@@ -33,7 +33,7 @@ export interface Apartment {
   neonSpot: THREE.SpotLight;
   screenLight: THREE.RectAreaLight;
   eyePosition: THREE.Vector3;
-  update(dt: number, time: number, neon: number, flash: number): void;
+  update(dt: number, time: number, neon: number, flash: number, roomVisible?: boolean): void;
   /** Put another empty can on the desk (one per hour of grinding). */
   addCan(): void;
   setScreenGlow(color: THREE.Color, brightness: number): void;
@@ -410,7 +410,7 @@ export function createApartment(renderer: THREE.WebGLRenderer, uiTexture: THREE.
         void main() {
           vec2 c = gl_PointCoord - 0.5;
           float a = smoothstep(0.5, 0.0, length(c));
-          gl_FragColor = vec4(vec3(0.75, 0.85, 1.0), a * vA * 0.35);
+          gl_FragColor = vec4(vec3(0.75, 0.85, 1.0), a * vA * 0.2);
         }`,
     }),
   );
@@ -461,10 +461,10 @@ export function createApartment(renderer: THREE.WebGLRenderer, uiTexture: THREE.
     neonSpot,
     screenLight,
     eyePosition,
-    update(dt, time, neon, flash) {
-      cookie.update(time);
+    update(dt, time, neon, flash, roomVisible = true) {
+      if (roomVisible) cookie.update(time);
       moteUniforms.uTime.value = time;
-      moteUniforms.uScale.value = renderer.getPixelRatio() * renderer.domElement.height / 800 * 1.4;
+      moteUniforms.uScale.value = (renderer.domElement.height / 800) * 0.9;
       neonSpot.intensity = neonBase * neon + flash * 250;
       neonSpot.color.lerpColors(lampColor.set(0xff3a8c), new THREE.Color(0xd8e4ff), Math.min(1, flash * 1.5));
       hemi.intensity = 0.12 + flash * 1.5;

@@ -21,13 +21,16 @@ const LensShader = {
     uTilt: { value: 0 },
     uPulse: { value: 0 },
     uFade: { value: 0 },
+    uSharpen: { value: 0.3 },
+    uTexel: { value: new THREE.Vector2(1 / 1920, 1 / 1080) },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uTime, uAberration, uVignette, uGrain, uTilt, uPulse, uFade;
+    uniform float uTime, uAberration, uVignette, uGrain, uTilt, uPulse, uFade, uSharpen;
+    uniform vec2 uTexel;
     varying vec2 vUv;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233)) + uTime * 3.1) * 43758.5453); }
     void main() {
@@ -35,10 +38,20 @@ const LensShader = {
       float r2 = dot(c, c);
       float ab = uAberration * (1.0 + uTilt * 3.0 + uPulse * 2.0);
       vec2 dir = c * r2 * 2.0;
-      vec3 col;
-      col.r = texture2D(tDiffuse, vUv - dir * ab).r;
-      col.g = texture2D(tDiffuse, vUv).g;
-      col.b = texture2D(tDiffuse, vUv + dir * ab).b;
+      // Contrast-adaptive sharpen: restores detail lost to resampling, clamped to the
+      // local min/max so edges don't ring.
+      vec3 cC = texture2D(tDiffuse, vUv).rgb;
+      vec3 cN = texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y)).rgb;
+      vec3 cS = texture2D(tDiffuse, vUv - vec2(0.0, uTexel.y)).rgb;
+      vec3 cE = texture2D(tDiffuse, vUv + vec2(uTexel.x, 0.0)).rgb;
+      vec3 cW = texture2D(tDiffuse, vUv - vec2(uTexel.x, 0.0)).rgb;
+      vec3 mn = min(cC, min(min(cN, cS), min(cE, cW)));
+      vec3 mx = max(cC, max(max(cN, cS), max(cE, cW)));
+      vec3 col = clamp(cC + (4.0 * cC - cN - cS - cE - cW) * (uSharpen * 0.25), mn, mx);
+      if (ab > 0.00001) {
+        col.r = texture2D(tDiffuse, vUv - dir * ab).r;
+        col.b = texture2D(tDiffuse, vUv + dir * ab).b;
+      }
       float vig = 1.0 - smoothstep(0.18, 0.9, r2 * (uVignette * 2.2 + uTilt * 1.6 + uPulse * 0.8));
       col *= mix(0.25, 1.0, vig);
       // Tilt: color drains toward a hot red at the edges.
@@ -64,7 +77,7 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
   const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.42, 0.55, 0.9);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.4, 0.4, 0.9);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
   const lens = new ShaderPass(LensShader);
@@ -75,6 +88,7 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
     lens,
     setSize(w, h) {
       composer.setSize(w, h);
+      lens.uniforms.uTexel.value.set(1 / w, 1 / h);
       bloom.resolution.set(w / 2, h / 2);
     },
     render(time) {

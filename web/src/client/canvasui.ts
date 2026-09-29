@@ -57,6 +57,8 @@ export class UI {
   readonly canvas: HTMLCanvasElement;
   readonly ctx: CanvasRenderingContext2D;
   readonly pointer = new Pointer();
+  /** Backing-store pixels per logical pixel. Drawing code always uses the 1600x1000 logical space. */
+  scale = 1;
   cursor: 'default' | 'pointer' = 'default';
   private pressedId: string | null = null;
   time = 0;
@@ -68,9 +70,19 @@ export class UI {
     this.ctx = this.canvas.getContext('2d')!;
   }
 
+  /** Resize the backing canvas so it matches how large the screen appears; returns true if it changed. */
+  setScale(s: number): boolean {
+    if (Math.abs(s - this.scale) < 0.01) return false;
+    this.scale = s;
+    this.canvas.width = Math.round(W * s);
+    this.canvas.height = Math.round(H * s);
+    return true;
+  }
+
   begin(time: number): void {
     this.time = time;
     this.cursor = 'default';
+    this.ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
   }
 
   end(): void {

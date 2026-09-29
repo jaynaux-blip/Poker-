@@ -10,6 +10,12 @@ import { FONT } from './canvasui';
 const SUIT_GLYPH = ['♣', '♦', '♥', '♠'];
 const SUIT_COLOR = ['#1f8f4e', '#2a6fdb', '#d8313f', '#1b1e24'];
 const cache = new Map<string, HTMLCanvasElement>();
+let artScale = 1;
+
+/** Cached card art is rendered at this many pixels per logical pixel. */
+export function setArtScale(s: number): void {
+  artScale = Math.max(1, Math.ceil(s * 2) / 2);
+}
 
 function roundRectPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   c.beginPath();
@@ -17,14 +23,15 @@ function roundRectPath(c: CanvasRenderingContext2D, x: number, y: number, w: num
 }
 
 export function cardFace(card: Card, w: number, h: number): HTMLCanvasElement {
-  const key = `f${card}:${w}x${h}`;
+  const key = `f${card}:${w}x${h}@${artScale}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const cv = document.createElement('canvas');
   const pad = 6;
-  cv.width = w + pad * 2;
-  cv.height = h + pad * 2;
+  cv.width = Math.ceil((w + pad * 2) * artScale);
+  cv.height = Math.ceil((h + pad * 2) * artScale);
   const c = cv.getContext('2d')!;
+  c.scale(artScale, artScale);
   c.translate(pad, pad);
   c.shadowColor = 'rgba(0,0,0,0.45)';
   c.shadowBlur = 6;
@@ -59,14 +66,15 @@ export function cardFace(card: Card, w: number, h: number): HTMLCanvasElement {
 }
 
 export function cardBack(w: number, h: number): HTMLCanvasElement {
-  const key = `b:${w}x${h}`;
+  const key = `b:${w}x${h}@${artScale}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const cv = document.createElement('canvas');
   const pad = 6;
-  cv.width = w + pad * 2;
-  cv.height = h + pad * 2;
+  cv.width = Math.ceil((w + pad * 2) * artScale);
+  cv.height = Math.ceil((h + pad * 2) * artScale);
   const c = cv.getContext('2d')!;
+  c.scale(artScale, artScale);
   c.translate(pad, pad);
   c.shadowColor = 'rgba(0,0,0,0.45)';
   c.shadowBlur = 6;
@@ -130,7 +138,7 @@ export function drawCard(
     ctx.shadowColor = 'rgba(242,193,78,0.95)';
     ctx.shadowBlur = 22;
   }
-  ctx.drawImage(img, -w / 2 - 6, -h / 2 - 6);
+  ctx.drawImage(img, -w / 2 - 6, -h / 2 - 6, w + 12, h + 12);
   if (opts.dim) {
     ctx.fillStyle = 'rgba(8,12,20,0.55)';
     ctx.beginPath();

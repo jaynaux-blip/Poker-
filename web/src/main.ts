@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Sound } from './audio/sound';
 import { H, UI, W } from './client/canvasui';
 import { RiverLine } from './client/riverline';
+import { setArtScale } from './client/cardart';
 import { PhoneScreen } from './game/phone';
 import { Session } from './game/session';
 import { World } from './scene/world';
@@ -22,6 +23,7 @@ uiTexture.colorSpace = THREE.SRGBColorSpace;
 uiTexture.anisotropy = 8;
 uiTexture.generateMipmaps = true;
 uiTexture.minFilter = THREE.LinearMipmapLinearFilter;
+uiTexture.magFilter = THREE.LinearFilter;
 
 const world = new World(canvas, uiTexture);
 world.debug = params.get('debug');
@@ -194,8 +196,14 @@ window.addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ loop
 
-let maxPR = params.get('hq') ? 2 : 1.5;
-const resize = () => world.resize(window.innerWidth, window.innerHeight, maxPR);
+// Resolution: render at the display's real pixel density (Retina included).
+// The adaptive step only lowers it after startup if the GPU really can't keep
+// up, never below 1x, and raises it again when there is headroom.
+const dpr = window.devicePixelRatio || 1;
+const prCap = Math.min(dpr, params.get('hq') ? 3 : 2);
+const prFloor = Math.min(1, prCap);
+let pixelRatio = prCap;
+const resize = () => world.resize(window.innerWidth, window.innerHeight, pixelRatio);
 window.addEventListener('resize', resize);
 resize();
 
@@ -204,7 +212,54 @@ let lastRaw = last;
 let uiAccum = 1;
 let perfTime = 0;
 let perfFrames = 0;
+let perfWarmup = 5;
+let perfCooldown = 0;
 let frames = 0;
+
+// The laptop client's canvas is sized to how large the screen appears, so
+// text maps 1:1 to screen pixels instead of being stretched.
+const screenCorner = new THREE.Vector3();
+let uiScaleWanted = 1;
+let uiScaleSince = 0;
+function screenPixelWidth(): number {
+  const scr = world.apartment.laptop.screen;
+  const half = world.apartment.laptop.screenSize.x / 2;
+  const cam = world.seat.camera;
+  const buf = world.renderer.domElement.width;
+  screenCorner.set(-half, 0, 0);
+  scr.localToWorld(screenCorner).project(cam);
+  const x0 = screenCorner.x;
+  screenCorner.set(half, 0, 0);
+  scr.localToWorld(screenCorner).project(cam);
+  return (Math.abs(screenCorner.x - x0) / 2) * buf;
+}
+function updateUiResolution(realDt: number): void {
+  const focused = world.seat.focus >= 0.9;
+  if (focused) {
+    // Draw the client at exactly the size it appears, so one canvas pixel
+    // lands on one screen pixel: canvas text stays hinted and crisp at any
+    // window size or pixel density.
+    const ratio = screenPixelWidth() / W;
+    const wanted = Math.min(2, Math.max(0.5, Math.ceil(ratio * 100) / 100));
+    if (Math.abs(wanted - uiScaleWanted) > 0.02) {
+      uiScaleWanted = wanted;
+      uiScaleSince = 0;
+    }
+    uiScaleSince += realDt;
+  }
+  // Mipmaps only while leaning back, when the screen is small in view.
+  const mip = !focused;
+  const resized = focused && uiScaleSince > 0.3 && ui.setScale(uiScaleWanted);
+  if (resized || uiTexture.generateMipmaps !== mip) {
+    setArtScale(ui.scale);
+    uiTexture.generateMipmaps = mip;
+    uiTexture.minFilter = mip ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+    uiTexture.dispose();
+    uiTexture.needsUpdate = true;
+    uiAccum = 1; // redraw at the new size right away
+  }
+}
+
 const screenTint = new THREE.Color();
 const smoothstep = (a: number, b: number, x: number) => {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
@@ -230,7 +285,8 @@ if (testShot === 'room') {
 (window as unknown as { __game: unknown }).__game = { world, session, ui };
 
 function loop(t: number): void {
-  const dt = Math.max(0, Math.min(0.05, (t - last) / 1000));
+  const realDt = Math.max(0, (t - last) / 1000);
+  const dt = Math.min(0.05, realDt);
   last = t;
   now += dt;
 
@@ -240,6 +296,7 @@ function loop(t: number): void {
   session.update(gameTime);
 
   // UI at up to 30 fps.
+  updateUiResolution(realDt);
   uiAccum += dt;
   if (uiAccum >= 1 / 30) {
     uiAccum = 0;
@@ -254,6 +311,11 @@ function loop(t: number): void {
   world.setDawn(smoothstep(4.6 * 60, 6.3 * 60, clock));
   phone.update(now, clock);
   const lens = world.post.lens.uniforms;
+  // Leaned in, keep the screen clean: no color fringing, lighter grain, a touch more sharpening.
+  const f = world.seat.focus;
+  lens.uAberration.value = 0.0022 * (1 - f);
+  lens.uGrain.value = 0.03 - 0.018 * f;
+  lens.uSharpen.value = 0.2 + 0.25 * f;
   lens.uTilt.value += (session.heroTilt * 0.85 - lens.uTilt.value) * Math.min(1, dt * 2);
   if (beat) lens.uPulse.value = 1;
   lens.uPulse.value = Math.max(0, lens.uPulse.value - dt * 3.5);
@@ -264,17 +326,27 @@ function loop(t: number): void {
 
   world.frame(dt);
   frames++;
-  // Adaptive resolution: step down on slow GPUs.
-  perfTime += dt;
-  perfFrames++;
-  if (perfTime > 2.5) {
-    const fps = perfFrames / perfTime;
-    if (fps < 38 && maxPR > 0.75 && !testShot) {
-      maxPR = Math.max(0.75, world.pixelRatio - 0.25);
-      resize();
+  // Adaptive resolution, measured on real frame time after a warm-up
+  // (shader compiles and texture generation make the first seconds slow).
+  if (perfWarmup > 0) perfWarmup -= realDt;
+  else if (!testShot && !document.hidden) {
+    perfTime += realDt;
+    perfFrames++;
+    perfCooldown -= realDt;
+    if (perfTime > 3) {
+      const fps = perfFrames / perfTime;
+      if (fps < 28 && pixelRatio > prFloor) {
+        pixelRatio = Math.max(prFloor, pixelRatio - 0.25);
+        resize();
+        perfCooldown = 6;
+      } else if (fps > 55 && pixelRatio < prCap && perfCooldown <= 0) {
+        pixelRatio = Math.min(prCap, pixelRatio + 0.25);
+        resize();
+        perfCooldown = 6;
+      }
+      perfTime = 0;
+      perfFrames = 0;
     }
-    perfTime = 0;
-    perfFrames = 0;
   }
   if (frames === 10) (window as unknown as { __ready: boolean }).__ready = true;
   requestAnimationFrame(loop);

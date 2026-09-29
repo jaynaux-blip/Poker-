@@ -150,7 +150,7 @@ export function createRainGlass(width: number, height: number): RainGlass {
     uResolution: { value: new THREE.Vector2(1, 1) },
     uTime: { value: 0 },
     uAspect: { value: width / height },
-    uFog: { value: 2.6 },
+    uFog: { value: 2.0 },
     uFlash: { value: 0 },
   };
   const mesh = new THREE.Mesh(

@@ -21,6 +21,7 @@ export class World {
   private height = 1;
   pixelRatio = 1;
   debug: string | null = null;
+  private shadowFrames = 0;
 
   constructor(canvas: HTMLCanvasElement, uiTexture: THREE.Texture) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
@@ -63,12 +64,14 @@ export class World {
     pmrem.dispose();
   }
 
-  resize(w: number, h: number, maxPixelRatio = 1.5): void {
+  /** Resize to `w` x `h` CSS pixels, rendering `pixelRatio` device pixels per CSS pixel. */
+  resize(w: number, h: number, pixelRatio: number): void {
     this.width = w;
     this.height = h;
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, maxPixelRatio);
+    this.pixelRatio = pixelRatio;
     this.renderer.setPixelRatio(this.pixelRatio);
-    this.renderer.setSize(w, h, false);
+    // Keep the canvas's CSS size in lockstep with its drawing buffer so the browser never rescales it.
+    this.renderer.setSize(w, h, true);
     this.seat.setAspect(w / h);
     this.post.setSize(w * this.pixelRatio, h * this.pixelRatio);
     this.apartment.glass.resize(w * this.pixelRatio, h * this.pixelRatio);
@@ -103,20 +106,28 @@ export class World {
     }
     this.flash = Math.max(0, this.flash - dt * 2.5);
     const flicker = this.flash > 0.05 ? this.flash * (0.5 + 0.5 * Math.sin(t * 55)) : 0;
+    // Leaned into the laptop, the window and most of the room are out of view:
+    // skip their offscreen passes and reuse the last shadow map.
+    const roomVisible = this.seat.focus < 0.97;
     this.outside.update(dt, t);
-    this.apartment.update(dt, t, this.outside.neonLevel(), flicker);
+    this.apartment.update(dt, t, this.outside.neonLevel(), flicker, roomVisible);
     this.seat.update(dt, t);
+    // Only pause shadow updates once the map has been drawn at least once.
+    this.renderer.shadowMap.autoUpdate = roomVisible || this.shadowFrames < 3;
+    this.shadowFrames++;
 
     // Pass 1: the world outside, into the window's target.
     const cam = this.seat.camera;
     const r = this.renderer;
-    cam.layers.set(OUTSIDE_LAYER);
-    r.setRenderTarget(this.apartment.glass.target);
-    r.setClearColor(0x000000, 1);
-    r.clear();
-    r.render(this.scene, cam);
-    r.setRenderTarget(null);
-    cam.layers.set(0);
+    if (roomVisible) {
+      cam.layers.set(OUTSIDE_LAYER);
+      r.setRenderTarget(this.apartment.glass.target);
+      r.setClearColor(0x000000, 1);
+      r.clear();
+      r.render(this.scene, cam);
+      r.setRenderTarget(null);
+      cam.layers.set(0);
+    }
 
     // Pass 2: the room, through the post chain.
     if (this.debug === 'nopost') {

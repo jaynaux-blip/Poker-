@@ -70,8 +70,11 @@ export class SeatCamera {
 
     const pos = this.camera.position;
     pos.lerpVectors(this.eye, sp, t);
-    pos.y += breathe * (1 - t * 0.7) + shakeY;
-    pos.x += sway * (1 - t * 0.7) + shakeX;
+    // Fully leaned in, the head holds still so the screen text stays pixel-steady.
+    const still = 1 - t;
+    const shakeK = 1 - 0.6 * t;
+    pos.y += breathe * still + shakeY * shakeK;
+    pos.x += sway * still + shakeX * shakeK;
     this.tmpLook.lerpVectors(this.roomLook, this.screenCenter, t);
     this.camera.lookAt(this.tmpLook);
   }
