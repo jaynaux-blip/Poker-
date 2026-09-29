@@ -174,3 +174,8 @@ export function evaluateHand(hole: readonly Card[], board: readonly Card[]): num
 }
 
 const scratch7 = new Int32Array(7);
+
+/** Highest card of a straight within a 13-bit rank mask, or -1. */
+export function straightHigh(rankMask: number): number {
+  return STRAIGHT_HIGH[rankMask & 8191];
+}
