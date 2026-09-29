@@ -194,13 +194,16 @@ window.addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ loop
 
-const resize = () => world.resize(window.innerWidth, window.innerHeight, params.get('hq') ? 2 : 1.5);
+let maxPR = params.get('hq') ? 2 : 1.5;
+const resize = () => world.resize(window.innerWidth, window.innerHeight, maxPR);
 window.addEventListener('resize', resize);
 resize();
 
 let last = performance.now();
 let lastRaw = last;
 let uiAccum = 1;
+let perfTime = 0;
+let perfFrames = 0;
 let frames = 0;
 const screenTint = new THREE.Color();
 const smoothstep = (a: number, b: number, x: number) => {
@@ -261,6 +264,18 @@ function loop(t: number): void {
 
   world.frame(dt);
   frames++;
+  // Adaptive resolution: step down on slow GPUs.
+  perfTime += dt;
+  perfFrames++;
+  if (perfTime > 2.5) {
+    const fps = perfFrames / perfTime;
+    if (fps < 38 && maxPR > 0.75 && !testShot) {
+      maxPR = Math.max(0.75, world.pixelRatio - 0.25);
+      resize();
+    }
+    perfTime = 0;
+    perfFrames = 0;
+  }
   if (frames === 10) (window as unknown as { __ready: boolean }).__ready = true;
   requestAnimationFrame(loop);
 }

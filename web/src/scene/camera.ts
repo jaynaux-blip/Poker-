@@ -21,6 +21,8 @@ export class SeatCamera {
   private roomLook = new THREE.Vector3();
   /** Extra shake, e.g. heartbeat during an all-in. */
   shake = 0;
+  /** Honors prefers-reduced-motion: no sway or shake. */
+  reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   constructor(eye: THREE.Vector3, screenCenter: THREE.Vector3, screenNormal: THREE.Vector3, screenSize: THREE.Vector2) {
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.02, 1200);
@@ -60,10 +62,11 @@ export class SeatCamera {
     const d = this.screenDistance();
     const sp = this.tmpPos.copy(this.screenCenter).addScaledVector(this.screenNormal, d);
 
-    const breathe = Math.sin(time * 1.3) * 0.0022 + Math.sin(time * 0.37) * 0.0015;
-    const sway = Math.sin(time * 0.6) * 0.0012;
-    const shakeX = this.shake * (Math.sin(time * 37) * 0.0015);
-    const shakeY = this.shake * (Math.sin(time * 29 + 1) * 0.0015);
+    const m = this.reducedMotion ? 0 : 1;
+    const breathe = (Math.sin(time * 1.3) * 0.0022 + Math.sin(time * 0.37) * 0.0015) * m;
+    const sway = Math.sin(time * 0.6) * 0.0012 * m;
+    const shakeX = this.shake * (Math.sin(time * 37) * 0.0015) * m;
+    const shakeY = this.shake * (Math.sin(time * 29 + 1) * 0.0015) * m;
 
     const pos = this.camera.position;
     pos.lerpVectors(this.eye, sp, t);

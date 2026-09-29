@@ -368,6 +368,55 @@ export function createApartment(renderer: THREE.WebGLRenderer, uiTexture: THREE.
     group.add(s);
   }
 
+  // ---------------------------------------------------------------- dust
+  // Motes drifting through the screen's light.
+  const moteCount = 160;
+  const moteGeo = new THREE.BufferGeometry();
+  const motePos = new Float32Array(moteCount * 3);
+  const moteSeed = new Float32Array(moteCount);
+  for (let i = 0; i < moteCount; i++) {
+    motePos[i * 3] = (Math.random() - 0.5) * 0.9;
+    motePos[i * 3 + 1] = R.deskTop + 0.05 + Math.random() * 0.55;
+    motePos[i * 3 + 2] = deskZ + 0.05 + Math.random() * 0.55;
+    moteSeed[i] = Math.random() * 100;
+  }
+  moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
+  moteGeo.setAttribute('aSeed', new THREE.BufferAttribute(moteSeed, 1));
+  const moteUniforms = { uTime: { value: 0 }, uScale: { value: 1 } };
+  const motes = new THREE.Points(
+    moteGeo,
+    new THREE.ShaderMaterial({
+      uniforms: moteUniforms,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexShader: /* glsl */ `
+        attribute float aSeed;
+        uniform float uTime;
+        uniform float uScale;
+        varying float vA;
+        void main() {
+          vec3 p = position;
+          p.x += sin(uTime * 0.07 + aSeed) * 0.05;
+          p.y += sin(uTime * 0.05 + aSeed * 1.7) * 0.04;
+          p.z += cos(uTime * 0.06 + aSeed * 0.3) * 0.05;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = uScale * 2.2 / max(0.2, -mv.z);
+          vA = 0.25 + 0.75 * fract(aSeed * 7.3);
+        }`,
+      fragmentShader: /* glsl */ `
+        varying float vA;
+        void main() {
+          vec2 c = gl_PointCoord - 0.5;
+          float a = smoothstep(0.5, 0.0, length(c));
+          gl_FragColor = vec4(vec3(0.75, 0.85, 1.0), a * vA * 0.35);
+        }`,
+    }),
+  );
+  motes.frustumCulled = false;
+  group.add(motes);
+
   // ---------------------------------------------------------------- lights
   const screenLight = new THREE.RectAreaLight(0xb8cfff, 7, laptop.screenSize.x, laptop.screenSize.y);
   screenLight.position.copy(laptop.screenCenter).addScaledVector(laptop.screenNormal, 0.003);
@@ -414,6 +463,8 @@ export function createApartment(renderer: THREE.WebGLRenderer, uiTexture: THREE.
     eyePosition,
     update(dt, time, neon, flash) {
       cookie.update(time);
+      moteUniforms.uTime.value = time;
+      moteUniforms.uScale.value = renderer.getPixelRatio() * renderer.domElement.height / 800 * 1.4;
       neonSpot.intensity = neonBase * neon + flash * 250;
       neonSpot.color.lerpColors(lampColor.set(0xff3a8c), new THREE.Color(0xd8e4ff), Math.min(1, flash * 1.5));
       hemi.intensity = 0.12 + flash * 1.5;

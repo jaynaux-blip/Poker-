@@ -37,6 +37,8 @@ vec3 beads(vec2 uv, float t, float density) {
       vec2 c = cid + 0.5 + (r - 0.5) * 0.8;
       float life = fract(t * (0.05 + 0.08 * r.x) + r.y);
       float size = (0.06 + 0.3 * r.x * r.x) * smoothstep(0.0, 0.15, life) * (1.0 - smoothstep(0.85, 1.0, life)) * step(0.35, r.y);
+      // No bead in this cell (also avoids smoothstep with equal edges).
+      if (size < 0.01) continue;
       vec2 d = g - c;
       float dist = length(d);
       float m = smoothstep(size, size * 0.55, dist);
@@ -111,7 +113,7 @@ void main() {
   float clear = clamp(water + max(r1.w, r2.w), 0.0, 1.0);
   vec2 suv = gl_FragCoord.xy / uResolution;
   // Drops act like tiny lenses: invert and magnify what's behind them.
-  vec2 refr = suv - offs * 0.028;
+  vec2 refr = suv - offs * 0.011;
   float fogLod = uFog * (1.0 - clear);
   vec3 col = textureLod(uOutside, refr, fogLod).rgb;
   // Condensation scatters light: lift the fogged areas slightly.

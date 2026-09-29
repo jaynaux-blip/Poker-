@@ -101,7 +101,7 @@ export function createLaptop(uiTexture: THREE.Texture): Laptop {
   group.add(deck);
   const pad = new THREE.Mesh(
     new THREE.PlaneGeometry(0.11, 0.07),
-    new THREE.MeshPhysicalMaterial({ color: 0x303236, metalness: 0.6, roughness: 0.25, clearcoat: 0.6 }),
+    new THREE.MeshPhysicalMaterial({ color: 0x1f2124, metalness: 0.5, roughness: 0.45, clearcoat: 0.3, clearcoatRoughness: 0.35 }),
   );
   pad.rotation.x = -Math.PI / 2;
   pad.position.set(0, T + 0.0005, 0.068);

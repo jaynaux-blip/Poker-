@@ -227,8 +227,8 @@ export function woodTextures(w = 1024, h = 512, seed = 7): PBRSet {
       img.data[i + 1] = clamp01(g) * 255;
       img.data[i + 2] = clamp01(b) * 255;
       img.data[i + 3] = 255;
-      height[y * w + x] = grain * 0.4 + fine * 0.3 - (pores < 0.18 ? 0.25 : 0);
-      rough[y * w + x] = 0.42 + 0.2 * (1 - grain) + wear * 0.25 + (pores < 0.18 ? 0.15 : 0);
+      height[y * w + x] = grain * 0.4 + fine * 0.3 - (pores < 0.12 ? 0.12 : 0);
+      rough[y * w + x] = 0.5 + 0.16 * (1 - grain) + wear * 0.2 + (pores < 0.12 ? 0.08 : 0);
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -240,7 +240,7 @@ export function woodTextures(w = 1024, h = 512, seed = 7): PBRSet {
     const y0 = rs.value(i * 1.7, 9.5) * h;
     const len = 20 + rs.value(i, 3.3) * 160;
     const ang = (rs.value(i * 0.7, 5) - 0.5) * 0.8;
-    ctx.strokeStyle = `rgba(255,220,180,${0.05 + rs.value(i, 7) * 0.08})`;
+    ctx.strokeStyle = `rgba(255,220,180,${0.03 + rs.value(i, 7) * 0.05})`;
     ctx.lineWidth = 0.6 + rs.value(i, 11) * 0.8;
     ctx.beginPath();
     ctx.moveTo(x0, y0);

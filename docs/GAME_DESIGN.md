@@ -256,7 +256,7 @@ The tone is grounded drama.
 
 ## 14. Build plan
 
-**Recommended tech:** a browser game in TypeScript using Three.js (WebGPU with a WebGL2 fallback) and Vite. The poker and tournament logic is a pure TypeScript module, kept separate from rendering, with no graphics dependency and its own unit tests. The online client UI renders onto the in-world monitor screens.
+**Tech decision:** production is built in **Unreal Engine 5** with **Blender** for assets. A browser prototype of Night One (TypeScript, Three.js, Vite) is in `web/`; it proves the systems and the look first, and its engine code is written to port to C++. See `docs/UE5_PORT.md`.
 
 **Vertical slices**
 
@@ -271,6 +271,8 @@ The tone is grounded drama.
 
 ## 15. Open questions
 
-- Engine: browser (recommended) or Unreal Engine 5?
-- Which optional extras make the cut?
-- First slice: Night One (recommended) or The Back Room?
+- Which optional extras make the cut? (Decided when production starts in UE5.)
+
+**Decided:**
+- Engine: Unreal Engine 5 with Blender for production; browser prototype first.
+- First slice: Night One. The browser prototype is playable.

@@ -919,7 +919,8 @@ export class RiverLine {
     ui.text(r.eventName, 60, TOP + 60, { size: 20, weight: 600, color: C.muted });
     ui.text(r.won ? 'Champion.' : `You finished ${ordinal(r.place)}`, 60, TOP + 130, { size: 60, weight: 900, color });
     ui.text(`of ${chips(r.entrants)} players`, 60, TOP + 172, { size: 22, color: C.muted });
-    ui.text(cashed ? `+${money(r.prizeCents)}` : 'No cash this time', 60, TOP + 250, { size: 46, weight: 800, color: cashed ? C.gold : C.muted, font: MONO });
+    if (cashed) ui.text(`+${money(r.prizeCents)}`, 60, TOP + 250, { size: 46, weight: 800, color: C.gold, font: MONO });
+    else ui.text('No cash this time', 60, TOP + 250, { size: 40, weight: 800, color: C.muted });
     ui.text(`Buy-in ${r.buyInCents ? money(r.buyInCents) : 'free'} · ${r.hands} hands · biggest pot won ${chips(r.biggestPot)}`, 60, TOP + 292, { size: 17, color: C.muted });
     ui.text(`Balance now ${money(s.bankrollCents)}`, 60, TOP + 330, { size: 20, weight: 700, color: C.ink });
 
@@ -927,7 +928,7 @@ export class RiverLine {
     const gx = 1240;
     const gy = TOP + 200;
     const acc = r.accuracy;
-    const shown = acc * ease.outCubic((now - s.resultsAt) / 1.4);
+    const shown = acc * (now >= s.resultsAt ? ease.outCubic((now - s.resultsAt) / 1.4) : 1);
     c.lineWidth = 18;
     c.lineCap = 'round';
     c.beginPath();
