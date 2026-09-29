@@ -48,14 +48,22 @@ export interface DecisionGrade {
   note: string;
 }
 
+/**
+ * How often one opponent folds to a bet or raise of `ratio` x the pot.
+ * Folds scale with size: a min-bet gets almost no folds, a pot-sized bet gets
+ * roughly what minimum-defense frequencies allow, and ranges that have shown
+ * strength fold less.
+ */
 function foldProb(m: OpponentModel, ratio: number, preflop: boolean): number {
   const r = Math.max(0, ratio);
+  const size = r / (r + 0.5); // 0 for tiny bets, 0.5 at half pot, 0.67 at pot
   if (preflop) {
-    if (m.band.max >= 0.9) return 0.8 + 0.12 * Math.min(r, 2) / 2;
-    return 0.35 + 0.25 * Math.min(r, 3) / 3;
+    // Players yet to act preflop fold most hands to any real raise.
+    if (m.band.max >= 0.9) return 0.55 + 0.35 * size;
+    return 0.1 + 0.45 * size;
   }
-  const base = m.aggr >= 1 ? 0.12 : m.calls >= 1 ? 0.28 : 0.38;
-  return Math.min(0.85, base + 0.3 * Math.min(r, 1.5) / 1.5);
+  const maxFold = m.aggr >= 1 ? 0.3 : m.calls >= 1 ? 0.5 : 0.62;
+  return maxFold * size;
 }
 
 function isInPosition(view: PlayerView): boolean {
