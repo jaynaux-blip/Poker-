@@ -146,7 +146,10 @@ def assemble(chips):
             bm.from_mesh(dup.data)
             bm.normal_update()
             top = i == count - 1
-            doomed = [f for f in bm.faces if f.normal.z < -0.5 or (not top and f.normal.z > 0.5)]
+            # Only the covered middle of a face goes: the rounded rims leave a groove between
+            # stacked chips where the outer ring still shows.
+            covered = lambda f: f.calc_center_median().xy.length < R - 0.004  # noqa: E731
+            doomed = [f for f in bm.faces if covered(f) and (f.normal.z < -0.5 or (not top and f.normal.z > 0.5))]
             bmesh.ops.delete(bm, geom=doomed, context='FACES_ONLY')
             spin = Matrix.Rotation(rnd.uniform(0, 2 * math.pi), 4, 'Z')
             bm.transform(Matrix.Translation(Vector((sx + rnd.uniform(-0.0005, 0.0005), sy + rnd.uniform(-0.0005, 0.0005), i * (T + 0.00002)))) @ spin)

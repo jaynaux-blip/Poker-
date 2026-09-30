@@ -64,6 +64,13 @@ def print_sheet():
     return s.render('mug_print', 2048)
 
 
+def vec_z(m, z, scale):
+    """A 1D coordinate along the mug's height, for noise that varies only with z."""
+    n = m.node('ShaderNodeCombineXYZ')
+    m.link(m.math('MULTIPLY', z, scale), n.inputs['Z'])
+    return n.outputs['Vector']
+
+
 def glaze_material(printed):
     m = core.Mat('mug_glaze')
     tc, sep = object_coords(m)
@@ -98,14 +105,22 @@ def glaze_material(printed):
     stain = m.math('MULTIPLY', m.math('MAXIMUM', tide, haze), inside)
     stain = m.math('MULTIPLY', stain, ramp(m, noise(m, tc.outputs['Object'], scale=90.0, detail=3.0), 0.3, 0.65))
     color = m.mix(m.math('MINIMUM', stain, 1.0), color, core.hex_linear(0x6b4222))
-    # A dried drip down the outside, from the rim toward the handle side.
-    drip_u = 0.31
-    du = m.math('ABSOLUTE', m.math('SUBTRACT', u, drip_u))
-    drip_w = m.math('ADD', 0.004, m.math('MULTIPLY', ramp(m, z, 0.06, 0.094), 0.006))
-    drip = m.math('MULTIPLY', m.math('LESS_THAN', du, drip_w), m.math('MULTIPLY', ramp(m, z, 0.064, 0.072), outer))
-    drip = m.math('MULTIPLY', drip, ramp(m, m.math('SUBTRACT', drip_w, du), 0.0, 0.0015))
-    color = m.mix(m.math('MULTIPLY', drip, 0.55), color, core.hex_linear(0x7a4a24))
-    rough = m.math('ADD', rough, m.math('MULTIPLY', drip, 0.12))
+    # A dried drip down the outside from the rim: it meanders, thins as it runs, and ends in a bead.
+    wander = m.math('MULTIPLY', m.math('SUBTRACT', noise(m, vec_z(m, z, 90.0), scale=1.0, detail=2.0), 0.5), 0.012)
+    du = m.math('ABSOLUTE', m.math('SUBTRACT', m.math('ADD', u, wander), 0.31))
+    along = ramp(m, z, 0.066, 0.094)  # 0 at the tip, 1 at the rim
+    drip_w = m.math('ADD', 0.0022, m.math('MULTIPLY', along, 0.0035))
+    body = m.math('MULTIPLY', ramp(m, m.math('SUBTRACT', drip_w, du), 0.0, 0.0012), ramp(m, z, 0.0655, 0.0675))
+    bead_d = m.math('ADD', m.math('MULTIPLY', m.math('DIVIDE', du, 0.0034), m.math('DIVIDE', du, 0.0034)),
+                    m.math('MULTIPLY', m.math('DIVIDE', m.math('SUBTRACT', z, 0.0668), 0.0022), m.math('DIVIDE', m.math('SUBTRACT', z, 0.0668), 0.0022)))
+    bead = ramp(m, m.math('SUBTRACT', 1.0, bead_d), 0.0, 0.25)
+    drip = m.math('MULTIPLY', m.math('MAXIMUM', body, bead), outer)
+    # Dried coffee: translucent tan in the thin run, darker in the bead and along its edges.
+    inner = ramp(m, m.math('SUBTRACT', drip_w, du), 0.0008, 0.002)
+    edge = m.math('MULTIPLY', body, m.math('SUBTRACT', 1.0, inner))
+    tone = m.mix(m.math('MAXIMUM', bead, edge), core.hex_linear(0xa77b52), core.hex_linear(0x5a3417))
+    color = m.mix(m.math('MULTIPLY', drip, 0.8), color, tone)
+    rough = m.math('ADD', rough, m.math('MULTIPLY', drip, 0.05))
     # A chip out of the rim shows the stoneware body.
     chip_at = (R_OUT * 0.99 * math.cos(math.radians(-137)), R_OUT * 0.99 * math.sin(math.radians(-137)), 0.0952)
     cd = m.node('ShaderNodeVectorMath')
