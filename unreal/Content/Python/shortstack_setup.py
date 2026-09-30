@@ -2,8 +2,8 @@
 SHORT STACK editor setup.
 
 Builds the project's materials (all procedural, written as HLSL in Custom
-nodes, so there are no binary assets in git) and the NightOne map with the
-apartment placed. init_unreal.py runs this when the editor opens; anything that
+nodes), imports the Blender props from unreal/Art/Meshes, and creates the
+NightOne map with the apartment placed. init_unreal.py runs this when the editor opens; anything that
 already exists is left alone.
 
 Rebuild everything from the editor's Python console (Output Log > Python):
@@ -506,6 +506,67 @@ def build_map(force=False):
     unreal.log(f"ShortStack: created {MAP_PATH}")
 
 
+MESH_DIR = "/Game/ShortStack/Meshes"
+
+
+def _file_hash(path):
+    import hashlib
+    with open(path, "rb") as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+
+def import_meshes(force=False):
+    """Imports the props exported by art/blender/build.py (unreal/Art/Meshes/*.glb).
+
+    Each file lands in /Game/ShortStack/Meshes/<Name>/ with its materials and textures, and
+    its static mesh is named <Name>, which is where NightOneStage looks for it. A file is
+    reimported only when it changed (its hash is kept as metadata on the mesh).
+    """
+    import os
+    src_dir = os.path.join(unreal.Paths.project_dir(), "Art", "Meshes")
+    if not os.path.isdir(src_dir):
+        return
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    for file in sorted(os.listdir(src_dir)):
+        if not file.lower().endswith(".glb"):
+            continue
+        name = os.path.splitext(file)[0]
+        path = os.path.join(src_dir, file)
+        folder = f"{MESH_DIR}/{name}"
+        mesh_path = f"{folder}/{name}"
+        digest = _file_hash(path)
+        if not force and eal.does_asset_exist(mesh_path):
+            existing = eal.load_asset(mesh_path)
+            if existing and eal.get_metadata_tag(existing, "SourceHash") == digest:
+                continue
+        task = unreal.AssetImportTask()
+        task.filename = path
+        task.destination_path = folder
+        task.automated = True
+        task.replace_existing = True
+        task.save = True
+        tools.import_asset_tasks([task])
+        mesh = None
+        for asset_path in eal.list_assets(folder, recursive=True):
+            asset = eal.load_asset(asset_path)
+            if isinstance(asset, unreal.StaticMesh):
+                mesh = asset
+                if asset.get_path_name().split(".")[0] != mesh_path:
+                    eal.rename_asset(asset.get_path_name().split(".")[0], mesh_path)
+                    mesh = eal.load_asset(mesh_path)
+                break
+        if mesh is None:
+            unreal.log_error(f"ShortStack: importing {file} produced no static mesh")
+            continue
+        eal.set_metadata_tag(mesh, "SourceHash", digest)
+        eal.save_loaded_asset(mesh)
+        unreal.log(f"ShortStack: imported {file} as {mesh_path}")
+
+
 def run(force=False):
     build_materials(force)
+    try:
+        import_meshes(force)
+    except Exception as exc:  # the stage falls back to engine shapes
+        unreal.log_error(f"ShortStack: importing meshes failed: {exc}")
     build_map(False)

@@ -58,6 +58,11 @@ UMaterialInterface* LoadOptional(const TCHAR* Path)
 {
 	return LoadObject<UMaterialInterface>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
 }
+
+UStaticMesh* LoadOptionalMesh(const TCHAR* Path)
+{
+	return LoadObject<UStaticMesh>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+}
 } // namespace NightOneStageDetail
 
 using namespace NightOneStageDetail;
@@ -211,6 +216,7 @@ void ANightOneStage::BuildSet()
 	RainMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Rain.M_Rain"));
 	WidgetLitMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_WidgetLit.M_WidgetLit"));
 	RainCookieMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_RainCookie.M_RainCookie"));
+	CanMesh = LoadOptionalMesh(TEXT("/Game/ShortStack/Meshes/SM_EnergyCan/SM_EnergyCan.SM_EnergyCan"));
 	BuildShell();
 	BuildWindow();
 	BuildDesk();
@@ -392,6 +398,12 @@ void ANightOneStage::AddCan()
 		return;
 	}
 	const FVector Base(Spots[N][0], DeskTop, DeskZ + Spots[N][1]);
+	if (CanMesh)
+	{
+		// The Blender can, with its own baked materials; each one turned a different way.
+		Cans.Add(AddMesh(CanMesh, nullptr, Web(Base.X, Base.Y, Base.Z), FVector(1.0), FRotator(0.0, FMath::RadiansToDegrees(Spots[N][2]), 0.0)));
+		return;
+	}
 	UStaticMeshComponent* Body = CylinderWeb(Surface(TEXT("Can"), 0x0f1a12, 0.28f, 0.75f), Base, 0.0332f, 0.1235f);
 	CylinderWeb(Surface(TEXT("CanStripe"), 0xb8ff2e, 0.35f, 0.3f), Base + FVector(0.0, 0.045, 0.0), 0.0334f, 0.03f);
 	CylinderWeb(Surface(TEXT("CanLid"), 0xb9bcc2, 0.3f, 1.0f), Base + FVector(0.0, 0.1235, 0.0), 0.0272f, 0.001f);

@@ -118,17 +118,17 @@ Select the `NightOneStage` actor in the NightOne map to change:
 
 On the game mode, `TimeScale` speeds up the game clock for testing.
 
-## Replacing placeholder geometry with Blender assets
+## Blender assets
 
-Each piece of the set is a component created in `NightOneStage.cpp`: `BuildShell`, `BuildWindow`, `BuildDesk`, `BuildProps` and `BuildOutside`. Positions are written in the prototype's meters through `Web(x, y, z)`, which maps to Unreal centimeters as X = -z, Y = x, Z = y.
+Props are modeled, textured and reviewed in Blender by the scripts in `art/blender` (see `art/README.md`). They are exported to `unreal/Art/Meshes/*.glb`. On editor launch, `shortstack_setup.py` imports each file into `/Game/ShortStack/Meshes/<SM_Name>/`, and `NightOneStage` uses the imported mesh in place of its engine-shape stand-in. So far that covers the energy drink cans (`SM_EnergyCan`).
 
-To swap in a Blender model:
+To swap in a hand-made model instead:
 
-1. Export FBX in meters with **Apply Transform** on.
+1. Export FBX or glTF in meters with **Apply Transform** on.
 2. Import it under `/Game/ShortStack/Meshes`.
-3. Replace the matching `BoxWeb`, `CylinderWeb` or `AddMesh` call with `AddMesh(YourMesh, Material, Location, Scale, Rotation)`.
+3. Replace the matching `BoxWeb`, `CylinderWeb` or `AddMesh` call in `NightOneStage.cpp` with `AddMesh(YourMesh, Material, Location, Scale, Rotation)`.
 
-Naming follows `docs/UE5_PORT.md`: `SM_`, `M_`, `MI_`, `T_`.
+Positions in `NightOneStage.cpp` are written in the prototype's meters through `Web(x, y, z)`, which maps to Unreal centimeters as X = -z, Y = x, Z = y. Naming follows `docs/UE5_PORT.md`: `SM_`, `M_`, `MI_`, `T_`.
 
 ## Differences from the browser prototype
 
