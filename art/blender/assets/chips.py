@@ -10,6 +10,7 @@ every chip is crisp and the texture budget stays at four small sets. Faces hidde
 are removed.
 
 Coordinates (meters): origin on the desk at the middle of the group, Z up; the group faces -Y.
+SM_Chip_<denomination> are the single chips, origin at the bottom center.
 """
 import math
 import random
@@ -22,7 +23,7 @@ from artkit import core
 from artkit.shade import image_surface, mix_float, noise, object_coords, planar, ramp, smooth_less
 from artkit.sheet import Sheet
 
-MESHES = ['SM_ChipStacks']
+MESHES = ['SM_ChipStacks', 'SM_Chip_1', 'SM_Chip_5', 'SM_Chip_25', 'SM_Chip_100']
 DOUBLE_SIDED = False
 TEXTURE_SIZE = 1024
 AO_DISTANCE = 0.003
@@ -156,7 +157,17 @@ def assemble(chips):
             bm.to_mesh(dup.data)
             bm.free()
             parts.append(dup)
+    stacks = core.join(parts, 'SM_ChipStacks')
+    # Each baked chip also ships on its own (origin at the bottom center) for the back room's stacks and bets.
     for c in chips:
-        c.hide_render = True
-        c.hide_set(True)
-    return [core.join(parts, 'SM_ChipStacks')]
+        denom = c.name.split('_', 1)[1]
+        c.name = f'SM_Chip_{denom}'
+        c.data.name = c.name
+    return [stacks] + chips
+
+
+def pose_for_review(objs):
+    """The single chips stand in a row in front of the stacks."""
+    singles = [o for o in objs if o.name.startswith('SM_Chip_')]
+    for i, o in enumerate(singles):
+        o.location = (-0.06 + i * 0.042, -0.07, 0.0)

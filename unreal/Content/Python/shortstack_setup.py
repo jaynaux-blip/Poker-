@@ -575,20 +575,21 @@ def import_meshes(force=False):
 
 
 def rebuild_stages():
-    """Rebuilds each NightOneStage in the open level.
+    """Rebuilds each stage (NightOneStage, BackRoomStage) in the open level.
 
     The editor loads the level before this script runs, so a stage already in it was built
     without the materials and props made since, and Play-In-Editor copies it as it is.
     """
-    stage_class = unreal.load_class(None, "/Script/ShortStack.NightOneStage")
-    if not stage_class:
+    stage_classes = [c for c in (unreal.load_class(None, "/Script/ShortStack.NightOneStage"),
+                                 unreal.load_class(None, "/Script/ShortStack.BackRoomStage")) if c]
+    if not stage_classes:
         return
     # Rebuilding marks the level unsaved; save it again unless it already had unsaved edits.
     was_dirty = bool(unreal.EditorLoadingAndSavingUtils.get_dirty_map_packages())
     rebuilt = False
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     for actor in actors.get_all_level_actors():
-        if actor.get_class() == stage_class:
+        if actor.get_class() in stage_classes:
             actor.rebuild_set()
             rebuilt = True
             unreal.log(f"ShortStack: rebuilt {actor.get_actor_label()} with the new assets")
@@ -597,11 +598,15 @@ def rebuild_stages():
 
 
 def run(force=False):
+    import backroom_setup
     changed = build_materials(force)
+    changed += backroom_setup.build_materials(force)
     try:
         changed += import_meshes(force)
+        changed += backroom_setup.fix_meshes()
     except Exception as exc:  # the stage falls back to engine shapes
         unreal.log_error(f"ShortStack: importing meshes failed: {exc}")
     if changed:
         rebuild_stages()
     build_map(False)
+    backroom_setup.build_map(False)

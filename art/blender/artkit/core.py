@@ -332,13 +332,23 @@ def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64, sizes=None):
         results.append({'mat': mat, 'bsdf': bsdf, 'out': out, 'surface': surface_src, 'target': target, 'maps': maps,
                         'suffix': suffix, 'size': (px_w, px_h), 'emissive': emissive, 'strength': strength})
 
-    def set_targets(key):
+    # Cycles (5.2, GPU) crashes baking images of different shapes in one pass, so each pass bakes
+    # one texture size at a time; the other materials write into a scratch image of the same size.
+    groups = sorted({r['size'] for r in results})
+    scratch = {g: bpy.data.images.new('T_bake_scratch', g[0], g[1], alpha=False) for g in groups} if len(groups) > 1 else {}
+
+    def set_targets(key, group=None):
         for r in results:
-            r['target'].image = r['maps'][key]
+            r['target'].image = r['maps'][key] if group is None or r['size'] == group else scratch[group]
             for n in r['mat'].node_tree.nodes:
                 n.select = False
             r['target'].select = True
             r['mat'].node_tree.nodes.active = r['target']
+
+    def bake_pass(kind, key):
+        for group in (groups if len(groups) > 1 else [None]):
+            set_targets(key, group)
+            bpy.ops.object.bake(type=kind)
 
     def emit_from(input_name):
         """Temporarily route a Principled input to an Emission shader."""
@@ -365,22 +375,23 @@ def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64, sizes=None):
 
     sc.render.bake.margin = 16
     sc.render.bake.use_clear = True
+    # Tiled rendering spills large bakes to disk and crashes reading them back (Cycles 5.2): bake whole.
+    sc.cycles.use_auto_tile = False
     sc.cycles.samples = 1
     passes = [('BaseColor', 'Base Color'), ('Roughness', 'Roughness'), ('Metallic', 'Metallic')]
     if any(r['emissive'] for r in results):
         passes.append(('Emissive', 'Emission Color'))
     for key, src in passes:
         tmp = emit_from(src)
-        set_targets(key)
-        bpy.ops.object.bake(type='EMIT')
+        bake_pass('EMIT', key)
         restore(tmp)
     sc.cycles.samples = 4
-    set_targets('Normal')
     sc.render.bake.normal_space = 'TANGENT'
-    bpy.ops.object.bake(type='NORMAL')
+    bake_pass('NORMAL', 'Normal')
     sc.cycles.samples = ao_samples
-    set_targets('AO')
-    bpy.ops.object.bake(type='AO')
+    bake_pass('AO', 'AO')
+    for img in scratch.values():
+        bpy.data.images.remove(img)
 
     new_mats = []
     for r in results:

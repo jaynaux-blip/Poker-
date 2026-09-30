@@ -18,7 +18,7 @@ sys.path.insert(0, HERE)
 import bpy  # noqa: E402
 from artkit import core, review  # noqa: E402
 
-ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chair', 'mouse']
+ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chair', 'mouse', 'table', 'cards']
 
 
 def args():
@@ -55,7 +55,8 @@ def run(name, do_review=True):
     tris, dims = core.stats(objs)
     print(f'[{name}] built {len(objs)} object(s), {tris} triangles, {dims.x * 100:.1f} x {dims.y * 100:.1f} x {dims.z * 100:.1f} cm')
     # An asset can bake parts once and assemble the exported meshes from them (poker chips in stacks).
-    bake_objs = getattr(mod, 'bake_parts', lambda o: o)(objs)
+    # Assets that the game shades itself (cards) skip baking and export their plain materials.
+    bake_objs = [] if getattr(mod, 'NO_BAKE', False) else getattr(mod, 'bake_parts', lambda o: o)(objs)
     for o in bake_objs:
         # Each mesh bakes alone: parts built at a shared origin (a laptop's base and lid) must not
         # shadow each other's occlusion.
