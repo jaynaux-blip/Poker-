@@ -21,18 +21,18 @@ enum class Effect : int
 };
 
 /** Renders a game sound (volume 0..1 as the session requests it). */
-std::vector<float> Render(SoundId Id, float Volume, uint32_t Seed);
-std::vector<float> Render(Effect Id, uint32_t Seed);
+SHORTSTACKCORE_API std::vector<float> Render(SoundId Id, float Volume, uint32_t Seed);
+SHORTSTACKCORE_API std::vector<float> Render(Effect Id, uint32_t Seed);
 /** Distant thunder, 5 s. */
-std::vector<float> RenderThunder(float Strength, uint32_t Seed);
+SHORTSTACKCORE_API std::vector<float> RenderThunder(float Strength, uint32_t Seed);
 
 /** Continuous room ambience. Not thread-safe; own one per audio stream. */
 class Ambience
 {
 public:
-	explicit Ambience(uint32_t Seed);
+	SHORTSTACKCORE_API explicit Ambience(uint32_t Seed);
 	/** Fills N mono samples. */
-	void Render(float* Out, int N);
+	SHORTSTACKCORE_API void Render(float* Out, int N);
 
 private:
 	struct Filter

@@ -25,9 +25,9 @@ public:
 	bool LeanBackRequested = false;
 
 	/** Draws one frame (and handles the pointer input gathered since the last one). */
-	void Draw(Canvas& C, double Now);
+	SHORTSTACKCORE_API void Draw(Canvas& C, double Now);
 	/** Keyboard shortcuts: "f", "c", "x", "r", "b", "a", "ArrowUp", "ArrowDown". */
-	void Key(const std::string& Key);
+	SHORTSTACKCORE_API void Key(const std::string& Key);
 
 private:
 	void Logo(float X, float Y, float Scale);

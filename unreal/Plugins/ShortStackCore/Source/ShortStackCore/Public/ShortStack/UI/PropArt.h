@@ -26,13 +26,13 @@ constexpr float NeonH = 320.0f;
 constexpr float KeyboardW = 1024.0f;
 constexpr float KeyboardH = 440.0f;
 
-void EvictionNotice(Canvas& C);
-void PowerBill(Canvas& C);
-void StickyNote(Canvas& C, const std::vector<std::string>& Lines, const Color& Paper);
-void Poster(Canvas& C);
+SHORTSTACKCORE_API void EvictionNotice(Canvas& C);
+SHORTSTACKCORE_API void PowerBill(Canvas& C);
+SHORTSTACKCORE_API void StickyNote(Canvas& C, const std::vector<std::string>& Lines, const Color& Paper);
+SHORTSTACKCORE_API void Poster(Canvas& C);
 /** Transparent background: the host adds glow (bloom) by tinting brighter than white. */
-void NeonSign(Canvas& C);
-void Keyboard(Canvas& C);
+SHORTSTACKCORE_API void NeonSign(Canvas& C);
+SHORTSTACKCORE_API void Keyboard(Canvas& C);
 } // namespace props
 } // namespace ui
 } // namespace ss

@@ -201,7 +201,7 @@ class Canvas
 {
 public:
 	/** PixelScale: output pixels per logical unit (sets the anti-aliasing fringe width). */
-	Canvas(DrawList& InOut, const TextMeasurer& InMeasurer, float Width, float Height, float PixelScale);
+	SHORTSTACKCORE_API Canvas(DrawList& InOut, const TextMeasurer& InMeasurer, float Width, float Height, float PixelScale);
 
 	void Save();
 	void Restore();

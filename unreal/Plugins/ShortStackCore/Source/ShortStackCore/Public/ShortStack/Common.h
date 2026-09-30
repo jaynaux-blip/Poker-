@@ -21,6 +21,14 @@
 #include <utility>
 #include <vector>
 
+// Unreal builds this plugin as its own DLL in editor builds, and UnrealBuildTool defines
+// SHORTSTACKCORE_API to export (inside the plugin) or import (in the game module). Every
+// non-inline function the game module calls needs it, or the game module fails to link
+// with "unresolved external symbol". Outside Unreal it expands to nothing.
+#ifndef SHORTSTACKCORE_API
+#define SHORTSTACKCORE_API
+#endif
+
 #ifndef SS_ASSERT
 #include <cassert>
 #define SS_ASSERT(Expr) assert(Expr)

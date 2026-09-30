@@ -11,7 +11,7 @@ This folder is the Unreal project for Night One. It contains:
 
 Everything is text in git: C++, config, and a Python script that generates the materials and the map the first time the editor opens.
 
-**Status:** everything that can run outside Unreal has been tested here. That covers the game session, the laptop UI, the audio synthesis and the poker engine. The Unreal-specific code is written for UE 5.3 or later but has **not been compiled inside Unreal yet**. Expect the first build to report a few API mismatches. Paste the errors to Claude and they get fixed.
+**Status:** everything that can run outside Unreal has been tested here. That covers the game session, the laptop UI, the audio synthesis and the poker engine. The Unreal code compiles with UE 5.6 and Visual Studio 2022; the first full build and play-through are in progress. If a build fails, run `BuildLog.bat` and paste the errors to Claude.
 
 ## Get the project onto your computer
 

@@ -130,3 +130,4 @@ Rules that keep the two builds identical (also listed at the top of `ShortStack/
 - Use stable sorts wherever TypeScript's `Array.sort` ordering matters.
 - Match JavaScript rounding and formatting with `JsRound`, `JsToFixed1` and `JsNumber`.
 - Use no exceptions, no RTTI, and no anonymous namespaces. Put file-local helpers in a uniquely named namespace so Unreal's unity build can merge files.
+- Mark every non-inline function that code outside the plugin calls with `SHORTSTACKCORE_API`. In editor builds the plugin is its own DLL, and an unmarked function fails the game module's link with `LNK2019: unresolved external symbol`.

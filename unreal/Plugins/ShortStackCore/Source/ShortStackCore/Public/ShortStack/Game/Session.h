@@ -176,8 +176,8 @@ struct SaveData
 	std::vector<std::string> TextsSeen;
 
 	/** Line-based text, safe to store in any save system. */
-	std::string Serialize() const;
-	static bool Parse(const std::string& Text, SaveData& Out);
+	SHORTSTACKCORE_API std::string Serialize() const;
+	static SHORTSTACKCORE_API bool Parse(const std::string& Text, SaveData& Out);
 };
 
 /** How the session reaches the world: sounds, the phone, the heartbeat, the desk. */
@@ -203,7 +203,7 @@ public:
 class Session
 {
 public:
-	Session(SessionHooks& InHooks, const std::string& Seed, const SaveData* Loaded = nullptr);
+	SHORTSTACKCORE_API Session(SessionHooks& InHooks, const std::string& Seed, const SaveData* Loaded = nullptr);
 
 	// ------------------------------------------------------------ persistent
 	Chips BankrollCents = 237;
@@ -259,7 +259,7 @@ public:
 	/** Real-time budget per update for Sprint simulation. */
 	double SprintBudgetMs = 10.0;
 
-	void Save();
+	SHORTSTACKCORE_API void Save();
 	void ResetSave();
 	void OnBoot();
 
@@ -271,14 +271,14 @@ public:
 	void Say(const std::string& Who, const std::string& Text);
 
 	void StartNextHand();
-	void Update(double InNow);
+	SHORTSTACKCORE_API void Update(double InNow);
 	void HeroAct(const PlayerAction& Action, bool TimedOut = false);
 	void RequestSitOut();
 	void BeginSprint();
 	void StopSprint(const std::string& Reason = "Stopped");
 	void LeaveResults();
 	/** Tournament clock (drives the dawn outside), or 2:07 AM in the lobby. */
-	double ClockMinutes() const;
+	SHORTSTACKCORE_API double ClockMinutes() const;
 
 	int HeroSeatIdx() const;
 	const TPlayer* PlayerById(const std::string& Id) const;

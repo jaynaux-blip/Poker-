@@ -14,10 +14,10 @@ public:
 	static constexpr float Height = 760.0f;
 
 	/** A new text: lights the screen for nine seconds. */
-	void Notify(const std::string& From, const std::string& Body, double Now);
+	SHORTSTACKCORE_API void Notify(const std::string& From, const std::string& Body, double Now);
 	/** Screen brightness 0..1 at Now (0 when dark). */
-	double Brightness(double Now) const;
-	void Draw(Canvas& C, double ClockMinutes) const;
+	SHORTSTACKCORE_API double Brightness(double Now) const;
+	SHORTSTACKCORE_API void Draw(Canvas& C, double ClockMinutes) const;
 
 private:
 	struct Message
