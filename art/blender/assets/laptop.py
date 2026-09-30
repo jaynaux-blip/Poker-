@@ -247,9 +247,9 @@ def anodized(m, sep, tc):
     """
     grain_v = m.node('ShaderNodeCombineXYZ')
     m.link(m.math('MULTIPLY', sep.outputs['X'], 6.0), grain_v.inputs['X'])
-    m.link(m.math('MULTIPLY', sep.outputs['Y'], 900.0), grain_v.inputs['Y'])
-    m.link(m.math('MULTIPLY', sep.outputs['Z'], 900.0), grain_v.inputs['Z'])
-    brush = m.node('ShaderNodeTexNoise', Scale=1.0, Detail=3.0, Roughness=0.5)
+    m.link(m.math('MULTIPLY', sep.outputs['Y'], 1400.0), grain_v.inputs['Y'])
+    m.link(m.math('MULTIPLY', sep.outputs['Z'], 1400.0), grain_v.inputs['Z'])
+    brush = m.node('ShaderNodeTexNoise', Scale=1.0, Detail=2.0, Roughness=0.5)
     m.link(grain_v.outputs['Vector'], brush.inputs['Vector'])
     # Edge wear on convex edges only: occlusion traced inside the solid finds edges whatever the
     # topology (Pointiness smears across the long triangles booleans leave on flat faces).
@@ -266,9 +266,9 @@ def anodized(m, sep, tc):
     m.link(tc.outputs['Object'], tone.inputs['Vector'])
     base = m.mix(m.math('MULTIPLY', tone.outputs['Fac'], 0.5), core.hex_linear(0x44474d), core.hex_linear(0x50535a))
     color = m.mix(edge, base, core.hex_linear(0x92969d))
-    rough = m.math('ADD', m.math('MULTIPLY', brush.outputs['Fac'], 0.08), 0.30)
+    rough = m.math('ADD', m.math('MULTIPLY', brush.outputs['Fac'], 0.05), 0.315)
     rough = m.math('SUBTRACT', rough, m.math('MULTIPLY', edge, 0.08))
-    bump = m.node('ShaderNodeBump', Strength=0.05, Distance=0.00005)
+    bump = m.node('ShaderNodeBump', Strength=0.03, Distance=0.00005)
     m.link(brush.outputs['Fac'], bump.inputs['Height'])
     return color, rough, bump
 

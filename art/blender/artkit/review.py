@@ -22,6 +22,7 @@ def _area(name, loc, target, size, power, color=(1, 1, 1)):
     data.energy = power
     data.color = color
     obj = core.link(bpy.data.objects.new(name, data))
+    obj.visible_camera = False  # light the asset without appearing in frame
     obj.location = loc
     _look_at(obj, target)
     return obj
