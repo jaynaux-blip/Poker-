@@ -272,14 +272,18 @@ def assign(obj, mat):
 
 # ------------------------------------------------------------------ baking
 
-def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64):
-    """Bakes every material on obj to BaseColor, ORM (occlusion, roughness, metallic) and Normal
-    textures, then replaces the materials with glTF-ready ones that use those textures."""
+def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64, sizes=None):
+    """Bakes every material on obj to BaseColor, ORM (occlusion, roughness, metallic), Normal and,
+    for emissive materials, Emissive textures, then replaces the materials with glTF-ready ones.
+
+    sizes: optional {material name: texture size, or (width, height)} overriding size per material.
+    """
     sc = bpy.context.scene
     select_only([obj])
     tex_dir = os.path.join(BUILD_DIR, 'textures', name)
     os.makedirs(tex_dir, exist_ok=True)
     sc.world.light_settings.distance = ao_distance
+    sizes = sizes or {}
     results = []
     for slot_index, slot in enumerate(obj.material_slots):
         mat = slot.material
@@ -288,36 +292,43 @@ def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64):
         out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
         surface_src = out.inputs['Surface'].links[0].from_socket
         suffix = f'_{slot_index}' if len(obj.material_slots) > 1 else ''
+        px_size = sizes.get(mat.name, size)
+        px_w, px_h = px_size if isinstance(px_size, (tuple, list)) else (px_size, px_size)
+        strength = bsdf.inputs['Emission Strength'].default_value
+        emissive = strength > 0.0 and (bsdf.inputs['Emission Color'].is_linked or any(c > 0.0 for c in bsdf.inputs['Emission Color'].default_value[:3]))
         maps = {}
-        for key, non_color in (('BaseColor', False), ('Roughness', True), ('Metallic', True), ('Normal', True), ('AO', True)):
-            img = bpy.data.images.new(f'T_{name}{suffix}_{key}', size, size, alpha=False)
+        for key, non_color in (('BaseColor', False), ('Roughness', True), ('Metallic', True), ('Normal', True), ('AO', True), ('Emissive', False)):
+            img = bpy.data.images.new(f'T_{name}{suffix}_{key}', px_w, px_h, alpha=False)
             img.colorspace_settings.name = 'Non-Color' if non_color else 'sRGB'
             maps[key] = img
         target = nt.nodes.new('ShaderNodeTexImage')
-        results.append((mat, bsdf, out, surface_src, target, maps, suffix))
+        results.append({'mat': mat, 'bsdf': bsdf, 'out': out, 'surface': surface_src, 'target': target, 'maps': maps,
+                        'suffix': suffix, 'size': (px_w, px_h), 'emissive': emissive, 'strength': strength})
 
     def set_targets(key):
-        for mat, bsdf, out, surface_src, target, maps, suffix in results:
-            target.image = maps[key]
-            for n in mat.node_tree.nodes:
+        for r in results:
+            r['target'].image = r['maps'][key]
+            for n in r['mat'].node_tree.nodes:
                 n.select = False
-            target.select = True
-            mat.node_tree.nodes.active = target
+            r['target'].select = True
+            r['mat'].node_tree.nodes.active = r['target']
 
     def emit_from(input_name):
         """Temporarily route a Principled input to an Emission shader."""
         tmp = []
-        for mat, bsdf, out, surface_src, target, maps, suffix in results:
-            nt = mat.node_tree
+        for r in results:
+            nt = r['mat'].node_tree
             em = nt.nodes.new('ShaderNodeEmission')
-            sock = bsdf.inputs[input_name]
-            if sock.is_linked:
+            sock = r['bsdf'].inputs[input_name]
+            if input_name == 'Emission Color' and not r['emissive']:
+                em.inputs['Color'].default_value = (0.0, 0.0, 0.0, 1.0)
+            elif sock.is_linked:
                 nt.links.new(sock.links[0].from_socket, em.inputs['Color'])
             else:
                 v = sock.default_value
                 em.inputs['Color'].default_value = tuple(v) if hasattr(v, '__len__') else (v, v, v, 1.0)
-            nt.links.new(em.outputs['Emission'], out.inputs['Surface'])
-            tmp.append((nt, em, out, surface_src))
+            nt.links.new(em.outputs['Emission'], r['out'].inputs['Surface'])
+            tmp.append((nt, em, r['out'], r['surface']))
         return tmp
 
     def restore(tmp):
@@ -328,7 +339,10 @@ def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64):
     sc.render.bake.margin = 16
     sc.render.bake.use_clear = True
     sc.cycles.samples = 1
-    for key, src in (('BaseColor', 'Base Color'), ('Roughness', 'Roughness'), ('Metallic', 'Metallic')):
+    passes = [('BaseColor', 'Base Color'), ('Roughness', 'Roughness'), ('Metallic', 'Metallic')]
+    if any(r['emissive'] for r in results):
+        passes.append(('Emissive', 'Emission Color'))
+    for key, src in passes:
         tmp = emit_from(src)
         set_targets(key)
         bpy.ops.object.bake(type='EMIT')
@@ -342,35 +356,44 @@ def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64):
     bpy.ops.object.bake(type='AO')
 
     new_mats = []
-    for mat, bsdf, out, surface_src, target, maps, suffix in results:
+    for r in results:
+        w, h = r['size']
         px = {}
         for key in ('Roughness', 'Metallic', 'AO'):
-            a = np.empty(size * size * 4, dtype=np.float32)
-            maps[key].pixels.foreach_get(a)
-            px[key] = a.reshape(size, size, 4)[:, :, 0]
-        orm = np.ones((size, size, 4), dtype=np.float32)
+            a = np.empty(w * h * 4, dtype=np.float32)
+            r['maps'][key].pixels.foreach_get(a)
+            px[key] = a.reshape(h, w, 4)[:, :, 0]
+        orm = np.ones((h, w, 4), dtype=np.float32)
         orm[:, :, 0] = np.clip(0.35 + 0.65 * px['AO'], 0, 1)  # keep occlusion gentle: Lumen adds its own
         orm[:, :, 1] = px['Roughness']
         orm[:, :, 2] = px['Metallic']
-        orm_img = bpy.data.images.new(f'T_{name}{suffix}_ORM', size, size, alpha=False)
+        orm_img = bpy.data.images.new(f"T_{name}{r['suffix']}_ORM", w, h, alpha=False)
         orm_img.colorspace_settings.name = 'Non-Color'
         orm_img.pixels.foreach_set(orm.ravel())
         saved = {}
-        for key, img in (('BaseColor', maps['BaseColor']), ('Normal', maps['Normal']), ('ORM', orm_img)):
-            path = os.path.join(tex_dir, f'T_{name}{suffix}_{key}.png')
+        outputs = [('BaseColor', r['maps']['BaseColor']), ('Normal', r['maps']['Normal']), ('ORM', orm_img)]
+        if r['emissive']:
+            outputs.append(('Emissive', r['maps']['Emissive']))
+        for key, img in outputs:
+            path = os.path.join(tex_dir, f"T_{name}{r['suffix']}_{key}.png")
             img.filepath_raw = path
             img.file_format = 'PNG'
             img.save()
             saved[key] = path
-        new_mats.append(gltf_material(f'M_{name}{suffix}', saved['BaseColor'], saved['ORM'], saved['Normal']))
+        new_mats.append(gltf_material(f"M_{name}{r['suffix']}", saved['BaseColor'], saved['ORM'], saved['Normal'],
+                                      saved.get('Emissive'), r['strength']))
     for i, m in enumerate(new_mats):
         obj.material_slots[i].material = m
     return new_mats
 
 
-def gltf_material(name, base_color, orm, normal):
+def gltf_material(name, base_color, orm, normal, emissive=None, emissive_strength=1.0):
     """Principled material wired the way the glTF exporter expects (including occlusion)."""
     mat = Mat(name)
+    if emissive:
+        em = mat.image(emissive)
+        mat.link(em.outputs['Color'], mat.bsdf.inputs['Emission Color'])
+        mat.set('Emission Strength', emissive_strength)
     base = mat.image(base_color)
     mat.link(base.outputs['Color'], mat.bsdf.inputs['Base Color'])
     orm_n = mat.image(orm, non_color=True)
@@ -419,3 +442,259 @@ def stats(objs):
         tris += len(me.loop_triangles)
     lo, hi = bounds(objs)
     return tris, hi - lo
+
+
+# ------------------------------------------------------------------ hard-surface helpers
+
+def rounded_rect(x0, y0, x1, y1, r, steps=8, radii=None):
+    """Counter-clockwise outline of a rectangle with rounded corners (radii: per corner, starting bottom-left)."""
+    rs = radii or (r, r, r, r)
+    corners = [((x0 + rs[0], y0 + rs[0]), rs[0], math.pi), ((x1 - rs[1], y0 + rs[1]), rs[1], 1.5 * math.pi),
+               ((x1 - rs[2], y1 - rs[2]), rs[2], 0.0), ((x0 + rs[3], y1 - rs[3]), rs[3], 0.5 * math.pi)]
+    pts = []
+    for (cx, cy), cr, a0 in corners:
+        if cr <= 0:
+            pts.append((cx, cy))
+            continue
+        for k in range(steps + 1):
+            a = a0 + 0.5 * math.pi * k / steps
+            pts.append((cx + cr * math.cos(a), cy + cr * math.sin(a)))
+    return pts
+
+
+def slab(outline, z0, z1):
+    """A bmesh prism: an n-gon outline (counter-clockwise, in XY) from z0 up to z1."""
+    bm = bmesh.new()
+    vs = [bm.verts.new((x, y, z0)) for x, y in outline]
+    face = bm.faces.new(vs)
+    res = bmesh.ops.extrude_face_region(bm, geom=[face])
+    top = [g for g in res['geom'] if isinstance(g, bmesh.types.BMVert)]
+    bmesh.ops.translate(bm, verts=top, vec=(0.0, 0.0, z1 - z0))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return bm
+
+
+def bevel(bm, pred, offset, segments=3, profile=0.5):
+    edges = [e for e in bm.edges if pred(e)]
+    if edges:
+        bmesh.ops.bevel(bm, geom=edges, offset=offset, segments=segments, profile=profile, affect='EDGES', clamp_overlap=True)
+
+
+def prism_x(name, outline, x0, x1):
+    """A prism along X from an outline given as (y, z) points: cutters for side ports."""
+    bm = bmesh.new()
+    a = [bm.verts.new((x0, y, z)) for y, z in outline]
+    b = [bm.verts.new((x1, y, z)) for y, z in outline]
+    bm.faces.new(a)
+    bm.faces.new(list(reversed(b)))
+    n = len(outline)
+    for i in range(n):
+        bm.faces.new((a[i], a[(i + 1) % n], b[(i + 1) % n], b[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return mesh_object(name, bm)
+
+
+def finish_hard_surface(obj, angle=35.0, weighted=True):
+    """Smooth shading, with edges sharper than angle kept crisp.
+
+    weighted: face-area weighted normals (applied), so large flat faces stay flat and the bevels
+    around them take the shading transition, as in production hard-surface work.
+    """
+    obj.data.shade_smooth()
+    try:
+        obj.data.set_sharp_from_angle(angle=math.radians(angle))
+    except AttributeError:
+        pass
+    if weighted:
+        mod = obj.modifiers.new('weighted', 'WEIGHTED_NORMAL')
+        mod.mode = 'FACE_AREA'
+        mod.keep_sharp = True
+        mod.weight = 50
+        select_only([obj])
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+
+
+def boolean(obj, cutter, op='DIFFERENCE'):
+    mod = obj.modifiers.new('bool', 'BOOLEAN')
+    mod.operation = op
+    mod.solver = 'EXACT'
+    mod.object = cutter
+    mod.material_mode = 'TRANSFER'
+    select_only([obj])
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    bpy.data.objects.remove(cutter)
+
+
+def keycap(bm, x, y, w, d, z0, z1, radius=0.0009, taper=0.0006):
+    """A chiclet keycap (bmesh, added to bm): rounded footprint w x d at z0, slightly smaller at the top z1."""
+    outline = rounded_rect(x - w / 2, y - d / 2, x + w / 2, y + d / 2, radius * 1.4, steps=3)
+    vs0 = [bm.verts.new((px, py, z0)) for px, py in outline]
+    sx = (w - 2 * taper) / w
+    sy = (d - 2 * taper) / d
+    vs1 = [bm.verts.new((x + (px - x) * sx, y + (py - y) * sy, z1)) for px, py in outline]
+    bm.faces.new(list(reversed(vs0)))
+    top = bm.faces.new(vs1)
+    n = len(outline)
+    for i in range(n):
+        bm.faces.new((vs0[i], vs0[(i + 1) % n], vs1[(i + 1) % n], vs1[i]))
+    return top
+
+
+# ------------------------------------------------------------------ UV layouts
+
+def uv_layout(obj, groups, margin=0.01):
+    """Lays out UVs by face groups, in order; a face takes the first group whose test accepts it.
+
+    Each group is (test(face) -> bool, mode, arg, rect), rect = (u0, v0, u1, v1):
+      ('planar', (axis_a, axis_b, a0, a1, b0, b1)): projects onto two axes ('x', 'y' or 'z', optionally '-x'
+        to mirror), mapping [a0, a1] x [b0, b1] onto rect. Used where print must stay sharp.
+      ('box', gap or None): each face projects along its dominant normal axis; connected faces sharing an
+        axis form islands, shelf-packed into rect at one uniform texel density (gap in UV units).
+      ('smart', None): smart-projected islands packed into rect.
+    """
+    me = obj.data
+    if not me.uv_layers:
+        me.uv_layers.new(name='UVMap')
+    select_only([obj])
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_mode(type='FACE')
+    bm = bmesh.from_edit_mesh(me)
+    bm.faces.ensure_lookup_table()
+    owner = [None] * len(bm.faces)
+    for f in bm.faces:
+        for gi, (test, mode, arg, rect) in enumerate(groups):
+            if test(f):
+                owner[f.index] = gi
+                break
+    axis_index = {'x': 0, 'y': 1, 'z': 2}
+    for gi, (test, mode, arg, rect) in enumerate(groups):
+        u0, v0, u1, v1 = rect
+        if mode == 'smart':
+            for f in bm.faces:
+                f.select_set(owner[f.index] == gi)
+            bmesh.update_edit_mesh(me)
+            if not any(o == gi for o in owner):
+                continue
+            bpy.ops.uv.smart_project(angle_limit=math.radians(66.0), island_margin=margin)
+            bm = bmesh.from_edit_mesh(me)
+            bm.faces.ensure_lookup_table()
+            uv = bm.loops.layers.uv.verify()
+            for f in bm.faces:
+                if owner[f.index] == gi:
+                    for l in f.loops:
+                        l[uv].uv = (u0 + (u1 - u0) * l[uv].uv.x, v0 + (v1 - v0) * l[uv].uv.y)
+        elif mode == 'box':
+            uv = bm.loops.layers.uv.verify()
+            _box_project([f for f in bm.faces if owner[f.index] == gi], uv, rect, arg if arg is not None else margin * 0.4)
+        else:
+            a_name, b_name, a0, a1, b0, b1 = arg
+            ia = axis_index[a_name.lstrip('-')]
+            ib = axis_index[b_name.lstrip('-')]
+            sa = -1.0 if a_name.startswith('-') else 1.0
+            sb = -1.0 if b_name.startswith('-') else 1.0
+            uv = bm.loops.layers.uv.verify()
+            for f in bm.faces:
+                if owner[f.index] == gi:
+                    for l in f.loops:
+                        ta = (sa * l.vert.co[ia] - a0) / (a1 - a0)
+                        tb = (sb * l.vert.co[ib] - b0) / (b1 - b0)
+                        l[uv].uv = (u0 + (u1 - u0) * ta, v0 + (v1 - v0) * tb)
+    bmesh.update_edit_mesh(me)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+# Projection plane per dominant axis and sign, chosen so no island is mirrored: (u axis, u sign, v axis, v sign).
+_BOX_PLANES = {(0, True): (1, 1.0, 2, 1.0), (0, False): (1, -1.0, 2, 1.0),
+               (1, True): (0, -1.0, 2, 1.0), (1, False): (0, 1.0, 2, 1.0),
+               (2, True): (0, 1.0, 1, 1.0), (2, False): (0, 1.0, 1, -1.0)}
+
+
+def _box_project(faces, uv, rect, gap):
+    if not faces:
+        return
+    key = {}
+    for f in faces:
+        n = f.normal
+        ax = max(range(3), key=lambda i: abs(n[i]))
+        key[f.index] = (ax, n[ax] > 0)
+    # Islands: faces connected by edges and sharing a projection.
+    seen = set()
+    islands = []
+    for f in faces:
+        if f.index in seen:
+            continue
+        seen.add(f.index)
+        stack, comp = [f], []
+        while stack:
+            g = stack.pop()
+            comp.append(g)
+            for e in g.edges:
+                for h in e.link_faces:
+                    if h.index not in seen and h.index in key and key[h.index] == key[g.index]:
+                        seen.add(h.index)
+                        stack.append(h)
+        plane = _BOX_PLANES[key[f.index]]
+        ia, sa, ib, sb = plane
+        pts = [(sa * v.co[ia], sb * v.co[ib]) for g in comp for v in g.verts]
+        a0 = min(p[0] for p in pts)
+        a1 = max(p[0] for p in pts)
+        b0 = min(p[1] for p in pts)
+        b1 = max(p[1] for p in pts)
+        rotate = (b1 - b0) > (a1 - a0)  # lay tall islands down: shelves pack wide ones best
+        islands.append({'faces': comp, 'plane': plane, 'box': (a0, a1, b0, b1), 'rotate': rotate})
+    u0, v0, u1, v1 = rect
+    W, H = u1 - u0, v1 - v0
+
+    def dims(isl, s):
+        a0, a1, b0, b1 = isl['box']
+        w, h = (a1 - a0) * s, (b1 - b0) * s
+        return (h, w) if isl['rotate'] else (w, h)
+
+    def pack(s):
+        order = sorted(range(len(islands)), key=lambda i: -dims(islands[i], s)[1])
+        x = y = shelf = 0.0
+        pos = [None] * len(islands)
+        for i in order:
+            w, h = dims(islands[i], s)
+            if w > W:
+                return None
+            if x + w > W:
+                y += shelf + gap
+                x = shelf = 0.0
+            if y + h > H:
+                return None
+            pos[i] = (x, y)
+            x += w + gap
+            shelf = max(shelf, h)
+        return pos
+
+    area = sum((i['box'][1] - i['box'][0]) * (i['box'][3] - i['box'][2]) for i in islands)
+    lo, hi = 0.0, math.sqrt(W * H / max(area, 1e-12))
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if pack(mid) is not None:
+            lo = mid
+        else:
+            hi = mid
+    s = lo
+    pos = pack(s)
+    for isl, (px, py) in zip(islands, pos):
+        a0, a1, b0, b1 = isl['box']
+        ia, sa, ib, sb = isl['plane']
+        for g in isl['faces']:
+            for l in g.loops:
+                a, b = sa * l.vert.co[ia], sb * l.vert.co[ib]
+                if isl['rotate']:
+                    x, y = (b - b0) * s, (a1 - a) * s
+                else:
+                    x, y = (a - a0) * s, (b - b0) * s
+                l[uv].uv = (u0 + px + x, v0 + py + y)
+
+
+def normal_z(f, above=0.9):
+    return f.normal.z > above
+
+
+def material_is(obj, name):
+    idx = next((i for i, s in enumerate(obj.material_slots) if s.material and s.material.name == name), -1)
+    return lambda f: f.material_index == idx

@@ -2,11 +2,14 @@
 
 Props are built in Blender from Python, so every asset is reproducible and can be changed by editing code. Each build runs four steps:
 
-1. **Model.** Real-world dimensions in meters, with clean topology.
-2. **Bake.** The procedural materials are baked to 2K PBR textures:
+1. **Model.** Real-world dimensions in meters, with clean topology. Flat faces next to bevels get face-weighted normals, so they shade flat.
+2. **Bake.** The procedural materials are baked to PBR textures, 2K by default and 4K for hero surfaces:
    - base color;
    - ORM (occlusion, roughness, metallic);
-   - normal.
+   - normal;
+   - emissive, for anything that glows.
+
+   Parts that move separately, like the laptop's lid, bake one at a time so they don't shadow each other.
 3. **Export.** The asset is written as glTF (`unreal/Art/Meshes/<SM_Name>.glb`). The Unreal editor imports it on its next launch.
 4. **Review.** The asset is rendered to a review sheet (`art/review/<name>.jpg`) for sign-off before it goes in the game.
 
@@ -24,7 +27,7 @@ Intermediate textures and review tiles go to `art/build/`, which git ignores.
 
 ## Review sheets
 
-Every sheet shows six views:
+Every sheet shows six views (an asset can choose its own studio angles; the laptop's third is a close-up of its keyboard):
 
 - **Top row:** front three-quarter, top and a close-up, in a neutral studio.
 - **Bottom row, left:** wireframe over clay, to check topology and density.
@@ -47,6 +50,7 @@ The editor setup script (`unreal/Content/Python/shortstack_setup.py`) imports ea
 | Asset | File | Notes |
 |---|---|---|
 | GRIND energy drink, opened 12 oz can | `assets/energy_can.py` | Wrap label with nutrition panel and barcode, stay-on tab and rivet, punched opening. 13k triangles. One more appears on the desk every hour of play. |
+| KESTREL 15 laptop, base and lid | `assets/laptop.py` | Gunmetal anodized unibody with edge wear. Every keycap is modeled, with printed legends and a white backlight. Also: glass trackpad, speaker grilles, side ports, hinge, rubber feet, webcam and palm-rest stickers. Years of poker left the F, C, R, A, arrow and space keys worn shiny. 14k triangles. Maps are 4K for the chassis and keyboard. |
 
 ## Fonts
 

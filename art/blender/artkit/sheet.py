@@ -113,6 +113,11 @@ class Sheet:
         sc.cycles.use_denoising = False
         sc.render.filter_size = 0.9
         sc.world.color = (0, 0, 0)
+        # Several sheets can share a scene: render this one's elements only.
+        mine = {obj.name for obj, *_ in self.items}
+        hidden = [o for o in sc.objects if o.name not in mine and o.type != 'CAMERA' and not o.hide_render]
+        for o in hidden:
+            o.hide_render = True
         paths = {}
         for pass_name, view in (('color', 'Standard'), ('surface', 'Raw')):
             sc.view_settings.view_transform = view
@@ -153,4 +158,8 @@ class Sheet:
             paths[pass_name] = path
         sc.render.film_transparent = False
         sc.view_settings.view_transform = 'AgX'
+        for o in hidden:
+            o.hide_render = False
+        for obj, *_ in self.items:
+            obj.hide_render = True
         return paths['color'], paths['surface']

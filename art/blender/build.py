@@ -15,7 +15,7 @@ sys.path.insert(0, HERE)
 
 from artkit import core, review  # noqa: E402
 
-ASSETS = ['energy_can']
+ASSETS = ['energy_can', 'laptop']
 
 
 def args():
@@ -30,9 +30,18 @@ def run(name, do_review=True):
     tris, dims = core.stats(objs)
     print(f'[{name}] built {len(objs)} object(s), {tris} triangles, {dims.x * 100:.1f} x {dims.y * 100:.1f} x {dims.z * 100:.1f} cm')
     for o in objs:
-        core.bake(o, o.name, size=getattr(mod, 'TEXTURE_SIZE', 2048), ao_distance=getattr(mod, 'AO_DISTANCE', 0.01))
+        # Each mesh bakes alone: parts built at a shared origin (a laptop's base and lid) must not
+        # shadow each other's occlusion.
+        for other in objs:
+            other.hide_render = other is not o
+        core.bake(o, o.name, size=getattr(mod, 'TEXTURE_SIZE', 2048), ao_distance=getattr(mod, 'AO_DISTANCE', 0.01),
+                  sizes=getattr(mod, 'TEXTURE_SIZES', None))
         path = core.export_glb([o], o.name)
         print(f'[{name}] exported {os.path.relpath(path, core.ROOT)}')
+    for o in objs:
+        o.hide_render = False
+    if hasattr(mod, 'pose_for_review'):
+        mod.pose_for_review(objs)
     if do_review:
         path = review.sheet(objs, name, views=getattr(mod, 'REVIEW_VIEWS', None))
         print(f'[{name}] review sheet {os.path.relpath(path, core.ROOT)}')

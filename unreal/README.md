@@ -120,7 +120,10 @@ On the game mode, `TimeScale` speeds up the game clock for testing.
 
 ## Blender assets
 
-Props are modeled, textured and reviewed in Blender by the scripts in `art/blender` (see `art/README.md`). They are exported to `unreal/Art/Meshes/*.glb`. On editor launch, `shortstack_setup.py` imports each file into `/Game/ShortStack/Meshes/<SM_Name>/`, and `NightOneStage` uses the imported mesh in place of its engine-shape stand-in. So far that covers the energy drink cans (`SM_EnergyCan`).
+Props are modeled, textured and reviewed in Blender by the scripts in `art/blender` (see `art/README.md`). They are exported to `unreal/Art/Meshes/*.glb`. On editor launch, `shortstack_setup.py` imports each file into `/Game/ShortStack/Meshes/<SM_Name>/`, and `NightOneStage` uses the imported mesh in place of its engine-shape stand-in. So far that covers:
+
+- the energy drink cans (`SM_EnergyCan`);
+- the laptop (`SM_Laptop_Base` and `SM_Laptop_Lid`). The stage hinges the lid at 18.5 mm and tilts it back 18.3°, and it mounts the RiverLine screen just in front of the lid's glass. Its keyboard, legends and backlight are part of the mesh.
 
 To swap in a hand-made model instead:
 

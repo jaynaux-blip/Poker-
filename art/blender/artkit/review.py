@@ -87,7 +87,8 @@ def _pixels(path):
 def sheet(objs, name, views=None, tile=900, samples=96, context_scale=1.0):
     """Renders the review sheet art/review/<name>.jpg (3 x 2 tiles) and returns its path.
 
-    views: optional list of (label, azimuth, elevation, distance factor) for the first three tiles.
+    views: optional list of (label, azimuth, elevation, distance factor[, target]) for the first three
+    tiles; the camera aims at target (world meters) when given, else at the middle of the asset.
     """
     sc = bpy.context.scene
     lo, hi = core.bounds(objs)
@@ -116,10 +117,15 @@ def sheet(objs, name, views=None, tile=900, samples=96, context_scale=1.0):
         _area('rim', _orbit(center, size * 3, 170, 35), center, size * 1.2, 900 * size ** 2, (1.0, 1.0, 1.0)),
     ]
     tiles = []
-    for label, az, el, dist in views:
-        cam.location = _orbit(center, size * dist, az, el)
-        _look_at(cam, center)
-        tiles.append(_render(os.path.join(tmp_dir, f'{label}.png'), tile, tile, samples))
+
+    def aim(view):
+        target = Vector(view[4]) if len(view) > 4 else center
+        cam.location = _orbit(target, size * view[3], view[1], view[2])
+        _look_at(cam, target)
+
+    for view in views:
+        aim(view)
+        tiles.append(_render(os.path.join(tmp_dir, f'{view[0]}.png'), tile, tile, samples))
 
     # Wireframe over clay, to check topology and density.
     wire = core.Mat('review_wire')
@@ -129,8 +135,7 @@ def sheet(objs, name, views=None, tile=900, samples=96, context_scale=1.0):
     wire.set('Base Color', col)
     wire.set('Roughness', 0.6)
     sc.view_layers[0].material_override = wire.m
-    cam.location = _orbit(center, size * views[0][3], views[0][1], views[0][2])
-    _look_at(cam, center)
+    aim(views[0])
     tiles.append(_render(os.path.join(tmp_dir, 'wire.png'), tile, tile, 32))
     sc.view_layers[0].material_override = None
 

@@ -217,6 +217,8 @@ void ANightOneStage::BuildSet()
 	WidgetLitMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_WidgetLit.M_WidgetLit"));
 	RainCookieMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_RainCookie.M_RainCookie"));
 	CanMesh = LoadOptionalMesh(TEXT("/Game/ShortStack/Meshes/SM_EnergyCan/SM_EnergyCan.SM_EnergyCan"));
+	LaptopBaseMesh = LoadOptionalMesh(TEXT("/Game/ShortStack/Meshes/SM_Laptop_Base/SM_Laptop_Base.SM_Laptop_Base"));
+	LaptopLidMesh = LoadOptionalMesh(TEXT("/Game/ShortStack/Meshes/SM_Laptop_Lid/SM_Laptop_Lid.SM_Laptop_Lid"));
 	BuildShell();
 	BuildWindow();
 	BuildDesk();
@@ -295,23 +297,45 @@ void ANightOneStage::BuildDesk()
 		BoxWeb(Legs, FVector(P.X, (DeskTop - 0.035) / 2.0, P.Y), FVector(0.035, DeskTop - 0.035, 0.035));
 	}
 
-	// Laptop.
-	UMaterialInterface* Body = Surface(TEXT("Laptop"), 0x2b2d31, 0.38f, 0.85f, PatternBrushed);
+	// Laptop, hinged at the back edge with the lid tilted back.
 	USceneComponent* Laptop = NewPart<USceneComponent>();
 	Laptop->SetRelativeLocation(Web(0.0, DeskTop, DeskZ + 0.04));
-	const double T = 0.016;
 	const double D = 0.235;
-	const double LaptopW = 0.34;
-	BoxWeb(Body, FVector(0.0, T / 2.0, 0.0), FVector(LaptopW, T, D), 0.0f, Laptop);
-	BoxWeb(Surface(TEXT("Trackpad"), 0x1f2124, 0.45f, 0.5f), FVector(0.0, T + 0.0005, 0.068), FVector(0.11, 0.001, 0.07), 0.0f, Laptop);
-	Keyboard = AddWidget(Web(0.0, T + 0.0008, -0.035), Facing(FVector::UpVector, FVector::ForwardVector), FVector2D(31.0, 11.8), FIntPoint(1024, 390), true, false, Laptop);
-	// Lid, hinged at the back edge and tilted back.
-	LidPivot = NewPart<USceneComponent>(Laptop);
-	LidPivot->SetRelativeLocationAndRotation(Web(0.0, T, -D / 2.0), FRotator(-18.3f, 0.0f, 0.0f));
-	const double LidH = 0.225;
-	BoxWeb(Body, FVector(0.0, LidH / 2.0, -0.0035), FVector(LaptopW, LidH, 0.007), 0.0f, LidPivot);
-	BoxWeb(Surface(TEXT("Bezel"), 0x050506, 0.35f, 0.2f), FVector(0.0, LidH / 2.0, 0.00015), FVector(LaptopW - 0.006, LidH - 0.006, 0.0003), 0.0f, LidPivot);
-	Screen = AddWidget(Web(0.0, LidH / 2.0 + 0.004, 0.0006), FRotator(0.0f, 180.0f, 0.0f), ScreenSize(), ScreenResolution, false, false, LidPivot);
+	const float LidTilt = -18.3f;
+	// Where the display sits on the lid, from the hinge (m): its center's height and how far its face is ahead.
+	double ScreenUp = 0.225 / 2.0 + 0.004;
+	double ScreenAhead = 0.0006;
+	Keyboard = nullptr;
+	if (LaptopBaseMesh && LaptopLidMesh)
+	{
+		// The Blender laptop (art/blender/assets/laptop.py): both meshes have their origin on the hinge line,
+		// the base's on the desk under it. The base runs forward from the hinge, so its bounds say which way
+		// the importer turned it; yaw that toward the chair (-X). The lid shares the base's axes.
+		const FVector Ahead = LaptopBaseMesh->GetBoundingBox().GetCenter() * FVector(1.0, 1.0, 0.0);
+		const float Yaw = 180.0f - static_cast<float>(FMath::RadiansToDegrees(FMath::Atan2(Ahead.Y, Ahead.X)));
+		const double HingeHeight = 0.0185;
+		AddMesh(LaptopBaseMesh, nullptr, Web(0.0, 0.0, -D / 2.0), FVector(1.0), FRotator(0.0f, Yaw, 0.0f), Laptop);
+		LidPivot = NewPart<USceneComponent>(Laptop);
+		LidPivot->SetRelativeLocationAndRotation(Web(0.0, HingeHeight, -D / 2.0), FRotator(LidTilt, 0.0f, 0.0f));
+		AddMesh(LaptopLidMesh, nullptr, FVector::ZeroVector, FVector(1.0), FRotator(0.0f, Yaw, 0.0f), LidPivot);
+		ScreenUp = 0.11525;
+		ScreenAhead = 0.0026 + 0.0003; // just in front of the glass
+	}
+	else
+	{
+		UMaterialInterface* Body = Surface(TEXT("Laptop"), 0x2b2d31, 0.38f, 0.85f, PatternBrushed);
+		const double T = 0.016;
+		const double LaptopW = 0.34;
+		BoxWeb(Body, FVector(0.0, T / 2.0, 0.0), FVector(LaptopW, T, D), 0.0f, Laptop);
+		BoxWeb(Surface(TEXT("Trackpad"), 0x1f2124, 0.45f, 0.5f), FVector(0.0, T + 0.0005, 0.068), FVector(0.11, 0.001, 0.07), 0.0f, Laptop);
+		Keyboard = AddWidget(Web(0.0, T + 0.0008, -0.035), Facing(FVector::UpVector, FVector::ForwardVector), FVector2D(31.0, 11.8), FIntPoint(1024, 390), true, false, Laptop);
+		LidPivot = NewPart<USceneComponent>(Laptop);
+		LidPivot->SetRelativeLocationAndRotation(Web(0.0, T, -D / 2.0), FRotator(LidTilt, 0.0f, 0.0f));
+		const double LidH = 0.225;
+		BoxWeb(Body, FVector(0.0, LidH / 2.0, -0.0035), FVector(LaptopW, LidH, 0.007), 0.0f, LidPivot);
+		BoxWeb(Surface(TEXT("Bezel"), 0x050506, 0.35f, 0.2f), FVector(0.0, LidH / 2.0, 0.00015), FVector(LaptopW - 0.006, LidH - 0.006, 0.0003), 0.0f, LidPivot);
+	}
+	Screen = AddWidget(Web(0.0, ScreenUp, ScreenAhead), FRotator(0.0f, 180.0f, 0.0f), ScreenSize(), ScreenResolution, false, false, LidPivot);
 	// Slightly below full white so only the brightest pixels bloom, like a real panel.
 	Screen->SetTintColorAndOpacity(FLinearColor(0.86f, 0.86f, 0.86f, 1.0f));
 	Screen->SetRedrawTime(1.0f / 30.0f);
@@ -495,9 +519,9 @@ void ANightOneStage::BuildOutside()
 
 void ANightOneStage::BuildLights()
 {
-	// The laptop screen is the key light.
+	// The laptop screen is the key light, just in front of the display.
 	ScreenLight = NewPart<URectLightComponent>(LidPivot);
-	ScreenLight->SetRelativeLocationAndRotation(Web(0.0, 0.225 / 2.0 + 0.004, 0.006), FRotator(0.0f, 180.0f, 0.0f));
+	ScreenLight->SetRelativeLocationAndRotation(Screen ? Screen->GetRelativeLocation() - FVector(0.55, 0.0, 0.0) : Web(0.0, 0.117, 0.006), FRotator(0.0f, 180.0f, 0.0f));
 	ScreenLight->SetIntensityUnits(ELightUnits::Candelas);
 	ScreenLight->SetIntensity(ScreenLightCandela);
 	ScreenLight->SetLightColor(ScreenGlow);
