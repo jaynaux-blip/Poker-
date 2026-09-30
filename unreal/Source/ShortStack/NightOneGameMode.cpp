@@ -49,8 +49,6 @@ ANightOneGameMode::ANightOneGameMode()
 	Audio = CreateDefaultSubobject<UNightOneAudio>(TEXT("Audio"));
 }
 
-ANightOneGameMode::~ANightOneGameMode() = default;
-
 void ANightOneGameMode::RestartPlayer(AController* NewPlayer)
 {
 	if (!NewPlayer || NewPlayer->IsPendingKillPending())

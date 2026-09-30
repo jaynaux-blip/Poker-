@@ -47,6 +47,11 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAudioComponent> AmbienceComponent;
 
+	/** One-shot sounds still playing; each is stopped (and destroyed) once its samples have played. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UAudioComponent>> OneShots;
+	TArray<double> OneShotEnds;
+
 	TUniquePtr<ss::audio::Ambience> AmbienceGen;
 	uint32 Seed = 1;
 	bool bMuted = false;

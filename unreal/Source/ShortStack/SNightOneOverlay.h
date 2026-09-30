@@ -2,6 +2,9 @@
 
 #include "Brushes/SlateColorBrush.h"
 #include "CoreMinimal.h"
+#include "Input/Reply.h"
+#include "Layout/Visibility.h"
+#include "Types/SlateEnums.h"
 #include "Widgets/SCompoundWidget.h"
 
 class SEditableTextBox;

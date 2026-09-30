@@ -1,6 +1,7 @@
 # Unreal / C++ build output
 unreal/**/Binaries/
 unreal/**/Intermediate/
+unreal/build_log.txt
 unreal/Plugins/ShortStackCore/Standalone/build/
 # Unreal project (unreal/ShortStack.uproject)
 unreal/Saved/

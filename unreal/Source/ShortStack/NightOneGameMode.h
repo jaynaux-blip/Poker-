@@ -24,7 +24,6 @@ class SHORTSTACK_API ANightOneGameMode : public AGameModeBase
 
 public:
 	ANightOneGameMode();
-	virtual ~ANightOneGameMode() override;
 
 	virtual void StartPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

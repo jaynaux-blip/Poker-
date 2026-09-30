@@ -48,7 +48,7 @@ float FSlateTextMeasurer::Ascent(ss::ui::Font Face, float SizePx) const
 
 void SDrawListWidget::Construct(const FArguments& InArgs)
 {
-	DesiredSize = InArgs._DesiredSize;
+	IdealSize = InArgs._DesiredSize;
 }
 
 int32 SDrawListWidget::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId,
@@ -97,10 +97,10 @@ int32 SDrawListWidget::OnPaint(const FPaintArgs& Args, const FGeometry& Allotted
 			const ss::ui::TextItem& T = Cmd.Text;
 			const FSlateFontInfo Font = FSlateTextMeasurer::FontFor(T.Face, T.SizePx * Sy);
 			const FString Str = FString(UTF8_TO_TCHAR(T.Text.c_str()));
-			const FVector2D TopLeft = AllottedGeometry.LocalToAbsolute(FVector2D(T.X * Sx, T.Y * Sy));
-			const FVector2D Size(4096.0, static_cast<double>(T.SizePx * Sy) * 2.0);
-			const FPaintGeometry Geometry(TopLeft, Size * AllottedGeometry.Scale, AllottedGeometry.Scale);
-			FSlateDrawElement::MakeText(OutDrawElements, ++Layer, Geometry, Str, Font, ESlateDrawEffect::None, FLinearColor(FColor(
+			const FVector2D Offset(static_cast<double>(T.X * Sx), static_cast<double>(T.Y * Sy));
+			const FVector2D Box(4096.0, static_cast<double>(T.SizePx * Sy) * 2.0);
+			const FPaintGeometry TextGeometry = AllottedGeometry.ToPaintGeometry(Box, FSlateLayoutTransform(1.0f, Offset));
+			FSlateDrawElement::MakeText(OutDrawElements, ++Layer, TextGeometry, Str, Font, ESlateDrawEffect::None, FLinearColor(FColor(
 				static_cast<uint8>(FMath::Clamp(T.Col.R * 255.0f + 0.5f, 0.0f, 255.0f)),
 				static_cast<uint8>(FMath::Clamp(T.Col.G * 255.0f + 0.5f, 0.0f, 255.0f)),
 				static_cast<uint8>(FMath::Clamp(T.Col.B * 255.0f + 0.5f, 0.0f, 255.0f)),

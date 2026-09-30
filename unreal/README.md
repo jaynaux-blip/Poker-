@@ -29,7 +29,7 @@ You need Unreal Engine 5.3 or later from the Epic Games Launcher. You also need 
 
 1. Right-click `unreal/ShortStack.uproject` and choose **Switch Unreal Engine version**, then pick your installed version. This also generates the Visual Studio solution.
 2. Double-click `ShortStack.uproject`. When asked to rebuild the missing `ShortStack` and `ShortStackCore` modules, click **Yes**.
-   - If the rebuild fails, open `ShortStack.sln` and build **Development Editor / Win64** to see the errors.
+   - If Unreal says "ShortStack could not be compiled", double-click `BuildLog.bat` in this folder. It builds the project, lists the first errors and saves everything to `build_log.txt`.
 3. On the first launch, the Output Log shows `ShortStack: built ...` for each material, then `ShortStack: created /Game/Maps/NightOne`. Shader compilation takes a few minutes the first time.
 4. Press **Play** (Alt+P). Type a screen name and press **Begin**.
 
@@ -47,7 +47,9 @@ The game builds the apartment at runtime, so it also runs in any other level. If
 
 ## If something goes wrong
 
-- **Build errors:** copy the first errors from Visual Studio's Error List or the Output Log and give them to Claude.
+- **"ShortStack could not be compiled":** close the editor and double-click `BuildLog.bat`. Give Claude the errors it prints, or attach `build_log.txt`.
+  - If it reports that Visual Studio's C++ compiler was not found, install Visual Studio 2022 Community with the **Game development with C++** workload. In the workload's details, include **Unreal Engine installer** and a **Windows 11 SDK**. Then run `BuildLog.bat` again.
+  - If the engine is not found automatically, pass its folder: `BuildLog.bat "D:\Epic Games\UE_5.5"`.
   - On UE 5.0, delete the `FPSemantics` line in `Plugins/ShortStackCore/Source/ShortStackCore/ShortStackCore.Build.cs`.
 - **Materials or map missing:** make sure **Edit > Plugins > Python Editor Script Plugin** is enabled. Then run this in the Output Log's Python console:
   ```

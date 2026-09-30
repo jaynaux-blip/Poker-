@@ -110,7 +110,7 @@ std::vector<uint32_t> EarClip(const std::vector<Vec2>& P)
 			Tris.push_back(Ia);
 			Tris.push_back(Ib);
 			Tris.push_back(Ic);
-			Idx.erase(Idx.begin() + static_cast<long>(I));
+			Idx.erase(Idx.begin() + static_cast<std::ptrdiff_t>(I));
 			Clipped = true;
 			break;
 		}

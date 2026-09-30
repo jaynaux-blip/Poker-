@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <sstream>
+#include <utility>
 
 namespace ss
 {
@@ -291,7 +292,7 @@ void Session::Push(const std::string& Who, const std::string& Text, ChatKind Kin
 	Chat.push_back(L);
 	if (Chat.size() > 80)
 	{
-		Chat.erase(Chat.begin(), Chat.begin() + static_cast<long>(Chat.size() - 80));
+		Chat.erase(Chat.begin(), Chat.begin() + static_cast<std::ptrdiff_t>(Chat.size() - 80));
 	}
 }
 
@@ -472,14 +473,14 @@ void Session::Update(double InNow)
 	{
 		if (!(Now < Flights[I].Start + Flights[I].Dur + 0.05))
 		{
-			Flights.erase(Flights.begin() + static_cast<long>(I));
+			Flights.erase(Flights.begin() + static_cast<std::ptrdiff_t>(I));
 		}
 	}
 	for (size_t I = Badges.size(); I-- > 0;)
 	{
 		if (!(Now < Badges[I].At + 3.2))
 		{
-			Badges.erase(Badges.begin() + static_cast<long>(I));
+			Badges.erase(Badges.begin() + static_cast<std::ptrdiff_t>(I));
 		}
 	}
 	if (CurrentBanner.Active && Now > CurrentBanner.At + 3.2)

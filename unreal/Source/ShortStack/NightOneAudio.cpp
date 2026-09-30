@@ -43,7 +43,7 @@ void UNightOneAudio::StartAmbience()
 	}
 	AmbienceGen = MakeUnique<ss::audio::Ambience>(7u);
 	AmbienceWave = NightOneAudioDetail::MakeWave(this, 10000.0f);
-	AmbienceComponent = UGameplayStatics::SpawnSound2D(this, AmbienceWave, bMuted ? 0.0f : MasterVolume, 1.0f, 0.0f, nullptr, false, false);
+	AmbienceComponent = UGameplayStatics::SpawnSound2D(this, AmbienceWave.Get(), bMuted ? 0.0f : MasterVolume, 1.0f, 0.0f, nullptr, false, false);
 }
 
 void UNightOneAudio::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -68,6 +68,19 @@ void UNightOneAudio::TickComponent(float DeltaTime, ELevelTick TickType, FActorC
 		PlayEffect(ss::audio::Effect::Thump);
 		bBeat = true;
 	}
+	// A procedural wave keeps its voice open after the queue runs dry, so stop each one-shot when it is done.
+	for (int32 I = OneShots.Num() - 1; I >= 0; --I)
+	{
+		if (HeartClock >= OneShotEnds[I])
+		{
+			if (IsValid(OneShots[I]))
+			{
+				OneShots[I]->Stop();
+			}
+			OneShots.RemoveAt(I);
+			OneShotEnds.RemoveAt(I);
+		}
+	}
 	for (int32 I = Thunders.Num() - 1; I >= 0; --I)
 	{
 		if (HeartClock >= Thunders[I].At)
@@ -89,6 +102,15 @@ void UNightOneAudio::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	AmbienceComponent = nullptr;
 	AmbienceWave = nullptr;
+	for (UAudioComponent* Shot : OneShots)
+	{
+		if (IsValid(Shot))
+		{
+			Shot->Stop();
+		}
+	}
+	OneShots.Reset();
+	OneShotEnds.Reset();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -98,9 +120,14 @@ void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume)
 	{
 		return;
 	}
-	USoundWaveProcedural* Wave = NightOneAudioDetail::MakeWave(this, static_cast<float>(Samples.size()) / ss::audio::SampleRate);
+	const float Seconds = static_cast<float>(Samples.size()) / static_cast<float>(ss::audio::SampleRate);
+	USoundWaveProcedural* Wave = NightOneAudioDetail::MakeWave(this, Seconds);
 	NightOneAudioDetail::Queue(Wave, Samples.data(), static_cast<int32>(Samples.size()), 1.0f);
-	UGameplayStatics::PlaySound2D(this, Wave, Volume * MasterVolume);
+	if (UAudioComponent* Shot = UGameplayStatics::SpawnSound2D(this, Wave, Volume * MasterVolume, 1.0f, 0.0f, nullptr, false, true))
+	{
+		OneShots.Add(Shot);
+		OneShotEnds.Add(HeartClock + Seconds + 0.2);
+	}
 }
 
 void UNightOneAudio::Play(ss::SoundId Id, float Volume)

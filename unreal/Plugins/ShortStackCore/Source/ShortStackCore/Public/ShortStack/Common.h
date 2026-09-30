@@ -15,8 +15,10 @@
 //     merge .cpp files).
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifndef SS_ASSERT
