@@ -22,6 +22,7 @@ blender -b -P art/blender/build.py -- energy_can  # or any Blender 4.2+
 
 - With no asset name, the script builds all of them.
 - `--no-review` skips the review renders, which take several minutes on a CPU.
+- `--review-only` renders the review from the exported `.glb` files without rebuilding. It is also the check that the export carries everything: the sheet shows exactly what Unreal imports.
 
 Intermediate textures and review tiles go to `art/build/`, which git ignores.
 

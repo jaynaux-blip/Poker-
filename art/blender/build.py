@@ -4,6 +4,8 @@
     blender -b -P art/blender/build.py -- [asset ...]  (any Blender 4.2+)
 
 With no asset names, builds everything in ASSETS. --no-review skips the review renders.
+--review-only renders the review from the exported .glb files without rebuilding, which also checks
+that the export carries everything the asset needs.
 """
 import importlib
 import os
@@ -13,6 +15,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import bpy  # noqa: E402
 from artkit import core, review  # noqa: E402
 
 ASSETS = ['energy_can', 'laptop']
@@ -21,6 +24,28 @@ ASSETS = ['energy_can', 'laptop']
 def args():
     a = sys.argv
     return a[a.index('--') + 1:] if '--' in a else a[1:]
+
+
+def review_only(name):
+    """Re-renders the review sheet from the exported meshes (asset module MESHES lists their names)."""
+    mod = importlib.import_module(f'assets.{name}')
+    t0 = time.time()
+    core.reset()
+    objs = []
+    for mesh in mod.MESHES:
+        bpy.ops.import_scene.gltf(filepath=os.path.join(core.EXPORT_DIR, f'{mesh}.glb'))
+        obj = next(o for o in bpy.context.selected_objects if o.type == 'MESH')
+        obj.name = mesh
+        objs.append(obj)
+    finish_review(mod, name, objs)
+    print(f'[{name}] review done in {time.time() - t0:.0f}s')
+
+
+def finish_review(mod, name, objs):
+    if hasattr(mod, 'pose_for_review'):
+        mod.pose_for_review(objs)
+    path = review.sheet(objs, name, views=getattr(mod, 'REVIEW_VIEWS', None), screen_light=getattr(mod, 'REVIEW_SCREEN_LIGHT', True))
+    print(f'[{name}] review sheet {os.path.relpath(path, core.ROOT)}')
 
 
 def run(name, do_review=True):
@@ -34,17 +59,16 @@ def run(name, do_review=True):
         # shadow each other's occlusion.
         for other in objs:
             other.hide_render = other is not o
-        core.bake(o, o.name, size=getattr(mod, 'TEXTURE_SIZE', 2048), ao_distance=getattr(mod, 'AO_DISTANCE', 0.01),
-                  sizes=getattr(mod, 'TEXTURE_SIZES', None))
+        baked = core.bake(o, o.name, size=getattr(mod, 'TEXTURE_SIZE', 2048), ao_distance=getattr(mod, 'AO_DISTANCE', 0.01),
+                          sizes=getattr(mod, 'TEXTURE_SIZES', None))
+        for m in baked:
+            m.use_backface_culling = not getattr(mod, 'DOUBLE_SIDED', True)  # exported as glTF doubleSided
         path = core.export_glb([o], o.name)
         print(f'[{name}] exported {os.path.relpath(path, core.ROOT)}')
     for o in objs:
         o.hide_render = False
-    if hasattr(mod, 'pose_for_review'):
-        mod.pose_for_review(objs)
     if do_review:
-        path = review.sheet(objs, name, views=getattr(mod, 'REVIEW_VIEWS', None))
-        print(f'[{name}] review sheet {os.path.relpath(path, core.ROOT)}')
+        finish_review(mod, name, objs)
     print(f'[{name}] done in {time.time() - t0:.0f}s')
 
 
@@ -53,7 +77,10 @@ def main():
     do_review = '--no-review' not in a
     names = [x for x in a if not x.startswith('--')] or ASSETS
     for n in names:
-        run(n, do_review)
+        if '--review-only' in a:
+            review_only(n)
+        else:
+            run(n, do_review)
 
 
 main()

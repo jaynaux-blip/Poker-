@@ -85,11 +85,13 @@ def _pixels(path):
     return a.reshape(h, w, 4)
 
 
-def sheet(objs, name, views=None, tile=900, samples=96, context_scale=1.0):
+def sheet(objs, name, views=None, tile=900, samples=96, context_scale=1.0, screen_light=True):
     """Renders the review sheet art/review/<name>.jpg (3 x 2 tiles) and returns its path.
 
     views: optional list of (label, azimuth, elevation, distance factor[, target]) for the first three
     tiles; the camera aims at target (world meters) when given, else at the middle of the asset.
+    screen_light: light the in-game views with a stand-in for the laptop's glow. Off for an asset that
+    lights itself (the laptop), whose glossy screen would otherwise mirror the stand-in.
     """
     sc = bpy.context.scene
     lo, hi = core.bounds(objs)
@@ -148,10 +150,11 @@ def sheet(objs, name, views=None, tile=900, samples=96, context_scale=1.0):
     world.color = (0.002, 0.002, 0.004)
     scale = context_scale
     game = [
-        _area('screen', _orbit(center, size * 2.2, -15, 12), center, size * 0.9, 160 * size ** 2 * scale, (0.72, 0.84, 1.0)),
         _area('neon', _orbit(center, size * 3, 150, 28), center, size * 1.0, 700 * size ** 2 * scale, (1.0, 0.18, 0.55)),
         _area('city', _orbit(center, size * 3, -150, 45), center, size * 2.0, 90 * size ** 2 * scale, (0.35, 0.47, 0.78)),
     ]
+    if screen_light:
+        game.append(_area('screen', _orbit(center, size * 2.2, -15, 12), center, size * 0.9, 160 * size ** 2 * scale, (0.72, 0.84, 1.0)))
     for label, az, el, dist in (('game', -25, 16, 2.4), ('game_close', 35, 24, 1.5)):
         cam.location = _orbit(center, size * dist, az, el)
         _look_at(cam, center)

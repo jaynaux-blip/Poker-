@@ -9,6 +9,7 @@ from artkit import core
 from artkit.sheet import Sheet
 
 NAME = 'SM_EnergyCan'
+MESHES = [NAME]
 BODY_R = 0.0331
 LABEL_Z0 = 0.0135
 LABEL_Z1 = 0.1058

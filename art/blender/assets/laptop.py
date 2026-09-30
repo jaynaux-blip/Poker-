@@ -56,7 +56,12 @@ DISPLAY = (-0.158, 0.158, 0.0165, 0.214)
 WORN = {'F', 'C', 'R', 'A', 'UP', 'DOWN', 'SPACE'}
 SCREEN_REFERENCE = os.path.join(core.ROOT, 'art', 'reference', 'screen_riverline.png')
 
+MESHES = ['SM_Laptop_Base', 'SM_Laptop_Lid']
+DOUBLE_SIDED = False  # closed meshes: no need to render back faces
+
 # Review: hero three-quarter, top-down, and a close-up of the worn keys and the trackpad corner.
+# The in-game views are lit by the laptop's own screen.
+REVIEW_SCREEN_LIGHT = False
 REVIEW_VIEWS = [('front', -28, 20, 2.5), ('top', 12, 56, 2.2), ('detail', -32, 40, 0.62, (-0.055, -0.105, 0.016))]
 
 CAP = 0x16171b
@@ -538,8 +543,9 @@ def build():
 def pose_for_review(objs):
     """Opens the lid and lights the screen with the RiverLine client, for the review renders only."""
     _, lid = objs
+    lid.rotation_mode = 'XYZ'  # meshes imported from glTF come in with quaternion rotation
     lid.location = (0.0, 0.0, HINGE_HEIGHT)
-    lid.rotation_euler.x = math.radians(-18.3)
+    lid.rotation_euler = (math.radians(-18.3), 0.0, 0.0)
     x0, x1, z0, z1 = DISPLAY
     bpy.ops.mesh.primitive_plane_add(size=1.0)
     screen = bpy.context.view_layer.objects.active
