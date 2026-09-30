@@ -22,10 +22,14 @@
 #include <vector>
 
 // Unreal builds this plugin as its own DLL in editor builds, and UnrealBuildTool defines
-// SHORTSTACKCORE_API to export (inside the plugin) or import (in the game module). Every
-// non-inline function the game module calls needs it, or the game module fails to link
-// with "unresolved external symbol". Outside Unreal it expands to nothing.
-#ifndef SHORTSTACKCORE_API
+// SHORTSTACKCORE_API as DLLEXPORT (inside the plugin) or DLLIMPORT (in the game module).
+// Every non-inline function the game module calls needs it, or the game module fails to
+// link with "unresolved external symbol". The engine sources include no other Unreal
+// header, so HAL/Platform.h is included here for those two macros. Outside Unreal,
+// SHORTSTACKCORE_API expands to nothing.
+#ifdef SHORTSTACKCORE_API
+#include "HAL/Platform.h"
+#else
 #define SHORTSTACKCORE_API
 #endif
 
