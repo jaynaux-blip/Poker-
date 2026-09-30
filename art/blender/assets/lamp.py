@@ -32,7 +32,7 @@ SHADE_DIR = Vector((0.42, 0.0, -1.0)).normalized()  # where the shade points (in
 ROD_R = 0.0035
 ROD_GAP = 0.011
 
-REVIEW_VIEWS = [('front', -30, 14, 2.4), ('top', 25, 55, 2.3), ('detail', -40, 20, 0.7, (-0.05, 0.0, 0.12))]
+REVIEW_VIEWS = [('front', -30, 14, 2.4), ('under', 70, -15, 0.8, (0.2, -0.05, 0.3)), ('detail', -40, 20, 0.7, (-0.05, 0.0, 0.12))]
 
 
 # ------------------------------------------------------------------ materials
@@ -142,7 +142,7 @@ def shade_parts(paint, inside, bulb_mat, steel):
     for f in bm.faces:
         c = f.calc_center_median()
         radial = Vector((c.x, c.y, 0.0))
-        f.material_index = 1 if (radial.length > 1e-6 and f.normal.dot(radial) < -0.2 and c.z < -0.006) else 0
+        f.material_index = 1 if (radial.length > 1e-6 and f.normal.dot(radial.normalized()) < -0.2 and c.z < -0.006) else 0
     bm.to_mesh(shade.data)
     bm.free()
     socket = core.lathe('socket', [(0.0, -0.004), (0.0135, -0.004), (0.0135, -0.036), (0.0115, -0.038), (0.0, -0.038)], segments=32)
