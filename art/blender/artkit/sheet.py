@@ -95,7 +95,7 @@ class Sheet:
         """Renders into art/build/textures/<name>_color.png and <name>_surface.png; returns both paths."""
         sc = bpy.context.scene
         sc.render.engine = 'CYCLES'  # EEVEE needs a GPU; Cycles renders anywhere
-        sc.cycles.device = 'CPU'
+        sc.cycles.device = core.cycles_device()
         out_dir = os.path.join(core.BUILD_DIR, 'textures')
         os.makedirs(out_dir, exist_ok=True)
         cam_data = bpy.data.cameras.new('sheet_cam')

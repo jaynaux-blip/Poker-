@@ -239,6 +239,8 @@ void ANightOneStage::BuildSet()
 	ChipsMesh = LoadProp(TEXT("SM_ChipStacks"));
 	LampMesh = LoadProp(TEXT("SM_DeskLamp"));
 	ChairMesh = LoadProp(TEXT("SM_Chair"));
+	MouseMesh = LoadProp(TEXT("SM_Mouse"));
+	MousePadMesh = LoadProp(TEXT("SM_MousePad"));
 	// Every Blender prop is modeled front toward -Y. The laptop base runs forward from its hinge,
 	// so its bounds say which way the importer turned that; the same yaw sets all of them facing the chair (-X).
 	ImportYaw = 0.0f;
@@ -380,8 +382,18 @@ void ANightOneStage::BuildDesk()
 	Screen->SetRedrawTime(1.0f / 30.0f);
 
 	// Mouse and pad.
-	BoxWeb(Surface(TEXT("MousePad"), 0x131417, 0.95f), FVector(0.33, DeskTop + 0.0015, DeskZ + 0.13), FVector(0.26, 0.003, 0.21));
-	AddMesh(SphereMesh, Surface(TEXT("Mouse"), 0x1d1e22, 0.35f), Web(0.34, DeskTop + 0.012, DeskZ + 0.15), FVector(0.099, 0.06, 0.027));
+	if (MouseMesh && MousePadMesh)
+	{
+		// The RiverLine pad and the KESTREL mouse (art/blender/assets/mouse.py), each with its origin under its middle;
+		// the pad is 3 mm thick and the mouse sits turned a little, as a hand leaves it.
+		AddMesh(MousePadMesh, nullptr, Web(0.33, DeskTop, DeskZ + 0.13), FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f));
+		AddMesh(MouseMesh, nullptr, Web(0.34, DeskTop + 0.003, DeskZ + 0.15), FVector(1.0), FRotator(0.0f, ImportYaw - 8.0f, 0.0f));
+	}
+	else
+	{
+		BoxWeb(Surface(TEXT("MousePad"), 0x131417, 0.95f), FVector(0.33, DeskTop + 0.0015, DeskZ + 0.13), FVector(0.26, 0.003, 0.21));
+		AddMesh(SphereMesh, Surface(TEXT("Mouse"), 0x1d1e22, 0.35f), Web(0.34, DeskTop + 0.012, DeskZ + 0.15), FVector(0.099, 0.06, 0.027));
+	}
 
 	// Phone, face up; its lock screen lights when a text arrives.
 	USceneComponent* Phone = NewPart<USceneComponent>();
@@ -652,7 +664,7 @@ void ANightOneStage::BuildLights()
 	P.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
 	P.AutoExposureApplyPhysicalCameraExposure = 0;
 	P.bOverride_AutoExposureBias = true;
-	P.AutoExposureBias = ExposureBias;
+	P.AutoExposureBias = ExposureBias + BrightnessBias;
 	P.bOverride_BloomIntensity = true;
 	P.BloomIntensity = 0.8f;
 	P.bOverride_BloomThreshold = true;
@@ -908,5 +920,5 @@ void ANightOneStage::SetLens(float Focus, float Tilt, float Pulse)
 	const float Sat = 1.0f - 0.55f * Tilt;
 	P.ColorSaturation = FVector4(Sat, Sat, Sat, 1.0f);
 	P.ColorGain = FVector4(1.0f + 0.2f * Tilt, 1.0f - 0.25f * Tilt, 1.0f - 0.25f * Tilt, 1.0f);
-	P.AutoExposureBias = ExposureBias;
+	P.AutoExposureBias = ExposureBias + BrightnessBias;
 }

@@ -17,14 +17,41 @@ BUILD_DIR = os.path.join(ROOT, 'art', 'build')
 
 # ------------------------------------------------------------------ scene
 
+def cycles_device():
+    """'GPU' when Cycles can use an OptiX or CUDA card (much faster bakes and reviews), else 'CPU'.
+
+    Set SHORTSTACK_CPU=1 to force the CPU.
+    """
+    if os.environ.get('SHORTSTACK_CPU'):
+        return 'CPU'
+    try:
+        prefs = bpy.context.preferences.addons['cycles'].preferences
+    except (KeyError, AttributeError):
+        return 'CPU'
+    for kind in ('OPTIX', 'CUDA'):
+        try:
+            prefs.compute_device_type = kind
+        except TypeError:
+            continue
+        prefs.get_devices()
+        gpus = [d for d in prefs.devices if d.type == kind]
+        if gpus:
+            for d in prefs.devices:
+                d.use = d.type == kind
+            return 'GPU'
+    return 'CPU'
+
+
 def reset():
-    """Empty scene in meters, rendering with Cycles on the CPU."""
-    bpy.ops.wm.read_factory_settings(use_empty=True)
+    """Empty scene in meters, rendering with Cycles (on the GPU when there is one)."""
+    # The factory startup file only: read_factory_settings would also reset the user's preferences,
+    # and Blender then uninstalls the Python wheels of every extension it no longer sees enabled.
+    bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True)
     sc = bpy.context.scene
     sc.unit_settings.system = 'METRIC'
     sc.unit_settings.scale_length = 1.0
     sc.render.engine = 'CYCLES'
-    sc.cycles.device = 'CPU'
+    sc.cycles.device = cycles_device()
     sc.cycles.use_denoising = True
     sc.cycles.use_adaptive_sampling = True
     sc.view_settings.view_transform = 'AgX'

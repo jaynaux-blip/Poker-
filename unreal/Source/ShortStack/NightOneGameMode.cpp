@@ -383,7 +383,7 @@ void ANightOneGameMode::ApplySettings(const ss::ui::GameSettings& NewSettings, b
 	SetConsoleInt(TEXT("r.Lumen.HardwareRayTracing.LightingMode"), NewSettings.RayTracing && NewSettings.Quality >= 4 ? 2 : 0);
 	if (Stage)
 	{
-		Stage->ExposureBias = static_cast<float>(NewSettings.Brightness - 50) / 50.0f * 1.5f;
+		Stage->BrightnessBias = static_cast<float>(NewSettings.Brightness - 50) / 50.0f * 1.5f;
 		Stage->bMotionBlur = NewSettings.MotionBlur;
 		Stage->GrainScale = NewSettings.FilmGrain == 0 ? 0.0f : NewSettings.FilmGrain == 1 ? 1.0f : 2.2f;
 		Stage->FringeScale = NewSettings.ChromaticAberration ? 1.0f : 0.0f;

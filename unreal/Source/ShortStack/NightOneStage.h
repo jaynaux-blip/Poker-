@@ -75,7 +75,7 @@ public:
 
 	// ------------------------------------------------------------ tuning
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
-	float ExposureBias = 0.0f;
+	float ExposureBias = 0.6f;
 
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	float ScreenLightCandela = 0.6f;
@@ -91,9 +91,11 @@ public:
 	float NeonCandela = 55.0f;
 
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
-	float RoomFillCandela = 0.08f;
+	float RoomFillCandela = 0.15f;
 
-	// Image options from Settings (applied in SetLens).
+	// Image options from Settings (applied in SetLens). BrightnessBias is the player's Brightness, in stops
+	// on top of the look's ExposureBias.
+	float BrightnessBias = 0.0f;
 	bool bMotionBlur = false;
 	float GrainScale = 1.0f;
 	float FringeScale = 1.0f;
@@ -164,6 +166,10 @@ private:
 	TObjectPtr<UStaticMesh> LampMesh;
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> ChairMesh;
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> MouseMesh;
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> MousePadMesh;
 	/** Yaw that turns a Blender prop (front toward -Y, Z up) to face the chair (-X) once imported. */
 	float ImportYaw = 0.0f;
 
