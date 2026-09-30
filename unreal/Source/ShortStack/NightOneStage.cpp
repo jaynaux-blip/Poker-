@@ -63,6 +63,12 @@ UStaticMesh* LoadOptionalMesh(const TCHAR* Path)
 {
 	return LoadObject<UStaticMesh>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
 }
+
+/** A prop imported by the editor setup script: /Game/ShortStack/Meshes/<Name>/<Name>. */
+UStaticMesh* LoadProp(const TCHAR* Name)
+{
+	return LoadOptionalMesh(*FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s.%s"), Name, Name, Name));
+}
 } // namespace NightOneStageDetail
 
 using namespace NightOneStageDetail;
@@ -216,9 +222,23 @@ void ANightOneStage::BuildSet()
 	RainMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Rain.M_Rain"));
 	WidgetLitMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_WidgetLit.M_WidgetLit"));
 	RainCookieMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_RainCookie.M_RainCookie"));
-	CanMesh = LoadOptionalMesh(TEXT("/Game/ShortStack/Meshes/SM_EnergyCan/SM_EnergyCan.SM_EnergyCan"));
-	LaptopBaseMesh = LoadOptionalMesh(TEXT("/Game/ShortStack/Meshes/SM_Laptop_Base/SM_Laptop_Base.SM_Laptop_Base"));
-	LaptopLidMesh = LoadOptionalMesh(TEXT("/Game/ShortStack/Meshes/SM_Laptop_Lid/SM_Laptop_Lid.SM_Laptop_Lid"));
+	CanMesh = LoadProp(TEXT("SM_EnergyCan"));
+	LaptopBaseMesh = LoadProp(TEXT("SM_Laptop_Base"));
+	LaptopLidMesh = LoadProp(TEXT("SM_Laptop_Lid"));
+	DeskMesh = LoadProp(TEXT("SM_Desk"));
+	MugMesh = LoadProp(TEXT("SM_Mug"));
+	PhoneMesh = LoadProp(TEXT("SM_Phone"));
+	ChipsMesh = LoadProp(TEXT("SM_ChipStacks"));
+	LampMesh = LoadProp(TEXT("SM_DeskLamp"));
+	ChairMesh = LoadProp(TEXT("SM_Chair"));
+	// Every Blender prop is modeled front toward -Y. The laptop base runs forward from its hinge,
+	// so its bounds say which way the importer turned that; the same yaw sets all of them facing the chair (-X).
+	ImportYaw = 0.0f;
+	if (LaptopBaseMesh)
+	{
+		const FVector Ahead = LaptopBaseMesh->GetBoundingBox().GetCenter() * FVector(1.0, 1.0, 0.0);
+		ImportYaw = 180.0f - static_cast<float>(FMath::RadiansToDegrees(FMath::Atan2(Ahead.Y, Ahead.X)));
+	}
 	BuildShell();
 	BuildWindow();
 	BuildDesk();
@@ -289,12 +309,25 @@ void ANightOneStage::BuildWindow()
 
 void ANightOneStage::BuildDesk()
 {
-	UMaterialInterface* Wood = Surface(TEXT("Desk"), 0x5c3821, 0.6f, 0.0f, PatternWood);
-	UMaterialInterface* Legs = Surface(TEXT("Legs"), 0x1c1d20, 0.5f, 0.7f);
-	BoxWeb(Wood, FVector(0.0, DeskTop - 0.0175, DeskZ), FVector(1.6, 0.035, 0.7));
-	for (const FVector2D& P : {FVector2D(-0.76, DeskZ - 0.3), FVector2D(0.76, DeskZ - 0.3), FVector2D(-0.76, DeskZ + 0.3), FVector2D(0.76, DeskZ + 0.3)})
+	if (DeskMesh)
 	{
-		BoxWeb(Legs, FVector(P.X, (DeskTop - 0.035) / 2.0, P.Y), FVector(0.035, DeskTop - 0.035, 0.035));
+		// Walnut top on a steel frame (art/blender/assets/desk.py); its origin is on the floor under the top's middle.
+		AddMesh(DeskMesh, nullptr, Web(0.0, 0.0, DeskZ), FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f));
+	}
+	else
+	{
+		UMaterialInterface* Wood = Surface(TEXT("Desk"), 0x5c3821, 0.6f, 0.0f, PatternWood);
+		UMaterialInterface* Legs = Surface(TEXT("Legs"), 0x1c1d20, 0.5f, 0.7f);
+		BoxWeb(Wood, FVector(0.0, DeskTop - 0.0175, DeskZ), FVector(1.6, 0.035, 0.7));
+		for (const FVector2D& P : {FVector2D(-0.76, DeskZ - 0.3), FVector2D(0.76, DeskZ - 0.3), FVector2D(-0.76, DeskZ + 0.3), FVector2D(0.76, DeskZ + 0.3)})
+		{
+			BoxWeb(Legs, FVector(P.X, (DeskTop - 0.035) / 2.0, P.Y), FVector(0.035, DeskTop - 0.035, 0.035));
+		}
+	}
+	if (ChairMesh)
+	{
+		// The chair the player sits in, turned to the desk (a little off square, as chairs are left).
+		AddMesh(ChairMesh, nullptr, Web(0.02, 0.0, DeskZ + 0.74), FVector(1.0), FRotator(0.0f, ImportYaw + 186.0f, 0.0f));
 	}
 
 	// Laptop, hinged at the back edge with the lid tilted back.
@@ -309,10 +342,8 @@ void ANightOneStage::BuildDesk()
 	if (LaptopBaseMesh && LaptopLidMesh)
 	{
 		// The Blender laptop (art/blender/assets/laptop.py): both meshes have their origin on the hinge line,
-		// the base's on the desk under it. The base runs forward from the hinge, so its bounds say which way
-		// the importer turned it; yaw that toward the chair (-X). The lid shares the base's axes.
-		const FVector Ahead = LaptopBaseMesh->GetBoundingBox().GetCenter() * FVector(1.0, 1.0, 0.0);
-		const float Yaw = 180.0f - static_cast<float>(FMath::RadiansToDegrees(FMath::Atan2(Ahead.Y, Ahead.X)));
+		// the base's on the desk under it.
+		const float Yaw = ImportYaw;
 		const double HingeHeight = 0.0185;
 		AddMesh(LaptopBaseMesh, nullptr, Web(0.0, 0.0, -D / 2.0), FVector(1.0), FRotator(0.0f, Yaw, 0.0f), Laptop);
 		LidPivot = NewPart<USceneComponent>(Laptop);
@@ -347,8 +378,18 @@ void ANightOneStage::BuildDesk()
 	// Phone, face up; its lock screen lights when a text arrives.
 	USceneComponent* Phone = NewPart<USceneComponent>();
 	Phone->SetRelativeLocationAndRotation(Web(0.28, DeskTop, DeskZ - 0.12), FRotator(0.0f, 14.3f, 0.0f));
-	BoxWeb(Surface(TEXT("Phone"), 0x15161a, 0.3f, 0.5f), FVector(0.0, 0.004, 0.0), FVector(0.074, 0.008, 0.155), 0.0f, Phone);
-	PhoneScreen = AddWidget(Web(0.0, 0.0082, 0.0), Facing(FVector::UpVector, FVector::ForwardVector), FVector2D(6.8, 14.6), FIntPoint(360, 760), false, false, Phone);
+	double GlassHeight = 0.008;
+	if (PhoneMesh)
+	{
+		// In its worn case, glass cracked (art/blender/assets/phone.py); the lock screen lies on the display.
+		AddMesh(PhoneMesh, nullptr, FVector::ZeroVector, FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f), Phone);
+		GlassHeight = 0.0094;
+	}
+	else
+	{
+		BoxWeb(Surface(TEXT("Phone"), 0x15161a, 0.3f, 0.5f), FVector(0.0, 0.004, 0.0), FVector(0.074, 0.008, 0.155), 0.0f, Phone);
+	}
+	PhoneScreen = AddWidget(Web(0.0, GlassHeight + 0.0002, 0.0), Facing(FVector::UpVector, FVector::ForwardVector), FVector2D(6.8, 14.6), FIntPoint(360, 760), false, false, Phone);
 	PhoneScreen->SetTintColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, 1.0f));
 	PhoneLight = NewPart<UPointLightComponent>(Phone);
 	PhoneLight->SetRelativeLocation(FVector(0.0, 0.0, 5.0));
@@ -364,11 +405,23 @@ void ANightOneStage::BuildProps()
 	// First empty energy drink (one more per hour of grinding).
 	AddCan();
 
-	// Mug of coffee.
-	UMaterialInterface* Ceramic = Surface(TEXT("Mug"), 0xd8d2c4, 0.25f);
-	CylinderWeb(Ceramic, FVector(-0.4, DeskTop, DeskZ + 0.06), 0.041f, 0.094f);
-	CylinderWeb(Surface(TEXT("Coffee"), 0x1a0d06, 0.05f), FVector(-0.4, DeskTop + 0.094, DeskZ + 0.06), 0.035f, 0.001f);
-	BoxWeb(Ceramic, FVector(-0.4 - 0.045, DeskTop + 0.048, DeskZ + 0.06 - 0.01), FVector(0.012, 0.05, 0.01), -137.0f);
+	// Mug of coffee, its handle to the left.
+	if (MugMesh)
+	{
+		AddMesh(MugMesh, nullptr, Web(-0.4, DeskTop, DeskZ + 0.06), FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f));
+	}
+	else
+	{
+		UMaterialInterface* Ceramic = Surface(TEXT("Mug"), 0xd8d2c4, 0.25f);
+		CylinderWeb(Ceramic, FVector(-0.4, DeskTop, DeskZ + 0.06), 0.041f, 0.094f);
+		CylinderWeb(Surface(TEXT("Coffee"), 0x1a0d06, 0.05f), FVector(-0.4, DeskTop + 0.094, DeskZ + 0.06), 0.035f, 0.001f);
+		BoxWeb(Ceramic, FVector(-0.4 - 0.045, DeskTop + 0.048, DeskZ + 0.06 - 0.01), FVector(0.012, 0.05, 0.01), -137.0f);
+	}
+	// Chips from the Tuesday game at the laundromat, stacked by the laptop.
+	if (ChipsMesh)
+	{
+		AddMesh(ChipsMesh, nullptr, Web(-0.265, DeskTop, DeskZ - 0.1), FVector(1.0), FRotator(0.0f, ImportYaw - 12.0f, 0.0f));
+	}
 
 	// Cup of ramen.
 	CylinderWeb(Surface(TEXT("Noodles"), 0xd63a1f, 0.6f), FVector(-0.58, DeskTop, DeskZ - 0.18), 0.045f, 0.1f);
@@ -390,12 +443,20 @@ void ANightOneStage::BuildProps()
 		PropWidgets.Add(AddWidget(Web(NoteX[I], NoteY[I], RoomFront + 0.003), Facing(FVector::BackwardVector, Up), FVector2D(7.6, 7.6), FIntPoint(256, 256), true, false));
 	}
 
-	// Desk lamp (off): a dark silhouette against the window.
-	UMaterialInterface* Lamp = Surface(TEXT("Lamp"), 0x1a1a1c, 0.4f, 0.6f);
-	CylinderWeb(Lamp, FVector(-0.66, DeskTop, DeskZ - 0.24), 0.065f, 0.02f);
-	AddMesh(CylinderMesh, Lamp, Web(-0.66, DeskTop + 0.18, DeskZ - 0.26), FVector(0.014, 0.014, 0.36), FRotator(-8.6f, 0.0f, 0.0f));
-	AddMesh(CylinderMesh, Lamp, Web(-0.6, DeskTop + 0.38, DeskZ - 0.2), FVector(0.014, 0.014, 0.3), FRotator(0.0f, 0.0f, 57.0f));
-	AddMesh(ConeMesh, Lamp, Web(-0.49, DeskTop + 0.42, DeskZ - 0.2), FVector(0.12, 0.12, 0.1), FRotator(0.0f, 0.0f, 132.0f));
+	// Desk lamp (off): a dark silhouette against the window. The Blender lamp's cable runs back and
+	// drops off the desk's rear edge, 11 cm behind its base.
+	if (LampMesh)
+	{
+		AddMesh(LampMesh, nullptr, Web(-0.66, DeskTop, DeskZ - 0.24), FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f));
+	}
+	else
+	{
+		UMaterialInterface* Lamp = Surface(TEXT("Lamp"), 0x1a1a1c, 0.4f, 0.6f);
+		CylinderWeb(Lamp, FVector(-0.66, DeskTop, DeskZ - 0.24), 0.065f, 0.02f);
+		AddMesh(CylinderMesh, Lamp, Web(-0.66, DeskTop + 0.18, DeskZ - 0.26), FVector(0.014, 0.014, 0.36), FRotator(-8.6f, 0.0f, 0.0f));
+		AddMesh(CylinderMesh, Lamp, Web(-0.6, DeskTop + 0.38, DeskZ - 0.2), FVector(0.014, 0.014, 0.3), FRotator(0.0f, 0.0f, 57.0f));
+		AddMesh(ConeMesh, Lamp, Web(-0.49, DeskTop + 0.42, DeskZ - 0.2), FVector(0.12, 0.12, 0.1), FRotator(0.0f, 0.0f, 132.0f));
+	}
 
 	// Mattress on the floor with a rumpled blanket.
 	BoxWeb(Surface(TEXT("Mattress"), 0xc9c2b5, 0.95f, 0.0f, PatternFabric), FVector(RoomLeft + 0.6, 0.1, RoomBack - 1.1), FVector(0.95, 0.2, 1.95));

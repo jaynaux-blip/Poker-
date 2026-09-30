@@ -124,6 +124,9 @@ Props are modeled, textured and reviewed in Blender by the scripts in `art/blend
 
 - the energy drink cans (`SM_EnergyCan`);
 - the laptop (`SM_Laptop_Base` and `SM_Laptop_Lid`). The stage hinges the lid at 18.5 mm and tilts it back 18.3°, and it mounts the RiverLine screen just in front of the lid's glass. Its keyboard, legends and backlight are part of the mesh.
+- the desk, chair, desk lamp, mug, phone and poker chips (`SM_Desk`, `SM_Chair`, `SM_DeskLamp`, `SM_Mug`, `SM_Phone`, `SM_ChipStacks`). The phone's lock screen lies on its cracked glass.
+
+Blender props are modeled facing -Y. The stage takes the importer's orientation from the laptop base's bounds and turns every prop by that same yaw.
 
 To swap in a hand-made model instead:
 

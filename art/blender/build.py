@@ -18,7 +18,7 @@ sys.path.insert(0, HERE)
 import bpy  # noqa: E402
 from artkit import core, review  # noqa: E402
 
-ASSETS = ['energy_can', 'laptop']
+ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chair']
 
 
 def args():
@@ -54,19 +54,24 @@ def run(name, do_review=True):
     objs = mod.build()
     tris, dims = core.stats(objs)
     print(f'[{name}] built {len(objs)} object(s), {tris} triangles, {dims.x * 100:.1f} x {dims.y * 100:.1f} x {dims.z * 100:.1f} cm')
-    for o in objs:
+    # An asset can bake parts once and assemble the exported meshes from them (poker chips in stacks).
+    bake_objs = getattr(mod, 'bake_parts', lambda o: o)(objs)
+    for o in bake_objs:
         # Each mesh bakes alone: parts built at a shared origin (a laptop's base and lid) must not
         # shadow each other's occlusion.
-        for other in objs:
+        for other in bake_objs:
             other.hide_render = other is not o
         baked = core.bake(o, o.name, size=getattr(mod, 'TEXTURE_SIZE', 2048), ao_distance=getattr(mod, 'AO_DISTANCE', 0.01),
                           sizes=getattr(mod, 'TEXTURE_SIZES', None))
         for m in baked:
             m.use_backface_culling = not getattr(mod, 'DOUBLE_SIDED', True)  # exported as glTF doubleSided
+    for o in bake_objs:
+        o.hide_render = False
+    if hasattr(mod, 'assemble'):
+        objs = mod.assemble(bake_objs)
+    for o in objs:
         path = core.export_glb([o], o.name)
         print(f'[{name}] exported {os.path.relpath(path, core.ROOT)}')
-    for o in objs:
-        o.hide_render = False
     if do_review:
         finish_review(mod, name, objs)
     print(f'[{name}] done in {time.time() - t0:.0f}s')

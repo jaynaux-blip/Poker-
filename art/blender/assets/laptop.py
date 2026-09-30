@@ -22,6 +22,7 @@ import bmesh
 from mathutils import Matrix
 
 from artkit import core
+from artkit.shade import convex_edges, mix_float, object_coords, planar, rrect_mask, smooth_less
 from artkit.sheet import Sheet
 
 TEXTURE_SIZE = 2048
@@ -196,54 +197,7 @@ def lid_back_sheet():
     return s.render('laptop_lid_back', 2048)
 
 
-# ------------------------------------------------------------------ shader helpers
-
-def smooth_less(m, d, edge, width):
-    """About 1 where d < edge, fading to 0 across edge +/- width: a soft step that bakes without jaggies."""
-    n = m.node('ShaderNodeMapRange')
-    n.interpolation_type = 'SMOOTHSTEP'
-    n.inputs['From Min'].default_value = edge - width
-    n.inputs['From Max'].default_value = edge + width
-    n.inputs['To Min'].default_value = 1.0
-    n.inputs['To Max'].default_value = 0.0
-    m.link(d, n.inputs['Value'])
-    return n.outputs['Result']
-
-
-def rrect_mask(m, sep, cx, cy, hw, hh, r, width=0.00008):
-    """1 inside a rounded rectangle in object XY, 0 outside."""
-    dx = m.math('MAXIMUM', m.math('SUBTRACT', m.math('ABSOLUTE', m.math('SUBTRACT', sep.outputs['X'], cx)), hw - r), 0.0)
-    dy = m.math('MAXIMUM', m.math('SUBTRACT', m.math('ABSOLUTE', m.math('SUBTRACT', sep.outputs['Y'], cy)), hh - r), 0.0)
-    d = m.math('SQRT', m.math('ADD', m.math('MULTIPLY', dx, dx), m.math('MULTIPLY', dy, dy)))
-    return smooth_less(m, d, r, width)
-
-
-def planar(m, sep, a, b, a0, a1, b0, b1, mirror_a=False):
-    """Object-space planar coordinates mapping [a0, a1] x [b0, b1] onto [0, 1]^2."""
-    uv = m.node('ShaderNodeCombineXYZ')
-    src = m.math('MULTIPLY', sep.outputs[a], -1.0) if mirror_a else sep.outputs[a]
-    m.link(m.math('DIVIDE', m.math('SUBTRACT', src, a0), a1 - a0), uv.inputs['X'])
-    m.link(m.math('DIVIDE', m.math('SUBTRACT', sep.outputs[b], b0), b1 - b0), uv.inputs['Y'])
-    return uv.outputs['Vector']
-
-
-def mix_float(m, factor, a, b):
-    n = m.node('ShaderNodeMix')
-    n.data_type = 'FLOAT'
-    for sock, v in ((n.inputs['Factor'], factor), (n.inputs['A'], a), (n.inputs['B'], b)):
-        if isinstance(v, (int, float)):
-            sock.default_value = v
-        else:
-            m.link(v, sock)
-    return n.outputs['Result']
-
-
-def object_coords(m):
-    tc = m.node('ShaderNodeTexCoord')
-    sep = m.node('ShaderNodeSeparateXYZ')
-    m.link(tc.outputs['Object'], sep.inputs['Vector'])
-    return tc, sep
-
+# ------------------------------------------------------------------ materials
 
 def anodized(m, sep, tc):
     """Dark gunmetal anodized aluminum, brushed along X and scuffed bright at the edges.
@@ -256,16 +210,7 @@ def anodized(m, sep, tc):
     m.link(m.math('MULTIPLY', sep.outputs['Z'], 1400.0), grain_v.inputs['Z'])
     brush = m.node('ShaderNodeTexNoise', Scale=1.0, Detail=2.0, Roughness=0.5)
     m.link(grain_v.outputs['Vector'], brush.inputs['Vector'])
-    # Edge wear on convex edges only: occlusion traced inside the solid finds edges whatever the
-    # topology (Pointiness smears across the long triangles booleans leave on flat faces).
-    inside = m.node('ShaderNodeAmbientOcclusion', Distance=0.0007)
-    inside.inside = True
-    inside.only_local = True
-    inside.samples = 24
-    breakup = m.node('ShaderNodeTexNoise', Scale=90.0, Detail=5.0)
-    m.link(tc.outputs['Object'], breakup.inputs['Vector'])
-    convex = m.math('MULTIPLY', m.math('SUBTRACT', 0.93, inside.outputs['AO']), 4.0, clamp=True)
-    edge = m.math('MULTIPLY', convex, m.math('MULTIPLY', m.math('SUBTRACT', breakup.outputs['Fac'], 0.3), 2.2, clamp=True))
+    edge = convex_edges(m, tc, distance=0.0007, samples=24)
     # Large, soft tonal variation, as real anodizing is never perfectly even.
     tone = m.node('ShaderNodeTexNoise', Scale=6.0, Detail=2.0)
     m.link(tc.outputs['Object'], tone.inputs['Vector'])

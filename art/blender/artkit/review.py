@@ -10,6 +10,10 @@ from mathutils import Vector
 from . import core
 
 
+# Studio key, fill and rim power (W per m^2 of asset size squared).
+STUDIO = (58.0, 14.5, 100.0)
+
+
 def _look_at(obj, target):
     d = Vector(target) - obj.location
     obj.rotation_euler = d.to_track_quat('-Z', 'Y').to_euler()
@@ -114,10 +118,11 @@ def sheet(objs, name, views=None, tile=900, samples=96, context_scale=1.0, scree
     world.color = (0.006, 0.0065, 0.008)
     floor = _floor(lo.z, size * 20, core.hex_linear(0x1a1b1f), 0.38)
     lights = [
-        # Powers scale with size squared, so every asset gets the same exposure.
-        _area('key', _orbit(center, size * 3, -45, 40), center, size * 2.2, 520 * size ** 2, (1.0, 0.95, 0.88)),
-        _area('fill', _orbit(center, size * 3, 70, 15), center, size * 3, 130 * size ** 2, (0.8, 0.88, 1.0)),
-        _area('rim', _orbit(center, size * 3, 170, 35), center, size * 1.2, 900 * size ** 2, (1.0, 1.0, 1.0)),
+        # Powers scale with size squared, so every asset gets the same exposure: an 18% gray card
+        # facing up reads as middle gray, as in a calibrated product shot.
+        _area('key', _orbit(center, size * 3, -45, 40), center, size * 2.2, STUDIO[0] * size ** 2, (1.0, 0.95, 0.88)),
+        _area('fill', _orbit(center, size * 3, 70, 15), center, size * 3, STUDIO[1] * size ** 2, (0.8, 0.88, 1.0)),
+        _area('rim', _orbit(center, size * 3, 170, 35), center, size * 1.2, STUDIO[2] * size ** 2, (1.0, 1.0, 1.0)),
     ]
     tiles = []
 

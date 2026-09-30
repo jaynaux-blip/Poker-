@@ -34,6 +34,8 @@ Every sheet shows six views (an asset can choose its own studio angles; the lapt
 - **Bottom row, left:** wireframe over clay, to check topology and density.
 - **Bottom row, right:** two views under the game's lighting: a dark desk, the laptop's cool glow and the laundromat's pink neon.
 
+The studio is calibrated so an 18% gray card reads as middle gray. The in-game views are exposed for the dark room, as the game is.
+
 An asset goes in the game once all six views hold up. Check for:
 
 - correct proportions and silhouette;
@@ -52,6 +54,12 @@ The editor setup script (`unreal/Content/Python/shortstack_setup.py`) imports ea
 |---|---|---|
 | GRIND energy drink, opened 12 oz can | `assets/energy_can.py` | Wrap label with nutrition panel and barcode, stay-on tab and rivet, punched opening. 13k triangles. One more appears on the desk every hour of play. |
 | KESTREL 15 laptop, base and lid | `assets/laptop.py` | Gunmetal anodized unibody with edge wear. Every keycap is modeled, with printed legends and a white backlight. Also: glass trackpad, speaker grilles, side ports, hinge, rubber feet, webcam and palm-rest stickers. Years of poker left the F, C, R, A, arrow and space keys worn shiny. 14k triangles. Maps are 4K for the chassis and keyboard. |
+| Desk | `assets/desk.py` | Solid walnut plank top: flat-sawn grain, lacquer worn matte where forearms rest, coffee and soda rings where the props stand in the stage, scratches, dust toward the wall. Black powder-coated steel frame with chipped edges, plastic feet. Top baked at 4096 x 2048. |
+| RiverLine mug | `assets/mug.py` | 11 oz stoneware: glazed, with an unglazed foot. The logo faces the player. Cold coffee with a crema ring, tide lines inside, a dried drip and a rim chip. |
+| Phone | `assets/phone.py` | Face up in a worn silicone case: button covers, USB-C port. Cracked glass: hairlines from a corner impact that glint in the light, and thumb smudges. The stage's lock screen lies on its display. |
+| Poker chips | `assets/chips.py` | Clay chips from the "Spin Cycle Club" in four denominations: edge inserts, molded ring, printed inlays, grime. Baked once per denomination, then stacked with jitter. Faces hidden in a stack are removed. |
+| Desk lamp | `assets/lamp.py` | Balanced-arm lamp, switched off. Enamel base and twin-rod arms, balance springs, knobbed joints. Bell shade with a white interior and a frosted bulb. A cloth cable drops off the desk's rear edge. |
+| Office chair | `assets/chair.py` | Mid-back mesh chair: five-star base on twin-wheel casters, gas lift, pilled fabric seat, curved mesh back, T-armrests peeling at the front. |
 
 ## Fonts
 

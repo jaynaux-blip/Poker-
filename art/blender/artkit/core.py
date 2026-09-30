@@ -47,13 +47,13 @@ def select_only(objs, active=None):
 
 
 def srgb_to_linear(c):
-    c = c / 255.0 if c > 1.0 else c
+    """One sRGB channel in 0..1 to linear."""
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
 def hex_linear(h, a=1.0):
     """0xRRGGBB (sRGB) to a linear RGBA tuple for shader inputs."""
-    return (srgb_to_linear((h >> 16) & 255), srgb_to_linear((h >> 8) & 255), srgb_to_linear(h & 255), a)
+    return (srgb_to_linear(((h >> 16) & 255) / 255.0), srgb_to_linear(((h >> 8) & 255) / 255.0), srgb_to_linear((h & 255) / 255.0), a)
 
 
 # ------------------------------------------------------------------ geometry
@@ -494,6 +494,101 @@ def prism_x(name, outline, x0, x1):
     return mesh_object(name, bm)
 
 
+def sweep(name, path, profile, closed=False, caps=True):
+    """Sweeps a closed 2D profile [(a, b), ...] along a 3D path of points: handles, rods, tubes, springs.
+
+    Frames are parallel-transported along the path, so the profile never flips. UVs: u runs around
+    the profile, v along the path by arc length.
+    """
+    pts = [Vector(p) for p in path]
+    n = len(pts)
+    tangents = []
+    for i in range(n):
+        a = pts[i - 1] if (closed or i > 0) else pts[i]
+        b = pts[(i + 1) % n] if (closed or i < n - 1) else pts[i]
+        tangents.append((b - a).normalized())
+    ref = Vector((0.0, 0.0, 1.0)) if abs(tangents[0].z) < 0.9 else Vector((1.0, 0.0, 0.0))
+    normal = (ref - tangents[0] * ref.dot(tangents[0])).normalized()
+    bm = bmesh.new()
+    uv = bm.loops.layers.uv.new('UVMap')
+    rings = []
+    for i in range(n):
+        if i > 0:
+            normal = tangents[i - 1].rotation_difference(tangents[i]) @ normal
+            normal = (normal - tangents[i] * normal.dot(tangents[i])).normalized()
+        binormal = tangents[i].cross(normal)
+        rings.append([bm.verts.new(pts[i] + normal * a + binormal * b) for a, b in profile])
+    lengths = [0.0]
+    for i in range(1, n + (1 if closed else 0)):
+        lengths.append(lengths[-1] + (pts[i % n] - pts[i - 1]).length)
+    total = lengths[-1] or 1.0
+    m = len(profile)
+    for i in range(n if closed else n - 1):
+        r0, r1 = rings[i], rings[(i + 1) % n]
+        v0, v1 = lengths[i] / total, lengths[i + 1] / total
+        for k in range(m):
+            f = bm.faces.new((r0[k], r0[(k + 1) % m], r1[(k + 1) % m], r1[k]))
+            for loop, t in zip(f.loops, ((k / m, v0), ((k + 1) / m, v0), ((k + 1) / m, v1), (k / m, v1))):
+                loop[uv].uv = t
+    if caps and not closed:
+        bm.faces.new(list(reversed(rings[0])))
+        bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return mesh_object(name, bm)
+
+
+def catmull_rom(points, steps=8):
+    """A smooth curve through 2D or 3D control points (ends included), steps samples per span."""
+    pts = [Vector(p) for p in points]
+    out = []
+    for i in range(len(pts) - 1):
+        p0, p1, p2, p3 = pts[max(i - 1, 0)], pts[i], pts[i + 1], pts[min(i + 2, len(pts) - 1)]
+        for k in range(steps):
+            t = k / steps
+            out.append(0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t))
+    out.append(pts[-1])
+    return [tuple(p) for p in out]
+
+
+def orient_normals(obj, toward=None):
+    """Makes face normals consistent (outward on a closed mesh); with toward, flips an open
+    surface so its normals face that direction on average."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    if toward is not None:
+        bm.normal_update()
+        if sum((f.normal.dot(Vector(toward)) * f.calc_area() for f in bm.faces)) < 0:
+            bmesh.ops.reverse_faces(bm, faces=bm.faces[:])
+    bm.to_mesh(obj.data)
+    bm.free()
+
+
+def loft(name, rings, caps=True):
+    """A surface through closed rings of 3D points (all the same count), capped at both ends:
+    tapered legs, spines, anything whose section changes along its length."""
+    bm = bmesh.new()
+    verts = [[bm.verts.new(p) for p in ring] for ring in rings]
+    m = len(rings[0])
+    for a, b in zip(verts, verts[1:]):
+        for k in range(m):
+            bm.faces.new((a[k], a[(k + 1) % m], b[(k + 1) % m], b[k]))
+    if caps:
+        bm.faces.new(list(reversed(verts[0])))
+        bm.faces.new(verts[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return mesh_object(name, bm)
+
+
+def subdivide(obj, levels=2):
+    """Applies Catmull-Clark subdivision: soft forms (cushions, pads) from a low cage."""
+    mod = obj.modifiers.new('subsurf', 'SUBSURF')
+    mod.levels = levels
+    mod.render_levels = levels
+    select_only([obj])
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+
+
 def finish_hard_surface(obj, angle=35.0, weighted=True):
     """Smooth shading, with edges sharper than angle kept crisp.
 
@@ -551,6 +646,9 @@ def uv_layout(obj, groups, margin=0.01):
       ('box', gap or None): each face projects along its dominant normal axis; connected faces sharing an
         axis form islands, shelf-packed into rect at one uniform texel density (gap in UV units).
       ('smart', None): smart-projected islands packed into rect.
+      ('keep', None): the faces' existing UVs (from lathe or sweep), scaled from [0, 1]^2 into rect.
+      ('cylinder', (z0, z1)): around the Z axis (u = angle, from -X counterclockwise) by height, for
+        bands such as a chip's edge.
     """
     me = obj.data
     if not me.uv_layers:
@@ -583,6 +681,23 @@ def uv_layout(obj, groups, margin=0.01):
                 if owner[f.index] == gi:
                     for l in f.loops:
                         l[uv].uv = (u0 + (u1 - u0) * l[uv].uv.x, v0 + (v1 - v0) * l[uv].uv.y)
+        elif mode == 'keep':
+            uv = bm.loops.layers.uv.verify()
+            for f in bm.faces:
+                if owner[f.index] == gi:
+                    for l in f.loops:
+                        l[uv].uv = (u0 + (u1 - u0) * l[uv].uv.x, v0 + (v1 - v0) * l[uv].uv.y)
+        elif mode == 'cylinder':
+            z0, z1 = arg
+            uv = bm.loops.layers.uv.verify()
+            for f in bm.faces:
+                if owner[f.index] != gi:
+                    continue
+                us = [math.atan2(l.vert.co.y, l.vert.co.x) / (2 * math.pi) + 0.5 for l in f.loops]
+                if max(us) - min(us) > 0.5:  # the face straddles the seam
+                    us = [u + 1.0 if u < 0.5 else u for u in us]
+                for l, u in zip(f.loops, us):
+                    l[uv].uv = (u0 + (u1 - u0) * u, v0 + (v1 - v0) * (l.vert.co.z - z0) / (z1 - z0))
         elif mode == 'box':
             uv = bm.loops.layers.uv.verify()
             _box_project([f for f in bm.faces if owner[f.index] == gi], uv, rect, arg if arg is not None else margin * 0.4)
