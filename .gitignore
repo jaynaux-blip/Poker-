@@ -13,6 +13,9 @@ unreal/*.sln
 unreal/*.code-workspace
 # Generated on first editor launch by unreal/Content/Python/shortstack_setup.py (the script is the source)
 unreal/Content/ShortStack/Materials/
+# (the props are imported from unreal/Art/Meshes/*.glb)
+unreal/Content/ShortStack/Meshes/
+unreal/Content/Maps/
 __pycache__/
 # Intermediate textures and review renders from art/blender/build.py
 art/build/

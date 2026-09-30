@@ -207,6 +207,14 @@ void ANightOneStage::OnConstruction(const FTransform& Transform)
 	BuildSet();
 }
 
+void ANightOneStage::RebuildSet()
+{
+#if WITH_EDITOR
+	// Destroys the set's components and runs OnConstruction again.
+	RerunConstructionScripts();
+#endif
+}
+
 void ANightOneStage::BuildSet()
 {
 	Materials.Reset();
@@ -590,6 +598,7 @@ void ANightOneStage::BuildLights()
 	ScreenLight->SetSourceHeight(19.75f);
 	ScreenLight->SetAttenuationRadius(400.0f);
 	ScreenLight->SetCastShadows(true);
+	ScreenLight->SetSpecularScale(ScreenLightSpecular);
 
 	// Neon through the window: shadows of the frame and moving rain on the room.
 	NeonSpot = NewPart<USpotLightComponent>();

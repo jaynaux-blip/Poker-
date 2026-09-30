@@ -40,6 +40,13 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	/**
+	 * Builds the set again so it picks up materials and props imported since the level loaded.
+	 * The editor setup script calls this after an import; it is also a button on the actor.
+	 */
+	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Short Stack")
+	void RebuildSet();
+
 	// ------------------------------------------------------------ game hooks
 	FVector EyeLocation() const;
 	FVector ScreenCenter() const;
@@ -72,6 +79,13 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	float ScreenLightCandela = 0.6f;
+
+	/**
+	 * How much the laptop light shows in reflections. The light is much brighter than the screen
+	 * looks, so at full strength its reflection washes the glossy keycaps and palm rest out to white.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
+	float ScreenLightSpecular = 0.15f;
 
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	float NeonCandela = 55.0f;

@@ -307,6 +307,7 @@ def _finish(mat):
     mel.recompile_material(mat)
     eal.save_loaded_asset(mat)
     unreal.log(f"ShortStack: built {mat.get_path_name()}")
+    return True
 
 
 def _world_pos(mat, x, y):
@@ -328,6 +329,7 @@ def build_surface(force):
     mat = _new_material("M_Surface", force)
     if not mat:
         return
+    mat.set_editor_property("used_with_instanced_static_meshes", True)  # the city's rooftop beacons
     base = _vector(mat, "BaseColor", (0.5, 0.5, 0.5), -900, -200)
     rough = _scalar(mat, "Roughness", 0.6, -900, 0)
     metal = _scalar(mat, "Metallic", 0.0, -900, 100)
@@ -350,7 +352,7 @@ def build_surface(force):
     _link(base, glow, "A")
     _link(emissive, glow, "B")
     mel.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    _finish(mat)
+    return _finish(mat)
 
 
 def build_glow(force):
@@ -368,7 +370,7 @@ def build_glow(force):
     _link(color, c, "ColorIn")
     _link(strength, c, "StrengthIn")
     mel.connect_material_property(c, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    _finish(mat)
+    return _finish(mat)
 
 
 def _timed_inputs(mat, c, names):
@@ -393,7 +395,7 @@ def build_sky(force):
     _link(_expr(mat, unreal.MaterialExpressionCameraPositionWS, -900, 0), c, "Cam")
     _timed_inputs(mat, c, names)
     mel.connect_material_property(c, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    _finish(mat)
+    return _finish(mat)
 
 
 def build_city(force):
@@ -401,6 +403,7 @@ def build_city(force):
     if not mat:
         return
     mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    mat.set_editor_property("used_with_instanced_static_meshes", True)  # the buildings are instanced
     names = ["P", "N", "Rand", "Cam", "T", "DawnIn", "FlashIn"]
     c = _custom(mat, CITY, names, F3, -450, 0, "Skyline facades with lit windows")
     _link(_world_pos(mat, -900, -300), c, "P")
@@ -409,7 +412,7 @@ def build_city(force):
     _link(_expr(mat, unreal.MaterialExpressionCameraPositionWS, -900, 0), c, "Cam")
     _timed_inputs(mat, c, names)
     mel.connect_material_property(c, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    _finish(mat)
+    return _finish(mat)
 
 
 def build_rain(force):
@@ -424,7 +427,7 @@ def build_rain(force):
     _link(_world_pos(mat, -900, -100), c, "P")
     _timed_inputs(mat, c, names)
     mel.connect_material_property(c, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    _finish(mat)
+    return _finish(mat)
 
 
 def build_glass(force):
@@ -446,7 +449,7 @@ def build_glass(force):
     a = _mask(mat, c, "a", -200, 100)
     mel.connect_material_property(rgb, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.connect_material_property(a, "", unreal.MaterialProperty.MP_OPACITY)
-    _finish(mat)
+    return _finish(mat)
 
 
 def build_cookie(force):
@@ -459,7 +462,7 @@ def build_cookie(force):
     _link(_expr(mat, unreal.MaterialExpressionTextureCoordinate, -900, -100), c, "UV")
     _timed_inputs(mat, c, names)
     mel.connect_material_property(c, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    _finish(mat)
+    return _finish(mat)
 
 
 def build_widget_lit(force):
@@ -474,17 +477,21 @@ def build_widget_lit(force):
         tex.set_editor_property("texture", default_tex)
     mel.connect_material_property(tex, "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
     mel.connect_material_property(_scalar(mat, "Roughness", 0.85, -600, 250), "", unreal.MaterialProperty.MP_ROUGHNESS)
-    _finish(mat)
+    return _finish(mat)
 
 
 def build_materials(force=False):
+    """Builds the materials that are missing (all of them with force). Returns how many were built."""
     if not eal.does_directory_exist(MAT_DIR):
         eal.make_directory(MAT_DIR)
+    built = 0
     for build in (build_surface, build_glow, build_sky, build_city, build_rain, build_glass, build_cookie, build_widget_lit):
         try:
-            build(force)
+            if build(force):
+                built += 1
         except Exception as exc:  # keep going: the game has fallbacks for every material
             unreal.log_error(f"ShortStack: {build.__name__} failed: {exc}")
+    return built
 
 
 def build_map(force=False):
@@ -521,12 +528,14 @@ def import_meshes(force=False):
     Each file lands in /Game/ShortStack/Meshes/<Name>/ with its materials and textures, and
     its static mesh is named <Name>, which is where NightOneStage looks for it. A file is
     reimported only when it changed (its hash is kept as metadata on the mesh).
+    Returns how many files were imported.
     """
     import os
     src_dir = os.path.join(unreal.Paths.project_dir(), "Art", "Meshes")
     if not os.path.isdir(src_dir):
-        return
+        return 0
     tools = unreal.AssetToolsHelpers.get_asset_tools()
+    imported = 0
     for file in sorted(os.listdir(src_dir)):
         if not file.lower().endswith(".glb"):
             continue
@@ -561,12 +570,38 @@ def import_meshes(force=False):
         eal.set_metadata_tag(mesh, "SourceHash", digest)
         eal.save_loaded_asset(mesh)
         unreal.log(f"ShortStack: imported {file} as {mesh_path}")
+        imported += 1
+    return imported
+
+
+def rebuild_stages():
+    """Rebuilds each NightOneStage in the open level.
+
+    The editor loads the level before this script runs, so a stage already in it was built
+    without the materials and props made since, and Play-In-Editor copies it as it is.
+    """
+    stage_class = unreal.load_class(None, "/Script/ShortStack.NightOneStage")
+    if not stage_class:
+        return
+    # Rebuilding marks the level unsaved; save it again unless it already had unsaved edits.
+    was_dirty = bool(unreal.EditorLoadingAndSavingUtils.get_dirty_map_packages())
+    rebuilt = False
+    actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    for actor in actors.get_all_level_actors():
+        if actor.get_class() == stage_class:
+            actor.rebuild_set()
+            rebuilt = True
+            unreal.log(f"ShortStack: rebuilt {actor.get_actor_label()} with the new assets")
+    if rebuilt and not was_dirty:
+        unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).save_current_level()
 
 
 def run(force=False):
-    build_materials(force)
+    changed = build_materials(force)
     try:
-        import_meshes(force)
+        changed += import_meshes(force)
     except Exception as exc:  # the stage falls back to engine shapes
         unreal.log_error(f"ShortStack: importing meshes failed: {exc}")
+    if changed:
+        rebuild_stages()
     build_map(False)
