@@ -260,7 +260,7 @@ public:
 	double SprintBudgetMs = 10.0;
 
 	SHORTSTACKCORE_API void Save();
-	void ResetSave();
+	SHORTSTACKCORE_API void ResetSave();
 	void OnBoot();
 
 	bool CanAfford(const LobbyEvent& Ev) const;

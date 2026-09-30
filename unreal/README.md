@@ -30,8 +30,9 @@ You need Unreal Engine 5.3 or later from the Epic Games Launcher. You also need 
 1. Right-click `unreal/ShortStack.uproject` and choose **Switch Unreal Engine version**, then pick your installed version. This also generates the Visual Studio solution.
 2. Double-click `ShortStack.uproject`. When asked to rebuild the missing `ShortStack` and `ShortStackCore` modules, click **Yes**.
    - If Unreal says "ShortStack could not be compiled", double-click `BuildLog.bat` in this folder. It builds the project, lists the first errors and saves everything to `build_log.txt`.
-3. On the first launch, the Output Log shows `ShortStack: built ...` for each material, then `ShortStack: created /Game/Maps/NightOne`. Shader compilation takes a few minutes the first time.
-4. Press **Play** (Alt+P). Type a screen name and press **Begin**.
+3. On the first launch, the Output Log shows `ShortStack: built ...` for each material, then `ShortStack: created /Game/Maps/NightOne`. Shader compilation takes a while the first time, longer with hardware ray tracing on (see Rendering below).
+4. Press **Play** (Alt+P). The title screen appears over the room. Press any key, then choose **Continue** or **New Game**.
+   - Play-In-Editor keeps Escape for stopping the session, so use **P** to pause. In a standalone game (**Play > Standalone Game**) or a packaged build, Escape pauses too.
 
 **Controls:**
 
@@ -42,6 +43,28 @@ You need Unreal Engine 5.3 or later from the Epic Games Launcher. You also need 
 | F · C · R · A | Fold, call or check, raise, all-in |
 | Up / Down | Bet size |
 | M | Mute |
+| P · Esc · gamepad Start | Pause menu |
+
+The menus work with the mouse, the keyboard (arrows, Enter, Escape, Q/E for settings tabs) or a gamepad (D-pad or left stick, A, B, LB/RB).
+
+## Menus and settings
+
+- **Title screen:** the logo over a slow establishing shot of the room; press any key.
+- **Main menu:** Continue (your career: bankroll, events played, best finish), New Game (pick a screen name; replaces the current career), Settings, Credits, Quit.
+- **Pause menu:** Resume, Settings, Quit to Main Menu, Quit to Desktop, with the night so far (bankroll, the event, players left, your rank and stack).
+- **Settings** apply as you change them and are saved to the `Settings` save slot:
+  - Graphics: quality preset (Low to Cinematic), ray-traced lighting, resolution scale, frame rate limit, V-Sync, motion blur, film grain, chromatic aberration.
+  - Display: window mode, resolution, brightness, field of view.
+  - Audio: master, effects, ambience.
+  - Controls: look sensitivity, invert look, control hints.
+
+The menus are drawn by `ss::ui::FrontEnd` in ShortStackCore (like the laptop client), so every page can be rendered and checked without Unreal: `ui_test <dir>` writes them as `menu_*.json`, and `BG=<image> node web/scripts/render-drawlists.mjs <dir>` turns them into PNGs over a backdrop.
+
+## Rendering
+
+The project targets DirectX 12 with Shader Model 6 and turns on hardware ray tracing (`r.RayTracing`). On an RTX-class GPU, Lumen then traces the real scene geometry for global illumination and reflections, so the neon and the laptop light the room exactly. Virtual shadow maps, Nanite and temporal super resolution are on as well. The defaults are Epic quality with ray-traced lighting, which suits an RTX 4070-class GPU at 1440p. The Cinematic preset adds ray-traced hit lighting for reflections.
+
+The first editor launch after ray tracing is enabled recompiles the engine's shaders. It can take 10 to 30 minutes, once.
 
 The game builds the apartment at runtime, so it also runs in any other level. If the map was not created, the set is spawned at the origin.
 
@@ -71,12 +94,13 @@ Source/ShortStack/          the game module (Unreal side)
   NightOnePlayerController  mouse ray onto the laptop screen, clicks, wheel, hotkeys
   SlateDrawList             draws ShortStackCore draw lists with Slate (laptop, phone, printed props, neon sign)
   NightOneAudio             plays the synthesized sounds and streams the room ambience
-  SNightOneOverlay          title card, phone notifications and the controls hint
+  SFrontEndWidget           the title screen and menus (draws ss::ui::FrontEnd, takes keyboard, mouse and gamepad input)
+  SNightOneOverlay          phone notifications and the controls hint
   NightOneSaveGame          bankroll, results and story flags
 Plugins/ShortStackCore/     everything engine-agnostic, tested without Unreal (see its README)
   ShortStack/*              poker engine, bots, grading, tournaments
   ShortStack/Game           the Night One session, lobby, chat
-  ShortStack/UI             vector canvas, RiverLine client, card art, phone, printed props
+  ShortStack/UI             vector canvas, RiverLine client, menus (FrontEnd), card art, phone, printed props
   ShortStack/Audio          sound synthesis
 ```
 

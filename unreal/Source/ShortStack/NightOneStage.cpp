@@ -706,6 +706,17 @@ FVector ANightOneStage::ScreenNormal() const
 	return Screen ? Screen->GetForwardVector() : FVector::BackwardVector;
 }
 
+void ANightOneStage::MenuShot(double T, FVector& OutLocation, FVector& OutLookAt) const
+{
+	// Over the chair's shoulder from behind and to the left, drifting slowly: the desk and the
+	// laptop in the middle of the frame, the rain-streaked window and the neon beyond it, and the
+	// darker side of the room on the left where the menu sits.
+	const FVector Eye = Web(-0.62 + 0.07 * FMath::Sin(T * 0.045), 1.42 + 0.012 * FMath::Sin(T * 0.21), 0.92 - 0.06 * FMath::Sin(T * 0.037));
+	const FVector At = Web(0.22 + 0.05 * FMath::Sin(T * 0.03), 1.02 + 0.02 * FMath::Sin(T * 0.05), -0.8);
+	OutLocation = GetActorTransform().TransformPosition(Eye);
+	OutLookAt = GetActorTransform().TransformPosition(At);
+}
+
 bool ANightOneStage::ScreenHit(const FVector& Origin, const FVector& Direction, FVector2D& OutClient) const
 {
 	if (!Screen)
@@ -783,8 +794,9 @@ void ANightOneStage::SetLens(float Focus, float Tilt, float Pulse)
 	}
 	FPostProcessSettings& P = Lens->Settings;
 	// Leaned in, keep the screen clean: no fringing, lighter grain.
-	P.SceneFringeIntensity = (0.4f + Tilt * 2.0f + Pulse * 2.0f) * (1.0f - 0.9f * Focus);
-	P.FilmGrainIntensity = 0.12f - 0.08f * Focus;
+	P.SceneFringeIntensity = (0.4f + Tilt * 2.0f + Pulse * 2.0f) * (1.0f - 0.9f * Focus) * FringeScale;
+	P.FilmGrainIntensity = (0.12f - 0.08f * Focus) * GrainScale;
+	P.MotionBlurAmount = bMotionBlur ? 0.35f : 0.0f;
 	P.VignetteIntensity = 0.5f + Tilt * 0.6f + Pulse * 0.35f;
 	// Tilt: color drains toward a hot red.
 	const float Sat = 1.0f - 0.55f * Tilt;

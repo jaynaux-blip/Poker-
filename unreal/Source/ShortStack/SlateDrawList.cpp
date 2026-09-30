@@ -15,7 +15,16 @@ bool FSlateTextMeasurer::IsAvailable()
 
 FSlateFontInfo FSlateTextMeasurer::FontFor(ss::ui::Font Face, float SizePx)
 {
-	const TCHAR* Typeface = Face == ss::ui::Font::Bold ? TEXT("Bold") : Face == ss::ui::Font::Mono ? TEXT("Mono") : TEXT("Regular");
+	// Typefaces of Unreal's default font (Roboto, and Droid Sans Mono for "Mono").
+	const TCHAR* Typeface = TEXT("Regular");
+	switch (Face)
+	{
+	case ss::ui::Font::Bold: Typeface = TEXT("Bold"); break;
+	case ss::ui::Font::Mono: Typeface = TEXT("Mono"); break;
+	case ss::ui::Font::Black: Typeface = TEXT("Black"); break;
+	case ss::ui::Font::Light: Typeface = TEXT("Light"); break;
+	default: break;
+	}
 	FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle(FName(Typeface), 10);
 	Font.Size = SizePx * 0.75f;
 	return Font;

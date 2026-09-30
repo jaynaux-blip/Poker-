@@ -279,8 +279,18 @@ Color Paint::At(Vec2 P) const
 		}
 		else
 		{
+			// Roots of Qa t^2 - 2 Qb t + Qc = 0. Canvas takes the larger t whose radius is not negative;
+			// Qa is negative for nested circles (the usual glow), so which root is larger depends on its sign.
 			const float Disc = Qb * Qb - Qa * Qc;
-			T = Disc >= 0.0f ? (Qb + std::sqrt(Disc)) / Qa : 0.0f;
+			if (Disc >= 0.0f)
+			{
+				const float Sq = std::sqrt(Disc);
+				const float Ta = (Qb + Sq) / Qa;
+				const float Tb = (Qb - Sq) / Qa;
+				const float Hi = Ta > Tb ? Ta : Tb;
+				const float Lo = Ta > Tb ? Tb : Ta;
+				T = R0 + Hi * Dr >= 0.0f ? Hi : Lo;
+			}
 		}
 	}
 	T = Clampf(T, 0.0f, 1.0f);

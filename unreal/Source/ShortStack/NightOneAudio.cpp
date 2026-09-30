@@ -43,7 +43,7 @@ void UNightOneAudio::StartAmbience()
 	}
 	AmbienceGen = MakeUnique<ss::audio::Ambience>(7u);
 	AmbienceWave = NightOneAudioDetail::MakeWave(this, 10000.0f);
-	AmbienceComponent = UGameplayStatics::SpawnSound2D(this, AmbienceWave.Get(), bMuted ? 0.0f : MasterVolume, 1.0f, 0.0f, nullptr, false, false);
+	AmbienceComponent = UGameplayStatics::SpawnSound2D(this, AmbienceWave.Get(), AmbienceLevel(), 1.0f, 0.0f, nullptr, false, false);
 }
 
 void UNightOneAudio::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -87,7 +87,7 @@ void UNightOneAudio::TickComponent(float DeltaTime, ELevelTick TickType, FActorC
 		{
 			if (!bMuted)
 			{
-				PlayPcm(ss::audio::RenderThunder(Thunders[I].Strength, Seed++), 1.0f);
+				PlayPcm(ss::audio::RenderThunder(Thunders[I].Strength, Seed++), 1.0f, true);
 			}
 			Thunders.RemoveAt(I);
 		}
@@ -114,7 +114,7 @@ void UNightOneAudio::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume)
+void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience)
 {
 	if (bMuted || Samples.empty())
 	{
@@ -123,7 +123,8 @@ void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume)
 	const float Seconds = static_cast<float>(Samples.size()) / static_cast<float>(ss::audio::SampleRate);
 	USoundWaveProcedural* Wave = NightOneAudioDetail::MakeWave(this, Seconds);
 	NightOneAudioDetail::Queue(Wave, Samples.data(), static_cast<int32>(Samples.size()), 1.0f);
-	if (UAudioComponent* Shot = UGameplayStatics::SpawnSound2D(this, Wave, Volume * MasterVolume, 1.0f, 0.0f, nullptr, false, true))
+	const float Level = Volume * MasterVolume * (bAmbience ? AmbienceVolume : EffectsVolume);
+	if (UAudioComponent* Shot = UGameplayStatics::SpawnSound2D(this, Wave, Level, 1.0f, 0.0f, nullptr, false, true))
 	{
 		OneShots.Add(Shot);
 		OneShotEnds.Add(HeartClock + Seconds + 0.2);
@@ -165,7 +166,18 @@ void UNightOneAudio::SetMuted(bool bInMuted)
 	bMuted = bInMuted;
 	if (AmbienceComponent)
 	{
-		AmbienceComponent->SetVolumeMultiplier(bMuted ? 0.0f : MasterVolume);
+		AmbienceComponent->SetVolumeMultiplier(AmbienceLevel());
+	}
+}
+
+void UNightOneAudio::SetMix(float Master, float Effects, float Ambience)
+{
+	MasterVolume = FMath::Clamp(Master, 0.0f, 4.0f);
+	EffectsVolume = FMath::Clamp(Effects, 0.0f, 1.0f);
+	AmbienceVolume = FMath::Clamp(Ambience, 0.0f, 1.0f);
+	if (AmbienceComponent)
+	{
+		AmbienceComponent->SetVolumeMultiplier(AmbienceLevel());
 	}
 }
 

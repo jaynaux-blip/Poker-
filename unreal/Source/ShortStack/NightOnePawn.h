@@ -35,6 +35,11 @@ public:
 
 	void ToggleLean();
 
+	/** Vertical field of view in degrees while sitting back (the Field of view setting). */
+	float VerticalFov = 50.0f;
+	/** The title screen's camera: the seat blends to (or from) this shot, a slow fly-in when play starts. */
+	void SetEstablishingShot(const FVector& Location, const FVector& LookAt, bool bActive);
+
 	UPROPERTY(VisibleAnywhere, Category = "Short Stack")
 	TObjectPtr<UCameraComponent> Camera;
 
@@ -47,4 +52,9 @@ private:
 	FVector2D ScreenSizeCm = FVector2D(31.6, 19.75);
 	bool bConfigured = false;
 	double Clock = 0.0;
+	FVector ShotLocation = FVector::ZeroVector;
+	FVector ShotLookAt = FVector::ForwardVector;
+	bool bHasShot = false;
+	float ShotBlend = 1.0f;
+	float ShotTarget = 1.0f;
 };

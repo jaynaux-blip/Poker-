@@ -28,6 +28,8 @@ public:
 	void Thunder(float Delay, float Strength);
 	void SetHeartbeat(bool bOn);
 	void SetMuted(bool bInMuted);
+	/** Master, effects and ambience (rain, thunder) levels, 0..1. */
+	void SetMix(float Master, float Effects, float Ambience);
 	bool IsMuted() const { return bMuted; }
 	/** True for the frame a heartbeat thumps (drives the visual pulse). */
 	bool ConsumeBeat();
@@ -39,7 +41,8 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	void PlayPcm(const std::vector<float>& Samples, float Volume);
+	void PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience = false);
+	float AmbienceLevel() const { return bMuted ? 0.0f : MasterVolume * AmbienceVolume; }
 
 	UPROPERTY(Transient)
 	TObjectPtr<USoundWaveProcedural> AmbienceWave;
@@ -53,6 +56,8 @@ private:
 	TArray<double> OneShotEnds;
 
 	TUniquePtr<ss::audio::Ambience> AmbienceGen;
+	float EffectsVolume = 1.0f;
+	float AmbienceVolume = 1.0f;
 	uint32 Seed = 1;
 	bool bMuted = false;
 	bool bHeart = false;

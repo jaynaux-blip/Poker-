@@ -87,11 +87,14 @@ struct Paint
 	Color At(Vec2 P) const;
 };
 
+/** Typefaces of the host's UI font (Roboto in Unreal): weight 900 is Black, 300 and below Light. */
 enum class Font : int
 {
 	Regular,
 	Bold,
 	Mono,
+	Black,
+	Light,
 };
 
 enum class Align : int
@@ -232,7 +235,7 @@ public:
 	// Text.
 	float Text(const std::string& S, float X, float Y, const TextStyle& Style);
 	float Measure(const std::string& S, float Size, int Weight = 500, bool Mono = false) const;
-	static Font FaceFor(int Weight, bool Mono) { return Mono ? Font::Mono : Weight >= 600 ? Font::Bold : Font::Regular; }
+	static Font FaceFor(int Weight, bool Mono) { return Mono ? Font::Mono : Weight >= 900 ? Font::Black : Weight >= 600 ? Font::Bold : Weight <= 300 ? Font::Light : Font::Regular; }
 
 	float Width() const { return W; }
 	float Height() const { return H; }

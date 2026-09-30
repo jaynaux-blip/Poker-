@@ -1,8 +1,10 @@
 // Replays draw lists written by the C++ UI test (ui_test <dir>) in Chromium and saves PNGs,
 // so the Unreal client's screens can be checked without Unreal.
 // Usage: node scripts/render-drawlists.mjs <dir> [scale]
+// With BG=<image> in the environment, full-screen lists (the menus) are drawn over that image.
 import { chromium } from 'playwright';
 import { readdirSync, readFileSync } from 'node:fs';
+const bg = process.env.BG ? 'data:image/png;base64,' + readFileSync(process.env.BG).toString('base64') : '';
 import { join } from 'node:path';
 const [dir, scaleArg = '1'] = process.argv.slice(2);
 const scale = Number(scaleArg);
@@ -10,12 +12,12 @@ const browser = await chromium.launch({
   executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
-const page = await browser.newPage({ viewport: { width: 1700, height: 1100 } });
+const page = await browser.newPage({ viewport: { width: 2600, height: 1200 } });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.setContent('<html><body style="margin:0;background:#000"><canvas id="out"></canvas></body></html>');
 for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
   const json = readFileSync(join(dir, file), 'utf8');
-  const size = await page.evaluate(({ json, scale }) => {
+  const size = await page.evaluate(async ({ json, scale, bg, isMenu }) => {
     const d = JSON.parse(json);
     const W = Math.round(d.w * scale);
     const H = Math.round(d.h * scale);
@@ -24,6 +26,13 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
     out.height = H;
     const ctx = out.getContext('2d');
     ctx.clearRect(0, 0, W, H);
+    if (bg && isMenu) {
+      const img = new Image();
+      img.src = bg;
+      await img.decode();
+      const k = Math.max(W / img.width, H / img.height);
+      ctx.drawImage(img, (W - img.width * k) / 2, (H - img.height * k) / 2, img.width * k, img.height * k);
+    }
     const glc = document.createElement('canvas');
     glc.width = W;
     glc.height = H;
@@ -47,8 +56,10 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     const ext = gl.getExtension('OES_element_index_uint');
-    const fonts = ['Inter, "Segoe UI", Roboto, Arial, sans-serif', 'Inter, "Segoe UI", Roboto, Arial, sans-serif', '"JetBrains Mono", Menlo, Consolas, monospace'];
-    const weights = [500, 700, 600];
+    // Same order and faces as ss::ui::Font and web/scripts/gen-test-font-metrics.mjs.
+    const sans = 'Roboto, Arial, sans-serif';
+    const fonts = [sans, sans, '"Droid Sans Mono", "DejaVu Sans Mono", monospace', sans, sans];
+    const weights = [400, 700, 400, 900, 300];
     const clips = [];
     ctx.save();
     ctx.scale(scale, scale);
@@ -105,7 +116,7 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
     }
     ctx.restore();
     return [W, H];
-  }, { json, scale });
+  }, { json, scale, bg, isMenu: file.startsWith('menu_') });
   const png = join(dir, file.replace('.json', '.png'));
   await page.locator('#out').screenshot({ path: png });
   console.log('rendered', png, size.join('x'));

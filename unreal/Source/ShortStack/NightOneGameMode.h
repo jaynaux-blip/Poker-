@@ -8,14 +8,17 @@
 
 class ANightOnePawn;
 class ANightOneStage;
+class SBackgroundBlur;
+class SFrontEndWidget;
 class SNightOneOverlay;
+class SWidget;
 class UNightOneAudio;
 
 /**
- * SHORT STACK: Night One. Boots the apartment, the RiverLine client on the
- * laptop, audio and the game session, and routes input between the room and
- * the screen (port of web/src/main.ts). Works in any level: if no
- * NightOneStage is placed, one is spawned at the origin.
+ * SHORT STACK: Night One. Boots the apartment, the title screen and menus,
+ * the RiverLine client on the laptop, audio and the game session, and routes
+ * input between the menus, the room and the screen (port of web/src/main.ts).
+ * Works in any level: if no NightOneStage is placed, one is spawned at the origin.
  */
 UCLASS()
 class SHORTSTACK_API ANightOneGameMode : public AGameModeBase
@@ -30,14 +33,24 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void RestartPlayer(AController* NewPlayer) override;
 
-	// Input from ANightOnePlayerController.
+	// Input from ANightOnePlayerController (ignored while a menu is open).
 	void OnMouse(bool bOverScreen, const FVector2D& Client, float Nx, float Ny);
 	void OnPress(bool bOverScreen);
 	void OnRelease();
 	void OnWheel(float Delta);
 	void OnKey(const FString& Key);
+	void OpenPauseMenu();
 	bool HideCursor(bool bOverScreen) const;
 	bool IsLeanedBack() const;
+	bool IsMenuOpen() const;
+
+	// From the menus (FNightOneGame's front-end hooks).
+	void ContinueCareer();
+	void StartNewCareer(const FString& ScreenName);
+	void ResumePlay();
+	void QuitToMainMenu();
+	void QuitToDesktop();
+	void ApplySettings(const ss::ui::GameSettings& Settings, bool bSave);
 
 	ANightOneStage* GetStage() const { return Stage; }
 	ANightOnePawn* GetSeat() const;
@@ -50,6 +63,11 @@ public:
 
 private:
 	void Begin(const FString& Name);
+	void CreateViewportWidgets();
+	void FocusMenu();
+	void ReturnInputToGame();
+	void DrawMenu();
+	void SaveSettingsNow();
 
 	UPROPERTY(Transient)
 	TObjectPtr<ANightOneStage> Stage;
@@ -59,13 +77,21 @@ private:
 
 	TUniquePtr<FNightOneGame> Game;
 	TSharedPtr<SNightOneOverlay> Overlay;
+	TSharedPtr<SFrontEndWidget> MenuWidget;
+	TSharedPtr<SBackgroundBlur> MenuBlur;
+	TSharedPtr<SWidget> MenuRoot;
 	bool bStarted = false;
+	bool bHasSave = false;
 	double RealTime = 0.0;
 	double GameTime = 0.0;
 	double BeganAt = -1.0;
 	double UiAccum = 1.0;
 	double PhoneAccum = 1.0;
+	double SettingsDirtyAt = -1.0;
 	float Tilt = 0.0f;
 	float Pulse = 0.0f;
+	float LookSensitivity = 1.0f;
+	bool bInvertLook = false;
+	bool bShowHints = true;
 	bool bOverScreenNow = false;
 };

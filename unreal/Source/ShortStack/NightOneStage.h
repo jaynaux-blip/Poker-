@@ -46,6 +46,8 @@ public:
 	FVector ScreenNormal() const;
 	/** Laptop screen size in centimeters. */
 	FVector2D ScreenSize() const { return FVector2D(31.6, 19.75); }
+	/** The title screen's slow camera move at time T (seconds): where the camera is and what it looks at. */
+	void MenuShot(double T, FVector& OutLocation, FVector& OutLookAt) const;
 	/** Ray from the camera onto the laptop screen; returns the point in client space (1600 x 1000). */
 	bool ScreenHit(const FVector& Origin, const FVector& Direction, FVector2D& OutClient) const;
 
@@ -76,6 +78,11 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	float RoomFillCandela = 0.08f;
+
+	// Image options from Settings (applied in SetLens).
+	bool bMotionBlur = false;
+	float GrainScale = 1.0f;
+	float FringeScale = 1.0f;
 
 	/** Laptop client resolution (logical 1600 x 1000 is scaled to this). */
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")

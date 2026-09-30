@@ -7,7 +7,7 @@
 #include "NightOneStage.h"
 
 FNightOneGame::FNightOneGame(ANightOneGameMode& InMode, const ss::SaveData* Loaded, const std::string& Seed)
-	: Mode(InMode), Session(*this, Seed, Loaded), Client(Session)
+	: Mode(InMode), Session(*this, Seed, Loaded), Client(Session), Menu(*this)
 {
 }
 
@@ -66,4 +66,44 @@ void FNightOneGame::Save(const ss::SaveData& Data)
 		SaveObject->Data = FString(UTF8_TO_TCHAR(Data.Serialize().c_str()));
 		UGameplayStatics::SaveGameToSlot(SaveObject, UNightOneSaveGame::SlotName(), 0);
 	}
+}
+
+// ------------------------------------------------------------------ menus
+
+void FNightOneGame::UiSound(ss::SoundId Id, double Volume)
+{
+	if (UNightOneAudio* A = Mode.GetAudio())
+	{
+		A->Play(Id, static_cast<float>(Volume));
+	}
+}
+
+void FNightOneGame::Continue()
+{
+	Mode.ContinueCareer();
+}
+
+void FNightOneGame::NewGame(const std::string& ScreenName)
+{
+	Mode.StartNewCareer(FString(UTF8_TO_TCHAR(ScreenName.c_str())));
+}
+
+void FNightOneGame::Resume()
+{
+	Mode.ResumePlay();
+}
+
+void FNightOneGame::QuitToMenu()
+{
+	Mode.QuitToMainMenu();
+}
+
+void FNightOneGame::QuitGame()
+{
+	Mode.QuitToDesktop();
+}
+
+void FNightOneGame::SettingsChanged(const ss::ui::GameSettings& Settings)
+{
+	Mode.ApplySettings(Settings, true);
 }

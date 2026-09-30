@@ -24,6 +24,18 @@ void ANightOnePawn::Configure(const FVector& InEye, const FVector& InScreenCente
 	bConfigured = true;
 }
 
+void ANightOnePawn::SetEstablishingShot(const FVector& Location, const FVector& LookAt, bool bActive)
+{
+	ShotLocation = Location;
+	ShotLookAt = LookAt;
+	ShotTarget = bActive ? 1.0f : 0.0f;
+	if (!bHasShot)
+	{
+		ShotBlend = ShotTarget; // the first frame starts on the shot, not mid-flight
+		bHasShot = true;
+	}
+}
+
 void ANightOnePawn::ToggleLean()
 {
 	TargetFocus = TargetFocus > 0.5f ? 0.0f : 1.0f;
@@ -59,8 +71,8 @@ void ANightOnePawn::Tick(float DeltaSeconds)
 			Aspect = Size.X / Size.Y;
 		}
 	}
-	// Vertical field of view 50 degrees (62 on tall screens), as in the prototype; Unreal wants horizontal.
-	const double VFov = FMath::DegreesToRadians(Aspect < 1.0 ? 62.0 : 50.0);
+	// Vertical field of view from the settings (+12 degrees on tall screens), as in the prototype; Unreal wants horizontal.
+	const double VFov = FMath::DegreesToRadians(static_cast<double>(VerticalFov) + (Aspect < 1.0 ? 12.0 : 0.0));
 	const double HFov = 2.0 * FMath::Atan(FMath::Tan(VFov / 2.0) * Aspect);
 	Camera->SetFieldOfView(static_cast<float>(FMath::RadiansToDegrees(HFov)));
 
@@ -84,10 +96,18 @@ void ANightOnePawn::Tick(float DeltaSeconds)
 	const double ShakeK = 1.0 - 0.6 * T;
 	Pos.Z += Breathe * Still + ShakeY * ShakeK;
 	Pos.Y += Sway * Still + ShakeX * ShakeK;
-	const FVector Look = FMath::Lerp(RoomLook, ScreenCenter, T);
+	FVector Look = FMath::Lerp(RoomLook, ScreenCenter, T);
 	if (!bConfigured)
 	{
 		return;
+	}
+	// Establishing shot: a slow, eased flight between the shot and the seat.
+	ShotBlend += (ShotTarget - ShotBlend) * static_cast<float>(1.0 - FMath::Exp(-Dt * 1.4));
+	if (bHasShot && ShotBlend > 0.0005f)
+	{
+		const double E = static_cast<double>(ShotBlend) * ShotBlend * (3.0 - 2.0 * ShotBlend);
+		Pos = FMath::Lerp(Pos, ShotLocation, E);
+		Look = FMath::Lerp(Look, ShotLookAt, E);
 	}
 	Camera->SetWorldLocationAndRotation(Pos, (Look - Pos).Rotation());
 }

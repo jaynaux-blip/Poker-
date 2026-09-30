@@ -1,5 +1,7 @@
-// Measures glyph advances in Chromium for the fonts the browser prototype renders with in CI
-// (Liberation Sans / DejaVu Sans Mono), so the C++ UI tests lay text out like the prototype does.
+// Measures glyph advances in Chromium for Roboto, the family Unreal's default UI font uses, so the
+// C++ UI tests lay text out as Unreal does. Install Roboto first (fonts-roboto, or the TTFs in
+// ~/.local/share/fonts); mono falls back to DejaVu Sans Mono, standing in for Unreal's Droid Sans Mono.
+// Face order matches ss::ui::Font: Regular, Bold, Mono, Black, Light.
 // Output: unreal/Plugins/ShortStackCore/Standalone/tests/TestFontMetrics.h
 import { chromium } from 'playwright';
 import { writeFileSync } from 'node:fs';
@@ -10,9 +12,11 @@ const specials = ['·', '—', '–', '…', 'é'];
 const data = await page.evaluate((specials) => {
   const c = document.createElement('canvas').getContext('2d');
   const fonts = [
-    ['Regular', '500 100px Inter, "Segoe UI", Roboto, Arial, sans-serif'],
-    ['Bold', '700 100px Inter, "Segoe UI", Roboto, Arial, sans-serif'],
-    ['Mono', '600 100px "JetBrains Mono", Menlo, Consolas, monospace'],
+    ['Regular', '400 100px Roboto, Arial, sans-serif'],
+    ['Bold', '700 100px Roboto, Arial, sans-serif'],
+    ['Mono', '400 100px "Droid Sans Mono", "DejaVu Sans Mono", monospace'],
+    ['Black', '900 100px Roboto, Arial, sans-serif'],
+    ['Light', '300 100px Roboto, Arial, sans-serif'],
   ];
   const out = {};
   for (const [name, font] of fonts) {

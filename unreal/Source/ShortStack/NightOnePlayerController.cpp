@@ -37,6 +37,12 @@ void ANightOnePlayerController::PlayerTick(float DeltaTime)
 		}
 		Mode->OnMouse(bOverScreen, Client, Mx / static_cast<float>(Vw) - 0.5f, My / static_cast<float>(Vh) - 0.5f);
 	}
+	// Pause. In Play-In-Editor, Escape stops the session before the game sees it, so P works too.
+	if (WasInputKeyJustPressed(EKeys::Escape) || WasInputKeyJustPressed(EKeys::P) || WasInputKeyJustPressed(EKeys::Gamepad_Special_Right))
+	{
+		Mode->OpenPauseMenu();
+		return;
+	}
 	if (WasInputKeyJustPressed(EKeys::LeftMouseButton))
 	{
 		Mode->OnPress(bOverScreen);
