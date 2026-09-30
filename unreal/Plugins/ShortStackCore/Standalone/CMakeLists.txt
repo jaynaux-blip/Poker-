@@ -39,3 +39,7 @@ add_test(NAME engine_invariants COMMAND unit_test)
 add_executable(session_test tests/session_main.cpp)
 target_link_libraries(session_test PRIVATE ShortStackCore)
 add_test(NAME night_one_session COMMAND session_test)
+
+add_executable(ui_test tests/ui_main.cpp)
+target_link_libraries(ui_test PRIVATE ShortStackCore)
+add_test(NAME riverline_ui COMMAND ui_test)
