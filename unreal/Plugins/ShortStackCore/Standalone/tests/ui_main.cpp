@@ -4,6 +4,7 @@
 // Usage: ui_test <out-dir>   (with no argument it only checks the frames draw)
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/UI/Phone.h"
+#include "ShortStack/UI/PropArt.h"
 #include "ShortStack/UI/RiverLine.h"
 #include "TestFontMetrics.h"
 
@@ -242,6 +243,44 @@ void Results()
 	}
 }
 
+void Props()
+{
+	struct Item
+	{
+		const char* Name;
+		float W;
+		float H;
+	};
+	const Item Items[7] = {{"prop_notice", ss::ui::props::NoticeW, ss::ui::props::NoticeH}, {"prop_bill", ss::ui::props::BillW, ss::ui::props::BillH}, {"prop_note", ss::ui::props::NoteSize, ss::ui::props::NoteSize},
+		{"prop_poster", ss::ui::props::PosterW, ss::ui::props::PosterH}, {"prop_neon", ss::ui::props::NeonW, ss::ui::props::NeonH}, {"prop_keyboard", ss::ui::props::KeyboardW, ss::ui::props::KeyboardH}, {"prop_note2", ss::ui::props::NoteSize, ss::ui::props::NoteSize}};
+	TableMeasurer M;
+	for (int I = 0; I < 7; ++I)
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, Items[I].W, Items[I].H, 1.0f);
+		switch (I)
+		{
+		case 0: ss::ui::props::EvictionNotice(C); break;
+		case 1: ss::ui::props::PowerBill(C); break;
+		case 2: ss::ui::props::StickyNote(C, {"BR: $2.37", "DON'T", "TILT."}, ss::ui::Hex(0xf6e27a)); break;
+		case 3: ss::ui::props::Poster(C); break;
+		case 4: ss::ui::props::NeonSign(C); break;
+		case 5: ss::ui::props::Keyboard(C); break;
+		default: ss::ui::props::StickyNote(C, {"RENT", "FRIDAY", "$1,225"}, ss::ui::Hex(0xff9cb8)); break;
+		}
+		Expect(!L.Cmds.empty(), "prop drew something");
+		if (!OutDir.empty())
+		{
+			if (FILE* F = std::fopen((OutDir + "/" + Items[I].Name + ".json").c_str(), "wb"))
+			{
+				const std::string J = L.ToJson();
+				std::fwrite(J.data(), 1, J.size(), F);
+				std::fclose(F);
+			}
+		}
+	}
+}
+
 void Clicks()
 {
 	// A click on "Log in" moves the boot screen to the lobby; clicks elsewhere do nothing.
@@ -289,6 +328,7 @@ int main(int Argc, char** Argv)
 	ui_test::Clicks();
 	ui_test::Screens();
 	ui_test::Results();
+	ui_test::Props();
 	if (ui_test::Failures == 0)
 	{
 		std::printf("ui tests: all passed\n");
