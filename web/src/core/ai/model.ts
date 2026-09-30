@@ -1,4 +1,5 @@
 import { Card } from '../cards';
+import { detPow } from '../detmath';
 import { CLASS_PERCENTILE, RangeBand } from '../equity';
 import { handClass } from '../cards';
 import { Category, evaluate, straightHigh } from '../evaluator';
@@ -230,5 +231,5 @@ export function heuristicEquity(hole: readonly Card[], board: readonly Card[], o
   else eq = 0.97;
   if (board.length < 5 && hasDraw(hole[0], hole[1], board)) eq += board.length === 3 ? 0.18 : 0.1;
   eq = Math.min(0.99, eq);
-  return Math.pow(eq, 1 + 0.6 * (opponents - 1));
+  return detPow(eq, 1 + 0.6 * (opponents - 1));
 }

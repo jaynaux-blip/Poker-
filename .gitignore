@@ -1,0 +1,4 @@
+# Unreal / C++ build output
+unreal/**/Binaries/
+unreal/**/Intermediate/
+unreal/Plugins/ShortStackCore/Standalone/build/

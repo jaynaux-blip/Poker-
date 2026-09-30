@@ -1,3 +1,5 @@
+import { detPow } from './detmath';
+
 /** Blind structures, payout tables and ICM. */
 
 export interface Level {
@@ -27,7 +29,7 @@ export function payoutTable(poolCents: number, entrants: number, minCashCents: n
   const paid = Math.max(1, Math.min(entrants - 1, Math.round(entrants * paidShare)));
   if (entrants <= 3) return [poolCents];
   const weights: number[] = [];
-  for (let i = 1; i <= paid; i++) weights.push(1 / Math.pow(i, paid > 60 ? 1.0 : paid > 12 ? 0.95 : 0.85));
+  for (let i = 1; i <= paid; i++) weights.push(1 / detPow(i, paid > 60 ? 1.0 : paid > 12 ? 0.95 : 0.85));
   const wSum = weights.reduce((a, b) => a + b, 0);
   let cents = weights.map((w) => (w / wSum) * poolCents);
   // Enforce the min-cash floor, taking the difference proportionally from the top.

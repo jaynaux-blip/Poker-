@@ -1,3 +1,4 @@
+import { powInt } from '../detmath';
 import { handPercentile } from '../equity';
 import { PlayerAction } from '../hand';
 import { Rng } from '../rng';
@@ -273,7 +274,7 @@ function postflop(view: PlayerView, p: Profile, pressure: number, ctx: BotContex
       }
       return out({ type: 'check' }, valueTh);
     }
-    if (pfa && view.street === 'flop' && rng.chance(p.cbet * Math.pow(0.55, opps - 1))) {
+    if (pfa && view.street === 'flop' && rng.chance(p.cbet * powInt(0.55, opps - 1))) {
       return out(betTo(0.33 + 0.2 * rng.next()), valueTh);
     }
     if (eq >= 0.3 && view.street !== 'river' && rng.chance(p.aggression * 0.3)) {
