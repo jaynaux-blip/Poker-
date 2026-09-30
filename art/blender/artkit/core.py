@@ -690,14 +690,19 @@ def uv_layout(obj, groups, margin=0.01):
         elif mode == 'cylinder':
             z0, z1 = arg
             uv = bm.loops.layers.uv.verify()
+            faces_us = []
             for f in bm.faces:
                 if owner[f.index] != gi:
                     continue
                 us = [math.atan2(l.vert.co.y, l.vert.co.x) / (2 * math.pi) + 0.5 for l in f.loops]
-                if max(us) - min(us) > 0.5:  # the face straddles the seam
+                if max(us) - min(us) > 0.5:  # the face straddles the seam: unwrap it past 1
                     us = [u + 1.0 if u < 0.5 else u for u in us]
+                faces_us.append((f, us))
+            # Squeeze the wrap so the seam faces stay inside the rectangle (outside it is unbaked).
+            span = max([1.0] + [max(us) for _, us in faces_us])
+            for f, us in faces_us:
                 for l, u in zip(f.loops, us):
-                    l[uv].uv = (u0 + (u1 - u0) * u, v0 + (v1 - v0) * (l.vert.co.z - z0) / (z1 - z0))
+                    l[uv].uv = (u0 + (u1 - u0) * u / span, v0 + (v1 - v0) * (l.vert.co.z - z0) / (z1 - z0))
         elif mode == 'box':
             uv = bm.loops.layers.uv.verify()
             _box_project([f for f in bm.faces if owner[f.index] == gi], uv, rect, arg if arg is not None else margin * 0.4)
