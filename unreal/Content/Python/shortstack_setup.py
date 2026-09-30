@@ -519,7 +519,8 @@ def import_meshes(force=False):
     """Imports the props exported by art/blender/build.py (unreal/Art/Meshes/*.glb).
 
     Each file lands in /Game/ShortStack/Meshes/<Name>/ with its materials and textures, and
-    its static mesh is named <Name>, which is where NightOneStage looks for it. A file is
+    its mesh (static, or skeletal for a rigged file like SK_Arms) is named <Name>, which is where
+    NightOneStage looks for it. A file is
     reimported only when it changed (its hash is kept as metadata on the mesh).
     """
     import os
@@ -549,18 +550,74 @@ def import_meshes(force=False):
         mesh = None
         for asset_path in eal.list_assets(folder, recursive=True):
             asset = eal.load_asset(asset_path)
-            if isinstance(asset, unreal.StaticMesh):
+            if isinstance(asset, (unreal.StaticMesh, unreal.SkeletalMesh)):
                 mesh = asset
                 if asset.get_path_name().split(".")[0] != mesh_path:
                     eal.rename_asset(asset.get_path_name().split(".")[0], mesh_path)
                     mesh = eal.load_asset(mesh_path)
                 break
         if mesh is None:
-            unreal.log_error(f"ShortStack: importing {file} produced no static mesh")
+            unreal.log_error(f"ShortStack: importing {file} produced no mesh")
             continue
+        if isinstance(mesh, unreal.SkeletalMesh):
+            try:
+                _skin_material(folder, mesh)
+            except Exception as exc:  # the imported glTF material still works, just without subsurface
+                unreal.log_warning(f"ShortStack: skin material for {name} failed: {exc}")
         eal.set_metadata_tag(mesh, "SourceHash", digest)
         eal.save_loaded_asset(mesh)
         unreal.log(f"ShortStack: imported {file} as {mesh_path}")
+
+
+def _skin_material(folder, mesh):
+    """Skin needs subsurface scattering, which glTF can't carry: M_<mesh>Skin rebuilds material slot 0
+    from the imported textures with the Subsurface Profile shading model."""
+    tex = {}
+    for asset_path in eal.list_assets(folder, recursive=True):
+        asset = eal.load_asset(asset_path)
+        if isinstance(asset, unreal.Texture2D):
+            for key in ("BaseColor", "ORM", "Normal"):
+                if asset.get_name().endswith(f"_0_{key}"):
+                    tex[key] = asset
+    if len(tex) < 3:
+        unreal.log_warning(f"ShortStack: skin textures not found in {folder} (have {sorted(tex)})")
+        return
+    tex["ORM"].set_editor_property("srgb", False)
+    tex["Normal"].set_editor_property("srgb", False)
+    tex["Normal"].set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_NORMALMAP)
+    for t in tex.values():
+        eal.save_loaded_asset(t)
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    profile_path = f"{MAT_DIR}/SP_Skin"
+    if eal.does_asset_exist(profile_path):
+        profile = eal.load_asset(profile_path)
+    else:
+        profile = tools.create_asset("SP_Skin", MAT_DIR, unreal.SubsurfaceProfile, None)  # the defaults are skin
+    mat = _new_material(f"M_{mesh.get_name()}Skin", True)
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_SUBSURFACE_PROFILE)
+    mat.set_editor_property("subsurface_profile", profile)
+    samplers = {}
+    for i, (key, kind) in enumerate((("BaseColor", unreal.MaterialSamplerType.SAMPLERTYPE_COLOR),
+                                     ("ORM", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR),
+                                     ("Normal", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL))):
+        e = _expr(mat, unreal.MaterialExpressionTextureSample, -700, i * 260)
+        e.set_editor_property("texture", tex[key])
+        e.set_editor_property("sampler_type", kind)
+        samplers[key] = e
+    mel.connect_material_property(samplers["BaseColor"], "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(samplers["ORM"], "G", unreal.MaterialProperty.MP_ROUGHNESS)
+    mel.connect_material_property(samplers["ORM"], "R", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
+    mel.connect_material_property(samplers["Normal"], "RGB", unreal.MaterialProperty.MP_NORMAL)
+    spec = _expr(mat, unreal.MaterialExpressionConstant, -300, 600)
+    spec.set_editor_property("r", 0.35)  # skin reflects less than the default 0.5
+    mel.connect_material_property(spec, "", unreal.MaterialProperty.MP_SPECULAR)
+    _finish(mat)
+    materials = list(mesh.get_editor_property("materials"))
+    if materials:
+        slot = materials[0]
+        slot.set_editor_property("material_interface", mat)
+        materials[0] = slot
+        mesh.set_editor_property("materials", materials)
 
 
 def run(force=False):

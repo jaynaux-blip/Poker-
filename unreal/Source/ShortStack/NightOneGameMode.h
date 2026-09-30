@@ -94,4 +94,5 @@ private:
 	bool bInvertLook = false;
 	bool bShowHints = true;
 	bool bOverScreenNow = false;
+	FVector2D ArmsPointer = FVector2D(0.5, 0.5); // the pointer across the view (0..1), for the mouse hand
 };

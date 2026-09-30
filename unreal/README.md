@@ -126,6 +126,15 @@ Props are modeled, textured and reviewed in Blender by the scripts in `art/blend
 - the laptop (`SM_Laptop_Base` and `SM_Laptop_Lid`). The stage hinges the lid at 18.5 mm and tilts it back 18.3°, and it mounts the RiverLine screen just in front of the lid's glass. Its keyboard, legends and backlight are part of the mesh.
 - the desk, chair, desk lamp, mug, phone and poker chips (`SM_Desk`, `SM_Chair`, `SM_DeskLamp`, `SM_Mug`, `SM_Phone`, `SM_ChipStacks`). The phone's lock screen lies on its cracked glass.
 
+- the mouse and mousepad (`SM_Mouse`, `SM_MousePad`). The mouse slides across the pad as you move the pointer;
+- the player's arms (`SK_Arms`, a skeletal mesh). The setup script rebuilds their skin material with Unreal's Subsurface Profile shading (`M_SK_ArmsSkin`), which glTF can't carry.
+
+**First-person arms** (`FirstPersonArms.cpp`, driven from `NightOneStage::UpdateArms`):
+- The left hand rests on the laptop's palm rest. On each hotkey it reaches over and taps the key with the finger a touch typist would use (F and R index, C middle, X ring, A pinky, Space thumb).
+- The right hand holds the mouse, which follows the pointer. It clicks with the index finger, and reaches over for the arrows and M.
+- Two-bone IK places the wrists; the hands and fingers pose from the mesh's reference pose. The shoulders follow the head when you lean in.
+- The arms hide during the title screen's establishing shot.
+
 Blender props are modeled facing -Y. The stage takes the importer's orientation from the laptop base's bounds and turns every prop by that same yaw.
 
 To swap in a hand-made model instead:

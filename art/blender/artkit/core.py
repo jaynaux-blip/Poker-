@@ -419,11 +419,15 @@ def gltf_material(name, base_color, orm, normal, emissive=None, emissive_strengt
 # ------------------------------------------------------------------ export
 
 def export_glb(objs, name):
+    """Writes objs as unreal/Art/Meshes/<name>.glb. A mesh parented to an armature goes out skinned,
+    with the armature."""
     os.makedirs(EXPORT_DIR, exist_ok=True)
     path = os.path.join(EXPORT_DIR, f'{name}.glb')
-    select_only(objs)
+    rigs = [o.parent for o in objs if o.parent is not None and o.parent.type == 'ARMATURE']
+    select_only(list(objs) + rigs)
     bpy.ops.export_scene.gltf(filepath=path, export_format='GLB', use_selection=True, export_apply=True, export_yup=True,
-                              export_texcoords=True, export_normals=True, export_materials='EXPORT', export_image_format='AUTO')
+                              export_texcoords=True, export_normals=True, export_materials='EXPORT', export_image_format='AUTO',
+                              export_skins=bool(rigs), export_animations=False)
     return path
 
 
