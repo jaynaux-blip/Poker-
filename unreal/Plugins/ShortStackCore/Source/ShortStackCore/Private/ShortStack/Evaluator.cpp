@@ -1,4 +1,5 @@
 #include "ShortStack/Evaluator.h"
+#include "StrictFloat.h"
 
 #include "ShortStack/Cards.h"
 

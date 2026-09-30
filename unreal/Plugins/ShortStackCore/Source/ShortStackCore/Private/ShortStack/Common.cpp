@@ -1,4 +1,5 @@
 #include "ShortStack/Common.h"
+#include "StrictFloat.h"
 
 #include <cmath>
 #include <cstdio>

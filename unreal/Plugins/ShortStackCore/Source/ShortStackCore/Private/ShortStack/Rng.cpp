@@ -1,4 +1,5 @@
 #include "ShortStack/Rng.h"
+#include "StrictFloat.h"
 
 #include <cmath>
 

@@ -2,20 +2,33 @@
 
 The browser prototype in `web/` proves the systems and the look of Night One. Production moves to **Unreal Engine 5** (gameplay, rendering) with **Blender** (modelling, UVs, texturing hand-off). This doc maps what exists to where it goes.
 
-## 1. The engine code ports almost line for line
+## 1. The engine: ported and verified
 
-Everything in `web/src/core/` is plain logic with no rendering or DOM. It becomes a C++ runtime module, `ShortStackCore`. It uses no engine types, so it stays unit-testable outside the editor.
+**Status: done.** `web/src/core/` is now also a C++ Unreal plugin, `unreal/Plugins/ShortStackCore`. It is plain C++17 with no engine types, so it builds inside Unreal and as a standalone CMake library. See the [plugin README](../unreal/Plugins/ShortStackCore/README.md) for install, test and API details.
 
-| Prototype | UE5 target | Notes |
+| Prototype | C++ (`ShortStackCore`) | Notes |
 |---|---|---|
-| `rng.ts` | `FSSRng` (sfc32) | Keep the algorithm identical so seeds reproduce the same hands across both builds. |
-| `evaluator.ts`, `equity.ts` | `FHandEvaluator`, `FEquity` | Same bit-mask evaluator. Run Monte Carlo on a worker thread (`UE::Tasks`). |
-| `hand.ts` | `FHoldemHand` | Keep the event list. Blueprints subscribe to events to drive animation. |
-| `tournament.ts`, `structure.ts` | `FTournament` in a `UGameInstanceSubsystem` | Simulate off-screen tables on a background task. |
-| `ai/*` | `FBotBrain` and archetype data | Move archetype numbers into a `UDataTable` so designers can tune them. |
-| `ai/grading.ts` | `FDecisionGrader` | Feeds the results screen and the XP system. |
+| `rng.ts` | `ss::Rng` (sfc32) | Same algorithm, so a seed deals the same cards in both builds. |
+| `cards.ts`, `evaluator.ts`, `equity.ts` | `ShortStack/Cards.h`, `Evaluator.h`, `Equity.h` | Same bitmask evaluator. The preflop tables are generated from the TypeScript source. |
+| `hand.ts` | `ss::Hand` | Keeps the event list. Blueprints will subscribe to it to drive animation. |
+| `tournament.ts`, `structure.ts`, `names.ts` | `ss::Tournament`, `Structure.h`, `Names.h` | Wrapped by `UShortStackTournamentSubsystem` (a `UGameInstanceSubsystem`) for Blueprints. |
+| `ai/*` | `ShortStack/AI/*` (`ss::Decide`, `ss::MakeProfile`) | Archetype numbers can move into a `UDataTable` later so designers can tune them. |
+| `ai/grading.ts` | `ss::AnalyzeDecision`, `ss::GradeDecision` | Feeds the results screen and the XP system. |
 
-**Porting safety net:** export golden test vectors from the TypeScript tests (seeded hands, evaluator results, side-pot outcomes) as JSON. Run the same vectors against the C++ build with UE's Automation Tests. When both agree, the port is correct.
+**Proof the port is correct:** `web/scripts/gen-golden.ts` runs the TypeScript engine on seeded inputs and writes 4,201 records to `Tests/golden_vectors.txt`. The records cover:
+
+- RNG streams, evaluator results and equities, stored as exact double bit patterns
+- 400 full hands and 160 bot-played hands with think times
+- 129 graded decisions
+- payouts and ICM
+- every round of three tournaments, including a 1,000-player field
+
+The C++ build replays all of them and must match bit for bit.
+
+- **Standalone:** passes under GCC and Clang, C++17 and C++20, Debug and Release. `ctest` also runs a chip-conservation fuzz over 5,000 hands and a full 1,000-player tournament (about 0.7 s, roughly 4x faster than TypeScript).
+- **Unreal:** the automation test `ShortStack.Core.GoldenVectors` runs the same vectors. The wrapper still needs its first compile inside Unreal on the desktop.
+
+After any engine change in `web/`, run `npm run export:cpp` and bring the C++ side back to 0 mismatches.
 
 ## 2. Presentation
 
@@ -50,7 +63,7 @@ Everything in `web/src/core/` is plain logic with no rendering or DOM. It become
 
 ## 4. First milestones in UE5
 
-1. **Core port:** `ShortStackCore` compiles and passes the golden vectors.
+1. **Core port** (done outside Unreal): `ShortStackCore` passes the golden vectors. What remains is the first build inside UE5 and a green `ShortStack.Core.GoldenVectors` run.
 2. **Night One scene:** the apartment in UE5 with Lumen, the rain window and the laptop widget running the lobby.
 3. **Playable table:** a full tournament through the UMG client, graded decisions and the results screen.
 4. **Vertical slice 2, "The Back Room":** the laundromat live cash game. This is where UE5 earns its keep: MetaHuman opponents, physical chips and cards, tells and composure.

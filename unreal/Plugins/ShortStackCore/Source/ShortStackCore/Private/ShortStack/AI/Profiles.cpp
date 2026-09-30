@@ -1,4 +1,5 @@
 #include "ShortStack/AI/Profiles.h"
+#include "../StrictFloat.h"
 
 #include "ShortStack/Rng.h"
 

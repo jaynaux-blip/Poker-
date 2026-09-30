@@ -1,4 +1,5 @@
 #include "ShortStack/AI/View.h"
+#include "../StrictFloat.h"
 
 namespace ss
 {

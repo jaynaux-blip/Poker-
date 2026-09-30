@@ -1,4 +1,5 @@
 #include "ShortStack/Hand.h"
+#include "StrictFloat.h"
 
 #include "ShortStack/Cards.h"
 #include "ShortStack/Evaluator.h"

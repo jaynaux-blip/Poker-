@@ -12,6 +12,7 @@ npm install
 npm run dev        # http://localhost:5173
 npm test           # engine, AI, tournament and session tests
 npm run build      # dist/short-stack.html: one self-contained file
+npm run export:cpp # after engine changes: refresh the C++ port's golden vectors and tables
 ```
 
 Useful URL parameters for development: `?shot=lobby`, `?shot=table&event=1`, `?pace=full`, `?speed=4` (game time multiplier), `?debug=outside` or `?debug=nopost` (render passes), `?hq=1` (full pixel ratio).

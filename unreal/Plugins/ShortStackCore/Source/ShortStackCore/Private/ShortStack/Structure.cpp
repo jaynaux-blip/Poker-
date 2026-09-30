@@ -1,4 +1,5 @@
 #include "ShortStack/Structure.h"
+#include "StrictFloat.h"
 
 #include <cmath>
 

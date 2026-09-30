@@ -1,4 +1,5 @@
 #include "ShortStack/AI/Bot.h"
+#include "../StrictFloat.h"
 
 #include "ShortStack/AI/Model.h"
 #include "ShortStack/Equity.h"

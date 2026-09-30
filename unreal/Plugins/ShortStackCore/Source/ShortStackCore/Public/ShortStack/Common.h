@@ -7,7 +7,7 @@
 // Rules for this code so it stays portable and deterministic:
 //   - No exceptions and no RTTI (Unreal builds with both off).
 //   - Doubles only, no float; never let the compiler fuse multiply-adds
-//     (-ffp-contract=off, MSVC /fp:precise).
+//     (every engine .cpp includes StrictFloat.h; builds also pass -ffp-contract=off or /fp:precise).
 //   - No libm transcendental functions in simulation code: use PowInt/DetPow.
 //   - At most one RNG call per expression, since C++ does not define the
 //     evaluation order of operands.

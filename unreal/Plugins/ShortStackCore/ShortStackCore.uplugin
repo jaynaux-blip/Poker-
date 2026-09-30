@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "Short Stack Core",
+	"Description": "The SHORT STACK poker engine: No-Limit Hold'em rules, multi-table tournaments, opponent AI and decision grading. Deterministic, and verified bit for bit against the browser prototype.",
+	"Category": "Gameplay",
+	"CreatedBy": "Short Stack",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "ShortStackCore",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

@@ -1,4 +1,5 @@
 #include "ShortStack/Golden.h"
+#include "StrictFloat.h"
 
 #include "ShortStack/AI/Bot.h"
 #include "ShortStack/AI/Grading.h"

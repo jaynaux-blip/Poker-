@@ -1,4 +1,5 @@
 #include "ShortStack/Tournament.h"
+#include "StrictFloat.h"
 
 #include "ShortStack/AI/View.h"
 #include "ShortStack/Names.h"

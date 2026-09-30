@@ -1,4 +1,5 @@
 #include "ShortStack/Cards.h"
+#include "StrictFloat.h"
 
 #include <cstring>
 

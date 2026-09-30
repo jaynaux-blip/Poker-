@@ -1,4 +1,5 @@
 #include "ShortStack/Names.h"
+#include "StrictFloat.h"
 
 #include "ShortStack/Rng.h"
 
