@@ -6,6 +6,8 @@ namespace ss
 {
 namespace ui
 {
+constexpr float Pi = 3.14159265358979f;
+
 /** sRGB color with straight alpha, components 0..1. */
 struct Color
 {

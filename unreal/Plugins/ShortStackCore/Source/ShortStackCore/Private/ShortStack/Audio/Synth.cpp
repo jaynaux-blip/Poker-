@@ -9,8 +9,8 @@ namespace audio
 {
 namespace synth_detail
 {
-const double Pi = 3.14159265358979323846;
-const double Sr = static_cast<double>(SampleRate);
+const double SynthPi = 3.14159265358979323846;
+const double SynthRate = static_cast<double>(SampleRate);
 
 enum class FilterType : int
 {
@@ -35,8 +35,8 @@ struct Biquad
 
 	void Set(FilterType T, double Freq, double Q)
 	{
-		const double F = Freq < 10.0 ? 10.0 : Freq > Sr * 0.49 ? Sr * 0.49 : Freq;
-		const double W0 = 2.0 * Pi * F / Sr;
+		const double F = Freq < 10.0 ? 10.0 : Freq > SynthRate * 0.49 ? SynthRate * 0.49 : Freq;
+		const double W0 = 2.0 * SynthPi * F / SynthRate;
 		const double Cw = std::cos(W0);
 		const double Sw = std::sin(W0);
 		double Alpha = 0.0;
@@ -125,7 +125,7 @@ struct Buffer
 	std::vector<float> Data;
 	void Ensure(double Seconds)
 	{
-		const size_t N = static_cast<size_t>(Seconds * Sr) + 1;
+		const size_t N = static_cast<size_t>(Seconds * SynthRate) + 1;
 		if (Data.size() < N)
 		{
 			Data.resize(N, 0.0f);
@@ -142,11 +142,11 @@ void Burst(Buffer& Out, Noise& Rng, double Delay, double Freq, double Q, double 
 	}
 	Out.Ensure(Delay + Dur + 0.06);
 	Biquad F;
-	const size_t Start = static_cast<size_t>(Delay * Sr);
-	const size_t N = static_cast<size_t>((Dur + 0.05) * Sr);
+	const size_t Start = static_cast<size_t>(Delay * SynthRate);
+	const size_t N = static_cast<size_t>((Dur + 0.05) * SynthRate);
 	for (size_t I = 0; I < N; ++I)
 	{
-		const double T = static_cast<double>(I) / Sr;
+		const double T = static_cast<double>(I) / SynthRate;
 		const double Fq = SweepTo > 0.0 ? Freq * std::pow(SweepTo / Freq, T < Dur ? T / Dur : 1.0) : Freq;
 		if (I % 32 == 0)
 		{
@@ -161,14 +161,14 @@ void Burst(Buffer& Out, Noise& Rng, double Delay, double Freq, double Q, double 
 void Tone(Buffer& Out, double Freq, double Dur, double Gain, double Delay = 0.0, Wave W = Wave::Sine, double SlideTo = 0.0)
 {
 	Out.Ensure(Delay + Dur + 0.06);
-	const size_t Start = static_cast<size_t>(Delay * Sr);
-	const size_t N = static_cast<size_t>((Dur + 0.05) * Sr);
+	const size_t Start = static_cast<size_t>(Delay * SynthRate);
+	const size_t N = static_cast<size_t>((Dur + 0.05) * SynthRate);
 	double Phase = 0.0;
 	for (size_t I = 0; I < N; ++I)
 	{
-		const double T = static_cast<double>(I) / Sr;
+		const double T = static_cast<double>(I) / SynthRate;
 		const double Fq = SlideTo > 0.0 ? Freq * std::pow(SlideTo / Freq, T < Dur ? T / Dur : 1.0) : Freq;
-		Phase += Fq / Sr;
+		Phase += Fq / SynthRate;
 		Phase -= std::floor(Phase);
 		double S = 0.0;
 		switch (W)
@@ -176,7 +176,7 @@ void Tone(Buffer& Out, double Freq, double Dur, double Gain, double Delay = 0.0,
 		case Wave::Square: S = Phase < 0.5 ? 1.0 : -1.0; break;
 		case Wave::Triangle: S = 1.0 - 4.0 * std::fabs(Phase - 0.5); break;
 		case Wave::Sawtooth: S = 2.0 * Phase - 1.0; break;
-		default: S = std::sin(2.0 * Pi * Phase); break;
+		default: S = std::sin(2.0 * SynthPi * Phase); break;
 		}
 		Out.Data[Start + I] += static_cast<float>(S * Envelope(T, 0.01, Gain, Dur));
 	}
@@ -310,10 +310,10 @@ std::vector<float> Render(Effect Id, uint32_t Seed)
 			Biquad Lp;
 			Lp.Set(FilterType::LowPass, 400.0, 1.0);
 			B.Ensure(K * 0.45 + 0.4);
-			const size_t Start = static_cast<size_t>(K * 0.45 * Sr);
-			for (size_t I = 0; I < static_cast<size_t>(0.35 * Sr); ++I)
+			const size_t Start = static_cast<size_t>(K * 0.45 * SynthRate);
+			for (size_t I = 0; I < static_cast<size_t>(0.35 * SynthRate); ++I)
 			{
-				const double T = static_cast<double>(I) / Sr;
+				const double T = static_cast<double>(I) / SynthRate;
 				const double Ph = std::fmod(T * 155.0, 1.0);
 				const double G = T < 0.02 ? 0.18 * T / 0.02 : T < 0.28 ? 0.18 : T < 0.32 ? 0.18 * (0.32 - T) / 0.04 : 0.0;
 				B.Data[Start + I] += static_cast<float>(Lp.Process(Ph < 0.5 ? 1.0 : -1.0) * G);
@@ -341,7 +341,7 @@ std::vector<float> RenderThunder(float Strength, uint32_t Seed)
 	double Brown = 0.0;
 	for (size_t I = 0; I < B.Data.size(); ++I)
 	{
-		const double T = static_cast<double>(I) / Sr;
+		const double T = static_cast<double>(I) / SynthRate;
 		if (I % 32 == 0)
 		{
 			Lp.Set(FilterType::LowPass, 420.0 * std::pow(90.0 / 420.0, T < 4.0 ? T / 4.0 : 1.0), 1.0);
@@ -416,7 +416,7 @@ double Ambience::NextNoise()
 
 void Ambience::Render(float* Out, int N)
 {
-	const double Dt = 1.0 / Sr;
+	const double Dt = 1.0 / SynthRate;
 	for (int I = 0; I < N; ++I)
 	{
 		const double Fade = Time < 3.0 ? Time / 3.0 : 1.0; // ambience fades in over 3 s
@@ -424,10 +424,10 @@ void Ambience::Render(float* Out, int N)
 		const double Hiss = HissLp.Process(HissBp.Process(NextNoise())) * 0.05;
 		// Heavy rain body with a slow swell.
 		Brown = (Brown + 0.02 * NextNoise()) / 1.02;
-		const double Swell = 0.12 + 0.05 * std::sin(2.0 * Pi * 0.07 * Time);
+		const double Swell = 0.12 + 0.05 * std::sin(2.0 * SynthPi * 0.07 * Time);
 		const double Body = BodyLp.Process(Brown * 3.5) * Swell;
 		// Room tone: fridge hum and the laptop fan.
-		const double Hum = std::sin(2.0 * Pi * 58.0 * Time) * 0.008;
+		const double Hum = std::sin(2.0 * SynthPi * 58.0 * Time) * 0.008;
 		const double Fan = FanLp.Process(NextNoise()) * 0.025;
 		// Drips: short resonant ticks every 50-300 ms.
 		if (Time >= NextDrip)

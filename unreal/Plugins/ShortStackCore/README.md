@@ -8,6 +8,14 @@ The SHORT STACK poker engine in C++. It is a port of `web/src/core/` from the br
 - decision grading
 - the multi-table tournament with payouts and ICM
 
+On top of the engine, the plugin also carries the rest of Night One's logic as plain C++:
+
+- `ShortStack/Game`: the session (lobby, pacing, hero turns, sprint, story texts, results, saves)
+- `ShortStack/UI`: a vector canvas, the RiverLine client, card art, the phone and printed props
+- `ShortStack/Audio`: sound synthesis
+
+The Unreal project in `unreal/` (see `unreal/README.md`) is a thin host around them.
+
 The port is **bit-exact**: given the same seed, it deals the same cards, makes the same bot decisions and produces the same tournament as the TypeScript build. `Tests/golden_vectors.txt` proves this with 4,201 records exported from TypeScript and replayed here.
 
 ```
@@ -89,10 +97,22 @@ cmake -S . -B build && cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-On Windows, run this from a *Developer Command Prompt for VS*. The Standalone build runs two tests:
+On Windows, run this from a *Developer Command Prompt for VS*. The Standalone build runs five tests:
 
 - `golden_test`: the 4,201 golden vectors.
 - `unit_test`: 5,000 fuzzed hands checking chip conservation, illegal-action rejection, and a 1,000-player tournament played to the end, about 0.7 s.
+- `session_test`: whole tournaments played through the Night One session, with random and best-EV heroes. It covers the bubble, the money, the final table, sprint mode and save round trips.
+- `ui_test`: clicks drive the session (log in, select an event, register). It also draws every screen.
+- `audio_test`: every synthesized sound is audible, finite and in range.
+
+To look at the UI without Unreal:
+
+```
+./build/ui_test /tmp/ui
+cd ../../../../web && node scripts/render-drawlists.mjs /tmp/ui
+```
+
+This writes PNGs of each RiverLine screen, the phone and the props. `audio_test /tmp/wav` writes every sound as a WAV file.
 
 ## Keeping the TypeScript and C++ builds in sync
 

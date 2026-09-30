@@ -11,7 +11,6 @@ namespace ui
 {
 namespace canvas_detail
 {
-const float Pi = 3.14159265358979f;
 
 Vec2 Sub(Vec2 A, Vec2 B) { return {A.X - B.X, A.Y - B.Y}; }
 Vec2 Add(Vec2 A, Vec2 B) { return {A.X + B.X, A.Y + B.Y}; }

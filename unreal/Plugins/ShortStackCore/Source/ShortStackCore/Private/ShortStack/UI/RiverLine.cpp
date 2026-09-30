@@ -15,15 +15,14 @@ namespace ui
 {
 namespace riverline_detail
 {
-const float Pi = 3.14159265358979f;
-const float W = RiverLine::Width;
-const float H = RiverLine::Height;
+const float RlW = RiverLine::Width;
+const float RlH = RiverLine::Height;
 const float TableCx = 590.0f;
 const float TableCy = 430.0f;
 const float TableRx = 420.0f;
 const float TableRy = 226.0f;
-const float Top = 64.0f;
-const float SideX = 1188.0f;
+const float RlTop = 64.0f;
+const float RlSideX = 1188.0f;
 
 Color GradeColor(Grade G)
 {
@@ -110,7 +109,7 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	C = &Cv;
 	UI.Begin(Cv, Now);
 	C->Save();
-	C->FillRect({0.0f, 0.0f, W, H}, Paint::Linear({0.0f, 0.0f}, {0.0f, H}, pal::Bg2, pal::Bg));
+	C->FillRect({0.0f, 0.0f, RlW, RlH}, Paint::Linear({0.0f, 0.0f}, {0.0f, RlH}, pal::Bg2, pal::Bg));
 	TopBar(Now);
 	switch (S.CurrentScreen)
 	{
@@ -231,8 +230,8 @@ void RiverLine::Logo(float X, float Y, float Scale)
 
 void RiverLine::TopBar(double Now)
 {
-	C->FillRect({0.0f, 0.0f, W, Top}, Hex(0x08101b));
-	C->FillRect({0.0f, Top - 1.0f, W, 1.0f}, pal::Line);
+	C->FillRect({0.0f, 0.0f, RlW, RlTop}, Hex(0x08101b));
+	C->FillRect({0.0f, RlTop - 1.0f, RlW, 1.0f}, pal::Line);
 	Logo(24.0f, 16.0f, 1.0f);
 	if (S.CurrentScreen != Screen::Boot)
 	{
@@ -245,19 +244,19 @@ void RiverLine::TopBar(double Now)
 			const float Tw = UI.Measure(Tabs[I], 17.0f, 700);
 			if (Active)
 			{
-				UI.RRect({X, Top - 4.0f, Tw, 3.0f}, 1.5f, pal::Accent);
+				UI.RRect({X, RlTop - 4.0f, Tw, 3.0f}, 1.5f, pal::Accent);
 			}
 			X += Tw + 34.0f;
 		}
 	}
 	// Balance and clock.
-	UI.Text(ClockString(S.ClockMinutes()), W - 24.0f, 40.0f, Ts(17.0f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, true));
+	UI.Text(ClockString(S.ClockMinutes()), RlW - 24.0f, 40.0f, Ts(17.0f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, true));
 	const std::string Bal = "Balance " + Money(S.BankrollCents);
 	const float Bw = UI.Measure(Bal, 17.0f, 700) + 28.0f;
-	UI.RRect({W - 140.0f - Bw, 16.0f, Bw, 32.0f}, 16.0f, Hex(0x10213a), pal::Line);
-	UI.Text(Bal, W - 140.0f - Bw / 2.0f, 38.0f, Ts(17.0f, 700, pal::Gold, Align::Center));
+	UI.RRect({RlW - 140.0f - Bw, 16.0f, Bw, 32.0f}, 16.0f, Hex(0x10213a), pal::Line);
+	UI.Text(Bal, RlW - 140.0f - Bw / 2.0f, 38.0f, Ts(17.0f, 700, pal::Gold, Align::Center));
 	// Connection dot.
-	C->FillCircle(W - 128.0f, 32.0f, 4.0f, std::sin(Now * 2.0) > -0.9 ? pal::Green : pal::Dim);
+	C->FillCircle(RlW - 128.0f, 32.0f, 4.0f, std::sin(Now * 2.0) > -0.9 ? pal::Green : pal::Dim);
 }
 
 void RiverLine::DrawCursor()
@@ -293,19 +292,19 @@ void RiverLine::Boot(double Now)
 	for (int K = 0; K < 6; ++K)
 	{
 		std::vector<Vec2> Pts;
-		for (float X = 0.0f; X <= W; X += 8.0f)
+		for (float X = 0.0f; X <= RlW; X += 8.0f)
 		{
 			Pts.push_back({X, 640.0f + static_cast<float>(K) * 34.0f + static_cast<float>(std::sin(X / 140.0f + Now * 0.6 + K)) * 18.0f});
 		}
 		C->StrokePolyline(Pts, false, K % 2 ? pal::Accent : pal::Accent2, 2.0f);
 	}
 	C->SetAlpha(Prev);
-	const Rect Card{W / 2.0f - 280.0f, 200.0f, 560.0f, 420.0f};
+	const Rect Card{RlW / 2.0f - 280.0f, 200.0f, 560.0f, 420.0f};
 	UI.RRect(Card, 18.0f, Rgba(17, 28, 46, 0.92f), pal::Line);
 	Logo(Card.X + 150.0f, Card.Y + 50.0f, 1.6f);
-	UI.Text("Welcome back, " + S.HeroName, W / 2.0f, Card.Y + 175.0f, Ts(26.0f, 700, pal::Ink, Align::Center));
-	UI.Text("Account balance", W / 2.0f, Card.Y + 225.0f, Ts(16.0f, 500, pal::Muted, Align::Center));
-	UI.Text(Money(S.BankrollCents), W / 2.0f, Card.Y + 275.0f, Ts(44.0f, 800, pal::Gold, Align::Center, Baseline::Alphabetic, true));
+	UI.Text("Welcome back, " + S.HeroName, RlW / 2.0f, Card.Y + 175.0f, Ts(26.0f, 700, pal::Ink, Align::Center));
+	UI.Text("Account balance", RlW / 2.0f, Card.Y + 225.0f, Ts(16.0f, 500, pal::Muted, Align::Center));
+	UI.Text(Money(S.BankrollCents), RlW / 2.0f, Card.Y + 275.0f, Ts(44.0f, 800, pal::Gold, Align::Center, Baseline::Alphabetic, true));
 	ButtonOpts Login;
 	Login.Kind = ButtonKind::Primary;
 	Login.Size = 24.0f;
@@ -314,7 +313,7 @@ void RiverLine::Boot(double Now)
 		S.CurrentScreen = Screen::Lobby;
 		S.OnBoot();
 	}
-	UI.Text("Play responsibly. RiverLine is a fictional site.", W / 2.0f, Card.Y + Card.H + 40.0f, Ts(14.0f, 500, pal::Dim, Align::Center));
+	UI.Text("Play responsibly. RiverLine is a fictional site.", RlW / 2.0f, Card.Y + Card.H + 40.0f, Ts(14.0f, 500, pal::Dim, Align::Center));
 }
 
 // ------------------------------------------------------------------ lobby
@@ -323,7 +322,7 @@ void RiverLine::LobbyScreen(double /*Now*/)
 {
 	const std::vector<LobbyEvent>& L = Lobby();
 	const float X0 = 24.0f;
-	const float Y0 = Top + 24.0f;
+	const float Y0 = RlTop + 24.0f;
 	UI.Text("Tournaments", X0, Y0 + 30.0f, Ts(30.0f, 800));
 	UI.Text("NL Hold'em \xC2\xB7 Tonight", X0 + 210.0f, Y0 + 30.0f, Ts(17.0f, 500, pal::Muted));
 	struct Col
@@ -377,7 +376,7 @@ void RiverLine::LobbyScreen(double /*Now*/)
 	// Detail panel.
 	const LobbyEvent& Ev = L[static_cast<size_t>(S.Selected)];
 	const float Px = 1048.0f;
-	const Rect Pr{Px, Y0, W - Px - 24.0f, 700.0f};
+	const Rect Pr{Px, Y0, RlW - Px - 24.0f, 700.0f};
 	UI.RRect(Pr, 14.0f, pal::Panel, pal::Line);
 	UI.Text(Ev.Name, Px + 24.0f, Y0 + 48.0f, Ts(28.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, Pr.W - 48.0f));
 	UI.Text(Ev.Game + " \xC2\xB7 " + Ev.Speed, Px + 24.0f, Y0 + 80.0f, Ts(16.0f, 500, pal::Muted));
@@ -1131,9 +1130,9 @@ void RiverLine::Controls(double /*Now*/)
 void RiverLine::SidePanel(double Now)
 {
 	const Tournament& T = *S.T;
-	const float X = SideX;
-	const float Wd = W - X - 16.0f;
-	const Rect Card{X, Top + 14.0f, Wd, 300.0f};
+	const float X = RlSideX;
+	const float Wd = RlW - X - 16.0f;
+	const Rect Card{X, RlTop + 14.0f, Wd, 300.0f};
 	UI.RRect(Card, 14.0f, pal::Panel, pal::Line);
 	UI.Text(T.Spec.Name, X + 18.0f, Card.Y + 34.0f, Ts(19.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, Wd - 120.0f));
 	UI.Text("Table " + std::to_string(S.TableId), X + Wd - 18.0f, Card.Y + 34.0f, Ts(15.0f, 700, pal::Muted, Align::Right));
@@ -1195,7 +1194,7 @@ void RiverLine::SidePanel(double Now)
 		}
 		UI.Text(Tabs[I].second, R.X + R.W / 2.0f, R.Y + 24.0f, Ts(15.0f, 700, Active ? pal::Ink : pal::Muted, Align::Center));
 	}
-	const Rect Box{X, Ty + 44.0f, Wd, H - (Ty + 44.0f) - 16.0f};
+	const Rect Box{X, Ty + 44.0f, Wd, RlH - (Ty + 44.0f) - 16.0f};
 	UI.RRect(Box, 14.0f, Hex(0x0c1524), pal::Line);
 	C->PushClip(Box);
 	if (S.Tab == RightTab::Chat)
@@ -1297,7 +1296,7 @@ void RiverLine::Overlays(double Now)
 	if (S.Sprinting && S.T)
 	{
 		const Tournament& T = *S.T;
-		C->FillRect({0.0f, Top, SideX - 8.0f, H - Top}, Rgba(5, 9, 16, 0.78f));
+		C->FillRect({0.0f, RlTop, RlSideX - 8.0f, RlH - RlTop}, Rgba(5, 9, 16, 0.78f));
 		UI.Text("SPRINTING AHEAD", TableCx, 330.0f, Ts(40.0f, 900, pal::Accent, Align::Center));
 		UI.Text("The game is playing your hands in a solid, tight-aggressive style.", TableCx, 372.0f, Ts(17.0f, 500, pal::Muted, Align::Center));
 		const Level& L = T.CurrentLevel();
@@ -1337,23 +1336,23 @@ void RiverLine::ResultsScreen(double Now)
 	const Results& R = S.LastResults;
 	const bool Cashed = R.PrizeCents > 0;
 	const Color Col = R.Won ? pal::Gold : Cashed ? pal::Green : pal::Red;
-	UI.Text(R.EventName, 60.0f, Top + 60.0f, Ts(20.0f, 600, pal::Muted));
-	UI.Text(R.Won ? std::string("Champion.") : "You finished " + Ordinal(R.Place), 60.0f, Top + 130.0f, Ts(60.0f, 900, Col));
-	UI.Text("of " + ChipsText(R.Entrants) + " players", 60.0f, Top + 172.0f, Ts(22.0f, 500, pal::Muted));
+	UI.Text(R.EventName, 60.0f, RlTop + 60.0f, Ts(20.0f, 600, pal::Muted));
+	UI.Text(R.Won ? std::string("Champion.") : "You finished " + Ordinal(R.Place), 60.0f, RlTop + 130.0f, Ts(60.0f, 900, Col));
+	UI.Text("of " + ChipsText(R.Entrants) + " players", 60.0f, RlTop + 172.0f, Ts(22.0f, 500, pal::Muted));
 	if (Cashed)
 	{
-		UI.Text("+" + Money(R.PrizeCents), 60.0f, Top + 250.0f, Ts(46.0f, 800, pal::Gold, Align::Left, Baseline::Alphabetic, true));
+		UI.Text("+" + Money(R.PrizeCents), 60.0f, RlTop + 250.0f, Ts(46.0f, 800, pal::Gold, Align::Left, Baseline::Alphabetic, true));
 	}
 	else
 	{
-		UI.Text("No cash this time", 60.0f, Top + 250.0f, Ts(40.0f, 800, pal::Muted));
+		UI.Text("No cash this time", 60.0f, RlTop + 250.0f, Ts(40.0f, 800, pal::Muted));
 	}
-	UI.Text("Buy-in " + (R.BuyInCents ? Money(R.BuyInCents) : std::string("free")) + " \xC2\xB7 " + std::to_string(R.Hands) + " hands \xC2\xB7 biggest pot won " + ChipsText(static_cast<double>(R.BiggestPot)), 60.0f, Top + 292.0f, Ts(17.0f, 500, pal::Muted));
-	UI.Text("Balance now " + Money(S.BankrollCents), 60.0f, Top + 330.0f, Ts(20.0f, 700, pal::Ink));
+	UI.Text("Buy-in " + (R.BuyInCents ? Money(R.BuyInCents) : std::string("free")) + " \xC2\xB7 " + std::to_string(R.Hands) + " hands \xC2\xB7 biggest pot won " + ChipsText(static_cast<double>(R.BiggestPot)), 60.0f, RlTop + 292.0f, Ts(17.0f, 500, pal::Muted));
+	UI.Text("Balance now " + Money(S.BankrollCents), 60.0f, RlTop + 330.0f, Ts(20.0f, 700, pal::Ink));
 
 	// Accuracy gauge.
 	const float Gx = 1240.0f;
-	const float Gy = Top + 200.0f;
+	const float Gy = RlTop + 200.0f;
 	const double Acc = R.AccuracyPct;
 	const double Shown = Acc * (Now >= S.ResultsAt ? EaseOutCubic((Now - S.ResultsAt) / 1.4) : 1.0);
 	C->StrokeArc(Gx, Gy, 110.0f, Pi * 0.75f, Pi * 2.25f, Hex(0x13213a), 18.0f, true);
@@ -1377,7 +1376,7 @@ void RiverLine::ResultsScreen(double Now)
 	}
 	const float Total = static_cast<float>(R.Grades.empty() ? 1 : R.Grades.size());
 	float Bx = 60.0f;
-	const float By = Top + 390.0f;
+	const float By = RlTop + 390.0f;
 	for (int I = 0; I < 5; ++I)
 	{
 		const float Wd = (static_cast<float>(Counts[I]) / Total) * 1000.0f;
@@ -1423,7 +1422,7 @@ void RiverLine::ResultsScreen(double Now)
 
 	ButtonOpts Back;
 	Back.Kind = ButtonKind::Primary;
-	if (UI.Button("backlobby", {1120.0f, H - 120.0f, 420.0f, 70.0f}, "Back to lobby", Back))
+	if (UI.Button("backlobby", {1120.0f, RlH - 120.0f, 420.0f, 70.0f}, "Back to lobby", Back))
 	{
 		S.LeaveResults();
 	}

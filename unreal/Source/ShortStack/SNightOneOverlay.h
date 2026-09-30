@@ -1,0 +1,53 @@
+#pragma once
+
+#include "Brushes/SlateColorBrush.h"
+#include "CoreMinimal.h"
+#include "Widgets/SCompoundWidget.h"
+
+class SEditableTextBox;
+
+/**
+ * Viewport overlay: the title card with the screen-name field (port of the
+ * intro in web/src/main.ts), phone notifications and the controls hint.
+ */
+class SHORTSTACK_API SNightOneOverlay : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SNightOneOverlay) {}
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
+
+	/** Called with the chosen screen name when the player presses Begin. */
+	TFunction<void(const FString&)> OnBegin;
+
+	void SetName(const FString& Name);
+	void HideIntro();
+	bool IsIntroVisible() const { return !bIntroHidden; }
+	void ShowToast(const FString& From, const FString& Body);
+	void ShowHint();
+	TSharedPtr<SEditableTextBox> GetNameBox() const { return NameBox; }
+
+private:
+	FReply OnBeginClicked();
+	void OnNameCommitted(const FText& Text, ETextCommit::Type CommitType);
+	EVisibility IntroVisibility() const;
+	EVisibility ToastVisibility() const;
+	FText ToastFrom() const { return FText::FromString(ToastFromText); }
+	FText ToastBody() const { return FText::FromString(ToastBodyText); }
+
+	TSharedPtr<SEditableTextBox> NameBox;
+	TSharedPtr<SWidget> IntroPanel;
+	TSharedPtr<SWidget> ToastPanel;
+	TSharedPtr<SWidget> HintPanel;
+	FSlateColorBrush Dim = FSlateColorBrush(FLinearColor(0.004f, 0.005f, 0.009f, 0.9f));
+	FSlateColorBrush ToastBrush = FSlateColorBrush(FLinearColor(0.02f, 0.025f, 0.04f, 0.85f));
+	FString ToastFromText;
+	FString ToastBodyText;
+	double Clock = 0.0;
+	double IntroHiddenAt = -1.0;
+	double ToastAt = -100.0;
+	double HintAt = -100.0;
+	bool bIntroHidden = false;
+};
