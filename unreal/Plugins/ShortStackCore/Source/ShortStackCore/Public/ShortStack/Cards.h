@@ -13,7 +13,7 @@ extern const char* const SuitChars; // "cdhs"
 extern const char* const RankNames[13];
 extern const char* const RankPlurals[13];
 
-std::string CardToString(Card C);
+SHORTSTACKCORE_API std::string CardToString(Card C);
 /** Parse "As" style text; returns -1 on bad input. */
 Card ParseCard(const std::string& Text);
 /** Parse "AsKd" or "As Kd". */

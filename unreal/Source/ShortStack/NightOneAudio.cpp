@@ -1,6 +1,7 @@
 #include "NightOneAudio.h"
 
 #include "Components/AudioComponent.h"
+#include "Sound/SoundAttenuation.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundWaveProcedural.h"
 
@@ -46,19 +47,38 @@ void UNightOneAudio::StartAmbience()
 	AmbienceComponent = UGameplayStatics::SpawnSound2D(this, AmbienceWave.Get(), AmbienceLevel(), 1.0f, 0.0f, nullptr, false, false);
 }
 
+void UNightOneAudio::StartAmbience(TFunction<void(float*, int32)> Source, float Level)
+{
+	if (AmbienceComponent)
+	{
+		return;
+	}
+	AmbienceSource = MoveTemp(Source);
+	AmbienceGain = Level;
+	AmbienceWave = NightOneAudioDetail::MakeWave(this, 10000.0f);
+	AmbienceComponent = UGameplayStatics::SpawnSound2D(this, AmbienceWave.Get(), AmbienceLevel(), 1.0f, 0.0f, nullptr, false, false);
+}
+
 void UNightOneAudio::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	// Keep about a quarter second of ambience queued ahead of the audio renderer.
-	if (AmbienceWave && AmbienceGen)
+	if (AmbienceWave && (AmbienceGen || AmbienceSource))
 	{
 		const int32 Target = ss::audio::SampleRate / 4 * static_cast<int32>(sizeof(int16));
 		int32 Guard = 0;
 		while (AmbienceWave->GetAvailableAudioByteCount() < Target && Guard++ < 16)
 		{
 			float Block[1200];
-			AmbienceGen->Render(Block, 1200);
-			NightOneAudioDetail::Queue(AmbienceWave, Block, 1200, 1.0f);
+			if (AmbienceSource)
+			{
+				AmbienceSource(Block, 1200);
+			}
+			else
+			{
+				AmbienceGen->Render(Block, 1200);
+			}
+			NightOneAudioDetail::Queue(AmbienceWave, Block, 1200, AmbienceGain);
 		}
 	}
 	HeartClock += DeltaTime;
@@ -114,7 +134,7 @@ void UNightOneAudio::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience)
+void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience, const FVector* At)
 {
 	if (bMuted || Samples.empty())
 	{
@@ -124,7 +144,28 @@ void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume, bo
 	USoundWaveProcedural* Wave = NightOneAudioDetail::MakeWave(this, Seconds);
 	NightOneAudioDetail::Queue(Wave, Samples.data(), static_cast<int32>(Samples.size()), 1.0f);
 	const float Level = Volume * MasterVolume * (bAmbience ? AmbienceVolume : EffectsVolume);
-	if (UAudioComponent* Shot = UGameplayStatics::SpawnSound2D(this, Wave, Level, 1.0f, 0.0f, nullptr, false, true))
+	UAudioComponent* Shot = nullptr;
+	if (At)
+	{
+		if (!Attenuation)
+		{
+			// Close sounds: full volume within an arm's length, natural falloff across the room.
+			Attenuation = NewObject<USoundAttenuation>(this);
+			FSoundAttenuationSettings& A = Attenuation->Attenuation;
+			A.bAttenuate = true;
+			A.bSpatialize = true;
+			A.AttenuationShape = EAttenuationShape::Sphere;
+			A.AttenuationShapeExtents = FVector(80.0f);
+			A.FalloffDistance = 1800.0f;
+			A.DistanceAlgorithm = EAttenuationDistanceModel::NaturalSound;
+		}
+		Shot = UGameplayStatics::SpawnSoundAtLocation(this, Wave, *At, FRotator::ZeroRotator, Level, 1.0f, 0.0f, Attenuation, nullptr, true);
+	}
+	else
+	{
+		Shot = UGameplayStatics::SpawnSound2D(this, Wave, Level, 1.0f, 0.0f, nullptr, false, true);
+	}
+	if (Shot)
 	{
 		OneShots.Add(Shot);
 		OneShotEnds.Add(HeartClock + Seconds + 0.2);
@@ -136,6 +177,14 @@ void UNightOneAudio::Play(ss::SoundId Id, float Volume)
 	if (!bMuted)
 	{
 		PlayPcm(ss::audio::Render(Id, Volume, Seed++), 1.0f);
+	}
+}
+
+void UNightOneAudio::PlayAt(ss::SoundId Id, const FVector& At, float Volume)
+{
+	if (!bMuted)
+	{
+		PlayPcm(ss::audio::Render(Id, Volume, Seed++), 1.0f, false, &At);
 	}
 }
 

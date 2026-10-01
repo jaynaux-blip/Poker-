@@ -32,5 +32,5 @@ struct BotDecision
 double PushRange(double StackBB, int Behind);
 
 /** Chooses an action from public information only. Port of decide() in web/src/core/ai/bot.ts. */
-BotDecision Decide(const PlayerView& View, const BotContext& Ctx);
+SHORTSTACKCORE_API BotDecision Decide(const PlayerView& View, const BotContext& Ctx);
 } // namespace ss

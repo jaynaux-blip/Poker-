@@ -157,20 +157,20 @@ struct HandConfig
 class Hand
 {
 public:
-	Hand(const HandConfig& Config, Rng& R);
+	SHORTSTACKCORE_API Hand(const HandConfig& Config, Rng& R);
 
 	/** False if the config was invalid (fewer than two players, button on an empty seat). */
 	bool IsValid() const { return bValid; }
 
 	/** Applies an action for the player to act. Returns false (and changes nothing) if it is illegal. */
-	bool Act(const PlayerAction& Action);
-	LegalActions GetLegalActions() const;
+	SHORTSTACKCORE_API bool Act(const PlayerAction& Action);
+	SHORTSTACKCORE_API LegalActions GetLegalActions() const;
 
-	Chips Pot() const;
-	Chips PotBeforeStreet() const;
-	const HandSeat* SeatByNumber(int SeatNumber) const;
-	int ActiveCount() const;
-	std::vector<PotResult> BuildPots() const;
+	SHORTSTACKCORE_API Chips Pot() const;
+	SHORTSTACKCORE_API Chips PotBeforeStreet() const;
+	SHORTSTACKCORE_API const HandSeat* SeatByNumber(int SeatNumber) const;
+	SHORTSTACKCORE_API int ActiveCount() const;
+	SHORTSTACKCORE_API std::vector<PotResult> BuildPots() const;
 
 	std::vector<HandSeat> Seats;
 	std::vector<HandEvent> Events;

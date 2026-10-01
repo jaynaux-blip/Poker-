@@ -23,7 +23,11 @@ public:
 	UNightOneAudio();
 
 	void StartAmbience();
+	/** Streams a different room tone (Source fills N mono samples at ss::audio::SampleRate). */
+	void StartAmbience(TFunction<void(float*, int32)> Source, float Level = 1.0f);
 	void Play(ss::SoundId Id, float Volume = 1.0f);
+	/** A sound from a place in the world, falling off with distance. */
+	void PlayAt(ss::SoundId Id, const FVector& At, float Volume = 1.0f);
 	void PlayEffect(ss::audio::Effect Id);
 	void Thunder(float Delay, float Strength);
 	void SetHeartbeat(bool bOn);
@@ -41,7 +45,7 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	void PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience = false);
+	void PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience = false, const FVector* At = nullptr);
 	float AmbienceLevel() const { return bMuted ? 0.0f : MasterVolume * AmbienceVolume; }
 
 	UPROPERTY(Transient)
@@ -56,6 +60,10 @@ private:
 	TArray<double> OneShotEnds;
 
 	TUniquePtr<ss::audio::Ambience> AmbienceGen;
+	TFunction<void(float*, int32)> AmbienceSource;
+	float AmbienceGain = 1.0f;
+	UPROPERTY(Transient)
+	TObjectPtr<class USoundAttenuation> Attenuation;
 	float EffectsVolume = 1.0f;
 	float AmbienceVolume = 1.0f;
 	uint32 Seed = 1;

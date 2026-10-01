@@ -13,7 +13,7 @@ extern const double PreflopEquityHU[169];
 
 /** Share of all 1326 combos at least as strong as each hand class (AA = 0.0045, 32o = 1.0). */
 const double* ClassPercentile();
-double HandPercentile(Card A, Card B);
+SHORTSTACKCORE_API double HandPercentile(Card A, Card B);
 
 /** A range as a band of the preflop ranking: hands with percentile in (Min, Max]. */
 struct RangeBand
@@ -23,7 +23,7 @@ struct RangeBand
 };
 
 /** Monte Carlo equity of Hero against opponents drawn from Ranges; ties split. */
-double EquityVsRanges(const std::vector<Card>& Hero, const std::vector<Card>& Board, const std::vector<RangeBand>& Ranges, int Iterations, Rng& R);
+SHORTSTACKCORE_API double EquityVsRanges(const std::vector<Card>& Hero, const std::vector<Card>& Board, const std::vector<RangeBand>& Ranges, int Iterations, Rng& R);
 
 /**
  * Pot share of every known hand: exact enumeration from the flop on,

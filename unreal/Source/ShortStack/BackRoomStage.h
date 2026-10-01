@@ -114,8 +114,6 @@ private:
 	// Blender props (art/blender), imported from unreal/Art/Meshes; each is optional.
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> TableMesh;
-	UPROPERTY()
-	TObjectPtr<UStaticMesh> ChipsMesh;
 
 	UPROPERTY()
 	TObjectPtr<USpotLightComponent> LampLight;

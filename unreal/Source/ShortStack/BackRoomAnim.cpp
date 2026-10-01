@@ -214,9 +214,10 @@ bool FBackRoomBodyProxy::Evaluate(FPoseContext& Output)
 	const int32 Spine[5] = {S.Find(TEXT("spine_01")), S.Find(TEXT("spine_02")), S.Find(TEXT("spine_03")), S.Find(TEXT("spine_04")), S.Find(TEXT("spine_05"))};
 	const int32 Neck1 = S.Find(TEXT("neck_01")), Neck2 = S.Find(TEXT("neck_02")), Head = S.Find(TEXT("head"));
 
-	// Sit: the pelvis drops onto the seat and rolls back a little as the back slumps.
+	// Sit: the pelvis drops onto the seat and rolls back as the back slumps, or tips forward as the
+	// player leans in over the table (people lean from the hips first).
 	S.Move(Pelvis, FVector(0.0, -3.0, P.SeatHeight + 9.0) - S.Pos(Pelvis));
-	S.Rotate(Pelvis, FQuat(FVector::XAxisVector, Rad(7.0f + 6.0f * P.Slouch)));
+	S.Rotate(Pelvis, FQuat(FVector::XAxisVector, Rad(7.0f + 6.0f * P.Slouch - 15.0f * P.Lean)));
 
 	// Legs: thighs along the seat (sloping down a touch so the feet reach the floor), shins down,
 	// feet flat, knees apart as far as the player sprawls.
@@ -231,7 +232,7 @@ bool FBackRoomBodyProxy::Evaluate(FPoseContext& Output)
 	}
 
 	// Spine: lean in toward the table (+Y), twist, and breathe.
-	const float LeanDeg = 4.0f + 30.0f * P.Lean + 8.0f * P.Slouch;
+	const float LeanDeg = 4.0f + 34.0f * P.Lean + 8.0f * P.Slouch;
 	const float LeanShare[5] = {0.14f, 0.18f, 0.22f, 0.24f, 0.22f};
 	for (int32 K = 0; K < 5; ++K)
 	{
@@ -268,8 +269,8 @@ bool FBackRoomBodyProxy::Evaluate(FPoseContext& Output)
 			const float T = P.Time * 9.0f;
 			Target += P.Tremble * FVector(Wobble(T, 1.3f + Side), Wobble(T * 1.1f, 4.1f + Side), Wobble(T * 0.9f, 7.7f + Side));
 		}
-		// Elbows out to the sides and a little forward: forearms come to rest on the rail's padding.
-		const FVector Pole = S.Pos(Upper) + FVector(Sx * 45.0, 12.0, -22.0);
+		// Elbows out and down: forearms come to rest along the rail's padding.
+		const FVector Pole = S.Pos(Upper) + FVector(Sx * 40.0, 14.0, -34.0);
 		FVector Joint, End;
 		AnimationCore::SolveTwoBoneIK(S.Pos(Upper), S.Pos(Lower), S.Pos(Hand), Pole, Target, Joint, End, false, 1.0, 1.0);
 		S.Aim(Upper, Lower, Joint - S.Pos(Upper), W);
@@ -310,12 +311,16 @@ bool FBackRoomBodyProxy::Evaluate(FPoseContext& Output)
 		const FQuat Rel = S.CS[Head].GetRotation() * Ref[Head].GetRotation().Inverse();
 		const FVector Fwd = Rel.RotateVector(FVector::YAxisVector);
 		FVector Want = (P.LookAt - S.Pos(Head)).GetSafeNormal();
-		// Limit to +/-75 degrees of yaw and -45..+35 of pitch from straight ahead.
-		const float Yaw = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan2(Want.X, Want.Y)), -75.0f, 75.0f);
+		// Limit to +/-85 degrees of yaw and -45..+35 of pitch from straight ahead.
+		const float Yaw = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan2(Want.X, Want.Y)), -85.0f, 85.0f);
 		const float Pitch = FMath::Clamp(FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(Want.Z, -1.0, 1.0))), -45.0f, 35.0f);
 		Want = FVector(FMath::Sin(Rad(Yaw)) * FMath::Cos(Rad(Pitch)), FMath::Cos(Rad(Yaw)) * FMath::Cos(Rad(Pitch)), FMath::Sin(Rad(Pitch)));
 		FQuat D = FQuat::FindBetweenNormals(Fwd, Want);
-		D = FQuat::Slerp(FQuat::Identity, D, FMath::Clamp(P.HeadFollow, 0.0f, 1.0f));
+		// The eyes take a comfortable 15-odd degrees; anything further, the head turns for (nobody
+		// looks at the person beside them out of the corners of their eyes for long).
+		const float Off = FMath::RadiansToDegrees(D.GetAngle());
+		const float Follow = FMath::Max(P.HeadFollow, Off > 1.0f ? 1.0f - 16.0f / Off : 0.0f);
+		D = FQuat::Slerp(FQuat::Identity, D, FMath::Clamp(Follow, 0.0f, 1.0f));
 		S.Rotate(Neck1, FQuat::Slerp(FQuat::Identity, D, 0.3f));
 		S.Rotate(Neck2, FQuat::Slerp(FQuat::Identity, D, 0.3f));
 		S.Rotate(Head, FQuat::Slerp(FQuat::Identity, D, 0.4f));
@@ -424,8 +429,9 @@ void FBackRoomFaceProxy::EvaluateSource(FPoseContext& Output)
 		const FVector Local = Rel.UnrotateVector((LookAt - Center).GetSafeNormal());
 		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Local.X, Local.Y));      // + toward the character's left
 		const float Pitch = FMath::RadiansToDegrees(FMath::Atan2(Local.Z, FVector2D(Local.X, Local.Y).Size()));
-		const float Left = FMath::Clamp(Yaw / 32.0f, 0.0f, 1.0f), Right = FMath::Clamp(-Yaw / 32.0f, 0.0f, 1.0f);
-		const float Up = FMath::Clamp(Pitch / 24.0f, 0.0f, 1.0f), Down = FMath::Clamp(-Pitch / 28.0f, 0.0f, 1.0f);
+		// Never all the way to the rig's limit: that much white looks wrong at once.
+		const float Left = FMath::Clamp(Yaw / 32.0f, 0.0f, 0.6f), Right = FMath::Clamp(-Yaw / 32.0f, 0.0f, 0.6f);
+		const float Up = FMath::Clamp(Pitch / 24.0f, 0.0f, 0.6f), Down = FMath::Clamp(-Pitch / 28.0f, 0.0f, 0.85f);
 		for (const TCHAR* Eye : {TEXT("L"), TEXT("R")})
 		{
 			Output.Curve.Set(FName(*FString::Printf(TEXT("CTRL_expressions_eyeLookLeft%s"), Eye)), Left);

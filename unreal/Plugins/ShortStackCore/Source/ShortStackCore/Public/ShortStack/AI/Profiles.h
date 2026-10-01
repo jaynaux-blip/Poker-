@@ -53,7 +53,7 @@ bool ArchetypeFromName(const std::string& Name, Archetype& Out);
 const char* TimingName(TimingStyle T);
 
 /** Rolls an individual player of the given archetype (consumes the RNG exactly like the TypeScript build). */
-Profile MakeProfile(Archetype A, Rng& R);
+SHORTSTACKCORE_API Profile MakeProfile(Archetype A, Rng& R);
 
 /** Weighted opponent mix for a stake band ("freeroll", "micro", "low", "high"). Order matters for RNG parity. */
 using Population = std::vector<std::pair<Archetype, int>>;

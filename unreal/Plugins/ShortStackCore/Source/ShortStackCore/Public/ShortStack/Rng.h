@@ -12,19 +12,19 @@ namespace ss
 class Rng
 {
 public:
-	explicit Rng(const std::string& Seed);
+	SHORTSTACKCORE_API explicit Rng(const std::string& Seed);
 
-	uint32_t NextUint32();
+	SHORTSTACKCORE_API uint32_t NextUint32();
 	/** Uniform double in [0, 1). */
-	double Next();
+	SHORTSTACKCORE_API double Next();
 	/** Uniform integer in [0, N), without modulo bias. */
-	int Int(int N);
-	double Range(double Lo, double Hi);
-	bool Chance(double P);
+	SHORTSTACKCORE_API int Int(int N);
+	SHORTSTACKCORE_API double Range(double Lo, double Hi);
+	SHORTSTACKCORE_API bool Chance(double P);
 	/** Approximately normal sample (Irwin-Hall with four terms). */
-	double Gauss(double Mean, double Sd);
+	SHORTSTACKCORE_API double Gauss(double Mean, double Sd);
 	/** Independent child generator. */
-	Rng Fork(const std::string& Label);
+	SHORTSTACKCORE_API Rng Fork(const std::string& Label);
 
 	template <typename T>
 	const T& Pick(const std::vector<T>& Items)

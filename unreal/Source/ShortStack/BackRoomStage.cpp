@@ -185,7 +185,6 @@ void ABackRoomStage::BuildSet()
 	RoomMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Room.M_Room"));
 	SurfaceMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Surface.M_Surface"));
 	TableMesh = LoadProp(TEXT("SM_PokerTable"));
-	ChipsMesh = LoadProp(TEXT("SM_ChipStacks"));
 	BuildShell();
 	BuildTable();
 	BuildMachines();
@@ -247,16 +246,6 @@ void ABackRoomStage::BuildTable()
 		Box(Felt, FVector(-50.0, -110.0, FeltZ - 4.0), FVector(50.0, 110.0, FeltZ));
 		Box(Rail, FVector(-61.0, -122.0, FeltZ - 4.0), FVector(61.0, 122.0, FeltZ - 1.0));
 	}
-	if (ChipsMesh)
-	{
-		// Stacks at a few seats for scale until the game places real stacks.
-		for (int32 Seat : {1, 3, 5, 6})
-		{
-			const FVector Edge = SeatEdge(Seat);
-			const FVector In = (FVector(0.0, FMath::Clamp(Edge.Y, -HalfL, HalfL), FeltZ) - Edge).GetSafeNormal2D();
-			AddMesh(ChipsMesh, nullptr, Edge + In * 26.0, FVector(1.0), FRotator(0.0f, In.Rotation().Yaw + 90.0f, 0.0f));
-		}
-	}
 }
 
 void ABackRoomStage::BuildMachines()
@@ -315,13 +304,27 @@ void ABackRoomStage::BuildLights()
 	URectLightComponent* Bounce = NewPart<URectLightComponent>();
 	Bounce->SetRelativeLocationAndRotation(FVector(0.0, 0.0, FeltZ + 2.0), FRotator(90.0f, 0.0f, 0.0f));
 	Bounce->SetIntensityUnits(ELightUnits::Candelas);
-	Bounce->SetIntensity(9.0f);
+	Bounce->SetIntensity(24.0f);
 	Bounce->SetLightColor(Srgb(0xc9d6a0));
 	Bounce->SetSourceWidth(200.0f);
 	Bounce->SetSourceHeight(90.0f);
 	Bounce->SetAttenuationRadius(320.0f);
 	Bounce->SetCastShadows(false);
 	Bounce->SetVolumetricScatteringIntensity(0.0f);
+	// The lamp's pool on the felt and the shade's glow lift the whole room a little: a broad, soft
+	// light from above the table that reaches the players' faces past the edge of the cone.
+	URectLightComponent* Overhead = NewPart<URectLightComponent>();
+	Overhead->SetRelativeLocationAndRotation(FVector(0.0, 0.0, 262.0), FRotator(-90.0f, 0.0f, 0.0f));
+	Overhead->SetIntensityUnits(ELightUnits::Candelas);
+	Overhead->SetIntensity(14.0f);
+	Overhead->SetLightColor(Srgb(0xffd2a4));
+	// Pointing down, a rect light's width runs along world Y (the table's length) and its height along X.
+	Overhead->SetSourceWidth(360.0f);
+	Overhead->SetSourceHeight(230.0f);
+	Overhead->SetBarnDoorAngle(88.0f);
+	Overhead->SetAttenuationRadius(520.0f);
+	Overhead->SetCastShadows(true);
+	Overhead->SetVolumetricScatteringIntensity(0.0f);
 	// The light leaking out of the shade's top vents onto the ceiling.
 	ShadeGlow = NewPart<UPointLightComponent>();
 	ShadeGlow->SetRelativeLocation(LampAt + FVector(0.0, 0.0, 30.0));
@@ -386,7 +389,8 @@ void ABackRoomStage::BuildAir()
 	Fog->SetVolumetricFog(true);
 	Fog->SetVolumetricFogScatteringDistribution(0.55f);
 	Fog->SetVolumetricFogAlbedo(FColor(236, 232, 224));
-	Fog->SetVolumetricFogExtinctionScale(1.0f);
+	// Thick enough that the lamp's cone shows in the smoke (tested 1..12: under 6 the cone vanishes).
+	Fog->SetVolumetricFogExtinctionScale(8.0f);
 	Fog->SetVolumetricFogDistance(1400.0f);
 	Fog->SetStartDistance(0.0f);
 
@@ -397,7 +401,8 @@ void ABackRoomStage::BuildAir()
 	P.bOverride_AutoExposureMethod = true;
 	P.AutoExposureMethod = EAutoExposureMethod::AEM_Histogram;
 	P.bOverride_AutoExposureMinBrightness = true;
-	P.AutoExposureMinBrightness = 6.2f;
+	// Low enough that the eye opens up on a face in the shadows (Focus), the felt still holds it down.
+	P.AutoExposureMinBrightness = 5.3f;
 	P.bOverride_AutoExposureMaxBrightness = true;
 	P.AutoExposureMaxBrightness = 7.6f;
 	P.bOverride_AutoExposureBias = true;

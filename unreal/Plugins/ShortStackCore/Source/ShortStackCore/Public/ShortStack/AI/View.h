@@ -44,7 +44,7 @@ struct PlayerView
 	bool CanCheck = false;
 };
 
-PlayerView MakeView(const Hand& H, int SeatIdx);
+SHORTSTACKCORE_API PlayerView MakeView(const Hand& H, int SeatIdx);
 
 enum class Position : int
 {
