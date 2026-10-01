@@ -8,5 +8,6 @@ public class ShortStackEditorTarget : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 		ExtraModuleNames.Add("ShortStack");
+		ExtraModuleNames.Add("ShortStackEditor");
 	}
 }

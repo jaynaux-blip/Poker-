@@ -17,6 +17,9 @@ unreal/Content/ShortStack/Materials/
 unreal/Content/ShortStack/Meshes/
 unreal/Content/ShortStack/Cards/
 unreal/Content/Maps/
+# The Back Room's MetaHumans (~4 GB): made by unreal/Content/Python/backroom_cast.py from the Creator's
+# presets with Epic's MetaHuman cloud service (needs an Epic account sign-in).
+unreal/Content/ShortStack/Cast/
 __pycache__/
 # Intermediate textures and review renders from art/blender/build.py
 art/build/
