@@ -165,6 +165,8 @@ struct HistoryEntry
 	int Entrants = 0;
 	Chips Prize = 0;
 	double AccuracyPct = 0.0;
+	Chips BuyInCents = -1;  // -1 in saves from before the network schedule
+	std::string EventId;    // the scheduled instance ("mm-26@1530"), if known
 };
 
 /** Everything that persists between runs. */
@@ -174,6 +176,7 @@ struct SaveData
 	std::string HeroName = "grinder_3c";
 	std::vector<HistoryEntry> History;
 	std::vector<std::string> TextsSeen;
+	double ClockMinutes = 2.0 * 60.0 + 7.0; // the lobby clock
 
 	/** Line-based text, safe to store in any save system. */
 	SHORTSTACKCORE_API std::string Serialize() const;
@@ -223,7 +226,8 @@ public:
 	ss::Banner CurrentBanner;
 
 	// ------------------------------------------------------------ tournament
-	const LobbyEvent* Event = nullptr;
+	const LobbyEvent* Event = nullptr; // the event being played (points at Joined)
+	LobbyEvent Joined;
 	std::unique_ptr<Tournament> T;
 	std::unique_ptr<Hand> CurHand;
 	int TableId = 0;
@@ -264,7 +268,10 @@ public:
 	void OnBoot();
 
 	bool CanAfford(const LobbyEvent& Ev) const;
+	/** Registers for a Lobby() event (tonight's hand-tuned listings). */
 	void Register(int Index);
+	/** Registers for any joinable listing (the network schedule builds them); pays the buy-in and opens the table. */
+	SHORTSTACKCORE_API void RegisterEvent(const LobbyEvent& Listing);
 
 	void DealerLine(const std::string& Text);
 	void SystemLine(const std::string& Text);
@@ -277,8 +284,12 @@ public:
 	void BeginSprint();
 	void StopSprint(const std::string& Reason = "Stopped");
 	void LeaveResults();
-	/** Tournament clock (drives the dawn outside), or 2:07 AM in the lobby. */
+	/** Tournament clock (drives the dawn outside), or the lobby clock. Minutes after midnight on Night One. */
 	SHORTSTACKCORE_API double ClockMinutes() const;
+	/** The clock on the network's calendar (net::DayOf, net::TimeLabel). */
+	SHORTSTACKCORE_API double WorldMinutes() const;
+	/** The clock between tournaments: 2:07 AM at first, running in real time, and where the last tournament ended. */
+	double LobbyMinutes = 2.0 * 60.0 + 7.0;
 
 	int HeroSeatIdx() const;
 	const TPlayer* PlayerById(const std::string& Id) const;
@@ -305,6 +316,7 @@ private:
 	std::set<std::string> TextsSeen;
 	std::string SeedBase;
 	int RegisterCount = 0;
+	double LastTick = -1.0;
 	Rng R;
 	size_t Cursor = 0;
 	double NextAt = 0.0;

@@ -4,6 +4,7 @@ This folder is the Unreal project for Night One. It contains:
 
 - the seated first-person view in the rainy apartment
 - the RiverLine poker client on the laptop, playable from the lobby through a full tournament to the results screen
+- a living poker network behind the lobby: a round-the-clock schedule, series, 1,600 regulars, leaderboards, news and your career page
 - phone texts from Dee and the landlord
 - the composure and tilt effects
 - procedural sound
@@ -99,7 +100,7 @@ Source/ShortStack/          the game module (Unreal side)
   NightOneSaveGame          bankroll, results and story flags
 Plugins/ShortStackCore/     everything engine-agnostic, tested without Unreal (see its README)
   ShortStack/*              poker engine, bots, grading, tournaments
-  ShortStack/Game           the Night One session, lobby, chat
+  ShortStack/Game           the Night One session, lobby, chat, the RiverLine network (schedule, series, players, boards, news)
   ShortStack/UI             vector canvas, RiverLine client, menus (FrontEnd), card art, phone, printed props
   ShortStack/Audio          sound synthesis
 ```

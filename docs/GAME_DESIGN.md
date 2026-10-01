@@ -60,6 +60,16 @@ The whole online career is played from a first-person desk. The apartment is the
 
 **Formats:** freerolls, standard MTTs, turbos, hypers, rebuy/add-on events, progressive knockout (PKO) bounties, step satellites, 9-max sit & gos, and the weekly Sunday Showdown ($215 buy-in, $1M guaranteed).
 
+**The network (built).** RiverLine runs like a big real site, all day, every day. It is simulated from fixed seeds and the world clock, so it is the same on every run and moves on as the night does.
+
+- **Schedule.** About 270 recurring events: dailies across the stakes ($0.25 hypers to a $525 High Roller), PKOs, mystery bounties, flip & gos, six-max, Omaha, deepstacks, step satellites, and weekly majors (Monday Madness, Thursday Heater, the $1,050 RiverLine Millions with $3M guaranteed, the $215 Sunday Showdown with $1M guaranteed). Every event has a registration curve, late registration, a field that shrinks, a final table and an overlay when the guarantee isn't met.
+- **Series.** Micro Madness (Oct 1 to 14: 70 events, $5M guaranteed, an $11 Main Event for $1M) is running on Night One. RCOP 2026 (Oct 18 to Nov 8: 154 events, $100M guaranteed, a $5,250 Main Event with $25M guaranteed) is announced, with a step-satellite ladder from $2.20. Summer Slam is history.
+- **Players.** 1,600 named regulars from 28 countries, with skill, volume, stakes, lifetime records and weekly form, including Team RiverLine pros and the rival, gh0stfold. Events the player isn't in are resolved statistically: the regulars who make each final table are drawn by skill, volume and stakes.
+- **Leaderboards.** The Night Shift (tonight's micro-stakes race, $1,000 to the top 20), Player of the Year, the all-time Money List, Titles, Final Tables and the running series. Rows show rank movement and eight-week form. The player's own rank is estimated across the whole 412,000-player network.
+- **News.** Big wins, series updates, schedule changes and records, plus the player's own results ("grinder_3c wins MM #26").
+- **Career.** Lifetime stats, a rank by winnings (Rookie to Legend), the rent bar ($1,225 by Friday), a career path from first cash to the RCOP Main Event, and a head-to-head card against the rival.
+- **What you can play.** Tonight's story events and any scheduled Hold'em freezeout or re-entry with a full-ring field of up to 3,000 can be played, an hour before the start through late registration. Bounties, satellites, Omaha, six-max and huge fields are locked "until later in your career."
+
 **Multi-tabling.** You can play several tournaments at once, tiled across your monitors. It is the online game's signature skill: managing your attention.
 
 - You focus a table by looking at it.

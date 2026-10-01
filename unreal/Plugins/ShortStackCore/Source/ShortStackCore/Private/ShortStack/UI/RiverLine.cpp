@@ -108,13 +108,14 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 {
 	C = &Cv;
 	UI.Begin(Cv, Now);
+	NetFrame(Now);
 	C->Save();
 	C->FillRect({0.0f, 0.0f, RlW, RlH}, Paint::Linear({0.0f, 0.0f}, {0.0f, RlH}, pal::Bg2, pal::Bg));
 	TopBar(Now);
 	switch (S.CurrentScreen)
 	{
 	case Screen::Boot: Boot(Now); break;
-	case Screen::Lobby: LobbyScreen(Now); break;
+	case Screen::Lobby: LobbyPages(Now); break;
 	case Screen::Table: Table(Now); break;
 	case Screen::Results: ResultsScreen(Now); break;
 	}
@@ -235,22 +236,11 @@ void RiverLine::TopBar(double Now)
 	Logo(24.0f, 16.0f, 1.0f);
 	if (S.CurrentScreen != Screen::Boot)
 	{
-		const char* Tabs[3] = {"Lobby", "My Tournaments", "Cashier"};
-		float X = 250.0f;
-		for (int I = 0; I < 3; ++I)
-		{
-			const bool Active = (I == 0 && S.CurrentScreen == Screen::Lobby) || (I == 1 && (S.CurrentScreen == Screen::Table || S.CurrentScreen == Screen::Results));
-			UI.Text(Tabs[I], X, 40.0f, Ts(17.0f, Active ? 700 : 500, Active ? pal::Ink : pal::Muted));
-			const float Tw = UI.Measure(Tabs[I], 17.0f, 700);
-			if (Active)
-			{
-				UI.RRect({X, RlTop - 4.0f, Tw, 3.0f}, 1.5f, pal::Accent);
-			}
-			X += Tw + 34.0f;
-		}
+		NavTabs(Now);
 	}
 	// Balance and clock.
-	UI.Text(ClockString(S.ClockMinutes()), RlW - 24.0f, 40.0f, Ts(17.0f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, true));
+	UI.Text(ClockString(S.ClockMinutes()), RlW - 24.0f, 34.0f, Ts(17.0f, 700, pal::Ink, Align::Right, Baseline::Alphabetic, true));
+	UI.Text(std::string(net::WeekdayName(net::DayOf(World))) + ", " + net::DateLabel(net::DayOf(World)), RlW - 24.0f, 52.0f, Ts(12.0f, 600, pal::Muted, Align::Right));
 	const std::string Bal = "Balance " + Money(S.BankrollCents);
 	const float Bw = UI.Measure(Bal, 17.0f, 700) + 28.0f;
 	UI.RRect({RlW - 140.0f - Bw, 16.0f, Bw, 32.0f}, 16.0f, Hex(0x10213a), pal::Line);
@@ -314,141 +304,6 @@ void RiverLine::Boot(double Now)
 		S.OnBoot();
 	}
 	UI.Text("Play responsibly. RiverLine is a fictional site.", RlW / 2.0f, Card.Y + Card.H + 40.0f, Ts(14.0f, 500, pal::Dim, Align::Center));
-}
-
-// ------------------------------------------------------------------ lobby
-
-void RiverLine::LobbyScreen(double /*Now*/)
-{
-	const std::vector<LobbyEvent>& L = Lobby();
-	const float X0 = 24.0f;
-	const float Y0 = RlTop + 24.0f;
-	UI.Text("Tournaments", X0, Y0 + 30.0f, Ts(30.0f, 800));
-	UI.Text("NL Hold'em \xC2\xB7 Tonight", X0 + 210.0f, Y0 + 30.0f, Ts(17.0f, 500, pal::Muted));
-	struct Col
-	{
-		const char* T;
-		float X;
-	};
-	const Col Cols[7] = {{"Start", 0}, {"Tournament", 110}, {"Buy-in", 360}, {"Speed", 460}, {"Entrants", 600}, {"Prize", 710}, {"Status", 850}};
-	const float Tx = X0;
-	const float Ty = Y0 + 60.0f;
-	const float Tw = 1000.0f;
-	UI.RRect({Tx, Ty, Tw, 44.0f}, 8.0f, pal::Panel2);
-	for (const Col& Cc : Cols)
-	{
-		UI.Text(Cc.T, Tx + 18.0f + Cc.X, Ty + 28.0f, Ts(14.0f, 700, pal::Muted));
-	}
-	for (size_t I = 0; I < L.size(); ++I)
-	{
-		const LobbyEvent& Ev = L[I];
-		const Rect R{Tx, Ty + 52.0f + static_cast<float>(I) * 62.0f, Tw, 56.0f};
-		const Ui::ClickState St = UI.Clickable("row" + std::to_string(I), R);
-		if (St.Clicked)
-		{
-			S.Selected = static_cast<int>(I);
-			S.ConfirmRegister = false;
-		}
-		const bool Sel = S.Selected == static_cast<int>(I);
-		const Paint Fill = Sel ? Hex(0x15304a) : St.Hover ? Hex(0x132238) : pal::Panel;
-		if (Sel)
-		{
-			UI.RRect(R, 10.0f, Fill, pal::Accent, 1.5f);
-		}
-		else
-		{
-			UI.RRect(R, 10.0f, Fill);
-		}
-		const bool Dim = !Ev.Joinable;
-		const Color Cl = Dim ? pal::Dim : pal::Ink;
-		const float Y = R.Y + 35.0f;
-		UI.Text(Ev.Start, Tx + 18.0f, Y, Ts(16.0f, 600, Ev.Start == "Now" ? pal::Accent : Cl));
-		UI.Text(Ev.Name, Tx + 18.0f + 110.0f, Y, Ts(17.0f, 700, Cl, Align::Left, Baseline::Alphabetic, false, 240.0f));
-		UI.Text(Ev.BuyInLabel, Tx + 18.0f + 360.0f, Y, Ts(17.0f, 700, Dim ? pal::Dim : pal::Gold, Align::Left, Baseline::Alphabetic, true));
-		UI.Text(Ev.Speed, Tx + 18.0f + 460.0f, Y, Ts(15.0f, 500, Dim ? pal::Dim : pal::Muted));
-		UI.Text(Ev.EntrantsLabel, Tx + 18.0f + 600.0f, Y, Ts(16.0f, 500, Cl, Align::Left, Baseline::Alphabetic, true));
-		UI.Text(Ev.GuaranteeLabel, Tx + 18.0f + 710.0f, Y, Ts(16.0f, 600, Cl));
-		const Color StColor = Ev.Status == "Late Reg" ? pal::Green : Ev.Status == "Registering" ? pal::Accent2 : pal::Dim;
-		UI.RRect({Tx + 18.0f + 850.0f, R.Y + 15.0f, 110.0f, 26.0f}, 13.0f, Rgba(255, 255, 255, 0.04f), StColor);
-		UI.Text(Ev.Status, Tx + 18.0f + 905.0f, R.Y + 33.0f, Ts(13.0f, 700, StColor, Align::Center));
-	}
-
-	// Detail panel.
-	const LobbyEvent& Ev = L[static_cast<size_t>(S.Selected)];
-	const float Px = 1048.0f;
-	const Rect Pr{Px, Y0, RlW - Px - 24.0f, 700.0f};
-	UI.RRect(Pr, 14.0f, pal::Panel, pal::Line);
-	UI.Text(Ev.Name, Px + 24.0f, Y0 + 48.0f, Ts(28.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, Pr.W - 48.0f));
-	UI.Text(Ev.Game + " \xC2\xB7 " + Ev.Speed, Px + 24.0f, Y0 + 80.0f, Ts(16.0f, 500, pal::Muted));
-	if (Ev.Joinable)
-	{
-		const TournamentSpec& Sp = Ev.Spec;
-		const std::pair<std::string, std::string> Facts[6] = {
-			{"Buy-in", Ev.BuyInCents == 0 ? std::string("Free") : Money(Sp.BuyInCents - Sp.FeeCents) + " + " + Money(Sp.FeeCents)},
-			{"Starting stack", ChipsText(static_cast<double>(Sp.StartingStack)) + " (100 BB)"},
-			{"Blind levels", std::to_string(static_cast<int>(Sp.LevelMinutes)) + " minutes"},
-			{"Players", ChipsText(Sp.Entrants)},
-			{"Places paid", ChipsText(JsRound(Sp.Entrants * 0.15))},
-			{"Prize pool", Ev.GuaranteeLabel},
-		};
-		for (int I = 0; I < 6; ++I)
-		{
-			const float Y = Y0 + 130.0f + static_cast<float>(I) * 40.0f;
-			UI.Text(Facts[I].first, Px + 24.0f, Y, Ts(16.0f, 500, pal::Muted));
-			UI.Text(Facts[I].second, Pr.X + Pr.W - 24.0f, Y, Ts(17.0f, 700, pal::Ink, Align::Right));
-		}
-		Wrap(Ev.Blurb, Px + 24.0f, Y0 + 400.0f, Pr.W - 48.0f, 17.0f, pal::Ink, 24.0f);
-		const bool Afford = S.CanAfford(Ev);
-		const float By = Y0 + 560.0f;
-		if (!S.ConfirmRegister)
-		{
-			ButtonOpts O;
-			O.Kind = Afford ? ButtonKind::Primary : ButtonKind::Secondary;
-			O.Enabled = Afford;
-			if (UI.Button("reg", {Px + 24.0f, By, Pr.W - 48.0f, 64.0f}, Afford ? "Register \xC2\xB7 " + Ev.BuyInLabel : std::string("Insufficient funds"), O))
-			{
-				S.ConfirmRegister = true;
-			}
-		}
-		else
-		{
-			UI.Text("Balance after: " + Money(S.BankrollCents - Ev.BuyInCents), Px + 24.0f, By - 14.0f, Ts(15.0f, 500, pal::Muted));
-			ButtonOpts Ok;
-			Ok.Kind = ButtonKind::Gold;
-			if (UI.Button("regok", {Px + 24.0f, By, (Pr.W - 60.0f) / 2.0f, 64.0f}, "Confirm", Ok))
-			{
-				S.ConfirmRegister = false;
-				S.Register(S.Selected);
-			}
-			ButtonOpts No;
-			No.Kind = ButtonKind::Ghost;
-			if (UI.Button("regno", {Px + 36.0f + (Pr.W - 60.0f) / 2.0f, By, (Pr.W - 60.0f) / 2.0f, 64.0f}, "Cancel", No))
-			{
-				S.ConfirmRegister = false;
-			}
-		}
-	}
-	else
-	{
-		Wrap("Registration for this event opens later. Tonight, the grind starts smaller.", Px + 24.0f, Y0 + 150.0f, Pr.W - 48.0f, 17.0f, pal::Muted, 24.0f);
-	}
-
-	// Recent results.
-	const float Ry = Ty + 52.0f + static_cast<float>(L.size()) * 62.0f + 26.0f;
-	UI.Text("Recent results", X0, Ry, Ts(18.0f, 700));
-	if (S.History.empty())
-	{
-		UI.Text("No tournaments yet tonight.", X0, Ry + 32.0f, Ts(15.0f, 500, pal::Muted));
-	}
-	for (size_t I = 0; I < S.History.size() && I < 3; ++I)
-	{
-		const HistoryEntry& He = S.History[I];
-		const float Y = Ry + 32.0f + static_cast<float>(I) * 28.0f;
-		UI.Text(He.Name, X0, Y, Ts(15.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, false, 360.0f));
-		UI.Text(Ordinal(He.Place) + " / " + ChipsText(He.Entrants), X0 + 400.0f, Y, Ts(15.0f, 500, pal::Ink, Align::Left, Baseline::Alphabetic, true));
-		UI.Text(He.Prize > 0 ? "+" + Money(He.Prize) : std::string("\xE2\x80\x94"), X0 + 560.0f, Y, Ts(15.0f, 700, He.Prize > 0 ? pal::Green : pal::Dim, Align::Left, Baseline::Alphabetic, true));
-		UI.Text("Accuracy " + Fixed(He.AccuracyPct, 0), X0 + 700.0f, Y, Ts(15.0f, 500, pal::Muted));
-	}
 }
 
 float RiverLine::Wrap(const std::string& Text, float X, float Y, float MaxW, float Size, const Color& Col, float LineHeight)
@@ -922,6 +777,14 @@ void RiverLine::GradeBadges(double Now)
 
 void RiverLine::Key(const std::string& K)
 {
+	if (S.CurrentScreen == Screen::Lobby && PageShown == Page::Lobby && (K == "ArrowUp" || K == "ArrowDown") && !Listed.empty())
+	{
+		const auto Found = std::find(Listed.begin(), Listed.end(), EventId);
+		int I = Found == Listed.end() ? -1 : static_cast<int>(Found - Listed.begin());
+		I = std::min(std::max(I + (K == "ArrowUp" ? -1 : 1), 0), static_cast<int>(Listed.size()) - 1);
+		SelectEvent(Listed[static_cast<size_t>(I)]);
+		return;
+	}
 	if (!S.HasPrompt)
 	{
 		return;

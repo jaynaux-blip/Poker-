@@ -7,6 +7,7 @@
 #include "ShortStack/Equity.h"
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Network.h"
 
 #include <chrono>
 #include <cmath>
@@ -126,13 +127,15 @@ std::string SaveData::Serialize() const
 	Out << "shortstack.nightone.v1\n";
 	Out << "bankroll\t" << BankrollCents << "\n";
 	Out << "name\t" << session_detail::Escape(HeroName) << "\n";
+	Out << "clock\t" << Fixed(ClockMinutes, 2) << "\n";
 	for (const std::string& Key : TextsSeen)
 	{
 		Out << "text\t" << session_detail::Escape(Key) << "\n";
 	}
 	for (const HistoryEntry& H : History)
 	{
-		Out << "result\t" << session_detail::Escape(H.Name) << "\t" << H.Place << "\t" << H.Entrants << "\t" << H.Prize << "\t" << Fixed(H.AccuracyPct, 3) << "\n";
+		Out << "result\t" << session_detail::Escape(H.Name) << "\t" << H.Place << "\t" << H.Entrants << "\t" << H.Prize << "\t" << Fixed(H.AccuracyPct, 3) << "\t" << H.BuyInCents << "\t"
+			<< session_detail::Escape(H.EventId) << "\n";
 	}
 	return Out.str();
 }
@@ -159,11 +162,15 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 		{
 			D.HeroName = session_detail::Unescape(P[1]);
 		}
+		else if (P.size() == 2 && P[0] == "clock")
+		{
+			D.ClockMinutes = std::atof(P[1].c_str());
+		}
 		else if (P.size() == 2 && P[0] == "text")
 		{
 			D.TextsSeen.push_back(session_detail::Unescape(P[1]));
 		}
-		else if (P.size() == 6 && P[0] == "result")
+		else if ((P.size() == 6 || P.size() == 8) && P[0] == "result")
 		{
 			HistoryEntry H;
 			H.Name = session_detail::Unescape(P[1]);
@@ -171,6 +178,11 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 			H.Entrants = std::atoi(P[3].c_str());
 			H.Prize = std::strtoll(P[4].c_str(), nullptr, 10);
 			H.AccuracyPct = std::atof(P[5].c_str());
+			if (P.size() == 8)
+			{
+				H.BuyInCents = std::strtoll(P[6].c_str(), nullptr, 10);
+				H.EventId = session_detail::Unescape(P[7]);
+			}
 			D.History.push_back(H);
 		}
 	}
@@ -194,6 +206,7 @@ Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData*
 		BankrollCents = Loaded->BankrollCents;
 		HeroName = Loaded->HeroName;
 		History = Loaded->History;
+		LobbyMinutes = Loaded->ClockMinutes;
 		TextsSeen.insert(Loaded->TextsSeen.begin(), Loaded->TextsSeen.end());
 	}
 }
@@ -204,6 +217,7 @@ void Session::Save()
 	D.BankrollCents = BankrollCents;
 	D.HeroName = HeroName;
 	D.History = History;
+	D.ClockMinutes = LobbyMinutes;
 	D.TextsSeen.assign(TextsSeen.begin(), TextsSeen.end());
 	Hooks.Save(D);
 }
@@ -213,6 +227,7 @@ void Session::ResetSave()
 	BankrollCents = 237;
 	History.clear();
 	TextsSeen.clear();
+	LobbyMinutes = 2.0 * 60.0 + 7.0;
 	Save();
 }
 
@@ -248,14 +263,22 @@ void Session::Register(int Index)
 	{
 		return;
 	}
-	const LobbyEvent& Ev = L[static_cast<size_t>(Index)];
-	if (!CanAfford(Ev))
+	RegisterEvent(L[static_cast<size_t>(Index)]);
+}
+
+void Session::RegisterEvent(const LobbyEvent& Listing)
+{
+	if (!CanAfford(Listing))
 	{
 		return;
 	}
+	Joined = Listing;
+	// The table opens now, or when the event starts if that's later (the wait passes at the desk).
+	Joined.Spec.StartClock = std::max(Joined.Spec.StartClock, LobbyMinutes);
+	const LobbyEvent& Ev = Joined;
 	BankrollCents -= Ev.BuyInCents;
 	Save();
-	Event = &Ev;
+	Event = &Joined;
 	Grades.clear();
 	Badges.clear();
 	Chat.clear();
@@ -271,6 +294,7 @@ void Session::Register(int Index)
 	Moving = false;
 	CurHand.reset();
 	const std::string Seed = Ev.Spec.Id + ":" + SeedBase + ":" + std::to_string(RegisterCount++);
+	LastTick = -1.0;
 	T = std::make_unique<Tournament>(Ev.Spec, HeroName, Seed, std::vector<ReservedPlayer>{{RivalName, Archetype::Crusher}});
 	CurrentScreen = Screen::Table;
 	SystemLine("Welcome to " + Ev.Spec.Name + ". " + ChipsText(Ev.Spec.Entrants) + " players, " + std::to_string(T->PaidPlaces()) + " paid.");
@@ -468,6 +492,12 @@ int Session::HeroSeatIdx() const
 
 void Session::Update(double InNow)
 {
+	// The lobby clock runs in real time; tournaments run on their own clock.
+	if (LastTick >= 0.0 && !T && InNow > LastTick)
+	{
+		LobbyMinutes += std::min(InNow - LastTick, 1.0) / 60.0;
+	}
+	LastTick = InNow;
 	Now = InNow;
 	for (size_t I = Flights.size(); I-- > 0;)
 	{
@@ -1365,16 +1395,19 @@ void Session::ShowResults()
 	LastResults.BiggestPot = BiggestPot;
 	LastResults.Won = BustPlace == 1;
 	HasResults = true;
+	LobbyMinutes = std::max(LobbyMinutes, T->ClockMinutes());
 	HistoryEntry Entry;
 	Entry.Name = T->Spec.Name;
 	Entry.Place = BustPlace;
 	Entry.Entrants = T->Spec.Entrants;
 	Entry.Prize = BustPrize;
 	Entry.AccuracyPct = Acc;
+	Entry.BuyInCents = T->Spec.BuyInCents;
+	Entry.EventId = T->Spec.Id.find('@') != std::string::npos ? T->Spec.Id : std::string();
 	History.insert(History.begin(), Entry);
-	if (History.size() > 20)
+	if (History.size() > 100)
 	{
-		History.resize(20);
+		History.resize(100);
 	}
 	HasBustInfo = false;
 	CurHand.reset();
@@ -1390,10 +1423,25 @@ void Session::ShowResults()
 	{
 		StoryText("first-cash", "Landlord", "Saw your light on all night. Rent + late fee is $1,225. Friday.");
 	}
+	// Series results reach the people who follow the boards.
+	const bool SeriesEvent = T->Spec.Name.rfind("MM #", 0) == 0;
+	if (SeriesEvent && BustPlace == 1)
+	{
+		StoryText("mm-title", "Dee", "Your name is on the Micro Madness leaderboard. A TITLE. The whole laundromat is refreshing the page.");
+		StoryText("mm-title-rival", RivalName, "gg on the title. enjoy it. the RCOP satellites start at $2.20, see you on the steps");
+	}
+	else if (SeriesEvent && BustPlace <= 9)
+	{
+		StoryText("mm-final", "Dee", "Final table in a Micro Madness event?? They put those on the news page. Screenshot it.");
+	}
 }
 
 void Session::LeaveResults()
 {
+	if (T)
+	{
+		LobbyMinutes = std::max(LobbyMinutes, T->ClockMinutes());
+	}
 	CurrentScreen = Screen::Lobby;
 	HasResults = false;
 	T.reset();
@@ -1403,6 +1451,11 @@ void Session::LeaveResults()
 
 double Session::ClockMinutes() const
 {
-	return T ? T->ClockMinutes() : 2.0 * 60.0 + 7.0;
+	return T ? T->ClockMinutes() : LobbyMinutes;
+}
+
+double Session::WorldMinutes() const
+{
+	return net::MinutesPerDay * static_cast<double>(net::NightOneDay) + ClockMinutes();
 }
 } // namespace ss

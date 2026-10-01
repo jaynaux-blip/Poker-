@@ -10,8 +10,8 @@ The SHORT STACK poker engine in C++. It is a port of `web/src/core/` from the br
 
 On top of the engine, the plugin also carries the rest of Night One's logic as plain C++:
 
-- `ShortStack/Game`: the session (lobby, pacing, hero turns, sprint, story texts, results, saves)
-- `ShortStack/UI`: a vector canvas, the RiverLine client, card art, the phone and printed props
+- `ShortStack/Game`: the session (lobby, pacing, hero turns, sprint, story texts, results, saves) and the RiverLine network (`Network.h`: the schedule, series, regulars, simulated results, leaderboards and news, on a world clock)
+- `ShortStack/UI`: a vector canvas, the RiverLine client (the table in `RiverLine.cpp`, the lobby pages in `RiverLineNet.cpp`), card art, the phone and printed props
 - `ShortStack/Audio`: sound synthesis
 
 The Unreal project in `unreal/` (see `unreal/README.md`) is a thin host around them.
@@ -101,8 +101,8 @@ On Windows, run this from a *Developer Command Prompt for VS*. The Standalone bu
 
 - `golden_test`: the 4,201 golden vectors.
 - `unit_test`: 5,000 fuzzed hands checking chip conservation, illegal-action rejection, and a 1,000-player tournament played to the end, about 0.7 s.
-- `session_test`: whole tournaments played through the Night One session, with random and best-EV heroes. It covers the bubble, the money, the final table, sprint mode and save round trips.
-- `ui_test`: clicks drive the session (log in, select an event, register). It also draws every screen.
+- `session_test`: whole tournaments played through the Night One session, with random and best-EV heroes. It covers the bubble, the money, the final table, sprint mode and save round trips. It also checks the network: tonight's schedule at 2:07 AM, fees, locked formats, the Night Shift board, the player's results landing in final tables and the news, the lobby clock, and registering for a scheduled event.
+- `ui_test`: clicks drive the session (log in, filter the schedule, select an event, register, open a page). It also draws every screen, including each lobby page before and after a big night.
 - `audio_test`: every synthesized sound is audible, finite and in range.
 
 To look at the UI without Unreal:

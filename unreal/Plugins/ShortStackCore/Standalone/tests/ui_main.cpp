@@ -137,11 +137,11 @@ void Screens()
 	S.CurrentScreen = ss::Screen::Lobby;
 	RL.UI.Ptr.Active = true;
 	RL.UI.Ptr.X = 520.0f;
-	RL.UI.Ptr.Y = 290.0f; // hovering the second row
+	RL.UI.Ptr.Y = 490.0f; // hovering a schedule row
 	Emit("lobby", RL, 2.0);
 	S.ConfirmRegister = true;
 	RL.UI.Ptr.X = 1200.0f;
-	RL.UI.Ptr.Y = 680.0f;
+	RL.UI.Ptr.Y = 890.0f;
 	Emit("lobby_confirm", RL, 2.5);
 	S.ConfirmRegister = false;
 
@@ -469,6 +469,85 @@ void FrontEndScreens()
 	EmitMenu("menu_attract_gamepad", Fe, Now + 3.0);
 }
 
+/** Draws frames (and runs the session) for a while, so animations and the lobby clock move on. */
+double Run(ss::Session& S, ss::ui::RiverLine& RL, double Now, double Seconds)
+{
+	TableMeasurer M;
+	for (double T = 0.0; T < Seconds; T += 1.0 / 30.0)
+	{
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		RL.Draw(C, Now);
+	}
+	return Now;
+}
+
+void NetScreens()
+{
+	using Page = ss::ui::RiverLine::Page;
+	QuietHooks H;
+	ss::Session S(H, "ui-net");
+	ss::ui::RiverLine RL(S);
+	S.CurrentScreen = ss::Screen::Lobby;
+	RL.UI.Ptr.Active = true;
+	RL.UI.Ptr.X = 640.0f;
+	RL.UI.Ptr.Y = 560.0f; // hovering a schedule row
+	double Now = Run(S, RL, 10.0, 1.5);
+	Emit("net_lobby", RL, Now);
+	RL.UI.Ptr.X = 400.0f;
+	RL.UI.Ptr.Y = 200.0f; // over the banner (it stops rotating)
+	Now = Run(S, RL, Now, 8.0);
+	Emit("net_lobby_slide", RL, Now);
+	RL.SetFilter(ss::ui::RiverLine::Filter::Playable, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("net_lobby_playable", RL, Now);
+	for (Page P : {Page::Series, Page::Leaderboards, Page::News, Page::Career})
+	{
+		RL.OpenPage(P, Now);
+		Now = Run(S, RL, Now, 1.5);
+		const char* Names[5] = {"net_lobby", "net_series", "net_boards", "net_news", "net_career"};
+		Emit(Names[static_cast<int>(P)], RL, Now);
+	}
+	RL.ShowSeries("rcop", Now);
+	RL.OpenPage(Page::Series, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("net_series_rcop", RL, Now);
+
+	// Later that night: a Micro Madness title and a Night Owl cash.
+	ss::HistoryEntry Owl;
+	Owl.Name = "$1.10 Night Owl Turbo";
+	Owl.Place = 31;
+	Owl.Entrants = 1000;
+	Owl.Prize = 380;
+	Owl.AccuracyPct = 82.0;
+	Owl.BuyInCents = 110;
+	Owl.EventId = "night-owl@1560";
+	ss::HistoryEntry Title;
+	Title.Name = "MM #26: Night Crawler";
+	Title.Place = 1;
+	Title.Entrants = 1184;
+	Title.Prize = 45000;
+	Title.AccuracyPct = 91.0;
+	Title.BuyInCents = 220;
+	Title.EventId = "mm-26@1530";
+	S.History = {Title, Owl};
+	S.BankrollCents += 45380;
+	S.LobbyMinutes = 5.0 * 60.0 + 12.0;
+	for (Page P : {Page::Leaderboards, Page::News, Page::Career})
+	{
+		RL.OpenPage(P, Now);
+		Now = Run(S, RL, Now, 1.5);
+		const char* Names[5] = {"", "", "net_boards_after", "net_news_after", "net_career_after"};
+		Emit(Names[static_cast<int>(P)], RL, Now);
+	}
+	RL.ShowBoard(ss::net::Board::Series, Now);
+	RL.OpenPage(Page::Leaderboards, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("net_boards_series", RL, Now);
+}
+
 void Clicks()
 {
 	// A click on "Log in" moves the boot screen to the lobby; clicks elsewhere do nothing.
@@ -494,16 +573,33 @@ void Clicks()
 	Frame(800.0f, 550.0f, false, false, true);
 	Expect(S.CurrentScreen == ss::Screen::Lobby, "log in button works");
 	Expect(H.Texts.size() == 1, "logging in triggers Dee's text");
-	// Select the hyper sprint row, register, confirm.
-	Frame(300.0f, 290.0f, true, true, false);
-	Frame(300.0f, 290.0f, false, false, true);
-	Expect(S.Selected == 1, "row click selects the event");
-	Frame(1300.0f, 700.0f, true, true, false);
-	Frame(1300.0f, 700.0f, false, false, true);
+	// Show what can be played now, pick the hyper sprint, register, confirm.
+	Frame(130.0f, 330.0f, true, true, false);
+	Frame(130.0f, 330.0f, false, false, true);
+	Frame(130.0f, 330.0f, false, false, false);
+	Expect(RL.ListedEvents().size() >= 4, "the Playable chip filters the schedule");
+	int Row = -1;
+	for (size_t I = 0; I < RL.ListedEvents().size() && I < 9; ++I)
+	{
+		Row = Row < 0 && RL.ListedEvents()[I].rfind("hyper-sprint@", 0) == 0 ? static_cast<int>(I) : Row;
+	}
+	Expect(Row >= 0, "a hyper sprint is open");
+	const float RowY = 404.0f + static_cast<float>(Row) * 60.0f + 27.0f;
+	Frame(300.0f, RowY, true, true, false);
+	Frame(300.0f, RowY, false, false, true);
+	Expect(Row >= 0 && RL.SelectedEvent() == RL.ListedEvents()[static_cast<size_t>(Row)], "row click selects the event");
+	Frame(1300.0f, 890.0f, true, true, false);
+	Frame(1300.0f, 890.0f, false, false, true);
 	Expect(S.ConfirmRegister, "register asks for confirmation");
-	Frame(1150.0f, 700.0f, true, true, false);
-	Frame(1150.0f, 700.0f, false, false, true);
-	Expect(S.CurrentScreen == ss::Screen::Table && S.T != nullptr, "confirm registers and opens the table");
+	Frame(1200.0f, 890.0f, true, true, false);
+	Frame(1200.0f, 890.0f, false, false, true);
+	Expect(S.CurrentScreen == ss::Screen::Table && S.T != nullptr && S.T->Spec.Id.rfind("hyper-sprint@", 0) == 0, "confirm registers and opens the table");
+	// Navigation.
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.T.reset();
+	Frame(500.0f, 34.0f, true, true, false);
+	Frame(500.0f, 34.0f, false, false, true);
+	Expect(RL.CurrentPage() == ss::ui::RiverLine::Page::Leaderboards, "the top bar opens the leaderboards");
 }
 } // namespace ui_test
 
@@ -513,6 +609,7 @@ int main(int Argc, char** Argv)
 	{
 		ui_test::OutDir = Argv[1];
 	}
+	ui_test::NetScreens();
 	ui_test::Clicks();
 	ui_test::Screens();
 	ui_test::Results();
