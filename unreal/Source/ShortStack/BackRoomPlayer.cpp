@@ -130,7 +130,8 @@ void ABackRoomPlayer::Build()
 		ChairSeat->SetStaticMesh(Chair);
 		ChairSeat->SetRelativeLocationAndRotation(FVector(-SeatDepth + 0.5, 0.0, 0.0), FRotator::ZeroRotator);
 		ChairSeat->SetRelativeScale3D(FVector(1.0));
-		ChairSeat->SetVisibility(true);
+		// Extras sit on the room's own chairs.
+		ChairSeat->SetVisibility(SeatRole != EBackRoomRole::Extra);
 		ChairBack->SetVisibility(false);
 	}
 	else

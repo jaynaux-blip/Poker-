@@ -24,6 +24,7 @@ enum class Kind : int
 	Ghost,  // Burner: playing Sam's RiverLine account; risks the player's own account
 	Sleep,
 	Game, // Burner: Dee's live game in the laundromat's back room (the host takes the player there)
+	Live, // Burner: the Riverside's Sunday tournament (the host takes the player there)
 };
 
 /** Dee's game: $1/$2 no-limit, bought into from the bankroll. */
@@ -102,6 +103,11 @@ struct State
 	Chips BackRoomNetCents = 0;
 	/** Tells seen and confirmed at showdown, by "Player/Tell" (2 or more: learned). */
 	std::map<std::string, int> Reads;
+	// Live tournaments (the Riverside).
+	int LiveEvents = 0;
+	int LiveCashes = 0;
+	int LiveBestPlace = 0; // 0: none yet
+	Chips LiveWonCents = 0; // prizes, before buy-ins
 
 	SHORTSTACKCORE_API void Record(double At, const std::string& Label, Chips Amount, int Kind);
 	int TicketsFor(const std::string& TemplateId) const;

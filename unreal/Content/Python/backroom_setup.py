@@ -143,6 +143,63 @@ struct SSRoom
             rough = lerp(0.42, 0.85, chip) + grime * 0.2;
             h = -chip * 0.0004 + (Fbm(uv * 500.0) - 0.5) * 0.00008;
         }
+        else if (k == 5)
+        {
+            // Casino carpet: medallions, a lattice and confetti on a deep ground, in a cut pile.
+            float t = 0.9144;
+            float2 c = uv / t;
+            float2 f = frac(c) - 0.5;
+            float r = length(f);
+            float ang = atan2(f.y, f.x);
+            float petals = 0.5 + 0.5 * cos(ang * 8.0);
+            float medal = 1.0 - smoothstep(0.012, 0.03, abs(r - (0.17 + 0.05 * petals)));
+            float ring = 1.0 - smoothstep(0.01, 0.022, abs(r - 0.32));
+            float core = 1.0 - smoothstep(0.05, 0.07, r);
+            float2 g = abs(frac(c + 0.5) - 0.5);
+            float diamond = 1.0 - smoothstep(0.015, 0.035, abs(g.x + g.y - 0.2));
+            float2 dc = floor(uv * 22.0);
+            float dotm = step(0.92, Hash(dc)) * (1.0 - smoothstep(0.18, 0.32, length(frac(uv * 22.0) - 0.5)));
+            float3 teal = float3(0.02, 0.12, 0.13);
+            float3 cream = float3(0.55, 0.47, 0.32);
+            col = base;
+            col = lerp(col, teal, saturate(ring + diamond * 0.9));
+            col = lerp(col, base2, saturate(medal + core));
+            col = lerp(col, lerp(teal, cream, Hash(dc + 3.0)), dotm);
+            float pile = Fbm(uv * 260.0);
+            float wear = Fbm(uv * 0.6 + 4.0);
+            col *= (0.82 + 0.3 * pile) * (0.9 + 0.16 * wear);
+            rough = 0.97;
+            h = 0.0007 * pile;
+        }
+        else if (k == 6)
+        {
+            // Walnut panelling: vertical boards with grooves, figured grain, a brass-capped rail at split.
+            float pw = 0.5;
+            float px = uv.x / pw;
+            float board = floor(px);
+            float fx = frac(px);
+            float groove = 1.0 - smoothstep(0.006, 0.02, min(fx, 1.0 - fx));
+            float grain = Fbm(float2(uv.x * 30.0 + board * 3.1, uv.y * 1.6));
+            float figure = 0.5 + 0.5 * sin(uv.x * 80.0 + grain * 7.0 + Hash(float2(board, 1.0)) * 20.0);
+            col = base * (0.7 + 0.4 * grain) * (0.88 + 0.16 * figure) * (0.88 + 0.24 * Hash(float2(board, 2.0)));
+            col = lerp(col, col * 0.3, groove);
+            float rail = split > 0.01 ? 1.0 - smoothstep(0.018, 0.026, abs(m.z - split)) : 0.0;
+            col = lerp(col, base2, rail);
+            rough = lerp(0.32, 0.55, grain) + groove * 0.3 - rail * 0.15;
+            h = -groove * 0.004 + 0.0002 * figure + rail * 0.012;
+        }
+        else if (k == 7)
+        {
+            // A black ceiling deck: big acoustic panels, faint seams, a dusty matte.
+            float t = 1.2;
+            float2 f = abs(frac(uv / t) - 0.5) * t;
+            float seam = 1.0 - smoothstep(0.004, 0.009, min(t * 0.5 - f.x, t * 0.5 - f.y));
+            float n = Fbm(uv * 30.0);
+            col = base * (0.85 + 0.3 * n);
+            col = lerp(col, col * 0.55, seam);
+            rough = 0.93;
+            h = -seam * 0.003 + n * 0.0002;
+        }
     }
 
     float3 Normal(float3 P, float3 N, float h)
@@ -199,9 +256,67 @@ def build_room(force):
     return ss._finish(mat)
 
 
+def build_card_room(force):
+    """M_CardRoom: M_Room's surfaces plus the Riverside's carpet, walnut and black ceiling (Pattern 5-7)."""
+    mat = ss._new_material("M_CardRoom", force)
+    if not mat:
+        return False
+    mat.set_editor_property("tangent_space_normal", False)
+    base = ss._vector(mat, "BaseColor", (0.6, 0.6, 0.6), -1100, -300)
+    base2 = ss._vector(mat, "BaseColor2", (0.3, 0.4, 0.33), -1100, -150)
+    split = ss._scalar(mat, "Split", 1.2, -1100, 0)
+    pattern = ss._scalar(mat, "Pattern", 5.0, -1100, 100)
+    metal = ss._scalar(mat, "Metallic", 0.0, -1100, 200)
+    inputs = ["P", "N", "BaseIn", "Base2In", "SplitIn", "PatternIn"]
+    nodes = []
+    for code, out, y, desc in ((ROOM_COLOR, F4, -250, "Card room surfaces"), (ROOM_NORMAL, F3, 150, "Card room surface normal")):
+        c = ss._custom(mat, code, inputs, out, -600, y, desc)
+        ss._link(ss._world_pos(mat, -1100, -500), c, "P")
+        ss._link(ss._expr(mat, unreal.MaterialExpressionVertexNormalWS, -1100, -420), c, "N")
+        ss._link(base, c, "BaseIn")
+        ss._link(base2, c, "Base2In")
+        ss._link(split, c, "SplitIn")
+        ss._link(pattern, c, "PatternIn")
+        nodes.append(c)
+    rgb = ss._mask(mat, nodes[0], "rgb", -300, -300)
+    a = ss._mask(mat, nodes[0], "a", -300, -150)
+    mel.connect_material_property(rgb, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(a, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    mel.connect_material_property(metal, "", unreal.MaterialProperty.MP_METALLIC)
+    mel.connect_material_property(nodes[1], "", unreal.MaterialProperty.MP_NORMAL)
+    return ss._finish(mat)
+
+
+def build_screen_text(force):
+    """M_ScreenText: glowing text for the tournament clock screens and signs (TextRender's Font parameter)."""
+    mat = ss._new_material("M_ScreenText", force)
+    if not mat:
+        return False
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    font = ss._expr(mat, unreal.MaterialExpressionFontSampleParameter, -700, 0)
+    font.set_editor_property("parameter_name", "Font")
+    default_font = unreal.load_object(None, "/Engine/EngineFonts/RobotoDistanceField.RobotoDistanceField")
+    if default_font:
+        font.set_editor_property("font", default_font)
+    vc = ss._expr(mat, unreal.MaterialExpressionVertexColor, -700, -250)
+    glow = ss._scalar(mat, "Glow", 4.0, -700, 250)
+    mul = ss._expr(mat, unreal.MaterialExpressionMultiply, -400, -150)
+    mel.connect_material_expressions(vc, "", mul, "A")
+    mel.connect_material_expressions(glow, "", mul, "B")
+    mel.connect_material_property(mul, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mat_mask = ss._expr(mat, unreal.MaterialExpressionMultiply, -400, 100)
+    mel.connect_material_expressions(font, "A", mat_mask, "A")
+    one = ss._expr(mat, unreal.MaterialExpressionConstant, -700, 150)
+    one.set_editor_property("r", 1.0)
+    mel.connect_material_expressions(one, "", mat_mask, "B")
+    mel.connect_material_property(mat_mask, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+    return ss._finish(mat)
+
+
 def build_materials(force=False):
     built = import_cards(force)
-    for build in (build_room, build_card):
+    for build in (build_room, build_card, build_card_room, build_screen_text):
         try:
             if build(force):
                 built += 1

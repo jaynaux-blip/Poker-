@@ -5,6 +5,7 @@
 #include "BackRoomChips.h"
 #include "BackRoomPlayer.h"
 #include "BackRoomStage.h"
+#include "CardRoomAmbience.h"
 #include "Engine/World.h"
 #include "Misc/App.h"
 #include "NightOneAudio.h"
@@ -135,6 +136,7 @@ void ABackRoomTable::AddPlayer(ABackRoomPlayer* Player, int32 TableSeat, ss::Arc
 	}
 	FSeat& S = Seats.AddDefaulted_GetRef();
 	S.TableSeat = TableSeat;
+	S.HandSeat = TableSeat;
 	S.Player = Player;
 	S.bHero = Player && Player->SeatRole == EBackRoomRole::Hero;
 	S.Id = Player ? Player->Persona.Name : FString::Printf(TEXT("Seat%d"), TableSeat);
@@ -187,7 +189,14 @@ void ABackRoomTable::Begin(float Delay)
 
 void ABackRoomTable::StartRoomTone()
 {
-	if (Audio && !RoomTone)
+	if (Audio && bCardRoomTone && !CardTone)
+	{
+		CardTone = MakeShared<FCardRoomAmbience>(0xcafeu);
+		TSharedPtr<FCardRoomAmbience> Tone = CardTone;
+		Audio->StartAmbience([Tone](float* Out, int32 N) { Tone->Render(Out, N); }, 0.4f);
+		return;
+	}
+	if (Audio && !RoomTone && !CardTone)
 	{
 		RoomTone = MakeShared<FBackRoomAmbience>(0x5eedu);
 		TSharedPtr<FBackRoomAmbience> Tone = RoomTone;
@@ -201,14 +210,57 @@ ABackRoomPlayer* ABackRoomTable::GetHeroPlayer() const
 	return S ? S->Player.Get() : nullptr;
 }
 
-ABackRoomTable::FSeat* ABackRoomTable::SeatAt(int32 TableSeat)
+ABackRoomTable::FSeat* ABackRoomTable::SeatAt(int32 HandSeat)
 {
-	return Seats.FindByPredicate([TableSeat](const FSeat& S) { return S.TableSeat == TableSeat; });
+	return HandSeat < 0 ? nullptr : Seats.FindByPredicate([HandSeat](const FSeat& S) { return S.HandSeat == HandSeat; });
 }
 
-const ABackRoomTable::FSeat* ABackRoomTable::SeatAt(int32 TableSeat) const
+const ABackRoomTable::FSeat* ABackRoomTable::SeatAt(int32 HandSeat) const
 {
-	return Seats.FindByPredicate([TableSeat](const FSeat& S) { return S.TableSeat == TableSeat; });
+	return HandSeat < 0 ? nullptr : Seats.FindByPredicate([HandSeat](const FSeat& S) { return S.HandSeat == HandSeat; });
+}
+
+ABackRoomTable::FSeat& ABackRoomTable::EnsureSeat(int32 TableSeat)
+{
+	if (FSeat* Found = Seats.FindByPredicate([TableSeat](const FSeat& S) { return S.TableSeat == TableSeat; }))
+	{
+		return *Found;
+	}
+	FSeat& S = Seats.AddDefaulted_GetRef();
+	S.TableSeat = TableSeat;
+	const FTransform T = ABackRoomStage::SeatTransform(TableSeat);
+	S.StackPile = NewPile(StackSpot(TableSeat), T.Rotator(), TableSeat * 17 + 3, static_cast<uint8>(EBackRoomChipStyle::Stack));
+	S.BetPile = NewPile(BetSpot(TableSeat), T.Rotator(), TableSeat * 29 + 5, static_cast<uint8>(EBackRoomChipStyle::Bet));
+	Seats.Sort([](const FSeat& A, const FSeat& B) { return A.TableSeat < B.TableSeat; });
+	return *Seats.FindByPredicate([TableSeat](const FSeat& X) { return X.TableSeat == TableSeat; });
+}
+
+void ABackRoomTable::WireSeat(FSeat& S)
+{
+	ABackRoomPlayer* Player = S.Player;
+	if (!Player)
+	{
+		return;
+	}
+	const FTransform T = ABackRoomStage::SeatTransform(S.TableSeat);
+	HookSounds(Player);
+	Player->StackPile = S.StackPile;
+	Player->BetPile = S.BetPile;
+	Player->Spots.Cards = CardSpot(S.TableSeat, 0).GetLocation();
+	Player->Spots.Stack = StackSpot(S.TableSeat);
+	Player->Spots.Bet = BetSpot(S.TableSeat);
+	Player->Spots.Inward = T.GetRotation().GetForwardVector();
+	if (!S.bHero)
+	{
+		Opponents.AddUnique(Player);
+		TWeakObjectPtr<ABackRoomTable> Self = this;
+		Player->TellHook = [Self](ABackRoomPlayer* P, uint8 Tell, uint8 Means, bool bHonest, float Studied) {
+			if (ABackRoomTable* Tb = Self.Get())
+			{
+				Tb->OnTellSeen(P, Tell, Means, bHonest, Studied);
+			}
+		};
+	}
 }
 
 ABackRoomTable::FSeat* ABackRoomTable::HeroSeat()
@@ -368,7 +420,7 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 		ss::BotContext Ctx;
 		Ctx.Prof = &S->Profile;
 		Ctx.R = Rng.Get();
-		const ss::BotDecision D = ss::Decide(View, Ctx);
+		const ss::BotDecision D = Tourney ? Tourney->BotDecisionFor(*Hand, false) : ss::Decide(View, Ctx);
 		bBotPending = true;
 		BotSeat = S->TableSeat;
 		BotKind = static_cast<int32>(D.Action.Type);
@@ -436,6 +488,33 @@ void ABackRoomTable::StartHand()
 		}
 		return;
 	}
+	if (Tourney)
+	{
+		if (!PendingHand && !FetchTournamentHand())
+		{
+			return;
+		}
+		if (bHolding)
+		{
+			return;
+		}
+		SyncTournamentSeats(*PendingHand);
+		Hand.Reset(PendingHand.Release());
+		for (FSeat& S : Seats)
+		{
+			S.StartStack = S.Stack;
+			S.bDealt = false;
+			S.bShown = false;
+			S.Hole.Reset();
+			if (S.Player && S.HandSeat >= 0)
+			{
+				S.Player->Hole.Reset();
+				S.Player->BeginHand();
+			}
+		}
+	}
+	else
+	{
 	// Busted players buy back in (the Tuesday game is friendly like that).
 	for (FSeat& S : Seats)
 	{
@@ -480,6 +559,7 @@ void ABackRoomTable::StartHand()
 	Config.SmallBlind = SmallBlind;
 	Config.BigBlind = BigBlind;
 	Hand = MakeUnique<ss::Hand>(Config, *Rng);
+	}
 	if (!Hand->IsValid())
 	{
 		Hand.Reset();
@@ -493,6 +573,11 @@ void ABackRoomTable::StartHand()
 	bBotPending = false;
 	Board.Reset();
 	++HandNumber;
+	if (!Tourney || HandNumber == 1)
+	{
+		// (A tournament's hand clock runs from the end of the last hand: see EndHand.)
+		HandStartedAt = Time;
+	}
 	if (const FSeat* H = HeroSeat())
 	{
 		HeroStartOfHand = H->Stack;
@@ -564,7 +649,7 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 			if (bAggressive)
 			{
 				// The bet is out there now, with the hands that pushed it: whatever the heart was doing shows.
-				Composure.Bluff = FeltEquity(S->TableSeat) < 0.42f ? 1.0f : 0.0f;
+				Composure.Bluff = FeltEquity(S->HandSeat) < 0.42f ? 1.0f : 0.0f;
 				HeroShakeAtBet = Composure.Shake();
 				bHeroAggressedThisStreet = true;
 			}
@@ -718,9 +803,9 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 				FTimerHandle Handle;
 				GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, Land), 0.65f, false);
 			}
-			if (S->bHero && R.Amount >= 40)
+			if (S->bHero && R.Amount >= 20 * BigBlindNow())
 			{
-				DealerSays(TEXT("Ship it to the kid."));
+				DealerSays(Tourney ? TEXT("Pot to you, kid.") : TEXT("Ship it to the kid."));
 			}
 		}
 		return 1.4f;
@@ -751,11 +836,11 @@ float ABackRoomTable::DealHoles(const TArray<int32>& Order)
 			{
 				S->Player->Hole.Add(C);
 			}
-			T += Dealer ? Dealer->GestureDeal(C, CardSpot(Seat, Round), false) : 0.3f;
+			T += Dealer ? Dealer->GestureDeal(C, CardSpot(S->TableSeat, Round), false) : 0.3f;
 			if (!Dealer)
 			{
 				C->SetActorHiddenInGame(false);
-				C->PitchTo(CardSpot(Seat, Round), 0.3f, 3.0f);
+				C->PitchTo(CardSpot(S->TableSeat, Round), 0.3f, 3.0f);
 			}
 		}
 	}
@@ -835,9 +920,9 @@ float ABackRoomTable::DealStreet(const TArray<int32>& New)
 	return T;
 }
 
-float ABackRoomTable::FeltEquity(int32 TableSeat)
+float ABackRoomTable::FeltEquity(int32 HandSeat)
 {
-	const ss::HandSeat* Me = Hand ? Hand->SeatByNumber(TableSeat) : nullptr;
+	const ss::HandSeat* Me = Hand ? Hand->SeatByNumber(HandSeat) : nullptr;
 	if (!Me || Me->Hole.size() < 2)
 	{
 		return 0.5f;
@@ -916,7 +1001,7 @@ void ABackRoomTable::EndHand()
 	}
 	for (FSeat& S : Seats)
 	{
-		const ss::HandSeat* HS = Hand->SeatByNumber(S.TableSeat);
+		const ss::HandSeat* HS = S.HandSeat >= 0 ? Hand->SeatByNumber(S.HandSeat) : nullptr;
 		if (!HS)
 		{
 			continue;
@@ -947,7 +1032,7 @@ void ABackRoomTable::EndHand()
 		{
 			Composure.Tilt *= 0.5f;
 		}
-		if (H->Stack <= 0 && !bHeroAutoReload)
+		if (H->Stack <= 0 && !bHeroAutoReload && !Tourney)
 		{
 			DealerSays(TEXT("That's the felt, kid."));
 		}
@@ -988,12 +1073,183 @@ void ABackRoomTable::EndHand()
 			S.Player->Hole.Reset();
 		}
 	}
+	if (Tourney)
+	{
+		// The rest of the room plays its hand; eliminations, the clock and the levels follow.
+		for (const ss::TEvent& E : Tourney->FinishTick(Hand.Get()))
+		{
+			Events.Add(E);
+		}
+		HandStartedAt = Time;
+	}
 	Hand.Reset();
 	bHeroTurn = false;
 	Wait = T + 2.2f;
 	if (OnNote)
 	{
 		OnNote(EBackRoomTableNote::HandEnded);
+	}
+}
+
+// ------------------------------------------------------------------ the tournament
+
+void ABackRoomTable::SetTournament(TSharedPtr<ss::Tournament> InTourney)
+{
+	Tourney = InTourney;
+	bHeroAutoReload = false;
+}
+
+TArray<ss::TEvent> ABackRoomTable::TakeEvents()
+{
+	TArray<ss::TEvent> Out = MoveTemp(Events);
+	Events.Reset();
+	return Out;
+}
+
+int64 ABackRoomTable::BigBlindNow() const
+{
+	if (Hand)
+	{
+		return Hand->BigBlind;
+	}
+	return Tourney ? Tourney->CurrentLevel().Bb : BigBlind;
+}
+
+bool ABackRoomTable::IsHeroInHand() const
+{
+	const FSeat* H = HeroSeat();
+	const ss::HandSeat* HS = (H && Hand && !Hand->bComplete && H->HandSeat >= 0) ? Hand->SeatByNumber(H->HandSeat) : nullptr;
+	return HS && !HS->Folded;
+}
+
+ABackRoomPlayer* ABackRoomTable::PlayerById(const FString& Id) const
+{
+	const FSeat* S = Seats.FindByPredicate([&Id](const FSeat& X) { return X.HandSeat >= 0 && X.Id == Id; });
+	return S ? S->Player.Get() : nullptr;
+}
+
+void ABackRoomTable::SetCrowd(float Crowd)
+{
+	if (CardTone)
+	{
+		CardTone->SetCrowd(Crowd);
+	}
+}
+
+void ABackRoomTable::PrepareNext()
+{
+	if (!Tourney || Hand)
+	{
+		return;
+	}
+	if (!PendingHand)
+	{
+		FetchTournamentHand();
+	}
+	if (PendingHand)
+	{
+		SyncTournamentSeats(*PendingHand);
+		bHolding = false;
+	}
+}
+
+void ABackRoomTable::Resume(float Delay)
+{
+	bHolding = false;
+	Wait = FMath::Max(Wait, Delay);
+	bRunning = true;
+}
+
+bool ABackRoomTable::FetchTournamentHand()
+{
+	std::vector<ss::TEvent> Ev;
+	std::unique_ptr<ss::Hand> H = Tourney->StartTick(Ev);
+	bool bHeroMoved = false;
+	for (const ss::TEvent& E : Ev)
+	{
+		Events.Add(E);
+		bHeroMoved = bHeroMoved || (E.Type == ss::TEventType::Moved && E.IsHero);
+	}
+	if (!H)
+	{
+		// Out (or the hero is away): nothing to deal; the host plays out the rest of the night.
+		bHolding = true;
+		if (!bTournamentOverNoted && OnNote)
+		{
+			bTournamentOverNoted = true;
+			OnNote(EBackRoomTableNote::TournamentOver);
+		}
+		return false;
+	}
+	PendingHand.Reset(H.release());
+	if (bHeroMoved)
+	{
+		// The host walks the hero to the new table first.
+		bHolding = true;
+		if (OnNote)
+		{
+			OnNote(EBackRoomTableNote::HeroMoved);
+		}
+	}
+	return true;
+}
+
+void ABackRoomTable::SyncTournamentSeats(const ss::Hand& H)
+{
+	// Six-max around the hero: the engine's seats in order from the hero's, on the table's seats with
+	// the dealer's (4) and one at the hero's left (7) left out.
+	static const int32 Physical[6] = {0, 1, 2, 3, 5, 6};
+	const int32 Size = FMath::Max(1, Tourney->TableSize);
+	const int32 HeroSeatNo = Tourney->Hero().Seat;
+	TMap<int32, const ss::HandSeat*> Want;
+	for (const ss::HandSeat& HS : H.Seats)
+	{
+		const int32 Rel = ((HS.Seat - HeroSeatNo) % Size + Size) % Size;
+		Want.Add(Physical[FMath::Clamp(Rel, 0, 5)], &HS);
+	}
+	// Whoever isn't sitting here this hand leaves (busted, or moved to another table).
+	for (FSeat& S : Seats)
+	{
+		const ss::HandSeat* const* W = Want.Find(S.TableSeat);
+		const FString WantId = W ? FString(UTF8_TO_TCHAR((*W)->Id.c_str())) : FString();
+		if (S.bHero || S.Id == WantId)
+		{
+			continue;
+		}
+		if (S.Player)
+		{
+			const int32 Idx = Tourney->PlayerIndex(std::string(TCHAR_TO_UTF8(*S.Id)));
+			const bool bBusted = Idx >= 0 && Tourney->Players[static_cast<size_t>(Idx)].Busted;
+			Opponents.Remove(S.Player);
+			if (OnUnseatPlayer)
+			{
+				OnUnseatPlayer(S.Player, S.Id, bBusted);
+			}
+		}
+		S.Player = nullptr;
+		S.Id.Empty();
+		S.HandSeat = -1;
+		S.Stack = 0;
+		S.StackPile->SetAmount(0);
+		S.BetPile->SetAmount(0);
+	}
+	// And whoever is sits down (or stays).
+	for (const TPair<int32, const ss::HandSeat*>& It : Want)
+	{
+		const ss::HandSeat& HS = *It.Value;
+		const FString Id = UTF8_TO_TCHAR(HS.Id.c_str());
+		FSeat& S = Id == UTF8_TO_TCHAR(ss::HeroId) ? *HeroSeat() : EnsureSeat(It.Key);
+		S.HandSeat = HS.Seat;
+		S.Stack = HS.Stack;
+		if (!S.bHero && S.Id != Id)
+		{
+			const int32 Idx = Tourney->PlayerIndex(HS.Id);
+			S.Id = Id;
+			S.Player = Idx >= 0 && OnSeatPlayer ? OnSeatPlayer(Tourney->Players[static_cast<size_t>(Idx)], S.TableSeat) : nullptr;
+			WireSeat(S);
+		}
+		S.StackPile->SetAmount(S.Stack);
+		S.BetPile->SetAmount(0);
 	}
 }
 
@@ -1060,7 +1316,7 @@ void ABackRoomTable::UpdateComposure(float Dt)
 {
 	FBackRoomComposure& C = Composure;
 	const FSeat* H = HeroSeat();
-	const ss::HandSeat* HS = (H && Hand && !Hand->bComplete) ? Hand->SeatByNumber(H->TableSeat) : nullptr;
+	const ss::HandSeat* HS = (H && Hand && !Hand->bComplete && H->HandSeat >= 0) ? Hand->SeatByNumber(H->HandSeat) : nullptr;
 	const bool bIn = HS && !HS->Folded && H->Hole.Num() == 2;
 	float Pressure = 0.0f;
 	if (bIn)
@@ -1088,6 +1344,7 @@ void ABackRoomTable::UpdateComposure(float Dt)
 		}
 	}
 	Pressure += 20.0f * C.Tilt;
+	Pressure += ExtraPressure * (bIn ? 1.0f : 0.5f);
 	C.Target = FMath::Clamp(66.0f + C.Sensitivity * Pressure - (C.bSteadying ? 16.0f : 0.0f), 56.0f, 168.0f);
 	// The heart jumps fast and settles slowly; steady breathing brings it down quicker.
 	const float Rate = C.Target > C.Bpm ? 0.55f : (C.bSteadying ? 0.32f : 0.12f);
@@ -1231,7 +1488,7 @@ void ABackRoomTable::OpenHeroTurn()
 {
 	bHeroTurn = true;
 	const ss::LegalActions L = Hand->GetLegalActions();
-	const int64 Bb = BigBlind;
+	const int64 Bb = BigBlindNow();
 	int64 Want = L.MinRaiseTo;
 	if (Hand->CurrentStreet == ss::Street::Preflop)
 	{
@@ -1256,14 +1513,14 @@ FBackRoomPrompt ABackRoomTable::GetPrompt() const
 {
 	FBackRoomPrompt P;
 	P.HandNumber = HandNumber;
-	P.BigBlind = BigBlind;
+	P.BigBlind = BigBlindNow();
 	const FSeat* Hero = HeroSeat();
 	if (Hero)
 	{
 		P.Stack = Hero->StackPile ? Hero->StackPile->GetAmount() : Hero->Stack;
 		if (bHeroPeeked && Hand)
 		{
-			if (const ss::HandSeat* HS = Hand->SeatByNumber(Hero->TableSeat))
+			if (const ss::HandSeat* HS = Hand->SeatByNumber(Hero->HandSeat))
 			{
 				for (int C : HS->Hole)
 				{
@@ -1290,7 +1547,7 @@ FBackRoomPrompt ABackRoomTable::GetPrompt() const
 	P.MinRaiseTo = L.MinRaiseTo;
 	P.MaxRaiseTo = L.MaxRaiseTo;
 	P.RaiseTo = HeroRaiseTo;
-	if (const ss::HandSeat* HS = Hero ? Hand->SeatByNumber(Hero->TableSeat) : nullptr)
+	if (const ss::HandSeat* HS = Hero ? Hand->SeatByNumber(Hero->HandSeat) : nullptr)
 	{
 		P.Stack = HS->Stack;
 	}
@@ -1360,7 +1617,8 @@ void ABackRoomTable::HeroAdjustRaise(int32 Steps)
 		return;
 	}
 	const ss::LegalActions L = Hand->GetLegalActions();
-	const int64 Step = HeroRaiseTo < 20 * BigBlind ? BigBlind : 5 * BigBlind;
+	const int64 Bb = BigBlindNow();
+	const int64 Step = HeroRaiseTo < 20 * Bb ? Bb : 5 * Bb;
 	HeroRaiseTo = FMath::Clamp<int64>(HeroRaiseTo + Steps * Step, L.MinRaiseTo, FMath::Max(L.MinRaiseTo, L.MaxRaiseTo));
 }
 
@@ -1384,6 +1642,11 @@ FString ABackRoomTable::Describe() const
 	}
 	Out += bHeroTurn ? TEXT(" HERO TURN") : TEXT("");
 	Out += FString::Printf(TEXT(" | bpm %.0f tilt %.2f reads %d%s"), Composure.Bpm, Composure.Tilt, Reads.Num(), bHolding ? TEXT(" HOLDING") : TEXT(""));
+	if (Tourney)
+	{
+		Out += FString::Printf(TEXT(" | MTT level %d %lld/%lld left %d/%d table %d"), Tourney->LevelIndex + 1, static_cast<int64>(Tourney->CurrentLevel().Sb),
+			static_cast<int64>(Tourney->CurrentLevel().Bb), Tourney->Remaining, Tourney->Spec.Entrants, Tourney->Hero().TableId);
+	}
 	for (const FSeat& S : Seats)
 	{
 		Out += FString::Printf(TEXT(" | %s %lld"), *S.Id, S.StackPile ? S.StackPile->GetAmount() : S.Stack);

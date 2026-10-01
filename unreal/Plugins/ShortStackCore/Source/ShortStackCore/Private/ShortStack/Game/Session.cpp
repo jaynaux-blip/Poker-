@@ -8,6 +8,7 @@
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
+#include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 
 #include <chrono>
@@ -138,6 +139,7 @@ std::string SaveData::Serialize() const
 	Out << "life\tcount\t" << L.Shifts << "\t" << L.Runs << "\t" << L.Busts << "\t" << L.Ghosts << "\t" << L.Bans << "\n";
 	Out << "life\tearned\t" << L.EarnedJobs << "\t" << L.EarnedHustles << "\n";
 	Out << "life\tbackroom\t" << L.BackRoomNights << "\t" << L.BackRoomNetCents << "\n";
+	Out << "life\tlive\t" << L.LiveEvents << "\t" << L.LiveCashes << "\t" << L.LiveBestPlace << "\t" << L.LiveWonCents << "\n";
 	for (const auto& Rd : L.Reads)
 	{
 		Out << "read\t" << session_detail::Escape(Rd.first) << "\t" << Rd.second << "\n";
@@ -237,6 +239,13 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 			{
 				L.EarnedJobs = Cents(2);
 				L.EarnedHustles = Cents(3);
+			}
+			else if (P[1] == "live" && P.size() >= 6)
+			{
+				L.LiveEvents = Int(2);
+				L.LiveCashes = Int(3);
+				L.LiveBestPlace = Int(4);
+				L.LiveWonCents = Cents(5);
 			}
 			else if (P[1] == "backroom" && P.size() >= 4)
 			{
@@ -1706,9 +1715,13 @@ int Session::SeatsInPlay() const
 std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
 {
 	const life::Activity* A = life::Find(Id);
-	if (!A || A->Type != life::Kind::Game)
+	if (!A || (A->Type != life::Kind::Game && A->Type != life::Kind::Live))
 	{
 		return "Unknown game.";
+	}
+	if (A->Type == life::Kind::Live)
+	{
+		BuyInCents = live::RiversideBuyInCents;
 	}
 	if (TimeSkip.Active)
 	{
@@ -1719,7 +1732,7 @@ std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
 	{
 		return Why;
 	}
-	if (BuyInCents < life::GameMinBuyInCents || BuyInCents > life::GameMaxBuyInCents || BuyInCents > BankrollCents)
+	if (BuyInCents > BankrollCents || (A->Type == life::Kind::Game && (BuyInCents < life::GameMinBuyInCents || BuyInCents > life::GameMaxBuyInCents)))
 	{
 		return "Pick a buy-in you can cover.";
 	}
@@ -1736,7 +1749,7 @@ std::string Session::StartActivity(const std::string& Id)
 	{
 		return "Unknown activity.";
 	}
-	if (A->Type == life::Kind::Game)
+	if (A->Type == life::Kind::Game || A->Type == life::Kind::Live)
 	{
 		return "Pick a buy-in first.";
 	}
@@ -1763,7 +1776,8 @@ std::string Session::StartActivity(const std::string& Id)
 	case life::Kind::Hustle: TimeSkip.Label = A->Id == "marcus-run" ? "On the long run for Marcus" : "On a drop-off for Marcus"; break;
 	case life::Kind::Ghost: TimeSkip.Label = "Playing as whale_sam"; break;
 	case life::Kind::Sleep: TimeSkip.Label = A->Hours >= 8.0 ? "Sleeping" : "Napping"; break;
-	case life::Kind::Game: break;
+	case life::Kind::Game:
+	case life::Kind::Live: break;
 	}
 	HasOutcome = false;
 	ConfirmRegister = false;
@@ -1828,6 +1842,7 @@ void Session::FinishSkip()
 			break;
 		case life::Kind::Sleep:
 		case life::Kind::Game:
+		case life::Kind::Live:
 			break;
 		}
 	}
@@ -2086,6 +2101,20 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	if (Life.BannedUntil > From && Life.BannedUntil <= To)
 	{
 		Hooks.Text("RiverLine", "Review complete. Your account is active again. Further violations may result in permanent closure.");
+	}
+	// Sundays: Dee deals the Riverside's $150, and says so in the afternoon.
+	if (const life::Activity* Live = life::Find("riverside"))
+	{
+		for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 16.0 * 60.0; At <= To; At += net::MinutesPerDay)
+		{
+			if (At <= From || !life::InWindow(*Live, At + 2.0 * 60.0 + 1.0) || Life.RentStage == life::Rent::Evicted)
+			{
+				continue;
+			}
+			StoryText("dee-riverside-" + std::to_string(net::DayOf(At)), "Dee",
+				Life.LiveEvents == 0 ? "i deal the riverside $150 on sundays. seven o'clock, forty-something players, deep stacks. sal and mei play it. you should too."
+									 : "riverside tonight. seven. i've got the feature table.");
+		}
 	}
 	// Game nights at Dee's: a heads-up half an hour before the doors open.
 	if (const life::Activity* Game = life::Find("dee-game"))

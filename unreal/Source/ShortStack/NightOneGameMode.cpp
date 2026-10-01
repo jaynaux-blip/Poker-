@@ -14,6 +14,7 @@
 #include "Misc/DateTime.h"
 #include "NightOneAudio.h"
 #include "NightOneGame.h"
+#include "ShortStack/Game/Network.h"
 #include "NightOnePawn.h"
 #include "NightOnePlayerController.h"
 #include "NightOneSaveGame.h"
@@ -85,6 +86,38 @@ void SetConsoleInt(const TCHAR* Name, int32 Value)
 /** What Dee texts after a night at her game, from what the Back Room passed back (cents, reads learned). */
 FString HomeTextFromOptions(const FString& Options)
 {
+	if (UGameplayStatics::HasOption(Options, TEXT("Live")))
+	{
+		// Home from the Riverside: Dee saw it all from the box.
+		const int32 Place = FCString::Atoi(*UGameplayStatics::ParseOption(Options, TEXT("Place")));
+		const int32 Of = FCString::Atoi(*UGameplayStatics::ParseOption(Options, TEXT("Of")));
+		const int64 Prize = FCString::Atoi64(*UGameplayStatics::ParseOption(Options, TEXT("Prize")));
+		const int32 Learned = FCString::Atoi(*UGameplayStatics::ParseOption(Options, TEXT("Learned")));
+		const int32 Tens = Place % 100;
+		const TCHAR* Suffix = (Tens >= 11 && Tens <= 13) ? TEXT("th") : (Place % 10 == 1 ? TEXT("st") : (Place % 10 == 2 ? TEXT("nd") : (Place % 10 == 3 ? TEXT("rd") : TEXT("th"))));
+		FString Text;
+		if (UGameplayStatics::HasOption(Options, TEXT("Won")))
+		{
+			Text = FString::Printf(TEXT("YOU WON THE RIVERSIDE. $%lld. the whole floor's talking about you. pay your rent, then call me."), Prize / 100);
+		}
+		else if (Prize > 0)
+		{
+			Text = FString::Printf(TEXT("%d%s of %d and a cash. $%lld. told you strangers are easier."), Place, Suffix, Of, Prize / 100);
+		}
+		else if (Place > 0 && Place <= Of / 3)
+		{
+			Text = FString::Printf(TEXT("%d%s of %d. close. you're better than half that room already."), Place, Suffix, Of);
+		}
+		else
+		{
+			Text = FString::Printf(TEXT("%d%s of %d. tournaments are long. come play my game tuesday and get your reps in."), Place, Suffix, Of);
+		}
+		if (Learned > 0)
+		{
+			Text += TEXT(" and you picked up a read. good.");
+		}
+		return Text;
+	}
 	const int64 Net = FCString::Atoi64(*UGameplayStatics::ParseOption(Options, TEXT("Net")));
 	const int32 Learned = FCString::Atoi(*UGameplayStatics::ParseOption(Options, TEXT("Learned")));
 	const bool bBusted = UGameplayStatics::HasOption(Options, TEXT("Busted"));
@@ -503,6 +536,7 @@ bool ANightOneGameMode::GoOut(const FString& ActivityId, int64 BuyInCents)
 	bLeaving = true;
 	LeaveAt = RealTime + 1.6;
 	LeaveBuyInCents = BuyInCents;
+	LeaveFor = ActivityId;
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
 		if (PC->PlayerCameraManager)
@@ -620,7 +654,11 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	if (bLeaving && RealTime >= LeaveAt)
 	{
 		bLeaving = false;
-		UGameplayStatics::OpenLevel(this, FName(TEXT("BackRoom")), true, FString::Printf(TEXT("BuyIn=%lld"), LeaveBuyInCents));
+		// The Back Room for Dee's game; the same map turns into the Riverside's poker room for the tournament.
+		const FString Options = LeaveFor == TEXT("riverside")
+			? FString::Printf(TEXT("Live=riverside?Day=%d"), ss::net::DayOf(Game->Session.WorldMinutes()))
+			: FString::Printf(TEXT("BuyIn=%lld"), LeaveBuyInCents);
+		UGameplayStatics::OpenLevel(this, FName(TEXT("BackRoom")), true, Options);
 		return;
 	}
 	if (HomeTextAt >= 0.0 && RealTime >= HomeTextAt)

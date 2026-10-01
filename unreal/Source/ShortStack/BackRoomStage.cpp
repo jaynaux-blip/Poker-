@@ -103,17 +103,6 @@ FVector ABackRoomStage::EyeLocation() const
 
 // ------------------------------------------------------------------ building blocks
 
-template <typename T>
-T* ABackRoomStage::NewPart(USceneComponent* Parent)
-{
-	T* Part = NewObject<T>(this);
-	Part->CreationMethod = EComponentCreationMethod::UserConstructionScript;
-	Part->SetupAttachment(Parent ? Parent : Root.Get());
-	BlueprintCreatedComponents.Add(Part);
-	Part->RegisterComponent();
-	return Part;
-}
-
 UStaticMeshComponent* ABackRoomStage::AddMesh(UStaticMesh* Mesh, UMaterialInterface* Material, const FVector& Location, const FVector& Scale, const FRotator& Rotation, USceneComponent* Parent, bool bShadows)
 {
 	UStaticMeshComponent* C = NewPart<UStaticMeshComponent>(Parent);
@@ -141,7 +130,7 @@ UMaterialInstanceDynamic* ABackRoomStage::Room(FName Key, int32 Pattern, uint32 
 	{
 		return *Found;
 	}
-	UMaterialInterface* Parent = RoomMaterial ? RoomMaterial.Get() : (SurfaceMaterial ? SurfaceMaterial.Get() : FallbackMaterial.Get());
+	UMaterialInterface* Parent = Pattern >= 5 && CardRoomMaterial ? CardRoomMaterial.Get() : (RoomMaterial ? RoomMaterial.Get() : (SurfaceMaterial ? SurfaceMaterial.Get() : FallbackMaterial.Get()));
 	UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(Parent, this);
 	M->SetVectorParameterValue(TEXT("BaseColor"), Srgb(SrgbHex));
 	M->SetVectorParameterValue(TEXT("BaseColor2"), Srgb(SrgbHex2 ? SrgbHex2 : SrgbHex));
@@ -188,8 +177,14 @@ void ABackRoomStage::BuildSet()
 {
 	Materials.Reset();
 	RoomMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Room.M_Room"));
+	CardRoomMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_CardRoom.M_CardRoom"));
 	SurfaceMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Surface.M_Surface"));
 	TableMesh = LoadProp(TEXT("SM_PokerTable"));
+	if (bCardRoom)
+	{
+		BuildCardRoom();
+		return;
+	}
 	BuildShell();
 	BuildTable();
 	BuildMachines();
@@ -472,6 +467,16 @@ void ABackRoomStage::Tick(float DeltaSeconds)
 	if (TubeGlow)
 	{
 		TubeGlow->SetScalarParameterValue(TEXT("Emissive"), 30.0f * Tube);
+	}
+	// The stream's tally light: a slow pulse while on air.
+	if (Tally)
+	{
+		const float Pulse = bOnAir ? 0.75f + 0.25f * FMath::Sin(Time * 3.0f) : 0.0f;
+		Tally->SetIntensity(3.0f * Pulse);
+		if (TallyGlow)
+		{
+			TallyGlow->SetScalarParameterValue(TEXT("Emissive"), 1.0f + 40.0f * Pulse);
+		}
 	}
 	// The running dryer: its drum's light rises and falls as the clothes tumble past the glass.
 	if (DryerGlow)

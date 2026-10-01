@@ -54,6 +54,9 @@ public:
 	/** Chips worth Amount as the club's denominations (counts of 100, 25, 5 and 1), the way players stack them. */
 	static void Break(int64 Amount, EBackRoomChipStyle Style, int32 Counts[4]);
 
+	/** What one chip of the smallest denomination stands for: 1 at Dee's game, 100 in a tournament. */
+	static int64 ChipUnit;
+
 	static constexpr double Radius = 1.95;
 	static constexpr double Thickness = 0.33;
 

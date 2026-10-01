@@ -566,6 +566,19 @@ void ABackRoomPlayer::SetHeroPeek(bool bPeeking)
 void ABackRoomPlayer::BeginPlay()
 {
 	Super::BeginPlay();
+	if (SeatRole == EBackRoomRole::Extra)
+	{
+		// Across the room and out of focus: the body moves a little less often, the face rarely.
+		SetActorTickInterval(0.05f);
+		for (UActorComponent* C : GetComponents())
+		{
+			if (USkeletalMeshComponent* Sk = Cast<USkeletalMeshComponent>(C))
+			{
+				Sk->SetComponentTickInterval(Sk == Face ? 0.1f : 0.05f);
+				Sk->bEnableUpdateRateOptimizations = true;
+			}
+		}
+	}
 	if (SeatRole == EBackRoomRole::Dealer && !Deck)
 	{
 		// The deck: a card stretched to a deck's thickness, face down in the left hand.

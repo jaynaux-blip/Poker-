@@ -1,6 +1,7 @@
 #include "BackRoomGameMode.h"
 
 #include "BackRoomCard.h"
+#include "BackRoomChips.h"
 #include "BackRoomPlayer.h"
 #include "BackRoomStage.h"
 #include "BackRoomTable.h"
@@ -22,6 +23,7 @@
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Tournament.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBackRoom, Log, All);
 
@@ -204,7 +206,9 @@ void ABackRoomPawn::HandleInput(float RealDt)
 	const float Drain = (bFocusing ? 1.0f / 8.0f : 0.0f) + (bSteadying ? 1.0f / 12.0f : 0.0f);
 	FocusLeft = FMath::Clamp(FocusLeft + (Drain > 0.0f ? -Drain * RealDt : RealDt / 14.0f), 0.0f, 1.0f);
 	Focus = Ease(Focus, bFocusing ? 1.0f : 0.0f, 5.0f, RealDt);
-	UGameplayStatics::SetGlobalTimeDilation(this, FMath::Lerp(1.0f, 0.45f, Focus));
+	const bool bFolded = GM && GM->IsLive() && GM->GetPhase() == EBackRoomPhase::Playing && Table && !Table->IsHeroInHand();
+	Pace = Ease(Pace, bFolded && !bFocusing ? 1.9f : 1.0f, 2.0f, RealDt);
+	UGameplayStatics::SetGlobalTimeDilation(this, FMath::Lerp(Pace, 0.45f, Focus));
 	if (bFocusing && Table)
 	{
 		// Whoever is nearest the middle of the view, and stays that way until you look well away.
@@ -577,7 +581,7 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	P.DepthOfFieldFstop = FMath::Lerp(FMath::Lerp(4.0f, 2.8f, PeekBlend), 1.4f, Focus);
 	P.VignetteIntensity = 0.45f + 0.5f * Focus + 0.55f * Racing + 0.18f * Racing * Kick;
 	P.ColorSaturation = FVector4(1.0, 1.0, 1.0, 1.0 - 0.38 * Racing);
-	P.SceneFringeIntensity = 2.6f * Racing + 1.2f * Racing * Kick;
+	P.SceneFringeIntensity = 1.1f * Racing + 0.7f * Racing * Kick;
 
 	// The opponents feel being looked at: more so through Focus.
 	if (Table)
@@ -695,8 +699,8 @@ void ABackRoomHUD::DrawHUD()
 	if (Arrive >= 0.0f)
 	{
 		const float A = Smooth(0.6f, 1.8f, Arrive) * (1.0f - Smooth(5.0f, 6.4f, Arrive));
-		Text(TEXT("S P I N    C Y C L E    L A U N D R O M A T"), Fade(Paper, A), W * 0.5f, H * 0.4f, Big, 1.35f, 1);
-		Text(TEXT("the back room"), Fade(Warm, A), W * 0.5f, H * 0.4f + 50.0f * S, Small, 1.45f, 1);
+		Text(GM->IsLive() ? TEXT("R I V E R S I D E    C A S I N O") : TEXT("S P I N    C Y C L E    L A U N D R O M A T"), Fade(Paper, A), W * 0.5f, H * 0.4f, Big, 1.35f, 1);
+		Text(GM->IsLive() ? TEXT("the poker room   \u00b7   sunday $150") : TEXT("the back room"), Fade(Warm, A), W * 0.5f, H * 0.4f + 50.0f * S, Small, 1.45f, 1);
 		Text(GM->ArrivalDay(), Fade(Dim, A), W * 0.5f, H * 0.4f + 88.0f * S, Small, 1.1f, 1);
 	}
 
@@ -732,7 +736,20 @@ void ABackRoomHUD::DrawHUD()
 		}
 		return;
 	}
-	if (Pawn && Pawn->IsWalking())
+	// A big moment, across the room's attention.
+	{
+		float Age = 0.0f;
+		const FString& B = GM->GetBanner(Age);
+		const float A = FMath::Clamp(Age / 0.3f, 0.0f, 1.0f) * (1.0f - FMath::Clamp((Age - 3.4f) / 0.8f, 0.0f, 1.0f));
+		if (!B.IsEmpty() && A > 0.01f)
+		{
+			const float By = H * 0.085f;
+			DrawRect(FLinearColor(Warm.R, Warm.G, Warm.B, 0.65f * A), W * 0.38f, By - 10.0f * S, W * 0.24f, 2.0f * S);
+			Text(B, Fade(Paper, A), W * 0.5f, By, Big, 1.45f, 1);
+			DrawRect(FLinearColor(Warm.R, Warm.G, Warm.B, 0.65f * A), W * 0.38f, By + 50.0f * S, W * 0.24f, 2.0f * S);
+		}
+	}
+	if ((Pawn && Pawn->IsWalking()) || Phase == EBackRoomPhase::Moving)
 	{
 		return;
 	}
@@ -740,8 +757,15 @@ void ABackRoomHUD::DrawHUD()
 	// Your stack, the pot, and your cards once you've looked.
 	const FBackRoomPrompt P = Table->GetPrompt();
 	const float Left = 48.0f * S;
-	Text(FString::Printf(TEXT("$%lld"), P.Stack), Paper, Left, H - 128.0f * S, Big, 1.6f, 0);
-	FString Under = FString::Printf(TEXT("Pot $%lld"), P.Pot);
+	const bool bLive = GM->IsLive();
+	// Money as the table counts it: dollars at Dee's, tournament chips at the Riverside.
+	auto Amount = [bLive](int64 V) { return bLive ? FText::AsNumber(V).ToString() : FString::Printf(TEXT("$%lld"), V); };
+	const float StackW = Text(Amount(P.Stack), Paper, Left, H - 128.0f * S, Big, 1.6f, 0);
+	if (bLive && P.BigBlind > 0)
+	{
+		Text(FString::Printf(TEXT("%.0f BB"), static_cast<double>(P.Stack) / static_cast<double>(P.BigBlind)), Dim, Left + StackW + 14.0f * S, H - 114.0f * S, Small, 1.1f, 0);
+	}
+	FString Under = TEXT("Pot ") + Amount(P.Pot);
 	if (P.Known.Num() == 2)
 	{
 		Under += TEXT("     ") + CardText(P.Known[0]) + TEXT(" ") + CardText(P.Known[1]);
@@ -789,15 +813,15 @@ void ABackRoomHUD::DrawHUD()
 	}
 
 	// Your turn: what you can do.
-	if (P.bYourTurn && Phase != EBackRoomPhase::Busted)
+	if (P.bYourTurn && Phase != EBackRoomPhase::Busted && Phase != EBackRoomPhase::Moving)
 	{
-		const FString Head = P.ToCall > 0 ? FString::Printf(TEXT("$%lld to call"), P.ToCall) : TEXT("Checks to you");
+		const FString Head = P.ToCall > 0 ? Amount(P.ToCall) + TEXT(" to call") : TEXT("Checks to you");
 		Text(Head, Warm, W * 0.5f, H - 150.0f * S, Big, 1.25f, 1);
 		FString Keys = TEXT("[F] Fold     ");
-		Keys += P.bCanCheck ? TEXT("[C] Check") : FString::Printf(TEXT("[C] Call $%lld"), P.ToCall);
+		Keys += P.bCanCheck ? FString(TEXT("[C] Check")) : TEXT("[C] Call ") + Amount(P.ToCall);
 		if (P.bCanRaise)
 		{
-			Keys += FString::Printf(TEXT("     [R] %s $%lld     [A] All in"), P.bIsBet ? TEXT("Bet") : TEXT("Raise to"), P.RaiseTo);
+			Keys += FString::Printf(TEXT("     [R] %s %s     [A] All in"), P.bIsBet ? TEXT("Bet") : TEXT("Raise to"), *Amount(P.RaiseTo));
 		}
 		Text(Keys, Paper, W * 0.5f, H - 100.0f * S, Small, 1.25f, 1);
 		if (P.bCanRaise)
@@ -830,10 +854,34 @@ void ABackRoomHUD::DrawHUD()
 	if (GM->IsCareer())
 	{
 		Text(GM->ClockLabel(), Dim, W - 48.0f * S, 36.0f * S, Small, 1.15f, 2);
+		float Ty = 66.0f * S;
+		if (const ss::Tournament* T = GM->GetTourney())
+		{
+			// The tournament at a glance: the level, the field, the money.
+			const ss::Level& L = T->CurrentLevel();
+			const int32 Secs = FMath::FloorToInt(GM->LevelTimeLeft());
+			auto N = [](int64 V) { return FText::AsNumber(V).ToString(); };
+			Text(FString::Printf(TEXT("LEVEL %d   %s / %s%s   %d:%02d"), T->LevelIndex + 1, *N(L.Sb), *N(L.Bb), L.Ante > 0 ? *FString::Printf(TEXT(" (%s)"), *N(L.Ante)) : TEXT(""), Secs / 60, Secs % 60),
+				Paper, W - 48.0f * S, Ty, Small, 1.1f, 2);
+			Ty += 27.0f * S;
+			Text(FString::Printf(TEXT("%d of %d left   \u00b7   avg %s   \u00b7   you're %d%s"), T->Remaining, T->Spec.Entrants, *N(static_cast<int64>(T->AverageStack())), T->HeroRank(),
+					 T->HeroRank() % 10 == 1 && T->HeroRank() % 100 != 11 ? TEXT("st") : (T->HeroRank() % 10 == 2 && T->HeroRank() % 100 != 12 ? TEXT("nd") : (T->HeroRank() % 10 == 3 && T->HeroRank() % 100 != 13 ? TEXT("rd") : TEXT("th")))),
+				Dim, W - 48.0f * S, Ty, Small, 1.0f, 2);
+			Ty += 25.0f * S;
+			const int32 Paid = T->PaidPlaces();
+			Text(T->InTheMoney() ? FString::Printf(TEXT("in the money   \u00b7   next out gets $%s"), *N(T->PrizeFor(T->Remaining) / 100))
+								 : FString::Printf(TEXT("%d paid   \u00b7   min cash $%s   \u00b7   %d to the money"), Paid, *N(T->PrizeFor(Paid) / 100), T->Remaining - Paid),
+				T->InTheMoney() ? Fade(FLinearColor(0.55f, 0.92f, 0.6f, 1.0f), 0.85f) : Dim, W - 48.0f * S, Ty, Small, 1.0f, 2);
+			Ty += 25.0f * S;
+		}
 		if (GM->GetEnergy() < 30.0f)
 		{
-			Text(FString::Printf(TEXT("tired  %d%%"), FMath::RoundToInt(GM->GetEnergy())), Fade(Warm, 0.8f), W - 48.0f * S, 66.0f * S, Small, 1.0f, 2);
+			Text(FString::Printf(TEXT("tired  %d%%"), FMath::RoundToInt(GM->GetEnergy())), Fade(Warm, 0.8f), W - 48.0f * S, Ty, Small, 1.0f, 2);
 		}
+	}
+	if (GM->IsQuitPending())
+	{
+		Text(TEXT("[L] again to walk away   \u00b7   your stack will be blinded off"), Warm, W * 0.5f, H - 190.0f * S, Small, 1.15f, 1);
 	}
 
 	// Focus left, when it isn't full.
@@ -887,7 +935,7 @@ void ABackRoomHUD::DrawHUD()
 		TArray<const TCHAR*> Hints = {TEXT("Space  look at your cards"), TEXT("Right mouse  study a face"), TEXT("Shift  breathe, slow the heart"), TEXT("Tab  your reads")};
 		if (GM->IsCareer())
 		{
-			Hints.Add(TEXT("L  rack up and go home"));
+			Hints.Add(GM->IsLive() ? TEXT("L  walk away (blinded off)") : TEXT("L  rack up and go home"));
 		}
 		for (const TCHAR* Hint : Hints)
 		{
@@ -911,16 +959,25 @@ ABackRoomGameMode::~ABackRoomGameMode() = default;
 
 ABackRoomStage* ABackRoomGameMode::FindOrSpawnStage()
 {
-	if (Stage)
+	// (The player is placed before StartPlay knows tonight's venue: a stage for the wrong one is replaced.)
+	if (Stage && Stage->bCardRoom == bLive)
 	{
 		return Stage;
 	}
+	Stage = nullptr;
 	for (TActorIterator<ABackRoomStage> It(GetWorld()); It; ++It)
 	{
-		Stage = *It;
-		return Stage;
+		if (It->bCardRoom == bLive)
+		{
+			Stage = *It;
+			return Stage;
+		}
+		// The map's Back Room makes way for the Riverside (or the other way round).
+		It->Destroy();
 	}
-	Stage = GetWorld()->SpawnActor<ABackRoomStage>(ABackRoomStage::StaticClass(), FTransform::Identity);
+	Stage = GetWorld()->SpawnActorDeferred<ABackRoomStage>(ABackRoomStage::StaticClass(), FTransform::Identity);
+	Stage->bCardRoom = bLive;
+	Stage->FinishSpawning(FTransform::Identity);
 	return Stage;
 }
 
@@ -945,8 +1002,10 @@ void ABackRoomGameMode::RestartPlayer(AController* NewPlayer)
 void ABackRoomGameMode::StartPlay()
 {
 	Super::StartPlay();
+	ABackRoomChips::ChipUnit = 1;
+	bLive = LoadLive();
 	FindOrSpawnStage();
-	const bool bCareer = LoadCareer();
+	const bool bCareer = bLive || LoadCareer();
 	SeatEveryone();
 	if (bCareer)
 	{
@@ -1006,7 +1065,7 @@ bool ABackRoomGameMode::LoadCareer()
 
 FString ABackRoomGameMode::DescribeNight() const
 {
-	static const TCHAR* Phases[] = {TEXT("practice"), TEXT("arriving"), TEXT("playing"), TEXT("busted"), TEXT("leaving")};
+	static const TCHAR* Phases[] = {TEXT("practice"), TEXT("arriving"), TEXT("playing"), TEXT("busted"), TEXT("leaving"), TEXT("moving")};
 	return FString::Printf(TEXT("%s %s energy %.1f base %lld bought %lld stack %lld hands %d%s%s"), Phases[static_cast<int32>(Phase)], *ClockLabel(), Energy, BaseCents,
 		BoughtInCents, Table ? Table->GetHeroStack() : 0, HandsPlayed, bLeaveAsked ? TEXT(" LEAVING") : TEXT(""), bLastHandCalled ? TEXT(" LAST-HAND") : TEXT(""));
 }
@@ -1073,6 +1132,11 @@ void ABackRoomGameMode::SaveCareer(bool bFinal)
 
 void ABackRoomGameMode::OnTableNote(uint8 Note)
 {
+	if (bLive)
+	{
+		LiveNote(Note);
+		return;
+	}
 	switch (static_cast<EBackRoomTableNote>(Note))
 	{
 	case EBackRoomTableNote::HandEnded:
@@ -1132,6 +1196,11 @@ void ABackRoomGameMode::Reload()
 
 void ABackRoomGameMode::RequestLeave()
 {
+	if (bLive)
+	{
+		LiveRequestLeave();
+		return;
+	}
 	if (!IsCareer() || !Table || Phase == EBackRoomPhase::Leaving || Phase == EBackRoomPhase::Arriving)
 	{
 		return;
@@ -1173,7 +1242,7 @@ void ABackRoomGameMode::StartWalkIn(ABackRoomPawn* Pawn)
 	ArrivalBeat = 1;
 	ArrivalT = 0.0f;
 	const FVector Eye = Stage ? Stage->EyeLocation() : FVector(-91.0, 0.0, 118.0);
-	const TArray<FVector> Path = {FVector(166.0, 540.0, 166.0), FVector(174.0, 360.0, 166.0), FVector(194.0, 258.0, 165.0), FVector(168.0, 176.0, 165.0),
+	const TArray<FVector> Path = bLive && Stage ? Stage->CardRoomWalkIn(Eye) : TArray<FVector>{FVector(166.0, 540.0, 166.0), FVector(174.0, 360.0, 166.0), FVector(194.0, 258.0, 165.0), FVector(168.0, 176.0, 165.0),
 		FVector(40.0, 210.0, 165.0), FVector(-90.0, 228.0, 164.0), FVector(-196.0, 168.0, 163.0), FVector(-206.0, 50.0, 161.0), FVector(-160.0, 6.0, 148.0), Eye};
 	TWeakObjectPtr<ABackRoomGameMode> Self = this;
 	Pawn->PlayWalk(Path, 9.5f, false, [Self]() {
@@ -1339,6 +1408,11 @@ void ABackRoomGameMode::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	if (bLive)
+	{
+		LiveTick(RealDt);
+		return;
+	}
 	ABackRoomPawn* Pawn = Cast<ABackRoomPawn>(UGameplayStatics::GetPlayerPawn(this, 0));
 	APlayerController* PC = GetWorld()->GetFirstPlayerController();
 	TWeakObjectPtr<ABackRoomGameMode> Self = this;
@@ -1470,28 +1544,15 @@ void ABackRoomGameMode::Tick(float DeltaSeconds)
 	}
 }
 
-void ABackRoomGameMode::SeatEveryone()
+FBackRoomPersona ABackRoomGameMode::PersonaFor(const FString& Name)
 {
-	// Players placed in the map (for look development) stay out of the game.
-	for (TActorIterator<ABackRoomPlayer> It(GetWorld()); It; ++It)
-	{
-		It->Destroy();
-	}
-
-	auto Spawn = [this](const TCHAR* CastName, int32 Seat, EBackRoomRole AtTableAs, const FBackRoomPersona& Persona) {
-		const FTransform T = ABackRoomStage::SeatTransform(Seat);
-		ABackRoomPlayer* P = GetWorld()->SpawnActorDeferred<ABackRoomPlayer>(ABackRoomPlayer::StaticClass(), T);
-		P->Persona = Persona;
-		P->SeatRole = AtTableAs;
-		P->MetaHumanClass = CastBlueprint(CastName);
-		P->FinishSpawning(T);
-		return P;
-	};
-	auto Persona = [](const TCHAR* Name, float Nerves, float Expressive, float Restless, float Fidget, float Posture, float Chatter, int32 Seed,
-		TArray<FBackRoomTell> Tells, uint32 ShirtSrgb = 0x8a8a8a, float HeroRead = 0.0f) {
+	using T = EBackRoomTell;
+	using M = EBackRoomTellMeaning;
+	auto Persona = [](const TCHAR* InName, float Nerves, float Expressive, float Restless, float Fidget, float Posture, float Chatter, int32 Seed,
+		TArray<FBackRoomTell> Tells, uint32 ShirtSrgb, float HeroRead) {
 		FBackRoomPersona P;
 		P.Shirt = FLinearColor(FColor((ShirtSrgb >> 16) & 0xff, (ShirtSrgb >> 8) & 0xff, ShirtSrgb & 0xff));
-		P.Name = Name;
+		P.Name = InName;
 		P.Nervousness = Nerves;
 		P.Expressiveness = Expressive;
 		P.Restlessness = Restless;
@@ -1503,8 +1564,135 @@ void ABackRoomGameMode::SeatEveryone()
 		P.HeroRead = HeroRead;
 		return P;
 	};
-	using T = EBackRoomTell;
-	using M = EBackRoomTellMeaning;
+	// The regulars, what gives them away, and how they read you (HeroRead: above 0 they read your shaking
+	// hands right, below 0 they think nerves mean a bluff).
+	if (Name == TEXT("Dee"))
+	{
+		return Persona(TEXT("Dee"), 0.1f, 0.3f, 0.3f, 0.0f, 0.6f, 0.2f, 37, {}, 0x1f2a3d, 0.0f);
+	}
+	if (Name == TEXT("You"))
+	{
+		return Persona(TEXT("You"), 0.3f, 0.5f, 0.5f, 0.3f, 0.5f, 0.0f, 7, {}, 0x3c4a44, 0.0f);
+	}
+	if (Name == TEXT("Sal"))
+	{
+		// Old-timer, plays tight. Honest tells: he glances at his chips when he connects, and a bluff
+		// makes him rub his neck. Forty years of watching hands: he knows a shake.
+		return Persona(TEXT("Sal"), 0.2f, 0.35f, 0.4f, 0.6f, 0.3f, 0.35f, 11,
+			{Tell(T::ChipGlance, M::Strong, 0.85f, 0.05f), Tell(T::Recheck, M::Weak, 0.55f, 0.08f), Tell(T::NeckTouch, M::Bluff, 0.75f, 0.08f)}, 0x6b6a4e, 0.6f);
+	}
+	if (Name == TEXT("Big Lou"))
+	{
+		// Loud, calls everything. His smile is real when he has it; when he bluffs it's mouth only.
+		// Sees you shake and calls, every time.
+		return Persona(TEXT("Big Lou"), 0.25f, 0.75f, 0.35f, 0.5f, 0.2f, 0.8f, 53,
+			{Tell(T::RealSmile, M::Strong, 0.8f, 0.1f), Tell(T::FalseSmile, M::Bluff, 0.75f, 0.08f), Tell(T::ChipReach, M::Weak, 0.6f, 0.12f)}, 0x1c1c1e, -0.6f);
+	}
+	if (Name == TEXT("Twitch"))
+	{
+		// Wired, bets too much. Shakes when he has it; bluffing, he stares you down and swallows.
+		return Persona(TEXT("Twitch"), 0.85f, 0.7f, 0.9f, 0.9f, 0.7f, 0.5f, 41,
+			{Tell(T::Tremble, M::Strong, 0.85f, 0.12f), Tell(T::StareDown, M::Bluff, 0.75f, 0.12f), Tell(T::Swallow, M::Bluff, 0.6f, 0.1f),
+				Tell(T::BlinkBurst, M::Bluff, 0.45f, 0.15f)}, 0x8c2a24, -0.5f);
+	}
+	if (Name == TEXT("Mei"))
+	{
+		// Quiet and sharp. She acts: a sigh and a look away mean she's strong. Her pupils don't act. She
+		// reads yours best of all.
+		return Persona(TEXT("Mei"), 0.15f, 0.25f, 0.3f, 0.3f, 0.55f, 0.15f, 23,
+			{Tell(T::Sigh, M::Strong, 0.65f, 0.08f), Tell(T::LookAway, M::Strong, 0.5f, 0.15f), Tell(T::PupilFlare, M::Strong, 0.6f, 0.05f),
+				Tell(T::LipPress, M::Bluff, 0.45f, 0.12f)}, 0x34383d, 0.9f);
+	}
+	// The Riverside's Sunday faces.
+	if (Name == TEXT("Mrs. Park"))
+	{
+		// Thirty years of the Sunday tournament. Folds and folds; when she finally bluffs she goes
+		// rigid, and a real hand pulls her eyes down to her chips. Nothing gets past her.
+		return Persona(TEXT("Mrs. Park"), 0.15f, 0.2f, 0.25f, 0.4f, 0.75f, 0.25f, 61,
+			{Tell(T::Freeze, M::Bluff, 0.85f, 0.05f), Tell(T::ChipGlance, M::Strong, 0.7f, 0.05f), Tell(T::Sigh, M::Weak, 0.5f, 0.1f)}, 0x5a3e57, 0.7f);
+	}
+	if (Name == TEXT("Rick"))
+	{
+		// Car-dealership money, loud and loose. Bluffing he stares you down and rubs his neck; with a
+		// hand he goes quiet and looks off at the room.
+		return Persona(TEXT("Rick"), 0.35f, 0.7f, 0.6f, 0.7f, 0.25f, 0.75f, 67,
+			{Tell(T::StareDown, M::Bluff, 0.8f, 0.15f), Tell(T::NeckTouch, M::Bluff, 0.55f, 0.1f), Tell(T::LookAway, M::Strong, 0.6f, 0.1f)}, 0x2b4d7a, -0.3f);
+	}
+	if (Name == TEXT("Dre"))
+	{
+		// Talks the whole time. Can't hide a smile with a hand; swallows when he's pushing air, and
+		// reaches for chips when he wants you to check.
+		return Persona(TEXT("Dre"), 0.3f, 0.85f, 0.55f, 0.6f, 0.45f, 0.9f, 71,
+			{Tell(T::RealSmile, M::Strong, 0.75f, 0.15f), Tell(T::Swallow, M::Bluff, 0.6f, 0.1f), Tell(T::ChipReach, M::Weak, 0.55f, 0.1f)}, 0xc28a2e, -0.2f);
+	}
+	if (Name == TEXT("gh0stfold"))
+	{
+		// The rival from RiverLine, in a hoodie. Almost nothing leaks: the pupils, close up, when he has
+		// it, and a burst of blinks after a bluff. Reads you better than anyone.
+		return Persona(TEXT("gh0stfold"), 0.1f, 0.12f, 0.3f, 0.5f, 0.6f, 0.3f, 83,
+			{Tell(T::PupilFlare, M::Strong, 0.45f, 0.02f), Tell(T::BlinkBurst, M::Bluff, 0.35f, 0.05f)}, 0x232326, 1.0f);
+	}
+	// Anyone else: a stranger with a couple of the common tells.
+	const int32 Seed = static_cast<int32>(GetTypeHash(Name) & 0x7fffffff);
+	FRandomStream R(Seed);
+	const T Pool[] = {T::ChipGlance, T::BrowFlash, T::Swallow, T::LipPress, T::LookAway, T::NeckTouch, T::Recheck, T::Sigh, T::ChipReach, T::RealSmile};
+	const M Means[] = {M::Strong, M::Weak, M::Bluff};
+	TArray<FBackRoomTell> Tells;
+	const T A = Pool[R.RandRange(0, 9)];
+	T B = Pool[R.RandRange(0, 9)];
+	B = B == A ? Pool[(static_cast<int32>(A) + 3) % 10] : B;
+	Tells.Add(Tell(A, Means[R.RandRange(0, 2)], 0.6f, 0.12f));
+	Tells.Add(Tell(B, Means[R.RandRange(0, 2)], 0.5f, 0.12f));
+	static const uint32 Shirts[] = {0x2f3b52, 0x6e2b2b, 0x3a5a40, 0x8a7a5a, 0x222222, 0x5a4a6e, 0x9a9a9a, 0x7a4a2a};
+	return Persona(*Name, R.FRandRange(0.15f, 0.6f), R.FRandRange(0.3f, 0.7f), R.FRandRange(0.3f, 0.7f), R.FRandRange(0.2f, 0.7f), R.FRandRange(0.3f, 0.7f), 0.0f,
+		Seed % 997 + 101, MoveTemp(Tells), Shirts[R.RandRange(0, 7)], 0.0f);
+}
+
+FString ABackRoomGameMode::CastAssetFor(const FString& Name)
+{
+	if (Name == TEXT("Big Lou"))
+	{
+		return TEXT("BigLou");
+	}
+	if (Name == TEXT("Mrs. Park"))
+	{
+		return TEXT("MrsPark");
+	}
+	if (Name == TEXT("gh0stfold"))
+	{
+		return TEXT("Ghost");
+	}
+	if (Name == TEXT("You"))
+	{
+		return TEXT("Hero");
+	}
+	for (const TCHAR* Known : {TEXT("Dee"), TEXT("Sal"), TEXT("Twitch"), TEXT("Mei"), TEXT("Rick"), TEXT("Dre")})
+	{
+		if (Name == Known)
+		{
+			return Known;
+		}
+	}
+	return FString();
+}
+
+ABackRoomPlayer* ABackRoomGameMode::SpawnPerson(const FString& CastName, const FTransform& At, EBackRoomRole AtTableAs, const FBackRoomPersona& Persona)
+{
+	ABackRoomPlayer* P = GetWorld()->SpawnActorDeferred<ABackRoomPlayer>(ABackRoomPlayer::StaticClass(), At);
+	P->Persona = Persona;
+	P->SeatRole = AtTableAs;
+	P->MetaHumanClass = CastBlueprint(*CastName);
+	P->FinishSpawning(At);
+	return P;
+}
+
+void ABackRoomGameMode::SeatEveryone()
+{
+	// Players placed in the map (for look development) stay out of the game.
+	for (TActorIterator<ABackRoomPlayer> It(GetWorld()); It; ++It)
+	{
+		It->Destroy();
+	}
 
 	Table = GetWorld()->SpawnActor<ABackRoomTable>(ABackRoomTable::StaticClass(), FTransform::Identity);
 	// The night's rules: in a career a bust is yours to deal with, Dee only teaches the first time,
@@ -1527,45 +1715,38 @@ void ABackRoomGameMode::SeatEveryone()
 			GM->OnTableNote(static_cast<uint8>(Note));
 		}
 	};
-	Dealer = Spawn(TEXT("Dee"), 4, EBackRoomRole::Dealer, Persona(TEXT("Dee"), 0.1f, 0.3f, 0.3f, 0.0f, 0.6f, 0.2f, 37, {}, 0x1f2a3d));
-	Hero = Spawn(TEXT("Hero"), 0, EBackRoomRole::Hero, Persona(TEXT("You"), 0.3f, 0.5f, 0.5f, 0.3f, 0.5f, 0.0f, 7, {}, 0x3c4a44));
+	Dealer = SpawnPerson(TEXT("Dee"), ABackRoomStage::SeatTransform(4), EBackRoomRole::Dealer, PersonaFor(TEXT("Dee")));
+	Hero = SpawnPerson(TEXT("Hero"), ABackRoomStage::SeatTransform(0), EBackRoomRole::Hero, PersonaFor(TEXT("You")));
 	Table->SetDealer(Dealer);
 	Table->AddPlayer(Hero, 0, ss::Archetype::Tag, HeroBuyInChips);
 
-	// The regulars, what gives them away, and how they read you (HeroRead: above 0 they read your
-	// shaking hands right, below 0 they think nerves mean a bluff).
-	struct FRegular
+	if (bLive)
 	{
-		const TCHAR* Cast;
-		int32 Seat;
-		ss::Archetype Style;
-		int64 BuyIn;
-		FBackRoomPersona Persona;
-	};
-	const FRegular Regulars[] = {
-		// Old-timer, plays tight. Honest tells: he glances at his chips when he connects, and a bluff
-		// makes him rub his neck. Forty years of watching hands: he knows a shake.
-		{TEXT("Sal"), 3, ss::Archetype::Nit, 240, Persona(TEXT("Sal"), 0.2f, 0.35f, 0.4f, 0.6f, 0.3f, 0.35f, 11,
-			{Tell(T::ChipGlance, M::Strong, 0.85f, 0.05f), Tell(T::Recheck, M::Weak, 0.55f, 0.08f), Tell(T::NeckTouch, M::Bluff, 0.75f, 0.08f)}, 0x6b6a4e, 0.6f)},
-		// Loud, calls everything. His smile is real when he has it; when he bluffs it's mouth only.
-		// Sees you shake and calls, every time.
-		{TEXT("BigLou"), 5, ss::Archetype::Station, 300, Persona(TEXT("Big Lou"), 0.25f, 0.75f, 0.35f, 0.5f, 0.2f, 0.8f, 53,
-			{Tell(T::RealSmile, M::Strong, 0.8f, 0.1f), Tell(T::FalseSmile, M::Bluff, 0.75f, 0.08f), Tell(T::ChipReach, M::Weak, 0.6f, 0.12f)}, 0x1c1c1e, -0.6f)},
-		// Wired, bets too much. Shakes when he has it; bluffing, he stares you down and swallows.
-		{TEXT("Twitch"), 2, ss::Archetype::Maniac, 160, Persona(TEXT("Twitch"), 0.85f, 0.7f, 0.9f, 0.9f, 0.7f, 0.5f, 41,
-			{Tell(T::Tremble, M::Strong, 0.85f, 0.12f), Tell(T::StareDown, M::Bluff, 0.75f, 0.12f), Tell(T::Swallow, M::Bluff, 0.6f, 0.1f),
-				Tell(T::BlinkBurst, M::Bluff, 0.45f, 0.15f)}, 0x8c2a24, -0.5f)},
-		// Quiet and sharp. She acts: a sigh and a look away mean she's strong. Her pupils don't act. She
-		// reads yours best of all.
-		{TEXT("Mei"), 6, ss::Archetype::Reg, 220, Persona(TEXT("Mei"), 0.15f, 0.25f, 0.3f, 0.3f, 0.55f, 0.15f, 23,
-			{Tell(T::Sigh, M::Strong, 0.65f, 0.08f), Tell(T::LookAway, M::Strong, 0.5f, 0.15f), Tell(T::PupilFlare, M::Strong, 0.6f, 0.05f),
-				Tell(T::LipPress, M::Bluff, 0.45f, 0.12f)}, 0x34383d, 0.9f)},
-	};
-	for (const FRegular& R : Regulars)
+		// The Riverside: the tournament seats the table (BackRoomLive.cpp).
+		SeatLive();
+	}
+	else
 	{
-		ABackRoomPlayer* P = Spawn(R.Cast, R.Seat, EBackRoomRole::Player, R.Persona);
-		Opponents.Add(P);
-		Table->AddPlayer(P, R.Seat, R.Style, R.BuyIn);
+		// Dee's regulars, in their usual seats.
+		struct FRegular
+		{
+			const TCHAR* Name;
+			int32 Seat;
+			ss::Archetype Style;
+			int64 BuyIn;
+		};
+		const FRegular Regulars[] = {
+			{TEXT("Sal"), 3, ss::Archetype::Nit, 240},
+			{TEXT("Big Lou"), 5, ss::Archetype::Station, 300},
+			{TEXT("Twitch"), 2, ss::Archetype::Maniac, 160},
+			{TEXT("Mei"), 6, ss::Archetype::Reg, 220},
+		};
+		for (const FRegular& R : Regulars)
+		{
+			ABackRoomPlayer* P = SpawnPerson(CastAssetFor(R.Name), ABackRoomStage::SeatTransform(R.Seat), EBackRoomRole::Player, PersonaFor(R.Name));
+			Opponents.Add(P);
+			Table->AddPlayer(P, R.Seat, R.Style, R.BuyIn);
+		}
 	}
 
 	// Everyone knows where the others sit: gaze targets at head height.

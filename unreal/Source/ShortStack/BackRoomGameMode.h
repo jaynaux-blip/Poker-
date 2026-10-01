@@ -16,7 +16,12 @@ class UPointLightComponent;
 namespace ss
 {
 struct SaveData;
+class Tournament;
+struct TEvent;
+struct TPlayer;
 }
+struct FBackRoomPersona;
+enum class EBackRoomRole : uint8;
 
 /**
  * You, at the Back Room's table: a camera in your own head.
@@ -117,6 +122,8 @@ private:
 
 	// The heart.
 	float BeatPhase = 0.0f;
+	/** The table's pace: quicker once you're out of the hand (a tournament). */
+	float Pace = 1.0f;
 	int32 StepCount = 0;
 	float Kick = 0.0f;
 	float Steady = 0.0f;
@@ -162,6 +169,8 @@ enum class EBackRoomPhase : uint8
 	Busted,
 	/** Racked up: the goodbye, then the walk out. */
 	Leaving,
+	/** Tournament: carrying your chips to another table. */
+	Moving,
 };
 
 /**
@@ -216,6 +225,12 @@ public:
 	/** Moves the night's clock on (for testing closing time and tiredness). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	void TestAdvanceClock(float ClockMinutes, float EnergySpent);
+	/** Tournament: plays the next Hands of the whole room at once between hands (you play on autopilot). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestFastForward(int32 Hands);
+	/** Tournament: adds chips to your stack (between hands). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestHeroChips(int32 Chips);
 	void AdjustReload(int32 Steps);
 	int64 GetReloadChips() const { return ReloadChips; }
 	bool CanReload() const;
@@ -238,9 +253,83 @@ public:
 	bool IsFirstVisit() const { return bFirstVisit; }
 	bool IsLeaveRequested() const { return bLeaveAsked; }
 
+	// ------------------------------------------------------------ the Riverside (BackRoomLive.cpp)
+	/** A live tournament tonight (opened with "?Live=riverside") instead of Dee's game. */
+	bool IsLive() const { return bLive; }
+	/** The tournament for the HUD (null at Dee's game). */
+	const ss::Tournament* GetTourney() const { return Tourney.Get(); }
+	/** The level's time left on the clock screens, counting down between hands (game seconds). */
+	double LevelTimeLeft() const;
+	/** A big moment across the screen (HAND FOR HAND, THE BUBBLE HAS BURST, FINAL TABLE...), and its age. */
+	const FString& GetBanner(float& OutAge) const
+	{
+		OutAge = BannerAge;
+		return Banner;
+	}
+	/** Leaving a tournament early: L asks, L again within a few seconds confirms (your stack is blinded off). */
+	bool IsQuitPending() const { return QuitAskedAt >= 0.0f; }
+	/** The persona for a cast member by name (the Back Room's regulars and the Riverside's Sunday faces). */
+	static FBackRoomPersona PersonaFor(const FString& Name);
+	/** The cast's MetaHuman asset name for a player name ("Big Lou" -> "BigLou"), or empty. */
+	static FString CastAssetFor(const FString& Name);
+
 private:
 	ABackRoomStage* FindOrSpawnStage();
 	void SeatEveryone();
+	ABackRoomPlayer* SpawnPerson(const FString& CastName, const FTransform& At, EBackRoomRole AtTableAs, const FBackRoomPersona& Persona);
+
+	// The Riverside (BackRoomLive.cpp).
+	bool LoadLive();
+	void SeatLive();
+	void LiveTick(float RealDt);
+	void LiveEvent(const ss::TEvent& E);
+	void LiveNote(uint8 Note);
+	ABackRoomPlayer* SeatCast(const ss::TPlayer& P, int32 TableSeat);
+	void UnseatCast(ABackRoomPlayer* Player, const FString& Id, bool bBusted);
+	void LiveMove();
+	void LiveOver();
+	void LiveSettle();
+	void LiveGoHome();
+	void PlaceExtras();
+	void UpdateBoard(float RealDt);
+	void RaiseBanner(const FString& Text);
+	void Floor(const FString& Line, bool bChime = true);
+	void LiveRequestLeave();
+	FString Chips(int64 Amount) const;
+	int32 SlotForTable(int32 TableId);
+
+	bool bLive = false;
+	TSharedPtr<ss::Tournament> Tourney;
+	int32 LiveDay = 0;
+	/** Sunday's midnight in world minutes (the tournament's clock is minutes after it). */
+	double LiveDayStart = 0.0;
+	/** Who's in which body: tournament player id -> actor (kept, hidden, while they're elsewhere). */
+	UPROPERTY(Transient)
+	TMap<FString, TObjectPtr<ABackRoomPlayer>> CastActors;
+	/** The room's other tables: extras by slot (dealer and two players each). */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<ABackRoomPlayer>> Extras;
+	TMap<int32, int32> SlotByTable;
+	int32 HeroPlace = 0;
+	int64 HeroPrizeCents = 0;
+	bool bHeroWon = false;
+	bool bLiveOver = false;
+	bool bAnnouncedStart = false;
+	bool bGhostMet = false;
+	bool bHandForHand = false;
+	bool bFinalTable = false;
+	FString Banner;
+	float BannerAge = 99.0f;
+	float BoardTick = 0.0f;
+	float QuitAskedAt = -1.0f;
+	float LiveT = 0.0f;
+	float MoveT = -1.0f;
+	int32 AnonymousLooks = 0;
+	int32 FastForwardLeft = 0;
+	bool bTestMove = false;
+	float LastFarewellAt = -100.0f;
+	int32 TestChips = 0;
+	int32 RecentMovedIn = 0;
 
 	// The career.
 	bool LoadCareer();

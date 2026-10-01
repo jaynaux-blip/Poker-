@@ -322,7 +322,8 @@ public:
 	life::Outcome LastOutcome;
 	/** Starts an activity from life::Catalog(); returns why not, or "" when it started. */
 	SHORTSTACKCORE_API std::string StartActivity(const std::string& Id);
-	/** Heads out to a live game (life::Kind::Game) with a buy-in from the bankroll; returns why not, or "". */
+	/** Heads out to a live game (life::Kind::Game, a buy-in from the bankroll) or a live tournament (life::Kind::Live,
+	 * its fixed buy-in); returns why not, or "". */
 	SHORTSTACKCORE_API std::string GoToGame(const std::string& Id, Chips BuyInCents);
 	SHORTSTACKCORE_API bool PayRent();
 	SHORTSTACKCORE_API bool PayDebt();

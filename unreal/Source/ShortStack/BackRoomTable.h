@@ -5,6 +5,7 @@
 #include "ShortStack/AI/Profiles.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
+#include "ShortStack/Tournament.h"
 
 #include "BackRoomTable.generated.h"
 
@@ -32,6 +33,10 @@ enum class EBackRoomTableNote : uint8
 	HeroBusted,
 	/** The hero racked up (after the hand they asked to leave in). */
 	HeroLeft,
+	/** Tournament: the hero's been moved to another table; the table holds until Resume. */
+	HeroMoved,
+	/** Tournament: no more hands for the hero (busted, or it's over). */
+	TournamentOver,
 };
 
 /**
@@ -162,12 +167,54 @@ public:
 
 	/** Dee says something (the night's host lines). */
 	void DealerLine(const FString& Line) { DealerSays(Line); }
+	/** Someone not at the table speaks (the tournament floor over the PA). */
+	void Announce(const FString& Speaker, const FString& Line) { Lines.Add({Speaker, Line, Time}); }
+
+	// ------------------------------------------------------------ a tournament (the Riverside)
+	/**
+	 * Plays the hero's table of a tournament instead of a cash game: each hand is the tournament's next
+	 * tick at the hero's table, the seats follow its seating (6-max, physical seats around the hero), the
+	 * blinds its levels, the bots its profiles and ICM pressure. Busted players leave; nobody rebuys.
+	 */
+	void SetTournament(TSharedPtr<ss::Tournament> InTourney);
+	bool IsTournament() const { return Tourney.IsValid(); }
+	ss::Tournament* GetTournament() const { return Tourney.Get(); }
+	/** The tournament's events since the last call (busts, levels, moves, the bubble, the final table). */
+	TArray<ss::TEvent> TakeEvents();
+	/** The host's cast: a body for a tournament player taking physical seat TableSeat at the hero's table. */
+	TFunction<ABackRoomPlayer*(const ss::TPlayer&, int32)> OnSeatPlayer;
+	/** A player leaves the hero's table (Busted: out of the tournament; else moved to another table). */
+	TFunction<void(ABackRoomPlayer*, const FString&, bool)> OnUnseatPlayer;
+	/** Starts dealing again after a hold (a table move). */
+	void Resume(float Delay);
+	/** Holds before the next deal (hand for hand: the other tables are still playing). */
+	void Hold() { bHolding = true; }
+	/** Seats the tournament's next hand now (while the hero walks in), without dealing it. */
+	void PrepareNext();
+	/** The Riverside's room tone instead of the Back Room's (set before Begin). */
+	bool bCardRoomTone = false;
+	/** How full the room is (0..1), for the card room's murmur and chips. */
+	void SetCrowd(float Crowd);
+	/** Pressure the moment adds to the heart (the bubble, the final table), in bpm before sensitivity. */
+	float ExtraPressure = 0.0f;
+	/** The big blind now (2 at Dee's game). */
+	int64 BigBlindNow() const;
+	/** Still in this hand (not folded): when not, the host lets the rest of it play out quicker. */
+	bool IsHeroInHand() const;
+	/** The actor sitting for tournament player Id at the hero's table, if they're here. */
+	ABackRoomPlayer* PlayerById(const FString& Id) const;
+	/** Seconds since the current hand was dealt (for the clock screens' countdown). */
+	float HandAge() const { return Time - HandStartedAt; }
+	/** No hand dealt or waiting (between hands). */
+	bool IsBetweenHands() const { return !Hand.IsValid() && !PendingHand.IsValid(); }
 	UNightOneAudio* GetAudio() const { return Audio; }
 
 private:
 	struct FSeat
 	{
+		/** Where at the table (ABackRoomStage's seats), and the engine's seat number for this hand. */
 		int32 TableSeat = 0;
+		int32 HandSeat = -1;
 		TObjectPtr<ABackRoomPlayer> Player;
 		bool bHero = false;
 		FString Id;
@@ -182,8 +229,11 @@ private:
 		bool bShown = false;
 	};
 
-	FSeat* SeatAt(int32 TableSeat);
-	const FSeat* SeatAt(int32 TableSeat) const;
+	/** The seat playing engine seat HandSeat this hand. */
+	FSeat* SeatAt(int32 HandSeat);
+	const FSeat* SeatAt(int32 HandSeat) const;
+	/** The seat at physical TableSeat, made (with its chip piles) if there isn't one yet. */
+	FSeat& EnsureSeat(int32 TableSeat);
 	FSeat* HeroSeat();
 	const FSeat* HeroSeat() const;
 	/** Where things go on the felt in front of a seat. */
@@ -213,6 +263,7 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Short Stack")
 	TObjectPtr<UNightOneAudio> Audio;
 	TSharedPtr<FBackRoomAmbience> RoomTone;
+	TSharedPtr<class FCardRoomAmbience> CardTone;
 	void HookSounds(ABackRoomPlayer* Player);
 
 	UPROPERTY(Transient)
@@ -266,6 +317,19 @@ private:
 	float HeroShakeAtBet = 0.0f;
 	bool bHeroAggressedThisStreet = false;
 	void UpdateComposure(float Dt);
+
+	// The tournament.
+	TSharedPtr<ss::Tournament> Tourney;
+	TArray<ss::TEvent> Events;
+	/** The hand dealt by the tournament, waiting while the host moves the hero to its table. */
+	TUniquePtr<ss::Hand> PendingHand;
+	float HandStartedAt = 0.0f;
+	bool bTournamentOverNoted = false;
+	/** Asks the tournament for the next hand (into PendingHand); false when there's none to deal now. */
+	bool FetchTournamentHand();
+	/** Puts the tournament's players for H in their physical seats (bodies come and go through the host). */
+	void SyncTournamentSeats(const ss::Hand& H);
+	void WireSeat(FSeat& S);
 	/** An opponent facing the hero's bet: do the hands give it away (and do they read it right)? */
 	void ReadHero(const FSeat& Reader, int32& Kind, double& To, double Equity);
 	/** Tells seen this hand while studying their player, waiting for the cards to say if they meant it. */
@@ -282,7 +346,7 @@ private:
 	bool bLeftNoted = false;
 	bool bBustNoted = false;
 	/** Equity of a seat's hole cards against random hands for everyone still in, as a player feels it. */
-	float FeltEquity(int32 TableSeat);
+	float FeltEquity(int32 HandSeat);
 	TArray<FSighting> Sightings;
 	void ConfirmSightings(const ABackRoomPlayer* Shown);
 	void Whisper(const FString& Text);

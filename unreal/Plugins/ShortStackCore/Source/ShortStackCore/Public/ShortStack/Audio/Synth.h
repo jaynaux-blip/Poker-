@@ -21,6 +21,8 @@ enum class Effect : int
 	Step,     // a shoe on concrete
 	Scrape,   // chair legs dragged on concrete
 	Breath,   // a slow breath out
+	Chime,    // the PA's two-note chime before an announcement
+	Applause, // a room clapping
 };
 
 /** Renders a game sound (volume 0..1 as the session requests it). */

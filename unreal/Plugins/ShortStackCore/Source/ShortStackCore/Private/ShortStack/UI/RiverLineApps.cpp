@@ -7,6 +7,7 @@
 
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Live.h"
 
 #include <algorithm>
 #include <cmath>
@@ -619,6 +620,11 @@ void RiverLine::BurnerApp(double Now)
 		{
 			Learned += Rd.second >= 2 ? 1 : 0;
 		}
+		if (L.BackRoomNights >= 1 || L.LiveEvents >= 1)
+		{
+			Thread.push_back({false, L.LiveEvents == 0 ? "and on sundays i deal the riverside $150. real casino, real field. sal and mei play it. come see how you do with strangers."
+														   : L.LiveCashes > 0 ? "you cashed the riverside. the floor knows your name now." : "the riverside's every sunday. strangers are easier to read than my regulars. mostly."});
+		}
 		if (Learned >= 1)
 		{
 			Thread.push_back({false, Learned == 1 ? "you caught one of their tells. most people never see a single one." : "you've got " + std::to_string(Learned) + " of their tells now. they'll start to feel it."});
@@ -677,43 +683,75 @@ void RiverLine::BurnerApp(double Now)
 	}
 	if (BurnerContact == 2)
 	{
-		// The game: when it runs, and a buy-in from the bankroll that takes you there.
+		// Dee's two games: the back room's, with a buy-in from the bankroll, and the Riverside's Sunday tournament.
 		const life::Activity* G = life::Find("dee-game");
-		if (!G)
+		const life::Activity* Rv = life::Find("riverside");
+		if (!G || !Rv)
 		{
 			return;
 		}
-		const Rect R{380.0f, OffersTop + 24.0f, NetW - 420.0f, 214.0f};
-		UI.RRect(R, 16.0f, Hex(0x15110a), NetA(Cc, 0.45f));
-		// Named for the night it's on: tonight's while the doors are open, else the next one.
-		{
-			static const char* Days[7] = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
-			const double At = life::InWindow(*G, Ctx.World) ? Ctx.World : life::NextOpen(*G, Ctx.World);
+		static const char* Days[7] = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+		// The night a game is on: tonight's while its doors are open, else the next one.
+		auto NightOf = [&](const life::Activity& A) {
+			const double At = life::InWindow(A, Ctx.World) ? Ctx.World : life::NextOpen(A, Ctx.World);
 			int Day = static_cast<int>(std::floor(At / 1440.0));
-			if (std::fmod(At, 1440.0) < 12.0 * 60.0)
+			if (std::fmod(At, 1440.0) < 12.0 * 60.0 && A.Opens > A.Closes)
 			{
 				--Day;
 			}
-			UI.Text(std::string("The ") + Days[((Day % 7) + 7) % 7] + " game", R.X + 26.0f, R.Y + 40.0f, Ts(20.0f, 800, Text));
-		}
-		UI.Text(G->Place + "  \xC2\xB7  $1/$2 no-limit  \xC2\xB7  Tue, Thu, Sat  \xC2\xB7  doors 9:00 PM to 3:00 AM", R.X + 26.0f, R.Y + 64.0f, Ts(13.0f, 600, Dim));
-		const std::string Why = life::Blocked(*G, L, Ctx);
-		const bool Open = Why.empty();
-		const bool WindowOnly = !Open && life::InWindow(*G, Ctx.World) == false && Ctx.Bankroll >= life::GameMinBuyInCents && L.Energy >= G->Energy;
-		const std::string Status = Open ? "The game's running. Dee saved you a seat." : WindowOnly ? "Next game " + Why : Why;
-		UI.Text(Status, R.X + R.W - 26.0f, R.Y + 40.0f, Ts(15.0f, 800, Open ? Cc : Dim, Align::Right));
-		UI.Text(G->Blurb, R.X + 26.0f, R.Y + 96.0f, Ts(13.0f, 500, Dim, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
-		const Chips Amounts[3] = {life::GameMinBuyInCents, 10000, life::GameMaxBuyInCents};
+			return Days[((Day % 7) + 7) % 7];
+		};
 		const float Gap = 16.0f;
-		const float ButtonW = (R.W - 52.0f - 2.0f * Gap) / 3.0f;
-		for (int K = 0; K < 3; ++K)
+		const float TotalW = NetW - 420.0f;
+		const Rect R{380.0f, OffersTop + 24.0f, (TotalW - Gap) * 0.58f, 214.0f};
+		const Rect Rr{R.X + R.W + Gap, R.Y, TotalW - Gap - R.W, R.H};
 		{
-			const Chips Amt = Amounts[K];
-			const bool Ok = Open && S.BankrollCents >= Amt;
-			const std::string Sub = Open && !Ok ? "Balance " + Money(S.BankrollCents) : std::string();
-			if (AppButton("buyin:" + std::to_string(Amt), {R.X + 26.0f + Nf(K) * (ButtonW + Gap), R.Y + R.H - 62.0f, ButtonW, 46.0f}, "Sit with " + Money(Amt), Cc, Hex(0x1d1204), Ok, Sub))
+			UI.RRect(R, 16.0f, Hex(0x15110a), NetA(Cc, 0.45f));
+			UI.Text(std::string("The ") + NightOf(*G) + " game", R.X + 24.0f, R.Y + 38.0f, Ts(20.0f, 800, Text));
+			UI.Text("$1/$2 no-limit  \xC2\xB7  Tue, Thu, Sat  \xC2\xB7  doors 9 PM", R.X + 24.0f, R.Y + 61.0f, Ts(13.0f, 600, Dim));
+			const std::string Why = life::Blocked(*G, L, Ctx);
+			const bool Open = Why.empty();
+			const bool WindowOnly = !Open && !life::InWindow(*G, Ctx.World) && Ctx.Bankroll >= life::GameMinBuyInCents && L.Energy >= G->Energy;
+			UI.Text(Open ? "The game's running. Dee saved you a seat." : WindowOnly ? "Next game " + Why : Why, R.X + 24.0f, R.Y + 88.0f, Ts(14.0f, 800, Open ? Cc : Dim));
+			UI.Text(G->Blurb, R.X + 24.0f, R.Y + 112.0f, Ts(12.5f, 500, Dim, Align::Left, Baseline::Alphabetic, false, R.W - 48.0f));
+			const Chips Amounts[3] = {life::GameMinBuyInCents, 10000, life::GameMaxBuyInCents};
+			const float ButtonW = (R.W - 48.0f - 2.0f * 12.0f) / 3.0f;
+			for (int K = 0; K < 3; ++K)
 			{
-				const std::string E = S.GoToGame(G->Id, Amt);
+				const Chips Amt = Amounts[K];
+				const bool Ok = Open && S.BankrollCents >= Amt;
+				const std::string Sub = Open && !Ok ? "Balance " + Money(S.BankrollCents) : std::string();
+				if (AppButton("buyin:" + std::to_string(Amt), {R.X + 24.0f + Nf(K) * (ButtonW + 12.0f), R.Y + R.H - 60.0f, ButtonW, 44.0f}, "Sit with " + Money(Amt), Cc, Hex(0x1d1204), Ok, Sub))
+				{
+					const std::string E = S.GoToGame(G->Id, Amt);
+					if (!E.empty())
+					{
+						Toast = E;
+						ToastAt = Now;
+					}
+				}
+			}
+		}
+		{
+			// The Riverside: a casino's blue, the night's field, and what you've done there.
+			const Color Blue = Hex(Rv->Color);
+			UI.RRect(Rr, 16.0f, Hex(0x0b1119), NetA(Blue, 0.45f));
+			UI.Text(Rv->Title, Rr.X + 24.0f, Rr.Y + 38.0f, Ts(20.0f, 800, Text));
+			UI.Text("6-max deepstack  \xC2\xB7  Sundays 7 PM  \xC2\xB7  late reg 7:45", Rr.X + 24.0f, Rr.Y + 61.0f, Ts(13.0f, 600, Dim));
+			const std::string Why = life::Blocked(*Rv, L, Ctx);
+			const bool Open = Why.empty();
+			const bool WindowOnly = !Open && !life::InWindow(*Rv, Ctx.World) && Ctx.Bankroll >= live::RiversideBuyInCents && L.Energy >= Rv->Energy;
+			UI.Text(Open ? "Registration's open. Dee has the feature table." : WindowOnly ? "Registration " + Why : Why, Rr.X + 24.0f, Rr.Y + 88.0f,
+				Ts(14.0f, 800, Open ? Blue : Dim));
+			const std::string Record = L.LiveEvents == 0 ? std::string(Rv->Blurb)
+				: "Played " + std::to_string(L.LiveEvents) + "  \xC2\xB7  cashed " + std::to_string(L.LiveCashes) +
+					(L.LiveBestPlace > 0 ? "  \xC2\xB7  best " + Ordinal(L.LiveBestPlace) : std::string()) + "  \xC2\xB7  won " + Money(L.LiveWonCents);
+			UI.Text(Record, Rr.X + 24.0f, Rr.Y + 112.0f, Ts(12.5f, 500, Dim, Align::Left, Baseline::Alphabetic, false, Rr.W - 48.0f));
+			const bool Ok = Open && S.BankrollCents >= live::RiversideBuyInCents;
+			if (AppButton("riverside", {Rr.X + 24.0f, Rr.Y + Rr.H - 60.0f, Rr.W - 48.0f, 44.0f}, "Register  " + Money(live::RiversideBuyInCents), Blue, Hex(0x06101a), Ok,
+					Open && !Ok ? "Balance " + Money(S.BankrollCents) : std::string()))
+			{
+				const std::string E = S.GoToGame(Rv->Id, live::RiversideBuyInCents);
 				if (!E.empty())
 				{
 					Toast = E;
@@ -721,6 +759,7 @@ void RiverLine::BurnerApp(double Now)
 				}
 			}
 		}
+		(void)NightOf(*Rv);
 		return;
 	}
 	std::vector<const life::Activity*> Offers;

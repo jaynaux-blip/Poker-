@@ -25,7 +25,7 @@ struct ChatLine
 };
 
 /** The rival's screen name. */
-extern const char* const RivalName; // "gh0stfold"
+extern SHORTSTACKCORE_API const char* const RivalName; // "gh0stfold"
 /** The rival's tournament player id ("npc:gh0stfold"). */
 std::string RivalId();
 

@@ -17,6 +17,8 @@ float SmoothStep01(float T)
 
 using namespace BackRoomChipsDetail;
 
+int64 ABackRoomChips::ChipUnit = 1;
+
 ABackRoomChips::ABackRoomChips()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -107,7 +109,7 @@ void ABackRoomChips::Layout()
 		Ism->ClearInstances();
 	}
 	int32 Counts[4];
-	Break(Amount, Style, Counts);
+	Break((Amount + FMath::Max<int64>(ChipUnit, 1) / 2) / FMath::Max<int64>(ChipUnit, 1), Style, Counts);
 	FRandomStream Rng(Seed * 131 + static_cast<int32>(Amount % 100003));
 	Height = 0.0;
 	const double Pitch = 2.0 * Radius + 0.12;

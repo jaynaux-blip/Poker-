@@ -33,7 +33,22 @@ CAST = [
     ("Twitch", "Victor", 2),  # young, wired, bets too much
     ("Mei", "Tuya", 6),       # quiet, sharp, hard to read
     ("Hero", "Mateo", 0),     # you: only your hands, arms and chest are ever seen
+    # The Riverside's Sunday $150 (seats are dealt by the tournament, so no fixed seat).
+    ("Ghost", "Kelvin", -1),   # gh0stfold, the online rival, in the flesh
+    ("MrsPark", "Sook-ja", -1),  # retired, plays every Sunday, folds everything but aces
+    ("Rick", "Bruce", -1),     # car dealership money, splashes around
+    ("Dre", "Omari", -1),      # talks the whole time, calls too much
+    # The rest of the room: low-quality extras for the background tables (dyed shirts vary them).
+    ("ExtraA", "Ada", -1),
+    ("ExtraB", "Isaiah", -1),
+    ("ExtraC", "Jelena", -1),
+    ("ExtraD", "Trey", -1),
 ]
+# Quality per character where it differs from QUALITY: strangers at the casino are "high" (hair cards,
+# fewer LODs, about half the disk); the disk this runs on is nearly full.
+QUALITY_FOR = {"MrsPark": 2, "Rick": 2, "Dre": 2, "ExtraA": 0, "ExtraB": 0, "ExtraC": 0, "ExtraD": 0}
+# Don't start another character with less free space than this (bytes).
+MIN_FREE = 8 * 1024 ** 3
 
 
 def _path(name):
@@ -66,6 +81,10 @@ def step():
             continue
         c = L.find(_path(name))
         if not c or "open=0" in L.status(c):
+            import shutil
+            free = shutil.disk_usage(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir())).free
+            if free < MIN_FREE:
+                return f"{name}: stopped, only {free / 1024 ** 3:.1f} GB free"
             # Close anyone else first: one character in memory at a time.
             for other, _, _ in CAST:
                 o = L.find(_path(other))
@@ -89,7 +108,7 @@ def step():
             return f"{name}: saved"
         if "buildable=1" not in s:
             return f"{name}: cannot build ({s})"
-        if not L.assemble(c, BUILT_DIR, COMMON_DIR, QUALITY):
+        if not L.assemble(c, BUILT_DIR, COMMON_DIR, QUALITY_FOR.get(name, QUALITY)):
             return f"{name}: assembly failed"
         L.save(c)
         unreal.EditorLoadingAndSavingUtils.save_dirty_packages(True, True)

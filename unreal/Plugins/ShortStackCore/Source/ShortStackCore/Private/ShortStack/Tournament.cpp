@@ -235,7 +235,7 @@ std::unique_ptr<Hand> Tournament::MakeHand(TTable& Table)
 	std::vector<int> Occupied;
 	for (int K = 0; K < TableSize; ++K)
 	{
-		if (Table.Seats[static_cast<size_t>(K)] >= 0)
+		if (Table.Seats[static_cast<size_t>(K)] >= 0 && !(HeroAway && Table.Seats[static_cast<size_t>(K)] == HeroIndex))
 		{
 			Occupied.push_back(K);
 		}
@@ -249,7 +249,7 @@ std::unique_ptr<Hand> Tournament::MakeHand(TTable& Table)
 	for (int K = 1; K <= TableSize; ++K)
 	{
 		const int S = ((B + K) % TableSize + TableSize) % TableSize;
-		if (Table.Seats[static_cast<size_t>(S)] >= 0)
+		if (std::find(Occupied.begin(), Occupied.end(), S) != Occupied.end())
 		{
 			B = S;
 			break;
@@ -298,6 +298,18 @@ void Tournament::PlayInstant(Hand& H, bool Fast, const Profile* HeroAuto)
 	while (!H.bComplete)
 	{
 		const std::string& Id = H.Seats[static_cast<size_t>(H.ToAct)].Id;
+		if (HeroSitsOut && Id == HeroId)
+		{
+			const LegalActions L = H.GetLegalActions();
+			const bool Folded = H.Act(L.CanCheck ? PlayerAction::Check() : PlayerAction::Fold());
+			SS_ASSERT(Folded);
+			(void)Folded;
+			if (++Guard > 1000)
+			{
+				break;
+			}
+			continue;
+		}
 		const BotDecision D = BotDecisionFor(H, Fast, Id == HeroId ? HeroAuto : nullptr);
 		const bool Ok = H.Act(D.Action);
 		SS_ASSERT(Ok);
@@ -372,7 +384,7 @@ std::unique_ptr<Hand> Tournament::StartTick(std::vector<TEvent>& OutEvents)
 {
 	OutEvents = Balance();
 	const TPlayer& H = Hero();
-	if (!H.Busted && !bFinished)
+	if (!H.Busted && !bFinished && !HeroAway)
 	{
 		return MakeHand(Tables[H.TableId]);
 	}
@@ -656,6 +668,7 @@ std::vector<TEvent> Tournament::Balance()
 		const int Mover = Big->Seats[static_cast<size_t>(AfterButton[Pick])];
 		MovePlayer(Mover, *Small, Events);
 	}
+	KeepFeature(Events);
 	if (!bAnnouncedFinal && Tables.size() == 1 && Alive > 1)
 	{
 		bAnnouncedFinal = true;
@@ -664,6 +677,78 @@ std::vector<TEvent> Tournament::Balance()
 		Events.push_back(E);
 	}
 	return Events;
+}
+
+void Tournament::KeepFeature(std::vector<TEvent>& Events)
+{
+	if (FeatureIds.empty() || Hero().Busted)
+	{
+		return;
+	}
+	const auto HomeIt = Tables.find(Hero().TableId);
+	if (HomeIt == Tables.end())
+	{
+		return;
+	}
+	TTable& Home = HomeIt->second;
+	auto IsFeatured = [&](int Idx) { return std::find(FeatureIds.begin(), FeatureIds.end(), Players[static_cast<size_t>(Idx)].Id) != FeatureIds.end(); };
+	for (int K = 0; K < TableSize; ++K)
+	{
+		const int Idx = Home.Seats[static_cast<size_t>(K)];
+		if (Idx < 0 || Idx == HeroIndex || IsFeatured(Idx))
+		{
+			continue;
+		}
+		// The featured player to bring over: someone the hero hasn't sat with, if anyone.
+		int Best = -1;
+		for (const std::string& Id : FeatureIds)
+		{
+			const int C = PlayerIndex(Id);
+			if (C < 0 || Players[static_cast<size_t>(C)].Busted || Players[static_cast<size_t>(C)].TableId == Home.Id)
+			{
+				continue;
+			}
+			if (Best < 0 || (FeatureMet.count(Players[static_cast<size_t>(Best)].Id) > 0 && FeatureMet.count(Id) == 0))
+			{
+				Best = C;
+			}
+		}
+		if (Best < 0)
+		{
+			break;
+		}
+		// Swap them seat for seat.
+		TPlayer& Out = Players[static_cast<size_t>(Idx)];
+		TPlayer& In = Players[static_cast<size_t>(Best)];
+		TTable& Other = Tables[In.TableId];
+		const int OutSeat = Out.Seat;
+		const int InSeat = In.Seat;
+		Home.Seats[static_cast<size_t>(OutSeat)] = Best;
+		Other.Seats[static_cast<size_t>(InSeat)] = Idx;
+		Out.TableId = Other.Id;
+		Out.Seat = InSeat;
+		In.TableId = Home.Id;
+		In.Seat = OutSeat;
+		TEvent A;
+		A.Type = TEventType::Moved;
+		A.Id = Out.Id;
+		A.From = Home.Id;
+		A.To = Other.Id;
+		Events.push_back(A);
+		TEvent B;
+		B.Type = TEventType::Moved;
+		B.Id = In.Id;
+		B.From = Other.Id;
+		B.To = Home.Id;
+		Events.push_back(B);
+	}
+	for (int S : Home.Seats)
+	{
+		if (S >= 0 && S != HeroIndex)
+		{
+			FeatureMet.insert(Players[static_cast<size_t>(S)].Id);
+		}
+	}
 }
 
 std::vector<TEvent> Tournament::MoveToTable(const std::string& Id, int TableId)

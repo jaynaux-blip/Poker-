@@ -69,6 +69,10 @@ std::vector<Activity> Build()
 	Add("dee-game", Kind::Game, "Dee's game", "Spin Cycle Laundromat, the back room", 6.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 21 * 60, 3 * 60, 0xf2a541,
 		"One-two no-limit behind the dryers. $40 to sit, $200 max. Dee deals, the regulars talk, and you can read every one of them.");
 	L.back().Days = (1 << 1) | (1 << 3) | (1 << 5);
+	// The Riverside's Sunday $150: registration from six, cards at seven, late registration until 7:45.
+	Add("riverside", Kind::Live, "Riverside Sunday $150", "Riverside Casino, the poker room", 8.0, 0.0, 0.0, 0.0, 25.0, 0.0, 0.0, 18 * 60, 19 * 60 + 45, 0x5fb4ff,
+		"A live 6-max deepstack. 20,000 chips, twenty-minute levels, forty-odd runners and a real prize pool. Dee deals the feature table on Sundays.");
+	L.back().Days = 1 << 6;
 	// Sleep.
 	Add("nap", Kind::Sleep, "Nap", "Bed", 4.0, 0.0, 0.0, 0.0, -45.0, 0.0, 0.0, 0, 1440, 0x8b5cf6, "Four hours. Enough to function.");
 	Add("sleep", Kind::Sleep, "Sleep", "Bed", 8.0, 0.0, 0.0, 0.0, -90.0, 0.0, 0.0, 0, 1440, 0x8b5cf6, "A real night's sleep. The world keeps going without you.");
@@ -162,15 +166,16 @@ std::string Blocked(const Activity& A, const State& L, const Context& Ctx)
 	{
 		return L.Energy >= 92.0 ? "You're wide awake." : "";
 	}
-	if (A.Type == Kind::Game)
+	if (A.Type == Kind::Game || A.Type == Kind::Live)
 	{
-		if (Ctx.Bankroll < GameMinBuyInCents)
+		const Chips Need = A.Type == Kind::Live ? 15000 : GameMinBuyInCents;
+		if (Ctx.Bankroll < Need)
 		{
-			return "Dee's game is " + Money(GameMinBuyInCents) + " to sit.";
+			return (A.Type == Kind::Live ? "The Riverside is " : "Dee's game is ") + Money(Need) + (A.Type == Kind::Live ? " to enter." : " to sit.");
 		}
 		if (L.Energy < A.Energy)
 		{
-			return "Too tired to sit at a live game. Sleep first.";
+			return A.Type == Kind::Live ? "A tournament is a long night. Sleep first." : "Too tired to sit at a live game. Sleep first.";
 		}
 		if (!InWindow(A, Ctx.World))
 		{
@@ -282,6 +287,7 @@ Outcome Resolve(const Activity& A, const State& L, double Start, Rng& R, Chips B
 		O.Body = A.Hours >= 8.0 ? "Eight hours. The rain never stopped." : "Four hours on top of the covers.";
 		break;
 	case Kind::Game:
+	case Kind::Live:
 		// Played out at the table by the host, never resolved here.
 		break;
 	}

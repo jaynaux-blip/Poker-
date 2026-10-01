@@ -8,6 +8,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <unordered_map>
 
 namespace ss
@@ -96,7 +97,7 @@ struct ReservedPlayer
 	Archetype Type = Archetype::Crusher;
 };
 
-extern const char* const HeroId; // "hero"
+extern SHORTSTACKCORE_API const char* const HeroId; // "hero"
 
 /**
  * Multi-table tournament. Every table plays real hands with the same engine:
@@ -107,39 +108,39 @@ extern const char* const HeroId; // "hero"
 class Tournament
 {
 public:
-	Tournament(const TournamentSpec& InSpec, const std::string& HeroName, const std::string& Seed, const std::vector<ReservedPlayer>& Reserved = {});
+	SHORTSTACKCORE_API Tournament(const TournamentSpec& InSpec, const std::string& HeroName, const std::string& Seed, const std::vector<ReservedPlayer>& Reserved = {});
 
 	// ---------------------------------------------------------------- queries
 	const TPlayer& Hero() const { return Players[static_cast<size_t>(HeroIndex)]; }
-	const Level& CurrentLevel() const;
-	const Level& NextLevel() const;
+	SHORTSTACKCORE_API const Level& CurrentLevel() const;
+	SHORTSTACKCORE_API const Level& NextLevel() const;
 	int PaidPlaces() const { return static_cast<int>(Payouts.size()); }
 	bool InTheMoney() const { return Remaining <= PaidPlaces(); }
-	bool HandForHand() const;
+	SHORTSTACKCORE_API bool HandForHand() const;
 	double ElapsedSeconds() const { return static_cast<double>(Tick) * Spec.SecondsPerHand; }
-	double LevelSecondsLeft() const;
+	SHORTSTACKCORE_API double LevelSecondsLeft() const;
 	double ClockMinutes() const { return Spec.StartClock + ElapsedSeconds() / 60.0; }
-	double AverageStack() const;
-	std::vector<const TPlayer*> AlivePlayers() const;
-	std::vector<const TPlayer*> Standings() const;
-	int HeroRank() const;
-	Chips PrizeFor(int Place) const;
-	double PressureFor(const TPlayer& P) const;
-	int PlayerIndex(const std::string& Id) const;
+	SHORTSTACKCORE_API double AverageStack() const;
+	SHORTSTACKCORE_API std::vector<const TPlayer*> AlivePlayers() const;
+	SHORTSTACKCORE_API std::vector<const TPlayer*> Standings() const;
+	SHORTSTACKCORE_API int HeroRank() const;
+	SHORTSTACKCORE_API Chips PrizeFor(int Place) const;
+	SHORTSTACKCORE_API double PressureFor(const TPlayer& P) const;
+	SHORTSTACKCORE_API int PlayerIndex(const std::string& Id) const;
 
 	// ---------------------------------------------------------------- play
 	/** Rebalance tables, then deal the hero's next hand (nullptr when the hero is not playing). */
-	std::unique_ptr<Hand> StartTick(std::vector<TEvent>& OutEvents);
+	SHORTSTACKCORE_API std::unique_ptr<Hand> StartTick(std::vector<TEvent>& OutEvents);
 	/** Apply the hero's hand (if any), play every other table, process eliminations and the clock. */
-	std::vector<TEvent> FinishTick(Hand* HeroHand, const Profile* HeroAuto = nullptr);
+	SHORTSTACKCORE_API std::vector<TEvent> FinishTick(Hand* HeroHand, const Profile* HeroAuto = nullptr);
 	/** A whole round with no interactive hand (hero busted or sprinting). */
-	std::vector<TEvent> SimulateTick(const Profile* HeroAuto = nullptr);
+	SHORTSTACKCORE_API std::vector<TEvent> SimulateTick(const Profile* HeroAuto = nullptr);
 	/** Next bot decision at a live hand (full strength unless Fast). */
-	BotDecision BotDecisionFor(const Hand& H, bool Fast, const Profile* ProfileOverride = nullptr);
+	SHORTSTACKCORE_API BotDecision BotDecisionFor(const Hand& H, bool Fast, const Profile* ProfileOverride = nullptr);
 	/** Break tables that are no longer needed and even out table sizes. */
-	std::vector<TEvent> Balance();
+	SHORTSTACKCORE_API std::vector<TEvent> Balance();
 	/** Scripted move (story beats), e.g. seating the rival at the hero's table. */
-	std::vector<TEvent> MoveToTable(const std::string& Id, int TableId);
+	SHORTSTACKCORE_API std::vector<TEvent> MoveToTable(const std::string& Id, int TableId);
 
 	TournamentSpec Spec;
 	Rng R;
@@ -153,6 +154,17 @@ public:
 	int LevelIndex = 0;
 	int Remaining = 0;
 	bool bFinished = false;
+	/**
+	 * A feature table (C++ only): while any of these players are alive, the hero's table is filled
+	 * with them, swapped seat for seat with whoever else balancing put there. Players the hero hasn't
+	 * sat with yet come first. Empty (the default) leaves the shared behavior alone.
+	 */
+	std::vector<std::string> FeatureIds;
+	std::set<std::string> FeatureMet;
+	/** The hero's seat is held but not dealt in (late registration, C++ only): their table plays without them. */
+	bool HeroAway = false;
+	/** The hero has walked away (C++ only): dealt in, they check or fold every hand until blinded off. */
+	bool HeroSitsOut = false;
 
 private:
 	std::unique_ptr<Hand> MakeHand(TTable& Table);
@@ -162,6 +174,7 @@ private:
 	int Count(const TTable& T) const;
 	void SeatPlayer(int PlayerIdx, TTable& Table);
 	void MovePlayer(int PlayerIdx, TTable& To, std::vector<TEvent>& Events);
+	void KeepFeature(std::vector<TEvent>& Events);
 
 	std::unordered_map<std::string, int> IndexById;
 	std::unordered_map<std::string, Chips> StartStacks;

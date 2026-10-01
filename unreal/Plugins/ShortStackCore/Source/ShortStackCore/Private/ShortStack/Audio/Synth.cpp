@@ -340,6 +340,31 @@ std::vector<float> Render(Effect Id, uint32_t Seed)
 		Burst(B, R, 0.03, 1400.0, 5.0, 0.34, 0.07, FilterType::BandPass, 2000.0);
 		Burst(B, R, 0.0, 170.0, 1.0, 0.3, 0.14, FilterType::LowPass);
 		break;
+	case Effect::Chime:
+		// Ding-dong: two soft bell tones, a sixth apart, with a little shimmer.
+		Tone(B, 784.0, 1.1, 0.16, 0.0);
+		Tone(B, 1568.0, 0.5, 0.03, 0.0);
+		Tone(B, 622.25, 1.4, 0.16, 0.42);
+		Tone(B, 1244.5, 0.6, 0.03, 0.42);
+		break;
+	case Effect::Applause:
+	{
+		// Many pairs of hands, each clapping at its own pace, swelling and dying away over three seconds.
+		const double Dur = 3.2;
+		B.Ensure(Dur + 0.1);
+		for (int Hand = 0; Hand < 28; ++Hand)
+		{
+			const double Rate = 3.2 + 2.6 * Rand(R);
+			double At = 0.05 + 0.35 * Rand(R);
+			while (At < Dur)
+			{
+				const double Swell = std::sin(SynthPi * std::min(1.0, At / Dur)) * (1.0 - 0.4 * At / Dur);
+				Burst(B, R, At, 900.0 + 1600.0 * Rand(R), 1.2, 0.025, 0.05 * Swell);
+				At += 1.0 / Rate * (0.85 + 0.3 * Rand(R));
+			}
+		}
+		break;
+	}
 	case Effect::Breath:
 	{
 		// Air through the nose: band-limited noise that swells and fades over a second and a half.

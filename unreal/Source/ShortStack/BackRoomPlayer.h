@@ -22,6 +22,8 @@ enum class EBackRoomRole : uint8
 	Dealer,
 	/** You: the hands are yours to move (the table drives them from your input); the face is hidden. */
 	Hero,
+	/** Someone at another table across the room: idles, never acts at yours, ticks slowly. */
+	Extra,
 };
 
 /** A physical tell: something the body does that it shouldn't. */

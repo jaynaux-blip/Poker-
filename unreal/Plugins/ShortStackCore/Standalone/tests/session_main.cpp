@@ -1,6 +1,7 @@
 // Plays whole tournaments through the Night One session (the layer the Unreal
 // client drives), with a scripted hero, and checks the flow end to end.
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 
@@ -381,6 +382,136 @@ void DeeGame()
 	std::printf("  dee: %d text(s), sat with %s\n", H.FromDee, ss::Money(H.BuyIn).c_str());
 }
 
+/** The Riverside's Sunday $150: the schedule, entering, and the feature table holding through a whole tournament. */
+void Riverside()
+{
+	namespace life = ss::life;
+	namespace live = ss::live;
+	const life::Activity* Rv = life::Find("riverside");
+	Expect(Rv != nullptr && Rv->Type == life::Kind::Live, "the Riverside is in the catalog");
+	if (!Rv)
+	{
+		return;
+	}
+	const double Sunday = 6.0 * 1440.0;
+	Expect(!life::InWindow(*Rv, 5.0 * 1440.0 + 19.0 * 60.0) && life::InWindow(*Rv, Sunday + 18.0 * 60.0 + 30.0) && !life::InWindow(*Rv, Sunday + 20.0 * 60.0),
+		"registration Sunday 6:00 to 7:45 PM");
+	Expect(life::NextOpen(*Rv, 1440.0 + 127.0) == Sunday + 18.0 * 60.0, "from Tuesday, the next Riverside is Sunday at six");
+
+	struct OutHooks : Hooks
+	{
+		std::string Went;
+		ss::Chips BuyIn = 0;
+		bool GoOut(const std::string& Id, ss::Chips Cents) override
+		{
+			Went = Id;
+			BuyIn = Cents;
+			return true;
+		}
+	};
+	OutHooks H;
+	ss::Session S(H, "riverside");
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	S.BankrollCents = 10000;
+	Expect(S.GoToGame("riverside", 0).find("$150") != std::string::npos, "$100 can't enter");
+	S.BankrollCents = 40000;
+	S.LobbyMinutes = Sunday - 1440.0 + 18.0 * 60.0 + 40.0; // Sunday 6:40 PM
+	Now = Wait(S, Now, 0.2);
+	S.Life.Energy = 60.0;
+	Expect(S.GoToGame("riverside", 0).empty() && H.Went == "riverside" && H.BuyIn == live::RiversideBuyInCents, "registering heads out with the $150");
+
+	// The tournament itself: the hero's table is the feature table.
+	std::unique_ptr<ss::Tournament> T = live::MakeRiverside(6, "grinder_3c", "riverside-test");
+	Expect(T->Spec.Entrants >= 42 && T->Spec.Entrants <= 60 && T->TableSize == 6 && T->PrizePoolCents == T->Spec.Entrants * 13500, "a 6-max field with a $135 share each in the pool");
+	auto IsCast = [](const std::string& Id) {
+		for (const live::CastMember& C : live::RiversideCast())
+		{
+			if (Id == C.Id)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	auto CastAlive = [&]() {
+		int N = 0;
+		for (const ss::TPlayer& P : T->Players)
+		{
+			N += IsCast(P.Id) && !P.Busted ? 1 : 0;
+		}
+		return N;
+	};
+	bool Featured = true;
+	int Ticks = 0;
+	ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, T->R);
+	while (!T->Hero().Busted && !T->bFinished && Ticks < 2000)
+	{
+		std::vector<ss::TEvent> Events;
+		std::unique_ptr<ss::Hand> Hand = T->StartTick(Events);
+		if (Hand)
+		{
+			// Every seat at the hero's table is the cast while enough of them are alive.
+			int Strangers = 0;
+			int Seated = 0;
+			for (const ss::HandSeat& Hs : Hand->Seats)
+			{
+				if (Hs.Id != ss::HeroId)
+				{
+					++Seated;
+					Strangers += IsCast(Hs.Id) ? 0 : 1;
+				}
+			}
+			const int CastElsewhere = CastAlive() - (Seated - Strangers);
+			Featured = Featured && (Strangers == 0 || CastElsewhere == 0);
+		}
+		T->FinishTick(Hand.get(), &Auto);
+		++Ticks;
+	}
+	Expect(Featured, "the feature table seats the cast while any are left elsewhere");
+	Expect(T->Hero().Busted || T->bFinished, "the tournament plays out");
+	std::printf("  riverside: %d entrants, hero %s after %d hands, level %d, %d of the cast left\n", T->Spec.Entrants,
+		T->Hero().Busted ? ss::Ordinal(T->Hero().Place).c_str() : "won", Ticks, T->LevelIndex + 1, CastAlive());
+
+	// Late registration: the field plays on without the hero, whose stack waits untouched.
+	{
+		std::unique_ptr<ss::Tournament> Late = live::MakeRiverside(13, "grinder_3c", "late");
+		Late->HeroAway = true;
+		for (int K = 0; K < 12; ++K)
+		{
+			Late->SimulateTick();
+		}
+		Late->HeroAway = false;
+		std::vector<ss::TEvent> Ev;
+		std::unique_ptr<ss::Hand> First = Late->StartTick(Ev);
+		Expect(Late->Hero().Stack == Late->Spec.StartingStack && Late->Hero().Hands == 0 && Late->LevelIndex >= 1 && First != nullptr,
+			"a late registration sits down with a full stack, levels in");
+		Late->FinishTick(First.get(), &Auto);
+	}
+	// Walking away: dealt in, checking and folding, the blinds take the stack.
+	{
+		std::unique_ptr<ss::Tournament> Gone = live::MakeRiverside(20, "grinder_3c", "gone");
+		Gone->HeroSitsOut = true;
+		int Ticks2 = 0;
+		while (!Gone->Hero().Busted && !Gone->bFinished && Ticks2 < 4000)
+		{
+			Gone->SimulateTick();
+			++Ticks2;
+		}
+		Expect(Gone->Hero().Busted && Gone->Hero().Place > 1 && Gone->Hero().VpipHands == 0, "a player who walks away is blinded off, never putting a chip in voluntarily");
+		std::printf("  riverside: walked away, blinded off in %s after %d hands\n", ss::Ordinal(Gone->Hero().Place).c_str(), Gone->Hero().Hands);
+	}
+
+	ss::SaveData D;
+	D.Life.LiveEvents = 2;
+	D.Life.LiveCashes = 1;
+	D.Life.LiveBestPlace = 4;
+	D.Life.LiveWonCents = 61200;
+	ss::SaveData P;
+	Expect(ss::SaveData::Parse(D.Serialize(), P) && P.Life.LiveEvents == 2 && P.Life.LiveCashes == 1 && P.Life.LiveBestPlace == 4 && P.Life.LiveWonCents == 61200,
+		"live results survive a save");
+}
+
 /** Shifts, hustles, sleep, rent, Night Shift prizes, unlocks, bounties, satellites and tickets. */
 void LifeChecks()
 {
@@ -591,6 +722,7 @@ int main()
 	session_test::ScheduledTournament();
 	session_test::LifeChecks();
 	session_test::DeeGame();
+	session_test::Riverside();
 	session_test::BountyTournament();
 	session_test::FullTournament();
 	session_test::SprintTournament();
