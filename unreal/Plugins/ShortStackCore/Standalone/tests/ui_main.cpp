@@ -2,7 +2,10 @@
 // of game states and writes them as JSON. web/scripts/render-drawlists.mjs
 // replays them in Chromium so the C++ UI can be compared with the prototype.
 // Usage: ui_test <out-dir>   (with no argument it only checks the frames draw)
+#include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/FrontEnd.h"
 #include "ShortStack/UI/Phone.h"
 #include "ShortStack/UI/PropArt.h"
@@ -10,6 +13,8 @@
 #include "TestFontMetrics.h"
 
 #include <cstdio>
+#include <map>
+#include <set>
 #include <string>
 
 namespace ui_test
@@ -292,6 +297,90 @@ void Props()
 				std::fwrite(J.data(), 1, J.size(), F);
 				std::fclose(F);
 			}
+		}
+	}
+}
+
+/** Profile pictures: names pick fitting icons, everyone gets one, and a gallery of the set for review. */
+void Avatars()
+{
+	using ss::ui::AvatarFor;
+	using ss::ui::AvatarIcon;
+	Expect(AvatarFor("ElTiburon").Icon == AvatarIcon::Shark && AvatarFor("C0ldSh4rk").Icon == AvatarIcon::Shark, "shark names get sharks, leetspeak too");
+	Expect(AvatarFor("CoolerKing").Icon == AvatarIcon::Crown && AvatarFor("ReiDoRio").Icon == AvatarIcon::Crown, "kings get crowns");
+	Expect(AvatarFor("lazy_owl").Icon == AvatarIcon::Owl && AvatarFor("CoffeeAndCards").Icon == AvatarIcon::Coffee, "owls and coffee");
+	Expect(AvatarFor("Volkov").Icon != AvatarIcon::Wolf && AvatarFor("Volk88").Icon == AvatarIcon::Wolf, "short words match whole words only");
+	Expect(AvatarFor(ss::RivalName).Icon == AvatarIcon::Ghost && AvatarFor(ss::RivalName).Frame == ss::ui::AvatarFrame::Neon, "the rival is the ghost");
+	Expect(AvatarFor("PocketRockets").Icon == AvatarFor("PocketRockets").Icon && AvatarFor("PocketRockets").Bg == AvatarFor("PocketRockets").Bg, "avatars are stable");
+	std::map<int, int> Seen;
+	bool GhostTaken = false;
+	for (const ss::net::Player& P : ss::net::Shared().Players())
+	{
+		const ss::ui::AvatarSpec A = AvatarFor(P.Name);
+		++Seen[static_cast<int>(A.Icon)];
+		GhostTaken = GhostTaken || (A.Icon == AvatarIcon::Ghost && !P.Rival);
+	}
+	Expect(!GhostTaken, "nobody but the rival wears the ghost");
+	Expect(Seen.size() >= 30, "the network uses most of the set");
+	Expect(Seen[static_cast<int>(AvatarIcon::Initials)] < static_cast<int>(ss::net::Shared().Players().size() / 3), "initials are the exception");
+	std::printf("  avatars        %zu icons across %zu regulars\n", Seen.size(), ss::net::Shared().Players().size());
+
+	TableMeasurer M;
+	ss::ui::DrawList L;
+	const float W = 1600.0f;
+	const float H = 1000.0f;
+	ss::ui::Canvas C(L, M, W, H, 1.0f);
+	C.FillRect({0.0f, 0.0f, W, H}, ss::ui::Paint::Linear({0.0f, 0.0f}, {0.0f, H}, ss::ui::Hex(0x111a2b), ss::ui::Hex(0x0a0f1a)));
+	C.Text("RIVERLINE AVATARS", 48.0f, 62.0f, ss::ui::Ts(30.0f, 900, ss::ui::Hex(0xffffff)));
+	C.Text("Every icon, then the frames, then regulars as the lobby shows them", 48.0f, 92.0f, ss::ui::Ts(16.0f, 500, ss::ui::Hex(0x8b9bb4)));
+	const int Icons = static_cast<int>(AvatarIcon::Count);
+	for (int I = 0; I < Icons; ++I)
+	{
+		const float X = 92.0f + static_cast<float>(I % 12) * 120.0f;
+		const float Y = 170.0f + static_cast<float>(I / 12) * 128.0f;
+		ss::ui::AvatarSpec A = AvatarFor("gallery" + std::to_string(I * 7));
+		A.Icon = static_cast<AvatarIcon>(I);
+		A.Frame = ss::ui::AvatarFrame::None;
+		A.Initials = "JK";
+		if (A.Icon == AvatarIcon::Ghost)
+		{
+			A = AvatarFor(ss::RivalName);
+		}
+		ss::ui::DrawAvatar(C, X, Y, 38.0f, A);
+		C.Text(ss::ui::AvatarIconName(A.Icon), X, Y + 62.0f, ss::ui::Ts(13.0f, 600, ss::ui::Hex(0xc7d2e3), ss::ui::Align::Center));
+	}
+	const char* Frames[5] = {"None", "Ring", "Chip", "Gold (Team RiverLine)", "Neon (you, the rival)"};
+	for (int F = 0; F < 5; ++F)
+	{
+		const float X = 120.0f + static_cast<float>(F) * 230.0f;
+		ss::ui::AvatarSpec A = AvatarFor("SetMiner");
+		A.Frame = static_cast<ss::ui::AvatarFrame>(F);
+		A.Rim = F == 1 ? 0xf472b6 : 0x27d3c3;
+		ss::ui::DrawAvatar(C, X, 590.0f, 42.0f, A);
+		C.Text(Frames[F], X, 666.0f, ss::ui::Ts(13.0f, 600, ss::ui::Hex(0xc7d2e3), ss::ui::Align::Center));
+	}
+	const std::vector<ss::net::Player>& People = ss::net::Shared().Players();
+	for (int I = 0; I < 30; ++I)
+	{
+		const ss::net::Player& P = People[static_cast<size_t>(I * 13 % static_cast<int>(People.size()))];
+		const float X = 60.0f + static_cast<float>(I % 6) * 256.0f;
+		const float Y = 730.0f + static_cast<float>(I / 6) * 52.0f;
+		ss::ui::AvatarSpec A = AvatarFor(P.Name);
+		if (P.Pro)
+		{
+			A.Frame = ss::ui::AvatarFrame::Gold;
+		}
+		ss::ui::DrawAvatar(C, X, Y, 18.0f, A);
+		C.Text(P.Name, X + 28.0f, Y + 1.0f, ss::ui::Ts(15.0f, 700, ss::ui::Hex(0xe6edf7), ss::ui::Align::Left, ss::ui::Baseline::Middle));
+		C.Text(P.Country, X + 28.0f, Y + 18.0f, ss::ui::Ts(11.0f, 600, ss::ui::Hex(0x6b7a92), ss::ui::Align::Left, ss::ui::Baseline::Middle, true));
+	}
+	if (!OutDir.empty())
+	{
+		if (FILE* F = std::fopen((OutDir + "/avatars.json").c_str(), "wb"))
+		{
+			const std::string J = L.ToJson();
+			std::fwrite(J.data(), 1, J.size(), F);
+			std::fclose(F);
 		}
 	}
 }
@@ -730,6 +819,7 @@ int main(int Argc, char** Argv)
 	ui_test::Screens();
 	ui_test::Results();
 	ui_test::Props();
+	ui_test::Avatars();
 	ui_test::FrontEndFlows();
 	ui_test::FrontEndScreens();
 	if (ui_test::Failures == 0)

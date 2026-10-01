@@ -367,7 +367,7 @@ void RiverLine::ShiftLinkApp(double Now)
 	UI.Text("Shifts near you", 92.0f + Lw, 45.0f, Ts(15.0f, 500, Gray));
 	UI.Text("Earned on ShiftLink", NetW - 200.0f, 30.0f, Ts(12.0f, 600, Gray, Align::Right));
 	UI.Text(Money(L.EarnedJobs), NetW - 200.0f, 54.0f, Ts(20.0f, 900, Hex(0x16a34a), Align::Right, Baseline::Alphabetic, true));
-	NetAvatar(*C, NetW - 56.0f, 36.0f, 20.0f, S.HeroName, NetHue(S.HeroName), Color{0.0f, 0.0f, 0.0f, 0.0f});
+	NetAvatar(*C, NetW - 56.0f, 36.0f, 20.0f, S.HeroName, Color{0.0f, 0.0f, 0.0f, 0.0f}, true);
 	UI.Text(S.HeroName, NetW - 86.0f, 42.0f, Ts(15.0f, 700, Dark, Align::Right));
 
 	// Jobs.

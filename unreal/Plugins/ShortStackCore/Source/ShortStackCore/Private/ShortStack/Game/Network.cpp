@@ -2,15 +2,16 @@
 
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Session.h"
-#include "ShortStack/Names.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Structure.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <set>
 
 namespace ss
 {
@@ -37,17 +38,6 @@ Chips Cents(double Dollars)
 {
 	return static_cast<Chips>(std::llround(Dollars * 100.0));
 }
-
-struct CountryWeight
-{
-	const char* Code;
-	double W;
-};
-const CountryWeight Countries[] = {
-	{"BR", 12}, {"DE", 7}, {"CA", 6}, {"GB", 7}, {"RU", 6}, {"UA", 4}, {"US", 5}, {"NL", 3}, {"FR", 4}, {"IT", 3},
-	{"ES", 3}, {"SE", 3}, {"FI", 2}, {"PL", 3}, {"MX", 3}, {"AR", 3}, {"CN", 5}, {"JP", 3}, {"KR", 2}, {"AT", 2},
-	{"BE", 2}, {"PT", 2}, {"CZ", 2}, {"IE", 2}, {"NO", 2}, {"DK", 1}, {"AU", 3}, {"IN", 3},
-};
 
 /** Entries swing with the day of the week: Sunday is the big day. */
 double DayFactor(int Day)
@@ -288,31 +278,14 @@ Network::Network()
 
 void Network::BuildPlayers()
 {
-	Rng R("riverline-network-v1");
+	Rng R("riverline-network-v2");
 	const int N = 1600;
-	std::vector<std::string> Names = UniqueNames(N - 1, R, {RivalName, "grinder_3c"});
-	Names.push_back(RivalName);
-	double CountryTotal = 0.0;
-	for (const CountryWeight& C : Countries)
-	{
-		CountryTotal += C.W;
-	}
 	People.resize(static_cast<size_t>(N));
 	std::vector<std::pair<double, int>> Bankroll;
 	for (int I = 0; I < N; ++I)
 	{
 		Player& P = People[static_cast<size_t>(I)];
-		P.Name = Names[static_cast<size_t>(I)];
-		double Pick = R.Next() * CountryTotal;
-		P.Country = Countries[0].Code;
-		for (const CountryWeight& C : Countries)
-		{
-			if ((Pick -= C.W) < 0.0)
-			{
-				P.Country = C.Code;
-				break;
-			}
-		}
+		P.Country = handles::PickCountry(R);
 		P.Hue = R.Int(360);
 		P.Skill = static_cast<float>(Clamp(0.5 + 0.17 * R.Gauss(0.0, 1.0), 0.05, 0.98));
 		P.Volume = static_cast<float>(0.15 + 0.85 * std::pow(R.Next(), 1.5));
@@ -336,6 +309,7 @@ void Network::BuildPlayers()
 	{
 		Player& P = People[static_cast<size_t>(Rival)];
 		P.Rival = true;
+		P.Name = RivalName;
 		P.Country = "CA";
 		P.Hue = 268;
 		P.Skill = 0.93f;
@@ -387,6 +361,23 @@ void Network::BuildPlayers()
 		P.FinalTables = 402;
 		P.Cashes = 5120;
 		P.Best = Cents(18406.0);
+	}
+	// Screen names last, once the stakes are known: high-stakes regulars lean to understated names.
+	std::set<std::string> Used = {"gh0stfold", "grinder_3c"};
+	for (int I = 0; I < N; ++I)
+	{
+		Player& P = People[static_cast<size_t>(I)];
+		if (!P.Rival)
+		{
+			std::string Name = handles::Make(R, P.Country, P.Stake == Tier::High);
+			for (int Try = 0; Used.count(Name) > 0 || Name.size() > 17; ++Try)
+			{
+				Name = Try < 8 ? handles::Make(R, P.Country, P.Stake == Tier::High) : Name.substr(0, 14) + std::to_string(R.Int(100));
+			}
+			P.Name = Name;
+		}
+		Used.insert(P.Name);
+		ByName[P.Name] = I;
 	}
 	// Who makes final tables at each level: skill (squared, and then some), volume, and playing at those stakes.
 	for (size_t T = 0; T < TierWeights.size(); ++T)
@@ -764,6 +755,12 @@ void Network::BuildSchedule()
 		T.StartMinute = At(14, 0);
 		Temps.push_back(T);
 	}
+}
+
+int Network::FindPlayer(const std::string& Name) const
+{
+	const auto It = ByName.find(Name);
+	return It == ByName.end() ? -1 : It->second;
 }
 
 const SeriesInfo* Network::FindSeries(const std::string& Id) const

@@ -1073,7 +1073,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 				UI.Text(std::to_string(P.Place), Body.X + 12.0f, Y + 18.0f, Ts(14.0f, 800, P.Place == 1 ? pal::Gold : pal::Muted, Align::Center));
 			}
 			const std::string& Nm = P.Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(P.Player)].Name;
-			NetAvatar(*C, Body.X + 40.0f, Y + 13.0f, 11.0f, Nm, P.Player < 0 ? 174 : Net.Players()[static_cast<size_t>(P.Player)].Hue, Color{0.0f, 0.0f, 0.0f, 0.0f});
+			NetAvatar(*C, Body.X + 40.0f, Y + 13.0f, 11.0f, Nm, Color{0.0f, 0.0f, 0.0f, 0.0f}, P.Player < 0);
 			PlayerName(P.Player, Body.X + 60.0f, Y + 18.0f, 14.0f, Body.W - 170.0f, true);
 			if (Finished)
 			{
@@ -1503,7 +1503,7 @@ void RiverLine::SeriesPage(double Now)
 			const Color Medal = Rw.Rank == 1 ? pal::Gold : Rw.Rank == 2 ? Hex(0xc9d3e0) : Rw.Rank == 3 ? Hex(0xd08c4f) : pal::Muted;
 			UI.Text(std::to_string(Rw.Rank), Rt.X + 44.0f, Y + 28.0f, Ts(16.0f, 900, Medal, Align::Right, Baseline::Alphabetic, true));
 			const std::string& Nm = Rw.Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(Rw.Player)].Name;
-			NetAvatar(*C, Rt.X + 76.0f, Y + 22.0f, 15.0f, Nm, Rw.Player < 0 ? NetHue(Nm) : Net.Players()[static_cast<size_t>(Rw.Player)].Hue, Rw.Rank <= 3 ? Medal : Color{0.0f, 0.0f, 0.0f, 0.0f});
+			NetAvatar(*C, Rt.X + 76.0f, Y + 22.0f, 15.0f, Nm, Rw.Rank <= 3 ? Medal : Color{0.0f, 0.0f, 0.0f, 0.0f}, Rw.Player < 0);
 			PlayerName(Rw.Player, Rt.X + 102.0f, Y + 28.0f, 15.0f, 260.0f, true);
 			UI.Text(Grouped(static_cast<int64_t>(std::llround(Rw.Value))), Rt.X + Rt.W - 30.0f, Y + 28.0f, Ts(16.0f, 800, pal::Ink, Align::Right, Baseline::Alphabetic, true));
 			C->SetAlpha(A0);
@@ -1678,7 +1678,7 @@ void RiverLine::BoardsPage(double Now)
 			C->GlowRoundRect({Cx - Ar, Ay - Ar, Ar * 2.0f, Ar * 2.0f}, Ar, NetA(M, 0.5f), 20.0f);
 			NetCrown(*C, Cx, Ay - Ar - 4.0f, 26.0f, M);
 		}
-		NetAvatar(*C, Cx, Ay, Ar, Nm, Rw.Player < 0 ? NetHue(Nm) : Net.Players()[static_cast<size_t>(Rw.Player)].Hue, M);
+		NetAvatar(*C, Cx, Ay, Ar, Nm, M, Rw.Player < 0);
 		if (Rw.Player >= 0)
 		{
 			const net::Player& P = Net.Players()[static_cast<size_t>(Rw.Player)];
@@ -1704,7 +1704,7 @@ void RiverLine::BoardsPage(double Now)
 	UI.RRect(Hb, 12.0f, Paint::Linear({Hb.X, 0.0f}, {Hb.X + Hb.W, 0.0f}, Mix(Hex(0x111c2e), pal::Accent, 0.22f), Hex(0x111c2e)), NetA(pal::Accent, 0.6f), 1.5f);
 	NetSpaced(*C, "YOU", Hb.X + 22.0f, Hb.Y + 28.0f, 10.5f, 900, pal::Accent, 1.6f);
 	UI.Text(Mine.Rank > 0 ? "#" + Grouped(Mine.Rank) : std::string("\xE2\x80\x94"), Hb.X + 22.0f, Hb.Y + 56.0f, Ts(24.0f, 900, pal::Ink, Align::Left, Baseline::Alphabetic, true));
-	NetAvatar(*C, Hb.X + 190.0f, Hb.Y + 35.0f, 20.0f, S.HeroName, NetHue(S.HeroName), pal::Accent);
+	NetAvatar(*C, Hb.X + 190.0f, Hb.Y + 35.0f, 20.0f, S.HeroName, pal::Accent, true);
 	UI.Text(S.HeroName, Hb.X + 222.0f, Hb.Y + 42.0f, Ts(18.0f, 800, pal::Ink));
 	std::string Hint;
 	if (Mine.Rank == 0)
@@ -1868,7 +1868,7 @@ void RiverLine::BoardTable(const Rect& R, const std::vector<net::BoardRow>& Rows
 			C->FillRect({Rr.X + 75.0f, Ty - 5.0f, 10.0f, 2.0f}, pal::Dim);
 		}
 		const std::string& Nm = Hero ? S.HeroName : Net.Players()[static_cast<size_t>(Rw.Player)].Name;
-		NetAvatar(*C, Rr.X + 136.0f, Rr.Y + Rr.H / 2.0f, 14.0f, Nm, Hero ? NetHue(Nm) : Net.Players()[static_cast<size_t>(Rw.Player)].Hue, Color{0.0f, 0.0f, 0.0f, 0.0f});
+		NetAvatar(*C, Rr.X + 136.0f, Rr.Y + Rr.H / 2.0f, 14.0f, Nm, Color{0.0f, 0.0f, 0.0f, 0.0f}, Hero);
 		PlayerName(Rw.Player, Rr.X + 160.0f, Ty, 15.0f, 360.0f, true);
 		if (!Hero)
 		{
@@ -1925,12 +1925,26 @@ void RiverLine::NewsPage(double Now)
 				UI.Text(Money(It.Amount), R.X + R.W - 36.0f, R.Y + R.H / 2.0f + 20.0f, Ts(46.0f, 900, Kc, Align::Right, Baseline::Alphabetic, true));
 				if (It.Player >= 0)
 				{
-					NetAvatar(*C, R.X + R.W - 80.0f, R.Y + 70.0f, 30.0f, Net.Players()[static_cast<size_t>(It.Player)].Name, Net.Players()[static_cast<size_t>(It.Player)].Hue, Kc);
+					NetAvatar(*C, R.X + R.W - 80.0f, R.Y + 70.0f, 30.0f, Net.Players()[static_cast<size_t>(It.Player)].Name, Kc);
 				}
 			}
 			else
 			{
 				UI.Text(Money(It.Amount), R.X + R.W - 22.0f, R.Y + 34.0f, Ts(16.0f, 900, Kc, Align::Right, Baseline::Alphabetic, true));
+			}
+		}
+		if (!Headline && It.Player >= 0)
+		{
+			// The winner, as the lobby shows them.
+			const net::Player& Who = Net.Players()[static_cast<size_t>(It.Player)];
+			const float Wy = R.Y + R.H - 34.0f;
+			NetAvatar(*C, Px + 16.0f, Wy, 16.0f, Who.Name, Color{0.0f, 0.0f, 0.0f, 0.0f});
+			UI.Text(Who.Name, Px + 42.0f, Wy - 1.0f, Ts(14.0f, 800, pal::Ink, Align::Left, Baseline::Middle));
+			const float Fx = Px + 50.0f + UI.Measure(Who.Name, 14.0f, 800);
+			NetFlag(*C, Who.Country, Fx, Wy - 7.0f, 18.0f, 12.0f);
+			if (Who.Pro)
+			{
+				NetPill(*C, "TEAM RIVERLINE", Fx + 26.0f, Wy - 9.0f, pal::Gold, false, 9.0f);
 			}
 		}
 		C->Restore();
@@ -2032,7 +2046,7 @@ void RiverLine::CareerPage(double Now)
 	const Rect P{24.0f, 84.0f, 1052.0f, 196.0f};
 	C->GlowRoundRect({P.X, P.Y + 8.0f, P.W, P.H}, 16.0f, Rgba(0, 0, 0, 0.4f), 20.0f);
 	UI.RRect(P, 16.0f, Paint::Linear({P.X, 0.0f}, {P.X + P.W, 0.0f}, Mix(Hex(0x0c1626), Lc, 0.16f), Hex(0x0d1729)), NetA(Lc, 0.35f));
-	NetAvatar(*C, P.X + 96.0f, P.Y + 98.0f, 58.0f, S.HeroName, NetHue(S.HeroName), Lc);
+	NetAvatar(*C, P.X + 96.0f, P.Y + 98.0f, 58.0f, S.HeroName, Lc, true);
 	UI.Text(S.HeroName, P.X + 176.0f, P.Y + 78.0f, Ts(38.0f, 900, pal::Ink));
 	UI.Text("RiverLine member since 2021 \xC2\xB7 plays the night shift", P.X + 176.0f, P.Y + 106.0f, Ts(15.0f, 500, pal::Muted));
 	const float Tw = NetPill(*C, NetUpper(Tiers[Lv].Name), P.X + 176.0f, P.Y + 124.0f, Lc, true, 11.0f);
@@ -2210,7 +2224,7 @@ void RiverLine::CareerPage(double Now)
 	C->GlowRoundRect({Rc.X, Rc.Y + 6.0f, Rc.W, Rc.H}, 14.0f, Rgba(0, 0, 0, 0.35f), 16.0f);
 	UI.RRect(Rc, 14.0f, Paint::Linear({Rc.X, Rc.Y}, {Rc.X + Rc.W, Rc.Y + Rc.H}, Hex(0x1d1233), Hex(0x0d1729)), NetA(Hex(0xb36bff), 0.45f));
 	NetSpaced(*C, "YOUR RIVAL", Rc.X + 26.0f, Rc.Y + 36.0f, 10.5f, 900, Hex(0xb36bff), 1.8f);
-	NetAvatar(*C, Rc.X + 60.0f, Rc.Y + 84.0f, 32.0f, Rv.Name, Rv.Hue, Hex(0xb36bff));
+	NetAvatar(*C, Rc.X + 60.0f, Rc.Y + 84.0f, 32.0f, Rv.Name, Hex(0xb36bff));
 	UI.Text(Rv.Name, Rc.X + 108.0f, Rc.Y + 82.0f, Ts(24.0f, 900, Hex(0xe7dbff)));
 	NetFlag(*C, Rv.Country, Rc.X + 108.0f, Rc.Y + 94.0f, 18.0f, 12.0f);
 	UI.Text("Low-stakes crusher \xC2\xB7 " + std::to_string(Rv.Wins) + " titles \xC2\xB7 never logs off", Rc.X + 134.0f, Rc.Y + 105.0f, Ts(13.0f, 600, pal::Muted));

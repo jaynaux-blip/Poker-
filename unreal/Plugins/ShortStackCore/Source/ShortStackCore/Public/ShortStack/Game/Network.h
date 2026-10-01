@@ -272,6 +272,8 @@ public:
 	/** The series running at this time (or the next one to start). */
 	SHORTSTACKCORE_API const SeriesInfo* CurrentSeries(double Now) const;
 	int RivalIndex() const { return Rival; }
+	/** A regular by screen name (-1 when not one of the network's regulars). */
+	SHORTSTACKCORE_API int FindPlayer(const std::string& Name) const;
 
 	/** Events starting in [From, To), in start order. */
 	SHORTSTACKCORE_API std::vector<EventInstance> Window(double From, double To) const;
@@ -333,6 +335,7 @@ private:
 	const Ranking& Ranked(Board B, double Now) const;
 
 	std::vector<Player> People;
+	std::map<std::string, int> ByName;
 	std::array<std::vector<double>, 5> TierWeights; // final-table odds of each player by the event's tier
 	std::vector<EventTemplate> Temps;
 	std::vector<SeriesInfo> AllSeries;

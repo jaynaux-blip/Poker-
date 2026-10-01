@@ -5,6 +5,8 @@
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Structure.h"
+#include "ShortStack/UI/Avatars.h"
+#include "RiverLineShared.h"
 
 #include <algorithm>
 #include <cmath>
@@ -47,16 +49,6 @@ const char* GradeIconText(Grade G)
 	}
 }
 
-Color HashColor(const std::string& Name)
-{
-	uint32_t Hh = 0;
-	for (const char Ch : Name)
-	{
-		Hh = Hh * 31u + static_cast<unsigned char>(Ch);
-	}
-	return Hsl(static_cast<float>(Hh % 360u), 0.45f, 0.42f);
-}
-
 float BaselineOf(float Y, const TextStyle& S)
 {
 	switch (S.VAlign)
@@ -66,17 +58,6 @@ float BaselineOf(float Y, const TextStyle& S)
 	case Baseline::Bottom: return Y - 0.21f * S.Size;
 	default: return Y;
 	}
-}
-
-std::string Upper2(const std::string& Name)
-{
-	std::string Out;
-	for (size_t I = 0; I < Name.size() && Out.size() < 2; ++I)
-	{
-		const char Ch = Name[I];
-		Out.push_back(Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch);
-	}
-	return Out;
 }
 
 std::string Lower(const std::string& S)
@@ -697,15 +678,23 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 	const Paint PlateBg = Paint::Linear({0.0f, Plate.Y}, {0.0f, Plate.Y + Plate.H}, IsHero ? Hex(0x1b3552) : Hex(0x1a2536), IsHero ? Hex(0x10223a) : Hex(0x0f1726));
 	const Color Edge = Seat.IsRival ? Hex(0xb8324a) : Seat.Winner && HandOver ? pal::Gold : Rgba(255, 255, 255, 0.1f);
 	UI.RRect(Plate, 14.0f, PlateBg, Edge, Seat.IsRival ? 2.0f : 1.0f);
-	// Avatar.
-	C->FillCircle(Plate.X + 32.0f, P.Y, 22.0f, Seat.IsRival ? Hex(0x2a0d14) : HashColor(Seat.Name));
-	if (Seat.IsRival)
+	// Avatar, with the country flag pinned to it.
+	AvatarSpec Pic = AvatarFor(Seat.Name);
+	if (IsHero)
 	{
-		Ghost(Plate.X + 32.0f, P.Y, 26.0f);
+		Pic.Frame = AvatarFrame::Neon;
+		Pic.Rim = 0x27d3c3;
 	}
-	else
+	else if (Seat.Pro)
 	{
-		UI.Text(Upper2(Seat.Name), Plate.X + 32.0f, P.Y + 1.0f, Ts(16.0f, 800, Hex(0xffffff), Align::Center, Baseline::Middle));
+		Pic.Frame = AvatarFrame::Gold;
+	}
+	DrawAvatar(*C, Plate.X + 32.0f, P.Y, 21.0f, Pic);
+	if (!Seat.Country.empty())
+	{
+		const Rect Fl{Plate.X + 40.0f, P.Y + 10.0f, 15.0f, 10.0f};
+		C->FillRoundRect({Fl.X - 2.0f, Fl.Y - 2.0f, Fl.W + 4.0f, Fl.H + 4.0f}, 3.5f, Hex(0x0b1220));
+		rlnet_detail::NetFlag(*C, Seat.Country, Fl.X, Fl.Y, Fl.W, Fl.H);
 	}
 	UI.Text(Seat.Name, Plate.X + 62.0f, P.Y - 6.0f, Ts(16.0f, 700, Seat.IsRival ? Hex(0xff8da0) : pal::Ink, Align::Left, Baseline::Alphabetic, false, Pw - 72.0f));
 	if (S.T && S.T->Spec.BountyCents > 0 && !S.T->Spec.MysteryBounty)

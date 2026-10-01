@@ -7,6 +7,7 @@
 #include "ShortStack/Equity.h"
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Network.h"
 
 #include <chrono>
@@ -411,6 +412,7 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	LastTick = -1.0;
 	T = std::make_unique<Tournament>(Ev.Spec, HeroName, Seed, std::vector<ReservedPlayer>{{RivalName, Archetype::Crusher}});
 	CurrentScreen = Screen::Table;
+	NameField();
 	if (Ev.Spec.BountyCents > 0)
 	{
 		for (const TPlayer& P : T->Players)
@@ -507,6 +509,10 @@ void Session::BuildSeats()
 		V.Name = P.Name;
 		V.IsHero = P.IsHero;
 		V.IsRival = P.Name == RivalName;
+		const auto Country = FieldCountry.find(P.Id);
+		V.Country = Country == FieldCountry.end() ? std::string() : Country->second;
+		V.Regular = FieldRegulars.count(P.Id) > 0;
+		V.Pro = FieldPros.count(P.Id) > 0;
 		V.Stack = P.Stack;
 	}
 }
@@ -1857,6 +1863,95 @@ void Session::HandleKnockout(const TEvent& E)
 		SystemLine((T->Spec.MysteryBounty ? "Mystery envelope: " : "Bounty: ") + Money(Cash) + " for knocking out " + E.Name + ".");
 		Hooks.Sound(SoundId::Cash, 1.0);
 	}
+}
+
+void Session::NameField()
+{
+	// The engine names the field its own way (kept for parity with the TypeScript build); on RiverLine,
+	// everyone has a screen name and a country, and some of them are the network's regulars at these stakes.
+	FieldCountry.clear();
+	FieldRegulars.clear();
+	FieldPros.clear();
+	const net::Network& Net = net::Shared();
+	Rng Nr(T->Spec.Id + ":" + SeedBase + ":field");
+	const std::string& Pop = T->Spec.Population;
+	const net::Tier Stakes = Pop == "low" ? net::Tier::Low : Pop == "high" ? net::Tier::Mid : net::Tier::Micro;
+	std::vector<int> Strong;
+	std::vector<int> Weak;
+	for (size_t I = 0; I < Net.Players().size(); ++I)
+	{
+		const net::Player& P = Net.Players()[I];
+		const bool Match = Stakes == net::Tier::Mid ? (P.Stake == net::Tier::Mid || P.Stake == net::Tier::High) : P.Stake == Stakes;
+		if (Match && !P.Rival && P.Name != HeroName)
+		{
+			(P.Skill >= 0.55f ? Strong : Weak).push_back(static_cast<int>(I));
+		}
+	}
+	Nr.Shuffle(Strong);
+	Nr.Shuffle(Weak);
+	// Strong regulars take strong bots' seats; the fish take the fish's.
+	std::vector<size_t> StrongSeats;
+	std::vector<size_t> WeakSeats;
+	for (size_t I = 0; I < T->Players.size(); ++I)
+	{
+		const TPlayer& P = T->Players[I];
+		if (P.IsHero || P.Name == RivalName)
+		{
+			continue;
+		}
+		const Archetype A = P.Prof.Type;
+		(A == Archetype::Reg || A == Archetype::Crusher || A == Archetype::Tag || A == Archetype::Lag ? StrongSeats : WeakSeats).push_back(I);
+	}
+	Nr.Shuffle(StrongSeats);
+	Nr.Shuffle(WeakSeats);
+	// Nobody else at the tables goes by a regular's name.
+	std::set<std::string> Taken = {HeroName, RivalName};
+	for (const net::Player& P : Net.Players())
+	{
+		Taken.insert(P.Name);
+	}
+	std::set<size_t> Named;
+	const int Regulars = std::min(40, std::max(4, T->Spec.Entrants * 3 / 100));
+	for (int K = 0; K < Regulars; ++K)
+	{
+		const bool Good = K % 2 == 0;
+		std::vector<int>& From = Good ? (Strong.empty() ? Weak : Strong) : (Weak.empty() ? Strong : Weak);
+		std::vector<size_t>& Into = Good ? (StrongSeats.empty() ? WeakSeats : StrongSeats) : (WeakSeats.empty() ? StrongSeats : WeakSeats);
+		if (From.empty() || Into.empty())
+		{
+			break;
+		}
+		const net::Player& Reg = Net.Players()[static_cast<size_t>(From.back())];
+		TPlayer& Seat = T->Players[Into.back()];
+		From.pop_back();
+		Named.insert(Into.back());
+		Into.pop_back();
+		Seat.Name = Reg.Name;
+		FieldCountry[Seat.Id] = Reg.Country;
+		FieldRegulars.insert(Seat.Id);
+		if (Reg.Pro)
+		{
+			FieldPros.insert(Seat.Id);
+		}
+		Taken.insert(Reg.Name);
+	}
+	std::vector<size_t> Rest;
+	for (size_t I = 0; I < T->Players.size(); ++I)
+	{
+		const TPlayer& P = T->Players[I];
+		if (!P.IsHero && P.Name != RivalName && Named.count(I) == 0)
+		{
+			Rest.push_back(I);
+		}
+	}
+	const std::vector<handles::Identity> Ids = handles::Field(static_cast<int>(Rest.size()), Nr, Taken);
+	for (size_t K = 0; K < Rest.size() && K < Ids.size(); ++K)
+	{
+		TPlayer& P = T->Players[Rest[K]];
+		P.Name = Ids[K].Name;
+		FieldCountry[P.Id] = Ids[K].Country;
+	}
+	FieldCountry["npc:" + std::string(RivalName)] = "CA";
 }
 
 bool Session::CheckSatellite()

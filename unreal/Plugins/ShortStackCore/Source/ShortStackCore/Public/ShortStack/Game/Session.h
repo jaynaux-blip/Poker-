@@ -63,6 +63,9 @@ struct SeatVis
 	std::string Name;
 	bool IsHero = false;
 	bool IsRival = false;
+	std::string Country; // ISO 3166 alpha-2 ("" when unknown)
+	bool Regular = false; // one of the network's regulars (the leaderboards know them)
+	bool Pro = false;     // Team RiverLine
 	Chips Stack = 0;
 	Chips Bet = 0;
 	std::vector<Card> Hole; // known to the viewer (hero, or revealed)
@@ -327,6 +330,10 @@ public:
 	/** Tickets that pay for this listing (satellite seats). */
 	int TicketsFor(const LobbyEvent& Ev) const;
 
+	// Who is who in the tournament being played (player id -> country; regulars from the network).
+	std::map<std::string, std::string> FieldCountry;
+	std::set<std::string> FieldRegulars;
+	std::set<std::string> FieldPros;
 	// Bounties and seats in the tournament being played.
 	std::map<std::string, Chips> Bounties; // player id -> bounty on their head (PKO)
 	Chips BountyWon = 0;
@@ -358,6 +365,7 @@ private:
 	void SprintStep();
 	void ShowResults();
 	void HandleKnockout(const TEvent& E);
+	void NameField();
 	bool CheckSatellite();
 	void CheckUnlocks();
 	void CheckCalendar(double From, double To, bool Awake);

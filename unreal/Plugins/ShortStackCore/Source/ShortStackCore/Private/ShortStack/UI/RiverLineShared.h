@@ -3,6 +3,7 @@
 
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/RiverLine.h"
 
 #include <algorithm>
@@ -316,37 +317,35 @@ inline void NetFlag(Canvas& Cv, const std::string& Code, float X, float Y, float
 	Cv.StrokeRoundRect({X, Y, W, H}, 1.5f, Rgba(0, 0, 0, 0.35f), 1.0f);
 }
 
-inline int NetHue(const std::string& Name)
+inline uint32_t NetRgb(const Color& Cl)
 {
-	return static_cast<int>(Fnv1a(Name) % 360u);
+	const auto Byte = [](float V) { return static_cast<uint32_t>(std::min(255.0f, std::max(0.0f, V * 255.0f + 0.5f))); };
+	return Byte(Cl.R) << 16 | Byte(Cl.G) << 8 | Byte(Cl.B);
 }
 
-inline std::string NetInitials(const std::string& Name)
+/**
+ * A RiverLine profile picture: the icon the name picked, Team RiverLine pros framed in gold, the player in neon.
+ * A visible Ring (medals, the rival's purple) replaces the frame.
+ */
+inline void NetAvatar(Canvas& Cv, float Cx, float Cy, float R, const std::string& Name, const Color& Ring, bool Hero = false)
 {
-	std::string Out;
-	for (const char Ch : Name)
+	AvatarSpec A = AvatarFor(Name);
+	const int Id = net::Shared().FindPlayer(Name);
+	if (Id >= 0 && net::Shared().Players()[static_cast<size_t>(Id)].Pro)
 	{
-		if ((Ch >= 'a' && Ch <= 'z') || (Ch >= 'A' && Ch <= 'Z') || (Ch >= '0' && Ch <= '9'))
-		{
-			Out.push_back(Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch);
-		}
-		if (Out.size() == 2)
-		{
-			break;
-		}
+		A.Frame = AvatarFrame::Gold;
 	}
-	return Out.empty() ? std::string("?") : Out;
-}
-
-inline void NetAvatar(Canvas& Cv, float Cx, float Cy, float R, const std::string& Name, int Hue, const Color& Ring)
-{
-	const float H = Nf(Hue);
-	Cv.FillCircle(Cx, Cy, R, Paint::Linear({Cx - R, Cy - R}, {Cx + R, Cy + R}, Hsl(H, 0.62f, 0.52f), Hsl(H + 30.0f, 0.55f, 0.26f)));
-	Cv.Text(NetInitials(Name), Cx, Cy + R * 0.02f, Ts(R * 0.78f, 800, Hex(0xffffff), Align::Center, Baseline::Middle));
-	if (Ring.A > 0.0f)
+	if (Hero)
 	{
-		Cv.StrokeEllipse(Cx, Cy, R + 1.5f, R + 1.5f, Ring, 2.5f);
+		A.Frame = AvatarFrame::Neon;
+		A.Rim = Ring.A > 0.0f ? NetRgb(Ring) : NetRgb(pal::Accent);
 	}
+	else if (Ring.A > 0.0f)
+	{
+		A.Frame = A.Frame == AvatarFrame::Neon ? AvatarFrame::Neon : AvatarFrame::Ring;
+		A.Rim = NetRgb(Ring);
+	}
+	DrawAvatar(Cv, Cx, Cy, R, A);
 }
 
 inline void NetSpark(Canvas& Cv, const Rect& R, const std::array<float, 8>& V, const Color& Col)

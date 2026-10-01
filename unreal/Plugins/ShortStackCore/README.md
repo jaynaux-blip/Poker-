@@ -12,7 +12,8 @@ On top of the engine, the plugin also carries the rest of Night One's logic as p
 
 - `ShortStack/Game`: the session (lobby, pacing, hero turns, sprint, story texts, results, saves) and the RiverLine network (`Network.h`: the schedule, series, regulars, simulated results, leaderboards and news, on a world clock)
 - `ShortStack/Game/Life.h`: life away from the tables: shifts, hustles, energy, police heat, rent, the ledger, and the clock skipping ahead while they happen
-- `ShortStack/UI`: a vector canvas, the RiverLine client (the table in `RiverLine.cpp`, the lobby pages in `RiverLineNet.cpp`, the laptop's other apps in `RiverLineApps.cpp`), card art, the phone and printed props
+- `ShortStack/Game/Handles.h`: RiverLine screen names in each country's style, for the regulars and table fields (display only: the engine's `Names.h` stays as it is for parity with TypeScript)
+- `ShortStack/UI`: a vector canvas, the RiverLine client (the table in `RiverLine.cpp`, the lobby pages in `RiverLineNet.cpp`, the laptop's other apps in `RiverLineApps.cpp`), profile pictures (`Avatars.h`: 35 icons picked by screen name, with frames), card art, the phone and printed props
 - `ShortStack/Audio`: sound synthesis
 
 The Unreal project in `unreal/` (see `unreal/README.md`) is a thin host around them.
