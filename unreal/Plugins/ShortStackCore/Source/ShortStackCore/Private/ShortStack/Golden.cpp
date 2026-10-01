@@ -841,7 +841,10 @@ GoldenResult RunGoldenVectors(const std::string& FileText)
 		{
 			End = FileText.size();
 		}
-		const std::string Line = FileText.substr(Start, End - Start);
+		// A Windows checkout (core.autocrlf) ends lines in "\r\n". Drop the '\r' here: grade, tick
+		// and tresult compare the raw tail of the line, not Split()'s tokens.
+		const size_t Len = End > Start && FileText[End - 1] == '\r' ? End - Start - 1 : End - Start;
+		const std::string Line = FileText.substr(Start, Len);
 		Start = End + 1;
 		++LineNo;
 		if (Line.empty() || Line[0] == '#')

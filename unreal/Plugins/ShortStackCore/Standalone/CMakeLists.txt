@@ -19,7 +19,12 @@ target_include_directories(ShortStackCore PUBLIC ${MODULE_DIR}/Public)
 # Mirror Unreal's constraints (no exceptions, no RTTI) and keep floating point
 # bit-identical to the TypeScript build (no fused multiply-add).
 if(MSVC)
+  # CMake's default flags turn exceptions and RTTI on; drop them so /EHs-c- and /GR- don't clash.
+  string(REGEX REPLACE "/EHsc|/GR( |$)" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
   target_compile_options(ShortStackCore PUBLIC /W4 /WX /fp:precise /EHs-c- /GR-)
+  # Without _HAS_EXCEPTIONS=0, MSVC's STL still compiles try/catch and warns (C4530) under /EHs-c-.
+  # The tests write files with std::fopen, which MSVC flags as deprecated (C4996).
+  target_compile_definitions(ShortStackCore PUBLIC _HAS_EXCEPTIONS=0 _CRT_SECURE_NO_WARNINGS)
 else()
   target_compile_options(ShortStackCore PUBLIC -Wall -Wextra -Wshadow -Wconversion -Werror
     -ffp-contract=off -fno-exceptions -fno-rtti)

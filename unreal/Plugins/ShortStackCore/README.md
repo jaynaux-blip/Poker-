@@ -99,7 +99,7 @@ cmake -S . -B build && cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-On Windows, run this from a *Developer Command Prompt for VS*. The Standalone build runs five tests:
+On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio generator builds Debug by default, so pass the configuration to ctest: `ctest --test-dir build -C Debug --output-on-failure`. The Standalone build runs five tests:
 
 - `golden_test`: the 4,201 golden vectors.
 - `unit_test`: 5,000 fuzzed hands checking chip conservation, illegal-action rejection, and a 1,000-player tournament played to the end, about 0.7 s.
