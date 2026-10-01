@@ -2,7 +2,10 @@
 // of game states and writes them as JSON. web/scripts/render-drawlists.mjs
 // replays them in Chromium so the C++ UI can be compared with the prototype.
 // Usage: ui_test <out-dir>   (with no argument it only checks the frames draw)
+#include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/FrontEnd.h"
 #include "ShortStack/UI/Phone.h"
 #include "ShortStack/UI/PropArt.h"
@@ -10,6 +13,8 @@
 #include "TestFontMetrics.h"
 
 #include <cstdio>
+#include <map>
+#include <set>
 #include <string>
 
 namespace ui_test
@@ -137,11 +142,11 @@ void Screens()
 	S.CurrentScreen = ss::Screen::Lobby;
 	RL.UI.Ptr.Active = true;
 	RL.UI.Ptr.X = 520.0f;
-	RL.UI.Ptr.Y = 290.0f; // hovering the second row
+	RL.UI.Ptr.Y = 490.0f; // hovering a schedule row
 	Emit("lobby", RL, 2.0);
 	S.ConfirmRegister = true;
 	RL.UI.Ptr.X = 1200.0f;
-	RL.UI.Ptr.Y = 680.0f;
+	RL.UI.Ptr.Y = 890.0f;
 	Emit("lobby_confirm", RL, 2.5);
 	S.ConfirmRegister = false;
 
@@ -292,6 +297,90 @@ void Props()
 				std::fwrite(J.data(), 1, J.size(), F);
 				std::fclose(F);
 			}
+		}
+	}
+}
+
+/** Profile pictures: names pick fitting icons, everyone gets one, and a gallery of the set for review. */
+void Avatars()
+{
+	using ss::ui::AvatarFor;
+	using ss::ui::AvatarIcon;
+	Expect(AvatarFor("ElTiburon").Icon == AvatarIcon::Shark && AvatarFor("C0ldSh4rk").Icon == AvatarIcon::Shark, "shark names get sharks, leetspeak too");
+	Expect(AvatarFor("CoolerKing").Icon == AvatarIcon::Crown && AvatarFor("ReiDoRio").Icon == AvatarIcon::Crown, "kings get crowns");
+	Expect(AvatarFor("lazy_owl").Icon == AvatarIcon::Owl && AvatarFor("CoffeeAndCards").Icon == AvatarIcon::Coffee, "owls and coffee");
+	Expect(AvatarFor("Volkov").Icon != AvatarIcon::Wolf && AvatarFor("Volk88").Icon == AvatarIcon::Wolf, "short words match whole words only");
+	Expect(AvatarFor(ss::RivalName).Icon == AvatarIcon::Ghost && AvatarFor(ss::RivalName).Frame == ss::ui::AvatarFrame::Neon, "the rival is the ghost");
+	Expect(AvatarFor("PocketRockets").Icon == AvatarFor("PocketRockets").Icon && AvatarFor("PocketRockets").Bg == AvatarFor("PocketRockets").Bg, "avatars are stable");
+	std::map<int, int> Seen;
+	bool GhostTaken = false;
+	for (const ss::net::Player& P : ss::net::Shared().Players())
+	{
+		const ss::ui::AvatarSpec A = AvatarFor(P.Name);
+		++Seen[static_cast<int>(A.Icon)];
+		GhostTaken = GhostTaken || (A.Icon == AvatarIcon::Ghost && !P.Rival);
+	}
+	Expect(!GhostTaken, "nobody but the rival wears the ghost");
+	Expect(Seen.size() >= 30, "the network uses most of the set");
+	Expect(Seen[static_cast<int>(AvatarIcon::Initials)] < static_cast<int>(ss::net::Shared().Players().size() / 3), "initials are the exception");
+	std::printf("  avatars        %zu icons across %zu regulars\n", Seen.size(), ss::net::Shared().Players().size());
+
+	TableMeasurer M;
+	ss::ui::DrawList L;
+	const float W = 1600.0f;
+	const float H = 1000.0f;
+	ss::ui::Canvas C(L, M, W, H, 1.0f);
+	C.FillRect({0.0f, 0.0f, W, H}, ss::ui::Paint::Linear({0.0f, 0.0f}, {0.0f, H}, ss::ui::Hex(0x111a2b), ss::ui::Hex(0x0a0f1a)));
+	C.Text("RIVERLINE AVATARS", 48.0f, 62.0f, ss::ui::Ts(30.0f, 900, ss::ui::Hex(0xffffff)));
+	C.Text("Every icon, then the frames, then regulars as the lobby shows them", 48.0f, 92.0f, ss::ui::Ts(16.0f, 500, ss::ui::Hex(0x8b9bb4)));
+	const int Icons = static_cast<int>(AvatarIcon::Count);
+	for (int I = 0; I < Icons; ++I)
+	{
+		const float X = 92.0f + static_cast<float>(I % 12) * 120.0f;
+		const float Y = 170.0f + static_cast<float>(I / 12) * 128.0f;
+		ss::ui::AvatarSpec A = AvatarFor("gallery" + std::to_string(I * 7));
+		A.Icon = static_cast<AvatarIcon>(I);
+		A.Frame = ss::ui::AvatarFrame::None;
+		A.Initials = "JK";
+		if (A.Icon == AvatarIcon::Ghost)
+		{
+			A = AvatarFor(ss::RivalName);
+		}
+		ss::ui::DrawAvatar(C, X, Y, 38.0f, A);
+		C.Text(ss::ui::AvatarIconName(A.Icon), X, Y + 62.0f, ss::ui::Ts(13.0f, 600, ss::ui::Hex(0xc7d2e3), ss::ui::Align::Center));
+	}
+	const char* Frames[5] = {"None", "Ring", "Chip", "Gold (Team RiverLine)", "Neon (you, the rival)"};
+	for (int F = 0; F < 5; ++F)
+	{
+		const float X = 120.0f + static_cast<float>(F) * 230.0f;
+		ss::ui::AvatarSpec A = AvatarFor("SetMiner");
+		A.Frame = static_cast<ss::ui::AvatarFrame>(F);
+		A.Rim = F == 1 ? 0xf472b6 : 0x27d3c3;
+		ss::ui::DrawAvatar(C, X, 590.0f, 42.0f, A);
+		C.Text(Frames[F], X, 666.0f, ss::ui::Ts(13.0f, 600, ss::ui::Hex(0xc7d2e3), ss::ui::Align::Center));
+	}
+	const std::vector<ss::net::Player>& People = ss::net::Shared().Players();
+	for (int I = 0; I < 30; ++I)
+	{
+		const ss::net::Player& P = People[static_cast<size_t>(I * 13 % static_cast<int>(People.size()))];
+		const float X = 60.0f + static_cast<float>(I % 6) * 256.0f;
+		const float Y = 730.0f + static_cast<float>(I / 6) * 52.0f;
+		ss::ui::AvatarSpec A = AvatarFor(P.Name);
+		if (P.Pro)
+		{
+			A.Frame = ss::ui::AvatarFrame::Gold;
+		}
+		ss::ui::DrawAvatar(C, X, Y, 18.0f, A);
+		C.Text(P.Name, X + 28.0f, Y + 1.0f, ss::ui::Ts(15.0f, 700, ss::ui::Hex(0xe6edf7), ss::ui::Align::Left, ss::ui::Baseline::Middle));
+		C.Text(P.Country, X + 28.0f, Y + 18.0f, ss::ui::Ts(11.0f, 600, ss::ui::Hex(0x6b7a92), ss::ui::Align::Left, ss::ui::Baseline::Middle, true));
+	}
+	if (!OutDir.empty())
+	{
+		if (FILE* F = std::fopen((OutDir + "/avatars.json").c_str(), "wb"))
+		{
+			const std::string J = L.ToJson();
+			std::fwrite(J.data(), 1, J.size(), F);
+			std::fclose(F);
 		}
 	}
 }
@@ -469,6 +558,193 @@ void FrontEndScreens()
 	EmitMenu("menu_attract_gamepad", Fe, Now + 3.0);
 }
 
+/** Draws frames (and runs the session) for a while, so animations and the lobby clock move on. */
+double Run(ss::Session& S, ss::ui::RiverLine& RL, double Now, double Seconds)
+{
+	TableMeasurer M;
+	for (double T = 0.0; T < Seconds; T += 1.0 / 30.0)
+	{
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		RL.Draw(C, Now);
+	}
+	return Now;
+}
+
+void NetScreens()
+{
+	using Page = ss::ui::RiverLine::Page;
+	QuietHooks H;
+	ss::Session S(H, "ui-net");
+	ss::ui::RiverLine RL(S);
+	S.CurrentScreen = ss::Screen::Lobby;
+	RL.UI.Ptr.Active = true;
+	RL.UI.Ptr.X = 640.0f;
+	RL.UI.Ptr.Y = 560.0f; // hovering a schedule row
+	double Now = Run(S, RL, 10.0, 1.5);
+	Emit("net_lobby", RL, Now);
+	RL.UI.Ptr.X = 400.0f;
+	RL.UI.Ptr.Y = 200.0f; // over the banner (it stops rotating)
+	Now = Run(S, RL, Now, 8.0);
+	Emit("net_lobby_slide", RL, Now);
+	RL.SetFilter(ss::ui::RiverLine::Filter::Playable, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("net_lobby_playable", RL, Now);
+	for (Page P : {Page::Series, Page::Leaderboards, Page::News, Page::Career})
+	{
+		RL.OpenPage(P, Now);
+		Now = Run(S, RL, Now, 1.5);
+		const char* Names[5] = {"net_lobby", "net_series", "net_boards", "net_news", "net_career"};
+		Emit(Names[static_cast<int>(P)], RL, Now);
+	}
+	RL.ShowSeries("rcop", Now);
+	RL.OpenPage(Page::Series, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("net_series_rcop", RL, Now);
+
+	// Later that night: a Micro Madness title and a Night Owl cash.
+	ss::HistoryEntry Owl;
+	Owl.Name = "$1.10 Night Owl Turbo";
+	Owl.Place = 31;
+	Owl.Entrants = 1000;
+	Owl.Prize = 380;
+	Owl.AccuracyPct = 82.0;
+	Owl.BuyInCents = 110;
+	Owl.EventId = "night-owl@1560";
+	ss::HistoryEntry Title;
+	Title.Name = "MM #26: Night Crawler";
+	Title.Place = 1;
+	Title.Entrants = 1184;
+	Title.Prize = 45000;
+	Title.AccuracyPct = 91.0;
+	Title.BuyInCents = 220;
+	Title.EventId = "mm-26@1530";
+	S.History = {Title, Owl};
+	S.BankrollCents += 45380;
+	S.LobbyMinutes = 5.0 * 60.0 + 12.0;
+	for (Page P : {Page::Leaderboards, Page::News, Page::Career})
+	{
+		RL.OpenPage(P, Now);
+		Now = Run(S, RL, Now, 1.5);
+		const char* Names[5] = {"", "", "net_boards_after", "net_news_after", "net_career_after"};
+		Emit(Names[static_cast<int>(P)], RL, Now);
+	}
+	RL.ShowBoard(ss::net::Board::Series, Now);
+	RL.OpenPage(Page::Leaderboards, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("net_boards_series", RL, Now);
+}
+
+/** The laptop apps, the time-lapse, a bounty table and the new result screens. */
+void AppScreens()
+{
+	using App = ss::ui::RiverLine::App;
+	QuietHooks H;
+	ss::Session S(H, "ui-apps");
+	ss::ui::RiverLine RL(S);
+	S.CurrentScreen = ss::Screen::Lobby;
+	RL.UI.Ptr.Active = true;
+	RL.UI.Ptr.X = 300.0f;
+	RL.UI.Ptr.Y = 880.0f;
+	double Now = Run(S, RL, 10.0, 1.0);
+	Emit("net_lobby_taskbar", RL, Now);
+	RL.OpenApp(App::ShiftLink, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("app_shiftlink", RL, Now);
+	RL.OpenApp(App::Burner, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("app_burner", RL, Now);
+	RL.ShowSleepMenu(true);
+	RL.UI.Ptr.X = 520.0f;
+	RL.UI.Ptr.Y = 820.0f;
+	Now = Run(S, RL, Now, 0.3);
+	Emit("app_sleep", RL, Now);
+	RL.ShowSleepMenu(false);
+	// A night shift at the Quik Stop: the time-lapse, then the result.
+	Expect(S.StartActivity("quikstop").empty(), "the night shift starts from the app");
+	Now = Run(S, RL, Now, 1.6);
+	Emit("app_skip", RL, Now);
+	Now = Run(S, RL, Now, 4.5);
+	Expect(S.HasOutcome, "the shift's result is up");
+	Emit("app_outcome", RL, Now);
+	S.HasOutcome = false;
+	RL.OpenApp(App::Bank, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("app_bank", RL, Now);
+	// Night: Marcus trusts you now, and the cops have noticed.
+	S.LobbyMinutes = 1440.0 + 21.0 * 60.0 + 30.0;
+	Now = Run(S, RL, Now, 0.2);
+	S.Life.Energy = 88.0;
+	S.Life.Runs = 2;
+	S.Life.Heat = 38.0;
+	S.Life.EarnedHustles = 33600;
+	S.History.push_back(ss::HistoryEntry());
+	S.History.back().Name = "$1.10 Night Owl Turbo";
+	S.History.back().Place = 120;
+	S.History.back().Entrants = 1000;
+	S.History.back().Prize = 165;
+	RL.OpenApp(App::Burner, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("app_burner_night", RL, Now);
+	RL.ShowContact(1);
+	Now = Run(S, RL, Now, 0.5);
+	Emit("app_burner_sam", RL, Now);
+
+	// A progressive knockout, mid-hand, just after a knockout.
+	{
+		QuietHooks Hp;
+		ss::Session P(Hp, "ui-pko");
+		ss::ui::RiverLine Rp(P);
+		P.CurrentScreen = ss::Screen::Lobby;
+		P.Life.Unlocks.insert("bounty");
+		P.BankrollCents = 2000;
+		ss::net::EventInstance Pko;
+		Expect(ss::net::Shared().FindInstance("hh-110@1500", Pko), "the 1 AM PKO is scheduled");
+		P.RegisterEvent(ss::net::Shared().Listing(Pko, nullptr, P.Unlocks()));
+		P.CurrentPace = ss::Pace::Full;
+		double T0 = 0.0;
+		int Guard = 0;
+		while (++Guard < 200000 && !(P.HasPrompt && T0 - P.Prompt.OpenedAt > 1.0 && P.Board.size() >= 3))
+		{
+			T0 = Step(P, T0, 1.0 / 30.0);
+			if (P.HasPrompt && P.Board.size() < 3 && T0 - P.Prompt.OpenedAt > 0.3)
+			{
+				P.HeroAct(P.Prompt.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Call());
+			}
+		}
+		P.Knockouts = 2;
+		P.BountyWon = 75;
+		P.LastBountyAt = T0 - 0.5;
+		P.LastBountyCents = 50;
+		P.LastBountyName = "NutDoctor";
+		Rp.UI.Ptr.Active = false;
+		Emit("table_pko", Rp, T0);
+		// Results: a seat, then a deep PKO run.
+		P.HasResults = true;
+		P.CurrentScreen = ss::Screen::Results;
+		P.ResultsAt = T0 - 3.0;
+		P.LastResults = ss::Results();
+		P.LastResults.EventName = "Step 2 \xC2\xB7 RCOP Main";
+		P.LastResults.Place = 4;
+		P.LastResults.Entrants = 60;
+		P.LastResults.Hands = 112;
+		P.LastResults.AccuracyPct = 86.0;
+		P.LastResults.SeatWon = "step3";
+		P.LastResults.SeatValueCents = 5500;
+		Emit("results_seat", Rp, T0);
+		P.LastResults.EventName = "$1.10 Headhunter PKO";
+		P.LastResults.SeatWon.clear();
+		P.LastResults.Place = 7;
+		P.LastResults.Entrants = 896;
+		P.LastResults.PrizeCents = 1240;
+		P.LastResults.BountyCents = 375;
+		P.LastResults.Knockouts = 6;
+		Emit("results_pko", Rp, T0);
+	}
+}
+
 void Clicks()
 {
 	// A click on "Log in" moves the boot screen to the lobby; clicks elsewhere do nothing.
@@ -494,16 +770,40 @@ void Clicks()
 	Frame(800.0f, 550.0f, false, false, true);
 	Expect(S.CurrentScreen == ss::Screen::Lobby, "log in button works");
 	Expect(H.Texts.size() == 1, "logging in triggers Dee's text");
-	// Select the hyper sprint row, register, confirm.
-	Frame(300.0f, 290.0f, true, true, false);
-	Frame(300.0f, 290.0f, false, false, true);
-	Expect(S.Selected == 1, "row click selects the event");
-	Frame(1300.0f, 700.0f, true, true, false);
-	Frame(1300.0f, 700.0f, false, false, true);
+	// Show what can be played now, pick the hyper sprint, register, confirm.
+	Frame(130.0f, 330.0f, true, true, false);
+	Frame(130.0f, 330.0f, false, false, true);
+	Frame(130.0f, 330.0f, false, false, false);
+	Expect(RL.ListedEvents().size() >= 4, "the Playable chip filters the schedule");
+	int Row = -1;
+	for (size_t I = 0; I < RL.ListedEvents().size() && I < 9; ++I)
+	{
+		Row = Row < 0 && RL.ListedEvents()[I].rfind("hyper-sprint@", 0) == 0 ? static_cast<int>(I) : Row;
+	}
+	Expect(Row >= 0, "a hyper sprint is open");
+	const float RowY = 404.0f + static_cast<float>(Row) * 60.0f + 27.0f;
+	Frame(300.0f, RowY, true, true, false);
+	Frame(300.0f, RowY, false, false, true);
+	Expect(Row >= 0 && RL.SelectedEvent() == RL.ListedEvents()[static_cast<size_t>(Row)], "row click selects the event");
+	Frame(1300.0f, 890.0f, true, true, false);
+	Frame(1300.0f, 890.0f, false, false, true);
 	Expect(S.ConfirmRegister, "register asks for confirmation");
-	Frame(1150.0f, 700.0f, true, true, false);
-	Frame(1150.0f, 700.0f, false, false, true);
-	Expect(S.CurrentScreen == ss::Screen::Table && S.T != nullptr, "confirm registers and opens the table");
+	Frame(1200.0f, 890.0f, true, true, false);
+	Frame(1200.0f, 890.0f, false, false, true);
+	Expect(S.CurrentScreen == ss::Screen::Table && S.T != nullptr && S.T->Spec.Id.rfind("hyper-sprint@", 0) == 0, "confirm registers and opens the table");
+	// Navigation.
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.T.reset();
+	Frame(500.0f, 34.0f, true, true, false);
+	Frame(500.0f, 34.0f, false, false, true);
+	Expect(RL.CurrentPage() == ss::ui::RiverLine::Page::Leaderboards, "the top bar opens the leaderboards");
+	// The taskbar opens ShiftLink, and a night shift starts from its card.
+	Frame(170.0f, 981.0f, true, true, false);
+	Frame(170.0f, 981.0f, false, false, true);
+	Expect(RL.CurrentApp() == ss::ui::RiverLine::App::ShiftLink, "the taskbar opens ShiftLink");
+	Frame(290.0f, 516.0f, true, true, false);
+	Frame(290.0f, 516.0f, false, false, true);
+	Expect(S.TimeSkip.Active && S.TimeSkip.Result.ActivityId == "quikstop", "Take shift starts the Quik Stop shift");
 }
 } // namespace ui_test
 
@@ -513,10 +813,13 @@ int main(int Argc, char** Argv)
 	{
 		ui_test::OutDir = Argv[1];
 	}
+	ui_test::NetScreens();
+	ui_test::AppScreens();
 	ui_test::Clicks();
 	ui_test::Screens();
 	ui_test::Results();
 	ui_test::Props();
+	ui_test::Avatars();
 	ui_test::FrontEndFlows();
 	ui_test::FrontEndScreens();
 	if (ui_test::Failures == 0)

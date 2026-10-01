@@ -7,6 +7,8 @@
 #include "ShortStack/Equity.h"
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Handles.h"
+#include "ShortStack/Game/Network.h"
 
 #include <chrono>
 #include <cmath>
@@ -126,13 +128,39 @@ std::string SaveData::Serialize() const
 	Out << "shortstack.nightone.v1\n";
 	Out << "bankroll\t" << BankrollCents << "\n";
 	Out << "name\t" << session_detail::Escape(HeroName) << "\n";
+	Out << "clock\t" << Fixed(ClockMinutes, 2) << "\n";
+	const life::State& L = Life;
+	Out << "life\tenergy\t" << Fixed(L.Energy, 2) << "\n";
+	Out << "life\theat\t" << Fixed(L.Heat, 2) << "\n";
+	Out << "life\trent\t" << static_cast<int>(L.RentStage) << "\t" << L.RentDueCents << "\t" << Fixed(L.RentDeadline, 2) << "\t" << L.RentsPaid << "\n";
+	Out << "life\tdebt\t" << L.DebtCents << "\n";
+	Out << "life\tban\t" << Fixed(L.BannedUntil, 2) << "\n";
+	Out << "life\tcount\t" << L.Shifts << "\t" << L.Runs << "\t" << L.Busts << "\t" << L.Ghosts << "\t" << L.Bans << "\n";
+	Out << "life\tearned\t" << L.EarnedJobs << "\t" << L.EarnedHustles << "\n";
+	for (const std::string& U : L.Unlocks)
+	{
+		Out << "unlock\t" << session_detail::Escape(U) << "\n";
+	}
+	for (const auto& Tk : L.Tickets)
+	{
+		Out << "ticket\t" << session_detail::Escape(Tk.first) << "\t" << Tk.second << "\n";
+	}
+	for (const int Night : L.NightsPaid)
+	{
+		Out << "night\t" << Night << "\n";
+	}
+	for (auto It = L.Ledger.rbegin(); It != L.Ledger.rend(); ++It)
+	{
+		Out << "ledger\t" << Fixed(It->At, 2) << "\t" << It->Kind << "\t" << It->Amount << "\t" << session_detail::Escape(It->Label) << "\n";
+	}
 	for (const std::string& Key : TextsSeen)
 	{
 		Out << "text\t" << session_detail::Escape(Key) << "\n";
 	}
 	for (const HistoryEntry& H : History)
 	{
-		Out << "result\t" << session_detail::Escape(H.Name) << "\t" << H.Place << "\t" << H.Entrants << "\t" << H.Prize << "\t" << Fixed(H.AccuracyPct, 3) << "\n";
+		Out << "result\t" << session_detail::Escape(H.Name) << "\t" << H.Place << "\t" << H.Entrants << "\t" << H.Prize << "\t" << Fixed(H.AccuracyPct, 3) << "\t" << H.BuyInCents << "\t"
+			<< session_detail::Escape(H.EventId) << "\n";
 	}
 	return Out.str();
 }
@@ -159,11 +187,74 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 		{
 			D.HeroName = session_detail::Unescape(P[1]);
 		}
+		else if (P.size() == 2 && P[0] == "clock")
+		{
+			D.ClockMinutes = std::atof(P[1].c_str());
+		}
+		else if (P.size() >= 3 && P[0] == "life")
+		{
+			life::State& L = D.Life;
+			auto Num = [&](size_t I) { return I < P.size() ? std::atof(P[I].c_str()) : 0.0; };
+			auto Int = [&](size_t I) { return I < P.size() ? std::atoi(P[I].c_str()) : 0; };
+			auto Cents = [&](size_t I) { return I < P.size() ? static_cast<Chips>(std::strtoll(P[I].c_str(), nullptr, 10)) : static_cast<Chips>(0); };
+			if (P[1] == "energy")
+			{
+				L.Energy = Num(2);
+			}
+			else if (P[1] == "heat")
+			{
+				L.Heat = Num(2);
+			}
+			else if (P[1] == "rent" && P.size() >= 6)
+			{
+				L.RentStage = static_cast<life::Rent>(Int(2));
+				L.RentDueCents = Cents(3);
+				L.RentDeadline = Num(4);
+				L.RentsPaid = Int(5);
+			}
+			else if (P[1] == "debt")
+			{
+				L.DebtCents = Cents(2);
+			}
+			else if (P[1] == "ban")
+			{
+				L.BannedUntil = Num(2);
+			}
+			else if (P[1] == "count" && P.size() >= 7)
+			{
+				L.Shifts = Int(2);
+				L.Runs = Int(3);
+				L.Busts = Int(4);
+				L.Ghosts = Int(5);
+				L.Bans = Int(6);
+			}
+			else if (P[1] == "earned" && P.size() >= 4)
+			{
+				L.EarnedJobs = Cents(2);
+				L.EarnedHustles = Cents(3);
+			}
+		}
+		else if (P.size() == 2 && P[0] == "unlock")
+		{
+			D.Life.Unlocks.insert(session_detail::Unescape(P[1]));
+		}
+		else if (P.size() == 3 && P[0] == "ticket")
+		{
+			D.Life.Tickets[session_detail::Unescape(P[1])] = std::atoi(P[2].c_str());
+		}
+		else if (P.size() == 2 && P[0] == "night")
+		{
+			D.Life.NightsPaid.insert(std::atoi(P[1].c_str()));
+		}
+		else if (P.size() == 5 && P[0] == "ledger")
+		{
+			D.Life.Record(std::atof(P[1].c_str()), session_detail::Unescape(P[4]), static_cast<Chips>(std::strtoll(P[3].c_str(), nullptr, 10)), std::atoi(P[2].c_str()));
+		}
 		else if (P.size() == 2 && P[0] == "text")
 		{
 			D.TextsSeen.push_back(session_detail::Unescape(P[1]));
 		}
-		else if (P.size() == 6 && P[0] == "result")
+		else if ((P.size() == 6 || P.size() == 8) && P[0] == "result")
 		{
 			HistoryEntry H;
 			H.Name = session_detail::Unescape(P[1]);
@@ -171,6 +262,11 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 			H.Entrants = std::atoi(P[3].c_str());
 			H.Prize = std::strtoll(P[4].c_str(), nullptr, 10);
 			H.AccuracyPct = std::atof(P[5].c_str());
+			if (P.size() == 8)
+			{
+				H.BuyInCents = std::strtoll(P[6].c_str(), nullptr, 10);
+				H.EventId = session_detail::Unescape(P[7]);
+			}
 			D.History.push_back(H);
 		}
 	}
@@ -187,13 +283,15 @@ const char* SoundName(SoundId Id)
 // ------------------------------------------------------------------ session
 
 Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData* Loaded)
-	: Hooks(InHooks), SeedBase(Seed), R(Seed)
+	: Hooks(InHooks), SeedBase(Seed), R(Seed), LifeRng(Seed + ":life")
 {
 	if (Loaded)
 	{
 		BankrollCents = Loaded->BankrollCents;
 		HeroName = Loaded->HeroName;
 		History = Loaded->History;
+		LobbyMinutes = Loaded->ClockMinutes;
+		Life = Loaded->Life;
 		TextsSeen.insert(Loaded->TextsSeen.begin(), Loaded->TextsSeen.end());
 	}
 }
@@ -204,6 +302,8 @@ void Session::Save()
 	D.BankrollCents = BankrollCents;
 	D.HeroName = HeroName;
 	D.History = History;
+	D.ClockMinutes = LobbyMinutes;
+	D.Life = Life;
 	D.TextsSeen.assign(TextsSeen.begin(), TextsSeen.end());
 	Hooks.Save(D);
 }
@@ -213,6 +313,9 @@ void Session::ResetSave()
 	BankrollCents = 237;
 	History.clear();
 	TextsSeen.clear();
+	LobbyMinutes = 2.0 * 60.0 + 7.0;
+	Life = life::State();
+	CalendarAt = -1.0;
 	Save();
 }
 
@@ -238,7 +341,13 @@ void Session::OnBoot()
 
 bool Session::CanAfford(const LobbyEvent& Ev) const
 {
-	return Ev.Joinable && BankrollCents >= Ev.BuyInCents;
+	return Ev.Joinable && !Restricted() && !TimeSkip.Active && (BankrollCents >= Ev.BuyInCents || TicketsFor(Ev) > 0);
+}
+
+int Session::TicketsFor(const LobbyEvent& Ev) const
+{
+	const size_t At = Ev.Spec.Id.find('@');
+	return At == std::string::npos ? 0 : Life.TicketsFor(Ev.Spec.Id.substr(0, At));
 }
 
 void Session::Register(int Index)
@@ -248,14 +357,43 @@ void Session::Register(int Index)
 	{
 		return;
 	}
-	const LobbyEvent& Ev = L[static_cast<size_t>(Index)];
-	if (!CanAfford(Ev))
+	RegisterEvent(L[static_cast<size_t>(Index)]);
+}
+
+void Session::RegisterEvent(const LobbyEvent& Listing)
+{
+	if (!CanAfford(Listing))
 	{
 		return;
 	}
-	BankrollCents -= Ev.BuyInCents;
+	Joined = Listing;
+	// The table opens now, or when the event starts if that's later (the wait passes at the desk).
+	Joined.Spec.StartClock = std::max(Joined.Spec.StartClock, LobbyMinutes);
+	const LobbyEvent& Ev = Joined;
+	if (TicketsFor(Ev) > 0)
+	{
+		const std::string Tid = Ev.Spec.Id.substr(0, Ev.Spec.Id.find('@'));
+		if (--Life.Tickets[Tid] <= 0)
+		{
+			Life.Tickets.erase(Tid);
+		}
+		Life.Record(WorldMinutes(), "Ticket: " + Ev.Spec.Name, 0, 0);
+	}
+	else
+	{
+		BankrollCents -= Ev.BuyInCents;
+		if (Ev.BuyInCents > 0)
+		{
+			Life.Record(WorldMinutes(), "Buy-in: " + Ev.Spec.Name, -Ev.BuyInCents, 0);
+		}
+	}
 	Save();
-	Event = &Ev;
+	Event = &Joined;
+	Bounties.clear();
+	BountyWon = 0;
+	Knockouts = 0;
+	LastBountyAt = -100.0;
+	SeatWon = false;
 	Grades.clear();
 	Badges.clear();
 	Chat.clear();
@@ -266,14 +404,34 @@ void Session::Register(int Index)
 	HasBustInfo = false;
 	RivalArrived = false;
 	Sprinting = false;
-	TimeBank = 30.0;
+	TimeBank = Life.Energy < 20.0 ? 15.0 : 30.0; // exhausted: slower to think
 	TableId = 0;
 	Moving = false;
 	CurHand.reset();
 	const std::string Seed = Ev.Spec.Id + ":" + SeedBase + ":" + std::to_string(RegisterCount++);
+	LastTick = -1.0;
 	T = std::make_unique<Tournament>(Ev.Spec, HeroName, Seed, std::vector<ReservedPlayer>{{RivalName, Archetype::Crusher}});
 	CurrentScreen = Screen::Table;
-	SystemLine("Welcome to " + Ev.Spec.Name + ". " + ChipsText(Ev.Spec.Entrants) + " players, " + std::to_string(T->PaidPlaces()) + " paid.");
+	NameField();
+	if (Ev.Spec.BountyCents > 0)
+	{
+		for (const TPlayer& P : T->Players)
+		{
+			Bounties[P.Id] = Ev.Spec.BountyCents;
+		}
+	}
+	if (Ev.Spec.SeatValueCents > 0)
+	{
+		SystemLine("Welcome to " + Ev.Spec.Name + ". " + ChipsText(Ev.Spec.Entrants) + " players, " + std::to_string(SeatsInPlay()) + " seats.");
+	}
+	else
+	{
+		SystemLine("Welcome to " + Ev.Spec.Name + ". " + ChipsText(Ev.Spec.Entrants) + " players, " + std::to_string(T->PaidPlaces()) + " paid.");
+	}
+	if (Ev.Spec.BountyCents > 0)
+	{
+		SystemLine(Ev.Spec.MysteryBounty ? "Mystery bounties: knock players out in the money to open an envelope." : "Progressive knockout: " + Money(Ev.Spec.BountyCents) + " on every head. Half is paid, half goes on yours.");
+	}
 	const Level& L0 = T->CurrentLevel();
 	SystemLine("Blinds " + std::to_string(L0.Sb) + "/" + std::to_string(L0.Bb) + ", ante " + std::to_string(L0.Ante) + ". Good luck!");
 	Hooks.Sound(SoundId::Alert, 1.0);
@@ -351,6 +509,10 @@ void Session::BuildSeats()
 		V.Name = P.Name;
 		V.IsHero = P.IsHero;
 		V.IsRival = P.Name == RivalName;
+		const auto Country = FieldCountry.find(P.Id);
+		V.Country = Country == FieldCountry.end() ? std::string() : Country->second;
+		V.Regular = FieldRegulars.count(P.Id) > 0;
+		V.Pro = FieldPros.count(P.Id) > 0;
 		V.Stack = P.Stack;
 	}
 }
@@ -468,7 +630,37 @@ int Session::HeroSeatIdx() const
 
 void Session::Update(double InNow)
 {
+	// The lobby clock runs in real time; tournaments run on their own clock; a shift or a night's sleep races by.
+	const double DayOne = net::MinutesPerDay * static_cast<double>(net::NightOneDay);
+	if (TimeSkip.Active)
+	{
+		const double K = Clamp01((InNow - TimeSkip.RealStart) / TimeSkip.RealSeconds);
+		LobbyMinutes = TimeSkip.From + (TimeSkip.To - TimeSkip.From) * EaseInOut(K) - DayOne;
+	}
+	else if (LastTick >= 0.0 && !T && InNow > LastTick)
+	{
+		LobbyMinutes += std::min(InNow - LastTick, 1.0) / 60.0;
+	}
+	LastTick = InNow;
 	Now = InNow;
+	const double World = WorldMinutes();
+	if (CalendarAt < 0.0)
+	{
+		CalendarAt = World;
+	}
+	if (World > CalendarAt)
+	{
+		CheckCalendar(CalendarAt, World, !TimeSkip.Active || TimeSkip.Result.ActivityId.empty());
+		CalendarAt = World;
+	}
+	if (TimeSkip.Active && InNow - TimeSkip.RealStart >= TimeSkip.RealSeconds)
+	{
+		FinishSkip();
+	}
+	if (CurrentScreen != Screen::Boot && World >= DayOne + 129.0)
+	{
+		StoryText("marcus-intro", "Marcus", "heard you're behind on rent. I got work if you're not scared. check the burner app.");
+	}
 	for (size_t I = Flights.size(); I-- > 0;)
 	{
 		if (!(Now < Flights[I].Start + Flights[I].Dur + 0.05))
@@ -1168,6 +1360,10 @@ void Session::EndHand()
 			}
 		}
 	}
+	if (CheckSatellite())
+	{
+		return;
+	}
 	const TPlayer& Hero = T->Hero();
 	if (Hero.Busted)
 	{
@@ -1228,6 +1424,9 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 	{
 		switch (E.Type)
 		{
+		case TEventType::Bust:
+			HandleKnockout(E);
+			break;
 		case TEventType::Level:
 			SystemLine("Blinds are now " + ChipsText(static_cast<double>(E.Blinds.Sb)) + "/" + ChipsText(static_cast<double>(E.Blinds.Bb)) + ", ante " + ChipsText(static_cast<double>(E.Blinds.Ante)) + ".");
 			TimeBank = Min(60.0, TimeBank + 5.0);
@@ -1312,6 +1511,10 @@ void Session::SprintStep()
 		const std::vector<TEvent> Events = T->SimulateTick(&Autopilot);
 		++HandsPlayed;
 		HandleTourneyEvents(Events);
+		if (CheckSatellite())
+		{
+			return;
+		}
 		const TPlayer& Hero = T->Hero();
 		if (Hero.Busted)
 		{
@@ -1351,7 +1554,11 @@ void Session::SprintStep()
 
 void Session::ShowResults()
 {
-	BankrollCents += BustPrize;
+	if (T->bFinished && BustPlace == 1 && T->Spec.BountyCents > 0 && !T->Spec.MysteryBounty)
+	{
+		BountyWon += Bounties[HeroId]; // the winner keeps their own head
+	}
+	BankrollCents += BustPrize + BountyWon;
 	const double Acc = Grades.empty() ? 0.0 : Accuracy(Grades);
 	LastResults = ss::Results();
 	LastResults.EventName = T->Spec.Name;
@@ -1363,18 +1570,35 @@ void Session::ShowResults()
 	LastResults.Grades = Grades;
 	LastResults.AccuracyPct = Acc;
 	LastResults.BiggestPot = BiggestPot;
-	LastResults.Won = BustPlace == 1;
+	LastResults.Won = BustPlace == 1 && !SeatWon;
+	LastResults.BountyCents = BountyWon;
+	LastResults.Knockouts = Knockouts;
+	if (SeatWon)
+	{
+		LastResults.SeatWon = T->Spec.SeatTicket;
+		LastResults.SeatValueCents = T->Spec.SeatValueCents;
+		++Life.Tickets[T->Spec.SeatTicket];
+		Life.Record(WorldMinutes(), "Seat won: " + T->Spec.Name, 0, 4);
+		StoryText("seat-" + T->Spec.SeatTicket, "Dee", T->Spec.SeatTicket == "rcop-main" ? "You WON A SEAT TO THE MAIN EVENT?? $5,250 for nothing. Twenty-five million guaranteed. Kid." : "A ticket up the ladder. Keep climbing.");
+	}
+	if (BustPrize + BountyWon > 0)
+	{
+		Life.Record(WorldMinutes(), (BountyWon > 0 && BustPrize == 0 ? "Bounties: " : "Prize: ") + T->Spec.Name, BustPrize + BountyWon, 0);
+	}
 	HasResults = true;
+	LobbyMinutes = std::max(LobbyMinutes, T->ClockMinutes());
 	HistoryEntry Entry;
 	Entry.Name = T->Spec.Name;
 	Entry.Place = BustPlace;
 	Entry.Entrants = T->Spec.Entrants;
-	Entry.Prize = BustPrize;
+	Entry.Prize = BustPrize + BountyWon + (SeatWon ? T->Spec.SeatValueCents : 0);
 	Entry.AccuracyPct = Acc;
+	Entry.BuyInCents = T->Spec.BuyInCents;
+	Entry.EventId = T->Spec.Id.find('@') != std::string::npos ? T->Spec.Id : std::string();
 	History.insert(History.begin(), Entry);
-	if (History.size() > 20)
+	if (History.size() > 100)
 	{
-		History.resize(20);
+		History.resize(100);
 	}
 	HasBustInfo = false;
 	CurHand.reset();
@@ -1390,10 +1614,26 @@ void Session::ShowResults()
 	{
 		StoryText("first-cash", "Landlord", "Saw your light on all night. Rent + late fee is $1,225. Friday.");
 	}
+	CheckUnlocks();
+	// Series results reach the people who follow the boards.
+	const bool SeriesEvent = T->Spec.Name.rfind("MM #", 0) == 0;
+	if (SeriesEvent && BustPlace == 1)
+	{
+		StoryText("mm-title", "Dee", "Your name is on the Micro Madness leaderboard. A TITLE. The whole laundromat is refreshing the page.");
+		StoryText("mm-title-rival", RivalName, "gg on the title. enjoy it. the RCOP satellites start at $2.20, see you on the steps");
+	}
+	else if (SeriesEvent && BustPlace <= 9)
+	{
+		StoryText("mm-final", "Dee", "Final table in a Micro Madness event?? They put those on the news page. Screenshot it.");
+	}
 }
 
 void Session::LeaveResults()
 {
+	if (T)
+	{
+		LobbyMinutes = std::max(LobbyMinutes, T->ClockMinutes());
+	}
 	CurrentScreen = Screen::Lobby;
 	HasResults = false;
 	T.reset();
@@ -1403,6 +1643,454 @@ void Session::LeaveResults()
 
 double Session::ClockMinutes() const
 {
-	return T ? T->ClockMinutes() : 2.0 * 60.0 + 7.0;
+	return T ? T->ClockMinutes() : LobbyMinutes;
+}
+
+double Session::WorldMinutes() const
+{
+	return net::MinutesPerDay * static_cast<double>(net::NightOneDay) + ClockMinutes();
+}
+// ------------------------------------------------------------------ life
+
+life::Context Session::LifeContext() const
+{
+	life::Context Ctx;
+	Ctx.World = WorldMinutes();
+	Ctx.InTournament = T != nullptr;
+	Ctx.Bankroll = BankrollCents;
+	for (const HistoryEntry& H : History)
+	{
+		Ctx.Cashes += H.Prize > 0 ? 1 : 0;
+	}
+	return Ctx;
+}
+
+int Session::Unlocks() const
+{
+	return (Life.Unlocks.count("bounty") ? net::UnlockBounty : 0) | (Life.Unlocks.count("satellite") ? net::UnlockSatellite : 0) | (Life.Unlocks.count("sixmax") ? net::UnlockSixMax : 0);
+}
+
+double Session::Daylight() const
+{
+	return life::Daylight(WorldMinutes());
+}
+
+int Session::SeatsInPlay() const
+{
+	if (!T || T->Spec.SeatValueCents <= 0)
+	{
+		return 0;
+	}
+	int Count = 0;
+	for (const Chips P : T->Payouts)
+	{
+		Count += P == T->Spec.SeatValueCents ? 1 : 0;
+	}
+	return Count;
+}
+
+std::string Session::StartActivity(const std::string& Id)
+{
+	const life::Activity* A = life::Find(Id);
+	if (!A)
+	{
+		return "Unknown activity.";
+	}
+	if (TimeSkip.Active)
+	{
+		return "You're busy.";
+	}
+	const std::string Why = life::Blocked(*A, Life, LifeContext());
+	if (!Why.empty())
+	{
+		return Why;
+	}
+	const double World = WorldMinutes();
+	TimeSkip = Skip();
+	TimeSkip.Active = true;
+	TimeSkip.From = World;
+	TimeSkip.Result = life::Resolve(*A, Life, World, LifeRng, BankrollCents);
+	TimeSkip.To = TimeSkip.Result.End;
+	TimeSkip.RealStart = Now;
+	TimeSkip.RealSeconds = std::min(5.0, 2.0 + (TimeSkip.To - TimeSkip.From) / 60.0 * 0.22);
+	switch (A->Type)
+	{
+	case life::Kind::Job: TimeSkip.Label = "Working a shift at " + A->Place; break;
+	case life::Kind::Hustle: TimeSkip.Label = A->Id == "marcus-run" ? "On the long run for Marcus" : "On a drop-off for Marcus"; break;
+	case life::Kind::Ghost: TimeSkip.Label = "Playing as whale_sam"; break;
+	case life::Kind::Sleep: TimeSkip.Label = A->Hours >= 8.0 ? "Sleeping" : "Napping"; break;
+	}
+	HasOutcome = false;
+	ConfirmRegister = false;
+	Hooks.Sound(SoundId::Click, 0.8);
+	return "";
+}
+
+void Session::FinishSkip()
+{
+	const life::Outcome O = TimeSkip.Result;
+	TimeSkip.Active = false;
+	LobbyMinutes = O.End - net::MinutesPerDay * static_cast<double>(net::NightOneDay);
+	CalendarAt = std::max(CalendarAt, O.End);
+	const life::Activity* A = life::Find(O.ActivityId);
+	const Chips Change = std::max(O.Money, -BankrollCents);
+	BankrollCents += Change;
+	Life.Energy = std::min(100.0, std::max(0.0, Life.Energy + O.Energy));
+	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat + O.Heat));
+	Life.DebtCents += O.Debt;
+	Life.BannedUntil = std::max(Life.BannedUntil, O.BanUntil);
+	if (A)
+	{
+		switch (A->Type)
+		{
+		case life::Kind::Job:
+			++Life.Shifts;
+			Life.EarnedJobs += Change;
+			Life.Record(O.End, A->Place + " shift", Change, 1);
+			StoryText("first-shift", "Dee", "Saw you through the window at " + A->Place + ". Honest money. Don't let it eat your nights.");
+			break;
+		case life::Kind::Hustle:
+			if (O.Bad)
+			{
+				++Life.Busts;
+				Life.Record(O.End, "Fine (picked up)", Change, 2);
+				StoryText("first-bust", "Dee", "Heard you got picked up last night. What are you doing? Call me.");
+				Hooks.Text("Marcus", "you lost my bag. that's " + Money(O.Debt) + ". pay up before you get more work.");
+			}
+			else
+			{
+				++Life.Runs;
+				Life.EarnedHustles += Change;
+				Life.Record(O.End, "Marcus: " + A->Title, Change, 2);
+				if (Life.Runs == 2)
+				{
+					Hooks.Text("Marcus", "you're reliable. got a bigger one when you're ready. long drive, real money.");
+				}
+			}
+			break;
+		case life::Kind::Ghost:
+			++Life.Ghosts;
+			if (O.Bad)
+			{
+				++Life.Bans;
+				Hooks.Text("RiverLine", "Security notice: your account is restricted for 24 hours while we review activity linked to another account.");
+			}
+			else
+			{
+				Life.EarnedHustles += Change;
+				Life.Record(O.End, "Sam: account session", Change, 2);
+			}
+			break;
+		case life::Kind::Sleep:
+			break;
+		}
+	}
+	LastOutcome = O;
+	LastOutcome.Money = Change;
+	HasOutcome = true;
+	Hooks.Sound(O.Bad ? SoundId::Bust : Change > 0 ? SoundId::Cash : SoundId::Click, 1.0);
+	Save();
+}
+
+bool Session::PayRent()
+{
+	if (Life.RentStage == life::Rent::Evicted || BankrollCents < Life.RentDueCents || T)
+	{
+		return false;
+	}
+	BankrollCents -= Life.RentDueCents;
+	Life.Record(WorldMinutes(), "Rent", -Life.RentDueCents, 3);
+	++Life.RentsPaid;
+	Life.RentStage = life::Rent::Paid;
+	Life.RentDueCents = 107500;
+	// Next month: November 1, then every thirty days.
+	Life.RentDeadline = Life.RentsPaid == 1 ? 27.0 * net::MinutesPerDay : Life.RentDeadline + 30.0 * net::MinutesPerDay;
+	Hooks.Text("Landlord", "Got it. Don't make me come up there again.");
+	StoryText("rent-paid", "Dee", "RENT PAID?! Look at you. Laundromat's buying the coffee.");
+	Hooks.Sound(SoundId::Cash, 1.0);
+	Save();
+	return true;
+}
+
+bool Session::PayDebt()
+{
+	if (Life.DebtCents <= 0 || BankrollCents < Life.DebtCents)
+	{
+		return false;
+	}
+	BankrollCents -= Life.DebtCents;
+	Life.Record(WorldMinutes(), "Paid Marcus", -Life.DebtCents, 2);
+	Life.DebtCents = 0;
+	Hooks.Text("Marcus", "we're good. don't lose another one.");
+	Save();
+	return true;
+}
+
+void Session::HandleKnockout(const TEvent& E)
+{
+	if (!T || T->Spec.BountyCents <= 0 || E.EliminatedBy.empty())
+	{
+		return;
+	}
+	const bool Mine = E.EliminatedBy == HeroId;
+	Chips Cash = 0;
+	if (T->Spec.MysteryBounty)
+	{
+		// Envelopes open only in the money.
+		if (Mine && T->InTheMoney())
+		{
+			Cash = life::MysteryEnvelope(T->Spec.BountyCents, LifeRng);
+		}
+	}
+	else
+	{
+		const Chips Head = Bounties[E.Id];
+		Bounties[E.Id] = 0;
+		Cash = Head / 2;
+		Bounties[E.EliminatedBy] += Head - Cash;
+	}
+	if (!Mine)
+	{
+		return;
+	}
+	++Knockouts;
+	if (Cash > 0)
+	{
+		BountyWon += Cash;
+		LastBountyAt = Now;
+		LastBountyCents = Cash;
+		LastBountyName = E.Name;
+		SystemLine((T->Spec.MysteryBounty ? "Mystery envelope: " : "Bounty: ") + Money(Cash) + " for knocking out " + E.Name + ".");
+		Hooks.Sound(SoundId::Cash, 1.0);
+	}
+}
+
+void Session::NameField()
+{
+	// The engine names the field its own way (kept for parity with the TypeScript build); on RiverLine,
+	// everyone has a screen name and a country, and some of them are the network's regulars at these stakes.
+	FieldCountry.clear();
+	FieldRegulars.clear();
+	FieldPros.clear();
+	const net::Network& Net = net::Shared();
+	Rng Nr(T->Spec.Id + ":" + SeedBase + ":field");
+	const std::string& Pop = T->Spec.Population;
+	const net::Tier Stakes = Pop == "low" ? net::Tier::Low : Pop == "high" ? net::Tier::Mid : net::Tier::Micro;
+	std::vector<int> Strong;
+	std::vector<int> Weak;
+	for (size_t I = 0; I < Net.Players().size(); ++I)
+	{
+		const net::Player& P = Net.Players()[I];
+		const bool Match = Stakes == net::Tier::Mid ? (P.Stake == net::Tier::Mid || P.Stake == net::Tier::High) : P.Stake == Stakes;
+		if (Match && !P.Rival && P.Name != HeroName)
+		{
+			(P.Skill >= 0.55f ? Strong : Weak).push_back(static_cast<int>(I));
+		}
+	}
+	Nr.Shuffle(Strong);
+	Nr.Shuffle(Weak);
+	// Strong regulars take strong bots' seats; the fish take the fish's.
+	std::vector<size_t> StrongSeats;
+	std::vector<size_t> WeakSeats;
+	for (size_t I = 0; I < T->Players.size(); ++I)
+	{
+		const TPlayer& P = T->Players[I];
+		if (P.IsHero || P.Name == RivalName)
+		{
+			continue;
+		}
+		const Archetype A = P.Prof.Type;
+		(A == Archetype::Reg || A == Archetype::Crusher || A == Archetype::Tag || A == Archetype::Lag ? StrongSeats : WeakSeats).push_back(I);
+	}
+	Nr.Shuffle(StrongSeats);
+	Nr.Shuffle(WeakSeats);
+	// Nobody else at the tables goes by a regular's name.
+	std::set<std::string> Taken = {HeroName, RivalName};
+	for (const net::Player& P : Net.Players())
+	{
+		Taken.insert(P.Name);
+	}
+	std::set<size_t> Named;
+	const int Regulars = std::min(40, std::max(4, T->Spec.Entrants * 3 / 100));
+	for (int K = 0; K < Regulars; ++K)
+	{
+		const bool Good = K % 2 == 0;
+		std::vector<int>& From = Good ? (Strong.empty() ? Weak : Strong) : (Weak.empty() ? Strong : Weak);
+		std::vector<size_t>& Into = Good ? (StrongSeats.empty() ? WeakSeats : StrongSeats) : (WeakSeats.empty() ? StrongSeats : WeakSeats);
+		if (From.empty() || Into.empty())
+		{
+			break;
+		}
+		const net::Player& Reg = Net.Players()[static_cast<size_t>(From.back())];
+		TPlayer& Seat = T->Players[Into.back()];
+		From.pop_back();
+		Named.insert(Into.back());
+		Into.pop_back();
+		Seat.Name = Reg.Name;
+		FieldCountry[Seat.Id] = Reg.Country;
+		FieldRegulars.insert(Seat.Id);
+		if (Reg.Pro)
+		{
+			FieldPros.insert(Seat.Id);
+		}
+		Taken.insert(Reg.Name);
+	}
+	std::vector<size_t> Rest;
+	for (size_t I = 0; I < T->Players.size(); ++I)
+	{
+		const TPlayer& P = T->Players[I];
+		if (!P.IsHero && P.Name != RivalName && Named.count(I) == 0)
+		{
+			Rest.push_back(I);
+		}
+	}
+	const std::vector<handles::Identity> Ids = handles::Field(static_cast<int>(Rest.size()), Nr, Taken);
+	for (size_t K = 0; K < Rest.size() && K < Ids.size(); ++K)
+	{
+		TPlayer& P = T->Players[Rest[K]];
+		P.Name = Ids[K].Name;
+		FieldCountry[P.Id] = Ids[K].Country;
+	}
+	FieldCountry["npc:" + std::string(RivalName)] = "CA";
+}
+
+bool Session::CheckSatellite()
+{
+	if (!T || SeatWon || HasBustInfo || T->Spec.SeatValueCents <= 0 || T->Hero().Busted || T->Remaining > SeatsInPlay())
+	{
+		return false;
+	}
+	// Everyone left wins a seat: the satellite is over.
+	SeatWon = true;
+	Sprinting = false;
+	HasPrompt = false;
+	HasBustInfo = true;
+	BustPlace = std::max(1, T->HeroRank());
+	BustPrize = 0;
+	BustAt = Now + 4.0;
+	Hooks.Celebrate();
+	CurrentBanner.Active = true;
+	CurrentBanner.Title = "SEAT WON";
+	CurrentBanner.Sub = "A " + Money(T->Spec.SeatValueCents) + " ticket \xC2\xB7 " + std::to_string(T->Remaining) + " seats awarded";
+	CurrentBanner.At = Now;
+	CurrentBanner.Color = session_detail::Gold;
+	return true;
+}
+
+void Session::CheckUnlocks()
+{
+	int Cashes = 0;
+	int Finals = 0;
+	int Wins = 0;
+	for (const HistoryEntry& H : History)
+	{
+		Cashes += H.Prize > 0 ? 1 : 0;
+		Finals += H.Place >= 1 && H.Place <= 9 ? 1 : 0;
+		Wins += H.Place == 1 ? 1 : 0;
+	}
+	auto Open = [&](const char* Id, bool When, const std::string& Body) {
+		if (When && Life.Unlocks.insert(Id).second)
+		{
+			Hooks.Text("RiverLine", Body);
+		}
+	};
+	Open("bounty", Cashes > 0, "New on your account: bounty tournaments. Progressive knockouts and mystery bounties, every head pays.");
+	Open("satellite", Finals > 0, "New on your account: satellites. Win your way up the steps to the RCOP Main Event.");
+	Open("sixmax", Wins > 0, "New on your account: six-max tournaments. Fewer seats, more action.");
+	if (Cashes > 0)
+	{
+		StoryText("sam-intro", "Sam", "saw ur name on the riverline board. i pay ppl to play my account when im busy. hit me on the burner");
+	}
+}
+
+void Session::CheckCalendar(double From, double To, bool Awake)
+{
+	const double Hours = (To - From) / 60.0;
+	if (Awake)
+	{
+		Life.Energy = std::min(100.0, std::max(0.0, Life.Energy - Hours * 4.0));
+	}
+	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat - Hours * 1.0));
+	// The Night Shift closes at 6 AM.
+	for (double End = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 6.0 * 60.0; End <= To; End += net::MinutesPerDay)
+	{
+		if (End > From)
+		{
+			PayNightShift(End);
+		}
+	}
+	if (Life.RentStage != life::Rent::Evicted && Life.RentDeadline > From && Life.RentDeadline <= To)
+	{
+		RentDeadline();
+	}
+	// The landlord's reminders.
+	const double Thursday = 3.0 * net::MinutesPerDay + 9.0 * 60.0;
+	const double FridayEvening = 4.0 * net::MinutesPerDay + 18.0 * 60.0;
+	if (Life.RentStage == life::Rent::Due && Life.RentsPaid == 0)
+	{
+		if (Thursday > From && Thursday <= To)
+		{
+			StoryText("rent-thursday", "Landlord", "Tomorrow. $1,225. I'm not asking again.");
+		}
+		if (FridayEvening > From && FridayEvening <= To)
+		{
+			StoryText("rent-friday", "Landlord", "Midnight. Have it or start packing.");
+		}
+	}
+	if (Life.BannedUntil > From && Life.BannedUntil <= To)
+	{
+		Hooks.Text("RiverLine", "Review complete. Your account is active again. Further violations may result in permanent closure.");
+	}
+}
+
+void Session::PayNightShift(double End)
+{
+	const int Day = net::DayOf(End);
+	if (Life.NightsPaid.count(Day) > 0)
+	{
+		return;
+	}
+	Life.NightsPaid.insert(Day);
+	net::Network& Net = net::Shared();
+	Net.SetHero(HeroName, History);
+	const double At = End - 0.01;
+	net::BoardRow Row;
+	Net.Leaderboard(net::Board::NightShift, At, net::StatsFrom(HeroName, History, At), 0, &Row);
+	if (Row.Rank >= 1 && Row.Prize > 0)
+	{
+		BankrollCents += Row.Prize;
+		Life.Record(End, "Night Shift: " + Ordinal(Row.Rank), Row.Prize, 4);
+		Hooks.Text("RiverLine", "You finished " + Ordinal(Row.Rank) + " on the Night Shift leaderboard. " + Money(Row.Prize) + " has been added to your balance.");
+		Save();
+	}
+}
+
+void Session::RentDeadline()
+{
+	if (BankrollCents >= Life.RentDueCents)
+	{
+		// The landlord comes up the stairs and takes it.
+		BankrollCents -= Life.RentDueCents;
+		Life.Record(Life.RentDeadline, "Rent (collected)", -Life.RentDueCents, 3);
+		++Life.RentsPaid;
+		Life.RentStage = life::Rent::Paid;
+		Life.RentDueCents = 107500;
+		Life.RentDeadline = Life.RentsPaid == 1 ? 27.0 * net::MinutesPerDay : Life.RentDeadline + 30.0 * net::MinutesPerDay;
+		Hooks.Text("Landlord", "Came by for the rent. It's on the counter? Fine. Next month, don't make me climb the stairs.");
+	}
+	else if (Life.RentStage != life::Rent::FinalNotice)
+	{
+		Life.RentStage = life::Rent::FinalNotice;
+		Life.RentDueCents += 15000;
+		Life.RentDeadline += 3.0 * net::MinutesPerDay;
+		Hooks.Text("Landlord", "FINAL NOTICE. " + Money(Life.RentDueCents) + " with the late fee. You have until Monday at midnight, then the locks change.");
+	}
+	else
+	{
+		Life.RentStage = life::Rent::Evicted;
+		Hooks.Text("Landlord", "Locks change tomorrow. Leave the key on the counter.");
+		Hooks.Text("Dee", "I heard. My couch is yours as long as you need it. Bring the laptop.");
+	}
+	Save();
 }
 } // namespace ss

@@ -81,10 +81,10 @@ void Poster(Canvas& C)
 	// Spotlit table silhouette.
 	C.FillEllipse(300.0f, 520.0f, 300.0f, 300.0f, Paint::Radial({300.0f, 520.0f}, 20.0f, {300.0f, 520.0f}, 300.0f, Rgba(255, 210, 120, 0.55f), -1.0f, Color(), Rgba(255, 210, 120, 0.0f)));
 	C.FillEllipse(300.0f, 600.0f, 230.0f, 80.0f, Hex(0x0d3b2a));
-	const Color Gold = Hex(0xc9a44c);
-	C.Text("THE GRAND CIRCUIT", 300.0f, 110.0f, Ts(30.0f, 700, Gold, Align::Center));
-	C.Text("CHAMPIONSHIP", 300.0f, 190.0f, Ts(62.0f, 900, Gold, Align::Center));
-	C.Text("$10,000 MAIN EVENT", 300.0f, 250.0f, Ts(44.0f, 700, Gold, Align::Center));
+	const Color Foil = Hex(0xc9a44c);
+	C.Text("THE GRAND CIRCUIT", 300.0f, 110.0f, Ts(30.0f, 700, Foil, Align::Center));
+	C.Text("CHAMPIONSHIP", 300.0f, 190.0f, Ts(62.0f, 900, Foil, Align::Center));
+	C.Text("$10,000 MAIN EVENT", 300.0f, 250.0f, Ts(44.0f, 700, Foil, Align::Center));
 	C.Text("ONE TABLE. NINE SEATS. ONE CHAMPION.", 300.0f, 800.0f, Ts(22.0f, 400, Hex(0xb8a47a), Align::Center));
 	// Wear: creases.
 	C.StrokePolyline({{0.0f, 450.0f}, {600.0f, 430.0f}}, false, Rgba(255, 255, 255, 0.08f), 2.0f);

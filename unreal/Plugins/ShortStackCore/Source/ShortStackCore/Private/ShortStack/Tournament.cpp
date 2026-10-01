@@ -17,10 +17,23 @@ Tournament::Tournament(const TournamentSpec& InSpec, const std::string& HeroName
 	Levels = Spec.Levels.empty() ? StandardLevels() : Spec.Levels;
 	TableSize = Spec.TableSize > 0 ? Spec.TableSize : 9;
 	Remaining = Spec.Entrants;
-	const Chips Pool = MaxChips(Spec.GuaranteeCents, static_cast<Chips>(Spec.Entrants) * (Spec.BuyInCents - Spec.FeeCents));
+	const Chips Pool = MaxChips(Spec.GuaranteeCents, static_cast<Chips>(Spec.Entrants) * (Spec.BuyInCents - Spec.FeeCents - Spec.BountyCents));
 	PrizePoolCents = Pool;
-	const Chips MinCash = Spec.BuyInCents > 0 ? static_cast<Chips>(JsRound(static_cast<double>(Spec.BuyInCents - Spec.FeeCents) * 1.4)) : 20;
-	Payouts = PayoutTable(Pool, Spec.Entrants, MinCash);
+	const Chips MinCash = Spec.BuyInCents > 0 ? static_cast<Chips>(JsRound(static_cast<double>(Spec.BuyInCents - Spec.FeeCents - Spec.BountyCents) * 1.4)) : 20;
+	if (Spec.SeatValueCents > 0)
+	{
+		// Satellites: as many seats as the pool buys, and what is left to the next place.
+		const Chips Seats = MaxChips(1, Pool / Spec.SeatValueCents);
+		Payouts.assign(static_cast<size_t>(Seats), Spec.SeatValueCents);
+		if (Pool > Seats * Spec.SeatValueCents)
+		{
+			Payouts.push_back(Pool - Seats * Spec.SeatValueCents);
+		}
+	}
+	else
+	{
+		Payouts = PayoutTable(Pool, Spec.Entrants, MinCash);
+	}
 
 	Rng NameRng = R.Fork("names");
 	std::vector<std::string> ReservedNames = {HeroName};
@@ -332,6 +345,18 @@ void Tournament::ApplyHand(const Hand& H)
 			++P.PfrHands;
 		}
 		P.Tilt *= 0.93;
+		if (S.Stack <= 0 && P.KnockedOutBy.empty())
+		{
+			// The bounty goes to whoever won the last pot this player was in.
+			for (const PotResult& Pot : H.PotResults)
+			{
+				if (std::find(Pot.Eligible.begin(), Pot.Eligible.end(), S.Seat) != Pot.Eligible.end() && !Pot.Winners.empty())
+				{
+					const HandSeat* W = H.SeatByNumber(Pot.Winners.front());
+					P.KnockedOutBy = W && W->Id != S.Id ? W->Id : P.KnockedOutBy;
+				}
+			}
+		}
 		const double Lost = static_cast<double>(S.StartStack - S.Stack);
 		const double Start = static_cast<double>(S.StartStack);
 		if (P.HasProfile && S.Stack > 0 && Lost > Start * 0.4)
@@ -455,6 +480,7 @@ std::vector<TEvent> Tournament::ProcessEliminations()
 		E.PrizeCents = P.PrizeCents;
 		E.TableId = P.TableId;
 		E.IsHero = P.IsHero;
+		E.EliminatedBy = P.KnockedOutBy;
 		Events.push_back(E);
 	}
 	if (BubbleBefore && Remaining <= PaidPlaces() && !bBurstBubble)

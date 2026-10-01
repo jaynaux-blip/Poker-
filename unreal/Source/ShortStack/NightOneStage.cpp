@@ -2,11 +2,13 @@
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/PoseableMeshComponent.h"
 #include "Components/PostProcessComponent.h"
 #include "Components/RectLightComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -62,6 +64,18 @@ UMaterialInterface* LoadOptional(const TCHAR* Path)
 UStaticMesh* LoadOptionalMesh(const TCHAR* Path)
 {
 	return LoadObject<UStaticMesh>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+}
+
+// The laptop (art/blender/assets/laptop.py): depth of the base, and its key grid (meters).
+const double LaptopDepth = 0.235;
+const double KeyUnit = 0.01905;
+const double KeysLeft = -7.5 * KeyUnit;
+const double KeyTop = 0.0172;
+
+/** Center of a key in the laptop base's own coordinates (x right, y back from the hinge, z up): row 0 is the number row. */
+FVector LaptopKey(double Units, int32 Row, double Nudge = 0.0)
+{
+	return FVector(KeysLeft + Units * KeyUnit, -0.019 - 0.012 - (Row + 0.5) * KeyUnit + Nudge, KeyTop);
 }
 
 /** A prop imported by the editor setup script: /Game/ShortStack/Meshes/<Name>/<Name>. */
@@ -241,6 +255,7 @@ void ANightOneStage::BuildSet()
 	ChairMesh = LoadProp(TEXT("SM_Chair"));
 	MouseMesh = LoadProp(TEXT("SM_Mouse"));
 	MousePadMesh = LoadProp(TEXT("SM_MousePad"));
+	ArmsMesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/ShortStack/Meshes/SK_Arms/SK_Arms.SK_Arms"), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	// Every Blender prop is modeled front toward -Y. The laptop base runs forward from its hinge,
 	// so its bounds say which way the importer turned that; the same yaw sets all of them facing the chair (-X).
 	ImportYaw = 0.0f;
@@ -342,6 +357,7 @@ void ANightOneStage::BuildDesk()
 
 	// Laptop, hinged at the back edge with the lid tilted back.
 	USceneComponent* Laptop = NewPart<USceneComponent>();
+	LaptopFrame = Laptop;
 	Laptop->SetRelativeLocation(Web(0.0, DeskTop, DeskZ + 0.04));
 	const double D = 0.235;
 	const float LidTilt = -18.3f;
@@ -381,18 +397,43 @@ void ANightOneStage::BuildDesk()
 	Screen->SetTintColorAndOpacity(FLinearColor(0.86f, 0.86f, 0.86f, 1.0f));
 	Screen->SetRedrawTime(1.0f / 30.0f);
 
-	// Mouse and pad.
-	if (MouseMesh && MousePadMesh)
+	// Mouse and pad. The mouse moves with the pointer (UpdateArms).
+	double PadTop = 0.003;
+	if (MousePadMesh)
 	{
-		// The RiverLine pad and the KESTREL mouse (art/blender/assets/mouse.py), each with its origin under its middle;
-		// the pad is 3 mm thick and the mouse sits turned a little, as a hand leaves it.
 		AddMesh(MousePadMesh, nullptr, Web(0.33, DeskTop, DeskZ + 0.13), FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f));
-		AddMesh(MouseMesh, nullptr, Web(0.34, DeskTop + 0.003, DeskZ + 0.15), FVector(1.0), FRotator(0.0f, ImportYaw - 8.0f, 0.0f));
+		PadTop = 0.004;
 	}
 	else
 	{
 		BoxWeb(Surface(TEXT("MousePad"), 0x131417, 0.95f), FVector(0.33, DeskTop + 0.0015, DeskZ + 0.13), FVector(0.26, 0.003, 0.21));
-		AddMesh(SphereMesh, Surface(TEXT("Mouse"), 0x1d1e22, 0.35f), Web(0.34, DeskTop + 0.012, DeskZ + 0.15), FVector(0.099, 0.06, 0.027));
+	}
+	MouseRoot = NewPart<USceneComponent>();
+	MouseHome = Web(0.34, DeskTop + PadTop, DeskZ + 0.15);
+	MouseRoot->SetRelativeLocation(MouseHome);
+	if (MouseMesh)
+	{
+		AddMesh(MouseMesh, nullptr, FVector::ZeroVector, FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f), MouseRoot);
+		MouseTop = 3.9f;
+	}
+	else
+	{
+		AddMesh(SphereMesh, Surface(TEXT("Mouse"), 0x1d1e22, 0.35f), Web(0.0, 0.012 - PadTop, 0.0), FVector(0.099, 0.06, 0.027), FRotator::ZeroRotator, MouseRoot);
+		MouseTop = 2.6f;
+	}
+
+	// The player's arms, rooted between the shoulders (UpdateArms keeps them with the head).
+	ArmsRoot = NewPart<USceneComponent>();
+	ArmsComp = nullptr;
+	if (ArmsMesh)
+	{
+		ArmsComp = NewPart<UPoseableMeshComponent>(ArmsRoot);
+		ArmsComp->SetSkinnedAssetAndUpdate(ArmsMesh);
+		ArmsComp->SetRelativeRotation(FRotator(0.0f, ImportYaw, 0.0f));
+		ArmsComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		ArmsComp->SetCastShadow(true);
+		ArmsComp->bCastHiddenShadow = false;
+		ArmsComp->SetVisibility(false);
 	}
 
 	// Phone, face up; its lock screen lights when a text arrives.
@@ -921,4 +962,87 @@ void ANightOneStage::SetLens(float Focus, float Tilt, float Pulse)
 	P.ColorSaturation = FVector4(Sat, Sat, Sat, 1.0f);
 	P.ColorGain = FVector4(1.0f + 0.2f * Tilt, 1.0f - 0.25f * Tilt, 1.0f - 0.25f * Tilt, 1.0f);
 	P.AutoExposureBias = ExposureBias + BrightnessBias;
+}
+
+// ------------------------------------------------------------------ arms
+
+FVector ANightOneStage::KeyWorld(const FString& Name) const
+{
+	FVector K = LaptopKey(5.25, 2); // F
+	if (Name == TEXT("r")) K = LaptopKey(5.0, 1);
+	else if (Name == TEXT("a")) K = LaptopKey(2.25, 2);
+	else if (Name == TEXT("x")) K = LaptopKey(3.75, 3);
+	else if (Name == TEXT("c")) K = LaptopKey(4.75, 3);
+	else if (Name == TEXT("b")) K = LaptopKey(6.75, 3);
+	else if (Name == TEXT("m")) K = LaptopKey(8.75, 3);
+	else if (Name == TEXT(" ")) K = LaptopKey(7.375, 4);
+	else if (Name == TEXT("ArrowUp")) K = LaptopKey(13.5, 4, 0.0042);
+	else if (Name == TEXT("ArrowDown")) K = LaptopKey(13.5, 4, -0.0042);
+	// Laptop base coordinates (origin under the hinge, front toward -y) into the laptop's frame on the desk.
+	const FVector Local = Web(K.X, K.Z, -LaptopDepth / 2.0 - K.Y);
+	return LaptopFrame ? LaptopFrame->GetComponentTransform().TransformPosition(Local) : GetActorTransform().TransformPosition(Local);
+}
+
+void ANightOneStage::ArmsKey(const FString& Name)
+{
+	if (Arms.IsReady())
+	{
+		Arms.Key(Name, KeyWorld(Name));
+	}
+}
+
+void ANightOneStage::ArmsClick()
+{
+	if (Arms.IsReady())
+	{
+		Arms.Click();
+	}
+}
+
+void ANightOneStage::UpdateArms(float DeltaSeconds, const FVector& CameraLocation, const FVector2D& Pointer, bool bVisible)
+{
+	const float Dt = FMath::Max(0.0f, DeltaSeconds);
+	// The mouse follows the hand that moves it: a few centimeters across the pad for the whole screen.
+	if (MouseRoot)
+	{
+		const FVector2D Goal((Pointer.X - 0.5) * 0.08, (Pointer.Y - 0.5) * 0.06);
+		MouseOffset += (Goal - MouseOffset) * static_cast<double>(1.0f - FMath::Exp(-Dt * 14.0f));
+		MouseRoot->SetRelativeLocation(MouseHome + Web(MouseOffset.X, 0.0, MouseOffset.Y));
+	}
+	if (!ArmsComp || !ArmsRoot)
+	{
+		return;
+	}
+	ArmsComp->SetVisibility(bVisible);
+	// Shoulders 13 cm ahead of and 20 cm below the eye (the player sits up to the laptop); they follow the
+	// head most of the way when it moves, but not into the establishing shot across the room.
+	const FTransform& X = GetActorTransform();
+	const FVector EyeLocal = Web(0.0, 1.17, DeskZ + 0.72);
+	FVector Head = X.InverseTransformPosition(CameraLocation) - EyeLocal;
+	if (Head.Size() > 60.0)
+	{
+		Head = FVector::ZeroVector;
+	}
+	ArmsRoot->SetRelativeLocation(EyeLocal + Web(0.0, -0.20, -0.13) + Head * 0.7);
+	if (!Arms.IsReady())
+	{
+		if (ArmsInitTries++ > 120 || !Arms.Init(ArmsComp))
+		{
+			return;
+		}
+	}
+	if (!bVisible)
+	{
+		return;
+	}
+	FFirstPersonArms::FTargets T;
+	T.Forward = X.TransformVectorNoScale(FVector(1.0, 0.0, 0.0));
+	T.Up = X.TransformVectorNoScale(FVector(0.0, 0.0, 1.0));
+	if (LaptopFrame)
+	{
+		// The left wrist rests on the front of the palm rest, fingertips over the home row.
+		T.LeftRest = LaptopFrame->GetComponentTransform().TransformPosition(Web(-0.058, 0.032, -LaptopDepth / 2.0 + 0.225));
+	}
+	T.Mouse = MouseRoot ? MouseRoot->GetComponentLocation() + T.Up * MouseTop : X.TransformPosition(MouseHome);
+	Arms.Update(Dt, T);
 }

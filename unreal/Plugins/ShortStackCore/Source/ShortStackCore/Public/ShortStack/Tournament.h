@@ -28,6 +28,11 @@ struct TournamentSpec
 	double StartClock = 0.0; // game clock at the start, minutes after midnight
 	int TableSize = 9;
 	std::vector<Level> Levels; // empty = StandardLevels()
+	// Formats on top of the TypeScript engine (C++ only; zero keeps the shared behavior).
+	Chips BountyCents = 0;    // part of each buy-in that goes on players' heads (PKO), out of the prize pool
+	Chips SeatValueCents = 0; // satellites: the prize pool is paid as seats of this value
+	bool MysteryBounty = false; // bounties are drawn from envelopes once in the money (the session pays them)
+	std::string SeatTicket;     // satellites: the event a seat enters (schedule template id)
 };
 
 struct TPlayer
@@ -47,6 +52,7 @@ struct TPlayer
 	int Hands = 0;
 	int VpipHands = 0;
 	int PfrHands = 0;
+	std::string KnockedOutBy; // who won the pot that busted this player (C++ only)
 };
 
 struct TTable
@@ -81,6 +87,7 @@ struct TEvent
 	bool IsHero = false;
 	int LevelNumber = 0; // Level (1-based)
 	Level Blinds;        // Level
+	std::string EliminatedBy; // Bust: the player who won the pot (C++ only)
 };
 
 struct ReservedPlayer

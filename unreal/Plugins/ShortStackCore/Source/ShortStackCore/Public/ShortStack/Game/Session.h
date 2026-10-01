@@ -2,6 +2,7 @@
 
 #include "ShortStack/AI/Grading.h"
 #include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Tournament.h"
@@ -62,6 +63,9 @@ struct SeatVis
 	std::string Name;
 	bool IsHero = false;
 	bool IsRival = false;
+	std::string Country; // ISO 3166 alpha-2 ("" when unknown)
+	bool Regular = false; // one of the network's regulars (the leaderboards know them)
+	bool Pro = false;     // Team RiverLine
 	Chips Stack = 0;
 	Chips Bet = 0;
 	std::vector<Card> Hole; // known to the viewer (hero, or revealed)
@@ -147,6 +151,10 @@ struct Results
 	double AccuracyPct = 0.0;
 	Chips BiggestPot = 0;
 	bool Won = false;
+	Chips BountyCents = 0; // collected bounties (PKO and mystery)
+	int Knockouts = 0;
+	std::string SeatWon;   // satellites: the seat's event ("" when none)
+	Chips SeatValueCents = 0;
 };
 
 struct Banner
@@ -165,6 +173,8 @@ struct HistoryEntry
 	int Entrants = 0;
 	Chips Prize = 0;
 	double AccuracyPct = 0.0;
+	Chips BuyInCents = -1;  // -1 in saves from before the network schedule
+	std::string EventId;    // the scheduled instance ("mm-26@1530"), if known
 };
 
 /** Everything that persists between runs. */
@@ -174,6 +184,8 @@ struct SaveData
 	std::string HeroName = "grinder_3c";
 	std::vector<HistoryEntry> History;
 	std::vector<std::string> TextsSeen;
+	double ClockMinutes = 2.0 * 60.0 + 7.0; // the lobby clock
+	life::State Life;
 
 	/** Line-based text, safe to store in any save system. */
 	SHORTSTACKCORE_API std::string Serialize() const;
@@ -223,7 +235,8 @@ public:
 	ss::Banner CurrentBanner;
 
 	// ------------------------------------------------------------ tournament
-	const LobbyEvent* Event = nullptr;
+	const LobbyEvent* Event = nullptr; // the event being played (points at Joined)
+	LobbyEvent Joined;
 	std::unique_ptr<Tournament> T;
 	std::unique_ptr<Hand> CurHand;
 	int TableId = 0;
@@ -264,7 +277,10 @@ public:
 	void OnBoot();
 
 	bool CanAfford(const LobbyEvent& Ev) const;
+	/** Registers for a Lobby() event (tonight's hand-tuned listings). */
 	void Register(int Index);
+	/** Registers for any joinable listing (the network schedule builds them); pays the buy-in and opens the table. */
+	SHORTSTACKCORE_API void RegisterEvent(const LobbyEvent& Listing);
 
 	void DealerLine(const std::string& Text);
 	void SystemLine(const std::string& Text);
@@ -277,8 +293,57 @@ public:
 	void BeginSprint();
 	void StopSprint(const std::string& Reason = "Stopped");
 	void LeaveResults();
-	/** Tournament clock (drives the dawn outside), or 2:07 AM in the lobby. */
+	/** Tournament clock (drives the dawn outside), or the lobby clock. Minutes after midnight on Night One. */
 	SHORTSTACKCORE_API double ClockMinutes() const;
+	/** The clock on the network's calendar (net::DayOf, net::TimeLabel). */
+	SHORTSTACKCORE_API double WorldMinutes() const;
+	/** The clock between tournaments: 2:07 AM at first, running in real time, and where the last tournament ended. */
+	double LobbyMinutes = 2.0 * 60.0 + 7.0;
+
+	// ------------------------------------------------------------ life (Life.h)
+	life::State Life;
+	/** A shift, a hustle or sleep in progress: the clock races from From to To while the room plays it out. */
+	struct Skip
+	{
+		bool Active = false;
+		double From = 0.0; // world minutes
+		double To = 0.0;
+		double RealStart = 0.0;
+		double RealSeconds = 3.0;
+		std::string Label;
+		life::Outcome Result;
+	};
+	Skip TimeSkip;
+	bool HasOutcome = false; // the result card is up
+	life::Outcome LastOutcome;
+	/** Starts an activity from life::Catalog(); returns why not, or "" when it started. */
+	SHORTSTACKCORE_API std::string StartActivity(const std::string& Id);
+	SHORTSTACKCORE_API bool PayRent();
+	SHORTSTACKCORE_API bool PayDebt();
+	SHORTSTACKCORE_API life::Context LifeContext() const;
+	/** Formats unlocked so far (net::Unlock bits). */
+	SHORTSTACKCORE_API int Unlocks() const;
+	/** 0 at night, 1 by day, for the room's lighting. */
+	SHORTSTACKCORE_API double Daylight() const;
+	/** RiverLine has restricted the account (ghosting). */
+	bool Restricted() const { return WorldMinutes() < Life.BannedUntil; }
+	/** Tickets that pay for this listing (satellite seats). */
+	int TicketsFor(const LobbyEvent& Ev) const;
+
+	// Who is who in the tournament being played (player id -> country; regulars from the network).
+	std::map<std::string, std::string> FieldCountry;
+	std::set<std::string> FieldRegulars;
+	std::set<std::string> FieldPros;
+	// Bounties and seats in the tournament being played.
+	std::map<std::string, Chips> Bounties; // player id -> bounty on their head (PKO)
+	Chips BountyWon = 0;
+	int Knockouts = 0;
+	double LastBountyAt = -100.0;
+	Chips LastBountyCents = 0;
+	std::string LastBountyName;
+	bool SeatWon = false;
+	/** Satellites: seats the prize pool buys (0 otherwise). */
+	int SeatsInPlay() const;
 
 	int HeroSeatIdx() const;
 	const TPlayer* PlayerById(const std::string& Id) const;
@@ -299,13 +364,24 @@ private:
 	void HandleTourneyEvents(const std::vector<TEvent>& Events);
 	void SprintStep();
 	void ShowResults();
+	void HandleKnockout(const TEvent& E);
+	void NameField();
+	bool CheckSatellite();
+	void CheckUnlocks();
+	void CheckCalendar(double From, double To, bool Awake);
+	void PayNightShift(double End);
+	void RentDeadline();
+	void FinishSkip();
 	void BustBanner(const TPlayer& Hero, const char* NoCashSub);
 
 	SessionHooks& Hooks;
 	std::set<std::string> TextsSeen;
 	std::string SeedBase;
 	int RegisterCount = 0;
+	double LastTick = -1.0;
+	double CalendarAt = -1.0;
 	Rng R;
+	Rng LifeRng;
 	size_t Cursor = 0;
 	double NextAt = 0.0;
 	bool BotPending = false;

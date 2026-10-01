@@ -5,6 +5,8 @@
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Structure.h"
+#include "ShortStack/UI/Avatars.h"
+#include "RiverLineShared.h"
 
 #include <algorithm>
 #include <cmath>
@@ -47,16 +49,6 @@ const char* GradeIconText(Grade G)
 	}
 }
 
-Color HashColor(const std::string& Name)
-{
-	uint32_t Hh = 0;
-	for (const char Ch : Name)
-	{
-		Hh = Hh * 31u + static_cast<unsigned char>(Ch);
-	}
-	return Hsl(static_cast<float>(Hh % 360u), 0.45f, 0.42f);
-}
-
 float BaselineOf(float Y, const TextStyle& S)
 {
 	switch (S.VAlign)
@@ -66,17 +58,6 @@ float BaselineOf(float Y, const TextStyle& S)
 	case Baseline::Bottom: return Y - 0.21f * S.Size;
 	default: return Y;
 	}
-}
-
-std::string Upper2(const std::string& Name)
-{
-	std::string Out;
-	for (size_t I = 0; I < Name.size() && Out.size() < 2; ++I)
-	{
-		const char Ch = Name[I];
-		Out.push_back(Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch);
-	}
-	return Out;
 }
 
 std::string Lower(const std::string& S)
@@ -98,6 +79,11 @@ bool StartsWith(const std::string& S, const char* Prefix)
 {
 	return S.rfind(Prefix, 0) == 0;
 }
+
+Color NetChipFill(const Color& Cl)
+{
+	return {Cl.R, Cl.G, Cl.B, 0.12f};
+}
 } // namespace riverline_detail
 
 using namespace riverline_detail;
@@ -108,15 +94,60 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 {
 	C = &Cv;
 	UI.Begin(Cv, Now);
+	NetFrame(Now);
 	C->Save();
 	C->FillRect({0.0f, 0.0f, RlW, RlH}, Paint::Linear({0.0f, 0.0f}, {0.0f, RlH}, pal::Bg2, pal::Bg));
-	TopBar(Now);
-	switch (S.CurrentScreen)
+	// While the clock races (a shift, a run, sleep) or a result is up, the screen underneath takes no input.
+	const bool Modal = S.TimeSkip.Active || S.HasOutcome;
+	const Pointer Real = UI.Ptr;
+	if (Modal)
 	{
-	case Screen::Boot: Boot(Now); break;
-	case Screen::Lobby: LobbyScreen(Now); break;
-	case Screen::Table: Table(Now); break;
-	case Screen::Results: ResultsScreen(Now); break;
+		UI.Ptr.Pressed = false;
+		UI.Ptr.Released = false;
+		UI.Ptr.Wheel = 0.0f;
+		UI.Ptr.Active = false;
+	}
+	if (AppShown == App::RiverLine)
+	{
+		TopBar(Now);
+		switch (S.CurrentScreen)
+		{
+		case Screen::Boot: Boot(Now); break;
+		case Screen::Lobby: LobbyPages(Now); break;
+		case Screen::Table: Table(Now); break;
+		case Screen::Results: ResultsScreen(Now); break;
+		}
+	}
+	else if (AppShown == App::ShiftLink)
+	{
+		ShiftLinkApp(Now);
+	}
+	else if (AppShown == App::Burner)
+	{
+		BurnerApp(Now);
+	}
+	else
+	{
+		BankApp(Now);
+	}
+	Taskbar({0.0f, RlH - 38.0f, RlW, 38.0f}, Now);
+	if (SleepOpen)
+	{
+		SleepMenu(Now);
+	}
+	if (Modal)
+	{
+		const bool Cursor = UI.CursorIsPointer;
+		UI.Ptr = Real;
+		UI.CursorIsPointer = Cursor;
+		if (S.TimeSkip.Active)
+		{
+			SkipOverlay(Now);
+		}
+		else
+		{
+			OutcomeCard(Now);
+		}
 	}
 	DrawCursor();
 	C->Restore();
@@ -235,22 +266,11 @@ void RiverLine::TopBar(double Now)
 	Logo(24.0f, 16.0f, 1.0f);
 	if (S.CurrentScreen != Screen::Boot)
 	{
-		const char* Tabs[3] = {"Lobby", "My Tournaments", "Cashier"};
-		float X = 250.0f;
-		for (int I = 0; I < 3; ++I)
-		{
-			const bool Active = (I == 0 && S.CurrentScreen == Screen::Lobby) || (I == 1 && (S.CurrentScreen == Screen::Table || S.CurrentScreen == Screen::Results));
-			UI.Text(Tabs[I], X, 40.0f, Ts(17.0f, Active ? 700 : 500, Active ? pal::Ink : pal::Muted));
-			const float Tw = UI.Measure(Tabs[I], 17.0f, 700);
-			if (Active)
-			{
-				UI.RRect({X, RlTop - 4.0f, Tw, 3.0f}, 1.5f, pal::Accent);
-			}
-			X += Tw + 34.0f;
-		}
+		NavTabs(Now);
 	}
 	// Balance and clock.
-	UI.Text(ClockString(S.ClockMinutes()), RlW - 24.0f, 40.0f, Ts(17.0f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, true));
+	UI.Text(ClockString(S.ClockMinutes()), RlW - 24.0f, 34.0f, Ts(17.0f, 700, pal::Ink, Align::Right, Baseline::Alphabetic, true));
+	UI.Text(std::string(net::WeekdayName(net::DayOf(World))) + ", " + net::DateLabel(net::DayOf(World)), RlW - 24.0f, 52.0f, Ts(12.0f, 600, pal::Muted, Align::Right));
 	const std::string Bal = "Balance " + Money(S.BankrollCents);
 	const float Bw = UI.Measure(Bal, 17.0f, 700) + 28.0f;
 	UI.RRect({RlW - 140.0f - Bw, 16.0f, Bw, 32.0f}, 16.0f, Hex(0x10213a), pal::Line);
@@ -316,141 +336,6 @@ void RiverLine::Boot(double Now)
 	UI.Text("Play responsibly. RiverLine is a fictional site.", RlW / 2.0f, Card.Y + Card.H + 40.0f, Ts(14.0f, 500, pal::Dim, Align::Center));
 }
 
-// ------------------------------------------------------------------ lobby
-
-void RiverLine::LobbyScreen(double /*Now*/)
-{
-	const std::vector<LobbyEvent>& L = Lobby();
-	const float X0 = 24.0f;
-	const float Y0 = RlTop + 24.0f;
-	UI.Text("Tournaments", X0, Y0 + 30.0f, Ts(30.0f, 800));
-	UI.Text("NL Hold'em \xC2\xB7 Tonight", X0 + 210.0f, Y0 + 30.0f, Ts(17.0f, 500, pal::Muted));
-	struct Col
-	{
-		const char* T;
-		float X;
-	};
-	const Col Cols[7] = {{"Start", 0}, {"Tournament", 110}, {"Buy-in", 360}, {"Speed", 460}, {"Entrants", 600}, {"Prize", 710}, {"Status", 850}};
-	const float Tx = X0;
-	const float Ty = Y0 + 60.0f;
-	const float Tw = 1000.0f;
-	UI.RRect({Tx, Ty, Tw, 44.0f}, 8.0f, pal::Panel2);
-	for (const Col& Cc : Cols)
-	{
-		UI.Text(Cc.T, Tx + 18.0f + Cc.X, Ty + 28.0f, Ts(14.0f, 700, pal::Muted));
-	}
-	for (size_t I = 0; I < L.size(); ++I)
-	{
-		const LobbyEvent& Ev = L[I];
-		const Rect R{Tx, Ty + 52.0f + static_cast<float>(I) * 62.0f, Tw, 56.0f};
-		const Ui::ClickState St = UI.Clickable("row" + std::to_string(I), R);
-		if (St.Clicked)
-		{
-			S.Selected = static_cast<int>(I);
-			S.ConfirmRegister = false;
-		}
-		const bool Sel = S.Selected == static_cast<int>(I);
-		const Paint Fill = Sel ? Hex(0x15304a) : St.Hover ? Hex(0x132238) : pal::Panel;
-		if (Sel)
-		{
-			UI.RRect(R, 10.0f, Fill, pal::Accent, 1.5f);
-		}
-		else
-		{
-			UI.RRect(R, 10.0f, Fill);
-		}
-		const bool Dim = !Ev.Joinable;
-		const Color Cl = Dim ? pal::Dim : pal::Ink;
-		const float Y = R.Y + 35.0f;
-		UI.Text(Ev.Start, Tx + 18.0f, Y, Ts(16.0f, 600, Ev.Start == "Now" ? pal::Accent : Cl));
-		UI.Text(Ev.Name, Tx + 18.0f + 110.0f, Y, Ts(17.0f, 700, Cl, Align::Left, Baseline::Alphabetic, false, 240.0f));
-		UI.Text(Ev.BuyInLabel, Tx + 18.0f + 360.0f, Y, Ts(17.0f, 700, Dim ? pal::Dim : pal::Gold, Align::Left, Baseline::Alphabetic, true));
-		UI.Text(Ev.Speed, Tx + 18.0f + 460.0f, Y, Ts(15.0f, 500, Dim ? pal::Dim : pal::Muted));
-		UI.Text(Ev.EntrantsLabel, Tx + 18.0f + 600.0f, Y, Ts(16.0f, 500, Cl, Align::Left, Baseline::Alphabetic, true));
-		UI.Text(Ev.GuaranteeLabel, Tx + 18.0f + 710.0f, Y, Ts(16.0f, 600, Cl));
-		const Color StColor = Ev.Status == "Late Reg" ? pal::Green : Ev.Status == "Registering" ? pal::Accent2 : pal::Dim;
-		UI.RRect({Tx + 18.0f + 850.0f, R.Y + 15.0f, 110.0f, 26.0f}, 13.0f, Rgba(255, 255, 255, 0.04f), StColor);
-		UI.Text(Ev.Status, Tx + 18.0f + 905.0f, R.Y + 33.0f, Ts(13.0f, 700, StColor, Align::Center));
-	}
-
-	// Detail panel.
-	const LobbyEvent& Ev = L[static_cast<size_t>(S.Selected)];
-	const float Px = 1048.0f;
-	const Rect Pr{Px, Y0, RlW - Px - 24.0f, 700.0f};
-	UI.RRect(Pr, 14.0f, pal::Panel, pal::Line);
-	UI.Text(Ev.Name, Px + 24.0f, Y0 + 48.0f, Ts(28.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, Pr.W - 48.0f));
-	UI.Text(Ev.Game + " \xC2\xB7 " + Ev.Speed, Px + 24.0f, Y0 + 80.0f, Ts(16.0f, 500, pal::Muted));
-	if (Ev.Joinable)
-	{
-		const TournamentSpec& Sp = Ev.Spec;
-		const std::pair<std::string, std::string> Facts[6] = {
-			{"Buy-in", Ev.BuyInCents == 0 ? std::string("Free") : Money(Sp.BuyInCents - Sp.FeeCents) + " + " + Money(Sp.FeeCents)},
-			{"Starting stack", ChipsText(static_cast<double>(Sp.StartingStack)) + " (100 BB)"},
-			{"Blind levels", std::to_string(static_cast<int>(Sp.LevelMinutes)) + " minutes"},
-			{"Players", ChipsText(Sp.Entrants)},
-			{"Places paid", ChipsText(JsRound(Sp.Entrants * 0.15))},
-			{"Prize pool", Ev.GuaranteeLabel},
-		};
-		for (int I = 0; I < 6; ++I)
-		{
-			const float Y = Y0 + 130.0f + static_cast<float>(I) * 40.0f;
-			UI.Text(Facts[I].first, Px + 24.0f, Y, Ts(16.0f, 500, pal::Muted));
-			UI.Text(Facts[I].second, Pr.X + Pr.W - 24.0f, Y, Ts(17.0f, 700, pal::Ink, Align::Right));
-		}
-		Wrap(Ev.Blurb, Px + 24.0f, Y0 + 400.0f, Pr.W - 48.0f, 17.0f, pal::Ink, 24.0f);
-		const bool Afford = S.CanAfford(Ev);
-		const float By = Y0 + 560.0f;
-		if (!S.ConfirmRegister)
-		{
-			ButtonOpts O;
-			O.Kind = Afford ? ButtonKind::Primary : ButtonKind::Secondary;
-			O.Enabled = Afford;
-			if (UI.Button("reg", {Px + 24.0f, By, Pr.W - 48.0f, 64.0f}, Afford ? "Register \xC2\xB7 " + Ev.BuyInLabel : std::string("Insufficient funds"), O))
-			{
-				S.ConfirmRegister = true;
-			}
-		}
-		else
-		{
-			UI.Text("Balance after: " + Money(S.BankrollCents - Ev.BuyInCents), Px + 24.0f, By - 14.0f, Ts(15.0f, 500, pal::Muted));
-			ButtonOpts Ok;
-			Ok.Kind = ButtonKind::Gold;
-			if (UI.Button("regok", {Px + 24.0f, By, (Pr.W - 60.0f) / 2.0f, 64.0f}, "Confirm", Ok))
-			{
-				S.ConfirmRegister = false;
-				S.Register(S.Selected);
-			}
-			ButtonOpts No;
-			No.Kind = ButtonKind::Ghost;
-			if (UI.Button("regno", {Px + 36.0f + (Pr.W - 60.0f) / 2.0f, By, (Pr.W - 60.0f) / 2.0f, 64.0f}, "Cancel", No))
-			{
-				S.ConfirmRegister = false;
-			}
-		}
-	}
-	else
-	{
-		Wrap("Registration for this event opens later. Tonight, the grind starts smaller.", Px + 24.0f, Y0 + 150.0f, Pr.W - 48.0f, 17.0f, pal::Muted, 24.0f);
-	}
-
-	// Recent results.
-	const float Ry = Ty + 52.0f + static_cast<float>(L.size()) * 62.0f + 26.0f;
-	UI.Text("Recent results", X0, Ry, Ts(18.0f, 700));
-	if (S.History.empty())
-	{
-		UI.Text("No tournaments yet tonight.", X0, Ry + 32.0f, Ts(15.0f, 500, pal::Muted));
-	}
-	for (size_t I = 0; I < S.History.size() && I < 3; ++I)
-	{
-		const HistoryEntry& He = S.History[I];
-		const float Y = Ry + 32.0f + static_cast<float>(I) * 28.0f;
-		UI.Text(He.Name, X0, Y, Ts(15.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, false, 360.0f));
-		UI.Text(Ordinal(He.Place) + " / " + ChipsText(He.Entrants), X0 + 400.0f, Y, Ts(15.0f, 500, pal::Ink, Align::Left, Baseline::Alphabetic, true));
-		UI.Text(He.Prize > 0 ? "+" + Money(He.Prize) : std::string("\xE2\x80\x94"), X0 + 560.0f, Y, Ts(15.0f, 700, He.Prize > 0 ? pal::Green : pal::Dim, Align::Left, Baseline::Alphabetic, true));
-		UI.Text("Accuracy " + Fixed(He.AccuracyPct, 0), X0 + 700.0f, Y, Ts(15.0f, 500, pal::Muted));
-	}
-}
-
 float RiverLine::Wrap(const std::string& Text, float X, float Y, float MaxW, float Size, const Color& Col, float LineHeight)
 {
 	float Yy = Y;
@@ -510,8 +395,10 @@ int RiverLine::HeroSeatNo() const
 
 Vec2 RiverLine::SlotPos(int Seat) const
 {
-	const int Slot = (Seat - HeroSeatNo() + 9) % 9;
-	const float A = (90.0f + static_cast<float>(Slot) * 40.0f) * Pi / 180.0f;
+	// Seats around the oval from the hero at the bottom (nine-handed, or six-max).
+	const int N = std::max(2, static_cast<int>(S.Seats.size()));
+	const int Slot = (Seat - HeroSeatNo() + N) % N;
+	const float A = (90.0f + static_cast<float>(Slot) * 360.0f / static_cast<float>(N)) * Pi / 180.0f;
 	return {TableCx + (TableRx + 50.0f) * std::cos(A), TableCy + (TableRy + 64.0f) * std::sin(A)};
 }
 
@@ -633,11 +520,43 @@ void RiverLine::Table(double Now)
 		}
 	}
 
+	// The format: knockouts and seats.
+	if (T.Spec.BountyCents > 0 || T.Spec.SeatValueCents > 0)
+	{
+		std::string Chip;
+		if (T.Spec.SeatValueCents > 0)
+		{
+			Chip = "SATELLITE \xC2\xB7 " + std::to_string(S.SeatsInPlay()) + " seats \xC2\xB7 " + Grouped(T.Remaining) + " left";
+		}
+		else if (T.Spec.MysteryBounty)
+		{
+			Chip = "MYSTERY BOUNTY \xC2\xB7 envelopes open in the money \xC2\xB7 " + std::to_string(S.Knockouts) + " KOs \xC2\xB7 " + Money(S.BountyWon);
+		}
+		else
+		{
+			const auto Mine = S.Bounties.find(HeroId);
+			Chip = "PKO \xC2\xB7 your bounty " + Money(Mine == S.Bounties.end() ? 0 : Mine->second) + " \xC2\xB7 " + std::to_string(S.Knockouts) + " KOs \xC2\xB7 won " + Money(S.BountyWon);
+		}
+		const Color Cc = T.Spec.SeatValueCents > 0 ? pal::Gold : pal::Orange;
+		const float W = UI.Measure(Chip, 13.0f, 800) + 28.0f;
+		UI.RRect({24.0f, RlTop + 14.0f, W, 30.0f}, 15.0f, NetChipFill(Cc), Cc);
+		UI.Text(Chip, 24.0f + W / 2.0f, RlTop + 30.0f, Ts(13.0f, 800, Cc, Align::Center, Baseline::Middle));
+	}
+	if (Now - S.LastBountyAt < 2.6)
+	{
+		const float K = static_cast<float>((Now - S.LastBountyAt) / 2.6);
+		const Vec2 Hp = SlotPos(HeroSeatNo());
+		C->SetAlpha(K < 0.75f ? 1.0f : (1.0f - K) * 4.0f);
+		const float Y = Hp.Y - 40.0f - K * 50.0f;
+		UI.Text("+" + Money(S.LastBountyCents), Hp.X + 140.0f, Y, Ts(34.0f, 900, pal::Gold, Align::Left, Baseline::Alphabetic, true));
+		UI.Text((T.Spec.MysteryBounty ? "MYSTERY BOUNTY \xC2\xB7 " : "BOUNTY \xC2\xB7 ") + S.LastBountyName, Hp.X + 140.0f, Y + 22.0f, Ts(13.0f, 800, pal::Orange));
+		C->SetAlpha(1.0f);
+	}
+
 	GradeBadges(Now);
 	Controls(Now);
 	SidePanel(Now);
 	Overlays(Now);
-	(void)T;
 }
 
 std::vector<Card> RiverLine::WinningCards() const
@@ -759,17 +678,33 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 	const Paint PlateBg = Paint::Linear({0.0f, Plate.Y}, {0.0f, Plate.Y + Plate.H}, IsHero ? Hex(0x1b3552) : Hex(0x1a2536), IsHero ? Hex(0x10223a) : Hex(0x0f1726));
 	const Color Edge = Seat.IsRival ? Hex(0xb8324a) : Seat.Winner && HandOver ? pal::Gold : Rgba(255, 255, 255, 0.1f);
 	UI.RRect(Plate, 14.0f, PlateBg, Edge, Seat.IsRival ? 2.0f : 1.0f);
-	// Avatar.
-	C->FillCircle(Plate.X + 32.0f, P.Y, 22.0f, Seat.IsRival ? Hex(0x2a0d14) : HashColor(Seat.Name));
-	if (Seat.IsRival)
+	// Avatar, with the country flag pinned to it.
+	AvatarSpec Pic = AvatarFor(Seat.Name);
+	if (IsHero)
 	{
-		Ghost(Plate.X + 32.0f, P.Y, 26.0f);
+		Pic.Frame = AvatarFrame::Neon;
+		Pic.Rim = 0x27d3c3;
 	}
-	else
+	else if (Seat.Pro)
 	{
-		UI.Text(Upper2(Seat.Name), Plate.X + 32.0f, P.Y + 1.0f, Ts(16.0f, 800, Hex(0xffffff), Align::Center, Baseline::Middle));
+		Pic.Frame = AvatarFrame::Gold;
+	}
+	DrawAvatar(*C, Plate.X + 32.0f, P.Y, 21.0f, Pic);
+	if (!Seat.Country.empty())
+	{
+		const Rect Fl{Plate.X + 40.0f, P.Y + 10.0f, 15.0f, 10.0f};
+		C->FillRoundRect({Fl.X - 2.0f, Fl.Y - 2.0f, Fl.W + 4.0f, Fl.H + 4.0f}, 3.5f, Hex(0x0b1220));
+		rlnet_detail::NetFlag(*C, Seat.Country, Fl.X, Fl.Y, Fl.W, Fl.H);
 	}
 	UI.Text(Seat.Name, Plate.X + 62.0f, P.Y - 6.0f, Ts(16.0f, 700, Seat.IsRival ? Hex(0xff8da0) : pal::Ink, Align::Left, Baseline::Alphabetic, false, Pw - 72.0f));
+	if (S.T && S.T->Spec.BountyCents > 0 && !S.T->Spec.MysteryBounty)
+	{
+		const auto Head = S.Bounties.find(Seat.Id);
+		const std::string Tag = Money(Head == S.Bounties.end() ? 0 : Head->second);
+		const float Tw = UI.Measure(Tag, 12.0f, 800) + 16.0f;
+		UI.RRect({Plate.X + Pw - Tw - 6.0f, Plate.Y - 11.0f, Tw, 22.0f}, 11.0f, Hex(0x3a1f08), pal::Orange);
+		UI.Text(Tag, Plate.X + Pw - Tw / 2.0f - 6.0f, Plate.Y + 0.5f, Ts(12.0f, 800, pal::Orange, Align::Center, Baseline::Middle, true));
+	}
 	const double Bb = S.CurHand ? static_cast<double>(S.CurHand->BigBlind) : 1.0;
 	const std::string StackText = Seat.Stack <= 0 && Seat.AllIn ? std::string("ALL-IN") : ChipsText(static_cast<double>(Seat.Stack));
 	UI.Text(StackText, Plate.X + 62.0f, P.Y + 19.0f, Ts(16.0f, 700, Seat.AllIn ? pal::Red : pal::Gold, Align::Left, Baseline::Alphabetic, true));
@@ -922,6 +857,14 @@ void RiverLine::GradeBadges(double Now)
 
 void RiverLine::Key(const std::string& K)
 {
+	if (S.CurrentScreen == Screen::Lobby && PageShown == Page::Lobby && (K == "ArrowUp" || K == "ArrowDown") && !Listed.empty())
+	{
+		const auto Found = std::find(Listed.begin(), Listed.end(), EventId);
+		int I = Found == Listed.end() ? -1 : static_cast<int>(Found - Listed.begin());
+		I = std::min(std::max(I + (K == "ArrowUp" ? -1 : 1), 0), static_cast<int>(Listed.size()) - 1);
+		SelectEvent(Listed[static_cast<size_t>(I)]);
+		return;
+	}
 	if (!S.HasPrompt)
 	{
 		return;
@@ -973,14 +916,14 @@ void RiverLine::Controls(double /*Now*/)
 
 	// Pace and HUD (bottom-left).
 	const std::pair<Pace, const char*> Paces[3] = {{Pace::Full, "Full"}, {Pace::Smart, "Smart"}, {Pace::Sprint, "Sprint"}};
-	UI.Text("Pace", 24.0f, 900.0f, Ts(13.0f, 700, pal::Muted));
+	UI.Text("Pace", 24.0f, 866.0f, Ts(13.0f, 700, pal::Muted));
 	for (int I = 0; I < 3; ++I)
 	{
-		const Rect R{24.0f + static_cast<float>(I) * 96.0f, 910.0f, 92.0f, 38.0f};
+		const Rect R{24.0f + static_cast<float>(I) * 96.0f, 874.0f, 92.0f, 36.0f};
 		const Ui::ClickState St = UI.Clickable(std::string("pace") + Paces[I].second, R);
 		const bool Active = S.CurrentPace == Paces[I].first;
 		UI.RRect(R, 9.0f, Active ? Hex(0x1f4d63) : St.Hover ? Hex(0x172a42) : pal::Panel, Active ? pal::Accent : pal::Line);
-		UI.Text(Paces[I].second, R.X + R.W / 2.0f, R.Y + 25.0f, Ts(15.0f, 700, Active ? pal::Ink : pal::Muted, Align::Center));
+		UI.Text(Paces[I].second, R.X + R.W / 2.0f, R.Y + 24.0f, Ts(15.0f, 700, Active ? pal::Ink : pal::Muted, Align::Center));
 		if (St.Clicked && !Active)
 		{
 			S.CurrentPace = Paces[I].first;
@@ -990,14 +933,14 @@ void RiverLine::Controls(double /*Now*/)
 			}
 		}
 	}
-	const Rect HudR{24.0f, 958.0f, 130.0f, 30.0f};
+	const Rect HudR{24.0f, 918.0f, 130.0f, 30.0f};
 	if (UI.Clickable("hud", HudR).Clicked)
 	{
 		S.Hud = !S.Hud;
 	}
 	UI.RRect(HudR, 8.0f, S.Hud ? Hex(0x16354a) : pal::Panel, S.Hud ? pal::Accent : pal::Line);
 	UI.Text(S.Hud ? "HUD ON" : "HUD OFF", HudR.X + HudR.W / 2.0f, HudR.Y + 21.0f, Ts(13.0f, 700, S.Hud ? pal::Ink : pal::Muted, Align::Center));
-	const Rect LeanR{164.0f, 958.0f, 148.0f, 30.0f};
+	const Rect LeanR{164.0f, 918.0f, 148.0f, 30.0f};
 	if (UI.Clickable("lean", LeanR).Clicked)
 	{
 		LeanBackRequested = true;
@@ -1007,16 +950,16 @@ void RiverLine::Controls(double /*Now*/)
 
 	// Composure meter.
 	const double Tilt = S.HeroTilt;
-	UI.Text("Composure", 24.0f, 858.0f, Ts(13.0f, 700, pal::Muted));
-	UI.RRect({112.0f, 848.0f, 170.0f, 10.0f}, 5.0f, Hex(0x0b1422), pal::Line);
+	UI.Text("Composure", 24.0f, 812.0f, Ts(13.0f, 700, pal::Muted));
+	UI.RRect({112.0f, 802.0f, 170.0f, 10.0f}, 5.0f, Hex(0x0b1422), pal::Line);
 	const float Comp = static_cast<float>(1.0 - Tilt);
-	UI.RRect({112.0f, 848.0f, 170.0f * Comp, 10.0f}, 5.0f, Comp > 0.6f ? pal::Green : Comp > 0.35f ? pal::Gold : pal::Red);
+	UI.RRect({112.0f, 802.0f, 170.0f * Comp, 10.0f}, 5.0f, Comp > 0.6f ? pal::Green : Comp > 0.35f ? pal::Gold : pal::Red);
 	if (Tilt > 0.3 && !S.SitOutNext)
 	{
 		ButtonOpts O;
 		O.Kind = ButtonKind::Ghost;
 		O.Size = 13.0f;
-		if (UI.Button("sitout", {24.0f, 868.0f, 258.0f, 26.0f}, "Step away: sit out next hand", O))
+		if (UI.Button("sitout", {24.0f, 824.0f, 258.0f, 26.0f}, "Step away: sit out next hand", O))
 		{
 			S.RequestSitOut();
 		}
@@ -1031,7 +974,7 @@ void RiverLine::Controls(double /*Now*/)
 			if (ToAct.Id != HeroId)
 			{
 				const SeatVis& V = S.Seats[static_cast<size_t>(ToAct.Seat)];
-				UI.Text("Waiting for " + (V.Present ? V.Name : std::string("\xE2\x80\xA6")), 1170.0f, 940.0f, Ts(15.0f, 500, pal::Dim, Align::Right));
+				UI.Text("Waiting for " + (V.Present ? V.Name : std::string("\xE2\x80\xA6")), 1170.0f, 930.0f, Ts(15.0f, 500, pal::Dim, Align::Right));
 			}
 		}
 		return;
@@ -1053,7 +996,7 @@ void RiverLine::Controls(double /*Now*/)
 		}
 		for (size_t I = 0; I < Presets.size(); ++I)
 		{
-			const Rect R{Ax + static_cast<float>(I) * 72.0f, 800.0f, 66.0f, 34.0f};
+			const Rect R{Ax + static_cast<float>(I) * 72.0f, 786.0f, 66.0f, 34.0f};
 			const Chips Val = static_cast<Chips>(std::max(static_cast<double>(P.MinRaise), std::min(static_cast<double>(P.MaxRaise), Presets[I].second)));
 			ButtonOpts O;
 			O.Kind = P.RaiseTo == Val ? ButtonKind::Primary : ButtonKind::Secondary;
@@ -1063,17 +1006,17 @@ void RiverLine::Controls(double /*Now*/)
 				P.RaiseTo = Val;
 			}
 		}
-		const Rect Box{Ax + 370.0f, 800.0f, Aw - 370.0f, 34.0f};
+		const Rect Box{Ax + 370.0f, 786.0f, Aw - 370.0f, 34.0f};
 		UI.RRect(Box, 8.0f, Hex(0x0b1422), pal::Line);
 		UI.Text(ChipsText(static_cast<double>(P.RaiseTo)), Box.X + Box.W - 12.0f, Box.Y + 24.0f, Ts(18.0f, 700, pal::Ink, Align::Right, Baseline::Alphabetic, true));
 		UI.Text(Fixed(static_cast<double>(P.RaiseTo) / static_cast<double>(P.BigBlind), 1) + " BB", Box.X + 10.0f, Box.Y + 23.0f, Ts(13.0f, 500, pal::Muted));
 		const double Step = std::max(1.0, JsRound(static_cast<double>(P.BigBlind) / 4.0));
-		P.RaiseTo = static_cast<Chips>(UI.Slider("raise", {Ax + 10.0f, 842.0f, Aw - 20.0f, 26.0f}, static_cast<double>(P.RaiseTo), static_cast<double>(P.MinRaise), static_cast<double>(P.MaxRaise), Step));
+		P.RaiseTo = static_cast<Chips>(UI.Slider("raise", {Ax + 10.0f, 826.0f, Aw - 20.0f, 26.0f}, static_cast<double>(P.RaiseTo), static_cast<double>(P.MinRaise), static_cast<double>(P.MaxRaise), Step));
 	}
 
 	// Main buttons (each may end the prompt, so re-check it).
 	const float Bw = (Aw - 20.0f) / 3.0f;
-	const float By = 880.0f;
+	const float By = 862.0f;
 	ButtonOpts FoldO;
 	FoldO.Kind = ButtonKind::Danger;
 	FoldO.Hotkey = "F";
@@ -1084,7 +1027,7 @@ void RiverLine::Controls(double /*Now*/)
 	const Chips MaxRaise = P.MaxRaise;
 	const bool IsBet = P.IsBet;
 	const Chips PotNow = P.Pot;
-	if (UI.Button("fold", {Ax, By, Bw, 72.0f}, "Fold", FoldO))
+	if (UI.Button("fold", {Ax, By, Bw, 66.0f}, "Fold", FoldO))
 	{
 		S.HeroAct(PlayerAction::Fold());
 	}
@@ -1100,7 +1043,7 @@ void RiverLine::Controls(double /*Now*/)
 	ButtonOpts CallO;
 	CallO.Hotkey = "C";
 	CallO.Sub = CanCheck ? std::string() : ChipsText(static_cast<double>(ToCall));
-	if (UI.Button("call", {Ax + Bw + 10.0f, By, Bw, 72.0f}, CallLabel, CallO) && S.HasPrompt)
+	if (UI.Button("call", {Ax + Bw + 10.0f, By, Bw, 66.0f}, CallLabel, CallO) && S.HasPrompt)
 	{
 		S.HeroAct(CanCheck ? PlayerAction::Check() : PlayerAction::Call());
 	}
@@ -1111,7 +1054,7 @@ void RiverLine::Controls(double /*Now*/)
 		RaiseO.Kind = AllIn ? ButtonKind::Gold : ButtonKind::Primary;
 		RaiseO.Sub = ChipsText(static_cast<double>(RaiseTo));
 		RaiseO.Hotkey = "R";
-		if (UI.Button("raise", {Ax + (Bw + 10.0f) * 2.0f, By, Bw, 72.0f}, AllIn ? "All-in" : IsBet ? "Bet" : "Raise to", RaiseO) && S.HasPrompt)
+		if (UI.Button("raise", {Ax + (Bw + 10.0f) * 2.0f, By, Bw, 66.0f}, AllIn ? "All-in" : IsBet ? "Bet" : "Raise to", RaiseO) && S.HasPrompt)
 		{
 			S.HeroAct(PlayerAction::RaiseTo(static_cast<double>(RaiseTo)));
 		}
@@ -1120,7 +1063,7 @@ void RiverLine::Controls(double /*Now*/)
 	if (!CanCheck && ToCall > 0)
 	{
 		const double Odds = static_cast<double>(ToCall) / static_cast<double>(PotNow + ToCall);
-		UI.Text("Call " + ChipsText(static_cast<double>(ToCall)) + " to win " + ChipsText(static_cast<double>(PotNow)) + " \xC2\xB7 you need " + std::to_string(static_cast<int>(JsRound(Odds * 100.0))) + "% equity", 1170.0f, 976.0f,
+		UI.Text("Call " + ChipsText(static_cast<double>(ToCall)) + " to win " + ChipsText(static_cast<double>(PotNow)) + " \xC2\xB7 you need " + std::to_string(static_cast<int>(JsRound(Odds * 100.0))) + "% equity", 1170.0f, 948.0f,
 			Ts(15.0f, 600, pal::Muted, Align::Right));
 	}
 }
@@ -1194,7 +1137,7 @@ void RiverLine::SidePanel(double Now)
 		}
 		UI.Text(Tabs[I].second, R.X + R.W / 2.0f, R.Y + 24.0f, Ts(15.0f, 700, Active ? pal::Ink : pal::Muted, Align::Center));
 	}
-	const Rect Box{X, Ty + 44.0f, Wd, RlH - (Ty + 44.0f) - 16.0f};
+	const Rect Box{X, Ty + 44.0f, Wd, RlH - 38.0f - (Ty + 44.0f) - 12.0f};
 	UI.RRect(Box, 14.0f, Hex(0x0c1524), pal::Line);
 	C->PushClip(Box);
 	if (S.Tab == RightTab::Chat)
@@ -1334,14 +1277,24 @@ void RiverLine::ResultsScreen(double Now)
 		return;
 	}
 	const Results& R = S.LastResults;
-	const bool Cashed = R.PrizeCents > 0;
-	const Color Col = R.Won ? pal::Gold : Cashed ? pal::Green : pal::Red;
+	const bool Seat = !R.SeatWon.empty();
+	const bool Cashed = R.PrizeCents > 0 || R.BountyCents > 0 || Seat;
+	const Color Col = R.Won || Seat ? pal::Gold : Cashed ? pal::Green : pal::Red;
 	UI.Text(R.EventName, 60.0f, RlTop + 60.0f, Ts(20.0f, 600, pal::Muted));
-	UI.Text(R.Won ? std::string("Champion.") : "You finished " + Ordinal(R.Place), 60.0f, RlTop + 130.0f, Ts(60.0f, 900, Col));
+	UI.Text(Seat ? std::string("Seat won.") : R.Won ? std::string("Champion.") : "You finished " + Ordinal(R.Place), 60.0f, RlTop + 130.0f, Ts(60.0f, 900, Col));
 	UI.Text("of " + ChipsText(R.Entrants) + " players", 60.0f, RlTop + 172.0f, Ts(22.0f, 500, pal::Muted));
-	if (Cashed)
+	if (Seat)
 	{
-		UI.Text("+" + Money(R.PrizeCents), 60.0f, RlTop + 250.0f, Ts(46.0f, 800, pal::Gold, Align::Left, Baseline::Alphabetic, true));
+		const std::string To = R.SeatWon == "rcop-main" ? "the RCOP Main Event" : R.SeatWon == "step2" ? "Step 2" : R.SeatWon == "step3" ? "Step 3" : R.SeatWon == "step4" ? "Step 4" : R.SeatWon;
+		UI.Text("A " + Money(R.SeatValueCents) + " ticket to " + To, 60.0f, RlTop + 250.0f, Ts(40.0f, 800, pal::Gold, Align::Left, Baseline::Alphabetic, false, 1060.0f));
+	}
+	else if (R.PrizeCents > 0 || R.BountyCents > 0)
+	{
+		const float Pw = UI.Text("+" + Money(R.PrizeCents + R.BountyCents), 60.0f, RlTop + 250.0f, Ts(46.0f, 800, pal::Gold, Align::Left, Baseline::Alphabetic, true));
+		if (R.BountyCents > 0)
+		{
+			UI.Text(Money(R.BountyCents) + " in bounties \xC2\xB7 " + std::to_string(R.Knockouts) + (R.Knockouts == 1 ? " knockout" : " knockouts"), 80.0f + Pw, RlTop + 248.0f, Ts(18.0f, 700, pal::Orange));
+		}
 	}
 	else
 	{

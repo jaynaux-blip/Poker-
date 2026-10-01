@@ -60,6 +60,18 @@ The whole online career is played from a first-person desk. The apartment is the
 
 **Formats:** freerolls, standard MTTs, turbos, hypers, rebuy/add-on events, progressive knockout (PKO) bounties, step satellites, 9-max sit & gos, and the weekly Sunday Showdown ($215 buy-in, $1M guaranteed).
 
+**The network (built).** RiverLine runs like a big real site, all day, every day. It is simulated from fixed seeds and the world clock, so it is the same on every run and moves on as the night does.
+
+- **Schedule.** About 270 recurring events: dailies across the stakes ($0.25 hypers to a $525 High Roller), PKOs, mystery bounties, flip & gos, six-max, Omaha, deepstacks, step satellites, and weekly majors (Monday Madness, Thursday Heater, the $1,050 RiverLine Millions with $3M guaranteed, the $215 Sunday Showdown with $1M guaranteed). Every event has a registration curve, late registration, a field that shrinks, a final table and an overlay when the guarantee isn't met.
+- **Series.** Micro Madness (Oct 1 to 14: 70 events, $5M guaranteed, an $11 Main Event for $1M) is running on Night One. RCOP 2026 (Oct 18 to Nov 8: 154 events, $100M guaranteed, a $5,250 Main Event with $25M guaranteed) is announced, with a step-satellite ladder from $2.20. Summer Slam is history.
+- **Players.** 1,600 named regulars from 28 countries, with skill, volume, stakes, lifetime records and weekly form, including Team RiverLine pros and the rival, gh0stfold. Events the player isn't in are resolved statistically: the regulars who make each final table are drawn by skill, volume and stakes.
+- **Screen names.** Handles read like the ones people really pick: slang compounds ("VelvetRiver", "lazy_owl"), real names in each country's style ("kenji.k", "pablo_ortega", "BramvdBerg"), poker words in the players' own languages ("Kartenhai", "ElTiburon", "ReiDoRio"), grind jokes ("OneMoreTable", "LandlordHatesMe") and the odd gamer tag ("n00bflop", "BlindsTTV"). High-stakes pros favor understated names ("YMorozov", "mbouchard"). Table fields are named the same way and seeded with real regulars from the right stakes (about 3% of the field, 4 to 40 players), so the names on the leaderboards turn up at your tables.
+- **Avatars.** Every account has a profile picture: one of 35 vector icons (sharks, owls, foxes, wolves, crowns, rockets, robots, pizza, eight balls and more) on a colored disc. Names pick fitting icons in any language: "ElTiburon" and "C0ldSh4rk" get sharks, "CoolerKing" a crown, "CoffeeAndCards" a mug. Everyone else draws one from the set by name. Frames mark status: a chip edge or colored ring for flair, gold with a star for Team RiverLine, neon for you and the rival, whose ghost no one else may wear. Seats show the player's country flag on the avatar.
+- **Leaderboards.** The Night Shift (tonight's micro-stakes race, $1,000 to the top 20), Player of the Year, the all-time Money List, Titles, Final Tables and the running series. Rows show rank movement and eight-week form. The player's own rank is estimated across the whole 412,000-player network.
+- **News.** Big wins, series updates, schedule changes and records, plus the player's own results ("grinder_3c wins MM #26").
+- **Career.** Lifetime stats, a rank by winnings (Rookie to Legend), the rent bar ($1,225 by Friday), a career path from first cash to the RCOP Main Event, and a head-to-head card against the rival.
+- **What you can play.** Tonight's story events and any scheduled Hold'em freezeout or re-entry with a full-ring field of up to 3,000 can be played, an hour before the start through late registration. Bounties, satellites, Omaha, six-max and huge fields are locked "until later in your career."
+
 **Multi-tabling.** You can play several tournaments at once, tiled across your monitors. It is the online game's signature skill: managing your attention.
 
 - You focus a table by looking at it.
@@ -189,6 +201,16 @@ Skills give you information. They never make decisions for you.
 - **Selling action:** for live events, you sell pieces of your action at a markup your reputation justifies.
 - **Sponsorship:** unlocked by fame. A sponsor covers buy-ins and asks for patches, appearances and streaming hours.
 - **Fame:** grows with results and memorable hands. It changes how tables play against you and unlocks invitations, including The Summit.
+
+**Getting on your feet (built).** Early on, the bankroll is $2.37 and the rent is $1,225 by Friday midnight. The laptop has apps beside RiverLine for the other ways to get there; each one fast-forwards the clock while the room goes from night to day and back:
+
+- **ShiftLink:** minimum-wage gig shifts. Night cashier at the Quik Stop ($7.25/hr), attendant at the Wash & Fold across the street ($8), delivery driver ($6 plus tips), warehouse loader ($9.50, early mornings). Safe, slow, exhausting.
+- **Burner:** Marcus pays $120 to $200 a drop-off (and $380 to $600 for the long run once you've proven yourself). Every run adds police heat, and heat raises the chance of getting picked up: a fine, a night in holding, and a debt to Marcus for the lost bag. Sam, a rich player who notices you once you cash, pays you to play his RiverLine account ("ghosting"). If site security catches it, your account is restricted for 24 hours.
+- **Bank:** the balance, the rent countdown and payment, and where every dollar came from and went.
+- **Sleep:** a nap or a full night. Energy drains while you're awake and with every shift; under 20% your time bank at the table is halved.
+- **Rent day:** the landlord collects at Friday midnight if the money is there. If not, it's a final notice with a $150 late fee and three more days, then eviction (Dee's couch). After that, $1,075 on the 1st of every month.
+- **Career unlocks:** your first cash opens bounty events (progressive knockouts and mystery bounties), your first final table opens satellites (the steps to the RCOP Main Event pay tickets), and your first title opens six-max.
+- **The Night Shift pays:** at 6 AM the top 20 on the night's micro-stakes leaderboard are paid into your balance.
 
 ## 11. Narrative
 

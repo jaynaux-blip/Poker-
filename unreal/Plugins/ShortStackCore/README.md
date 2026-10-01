@@ -10,8 +10,10 @@ The SHORT STACK poker engine in C++. It is a port of `web/src/core/` from the br
 
 On top of the engine, the plugin also carries the rest of Night One's logic as plain C++:
 
-- `ShortStack/Game`: the session (lobby, pacing, hero turns, sprint, story texts, results, saves)
-- `ShortStack/UI`: a vector canvas, the RiverLine client, card art, the phone and printed props
+- `ShortStack/Game`: the session (lobby, pacing, hero turns, sprint, story texts, results, saves) and the RiverLine network (`Network.h`: the schedule, series, regulars, simulated results, leaderboards and news, on a world clock)
+- `ShortStack/Game/Life.h`: life away from the tables: shifts, hustles, energy, police heat, rent, the ledger, and the clock skipping ahead while they happen
+- `ShortStack/Game/Handles.h`: RiverLine screen names in each country's style, for the regulars and table fields (display only: the engine's `Names.h` stays as it is for parity with TypeScript)
+- `ShortStack/UI`: a vector canvas, the RiverLine client (the table in `RiverLine.cpp`, the lobby pages in `RiverLineNet.cpp`, the laptop's other apps in `RiverLineApps.cpp`), profile pictures (`Avatars.h`: 35 icons picked by screen name, with frames), card art, the phone and printed props
 - `ShortStack/Audio`: sound synthesis
 
 The Unreal project in `unreal/` (see `unreal/README.md`) is a thin host around them.
@@ -101,8 +103,8 @@ On Windows, run this from a *Developer Command Prompt for VS*. The Standalone bu
 
 - `golden_test`: the 4,201 golden vectors.
 - `unit_test`: 5,000 fuzzed hands checking chip conservation, illegal-action rejection, and a 1,000-player tournament played to the end, about 0.7 s.
-- `session_test`: whole tournaments played through the Night One session, with random and best-EV heroes. It covers the bubble, the money, the final table, sprint mode and save round trips.
-- `ui_test`: clicks drive the session (log in, select an event, register). It also draws every screen.
+- `session_test`: whole tournaments played through the Night One session, with random and best-EV heroes. It covers the bubble, the money, the final table, sprint mode and save round trips. It also checks the network: tonight's schedule at 2:07 AM, fees, locked formats, the Night Shift board, the player's results landing in final tables and the news, the lobby clock, and registering for a scheduled event. The life checks cover shifts, Marcus's runs, sleep, rent collection and eviction, the Night Shift payout, unlocks, bounty and satellite specs, tickets, a satellite played on a ticket, and a progressive knockout played out.
+- `ui_test`: clicks drive the session (log in, filter the schedule, select an event, register, open a page). It also draws every screen, including each lobby page before and after a big night, the laptop apps, the time-lapse, a bounty table and the seat and bounty result screens.
 - `audio_test`: every synthesized sound is audible, finite and in range.
 
 To look at the UI without Unreal:
@@ -121,6 +123,8 @@ The prototype remains the fastest place to try out rules and AI changes. After c
 1. Run `npm run export:cpp` in `web/`. It rewrites `Private/ShortStack/PreflopRanking.cpp` and `Tests/golden_vectors.txt`.
 2. Make the same change in C++. Each file names its TypeScript source.
 3. Run the Standalone tests until `golden_test` reports 0 failed, then commit both sides together.
+
+The C++ build adds formats the prototype doesn't have: bounty prize pools, satellite seats and knockout tracking (`TournamentSpec::BountyCents`, `SeatValueCents`, `TEvent::EliminatedBy`). They default to off, so the golden vectors still match.
 
 Rules that keep the two builds identical (also listed at the top of `ShortStack/Common.h`):
 

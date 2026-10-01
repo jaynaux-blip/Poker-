@@ -60,6 +60,18 @@ The editor setup script (`unreal/Content/Python/shortstack_setup.py`) imports ea
 | Poker chips | `assets/chips.py` | Clay chips from the "Spin Cycle Club" in four denominations: edge inserts, molded ring, printed inlays, grime. Baked once per denomination, then stacked with jitter. Faces hidden in a stack are removed. |
 | Desk lamp | `assets/lamp.py` | Balanced-arm lamp, switched off. Enamel base and twin-rod arms, balance springs, knobbed joints. Bell shade with a white interior and a frosted bulb. A cloth cable drops off the desk's rear edge. |
 | Office chair | `assets/chair.py` | Mid-back mesh chair: five-star base on twin-wheel casters, gas lift, pilled fabric seat, curved mesh back, T-armrests peeling at the front. |
+| Mouse and pad | `assets/mouse.py` | Matte black gaming mouse, sculpted as a signed distance field: palm hump, split buttons, ribbed wheel, thumb buttons, knurled rubber grips, polished where the hand rests. Cloth pad with a stitched edge, a RiverLine print and a rubbed-smooth patch. |
+| The player's arms | `assets/arms.py` | Both hands in the sleeves of a charcoal hoodie, rigged with Unreal Mannequin bone names (`SK_Arms`). The hands are sculpted as signed distance fields on an anatomical skeleton. Skin detail is computed per texel at 4K: knuckle wrinkles, nails with lunulae and cuticles, fingerprints, palm lines, veins, moles and flushed fingertips. The primitives that shape the mesh also weight it to the bones. |
+
+## Organic shapes
+
+`artkit/sdf.py` models smooth, organic forms (hands, a mouse, fabric folds) as signed distance fields:
+- tapered capsules, ellipsoids, rounded boxes and tori, joined with smooth unions whose blend radius sets how softly neighbors merge, or carved;
+- meshed with marching cubes, then decimated.
+
+Each primitive can belong to a bone, so the same field that shapes a character also skins it.
+
+`artkit/texmaps.py` computes texture maps per texel in numpy, for detail too fine for shader nodes: it bakes every texel's position, fills color, roughness and height from it, and converts the height to a normal map.
 
 ## Fonts
 

@@ -28,12 +28,6 @@ namespace NightOneModeDetail
 {
 const TCHAR* const SettingsSlot = TEXT("Settings");
 
-double SmoothStep(double A, double B, double X)
-{
-	const double T = FMath::Clamp((X - A) / (B - A), 0.0, 1.0);
-	return T * T * (3.0 - 2.0 * T);
-}
-
 FString SanitizeName(const FString& In)
 {
 	FString Out;
@@ -573,9 +567,16 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		Seat->SetEstablishingShot(ShotPos, ShotLook, Game->Menu.WantsEstablishingShot());
 	}
 
+	// The player's hands follow the head and the pointer; they sit out the establishing shot.
+	if (Seat)
+	{
+		Stage->UpdateArms(static_cast<float>(Dt), Seat->GetActorLocation(), ArmsPointer, bStarted && !Game->Menu.WantsEstablishingShot());
+	}
+
 	// The world reacts to the game.
 	const double Clock = S.ClockMinutes();
-	Stage->SetDawn(static_cast<float>(SmoothStep(4.6 * 60.0, 6.3 * 60.0, Clock)));
+	// Daylight from the time of day: dawn after a long night, the afternoon after a day shift, dusk again.
+	Stage->SetDawn(static_cast<float>(S.Daylight()));
 	const float PhoneLevel = static_cast<float>(Game->Phone.Brightness(RealTime));
 	Stage->SetPhoneBrightness(PhoneLevel);
 	PhoneAccum += Dt;
@@ -610,6 +611,7 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 
 void ANightOneGameMode::OnMouse(bool bOverScreen, const FVector2D& Client, float Nx, float Ny)
 {
+	ArmsPointer = FVector2D(Nx + 0.5f, Ny + 0.5f);
 	ANightOnePawn* Seat = GetSeat();
 	if (!Game || !Seat || IsMenuOpen())
 	{
@@ -645,6 +647,10 @@ void ANightOneGameMode::OnPress(bool bOverScreen)
 	if (!bStarted || !Game || !Seat || IsMenuOpen())
 	{
 		return;
+	}
+	if (Stage)
+	{
+		Stage->ArmsClick();
 	}
 	if (Seat->Focus < 0.5f && Seat->TargetFocus < 0.5f)
 	{
@@ -691,6 +697,10 @@ void ANightOneGameMode::OnKey(const FString& Key)
 	if (!bStarted || !Game || IsMenuOpen())
 	{
 		return;
+	}
+	if (Stage)
+	{
+		Stage->ArmsKey(Key);
 	}
 	if (Key == TEXT(" "))
 	{

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "FirstPersonArms.h"
 #include "ShortStack/UI/Canvas.h"
 
 #include "NightOneStage.generated.h"
@@ -14,6 +15,8 @@ class UPointLightComponent;
 class UPostProcessComponent;
 class URectLightComponent;
 class USpotLightComponent;
+class UPoseableMeshComponent;
+class USkeletalMesh;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UWidgetComponent;
@@ -69,6 +72,14 @@ public:
 	/** Put another empty can on the desk (one per hour of grinding). */
 	void AddCan();
 	void Lightning(float Strength);
+
+	// The player's arms (SK_Arms): the left hand on the laptop, the right on the mouse.
+	/** A hotkey press: the matching finger reaches over and taps the key. */
+	void ArmsKey(const FString& Name);
+	/** A click: the mouse hand's index finger presses. */
+	void ArmsClick();
+	/** Moves the arms with the head (camera location) and the mouse with the pointer (0..1 across the view). */
+	void UpdateArms(float DeltaSeconds, const FVector& CameraLocation, const FVector2D& Pointer, bool bVisible);
 
 	/** Called when lightning strikes: (delay until thunder, strength). */
 	TFunction<void(float, float)> OnThunder;
@@ -170,6 +181,8 @@ private:
 	TObjectPtr<UStaticMesh> MouseMesh;
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> MousePadMesh;
+	UPROPERTY()
+	TObjectPtr<USkeletalMesh> ArmsMesh;
 	/** Yaw that turns a Blender prop (front toward -Y, Z up) to face the chair (-X) once imported. */
 	float ImportYaw = 0.0f;
 
@@ -196,6 +209,14 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> LidPivot;
+	UPROPERTY()
+	TObjectPtr<USceneComponent> LaptopFrame; // the laptop's placement on the desk (keys are measured from it)
+	UPROPERTY()
+	TObjectPtr<USceneComponent> MouseRoot;
+	UPROPERTY()
+	TObjectPtr<USceneComponent> ArmsRoot;
+	UPROPERTY()
+	TObjectPtr<UPoseableMeshComponent> ArmsComp;
 	UPROPERTY()
 	TObjectPtr<UWidgetComponent> Screen;
 	UPROPERTY()
@@ -229,6 +250,14 @@ private:
 	TSharedPtr<SDrawListWidget> PhoneSlate;
 	TArray<TSharedPtr<SDrawListWidget>> PropSlates;
 	TArray<TSharedPtr<const ss::ui::DrawList>> PropLists;
+
+	FFirstPersonArms Arms;
+	int32 ArmsInitTries = 0;
+	FVector MouseHome = FVector::ZeroVector;
+	FVector2D MouseOffset = FVector2D::ZeroVector;
+	float MouseTop = 2.6f; // height of the mouse's hump above the desk (cm)
+	/** A key's top, in world space (the Blender laptop's layout; the stand-in keyboard matches it). */
+	FVector KeyWorld(const FString& Name) const;
 
 	float Time = 0.0f;
 	float Flash = 0.0f;

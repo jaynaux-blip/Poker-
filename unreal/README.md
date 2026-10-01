@@ -4,6 +4,8 @@ This folder is the Unreal project for Night One. It contains:
 
 - the seated first-person view in the rainy apartment
 - the RiverLine poker client on the laptop, playable from the lobby through a full tournament to the results screen
+- a living poker network behind the lobby: a round-the-clock schedule, series, 1,600 regulars, leaderboards, news and your career page
+- the rest of the laptop: ShiftLink shifts, the Burner (Marcus and Sam), the bank, sleep and rent day, with the room's light following the clock
 - phone texts from Dee and the landlord
 - the composure and tilt effects
 - procedural sound
@@ -99,7 +101,7 @@ Source/ShortStack/          the game module (Unreal side)
   NightOneSaveGame          bankroll, results and story flags
 Plugins/ShortStackCore/     everything engine-agnostic, tested without Unreal (see its README)
   ShortStack/*              poker engine, bots, grading, tournaments
-  ShortStack/Game           the Night One session, lobby, chat
+  ShortStack/Game           the Night One session, lobby, chat, the RiverLine network (schedule, series, players, boards, news)
   ShortStack/UI             vector canvas, RiverLine client, menus (FrontEnd), card art, phone, printed props
   ShortStack/Audio          sound synthesis
 ```
@@ -128,6 +130,15 @@ Props are modeled, textured and reviewed in Blender by the scripts in `art/blend
 - the energy drink cans (`SM_EnergyCan`);
 - the laptop (`SM_Laptop_Base` and `SM_Laptop_Lid`). The stage hinges the lid at 18.5 mm and tilts it back 18.3°, and it mounts the RiverLine screen just in front of the lid's glass. Its keyboard, legends and backlight are part of the mesh.
 - the desk, chair, desk lamp, mug, phone and poker chips (`SM_Desk`, `SM_Chair`, `SM_DeskLamp`, `SM_Mug`, `SM_Phone`, `SM_ChipStacks`). The phone's lock screen lies on its cracked glass.
+
+- the mouse and mousepad (`SM_Mouse`, `SM_MousePad`). The mouse slides across the pad as you move the pointer;
+- the player's arms (`SK_Arms`, a skeletal mesh). The setup script rebuilds their skin material with Unreal's Subsurface Profile shading (`M_SK_ArmsSkin`), which glTF can't carry.
+
+**First-person arms** (`FirstPersonArms.cpp`, driven from `NightOneStage::UpdateArms`):
+- The left hand rests on the laptop's palm rest. On each hotkey it reaches over and taps the key with the finger a touch typist would use (F and R index, C middle, X ring, A pinky, Space thumb).
+- The right hand holds the mouse, which follows the pointer. It clicks with the index finger, and reaches over for the arrows and M.
+- Two-bone IK places the wrists; the hands and fingers pose from the mesh's reference pose. The shoulders follow the head when you lean in.
+- The arms hide during the title screen's establishing shot.
 
 Blender props are modeled facing -Y. The stage takes the importer's orientation from the laptop base's bounds and turns every prop by that same yaw.
 
