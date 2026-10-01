@@ -11,14 +11,12 @@ unreal/.idea/
 unreal/.vscode/
 unreal/*.sln
 unreal/*.code-workspace
-# Generated on first editor launch by unreal/Content/Python/shortstack_setup.py (the script is the source)
-unreal/Content/ShortStack/Materials/
-# (the props are imported from unreal/Art/Meshes/*.glb)
-unreal/Content/ShortStack/Meshes/
-unreal/Content/ShortStack/Cards/
-unreal/Content/Maps/
-# The Back Room's MetaHumans (~4 GB): made by unreal/Content/Python/backroom_cast.py from the Creator's
-# presets with Epic's MetaHuman cloud service (needs an Epic account sign-in).
+# Unreal assets (*.uasset, *.umap) are committed through Git LFS (.gitattributes): the generated
+# materials, imported props, cards and maps travel with the repo so the project opens ready to play
+# (unreal/Content/Python/shortstack_setup.py still regenerates them when their sources change).
+# The Back Room's MetaHumans (~5.4 GB of Epic MetaHuman source assets) stay local: the repo is public
+# and Epic's license doesn't allow redistributing them. Rebuild them with
+# unreal/Content/Python/backroom_cast.py (needs an Epic account sign-in for the MetaHuman cloud).
 unreal/Content/ShortStack/Cast/
 __pycache__/
 # Intermediate textures and review renders from art/blender/build.py
