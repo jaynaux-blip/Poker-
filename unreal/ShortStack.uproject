@@ -24,6 +24,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "RigLogic",
+			"Enabled": true
+		},
+		{
 			"Name": "MetaHumanCharacter",
 			"Enabled": true
 		},

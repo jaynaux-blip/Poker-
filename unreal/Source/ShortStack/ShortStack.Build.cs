@@ -7,7 +7,7 @@ public class ShortStack : ModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
-			"Core", "CoreUObject", "Engine", "InputCore", "Slate", "SlateCore", "UMG", "ShortStackCore",
+			"Core", "CoreUObject", "Engine", "InputCore", "Slate", "SlateCore", "UMG", "AnimationCore", "RigLogicModule", "ShortStackCore",
 		});
 	}
 }

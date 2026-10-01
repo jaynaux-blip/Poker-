@@ -44,6 +44,8 @@ const FVector2D Seats[8] = {
 };
 // The table's straight run: the ends are half circles around (0, +/-HalfL).
 const double HalfL = 61.0;
+// A seated player's chair front edge is this far out from the rail (cm): forearms on the rail.
+const double RailGap = 22.0;
 } // namespace BackRoomDetail
 
 using namespace BackRoomDetail;
@@ -84,7 +86,7 @@ FTransform ABackRoomStage::SeatTransform(int32 Index)
 	{
 		Out = FVector(-1.0, 0.0, 0.0);
 	}
-	const FVector Chair = Edge + Out * 38.0;
+	const FVector Chair = Edge + Out * RailGap;
 	return FTransform((-Out).Rotation(), FVector(Chair.X, Chair.Y, 0.0));
 }
 
@@ -302,13 +304,24 @@ void ABackRoomStage::BuildLights()
 	LampLight->SetIntensityUnits(ELightUnits::Candelas);
 	LampLight->SetIntensity(LampCandela);
 	LampLight->SetLightColor(Srgb(0xffc98f));
-	LampLight->SetOuterConeAngle(62.0f);
-	LampLight->SetInnerConeAngle(34.0f);
+	LampLight->SetOuterConeAngle(80.0f);
+	LampLight->SetInnerConeAngle(40.0f);
 	LampLight->SetSourceRadius(4.0f);
 	LampLight->SetSoftSourceRadius(6.0f);
 	LampLight->SetAttenuationRadius(900.0f);
 	LampLight->SetVolumetricScatteringIntensity(1.6f);
 	LampLight->SetCastShadows(true);
+	// The felt throws the lamp's light back up, faintly green, into the players' faces.
+	URectLightComponent* Bounce = NewPart<URectLightComponent>();
+	Bounce->SetRelativeLocationAndRotation(FVector(0.0, 0.0, FeltZ + 2.0), FRotator(90.0f, 0.0f, 0.0f));
+	Bounce->SetIntensityUnits(ELightUnits::Candelas);
+	Bounce->SetIntensity(9.0f);
+	Bounce->SetLightColor(Srgb(0xc9d6a0));
+	Bounce->SetSourceWidth(200.0f);
+	Bounce->SetSourceHeight(90.0f);
+	Bounce->SetAttenuationRadius(320.0f);
+	Bounce->SetCastShadows(false);
+	Bounce->SetVolumetricScatteringIntensity(0.0f);
 	// The light leaking out of the shade's top vents onto the ceiling.
 	ShadeGlow = NewPart<UPointLightComponent>();
 	ShadeGlow->SetRelativeLocation(LampAt + FVector(0.0, 0.0, 30.0));
