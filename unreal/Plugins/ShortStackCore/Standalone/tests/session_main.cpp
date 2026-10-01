@@ -6,8 +6,10 @@
 #include "ShortStack/Game/Session.h"
 
 #include <cmath>
+#include <algorithm>
 #include <cstdio>
 #include <map>
+#include <vector>
 
 namespace session_test
 {
@@ -700,6 +702,131 @@ void BountyTournament()
 	std::printf("  pko: %s of %d, %d knockouts, %s in bounties, prize %s\n", ss::Ordinal(R.Place).c_str(), R.Entrants, R.Knockouts, ss::Money(R.BountyCents).c_str(), ss::Money(R.PrizeCents).c_str());
 }
 
+/** Several tournaments at once: all of them play on, the one in front changes, finished ones close, the last brings the results. */
+void MultiTable()
+{
+	Hooks H;
+	ss::Session S(H, "multi");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 20000;
+	const ss::Chips Start = S.BankrollCents;
+	const ss::net::Network& Net = ss::net::Shared();
+	const double World = S.WorldMinutes();
+	std::vector<ss::LobbyEvent> Picks;
+	for (const ss::net::EventInstance& E : Net.Window(World - 180.0, World + 90.0))
+	{
+		const ss::LobbyEvent L = Net.Listing(E, nullptr, S.Unlocks());
+		if (L.Joinable && L.Spec.Entrants <= 600 && L.BuyInCents <= 1100 && Picks.size() < 5)
+		{
+			Picks.push_back(L);
+		}
+	}
+	Expect(Picks.size() == 5, "five small events to pick from");
+	if (Picks.size() < 5)
+	{
+		return;
+	}
+	ss::Session Tired(H, "tired");
+	Tired.Life.Energy = 10.0;
+	Expect(S.MaxTables() == ss::Session::TableLimit && Tired.MaxTables() == 2, "four tables, two when exhausted");
+
+	S.RegisterEvent(Picks[0]);
+	Expect(S.TableCount() == 1 && S.FocusedTable() == 0 && S.CurrentScreen == ss::Screen::Table, "the first table opens in front");
+	double Now = Wait(S, 0.0, 30.0);
+	const int Before = S.HandsPlayed;
+	S.ShowLobby();
+	Now = Wait(S, Now, 40.0);
+	Expect(S.CurrentScreen == ss::Screen::Lobby && S.T && S.HandsPlayed > Before, "the table plays on while the player is in the lobby");
+	S.RegisterEvent(Picks[0]);
+	Expect(S.TableCount() == 1, "one seat per event");
+	for (int I = 1; I < 4; ++I)
+	{
+		S.RegisterEvent(Picks[static_cast<size_t>(I)]);
+	}
+	Expect(S.TableCount() == 4 && S.FocusedTable() == 3 && S.CurrentScreen == ss::Screen::Table && S.T->Spec.Id == Picks[3].Spec.Id, "each new table opens in front");
+	S.RegisterEvent(Picks[4]);
+	Expect(S.TableCount() == 4 && !S.IsPlaying(Picks[4].Spec.Id), "four is the limit");
+	ss::Chips Paid = 0;
+	for (int I = 0; I < 4; ++I)
+	{
+		Paid += Picks[static_cast<size_t>(I)].BuyInCents;
+		Expect(S.IsPlaying(Picks[static_cast<size_t>(I)].Spec.Id) && S.Glance(I).Name == Picks[static_cast<size_t>(I)].Spec.Name, "every table is open under its own name");
+	}
+	Expect(S.BankrollCents == Start - Paid, "four buy-ins");
+	const double OpenedAt = S.ClockMinutes();
+	for (int I = 0; I < 4; ++I)
+	{
+		S.WithTable(I, [&]() { Expect(S.T->Spec.StartClock >= Picks[static_cast<size_t>(I)].Spec.StartClock - 0.001, "tables keep their start"); });
+	}
+
+	// Play everything: act wherever it's the player's turn, through a tile's buttons (HeroActAt) half the time.
+	ss::Rng Choice("multi-choices");
+	int Decisions = 0;
+	int Background = 0;
+	int AutoSwitches = 0;
+	int MostTables = 0;
+	int Frames = 0;
+	bool Sped = false;
+	while (S.CurrentScreen == ss::Screen::Table && ++Frames < 6000000)
+	{
+		const int Front = S.FocusedTable();
+		const int Count = S.TableCount();
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		AutoSwitches += S.TableCount() == Count && S.FocusedTable() != Front ? 1 : 0;
+		MostTables = std::max(MostTables, S.TableCount());
+		if (!Sped && Now > 400.0)
+		{
+			// Enough of watching every hand: let the tables sprint to their milestones.
+			Sped = true;
+			for (int I = 0; I < S.TableCount(); ++I)
+			{
+				S.WithTable(I, [&]() { S.CurrentPace = ss::Pace::Sprint; });
+			}
+		}
+		for (int I = 0; I < S.TableCount(); ++I)
+		{
+			const ss::TableGlance G = S.Glance(I);
+			if (!G.YourTurn || Now - G.TurnOpenedAt < 0.4)
+			{
+				continue;
+			}
+			++Decisions;
+			Background += I != S.FocusedTable() ? 1 : 0;
+			const double Roll = Choice.Next();
+			const ss::PlayerAction A = Roll < 0.3 ? ss::PlayerAction::Fold() : Roll < 0.4 ? ss::PlayerAction::RaiseTo(1e12) : ss::PlayerAction::Call();
+			if (Choice.Chance(0.5))
+			{
+				S.HeroActAt(I, A);
+			}
+			else
+			{
+				S.FocusTable(I);
+				S.HeroAct(A);
+			}
+			break;
+		}
+	}
+	Expect(S.CurrentScreen == ss::Screen::Results, "the last table brings the results screen");
+	Expect(S.Finished.size() == 3 && S.History.size() == 4, "three tables closed early, four results recorded");
+	Expect(S.LastResults.SessionEvents == 4 && S.LastResults.SessionNetCents == S.BankrollCents - Start, "the results sum up the sitting");
+	Expect(Decisions > 20 && Background > 0, "decisions came from tables in front and behind");
+	Expect(AutoSwitches > 0, "a waiting table comes forward on its own");
+	Expect(H.Sounds[ss::SoundId::Turn] > 0, "turns chime");
+	Expect(S.ClockMinutes() >= OpenedAt, "the clock only moves forward");
+	ss::Chips Prizes = 0;
+	for (const ss::FinishedTable& F : S.Finished)
+	{
+		Prizes += F.Result.PrizeCents;
+	}
+	S.LeaveResults();
+	Expect(S.TableCount() == 0 && !S.T && S.FocusedTable() == -1, "leaving the results closes the sitting");
+	S.RegisterEvent(Picks[4]);
+	Expect(S.TableCount() == 1 && S.FocusedTable() == 0, "a new sitting starts from one table");
+	std::printf("  multi: 4 tables, %d decisions (%d away from the front), %d auto-switches, %s in early prizes, net %s\n", Decisions, Background, AutoSwitches, ss::Money(Prizes).c_str(),
+		ss::Money(S.LastResults.SessionNetCents).c_str());
+}
+
 void Formatting()
 {
 	Expect(ss::Money(237) == "$2.37", "money small");
@@ -724,6 +851,7 @@ int main()
 	session_test::DeeGame();
 	session_test::Riverside();
 	session_test::BountyTournament();
+	session_test::MultiTable();
 	session_test::FullTournament();
 	session_test::SprintTournament();
 	session_test::DeepRuns();

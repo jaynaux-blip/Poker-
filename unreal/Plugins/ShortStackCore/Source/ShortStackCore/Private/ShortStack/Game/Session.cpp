@@ -385,13 +385,35 @@ void Session::Register(int Index)
 
 void Session::RegisterEvent(const LobbyEvent& Listing)
 {
-	if (!CanAfford(Listing))
+	if (!CanAfford(Listing) || IsPlaying(Listing.Spec.Id) || TableCount() >= MaxTables())
 	{
 		return;
 	}
+	// Another table: the one in front steps back and keeps playing; the new one opens in front.
+	const double Clock = ClockMinutes();
+	const ss::Pace PrevPace = CurrentPace == Pace::Sprint ? Pace::Smart : CurrentPace;
+	const bool First = Runs.empty();
+	if (!First)
+	{
+		SwapActive(*Runs[static_cast<size_t>(Active)]);
+	}
+	else
+	{
+		SessionStartBankroll = BankrollCents;
+		SessionEvents = 0;
+		Finished.clear();
+	}
+	Runs.push_back(std::make_unique<TableRun>());
+	Active = static_cast<int>(Runs.size()) - 1;
+	FocusHoldUntil = Now + 1.5;
+	++SessionEvents;
+	if (!First)
+	{
+		CurrentPace = PrevPace; // a new table plays like the one before it (the first keeps the session's pace, as always)
+	}
 	Joined = Listing;
 	// The table opens now, or when the event starts if that's later (the wait passes at the desk).
-	Joined.Spec.StartClock = std::max(Joined.Spec.StartClock, LobbyMinutes);
+	Joined.Spec.StartClock = std::max(Joined.Spec.StartClock, Clock);
 	const LobbyEvent& Ev = Joined;
 	if (TicketsFor(Ev) > 0)
 	{
@@ -422,7 +444,10 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	Chat.clear();
 	HandsPlayed = 0;
 	BiggestPot = 0;
-	HeroTilt = 0.0;
+	if (First)
+	{
+		HeroTilt = 0.0; // a fresh sitting; another table doesn't calm you down
+	}
 	HasResults = false;
 	HasBustInfo = false;
 	RivalArrived = false;
@@ -457,7 +482,7 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	}
 	const Level& L0 = T->CurrentLevel();
 	SystemLine("Blinds " + std::to_string(L0.Sb) + "/" + std::to_string(L0.Bb) + ", ante " + std::to_string(L0.Ante) + ". Good luck!");
-	Hooks.Sound(SoundId::Alert, 1.0);
+	Sound(SoundId::Alert, 1.0);
 	StartNextHand();
 }
 
@@ -575,7 +600,7 @@ void Session::StartNextHand()
 		MovingTo = TableId;
 		MovingAt = Now;
 		SystemLine("You have been moved to Table " + std::to_string(TableId) + ".");
-		Hooks.Sound(SoundId::Move, 1.0);
+		Sound(SoundId::Move, 1.0);
 	}
 	BuildSeats();
 	if (RivalArrived)
@@ -615,7 +640,7 @@ void Session::StartNextHand()
 		HeroTilt *= 0.5;
 	}
 	SitOutNext = false;
-	HeroTilt *= 0.93;
+	HeroTilt *= TableCount() > 1 ? std::pow(0.93, 1.0 / static_cast<double>(TableCount())) : 0.93; // per hand, wherever it's dealt
 	++HandsPlayed;
 	const Level& L = T->CurrentLevel();
 	DealerLine("Hand #" + Grouped(T->Tick + 1) + " \xC2\xB7 Blinds " + ChipsText(static_cast<double>(L.Sb)) + "/" + ChipsText(static_cast<double>(L.Bb)));
@@ -684,6 +709,24 @@ void Session::Update(double InNow)
 	{
 		StoryText("marcus-intro", "Marcus", "heard you're behind on rent. I got work if you're not scared. check the burner app.");
 	}
+	// Every open table takes its turn; the one in front last-but-not-least, as it is.
+	const int Front = Active;
+	for (int K = 0; K < TableCount(); ++K)
+	{
+		if (K != Front)
+		{
+			Background = true;
+			WithTable(K, [this]() { TableStep(); });
+			Background = false;
+		}
+	}
+	TableStep();
+	CloseFinishedTables();
+	AutoFocusStep();
+}
+
+void Session::TableStep()
+{
 	for (size_t I = Flights.size(); I-- > 0;)
 	{
 		if (!(Now < Flights[I].Start + Flights[I].Dur + 0.05))
@@ -707,7 +750,8 @@ void Session::Update(double InNow)
 		Moving = false;
 	}
 
-	if (CurrentScreen != Screen::Table || !T)
+	// Tables play on while the player browses the lobby; they stop for the results screen.
+	if (!T || Closing || CurrentScreen == Screen::Results || CurrentScreen == Screen::Boot)
 	{
 		return;
 	}
@@ -759,7 +803,7 @@ void Session::Update(double InNow)
 				// Time bank kicks in automatically.
 				Prompt.TimeBankUntil = Now + TimeBank;
 				SystemLine("Time bank activated.");
-				Hooks.Sound(SoundId::Alert, 1.0);
+				Sound(SoundId::Alert, 1.0);
 			}
 			else if (Prompt.TimeBankUntil == 0.0 || Now > Prompt.TimeBankUntil)
 			{
@@ -926,7 +970,7 @@ void Session::OpenHeroTurn()
 	Vis.Acting = true;
 	Vis.ActStart = Now;
 	Vis.ActEnd = Prompt.Deadline;
-	Hooks.Sound(SoundId::Turn, 1.0);
+	Sound(SoundId::Turn, 1.0);
 }
 
 void Session::HeroAct(const PlayerAction& Action, bool TimedOut)
@@ -975,6 +1019,7 @@ void Session::HeroAct(const PlayerAction& Action, bool TimedOut)
 	}
 	H.Act(A);
 	NextAt = Now;
+	FocusHoldUntil = Now + 0.35;
 }
 
 void Session::RequestSitOut()
@@ -1015,7 +1060,7 @@ double Session::Consume(const HandEvent& Ev)
 		S.Stack -= Ev.Amount;
 		PotChips += Ev.Amount;
 		AddFlight(true, FlightEnd::AtSeat(Ev.Seat), FlightEnd::AtPot(), Ev.Amount, Now, 0.35);
-		Hooks.Sound(SoundId::Chip, 0.5);
+		Sound(SoundId::Chip, 0.5);
 		return 0.25;
 	}
 	case EventType::Deal:
@@ -1039,7 +1084,7 @@ double Session::Consume(const HandEvent& Ev)
 				SeatAt(HS.Seat).Hole = HS.Hole;
 			}
 		}
-		Hooks.Sound(SoundId::Deal, 1.0);
+		Sound(SoundId::Deal, 1.0);
 		return 0.2 + K * 0.05;
 	}
 	case EventType::Action:
@@ -1080,16 +1125,16 @@ double Session::Consume(const HandEvent& Ev)
 		{
 			S.Folded = true;
 			AddFlight(false, FlightEnd::AtSeat(A.Seat), FlightEnd::AtMuck(), 0, Now, 0.3);
-			Hooks.Sound(SoundId::Fold, 0.6);
+			Sound(SoundId::Fold, 0.6);
 		}
 		else if (A.Type == ActionType::Check)
 		{
-			Hooks.Sound(SoundId::Check, 1.0);
+			Sound(SoundId::Check, 1.0);
 		}
 		else
 		{
 			AddFlight(true, FlightEnd::AtSeat(A.Seat), FlightEnd::AtBet(A.Seat), A.Added, Now, 0.3);
-			Hooks.Sound(A.AllIn ? SoundId::AllIn : SoundId::ChipStack, 1.0);
+			Sound(A.AllIn ? SoundId::AllIn : SoundId::ChipStack, 1.0);
 		}
 		if (A.Type != ActionType::Fold || Speed() == 1.0)
 		{
@@ -1114,7 +1159,7 @@ double Session::Consume(const HandEvent& Ev)
 			}
 		}
 		DealerLine(std::string(StreetTitle(Ev.NewStreet)) + ": " + session_detail::CardsText(Ev.Board));
-		Hooks.Sound(SoundId::Flip, 1.0);
+		Sound(SoundId::Flip, 1.0);
 		if (Revealed)
 		{
 			UpdateEquities();
@@ -1146,9 +1191,9 @@ double Session::Consume(const HandEvent& Ev)
 		if (HeroIn)
 		{
 			HeroAllInReveal = true;
-			Hooks.Heartbeat(true);
+			Heartbeat(true);
 		}
-		Hooks.Sound(SoundId::Flip, 1.0);
+		Sound(SoundId::Flip, 1.0);
 		return 1.6;
 	}
 	case EventType::Showdown:
@@ -1160,7 +1205,7 @@ double Session::Consume(const HandEvent& Ev)
 			S.Hole = SH.Hole;
 			S.HandLabel = Describe(SH.Score);
 		}
-		Hooks.Sound(SoundId::Flip, 1.0);
+		Sound(SoundId::Flip, 1.0);
 		return 1.1;
 	}
 	case EventType::Award:
@@ -1187,7 +1232,7 @@ double Session::Consume(const HandEvent& Ev)
 		const std::string Label = P.Winners.size() == 1 ? SeatAt(P.Winners[0]).HandLabel : std::string();
 		const std::string PotName = Ev.PotCount > 1 ? (Ev.PotIndex == 0 ? std::string("the main pot") : "side pot " + std::to_string(Ev.PotIndex)) : std::string("the pot");
 		DealerLine(Names + " wins " + PotName + " (" + ChipsText(static_cast<double>(P.Amount)) + ")" + (Label.empty() ? "" : " with " + Label));
-		Hooks.Sound(HeroWon ? SoundId::Win : SoundId::ChipStack, HeroWon ? 1.0 : 0.6);
+		Sound(HeroWon ? SoundId::Win : SoundId::ChipStack, HeroWon ? 1.0 : 0.6);
 		if (HeroWon)
 		{
 			BiggestPot = MaxChips(BiggestPot, P.Amount);
@@ -1200,7 +1245,7 @@ double Session::Consume(const HandEvent& Ev)
 	}
 	case EventType::End:
 	default:
-		Hooks.Heartbeat(false);
+		Heartbeat(false);
 		return 0.1;
 	}
 }
@@ -1227,7 +1272,7 @@ bool Session::CollectBets()
 	}
 	if (Any)
 	{
-		Hooks.Sound(SoundId::ChipStack, 0.5);
+		Sound(SoundId::ChipStack, 0.5);
 	}
 	return Any;
 }
@@ -1366,7 +1411,7 @@ void Session::EndHand()
 {
 	Hand& H = *CurHand;
 	const std::vector<TEvent> Events = T->FinishTick(&H);
-	Hooks.Heartbeat(false);
+	Heartbeat(false);
 	HandleTourneyEvents(Events);
 	// Busted players at the hero's table say goodbye.
 	for (const TEvent& E : Events)
@@ -1407,7 +1452,7 @@ void Session::EndHand()
 		BustPlace = Hero.Place;
 		BustPrize = Hero.PrizeCents;
 		BustAt = Now + 3.0;
-		Hooks.Sound(SoundId::Bust, 1.0);
+		Sound(SoundId::Bust, 1.0);
 		BustBanner(Hero, "Better luck next time");
 		return;
 	}
@@ -1431,7 +1476,10 @@ void Session::EndHand()
 	while (CansShown <= HoursIn)
 	{
 		++CansShown;
-		Hooks.AddCan();
+		if (!Background)
+		{
+			Hooks.AddCan();
+		}
 	}
 	if (CurrentPace == Pace::Sprint)
 	{
@@ -1454,7 +1502,7 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 			SystemLine("Blinds are now " + ChipsText(static_cast<double>(E.Blinds.Sb)) + "/" + ChipsText(static_cast<double>(E.Blinds.Bb)) + ", ante " + ChipsText(static_cast<double>(E.Blinds.Ante)) + ".");
 			TimeBank = Min(60.0, TimeBank + 5.0);
 			LastLevelUpAt = Now;
-			Hooks.Sound(SoundId::Level, 1.0);
+			Sound(SoundId::Level, 1.0);
 			break;
 		case TEventType::HandForHand:
 			SystemLine("We are on the bubble. Hand-for-hand play.");
@@ -1463,7 +1511,7 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 			CurrentBanner.Sub = std::to_string(T->Remaining - T->PaidPlaces()) + " away from the money";
 			CurrentBanner.At = Now;
 			CurrentBanner.Color = session_detail::Orange;
-			Hooks.Sound(SoundId::Bubble, 1.0);
+			Sound(SoundId::Bubble, 1.0);
 			if (!T->Hero().Busted)
 			{
 				StoryText("dee-bubble", "Dee", "Bubble? Breathe. Fold the trash, shove the good ones. Nobody remembers who min-cashed scared.");
@@ -1478,7 +1526,7 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 				CurrentBanner.Sub = "Min cash " + Money(T->Payouts.back());
 				CurrentBanner.At = Now;
 				CurrentBanner.Color = session_detail::Green;
-				Hooks.Sound(SoundId::Cash, 1.0);
+				Sound(SoundId::Cash, 1.0);
 				StoryText("dee-itm", "Dee", "In the money. Now play to win, not to min-cash.");
 			}
 			break;
@@ -1491,7 +1539,7 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 				CurrentBanner.Sub = Ordinal(9) + " pays " + Money(T->PrizeFor(9)) + " \xC2\xB7 1st pays " + Money(T->PrizeFor(1));
 				CurrentBanner.At = Now;
 				CurrentBanner.Color = session_detail::Gold;
-				Hooks.Sound(SoundId::Bubble, 1.0);
+				Sound(SoundId::Bubble, 1.0);
 				StoryText("dee-ft", "Dee", "A final table? At this hour? Call me when it is over. Win or lose.");
 			}
 			break;
@@ -1546,7 +1594,7 @@ void Session::SprintStep()
 			BustPlace = Hero.Place;
 			BustPrize = Hero.PrizeCents;
 			BustAt = Now + 2.5;
-			Hooks.Sound(SoundId::Bust, 1.0);
+			Sound(SoundId::Bust, 1.0);
 			BustBanner(Hero, "Busted while sprinting");
 			return;
 		}
@@ -1570,7 +1618,7 @@ void Session::SprintStep()
 			StopSprint("final table");
 			return;
 		}
-	} while (ElapsedMs() < SprintBudgetMs);
+	} while (ElapsedMs() < SprintBudgetMs / static_cast<double>(std::max(1, TableCount())));
 }
 
 // ------------------------------------------------------------------ results
@@ -1583,6 +1631,13 @@ void Session::ShowResults()
 	}
 	BankrollCents += BustPrize + BountyWon;
 	const double Acc = Grades.empty() ? 0.0 : Accuracy(Grades);
+	// Another table still playing (one closing this same frame doesn't count): this one closes with a toast.
+	bool OthersPlaying = false;
+	for (int K = 0; K < TableCount(); ++K)
+	{
+		OthersPlaying = OthersPlaying || (K != Active && !Runs[static_cast<size_t>(K)]->Closing);
+	}
+	ss::Results Saved = LastResults;
 	LastResults = ss::Results();
 	LastResults.EventName = T->Spec.Name;
 	LastResults.Place = BustPlace;
@@ -1608,7 +1663,19 @@ void Session::ShowResults()
 	{
 		Life.Record(WorldMinutes(), (BountyWon > 0 && BustPrize == 0 ? "Bounties: " : "Prize: ") + T->Spec.Name, BustPrize + BountyWon, 0);
 	}
-	HasResults = true;
+	LastResults.SessionEvents = SessionEvents;
+	LastResults.SessionNetCents = BankrollCents - SessionStartBankroll;
+	if (OthersPlaying)
+	{
+		// The other tables keep going: this one closes with a toast, and the results screen waits for the last.
+		Finished.push_back({LastResults, Now});
+		LastResults = Saved;
+		Closing = true;
+	}
+	else
+	{
+		HasResults = true;
+	}
 	LobbyMinutes = std::max(LobbyMinutes, T->ClockMinutes());
 	HistoryEntry Entry;
 	Entry.Name = T->Spec.Name;
@@ -1625,9 +1692,12 @@ void Session::ShowResults()
 	}
 	HasBustInfo = false;
 	CurHand.reset();
-	CurrentScreen = Screen::Results;
-	ResultsAt = Now;
-	Hooks.Heartbeat(false);
+	if (!OthersPlaying)
+	{
+		CurrentScreen = Screen::Results;
+		ResultsAt = Now;
+	}
+	Heartbeat(false);
 	Save();
 	if (BankrollCents < 25 && BustPrize == 0)
 	{
@@ -1662,17 +1732,344 @@ void Session::LeaveResults()
 	T.reset();
 	CurHand.reset();
 	Seats.clear();
+	Runs.clear();
+	Active = -1;
+	Closing = false;
 }
 
 double Session::ClockMinutes() const
 {
-	return T ? T->ClockMinutes() : LobbyMinutes;
+	if (!T)
+	{
+		return LobbyMinutes;
+	}
+	// Each tournament keeps its own clock; the room's is the one furthest along.
+	double Clock = T->ClockMinutes();
+	for (const std::unique_ptr<TableRun>& Run : Runs)
+	{
+		Clock = Run->T ? std::max(Clock, Run->T->ClockMinutes()) : Clock;
+	}
+	return Clock;
 }
 
 double Session::WorldMinutes() const
 {
 	return net::MinutesPerDay * static_cast<double>(net::NightOneDay) + ClockMinutes();
 }
+// ------------------------------------------------------------------ multi-tabling
+
+void Session::SwapActive(TableRun& Run)
+{
+	// Event only ever points at Joined (or is null), so swapping the pointers keeps it right for whichever table is in front.
+	using std::swap;
+	swap(CurrentPace, Run.CurrentPace);
+	swap(CurrentBanner, Run.CurrentBanner);
+	swap(Event, Run.Event);
+	swap(Joined, Run.Joined);
+	swap(T, Run.T);
+	swap(CurHand, Run.CurHand);
+	swap(TableId, Run.TableId);
+	swap(Seats, Run.Seats);
+	swap(ButtonSeat, Run.ButtonSeat);
+	swap(Board, Run.Board);
+	swap(BoardShownAt, Run.BoardShownAt);
+	swap(PotChips, Run.PotChips);
+	swap(Flights, Run.Flights);
+	swap(Chat, Run.Chat);
+	swap(HasPrompt, Run.HasPrompt);
+	swap(Prompt, Run.Prompt);
+	swap(Badges, Run.Badges);
+	swap(Grades, Run.Grades);
+	swap(SitOutNext, Run.SitOutNext);
+	swap(SittingOutThisHand, Run.SittingOutThisHand);
+	swap(Sprinting, Run.Sprinting);
+	swap(SprintStopReason, Run.SprintStopReason);
+	swap(HandsPlayed, Run.HandsPlayed);
+	swap(BiggestPot, Run.BiggestPot);
+	swap(TimeBank, Run.TimeBank);
+	swap(Moving, Run.Moving);
+	swap(MovingFrom, Run.MovingFrom);
+	swap(MovingTo, Run.MovingTo);
+	swap(MovingAt, Run.MovingAt);
+	swap(AutoFolded, Run.AutoFolded);
+	swap(AutoFoldedCards, Run.AutoFoldedCards);
+	swap(AutoFoldedAt, Run.AutoFoldedAt);
+	swap(LastLevelUpAt, Run.LastLevelUpAt);
+	swap(HeroAllInReveal, Run.HeroAllInReveal);
+	swap(FieldCountry, Run.FieldCountry);
+	swap(FieldRegulars, Run.FieldRegulars);
+	swap(FieldPros, Run.FieldPros);
+	swap(Bounties, Run.Bounties);
+	swap(BountyWon, Run.BountyWon);
+	swap(Knockouts, Run.Knockouts);
+	swap(LastBountyAt, Run.LastBountyAt);
+	swap(LastBountyCents, Run.LastBountyCents);
+	swap(LastBountyName, Run.LastBountyName);
+	swap(SeatWon, Run.SeatWon);
+	swap(Cursor, Run.Cursor);
+	swap(NextAt, Run.NextAt);
+	swap(BotPending, Run.BotPending);
+	swap(BotAction, Run.BotAction);
+	swap(BotAt, Run.BotAt);
+	swap(BotSeatIdx, Run.BotSeatIdx);
+	swap(HandDone, Run.HandDone);
+	swap(Revealed, Run.Revealed);
+	swap(HeroFolded, Run.HeroFolded);
+	swap(PotBeforeAward, Run.PotBeforeAward);
+	swap(BustAt, Run.BustAt);
+	swap(HasBustInfo, Run.HasBustInfo);
+	swap(BustPlace, Run.BustPlace);
+	swap(BustPrize, Run.BustPrize);
+	swap(LastIdleChat, Run.LastIdleChat);
+	swap(RivalArrived, Run.RivalArrived);
+	swap(CansShown, Run.CansShown);
+	swap(SprintBubble, Run.SprintBubble);
+	swap(SprintFinal, Run.SprintFinal);
+	swap(Closing, Run.Closing);
+}
+
+int Session::MaxTables() const
+{
+	return Life.Energy < 20.0 ? 2 : TableLimit;
+}
+
+void Session::FocusTable(int Index)
+{
+	if (Index < 0 || Index >= TableCount() || Index == Active)
+	{
+		return;
+	}
+	SwapActive(*Runs[static_cast<size_t>(Active)]);
+	Active = Index;
+	SwapActive(*Runs[static_cast<size_t>(Active)]);
+	FocusHoldUntil = Now + 1.5;
+	Heartbeat(HeroAllInReveal && CurHand && !CurHand->bComplete);
+}
+
+void Session::WithTable(int Index, const std::function<void()>& Fn)
+{
+	if (Index < 0 || Index >= TableCount())
+	{
+		return;
+	}
+	if (Index == Active)
+	{
+		Fn();
+		return;
+	}
+	const int Front = Active;
+	SwapActive(*Runs[static_cast<size_t>(Front)]);
+	SwapActive(*Runs[static_cast<size_t>(Index)]);
+	Active = Index;
+	Fn();
+	SwapActive(*Runs[static_cast<size_t>(Index)]);
+	SwapActive(*Runs[static_cast<size_t>(Front)]);
+	Active = Front;
+}
+
+template <typename Src>
+TableGlance Session::GlanceOf(const Src& From)
+{
+	TableGlance G;
+	G.EventId = From.Joined.Spec.Id;
+	G.Name = From.T ? From.T->Spec.Name : From.Joined.Spec.Name;
+	G.YourTurn = From.HasPrompt;
+	G.TurnOpenedAt = From.Prompt.OpenedAt;
+	const bool Bank = From.Prompt.TimeBankUntil > 0.0;
+	G.Deadline = Bank ? From.Prompt.TimeBankUntil : From.Prompt.Deadline;
+	G.DeadlineStart = Bank ? From.Prompt.Deadline : From.Prompt.OpenedAt;
+	G.Sprinting = From.Sprinting;
+	if (!From.T)
+	{
+		return G;
+	}
+	const Tournament& Tn = *From.T;
+	G.Stack = Tn.Hero().Stack;
+	for (const SeatVis& Sv : From.Seats)
+	{
+		if (Sv.Present && Sv.IsHero)
+		{
+			G.Stack = Sv.Stack + Sv.Bet;
+			G.AllIn = Sv.AllIn;
+		}
+	}
+	const double Bb = static_cast<double>(std::max<Chips>(1, Tn.CurrentLevel().Bb));
+	G.StackBb = static_cast<double>(G.Stack) / Bb;
+	G.Rank = Tn.Hero().Busted ? Tn.Hero().Place : Tn.HeroRank();
+	G.Remaining = Tn.Remaining;
+	G.InMoney = Tn.InTheMoney();
+	G.Busted = From.HasBustInfo || Tn.Hero().Busted;
+	return G;
+}
+
+TableGlance Session::Glance(int Index) const
+{
+	if (Index < 0 || Index >= TableCount())
+	{
+		return TableGlance();
+	}
+	return Index == Active ? GlanceOf(*this) : GlanceOf(*Runs[static_cast<size_t>(Index)]);
+}
+
+void Session::HeroActAt(int Index, const PlayerAction& Action)
+{
+	FocusTable(Index);
+	if (Index == Active)
+	{
+		HeroAct(Action);
+	}
+}
+
+bool Session::IsPlaying(const std::string& EventId) const
+{
+	for (int K = 0; K < TableCount(); ++K)
+	{
+		const LobbyEvent& Ev = K == Active ? Joined : Runs[static_cast<size_t>(K)]->Joined;
+		if (Ev.Spec.Id == EventId)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+int Session::TablesWaiting() const
+{
+	int Count = 0;
+	for (int K = 0; K < TableCount(); ++K)
+	{
+		Count += (K == Active ? HasPrompt : Runs[static_cast<size_t>(K)]->HasPrompt) ? 1 : 0;
+	}
+	return Count;
+}
+
+void Session::ShowLobby()
+{
+	if (CurrentScreen == Screen::Table)
+	{
+		CurrentScreen = Screen::Lobby;
+		ConfirmRegister = false;
+	}
+}
+
+void Session::ShowTables()
+{
+	if (T && CurrentScreen == Screen::Lobby)
+	{
+		CurrentScreen = Screen::Table;
+		FocusHoldUntil = Now + 0.8;
+	}
+}
+
+void Session::CloseFinishedTables()
+{
+	for (int K = TableCount(); K-- > 0;)
+	{
+		const bool Done = K == Active ? Closing : Runs[static_cast<size_t>(K)]->Closing;
+		if (!Done)
+		{
+			continue;
+		}
+		if (K == Active)
+		{
+			SwapActive(*Runs[static_cast<size_t>(K)]); // the finished table goes into its run, to be dropped
+			Active = -1;
+		}
+		else if (K < Active)
+		{
+			--Active;
+		}
+		Runs.erase(Runs.begin() + K);
+	}
+	if (Active < 0 && !Runs.empty())
+	{
+		// The next table forward: the one that has waited longest for the player, else the first.
+		int Pick = 0;
+		double Oldest = 1e300;
+		for (int K = 0; K < TableCount(); ++K)
+		{
+			const TableRun& Run = *Runs[static_cast<size_t>(K)];
+			if (Run.HasPrompt && Run.Prompt.OpenedAt < Oldest)
+			{
+				Oldest = Run.Prompt.OpenedAt;
+				Pick = K;
+			}
+		}
+		Active = Pick;
+		SwapActive(*Runs[static_cast<size_t>(Active)]);
+		FocusHoldUntil = Now + 0.8;
+	}
+	if (Runs.empty() && Active < 0 && CurrentScreen == Screen::Table)
+	{
+		CurrentScreen = Screen::Lobby; // never strands the player on an empty table screen
+	}
+}
+
+void Session::AutoFocusStep()
+{
+	if (!AutoFocus || TableCount() < 2 || CurrentScreen != Screen::Table || Now < FocusHoldUntil || HasPrompt || HasBustInfo)
+	{
+		return;
+	}
+	// The player's own all-in runs out in front unless another clock is nearly gone.
+	const bool Sweating = HeroAllInReveal && CurHand && !CurHand->bComplete;
+	int Pick = -1;
+	double Oldest = 1e300;
+	for (int K = 0; K < TableCount(); ++K)
+	{
+		const TableRun& Run = *Runs[static_cast<size_t>(K)];
+		if (K == Active || !Run.HasPrompt)
+		{
+			continue;
+		}
+		if (Sweating && Run.Prompt.Deadline - Now > 8.0)
+		{
+			continue;
+		}
+		if (Run.Prompt.OpenedAt < Oldest)
+		{
+			Oldest = Run.Prompt.OpenedAt;
+			Pick = K;
+		}
+	}
+	if (Pick >= 0)
+	{
+		FocusTable(Pick);
+		FocusHoldUntil = Now + 0.6;
+	}
+}
+
+void Session::Sound(SoundId Id, double Volume)
+{
+	if (!Background)
+	{
+		Hooks.Sound(Id, Volume);
+		return;
+	}
+	// A table in the background: its turn chime carries, the big moments are soft, chips and cards stay quiet.
+	switch (Id)
+	{
+	case SoundId::Turn: Hooks.Sound(Id, Volume); break;
+	case SoundId::Alert:
+	case SoundId::Win:
+	case SoundId::Bust:
+	case SoundId::Cash:
+	case SoundId::Bubble:
+	case SoundId::Level:
+	case SoundId::Move:
+	case SoundId::AllIn: Hooks.Sound(Id, Volume * 0.35); break;
+	default: break;
+	}
+}
+
+void Session::Heartbeat(bool On)
+{
+	if (!Background)
+	{
+		Hooks.Heartbeat(On);
+	}
+}
+
 // ------------------------------------------------------------------ life
 
 life::Context Session::LifeContext() const
@@ -1738,7 +2135,7 @@ std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
 	}
 	// The host takes the player to the table; it settles up in the save when they come home.
 	Save();
-	Hooks.Sound(SoundId::Click, 0.8);
+	Sound(SoundId::Click, 0.8);
 	return Hooks.GoOut(Id, BuyInCents) ? "" : "Can't get there right now.";
 }
 
@@ -1781,7 +2178,7 @@ std::string Session::StartActivity(const std::string& Id)
 	}
 	HasOutcome = false;
 	ConfirmRegister = false;
-	Hooks.Sound(SoundId::Click, 0.8);
+	Sound(SoundId::Click, 0.8);
 	return "";
 }
 
@@ -1849,7 +2246,7 @@ void Session::FinishSkip()
 	LastOutcome = O;
 	LastOutcome.Money = Change;
 	HasOutcome = true;
-	Hooks.Sound(O.Bad ? SoundId::Bust : Change > 0 ? SoundId::Cash : SoundId::Click, 1.0);
+	Sound(O.Bad ? SoundId::Bust : Change > 0 ? SoundId::Cash : SoundId::Click, 1.0);
 	Save();
 }
 
@@ -1868,7 +2265,7 @@ bool Session::PayRent()
 	Life.RentDeadline = Life.RentsPaid == 1 ? 27.0 * net::MinutesPerDay : Life.RentDeadline + 30.0 * net::MinutesPerDay;
 	Hooks.Text("Landlord", "Got it. Don't make me come up there again.");
 	StoryText("rent-paid", "Dee", "RENT PAID?! Look at you. Laundromat's buying the coffee.");
-	Hooks.Sound(SoundId::Cash, 1.0);
+	Sound(SoundId::Cash, 1.0);
 	Save();
 	return true;
 }
@@ -1922,7 +2319,7 @@ void Session::HandleKnockout(const TEvent& E)
 		LastBountyCents = Cash;
 		LastBountyName = E.Name;
 		SystemLine((T->Spec.MysteryBounty ? "Mystery envelope: " : "Bounty: ") + Money(Cash) + " for knocking out " + E.Name + ".");
-		Hooks.Sound(SoundId::Cash, 1.0);
+		Sound(SoundId::Cash, 1.0);
 	}
 }
 

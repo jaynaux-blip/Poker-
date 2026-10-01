@@ -3,6 +3,7 @@
 // replays them in Chromium so the C++ UI can be compared with the prototype.
 // Usage: ui_test <out-dir>   (with no argument it only checks the frames draw)
 #include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/UI/Avatars.h"
@@ -16,6 +17,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace ui_test
 {
@@ -745,6 +747,161 @@ void AppScreens()
 	}
 }
 
+/** Multi-tabling: the tabs, a table waiting behind another, the tile view and its buttons, the lobby while seated, a closed table, the sitting's results. */
+std::vector<ss::LobbyEvent> OpenEvents(ss::Session& S, size_t Count, int MaxEntrants)
+{
+	const ss::net::Network& Net = ss::net::Shared();
+	const double World = S.WorldMinutes();
+	std::vector<ss::LobbyEvent> Out;
+	std::set<std::string> Names;
+	for (const ss::net::EventInstance& E : Net.Window(World - 180.0, World + 60.0))
+	{
+		const ss::LobbyEvent L = Net.Listing(E, nullptr, S.Unlocks());
+		if (L.Joinable && L.BuyInCents <= 1100 && L.Spec.Entrants <= MaxEntrants && Out.size() < Count && Names.insert(L.Spec.Name).second)
+		{
+			Out.push_back(L);
+		}
+	}
+	return Out;
+}
+
+void MultiScreens()
+{
+	QuietHooks H;
+	ss::Session S(H, "ui-multi");
+	ss::ui::RiverLine RL(S);
+	TableMeasurer M;
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 6000;
+	auto Frame = [&](float X, float Y, bool Down, bool Pressed, bool Released, double At) {
+		RL.UI.Ptr.Active = true;
+		RL.UI.Ptr.X = X;
+		RL.UI.Ptr.Y = Y;
+		RL.UI.Ptr.Down = Down;
+		RL.UI.Ptr.Pressed = Pressed;
+		RL.UI.Ptr.Released = Released;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		RL.Draw(C, At);
+	};
+	const std::vector<ss::LobbyEvent> Picks = OpenEvents(S, 4, 3000);
+	Expect(Picks.size() == 4, "four events open for the multi-table screens");
+	if (Picks.size() < 4)
+	{
+		return;
+	}
+	double Now = 1.0;
+	for (const ss::LobbyEvent& L : Picks)
+	{
+		S.RegisterEvent(L);
+		Now = Run(S, RL, Now, 3.0);
+	}
+	Expect(S.TableCount() == 4, "four tables open");
+	RL.UI.Ptr.Active = false;
+
+	// One table in front, another waiting behind it: its tab flashes.
+	S.AutoFocus = false;
+	for (int Guard = 0; Guard < 30 * 600 && !(S.TablesWaiting() >= 1 && !S.HasPrompt); ++Guard)
+	{
+		Now = Run(S, RL, Now, 1.0 / 30.0);
+	}
+	Expect(S.TablesWaiting() >= 1 && !S.HasPrompt, "a table behind the one in front waits for the player");
+	Now = Run(S, RL, Now, 0.4);
+	Emit("multi_tabs", RL, Now);
+
+	// Every table at once, each with its own buttons.
+	S.Tiled = true;
+	S.AutoFocus = true;
+	for (int Guard = 0; Guard < 30 * 600 && S.TablesWaiting() < 1; ++Guard)
+	{
+		Now = Run(S, RL, Now, 1.0 / 30.0);
+	}
+	Now = Run(S, RL, Now, 0.5);
+	Emit("multi_tiles", RL, Now);
+	int Waiting = -1;
+	for (int I = 0; I < S.TableCount(); ++I)
+	{
+		Waiting = Waiting < 0 && S.Glance(I).YourTurn ? I : Waiting;
+	}
+	Expect(Waiting >= 0, "a tile waits for the player");
+	if (Waiting >= 0)
+	{
+		// Fold from that tile's own button.
+		const float Tx = 8.0f + static_cast<float>(Waiting % 2) * 796.0f;
+		const float Ty = 72.0f + static_cast<float>(Waiting / 2) * 445.0f;
+		Frame(Tx + 52.0f, Ty + 437.0f - 30.0f, true, true, false, Now);
+		Frame(Tx + 52.0f, Ty + 437.0f - 30.0f, false, false, true, Now);
+		Expect(!S.Glance(Waiting).YourTurn && S.FocusedTable() == Waiting, "a tile's button acts at its table and brings it forward");
+		RL.UI.Ptr.Active = false;
+	}
+
+	// Back in the lobby with the tables still running: the tabs come along, and a seated event opens its table.
+	S.ShowLobby();
+	RL.OpenPage(ss::ui::RiverLine::Page::Lobby, Now);
+	RL.SelectEvent(Picks[1].Spec.Id);
+	Now = Run(S, RL, Now, 1.2);
+	Emit("multi_lobby", RL, Now);
+	Frame(1300.0f, 890.0f, true, true, false, Now);
+	Frame(1300.0f, 890.0f, false, false, true, Now);
+	Expect(S.CurrentScreen == ss::Screen::Table && S.Glance(S.FocusedTable()).EventId == Picks[1].Spec.Id, "Open table goes to the event's table");
+	RL.UI.Ptr.Active = false;
+
+	// A table that closed while the others play on.
+	S.Tiled = false;
+	ss::FinishedTable Done;
+	Done.Result.EventName = "$3.30 Daily Grind";
+	Done.Result.Place = 41;
+	Done.Result.Entrants = 501;
+	Done.Result.PrizeCents = 612;
+	Done.Result.AccuracyPct = 84.2;
+	Done.Result.Grades.resize(9);
+	Done.At = Now - 1.0;
+	S.Finished.push_back(Done);
+	Now = Run(S, RL, Now, 0.6);
+	Emit("multi_toast", RL, Now);
+
+	// Two tables tiled, played to the end: the results add up the sitting.
+	ss::Session Two(H, "ui-multi-two");
+	ss::ui::RiverLine RL2(Two);
+	Two.CurrentScreen = ss::Screen::Lobby;
+	Two.BankrollCents = 3000;
+	const std::vector<ss::LobbyEvent> Small = OpenEvents(Two, 2, 1500);
+	Expect(Small.size() == 2, "two small events open");
+	if (Small.size() < 2)
+	{
+		return;
+	}
+	Two.RegisterEvent(Small[0]);
+	Two.RegisterEvent(Small[1]);
+	Two.Tiled = true;
+	double At = 1.0;
+	for (int Guard = 0; Guard < 30 * 600 && Two.TablesWaiting() < 1; ++Guard)
+	{
+		At = Run(Two, RL2, At, 1.0 / 30.0);
+	}
+	At = Run(Two, RL2, At, 0.5);
+	Emit("multi_tiles2", RL2, At);
+	ss::Rng Choice("ui-multi-two");
+	for (int Guard = 0; Guard < 30 * 6000 && Two.CurrentScreen == ss::Screen::Table; ++Guard)
+	{
+		At += 1.0 / 30.0;
+		Two.Update(At);
+		for (int I = 0; I < Two.TableCount(); ++I)
+		{
+			Two.WithTable(I, [&]() { Two.CurrentPace = Two.CurrentPace == ss::Pace::Full ? ss::Pace::Full : ss::Pace::Sprint; });
+			if (Two.Glance(I).YourTurn)
+			{
+				Two.HeroActAt(I, Choice.Chance(0.5) ? ss::PlayerAction::Call() : ss::PlayerAction::Fold());
+				break;
+			}
+		}
+	}
+	Expect(Two.CurrentScreen == ss::Screen::Results && Two.LastResults.SessionEvents == 2, "the last of two tables brings the sitting's results");
+	At = Run(Two, RL2, At, 1.6);
+	Emit("results_sitting", RL2, At);
+	std::printf("  multi          4 tables (tabs, tiles, lobby, toast), 2 tiled to the end: net %s\n", ss::Money(Two.LastResults.SessionNetCents).c_str());
+}
+
 void Clicks()
 {
 	// A click on "Log in" moves the boot screen to the lobby; clicks elsewhere do nothing.
@@ -820,6 +977,7 @@ int main(int Argc, char** Argv)
 	ui_test::Results();
 	ui_test::Props();
 	ui_test::Avatars();
+	ui_test::MultiScreens();
 	ui_test::FrontEndFlows();
 	ui_test::FrontEndScreens();
 	if (ui_test::Failures == 0)

@@ -72,11 +72,16 @@ The whole online career is played from a first-person desk. The apartment is the
 - **Career.** Lifetime stats, a rank by winnings (Rookie to Legend), the rent bar ($1,225 by Friday), a career path from first cash to the RCOP Main Event, and a head-to-head card against the rival.
 - **What you can play.** Tonight's story events and any scheduled Hold'em freezeout or re-entry with a full-ring field of up to 3,000 can be played, an hour before the start through late registration. Bounties, satellites, Omaha, six-max and huge fields are locked "until later in your career."
 
-**Multi-tabling.** You can play several tournaments at once, tiled across your monitors. It is the online game's signature skill: managing your attention.
+**Multi-tabling (built).** You can play several tournaments at once. It is the online game's signature skill: managing your attention.
 
-- You focus a table by looking at it.
-- Tables where it's your turn flash and chime, and each table has its own time bank.
-- How many tables you can handle depends on your monitor count, your Focus stat and your fatigue.
+- **Up to four tables,** two when you're exhausted (energy under 20). Every open table keeps playing whether you're looking at it, browsing the lobby or in another app; nothing pauses for you.
+- **Adding a table:** the top bar's pages stay a click away while you play, and the + button opens the lobby. Registering opens the new table in front. You can't take two seats in the same event; a seated event's button reads "Open table".
+- **Table tabs** in the top bar show each table's stack in big blinds and your rank. A table where it's your turn turns orange and shows a shrinking clock ring and the seconds left, and its turn chime plays even when it's behind. Chips and cards from tables behind stay quiet.
+- **One in front (default):** when the table in front doesn't need you and another does, that one comes forward on its own (the longest-waiting first). It waits a moment after you act or switch, and holds while your own all-in runs out unless another clock is nearly gone.
+- **Tile view:** all tables at once in a 2×2 grid (two side by side), each with its own Fold, Check/Call, Raise and All-in buttons, its clock bar, time bank, pace and banners. The keyboard's F, C and R act at the highlighted table.
+- **Each table is its own tournament:** its own clock, levels, time bank, pace (one can Sprint while the others play), bounties and grades. Tilt is yours across all of them.
+- **When a table finishes while others run,** it closes with a toast (place, prize, accuracy) and its result goes into your history and bankroll. The results screen waits for the last table and adds up the sitting: how many tournaments and the net across every buy-in.
+- Later: the Focus stat and a second monitor raise the limit; the HUD and notes carry across tables.
 
 **Reading opponents online (digital tells)**
 

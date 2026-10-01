@@ -7,6 +7,8 @@
 #include "ShortStack/Rng.h"
 #include "ShortStack/Tournament.h"
 
+#include <functional>
+#include <map>
 #include <memory>
 #include <set>
 
@@ -155,6 +157,35 @@ struct Results
 	int Knockouts = 0;
 	std::string SeatWon;   // satellites: the seat's event ("" when none)
 	Chips SeatValueCents = 0;
+	// The whole sitting, when it was more than one table (multi-tabling).
+	int SessionEvents = 1;
+	Chips SessionNetCents = 0; // bankroll now minus before the first buy-in
+};
+
+/** One tournament out of several finished while the others were still running. */
+struct FinishedTable
+{
+	ss::Results Result;
+	double At = 0.0;
+};
+
+/** A look at one open table without bringing it to the front (table tabs, tiles). */
+struct TableGlance
+{
+	std::string EventId;
+	std::string Name;
+	bool YourTurn = false;
+	double TurnOpenedAt = 0.0;
+	double Deadline = 0.0;      // the action clock, or the time bank once it runs
+	double DeadlineStart = 0.0; // when that clock started
+	Chips Stack = 0;
+	double StackBb = 0.0;
+	int Rank = 0;
+	int Remaining = 0;
+	bool InMoney = false;
+	bool Busted = false;  // waiting for the results to post
+	bool Sprinting = false;
+	bool AllIn = false;   // the hero's chips are in the middle
 };
 
 struct Banner
@@ -295,6 +326,38 @@ public:
 	void BeginSprint();
 	void StopSprint(const std::string& Reason = "Stopped");
 	void LeaveResults();
+
+	// ------------------------------------------------------------ multi-tabling
+	// Several tournaments at once. The table in front lives in the fields above (T, CurHand, Seats, Prompt, ...);
+	// the others wait in Runs and take their turn in Update. Every open table keeps playing, wherever the player looks.
+	static constexpr int TableLimit = 4;
+	/** How many tables the player can handle: TableLimit, two when exhausted. */
+	SHORTSTACKCORE_API int MaxTables() const;
+	int TableCount() const { return static_cast<int>(Runs.size()); }
+	/** The table in front (index into the open tables), -1 with none open. */
+	int FocusedTable() const { return Active; }
+	/** Brings an open table to the front. */
+	SHORTSTACKCORE_API void FocusTable(int Index);
+	/** Runs Fn with table Index in front (S.T, S.Seats, S.Prompt... are its), then puts the front table back. Fn must not open or close tables. */
+	SHORTSTACKCORE_API void WithTable(int Index, const std::function<void()>& Fn);
+	SHORTSTACKCORE_API TableGlance Glance(int Index) const;
+	/** Acts at table Index (a tile's buttons): brings it to the front and acts there. */
+	SHORTSTACKCORE_API void HeroActAt(int Index, const PlayerAction& Action);
+	/** Already seated in this scheduled instance. */
+	SHORTSTACKCORE_API bool IsPlaying(const std::string& EventId) const;
+	/** Open tables where it's the player's turn. */
+	SHORTSTACKCORE_API int TablesWaiting() const;
+	/** To the lobby with tables still running (they keep playing), and back. */
+	SHORTSTACKCORE_API void ShowLobby();
+	SHORTSTACKCORE_API void ShowTables();
+	/** All tables at once, each with its own buttons (the tile view), or one in front at a time. */
+	bool Tiled = false;
+	/** With one table in front: when it doesn't need the player and another does, that one comes forward. */
+	bool AutoFocus = true;
+	/** The player is out (or has won) and the table is about to post its result. */
+	bool Finishing() const { return HasBustInfo; }
+	/** Tournaments that ended while others were still running, newest last (toasts). */
+	std::vector<FinishedTable> Finished;
 	/** Tournament clock (drives the dawn outside), or the lobby clock. Minutes after midnight on Night One. */
 	SHORTSTACKCORE_API double ClockMinutes() const;
 	/** The clock on the network's calendar (net::DayOf, net::TimeLabel). */
@@ -356,6 +419,92 @@ public:
 	const TPlayer* PlayerById(const std::string& Id) const;
 
 private:
+	/** Everything that belongs to one table, for the tables not in front (see SwapActive). */
+	struct TableRun
+	{
+		ss::Pace CurrentPace = ss::Pace::Smart;
+		ss::Banner CurrentBanner;
+		const LobbyEvent* Event = nullptr;
+		LobbyEvent Joined;
+		std::unique_ptr<Tournament> T;
+		std::unique_ptr<Hand> CurHand;
+		int TableId = 0;
+		std::vector<SeatVis> Seats;
+		int ButtonSeat = 0;
+		std::vector<Card> Board;
+		std::vector<double> BoardShownAt;
+		Chips PotChips = 0;
+		std::vector<Flight> Flights;
+		std::vector<ChatLine> Chat;
+		bool HasPrompt = false;
+		HeroPrompt Prompt;
+		std::vector<GradeBadge> Badges;
+		std::vector<DecisionGrade> Grades;
+		bool SitOutNext = false;
+		bool SittingOutThisHand = false;
+		bool Sprinting = false;
+		std::string SprintStopReason;
+		int HandsPlayed = 0;
+		Chips BiggestPot = 0;
+		double TimeBank = 30.0;
+		bool Moving = false;
+		int MovingFrom = 0;
+		int MovingTo = 0;
+		double MovingAt = 0.0;
+		bool AutoFolded = false;
+		std::vector<Card> AutoFoldedCards;
+		double AutoFoldedAt = 0.0;
+		double LastLevelUpAt = -100.0;
+		bool HeroAllInReveal = false;
+		std::map<std::string, std::string> FieldCountry;
+		std::set<std::string> FieldRegulars;
+		std::set<std::string> FieldPros;
+		std::map<std::string, Chips> Bounties;
+		Chips BountyWon = 0;
+		int Knockouts = 0;
+		double LastBountyAt = -100.0;
+		Chips LastBountyCents = 0;
+		std::string LastBountyName;
+		bool SeatWon = false;
+		size_t Cursor = 0;
+		double NextAt = 0.0;
+		bool BotPending = false;
+		PlayerAction BotAction;
+		double BotAt = 0.0;
+		int BotSeatIdx = -1;
+		bool HandDone = false;
+		bool Revealed = false;
+		bool HeroFolded = false;
+		Chips PotBeforeAward = 0;
+		double BustAt = 0.0;
+		bool HasBustInfo = false;
+		int BustPlace = 0;
+		Chips BustPrize = 0;
+		double LastIdleChat = 0.0;
+		bool RivalArrived = false;
+		int CansShown = 1;
+		bool SprintBubble = false;
+		bool SprintFinal = false;
+		bool Closing = false;
+	};
+	/** Trades the front table's fields with Run's: checks the front table in, or Run's out. */
+	void SwapActive(TableRun& Run);
+	template <typename Src>
+	static TableGlance GlanceOf(const Src& From);
+	void TableStep();
+	void CloseFinishedTables();
+	void AutoFocusStep();
+	void Sound(SoundId Id, double Volume);
+	void Heartbeat(bool On);
+
+	std::vector<std::unique_ptr<TableRun>> Runs;
+	int Active = -1;
+	bool Background = false; // a table not in front is taking its turn: quieter, no heartbeat
+	bool Closing = false;    // the front table finished while others play on; Update closes it
+	double FocusHoldUntil = 0.0;
+	Chips SessionStartBankroll = 0;
+	int SessionEvents = 0;
+
 	void StoryText(const std::string& Key, const std::string& From, const std::string& Body, bool Once = true);
 	void Push(const std::string& Who, const std::string& Text, ChatKind Kind);
 	std::string SeatName(int Seat) const;

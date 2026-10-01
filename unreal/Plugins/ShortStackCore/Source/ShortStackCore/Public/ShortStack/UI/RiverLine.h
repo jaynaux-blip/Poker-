@@ -12,7 +12,8 @@ namespace ui
  * RiverLine: the fictional poker site running on the laptop. Draws the boot
  * screen, the network lobby (schedule, series, leaderboards, news, career),
  * the table and results into a canvas each frame and turns pointer and key
- * input into session actions. The table and results are a port of
+ * input into session actions. With several tables open (multi-tabling) it shows
+ * them as tabs in the top bar, one in front, or tiled side by side. The table and results are a port of
  * web/src/client/riverline.ts; the lobby pages live in RiverLineNet.cpp.
  */
 class RiverLine
@@ -167,6 +168,12 @@ private:
 	void SidePanel(double Now);
 	void Overlays(double Now);
 	void ResultsScreen(double Now);
+	// Multi-tabling (RiverLineTables.cpp).
+	void TableStrip(float X, double Now);
+	void Tiles(double Now);
+	void Tile(int Index, const Rect& R, bool Front, double Now);
+	void FinishedToasts(double Now);
+	int TileClicked = -1;
 
 	float GradeLabel(Grade G, const std::string& Rest, float X, float Y, const TextStyle& Style, bool Draw = true);
 	float ArrowText(const std::string& Left, const std::string& Right, float X, float Y, const TextStyle& Style);

@@ -114,9 +114,19 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 		{
 		case Screen::Boot: Boot(Now); break;
 		case Screen::Lobby: LobbyPages(Now); break;
-		case Screen::Table: Table(Now); break;
+		case Screen::Table:
+			if (S.Tiled && S.TableCount() >= 2)
+			{
+				Tiles(Now);
+			}
+			else
+			{
+				Table(Now);
+			}
+			break;
 		case Screen::Results: ResultsScreen(Now); break;
 		}
+		FinishedToasts(Now);
 	}
 	else if (AppShown == App::ShiftLink)
 	{
@@ -768,7 +778,17 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 			const int Pf = static_cast<int>(JsRound(static_cast<double>(Pl->PfrHands) / Pl->Hands * 100.0));
 			const std::string Hud = std::to_string(Vp) + "/" + std::to_string(Pf) + " \xC2\xB7 " + std::to_string(Pl->Hands) + "h";
 			const Color Col = Vp >= 45 ? Hex(0xff9aa4) : Vp <= 14 ? Hex(0x8fb7ff) : pal::Muted;
-			UI.Text(Hud, P.X, Plate.Y - (Seat.HasCards && !Seat.Folded ? 72.0f : 8.0f), Ts(13.0f, 700, Col, Align::Center, Baseline::Alphabetic, true));
+			float Hy = Plate.Y - (Seat.HasCards && !Seat.Folded ? 72.0f : 8.0f);
+			float Hx = P.X;
+			Align Ha = Align::Center;
+			if (Hy < RlTop + 20.0f)
+			{
+				// The seats along the top: beside their cards, toward the middle, clear of the top bar.
+				Hy = Plate.Y - 30.0f;
+				Hx = P.X + (P.X < TableCx ? 66.0f : -66.0f);
+				Ha = P.X < TableCx ? Align::Left : Align::Right;
+			}
+			UI.Text(Hud, Hx, Hy, Ts(13.0f, 700, Col, Ha, Baseline::Alphabetic, true));
 		}
 	}
 }
@@ -909,7 +929,7 @@ double RiverLine::PotRaise(const HeroPrompt& P) const
 	return JsRound(Cur + static_cast<double>(P.Pot + P.ToCall));
 }
 
-void RiverLine::Controls(double /*Now*/)
+void RiverLine::Controls(double Now)
 {
 	const float Ax = 640.0f;
 	const float Aw = 1170.0f - Ax;
@@ -968,7 +988,8 @@ void RiverLine::Controls(double /*Now*/)
 	if (!S.HasPrompt)
 	{
 		// Waiting state.
-		if (S.CurHand && !S.CurHand->bComplete && !S.Sprinting && S.CurHand->ToAct >= 0)
+		const bool NoteUp = !S.Grades.empty() && !S.Badges.empty() && Now - S.Badges.back().At < 3.2; // GradeBadges explains the last decision here
+		if (S.CurHand && !S.CurHand->bComplete && !S.Sprinting && S.CurHand->ToAct >= 0 && !NoteUp)
 		{
 			const HandSeat& ToAct = S.CurHand->Seats[static_cast<size_t>(S.CurHand->ToAct)];
 			if (ToAct.Id != HeroId)
@@ -1301,7 +1322,14 @@ void RiverLine::ResultsScreen(double Now)
 		UI.Text("No cash this time", 60.0f, RlTop + 250.0f, Ts(40.0f, 800, pal::Muted));
 	}
 	UI.Text("Buy-in " + (R.BuyInCents ? Money(R.BuyInCents) : std::string("free")) + " \xC2\xB7 " + std::to_string(R.Hands) + " hands \xC2\xB7 biggest pot won " + ChipsText(static_cast<double>(R.BiggestPot)), 60.0f, RlTop + 292.0f, Ts(17.0f, 500, pal::Muted));
-	UI.Text("Balance now " + Money(S.BankrollCents), 60.0f, RlTop + 330.0f, Ts(20.0f, 700, pal::Ink));
+	const float BalW = UI.Text("Balance now " + Money(S.BankrollCents), 60.0f, RlTop + 330.0f, Ts(20.0f, 700, pal::Ink));
+	if (R.SessionEvents > 1)
+	{
+		// Multi-tabling: the whole sitting, every buy-in against every prize.
+		const std::string Net = (R.SessionNetCents >= 0 ? "+" : "") + Money(R.SessionNetCents);
+		const float Lw = UI.Text("This sitting: " + std::to_string(R.SessionEvents) + " tournaments \xC2\xB7 net ", 84.0f + BalW, RlTop + 330.0f, Ts(17.0f, 600, pal::Muted));
+		UI.Text(Net, 84.0f + BalW + Lw, RlTop + 330.0f, Ts(17.0f, 800, R.SessionNetCents >= 0 ? pal::Green : pal::Red, Align::Left, Baseline::Alphabetic, true));
+	}
 
 	// Accuracy gauge.
 	const float Gx = 1240.0f;

@@ -333,8 +333,24 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 	else if (S.T && AppShown != App::RiverLine && Lane.W > 120.0f)
 	{
 		C->FillCircle(Lane.X + 10.0f, R.Y + R.H / 2.0f, 4.0f, NetA(pal::Red, 0.6f + 0.4f * Nf(std::sin(Now * 4.0))));
-		UI.Text(S.HasPrompt ? "Your turn at " + S.T->Spec.Name + "  \xC2\xB7  the clock is running" : "Playing " + S.T->Spec.Name, Lane.X + 22.0f, R.Y + R.H / 2.0f + 1.0f,
-			Ts(13.0f, 700, S.HasPrompt ? pal::Red : Hex(0xb9c4d6), Align::Left, Baseline::Middle, false, Lane.W - 30.0f));
+		const int Waiting = S.TablesWaiting();
+		const int Tables = S.TableCount();
+		std::string Lane2 = Tables > 1 ? "Playing " + std::to_string(Tables) + " tables" : "Playing " + S.T->Spec.Name;
+		if (Waiting > 1)
+		{
+			Lane2 = "Your turn at " + std::to_string(Waiting) + " tables  \xC2\xB7  the clocks are running";
+		}
+		else if (Waiting == 1)
+		{
+			std::string Where = S.T->Spec.Name;
+			for (int I = 0; I < Tables; ++I)
+			{
+				const TableGlance G = S.Glance(I);
+				Where = G.YourTurn ? G.Name : Where;
+			}
+			Lane2 = "Your turn at " + Where + "  \xC2\xB7  the clock is running";
+		}
+		UI.Text(Lane2, Lane.X + 22.0f, R.Y + R.H / 2.0f + 1.0f, Ts(13.0f, 700, Waiting > 0 ? pal::Red : Hex(0xb9c4d6), Align::Left, Baseline::Middle, false, Lane.W - 30.0f));
 	}
 	// Toast for something that can't be done.
 	if (Now - ToastAt < 3.0 && !Toast.empty())
@@ -690,7 +706,7 @@ void RiverLine::BurnerApp(double Now)
 		{
 			return;
 		}
-		static const char* Days[7] = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+		static const char* NightNames[7] = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
 		// The night a game is on: tonight's while its doors are open, else the next one.
 		auto NightOf = [&](const life::Activity& A) {
 			const double At = life::InWindow(A, Ctx.World) ? Ctx.World : life::NextOpen(A, Ctx.World);
@@ -699,7 +715,7 @@ void RiverLine::BurnerApp(double Now)
 			{
 				--Day;
 			}
-			return Days[((Day % 7) + 7) % 7];
+			return NightNames[((Day % 7) + 7) % 7];
 		};
 		const float Gap = 16.0f;
 		const float TotalW = NetW - 420.0f;

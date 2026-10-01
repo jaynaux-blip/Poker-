@@ -116,6 +116,8 @@ void RiverLine::NavTabs(double Now)
 {
 	const net::Network& Net = net::Shared();
 	const bool InLobby = S.CurrentScreen == Screen::Lobby;
+	// At the tables the pages are a click away; the tables keep playing.
+	const bool Navigable = InLobby || (S.CurrentScreen == Screen::Table && S.T);
 	const char* Names[5] = {"Lobby", "Series", "Leaderboards", "News", "Career"};
 	float X = 250.0f;
 	float TargetX = NavX;
@@ -131,13 +133,14 @@ void RiverLine::NavTabs(double Now)
 	for (int I = 0; I < 5; ++I)
 	{
 		const float Tw = UI.Measure(Names[I], 17.0f, 700);
-		const Ui::ClickState St = UI.Clickable(std::string("nav") + Names[I], {X - 12.0f, 10.0f, Tw + 24.0f, NetTop - 12.0f}, InLobby);
+		const Ui::ClickState St = UI.Clickable(std::string("nav") + Names[I], {X - 12.0f, 10.0f, Tw + 24.0f, NetTop - 12.0f}, Navigable);
 		if (St.Clicked)
 		{
+			S.ShowLobby();
 			OpenPage(static_cast<Page>(I), Now);
 		}
 		const bool Active = InLobby && PageShown == static_cast<Page>(I);
-		const Color Col = !InLobby ? pal::Dim : Active ? pal::Ink : St.Hover ? Hex(0xc3cedf) : pal::Muted;
+		const Color Col = !Navigable ? pal::Dim : Active ? pal::Ink : St.Hover ? Hex(0xc3cedf) : InLobby ? pal::Muted : pal::Dim;
 		UI.Text(Names[I], X, 40.0f, Ts(17.0f, Active ? 700 : 500, Col));
 		if (Active)
 		{
@@ -180,17 +183,8 @@ void RiverLine::NavTabs(double Now)
 		C->GlowRoundRect({NavX - 4.0f, NetTop - 7.0f, NavW + 8.0f, 8.0f}, 4.0f, NetA(pal::Accent, 0.35f), 8.0f);
 		UI.RRect({NavX, NetTop - 4.0f, NavW, 3.0f}, 1.5f, pal::Accent);
 	}
-	if (!InLobby && S.T)
-	{
-		// The tournament being played.
-		const float Px = X + 6.0f;
-		const std::string Name = S.T->Spec.Name;
-		const float W = UI.Measure(Name, 14.0f, 700) + 64.0f;
-		UI.RRect({Px, 17.0f, W, 30.0f}, 15.0f, Rgba(239, 77, 90, 0.12f), NetA(pal::Red, 0.5f));
-		C->FillCircle(Px + 16.0f, 32.0f, 4.5f, NetA(pal::Red, 0.6f + 0.4f * Nf(std::sin(Now * 4.0))));
-		UI.Text("LIVE", Px + 26.0f, 36.5f, Ts(11.0f, 800, pal::Red));
-		UI.Text(Name, Px + 58.0f, 37.0f, Ts(14.0f, 700, pal::Ink));
-	}
+	// The tables being played: tabs that flash when one needs the player.
+	TableStrip(X, Now);
 }
 
 void RiverLine::Panel(const Rect& R, float Radius)
@@ -1102,6 +1096,24 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 		O.Sub = Sub;
 		UI.Button("regx", R, Label, O);
 	};
+	if (S.IsPlaying(E.Id))
+	{
+		// Seated in it: the button goes to its table.
+		int Seat = 0;
+		for (int I = 0; I < S.TableCount(); ++I)
+		{
+			Seat = S.Glance(I).EventId == E.Id ? I : Seat;
+		}
+		const TableGlance G = S.Glance(Seat);
+		O.Kind = G.YourTurn ? ButtonKind::Gold : ButtonKind::Primary;
+		O.Sub = G.YourTurn ? std::string("It's your turn") : "You're in \xC2\xB7 " + Grouped(G.Rank) + " of " + Grouped(G.Remaining);
+		if (UI.Button("regopen", R, "Open table", O))
+		{
+			S.ShowTables();
+			S.FocusTable(Seat);
+		}
+		return;
+	}
 	if (L.St == net::Status::Finished)
 	{
 		const net::EventResult& Res = Net.Result(E);
@@ -1138,6 +1150,10 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 	else if (!Affordable)
 	{
 		Disabled("Insufficient funds", "Balance " + Money(S.BankrollCents) + " \xC2\xB7 buy-in " + net::BuyIn(T.BuyInCents));
+	}
+	else if (S.TableCount() >= S.MaxTables())
+	{
+		Disabled("Table limit reached", S.MaxTables() < ss::Session::TableLimit ? "Too tired for more than " + std::to_string(S.MaxTables()) + " tables" : "Four tables is as many as you can follow");
 	}
 	else if (!S.ConfirmRegister)
 	{
