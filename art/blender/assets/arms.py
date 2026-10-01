@@ -676,7 +676,7 @@ def sleeve_material():
 MESHES = ['SK_Arms']
 DOUBLE_SIDED = False
 TEXTURE_SIZE = 2048
-TEXTURE_SIZES = {'arms_skin': 4096, 'arms_sleeve': 4096}
+TEXTURE_SIZES = {'arms_skin': 4096, 'arms_sleeve': 2048}  # the sleeve is mostly out of view; 4K would put the glb over 50 MB
 AO_DISTANCE = 0.02
 TYPING = dict(index=(26, 40, 18), middle=(24, 44, 20), ring=(28, 46, 20), pinky=(32, 46, 18))
 
