@@ -6,6 +6,7 @@
 #include "BackRoomPlayer.h"
 #include "BackRoomStage.h"
 #include "Engine/World.h"
+#include "Misc/App.h"
 #include "NightOneAudio.h"
 #include "TimerManager.h"
 
@@ -36,6 +37,35 @@ FString CardName(int32 Card)
 {
 	return UTF8_TO_TCHAR(ss::CardToString(Card).c_str());
 }
+
+const TCHAR* MeaningWord(uint8 Means)
+{
+	switch (static_cast<EBackRoomTellMeaning>(Means))
+	{
+	case EBackRoomTellMeaning::Strong: return TEXT("strength");
+	case EBackRoomTellMeaning::Weak: return TEXT("weakness");
+	default: return TEXT("a bluff");
+	}
+}
+
+/** What the sharper (or louder) regulars say when they catch the hero's hands shaking. */
+FString ShakeLine(const FString& Name, bool bReadsWeak, FRandomStream& Fx)
+{
+	if (Name == TEXT("Mei"))
+	{
+		return bReadsWeak ? TEXT("Your hands are shaking. Call.") : TEXT("Hands like that? I'm out.");
+	}
+	if (Name == TEXT("Sal"))
+	{
+		return bReadsWeak ? TEXT("I've seen that shake before, kid. Call.") : TEXT("I know that shake. Take it.");
+	}
+	if (Name == TEXT("Big Lou"))
+	{
+		return Fx.FRand() < 0.5f ? TEXT("Look at those hands go! Lou calls!") : TEXT("You're shaking like a leaf. I'm in!");
+	}
+	return Fx.FRand() < 0.5f ? TEXT("You're nervous, man. I call.") : TEXT("Shaky shaky. Call.");
+}
+
 } // namespace BackRoomTableDetail
 
 using namespace BackRoomTableDetail;
@@ -65,6 +95,36 @@ void ABackRoomTable::HookSounds(ABackRoomPlayer* Player)
 ABackRoomTable::~ABackRoomTable() = default;
 
 // ------------------------------------------------------------------ setup
+
+FString ABackRoomTable::ReadKey(const ABackRoomPlayer* Player, uint8 Tell)
+{
+	const FString Name = Player ? Player->Persona.Name : TEXT("?");
+	return Name + TEXT("/") + StaticEnum<EBackRoomTell>()->GetNameStringByValue(Tell);
+}
+
+FString ABackRoomTable::TellPhrase(uint8 Tell)
+{
+	switch (static_cast<EBackRoomTell>(Tell))
+	{
+	case EBackRoomTell::ChipGlance: return TEXT("the glance at the chips");
+	case EBackRoomTell::BrowFlash: return TEXT("the eyebrow flash");
+	case EBackRoomTell::Swallow: return TEXT("the dry swallow");
+	case EBackRoomTell::LipPress: return TEXT("the pressed lips");
+	case EBackRoomTell::Freeze: return TEXT("going still");
+	case EBackRoomTell::StareDown: return TEXT("the stare");
+	case EBackRoomTell::LookAway: return TEXT("looking away");
+	case EBackRoomTell::Tremble: return TEXT("the shaking hands");
+	case EBackRoomTell::NeckTouch: return TEXT("the hand to the neck");
+	case EBackRoomTell::FalseSmile: return TEXT("the mouth-only smile");
+	case EBackRoomTell::RealSmile: return TEXT("the smile that reaches the eyes");
+	case EBackRoomTell::BlinkBurst: return TEXT("the blinking");
+	case EBackRoomTell::Sigh: return TEXT("the big sigh");
+	case EBackRoomTell::Recheck: return TEXT("checking the cards again");
+	case EBackRoomTell::PupilFlare: return TEXT("the wide pupils");
+	case EBackRoomTell::ChipReach: return TEXT("reaching for chips");
+	default: return TEXT("that");
+	}
+}
 
 void ABackRoomTable::AddPlayer(ABackRoomPlayer* Player, int32 TableSeat, ss::Archetype Archetype, int64 BuyIn)
 {
@@ -96,6 +156,13 @@ void ABackRoomTable::AddPlayer(ABackRoomPlayer* Player, int32 TableSeat, ss::Arc
 		if (!S.bHero)
 		{
 			Opponents.Add(Player);
+			TWeakObjectPtr<ABackRoomTable> Self = this;
+			Player->TellHook = [Self](ABackRoomPlayer* P, uint8 Tell, uint8 Means, bool bHonest, float Studied) {
+				if (ABackRoomTable* T = Self.Get())
+				{
+					T->OnTellSeen(P, Tell, Means, bHonest, Studied);
+				}
+			};
 		}
 	}
 	Seats.Sort([](const FSeat& A, const FSeat& B) { return A.TableSeat < B.TableSeat; });
@@ -115,7 +182,12 @@ void ABackRoomTable::Begin(float Delay)
 	}
 	bRunning = true;
 	Wait = Delay;
-	if (Audio)
+	StartRoomTone();
+}
+
+void ABackRoomTable::StartRoomTone()
+{
+	if (Audio && !RoomTone)
 	{
 		RoomTone = MakeShared<FBackRoomAmbience>(0x5eedu);
 		TSharedPtr<FBackRoomAmbience> Tone = RoomTone;
@@ -225,6 +297,8 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	Time += DeltaSeconds;
+	// The heart runs on real time (Focus slows the room, not you).
+	UpdateComposure(FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f));
 	for (const FSeat& S : Seats)
 	{
 		if (S.Player)
@@ -300,6 +374,10 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 		BotKind = static_cast<int32>(D.Action.Type);
 		BotTo = D.Action.To;
 		bBotBluff = D.Action.Type == ss::PlayerAction::Kind::Raise && D.Equity < 0.42;
+		if (bHeroAggressedThisStreet && View.ToCall > 0)
+		{
+			ReadHero(*S, BotKind, BotTo, D.Equity);
+		}
 		// How long they sit with it: the engine's timing tell, slowed to a live table's pace.
 		BotAt = Time + FMath::Clamp(static_cast<float>(D.ThinkMs) / 1000.0f * 0.6f, 0.9f, 6.5f);
 		if (S->Player)
@@ -326,6 +404,38 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 
 void ABackRoomTable::StartHand()
 {
+	if (bHolding)
+	{
+		return;
+	}
+	if (bLeaveRequested)
+	{
+		// Racked up: the hero is out of the game; the table waits for the next one.
+		bHolding = true;
+		if (!bLeftNoted)
+		{
+			bLeftNoted = true;
+			if (OnNote)
+			{
+				OnNote(EBackRoomTableNote::HeroLeft);
+			}
+		}
+		return;
+	}
+	if (const FSeat* H = HeroSeat(); H && H->Stack <= 0 && !bHeroAutoReload)
+	{
+		// Felted: the host decides (reload from the bankroll, or go home).
+		bHolding = true;
+		if (!bBustNoted)
+		{
+			bBustNoted = true;
+			if (OnNote)
+			{
+				OnNote(EBackRoomTableNote::HeroBusted);
+			}
+		}
+		return;
+	}
 	// Busted players buy back in (the Tuesday game is friendly like that).
 	for (FSeat& S : Seats)
 	{
@@ -383,9 +493,18 @@ void ABackRoomTable::StartHand()
 	bBotPending = false;
 	Board.Reset();
 	++HandNumber;
+	if (const FSeat* H = HeroSeat())
+	{
+		HeroStartOfHand = H->Stack;
+	}
+	Composure.Bluff = 0.0f;
+	HeroShakeAtBet = 0.0f;
+	bHeroAggressedThisStreet = false;
+	Sightings.Reset();
+	WhisperedThisHand.Reset();
 
-	// Dee's lessons, a few hands apart.
-	switch (HandNumber)
+	// Dee's lessons, a few hands apart (the first night only).
+	switch (bFirstVisit ? HandNumber : 0)
 	{
 	case 1: DealerSays(TEXT("Tuesday game, kid. One-two, no limit. Hold space to look at your cards. Keep 'em on the felt.")); break;
 	case 2: DealerSays(TEXT("Right mouse, you can study a face. Don't stare too long. They notice.")); break;
@@ -442,10 +561,21 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 			{
 				O->OnHeroThinking(false, 0);
 			}
+			if (bAggressive)
+			{
+				// The bet is out there now, with the hands that pushed it: whatever the heart was doing shows.
+				Composure.Bluff = FeltEquity(S->TableSeat) < 0.42f ? 1.0f : 0.0f;
+				HeroShakeAtBet = Composure.Shake();
+				bHeroAggressedThisStreet = true;
+			}
 		}
 		else
 		{
 			P->OnActed(bAggressive, bBluff);
+			if (bAggressive)
+			{
+				bHeroAggressedThisStreet = false;
+			}
 		}
 		if (A.Type == ss::ActionType::Fold)
 		{
@@ -472,6 +602,7 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 	}
 	case ss::EventType::Street:
 	{
+		bHeroAggressedThisStreet = false;
 		TArray<int32> New;
 		for (int C : Ev.Cards)
 		{
@@ -512,9 +643,15 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 			if (S && S->Player && !S->bShown)
 			{
 				S->bShown = true;
-				ABackRoomPlayer* P = S->Player;
+				TWeakObjectPtr<ABackRoomPlayer> P = S->Player.Get();
 				FTimerHandle Handle;
-				GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(P, [P]() { P->GestureShow(); }), FMath::Max(T, 0.01f), false);
+				GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this, P]() {
+					if (ABackRoomPlayer* Shown = P.Get())
+					{
+						Shown->GestureShow();
+						ConfirmSightings(Shown);
+					}
+				}), FMath::Max(T, 0.01f), false);
 				T += 0.35f;
 			}
 		}
@@ -529,9 +666,15 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 			if (S && S->Player && !S->bShown)
 			{
 				S->bShown = true;
-				ABackRoomPlayer* P = S->Player;
+				TWeakObjectPtr<ABackRoomPlayer> P = S->Player.Get();
 				FTimerHandle Handle;
-				GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(P, [P]() { P->GestureShow(); }), FMath::Max(T, 0.01f), false);
+				GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this, P]() {
+					if (ABackRoomPlayer* Shown = P.Get())
+					{
+						Shown->GestureShow();
+						ConfirmSightings(Shown);
+					}
+				}), FMath::Max(T, 0.01f), false);
 				T += 1.1f;
 			}
 		}
@@ -692,6 +835,31 @@ float ABackRoomTable::DealStreet(const TArray<int32>& New)
 	return T;
 }
 
+float ABackRoomTable::FeltEquity(int32 TableSeat)
+{
+	const ss::HandSeat* Me = Hand ? Hand->SeatByNumber(TableSeat) : nullptr;
+	if (!Me || Me->Hole.size() < 2)
+	{
+		return 0.5f;
+	}
+	std::vector<int> Visible;
+	for (const ABackRoomCard* C : Board)
+	{
+		if (C && C->GetCard() >= 0)
+		{
+			Visible.push_back(C->GetCard());
+		}
+	}
+	int32 InHand = 0;
+	for (const ss::HandSeat& HS : Hand->Seats)
+	{
+		InHand += HS.Folded ? 0 : 1;
+	}
+	const std::vector<ss::RangeBand> Ranges(static_cast<size_t>(FMath::Max(1, InHand - 1)), ss::RangeBand{0.0, 1.0});
+	const float Eq = static_cast<float>(ss::EquityVsRanges(Me->Hole, Visible, Ranges, 300, *Rng));
+	return FMath::Clamp(Eq * (0.6f + 0.4f * FMath::Max(1, InHand - 1)), 0.0f, 1.0f);
+}
+
 void ABackRoomTable::UpdateStrengths(bool bBoardChanged)
 {
 	if (!Hand)
@@ -766,6 +934,25 @@ void ABackRoomTable::EndHand()
 	{
 		Pot->SetAmount(0);
 	}
+	if (const FSeat* H = HeroSeat())
+	{
+		// A loss that stings stays with you for a while; a win settles you.
+		const int64 Delta = H->Stack - HeroStartOfHand;
+		if (Delta < -20)
+		{
+			const float Hurt = static_cast<float>(-Delta) / static_cast<float>(FMath::Max<int64>(HeroStartOfHand, 1));
+			Composure.Tilt = FMath::Min(1.0f, Composure.Tilt + FMath::Clamp(Hurt * 1.2f, 0.15f, 0.9f) * (bShowdown ? 1.0f : 0.6f));
+		}
+		else if (Delta > 20)
+		{
+			Composure.Tilt *= 0.5f;
+		}
+		if (H->Stack <= 0 && !bHeroAutoReload)
+		{
+			DealerSays(TEXT("That's the felt, kid."));
+		}
+	}
+	Sightings.Reset();
 	// Dee gathers the cards in; then they go back in the deck.
 	TArray<ABackRoomCard*> All;
 	for (ABackRoomCard* C : Cards)
@@ -804,6 +991,238 @@ void ABackRoomTable::EndHand()
 	Hand.Reset();
 	bHeroTurn = false;
 	Wait = T + 2.2f;
+	if (OnNote)
+	{
+		OnNote(EBackRoomTableNote::HandEnded);
+	}
+}
+
+// ------------------------------------------------------------------ the night
+
+void ABackRoomTable::RequestLeave(bool bInLastHand)
+{
+	bLastHand = bLastHand || bInLastHand;
+	if (bLeaveRequested)
+	{
+		return;
+	}
+	bLeaveRequested = true;
+	if (bHolding && !bLeftNoted)
+	{
+		// Busted and going home: nothing to wait for.
+		bLeftNoted = true;
+		if (OnNote)
+		{
+			OnNote(EBackRoomTableNote::HeroLeft);
+		}
+	}
+}
+
+void ABackRoomTable::HeroReload(int64 Chips)
+{
+	FSeat* H = HeroSeat();
+	if (!H || Chips <= 0)
+	{
+		return;
+	}
+	H->Stack = H->BuyIn = Chips;
+	bHolding = false;
+	bBustNoted = false;
+	Wait = 2.4f;
+	DealerSays(FString::Printf(TEXT("Back in for %lld. Breathe, kid."), Chips));
+	// Dee counts out a fresh stack and pushes it across.
+	ABackRoomChips* Rack = NewPile(PotSpot() + FVector(26.0, 0.0, 0.0), FRotator::ZeroRotator, 77, static_cast<uint8>(EBackRoomChipStyle::Stack));
+	Rack->SetAmount(Chips);
+	ABackRoomChips* Stack = H->StackPile;
+	auto Land = [Rack, Stack, Chips]() {
+		Stack->SetAmount(Chips);
+		Rack->Destroy();
+	};
+	if (Dealer)
+	{
+		Dealer->GestureSweep(Rack, StackSpot(H->TableSeat), Land);
+	}
+	else
+	{
+		Rack->SlideTo(StackSpot(H->TableSeat), 0.6f);
+		FTimerHandle Handle;
+		GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, Land), 0.65f, false);
+	}
+}
+
+int64 ABackRoomTable::GetHeroStack() const
+{
+	const FSeat* H = HeroSeat();
+	return H ? H->Stack : 0;
+}
+
+void ABackRoomTable::UpdateComposure(float Dt)
+{
+	FBackRoomComposure& C = Composure;
+	const FSeat* H = HeroSeat();
+	const ss::HandSeat* HS = (H && Hand && !Hand->bComplete) ? Hand->SeatByNumber(H->TableSeat) : nullptr;
+	const bool bIn = HS && !HS->Folded && H->Hole.Num() == 2;
+	float Pressure = 0.0f;
+	if (bIn)
+	{
+		const float Stack = static_cast<float>(FMath::Max<int64>(HeroStartOfHand, 1));
+		const float InPot = static_cast<float>(Hand->Pot());
+		Pressure += 6.0f;
+		Pressure += 30.0f * FMath::Min(InPot / Stack, 1.5f) / 1.5f;
+		if (bHeroTurn)
+		{
+			const ss::LegalActions L = Hand->GetLegalActions();
+			const float Price = static_cast<float>(L.CallAmount) / static_cast<float>(FMath::Max<int64>(HS->Stack, 1));
+			Pressure += 22.0f * FMath::Clamp(Price * 2.0f, 0.0f, 1.0f);
+			Pressure += L.CallAmount >= HS->Stack && L.CallAmount > 0 ? 28.0f : 0.0f;
+		}
+		Pressure += HS->AllIn ? 28.0f : 0.0f;
+		Pressure += 18.0f * C.Bluff;
+	}
+	for (const ABackRoomPlayer* O : Opponents)
+	{
+		if (O && O->IsWatchingHero())
+		{
+			Pressure += 8.0f;
+			break;
+		}
+	}
+	Pressure += 20.0f * C.Tilt;
+	C.Target = FMath::Clamp(66.0f + C.Sensitivity * Pressure - (C.bSteadying ? 16.0f : 0.0f), 56.0f, 168.0f);
+	// The heart jumps fast and settles slowly; steady breathing brings it down quicker.
+	const float Rate = C.Target > C.Bpm ? 0.55f : (C.bSteadying ? 0.32f : 0.12f);
+	C.Bpm = FMath::Lerp(C.Bpm, C.Target, 1.0f - FMath::Exp(-Rate * Dt));
+	C.Tilt = FMath::Max(0.0f, C.Tilt - Dt / 240.0f);
+	if (ABackRoomPlayer* Me = H ? H->Player.Get() : nullptr)
+	{
+		Me->SetExternalTremble(0.3f * C.Shake());
+	}
+}
+
+void ABackRoomTable::ReadHero(const FSeat& Reader, int32& Kind, double& To, double Equity)
+{
+	const ABackRoomPlayer* P = Reader.Player;
+	const float R = P ? P->Persona.HeroRead : 0.0f;
+	if (FMath::Abs(R) < 0.05f || HeroShakeAtBet < 0.08f)
+	{
+		return;
+	}
+	// Did they see it? Shakier hands and sharper eyes, more often.
+	if (Fx.FRand() > FMath::Clamp(HeroShakeAtBet * FMath::Abs(R) * 1.4f, 0.0f, 0.9f))
+	{
+		return;
+	}
+	const bool bHeroBluffing = Composure.Bluff > 0.5f;
+	// The sharp ones read it for what it is; the rest think nerves mean a bluff.
+	const bool bReadsWeak = R > 0.0f ? bHeroBluffing : true;
+	const int32 Fold = static_cast<int32>(ss::PlayerAction::Kind::Fold);
+	const int32 Call = static_cast<int32>(ss::PlayerAction::Kind::Call);
+	bool bChanged = false;
+	if (bReadsWeak && Kind == Fold && Equity > 0.12)
+	{
+		Kind = Call;
+		To = 0.0;
+		bChanged = true;
+	}
+	else if (!bReadsWeak && Kind == Call && Equity < 0.6)
+	{
+		Kind = Fold;
+		To = 0.0;
+		bChanged = true;
+	}
+	if (!bChanged)
+	{
+		return;
+	}
+	UE_LOG(LogTemp, Display, TEXT("BackRoom: %s read the hero's hands (shake %.2f, %s) -> %s"), *P->Persona.Name, HeroShakeAtBet,
+		bHeroBluffing ? TEXT("bluffing") : TEXT("value"), Kind == Call ? TEXT("call") : TEXT("fold"));
+	if (Reader.Player && Fx.FRand() < 0.7f)
+	{
+		Reader.Player->Say(ShakeLine(P->Persona.Name, bReadsWeak, Fx));
+	}
+	Whisper(FString::Printf(TEXT("%s caught your hands shaking."), *P->Persona.Name));
+}
+
+// ------------------------------------------------------------------ the read book
+
+void ABackRoomTable::Whisper(const FString& Text)
+{
+	FBackRoomLine L;
+	L.Text = Text;
+	L.At = Time;
+	L.bRead = true;
+	Lines.Add(L);
+	UE_LOG(LogTemp, Display, TEXT("BackRoom read: %s"), *Text);
+}
+
+void ABackRoomTable::OnTellSeen(ABackRoomPlayer* Player, uint8 Tell, uint8 Means, bool bHonest, float Studied)
+{
+	if (!Player || !Hand)
+	{
+		return;
+	}
+	// The pupils only show up close, through Focus.
+	const bool bPupils = static_cast<EBackRoomTell>(Tell) == EBackRoomTell::PupilFlare;
+	const float Need = bPupils ? 0.8f : 0.45f;
+	const FString Key = ReadKey(Player, Tell);
+	const int32 Known = Reads.FindRef(Key);
+	const FString& Name = Player->Persona.Name;
+	if (Known >= 2 && Studied >= (bPupils ? 0.7f : 0.2f))
+	{
+		// A read you own: the eye catches it without trying.
+		if (!WhisperedThisHand.Contains(Key))
+		{
+			WhisperedThisHand.Add(Key);
+			Whisper(FString::Printf(TEXT("%s: %s. That's %s."), *Name, *TellPhrase(Tell), MeaningWord(Means)));
+		}
+		return;
+	}
+	if (Studied < Need || WhisperedThisHand.Contains(Key))
+	{
+		return;
+	}
+	WhisperedThisHand.Add(Key);
+	FSighting& S = Sightings.AddDefaulted_GetRef();
+	S.Player = Player;
+	S.Key = Key;
+	S.Tell = Tell;
+	S.Means = Means;
+	S.bHonest = bHonest;
+	Whisper(FString::Printf(TEXT("%s: %s."), *Name, *TellPhrase(Tell)));
+}
+
+void ABackRoomTable::ConfirmSightings(const ABackRoomPlayer* Shown)
+{
+	for (int32 I = Sightings.Num() - 1; I >= 0; --I)
+	{
+		const FSighting S = Sightings[I];
+		if (S.Player.Get() != Shown)
+		{
+			continue;
+		}
+		Sightings.RemoveAt(I);
+		const FString& Name = Shown->Persona.Name;
+		if (!S.bHonest)
+		{
+			Whisper(FString::Printf(TEXT("%s's cards say %s meant nothing this time."), *Name, *TellPhrase(S.Tell)));
+			continue;
+		}
+		int32& Count = Reads.FindOrAdd(S.Key);
+		++Count;
+		if (Count == 2)
+		{
+			++LearnedThisNight;
+			Whisper(FString::Printf(TEXT("READ LEARNED  %s: %s means %s."), *Name, *TellPhrase(S.Tell), MeaningWord(S.Means)));
+			if (Audio)
+			{
+				Audio->Play(ss::SoundId::Level, 0.45f);
+			}
+		}
+		else if (Count < 2)
+		{
+			Whisper(FString::Printf(TEXT("%s showed down after %s: %s. See it again to be sure."), *Name, *TellPhrase(S.Tell), MeaningWord(S.Means)));
+		}
+	}
 }
 
 // ------------------------------------------------------------------ the hero
@@ -964,6 +1383,7 @@ FString ABackRoomTable::Describe() const
 		Out += Hand->bComplete ? TEXT(" complete") : TEXT("");
 	}
 	Out += bHeroTurn ? TEXT(" HERO TURN") : TEXT("");
+	Out += FString::Printf(TEXT(" | bpm %.0f tilt %.2f reads %d%s"), Composure.Bpm, Composure.Tilt, Reads.Num(), bHolding ? TEXT(" HOLDING") : TEXT(""));
 	for (const FSeat& S : Seats)
 	{
 		Out += FString::Printf(TEXT(" | %s %lld"), *S.Id, S.StackPile ? S.StackPile->GetAmount() : S.Stack);

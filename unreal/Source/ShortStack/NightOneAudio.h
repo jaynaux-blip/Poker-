@@ -28,7 +28,7 @@ public:
 	void Play(ss::SoundId Id, float Volume = 1.0f);
 	/** A sound from a place in the world, falling off with distance. */
 	void PlayAt(ss::SoundId Id, const FVector& At, float Volume = 1.0f);
-	void PlayEffect(ss::audio::Effect Id);
+	void PlayEffect(ss::audio::Effect Id, float Volume = 1.0f);
 	void Thunder(float Delay, float Strength);
 	void SetHeartbeat(bool bOn);
 	void SetMuted(bool bInMuted);

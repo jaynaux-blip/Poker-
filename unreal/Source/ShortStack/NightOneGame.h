@@ -30,6 +30,7 @@ public:
 	virtual void AddCan() override;
 	virtual void Celebrate() override;
 	virtual void Save(const ss::SaveData& Data) override;
+	virtual bool GoOut(const std::string& ActivityId, ss::Chips BuyInCents) override;
 
 	// ss::ui::FrontEndHooks
 	virtual void UiSound(ss::SoundId Id, double Volume) override;

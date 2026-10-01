@@ -128,6 +128,13 @@ struct FBackRoomPersona
 	UPROPERTY(EditAnywhere, Category = "Persona")
 	float Chatter = 0.3f;
 
+	/**
+	 * How they read YOUR hands shaking when you bet (-1..1): above 0 they read it right (and the
+	 * higher, the more often they notice); below 0 they notice and get it wrong (nerves mean a bluff).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	float HeroRead = 0.0f;
+
 	/** Seed for this player's own rhythms. */
 	UPROPERTY(EditAnywhere, Category = "Persona")
 	int32 Seed = 1;
@@ -278,6 +285,17 @@ public:
 
 	/** How hard the hero is studying this player (0..1, from the camera), for "stare too long and they notice". */
 	void SetStudied(float Amount) { Studied = Amount; }
+	float GetStudied() const { return Studied; }
+	/**
+	 * A tell that meant something (fired by the hand, not for a test) showed while the hero was looking:
+	 * (this player, EBackRoomTell, EBackRoomTellMeaning, honest this time, how hard the hero was looking).
+	 * Set by the table, for the read book.
+	 */
+	TFunction<void(ABackRoomPlayer*, uint8, uint8, bool, float)> TellHook;
+	/** Hero: the hands shake this much (0..1) from the heart rate. */
+	void SetExternalTremble(float Amount) { ExternalTremble = Amount; }
+	/** Holding the hero's eyes now (a stare, or catching them staring), which raises the heart rate. */
+	bool IsWatchingHero() const;
 	/** World point between the eyes. */
 	FVector GetEyes() const;
 	USkeletalMeshComponent* GetBody() const { return Body; }
@@ -447,6 +465,12 @@ private:
 		float T = 0.0f;
 		float Duration = 1.0f;
 		float Intensity = 1.0f;
+		/** Fired by the hand (Provoke), so it means something: reported to TellHook once seen. */
+		bool bCounts = false;
+		bool bHonest = false;
+		EBackRoomTellMeaning Means = EBackRoomTellMeaning::Strong;
+		float SeenMax = 0.0f;
+		bool bReported = false;
 	};
 	TArray<FActiveTell> Active;
 	bool IsActive(EBackRoomTell Tell) const;
@@ -464,6 +488,7 @@ private:
 	float NextChat = 20.0f;
 	// Being studied by the hero.
 	float Studied = 0.0f;
+	float ExternalTremble = 0.0f;
 	float StudiedFor = 0.0f;
 	float NoticeCooldown = 0.0f;
 	/** 0..1 while reacting to being stared at, -1 otherwise. */

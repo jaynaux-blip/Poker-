@@ -23,7 +23,12 @@ enum class Kind : int
 	Hustle, // Burner: Marcus's runs; good money, police heat
 	Ghost,  // Burner: playing Sam's RiverLine account; risks the player's own account
 	Sleep,
+	Game, // Burner: Dee's live game in the laundromat's back room (the host takes the player there)
 };
+
+/** Dee's game: $1/$2 no-limit, bought into from the bankroll. */
+constexpr Chips GameMinBuyInCents = 4000;
+constexpr Chips GameMaxBuyInCents = 20000;
 
 struct Activity
 {
@@ -41,6 +46,7 @@ struct Activity
 	double Risk = 0.0;   // base chance it goes wrong
 	int Opens = 0;       // start window, minutes after midnight (wraps past midnight)
 	int Closes = 1440;
+	int Days = 0x7f;     // weekdays it runs (bit 0 Monday .. bit 6 Sunday), by the day its window opens
 	uint32_t Color = 0x27d3c3;
 };
 
@@ -91,8 +97,13 @@ struct State
 	std::map<std::string, int> Tickets; // event template id -> tickets held
 	std::set<int> NightsPaid;           // Night Shift payouts (the day of the 6 AM finish)
 	std::vector<LedgerEntry> Ledger;    // newest first
+	// Dee's game.
+	int BackRoomNights = 0;
+	Chips BackRoomNetCents = 0;
+	/** Tells seen and confirmed at showdown, by "Player/Tell" (2 or more: learned). */
+	std::map<std::string, int> Reads;
 
-	void Record(double At, const std::string& Label, Chips Amount, int Kind);
+	SHORTSTACKCORE_API void Record(double At, const std::string& Label, Chips Amount, int Kind);
 	int TicketsFor(const std::string& TemplateId) const;
 };
 

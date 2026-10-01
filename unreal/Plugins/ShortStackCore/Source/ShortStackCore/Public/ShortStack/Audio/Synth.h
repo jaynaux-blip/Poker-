@@ -18,6 +18,9 @@ enum class Effect : int
 	Buzz,     // phone vibrating on the desk
 	CanOpen,  // a fresh energy drink
 	Thump,    // one heartbeat (lub-dub)
+	Step,     // a shoe on concrete
+	Scrape,   // chair legs dragged on concrete
+	Breath,   // a slow breath out
 };
 
 /** Renders a game sound (volume 0..1 as the session requests it). */

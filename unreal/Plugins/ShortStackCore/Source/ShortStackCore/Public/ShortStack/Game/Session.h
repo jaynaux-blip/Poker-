@@ -203,6 +203,8 @@ public:
 	virtual void AddCan() {}
 	virtual void Celebrate() {}
 	virtual void Save(const SaveData& /*Data*/) {}
+	/** Leaves the apartment for a place the host plays out itself (Dee's game). False when it can't. */
+	virtual bool GoOut(const std::string& /*ActivityId*/, Chips /*BuyInCents*/) { return false; }
 };
 
 /**
@@ -297,6 +299,8 @@ public:
 	SHORTSTACKCORE_API double ClockMinutes() const;
 	/** The clock on the network's calendar (net::DayOf, net::TimeLabel). */
 	SHORTSTACKCORE_API double WorldMinutes() const;
+	/** Back from somewhere the host played out (Dee's game): calendar events since World still happen. */
+	void ResumeCalendarFrom(double World) { CalendarAt = World; }
 	/** The clock between tournaments: 2:07 AM at first, running in real time, and where the last tournament ended. */
 	double LobbyMinutes = 2.0 * 60.0 + 7.0;
 
@@ -318,6 +322,8 @@ public:
 	life::Outcome LastOutcome;
 	/** Starts an activity from life::Catalog(); returns why not, or "" when it started. */
 	SHORTSTACKCORE_API std::string StartActivity(const std::string& Id);
+	/** Heads out to a live game (life::Kind::Game) with a buy-in from the bankroll; returns why not, or "". */
+	SHORTSTACKCORE_API std::string GoToGame(const std::string& Id, Chips BuyInCents);
 	SHORTSTACKCORE_API bool PayRent();
 	SHORTSTACKCORE_API bool PayDebt();
 	SHORTSTACKCORE_API life::Context LifeContext() const;

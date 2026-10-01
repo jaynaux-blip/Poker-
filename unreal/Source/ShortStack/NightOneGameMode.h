@@ -52,6 +52,9 @@ public:
 	void QuitToDesktop();
 	void ApplySettings(const ss::ui::GameSettings& Settings, bool bSave);
 
+	/** Leaves the apartment for Dee's game across the street (the Back Room level), buying in with BuyInCents. */
+	bool GoOut(const FString& ActivityId, int64 BuyInCents);
+
 	ANightOneStage* GetStage() const { return Stage; }
 	ANightOnePawn* GetSeat() const;
 	UNightOneAudio* GetAudio() const { return Audio; }
@@ -95,4 +98,11 @@ private:
 	bool bShowHints = true;
 	bool bOverScreenNow = false;
 	FVector2D ArmsPointer = FVector2D(0.5, 0.5); // the pointer across the view (0..1), for the mouse hand
+	// Heading out: the room fades, then the Back Room level opens.
+	bool bLeaving = false;
+	double LeaveAt = -1.0;
+	int64 LeaveBuyInCents = 0;
+	// Home from Dee's game: what she texts once the room fades back in.
+	FString HomeText;
+	double HomeTextAt = -1.0;
 };

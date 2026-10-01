@@ -68,6 +68,11 @@ void FNightOneGame::Save(const ss::SaveData& Data)
 	}
 }
 
+bool FNightOneGame::GoOut(const std::string& ActivityId, ss::Chips BuyInCents)
+{
+	return Mode.GoOut(FString(UTF8_TO_TCHAR(ActivityId.c_str())), static_cast<int64>(BuyInCents));
+}
+
 // ------------------------------------------------------------------ menus
 
 void FNightOneGame::UiSound(ss::SoundId Id, double Volume)

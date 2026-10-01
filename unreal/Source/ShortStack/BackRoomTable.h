@@ -14,12 +14,46 @@ class ABackRoomPlayer;
 class FBackRoomAmbience;
 class UNightOneAudio;
 
-/** One line of table talk, for the subtitles. */
+/** One line of table talk, for the subtitles (or a read: what your eye caught, whispered). */
 struct FBackRoomLine
 {
 	FString Speaker;
 	FString Text;
 	float At = 0.0f;
+	bool bRead = false;
+};
+
+/** What the table tells its host (the game mode) between hands. */
+enum class EBackRoomTableNote : uint8
+{
+	/** A hand is over (stacks settled): a good moment to save. */
+	HandEnded,
+	/** The hero is out of chips; the table holds until Reload or the hero leaves. */
+	HeroBusted,
+	/** The hero racked up (after the hand they asked to leave in). */
+	HeroLeft,
+};
+
+/**
+ * Your own tells. A heart-rate model fed by the pressure of the hand: the pot against your stack,
+ * the price of a call, a bluff you are running, a stare across the table, the last big loss. Above
+ * about 95 bpm you hear your heart and your hands start to shake when they move chips, which the
+ * sharper regulars read.
+ */
+struct FBackRoomComposure
+{
+	float Bpm = 68.0f;
+	float Target = 68.0f;
+	/** 0..1 set while a bluff is out there (the hand's last aggression was yours, without the goods). */
+	float Bluff = 0.0f;
+	/** 0..1 after a painful loss, fading over minutes. */
+	float Tilt = 0.0f;
+	/** Holding Shift: slow breaths. */
+	bool bSteadying = false;
+	/** How much of the pressure reaches the heart (falls as the career goes on: you get used to it). */
+	float Sensitivity = 1.0f;
+	/** 0..1: how much the hands shake (what others can see). */
+	float Shake() const { return FMath::Clamp((Bpm - 95.0f) / 55.0f, 0.0f, 1.0f); }
 };
 
 /** What the hero can do now (for the HUD). */
@@ -66,6 +100,8 @@ public:
 	void SetDealer(ABackRoomPlayer* InDealer);
 	/** Starts dealing (after a pause for everyone to settle). */
 	void Begin(float Delay = 3.0f);
+	/** The room tone (dryers, the fluorescent hum), before the game starts. */
+	void StartRoomTone();
 
 	// ------------------------------------------------------------ the hero's input
 	FBackRoomPrompt GetPrompt() const;
@@ -92,6 +128,41 @@ public:
 	/** Everyone seated, for the camera's study of faces. */
 	const TArray<ABackRoomPlayer*>& GetOpponents() const { return Opponents; }
 	ABackRoomPlayer* GetHeroPlayer() const;
+
+	// ------------------------------------------------------------ the night (ABackRoomGameMode)
+	/** Called between hands and when the hero busts or leaves. */
+	TFunction<void(EBackRoomTableNote)> OnNote;
+	/** Rack up after the current hand (bLastHand: Dee is closing the game for everyone). */
+	void RequestLeave(bool bLastHand = false);
+	bool IsLeaving() const { return bLeaveRequested; }
+	bool IsHolding() const { return bHolding; }
+	/** Busted: buys back in for Chips (dollars) and deals on. */
+	void HeroReload(int64 Chips);
+	/** The hero's chips now (behind, plus what is in front of them this hand). */
+	int64 GetHeroStack() const;
+	int32 GetHandNumber() const { return HandNumber; }
+	/** In a career the hero's busts are the host's call; in practice they reload on the house. */
+	bool bHeroAutoReload = true;
+	/** First night at Dee's: she explains everything. */
+	bool bFirstVisit = true;
+
+	/** The hero's heart (read by the pawn for sound and sight, by the opponents through the hands). */
+	FBackRoomComposure Composure;
+	void SetSteadying(bool bOn) { Composure.bSteadying = bOn; }
+
+	/** The read book: "Player/Tell" -> sightings confirmed at showdown (2 or more: learned). */
+	TMap<FString, int32> Reads;
+	int32 LearnedThisNight = 0;
+	/** A tell just played across the table (from ABackRoomPlayer); Studied is how hard you were looking. */
+	void OnTellSeen(ABackRoomPlayer* Player, uint8 Tell, uint8 Means, bool bHonest, float Studied);
+	/** "Player/Tell" for the read book. */
+	static FString ReadKey(const ABackRoomPlayer* Player, uint8 Tell);
+	/** "the glance at the chips", for whispers and the summary. */
+	static FString TellPhrase(uint8 Tell);
+
+	/** Dee says something (the night's host lines). */
+	void DealerLine(const FString& Line) { DealerSays(Line); }
+	UNightOneAudio* GetAudio() const { return Audio; }
 
 private:
 	struct FSeat
@@ -184,4 +255,35 @@ private:
 
 	TArray<FBackRoomLine> Lines;
 	int32 TipsGiven = 0;
+
+	// The night.
+	bool bLeaveRequested = false;
+	bool bLastHand = false;
+	bool bHolding = false;
+	/** The hero's chips when the hand began (for the pressure of a pot, and the loss that stings). */
+	int64 HeroStartOfHand = 0;
+	/** How shaken the hero looked when they last bet or raised this hand (what opponents read). */
+	float HeroShakeAtBet = 0.0f;
+	bool bHeroAggressedThisStreet = false;
+	void UpdateComposure(float Dt);
+	/** An opponent facing the hero's bet: do the hands give it away (and do they read it right)? */
+	void ReadHero(const FSeat& Reader, int32& Kind, double& To, double Equity);
+	/** Tells seen this hand while studying their player, waiting for the cards to say if they meant it. */
+	struct FSighting
+	{
+		TWeakObjectPtr<ABackRoomPlayer> Player;
+		FString Key;
+		uint8 Tell = 0;
+		uint8 Means = 0;
+		bool bHonest = false;
+	};
+	/** Keys already whispered this hand (one whisper per tell per hand). */
+	TSet<FString> WhisperedThisHand;
+	bool bLeftNoted = false;
+	bool bBustNoted = false;
+	/** Equity of a seat's hole cards against random hands for everyone still in, as a player feels it. */
+	float FeltEquity(int32 TableSeat);
+	TArray<FSighting> Sightings;
+	void ConfirmSightings(const ABackRoomPlayer* Shown);
+	void Whisper(const FString& Text);
 };

@@ -1,10 +1,12 @@
 #include "NightOneGameMode.h"
 
 #include "Engine/Engine.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
+#include "GameFramework/PlayerController.h"
 #include "GameFramework/GameUserSettings.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -79,6 +81,45 @@ void SetConsoleInt(const TCHAR* Name, int32 Value)
 	{
 		Var->Set(Value, ECVF_SetByGameSetting);
 	}
+}
+/** What Dee texts after a night at her game, from what the Back Room passed back (cents, reads learned). */
+FString HomeTextFromOptions(const FString& Options)
+{
+	const int64 Net = FCString::Atoi64(*UGameplayStatics::ParseOption(Options, TEXT("Net")));
+	const int32 Learned = FCString::Atoi(*UGameplayStatics::ParseOption(Options, TEXT("Learned")));
+	const bool bBusted = UGameplayStatics::HasOption(Options, TEXT("Busted"));
+	const bool bClosed = UGameplayStatics::HasOption(Options, TEXT("Closed"));
+	const FString Dollars = FString::Printf(TEXT("$%lld"), FMath::Abs(Net) / 100);
+	FString Text;
+	if (bBusted)
+	{
+		Text = TEXT("Rough night. Everybody gets felted. Sleep, then come back and watch more than you play.");
+	}
+	else if (Net >= 10000)
+	{
+		Text = FString::Printf(TEXT("You took %s off my table. Sal's still muttering. Pay your rent before you get ideas."), *Dollars);
+	}
+	else if (Net > 0)
+	{
+		Text = FString::Printf(TEXT("Up %s. That's a good night at my game. Don't tell Lou I said so."), *Dollars);
+	}
+	else if (Net == 0)
+	{
+		Text = TEXT("Broke even. Nobody got hurt. You'll do better when you watch their hands.");
+	}
+	else
+	{
+		Text = FString::Printf(TEXT("Down %s. It happens. Next time watch Sal's eyes when the flop comes."), *Dollars);
+	}
+	if (bClosed)
+	{
+		Text += TEXT(" Thanks for staying till close.");
+	}
+	if (Learned > 0)
+	{
+		Text += Learned == 1 ? TEXT(" And you caught one of their tells. Most people never see one.") : TEXT(" And you're reading them now. They'll start to feel it.");
+	}
+	return Text;
 }
 } // namespace NightOneModeDetail
 
@@ -179,7 +220,27 @@ void ANightOneGameMode::StartPlay()
 	}
 
 	CreateViewportWidgets();
-	if (MenuWidget)
+	if (UGameplayStatics::HasOption(OptionsString, TEXT("Home")) && bLoaded)
+	{
+		// Back from Dee's game (the Back Room level opened this one with "?Home"): straight to the desk.
+		HomeText = HomeTextFromOptions(OptionsString);
+		HomeTextAt = 4.5;
+		// What happened on the calendar while out (a deadline passing at 3 AM) still happens.
+		const FString From = UGameplayStatics::ParseOption(OptionsString, TEXT("From"));
+		if (!From.IsEmpty())
+		{
+			Game->Session.ResumeCalendarFrom(FCString::Atod(*From));
+		}
+		Begin(FString(UTF8_TO_TCHAR(Game->Session.HeroName.c_str())));
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			if (PC->PlayerCameraManager)
+			{
+				PC->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, 2.5f, FLinearColor::Black, true, false);
+			}
+		}
+	}
+	else if (MenuWidget)
 	{
 		// Quitting to the menu reloads the level with "?Menu": skip the title screen then.
 		const bool bToMenu = UGameplayStatics::HasOption(OptionsString, TEXT("Menu"));
@@ -432,6 +493,31 @@ void ANightOneGameMode::Begin(const FString& Name)
 	UE_LOG(LogNightOne, Log, TEXT("Night One started as %s"), *Clean);
 }
 
+bool ANightOneGameMode::GoOut(const FString& ActivityId, int64 BuyInCents)
+{
+	if (bLeaving || !bStarted || !Game)
+	{
+		return false;
+	}
+	// The session saved itself before calling out. Grab the coat: the room fades, the street, then the game.
+	bLeaving = true;
+	LeaveAt = RealTime + 1.6;
+	LeaveBuyInCents = BuyInCents;
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	{
+		if (PC->PlayerCameraManager)
+		{
+			PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 1.5f, FLinearColor::Black, true, true);
+		}
+	}
+	if (Audio)
+	{
+		Audio->PlayEffect(ss::audio::Effect::Thump);
+	}
+	UE_LOG(LogNightOne, Log, TEXT("Heading out to %s with %lld cents"), *ActivityId, BuyInCents);
+	return true;
+}
+
 void ANightOneGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (SettingsDirtyAt >= 0.0)
@@ -528,6 +614,21 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		if (Overlay && bShowHints)
 		{
 			Overlay->ShowHint();
+		}
+	}
+
+	if (bLeaving && RealTime >= LeaveAt)
+	{
+		bLeaving = false;
+		UGameplayStatics::OpenLevel(this, FName(TEXT("BackRoom")), true, FString::Printf(TEXT("BuyIn=%lld"), LeaveBuyInCents));
+		return;
+	}
+	if (HomeTextAt >= 0.0 && RealTime >= HomeTextAt)
+	{
+		HomeTextAt = -1.0;
+		if (!HomeText.IsEmpty())
+		{
+			Game->Text("Dee", std::string(TCHAR_TO_UTF8(*HomeText)));
 		}
 	}
 

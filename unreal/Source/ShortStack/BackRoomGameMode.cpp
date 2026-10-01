@@ -5,6 +5,7 @@
 #include "BackRoomStage.h"
 #include "BackRoomTable.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/PointLightComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -14,13 +15,56 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/App.h"
 #include "Misc/PackageName.h"
+#include "NightOneAudio.h"
+#include "NightOneSaveGame.h"
 #include "ShortStack/AI/Profiles.h"
+#include "ShortStack/Audio/Synth.h"
+#include "ShortStack/Game/Life.h"
+#include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Session.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogBackRoom, Log, All);
 
 namespace BackRoomGameDetail
 {
+// A minute at the table is this many on the clock (a night is an hour or so of play).
+const double ClockRate = 6.0;
+// Energy a live game costs per hour on the clock.
+const float EnergyPerHour = 5.0f;
+// Dee calls the last hand at a quarter to five; the dryers go off at five.
+const double LastHandAt = 4.0 * 60.0 + 45.0;
+
+const TCHAR* WeekdayShort[7] = {TEXT("MON"), TEXT("TUE"), TEXT("WED"), TEXT("THU"), TEXT("FRI"), TEXT("SAT"), TEXT("SUN")};
+const TCHAR* WeekdayLong[7] = {TEXT("Monday"), TEXT("Tuesday"), TEXT("Wednesday"), TEXT("Thursday"), TEXT("Friday"), TEXT("Saturday"), TEXT("Sunday")};
+
 float Ease(float X, float Target, float Rate, float Dt)
 {
 	return FMath::Lerp(X, Target, 1.0f - FMath::Exp(-Rate * Dt));
+}
+
+float Smooth(float A, float B, float X)
+{
+	return FMath::SmoothStep(A, B, X);
+}
+
+/** "11:42 PM" for minutes after midnight. */
+FString Clock12(double MinutesOfDay)
+{
+	const int32 M = ((static_cast<int32>(FMath::FloorToDouble(MinutesOfDay)) % 1440) + 1440) % 1440;
+	const int32 H24 = M / 60;
+	const int32 H12 = H24 % 12 == 0 ? 12 : H24 % 12;
+	return FString::Printf(TEXT("%d:%02d %s"), H12, M % 60, H24 < 12 ? TEXT("AM") : TEXT("PM"));
+}
+
+int32 Weekday(int32 Day)
+{
+	return ((Day % 7) + 7) % 7;
+}
+
+/** "$1,234" */
+FString Dollars(int64 Amount)
+{
+	return TEXT("$") + FText::AsNumber(FMath::Abs(Amount)).ToString();
 }
 
 /** The assembled MetaHuman for a cast member, if backroom_cast.py has built it. */
@@ -49,6 +93,13 @@ FString CardText(int32 Card)
 	static const TCHAR* Ranks[13] = {TEXT("2"), TEXT("3"), TEXT("4"), TEXT("5"), TEXT("6"), TEXT("7"), TEXT("8"), TEXT("9"), TEXT("10"), TEXT("J"), TEXT("Q"), TEXT("K"), TEXT("A")};
 	static const TCHAR* Suits[4] = {TEXT("♣"), TEXT("♦"), TEXT("♥"), TEXT("♠")};
 	return FString(Ranks[(Card >> 2) % 13]) + Suits[Card & 3];
+}
+
+/** One beat of an ECG trace (P wave, the QRS spike, T wave) at phase P in 0..1. */
+float Ecg(float P)
+{
+	auto G = [P](float Mu, float Sigma) { return FMath::Exp(-0.5f * FMath::Square((P - Mu) / Sigma)); };
+	return 0.12f * G(0.12f, 0.025f) - 0.14f * G(0.232f, 0.008f) + 1.0f * G(0.25f, 0.009f) - 0.28f * G(0.27f, 0.01f) + 0.22f * G(0.48f, 0.045f);
 }
 } // namespace BackRoomGameDetail
 
@@ -92,6 +143,9 @@ void ABackRoomPawn::BeginPlay()
 	P.bOverride_DepthOfFieldSensorWidth = true;
 	P.DepthOfFieldSensorWidth = 24.576f;
 	P.bOverride_VignetteIntensity = true;
+	// The heart's hold on the eyes: color drains and the edges smear as it races.
+	P.bOverride_ColorSaturation = true;
+	P.bOverride_SceneFringeIntensity = true;
 }
 
 void ABackRoomPawn::EndPlay(const EEndPlayReason::Type Reason)
@@ -100,16 +154,27 @@ void ABackRoomPawn::EndPlay(const EEndPlayReason::Type Reason)
 	Super::EndPlay(Reason);
 }
 
+ABackRoomGameMode* ABackRoomPawn::GetMode() const
+{
+	return GetWorld() ? GetWorld()->GetAuthGameMode<ABackRoomGameMode>() : nullptr;
+}
+
 ABackRoomTable* ABackRoomPawn::GetTable() const
 {
-	const ABackRoomGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ABackRoomGameMode>() : nullptr;
+	const ABackRoomGameMode* GM = GetMode();
 	return GM ? GM->Table.Get() : nullptr;
+}
+
+FVector ABackRoomPawn::GetEye() const
+{
+	return Camera ? Camera->GetComponentLocation() : GetActorLocation();
 }
 
 void ABackRoomPawn::HandleInput(float RealDt)
 {
 	APlayerController* PC = Cast<APlayerController>(GetController());
 	ABackRoomTable* Table = GetTable();
+	ABackRoomGameMode* GM = GetMode();
 	ABackRoomPlayer* Me = Table ? Table->GetHeroPlayer() : nullptr;
 	if (!PC)
 	{
@@ -127,9 +192,17 @@ void ABackRoomPawn::HandleInput(float RealDt)
 		Table->HeroPeeked();
 	}
 
+	// Steady breathing (Shift): the heart settles. It draws on the same reserve as Focus.
+	bSteadying = (PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift)) && FocusLeft > 0.02f;
+	if (Table)
+	{
+		Table->SetSteadying(bSteadying);
+	}
+
 	// Focus: hold to study a face; it drains, and comes back slowly.
 	const bool bFocusing = (bTestFocus || PC->IsInputKeyDown(EKeys::RightMouseButton)) && FocusLeft > 0.02f && !bPeek;
-	FocusLeft = FMath::Clamp(FocusLeft + (bFocusing ? -RealDt / 8.0f : RealDt / 14.0f), 0.0f, 1.0f);
+	const float Drain = (bFocusing ? 1.0f / 8.0f : 0.0f) + (bSteadying ? 1.0f / 12.0f : 0.0f);
+	FocusLeft = FMath::Clamp(FocusLeft + (Drain > 0.0f ? -Drain * RealDt : RealDt / 14.0f), 0.0f, 1.0f);
 	Focus = Ease(Focus, bFocusing ? 1.0f : 0.0f, 5.0f, RealDt);
 	UGameplayStatics::SetGlobalTimeDilation(this, FMath::Lerp(1.0f, 0.45f, Focus));
 	if (bFocusing && Table)
@@ -154,6 +227,28 @@ void ABackRoomPawn::HandleInput(float RealDt)
 	else if (Focus < 0.05f)
 	{
 		Studying = nullptr;
+	}
+
+	// Felted: rebuy from the bankroll (the wheel picks how much) or go home.
+	if (GM && GM->GetPhase() == EBackRoomPhase::Busted)
+	{
+		if (PC->WasInputKeyJustPressed(EKeys::R))
+		{
+			GM->Reload();
+		}
+		if (PC->WasInputKeyJustPressed(EKeys::MouseScrollUp) || PC->WasInputKeyJustPressed(EKeys::Up))
+		{
+			GM->AdjustReload(1);
+		}
+		if (PC->WasInputKeyJustPressed(EKeys::MouseScrollDown) || PC->WasInputKeyJustPressed(EKeys::Down))
+		{
+			GM->AdjustReload(-1);
+		}
+		if (PC->WasInputKeyJustPressed(EKeys::L))
+		{
+			GM->RequestLeave();
+		}
+		return;
 	}
 
 	// Actions.
@@ -184,6 +279,203 @@ void ABackRoomPawn::HandleInput(float RealDt)
 			Table->HeroAdjustRaise(-1);
 		}
 	}
+	if (GM && PC->WasInputKeyJustPressed(EKeys::L))
+	{
+		GM->RequestLeave();
+	}
+}
+
+void ABackRoomPawn::PlayWalk(const TArray<FVector>& Points, float Seconds, bool bOut, TFunction<void()> OnDone)
+{
+	WalkPoints = Points;
+	WalkLengths.Reset();
+	WalkTotal = 0.0f;
+	for (int32 I = 1; I < WalkPoints.Num(); ++I)
+	{
+		const float L = static_cast<float>(FVector::Dist(WalkPoints[I - 1], WalkPoints[I]));
+		WalkLengths.Add(L);
+		WalkTotal += L;
+	}
+	WalkT = 0.0f;
+	StepCount = 0;
+	WalkSeconds = FMath::Max(Seconds, 0.1f);
+	bWalkOut = bOut;
+	bBodyShown = bOut;
+	WalkDone = MoveTemp(OnDone);
+	bWalking = WalkPoints.Num() >= 2 && WalkTotal > 1.0f;
+	UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
+	Focus = 0.0f;
+	Studying = nullptr;
+	if (bWalking)
+	{
+		if (!bOut)
+		{
+			SetActorLocation(WalkPoints[0]);
+			Smoothed = (WalkPoints[1] - WalkPoints[0]).Rotation();
+			Smoothed.Pitch = -4.0f;
+		}
+	}
+	else if (WalkDone)
+	{
+		TFunction<void()> Done = MoveTemp(WalkDone);
+		WalkDone = nullptr;
+		Done();
+	}
+}
+
+FVector ABackRoomPawn::WalkAt(float Distance) const
+{
+	// Catmull-Rom through the points, parameterized by distance along the chords.
+	const int32 N = WalkPoints.Num();
+	float D = FMath::Clamp(Distance, 0.0f, WalkTotal);
+	int32 I = 0;
+	while (I < WalkLengths.Num() - 1 && D > WalkLengths[I])
+	{
+		D -= WalkLengths[I];
+		++I;
+	}
+	const float U = WalkLengths[I] > 0.0f ? FMath::Clamp(D / WalkLengths[I], 0.0f, 1.0f) : 0.0f;
+	const FVector P0 = WalkPoints[FMath::Max(I - 1, 0)];
+	const FVector P1 = WalkPoints[I];
+	const FVector P2 = WalkPoints[I + 1];
+	const FVector P3 = WalkPoints[FMath::Min(I + 2, N - 1)];
+	const double U1 = U, U2 = U1 * U1, U3 = U2 * U1;
+	return 0.5 * ((2.0 * P1) + (P2 - P0) * U1 + (2.0 * P0 - 5.0 * P1 + 4.0 * P2 - P3) * U2 + (3.0 * P1 - P0 - 3.0 * P2 + P3) * U3);
+}
+
+void ABackRoomPawn::TickWalk(float RealDt)
+{
+	WalkT += RealDt;
+	const float T = FMath::Clamp(WalkT / WalkSeconds, 0.0f, 1.0f);
+	// A walking pace: setting off, an even stride, and slowing to a stop.
+	const float E = 0.3f * T + 0.7f * Smooth(0.0f, 1.0f, T);
+	const float D = E * WalkTotal;
+	FVector At = WalkAt(D);
+	const FVector Ahead = WalkAt(D + 80.0f);
+	// Each step lifts and drops the head a little and sways it side to side; it fades sitting down
+	// (or builds standing up).
+	const float Stride = bWalkOut ? Smooth(0.04f, 0.22f, T) : 1.0f - Smooth(0.7f, 0.9f, T);
+	const float Steps = D / 66.0f * PI;
+	At.Z += Stride * (1.5f * FMath::Abs(FMath::Sin(Steps)) - 0.75f);
+	ABackRoomTable* Table = GetTable();
+	UNightOneAudio* Sound = Table ? Table->GetAudio() : nullptr;
+	// A footfall each stride on the concrete.
+	const int32 Step = FMath::FloorToInt(D / 66.0f);
+	if (Step != StepCount)
+	{
+		StepCount = Step;
+		if (Sound && Stride > 0.25f)
+		{
+			Sound->PlayEffect(ss::audio::Effect::Step, 0.3f + 0.45f * Stride);
+		}
+	}
+	const FVector Along = (Ahead - At).GetSafeNormal2D();
+	const FVector Side = FVector::CrossProduct(FVector::UpVector, Along.IsNearlyZero() ? FVector::ForwardVector : Along);
+	At += Side * (Stride * 0.9f * FMath::Sin(Steps * 0.5f));
+
+	ABackRoomPlayer* Me = Table ? Table->GetHeroPlayer() : nullptr;
+	const FVector TableAt(0.0, 0.0, 96.0);
+	FRotator Look;
+	if (!bWalkOut)
+	{
+		// Through the door looking where you're going, then at the table and who is at it, then down
+		// into the seat, facing Dee.
+		const FVector Target = FMath::Lerp(Ahead + FVector(0.0, 0.0, -6.0), TableAt, Smooth(0.1f, 0.4f, T));
+		const FQuat Q = FQuat::Slerp((Target - At).Rotation().Quaternion(), FRotator(-14.0f, 0.0f, 0.0f).Quaternion(), Smooth(0.78f, 1.0f, T));
+		Look = Q.Rotator();
+		if (Me)
+		{
+			At = FMath::Lerp(At, Me->GetEyes() + FVector(1.5, 0.0, 0.0), static_cast<double>(Smooth(0.86f, 1.0f, T)));
+			if (!bBodyShown && T > 0.88f)
+			{
+				// Pull the chair in and sit.
+				Me->SetActorHiddenInGame(false);
+				bBodyShown = true;
+				if (Sound)
+				{
+					Sound->PlayEffect(ss::audio::Effect::Scrape, 0.8f);
+				}
+			}
+		}
+	}
+	else
+	{
+		// Up out of the chair, one look back at the table on the way round, then the door.
+		const float Back = Smooth(0.04f, 0.16f, T) * (1.0f - Smooth(0.4f, 0.58f, T));
+		const FVector Target = FMath::Lerp(Ahead + FVector(0.0, 0.0, -4.0), TableAt, static_cast<double>(0.85f * Back));
+		Look = (Target - At).Rotation();
+		if (Me && bBodyShown && T > 0.05f)
+		{
+			Me->SetActorHiddenInGame(true);
+			bBodyShown = false;
+			if (Sound)
+			{
+				Sound->PlayEffect(ss::audio::Effect::Scrape, 0.9f);
+			}
+		}
+	}
+	Look.Roll = Stride * 0.5f * FMath::Sin(Steps * 0.5f);
+	Smoothed = FMath::RInterpTo(Smoothed, Look, RealDt, bWalkOut ? 6.0f : 8.0f);
+	SetActorLocationAndRotation(At, Smoothed);
+	Camera->SetFieldOfView(72.0f);
+	FPostProcessSettings& P = Camera->PostProcessSettings;
+	P.DepthOfFieldFocalDistance = 220.0f;
+	P.DepthOfFieldFstop = 5.6f;
+	P.VignetteIntensity = 0.5f;
+	P.ColorSaturation = FVector4(1.0, 1.0, 1.0, 1.0);
+	P.SceneFringeIntensity = 0.0f;
+	PeekLight->SetIntensity(0.0f);
+	if (T >= 1.0f)
+	{
+		bWalking = false;
+		if (!bWalkOut)
+		{
+			Yaw = 0.0f;
+			Pitch = -14.0f;
+			Smoothed = FRotator(-14.0f, 0.0f, 0.0f);
+		}
+		TFunction<void()> Done = MoveTemp(WalkDone);
+		WalkDone = nullptr;
+		if (Done)
+		{
+			Done();
+		}
+	}
+}
+
+void ABackRoomPawn::TickHeart(float RealDt, float& PitchKick, float& Intensity)
+{
+	ABackRoomTable* Table = GetTable();
+	const float Bpm = Table ? Table->Composure.Bpm : 68.0f;
+	// You start to hear it in the high eighties; past ninety it takes the edges of the view.
+	const float Audible = FMath::Clamp((Bpm - 86.0f) / 44.0f, 0.0f, 1.0f);
+	Intensity = FMath::Clamp((Bpm - 92.0f) / 48.0f, 0.0f, 1.0f);
+	BeatPhase += RealDt * Bpm / 60.0f;
+	if (BeatPhase >= 1.0f)
+	{
+		BeatPhase -= FMath::FloorToFloat(BeatPhase);
+		if (Audible > 0.0f)
+		{
+			if (UNightOneAudio* A = Table ? Table->GetAudio() : nullptr)
+			{
+				A->PlayEffect(ss::audio::Effect::Thump, 0.12f + 0.85f * Audible);
+			}
+			Kick = 1.0f;
+		}
+	}
+	Kick = FMath::Max(0.0f, Kick - RealDt * 7.0f);
+	PitchKick = -0.25f * Kick * Audible;
+	Steady = Ease(Steady, bSteadying ? 1.0f : 0.0f, 2.0f, RealDt);
+	const float Before = BreathT;
+	BreathT += RealDt * (bSteadying ? 0.18f : 0.27f);
+	// Steadying, you hear each long breath out.
+	if (Steady > 0.4f && FMath::Frac(Before) < 0.5f && FMath::Frac(BreathT) >= 0.5f)
+	{
+		if (UNightOneAudio* A = Table ? Table->GetAudio() : nullptr)
+		{
+			A->PlayEffect(ss::audio::Effect::Breath, 0.9f * Steady);
+		}
+	}
 }
 
 void ABackRoomPawn::Tick(float DeltaSeconds)
@@ -192,8 +484,16 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	// Focus slows the world; the head and the meter run on real time.
 	const float RealDt = FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
 	Time += RealDt;
+	if (bWalking)
+	{
+		TickWalk(RealDt);
+		return;
+	}
 	ABackRoomTable* Table = GetTable();
+	ABackRoomGameMode* GM = GetMode();
 	ABackRoomPlayer* Me = Table ? Table->GetHeroPlayer() : nullptr;
+	// Racked up: the hands are off the table; the head still looks around while Dee says goodnight.
+	const bool bDone = GM && GM->GetPhase() == EBackRoomPhase::Leaving;
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		float Dx = 0.0f, Dy = 0.0f;
@@ -202,9 +502,27 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 		Yaw = FMath::Clamp(Yaw + Dx * Sens, -MaxYaw, MaxYaw);
 		Pitch = FMath::Clamp(Pitch + Dy * Sens, MinPitch, MaxPitch);
 	}
-	HandleInput(RealDt);
+	if (!bDone)
+	{
+		HandleInput(RealDt);
+	}
+	else
+	{
+		bSteadying = false;
+		Focus = Ease(Focus, 0.0f, 5.0f, RealDt);
+		PeekBlend = Ease(PeekBlend, 0.0f, 6.0f, RealDt);
+		if (Me)
+		{
+			Me->SetHeroPeek(false);
+		}
+		UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
+	}
+	float PitchKick = 0.0f, Racing = 0.0f;
+	TickHeart(RealDt, PitchKick, Racing);
 
 	FVector Eye = Me ? Me->GetEyes() + FVector(1.5, 0.0, 0.0) : Seat;
+	// A slow, deep breath while steadying.
+	Eye.Z += Steady * 1.1f * FMath::Sin(BreathT * 2.0f * PI);
 	FRotator Want(Pitch, Yaw, 0.0f);
 	FVector FocusAt = Eye + Want.Vector() * 120.0;
 	float PeekLit = 0.0f;
@@ -229,16 +547,19 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 		FocusAt = FMath::Lerp(FocusAt, S->GetEyes(), static_cast<double>(Focus));
 	}
 	Smoothed = FMath::RInterpTo(Smoothed, Want, RealDt, 14.0f);
+	// The heart in the view: a kick with each beat, and a fine tremor when it races.
+	const float Tremor = 0.12f * Racing;
+	const FRotator Shaken = Smoothed + FRotator(PitchKick + Tremor * FMath::Sin(Time * 37.0f) * FMath::Sin(Time * 11.3f), Tremor * FMath::Sin(Time * 29.0f + 1.7f), 0.0f);
 	if (Me)
 	{
-		SetActorLocationAndRotation(Eye, Smoothed);
+		SetActorLocationAndRotation(Eye, Shaken);
 		Me->SetHeroLook(Eye + Smoothed.Vector() * 200.0);
 	}
 	else
 	{
 		// No body yet: a head that breathes.
 		const float Breath = FMath::Sin(Time * 1.35f);
-		SetActorLocationAndRotation(Seat + FVector(0.25 * Breath, 0.0, 0.35 * Breath), Smoothed + FRotator(0.2f * Breath, 0.0f, 0.15f * FMath::Sin(Time * 0.37f)));
+		SetActorLocationAndRotation(Seat + FVector(0.25 * Breath, 0.0, 0.35 * Breath), Shaken + FRotator(0.2f * Breath, 0.0f, 0.15f * FMath::Sin(Time * 0.37f)));
 	}
 	if (!Studying.IsValid() && PeekBlend < 0.01f)
 	{
@@ -249,12 +570,14 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 		FocusAt = Eye + Dir * FMath::Clamp(ToFelt, 40.0, 250.0);
 	}
 
-	// The lens: Focus narrows it and opens the aperture.
-	Camera->SetFieldOfView(FMath::Lerp(FMath::Lerp(72.0f, 58.0f, PeekBlend), 34.0f, Focus));
+	// The lens: Focus narrows it and opens the aperture; a racing heart closes in the edges.
+	Camera->SetFieldOfView(FMath::Lerp(FMath::Lerp(72.0f, 58.0f, PeekBlend), 34.0f, Focus) - 4.0f * Racing);
 	FPostProcessSettings& P = Camera->PostProcessSettings;
 	P.DepthOfFieldFocalDistance = FMath::Max(10.0f, static_cast<float>(FVector::Dist(Eye, FocusAt)));
 	P.DepthOfFieldFstop = FMath::Lerp(FMath::Lerp(4.0f, 2.8f, PeekBlend), 1.4f, Focus);
-	P.VignetteIntensity = 0.45f + 0.5f * Focus;
+	P.VignetteIntensity = 0.45f + 0.5f * Focus + 0.55f * Racing + 0.18f * Racing * Kick;
+	P.ColorSaturation = FVector4(1.0, 1.0, 1.0, 1.0 - 0.38 * Racing);
+	P.SceneFringeIntensity = 2.6f * Racing + 1.2f * Racing * Kick;
 
 	// The opponents feel being looked at: more so through Focus.
 	if (Table)
@@ -265,7 +588,7 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 		for (ABackRoomPlayer* O : Table->GetOpponents())
 		{
 			const float C = FVector::DotProduct(Fwd, (O->GetEyes() - Eye).GetSafeNormal());
-			O->SetStudied(FMath::Clamp((C - Lo) / (Hi - Lo), 0.0f, 1.0f) * (0.6f + 0.4f * Focus));
+			O->SetStudied(bDone ? 0.0f : FMath::Clamp((C - Lo) / (Hi - Lo), 0.0f, 1.0f) * (0.6f + 0.4f * Focus));
 		}
 	}
 }
@@ -275,8 +598,9 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 void ABackRoomHUD::DrawHUD()
 {
 	Super::DrawHUD();
-	Clock += FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
-	const ABackRoomGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ABackRoomGameMode>() : nullptr;
+	const float Dt = FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
+	Clock += Dt;
+	ABackRoomGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ABackRoomGameMode>() : nullptr;
 	ABackRoomTable* Table = GM ? GM->Table.Get() : nullptr;
 	if (!Table || !Canvas)
 	{
@@ -290,20 +614,55 @@ void ABackRoomHUD::DrawHUD()
 	const FLinearColor Paper(0.93f, 0.9f, 0.82f, 0.92f);
 	const FLinearColor Dim(0.93f, 0.9f, 0.82f, 0.55f);
 	const FLinearColor Warm(1.0f, 0.78f, 0.45f, 0.95f);
+	const FLinearColor Read(0.64f, 0.86f, 0.92f, 0.92f);
+	const FLinearColor Blood(1.0f, 0.36f, 0.3f, 0.95f);
+	const ABackRoomPawn* Pawn = Cast<ABackRoomPawn>(GetOwningPawn());
+	const EBackRoomPhase Phase = GM->GetPhase();
 
-	auto Text = [&](const FString& T, const FLinearColor& Color, float X, float Y, UFont* Font, float Scale, bool bCenter) {
+	// Align: 0 left, 1 center, 2 right.
+	auto Text = [&](const FString& T, const FLinearColor& Color, float X, float Y, UFont* Font, float Scale, int32 Align) {
+		if (Color.A <= 0.005f)
+		{
+			return 0.0f;
+		}
 		float Tw = 0.0f, Th = 0.0f;
 		GetTextSize(T, Tw, Th, Font, Scale * S);
-		const float Px = bCenter ? X - Tw * 0.5f : X;
+		const float Px = Align == 1 ? X - Tw * 0.5f : (Align == 2 ? X - Tw : X);
 		DrawText(T, FLinearColor(0.0f, 0.0f, 0.0f, Color.A * 0.6f), Px + 2.0f * S, Y + 2.0f * S, Font, Scale * S);
 		DrawText(T, Color, Px, Y, Font, Scale * S);
 		return Tw;
 	};
+	auto Fade = [](FLinearColor C, float A) {
+		C.A *= FMath::Clamp(A, 0.0f, 1.0f);
+		return C;
+	};
 
-	// New table talk joins the subtitles; the newest three stay a few seconds.
+	// Tired: the lids come down from above and below, soft-edged.
+	if (GM->GetEyelids() > 0.01f)
+	{
+		const float Lid = GM->GetEyelids() * H * 0.5f;
+		DrawRect(FLinearColor::Black, 0.0f, 0.0f, W, Lid);
+		DrawRect(FLinearColor::Black, 0.0f, H - Lid, W, Lid);
+		const float Band = 10.0f * S;
+		for (int32 I = 0; I < 7; ++I)
+		{
+			const FLinearColor Edge(0.0f, 0.0f, 0.0f, 1.0f - (I + 1) / 8.0f);
+			DrawRect(Edge, 0.0f, Lid + I * Band, W, Band);
+			DrawRect(Edge, 0.0f, H - Lid - (I + 1) * Band, W, Band);
+		}
+	}
+
+	// Table talk becomes subtitles; what your eye catches becomes a whisper.
 	for (const FBackRoomLine& L : Table->TakeLines())
 	{
-		Subtitles.Add({L.Speaker, L.Text, Clock + 2.8f + 0.055f * L.Text.Len()});
+		if (L.bRead)
+		{
+			Whispers.Add({FString(), L.Text, Clock + 4.8f + 0.045f * L.Text.Len(), Clock});
+		}
+		else
+		{
+			Subtitles.Add({L.Speaker, L.Text, Clock + 2.8f + 0.055f * L.Text.Len(), Clock});
+		}
 	}
 	Subtitles.RemoveAll([this](const FShown& Sh) { return Sh.Until < Clock; });
 	while (Subtitles.Num() > 3)
@@ -314,50 +673,226 @@ void ABackRoomHUD::DrawHUD()
 	for (const FShown& Sh : Subtitles)
 	{
 		const float A = FMath::Clamp(Sh.Until - Clock, 0.0f, 1.0f);
-		const FString Line = Sh.Speaker + TEXT(":  ") + Sh.Text;
-		Text(Line, FLinearColor(Paper.R, Paper.G, Paper.B, Paper.A * A), W * 0.5f, Y, Small, 1.35f, true);
+		Text(Sh.Speaker + TEXT(":  ") + Sh.Text, Fade(Paper, A), W * 0.5f, Y, Small, 1.35f, 1);
 		Y += 30.0f * S;
+	}
+	Whispers.RemoveAll([this](const FShown& Sh) { return Sh.Until < Clock; });
+	while (Whispers.Num() > 3)
+	{
+		Whispers.RemoveAt(0);
+	}
+	float Wy = H * 0.15f;
+	for (const FShown& Sh : Whispers)
+	{
+		const float A = FMath::Clamp(Sh.Until - Clock, 0.0f, 1.0f) * FMath::Clamp((Clock - Sh.From) / 0.4f, 0.0f, 1.0f);
+		const bool bLearned = Sh.Text.StartsWith(TEXT("READ LEARNED"));
+		Text(Sh.Text, Fade(bLearned ? Warm : Read, A), W * 0.5f, Wy, Small, bLearned ? 1.32f : 1.15f, 1);
+		Wy += 30.0f * S;
+	}
+
+	// Walking in: where you are, and when.
+	const float Arrive = GM->GetArrivalTime();
+	if (Arrive >= 0.0f)
+	{
+		const float A = Smooth(0.6f, 1.8f, Arrive) * (1.0f - Smooth(5.0f, 6.4f, Arrive));
+		Text(TEXT("S P I N    C Y C L E    L A U N D R O M A T"), Fade(Paper, A), W * 0.5f, H * 0.4f, Big, 1.35f, 1);
+		Text(TEXT("the back room"), Fade(Warm, A), W * 0.5f, H * 0.4f + 50.0f * S, Small, 1.45f, 1);
+		Text(GM->ArrivalDay(), Fade(Dim, A), W * 0.5f, H * 0.4f + 88.0f * S, Small, 1.1f, 1);
+	}
+
+	// Racked up: the night, totted up, over the walk out.
+	if (Phase == EBackRoomPhase::Leaving)
+	{
+		const float T = GM->GetLeaveTime();
+		const TArray<FString>& Lines = GM->GetSummary();
+		const float A = Smooth(1.8f, 2.8f, T) * (1.0f - Smooth(8.6f, 9.6f, T));
+		if (A > 0.01f && Lines.Num() > 0)
+		{
+			const float Bw = 560.0f * S;
+			const float Bh = (70.0f + 34.0f * Lines.Num()) * S;
+			const float Bx = W * 0.5f - Bw * 0.5f, By = H * 0.3f;
+			DrawRect(FLinearColor(0.02f, 0.02f, 0.02f, 0.62f * A), Bx, By, Bw, Bh);
+			DrawRect(FLinearColor(Warm.R, Warm.G, Warm.B, 0.7f * A), Bx, By, Bw, 2.0f * S);
+			float Ly = By + 22.0f * S;
+			for (int32 I = 0; I < Lines.Num(); ++I)
+			{
+				const FString& L = Lines[I];
+				if (I == 0)
+				{
+					Text(L, Fade(Paper, A), W * 0.5f, Ly, Big, 1.2f, 1);
+					Ly += 52.0f * S;
+					continue;
+				}
+				const bool bNet = L.StartsWith(TEXT("Net"));
+				const bool bRead = L.StartsWith(TEXT("Read"));
+				const FLinearColor C = bNet ? (GM->GetNetCents() >= 0 ? FLinearColor(0.55f, 0.92f, 0.6f, 1.0f) : Blood) : (bRead ? Warm : (I == 1 ? Dim : Paper));
+				Text(L, Fade(C, A), W * 0.5f, Ly, Small, bNet ? 1.35f : 1.15f, 1);
+				Ly += 34.0f * S;
+			}
+		}
+		return;
+	}
+	if (Pawn && Pawn->IsWalking())
+	{
+		return;
 	}
 
 	// Your stack, the pot, and your cards once you've looked.
 	const FBackRoomPrompt P = Table->GetPrompt();
 	const float Left = 48.0f * S;
-	Text(FString::Printf(TEXT("$%lld"), P.Stack), Paper, Left, H - 128.0f * S, Big, 1.6f, false);
+	Text(FString::Printf(TEXT("$%lld"), P.Stack), Paper, Left, H - 128.0f * S, Big, 1.6f, 0);
 	FString Under = FString::Printf(TEXT("Pot $%lld"), P.Pot);
 	if (P.Known.Num() == 2)
 	{
 		Under += TEXT("     ") + CardText(P.Known[0]) + TEXT(" ") + CardText(P.Known[1]);
 	}
-	Text(Under, Dim, Left, H - 72.0f * S, Small, 1.2f, false);
+	Text(Under, Dim, Left, H - 72.0f * S, Small, 1.2f, 0);
+
+	// The heart: a trace that runs with it, bright when it races.
+	{
+		const float Bpm = Table->Composure.Bpm;
+		const int32 Rate = 240;
+		const int32 Keep = 2 * Rate;
+		TraceAccum += Dt;
+		while (TraceAccum >= 1.0f / Rate)
+		{
+			TraceAccum -= 1.0f / Rate;
+			TracePhase += Bpm / 60.0f / Rate;
+			TracePhase -= FMath::FloorToFloat(TracePhase);
+			Trace.Add(Ecg(TracePhase));
+		}
+		if (Trace.Num() > Keep)
+		{
+			Trace.RemoveAt(0, Trace.Num() - Keep);
+		}
+		HeartAlpha = Ease(HeartAlpha, FMath::Clamp((Bpm - 72.0f) / 18.0f, 0.3f, 1.0f), 3.0f, Dt);
+		const float Tw = 190.0f * S, Th = 36.0f * S;
+		const float Tx = Left, Ty = H - 206.0f * S;
+		const FLinearColor Line = FMath::Lerp(FLinearColor(0.62f, 0.95f, 0.78f, 1.0f), Blood, FMath::Clamp((Bpm - 84.0f) / 30.0f, 0.0f, 1.0f));
+		for (int32 I = 1; I < Trace.Num(); ++I)
+		{
+			const float X0 = Tx + Tw * (I - 1) / (Keep - 1.0f), X1 = Tx + Tw * I / (Keep - 1.0f);
+			const float Y0 = Ty + Th * (0.72f - 0.62f * Trace[I - 1]), Y1 = Ty + Th * (0.72f - 0.62f * Trace[I]);
+			// Older trace fades out; the line glows a little, like a monitor.
+			const float Fresh = FMath::Square(static_cast<float>(I) / Trace.Num());
+			DrawLine(X0, Y0, X1, Y1, Fade(Line, HeartAlpha * 0.16f * Fresh), 5.0f * S);
+			DrawLine(X0, Y0, X1, Y1, Fade(Line, HeartAlpha * (0.15f + 0.85f * Fresh)), 1.8f * S);
+		}
+		// The heart itself, kicking with each beat.
+		const float Beat = FMath::Clamp(Ecg(TracePhase) * 1.4f, 0.0f, 1.0f);
+		Text(TEXT("♥"), Fade(Line, HeartAlpha), Tx + Tw + 14.0f * S, Ty + 4.0f * S - 3.0f * S * Beat, Small, 1.1f + 0.35f * Beat, 0);
+		Text(FString::Printf(TEXT("%d"), FMath::RoundToInt(Bpm)), Fade(Line, HeartAlpha), Tx + Tw + 44.0f * S, Ty - 2.0f * S, Big, 1.35f, 0);
+		if (Pawn && Pawn->bSteadying)
+		{
+			Text(TEXT("breathing slow"), Fade(Dim, HeartAlpha), Tx, Ty - 24.0f * S, Small, 0.9f, 0);
+		}
+	}
 
 	// Your turn: what you can do.
-	if (P.bYourTurn)
+	if (P.bYourTurn && Phase != EBackRoomPhase::Busted)
 	{
 		const FString Head = P.ToCall > 0 ? FString::Printf(TEXT("$%lld to call"), P.ToCall) : TEXT("Checks to you");
-		Text(Head, Warm, W * 0.5f, H - 150.0f * S, Big, 1.25f, true);
+		Text(Head, Warm, W * 0.5f, H - 150.0f * S, Big, 1.25f, 1);
 		FString Keys = TEXT("[F] Fold     ");
 		Keys += P.bCanCheck ? TEXT("[C] Check") : FString::Printf(TEXT("[C] Call $%lld"), P.ToCall);
 		if (P.bCanRaise)
 		{
 			Keys += FString::Printf(TEXT("     [R] %s $%lld     [A] All in"), P.bIsBet ? TEXT("Bet") : TEXT("Raise to"), P.RaiseTo);
 		}
-		Text(Keys, Paper, W * 0.5f, H - 100.0f * S, Small, 1.25f, true);
+		Text(Keys, Paper, W * 0.5f, H - 100.0f * S, Small, 1.25f, 1);
 		if (P.bCanRaise)
 		{
-			Text(TEXT("wheel to size"), Dim, W * 0.5f, H - 66.0f * S, Small, 1.0f, true);
+			Text(TEXT("wheel to size"), Dim, W * 0.5f, H - 66.0f * S, Small, 1.0f, 1);
+		}
+	}
+
+	// Felted.
+	if (Phase == EBackRoomPhase::Busted)
+	{
+		Text(TEXT("You're felted."), Warm, W * 0.5f, H * 0.42f, Big, 1.4f, 1);
+		if (GM->CanReload())
+		{
+			Text(FString::Printf(TEXT("[R] Buy back in for $%lld     [L] Go home"), GM->GetReloadChips()), Paper, W * 0.5f, H * 0.42f + 58.0f * S, Small, 1.3f, 1);
+			Text(FString::Printf(TEXT("wheel to change  ·  %s left in the bankroll"), *Dollars(GM->GetBankrollOffTable() / 100)), Dim, W * 0.5f, H * 0.42f + 96.0f * S, Small, 1.05f, 1);
+		}
+		else
+		{
+			Text(TEXT("[L] Go home"), Paper, W * 0.5f, H * 0.42f + 58.0f * S, Small, 1.3f, 1);
+			Text(FString::Printf(TEXT("%s left. Not enough to sit."), *Dollars(GM->GetBankrollOffTable() / 100)), Dim, W * 0.5f, H * 0.42f + 96.0f * S, Small, 1.05f, 1);
+		}
+	}
+	else if (GM->IsLeaveRequested())
+	{
+		Text(TEXT("Racking up after this hand"), Dim, W * 0.5f, H - 190.0f * S, Small, 1.1f, 1);
+	}
+
+	// The clock, and how tired you are.
+	if (GM->IsCareer())
+	{
+		Text(GM->ClockLabel(), Dim, W - 48.0f * S, 36.0f * S, Small, 1.15f, 2);
+		if (GM->GetEnergy() < 30.0f)
+		{
+			Text(FString::Printf(TEXT("tired  %d%%"), FMath::RoundToInt(GM->GetEnergy())), Fade(Warm, 0.8f), W - 48.0f * S, 66.0f * S, Small, 1.0f, 2);
 		}
 	}
 
 	// Focus left, when it isn't full.
-	if (const ABackRoomPawn* Pawn = Cast<ABackRoomPawn>(GetOwningPawn()))
+	if (Pawn && (Pawn->FocusLeft < 0.995f || Pawn->Focus > 0.01f))
 	{
-		if (Pawn->FocusLeft < 0.995f || Pawn->Focus > 0.01f)
+		const float Bw = 160.0f * S, Bh = 4.0f * S;
+		const float Bx = W - Bw - 48.0f * S, By = H - 60.0f * S;
+		DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.35f), Bx, By, Bw, Bh);
+		DrawRect(FLinearColor(Warm.R, Warm.G, Warm.B, 0.85f), Bx, By, Bw * Pawn->FocusLeft, Bh);
+		Text(TEXT("FOCUS"), Dim, Bx, By - 26.0f * S, Small, 0.9f, 0);
+	}
+
+	// How to play: early on the first night (or holding Tab).
+	const bool bTab = PlayerOwner && PlayerOwner->IsInputKeyDown(EKeys::Tab);
+	if (bTab)
+	{
+		// The read book: what you have seen of each of them, and what the cards said it meant.
+		const float Rx = 48.0f * S;
+		float Ry = H * 0.2f;
+		Text(TEXT("R E A D S"), Warm, Rx, Ry, Small, 1.15f, 0);
+		Ry += 34.0f * S;
+		int32 Shown = 0;
+		for (ABackRoomPlayer* O : Table->GetOpponents())
 		{
-			const float Bw = 160.0f * S, Bh = 4.0f * S;
-			const float Bx = W - Bw - 48.0f * S, By = H - 60.0f * S;
-			DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.35f), Bx, By, Bw, Bh);
-			DrawRect(FLinearColor(Warm.R, Warm.G, Warm.B, 0.85f), Bx, By, Bw * Pawn->FocusLeft, Bh);
-			Text(TEXT("FOCUS"), Dim, Bx, By - 26.0f * S, Small, 0.9f, false);
+			for (const FBackRoomTell& T : O->Persona.Tells)
+			{
+				const int32 N = Table->Reads.FindRef(ABackRoomTable::ReadKey(O, static_cast<uint8>(T.Tell)));
+				if (N <= 0)
+				{
+					continue;
+				}
+				const TCHAR* Means = T.Means == EBackRoomTellMeaning::Strong ? TEXT("strength") : (T.Means == EBackRoomTellMeaning::Weak ? TEXT("weakness") : TEXT("a bluff"));
+				const FString Line = N >= 2 ? FString::Printf(TEXT("%s:  %s means %s"), *O->Persona.Name, *ABackRoomTable::TellPhrase(static_cast<uint8>(T.Tell)), Means)
+											: FString::Printf(TEXT("%s:  %s  (%s? seen once)"), *O->Persona.Name, *ABackRoomTable::TellPhrase(static_cast<uint8>(T.Tell)), Means);
+				Text(Line, N >= 2 ? Paper : Dim, Rx, Ry, Small, 1.05f, 0);
+				Ry += 27.0f * S;
+				++Shown;
+			}
+		}
+		if (Shown == 0)
+		{
+			Text(TEXT("Nothing yet. Study a face (right mouse) while the hand plays out,"), Dim, Rx, Ry, Small, 1.0f, 0);
+			Text(TEXT("then see what they turn over."), Dim, Rx, Ry + 25.0f * S, Small, 1.0f, 0);
+		}
+	}
+	const float HintA = bTab ? 1.0f : (GM->IsFirstVisit() && Table->GetHandNumber() <= 3 ? 0.7f : 0.0f);
+	if (HintA > 0.0f)
+	{
+		const float Hx = W - 48.0f * S;
+		float Hy = H - 250.0f * S;
+		TArray<const TCHAR*> Hints = {TEXT("Space  look at your cards"), TEXT("Right mouse  study a face"), TEXT("Shift  breathe, slow the heart"), TEXT("Tab  your reads")};
+		if (GM->IsCareer())
+		{
+			Hints.Add(TEXT("L  rack up and go home"));
+		}
+		for (const TCHAR* Hint : Hints)
+		{
+			Text(Hint, Fade(Dim, HintA), Hx, Hy, Small, 0.95f, 2);
+			Hy += 24.0f * S;
 		}
 	}
 }
@@ -368,7 +903,11 @@ ABackRoomGameMode::ABackRoomGameMode()
 {
 	DefaultPawnClass = ABackRoomPawn::StaticClass();
 	HUDClass = ABackRoomHUD::StaticClass();
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = true;
 }
+
+ABackRoomGameMode::~ABackRoomGameMode() = default;
 
 ABackRoomStage* ABackRoomGameMode::FindOrSpawnStage()
 {
@@ -407,7 +946,528 @@ void ABackRoomGameMode::StartPlay()
 {
 	Super::StartPlay();
 	FindOrSpawnStage();
+	const bool bCareer = LoadCareer();
 	SeatEveryone();
+	if (bCareer)
+	{
+		BeginArrival();
+	}
+	else
+	{
+		Phase = EBackRoomPhase::Practice;
+		Table->Begin(4.0f);
+	}
+}
+
+// ------------------------------------------------------------------ the career
+
+bool ABackRoomGameMode::LoadCareer()
+{
+	const FString BuyIn = UGameplayStatics::ParseOption(OptionsString, TEXT("BuyIn"));
+	if (BuyIn.IsEmpty())
+	{
+		return false;
+	}
+	UNightOneSaveGame* Obj = UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SlotName(), 0)
+		? Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SlotName(), 0))
+		: nullptr;
+	TSharedPtr<ss::SaveData> D = MakeShared<ss::SaveData>();
+	if (!Obj || !ss::SaveData::Parse(std::string(TCHAR_TO_UTF8(*Obj->Data)), *D))
+	{
+		UE_LOG(LogBackRoom, Warning, TEXT("BuyIn given but no career save to play from: practice table."));
+		return false;
+	}
+	const int64 Want = FMath::Clamp<int64>(FCString::Atoi64(*BuyIn), ss::life::GameMinBuyInCents, ss::life::GameMaxBuyInCents);
+	const int64 Chips = FMath::Min<int64>(Want, D->BankrollCents) / 100;
+	if (Chips * 100 < ss::life::GameMinBuyInCents)
+	{
+		UE_LOG(LogBackRoom, Warning, TEXT("Bankroll %lld cents can't cover the game: practice table."), static_cast<int64>(D->BankrollCents));
+		return false;
+	}
+	Save = D;
+	HeroBuyInChips = Chips;
+	StartBankrollCents = D->BankrollCents;
+	BoughtInCents = Chips * 100;
+	BaseCents = StartBankrollCents - BoughtInCents;
+	LeftHomeAt = ss::net::MinutesPerDay * ss::net::NightOneDay + D->ClockMinutes;
+	// Down the stairs, across the street in the rain, through the laundromat.
+	Minutes = LeftHomeAt + 4.0;
+	Energy = static_cast<float>(D->Life.Energy);
+	PastNights = D->Life.BackRoomNights;
+	PastNetCents = D->Life.BackRoomNetCents;
+	bFirstVisit = PastNights == 0;
+	ReloadChips = Chips;
+	Phase = EBackRoomPhase::Arriving;
+	ArrivalDayText = FString::Printf(TEXT("%s   %s"), WeekdayLong[Weekday(FMath::FloorToInt(Minutes / ss::net::MinutesPerDay))], *Clock12(TimeOfDay()));
+	UE_LOG(LogBackRoom, Log, TEXT("Career night: bankroll %lld cents, buy-in %lld chips, night %d, energy %.0f, %s"), StartBankrollCents, Chips, PastNights + 1,
+		Energy, *ClockLabel());
+	return true;
+}
+
+FString ABackRoomGameMode::DescribeNight() const
+{
+	static const TCHAR* Phases[] = {TEXT("practice"), TEXT("arriving"), TEXT("playing"), TEXT("busted"), TEXT("leaving")};
+	return FString::Printf(TEXT("%s %s energy %.1f base %lld bought %lld stack %lld hands %d%s%s"), Phases[static_cast<int32>(Phase)], *ClockLabel(), Energy, BaseCents,
+		BoughtInCents, Table ? Table->GetHeroStack() : 0, HandsPlayed, bLeaveAsked ? TEXT(" LEAVING") : TEXT(""), bLastHandCalled ? TEXT(" LAST-HAND") : TEXT(""));
+}
+
+void ABackRoomGameMode::TestAdvanceClock(float ClockMinutes, float EnergySpent)
+{
+	Minutes += ClockMinutes;
+	Energy = FMath::Clamp(Energy - EnergySpent, 0.0f, 100.0f);
+}
+
+double ABackRoomGameMode::TimeOfDay() const
+{
+	return FMath::Fmod(FMath::Fmod(Minutes, ss::net::MinutesPerDay) + ss::net::MinutesPerDay, ss::net::MinutesPerDay);
+}
+
+int32 ABackRoomGameMode::NightWeekday() const
+{
+	// Past midnight the night still belongs to the day the doors opened.
+	int32 Day = FMath::FloorToInt(Minutes / ss::net::MinutesPerDay);
+	if (TimeOfDay() < 12.0 * 60.0)
+	{
+		--Day;
+	}
+	return Weekday(Day);
+}
+
+FString ABackRoomGameMode::ClockLabel() const
+{
+	return FString(WeekdayShort[Weekday(FMath::FloorToInt(Minutes / ss::net::MinutesPerDay))]) + TEXT("  ") + Clock12(TimeOfDay());
+}
+
+void ABackRoomGameMode::SaveCareer(bool bFinal)
+{
+	if (!Save.IsValid() || !Table)
+	{
+		return;
+	}
+	ss::SaveData D = *Save;
+	D.BankrollCents = BaseCents + Table->GetHeroStack() * 100;
+	// The walk home is a few minutes more.
+	D.ClockMinutes = Minutes - ss::net::MinutesPerDay * ss::net::NightOneDay + (bFinal ? 4.0 : 0.0);
+	D.Life.Energy = FMath::Clamp(static_cast<double>(Energy), 0.0, 100.0);
+	for (const TPair<FString, int32>& R : Table->Reads)
+	{
+		D.Life.Reads[std::string(TCHAR_TO_UTF8(*R.Key))] = R.Value;
+	}
+	if (bFinal)
+	{
+		const int64 Net = D.BankrollCents - StartBankrollCents;
+		D.Life.Record(Minutes, "Dee's game", Net, 0);
+		D.Life.BackRoomNights += 1;
+		D.Life.BackRoomNetCents += Net;
+		// Settled: a second save can't count the night twice.
+		*Save = D;
+		StartBankrollCents = D.BankrollCents;
+		BaseCents = D.BankrollCents - Table->GetHeroStack() * 100;
+	}
+	if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::CreateSaveGameObject(UNightOneSaveGame::StaticClass())))
+	{
+		Obj->Data = FString(UTF8_TO_TCHAR(D.Serialize().c_str()));
+		UGameplayStatics::SaveGameToSlot(Obj, UNightOneSaveGame::SlotName(), 0);
+	}
+}
+
+void ABackRoomGameMode::OnTableNote(uint8 Note)
+{
+	switch (static_cast<EBackRoomTableNote>(Note))
+	{
+	case EBackRoomTableNote::HandEnded:
+		++HandsPlayed;
+		if (IsCareer() && Phase != EBackRoomPhase::Leaving)
+		{
+			SaveCareer(false);
+		}
+		break;
+	case EBackRoomTableNote::HeroBusted:
+		if (!IsCareer() || Phase == EBackRoomPhase::Leaving)
+		{
+			break;
+		}
+		Phase = EBackRoomPhase::Busted;
+		ReloadChips = FMath::Clamp<int64>((FMath::Min<int64>(HeroBuyInChips, BaseCents / 100) / 20) * 20, 40, 200);
+		if (bLastHandCalled)
+		{
+			RequestLeave();
+		}
+		else
+		{
+			Table->DealerLine(CanReload() ? TEXT("You want back in, or you calling it a night?") : TEXT("That's all you brought, huh? Go home and sleep, kid."));
+		}
+		SaveCareer(false);
+		break;
+	case EBackRoomTableNote::HeroLeft:
+		BeginLeaving();
+		break;
+	}
+}
+
+bool ABackRoomGameMode::CanReload() const
+{
+	return Phase == EBackRoomPhase::Busted && !bLeaveAsked && BaseCents >= ss::life::GameMinBuyInCents;
+}
+
+void ABackRoomGameMode::AdjustReload(int32 Steps)
+{
+	const int64 Max = FMath::Max<int64>(40, FMath::Min<int64>(200, BaseCents / 100));
+	ReloadChips = FMath::Clamp<int64>(ReloadChips + Steps * 20, 40, Max);
+}
+
+void ABackRoomGameMode::Reload()
+{
+	if (!CanReload() || !Table)
+	{
+		return;
+	}
+	const int64 Chips = FMath::Min<int64>(ReloadChips, BaseCents / 100);
+	BaseCents -= Chips * 100;
+	BoughtInCents += Chips * 100;
+	Phase = EBackRoomPhase::Playing;
+	Table->HeroReload(Chips);
+	SaveCareer(false);
+}
+
+void ABackRoomGameMode::RequestLeave()
+{
+	if (!IsCareer() || !Table || Phase == EBackRoomPhase::Leaving || Phase == EBackRoomPhase::Arriving)
+	{
+		return;
+	}
+	if (!bLeaveAsked)
+	{
+		bLeaveAsked = true;
+		if (Phase == EBackRoomPhase::Playing && !bLastHandCalled && !bSentHome)
+		{
+			Table->DealerLine(TEXT("Alright. Racking you up after this one."));
+		}
+	}
+	Table->RequestLeave(bLastHandCalled);
+}
+
+void ABackRoomGameMode::BeginArrival()
+{
+	ArrivalT = 0.0f;
+	ArrivalBeat = 0;
+	if (Table)
+	{
+		Table->StartRoomTone();
+	}
+	if (Hero)
+	{
+		// The body waits in the chair, unseen, until the camera sits down into it.
+		Hero->SetActorHiddenInGame(true);
+	}
+	StartWalkIn(Cast<ABackRoomPawn>(UGameplayStatics::GetPlayerPawn(this, 0)));
+}
+
+void ABackRoomGameMode::StartWalkIn(ABackRoomPawn* Pawn)
+{
+	if (ArrivalBeat != 0 || !Pawn)
+	{
+		return;
+	}
+	// In from the laundromat's white light, round the open steel door, behind Twitch, to the seat.
+	ArrivalBeat = 1;
+	ArrivalT = 0.0f;
+	const FVector Eye = Stage ? Stage->EyeLocation() : FVector(-91.0, 0.0, 118.0);
+	const TArray<FVector> Path = {FVector(166.0, 540.0, 166.0), FVector(174.0, 360.0, 166.0), FVector(194.0, 258.0, 165.0), FVector(168.0, 176.0, 165.0),
+		FVector(40.0, 210.0, 165.0), FVector(-90.0, 228.0, 164.0), FVector(-196.0, 168.0, 163.0), FVector(-206.0, 50.0, 161.0), FVector(-160.0, 6.0, 148.0), Eye};
+	TWeakObjectPtr<ABackRoomGameMode> Self = this;
+	Pawn->PlayWalk(Path, 9.5f, false, [Self]() {
+		if (ABackRoomGameMode* GM = Self.Get())
+		{
+			GM->Phase = EBackRoomPhase::Playing;
+			GM->Table->Begin(1.4f);
+		}
+	});
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	{
+		if (PC->PlayerCameraManager)
+		{
+			PC->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, 1.8f, FLinearColor::Black, true, false);
+		}
+	}
+}
+
+void ABackRoomGameMode::BeginLeaving()
+{
+	if (!IsCareer() || Phase == EBackRoomPhase::Leaving || !Table)
+	{
+		return;
+	}
+	const int64 Stack = Table->GetHeroStack();
+	bBustedOut = Stack <= 0;
+	NetCents = BaseCents + Stack * 100 - StartBankrollCents;
+	const int64 BoughtIn = BoughtInCents;
+	// Which reads became yours tonight (seen twice and confirmed by the cards).
+	TArray<FString> Learned;
+	for (const TPair<FString, int32>& R : Table->Reads)
+	{
+		const auto Was = Save->Life.Reads.find(std::string(TCHAR_TO_UTF8(*R.Key)));
+		const int32 Before = Was == Save->Life.Reads.end() ? 0 : Was->second;
+		if (R.Value >= 2 && Before < 2)
+		{
+			FString Who, TellName;
+			R.Key.Split(TEXT("/"), &Who, &TellName);
+			const int64 Value = StaticEnum<EBackRoomTell>()->GetValueByNameString(TellName);
+			Learned.Add(FString::Printf(TEXT("Read learned   %s: %s"), *Who, *ABackRoomTable::TellPhrase(static_cast<uint8>(FMath::Max<int64>(Value, 0)))));
+		}
+	}
+	SaveCareer(true);
+	Phase = EBackRoomPhase::Leaving;
+	LeaveT = 0.0f;
+	Summary.Reset();
+	Summary.Add(FString::Printf(TEXT("THE %s GAME"), *FString(WeekdayLong[NightWeekday()]).ToUpper()));
+	const int32 Sat = FMath::Max(0, FMath::FloorToInt(Minutes - LeftHomeAt - 4.0));
+	const FString Stayed = Sat >= 60 ? FString::Printf(TEXT("%dh %02dm"), Sat / 60, Sat % 60) : FString::Printf(TEXT("%d min"), Sat);
+	Summary.Add(FString::Printf(TEXT("%s   ·   %d %s   ·   %s at the table"), *Clock12(TimeOfDay()), HandsPlayed, HandsPlayed == 1 ? TEXT("hand") : TEXT("hands"), *Stayed));
+	Summary.Add(FString::Printf(TEXT("Bought in   %s"), *Dollars(BoughtIn / 100)));
+	Summary.Add(FString::Printf(TEXT("Cashed out   %s"), *Dollars(Stack)));
+	Summary.Add(FString::Printf(TEXT("Net   %s%s"), NetCents >= 0 ? TEXT("+") : TEXT("-"), *Dollars(NetCents / 100)));
+	Summary.Append(Learned);
+	Table->DealerLine(GoodbyeLine());
+	UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
+	UE_LOG(LogBackRoom, Log, TEXT("Leaving Dee's game: net %lld cents, %d hands, %d reads learned%s%s"), NetCents, HandsPlayed, Learned.Num(),
+		bBustedOut ? TEXT(", busted") : TEXT(""), bClosed ? TEXT(", closed") : TEXT(""));
+}
+
+void ABackRoomGameMode::GoHome()
+{
+	if (bGoingHome)
+	{
+		return;
+	}
+	bGoingHome = true;
+	FString Options = FString::Printf(TEXT("Home?Net=%lld?Learned=%d?From=%.0f"), NetCents, Table ? Table->LearnedThisNight : 0, LeftHomeAt);
+	if (bBustedOut)
+	{
+		Options += TEXT("?Busted");
+	}
+	if (bClosed)
+	{
+		Options += TEXT("?Closed");
+	}
+	UGameplayStatics::OpenLevel(this, FName(TEXT("NightOne")), true, Options);
+}
+
+FString ABackRoomGameMode::ArrivalLine() const
+{
+	const double Tod = TimeOfDay();
+	const bool bLate = Tod >= 60.0 && Tod < 12.0 * 60.0;
+	const ss::life::State& L = Save->Life;
+	const double ToRent = L.RentDeadline - Minutes;
+	const bool bRentSoon = (L.RentStage == ss::life::Rent::Due || L.RentStage == ss::life::Rent::FinalNotice) && ToRent > 0.0 && ToRent < 2.0 * ss::net::MinutesPerDay;
+	if (bFirstVisit)
+	{
+		return TEXT("There's the kid from across the street. Sit, sit. Forty to two hundred, no phones, no crying.");
+	}
+	if (bLate)
+	{
+		return TEXT("Little late, kid. Sit down before Lou eats your chair.");
+	}
+	if (bRentSoon)
+	{
+		return TEXT("Heard rent's due. Don't play scared, kid. Scared money don't make money.");
+	}
+	if (PastNetCents >= 10000)
+	{
+		return TEXT("Look who's back. Lou's been practicing his poker face. Didn't help.");
+	}
+	if (PastNetCents < -5000)
+	{
+		return TEXT("Back for more. I like that. Sit.");
+	}
+	return TEXT("Kid. Your seat's still warm.");
+}
+
+FString ABackRoomGameMode::GreetingLine(FString& Who) const
+{
+	if (bFirstVisit)
+	{
+		Who = TEXT("Big Lou");
+		return TEXT("Fresh money! Sit down, sit down!");
+	}
+	if (PastNetCents >= 10000)
+	{
+		Who = TEXT("Sal");
+		return TEXT("You again. Lucky kid.");
+	}
+	if (PastNetCents < 0)
+	{
+		Who = TEXT("Twitch");
+		return TEXT("Yo, it's my ATM! Sit down, man.");
+	}
+	Who = TEXT("Mei");
+	return TEXT("Evening.");
+}
+
+FString ABackRoomGameMode::GoodbyeLine() const
+{
+	const int32 Day = NightWeekday();
+	const TCHAR* Next = Day == 1 ? TEXT("Thursday") : (Day == 3 ? TEXT("Saturday") : TEXT("Tuesday"));
+	if (bClosed)
+	{
+		return TEXT("That's the game, folks. Dryers go off at five. Get home safe.");
+	}
+	if (bSentHome)
+	{
+		return FString::Printf(TEXT("Go sleep, kid. %s, nine o'clock."), Next);
+	}
+	if (bBustedOut)
+	{
+		return FString::Printf(TEXT("Go home, kid. Sleep. Game's back on %s."), Next);
+	}
+	if (NetCents >= 5000)
+	{
+		return FString::Printf(TEXT("Taking my regulars' money home? Come back %s so they can win it back."), Next);
+	}
+	if (NetCents < 0)
+	{
+		return FString::Printf(TEXT("Night, kid. Watch more, play less. %s, nine o'clock."), Next);
+	}
+	return FString::Printf(TEXT("Night, kid. %s, nine o'clock."), Next);
+}
+
+void ABackRoomGameMode::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	const float RealDt = FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
+	if (!IsCareer() || !Table)
+	{
+		return;
+	}
+	ABackRoomPawn* Pawn = Cast<ABackRoomPawn>(UGameplayStatics::GetPlayerPawn(this, 0));
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	TWeakObjectPtr<ABackRoomGameMode> Self = this;
+
+	// The room turns to look at whoever is walking through it.
+	auto Watch = [this, Pawn](float Dt) {
+		AttentionTick -= Dt;
+		if (!Pawn || AttentionTick > 0.0f)
+		{
+			return;
+		}
+		AttentionTick = 0.45f;
+		for (ABackRoomPlayer* O : Opponents)
+		{
+			O->OnOtherAction(Pawn->GetEye(), 0.25f, false);
+		}
+		if (Dealer)
+		{
+			Dealer->OnOtherAction(Pawn->GetEye(), 0.25f, false);
+		}
+	};
+
+	ArrivalT += RealDt;
+	if (Phase == EBackRoomPhase::Arriving)
+	{
+		StartWalkIn(Pawn);
+		if (ArrivalBeat == 1 && ArrivalT > 2.6f)
+		{
+			ArrivalBeat = 2;
+			Table->DealerLine(ArrivalLine());
+		}
+		if (ArrivalBeat == 2 && ArrivalT > 5.4f)
+		{
+			ArrivalBeat = 3;
+			FString Who;
+			const FString Line = GreetingLine(Who);
+			for (ABackRoomPlayer* O : Opponents)
+			{
+				if (O && O->Persona.Name == Who)
+				{
+					O->Say(Line);
+				}
+			}
+		}
+		Watch(RealDt);
+	}
+
+	// The night goes on: the clock, and what it takes out of you.
+	if (Phase == EBackRoomPhase::Playing || Phase == EBackRoomPhase::Busted)
+	{
+		const double Elapsed = RealDt * ClockRate / 60.0;
+		Minutes += Elapsed;
+		Energy = FMath::Max(0.0f, Energy - static_cast<float>(Elapsed / 60.0) * EnergyPerHour);
+		const double Tod = TimeOfDay();
+		if (!bLastHandCalled && Tod >= LastHandAt && Tod < 12.0 * 60.0)
+		{
+			bLastHandCalled = true;
+			bClosed = true;
+			Table->DealerLine(TEXT("Last hand, everybody. Dryers go off at five."));
+			RequestLeave();
+		}
+		if (!bSentHome && !bLeaveAsked && Energy <= 4.0f)
+		{
+			bSentHome = true;
+			Table->DealerLine(TEXT("Kid, you're falling asleep at my table. This one, then go home."));
+			RequestLeave();
+		}
+		// Tired: the lids get heavy, more often and for longer the emptier you are.
+		if (Energy < 22.0f)
+		{
+			const float Tired = 1.0f - Energy / 22.0f;
+			NextDroop -= RealDt;
+			if (DroopT < 0.0f && NextDroop <= 0.0f)
+			{
+				DroopT = 0.0f;
+				DroopLength = FMath::FRandRange(0.5f, 0.8f) + 0.9f * Tired;
+				DroopDepth = FMath::Min(1.0f, FMath::FRandRange(0.4f, 0.7f) + 0.3f * Tired);
+				NextDroop = FMath::FRandRange(9.0f, 20.0f) * (1.2f - 0.7f * Tired);
+			}
+		}
+	}
+	if (DroopT >= 0.0f)
+	{
+		// Closing slowly, snapping open.
+		DroopT += RealDt;
+		const float U = DroopT / DroopLength;
+		Eyelids = DroopDepth * (U < 0.7f ? Smooth(0.0f, 0.7f, U) : 1.0f - Smooth(0.7f, 1.0f, U));
+		if (U >= 1.0f)
+		{
+			DroopT = -1.0f;
+			Eyelids = 0.0f;
+		}
+	}
+
+	// Racked up: Dee says goodnight, then up and out the way you came, into the white light.
+	if (Phase == EBackRoomPhase::Leaving)
+	{
+		LeaveT += RealDt;
+		Eyelids = 0.0f;
+		if (!bWalkingOut && LeaveT > 2.4f)
+		{
+			bWalkingOut = true;
+			if (Pawn)
+			{
+				const FVector Eye = Pawn->GetEye();
+				const TArray<FVector> Path = {Eye, Eye + FVector(-34.0, 16.0, 44.0), FVector(-196.0, 84.0, 166.0), FVector(-150.0, 225.0, 166.0),
+					FVector(30.0, 214.0, 166.0), FVector(168.0, 180.0, 166.0), FVector(194.0, 262.0, 166.0), FVector(172.0, 380.0, 166.0), FVector(166.0, 560.0, 166.0)};
+				Pawn->PlayWalk(Path, 9.5f, true, [Self]() {
+					if (ABackRoomGameMode* GM = Self.Get())
+					{
+						GM->GoHome();
+					}
+				});
+			}
+			else
+			{
+				GoHome();
+			}
+		}
+		if (bWalkingOut && !bFadingOut && LeaveT > 2.4f + 7.6f && PC && PC->PlayerCameraManager)
+		{
+			bFadingOut = true;
+			PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 1.6f, FLinearColor::Black, true, true);
+		}
+		if (Pawn && Pawn->IsWalking())
+		{
+			Watch(RealDt);
+		}
+	}
 }
 
 void ABackRoomGameMode::SeatEveryone()
@@ -428,7 +1488,7 @@ void ABackRoomGameMode::SeatEveryone()
 		return P;
 	};
 	auto Persona = [](const TCHAR* Name, float Nerves, float Expressive, float Restless, float Fidget, float Posture, float Chatter, int32 Seed,
-		TArray<FBackRoomTell> Tells, uint32 ShirtSrgb = 0x8a8a8a) {
+		TArray<FBackRoomTell> Tells, uint32 ShirtSrgb = 0x8a8a8a, float HeroRead = 0.0f) {
 		FBackRoomPersona P;
 		P.Shirt = FLinearColor(FColor((ShirtSrgb >> 16) & 0xff, (ShirtSrgb >> 8) & 0xff, ShirtSrgb & 0xff));
 		P.Name = Name;
@@ -440,18 +1500,40 @@ void ABackRoomGameMode::SeatEveryone()
 		P.Chatter = Chatter;
 		P.Seed = Seed;
 		P.Tells = MoveTemp(Tells);
+		P.HeroRead = HeroRead;
 		return P;
 	};
 	using T = EBackRoomTell;
 	using M = EBackRoomTellMeaning;
 
 	Table = GetWorld()->SpawnActor<ABackRoomTable>(ABackRoomTable::StaticClass(), FTransform::Identity);
+	// The night's rules: in a career a bust is yours to deal with, Dee only teaches the first time,
+	// and what you learned of the regulars on other nights is still yours.
+	Table->bHeroAutoReload = !IsCareer();
+	Table->bFirstVisit = !IsCareer() || bFirstVisit;
+	if (Save.IsValid())
+	{
+		for (const auto& R : Save->Life.Reads)
+		{
+			Table->Reads.Add(FString(UTF8_TO_TCHAR(R.first.c_str())), R.second);
+		}
+		// Each night at the table, the pressure gets to you a little less.
+		Table->Composure.Sensitivity = FMath::Clamp(1.0f - 0.06f * PastNights, 0.65f, 1.0f);
+	}
+	TWeakObjectPtr<ABackRoomGameMode> Self = this;
+	Table->OnNote = [Self](EBackRoomTableNote Note) {
+		if (ABackRoomGameMode* GM = Self.Get())
+		{
+			GM->OnTableNote(static_cast<uint8>(Note));
+		}
+	};
 	Dealer = Spawn(TEXT("Dee"), 4, EBackRoomRole::Dealer, Persona(TEXT("Dee"), 0.1f, 0.3f, 0.3f, 0.0f, 0.6f, 0.2f, 37, {}, 0x1f2a3d));
 	Hero = Spawn(TEXT("Hero"), 0, EBackRoomRole::Hero, Persona(TEXT("You"), 0.3f, 0.5f, 0.5f, 0.3f, 0.5f, 0.0f, 7, {}, 0x3c4a44));
 	Table->SetDealer(Dealer);
-	Table->AddPlayer(Hero, 0, ss::Archetype::Tag, 100);
+	Table->AddPlayer(Hero, 0, ss::Archetype::Tag, HeroBuyInChips);
 
-	// The regulars, and what gives them away.
+	// The regulars, what gives them away, and how they read you (HeroRead: above 0 they read your
+	// shaking hands right, below 0 they think nerves mean a bluff).
 	struct FRegular
 	{
 		const TCHAR* Cast;
@@ -462,20 +1544,22 @@ void ABackRoomGameMode::SeatEveryone()
 	};
 	const FRegular Regulars[] = {
 		// Old-timer, plays tight. Honest tells: he glances at his chips when he connects, and a bluff
-		// makes him rub his neck.
+		// makes him rub his neck. Forty years of watching hands: he knows a shake.
 		{TEXT("Sal"), 3, ss::Archetype::Nit, 240, Persona(TEXT("Sal"), 0.2f, 0.35f, 0.4f, 0.6f, 0.3f, 0.35f, 11,
-			{Tell(T::ChipGlance, M::Strong, 0.85f, 0.05f), Tell(T::Recheck, M::Weak, 0.55f, 0.08f), Tell(T::NeckTouch, M::Bluff, 0.75f, 0.08f)}, 0x6b6a4e)},
+			{Tell(T::ChipGlance, M::Strong, 0.85f, 0.05f), Tell(T::Recheck, M::Weak, 0.55f, 0.08f), Tell(T::NeckTouch, M::Bluff, 0.75f, 0.08f)}, 0x6b6a4e, 0.6f)},
 		// Loud, calls everything. His smile is real when he has it; when he bluffs it's mouth only.
+		// Sees you shake and calls, every time.
 		{TEXT("BigLou"), 5, ss::Archetype::Station, 300, Persona(TEXT("Big Lou"), 0.25f, 0.75f, 0.35f, 0.5f, 0.2f, 0.8f, 53,
-			{Tell(T::RealSmile, M::Strong, 0.8f, 0.1f), Tell(T::FalseSmile, M::Bluff, 0.75f, 0.08f), Tell(T::ChipReach, M::Weak, 0.6f, 0.12f)}, 0x1c1c1e)},
+			{Tell(T::RealSmile, M::Strong, 0.8f, 0.1f), Tell(T::FalseSmile, M::Bluff, 0.75f, 0.08f), Tell(T::ChipReach, M::Weak, 0.6f, 0.12f)}, 0x1c1c1e, -0.6f)},
 		// Wired, bets too much. Shakes when he has it; bluffing, he stares you down and swallows.
 		{TEXT("Twitch"), 2, ss::Archetype::Maniac, 160, Persona(TEXT("Twitch"), 0.85f, 0.7f, 0.9f, 0.9f, 0.7f, 0.5f, 41,
 			{Tell(T::Tremble, M::Strong, 0.85f, 0.12f), Tell(T::StareDown, M::Bluff, 0.75f, 0.12f), Tell(T::Swallow, M::Bluff, 0.6f, 0.1f),
-				Tell(T::BlinkBurst, M::Bluff, 0.45f, 0.15f)}, 0x8c2a24)},
-		// Quiet and sharp. She acts: a sigh and a look away mean she's strong. Her pupils don't act.
+				Tell(T::BlinkBurst, M::Bluff, 0.45f, 0.15f)}, 0x8c2a24, -0.5f)},
+		// Quiet and sharp. She acts: a sigh and a look away mean she's strong. Her pupils don't act. She
+		// reads yours best of all.
 		{TEXT("Mei"), 6, ss::Archetype::Reg, 220, Persona(TEXT("Mei"), 0.15f, 0.25f, 0.3f, 0.3f, 0.55f, 0.15f, 23,
 			{Tell(T::Sigh, M::Strong, 0.65f, 0.08f), Tell(T::LookAway, M::Strong, 0.5f, 0.15f), Tell(T::PupilFlare, M::Strong, 0.6f, 0.05f),
-				Tell(T::LipPress, M::Bluff, 0.45f, 0.12f)}, 0x34383d)},
+				Tell(T::LipPress, M::Bluff, 0.45f, 0.12f)}, 0x34383d, 0.9f)},
 	};
 	for (const FRegular& R : Regulars)
 	{
@@ -506,5 +1590,4 @@ void ABackRoomGameMode::SeatEveryone()
 			}
 		}
 	}
-	Table->Begin(4.0f);
 }

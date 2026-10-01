@@ -509,11 +509,12 @@ void RiverLine::BurnerApp(double Now)
 		uint32_t Col;
 		bool Known;
 	};
-	const Contact Contacts[2] = {
+	const Contact Contacts[3] = {
 		{"Marcus", L.DebtCents > 0 ? "pay up before you get more work." : L.Runs >= 2 ? "got a bigger one when you're ready." : "I got work if you're not scared.", 0x2fd27a, true},
 		{"Sam", SamKnown ? (L.Bans > 0 ? "lay low for a day" : "i pay ppl to play my account") : "No messages yet", 0xf2c14e, SamKnown},
+		{"Dee", L.BackRoomNights == 0 ? "game's tonight. bring forty." : L.BackRoomNetCents > 0 ? "my regulars are talking about you." : "come back with a plan.", 0xf2a541, true},
 	};
-	for (int I = 0; I < 2; ++I)
+	for (int I = 0; I < 3; ++I)
 	{
 		const Rect R{0.0f, 66.0f + Nf(I) * 84.0f, 340.0f, 84.0f};
 		const Ui::ClickState St = UI.Clickable("contact" + std::to_string(I), R);
@@ -585,7 +586,7 @@ void RiverLine::BurnerApp(double Now)
 			Thread.push_back({false, "cops are hot on your plates right now. your call."});
 		}
 	}
-	else
+	else if (BurnerContact == 1)
 	{
 		Thread = {{false, "saw ur name on the riverline board"}, {false, "i pay ppl to play my account when im busy. 150 + a tip if im up"}, {false, "dont get caught lol. they call it ghosting"}};
 		if (L.Ghosts > L.Bans)
@@ -597,6 +598,30 @@ void RiverLine::BurnerApp(double Now)
 		{
 			Thread.push_back({false, "dude they flagged BOTH accounts"});
 			Thread.push_back({false, "lay low for a day"});
+		}
+	}
+	else
+	{
+		// Dee: the game across the street, and what she thinks of how you play in it.
+		Thread = {{false, "it's Dee. heard about the notice on your door."},
+			{false, "the game's still on. back room at the Spin Cycle, across the street. one-two no limit, tuesdays, thursdays, saturdays."},
+			{false, "forty to sit, two hundred max. doors at nine, last hand at five."},
+			{false, "and kid. watch their hands, not their faces. faces lie."}};
+		if (L.BackRoomNights >= 1)
+		{
+			Thread.push_back({true, "thanks for having me."});
+			Thread.push_back({false, L.BackRoomNetCents > 0 ? "you're up $" + std::to_string(L.BackRoomNetCents / 100) + " at my table. my regulars are talking about you. don't get cute."
+															: L.BackRoomNetCents < 0 ? "you've given my regulars $" + std::to_string(-L.BackRoomNetCents / 100) + ". come back with a plan."
+																					 : "broke even. that's a start."});
+		}
+		int Learned = 0;
+		for (const auto& Rd : L.Reads)
+		{
+			Learned += Rd.second >= 2 ? 1 : 0;
+		}
+		if (Learned >= 1)
+		{
+			Thread.push_back({false, Learned == 1 ? "you caught one of their tells. most people never see a single one." : "you've got " + std::to_string(Learned) + " of their tells now. they'll start to feel it."});
 		}
 	}
 	// Bubbles, newest at the bottom, above the offers.
@@ -647,6 +672,54 @@ void RiverLine::BurnerApp(double Now)
 		if (AppButton("paydebt", {D.X + D.W - 292.0f, D.Y + 64.0f, 260.0f, 60.0f}, "Pay " + Money(L.DebtCents), pal::Red, Hex(0xffffff), Can, Can ? std::string() : "Balance " + Money(S.BankrollCents)))
 		{
 			S.PayDebt();
+		}
+		return;
+	}
+	if (BurnerContact == 2)
+	{
+		// The game: when it runs, and a buy-in from the bankroll that takes you there.
+		const life::Activity* G = life::Find("dee-game");
+		if (!G)
+		{
+			return;
+		}
+		const Rect R{380.0f, OffersTop + 24.0f, NetW - 420.0f, 214.0f};
+		UI.RRect(R, 16.0f, Hex(0x15110a), NetA(Cc, 0.45f));
+		// Named for the night it's on: tonight's while the doors are open, else the next one.
+		{
+			static const char* Days[7] = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+			const double At = life::InWindow(*G, Ctx.World) ? Ctx.World : life::NextOpen(*G, Ctx.World);
+			int Day = static_cast<int>(std::floor(At / 1440.0));
+			if (std::fmod(At, 1440.0) < 12.0 * 60.0)
+			{
+				--Day;
+			}
+			UI.Text(std::string("The ") + Days[((Day % 7) + 7) % 7] + " game", R.X + 26.0f, R.Y + 40.0f, Ts(20.0f, 800, Text));
+		}
+		UI.Text(G->Place + "  \xC2\xB7  $1/$2 no-limit  \xC2\xB7  Tue, Thu, Sat  \xC2\xB7  doors 9:00 PM to 3:00 AM", R.X + 26.0f, R.Y + 64.0f, Ts(13.0f, 600, Dim));
+		const std::string Why = life::Blocked(*G, L, Ctx);
+		const bool Open = Why.empty();
+		const bool WindowOnly = !Open && life::InWindow(*G, Ctx.World) == false && Ctx.Bankroll >= life::GameMinBuyInCents && L.Energy >= G->Energy;
+		const std::string Status = Open ? "The game's running. Dee saved you a seat." : WindowOnly ? "Next game " + Why : Why;
+		UI.Text(Status, R.X + R.W - 26.0f, R.Y + 40.0f, Ts(15.0f, 800, Open ? Cc : Dim, Align::Right));
+		UI.Text(G->Blurb, R.X + 26.0f, R.Y + 96.0f, Ts(13.0f, 500, Dim, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
+		const Chips Amounts[3] = {life::GameMinBuyInCents, 10000, life::GameMaxBuyInCents};
+		const float Gap = 16.0f;
+		const float ButtonW = (R.W - 52.0f - 2.0f * Gap) / 3.0f;
+		for (int K = 0; K < 3; ++K)
+		{
+			const Chips Amt = Amounts[K];
+			const bool Ok = Open && S.BankrollCents >= Amt;
+			const std::string Sub = Open && !Ok ? "Balance " + Money(S.BankrollCents) : std::string();
+			if (AppButton("buyin:" + std::to_string(Amt), {R.X + 26.0f + Nf(K) * (ButtonW + Gap), R.Y + R.H - 62.0f, ButtonW, 46.0f}, "Sit with " + Money(Amt), Cc, Hex(0x1d1204), Ok, Sub))
+			{
+				const std::string E = S.GoToGame(G->Id, Amt);
+				if (!E.empty())
+				{
+					Toast = E;
+					ToastAt = Now;
+				}
+			}
 		}
 		return;
 	}

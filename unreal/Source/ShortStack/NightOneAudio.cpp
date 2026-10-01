@@ -188,11 +188,11 @@ void UNightOneAudio::PlayAt(ss::SoundId Id, const FVector& At, float Volume)
 	}
 }
 
-void UNightOneAudio::PlayEffect(ss::audio::Effect Id)
+void UNightOneAudio::PlayEffect(ss::audio::Effect Id, float Volume)
 {
 	if (!bMuted)
 	{
-		PlayPcm(ss::audio::Render(Id, Seed++), 1.0f);
+		PlayPcm(ss::audio::Render(Id, Seed++), Volume);
 	}
 }
 

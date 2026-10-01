@@ -308,6 +308,79 @@ double Wait(ss::Session& S, double Now, double Seconds)
 	return Now;
 }
 
+/** Dee's game: the nights it runs, what it takes to sit, the trip out, and what a night leaves in the save. */
+void DeeGame()
+{
+	struct OutHooks : Hooks
+	{
+		std::string Went;
+		ss::Chips BuyIn = 0;
+		int FromDee = 0;
+		void Text(const std::string& From, const std::string& Body) override
+		{
+			Hooks::Text(From, Body);
+			FromDee += From == "Dee" ? 1 : 0;
+		}
+		bool GoOut(const std::string& Id, ss::Chips Cents) override
+		{
+			Went = Id;
+			BuyIn = Cents;
+			return true;
+		}
+	};
+	namespace life = ss::life;
+	OutHooks H;
+	ss::Session S(H, "dee");
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	const life::Activity* G = life::Find("dee-game");
+	Expect(G != nullptr && G->Type == life::Kind::Game, "Dee's game is in the catalog");
+	if (!G)
+	{
+		return;
+	}
+	Expect(!life::InWindow(*G, S.WorldMinutes()), "2:07 AM Tuesday is Monday night: no game");
+	Expect(life::InWindow(*G, 1440.0 + 22.0 * 60.0), "Tuesday 10 PM, the game is on");
+	Expect(life::InWindow(*G, 2.0 * 1440.0 + 2.0 * 60.0), "2 AM Wednesday is still Tuesday's game");
+	Expect(!life::InWindow(*G, 2.0 * 1440.0 + 22.0 * 60.0), "no game on Wednesday night");
+	Expect(life::InWindow(*G, 3.0 * 1440.0 + 21.0 * 60.0) && life::InWindow(*G, 5.0 * 1440.0 + 23.0 * 60.0), "Thursday and Saturday nights");
+	Expect(life::NextOpen(*G, S.WorldMinutes()) == 1440.0 + 21.0 * 60.0, "the next game is Tuesday at nine");
+	Expect(life::NextOpen(*G, 2.0 * 1440.0 + 12.0 * 60.0) == 3.0 * 1440.0 + 21.0 * 60.0, "from Wednesday, the next game is Thursday");
+	Expect(S.GoToGame("dee-game", 4000).find("$40") != std::string::npos, "$2.37 can't sit");
+	S.BankrollCents = 30000;
+	S.Life.Energy = 60.0;
+	Expect(S.GoToGame("dee-game", 4000) == "Tonight 9:00 PM", "closed until nine");
+	// Dee's heads-up at 8:30 on a game night.
+	S.LobbyMinutes = 20.0 * 60.0 + 29.0;
+	Now = Wait(S, Now, 0.2);
+	Expect(H.FromDee == 0, "no text before 8:30");
+	S.LobbyMinutes = 20.0 * 60.0 + 31.0;
+	Now = Wait(S, Now, 0.2);
+	Expect(H.FromDee == 1, "Dee texts half an hour before the doors");
+	S.LobbyMinutes = 22.0 * 60.0;
+	Now = Wait(S, Now, 0.2);
+	S.Life.Energy = 60.0;
+	Expect(S.GoToGame("dee-game", 25000) == "Pick a buy-in you can cover.", "the buy-in is $40 to $200");
+	Expect(S.StartActivity("dee-game") == "Pick a buy-in first.", "the game isn't a time skip");
+	const int SavesBefore = H.Saves;
+	Expect(S.GoToGame("dee-game", 10000).empty() && H.Went == "dee-game" && H.BuyIn == 10000 && H.Saves > SavesBefore, "sitting with $100 saves and heads out");
+	S.Life.Energy = 5.0;
+	Expect(S.GoToGame("dee-game", 4000).find("Too tired") == 0, "too tired to sit");
+	// A night as the Back Room writes it into the save.
+	ss::SaveData D;
+	D.BankrollCents = 23400;
+	D.Life.BackRoomNights = 1;
+	D.Life.BackRoomNetCents = -1200;
+	D.Life.Reads["Sal/ChipGlance"] = 2;
+	D.Life.Reads["Twitch/Swallow"] = 1;
+	D.Life.Record(1440.0 + 23.0 * 60.0, "Dee's game", -1200, 0);
+	ss::SaveData P;
+	Expect(ss::SaveData::Parse(D.Serialize(), P) && P.Life.BackRoomNights == 1 && P.Life.BackRoomNetCents == -1200 && P.Life.Reads.size() == 2 && P.Life.Reads["Sal/ChipGlance"] == 2 &&
+			   P.Life.Ledger.size() == 1 && P.Life.Ledger[0].Label == "Dee's game",
+		"a night at Dee's survives a save");
+	std::printf("  dee: %d text(s), sat with %s\n", H.FromDee, ss::Money(H.BuyIn).c_str());
+}
+
 /** Shifts, hustles, sleep, rent, Night Shift prizes, unlocks, bounties, satellites and tickets. */
 void LifeChecks()
 {
@@ -517,6 +590,7 @@ int main()
 	session_test::NetworkChecks();
 	session_test::ScheduledTournament();
 	session_test::LifeChecks();
+	session_test::DeeGame();
 	session_test::BountyTournament();
 	session_test::FullTournament();
 	session_test::SprintTournament();

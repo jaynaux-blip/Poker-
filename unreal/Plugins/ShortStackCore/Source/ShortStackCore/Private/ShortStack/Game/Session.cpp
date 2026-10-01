@@ -137,6 +137,11 @@ std::string SaveData::Serialize() const
 	Out << "life\tban\t" << Fixed(L.BannedUntil, 2) << "\n";
 	Out << "life\tcount\t" << L.Shifts << "\t" << L.Runs << "\t" << L.Busts << "\t" << L.Ghosts << "\t" << L.Bans << "\n";
 	Out << "life\tearned\t" << L.EarnedJobs << "\t" << L.EarnedHustles << "\n";
+	Out << "life\tbackroom\t" << L.BackRoomNights << "\t" << L.BackRoomNetCents << "\n";
+	for (const auto& Rd : L.Reads)
+	{
+		Out << "read\t" << session_detail::Escape(Rd.first) << "\t" << Rd.second << "\n";
+	}
 	for (const std::string& U : L.Unlocks)
 	{
 		Out << "unlock\t" << session_detail::Escape(U) << "\n";
@@ -233,10 +238,19 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 				L.EarnedJobs = Cents(2);
 				L.EarnedHustles = Cents(3);
 			}
+			else if (P[1] == "backroom" && P.size() >= 4)
+			{
+				L.BackRoomNights = Int(2);
+				L.BackRoomNetCents = Cents(3);
+			}
 		}
 		else if (P.size() == 2 && P[0] == "unlock")
 		{
 			D.Life.Unlocks.insert(session_detail::Unescape(P[1]));
+		}
+		else if (P.size() == 3 && P[0] == "read")
+		{
+			D.Life.Reads[session_detail::Unescape(P[1])] = std::atoi(P[2].c_str());
 		}
 		else if (P.size() == 3 && P[0] == "ticket")
 		{
@@ -1689,12 +1703,42 @@ int Session::SeatsInPlay() const
 	return Count;
 }
 
+std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
+{
+	const life::Activity* A = life::Find(Id);
+	if (!A || A->Type != life::Kind::Game)
+	{
+		return "Unknown game.";
+	}
+	if (TimeSkip.Active)
+	{
+		return "You're busy.";
+	}
+	const std::string Why = life::Blocked(*A, Life, LifeContext());
+	if (!Why.empty())
+	{
+		return Why;
+	}
+	if (BuyInCents < life::GameMinBuyInCents || BuyInCents > life::GameMaxBuyInCents || BuyInCents > BankrollCents)
+	{
+		return "Pick a buy-in you can cover.";
+	}
+	// The host takes the player to the table; it settles up in the save when they come home.
+	Save();
+	Hooks.Sound(SoundId::Click, 0.8);
+	return Hooks.GoOut(Id, BuyInCents) ? "" : "Can't get there right now.";
+}
+
 std::string Session::StartActivity(const std::string& Id)
 {
 	const life::Activity* A = life::Find(Id);
 	if (!A)
 	{
 		return "Unknown activity.";
+	}
+	if (A->Type == life::Kind::Game)
+	{
+		return "Pick a buy-in first.";
 	}
 	if (TimeSkip.Active)
 	{
@@ -1719,6 +1763,7 @@ std::string Session::StartActivity(const std::string& Id)
 	case life::Kind::Hustle: TimeSkip.Label = A->Id == "marcus-run" ? "On the long run for Marcus" : "On a drop-off for Marcus"; break;
 	case life::Kind::Ghost: TimeSkip.Label = "Playing as whale_sam"; break;
 	case life::Kind::Sleep: TimeSkip.Label = A->Hours >= 8.0 ? "Sleeping" : "Napping"; break;
+	case life::Kind::Game: break;
 	}
 	HasOutcome = false;
 	ConfirmRegister = false;
@@ -1782,6 +1827,7 @@ void Session::FinishSkip()
 			}
 			break;
 		case life::Kind::Sleep:
+		case life::Kind::Game:
 			break;
 		}
 	}
@@ -2040,6 +2086,26 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	if (Life.BannedUntil > From && Life.BannedUntil <= To)
 	{
 		Hooks.Text("RiverLine", "Review complete. Your account is active again. Further violations may result in permanent closure.");
+	}
+	// Game nights at Dee's: a heads-up half an hour before the doors open.
+	if (const life::Activity* Game = life::Find("dee-game"))
+	{
+		for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + Game->Opens - 30.0; At <= To; At += net::MinutesPerDay)
+		{
+			if (At <= From || !life::InWindow(*Game, At + 31.0) || Life.RentStage == life::Rent::Evicted)
+			{
+				continue;
+			}
+			static const char* Nights[] = {
+				"doors at nine. lou's already here, eating.",
+				"game's on tonight. sal brought his lucky coffee.",
+				"nine o'clock. twitch is wound up, should be a good one.",
+				"tonight, nine. mei's back. watch yourself.",
+			};
+			const int Day = net::DayOf(At);
+			StoryText("dee-night-" + std::to_string(Day), "Dee",
+				Life.BackRoomNights == 0 ? "game's tonight at nine. back room of the laundromat, across the street. bring forty. open the burner if you're in." : Nights[Day % 4]);
+		}
 	}
 }
 

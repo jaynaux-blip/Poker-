@@ -328,6 +328,36 @@ std::vector<float> Render(Effect Id, uint32_t Seed)
 		Thump(B, 0.0, 62.0, 0.35);
 		Thump(B, 0.16, 52.0, 0.25);
 		break;
+	case Effect::Step:
+		// The heel's low thud, the tap of the sole, a little grit underfoot.
+		Burst(B, R, 0.0, 150.0, 0.9, 0.08, 0.34, FilterType::LowPass);
+		Burst(B, R, 0.012, 1800.0 + Rand(R) * 700.0, 3.0, 0.03, 0.07);
+		Burst(B, R, 0.035, 5200.0, 0.7, 0.08, 0.02 + 0.015 * Rand(R), FilterType::HighPass);
+		break;
+	case Effect::Scrape:
+		// A rough, rising groan from the legs, the frame's rattle, and the weight shifting.
+		Burst(B, R, 0.0, 480.0, 7.0, 0.42, 0.22, FilterType::BandPass, 760.0);
+		Burst(B, R, 0.03, 1400.0, 5.0, 0.34, 0.07, FilterType::BandPass, 2000.0);
+		Burst(B, R, 0.0, 170.0, 1.0, 0.3, 0.14, FilterType::LowPass);
+		break;
+	case Effect::Breath:
+	{
+		// Air through the nose: band-limited noise that swells and fades over a second and a half.
+		const double Dur = 1.6;
+		B.Ensure(Dur + 0.05);
+		Biquad F;
+		for (size_t I = 0; I < static_cast<size_t>(Dur * SynthRate); ++I)
+		{
+			const double T = static_cast<double>(I) / SynthRate;
+			if (I % 32 == 0)
+			{
+				F.Set(FilterType::BandPass, 900.0 - 350.0 * T / Dur, 0.7);
+			}
+			const double Env = std::pow(std::sin(SynthPi * T / Dur), 2.0) * (1.0 - 0.3 * T / Dur);
+			B.Data[I] += static_cast<float>(F.Process(R.Next()) * 0.07 * Env);
+		}
+		break;
+	}
 	}
 	return Finish(B);
 }

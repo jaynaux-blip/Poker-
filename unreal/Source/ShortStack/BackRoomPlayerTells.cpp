@@ -107,6 +107,10 @@ void ABackRoomPlayer::Provoke(EBackRoomTellMeaning Meaning, float Intensity)
 		if (Rng.FRand() < P * FMath::Clamp(Intensity, 0.3f, 1.2f) && !IsActive(T.Tell))
 		{
 			PlayTell(T.Tell, FMath::Clamp(Intensity, 0.4f, 1.0f));
+			FActiveTell& Fired = Active.Last();
+			Fired.bCounts = true;
+			Fired.bHonest = T.Means == Meaning;
+			Fired.Means = T.Means;
 			UE_LOG(LogBackRoomTells, Display, TEXT("%s: %s (%s, strength %.2f%s)"), *Persona.Name, *UEnum::GetValueAsString(T.Tell),
 				T.Means == Meaning ? TEXT("honest") : TEXT("false"), Strength, bBluffing ? TEXT(", bluffing") : TEXT(""));
 		}
@@ -121,6 +125,11 @@ void ABackRoomPlayer::PlayTell(EBackRoomTell Tell, float Intensity)
 	float Delay = 0.0f;
 	Timing(Tell, Rng, T.Duration, Delay);
 	T.T = -Delay;
+}
+
+bool ABackRoomPlayer::IsWatchingHero() const
+{
+	return NoticeT >= 0.0f || Active.ContainsByPredicate([](const FActiveTell& A) { return A.Tell == EBackRoomTell::StareDown && A.T >= 0.0f; });
 }
 
 bool ABackRoomPlayer::IsActive(EBackRoomTell Tell) const
@@ -239,6 +248,16 @@ void ABackRoomPlayer::UpdateTells(float Dt)
 			break;
 		default: break;
 		}
+		// What the hero saw of it: reported once clearly seen, or at the end with the best look they got.
+		if (A.bCounts && !A.bReported && TellHook)
+		{
+			A.SeenMax = FMath::Max(A.SeenMax, Studied);
+			if (Studied >= 0.45f || (A.T >= A.Duration && A.SeenMax >= 0.2f))
+			{
+				A.bReported = true;
+				TellHook(this, static_cast<uint8>(A.Tell), static_cast<uint8>(A.Means), A.bHonest, A.SeenMax);
+			}
+		}
 		if (A.T >= A.Duration)
 		{
 			const EBackRoomTell Ended = A.Tell;
@@ -255,6 +274,7 @@ void ABackRoomPlayer::UpdateTells(float Dt)
 			}
 		}
 	}
+	TrembleGoal = FMath::Max(TrembleGoal, ExternalTremble);
 	Stillness = Ease(Stillness, StillGoal, 3.0f, Dt);
 	Tremble = Ease(Tremble, TrembleGoal, 4.0f, Dt);
 

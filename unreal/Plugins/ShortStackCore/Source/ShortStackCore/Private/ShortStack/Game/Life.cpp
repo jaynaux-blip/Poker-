@@ -2,6 +2,7 @@
 #include "../StrictFloat.h"
 
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Network.h"
 #include "ShortStack/Rng.h"
 
 #include <algorithm>
@@ -64,6 +65,10 @@ std::vector<Activity> Build()
 		"Two cities, one car, no stops. Real money for people Marcus trusts.");
 	Add("sam-ghost", Kind::Ghost, "Play my account", "Sam", 3.0, 0.0, 150.0, 400.0, 18.0, 0.0, 0.10, 18 * 60, 3 * 60, 0xf2c14e,
 		"Sam plays big and badly. He pays you to log in as him and play his session. RiverLine security calls it ghosting.");
+	// Dee's game: Tuesdays, Thursdays and Saturdays, doors at nine, the last hand at five.
+	Add("dee-game", Kind::Game, "Dee's game", "Spin Cycle Laundromat, the back room", 6.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 21 * 60, 3 * 60, 0xf2a541,
+		"One-two no-limit behind the dryers. $40 to sit, $200 max. Dee deals, the regulars talk, and you can read every one of them.");
+	L.back().Days = (1 << 1) | (1 << 3) | (1 << 5);
 	// Sleep.
 	Add("nap", Kind::Sleep, "Nap", "Bed", 4.0, 0.0, 0.0, 0.0, -45.0, 0.0, 0.0, 0, 1440, 0x8b5cf6, "Four hours. Enough to function.");
 	Add("sleep", Kind::Sleep, "Sleep", "Bed", 8.0, 0.0, 0.0, 0.0, -90.0, 0.0, 0.0, 0, 1440, 0x8b5cf6, "A real night's sleep. The world keeps going without you.");
@@ -96,7 +101,19 @@ bool InWindow(const Activity& A, double World)
 	const double T = TimeOfDay(World);
 	const double O = static_cast<double>(A.Opens);
 	const double C = static_cast<double>(A.Closes);
-	return O <= C ? (T >= O && T < C) : (T >= O || T < C);
+	const bool bOpen = O <= C ? (T >= O && T < C) : (T >= O || T < C);
+	if (!bOpen || A.Days == 0x7f)
+	{
+		return bOpen;
+	}
+	// Past midnight, a window that wraps still belongs to the day it opened (Day 0 is a Monday).
+	int Day = static_cast<int>(std::floor(World / MinutesInDay));
+	if (O > C && T < C)
+	{
+		--Day;
+	}
+	const int Weekday = ((Day % 7) + 7) % 7;
+	return ((A.Days >> Weekday) & 1) != 0;
 }
 
 double NextOpen(const Activity& A, double World)
@@ -107,7 +124,12 @@ double NextOpen(const Activity& A, double World)
 	}
 	const double T = TimeOfDay(World);
 	const double O = static_cast<double>(A.Opens);
-	return World + (O > T ? O - T : MinutesInDay - T + O);
+	double At = World + (O > T ? O - T : MinutesInDay - T + O);
+	for (int Guard = 0; Guard < 8 && !InWindow(A, At); ++Guard)
+	{
+		At += MinutesInDay;
+	}
+	return At;
 }
 
 void State::Record(double At, const std::string& Label, Chips Amount, int K)
@@ -139,6 +161,25 @@ std::string Blocked(const Activity& A, const State& L, const Context& Ctx)
 	if (A.Type == Kind::Sleep)
 	{
 		return L.Energy >= 92.0 ? "You're wide awake." : "";
+	}
+	if (A.Type == Kind::Game)
+	{
+		if (Ctx.Bankroll < GameMinBuyInCents)
+		{
+			return "Dee's game is " + Money(GameMinBuyInCents) + " to sit.";
+		}
+		if (L.Energy < A.Energy)
+		{
+			return "Too tired to sit at a live game. Sleep first.";
+		}
+		if (!InWindow(A, Ctx.World))
+		{
+			const double At = NextOpen(A, Ctx.World);
+			const int Day = static_cast<int>(std::floor(At / MinutesInDay));
+			const int Today = static_cast<int>(std::floor(Ctx.World / MinutesInDay));
+			return std::string(Day == Today ? "Tonight " : net::DateLabel(Day) + ", ") + ClockString(TimeOfDay(At));
+		}
+		return "";
 	}
 	if (A.Id == "marcus-drop" || A.Id == "marcus-run")
 	{
@@ -239,6 +280,9 @@ Outcome Resolve(const Activity& A, const State& L, double Start, Rng& R, Chips B
 	case Kind::Sleep:
 		O.Title = A.Hours >= 8.0 ? "Slept" : "Napped";
 		O.Body = A.Hours >= 8.0 ? "Eight hours. The rain never stopped." : "Four hours on top of the covers.";
+		break;
+	case Kind::Game:
+		// Played out at the table by the host, never resolved here.
 		break;
 	}
 	return O;
