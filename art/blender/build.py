@@ -18,7 +18,7 @@ sys.path.insert(0, HERE)
 import bpy  # noqa: E402
 from artkit import core, review  # noqa: E402
 
-ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chair', 'mouse', 'table', 'cards', 'folding_chair']
+ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chair', 'mouse', 'table', 'cards', 'folding_chair', 'dryer']
 
 
 def args():

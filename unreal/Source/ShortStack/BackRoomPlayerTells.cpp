@@ -11,6 +11,8 @@
 
 using namespace BackRoomPlayerDetail;
 
+DEFINE_LOG_CATEGORY_STATIC(LogBackRoomTells, Log, All);
+
 namespace BackRoomTellsDetail
 {
 struct FLines
@@ -105,6 +107,8 @@ void ABackRoomPlayer::Provoke(EBackRoomTellMeaning Meaning, float Intensity)
 		if (Rng.FRand() < P * FMath::Clamp(Intensity, 0.3f, 1.2f) && !IsActive(T.Tell))
 		{
 			PlayTell(T.Tell, FMath::Clamp(Intensity, 0.4f, 1.0f));
+			UE_LOG(LogBackRoomTells, Display, TEXT("%s: %s (%s, strength %.2f%s)"), *Persona.Name, *UEnum::GetValueAsString(T.Tell),
+				T.Means == Meaning ? TEXT("honest") : TEXT("false"), Strength, bBluffing ? TEXT(", bluffing") : TEXT(""));
 		}
 	}
 }

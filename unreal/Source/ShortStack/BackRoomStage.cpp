@@ -42,6 +42,11 @@ const double DoorX0 = 110.0, DoorX1 = 202.0, DoorTop = 212.0;
 const FVector2D Seats[8] = {
 	{-61.0, 0.0}, {-61.0, 64.0}, {0.0, 122.0}, {61.0, 64.0}, {61.0, 0.0}, {61.0, -64.0}, {0.0, -122.0}, {-61.0, -64.0},
 };
+// The dryer bank: six stacked units, 80 cm apart, centered on the far wall.
+double DryerY(int32 Index)
+{
+	return -200.0 + Index * 80.0;
+}
 // The table's straight run: the ends are half circles around (0, +/-HalfL).
 const double HalfL = 61.0;
 // A seated player's chair front edge is this far out from the rail (cm): forearms on the rail.
@@ -250,13 +255,21 @@ void ABackRoomStage::BuildTable()
 
 void ABackRoomStage::BuildMachines()
 {
-	// Stand-ins until the Blender machines exist: a bank of stacked dryers behind the dealer.
+	// A bank of stacked dryers behind the dealer (art/blender/assets/dryer.py), flush against the far
+	// wall; engine-shape stand-ins until the mesh is imported.
 	UMaterialInterface* Enamel = Room(TEXT("DryerEnamel"), 4, 0xd8d2bf, 0, 0.0f, 0.0f);
 	UMaterialInterface* Chrome = Room(TEXT("DryerChrome"), 4, 0xb9bab7, 0, 0.0f, 0.9f);
 	UMaterialInterface* Glass = Room(TEXT("DryerGlass"), 4, 0x1b1d1f, 0, 0.0f, 0.1f);
+	UStaticMesh* Dryer = LoadProp(TEXT("SM_StackDryer"));
 	for (int32 I = 0; I < 6; ++I)
 	{
-		const double Y = -235.0 + I * 86.0;
+		const double Y = DryerY(I);
+		if (Dryer)
+		{
+			// Not quite square to the wall or each other: they were pushed in one at a time.
+			AddMesh(Dryer, nullptr, FVector(X1 - 44.0 + (I % 2) * 0.8, Y, 0.0), FVector(1.0), FRotator(0.0f, (I % 3 - 1) * 0.35f, 0.0f));
+			continue;
+		}
 		Box(Enamel, FVector(X1 - 84.0, Y - 41.0, 0.0), FVector(X1 - 4.0, Y + 41.0, 196.0));
 		for (double Z : {50.0, 146.0})
 		{
@@ -367,7 +380,8 @@ void ABackRoomStage::BuildLights()
 
 	// One dryer running (second from the right, top): warm light through its door glass.
 	DryerGlow = NewPart<UPointLightComponent>();
-	DryerGlow->SetRelativeLocation(FVector(X1 - 70.0, -235.0 + 4 * 86.0, 146.0));
+	// The running dryer's drum light, through its glass.
+	DryerGlow->SetRelativeLocation(FVector(X1 - 92.0, DryerY(4), 143.0));
 	DryerGlow->SetIntensityUnits(ELightUnits::Candelas);
 	DryerGlow->SetIntensity(6.0f);
 	DryerGlow->SetLightColor(Srgb(0xffb46b));
