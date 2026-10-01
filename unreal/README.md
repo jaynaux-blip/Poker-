@@ -5,6 +5,7 @@ This folder is the Unreal project for Night One. It contains:
 - the seated first-person view in the rainy apartment
 - the RiverLine poker client on the laptop, playable from the lobby through a full tournament to the results screen
 - a living poker network behind the lobby: a round-the-clock schedule, series, 1,600 regulars, leaderboards, news and your career page
+- the rest of the laptop: ShiftLink shifts, the Burner (Marcus and Sam), the bank, sleep and rent day, with the room's light following the clock
 - phone texts from Dee and the landlord
 - the composure and tilt effects
 - procedural sound

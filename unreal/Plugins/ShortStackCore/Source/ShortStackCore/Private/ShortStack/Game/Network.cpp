@@ -2,6 +2,7 @@
 
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Names.h"
 #include "ShortStack/Rng.h"
@@ -232,10 +233,17 @@ double Points(int Place, int Entries, Chips BuyInCents)
 	return std::round(10.0 * std::sqrt(static_cast<double>(Entries)) / std::sqrt(static_cast<double>(Place)) * Stake);
 }
 
-HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& History)
+double EntryStart(const HistoryEntry& E)
+{
+	const size_t At = E.EventId.rfind('@');
+	return At == std::string::npos ? MinutesPerDay + 120.0 : std::atof(E.EventId.c_str() + At + 1);
+}
+
+HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& History, double Now)
 {
 	HeroStats H;
 	H.Name = Name;
+	const double Night = life::NightShiftStart(Now);
 	for (const HistoryEntry& E : History)
 	{
 		++H.Tournaments;
@@ -255,7 +263,8 @@ HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& Hi
 		BuyInCents = std::max<Chips>(0, BuyInCents);
 		const double P = Points(E.Place, E.Entrants, BuyInCents);
 		H.SeasonPoints += P;
-		if (BuyInCents <= 550)
+		const double Start = EntryStart(E);
+		if (BuyInCents <= 550 && Start >= Night && Start < Night + 12.0 * 60.0 && Start <= Now)
 		{
 			H.NightPoints += P;
 		}
@@ -536,11 +545,19 @@ void Network::BuildSchedule()
 	{
 		EventTemplate& T = Add("step1", "Step 1 \xC2\xB7 RCOP Main", 2.20, 0, Format::Satellite, "Turbo", 5.0, 90, At(1, 30), 240, 30);
 		T.Seats = "Step 2 tickets ($11)";
+		T.SeatTicket = "step2";
+		T.SeatValueCents = Cents(11.0);
 		T.Blurb = "Win a ticket to Step 2. Five steps from $2.20 to a $5,250 seat in the Main Event.";
 	}
-	Add("step2", "Step 2 \xC2\xB7 RCOP Main", 11, 0, Format::Satellite, "Turbo", 6.0, 60, At(3, 0), 360, 30).Seats = "Step 3 tickets ($55)";
-	Add("step3", "Step 3 \xC2\xB7 RCOP Main", 55, 0, Format::Satellite, "Turbo", 6.0, 45, At(12, 0), 480, 30).Seats = "Step 4 tickets ($215)";
-	Add("step4", "Step 4 \xC2\xB7 RCOP Main", 215, 0, Format::Satellite, "Regular", 8.0, 36, At(20, 30), 0, 30).Seats = "RCOP Main Event seats";
+	auto Step = [&](const std::string& Id, const std::string& Name, double BuyIn, double Level, int Field, int StartMin, int Every, const char* Seats, const char* Ticket, double SeatValue) {
+		EventTemplate& T = Add(Id, Name, BuyIn, 0, Format::Satellite, Level >= 8.0 ? "Regular" : "Turbo", Level, Field, StartMin, Every, 30);
+		T.Seats = Seats;
+		T.SeatTicket = Ticket;
+		T.SeatValueCents = Cents(SeatValue);
+	};
+	Step("step2", "Step 2 \xC2\xB7 RCOP Main", 11, 6.0, 60, At(3, 0), 360, "Step 3 tickets ($55)", "step3", 55.0);
+	Step("step3", "Step 3 \xC2\xB7 RCOP Main", 55, 6.0, 45, At(12, 0), 480, "Step 4 tickets ($215)", "step4", 215.0);
+	Step("step4", "Step 4 \xC2\xB7 RCOP Main", 215, 8.0, 36, At(20, 30), 0, "RCOP Main Event seats", "rcop-main", 5250.0);
 
 	// Weekly majors.
 	auto Weekly = [&](const std::string& Id, const std::string& Name, double BuyIn, double Gtd, Format F, const char* Speed, double Level, int Field, int StartMin, int Day,
@@ -566,6 +583,8 @@ void Network::BuildSchedule()
 	Weekly("sunday-shr", "Super High Roller Bounty", 2100, 300000, Format::Bounty, "Regular", 15.0, 150, At(18, 0), 6, false, "");
 	Weekly("mega-rcop", "RCOP Main Mega Satellite", 109, 0, Format::Satellite, "Turbo", 8.0, 1400, At(18, 0), 5, true, "25 seats to the $5,250 RCOP Main Event guaranteed.");
 	Temps.back().Seats = "25 Main Event seats";
+	Temps.back().SeatTicket = "rcop-main";
+	Temps.back().SeatValueCents = Cents(5250.0);
 
 	// Micro Madness: five events a day, and a Main Event on Sunday, October 11.
 	{
@@ -1017,7 +1036,7 @@ std::vector<Chips> Network::Payouts(const EventInstance& E) const
 	return PayoutTable(E.Pool, E.Entries, MinCash);
 }
 
-LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock) const
+LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock, int Unlocks) const
 {
 	const EventTemplate& T = TemplateOf(E);
 	const double Day1 = static_cast<double>(NightOneDay) * MinutesPerDay;
@@ -1034,8 +1053,7 @@ LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock) const
 		L.Game = T.Omaha ? "PL Omaha" : T.Fmt == Format::Bounty ? "NL Hold'em PKO" : T.Fmt == Format::Satellite ? "Satellite" : "NL Hold'em";
 		L.Speed = T.Speed + " \xC2\xB7 " + std::to_string(static_cast<int>(T.LevelMinutes)) + " min";
 		L.Blurb = T.Blurb;
-		std::string Why;
-		L.Joinable = Joinable(E, &Why);
+		L.Joinable = Joinable(E, nullptr, Unlocks);
 		TournamentSpec& Sp = L.Spec;
 		Sp.Id = T.Id;
 		Sp.Name = !T.Series.empty() ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
@@ -1050,6 +1068,18 @@ LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock) const
 		Sp.Population = Tr == Tier::Freeroll ? "freeroll" : Tr == Tier::Micro ? "micro" : Tr == Tier::Low ? "low" : "high";
 		Sp.Speed = T.Speed;
 		Sp.TableSize = T.TableSize;
+		if (T.Fmt == Format::Bounty || T.Fmt == Format::Mystery)
+		{
+			// Half of the prize part of the buy-in goes on heads; the guarantee covers both halves.
+			Sp.BountyCents = (Sp.BuyInCents - Sp.FeeCents) / 2;
+			Sp.GuaranteeCents = T.GtdCents / 2;
+			Sp.MysteryBounty = T.Fmt == Format::Mystery;
+		}
+		if (T.Fmt == Format::Satellite)
+		{
+			Sp.SeatValueCents = T.SeatValueCents;
+			Sp.SeatTicket = T.SeatTicket;
+		}
 		// Deeper stacks start at 100/200 so the blinds keep pace (100 big blinds or more to start).
 		if (T.StartStack > 10000)
 		{
@@ -1071,23 +1101,24 @@ LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock) const
 	L.Status = StatusName(Live(E, Day1 + 127.0).St);
 	if (Lock)
 	{
-		Joinable(E, Lock);
+		Joinable(E, Lock, Unlocks);
 	}
 	return L;
 }
 
-bool Network::Joinable(const EventInstance& E, std::string* Lock) const
+bool Network::Joinable(const EventInstance& E, std::string* Lock, int Unlocks) const
 {
 	const EventTemplate& T = TemplateOf(E);
-	// Tonight's story events always run; otherwise the tables play Hold'em freezeouts and re-entries, full ring,
-	// with fields the engine deals every hand of.
+	// Tonight's story events always run. Otherwise the tables play Hold'em, full ring or six-max, with fields the
+	// engine deals every hand of; bounties, satellites and six-max open up as the player's career does.
+	const bool Bounty = T.Fmt == Format::Bounty || T.Fmt == Format::Mystery;
 	const char* Why = T.JoinIndex >= 0 ? nullptr
-		: T.Fmt == Format::Satellite ? "Satellites unlock later in your career."
-		: T.Fmt == Format::Bounty || T.Fmt == Format::Mystery ? "Bounty tournaments unlock later in your career."
-		: T.Fmt == Format::Flip ? "Flip & Go unlocks later in your career."
 		: T.Omaha ? "Pot-Limit Omaha unlocks later in your career."
-		: T.TableSize < 8 ? "Six-max tables unlock later in your career."
+		: T.Fmt == Format::Flip ? "Flip & Go unlocks later in your career."
 		: E.Entries > 3000 ? "Fields this big unlock later in your career."
+		: Bounty && !(Unlocks & UnlockBounty) ? "Cash in any tournament to unlock bounty events."
+		: T.Fmt == Format::Satellite && !(Unlocks & UnlockSatellite) ? "Make a final table to unlock satellites."
+		: T.TableSize < 8 && !(Unlocks & UnlockSixMax) ? "Win a tournament to unlock six-max."
 		: nullptr;
 	if (Lock)
 	{
@@ -1337,8 +1368,11 @@ const Network::Ranking& Network::Ranked(Board B, double Now) const
 		}
 		case Board::NightShift:
 		{
-			const double Start = static_cast<double>(NightOneDay - 1) * MinutesPerDay + 18.0 * 60.0;
-			V = Tally(Start, std::min(At, Start + 12.0 * 60.0), "", true).Points;
+			const double Start = life::NightShiftStart(Now);
+			if (At > Start)
+			{
+				V = Tally(Start, std::min(At, Start + 12.0 * 60.0), "", true).Points;
+			}
 			break;
 		}
 		}

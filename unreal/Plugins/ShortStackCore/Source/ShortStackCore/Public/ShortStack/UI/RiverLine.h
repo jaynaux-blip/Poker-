@@ -45,6 +45,15 @@ public:
 		Running,
 	};
 
+	/** The laptop's other apps (the taskbar along the bottom of the screen). */
+	enum class App : int
+	{
+		RiverLine,
+		ShiftLink, // gig shifts
+		Burner,    // Marcus and Sam
+		Bank,      // balance, rent, history
+	};
+
 	explicit RiverLine(Session& InSession) : S(InSession) {}
 
 	Ui UI;
@@ -68,6 +77,12 @@ public:
 	SHORTSTACKCORE_API void ShowBoard(net::Board B, double Now);
 	/** Series shown on the Series page (id; empty = the one running now). */
 	SHORTSTACKCORE_API void ShowSeries(const std::string& Id, double Now);
+	SHORTSTACKCORE_API void OpenApp(App A, double Now);
+	App CurrentApp() const { return AppShown; }
+	/** Burner contact shown: 0 Marcus, 1 Sam. */
+	void ShowContact(int Contact) { BurnerContact = Contact; }
+	/** The sleep menu over the taskbar. */
+	void ShowSleepMenu(bool Open) { SleepOpen = Open; }
 
 private:
 	void Logo(float X, float Y, float Scale);
@@ -115,6 +130,17 @@ private:
 	void EventPanel(const Rect& R, double Now);
 	void RegisterBlock(const net::EventInstance& E, const net::LiveState& L, const Rect& R, double Now);
 	void Ticker(const Rect& R, double Now);
+	// Laptop apps (RiverLineApps.cpp).
+	void Taskbar(const Rect& R, double Now);
+	void AppIcon(App A, float X, float Y, float Size);
+	bool AppButton(const std::string& Id, const Rect& R, const std::string& Label, const Color& Fill, const Color& Ink, bool Enabled, const std::string& Sub = std::string());
+	void ShiftLinkApp(double Now);
+	void BurnerApp(double Now);
+	void BankApp(double Now);
+	void SleepMenu(double Now);
+	void SkipOverlay(double Now);
+	void OutcomeCard(double Now);
+	void TryActivity(const std::string& Id, double Now);
 	void SeriesPage(double Now);
 	void BoardsPage(double Now);
 	void BoardTable(const Rect& R, const std::vector<net::BoardRow>& Rows, double Now);
@@ -180,6 +206,12 @@ private:
 	long long SlidesKey = -1;
 	std::vector<net::NewsItem> News;
 	long long NewsKey = -1;
+	App AppShown = App::RiverLine;
+	double AppAt = -100.0;
+	bool SleepOpen = false;
+	int BurnerContact = 0;
+	std::string Toast;
+	double ToastAt = -100.0;
 	// This frame.
 	double World = 0.0;
 	net::HeroStats You;

@@ -2,6 +2,7 @@
 // Everything here reads the simulated network (ShortStack/Game/Network.h) at the session's world clock.
 #include "ShortStack/UI/RiverLine.h"
 #include "../StrictFloat.h"
+#include "RiverLineShared.h"
 
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
@@ -14,523 +15,6 @@ namespace ss
 {
 namespace ui
 {
-namespace rlnet_detail
-{
-const float NetTop = 64.0f;
-const float NetW = RiverLine::Width;
-const double SlideSeconds = 7.5;
-
-template <typename T>
-float Nf(T V)
-{
-	return static_cast<float>(V);
-}
-
-float NetEase(double T)
-{
-	return static_cast<float>(EaseOutCubic(Clamp01(T)));
-}
-
-Color NetA(const Color& Cl, float A)
-{
-	return {Cl.R, Cl.G, Cl.B, Cl.A * A};
-}
-
-/** Frame-rate independent approach: the share of the remaining distance to cover this frame. */
-float NetFollow(double Dt, double Rate)
-{
-	return static_cast<float>(1.0 - std::exp(-Dt * Rate));
-}
-
-std::string NetPad2(long long V)
-{
-	return (V < 10 ? "0" : "") + std::to_string(V);
-}
-
-/** Countdown with seconds: "1:03:12", "03:12"; days beyond a day ("5d 14h"). */
-std::string NetHms(double Minutes)
-{
-	if (Minutes >= 24.0 * 60.0)
-	{
-		return net::Countdown(Minutes);
-	}
-	const long long Secs = std::max(0LL, static_cast<long long>(std::floor(Minutes * 60.0)));
-	const long long H = Secs / 3600;
-	return (H > 0 ? std::to_string(H) + ":" : std::string()) + NetPad2((Secs / 60) % 60) + ":" + NetPad2(Secs % 60);
-}
-
-/** "$2,000" (whole dollars from $1,000 up, or when there are no cents), "$41.40" otherwise. */
-std::string NetMoney(Chips Cents)
-{
-	return Cents >= 100000 || Cents % 100 == 0 ? "$" + Grouped((Cents + 50) / 100) : Money(Cents);
-}
-
-Color NetTier(net::Tier T)
-{
-	switch (T)
-	{
-	case net::Tier::Freeroll: return Hex(0x3ecf6e);
-	case net::Tier::Micro: return Hex(0x27d3c3);
-	case net::Tier::Low: return Hex(0x3b82f6);
-	case net::Tier::Mid: return Hex(0x9b6bff);
-	case net::Tier::High: return Hex(0xf2c14e);
-	}
-	return pal::Accent;
-}
-
-Color NetStatus(net::Status St)
-{
-	switch (St)
-	{
-	case net::Status::Announced: return Hex(0x6b7a93);
-	case net::Status::Registering: return Hex(0x4f9bff);
-	case net::Status::LateReg: return Hex(0x3ecf6e);
-	case net::Status::Running: return Hex(0x9aa7bd);
-	case net::Status::FinalTable: return Hex(0xf2c14e);
-	case net::Status::Finished: return Hex(0x4d5b73);
-	}
-	return pal::Muted;
-}
-
-Color NetKind(net::NewsKind K)
-{
-	switch (K)
-	{
-	case net::NewsKind::BigWin: return Hex(0xf2c14e);
-	case net::NewsKind::Series: return Hex(0xb8ff2e);
-	case net::NewsKind::Schedule: return Hex(0x4f9bff);
-	case net::NewsKind::Record: return Hex(0xf28a3a);
-	case net::NewsKind::Hero: return Hex(0x27d3c3);
-	}
-	return pal::Accent;
-}
-
-/** Text with letter spacing (labels in capitals). Returns the width. */
-float NetSpaced(Canvas& Cv, const std::string& Str, float X, float Y, float Size, int Weight, const Color& Col, float Track, Align A = Align::Left)
-{
-	std::vector<std::string> Glyphs;
-	for (size_t I = 0; I < Str.size();)
-	{
-		const unsigned char B = static_cast<unsigned char>(Str[I]);
-		const size_t Len = B >= 0xF0 ? 4 : B >= 0xE0 ? 3 : B >= 0xC0 ? 2 : 1;
-		Glyphs.push_back(Str.substr(I, Len));
-		I += Len;
-	}
-	float Total = 0.0f;
-	for (const std::string& G : Glyphs)
-	{
-		Total += Cv.Measure(G, Size, Weight) + Track;
-	}
-	Total -= Glyphs.empty() ? 0.0f : Track;
-	float Xx = X - (A == Align::Center ? Total / 2.0f : A == Align::Right ? Total : 0.0f);
-	for (const std::string& G : Glyphs)
-	{
-		Cv.Text(G, Xx, Y, Ts(Size, Weight, Col));
-		Xx += Cv.Measure(G, Size, Weight) + Track;
-	}
-	return Total;
-}
-
-/** A small rounded badge with its top-left at (X, Y); returns its width. */
-float NetPill(Canvas& Cv, const std::string& Label, float X, float Y, const Color& Col, bool Solid = false, float Size = 10.5f)
-{
-	const float W = Cv.Measure(Label, Size, 700) + Size * 1.3f;
-	const float H = Size + 8.0f;
-	Cv.FillRoundRect({X, Y, W, H}, H / 2.0f, Solid ? Col : NetA(Col, 0.16f));
-	if (!Solid)
-	{
-		Cv.StrokeRoundRect({X, Y, W, H}, H / 2.0f, NetA(Col, 0.45f), 1.0f);
-	}
-	Cv.Text(Label, X + W / 2.0f, Y + H / 2.0f + 0.5f, Ts(Size, 700, Solid ? Hex(0x07121c) : Col, Align::Center, Baseline::Middle));
-	return W;
-}
-
-void NetStar(Canvas& Cv, float Cx, float Cy, float R, const Color& Col)
-{
-	std::vector<Vec2> P;
-	for (int I = 0; I < 10; ++I)
-	{
-		const float A = -Pi / 2.0f + Nf(I) * Pi / 5.0f;
-		const float Rr = I % 2 == 0 ? R : R * 0.42f;
-		P.push_back({Cx + Rr * std::cos(A), Cy + Rr * std::sin(A)});
-	}
-	Cv.FillPolygon(P, Col);
-}
-
-void NetLockIcon(Canvas& Cv, float X, float Y, float Sz, const Color& Col)
-{
-	Cv.StrokeArc(X + Sz * 0.5f, Y + Sz * 0.42f, Sz * 0.26f, Pi, 2.0f * Pi, Col, Sz * 0.12f);
-	Cv.StrokePolyline({{X + Sz * 0.24f, Y + Sz * 0.42f}, {X + Sz * 0.24f, Y + Sz * 0.5f}}, false, Col, Sz * 0.12f);
-	Cv.StrokePolyline({{X + Sz * 0.76f, Y + Sz * 0.42f}, {X + Sz * 0.76f, Y + Sz * 0.5f}}, false, Col, Sz * 0.12f);
-	Cv.FillRoundRect({X + Sz * 0.12f, Y + Sz * 0.48f, Sz * 0.76f, Sz * 0.5f}, Sz * 0.1f, Col);
-}
-
-void NetCheck(Canvas& Cv, float Cx, float Cy, float Sz, const Color& Col)
-{
-	Cv.StrokePolyline({{Cx - Sz * 0.42f, Cy}, {Cx - Sz * 0.12f, Cy + Sz * 0.3f}, {Cx + Sz * 0.45f, Cy - Sz * 0.32f}}, false, Col, Sz * 0.2f, true);
-}
-
-void NetChevron(Canvas& Cv, float Cx, float Cy, float Sz, int Dir, const Color& Col)
-{
-	// Dir: 0 right, 1 left, 2 up, 3 down.
-	const float D = Sz * 0.5f;
-	std::vector<Vec2> P;
-	switch (Dir)
-	{
-	case 1: P = {{Cx + D * 0.5f, Cy - D}, {Cx - D * 0.5f, Cy}, {Cx + D * 0.5f, Cy + D}}; break;
-	case 2: P = {{Cx - D, Cy + D * 0.5f}, {Cx, Cy - D * 0.5f}, {Cx + D, Cy + D * 0.5f}}; break;
-	case 3: P = {{Cx - D, Cy - D * 0.5f}, {Cx, Cy + D * 0.5f}, {Cx + D, Cy - D * 0.5f}}; break;
-	default: P = {{Cx - D * 0.5f, Cy - D}, {Cx + D * 0.5f, Cy}, {Cx - D * 0.5f, Cy + D}}; break;
-	}
-	Cv.StrokePolyline(P, false, Col, Sz * 0.16f, true);
-}
-
-void NetTriangle(Canvas& Cv, float Cx, float Cy, float Sz, bool Up, const Color& Col)
-{
-	const float H = Sz * 0.5f;
-	if (Up)
-	{
-		Cv.FillPolygon({{Cx - H, Cy + H * 0.6f}, {Cx, Cy - H * 0.7f}, {Cx + H, Cy + H * 0.6f}}, Col);
-	}
-	else
-	{
-		Cv.FillPolygon({{Cx - H, Cy - H * 0.6f}, {Cx + H, Cy - H * 0.6f}, {Cx, Cy + H * 0.7f}}, Col);
-	}
-}
-
-/** Country flags, simplified to their stripes and crosses. */
-void NetFlag(Canvas& Cv, const std::string& Code, float X, float Y, float W, float H)
-{
-	auto Hz = [&](std::initializer_list<uint32_t> Cols) {
-		const float Bh = H / Nf(Cols.size());
-		float Yy = Y;
-		for (uint32_t Cl : Cols)
-		{
-			Cv.FillRect({X, Yy, W, Bh + 0.3f}, Hex(Cl));
-			Yy += Bh;
-		}
-	};
-	auto Vt = [&](std::initializer_list<uint32_t> Cols) {
-		const float Bw = W / Nf(Cols.size());
-		float Xx = X;
-		for (uint32_t Cl : Cols)
-		{
-			Cv.FillRect({Xx, Y, Bw + 0.3f, H}, Hex(Cl));
-			Xx += Bw;
-		}
-	};
-	auto Nordic = [&](uint32_t Field, uint32_t Cross, uint32_t Inner) {
-		Cv.FillRect({X, Y, W, H}, Hex(Field));
-		Cv.FillRect({X + W * 0.28f, Y, W * 0.2f, H}, Hex(Cross));
-		Cv.FillRect({X, Y + H * 0.38f, W, H * 0.24f}, Hex(Cross));
-		if (Inner != Cross)
-		{
-			Cv.FillRect({X + W * 0.33f, Y, W * 0.1f, H}, Hex(Inner));
-			Cv.FillRect({X, Y + H * 0.44f, W, H * 0.12f}, Hex(Inner));
-		}
-	};
-	if (Code == "DE") Hz({0x111111, 0xdd0000, 0xffce00});
-	else if (Code == "NL") Hz({0xae1c28, 0xffffff, 0x21468b});
-	else if (Code == "RU") Hz({0xffffff, 0x0039a6, 0xd52b1e});
-	else if (Code == "UA") Hz({0x0057b7, 0xffd700});
-	else if (Code == "PL") Hz({0xffffff, 0xdc143c});
-	else if (Code == "AT") Hz({0xed2939, 0xffffff, 0xed2939});
-	else if (Code == "AR") Hz({0x74acdf, 0xffffff, 0x74acdf});
-	else if (Code == "IN") Hz({0xff9933, 0xffffff, 0x138808});
-	else if (Code == "ES") { Hz({0xaa151b, 0xf1bf00, 0xf1bf00, 0xaa151b}); }
-	else if (Code == "FR") Vt({0x0055a4, 0xffffff, 0xef4135});
-	else if (Code == "IT") Vt({0x009246, 0xffffff, 0xce2b37});
-	else if (Code == "MX") Vt({0x006847, 0xffffff, 0xce1126});
-	else if (Code == "IE") Vt({0x169b62, 0xffffff, 0xff883e});
-	else if (Code == "BE") Vt({0x111111, 0xfdda24, 0xef3340});
-	else if (Code == "CA")
-	{
-		Vt({0xd52b1e, 0xffffff, 0xffffff, 0xd52b1e});
-		NetStar(Cv, X + W * 0.5f, Y + H * 0.5f, H * 0.3f, Hex(0xd52b1e));
-	}
-	else if (Code == "PT")
-	{
-		Cv.FillRect({X, Y, W, H}, Hex(0xda291c));
-		Cv.FillRect({X, Y, W * 0.4f, H}, Hex(0x046a38));
-		Cv.FillCircle(X + W * 0.4f, Y + H * 0.5f, H * 0.2f, Hex(0xffe900));
-	}
-	else if (Code == "SE") Nordic(0x006aa7, 0xfecc00, 0xfecc00);
-	else if (Code == "FI") Nordic(0xffffff, 0x002f6c, 0x002f6c);
-	else if (Code == "NO") Nordic(0xba0c2f, 0xffffff, 0x00205b);
-	else if (Code == "DK") Nordic(0xc8102e, 0xffffff, 0xffffff);
-	else if (Code == "BR")
-	{
-		Cv.FillRect({X, Y, W, H}, Hex(0x009c3b));
-		Cv.FillPolygon({{X + W * 0.5f, Y + H * 0.12f}, {X + W * 0.9f, Y + H * 0.5f}, {X + W * 0.5f, Y + H * 0.88f}, {X + W * 0.1f, Y + H * 0.5f}}, Hex(0xffdf00));
-		Cv.FillCircle(X + W * 0.5f, Y + H * 0.5f, H * 0.2f, Hex(0x002776));
-	}
-	else if (Code == "US")
-	{
-		Hz({0xb22234, 0xffffff, 0xb22234, 0xffffff, 0xb22234, 0xffffff, 0xb22234});
-		Cv.FillRect({X, Y, W * 0.42f, H * 0.54f}, Hex(0x3c3b6e));
-	}
-	else if (Code == "GB" || Code == "AU")
-	{
-		Cv.FillRect({X, Y, W, H}, Hex(0x012169));
-		const float Lw = H * 0.12f;
-		Cv.StrokePolyline({{X, Y}, {X + W, Y + H}}, false, Hex(0xffffff), Lw * 1.6f);
-		Cv.StrokePolyline({{X + W, Y}, {X, Y + H}}, false, Hex(0xffffff), Lw * 1.6f);
-		Cv.FillRect({X + W * 0.42f, Y, W * 0.16f, H}, Hex(0xffffff));
-		Cv.FillRect({X, Y + H * 0.36f, W, H * 0.28f}, Hex(0xffffff));
-		Cv.FillRect({X + W * 0.45f, Y, W * 0.1f, H}, Hex(0xc8102e));
-		Cv.FillRect({X, Y + H * 0.41f, W, H * 0.18f}, Hex(0xc8102e));
-		if (Code == "AU")
-		{
-			Cv.FillRect({X, Y + H * 0.55f, W, H * 0.45f}, Hex(0x012169));
-			Cv.FillRect({X + W * 0.5f, Y, W * 0.5f, H}, Hex(0x012169));
-			NetStar(Cv, X + W * 0.25f, Y + H * 0.78f, H * 0.14f, Hex(0xffffff));
-			NetStar(Cv, X + W * 0.75f, Y + H * 0.5f, H * 0.12f, Hex(0xffffff));
-		}
-	}
-	else if (Code == "CN")
-	{
-		Cv.FillRect({X, Y, W, H}, Hex(0xee1c25));
-		NetStar(Cv, X + W * 0.2f, Y + H * 0.3f, H * 0.2f, Hex(0xffff00));
-	}
-	else if (Code == "JP")
-	{
-		Cv.FillRect({X, Y, W, H}, Hex(0xffffff));
-		Cv.FillCircle(X + W * 0.5f, Y + H * 0.5f, H * 0.3f, Hex(0xbc002d));
-	}
-	else if (Code == "KR")
-	{
-		Cv.FillRect({X, Y, W, H}, Hex(0xffffff));
-		Cv.FillCircle(X + W * 0.5f, Y + H * 0.5f, H * 0.28f, Hex(0x0047a0));
-		Cv.FillEllipse(X + W * 0.5f, Y + H * 0.36f, H * 0.28f, H * 0.14f, Hex(0xcd2e3a));
-	}
-	else if (Code == "CZ")
-	{
-		Hz({0xffffff, 0xd7141a});
-		Cv.FillPolygon({{X, Y}, {X + W * 0.5f, Y + H * 0.5f}, {X, Y + H}}, Hex(0x11457e));
-	}
-	else
-	{
-		Cv.FillRect({X, Y, W, H}, pal::Dim);
-	}
-	Cv.StrokeRoundRect({X, Y, W, H}, 1.5f, Rgba(0, 0, 0, 0.35f), 1.0f);
-}
-
-int NetHue(const std::string& Name)
-{
-	return static_cast<int>(Fnv1a(Name) % 360u);
-}
-
-std::string NetInitials(const std::string& Name)
-{
-	std::string Out;
-	for (const char Ch : Name)
-	{
-		if ((Ch >= 'a' && Ch <= 'z') || (Ch >= 'A' && Ch <= 'Z') || (Ch >= '0' && Ch <= '9'))
-		{
-			Out.push_back(Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch);
-		}
-		if (Out.size() == 2)
-		{
-			break;
-		}
-	}
-	return Out.empty() ? std::string("?") : Out;
-}
-
-void NetAvatar(Canvas& Cv, float Cx, float Cy, float R, const std::string& Name, int Hue, const Color& Ring)
-{
-	const float H = Nf(Hue);
-	Cv.FillCircle(Cx, Cy, R, Paint::Linear({Cx - R, Cy - R}, {Cx + R, Cy + R}, Hsl(H, 0.62f, 0.52f), Hsl(H + 30.0f, 0.55f, 0.26f)));
-	Cv.Text(NetInitials(Name), Cx, Cy + R * 0.02f, Ts(R * 0.78f, 800, Hex(0xffffff), Align::Center, Baseline::Middle));
-	if (Ring.A > 0.0f)
-	{
-		Cv.StrokeEllipse(Cx, Cy, R + 1.5f, R + 1.5f, Ring, 2.5f);
-	}
-}
-
-void NetSpark(Canvas& Cv, const Rect& R, const std::array<float, 8>& V, const Color& Col)
-{
-	float Hi = 1.0f;
-	for (float X : V)
-	{
-		Hi = std::max(Hi, X);
-	}
-	std::vector<Vec2> Pts;
-	for (size_t I = 0; I < V.size(); ++I)
-	{
-		Pts.push_back({R.X + R.W * Nf(I) / Nf(V.size() - 1), R.Y + R.H - R.H * V[I] / Hi});
-	}
-	std::vector<Vec2> Area = Pts;
-	Area.push_back({R.X + R.W, R.Y + R.H});
-	Area.push_back({R.X, R.Y + R.H});
-	Cv.FillPolygon(Area, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, NetA(Col, 0.28f), NetA(Col, 0.0f)));
-	Cv.StrokePolyline(Pts, false, Col, 1.6f, true);
-	Cv.FillCircle(Pts.back().X, Pts.back().Y, 2.4f, Col);
-}
-
-void NetTrophy(Canvas& Cv, float Cx, float Top, float Sz, const Color& Col, const Color& Col2)
-{
-	const Paint Metal = Paint::Linear({Cx - Sz * 0.5f, Top}, {Cx + Sz * 0.5f, Top + Sz}, Col, Col2);
-	// Handles.
-	Cv.StrokeArc(Cx - Sz * 0.36f, Top + Sz * 0.24f, Sz * 0.16f, Pi * 0.5f, Pi * 1.5f, Col2, Sz * 0.05f);
-	Cv.StrokeArc(Cx + Sz * 0.36f, Top + Sz * 0.24f, Sz * 0.16f, -Pi * 0.5f, Pi * 0.5f, Col2, Sz * 0.05f);
-	// Cup.
-	std::vector<Vec2> Cup;
-	Cup.push_back({Cx - Sz * 0.38f, Top});
-	Cup.push_back({Cx + Sz * 0.38f, Top});
-	for (int I = 0; I <= 12; ++I)
-	{
-		const float A = Nf(I) / 12.0f * Pi;
-		Cup.push_back({Cx + Sz * 0.38f * std::cos(A), Top + Sz * 0.12f + Sz * 0.36f * std::sin(A)});
-	}
-	Cv.FillPolygon(Cup, Metal);
-	Cv.FillRect({Cx - Sz * 0.05f, Top + Sz * 0.46f, Sz * 0.1f, Sz * 0.22f}, Metal);
-	Cv.FillRoundRect({Cx - Sz * 0.22f, Top + Sz * 0.66f, Sz * 0.44f, Sz * 0.08f}, Sz * 0.02f, Metal);
-	Cv.FillRoundRect({Cx - Sz * 0.3f, Top + Sz * 0.74f, Sz * 0.6f, Sz * 0.16f}, Sz * 0.03f, Paint::Linear({0.0f, Top + Sz * 0.74f}, {0.0f, Top + Sz * 0.9f}, Hex(0x2a2f3a), Hex(0x12151c)));
-	// Shine.
-	Cv.FillEllipse(Cx - Sz * 0.16f, Top + Sz * 0.2f, Sz * 0.06f, Sz * 0.16f, Rgba(255, 255, 255, 0.35f));
-}
-
-void NetCrown(Canvas& Cv, float Cx, float Base, float Sz, const Color& Col)
-{
-	Cv.FillPolygon({{Cx - Sz * 0.5f, Base}, {Cx - Sz * 0.56f, Base - Sz * 0.62f}, {Cx - Sz * 0.24f, Base - Sz * 0.3f}, {Cx, Base - Sz * 0.78f}, {Cx + Sz * 0.24f, Base - Sz * 0.3f},
-		{Cx + Sz * 0.56f, Base - Sz * 0.62f}, {Cx + Sz * 0.5f, Base}}, Col);
-	Cv.FillCircle(Cx, Base - Sz * 0.82f, Sz * 0.08f, Col);
-	Cv.FillCircle(Cx - Sz * 0.58f, Base - Sz * 0.66f, Sz * 0.07f, Col);
-	Cv.FillCircle(Cx + Sz * 0.58f, Base - Sz * 0.66f, Sz * 0.07f, Col);
-}
-
-std::vector<std::string> NetWrap(Canvas& Cv, const std::string& Text, float MaxW, float Size, int Weight)
-{
-	std::vector<std::string> Out;
-	std::string Line;
-	size_t Start = 0;
-	while (Start <= Text.size())
-	{
-		size_t End = Text.find(' ', Start);
-		End = End == std::string::npos ? Text.size() : End;
-		const std::string Word = Text.substr(Start, End - Start);
-		const std::string Test = Line.empty() ? Word : Line + " " + Word;
-		if (Cv.Measure(Test, Size, Weight) > MaxW && !Line.empty())
-		{
-			Out.push_back(Line);
-			Line = Word;
-		}
-		else
-		{
-			Line = Test;
-		}
-		Start = End + 1;
-	}
-	if (!Line.empty())
-	{
-		Out.push_back(Line);
-	}
-	return Out;
-}
-
-/** Draws wrapped text, at most MaxLines lines (the last one ellipsized); returns the y after the last line. */
-float NetParagraph(Canvas& Cv, const std::string& Text, float X, float Y, float MaxW, float Size, int Weight, const Color& Col, float LineH, int MaxLines = 99)
-{
-	std::vector<std::string> Lines = NetWrap(Cv, Text, MaxW, Size, Weight);
-	for (size_t I = 0; I < Lines.size() && static_cast<int>(I) < MaxLines; ++I)
-	{
-		std::string L = Lines[I];
-		if (static_cast<int>(I) == MaxLines - 1 && I + 1 < Lines.size())
-		{
-			L += " " + Lines[I + 1];
-		}
-		Cv.Text(L, X, Y, Ts(Size, Weight, Col, Align::Left, Baseline::Alphabetic, false, MaxW));
-		Y += LineH;
-	}
-	return Y;
-}
-
-std::string NetFormat(const net::EventTemplate& T)
-{
-	switch (T.Fmt)
-	{
-	case net::Format::Freezeout: return "Freezeout";
-	case net::Format::ReEntry: return "Re-entry";
-	case net::Format::Bounty: return "Progressive KO";
-	case net::Format::Mystery: return "Mystery Bounty";
-	case net::Format::Satellite: return "Satellite";
-	case net::Format::Flip: return "Flip & Go";
-	}
-	return "";
-}
-
-std::string NetAgo(double Minutes, double At)
-{
-	if (Minutes < 1.0)
-	{
-		return "just now";
-	}
-	if (Minutes < 60.0)
-	{
-		return std::to_string(static_cast<int>(Minutes)) + "m ago";
-	}
-	if (Minutes < 24.0 * 60.0)
-	{
-		return std::to_string(static_cast<int>(Minutes / 60.0)) + "h ago";
-	}
-	return net::DateLabel(net::DayOf(At));
-}
-
-std::string NetUpper(const std::string& In)
-{
-	std::string Out = In;
-	for (char& Ch : Out)
-	{
-		Ch = Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch;
-	}
-	return Out;
-}
-
-std::string NetLower(const std::string& In)
-{
-	std::string Out = In;
-	for (char& Ch : Out)
-	{
-		Ch = Ch >= 'A' && Ch <= 'Z' ? static_cast<char>(Ch - 'A' + 'a') : Ch;
-	}
-	return Out;
-}
-
-/** The part of a series event's name after "MM #26: ". */
-std::string NetShortName(const std::string& Name)
-{
-	const size_t P = Name.find(": ");
-	return P == std::string::npos ? Name : Name.substr(P + 2);
-}
-
-Color NetEdge(const net::Network& Net, const net::EventTemplate& T)
-{
-	if (!T.Series.empty())
-	{
-		if (const net::SeriesInfo* Sr = Net.FindSeries(T.Series))
-		{
-			return Hex(Sr->Color);
-		}
-	}
-	return NetTier(net::TierOf(T.BuyInCents));
-}
-
-const char* NetBoardName(net::Board B)
-{
-	switch (B)
-	{
-	case net::Board::Earnings: return "Money List";
-	case net::Board::Season: return "Player of the Year";
-	case net::Board::Wins: return "Titles";
-	case net::Board::FinalTables: return "Final Tables";
-	case net::Board::Series: return "Series Leaderboard";
-	case net::Board::NightShift: return "Night Shift";
-	}
-	return "";
-}
-} // namespace rlnet_detail
-
 using namespace rlnet_detail;
 
 // ------------------------------------------------------------------ frame and navigation
@@ -545,7 +29,7 @@ void RiverLine::NetFrame(double Now)
 	LastFrame = Now;
 	World = S.WorldMinutes();
 	net::Shared().SetHero(S.HeroName, S.History);
-	You = net::StatsFrom(S.HeroName, S.History);
+	You = net::StatsFrom(S.HeroName, S.History, World);
 	if (NewsSeenAt == 0.0)
 	{
 		NewsSeenAt = World - 6.0 * 60.0;
@@ -892,7 +376,7 @@ const std::vector<RiverLine::FeatureSlide>& RiverLine::FeatureSlides()
 		F.Action = 2;
 		Slides.push_back(F);
 	}
-	const double ShiftEnd = static_cast<double>(net::NightOneDay) * net::MinutesPerDay + 6.0 * 60.0;
+	const double ShiftEnd = life::NightShiftStart(World) + 12.0 * 60.0;
 	if (World < ShiftEnd)
 	{
 		FeatureSlide F;
@@ -1141,12 +625,13 @@ std::vector<RiverLine::ListRow> RiverLine::ScheduleRows() const
 		const bool InPlay = L.St == net::Status::Running || L.St == net::Status::FinalTable;
 		const net::Tier Tr = net::TierOf(T.BuyInCents);
 		std::string Lock;
-		const bool Joinable = Net.Joinable(E, &Lock);
+		const bool Joinable = Net.Joinable(E, &Lock, S.Unlocks());
+		const bool Pays = S.BankrollCents >= T.BuyInCents || S.Life.TicketsFor(T.Id) > 0;
 		bool Keep = FilterShown == Filter::Running ? InPlay : Open;
 		switch (FilterShown)
 		{
 		case Filter::Playable:
-			Keep = Keep && Joinable && S.BankrollCents >= T.BuyInCents && (L.St == net::Status::LateReg || L.StartsIn <= 60.0);
+			Keep = Keep && Joinable && Pays && (L.St == net::Status::LateReg || L.StartsIn <= 60.0);
 			break;
 		case Filter::Micro: Keep = Keep && Tr == net::Tier::Micro; break;
 		case Filter::Low: Keep = Keep && Tr == net::Tier::Low; break;
@@ -1266,7 +751,8 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	C->FillRoundRect({R.X + 1.0f, R.Y + 10.0f, 4.0f, R.H - 20.0f}, 2.0f, Edge);
 	const float Top = R.Y + 24.0f;
 	const float Low = R.Y + 43.0f;
-	const bool Affordable = S.BankrollCents >= T.BuyInCents;
+	const int Tickets = S.Life.TicketsFor(T.Id);
+	const bool Affordable = S.BankrollCents >= T.BuyInCents || Tickets > 0;
 	const bool Dim = !Row.Joinable || !Affordable;
 	// Start.
 	UI.Text(net::TimeLabel(Row.E.Start), R.X + 20.0f, Top, Ts(16.0f, 700, pal::Ink));
@@ -1313,6 +799,10 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	if (T.Omaha)
 	{
 		Bx += NetPill(*C, "PLO", Bx, By, Hex(0x4f9bff), false, 9.5f) + 5.0f;
+	}
+	if (Tickets > 0)
+	{
+		Bx += NetPill(*C, "TICKET", Bx, By, pal::Gold, true, 9.5f) + 5.0f;
 	}
 	if (!T.Seats.empty())
 	{
@@ -1545,7 +1035,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 			Y += 50.0f;
 		}
 		std::string Lock;
-		if (!Net.Joinable(E, &Lock))
+		if (!Net.Joinable(E, &Lock, S.Unlocks()))
 		{
 			Y += 8.0f;
 			UI.RRect({Body.X, Y, Body.W, 54.0f}, 8.0f, Rgba(255, 255, 255, 0.03f), pal::Line);
@@ -1600,8 +1090,9 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 	const net::Network& Net = net::Shared();
 	const net::EventTemplate& T = Net.TemplateOf(E);
 	std::string Lock;
-	const bool Joinable = Net.Joinable(E, &Lock);
-	const bool Affordable = S.BankrollCents >= T.BuyInCents;
+	const bool Joinable = Net.Joinable(E, &Lock, S.Unlocks());
+	const int Tickets = S.Life.TicketsFor(T.Id);
+	const bool Affordable = S.BankrollCents >= T.BuyInCents || Tickets > 0;
 	const bool Open = L.St == net::Status::LateReg || (L.St == net::Status::Registering && L.StartsIn <= 60.0);
 	ButtonOpts O;
 	O.Size = 20.0f;
@@ -1632,6 +1123,14 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 	{
 		Disabled("Locked", Lock);
 	}
+	else if (S.Restricted())
+	{
+		Disabled("Account under review", "RiverLine security \xC2\xB7 " + net::Countdown(S.Life.BannedUntil - World) + " left");
+	}
+	else if (S.TimeSkip.Active)
+	{
+		Disabled("You're away", S.TimeSkip.Label);
+	}
 	else if (!Open)
 	{
 		Disabled("Opens in " + net::Countdown(L.StartsIn - 60.0), "Seats open an hour before the start");
@@ -1646,14 +1145,19 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 		O.Sub = L.St == net::Status::LateReg ? "Late registration \xC2\xB7 " + NetHms(L.LateRegLeft) + " left" : "Starts at " + net::TimeLabel(E.Start);
 		const float Glow = 0.5f + 0.5f * Nf(std::sin(Now * 2.4));
 		C->GlowRoundRect(R, 10.0f, NetA(pal::Accent, 0.18f + 0.14f * Glow), 18.0f);
-		if (UI.Button("reg", R, "Register \xC2\xB7 " + net::BuyIn(T.BuyInCents), O))
+		if (Tickets > 0)
+		{
+			O.Kind = ButtonKind::Gold;
+			O.Sub = "Pays with your ticket (" + std::to_string(Tickets) + " held)";
+		}
+		if (UI.Button("reg", R, Tickets > 0 ? std::string("Register with ticket") : "Register \xC2\xB7 " + net::BuyIn(T.BuyInCents), O))
 		{
 			S.ConfirmRegister = true;
 		}
 	}
 	else
 	{
-		UI.Text("Balance after: " + Money(S.BankrollCents - T.BuyInCents), R.X, R.Y - 10.0f, Ts(14.0f, 600, pal::Muted));
+		UI.Text(Tickets > 0 ? std::string("One ticket will be used") : "Balance after: " + Money(S.BankrollCents - T.BuyInCents), R.X, R.Y - 10.0f, Ts(14.0f, 600, pal::Muted));
 		ButtonOpts Ok;
 		Ok.Kind = ButtonKind::Gold;
 		Ok.Size = 20.0f;
@@ -1661,7 +1165,7 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 		if (UI.Button("regok", {R.X, R.Y, Hw, R.H}, "Confirm", Ok))
 		{
 			S.ConfirmRegister = false;
-			S.RegisterEvent(Net.Listing(E));
+			S.RegisterEvent(Net.Listing(E, nullptr, S.Unlocks()));
 		}
 		ButtonOpts No;
 		No.Kind = ButtonKind::Ghost;
@@ -1676,8 +1180,6 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 void RiverLine::Ticker(const Rect& R, double Now)
 {
 	const net::Network& Net = net::Shared();
-	C->FillRect(R, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x0b1524), Hex(0x060c16)));
-	C->FillRect({R.X, R.Y, R.W, 1.0f}, pal::Line);
 	// The feed: headlines, then the network's own numbers.
 	struct Item
 	{
@@ -1706,29 +1208,30 @@ void RiverLine::Ticker(const Rect& R, double Now)
 	float Total = 0.0f;
 	for (const Item& It : Items)
 	{
-		Total += UI.Measure(It.Text, 14.0f, 600) + 64.0f;
+		Total += UI.Measure(It.Text, 13.0f, 600) + 62.0f;
 	}
-	const Rect Lane{R.X + 150.0f, R.Y, R.W - 150.0f, R.H};
+	// The label, then the scrolling lane.
+	UI.RRect({R.X, R.Y + 9.0f, 52.0f, R.H - 18.0f}, 5.0f, pal::Red);
+	C->FillCircle(R.X + 11.0f, R.Y + R.H / 2.0f, 3.0f, Rgba(255, 255, 255, 0.55f + 0.45f * Nf(std::sin(Now * 4.0))));
+	UI.Text("LIVE", R.X + 18.0f, R.Y + R.H / 2.0f + 1.0f, Ts(11.0f, 900, Hex(0xffffff), Align::Left, Baseline::Middle));
+	const Rect Lane{R.X + 60.0f, R.Y, R.W - 60.0f, R.H};
 	C->PushClip(Lane);
-	float X = Lane.X + 20.0f - Nf(std::fmod(Now * 64.0, static_cast<double>(Total)));
+	float X = Lane.X + 20.0f - Nf(std::fmod(Now * 60.0, static_cast<double>(Total)));
 	for (int Rep = 0; Rep < 3 && X < Lane.X + Lane.W; ++Rep)
 	{
 		for (const Item& It : Items)
 		{
-			C->FillCircle(X, R.Y + R.H / 2.0f, 3.5f, It.Col);
-			X += 14.0f;
-			X += UI.Text(It.Text, X, R.Y + R.H / 2.0f + 1.0f, Ts(14.0f, 600, Hex(0xc3cedf), Align::Left, Baseline::Middle)) + 50.0f;
+			C->FillCircle(X, R.Y + R.H / 2.0f, 3.0f, It.Col);
+			X += 12.0f;
+			X += UI.Text(It.Text, X, R.Y + R.H / 2.0f + 1.0f, Ts(13.0f, 600, Hex(0xb9c4d6), Align::Left, Baseline::Middle)) + 50.0f;
 		}
 	}
 	C->PopClip();
-	C->FillRect({Lane.X, R.Y + 1.0f, 40.0f, R.H - 1.0f}, Paint::Linear({Lane.X, 0.0f}, {Lane.X + 40.0f, 0.0f}, Hex(0x09121f), Rgba(9, 18, 31, 0.0f)));
-	C->FillRect({R.X + R.W - 40.0f, R.Y + 1.0f, 40.0f, R.H - 1.0f}, Paint::Linear({R.X + R.W - 40.0f, 0.0f}, {R.X + R.W, 0.0f}, Rgba(9, 18, 31, 0.0f), Hex(0x09121f)));
-	// The label.
-	UI.RRect({R.X + 18.0f, R.Y + 9.0f, 56.0f, R.H - 18.0f}, 5.0f, pal::Red);
-	C->FillCircle(R.X + 30.0f, R.Y + R.H / 2.0f, 3.5f, Rgba(255, 255, 255, 0.55f + 0.45f * Nf(std::sin(Now * 4.0))));
-	UI.Text("LIVE", R.X + 38.0f, R.Y + R.H / 2.0f + 1.0f, Ts(12.0f, 900, Hex(0xffffff), Align::Left, Baseline::Middle));
-	NetSpaced(*C, "WIRE", R.X + 86.0f, R.Y + R.H / 2.0f + 5.0f, 12.0f, 800, pal::Muted, 2.0f);
+	const Color Bar = Hex(0x080e18);
+	C->FillRect({Lane.X, R.Y + 1.0f, 30.0f, R.H - 1.0f}, Paint::Linear({Lane.X, 0.0f}, {Lane.X + 30.0f, 0.0f}, Bar, NetA(Bar, 0.0f)));
+	C->FillRect({Lane.X + Lane.W - 30.0f, R.Y + 1.0f, 30.0f, R.H - 1.0f}, Paint::Linear({Lane.X + Lane.W - 30.0f, 0.0f}, {Lane.X + Lane.W, 0.0f}, NetA(Bar, 0.0f), Bar));
 }
+
 // ------------------------------------------------------------------ pages
 
 void RiverLine::LobbyPages(double Now)
@@ -1748,7 +1251,6 @@ void RiverLine::LobbyPages(double Now)
 	}
 	C->Restore();
 	C->SetAlpha(A0);
-	Ticker({0.0f, 962.0f, NetW, 38.0f}, Now);
 }
 
 // ------------------------------------------------------------------ series
@@ -2048,16 +1550,23 @@ void RiverLine::SeriesPage(double Now)
 				UI.Text(HasMain ? NetUpper(net::DateLabel(net::DayOf(Main.Start))) : std::string(), X + Bw / 2.0f, Base + 20.0f, Ts(11.5f, 700, pal::Gold, Align::Center));
 			}
 		}
-		// You are here.
-		const float Yx = Rt.X + 24.0f + Bw / 2.0f;
-		const float Yy = Base - 70.0f - 30.0f + Nf(std::sin(Now * 3.0)) * 3.0f;
+		// You are here: the highest step the player holds a ticket for.
+		int Here = 0;
+		const char* Tickets[4] = {"step2", "step3", "step4", "rcop-main"};
+		for (int K = 0; K < 4; ++K)
+		{
+			Here = S.Life.TicketsFor(Tickets[K]) > 0 ? K + 1 : Here;
+		}
+		const float Yx = Rt.X + 24.0f + Bw / 2.0f + Nf(Here) * (Bw + 8.0f);
+		const float Yy = Base - (70.0f + Nf(Here) * 58.0f) - 30.0f + Nf(std::sin(Now * 3.0)) * 3.0f;
 		NetPill(*C, "YOU \xC2\xB7 " + Money(S.BankrollCents), Yx - 38.0f, Yy - 24.0f, pal::Accent, true, 10.0f);
 		NetTriangle(*C, Yx, Yy + 2.0f, 10.0f, false, pal::Accent);
 		const float Cy = Base + 48.0f;
 		UI.RRect({Rt.X + 24.0f, Cy, Rt.W - 48.0f, 118.0f}, 10.0f, Rgba(242, 193, 78, 0.07f), NetA(pal::Gold, 0.35f));
 		UI.Text("$2.20 to a $5,250 seat.", Rt.X + 44.0f, Cy + 34.0f, Ts(20.0f, 900, pal::Ink));
-		NetParagraph(*C, "Five steps to the Main Event and its $25,000,000 guarantee. Last year's champion won $4,108,220. Satellites unlock later in your career.", Rt.X + 44.0f, Cy + 60.0f, Rt.W - 88.0f,
-			13.5f, 500, Hex(0xc9d3e2), 19.0f, 3);
+		NetParagraph(*C, (S.Unlocks() & net::UnlockSatellite) ? "Five steps to the Main Event and its $25,000,000 guarantee. Last year's champion won $4,108,220. Step 1 runs every four hours."
+															   : "Five steps to the Main Event and its $25,000,000 guarantee. Last year's champion won $4,108,220. Make a final table to unlock satellites.",
+			Rt.X + 44.0f, Cy + 60.0f, Rt.W - 88.0f, 13.5f, 500, Hex(0xc9d3e2), 19.0f, 3);
 	}
 	else
 	{
@@ -2227,7 +1736,7 @@ void RiverLine::BoardsPage(double Now)
 	{
 	case net::Board::NightShift:
 		About = "Tonight's micro-stakes race. Every final table in a $5.50-or-less event from 6 PM to 6 AM scores: bigger fields and deeper runs score more. The top 20 share $1,000.";
-		Ends = static_cast<double>(net::NightOneDay) * net::MinutesPerDay + 6.0 * 60.0;
+		Ends = life::NightShiftStart(World) + 12.0 * 60.0;
 		break;
 	case net::Board::Season:
 		About = "Player of the Year 2026. Points from every final table since January. The top three win RCOP 2027 Platinum Passes worth $25,000.";
@@ -2541,13 +2050,23 @@ void RiverLine::CareerPage(double Now)
 	const float Bx = P.X + P.W - 30.0f;
 	NetSpaced(*C, "BANKROLL", Bx, P.Y + 44.0f, 10.5f, 800, pal::Muted, 1.6f, Align::Right);
 	UI.Text(Money(static_cast<Chips>(static_cast<double>(S.BankrollCents) * static_cast<double>(In))), Bx, P.Y + 92.0f, Ts(44.0f, 900, pal::Gold, Align::Right, Baseline::Alphabetic, true));
-	const Chips Rent = 122500;
+	const life::State& Lf = S.Life;
+	const Chips Rent = std::max<Chips>(1, Lf.RentDueCents);
 	const float RentFrac = Nf(Clamp01(static_cast<double>(S.BankrollCents) / static_cast<double>(Rent)));
 	const Rect Rb{Bx - 300.0f, P.Y + 128.0f, 300.0f, 8.0f};
-	NetSpaced(*C, "RENT DUE FRIDAY", Rb.X, P.Y + 120.0f, 10.0f, 800, pal::Red, 1.4f);
-	UI.RRect(Rb, 4.0f, Rgba(255, 255, 255, 0.08f));
-	UI.RRect({Rb.X, Rb.Y, std::max(8.0f, Rb.W * RentFrac * In), Rb.H}, 4.0f, Paint::Linear({Rb.X, 0.0f}, {Rb.X + Rb.W, 0.0f}, pal::Red, pal::Gold));
-	UI.Text(S.BankrollCents >= Rent ? std::string("Rent covered.") : Money(Rent - S.BankrollCents) + " to go of $1,225.00", Bx, P.Y + 160.0f, Ts(13.0f, 600, S.BankrollCents >= Rent ? pal::Green : Hex(0xc3cedf), Align::Right));
+	const bool Evicted = Lf.RentStage == life::Rent::Evicted;
+	const std::string RentHead = Evicted ? "EVICTED \xC2\xB7 ON DEE'S COUCH"
+		: Lf.RentStage == life::Rent::FinalNotice ? "FINAL NOTICE \xC2\xB7 " + NetUpper(net::Countdown(Lf.RentDeadline - World)) + " LEFT"
+		: Lf.RentStage == life::Rent::Paid ? "RENT PAID \xC2\xB7 NEXT DUE " + NetUpper(net::DateLabel(net::DayOf(Lf.RentDeadline - 1.0)))
+		: "RENT DUE " + NetUpper(net::WeekdayName(net::DayOf(Lf.RentDeadline - 1.0), true)) + " \xC2\xB7 " + NetUpper(net::Countdown(Lf.RentDeadline - World));
+	NetSpaced(*C, RentHead, Rb.X, P.Y + 120.0f, 10.0f, 800, Lf.RentStage == life::Rent::Paid ? pal::Green : pal::Red, 1.4f);
+	if (!Evicted)
+	{
+		UI.RRect(Rb, 4.0f, Rgba(255, 255, 255, 0.08f));
+		UI.RRect({Rb.X, Rb.Y, std::max(8.0f, Rb.W * RentFrac * In), Rb.H}, 4.0f, Paint::Linear({Rb.X, 0.0f}, {Rb.X + Rb.W, 0.0f}, pal::Red, pal::Gold));
+		UI.Text(S.BankrollCents >= Rent ? "Covered: pay it in the Bank app." : Money(Rent - S.BankrollCents) + " to go of " + Money(Rent), Bx, P.Y + 160.0f,
+			Ts(13.0f, 600, S.BankrollCents >= Rent ? pal::Green : Hex(0xc3cedf), Align::Right));
+	}
 
 	// Numbers.
 	const int Cashes = You.Cashes;
@@ -2626,14 +2145,20 @@ void RiverLine::CareerPage(double Now)
 		bool Done;
 		bool Locked;
 	};
+	const bool Satellites = (S.Unlocks() & net::UnlockSatellite) != 0;
+	bool NightMoney = NightRank > 0 && NightRank <= 20;
+	for (const life::LedgerEntry& E : S.Life.Ledger)
+	{
+		NightMoney = NightMoney || (E.Kind == 4 && E.Label.rfind("Night Shift", 0) == 0);
+	}
 	const std::vector<Step> Path = {
-		{"First cash", "Finish in the money in any tournament.", You.Cashes > 0, false},
-		{"Final table", "Make the last nine.", You.FinalTables > 0, false},
-		{"Champion", "Win a tournament.", You.Wins > 0, false},
-		{"Night Shift top 20", "Finish the night in the leaderboard's money.", NightRank > 0 && NightRank <= 20, false},
+		{"First cash", "Finish in the money. Unlocks bounty tournaments.", You.Cashes > 0, false},
+		{"Final table", "Make the last nine. Unlocks satellites.", You.FinalTables > 0, false},
+		{"Champion", "Win a tournament. Unlocks six-max.", You.Wins > 0, false},
+		{"Night Shift top 20", "Finish a night in the leaderboard's money.", NightMoney, false},
 		{"Series title", "Win a Micro Madness event.", You.SeriesTitles > 0, false},
-		{"Make rent", "Bankroll $1,225 by Friday.", S.BankrollCents >= 122500, false},
-		{"Road to the Main", "Win a $5,250 seat to the RCOP Main Event.", false, true},
+		{"Make rent", "Pay the $1,225 before Friday midnight.", S.Life.RentsPaid > 0, false},
+		{"Road to the Main", "Win a $5,250 seat to the RCOP Main Event.", S.Life.TicketsFor("rcop-main") > 0, !Satellites},
 		{"Life changer", "Win the RCOP Main Event. Last year: $4,108,220.", false, true},
 	};
 	int DoneCount = 0;

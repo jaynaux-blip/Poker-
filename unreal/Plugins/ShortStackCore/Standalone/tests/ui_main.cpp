@@ -548,6 +548,114 @@ void NetScreens()
 	Emit("net_boards_series", RL, Now);
 }
 
+/** The laptop apps, the time-lapse, a bounty table and the new result screens. */
+void AppScreens()
+{
+	using App = ss::ui::RiverLine::App;
+	QuietHooks H;
+	ss::Session S(H, "ui-apps");
+	ss::ui::RiverLine RL(S);
+	S.CurrentScreen = ss::Screen::Lobby;
+	RL.UI.Ptr.Active = true;
+	RL.UI.Ptr.X = 300.0f;
+	RL.UI.Ptr.Y = 880.0f;
+	double Now = Run(S, RL, 10.0, 1.0);
+	Emit("net_lobby_taskbar", RL, Now);
+	RL.OpenApp(App::ShiftLink, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("app_shiftlink", RL, Now);
+	RL.OpenApp(App::Burner, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("app_burner", RL, Now);
+	RL.ShowSleepMenu(true);
+	RL.UI.Ptr.X = 520.0f;
+	RL.UI.Ptr.Y = 820.0f;
+	Now = Run(S, RL, Now, 0.3);
+	Emit("app_sleep", RL, Now);
+	RL.ShowSleepMenu(false);
+	// A night shift at the Quik Stop: the time-lapse, then the result.
+	Expect(S.StartActivity("quikstop").empty(), "the night shift starts from the app");
+	Now = Run(S, RL, Now, 1.6);
+	Emit("app_skip", RL, Now);
+	Now = Run(S, RL, Now, 4.5);
+	Expect(S.HasOutcome, "the shift's result is up");
+	Emit("app_outcome", RL, Now);
+	S.HasOutcome = false;
+	RL.OpenApp(App::Bank, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("app_bank", RL, Now);
+	// Night: Marcus trusts you now, and the cops have noticed.
+	S.LobbyMinutes = 1440.0 + 21.0 * 60.0 + 30.0;
+	Now = Run(S, RL, Now, 0.2);
+	S.Life.Energy = 88.0;
+	S.Life.Runs = 2;
+	S.Life.Heat = 38.0;
+	S.Life.EarnedHustles = 33600;
+	S.History.push_back(ss::HistoryEntry());
+	S.History.back().Name = "$1.10 Night Owl Turbo";
+	S.History.back().Place = 120;
+	S.History.back().Entrants = 1000;
+	S.History.back().Prize = 165;
+	RL.OpenApp(App::Burner, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("app_burner_night", RL, Now);
+	RL.ShowContact(1);
+	Now = Run(S, RL, Now, 0.5);
+	Emit("app_burner_sam", RL, Now);
+
+	// A progressive knockout, mid-hand, just after a knockout.
+	{
+		QuietHooks Hp;
+		ss::Session P(Hp, "ui-pko");
+		ss::ui::RiverLine Rp(P);
+		P.CurrentScreen = ss::Screen::Lobby;
+		P.Life.Unlocks.insert("bounty");
+		P.BankrollCents = 2000;
+		ss::net::EventInstance Pko;
+		Expect(ss::net::Shared().FindInstance("hh-110@1500", Pko), "the 1 AM PKO is scheduled");
+		P.RegisterEvent(ss::net::Shared().Listing(Pko, nullptr, P.Unlocks()));
+		P.CurrentPace = ss::Pace::Full;
+		double T0 = 0.0;
+		int Guard = 0;
+		while (++Guard < 200000 && !(P.HasPrompt && T0 - P.Prompt.OpenedAt > 1.0 && P.Board.size() >= 3))
+		{
+			T0 = Step(P, T0, 1.0 / 30.0);
+			if (P.HasPrompt && P.Board.size() < 3 && T0 - P.Prompt.OpenedAt > 0.3)
+			{
+				P.HeroAct(P.Prompt.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Call());
+			}
+		}
+		P.Knockouts = 2;
+		P.BountyWon = 75;
+		P.LastBountyAt = T0 - 0.5;
+		P.LastBountyCents = 50;
+		P.LastBountyName = "NutDoctor";
+		Rp.UI.Ptr.Active = false;
+		Emit("table_pko", Rp, T0);
+		// Results: a seat, then a deep PKO run.
+		P.HasResults = true;
+		P.CurrentScreen = ss::Screen::Results;
+		P.ResultsAt = T0 - 3.0;
+		P.LastResults = ss::Results();
+		P.LastResults.EventName = "Step 2 \xC2\xB7 RCOP Main";
+		P.LastResults.Place = 4;
+		P.LastResults.Entrants = 60;
+		P.LastResults.Hands = 112;
+		P.LastResults.AccuracyPct = 86.0;
+		P.LastResults.SeatWon = "step3";
+		P.LastResults.SeatValueCents = 5500;
+		Emit("results_seat", Rp, T0);
+		P.LastResults.EventName = "$1.10 Headhunter PKO";
+		P.LastResults.SeatWon.clear();
+		P.LastResults.Place = 7;
+		P.LastResults.Entrants = 896;
+		P.LastResults.PrizeCents = 1240;
+		P.LastResults.BountyCents = 375;
+		P.LastResults.Knockouts = 6;
+		Emit("results_pko", Rp, T0);
+	}
+}
+
 void Clicks()
 {
 	// A click on "Log in" moves the boot screen to the lobby; clicks elsewhere do nothing.
@@ -600,6 +708,13 @@ void Clicks()
 	Frame(500.0f, 34.0f, true, true, false);
 	Frame(500.0f, 34.0f, false, false, true);
 	Expect(RL.CurrentPage() == ss::ui::RiverLine::Page::Leaderboards, "the top bar opens the leaderboards");
+	// The taskbar opens ShiftLink, and a night shift starts from its card.
+	Frame(170.0f, 981.0f, true, true, false);
+	Frame(170.0f, 981.0f, false, false, true);
+	Expect(RL.CurrentApp() == ss::ui::RiverLine::App::ShiftLink, "the taskbar opens ShiftLink");
+	Frame(290.0f, 516.0f, true, true, false);
+	Frame(290.0f, 516.0f, false, false, true);
+	Expect(S.TimeSkip.Active && S.TimeSkip.Result.ActivityId == "quikstop", "Take shift starts the Quik Stop shift");
 }
 } // namespace ui_test
 
@@ -610,6 +725,7 @@ int main(int Argc, char** Argv)
 		ui_test::OutDir = Argv[1];
 	}
 	ui_test::NetScreens();
+	ui_test::AppScreens();
 	ui_test::Clicks();
 	ui_test::Screens();
 	ui_test::Results();

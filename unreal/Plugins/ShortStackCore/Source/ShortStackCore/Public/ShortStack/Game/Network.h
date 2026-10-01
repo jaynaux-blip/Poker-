@@ -105,6 +105,8 @@ struct EventTemplate
 	bool Featured = false;
 	int JoinIndex = -1; // Lobby() index when the event can be played in this build
 	std::string Seats;  // satellites: what the seats are for
+	std::string SeatTicket; // satellites: the template a seat enters
+	Chips SeatValueCents = 0;
 	std::string Blurb;
 };
 
@@ -187,7 +189,18 @@ struct HeroStats
 	int SeriesTitles = 0;
 	int Tournaments = 0;
 };
-SHORTSTACKCORE_API HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& History);
+/** Night points count the Night Shift that contains Now (life::NightShiftStart). */
+SHORTSTACKCORE_API HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& History, double Now = MinutesPerDay + 127.0);
+/** When a result's event started (world minutes), from its event id; Night One for older saves. */
+SHORTSTACKCORE_API double EntryStart(const HistoryEntry& E);
+
+/** Formats the player has unlocked (bits for Joinable and Listing). */
+enum Unlock : int
+{
+	UnlockBounty = 1,    // first cash
+	UnlockSatellite = 2, // first final table
+	UnlockSixMax = 4,    // first title
+};
 /** Leaderboard points for a finish (the network's formula: field size, buy-in and place). */
 SHORTSTACKCORE_API double Points(int Place, int Entries, Chips BuyInCents);
 
@@ -273,9 +286,9 @@ public:
 	 * hand-tuned spec; other Hold'em events get one built from the schedule. Joinable is false for events the
 	 * tables can't run yet (bounties, satellites, Omaha, six-max, huge fields); Lock says why.
 	 */
-	SHORTSTACKCORE_API LobbyEvent Listing(const EventInstance& E, std::string* Lock = nullptr) const;
+	SHORTSTACKCORE_API LobbyEvent Listing(const EventInstance& E, std::string* Lock = nullptr, int Unlocks = 0) const;
 	/** Whether the tables can run this event (Listing's Joinable), without building the listing. */
-	SHORTSTACKCORE_API bool Joinable(const EventInstance& E, std::string* Lock = nullptr) const;
+	SHORTSTACKCORE_API bool Joinable(const EventInstance& E, std::string* Lock = nullptr, int Unlocks = 0) const;
 	/** The instance a Listing's spec came from, by id ("night-owl@1560"); false when it isn't scheduled. */
 	SHORTSTACKCORE_API bool FindInstance(const std::string& Id, EventInstance& Out) const;
 	/** The first instance of a template starting at or after From (within two weeks). */
