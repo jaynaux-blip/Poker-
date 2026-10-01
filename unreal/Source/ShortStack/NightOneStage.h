@@ -253,8 +253,12 @@ private:
 
 	FFirstPersonArms Arms;
 	int32 ArmsInitTries = 0;
+	// Set while building the set: properties, so Play-In-Editor's copy of the placed stage keeps them
+	// (a plain member resets to zero there and UpdateArms would park the mouse at the stage's origin).
+	UPROPERTY()
 	FVector MouseHome = FVector::ZeroVector;
 	FVector2D MouseOffset = FVector2D::ZeroVector;
+	UPROPERTY()
 	float MouseTop = 2.6f; // height of the mouse's hump above the desk (cm)
 	/** A key's top, in world space (the Blender laptop's layout; the stand-in keyboard matches it). */
 	FVector KeyWorld(const FString& Name) const;
