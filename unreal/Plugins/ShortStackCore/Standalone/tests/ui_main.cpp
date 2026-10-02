@@ -4,6 +4,7 @@
 // Usage: ui_test <out-dir>   (with no argument it only checks the frames draw)
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/UI/Avatars.h"
@@ -11,6 +12,7 @@
 #include "ShortStack/UI/Phone.h"
 #include "ShortStack/UI/PropArt.h"
 #include "ShortStack/UI/RiverLine.h"
+#include "ShortStack/UI/StreamArt.h"
 #include "TestFontMetrics.h"
 
 #include <cstdio>
@@ -384,6 +386,90 @@ void Avatars()
 			std::fwrite(J.data(), 1, J.size(), F);
 			std::fclose(F);
 		}
+	}
+}
+
+// ------------------------------------------------------------------ GearDrop and Kast art
+
+void WriteList(const std::string& Name, const ss::ui::DrawList& L)
+{
+	if (!OutDir.empty())
+	{
+		if (FILE* F = std::fopen((OutDir + "/" + Name + ".json").c_str(), "wb"))
+		{
+			const std::string J = L.ToJson();
+			std::fwrite(J.data(), 1, J.size(), F);
+			std::fclose(F);
+		}
+	}
+}
+
+/** Every product picture, every emote, the facecam in each mood and gear level, and the desk filling up. */
+void StreamGallery()
+{
+	namespace sa = ss::ui::streamart;
+	TableMeasurer M;
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		C.FillRect({0.0f, 0.0f, 1600.0f, 1000.0f}, ss::ui::Hex(0xf4f5f7));
+		const std::vector<ss::gear::Item>& Items = ss::gear::Catalog();
+		for (size_t I = 0; I < Items.size(); ++I)
+		{
+			const float X = 20.0f + static_cast<float>(I % 7) * 225.0f;
+			const float Y = 20.0f + static_cast<float>(I / 7) * 240.0f;
+			C.FillRoundRect({X, Y, 210.0f, 225.0f}, 14.0f, ss::ui::Hex(0xffffff));
+			C.FillRoundRect({X + 8.0f, Y + 8.0f, 194.0f, 170.0f}, 10.0f, ss::ui::Paint::Linear({X, Y}, {X, Y + 170.0f}, ss::ui::Mix(ss::ui::Hex(Items[I].Color), ss::ui::Hex(0xffffff), 0.82f), ss::ui::Mix(ss::ui::Hex(Items[I].Color), ss::ui::Hex(0xffffff), 0.6f)));
+			sa::Product(C, Items[I].Pic, {X + 8.0f, Y + 8.0f, 194.0f, 170.0f}, Items[I].Color, 1.0);
+			C.Text(Items[I].Name, X + 12.0f, Y + 202.0f, ss::ui::Ts(14.0f, 700, ss::ui::Hex(0x111827), ss::ui::Align::Left, ss::ui::Baseline::Alphabetic, false, 186.0f));
+		}
+		Expect(L.Vertices.size() > 5000, "every product has a picture");
+		WriteList("stream_products", L);
+	}
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		C.FillRect({0.0f, 0.0f, 1600.0f, 1000.0f}, ss::ui::Hex(0x0f0b17));
+		for (int E = 0; E < static_cast<int>(ss::kast::Emote::Count); ++E)
+		{
+			sa::Emote(C, E, 30.0f + static_cast<float>(E) * 118.0f, 24.0f, 80.0f);
+			sa::Emote(C, E, 60.0f + static_cast<float>(E) * 118.0f, 118.0f, 22.0f);
+		}
+		const ss::kast::Mood Moods[] = {ss::kast::Mood::Focus, ss::kast::Mood::Happy, ss::kast::Mood::Hyped, ss::kast::Mood::Shocked, ss::kast::Mood::Tilted, ss::kast::Mood::Laugh};
+		for (int Tier = 0; Tier < 3; ++Tier)
+		{
+			ss::gear::Owned Own;
+			if (Tier >= 1)
+			{
+				Own = {{"webcam-720", 0.0}, {"mic-usb", 0.0}, {"ring-light", 0.0}};
+			}
+			if (Tier >= 2)
+			{
+				Own = {{"mirrorless", 0.0}, {"mic-xlr", 0.0}, {"key-lights", 0.0}, {"headphones", 0.0}};
+			}
+			for (int K = 0; K < 6; ++K)
+			{
+				sa::Cam Look;
+				Look.Gear = ss::gear::Sum(Own);
+				Look.Headphones = Own.count("headphones") > 0;
+				Look.Face = Moods[K];
+				Look.FaceAge = 0.6;
+				Look.Time = 2.0 + K;
+				sa::Facecam(C, {20.0f + static_cast<float>(K) * 262.0f, 170.0f + static_cast<float>(Tier) * 160.0f, 250.0f, 141.0f}, Look);
+			}
+		}
+		ss::gear::Owned Desk;
+		sa::Desk(C, {20.0f, 660.0f, 500.0f, 320.0f}, Desk, false, 1.0);
+		Desk = {{"monitor-24", 0.0}, {"ram-32", 0.0}, {"webcam-720", 0.0}, {"mic-usb", 0.0}, {"ring-light", 0.0}, {"plant", 0.0}};
+		sa::Desk(C, {550.0f, 660.0f, 500.0f, 320.0f}, Desk, true, 1.0);
+		for (const ss::gear::Item& I : ss::gear::Catalog())
+		{
+			Desk[I.Id] = 0.0;
+		}
+		Desk.erase("ring-light");
+		Desk.erase("mic-usb");
+		sa::Desk(C, {1080.0f, 660.0f, 500.0f, 320.0f}, Desk, true, 1.0);
+		WriteList("stream_art", L);
 	}
 }
 
@@ -772,7 +858,8 @@ void MultiScreens()
 	ss::ui::RiverLine RL(S);
 	TableMeasurer M;
 	S.CurrentScreen = ss::Screen::Lobby;
-	S.BankrollCents = 6000;
+	S.BankrollCents = 6000 + 14900 + 28900;
+	Expect(S.Buy("monitor-24").empty() && S.Buy("monitor-27").empty() && S.BankrollCents == 6000, "two monitors for four tables");
 	auto Frame = [&](float X, float Y, bool Down, bool Pressed, bool Released, double At) {
 		RL.UI.Ptr.Active = true;
 		RL.UI.Ptr.X = X;
@@ -962,6 +1049,163 @@ void Clicks()
 	Frame(290.0f, 516.0f, false, false, true);
 	Expect(S.TimeSkip.Active && S.TimeSkip.Result.ActivityId == "quikstop", "Take shift starts the Quik Stop shift");
 }
+/** GearDrop and Kast: the store, the locked studio on the laptop, the upgrade that unlocks it, a stream from the lobby to a
+ * table, the channel, the directory, the end-of-stream card. */
+void StreamScreens()
+{
+	QuietHooks H;
+	ss::Session S(H, "ui-stream");
+	ss::ui::RiverLine RL(S);
+	TableMeasurer M;
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 250000;
+	double Now = 1.0;
+	auto Frame = [&](float X, float Y, bool Down, bool Pressed, bool Released) {
+		RL.UI.Ptr.Active = true;
+		RL.UI.Ptr.X = X;
+		RL.UI.Ptr.Y = Y;
+		RL.UI.Ptr.Down = Down;
+		RL.UI.Ptr.Pressed = Pressed;
+		RL.UI.Ptr.Released = Released;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		RL.Draw(C, Now);
+		RL.UI.Ptr.EndFrame();
+	};
+	auto Click = [&](float X, float Y) {
+		Frame(X, Y, true, true, false);
+		Now += 0.05;
+		Frame(X, Y, false, false, true);
+		Now += 0.05;
+	};
+	RL.UI.Ptr.Active = false;
+	RL.OpenApp(ss::ui::RiverLine::App::GearDrop, Now);
+	Emit("store", RL, Now + 1.0);
+	Now += 1.0;
+
+	// Kast on the laptop: locked.
+	RL.OpenApp(ss::ui::RiverLine::App::Kast, Now);
+	Emit("kast_locked", RL, Now + 1.0);
+	Now += 1.0;
+	Expect(!S.GoLive().empty() && !S.Streaming(), "the laptop alone can't stream");
+	Click(524.0f, 547.0f);
+	Expect(RL.CurrentApp() == ss::ui::RiverLine::App::GearDrop && RL.OrderShown() == ss::gear::FirstPcUpgrade().Id, "the locked studio leads to the next PC upgrade");
+	Emit("store_order", RL, Now + 0.6);
+	Now += 0.6;
+	Click(887.0f, 654.0f);
+	Expect(S.Owns(ss::gear::FirstPcUpgrade().Id) && S.GearFx().CanStream() && RL.OrderShown().empty(), "placing the order unlocks streaming");
+	Emit("store_delivered", RL, Now + 0.4);
+	for (const char* Id : {"webcam-1080", "mic-usb", "ring-light", "overlay-pack", "monitor-24", "headphones", "plant", "chair", "modbot"})
+	{
+		Expect(S.Buy(Id).empty(), "GearDrop sells the stream kit");
+	}
+	Expect(S.Buy("webcam-720") == "You have better.", "no side-grades: a 720p webcam after the 1080p one");
+	RL.ShowStoreCategory(static_cast<int>(ss::gear::Category::Stream));
+	RL.OpenApp(ss::ui::RiverLine::App::GearDrop, Now);
+	Emit("store_stream", RL, Now + 1.0);
+	Now += 1.0;
+
+	// A channel a few weeks in, so the pages have something to show.
+	ss::kast::Channel& Ch = S.Channel;
+	ss::Rng Fake("ui-stream-channel");
+	Ch.Followers = 3420;
+	Ch.Affiliate = true;
+	Ch.Partner = true;
+	Ch.MinutesLive = 41.0 * 60.0;
+	Ch.Streams = 22;
+	Ch.Peak = 412;
+	Ch.Milestone = 2500;
+	Ch.EarnedSubs = 118250;
+	Ch.EarnedTips = 96400;
+	Ch.EarnedBits = 21300;
+	Ch.EarnedAds = 4170;
+	Ch.EarnedSponsors = 77800;
+	Ch.PaidCents = 300000;
+	for (int K = 0; K < 9; ++K)
+	{
+		ss::kast::StreamLog Lg;
+		Lg.Start = S.WorldMinutes() - 1440.0 * (K + 1) - 120.0;
+		Lg.Minutes = 150.0 + 20.0 * K;
+		Lg.Avg = 140 - 9 * K;
+		Lg.Peak = 210 - 11 * K;
+		Lg.Follows = 160 - 12 * K;
+		Lg.Cents = 41000 - 3100 * K;
+		Ch.Log.push_back(Lg);
+	}
+	const std::vector<std::string> Clips = {"grinder_3c holds the all-in for 41,200", "the cruelest river (grinder_3c)", "grinder_3c makes the final table of the Night Owl", "grinder_3c sends VelvetRiver home"};
+	for (size_t K = 0; K < Clips.size(); ++K)
+	{
+		ss::kast::Clip Cl;
+		Cl.Title = Clips[K];
+		Cl.By = ss::handles::Make(Fake, "US");
+		Cl.Views = 48000.0 / static_cast<double>(K + 1);
+		Cl.Reach = Cl.Views;
+		Cl.At = S.WorldMinutes() - 3000.0;
+		Ch.Clips.push_back(Cl);
+	}
+	for (int K = 0; K < 40; ++K)
+	{
+		Ch.Regulars[ss::handles::Make(Fake, ss::handles::PickCountry(Fake))] = 6 + K * 3;
+	}
+	for (int K = 0; K < 2; ++K)
+	{
+		ss::kast::Moderator Md;
+		Md.Name = ss::handles::Make(Fake, "GB");
+		Md.Online = 1.0;
+		Md.Actions = 30 - K * 11;
+		Ch.Mods.push_back(Md);
+	}
+	ss::kast::Deal D;
+	D.Id = "riverline";
+	D.Since = S.WorldMinutes() - 3.0 * 1440.0;
+	D.Until = S.WorldMinutes() + 27.0 * 1440.0;
+	D.EarnedCents = 31250;
+	Ch.Deals.push_back(D);
+	Ch.Offers.insert("stacked");
+	Ch.LastOffline = S.WorldMinutes();
+
+	// Live from the lobby, then a tournament.
+	RL.OpenApp(ss::ui::RiverLine::App::Kast, Now);
+	Emit("kast_offline", RL, Now + 1.0);
+	Now += 1.0;
+	Click(130.0f, 686.0f);
+	Expect(S.Streaming() && S.Stream.Chat.size() >= 1, "Go live starts the stream");
+	Now = Step(S, Now, 20.0);
+	const std::vector<ss::LobbyEvent> Picks = OpenEvents(S, 1, 3000);
+	Expect(Picks.size() == 1, "an event to stream");
+	if (Picks.empty())
+	{
+		return;
+	}
+	S.RegisterEvent(Picks[0]);
+	Expect(S.Stream.Pred.Active, "registering on stream starts a prediction");
+	Now = Step(S, Now, 300.0);
+	S.Stream.OnMoment(S.Channel, S.StreamInputs(), ss::kast::Moment::WonAllIn, "38,400", 1.6);
+	ss::kast::Alert Raid;
+	Raid.Kind = ss::kast::AlertKind::Raid;
+	Raid.Who = "SuitedConnor";
+	Raid.Count = 214;
+	S.Stream.Alerts.insert(S.Stream.Alerts.begin(), Raid);
+	Now = Step(S, Now, 1.2);
+	Expect(S.Stream.Chat.size() > 20 && S.Stream.Viewers > 10.0 && S.Stream.Tonight.Follows > 0, "a live stream: chat, viewers, follows");
+	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
+	Emit("kast_studio", RL, Now);
+	RL.OpenApp(ss::ui::RiverLine::App::RiverLine, Now);
+	S.Tab = ss::RightTab::Stream;
+	Emit("table_live", RL, Now + 0.1);
+	RL.OpenApp(ss::ui::RiverLine::App::Kast, Now);
+	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Channel);
+	Emit("kast_channel", RL, Now + 1.0);
+	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Browse);
+	Emit("kast_browse", RL, Now + 1.0);
+	const ss::Chips Bank = S.BankrollCents;
+	const ss::Chips Owed = S.Channel.UnpaidCents;
+	S.EndStream();
+	Expect(!S.Streaming() && S.StreamCard && S.BankrollCents == Bank + Owed && S.Channel.UnpaidCents == 0, "ending the stream pays the balance to the bank");
+	Expect(Owed == 0 || (S.Life.Ledger.front().Kind == 6 && S.Life.Ledger.front().Amount == Owed), "the payout is in the ledger");
+	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
+	Emit("kast_summary", RL, Now + 1.5);
+}
 } // namespace ui_test
 
 int main(int Argc, char** Argv)
@@ -978,6 +1222,8 @@ int main(int Argc, char** Argv)
 	ui_test::Props();
 	ui_test::Avatars();
 	ui_test::MultiScreens();
+	ui_test::StreamGallery();
+	ui_test::StreamScreens();
 	ui_test::FrontEndFlows();
 	ui_test::FrontEndScreens();
 	if (ui_test::Failures == 0)

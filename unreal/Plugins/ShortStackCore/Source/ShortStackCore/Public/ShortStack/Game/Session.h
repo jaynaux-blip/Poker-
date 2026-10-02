@@ -2,6 +2,8 @@
 
 #include "ShortStack/AI/Grading.h"
 #include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Gear.h"
+#include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Rng.h"
@@ -34,6 +36,7 @@ enum class RightTab : int
 	Info,
 	Chat,
 	Payouts,
+	Stream, // Kast chat, while live
 };
 
 enum class SoundId : int
@@ -217,6 +220,8 @@ struct SaveData
 	std::vector<std::string> TextsSeen;
 	double ClockMinutes = 2.0 * 60.0 + 7.0; // the lobby clock
 	life::State Life;
+	gear::Owned Gear;
+	kast::Channel Channel;
 
 	/** Line-based text, safe to store in any save system. */
 	SHORTSTACKCORE_API std::string Serialize() const;
@@ -236,6 +241,10 @@ public:
 	virtual void Save(const SaveData& /*Data*/) {}
 	/** Leaves the apartment for a place the host plays out itself (Dee's game). False when it can't. */
 	virtual bool GoOut(const std::string& /*ActivityId*/, Chips /*BuyInCents*/) { return false; }
+	/** Something from GearDrop arrived (or a subscription ended): the desk can show it (a second monitor, a ring light). */
+	virtual void GearChanged(const std::string& /*ItemId*/, bool /*Owned*/) {}
+	/** The stream went live or ended (an ON AIR light, the ring light coming on). */
+	virtual void OnAir(bool /*Live*/) {}
 };
 
 /**
@@ -402,6 +411,47 @@ public:
 	/** Tickets that pay for this listing (satellite seats). */
 	int TicketsFor(const LobbyEvent& Ev) const;
 
+	// ------------------------------------------------------------ gear and streaming (Gear.h, Kast.h)
+	/** Everything bought on GearDrop (id -> when a subscription renews; 0 for things owned outright). */
+	gear::Owned Gear;
+	/** The Kast channel (persists) and the stream (live state). */
+	kast::Channel Channel;
+	kast::Stream Stream;
+	/** What the owned gear adds up to. */
+	const gear::Effects& GearFx() const { return Fx; }
+	bool Owns(const std::string& Id) const { return Gear.count(Id) > 0; }
+	/** Why an item can't be bought now ("" when it can). */
+	SHORTSTACKCORE_API std::string CanBuy(const std::string& Id) const;
+	/** Buys from GearDrop (the first month, for subscriptions); returns why not, or "". */
+	SHORTSTACKCORE_API std::string Buy(const std::string& Id);
+	/** Ends a subscription (no refund; it stops now). */
+	SHORTSTACKCORE_API bool Cancel(const std::string& Id);
+	/** Goes live on Kast; returns why not, or "". */
+	SHORTSTACKCORE_API std::string GoLive();
+	/** Ends the stream: the channel's balance goes to the bank and the summary card comes up. */
+	SHORTSTACKCORE_API void EndStream();
+	bool Streaming() const { return Stream.Live; }
+	/** The summary card of the stream that just ended is up. */
+	bool StreamCard = false;
+	/** The stream's view of the game right now. */
+	SHORTSTACKCORE_API kast::Inputs StreamInputs() const;
+	/** Studio actions (see kast::Stream). */
+	SHORTSTACKCORE_API bool StreamAd(int Seconds);
+	SHORTSTACKCORE_API bool StreamThank();
+	SHORTSTACKCORE_API bool StreamAnswer(int MsgId);
+	SHORTSTACKCORE_API bool StreamTimeout(int MsgId);
+	SHORTSTACKCORE_API bool StreamPromote(const std::string& Name);
+	SHORTSTACKCORE_API bool StreamDemote(const std::string& Name);
+	SHORTSTACKCORE_API Chips StreamRead(const std::string& SponsorId);
+	SHORTSTACKCORE_API void StreamTitle(int Title);
+	/** Sponsor offers. Accepting takes one of the overlay's slots (kast::MaxDeals). */
+	SHORTSTACKCORE_API std::string AcceptDeal(const std::string& Id);
+	SHORTSTACKCORE_API void DeclineDeal(const std::string& Id);
+	/** Sends the channel's balance to the bank; returns the amount. */
+	SHORTSTACKCORE_API Chips CashOut();
+	/** On Team RiverLine (the sponsor deal): the patch on the hero's avatar. */
+	bool TeamRiverLine() const { return Channel.ActiveDeal("riverline", WorldMinutes()) != nullptr; }
+
 	// Who is who in the tournament being played (player id -> country; regulars from the network).
 	std::map<std::string, std::string> FieldCountry;
 	std::set<std::string> FieldRegulars;
@@ -532,6 +582,12 @@ private:
 	void RentDeadline();
 	void FinishSkip();
 	void BustBanner(const TPlayer& Hero, const char* NoCashSub);
+	void RefreshGear();
+	void RenewGear(double From, double To);
+	void StreamStep();
+	void StreamMoment(kast::Moment M, const std::string& Detail = std::string(), double Size = 1.0);
+	void PlayStreamNotices();
+	void PayOut(const std::string& Label);
 
 	SessionHooks& Hooks;
 	std::set<std::string> TextsSeen;
@@ -560,6 +616,12 @@ private:
 	int CansShown = 1;
 	bool SprintBubble = false;
 	bool SprintFinal = false;
+	gear::Effects Fx;
+	double StreamWorldAt = -1.0;
+	double StreamRealAt = -1.0;
+	double StreamSoundAt = -100.0;
+	double OfflineAt = -1.0;
+	Rng KastRng;
 };
 
 const char* SoundName(SoundId Id);

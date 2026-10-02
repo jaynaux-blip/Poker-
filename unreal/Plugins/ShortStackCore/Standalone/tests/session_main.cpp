@@ -40,6 +40,10 @@ struct Hooks : ss::SessionHooks
 	}
 	void Heartbeat(bool On) override { Beats += On ? 1 : 0; }
 	void AddCan() override { ++Cans; }
+	int OnAirs = 0;
+	int GearEvents = 0;
+	void OnAir(bool On) override { OnAirs += On ? 1 : 0; }
+	void GearChanged(const std::string&, bool) override { ++GearEvents; }
 	void Save(const ss::SaveData& D) override
 	{
 		++Saves;
@@ -708,7 +712,10 @@ void MultiTable()
 	Hooks H;
 	ss::Session S(H, "multi");
 	S.CurrentScreen = ss::Screen::Lobby;
-	S.BankrollCents = 20000;
+	S.BankrollCents = 20000 + 14900 + 28900;
+	Expect(S.MaxTables() == 2, "the laptop's screen fits two tables");
+	Expect(S.CanBuy("monitor-27") != "" && S.Buy("monitor-24").empty() && S.MaxTables() == 3 && S.Buy("monitor-27").empty(), "GearDrop: each monitor adds a table (the big one needs the first)");
+	Expect(S.BankrollCents == 20000 && S.Life.Ledger.size() == 2 && S.Life.Ledger.front().Kind == 5, "monitors paid from the bankroll, in the ledger");
 	const ss::Chips Start = S.BankrollCents;
 	const ss::net::Network& Net = ss::net::Shared();
 	const double World = S.WorldMinutes();
@@ -842,6 +849,91 @@ void Formatting()
 }
 } // namespace session_test
 
+namespace session_test
+{
+/** GearDrop and Kast: the laptop can't stream, the first PC upgrade can; a stream through a whole tournament; the payout;
+ * a shift ends the stream; subscriptions renew and lapse; everything survives a save. */
+void Streaming()
+{
+	Hooks H;
+	ss::Session S(H, "stream");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 300000;
+	Expect(!S.GoLive().empty() && !S.Streaming(), "the laptop can't stream");
+	Expect(S.Buy(ss::gear::FirstPcUpgrade().Id).empty() && S.GearFx().CanStream() && H.GearEvents == 1, "the first PC upgrade makes the rig stream-capable");
+	for (const char* Id : {"webcam-1080", "mic-usb", "ring-light", "overlay-pack"})
+	{
+		Expect(S.Buy(Id).empty(), "the stream kit");
+	}
+	const double Q = S.GearFx().Quality;
+	Expect(Q > 0.3 && S.GearFx().Resolution == 720, "the kit adds production value; the old line caps the stream at 720p");
+	Expect(S.Buy("fiber").empty() && S.GearFx().Resolution == 720, "fiber alone can't lift what the RAM kit can encode");
+	Expect(S.Buy("tower-mid").empty() && S.GearFx().Resolution == 1080 && S.GearFx().Quality > Q, "a desktop and fiber: 1080p60");
+	Expect(S.GoLive().empty() && S.Streaming() && H.OnAirs == 1 && S.Channel.Streams == 1, "live on Kast");
+
+	// A tournament on stream, played out at the sprint's pace.
+	const ss::net::Network& Net = ss::net::Shared();
+	ss::LobbyEvent Pick;
+	bool Found = false;
+	for (const ss::net::EventInstance& E : Net.Window(S.WorldMinutes() - 120.0, S.WorldMinutes() + 60.0))
+	{
+		const ss::LobbyEvent L = Net.Listing(E, nullptr, S.Unlocks());
+		if (!Found && L.Joinable && L.Spec.Entrants <= 400 && L.BuyInCents <= 1100)
+		{
+			Pick = L;
+			Found = true;
+		}
+	}
+	Expect(Found, "an event to stream");
+	if (!Found)
+	{
+		return;
+	}
+	S.RegisterEvent(Pick);
+	Expect(S.Stream.Pred.Active, "registering on stream opens a prediction");
+	ss::Rng Choice("stream-choice");
+	int Decisions = 0;
+	double Now = PlayOut(S, Choice, 0.0, Decisions);
+	const ss::kast::Stream& St = S.Stream;
+	Expect(St.Pred.Resolved, "the prediction resolves when the tournament ends");
+	Expect(St.Chat.size() > 20 && St.Chatters() > 5, "chat talks through the tournament");
+	Expect(S.Channel.Followers > 0 && St.Peak > 0 && !St.Graph.empty(), "viewers come, some follow");
+	std::printf("  stream: %.0f min on stream, %d followers, peak %d, %zu chat lines, %d chatters, %s earned, hype %.0f\n", St.Uptime(S.WorldMinutes()), S.Channel.Followers, St.Peak, St.Chat.size(),
+		St.Chatters(), ss::Money(St.Tonight.Total()).c_str(), St.Hype);
+	// A shift ends the stream and pays the balance out.
+	const ss::Chips Bank = S.BankrollCents;
+	const ss::Chips Owed = S.Channel.UnpaidCents;
+	S.LeaveResults();
+	Expect(S.StartActivity("nap").empty() && !S.Streaming() && S.StreamCard && H.OnAirs == 1, "a nap ends the stream (the summary card comes up)");
+	Expect(S.BankrollCents == Bank + Owed && S.Channel.UnpaidCents == 0 && (Owed == 0 || S.Life.Ledger.front().Kind == 6), "the stream's balance goes to the bank, in the ledger");
+	Expect(S.Channel.Log.size() == 1 && S.Channel.MinutesLive > 0.0, "the stream is logged");
+	Now = Wait(S, Now, 8.0);
+
+	// The save keeps the gear and the channel.
+	ss::SaveData Back;
+	Expect(H.Saves > 0 && ss::SaveData::Parse(H.Last.Serialize(), Back) && Back.Serialize() == H.Last.Serialize(), "the save round-trips");
+	Expect(Back.Gear == S.Gear && Back.Channel.Followers == S.Channel.Followers && Back.Channel.Log.size() == S.Channel.Log.size() && Back.Channel.Regulars == S.Channel.Regulars, "gear and channel in the save");
+	ss::Session Loaded(H, "stream-loaded", &Back);
+	Expect(Loaded.GearFx().CanStream() && Loaded.GearFx().Resolution == 1080 && Loaded.Channel.Streams == 1, "a loaded game streams at 1080p");
+
+	// Subscriptions: one renews (in the ledger), one lapses when the bank can't cover it.
+	ss::SaveData Monthly = Back;
+	Monthly.BankrollCents = 10000;
+	Monthly.Gear["gym"] = Monthly.ClockMinutes + ss::net::MinutesPerDay * static_cast<double>(ss::net::NightOneDay) + 1.0;
+	ss::Session Gym(H, "stream-gym", &Monthly);
+	Gym.CurrentScreen = ss::Screen::Lobby;
+	Wait(Gym, 0.0, 90.0);
+	const ss::gear::Item& GymItem = *ss::gear::Find("gym");
+	Expect(Gym.Owns("gym") && Gym.BankrollCents == 10000 - GymItem.PriceCents && Gym.Life.Ledger.front().Kind == 5, "a subscription renews from the bankroll");
+	Monthly.BankrollCents = 100;
+	ss::Session Broke(H, "stream-broke", &Monthly);
+	Broke.CurrentScreen = ss::Screen::Lobby;
+	Wait(Broke, 0.0, 90.0);
+	Expect(!Broke.Owns("gym") && Broke.BankrollCents == 100 && Broke.GearFx().Calm == Loaded.GearFx().Calm, "a subscription the bank can't cover lapses");
+	Expect(S.Cancel("fiber") && !S.Owns("fiber") && S.GearFx().Resolution == 720, "cancelling fiber drops the stream back to 720p");
+}
+} // namespace session_test
+
 int main()
 {
 	session_test::Formatting();
@@ -855,6 +947,7 @@ int main()
 	session_test::FullTournament();
 	session_test::SprintTournament();
 	session_test::DeepRuns();
+	session_test::Streaming();
 	if (session_test::Failures == 0)
 	{
 		std::printf("session tests: all passed\n");

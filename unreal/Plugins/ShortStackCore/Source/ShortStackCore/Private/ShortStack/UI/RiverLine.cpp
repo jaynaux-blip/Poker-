@@ -136,6 +136,14 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	{
 		BurnerApp(Now);
 	}
+	else if (AppShown == App::GearDrop)
+	{
+		GearDropApp(Now);
+	}
+	else if (AppShown == App::Kast)
+	{
+		KastApp(Now);
+	}
 	else
 	{
 		BankApp(Now);
@@ -285,6 +293,10 @@ void RiverLine::TopBar(double Now)
 	const float Bw = UI.Measure(Bal, 17.0f, 700) + 28.0f;
 	UI.RRect({RlW - 140.0f - Bw, 16.0f, Bw, 32.0f}, 16.0f, Hex(0x10213a), pal::Line);
 	UI.Text(Bal, RlW - 140.0f - Bw / 2.0f, 38.0f, Ts(17.0f, 700, pal::Gold, Align::Center));
+	if (S.Streaming())
+	{
+		LivePill(RlW - 150.0f - Bw, 17.0f, Now); // on Kast: viewers, a click away from the studio
+	}
 	// Connection dot.
 	C->FillCircle(RlW - 128.0f, 32.0f, 4.0f, std::sin(Now * 2.0) > -0.9 ? pal::Green : pal::Dim);
 }
@@ -567,6 +579,10 @@ void RiverLine::Table(double Now)
 	Controls(Now);
 	SidePanel(Now);
 	Overlays(Now);
+	if (S.Streaming() && !Previewing)
+	{
+		StreamAlert(TableCx, TableCy - TableRy + 24.0f, 0.72f, Now); // follows, subs, tips as they come in, on the felt
+	}
 }
 
 std::vector<Card> RiverLine::WinningCards() const
@@ -1141,27 +1157,45 @@ void RiverLine::SidePanel(double Now)
 	}
 
 	// Tabs.
-	const std::pair<RightTab, const char*> Tabs[3] = {{RightTab::Chat, "Chat"}, {RightTab::Payouts, "Payouts"}, {RightTab::Info, "Standings"}};
+	// Live on Kast: the stream gets a tab of its own.
+	const bool Live = S.Streaming();
+	const RightTab Shown = !Live && S.Tab == RightTab::Stream ? RightTab::Chat : S.Tab;
+	const std::pair<RightTab, const char*> Tabs[4] = {{RightTab::Chat, "Chat"}, {RightTab::Stream, "Stream"}, {RightTab::Payouts, "Payouts"}, {RightTab::Info, "Standings"}};
+	const int TabCount = Live ? 4 : 3;
 	const float Ty = Card.Y + Card.H + 14.0f;
-	for (int I = 0; I < 3; ++I)
+	for (int I = 0, Slot = 0; I < 4; ++I)
 	{
-		const Rect R{X + static_cast<float>(I) * (Wd / 3.0f), Ty, Wd / 3.0f - 6.0f, 36.0f};
+		if (!Live && Tabs[I].first == RightTab::Stream)
+		{
+			continue;
+		}
+		const float TabW = Wd / static_cast<float>(TabCount);
+		const Rect R{X + static_cast<float>(Slot++) * TabW, Ty, TabW - 6.0f, 36.0f};
 		const Ui::ClickState St = UI.Clickable(std::string("tab") + Tabs[I].second, R);
 		if (St.Clicked)
 		{
 			S.Tab = Tabs[I].first;
 		}
-		const bool Active = S.Tab == Tabs[I].first;
+		const bool Active = Shown == Tabs[I].first;
 		if (Active)
 		{
 			UI.RRect(R, 9.0f, pal::Panel2, pal::Line);
 		}
 		UI.Text(Tabs[I].second, R.X + R.W / 2.0f, R.Y + 24.0f, Ts(15.0f, 700, Active ? pal::Ink : pal::Muted, Align::Center));
+		if (Tabs[I].first == RightTab::Stream)
+		{
+			C->FillCircle(R.X + 12.0f, R.Y + 18.0f, 4.0f, rlnet_detail::NetA(pal::Red, 0.6f + 0.4f * static_cast<float>(std::sin(Now * 4.0))));
+		}
 	}
 	const Rect Box{X, Ty + 44.0f, Wd, RlH - 38.0f - (Ty + 44.0f) - 12.0f};
+	if (Shown == RightTab::Stream)
+	{
+		StreamSide(Box, Now);
+		return;
+	}
 	UI.RRect(Box, 14.0f, Hex(0x0c1524), pal::Line);
 	C->PushClip(Box);
-	if (S.Tab == RightTab::Chat)
+	if (Shown == RightTab::Chat)
 	{
 		// Wrap from the bottom up.
 		float Y = Box.Y + Box.H - 14.0f;

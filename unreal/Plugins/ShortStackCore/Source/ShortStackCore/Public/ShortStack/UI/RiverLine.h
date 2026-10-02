@@ -53,6 +53,15 @@ public:
 		ShiftLink, // gig shifts
 		Burner,    // Marcus and Sam
 		Bank,      // balance, rent, history
+		GearDrop,  // the store: screens, the rig, stream gear, the apartment
+		Kast,      // streaming: the studio, the channel, the directory
+	};
+	/** Kast's pages. */
+	enum class KastPage : int
+	{
+		Studio,
+		Channel,
+		Browse,
 	};
 
 	explicit RiverLine(Session& InSession) : S(InSession) {}
@@ -84,6 +93,13 @@ public:
 	void ShowContact(int Contact) { BurnerContact = Contact; }
 	/** The sleep menu over the taskbar. */
 	void ShowSleepMenu(bool Open) { SleepOpen = Open; }
+	/** GearDrop's category (-1 all, else gear::Category). */
+	void ShowStoreCategory(int Category) { StoreCat = Category; StoreScroll = StoreScrollGoal = 0.0f; }
+	/** Opens the order card for an item (the confirm step). */
+	void ShowOrder(const std::string& ItemId) { OrderId = ItemId; }
+	const std::string& OrderShown() const { return OrderId; }
+	void ShowKastPage(KastPage P) { KastShown = P; }
+	KastPage CurrentKastPage() const { return KastShown; }
 
 private:
 	void Logo(float X, float Y, float Scale);
@@ -168,6 +184,26 @@ private:
 	void SidePanel(double Now);
 	void Overlays(double Now);
 	void ResultsScreen(double Now);
+	// GearDrop (RiverLineStore.cpp).
+	void GearDropApp(double Now);
+	void StoreCard(const gear::Item& I, const Rect& R, double Now, int Index);
+	void SetupPanel(const Rect& R, double Now);
+	void OrderCard(double Now);
+	// Kast (RiverLineKast.cpp).
+	void KastApp(double Now);
+	void KastHeader(double Now);
+	void KastStudio(double Now);
+	void KastChannel(double Now);
+	void KastBrowse(double Now);
+	void StreamPreview(const Rect& R, double Now);
+	void StreamOverlay(const Rect& R, float Scale, double Now);
+	void StreamChat(const Rect& R, double Now, bool Interactive);
+	void StreamChatLine(const kast::ChatMsg& M, float X, float Y, float W, float Size, bool Interactive, double Now, float& LineHeight, bool Measure);
+	void StreamAlert(float Cx, float Y, float Scale, double Now);
+	void StreamSummary(double Now);
+	void LivePill(float X, float Y, double Now);
+	void StreamSide(const Rect& R, double Now);
+	float EmoteText(const std::string& Text, float X, float Y, float Size, int Weight, const Color& Col, float MaxW, bool Draw);
 	// Multi-tabling (RiverLineTables.cpp).
 	void TableStrip(float X, double Now);
 	void Tiles(double Now);
@@ -219,6 +255,20 @@ private:
 	int BurnerContact = 0;
 	std::string Toast;
 	double ToastAt = -100.0;
+	// GearDrop.
+	int StoreCat = -1;
+	float StoreScroll = 0.0f;
+	float StoreScrollGoal = 0.0f;
+	std::string OrderId;
+	std::string Delivered;
+	double DeliveredAt = -100.0;
+	// Kast.
+	KastPage KastShown = KastPage::Studio;
+	double KastAt = -100.0;
+	int ChatTab = 0; // 0 chat, 1 mods, 2 activity
+	float ChannelScroll = 0.0f;
+	float ChannelScrollGoal = 0.0f;
+	bool Previewing = false; // drawing RiverLine into the stream preview (no input, no side effects)
 	// This frame.
 	double World = 0.0;
 	net::HeroStats You;

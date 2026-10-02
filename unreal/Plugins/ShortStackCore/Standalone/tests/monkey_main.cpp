@@ -90,6 +90,12 @@ std::vector<Spot> Hotspots()
 		}
 		H.push_back({Tx + 600.0f, Ty + 413.0f}); // pace chips
 	}
+	// GearDrop and Kast: the taskbar, the store's tabs, cards and order card, the studio's controls, chat, the channel page.
+	const std::vector<Spot> Stream = {{470, 981}, {565, 981}, {60, 110}, {140, 110}, {235, 110}, {340, 110}, {460, 110}, {210, 436}, {480, 436}, {747, 436}, {1016, 436},
+		{210, 790}, {480, 790}, {747, 790}, {1016, 790}, {887, 654}, {1080, 654}, {1340, 735}, {1513, 660}, {197, 30}, {283, 30}, {374, 30}, {130, 686}, {524, 547},
+		{661, 686}, {697, 686}, {782, 698}, {880, 698}, {978, 698}, {110, 746}, {1085, 100}, {1160, 100}, {1230, 100}, {1530, 272}, {1530, 453}, {1530, 664},
+		{1510, 917}, {1390, 213}, {898, 411}, {1028, 411}, {1040, 703}, {1240, 32}, {1335, 410}, {1520, 920}};
+	H.insert(H.end(), Stream.begin(), Stream.end());
 	// App screens: a coarse grid.
 	for (int Y = 120; Y < 960; Y += 70)
 	{
@@ -135,6 +141,13 @@ int main(int Argc, char** Argv)
 			S.Life.Unlocks.insert("bounty");
 			S.Life.Unlocks.insert("satellite");
 			S.Life.Unlocks.insert("sixmax");
+		}
+		// The rich seeds have the screens for four tables; the others start on the laptop's two.
+		if (Seed % 3 == 2)
+		{
+			S.BankrollCents += 14900 + 28900;
+			S.Buy("monitor-24");
+			S.Buy("monitor-27");
 		}
 		double Now = 0.0;
 		ss::Chips PrevBank = S.BankrollCents;
@@ -215,6 +228,82 @@ int main(int Argc, char** Argv)
 				const int K = R.Int(S.TableCount());
 				const ss::Pace Pc = static_cast<ss::Pace>(R.Int(3));
 				S.WithTable(K, [&]() { S.CurrentPace = Pc; });
+			}
+			// Streaming: shop now and then (the PC upgrade first), go live and off again, work the studio.
+			if (R.Chance(0.002))
+			{
+				// Only what the bankroll can spare (a quarter of it), so there's still money for buy-ins.
+				const std::vector<ss::gear::Item>& Cat = ss::gear::Catalog();
+				const ss::gear::Item& It = !S.GearFx().CanStream() && R.Chance(0.6) ? ss::gear::FirstPcUpgrade() : Cat[static_cast<size_t>(R.Int(static_cast<int>(Cat.size())))];
+				if (It.PriceCents * 4 <= S.BankrollCents)
+				{
+					Reached["bought"] += S.Buy(It.Id).empty() ? 1 : 0;
+				}
+			}
+			if (S.CurrentScreen != ss::Screen::Boot && R.Chance(0.0006))
+			{
+				const double Pick = R.Next();
+				RL.OpenApp(Pick < 0.5 ? ss::ui::RiverLine::App::RiverLine : Pick < 0.75 ? ss::ui::RiverLine::App::Kast : ss::ui::RiverLine::App::GearDrop, Now);
+			}
+			if (!S.GearFx().CanStream() && S.Streaming())
+			{
+				Fail("streaming without the PC upgrade", Seed, F);
+			}
+			if (!S.Streaming() && R.Chance(0.002))
+			{
+				const std::string Why = S.GoLive();
+				if (Why.empty() != S.GearFx().CanStream() && Why != "You're busy." && Why != "No apartment, no internet.")
+				{
+					Fail("going live doesn't follow the PC upgrade", Seed, F);
+				}
+				Reached["live"] += Why.empty() ? 1 : 0;
+			}
+			if (S.Streaming())
+			{
+				++Reached["streaming"];
+				const ss::kast::Stream& St = S.Stream;
+				if (!(St.Viewers >= 0.0 && St.Viewers < 1e7) || St.Health < 0.0 || St.Health > 1.0 || St.Hype < 0.0 || St.Hype > 100.0 || S.Channel.UnpaidCents < 0)
+				{
+					Fail("the stream's numbers left their ranges", Seed, F);
+				}
+				if (R.Chance(0.003))
+				{
+					S.StreamAd(R.Chance(0.5) ? 60 : 180);
+				}
+				if (R.Chance(0.004))
+				{
+					S.StreamThank();
+				}
+				if (!St.Chat.empty() && R.Chance(0.004))
+				{
+					const ss::kast::ChatMsg& Msg = St.Chat[static_cast<size_t>(R.Int(static_cast<int>(St.Chat.size())))];
+					const int Id = Msg.Id;
+					if (R.Chance(0.5))
+					{
+						S.StreamAnswer(Id);
+					}
+					else
+					{
+						S.StreamTimeout(Id);
+					}
+				}
+				if (R.Chance(0.001))
+				{
+					const std::vector<std::string> Cand = St.ModCandidates(S.Channel, S.WorldMinutes());
+					if (!Cand.empty())
+					{
+						S.StreamPromote(Cand.front());
+					}
+				}
+				if (R.Chance(0.0005))
+				{
+					S.EndStream();
+					++Reached["ended"];
+				}
+			}
+			if (R.Chance(0.0005))
+			{
+				S.CashOut();
 			}
 			// A frame.
 			Now += 1.0 / 30.0;
@@ -390,6 +479,11 @@ int main(int Argc, char** Argv)
 		std::printf(" %s=%d", R.first.c_str(), R.second);
 	}
 	std::printf("\nworst frame %.2f ms (%s), %lld frames\n", WorstMs, WorstWhere.c_str(), TotalFrames);
+	if (Seeds >= 3 && Frames >= 15000 && (Reached["live"] == 0 || Reached["streaming"] == 0 || Reached["bought"] == 0))
+	{
+		++Failures;
+		std::printf("FAIL: the monkey never bought gear and went live\n");
+	}
 	if (Seeds >= 3 && Frames >= 15000 && (Reached["table+4"] == 0 || Reached["results"] == 0 || Reached["registered"] == 0))
 	{
 		std::printf("FAIL: the monkey didn't reach four tables and a results screen\n");

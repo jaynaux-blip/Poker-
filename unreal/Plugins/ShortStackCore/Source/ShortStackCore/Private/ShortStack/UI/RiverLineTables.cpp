@@ -67,7 +67,9 @@ void RiverLine::TableStrip(float X, double Now)
 		return;
 	}
 	const std::string Bal = "Balance " + Money(S.BankrollCents);
-	const float Right = Width - 140.0f - (UI.Measure(Bal, 17.0f, 700) + 28.0f) - 14.0f;
+	// Room for the balance (and Kast's LIVE pill beside it while streaming).
+	const float Pill = S.Streaming() ? UI.Measure(std::to_string(static_cast<long long>(std::round(S.Stream.Viewers))), 13.0f, 900, true) + 80.0f + 24.0f : 0.0f;
+	const float Right = Width - 140.0f - (UI.Measure(Bal, 17.0f, 700) + 28.0f) - 14.0f - Pill;
 	const bool CanAdd = AtTables && Count < S.MaxTables();
 	const bool CanTile = AtTables && Count >= 2;
 	float Px = X + 2.0f;

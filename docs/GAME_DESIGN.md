@@ -42,7 +42,7 @@ Progress comes in two deliberately separate forms:
 
 The whole online career is played from a first-person desk. The apartment is the hub, the menu and the most important graphics showcase.
 
-- **Computer:** runs the RiverLine poker client (tournament lobby and tables), study tools, a poker forum, the staking marketplace and, later, streaming software. All UI is rendered on the in-world monitors, with no floating menus.
+- **Computer:** runs the RiverLine poker client (tournament lobby and tables), study tools, a poker forum, the staking marketplace, the GearDrop store and the Kast streaming studio. All UI is rendered on the in-world monitors, with no floating menus.
 - **Phone:** messages from Dee, backers, friends and the rival, plus tournament alerts, your bank balance and rent reminders.
 - **Wall calendar:** the tournament schedule and live series dates.
 - **Bed:** sleeping ends the day and restores energy.
@@ -74,14 +74,37 @@ The whole online career is played from a first-person desk. The apartment is the
 
 **Multi-tabling (built).** You can play several tournaments at once. It is the online game's signature skill: managing your attention.
 
-- **Up to four tables,** two when you're exhausted (energy under 20). Every open table keeps playing whether you're looking at it, browsing the lobby or in another app; nothing pauses for you.
+- **Up to four tables,** as many as your screens fit: the laptop shows two, each GearDrop monitor adds one. Two when you're exhausted (energy under 20). Every open table keeps playing whether you're looking at it, browsing the lobby or in another app; nothing pauses for you.
 - **Adding a table:** the top bar's pages stay a click away while you play, and the + button opens the lobby. Registering opens the new table in front. You can't take two seats in the same event; a seated event's button reads "Open table".
 - **Table tabs** in the top bar show each table's stack in big blinds and your rank. A table where it's your turn turns orange and shows a shrinking clock ring and the seconds left, and its turn chime plays even when it's behind. Chips and cards from tables behind stay quiet.
 - **One in front (default):** when the table in front doesn't need you and another does, that one comes forward on its own (the longest-waiting first). It waits a moment after you act or switch, and holds while your own all-in runs out unless another clock is nearly gone.
 - **Tile view:** all tables at once in a 2×2 grid (two side by side), each with its own Fold, Check/Call, Raise and All-in buttons, its clock bar, time bank, pace and banners. The keyboard's F, C and R act at the highlighted table.
 - **Each table is its own tournament:** its own clock, levels, time bank, pace (one can Sprint while the others play), bounties and grades. Tilt is yours across all of them.
 - **When a table finishes while others run,** it closes with a toast (place, prize, accuracy) and its result goes into your history and bankroll. The results screen waits for the last table and adds up the sitting: how many tournaments and the net across every buy-in.
-- Later: the Focus stat and a second monitor raise the limit; the HUD and notes carry across tables.
+- Later: the Focus stat raises the limit further; the HUD and notes carry across tables.
+
+**GearDrop: the store (built).** An online shop on the laptop (fictional brands). Everything it sells changes the game:
+
+| Category | Items | What they do |
+|---|---|---|
+| Rig | 32 GB RAM kit ($89), desktop PC ($899), two-PC setup ($2,499), 24" and 27" monitors ($149, $289), macro pad, headphones | The RAM kit is the next PC upgrade: the laptop alone can't stream, the kit unlocks Kast at 720p. A desktop streams 1080p60 and four tables without dropped frames. Each monitor adds a table. Headphones calm tilt. |
+| Stream | 720p and 1080p60 webcams, a mirrorless camera, USB and broadcast mics, ring light, key lights, green screen, overlay pack | Production value: how the stream looks and sounds, which decides how many strangers stay and follow. The overlay pack adds alerts, a rent-goal bar and 25% more follows. |
+| Home | Ergonomic chair, espresso machine, memory foam mattress, blackout curtains, desk plant | Slower energy drain while awake, more energy from sleep, faster tilt recovery. |
+| Subscriptions | Fiber internet, gym, meal kit, chat filter bot | Monthly from the bankroll: fiber lifts the stream above 720p, the gym calms tilt and fatigue, the bot catches 75% of trolls. A renewal the bank can't cover lapses. |
+
+The best item in each slot counts (a 1080p webcam replaces the 720p one; buying down is blocked). The store shows "Your setup": the desk drawn with everything you own on it, the totals (tables, stream resolution, production value, fatigue, sleep, tilt, monthly costs), a recommended next buy and the running subscriptions. Every purchase and renewal is in the bank's ledger.
+
+**Kast: streaming (built).** Once the PC is upgraded, you can go live and play RiverLine on stream. Before that, Kast's studio is locked and points at the RAM kit.
+
+- **The studio** shows the stream as viewers see it: your RiverLine screen, the facecam, the overlay, the alerts. The facecam is the player at the desk, grainy and blue-lit on the laptop camera, sharp and lit with real lights; it celebrates a won all-in with arms up, grabs its head at a bad beat and laughs at its own blunders. Controls: go live and end, the stream title (story, action, chill, teaching or grind, each shifting discovery, follows, hype and trolls), ad breaks (60 s, 90 s, 3 min), sponsor reads, talk to chat. Tiles show viewers with a graph, followers, subs, tonight's money, hype and chat health.
+- **Viewers** drift toward what the show deserves: followers who come back (by time of day), strangers browsing the Poker directory (more with better production and hype; easier late at night), placement in the directory (bigger streams get found) and raids. Being in the lobby is boring; multi-tabling is content; an ad break or a toxic chat costs viewers. Streaming more tables than the PC handles drops frames.
+- **Poker is the content.** Every big moment hits chat and the hype meter: registering, all-ins, the sweat, the suckout, the bad beat, knockouts, the bubble, the money, the final table, winning, busting, the coach's best play and your blunders, the rival sitting down. Chat reacts in waves, clips the big hands (some go viral and bring followers for days), and big channels raid deep runs.
+- **Chat** is generated from the game: greetings from around the world, questions you can answer ("what would you do with AQ under the gun?"), comments on your mic, camera and lighting, backseat poker, emotes (Kast's own, and the channel's once you're an affiliate). Trolls and spam bots arrive as the channel grows; moderators you promote from your regulars and the chat filter bot time them out. Missed trolls lower chat health and get under your skin (tilt). You can time people out yourself, but timing out a regular costs goodwill.
+- **Money:** tips from the first stream (Dee tips $5 on your first one). Affiliate (50 followers, 8 hours, 3 streams) turns on subscriptions ($4.99, 50% to you), cheers and ads. Partner (2,500 followers and 75 average viewers) is verified and pays 70%. Sponsors make offers by follower count: Overclock Energy, TunnelRat VPN, Stacked Apparel, then Partner-only Team RiverLine (the gold patch on your avatar at the tables) and Sitwell, two slots at a time, paying by the hour live plus a read once a stream. Everything goes into the channel balance and to the bank when the stream ends; subs renew monthly while you're offline.
+- **Predictions:** registering on stream starts one ("Will grinder_3c cash?") and the result settles it.
+- **Channel page:** the road to Affiliate and Partner, earnings by source, sponsors, top clips, past streams. **Browse:** the Poker directory, live channels ranked by viewers with your rank, and when the others are on: VikingVolta (418K), HighRollerHana, MissFinch, BluffSquadTV, down to gh0stfold, who never logs off.
+- **At the table** while live: a KAST pill with the viewer count in the top bar, alerts on the felt and a Stream tab with chat beside the table. Starting a shift, a hustle, sleep or a trip out ends the stream. Streaming tires you a little faster.
+- **Measured growth** (simulated, 4-hour nights): the $222 starter kit makes about 40 followers a night and reaches about 1,900 in a month. A $2,000 rig gets 250 on night one, Partner around night 9 and 11,000 followers by night 30, earning about $700 to $1,100 a night. A full studio passes 30,000 followers and $3,000 a night. Viral clips and raids make the occasional breakout night.
 
 **Reading opponents online (digital tells)**
 
@@ -210,7 +233,7 @@ Skills give you information. They never make decisions for you.
 - **Bankroll:** your life. Rent, food, travel, hotels and gear all come out of it.
 - **Staking:** backers pay your buy-ins for a share of the profit, with makeup (you must win back their losses before you profit). Deal terms vary by backer personality.
 - **Selling action:** for live events, you sell pieces of your action at a markup your reputation justifies.
-- **Sponsorship:** unlocked by fame. A sponsor covers buy-ins and asks for patches, appearances and streaming hours.
+- **Sponsorship:** unlocked by fame. A sponsor covers buy-ins and asks for patches, appearances and streaming hours. Streaming sponsors are built (see Kast).
 - **Fame:** grows with results and memorable hands. It changes how tables play against you and unlocks invitations, including The Summit.
 
 **Getting on your feet (built).** Early on, the bankroll is $2.37 and the rent is $1,225 by Friday midnight. The laptop has apps beside RiverLine for the other ways to get there; each one fast-forwards the clock while the room goes from night to day and back:
@@ -219,6 +242,7 @@ Skills give you information. They never make decisions for you.
 - **Burner:** Marcus pays $120 to $200 a drop-off (and $380 to $600 for the long run once you've proven yourself). Every run adds police heat, and heat raises the chance of getting picked up: a fine, a night in holding, and a debt to Marcus for the lost bag. Sam, a rich player who notices you once you cash, pays you to play his RiverLine account ("ghosting"). If site security catches it, your account is restricted for 24 hours.
 - **Bank:** the balance, the rent countdown and payment, and where every dollar came from and went.
 - **Sleep:** a nap or a full night. Energy drains while you're awake and with every shift; under 20% your time bank at the table is halved.
+- **GearDrop and Kast:** the store and the streaming site (see Online play). Streaming becomes a second career: by the time a channel is Partner, a few nights on stream pay the rent.
 - **Rent day:** the landlord collects at Friday midnight if the money is there. If not, it's a final notice with a $150 late fee and three more days, then eviction (Dee's couch). After that, $1,075 on the 1st of every month.
 - **Career unlocks:** your first cash opens bounty events (progressive knockouts and mystery bounties), your first final table opens satellites (the steps to the RCOP Main Event pay tickets), and your first title opens six-max.
 - **The Night Shift pays:** at 6 AM the top 20 on the night's micro-stakes leaderboard are paid into your balance.

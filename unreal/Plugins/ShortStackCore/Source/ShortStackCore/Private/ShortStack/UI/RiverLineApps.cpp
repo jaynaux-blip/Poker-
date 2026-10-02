@@ -36,6 +36,8 @@ AppBrand BrandOf(RiverLine::App A)
 	case RiverLine::App::ShiftLink: return {"ShiftLink", 0xff8a1f, 0xff5a1f};
 	case RiverLine::App::Burner: return {"Burner", 0x2fd27a, 0x0f8a4a};
 	case RiverLine::App::Bank: return {"Bank", 0x3b82f6, 0x1d4ed8};
+	case RiverLine::App::GearDrop: return {"GearDrop", 0xff6b2c, 0xf43f5e};
+	case RiverLine::App::Kast: return {"Kast", 0xb07cff, 0x6d28d9};
 	default: return {"RiverLine", 0x27d3c3, 0x1a8fd8};
 	}
 }
@@ -59,6 +61,8 @@ Color KindColor(int Kind)
 	case 1: return Hex(0xff8a1f);
 	case 2: return Hex(0x2fd27a);
 	case 3: return Hex(0xef4d5a);
+	case 5: return Hex(0xff6b2c);
+	case 6: return Hex(0x9b5cff);
 	default: return Hex(0xf2c14e);
 	}
 }
@@ -71,6 +75,8 @@ const char* KindName(int Kind)
 	case 1: return "ShiftLink";
 	case 2: return "Cash";
 	case 3: return "Bills";
+	case 5: return "GearDrop";
+	case 6: return "Kast";
 	default: return "Prizes";
 	}
 }
@@ -192,6 +198,15 @@ void RiverLine::AppIcon(App A, float X, float Y, float Sz)
 		}
 		C->FillRect({Cx - Sz * 0.32f, Cy + Sz * 0.2f, Sz * 0.64f, Sz * 0.07f}, W);
 		break;
+	case App::GearDrop:
+		C->FillPolygon({{Cx - Sz * 0.28f, Cy - Sz * 0.12f}, {Cx, Cy - Sz * 0.26f}, {Cx + Sz * 0.28f, Cy - Sz * 0.12f}, {Cx + Sz * 0.28f, Cy + Sz * 0.18f}, {Cx, Cy + Sz * 0.3f}, {Cx - Sz * 0.28f, Cy + Sz * 0.18f}}, W);
+		C->StrokePolyline({{Cx, Cy - Sz * 0.18f}, {Cx, Cy + Sz * 0.12f}}, false, Hex(B.Col2), Sz * 0.07f, true);
+		C->StrokePolyline({{Cx - Sz * 0.1f, Cy + Sz * 0.02f}, {Cx, Cy + Sz * 0.13f}, {Cx + Sz * 0.1f, Cy + Sz * 0.02f}}, false, Hex(B.Col2), Sz * 0.07f, true);
+		break;
+	case App::Kast:
+		C->FillPolygon({{Cx - Sz * 0.14f, Cy - Sz * 0.22f}, {Cx + Sz * 0.24f, Cy}, {Cx - Sz * 0.14f, Cy + Sz * 0.22f}}, Hex(0xc6f432));
+		C->StrokeArc(Cx - Sz * 0.14f, Cy, Sz * 0.44f, -0.6f, 0.6f, NetA(W, 0.6f), Sz * 0.06f, true);
+		break;
 	}
 }
 
@@ -232,7 +247,7 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 	C->FillRect(R, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x0c1422), Hex(0x060a12)));
 	C->FillRect({R.X, R.Y, R.W, 1.0f}, Rgba(255, 255, 255, 0.08f));
 	const life::Context Ctx = S.LifeContext();
-	const App Apps[4] = {App::RiverLine, App::ShiftLink, App::Burner, App::Bank};
+	const App Apps[6] = {App::RiverLine, App::ShiftLink, App::Burner, App::Bank, App::GearDrop, App::Kast};
 	float X = R.X + 8.0f;
 	for (const App A : Apps)
 	{
@@ -276,6 +291,22 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 		if (A == App::Bank && S.Life.RentStage != life::Rent::Paid && S.Life.RentStage != life::Rent::Evicted && S.Life.RentDeadline - World < 24.0 * 60.0)
 		{
 			Dot = pal::Red;
+		}
+		if (A == App::Kast)
+		{
+			// Live: a pulsing red dot. A sponsor waiting: gold. Locked until the PC can stream: no dot, a padlock.
+			if (S.Streaming())
+			{
+				Dot = NetA(pal::Red, 0.6f + 0.4f * Nf(std::sin(Now * 4.0)));
+			}
+			else if (!S.Channel.Offers.empty())
+			{
+				Dot = pal::Gold;
+			}
+			else if (!S.GearFx().CanStream())
+			{
+				NetLockIcon(*C, Btn.X + 24.0f, Btn.Y - 1.0f, 10.0f, Hex(0xd8ccff));
+			}
 		}
 		if (Dot.A > 0.0f)
 		{

@@ -182,6 +182,47 @@ std::string SaveData::Serialize() const
 	{
 		Out << "text\t" << session_detail::Escape(Key) << "\n";
 	}
+	for (const auto& G : Gear)
+	{
+		Out << "gear\t" << session_detail::Escape(G.first) << "\t" << Fixed(G.second, 2) << "\n";
+	}
+	const kast::Channel& K = Channel;
+	Out << "kast\tch\t" << K.Title << "\t" << K.Followers << "\t" << Fixed(K.FollowFrac, 4) << "\t" << Fixed(K.MinutesLive, 2) << "\t" << Fixed(K.ViewerMinutes, 1) << "\t" << K.Peak << "\t" << K.Streams << "\t"
+		<< (K.Affiliate ? 1 : 0) << "\t" << (K.Partner ? 1 : 0) << "\t" << K.Milestone << "\t" << Fixed(K.LastOffline, 2) << "\t" << K.GiftedSubs << "\t" << K.RaidsIn << "\n";
+	Out << "kast\tearn\t" << K.EarnedSubs << "\t" << K.EarnedBits << "\t" << K.EarnedTips << "\t" << K.EarnedAds << "\t" << K.EarnedSponsors << "\t" << K.UnpaidCents << "\t" << K.PaidCents << "\n";
+	for (const kast::Subscriber& Sb : K.Subs)
+	{
+		Out << "kast\tsub\t" << session_detail::Escape(Sb.Name) << "\t" << Fixed(Sb.Since, 2) << "\t" << Fixed(Sb.Renews, 2) << "\t" << Sb.Months << "\t" << (Sb.Gift ? 1 : 0) << "\n";
+	}
+	for (const kast::Moderator& M : K.Mods)
+	{
+		Out << "kast\tmod\t" << session_detail::Escape(M.Name) << "\t" << Fixed(M.Since, 2) << "\t" << M.Actions << "\t" << Fixed(M.Online, 3) << "\n";
+	}
+	for (const kast::Clip& Cl : K.Clips)
+	{
+		Out << "kast\tclip\t" << Fixed(Cl.At, 2) << "\t" << Fixed(Cl.Views, 1) << "\t" << Fixed(Cl.Reach, 1) << "\t" << Cl.Kind << "\t" << session_detail::Escape(Cl.By) << "\t" << session_detail::Escape(Cl.Title) << "\n";
+	}
+	for (auto It = K.Log.rbegin(); It != K.Log.rend(); ++It)
+	{
+		Out << "kast\tlog\t" << Fixed(It->Start, 2) << "\t" << Fixed(It->Minutes, 2) << "\t" << It->Avg << "\t" << It->Peak << "\t" << It->Follows << "\t" << It->Subs << "\t" << It->Cents << "\t"
+			<< session_detail::Escape(It->Title) << "\n";
+	}
+	for (const auto& Rg : K.Regulars)
+	{
+		Out << "kast\treg\t" << session_detail::Escape(Rg.first) << "\t" << Rg.second << "\n";
+	}
+	for (const kast::Deal& Dl : K.Deals)
+	{
+		Out << "kast\tdeal\t" << session_detail::Escape(Dl.Id) << "\t" << Fixed(Dl.Since, 2) << "\t" << Fixed(Dl.Until, 2) << "\t" << Fixed(Dl.ReadAt, 2) << "\t" << Dl.EarnedCents << "\n";
+	}
+	for (const std::string& O : K.Offers)
+	{
+		Out << "kast\toffer\t" << session_detail::Escape(O) << "\n";
+	}
+	for (const std::string& O : K.Declined)
+	{
+		Out << "kast\tdeclined\t" << session_detail::Escape(O) << "\n";
+	}
 	for (const HistoryEntry& H : History)
 	{
 		Out << "result\t" << session_detail::Escape(H.Name) << "\t" << H.Place << "\t" << H.Entrants << "\t" << H.Prize << "\t" << Fixed(H.AccuracyPct, 3) << "\t" << H.BuyInCents << "\t"
@@ -295,6 +336,110 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 		{
 			D.TextsSeen.push_back(session_detail::Unescape(P[1]));
 		}
+		else if (P.size() == 3 && P[0] == "gear")
+		{
+			D.Gear[session_detail::Unescape(P[1])] = std::atof(P[2].c_str());
+		}
+		else if (P.size() >= 3 && P[0] == "kast")
+		{
+			kast::Channel& K = D.Channel;
+			auto Num = [&](size_t I) { return I < P.size() ? std::atof(P[I].c_str()) : 0.0; };
+			auto Int = [&](size_t I) { return I < P.size() ? std::atoi(P[I].c_str()) : 0; };
+			auto Cents = [&](size_t I) { return I < P.size() ? static_cast<Chips>(std::strtoll(P[I].c_str(), nullptr, 10)) : static_cast<Chips>(0); };
+			auto Str = [&](size_t I) { return I < P.size() ? session_detail::Unescape(P[I]) : std::string(); };
+			const std::string& Key = P[1];
+			if (Key == "ch" && P.size() >= 15)
+			{
+				K.Title = Int(2);
+				K.Followers = Int(3);
+				K.FollowFrac = Num(4);
+				K.MinutesLive = Num(5);
+				K.ViewerMinutes = Num(6);
+				K.Peak = Int(7);
+				K.Streams = Int(8);
+				K.Affiliate = Int(9) != 0;
+				K.Partner = Int(10) != 0;
+				K.Milestone = Int(11);
+				K.LastOffline = Num(12);
+				K.GiftedSubs = Int(13);
+				K.RaidsIn = Int(14);
+			}
+			else if (Key == "earn" && P.size() >= 9)
+			{
+				K.EarnedSubs = Cents(2);
+				K.EarnedBits = Cents(3);
+				K.EarnedTips = Cents(4);
+				K.EarnedAds = Cents(5);
+				K.EarnedSponsors = Cents(6);
+				K.UnpaidCents = Cents(7);
+				K.PaidCents = Cents(8);
+			}
+			else if (Key == "sub" && P.size() >= 7)
+			{
+				kast::Subscriber Sb;
+				Sb.Name = Str(2);
+				Sb.Since = Num(3);
+				Sb.Renews = Num(4);
+				Sb.Months = Int(5);
+				Sb.Gift = Int(6) != 0;
+				K.Subs.push_back(Sb);
+			}
+			else if (Key == "mod" && P.size() >= 6)
+			{
+				kast::Moderator M;
+				M.Name = Str(2);
+				M.Since = Num(3);
+				M.Actions = Int(4);
+				M.Online = Num(5);
+				K.Mods.push_back(M);
+			}
+			else if (Key == "clip" && P.size() >= 8)
+			{
+				kast::Clip Cl;
+				Cl.At = Num(2);
+				Cl.Views = Num(3);
+				Cl.Reach = Num(4);
+				Cl.Kind = Int(5);
+				Cl.By = Str(6);
+				Cl.Title = Str(7);
+				K.Clips.push_back(Cl);
+			}
+			else if (Key == "log" && P.size() >= 10)
+			{
+				kast::StreamLog Lg;
+				Lg.Start = Num(2);
+				Lg.Minutes = Num(3);
+				Lg.Avg = Int(4);
+				Lg.Peak = Int(5);
+				Lg.Follows = Int(6);
+				Lg.Subs = Int(7);
+				Lg.Cents = Cents(8);
+				Lg.Title = Str(9);
+				K.Log.insert(K.Log.begin(), Lg);
+			}
+			else if (Key == "reg" && P.size() >= 4)
+			{
+				K.Regulars[Str(2)] = Int(3);
+			}
+			else if (Key == "deal" && P.size() >= 7)
+			{
+				kast::Deal Dl;
+				Dl.Id = Str(2);
+				Dl.Since = Num(3);
+				Dl.Until = Num(4);
+				Dl.ReadAt = Num(5);
+				Dl.EarnedCents = Cents(6);
+				K.Deals.push_back(Dl);
+			}
+			else if (Key == "offer")
+			{
+				K.Offers.insert(Str(2));
+			}
+			else if (Key == "declined")
+			{
+				K.Declined.insert(Str(2));
+			}
+		}
 		else if ((P.size() == 6 || P.size() == 8) && P[0] == "result")
 		{
 			HistoryEntry H;
@@ -324,7 +469,7 @@ const char* SoundName(SoundId Id)
 // ------------------------------------------------------------------ session
 
 Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData* Loaded)
-	: Hooks(InHooks), SeedBase(Seed), R(Seed), LifeRng(Seed + ":life")
+	: Stream(Seed + ":kast"), Hooks(InHooks), SeedBase(Seed), R(Seed), LifeRng(Seed + ":life"), KastRng(Seed + ":kast-offline")
 {
 	if (Loaded)
 	{
@@ -333,8 +478,11 @@ Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData*
 		History = Loaded->History;
 		LobbyMinutes = Loaded->ClockMinutes;
 		Life = Loaded->Life;
+		Gear = Loaded->Gear;
+		Channel = Loaded->Channel;
 		TextsSeen.insert(Loaded->TextsSeen.begin(), Loaded->TextsSeen.end());
 	}
+	RefreshGear();
 	// While the game loads: simulate the network's past results now, so the first leaderboard or page doesn't stall.
 	net::Shared().Prewarm(WorldMinutes());
 }
@@ -347,6 +495,8 @@ void Session::Save()
 	D.History = History;
 	D.ClockMinutes = LobbyMinutes;
 	D.Life = Life;
+	D.Gear = Gear;
+	D.Channel = Channel;
 	D.TextsSeen.assign(TextsSeen.begin(), TextsSeen.end());
 	Hooks.Save(D);
 }
@@ -359,6 +509,19 @@ void Session::ResetSave()
 	LobbyMinutes = 2.0 * 60.0 + 7.0;
 	Life = life::State();
 	CalendarAt = -1.0;
+	if (Stream.Live)
+	{
+		Hooks.OnAir(false);
+	}
+	for (const auto& G : Gear)
+	{
+		Hooks.GearChanged(G.first, false);
+	}
+	Gear.clear();
+	Channel = kast::Channel();
+	Stream = kast::Stream(SeedBase + ":kast");
+	StreamCard = false;
+	RefreshGear();
 	Save();
 }
 
@@ -454,6 +617,7 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	}
 	Save();
 	Event = &Joined;
+	StreamMoment(kast::Moment::Register, Ev.Spec.Name);
 	Bounties.clear();
 	BountyWon = 0;
 	Knockouts = 0;
@@ -580,7 +744,7 @@ void Session::BuildSeats()
 		const auto Country = FieldCountry.find(P.Id);
 		V.Country = Country == FieldCountry.end() ? std::string() : Country->second;
 		V.Regular = FieldRegulars.count(P.Id) > 0;
-		V.Pro = FieldPros.count(P.Id) > 0;
+		V.Pro = FieldPros.count(P.Id) > 0 || (P.IsHero && TeamRiverLine());
 		V.Stack = P.Stack;
 	}
 }
@@ -601,6 +765,7 @@ void Session::StartNextHand()
 		{
 			T->MoveToTable(RivalId(), T->Hero().TableId);
 			RivalArrived = true;
+			StreamMoment(kast::Moment::Rival);
 		}
 	}
 
@@ -660,7 +825,12 @@ void Session::StartNextHand()
 		HeroTilt *= 0.5;
 	}
 	SitOutNext = false;
-	HeroTilt *= TableCount() > 1 ? std::pow(0.93, 1.0 / static_cast<double>(TableCount())) : 0.93; // per hand, wherever it's dealt
+	double Calm = TableCount() > 1 ? std::pow(0.93, 1.0 / static_cast<double>(TableCount())) : 0.93; // per hand, wherever it's dealt
+	if (Fx.Calm > 0.0)
+	{
+		Calm = std::pow(Calm, 1.0 + Fx.Calm); // the gym, the headphones
+	}
+	HeroTilt *= Calm;
 	++HandsPlayed;
 	const Level& L = T->CurrentLevel();
 	DealerLine("Hand #" + Grouped(T->Tick + 1) + " \xC2\xB7 Blinds " + ChipsText(static_cast<double>(L.Sb)) + "/" + ChipsText(static_cast<double>(L.Bb)));
@@ -749,6 +919,7 @@ void Session::Update(double InNow)
 	}
 	CloseFinishedTables();
 	AutoFocusStep();
+	StreamStep();
 }
 
 void Session::TableStep()
@@ -1078,6 +1249,10 @@ void Session::HeroAct(const PlayerAction& Action, bool TimedOut)
 	Badge.At = Now;
 	Grades.push_back(Badge.G);
 	Badges.push_back(Badge);
+	if (Badge.G.Result == Grade::Blunder || (Badge.G.Result == Grade::Best && Prompt.Pot >= Prompt.BigBlind * 12))
+	{
+		StreamMoment(Badge.G.Result == Grade::Blunder ? kast::Moment::Blunder : kast::Moment::BestPlay);
+	}
 	if (TimedOut)
 	{
 		SystemLine("You ran out of time.");
@@ -1263,6 +1438,7 @@ double Session::Consume(const HandEvent& Ev)
 		{
 			HeroAllInReveal = true;
 			Heartbeat(true);
+			StreamMoment(kast::Moment::AllIn, std::string(), static_cast<double>(H.Pot()) / static_cast<double>(std::max<Chips>(1, H.BigBlind)) / 30.0);
 		}
 		Sound(SoundId::Flip, 1.0);
 		return 1.6;
@@ -1399,6 +1575,17 @@ void Session::AfterAward()
 	{
 		const SeatVis& HeroVis = Seats[static_cast<size_t>(HeroSeat->Seat)];
 		const bool Lost = Winners.count(HeroSeat->Seat) == 0;
+		// On stream: the sweat pays off or it doesn't.
+		const double PotBb = static_cast<double>(PotBeforeAward) / static_cast<double>(std::max<Chips>(1, H.BigBlind));
+		if (HeroAllInReveal)
+		{
+			const kast::Moment M = !Lost ? kast::Moment::WonAllIn : HeroVis.HasEquity && HeroVis.Equity >= 0.6 ? kast::Moment::BadBeat : kast::Moment::LostAllIn;
+			StreamMoment(M, ChipsText(static_cast<double>(PotBeforeAward)), PotBb / 30.0);
+		}
+		else if (!Lost && PotBb >= 30.0)
+		{
+			StreamMoment(kast::Moment::BigPot, ChipsText(static_cast<double>(PotBeforeAward)), PotBb / 40.0);
+		}
 		if (Lost && HeroVis.HasEquity && HeroVis.Equity >= 0.6)
 		{
 			HeroTilt = Min(1.0, HeroTilt + 0.45);
@@ -1524,6 +1711,11 @@ void Session::EndHand()
 		BustPrize = Hero.PrizeCents;
 		BustAt = Now + 3.0;
 		Sound(SoundId::Bust, 1.0);
+		StreamMoment(Hero.PrizeCents > 0 ? kast::Moment::Cashed : kast::Moment::Bust, Ordinal(Hero.Place));
+		if (Stream.Live)
+		{
+			Stream.Resolve(Channel, StreamInputs(), Hero.PrizeCents > 0);
+		}
 		BustBanner(Hero, "Better luck next time");
 		return;
 	}
@@ -1534,6 +1726,11 @@ void Session::EndHand()
 		BustPrize = Hero.PrizeCents;
 		BustAt = Now + 4.0;
 		Hooks.Celebrate();
+		StreamMoment(kast::Moment::Win, T->Spec.Name, 1.0 + static_cast<double>(Hero.PrizeCents) / 50000.0);
+		if (Stream.Live)
+		{
+			Stream.Resolve(Channel, StreamInputs(), true);
+		}
 		CurrentBanner.Active = true;
 		CurrentBanner.Title = "YOU WON THE TOURNAMENT";
 		CurrentBanner.Sub = Money(Hero.PrizeCents);
@@ -1570,6 +1767,7 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 			HandleKnockout(E);
 			break;
 		case TEventType::Level:
+			StreamMoment(kast::Moment::LevelUp);
 			SystemLine("Blinds are now " + ChipsText(static_cast<double>(E.Blinds.Sb)) + "/" + ChipsText(static_cast<double>(E.Blinds.Bb)) + ", ante " + ChipsText(static_cast<double>(E.Blinds.Ante)) + ".");
 			TimeBank = Min(60.0, TimeBank + 5.0);
 			LastLevelUpAt = Now;
@@ -1585,6 +1783,7 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 			Sound(SoundId::Bubble, 1.0);
 			if (!T->Hero().Busted)
 			{
+				StreamMoment(kast::Moment::Bubble);
 				StoryText("dee-bubble", "Dee", "Bubble? Breathe. Fold the trash, shove the good ones. Nobody remembers who min-cashed scared.");
 			}
 			break;
@@ -1599,6 +1798,7 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 				CurrentBanner.Color = session_detail::Green;
 				Sound(SoundId::Cash, 1.0);
 				StoryText("dee-itm", "Dee", "In the money. Now play to win, not to min-cash.");
+				StreamMoment(kast::Moment::InTheMoney);
 			}
 			break;
 		case TEventType::FinalTable:
@@ -1612,6 +1812,7 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 				CurrentBanner.Color = session_detail::Gold;
 				Sound(SoundId::Bubble, 1.0);
 				StoryText("dee-ft", "Dee", "A final table? At this hour? Call me when it is over. Win or lose.");
+				StreamMoment(kast::Moment::FinalTable, T->Spec.Name, 1.0 + static_cast<double>(T->PrizeFor(1)) / 100000.0);
 			}
 			break;
 		default:
@@ -1902,7 +2103,8 @@ void Session::SwapActive(TableRun& Run)
 
 int Session::MaxTables() const
 {
-	return Life.Energy < 20.0 ? 2 : TableLimit;
+	// Screens decide how many tables fit (the laptop alone fits two); being exhausted caps it at two anyway.
+	return std::min(Life.Energy < 20.0 ? 2 : TableLimit, std::max(1, Fx.Tables));
 }
 
 void Session::FocusTable(int Index)
@@ -2206,6 +2408,10 @@ std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
 		return "Pick a buy-in you can cover.";
 	}
 	// The host takes the player to the table; it settles up in the save when they come home.
+	if (Stream.Live)
+	{
+		EndStream();
+	}
 	Save();
 	Sound(SoundId::Click, 0.8);
 	return Hooks.GoOut(Id, BuyInCents) ? "" : "Can't get there right now.";
@@ -2230,6 +2436,10 @@ std::string Session::StartActivity(const std::string& Id)
 	if (!Why.empty())
 	{
 		return Why;
+	}
+	if (Stream.Live)
+	{
+		EndStream(); // nobody streams a shift, a run or a night's sleep
 	}
 	const double World = WorldMinutes();
 	TimeSkip = Skip();
@@ -2263,7 +2473,8 @@ void Session::FinishSkip()
 	const life::Activity* A = life::Find(O.ActivityId);
 	const Chips Change = std::max(O.Money, -BankrollCents);
 	BankrollCents += Change;
-	Life.Energy = std::min(100.0, std::max(0.0, Life.Energy + O.Energy));
+	const double EnergyGain = O.Energy > 0.0 ? O.Energy * (1.0 + Fx.Rest) : O.Energy; // a better bed, darker curtains
+	Life.Energy = std::min(100.0, std::max(0.0, Life.Energy + EnergyGain));
 	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat + O.Heat));
 	Life.DebtCents += O.Debt;
 	Life.BannedUntil = std::max(Life.BannedUntil, O.BanUntil);
@@ -2317,9 +2528,396 @@ void Session::FinishSkip()
 	}
 	LastOutcome = O;
 	LastOutcome.Money = Change;
+	LastOutcome.Energy = EnergyGain;
 	HasOutcome = true;
 	Sound(O.Bad ? SoundId::Bust : Change > 0 ? SoundId::Cash : SoundId::Click, 1.0);
 	Save();
+}
+
+// ------------------------------------------------------------------ GearDrop
+
+void Session::RefreshGear()
+{
+	Fx = gear::Sum(Gear);
+}
+
+std::string Session::CanBuy(const std::string& Id) const
+{
+	const gear::Item* I = gear::Find(Id);
+	if (!I)
+	{
+		return "Unknown item.";
+	}
+	if (Owns(Id))
+	{
+		return I->Monthly ? "Subscribed." : "Owned.";
+	}
+	if (!I->Requires.empty() && !Owns(I->Requires))
+	{
+		const gear::Item* Need = gear::Find(I->Requires);
+		return "Needs the " + (Need ? Need->Name : I->Requires) + " first.";
+	}
+	// Something better already fills the slot (an upgrade path, not a side-grade).
+	if (I->Where != gear::Slot::None)
+	{
+		for (const auto& G : Gear)
+		{
+			const gear::Item* Have = gear::Find(G.first);
+			if (Have && Have->Where == I->Where && Have->PriceCents > I->PriceCents)
+			{
+				return "You have better.";
+			}
+		}
+	}
+	if (BankrollCents < I->PriceCents)
+	{
+		return "Not enough in the bank.";
+	}
+	return "";
+}
+
+std::string Session::Buy(const std::string& Id)
+{
+	const std::string Why = CanBuy(Id);
+	if (!Why.empty())
+	{
+		return Why;
+	}
+	const gear::Item& I = *gear::Find(Id);
+	const double World = WorldMinutes();
+	BankrollCents -= I.PriceCents;
+	Life.Record(World, (I.Monthly ? "GearDrop: " + I.Name + " (month)" : "GearDrop: " + I.Name), -I.PriceCents, 5);
+	Gear[Id] = I.Monthly ? World + 30.0 * net::MinutesPerDay : 0.0;
+	RefreshGear();
+	Hooks.GearChanged(Id, true);
+	Sound(SoundId::Cash, 0.7);
+	if (I.Where == gear::Slot::Pc && Fx.CanStream())
+	{
+		StoryText("gear-can-stream", "Kast", "Your setup can stream now. Open Kast on the taskbar and go live: chat, followers, subs and sponsors are waiting.");
+	}
+	if (I.Cat == gear::Category::Stream && !Channel.Streams)
+	{
+		StoryText("gear-first-stream", "Dee", "Saw the box at your door. A camera? You're going to stream it? Half the laundromat watches those poker streams. Don't punt on camera.");
+	}
+	if (I.Tables > 0)
+	{
+		StoryText("gear-monitor", "Dee", "More screens, more tables. More tables, more ways to go broke at once. Be smart.");
+	}
+	Save();
+	return "";
+}
+
+bool Session::Cancel(const std::string& Id)
+{
+	const gear::Item* I = gear::Find(Id);
+	if (!I || !I->Monthly || !Owns(Id))
+	{
+		return false;
+	}
+	Gear.erase(Id);
+	RefreshGear();
+	Hooks.GearChanged(Id, false);
+	Save();
+	return true;
+}
+
+void Session::RenewGear(double From, double To)
+{
+	(void)From;
+	bool Changed = false;
+	for (auto It = Gear.begin(); It != Gear.end();)
+	{
+		const gear::Item* I = gear::Find(It->first);
+		bool Keep = true;
+		while (I && I->Monthly && It->second > 0.0 && It->second <= To)
+		{
+			if (BankrollCents < I->PriceCents)
+			{
+				Hooks.Text(I->Brand, "We couldn't take this month's payment for " + I->Name + ", so your subscription has ended. Resubscribe on GearDrop any time.");
+				Hooks.GearChanged(It->first, false);
+				Keep = false;
+				break;
+			}
+			BankrollCents -= I->PriceCents;
+			Life.Record(It->second, "GearDrop: " + I->Name + " (renewal)", -I->PriceCents, 5);
+			It->second += 30.0 * net::MinutesPerDay;
+		}
+		if (Keep)
+		{
+			++It;
+		}
+		else
+		{
+			It = Gear.erase(It);
+			Changed = true;
+		}
+	}
+	if (Changed)
+	{
+		RefreshGear();
+	}
+}
+
+// ------------------------------------------------------------------ Kast
+
+kast::Inputs Session::StreamInputs() const
+{
+	kast::Inputs In;
+	In.World = WorldMinutes();
+	In.Real = Now;
+	In.AtTable = T != nullptr && CurrentScreen != Screen::Results;
+	In.Results = CurrentScreen == Screen::Results;
+	In.Tables = TableCount();
+	In.Sprinting = Sprinting;
+	In.Hero = HeroName;
+	In.EventName = Event ? Event->Spec.Name : std::string();
+	if (T && Active >= 0)
+	{
+		const TableGlance G = Glance(Active);
+		In.Remaining = G.Remaining;
+		In.Rank = G.Rank;
+		In.InMoney = G.InMoney;
+		In.StackBb = G.StackBb;
+		In.Entrants = T->Spec.Entrants;
+	}
+	In.Tilt = HeroTilt;
+	In.Bankroll = BankrollCents;
+	In.RentDue = Life.RentStage == life::Rent::Paid ? 0 : Life.RentDueCents;
+	In.Gear = Fx;
+	return In;
+}
+
+std::string Session::GoLive()
+{
+	if (Stream.Live)
+	{
+		return "Already live.";
+	}
+	if (TimeSkip.Active)
+	{
+		return "You're busy.";
+	}
+	if (Life.RentStage == life::Rent::Evicted)
+	{
+		return "No apartment, no internet.";
+	}
+	if (!Fx.CanStream())
+	{
+		return "The laptop can't stream. It needs a PC upgrade (" + gear::FirstPcUpgrade().Name + " on GearDrop).";
+	}
+	StreamCard = false;
+	StreamWorldAt = WorldMinutes();
+	StreamRealAt = Now;
+	Stream.Start(Channel, StreamInputs());
+	Hooks.OnAir(true);
+	Sound(SoundId::Alert, 0.7);
+	PlayStreamNotices();
+	if (Channel.Streams == 1)
+	{
+		StoryText("kast-first", "Dee", "You're LIVE? Mei just sent me the link. Say hi to the laundromat.");
+	}
+	Save();
+	return "";
+}
+
+void Session::PayOut(const std::string& Label)
+{
+	const Chips Pay = Channel.UnpaidCents;
+	if (Pay <= 0)
+	{
+		return;
+	}
+	BankrollCents += Pay;
+	Channel.PaidCents += Pay;
+	Channel.UnpaidCents = 0;
+	Life.Record(WorldMinutes(), Label, Pay, 6);
+}
+
+void Session::EndStream()
+{
+	if (!Stream.Live)
+	{
+		return;
+	}
+	Stream.Stop(Channel, StreamInputs());
+	PlayStreamNotices();
+	PayOut("Kast payout");
+	StreamCard = true;
+	Hooks.OnAir(false);
+	Sound(Stream.Last.Total() > 0 ? SoundId::Cash : SoundId::Click, 0.8);
+	Save();
+}
+
+Chips Session::CashOut()
+{
+	const Chips Pay = Channel.UnpaidCents;
+	PayOut("Kast payout");
+	if (Pay > 0)
+	{
+		Sound(SoundId::Cash, 0.8);
+		Save();
+	}
+	return Pay;
+}
+
+void Session::StreamMoment(kast::Moment M, const std::string& Detail, double Size)
+{
+	if (!Stream.Live)
+	{
+		return;
+	}
+	Stream.OnMoment(Channel, StreamInputs(), M, Detail, Size);
+}
+
+void Session::PlayStreamNotices()
+{
+	for (const kast::Notice& N : Stream.Notices)
+	{
+		if (N.Type == kast::Notice::Kind::Text)
+		{
+			Hooks.Text(N.From, N.Body);
+			continue;
+		}
+		// One alert sound at a time; a burst of follows doesn't machine-gun the speakers.
+		if (Now - StreamSoundAt < 1.2)
+		{
+			continue;
+		}
+		StreamSoundAt = Now;
+		switch (N.Type)
+		{
+		case kast::Notice::Kind::Chime: Hooks.Sound(SoundId::Alert, 0.35); break;
+		case kast::Notice::Kind::Sub:
+		case kast::Notice::Kind::Tip: Hooks.Sound(SoundId::Cash, 0.55); break;
+		case kast::Notice::Kind::Raid:
+		case kast::Notice::Kind::Milestone: Hooks.Sound(SoundId::Win, 0.7); break;
+		default: break;
+		}
+	}
+	Stream.Notices.clear();
+}
+
+void Session::StreamStep()
+{
+	const double World = WorldMinutes();
+	if (!Stream.Live)
+	{
+		// Offline, the channel still turns over: renewals, clip views, deals running out (once a game minute is plenty).
+		if (OfflineAt < 0.0 || World - OfflineAt >= 1.0)
+		{
+			OfflineAt = World;
+			kast::Offline(Channel, World, KastRng);
+		}
+		return;
+	}
+	const double DWorld = StreamWorldAt < 0.0 ? 0.0 : World - StreamWorldAt;
+	const double DReal = StreamRealAt < 0.0 ? 0.0 : Now - StreamRealAt;
+	StreamWorldAt = World;
+	StreamRealAt = Now;
+	const int MissedBefore = Stream.Missed;
+	Stream.Tick(Channel, StreamInputs(), DWorld, DReal);
+	if (Stream.Missed > MissedBefore)
+	{
+		// A troll gets through after a bad beat: it gets under the skin.
+		HeroTilt = std::min(1.0, HeroTilt + 0.03 * static_cast<double>(Stream.Missed - MissedBefore) * (1.0 - Fx.Calm));
+	}
+	PlayStreamNotices();
+}
+
+bool Session::StreamAd(int Seconds)
+{
+	const bool Ok = Stream.RunAd(Channel, StreamInputs(), Seconds);
+	Sound(Ok ? SoundId::Click : SoundId::Fold, 0.6);
+	return Ok;
+}
+
+bool Session::StreamThank()
+{
+	return Stream.Thank(Channel, StreamInputs());
+}
+
+bool Session::StreamAnswer(int MsgId)
+{
+	return Stream.Answer(Channel, StreamInputs(), MsgId);
+}
+
+bool Session::StreamTimeout(int MsgId)
+{
+	return Stream.Timeout(Channel, StreamInputs(), MsgId);
+}
+
+bool Session::StreamPromote(const std::string& Name)
+{
+	const bool Ok = Stream.Promote(Channel, StreamInputs(), Name);
+	if (Ok)
+	{
+		Save();
+	}
+	return Ok;
+}
+
+bool Session::StreamDemote(const std::string& Name)
+{
+	const bool Ok = Stream.Demote(Channel, Name);
+	if (Ok)
+	{
+		Save();
+	}
+	return Ok;
+}
+
+Chips Session::StreamRead(const std::string& SponsorId)
+{
+	const Chips Paid = Stream.SponsorRead(Channel, StreamInputs(), SponsorId);
+	if (Paid > 0)
+	{
+		Sound(SoundId::Cash, 0.5);
+	}
+	return Paid;
+}
+
+void Session::StreamTitle(int Title)
+{
+	const int Count = static_cast<int>(kast::Titles().size());
+	Channel.Title = ((Title % Count) + Count) % Count;
+}
+
+std::string Session::AcceptDeal(const std::string& Id)
+{
+	const kast::Sponsor* S = kast::FindSponsor(Id);
+	if (!S || !Channel.Offers.count(Id))
+	{
+		return "No offer.";
+	}
+	const double World = WorldMinutes();
+	int Active2 = 0;
+	for (const kast::Deal& D : Channel.Deals)
+	{
+		Active2 += D.Until > World ? 1 : 0;
+	}
+	if (Active2 >= kast::MaxDeals)
+	{
+		return "Both sponsor slots are taken.";
+	}
+	kast::Deal D;
+	D.Id = Id;
+	D.Since = World;
+	D.Until = World + static_cast<double>(S->Days) * net::MinutesPerDay;
+	Channel.Deals.push_back(D);
+	Channel.Offers.erase(Id);
+	Hooks.Text(S->Brand, "Welcome aboard! The deal runs " + std::to_string(S->Days) + " days. We pay " + Money(S->PerHourCents) + " for every hour you're live" + (S->ReadCents > 0 ? ", plus " + Money(S->ReadCents) + " a read." : "."));
+	Sound(SoundId::Cash, 0.8);
+	Save();
+	return "";
+}
+
+void Session::DeclineDeal(const std::string& Id)
+{
+	if (Channel.Offers.erase(Id))
+	{
+		Channel.Declined.insert(Id);
+		Save();
+	}
 }
 
 bool Session::PayRent()
@@ -2358,6 +2956,10 @@ bool Session::PayDebt()
 
 void Session::HandleKnockout(const TEvent& E)
 {
+	if (T && E.EliminatedBy == HeroId)
+	{
+		StreamMoment(kast::Moment::Knockout, E.Name);
+	}
 	if (!T || T->Spec.BountyCents <= 0 || E.EliminatedBy.empty())
 	{
 		return;
@@ -2538,8 +3140,11 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	const double Hours = (To - From) / 60.0;
 	if (Awake)
 	{
-		Life.Energy = std::min(100.0, std::max(0.0, Life.Energy - Hours * 4.0));
+		// A good chair and real coffee slow the drain; being live on stream speeds it up.
+		const double Drain = Fx.Drain > 0.0 || Stream.Live ? 4.0 * (1.0 - Fx.Drain) + (Stream.Live ? 1.0 : 0.0) : 4.0;
+		Life.Energy = std::min(100.0, std::max(0.0, Life.Energy - Hours * Drain));
 	}
+	RenewGear(From, To);
 	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat - Hours * 1.0));
 	// The Night Shift closes at 6 AM.
 	for (double End = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 6.0 * 60.0; End <= To; End += net::MinutesPerDay)
