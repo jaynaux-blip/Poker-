@@ -53,6 +53,10 @@ add_executable(monkey_test tests/monkey_main.cpp)
 target_link_libraries(monkey_test PRIVATE ShortStackCore)
 add_test(NAME monkey_play COMMAND monkey_test)
 
+add_executable(world_test tests/world_main.cpp)
+target_link_libraries(world_test PRIVATE ShortStackCore)
+add_test(NAME living_world COMMAND world_test)
+
 add_executable(audio_test tests/audio_main.cpp)
 target_link_libraries(audio_test PRIVATE ShortStackCore)
 add_test(NAME synthesized_audio COMMAND audio_test)

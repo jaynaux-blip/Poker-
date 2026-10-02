@@ -1318,6 +1318,15 @@ void Network::Accumulate(Totals& T, double From, double To, const std::string& S
 	}
 }
 
+void Network::FoundingTally(double To, std::vector<double>& Points, std::vector<Chips>& Money, std::vector<int>& Wins, std::vector<int>& FinalTables) const
+{
+	const Totals T = Tally(static_cast<double>(SimFirstDay) * MinutesPerDay, To, "", false);
+	Points = T.Points;
+	Money = T.Money;
+	Wins = T.Wins;
+	FinalTables = T.FinalTables;
+}
+
 Chips Network::NightShiftPrize(int Rank)
 {
 	static const Chips Top[10] = {25000, 15000, 10000, 7500, 6000, 5000, 4500, 4000, 3500, 3000};
@@ -1380,6 +1389,7 @@ const Network::Ranking& Network::Ranked(Board B, double Now) const
 			}
 			break;
 		}
+		case Board::Live: break; // a living world's board
 		}
 		return V;
 	};

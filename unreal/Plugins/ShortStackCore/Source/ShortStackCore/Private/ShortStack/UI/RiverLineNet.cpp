@@ -1765,6 +1765,7 @@ void RiverLine::BoardsPage(double Now)
 		About = "Points from every final table at " + (Sr ? Sr->Name : std::string("the series")) + ". The top three win RCOP Main Event packages.";
 		Ends = Sr ? static_cast<double>(Sr->LastDay + 1) * net::MinutesPerDay : -1.0;
 		break;
+	case net::Board::Live: About = "Live Player of the Year: points from every live final table, from the Riverside's Sunday $150 to the Championship."; break;
 	}
 	float Y = NetParagraph(*C, About, Rt.X + 26.0f, Rt.Y + 90.0f, Rt.W - 52.0f, 15.0f, 500, Hex(0xc3cedf), 22.0f, 5) + 12.0f;
 	if (Ends > World)

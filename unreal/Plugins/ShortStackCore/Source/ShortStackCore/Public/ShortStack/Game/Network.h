@@ -164,9 +164,11 @@ struct Player
 
 struct Placing
 {
-	int Player = -1; // index into Players(), or -1 for the player (an event they played)
+	int Player = -1; // index into Players(), -1 for the player (an event they played), -2 for someone nobody follows
 	int Place = 0;
 	Chips Prize = 0;
+	std::string Name;    // Player -2: their screen name
+	std::string Country; // and flag
 };
 
 struct EventResult
@@ -212,6 +214,7 @@ enum class Board : int
 	FinalTables, // 2026
 	Series,      // the running series
 	NightShift,  // tonight's micro-stakes leaderboard
+	Live,        // live Player of the Year points (a living world only)
 };
 
 struct BoardRow
@@ -265,6 +268,13 @@ public:
 	SHORTSTACKCORE_API Network();
 
 	const std::vector<Player>& Players() const { return People; }
+	/** The regulars as they were on Night One (the living world starts from these). */
+	const std::vector<Player>& Founding() const { return People; }
+	/**
+	 * What each regular did in the network's own simulated past, from SimFirstDay up to To: season points,
+	 * prize money, wins and final tables (the numbers the boards showed before a living world took over).
+	 */
+	SHORTSTACKCORE_API void FoundingTally(double To, std::vector<double>& Points, std::vector<Chips>& Money, std::vector<int>& Wins, std::vector<int>& FinalTables) const;
 	const std::vector<EventTemplate>& Templates() const { return Temps; }
 	const std::vector<SeriesInfo>& Series() const { return AllSeries; }
 	const EventTemplate& TemplateOf(const EventInstance& E) const { return Temps[static_cast<size_t>(E.Template)]; }

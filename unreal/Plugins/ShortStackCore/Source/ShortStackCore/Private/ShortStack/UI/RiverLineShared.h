@@ -526,6 +526,7 @@ inline const char* NetBoardName(net::Board B)
 	case net::Board::FinalTables: return "Final Tables";
 	case net::Board::Series: return "Series Leaderboard";
 	case net::Board::NightShift: return "Night Shift";
+	case net::Board::Live: return "Live Player of the Year";
 	}
 	return "";
 }
