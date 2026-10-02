@@ -1177,6 +1177,96 @@ void StreamGrind()
 	std::printf("  grind (no schedule, rarely talks to chat, never raids): followers %d, regulars %d, returning %.1f\n", Lazy.Followers, Lazy.Regulars, Lazy.ReturningLate);
 	Expect(Lazy.Regulars < G.Regulars && Lazy.ReturningLate < G.ReturningLate, "a schedule and a streamer who talks to chat build a bigger community");
 }
+/** The living world inside a session: who sits at the player's tables, what they remember, and the save. */
+void LivingWorld()
+{
+	namespace net = ss::net;
+	Hooks H;
+	ss::Session S(H, "living-world");
+	S.OnBoot();
+	S.CurrentScreen = ss::Screen::Lobby;
+	const ss::world::World& W = S.Living();
+	const net::Network& Net = net::Shared();
+	Expect(W.Ready() && Net.Attached() == &W && Net.Players().size() == W.People().size() && W.People().size() >= 1618, "a new career starts a living world the network shows");
+	Expect(Net.Players()[static_cast<size_t>(Net.RivalIndex())].Name == ss::RivalName && Net.FindPlayer("Mei") >= 0, "the rival and the cast are on the network");
+	// Tonight's schedule: an event the player can join with the world's regulars registered.
+	const double Now = S.WorldMinutes();
+	net::EventInstance Pick;
+	size_t Best = 0;
+	for (const net::EventInstance& E : Net.Window(Now, Now + 180.0))
+	{
+		std::string Lock;
+		if (Net.Joinable(E, &Lock, S.Unlocks()) && Net.TemplateOf(E).BuyInCents <= S.BankrollCents && Net.TemplateOf(E).BuyInCents > 0 && E.Entries <= 1000)
+		{
+			const size_t N = S.Living().Registered(E.Id).size();
+			if (N > Best)
+			{
+				Best = N;
+				Pick = E;
+			}
+		}
+	}
+	std::printf("  world: %zu regulars registered for %s\n", Best, Pick.Id.c_str());
+	Expect(Best >= 3, "tonight's events have the world's regulars in them");
+	S.RegisterEvent(Net.Listing(Pick));
+	Expect(S.T != nullptr && S.FieldNpc.size() >= Best, "the regulars take seats at the player's tournament");
+	bool Named = true;
+	for (const ss::TPlayer& P : S.T->Players)
+	{
+		const auto It = S.FieldNpc.find(P.Id);
+		Named = Named && (It == S.FieldNpc.end() || W.Get(It->second)->Name == P.Name);
+	}
+	Expect(Named, "they play under their own names");
+	S.CurrentPace = ss::Pace::Sprint;
+	ss::Rng Choice("world-choices");
+	int Decisions = 0;
+	double T = PlayOut(S, Choice, 10.0, Decisions);
+	Expect(S.CurrentScreen == ss::Screen::Results, "the tournament finishes");
+	const int Place = S.History[0].Place;
+	Expect(!S.Living().Bonds().empty(), "the people at the player's tables remember them");
+	S.LeaveResults();
+	// The world plays the event out around the player's own finish.
+	S.WorldSkip(1);
+	const net::EventResult* Res = S.Living().ResultOf(Pick.Id);
+	bool HeroThere = Place > 9;
+	if (Res)
+	{
+		for (const net::Placing& P : Res->FinalTable)
+		{
+			HeroThere = HeroThere || (P.Player == -1 && P.Place == Place);
+		}
+	}
+	Expect(Res != nullptr && HeroThere, "the world's result of the event has the player's finish in it");
+	std::printf("  world: finished %s; %zu people now know the player\n", ss::Ordinal(Place).c_str(), S.Living().Bonds().size());
+	// Days go by: the news is about people.
+	S.WorldSkip(3);
+	int People = 0;
+	for (const net::NewsItem& It : Net.News(S.WorldMinutes(), net::StatsFrom(S.HeroName, S.History, S.WorldMinutes()), 40))
+	{
+		People += It.Player >= 0 ? 1 : 0;
+	}
+	Expect(People > 0, "the news follows the world's people");
+	Expect(S.WorldPreview(14).find("World ") == 0 && S.Living().Clock() <= S.WorldMinutes() + 1.0, "a preview plays a copy forward and leaves the world alone");
+	// The save carries the world, and a night at Dee's goes into it.
+	ss::SaveData Saved = H.Last;
+	Expect(!Saved.WorldText.empty(), "the world is in the save");
+	Saved.NoteBackRoom(S.WorldMinutes() + 60.0, {"Sal", "Big Lou", "Twitch", "Mei"}, 4200);
+	ss::SaveData Parsed;
+	Expect(ss::SaveData::Parse(Saved.Serialize(), Parsed) && Parsed.WorldText == Saved.WorldText && Parsed.WorldNotes.size() == 1, "the world and its notes survive a save");
+	Parsed.ClockMinutes += 120.0;
+	{
+		Hooks H2;
+		ss::Session Back(H2, "living-world-2", &Parsed);
+		const ss::world::Bond* Sal = Back.Living().BondWith(Back.Living().Find("Sal"));
+		Expect(Back.Living().People().size() == W.People().size() && Back.Living().Bonds().size() > S.Living().Bonds().size() - 1, "a loaded session carries on the same world");
+		Expect(Sal && !Sal->Memories.empty() && Sal->Memories.back().Kind == ss::world::MemoryKind::BackRoom, "Sal remembers the night at Dee's");
+		Back.Save();
+		Expect(H2.Last.WorldNotes.empty(), "a note is read once");
+	}
+	Expect(Net.Attached() == &S.Living(), "the network goes back to the session still running");
+	(void)T;
+}
+
 } // namespace session_test
 
 int main()
@@ -1195,6 +1285,7 @@ int main()
 	session_test::Streaming();
 	session_test::StreamGrind();
 	session_test::LedChecks();
+	session_test::LivingWorld();
 	if (session_test::Failures == 0)
 	{
 		std::printf("session tests: all passed\n");

@@ -229,6 +229,7 @@ struct Finish
 	Chips Prize = 0;
 	int Where = 0; // Venue
 	bool Major = false;
+	Chips Seat = 0; // a satellite seat won (its value)
 };
 
 /** A year of a career (the career graph and the profile's years). */
@@ -461,6 +462,46 @@ struct Honor
 	double At = 0.0;
 };
 
+/**
+ * A player card: what anyone can see about someone. No bankroll, no plans, no state of mind; reputations,
+ * results, titles, who they're known to run with, and what they think of the player (and why).
+ */
+struct Profile
+{
+	int Id = -1;
+	std::string Name;
+	std::string Country;
+	int Age = 0;
+	std::string Known;  // what the world calls them ("Online grinder")
+	std::string Status; // "Active", "On a break", "Retired", "Away from the tables"
+	std::string Stakes; // "Mid stakes online"
+	std::string Live;   // "Travels the Grand Circuit"
+	std::string Style;  // "Loose and aggressive"
+	int Since = 2026;   // first year on the scene
+	std::array<int, RepCount> Reps{};
+	std::array<Ledger, VenueCount> Totals{}; // buy-ins are private (Spent is zero)
+	int Bracelets = 0;
+	int Rings = 0;
+	int Titles = 0;
+	int Majors = 0;
+	std::string BestEvent;
+	Chips Best = 0;
+	int BestDay = 0;
+	std::vector<Finish> Recent;
+	std::vector<Year> Years; // Net is private (zero)
+	std::array<float, 8> Form{};
+	Season ThisSeason;
+	bool Streams = false;
+	int Followers = 0;
+	std::string Sponsor;
+	bool Pro = false;
+	bool Rival = false;
+	std::vector<std::pair<std::string, std::string>> Knows; // what (Rival, Training partner, ...), who
+	std::string Bond;                  // what they think of the player ("" for a stranger)
+	std::vector<std::string> Memories; // why, newest first
+	std::vector<std::string> Story;    // headlines about them, newest first
+};
+
 // ------------------------------------------------------------------ the live calendar
 
 enum class LiveKind : int
@@ -559,6 +600,8 @@ public:
 	/** A new world: the network's regulars, the people you can meet, and this save's hidden traits. */
 	SHORTSTACKCORE_API void Create(uint32_t Seed, double StartWorld);
 	bool Ready() const { return Created; }
+	/** Changes when something involving the player happens (the session saves the world then, not every frame). */
+	int HeroRevision() const { return HeroRev; }
 	uint32_t Seed() const { return WorldSeed; }
 	/** When this world began (world minutes): earlier results are the network's history. */
 	double StartedAt() const { return Origin; }
@@ -590,6 +633,8 @@ public:
 	SHORTSTACKCORE_API int RankBefore(net::Board B, int Npc) const;
 
 	// The player.
+	/** Someone takes a seat in an event (the player's tables seat a regular the world hadn't planned there). */
+	SHORTSTACKCORE_API void Join(const std::string& EventId, int Npc);
 	/** The player registered (their result decides where everyone else finishes around them). */
 	SHORTSTACKCORE_API void HeroEntered(const std::string& EventId, const std::string& EventName);
 	/** The player's finish, and what their tables saw: who busted where, who was still in, who knocked whom out. */
@@ -612,14 +657,22 @@ public:
 	SHORTSTACKCORE_API const Bond* BondWith(int Npc) const;
 	/** A line for a table chat when the player sits down with someone who remembers them ("" for nothing to say). */
 	SHORTSTACKCORE_API std::string Greeting(int Npc, uint32_t Salt) const;
-	/** How the player looks to the world (their own reputations, from their results). */
+	/** The player's name, as the world knows it (honors, headlines). */
 	std::string HeroName;
+	/** The player's Player of the Year points this calendar year (online, live). */
+	double HeroSeasonPoints() const { return HeroPoints; }
+	double HeroSeasonLivePoints() const { return HeroLivePoints; }
 
 	// History.
 	const std::vector<WorldEvent>& Events() const { return Log; }
 	const std::vector<Honor>& Honors() const { return Titles; }
 	/** Who leads each board when the world is attached, by recorded value. */
 	SHORTSTACKCORE_API std::vector<int> Leaders(Rep R, int Count) const;
+
+	// Presentation (WorldText.cpp): the simulation's events in words. Private events (going broke, taking a stake)
+	// never make a headline.
+	SHORTSTACKCORE_API Profile ProfileOf(int Npc) const;
+	SHORTSTACKCORE_API bool Headline(const WorldEvent& E, std::string& Title, std::string& Body, std::string& Tag) const;
 
 	// Debug.
 	SHORTSTACKCORE_API std::string Describe(int Npc) const;
@@ -649,6 +702,7 @@ private:
 	double Origin = 0.0;
 	int Planned = -9999; // last day planned
 	int Rev = 0;
+	int HeroRev = 0;
 	int Founding = 0; // the network's regulars, at the start of the roster
 	std::vector<Npc> Roster;
 	std::map<std::string, int> ByName;

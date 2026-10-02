@@ -103,6 +103,11 @@ public:
 	void ShowRoomLights(bool On, double Now = 0.0) { LightsShown = On; LightsAt = Now; }
 	bool RoomLightsShown() const { return LightsShown; }
 	void ShowKastPage(KastPage P) { KastShown = P; }
+	/** A player card over the RiverLine pages (an index into the network's players; -1 closes it). */
+	SHORTSTACKCORE_API void ShowPlayer(int Index, double Now);
+	int PlayerShown() const { return CardShown; }
+	/** The event panel's tab: 0 overview, 1 payouts, 2 players (or the final table). */
+	void ShowEventTab(int Tab) { DetailTab = Tab; }
 	KastPage CurrentKastPage() const { return KastShown; }
 
 private:
@@ -169,6 +174,8 @@ private:
 	void CareerPage(double Now);
 	std::string BoardValue(net::Board B, double V) const;
 	void PlayerName(int Index, float X, float Y, float Size, float MaxW, bool Badges);
+	void PlayerName(const net::Placing& P, float X, float Y, float Size, float MaxW, bool Badges);
+	std::string PlacingName(const net::Placing& P) const;
 	void Panel(const Rect& R, float Radius = 14.0f);
 	float Section(const std::string& Title, float X, float Y, const Color& Col);
 	float Wrap(const std::string& Text, float X, float Y, float MaxW, float Size, const Color& Col, float LineHeight);
@@ -194,6 +201,9 @@ private:
 	void SetupPanel(const Rect& R, double Now);
 	void OrderCard(double Now);
 	void RoomLightsCard(double Now);
+	void PlayerCard(double Now);
+	int CardShown = -1;
+	double CardAt = 0.0;
 	// Kast (RiverLineKast.cpp).
 	void KastApp(double Now);
 	void KastHeader(double Now);

@@ -5,6 +5,7 @@
 #include "WorldSim.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 
@@ -81,18 +82,29 @@ std::vector<std::string> Split(const std::string& S, char Sep)
 	return Out;
 }
 
+// The shortest text that reads back as exactly the same number (so a loaded world carries on exactly).
 std::string D(double V)
 {
 	char Buf[40];
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+	const std::to_chars_result R = std::to_chars(Buf, Buf + sizeof(Buf), V);
+	return std::string(Buf, R.ptr);
+#else
 	std::snprintf(Buf, sizeof(Buf), "%.17g", V);
 	return Buf;
+#endif
 }
 
 std::string F(float V)
 {
 	char Buf[32];
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+	const std::to_chars_result R = std::to_chars(Buf, Buf + sizeof(Buf), V);
+	return std::string(Buf, R.ptr);
+#else
 	std::snprintf(Buf, sizeof(Buf), "%.9g", static_cast<double>(V));
 	return Buf;
+#endif
 }
 
 std::string I(long long V)
@@ -139,7 +151,7 @@ struct Cursor
 	long long Int() { return At < V.size() ? std::strtoll(V[At++].c_str(), nullptr, 10) : 0; }
 	int Small() { return static_cast<int>(Int()); }
 	double Dbl() { return At < V.size() ? std::strtod(V[At++].c_str(), nullptr) : 0.0; }
-	float Flt() { return static_cast<float>(Dbl()); }
+	float Flt() { return At < V.size() ? std::strtof(V[At++].c_str(), nullptr) : 0.0f; }
 	bool Bool() { return Int() != 0; }
 };
 
@@ -159,7 +171,7 @@ void ReadLedger(Cursor& C, Ledger& G)
 	G.Best = C.Int();
 }
 
-std::string Join(const std::vector<std::string>& Records)
+std::string JoinRecords(const std::vector<std::string>& Records)
 {
 	std::string S;
 	for (size_t K = 0; K < Records.size(); ++K)
@@ -265,9 +277,9 @@ void World::Write(std::string& Out) const
 			std::vector<std::string> R;
 			for (const world::Finish& Fi : N.Recent)
 			{
-				R.push_back(Rec({I(Fi.Day), Esc(Fi.Event), I(Fi.Place), I(Fi.Entries), I(Fi.Prize), I(Fi.Where), I(Fi.Major)}));
+				R.push_back(Rec({I(Fi.Day), Esc(Fi.Event), I(Fi.Place), I(Fi.Entries), I(Fi.Prize), I(Fi.Where), I(Fi.Major), I(Fi.Seat)}));
 			}
-			Emit(Line("recent") << I(N.Id) << Join(R));
+			Emit(Line("recent") << I(N.Id) << JoinRecords(R));
 		}
 		if (!N.Years.empty())
 		{
@@ -276,7 +288,7 @@ void World::Write(std::string& Out) const
 			{
 				R.push_back(Rec({I(Y.Number), I(Y.Online), I(Y.Live), I(Y.Net), I(Y.Wins), I(Y.Events)}));
 			}
-			Emit(Line("years") << I(N.Id) << Join(R));
+			Emit(Line("years") << I(N.Id) << JoinRecords(R));
 		}
 		if (!N.Ties.empty())
 		{
@@ -285,7 +297,7 @@ void World::Write(std::string& Out) const
 			{
 				R.push_back(Rec({I(T.Other), I(static_cast<int>(T.Kind)), F(T.Strength), I(T.Since)}));
 			}
-			Emit(Line("ties") << I(N.Id) << Join(R));
+			Emit(Line("ties") << I(N.Id) << JoinRecords(R));
 		}
 		if (!N.Tickets.empty())
 		{
@@ -294,7 +306,7 @@ void World::Write(std::string& Out) const
 			{
 				R.push_back(Rec({Esc(T.first), I(T.second)}));
 			}
-			Emit(Line("tickets") << I(N.Id) << Join(R));
+			Emit(Line("tickets") << I(N.Id) << JoinRecords(R));
 		}
 	}
 	for (const Pending& P : Queue)
@@ -308,7 +320,7 @@ void World::Write(std::string& Out) const
 		{
 			R.push_back(Rec({I(E.Npc), I(E.Ticket), I(E.Staked), I(E.Bullets), F(E.Share), I(E.Known), I(E.Better)}));
 		}
-		L << Join(R);
+		L << JoinRecords(R);
 		Emit(L);
 	}
 	for (const auto& It : Results)
@@ -328,7 +340,7 @@ void World::Write(std::string& Out) const
 		{
 			R.push_back(Rec({I(P.Player), I(P.Place), I(P.Prize), Esc(P.Name), Esc(P.Country)}));
 		}
-		L << Join(R);
+		L << JoinRecords(R);
 		Emit(L);
 	}
 	const size_t LogFrom = Log.size() > 2500 ? Log.size() - 2500 : 0;
@@ -351,7 +363,7 @@ void World::Write(std::string& Out) const
 		{
 			R.push_back(Rec({I(M.Day), I(static_cast<int>(M.Kind)), Esc(M.Where), I(M.Amount)}));
 		}
-		L << Join(R);
+		L << JoinRecords(R);
 		Emit(L);
 	}
 	for (const auto& It : HeroResults)
@@ -372,7 +384,7 @@ void World::Write(std::string& Out) const
 		{
 			R.push_back(Rec({I(It.first), D(It.second)}));
 		}
-		Emit(Line(Kind) << Join(R));
+		Emit(Line(Kind) << JoinRecords(R));
 	};
 	Points("series", SeriesPoints);
 	Points("night", NightPoints);
@@ -384,7 +396,7 @@ void World::Write(std::string& Out) const
 		{
 			R.push_back(Rec({I(P.first), I(P.second)}));
 		}
-		Emit(Line("pairs") << Join(R));
+		Emit(Line("pairs") << JoinRecords(R));
 	}
 }
 
@@ -600,6 +612,7 @@ bool World::Read(const std::vector<std::string>& Fields)
 				Fi.Prize = Rc.Int();
 				Fi.Where = Rc.Small();
 				Fi.Major = Rc.Bool();
+				Fi.Seat = Rc.Int();
 				N->Recent.push_back(Fi);
 			}
 			else if (Kind == "years")

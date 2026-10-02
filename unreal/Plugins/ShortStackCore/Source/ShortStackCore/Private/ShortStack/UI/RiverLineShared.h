@@ -103,6 +103,7 @@ inline Color NetKind(net::NewsKind K)
 	case net::NewsKind::Schedule: return Hex(0x4f9bff);
 	case net::NewsKind::Record: return Hex(0xf28a3a);
 	case net::NewsKind::Hero: return Hex(0x27d3c3);
+	case net::NewsKind::People: return Hex(0xc084fc);
 	}
 	return pal::Accent;
 }

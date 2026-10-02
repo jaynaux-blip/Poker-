@@ -9,6 +9,10 @@
 namespace ss
 {
 struct HistoryEntry;
+namespace world
+{
+class World;
+}
 
 /**
  * The RiverLine poker network around the player: a week-round tournament schedule in the style of the big
@@ -190,6 +194,10 @@ struct HeroStats
 	double SeriesPoints = 0.0;
 	int SeriesTitles = 0;
 	int Tournaments = 0;
+	// This calendar year only (the season boards).
+	int SeasonWins = 0;
+	int SeasonFinalTables = 0;
+	double LivePoints = 0.0; // live Player of the Year (the session fills it from its world)
 };
 /** Night points count the Night Shift that contains Now (life::NightShiftStart). */
 SHORTSTACKCORE_API HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& History, double Now = MinutesPerDay + 127.0);
@@ -249,6 +257,7 @@ enum class NewsKind : int
 	Schedule,
 	Record,
 	Hero,
+	People, // careers: moves, comebacks, retirements, sponsorships (a living world)
 };
 
 struct NewsItem
@@ -267,7 +276,14 @@ class Network
 public:
 	SHORTSTACKCORE_API Network();
 
-	const std::vector<Player>& Players() const { return People; }
+	/** Everyone on the network: the living world's people when one is attached (the same first indices). */
+	const std::vector<Player>& Players() const { return Living ? LivingRows() : People; }
+	/**
+	 * A living world takes over the people: their results, the boards and the news come from it (the calendar is
+	 * still the network's). Detached (nullptr), everything is the network's own fixed simulation again.
+	 */
+	SHORTSTACKCORE_API void Attach(const world::World* W);
+	const world::World* Attached() const { return Living; }
 	/** The regulars as they were on Night One (the living world starts from these). */
 	const std::vector<Player>& Founding() const { return People; }
 	/**
@@ -321,6 +337,11 @@ public:
 	SHORTSTACKCORE_API std::vector<NewsItem> News(double Now, const HeroStats& Hero, int Count) const;
 
 private:
+	const std::vector<Player>& LivingRows() const;
+	/** The network's own result (its regulars by weighted draw), and a final table of unknowns (a living world's
+	 * events it didn't play). */
+	const EventResult& Deterministic(const EventInstance& E) const;
+	const EventResult& Unknowns(const EventInstance& E) const;
 	void BuildPlayers();
 	void BuildSchedule();
 	void BuildSeries();
@@ -358,6 +379,9 @@ private:
 	mutable std::map<std::string, Totals> TallyCache;              // whole days, by range and filter
 	std::string YouName;
 	std::map<std::string, std::pair<int, Chips>> HeroFinishes; // instance id -> (place, prize)
+	const world::World* Living = nullptr;
+	mutable int LivingRev = -1;
+	mutable std::map<std::string, EventResult> Unknown;
 };
 
 /** The network every screen shows (built on first use). */

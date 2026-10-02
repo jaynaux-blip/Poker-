@@ -51,6 +51,44 @@ const char* OriginName(Origin O)
 	return "";
 }
 
+std::string Short(Chips C)
+{
+	return net::MoneyShort(C);
+}
+
+std::string StyleOf(const Npc& N)
+{
+	const float Aggro = N.TraitOf(Trait::Aggro);
+	const float Patience = N.TraitOf(Trait::Patience);
+	if (Aggro > 0.8f && N.TraitOf(Trait::Risk) > 0.75f)
+	{
+		return "Wild: raises everything";
+	}
+	if (Aggro > 0.62f)
+	{
+		return Patience > 0.55f ? "Tight and aggressive" : "Loose and aggressive";
+	}
+	if (Aggro < 0.3f)
+	{
+		return Patience > 0.6f ? "Tight and patient" : "Calls a lot";
+	}
+	return Patience > 0.6f ? "Solid and patient" : "Balanced";
+}
+
+std::string LiveText(const Npc& N)
+{
+	switch (N.Live)
+	{
+	case LiveLevel::None: return "Online only";
+	case LiveLevel::Local: return "Plays the local weeklies";
+	case LiveLevel::Regional: return "Plays regional festivals";
+	case LiveLevel::Circuit: return "Travels the Grand Circuit";
+	case LiveLevel::Championship: return "Plays the Championship";
+	case LiveLevel::HighRoller: return "Plays the high rollers";
+	}
+	return "";
+}
+
 double Percentile(std::vector<double> V, double P)
 {
 	if (V.empty())
@@ -64,6 +102,250 @@ double Percentile(std::vector<double> V, double P)
 } // namespace worldtext_detail
 
 using namespace worldtext_detail;
+
+Profile World::ProfileOf(int Id) const
+{
+	Profile Pr;
+	const Npc* P = Get(Id);
+	if (!P)
+	{
+		return Pr;
+	}
+	const Npc& N = *P;
+	const int Day = sim::DayAt(Now);
+	Pr.Id = N.Id;
+	Pr.Name = N.Name;
+	Pr.Country = N.Country;
+	Pr.Age = N.Age(Day);
+	Pr.Known = IdentityName(N.Is);
+	Pr.Status = N.St == Status::Broke ? "Away from the tables" : StatusName(N.St);
+	Pr.Stakes = std::string(net::TierName(static_cast<net::Tier>(sim::TierIndex(N.Tier)))) + " stakes online";
+	Pr.Live = LiveText(N);
+	Pr.Style = StyleOf(N);
+	Pr.Since = YearOf(N.Joined);
+	for (int K = 0; K < RepCount; ++K)
+	{
+		Pr.Reps[static_cast<size_t>(K)] = static_cast<int>(std::lround(static_cast<double>(N.Reps[static_cast<size_t>(K)])));
+	}
+	Pr.Totals = N.Totals;
+	for (Ledger& L : Pr.Totals)
+	{
+		L.Spent = 0;
+	}
+	Pr.Bracelets = N.Bracelets;
+	Pr.Rings = N.Rings;
+	Pr.Titles = N.Titles;
+	Pr.Majors = N.Majors;
+	Pr.BestEvent = N.BestEvent;
+	Pr.Best = std::max({N.Totals[0].Best, N.Totals[1].Best, N.Totals[2].Best});
+	Pr.BestDay = N.BestDay;
+	Pr.Recent = N.Recent;
+	Pr.Years = N.Years;
+	for (Year& Y : Pr.Years)
+	{
+		Y.Net = 0;
+	}
+	Pr.Form = N.Weekly;
+	Pr.ThisSeason = N.ThisSeason;
+	Pr.Streams = N.Streams;
+	Pr.Followers = N.Followers;
+	Pr.Sponsor = N.Sponsor;
+	Pr.Pro = N.Pro;
+	Pr.Rival = N.Rival;
+	for (const Tie& T : N.Ties)
+	{
+		// Who backs whom stays between them.
+		if (T.Kind != TieKind::Backer && T.Kind != TieKind::Backed && T.Strength >= 0.2f)
+		{
+			if (const Npc* O = Get(T.Other))
+			{
+				Pr.Knows.push_back({TieName(T.Kind), O->Name});
+			}
+		}
+	}
+	if (const Bond* B = BondWith(N.Id))
+	{
+		Pr.Bond = B->Label();
+		for (auto It = B->Memories.rbegin(); It != B->Memories.rend(); ++It)
+		{
+			Pr.Memories.push_back(net::DateLabel(It->Day) + ", " + std::to_string(YearOf(It->Day)) + ": " + MemoryText(It->Kind) + (It->Where.empty() ? "" : " (" + It->Where + ")"));
+		}
+	}
+	for (auto It = Log.rbegin(); It != Log.rend() && Pr.Story.size() < 8; ++It)
+	{
+		std::string Title;
+		std::string Body;
+		std::string Tag;
+		if ((It->Npc == N.Id || It->Other == N.Id) && Headline(*It, Title, Body, Tag))
+		{
+			Pr.Story.push_back(net::DateLabel(sim::DayAt(It->At)) + ", " + std::to_string(YearOf(sim::DayAt(It->At))) + ": " + Title);
+		}
+	}
+	return Pr;
+}
+
+bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body, std::string& Tag) const
+{
+	const Npc* N = Get(E.Npc);
+	if (!N)
+	{
+		return false;
+	}
+	const Npc* O = Get(E.Other);
+	const std::string& Who = N->Name;
+	const bool Known = N->RepOf(Rep::Overall) >= 15.0f || N->Anchored || N->Pro || N->Streams;
+	const bool Live = (E.Flags & FlagLive) != 0;
+	const int Day = sim::DayAt(E.At);
+	switch (E.Kind)
+	{
+	case EventKind::Won:
+	case EventKind::Champion:
+	{
+		const bool Qualifier = (E.Flags & FlagQualifier) != 0;
+		Title = Who + " wins " + E.What;
+		Body = Grouped(E.Value) + " entries Â· " + Money(E.Amount) + " to the winner.";
+		if (Qualifier)
+		{
+			Body = "From a satellite seat to the title: " + Body;
+		}
+		if (O)
+		{
+			Body += " Runner-up: " + O->Name + ".";
+		}
+		if ((E.Flags & FlagFirst) != 0)
+		{
+			Body += " A first title.";
+		}
+		Tag = E.Kind == EventKind::Champion ? "CHAMPION" : Live ? "LIVE" : "BIG WIN";
+		return true;
+	}
+	case EventKind::FinalTable:
+		Title = Who + " makes the final table of " + E.What;
+		Body = Ordinal(E.Value) + " place, " + Money(E.Amount) + ".";
+		Tag = Live ? "LIVE" : "FINAL TABLE";
+		return true;
+	case EventKind::Discovered:
+		Title = "Unknown " + Who + " wins " + E.What;
+		Body = std::string((E.Flags & FlagQualifier) != 0 ? "A satellite qualifier nobody had heard of" : "A name nobody had heard of") + " takes " + Money(E.Amount) + " from " + Grouped(E.Value) +
+			" entries.";
+		Tag = "NEW NAME";
+		return true;
+	case EventKind::Breakout:
+		Title = Who + "'s breakout";
+		Body = Money(E.Amount) + " for " + Ordinal(E.Value) + " in " + E.What + ": the score of a career so far.";
+		Tag = "BREAKOUT";
+		return true;
+	case EventKind::Qualified:
+		if (!Known)
+		{
+			return false;
+		}
+		Title = Who + " wins a seat to the " + E.What;
+		Body = "A " + Money(E.Amount) + " seat from a satellite.";
+		Tag = "QUALIFIED";
+		return true;
+	case EventKind::MovedUp:
+		if (!Known && E.Value < 4)
+		{
+			return false;
+		}
+		Title = Who + " moves up to " + E.What + " stakes";
+		Body = "A new level, new regulars, bigger swings.";
+		Tag = "MOVES";
+		return true;
+	case EventKind::MovedDown:
+		if (!Known)
+		{
+			return false;
+		}
+		Title = Who + " steps down to " + E.What + " stakes";
+		Body = "Rebuilding after a rough stretch.";
+		Tag = "MOVES";
+		return true;
+	case EventKind::Retired:
+		Title = Who + " retires";
+		Body = "After " + std::to_string(std::max(1, (Day - N->Joined) / 365)) + " years and " + Short(E.Amount) + " in winnings, " + Who + " steps away from the game.";
+		Tag = "RETIRED";
+		return true;
+	case EventKind::Returned:
+		Title = Who + " is back";
+		Body = E.What == "retired" ? "Out of retirement after " + std::to_string(std::max(1, E.Value / 30)) + " months away."
+			: E.What == "broke" ? "Back at the tables after time away."
+			: E.Value >= 14 ? "Back at the tables after " + std::to_string(E.Value / 7) + " weeks away." : "Back at the tables.";
+		Tag = "COMEBACK";
+		return Known || E.What == "retired";
+	case EventKind::Break:
+		if (!Known)
+		{
+			return false;
+		}
+		Title = Who + " takes a break";
+		Body = "Stepping away for a while.";
+		Tag = "AWAY";
+		return true;
+	case EventKind::Sponsored:
+		Title = Who + " joins " + E.What;
+		Body = E.What == "Team RiverLine" ? "The site's newest sponsored pro." : "A sponsorship deal for the Kast channel.";
+		Tag = "SPONSOR";
+		return true;
+	case EventKind::Milestone:
+		if (E.What == "career-won")
+		{
+			Title = Who + " passes " + Short(E.Amount) + " in career winnings";
+			Body = "A milestone few reach.";
+		}
+		else if (E.What == "first-title")
+		{
+			Title = Who + " wins a first major title";
+			Body = Money(E.Amount) + ".";
+		}
+		else if (E.What == "turned-pro")
+		{
+			if (!Known)
+			{
+				return false;
+			}
+			Title = Who + " goes pro";
+			Body = "The day job is over.";
+		}
+		else
+		{
+			return false;
+		}
+		Tag = "MILESTONE";
+		return true;
+	case EventKind::StartedStreaming:
+		Title = Who + " starts streaming on Kast";
+		Body = "Another regular goes live.";
+		Tag = "KAST";
+		return Known;
+	case EventKind::StreamMilestone:
+		Title = Who + " reaches " + Grouped(E.Value) + " followers on Kast";
+		Body = "The channel keeps growing.";
+		Tag = "KAST";
+		return true;
+	case EventKind::Debut:
+		Title = "A new name: " + Who;
+		Body = "Fresh on the scene and already turning heads.";
+		Tag = "NEW FACE";
+		return true;
+	case EventKind::Rivalry:
+		if (!O)
+		{
+			return false;
+		}
+		Title = Who + " vs " + O->Name;
+		Body = "They keep meeting heads-up. Neither is letting it go.";
+		Tag = "RIVALRY";
+		return true;
+	case EventKind::PlayerOfYear:
+		Title = Who + " is " + E.What + " " + std::to_string(YearOf(Day));
+		Body = Grouped(E.Value) + " points.";
+		Tag = "PLAYER OF THE YEAR";
+		return true;
+	default: return false; // going broke, taking a stake: nobody's business
+	}
+}
 
 std::string World::Describe(int Id) const
 {

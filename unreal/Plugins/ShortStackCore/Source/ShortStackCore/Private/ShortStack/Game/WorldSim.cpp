@@ -427,7 +427,7 @@ Pending Sim::LiveEventOf(World& W, const LiveEvent& E)
 	P.Ticket = E.Ticket;
 	P.Bracelet = E.Bracelet;
 	P.Ring = E.Ring;
-	P.TableSize = E.Kind == LiveKind::Summit ? 8 : 9;
+	P.TableSize = E.Kind == LiveKind::Summit ? 8 : E.Id.rfind("riverside@", 0) == 0 ? 6 : 9;
 	P.FinalSize = std::min(P.TableSize, std::max(2, E.Field));
 	const bool Summit = E.Kind == LiveKind::Summit;
 	// The calendar is the same in every save; the crowds aren't (the Riverside's is the player's own room's).
@@ -839,14 +839,27 @@ void Sim::PlanDay(World& W, int Day)
 			}
 		}
 
-		// Into the queue: every event someone the world follows is playing, and the player's.
+		// Into the queue: every event someone the world follows is playing (the player may already be in one).
 		for (std::vector<Option>* List : {&Online, &Live})
 		{
 			for (Option& O : *List)
 			{
-				if (!O.P.Who.empty())
+				if (O.P.Who.empty())
+				{
+					continue;
+				}
+				auto Already = std::find_if(W.Queue.begin(), W.Queue.end(), [&](const Pending& Q) { return Q.Id == O.P.Id; });
+				if (Already == W.Queue.end())
 				{
 					W.Queue.push_back(std::move(O.P));
+					continue;
+				}
+				for (const Entry& E : O.P.Who)
+				{
+					if (std::none_of(Already->Who.begin(), Already->Who.end(), [&](const Entry& X) { return X.Npc == E.Npc; }))
+					{
+						Already->Who.push_back(E);
+					}
 				}
 			}
 		}
@@ -1059,6 +1072,7 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 		F.Prize = Prize;
 		F.Where = P.Online ? 0 : 1;
 		F.Major = P.Major;
+		F.Seat = Seat ? P.SeatValue : 0;
 		N.Recent.insert(N.Recent.begin(), F);
 		if (N.Recent.size() > 10)
 		{
@@ -1158,15 +1172,16 @@ void Sim::Resolve(World& W, Pending& P)
 		return;
 	}
 
-	// The Summit's field is exactly who accepted the invitation.
-	if (!P.Online && P.Kind == static_cast<int>(LiveKind::Summit))
+	// The Summit's field is exactly who accepted the invitation (nobody the world doesn't follow sits down).
+	const bool Invitational = !P.Online && P.Kind == static_cast<int>(LiveKind::Summit);
+	if (Invitational)
 	{
-		P.Entries = std::max(2, static_cast<int>(P.Who.size()));
+		P.Entries = std::max(2, static_cast<int>(P.Who.size()) + (HeroIn ? 1 : 0));
 		P.Pool = P.BuyIn * static_cast<Chips>(P.Entries);
 		P.FinalSize = std::min(P.FinalSize, P.Entries);
 	}
 	// The field: the people the world follows draw their finishes; everyone else is the rest of the field.
-	const int Field = std::max(P.Entries, static_cast<int>(P.Who.size()) + (HeroIn ? 1 : 0) + 1);
+	const int Field = std::max(P.Entries, static_cast<int>(P.Who.size()) + (HeroIn ? 1 : 0) + (Invitational ? 0 : 1));
 	P.Entries = Field;
 	const bool Bounty = Has(P.Kinds, KindBounty);
 	const Chips PrizePool = Bounty ? P.Pool / 2 : P.Pool;
@@ -1347,7 +1362,7 @@ void Sim::Resolve(World& W, Pending& P)
 			W.Titles.push_back(H);
 		}
 	}
-	else if (Winner == -2 && (P.Bracelet || (P.Ring && P.Major) || (P.Online && P.Major && !P.Series.empty())))
+	else if (Winner == -2 && (P.Bracelet || Invitational || (P.Ring && P.Major) || (P.Online && P.Major && !P.Series.empty())))
 	{
 		// An unknown's title is still history.
 		world::Honor H;
@@ -1918,6 +1933,7 @@ void Sim::Lifecycle(World& W, Npc& N, int Day, Rng& R)
 		if (N.TripUntil < Day && R.Chance(Away))
 		{
 			N.St = Status::Break;
+			N.Left = Day;
 			N.Until = Day + 14 + R.Int(N.Mood == Momentum::Burnout ? 120 : 60);
 			if (Known)
 			{
@@ -2328,7 +2344,7 @@ void Sim::NewDay(World& W, int Day)
 			}
 			if (N.RepOf(Rep::Overall) >= 12.0f || N.Anchored)
 			{
-				Post(W, static_cast<double>(Day) * 1440.0, EventKind::Returned, N.Id, "break", 0, Day - N.Until);
+				Post(W, static_cast<double>(Day) * 1440.0, EventKind::Returned, N.Id, "break", 0, Day - N.Left);
 			}
 		}
 		if (!N.Trip.empty() && N.TripUntil < Day)

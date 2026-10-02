@@ -1398,6 +1398,91 @@ void LedScreens()
 	Expect(S.RoomGlow(Now + 0.2).Rgb == ss::gear::LedColor(1, Now + 0.2) && S.RoomGlow(Now + 0.2).Level == 1.0, "unsynced, the room holds its colour");
 	S.EndStream();
 }
+/** The living world on RiverLine: boards, news and player cards two months into a career. */
+void WorldScreens()
+{
+	using Page = ss::ui::RiverLine::Page;
+	QuietHooks H;
+	ss::Session S(H, "ui-world");
+	ss::ui::RiverLine RL(S);
+	S.CurrentScreen = ss::Screen::Lobby;
+	RL.UI.Ptr.Active = true;
+	RL.UI.Ptr.X = -1.0f;
+	RL.UI.Ptr.Y = -1.0f;
+	double Now = Run(S, RL, 10.0, 0.5);
+	S.WorldSkip(61);
+	const ss::world::World& W = S.Living();
+	Expect(ss::net::Shared().Attached() == &W, "the boards read the world");
+	RL.ShowBoard(ss::net::Board::Season, Now);
+	RL.OpenPage(Page::Leaderboards, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_boards", RL, Now);
+	RL.ShowBoard(ss::net::Board::Live, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_boards_live", RL, Now);
+	RL.OpenPage(Page::News, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_news", RL, Now);
+	// Player cards: the rival, and someone from the Riverside.
+	RL.OpenPage(Page::Leaderboards, Now);
+	RL.ShowPlayer(W.Find(ss::RivalName), Now);
+	Now = Run(S, RL, Now, 1.0);
+	Expect(RL.PlayerShown() == W.Find(ss::RivalName), "a player card opens");
+	Emit("world_card_rival", RL, Now);
+	S.Living().Remember(W.Find("Mei"), ss::world::MemoryKind::Riverside, "the Riverside Sunday", 0, S.WorldMinutes() - 3000.0);
+	S.Living().Remember(W.Find("Mei"), ss::world::MemoryKind::HeroKnockedOut, "Riverside Sunday $150", 0, S.WorldMinutes() - 2900.0);
+	RL.ShowPlayer(W.Find("Mei"), Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("world_card_mei", RL, Now);
+	// A click outside closes it.
+	RL.UI.Ptr.X = 60.0f;
+	RL.UI.Ptr.Y = 950.0f;
+	RL.UI.Ptr.Pressed = true;
+	RL.UI.Ptr.Down = true;
+	Now = Run(S, RL, Now, 0.05);
+	RL.UI.Ptr.Pressed = false;
+	RL.UI.Ptr.Down = false;
+	RL.UI.Ptr.Released = true;
+	Now = Run(S, RL, Now, 0.05);
+	RL.UI.Ptr.Released = false;
+	Expect(RL.PlayerShown() < 0, "clicking outside closes the card");
+	// Who's playing tonight: the event panel lists the regulars registered.
+	RL.OpenPage(Page::Lobby, Now);
+	std::string Busy;
+	size_t Most = 0;
+	for (const ss::net::EventInstance& E : ss::net::Shared().Window(S.WorldMinutes(), S.WorldMinutes() + 240.0))
+	{
+		const size_t N = S.Living().Registered(E.Id).size();
+		if (N > Most && ss::net::Shared().TemplateOf(E).BuyInCents >= 1000)
+		{
+			Most = N;
+			Busy = E.Id;
+		}
+	}
+	RL.SelectEvent(Busy);
+	RL.ShowEventTab(2);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("world_lobby_players", RL, Now);
+	Expect(Most > 0, "tonight's events show who's registered");
+	// A year and a half on: the season, the best-known player, the rival.
+	S.WorldSkip(420);
+	RL.ShowBoard(ss::net::Board::Season, Now);
+	RL.OpenPage(Page::Leaderboards, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_boards_later", RL, Now);
+	RL.ShowPlayer(W.Leaders(ss::world::Rep::Overall, 1).front(), Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("world_card_leader", RL, Now);
+	RL.ShowPlayer(W.Find(ss::RivalName), Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("world_card_rival_later", RL, Now);
+	RL.ShowPlayer(-1, Now);
+	RL.OpenPage(Page::News, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_news_later", RL, Now);
+	std::printf("%s", W.Describe(W.Find("Mei")).c_str());
+}
+
 } // namespace ui_test
 
 int main(int Argc, char** Argv)
@@ -1407,6 +1492,7 @@ int main(int Argc, char** Argv)
 		ui_test::OutDir = Argv[1];
 	}
 	ui_test::NetScreens();
+	ui_test::WorldScreens();
 	ui_test::AppScreens();
 	ui_test::Clicks();
 	ui_test::Screens();

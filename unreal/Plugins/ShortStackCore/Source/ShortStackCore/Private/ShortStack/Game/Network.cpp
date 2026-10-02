@@ -5,6 +5,7 @@
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Structure.h"
 
@@ -234,6 +235,7 @@ HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& Hi
 	HeroStats H;
 	H.Name = Name;
 	const double Night = life::NightShiftStart(Now);
+	const int ThisYear = world::YearOf(DayOf(Now));
 	for (const HistoryEntry& E : History)
 	{
 		++H.Tournaments;
@@ -242,6 +244,9 @@ HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& Hi
 		H.Wins += E.Place == 1 ? 1 : 0;
 		H.FinalTables += E.Place >= 1 && E.Place <= 9 ? 1 : 0;
 		H.Cashes += E.Prize > 0 ? 1 : 0;
+		const bool Season = world::YearOf(DayOf(EntryStart(E))) == ThisYear;
+		H.SeasonWins += Season && E.Place == 1 ? 1 : 0;
+		H.SeasonFinalTables += Season && E.Place >= 1 && E.Place <= 9 ? 1 : 0;
 		Chips BuyInCents = E.BuyInCents;
 		for (const LobbyEvent& L : Lobby())
 		{
@@ -252,7 +257,7 @@ HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& Hi
 		}
 		BuyInCents = std::max<Chips>(0, BuyInCents);
 		const double P = Points(E.Place, E.Entrants, BuyInCents);
-		H.SeasonPoints += P;
+		H.SeasonPoints += Season ? P : 0.0;
 		const double Start = EntryStart(E);
 		if (BuyInCents <= 550 && Start >= Night && Start < Night + 12.0 * 60.0 && Start <= Now)
 		{
@@ -759,6 +764,10 @@ void Network::BuildSchedule()
 
 int Network::FindPlayer(const std::string& Name) const
 {
+	if (Living)
+	{
+		return Living->Find(Name);
+	}
 	const auto It = ByName.find(Name);
 	return It == ByName.end() ? -1 : It->second;
 }
@@ -973,7 +982,77 @@ LiveState Network::Live(const EventInstance& E, double Now) const
 	return L;
 }
 
+void Network::Attach(const world::World* W)
+{
+	Living = W;
+	LivingRev = -1;
+	RankCache.clear();
+	Unknown.clear();
+}
+
+const std::vector<Player>& Network::LivingRows() const
+{
+	return Living->View();
+}
+
 const EventResult& Network::Result(const EventInstance& E) const
+{
+	if (Living)
+	{
+		if (const EventResult* R = Living->ResultOf(E.Id))
+		{
+			return *R;
+		}
+		// Before the world began, the network's own past; after, an event nobody the world follows played.
+		return E.Start + E.Duration <= Living->StartedAt() ? Deterministic(E) : Unknowns(E);
+	}
+	return Deterministic(E);
+}
+
+const EventResult& Network::Unknowns(const EventInstance& E) const
+{
+	auto Found = Unknown.find(E.Id);
+	if (Found != Unknown.end())
+	{
+		return Found->second;
+	}
+	if (Unknown.size() > 4096)
+	{
+		Unknown.clear();
+	}
+	const EventTemplate& T = TemplateOf(E);
+	const int Places = std::min(T.TableSize >= 8 ? 9 : T.TableSize, std::max(2, E.Entries));
+	const std::vector<Chips> Pay = Payouts(E);
+	auto HeroIt = HeroFinishes.find(E.Id);
+	const int HeroPlace = HeroIt != HeroFinishes.end() ? HeroIt->second.first : 0;
+	Rng R(E.Id + "/unknowns");
+	EventResult Res;
+	for (int Place = 1; Place <= Places; ++Place)
+	{
+		Placing P;
+		P.Place = Place;
+		P.Prize = static_cast<size_t>(Place - 1) < Pay.size() ? Pay[static_cast<size_t>(Place - 1)] : 0;
+		if (Place == HeroPlace)
+		{
+			P.Player = -1;
+			P.Prize = HeroIt->second.second;
+		}
+		else
+		{
+			P.Player = -2;
+			P.Country = handles::PickCountry(R);
+			P.Name = handles::Make(R, P.Country, TierOf(T.BuyInCents) >= Tier::Mid);
+			if (Living->Find(P.Name) >= 0)
+			{
+				P.Name += std::to_string(R.Int(90) + 10);
+			}
+		}
+		Res.FinalTable.push_back(P);
+	}
+	return Unknown.emplace(E.Id, std::move(Res)).first->second;
+}
+
+const EventResult& Network::Deterministic(const EventInstance& E) const
 {
 	auto Found = Results.find(E.Id);
 	if (Found != Results.end())
@@ -1028,9 +1107,11 @@ const EventResult& Network::Result(const EventInstance& E) const
 
 void Network::Prewarm(double Now) const
 {
-	for (const EventInstance& E : Finished(static_cast<double>(SimFirstDay) * MinutesPerDay, Now))
+	// With a living world, only the network's own past needs working out.
+	const double To = Living ? std::min(Now, Living->StartedAt()) : Now;
+	for (const EventInstance& E : Finished(static_cast<double>(SimFirstDay) * MinutesPerDay, To))
 	{
-		Result(E);
+		Deterministic(E);
 	}
 }
 
@@ -1303,7 +1384,7 @@ void Network::Accumulate(Totals& T, double From, double To, const std::string& S
 		{
 			continue;
 		}
-		for (const Placing& P : Result(E).FinalTable)
+		for (const Placing& P : Deterministic(E).FinalTable)
 		{
 			if (P.Player < 0)
 			{
@@ -1339,6 +1420,12 @@ Chips Network::NightShiftPrize(int Rank)
 
 const Network::Ranking& Network::Ranked(Board B, double Now) const
 {
+	if (Living && Living->Revision() != LivingRev)
+	{
+		// The world moved on: yesterday's rankings of it are stale.
+		LivingRev = Living->Revision();
+		RankCache.clear();
+	}
 	const auto Key = std::make_pair(static_cast<int>(B), static_cast<long long>(std::floor(Now)));
 	auto Found = RankCache.find(Key);
 	if (Found != RankCache.end())
@@ -1350,6 +1437,29 @@ const Network::Ranking& Network::Ranked(Board B, double Now) const
 		RankCache.clear();
 	}
 	const double SimStart = static_cast<double>(SimFirstDay) * MinutesPerDay;
+	if (Living)
+	{
+		// The living world keeps the boards itself (and where everyone stood a day, or an hour, ago).
+		const size_t Count = Living->View().size();
+		Ranking Rk;
+		Rk.Values.assign(Count, 0.0);
+		for (size_t I = 0; I < Count; ++I)
+		{
+			Rk.Values[I] = Living->BoardValue(B, static_cast<int>(I), Now);
+		}
+		Rk.Order.resize(Count);
+		for (size_t I = 0; I < Count; ++I)
+		{
+			Rk.Order[I] = static_cast<int>(I);
+		}
+		std::stable_sort(Rk.Order.begin(), Rk.Order.end(), [&](int A, int C) { return Rk.Values[static_cast<size_t>(A)] > Rk.Values[static_cast<size_t>(C)]; });
+		Rk.RankBefore.assign(Count, 0);
+		for (size_t I = 0; I < Count; ++I)
+		{
+			Rk.RankBefore[I] = Living->RankBefore(B, static_cast<int>(I));
+		}
+		return RankCache.emplace(Key, std::move(Rk)).first->second;
+	}
 	const size_t N = People.size();
 	auto Values = [&](double At) {
 		std::vector<double> V(N, 0.0);
@@ -1417,16 +1527,18 @@ const Network::Ranking& Network::Ranked(Board B, double Now) const
 
 std::vector<BoardRow> Network::Leaderboard(Board B, double Now, const HeroStats& Hero, int Count, BoardRow* HeroRow) const
 {
-	const size_t N = People.size();
+	const std::vector<Player>& Everyone = Players();
+	const size_t N = Everyone.size();
 	const Ranking& Rk = Ranked(B, Now);
 	const std::vector<double>& V = Rk.Values;
 	const std::vector<int>& Order = Rk.Order;
 	const std::vector<int>& RankBefore = Rk.RankBefore;
 	double HeroValue = B == Board::Earnings ? static_cast<double>(Hero.Earnings)
 		: B == Board::Season ? Hero.SeasonPoints
-		: B == Board::Wins ? static_cast<double>(Hero.Wins)
-		: B == Board::FinalTables ? static_cast<double>(Hero.FinalTables)
+		: B == Board::Wins ? static_cast<double>(Hero.SeasonWins)
+		: B == Board::FinalTables ? static_cast<double>(Hero.SeasonFinalTables)
 		: B == Board::Series ? Hero.SeriesPoints
+		: B == Board::Live ? Hero.LivePoints
 		: Hero.NightPoints;
 	std::vector<BoardRow> Rows;
 	int HeroRank = 0;
@@ -1460,7 +1572,7 @@ std::vector<BoardRow> Network::Leaderboard(Board B, double Now, const HeroStats&
 		Row.Player = static_cast<int>(I);
 		Row.Value = V[I];
 		Row.Move = RankBefore[I] - Row.Rank;
-		Row.Form = People[I].Form;
+		Row.Form = Everyone[I].Form;
 		if (B == Board::NightShift)
 		{
 			Row.Prize = NightShiftPrize(Row.Rank);
@@ -1558,15 +1670,38 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 		}
 		const Placing& W = R.FinalTable.front();
 		const bool Series = !T.Series.empty();
-		if (W.Prize < Cents(Series ? 400.0 : 9000.0) && W.Player >= 0)
+		if (W.Prize < Cents(Series ? 400.0 : 9000.0) && W.Player != -1)
 		{
 			continue;
 		}
-		auto NameOf = [&](int Index) { return Index < 0 ? YouName : People[static_cast<size_t>(Index)].Name; };
+		auto NameOf = [&](const Placing& P) { return P.Player == -1 ? YouName : P.Player == -2 ? P.Name : Players()[static_cast<size_t>(P.Player)].Name; };
 		const std::string EventName = T.Name.find("MM #") == 0 || T.Name.find("RCOP #") == 0 ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
-		Post(E.Start + E.Duration, W.Player < 0 ? NewsKind::Hero : NewsKind::BigWin, NameOf(W.Player) + " wins " + EventName,
-			Grouped(E.Entries) + " entries \xC2\xB7 " + MoneyShort(E.Pool) + " prize pool. Runner-up: " + NameOf(R.FinalTable[1].Player) + " (" + Money(R.FinalTable[1].Prize) + ").",
-			W.Player < 0 ? "YOU" : Series ? (T.Series == "mm" ? "MICRO MADNESS" : "SERIES") : "BIG WIN", W.Prize, W.Player);
+		Post(E.Start + E.Duration, W.Player == -1 ? NewsKind::Hero : NewsKind::BigWin, NameOf(W) + " wins " + EventName,
+			Grouped(E.Entries) + " entries \xC2\xB7 " + MoneyShort(E.Pool) + " prize pool. Runner-up: " + NameOf(R.FinalTable[1]) + " (" + Money(R.FinalTable[1].Prize) + ").",
+			W.Player == -1 ? "YOU" : Series ? (T.Series == "mm" ? "MICRO MADNESS" : "SERIES") : "BIG WIN", W.Prize, W.Player == -2 ? -1 : W.Player);
+		if (W.Player == -2)
+		{
+			Items.back().Player = -2;
+		}
+	}
+	// A living world's people: live titles, careers, comebacks, retirements (its online wins are above).
+	if (Living)
+	{
+		const std::vector<world::WorldEvent>& Log = Living->Events();
+		for (auto It = Log.rbegin(); It != Log.rend() && It->At > Now - 4.0 * MinutesPerDay; ++It)
+		{
+			const bool OnlineWin = (It->Kind == world::EventKind::Won || It->Kind == world::EventKind::Champion) && (It->Flags & world::FlagLive) == 0;
+			std::string Title;
+			std::string Body;
+			std::string Tag;
+			if (OnlineWin || It->At > Now || !Living->Headline(*It, Title, Body, Tag))
+			{
+				continue;
+			}
+			const bool Win = It->Kind == world::EventKind::Won || It->Kind == world::EventKind::Champion || It->Kind == world::EventKind::Discovered || It->Kind == world::EventKind::Breakout;
+			const NewsKind K = Win ? NewsKind::BigWin : It->Kind == world::EventKind::PlayerOfYear || It->Kind == world::EventKind::Milestone ? NewsKind::Record : NewsKind::People;
+			Post(It->At, K, Title, Body, Tag, It->Amount, It->Npc);
+		}
 	}
 	// The player's own milestones (when no result of theirs made the news).
 	const bool HeroNews = std::any_of(Items.begin(), Items.end(), [](const NewsItem& It) { return It.Kind == NewsKind::Hero; });

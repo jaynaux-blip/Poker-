@@ -240,7 +240,36 @@ std::string SaveData::Serialize() const
 		Out << "result\t" << session_detail::Escape(H.Name) << "\t" << H.Place << "\t" << H.Entrants << "\t" << H.Prize << "\t" << Fixed(H.AccuracyPct, 3) << "\t" << H.BuyInCents << "\t"
 			<< session_detail::Escape(H.EventId) << "\n";
 	}
+	for (const std::string& Note : WorldNotes)
+	{
+		Out << Note << "\n";
+	}
+	Out << WorldText;
+	if (!WorldText.empty() && WorldText.back() != '\n')
+	{
+		Out << "\n";
+	}
 	return Out.str();
+}
+
+void SaveData::NoteBackRoom(double World, const std::vector<std::string>& Names, Chips NetCents)
+{
+	std::string Line = "worldnote\tbackroom\t" + Fixed(World, 2) + "\t" + std::to_string(NetCents);
+	for (const std::string& N : Names)
+	{
+		Line += "\t" + session_detail::Escape(N);
+	}
+	WorldNotes.push_back(Line);
+}
+
+void SaveData::NoteRiverside(double World, int HeroPlace, int Field, const std::vector<std::pair<std::string, int>>& Places)
+{
+	std::string Line = "worldnote\triverside\t" + Fixed(World, 2) + "\t" + std::to_string(HeroPlace) + "\t" + std::to_string(Field);
+	for (const std::pair<std::string, int>& P : Places)
+	{
+		Line += "\t" + session_detail::Escape(P.first) + "\t" + std::to_string(P.second);
+	}
+	WorldNotes.push_back(Line);
 }
 
 bool SaveData::Parse(const std::string& Text, SaveData& Out)
@@ -256,6 +285,18 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 	D.TextsSeen.clear();
 	while (std::getline(In, Line))
 	{
+		if (Line.rfind("world\t", 0) == 0)
+		{
+			// The living world's lines, kept as they are for the session to read.
+			D.WorldText += Line;
+			D.WorldText += '\n';
+			continue;
+		}
+		if (Line.rfind("worldnote\t", 0) == 0)
+		{
+			D.WorldNotes.push_back(Line);
+			continue;
+		}
 		const std::vector<std::string> P = session_detail::SplitTabs(Line);
 		if (P.size() == 2 && P[0] == "bankroll")
 		{
@@ -540,8 +581,167 @@ Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData*
 		TextsSeen.insert(Loaded->TextsSeen.begin(), Loaded->TextsSeen.end());
 	}
 	RefreshGear();
+	StartWorld(Loaded);
 	// While the game loads: simulate the network's past results now, so the first leaderboard or page doesn't stall.
 	net::Shared().Prewarm(WorldMinutes());
+}
+
+namespace session_detail
+{
+/** The worlds of the sessions alive now, newest last: the network shows the newest. */
+std::vector<const world::World*>& LiveWorlds()
+{
+	static std::vector<const world::World*> Worlds;
+	return Worlds;
+}
+} // namespace session_detail
+
+Session::~Session()
+{
+	std::vector<const world::World*>& Worlds = session_detail::LiveWorlds();
+	Worlds.erase(std::remove(Worlds.begin(), Worlds.end(), &LivingWorld), Worlds.end());
+	if (net::Shared().Attached() == &LivingWorld)
+	{
+		net::Shared().Attach(Worlds.empty() ? nullptr : Worlds.back());
+	}
+}
+
+void Session::StartWorld(const SaveData* Loaded)
+{
+	if (Loaded && !Loaded->WorldText.empty())
+	{
+		std::istringstream In(Loaded->WorldText);
+		std::string Line;
+		while (std::getline(In, Line))
+		{
+			LivingWorld.Read(session_detail::SplitTabs(Line));
+		}
+		LivingWorld.Finish();
+	}
+	if (!LivingWorld.Ready())
+	{
+		// A new world for a new career (or a save from before there was one): everyone starts from tonight.
+		LivingWorld.Create(Fnv1a(SeedBase + ":world:" + HeroName), WorldMinutes());
+	}
+	LivingWorld.HeroName = HeroName;
+	std::vector<const world::World*>& Worlds = session_detail::LiveWorlds();
+	if (std::find(Worlds.begin(), Worlds.end(), &LivingWorld) == Worlds.end())
+	{
+		Worlds.push_back(&LivingWorld);
+	}
+	net::Shared().Attach(&LivingWorld);
+	net::Shared().SetHero(HeroName, History);
+	WorldNewsAt = LivingWorld.Clock();
+	// The night out the host played (Dee's game, the Riverside), and the time it took.
+	if (Loaded)
+	{
+		for (const std::string& Note : Loaded->WorldNotes)
+		{
+			WorldNote(session_detail::SplitTabs(Note));
+		}
+	}
+	LivingWorld.AdvanceTo(WorldMinutes());
+	WorldNewsAt = std::max(WorldNewsAt, LivingWorld.Clock() - 6.0 * 60.0);
+}
+
+void Session::WorldNote(const std::vector<std::string>& F)
+{
+	if (F.size() < 4 || F[0] != "worldnote")
+	{
+		return;
+	}
+	const double At = std::atof(F[2].c_str());
+	LivingWorld.AdvanceTo(At);
+	if (F[1] == "backroom")
+	{
+		std::vector<std::string> Names;
+		for (size_t K = 4; K < F.size(); ++K)
+		{
+			Names.push_back(session_detail::Unescape(F[K]));
+		}
+		LivingWorld.BackRoomNight(At, Names, std::strtoll(F[3].c_str(), nullptr, 10));
+	}
+	else if (F[1] == "riverside" && F.size() >= 5)
+	{
+		std::vector<std::pair<std::string, int>> Places;
+		for (size_t K = 5; K + 1 < F.size(); K += 2)
+		{
+			Places.push_back({session_detail::Unescape(F[K]), std::atoi(F[K + 1].c_str())});
+		}
+		LivingWorld.RiversideDone(At, Places, std::atoi(F[3].c_str()), std::atoi(F[4].c_str()));
+	}
+}
+
+std::string Session::WorldPreview(int DayCount) const
+{
+	world::World Copy = LivingWorld;
+	Copy.Simulate(DayCount);
+	return Copy.Report();
+}
+
+void Session::WorldSkip(int DayCount)
+{
+	if (T || DayCount <= 0)
+	{
+		return; // not with tables open
+	}
+	LobbyMinutes += static_cast<double>(DayCount) * net::MinutesPerDay;
+	CalendarAt = WorldMinutes();
+	LivingWorld.AdvanceTo(WorldMinutes());
+	WorldNewsAt = LivingWorld.Clock();
+	WorldSaved.clear();
+	Save();
+}
+
+void Session::WorldStep()
+{
+	LivingWorld.AdvanceTo(WorldMinutes());
+	if (LivingWorld.Clock() <= WorldNewsAt)
+	{
+		return;
+	}
+	// The phone: news about the people the player knows, from them or from Dee.
+	const std::vector<world::WorldEvent>& Log = LivingWorld.Events();
+	for (auto It = Log.rbegin(); It != Log.rend() && It->At > WorldNewsAt; ++It)
+	{
+		const world::Npc* N = LivingWorld.Get(It->Npc);
+		if (!N)
+		{
+			continue;
+		}
+		const bool Cast = N->From == world::Origin::Cast;
+		const world::Bond* B = LivingWorld.BondWith(N->Id);
+		const bool Met = B && !B->Memories.empty();
+		const bool Win = It->Kind == world::EventKind::Won || It->Kind == world::EventKind::Champion || It->Kind == world::EventKind::Breakout;
+		const std::string Key = "world:" + std::to_string(static_cast<long long>(std::llround(It->At))) + ":" + std::to_string(It->Npc) + ":" + std::to_string(static_cast<int>(It->Kind));
+		if (Cast && Win)
+		{
+			StoryText(Key, N->Name, N->Name == "Mei" ? "just won " + It->What + "!! " + net::MoneyShort(It->Amount) + ". drinks on me tuesday" :
+				N->Name == "Twitch" ? "SHIPPED " + It->What + " lmaooo " + net::MoneyShort(It->Amount) :
+				N->Name == "Big Lou" ? "YOU SEE THAT?? " + It->What + ". Lou's buying." :
+				"Took down " + It->What + ". " + net::MoneyShort(It->Amount) + ".");
+		}
+		else if (Cast && It->Kind == world::EventKind::MovedUp)
+		{
+			StoryText(Key, N->Name, "moving up to " + It->What + " stakes. wish me luck");
+		}
+		else if (Cast && It->Kind == world::EventKind::Retired)
+		{
+			StoryText(Key, "Dee", N->Name + " says they're done with poker. We'll see. They said that last time.");
+		}
+		else if (!Cast && !N->Rival && Met && (It->Kind == world::EventKind::Champion || It->Kind == world::EventKind::Breakout || (Win && It->Amount >= 5000000)))
+		{
+			// Somebody the player sat with, a long time ago, makes it.
+			const world::Memory& First = B->Memories.front();
+			StoryText(Key, "Dee", "Remember " + N->Name + "? You played them at " + First.Where + " back in " + net::DateLabel(First.Day) + ". They just won " + It->What + " for " +
+				net::MoneyShort(It->Amount) + ".");
+		}
+		else if (N->Rival && (It->Kind == world::EventKind::Champion || It->Kind == world::EventKind::PlayerOfYear))
+		{
+			StoryText(Key, RivalName, It->Kind == world::EventKind::PlayerOfYear ? "player of the year. told you I never log off." : "gg. " + It->What + ". your move.");
+		}
+	}
+	WorldNewsAt = LivingWorld.Clock();
 }
 
 void Session::Save()
@@ -556,6 +756,14 @@ void Session::Save()
 	D.Leds = Leds;
 	D.Channel = Channel;
 	D.TextsSeen.assign(TextsSeen.begin(), TextsSeen.end());
+	if (WorldSaved.empty() || LivingWorld.HeroRevision() != WorldSavedRev || LivingWorld.Clock() - WorldSavedAt >= 60.0)
+	{
+		WorldSaved.clear();
+		LivingWorld.Write(WorldSaved);
+		WorldSavedAt = LivingWorld.Clock();
+		WorldSavedRev = LivingWorld.HeroRevision();
+	}
+	D.WorldText = WorldSaved;
 	Hooks.Save(D);
 }
 
@@ -581,6 +789,10 @@ void Session::ResetSave()
 	Stream = kast::Stream(SeedBase + ":kast");
 	StreamCard = false;
 	RefreshGear();
+	// A new career, a new world.
+	LivingWorld = world::World();
+	WorldSaved.clear();
+	StartWorld(nullptr);
 	Save();
 }
 
@@ -703,6 +915,7 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	LastTick = -1.0;
 	T = std::make_unique<Tournament>(Ev.Spec, HeroName, Seed, std::vector<ReservedPlayer>{{RivalName, Archetype::Crusher}});
 	CurrentScreen = Screen::Table;
+	LivingWorld.HeroEntered(Ev.Spec.Id, Ev.Spec.Name);
 	NameField();
 	if (Ev.Spec.BountyCents > 0)
 	{
@@ -794,6 +1007,20 @@ void Session::BuildSeats()
 		}
 		const TPlayer& P = T->Players[static_cast<size_t>(Idx)];
 		SeatVis& V = Seats[S];
+		const auto Npc = FieldNpc.find(P.Id);
+		if (Npc != FieldNpc.end() && !P.IsHero)
+		{
+			// Someone the world follows is at the player's table: met (and maybe remembered).
+			FieldMet.insert(Npc->second);
+			if (FieldGreeted.insert(Npc->second).second)
+			{
+				const std::string Hello = LivingWorld.Greeting(Npc->second, Fnv1a(T->Spec.Id + P.Id));
+				if (!Hello.empty())
+				{
+					Say(P.Name, Hello);
+				}
+			}
+		}
 		V.Present = true;
 		V.Seat = static_cast<int>(S);
 		V.Id = P.Id;
@@ -954,6 +1181,7 @@ void Session::Update(double InNow)
 	{
 		FinishSkip();
 	}
+	WorldStep();
 	if (CurrentScreen != Screen::Boot && World >= DayOne + 129.0)
 	{
 		StoryText("marcus-intro", "Marcus", "heard you're behind on rent. I got work if you're not scared. check the burner app.");
@@ -1913,6 +2141,22 @@ void Session::SprintStep()
 		const std::vector<TEvent> Events = T->SimulateTick(&Autopilot);
 		++HandsPlayed;
 		HandleTourneyEvents(Events);
+		// Sprinting still sits the player with people (who'll remember them).
+		if (!FieldNpc.empty() && !T->Hero().Busted)
+		{
+			const auto Table = T->Tables.find(T->Hero().TableId);
+			if (Table != T->Tables.end())
+			{
+				for (const int Idx : Table->second.Seats)
+				{
+					const auto Npc = Idx >= 0 ? FieldNpc.find(T->Players[static_cast<size_t>(Idx)].Id) : FieldNpc.end();
+					if (Npc != FieldNpc.end())
+					{
+						FieldMet.insert(Npc->second);
+					}
+				}
+			}
+		}
 		if (CheckSatellite())
 		{
 			return;
@@ -2008,6 +2252,7 @@ void Session::ShowResults()
 		HasResults = true;
 	}
 	LobbyMinutes = std::max(LobbyMinutes, T->ClockMinutes());
+	ReportToWorld();
 	HistoryEntry Entry;
 	Entry.Name = T->Spec.Name;
 	Entry.Place = BustPlace;
@@ -2131,6 +2376,10 @@ void Session::SwapActive(TableRun& Run)
 	swap(FieldCountry, Run.FieldCountry);
 	swap(FieldRegulars, Run.FieldRegulars);
 	swap(FieldPros, Run.FieldPros);
+	swap(FieldNpc, Run.FieldNpc);
+	swap(FieldMet, Run.FieldMet);
+	swap(FieldGreeted, Run.FieldGreeted);
+	swap(FieldPots, Run.FieldPots);
 	swap(Bounties, Run.Bounties);
 	swap(BountyWon, Run.BountyWon);
 	swap(Knockouts, Run.Knockouts);
@@ -3169,73 +3418,146 @@ void Session::HandleKnockout(const TEvent& E)
 
 void Session::NameField()
 {
-	// The engine names the field its own way (kept for parity with the TypeScript build); on RiverLine,
-	// everyone has a screen name and a country, and some of them are the network's regulars at these stakes.
+	// The engine names the field its own way (kept for parity with the TypeScript build); on RiverLine, everyone has a
+	// screen name and a country, and the people the living world has registered for this event take seats that suit
+	// how they play.
 	FieldCountry.clear();
 	FieldRegulars.clear();
 	FieldPros.clear();
-	const net::Network& Net = net::Shared();
+	FieldNpc.clear();
+	FieldMet.clear();
+	FieldGreeted.clear();
+	FieldPots.clear();
 	Rng Nr(T->Spec.Id + ":" + SeedBase + ":field");
-	const std::string& Pop = T->Spec.Population;
-	const net::Tier Stakes = Pop == "low" ? net::Tier::Low : Pop == "high" ? net::Tier::Mid : net::Tier::Micro;
-	std::vector<int> Strong;
-	std::vector<int> Weak;
-	for (size_t I = 0; I < Net.Players().size(); ++I)
+	std::vector<int> Who = LivingWorld.Registered(T->Spec.Id);
+	const int Rival = LivingWorld.Find(RivalName);
+	Who.erase(std::remove(Who.begin(), Who.end(), Rival), Who.end());
+	if (Who.empty())
 	{
-		const net::Player& P = Net.Players()[I];
-		const bool Match = Stakes == net::Tier::Mid ? (P.Stake == net::Tier::Mid || P.Stake == net::Tier::High) : P.Stake == Stakes;
-		if (Match && !P.Rival && P.Name != HeroName)
+		// An event the world's regulars skip (a freeroll): a few of the weakest micro regulars play it anyway.
+		const std::string& Pop = T->Spec.Population;
+		const int Tier = Pop == "low" ? 2 : Pop == "high" ? 3 : 1;
+		std::vector<int> Pool;
+		for (const world::Npc& N : LivingWorld.People())
 		{
-			(P.Skill >= 0.55f ? Strong : Weak).push_back(static_cast<int>(I));
+			if (N.Playing() && N.Tier == Tier && !N.Rival && N.Name != HeroName && N.Overall() < 0.5f)
+			{
+				Pool.push_back(N.Id);
+			}
+		}
+		Nr.Shuffle(Pool);
+		const int Count = std::min(static_cast<int>(Pool.size()), std::min(40, std::max(4, T->Spec.Entrants * 3 / 100)));
+		for (int K = 0; K < Count; ++K)
+		{
+			Who.push_back(Pool[static_cast<size_t>(K)]);
+			LivingWorld.Join(T->Spec.Id, Pool[static_cast<size_t>(K)]);
 		}
 	}
-	Nr.Shuffle(Strong);
-	Nr.Shuffle(Weak);
-	// Strong regulars take strong bots' seats; the fish take the fish's.
-	std::vector<size_t> StrongSeats;
-	std::vector<size_t> WeakSeats;
+	Nr.Shuffle(Who);
+	// Seats by how the engine's bots play: each person takes the one most like them. A few open at the player's own
+	// table (the faces of the night); the rest are somewhere in the room.
+	std::map<int, std::vector<size_t>> SeatsBy;
+	std::map<int, std::vector<size_t>> HeroTable;
+	const int HeroTableId = T->Hero().TableId;
 	for (size_t I = 0; I < T->Players.size(); ++I)
 	{
 		const TPlayer& P = T->Players[I];
-		if (P.IsHero || P.Name == RivalName)
+		if (!P.IsHero && P.Name != RivalName)
+		{
+			(P.TableId == HeroTableId ? HeroTable : SeatsBy)[static_cast<int>(P.Prof.Type)].push_back(I);
+		}
+	}
+	for (auto& It : SeatsBy)
+	{
+		Nr.Shuffle(It.second);
+	}
+	for (auto& It : HeroTable)
+	{
+		Nr.Shuffle(It.second);
+	}
+	int AtHeroTable = std::min(3, static_cast<int>(Who.size()) / 3 + 1);
+	auto Strong = [](int A) { return A == static_cast<int>(Archetype::Reg) || A == static_cast<int>(Archetype::Crusher) || A == static_cast<int>(Archetype::Tag) || A == static_cast<int>(Archetype::Lag); };
+	auto Style = [](const world::Npc& N) {
+		const float Sk = N.Overall();
+		const float Aggro = N.TraitOf(world::Trait::Aggro);
+		const float Risk = N.TraitOf(world::Trait::Risk);
+		if (Sk >= 0.72f)
+		{
+			return Aggro > 0.6f ? Archetype::Crusher : Archetype::Reg;
+		}
+		if (Sk >= 0.58f)
+		{
+			return Aggro > 0.62f ? Archetype::Lag : Aggro < 0.35f ? Archetype::Tag : Archetype::Reg;
+		}
+		if (Sk >= 0.45f)
+		{
+			return Aggro > 0.8f && Risk > 0.7f ? Archetype::Maniac : Aggro < 0.3f ? Archetype::Nit : Archetype::Tag;
+		}
+		return Aggro > 0.8f ? Archetype::Maniac : Aggro < 0.3f ? Archetype::Station : N.TraitOf(world::Trait::Patience) > 0.7f ? Archetype::Nit : Archetype::Fish;
+	};
+	auto TakeFrom = [&](std::map<int, std::vector<size_t>>& Pool, int Wanted) -> size_t {
+		auto Exact = Pool.find(Wanted);
+		if (Exact != Pool.end() && !Exact->second.empty())
+		{
+			const size_t S = Exact->second.back();
+			Exact->second.pop_back();
+			return S;
+		}
+		for (int Pass = 0; Pass < 2; ++Pass)
+		{
+			for (auto& It : Pool)
+			{
+				if (!It.second.empty() && (Pass == 1 || Strong(It.first) == Strong(Wanted)))
+				{
+					const size_t S = It.second.back();
+					It.second.pop_back();
+					return S;
+				}
+			}
+		}
+		return static_cast<size_t>(-1);
+	};
+	auto Take = [&](int Wanted) -> size_t {
+		if (AtHeroTable > 0)
+		{
+			--AtHeroTable;
+			const size_t S = TakeFrom(HeroTable, Wanted);
+			if (S != static_cast<size_t>(-1))
+			{
+				return S;
+			}
+		}
+		return TakeFrom(SeatsBy, Wanted);
+	};
+	// Nobody else at the tables goes by a name the world uses.
+	std::set<std::string> Taken = {HeroName, RivalName};
+	for (const world::Npc& N : LivingWorld.People())
+	{
+		Taken.insert(N.Name);
+	}
+	std::set<size_t> Named;
+	for (int Id : Who)
+	{
+		const world::Npc* N = LivingWorld.Get(Id);
+		if (!N || N->Name == HeroName)
 		{
 			continue;
 		}
-		const Archetype A = P.Prof.Type;
-		(A == Archetype::Reg || A == Archetype::Crusher || A == Archetype::Tag || A == Archetype::Lag ? StrongSeats : WeakSeats).push_back(I);
-	}
-	Nr.Shuffle(StrongSeats);
-	Nr.Shuffle(WeakSeats);
-	// Nobody else at the tables goes by a regular's name.
-	std::set<std::string> Taken = {HeroName, RivalName};
-	for (const net::Player& P : Net.Players())
-	{
-		Taken.insert(P.Name);
-	}
-	std::set<size_t> Named;
-	const int Regulars = std::min(40, std::max(4, T->Spec.Entrants * 3 / 100));
-	for (int K = 0; K < Regulars; ++K)
-	{
-		const bool Good = K % 2 == 0;
-		std::vector<int>& From = Good ? (Strong.empty() ? Weak : Strong) : (Weak.empty() ? Strong : Weak);
-		std::vector<size_t>& Into = Good ? (StrongSeats.empty() ? WeakSeats : StrongSeats) : (WeakSeats.empty() ? StrongSeats : WeakSeats);
-		if (From.empty() || Into.empty())
+		const size_t Seat = Take(static_cast<int>(Style(*N)));
+		if (Seat == static_cast<size_t>(-1))
 		{
 			break;
 		}
-		const net::Player& Reg = Net.Players()[static_cast<size_t>(From.back())];
-		TPlayer& Seat = T->Players[Into.back()];
-		From.pop_back();
-		Named.insert(Into.back());
-		Into.pop_back();
-		Seat.Name = Reg.Name;
-		FieldCountry[Seat.Id] = Reg.Country;
-		FieldRegulars.insert(Seat.Id);
-		if (Reg.Pro)
+		TPlayer& P = T->Players[Seat];
+		Named.insert(Seat);
+		P.Name = N->Name;
+		FieldCountry[P.Id] = N->Country;
+		FieldRegulars.insert(P.Id);
+		FieldNpc[P.Id] = Id;
+		if (N->Pro)
 		{
-			FieldPros.insert(Seat.Id);
+			FieldPros.insert(P.Id);
 		}
-		Taken.insert(Reg.Name);
 	}
 	std::vector<size_t> Rest;
 	for (size_t I = 0; I < T->Players.size(); ++I)
@@ -3254,6 +3576,50 @@ void Session::NameField()
 		FieldCountry[P.Id] = Ids[K].Country;
 	}
 	FieldCountry["npc:" + std::string(RivalName)] = "CA";
+	if (Rival >= 0)
+	{
+		FieldNpc["npc:" + std::string(RivalName)] = Rival;
+		LivingWorld.Join(T->Spec.Id, Rival);
+	}
+}
+
+void Session::ReportToWorld()
+{
+	// What the player's tables saw, for the people at them to remember (and for the world's result of the event).
+	if (!T || T->Spec.Id.find('@') == std::string::npos)
+	{
+		return;
+	}
+	world::World::TableReport Rp;
+	const TPlayer& Hero = T->Hero();
+	for (const TPlayer& P : T->Players)
+	{
+		const auto It = FieldNpc.find(P.Id);
+		if (It == FieldNpc.end())
+		{
+			continue;
+		}
+		if (P.Busted && P.Place > 0)
+		{
+			Rp.Places.push_back({It->second, P.Place});
+		}
+		else if (!P.Busted)
+		{
+			Rp.StillIn.push_back(It->second);
+		}
+		if (P.KnockedOutBy == Hero.Id && P.Busted)
+		{
+			Rp.HeroKnockedOut.push_back(It->second);
+		}
+	}
+	const auto By = FieldNpc.find(Hero.KnockedOutBy);
+	if (By != FieldNpc.end() && BustPlace > 1)
+	{
+		Rp.KnockedOutHero = By->second;
+	}
+	Rp.Met.assign(FieldMet.begin(), FieldMet.end());
+	Rp.BigPots = FieldPots;
+	LivingWorld.HeroFinished(T->Spec.Id, BustPlace, BustPrize + BountyWon, Rp);
 }
 
 bool Session::CheckSatellite()

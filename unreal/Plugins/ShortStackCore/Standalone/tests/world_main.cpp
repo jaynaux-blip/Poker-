@@ -250,6 +250,22 @@ int Years(int Count, uint32_t Seed)
 			}
 		}
 	}
+	// Every big one that has finished has a champion in the history books.
+	for (int Day = static_cast<int>(W.StartedAt() / 1440.0); Day < static_cast<int>(W.Clock() / 1440.0); ++Day)
+	{
+		for (const world::LiveEvent& E : world::LiveCalendar(Day))
+		{
+			if ((E.Kind == world::LiveKind::Summit || E.Kind == world::LiveKind::ChampionshipMain) && E.Start + E.Duration + 2.0 * 1440.0 < W.Clock())
+			{
+				bool Crowned = false;
+				for (const world::Honor& H : W.Honors())
+				{
+					Crowned = Crowned || H.EventId == E.Id;
+				}
+				Check(Crowned, E.Name + " has a champion");
+			}
+		}
+	}
 	for (const char* Name : {"gh0stfold", "Mei", "Big Lou", "VikingVolta"})
 	{
 		std::printf("%s", W.Describe(W.Find(Name)).c_str());

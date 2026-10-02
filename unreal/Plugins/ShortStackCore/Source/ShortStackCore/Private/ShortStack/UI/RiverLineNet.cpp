@@ -3,6 +3,7 @@
 #include "ShortStack/UI/RiverLine.h"
 #include "../StrictFloat.h"
 #include "RiverLineShared.h"
+#include "ShortStack/Game/World.h"
 
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
@@ -30,6 +31,7 @@ void RiverLine::NetFrame(double Now)
 	World = S.WorldMinutes();
 	net::Shared().SetHero(S.HeroName, S.History);
 	You = net::StatsFrom(S.HeroName, S.History, World);
+	You.LivePoints = S.Living().HeroSeasonLivePoints();
 	if (NewsSeenAt == 0.0)
 	{
 		NewsSeenAt = World - 6.0 * 60.0;
@@ -200,6 +202,23 @@ float RiverLine::Section(const std::string& Title, float X, float Y, const Color
 	return NetSpaced(*C, Title, X + 11.0f, Y, 12.0f, 800, pal::Muted, 1.6f) + 11.0f;
 }
 
+std::string RiverLine::PlacingName(const net::Placing& P) const
+{
+	return P.Player == -1 ? S.HeroName : P.Player == -2 ? P.Name : net::Shared().Players()[static_cast<size_t>(P.Player)].Name;
+}
+
+void RiverLine::PlayerName(const net::Placing& P, float X, float Y, float Size, float MaxW, bool Badges)
+{
+	if (P.Player != -2)
+	{
+		PlayerName(P.Player, X, Y, Size, MaxW, Badges);
+		return;
+	}
+	// Someone nobody follows: just a name and a flag.
+	NetFlag(*C, P.Country, X, Y - Size * 0.72f, Size * 1.2f, Size * 0.8f);
+	UI.Text(P.Name, X + Size * 1.2f + 8.0f, Y, Ts(Size, 600, Hex(0xc3cedf), Align::Left, Baseline::Alphabetic, false, MaxW - Size * 1.2f - 8.0f));
+}
+
 void RiverLine::PlayerName(int Index, float X, float Y, float Size, float MaxW, bool Badges)
 {
 	const net::Network& Net = net::Shared();
@@ -215,7 +234,19 @@ void RiverLine::PlayerName(int Index, float X, float Y, float Size, float MaxW, 
 	const net::Player& P = Net.Players()[static_cast<size_t>(Index)];
 	NetFlag(*C, P.Country, X, Y - Size * 0.72f, Size * 1.2f, Size * 0.8f);
 	const float Nx = X + Size * 1.2f + 8.0f;
-	const float W = UI.Text(P.Name, Nx, Y, Ts(Size, 700, P.Rival ? Hex(0xd5b8ff) : pal::Ink, Align::Left, Baseline::Alphabetic, false, MaxW - Size * 1.2f - 8.0f));
+	// The name opens their player card.
+	const float Fit = std::min(MaxW - Size * 1.2f - 8.0f, UI.Measure(P.Name, Size, 700));
+	const Ui::ClickState Click = UI.Clickable("player:" + std::to_string(Index) + "@" + std::to_string(static_cast<int>(X)) + "," + std::to_string(static_cast<int>(Y)), {Nx - 2.0f, Y - Size, Fit + 4.0f, Size * 1.3f},
+		S.CurrentScreen == Screen::Lobby && CardShown < 0);
+	if (Click.Clicked)
+	{
+		ShowPlayer(Index, LastFrame);
+	}
+	const float W = UI.Text(P.Name, Nx, Y, Ts(Size, 700, P.Rival ? Hex(0xd5b8ff) : Click.Hover ? pal::Accent : pal::Ink, Align::Left, Baseline::Alphabetic, false, MaxW - Size * 1.2f - 8.0f));
+	if (Click.Hover)
+	{
+		C->FillRect({Nx, Y + 3.0f, std::min(W, Fit), 1.5f}, pal::Accent);
+	}
 	if (Badges && P.Rival)
 	{
 		NetPill(*C, "RIVAL", Nx + W + 8.0f, Y - Size * 0.78f, Hex(0xb36bff), true, 9.0f);
@@ -979,8 +1010,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 	C->FillRect({R.X + 26.0f, R.Y + 426.0f, R.W - 52.0f, 1.0f}, pal::Line);
 
 	// Tabs.
-	const bool Done = L.St == net::Status::Finished || L.St == net::Status::FinalTable;
-	const std::string Tabs[3] = {"Overview", "Payouts", Done ? "Final table" : L.St == net::Status::Running ? "Chip leaders" : "Players"};
+	const std::string Tabs[3] = {"Overview", "Payouts", L.St == net::Status::Finished ? "Final table" : "Players"};
 	float Tx = R.X + 26.0f;
 	for (int I = 0; I < 3; ++I)
 	{
@@ -1052,6 +1082,22 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 		}
 		UI.Text(Grouped(static_cast<int64_t>(Pay.size())) + " places paid \xC2\xB7 min cash " + (Pay.empty() ? std::string("-") : Money(Pay.back())), Body.X, Body.Y + Body.H - 4.0f, Ts(13.0f, 500, pal::Muted));
 	}
+	else if (L.St != net::Status::Finished)
+	{
+		// Who's in it: the regulars the world has registered, the best known first.
+		std::vector<int> Who = S.Living().Registered(E.Id);
+		const world::World& W = S.Living();
+		std::stable_sort(Who.begin(), Who.end(), [&](int A, int B) { return W.Get(A)->RepOf(world::Rep::Overall) > W.Get(B)->RepOf(world::Rep::Overall); });
+		UI.Text(Who.empty() ? std::string("No regulars registered yet") : "Regulars registered \xC2\xB7 " + std::to_string(Who.size()), Body.X, Body.Y + 18.0f, Ts(13.0f, 600, pal::Muted));
+		for (size_t I = 0; I < Who.size() && I < 8; ++I)
+		{
+			const world::Npc* N = W.Get(Who[I]);
+			const float Y = Body.Y + 30.0f + Nf(I) * 29.0f;
+			NetAvatar(*C, Body.X + 12.0f, Y + 13.0f, 11.0f, N->Name, Color{0.0f, 0.0f, 0.0f, 0.0f});
+			PlayerName(Who[I], Body.X + 32.0f, Y + 18.0f, 14.0f, Body.W - 190.0f, true);
+			UI.Text(world::IdentityName(N->Is), Body.X + Body.W, Y + 18.0f, Ts(12.0f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, false, 150.0f));
+		}
+	}
 	else
 	{
 		const net::EventResult& Res = Net.Result(E);
@@ -1066,9 +1112,9 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 			{
 				UI.Text(std::to_string(P.Place), Body.X + 12.0f, Y + 18.0f, Ts(14.0f, 800, P.Place == 1 ? pal::Gold : pal::Muted, Align::Center));
 			}
-			const std::string& Nm = P.Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(P.Player)].Name;
-			NetAvatar(*C, Body.X + 40.0f, Y + 13.0f, 11.0f, Nm, Color{0.0f, 0.0f, 0.0f, 0.0f}, P.Player < 0);
-			PlayerName(P.Player, Body.X + 60.0f, Y + 18.0f, 14.0f, Body.W - 170.0f, true);
+			const std::string Nm = PlacingName(P);
+			NetAvatar(*C, Body.X + 40.0f, Y + 13.0f, 11.0f, Nm, Color{0.0f, 0.0f, 0.0f, 0.0f}, P.Player == -1);
+			PlayerName(P, Body.X + 60.0f, Y + 18.0f, 14.0f, Body.W - 170.0f, true);
 			if (Finished)
 			{
 				UI.Text(Money(P.Prize), Body.X + Body.W, Y + 18.0f, Ts(14.0f, 700, P.Place == 1 ? pal::Gold : pal::Ink, Align::Right, Baseline::Alphabetic, true));
@@ -1123,7 +1169,7 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 		UI.Text("Winner", R.X + 68.0f, R.Y + 28.0f, Ts(12.0f, 700, pal::Muted));
 		if (W)
 		{
-			UI.Text(W->Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(W->Player)].Name, R.X + 68.0f, R.Y + 52.0f, Ts(19.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, R.W - 200.0f));
+			UI.Text(PlacingName(*W), R.X + 68.0f, R.Y + 52.0f, Ts(19.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, R.W - 200.0f));
 			UI.Text(Money(W->Prize), R.X + R.W - 18.0f, R.Y + 44.0f, Ts(22.0f, 800, pal::Gold, Align::Right, Baseline::Alphabetic, true));
 		}
 	}
@@ -1254,6 +1300,17 @@ void RiverLine::LobbyPages(double Now)
 {
 	const float In = NetEase((Now - PageAt) / 0.4);
 	const float A0 = C->GetAlpha();
+	// A player card is up: the page underneath takes no input.
+	const bool Card = CardShown >= 0;
+	const Pointer Real = UI.Ptr;
+	if (Card)
+	{
+		UI.Ptr.Pressed = false;
+		UI.Ptr.Released = false;
+		UI.Ptr.Wheel = 0.0f;
+		UI.Ptr.X = -1.0f;
+		UI.Ptr.Y = -1.0f;
+	}
 	C->Save();
 	C->SetAlpha(A0 * In);
 	C->Translate(0.0f, (1.0f - In) * 16.0f);
@@ -1267,6 +1324,11 @@ void RiverLine::LobbyPages(double Now)
 	}
 	C->Restore();
 	C->SetAlpha(A0);
+	if (Card)
+	{
+		UI.Ptr = Real;
+		PlayerCard(Now);
+	}
 }
 
 // ------------------------------------------------------------------ series
@@ -1379,7 +1441,7 @@ void RiverLine::SeriesPage(double Now)
 			{
 				const net::Placing& W = Res.FinalTable.front();
 				NetTrophy(*C, M.X + 34.0f, M.Y + 118.0f, 40.0f, Hex(0xffe08a), Hex(0xc9962b));
-				UI.Text(W.Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(W.Player)].Name, M.X + 64.0f, M.Y + 140.0f, Ts(17.0f, 800, pal::Ink));
+				UI.Text(PlacingName(W), M.X + 64.0f, M.Y + 140.0f, Ts(17.0f, 800, pal::Ink));
 				UI.Text("won " + Money(W.Prize), M.X + 64.0f, M.Y + 160.0f, Ts(13.0f, 600, pal::Gold));
 			}
 		}
@@ -1483,7 +1545,7 @@ void RiverLine::SeriesPage(double Now)
 			{
 				const net::Placing& W = Res.FinalTable.front();
 				NetTrophy(*C, R.X + 744.0f, R.Y + 13.0f, 26.0f, Hex(0xffe08a), Hex(0xc9962b));
-				UI.Text(W.Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(W.Player)].Name, R.X + 764.0f, R.Y + 27.0f, Ts(14.0f, 700, W.Player < 0 ? pal::Accent : pal::Ink, Align::Left, Baseline::Alphabetic, false, 150.0f));
+				UI.Text(PlacingName(W), R.X + 764.0f, R.Y + 27.0f, Ts(14.0f, 700, W.Player == -1 ? pal::Accent : pal::Ink, Align::Left, Baseline::Alphabetic, false, 150.0f));
 				UI.Text(Money(W.Prize), R.X + 764.0f, R.Y + 44.0f, Ts(12.0f, 700, pal::Gold, Align::Left, Baseline::Alphabetic, true));
 			}
 		}
@@ -1597,7 +1659,7 @@ void RiverLine::SeriesPage(double Now)
 				const net::Placing& P = Res.FinalTable[I];
 				const float Y = Rt.Y + 116.0f + Nf(I) * 44.0f;
 				UI.Text(Ordinal(P.Place), Rt.X + 24.0f, Y + 26.0f, Ts(14.0f, 800, P.Place == 1 ? pal::Gold : pal::Muted));
-				PlayerName(P.Player, Rt.X + 76.0f, Y + 26.0f, 15.0f, 260.0f, true);
+				PlayerName(P, Rt.X + 76.0f, Y + 26.0f, 15.0f, 260.0f, true);
 				UI.Text(Money(P.Prize), Rt.X + Rt.W - 24.0f, Y + 26.0f, Ts(15.0f, 700, P.Place == 1 ? pal::Gold : pal::Ink, Align::Right, Baseline::Alphabetic, true));
 			}
 		}
@@ -1621,7 +1683,7 @@ std::string RiverLine::BoardValue(net::Board B, double V) const
 void RiverLine::BoardsPage(double Now)
 {
 	const net::Network& Net = net::Shared();
-	const net::Board Order[6] = {net::Board::NightShift, net::Board::Season, net::Board::Earnings, net::Board::Wins, net::Board::FinalTables, net::Board::Series};
+	const net::Board Order[7] = {net::Board::NightShift, net::Board::Season, net::Board::Earnings, net::Board::Wins, net::Board::FinalTables, net::Board::Live, net::Board::Series};
 	const net::SeriesInfo* Sr = Net.CurrentSeries(World);
 	const bool SeriesLive = Sr && net::DayOf(World) >= Sr->FirstDay;
 	auto Name = [&](net::Board B) { return B == net::Board::Series && Sr ? Sr->Name : std::string(NetBoardName(B)); };
@@ -1632,7 +1694,7 @@ void RiverLine::BoardsPage(double Now)
 		{
 			continue;
 		}
-		const std::string Label = Name(B);
+		const std::string Label = B == net::Board::Live ? std::string("Live") : Name(B);
 		const Rect R{X, 84.0f, UI.Measure(Label, 15.0f, 700) + 36.0f, 36.0f};
 		const Ui::ClickState St = UI.Clickable("board" + Label, R);
 		if (St.Clicked)
@@ -1748,6 +1810,10 @@ void RiverLine::BoardsPage(double Now)
 	UI.Text(Name(BoardShown), Rt.X + 26.0f, Rt.Y + 54.0f, Ts(28.0f, 900, pal::Ink, Align::Left, Baseline::Alphabetic, false, Rt.W - 52.0f));
 	std::string About;
 	double Ends = -1.0;
+	// The season boards run January to December (and start again).
+	const int Year = world::YearOf(net::DayOf(World));
+	const std::string Yr = std::to_string(Year);
+	const double YearEnds = static_cast<double>(world::YearStart(Year + 1)) * net::MinutesPerDay;
 	switch (BoardShown)
 	{
 	case net::Board::NightShift:
@@ -1755,17 +1821,20 @@ void RiverLine::BoardsPage(double Now)
 		Ends = life::NightShiftStart(World) + 12.0 * 60.0;
 		break;
 	case net::Board::Season:
-		About = "Player of the Year 2026. Points from every final table since January. The top three win RCOP 2027 Platinum Passes worth $25,000.";
-		Ends = 88.0 * net::MinutesPerDay;
+		About = "Player of the Year " + Yr + ". Points from every final table since January. The top three win RCOP " + std::to_string(Year + 1) + " Platinum Passes worth $25,000.";
+		Ends = YearEnds;
 		break;
 	case net::Board::Earnings: About = "All-time tournament winnings on RiverLine. Every cash counts, every buy-in forgotten."; break;
-	case net::Board::Wins: About = "Tournament titles won in 2026. Anyone can run deep once."; Ends = 88.0 * net::MinutesPerDay; break;
-	case net::Board::FinalTables: About = "Final tables reached in 2026. The consistency board."; Ends = 88.0 * net::MinutesPerDay; break;
+	case net::Board::Wins: About = "Tournament titles won in " + Yr + ". Anyone can run deep once."; Ends = YearEnds; break;
+	case net::Board::FinalTables: About = "Final tables reached in " + Yr + ". The consistency board."; Ends = YearEnds; break;
 	case net::Board::Series:
 		About = "Points from every final table at " + (Sr ? Sr->Name : std::string("the series")) + ". The top three win RCOP Main Event packages.";
 		Ends = Sr ? static_cast<double>(Sr->LastDay + 1) * net::MinutesPerDay : -1.0;
 		break;
-	case net::Board::Live: About = "Live Player of the Year: points from every live final table, from the Riverside's Sunday $150 to the Championship."; break;
+	case net::Board::Live:
+		About = "Live Player of the Year " + Yr + ": points from every live final table, from the Riverside's Sunday $150 to the Grand Circuit and the Championship in Las Vegas.";
+		Ends = YearEnds;
+		break;
 	}
 	float Y = NetParagraph(*C, About, Rt.X + 26.0f, Rt.Y + 90.0f, Rt.W - 52.0f, 15.0f, 500, Hex(0xc3cedf), 22.0f, 5) + 12.0f;
 	if (Ends > World)
@@ -2244,7 +2313,13 @@ void RiverLine::CareerPage(double Now)
 	NetAvatar(*C, Rc.X + 60.0f, Rc.Y + 84.0f, 32.0f, Rv.Name, Hex(0xb36bff));
 	UI.Text(Rv.Name, Rc.X + 108.0f, Rc.Y + 82.0f, Ts(24.0f, 900, Hex(0xe7dbff)));
 	NetFlag(*C, Rv.Country, Rc.X + 108.0f, Rc.Y + 94.0f, 18.0f, 12.0f);
-	UI.Text("Low-stakes crusher \xC2\xB7 " + std::to_string(Rv.Wins) + " titles \xC2\xB7 never logs off", Rc.X + 134.0f, Rc.Y + 105.0f, Ts(13.0f, 600, pal::Muted));
+	const std::string Level = Rv.Stake == net::Tier::High ? "High-stakes" : Rv.Stake == net::Tier::Mid ? "Mid-stakes" : "Low-stakes";
+	UI.Text(Level + " crusher \xC2\xB7 " + std::to_string(Rv.Wins) + " titles \xC2\xB7 never logs off", Rc.X + 134.0f, Rc.Y + 105.0f, Ts(13.0f, 600, pal::Muted));
+	// The rival's card, like anyone's.
+	if (UI.Clickable("rivalcard", {Rc.X + 20.0f, Rc.Y + 40.0f, Rc.W - 40.0f, 80.0f}, CardShown < 0).Clicked)
+	{
+		ShowPlayer(Net.RivalIndex(), LastFrame);
+	}
 	const std::pair<const char*, std::pair<double, double>> Versus[3] = {
 		{"Winnings", {static_cast<double>(You.Earnings), static_cast<double>(Rv.Earnings)}},
 		{"Titles", {static_cast<double>(You.Wins), static_cast<double>(Rv.Wins)}},

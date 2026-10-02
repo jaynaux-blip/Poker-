@@ -70,12 +70,18 @@ void World::AdvanceTo(double To)
 		for (; Done < Queue.size() && Queue[Done].End <= Limit; ++Done)
 		{
 			Pending& P = Queue[Done];
-			if (P.HeroPlace < 0)
+			if (P.HeroPlace < 0 && Limit < P.Start + 2.0 * 1440.0)
 			{
-				// The player is still at the tables: the result waits for them.
+				// The player is still at the tables: the result waits for them (not forever: a table walked away from
+				// is decided without them).
 				P.End = Limit + 15.0;
 				Later.push_back(std::move(P));
 				continue;
+			}
+			if (P.HeroPlace < 0)
+			{
+				P.HeroPlace = 0;
+				HeroIn.erase(P.Id);
 			}
 			Sim::Resolve(*this, P);
 		}
@@ -120,7 +126,8 @@ const net::EventResult* World::ResultOf(const std::string& EventId) const
 
 void World::EnsurePlanned(int Day)
 {
-	if (Created && Day > Planned && Day <= sim::DayAt(Now) + 3)
+	// Tomorrow at most: registrations further out don't exist yet (and looking doesn't change the world).
+	if (Created && Day > Planned && Day <= sim::DayAt(Now) + 1)
 	{
 		Sim::PlanDay(*this, Day);
 	}
@@ -254,6 +261,28 @@ void World::HeroEntered(const std::string& EventId, const std::string& EventName
 	}
 	HeroIn.insert(EventId);
 	++Rev;
+	++HeroRev;
+}
+
+void World::Join(const std::string& EventId, int Npc)
+{
+	Pending* P = FindPending(Queue, EventId);
+	if (!P || !Get(Npc))
+	{
+		return;
+	}
+	for (const Entry& E : P->Who)
+	{
+		if (E.Npc == Npc)
+		{
+			return;
+		}
+	}
+	Entry E;
+	E.Npc = Npc;
+	P->Who.push_back(E);
+	++Rev;
+	++HeroRev;
 }
 
 void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, const TableReport& Report)
@@ -356,6 +385,7 @@ void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, con
 		}
 	}
 	++Rev;
+	++HeroRev;
 }
 
 void World::BackRoomNight(double At, const std::vector<std::string>& Names, Chips HeroNet)
@@ -369,6 +399,7 @@ void World::BackRoomNight(double At, const std::vector<std::string>& Names, Chip
 		}
 	}
 	++Rev;
+	++HeroRev;
 }
 
 void World::RiversideDone(double At, const std::vector<std::pair<std::string, int>>& Places, int HeroPlace, int FieldSize)
@@ -416,6 +447,7 @@ void World::RiversideDone(double At, const std::vector<std::pair<std::string, in
 	}
 	HeroResults[Id] = {HeroPlace, 0};
 	++Rev;
+	++HeroRev;
 }
 
 void Sim::Feel(Bond& B, MemoryKind K, float Emotion)
@@ -511,6 +543,7 @@ void World::Remember(int Npc, MemoryKind Kind, const std::string& Where, Chips A
 	M.Where = Where;
 	M.Amount = Amount;
 	B.Memories.push_back(M);
+	++HeroRev;
 	if (B.Memories.size() > 12)
 	{
 		B.Memories.erase(B.Memories.begin() + 1); // the first meeting is always kept

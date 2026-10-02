@@ -102,6 +102,63 @@ Both default to doing nothing, so existing hosts compile unchanged.
 
 The LED room kit is polled rather than pushed: call `Session::RoomGlow(Now)` every frame (with the time passed to `Update`). It returns whether the lights are on, the colour (0xRRGGBB, sRGB) and a level (1 is steady). With sync on and the stream live, the level and colour follow the hype, alerts and big hands. `ANightOneStage::SetRoomLights` turns it into the desk strip, the ceiling cove and the room fill.
 
+## The living world
+
+`ShortStack/Game/World.h` holds everyone else's careers: about 1,600 regulars, the cast and Kast's streamers. They're plain structs, not Actors, and the session owns the world (`Session::Living()`).
+
+**How it runs**
+
+- The world advances with the session clock (`World::AdvanceTo`), an hour at a time. Each day it plans who plays what (from bankroll, comfort, schedule and identity) and resolves events as they finish.
+- Weekly, monthly and yearly passes handle:
+  - living costs, deposits and cash-outs;
+  - stake moves (with hysteresis);
+  - skill growth and decline;
+  - breaks, retirements, newcomers, staking, streaming and ties between people;
+  - Player of the Year and honors.
+- **Finishing places come from a formula, never from dealt cards:** the place is u^(1/a), with a = exp(-0.8 · luck · edge). The edge is skill minus the tier's field strength, clamped to ±0.35. Re-entries keep their best bullet.
+- The cards are never touched. The world never decides a hand, and the AI at the player's tables plays as before.
+- **Determinism:** every random draw comes from a named stream (`world/<seed>/<what>/<key>`). The same seed and the same player inputs give the same world, and a saved world resumes exactly.
+
+**Where it shows up**
+
+- `net::Network::Attach(const world::World*)` makes the lobby's players, results, leaderboards (including `Board::Live`) and news read from the world. Before the world starts, the old deterministic network still answers.
+- `Session::NameField` seats up to three registered regulars at the player's table, matched by style. The player's results, pots, knockouts and greetings become memories (`World::Bonds()`).
+- `World::ProfileOf(Npc)` is the public player card RiverLine draws (`RiverLineCard.cpp`); it never exposes hidden numbers.
+- `World::Headline` turns world events into news.
+
+**Save**
+
+- The world writes its own `world\t...` lines after the session's lines. The first line carries `world::Version`. Hosts that edit a save pass these lines through untouched (`SaveData::WorldText`).
+- A save without world lines gets a new world, starting tonight.
+- **Size and cost:**
+  - Recent results are kept for 8 days (majors for 400 days), and long-gone retirees fold into `ghost` lines.
+  - A save is about 1.7 MB after a month, 2.5 MB after a year and 4 MB after ten years.
+  - The session rewrites the world text only when something involving the player changed, or once an in-game hour has passed.
+
+**Nights away from the desk**
+
+- The host records Dee's game and the Riverside with `SaveData::NoteBackRoom` and `NoteRiverside`.
+- These write `worldnote` lines, and the next session plays them into the world once.
+
+**Debug console commands** (non-shipping builds, `NightOneGameMode.cpp`)
+
+| Command | What it does |
+|---|---|
+| `ss.World.Report` | Population, stakes, bankrolls, form, identities and reputation leaders |
+| `ss.World.Npc <name>` | Everything about one person: bankroll, skills, traits, results, schedule, ties, memories of the player, history |
+| `ss.World.Leaders` | The 20 best-known players and what they're known for |
+| `ss.World.Simulate <days>` | Sleep through 1, 7, 30 or 365 days (up to 3,650); the clock and the world move on |
+| `ss.World.Preview <days>` | How the world would look then (a copy is played forward; nothing changes) |
+
+**Performance**
+
+- About 9 ms per simulated day (spread over the hour ticks), 0.05 ms per in-game minute, and 4 to 5 s per simulated year.
+- `world_test years 10 11` runs a ten-year check with seed 11. Over ten years:
+  - The active population follows its slowly growing target (about 1,600 to 1,870).
+  - The number of players at each stake stays steady, and per-stake median bankrolls stay flat.
+  - There are about 100 to 120 pros, and 125 to 150 players with skill of 0.75 or more.
+  - The run fails if any finished Summit or Championship Main has no champion in the history.
+
 ## Build and test without Unreal
 
 ```
@@ -110,13 +167,14 @@ cmake -S . -B build && cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio generator builds Debug by default, so pass the configuration to ctest: `ctest --test-dir build -C Debug --output-on-failure`. The Standalone build runs six tests:
+On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio generator builds Debug by default, so pass the configuration to ctest: `ctest --test-dir build -C Debug --output-on-failure`. The Standalone build runs seven tests:
 
 - `golden_test`: the 4,201 golden vectors.
 - `unit_test`: 5,000 fuzzed hands checking chip conservation, illegal-action rejection, and a 1,000-player tournament played to the end, about 0.7 s.
 - `session_test`: whole tournaments played through the Night One session, with random and best-EV heroes. It covers the bubble, the money, the final table, sprint mode and save round trips. It also checks the network: tonight's schedule at 2:07 AM, fees, locked formats, the Night Shift board, the player's results landing in final tables and the news, the lobby clock, and registering for a scheduled event. The life checks cover shifts, Marcus's runs, sleep, rent collection and eviction, the Night Shift payout, unlocks, bounty and satellite specs, tickets, a satellite played on a ticket, and a progressive knockout played out. The streaming checks cover GearDrop (screens add tables, the laptop can't stream until the PC upgrade, side-grades are blocked), a whole tournament on stream on Kast, the payout, a shift ending the stream, subscriptions renewing and lapsing, and the gear and channel in the save. They also check Dee and Mei on night one, a first stream that draws a handful of people, a posted schedule, a stream ended with a raid, and the community in the save. A 50-stream grind checks that growth is slow but real: tens of followers after ten streams, Affiliate only once the 30-day rules are met, more regulars and more people coming back, the community drifting after three weeks away, and a schedule and a streamer who talks to chat building a bigger community. The LED checks cover the room kit: no light without it, each colour's perk (and only that one), Aurora's drift, the power switch, the save (and old saves without it), a sub flashing the room, a won all-in sweeping it gold, a bad beat dimming it, the room breathing with hype, and sync off holding the colour.
-- `ui_test`: clicks drive the session (log in, filter the schedule, select an event, register, open a page). It also draws every screen, including each lobby page before and after a big night, the laptop apps, the time-lapse, a bounty table and the seat and bounty result screens, GearDrop (the store, an order, the delivery) and Kast (the locked studio, the studio live at a table, the Community page offline and live, the channel, the directory, the end-of-stream card). On Kast it also clicks the schedule's day toggles and start time, and ends a stream with Raid & end. For the LED room kit it buys the kit, picks a colour from Your setup, opens the Room lights card and draws it in each of the seven colours and switched off, toggles power and sync, and opens it from the Kast studio while live (the facecam lit, and swept gold by a won all-in). It ends with a gallery of every product picture, emote and facecam mood.
+- `ui_test`: clicks drive the session (log in, filter the schedule, select an event, register, open a page). It also draws every screen, including each lobby page before and after a big night, the laptop apps, the time-lapse, a bounty table and the seat and bounty result screens, GearDrop (the store, an order, the delivery) and Kast (the locked studio, the studio live at a table, the Community page offline and live, the channel, the directory, the end-of-stream card). On Kast it also clicks the schedule's day toggles and start time, and ends a stream with Raid & end. For the LED room kit it buys the kit, picks a colour from Your setup, opens the Room lights card and draws it in each of the seven colours and switched off, toggles power and sync, and opens it from the Kast studio while live (the facecam lit, and swept gold by a won all-in). It ends with a gallery of every product picture, emote and facecam mood. For the living world it draws the boards (including Live), the news, player cards (the rival, Mei, the world's best-known player) and the regulars registered for an event, then sleeps 420 days and draws them again.
 - `monkey_test`: random clicks and keys across every screen while it sits down at random events (up to four tables at once) and winds the sitting down to its results, about 15 s. It also shops on GearDrop, goes live on Kast and works the studio (ads, answers, timeouts, mods), changes the schedule, sometimes ends a stream with a raid, and changes the LED kit's colour, power and sync. Every frame it checks that the bankroll only moves through the ledger, tournament chips are conserved, the clock never runs backwards, no table stalls, saves round-trip, nobody streams without the PC upgrade, the stream's numbers stay in range, the community stays in its ranges (loyalty, affinity, stage, schedule), and the room's lights match the kit and its settings. `./build/monkey_test 40 30000` runs a longer sweep.
+- `living_world` (`world_test`): a world is created and played for a month, about 1.5 s. It checks every person (no negative bankrolls, skills and stakes in range, sane ledgers, at most seven ties), that tonight's events have the world's regulars registered, that final tables mix regulars and unknowns, that the rival keeps the network's index, that a night at Dee's leaves memories, and that a saved world writes the same save and plays on exactly as the original. `world_test years <n> [seed]` runs the long check above, and `world_test npc <name> [days]` prints one person's career.
 - `audio_test`: every synthesized sound is audible, finite and in range.
 
 To look at the UI without Unreal:

@@ -264,6 +264,29 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
 - **Tilt:** NPCs tilt after bad beats and needling, and it shows in their play and their tells.
 - **Fairness guarantee:** the AI never sees hidden cards. The shuffle is a uniform Fisher–Yates shuffle driven by a strong random number generator, and every hand history can be replayed exactly.
 
+**The living world (built).** The other players have careers, and those careers go on whether you're watching or not.
+
+- **Who's in it:** about 1,600 regulars (the RiverLine field), the people with faces (Dee, Mei, Sal, Big Lou, Twitch, gh0stfold and the rest of the cast) and Kast's streamers. Each has:
+  - a bankroll and a living to pay for;
+  - fourteen skills (preflop, ICM, bounties, live reads, emotional control and so on) and seven traits;
+  - a weekly schedule and a home region;
+  - an identity that changes with the career (a Recreational player can become a Rising prospect, then a Young crusher, then a Disciplined pro);
+  - form (heaters, downswings, burnout) and five reputations (online, live, underground, streaming, high stakes).
+- **How they play:** each person picks events their bankroll and comfort allow, plays them off-screen, and finishes where skill against the field's strength and the luck of the draw put them. The world never touches cards. Your own tables play out hand by hand as before, and NPCs at them play with the AI; the world only records where they finished.
+- **Careers:**
+  - Moving up and down stakes (with a margin, so nobody bounces back and forth).
+  - Going broke and rebuilding, and staking deals that run for six months.
+  - Turning pro, taking breaks, retiring and coming back.
+  - Newcomers arrive and keep the population steady, and rare big scores make overnight stories.
+- **The calendar:** local weeklies, Dee's back room, regional festivals, the Grand Circuit, the Championship (with its summer Main Event), The Summit and RiverLine's online series. Everyone in the world plays them, and the results stand.
+- **History:** titles, Player of the Year and every honor are kept forever. Results and events are kept for as long as they matter, and old retirees fold into short records.
+- **You, in their world:**
+  - People who sat with you remember it: met, said hello, big pots, who busted whom, nights at Dee's game, the Riverside.
+  - Their memories show on their player card ("Knows you") and in what they say at the table.
+  - Click any name in RiverLine to open a player card. It shows only what's public: results, reputation, form, years, what they know about you, their story and who they run with.
+  - The leaderboards (Overall, Online, Live, the season and the years) and the news are the world's real results, with you on them.
+  - Dee and the cast text you when someone you know wins, moves up or retires.
+
 ## 9. RPG systems
 
 **Skill tree: five branches**
