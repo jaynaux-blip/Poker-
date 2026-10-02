@@ -32,9 +32,34 @@ FELT_R = RADIUS - RAIL_W + 0.006  # the felt tucks under the rail
 FELT_Z = 0.76
 PLY_Z0 = 0.715
 
-# Seats, counterclockwise from the player: (x, y) at the rail's outer edge. 0 is the player, 4 the dealer.
-SEATS = [(0.0, -RADIUS), (0.64, -RADIUS), (HALF_L + RADIUS, 0.0), (0.64, RADIUS), (0.0, RADIUS), (-0.64, RADIUS),
-         (-HALF_L - RADIUS, 0.0), (-0.64, -RADIUS)]
+
+
+def rail_point(s):
+    """The point s meters along the rail's outer edge from the player's seat (x = 0, y = -RADIUS), counterclockwise."""
+    arc = math.pi * RADIUS
+    if s < HALF_L:
+        return (s, -RADIUS)
+    s -= HALF_L
+    if s < arc:
+        a = -math.pi / 2 + s / RADIUS
+        return (HALF_L + RADIUS * math.cos(a), RADIUS * math.sin(a))
+    s -= arc
+    if s < 2 * HALF_L:
+        return (HALF_L - s, RADIUS)
+    s -= 2 * HALF_L
+    if s < arc:
+        a = math.pi / 2 + s / RADIUS
+        return (-HALF_L + RADIUS * math.cos(a), RADIUS * math.sin(a))
+    s -= arc
+    return (-HALF_L + s, -RADIUS)
+
+
+# Seven seats spaced evenly round the rail's outer edge (89 cm apart: room for a pair of shoulders between chairs),
+# counterclockwise from the player: (x, y). 0 is the player, 4 the dealer, who sits a little to the side of straight
+# across. The game (BackRoomStage.cpp SeatEdge) lays its seats out the same way.
+SEAT_COUNT = 7
+PERIMETER = 4 * HALF_L + 2 * math.pi * RADIUS
+SEATS = [rail_point(i * PERIMETER / SEAT_COUNT) for i in range(SEAT_COUNT)]
 PEDESTAL_X = 0.62
 
 REVIEW_VIEWS = [('front', -25, 30, 1.6), ('top', 0, 80, 1.35), ('detail', -40, 30, 0.45, (0.25, -0.5, FELT_Z))]

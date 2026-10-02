@@ -487,11 +487,13 @@ void ABackRoomPlayer::UpdateBody(float Dt)
 		P.Curl[Side] = FMath::Clamp(H.Curl + W.Curl, 0.0f, 1.0f);
 		P.ThumbCurl[Side] = FMath::Clamp(H.Thumb + W.Thumb, 0.0f, 1.0f);
 		P.Pinch[Side] = FMath::Clamp(H.Pinch + W.Pinch, 0.0f, 1.0f);
-		// The elbow rests on the rail's edge, a little out from the shoulder; a hand down in the lap lets it hang back.
-		const float Sx = Side == 0 ? 1.0f : -1.0f;
+		// The elbow hangs relaxed (down and a little out; straight down with a hand in the lap) and comes up off the
+		// rail's crown only as far as the forearm needs: the arm solve finds that against the table itself.
 		const float Low = FMath::SmoothStep(78.0f, 68.0f, static_cast<float>(H.Pos.Z));
-		P.ElbowAt[Side] = FMath::Lerp(FVector(Sx * 22.0, Rail - 4.0, 80.0), FVector(Sx * 20.0, Rail - 28.0, 64.0), static_cast<double>(Low));
+		P.ElbowPrefer[Side] = FMath::Lerp(-1.0f, -1.45f, Low);
 	}
+	P.bTableContact = ContactEnabled();
+	P.ToTable = Body->GetComponentTransform() * TableToWorld.Inverse();
 	P.Tremble = Tremble;
 	P.KneeSpread = 0.2f + 0.5f * Dominance;
 }

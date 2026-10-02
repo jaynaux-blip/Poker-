@@ -370,9 +370,9 @@ float t = dot(LP.xy, D);
 float dp = dot(LP.xy, Pd) - Anchor;
 // The hinge is curved (a parabola about the corner: Anchor is the corner's place along it) so what comes up is a
 // rounded tongue around the corner, not a wing across the card; the lift also dies away along the edge.
-float s = Hinge - t - 0.22 * dp * dp;
+float s = Hinge - t - Cup * dp * dp;
 float h = LP.z * Up;
-float L = Lift * (1.0 - smoothstep(0.6, 4.4, abs(dp)));
+float L = Lift * (1.0 - smoothstep(Taper0, Taper1, abs(dp)));
 float3 outP = LP;
 float phi = 0.0;
 if (s > 0.0 && L > 0.0001)
@@ -432,12 +432,12 @@ def build_card(force):
     mat.set_editor_property("tangent_space_normal", False)
     side = ss._scalar(mat, "Side", 0.0, -1400, -500)
     params = {}
-    for i, (n, v) in enumerate((("Lift", 0.0), ("Radius", 2.5), ("Hinge", 0.0), ("BendAngle", 1.5708), ("Up", 1.0), ("Anchor", 0.0))):
+    for i, (n, v) in enumerate((("Lift", 0.0), ("Radius", 2.5), ("Hinge", 0.0), ("BendAngle", 1.5708), ("Up", 1.0), ("Anchor", 0.0), ("Taper0", 0.6), ("Taper1", 4.4), ("Cup", 0.4))):
         params[n] = ss._scalar(mat, n, v, -1400, -400 + i * 80)
     lp = ss._expr(mat, unreal.MaterialExpressionLocalPosition, -1400, 100)
 
     def bend_node(code, y, desc):
-        c = ss._custom(mat, code, ["LP", "Lift", "Radius", "Hinge", "BendAngle", "Up", "Anchor", "Side"], F3, -900, y, desc)
+        c = ss._custom(mat, code, ["LP", "Lift", "Radius", "Hinge", "BendAngle", "Up", "Anchor", "Taper0", "Taper1", "Cup", "Side"], F3, -900, y, desc)
         ss._link(lp, c, "LP")
         for n, e in params.items():
             ss._link(e, c, n)

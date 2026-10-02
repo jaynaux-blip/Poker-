@@ -190,6 +190,9 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Short Stack")
 	FBackRoomPersona Persona;
 
+	/** The table this person sits at, in the world (the table's own frame is the stage's origin: the main table is the identity). */
+	FTransform TableToWorld = FTransform::Identity;
+
 	UPROPERTY(EditAnywhere, Category = "Short Stack")
 	EBackRoomRole SeatRole = EBackRoomRole::Player;
 
@@ -429,8 +432,10 @@ private:
 	// ---- the peek (BackRoomPlayerHands.cpp): one hand covers the cards, the other pinches the corner and lifts it
 	/** The hand that lifts the corner: the one on the side of the near corner that carries an index. */
 	int32 PeekHand() const;
-	/** The lifted corners' grip at Amount (world): between the two cards' pinch points. */
-	FVector PeekGripAt(float Amount) const;
+	/** The lifted corners' grip at Amount (world): between the two cards' pinch points (Height: off the skin, along its normal). */
+	FVector PeekGripAt(float Amount, float Height = 0.0f) const;
+	/** Where the lifting finger's center goes: just under the corner's skin, and never lower than a finger lying on the felt. */
+	FVector FingerPathAt(float Amount) const;
 	/** The fingers pinching the corners as they are at Amount (0 on the felt .. 1 lifted). */
 	FHandPose PeekGripPose(int32 Side, float Amount, float Pinch) const;
 	/** The hand laid over the far half of the cards. */
@@ -492,6 +497,35 @@ private:
 	/** The hand whose real fingertips are being steered onto the intended ones (-1: none), and how far the wrist is moved to do it. */
 	int32 TrackSide = -1;
 	FVector PeekBias[2] = {FVector::ZeroVector, FVector::ZeroVector};
+
+	// ------------------------------------------------------------ contact (BackRoomPlayerContact.cpp)
+	// The contact itself is solved in the pose (BackRoomAnim.cpp); this is the audit of it, and the offsets it came to.
+	static bool ContactEnabled();
+	/** How far the pose moved this hand off the table (component space), for what the hand holds to follow. */
+	FVector ContactShift(int32 Side) const;
+	/** How far the pose pitched this hand up about the wrist (radians), for what the hand holds to follow. */
+	float ContactPitch(int32 Side) const;
+	void AuditContacts(float Dt);
+	struct FContactSample
+	{
+		int32 Bone = INDEX_NONE;
+		/** A second bone: the sample is between the two (Mix), or this bone's tip carried Extend cm along the finger. */
+		int32 Bone2 = INDEX_NONE;
+		float Mix = 0.0f;
+		float Extend = 0.0f;
+		float Radius = 1.0f;
+	};
+	bool BuildContactSamples();
+	FVector ContactAt(const FContactSample& S) const;
+	TArray<FContactSample> HandSamples[2];
+	bool bContactReady = false;
+	float ContactLogT = 0.0f;
+	float ContactWorst = 0.0f;
+	FString ContactWorstName;
+	int32 ContactFrames = 0, ContactBad1 = 0, ContactBad2 = 0;
+	/** Where each hand's wrist and middle fingertip were last frame (world), for the audit's pop detector. */
+	FVector LastProbe[2][2] = {{FVector::ZeroVector, FVector::ZeroVector}, {FVector::ZeroVector, FVector::ZeroVector}};
+	bool bLastProbe = false;
 	/** The hole cards' lift (0..1): what the lifting fingers make of it, or the corner falling back once let go. */
 	float PeekNow = 0.0f;
 	float PeekApplied = 0.0f;

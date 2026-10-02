@@ -52,12 +52,23 @@ public:
 	 * over the felt (more, and the arms reach out straight and become the picture).
 	 */
 	static constexpr double RailGap = 10.0;
+	/** Height of the table's underside (the apron's lower edge, cm): under it is open (knees, a lap, a belly). */
+	static constexpr double ApronZ = 71.6;
+	/** How far the table's outer edge is from its middle line (cm). */
+	static constexpr double RailOuterD = 61.0;
 	/** Where seat Index (0 = player, 4 = dealer, counterclockwise) meets the rail's outer edge. */
 	static FVector SeatEdge(int32 Index);
 	/** Where a player in seat Index sits: the chair's front edge, facing the table. */
 	static FTransform SeatTransform(int32 Index);
 	/** The player's eyes, seated. */
 	FVector EyeLocation() const;
+	/**
+	 * The poker table's solid, in the table's own frame (its middle line along y: x = 0, y in [-61, 61]; the same
+	 * section the table mesh is built from: the felt, the padded rail with its crown, the outer skirt). Whether a
+	 * ball of Radius at P is sunk into it, the push that takes it out, and its clearance (negative when sunk).
+	 * bUnderTableFree: the space under the apron is open (knees, a belly), else the solid runs on down.
+	 */
+	static bool TableContact(const FVector& P, float Radius, bool bUnderTableFree, FVector& OutPush, float& OutClearance);
 
 	// ------------------------------------------------------------ the Riverside (card room venue)
 	/**

@@ -416,6 +416,7 @@ void ABackRoomGameMode::PlaceExtras()
 			E->SetActorHiddenInGame(false);
 			// They look at their own table.
 			const FTransform World = TableFrame * (RoomRoot ? RoomRoot->GetComponentTransform() : FTransform::Identity);
+			E->TableToWorld = World;
 			E->PotAt = World.TransformPosition(FVector(10.0, 0.0, ABackRoomStage::FeltZ));
 			E->DealerAt = World.TransformPosition(ABackRoomStage::SeatTransform(4).TransformPosition(FVector(-14.0, 0.0, 112.0)));
 			E->HeroEyes = World.TransformPosition(ABackRoomStage::SeatTransform(ExtraSeats[(K + 1) % 3]).TransformPosition(FVector(-14.0, 0.0, 112.0)));

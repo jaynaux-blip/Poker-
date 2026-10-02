@@ -44,8 +44,8 @@ public:
 
 	/**
 	 * A peek: the corner nearest Toward (a world point: the peeker's eyes) that carries an index is lifted and
-	 * curled back toward them, a rounded tongue about 5.6 cm deep at the corner and dying away along the edge
-	 * (the hinge is a parabola about the corner, so it isn't a fin across the card). At Amount 1 its
+	 * curled back toward them: the stack's near edge comes up about 5.6 cm deep, strongest at the corner and easing away along the edge
+	 * (the shape is tunable: ss.PeekDepth, ss.PeekCup, ss.PeekTaper0/1). At Amount 1 its
 	 * tip stands MaxLift radians up: about 60 degrees for a careful player across the table; the hero's own
 	 * peek curls on past upright, so the face's index turns up to the eyes above it.
 	 */
@@ -54,6 +54,26 @@ public:
 	FVector GetPeekTip(float Amount, const FVector& Toward, float MaxLift) const;
 	/** Where fingers pinch the lifted corner: the tip, drawn a little in along the near edge so the index stays clear. */
 	FVector GetPeekGrip(float Amount, const FVector& Toward, float MaxLift) const;
+	/**
+	 * Cards lying one on another bend together or not at all: a flap in world space (the way into the card, and a
+	 * point on the hinge line), the same hinge for each card of the stack, so their curls nest (each inside the
+	 * one beneath it by NestGap) instead of cutting through one another.
+	 */
+	struct FPeekFlapWorld
+	{
+		FVector Dir = FVector::ZeroVector;
+		FVector Vertex = FVector::ZeroVector;
+		/** Half the distance between the stacked cards' corners along the hinge: the tongue is this much wider. */
+		float Spread = 0.0f;
+	};
+	/** The flap two cards of a peek share: the lower card's, widened to take both corners. */
+	static FPeekFlapWorld MakeSharedFlap(const ABackRoomCard& Under, const ABackRoomCard& Over, const FVector& Toward);
+	/** How much tighter the upper card of a stack curls than the one beneath it (cm): a card's thickness and the air between. */
+	static constexpr float NestGap = 0.2f;
+	/** A peek of this card as part of a stack (RadiusReduce: its curl's radius is that much smaller than the lowest card's). */
+	void SetPeekShared(float Amount, const FPeekFlapWorld& Flap, float MaxLift, float RadiusReduce, const FVector& Toward);
+	/** Where the pinch is on the shared flap; Height above (+) or below (-) the card's skin, along its normal. */
+	FVector GetPeekGripShared(float Amount, const FPeekFlapWorld& Flap, float MaxLift, float RadiusReduce, float Height, const FVector& Toward) const;
 	/** Which side of the peeker (the right vector of where they sit) the lifted corner is on: +1 right, -1 left. */
 	float GetPeekSide(const FVector& Toward, const FVector& PeekerRight) const;
 	/**
@@ -84,8 +104,14 @@ private:
 		float Hinge = 0.0f;
 		/** Where the corner sits along the hinge line: the lift is strongest here and tapers away from it. */
 		float Anchor = 0.0f;
+		/** The taper along the hinge: full lift to Taper0 from the anchor, none by Taper1 (cm). */
+		float Taper0 = 4.5f;
+		float Taper1 = 9.5f;
+		/** How fast the hinge falls away from the anchor (cm of depth per cm squared along it). */
+		float Cup = 0.03f;
 	};
 	FFlap FlapToward(const FVector& Toward) const;
+	FFlap FlapShared(const FPeekFlapWorld& Flap, const FVector& Toward) const;
 	/** A point of the card (local, cm; Height above the mid-plane toward the ceiling) bent by Lift, as the material does. */
 	FVector BendLocal(const FVector& Local, const FFlap& Flap, float Lift, float Radius, float Height) const;
 	static float RadiusFor(float MaxLift);
@@ -120,5 +146,6 @@ private:
 	// The peek's curl.
 	float Peek = 0.0f;
 	float PeekMax = 1.05f;
+	float PeekRadius = 1.6f;
 	FFlap Flap;
 };

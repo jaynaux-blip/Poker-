@@ -1,6 +1,7 @@
 #include "BackRoomAnim.h"
 
 #include "Animation/AnimNodeBase.h"
+#include "BackRoomStage.h"
 #include "BonePose.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "TwoBoneIK.h"
@@ -193,11 +194,121 @@ using namespace BackRoomAnimDetail;
 void FBackRoomBodyProxy::PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds)
 {
 	FAnimInstanceProxy::PreUpdate(InAnimInstance, DeltaSeconds);
+	Dt = FMath::Clamp(DeltaSeconds, 0.001f, 0.1f);
 	if (const UBackRoomBodyAnim* Anim = Cast<UBackRoomBodyAnim>(InAnimInstance))
 	{
 		Pose = Anim->Pose;
 	}
 }
+
+namespace
+{
+/**
+ * Two-bone IK for an arm, the elbow's swing about the shoulder-to-hand line chosen here: where it hangs when
+ * nothing is in the way (Prefer), else the nearest swing that keeps the elbow and both ends of the forearm
+ * (and the upper arm by the elbow) out of the table, tested against its real surface. A swing that clears is taken
+ * at once; coming back down to the relaxed one is slow.
+ */
+void SolveArm(const FBackRoomBodyPose& P, int32 Side, const FVector& Root, double L1, double L2, const FVector& Target, float Prefer, float Dt, float& Phi, FVector& OutJoint, FVector& OutEnd)
+{
+	const FVector To = Target - Root;
+	double Dist = To.Size();
+	const FVector D = Dist > 1.0e-3 ? To / Dist : FVector::YAxisVector;
+	Dist = FMath::Clamp(Dist, FMath::Abs(L1 - L2) + 0.5, L1 + L2 - 0.05);
+	OutEnd = Root + D * Dist;
+	const double A = (L1 * L1 - L2 * L2 + Dist * Dist) / (2.0 * Dist);
+	const double H = FMath::Sqrt(FMath::Max(L1 * L1 - A * A, 0.0));
+	const FVector C = Root + D * A;
+	// The elbow's circle: Up across the line (toward the ceiling), Out across it and away from the body.
+	FVector Up = FVector::UpVector - D * FVector::DotProduct(FVector::UpVector, D);
+	if (Up.SizeSquared() < 0.01)
+	{
+		Up = FVector::YAxisVector - D * D.Y;
+	}
+	Up = Up.GetSafeNormal();
+	FVector Out = FVector::CrossProduct(Up, D).GetSafeNormal();
+	if (FVector::DotProduct(Out, FVector(Side == 0 ? 1.0 : -1.0, 0.0, 0.0)) < 0.0)
+	{
+		Out = -Out;
+	}
+	auto Elbow = [&](float Angle) { return C + (Out * FMath::Cos(Angle) + Up * FMath::Sin(Angle)) * H; };
+	float Want = Prefer;
+	if (P.bTableContact)
+	{
+		auto Clearance = [&](const FVector& E) {
+			float Worst = 1.0e3f;
+			auto Test = [&](const FVector& At, float Radius) {
+				FVector Push;
+				float Clear;
+				ABackRoomStage::TableContact(P.ToTable.TransformPosition(At), Radius + 0.15f, true, Push, Clear);
+				Worst = FMath::Min(Worst, Clear);
+			};
+			Test(E, 3.2f);
+			Test(FMath::Lerp(E, OutEnd, 0.35), 2.9f);
+			Test(FMath::Lerp(E, OutEnd, 0.7), 2.7f);
+			Test(FMath::Lerp(Root, E, 0.7), 3.6f);
+			return Worst;
+		};
+		if (Clearance(Elbow(Prefer)) < 0.0f)
+		{
+			// The nearest swing that clears, walked out from the relaxed one on both sides and then narrowed to the
+			// edge of clear (so it moves smoothly as the arm does, never in steps); where two sides clear at once, the
+			// one nearer the swing it is at now. The most clearance if none does.
+			constexpr float Lo = -1.9f, Hi = 1.5f, Step = 0.08f;
+			float BestClear = -1.0e9f, BestAngle = Prefer;
+			bool bFound = false;
+			for (int32 K = 1; K <= 45 && !bFound; ++K)
+			{
+				float Cand[2] = {Prefer + Step * K, Prefer - Step * K};
+				if (FMath::Abs(Cand[0] - Phi) > FMath::Abs(Cand[1] - Phi))
+				{
+					Swap(Cand[0], Cand[1]);
+				}
+				for (int32 Side2 = 0; Side2 < 2 && !bFound; ++Side2)
+				{
+					const float Angle = Cand[Side2];
+					if (Angle < Lo || Angle > Hi)
+					{
+						continue;
+					}
+					const float Clear = Clearance(Elbow(Angle));
+					if (Clear > BestClear)
+					{
+						BestClear = Clear;
+						BestAngle = Angle;
+					}
+					if (Clear >= 0.0f)
+					{
+						// Narrow in toward the relaxed swing.
+						float Fail = Angle > Prefer ? Angle - Step : Angle + Step, Pass = Angle;
+						for (int32 Refine = 0; Refine < 5; ++Refine)
+						{
+							const float Mid = 0.5f * (Fail + Pass);
+							if (Clearance(Elbow(Mid)) >= 0.0f)
+							{
+								Pass = Mid;
+							}
+							else
+							{
+								Fail = Mid;
+							}
+						}
+						Want = Pass;
+						bFound = true;
+					}
+				}
+			}
+			if (!bFound)
+			{
+				Want = BestAngle;
+			}
+		}
+	}
+	// Up to clear the rail fast (but not in a single frame), settling back down slowly.
+	Phi = Want > Phi ? FMath::Min(Want, Phi + 24.0f * Dt) : FMath::Lerp(Phi, Want, 1.0f - FMath::Exp(-9.0f * Dt));
+	OutJoint = Elbow(Phi);
+}
+} // namespace
 
 bool FBackRoomBodyProxy::Evaluate(FPoseContext& Output)
 {
@@ -214,49 +325,98 @@ bool FBackRoomBodyProxy::Evaluate(FPoseContext& Output)
 	const int32 Spine[5] = {S.Find(TEXT("spine_01")), S.Find(TEXT("spine_02")), S.Find(TEXT("spine_03")), S.Find(TEXT("spine_04")), S.Find(TEXT("spine_05"))};
 	const int32 Neck1 = S.Find(TEXT("neck_01")), Neck2 = S.Find(TEXT("neck_02")), Head = S.Find(TEXT("head"));
 
-	// Sit: the pelvis drops onto the seat and rolls back as the back slumps, or tips forward as the
-	// player leans in over the table (people lean from the hips first).
-	S.Move(Pelvis, FVector(0.0, -3.0, P.SeatHeight + 9.0) - S.Pos(Pelvis));
-	S.Rotate(Pelvis, FQuat(FVector::XAxisVector, Rad(7.0f + 6.0f * P.Slouch - 15.0f * P.Lean)));
+	// The body: sits, leans, shoulders. (A function of the lean, so a lean that would put the belly through the
+	// table's rail can be eased off and posed again in the same frame.)
+	auto PoseBody = [&](float Lean) {
+		S.CS = Ref;
+		// Sit: the pelvis drops onto the seat and rolls back as the back slumps, or tips forward as the
+		// player leans in over the table (people lean from the hips first).
+		S.Move(Pelvis, FVector(0.0, -3.0, P.SeatHeight + 9.0) - S.Pos(Pelvis));
+		S.Rotate(Pelvis, FQuat(FVector::XAxisVector, Rad(7.0f + 6.0f * P.Slouch - 15.0f * Lean)));
 
-	// Legs: thighs along the seat (sloping down a touch so the feet reach the floor), shins down,
-	// feet flat, knees apart as far as the player sprawls.
-	for (int32 Side = 0; Side < 2; ++Side)
-	{
-		const float Sx = Side == 0 ? 1.0f : -1.0f;
-		const int32 Thigh = FindSided(S, TEXT("thigh"), Side), Calf = FindSided(S, TEXT("calf"), Side);
-		const int32 Foot = FindSided(S, TEXT("foot"), Side), Ball = FindSided(S, TEXT("ball"), Side);
-		S.Aim(Thigh, Calf, FVector(Sx * (0.08f + 0.28f * P.KneeSpread), 1.0f, -0.24f));
-		S.Aim(Calf, Foot, FVector(Sx * 0.04f, 0.12f, -1.0f));
-		S.Aim(Foot, Ball, FVector(Sx * 0.14f, 0.87f, -0.48f));
-	}
-
-	// Spine: lean in toward the table (+Y), twist, and breathe.
-	const float LeanDeg = 4.0f + 34.0f * P.Lean + 8.0f * P.Slouch;
-	const float LeanShare[5] = {0.14f, 0.18f, 0.22f, 0.24f, 0.22f};
-	for (int32 K = 0; K < 5; ++K)
-	{
-		float Deg = LeanDeg * LeanShare[K];
-		// The inhale lifts and opens the chest: the upper spine straightens a little.
-		if (K >= 3)
+		// Legs: thighs along the seat (sloping down a touch so the feet reach the floor), shins down,
+		// feet flat, knees apart as far as the player sprawls.
+		for (int32 Side = 0; Side < 2; ++Side)
 		{
-			Deg -= 1.4f * P.Breath;
+			const float Sx = Side == 0 ? 1.0f : -1.0f;
+			const int32 Thigh = FindSided(S, TEXT("thigh"), Side), Calf = FindSided(S, TEXT("calf"), Side);
+			const int32 Foot = FindSided(S, TEXT("foot"), Side), Ball = FindSided(S, TEXT("ball"), Side);
+			S.Aim(Thigh, Calf, FVector(Sx * (0.08f + 0.28f * P.KneeSpread), 1.0f, -0.24f));
+			S.Aim(Calf, Foot, FVector(Sx * 0.04f, 0.12f, -1.0f));
+			S.Aim(Foot, Ball, FVector(Sx * 0.14f, 0.87f, -0.48f));
 		}
-		S.Rotate(Spine[K], FQuat(FVector::ZAxisVector, Rad(P.Twist * LeanShare[K])) * FQuat(FVector::XAxisVector, Rad(-Deg)));
+
+		// Spine: lean in toward the table (+Y), twist, and breathe.
+		const float LeanDeg = 4.0f + 34.0f * Lean + 8.0f * P.Slouch;
+		const float LeanShare[5] = {0.14f, 0.18f, 0.22f, 0.24f, 0.22f};
+		for (int32 K = 0; K < 5; ++K)
+		{
+			float Deg = LeanDeg * LeanShare[K];
+			// The inhale lifts and opens the chest: the upper spine straightens a little.
+			if (K >= 3)
+			{
+				Deg -= 1.4f * P.Breath;
+			}
+			S.Rotate(Spine[K], FQuat(FVector::ZAxisVector, Rad(P.Twist * LeanShare[K])) * FQuat(FVector::XAxisVector, Rad(-Deg)));
+		}
+
+		// Shoulders: raised by tension and each inhale, rounded forward by a slouch.
+		for (int32 Side = 0; Side < 2; ++Side)
+		{
+			const int32 Clav = FindSided(S, TEXT("clavicle"), Side), Upper = FindSided(S, TEXT("upperarm"), Side);
+			const FVector Dir = (S.Pos(Upper) - S.Pos(Clav)).GetSafeNormal();
+			S.Aim(Clav, Upper, Dir + FVector(0.0, 0.08f * P.Slouch, 0.22f * P.ShoulderRaise + 0.03f * P.Breath));
+		}
+	};
+	// How deep a ball at At (component space) of Radius is in the table, and the push out of it (table frame).
+	// (The space under the apron is open for the body; a hand that is over the table is held by it all the way down,
+	// so a finger deep in the felt is pushed back up, never on through; and a hand that is under the table
+	// (in the lap) is held down out of the table's underside.)
+	bool bHandUnder = true;
+	auto Sunk = [&](const FVector& At, float Radius, FVector& Push) {
+		float Clear;
+		const FVector T = P.ToTable.TransformPosition(At);
+		if (!ABackRoomStage::TableContact(T, Radius, bHandUnder, Push, Clear))
+		{
+			return 0.0f;
+		}
+		if (bHandUnder && T.Z + Radius > ABackRoomStage::ApronZ && T.Z < ABackRoomStage::ApronZ + 3.0)
+		{
+			const double Dy = FMath::Max(FMath::Abs(T.Y) - 61.0, 0.0);
+			if (FMath::Sqrt(T.X * T.X + Dy * Dy) < ABackRoomStage::RailOuterD - 1.0)
+			{
+				// Up inside the table's underside: straight down out of it.
+				Push = FVector(0.0, 0.0, -(T.Z + Radius - ABackRoomStage::ApronZ));
+				return static_cast<float>(-Push.Z);
+			}
+		}
+		return -Clear;
+	};
+	float Lean = P.Lean;
+	PoseBody(Lean);
+	if (P.bTableContact)
+	{
+		// The belly may press the rail's skirt and no further: a lean that would go through it is eased off.
+		for (int32 Iter = 0; Iter < 6; ++Iter)
+		{
+			FVector Push;
+			const float Deep = FMath::Max3(Sunk(S.Pos(Spine[1]), 13.0f, Push), Sunk(S.Pos(Spine[2]), 14.0f, Push), Sunk(S.Pos(Spine[3]), 13.0f, Push));
+			if (Deep <= 0.0f || Lean <= 0.0f)
+			{
+				break;
+			}
+			Lean = FMath::Max(0.0f, Lean - 0.045f * Deep - 0.01f);
+			PoseBody(Lean);
+		}
 	}
 
-	// Shoulders: raised by tension and each inhale, rounded forward by a slouch.
+	// Arms: two-bone IK to the hand targets, the elbow where it hangs relaxed unless the table is in the way.
+	// Posed against the table in the same frame: the arm, the hand and the fingers are posed, every ball of them
+	// (fingertip, joint, knuckle, palm, wrist, forearm) is tested against the table's real surface, and what has
+	// sunk in lifts the hand and pitches the fingers up about the wrist before it is posed again, until it clears.
 	for (int32 Side = 0; Side < 2; ++Side)
 	{
-		const int32 Clav = FindSided(S, TEXT("clavicle"), Side), Upper = FindSided(S, TEXT("upperarm"), Side);
-		const FVector Dir = (S.Pos(Upper) - S.Pos(Clav)).GetSafeNormal();
-		S.Aim(Clav, Upper, Dir + FVector(0.0, 0.08f * P.Slouch, 0.22f * P.ShoulderRaise + 0.03f * P.Breath));
-	}
-
-	// Arms: two-bone IK to the hand targets, elbows out, back and down.
-	for (int32 Side = 0; Side < 2; ++Side)
-	{
-		const float Sx = Side == 0 ? 1.0f : -1.0f;
+		ResolvedShift[Side] = FVector::ZeroVector;
 		const float W = FMath::Clamp(P.HandWeight[Side], 0.0f, 1.0f);
 		const int32 Upper = FindSided(S, TEXT("upperarm"), Side), Lower = FindSided(S, TEXT("lowerarm"), Side), Hand = FindSided(S, TEXT("hand"), Side);
 		if (Upper == INDEX_NONE || Lower == INDEX_NONE || Hand == INDEX_NONE || W <= 0.0f)
@@ -269,41 +429,191 @@ bool FBackRoomBodyProxy::Evaluate(FPoseContext& Output)
 			const float T = P.Time * 9.0f;
 			Target += P.Tremble * FVector(Wobble(T, 1.3f + Side), Wobble(T * 1.1f, 4.1f + Side), Wobble(T * 0.9f, 7.7f + Side));
 		}
-		// Elbows out and down: forearms come to rest along the rail's padding.
-		const FVector Pole = P.ElbowAt[Side].IsZero() ? S.Pos(Upper) + FVector(Sx * 40.0, 14.0, -34.0) : P.ElbowAt[Side];
-		FVector Joint, End;
-		AnimationCore::SolveTwoBoneIK(S.Pos(Upper), S.Pos(Lower), S.Pos(Hand), Pole, Target, Joint, End, false, 1.0, 1.0);
-		S.Aim(Upper, Lower, Joint - S.Pos(Upper), W);
-		S.Aim(Lower, Hand, End - S.Pos(Lower), W);
-
-		// The hand: fingers along FingerDir, palm toward PalmDir.
 		const int32 Mid = FindSided(S, TEXT("middle"), Side, TEXT("01"));
-		const FVector F = (S.Pos(Mid) - S.Pos(Hand)).GetSafeNormal();
-		const FVector Palm = PalmNormal(S, Side);
-		const FQuat Cur = FRotationMatrix::MakeFromXZ(F, Palm).ToQuat();
-		const FQuat Want = FRotationMatrix::MakeFromXZ(P.FingerDir[Side].GetSafeNormal(), P.PalmDir[Side].GetSafeNormal()).ToQuat();
-		S.Rotate(Hand, FQuat::Slerp(FQuat::Identity, Want * Cur.Inverse(), W));
-
-		// Fingers curl toward the palm; the index closes further when pinching.
-		const FVector PalmNow = PalmNormal(S, Side);
+		int32 Chains[4][3];
 		for (int32 Fi = 0; Fi < 4; ++Fi)
 		{
-			const int32 Chain[3] = {FindSided(S, Fingers[Fi], Side, TEXT("01")), FindSided(S, Fingers[Fi], Side, TEXT("02")), FindSided(S, Fingers[Fi], Side, TEXT("03"))};
-			float C = P.Curl[Side];
-			if (Fi == 0)
+			for (int32 K = 0; K < 3; ++K)
 			{
-				C = FMath::Max(C, 0.55f * P.Pinch[Side]);
+				Chains[Fi][K] = FindSided(S, Fingers[Fi], Side, K == 0 ? TEXT("01") : (K == 1 ? TEXT("02") : TEXT("03")));
 			}
-			// Outer fingers curl a little more than the index, as a resting hand does.
-			C = FMath::Clamp(C * (1.0f + 0.12f * Fi), 0.0f, 1.0f);
-			const float Angles[3] = {70.0f * C, 92.0f * C, 55.0f * C};
-			CurlChain(S, Chain, 3, PalmNow, Angles);
 		}
 		const int32 Thumb[3] = {FindSided(S, TEXT("thumb"), Side, TEXT("01")), FindSided(S, TEXT("thumb"), Side, TEXT("02")), FindSided(S, TEXT("thumb"), Side, TEXT("03"))};
-		const float TC = FMath::Clamp(P.ThumbCurl[Side] + 0.5f * P.Pinch[Side], 0.0f, 1.0f);
-		const float ThumbAngles[3] = {18.0f * TC, 35.0f * TC, 45.0f * TC};
-		CurlChain(S, Thumb, 3, PalmNow, ThumbAngles);
+
+		const TArray<FTransform> Before = S.CS;
+		const float PhiStart = ElbowPhi[Side];
+		// Warm start: what held this hand off the table last frame, relaxing as the hand comes away. A hand resting on
+		// the table settles on it, and the correction is one contact carried from frame to frame, never solved again
+		// from nothing (which, near a tie, picks another answer each time and shows as a pop). A frame can change it
+		// by no more than a hand can move.
+		const FVector ShiftPrev = SolvedShift[Side];
+		const float PitchPrev = SolvedPitch[Side];
+		const float Relax = FMath::Exp(-14.0f * Dt);
+		const float StepMax = 400.0f * Dt, PitchStepMax = 14.0f * Dt;
+		FVector Shift = ShiftPrev * Relax;
+		float Pitch = PitchPrev * Relax;
+		auto Hold = [&]() {
+			Shift = (ShiftPrev + (Shift - ShiftPrev).GetClampedToMaxSize(StepMax)).GetClampedToMaxSize(12.0);
+			Pitch = FMath::Clamp(PitchPrev + FMath::Clamp(Pitch - PitchPrev, -PitchStepMax, PitchStepMax), 0.0f, 0.75f);
+		};
+		float Phi = PhiStart;
+		for (int32 Iter = 0; Iter < 4; ++Iter)
+		{
+			if (Iter > 0)
+			{
+				S.CS = Before;
+			}
+			Phi = PhiStart;
+			// The elbow hangs relaxed, or comes up and out only as far as it must to keep the forearm off the rail.
+			FVector Joint, End;
+			SolveArm(P, Side, S.Pos(Upper), FVector::Dist(S.Pos(Upper), S.Pos(Lower)), FVector::Dist(S.Pos(Lower), S.Pos(Hand)), Target + Shift, P.ElbowPrefer[Side], Dt, Phi, Joint, End);
+			S.Aim(Upper, Lower, Joint - S.Pos(Upper), W);
+			S.Aim(Lower, Hand, End - S.Pos(Lower), W);
+
+			// The hand: fingers along FingerDir, palm toward PalmDir (pitched up about the wrist when fingers are in the table).
+			FVector FingerDir = P.FingerDir[Side].GetSafeNormal(), PalmDir = P.PalmDir[Side].GetSafeNormal();
+			if (Pitch > 0.0f)
+			{
+				const FVector Across = FVector::CrossProduct(FingerDir, FVector::UpVector).GetSafeNormal();
+				if (!Across.IsNearlyZero())
+				{
+					const FQuat Q(Across, Pitch);
+					FingerDir = Q.RotateVector(FingerDir);
+					PalmDir = Q.RotateVector(PalmDir);
+				}
+			}
+			// Which side of the table the hand is on this pass: under it (the lap) or over it (with a little hysteresis,
+			// so a hand at the apron height does not flip between the two).
+			const double WristZ = P.ToTable.TransformPosition(S.Pos(Hand)).Z;
+			bHandUnder = bSolvedUnder[Side] ? WristZ < ABackRoomStage::ApronZ + 1.5 : WristZ < ABackRoomStage::ApronZ - 0.8;
+			const FVector F = (S.Pos(Mid) - S.Pos(Hand)).GetSafeNormal();
+			const FVector Palm = PalmNormal(S, Side);
+			const FQuat Cur = FRotationMatrix::MakeFromXZ(F, Palm).ToQuat();
+			const FQuat Want = FRotationMatrix::MakeFromXZ(FingerDir, PalmDir).ToQuat();
+			S.Rotate(Hand, FQuat::Slerp(FQuat::Identity, Want * Cur.Inverse(), W));
+
+			// Fingers curl toward the palm; the index closes further when pinching.
+			const FVector PalmNow = PalmNormal(S, Side);
+			for (int32 Fi = 0; Fi < 4; ++Fi)
+			{
+				float C = P.Curl[Side];
+				if (Fi == 0)
+				{
+					C = FMath::Max(C, 0.55f * P.Pinch[Side]);
+				}
+				// Outer fingers curl a little more than the index, as a resting hand does.
+				C = FMath::Clamp(C * (1.0f + 0.12f * Fi), 0.0f, 1.0f);
+				const float Angles[3] = {70.0f * C, 92.0f * C, 55.0f * C};
+				CurlChain(S, Chains[Fi], 3, PalmNow, Angles);
+			}
+			const float TC = FMath::Clamp(P.ThumbCurl[Side] + 0.5f * P.Pinch[Side], 0.0f, 1.0f);
+			const float ThumbAngles[3] = {18.0f * TC, 35.0f * TC, 45.0f * TC};
+			CurlChain(S, Thumb, 3, PalmNow, ThumbAngles);
+
+			if (!P.bTableContact)
+			{
+				break;
+			}
+			// Against the table: the wrist, the palm and the forearm lift the hand; each finger pitches the hand up
+			// by the angle that raises it the depth it has sunk (its distance from the wrist is the lever).
+			const FVector Wrist = S.Pos(Hand);
+			// Lift: out of the felt or the rail's crown from above. Drop: out of the table's underside (a hand in the
+			// lap that has come up into it) from below.
+			float Lift = 0.0f, Drop = 0.0f, OutMax = 0.0f;
+			// The sideways push is the direction the pushes agree on, as deep as the deepest (opposite pushes cancel,
+			// and it never jumps from one ball's answer to another's).
+			FVector OutSum = FVector::ZeroVector;
+			struct FFingerSink
+			{
+				float Rise, Lever;
+			};
+			FFingerSink Sinks[16];
+			int32 NumSinks = 0;
+			FVector Push;
+			auto AddOut = [&](const FVector& At) {
+				const FVector Flat(At.X, At.Y, 0.0);
+				OutSum += Flat;
+				OutMax = FMath::Max(OutMax, static_cast<float>(Flat.Size()));
+			};
+			auto Body = [&](const FVector& At, float Radius, float Gain) {
+				const float D = Sunk(At, Radius + 0.12f, Push);
+				if (D > 0.0f)
+				{
+					Lift = FMath::Max(Lift, static_cast<float>(Push.Z) * Gain);
+					Drop = bHandUnder ? FMath::Max(Drop, static_cast<float>(-Push.Z) * Gain) : 0.0f;
+					AddOut(Push);
+				}
+			};
+			Body(Wrist, 2.4f, 1.0f);
+			Body(S.Pos(Lower), 3.0f, 1.5f);
+			Body(FMath::Lerp(S.Pos(Lower), Wrist, 0.5), 2.8f, 1.5f);
+			Body(FMath::Lerp(Wrist, S.Pos(Mid), 0.5), 2.0f, 1.0f);
+			auto Finger = [&](const FVector& At, float Radius) {
+				const float D = Sunk(At, Radius + 0.12f, Push);
+				if (D <= 0.0f)
+				{
+					return;
+				}
+				// Out of the table's side (the rail's inner wall) is sideways whichever way the hand also has to rise.
+				AddOut(Push);
+				if (Push.Z > 0.0)
+				{
+					if (NumSinks < 16)
+					{
+						Sinks[NumSinks++] = {static_cast<float>(Push.Z), FMath::Max(3.0f, static_cast<float>(FVector::Dist(At, Wrist)))};
+					}
+				}
+				else
+				{
+					Drop = bHandUnder ? FMath::Max(Drop, static_cast<float>(-Push.Z)) : 0.0f;
+				}
+			};
+			for (int32 Fi = 0; Fi < 4; ++Fi)
+			{
+				Finger(S.Pos(Chains[Fi][0]), 1.3f);
+				Finger(S.Pos(Chains[Fi][1]), 1.0f);
+				Finger(S.Pos(Chains[Fi][2]) + (S.Pos(Chains[Fi][2]) - S.Pos(Chains[Fi][1])).GetSafeNormal() * 2.0, 0.65f);
+			}
+			Finger(S.Pos(Thumb[0]), 1.4f);
+			Finger(S.Pos(Thumb[1]), 1.0f);
+			Finger(S.Pos(Thumb[2]) + (S.Pos(Thumb[2]) - S.Pos(Thumb[1])).GetSafeNormal() * 2.0, 0.65f);
+			// The fingers first ask the whole hand to rise (a wrist held off the felt with the fingertips resting on it
+			// is how a hand lies), a few centimeters at most; what that does not cover pitches them up about the wrist.
+			float FingerRise = 0.0f;
+			for (int32 K = 0; K < NumSinks; ++K)
+			{
+				FingerRise = FMath::Max(FingerRise, Sinks[K].Rise);
+			}
+			const float FingerLift = FMath::Min(FingerRise, FMath::Max(0.0f, 3.0f - static_cast<float>(Shift.Z)));
+			float NeedPitch = 0.0f;
+			for (int32 K = 0; K < NumSinks; ++K)
+			{
+				const float Residual = Sinks[K].Rise - FingerLift;
+				if (Residual > 0.0f)
+				{
+					NeedPitch = FMath::Max(NeedPitch, FMath::Asin(FMath::Clamp(Residual / Sinks[K].Lever, 0.0f, 0.9f)));
+				}
+			}
+			Lift = FMath::Max(Lift, FingerLift);
+			const FVector Out = OutSum.GetSafeNormal() * FMath::Min(OutMax, static_cast<float>(OutSum.Size()));
+			ResolvedWorst[Side] = FMath::Max3(Lift, Drop, FMath::Max(static_cast<float>(Out.Size()), NeedPitch * 10.0f));
+			if ((Lift <= 0.03f && Drop <= 0.03f && NeedPitch <= 0.004f && Out.SizeSquared() < 0.0009) || Iter == 3)
+			{
+				break;
+			}
+			// (What sits above the felt comes up out of it; a hand that is only in the table underside goes down.)
+			Shift += FVector(0.0, 0.0, (Lift > 0.03f ? Lift : -Drop) * 0.95f) + P.ToTable.InverseTransformVectorNoScale(Out) * 0.95f;
+			Pitch += NeedPitch * 0.95f;
+			Hold();
+		}
+		bSolvedUnder[Side] = bHandUnder;
+		SolvedShift[Side] = Shift;
+		SolvedPitch[Side] = Pitch;
+		bHandUnder = true;
+		ElbowPhi[Side] = Phi;
+		ResolvedShift[Side] = Shift;
 	}
+	ResolvedLean = Lean;
 
 	// Head: turn toward the look target, shared down the neck, within what a neck can do.
 	if (Head != INDEX_NONE)

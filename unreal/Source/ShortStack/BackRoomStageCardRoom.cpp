@@ -53,10 +53,6 @@ const FVector2D Slots[] = {
 };
 constexpr int32 SlotCount = 8;
 
-// art/blender/assets/table.py seats (cm, the table turned so its player sits at -X), as ABackRoomStage.
-const FVector2D TableSeats[8] = {
-	{-61.0, 0.0}, {-61.0, 64.0}, {0.0, 122.0}, {61.0, 64.0}, {61.0, 0.0}, {61.0, -64.0}, {0.0, -122.0}, {-61.0, -64.0},
-};
 } // namespace CardRoomDetail
 
 using namespace CardRoomDetail;
@@ -418,13 +414,14 @@ void ABackRoomStage::BuildCardRoomTables()
 			AddMesh(CubeMesh, Room(TEXT("FeltStandIn"), 0, 0x245a3b), FVector(0.0, 0.0, FeltZ - 2.0), FVector(1.0, 2.2, 0.04), FRotator::ZeroRotator, Table);
 		}
 		// A few cards and chips on the felt: hole cards in front of the seats, a flop in the middle.
-		for (int32 S = 0; S < 8; ++S)
+		for (int32 S = 0; S < 7; ++S)
 		{
 			if (S == 4)
 			{
 				continue;
 			}
-			const FVector2D& E = TableSeats[S];
+			const FVector SeatAt = SeatEdge(S);
+			const FVector2D E(SeatAt.X, SeatAt.Y);
 			const FVector Out = FVector(E.X, E.Y, 0.0).GetSafeNormal2D();
 			const FVector At(E.X - Out.X * 22.0, E.Y - Out.Y * 22.0, FeltZ + 0.15);
 			AddMesh(CubeMesh, CardBack, At, FVector(0.064, 0.089, 0.002), FRotator(0.0f, Out.Rotation().Yaw + 90.0f + (S * 13 % 9) - 4.0f, 0.0f), Table, false);

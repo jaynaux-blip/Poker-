@@ -45,9 +45,14 @@ struct FBackRoomBodyPose
 	FVector FingerDir[2] = {FVector(-0.3, 1.0, 0.0), FVector(0.3, 1.0, 0.0)};
 	/** How strongly each arm follows its hand target (0 hangs in the reference pose). */
 	float HandWeight[2] = {1.0f, 1.0f};
-	/** Where each elbow wants to be (component space), or zero for the default (out and down): the elbow
-	 *  resting on the rail, or hanging at the side when the hand is in the lap. */
-	FVector ElbowAt[2] = {FVector::ZeroVector, FVector::ZeroVector};
+	/**
+	 * Where the table is, from component space: the arms keep their elbows and forearms out of it. And how each
+	 * elbow hangs when nothing is in the way, as its swing about the shoulder-to-hand line in radians (0: straight
+	 * out from the line, negative: down; -pi/2 hangs it straight down).
+	 */
+	FTransform ToTable = FTransform::Identity;
+	bool bTableContact = false;
+	float ElbowPrefer[2] = {-1.1f, -1.1f};
 	/** 0 flat .. 1 fist; Pinch closes the index and thumb (holding a chip or a card corner). */
 	float Curl[2] = {0.35f, 0.35f};
 	float ThumbCurl[2] = {0.2f, 0.2f};
@@ -65,6 +70,18 @@ struct FBackRoomBodyProxy : public FAnimInstanceProxy
 	explicit FBackRoomBodyProxy(UAnimInstance* Instance) : FAnimInstanceProxy(Instance) {}
 
 	FBackRoomBodyPose Pose;
+	float Dt = 0.016f;
+	/** Each elbow's swing now (kept between frames: it rises at once to clear the rail, and settles back slowly). */
+	float ElbowPhi[2] = {-1.1f, -1.1f};
+	/** What posing against the table came to (component space): how far each hand was moved off the table, and the lean left. */
+	FVector ResolvedShift[2] = {FVector::ZeroVector, FVector::ZeroVector};
+	float ResolvedLean = 0.3f;
+	/** How far the final pass found a hand still in the table (cm, a rough measure: pitch counts ten to the radian). */
+	float ResolvedWorst[2] = {0.0f, 0.0f};
+	/** What held each hand off the table in the last pose (shift and finger pitch), and which side of the table it was on. */
+	FVector SolvedShift[2] = {FVector::ZeroVector, FVector::ZeroVector};
+	float SolvedPitch[2] = {0.0f, 0.0f};
+	bool bSolvedUnder[2] = {false, false};
 
 	virtual void PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds) override;
 	virtual bool Evaluate(FPoseContext& Output) override;
@@ -78,6 +95,11 @@ class SHORTSTACK_API UBackRoomBodyAnim : public UAnimInstance
 
 public:
 	FBackRoomBodyPose Pose;
+	/** How far the last pose moved this hand off the table to keep it out (component space). */
+	FVector GetResolvedShift(int32 Side) { return GetProxyOnGameThread<FBackRoomBodyProxy>().ResolvedShift[Side]; }
+	/** How far the last pose pitched this hand's fingers up about the wrist to keep them out of the table (radians). */
+	float GetResolvedPitch(int32 Side) { return GetProxyOnGameThread<FBackRoomBodyProxy>().SolvedPitch[Side]; }
+	float GetResolvedWorst(int32 Side) { return GetProxyOnGameThread<FBackRoomBodyProxy>().ResolvedWorst[Side]; }
 
 protected:
 	virtual FAnimInstanceProxy* CreateAnimInstanceProxy() override { return new FBackRoomBodyProxy(this); }

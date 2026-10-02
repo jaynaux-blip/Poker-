@@ -37,18 +37,48 @@ const double Wall = 20.0;
 // The door to the laundromat, in the right-hand wall, standing ajar.
 const double DoorX0 = 110.0, DoorX1 = 202.0, DoorTop = 212.0;
 
-// art/blender/assets/table.py SEATS (meters, Blender axes) as Unreal centimeters: Blender (x, y) is
-// Unreal (y, x) once the table is turned to face the player down +X (import flips Y, then yaw 90).
-const FVector2D Seats[8] = {
-	{-61.0, 0.0}, {-61.0, 64.0}, {0.0, 122.0}, {61.0, 64.0}, {61.0, 0.0}, {61.0, -64.0}, {0.0, -122.0}, {-61.0, -64.0},
-};
 // The dryer bank: six stacked units, 80 cm apart, centered on the far wall.
 double DryerY(int32 Index)
 {
 	return -200.0 + Index * 80.0;
 }
-// The table's straight run: the ends are half circles around (0, +/-HalfL).
+// The table's straight run: the ends are half circles around (0, +/-HalfL), the rail's outer edge a radius of HalfL out.
 const double HalfL = 61.0;
+const double RailR = 61.0;
+constexpr int32 SeatCount = 7;
+
+/**
+ * A point S cm along the rail's outer edge from the player's seat, counterclockwise. art/blender/assets/table.py
+ * rail_point (meters, Blender axes) is this in Unreal centimeters: Blender (x, y) is Unreal (y, x) once the table is
+ * turned to face the player down +X (import flips Y, then yaw 90).
+ */
+FVector2D RailPoint(double S)
+{
+	const double Arc = UE_DOUBLE_PI * RailR;
+	if (S < HalfL)
+	{
+		return FVector2D(-RailR, S);
+	}
+	S -= HalfL;
+	if (S < Arc)
+	{
+		const double T = S / RailR;
+		return FVector2D(-RailR * FMath::Cos(T), HalfL + RailR * FMath::Sin(T));
+	}
+	S -= Arc;
+	if (S < 2.0 * HalfL)
+	{
+		return FVector2D(RailR, HalfL - S);
+	}
+	S -= 2.0 * HalfL;
+	if (S < Arc)
+	{
+		const double T = S / RailR;
+		return FVector2D(RailR * FMath::Cos(T), -HalfL - RailR * FMath::Sin(T));
+	}
+	S -= Arc;
+	return FVector2D(-RailR, -HalfL + S);
+}
 } // namespace BackRoomDetail
 
 using namespace BackRoomDetail;
@@ -75,7 +105,11 @@ ABackRoomStage::ABackRoomStage()
 
 FVector ABackRoomStage::SeatEdge(int32 Index)
 {
-	const FVector2D& S = Seats[FMath::Clamp(Index, 0, 7)];
+	// Seven seats evenly spaced round the rail (89 cm apart, room for a pair of shoulders between chairs): 0 is the
+	// player's, 4 the dealer's. The seat that isn't there (7, the old eighth) is the middle of the gap behind the player.
+	const double Perimeter = 4.0 * HalfL + 2.0 * UE_DOUBLE_PI * RailR;
+	const double Slot = Index >= SeatCount ? SeatCount - 0.5 : FMath::Max(Index, 0);
+	const FVector2D S = RailPoint(Slot * Perimeter / SeatCount);
 	return FVector(S.X, S.Y, FeltZ);
 }
 
@@ -93,10 +127,126 @@ FTransform ABackRoomStage::SeatTransform(int32 Index)
 	return FTransform((-Out).Rotation(), FVector(Chair.X, Chair.Y, 0.0));
 }
 
+namespace BackRoomDetail
+{
+/**
+ * The table's cross-section (art/blender/assets/table.py): (distance from the table's middle line, height) from the
+ * middle over the felt, up the rail's inner wall, over its crown (1.8 cm above the felt at the edges, 5.4 at the middle
+ * of its 13 cm), and down the outer skirt to the apron's underside.
+ */
+const TArray<FVector2D>& TableSection()
+{
+	static TArray<FVector2D> Section;
+	if (Section.Num() == 0)
+	{
+		const double Felt = ABackRoomStage::FeltZ;
+		const double RailCenter = 54.5, HalfW = 6.5;
+		Section.Add(FVector2D(0.0, Felt));
+		Section.Add(FVector2D(RailCenter - HalfW, Felt));
+		for (int32 I = 0; I <= 26; ++I)
+		{
+			const double B = -HalfW + 2.0 * HalfW * I / 26.0;
+			const double C = FMath::Pow(FMath::Abs(B) / HalfW, 1.0 / 0.55);
+			const double S = FMath::Sqrt(FMath::Max(0.0, 1.0 - C * C));
+			Section.Add(FVector2D(RailCenter + B, Felt + 1.8 + 3.6 * FMath::Pow(S, 0.6)));
+		}
+	}
+	return Section;
+}
+
+/** The table's top at distance D from its middle line (inside the footprint, D <= 61). */
+double TableTop(double D)
+{
+	const TArray<FVector2D>& S = TableSection();
+	if (D <= S[0].X)
+	{
+		return S[0].Y;
+	}
+	for (int32 I = 1; I < S.Num(); ++I)
+	{
+		if (D <= S[I].X)
+		{
+			const double T = (S[I].X - S[I - 1].X) > KINDA_SMALL_NUMBER ? (D - S[I - 1].X) / (S[I].X - S[I - 1].X) : 1.0;
+			return FMath::Lerp(S[I - 1].Y, S[I].Y, T);
+		}
+	}
+	return S.Last().Y;
+}
+
+/** The closest point on the segment A-B to P, and its squared distance. */
+FVector2D ClosestOnSegment(const FVector2D& P, const FVector2D& A, const FVector2D& B)
+{
+	const FVector2D AB = B - A;
+	const double L2 = AB.SizeSquared();
+	const double T = L2 > KINDA_SMALL_NUMBER ? FMath::Clamp(FVector2D::DotProduct(P - A, AB) / L2, 0.0, 1.0) : 0.0;
+	return A + AB * T;
+}
+} // namespace BackRoomDetail
+
+bool ABackRoomStage::TableContact(const FVector& P, float Radius, bool bUnderTableFree, FVector& OutPush, float& OutClearance)
+{
+	const TArray<FVector2D>& Section = TableSection();
+	const double RailOuter = Section.Last().X;
+	// Distance from the table's middle line (a segment along y), and the way away from it.
+	const double Dy = FMath::Max(FMath::Abs(P.Y) - HalfL, 0.0);
+	const double D = FMath::Sqrt(P.X * P.X + Dy * Dy);
+	FVector2D Away(D > 1.0e-4 ? P.X / D : 1.0, D > 1.0e-4 ? FMath::Sign(P.Y) * Dy / D : 0.0);
+	// The ball in the section's plane: (D, z).
+	const FVector2D Q(D, P.Z);
+	// Outside the footprint and out of reach: nothing to do.
+	OutPush = FVector::ZeroVector;
+	OutClearance = 1.0e3f;
+	if (D > RailOuter + Radius + 1.0)
+	{
+		OutClearance = static_cast<float>(D - RailOuter - Radius);
+		return false;
+	}
+	// Closest point of the surface: the section, the outer wall running down, and (open underneath) the apron's
+	// underside back toward the middle.
+	double Best = 1.0e9;
+	FVector2D BestPoint = FVector2D::ZeroVector;
+	auto Consider = [&](const FVector2D& A, const FVector2D& B) {
+		const FVector2D C = ClosestOnSegment(Q, A, B);
+		const double Dist2 = (Q - C).SizeSquared();
+		if (Dist2 < Best)
+		{
+			Best = Dist2;
+			BestPoint = C;
+		}
+	};
+	for (int32 I = 1; I < Section.Num(); ++I)
+	{
+		Consider(Section[I - 1], Section[I]);
+	}
+	const double WallBottom = bUnderTableFree ? ApronZ : -200.0;
+	Consider(Section.Last(), FVector2D(RailOuter, WallBottom));
+	if (bUnderTableFree)
+	{
+		Consider(FVector2D(RailOuter, ApronZ), FVector2D(0.0, ApronZ));
+	}
+	const double Dist = FMath::Sqrt(Best);
+	const bool bInside = D <= RailOuter && P.Z < TableTop(D) && (!bUnderTableFree || P.Z > ApronZ);
+	OutClearance = static_cast<float>((bInside ? -Dist : Dist) - Radius);
+	if (OutClearance >= 0.0f)
+	{
+		return false;
+	}
+	// Out the shortest way: from the ball to the surface (inside), or from the surface to the ball.
+	FVector2D Dir = bInside ? (BestPoint - Q) : (Q - BestPoint);
+	if (Dir.SizeSquared() < 1.0e-8)
+	{
+		Dir = FVector2D(0.0, 1.0);
+	}
+	Dir.Normalize();
+	const double Amount = -OutClearance;
+	OutPush = FVector(Away.X * Dir.X * Amount, Away.Y * Dir.X * Amount, Dir.Y * Amount);
+	return true;
+}
+
 FVector ABackRoomStage::EyeLocation() const
 {
 	// Seated close, leaning in a little: just behind the rail's outer edge, eyes 1.3 m up.
-	return GetActorTransform().TransformPosition(FVector(Seats[0].X - 6.0, 0.0, 130.0));
+	return GetActorTransform().TransformPosition(FVector(SeatEdge(0).X - 6.0, 0.0, 130.0));
 }
 
 // ------------------------------------------------------------------ building blocks

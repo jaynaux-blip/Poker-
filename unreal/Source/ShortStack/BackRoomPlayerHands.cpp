@@ -12,6 +12,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "ShortStack/Game/Session.h"
+#include "HAL/IConsoleManager.h"
 #include "TimerManager.h"
 
 using namespace BackRoomPlayerDetail;
@@ -26,6 +27,37 @@ double Reach(float Curl)
 
 /** The deck's thickness (cm). */
 const double DeckThickness = 1.7;
+
+/**
+ * Where a hand goes first on its way from From to Goal (the body's space), so that it goes round the table and not
+ * through it. The fingers reach a hand's length ahead of the wrist, so a hand beside the body can only go down
+ * (to the lap) or come up once the wrist is well back from the rail's edge: a hand coming from the lap backs out
+ * from under, rises clear of the rail's crown and comes in over it; a hand going to the lap rises clear of the
+ * crown, backs out above the rail's edge and goes down beside the belly. Goal itself when the way is clear.
+ */
+FVector RouteHand(int32 Side, const FVector& From, const FVector& Goal)
+{
+	const double Edge = Rail - 3.0;  // the wrist is over the table's plan beyond this (the rail's outer edge less its own size)
+	const double Clear = 84.0;       // and clear of the rail's crown above this
+	const double Out = Rail - 18.0;  // backed out to here, the fingers are clear of the rail
+	const double Back = Out + 2.0;
+	const double Beside = (Side == 0 ? 1.0 : -1.0) * 22.0;
+	if (Goal.Y > Edge)
+	{
+		// To the table: along it, or in over the crown from clear of it.
+		if (From.Y > Edge || From.Z >= Clear - 0.5)
+		{
+			return Goal;
+		}
+		return From.Y > Back ? FVector(Beside, Out, From.Z) : FVector(From.X, From.Y, Clear + 2.0);
+	}
+	// To the back (the lap, the face): free once back there, or high above the rail the whole way.
+	if (From.Y <= FMath::Max(Back, Goal.Y + 1.0) || (From.Z >= Clear - 0.5 && Goal.Z >= Clear))
+	{
+		return Goal;
+	}
+	return From.Z < Clear - 0.5 ? FVector(From.X, From.Y, Clear + 2.0) : FVector(Beside, Out, From.Z);
+}
 
 int32 Snd(ss::SoundId Id)
 {
@@ -59,6 +91,10 @@ FVector Dir(const FVector& V, const FVector& Fallback)
 
 using namespace BackRoomHandsDetail;
 
+static TAutoConsoleVariable<float> CVarRestY(TEXT("ss.RestY"), 7.0f, TEXT("Resting wrist: cm past the rail's outer edge."));
+static TAutoConsoleVariable<float> CVarRestZ(TEXT("ss.RestZ"), 85.0f, TEXT("Resting wrist: height."));
+static TAutoConsoleVariable<float> CVarRestFingerZ(TEXT("ss.RestFingerZ"), -0.30f, TEXT("Resting fingers: how far they point down (per unit forward)."));
+
 // ------------------------------------------------------------------ poses and the queue
 
 ABackRoomPlayer::FHandPose ABackRoomPlayer::RestPose(int32 Side) const
@@ -83,10 +119,10 @@ ABackRoomPlayer::FHandPose ABackRoomPlayer::RestPose(int32 Side) const
 		P.Curl = 0.4f;
 		return P;
 	}
-	// Forearms along the rail, the wrists just over its inner edge and the hands loose on the felt beyond.
-	P.Pos = FVector(Sx * 10.0, Rail + 9.0, 83.0);
+	// Forearms across the rail, the wrists at its inner edge and the hands loose on the felt beyond.
+	P.Pos = FVector(Sx * 9.0, Rail + CVarRestY.GetValueOnAnyThread(), CVarRestZ.GetValueOnAnyThread());
 	P.Palm = FVector(Sx * 0.15f, 0.0, -1.0);
-	P.Finger = FVector(-Sx * 0.45f, 1.0, -0.3);
+	P.Finger = FVector(-Sx * 0.45f, 1.0, CVarRestFingerZ.GetValueOnAnyThread());
 	P.Curl = 0.35f + 0.1f * Persona.Nervousness;
 	P.Thumb = 0.2f;
 	return P;
@@ -107,7 +143,7 @@ ABackRoomPlayer::FHandPose ABackRoomPlayer::IdleGoal(int32 Side) const
 				return PeekCoverPose(Side);
 			}
 			// The fingers close as they arrive at the corner, and only then does it come up.
-			const float Near = static_cast<float>(FVector::Dist(TipBody(Side), ToBody(PeekGripAt(HeroLift))));
+			const float Near = static_cast<float>(FVector::Dist(TipBody(Side), ToBody(FingerPathAt(HeroLift))));
 			return PeekGripPose(Side, HeroLift, 0.12f + 0.62f * (1.0f - FMath::SmoothStep(0.8f, 3.5f, Near)));
 		}
 		return Goal;
@@ -158,7 +194,7 @@ ABackRoomPlayer::FHandPose ABackRoomPlayer::IdleGoal(int32 Side) const
 		break;
 	case 4:
 		// Hands folded on the felt in front, the right over the left, fingers across the other hand.
-		Goal.Pos = FVector(Sx * 6.0, Rail + 11.0, Side == 1 ? 84.2 : 82.8);
+		Goal.Pos = FVector(Sx * 5.0, Rail + 8.0, Side == 1 ? 86.2 : 85.0);
 		Goal.Finger = FVector(-Sx * 1.0, 0.45, -0.15).GetSafeNormal();
 		Goal.Palm = FVector(-Sx * 0.25, 0.0, -1.0).GetSafeNormal();
 		Goal.Curl = 0.55f;
@@ -166,7 +202,7 @@ ABackRoomPlayer::FHandPose ABackRoomPlayer::IdleGoal(int32 Side) const
 		break;
 	case 5:
 		// Sat back, the hands in the lap.
-		Goal.Pos = FVector(Sx * 8.5, 24.0, 65.0);
+		Goal.Pos = FVector(Sx * 8.5, 17.0, 65.0);
 		Goal.Finger = FVector(-Sx * 0.55, 1.0, -0.2).GetSafeNormal();
 		Goal.Palm = FVector(Sx * 0.1, 0.0, -1.0).GetSafeNormal();
 		Goal.Curl = 0.45f;
@@ -338,8 +374,15 @@ int32 ABackRoomPlayer::PeekHand() const
 	return Hole[0]->GetPeekSide(GetEyes(), GetActorRightVector()) > 0.0f ? 1 : 0;
 }
 
-FVector ABackRoomPlayer::PeekGripAt(float Amount) const
+FVector ABackRoomPlayer::PeekGripAt(float Amount, float Height) const
 {
+	if (Hole.Num() == 2 && Hole[0] && Hole[1])
+	{
+		// The two cards are a stack: one hinge, the upper card's curl inside the lower's.
+		const FVector Eyes = GetEyes();
+		const ABackRoomCard::FPeekFlapWorld W = ABackRoomCard::MakeSharedFlap(*Hole[0], *Hole[1], Eyes);
+		return (Hole[0]->GetPeekGripShared(Amount, W, PeekMaxLift(), 0.0f, Height, Eyes) + Hole[1]->GetPeekGripShared(Amount, W, PeekMaxLift(), ABackRoomCard::NestGap, Height, Eyes)) * 0.5;
+	}
 	FVector Sum = FVector::ZeroVector;
 	int32 N = 0;
 	for (const ABackRoomCard* Card : Hole)
@@ -353,6 +396,15 @@ FVector ABackRoomPlayer::PeekGripAt(float Amount) const
 	return N > 0 ? Sum / N : Spots.Cards;
 }
 
+FVector ABackRoomPlayer::FingerPathAt(float Amount) const
+{
+	// A fingertip's flesh is about 0.65 cm deep: its center is that far under the card's skin, and a finger can't
+	// sink into the felt to get there.
+	FVector At = PeekGripAt(Amount, -0.65f);
+	At.Z = FMath::Max(At.Z, ABackRoomStage::FeltZ + 0.8);
+	return At;
+}
+
 FVector ABackRoomPlayer::TipBody(int32 Side) const
 {
 	const FHandPose& H = HandNow[Side];
@@ -361,8 +413,8 @@ FVector ABackRoomPlayer::TipBody(int32 Side) const
 
 float ABackRoomPlayer::PeekAmountFromHand(int32 Side) const
 {
-	const FVector G0 = ToBody(PeekGripAt(0.0f));
-	const FVector Chord = ToBody(PeekGripAt(1.0f)) - G0;
+	const FVector G0 = ToBody(FingerPathAt(0.0f));
+	const FVector Chord = ToBody(FingerPathAt(1.0f)) - G0;
 	if (Chord.SizeSquared() < 0.01)
 	{
 		return 0.0f;
@@ -381,7 +433,7 @@ ABackRoomPlayer::FHandPose ABackRoomPlayer::PeekGripPose(int32 Side, float Amoun
 	// enters from the left) so the lifted face stays clear of it; the hand tilts up as the corner comes up.
 	// The fingers stay long and loose (a finger tucked under the corner, the thumb along beside it): a procedural
 	// pinch can't make a thumb oppose, and a long finger lets the lifted face stay in view.
-	return Touch(PeekGripAt(Amount) + FVector(0.0, 0.0, -0.1), FVector(-Sx * 0.9f, 0.35f, -0.12f + 0.45f * Amount), FVector(-Sx * 0.25f, 0.0f, -1.0f), 0.14f, 0.3f * Pinch);
+	return Touch(FingerPathAt(Amount), FVector(-Sx * 0.9f, 0.35f, -0.12f + 0.45f * Amount), FVector(-Sx * 0.25f, 0.0f, -1.0f), 0.14f, 0.3f * Pinch);
 }
 
 ABackRoomPlayer::FHandPose ABackRoomPlayer::PeekCoverPose(int32 Side) const
@@ -390,7 +442,7 @@ ABackRoomPlayer::FHandPose ABackRoomPlayer::PeekCoverPose(int32 Side) const
 	const float Sx = Side == 0 ? 1.0f : -1.0f;
 	// Laid over the far half of the cards, the fingers curled over them and reaching across toward the corner's side.
 	const float Toward = PeekHand() == 1 ? 1.0f : -1.0f;
-	const FVector Tip = C + Spots.Inward * 3.2 + GetActorRightVector() * (-Toward * 6.4) + FVector(0.0, 0.0, 0.6);
+	const FVector Tip = C + Spots.Inward * 3.2 + GetActorRightVector() * (-Toward * 9.2) + FVector(0.0, 0.0, 0.6);
 	// Resting against the cards' far edge on the side away from the lifted corner, fingers curled and pointing across
 	// (it keeps them still, and both cards stay in clear view between the hands).
 	return Touch(Tip, FVector(-Sx * 0.4f, 0.9f, -0.35f), FVector(-Sx * 0.1f, 0.0f, -1.0f), 0.6f);
@@ -429,9 +481,18 @@ float ABackRoomPlayer::QueuedTime(int32 Side) const
 FTransform ABackRoomPlayer::HandFrame(int32 Side) const
 {
 	const FTransform& B = Body->GetComponentTransform();
-	const FVector F = B.TransformVectorNoScale(HandNow[Side].Finger.GetSafeNormal());
-	const FVector Back = -B.TransformVectorNoScale(HandNow[Side].Palm.GetSafeNormal());
-	return FTransform(FRotationMatrix::MakeFromXZ(F, Back).ToQuat(), B.TransformPosition(HandNow[Side].Pos));
+	FVector F = B.TransformVectorNoScale(HandNow[Side].Finger.GetSafeNormal());
+	FVector Back = -B.TransformVectorNoScale(HandNow[Side].Palm.GetSafeNormal());
+	// The pose pitches the fingers up about the wrist when they would be in the table: what the hand holds goes with it.
+	const float Pitch = ContactPitch(Side);
+	const FVector Across = FVector::CrossProduct(F, FVector::UpVector).GetSafeNormal();
+	if (Pitch > 0.002f && !Across.IsNearlyZero())
+	{
+		const FQuat Q(Across, Pitch);
+		F = Q.RotateVector(F);
+		Back = Q.RotateVector(Back);
+	}
+	return FTransform(FRotationMatrix::MakeFromXZ(F, Back).ToQuat(), B.TransformPosition(HandNow[Side].Pos + PeekBias[Side] + ContactShift(Side)));
 }
 
 void ABackRoomPlayer::Grab(AActor* Thing, int32 Side, const FTransform& Offset)
@@ -461,7 +522,24 @@ void ABackRoomPlayer::UpdateHands(float Dt)
 		{
 			// A move: a smooth curve from where the hand was, leaving at the speed it had, through the step's
 			// pose, on into the next one when it only passes there (a stop where it presses, holds or turns back).
-			FHandStep& S = Q[0];
+			FHandStep* Cur = &Q[0];
+			if (!Cur->bBegun)
+			{
+				// Round the table's edge rather than through it: a stop on the way first when the straight way is blocked.
+				const FHandPose Intended = Cur->bRest ? IdleGoal(Side) : Cur->Pose;
+				const FVector Via = RouteHand(Side, StepFrom[Side].Pos, Intended.Pos);
+				if (!Via.Equals(Intended.Pos, 0.05))
+				{
+					FHandStep Step;
+					Step.Pose = Intended;
+					Step.Pose.Pos = Via;
+					Step.Duration = 0.2f;
+					Q.Insert(MoveTemp(Step), 0);
+					Cur = &Q[0];
+					StepT[Side] = 0.0f;
+				}
+			}
+			FHandStep& S = *Cur;
 			const FHandPose Target = S.bRest ? IdleGoal(Side) : S.Pose;
 			const FHandPose& From = StepFrom[Side];
 			if (!S.bBegun)
@@ -503,6 +581,7 @@ void ABackRoomPlayer::UpdateHands(float Dt)
 		const float Live = (1.0f - Stillness) * (SeatRole == EBackRoomRole::Hero ? 0.5f : 1.0f) * (bTrickHand ? 0.3f : 1.0f);
 		const float Ph = Persona.Seed * 1.37f + Side * 2.1f;
 		Goal.Pos += Live * FVector(0.5f * FMath::Sin(Time * 0.61f + Ph), 0.4f * FMath::Sin(Time * 0.47f + 2.0f * Ph), 0.25f * FMath::Sin(Time * 0.83f + Ph));
+		Goal.Pos = RouteHand(Side, HandNow[Side].Pos, Goal.Pos);
 		Goal.Curl += Live * 0.05f * FMath::Sin(Time * 0.37f + Ph);
 		const float Omega = SeatRole == EBackRoomRole::Hero ? 11.0f : (bTrickHand ? 9.0f : 4.5f);
 		FHandPose& H = HandNow[Side];
@@ -546,6 +625,7 @@ void ABackRoomPlayer::UpdateHands(float Dt)
 		HeroLift = Ease(HeroLift, 0.0f, 14.0f, Dt);
 		GripSide = -1;
 	}
+	AuditContacts(Dt);
 	// The skeleton's fingers are not quite where the model puts them (a curled finger is shorter): for the hand
 	// that works the corner, the real fingertip is measured against the intended one and the wrist moved the
 	// difference, until they meet.
@@ -558,7 +638,7 @@ void ABackRoomPlayer::UpdateHands(float Dt)
 			const FVector P3 = ToBody(Body->GetBoneLocation(*FString::Printf(TEXT("index_03_%s"), Sd)));
 			const FVector P2 = ToBody(Body->GetBoneLocation(*FString::Printf(TEXT("index_02_%s"), Sd)));
 			const FVector Real = P3 + (P3 - P2).GetSafeNormal() * 2.0;
-			PeekBias[Side] = (PeekBias[Side] + (TipBody(Side) - Real) * (1.0f - FMath::Exp(-8.0f * Dt))).GetClampedToMaxSize(10.0);
+			PeekBias[Side] = (PeekBias[Side] + (TipBody(Side) + ContactShift(Side) - Real) * (1.0f - FMath::Exp(-8.0f * Dt))).GetClampedToMaxSize(10.0);
 		}
 		else
 		{
@@ -609,11 +689,22 @@ void ABackRoomPlayer::UpdateHands(float Dt)
 	}
 	if (PeekNow > 0.002f || PeekApplied > 0.002f)
 	{
-		for (ABackRoomCard* Card : Hole)
+		if (bHole)
 		{
-			if (Card && !Card->IsFaceUp())
+			// One stack, one hinge: the upper card's curl nests inside the lower's.
+			const FVector Eyes = GetEyes();
+			const ABackRoomCard::FPeekFlapWorld W = ABackRoomCard::MakeSharedFlap(*Hole[0], *Hole[1], Eyes);
+			Hole[0]->SetPeekShared(PeekNow, W, PeekMaxLift(), 0.0f, Eyes);
+			Hole[1]->SetPeekShared(PeekNow, W, PeekMaxLift(), ABackRoomCard::NestGap, Eyes);
+		}
+		else
+		{
+			for (ABackRoomCard* Card : Hole)
 			{
-				Card->SetPeek(PeekNow, GetEyes(), PeekMaxLift());
+				if (Card && !Card->IsFaceUp())
+				{
+					Card->SetPeek(PeekNow, GetEyes(), PeekMaxLift());
+				}
 			}
 		}
 		PeekApplied = PeekNow;
