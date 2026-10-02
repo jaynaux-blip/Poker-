@@ -301,6 +301,19 @@ void RiverLine::TopBar(double Now)
 	C->FillCircle(RlW - 128.0f, 32.0f, 4.0f, std::sin(Now * 2.0) > -0.9 ? pal::Green : pal::Dim);
 }
 
+Chips RiverLine::PotTotal() const
+{
+	Chips Total = S.PotChips;
+	for (const SeatVis& Seat : S.Seats)
+	{
+		if (Seat.Present)
+		{
+			Total += Seat.Bet;
+		}
+	}
+	return Total;
+}
+
 void RiverLine::DrawCursor()
 {
 	const Pointer& P = UI.Ptr;
@@ -447,12 +460,15 @@ void RiverLine::Table(double Now)
 	Logo(TableCx - 95.0f, TableCy + 88.0f, 1.25f);
 	C->SetAlpha(1.0f);
 
-	// Pot and board.
+	// Pot and board: the stack is what's been gathered in; the label counts the bets out in front too.
 	if (S.PotChips > 0)
 	{
 		DrawChipStack(*C, S.PotChips, TableCx, TableCy - 75.0f, 1.0f);
+	}
+	if (const Chips Total = PotTotal(); Total > 0)
+	{
 		UI.RRect({TableCx - 80.0f, TableCy - 128.0f, 160.0f, 30.0f}, 15.0f, Rgba(0, 0, 0, 0.45f));
-		UI.Text("Pot " + ChipsText(static_cast<double>(S.PotChips)), TableCx, TableCy - 107.0f, Ts(17.0f, 700, pal::Ink, Align::Center));
+		UI.Text("Pot " + ChipsText(static_cast<double>(Total)), TableCx, TableCy - 107.0f, Ts(17.0f, 700, pal::Ink, Align::Center));
 	}
 	const float Bw = 84.0f;
 	const float Bh = 118.0f;

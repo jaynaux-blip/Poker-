@@ -332,9 +332,9 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 	};
 
 	// Pot and board.
-	if (S.PotChips > 0)
+	if (const Chips Total = PotTotal(); Total > 0)
 	{
-		const std::string Pot = "Pot " + ChipsText(static_cast<double>(S.PotChips));
+		const std::string Pot = "Pot " + ChipsText(static_cast<double>(Total));
 		const float Pw = UI.Measure(Pot, 12.5f, 700) + 20.0f;
 		UI.RRect({Cx - Pw / 2.0f, Cy - 60.0f, Pw, 21.0f}, 10.5f, Rgba(0, 0, 0, 0.45f));
 		UI.Text(Pot, Cx, Cy - 45.0f, Ts(12.5f, 700, pal::Ink, Align::Center));

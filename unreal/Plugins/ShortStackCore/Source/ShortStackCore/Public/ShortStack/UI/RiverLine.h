@@ -182,6 +182,8 @@ private:
 	Vec2 FlightPoint(const FlightEnd& End) const;
 	void DrawFlight(const Flight& F, double Now);
 	void GradeBadges(double Now);
+	/** The whole pot, as the label reads it: what's in the middle plus the bets (and blinds) still in front of the seats. */
+	Chips PotTotal() const;
 	void Controls(double Now);
 	double PotFrac(const HeroPrompt& P, double F) const;
 	double PotRaise(const HeroPrompt& P) const;
