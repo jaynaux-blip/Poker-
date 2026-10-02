@@ -65,6 +65,12 @@ public:
 	void SetPhoneDrawList(const TSharedPtr<const ss::ui::DrawList>& List);
 	void SetPhoneBrightness(float Level);
 	void SetScreenGlow(const FLinearColor& Color, float Brightness);
+	/**
+	 * The GearDrop LED room kit (ss::Session::RoomGlow): a strip behind the desk under the window, a cove strip where
+	 * the walls meet the ceiling, and a soft fill so the room takes the colour. Level 1 is steady; stream alerts and
+	 * big hands push it up (or dip it, for a bad beat). Off hides it all.
+	 */
+	void SetRoomLights(bool bOn, const FLinearColor& Color, float Level);
 	/** 0 = deep night, 1 = first light (from the tournament clock). */
 	void SetDawn(float Value);
 	/** Lens treatment: Focus 0..1 (leaned in), Tilt 0..1, Pulse 0..1 (heartbeat). */
@@ -104,6 +110,16 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	float RoomFillCandela = 0.15f;
 
+	/** The LED kit: the wash from the strip behind the desk, the ceiling cove (each wall), the room fill, the strips' glow. */
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|LEDs")
+	float LedDeskCandela = 1.8f;
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|LEDs")
+	float LedCoveCandela = 2.6f;
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|LEDs")
+	float LedFillCandela = 1.6f;
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|LEDs")
+	float LedEmissive = 20.0f;
+
 	// Image options from Settings (applied in SetLens). BrightnessBias is the player's Brightness, in stops
 	// on top of the look's ExposureBias.
 	float BrightnessBias = 0.0f;
@@ -123,6 +139,7 @@ private:
 	void BuildProps();
 	void BuildOutside();
 	void BuildLights();
+	void BuildLeds();
 	void AttachSlate();
 
 	UMaterialInstanceDynamic* Surface(FName Key, uint32 SrgbHex, float Roughness, float Metallic = 0.0f, float Pattern = 0.0f, float Emissive = 0.0f);
@@ -241,6 +258,16 @@ private:
 	TObjectPtr<UPointLightComponent> RoomFill;
 	UPROPERTY()
 	TObjectPtr<UPostProcessComponent> Lens;
+	// The LED kit (hidden until it's bought and on): the desk strip's wash first, then the three cove washes.
+	UPROPERTY()
+	TArray<TObjectPtr<URectLightComponent>> LedWashes;
+	UPROPERTY()
+	TObjectPtr<UPointLightComponent> LedFill;
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> LedStrips;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> LedMaterial;
+	bool bLedsShown = false;
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> Cans;
 	UPROPERTY()

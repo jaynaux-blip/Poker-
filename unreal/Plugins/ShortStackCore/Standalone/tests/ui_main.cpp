@@ -1304,6 +1304,102 @@ void StreamScreens()
 }
 } // namespace ui_test
 
+namespace ui_test
+{
+/** The LED room kit: bought, picked from the setup panel and the Prism card, switched off and on, synced to the stream. */
+void LedScreens()
+{
+	QuietHooks H;
+	ss::Session S(H, "ui-leds");
+	ss::ui::RiverLine RL(S);
+	TableMeasurer M;
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 600000;
+	double Now = 1.0;
+	auto Frame = [&](float X, float Y, bool Down, bool Pressed, bool Released) {
+		RL.UI.Ptr.Active = true;
+		RL.UI.Ptr.X = X;
+		RL.UI.Ptr.Y = Y;
+		RL.UI.Ptr.Down = Down;
+		RL.UI.Ptr.Pressed = Pressed;
+		RL.UI.Ptr.Released = Released;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		RL.Draw(C, Now);
+		RL.UI.Ptr.EndFrame();
+	};
+	auto Click = [&](float X, float Y) {
+		Frame(X, Y, true, true, false);
+		Now += 0.05;
+		Frame(X, Y, false, false, true);
+		Now += 0.05;
+	};
+	for (const char* Id : {"ram-32", "webcam-1080", "mic-usb", "key-lights", "monitor-24", "headphones", "plant"})
+	{
+		Expect(S.Buy(Id).empty(), "a streaming desk");
+	}
+	const double Before = S.GearFx().Quality;
+	Expect(!S.RoomGlow(Now).On && !S.GearFx().Leds, "no kit, no glow");
+	Expect(S.Buy(ss::gear::LedKitId).empty(), "GearDrop sells the LED kit");
+	Expect(S.RoomGlow(Now).On && S.GearFx().Leds && S.GearFx().Quality > Before, "the kit lights up the room (and the stream) when it arrives");
+	Expect(!H.Texts.empty() && H.Texts.back().first == "Dee", "Dee sees the window glowing");
+	RL.ShowStoreCategory(static_cast<int>(ss::gear::Category::Home));
+	RL.OpenApp(ss::ui::RiverLine::App::GearDrop, Now);
+	Emit("leds_store", RL, Now + 1.0);
+	Now += 1.0;
+	RL.UI.Ptr.Active = false;
+	// A swatch on the setup panel, then the full controls.
+	Click(1120.0f + 132.0f + 27.0f * 3.0f, 402.0f);
+	Expect(S.Leds.Preset == 3, "a swatch on the setup panel picks Heater Red");
+	Click(1508.0f, 402.0f);
+	Expect(RL.RoomLightsShown(), "Customize opens the Prism card");
+	Now += 0.6;
+	const std::vector<ss::gear::LedPreset>& Presets = ss::gear::LedPresets();
+	Expect(Presets.size() == 7, "seven looks");
+	for (int K = 0; K < ss::gear::LedPresetCount; ++K)
+	{
+		Click(900.0f, 286.0f + 58.0f * static_cast<float>(K));
+		Expect(S.Leds.Preset == K && S.GearFx().LedPreset == K && S.RoomGlow(Now).Rgb == ss::gear::LedColor(K, Now), "picking a colour lights the room in it");
+		RL.UI.Ptr.Active = false;
+		Emit("leds_" + Presets[static_cast<size_t>(K)].Id, RL, Now + 0.4);
+	}
+	Expect(S.RoomGlow(1.0).Rgb != S.RoomGlow(5.0).Rgb, "Aurora drifts");
+	Click(1244.0f, 223.0f);
+	Expect(!S.Leds.On && !S.RoomGlow(Now).On && !S.GearFx().Leds && S.GearFx().Quality == Before, "the power switch turns the room dark again");
+	RL.UI.Ptr.Active = false;
+	Emit("leds_off", RL, Now + 0.4);
+	Click(1244.0f, 223.0f);
+	Expect(S.Leds.On, "and back on");
+	Click(846.0f, 700.0f);
+	Expect(!S.Leds.Sync, "sync off");
+	Click(846.0f, 700.0f);
+	Expect(S.Leds.Sync, "sync on");
+	Click(80.0f, 500.0f);
+	Expect(!RL.RoomLightsShown(), "a click outside closes the card");
+	// On stream: the facecam in the room's colour, the chip in the studio, a flash on a big hand.
+	S.SetLedPreset(0);
+	Expect(S.GoLive().empty() && S.Streaming(), "live");
+	Now = Step(S, Now, 30.0);
+	RL.OpenApp(ss::ui::RiverLine::App::Kast, Now);
+	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
+	Emit("leds_kast_live", RL, Now);
+	Click(1010.0f, 748.0f);
+	Expect(RL.RoomLightsShown(), "the studio's lights chip opens the card");
+	Click(1201.0f, 769.0f);
+	Expect(!RL.RoomLightsShown(), "Done closes it");
+	S.SetLedPreset(1);
+	const ss::gear::Glow Calm = S.RoomGlow(Now);
+	S.Stream.OnMoment(S.Channel, S.StreamInputs(), ss::kast::Moment::WonAllIn, "38,400", 1.6);
+	const ss::gear::Glow Win = S.RoomGlow(Now + 0.2);
+	Expect(Win.Rgb != Calm.Rgb && Win.Level > Calm.Level, "a won all-in sweeps the room gold");
+	RL.UI.Ptr.Active = false;
+	Emit("leds_kast_flash", RL, Now + 0.2);
+	S.SetLedSync(false);
+	Expect(S.RoomGlow(Now + 0.2).Rgb == ss::gear::LedColor(1, Now + 0.2) && S.RoomGlow(Now + 0.2).Level == 1.0, "unsynced, the room holds its colour");
+	S.EndStream();
+}
+} // namespace ui_test
+
 int main(int Argc, char** Argv)
 {
 	if (Argc > 1)
@@ -1320,6 +1416,7 @@ int main(int Argc, char** Argv)
 	ui_test::MultiScreens();
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();
+	ui_test::LedScreens();
 	ui_test::FrontEndFlows();
 	ui_test::FrontEndScreens();
 	if (ui_test::Failures == 0)

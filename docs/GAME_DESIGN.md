@@ -89,8 +89,25 @@ The whole online career is played from a first-person desk. The apartment is the
 |---|---|---|
 | Rig | 32 GB RAM kit ($89), desktop PC ($899), two-PC setup ($2,499), 24" and 27" monitors ($149, $289), macro pad, headphones | The RAM kit is the next PC upgrade: the laptop alone can't stream, the kit unlocks Kast at 720p. A desktop streams 1080p60 and four tables without dropped frames. Each monitor adds a table. Headphones calm tilt. |
 | Stream | 720p and 1080p60 webcams, a mirrorless camera, USB and broadcast mics, ring light, key lights, green screen, overlay pack | Production value: how the stream looks and sounds, which decides how many strangers stay and follow. The overlay pack adds alerts, a rent-goal bar and 25% more follows. |
-| Home | Ergonomic chair, espresso machine, memory foam mattress, blackout curtains, desk plant | Slower energy drain while awake, more energy from sleep, faster tilt recovery. |
+| Home | Ergonomic chair, espresso machine, memory foam mattress, blackout curtains, desk plant, RGB LED room kit ($59) | Slower energy drain while awake, more energy from sleep, faster tilt recovery. The LED kit lights the room and the stream in seven colours (below). |
 | Subscriptions | Fiber internet, gym, meal kit, chat filter bot | Monthly from the bankroll: fiber lifts the stream above 720p, the gym calms tilt and fatigue, the bot catches 75% of trolls. A renewal the bank can't cover lapses. |
+
+**The LED room kit (Prism, built).** Strips behind the desk under the window (bias light on the wall), a cove strip where the walls meet the ceiling, and a soft fill, so the whole room takes the colour. In the apartment the light is bright and coloured; on stream the facecam's wall is washed in the colour, with a rim of light around the streamer. A lit room adds 5% production value.
+
+- **Seven looks, each with a small perk:**
+
+  | Colour | Vibe | Perk |
+  |---|---|---|
+  | Felt Green | The colour of a good table | Tilt fades 5% faster |
+  | Ice Blue | Cold deck, clear head | 5% less fatigue |
+  | Royal Violet | Kast purple | 5% more follows |
+  | Heater Red | Running hot | Hype from big hands builds 10% faster |
+  | Gold Rush | Warm chip-stack gold | 10% more tips |
+  | After Hours | The laundromat's pink, on your side of the street | Strangers stay 10% longer |
+  | Aurora | Slow waves of green, blue, violet and pink | 3% more follows, hype 5% faster |
+- **Sync with the stream** (on by default): while live, the room breathes with the hype and flashes with every alert in its colour (violet follow, lime sub, gold tip, pink cheer, red raid). A won all-in or a final table sweeps it gold; a bad beat or a bust dims it red.
+- **Controls:** the Room lights card (the kit's own app, Prism) has live previews of the room and the facecam, the seven colours, power and sync. It opens from the kit's card on GearDrop, the "Customize" button under Your setup (which also has a swatch for each colour) and a chip in the Kast studio.
+- **Chat** notices the lights ("felt green LEDs, a man of culture"). Dee sees the window glowing from the street.
 
 The best item in each slot counts (a 1080p webcam replaces the 720p one; buying down is blocked). The store shows "Your setup": the desk drawn with everything you own on it, the totals (tables, stream resolution, production value, fatigue, sleep, tilt, monthly costs), a recommended next buy and the running subscriptions. Every purchase and renewal is in the bank's ledger.
 

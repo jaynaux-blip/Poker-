@@ -5,6 +5,7 @@ import { RiverLine } from './client/riverline';
 import { setArtScale } from './client/cardart';
 import { PhoneScreen } from './game/phone';
 import { Session } from './game/session';
+import { LED_PRESETS, ledColor } from './scene/leds';
 import { World } from './scene/world';
 
 /**
@@ -283,6 +284,9 @@ if (testShot === 'room') {
   if (pace === 'full' || pace === 'smart') session.pace = pace;
 }
 (window as unknown as { __game: unknown }).__game = { world, session, ui };
+// LED room kit preview (the game's GearDrop kit lives in the C++ core): ?leds=felt|ice|royal|heater|gold|afterhours|aurora.
+const ledParam = params.get('leds');
+const ledIndex = LED_PRESETS.findIndex((p) => p.id === ledParam);
 
 function loop(t: number): void {
   const realDt = Math.max(0, (t - last) / 1000);
@@ -323,6 +327,7 @@ function loop(t: number): void {
   screenTint.setRGB(0.72, 0.84, 1.0);
   if (session.screen === 'table') screenTint.setRGB(0.55, 0.9, 0.8);
   world.apartment.setScreenGlow(screenTint, 1);
+  world.apartment.setRoomLights(ledIndex >= 0 ? ledColor(ledIndex, now + Number(params.get('ledt') ?? 0)) : null, Number(params.get('ledlevel') ?? 1));
 
   world.frame(dt);
   frames++;

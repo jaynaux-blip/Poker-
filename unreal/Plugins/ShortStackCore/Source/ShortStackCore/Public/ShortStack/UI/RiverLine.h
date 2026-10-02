@@ -99,6 +99,9 @@ public:
 	/** Opens the order card for an item (the confirm step). */
 	void ShowOrder(const std::string& ItemId) { OrderId = ItemId; }
 	const std::string& OrderShown() const { return OrderId; }
+	/** The LED kit's controls (Prism): colours, power, sync with the stream. Opens over GearDrop or Kast. */
+	void ShowRoomLights(bool On, double Now = 0.0) { LightsShown = On; LightsAt = Now; }
+	bool RoomLightsShown() const { return LightsShown; }
 	void ShowKastPage(KastPage P) { KastShown = P; }
 	KastPage CurrentKastPage() const { return KastShown; }
 
@@ -190,6 +193,7 @@ private:
 	void StoreCard(const gear::Item& I, const Rect& R, double Now, int Index);
 	void SetupPanel(const Rect& R, double Now);
 	void OrderCard(double Now);
+	void RoomLightsCard(double Now);
 	// Kast (RiverLineKast.cpp).
 	void KastApp(double Now);
 	void KastHeader(double Now);
@@ -262,6 +266,8 @@ private:
 	float StoreScroll = 0.0f;
 	float StoreScrollGoal = 0.0f;
 	std::string OrderId;
+	bool LightsShown = false;
+	double LightsAt = -100.0;
 	std::string Delivered;
 	double DeliveredAt = -100.0;
 	// Kast.

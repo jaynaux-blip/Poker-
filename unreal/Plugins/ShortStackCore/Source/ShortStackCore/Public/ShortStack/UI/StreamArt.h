@@ -17,8 +17,8 @@ namespace streamart
 {
 /** A product, centered in R. */
 SHORTSTACKCORE_API void Product(Canvas& C, gear::Art A, const Rect& R, uint32_t Accent, double Time);
-/** The desk with what's owned on it (monitors, the tower, camera, mic, lights, plant, coffee). */
-SHORTSTACKCORE_API void Desk(Canvas& C, const Rect& R, const gear::Owned& Owned, bool Live, double Time);
+/** The desk with what's owned on it (monitors, the tower, camera, mic, lights, plant, coffee), lit by the LED kit's Leds. */
+SHORTSTACKCORE_API void Desk(Canvas& C, const Rect& R, const gear::Owned& Owned, bool Live, double Time, const gear::Glow& Leds = gear::Glow());
 /** An emote (kast::Emote) in the square at (X, Y). */
 SHORTSTACKCORE_API void Emote(Canvas& C, int E, float X, float Y, float Size);
 
@@ -32,6 +32,7 @@ struct Cam
 	double Time = 0.0;
 	uint32_t Hoodie = 0x9b5cff;
 	bool Live = true;
+	gear::Glow Leds; // the room's LEDs: a coloured wall behind, a rim of light around the streamer
 };
 /** The facecam: the streamer at the desk. With a green screen the background is left out (it sits over the game). */
 SHORTSTACKCORE_API void Facecam(Canvas& C, const Rect& R, const Cam& Look);

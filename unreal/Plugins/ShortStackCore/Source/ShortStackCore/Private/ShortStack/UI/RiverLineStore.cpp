@@ -203,6 +203,10 @@ void RiverLine::GearDropApp(double Now)
 	{
 		OrderCard(Now);
 	}
+	if (LightsShown)
+	{
+		RoomLightsCard(Now);
+	}
 	(void)In;
 }
 
@@ -210,6 +214,7 @@ void RiverLine::StoreCard(const gear::Item& I, const Rect& R0, double Now, int I
 {
 	const bool Owned = S.Owns(I.Id);
 	const std::string Why = S.CanBuy(I.Id);
+	const bool Leds = I.Id == gear::LedKitId && Owned; // the LED kit, owned: the card opens its controls
 	const Ui::ClickState Card = UI.Clickable("storecard" + I.Id, R0, OrderId.empty());
 	const float Lift = Card.Hover && OrderId.empty() ? 4.0f : 0.0f;
 	const Rect R{R0.X, R0.Y - Lift, R0.W, R0.H};
@@ -259,9 +264,9 @@ void RiverLine::StoreCard(const gear::Item& I, const Rect& R0, double Now, int I
 	bool Enabled = OrderId.empty();
 	if (Owned)
 	{
-		Label = I.Monthly ? "Manage" : "Owned";
-		Fill = StoreGreen;
-		Enabled = Enabled && I.Monthly;
+		Label = I.Monthly ? "Manage" : Leds ? "Colours" : "Owned";
+		Fill = Leds ? StoreInk : StoreGreen;
+		Enabled = Enabled && (I.Monthly || Leds);
 	}
 	else if (!Why.empty())
 	{
@@ -270,16 +275,30 @@ void RiverLine::StoreCard(const gear::Item& I, const Rect& R0, double Now, int I
 	}
 	if (AppButton("storebuy" + I.Id, Btn, Label, Fill, Hex(0xffffff), Enabled))
 	{
-		OrderId = I.Id;
-		AppAt = Now - 1.0; // keep the grid settled behind the card
+		if (Leds)
+		{
+			ShowRoomLights(true, Now);
+		}
+		else
+		{
+			OrderId = I.Id;
+			AppAt = Now - 1.0; // keep the grid settled behind the card
+		}
 	}
 	if (!Owned && Why.rfind("Needs", 0) == 0)
 	{
 		UI.Text(Why, R.X + 16.0f, R.Y + R.H - 12.0f, Ts(11.5f, 600, Hex(0xb45309), Align::Left, Baseline::Alphabetic, false, R.W - 32.0f));
 	}
-	if (Card.Clicked && OrderId.empty())
+	if (Card.Clicked && OrderId.empty() && !LightsShown)
 	{
-		OrderId = I.Id; // the card itself opens the details
+		if (Leds)
+		{
+			ShowRoomLights(true, Now);
+		}
+		else
+		{
+			OrderId = I.Id; // the card itself opens the details
+		}
 	}
 	(void)Index;
 }
@@ -296,11 +315,49 @@ void RiverLine::SetupPanel(const Rect& R, double Now)
 		Count += gear::Find(G.first) ? 1 : 0;
 	}
 	UI.Text(Count == 0 ? std::string("Just the laptop") : std::to_string(Count) + (Count == 1 ? " item" : " items"), R.X + R.W - 24.0f, R.Y + 40.0f, Ts(13.0f, 700, StoreGray, Align::Right));
-	const Rect Pic{R.X + 16.0f, R.Y + 58.0f, R.W - 32.0f, 250.0f};
+	const bool HasLeds = S.Owns(gear::LedKitId);
+	const gear::Glow Glow = S.RoomGlow(Now);
+	const Rect Pic{R.X + 16.0f, R.Y + 58.0f, R.W - 32.0f, HasLeds ? 214.0f : 250.0f};
 	C->PushClip(Pic);
-	streamart::Desk(*C, Pic, S.Gear, S.Streaming(), Now);
+	streamart::Desk(*C, Pic, S.Gear, S.Streaming(), Now, Glow);
 	C->PopClip();
 	C->StrokeRoundRect(Pic, 2.0f, StoreLine, 1.0f);
+	float Top = Pic.Y + Pic.H;
+	if (HasLeds)
+	{
+		// The LED kit: the colour at a glance, a swatch for each, and the full controls.
+		const Rect Row{R.X + 16.0f, Pic.Y + Pic.H + 10.0f, R.W - 32.0f, 56.0f};
+		C->FillRoundRect(Row, 12.0f, Hex(0x0e0c16));
+		NetSpaced(*C, "ROOM LIGHTS", Row.X + 14.0f, Row.Y + 22.0f, 9.5f, 900, Hex(0x9ca3af), 1.3f);
+		const gear::LedPreset& Cur = gear::LedPresets()[static_cast<size_t>(S.Leds.Preset)];
+		UI.Text(Glow.On ? Cur.Name : std::string("Off"), Row.X + 14.0f, Row.Y + 42.0f, Ts(13.0f, 800, Glow.On ? Mix(Hex(Glow.Rgb), Hex(0xffffff), 0.3f) : StoreGray, Align::Left, Baseline::Alphabetic, false, 104.0f));
+		for (int K = 0; K < gear::LedPresetCount; ++K)
+		{
+			const float Sx = Row.X + 132.0f + Nf(K) * 27.0f;
+			const float Sy = Row.Y + 28.0f;
+			const Ui::ClickState Cs = UI.Clickable("storeled" + std::to_string(K), {Sx - 12.0f, Sy - 12.0f, 24.0f, 24.0f}, OrderId.empty() && !LightsShown);
+			const Color Sw = Hex(gear::LedColor(K, Now));
+			if (Glow.On && S.Leds.Preset == K)
+			{
+				C->FillCircle(Sx, Sy, 13.0f, NetA(Sw, 0.35f));
+				C->StrokeEllipse(Sx, Sy, 11.5f, 11.5f, Hex(0xffffff), 2.0f);
+			}
+			C->FillCircle(Sx, Sy, Cs.Hover ? 10.0f : 9.0f, Sw);
+			if (Cs.Clicked)
+			{
+				S.SetLedPreset(K);
+			}
+		}
+		const Rect Edit{Row.X + Row.W - 108.0f, Row.Y + 13.0f, 96.0f, 30.0f};
+		const Ui::ClickState Es = UI.Clickable("storeledcustom", Edit, OrderId.empty() && !LightsShown);
+		C->FillRoundRect(Edit, 10.0f, Es.Hover ? Hex(0x3a3352) : Hex(0x2a2540));
+		UI.Text("Customize", Edit.X + Edit.W / 2.0f, Edit.Y + 20.0f, Ts(12.5f, 800, Hex(0xffffff), Align::Center));
+		if (Es.Clicked)
+		{
+			ShowRoomLights(true, Now);
+		}
+		Top = Row.Y + Row.H;
+	}
 
 	// What it adds up to.
 	struct Stat
@@ -319,7 +376,7 @@ void RiverLine::SetupPanel(const Rect& R, double Now)
 	Stats.push_back({"Tilt recovery", Fx.Calm > 0.0 ? "+" + Pct(Fx.Calm) + " faster" : std::string("normal"), Fx.Calm > 0.0 ? StoreGreen : StoreGray});
 	Stats.push_back({"Chat filter", Fx.ModBot > 0.0 ? "catches " + Pct(Fx.ModBot) : std::string("none"), Fx.ModBot > 0.0 ? StoreGreen : StoreGray});
 	Stats.push_back({"Subscriptions", Fx.MonthlyCents > 0 ? Money(Fx.MonthlyCents) + "/mo" : std::string("none"), StoreInk});
-	float Y = Pic.Y + Pic.H + 26.0f;
+	float Y = Top + 26.0f;
 	// Production value: the number Kast cares about.
 	UI.Text("Stream production value", R.X + 24.0f, Y, Ts(14.0f, 700, StoreInk));
 	const double Q = Fx.Quality;
@@ -447,6 +504,151 @@ void RiverLine::OrderCard(double Now)
 	if (St.Clicked)
 	{
 		OrderId.clear();
+	}
+}
+void RiverLine::RoomLightsCard(double Now)
+{
+	if (!S.Owns(gear::LedKitId))
+	{
+		LightsShown = false;
+		return;
+	}
+	const gear::Glow Glow = S.RoomGlow(Now);
+	const Color Lit = Glow.On ? Hex(Glow.Rgb) : Hex(0x4b5563);
+	const Color PrismInk = Hex(0xf5f3ff);
+	const Color PrismMuted = Hex(0x9d97b5);
+	const Color PrismPanel = Hex(0x0e0c16);
+	const float In = NetEase((Now - LightsAt) / 0.35);
+	// The rest of the screen stays put: a click outside the card closes it.
+	C->FillRect({0.0f, 0.0f, NetW, StoreH}, Rgba(4, 3, 10, 0.74f * In));
+	const Ui::ClickState Outside = UI.Clickable("ledsbackdrop", {0.0f, 0.0f, NetW, StoreH});
+	const Rect R{NetW / 2.0f - 500.0f, 148.0f + (1.0f - In) * 24.0f, 1000.0f, 668.0f};
+	C->GlowRoundRect(R, 24.0f, NetA(Lit, (Glow.On ? 0.4f : 0.15f) * In), 44.0f);
+	C->FillRoundRect(R, 24.0f, PrismPanel);
+	C->StrokeRoundRect(R, 24.0f, Mix(Lit, Hex(0x2a2540), 0.6f), 1.5f);
+
+	// Left: what the room and the stream look like right now.
+	const Rect Room{R.X + 24.0f, R.Y + 24.0f, 470.0f, 300.0f};
+	C->PushClip(Room);
+	streamart::Desk(*C, Room, S.Gear, S.Streaming(), Now, Glow);
+	C->PopClip();
+	C->StrokeRoundRect(Room, 6.0f, Hex(0x2a2540), 1.0f);
+	NetPill(*C, "YOUR ROOM", Room.X + 12.0f, Room.Y + 12.0f, PrismInk, false, 10.0f);
+	const Rect Cam{R.X + 24.0f, R.Y + 338.0f, 470.0f, 470.0f * 9.0f / 16.0f};
+	streamart::Cam Look;
+	Look.Gear = S.GearFx();
+	Look.Headphones = S.Owns("headphones");
+	Look.Face = S.Stream.Face;
+	Look.FaceAge = Now - S.Stream.FaceAt;
+	Look.Time = Now;
+	Look.Live = S.Streaming();
+	Look.Leds = Glow;
+	streamart::Facecam(*C, Cam, Look);
+	C->StrokeRoundRect(Cam, 6.0f, Hex(0x2a2540), 1.0f);
+	NetPill(*C, S.Streaming() ? "LIVE ON KAST" : "ON STREAM", Cam.X + 12.0f, Cam.Y + 12.0f, S.Streaming() ? Hex(0xef4444) : Hex(kast::Violet), true, 10.0f);
+	UI.Text(Glow.On ? "Lit room on camera: +5% stream production value" : "Lights off: the stream goes back to the monitor's glow", Cam.X, R.Y + R.H - 22.0f, Ts(12.0f, 600, Glow.On ? PrismMuted : Hex(0x6b6385)));
+
+	// Right: power, the seven looks, sync.
+	const float X = R.X + 520.0f;
+	const float W = R.X + R.W - 24.0f - X;
+	NetSpaced(*C, "PRISM \xC2\xB7 RGB LED ROOM KIT", X, R.Y + 46.0f, 10.5f, 900, PrismMuted, 1.5f);
+	UI.Text("Room lights", X, R.Y + 84.0f, Ts(30.0f, 900, PrismInk));
+	auto Switch = [&](const std::string& Id, const Rect& B, bool On, const Color& Col) {
+		const Ui::ClickState Cs = UI.Clickable(Id, B);
+		C->FillRoundRect(B, B.H / 2.0f, On ? Col : (Cs.Hover ? Hex(0x2f2a40) : Hex(0x221e30)));
+		const float Kx = On ? B.X + B.W - B.H / 2.0f : B.X + B.H / 2.0f;
+		C->FillCircle(Kx, B.Y + B.H / 2.0f, B.H / 2.0f - 4.0f, On ? Hex(0xffffff) : Hex(0x8b85a3));
+		return Cs.Clicked;
+	};
+	{
+		const Rect Pw{X + W - 64.0f, R.Y + 58.0f, 64.0f, 34.0f};
+		UI.Text(Glow.On ? "ON" : "OFF", Pw.X - 12.0f, Pw.Y + 23.0f, Ts(13.0f, 900, Glow.On ? Mix(Lit, Hex(0xffffff), 0.3f) : PrismMuted, Align::Right));
+		if (Switch("ledspower", Pw, Glow.On, Lit))
+		{
+			S.SetLedsOn(!S.Leds.On);
+		}
+	}
+	const std::vector<gear::LedPreset>& Presets = gear::LedPresets();
+	for (int K = 0; K < gear::LedPresetCount; ++K)
+	{
+		const gear::LedPreset& P = Presets[static_cast<size_t>(K)];
+		const Rect Row{X - 8.0f, R.Y + 112.0f + Nf(K) * 58.0f, W + 8.0f, 52.0f};
+		const bool Picked = S.Leds.Preset == K;
+		const Ui::ClickState Cs = UI.Clickable("ledpreset" + std::to_string(K), Row);
+		const Color Sw = Hex(gear::LedColor(K, Now));
+		const float A0 = C->GetAlpha();
+		if (!Glow.On)
+		{
+			C->SetAlpha(A0 * 0.55f);
+		}
+		if (Picked)
+		{
+			C->FillRoundRect(Row, 14.0f, NetA(Sw, 0.15f));
+			C->StrokeRoundRect(Row, 14.0f, NetA(Sw, 0.75f), 1.5f);
+		}
+		else if (Cs.Hover)
+		{
+			C->FillRoundRect(Row, 14.0f, Hex(0x1a1726));
+		}
+		// The swatch: a halo and the colour (Aurora: its four colours turning).
+		const float Sx = Row.X + 32.0f;
+		const float Sy = Row.Y + 26.0f;
+		C->FillCircle(Sx, Sy, 21.0f, NetA(Sw, Picked ? 0.35f : 0.18f));
+		if (P.Cycles)
+		{
+			static const uint32_t Stops[4] = {0x19e68c, 0x2fb4ff, 0x9b5cff, 0xff3fb4};
+			const float Turn = Nf(std::fmod(Now * 0.6, 6.2831853));
+			for (int Q = 0; Q < 4; ++Q)
+			{
+				std::vector<Vec2> Wedge = {{Sx, Sy}};
+				for (int I = 0; I <= 8; ++I)
+				{
+					const float A = Turn + (Nf(Q) + Nf(I) / 8.0f) * 1.5707963f;
+					Wedge.push_back({Sx + std::cos(A) * 14.0f, Sy + std::sin(A) * 14.0f});
+				}
+				C->FillPolygon(Wedge, Hex(Stops[Q]));
+			}
+		}
+		else
+		{
+			C->FillCircle(Sx, Sy, 14.0f, Sw);
+		}
+		C->FillCircle(Sx - 4.0f, Sy - 4.0f, 4.0f, Rgba(255, 255, 255, 0.35f));
+		if (Picked)
+		{
+			C->StrokeEllipse(Sx, Sy, 17.0f, 17.0f, Hex(0xffffff), 2.0f);
+		}
+		UI.Text(P.Name, Row.X + 64.0f, Row.Y + 23.0f, Ts(15.5f, 800, Picked ? Hex(0xffffff) : PrismInk));
+		UI.Text(P.Vibe, Row.X + 64.0f, Row.Y + 42.0f, Ts(12.0f, 500, PrismMuted, Align::Left, Baseline::Alphabetic, false, Row.W - 76.0f));
+		const float Pw = UI.Measure(P.Perk, 11.5f, 800) + 18.0f;
+		const Rect Perk{Row.X + Row.W - 12.0f - Pw, Row.Y + 8.0f, Pw, 21.0f};
+		C->FillRoundRect(Perk, 10.5f, NetA(Sw, Picked ? 0.3f : 0.14f));
+		UI.Text(P.Perk, Perk.X + 9.0f, Perk.Y + 15.0f, Ts(11.5f, 800, Mix(Sw, Hex(0xffffff), 0.45f)));
+		C->SetAlpha(A0);
+		if (Cs.Clicked)
+		{
+			S.SetLedPreset(K);
+		}
+	}
+	// Sync: alerts and big hands flash the room while live.
+	{
+		const float Y = R.Y + 532.0f;
+		C->FillRect({X, Y - 10.0f, W, 1.0f}, Hex(0x221e30));
+		if (Switch("ledssync", {X, Y + 6.0f, 52.0f, 28.0f}, S.Leds.Sync, Hex(kast::Violet)))
+		{
+			S.SetLedSync(!S.Leds.Sync);
+		}
+		UI.Text("Sync with the stream", X + 66.0f, Y + 20.0f, Ts(15.0f, 800, PrismInk));
+		NetParagraph(*C, "Flashes with follows, subs, tips and raids while you're live. Gold for a won all-in, red for a bad beat.", X + 66.0f, Y + 39.0f, W - 66.0f, 12.0f, 500, PrismMuted, 16.0f, 2);
+	}
+	if (AppButton("ledsdone", {X + W - 150.0f, R.Y + R.H - 70.0f, 150.0f, 46.0f}, "Done", Glow.On ? Mix(Lit, Hex(0x000000), 0.15f) : Hex(0x2a2540), Hex(0xffffff), true))
+	{
+		LightsShown = false;
+	}
+	UI.Text("Each colour has a perk. Change it any time.", X, R.Y + R.H - 41.0f, Ts(12.5f, 600, PrismMuted));
+	if (Outside.Clicked && !UI.Hover(R))
+	{
+		LightsShown = false;
 	}
 }
 } // namespace ui

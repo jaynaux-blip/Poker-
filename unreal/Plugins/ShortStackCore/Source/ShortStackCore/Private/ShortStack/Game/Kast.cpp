@@ -195,7 +195,32 @@ const std::vector<std::string>& QualityLines(const gear::Effects& G, bool Droppi
 	}
 	if (G.Lights == 0)
 	{
-		return Dark;
+		static const std::vector<std::string> LedDark = {"love the LEDs, now light your face kastLUL", "nice room lights tho", "the LEDs carry this stream", "gamer lights, no face light kastLUL"};
+		return G.Leds ? LedDark : Dark;
+	}
+	if (G.Leds)
+	{
+		// The room's colour, in chat.
+		static const std::vector<std::vector<std::string>> Led = [] {
+			const std::vector<std::vector<std::string>> Extra = {
+				{"the green lights are so cozy", "felt green LEDs, a man of culture", "looks like you're sitting inside a poker table"},
+				{"that blue is so calm", "ice blue setup goes hard", "the blue room at 3am kastPog"},
+				{"purple LEDs kastPog", "the violet setup is clean", "matching kast purple, respect"},
+				{"red lights, heater mode", "running hot, the room agrees", "the red LEDs are a vibe"},
+				{"gold lights, rich already kastLUL", "that warm gold is cozy", "gold room = gold run"},
+				{"pink lights from across the street kastPog", "after hours vibes", "love the pink glow"},
+				{"the aurora lights are hypnotic", "rainbow room kastPog", "how do the LEDs change like that", "the light show is crazy"},
+			};
+			std::vector<std::vector<std::string>> Out;
+			for (const std::vector<std::string>& E : Extra)
+			{
+				std::vector<std::string> V = {"stream looks so clean", "what mic is that?", "cam quality kastPog", "this production value", "looking pro", "what LEDs are those?"};
+				V.insert(V.end(), E.begin(), E.end());
+				Out.push_back(V);
+			}
+			return Out;
+		}();
+		return Led[static_cast<size_t>(std::max(0, std::min(gear::LedPresetCount - 1, G.LedPreset)))];
 	}
 	return Clean;
 }
@@ -988,7 +1013,7 @@ double Stream::StrangerStay(const Inputs& In) const
 {
 	// Minutes a stranger stays: longer with a good picture, a streamer who talks, a chat that's alive, a big hand.
 	const double Warm = std::min(1.0, static_cast<double>(Present) / 8.0);
-	return 4.0 + 6.0 * Quality(In) + 6.0 * Engage + Hype / 15.0 + 4.0 * Warm;
+	return (4.0 + 6.0 * Quality(In) + 6.0 * Engage + Hype / 15.0 + 4.0 * Warm) * (1.0 + In.Gear.Stay);
 }
 
 double Stream::Expected(const Channel& Ch, const Inputs& In)
@@ -1742,7 +1767,7 @@ void Stream::OnMoment(Channel& Ch, const Inputs& In, Moment M, const std::string
 	}
 	LastReal = In.Real;
 	const kast_detail::Hit H = kast_detail::HitOf(M);
-	Hype = std::min(100.0, Hype + H.Hype * kast_detail::TitleOf(Ch).Hype * std::max(0.5, std::min(2.0, Size)));
+	Hype = std::min(100.0, Hype + H.Hype * kast_detail::TitleOf(Ch).Hype * std::max(0.5, std::min(2.0, Size)) * (1.0 + In.Gear.Hype));
 	LastMoment = M;
 	LastMomentReal = In.Real;
 	if (H.Face != Mood::Focus || M == Moment::BestPlay)
@@ -2362,7 +2387,7 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 			RunAd(Ch, In, 90);
 		}
 	}
-	TipDebt += (SumL * 0.012 + (Strangers + Lurkers) * 0.0006) * (1.0 + Hype / 50.0) * (1.0 + 0.5 * Engage) * DWorld / 60.0;
+	TipDebt += (SumL * 0.012 + (Strangers + Lurkers) * 0.0006) * (1.0 + Hype / 50.0) * (1.0 + 0.5 * Engage) * (1.0 + In.Gear.Tips) * DWorld / 60.0;
 	while (TipDebt >= 1.0)
 	{
 		TipDebt -= 1.0;

@@ -1,6 +1,7 @@
 #include "ShortStack/Game/Gear.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace ss
 {
@@ -190,6 +191,12 @@ std::vector<Item> Build()
 		I.Rating = 4.8;
 		I.Reviews = 1720;
 	}
+	{
+		Item& I = Add(LedKitId, Category::Home, Slot::None, Art::LedKit, 0x19e68c, "RGB LED room kit", "Prism", 59.0, "Lights the room \xC2\xB7 7 colours",
+			"Strips behind the desk, along the ceiling and under the window. Pick a colour from the laptop; sync it to the stream and it flashes with every follow and every all-in.");
+		I.Rating = 4.7;
+		I.Reviews = 18420;
+	}
 	// Subscriptions.
 	{
 		Item& I = Add("fiber", Category::Subscription, Slot::Net, Art::Router, 0x2dd4bf, "Fiber 500", "Northline", 69.99, "Upload for 1080p and up",
@@ -337,6 +344,72 @@ const Item& FirstPcUpgrade()
 		}
 	}
 	return *Best;
+}
+
+const std::vector<LedPreset>& LedPresets()
+{
+	static const std::vector<LedPreset> L = {
+		{"felt", "Felt Green", "The colour of a good table.", "Tilt fades 5% faster", 0x19e68c, false},
+		{"ice", "Ice Blue", "Cold deck, clear head.", "-5% fatigue", 0x2fb4ff, false},
+		{"royal", "Royal Violet", "Kast purple. Chat feels at home.", "+5% follows", 0x9b5cff, false},
+		{"heater", "Heater Red", "For when you're running hot.", "Hype builds 10% faster", 0xff2d55, false},
+		{"gold", "Gold Rush", "Warm chip-stack gold.", "+10% tips", 0xffb21e, false},
+		{"afterhours", "After Hours", "The laundromat's pink, on your side of the street.", "Viewers stay 10% longer", 0xff3fb4, false},
+		{"aurora", "Aurora", "Slow waves of green, blue, violet and pink.", "+3% follows \xC2\xB7 hype builds 5% faster", 0x19e68c, true},
+	};
+	return L;
+}
+
+uint32_t MixRgb(uint32_t A, uint32_t B, double T)
+{
+	const double U = std::max(0.0, std::min(1.0, T));
+	uint32_t Out = 0;
+	for (int Shift = 0; Shift <= 16; Shift += 8)
+	{
+		const double Ca = static_cast<double>((A >> Shift) & 0xffu);
+		const double Cb = static_cast<double>((B >> Shift) & 0xffu);
+		Out |= static_cast<uint32_t>(std::lround(Ca + (Cb - Ca) * U)) << Shift;
+	}
+	return Out;
+}
+
+uint32_t LedColor(int Preset, double Time)
+{
+	const std::vector<LedPreset>& L = LedPresets();
+	const LedPreset& P = L[static_cast<size_t>(std::max(0, std::min(LedPresetCount - 1, Preset)))];
+	if (!P.Cycles)
+	{
+		return P.Rgb;
+	}
+	// Aurora: four stops, eight seconds from one to the next, eased so each colour lingers.
+	static const uint32_t Stops[4] = {0x19e68c, 0x2fb4ff, 0x9b5cff, 0xff3fb4};
+	const double Pos = std::fmod(std::max(0.0, Time) / 8.0, 4.0);
+	const int K = static_cast<int>(Pos);
+	const double F = Pos - static_cast<double>(K);
+	const double Ease = F * F * (3.0 - 2.0 * F);
+	return MixRgb(Stops[K % 4], Stops[(K + 1) % 4], Ease);
+}
+
+void ApplyLeds(Effects& E, int Preset)
+{
+	const int P = std::max(0, std::min(LedPresetCount - 1, Preset));
+	E.Leds = true;
+	E.LedPreset = P;
+	// A coloured room behind the facecam looks like a real setup.
+	E.Quality = std::min(1.0, E.Quality + 0.05);
+	switch (P)
+	{
+	case 0: E.Calm = std::min(0.6, E.Calm + 0.05); break;
+	case 1: E.Drain = std::min(0.45, E.Drain + 0.05); break;
+	case 2: E.Follow += 0.05; break;
+	case 3: E.Hype += 0.1; break;
+	case 4: E.Tips += 0.1; break;
+	case 5: E.Stay += 0.1; break;
+	default:
+		E.Follow += 0.03;
+		E.Hype += 0.05;
+		break;
+	}
 }
 
 std::string ResolutionLabel(int Resolution)

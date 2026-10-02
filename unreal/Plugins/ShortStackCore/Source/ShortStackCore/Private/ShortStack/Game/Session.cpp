@@ -186,6 +186,7 @@ std::string SaveData::Serialize() const
 	{
 		Out << "gear\t" << session_detail::Escape(G.first) << "\t" << Fixed(G.second, 2) << "\n";
 	}
+	Out << "leds\t" << Leds.Preset << "\t" << (Leds.On ? 1 : 0) << "\t" << (Leds.Sync ? 1 : 0) << "\n";
 	const kast::Channel& K = Channel;
 	Out << "kast\tch\t" << K.Title << "\t" << K.Followers << "\t" << Fixed(K.FollowFrac, 4) << "\t" << Fixed(K.MinutesLive, 2) << "\t" << Fixed(K.ViewerMinutes, 1) << "\t" << K.Peak << "\t" << K.Streams << "\t"
 		<< (K.Affiliate ? 1 : 0) << "\t" << (K.Partner ? 1 : 0) << "\t" << K.Milestone << "\t" << Fixed(K.LastOffline, 2) << "\t" << K.GiftedSubs << "\t" << K.RaidsIn << "\n";
@@ -350,6 +351,12 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 		else if (P.size() == 3 && P[0] == "gear")
 		{
 			D.Gear[session_detail::Unescape(P[1])] = std::atof(P[2].c_str());
+		}
+		else if (P.size() >= 4 && P[0] == "leds")
+		{
+			D.Leds.Preset = std::max(0, std::min(gear::LedPresetCount - 1, std::atoi(P[1].c_str())));
+			D.Leds.On = P[2] == "1";
+			D.Leds.Sync = P[3] == "1";
 		}
 		else if (P.size() >= 3 && P[0] == "kast")
 		{
@@ -528,6 +535,7 @@ Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData*
 		LobbyMinutes = Loaded->ClockMinutes;
 		Life = Loaded->Life;
 		Gear = Loaded->Gear;
+		Leds = Loaded->Leds;
 		Channel = Loaded->Channel;
 		TextsSeen.insert(Loaded->TextsSeen.begin(), Loaded->TextsSeen.end());
 	}
@@ -545,6 +553,7 @@ void Session::Save()
 	D.ClockMinutes = LobbyMinutes;
 	D.Life = Life;
 	D.Gear = Gear;
+	D.Leds = Leds;
 	D.Channel = Channel;
 	D.TextsSeen.assign(TextsSeen.begin(), TextsSeen.end());
 	Hooks.Save(D);
@@ -567,6 +576,7 @@ void Session::ResetSave()
 		Hooks.GearChanged(G.first, false);
 	}
 	Gear.clear();
+	Leds = gear::LedState();
 	Channel = kast::Channel();
 	Stream = kast::Stream(SeedBase + ":kast");
 	StreamCard = false;
@@ -2588,6 +2598,104 @@ void Session::FinishSkip()
 void Session::RefreshGear()
 {
 	Fx = gear::Sum(Gear);
+	if (Owns(gear::LedKitId) && Leds.On)
+	{
+		gear::ApplyLeds(Fx, Leds.Preset);
+	}
+}
+
+void Session::SetLedPreset(int Preset)
+{
+	Leds.Preset = std::max(0, std::min(gear::LedPresetCount - 1, Preset));
+	Leds.On = true;
+	RefreshGear();
+	Save();
+}
+
+void Session::SetLedsOn(bool On)
+{
+	Leds.On = On;
+	RefreshGear();
+	Save();
+}
+
+void Session::SetLedSync(bool Sync)
+{
+	Leds.Sync = Sync;
+	Save();
+}
+
+gear::Glow Session::RoomGlow(double At) const
+{
+	gear::Glow G;
+	if (!Owns(gear::LedKitId) || !Leds.On)
+	{
+		return G;
+	}
+	G.On = true;
+	G.Preset = Leds.Preset;
+	G.Rgb = gear::LedColor(Leds.Preset, At);
+	G.Level = 1.0;
+	if (!Leds.Sync || !Stream.Live)
+	{
+		return G;
+	}
+	// Synced to the stream: the room breathes with the hype...
+	G.Level += 0.2 * (Stream.Hype / 100.0) * (0.5 + 0.5 * std::sin(At * 2.4));
+	// ...a big hand sweeps it (gold for a win, a red dip for a bad beat)...
+	const double SinceMoment = At - Stream.LastMomentReal;
+	if (SinceMoment >= 0.0 && SinceMoment < 2.5)
+	{
+		const double Fade = 1.0 - SinceMoment / 2.5;
+		switch (Stream.LastMoment)
+		{
+		case kast::Moment::WonAllIn:
+		case kast::Moment::Win:
+		case kast::Moment::FinalTable:
+		case kast::Moment::InTheMoney:
+		case kast::Moment::Knockout:
+			G.Rgb = gear::MixRgb(G.Rgb, 0xffc83d, 0.9 * Fade);
+			G.Level += 0.7 * Fade * (0.6 + 0.4 * std::fabs(std::sin(At * 9.0)));
+			break;
+		case kast::Moment::BadBeat:
+		case kast::Moment::Bust:
+		case kast::Moment::LostAllIn:
+			G.Rgb = gear::MixRgb(G.Rgb, 0xff2020, 0.8 * Fade);
+			G.Level -= 0.45 * Fade;
+			break;
+		default: break;
+		}
+	}
+	// ...and every alert flashes it in the alert's colour.
+	if (!Stream.Alerts.empty() && Stream.Alerts.front().At >= 0.0)
+	{
+		const double Since = At - Stream.Alerts.front().At;
+		if (Since >= 0.0 && Since < 1.6)
+		{
+			uint32_t Flash = 0x9b5cff;
+			switch (Stream.Alerts.front().Kind)
+			{
+			case kast::AlertKind::Sub:
+			case kast::AlertKind::Gift:
+			case kast::AlertKind::Milestone:
+			case kast::AlertKind::Affiliate:
+			case kast::AlertKind::Partner:
+			case kast::AlertKind::Stage: Flash = 0xa3e635; break;
+			case kast::AlertKind::Tip: Flash = 0xffc83d; break;
+			case kast::AlertKind::Cheer: Flash = 0xf472b6; break;
+			case kast::AlertKind::Raid: Flash = 0xff3b3b; break;
+			case kast::AlertKind::Clip: Flash = 0x38bdf8; break;
+			default: break;
+			}
+			const double Fade = 1.0 - Since / 1.6;
+			// Two quick pulses, then back to the room's colour.
+			const double Pulse = 0.5 + 0.5 * std::cos(Since * 2.0 * 3.14159265358979 * 1.25);
+			G.Rgb = gear::MixRgb(G.Rgb, Flash, Fade * (0.55 + 0.45 * Pulse));
+			G.Level += 0.8 * Fade * Pulse;
+		}
+	}
+	G.Level = std::max(0.3, std::min(2.0, G.Level));
+	return G;
 }
 
 std::string Session::CanBuy(const std::string& Id) const
@@ -2643,6 +2751,12 @@ std::string Session::Buy(const std::string& Id)
 	if (I.Where == gear::Slot::Pc && Fx.CanStream())
 	{
 		StoryText("gear-can-stream", "Kast", "Your setup can stream now. Open Kast on the taskbar and go live: chat, followers, subs and sponsors are waiting.");
+	}
+	if (Id == gear::LedKitId)
+	{
+		Leds.On = true;
+		RefreshGear();
+		StoryText("gear-leds", "Dee", "Your window is GLOWING from the street. Mei says do the green, it looks like a poker table. I say do the pink, it matches the laundromat.");
 	}
 	if (I.Cat == gear::Category::Stream && !Channel.Streams)
 	{

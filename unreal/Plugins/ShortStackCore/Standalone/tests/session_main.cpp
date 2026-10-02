@@ -952,6 +952,90 @@ void Streaming()
 	Expect(!Broke.Owns("gym") && Broke.BankrollCents == 100 && Broke.GearFx().Calm == Loaded.GearFx().Calm, "a subscription the bank can't cover lapses");
 	Expect(S.Cancel("fiber") && !S.Owns("fiber") && S.GearFx().Resolution == 720, "cancelling fiber drops the stream back to 720p");
 }
+/** The LED room kit: bought, each colour's perk, the power switch, the save, and the room flashing with the stream. */
+void LedChecks()
+{
+	Hooks H;
+	ss::Session S(H, "leds");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 100000;
+	Expect(!S.RoomGlow(1.0).On && !S.GearFx().Leds, "no kit, no lights");
+	S.SetLedPreset(4);
+	Expect(!S.RoomGlow(1.0).On && !S.GearFx().Leds, "picking a colour without the kit lights nothing");
+	const ss::gear::Effects Base = ss::gear::Sum(S.Gear);
+	Expect(S.Buy(ss::gear::LedKitId).empty() && H.GearEvents == 1 && S.BankrollCents == 100000 - ss::gear::Find(ss::gear::LedKitId)->PriceCents, "GearDrop sells the kit ($59)");
+	Expect(S.RoomGlow(1.0).On && S.RoomGlow(1.0).Preset == 4 && S.RoomGlow(1.0).Rgb == 0xffb21e && S.RoomGlow(1.0).Level == 1.0, "it lights up in the colour picked");
+	struct Perk
+	{
+		double Calm, Drain, Follow, Hype, Tips, Stay;
+	};
+	const Perk Perks[7] = {{0.05, 0, 0, 0, 0, 0}, {0, 0.05, 0, 0, 0, 0}, {0, 0, 0.05, 0, 0, 0}, {0, 0, 0, 0.1, 0, 0}, {0, 0, 0, 0, 0.1, 0}, {0, 0, 0, 0, 0, 0.1}, {0, 0, 0.03, 0.05, 0, 0}};
+	auto Near = [](double A, double B) { return std::fabs(A - B) < 1e-9; };
+	for (int K = 0; K < ss::gear::LedPresetCount; ++K)
+	{
+		S.SetLedPreset(K);
+		const ss::gear::Effects& Fx = S.GearFx();
+		const Perk& P = Perks[K];
+		Expect(Fx.Leds && Fx.LedPreset == K && Near(Fx.Quality, Base.Quality + 0.05), "every colour lights the stream (+5% production value)");
+		Expect(Near(Fx.Calm, Base.Calm + P.Calm) && Near(Fx.Drain, Base.Drain + P.Drain) && Near(Fx.Follow, Base.Follow + P.Follow) && Near(Fx.Hype, P.Hype) && Near(Fx.Tips, P.Tips) && Near(Fx.Stay, P.Stay),
+			"each colour has its own perk, and only that one");
+	}
+	Expect(S.RoomGlow(0.0).Rgb == 0x19e68c && S.RoomGlow(8.0).Rgb == 0x2fb4ff && S.RoomGlow(4.0).Rgb != S.RoomGlow(0.0).Rgb && S.RoomGlow(32.0).Rgb == 0x19e68c, "Aurora drifts green, blue, violet, pink and around again");
+	S.SetLedsOn(false);
+	Expect(!S.RoomGlow(1.0).On && !S.GearFx().Leds && Near(S.GearFx().Quality, Base.Quality) && S.GearFx().Hype == 0.0, "off: dark room, no perk");
+	S.SetLedsOn(true);
+	// The save keeps the colour and the switches; an old save without them gets the defaults.
+	S.SetLedPreset(5);
+	S.SetLedSync(false);
+	ss::SaveData Back;
+	Expect(ss::SaveData::Parse(H.Last.Serialize(), Back) && Back.Leds == S.Leds && Back.Leds.Preset == 5 && !Back.Leds.Sync && Back.Serialize() == H.Last.Serialize(), "the LEDs are in the save");
+	ss::Session Loaded(H, "leds-loaded", &Back);
+	Expect(Loaded.RoomGlow(1.0).On && Loaded.RoomGlow(1.0).Rgb == 0xff3fb4 && Loaded.GearFx().Stay > 0.09, "a loaded game comes back with After Hours on");
+	std::string Old = H.Last.Serialize();
+	Old.erase(Old.find("leds\t"), Old.find('\n', Old.find("leds\t")) - Old.find("leds\t") + 1);
+	ss::SaveData Older;
+	Expect(ss::SaveData::Parse(Old, Older) && Older.Leds == ss::gear::LedState(), "an old save gets the default lights (Felt Green, on, synced)");
+	// Synced to the stream: alerts flash the room, a won all-in sweeps it gold, a bad beat dips it; unsynced it holds.
+	S.SetLedSync(true);
+	S.SetLedPreset(1);
+	Expect(S.Buy("ram-32").empty() && S.GoLive().empty() && S.Streaming(), "live");
+	const double T = 500.0;
+	ss::kast::Alert A;
+	A.Kind = ss::kast::AlertKind::Sub;
+	A.Who = "dee_spincycle";
+	A.At = T;
+	S.Stream.Alerts.insert(S.Stream.Alerts.begin(), A);
+	S.Stream.LastMomentReal = -100.0;
+	S.Stream.Hype = 0.0;
+	const ss::gear::Glow Flash = S.RoomGlow(T + 0.05);
+	Expect(Flash.Rgb != 0x2fb4ff && Flash.Level > 1.5, "a sub flashes the room (lime)");
+	Expect(S.RoomGlow(T + 2.0).Rgb == 0x2fb4ff && S.RoomGlow(T + 2.0).Level == 1.0, "then it settles back to Ice Blue");
+	S.Stream.Alerts.clear();
+	S.Stream.LastMoment = ss::kast::Moment::BadBeat;
+	S.Stream.LastMomentReal = T;
+	Expect(S.RoomGlow(T + 0.1).Level < 0.8, "a bad beat dims the room");
+	S.Stream.LastMoment = ss::kast::Moment::WonAllIn;
+	const ss::gear::Glow Win = S.RoomGlow(T + 0.1);
+	Expect(((Win.Rgb >> 16) & 0xff) > 0xc0 && Win.Level > 1.2, "a won all-in sweeps it gold");
+	S.Stream.Hype = 100.0;
+	S.Stream.LastMomentReal = -100.0;
+	double Lo = 9.0;
+	double Hi = 0.0;
+	for (int K = 0; K < 40; ++K)
+	{
+		const double L = S.RoomGlow(T + static_cast<double>(K) * 0.07).Level;
+		Lo = std::min(Lo, L);
+		Hi = std::max(Hi, L);
+	}
+	Expect(Hi - Lo > 0.15, "the room breathes with the hype");
+	S.SetLedSync(false);
+	S.Stream.LastMomentReal = T;
+	Expect(S.RoomGlow(T + 0.1).Rgb == 0x2fb4ff && S.RoomGlow(T + 0.1).Level == 1.0, "unsynced, the room holds its colour");
+	S.EndStream();
+	S.ResetSave();
+	Expect(S.Leds == ss::gear::LedState() && !S.RoomGlow(1.0).On, "a new game starts with no kit and default settings");
+}
+
 /** One channel's first months, stream by stream: the grind is slow, and consistency pays. */
 struct Grind
 {
@@ -1110,6 +1194,7 @@ int main()
 	session_test::DeepRuns();
 	session_test::Streaming();
 	session_test::StreamGrind();
+	session_test::LedChecks();
 	if (session_test::Failures == 0)
 	{
 		std::printf("session tests: all passed\n");

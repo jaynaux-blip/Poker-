@@ -270,6 +270,7 @@ void ANightOneStage::BuildSet()
 	BuildProps();
 	BuildOutside();
 	BuildLights();
+	BuildLeds();
 }
 
 void ANightOneStage::BuildShell()
@@ -926,6 +927,98 @@ void ANightOneStage::SetPhoneBrightness(float Level)
 	if (PhoneLight)
 	{
 		PhoneLight->SetIntensity(Level * 0.35f);
+	}
+}
+
+void ANightOneStage::BuildLeds()
+{
+	LedWashes.Reset();
+	LedStrips.Reset();
+	bLedsShown = false;
+	LedMaterial = UMaterialInstanceDynamic::Create(SurfaceMaterial ? SurfaceMaterial.Get() : FallbackMaterial.Get(), this);
+	LedMaterial->SetScalarParameterValue(TEXT("Roughness"), 0.4f);
+	LedMaterial->SetScalarParameterValue(TEXT("Pattern"), PatternNone);
+	auto Strip = [this](double Length, const FVector& At, float Yaw, const FVector& WashTo, double WashHeight) {
+		UStaticMeshComponent* Bar = BoxWeb(LedMaterial, At, FVector(Length, 0.012, 0.014), Yaw);
+		Bar->SetCastShadow(false);
+		Bar->SetVisibility(false);
+		LedStrips.Add(Bar);
+		URectLightComponent* Wash = NewPart<URectLightComponent>();
+		const FVector From = Web(At.X, At.Y, At.Z);
+		Wash->SetRelativeLocationAndRotation(From, (Web(WashTo.X, WashTo.Y, WashTo.Z) - From).Rotation());
+		Wash->SetIntensityUnits(ELightUnits::Candelas);
+		Wash->SetSourceWidth(static_cast<float>(Length * 100.0));
+		Wash->SetSourceHeight(static_cast<float>(WashHeight * 100.0));
+		Wash->SetBarnDoorAngle(70.0f);
+		Wash->SetAttenuationRadius(450.0f);
+		Wash->SetCastShadows(false);
+		Wash->SetVisibility(false);
+		LedWashes.Add(Wash);
+	};
+	// Behind the desk, on the wall under the sill: it washes up the wall and into the window recess.
+	Strip(1.5, FVector(0.0, DeskTop + 0.02, RoomFront + 0.02), 0.0f, FVector(0.0, DeskTop + 0.6, RoomFront - 0.3), 0.05);
+	// The ceiling cove: the window wall, then the left and right walls.
+	const double Cy = RoomCeiling - 0.03;
+	const double Cx = (RoomLeft + RoomRight) / 2.0;
+	const double Cz = (RoomFront + RoomBack) / 2.0;
+	Strip(RoomRight - RoomLeft - 0.1, FVector(Cx, Cy, RoomFront + 0.03), 0.0f, FVector(Cx, Cy - 0.9, RoomFront + 0.35), 0.06);
+	Strip(RoomBack - RoomFront - 0.1, FVector(RoomLeft + 0.03, Cy, Cz), 90.0f, FVector(RoomLeft + 0.35, Cy - 0.9, Cz), 0.06);
+	Strip(RoomBack - RoomFront - 0.1, FVector(RoomRight - 0.03, Cy, Cz), 90.0f, FVector(RoomRight - 0.35, Cy - 0.9, Cz), 0.06);
+	LedFill = NewPart<UPointLightComponent>();
+	LedFill->SetRelativeLocation(Web(0.2, 2.1, 0.4));
+	LedFill->SetIntensityUnits(ELightUnits::Candelas);
+	LedFill->SetAttenuationRadius(700.0f);
+	LedFill->SetCastShadows(false);
+	LedFill->SetVisibility(false);
+}
+
+void ANightOneStage::SetRoomLights(bool bOn, const FLinearColor& Color, float Level)
+{
+	if (bOn != bLedsShown)
+	{
+		bLedsShown = bOn;
+		for (UStaticMeshComponent* Bar : LedStrips)
+		{
+			if (Bar)
+			{
+				Bar->SetVisibility(bOn);
+			}
+		}
+		for (URectLightComponent* Wash : LedWashes)
+		{
+			if (Wash)
+			{
+				Wash->SetVisibility(bOn);
+			}
+		}
+		if (LedFill)
+		{
+			LedFill->SetVisibility(bOn);
+		}
+	}
+	if (!bOn)
+	{
+		return;
+	}
+	const float L = FMath::Clamp(Level, 0.0f, 2.0f);
+	if (LedMaterial)
+	{
+		LedMaterial->SetVectorParameterValue(TEXT("BaseColor"), Color);
+		LedMaterial->SetVectorParameterValue(TEXT("Color"), Color);
+		LedMaterial->SetScalarParameterValue(TEXT("Emissive"), LedEmissive * L);
+	}
+	for (int32 I = 0; I < LedWashes.Num(); ++I)
+	{
+		if (URectLightComponent* Wash = LedWashes[I])
+		{
+			Wash->SetLightColor(Color);
+			Wash->SetIntensity((I == 0 ? LedDeskCandela : LedCoveCandela) * L);
+		}
+	}
+	if (LedFill)
+	{
+		LedFill->SetLightColor(Color);
+		LedFill->SetIntensity(LedFillCandela * L);
 	}
 }
 

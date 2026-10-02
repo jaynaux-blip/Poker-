@@ -95,7 +95,7 @@ std::vector<Spot> Hotspots()
 		{210, 790}, {480, 790}, {747, 790}, {1016, 790}, {887, 654}, {1080, 654}, {1340, 735}, {1513, 660}, {197, 30}, {283, 30}, {374, 30}, {130, 686}, {524, 547},
 		{661, 686}, {697, 686}, {782, 698}, {880, 698}, {978, 698}, {110, 746}, {1085, 100}, {1160, 100}, {1230, 100}, {1530, 272}, {1530, 453}, {1530, 664},
 		{1510, 917}, {1390, 213}, {898, 411}, {1028, 411}, {1040, 703}, {1240, 32}, {1335, 410}, {1520, 920}, {490, 30}, {130, 715}, {70, 763}, {202, 763}, {400, 763},
-		{539, 763}, {741, 763}};
+		{539, 763}, {741, 763}, {1010, 748}, {1252, 402}, {1333, 402}, {1414, 402}, {1508, 402}, {900, 286}, {900, 460}, {900, 634}, {1244, 223}, {846, 700}, {1201, 769}};
 	H.insert(H.end(), Stream.begin(), Stream.end());
 	// App screens: a coarse grid.
 	for (int Y = 120; Y < 960; Y += 70)
@@ -308,6 +308,32 @@ int main(int Argc, char** Argv)
 					{
 						Fail("a raid out didn't land", Seed, F);
 					}
+				}
+			}
+			// The LED kit: a colour, the power switch, sync.
+			if (S.Owns(ss::gear::LedKitId) && R.Chance(0.0008))
+			{
+				const double Pick = R.Next();
+				if (Pick < 0.6)
+				{
+					S.SetLedPreset(R.Int(ss::gear::LedPresetCount));
+				}
+				else if (Pick < 0.8)
+				{
+					S.SetLedsOn(!S.Leds.On);
+				}
+				else
+				{
+					S.SetLedSync(!S.Leds.Sync);
+				}
+				++Reached["leds"];
+			}
+			{
+				const ss::gear::Glow G = S.RoomGlow(Now);
+				const bool Should = S.Owns(ss::gear::LedKitId) && S.Leds.On;
+				if (G.On != Should || G.On != S.GearFx().Leds || (G.On && (G.Level < 0.3 || G.Level > 2.0 || G.Preset != S.Leds.Preset)) || S.Leds.Preset < 0 || S.Leds.Preset >= ss::gear::LedPresetCount)
+				{
+					Fail("the room's LEDs don't match the kit and its settings", Seed, F);
 				}
 			}
 			if (R.Chance(0.0003))

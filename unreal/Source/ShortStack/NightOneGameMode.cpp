@@ -739,6 +739,12 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		Stage->SetLens(Seat->Focus, Tilt, Pulse);
 	}
 	Stage->SetScreenGlow(S.CurrentScreen == ss::Screen::Table ? FLinearColor(0.55f, 0.9f, 0.8f) : FLinearColor(0.72f, 0.84f, 1.0f), 1.0f);
+	// The GearDrop LED kit: the room in the chosen colour, flashing with the stream when synced.
+	{
+		const ss::gear::Glow Leds = S.RoomGlow(GameTime);
+		const FLinearColor LedColor = FLinearColor::FromSRGBColor(FColor(static_cast<uint8>((Leds.Rgb >> 16) & 0xff), static_cast<uint8>((Leds.Rgb >> 8) & 0xff), static_cast<uint8>(Leds.Rgb & 0xff)));
+		Stage->SetRoomLights(Leds.On, LedColor, static_cast<float>(Leds.Level));
+	}
 
 	if (SettingsDirtyAt >= 0.0 && RealTime - SettingsDirtyAt > 0.75)
 	{

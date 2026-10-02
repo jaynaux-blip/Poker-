@@ -653,6 +653,7 @@ void RiverLine::StreamOverlay(const Rect& R, float Scale, double Now)
 	Look.Talking = Now - St.ThankAt < 3.0;
 	Look.Time = Now;
 	Look.Live = St.Live;
+	Look.Leds = S.RoomGlow(Now);
 	const float CamW = (Fx.GreenScreen ? 330.0f : 300.0f) * Scale;
 	const float CamH = CamW * 9.0f / 16.0f * (Fx.GreenScreen ? 1.15f : 1.0f);
 	const Rect Cam{R.X + R.W - CamW - 14.0f * Scale, R.Y + R.H - CamH - 14.0f * Scale, CamW, CamH};
@@ -864,6 +865,10 @@ void RiverLine::KastApp(double Now)
 	{
 		StreamSummary(Now);
 	}
+	if (LightsShown)
+	{
+		RoomLightsCard(Now);
+	}
 }
 
 void RiverLine::KastStudio(double Now)
@@ -1016,11 +1021,35 @@ void RiverLine::KastStudio(double Now)
 			UI.Text(Ch.Offers.empty() ? "No sponsors yet: they find you at " + Grouped(kast::Sponsors().front().Followers) + " followers." : "A sponsor offer is waiting on the Channel page.", X, Y + 21.0f,
 				Ts(13.0f, 600, Ch.Offers.empty() ? KDim : KGold));
 		}
+		// The room's LEDs: a chip that opens their controls.
+		float Right = 1028.0f;
+		if (S.Owns(gear::LedKitId))
+		{
+			const gear::Glow Gl = S.RoomGlow(Now);
+			const std::string Label = Gl.On ? gear::LedPresets()[static_cast<size_t>(S.Leds.Preset)].Name : std::string("Lights off");
+			const float W = UI.Measure(Label, 13.0f, 800) + 44.0f;
+			const Rect B{Right - W, Y, W, 32.0f};
+			const Ui::ClickState Cs = UI.Clickable("kastlights", B);
+			const Color Col = Gl.On ? Hex(Gl.Rgb) : KDim;
+			C->FillRoundRect(B, 9.0f, Cs.Hover ? NetA(Col, 0.3f) : NetA(Col, 0.14f));
+			C->StrokeRoundRect(B, 9.0f, NetA(Col, 0.55f), 1.0f);
+			if (Gl.On)
+			{
+				C->FillCircle(B.X + 16.0f, B.Y + 16.0f, 9.0f, NetA(Col, 0.35f));
+			}
+			C->FillCircle(B.X + 16.0f, B.Y + 16.0f, 5.5f, Gl.On ? Mix(Col, Hex(0xffffff), 0.3f) : KDim);
+			UI.Text(Label, B.X + 30.0f, B.Y + 21.0f, Ts(13.0f, 800, Gl.On ? Mix(Col, Hex(0xffffff), 0.35f) : KMuted));
+			if (Cs.Clicked)
+			{
+				ShowRoomLights(true, Now);
+			}
+			Right -= W + 14.0f;
+		}
 		if (St.Pred.Active)
 		{
 			const int Total = std::max(1, St.Pred.Yes + St.Pred.No);
 			const std::string P = St.Pred.Resolved ? std::string("Prediction: ") + (St.Pred.Outcome ? "YES" : "NO") + " won" : "Prediction: " + std::to_string(St.Pred.Yes * 100 / Total) + "% believe";
-			UI.Text(P, 1028.0f, Y + 21.0f, Ts(13.0f, 700, KViolet, Align::Right));
+			UI.Text(P, Right, Y + 21.0f, Ts(13.0f, 700, KViolet, Align::Right));
 		}
 	}
 
@@ -1708,6 +1737,7 @@ void RiverLine::KastBrowse(double Now)
 			Look.Face = S.Stream.Face;
 			Look.FaceAge = Now - S.Stream.FaceAt;
 			Look.Time = Now;
+			Look.Leds = S.RoomGlow(Now);
 			streamart::Facecam(*C, {Th.X + Th.W - 140.0f, Th.Y + Th.H - 84.0f, 132.0f, 76.0f}, Look);
 		}
 		else

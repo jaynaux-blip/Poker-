@@ -37,6 +37,8 @@ export interface Apartment {
   /** Put another empty can on the desk (one per hour of grinding). */
   addCan(): void;
   setScreenGlow(color: THREE.Color, brightness: number): void;
+  /** The GearDrop LED room kit: a colour (0xRRGGBB) and a level (1 steady), or null for off / not owned. */
+  setRoomLights(rgb: number | null, level?: number): void;
 }
 
 function planeWithHole(w: number, h: number, hole: { x0: number; x1: number; y0: number; y1: number }): THREE.BufferGeometry {
@@ -449,6 +451,38 @@ export function createApartment(renderer: THREE.WebGLRenderer, uiTexture: THREE.
   const hemi = new THREE.HemisphereLight(0x223047, 0x0d0907, 0.12);
   group.add(hemi);
 
+  // ---------------------------------------------------------------- LED room kit (GearDrop)
+  // A strip behind the desk under the window (bias light on the wall), a cove strip where the walls meet the
+  // ceiling on three sides, and a soft fill so the whole room takes the colour. Hidden until the kit is on.
+  const leds = new THREE.Group();
+  leds.visible = false;
+  group.add(leds);
+  const ledMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  const ledLights: { light: THREE.RectAreaLight; base: number }[] = [];
+  const strip = (len: number, pos: THREE.Vector3, rotY: number, washTo: THREE.Vector3, power: number, height = 0.05) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(len, 0.012, 0.014), ledMat);
+    m.position.copy(pos);
+    m.rotation.y = rotY;
+    leds.add(m);
+    const l = new THREE.RectAreaLight(0xffffff, power, len, height);
+    l.position.copy(pos);
+    l.lookAt(washTo);
+    leds.add(l);
+    ledLights.push({ light: l, base: power });
+  };
+  // Behind the desk, on the wall under the sill: it washes up the wall and into the window recess.
+  strip(1.5, new THREE.Vector3(0, R.deskTop + 0.02, R.front + 0.02), 0, new THREE.Vector3(0, R.deskTop + 0.6, R.front - 0.3), 18);
+  // The ceiling cove: front wall, left wall, right wall.
+  const cy = R.ceiling - 0.03;
+  strip(W - 0.1, new THREE.Vector3(cx, cy, R.front + 0.03), 0, new THREE.Vector3(cx, cy - 0.9, R.front + 0.35), 9, 0.06);
+  strip(D - 0.1, new THREE.Vector3(R.left + 0.03, cy, cz), Math.PI / 2, new THREE.Vector3(R.left + 0.35, cy - 0.9, cz), 7, 0.06);
+  strip(D - 0.1, new THREE.Vector3(R.right - 0.03, cy, cz), Math.PI / 2, new THREE.Vector3(R.right - 0.35, cy - 0.9, cz), 7, 0.06);
+  // A soft fill so the desk, the floor and the far walls pick up the colour.
+  const ledFill = new THREE.PointLight(0xffffff, 0, 7, 2);
+  ledFill.position.set(0.2, 2.1, 0.4);
+  leds.add(ledFill);
+  const ledColor = new THREE.Color();
+
   const eyePosition = new THREE.Vector3(0, 1.17, deskZ + 0.72);
   const neonBase = neonSpot.intensity;
   const lampColor = new THREE.Color();
@@ -486,6 +520,18 @@ export function createApartment(renderer: THREE.WebGLRenderer, uiTexture: THREE.
     setScreenGlow(color, brightness) {
       screenLight.color.copy(color);
       screenLight.intensity = 7 * brightness;
+    },
+    setRoomLights(rgb, level = 1) {
+      leds.visible = rgb !== null;
+      if (rgb === null) return;
+      ledColor.setHex(rgb);
+      ledMat.color.copy(ledColor).multiplyScalar(2.4 * level);
+      for (const l of ledLights) {
+        l.light.color.copy(ledColor);
+        l.light.intensity = l.base * level;
+      }
+      ledFill.color.copy(ledColor);
+      ledFill.intensity = 1.6 * level;
     },
   };
 }

@@ -65,6 +65,7 @@ enum class Art : int
 	ModBot,
 	Headphones,
 	Plant,
+	LedKit,
 	Count,
 };
 
@@ -96,6 +97,9 @@ struct Item
 	double ModBot = 0.0;  // chance an automated filter catches a troll or a spammer
 };
 
+/** The RGB LED room kit's id. */
+constexpr const char* LedKitId = "led-kit";
+
 SHORTSTACKCORE_API const std::vector<Item>& Catalog();
 SHORTSTACKCORE_API const Item* Find(const std::string& Id);
 SHORTSTACKCORE_API const char* CategoryName(Category C);
@@ -126,11 +130,55 @@ struct Effects
 	bool MacroPad = false;
 	bool Fiber = false;
 	Chips MonthlyCents = 0;    // what the subscriptions cost a month
+	// The LED room kit, lit (ApplyLeds): its preset, and what that colour does.
+	bool Leds = false;
+	int LedPreset = -1;
+	double Hype = 0.0; // hype from big hands builds this much faster
+	double Tips = 0.0; // this much more in tips
+	double Stay = 0.0; // strangers stay this much longer
 };
 SHORTSTACKCORE_API Effects Sum(const Owned& Items);
 /** "1080p60" for the resolution. */
 SHORTSTACKCORE_API std::string ResolutionLabel(int Resolution);
 /** The cheapest PC upgrade (the one that unlocks streaming). */
 SHORTSTACKCORE_API const Item& FirstPcUpgrade();
+
+/**
+ * The LED room kit: strips behind the desk, along the ceiling and under the window sill, in one of seven looks.
+ * Each colour lights the room and the facecam, and each has a small perk of its own.
+ */
+struct LedPreset
+{
+	std::string Id;
+	std::string Name;
+	std::string Vibe; // the line under the swatch
+	std::string Perk; // what it does
+	uint32_t Rgb = 0; // the colour (Aurora: where it starts)
+	bool Cycles = false;
+};
+constexpr int LedPresetCount = 7;
+SHORTSTACKCORE_API const std::vector<LedPreset>& LedPresets();
+/** The LED settings (saved with the game). */
+struct LedState
+{
+	int Preset = 0;
+	bool On = true;
+	bool Sync = true; // flash with stream alerts and big hands
+	bool operator==(const LedState& O) const { return Preset == O.Preset && On == O.On && Sync == O.Sync; }
+};
+/** What the room's LEDs are showing right now: the apartment's lights and the facecam read it every frame. */
+struct Glow
+{
+	bool On = false;
+	uint32_t Rgb = 0;
+	double Level = 0.0; // 1 steady; alerts and hype push it up, a bad beat dips it
+	int Preset = -1;
+};
+/** The colour of a preset at Time (seconds): the solid colours hold, Aurora drifts through its stops. */
+SHORTSTACKCORE_API uint32_t LedColor(int Preset, double Time);
+/** The kit lit with a preset: a better-looking stream, and the colour's perk. */
+SHORTSTACKCORE_API void ApplyLeds(Effects& E, int Preset);
+/** A to B by T (0..1), per channel. */
+SHORTSTACKCORE_API uint32_t MixRgb(uint32_t A, uint32_t B, double T);
 } // namespace gear
 } // namespace ss

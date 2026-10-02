@@ -448,6 +448,63 @@ void MacroPad(Canvas& C, const Box& B, uint32_t Hue, double Time)
 
 using namespace streamart_detail;
 
+/** A glowing bar: a soft halo, then a bright core (an LED strip, seen lit). */
+void LedBar(Canvas& C, const Rect& R, const Color& Col, float Level)
+{
+	const float L = std::max(0.0f, std::min(1.6f, Level));
+	C.GlowRoundRect(R, R.H * 0.5f, Alpha(Col, 0.75f * std::min(1.0f, L)), R.H * 3.0f + 6.0f * L);
+	C.FillRoundRect(R, R.H * 0.5f, Mix(Col, Hex(0xffffff), 0.35f + 0.2f * std::min(1.0f, L - 0.5f)));
+	C.FillRoundRect({R.X + R.H * 0.5f, R.Y + R.H * 0.3f, R.W - R.H, R.H * 0.4f}, R.H * 0.2f, Alpha(Hex(0xffffff), 0.55f * std::min(1.0f, L)));
+}
+
+void LedKit(Canvas& C, const Box& B, double Time)
+{
+	// The colour on the box cycles through the seven looks.
+	const double Pos = std::fmod(std::max(0.0, Time) / 1.6, static_cast<double>(gear::LedPresetCount));
+	const int K = static_cast<int>(Pos);
+	const double F = std::min(1.0, (Pos - static_cast<double>(K)) * 3.0);
+	const Color Col = Hex(gear::MixRgb(gear::LedColor(K, Time), gear::LedColor((K + 1) % gear::LedPresetCount, Time), F * F * (3.0 - 2.0 * F)));
+	// A corner of a dark room, washed in the colour from a strip behind the desk.
+	const Rect Wall = B.Rc(0.02f, 0.06f, 0.96f, 0.62f);
+	C.FillRoundRect(Wall, B.L(0.05f), Paint::Linear(B.P(0.0f, 0.06f), B.P(0.0f, 0.68f), Hex(0x0c0a14), Hex(0x15111f)));
+	C.FillRect({Wall.X + B.L(0.02f), B.Y(0.14f), Wall.W - B.L(0.04f), B.L(0.42f)}, Paint::Linear(B.P(0.0f, 0.56f), B.P(0.0f, 0.14f), Alpha(Col, 0.7f), Alpha(Col, 0.0f)));
+	LedBar(C, B.Rc(0.1f, 0.13f, 0.8f, 0.018f), Col, 0.8f); // along the ceiling
+	LedBar(C, B.Rc(0.08f, 0.545f, 0.84f, 0.026f), Col, 1.2f); // behind the desk
+	// The desk, the laptop's silhouette.
+	C.FillRoundRect(B.Rc(0.02f, 0.57f, 0.96f, 0.06f), B.L(0.015f), Hex(0x2a1f17));
+	C.FillPolygon(Pts(B, {{0.38f, 0.57f}, {0.62f, 0.57f}, {0.6f, 0.41f}, {0.4f, 0.41f}}), Hex(0x1b1d26));
+	C.FillRect(B.Rc(0.41f, 0.43f, 0.18f, 0.11f), Alpha(Col, 0.25f));
+	// The reel, the strip coming off it, one LED in each colour.
+	C.FillCircle(B.X(0.2f), B.Y(0.8f), B.L(0.13f), Paint::Linear(B.P(0.07f, 0.67f), B.P(0.33f, 0.93f), Hex(0xf8fafc), Hex(0xcbd5e1)));
+	C.FillCircle(B.X(0.2f), B.Y(0.8f), B.L(0.05f), Hex(0x94a3b8));
+	C.StrokeEllipse(B.X(0.2f), B.Y(0.8f), B.L(0.095f), B.L(0.095f), Hex(0x1f2937), B.L(0.02f));
+	std::vector<Vec2> Strip;
+	for (int I = 0; I <= 24; ++I)
+	{
+		const float U = Fl(I) / 24.0f;
+		Strip.push_back(B.P(0.3f + U * 0.38f, 0.86f - std::sin(U * 3.1416f) * 0.05f + U * 0.04f));
+	}
+	C.StrokePolyline(Strip, false, Hex(0xe5e7eb), B.L(0.035f), true);
+	for (int I = 0; I < gear::LedPresetCount; ++I)
+	{
+		const Vec2 P = Strip[static_cast<size_t>(2 + I * 3)];
+		const Color Dot = Hex(gear::LedColor(I, Time));
+		C.FillCircle(P.X, P.Y, B.L(0.022f), Alpha(Dot, 0.35f));
+		C.FillCircle(P.X, P.Y, B.L(0.011f), Mix(Dot, Hex(0xffffff), 0.3f));
+	}
+	// The remote: seven colour keys.
+	const Rect Rm = B.Rc(0.74f, 0.66f, 0.15f, 0.28f);
+	C.FillRoundRect({Rm.X + B.L(0.01f), Rm.Y + B.L(0.012f), Rm.W, Rm.H}, B.L(0.04f), Rgba(0, 0, 0, 0.18f));
+	C.FillRoundRect(Rm, B.L(0.04f), Paint::Linear({Rm.X, Rm.Y}, {Rm.X + Rm.W, Rm.Y + Rm.H}, Hex(0xf8fafc), Hex(0xd1d5db)));
+	C.FillCircle(Rm.X + Rm.W * 0.5f, Rm.Y + B.L(0.04f), B.L(0.017f), Hex(0xef4444));
+	for (int I = 0; I < gear::LedPresetCount; ++I)
+	{
+		const float Kx = Rm.X + Rm.W * (I % 2 == 0 ? 0.32f : 0.68f) + (I == 6 ? Rm.W * 0.18f : 0.0f);
+		const float Ky = Rm.Y + B.L(0.09f) + Fl(I / 2) * B.L(0.048f);
+		C.FillCircle(Kx, Ky, B.L(0.016f), Hex(gear::LedColor(I, Time)));
+	}
+}
+
 void Product(Canvas& C, gear::Art A, const Rect& R, uint32_t Hue, double Time)
 {
 	const Box B(R);
@@ -491,11 +548,12 @@ void Product(Canvas& C, gear::Art A, const Rect& R, uint32_t Hue, double Time)
 	case gear::Art::ModBot: ModBot(C, B, Hue, Time); break;
 	case gear::Art::Headphones: Headphones(C, B, Hue); break;
 	case gear::Art::Plant: Plant(C, B, Time); break;
+	case gear::Art::LedKit: LedKit(C, B, Time); break;
 	default: break;
 	}
 }
 
-void Desk(Canvas& C, const Rect& R, const gear::Owned& Owned, bool Live, double Time)
+void Desk(Canvas& C, const Rect& R, const gear::Owned& Owned, bool Live, double Time, const gear::Glow& Leds)
 {
 	auto Has = [&](const char* Id) { return Owned.count(Id) > 0; };
 	auto At = [&](float U, float V) { return Vec2{R.X + U * R.W, R.Y + V * R.H}; };
@@ -549,6 +607,18 @@ void Desk(Canvas& C, const Rect& R, const gear::Owned& Owned, bool Live, double 
 			C.FillCircle(Shelf.X + S * 0.04f + Fl(K) * S * 0.025f, Shelf.Y - S * 0.018f, S * 0.006f, std::fmod(Time * 2.0 + K * 0.3, 1.0) < 0.5 ? Hex(0x2dd4bf) : Hex(0x64748b));
 		}
 	}
+	// The LED kit: a strip along the ceiling, one under the sill, one behind the desk washing the wall.
+	const bool Lit = Leds.On && Has(gear::LedKitId);
+	const Color Led = Hex(Leds.Rgb);
+	const float Lv = Fl(Leds.Level);
+	if (Lit)
+	{
+		C.FillRect(R, Alpha(Led, 0.08f * std::min(1.0f, Lv)));
+		C.FillRect({R.X, R.Y, R.W, R.H * 0.3f}, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H * 0.3f}, Alpha(Led, 0.4f * std::min(1.2f, Lv)), Alpha(Led, 0.0f)));
+		C.FillRect({R.X, R.Y + R.H * 0.24f, R.W, R.H * 0.42f}, Paint::Linear({0.0f, R.Y + R.H * 0.66f}, {0.0f, R.Y + R.H * 0.24f}, Alpha(Led, 0.55f * std::min(1.2f, Lv)), Alpha(Led, 0.0f)));
+		LedBar(C, {R.X + R.W * 0.02f, R.Y + S * 0.015f, R.W * 0.96f, S * 0.014f}, Led, Lv);
+		LedBar(C, {Win.X - S * 0.02f, Win.Y + Win.H + S * 0.012f, Win.W + S * 0.04f, S * 0.012f}, Led, Lv * 0.8f);
+	}
 	// Lights behind the desk.
 	if (Has("key-lights"))
 	{
@@ -569,6 +639,11 @@ void Desk(Canvas& C, const Rect& R, const gear::Owned& Owned, bool Live, double 
 	const float Top = R.Y + 0.66f * R.H;
 	C.FillRect({R.X, Top, R.W, S * 0.05f}, Paint::Linear({0.0f, Top}, {0.0f, Top + S * 0.05f}, Hex(0x8a6a48), Hex(0x5c4430)));
 	C.FillRect({R.X, Top + S * 0.05f, R.W, R.H}, Hex(0x0c0f17));
+	if (Lit)
+	{
+		LedBar(C, {R.X + R.W * 0.04f, Top - S * 0.012f, R.W * 0.92f, S * 0.012f}, Led, Lv);
+		C.FillRect({R.X, Top + S * 0.05f, R.W, S * 0.16f}, Paint::Linear({0.0f, Top + S * 0.05f}, {0.0f, Top + S * 0.21f}, Alpha(Led, 0.3f * std::min(1.0f, Lv)), Alpha(Led, 0.0f)));
+	}
 	C.FillRect({R.X + R.W * 0.08f, Top + S * 0.05f, S * 0.02f, R.H}, Hex(0x1f2533));
 	C.FillRect({R.X + R.W * 0.92f - S * 0.02f, Top + S * 0.05f, S * 0.02f, R.H}, Hex(0x1f2533));
 	// Monitors either side, the laptop in the middle.
@@ -847,9 +922,12 @@ void Facecam(Canvas& C, const Rect& R, const Cam& L)
 	C.PushClip(R);
 	// How bright the room is: the monitor's blue glow at night, or real lights.
 	const float Light = G.Lights >= 2 ? 1.0f : G.Lights == 1 ? 0.85f : 0.45f;
+	const bool Led = L.Leds.On;
+	const Color LedCol = Hex(L.Leds.Rgb);
+	const float LedLv = Fl(std::max(0.0, std::min(1.6, L.Leds.Level)));
 	if (!G.GreenScreen)
 	{
-		const Color Wall = Mix(Hex(0x0f1420), Hex(0x3a3f55), Light * 0.55f);
+		const Color Wall = Led ? Mix(Mix(Hex(0x0f1420), Hex(0x3a3f55), Light * 0.55f), LedCol, 0.18f * std::min(1.0f, LedLv)) : Mix(Hex(0x0f1420), Hex(0x3a3f55), Light * 0.55f);
 		C.FillRect(R, Paint::Linear({R.X, R.Y}, {R.X, R.Y + R.H}, Wall, Mix(Wall, Hex(0x000000), 0.5f)));
 		// A poster, a shelf, an LED strip in the channel's color.
 		C.FillRect({R.X + R.W * 0.08f, R.Y + H * 0.12f, R.W * 0.14f, H * 0.36f}, Mix(Hex(0x27d3c3), Wall, 0.55f));
@@ -857,8 +935,18 @@ void Facecam(Canvas& C, const Rect& R, const Cam& L)
 		C.FillRect({R.X + R.W * 0.7f, R.Y + H * 0.3f, R.W * 0.24f, H * 0.025f}, Mix(Hex(0x8a6a48), Wall, 0.4f));
 		C.FillRect({R.X + R.W * 0.74f, R.Y + H * 0.2f, R.W * 0.05f, H * 0.1f}, Mix(Hex(0x22c55e), Wall, 0.5f));
 		C.FillRect({R.X + R.W * 0.82f, R.Y + H * 0.22f, R.W * 0.06f, H * 0.08f}, Mix(Hex(0xef4444), Wall, 0.6f));
-		C.FillRect({R.X, R.Y + H * 0.04f, R.W, H * 0.015f}, Alpha(Hex(L.Hoodie), 0.6f));
-		C.FillRect({R.X, R.Y + H * 0.02f, R.W, H * 0.08f}, Alpha(Hex(L.Hoodie), 0.12f));
+		if (Led)
+		{
+			// The room's LEDs: the wall washed in colour from the strip at the top and the one behind the desk.
+			C.FillRect({R.X, R.Y, R.W, H * 0.55f}, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + H * 0.55f}, Alpha(LedCol, 0.5f * std::min(1.2f, LedLv)), Alpha(LedCol, 0.0f)));
+			C.FillRect({R.X, R.Y + H * 0.35f, R.W, H * 0.4f}, Paint::Linear({0.0f, R.Y + H * 0.75f}, {0.0f, R.Y + H * 0.35f}, Alpha(LedCol, 0.42f * std::min(1.2f, LedLv)), Alpha(LedCol, 0.0f)));
+			LedBar(C, {R.X - 4.0f, R.Y + H * 0.035f, R.W + 8.0f, std::max(2.0f, H * 0.018f)}, LedCol, LedLv);
+		}
+		else
+		{
+			C.FillRect({R.X, R.Y + H * 0.04f, R.W, H * 0.015f}, Alpha(Hex(L.Hoodie), 0.6f));
+			C.FillRect({R.X, R.Y + H * 0.02f, R.W, H * 0.08f}, Alpha(Hex(L.Hoodie), 0.12f));
+		}
 		if (G.CamTier >= 3)
 		{
 			// Shallow depth of field: the room goes soft.
@@ -907,6 +995,20 @@ void Facecam(Canvas& C, const Rect& R, const Cam& L)
 	C.FillEllipse(-HeadR * 0.95f, HeadR * 0.05f, HeadR * 0.16f, HeadR * 0.24f, SkinDark);
 	C.FillEllipse(HeadR * 0.95f, HeadR * 0.05f, HeadR * 0.16f, HeadR * 0.24f, SkinDark);
 	C.FillEllipse(0.0f, 0.0f, HeadR * 0.92f, HeadR * 1.08f, Paint::Radial({-HeadR * 0.3f, -HeadR * 0.4f}, 0.0f, {0.0f, 0.0f}, HeadR * 1.2f, Mix(Skin, Hex(0xffffff), 0.12f * Light), 0.55f, Skin, SkinDark));
+	// The LEDs behind: a rim of coloured light around the head.
+	if (Led && !G.GreenScreen)
+	{
+		for (int Side = -1; Side <= 1; Side += 2)
+		{
+			std::vector<Vec2> Rim;
+			for (int I = 0; I <= 10; ++I)
+			{
+				const float A = -1.25f + 2.1f * Fl(I) / 10.0f; // from the crown down past the cheek
+				Rim.push_back({Fl(Side) * HeadR * 0.92f * std::sin(A + 0.35f), -HeadR * 1.08f * std::cos(A + 0.35f)});
+			}
+			C.StrokePolyline(Rim, false, Alpha(Mix(LedCol, Hex(0xffffff), 0.25f), 0.55f * std::min(1.0f, LedLv)), HeadR * 0.07f, true);
+		}
+	}
 	// Hair: a mop with a beanie-ish swoop.
 	C.FillEllipse(0.0f, -HeadR * 0.62f, HeadR * 0.98f, HeadR * 0.55f, Hex(0x2b1d14));
 	C.FillPolygon({{-HeadR * 0.95f, -HeadR * 0.5f}, {HeadR * 0.6f, -HeadR * 0.7f}, {HeadR * 0.2f, -HeadR * 0.25f}, {-HeadR * 0.7f, -HeadR * 0.15f}}, Hex(0x2b1d14));
@@ -995,6 +1097,18 @@ void Facecam(Canvas& C, const Rect& R, const Cam& L)
 		C.FillRect({Mx - H * 0.008f, R.Y + H * 0.82f, H * 0.016f, H * 0.2f}, Hex(0x2a3142));
 		C.FillRoundRect({Mx - H * 0.045f, R.Y + H * 0.62f, H * 0.09f, H * 0.22f}, H * 0.045f, Paint::Linear({Mx - H * 0.05f, 0.0f}, {Mx + H * 0.05f, 0.0f}, Hex(0x6b7280), Hex(0x1f2937)));
 	}
+	// The LED rim on the shoulders, and a little of the colour on everything.
+	if (Led && !G.GreenScreen)
+	{
+		std::vector<Vec2> Rim;
+		for (int I = 0; I <= 16; ++I)
+		{
+			const float A = 3.1416f * (1.08f + 0.84f * Fl(I) / 16.0f);
+			Rim.push_back({Cx + std::cos(A) * R.W * 0.3f, R.Y + H * 1.05f + Breath + std::sin(A) * H * 0.36f});
+		}
+		C.StrokePolyline(Rim, false, Alpha(Mix(LedCol, Hex(0xffffff), 0.2f), 0.5f * std::min(1.0f, LedLv)), H * 0.018f, true);
+		C.FillRect(R, Alpha(LedCol, 0.05f * std::min(1.0f, LedLv)));
+	}
 	// Light: key lights rim the hair; a dark room is dark.
 	if (G.Lights >= 2)
 	{
@@ -1002,8 +1116,9 @@ void Facecam(Canvas& C, const Rect& R, const Cam& L)
 	}
 	if (G.Lights == 0)
 	{
-		C.FillRect(R, Rgba(4, 8, 20, 0.32f));
-		C.FillRect(R, Paint::Linear({R.X, R.Y + H}, {R.X, R.Y}, Rgba(80, 140, 255, 0.12f), Rgba(80, 140, 255, 0.0f)));
+		// The LEDs light the room a little even without a light on the face.
+		C.FillRect(R, Rgba(4, 8, 20, Led ? 0.2f : 0.32f));
+		C.FillRect(R, Paint::Linear({R.X, R.Y + H}, {R.X, R.Y}, Rgba(80, 140, 255, Led ? 0.05f : 0.12f), Rgba(80, 140, 255, 0.0f)));
 	}
 	if (L.Face == kast::Mood::Tilted)
 	{

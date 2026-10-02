@@ -221,6 +221,7 @@ struct SaveData
 	double ClockMinutes = 2.0 * 60.0 + 7.0; // the lobby clock
 	life::State Life;
 	gear::Owned Gear;
+	gear::LedState Leds;
 	kast::Channel Channel;
 
 	/** Line-based text, safe to store in any save system. */
@@ -426,6 +427,13 @@ public:
 	SHORTSTACKCORE_API std::string Buy(const std::string& Id);
 	/** Ends a subscription (no refund; it stops now). */
 	SHORTSTACKCORE_API bool Cancel(const std::string& Id);
+	/** The LED room kit: its colour (gear::LedPresets), on or off, and whether it flashes with the stream. */
+	gear::LedState Leds;
+	SHORTSTACKCORE_API void SetLedPreset(int Preset);
+	SHORTSTACKCORE_API void SetLedsOn(bool On);
+	SHORTSTACKCORE_API void SetLedSync(bool Sync);
+	/** What the LEDs show at Now (the time passed to Update): the room's lights and the facecam follow it. */
+	SHORTSTACKCORE_API gear::Glow RoomGlow(double Now) const;
 	/** Goes live on Kast; returns why not, or "". */
 	SHORTSTACKCORE_API std::string GoLive();
 	/** Ends the stream: the channel's balance goes to the bank and the summary card comes up. Raid: a small channel
