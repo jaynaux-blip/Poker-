@@ -60,6 +60,7 @@ public:
 	enum class KastPage : int
 	{
 		Studio,
+		Community,
 		Channel,
 		Browse,
 	};
@@ -193,6 +194,7 @@ private:
 	void KastApp(double Now);
 	void KastHeader(double Now);
 	void KastStudio(double Now);
+	void KastCommunity(double Now);
 	void KastChannel(double Now);
 	void KastBrowse(double Now);
 	void StreamPreview(const Rect& R, double Now);

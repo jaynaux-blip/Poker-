@@ -428,8 +428,12 @@ public:
 	SHORTSTACKCORE_API bool Cancel(const std::string& Id);
 	/** Goes live on Kast; returns why not, or "". */
 	SHORTSTACKCORE_API std::string GoLive();
-	/** Ends the stream: the channel's balance goes to the bank and the summary card comes up. */
-	SHORTSTACKCORE_API void EndStream();
+	/** Ends the stream: the channel's balance goes to the bank and the summary card comes up. Raid: a small channel
+	 * (kast::Network) to send the viewers to on the way out; it raids back on another night. */
+	SHORTSTACKCORE_API void EndStream(const std::string& Raid = std::string());
+	/** The posted schedule: weekdays (bit 0 Monday, 0 for none) and the start, minutes after midnight. Regulars come
+	 * when they know when; missing a posted day costs loyalty. */
+	SHORTSTACKCORE_API void StreamSchedule(int Weekdays, int StartMinute);
 	bool Streaming() const { return Stream.Live; }
 	/** The summary card of the stream that just ended is up. */
 	bool StreamCard = false;

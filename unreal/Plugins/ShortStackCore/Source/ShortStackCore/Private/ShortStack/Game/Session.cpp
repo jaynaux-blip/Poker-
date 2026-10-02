@@ -205,11 +205,22 @@ std::string SaveData::Serialize() const
 	for (auto It = K.Log.rbegin(); It != K.Log.rend(); ++It)
 	{
 		Out << "kast\tlog\t" << Fixed(It->Start, 2) << "\t" << Fixed(It->Minutes, 2) << "\t" << It->Avg << "\t" << It->Peak << "\t" << It->Follows << "\t" << It->Subs << "\t" << It->Cents << "\t"
-			<< session_detail::Escape(It->Title) << "\n";
+			<< session_detail::Escape(It->Title) << "\t" << It->Returning << "\t" << (It->OnSchedule ? 1 : 0) << "\n";
 	}
-	for (const auto& Rg : K.Regulars)
+	for (const kast::Member& M : K.Members)
 	{
-		Out << "kast\treg\t" << session_detail::Escape(Rg.first) << "\t" << Rg.second << "\n";
+		Out << "kast\tmem\t" << session_detail::Escape(M.Name) << "\t" << Fixed(M.Loyalty, 4) << "\t" << Fixed(M.Affinity, 4) << "\t" << Fixed(M.FirstSeen, 2) << "\t" << Fixed(M.LastSeen, 2) << "\t" << M.Streams << "\t"
+			<< Fixed(M.WatchMinutes, 1) << "\t" << M.Messages << "\t" << ((M.Follower ? 1 : 0) | (M.Friend ? 2 : 0)) << "\t" << M.Given << "\n";
+	}
+	Out << "kast\tgrowth\t" << K.ScheduleDays << "\t" << K.ScheduleStart << "\t" << Fixed(K.Xp, 1) << "\t" << K.Streak << "\t" << K.Stage << "\t" << K.Week << "\t" << K.WeekStreams << "\t"
+		<< Fixed(K.WeekMinutes, 1) << "\t" << K.WeekAnswers << "\t" << K.WeekRegulars << "\t" << K.WeekRewarded << "\t" << K.ProcessedDay << "\t" << K.RaidsOut << "\n";
+	for (const int D : K.DaysLive)
+	{
+		Out << "kast\tday\t" << D << "\n";
+	}
+	for (const auto& G : K.Goodwill)
+	{
+		Out << "kast\tgoodwill\t" << session_detail::Escape(G.first) << "\t" << G.second << "\n";
 	}
 	for (const kast::Deal& Dl : K.Deals)
 	{
@@ -415,11 +426,49 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 				Lg.Subs = Int(7);
 				Lg.Cents = Cents(8);
 				Lg.Title = Str(9);
+				Lg.Returning = Int(10);
+				Lg.OnSchedule = Int(11) != 0;
 				K.Log.insert(K.Log.begin(), Lg);
 			}
-			else if (Key == "reg" && P.size() >= 4)
+			else if (Key == "mem" && P.size() >= 12)
 			{
-				K.Regulars[Str(2)] = Int(3);
+				kast::Member M;
+				M.Name = Str(2);
+				M.Loyalty = Num(3);
+				M.Affinity = Num(4);
+				M.FirstSeen = Num(5);
+				M.LastSeen = Num(6);
+				M.Streams = Int(7);
+				M.WatchMinutes = Num(8);
+				M.Messages = Int(9);
+				M.Follower = (Int(10) & 1) != 0;
+				M.Friend = (Int(10) & 2) != 0;
+				M.Given = Cents(11);
+				K.Members.push_back(M);
+			}
+			else if (Key == "growth" && P.size() >= 15)
+			{
+				K.ScheduleDays = Int(2);
+				K.ScheduleStart = Int(3);
+				K.Xp = Num(4);
+				K.Streak = Int(5);
+				K.Stage = Int(6);
+				K.Week = Int(7);
+				K.WeekStreams = Int(8);
+				K.WeekMinutes = Num(9);
+				K.WeekAnswers = Int(10);
+				K.WeekRegulars = Int(11);
+				K.WeekRewarded = Int(12);
+				K.ProcessedDay = Int(13);
+				K.RaidsOut = Int(14);
+			}
+			else if (Key == "day" && P.size() >= 3)
+			{
+				K.DaysLive.push_back(Int(2));
+			}
+			else if (Key == "goodwill" && P.size() >= 4)
+			{
+				K.Goodwill[Str(2)] = Int(3);
 			}
 			else if (Key == "deal" && P.size() >= 7)
 			{
@@ -2733,13 +2782,13 @@ void Session::PayOut(const std::string& Label)
 	Life.Record(WorldMinutes(), Label, Pay, 6);
 }
 
-void Session::EndStream()
+void Session::EndStream(const std::string& Raid)
 {
 	if (!Stream.Live)
 	{
 		return;
 	}
-	Stream.Stop(Channel, StreamInputs());
+	Stream.Stop(Channel, StreamInputs(), Raid);
 	PlayStreamNotices();
 	PayOut("Kast payout");
 	StreamCard = true;
@@ -2874,6 +2923,13 @@ Chips Session::StreamRead(const std::string& SponsorId)
 		Sound(SoundId::Cash, 0.5);
 	}
 	return Paid;
+}
+
+void Session::StreamSchedule(int Weekdays, int StartMinute)
+{
+	Channel.ScheduleDays = Weekdays & 0x7f;
+	Channel.ScheduleStart = ((StartMinute % 1440) + 1440) % 1440;
+	Save();
 }
 
 void Session::StreamTitle(int Title)

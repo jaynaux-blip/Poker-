@@ -215,11 +215,62 @@ std::string CountryName(const std::string& Code)
 	return "the night shift";
 }
 
-/** Followers who come back when the channel goes live: a few percent, less as the channel gets huge. */
-double ReturningViewers(int Followers, double Tod, double Q)
+/** An exponential wait with this mean. */
+double KastExp(Rng& R, double Mean)
 {
-	const double F = static_cast<double>(Followers);
-	return F * 0.032 / std::sqrt(1.0 + F / 40000.0) * Tod * (0.55 + 0.9 * Q);
+	return -Mean * std::log(std::max(1e-9, 1.0 - R.Next()));
+}
+
+int KastDayOf(double World)
+{
+	return static_cast<int>(std::floor(World / KastDay));
+}
+
+int KastWeekday(int Day)
+{
+	return ((Day % 7) + 7) % 7; // 0 Monday
+}
+
+const TitleSpec& TitleOf(const Channel& Ch)
+{
+	const std::vector<TitleSpec>& T = Titles();
+	return T[static_cast<size_t>(std::max(0, std::min(static_cast<int>(T.size()) - 1, Ch.Title)))];
+}
+
+/** A week starts Monday at midnight (day 0 is a Monday). */
+int KastWeekOf(double World)
+{
+	return static_cast<int>(std::floor(World / (7.0 * KastDay)));
+}
+
+/** A new week: the streak carries on if last week had three streams, and the goals start over. */
+void RollWeek(Channel& Ch, double World)
+{
+	const int W = KastWeekOf(World);
+	if (Ch.Week == W)
+	{
+		return;
+	}
+	if (Ch.Week >= 0)
+	{
+		Ch.Streak = Ch.WeekStreams >= 3 && W == Ch.Week + 1 ? Ch.Streak + 1 : 0;
+	}
+	Ch.Week = W;
+	Ch.WeekStreams = 0;
+	Ch.WeekMinutes = 0.0;
+	Ch.WeekAnswers = 0;
+	Ch.WeekRegulars = 0;
+	Ch.WeekRewarded = 0;
+}
+
+int TrackedFollowers(const Channel& Ch)
+{
+	int N = 0;
+	for (const Member& M : Ch.Members)
+	{
+		N += M.Follower ? 1 : 0;
+	}
+	return N;
 }
 
 const char* const MomentNames[] = {"Register", "AllIn", "WonAllIn", "LostAllIn", "BadBeat", "BigPot", "Knockout", "Bubble", "InTheMoney", "FinalTable", "Win", "Bust", "Cashed", "BestPlay", "Blunder", "Rival", "LevelUp"};
@@ -345,7 +396,7 @@ const std::vector<Sponsor>& Sponsors()
 {
 	static const std::vector<Sponsor> L = [] {
 		std::vector<Sponsor> V;
-		auto Add = [&](const char* Id, const char* Brand, const char* Product, const char* Pitch, const char* Read, uint32_t Color, int Followers, bool Partner, double PerHour, double ReadPay, int Days) {
+		auto Add = [&](const char* Id, const char* Brand, const char* Product, const char* Pitch, const char* Read, uint32_t Color, int Followers, int Avg, bool Partner, double PerHour, double ReadPay, int Days) {
 			Sponsor S;
 			S.Id = Id;
 			S.Brand = Brand;
@@ -354,6 +405,7 @@ const std::vector<Sponsor>& Sponsors()
 			S.ReadLine = Read;
 			S.Color = Color;
 			S.Followers = Followers;
+			S.AvgViewers = Avg;
 			S.NeedsPartner = Partner;
 			S.PerHourCents = static_cast<Chips>(PerHour * 100.0 + 0.5);
 			S.ReadCents = static_cast<Chips>(ReadPay * 100.0 + 0.5);
@@ -361,20 +413,20 @@ const std::vector<Sponsor>& Sponsors()
 			V.push_back(S);
 		};
 		Add("overclock", "Overclock", "Overclock Energy, zero sugar",
-			"Hey! We love the late-night grind energy. $4 for every hour you're live with a can on the desk, plus $10 a read. 30 days.",
-			"This hand is brought to you by Overclock Energy. Zero sugar, all-night focus. Code GRIND in the panels.", 0x84cc16, 150, false, 4.0, 10.0, 30);
+			"Hey! We love the late-night grind energy. $3 for every hour you're live with a can on the desk, plus $10 a read. 30 days.",
+			"This hand is brought to you by Overclock Energy. Zero sugar, all-night focus. Code GRIND in the panels.", 0x84cc16, 300, 15, false, 3.0, 10.0, 30);
 		Add("tunnelrat", "TunnelRat VPN", "TunnelRat VPN",
-			"Your chat trusts you. $8 an hour live and $25 a read to tell them about TunnelRat. 30 days.",
-			"Quick one: TunnelRat VPN keeps your connection private wherever you play. Link below, first month free.", 0x38bdf8, 600, false, 8.0, 25.0, 30);
+			"Your chat trusts you. $6 an hour live and $25 a read to tell them about TunnelRat. 30 days.",
+			"Quick one: TunnelRat VPN keeps your connection private wherever you play. Link below, first month free.", 0x38bdf8, 1000, 30, false, 6.0, 25.0, 30);
 		Add("stacked", "Stacked Apparel", "Stacked hoodies and caps",
-			"We'd love to see you grind in Stacked. $12 an hour live, $40 a read, and a box of merch. 30 days.",
-			"Hoodie's from Stacked Apparel. Built for twelve-hour sessions. Code in the panels for 20% off.", 0xf59e0b, 1500, false, 12.0, 40.0, 30);
+			"We'd love to see you grind in Stacked. $10 an hour live, $40 a read, and a box of merch. 30 days.",
+			"Hoodie's from Stacked Apparel. Built for twelve-hour sessions. Code in the panels for 20% off.", 0xf59e0b, 2500, 60, false, 10.0, 40.0, 30);
 		Add("riverline", "RiverLine", "Team RiverLine streamer contract",
 			"You've built something. RiverLine would like you on Team RiverLine: $25 an hour streaming RiverLine, $60 a read, and the Team patch on your avatar. 30 days.",
-			"Everything you see tonight is on RiverLine. New players: the welcome freeroll is in my panels. Team RiverLine!", 0x27d3c3, 2500, true, 25.0, 60.0, 30);
+			"Everything you see tonight is on RiverLine. New players: the welcome freeroll is in my panels. Team RiverLine!", 0x27d3c3, 2500, 75, true, 25.0, 60.0, 30);
 		Add("sitwell", "Sitwell", "Sitwell Pro gaming chair",
 			"Ten thousand followers sit with you every night. Sitwell would like to be the chair. $35 an hour, $90 a read. 30 days.",
-			"Twelve hours in and my back is fine. That's the Sitwell Pro. Link's below.", 0xfb923c, 10000, true, 35.0, 90.0, 30);
+			"Twelve hours in and my back is fine. That's the Sitwell Pro. Link's below.", 0xfb923c, 10000, 300, true, 35.0, 90.0, 30);
 		return V;
 	}();
 	return L;
@@ -483,6 +535,116 @@ double Channel::AvgViewers() const
 	return Minutes > 0.0 ? Sum / Minutes : 0.0;
 }
 
+void Channel::Window30(double World, double& Minutes, int& LiveDays, double& Avg) const
+{
+	Minutes = 0.0;
+	double ViewerMins = 0.0;
+	for (const StreamLog& L : Log)
+	{
+		if (L.Start >= World - 30.0 * kast_detail::KastDay)
+		{
+			Minutes += L.Minutes;
+			ViewerMins += static_cast<double>(L.Avg) * L.Minutes;
+		}
+	}
+	LiveDays = 0;
+	const int Today = kast_detail::KastDayOf(World);
+	for (const int D : DaysLive)
+	{
+		LiveDays += D > Today - 30 ? 1 : 0;
+	}
+	Avg = Minutes > 0.0 ? ViewerMins / Minutes : 0.0;
+}
+
+int Channel::Regulars() const
+{
+	int N = 0;
+	for (const Member& M : Members)
+	{
+		N += M.Loyalty >= RegularLoyalty && !M.Friend ? 1 : 0;
+	}
+	return N;
+}
+
+int Channel::Superfans() const
+{
+	int N = 0;
+	for (const Member& M : Members)
+	{
+		N += M.Loyalty >= SuperfanLoyalty && !M.Friend ? 1 : 0;
+	}
+	return N;
+}
+
+double Channel::LevelXp(int Lv)
+{
+	return Lv <= 1 ? 0.0 : 120.0 * std::pow(static_cast<double>(Lv - 1), 1.7);
+}
+
+int Channel::Level() const
+{
+	int Lv = 1;
+	while (Lv < MaxLevel && Xp >= LevelXp(Lv + 1))
+	{
+		++Lv;
+	}
+	return Lv;
+}
+
+double Channel::Discoverability() const
+{
+	return (1.0 + 0.05 * static_cast<double>(Level() - 1)) * (1.0 + 0.05 * static_cast<double>(std::min(Streak, 8)));
+}
+
+bool Channel::OnSchedule(double World) const
+{
+	if (ScheduleDays == 0)
+	{
+		return false;
+	}
+	const double Minute = std::fmod(World, kast_detail::KastDay);
+	const int Today = kast_detail::KastDayOf(World);
+	// Today's slot, or yesterday's running past midnight: within an hour before to an hour and a half after.
+	for (int Back = 0; Back <= 1; ++Back)
+	{
+		const int D = Today - Back;
+		if (!((ScheduleDays >> kast_detail::KastWeekday(D)) & 1))
+		{
+			continue;
+		}
+		const double Since = Minute + static_cast<double>(Back) * kast_detail::KastDay - static_cast<double>(ScheduleStart);
+		if (Since >= -60.0 && Since <= 90.0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+const Member* Channel::FindMember(const std::string& Name) const
+{
+	for (const Member& M : Members)
+	{
+		if (M.Name == Name)
+		{
+			return &M;
+		}
+	}
+	return nullptr;
+}
+
+Member* Channel::FindMember(const std::string& Name)
+{
+	for (Member& M : Members)
+	{
+		if (M.Name == Name)
+		{
+			return &M;
+		}
+	}
+	return nullptr;
+}
+
 bool Channel::IsMod(const std::string& Name) const
 {
 	for (const Moderator& M : Mods)
@@ -524,6 +686,172 @@ int Tier(const Channel& Ch)
 	return Ch.Partner ? 2 : Ch.Affiliate ? 1 : 0;
 }
 
+const std::vector<StageSpec>& Stages()
+{
+	static const std::vector<StageSpec> L = {
+		{"First stream", "Go live for the first time. Dee's in the front row.", "The studio and chat", 1, 0, 0, 0, 0},
+		{"Familiar faces", "The same names start showing up night after night.", "Promote regulars to moderator", 5, 3, 0, 0, 0},
+		{"Affiliate", "Kast's first tier, over the last 30 days: 50 followers, 500 minutes and 7 days live, 3 average viewers.", "Subs, cheers, ad breaks and channel emotes", 0, 0, 0, AffiliateFollowers, 1},
+		{"Small community", "A chat that talks to itself before you say a word.", "Regulars bring their friends twice as often", 30, 10, 8, 150, 1},
+		{"Growing channel", "People plan their night around your stream.", "Sponsors start paying attention", 60, 25, 20, 500, 1},
+		{"Partner", "Kast's Partner Program, over the last 30 days: 75 average viewers, 25 hours and 12 days live.", "Verified, 70% of every sub, better ad rates", 0, 0, 75, 0, 2},
+		{"Established", "A name in the Poker category.", "The big channels raid your deep runs", 150, 120, 150, 5000, 2},
+		{"Poker personality", "Chat follows you to every table.", "The biggest sponsors want you", 250, 400, 600, 25000, 2},
+	};
+	return L;
+}
+
+namespace kast_detail
+{
+/** The furthest stage reached, in order (a stage counts once every stage before it is done). */
+int StageReached(const Channel& Ch, double World, double LiveMinutes, double LiveViewerMinutes)
+{
+	double Minutes = 0.0;
+	int LiveDays = 0;
+	double Avg = 0.0;
+	Ch.Window30(World, Minutes, LiveDays, Avg);
+	if (LiveMinutes > 1.0)
+	{
+		Avg = (Avg * Minutes + LiveViewerMinutes) / (Minutes + LiveMinutes);
+	}
+	const int Regs = Ch.Regulars();
+	int Reached = -1;
+	const std::vector<StageSpec>& L = Stages();
+	for (size_t I = 0; I < L.size(); ++I)
+	{
+		const StageSpec& S = L[I];
+		const bool Ok = Ch.Streams >= S.Streams && Regs >= S.Regulars && Avg >= static_cast<double>(S.AvgViewers) && Ch.Followers >= S.Followers && Tier(Ch) >= S.Tier;
+		if (!Ok)
+		{
+			break;
+		}
+		Reached = static_cast<int>(I);
+	}
+	return Reached;
+}
+} // namespace kast_detail
+
+std::vector<Goal> StageGoals(const Channel& Ch, double World, int Stage)
+{
+	std::vector<Goal> Out;
+	const std::vector<StageSpec>& L = Stages();
+	if (Stage < 0 || Stage >= static_cast<int>(L.size()))
+	{
+		return Out;
+	}
+	const StageSpec& S = L[static_cast<size_t>(Stage)];
+	double Minutes = 0.0;
+	int LiveDays = 0;
+	double Avg = 0.0;
+	Ch.Window30(World, Minutes, LiveDays, Avg);
+	if (S.Tier == 1)
+	{
+		Out.push_back({"Followers", static_cast<double>(Ch.Followers), static_cast<double>(AffiliateFollowers), 0});
+		Out.push_back({"Minutes live (30 days)", Minutes, AffiliateMinutes, 0});
+		Out.push_back({"Days live (30 days)", static_cast<double>(LiveDays), static_cast<double>(AffiliateDays), 0});
+		Out.push_back({"Average viewers (30 days)", Avg, AffiliateAvg, 0});
+		return Out;
+	}
+	if (S.Tier == 2 && S.Streams == 0)
+	{
+		Out.push_back({"Hours live (30 days)", Minutes / 60.0, PartnerMinutes / 60.0, 0});
+		Out.push_back({"Days live (30 days)", static_cast<double>(LiveDays), static_cast<double>(PartnerDays), 0});
+		Out.push_back({"Average viewers (30 days)", Avg, PartnerAvg, 0});
+		return Out;
+	}
+	if (S.Streams > 0)
+	{
+		Out.push_back({"Streams", static_cast<double>(Ch.Streams), static_cast<double>(S.Streams), 0});
+	}
+	if (S.Regulars > 0)
+	{
+		Out.push_back({"Regulars", static_cast<double>(Ch.Regulars()), static_cast<double>(S.Regulars), 0});
+	}
+	if (S.AvgViewers > 0)
+	{
+		Out.push_back({"Average viewers (30 days)", Avg, static_cast<double>(S.AvgViewers), 0});
+	}
+	if (S.Followers > 0)
+	{
+		Out.push_back({"Followers", static_cast<double>(Ch.Followers), static_cast<double>(S.Followers), 0});
+	}
+	return Out;
+}
+
+std::vector<Goal> WeekGoals(const Channel& Ch, double World)
+{
+	const bool This = Ch.Week == kast_detail::KastWeekOf(World);
+	return {
+		{"Stream 3 times", This ? static_cast<double>(Ch.WeekStreams) : 0.0, 3.0, 100},
+		{"6 hours live", This ? Ch.WeekMinutes / 60.0 : 0.0, 6.0, 100},
+		{"Answer 5 questions", This ? static_cast<double>(Ch.WeekAnswers) : 0.0, 5.0, 60},
+		{"2 new regulars", This ? static_cast<double>(Ch.WeekRegulars) : 0.0, 2.0, 80},
+	};
+}
+
+std::vector<SmallChannel> Network(double World)
+{
+	struct Spec
+	{
+		std::string Name;
+		std::string Title;
+		int Viewers;
+		int Opens;
+		int Hours;
+		int Days;
+		uint32_t Color;
+	};
+	static const std::vector<Spec> All = [] {
+		static const char* const SmallTitles[] = {"micro stakes grind, come hang", "road to $1k bankroll", "learning MTTs live", "late night turbos", "chill freerolls + music",
+			"PKO practice", "first final table?? (day 12)", "grinding with chat", "spin & fold", "the 3am crew"};
+		static const uint32_t Colors[] = {0xf97316, 0x22c55e, 0x38bdf8, 0xe879f9, 0xfacc15, 0x14b8a6, 0xef4444, 0xa78bfa};
+		Rng R("kast-network");
+		std::vector<Spec> V;
+		std::set<std::string> Taken;
+		while (V.size() < 36)
+		{
+			Spec S;
+			S.Name = handles::Make(R, handles::PickCountry(R));
+			if (!Taken.insert(S.Name).second)
+			{
+				continue;
+			}
+			S.Title = SmallTitles[R.Int(10)];
+			S.Viewers = 2 + static_cast<int>(std::pow(R.Next(), 2.2) * 55.0);
+			S.Opens = (17 + R.Int(10)) % 24 * 60 + R.Int(4) * 15;
+			S.Hours = 2 + R.Int(5);
+			int Mask = 0;
+			for (int D = 0; D < 7; ++D)
+			{
+				Mask |= R.Chance(0.65) ? 1 << D : 0;
+			}
+			S.Days = Mask == 0 ? 0x1f : Mask;
+			S.Color = Colors[R.Int(8)];
+			V.push_back(S);
+		}
+		return V;
+	}();
+	std::vector<SmallChannel> Live;
+	const double Minute = std::fmod(World, kast_detail::KastDay);
+	const int Today = kast_detail::KastDayOf(World);
+	for (const Spec& S : All)
+	{
+		for (int Back = 0; Back <= 1; ++Back)
+		{
+			const int D = Today - Back;
+			const double Since = Minute + static_cast<double>(Back) * kast_detail::KastDay - static_cast<double>(S.Opens);
+			if (((S.Days >> kast_detail::KastWeekday(D)) & 1) && Since >= 0.0 && Since < static_cast<double>(S.Hours) * 60.0)
+			{
+				const double Night = 0.7 + 0.6 * static_cast<double>(kast_detail::NameHash(S.Name + std::to_string(D)) % 100) / 100.0;
+				Live.push_back({S.Name, S.Title, std::max(1, static_cast<int>(std::round(static_cast<double>(S.Viewers) * Night))), S.Color});
+				break;
+			}
+		}
+	}
+	std::stable_sort(Live.begin(), Live.end(), [](const SmallChannel& A, const SmallChannel& B) { return A.Viewers > B.Viewers; });
+	return Live;
+}
+
 void Offline(Channel& Ch, double World, Rng& R)
 {
 	if (World <= Ch.LastOffline)
@@ -531,14 +859,16 @@ void Offline(Channel& Ch, double World, Rng& R)
 		return;
 	}
 	Ch.LastOffline = World;
-	// Subscriptions renew every thirty days; most of them do.
+	kast_detail::RollWeek(Ch, World);
+	// Subscriptions renew every thirty days: loyal members keep theirs.
 	const double Share = Ch.Partner ? 0.7 : 0.5;
 	for (Subscriber& S : Ch.Subs)
 	{
 		while (S.Renews > 0.0 && S.Renews <= World)
 		{
-			const bool Stays = R.Chance(S.Gift ? 0.3 : 0.7);
-			if (!Stays)
+			const Member* M = Ch.FindMember(S.Name);
+			const double L = M ? M->Loyalty : 0.15;
+			if (!R.Chance(S.Gift ? 0.2 + 0.5 * L : 0.45 + 0.5 * L))
 			{
 				S.Renews = -S.Renews; // lapsed (kept for the history, negative so it never renews)
 				break;
@@ -551,9 +881,42 @@ void Offline(Channel& Ch, double World, Rng& R)
 			Ch.UnpaidCents += Cents;
 		}
 	}
-	// Lapsed subscribers are forgotten after a while, so the list stays short.
 	Ch.Subs.erase(std::remove_if(Ch.Subs.begin(), Ch.Subs.end(), [&](const Subscriber& S) { return S.Renews < 0.0 && -S.Renews < World - 30.0 * kast_detail::KastDay; }), Ch.Subs.end());
-	// Clips keep getting watched for a few days; some of those viewers follow.
+	// The days go by: members drift when the channel goes quiet, and more when a posted stream doesn't happen.
+	const int Today = kast_detail::KastDayOf(World);
+	if (Ch.ProcessedDay < 0)
+	{
+		Ch.ProcessedDay = Today;
+	}
+	if (Ch.ProcessedDay < Today)
+	{
+		const int From = std::max(Ch.ProcessedDay, Today - 120);
+		for (int D = From; D < Today; ++D)
+		{
+			bool Streamed = false;
+			bool Recent = false;
+			for (const int Live : Ch.DaysLive)
+			{
+				Streamed = Streamed || Live == D;
+				Recent = Recent || (Live >= D - 2 && Live <= D);
+			}
+			double F = Recent ? 0.996 : 0.985;
+			if (((Ch.ScheduleDays >> kast_detail::KastWeekday(D)) & 1) && !Streamed)
+			{
+				F *= 0.97; // they showed up and nobody was there
+			}
+			for (Member& M : Ch.Members)
+			{
+				M.Loyalty = M.Friend ? std::max(0.6, M.Loyalty * F) : M.Loyalty * F;
+			}
+		}
+		Ch.ProcessedDay = Today;
+		// Members who drifted all the way off are forgotten (followers stay followers: they just never come).
+		Ch.Members.erase(std::remove_if(Ch.Members.begin(), Ch.Members.end(),
+							 [&](const Member& M) { return !M.Friend && M.Loyalty < 0.012 && M.LastSeen < World - 45.0 * kast_detail::KastDay && !Ch.IsSub(M.Name, World) && !Ch.IsMod(M.Name); }),
+			Ch.Members.end());
+	}
+	// Clips keep getting watched for a few days; a few of those viewers follow.
 	double Gained = 0.0;
 	for (Clip& C : Ch.Clips)
 	{
@@ -561,10 +924,26 @@ void Offline(Channel& Ch, double World, Rng& R)
 		C.Views = C.Reach * (1.0 - std::exp(-(World - C.At) / (1.5 * kast_detail::KastDay)));
 		Gained += std::max(0.0, C.Views - Was);
 	}
-	Ch.FollowFrac += Gained * 0.004;
-	const int Whole = static_cast<int>(std::floor(Ch.FollowFrac));
-	Ch.Followers += Whole;
-	Ch.FollowFrac -= static_cast<double>(Whole);
+	Ch.FollowFrac += Gained * 0.002;
+	while (Ch.FollowFrac >= 1.0)
+	{
+		Ch.FollowFrac -= 1.0;
+		++Ch.Followers;
+		if (static_cast<int>(Ch.Members.size()) < MaxMembers)
+		{
+			Member M;
+			M.Name = handles::Make(R, handles::PickCountry(R));
+			M.Loyalty = 0.03;
+			M.Affinity = 0.05 + 0.6 * std::pow(R.Next(), 4.0);
+			M.FirstSeen = World;
+			M.LastSeen = World;
+			M.Follower = true;
+			if (!Ch.FindMember(M.Name))
+			{
+				Ch.Members.push_back(M);
+			}
+		}
+	}
 	// Deals run out.
 	Ch.Deals.erase(std::remove_if(Ch.Deals.begin(), Ch.Deals.end(), [&](const Deal& D) { return D.Until <= World; }), Ch.Deals.end());
 }
@@ -590,28 +969,136 @@ double Stream::Quality(const Inputs& In)
 	return std::min(1.0, std::max(0.0, Q));
 }
 
-double Stream::Target(const Channel& Ch, const Inputs& In) const
+double Stream::StrangerRate(const Channel& Ch, const Inputs& In) const
 {
-	double Fresh = 0.0;
-	return Audience(Ch, In, Fresh);
+	// Strangers browsing the Poker directory, an hour: a new channel at the bottom of the list gets a handful.
+	const double Q = Quality(In);
+	double A = (1.5 + 2.0 * Q) * Ch.Discoverability() * kast_detail::Competition(In.World) * (0.4 + 0.6 * kast_detail::TimeOfDay(In.World) / 1.25) * kast_detail::TitleOf(Ch).Discover;
+	A *= 1.0 + Hype / 60.0;
+	A *= 1.0 + 0.45 * std::log2(1.0 + Viewers / 4.0); // the directory sorts by viewers
+	A *= 1.0 + 0.08 * static_cast<double>(std::min(3, std::max(0, In.Tables - 1)));
+	A *= In.AtTable ? 1.0 : In.Results ? 0.8 : 0.5;
+	A *= In.Sprinting ? 0.8 : 1.0;
+	A *= AdRunning(In.Real) ? 0.6 : 1.0;
+	A *= 0.6 + 0.4 * Health;
+	return A;
 }
 
-double Stream::Audience(const Channel& Ch, const Inputs& In, double& Fresh) const
+double Stream::StrangerStay(const Inputs& In) const
 {
+	// Minutes a stranger stays: longer with a good picture, a streamer who talks, a chat that's alive, a big hand.
+	const double Warm = std::min(1.0, static_cast<double>(Present) / 8.0);
+	return 4.0 + 6.0 * Quality(In) + 6.0 * Engage + Hype / 15.0 + 4.0 * Warm;
+}
+
+double Stream::Expected(const Channel& Ch, const Inputs& In)
+{
+	const double Sched = Ch.ScheduleDays == 0 ? 0.75 : Ch.OnSchedule(In.World) ? 1.3 : 0.6;
+	const double Tod = std::max(0.4, std::min(1.0, kast_detail::TimeOfDay(In.World) / 1.25));
+	double Members = 0.0;
+	for (const Member& M : Ch.Members)
+	{
+		const double Pa = M.Friend ? 0.6 : 0.03 + 0.85 * std::pow(M.Loyalty, 1.15);
+		Members += std::min(0.95, Pa * Sched * Tod) * std::min(1.0, (15.0 + 150.0 * M.Loyalty) / 120.0);
+	}
 	const double Q = Quality(In);
-	const TitleSpec& T = Titles()[static_cast<size_t>(std::max(0, std::min(static_cast<int>(Titles().size()) - 1, Ch.Title)))];
-	const double Tod = kast_detail::TimeOfDay(In.World);
-	const double Returning = kast_detail::ReturningViewers(Ch.Followers, Tod, Q);
-	double Discover = (1.0 + 12.0 * std::pow(Q, 1.2)) * kast_detail::Competition(In.World) * (1.0 + Hype / 35.0) * T.Discover;
-	Discover += 0.08 * Viewers / (1.0 + Viewers / 5000.0); // the directory sorts by viewers: a bigger stream is easier to find (up to a point)
-	double Mult = 1.0 + 0.12 * static_cast<double>(std::min(3, std::max(0, In.Tables - 1)));
-	Mult *= In.AtTable ? 1.0 : In.Results ? 0.8 : 0.55;
-	Mult *= In.Sprinting ? 0.85 : 1.0;
-	Mult *= AdRunning(In.Real) ? 0.85 : 1.0;
-	Mult *= 0.55 + 0.45 * Health;
-	Mult *= 1.0 + 0.15 * Engage;
-	Fresh = Discover * Mult + RaidViewers;
-	return (Returning + Discover) * Mult + RaidViewers;
+	const double A = (1.5 + 2.0 * Q) * Ch.Discoverability() * kast_detail::Competition(In.World) * (0.4 + 0.6 * kast_detail::TimeOfDay(In.World) / 1.25);
+	return Members + A / 60.0 * (4.0 + 6.0 * Q);
+}
+
+int Stream::AddMember(Channel& Ch, const Inputs& In, const std::string& Name, bool Follower, double Loyalty)
+{
+	if (static_cast<int>(Ch.Members.size()) >= MaxMembers || Ch.FindMember(Name))
+	{
+		return -1;
+	}
+	Member M;
+	M.Name = Name;
+	M.Loyalty = Loyalty;
+	M.Affinity = 0.05 + 0.9 * std::pow(R.Next(), 4.0); // most are casual
+	M.FirstSeen = In.World;
+	M.LastSeen = In.World;
+	M.Follower = Follower;
+	Ch.Members.push_back(M);
+	return static_cast<int>(Ch.Members.size()) - 1;
+}
+
+void Stream::Invite(Channel& Ch, const Inputs& In, double Chance, double MeanDelay)
+{
+	// Who shows up: loyal members almost always (on schedule), new followers now and then.
+	const double Sched = Ch.ScheduleDays == 0 ? 0.75 : Scheduled ? 1.3 : 0.6;
+	const double Tod = std::max(0.4, std::min(1.0, kast_detail::TimeOfDay(In.World) / 1.25));
+	std::vector<char> Coming(Ch.Members.size(), 0);
+	for (const Visit& V : Visits)
+	{
+		Coming[static_cast<size_t>(V.Member)] = 1;
+	}
+	for (size_t I = 0; I < Ch.Members.size(); ++I)
+	{
+		if (Coming[I])
+		{
+			continue;
+		}
+		const Member& M = Ch.Members[I];
+		double Pa = M.Friend ? 0.6 : 0.03 + 0.85 * std::pow(M.Loyalty, 1.15);
+		Pa *= Sched * Tod * Chance * (In.World - M.LastSeen < 3.0 * kast_detail::KastDay ? 1.15 : 1.0);
+		if (!R.Chance(std::min(0.95, Pa)))
+		{
+			continue;
+		}
+		Visit V;
+		V.Member = static_cast<int>(I);
+		V.Arrive = In.World + kast_detail::KastExp(R, MeanDelay);
+		V.Leave = V.Arrive + (M.Friend ? R.Range(40.0, 150.0) : std::max(4.0, kast_detail::KastExp(R, 15.0 + 150.0 * M.Loyalty)));
+		Visits.push_back(V);
+	}
+}
+
+void Stream::NewFollower(Channel& Ch, const Inputs& In, double Stay)
+{
+	std::string Name;
+	for (int Try = 0; Try < 8 && (Name.empty() || Ch.FindMember(Name)); ++Try)
+	{
+		Name = Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
+	}
+	const int Before = Ch.Followers;
+	++Ch.Followers;
+	++Tonight.Follows;
+	const int Index = Ch.FindMember(Name) ? -1 : AddMember(Ch, In, Name, true, 0.04);
+	if (Index >= 0)
+	{
+		// They're watching right now: tonight counts toward their loyalty.
+		Visit V;
+		V.Member = Index;
+		V.Arrive = In.World;
+		V.Leave = In.World + std::max(5.0, kast_detail::KastExp(R, Stay * 2.0));
+		Visits.push_back(V);
+	}
+	Alert A;
+	A.Kind = AlertKind::Follow;
+	A.Who = Name;
+	Queue(A);
+	if (Before < 2400 && Ch.Followers >= 2400)
+	{
+		Notice N;
+		N.Type = Notice::Kind::Text;
+		N.From = "gh0stfold";
+		N.Body = "saw you passed me on kast. cute. see you at the tables.";
+		Notices.push_back(N);
+	}
+}
+
+int Stream::HereVisit(const Channel& Ch, const std::string& Name) const
+{
+	for (const int I : Here)
+	{
+		const int M = Visits[static_cast<size_t>(I)].Member;
+		if (M >= 0 && static_cast<size_t>(M) < Ch.Members.size() && Ch.Members[static_cast<size_t>(M)].Name == Name)
+		{
+			return I;
+		}
+	}
+	return -1;
 }
 
 void Stream::Say(const Inputs& In, const std::string& Who, const std::string& Text, LineKind Kind, int Badges, uint32_t Color, Chips Cents)
@@ -634,33 +1121,32 @@ void Stream::Say(const Inputs& In, const std::string& Who, const std::string& Te
 
 std::string Stream::Chatter(Channel& Ch, const Inputs& In, int& Badges, uint32_t& Color)
 {
-	std::string Name;
-	const double RegularShare = std::min(0.55, 0.12 + static_cast<double>(Ch.Followers) / 2500.0);
-	if (!OnlineMods.empty() && R.Chance(0.08))
+	// Who talks: the community members watching (the loyal ones most), or a stranger passing through.
+	double MemberWeight = 0.0;
+	for (const int I : Here)
 	{
-		Name = R.Pick(OnlineMods);
+		MemberWeight += 0.2 + Ch.Members[static_cast<size_t>(Visits[static_cast<size_t>(I)].Member)].Loyalty;
 	}
-	else if (!Ch.Regulars.empty() && R.Chance(RegularShare))
+	const double StrangerWeight = Strangers * 0.1 + Lurkers * 0.03 + RaidViewers * 0.15 + 0.02;
+	std::string Name;
+	if (!Here.empty() && R.Next() * (MemberWeight + StrangerWeight) < MemberWeight)
 	{
-		// The most active regulars talk most (the ranking is refreshed every few seconds).
-		if (TopRegulars.empty() || In.Real - TopAt > 5.0 || In.Real < TopAt)
+		double Pick = R.Next() * MemberWeight;
+		int Chosen = Here.front();
+		for (const int I : Here)
 		{
-			TopAt = In.Real;
-			std::vector<std::pair<int, std::string>> Top;
-			for (const auto& Rg : Ch.Regulars)
+			Pick -= 0.2 + Ch.Members[static_cast<size_t>(Visits[static_cast<size_t>(I)].Member)].Loyalty;
+			if (Pick <= 0.0)
 			{
-				Top.push_back({Rg.second, Rg.first});
-			}
-			std::sort(Top.begin(), Top.end(), [](const std::pair<int, std::string>& A, const std::pair<int, std::string>& B) { return A.first != B.first ? A.first > B.first : A.second < B.second; });
-			TopRegulars.clear();
-			for (size_t I = 0; I < Top.size() && I < 80; ++I)
-			{
-				TopRegulars.push_back(Top[I].second);
+				Chosen = I;
+				break;
 			}
 		}
-		const int N = std::min(static_cast<int>(TopRegulars.size()), 12 + Ch.Followers / 200);
-		const double U = R.Next();
-		Name = TopRegulars[static_cast<size_t>(std::min(N - 1, static_cast<int>(U * U * static_cast<double>(N))))];
+		Visit& V = Visits[static_cast<size_t>(Chosen)];
+		V.Chatted = true;
+		Member& M = Ch.Members[static_cast<size_t>(V.Member)];
+		++M.Messages;
+		Name = M.Name;
 	}
 	else
 	{
@@ -676,12 +1162,13 @@ std::string Stream::Chatter(Channel& Ch, const Inputs& In, int& Badges, uint32_t
 	{
 		Badges |= BadgeMod;
 	}
-	const auto It = Ch.Regulars.find(Name);
-	if (It != Ch.Regulars.end() && It->second >= 40 && !(Badges & BadgeMod))
+	const Member* M = Ch.FindMember(Name);
+	if (M && M->Loyalty >= SuperfanLoyalty && !(Badges & BadgeMod) && Ch.Affiliate)
 	{
 		Badges |= BadgeVip;
 	}
 	Color = kast_detail::NameColor(Name);
+	Seen.insert(Name);
 	return Name;
 }
 
@@ -801,50 +1288,30 @@ void Stream::Earn(Channel& Ch, Chips Cents, int Source)
 	}
 }
 
-void Stream::Follow(Channel& Ch, const Inputs& In, int Count)
-{
-	if (Count <= 0)
-	{
-		return;
-	}
-	const int Before = Ch.Followers;
-	Ch.Followers += Count;
-	Tonight.Follows += Count;
-	Alert A;
-	A.Kind = AlertKind::Follow;
-	A.Count = Count;
-	if (Count == 1)
-	{
-		A.Who = Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
-	}
-	Queue(A);
-	const int Rival = 2400;
-	if (Before < Rival && Ch.Followers >= Rival)
-	{
-		Notice N;
-		N.Type = Notice::Kind::Text;
-		N.From = "gh0stfold";
-		N.Body = "saw you passed me on kast. cute. see you at the tables.";
-		Notices.push_back(N);
-	}
-	(void)In;
-}
-
 void Stream::Subscribe(Channel& Ch, const Inputs& In, const std::string& Who, bool Gift, int Count)
 {
 	const double Share = Ch.Partner ? 0.7 : 0.5;
 	for (int K = 0; K < Count; ++K)
 	{
-		Subscriber S;
-		S.Name = Gift ? Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))] : Who;
-		S.Since = In.World;
-		S.Renews = In.World + 30.0 * kast_detail::KastDay;
-		S.Gift = Gift;
-		// Already subscribed (a resub): the months go on.
+		// A gift lands on someone watching who isn't subscribed yet.
+		std::string To = Who;
+		if (Gift)
+		{
+			To = Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
+			for (const int I : Here)
+			{
+				const std::string& N = Ch.Members[static_cast<size_t>(Visits[static_cast<size_t>(I)].Member)].Name;
+				if (N != Who && !Ch.IsSub(N, In.World) && R.Chance(0.5))
+				{
+					To = N;
+					break;
+				}
+			}
+		}
 		bool Found = false;
 		for (Subscriber& Old : Ch.Subs)
 		{
-			if (Old.Name == S.Name)
+			if (Old.Name == To)
 			{
 				Old.Renews = std::max(std::fabs(Old.Renews), In.World) + 30.0 * kast_detail::KastDay;
 				++Old.Months;
@@ -854,9 +1321,19 @@ void Stream::Subscribe(Channel& Ch, const Inputs& In, const std::string& Who, bo
 		}
 		if (!Found)
 		{
+			Subscriber S;
+			S.Name = To;
+			S.Since = In.World;
+			S.Renews = In.World + 30.0 * kast_detail::KastDay;
+			S.Gift = Gift;
 			Ch.Subs.push_back(S);
 		}
 		Earn(Ch, static_cast<Chips>(std::round(static_cast<double>(SubPriceCents) * Share)), 0);
+	}
+	if (Member* M = Ch.FindMember(Who))
+	{
+		M->Given += SubPriceCents * Count;
+		M->Loyalty = std::min(1.0, M->Loyalty + 0.04); // money in, heart in
 	}
 	Tonight.Subs += Gift ? 0 : Count;
 	Tonight.Gifted += Gift ? Count : 0;
@@ -867,7 +1344,7 @@ void Stream::Subscribe(Channel& Ch, const Inputs& In, const std::string& Who, bo
 	A.Count = Count;
 	if (!Gift)
 	{
-		static const std::vector<std::string> Msgs = {"", "love the stream", "rent fund", "finally subbed", "for the grind", "kastLove", "", "deep run tonight"};
+		static const std::vector<std::string> Msgs = {"", "love the stream", "rent fund", "finally subbed", "for the grind", "kastLove", "", "every night i'm here anyway"};
 		A.Text = R.Pick(Msgs);
 	}
 	Queue(A);
@@ -885,8 +1362,6 @@ void Stream::React(Channel& Ch, const Inputs& In, Moment M, int Count)
 		uint32_t Color = 0;
 		const std::string Who = Chatter(Ch, In, Badges, Color);
 		std::string Line = R.Pick(kast_detail::Lines(M));
-		Ch.Regulars[Who] += 1;
-		Seen.insert(Who);
 		Line = kast_detail::Fill(Line, "{hero}", In.Hero);
 		Line = kast_detail::Fill(Line, "{event}", In.EventName);
 		Line = kast_detail::Fill(Line, "{ship}", Ch.Affiliate && (Badges & BadgeSub) ? Prefix2 + "Ship" : "kastHype");
@@ -903,9 +1378,10 @@ void Stream::React(Channel& Ch, const Inputs& In, Moment M, int Count)
 
 void Stream::MakeClip(Channel& Ch, const Inputs& In, Moment M, const std::string& Detail, double Size)
 {
+	// Somebody has to be watching to clip it; a clip reaches about as far as the channel does.
 	const kast_detail::Hit H = kast_detail::HitOf(M);
-	const double Chance = std::min(0.95, H.ClipChance * std::min(1.0, 0.25 + Viewers / 60.0));
-	if (!R.Chance(Chance))
+	const double Chance = std::min(0.95, H.ClipChance * std::min(1.0, 0.1 + Viewers / 40.0));
+	if (Viewers < 1.5 || !R.Chance(Chance))
 	{
 		return;
 	}
@@ -917,14 +1393,13 @@ void Stream::MakeClip(Channel& Ch, const Inputs& In, Moment M, const std::string
 	uint32_t Color = 0;
 	C.By = Chatter(Ch, In, Badges, Color);
 	const double Spread = std::exp(R.Gauss(0.0, 0.8));
-	double Reach = (40.0 + Viewers * 6.0) * Spread * (1.0 + Hype / 40.0) * std::max(0.5, Size);
-	const bool Viral = R.Chance(M == Moment::Win || M == Moment::BadBeat ? 0.06 : 0.025);
-	Reach *= Viral ? 25.0 : 1.0;
+	double Reach = (5.0 + Viewers * 3.0) * Spread * (1.0 + Hype / 50.0) * std::max(0.5, Size);
+	const bool Viral = R.Chance(M == Moment::Win || M == Moment::BadBeat ? 0.008 : 0.003);
+	Reach *= Viral ? 30.0 : 1.0;
 	C.Reach = Reach;
 	Ch.Clips.insert(Ch.Clips.begin(), C);
 	if (Ch.Clips.size() > 16)
 	{
-		// Keep the most watched.
 		std::stable_sort(Ch.Clips.begin() + 1, Ch.Clips.end(), [](const Clip& A, const Clip& B) { return A.Reach > B.Reach; });
 		Ch.Clips.pop_back();
 	}
@@ -957,12 +1432,22 @@ void Stream::CheckGrowth(Channel& Ch, const Inputs& In)
 			A.Count = Step;
 			A.Text = Grouped(Step) + " followers!";
 			Queue(A);
-			Hype = std::min(100.0, Hype + 10.0);
+			Hype = std::min(100.0, Hype + 6.0);
 			Say(In, "", "Milestone: " + Grouped(Step) + " followers!", LineKind::System, 0, Lime);
 		}
 	}
-	const double Minutes = Ch.MinutesLive + (Live ? In.World - StartWorld : 0.0);
-	if (!Ch.Affiliate && Ch.Followers >= AffiliateFollowers && Minutes >= AffiliateMinutes && Ch.Streams >= AffiliateStreams)
+	// Kast's rules look at the last 30 days (tonight included).
+	double Minutes = 0.0;
+	int LiveDays = 0;
+	double Avg = 0.0;
+	Ch.Window30(In.World, Minutes, LiveDays, Avg);
+	const double Up = Live ? In.World - StartWorld : 0.0;
+	if (Up > 1.0)
+	{
+		Avg = (Avg * Minutes + ViewerMinutes) / (Minutes + Up);
+		Minutes += Up;
+	}
+	if (!Ch.Affiliate && Ch.Followers >= AffiliateFollowers && Minutes >= AffiliateMinutes && LiveDays >= AffiliateDays && Avg >= AffiliateAvg)
 	{
 		Ch.Affiliate = true;
 		Alert A;
@@ -976,26 +1461,61 @@ void Stream::CheckGrowth(Channel& Ch, const Inputs& In)
 		Notices.push_back(N);
 		Say(In, "", "This channel is now a Kast Affiliate. Subscribe to support " + In.Hero + "!", LineKind::System, 0, Violet);
 	}
-	if (Ch.Affiliate && !Ch.Partner && Ch.Followers >= PartnerFollowers)
+	if (Ch.Affiliate && !Ch.Partner && Minutes >= PartnerMinutes && LiveDays >= PartnerDays && Avg >= PartnerAvg)
 	{
-		const double Avg = Live && In.World - StartWorld > 30.0 ? std::max(Ch.AvgViewers(), ViewerMinutes / (In.World - StartWorld)) : Ch.AvgViewers();
-		if (Avg >= PartnerAvgViewers)
+		Ch.Partner = true;
+		Alert A;
+		A.Kind = AlertKind::Partner;
+		A.Text = "Verified \xC2\xB7 70% of every sub";
+		Queue(A);
+		Notice N;
+		N.Type = Notice::Kind::Text;
+		N.From = "Kast";
+		N.Body = "Welcome to the Kast Partner Program. Your channel is verified, your sub share is now 70%, and ads pay more.";
+		Notices.push_back(N);
+	}
+	// Community stages, one at a time.
+	const int Reached = kast_detail::StageReached(Ch, In.World, Up, ViewerMinutes);
+	while (Ch.Stage < Reached)
+	{
+		++Ch.Stage;
+		const StageSpec& S = Stages()[static_cast<size_t>(Ch.Stage)];
+		Ch.Xp += 200.0;
+		// Affiliate and Partner announce themselves.
+		if (Ch.Stage > 0 && S.Streams > 0)
 		{
-			Ch.Partner = true;
 			Alert A;
-			A.Kind = AlertKind::Partner;
-			A.Text = "Verified \xC2\xB7 70% of every sub";
+			A.Kind = AlertKind::Stage;
+			A.Text = S.Name;
 			Queue(A);
 			Notice N;
 			N.Type = Notice::Kind::Text;
 			N.From = "Kast";
-			N.Body = "Welcome to the Kast Partner Program. Your channel is verified, your sub share is now 70%, and ads pay more.";
+			N.Body = "Your channel reached a new stage: " + S.Name + ". Unlocked: " + S.Unlock + ".";
 			Notices.push_back(N);
+			if (Live)
+			{
+				Say(In, "", "New stage: " + S.Name + " \xC2\xB7 " + S.Unlock, LineKind::System, 0, Lime);
+			}
+		}
+	}
+	// Weekly goals pay out once each.
+	const std::vector<Goal> Week = WeekGoals(Ch, In.World);
+	for (size_t I = 0; I < Week.size(); ++I)
+	{
+		if (Week[I].Have >= Week[I].Need && !((Ch.WeekRewarded >> I) & 1))
+		{
+			Ch.WeekRewarded |= 1 << I;
+			Ch.Xp += static_cast<double>(Week[I].Xp);
+			if (Live)
+			{
+				Say(In, "", "Weekly goal done: " + Week[I].Label + " (+" + std::to_string(Week[I].Xp) + " XP)", LineKind::System, 0, Lime);
+			}
 		}
 	}
 	for (const Sponsor& S : Sponsors())
 	{
-		if (Ch.Followers >= S.Followers && (!S.NeedsPartner || Ch.Partner) && !Ch.Offers.count(S.Id) && !Ch.Declined.count(S.Id) && !Ch.ActiveDeal(S.Id, In.World))
+		if (Ch.Followers >= S.Followers && Avg >= static_cast<double>(S.AvgViewers) && (!S.NeedsPartner || Ch.Partner) && !Ch.Offers.count(S.Id) && !Ch.Declined.count(S.Id) && !Ch.ActiveDeal(S.Id, In.World))
 		{
 			bool Had = false;
 			for (const Deal& D : Ch.Deals)
@@ -1023,7 +1543,7 @@ void Stream::Start(Channel& Ch, const Inputs& In)
 	}
 	if (Pool.empty())
 	{
-		std::set<std::string> Taken = {In.Hero};
+		std::set<std::string> Taken = {In.Hero, "dee_spincycle", "mei_ng"};
 		while (Pool.size() < 700)
 		{
 			const std::string Name = handles::Make(R, handles::PickCountry(R));
@@ -1035,12 +1555,24 @@ void Stream::Start(Channel& Ch, const Inputs& In)
 	}
 	Prefix = EmotePrefix(In.Hero);
 	Offline(Ch, In.World, R);
+	kast_detail::RollWeek(Ch, In.World);
+	// The first night: two friends from the laundromat are the whole audience.
+	if (Ch.Streams == 0 && Ch.Members.empty())
+	{
+		AddMember(Ch, In, "dee_spincycle", true, 0.85);
+		AddMember(Ch, In, "mei_ng", true, 0.7);
+		Ch.Members[0].Friend = true;
+		Ch.Members[1].Friend = true;
+		Ch.Members[0].Affinity = 0.95;
+		Ch.Members[1].Affinity = 0.85;
+		Ch.Followers += 2;
+	}
 	Live = true;
 	StartWorld = In.World;
 	StartReal = In.Real;
-	Viewers = 1.0 + static_cast<double>(Ch.Followers) * 0.006;
-	Peak = static_cast<int>(Viewers);
-	Hype = 15.0;
+	Viewers = 0.0;
+	Peak = 0;
+	Hype = 10.0;
 	Health = 1.0;
 	Engage = 0.3;
 	Chat.clear();
@@ -1060,11 +1592,22 @@ void Stream::Start(Channel& Ch, const Inputs& In)
 	LastMomentReal = -100.0;
 	Seen.clear();
 	TimedOut.clear();
-	TopRegulars.clear();
 	Caught = 0;
 	Missed = 0;
 	ChatDebt = TrollDebt = TipDebt = CheerDebt = SubDebt = QuestionDebt = GraphDebt = ViewerMinutes = RaidDebt = SponsorDebt = PredDebt = 0.0;
+	FollowDebt = ArriveDebt = WordDebt = GiftDebt = 0.0;
 	GreetDebt = 3.0;
+	Strangers = 0.0;
+	Lurkers = 0.0;
+	Present = 0;
+	RegularsHere = 0;
+	Visits.clear();
+	Here.clear();
+	Scheduled = Ch.OnSchedule(In.World);
+	Tonight.OnSchedule = Scheduled;
+	// Who's coming tonight (they turn up over the first half hour or so; latecomers are rolled for each hour).
+	Invite(Ch, In, 1.0, Scheduled ? 8.0 : 18.0);
+	RollAt = In.World + 60.0;
 	OnlineMods.clear();
 	for (const Moderator& M : Ch.Mods)
 	{
@@ -1074,8 +1617,18 @@ void Stream::Start(Channel& Ch, const Inputs& In)
 		}
 	}
 	++Ch.Streams;
-	Say(In, "", "You're live! " + (Ch.Followers > 0 ? Grouped(Ch.Followers) + (Ch.Followers == 1 ? " follower was" : " followers were") + " notified." : std::string("Share the link and say hi to chat.")),
-		LineKind::System, 0, Violet);
+	++Ch.WeekStreams;
+	const int Today = kast_detail::KastDayOf(In.World);
+	if (std::find(Ch.DaysLive.begin(), Ch.DaysLive.end(), Today) == Ch.DaysLive.end())
+	{
+		Ch.DaysLive.push_back(Today);
+		if (Ch.DaysLive.size() > 60)
+		{
+			Ch.DaysLive.erase(Ch.DaysLive.begin());
+		}
+	}
+	Say(In, "", "You're live! " + (Ch.Followers > 0 ? Grouped(Ch.Followers) + (Ch.Followers == 1 ? " follower was" : " followers were") + " notified." : std::string("Share the link and say hi to chat.")) +
+		(Scheduled ? " On schedule: your regulars knew you'd be here." : std::string()), LineKind::System, 0, Violet);
 	if (!OnlineMods.empty())
 	{
 		Say(In, "", std::to_string(OnlineMods.size()) + (OnlineMods.size() == 1 ? " moderator is" : " moderators are") + " watching chat.", LineKind::System, 0, 0x22c55e);
@@ -1085,13 +1638,13 @@ void Stream::Start(Channel& Ch, const Inputs& In)
 		Notice N;
 		N.Type = Notice::Kind::Text;
 		N.From = "Kast";
-		N.Body = "Your first stream is live! Tip: streamers grow by playing big moments, talking to chat and looking and sounding good. 50 followers and 8 hours live unlock Affiliate.";
+		N.Body = "Your first stream is live! Growing a channel takes time: stream on a schedule, talk to chat, answer questions. Regulars are built one stream at a time.";
 		Notices.push_back(N);
 	}
 	CheckGrowth(Ch, In);
 }
 
-Summary Stream::Stop(Channel& Ch, const Inputs& In)
+Summary Stream::Stop(Channel& Ch, const Inputs& In, const std::string& Raid)
 {
 	if (!Live)
 	{
@@ -1103,8 +1656,50 @@ Summary Stream::Stop(Channel& Ch, const Inputs& In)
 	S.Avg = S.Minutes > 0.5 ? static_cast<int>(std::round(ViewerMinutes / S.Minutes)) : static_cast<int>(std::round(Viewers));
 	S.Peak = Peak;
 	S.Trolls = Caught + Missed;
+	// Ending with a raid: tonight's viewers go to a small channel, who'll remember it.
+	if (!Raid.empty())
+	{
+		S.RaidedOut = Raid;
+		S.RaidSize = std::max(1, static_cast<int>(std::round(Viewers * 0.7)));
+		Ch.Goodwill[Raid] += 1;
+		++Ch.RaidsOut;
+	}
+	// Loyalty: everyone who watched tonight is a little more part of this.
+	for (const Visit& V : Visits)
+	{
+		if (V.Watched < 0.5 || V.Member < 0 || static_cast<size_t>(V.Member) >= Ch.Members.size())
+		{
+			continue;
+		}
+		Member& M = Ch.Members[static_cast<size_t>(V.Member)];
+		if (M.FirstSeen < StartWorld - 0.01)
+		{
+			++S.Returning;
+		}
+		++M.Streams;
+		M.WatchMinutes += V.Watched;
+		M.LastSeen = In.World;
+		const bool WasRegular = M.Loyalty >= RegularLoyalty;
+		// Being noticed (answered, greeted, thanked) makes people care a little more than they meant to.
+		if (V.Engaged)
+		{
+			M.Affinity = std::min(1.0, M.Affinity + 0.04 * (1.0 - M.Affinity));
+		}
+		double Gain = 0.12 * std::pow(std::min(V.Watched, 180.0) / 60.0, 0.75) * std::max(0.0, M.Affinity - M.Loyalty);
+		Gain *= (Scheduled ? 1.3 : 1.0) * (1.0 + 0.6 * (V.Engaged ? 1.0 : 0.0) + 0.3 * (V.Chatted ? 1.0 : 0.0)) * (Raid.empty() ? 1.0 : 1.05);
+		M.Loyalty = std::min(1.0, M.Loyalty + Gain);
+		if (!WasRegular && M.Loyalty >= RegularLoyalty && !M.Friend)
+		{
+			++S.NewRegulars;
+			++Ch.WeekRegulars;
+			S.Xp += 40.0;
+			Ch.Xp += 40.0;
+		}
+	}
+	Ch.Xp += Tonight.Xp;
 	Ch.MinutesLive += S.Minutes;
 	Ch.ViewerMinutes += ViewerMinutes;
+	Ch.WeekMinutes += S.Minutes;
 	Ch.Peak = std::max(Ch.Peak, Peak);
 	StreamLog Lg;
 	Lg.Start = StartWorld;
@@ -1114,34 +1709,27 @@ Summary Stream::Stop(Channel& Ch, const Inputs& In)
 	Lg.Follows = S.Follows;
 	Lg.Subs = S.Subs + S.Gifted;
 	Lg.Cents = S.Total();
-	Lg.Title = Titles()[static_cast<size_t>(std::max(0, std::min(static_cast<int>(Titles().size()) - 1, Ch.Title)))].Text;
+	Lg.Title = kast_detail::TitleOf(Ch).Text;
+	Lg.Returning = S.Returning;
+	Lg.OnSchedule = Scheduled;
 	if (S.Minutes >= 1.0)
 	{
 		Ch.Log.insert(Ch.Log.begin(), Lg);
-		if (Ch.Log.size() > 30)
+		if (Ch.Log.size() > 60)
 		{
 			Ch.Log.pop_back();
-		}
-	}
-	// Regulars: keep the sixty most active.
-	if (Ch.Regulars.size() > 120)
-	{
-		std::vector<std::pair<int, std::string>> Top;
-		for (const auto& Rg : Ch.Regulars)
-		{
-			Top.push_back({Rg.second, Rg.first});
-		}
-		std::sort(Top.begin(), Top.end(), [](const std::pair<int, std::string>& A, const std::pair<int, std::string>& B) { return A.first != B.first ? A.first > B.first : A.second < B.second; });
-		Ch.Regulars.clear();
-		for (size_t I = 0; I < 60; ++I)
-		{
-			Ch.Regulars[Top[I].second] = Top[I].first;
 		}
 	}
 	CheckGrowth(Ch, In);
 	Live = false;
 	AdUntil = -1.0;
 	Alerts.clear();
+	Visits.clear();
+	Here.clear();
+	Present = 0;
+	RegularsHere = 0;
+	Strangers = 0.0;
+	Lurkers = 0.0;
 	Last = S;
 	return S;
 }
@@ -1154,8 +1742,7 @@ void Stream::OnMoment(Channel& Ch, const Inputs& In, Moment M, const std::string
 	}
 	LastReal = In.Real;
 	const kast_detail::Hit H = kast_detail::HitOf(M);
-	const TitleSpec& T = Titles()[static_cast<size_t>(std::max(0, std::min(static_cast<int>(Titles().size()) - 1, Ch.Title)))];
-	Hype = std::min(100.0, Hype + H.Hype * T.Hype * std::max(0.5, std::min(2.0, Size)));
+	Hype = std::min(100.0, Hype + H.Hype * kast_detail::TitleOf(Ch).Hype * std::max(0.5, std::min(2.0, Size)));
 	LastMoment = M;
 	LastMomentReal = In.Real;
 	if (H.Face != Mood::Focus || M == Moment::BestPlay)
@@ -1163,57 +1750,85 @@ void Stream::OnMoment(Channel& Ch, const Inputs& In, Moment M, const std::string
 		Face = H.Face;
 		FaceAt = In.Real;
 	}
-	// The more people watching, the bigger the wave in chat.
-	const int Lines = std::min(14, H.Lines + static_cast<int>(std::sqrt(Viewers) / 3.0));
+	// A wave in chat, as big as the room.
+	const int Lines = std::min(14, std::max(Present > 0 || Viewers >= 1.0 ? 1 : 0, std::min(H.Lines, 1 + static_cast<int>(Viewers)) + static_cast<int>(std::sqrt(Viewers) / 3.0)));
 	React(Ch, In, M, Lines);
-	if (M == Moment::Knockout && !Detail.empty())
+	if (M == Moment::Knockout && !Detail.empty() && Lines > 0)
 	{
 		Chat.back().Text = "bye " + Detail + " kastGG";
 	}
 	MakeClip(Ch, In, M, Detail, Size);
-	// Deep runs draw raids: sometimes from the biggest names in the directory.
+	// The big moments: superfans gift subs, and the network notices deep runs.
+	const bool Big = M == Moment::WonAllIn || M == Moment::InTheMoney || M == Moment::FinalTable || M == Moment::Win;
+	if (Big && Ch.Affiliate)
+	{
+		for (const int I : Here)
+		{
+			const Member& Fan = Ch.Members[static_cast<size_t>(Visits[static_cast<size_t>(I)].Member)];
+			if (Fan.Loyalty >= SuperfanLoyalty && R.Chance(0.05))
+			{
+				Subscribe(Ch, In, Fan.Name, true, 1 + R.Int(std::min(5, 1 + Present / 15)));
+				break;
+			}
+		}
+	}
 	if (M == Moment::FinalTable || M == Moment::Win || M == Moment::InTheMoney)
 	{
-		const double Chance = M == Moment::Win ? 0.55 : M == Moment::FinalTable ? 0.4 : 0.12;
+		const bool Established = Ch.Stage >= 6;
+		const double Chance = M == Moment::Win ? 0.3 : M == Moment::FinalTable ? 0.15 : 0.05;
 		if (R.Chance(Chance))
 		{
-			std::vector<const Streamer*> Live2;
+			std::string From;
+			int Size2 = 0;
+			uint32_t Color = Violet;
+			std::vector<const Streamer*> BigLive;
 			for (const Streamer& S : Directory())
 			{
 				if (!S.Rival && ViewersNow(S, In.World) > 0)
 				{
-					Live2.push_back(&S);
+					BigLive.push_back(&S);
 				}
 			}
-			if (!Live2.empty())
+			if (Established && !BigLive.empty() && R.Chance(M == Moment::InTheMoney ? 0.2 : 0.5))
 			{
-				// Big names raid the moments that matter; smaller channels raid anything.
-				const Streamer* From = Live2[static_cast<size_t>(R.Int(static_cast<int>(Live2.size())))];
-				if (M == Moment::InTheMoney)
+				// Only an established channel gets noticed by the big names.
+				const Streamer& S = *BigLive[static_cast<size_t>(R.Int(static_cast<int>(BigLive.size())))];
+				From = S.Name;
+				const double Share = R.Range(0.05, 0.15);
+				Size2 = std::max(5, static_cast<int>(static_cast<double>(ViewersNow(S, In.World)) * Share));
+				Color = S.Color;
+			}
+			else
+			{
+				const std::vector<SmallChannel> Net = Network(In.World);
+				if (!Net.empty())
 				{
-					for (const Streamer* S : Live2)
-					{
-						From = ViewersNow(*S, In.World) < ViewersNow(*From, In.World) ? S : From;
-					}
+					const SmallChannel& S = Net[static_cast<size_t>(R.Int(static_cast<int>(Net.size())))];
+					From = S.Name;
+					const double Share = R.Range(0.5, 0.9);
+					Size2 = std::max(1, static_cast<int>(std::round(static_cast<double>(S.Viewers) * Share)));
+					Color = S.Color;
 				}
-				const double Size2 = static_cast<double>(ViewersNow(*From, In.World)) * R.Range(0.12, 0.35);
-				RaidViewers += Size2 * 0.85;
-				Viewers += Size2 * 0.85;
-				LastRaider = From->Name;
+			}
+			if (!From.empty())
+			{
+				RaidViewers += static_cast<double>(Size2);
+				LastRaider = From;
 				++Ch.RaidsIn;
 				++Tonight.Raids;
-				Hype = std::min(100.0, Hype + 25.0);
+				Hype = std::min(100.0, Hype + 15.0);
+				FollowDebt += static_cast<double>(Size2) * 0.06;
 				Alert A;
 				A.Kind = AlertKind::Raid;
-				A.Who = From->Name;
-				A.Count = static_cast<int>(std::round(Size2));
+				A.Who = From;
+				A.Count = Size2;
 				Queue(A);
-				Say(In, "", From->Name + " is raiding with " + Grouped(A.Count) + " viewers!", LineKind::Raid, 0, From->Color);
+				Say(In, "", From + " is raiding with " + Grouped(Size2) + (Size2 == 1 ? " viewer!" : " viewers!"), LineKind::Raid, 0, Color);
 				static const std::vector<std::string> RaidLines = {"RAID kastHype", "{raider} sent us!", "hi from {raider}'s stream", "kastPog kastPog", "raid hype", "GL on the run!", "we're here to sweat"};
-				for (int K = 0; K < 6; ++K)
+				for (int K = 0; K < std::min(6, 1 + Size2 / 4); ++K)
 				{
 					const std::string Who = Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
-					Say(In, Who, kast_detail::Fill(R.Pick(RaidLines), "{raider}", From->Name), LineKind::Chat, 0, kast_detail::NameColor(Who));
+					Say(In, Who, kast_detail::Fill(R.Pick(RaidLines), "{raider}", From), LineKind::Chat, 0, kast_detail::NameColor(Who));
 					Chat.back().At = In.Real + 0.4 + static_cast<double>(K) * 0.35;
 				}
 			}
@@ -1244,7 +1859,7 @@ void Stream::Resolve(Channel& Ch, const Inputs& In, bool Yes)
 		LineKind::System, 0, Violet);
 	static const std::vector<std::string> Believers = {"I BELIEVED kastHype", "never doubted", "points secured", "believers win kastClap"};
 	static const std::vector<std::string> Doubters = {"doubters win kastLUL", "free points", "sorry {hero}", "I knew it kastLUL"};
-	for (int K = 0; K < 3; ++K)
+	for (int K = 0; K < std::min(3, 1 + static_cast<int>(Viewers)); ++K)
 	{
 		int Badges = 0;
 		uint32_t Color = 0;
@@ -1292,7 +1907,7 @@ Chips Stream::SponsorRead(Channel& Ch, const Inputs& In, const std::string& Id)
 			Earn(Ch, S->ReadCents, 4);
 			Say(In, In.Hero, S->ReadLine, LineKind::Streamer, BadgeStreamer | (Ch.Partner ? BadgeVerified : 0), 0xc6f432);
 			static const std::vector<std::string> Reacts = {"ad read kastLUL", "sellout kastLUL", "get that bag", "rent money", "{brand}!!", "the read was smooth"};
-			for (int K = 0; K < 3; ++K)
+			for (int K = 0; K < std::min(3, 1 + static_cast<int>(Viewers / 3.0)); ++K)
 			{
 				int Badges = 0;
 				uint32_t Color = 0;
@@ -1317,8 +1932,16 @@ bool Stream::Thank(Channel& Ch, const Inputs& In)
 	Say(In, In.Hero, R.Pick(kast_detail::ThankLines()), LineKind::Streamer, BadgeStreamer | (Ch.Partner ? BadgeVerified : 0), 0xc6f432);
 	Engage = std::min(1.0, Engage + 0.25);
 	Health = std::min(1.0, Health + 0.03);
+	// The people in the room feel seen.
+	for (const int I : Here)
+	{
+		if (R.Chance(0.5))
+		{
+			Visits[static_cast<size_t>(I)].Engaged = true;
+		}
+	}
 	static const std::vector<std::string> Back = {"kastLove", "<3", "love you too", "ty for streaming", "kastLove kastLove", "best streamer"};
-	for (int K = 0; K < 2 + static_cast<int>(std::sqrt(Viewers) / 4.0) && K < 6; ++K)
+	for (int K = 0; K < std::min(6, std::min(Present + (Strangers > 0.5 ? 1 : 0), 2 + static_cast<int>(std::sqrt(Viewers) / 4.0))); ++K)
 	{
 		int Badges = 0;
 		uint32_t Color = 0;
@@ -1347,10 +1970,21 @@ bool Stream::Answer(Channel& Ch, const Inputs& In, int MsgId)
 			Engage = std::min(1.0, Engage + 0.35);
 			Hype = std::min(100.0, Hype + 3.0);
 			Health = std::min(1.0, Health + 0.02);
+			++Ch.WeekAnswers;
 			static const std::vector<std::string> Thanks = {"thanks!", "ty kastLove", "makes sense", "good answer", "appreciate it"};
 			Say(In, Who, R.Pick(Thanks), LineKind::Chat, Ch.IsSub(Who, In.World) ? BadgeSub : 0, kast_detail::NameColor(Who));
 			Chat.back().At = In.Real + 1.2;
-			Ch.Regulars[Who] += 2;
+			// Being answered is how a stranger becomes a follower, and a follower a regular.
+			const int V = HereVisit(Ch, Who);
+			if (V >= 0)
+			{
+				Visits[static_cast<size_t>(V)].Engaged = true;
+			}
+			else if (!Ch.FindMember(Who) && R.Chance(0.45))
+			{
+				FollowDebt += 1.0;
+			}
+			CheckGrowth(Ch, In);
 			return true;
 		}
 	}
@@ -1379,7 +2013,7 @@ bool Stream::Timeout(Channel& Ch, const Inputs& In, int MsgId)
 			{
 				++Caught;
 				Health = std::min(1.0, Health + 0.02);
-				if (R.Chance(0.6))
+				if (R.Chance(0.6) && Viewers >= 2.0)
 				{
 					int Badges = 0;
 					uint32_t Color = 0;
@@ -1390,14 +2024,25 @@ bool Stream::Timeout(Channel& Ch, const Inputs& In, int MsgId)
 			}
 			else
 			{
-				// Timing out a regular for nothing costs goodwill.
+				// Timing out someone for nothing: they leave hurt, and the room noticed.
 				Health = std::max(0.0, Health - 0.06);
-				Ch.Regulars.erase(Who);
-				int Badges = 0;
-				uint32_t Color = 0;
-				const std::string Fan = Chatter(Ch, In, Badges, Color);
-				Say(In, Fan, "why did " + Who + " get timed out?? kastLUL", LineKind::Chat, Badges, Color);
-				Chat.back().At = In.Real + 0.8;
+				if (Member* Hurt = Ch.FindMember(Who))
+				{
+					Hurt->Loyalty = std::max(0.0, Hurt->Loyalty - 0.15);
+				}
+				const int V = HereVisit(Ch, Who);
+				if (V >= 0)
+				{
+					Visits[static_cast<size_t>(V)].Leave = In.World;
+				}
+				if (Viewers >= 2.0)
+				{
+					int Badges = 0;
+					uint32_t Color = 0;
+					const std::string Fan = Chatter(Ch, In, Badges, Color);
+					Say(In, Fan, "why did " + Who + " get timed out?? kastLUL", LineKind::Chat, Badges, Color);
+					Chat.back().At = In.Real + 0.8;
+				}
 			}
 			return true;
 		}
@@ -1414,19 +2059,26 @@ bool Stream::Promote(Channel& Ch, const Inputs& In, const std::string& Name)
 	Moderator M;
 	M.Name = Name;
 	M.Since = In.World;
-	const auto It = Ch.Regulars.find(Name);
-	M.Online = std::min(0.9, 0.5 + (It != Ch.Regulars.end() ? static_cast<double>(It->second) / 200.0 : 0.0));
+	const Member* Mem = Ch.FindMember(Name);
+	M.Online = std::min(0.95, 0.4 + 0.5 * (Mem ? Mem->Loyalty : 0.2));
 	Ch.Mods.push_back(M);
+	if (Member* Mm = Ch.FindMember(Name))
+	{
+		Mm->Loyalty = std::min(1.0, Mm->Loyalty + 0.1); // trusted
+	}
 	if (Live)
 	{
 		OnlineMods.push_back(Name);
 		Say(In, "", Name + " is now a moderator.", LineKind::System, 0, 0x22c55e);
 		static const std::vector<std::string> Lines2 = {"congrats {who} kastClap", "mod {who} kastHype", "power trip incoming kastLUL", "well deserved"};
-		int Badges = 0;
-		uint32_t Color = 0;
-		const std::string Fan = Chatter(Ch, In, Badges, Color);
-		Say(In, Fan, kast_detail::Fill(R.Pick(Lines2), "{who}", Name), LineKind::Chat, Badges, Color);
-		Chat.back().At = In.Real + 0.7;
+		if (Viewers >= 2.0)
+		{
+			int Badges = 0;
+			uint32_t Color = 0;
+			const std::string Fan = Chatter(Ch, In, Badges, Color);
+			Say(In, Fan, kast_detail::Fill(R.Pick(Lines2), "{who}", Name), LineKind::Chat, Badges, Color);
+			Chat.back().At = In.Real + 0.7;
+		}
 		Say(In, Name, "thank you!! I'll keep it clean", LineKind::Chat, BadgeMod | (Ch.IsSub(Name, In.World) ? BadgeSub : 0), kast_detail::NameColor(Name));
 		Chat.back().At = In.Real + 1.5;
 	}
@@ -1447,15 +2099,16 @@ bool Stream::Demote(Channel& Ch, const std::string& Name)
 
 std::vector<std::string> Stream::ModCandidates(const Channel& Ch, double World) const
 {
-	std::vector<std::pair<int, std::string>> Top;
-	for (const auto& Rg : Ch.Regulars)
+	// Regulars who talk and behave: the loyal ones first.
+	std::vector<std::pair<double, std::string>> Top;
+	for (const Member& M : Ch.Members)
 	{
-		if (Rg.second >= 6 && !Ch.IsMod(Rg.first))
+		if (M.Loyalty >= RegularLoyalty && M.Messages >= 10 && !M.Friend && !Ch.IsMod(M.Name))
 		{
-			Top.push_back({Rg.second + (Ch.IsSub(Rg.first, World) ? 10 : 0), Rg.first});
+			Top.push_back({M.Loyalty * 100.0 + static_cast<double>(M.Messages) * 0.2 + (Ch.IsSub(M.Name, World) ? 10.0 : 0.0), M.Name});
 		}
 	}
-	std::sort(Top.begin(), Top.end(), [](const std::pair<int, std::string>& A, const std::pair<int, std::string>& B) { return A.first != B.first ? A.first > B.first : A.second < B.second; });
+	std::sort(Top.begin(), Top.end(), [](const std::pair<double, std::string>& A, const std::pair<double, std::string>& B) { return A.first != B.first ? A.first > B.first : A.second < B.second; });
 	std::vector<std::string> Out;
 	for (size_t I = 0; I < Top.size() && I < 5; ++I)
 	{
@@ -1466,8 +2119,8 @@ std::vector<std::string> Stream::ModCandidates(const Channel& Ch, double World) 
 
 void Stream::TrollStep(Channel& Ch, const Inputs& In, double DReal)
 {
-	const TitleSpec& T = Titles()[static_cast<size_t>(std::max(0, std::min(static_cast<int>(Titles().size()) - 1, Ch.Title)))];
-	const double Rate = (0.004 + 0.00012 * Viewers) * (1.0 + Hype / 50.0) * T.Calm * (Ch.Partner ? 1.1 : 1.0);
+	// Trolls follow strangers and size: a quiet little stream rarely sees one.
+	const double Rate = (0.0005 + 0.00008 * Viewers + 0.0003 * Strangers) * (1.0 + Hype / 50.0) * kast_detail::TitleOf(Ch).Calm * (Ch.Partner ? 1.1 : 1.0);
 	TrollDebt = std::min(3.0, TrollDebt + Rate * DReal);
 	while (TrollDebt >= 1.0)
 	{
@@ -1479,15 +2132,14 @@ void Stream::TrollStep(Channel& Ch, const Inputs& In, double DReal)
 			static const std::vector<std::string> Bots = {"v1ewz_b0t", "free_chips_4u", "promo_kingz", "k4st_boost", "followerz_cheap"};
 			Who = R.Pick(Bots) + std::to_string(R.Int(90) + 10);
 		}
-		if (Ch.IsMod(Who) || Ch.Regulars.count(Who))
+		if (Ch.IsMod(Who) || Ch.FindMember(Who))
 		{
-			continue; // regulars don't troll
+			continue; // the community doesn't troll
 		}
 		Say(In, Who, IsSpam ? R.Pick(kast_detail::Spam()) : kast_detail::Fill(R.Pick(kast_detail::Trolls()), "{hero}", In.Hero), LineKind::Chat, 0, kast_detail::NameColor(Who));
 		ChatMsg& M = Chat.back();
 		M.Toxic = !IsSpam;
 		M.Spam = IsSpam;
-		// The bot catches what it can at once; mods take a moment to notice.
 		if (R.Chance(In.Gear.ModBot * (IsSpam ? 1.1 : 0.9)))
 		{
 			M.DeleteAt = In.Real + R.Range(0.2, 0.6);
@@ -1506,7 +2158,6 @@ void Stream::TrollStep(Channel& Ch, const Inputs& In, double DReal)
 		}
 		if (!Caught2)
 		{
-			// The streamer may still click it away; if not, it costs a little chat health when it lands (Tick).
 			M.DeleteAt = -2.0;
 		}
 	}
@@ -1522,16 +2173,16 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 	DReal = std::max(0.0, std::min(1.0, DReal));
 	LastReal = In.Real;
 	const double Q = Quality(In);
-	const TitleSpec& T = Titles()[static_cast<size_t>(std::max(0, std::min(static_cast<int>(Titles().size()) - 1, Ch.Title)))];
+	const TitleSpec& T = kast_detail::TitleOf(Ch);
 
-	// Hype and raids fade on the clock; talking to chat fades in real time.
+	// Hype and raiders fade on the clock; talking to chat fades in real time.
 	Hype *= std::exp(-DWorld / 12.0);
 	RaidViewers *= std::exp(-DWorld / 20.0);
 	Engage *= std::exp(-DReal / 90.0);
 	Health = std::min(1.0, Health + DReal / 60.0 * 0.03);
 
 	// A bigger audience brings more names into chat.
-	while (Pool.size() < 6000 && static_cast<double>(Pool.size()) < 400.0 + Viewers * 3.0 + static_cast<double>(Ch.Subs.size()) * 1.5)
+	while (Pool.size() < 6000 && static_cast<double>(Pool.size()) < 400.0 + Viewers * 3.0)
 	{
 		const std::string Name = handles::Make(R, handles::PickCountry(R));
 		if (Name != In.Hero && std::find(Pool.end() - std::min<std::ptrdiff_t>(static_cast<std::ptrdiff_t>(Pool.size()), 400), Pool.end(), Name) == Pool.end())
@@ -1540,13 +2191,90 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 		}
 	}
 
-	// Viewers drift toward what the show deserves.
-	double Fresh = 0.0;
-	const double Goal = Audience(Ch, In, Fresh);
-	Viewers += (Goal - Viewers) * (1.0 - std::exp(-DWorld / 5.0));
-	Viewers = std::max(0.0, Viewers);
+	// The community: who's in the room right now.
+	const double From = In.World - DWorld;
+	const size_t WasHere = Here.size();
+	std::vector<char> WasPresent(Visits.size(), 0);
+	for (const int I : Here)
+	{
+		WasPresent[static_cast<size_t>(I)] = 1;
+	}
+	Here.clear();
+	RegularsHere = 0;
+	for (size_t I = 0; I < Visits.size(); ++I)
+	{
+		Visit& V = Visits[I];
+		const double Overlap = std::min(In.World, V.Leave) - std::max(From, V.Arrive);
+		if (Overlap > 0.0)
+		{
+			V.Watched += Overlap;
+		}
+		if (In.World >= V.Arrive && In.World < V.Leave)
+		{
+			Here.push_back(static_cast<int>(I));
+			const Member& M = Ch.Members[static_cast<size_t>(V.Member)];
+			RegularsHere += M.Loyalty >= RegularLoyalty && !M.Friend ? 1 : 0;
+			// Someone just walked in: the familiar ones say hi.
+			if (!WasPresent[I] && R.Chance(0.25 + 0.5 * M.Loyalty))
+			{
+				static const std::vector<std::string> Back = {"hey {hero}", "evening", "back again", "made it", "o7", "hi chat", "what did I miss", "gl tonight", "kastLove"};
+				Say(In, M.Name, kast_detail::Fill(R.Pick(Back), "{hero}", In.Hero), LineKind::Chat, Ch.IsSub(M.Name, In.World) ? BadgeSub : 0, kast_detail::NameColor(M.Name));
+				Chat.back().At = In.Real + R.Range(0.2, 2.0);
+				V.Chatted = true;
+				++Ch.Members[static_cast<size_t>(V.Member)].Messages;
+			}
+		}
+	}
+	(void)WasHere;
+	Present = static_cast<int>(Here.size());
+	if (In.World >= RollAt)
+	{
+		RollAt += 60.0;
+		Invite(Ch, In, 0.3, 15.0); // latecomers
+	}
+
+	// Strangers from the directory: they drop in, look around, mostly leave; some follow.
+	const double Arrivals = StrangerRate(Ch, In);
+	const double Stay = StrangerStay(In);
+	const double Warm = std::min(1.0, static_cast<double>(Present) / 8.0);
+	Strangers += (Arrivals / 60.0 * Stay - Strangers) * (1.0 - std::exp(-DWorld / std::max(1.0, Stay)));
+	ArriveDebt += Arrivals * DWorld / 60.0;
+	if (ArriveDebt >= 1.0)
+	{
+		const int Whole = static_cast<int>(std::floor(ArriveDebt));
+		ArriveDebt -= static_cast<double>(Whole);
+		Tonight.NewFaces += Whole;
+	}
+	const double FollowChance = (0.027 + 0.025 * Q) * (1.0 + In.Gear.Follow) * T.Follow * (0.6 + 0.4 * Health) * (1.0 + 0.6 * Warm) * (1.0 + 0.8 * Engage) * (In.Sprinting ? 0.6 : 1.0);
+	FollowDebt += Arrivals * DWorld / 60.0 * FollowChance;
+	// Regulars bring friends (twice as often once the community is a real one).
+	double Bring = 0.0;
+	for (const int I : Here)
+	{
+		Bring += std::max(0.0, Ch.Members[static_cast<size_t>(Visits[static_cast<size_t>(I)].Member)].Loyalty - 0.4);
+	}
+	WordDebt += Bring * 0.05 * (Ch.Stage >= 3 ? 2.0 : 1.0) * DWorld / 60.0;
+	while (WordDebt >= 1.0)
+	{
+		WordDebt -= 1.0;
+		++Tonight.NewFaces;
+		Strangers += 1.0;
+		FollowDebt += 0.35;
+	}
+	while (FollowDebt >= 1.0)
+	{
+		FollowDebt -= 1.0;
+		NewFollower(Ch, In, Stay);
+	}
+	// Followers beyond the tracked community (a big channel's long tail): a few of them lurk.
+	const double Untracked = static_cast<double>(std::max(0, Ch.Followers - kast_detail::TrackedFollowers(Ch)));
+	const double Sched = Ch.ScheduleDays == 0 ? 0.75 : Scheduled ? 1.3 : 0.6;
+	Lurkers += (Untracked * 0.01 * Sched * (0.4 + 0.6 * kast_detail::TimeOfDay(In.World) / 1.25) - Lurkers) * (1.0 - std::exp(-DWorld / 10.0));
+
+	Viewers = static_cast<double>(Present) + Strangers + Lurkers + RaidViewers;
 	Peak = std::max(Peak, static_cast<int>(std::round(Viewers)));
 	ViewerMinutes += Viewers * DWorld;
+	Tonight.Xp += DWorld * (1.0 + 0.05 * std::sqrt(Viewers));
 	GraphDebt += DWorld;
 	if (Graph.empty() || GraphDebt >= 1.0)
 	{
@@ -1563,51 +2291,62 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 		}
 	}
 
-	// New viewers follow; returning ones already have.
-	const double NewShare = Goal > 0.0 ? std::min(1.0, Fresh / Goal) : 0.0;
-	const double FollowRate = (0.25 + 0.9 * Q) * (1.0 + In.Gear.Follow) * T.Follow * (1.0 + Hype / 60.0) * (0.5 + 0.5 * Health) * (1.0 + 0.3 * Engage) * (In.Sprinting ? 0.6 : 1.0);
-	Ch.FollowFrac += Viewers * NewShare * FollowRate * DWorld / 60.0;
-	if (Ch.FollowFrac >= 1.0)
+	// Money comes from the people who care: loyal members sub, cheer and tip; strangers almost never.
+	double SumL = 0.0;
+	double SumL15 = 0.0;
+	for (const int I : Here)
 	{
-		const int Whole = static_cast<int>(std::floor(Ch.FollowFrac));
-		Ch.FollowFrac -= static_cast<double>(Whole);
-		Follow(Ch, In, Whole);
+		const double L = Ch.Members[static_cast<size_t>(Visits[static_cast<size_t>(I)].Member)].Loyalty;
+		SumL += L;
+		SumL15 += std::pow(L, 1.5);
 	}
-
-	// Money: subs, cheers and ads once affiliate; tips from the start; sponsors by the hour.
+	auto GiverIn = [&](double Power) -> std::string {
+		// A member weighted by loyalty (or a passer-by when nobody's here).
+		double Total = 0.0;
+		for (const int I : Here)
+		{
+			Total += std::pow(Ch.Members[static_cast<size_t>(Visits[static_cast<size_t>(I)].Member)].Loyalty, Power);
+		}
+		double Pick = R.Next() * Total;
+		for (const int I : Here)
+		{
+			const Member& M = Ch.Members[static_cast<size_t>(Visits[static_cast<size_t>(I)].Member)];
+			Pick -= std::pow(M.Loyalty, Power);
+			if (Pick <= 0.0)
+			{
+				return M.Name;
+			}
+		}
+		return Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
+	};
 	if (Ch.Affiliate)
 	{
-		SubDebt += Viewers * 0.006 * (1.0 + Q) * (1.0 + Hype / 50.0) * (Ch.Partner ? 1.1 : 1.0) * DWorld / 60.0;
+		SubDebt += (SumL15 * 0.025 * (1.0 + 0.5 * Q) * (1.0 + Hype / 80.0) + (Strangers + Lurkers) * 0.0008) * DWorld / 60.0;
 		while (SubDebt >= 1.0)
 		{
 			SubDebt -= 1.0;
-			int Badges = 0;
-			uint32_t Color = 0;
-			std::string Who = Chatter(Ch, In, Badges, Color);
+			std::string Who = GiverIn(1.5);
 			for (int Try = 0; Try < 4 && Ch.IsSub(Who, In.World); ++Try)
 			{
-				Who = Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
+				Who = GiverIn(1.5);
 			}
-			if (Hype > 25.0 && R.Chance(0.12))
-			{
-				const int Gifts = Viewers > 400 && R.Chance(0.3) ? 20 : Viewers > 120 && R.Chance(0.4) ? 10 : R.Chance(0.5) ? 5 : 1;
-				Subscribe(Ch, In, Who, true, Gifts);
-			}
-			else
+			if (!Ch.IsSub(Who, In.World))
 			{
 				Subscribe(Ch, In, Who, false, 1);
 			}
 		}
-		CheerDebt += Viewers * 0.00015 * (1.0 + Hype / 40.0) * DWorld;
+		CheerDebt += (SumL * 0.015 + (Strangers + Lurkers) * 0.001) * (1.0 + Hype / 50.0) * DWorld / 60.0;
 		while (CheerDebt >= 1.0)
 		{
 			CheerDebt -= 1.0;
 			static const int Amounts[] = {100, 100, 100, 100, 100, 200, 200, 300, 500, 500, 1000, 2500};
 			const int Bits = Amounts[R.Int(12)];
-			int Badges = 0;
-			uint32_t Color = 0;
-			const std::string Who = Chatter(Ch, In, Badges, Color);
+			const std::string Who = GiverIn(1.0);
 			Earn(Ch, Bits, 1);
+			if (Member* M = Ch.FindMember(Who))
+			{
+				M->Given += Bits;
+			}
 			Alert A;
 			A.Kind = AlertKind::Cheer;
 			A.Who = Who;
@@ -1615,7 +2354,7 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 			A.Cents = Bits;
 			A.Text = R.Pick(kast_detail::Cheers());
 			Queue(A);
-			Say(In, Who, "Cheer" + std::to_string(Bits) + " " + A.Text, LineKind::Cheer, Badges, Color, Bits);
+			Say(In, Who, "Cheer" + std::to_string(Bits) + " " + A.Text, LineKind::Cheer, Ch.IsSub(Who, In.World) ? BadgeSub : 0, kast_detail::NameColor(Who), Bits);
 		}
 		if (In.World - LastAdWorld >= 60.0 && !AdRunning(In.Real))
 		{
@@ -1623,32 +2362,30 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 			RunAd(Ch, In, 90);
 		}
 	}
-	TipDebt += Viewers * 0.00025 * (1.0 + Hype / 40.0) * (1.0 + 0.5 * Engage) * DWorld;
+	TipDebt += (SumL * 0.012 + (Strangers + Lurkers) * 0.0006) * (1.0 + Hype / 50.0) * (1.0 + 0.5 * Engage) * DWorld / 60.0;
 	while (TipDebt >= 1.0)
 	{
 		TipDebt -= 1.0;
 		static const int Cents[] = {100, 100, 100, 200, 200, 300, 500, 500, 500, 1000, 1000, 2000, 5000};
-		Chips Amount = Cents[R.Int(13)];
-		if (R.Chance(0.002 + std::min(0.004, Viewers / 250000.0)))
-		{
-			Amount = 25000 + 25000 * R.Int(4); // a whale
-		}
-		int Badges = 0;
-		uint32_t Color = 0;
-		const std::string Who = Chatter(Ch, In, Badges, Color);
+		const Chips Amount = Cents[R.Int(13)];
+		const std::string Who = GiverIn(1.0);
 		std::string Msg = kast_detail::Fill(R.Pick(kast_detail::Tips()), "{hero}", In.Hero);
 		if (In.Gear.MicTier == 0 && R.Chance(0.3))
 		{
 			Msg = "buy a real mic with this";
 		}
 		Earn(Ch, Amount, 2);
+		if (Member* M = Ch.FindMember(Who))
+		{
+			M->Given += Amount;
+		}
 		Alert A;
 		A.Kind = AlertKind::Tip;
 		A.Who = Who;
 		A.Cents = Amount;
 		A.Text = Msg;
 		Queue(A);
-		Say(In, Who, Money(Amount) + ": " + Msg, LineKind::Tip, Badges, Color, Amount);
+		Say(In, Who, Money(Amount) + ": " + Msg, LineKind::Tip, Ch.IsSub(Who, In.World) ? BadgeSub : 0, kast_detail::NameColor(Who), Amount);
 		Hype = std::min(100.0, Hype + std::min(15.0, static_cast<double>(Amount) / 500.0));
 	}
 	// The very first stream: Dee is watching.
@@ -1681,45 +2418,56 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 		SponsorDebt = 0.0;
 	}
 
-	// Small channels raid each other.
-	RaidDebt += DWorld * 0.0008 * (Ch.Followers >= 30 ? 1.0 : 0.0) * (1.0 + Hype / 30.0);
-	if (RaidDebt >= 1.0)
+	// The small-channel network: the ones you've raided raid you back.
+	int Owed = 0;
+	const std::vector<SmallChannel> Net = Network(In.World);
+	for (const SmallChannel& S : Net)
+	{
+		const auto It = Ch.Goodwill.find(S.Name);
+		Owed += It != Ch.Goodwill.end() ? std::min(3, It->second) : 0;
+	}
+	RaidDebt += DWorld / 60.0 * (0.01 + 0.03 * static_cast<double>(std::min(10, Owed))) * std::min(2.0, Ch.Discoverability());
+	if (RaidDebt >= 1.0 && !Net.empty())
 	{
 		RaidDebt = 0.0;
-		std::vector<const Streamer*> Small;
-		for (const Streamer& S : Directory())
+		// A friend in the network first, else whoever's ending their stream.
+		const SmallChannel* Raider = &Net[static_cast<size_t>(R.Int(static_cast<int>(Net.size())))];
+		for (const SmallChannel& S : Net)
 		{
-			const int V = ViewersNow(S, In.World);
-			if (!S.Rival && V > 0 && V < 600)
+			const auto It = Ch.Goodwill.find(S.Name);
+			if (It != Ch.Goodwill.end() && R.Chance(0.6))
 			{
-				Small.push_back(&S);
+				Raider = &S;
+				break;
 			}
 		}
-		int Size2 = 6 + R.Int(30);
-		std::string From = Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
-		if (!Small.empty())
-		{
-			const Streamer& Raider = *Small[static_cast<size_t>(R.Int(static_cast<int>(Small.size())))];
-			const double Share = R.Range(0.2, 0.5);
-			Size2 = std::max(3, static_cast<int>(static_cast<double>(ViewersNow(Raider, In.World)) * Share));
-			From = Raider.Name;
-		}
-		RaidViewers += static_cast<double>(Size2) * 0.8;
-		Viewers += static_cast<double>(Size2) * 0.8;
-		LastRaider = From;
+		const int Size2 = std::max(1, static_cast<int>(std::round(static_cast<double>(Raider->Viewers) * R.Range(0.5, 0.9))));
+		RaidViewers += static_cast<double>(Size2);
+		FollowDebt += static_cast<double>(Size2) * 0.06;
+		LastRaider = Raider->Name;
 		++Ch.RaidsIn;
 		++Tonight.Raids;
-		Hype = std::min(100.0, Hype + 12.0);
+		Hype = std::min(100.0, Hype + 10.0);
 		Alert A;
 		A.Kind = AlertKind::Raid;
-		A.Who = From;
+		A.Who = Raider->Name;
 		A.Count = Size2;
 		Queue(A);
-		Say(In, "", From + " is raiding with " + Grouped(Size2) + " viewers!", LineKind::Raid, 0, Violet);
+		Say(In, "", Raider->Name + " is raiding with " + Grouped(Size2) + (Size2 == 1 ? " viewer!" : " viewers!"), LineKind::Raid, 0, Raider->Color);
+	}
+	else if (RaidDebt >= 1.0)
+	{
+		RaidDebt = 0.0;
 	}
 
-	// Chat.
-	const double ChatRate = std::min(10.0, (0.03 + 0.004 * std::pow(Viewers, 0.9)) * (1.0 + Hype / 25.0) * (0.7 + 0.6 * Engage)) * (AdRunning(In.Real) ? 0.6 : 1.0);
+	// Chat: the room talks at the room's size.
+	double Talk = 0.0;
+	for (const int I : Here)
+	{
+		Talk += 0.2 + 1.0 * Ch.Members[static_cast<size_t>(Visits[static_cast<size_t>(I)].Member)].Loyalty;
+	}
+	Talk += Strangers * 0.1 + Lurkers * 0.03 + RaidViewers * 0.15;
+	const double ChatRate = std::min(10.0, Talk / 60.0 * (1.0 + Hype / 40.0) * (0.8 + 0.4 * Engage)) * (AdRunning(In.Real) ? 0.6 : 1.0);
 	ChatDebt = std::min(6.0, ChatDebt + ChatRate * DReal);
 	while (ChatDebt >= 1.0)
 	{
@@ -1749,10 +2497,9 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 			Line = "rank? " + std::to_string(In.Rank) + "/" + std::to_string(In.Remaining) + " kastPog";
 		}
 		Say(In, Who, Line, Kind, Badges, Color);
-		Ch.Regulars[Who] += 1;
-		Seen.insert(Who);
 	}
-	QuestionDebt = std::min(2.0, QuestionDebt + std::min(0.05, 0.006 + 0.0006 * Viewers) * DReal * (Ch.Title == 2 || Ch.Title == 3 ? 1.6 : 1.0));
+	// Questions, mostly from people still deciding whether to stay.
+	QuestionDebt = std::min(2.0, QuestionDebt + std::min(0.03, 0.0015 * (Strangers + static_cast<double>(Present) * 0.4 + RaidViewers * 0.5)) * DReal * (Ch.Title == 2 || Ch.Title == 3 ? 1.6 : 1.0));
 	if (QuestionDebt >= 1.0)
 	{
 		QuestionDebt -= 1.0;
@@ -1760,7 +2507,6 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 		uint32_t Color = 0;
 		const std::string Who = Chatter(Ch, In, Badges, Color);
 		Say(In, Who, R.Pick(kast_detail::Questions()), LineKind::Question, Badges, Color);
-		Ch.Regulars[Who] += 1;
 	}
 	TrollStep(Ch, In, DReal);
 	for (ChatMsg& M : Chat)
@@ -1784,7 +2530,6 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 		}
 		else if (M.DeleteAt == -2.0 && In.Real - M.At > 8.0)
 		{
-			// Nobody caught it: it sat in chat and people saw it.
 			M.DeleteAt = -3.0;
 			++Missed;
 			Health = std::max(0.0, Health - (M.Toxic ? 0.05 : 0.03));
@@ -1801,21 +2546,6 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 			const int Points = (1 + R.Int(10)) * 100;
 			(R.Chance(0.45 + Hype / 400.0) ? Pred.Yes : Pred.No) += Points;
 		}
-	}
-
-	// Greet the first few in.
-	GreetDebt -= DReal;
-	if (GreetDebt <= 0.0 && In.Real - StartReal < 90.0)
-	{
-		GreetDebt = R.Range(4.0, 9.0);
-		int Badges = 0;
-		uint32_t Color = 0;
-		const std::string Who = Chatter(Ch, In, Badges, Color);
-		const std::string Hello = kast_detail::Fill(R.Pick(kast_detail::Greetings()), "{hero}", In.Hero);
-		const std::string Place = kast_detail::CountryName(handles::PickCountry(R));
-		Say(In, Who, kast_detail::Fill(Hello, "{country}", Place), LineKind::Chat, Badges, Color);
-		Ch.Regulars[Who] += 1;
-		Seen.insert(Who);
 	}
 
 	// Alerts: one at a time.

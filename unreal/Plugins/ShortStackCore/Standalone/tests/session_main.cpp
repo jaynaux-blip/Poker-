@@ -896,6 +896,8 @@ void Streaming()
 	double Now = PlayOut(S, Choice, 0.0, Decisions);
 	const ss::kast::Stream& St = S.Stream;
 	Expect(St.Pred.Resolved, "the prediction resolves when the tournament ends");
+	Expect(S.Channel.FindMember("dee_spincycle") && S.Channel.FindMember("dee_spincycle")->Friend && S.Channel.FindMember("mei_ng"), "Dee and Mei are there on night one");
+	Expect(St.Peak <= 12, "a first stream draws a handful of people, not a crowd");
 	Expect(St.Chat.size() > 20 && St.Chatters() > 5, "chat talks through the tournament");
 	Expect(S.Channel.Followers > 0 && St.Peak > 0 && !St.Graph.empty(), "viewers come, some follow");
 	std::printf("  stream: %.0f min on stream, %d followers, peak %d, %zu chat lines, %d chatters, %s earned, hype %.0f\n", St.Uptime(S.WorldMinutes()), S.Channel.Followers, St.Peak, St.Chat.size(),
@@ -912,9 +914,27 @@ void Streaming()
 	// The save keeps the gear and the channel.
 	ss::SaveData Back;
 	Expect(H.Saves > 0 && ss::SaveData::Parse(H.Last.Serialize(), Back) && Back.Serialize() == H.Last.Serialize(), "the save round-trips");
-	Expect(Back.Gear == S.Gear && Back.Channel.Followers == S.Channel.Followers && Back.Channel.Log.size() == S.Channel.Log.size() && Back.Channel.Regulars == S.Channel.Regulars, "gear and channel in the save");
+	Expect(Back.Gear == S.Gear && Back.Channel.Followers == S.Channel.Followers && Back.Channel.Log.size() == S.Channel.Log.size() && Back.Channel.Members.size() == S.Channel.Members.size() &&
+		Back.Channel.Regulars() == S.Channel.Regulars() && Back.Channel.ScheduleDays == S.Channel.ScheduleDays && Back.Channel.DaysLive == S.Channel.DaysLive, "gear and channel (and the community) in the save");
 	ss::Session Loaded(H, "stream-loaded", &Back);
 	Expect(Loaded.GearFx().CanStream() && Loaded.GearFx().Resolution == 1080 && Loaded.Channel.Streams == 1, "a loaded game streams at 1080p");
+
+	// A posted schedule, and a stream that ends with a raid.
+	S.StreamSchedule(0x7f | 0x80, 24 * 60 + 90);
+	Expect(S.Channel.ScheduleDays == 0x7f && S.Channel.ScheduleStart == 90, "the schedule keeps seven days and a minute of the day");
+	S.StreamSchedule(0x7f, static_cast<int>(std::fmod(S.WorldMinutes(), ss::net::MinutesPerDay)));
+	Expect(S.Channel.OnSchedule(S.WorldMinutes()), "a stream now would be on schedule");
+	S.StreamCard = false;
+	Expect(S.GoLive().empty() && S.Streaming() && S.Stream.Tonight.OnSchedule, "the second stream is on schedule");
+	for (int K = 0; K < 60 && S.Stream.Uptime(S.WorldMinutes()) < 3.0; ++K)
+	{
+		Now = Wait(S, Now, 10.0);
+	}
+	const std::vector<ss::kast::SmallChannel> Small = ss::kast::Network(S.WorldMinutes());
+	const std::string Target = Small.empty() ? std::string("chipleader_carla") : Small.front().Name;
+	S.EndStream(Target);
+	Expect(!S.Streaming() && S.Stream.Last.RaidedOut == Target && S.Channel.Goodwill[Target] == 1 && S.Channel.RaidsOut == 1, "ending with a raid sends the viewers on (and the channel remembers)");
+	Expect(S.Channel.Log.size() == 2 && S.Channel.Log.front().OnSchedule && S.Channel.Streams == 2, "both streams logged");
 
 	// Subscriptions: one renews (in the ledger), one lapses when the bank can't cover it.
 	ss::SaveData Monthly = Back;
@@ -932,6 +952,147 @@ void Streaming()
 	Expect(!Broke.Owns("gym") && Broke.BankrollCents == 100 && Broke.GearFx().Calm == Loaded.GearFx().Calm, "a subscription the bank can't cover lapses");
 	Expect(S.Cancel("fiber") && !S.Owns("fiber") && S.GearFx().Resolution == 720, "cancelling fiber drops the stream back to 720p");
 }
+/** One channel's first months, stream by stream: the grind is slow, and consistency pays. */
+struct Grind
+{
+	int Streams = 0;
+	int FirstPeak = 0;
+	int Followers10 = 0;
+	int Followers = 0;
+	int Regulars10 = 0;
+	int Regulars = 0;
+	double ReturningEarly = 0.0; // average over streams 1-10
+	double ReturningLate = 0.0;  // the last ten
+	int AffiliateAt = 0;
+	bool RulesKept = true; // Affiliate only once the 30-day rules are met
+	double LoyaltyBefore = 0.0;
+	double LoyaltyAfter = 0.0; // after three weeks away
+	int RegularsAfter = 0;
+};
+
+Grind RunGrind(bool Engaged, int Total)
+{
+	Grind G;
+	ss::gear::Owned Own;
+	for (const char* Id : {"tower-mid", "fiber", "webcam-1080", "mic-usb", "ring-light", "overlay-pack", "monitor-24"})
+	{
+		Own[Id] = 0.0;
+	}
+	ss::kast::Channel Ch;
+	const bool Schedule = Engaged;
+	const double AnswerRate = Engaged ? 0.6 : 0.1;
+	if (Schedule)
+	{
+		Ch.ScheduleDays = 1 | 4 | 16 | 64;
+		Ch.ScheduleStart = 21 * 60;
+	}
+	ss::kast::Stream St("grind");
+	ss::Rng Ev("grind-events");
+	ss::kast::Inputs In;
+	In.Hero = "grinder_3c";
+	In.Gear = ss::gear::Sum(Own);
+	In.AtTable = true;
+	In.Tables = 2;
+	In.EventName = "Night Owl";
+	int Day = 0;
+	for (; G.Streams < Total; ++Day)
+	{
+		In.World = static_cast<double>(Day) * ss::net::MinutesPerDay + 21.0 * 60.0 + (Schedule ? 0.0 : 37.0 * static_cast<double>(Day % 5));
+		ss::kast::Offline(Ch, In.World, Ev);
+		if (!(((1 | 4 | 16 | 64) >> (Day % 7)) & 1))
+		{
+			continue;
+		}
+		const bool WasAffiliate = Ch.Affiliate;
+		St.Start(Ch, In);
+		const double End = In.World + 180.0;
+		int Hand = 0;
+		double NextThank = In.Real + 600.0;
+		while (In.World < End)
+		{
+			for (int K = 0; K < 6; ++K)
+			{
+				In.World += 0.25 / 6.0;
+				In.Real += 1.0;
+				St.Tick(Ch, In, 0.25 / 6.0, 1.0);
+			}
+			for (const ss::kast::ChatMsg& M : St.Chat)
+			{
+				if (M.Kind == ss::kast::LineKind::Question && !M.Answered && In.Real - M.At > 4.0 && In.Real - M.At < 6.0 && Ev.Chance(AnswerRate))
+				{
+					St.Answer(Ch, In, M.Id);
+					break;
+				}
+			}
+			if (Engaged && In.Real > NextThank)
+			{
+				St.Thank(Ch, In);
+				NextThank = In.Real + 900.0;
+			}
+			if (++Hand % 3 == 0 && Ev.Chance(0.05))
+			{
+				St.OnMoment(Ch, In, ss::kast::Moment::AllIn);
+				St.OnMoment(Ch, In, Ev.Chance(0.6) ? ss::kast::Moment::WonAllIn : ss::kast::Moment::LostAllIn);
+			}
+			St.Notices.clear();
+		}
+		const std::vector<ss::kast::SmallChannel> Net = ss::kast::Network(In.World);
+		const ss::kast::Summary Sm = St.Stop(Ch, In, Engaged && !Net.empty() && G.Streams % 2 == 0 ? Net.front().Name : std::string());
+		++G.Streams;
+		if (Ch.Affiliate && !WasAffiliate)
+		{
+			double Minutes = 0.0;
+			int Days = 0;
+			double Avg = 0.0;
+			Ch.Window30(In.World, Minutes, Days, Avg);
+			G.AffiliateAt = G.Streams;
+			G.RulesKept = Ch.Followers >= ss::kast::AffiliateFollowers && Minutes >= ss::kast::AffiliateMinutes && Days >= ss::kast::AffiliateDays && Avg >= ss::kast::AffiliateAvg;
+		}
+		G.FirstPeak = G.Streams == 1 ? Sm.Peak : G.FirstPeak;
+		G.ReturningEarly += G.Streams <= 10 ? static_cast<double>(Sm.Returning) / 10.0 : 0.0;
+		G.ReturningLate += G.Streams > Total - 10 ? static_cast<double>(Sm.Returning) / 10.0 : 0.0;
+		if (G.Streams == 10)
+		{
+			G.Followers10 = Ch.Followers;
+			G.Regulars10 = Ch.Regulars();
+		}
+	}
+	G.Followers = Ch.Followers;
+	G.Regulars = Ch.Regulars();
+	auto Mean = [&Ch]() {
+		double Sum = 0.0;
+		for (const ss::kast::Member& M : Ch.Members)
+		{
+			Sum += M.Friend ? 0.0 : M.Loyalty;
+		}
+		return Sum / static_cast<double>(std::max<size_t>(1, Ch.Members.size()));
+	};
+	G.LoyaltyBefore = Mean();
+	for (int K = 0; K < 21; ++K)
+	{
+		ss::kast::Offline(Ch, static_cast<double>(Day + K) * ss::net::MinutesPerDay + 12.0 * 60.0, Ev);
+	}
+	G.LoyaltyAfter = Mean();
+	G.RegularsAfter = Ch.Regulars();
+	return G;
+}
+
+void StreamGrind()
+{
+	const Grind G = RunGrind(true, 50);
+	std::printf("  grind (a mid rig, 4 nights a week, 3 hours, on schedule, talks to chat): first peak %d, followers %d -> %d, regulars %d -> %d, returning %.1f -> %.1f, affiliate at stream %d\n", G.FirstPeak, G.Followers10,
+		G.Followers, G.Regulars10, G.Regulars, G.ReturningEarly, G.ReturningLate, G.AffiliateAt);
+	Expect(G.FirstPeak >= 1 && G.FirstPeak <= 6, "the first stream: a handful of viewers");
+	Expect(G.Followers10 < 40, "ten streams in, followers are still in the tens");
+	Expect(G.Followers > G.Followers10 * 4 && G.Followers < 600, "fifty streams in: real growth, not a flood");
+	Expect(G.Regulars > G.Regulars10 && G.Regulars >= 8, "regulars build up stream by stream");
+	Expect(G.ReturningLate > G.ReturningEarly * 1.5, "more people come back as the community grows");
+	Expect(G.AffiliateAt > 10 && G.RulesKept, "Affiliate takes weeks, and comes only with the 30-day rules met");
+	Expect(G.LoyaltyAfter < G.LoyaltyBefore * 0.9 && G.RegularsAfter < G.Regulars, "three weeks away and the community drifts");
+	const Grind Lazy = RunGrind(false, 50);
+	std::printf("  grind (no schedule, rarely talks to chat, never raids): followers %d, regulars %d, returning %.1f\n", Lazy.Followers, Lazy.Regulars, Lazy.ReturningLate);
+	Expect(Lazy.Regulars < G.Regulars && Lazy.ReturningLate < G.ReturningLate, "a schedule and a streamer who talks to chat build a bigger community");
+}
 } // namespace session_test
 
 int main()
@@ -948,6 +1109,7 @@ int main()
 	session_test::SprintTournament();
 	session_test::DeepRuns();
 	session_test::Streaming();
+	session_test::StreamGrind();
 	if (session_test::Failures == 0)
 	{
 		std::printf("session tests: all passed\n");

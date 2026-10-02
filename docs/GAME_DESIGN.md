@@ -97,14 +97,67 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
 **Kast: streaming (built).** Once the PC is upgraded, you can go live and play RiverLine on stream. Before that, Kast's studio is locked and points at the RAM kit.
 
 - **The studio** shows the stream as viewers see it: your RiverLine screen, the facecam, the overlay, the alerts. The facecam is the player at the desk, grainy and blue-lit on the laptop camera, sharp and lit with real lights; it celebrates a won all-in with arms up, grabs its head at a bad beat and laughs at its own blunders. Controls: go live and end, the stream title (story, action, chill, teaching or grind, each shifting discovery, follows, hype and trolls), ad breaks (60 s, 90 s, 3 min), sponsor reads, talk to chat. Tiles show viewers with a graph, followers, subs, tonight's money, hype and chat health.
-- **Viewers** drift toward what the show deserves: followers who come back (by time of day), strangers browsing the Poker directory (more with better production and hype; easier late at night), placement in the directory (bigger streams get found) and raids. Being in the lobby is boring; multi-tabling is content; an ad break or a toxic chat costs viewers. Streaming more tables than the PC handles drops frames.
+- **Viewers are people, and the audience is a community built one person at a time.** Growth works the way it does for real streamers: slowly, then faster, and only if you keep showing up.
+  - **Members:** everyone who has watched or followed. Each has a loyalty (how much the channel is part of their week) and an affinity (how much they could ever care). Most followers are casual; a few become superfans.
+  - **Who shows up:** before each stream, every member decides whether to come. A regular (loyalty 0.35 or more) comes most nights; a superfan (0.7 or more) almost never misses one; a casual follower drops in now and then. Followers beyond the 1,500 tracked members lurk.
+  - **Strangers** find the stream in the Poker directory. More come with better production, hype, a good title, a higher channel level and streak, and late at night. They stay a few minutes, and a few percent follow.
+  - **Loyalty grows with every stream a member watches.** It grows faster when you answer their questions, greet them and thank chat, and when you stream on schedule. Regulars bring their friends.
+  - **What costs viewers:** the lobby is boring, while multi-tabling is content. An ad break or a toxic chat costs viewers, and streaming more tables than the PC handles drops frames.
+- **Consistency:** post a schedule (days and a start time) on the Community page.
+  - A stream that starts between an hour before and 90 minutes after the slot is on schedule. Regulars come about twice as often to on-schedule streams as to off-schedule ones.
+  - Loyalty fades a little each day, and faster after three days without a stream. Skipping a scheduled night costs a little more.
+  - Dee and Mei, your friends from the first night, never drift far.
+- **Structure:** XP comes from minutes live (more with viewers), weekly goals and stages. XP raises the channel level (up to 50). The level and the streak make Kast show the stream to more people browsing Poker.
+  - **The streak** counts weeks in a row with three streams or more.
+  - **Weekly goals:** stream three times, six hours live, answer five questions, two new regulars.
+  - **Eight stages**, each opening something:
+
+    | Stage | Needs | Opens |
+    |---|---|---|
+    | First stream | — | The studio and chat |
+    | Familiar faces | 5 streams, 3 regulars | Promoting mods |
+    | Affiliate | Kast's 30-day rules (see Money) | Subs, cheers and ads |
+    | Small community | 30 streams, 10 regulars, 8 average viewers, 150 followers | Regulars bring friends twice as often |
+    | Growing channel | 60 streams, 25 regulars, 20 average viewers, 500 followers | Sponsors notice |
+    | Partner | Kast's 30-day rules (see Money) | Verified, 70% of every sub, better ad rates |
+    | Established | 150 streams, 120 regulars, 150 average viewers, 5,000 followers | The big directory channels raid your deep runs |
+    | Poker personality | 250 streams, 400 regulars, 600 average viewers, 25,000 followers | The biggest sponsors |
+- **Raids:** "Raid & end" ends a stream by sending everyone to a smaller channel. The channels you raid remember, and they raid back now and then.
 - **Poker is the content.** Every big moment hits chat and the hype meter: registering, all-ins, the sweat, the suckout, the bad beat, knockouts, the bubble, the money, the final table, winning, busting, the coach's best play and your blunders, the rival sitting down. Chat reacts in waves, clips the big hands (some go viral and bring followers for days), and big channels raid deep runs.
 - **Chat** is generated from the game: greetings from around the world, questions you can answer ("what would you do with AQ under the gun?"), comments on your mic, camera and lighting, backseat poker, emotes (Kast's own, and the channel's once you're an affiliate). Trolls and spam bots arrive as the channel grows; moderators you promote from your regulars and the chat filter bot time them out. Missed trolls lower chat health and get under your skin (tilt). You can time people out yourself, but timing out a regular costs goodwill.
-- **Money:** tips from the first stream (Dee tips $5 on your first one). Affiliate (50 followers, 8 hours, 3 streams) turns on subscriptions ($4.99, 50% to you), cheers and ads. Partner (2,500 followers and 75 average viewers) is verified and pays 70%. Sponsors make offers by follower count: Overclock Energy, TunnelRat VPN, Stacked Apparel, then Partner-only Team RiverLine (the gold patch on your avatar at the tables) and Sitwell, two slots at a time, paying by the hour live plus a read once a stream. Everything goes into the channel balance and to the bank when the stream ends; subs renew monthly while you're offline.
+- **Money:**
+  - **Tips** start with the first stream (Dee tips $5 on your first one).
+  - **Affiliate** follows Kast's 30-day rules: 50 followers, plus 500 minutes and 7 days live and 3 average viewers over the last 30 days. It turns on subscriptions ($4.99, 50% to you), cheers and ads.
+  - **Partner** needs 75 average viewers, 25 hours and 12 days live over the last 30 days. It is verified and pays 70%.
+  - **Subs, cheers and tips** come from loyal members, almost never from strangers.
+  - **Sponsors** make offers by followers and average viewers, two slots at a time. Each pays by the hour live, plus a read once a stream.
+
+    | Sponsor | Needs |
+    |---|---|
+    | Overclock Energy | 300 followers, 15 average viewers |
+    | TunnelRat VPN | 1,000 followers, 30 average viewers |
+    | Stacked Apparel | 2,500 followers, 60 average viewers |
+    | Team RiverLine (the gold patch on your avatar at the tables) | Partner |
+    | Sitwell | 10,000 followers, 300 average viewers |
+  - **Payout:** everything goes into the channel balance, and to the bank when the stream ends. Subs renew monthly while you're offline.
 - **Predictions:** registering on stream starts one ("Will grinder_3c cash?") and the result settles it.
-- **Channel page:** the road to Affiliate and Partner, earnings by source, sponsors, top clips, past streams. **Browse:** the Poker directory, live channels ranked by viewers with your rank, and when the others are on: VikingVolta (418K), HighRollerHana, MissFinch, BluffSquadTV, down to gh0stfold, who never logs off.
+- **Community page:** the stage ladder with what the next stage needs, this week's goals, the streak, the level and how far Kast pushes the stream.
+  - **The schedule** has day toggles and a start time, plus a strip of the last three weeks and the next one (days streamed, scheduled days missed).
+  - **The audience:** followers, people who have watched, regulars, superfans and lurkers.
+  - **The members**, most loyal first: Friend, Superfan, Regular and Sub badges, a loyalty bar, streams watched and when each was last seen.
+- **End-of-stream card:** besides viewers, follows and money, it shows who came back, new faces, new regulars, the XP earned and the raid.
+- **Channel page:** Kast's 30-day rules for Affiliate and Partner, earnings by source, sponsors, top clips and past streams.
+- **Browse:** the Poker directory, with live channels ranked by viewers and your rank. It also shows when the others are on, from VikingVolta (418K) and HighRollerHana through MissFinch and BluffSquadTV down to gh0stfold, who never logs off. A row of smaller channels shows the ones you can raid.
 - **At the table** while live: a KAST pill with the viewer count in the top bar, alerts on the felt and a Stream tab with chat beside the table. Starting a shift, a hustle, sleep or a trip out ends the stream. Streaming tires you a little faster.
-- **Measured growth** (simulated, 4-hour nights): the $222 starter kit makes about 40 followers a night and reaches about 1,900 in a month. A $2,000 rig gets 250 on night one, Partner around night 9 and 11,000 followers by night 30, earning about $700 to $1,100 a night. A full studio passes 30,000 followers and $3,000 a night. Viral clips and raids make the occasional breakout night.
+- **Measured growth** (simulated: four 3-hour streams a week, on schedule, answering most questions). The first streams draw 1 to 3 viewers, mostly Dee and Mei. Viral clips (rare) and raids make the occasional breakout night.
+
+  | Setup | Affiliate | Partner | Later |
+  |---|---|---|---|
+  | RAM kit alone | about stream 90 | — | — |
+  | $222 starter kit | stream 57 (about three months) | about stream 150 | 196 followers and 26 average viewers at stream 100; 1,400 followers by stream 200 |
+  | $2,000 rig | stream 23 (six weeks) | stream 88 (five months) | 1,100 followers at stream 100; 5,800 by stream 200 |
+  | $2,000 rig, no schedule, ignoring chat | stream 26 | about stream 150 | — |
+  | Full studio | stream 17 | stream 74 | — |
 
 **Reading opponents online (digital tells)**
 
@@ -242,7 +295,7 @@ Skills give you information. They never make decisions for you.
 - **Burner:** Marcus pays $120 to $200 a drop-off (and $380 to $600 for the long run once you've proven yourself). Every run adds police heat, and heat raises the chance of getting picked up: a fine, a night in holding, and a debt to Marcus for the lost bag. Sam, a rich player who notices you once you cash, pays you to play his RiverLine account ("ghosting"). If site security catches it, your account is restricted for 24 hours.
 - **Bank:** the balance, the rent countdown and payment, and where every dollar came from and went.
 - **Sleep:** a nap or a full night. Energy drains while you're awake and with every shift; under 20% your time bank at the table is halved.
-- **GearDrop and Kast:** the store and the streaming site (see Online play). Streaming becomes a second career: by the time a channel is Partner, a few nights on stream pay the rent.
+- **GearDrop and Kast:** the store and the streaming site (see Online play). Streaming becomes a second career, slowly: it takes months of steady streaming to build a community, and by the time a channel is Partner, a month of streams pays the rent.
 - **Rent day:** the landlord collects at Friday midnight if the money is there. If not, it's a final notice with a $150 late fee and three more days, then eviction (Dee's couch). After that, $1,075 on the 1st of every month.
 - **Career unlocks:** your first cash opens bounty events (progressive knockouts and mystery bounties), your first final table opens satellites (the steps to the RCOP Main Event pay tickets), and your first title opens six-max.
 - **The Night Shift pays:** at 6 AM the top 20 on the night's micro-stakes leaderboard are paid into your balance.

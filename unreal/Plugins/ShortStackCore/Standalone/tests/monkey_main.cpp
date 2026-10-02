@@ -66,7 +66,7 @@ std::vector<Spot> Hotspots()
 {
 	std::vector<Spot> H = {{800, 550}, {270, 34}, {350, 34}, {500, 34}, {590, 34}, {690, 34}, {385, 259}, {1150, 539}, {1233, 539}, {1311, 539},
 		{1300, 890}, {1200, 890}, {1450, 890}, {1330, 915}, {725, 895}, {905, 895}, {1085, 895}, {70, 892}, {166, 892}, {262, 892}, {89, 933}, {150, 837},
-		{1250, 410}, {1382, 410}, {1514, 410}, {60, 981}, {170, 981}, {268, 981}, {360, 981}, {450, 981}, {800, 600}, {800, 650}, {800, 700}};
+		{1250, 410}, {1382, 410}, {1514, 410}, {60, 981}, {170, 981}, {268, 981}, {360, 981}, {450, 981}, {800, 552}, {800, 600}, {800, 650}, {800, 700}};
 	for (int K = 0; K < 10; ++K)
 	{
 		H.push_back({46.0f + 82.0f * static_cast<float>(K), 330});
@@ -94,7 +94,8 @@ std::vector<Spot> Hotspots()
 	const std::vector<Spot> Stream = {{470, 981}, {565, 981}, {60, 110}, {140, 110}, {235, 110}, {340, 110}, {460, 110}, {210, 436}, {480, 436}, {747, 436}, {1016, 436},
 		{210, 790}, {480, 790}, {747, 790}, {1016, 790}, {887, 654}, {1080, 654}, {1340, 735}, {1513, 660}, {197, 30}, {283, 30}, {374, 30}, {130, 686}, {524, 547},
 		{661, 686}, {697, 686}, {782, 698}, {880, 698}, {978, 698}, {110, 746}, {1085, 100}, {1160, 100}, {1230, 100}, {1530, 272}, {1530, 453}, {1530, 664},
-		{1510, 917}, {1390, 213}, {898, 411}, {1028, 411}, {1040, 703}, {1240, 32}, {1335, 410}, {1520, 920}};
+		{1510, 917}, {1390, 213}, {898, 411}, {1028, 411}, {1040, 703}, {1240, 32}, {1335, 410}, {1520, 920}, {490, 30}, {130, 715}, {70, 763}, {202, 763}, {400, 763},
+		{539, 763}, {741, 763}};
 	H.insert(H.end(), Stream.begin(), Stream.end());
 	// App screens: a coarse grid.
 	for (int Y = 120; Y < 960; Y += 70)
@@ -297,8 +298,37 @@ int main(int Argc, char** Argv)
 				}
 				if (R.Chance(0.0005))
 				{
-					S.EndStream();
-					++Reached["ended"];
+					// Half the time, end it the way communities like: a raid on a small channel.
+					const std::vector<ss::kast::SmallChannel> Net = ss::kast::Network(S.WorldMinutes());
+					const bool Raid = !Net.empty() && R.Chance(0.5);
+					const std::string Target = Raid ? Net[static_cast<size_t>(R.Int(static_cast<int>(Net.size())))].Name : std::string();
+					S.EndStream(Target);
+					++Reached[Raid ? "raided" : "ended"];
+					if (Raid && (S.Stream.Last.RaidedOut != Target || S.Channel.Goodwill.count(Target) == 0))
+					{
+						Fail("a raid out didn't land", Seed, F);
+					}
+				}
+			}
+			if (R.Chance(0.0003))
+			{
+				const int Days = R.Int(128);
+				const int Start = R.Int(48) * 30;
+				S.StreamSchedule(Days, Start);
+				++Reached["schedule"];
+			}
+			{
+				// The community stays in its ranges.
+				const ss::kast::Channel& Ch = S.Channel;
+				bool Bad = Ch.Members.size() > static_cast<size_t>(ss::kast::MaxMembers) || Ch.ScheduleDays < 0 || Ch.ScheduleDays > 127 || Ch.ScheduleStart < 0 || Ch.ScheduleStart >= 1440 ||
+					Ch.Stage < 0 || Ch.Stage >= static_cast<int>(ss::kast::Stages().size()) || Ch.Xp < 0.0 || Ch.Followers < 0 || Ch.Superfans() > Ch.Regulars();
+				for (const ss::kast::Member& Mb : Ch.Members)
+				{
+					Bad = Bad || !(Mb.Loyalty >= 0.0 && Mb.Loyalty <= 1.0) || !(Mb.Affinity >= 0.0 && Mb.Affinity <= 1.0) || Mb.Streams < 0;
+				}
+				if (Bad)
+				{
+					Fail("the community left its ranges", Seed, F);
 				}
 			}
 			if (R.Chance(0.0005))

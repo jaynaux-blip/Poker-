@@ -1105,67 +1105,150 @@ void StreamScreens()
 	Emit("store_stream", RL, Now + 1.0);
 	Now += 1.0;
 
-	// A channel a few weeks in, so the pages have something to show.
+	// A channel four months in (a mid rig, four nights a week on a posted schedule), so the pages have something to show.
 	ss::kast::Channel& Ch = S.Channel;
 	ss::Rng Fake("ui-stream-channel");
-	Ch.Followers = 3420;
+	const double World0 = S.WorldMinutes();
+	const int Today = ss::net::DayOf(World0);
+	Ch.Followers = 1040;
 	Ch.Affiliate = true;
-	Ch.Partner = true;
-	Ch.MinutesLive = 41.0 * 60.0;
-	Ch.Streams = 22;
-	Ch.Peak = 412;
-	Ch.Milestone = 2500;
-	Ch.EarnedSubs = 118250;
-	Ch.EarnedTips = 96400;
-	Ch.EarnedBits = 21300;
-	Ch.EarnedAds = 4170;
-	Ch.EarnedSponsors = 77800;
-	Ch.PaidCents = 300000;
-	for (int K = 0; K < 9; ++K)
+	Ch.MinutesLive = 74.0 * 170.0;
+	Ch.Streams = 74;
+	Ch.Peak = 96;
+	Ch.Milestone = 1000;
+	Ch.EarnedSubs = 41250;
+	Ch.EarnedTips = 18400;
+	Ch.EarnedBits = 6300;
+	Ch.EarnedAds = 2170;
+	Ch.EarnedSponsors = 9800;
+	Ch.PaidCents = 64000;
+	Ch.ScheduleDays = 1 | 4 | 16 | 64; // Mon Wed Fri Sun
+	Ch.ScheduleStart = 21 * 60;
+	Ch.Stage = 4;
+	Ch.Xp = 9300.0;
+	Ch.Streak = 6;
+	Ch.Week = static_cast<int>(std::floor(World0 / (7.0 * ss::net::MinutesPerDay)));
+	Ch.WeekStreams = 2;
+	Ch.WeekMinutes = 330.0;
+	Ch.WeekAnswers = 5;
+	Ch.WeekRegulars = 1;
+	Ch.WeekRewarded = 4;
+	Ch.ProcessedDay = Today;
+	for (int Back = 27; Back >= 1; --Back)
 	{
+		const int D = Today - Back;
+		if (((Ch.ScheduleDays >> (((D % 7) + 7) % 7)) & 1) && Back != 9)
+		{
+			Ch.DaysLive.push_back(D);
+		}
+	}
+	for (size_t K = 0; K < Ch.DaysLive.size(); ++K)
+	{
+		const int I = static_cast<int>(K);
 		ss::kast::StreamLog Lg;
-		Lg.Start = S.WorldMinutes() - 1440.0 * (K + 1) - 120.0;
-		Lg.Minutes = 150.0 + 20.0 * K;
-		Lg.Avg = 140 - 9 * K;
-		Lg.Peak = 210 - 11 * K;
-		Lg.Follows = 160 - 12 * K;
-		Lg.Cents = 41000 - 3100 * K;
+		Lg.Start = static_cast<double>(Ch.DaysLive[Ch.DaysLive.size() - 1 - K]) * ss::net::MinutesPerDay + 21.0 * 60.0;
+		Lg.Minutes = 170.0 + 10.0 * static_cast<double>(I % 3);
+		Lg.Avg = 36 - I / 2;
+		Lg.Peak = Lg.Avg * 8 / 5;
+		Lg.Follows = 11 - I / 3;
+		Lg.Subs = I % 4 == 0 ? 1 : 0;
+		Lg.Cents = 2600 - 70 * I;
+		Lg.Returning = 24 - I / 3;
+		Lg.OnSchedule = true;
 		Ch.Log.push_back(Lg);
 	}
 	const std::vector<std::string> Clips = {"grinder_3c holds the all-in for 41,200", "the cruelest river (grinder_3c)", "grinder_3c makes the final table of the Night Owl", "grinder_3c sends VelvetRiver home"};
+	const double Views[4] = {2640.0, 940.0, 610.0, 380.0};
 	for (size_t K = 0; K < Clips.size(); ++K)
 	{
 		ss::kast::Clip Cl;
 		Cl.Title = Clips[K];
 		Cl.By = ss::handles::Make(Fake, "US");
-		Cl.Views = 48000.0 / static_cast<double>(K + 1);
+		Cl.Views = Views[K];
 		Cl.Reach = Cl.Views;
-		Cl.At = S.WorldMinutes() - 3000.0;
+		Cl.At = World0 - 3000.0;
 		Ch.Clips.push_back(Cl);
 	}
-	for (int K = 0; K < 40; ++K)
+	// The community: two friends from night one, a core of regulars, and a long tail of people who came once.
+	const std::pair<const char*, double> Friends[2] = {{"dee_spincycle", 0.91}, {"mei_ng", 0.78}};
+	for (const auto& F : Friends)
 	{
-		Ch.Regulars[ss::handles::Make(Fake, ss::handles::PickCountry(Fake))] = 6 + K * 3;
+		ss::kast::Member Mb;
+		Mb.Name = F.first;
+		Mb.Friend = true;
+		Mb.Follower = true;
+		Mb.Affinity = F.second + 0.04;
+		Mb.Loyalty = F.second;
+		Mb.Streams = 66;
+		Mb.WatchMinutes = 66.0 * 150.0;
+		Mb.Messages = 410;
+		Mb.FirstSeen = World0 - 120.0 * ss::net::MinutesPerDay;
+		Mb.LastSeen = World0 - 2.0 * ss::net::MinutesPerDay;
+		Ch.Members.push_back(Mb);
 	}
-	for (int K = 0; K < 2; ++K)
+	for (int K = 0; K < 460; ++K)
 	{
-		ss::kast::Moderator Md;
-		Md.Name = ss::handles::Make(Fake, "GB");
-		Md.Online = 1.0;
-		Md.Actions = 30 - K * 11;
-		Ch.Mods.push_back(Md);
+		ss::kast::Member Mb;
+		Mb.Name = ss::handles::Make(Fake, ss::handles::PickCountry(Fake));
+		const double U = Fake.Next();
+		Mb.Affinity = 0.05 + 0.9 * U * U * U * U;
+		const double Share = 0.25 + 0.75 * Fake.Next();
+		Mb.Loyalty = Mb.Affinity * Share;
+		const double Seen = Fake.Next();
+		Mb.Streams = 1 + static_cast<int>(Mb.Loyalty * 70.0 * Seen);
+		Mb.WatchMinutes = static_cast<double>(Mb.Streams) * (20.0 + 100.0 * Mb.Loyalty);
+		const double Chat = Fake.Next();
+		Mb.Messages = static_cast<int>(static_cast<double>(Mb.Streams) * 4.0 * Chat);
+		const double Ago = Fake.Next();
+		Mb.FirstSeen = World0 - (10.0 + 100.0 * Ago) * ss::net::MinutesPerDay;
+		Mb.LastSeen = World0 - (1.0 + (1.0 - Mb.Loyalty) * (1.0 - Mb.Loyalty) * 60.0 * Ago) * ss::net::MinutesPerDay;
+		Mb.Follower = Fake.Chance(0.75);
+		Ch.Members.push_back(Mb);
+	}
+	for (const ss::kast::Member& Mb : Ch.Members)
+	{
+		if (!Mb.Friend && Mb.Loyalty > 0.55 && Ch.Mods.size() < 2)
+		{
+			ss::kast::Moderator Md;
+			Md.Name = Mb.Name;
+			Md.Online = 1.0;
+			Md.Actions = 30 - static_cast<int>(Ch.Mods.size()) * 11;
+			Ch.Mods.push_back(Md);
+		}
+	}
+	const std::vector<ss::kast::SmallChannel> Small = ss::kast::Network(World0);
+	if (!Small.empty())
+	{
+		Ch.Goodwill[Small.front().Name] = 2;
+		Ch.RaidsOut = 3;
 	}
 	ss::kast::Deal D;
-	D.Id = "riverline";
-	D.Since = S.WorldMinutes() - 3.0 * 1440.0;
-	D.Until = S.WorldMinutes() + 27.0 * 1440.0;
-	D.EarnedCents = 31250;
+	D.Id = "overclock";
+	D.Since = World0 - 3.0 * 1440.0;
+	D.Until = World0 + 27.0 * 1440.0;
+	D.EarnedCents = 9800;
 	Ch.Deals.push_back(D);
-	Ch.Offers.insert("stacked");
-	Ch.LastOffline = S.WorldMinutes();
+	Ch.Offers.insert("tunnelrat");
+	Ch.LastOffline = World0;
+	Expect(Ch.Regulars() >= 25 && Ch.Superfans() >= 2, "a channel four months in has a core of regulars");
+
+	// The community page: the ladder, the week, the schedule, the people.
+	RL.OpenApp(ss::ui::RiverLine::App::Kast, Now);
+	Click(254.0f, 30.0f);
+	Expect(RL.CurrentKastPage() == ss::ui::RiverLine::KastPage::Community, "the Community tab");
+	Emit("kast_community", RL, Now + 1.0);
+	Now += 1.0;
+	Click(70.0f, 763.0f);
+	Expect(Ch.ScheduleDays == (4 | 16 | 64), "a day off the schedule");
+	Click(70.0f, 763.0f);
+	Click(741.0f, 763.0f);
+	Expect(Ch.ScheduleDays == (1 | 4 | 16 | 64) && Ch.ScheduleStart == 21 * 60 + 30, "back on, half an hour later");
+	Click(539.0f, 763.0f);
+	Expect(Ch.ScheduleStart == 21 * 60, "and back to nine");
 
 	// Live from the lobby, then a tournament.
 	RL.OpenApp(ss::ui::RiverLine::App::Kast, Now);
+	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
 	Emit("kast_offline", RL, Now + 1.0);
 	Now += 1.0;
 	Click(130.0f, 686.0f);
@@ -1183,11 +1266,11 @@ void StreamScreens()
 	S.Stream.OnMoment(S.Channel, S.StreamInputs(), ss::kast::Moment::WonAllIn, "38,400", 1.6);
 	ss::kast::Alert Raid;
 	Raid.Kind = ss::kast::AlertKind::Raid;
-	Raid.Who = "SuitedConnor";
-	Raid.Count = 214;
+	Raid.Who = Small.empty() ? std::string("chipleader_carla") : Small.front().Name;
+	Raid.Count = 23;
 	S.Stream.Alerts.insert(S.Stream.Alerts.begin(), Raid);
 	Now = Step(S, Now, 1.2);
-	Expect(S.Stream.Chat.size() > 20 && S.Stream.Viewers > 10.0 && S.Stream.Tonight.Follows > 0, "a live stream: chat, viewers, follows");
+	Expect(S.Stream.Chat.size() > 20 && S.Stream.Viewers > 5.0 && S.Stream.RegularsHere > 0, "a live stream: chat, viewers, regulars turning up");
 	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
 	Emit("kast_studio", RL, Now);
 	RL.OpenApp(ss::ui::RiverLine::App::RiverLine, Now);
@@ -1198,9 +1281,22 @@ void StreamScreens()
 	Emit("kast_channel", RL, Now + 1.0);
 	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Browse);
 	Emit("kast_browse", RL, Now + 1.0);
+	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Community);
+	Emit("kast_community_live", RL, Now + 1.0);
 	const ss::Chips Bank = S.BankrollCents;
 	const ss::Chips Owed = S.Channel.UnpaidCents;
-	S.EndStream();
+	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
+	Emit("kast_studio_end", RL, Now + 1.0);
+	const std::vector<ss::kast::SmallChannel> Out = ss::kast::Network(S.WorldMinutes());
+	if (Out.empty())
+	{
+		S.EndStream();
+	}
+	else
+	{
+		Click(130.0f, 715.0f);
+	}
+	Expect(Out.empty() || (S.Stream.Last.RaidedOut.size() > 0 && S.Channel.Goodwill.count(S.Stream.Last.RaidedOut) == 1), "Raid & end sends the viewers to a small channel");
 	Expect(!S.Streaming() && S.StreamCard && S.BankrollCents == Bank + Owed && S.Channel.UnpaidCents == 0, "ending the stream pays the balance to the bank");
 	Expect(Owed == 0 || (S.Life.Ledger.front().Kind == 6 && S.Life.Ledger.front().Amount == Owed), "the payout is in the ledger");
 	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
