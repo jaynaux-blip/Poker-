@@ -133,6 +133,16 @@ public:
 	SHORTSTACKCORE_API std::unique_ptr<Hand> StartTick(std::vector<TEvent>& OutEvents);
 	/** Apply the hero's hand (if any), play every other table, process eliminations and the clock. */
 	SHORTSTACKCORE_API std::vector<TEvent> FinishTick(Hand* HeroHand, const Profile* HeroAuto = nullptr);
+	/**
+	 * FinishTick in steps (C++ only), so a big field's other tables can be played over several frames: BeginFinish applies
+	 * the hero's hand, FinishSome plays up to Count more tables (true once none are left), EndFinish processes eliminations
+	 * and the clock. Same order and same results as FinishTick, which is these three in a row. Nothing else may touch the
+	 * tournament between BeginFinish and EndFinish.
+	 */
+	SHORTSTACKCORE_API void BeginFinish(Hand* HeroHand, const Profile* HeroAuto = nullptr);
+	SHORTSTACKCORE_API bool FinishSome(int Count);
+	SHORTSTACKCORE_API std::vector<TEvent> EndFinish();
+	bool FinishPending() const { return bFinishing; }
 	/** A whole round with no interactive hand (hero busted or sprinting). */
 	SHORTSTACKCORE_API std::vector<TEvent> SimulateTick(const Profile* HeroAuto = nullptr);
 	/** Next bot decision at a live hand (full strength unless Fast). */
@@ -182,5 +192,10 @@ private:
 	bool bAnnouncedFinal = false;
 	bool bAnnouncedH4H = false;
 	bool bBurstBubble = false;
+	// A tick being finished in steps.
+	bool bFinishing = false;
+	bool FinishWithHero = false;
+	int FinishHeroTable = -1;
+	int FinishNextTable = 0; // the first table id not played yet
 };
 } // namespace ss

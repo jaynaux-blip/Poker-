@@ -49,6 +49,10 @@ add_executable(ui_test tests/ui_main.cpp)
 target_link_libraries(ui_test PRIVATE ShortStackCore)
 add_test(NAME riverline_ui COMMAND ui_test)
 
+add_executable(monkey_test tests/monkey_main.cpp)
+target_link_libraries(monkey_test PRIVATE ShortStackCore)
+add_test(NAME monkey_play COMMAND monkey_test)
+
 add_executable(audio_test tests/audio_main.cpp)
 target_link_libraries(audio_test PRIVATE ShortStackCore)
 add_test(NAME synthesized_audio COMMAND audio_test)

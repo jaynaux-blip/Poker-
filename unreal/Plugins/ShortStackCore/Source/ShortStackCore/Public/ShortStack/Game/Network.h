@@ -297,6 +297,8 @@ public:
 	SHORTSTACKCORE_API bool Next(const std::string& TemplateId, double From, EventInstance& Out) const;
 	/** Featured events starting in (Now, Now + Horizon], soonest first. */
 	SHORTSTACKCORE_API std::vector<EventInstance> Upcoming(double Now, double Horizon) const;
+	/** Simulates every result up to Now ahead of time (a loading moment), so the first board or page doesn't stall. */
+	SHORTSTACKCORE_API void Prewarm(double Now) const;
 	/** The player's own results (from the save): their finishes replace a regular in those final tables. */
 	SHORTSTACKCORE_API void SetHero(const std::string& Name, const std::vector<HistoryEntry>& History);
 	const std::string& HeroName() const { return YouName; }

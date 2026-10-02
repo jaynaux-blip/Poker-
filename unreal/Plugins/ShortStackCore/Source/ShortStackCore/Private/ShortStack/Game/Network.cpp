@@ -1026,6 +1026,14 @@ const EventResult& Network::Result(const EventInstance& E) const
 	return Results.emplace(E.Id, std::move(Res)).first->second;
 }
 
+void Network::Prewarm(double Now) const
+{
+	for (const EventInstance& E : Finished(static_cast<double>(SimFirstDay) * MinutesPerDay, Now))
+	{
+		Result(E);
+	}
+}
+
 std::vector<Chips> Network::Payouts(const EventInstance& E) const
 {
 	const EventTemplate& T = TemplateOf(E);

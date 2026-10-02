@@ -141,7 +141,7 @@ void SprintTournament()
 	Expect(S.CurrentScreen == ss::Screen::Results, "sprint tournament reaches results");
 	std::printf("  freeroll with sprint: finished %s of %d after %d hands (%d hero decisions), cans %d\n",
 		ss::Ordinal(S.LastResults.Place).c_str(), S.LastResults.Entrants, S.LastResults.Hands, Decisions, H.Cans);
-	Expect(S.LastResults.Hands > 20, "sprint simulated many hands");
+	Expect(S.LastResults.Hands > 5 && Decisions == 0, "sprint plays the hands by itself");
 }
 
 /** A hero that always takes the grader's best option: goes deep, so the bubble and final table get exercised. */

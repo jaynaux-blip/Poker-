@@ -949,7 +949,7 @@ void RiverLine::Controls(double Now)
 			S.CurrentPace = Paces[I].first;
 			if (Paces[I].first == Pace::Sprint)
 			{
-				S.SystemLine("Sprint: the game will play your hands (solid TAG style) until the bubble or the final table.");
+				S.SystemLine("Sprint: autopilot plays your hands until the bubble or the final table. Safe, a bit passive, a step behind your best.");
 			}
 		}
 	}

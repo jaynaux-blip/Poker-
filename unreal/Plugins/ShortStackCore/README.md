@@ -99,12 +99,13 @@ cmake -S . -B build && cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio generator builds Debug by default, so pass the configuration to ctest: `ctest --test-dir build -C Debug --output-on-failure`. The Standalone build runs five tests:
+On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio generator builds Debug by default, so pass the configuration to ctest: `ctest --test-dir build -C Debug --output-on-failure`. The Standalone build runs six tests:
 
 - `golden_test`: the 4,201 golden vectors.
 - `unit_test`: 5,000 fuzzed hands checking chip conservation, illegal-action rejection, and a 1,000-player tournament played to the end, about 0.7 s.
 - `session_test`: whole tournaments played through the Night One session, with random and best-EV heroes. It covers the bubble, the money, the final table, sprint mode and save round trips. It also checks the network: tonight's schedule at 2:07 AM, fees, locked formats, the Night Shift board, the player's results landing in final tables and the news, the lobby clock, and registering for a scheduled event. The life checks cover shifts, Marcus's runs, sleep, rent collection and eviction, the Night Shift payout, unlocks, bounty and satellite specs, tickets, a satellite played on a ticket, and a progressive knockout played out.
 - `ui_test`: clicks drive the session (log in, filter the schedule, select an event, register, open a page). It also draws every screen, including each lobby page before and after a big night, the laptop apps, the time-lapse, a bounty table and the seat and bounty result screens.
+- `monkey_test`: random clicks and keys across every screen while it sits down at random events (up to four tables at once) and winds the sitting down to its results, about 15 s. Every frame it checks that the bankroll only moves through the ledger, tournament chips are conserved, the clock never runs backwards, no table stalls and saves round-trip. `./build/monkey_test 40 30000` runs a longer sweep.
 - `audio_test`: every synthesized sound is audible, finite and in range.
 
 To look at the UI without Unreal:

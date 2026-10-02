@@ -94,8 +94,14 @@ The whole online career is played from a first-person desk. The apartment is the
 **Pacing (critical for MTTs).** Real tournaments last for hours, so the game has three speeds:
 
 - **Full:** you play every hand.
-- **Smart (default):** junk hands auto-fold and fast-forward. The game stops for any hand that needs a decision: playable holdings, blind defense, facing a raise, bubble and ICM spots, or a tell worth watching.
-- **Sprint (optional):** skips ahead to the next milestone (a break, the bubble or the final table). Hands resolve using a play-style profile you pick plus your stats, so you trade control for time.
+- **Smart (default):** junk hands auto-fold and fast-forward. The game stops for any hand that needs a decision: playable holdings, blind defense, facing a raise, bubble and ICM spots, or a tell worth watching. It never folds a cheap price for you (calling less than a quarter of the pot): measured over hundreds of tournaments, a quarter of those blind folds threw away a playable spot. About half of all spots auto-fold, at a cost of about 0.03 big blinds each.
+- **Sprint (optional):** skips ahead to the next milestone (a break, the bubble or the final table). An autopilot plays your hands: safe on paper but a step behind good play (it calls too wide, rarely bluffs, shoves short stacks by feel and half-ignores the bubble), so it finishes like an average player while playing your own hands well finishes clearly ahead. Later: a play-style you pick and your stats make it better.
+
+**Measured balance (simulated, Night One build).**
+
+- **Skill pays.** Over 300 $0.25 hyper turbos each, average finishing position (50% = average): always the coach's best play 58–59%, mostly-best play (94% accuracy) 52%, the autopilot 52–54%, random play 37%.
+- **Length.** At Smart pace a typical bust takes 10 minutes of real time in a 180-player hyper, 15 in the 1,000-player Night Owl Turbo and 23 in the 700-player Daily Grind; a deep run in a 1,000-player field takes about an hour. About 140–160 decisions an hour, one every 25 seconds or so; four tables make that one every 6 seconds.
+- **Rent.** Shifts pay about $50 each, so honest work alone can't reach $1,225 by Friday (about $600 at three shifts a day). Marcus's long run ($380–600) gets there in two or three nights with roughly a one-in-three chance of an arrest along the way; doing a drop-off and a run every night pushes that past one-in-two within two nights. Dee's game, Sam's account and a tournament score fill the gap.
 
 ## 6. Tournament engine
 

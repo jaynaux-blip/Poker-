@@ -356,6 +356,8 @@ public:
 	bool AutoFocus = true;
 	/** The player is out (or has won) and the table is about to post its result. */
 	bool Finishing() const { return HasBustInfo; }
+	/** Events of the current hand played out so far (tests watch it move). */
+	size_t HandProgress() const { return Cursor; }
 	/** Tournaments that ended while others were still running, newest last (toasts). */
 	std::vector<FinishedTable> Finished;
 	/** Tournament clock (drives the dawn outside), or the lobby clock. Minutes after midnight on Night One. */
@@ -500,6 +502,7 @@ private:
 	std::vector<std::unique_ptr<TableRun>> Runs;
 	int Active = -1;
 	bool Background = false; // a table not in front is taking its turn: quieter, no heartbeat
+	int BackgroundHeavy = 0; // heavy steps the tables behind may still take this frame
 	bool Closing = false;    // the front table finished while others play on; Update closes it
 	double FocusHoldUntil = 0.0;
 	Chips SessionStartBankroll = 0;

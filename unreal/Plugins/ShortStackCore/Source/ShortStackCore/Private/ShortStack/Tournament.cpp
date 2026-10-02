@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <climits>
 
 namespace ss
 {
@@ -393,8 +394,17 @@ std::unique_ptr<Hand> Tournament::StartTick(std::vector<TEvent>& OutEvents)
 
 std::vector<TEvent> Tournament::FinishTick(Hand* HeroHand, const Profile* HeroAuto)
 {
-	std::vector<TEvent> Events;
-	const int HeroTableId = Hero().Busted ? -1 : Hero().TableId;
+	BeginFinish(HeroHand, HeroAuto);
+	FinishSome(INT_MAX);
+	return EndFinish();
+}
+
+void Tournament::BeginFinish(Hand* HeroHand, const Profile* HeroAuto)
+{
+	FinishHeroTable = Hero().Busted ? -1 : Hero().TableId;
+	FinishWithHero = HeroHand != nullptr;
+	FinishNextTable = INT_MIN;
+	bFinishing = true;
 	if (HeroHand)
 	{
 		if (!HeroHand->bComplete)
@@ -403,10 +413,24 @@ std::vector<TEvent> Tournament::FinishTick(Hand* HeroHand, const Profile* HeroAu
 		}
 		ApplyHand(*HeroHand);
 	}
-	for (auto& It : Tables)
+}
+
+bool Tournament::FinishSome(int Count)
+{
+	if (!bFinishing)
 	{
-		TTable& Table = It.second;
-		if (Table.Id == HeroTableId && HeroHand)
+		return true;
+	}
+	// Tables in id order, as FinishTick always played them; hands don't add or remove tables.
+	for (auto It = Tables.lower_bound(FinishNextTable); It != Tables.end(); ++It)
+	{
+		if (Count <= 0)
+		{
+			FinishNextTable = It->first;
+			return false;
+		}
+		TTable& Table = It->second;
+		if (Table.Id == FinishHeroTable && FinishWithHero)
 		{
 			continue;
 		}
@@ -417,7 +441,21 @@ std::vector<TEvent> Tournament::FinishTick(Hand* HeroHand, const Profile* HeroAu
 		}
 		PlayInstant(*H, true, nullptr);
 		ApplyHand(*H);
+		--Count;
 	}
+	FinishNextTable = INT_MAX;
+	return true;
+}
+
+std::vector<TEvent> Tournament::EndFinish()
+{
+	std::vector<TEvent> Events;
+	if (!bFinishing)
+	{
+		return Events;
+	}
+	FinishSome(INT_MAX);
+	bFinishing = false;
 	const std::vector<TEvent> Busts = ProcessEliminations();
 	Events.insert(Events.end(), Busts.begin(), Busts.end());
 	++Tick;

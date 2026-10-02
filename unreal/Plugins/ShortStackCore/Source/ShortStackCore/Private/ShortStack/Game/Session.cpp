@@ -103,6 +103,24 @@ std::string CardsText(const std::vector<Card>& Cards)
 	return Out;
 }
 
+/**
+ * The game playing the player's hands (Sprint): safe on paper and a step behind good play. It calls too wide and too
+ * long, rarely bluffs, shoves short stacks by feel and half-ignores the bubble, so it finishes like an average player
+ * while playing well finishes clearly ahead. The engine's SprintProfile stays as it is (TypeScript parity).
+ */
+Profile Autopilot()
+{
+	Profile P = SprintProfile();
+	P.Label = "Autopilot";
+	P.CallWidth = 1.35;
+	P.Stickiness = 0.35;
+	P.Aggression = 0.6;
+	P.Bluff = 0.12;
+	P.PushFold = 0.65;
+	P.IcmAware = 0.45;
+	return P;
+}
+
 double OpenThreshold(Position P)
 {
 	switch (P)
@@ -317,6 +335,8 @@ Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData*
 		Life = Loaded->Life;
 		TextsSeen.insert(Loaded->TextsSeen.begin(), Loaded->TextsSeen.end());
 	}
+	// While the game loads: simulate the network's past results now, so the first leaderboard or page doesn't stall.
+	net::Shared().Prewarm(WorldMinutes());
 }
 
 void Session::Save()
@@ -709,7 +729,9 @@ void Session::Update(double InNow)
 	{
 		StoryText("marcus-intro", "Marcus", "heard you're behind on rent. I got work if you're not scared. check the burner app.");
 	}
-	// Every open table takes its turn; the one in front last-but-not-least, as it is.
+	// Every open table takes its turn; the one in front last-but-not-least, as it is. Tables behind share a small budget of
+	// heavy steps (ending a hand, an equity run, a bot's postflop think) per frame, so they never pile into one long frame.
+	BackgroundHeavy = 2;
 	const int Front = Active;
 	for (int K = 0; K < TableCount(); ++K)
 	{
@@ -721,6 +743,10 @@ void Session::Update(double InNow)
 		}
 	}
 	TableStep();
+	if (T)
+	{
+		LobbyMinutes = std::max(LobbyMinutes, ClockMinutes());
+	}
 	CloseFinishedTables();
 	AutoFocusStep();
 }
@@ -813,11 +839,35 @@ void Session::TableStep()
 		return;
 	}
 
+	// A table behind takes a heavy step only while the frame's budget lasts; otherwise it waits for the next frame.
+	auto Heavy = [this]() {
+		if (!Background)
+		{
+			return true;
+		}
+		if (BackgroundHeavy <= 0)
+		{
+			return false;
+		}
+		--BackgroundHeavy;
+		return true;
+	};
+	// While a finished hand is shown, the rest of the field plays its hands a few tables a frame (EndHand wraps up).
+	if (HandDone && T->FinishPending())
+	{
+		T->FinishSome(20);
+	}
 	int Guard = 0;
 	while (Now >= NextAt && Guard++ < 50)
 	{
 		if (Cursor < H.Events.size())
 		{
+			const HandEvent& Next = H.Events[Cursor];
+			const bool Equities = Next.Type == EventType::Reveal || (Next.Type == EventType::Street && Revealed);
+			if (Equities && !Heavy())
+			{
+				return;
+			}
 			const HandEvent Ev = H.Events[Cursor++];
 			NextAt = Now + Consume(Ev) * Speed();
 			continue;
@@ -828,7 +878,12 @@ void Session::TableStep()
 			{
 				HandDone = true;
 				NextAt = Now + 1.4 * Max(0.5, Speed());
+				T->BeginFinish(&H);
 				continue;
+			}
+			if (!Heavy())
+			{
+				return;
 			}
 			EndHand();
 			return;
@@ -841,11 +896,19 @@ void Session::TableStep()
 		SeatVis& Vis = Seats[static_cast<size_t>(H.Seats[static_cast<size_t>(Idx)].Seat)];
 		if (H.Seats[static_cast<size_t>(Idx)].Id == HeroId)
 		{
+			if (!Heavy())
+			{
+				return;
+			}
 			OpenHeroTurn();
 			return;
 		}
 		if (!BotPending)
 		{
+			if (H.CurrentStreet != Street::Preflop && !Heavy())
+			{
+				return;
+			}
 			const BotDecision D = T->BotDecisionFor(H, false);
 			const double Think = (D.ThinkMs / 1000.0) * (Speed() < 1.0 ? 0.12 : 0.55);
 			BotPending = true;
@@ -891,6 +954,14 @@ bool Session::ShouldAutoFold()
 	if (View.CanCheck)
 	{
 		return false; // free option: always let the hero decide
+	}
+	// A cheap price (big-blind defence, completing, a short all-in) is a real decision: folding those blind gave away
+	// playable spots about a quarter of the time, so they go to the player.
+	const LegalActions Legal = H.GetLegalActions();
+	const double Price = static_cast<double>(Legal.CallAmount) / static_cast<double>(std::max<Chips>(1, H.Pot() + Legal.CallAmount));
+	if (Price < 0.25)
+	{
+		return false;
 	}
 	const Position Pos = PositionOf(View, Idx);
 	if (StackBB <= 15.0 && Sum.Raises == 0)
@@ -1410,7 +1481,7 @@ void Session::BustBanner(const TPlayer& Hero, const char* NoCashSub)
 void Session::EndHand()
 {
 	Hand& H = *CurHand;
-	const std::vector<TEvent> Events = T->FinishTick(&H);
+	const std::vector<TEvent> Events = T->FinishPending() ? T->EndFinish() : T->FinishTick(&H);
 	Heartbeat(false);
 	HandleTourneyEvents(Events);
 	// Busted players at the hero's table say goodbye.
@@ -1574,7 +1645,7 @@ void Session::StopSprint(const std::string& Reason)
 
 void Session::SprintStep()
 {
-	const Profile Autopilot = SprintProfile();
+	const Profile Autopilot = session_detail::Autopilot();
 	const auto T0 = std::chrono::steady_clock::now();
 	auto ElapsedMs = [&]() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count(); };
 	do
@@ -1743,8 +1814,9 @@ double Session::ClockMinutes() const
 	{
 		return LobbyMinutes;
 	}
-	// Each tournament keeps its own clock; the room's is the one furthest along.
-	double Clock = T->ClockMinutes();
+	// Each tournament keeps its own clock; the room's is the one furthest along, and never earlier than it has been
+	// (Update keeps LobbyMinutes up with it, so a table closing doesn't wind the clock back).
+	double Clock = std::max(LobbyMinutes, T->ClockMinutes());
 	for (const std::unique_ptr<TableRun>& Run : Runs)
 	{
 		Clock = Run->T ? std::max(Clock, Run->T->ClockMinutes()) : Clock;
