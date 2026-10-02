@@ -116,6 +116,7 @@ struct FBackRoomFaceProxy : public FAnimInstanceProxy
 	/** Where the eyes look (component space). */
 	FVector LookAt = FVector::ZeroVector;
 	bool bHasLook = false;
+	bool bExpressionless = false;
 
 	virtual void Initialize(UAnimInstance* InAnimInstance) override;
 	virtual void PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds) override;
@@ -139,6 +140,8 @@ public:
 	/** The body to follow (its component space must match the face's: attach the face at identity). */
 	TWeakObjectPtr<USkeletalMeshComponent> Body;
 	FVector LookAt = FVector::ZeroVector;
+	/** A face nobody sees (the hero's own, there for its shadow): it follows the head, and RigLogic doesn't run. */
+	bool bExpressionless = false;
 
 protected:
 	virtual FAnimInstanceProxy* CreateAnimInstanceProxy() override { return new FBackRoomFaceProxy(this); }

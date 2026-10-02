@@ -42,8 +42,12 @@ public:
 	bool IsFaceUp() const { return bFaceUp; }
 	bool IsMoving() const { return MoveT < 1.0f || FlipT < 1.0f; }
 
-	/** Curls the edge facing Toward (a world point) up by Amount (0..1, 1 = about 50 degrees): a peek. */
-	void SetPeek(float Amount, const FVector& Toward);
+	/**
+	 * Curls the short edge facing Toward (a world point) up by Amount (0..1): a peek. At 1 the edge stands
+	 * MaxLift radians up: about 60 degrees for a careful player across the table; the hero's own peek curls
+	 * on past upright (deeper, softer) so the face's index turns up to the eyes above it.
+	 */
+	void SetPeek(float Amount, const FVector& Toward, float MaxLift = 1.05f);
 	/** Stops any motion where the card is (a hand has picked it up and places it each frame). */
 	void Stop() { MoveT = FlipT = 1.0f; }
 
@@ -85,4 +89,5 @@ private:
 	// The peek's curl.
 	float Peek = 0.0f;
 	float PeekAngle = 0.0f;
+	float PeekMax = 1.05f;
 };

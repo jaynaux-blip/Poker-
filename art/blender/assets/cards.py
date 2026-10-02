@@ -175,8 +175,11 @@ def card_back():
 
 # ------------------------------------------------------------------ mesh
 
-def grid_face(bm, uv, z, flip, nx=10, ny=14):
-    """A subdivided rectangle over the card at height z; UVs map the card into the 1024 square."""
+def grid_face(bm, uv, z, flip, nx=30, ny=42):
+    """A subdivided rectangle over the card at height z; UVs map the card into the 1024 square.
+
+    About 2 mm cells: the peek curls the card around a 16 mm radius, and a coarser grid shows the bend as
+    creases (the face looks crumpled)."""
     verts = [[bm.verts.new((-W / 2 + W * i / nx, -H / 2 + H * j / ny, z)) for i in range(nx + 1)] for j in range(ny + 1)]
     for j in range(ny):
         for i in range(nx):
@@ -193,11 +196,13 @@ def grid_face(bm, uv, z, flip, nx=10, ny=14):
 def build():
     core.reset()
     os.makedirs(CARDS_DIR, exist_ok=True)
-    renders = [(f'{r}{s}', card_face(r, s)) for s in SUITS for r in RANKS] + [('back', card_back())]
-    for code, sheet in renders:
-        color, _ = sheet.render(f'card_{code}', 1024, samples=16)
-        shutil.copyfile(color, os.path.join(CARDS_DIR, f'T_Card_{code}.png'))
-    print(f'[cards] rendered {len(renders)} faces into {os.path.relpath(CARDS_DIR, core.ROOT)}')
+    # SHORTSTACK_CARD_MESH_ONLY=1 rebuilds just the mesh, keeping the rendered faces.
+    if not os.environ.get('SHORTSTACK_CARD_MESH_ONLY'):
+        renders = [(f'{r}{s}', card_face(r, s)) for s in SUITS for r in RANKS] + [('back', card_back())]
+        for code, sheet in renders:
+            color, _ = sheet.render(f'card_{code}', 1024, samples=16)
+            shutil.copyfile(color, os.path.join(CARDS_DIR, f'T_Card_{code}.png'))
+        print(f'[cards] rendered {len(renders)} faces into {os.path.relpath(CARDS_DIR, core.ROOT)}')
 
     core.reset()
     mats = []

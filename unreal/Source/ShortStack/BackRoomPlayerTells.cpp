@@ -573,9 +573,8 @@ void ABackRoomPlayer::BeginThink(int64 ToCall, int64 Pot, int64 Stack)
 	// The price weighs on a weak hand.
 	const float Price = Stack > 0 ? FMath::Clamp(static_cast<float>(ToCall) / static_cast<float>(Stack), 0.0f, 1.0f) : 0.0f;
 	StressGoal = FMath::Max(StressGoal, 0.2f + 0.6f * Price * (1.0f - Strength));
-	// While deciding the hand drifts to the chips (or stays home).
-	HandMode = Rng.FRand() < 0.5f + 0.4f * Persona.ChipFidget ? 1 : 0;
-	HandSwitch = Rng.FRandRange(3.0f, 6.0f);
+	// While deciding the hand drifts to the chips, or a chin comes to rest on a fist (or the hands stay home).
+	PickHabit(true);
 }
 
 void ABackRoomPlayer::OnActed(bool bAggressive, bool bBluff)

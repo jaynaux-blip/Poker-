@@ -101,12 +101,12 @@ void ABackRoomCard::ApplyBend()
 	{
 		// The lift goes toward the ceiling whichever way up the card lies.
 		Mid->SetScalarParameterValue(TEXT("Up"), bFaceUp ? 1.0f : -1.0f);
-		// Up to about 80 degrees: the lifted corner faces the eyes.
-		Mid->SetScalarParameterValue(TEXT("Lift"), Peek * 1.45f);
-		// A tight bend: the lifted end stands up as a flap (plastic cards spring back flat).
-		Mid->SetScalarParameterValue(TEXT("Radius"), 0.6f);
-		// The hinge sits about 3.5 cm in from the near edge: enough to bare the index, no more.
-		Mid->SetScalarParameterValue(TEXT("Hinge"), -1.0f);
+		Mid->SetScalarParameterValue(TEXT("Lift"), Peek * PeekMax);
+		// A soft curl (plastic cards flex, they don't fold), over the mesh's 2 mm grid; the hinge about 3.5 cm in
+		// from the near edge, enough to bare the index. A deep peek (the hero's) curls longer and rounder.
+		const bool bDeep = PeekMax > 1.3f;
+		Mid->SetScalarParameterValue(TEXT("Radius"), bDeep ? 1.9f : 1.6f);
+		Mid->SetScalarParameterValue(TEXT("Hinge"), bDeep ? -0.4f : -1.0f);
 		Mid->SetScalarParameterValue(TEXT("BendAngle"), PeekAngle);
 	}
 }
@@ -150,15 +150,17 @@ void ABackRoomCard::Flip(bool bInFaceUp, float Duration)
 	ApplyBend();
 }
 
-void ABackRoomCard::SetPeek(float Amount, const FVector& Toward)
+void ABackRoomCard::SetPeek(float Amount, const FVector& Toward, float MaxLift)
 {
 	Peek = FMath::Clamp(Amount, 0.0f, 1.0f);
+	PeekMax = MaxLift;
 	if (Peek > 0.0f)
 	{
-		// The bend runs from the hinge away from the edge being lifted: point it away from the peeker.
+		// The bend runs from the hinge away from the edge being lifted: point it away from the peeker, along the
+		// card's nearest axis (an edge comes up square; a bend aimed at the eyes from off to one side twists it).
 		const FVector Local = GetActorTransform().InverseTransformVector(Toward - GetActorLocation());
-		const FVector2D Away = -FVector2D(Local.X, Local.Y).GetSafeNormal();
-		PeekAngle = FMath::Atan2(Away.Y, Away.X);
+		const FVector2D Away = -FVector2D(Local.X, Local.Y);
+		PeekAngle = FMath::Abs(Away.X) >= FMath::Abs(Away.Y) ? (Away.X >= 0.0 ? 0.0f : UE_PI) : (Away.Y >= 0.0 ? UE_HALF_PI : -UE_HALF_PI);
 	}
 	ApplyBend();
 }

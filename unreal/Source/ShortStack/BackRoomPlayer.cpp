@@ -112,6 +112,8 @@ void ABackRoomPlayer::Build()
 	const bool bHero = SeatRole == EBackRoomRole::Hero;
 	Face->SetHiddenInGame(bHero);
 	Face->bCastHiddenShadow = true;
+	// Only its shadow shows: a coarse level of detail does for that (0 lets the screen size choose).
+	Face->SetForcedLOD(bHero ? 4 : 0);
 	for (USceneComponent* W : Wearables)
 	{
 		if (W && W->GetAttachParent() == Face)
@@ -144,6 +146,7 @@ void ABackRoomPlayer::Build()
 	for (int32 Side = 0; Side < 2; ++Side)
 	{
 		HandNow[Side] = StepFrom[Side] = RestPose(Side);
+		HandRate[Side] = Wiggle[Side] = Still();
 		HandGoal[Side] = HandNow[Side].Pos;
 		Steps[Side].Reset();
 	}
@@ -372,7 +375,26 @@ void ABackRoomPlayer::UpdateBody(float Dt)
 		// You lean in over your cards to look at them.
 		LeanTarget = bHeroPeek ? 1.0f : 0.62f;
 	}
-	Lean = Ease(Lean, LeanTarget, (SeatRole == EBackRoomRole::Hero ? 4.0f : 0.8f) * (1.0f - 0.9f * Stillness), Dt);
+	// The idle habit carries the body with it: forward onto a fist, back into the chair, onto an elbow.
+	float WantLean = LeanTarget;
+	float WantTwist = 0.0f;
+	const bool bHabit = SeatRole == EBackRoomRole::Player && !IsBusy();
+	if (bHabit)
+	{
+		switch (HandMode)
+		{
+		case 3: WantLean = FMath::Max(LeanTarget, 0.78f); break;
+		case 4: WantLean = FMath::Max(LeanTarget, 0.5f); break;
+		case 5: WantLean = 0.06f; break;
+		case 6:
+			WantLean = FMath::Max(LeanTarget, 0.6f);
+			WantTwist = HabitSide == 0 ? -7.0f : 7.0f;
+			break;
+		default: break;
+		}
+	}
+	Lean = Ease(Lean, WantLean, (SeatRole == EBackRoomRole::Hero ? 4.0f : 0.8f) * (1.0f - 0.9f * Stillness), Dt);
+	Twist = Ease(Twist, WantTwist, 1.2f * (1.0f - 0.9f * Stillness), Dt);
 
 	// Gaze: a new target every second or few; the eyes jump, the head follows.
 	GazeLeft -= Dt * (1.0f - 0.85f * Stillness);
@@ -444,8 +466,8 @@ void ABackRoomPlayer::UpdateBody(float Dt)
 	P.Breath = Breath;
 	P.ShoulderRaise = FMath::Clamp(0.5f * Arousal * (1.0f - Dominance) + 0.3f * Persona.Nervousness - 0.2f + 0.3f * FMath::Max(0.0f, Breath - 1.0f), 0.0f, 1.0f);
 	P.LookAt = ToBody(HeadAt);
-	P.HeadFollow = SeatRole == EBackRoomRole::Hero ? 1.0f : (GazeHoldLeft > 0.0f ? HeadFollow : 0.75f);
-	P.Twist = 0.0f;
+	P.HeadFollow = SeatRole == EBackRoomRole::Hero ? 1.0f : (GazeHoldLeft > 0.0f ? HeadFollow : (bHabit && HandMode == 3 ? 0.3f : 0.75f));
+	P.Twist = Twist;
 	const float Drift = 1.0f - 0.9f * Stillness;
 	P.HeadTilt = Drift * 2.5f * FMath::Sin(Time * 0.21f + Persona.Seed);
 	P.HeadNod = Drift * (1.2f * FMath::Sin(Time * 0.33f + 2.0f * Persona.Seed) + 0.45f * Breath);
@@ -457,13 +479,14 @@ void ABackRoomPlayer::UpdateBody(float Dt)
 	for (int32 Side = 0; Side < 2; ++Side)
 	{
 		const FHandPose& H = HandNow[Side];
-		P.HandPos[Side] = H.Pos;
+		const FHandPose& W = Wiggle[Side];
+		P.HandPos[Side] = H.Pos + W.Pos;
 		P.PalmDir[Side] = H.Palm;
 		P.FingerDir[Side] = H.Finger;
 		P.HandWeight[Side] = 1.0f;
-		P.Curl[Side] = H.Curl;
-		P.ThumbCurl[Side] = H.Thumb;
-		P.Pinch[Side] = H.Pinch;
+		P.Curl[Side] = FMath::Clamp(H.Curl + W.Curl, 0.0f, 1.0f);
+		P.ThumbCurl[Side] = FMath::Clamp(H.Thumb + W.Thumb, 0.0f, 1.0f);
+		P.Pinch[Side] = FMath::Clamp(H.Pinch + W.Pinch, 0.0f, 1.0f);
 	}
 	P.Tremble = Tremble;
 	P.KneeSpread = 0.2f + 0.5f * Dominance;
@@ -477,6 +500,12 @@ void ABackRoomPlayer::UpdateFace(float Dt)
 		return;
 	}
 	Anim->Body = Body;
+	// Your own face is never seen, only its shadow: no expressions to work out or for RigLogic to run.
+	Anim->bExpressionless = SeatRole == EBackRoomRole::Hero;
+	if (Anim->bExpressionless)
+	{
+		return;
+	}
 	TMap<FName, float> C;
 	auto Add = [&C](const TCHAR* Control, float Value) {
 		if (Value > 0.0005f)

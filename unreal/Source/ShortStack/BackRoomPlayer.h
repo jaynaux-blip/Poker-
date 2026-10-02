@@ -9,6 +9,7 @@
 
 class ABackRoomCard;
 class ABackRoomChips;
+class UInstancedStaticMeshComponent;
 class USkeletalMeshComponent;
 class UStaticMeshComponent;
 
@@ -229,6 +230,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Short Stack")
 	void PlayTell(EBackRoomTell Tell, float Intensity = 1.0f);
 
+	/** Holds an idle habit (0..6, see HandMode) using the left (0) or right (1) hand for a minute, for testing. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack")
+	void TestHabit(int32 Mode, int32 Side);
+
 	/** A MetaHuman body and face to use instead of the archetypes (from the Creator, once assembled). */
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	TSoftObjectPtr<USkeletalMesh> BodyMesh;
@@ -394,6 +399,11 @@ private:
 		/** Go back to the resting hand instead of Pose. */
 		bool bRest = false;
 		TFunction<void()> OnArrive;
+		/** Set when the step starts: how fast the hand leaves and arrives (per second), so it flows through
+		 *  the waypoints it passes on its way and only stops where it presses, holds or turns back. */
+		bool bBegun = false;
+		FHandPose StartRate;
+		FHandPose EndRate;
 	};
 	/** Something a hand holds: placed every frame at the hand (Offset in the hand's frame). */
 	struct FHeld
@@ -406,6 +416,16 @@ private:
 		double Drop = 0.0;
 	};
 	FHandPose RestPose(int32 Side) const;
+	/** Where an idle hand goes: the rest, or the habit of the moment (a chin rest, the chips, the lap...). */
+	FHandPose IdleGoal(int32 Side) const;
+	/** All zeros: a still hand's rate of change. */
+	static FHandPose Still();
+	/** The pose at T (0..1) on a cubic from P0 to P1, leaving at V0 and arriving at V1 (rates per second), and its rate there. */
+	static void Hermite(const FHandPose& P0, const FHandPose& V0, const FHandPose& P1, const FHandPose& V1, float Duration, float T, FHandPose& OutPose, FHandPose& OutRate);
+	/** How fast the hand passes the end of its current step (From to To) on the way to the next: zero where it stops. */
+	FHandPose PassRate(int32 Side, const FHandPose& From, const FHandPose& To) const;
+	/** Picks the idle hands' habit (and the body's posture with it); Deciding: while it's their turn. */
+	void PickHabit(bool bDeciding);
 	/** The hand placed so its fingertips touch Tip (world), fingers along Finger, palm along Palm (body space). */
 	FHandPose Touch(const FVector& Tip, const FVector& Finger, const FVector& Palm, float Curl = 0.25f, float Pinch = 0.0f) const;
 	void Queue(int32 Side, const FHandPose& Pose, float Duration, float Arc = 0.0f, TFunction<void()> OnArrive = nullptr);
@@ -423,6 +443,10 @@ private:
 	FTransform HandFrame(int32 Side) const;
 
 	FHandPose HandNow[2];
+	/** How fast each hand is moving (per second), carried from move to move so nothing starts or stops with a jolt. */
+	FHandPose HandRate[2];
+	/** Quick finger work on top of the hand (a riffle, a pinch), added to the pose the body gets. */
+	FHandPose Wiggle[2];
 	FHandPose StepFrom[2];
 	TArray<FHandStep> Steps[2];
 	float StepT[2] = {0.0f, 0.0f};
@@ -430,7 +454,12 @@ private:
 	/** Idle hands: resting spots in body space, eased toward. */
 	FVector HandGoal[2];
 	float HandSwitch = 5.0f;
+	/** The idle habit: 0 hands at rest, 1 playing with chips, 2 guarding the cards, 3 chin on a fist, 4 hands
+	 *  folded, 5 sat back with the hands in the lap, 6 an elbow on the rail. HabitSide: the hand it uses. */
 	int32 HandMode = 0;
+	int32 HabitSide = 1;
+	/** Torso turn (degrees), eased: leaning on an elbow turns the chest. */
+	float Twist = 0.0f;
 	bool bHeroPeek = false;
 	float HeroPeekT = 0.0f;
 	/** The hole cards' lift (0..1), eased toward the goal the hands set. */
@@ -443,6 +472,37 @@ private:
 	/** The dealer's deck, in the left hand. */
 	UPROPERTY(Transient)
 	TObjectPtr<ABackRoomCard> Deck;
+
+	// ------------------------------------------------------------ chips to play with (BackRoomPlayerChipTricks.cpp)
+	/** Whether this player keeps a short column of chips beside the stack to play with (fidgety players with chips). */
+	bool HasPlayChips() const;
+	/** The column's foot on the felt (world). */
+	FVector PlayChipsBase() const;
+	/** Lays the column out, or plays a trick with it (a riffle, a drop chip by chip) while the right hand is on it. */
+	void UpdatePlayChips(float Dt, bool bHandOnChips);
+	/** The trick's chips at T seconds in (world), the column's order once it's done, and the top of the chips in hand. */
+	void PoseTrick(float T, FTransform Out[8], int32 NewOrder[8], float& Top) const;
+	/** Two colors, four chips each (instances 0..3 of each). */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> PlayChips;
+	int32 PlayChipsSeed = -1;
+	/** Which chip (0..7; 0..3 the first color) is at each height of the column, bottom up. */
+	int32 PlayOrder[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+	float PlayYaw[8] = {};
+	/** Where each chip is drawn now (world). */
+	FTransform PlayAt[8];
+	FVector PlayLaidAt = FVector(0.0, 0.0, -1.0e6);
+	/** Seconds into the trick being played (-1: none), which one (0 riffle, 1 drop), and its pace. */
+	float TrickT = -1.0f;
+	int32 TrickKind = 0;
+	float TrickPace = 1.0f;
+	/** The top of the chips in hand above the column's foot (cm): where the fingertips go. */
+	float TrickTop = 2.64f;
+	/** Landings already clicked this time through the trick. */
+	int32 TrickClicks = 0;
+	/** A trick cut short: the chips settle back into a column (0..1). */
+	float SettleT = 1.0f;
+	FTransform SettleFrom[8];
 
 	// ------------------------------------------------------------ the hand being played
 	float Strength = 0.5f;

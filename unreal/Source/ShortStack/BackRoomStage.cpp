@@ -374,9 +374,14 @@ void ABackRoomStage::BuildLights()
 	DoorSpill->SetCastShadows(true);
 
 	// One dryer running (second from the right, top): warm light through its door glass.
-	DryerGlow = NewPart<UPointLightComponent>();
-	// The running dryer's drum light, through its glass.
-	DryerGlow->SetRelativeLocation(FVector(X1 - 92.0, DryerY(4), 143.0));
+	// The running dryer's drum light, through its glass: a wide spot just in front of the door aimed out into
+	// the room (a shadowed point light here drew six shadow views, half of them of the dryer itself).
+	USpotLightComponent* DrumLight = NewPart<USpotLightComponent>();
+	DrumLight->SetOuterConeAngle(80.0f);
+	DrumLight->SetInnerConeAngle(35.0f);
+	DrumLight->SetSourceRadius(20.0f);
+	DryerGlow = DrumLight;
+	DryerGlow->SetRelativeLocationAndRotation(FVector(X1 - 92.0, DryerY(4), 143.0), FRotator(0.0f, 180.0f, 0.0f));
 	DryerGlow->SetIntensityUnits(ELightUnits::Candelas);
 	DryerGlow->SetIntensity(6.0f);
 	DryerGlow->SetLightColor(Srgb(0xffb46b));

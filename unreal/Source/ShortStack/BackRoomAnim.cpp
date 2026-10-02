@@ -352,9 +352,10 @@ void FBackRoomFaceProxy::PreUpdate(UAnimInstance* InAnimInstance, float DeltaSec
 	{
 		return;
 	}
-	Curves = Anim->Curves;
+	bExpressionless = Anim->bExpressionless;
+	Curves = Anim->bExpressionless ? TMap<FName, float>() : Anim->Curves;
 	LookAt = Anim->LookAt;
-	bHasLook = !LookAt.IsZero();
+	bHasLook = !LookAt.IsZero() && !bExpressionless;
 	BodyBones.Reset();
 	// The body ticks first (a tick prerequisite), so its pose for this frame is ready.
 	if (const USkeletalMeshComponent* Body = Anim->Body.Get())
@@ -383,12 +384,21 @@ void FBackRoomFaceProxy::Initialize(UAnimInstance* InAnimInstance)
 
 void FBackRoomFaceProxy::Update(float DeltaSeconds)
 {
+	if (bExpressionless)
+	{
+		return;
+	}
 	FAnimationUpdateContext Context(this, DeltaSeconds);
 	RigLogic.Update_AnyThread(Context);
 }
 
 bool FBackRoomFaceProxy::Evaluate(FPoseContext& Output)
 {
+	if (bExpressionless)
+	{
+		EvaluateSource(Output);
+		return true;
+	}
 	// RigLogic maps DNA joints to this LOD's compact pose: remap whenever the required bones change.
 	const FBoneContainer& Required = GetRequiredBones();
 	if (Required.IsValid() && (Required.GetSerialNumber() != CachedBoneSerial || GetLODLevel() != CachedLOD))

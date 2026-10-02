@@ -31,6 +31,30 @@ int32 Snd(ss::SoundId Id)
 {
 	return static_cast<int32>(Id);
 }
+
+/** The fastest a hand sweeps through a point on its way (cm/s). */
+const double MaxPass = 150.0;
+
+/**
+ * A critically damped spring: X chases Goal with velocity V and settles in about 4 / Omega seconds, starting
+ * and stopping without a jolt from wherever it is, steady at any frame rate.
+ */
+template <typename T>
+void Spring(T& X, T& V, const T& Goal, float Omega, float Dt)
+{
+	const float W = Omega * Dt;
+	const float Decay = 1.0f / (1.0f + W + 0.48f * W * W + 0.235f * W * W * W);
+	const T Change = X - Goal;
+	const T Carry = (V + Change * Omega) * Dt;
+	V = (V - Carry * Omega) * Decay;
+	X = Goal + (Change + Carry) * Decay;
+}
+
+/** A direction, or the last one if a blend between opposites shrinks it to nothing. */
+FVector Dir(const FVector& V, const FVector& Fallback)
+{
+	return V.SizeSquared() > 0.01 ? V.GetUnsafeNormal() : Fallback;
+}
 } // namespace BackRoomHandsDetail
 
 using namespace BackRoomHandsDetail;
@@ -65,6 +89,223 @@ ABackRoomPlayer::FHandPose ABackRoomPlayer::RestPose(int32 Side) const
 	P.Curl = 0.35f + 0.1f * Persona.Nervousness;
 	P.Thumb = 0.2f;
 	return P;
+}
+
+ABackRoomPlayer::FHandPose ABackRoomPlayer::IdleGoal(int32 Side) const
+{
+	FHandPose Goal = RestPose(Side);
+	const float Sx = Side == 0 ? 1.0f : -1.0f;
+	if (SeatRole == EBackRoomRole::Hero)
+	{
+		if (bHeroPeek && Hole.Num() == 2 && Hole[0] && Hole[1])
+		{
+			// Peeking: the left hand covers the cards, the right thumb lifts the near corner (and the hand
+			// rises with it as the cards come up).
+			const FVector C = (Hole[0]->GetActorLocation() + Hole[1]->GetActorLocation()) * 0.5;
+			const FVector In = Spots.Inward;
+			const FVector Left = -GetActorRightVector();
+			if (Side == 0)
+			{
+				Goal = Touch(C + In * 4.0 + Left * 6.5 + FVector(0.0, 0.0, 1.0), FVector(-0.65, 1.0, -0.2), FVector(0.1, 0.0, -1.0), 0.2f);
+			}
+			else
+			{
+				Goal = Touch(C - In * 4.3 - Left * 3.6 + FVector(0.0, 0.0, 0.8), FVector(0.35, 1.0, -0.3), FVector(0.65, 0.0, -0.75), 0.25f, 0.45f);
+				// The thumb rides the edge it lifts: up and a little over, toward the far side.
+				Goal.Pos += ToBodyDir(In) * (1.0 * PeekNow) + FVector(0.0, 0.0, 2.4 * PeekNow);
+				Goal.Thumb += 0.3f * PeekNow;
+			}
+		}
+		return Goal;
+	}
+	if (SeatRole != EBackRoomRole::Player)
+	{
+		return Goal;
+	}
+	switch (HandMode)
+	{
+	case 1:
+		if (Side == 1)
+		{
+			if (HasPlayChips())
+			{
+				// Over the column to play with: thumb on the near side, middle finger on the far side, index on top.
+				// (The Touch's fingertip estimate runs about 4 cm toward the body's middle of where a curled hand's
+				// fingers land: aimed that far to the player's right of the column.)
+				Goal = Touch(PlayChipsBase() + FVector(0.0, 0.0, TrickTop + 0.3) + Spots.Inward * 1.4 + GetActorRightVector() * 4.0, FVector(-0.15, 1.0, -0.6),
+					FVector(0.3, 0.0, -1.0), 0.55f, 0.35f);
+			}
+			else if (StackPile && StackPile->GetAmount() > 0)
+			{
+				// Fingers on top of the stack, toying with it.
+				Goal = Touch(StackPile->GetTop() + FVector(0.0, 0.0, 0.4), FVector(-0.2, 1.0, -0.35), FVector(0.3, 0.0, -1.0), 0.45f, 0.4f);
+			}
+		}
+		break;
+	case 2:
+		if (Side == 0 && bInHand && Hole.Num() > 0 && Hole[0])
+		{
+			// A hand guarding the cards, resting beside them.
+			Goal = Touch(Hole[0]->GetActorLocation() + GetActorRightVector() * -5.0 + FVector(0.0, 0.0, 0.5), FVector(-0.35, 1.0, -0.2), FVector(0.2, 0.0, -1.0), 0.5f);
+		}
+		break;
+	case 3:
+		if (Side == HabitSide)
+		{
+			// Chin on a fist, the elbow out on the table: the fist's knuckles under the chin, the palm to the face.
+			const FVector Chin = ToBody(GetEyes()) + FVector(0.0, 0.5, -11.5);
+			Goal.Finger = FVector(0.0, 0.2, 1.0).GetSafeNormal();
+			Goal.Palm = FVector(Sx * 0.25, -1.0, 0.0).GetSafeNormal();
+			Goal.Curl = 0.85f;
+			Goal.Thumb = 0.55f;
+			Goal.Pinch = 0.0f;
+			Goal.Pos = Chin - Goal.Finger * Reach(Goal.Curl) - Goal.Palm * 1.6;
+		}
+		break;
+	case 4:
+		// Hands folded on the felt in front, the right over the left, fingers across the other hand.
+		Goal.Pos = FVector(Sx * 6.5, Rail + 15.0, Side == 1 ? 81.8 : 80.2);
+		Goal.Finger = FVector(-Sx * 1.0, 0.45, -0.15).GetSafeNormal();
+		Goal.Palm = FVector(-Sx * 0.25, 0.0, -1.0).GetSafeNormal();
+		Goal.Curl = 0.55f;
+		Goal.Thumb = 0.3f;
+		break;
+	case 5:
+		// Sat back, the hands in the lap.
+		Goal.Pos = FVector(Sx * 8.5, 24.0, 65.0);
+		Goal.Finger = FVector(-Sx * 0.55, 1.0, -0.2).GetSafeNormal();
+		Goal.Palm = FVector(Sx * 0.1, 0.0, -1.0).GetSafeNormal();
+		Goal.Curl = 0.45f;
+		Goal.Thumb = 0.25f;
+		break;
+	case 6:
+		if (Side == HabitSide)
+		{
+			// The forearm laid along the rail's crown, the weight on it.
+			Goal.Pos = FVector(Sx * 3.0, Rail + 6.5, 84.5);
+			Goal.Finger = FVector(-Sx * 1.0, 0.3, -0.15).GetSafeNormal();
+			Goal.Palm = FVector(0.0, 0.1, -1.0).GetSafeNormal();
+			Goal.Curl = 0.5f;
+		}
+		break;
+	default:
+		break;
+	}
+	return Goal;
+}
+
+void ABackRoomPlayer::PickHabit(bool bDeciding)
+{
+	if (SeatRole != EBackRoomRole::Player)
+	{
+		HandMode = 0;
+		return;
+	}
+	// Each persona has their own ways of sitting: fidgets play with chips, the composed fold their hands or
+	// rest a chin, sprawlers sit back; nobody holds one for long.
+	const float Calm = 1.0f - Persona.Nervousness;
+	const bool bChips = HasPlayChips() || (StackPile && StackPile->GetAmount() > 0);
+	float W[7] = {};
+	if (bDeciding)
+	{
+		W[0] = 0.3f;
+		W[1] = bChips ? 0.5f + 0.4f * Persona.ChipFidget : 0.0f;
+		W[3] = 0.35f * Calm;
+	}
+	else
+	{
+		W[0] = 0.35f;
+		W[1] = bChips ? (HasPlayChips() ? 0.25f + 0.6f * Persona.ChipFidget : 0.15f * Persona.ChipFidget) : 0.0f;
+		W[2] = bInHand ? 0.25f : 0.0f;
+		W[3] = 0.15f * Calm + (bInHand ? 0.1f : 0.0f);
+		W[4] = 0.25f * Persona.Posture * Calm;
+		W[5] = 0.45f * (1.0f - Persona.Posture) + (bInHand ? 0.0f : 0.15f);
+		W[6] = 0.2f;
+	}
+	// Something other than what they're doing now, as a rule.
+	W[HandMode] *= 0.25f;
+	float Sum = 0.0f;
+	for (float X : W)
+	{
+		Sum += X;
+	}
+	float Pick = Rng.FRandRange(0.0f, Sum);
+	int32 Mode = 0;
+	for (int32 I = 0; I < 7; ++I)
+	{
+		Pick -= W[I];
+		if (W[I] > 0.0f && Pick <= 0.0f)
+		{
+			Mode = I;
+			break;
+		}
+	}
+	HandMode = Mode;
+	HabitSide = Rng.FRand() < 0.5f ? 0 : 1;
+	HandSwitch = bDeciding ? Rng.FRandRange(3.0f, 6.0f) : Rng.FRandRange(6.0f, 16.0f);
+}
+
+void ABackRoomPlayer::TestHabit(int32 Mode, int32 Side)
+{
+	HandMode = FMath::Clamp(Mode, 0, 6);
+	HabitSide = Side == 0 ? 0 : 1;
+	HandSwitch = 60.0f;
+}
+
+ABackRoomPlayer::FHandPose ABackRoomPlayer::Still()
+{
+	FHandPose Z;
+	Z.Pos = Z.Palm = Z.Finger = FVector::ZeroVector;
+	Z.Curl = Z.Thumb = Z.Pinch = 0.0f;
+	return Z;
+}
+
+void ABackRoomPlayer::Hermite(const FHandPose& P0, const FHandPose& V0, const FHandPose& P1, const FHandPose& V1, float Duration, float T, FHandPose& Out, FHandPose& Rate)
+{
+	const float D = FMath::Max(Duration, 0.01f);
+	const float T2 = T * T;
+	const float T3 = T2 * T;
+	const float H00 = 2.0f * T3 - 3.0f * T2 + 1.0f, H10 = (T3 - 2.0f * T2 + T) * D, H01 = 3.0f * T2 - 2.0f * T3, H11 = (T3 - T2) * D;
+	// The same, differentiated per second.
+	const float R00 = (6.0f * T2 - 6.0f * T) / D, R10 = 3.0f * T2 - 4.0f * T + 1.0f, R01 = (6.0f * T - 6.0f * T2) / D, R11 = 3.0f * T2 - 2.0f * T;
+	auto Mix = [&](const auto& A0, const auto& B0, const auto& A1, const auto& B1, auto& Value, auto& Speed) {
+		Value = A0 * H00 + B0 * H10 + A1 * H01 + B1 * H11;
+		Speed = A0 * R00 + B0 * R10 + A1 * R01 + B1 * R11;
+	};
+	Mix(P0.Pos, V0.Pos, P1.Pos, V1.Pos, Out.Pos, Rate.Pos);
+	Mix(P0.Palm, V0.Palm, P1.Palm, V1.Palm, Out.Palm, Rate.Palm);
+	Mix(P0.Finger, V0.Finger, P1.Finger, V1.Finger, Out.Finger, Rate.Finger);
+	Mix(P0.Curl, V0.Curl, P1.Curl, V1.Curl, Out.Curl, Rate.Curl);
+	Mix(P0.Thumb, V0.Thumb, P1.Thumb, V1.Thumb, Out.Thumb, Rate.Thumb);
+	Mix(P0.Pinch, V0.Pinch, P1.Pinch, V1.Pinch, Out.Pinch, Rate.Pinch);
+	Out.Palm = Dir(Out.Palm, P0.Palm);
+	Out.Finger = Dir(Out.Finger, P0.Finger);
+}
+
+ABackRoomPlayer::FHandPose ABackRoomPlayer::PassRate(int32 Side, const FHandPose& From, const FHandPose& To) const
+{
+	const TArray<FHandStep>& Q = Steps[Side];
+	if (Q.Num() < 2)
+	{
+		return Still();
+	}
+	const FHandPose After = Q[1].bRest ? IdleGoal(Side) : Q[1].Pose;
+	const FVector In = To.Pos - From.Pos;
+	const FVector Out = After.Pos - To.Pos;
+	// It stops where it presses, holds or turns back; a point it only passes, it sweeps through.
+	if (In.Size() < 1.5 || Out.Size() < 1.5 || FVector::DotProduct(In.GetSafeNormal(), Out.GetSafeNormal()) < 0.1)
+	{
+		return Still();
+	}
+	const float Span = FMath::Max(Q[0].Duration + Q[1].Duration, 0.05f);
+	FHandPose V;
+	V.Pos = ((After.Pos - From.Pos) / Span).GetClampedToMaxSize(MaxPass);
+	V.Palm = (After.Palm - From.Palm) / Span;
+	V.Finger = (After.Finger - From.Finger) / Span;
+	V.Curl = (After.Curl - From.Curl) / Span;
+	V.Thumb = (After.Thumb - From.Thumb) / Span;
+	V.Pinch = (After.Pinch - From.Pinch) / Span;
+	return V;
 }
 
 ABackRoomPlayer::FHandPose ABackRoomPlayer::Touch(const FVector& Tip, const FVector& Finger, const FVector& Palm, float Curl, float Pinch) const
@@ -135,31 +376,43 @@ void ABackRoomPlayer::LetGo(AActor* Thing)
 
 void ABackRoomPlayer::UpdateHands(float Dt)
 {
+	bool bHandOnChips = false;
 	for (int32 Side = 0; Side < 2; ++Side)
 	{
+		Wiggle[Side] = Still();
 		TArray<FHandStep>& Q = Steps[Side];
 		if (Q.Num() > 0)
 		{
+			// A move: a smooth curve from where the hand was, leaving at the speed it had, through the step's
+			// pose, on into the next one when it only passes there (a stop where it presses, holds or turns back).
 			FHandStep& S = Q[0];
-			const FHandPose Target = S.bRest ? RestPose(Side) : S.Pose;
+			const FHandPose Target = S.bRest ? IdleGoal(Side) : S.Pose;
+			const FHandPose& From = StepFrom[Side];
+			if (!S.bBegun)
+			{
+				S.bBegun = true;
+				S.StartRate = HandRate[Side];
+				S.StartRate.Pos = S.StartRate.Pos.GetClampedToMaxSize(MaxPass);
+				S.EndRate = PassRate(Side, From, Target);
+			}
 			StepT[Side] += Dt / FMath::Max(S.Duration, 0.01f);
 			const float T = FMath::Min(StepT[Side], 1.0f);
-			const float E = Smoother(T);
-			const FHandPose& From = StepFrom[Side];
 			FHandPose& H = HandNow[Side];
-			H.Pos = FMath::Lerp(From.Pos, Target.Pos, static_cast<double>(E)) + FVector(0.0, 0.0, S.Arc * FMath::Sin(T * UE_PI));
-			H.Palm = FMath::Lerp(From.Palm, Target.Palm, static_cast<double>(E)).GetSafeNormal();
-			H.Finger = FMath::Lerp(From.Finger, Target.Finger, static_cast<double>(E)).GetSafeNormal();
-			H.Curl = FMath::Lerp(From.Curl, Target.Curl, E);
-			H.Thumb = FMath::Lerp(From.Thumb, Target.Thumb, E);
-			H.Pinch = FMath::Lerp(From.Pinch, Target.Pinch, E);
+			Hermite(From, S.StartRate, Target, S.EndRate, S.Duration, T, H, HandRate[Side]);
+			// Up over the felt and the chips, lifting off and settling with the move.
+			const float Lift = FMath::Sin(T * UE_PI);
+			H.Pos.Z += S.Arc * Lift * Lift;
+			// A quick arrival can swing past its point: never down through the felt.
+			H.Pos.Z = FMath::Max(H.Pos.Z, FMath::Min(From.Pos.Z, Target.Pos.Z) - 0.3);
 			if (StepT[Side] >= 1.0f)
 			{
-				H = Target;
+				const float Over = (StepT[Side] - 1.0f) * S.Duration;
+				HandRate[Side] = S.EndRate;
 				StepFrom[Side] = Target;
-				StepT[Side] = 0.0f;
 				TFunction<void()> Fn = MoveTemp(S.OnArrive);
 				Q.RemoveAt(0);
+				// The frame's leftover time goes to the next move, so a hand sweeping through doesn't hitch.
+				StepT[Side] = Q.Num() > 0 ? FMath::Min(Over / FMath::Max(Q[0].Duration, 0.01f), 0.5f) : 0.0f;
 				if (Fn)
 				{
 					Fn();
@@ -168,55 +421,60 @@ void ABackRoomPlayer::UpdateHands(float Dt)
 			continue;
 		}
 
-		// Idle: where the hand drifts on its own.
-		FHandPose Goal = RestPose(Side);
-		if (SeatRole == EBackRoomRole::Player && Side == 1 && HandMode == 1 && StackPile && StackPile->GetAmount() > 0)
-		{
-			// Riffling the top chips of the stack.
-			Goal = Touch(StackPile->GetTop() + FVector(0.0, 0.0, 0.4), FVector(-0.2, 1.0, -0.35), FVector(0.3, 0.0, -1.0), 0.45f, 0.5f);
-			Goal.Curl = 0.45f + 0.2f * FMath::Sin(Time * 7.0f);
-			Goal.Pinch = 0.5f + 0.4f * FMath::Sin(Time * 7.0f + 1.0f);
-		}
-		else if (SeatRole == EBackRoomRole::Player && Side == 0 && HandMode == 2 && bInHand && Hole.Num() > 0 && Hole[0])
-		{
-			// A hand guarding the cards, resting beside them.
-			Goal = Touch(Hole[0]->GetActorLocation() + GetActorRightVector() * -5.0 + FVector(0.0, 0.0, 0.5), FVector(-0.35, 1.0, -0.2), FVector(0.2, 0.0, -1.0), 0.5f);
-		}
-		else if (SeatRole == EBackRoomRole::Hero && bHeroPeek && Hole.Num() == 2 && Hole[0] && Hole[1])
-		{
-			// Peeking: the left hand covers the cards, the right thumb lifts the near corner.
-			const FVector C = (Hole[0]->GetActorLocation() + Hole[1]->GetActorLocation()) * 0.5;
-			const FVector In = Spots.Inward;
-			const FVector Left = -GetActorRightVector();
-			Goal = Side == 0
-				? Touch(C + In * 4.0 + Left * 6.5 + FVector(0.0, 0.0, 1.0), FVector(-0.65, 1.0, -0.2), FVector(0.1, 0.0, -1.0), 0.2f)
-				: Touch(C - In * 4.3 - Left * 3.6 + FVector(0.0, 0.0, 0.8), FVector(0.35, 1.0, -0.3), FVector(0.65, 0.0, -0.75), 0.25f, 0.45f);
-		}
-		const float Rate = SeatRole == EBackRoomRole::Hero ? 7.0f : 3.0f;
+		// Idle: the hand goes to its habit of the moment on a spring, never quite still once there.
+		FHandPose Goal = IdleGoal(Side);
+		const bool bTrickHand = Side == 1 && SeatRole == EBackRoomRole::Player && HandMode == 1;
+		const float Live = (1.0f - Stillness) * (SeatRole == EBackRoomRole::Hero ? 0.5f : 1.0f) * (bTrickHand ? 0.3f : 1.0f);
+		const float Ph = Persona.Seed * 1.37f + Side * 2.1f;
+		Goal.Pos += Live * FVector(0.5f * FMath::Sin(Time * 0.61f + Ph), 0.4f * FMath::Sin(Time * 0.47f + 2.0f * Ph), 0.25f * FMath::Sin(Time * 0.83f + Ph));
+		Goal.Curl += Live * 0.05f * FMath::Sin(Time * 0.37f + Ph);
+		const float Omega = SeatRole == EBackRoomRole::Hero ? 11.0f : (bTrickHand ? 9.0f : 4.5f);
 		FHandPose& H = HandNow[Side];
-		H.Pos = Ease(H.Pos, Goal.Pos, Rate, Dt);
-		H.Palm = Ease(H.Palm, Goal.Palm, Rate, Dt).GetSafeNormal();
-		H.Finger = Ease(H.Finger, Goal.Finger, Rate, Dt).GetSafeNormal();
-		H.Curl = Ease(H.Curl, Goal.Curl, Rate * 2.0f, Dt);
-		H.Thumb = Ease(H.Thumb, Goal.Thumb, Rate * 2.0f, Dt);
-		H.Pinch = Ease(H.Pinch, Goal.Pinch, Rate * 2.0f, Dt);
+		FHandPose& V = HandRate[Side];
+		Spring(H.Pos, V.Pos, Goal.Pos, Omega, Dt);
+		FVector Palm = H.Palm;
+		FVector Finger = H.Finger;
+		Spring(Palm, V.Palm, Goal.Palm, Omega, Dt);
+		Spring(Finger, V.Finger, Goal.Finger, Omega, Dt);
+		H.Palm = Dir(Palm, H.Palm);
+		H.Finger = Dir(Finger, H.Finger);
+		Spring(H.Curl, V.Curl, Goal.Curl, Omega * 1.5f, Dt);
+		Spring(H.Thumb, V.Thumb, Goal.Thumb, Omega * 1.5f, Dt);
+		Spring(H.Pinch, V.Pinch, Goal.Pinch, Omega * 1.5f, Dt);
 		StepFrom[Side] = H;
+		const double Off = FVector::Dist(H.Pos, Goal.Pos);
+		if (bTrickHand)
+		{
+			if (HasPlayChips())
+			{
+				bHandOnChips = Off < 2.5;
+			}
+			else
+			{
+				// Fingering the top of the stack.
+				Wiggle[Side].Curl = 0.08f * FMath::Sin(Time * 2.3f + Ph);
+				Wiggle[Side].Pinch = 0.2f * FMath::Max(0.0f, FMath::Sin(Time * 1.7f));
+			}
+		}
+		if (SeatRole == EBackRoomRole::Hero && Side == 1)
+		{
+			// How settled the right hand is on the cards' corner: the cards come up under the thumb as it lands.
+			HeroPeekT = bHeroPeek ? 1.0f - FMath::SmoothStep(0.6f, 3.5f, static_cast<float>(Off)) : 0.0f;
+		}
 	}
+	UpdatePlayChips(Dt, bHandOnChips);
 
 	// Idle hand habits: change every several seconds.
 	HandSwitch -= Dt;
 	if (HandSwitch <= 0.0f)
 	{
-		const float R = Rng.FRand();
-		HandMode = R < 0.45f ? 0 : (R < 0.45f + 0.35f * Persona.ChipFidget ? 1 : 2);
-		HandSwitch = Rng.FRandRange(5.0f, 14.0f);
+		PickHabit(bThinking);
 	}
 
-	// The hero's peek lifts the cards once the hands are on them.
+	// The hero's peek lifts the cards under the thumb.
 	if (SeatRole == EBackRoomRole::Hero)
 	{
-		HeroPeekT = Ease(HeroPeekT, bHeroPeek && Steps[1].Num() == 0 ? 1.0f : 0.0f, 9.0f, Dt);
-		PeekGoal = HeroPeekT > 0.8f ? 1.0f : 0.0f;
+		PeekGoal = bHeroPeek && Steps[1].Num() == 0 ? HeroPeekT : 0.0f;
 	}
 	PeekNow = Ease(PeekNow, PeekGoal, 9.0f, Dt);
 	if (PeekNow > 0.002f || PeekApplied > 0.002f)
@@ -225,7 +483,7 @@ void ABackRoomPlayer::UpdateHands(float Dt)
 		{
 			if (Card && !Card->IsFaceUp())
 			{
-				Card->SetPeek(PeekNow, GetEyes());
+				Card->SetPeek(PeekNow, GetEyes(), SeatRole == EBackRoomRole::Hero ? 1.8f : 1.05f);
 			}
 		}
 		PeekApplied = PeekNow;

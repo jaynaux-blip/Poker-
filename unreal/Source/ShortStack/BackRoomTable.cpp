@@ -278,8 +278,9 @@ const ABackRoomTable::FSeat* ABackRoomTable::HeroSeat() const
 FTransform ABackRoomTable::CardSpot(int32 TableSeat, int32 Index) const
 {
 	const FTransform T = ABackRoomStage::SeatTransform(TableSeat);
-	// Two cards side by side, a little overlapped, the long side toward the player, the face's top away.
-	const FVector At = T.TransformPosition(FVector(RailGap + 25.0, Index == 0 ? -5.9 : -0.1, ABackRoomStage::FeltZ + 0.04 * Index));
+	// Two cards side by side, just apart (a peek curls their near edges: overlapped, the curls would cross), the long
+	// side toward the player, the face's top away.
+	const FVector At = T.TransformPosition(FVector(RailGap + 25.0, Index == 0 ? -6.4 : 0.5, ABackRoomStage::FeltZ + 0.04 * Index));
 	return FTransform(FRotator(0.0f, T.Rotator().Yaw + 90.0f + (Index == 0 ? -4.0f : 3.0f), 0.0f), At);
 }
 
