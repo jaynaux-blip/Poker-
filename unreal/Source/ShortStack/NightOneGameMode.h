@@ -67,6 +67,22 @@ public:
 	/** Goes live on Kast, or ends the stream; returns why not when it can't. */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	FString TestStream(bool bLive);
+	/** Starts a new career with this screen name (the title screen's New career). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestNewCareer(const FString& ScreenName);
+	/** A click on the laptop's screen at client coordinates (1600 x 1000): pressed now, released a moment later. From
+	 *  then on the real mouse no longer moves the screen's pointer (a script is playing). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestClick(float X, float Y);
+	/** A key, as the player's keyboard sends it ("f", "c", "r", "a", "ArrowUp", " " to lean...). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestKey(const FString& Key);
+	/** The mouse wheel over the screen (lists scroll). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestWheel(float Delta);
+	/** The game as text: the career, the open table (seats, cards, the board, the pot, what the player may do), results. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestDescribe() const;
 
 	/** Game time multiplier (for testing long tournaments). */
 	UPROPERTY(EditAnywhere, Category = "Short Stack")
@@ -99,6 +115,9 @@ private:
 	double UiAccum = 1.0;
 	double PhoneAccum = 1.0;
 	double MonitorAccum = 1.0;
+	// Test input: a scripted click's release, due at this real time; the real mouse is ignored once a script plays.
+	double TestReleaseAt = -1.0;
+	bool bTestInput = false;
 	double SettingsDirtyAt = -1.0;
 	float Tilt = 0.0f;
 	float Pulse = 0.0f;

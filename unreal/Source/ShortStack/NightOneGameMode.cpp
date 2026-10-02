@@ -12,6 +12,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Misc/App.h"
 #include "Misc/DateTime.h"
 #include "NightOneAudio.h"
 #include "NightOneGame.h"
@@ -23,6 +24,7 @@
 #include "SFrontEndWidget.h"
 #include "SNightOneOverlay.h"
 #include "ShortStack.h"
+#include "ShortStack/Cards.h"
 #include "ShortStack/UI/SecondScreen.h"
 #include "Widgets/Layout/SBackgroundBlur.h"
 #include "Widgets/SOverlay.h"
@@ -31,7 +33,7 @@
 
 namespace NightOneModeDetail
 {
-const TCHAR* const SettingsSlot = TEXT("Settings");
+const TCHAR* const SettingsSlot = UNightOneSaveGame::SettingsSlotName();
 
 FString SanitizeName(const FString& In)
 {
@@ -312,6 +314,112 @@ FString ANightOneGameMode::TestStream(bool bLive)
 	return UTF8_TO_TCHAR(Game->Session.GoLive().c_str());
 }
 
+void ANightOneGameMode::TestNewCareer(const FString& ScreenName)
+{
+	if (Game && !bStarted)
+	{
+		// As the title screen does: the menu closes, then the career starts.
+		Game->Menu.Close(RealTime);
+		StartNewCareer(ScreenName);
+	}
+}
+
+void ANightOneGameMode::TestClick(float X, float Y)
+{
+	if (!Game)
+	{
+		return;
+	}
+	bTestInput = true;
+	ss::ui::Pointer& P = Game->Client.UI.Ptr;
+	P.Active = true;
+	P.X = X;
+	P.Y = Y;
+	OnPress(true);
+	TestReleaseAt = RealTime + 0.12;
+}
+
+void ANightOneGameMode::TestKey(const FString& Key)
+{
+	OnKey(Key);
+}
+
+void ANightOneGameMode::TestWheel(float Delta)
+{
+	OnWheel(Delta);
+}
+
+FString ANightOneGameMode::TestDescribe() const
+{
+	if (!Game)
+	{
+		return TEXT("no game");
+	}
+	const ss::Session& S = Game->Session;
+	auto Dollars = [](int64 Cents) { return FString::Printf(TEXT("%s$%.2f"), Cents < 0 ? TEXT("-") : TEXT(""), FMath::Abs(Cents) / 100.0); };
+	auto Clock = [](double Minutes) {
+		const int32 M = FMath::FloorToInt(FMath::Fmod(FMath::Max(0.0, Minutes), 1440.0));
+		const int32 H = M / 60;
+		return FString::Printf(TEXT("%d:%02d %s"), H % 12 == 0 ? 12 : H % 12, M % 60, H < 12 ? TEXT("AM") : TEXT("PM"));
+	};
+	auto Cards = [](const std::vector<ss::Card>& Cs) {
+		FString Out;
+		for (ss::Card C : Cs)
+		{
+			Out += FString(UTF8_TO_TCHAR(ss::CardToString(C).c_str())) + TEXT(" ");
+		}
+		return Out.TrimEnd();
+	};
+	static const TCHAR* Screens[4] = {TEXT("boot"), TEXT("lobby"), TEXT("table"), TEXT("results")};
+	static const TCHAR* Rents[4] = {TEXT("due"), TEXT("paid"), TEXT("final notice"), TEXT("evicted")};
+	const ss::life::State& L = S.Life;
+	FString Out = FString::Printf(TEXT("started=%d menu=%d leaned=%d screen=%s | %s | bankroll %s | %s (world %.0f, day %d) | energy %.0f | rent %s %s, %.1f h left | streaming=%d\n"),
+		bStarted ? 1 : 0, IsMenuOpen() ? 1 : 0, IsLeanedBack() ? 0 : 1, Screens[FMath::Clamp(static_cast<int32>(S.CurrentScreen), 0, 3)],
+		UTF8_TO_TCHAR(S.HeroName.c_str()), *Dollars(S.BankrollCents), *Clock(S.ClockMinutes()), S.WorldMinutes(), static_cast<int32>(S.WorldMinutes() / 1440.0),
+		L.Energy, Rents[FMath::Clamp(static_cast<int32>(L.RentStage), 0, 3)], *Dollars(L.RentDueCents), (L.RentDeadline - S.WorldMinutes()) / 60.0, S.Streaming() ? 1 : 0);
+	if (S.TableCount() > 0)
+	{
+		Out += FString::Printf(TEXT("tables open %d (in front %d, waiting on you %d)\n"), S.TableCount(), S.FocusedTable(), S.TablesWaiting());
+	}
+	if (S.T)
+	{
+		const ss::Level& Lv = S.T->CurrentLevel();
+		Out += FString::Printf(TEXT("event: %s | level %d %lld/%lld ante %lld | %d of %d left | hands %d\n"), UTF8_TO_TCHAR(S.Joined.Name.c_str()), S.T->LevelIndex + 1,
+			static_cast<int64>(Lv.Sb), static_cast<int64>(Lv.Bb), static_cast<int64>(Lv.Ante), S.T->Remaining, S.T->Spec.Entrants, S.HandsPlayed);
+		for (const ss::SeatVis& V : S.Seats)
+		{
+			if (!V.Present)
+			{
+				continue;
+			}
+			Out += FString::Printf(TEXT("  seat %d%s %s: %lld%s%s%s%s%s%s\n"), V.Seat, V.Seat == S.ButtonSeat ? TEXT(" (button)") : TEXT(""), UTF8_TO_TCHAR(V.Name.c_str()),
+				static_cast<int64>(V.Stack), V.Bet > 0 ? *FString::Printf(TEXT(" bet %lld"), static_cast<int64>(V.Bet)) : TEXT(""),
+				V.Folded ? TEXT(" folded") : TEXT(""), V.AllIn ? TEXT(" ALL-IN") : TEXT(""),
+				V.LastAction.empty() ? TEXT("") : *FString::Printf(TEXT(" [%s]"), UTF8_TO_TCHAR(V.LastAction.c_str())),
+				V.Hole.empty() ? TEXT("") : *FString::Printf(TEXT(" cards %s"), *Cards(V.Hole)), V.IsHero ? TEXT("  <- you") : TEXT(""));
+		}
+		Out += FString::Printf(TEXT("board: %s | pot %lld\n"), S.Board.empty() ? TEXT("(none)") : *Cards(S.Board), static_cast<int64>(S.PotChips));
+		if (S.HasPrompt)
+		{
+			const ss::HeroPrompt& P = S.Prompt;
+			Out += FString::Printf(TEXT("YOUR TURN: to call %lld%s | pot %lld | raise %s (min %lld, max %lld, set to %lld) | bb %lld | %.0f s left\n"),
+				static_cast<int64>(P.ToCall), P.CanCheck ? TEXT(" (can check)") : TEXT(""), static_cast<int64>(P.Pot), P.CanRaise ? (P.IsBet ? TEXT("bet") : TEXT("to")) : TEXT("not allowed"),
+				static_cast<int64>(P.MinRaise), static_cast<int64>(P.MaxRaise), static_cast<int64>(P.RaiseTo), static_cast<int64>(P.BigBlind), P.Deadline - S.Now);
+		}
+	}
+	if (S.HasResults)
+	{
+		const ss::Results& R = S.LastResults;
+		Out += FString::Printf(TEXT("results: %s, %d of %d, prize %s (buy-in %s), %d hands, accuracy %.0f%%\n"), UTF8_TO_TCHAR(R.EventName.c_str()), R.Place, R.Entrants,
+			*Dollars(R.PrizeCents), *Dollars(R.BuyInCents), R.Hands, R.AccuracyPct);
+	}
+	for (size_t I = 0; I < L.Ledger.size() && I < 3; ++I)
+	{
+		Out += FString::Printf(TEXT("ledger: %s %s\n"), UTF8_TO_TCHAR(L.Ledger[I].Label.c_str()), *Dollars(L.Ledger[I].Amount));
+	}
+	return Out;
+}
+
 void ANightOneGameMode::CreateViewportWidgets()
 {
 	UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr;
@@ -510,6 +618,8 @@ void ANightOneGameMode::ApplySettings(const ss::ui::GameSettings& NewSettings, b
 	{
 		Audio->SetMix(static_cast<float>(NewSettings.MasterVolume) / 100.0f, static_cast<float>(NewSettings.EffectsVolume) / 100.0f, static_cast<float>(NewSettings.AmbienceVolume) / 100.0f);
 	}
+	// The engine mutes a game whose window isn't in front unless told otherwise.
+	FApp::SetUnfocusedVolumeMultiplier(NewSettings.BackgroundAudio ? 1.0f : 0.0f);
 	LookSensitivity = static_cast<float>(NewSettings.LookSensitivity) / 100.0f;
 	bInvertLook = NewSettings.InvertLook;
 	bShowHints = NewSettings.ShowHints;
@@ -696,6 +806,11 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		}
 	}
 
+	if (TestReleaseAt >= 0.0 && RealTime >= TestReleaseAt)
+	{
+		TestReleaseAt = -1.0;
+		OnRelease();
+	}
 	const bool bBeat = Audio && Audio->ConsumeBeat();
 	ss::Session& S = Game->Session;
 	if (!bPaused)
@@ -829,6 +944,10 @@ void ANightOneGameMode::OnMouse(bool bOverScreen, const FVector2D& Client, float
 	}
 	bOverScreenNow = bOverScreen;
 	ss::ui::Pointer& P = Game->Client.UI.Ptr;
+	if (bTestInput)
+	{
+		return; // a script is playing: its clicks place the pointer
+	}
 	if (Seat->Focus > 0.85f)
 	{
 		P.Active = bOverScreen;

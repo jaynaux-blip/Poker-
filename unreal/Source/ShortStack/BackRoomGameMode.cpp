@@ -24,6 +24,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Tournament.h"
+#include "ShortStack/UI/FrontEnd.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBackRoom, Log, All);
 
@@ -1007,6 +1008,22 @@ void ABackRoomGameMode::StartPlay()
 	FindOrSpawnStage();
 	const bool bCareer = bLive || LoadCareer();
 	SeatEveryone();
+	// The player's volumes (and whether to keep playing behind another window), as set in the apartment's menus.
+	{
+		ss::ui::GameSettings Settings;
+		if (UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SettingsSlotName(), 0))
+		{
+			if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SettingsSlotName(), 0)))
+			{
+				ss::ui::GameSettings::Parse(std::string(TCHAR_TO_UTF8(*Obj->Data)), Settings);
+			}
+		}
+		if (UNightOneAudio* A = Table ? Table->GetAudio() : nullptr)
+		{
+			A->SetMix(Settings.MasterVolume / 100.0f, Settings.EffectsVolume / 100.0f, Settings.AmbienceVolume / 100.0f);
+		}
+		FApp::SetUnfocusedVolumeMultiplier(Settings.BackgroundAudio ? 1.0f : 0.0f);
+	}
 	if (bCareer)
 	{
 		BeginArrival();

@@ -16,4 +16,6 @@ public:
 	FString Data;
 
 	static const TCHAR* SlotName() { return TEXT("NightOne"); }
+	/** The player's settings (ss::ui::GameSettings, serialized as text) live in their own slot. */
+	static const TCHAR* SettingsSlotName() { return TEXT("Settings"); }
 };

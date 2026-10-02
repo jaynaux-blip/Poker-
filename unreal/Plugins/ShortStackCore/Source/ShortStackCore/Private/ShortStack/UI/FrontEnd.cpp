@@ -245,6 +245,7 @@ std::string GameSettings::Serialize() const
 	Put("master", MasterVolume);
 	Put("effects", EffectsVolume);
 	Put("ambience", AmbienceVolume);
+	Put("bgaudio", BackgroundAudio ? 1 : 0);
 	Put("sensitivity", LookSensitivity);
 	Put("invert", InvertLook ? 1 : 0);
 	Put("hints", ShowHints ? 1 : 0);
@@ -291,6 +292,7 @@ bool GameSettings::Parse(const std::string& Text, GameSettings& Out)
 		else if (Name == "master") S.MasterVolume = std::clamp(N, 0, 100);
 		else if (Name == "effects") S.EffectsVolume = std::clamp(N, 0, 100);
 		else if (Name == "ambience") S.AmbienceVolume = std::clamp(N, 0, 100);
+		else if (Name == "bgaudio") S.BackgroundAudio = N != 0;
 		else if (Name == "sensitivity") S.LookSensitivity = std::clamp(N, 20, 200);
 		else if (Name == "invert") S.InvertLook = N != 0;
 		else if (Name == "hints") S.ShowHints = N != 0;
@@ -789,6 +791,8 @@ std::vector<FrontEnd::SettingRow> FrontEnd::Rows(int ForTab)
 		Slider("Master volume", "Everything you hear.", -1, 0, 100, 5, "", [&S] { return S.MasterVolume; }, [&S](int V) { S.MasterVolume = V; });
 		Slider("Effects", "Chips, cards, the laptop and the phone.", -1, 0, 100, 5, "", [&S] { return S.EffectsVolume; }, [&S](int V) { S.EffectsVolume = V; });
 		Slider("Ambience", "Rain on the window, thunder and the city at night.", -1, 0, 100, 5, "", [&S] { return S.AmbienceVolume; }, [&S](int V) { S.AmbienceVolume = V; });
+		Choice("Sound in background", "Keeps playing when another window is in front: a second screen, a stream, a chat.", -1, OffOn,
+			[&S] { return S.BackgroundAudio ? 1 : 0; }, [&S](int V) { S.BackgroundAudio = V != 0; });
 		break;
 	default:
 		Slider("Look sensitivity", "How far the view turns as you move the mouse while sitting back.", -1, 20, 200, 10, "%", [&S] { return S.LookSensitivity; },

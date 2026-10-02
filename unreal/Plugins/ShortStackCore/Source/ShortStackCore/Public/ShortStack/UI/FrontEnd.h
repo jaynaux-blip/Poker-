@@ -30,6 +30,7 @@ struct GameSettings
 	int MasterVolume = 80;
 	int EffectsVolume = 100;
 	int AmbienceVolume = 100;
+	bool BackgroundAudio = true; // keep playing with another window in front
 	// Controls
 	int LookSensitivity = 100;   // percent
 	bool InvertLook = false;
