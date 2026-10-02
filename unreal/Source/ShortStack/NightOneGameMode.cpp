@@ -1,6 +1,7 @@
 #include "NightOneGameMode.h"
 
 #include "Engine/Engine.h"
+#include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
@@ -22,6 +23,7 @@
 #include "SFrontEndWidget.h"
 #include "SNightOneOverlay.h"
 #include "ShortStack.h"
+#include "ShortStack/UI/SecondScreen.h"
 #include "Widgets/Layout/SBackgroundBlur.h"
 #include "Widgets/SOverlay.h"
 
@@ -284,6 +286,30 @@ void ANightOneGameMode::StartPlay()
 	{
 		Begin(FString());
 	}
+}
+
+void ANightOneGameMode::TestLook(float Lean, float Yaw, float Pitch)
+{
+	if (ANightOnePawn* Seat = GetSeat())
+	{
+		Seat->TargetFocus = FMath::Clamp(Lean, 0.0f, 1.0f);
+		Seat->Yaw = Yaw;
+		Seat->Pitch = Pitch;
+	}
+}
+
+FString ANightOneGameMode::TestStream(bool bLive)
+{
+	if (!Game)
+	{
+		return TEXT("no game");
+	}
+	if (!bLive)
+	{
+		Game->Session.EndStream();
+		return TEXT("ended");
+	}
+	return UTF8_TO_TCHAR(Game->Session.GoLive().c_str());
 }
 
 void ANightOneGameMode::CreateViewportWidgets()
@@ -709,7 +735,8 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	// The player's hands follow the head and the pointer; they sit out the establishing shot.
 	if (Seat)
 	{
-		Stage->UpdateArms(static_cast<float>(Dt), Seat->GetActorLocation(), ArmsPointer, bStarted && !Game->Menu.WantsEstablishingShot());
+		Stage->UpdateArms(static_cast<float>(Dt), Seat->GetActorLocation(), Seat->Camera ? Seat->Camera->GetForwardVector() : Seat->GetActorForwardVector(), ArmsPointer,
+		                  bStarted && !Game->Menu.WantsEstablishingShot());
 	}
 
 	// The world reacts to the game.
@@ -744,6 +771,43 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		const ss::gear::Glow Leds = S.RoomGlow(GameTime);
 		const FLinearColor LedColor = FLinearColor::FromSRGBColor(FColor(static_cast<uint8>((Leds.Rgb >> 16) & 0xff), static_cast<uint8>((Leds.Rgb >> 8) & 0xff), static_cast<uint8>(Leds.Rgb & 0xff)));
 		Stage->SetRoomLights(Leds.On, LedColor, static_cast<float>(Leds.Level));
+		// What the player owns, set up in the room, and what their career has left on the windowsill. The PC's RGB
+		// follows the kit (or cycles through the rainbow on its own); the streaming lights come on while live.
+		const ss::gear::Effects& Fx = S.GearFx();
+		FRoomGear Room;
+		Room.bMonitor = S.Owns("monitor-24");
+		Room.bMonitorWide = S.Owns("monitor-27");
+		Room.Towers = Fx.PcTier >= 3 ? 2 : (Fx.PcTier >= 2 ? 1 : 0);
+		Room.Cam = Fx.CamTier;
+		Room.Mic = Fx.MicTier;
+		Room.Lights = Fx.Lights;
+		Room.bMacroPad = Fx.MacroPad;
+		Room.bHeadphones = S.Owns("headphones");
+		Room.bPlant = S.Owns("plant");
+		Room.bCurtains = S.Owns("curtains");
+		Room.bRouter = Fx.Fiber;
+		Room.bTrophy = S.Life.LiveBestPlace == 1;
+		Room.bDeeChip = S.Life.BackRoomNetCents > 0;
+		Stage->SetGear(Room);
+		const FLinearColor Rgb = Leds.On ? LedColor : FLinearColor::MakeFromHSV8(static_cast<uint8>(FMath::Fmod(RealTime * 12.0, 256.0)), 190, 255);
+		Stage->SetGearGlow(Rgb, Leds.On ? static_cast<float>(Leds.Level) : 1.0f, S.Streaming());
+	}
+	// The monitors' pictures, ten times a second (ss::ui::secondscreen).
+	MonitorAccum += Dt;
+	if (MonitorAccum >= 0.1 && (Stage->MonitorShown(0) || Stage->MonitorShown(1)))
+	{
+		MonitorAccum = 0.0;
+		for (int32 M = 0; M < 2; ++M)
+		{
+			if (Stage->MonitorShown(M))
+			{
+				TSharedPtr<ss::ui::DrawList> List = MakeShared<ss::ui::DrawList>();
+				ss::ui::Canvas Cv(*List, Game->Measurer, ss::ui::secondscreen::Width, ss::ui::secondscreen::Height,
+				                  static_cast<float>(Stage->MonitorResolution.X) / ss::ui::secondscreen::Width);
+				ss::ui::secondscreen::Draw(Cv, S, M, GameTime);
+				Stage->SetMonitorDrawList(M, List);
+			}
+		}
 	}
 
 	if (SettingsDirtyAt >= 0.0 && RealTime - SettingsDirtyAt > 0.75)

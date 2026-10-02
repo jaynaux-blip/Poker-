@@ -18,7 +18,9 @@ sys.path.insert(0, HERE)
 import bpy  # noqa: E402
 from artkit import core, review  # noqa: E402
 
-ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chair', 'mouse', 'arms', 'table', 'cards', 'folding_chair', 'dryer']
+ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chair', 'mouse', 'arms', 'table', 'cards', 'folding_chair', 'dryer',
+          # GearDrop's gear in the apartment, and the career's mementos.
+          'monitor', 'tower', 'mic', 'webcam', 'lights', 'macro_pad', 'headphones', 'plant', 'curtains', 'router', 'trophy']
 
 
 def args():

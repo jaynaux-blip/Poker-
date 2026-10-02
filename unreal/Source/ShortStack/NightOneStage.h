@@ -9,6 +9,7 @@
 
 class SDrawListWidget;
 class UInstancedStaticMeshComponent;
+class ULocalLightComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UPointLightComponent;
@@ -20,6 +21,29 @@ class USkeletalMesh;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UWidgetComponent;
+
+/**
+ * What the apartment shows of the player's life: the GearDrop gear they own, set up where it would go, and the
+ * mementos their career has left (ss::Session's gear and life::State).
+ */
+struct FRoomGear
+{
+	bool bMonitor = false;     // the 24", on an arm at the right of the desk
+	bool bMonitorWide = false; // the 27", on the left (the desk lamp moves up to the windowsill)
+	int32 Towers = 0;          // the desktop PC on the floor right of the desk; 2 for the two-PC setup
+	int32 Cam = 0;             // 1 a 720p and 2 a 1080p webcam on the laptop's lid, 3 the mirrorless on a tripod
+	int32 Mic = 0;             // 1 a USB mic on the desk, 2 the broadcast mic on a boom arm
+	int32 Lights = 0;          // 1 a ring light behind the laptop, 2 key lights either side
+	bool bMacroPad = false;
+	bool bHeadphones = false;
+	bool bPlant = false;       // on the windowsill
+	bool bCurtains = false;
+	bool bRouter = false;      // fiber
+	bool bTrophy = false;      // won the Riverside's Sunday tournament
+	bool bDeeChip = false;     // came out ahead at Dee's game: a $100 chip on a little stand on the sill
+
+	bool operator==(const FRoomGear& O) const = default;
+};
 
 /**
  * The studio apartment on the third floor, 2 a.m.: room shell, desk and
@@ -71,6 +95,17 @@ public:
 	 * big hands push it up (or dip it, for a bad beat). Off hides it all.
 	 */
 	void SetRoomLights(bool bOn, const FLinearColor& Color, float Level);
+	/** Shows what the player owns and has won (hidden pieces cost nothing to render); a no-op when nothing changed. */
+	void SetGear(const FRoomGear& Gear);
+	const FRoomGear& GearShown() const { return Gear; }
+	/**
+	 * Each frame: the PCs' RGB (the LED kit's colour when it's on, the PC's own otherwise; Level as SetRoomLights),
+	 * and the streaming lights, on while the player is live.
+	 */
+	void SetGearGlow(const FLinearColor& Rgb, float Level, bool bLive);
+	/** The monitors' pictures (0: the 24" on the right, 1: the 27" on the left), drawn at MonitorResolution. */
+	void SetMonitorDrawList(int32 Index, const TSharedPtr<const ss::ui::DrawList>& List);
+	bool MonitorShown(int32 Index) const { return Index == 0 ? Gear.bMonitor : Gear.bMonitorWide; }
 	/** 0 = deep night, 1 = first light (from the tournament clock). */
 	void SetDawn(float Value);
 	/** Lens treatment: Focus 0..1 (leaned in), Tilt 0..1, Pulse 0..1 (heartbeat). */
@@ -84,8 +119,8 @@ public:
 	void ArmsKey(const FString& Name);
 	/** A click: the mouse hand's index finger presses. */
 	void ArmsClick();
-	/** Moves the arms with the head (camera location) and the mouse with the pointer (0..1 across the view). */
-	void UpdateArms(float DeltaSeconds, const FVector& CameraLocation, const FVector2D& Pointer, bool bVisible);
+	/** Moves the arms with the head (camera location and facing) and the mouse with the pointer (0..1 across the view). */
+	void UpdateArms(float DeltaSeconds, const FVector& CameraLocation, const FVector& CameraForward, const FVector2D& Pointer, bool bVisible);
 
 	/** Called when lightning strikes: (delay until thunder, strength). */
 	TFunction<void(float, float)> OnThunder;
@@ -120,6 +155,24 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|LEDs")
 	float LedEmissive = 20.0f;
 
+	/** GearDrop's gear: the PCs' RGB glow and the light it throws, the monitors' light, the streaming lights. */
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|Gear")
+	float RgbEmissive = 14.0f;
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|Gear")
+	float RgbCandela = 0.9f;
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|Gear")
+	float MonitorCandela = 0.45f;
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|Gear")
+	float StudioEmissive = 12.0f;
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|Gear")
+	float RingCandela = 2.2f;
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|Gear")
+	float KeyCandela = 3.0f;
+
+	/** The monitors' picture resolution (16:9). */
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look|Gear")
+	FIntPoint MonitorResolution = FIntPoint(1280, 720);
+
 	// Image options from Settings (applied in SetLens). BrightnessBias is the player's Brightness, in stops
 	// on top of the look's ExposureBias.
 	float BrightnessBias = 0.0f;
@@ -140,6 +193,7 @@ private:
 	void BuildOutside();
 	void BuildLights();
 	void BuildLeds();
+	void BuildGear();
 	void AttachSlate();
 
 	UMaterialInstanceDynamic* Surface(FName Key, uint32 SrgbHex, float Roughness, float Metallic = 0.0f, float Pattern = 0.0f, float Emissive = 0.0f);
@@ -270,12 +324,38 @@ private:
 	bool bLedsShown = false;
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> Cans;
+
+	// GearDrop's gear and the career's mementos (BuildGear): one group per piece, hidden unless owned.
+	UPROPERTY()
+	TArray<TObjectPtr<USceneComponent>> GearGroups;
+	UPROPERTY()
+	TArray<TObjectPtr<UWidgetComponent>> MonitorScreens; // the 24", the 27"
+	UPROPERTY()
+	TArray<TObjectPtr<URectLightComponent>> MonitorLights;
+	UPROPERTY()
+	TArray<TObjectPtr<URectLightComponent>> RgbLights; // out of each PC's open side
+	UPROPERTY()
+	TArray<TObjectPtr<ULocalLightComponent>> StudioLights; // the ring light's, then the key lights'
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> RgbMaterial;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> StudioMaterial;
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> LampComp;
+	UPROPERTY()
+	FVector LampOnDesk = FVector::ZeroVector;
+	UPROPERTY()
+	FVector LampOnSill = FVector::ZeroVector;
+	FRoomGear Gear;
+	bool bGearApplied = false;
+	int32 StudioState = -1; // the streaming lights: -1 unknown, 0 off, 1 on
 	UPROPERTY()
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> TimedMaterials; // sky, city, glass, rain: Dawn / Flash parameters
 
 	TSharedPtr<SDrawListWidget> ScreenSlate;
 	TSharedPtr<SDrawListWidget> PhoneSlate;
 	TArray<TSharedPtr<SDrawListWidget>> PropSlates;
+	TArray<TSharedPtr<SDrawListWidget>> MonitorSlates;
 	TArray<TSharedPtr<const ss::ui::DrawList>> PropLists;
 
 	FFirstPersonArms Arms;
@@ -285,6 +365,7 @@ private:
 	UPROPERTY()
 	FVector MouseHome = FVector::ZeroVector;
 	FVector2D MouseOffset = FVector2D::ZeroVector;
+	float ArmsAway = 0.0f; // 0 looking at the desk, 1 looking well off to a side (the shoulders drop out of view)
 	UPROPERTY()
 	float MouseTop = 2.6f; // height of the mouse's hump above the desk (cm)
 	/** A key's top, in world space (the Blender laptop's layout; the stand-in keyboard matches it). */

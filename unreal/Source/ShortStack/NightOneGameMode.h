@@ -60,6 +60,14 @@ public:
 	UNightOneAudio* GetAudio() const { return Audio; }
 	void ShowToast(const FString& From, const FString& Body);
 
+	// Test hooks, driven from the editor's Python for screenshots and checks.
+	/** Sits back (Lean 0) or leans in to the laptop (1), looking Yaw / Pitch (radians) while sitting back. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestLook(float Lean, float Yaw, float Pitch);
+	/** Goes live on Kast, or ends the stream; returns why not when it can't. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestStream(bool bLive);
+
 	/** Game time multiplier (for testing long tournaments). */
 	UPROPERTY(EditAnywhere, Category = "Short Stack")
 	float TimeScale = 1.0f;
@@ -90,6 +98,7 @@ private:
 	double BeganAt = -1.0;
 	double UiAccum = 1.0;
 	double PhoneAccum = 1.0;
+	double MonitorAccum = 1.0;
 	double SettingsDirtyAt = -1.0;
 	float Tilt = 0.0f;
 	float Pulse = 0.0f;

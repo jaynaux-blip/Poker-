@@ -1,6 +1,7 @@
 #include "NightOneStage.h"
 
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/LocalLightComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/PoseableMeshComponent.h"
 #include "Components/PostProcessComponent.h"
@@ -271,6 +272,7 @@ void ANightOneStage::BuildSet()
 	BuildOutside();
 	BuildLights();
 	BuildLeds();
+	BuildGear();
 }
 
 void ANightOneStage::BuildShell()
@@ -507,9 +509,13 @@ void ANightOneStage::BuildProps()
 
 	// Desk lamp (off): a dark silhouette against the window. The Blender lamp's cable runs back and
 	// drops off the desk's rear edge, 11 cm behind its base.
+	LampComp = nullptr;
+	LampOnDesk = Web(-0.66, DeskTop, DeskZ - 0.24);
+	// With the 27" monitor's arm there, the lamp goes up onto the windowsill (SetGear), clear of the recess's side wall.
+	LampOnSill = Web(-0.6, WinY0, RoomFront - 0.025);
 	if (LampMesh)
 	{
-		AddMesh(LampMesh, nullptr, Web(-0.66, DeskTop, DeskZ - 0.24), FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f));
+		LampComp = AddMesh(LampMesh, nullptr, LampOnDesk, FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f));
 	}
 	else
 	{
@@ -795,6 +801,18 @@ void ANightOneStage::AttachSlate()
 	};
 	Single(NeonWidget, Draw(P::NeonW, P::NeonH, [](ss::ui::Canvas& C) { P::NeonSign(C); }));
 	Single(Keyboard, Draw(P::KeyboardW, P::KeyboardH, [](ss::ui::Canvas& C) { P::Keyboard(C); }));
+
+	// The GearDrop monitors, drawn by the game (SetMonitorDrawList).
+	MonitorSlates.Reset();
+	for (UWidgetComponent* Panel : MonitorScreens)
+	{
+		TSharedPtr<SDrawListWidget> Sw = SNew(SDrawListWidget).DesiredSize(FVector2D(MonitorResolution.X, MonitorResolution.Y));
+		MonitorSlates.Add(Sw);
+		if (Panel)
+		{
+			Panel->SetSlateWidget(Sw);
+		}
+	}
 }
 
 void ANightOneStage::Tick(float DeltaSeconds)
@@ -1022,6 +1040,287 @@ void ANightOneStage::SetRoomLights(bool bOn, const FLinearColor& Color, float Le
 	}
 }
 
+// ------------------------------------------------------------------ GearDrop's gear and the mementos
+
+namespace NightOneStageDetail
+{
+enum EGearPiece : int32
+{
+	GearMonitor,
+	GearMonitorWide,
+	GearTower,
+	GearTower2,
+	GearWebcam,
+	GearWebcamPro,
+	GearMirrorless,
+	GearMicUsb,
+	GearMicArm,
+	GearRingLight,
+	GearKeyLights,
+	GearMacroPad,
+	GearHeadphones,
+	GearPlant,
+	GearCurtains,
+	GearRouter,
+	GearTrophy,
+	GearDeeChip,
+	GearPieces
+};
+
+/** An offset or direction in a Blender prop's own frame (x right, y away from the chair, z up) in the stage's axes. */
+FVector BlenderAxes(const FVector& B)
+{
+	return FVector(B.Y, B.X, B.Z);
+}
+
+/**
+ * The monitors (art/blender/assets/monitor.py SCREENS): where the arm's pole stands (web x), the display's center from
+ * the pole (Blender meters), its turn toward the chair and its tilt back (degrees), and its size (cm).
+ */
+struct FMonitorSpec
+{
+	double PoleX;
+	FVector Center;
+	double Yaw;
+	double Pitch;
+	FVector2D SizeCm;
+};
+const FMonitorSpec MonitorSpecs[2] = {
+	{0.56, FVector(-0.060, -0.235, 0.295), -31.9, -7.5, FVector2D(53.13, 29.89)},
+	{-0.48, FVector(-0.040, -0.245, 0.315), 33.2, -6.3, FVector2D(59.68, 33.57)},
+};
+/** The monitor arms' poles stand 3 cm in front of the desk's back edge. */
+const double PoleZ = DeskZ - 0.35 + 0.03;
+/** Where the player's face is, for the lights aimed at it. */
+const FVector FaceWeb(0.0, 1.12, 0.12);
+const FLinearColor StudioWhite(1.0f, 0.9f, 0.78f);
+const uint32 StudioOff = 0xd9d6cf;
+} // namespace NightOneStageDetail
+
+void ANightOneStage::BuildGear()
+{
+	GearGroups.Reset();
+	MonitorScreens.Reset();
+	MonitorLights.Reset();
+	RgbLights.Reset();
+	StudioLights.Reset();
+	bGearApplied = false;
+	StudioState = -1;
+	auto Emitter = [this](uint32 Hex) {
+		UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(SurfaceMaterial ? SurfaceMaterial.Get() : FallbackMaterial.Get(), this);
+		M->SetVectorParameterValue(TEXT("BaseColor"), Srgb(Hex));
+		M->SetVectorParameterValue(TEXT("Color"), Srgb(Hex));
+		M->SetScalarParameterValue(TEXT("Roughness"), 0.45f);
+		M->SetScalarParameterValue(TEXT("Pattern"), PatternNone);
+		return M;
+	};
+	RgbMaterial = Emitter(0x7c5cff);
+	StudioMaterial = Emitter(StudioOff);
+	for (int32 I = 0; I < GearPieces; ++I)
+	{
+		// The webcams clip onto the laptop's lid and tilt with it.
+		GearGroups.Add(NewPart<USceneComponent>(I == GearWebcam || I == GearWebcamPro ? LidPivot.Get() : nullptr));
+	}
+	// A Blender prop set out like the others (its front to the chair), turned Yaw degrees further: positive turns it to
+	// face more to the left, as the player sees the room.
+	auto Place = [this](int32 Piece, const TCHAR* Name, const FVector& WebAt, float Yaw, UMaterialInterface* Material = nullptr) -> UStaticMeshComponent* {
+		UStaticMesh* Mesh = LoadProp(Name);
+		if (!Mesh || !GearGroups[Piece])
+		{
+			return nullptr;
+		}
+		return AddMesh(Mesh, Material, Web(WebAt.X, WebAt.Y, WebAt.Z), FVector(1.0), FRotator(0.0f, ImportYaw + Yaw, 0.0f), GearGroups[Piece], Material == nullptr);
+	};
+	auto Light = [this](int32 Piece, const FVector& At, const FVector& Aim, float Width, float Height, float BarnDoor, float Radius) {
+		URectLightComponent* L = NewPart<URectLightComponent>(GearGroups[Piece]);
+		L->SetRelativeLocationAndRotation(At, Aim.Rotation());
+		L->SetIntensityUnits(ELightUnits::Candelas);
+		L->SetSourceWidth(Width);
+		L->SetSourceHeight(Height);
+		L->SetBarnDoorAngle(BarnDoor);
+		L->SetAttenuationRadius(Radius);
+		L->SetCastShadows(false);
+		return L;
+	};
+
+	// Monitors on arms either side of the laptop, turned to the chair; their pictures come from the game, and they light
+	// the desk a little.
+	for (int32 M = 0; M < 2; ++M)
+	{
+		const FMonitorSpec& Spec = MonitorSpecs[M];
+		const int32 Piece = M == 0 ? GearMonitor : GearMonitorWide;
+		const FVector Pole(Spec.PoleX, DeskTop, PoleZ);
+		Place(Piece, M == 0 ? TEXT("SM_Monitor") : TEXT("SM_MonitorWide"), Pole, 0.0f);
+		const double Yaw = FMath::DegreesToRadians(Spec.Yaw);
+		const double Pitch = FMath::DegreesToRadians(Spec.Pitch);
+		const FVector Normal = BlenderAxes(FVector(FMath::Cos(Pitch) * FMath::Sin(Yaw), -FMath::Cos(Pitch) * FMath::Cos(Yaw), -FMath::Sin(Pitch)));
+		const FVector Up = BlenderAxes(FVector(FMath::Sin(Pitch) * FMath::Sin(Yaw), -FMath::Sin(Pitch) * FMath::Cos(Yaw), FMath::Cos(Pitch)));
+		const FVector Center = Web(Pole.X, Pole.Y, Pole.Z) + BlenderAxes(Spec.Center) * 100.0;
+		UWidgetComponent* Panel = AddWidget(Center + Normal * 0.1, Facing(Normal, Up), Spec.SizeCm, MonitorResolution, false, false, GearGroups[Piece]);
+		Panel->SetTintColorAndOpacity(FLinearColor(0.8f, 0.8f, 0.8f, 1.0f));
+		Panel->SetRedrawTime(1.0f / 15.0f);
+		MonitorScreens.Add(Panel);
+		URectLightComponent* Glow = Light(Piece, Center + Normal * 2.0, Normal, Spec.SizeCm.X, Spec.SizeCm.Y, 80.0f, 320.0f);
+		Glow->SetIntensity(MonitorCandela);
+		Glow->SetLightColor(FLinearColor(0.7f, 0.82f, 1.0f));
+		Glow->SetSpecularScale(0.2f);
+		MonitorLights.Add(Glow);
+	}
+
+	// The PC on the floor by the desk's front corner, where the player sees it beside them, its open side turned to the
+	// chair (behind the desk it would hide under the top); the second PC of the two-PC setup beside it. Their RGB takes
+	// the LED kit's colour (SetGearGlow) and spills across the floor and the chair.
+	for (int32 T = 0; T < 2; ++T)
+	{
+		const int32 Piece = T == 0 ? GearTower : GearTower2;
+		const FVector At(1.0 + 0.3 * T, 0.0, -0.15 - 0.04 * T);
+		const float Yaw = -16.0f + 6.0f * T;
+		Place(Piece, TEXT("SM_Tower"), At, Yaw);
+		if (UStaticMeshComponent* Lit = Place(Piece, TEXT("SM_Tower_Glow"), At, Yaw, RgbMaterial))
+		{
+			Lit->SetCastShadow(false);
+		}
+		const FRotator Turn(0.0f, Yaw, 0.0f);
+		const FVector Out = Turn.RotateVector(BlenderAxes(FVector(-1.0, 0.0, 0.0)));
+		RgbLights.Add(Light(Piece, Web(At.X, At.Y, At.Z) + Turn.RotateVector(BlenderAxes(FVector(-0.1, 0.0, 0.25))) * 100.0, Out, 40.0f, 42.0f, 85.0f, 260.0f));
+	}
+
+	// Cameras: the webcams on the lid, the mirrorless on its tripod behind the laptop.
+	Place(GearWebcam, TEXT("SM_Webcam"), FVector::ZeroVector, 0.0f);
+	Place(GearWebcamPro, TEXT("SM_WebcamPro"), FVector::ZeroVector, 0.0f);
+	Place(GearMirrorless, TEXT("SM_Mirrorless"), FVector(0.12, DeskTop, -0.815), 7.0f);
+	// Mics: the USB mic beside the laptop, the broadcast mic's arm clamped to the desk's left edge.
+	Place(GearMicUsb, TEXT("SM_MicUsb"), FVector(-0.235, DeskTop, -0.58), -18.0f);
+	Place(GearMicArm, TEXT("SM_MicArm"), FVector(-0.775, DeskTop, -0.46), 0.0f);
+
+	// Streaming lights, lit while live (SetGearGlow): the ring light behind the laptop, or key lights on the desk's edges.
+	{
+		const FVector At(0.0, DeskTop, -0.83);
+		Place(GearRingLight, TEXT("SM_RingLight"), At, 0.0f);
+		Place(GearRingLight, TEXT("SM_RingLight_Glow"), At, 0.0f, StudioMaterial);
+		const FVector Ring = Web(At.X, At.Y + 0.5, At.Z + 0.03);
+		StudioLights.Add(Light(GearRingLight, Ring, (Web(FaceWeb.X, FaceWeb.Y, FaceWeb.Z) - Ring).GetSafeNormal(), 28.0f, 28.0f, 55.0f, 360.0f));
+	}
+	for (int32 Side = -1; Side <= 1; Side += 2)
+	{
+		const FVector At(0.77 * Side, DeskTop, -0.70);
+		Place(GearKeyLights, Side < 0 ? TEXT("SM_KeyLight_L") : TEXT("SM_KeyLight_R"), At, 0.0f);
+		Place(GearKeyLights, Side < 0 ? TEXT("SM_KeyLight_L_Glow") : TEXT("SM_KeyLight_R_Glow"), At, 0.0f, StudioMaterial);
+		// The panel sits on the pole's head (lights.py: KEY_Z), 5 cm out toward the face and 3 cm up.
+		const FVector Head = Web(At.X, DeskTop + 0.714, At.Z);
+		const FVector Aim = (Web(FaceWeb.X, FaceWeb.Y, FaceWeb.Z) - Head).GetSafeNormal();
+		StudioLights.Add(Light(GearKeyLights, Head + Aim * 7.5 + FVector(0.0, 0.0, 3.0), Aim, 33.0f, 23.0f, 45.0f, 380.0f));
+	}
+	for (ULocalLightComponent* L : StudioLights)
+	{
+		L->SetLightColor(StudioWhite);
+		L->SetSpecularScale(0.3f);
+	}
+
+	// The rest of the desk, the window and the sill.
+	Place(GearMacroPad, TEXT("SM_MacroPad"), FVector(-0.27, DeskTop, -0.40), -12.0f);
+	Place(GearHeadphones, TEXT("SM_Headphones"), FVector(0.66, DeskTop, -0.36), 25.0f);
+	Place(GearPlant, TEXT("SM_Plant"), FVector(-0.13, WinY0, RoomFront - 0.02), 0.0f);
+	Place(GearCurtains, TEXT("SM_Curtains"), FVector(0.0, 0.0, RoomFront), 0.0f);
+	Place(GearRouter, TEXT("SM_Router"), FVector(0.56, WinY0, RoomFront - 0.035), 0.0f);
+	// Mementos on the sill: the Riverside's cup, and the chip from Dee's back room standing in its stand.
+	Place(GearTrophy, TEXT("SM_Trophy"), FVector(0.26, WinY0, RoomFront - 0.025), 13.0f);
+	{
+		const FVector At(0.05, WinY0, RoomFront + 0.015);
+		const float Yaw = 4.0f;
+		Place(GearDeeChip, TEXT("SM_ChipStand"), At, Yaw);
+		if (UStaticMesh* Chip = LoadProp(TEXT("SM_Chip_100")))
+		{
+			// Upright in the slot and leaning back (trophy.py: SLOT, SLOT_TILT), its face to the room.
+			const FRotator Turn(0.0f, Yaw, 0.0f);
+			const FVector Seat = Web(At.X, At.Y, At.Z) + Turn.RotateVector(BlenderAxes(FVector(0.0, 0.0096, 0.0328))) * 100.0;
+			const FRotator Upright = (FQuat(FRotator(78.0f, Yaw, 0.0f)) * FQuat(FRotator(0.0f, ImportYaw, 0.0f))).Rotator();
+			AddMesh(Chip, nullptr, Seat, FVector(1.0), Upright, GearGroups[GearDeeChip]);
+		}
+	}
+	for (USceneComponent* Group : GearGroups)
+	{
+		Group->SetVisibility(false, true);
+	}
+}
+
+void ANightOneStage::SetGear(const FRoomGear& NewGear)
+{
+	if (bGearApplied && NewGear == Gear)
+	{
+		return;
+	}
+	Gear = NewGear;
+	bGearApplied = true;
+	const bool Shown[GearPieces] = {Gear.bMonitor, Gear.bMonitorWide, Gear.Towers >= 1, Gear.Towers >= 2, Gear.Cam == 1, Gear.Cam == 2, Gear.Cam >= 3,
+	                                Gear.Mic == 1, Gear.Mic >= 2, Gear.Lights == 1, Gear.Lights >= 2, Gear.bMacroPad, Gear.bHeadphones, Gear.bPlant,
+	                                Gear.bCurtains, Gear.bRouter, Gear.bTrophy, Gear.bDeeChip};
+	for (int32 I = 0; I < GearGroups.Num() && I < GearPieces; ++I)
+	{
+		if (GearGroups[I])
+		{
+			GearGroups[I]->SetVisibility(Shown[I], true);
+		}
+	}
+	if (LampComp)
+	{
+		LampComp->SetRelativeLocation(Gear.bMonitorWide ? LampOnSill : LampOnDesk);
+	}
+	StudioState = -1; // showing a group shows its lights: SetGearGlow sets them again
+}
+
+void ANightOneStage::SetGearGlow(const FLinearColor& Rgb, float Level, bool bLive)
+{
+	const float L = FMath::Clamp(Level, 0.0f, 2.0f);
+	if (Gear.Towers > 0)
+	{
+		if (RgbMaterial)
+		{
+			RgbMaterial->SetVectorParameterValue(TEXT("BaseColor"), Rgb);
+			RgbMaterial->SetVectorParameterValue(TEXT("Color"), Rgb);
+			RgbMaterial->SetScalarParameterValue(TEXT("Emissive"), RgbEmissive * L);
+		}
+		for (URectLightComponent* Spill : RgbLights)
+		{
+			if (Spill)
+			{
+				Spill->SetLightColor(Rgb);
+				Spill->SetIntensity(RgbCandela * L);
+			}
+		}
+	}
+	const int32 State = bLive && Gear.Lights > 0 ? 1 : 0;
+	if (State == StudioState)
+	{
+		return;
+	}
+	StudioState = State;
+	if (StudioMaterial)
+	{
+		const FLinearColor Diffuser = State ? StudioWhite : Srgb(StudioOff);
+		StudioMaterial->SetVectorParameterValue(TEXT("BaseColor"), Diffuser);
+		StudioMaterial->SetVectorParameterValue(TEXT("Color"), Diffuser);
+		StudioMaterial->SetScalarParameterValue(TEXT("Emissive"), State ? StudioEmissive : 0.0f);
+	}
+	for (int32 I = 0; I < StudioLights.Num(); ++I)
+	{
+		if (ULocalLightComponent* Studio = StudioLights[I])
+		{
+			const bool bThis = I == 0 ? Gear.Lights == 1 : Gear.Lights >= 2;
+			Studio->SetIntensity(I == 0 ? RingCandela : KeyCandela);
+			Studio->SetVisibility(State == 1 && bThis);
+		}
+	}
+}
+
+void ANightOneStage::SetMonitorDrawList(int32 Index, const TSharedPtr<const ss::ui::DrawList>& List)
+{
+	if (MonitorSlates.IsValidIndex(Index) && MonitorSlates[Index])
+	{
+		MonitorSlates[Index]->SetDrawList(List);
+	}
+}
+
 void ANightOneStage::SetScreenGlow(const FLinearColor& Color, float Brightness)
 {
 	ScreenGlow = Color;
@@ -1092,7 +1391,7 @@ void ANightOneStage::ArmsClick()
 	}
 }
 
-void ANightOneStage::UpdateArms(float DeltaSeconds, const FVector& CameraLocation, const FVector2D& Pointer, bool bVisible)
+void ANightOneStage::UpdateArms(float DeltaSeconds, const FVector& CameraLocation, const FVector& CameraForward, const FVector2D& Pointer, bool bVisible)
 {
 	const float Dt = FMath::Max(0.0f, DeltaSeconds);
 	// The mouse follows the hand that moves it: a few centimeters across the pad for the whole screen.
@@ -1116,7 +1415,13 @@ void ANightOneStage::UpdateArms(float DeltaSeconds, const FVector& CameraLocatio
 	{
 		Head = FVector::ZeroVector;
 	}
-	ArmsRoot->SetRelativeLocation(EyeLocal + Web(0.0, -0.20, -0.13) + Head * 0.7);
+	// Turned well off to a side, the eye would look down onto the tops of the shoulders, right under it: they drop
+	// and ease back out of view (closer to the hands, so the hands keep their places).
+	const FVector Look = X.InverseTransformVectorNoScale(CameraForward);
+	const float Turn = FMath::Abs(FMath::Atan2(static_cast<float>(Look.Y), static_cast<float>(FMath::Max(Look.X, 0.01))));
+	const float AwayGoal = FMath::SmoothStep(0.3f, 0.75f, Turn);
+	ArmsAway += (AwayGoal - ArmsAway) * (1.0f - FMath::Exp(-Dt * 6.0f));
+	ArmsRoot->SetRelativeLocation(EyeLocal + Web(0.0, -0.20 - 0.10 * ArmsAway, -0.13 + 0.05 * ArmsAway) + Head * 0.7);
 	if (!Arms.IsReady())
 	{
 		if (ArmsInitTries++ > 120 || !Arms.Init(ArmsComp))
