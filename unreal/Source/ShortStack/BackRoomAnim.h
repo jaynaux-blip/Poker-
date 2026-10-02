@@ -45,6 +45,9 @@ struct FBackRoomBodyPose
 	FVector FingerDir[2] = {FVector(-0.3, 1.0, 0.0), FVector(0.3, 1.0, 0.0)};
 	/** How strongly each arm follows its hand target (0 hangs in the reference pose). */
 	float HandWeight[2] = {1.0f, 1.0f};
+	/** Where each elbow wants to be (component space), or zero for the default (out and down): the elbow
+	 *  resting on the rail, or hanging at the side when the hand is in the lap. */
+	FVector ElbowAt[2] = {FVector::ZeroVector, FVector::ZeroVector};
 	/** 0 flat .. 1 fist; Pinch closes the index and thumb (holding a chip or a card corner). */
 	float Curl[2] = {0.35f, 0.35f};
 	float ThumbCurl[2] = {0.2f, 0.2f};

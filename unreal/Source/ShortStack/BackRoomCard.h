@@ -43,11 +43,28 @@ public:
 	bool IsMoving() const { return MoveT < 1.0f || FlipT < 1.0f; }
 
 	/**
-	 * Curls the short edge facing Toward (a world point) up by Amount (0..1): a peek. At 1 the edge stands
-	 * MaxLift radians up: about 60 degrees for a careful player across the table; the hero's own peek curls
-	 * on past upright (deeper, softer) so the face's index turns up to the eyes above it.
+	 * A peek: the corner nearest Toward (a world point: the peeker's eyes) that carries an index is lifted and
+	 * curled back toward them, a rounded tongue about 5.6 cm deep at the corner and dying away along the edge
+	 * (the hinge is a parabola about the corner, so it isn't a fin across the card). At Amount 1 its
+	 * tip stands MaxLift radians up: about 60 degrees for a careful player across the table; the hero's own
+	 * peek curls on past upright, so the face's index turns up to the eyes above it.
 	 */
 	void SetPeek(float Amount, const FVector& Toward, float MaxLift = 1.05f);
+	/** The lifted corner, at Amount of a peek from Toward (world): where the very tip is. */
+	FVector GetPeekTip(float Amount, const FVector& Toward, float MaxLift) const;
+	/** Where fingers pinch the lifted corner: the tip, drawn a little in along the near edge so the index stays clear. */
+	FVector GetPeekGrip(float Amount, const FVector& Toward, float MaxLift) const;
+	/** Which side of the peeker (the right vector of where they sit) the lifted corner is on: +1 right, -1 left. */
+	float GetPeekSide(const FVector& Toward, const FVector& PeekerRight) const;
+	/**
+	 * Which side of a player (+1 their right, -1 their left) the index corner of a face-down card lies on: the
+	 * near corner a peek lifts, on a card held the usual way (its long side toward them, the print's top away).
+	 * The table fans the hole cards by it (the front card's index corner stays clear of the back card's).
+	 */
+	static float NearIndexSide();
+	/** The card's size (cm). */
+	static constexpr double Width = 6.35;
+	static constexpr double Length = 8.89;
 	/** Stops any motion where the card is (a hand has picked it up and places it each frame). */
 	void Stop() { MoveT = FlipT = 1.0f; }
 
@@ -58,6 +75,20 @@ public:
 private:
 	void ApplyMaterials();
 	void ApplyBend();
+
+	/** The dog-ear a peek lifts: its corner (local, signs), the direction into the card it hinges along, and where. */
+	struct FFlap
+	{
+		FVector2D Corner = FVector2D(1.0, 1.0);
+		float Angle = 0.0f;
+		float Hinge = 0.0f;
+		/** Where the corner sits along the hinge line: the lift is strongest here and tapers away from it. */
+		float Anchor = 0.0f;
+	};
+	FFlap FlapToward(const FVector& Toward) const;
+	/** A point of the card (local, cm; Height above the mid-plane toward the ceiling) bent by Lift, as the material does. */
+	FVector BendLocal(const FVector& Local, const FFlap& Flap, float Lift, float Radius, float Height) const;
+	static float RadiusFor(float MaxLift);
 
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> Mesh;
@@ -88,6 +119,6 @@ private:
 
 	// The peek's curl.
 	float Peek = 0.0f;
-	float PeekAngle = 0.0f;
 	float PeekMax = 1.05f;
+	FFlap Flap;
 };

@@ -102,12 +102,10 @@ void ABackRoomCard::ApplyBend()
 		// The lift goes toward the ceiling whichever way up the card lies.
 		Mid->SetScalarParameterValue(TEXT("Up"), bFaceUp ? 1.0f : -1.0f);
 		Mid->SetScalarParameterValue(TEXT("Lift"), Peek * PeekMax);
-		// A soft curl (plastic cards flex, they don't fold), over the mesh's 2 mm grid; the hinge about 3.5 cm in
-		// from the near edge, enough to bare the index. A deep peek (the hero's) curls longer and rounder.
-		const bool bDeep = PeekMax > 1.3f;
-		Mid->SetScalarParameterValue(TEXT("Radius"), bDeep ? 1.9f : 1.6f);
-		Mid->SetScalarParameterValue(TEXT("Hinge"), bDeep ? -0.4f : -1.0f);
-		Mid->SetScalarParameterValue(TEXT("BendAngle"), PeekAngle);
+		Mid->SetScalarParameterValue(TEXT("Radius"), RadiusFor(PeekMax));
+		Mid->SetScalarParameterValue(TEXT("Hinge"), Flap.Hinge);
+		Mid->SetScalarParameterValue(TEXT("BendAngle"), Flap.Angle);
+		Mid->SetScalarParameterValue(TEXT("Anchor"), Flap.Anchor);
 	}
 }
 
@@ -150,17 +148,124 @@ void ABackRoomCard::Flip(bool bInFaceUp, float Duration)
 	ApplyBend();
 }
 
+namespace BackRoomCardDetail
+{
+/**
+ * The tongue a peek lifts: its hinge runs almost parallel to the near edge (LegAlong is long, so the face turns
+ * straight to the player), LegDown cm in from it at the corner.
+ */
+const double LegAlong = 33.0;
+const double LegDown = 5.6;
+/** The lift's taper along the hinge, from the corner: full to TaperIn, gone by TaperOut (the shader's smoothstep). */
+const double TaperIn = 0.6;
+const double TaperOut = 4.4;
+/** How fast the hinge falls away from the corner (the parabola's curvature, cm of depth per cm squared). */
+const double HingeCurve = 0.22;
+/** The pinch sits this far in from the tip along the near edge: on the corner itself, just clear of the index. */
+const double GripInset = -0.3;
+} // namespace BackRoomCardDetail
+
+// The index corners are the print's top-left and bottom-right; in the mesh's own frame that is a pair of corners
+// whose signs are the same (+1: as the glTF importer turned the card's axes) or opposite (-1). Kept as a console
+// variable, the one place the mesh's handedness is stated, in case the card art is ever re-exported another way.
+static TAutoConsoleVariable<int32> CVarIndexParity(TEXT("ss.CardIndexParity"), 1, TEXT("+1 or -1: sign of x*y at the mesh's index corners."), ECVF_Default);
+
+float ABackRoomCard::NearIndexSide()
+{
+	// A face-down card turned about its long axis: local x = -lateral. Its near end is local +Y.
+	return CVarIndexParity.GetValueOnAnyThread() > 0 ? -1.0f : 1.0f;
+}
+
+float ABackRoomCard::RadiusFor(float MaxLift)
+{
+	// A light peek curls tight and short; a deep one rolls the whole corner in a long, soft curve.
+	return FMath::Lerp(1.6f, 1.9f, FMath::Clamp((MaxLift - 1.05f) / 1.0f, 0.0f, 1.0f));
+}
+
+ABackRoomCard::FFlap ABackRoomCard::FlapToward(const FVector& Toward) const
+{
+	// The near edge is a short edge (the long axis, local Y, points at the peeker one way or the other). The
+	// indices are the print's top-left and bottom-right corners: (-,-) and (+,+) in the mesh's frame (the print's
+	// top is -Y), so the near corner that carries one is the one whose signs agree.
+	const FVector Local = GetActorTransform().InverseTransformVector(Toward - GetActorLocation());
+	FFlap F;
+	const double Sy = Local.Y >= 0.0 ? 1.0 : -1.0;
+	F.Corner = FVector2D(Sy * (CVarIndexParity.GetValueOnAnyThread() > 0 ? 1.0 : -1.0), Sy);
+	// Into the card from the corner, so the hinge line cuts it LegAlong along the edge and LegDown down the side.
+	FVector2D D(-F.Corner.X / LegAlong, -F.Corner.Y / LegDown);
+	D.Normalize();
+	F.Angle = static_cast<float>(FMath::Atan2(D.Y, D.X));
+	const FVector2D CornerAt(F.Corner.X * Width * 0.5, F.Corner.Y * Length * 0.5);
+	F.Hinge = static_cast<float>(FVector2D::DotProduct(CornerAt, D) + LegAlong * FMath::Abs(D.X));
+	F.Anchor = static_cast<float>(FVector2D::DotProduct(CornerAt, FVector2D(-D.Y, D.X)));
+	return F;
+}
+
+FVector ABackRoomCard::BendLocal(const FVector& Local, const FFlap& F, float Lift, float Radius, float Height) const
+{
+	// The same as M_Card's bend (backroom_setup.py CARD_BEND), here for hands to follow the corner.
+	const double Up = bFaceUp ? 1.0 : -1.0;
+	const FVector2D D(FMath::Cos(F.Angle), FMath::Sin(F.Angle));
+	const double T = Local.X * D.X + Local.Y * D.Y;
+	// The hinge is a parabola about the corner, and the lift is strongest there and dies away along it (as the
+	// material does).
+	const double Dp = Local.X * -D.Y + Local.Y * D.X - F.Anchor;
+	const double S = F.Hinge - T - HingeCurve * Dp * Dp;
+	const double Smooth = FMath::Clamp((FMath::Abs(Dp) - TaperIn) / (TaperOut - TaperIn), 0.0, 1.0);
+	Lift *= static_cast<float>(1.0 - Smooth * Smooth * (3.0 - 2.0 * Smooth));
+	if (S <= 0.0 || Lift <= 0.0001f)
+	{
+		return Local + FVector(0.0, 0.0, Up * Height);
+	}
+	const double R = FMath::Max(Radius, 0.2f);
+	const double Arc = Lift * R;
+	double U, Z, Phi;
+	if (S <= Arc)
+	{
+		Phi = S / R;
+		U = F.Hinge - R * FMath::Sin(Phi);
+		Z = R * (1.0 - FMath::Cos(Phi));
+	}
+	else
+	{
+		Phi = Lift;
+		U = F.Hinge - R * FMath::Sin(Lift) - (S - Arc) * FMath::Cos(Lift);
+		Z = R * (1.0 - FMath::Cos(Lift)) + (S - Arc) * FMath::Sin(Lift);
+	}
+	U += Height * FMath::Sin(Phi);
+	Z += Height * FMath::Cos(Phi);
+	const FVector2D Perp = FVector2D(Local.X, Local.Y) - T * D;
+	return FVector(Perp.X + U * D.X, Perp.Y + U * D.Y, Up * Z);
+}
+
+FVector ABackRoomCard::GetPeekTip(float Amount, const FVector& Toward, float MaxLift) const
+{
+	const FFlap F = FlapToward(Toward);
+	const FVector Corner(F.Corner.X * Width * 0.5, F.Corner.Y * Length * 0.5, 0.0);
+	return GetActorTransform().TransformPosition(BendLocal(Corner, F, FMath::Clamp(Amount, 0.0f, 1.0f) * MaxLift, RadiusFor(MaxLift), 0.0f));
+}
+
+FVector ABackRoomCard::GetPeekGrip(float Amount, const FVector& Toward, float MaxLift) const
+{
+	const FFlap F = FlapToward(Toward);
+	const FVector Grip(F.Corner.X * (Width * 0.5 - GripInset), F.Corner.Y * Length * 0.5, 0.0);
+	return GetActorTransform().TransformPosition(BendLocal(Grip, F, FMath::Clamp(Amount, 0.0f, 1.0f) * MaxLift, RadiusFor(MaxLift), 0.0f));
+}
+
+float ABackRoomCard::GetPeekSide(const FVector& Toward, const FVector& PeekerRight) const
+{
+	const FFlap F = FlapToward(Toward);
+	const FVector Corner = GetActorTransform().TransformPosition(FVector(F.Corner.X * Width * 0.5, F.Corner.Y * Length * 0.5, 0.0));
+	return FVector::DotProduct(Corner - GetActorLocation(), PeekerRight) >= 0.0 ? 1.0f : -1.0f;
+}
+
 void ABackRoomCard::SetPeek(float Amount, const FVector& Toward, float MaxLift)
 {
 	Peek = FMath::Clamp(Amount, 0.0f, 1.0f);
 	PeekMax = MaxLift;
 	if (Peek > 0.0f)
 	{
-		// The bend runs from the hinge away from the edge being lifted: point it away from the peeker, along the
-		// card's nearest axis (an edge comes up square; a bend aimed at the eyes from off to one side twists it).
-		const FVector Local = GetActorTransform().InverseTransformVector(Toward - GetActorLocation());
-		const FVector2D Away = -FVector2D(Local.X, Local.Y);
-		PeekAngle = FMath::Abs(Away.X) >= FMath::Abs(Away.Y) ? (Away.X >= 0.0 ? 0.0f : UE_PI) : (Away.Y >= 0.0 ? UE_HALF_PI : -UE_HALF_PI);
+		Flap = FlapToward(Toward);
 	}
 	ApplyBend();
 }

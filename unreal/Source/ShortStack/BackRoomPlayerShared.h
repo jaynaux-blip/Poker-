@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 
+#include "BackRoomStage.h"
+
 // Shared by ABackRoomPlayer's source files (BackRoomPlayer.cpp, BackRoomPlayerHands.cpp, BackRoomPlayerTells.cpp).
 namespace BackRoomPlayerDetail
 {
@@ -10,7 +12,7 @@ inline constexpr double SeatDepth = 20.0;
 inline constexpr float SeatHeight = 46.0f;
 // The rail's outer edge, ahead of the chair's front edge (ABackRoomStage seats players this far out),
 // and in the body's space (+Y toward the table): the rail is 13 cm wide, the felt beyond it.
-inline constexpr double RailGap = 22.0;
+inline constexpr double RailGap = ABackRoomStage::RailGap;
 inline constexpr double Rail = RailGap + SeatDepth;
 
 /** Critically damped approach of X toward Target at Rate (per second). */

@@ -46,6 +46,12 @@ public:
 	// ------------------------------------------------------------ layout
 	/** Felt height (cm): cards and chips lie here. */
 	static constexpr double FeltZ = 76.0;
+	/**
+	 * A seated player's chair front edge is this far out from the rail's outer edge (cm). Close, as people sit at a
+	 * card table: the belly an arm's length less a forearm from the rail, the elbows resting on it, the hands out
+	 * over the felt (more, and the arms reach out straight and become the picture).
+	 */
+	static constexpr double RailGap = 10.0;
 	/** Where seat Index (0 = player, 4 = dealer, counterclockwise) meets the rail's outer edge. */
 	static FVector SeatEdge(int32 Index);
 	/** Where a player in seat Index sits: the chair's front edge, facing the table. */

@@ -49,8 +49,6 @@ double DryerY(int32 Index)
 }
 // The table's straight run: the ends are half circles around (0, +/-HalfL).
 const double HalfL = 61.0;
-// A seated player's chair front edge is this far out from the rail (cm): forearms on the rail.
-const double RailGap = 22.0;
 } // namespace BackRoomDetail
 
 using namespace BackRoomDetail;
@@ -97,8 +95,8 @@ FTransform ABackRoomStage::SeatTransform(int32 Index)
 
 FVector ABackRoomStage::EyeLocation() const
 {
-	// Seated, leaning in a little: 30 cm back from the rail, eyes 1.18 m up.
-	return GetActorTransform().TransformPosition(FVector(Seats[0].X - 30.0, 0.0, 118.0));
+	// Seated close, leaning in a little: just behind the rail's outer edge, eyes 1.3 m up.
+	return GetActorTransform().TransformPosition(FVector(Seats[0].X - 6.0, 0.0, 130.0));
 }
 
 // ------------------------------------------------------------------ building blocks

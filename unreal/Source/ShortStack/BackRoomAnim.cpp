@@ -270,7 +270,7 @@ bool FBackRoomBodyProxy::Evaluate(FPoseContext& Output)
 			Target += P.Tremble * FVector(Wobble(T, 1.3f + Side), Wobble(T * 1.1f, 4.1f + Side), Wobble(T * 0.9f, 7.7f + Side));
 		}
 		// Elbows out and down: forearms come to rest along the rail's padding.
-		const FVector Pole = S.Pos(Upper) + FVector(Sx * 40.0, 14.0, -34.0);
+		const FVector Pole = P.ElbowAt[Side].IsZero() ? S.Pos(Upper) + FVector(Sx * 40.0, 14.0, -34.0) : P.ElbowAt[Side];
 		FVector Joint, End;
 		AnimationCore::SolveTwoBoneIK(S.Pos(Upper), S.Pos(Lower), S.Pos(Hand), Pole, Target, Joint, End, false, 1.0, 1.0);
 		S.Aim(Upper, Lower, Joint - S.Pos(Upper), W);

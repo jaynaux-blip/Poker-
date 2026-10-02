@@ -69,6 +69,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Short Stack")
 	float Pitch = -14.0f;
 
+	/** A free camera for looking at the table from outside (for testing from scripts): bOn takes the view, off gives it back. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestExtCam(FVector Pos, FVector At, float Fov, bool bOn);
+
 	/** Hold the peek or Focus without input (for testing from scripts). */
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Test")
 	bool bTestPeek = false;
@@ -107,6 +111,10 @@ private:
 	float Time = 0.0f;
 	float PeekBlend = 0.0f;
 	bool bPeekReported = false;
+	bool bExtCam = false;
+	FVector ExtPos = FVector::ZeroVector;
+	FVector ExtAt = FVector::ZeroVector;
+	float ExtFov = 50.0f;
 
 	// The walk.
 	TArray<FVector> WalkPoints;

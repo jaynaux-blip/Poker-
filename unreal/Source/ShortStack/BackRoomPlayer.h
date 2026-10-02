@@ -155,6 +155,8 @@ struct FBackRoomPersona
 struct FBackRoomSeatSpots
 {
 	FVector Cards = FVector::ZeroVector;
+	/** The two hole cards laid side by side, to be turned over (they lie fanned, overlapped, until then). */
+	FTransform Spread[2];
 	FVector Stack = FVector::ZeroVector;
 	FVector Bet = FVector::ZeroVector;
 	/** Toward the middle of the table, along the felt. */
@@ -230,6 +232,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Short Stack")
 	void PlayTell(EBackRoomTell Tell, float Intensity = 1.0f);
 
+	/** Turns this player's hole cards over (the showdown gesture), or has them look at their cards (a peek), for testing. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack")
+	void TestShow(bool bPeek);
+
 	/** Holds an idle habit (0..6, see HandMode) using the left (0) or right (1) hand for a minute, for testing. */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack")
 	void TestHabit(int32 Mode, int32 Side);
@@ -277,6 +283,10 @@ public:
 	FTransform GetDeckTop() const;
 	/** Hero: peeking (hold) at the hole cards with both hands. */
 	void SetHeroPeek(bool bPeeking);
+	/** How far the lifted corners are up (0..1): the peek, as the cards show it. */
+	float GetPeekAmount() const { return PeekNow; }
+	/** Where the lifted corners are, fully up (world): what the camera frames when you look at your cards. */
+	FVector GetPeekFocus() const { return PeekGripAt(1.0f); }
 	/** Hero: where the camera looks (world), so the head and neck follow it. */
 	void SetHeroLook(const FVector& At) { HeroLook = At; }
 
@@ -416,6 +426,20 @@ private:
 		double Drop = 0.0;
 	};
 	FHandPose RestPose(int32 Side) const;
+	// ---- the peek (BackRoomPlayerHands.cpp): one hand covers the cards, the other pinches the corner and lifts it
+	/** The hand that lifts the corner: the one on the side of the near corner that carries an index. */
+	int32 PeekHand() const;
+	/** The lifted corners' grip at Amount (world): between the two cards' pinch points. */
+	FVector PeekGripAt(float Amount) const;
+	/** The fingers pinching the corners as they are at Amount (0 on the felt .. 1 lifted). */
+	FHandPose PeekGripPose(int32 Side, float Amount, float Pinch) const;
+	/** The hand laid over the far half of the cards. */
+	FHandPose PeekCoverPose(int32 Side) const;
+	/** Where a hand's fingertips are (body space). */
+	FVector TipBody(int32 Side) const;
+	/** How far up the corner's path the lifting hand's fingertips are (0..1). */
+	float PeekAmountFromHand(int32 Side) const;
+	float PeekMaxLift() const { return SeatRole == EBackRoomRole::Hero ? 2.4f : 1.05f; }
 	/** Where an idle hand goes: the rest, or the habit of the moment (a chin rest, the chips, the lap...). */
 	FHandPose IdleGoal(int32 Side) const;
 	/** All zeros: a still hand's rate of change. */
@@ -461,11 +485,17 @@ private:
 	/** Torso turn (degrees), eased: leaning on an elbow turns the chest. */
 	float Twist = 0.0f;
 	bool bHeroPeek = false;
-	float HeroPeekT = 0.0f;
-	/** The hole cards' lift (0..1), eased toward the goal the hands set. */
+	/** The hero's commanded lift (0..1): the fingers rise once they have the corner. */
+	float HeroLift = 0.0f;
+	/** The hand that has the corner pinched (-1: none): the cards follow it up and down. */
+	int32 GripSide = -1;
+	/** The hand whose real fingertips are being steered onto the intended ones (-1: none), and how far the wrist is moved to do it. */
+	int32 TrackSide = -1;
+	FVector PeekBias[2] = {FVector::ZeroVector, FVector::ZeroVector};
+	/** The hole cards' lift (0..1): what the lifting fingers make of it, or the corner falling back once let go. */
 	float PeekNow = 0.0f;
-	float PeekGoal = 0.0f;
 	float PeekApplied = 0.0f;
+	bool bPeekHeard = false;
 	/** Chips on their way from the stack to the bet, in hand. */
 	TWeakObjectPtr<ABackRoomChips> Carrying;
 	FVector HeroLook = FVector::ZeroVector;

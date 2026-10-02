@@ -488,7 +488,9 @@ void ABackRoomPlayer::BeginHand()
 	bInHand = true;
 	bBluffing = bValue = bThinking = bHeroThinking = false;
 	Strength = PrevStrength = 0.5f;
-	PeekGoal = 0.0f;
+	GripSide = -1;
+	TrackSide = -1;
+	HeroLift = 0.0f;
 	for (FActiveTell& A : Active)
 	{
 		if (IsSustained(A.Tell))

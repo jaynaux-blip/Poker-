@@ -238,6 +238,8 @@ private:
 	const FSeat* HeroSeat() const;
 	/** Where things go on the felt in front of a seat. */
 	FTransform CardSpot(int32 TableSeat, int32 Index) const;
+	/** The same two cards laid side by side, clear of each other (to turn them over). */
+	FTransform SpreadSpot(int32 TableSeat, int32 Index) const;
 	FVector StackSpot(int32 TableSeat) const;
 	FVector BetSpot(int32 TableSeat) const;
 	FTransform BoardSpot(int32 Index) const;

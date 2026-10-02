@@ -360,21 +360,42 @@ CARDS_DIR = "/Game/ShortStack/Cards"
 # The peek: the card curls around a hinge line across it. Points past the hinge (t < Hinge along the
 # bend direction D) wrap onto a cylinder of Radius until they reach the Lift angle, then run straight.
 # Up is +1 when the face is up and -1 when the card lies face down (so the lift is toward the ceiling).
+# A point Height above the card's mid-plane (the print's skin: half the card's thickness) rides the
+# bend's normal, not straight up: a flap standing past vertical must keep its face and back apart, or
+# the two coincide and the print fights itself.
 CARD_BEND = """
 float2 D = float2(cos(BendAngle), sin(BendAngle));
+float2 Pd = float2(-D.y, D.x);
 float t = dot(LP.xy, D);
-float s = Hinge - t;
+float dp = dot(LP.xy, Pd) - Anchor;
+// The hinge is curved (a parabola about the corner: Anchor is the corner's place along it) so what comes up is a
+// rounded tongue around the corner, not a wing across the card; the lift also dies away along the edge.
+float s = Hinge - t - 0.22 * dp * dp;
+float h = LP.z * Up;
+float L = Lift * (1.0 - smoothstep(0.6, 4.4, abs(dp)));
 float3 outP = LP;
 float phi = 0.0;
-if (s > 0.0 && Lift > 0.0001)
+if (s > 0.0 && L > 0.0001)
 {
     float R = max(Radius, 0.2);
-    float arc = Lift * R;
+    float arc = L * R;
     float u, z;
-    if (s <= arc) { phi = s / R; u = Hinge - R * sin(phi); z = R * (1.0 - cos(phi)); }
-    else { phi = Lift; u = Hinge - R * sin(Lift) - (s - arc) * cos(Lift); z = R * (1.0 - cos(Lift)) + (s - arc) * sin(Lift); }
+    if (s <= arc)
+    {
+        phi = s / R;
+        u = Hinge - R * sin(phi);
+        z = R * (1.0 - cos(phi));
+    }
+    else
+    {
+        phi = L;
+        u = Hinge - R * sin(L) - (s - arc) * cos(L);
+        z = R * (1.0 - cos(L)) + (s - arc) * sin(L);
+    }
+    u += h * sin(phi);
+    z += h * cos(phi);
     float2 perp = LP.xy - t * D;
-    outP = float3(perp + u * D, LP.z + z * Up);
+    outP = float3(perp + u * D, Up * z);
 }
 """
 CARD_WPO = CARD_BEND + "return outP - LP;\n"
@@ -411,12 +432,12 @@ def build_card(force):
     mat.set_editor_property("tangent_space_normal", False)
     side = ss._scalar(mat, "Side", 0.0, -1400, -500)
     params = {}
-    for i, (n, v) in enumerate((("Lift", 0.0), ("Radius", 2.5), ("Hinge", 0.0), ("BendAngle", 1.5708), ("Up", 1.0))):
+    for i, (n, v) in enumerate((("Lift", 0.0), ("Radius", 2.5), ("Hinge", 0.0), ("BendAngle", 1.5708), ("Up", 1.0), ("Anchor", 0.0))):
         params[n] = ss._scalar(mat, n, v, -1400, -400 + i * 80)
     lp = ss._expr(mat, unreal.MaterialExpressionLocalPosition, -1400, 100)
 
     def bend_node(code, y, desc):
-        c = ss._custom(mat, code, ["LP", "Lift", "Radius", "Hinge", "BendAngle", "Up", "Side"], F3, -900, y, desc)
+        c = ss._custom(mat, code, ["LP", "Lift", "Radius", "Hinge", "BendAngle", "Up", "Anchor", "Side"], F3, -900, y, desc)
         ss._link(lp, c, "LP")
         for n, e in params.items():
             ss._link(e, c, n)

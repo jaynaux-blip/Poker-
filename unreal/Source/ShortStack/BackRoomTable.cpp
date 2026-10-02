@@ -19,7 +19,7 @@
 namespace BackRoomTableDetail
 {
 // ABackRoomStage's layout: a seated player's chair front edge is this far out from the rail.
-const double RailGap = 22.0;
+const double RailGap = ABackRoomStage::RailGap;
 const int64 SmallBlind = 1;
 const int64 BigBlind = 2;
 
@@ -152,6 +152,8 @@ void ABackRoomTable::AddPlayer(ABackRoomPlayer* Player, int32 TableSeat, ss::Arc
 		Player->StackPile = S.StackPile;
 		Player->BetPile = S.BetPile;
 		Player->Spots.Cards = CardSpot(TableSeat, 0).GetLocation();
+		Player->Spots.Spread[0] = SpreadSpot(TableSeat, 0);
+		Player->Spots.Spread[1] = SpreadSpot(TableSeat, 1);
 		Player->Spots.Stack = StackSpot(TableSeat);
 		Player->Spots.Bet = BetSpot(TableSeat);
 		Player->Spots.Inward = T.GetRotation().GetForwardVector();
@@ -247,6 +249,8 @@ void ABackRoomTable::WireSeat(FSeat& S)
 	Player->StackPile = S.StackPile;
 	Player->BetPile = S.BetPile;
 	Player->Spots.Cards = CardSpot(S.TableSeat, 0).GetLocation();
+	Player->Spots.Spread[0] = SpreadSpot(S.TableSeat, 0);
+	Player->Spots.Spread[1] = SpreadSpot(S.TableSeat, 1);
 	Player->Spots.Stack = StackSpot(S.TableSeat);
 	Player->Spots.Bet = BetSpot(S.TableSeat);
 	Player->Spots.Inward = T.GetRotation().GetForwardVector();
@@ -278,10 +282,23 @@ const ABackRoomTable::FSeat* ABackRoomTable::HeroSeat() const
 FTransform ABackRoomTable::CardSpot(int32 TableSeat, int32 Index) const
 {
 	const FTransform T = ABackRoomStage::SeatTransform(TableSeat);
-	// Two cards side by side, just apart (a peek curls their near edges: overlapped, the curls would cross), the long
-	// side toward the player, the face's top away.
-	const FVector At = T.TransformPosition(FVector(RailGap + 25.0, Index == 0 ? -6.4 : 0.5, ABackRoomStage::FeltZ + 0.04 * Index));
-	return FTransform(FRotator(0.0f, T.Rotator().Yaw + 90.0f + (Index == 0 ? -4.0f : 3.0f), 0.0f), At);
+	// The way a player holds two cards: fanned, one over the other, the long side toward them. The first card
+	// dealt lies in front (nearer, to the right) and the second drops onto it, back and to the left: a peek lifts
+	// each card's near-left corner (the one with an index), and the front card's curl then lies outside the back
+	// card's, so both indices show.
+	const float Side = ABackRoomCard::NearIndexSide();
+	const double Y = -2.95 + Side * (Index == 0 ? -1.3 : 1.3);
+	const double X = RailGap + 25.0 + (Index == 0 ? -0.7 : 0.7);
+	const FVector At = T.TransformPosition(FVector(X, Y, ABackRoomStage::FeltZ + (Index == 0 ? 0.0 : 0.12)));
+	return FTransform(FRotator(0.0f, T.Rotator().Yaw + 90.0f + Side * (Index == 0 ? -4.0f : 5.0f), 0.0f), At);
+}
+
+FTransform ABackRoomTable::SpreadSpot(int32 TableSeat, int32 Index) const
+{
+	const FTransform T = ABackRoomStage::SeatTransform(TableSeat);
+	const float Side = ABackRoomCard::NearIndexSide();
+	const FVector At = T.TransformPosition(FVector(RailGap + 25.0, -2.95 + Side * (Index == 0 ? -3.55 : 3.55), ABackRoomStage::FeltZ + 0.02 * Index));
+	return FTransform(FRotator(0.0f, T.Rotator().Yaw + 90.0f + Side * (Index == 0 ? -2.0f : 2.0f), 0.0f), At);
 }
 
 FVector ABackRoomTable::StackSpot(int32 TableSeat) const

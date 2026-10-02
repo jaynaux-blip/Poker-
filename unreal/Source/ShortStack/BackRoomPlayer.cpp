@@ -373,7 +373,7 @@ void ABackRoomPlayer::UpdateBody(float Dt)
 	if (SeatRole == EBackRoomRole::Hero)
 	{
 		// You lean in over your cards to look at them.
-		LeanTarget = bHeroPeek ? 1.0f : 0.62f;
+		LeanTarget = bHeroPeek ? 1.0f : 0.5f;
 	}
 	// The idle habit carries the body with it: forward onto a fist, back into the chair, onto an elbow.
 	float WantLean = LeanTarget;
@@ -480,13 +480,17 @@ void ABackRoomPlayer::UpdateBody(float Dt)
 	{
 		const FHandPose& H = HandNow[Side];
 		const FHandPose& W = Wiggle[Side];
-		P.HandPos[Side] = H.Pos + W.Pos;
+		P.HandPos[Side] = H.Pos + W.Pos + PeekBias[Side];
 		P.PalmDir[Side] = H.Palm;
 		P.FingerDir[Side] = H.Finger;
 		P.HandWeight[Side] = 1.0f;
 		P.Curl[Side] = FMath::Clamp(H.Curl + W.Curl, 0.0f, 1.0f);
 		P.ThumbCurl[Side] = FMath::Clamp(H.Thumb + W.Thumb, 0.0f, 1.0f);
 		P.Pinch[Side] = FMath::Clamp(H.Pinch + W.Pinch, 0.0f, 1.0f);
+		// The elbow rests on the rail's edge, a little out from the shoulder; a hand down in the lap lets it hang back.
+		const float Sx = Side == 0 ? 1.0f : -1.0f;
+		const float Low = FMath::SmoothStep(78.0f, 68.0f, static_cast<float>(H.Pos.Z));
+		P.ElbowAt[Side] = FMath::Lerp(FVector(Sx * 22.0, Rail - 4.0, 80.0), FVector(Sx * 20.0, Rail - 28.0, 64.0), static_cast<double>(Low));
 	}
 	P.Tremble = Tremble;
 	P.KneeSpread = 0.2f + 0.5f * Dominance;

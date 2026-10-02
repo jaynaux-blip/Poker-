@@ -168,6 +168,14 @@ ABackRoomTable* ABackRoomPawn::GetTable() const
 	return GM ? GM->Table.Get() : nullptr;
 }
 
+void ABackRoomPawn::TestExtCam(FVector Pos, FVector At, float Fov, bool bOn)
+{
+	bExtCam = bOn;
+	ExtPos = Pos;
+	ExtAt = At;
+	ExtFov = Fov;
+}
+
 FVector ABackRoomPawn::GetEye() const
 {
 	return Camera ? Camera->GetComponentLocation() : GetActorLocation();
@@ -190,7 +198,8 @@ void ABackRoomPawn::HandleInput(float RealDt)
 	{
 		Me->SetHeroPeek(bPeek);
 	}
-	if (bPeek && PeekBlend > 0.85f && Table)
+	// The hand is known once the corners are really up (the fingers have taken them), not when the key goes down.
+	if (bPeek && Me && Me->GetPeekAmount() > 0.55f && Table)
 	{
 		Table->HeroPeeked();
 	}
@@ -533,17 +542,19 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	float PeekLit = 0.0f;
 	if (Me && Me->Hole.Num() == 2 && Me->Hole[0] && Me->Hole[1] && PeekBlend > 0.01f)
 	{
-		// Peeking: you hunch down over the rail until the lifted corners face you, a hand's width away.
+		// Peeking: you drop down to the table (your chin nearly on the rail) behind the lifted corner and look
+		// across at it: low and nearly level, so the lifted face turns to you, the hands framing it either side.
 		const FVector Cards = (Me->Hole[0]->GetActorLocation() + Me->Hole[1]->GetActorLocation()) * 0.5;
-		const FVector Near = Cards - FVector(3.5, 0.0, -1.0);
-		Eye = FMath::Lerp(Eye, Cards + FVector(-30.0, 0.0, 18.0), 0.9 * PeekBlend);
+		const FVector Corners = Me->GetPeekFocus();
+		const FVector Near = FMath::Lerp(Cards, Corners, 0.7) + FVector(0.0, 0.0, 0.8);
+		Eye = FMath::Lerp(Eye, Near + FVector(-20.0, 2.5 * ABackRoomCard::NearIndexSide(), 15.0), 0.94 * PeekBlend);
 		const FRotator ToCards = (Near - Eye).Rotation();
-		Want = FMath::Lerp(Want, FRotator(ToCards.Pitch, ToCards.Yaw, 0.0f), 0.9f * PeekBlend);
+		Want = FMath::Lerp(Want, FRotator(ToCards.Pitch, ToCards.Yaw, 0.0f), 0.95f * PeekBlend);
 		FocusAt = Near;
-		PeekLight->SetWorldLocation(Near + FVector(-8.0, 3.0, 5.0));
+		PeekLight->SetWorldLocation(Near + FVector(-16.0, 0.0, 14.0));
 		PeekLit = PeekBlend;
 	}
-	PeekLight->SetIntensity(3.5f * PeekLit);
+	PeekLight->SetIntensity(4.0f * PeekLit);
 	if (ABackRoomPlayer* S = Studying.Get())
 	{
 		// Focus pulls the view onto the face.
@@ -576,13 +587,20 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	}
 
 	// The lens: Focus narrows it and opens the aperture; a racing heart closes in the edges.
-	Camera->SetFieldOfView(FMath::Lerp(FMath::Lerp(72.0f, 58.0f, PeekBlend), 34.0f, Focus) - 4.0f * Racing);
+	Camera->SetFieldOfView(FMath::Lerp(FMath::Lerp(72.0f, 42.0f, PeekBlend), 34.0f, Focus) - 4.0f * Racing);
 	FPostProcessSettings& P = Camera->PostProcessSettings;
 	P.DepthOfFieldFocalDistance = FMath::Max(10.0f, static_cast<float>(FVector::Dist(Eye, FocusAt)));
-	P.DepthOfFieldFstop = FMath::Lerp(FMath::Lerp(4.0f, 2.8f, PeekBlend), 1.4f, Focus);
+	P.DepthOfFieldFstop = FMath::Lerp(FMath::Lerp(4.0f, 8.0f, PeekBlend), 1.4f, Focus);
 	P.VignetteIntensity = 0.45f + 0.5f * Focus + 0.55f * Racing + 0.18f * Racing * Kick;
 	P.ColorSaturation = FVector4(1.0, 1.0, 1.0, 1.0 - 0.38 * Racing);
 	P.SceneFringeIntensity = 1.1f * Racing + 0.7f * Racing * Kick;
+
+	if (bExtCam)
+	{
+		Camera->SetWorldLocationAndRotation(ExtPos, (ExtAt - ExtPos).Rotation());
+		Camera->SetFieldOfView(ExtFov);
+		Camera->PostProcessSettings.DepthOfFieldFstop = 32.0f;
+	}
 
 	// The opponents feel being looked at: more so through Focus.
 	if (Table)
