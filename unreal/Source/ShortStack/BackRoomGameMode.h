@@ -286,6 +286,14 @@ private:
 	void LiveNote(uint8 Note);
 	ABackRoomPlayer* SeatCast(const ss::TPlayer& P, int32 TableSeat);
 	void UnseatCast(ABackRoomPlayer* Player, const FString& Id, bool bBusted);
+	/** Whether a point is in (or near) the hero's view. */
+	bool HeroCanSee(const FVector& At) const;
+	/**
+	 * A chair changing hands where the hero can see it (a bust, a player moved in) waits for a blink: the eyes close for a
+	 * tenth of a second, the bodies swap, the eyes open; nobody pops in or out in plain sight. Out of view it's at once.
+	 */
+	void BlinkSwap(ABackRoomPlayer* Player, bool bShow);
+	void ApplyBlinkSwaps();
 	void LiveMove();
 	void LiveOver();
 	void LiveSettle();
@@ -328,6 +336,8 @@ private:
 	int32 FastForwardLeft = 0;
 	bool bTestMove = false;
 	float LastFarewellAt = -100.0f;
+	TArray<TPair<TWeakObjectPtr<ABackRoomPlayer>, bool>> BlinkSwaps; // body, shown (else gone) after the blink
+	float BlinkT = -1.0f;
 	int32 TestChips = 0;
 	int32 RecentMovedIn = 0;
 

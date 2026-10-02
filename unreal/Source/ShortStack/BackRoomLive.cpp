@@ -206,7 +206,17 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 		CastActors.Add(Id, A);
 	}
 	A->SetActorTransform(At);
-	A->SetActorHiddenInGame(false);
+	// In plain sight, a new face takes the chair in a blink rather than appearing in it.
+	BlinkSwaps.RemoveAll([A](const TPair<TWeakObjectPtr<ABackRoomPlayer>, bool>& S) { return S.Key.Get() == A; });
+	if (Phase == EBackRoomPhase::Playing && MoveT < 0.0f && HeroCanSee(At.GetLocation() + FVector(0.0, 0.0, 110.0)))
+	{
+		A->SetActorHiddenInGame(true);
+		BlinkSwap(A, true);
+	}
+	else
+	{
+		A->SetActorHiddenInGame(false);
+	}
 	// Where everyone is, for their eyes.
 	A->HeroEyes = Stage ? Stage->EyeLocation() : FVector(-98.0, 0.0, 124.0);
 	A->PotAt = FVector(10.0, 0.0, ABackRoomStage::FeltZ);
@@ -246,14 +256,66 @@ void ABackRoomGameMode::UnseatCast(ABackRoomPlayer* Player, const FString& Id, b
 	{
 		return;
 	}
-	// Up and gone (the body waits out of sight in case the floor brings them back).
-	Player->SetActorHiddenInGame(true);
-	Player->SetActorLocation(FVector(0.0, 0.0, -5000.0));
+	// Up and gone (the body waits out of sight in case the floor brings them back); in front of the hero, in a blink.
+	if (Phase == EBackRoomPhase::Playing && MoveT < 0.0f && HeroCanSee(Player->GetActorLocation() + FVector(0.0, 0.0, 110.0)))
+	{
+		BlinkSwap(Player, false);
+	}
+	else
+	{
+		Player->SetActorHiddenInGame(true);
+		Player->SetActorLocation(FVector(0.0, 0.0, -5000.0));
+	}
 	if (!bBusted && Dealer && Phase == EBackRoomPhase::Playing && LiveT - LastFarewellAt > 20.0f)
 	{
 		LastFarewellAt = LiveT;
 		Table->DealerLine(TEXT("Good luck at the new table."));
 	}
+}
+
+bool ABackRoomGameMode::HeroCanSee(const FVector& At) const
+{
+	const APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	if (!PC || !PC->PlayerCameraManager)
+	{
+		return false;
+	}
+	const FVector To = (At - PC->PlayerCameraManager->GetCameraLocation()).GetSafeNormal();
+	// Half the (horizontal, so wider) field of view, and a margin for a body's width.
+	const float Half = FMath::DegreesToRadians(FMath::Min(PC->PlayerCameraManager->GetFOVAngle() * 0.5f + 14.0f, 89.0f));
+	return FVector::DotProduct(PC->PlayerCameraManager->GetCameraRotation().Vector(), To) > FMath::Cos(Half);
+}
+
+void ABackRoomGameMode::BlinkSwap(ABackRoomPlayer* Player, bool bShow)
+{
+	BlinkSwaps.Add({Player, bShow});
+	if (BlinkT >= 0.0f)
+	{
+		return; // this blink covers it
+	}
+	BlinkT = 0.0f;
+	APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	if (PC && PC->PlayerCameraManager)
+	{
+		PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 0.07f, FLinearColor::Black, false, true);
+	}
+}
+
+void ABackRoomGameMode::ApplyBlinkSwaps()
+{
+	UE_LOG(LogRiverside, Log, TEXT("Seat change in a blink: %d bodies"), BlinkSwaps.Num());
+	for (const TPair<TWeakObjectPtr<ABackRoomPlayer>, bool>& S : BlinkSwaps)
+	{
+		if (ABackRoomPlayer* A = S.Key.Get())
+		{
+			A->SetActorHiddenInGame(!S.Value);
+			if (!S.Value)
+			{
+				A->SetActorLocation(FVector(0.0, 0.0, -5000.0));
+			}
+		}
+	}
+	BlinkSwaps.Reset();
 }
 
 int32 ABackRoomGameMode::SlotForTable(int32 TableId)
@@ -795,6 +857,20 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 	for (const ss::TEvent& E : Table->TakeEvents())
 	{
 		LiveEvent(E);
+	}
+	// A blink in progress: the bodies swap with the eyes shut, then they open.
+	if (BlinkT >= 0.0f)
+	{
+		BlinkT += RealDt;
+		if (BlinkT >= 0.1f || MoveT >= 0.0f)
+		{
+			ApplyBlinkSwaps();
+			BlinkT = -1.0f;
+			if (PC && PC->PlayerCameraManager && MoveT < 0.0f)
+			{
+				PC->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, 0.16f, FLinearColor::Black, false, false);
+			}
+		}
 	}
 	// (Testing: chips, a forced move, between hands.)
 	if (Phase == EBackRoomPhase::Playing && Table->IsBetweenHands() && (TestChips != 0 || bTestMove))
