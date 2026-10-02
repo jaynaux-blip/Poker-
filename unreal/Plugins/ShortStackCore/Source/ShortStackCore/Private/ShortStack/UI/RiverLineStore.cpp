@@ -265,7 +265,7 @@ void RiverLine::StoreCard(const gear::Item& I, const Rect& R0, double Now, int I
 	}
 	else if (!Why.empty())
 	{
-		Label = Why == "Not enough in the bank." ? "Short " + NetMoney(I.PriceCents - S.BankrollCents) : Why == "You have better." ? "Have better" : "Locked";
+		Label = Why == "Not enough in the bank." ? "Short " + NetMoney(I.PriceCents - S.BankrollCents) : Why == "You have better." ? "Upgraded" : "Locked";
 		Enabled = false;
 	}
 	if (AppButton("storebuy" + I.Id, Btn, Label, Fill, Hex(0xffffff), Enabled))
