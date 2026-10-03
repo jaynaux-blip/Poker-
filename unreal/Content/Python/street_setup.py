@@ -141,11 +141,11 @@ def build_materials(force=False):
 def build_map(force=False):
     """/Game/Maps/Street: the stage actor and the game mode override (the stage builds everything else)."""
     if ss.eal.does_asset_exist(MAP_PATH) and not force:
-        return
+        return False
     stage_class = unreal.load_class(None, "/Script/ShortStack.StreetStage")
     if not stage_class:
         unreal.log_error("ShortStack: StreetStage class not found (is the C++ module built?)")
-        return
+        return False
     levels = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     if ss.eal.does_asset_exist(MAP_PATH):
@@ -160,6 +160,7 @@ def build_map(force=False):
         world.get_world_settings().set_editor_property("default_game_mode", mode_class)
     levels.save_current_level()
     unreal.log(f"ShortStack: created {MAP_PATH}")
+    return True
 
 
 def rebuild_stage():
@@ -169,3 +170,28 @@ def rebuild_stage():
     for a in actors.get_all_level_actors():
         if stage_class and a.get_class() == stage_class:
             a.rebuild_set()
+
+
+def refresh_map():
+    """Rebuilds the street's stage in /Game/Maps/Street and saves it, then goes back to the level that was open.
+
+    The stage builds its props when the level is built in the editor, and Play travels into the saved level,
+    so props imported after the map was saved only show up once it's rebuilt. shortstack_setup.run() calls
+    this when it imported meshes; it does nothing if the open level has unsaved edits (run it by hand then).
+    """
+    if not ss.eal.does_asset_exist(MAP_PATH):
+        return False
+    if unreal.EditorLoadingAndSavingUtils.get_dirty_map_packages():
+        unreal.log_warning("ShortStack: the open level has unsaved changes; run street_setup.refresh_map() to rebuild the Street level")
+        return False
+    levels = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+    world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+    previous = world.get_outermost().get_name() if world else ""
+    levels.load_level(MAP_PATH)
+    rebuild_stage()
+    levels.save_current_level()
+    if previous and previous != MAP_PATH and ss.eal.does_asset_exist(previous):
+        levels.load_level(previous)
+    unreal.log("ShortStack: rebuilt the Street level with the imported props")
+    return True
+

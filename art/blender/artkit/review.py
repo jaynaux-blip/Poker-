@@ -98,6 +98,9 @@ def sheet(objs, name, views=None, tile=900, samples=96, context_scale=1.0, scree
     lights itself (the laptop), whose glossy screen would otherwise mirror the stand-in.
     """
     sc = bpy.context.scene
+    # A machine without a GPU can trade review quality for time (the bake is unaffected).
+    tile = int(os.environ.get('SHORTSTACK_REVIEW_TILE', tile))
+    samples = int(os.environ.get('SHORTSTACK_REVIEW_SAMPLES', samples))
     lo, hi = core.bounds(objs)
     center = (lo + hi) / 2
     size = max((hi - lo).length, 1e-4)

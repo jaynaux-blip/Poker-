@@ -818,11 +818,11 @@ void FrontLocks(Ctx& X)
 		for (int Side = -1; Side <= 1; Side += 2)
 		{
 			const float S = Fl(Side);
-			const Pts Panel = Spline({{S * (G.CheekW - 8.0f), -30.0f}, {S * (G.CheekW - 11.0f), 20.0f}, {S * (G.CheekW - 9.0f), 76.0f}, {S * (G.CheekW + 4.0f), 80.0f}, {S * (G.CheekW + 13.0f), 70.0f},
+			const Pts Cheek = Spline({{S * (G.CheekW - 8.0f), -30.0f}, {S * (G.CheekW - 11.0f), 20.0f}, {S * (G.CheekW - 9.0f), 76.0f}, {S * (G.CheekW + 4.0f), 80.0f}, {S * (G.CheekW + 13.0f), 70.0f},
 										 {S * (G.CheekW + 14.0f), 20.0f}, {S * (G.CheekW + 10.0f), -40.0f}},
 				4, true);
-			HairFill(X, Panel);
-			C.FillPolygon(Panel, Paint::Linear({0.0f, 20.0f}, {0.0f, 84.0f}, WithA(X.HairDark, 0.0f), WithA(X.HairDark, 0.35f)));
+			HairFill(X, Cheek);
+			C.FillPolygon(Cheek, Paint::Linear({0.0f, 20.0f}, {0.0f, 84.0f}, WithA(X.HairDark, 0.0f), WithA(X.HairDark, 0.35f)));
 		}
 	}
 }
@@ -1430,8 +1430,8 @@ void Hat(Ctx& X)
 	const Geo& G = X.H.G;
 	// The hat goes with the jacket without matching it.
 	static const int Partner[8] = {7, 4, 5, 0, 1, 3, 0, 5};
-	const Color Felt = Hex(hero::OutfitTone(Partner[std::clamp(X.Who->Appearance.OutfitColor, 0, 7)]));
-	const Paint Fill = Paint::Linear({-G.TempleW - 20.0f, 0.0f}, {G.TempleW + 20.0f, 0.0f}, Lum(Felt, 0.12f), Lum(Felt, -0.45f));
+	const Color HatTone = Hex(hero::OutfitTone(Partner[std::clamp(X.Who->Appearance.OutfitColor, 0, 7)]));
+	const Paint Fill = Paint::Linear({-G.TempleW - 20.0f, 0.0f}, {G.TempleW + 20.0f, 0.0f}, Lum(HatTone, 0.12f), Lum(HatTone, -0.45f));
 	const int Style = HairStyle(X);
 	const float Puff = Style == 6 ? 12.0f : Style == 7 ? 6.0f : Style == 3 || Style == 4 || Style == 5 ? 6.0f : 0.0f;
 	switch (Kind)
@@ -1446,16 +1446,16 @@ void Hat(Ctx& X)
 		const Pts Cuff = ClipConvex(Dome, {{-300.0f, -82.0f}, {300.0f, -82.0f}, {300.0f, 0.0f}, {-300.0f, 0.0f}});
 		if (!Cuff.empty())
 		{
-			C.FillPolygon(Cuff, Paint::Linear({-G.TempleW - 20.0f, 0.0f}, {G.TempleW + 20.0f, 0.0f}, Lum(Felt, 0.2f), Lum(Felt, -0.4f)));
+			C.FillPolygon(Cuff, Paint::Linear({-G.TempleW - 20.0f, 0.0f}, {G.TempleW + 20.0f, 0.0f}, Lum(HatTone, 0.2f), Lum(HatTone, -0.4f)));
 			for (float Rx = -G.TempleW - 14.0f; Rx < G.TempleW + 14.0f; Rx += 6.0f)
 			{
 				const Pts Rib = ClipConvex({{Rx, -84.0f}, {Rx + 1.6f, -84.0f}, {Rx + 1.6f, -40.0f}, {Rx, -40.0f}}, Cuff);
 				if (!Rib.empty())
 				{
-					C.FillPolygon(Rib, WithA(Lum(Felt, -0.5f), 0.45f));
+					C.FillPolygon(Rib, WithA(Lum(HatTone, -0.5f), 0.45f));
 				}
 			}
-			C.StrokePolyline(Spline({{-G.TempleW - 14.0f, -82.0f}, {0.0f, -84.0f}, {G.TempleW + 14.0f, -82.0f}}, 4, false), false, WithA(Lum(Felt, -0.6f), 0.6f), 1.6f, true);
+			C.StrokePolyline(Spline({{-G.TempleW - 14.0f, -82.0f}, {0.0f, -84.0f}, {G.TempleW + 14.0f, -82.0f}}, 4, false), false, WithA(Lum(HatTone, -0.6f), 0.6f), 1.6f, true);
 		}
 		C.StrokePolyline(X.H.Arc(20.0f, 96.0f, [Puff](float A) { return 13.0f + Puff + 6.0f * std::cos(A * Deg) - 0.6f; }, 4.0f), false, WithA(X.Light.Rim, 0.55f * X.Light.RimStrength), 2.2f, true);
 		X.HatTop = -56.0f;
@@ -1471,25 +1471,25 @@ void Hat(Ctx& X)
 		Crown.push_back({-G.TempleW * 0.7f, -60.0f});
 		C.FillPolygon(Crown, Fill);
 		const Vec2 Top = X.H.Rim(0.0f, 11.0f + Puff * 0.7f);
-		C.StrokePolyline(Spline({Top, {0.0f, -92.0f}, {0.0f, -66.0f}}, 3, false), false, WithA(Lum(Felt, -0.5f), 0.6f), 1.3f);
-		C.FillEllipse(Top.X, Top.Y + 2.0f, 5.0f, 2.6f, Lum(Felt, -0.2f));
+		C.StrokePolyline(Spline({Top, {0.0f, -92.0f}, {0.0f, -66.0f}}, 3, false), false, WithA(Lum(HatTone, -0.5f), 0.6f), 1.3f);
+		C.FillEllipse(Top.X, Top.Y + 2.0f, 5.0f, 2.6f, Lum(HatTone, -0.2f));
 		if (Back)
 		{
 			// The strap opening at the front.
 			C.FillPolygon(Spline({{-15.0f, -64.0f}, {-13.0f, -80.0f}, {0.0f, -86.0f}, {13.0f, -80.0f}, {15.0f, -64.0f}}, 4, false), X.HairDark);
-			C.FillRoundRect({-16.0f, -70.0f, 32.0f, 5.0f}, 2.0f, Lum(Felt, -0.35f));
+			C.FillRoundRect({-16.0f, -70.0f, 32.0f, 5.0f}, 2.0f, Lum(HatTone, -0.35f));
 			C.FillRect({-5.0f, -71.0f, 10.0f, 7.0f}, Hex(0x9a9da4));
 			X.HatTop = -64.0f;
 		}
 		else
 		{
 			// A chip on the front panel, then the brim and its shadow on the brow.
-			C.FillCircle(0.0f, -84.0f, 9.0f, Lum(Felt, 0.5f));
-			C.FillCircle(0.0f, -84.0f, 5.5f, Lum(Felt, -0.1f));
+			C.FillCircle(0.0f, -84.0f, 9.0f, Lum(HatTone, 0.5f));
+			C.FillCircle(0.0f, -84.0f, 5.5f, Lum(HatTone, -0.1f));
 			for (int I = 0; I < 6; ++I)
 			{
 				const float A = Fl(I) * 3.1415926f / 3.0f;
-				C.FillCircle(7.3f * std::cos(A), -84.0f + 7.3f * std::sin(A), 1.4f, Lum(Felt, -0.1f));
+				C.FillCircle(7.3f * std::cos(A), -84.0f + 7.3f * std::sin(A), 1.4f, Lum(HatTone, -0.1f));
 			}
 			const Pts Shade = ClipConvex({{-200.0f, -66.0f}, {200.0f, -66.0f}, {200.0f, -8.0f}, {-200.0f, -8.0f}}, X.H.Outline);
 			if (!Shade.empty())
@@ -1498,8 +1498,8 @@ void Hat(Ctx& X)
 			}
 			const float Bw = G.TempleW + 22.0f;
 			const Pts Brim = Spline({{-Bw, -62.0f}, {-Bw * 0.6f, -64.0f}, {0.0f, -65.0f}, {Bw * 0.6f, -64.0f}, {Bw, -62.0f}, {Bw * 0.8f, -50.0f}, {0.0f, -40.0f}, {-Bw * 0.8f, -50.0f}}, 4, true);
-			C.FillPolygon(Brim, Paint::Linear({0.0f, -66.0f}, {0.0f, -40.0f}, Lum(Felt, 0.18f), Lum(Felt, -0.5f)));
-			C.StrokePolyline(Spline({{-Bw * 0.8f, -52.0f}, {0.0f, -43.0f}, {Bw * 0.8f, -52.0f}}, 4, false), false, WithA(Lum(Felt, -0.65f), 0.7f), 1.2f, true);
+			C.FillPolygon(Brim, Paint::Linear({0.0f, -66.0f}, {0.0f, -40.0f}, Lum(HatTone, 0.18f), Lum(HatTone, -0.5f)));
+			C.StrokePolyline(Spline({{-Bw * 0.8f, -52.0f}, {0.0f, -43.0f}, {Bw * 0.8f, -52.0f}}, 4, false), false, WithA(Lum(HatTone, -0.65f), 0.7f), 1.2f, true);
 			X.HatTop = -40.0f;
 		}
 		C.StrokePolyline(X.H.Arc(20.0f, 72.0f, [Puff](float A) { return 7.0f + Puff * 0.7f + 4.0f * std::cos(A * Deg) - 0.6f; }, 4.0f), false, WithA(X.Light.Rim, 0.55f * X.Light.RimStrength), 2.2f,
@@ -1518,13 +1518,13 @@ void Hat(Ctx& X)
 		}
 		const float Bw = G.TempleW + 34.0f;
 		const Pts Brim = Spline({{-G.TempleW - 8.0f, -66.0f}, {0.0f, -64.0f}, {G.TempleW + 8.0f, -66.0f}, {Bw, -30.0f}, {Bw * 0.5f, -36.0f}, {0.0f, -38.0f}, {-Bw * 0.5f, -36.0f}, {-Bw, -30.0f}}, 4, true);
-		C.FillPolygon(Brim, Paint::Linear({0.0f, -66.0f}, {0.0f, -30.0f}, Lum(Felt, 0.1f), Lum(Felt, -0.45f)));
+		C.FillPolygon(Brim, Paint::Linear({0.0f, -66.0f}, {0.0f, -30.0f}, Lum(HatTone, 0.1f), Lum(HatTone, -0.45f)));
 		for (int I = 1; I <= 3; ++I)
 		{
 			const float T = Fl(I) / 4.0f;
 			C.StrokePolyline(Spline({{-(G.TempleW + 8.0f) - (Bw - G.TempleW - 8.0f) * T, -66.0f + 36.0f * T}, {0.0f, -64.0f + 26.0f * T}, {(G.TempleW + 8.0f) + (Bw - G.TempleW - 8.0f) * T, -66.0f + 36.0f * T}}, 5,
 								 false),
-				false, WithA(Lum(Felt, -0.55f), 0.5f), 1.0f, true);
+				false, WithA(Lum(HatTone, -0.55f), 0.5f), 1.0f, true);
 		}
 		C.StrokePolyline(X.H.Arc(20.0f, 92.0f, [Puff](float A) { return 12.0f + Puff * 0.6f + 2.0f * std::cos(A * Deg) - 0.6f; }, 4.0f), false, WithA(X.Light.Rim, 0.55f * X.Light.RimStrength), 2.2f,
 			true);

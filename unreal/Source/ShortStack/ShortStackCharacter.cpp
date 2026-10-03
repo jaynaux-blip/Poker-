@@ -1,6 +1,7 @@
 #include "ShortStackCharacter.h"
 
 #include "BackRoomAnim.h"
+#include "BlenderProps.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -14,6 +15,7 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GroomComponent.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/PackageName.h"
 #include "StreetAnim.h"
@@ -49,6 +51,12 @@ void CopyOverrides(const UMeshComponent* From, UMeshComponent* To)
 		}
 	}
 }
+
+// Where the hat and glasses sit from the head bone (cm, scaled with the body): set blind, so tunable live.
+TAutoConsoleVariable<float> CVarHatUp(TEXT("ss.Wear.HatUp"), 19.0f, TEXT("The hat's crown above the head bone (cm)."));
+TAutoConsoleVariable<float> CVarHatForward(TEXT("ss.Wear.HatForward"), 1.5f, TEXT("The hat's crown ahead of the head bone (cm)."));
+TAutoConsoleVariable<float> CVarGlassesUp(TEXT("ss.Wear.GlassesUp"), 8.5f, TEXT("The glasses' bridge above the head bone (cm)."));
+TAutoConsoleVariable<float> CVarGlassesForward(TEXT("ss.Wear.GlassesForward"), 10.5f, TEXT("The glasses' bridge ahead of the head bone (cm)."));
 
 /** Hats and glasses from the Blender pipeline (art/blender/assets/wearables.py), when imported. */
 UStaticMesh* Wearable(const TCHAR* Name)
@@ -283,13 +291,10 @@ void AShortStackCharacter::ApplyLook(const ss::hero::Character& Who)
 			Slot->RegisterComponent();
 		}
 		Slot->SetStaticMesh(Mesh);
+		// The last hat's tinted material would otherwise stay on as an override.
+		Slot->EmptyOverrideMaterials();
 		Slot->SetVisibility(true);
-		if (UMaterialInterface* Material = Slot->GetMaterial(0))
-		{
-			UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Material, Slot);
-			Mid->SetVectorParameterValue(TEXT("BaseColor"), Tint);
-			Slot->SetMaterial(0, Mid);
-		}
+		TintImported(Slot, 0, Tint);
 	};
 	static const int32 HatPartner[8] = {7, 4, 5, 0, 1, 3, 0, 5}; // as the portrait: a hat that goes with the jacket
 	Accessory(HatMesh, Hats[FMath::Clamp(L.Hat, 0, 4)], SrgbOf(ss::hero::OutfitTone(HatPartner[FMath::Clamp(L.OutfitColor, 0, 7)])));
@@ -442,21 +447,24 @@ void AShortStackCharacter::UpdateAccessories()
 	{
 		return;
 	}
-	// Placed from the head bone each frame, square to the body (the props are modeled facing +X):
-	// the hat's origin is the crown, the glasses' the bridge of the nose.
+	// Placed from the head bone each frame, square to the body: the hat's origin is the top of the head
+	// (the crown inside it), the glasses' the bridge of the nose.
 	const FVector Head = Body->GetSocketLocation(TEXT("head"));
-	const FRotator Facing(0.0f, GetActorRotation().Yaw, 0.0f);
+	const float BodyYaw = static_cast<float>(GetActorRotation().Yaw);
+	const FRotator Facing(0.0f, BodyYaw, 0.0f);
 	const FVector Fwd = Facing.Vector();
 	const FVector Up = FVector::UpVector;
 	if (HatMesh && HatMesh->IsVisible())
 	{
 		const bool bBackwards = LookNow.Hat == 3;
-		HatMesh->SetWorldLocationAndRotation(Head + Up * (19.0 * MeshScale) + Fwd * (1.5 * MeshScale), Facing + FRotator(0.0f, bBackwards ? 180.0f : 0.0f, 0.0f));
+		const FVector At = Head + Up * (CVarHatUp.GetValueOnGameThread() * MeshScale) + Fwd * (CVarHatForward.GetValueOnGameThread() * MeshScale);
+		HatMesh->SetWorldLocationAndRotation(At, BlenderFacing(BodyYaw + (bBackwards ? 180.0f : 0.0f)));
 		HatMesh->SetWorldScale3D(FVector(MeshScale));
 	}
 	if (GlassesMesh && GlassesMesh->IsVisible())
 	{
-		GlassesMesh->SetWorldLocationAndRotation(Head + Up * (8.5 * MeshScale) + Fwd * (10.5 * MeshScale), Facing);
+		const FVector At = Head + Up * (CVarGlassesUp.GetValueOnGameThread() * MeshScale) + Fwd * (CVarGlassesForward.GetValueOnGameThread() * MeshScale);
+		GlassesMesh->SetWorldLocationAndRotation(At, BlenderFacing(BodyYaw));
 		GlassesMesh->SetWorldScale3D(FVector(MeshScale));
 	}
 }

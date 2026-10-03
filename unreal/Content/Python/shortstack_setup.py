@@ -663,8 +663,10 @@ def run(force=False):
         changed += street_setup.build_materials(force)
     except Exception as exc:  # the street falls back to M_Surface
         unreal.log_error(f"ShortStack: street materials failed: {exc}")
+    imported = 0
     try:
-        changed += import_meshes(force)
+        imported = import_meshes(force)
+        changed += imported
         changed += backroom_setup.fix_meshes()
     except Exception as exc:  # the stage falls back to engine shapes
         unreal.log_error(f"ShortStack: importing meshes failed: {exc}")
@@ -672,4 +674,9 @@ def run(force=False):
         rebuild_stages()
     build_map(False)
     backroom_setup.build_map(False)
-    street_setup.build_map(False)
+    if not street_setup.build_map(False) and imported:
+        # New props (the street's, the hats and glasses) go into the saved Street level.
+        try:
+            street_setup.refresh_map()
+        except Exception as exc:
+            unreal.log_error(f"ShortStack: rebuilding the Street level failed: {exc}")

@@ -41,6 +41,8 @@ constexpr float OpenSignW = 640.0f;
 constexpr float OpenSignH = 280.0f;
 constexpr float StreetSignW = 900.0f;
 constexpr float StreetSignH = 200.0f;
+constexpr float BuildingNumberW = 400.0f;
+constexpr float BuildingNumberH = 90.0f;
 constexpr float DoorDecalW = 400.0f;
 constexpr float DoorDecalH = 520.0f;
 constexpr float PromoW = 600.0f;
@@ -51,6 +53,8 @@ SHORTSTACKCORE_API void StoreSign(Canvas& C);
 SHORTSTACKCORE_API void OpenSign(Canvas& C);
 /** A green street-name blade: "FIFTH ST" with its block number. */
 SHORTSTACKCORE_API void StreetSign(Canvas& C, const std::string& Name, const std::string& Block);
+/** The apartment building's number over its door (BuildingNumberW x BuildingNumberH): brass on dark enamel. */
+SHORTSTACKCORE_API void BuildingNumber(Canvas& C, const std::string& Number);
 /** The hours sticker on the store's door. */
 SHORTSTACKCORE_API void DoorDecal(Canvas& C);
 /** A window poster for one of the store's products ("2 for $5"). */

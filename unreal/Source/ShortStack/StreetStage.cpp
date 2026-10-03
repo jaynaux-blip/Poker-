@@ -1,5 +1,7 @@
 #include "StreetStage.h"
 
+#include "BlenderProps.h"
+
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -16,7 +18,6 @@
 #include "Materials/MaterialInterface.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/UI/PropArt.h"
-#include "ShortStack/UI/Ui.h"
 #include "SlateDrawList.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -165,7 +166,7 @@ UStaticMeshComponent* AStreetStage::Prop(const TCHAR* Name, const FVector& At, f
 	}
 	UStaticMeshComponent* C = NewPart<UStaticMeshComponent>();
 	C->SetStaticMesh(Mesh);
-	C->SetRelativeLocationAndRotation(At, FRotator(0.0f, Yaw, 0.0f));
+	C->SetRelativeLocationAndRotation(At, BlenderFacing(Yaw));
 	C->SetRelativeScale3D(Scale);
 	C->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 	return C;
@@ -332,10 +333,10 @@ void AStreetStage::BuildHomeBlock()
 		}
 	}
 	// Street furniture from Blender where it's been imported.
-	Prop(TEXT("SM_Hydrant"), FVector(360.0, 1300.0, 0.0), 0.0f);
+	Prop(TEXT("SM_Hydrant"), FVector(360.0, 1300.0, 0.0), 0.0f); // the pumper nozzle to the street
 	Prop(TEXT("SM_TrashCan"), FVector(330.0, -500.0, 0.0), 12.0f);
 	Prop(TEXT("SM_TrashCan"), FVector(330.0, 3550.0, 0.0), -8.0f);
-	Prop(TEXT("SM_Newsbox"), FVector(300.0, 3400.0, 0.0), 90.0f);
+	Prop(TEXT("SM_Newsbox"), FVector(300.0, 3400.0, 0.0), 180.0f); // its window to the sidewalk
 
 	FStreetSpot Home;
 	Home.Id = TEXT("home");
@@ -418,7 +419,13 @@ void AStreetStage::BuildAcross()
 	for (int32 I = 0; I < 4; ++I)
 	{
 		const double Y = Cars[I];
-		if (!Prop(TEXT("SM_Sedan"), FVector(RoadX1 - 120.0, Y + 230.0, -15.0), 90.0f))
+		// The Blender sedan is baked light grey; each car gets its own paint (navy, oxblood, silver, black).
+		static const uint32 Paints[4] = {0x24365a, 0x7a2028, 0xe6e6e2, 0x2a2b2e};
+		if (UStaticMeshComponent* Car = Prop(TEXT("SM_Sedan"), FVector(RoadX1 - 120.0, Y + 230.0, -15.0), 90.0f))
+		{
+			TintImported(Car, 0, FLinearColor::FromSRGBColor(FColor((Paints[I] >> 16) & 0xff, (Paints[I] >> 8) & 0xff, Paints[I] & 0xff)));
+		}
+		else
 		{
 			Box(CarPaint[I % 3], FVector(RoadX1 - 210.0, Y, -5.0), FVector(RoadX1 - 30.0, Y + 460.0, 90.0));
 			Box(CarGlass, FVector(RoadX1 - 195.0, Y + 110.0, 90.0), FVector(RoadX1 - 45.0, Y + 330.0, 140.0));
@@ -509,7 +516,7 @@ void AStreetStage::BuildStore()
 	}
 
 	// The cooler wall at the back: glass doors lit from inside, rows of drinks behind them.
-	if (!Prop(TEXT("SM_Cooler"), FVector(X0 + 40.0, 4500.0, 0.0), 0.0f))
+	if (!Prop(TEXT("SM_Cooler"), FVector(X0 + 45.0, 4500.0, 0.0), 0.0f))
 	{
 		Box(Metal, FVector(X0, 4100.0, 0.0), FVector(X0 + 90.0, StoreY1 - 50.0, 230.0));
 		Box(CoolerGlow, FVector(X0 + 90.0, 4130.0, 20.0), FVector(X0 + 92.0, StoreY1 - 80.0, 215.0), false);
@@ -564,7 +571,7 @@ void AStreetStage::BuildStore()
 	// The counter, the register and the roller grill; the lotto and smokes behind Benny; the coffee bar.
 	Box(Counter, FVector(-650.0, 3980.0, 0.0), FVector(-150.0, 4060.0, 100.0));
 	Box(Mat(TEXT("CounterFront"), 0x7a1f2c, 0.6f), FVector(-650.0, 4058.0, 0.0), FVector(-150.0, 4062.0, 92.0), false);
-	if (!Prop(TEXT("SM_Register"), FVector(-300.0, 4020.0, 100.0), 180.0f))
+	if (!Prop(TEXT("SM_Register"), FVector(-300.0, 4020.0, 100.0), -90.0f)) // its screen to Benny, the card reader to us
 	{
 		Box(Mat(TEXT("Register"), 0x1b1d22, 0.35f), FVector(-340.0, 3995.0, 100.0), FVector(-260.0, 4045.0, 128.0), false);
 		Box(Mat(TEXT("RegisterScreen"), 0x6ad1ff, 0.3f, 0.0f, 3.0f), FVector(-330.0, 4044.0, 128.0), FVector(-270.0, 4046.0, 150.0), false);
@@ -767,10 +774,7 @@ void AStreetStage::AttachSlate()
 	};
 	// In the order Sign() made them: the building number first, then the Wash & Fold, the store's, the corner's.
 	TArray<TSharedPtr<const ss::ui::DrawList>> Lists;
-	Lists.Add(Draw(400.0f, 90.0f, [](ss::ui::Canvas& C) {
-		C.FillRoundRect({0.0f, 0.0f, 400.0f, 90.0f}, 8.0f, ss::ui::Hex(0x1b1d22));
-		C.Text("1812", 200.0f, 66.0f, ss::ui::Ts(64.0f, 900, ss::ui::Hex(0xd9c79a), ss::ui::Align::Center));
-	}));
+	Lists.Add(Draw(P::BuildingNumberW, P::BuildingNumberH, [](ss::ui::Canvas& C) { P::BuildingNumber(C, "1812"); }));
 	Lists.Add(Draw(P::NeonW, P::NeonH, [](ss::ui::Canvas& C) { P::NeonSign(C); }));
 	Lists.Add(Draw(P::StoreSignW, P::StoreSignH, [](ss::ui::Canvas& C) { P::StoreSign(C); }));
 	Lists.Add(Draw(P::OpenSignW, P::OpenSignH, [](ss::ui::Canvas& C) { P::OpenSign(C); }));

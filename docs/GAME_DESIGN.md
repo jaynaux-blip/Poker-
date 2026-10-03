@@ -48,6 +48,8 @@ The whole online career is played from a first-person desk. The apartment is the
 - **Bed:** sleeping ends the day and restores energy.
 - **Door:** travel to the laundromat, the casino and the airport.
 
+**Outside the door (built, step 1 of the open world).** G at the desk walks you out of building 1812 onto Fifth Street, in first or third person (V switches). Two blocks down is the Lucky Penny #212, where Benny sells drinks and food over the counter. Hunger and thirst rise with the clock, and the clock keeps running outside. The scope, the controls and what comes next are in `docs/OPEN_WORLD.md`.
+
 **How the apartment changes**
 
 - It moves through three tiers: studio → loft → penthouse.
@@ -394,6 +396,14 @@ Skills give you information. They never make decisions for you.
 
 **Decision grading.** Every meaningful decision is graded against an EV estimate as Best, Good, Inaccuracy, Mistake or Blunder, and the grades roll up into an Accuracy score for the session. XP comes from Accuracy plus milestones (first cash, first final table, first title).
 
+**Your character (built).** A new career starts in the character creator:
+
+- **Who:** name, screen name, age and country.
+- **Background:** one of six backstories, each with a small permanent perk. A line cook's shifts pay more, a dealer's kid learns tells at the first showdown that confirms them, a dropout starts with bounty events open, a bouncer tilts slower, a hustler runs safer, a newcomer has savings.
+- **Look:** face, hair, body, height, jacket, glasses and hat.
+
+The player walks the street as that character, a MetaHuman matched to the look, and sees their own head at the table in third person.
+
 **Study**
 
 - **Hand replayer:** step through any hand on a 3D table and see the EV of the actions you didn't take.
@@ -517,3 +527,4 @@ The tone is grounded drama.
 **Decided:**
 - Engine: Unreal Engine 5 with Blender for production; browser prototype first.
 - First slice: Night One. The browser prototype is playable.
+- The open world grows from the apartment door outward in small, dense steps (the street and the store first). Third person is a toggle everywhere, including at live tables. See `docs/OPEN_WORLD.md`.

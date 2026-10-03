@@ -86,7 +86,7 @@ public:
 private:
 	std::vector<const store::Item*> OnShelf() const;
 	void Pay(double Now);
-	void Say(const std::string& Line, double Now, bool Bad);
+	void Say(const std::string& Words, double Now, bool Bad);
 
 	Session& S;
 	bool Shown = false;

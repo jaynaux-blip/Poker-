@@ -23,6 +23,7 @@ blender -b -P art/blender/build.py -- energy_can  # or any Blender 4.2+
 - With no asset name, the script builds all of them.
 - `--no-review` skips the review renders, which take several minutes on a CPU.
 - `--review-only` renders the review from the exported `.glb` files without rebuilding. It is also the check that the export carries everything: the sheet shows exactly what Unreal imports.
+- Without a GPU, environment variables trade time for quality: `SHORTSTACK_AO_SAMPLES` (the occlusion bake, 64 by default), `SHORTSTACK_REVIEW_SAMPLES` (96) and `SHORTSTACK_REVIEW_TILE` (900 px). The street's props were built in the cloud with 24, 40 and 720.
 
 Intermediate textures and review tiles go to `art/build/`, which git ignores.
 
@@ -73,6 +74,22 @@ The editor setup script (`unreal/Content/Python/shortstack_setup.py`) imports ea
 | Fiber router | `assets/router.py` | A gloss-topped router with four antenna paddles and status lights, its cables plugged into an outlet on the window recess's wall. |
 | Mementos | `assets/trophy.py` | The Riverside's Sunday cup: gold, with loop handles and an embossed spade, on a stepped lacquer base with an engraved brass plaque. Also a walnut stand for the $100 chip from Dee's back room. |
 | The player's arms | `assets/arms.py` | Both hands in the sleeves of a charcoal hoodie, rigged with Unreal Mannequin bone names (`SK_Arms`). The hands are sculpted as signed distance fields on an anatomical skeleton. Skin detail is computed per texel at 4K: knuckle wrinkles, nails with lunulae and cuticles, fingerprints, palm lines, veins, moles and flushed fingertips. The primitives that shape the mesh also weight it to the bones. |
+
+### The street, the store, and what the player wears
+
+These use `artkit/street.py`: finishes scaled for things a meter or more tall that live outdoors or in a shop (weathered enamel chipped to primer and rust, rain streaks, road grime rising from the ground; galvanized and bare metal; car paint, tires, shop plastics, lenses). `AStreetStage` places them with `BlenderFacing` (`BlenderProps.h`), so each one's front (Blender -Y) faces where the stage says.
+
+| Asset | File | Notes |
+|---|---|---|
+| Fire hydrant | `assets/hydrant.py` | Dry-barrel hydrant in chrome yellow: a bolted ground flange, the nozzle section with the pumper nozzle to the street and a hose nozzle each side, the bonnet with its pentagon nut. Bonnet and caps in high-flow light blue, a chain on the pumper cap. Chipped, streaked and splashed with road grime. |
+| Litter basket | `assets/trash_can.py` | Slatted steel basket in municipal green on three feet, a rain hood on struts, a black liner bunched over the rim, a RIVERSIDE SANITATION plate. |
+| Newspaper box | `assets/newsbox.py` | The Riverside Ledger's coin-op box on a post: the front page behind the door's glass, the masthead, a pull handle, the coin mechanism with its price window and return lever. |
+| Streetlight | `assets/streetlight.py` | 7.6 m tapered pole on a fluted base cover, an access hatch, a davit arm 1.5 m out over the road and a cobra head with its warm lens and photocell. |
+| Parked sedan | `assets/sedan.py` | A four-door with a lofted body, arches cut and lined, alloys with brake discs, glass and pillars, lights, mirrors, shut lines, RIVERSIDE plates. Baked light grey: the stage paints each car (navy, oxblood, silver, black). |
+| Cooler wall | `assets/cooler.py` | The Lucky Penny's ten-door cooler: a lit header (COLD DRINKS · ENERGY · WATER · JUICE · ICE · DAIRY), chrome pulls, LED mullions, wire shelves with price rails. The glass is left out; the stage stocks the shelves. |
+| Gondola shelf | `assets/store_shelf.py` | A 6 m double-sided run: slotted spine and uprights, three shelves a side on brackets, price channels with tags, kick plates, end panels. |
+| Register | `assets/register.py` | The point of sale on the counter: cash drawer, the clerk's touchscreen mid-sale, receipt printer, the customer's pole display and PIN pad, a scanner in its cradle. |
+| Hats and glasses | `assets/wearables.py` | `SM_Hat_Beanie` (cuffed rib knit), `SM_Hat_Cap` (six panels, a stitched spade, pre-curved bill), `SM_Hat_Bucket`, and `SM_Glasses_Round`, `_Square`, `_Wire` and `_Shades`. Fabric and frames are baked light grey, and the character tints them. A hat's origin is the top of the head; the glasses' origin is the bridge of the nose. |
 
 ## Organic shapes
 

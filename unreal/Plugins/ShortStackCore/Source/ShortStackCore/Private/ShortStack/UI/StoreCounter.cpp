@@ -370,9 +370,9 @@ void StoreCounter::Close(double Now)
 	OpenedAt = Now;
 }
 
-void StoreCounter::Say(const std::string& Line, double Now, bool Bad)
+void StoreCounter::Say(const std::string& Words, double Now, bool Bad)
 {
-	Note = Line;
+	Note = Words;
 	NoteAt = Now;
 	NoteBad = Bad;
 }
@@ -693,15 +693,15 @@ void StoreCounter::Draw(Canvas& C, double Now)
 	if (Paid || Declined)
 	{
 		const float Sa = Ease((Now - (Paid ? PaidAt : DeclinedAt)) / 0.15);
-		const Color Ink = Paid ? Hex(0x1f9d55) : Hex(0xd7263d);
+		const Color StampInk = Paid ? Hex(0x1f9d55) : Hex(0xd7263d);
 		C.Save();
 		C.Translate(Rx + ReceiptW * 0.5f, 86.0f + PaperH * 0.55f);
 		C.Rotate(-0.22f);
 		C.Scale(1.6f - 0.6f * Sa, 1.6f - 0.6f * Sa);
 		const std::string Word = Paid ? "PAID" : "DECLINED";
 		const float Sw = TrackedWidth(C, Word, 40.0f, 900, 6.0f) + 40.0f;
-		C.StrokeRoundRect({-Sw * 0.5f, -36.0f, Sw, 64.0f}, 8.0f, Fade(Ink, 0.85f * Sa), 4.0f);
-		TrackedText(C, Word, 0.0f, 12.0f, 40.0f, 900, Fade(Ink, 0.85f * Sa), 6.0f, Align::Center);
+		C.StrokeRoundRect({-Sw * 0.5f, -36.0f, Sw, 64.0f}, 8.0f, Fade(StampInk, 0.85f * Sa), 4.0f);
+		TrackedText(C, Word, 0.0f, 12.0f, 40.0f, 900, Fade(StampInk, 0.85f * Sa), 6.0f, Align::Center);
 		C.Restore();
 	}
 	// Pay.

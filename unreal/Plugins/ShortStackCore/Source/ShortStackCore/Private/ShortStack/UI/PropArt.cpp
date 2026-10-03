@@ -232,6 +232,12 @@ void StreetSign(Canvas& C, const std::string& Name, const std::string& Block)
 	C.Text(Block, W - 50.0f, H * 0.5f - 34.0f, Ts(46.0f, 800, Hex(0xf2f5f0), Align::Right));
 }
 
+void BuildingNumber(Canvas& C, const std::string& Number)
+{
+	C.FillRoundRect({0.0f, 0.0f, BuildingNumberW, BuildingNumberH}, 8.0f, Hex(0x1b1d22));
+	C.Text(Number, BuildingNumberW * 0.5f, 66.0f, Ts(64.0f, 900, Hex(0xd9c79a), Align::Center));
+}
+
 void DoorDecal(Canvas& C)
 {
 	const float W = DoorDecalW;

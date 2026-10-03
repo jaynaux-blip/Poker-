@@ -1992,6 +1992,7 @@ void StreetProps()
 	Place(48.0f, 340.0f, 0.62f, P::OpenSignW, P::OpenSignH, [&] { P::OpenSign(C); });
 	Place(500.0f, 340.0f, 0.5f, P::StreetSignW, P::StreetSignH, [&] { P::StreetSign(C, "FIFTH ST", "1800"); });
 	Place(500.0f, 460.0f, 0.5f, P::StreetSignW, P::StreetSignH, [&] { P::StreetSign(C, "MARKET ST", "200"); });
+	Place(500.0f, 580.0f, 0.75f, P::BuildingNumberW, P::BuildingNumberH, [&] { P::BuildingNumber(C, "1812"); });
 	Place(48.0f, 540.0f, 0.75f, P::DoorDecalW, P::DoorDecalH, [&] { P::DoorDecal(C); });
 	Place(1060.0f, 120.0f, 0.5f, P::PromoW, P::PromoH, [&] { P::Promo(C, "volt-rush", "2 FOR $5"); });
 	Place(1330.0f, 120.0f, 0.42f, P::PromoW, P::PromoH, [&] { P::Promo(C, "roller-dog", "$1.99"); });

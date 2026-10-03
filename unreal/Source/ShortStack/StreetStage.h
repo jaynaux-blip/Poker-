@@ -91,6 +91,7 @@ private:
 	UMaterialInstanceDynamic* Mat(FName Key, uint32 SrgbHex, float Roughness, float Pattern = 0.0f, float Emissive = 0.0f, float Metallic = 0.0f);
 	UStaticMeshComponent* Box(UMaterialInterface* Material, const FVector& Min, const FVector& Max, bool bCollide = true, USceneComponent* Parent = nullptr);
 	UStaticMeshComponent* Cyl(UMaterialInterface* Material, const FVector& Base, float Radius, float Height, bool bCollide = true);
+	/** An imported Blender prop (nullptr when it isn't), its origin at At and its front facing Yaw (degrees, 0 is +X). */
 	UStaticMeshComponent* Prop(const TCHAR* Name, const FVector& At, float Yaw, const FVector& Scale = FVector(1.0));
 	UWidgetComponent* Sign(const FVector& At, float Yaw, const FVector2D& SizeCm, const FIntPoint& Pixels, bool bLit);
 

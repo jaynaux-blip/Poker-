@@ -1770,6 +1770,7 @@ void ABackRoomGameMode::SeatEveryone()
 		{
 			Table->Reads.Add(FString(UTF8_TO_TCHAR(R.first.c_str())), R.second);
 		}
+		Table->ReadWeight = FMath::Max(1, static_cast<int32>(ss::hero::PerksOf(Save->Person).ReadWeight));
 		// Each night at the table, the pressure gets to you a little less.
 		Table->Composure.Sensitivity = FMath::Clamp(1.0f - 0.06f * PastNights, 0.65f, 1.0f);
 	}
