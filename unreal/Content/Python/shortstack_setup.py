@@ -615,6 +615,13 @@ def import_meshes(force=False):
         if mesh is None:
             unreal.log_error(f"ShortStack: importing {file} produced no mesh")
             continue
+        if name.startswith("SM_Wear_") and isinstance(mesh, unreal.StaticMesh):
+            # Glasses and hats are small and seen up close: their own triangles, not Nanite (whose fallback for a mesh
+            # this small cuts the frames' rounded corners down to chamfers).
+            nanite = mesh.get_editor_property("nanite_settings")
+            nanite.enabled = False
+            # Through the subsystem, which rebuilds the mesh (setting the property alone keeps the fallback's triangles).
+            unreal.get_editor_subsystem(unreal.StaticMeshEditorSubsystem).set_nanite_settings(mesh, nanite, True)
         if isinstance(mesh, unreal.SkeletalMesh):
             try:
                 _skin_material(folder, mesh)
@@ -624,6 +631,58 @@ def import_meshes(force=False):
         eal.save_loaded_asset(mesh)
         unreal.log(f"ShortStack: imported {file} as {mesh_path}")
         imported += 1
+    return imported
+
+
+TEXTURE_DIR = "/Game/ShortStack/Textures"
+
+
+def import_textures(force=False):
+    """Imports the masks made by art/blender (unreal/Art/Textures/<Group>/*.png, e.g. the shirt prints from prints.py).
+
+    Each lands in /Game/ShortStack/Textures/<Group>/<Name> as a linear mask (no sRGB), reimported only when the file
+    changed (its hash kept as metadata). Returns how many were imported.
+    """
+    import os
+    src_root = os.path.join(unreal.Paths.project_dir(), "Art", "Textures")
+    if not os.path.isdir(src_root):
+        return 0
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    imported = 0
+    for group in sorted(os.listdir(src_root)):
+        group_dir = os.path.join(src_root, group)
+        if not os.path.isdir(group_dir):
+            continue
+        for file in sorted(os.listdir(group_dir)):
+            if not file.lower().endswith(".png"):
+                continue
+            name = os.path.splitext(file)[0]
+            path = os.path.join(group_dir, file)
+            folder = f"{TEXTURE_DIR}/{group}"
+            asset_path = f"{folder}/{name}"
+            digest = _file_hash(path)
+            if not force and eal.does_asset_exist(asset_path):
+                existing = eal.load_asset(asset_path)
+                if existing and eal.get_metadata_tag(existing, "SourceHash") == digest:
+                    continue
+            task = unreal.AssetImportTask()
+            task.filename = path
+            task.destination_path = folder
+            task.destination_name = name
+            task.automated = True
+            task.replace_existing = True
+            task.save = False
+            tools.import_asset_tasks([task])
+            tex = eal.load_asset(asset_path)
+            if not isinstance(tex, unreal.Texture2D):
+                unreal.log_error(f"ShortStack: importing {file} produced no texture")
+                continue
+            tex.set_editor_property("srgb", False)
+            tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_MASKS)
+            eal.set_metadata_tag(tex, "SourceHash", digest)
+            eal.save_loaded_asset(tex)
+            unreal.log(f"ShortStack: imported {group}/{file} as {asset_path}")
+            imported += 1
     return imported
 
 
@@ -708,6 +767,7 @@ def run(force=False):
     try:
         changed += import_meshes(force)
         changed += backroom_setup.fix_meshes()
+        import_textures(force)
     except Exception as exc:  # the stage falls back to engine shapes
         unreal.log_error(f"ShortStack: importing meshes failed: {exc}")
     if changed:

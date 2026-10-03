@@ -57,10 +57,13 @@ FString Str(const std::string& S)
 }
 
 /** The room's extras: low-detail MetaHumans for the other tables. */
-const TCHAR* ExtraBodies[4] = {TEXT("ExtraA"), TEXT("ExtraB"), TEXT("ExtraC"), TEXT("ExtraD")};
+const TCHAR* ExtraBodies[12] = {TEXT("ExtraA"), TEXT("ExtraB"), TEXT("ExtraC"), TEXT("ExtraD"), TEXT("ExtraE"), TEXT("ExtraF"), TEXT("ExtraG"),
+	TEXT("ExtraH"), TEXT("ExtraI"), TEXT("ExtraJ"), TEXT("ExtraK"), TEXT("ExtraL")};
+/** The room's bodies by whom they suit (ExtraA, C, E, G, I, K are women's). */
+const TCHAR* WomenBodies[6] = {TEXT("ExtraA"), TEXT("ExtraC"), TEXT("ExtraE"), TEXT("ExtraG"), TEXT("ExtraI"), TEXT("ExtraK")};
+const TCHAR* MenBodies[6] = {TEXT("ExtraB"), TEXT("ExtraD"), TEXT("ExtraF"), TEXT("ExtraH"), TEXT("ExtraJ"), TEXT("ExtraL")};
 /** At each other table: the dealer, and two players facing across. */
 const int32 ExtraSeats[3] = {4, 2, 6};
-const uint32 ExtraShirts[] = {0x2f3b52, 0x6e2b2b, 0x3a5a40, 0x8a7a5a, 0x5a4a6e, 0x9a9a9a, 0x7a4a2a, 0x24464f, 0x6a5a3a};
 
 /** What a player says leaving the tournament. */
 FString Goodbye(const FString& Name)
@@ -376,14 +379,35 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 		{
 			// Someone without a face of their own: one of the room's, the same one every night they play (a regular of
 			// the room's, one that fits who they are).
+			// Unless someone at the table already wears that one: then the next of the kind that's free.
 			const uint32 Hash = FCrc::StrCrc32(*Name);
-			if (const ss::live::RoomLocal* Local = ss::live::FindRoomLocal(std::string(TCHAR_TO_UTF8(*Name))))
+			const ss::live::RoomLocal* Local = ss::live::FindRoomLocal(std::string(TCHAR_TO_UTF8(*Name)));
+			const TCHAR* const* Bodies = Local ? (Local->Woman ? WomenBodies : MenBodies) : ExtraBodies;
+			const uint32 NumBodies = Local ? 6 : 12;
+			auto Taken = [this](const TCHAR* Body) {
+				const FString Tag = FString::Printf(TEXT("/MHC_%s/"), Body);
+				auto Wears = [&Tag](const ABackRoomPlayer* O) { return O && O->MetaHumanClass.ToSoftObjectPath().ToString().Contains(Tag); };
+				for (const TPair<FString, TObjectPtr<ABackRoomPlayer>>& It : CastActors)
+				{
+					const ABackRoomPlayer* O = It.Value.Get();
+					const bool bSeated = O && (!O->IsHidden() || BlinkSwaps.ContainsByPredicate([O](const TPair<TWeakObjectPtr<ABackRoomPlayer>, bool>& S) {
+						return S.Key.Get() == O && S.Value;
+					}));
+					if (bSeated && Wears(O))
+					{
+						return true;
+					}
+				}
+				return Wears(Dealer.Get());
+			};
+			Asset = Bodies[Hash % NumBodies];
+			for (uint32 K = 0; K < NumBodies; ++K)
 			{
-				Asset = Local->Woman ? (Hash % 2 ? TEXT("ExtraC") : TEXT("ExtraA")) : (Hash % 2 ? TEXT("ExtraD") : TEXT("ExtraB"));
-			}
-			else
-			{
-				Asset = ExtraBodies[Hash % 4];
+				if (!Taken(Bodies[(Hash + K) % NumBodies]))
+				{
+					Asset = Bodies[(Hash + K) % NumBodies];
+					break;
+				}
 			}
 		}
 		A = SpawnPerson(Asset, At, EBackRoomRole::Player, PersonaFor(Name));
@@ -596,9 +620,16 @@ void ABackRoomGameMode::PlaceExtras()
 		if (!E)
 		{
 			FBackRoomPersona Persona = PersonaFor(FString::Printf(TEXT("Extra%d"), Index));
-			const uint32 Shirt = bDealer ? 0x141418 : ExtraShirts[(Index * 5 + 3) % 9];
-			Persona.Shirt = FLinearColor(FColor((Shirt >> 16) & 0xff, (Shirt >> 8) & 0xff, Shirt & 0xff));
-			E = SpawnPerson(ExtraBodies[(Index * 3 + Physical) % 4], Local * RoomWorld, EBackRoomRole::Extra, Persona);
+			if (bDealer)
+			{
+				// The house's black, nothing on the head.
+				Persona.Shirt = FLinearColor(FColor(0x14, 0x14, 0x18));
+				Persona.ShirtPrint = 0;
+				Persona.ShirtGraphic = 0;
+				Persona.Headwear = 0;
+			}
+			// Consecutive extras (a table's seats) step through all twelve bodies: 5 shares no factor with 12.
+			E = SpawnPerson(ExtraBodies[(Index * 5 + 2) % 12], Local * RoomWorld, EBackRoomRole::Extra, Persona);
 			if (RoomRoot)
 			{
 				E->AttachToComponent(RoomRoot, FAttachmentTransformRules::KeepWorldTransform);

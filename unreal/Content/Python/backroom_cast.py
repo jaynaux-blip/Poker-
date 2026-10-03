@@ -43,10 +43,39 @@ CAST = [
     ("ExtraB", "Isaiah", -1),
     ("ExtraC", "Jelena", -1),
     ("ExtraD", "Trey", -1),
+    # The Riverside's regulars (2026-10-03): more faces for the room, each with a look of their own (STYLE).
+    ("ExtraE", "Aera", -1),
+    ("ExtraF", "Lorenzo", -1),
+    ("ExtraG", "Etta", -1),
+    ("ExtraH", "Bo", -1),
+    ("ExtraI", "Sunita", -1),
+    ("ExtraJ", "Orlando", -1),
+    ("ExtraK", "Lani", -1),
+    ("ExtraL", "Mikel", -1),
 ]
+# Hair and facial hair worn over the preset's (the Creator's groom wardrobe items); None clears a slot.
+_G = "/MetaHumanCharacter/Optional/Grooms/Bindings"
+def _wi(folder, name):
+    return f"{_G}/{folder}/WI_{name}.WI_{name}"
+STYLE = {
+    "ExtraE": {"Hair": _wi("Hair", "Hair_L_Straight")},
+    "ExtraF": {"Hair": _wi("Hair", "Hair_S_SlickBack"), "Beard": _wi("Beards", "Beard_S_Stubble")},
+    "ExtraG": {"Hair": _wi("Hair", "Hair_M_BobStraight")},
+    "ExtraH": {"Hair": _wi("Hair", "Hair_S_SideSweptFringe"), "Beard": _wi("Beards", "Goatee_M_Pointed")},
+    "ExtraI": {"Hair": _wi("Hair", "Hair_S_LowPonytail")},
+    "ExtraJ": {"Hair": _wi("Hair", "Hair_S_360Waves"), "Beard": _wi("Beards", "Beard_S_Full")},
+    "ExtraK": {"Hair": _wi("Hair", "Hair_M_BobCurly")},
+    "ExtraL": {"Hair": _wi("Hair", "Hair_S_RecedeMessy"), "Beard": _wi("Beards", "Beard_L_Full")},
+}
 # Quality per character where it differs from QUALITY: strangers at the casino are "high" (hair cards,
 # fewer LODs, about half the disk); the disk this runs on is nearly full.
-QUALITY_FOR = {"MrsPark": 2, "Rick": 2, "Dre": 2, "ExtraA": 0, "ExtraB": 0, "ExtraC": 0, "ExtraD": 0}
+# The room's extras are "medium" (1): "low" (0) keeps only the face's far LODs, so hair cards can't bind (every hairstyle
+# renders as its helmet) and the eyes lose their shells. A build at another quality than this is assembled again.
+QUALITY_FOR = {"MrsPark": 2, "Rick": 2, "Dre": 2, "ExtraA": 1, "ExtraB": 1, "ExtraC": 1, "ExtraD": 1,
+               "ExtraE": 1, "ExtraF": 1, "ExtraG": 1, "ExtraH": 1, "ExtraI": 1, "ExtraJ": 1, "ExtraK": 1, "ExtraL": 1}
+# Builds from before the quality was recorded on the Blueprint (metadata "ShortStackQuality").
+BUILT_BEFORE = {"ExtraA": 0, "ExtraB": 0, "ExtraC": 0, "ExtraD": 0, "ExtraF": 0, "ExtraG": 0, "ExtraH": 0, "ExtraI": 0, "ExtraJ": 0,
+                "ExtraK": 0, "ExtraL": 0}
 # Don't start another character with less free space than this (bytes).
 MIN_FREE = 8 * 1024 ** 3
 
@@ -74,11 +103,23 @@ def status():
     return out
 
 
+def built_quality(name):
+    bp = built_blueprint(name)
+    if not bp:
+        return None
+    tag = unreal.EditorAssetLibrary.get_metadata_tag(unreal.EditorAssetLibrary.load_asset(bp), "ShortStackQuality")
+    return int(tag) if tag else BUILT_BEFORE.get(name, QUALITY_FOR.get(name, QUALITY))
+
+
 def step():
     """Advances the first unfinished character by one step and says what it did."""
     for name, preset, _ in CAST:
-        if built_blueprint(name):
+        q = built_quality(name)
+        if q is not None and q == QUALITY_FOR.get(name, QUALITY):
             continue
+        if q is not None:
+            # Built at another quality: out with it, and assembled again (the rig and textures are kept).
+            unreal.EditorAssetLibrary.delete_directory(f"{BUILT_DIR}/MHC_{name}")
         c = L.find(_path(name))
         if not c or "open=0" in L.status(c):
             import shutil
@@ -91,6 +132,8 @@ def step():
                 if o and other != name:
                     L.close(o)
             c = L.create_from_preset(_path(name), preset, False)
+            for slot, item in STYLE.get(name, {}).items():
+                L.set_wardrobe(c, slot, item or "")
             L.save(c)
             return f"{name}: opened"
         s = L.status(c)
@@ -110,6 +153,11 @@ def step():
             return f"{name}: cannot build ({s})"
         if not L.assemble(c, BUILT_DIR, COMMON_DIR, QUALITY_FOR.get(name, QUALITY)):
             return f"{name}: assembly failed"
+        bp = built_blueprint(name)
+        if bp:
+            asset = unreal.EditorAssetLibrary.load_asset(bp)
+            unreal.EditorAssetLibrary.set_metadata_tag(asset, "ShortStackQuality", str(QUALITY_FOR.get(name, QUALITY)))
+            unreal.EditorAssetLibrary.save_loaded_asset(asset)
         L.save(c)
         unreal.EditorLoadingAndSavingUtils.save_dirty_packages(True, True)
         L.close(c)

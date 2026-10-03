@@ -5,7 +5,10 @@
 #include "HAL/PlatformMemory.h"
 #include "MetaHumanCharacter.h"
 #include "MetaHumanCharacterEditorSubsystem.h"
+#include "MetaHumanCharacterInstance.h"
 #include "MetaHumanCharacterPaletteProjectSettings.h"
+#include "MetaHumanCollection.h"
+#include "MetaHumanWardrobeItem.h"
 #include "MetaHumanCollectionEditorPipeline.h"
 #include "MetaHumanCollectionPipeline.h"
 #include "MetaHumanTypes.h"
@@ -210,6 +213,46 @@ bool UShortStackMetaHumanLibrary::Assemble(UMetaHumanCharacter* Character, const
 	Params.PipelineOverride = Pipeline;
 	FMetaHumanCharacterEditorBuild::BuildMetaHumanCharacter(Character, Params);
 	UE_LOG(LogShortStackCast, Display, TEXT("Assembled %s into %s with %s"), *Character->GetName(), *OutputPath, *PipelineClass->GetName());
+	return true;
+}
+
+bool UShortStackMetaHumanLibrary::SetWardrobe(UMetaHumanCharacter* Character, const FString& SlotName, const FString& WardrobeItemPath)
+{
+	if (!EnsureEditing(Character))
+	{
+		return false;
+	}
+	UMetaHumanCollection* Collection = Character->GetMutableInternalCollection();
+	if (!Collection)
+	{
+		return false;
+	}
+	const FName Slot(*SlotName);
+	FMetaHumanPaletteItemKey Key;
+	if (!WardrobeItemPath.IsEmpty())
+	{
+		UMetaHumanWardrobeItem* Item = LoadObject<UMetaHumanWardrobeItem>(nullptr, *WardrobeItemPath);
+		if (!Item)
+		{
+			UE_LOG(LogShortStackCast, Error, TEXT("No wardrobe item %s"), *WardrobeItemPath);
+			return false;
+		}
+		// Already in the character's collection (the preset's own, or worn before): wear that one.
+		const FMetaHumanCharacterPaletteItem* Found = Collection->GetItems().FindByPredicate(
+			[Slot, Item](const FMetaHumanCharacterPaletteItem& Existing) { return Existing.SlotName == Slot && Existing.WardrobeItem == Item; });
+		if (Found)
+		{
+			Key = Found->GetItemKey();
+		}
+		else if (!Collection->TryAddItemFromWardrobeItem(Slot, Item, Key))
+		{
+			UE_LOG(LogShortStackCast, Error, TEXT("%s can't wear %s in %s"), *Character->GetName(), *WardrobeItemPath, *SlotName);
+			return false;
+		}
+	}
+	Collection->GetMutableDefaultInstance()->SetSingleSlotSelection(Slot, Key);
+	Character->MarkPackageDirty();
+	UE_LOG(LogShortStackCast, Display, TEXT("%s: %s = %s"), *Character->GetName(), *SlotName, WardrobeItemPath.IsEmpty() ? TEXT("(none)") : *WardrobeItemPath);
 	return true;
 }
 

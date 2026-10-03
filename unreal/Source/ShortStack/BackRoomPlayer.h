@@ -146,6 +146,35 @@ struct FBackRoomPersona
 	UPROPERTY(EditAnywhere, Category = "Persona")
 	FLinearColor Shirt = FLinearColor(0.5f, 0.5f, 0.5f);
 
+	/**
+	 * What's on the shirt: a repeating print (0 plain; 1 stripes, 2 breton, 3 ringer, 4 tartan, 5 gingham, 6 dots,
+	 * 7 camo) or a chest graphic (0 none; 1 the Riverside's spade, 2 ALL IN, 3 a chip, 4 BAD BEAT CLUB, 5 a sunset,
+	 * 6 a number), in its second and third colors (art/blender/prints.py's masks).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	int32 ShirtPrint = 0;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	int32 ShirtGraphic = 0;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	FLinearColor ShirtB = FLinearColor(0.85f, 0.85f, 0.82f);
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	FLinearColor ShirtC = FLinearColor(0.05f, 0.05f, 0.06f);
+	/** Their trousers. */
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	FLinearColor Pants = FLinearColor(0.035f, 0.037f, 0.045f);
+	/**
+	 * On the head (0 none, 1 a cap, 2 a beanie, 3 a trilby: only over short hair) and the face (0 none, 1 glasses,
+	 * 2 shades, 3 aviators), from art/blender/assets/wear.py, fitted to the face's eyes; their colors.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	int32 Headwear = 0;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	int32 Eyewear = 0;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	FLinearColor WearColor = FLinearColor(0.05f, 0.06f, 0.1f);
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	FLinearColor FrameColor = FLinearColor(0.01f, 0.01f, 0.01f);
+
 	/** What their body gives away (2 to 4 each; pros have reverse tells). */
 	UPROPERTY(EditAnywhere, Category = "Persona")
 	TArray<FBackRoomTell> Tells;
@@ -319,11 +348,17 @@ public:
 	/** World point between the eyes. */
 	FVector GetEyes() const;
 	USkeletalMeshComponent* GetBody() const { return Body; }
+	/** Dresses them again from the persona (after it or the ss.Wear.* tunables change). */
+	void Redress();
 	bool IsBusy() const;
 
 private:
 	void Build();
 	void BuildFromMetaHuman();
+	/** The persona's print or graphic and colors on a shirt material; their trousers' color on the rest. */
+	void DressOutfit(UMaterialInstanceDynamic* Mid, bool bShirt) const;
+	/** The persona's hat and eyewear, fitted to the face (the eyes' midpoint and spacing in the reference pose). */
+	void ApplyWear();
 	void UpdateMood(float Dt);
 	void UpdateBody(float Dt);
 	void UpdateHands(float Dt);
@@ -354,6 +389,9 @@ private:
 	/** The Blueprint they were copied from. */
 	UPROPERTY()
 	TObjectPtr<UClass> WornClass;
+	/** Hats and glasses (ApplyWear). */
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> Worn;
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> ChairSeat;
 	UPROPERTY()

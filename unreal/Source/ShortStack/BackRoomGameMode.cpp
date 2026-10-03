@@ -1872,6 +1872,17 @@ void ABackRoomGameMode::Tick(float DeltaSeconds)
 	}
 }
 
+namespace
+{
+/** A persona with glasses (1), shades (2) or aviators (3) in a frame color. */
+FBackRoomPersona Eyed(FBackRoomPersona P, int32 Eyewear, uint32 FrameSrgb)
+{
+	P.Eyewear = Eyewear;
+	P.FrameColor = FLinearColor(FColor((FrameSrgb >> 16) & 0xff, (FrameSrgb >> 8) & 0xff, FrameSrgb & 0xff));
+	return P;
+}
+} // namespace
+
 FBackRoomPersona ABackRoomGameMode::PersonaFor(const FString& Name)
 {
 	using T = EBackRoomTell;
@@ -1906,8 +1917,9 @@ FBackRoomPersona ABackRoomGameMode::PersonaFor(const FString& Name)
 	{
 		// Old-timer, plays tight. Honest tells: he glances at his chips when he connects, and a bluff
 		// makes him rub his neck. Forty years of watching hands: he knows a shake.
-		return Persona(TEXT("Sal"), 0.2f, 0.35f, 0.4f, 0.6f, 0.3f, 0.35f, 11,
-			{Tell(T::ChipGlance, M::Strong, 0.85f, 0.05f), Tell(T::Recheck, M::Weak, 0.55f, 0.08f), Tell(T::NeckTouch, M::Bluff, 0.75f, 0.08f)}, 0x6b6a4e, 0.6f);
+		// Reading glasses he pushes up to look at the board.
+		return Eyed(Persona(TEXT("Sal"), 0.2f, 0.35f, 0.4f, 0.6f, 0.3f, 0.35f, 11,
+			{Tell(T::ChipGlance, M::Strong, 0.85f, 0.05f), Tell(T::Recheck, M::Weak, 0.55f, 0.08f), Tell(T::NeckTouch, M::Bluff, 0.75f, 0.08f)}, 0x6b6a4e, 0.6f), 1, 0x3b2314);
 	}
 	if (Name == TEXT("Big Lou"))
 	{
@@ -1919,9 +1931,10 @@ FBackRoomPersona ABackRoomGameMode::PersonaFor(const FString& Name)
 	if (Name == TEXT("Twitch"))
 	{
 		// Wired, bets too much. Shakes when he has it; bluffing, he stares you down and swallows.
-		return Persona(TEXT("Twitch"), 0.85f, 0.7f, 0.9f, 0.9f, 0.7f, 0.5f, 41,
+		// Shades indoors, like the streamers he watches.
+		return Eyed(Persona(TEXT("Twitch"), 0.85f, 0.7f, 0.9f, 0.9f, 0.7f, 0.5f, 41,
 			{Tell(T::Tremble, M::Strong, 0.85f, 0.12f), Tell(T::StareDown, M::Bluff, 0.75f, 0.12f), Tell(T::Swallow, M::Bluff, 0.6f, 0.1f),
-				Tell(T::BlinkBurst, M::Bluff, 0.45f, 0.15f)}, 0x8c2a24, -0.5f);
+				Tell(T::BlinkBurst, M::Bluff, 0.45f, 0.15f)}, 0x8c2a24, -0.5f), 2, 0x101010);
 	}
 	if (Name == TEXT("Mei"))
 	{
@@ -1936,15 +1949,16 @@ FBackRoomPersona ABackRoomGameMode::PersonaFor(const FString& Name)
 	{
 		// Thirty years of the Sunday tournament. Folds and folds; when she finally bluffs she goes
 		// rigid, and a real hand pulls her eyes down to her chips. Nothing gets past her.
-		return Persona(TEXT("Mrs. Park"), 0.15f, 0.2f, 0.25f, 0.4f, 0.75f, 0.25f, 61,
-			{Tell(T::Freeze, M::Bluff, 0.85f, 0.05f), Tell(T::ChipGlance, M::Strong, 0.7f, 0.05f), Tell(T::Sigh, M::Weak, 0.5f, 0.1f)}, 0x5a3e57, 0.7f);
+		return Eyed(Persona(TEXT("Mrs. Park"), 0.15f, 0.2f, 0.25f, 0.4f, 0.75f, 0.25f, 61,
+			{Tell(T::Freeze, M::Bluff, 0.85f, 0.05f), Tell(T::ChipGlance, M::Strong, 0.7f, 0.05f), Tell(T::Sigh, M::Weak, 0.5f, 0.1f)}, 0x5a3e57, 0.7f), 1, 0x5a1f2a);
 	}
 	if (Name == TEXT("Rick"))
 	{
 		// Car-dealership money, loud and loose. Bluffing he stares you down and rubs his neck; with a
 		// hand he goes quiet and looks off at the room.
-		return Persona(TEXT("Rick"), 0.35f, 0.7f, 0.6f, 0.7f, 0.25f, 0.75f, 67,
-			{Tell(T::StareDown, M::Bluff, 0.8f, 0.15f), Tell(T::NeckTouch, M::Bluff, 0.55f, 0.1f), Tell(T::LookAway, M::Strong, 0.6f, 0.1f)}, 0x2b4d7a, -0.3f);
+		// Aviators, gold, from the showroom floor.
+		return Eyed(Persona(TEXT("Rick"), 0.35f, 0.7f, 0.6f, 0.7f, 0.25f, 0.75f, 67,
+			{Tell(T::StareDown, M::Bluff, 0.8f, 0.15f), Tell(T::NeckTouch, M::Bluff, 0.55f, 0.1f), Tell(T::LookAway, M::Strong, 0.6f, 0.1f)}, 0x2b4d7a, -0.3f), 3, 0xc9a24a);
 	}
 	if (Name == TEXT("Dre"))
 	{
@@ -1972,8 +1986,42 @@ FBackRoomPersona ABackRoomGameMode::PersonaFor(const FString& Name)
 	Tells.Add(Tell(A, Means[R.RandRange(0, 2)], 0.6f, 0.12f));
 	Tells.Add(Tell(B, Means[R.RandRange(0, 2)], 0.5f, 0.12f));
 	static const uint32 Shirts[] = {0x2f3b52, 0x6e2b2b, 0x3a5a40, 0x8a7a5a, 0x222222, 0x5a4a6e, 0x9a9a9a, 0x7a4a2a};
-	return Persona(*Name, R.FRandRange(0.15f, 0.6f), R.FRandRange(0.3f, 0.7f), R.FRandRange(0.3f, 0.7f), R.FRandRange(0.2f, 0.7f), R.FRandRange(0.3f, 0.7f), 0.0f,
-		Seed % 997 + 101, MoveTemp(Tells), Shirts[R.RandRange(0, 7)], 0.0f);
+	FBackRoomPersona P = Persona(*Name, R.FRandRange(0.15f, 0.6f), R.FRandRange(0.3f, 0.7f), R.FRandRange(0.3f, 0.7f), R.FRandRange(0.2f, 0.7f), R.FRandRange(0.3f, 0.7f),
+		0.0f, Seed % 997 + 101, MoveTemp(Tells), Shirts[R.RandRange(0, 7)], 0.0f);
+	// What they wear, the same every night: a print or a graphic on about half the shirts, trousers, now and then a
+	// hat (over short hair), glasses or shades.
+	auto C = [](uint32 S) { return FLinearColor(FColor((S >> 16) & 0xff, (S >> 8) & 0xff, S & 0xff)); };
+	static const uint32 Tones[] = {0x1f2a44, 0x2f3b52, 0x6e2b2b, 0x3a5a40, 0x8a7a5a, 0x222222, 0x5a4a6e, 0x9a9a9a, 0x7a4a2a, 0xd8d4c8, 0x7b1e1e,
+		0x1e4d6b, 0xc9a227, 0x4a5d23, 0x30343c, 0xb85c38, 0xe8e6df, 0x2b2b30};
+	constexpr int32 NumTones = UE_ARRAY_COUNT(Tones);
+	P.Shirt = C(Tones[R.RandRange(0, NumTones - 1)]);
+	const float Look = R.FRand();
+	if (Look < 0.36f)
+	{
+		P.ShirtPrint = R.RandRange(1, 7);
+	}
+	else if (Look < 0.56f)
+	{
+		P.ShirtGraphic = R.RandRange(1, 6);
+	}
+	// The print's colors against the shirt: light on dark, dark on light.
+	const bool bDark = P.Shirt.GetLuminance() < 0.25f;
+	static const uint32 Lights[] = {0xf2efe6, 0xe8d9a8, 0xd9e2ea, 0xf0c9a0, 0xc8d8b8};
+	static const uint32 Darks[] = {0x14161c, 0x2a1f1a, 0x1c2a40, 0x3a1414, 0x223322};
+	P.ShirtB = C(bDark ? Lights[R.RandRange(0, 4)] : Darks[R.RandRange(0, 4)]);
+	P.ShirtC = C(Tones[R.RandRange(0, NumTones - 1)]);
+	static const uint32 Trousers[] = {0x2a3a5c, 0x243150, 0x161616, 0x8b7d5b, 0x4a4a4e, 0x1c2236, 0x5a4632};
+	P.Pants = C(Trousers[R.RandRange(0, 6)]);
+	const float Head = R.FRand();
+	P.Headwear = Head < 0.16f ? 1 : Head < 0.23f ? 2 : Head < 0.27f ? 3 : 0;
+	const float Eye = R.FRand();
+	P.Eyewear = Eye < 0.13f ? 1 : Eye < 0.20f ? 2 : Eye < 0.24f ? 3 : 0;
+	// Muted: under the table lamps a hat's crown takes the most light of anything in the room.
+	static const uint32 Hats[] = {0x1c2236, 0x141414, 0x5e1a1a, 0x6b5f45, 0x26392a, 0x2f3338, 0x4a3426, 0x1f3a3d};
+	P.WearColor = C(Hats[R.RandRange(0, 7)]);
+	static const uint32 Frames[] = {0x111111, 0x3b2314, 0x2a2d33, 0x1c2a4a, 0x4a1a22};
+	P.FrameColor = C(Frames[R.RandRange(0, 4)]);
+	return P;
 }
 
 FString ABackRoomGameMode::CastAssetFor(const FString& Name)
@@ -2050,12 +2098,17 @@ void ABackRoomGameMode::SeatEveryone()
 	if (bLive && ((LiveDay % 7) + 7) % 7 != 6)
 	{
 		static const TCHAR* Names[6] = {TEXT("Rosa"), TEXT("Hank"), TEXT("Lupe"), TEXT("Vic"), TEXT("June"), TEXT("Tomas")};
-		static const TCHAR* Bodies[6] = {TEXT("ExtraA"), TEXT("ExtraB"), TEXT("ExtraC"), TEXT("ExtraD"), TEXT("ExtraC"), TEXT("ExtraB")};
+		static const TCHAR* Bodies[6] = {TEXT("ExtraE"), TEXT("ExtraL"), TEXT("ExtraK"), TEXT("ExtraJ"), TEXT("ExtraG"), TEXT("ExtraF")};
 		const int32 Day = ((LiveDay % 7) + 7) % 7;
 		DealerBody = Bodies[Day];
 		DealerPersona = PersonaFor(Names[Day]);
 		DealerPersona.Shirt = FLinearColor(FColor(0x14, 0x14, 0x18));
 		DealerPersona.Chatter = 0.2f;
+		// The house dresses its dealers: a black shirt, nothing on the head.
+		DealerPersona.ShirtPrint = 0;
+		DealerPersona.ShirtGraphic = 0;
+		DealerPersona.Headwear = 0;
+		DealerPersona.Pants = FLinearColor(FColor(0x12, 0x12, 0x14));
 	}
 	Dealer = SpawnPerson(DealerBody, ABackRoomStage::SeatTransform(4), EBackRoomRole::Dealer, DealerPersona);
 	Hero = SpawnPerson(TEXT("Hero"), ABackRoomStage::SeatTransform(0), EBackRoomRole::Hero, PersonaFor(TEXT("You")));

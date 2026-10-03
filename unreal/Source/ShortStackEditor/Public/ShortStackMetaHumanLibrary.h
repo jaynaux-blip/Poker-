@@ -58,4 +58,11 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|MetaHuman")
 	static bool Save(UMetaHumanCharacter* Character);
+
+	/**
+	 * Wears a wardrobe item in a slot, as the Creator's wardrobe does: a groom's WI_ asset ("Hair", "Beard", "Mustache",
+	 * "Eyebrows") from /MetaHumanCharacter/Optional/Grooms/Bindings. An empty path clears the slot (a clean shave).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|MetaHuman")
+	static bool SetWardrobe(UMetaHumanCharacter* Character, const FString& SlotName, const FString& WardrobeItemPath);
 };

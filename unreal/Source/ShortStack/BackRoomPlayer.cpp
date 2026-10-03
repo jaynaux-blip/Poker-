@@ -11,6 +11,10 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "Engine/Texture2D.h"
+#include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
+#include "GroomAsset.h"
 #include "GroomComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
@@ -234,18 +238,264 @@ void ABackRoomPlayer::BuildFromMetaHuman()
 				}
 				const FString MaterialName = Material->GetName();
 				const bool bShirt = MaterialName.Contains(TEXT("Shirt"));
-				const FLinearColor Dye = bShirt ? Persona.Shirt : FLinearColor(0.035f, 0.037f, 0.045f);
 				UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Material, Skinned);
-				Mid->SetVectorParameterValue(TEXT("diffuse_color_1"), Dye);
-				Mid->SetVectorParameterValue(TEXT("diffuse_color_2"), Dye);
+				DressOutfit(Mid, bShirt);
 				Skinned->SetMaterial(Slot, Mid);
 			}
 		}
 		Copy->RegisterComponent();
+		// The Blueprint's LOD sync drives its grooms from the face; without it a groom falls back to its helmet (a
+		// painted-on cap of hair). The room's extras are built without strands: they wear their nearest hair cards.
+		if (UGroomComponent* Hair = Cast<UGroomComponent>(Copy); Hair && Hair->GroomAsset && Bp->GetPathName().Contains(TEXT("/MHC_Extra")))
+		{
+			int32 CardsLOD = INDEX_NONE;
+			for (const FHairGroupsCardsSourceDescription& Cards : Hair->GroomAsset->GetHairGroupsCards())
+			{
+				if (Cards.ImportedMesh && Cards.LODIndex >= 0)
+				{
+					CardsLOD = CardsLOD == INDEX_NONE ? Cards.LODIndex : FMath::Min(CardsLOD, Cards.LODIndex);
+				}
+			}
+			if (CardsLOD != INDEX_NONE)
+			{
+				Hair->SetForcedLOD(CardsLOD);
+			}
+		}
 		Ours.Add(Node->GetVariableName(), Copy);
 		Wearables.Add(Copy);
 	}
+	ApplyWear();
 }
+
+namespace PlayerWear
+{
+// Where the chest graphic sits on the garment's layout, and a nudge for everything worn on the head (cm, ahead and up
+// of the eyes' midpoint). Console variables so they can be tuned live (ss.Wear.Redress applies them).
+// The garment samples the graphic at (its UV * scale + offset), clamped. The shirt's front panel is centered near
+// UV (0.266, 0.52): scale 5 makes the graphic a fifth of the layout, and the offsets put its middle on the upper chest.
+TAutoConsoleVariable<float> CVarGraphicScale(TEXT("ss.Wear.GraphicScale"), 5.0f, TEXT("Scale of the chest graphic on shirts (bigger is smaller)."));
+TAutoConsoleVariable<float> CVarGraphicU(TEXT("ss.Wear.GraphicU"), -0.83f, TEXT("Chest graphic offset across the shirt's layout."));
+TAutoConsoleVariable<float> CVarGraphicV(TEXT("ss.Wear.GraphicV"), -2.1f, TEXT("Chest graphic offset along the shirt's layout."));
+TAutoConsoleVariable<float> CVarNudgeX(TEXT("ss.Wear.NudgeX"), 0.0f, TEXT("Hats and glasses: cm ahead of the eyes."));
+TAutoConsoleVariable<float> CVarNudgeZ(TEXT("ss.Wear.NudgeZ"), 0.0f, TEXT("Hats and glasses: cm above the eyes."));
+
+const TCHAR* Prints[] = {nullptr, TEXT("T_Print_Stripes"), TEXT("T_Print_Breton"), TEXT("T_Print_Ringer"), TEXT("T_Print_Tartan"), TEXT("T_Print_Gingham"),
+	TEXT("T_Print_Dots"), TEXT("T_Print_Camo")};
+// How many repeats across the shirt's layout each print reads best at.
+const float PrintTiling[] = {1.0f, 7.0f, 9.0f, 5.0f, 3.0f, 7.0f, 9.0f, 2.0f};
+const TCHAR* Graphics[] = {nullptr, TEXT("T_Graphic_Riverside"), TEXT("T_Graphic_AllIn"), TEXT("T_Graphic_Chip"), TEXT("T_Graphic_BadBeat"),
+	TEXT("T_Graphic_Sunset"), TEXT("T_Graphic_Number")};
+const TCHAR* Heads[] = {nullptr, TEXT("SM_Wear_Cap"), TEXT("SM_Wear_Beanie"), TEXT("SM_Wear_Trilby")};
+const TCHAR* Eyes[] = {nullptr, TEXT("SM_Wear_Glasses"), TEXT("SM_Wear_Shades"), TEXT("SM_Wear_Aviators")};
+
+UTexture2D* ClothingTexture(const TCHAR* Name)
+{
+	return Name ? LoadObject<UTexture2D>(nullptr, *FString::Printf(TEXT("/Game/ShortStack/Textures/Clothing/%s.%s"), Name, Name), nullptr, LOAD_NoWarn | LOAD_Quiet) : nullptr;
+}
+
+UStaticMesh* WearMesh(const TCHAR* Name)
+{
+	return Name ? LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s.%s"), Name, Name, Name), nullptr, LOAD_NoWarn | LOAD_Quiet) : nullptr;
+}
+
+/** The room's bodies whose hair fits under a hat: none, waves, slicked back, short and receding. Fuller hair (coils,
+ *  an afro, a fringe, anything long) comes up through the crown. */
+bool HatFits(const FString& BlueprintPath)
+{
+	for (const TCHAR* Body : {TEXT("MHC_ExtraB/"), TEXT("MHC_ExtraF/"), TEXT("MHC_ExtraJ/"), TEXT("MHC_ExtraL/")})
+	{
+		if (BlueprintPath.Contains(Body))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** A graphic's ink, kept readable on its shirt: too close in lightness, it is pushed light (on a dark shirt) or dark. */
+FLinearColor Legible(const FLinearColor& Ink, const FLinearColor& Shirt)
+{
+	// Square roots of luminance: roughly how far apart the eye puts them.
+	const float Ground = FMath::Sqrt(Shirt.GetLuminance());
+	if (FMath::Abs(FMath::Sqrt(Ink.GetLuminance()) - Ground) >= 0.3f)
+	{
+		return Ink;
+	}
+	return Ground < 0.45f ? FMath::Lerp(Ink, FLinearColor(0.80f, 0.76f, 0.68f), 0.75f) : FMath::Lerp(Ink, FLinearColor(0.012f, 0.012f, 0.016f), 0.8f);
+}
+
+/** A bone's transform in the mesh's component space, in its reference pose. */
+FTransform RefComponentSpace(const FReferenceSkeleton& Ref, int32 Bone)
+{
+	FTransform T = Ref.GetRefBonePose()[Bone];
+	for (int32 Parent = Ref.GetParentIndex(Bone); Parent != INDEX_NONE; Parent = Ref.GetParentIndex(Parent))
+	{
+		T = T * Ref.GetRefBonePose()[Parent];
+	}
+	return T;
+}
+} // namespace PlayerWear
+
+void ABackRoomPlayer::DressOutfit(UMaterialInstanceDynamic* Mid, bool bShirt) const
+{
+	using namespace PlayerWear;
+	if (!bShirt)
+	{
+		Mid->SetVectorParameterValue(TEXT("diffuse_color_1"), Persona.Pants);
+		Mid->SetVectorParameterValue(TEXT("diffuse_color_2"), Persona.Pants);
+		return;
+	}
+	Mid->SetVectorParameterValue(TEXT("diffuse_color_1"), Persona.Shirt);
+	Mid->SetVectorParameterValue(TEXT("diffuse_color_2"), Persona.Shirt);
+	const int32 Print = FMath::Clamp(Persona.ShirtPrint, 0, 7);
+	if (UTexture2D* Map = ClothingTexture(Prints[Print]))
+	{
+		Mid->SetTextureParameterValue(TEXT("Print1Map"), Map);
+		Mid->SetScalarParameterValue(TEXT("Print1Strength"), 1.0f);
+		Mid->SetScalarParameterValue(TEXT("Print1Tiling"), PrintTiling[Print]);
+		Mid->SetVectorParameterValue(TEXT("Print1ColorA"), Persona.ShirtB);
+		Mid->SetVectorParameterValue(TEXT("Print1ColorB"), Persona.ShirtC);
+		Mid->SetVectorParameterValue(TEXT("Print1ColorC"), FMath::Lerp(Persona.ShirtB, Persona.ShirtC, 0.5f));
+	}
+	else
+	{
+		// Plain (a re-dress can take a print off again).
+		Mid->SetScalarParameterValue(TEXT("Print1Strength"), 0.0f);
+	}
+	const int32 Graphic = FMath::Clamp(Persona.ShirtGraphic, 0, 6);
+	if (UTexture2D* Map = ClothingTexture(Graphics[Graphic]))
+	{
+		Mid->SetTextureParameterValue(TEXT("PrintGraphicMap"), Map);
+		Mid->SetScalarParameterValue(TEXT("PrintGraphicStrength"), 1.0f);
+		Mid->SetScalarParameterValue(TEXT("PrintScale"), CVarGraphicScale.GetValueOnGameThread());
+		Mid->SetScalarParameterValue(TEXT("PrintGraphicOffsetU"), CVarGraphicU.GetValueOnGameThread());
+		Mid->SetScalarParameterValue(TEXT("PrintGraphicOffsetV"), CVarGraphicV.GetValueOnGameThread());
+		const FLinearColor InkA = Legible(Persona.ShirtB, Persona.Shirt);
+		Mid->SetVectorParameterValue(TEXT("PrintGraphicColorA"), InkA);
+		Mid->SetVectorParameterValue(TEXT("PrintGraphicColorB"), Legible(Persona.ShirtC, Persona.Shirt));
+		Mid->SetVectorParameterValue(TEXT("PrintGraphicColorC"), FMath::Lerp(InkA, Persona.Shirt, 0.35f));
+	}
+	else
+	{
+		Mid->SetScalarParameterValue(TEXT("PrintGraphicStrength"), 0.0f);
+	}
+}
+
+void ABackRoomPlayer::ApplyWear()
+{
+	using namespace PlayerWear;
+	for (UStaticMeshComponent* W : Worn)
+	{
+		if (W)
+		{
+			W->DestroyComponent();
+		}
+	}
+	Worn.Reset();
+	USkeletalMesh* FaceAsset = Face ? Face->GetSkeletalMeshAsset() : nullptr;
+	if (!FaceAsset || SeatRole == EBackRoomRole::Hero)
+	{
+		return;
+	}
+	const FReferenceSkeleton& Ref = FaceAsset->GetRefSkeleton();
+	const int32 HeadBone = Ref.FindBoneIndex(TEXT("head"));
+	const int32 EyeL = Ref.FindBoneIndex(TEXT("FACIAL_L_Eye"));
+	const int32 EyeR = Ref.FindBoneIndex(TEXT("FACIAL_R_Eye"));
+	if (HeadBone == INDEX_NONE || EyeL == INDEX_NONE || EyeR == INDEX_NONE)
+	{
+		return;
+	}
+	// The pieces are made around the midpoint between the eyes, looking down +X with +Z up, for eyes 6.3 cm apart;
+	// the face looks down its mesh's +Y. Fitted in the reference pose, then carried by the head.
+	const FTransform Head = RefComponentSpace(Ref, HeadBone);
+	const FVector L = RefComponentSpace(Ref, EyeL).GetLocation();
+	const FVector R = RefComponentSpace(Ref, EyeR).GetLocation();
+	const FVector Across = (L - R).GetSafeNormal();
+	const FVector Ahead = (FVector(0.0, 1.0, 0.0) - Across * FVector::DotProduct(FVector(0.0, 1.0, 0.0), Across)).GetSafeNormal();
+	const FRotator Facing = FRotationMatrix::MakeFromXZ(Ahead, FVector::UpVector).Rotator();
+	const double Scale = FMath::Clamp(FVector::Dist(L, R) / 6.3, 0.9, 1.12);
+	const FTransform AtEyes(Facing, (L + R) * 0.5 + Ahead * CVarNudgeX.GetValueOnGameThread() + FVector(0.0, 0.0, CVarNudgeZ.GetValueOnGameThread()), FVector(Scale));
+	const FTransform Rel = AtEyes.GetRelativeTransform(Head);
+	UMaterialInterface* Surface = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/ShortStack/Materials/M_Surface.M_Surface"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	const FString BlueprintPath = MetaHumanClass.ToSoftObjectPath().ToString();
+	auto Put = [&](UStaticMesh* Mesh) {
+		if (!Mesh)
+		{
+			return;
+		}
+		UStaticMeshComponent* C = NewObject<UStaticMeshComponent>(this, MakeUniqueObjectName(this, UStaticMeshComponent::StaticClass(), *Mesh->GetName()), RF_Transient);
+		C->SetStaticMesh(Mesh);
+		C->SetupAttachment(Face, TEXT("head"));
+		C->SetRelativeTransform(Rel);
+		C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		for (int32 Slot = 0; Slot < C->GetNumMaterials(); ++Slot)
+		{
+			UMaterialInterface* M = C->GetMaterial(Slot);
+			const FString Name = M ? M->GetName() : FString();
+			const bool bMain = Name.Contains(TEXT("wear_main"));
+			const bool bFrame = Name.Contains(TEXT("wear_frame"));
+			if (Surface && (bMain || bFrame))
+			{
+				UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Surface, C);
+				Mid->SetVectorParameterValue(TEXT("BaseColor"), bMain ? Persona.WearColor : Persona.FrameColor);
+				Mid->SetScalarParameterValue(TEXT("Roughness"), bMain ? 0.86f : 0.28f);
+				Mid->SetScalarParameterValue(TEXT("Metallic"), 0.0f);
+				Mid->SetScalarParameterValue(TEXT("Pattern"), 0.0f);
+				C->SetMaterial(Slot, Mid);
+			}
+		}
+		C->RegisterComponent();
+		Worn.Add(C);
+	};
+	if (Persona.Headwear > 0 && HatFits(BlueprintPath) && SeatRole != EBackRoomRole::Dealer)
+	{
+		Put(WearMesh(Heads[FMath::Clamp(Persona.Headwear, 0, 3)]));
+	}
+	if (Persona.Eyewear > 0)
+	{
+		Put(WearMesh(Eyes[FMath::Clamp(Persona.Eyewear, 0, 3)]));
+	}
+}
+
+void ABackRoomPlayer::Redress()
+{
+	for (USceneComponent* W : Wearables)
+	{
+		USkinnedMeshComponent* Skinned = Cast<USkinnedMeshComponent>(W);
+		for (int32 Slot = 0; Skinned && Slot < Skinned->GetNumMaterials(); ++Slot)
+		{
+			if (UMaterialInstanceDynamic* Mid = Cast<UMaterialInstanceDynamic>(Skinned->GetMaterial(Slot)))
+			{
+				DressOutfit(Mid, Mid->Parent && Mid->Parent->GetName().Contains(TEXT("Shirt")));
+			}
+		}
+	}
+	ApplyWear();
+}
+
+namespace PlayerWear
+{
+FAutoConsoleCommandWithWorld RedressCmd(TEXT("ss.Wear.Redress"), TEXT("Re-dresses everyone (after changing the ss.Wear.* tunables)."), FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World) {
+	for (TActorIterator<ABackRoomPlayer> It(World); It; ++It)
+	{
+		It->Redress();
+	}
+}));
+FAutoConsoleCommandWithWorldAndArgs TestCmd(TEXT("ss.Wear.Test"),
+	TEXT("ss.Wear.Test <print 0-7> <graphic 0-6> <head 0-3> <eyes 0-3>: dresses everyone at the table the same (testing; -1 keeps theirs)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		auto Arg = [&Args](int32 I) { return Args.IsValidIndex(I) ? FCString::Atoi(*Args[I]) : -1; };
+		for (TActorIterator<ABackRoomPlayer> It(World); It; ++It)
+		{
+			FBackRoomPersona& P = It->Persona;
+			P.ShirtPrint = Arg(0) >= 0 ? Arg(0) : P.ShirtPrint;
+			P.ShirtGraphic = Arg(1) >= 0 ? Arg(1) : P.ShirtGraphic;
+			P.Headwear = Arg(2) >= 0 ? Arg(2) : P.Headwear;
+			P.Eyewear = Arg(3) >= 0 ? Arg(3) : P.Eyewear;
+			It->Redress();
+		}
+	}));
+} // namespace PlayerWear
 
 FVector ABackRoomPlayer::ToBody(const FVector& World) const
 {
