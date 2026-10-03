@@ -1,7 +1,12 @@
 #pragma once
 
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/World.h"
+#include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/Canvas.h"
+
+#include <string>
+#include <vector>
 
 namespace ss
 {
@@ -101,6 +106,20 @@ SHORTSTACKCORE_API void Emblem(Canvas& C, const net::EventTemplate& T, float Cx,
 SHORTSTACKCORE_API void SeriesCrest(Canvas& C, const net::SeriesInfo& S, float Cx, float Cy, float Size, double Time);
 /** The glyph a series is known by (its motif). */
 SHORTSTACKCORE_API Glyph SeriesGlyph(const net::SeriesInfo& S);
+
+/**
+ * A bracelet or a ring, as won: The Championship Online's bracelets in royal-blue enamel, the Las Vegas bracelets in
+ * gold and onyx, Ring Rush's rings with a garnet, each Grand Circuit stop's ring with its own stone. A Main Event's
+ * carries more: pavé and a crown on a bracelet, a bigger stone with a double halo on a ring.
+ */
+SHORTSTACKCORE_API void Trophy(Canvas& C, const world::Award& A, float Cx, float Cy, float Size, double Time);
+/** A ring's stone, a bracelet's enamel (0xRRGGBB). */
+SHORTSTACKCORE_API uint32_t TrophyStone(const world::Award& A);
+/** Where it was won ("The Championship Online 2027", "Grand Circuit Montreal 2027") and the event ("$1,500 Bounty"). */
+SHORTSTACKCORE_API std::string TrophySeries(const world::Award& A);
+SHORTSTACKCORE_API std::string TrophyEvent(const world::Award& A);
+/** A champion's picture: a bracelet winner framed in gold links, a ring winner in a band with their ring's stone. */
+SHORTSTACKCORE_API void Champion(AvatarSpec& Pic, const std::vector<world::Award>& Awards);
 } // namespace eventart
 } // namespace ui
 } // namespace ss

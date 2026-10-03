@@ -184,6 +184,37 @@ std::string JoinRecords(const std::vector<std::string>& Records)
 	}
 	return S;
 }
+
+std::vector<std::string> AwardRecords(const std::vector<Award>& Awards)
+{
+	std::vector<std::string> R;
+	for (const Award& A : Awards)
+	{
+		R.push_back(Rec({I(A.Day), I(A.Ring), I(A.Online), I(A.Main), Esc(A.Series), Esc(A.Event), I(A.Prize), I(A.Entries)}));
+	}
+	return R;
+}
+
+std::vector<Award> ReadAwards(const std::string& Field)
+{
+	std::vector<Award> Out;
+	for (const std::string& R : Split(Field, '|'))
+	{
+		const std::vector<std::string> V = Split(R, '~');
+		Cursor Rc{V, 0};
+		Award A;
+		A.Day = Rc.Small();
+		A.Ring = Rc.Bool();
+		A.Online = Rc.Bool();
+		A.Main = Rc.Bool();
+		A.Series = Rc.Str();
+		A.Event = Rc.Str();
+		A.Prize = Rc.Int();
+		A.Entries = Rc.Small();
+		Out.push_back(A);
+	}
+	return Out;
+}
 } // namespace worldsave_detail
 
 using namespace worldsave_detail;
@@ -318,6 +349,14 @@ void World::Write(std::string& Out) const
 			}
 			Emit(Line("path") << I(N.Id) << JoinRecords(R));
 		}
+		if (!N.Awards.empty())
+		{
+			Emit(Line("awards") << I(N.Id) << JoinRecords(AwardRecords(N.Awards)));
+		}
+	}
+	if (!HeroTrophies.empty())
+	{
+		Emit(Line("heroawards") << JoinRecords(AwardRecords(HeroTrophies)));
 	}
 	for (const Pending& P : Queue)
 	{
@@ -611,6 +650,17 @@ bool World::Read(const std::vector<std::string>& Fields)
 		}
 		Roster[static_cast<size_t>(N.Id)] = std::move(N);
 	}
+	else if (Kind == "heroawards")
+	{
+		HeroTrophies = ReadAwards(C.At < Fields.size() ? Fields[C.At] : std::string());
+	}
+	else if (Kind == "awards")
+	{
+		if (Npc* N = Person(C.Int()))
+		{
+			N->Awards = ReadAwards(C.At < Fields.size() ? Fields[C.At] : std::string());
+		}
+	}
 	else if (Kind == "recent" || Kind == "years" || Kind == "ties" || Kind == "tickets" || Kind == "path")
 	{
 		Npc* N = Person(C.Int());
@@ -834,6 +884,75 @@ void World::Finish()
 		{
 			ByName[N.Name] = N.Id;
 		}
+	}
+	// Saves from before the trophy case kept only counts: the titles in history say which, the rest stay plain.
+	for (Npc& N : Roster)
+	{
+		int Bracelets = 0;
+		int Rings = 0;
+		for (const Award& A : N.Awards)
+		{
+			(A.Ring ? Rings : Bracelets) += 1;
+		}
+		if (Bracelets >= N.Bracelets && Rings >= N.Rings)
+		{
+			continue;
+		}
+		for (const Honor& H : Titles)
+		{
+			if (H.Npc != N.Id)
+			{
+				continue;
+			}
+			Award A;
+			A.Day = sim::DayAt(H.At);
+			A.Event = H.Title;
+			A.Prize = H.Prize;
+			A.Entries = H.Entries;
+			const size_t At = H.EventId.find('@');
+			const net::EventTemplate* T = net::Shared().FindTemplate(H.EventId.substr(0, At));
+			if (T && (T->Bracelet || T->Ring))
+			{
+				A.Ring = T->Ring;
+				A.Series = T->Series;
+				const net::SeriesInfo* Sr = net::Shared().FindSeries(T->Series);
+				A.Main = Sr && Sr->MainEvent == T->Id;
+			}
+			else if (!T && H.Title.rfind("The Championship ", 0) == 0)
+			{
+				A.Online = false;
+				A.Series = H.Title.substr(0, H.Title.find(':'));
+				A.Main = H.Title.find("Main Event") != std::string::npos;
+			}
+			else if (!T && H.Title.rfind("Grand Circuit ", 0) == 0)
+			{
+				A.Online = false;
+				A.Ring = true;
+				A.Series = H.Title.substr(0, H.Title.find(':'));
+				A.Main = H.Title.find("Main Event") != std::string::npos;
+			}
+			else
+			{
+				continue;
+			}
+			int& Have = A.Ring ? Rings : Bracelets;
+			if (Have < (A.Ring ? N.Rings : N.Bracelets))
+			{
+				++Have;
+				N.Awards.push_back(A);
+			}
+		}
+		for (; Bracelets < N.Bracelets; ++Bracelets)
+		{
+			N.Awards.push_back(Award());
+		}
+		for (; Rings < N.Rings; ++Rings)
+		{
+			Award A;
+			A.Ring = true;
+			N.Awards.push_back(A);
+		}
+		std::stable_sort(N.Awards.begin(), N.Awards.end(), [](const Award& A, const Award& B) { return A.Day < B.Day; });
 	}
 	std::stable_sort(Queue.begin(), Queue.end(), [](const Pending& A, const Pending& B) { return A.End < B.End; });
 	RefreshAll();

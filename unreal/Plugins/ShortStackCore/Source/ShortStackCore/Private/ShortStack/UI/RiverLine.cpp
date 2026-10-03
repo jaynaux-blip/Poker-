@@ -732,6 +732,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 	{
 		Pic.Frame = AvatarFrame::Gold;
 	}
+	rlnet_detail::NetChampion(Pic, Seat.Name, IsHero);
 	DrawAvatar(*C, Plate.X + 32.0f, P.Y, 21.0f, Pic);
 	if (!Seat.Country.empty())
 	{

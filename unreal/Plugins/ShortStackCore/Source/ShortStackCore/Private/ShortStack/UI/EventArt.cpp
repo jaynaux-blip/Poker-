@@ -2132,6 +2132,240 @@ bool Has(const std::string& S, const char* Word)
 {
 	return S.find(Word) != std::string::npos;
 }
+
+// ------------------------------------------------------------------ bracelets and rings
+
+/** A bracelet's or a ring's look: where it was won decides the enamel and the stones. */
+struct TrophyLook
+{
+	Metal Band;
+	Color Plate;  // a bracelet's plaque (enamel)
+	Color Plate2;
+	Color Mark;   // the plaque's spade
+	Color Stone;  // a ring's center stone; a bracelet's corner stones
+	bool Main = false;
+};
+
+/** Each Grand Circuit stop has its own stone (the year doesn't change it). */
+uint32_t CityStone(const std::string& Series)
+{
+	static const uint32_t Stones[] = {0x2f6fef, 0x10b981, 0xe11d48, 0x9b5de5, 0xf59e0b, 0x22d3ee, 0xec4899};
+	std::string City = Series.rfind("Grand Circuit ", 0) == 0 ? Series.substr(14) : Series;
+	const size_t Sp = City.rfind(' ');
+	if (Sp != std::string::npos)
+	{
+		City = City.substr(0, Sp);
+	}
+	uint32_t H = 2166136261u;
+	for (char Ch : City)
+	{
+		H ^= static_cast<unsigned char>(Ch);
+		H *= 16777619u;
+	}
+	return Stones[H % (sizeof(Stones) / sizeof(Stones[0]))];
+}
+
+TrophyLook LookOf(const world::Award& A)
+{
+	TrophyLook L;
+	L.Band = MetalOf(Alloy::Gold);
+	L.Main = A.Main;
+	const bool Tco = A.Online && SlotOf(A.Series) == "tco";
+	if (!A.Ring && Tco)
+	{
+		// The Championship Online: royal-blue enamel, a white-gold spade, sapphires.
+		L.Plate = Hex(0x2f5fd6);
+		L.Plate2 = Hex(0x0a1747);
+		L.Mark = Hex(0xf4f7ff);
+		L.Stone = Hex(0x8fbaff);
+	}
+	else if (!A.Ring)
+	{
+		// Las Vegas: yellow gold on black onyx, a diamond spade.
+		L.Plate = Hex(0x2a2a35);
+		L.Plate2 = Hex(0x040406);
+		L.Mark = Hex(0xeaf7ff);
+		L.Stone = Hex(0xdff6ff);
+	}
+	else
+	{
+		// Ring Rush's garnet; each Grand Circuit stop's own stone.
+		L.Plate = Hex(0x2a2a35);
+		L.Plate2 = Hex(0x040406);
+		L.Mark = Hex(0xeaf7ff);
+		L.Stone = A.Online && SlotOf(A.Series) == "ring" ? Hex(0xd0123a) : A.Series.empty() ? Hex(0x2f6fef) : Hex(CityStone(A.Series));
+	}
+	return L;
+}
+
+/** A small diamond (pavé, halos): a white disc with a spark. */
+void Pave(const Pen& P, float U, float V, float R, const Color& Tint)
+{
+	Disc(P, U, V, R * 1.25f, Fade(Hex(0x3a2a08), 0.8f));
+	Disc(P, U, V, R, Lin(P, U - R, V - R, U + R, V + R, Hex(0xffffff), Tint));
+	Disc(P, U - R * 0.3f, V - R * 0.3f, R * 0.35f, Fade(Hex(0xffffff), 0.95f));
+}
+
+/** A bracelet seen from above and in front: the band's far side, its links, the plaque with its spade. */
+void BraceletArt(const Pen& P, const TrophyLook& L, double Time)
+{
+	const Metal& M = L.Band;
+	const float Cy = -0.12f;
+	const float Rx = 0.88f;
+	const float Ry = 0.4f;
+	const float Hb = 0.17f; // the band's height at the back
+	const float Hf = 0.27f; // and at the front
+	auto At = [&](float A) { return Vec2{Rx * std::cos(A), Cy + Ry * std::sin(A)}; };
+	auto Height = [&](float A) { return Hb + (Hf - Hb) * (0.5f + 0.5f * std::sin(A)); };
+	Oval(P, 0.0f, 0.72f, 0.92f, 0.16f, Paint::Radial(P.P(0.0f, 0.72f), 0.0f, P.P(0.0f, 0.72f), 0.92f * P.S, Rgba(0, 0, 0, 0.45f), 0.6f, Rgba(0, 0, 0, 0.2f), Rgba(0, 0, 0, 0.0f)));
+	// The far side: the inside of the band, in shadow.
+	{
+		std::vector<Vec2> Back;
+		const int N = 28;
+		for (int I = 0; I <= N; ++I)
+		{
+			const float A = PiF + PiF * Fl(I) / Fl(N);
+			const Vec2 Q = At(A);
+			Back.push_back({Q.X, Q.Y - Height(A) * 0.5f});
+		}
+		for (int I = N; I >= 0; --I)
+		{
+			const float A = PiF + PiF * Fl(I) / Fl(N);
+			const Vec2 Q = At(A);
+			Back.push_back({Q.X, Q.Y + Height(A) * 0.5f});
+		}
+		PolyV(P, Back, Lin(P, 0.0f, Cy - Ry - Hb, 0.0f, Cy - Ry + Hb, Sink(M.Mid, 0.2f), Sink(M.Lo, 0.45f)));
+		for (int K = 1; K < 12; ++K)
+		{
+			const float A = PiF + PiF * Fl(K) / 12.0f;
+			const Vec2 Q = At(A);
+			const float H = Height(A) * 0.5f;
+			Stroke(P, {{Q.X, Q.Y - H}, {Q.X, Q.Y + H}}, Fade(Sink(M.Lo, 0.5f), 0.7f), 0.018f);
+		}
+		StrokeV(P, ArcPts(0.0f, Cy - Hb * 0.5f, Rx, Ry, PiF + 0.2f, TwoPiF - 0.2f, 24), Fade(M.Hi, 0.35f), 0.015f);
+	}
+	// The front: polished links, catching the light in turn.
+	{
+		const int N = 14;
+		for (int K = 0; K < N; ++K)
+		{
+			const float Step = PiF / Fl(N);
+			const float A0 = -0.06f + Step * Fl(K);
+			const float A1 = A0 + Step * 0.92f;
+			const Vec2 Q0 = At(A0);
+			const Vec2 Q1 = At(A1);
+			const float H0 = Height(A0) * 0.5f;
+			const float H1 = Height(A1) * 0.5f;
+			const Color Top = K % 2 == 0 ? M.Hi : Lift(M.Mid, 0.25f);
+			const Color Bot = K % 2 == 0 ? M.Mid : Sink(M.Mid, 0.25f);
+			Poly(P, {{Q0.X, Q0.Y - H0}, {Q1.X, Q1.Y - H1}, {Q1.X, Q1.Y + H1}, {Q0.X, Q0.Y + H0}}, Lin(P, 0.0f, Q0.Y - H0, 0.0f, Q0.Y + H0, Top, Bot));
+			Stroke(P, {{Q1.X, Q1.Y - H1}, {Q1.X, Q1.Y + H1}}, Fade(M.Lo, 0.9f), 0.02f);
+			// A bevel across each link.
+			Stroke(P, {{Q0.X, Q0.Y - H0 * 0.35f}, {Q1.X, Q1.Y - H1 * 0.35f}}, Fade(Hex(0xffffff), K % 2 == 0 ? 0.55f : 0.25f), 0.014f);
+		}
+		StrokeV(P, ArcPts(0.0f, Cy + Hf * 0.5f, Rx, Ry, -0.04f, PiF + 0.04f, 30), Fade(M.Lo, 0.9f), 0.02f);
+		StrokeV(P, ArcPts(0.0f, Cy - Hf * 0.5f, Rx, Ry, 0.05f, PiF - 0.05f, 30), Fade(M.Hi, 0.8f), 0.016f);
+	}
+	// The plaque at the front, facing you.
+	const float Pw = L.Main ? 0.9f : 0.82f;
+	const float Ph = L.Main ? 0.6f : 0.54f;
+	const float Pv = Cy + Ry + 0.06f;
+	if (L.Main)
+	{
+		// A Main Event's: a crown over the plaque, and light behind it.
+		Glow(P, 0.0f, Pv, 0.9f, Fade(M.Mid, 0.35f));
+	}
+	Box(P, -Pw * 0.5f - 0.02f, Pv - Ph * 0.5f + 0.04f, Pw + 0.04f, Ph, 0.13f, Rgba(0, 0, 0, 0.4f));
+	Box(P, -Pw * 0.5f, Pv - Ph * 0.5f, Pw, Ph, 0.12f, Lin(P, -Pw * 0.5f, Pv - Ph * 0.5f, Pw * 0.5f, Pv + Ph * 0.5f, M.Hi, M.Lo));
+	Box(P, -Pw * 0.5f + 0.02f, Pv - Ph * 0.5f + 0.02f, Pw - 0.05f, Ph - 0.05f, 0.11f, Lin(P, -Pw * 0.5f, Pv - Ph * 0.5f, Pw * 0.4f, Pv + Ph * 0.4f, Lift(M.Hi, 0.3f), M.Mid));
+	const float Iw = Pw - 0.14f;
+	const float Ih = Ph - 0.14f;
+	Box(P, -Iw * 0.5f, Pv - Ih * 0.5f, Iw, Ih, 0.07f, Lin(P, 0.0f, Pv - Ih * 0.5f, 0.0f, Pv + Ih * 0.5f, L.Plate, L.Plate2));
+	Box(P, -Iw * 0.5f + 0.03f, Pv - Ih * 0.5f + 0.02f, Iw - 0.06f, Ih * 0.42f, 0.05f, Rgba(255, 255, 255, 0.07f));
+	// The spade, in white gold or diamonds.
+	Spade(P, 0.012f, Pv - 0.01f + 0.012f, Ih * 0.36f, Rgba(0, 0, 0, 0.45f));
+	Spade(P, 0.0f, Pv - 0.01f, Ih * 0.36f, Lin(P, -0.1f, Pv - 0.15f, 0.1f, Pv + 0.15f, Hex(0xffffff), Sink(L.Mark, 0.25f)));
+	Glint(P, -0.05f, Pv - 0.1f, 0.05f, Fade(Hex(0xffffff), 0.9f));
+	if (L.Main)
+	{
+		// Pavé all the way round the enamel.
+		const int N = 18;
+		for (int K = 0; K < N; ++K)
+		{
+			const float T = TwoPiF * Fl(K) / Fl(N);
+			const float U = std::cos(T) * (Iw * 0.5f + 0.025f);
+			const float V = Pv + std::sin(T) * (Ih * 0.5f + 0.022f);
+			Pave(P, std::max(-Iw * 0.5f, std::min(Iw * 0.5f, U * 1.12f)), std::max(Pv - Ih * 0.5f - 0.01f, std::min(Pv + Ih * 0.5f + 0.01f, V)), 0.026f, L.Stone);
+		}
+		const Tone Regal{M.Hi, M.Mid, Sink(M.Lo, 0.5f), Hex(0xef4466), Hex(0xffffff)};
+		Draw(P.At(0.01f, Pv - Ph * 0.5f - 0.1f, 0.2f), Glyph::Crown, Shadowed(0.4f));
+		Draw(P.At(0.0f, Pv - Ph * 0.5f - 0.12f, 0.2f), Glyph::Crown, Regal);
+	}
+	else
+	{
+		for (int K = 0; K < 4; ++K)
+		{
+			Pave(P, (K % 2 == 0 ? -1.0f : 1.0f) * (Iw * 0.5f - 0.06f), Pv + (K < 2 ? -1.0f : 1.0f) * (Ih * 0.5f - 0.06f), 0.03f, L.Stone);
+		}
+	}
+	Sparkles(P, Time, L.Main ? 5 : 3, 0.92f);
+}
+
+/** A ring: the band, its shoulders, the head with a halo, and the stone. */
+void RingArt(const Pen& P, const TrophyLook& L, double Time)
+{
+	const Metal& M = L.Band;
+	const float Bv = 0.3f;  // the band's center
+	const float Br = 0.52f; // its radius
+	const float K = L.Main ? 0.5f : 0.42f;
+	const float Sv = -0.5f; // the stone's girdle
+	Oval(P, 0.0f, Bv + Br + 0.1f, 0.62f, 0.12f, Paint::Radial(P.P(0.0f, Bv + Br + 0.1f), 0.0f, P.P(0.0f, Bv + Br + 0.1f), 0.62f * P.S, Rgba(0, 0, 0, 0.45f), 0.6f,
+		Rgba(0, 0, 0, 0.2f), Rgba(0, 0, 0, 0.0f)));
+	if (L.Main)
+	{
+		Glow(P, 0.0f, Sv, 0.8f, Fade(L.Stone, 0.45f));
+	}
+	// The band: dark inside, polished outside.
+	Hoop(P, 0.0f, Bv, Br, Br, M.Lo, 0.2f);
+	Hoop(P, 0.0f, Bv, Br, Br, M.Mid, 0.14f);
+	Arc(P, 0.0f, Bv, Br + 0.035f, PiF * 0.62f, PiF * 1.3f, Fade(M.Hi, 0.95f), 0.04f);
+	Arc(P, 0.0f, Bv, Br + 0.035f, PiF * 0.05f, PiF * 0.4f, Fade(M.Hi, 0.55f), 0.03f);
+	Arc(P, 0.0f, Bv, Br - 0.075f, 0.0f, TwoPiF, Fade(Sink(M.Lo, 0.4f), 0.85f), 0.025f, false);
+	// The shoulders rise into the head.
+	for (int Side = -1; Side <= 1; Side += 2)
+	{
+		const float Sd = Fl(Side);
+		Poly(P, {{Sd * 0.36f, Bv - Br + 0.16f}, {Sd * 0.13f, Sv + 0.28f}, {Sd * 0.06f, Sv + 0.36f}, {Sd * 0.22f, Bv - Br + 0.22f}},
+			Lin(P, Sd * 0.36f, Bv - Br, 0.0f, Sv + 0.3f, M.Mid, M.Hi));
+		if (L.Main)
+		{
+			Pave(P, Sd * 0.26f, Bv - Br + 0.12f, 0.035f, Hex(0xdff6ff));
+			Pave(P, Sd * 0.18f, Bv - Br + 0.02f, 0.03f, Hex(0xdff6ff));
+		}
+	}
+	// The head: a basket under the stone.
+	Poly(P, {{-0.15f, Sv + 0.36f}, {0.15f, Sv + 0.36f}, {0.27f, Sv + 0.06f}, {-0.27f, Sv + 0.06f}}, Lin(P, -0.27f, 0.0f, 0.27f, 0.0f, M.Hi, M.Lo));
+	Stroke(P, {{-0.21f, Sv + 0.2f}, {0.21f, Sv + 0.2f}}, Fade(M.Lo, 0.8f), 0.02f);
+	// The halo: small diamonds set round the stone's girdle, behind it (a Main Event's ring has two rows).
+	for (int H = L.Main ? 1 : 0; H >= 0; --H)
+	{
+		const float Hr = K * (0.98f + 0.2f * Fl(H));
+		const int N = 14 + H * 4;
+		for (int I = 0; I < N; ++I)
+		{
+			const float T = TwoPiF * (Fl(I) + 0.5f * Fl(H)) / Fl(N);
+			Pave(P, Hr * std::cos(T), Sv + 0.04f * K + Hr * 0.24f * std::sin(T), 0.036f + 0.004f * Fl(H), Hex(0xdff6ff));
+		}
+	}
+	Gem(P, 0.0f, Sv, K, L.Stone);
+	// Four prongs.
+	for (int Side = -1; Side <= 1; Side += 2)
+	{
+		Disc(P, Fl(Side) * 0.62f * K, Sv - 0.3f * K, 0.03f, M.Hi);
+		Disc(P, Fl(Side) * 0.25f * K, Sv - 0.55f * K, 0.025f, M.Hi);
+	}
+	Sparkles(P, Time, L.Main ? 5 : 3, 0.9f);
+}
 } // namespace eventart_detail
 
 using namespace eventart_detail;
@@ -2256,6 +2490,80 @@ void SeriesCrest(Canvas& C, const net::SeriesInfo& S, float Cx, float Cy, float 
 	const bool Year = Last.size() == 4 && std::isdigit(static_cast<unsigned char>(Last[0])) != 0;
 	L.Banner = Year ? Last : S.Short;
 	Crest(C, L, Cx, Cy, Size, Time);
+}
+void Trophy(Canvas& C, const world::Award& A, float Cx, float Cy, float Size, double Time)
+{
+	const Pen P{&C, Cx, Cy, Size * 0.5f};
+	const TrophyLook L = LookOf(A);
+	if (A.Ring)
+	{
+		RingArt(P.At(0.0f, -0.08f, 1.0f), L, Time);
+	}
+	else
+	{
+		BraceletArt(P.At(0.0f, -0.04f, 1.0f), L, Time);
+	}
+}
+
+uint32_t TrophyStone(const world::Award& A)
+{
+	const TrophyLook L = LookOf(A);
+	const Color S = A.Ring ? L.Stone : L.Plate;
+	const auto Byte = [](float V) { return static_cast<uint32_t>(std::min(255.0f, std::max(0.0f, V * 255.0f + 0.5f))); };
+	return Byte(S.R) << 16 | Byte(S.G) << 8 | Byte(S.B);
+}
+
+std::string TrophySeries(const world::Award& A)
+{
+	if (A.Series.empty())
+	{
+		return A.Ring ? "Grand Circuit" : "The Championship";
+	}
+	if (A.Online)
+	{
+		const net::SeriesInfo* Sr = net::Shared().FindSeries(A.Series);
+		return Sr ? Sr->Name : A.Series;
+	}
+	return A.Series;
+}
+
+std::string TrophyEvent(const world::Award& A)
+{
+	// "TCO '27 #12: $215 Final Viper" or "The Championship 2027: $1,500 Bounty": the event itself.
+	const size_t Colon = A.Event.find(": ");
+	return Colon == std::string::npos ? A.Event : A.Event.substr(Colon + 2);
+}
+
+void Champion(AvatarSpec& Pic, const std::vector<world::Award>& Awards)
+{
+	int Bracelets = 0;
+	int Rings = 0;
+	const world::Award* LastRing = nullptr;
+	const world::Award* LastBracelet = nullptr;
+	for (const world::Award& A : Awards)
+	{
+		if (A.Ring)
+		{
+			++Rings;
+			LastRing = &A;
+		}
+		else
+		{
+			++Bracelets;
+			LastBracelet = &A;
+		}
+	}
+	if (Bracelets + Rings == 0)
+	{
+		return;
+	}
+	// The player and the rival keep their glow under the champion's frame.
+	Pic.Halo = Pic.Frame == AvatarFrame::Neon;
+	Pic.Frame = Bracelets > 0 ? AvatarFrame::Bracelet : AvatarFrame::Gem;
+	Pic.Bracelets = Bracelets;
+	Pic.Rings = Rings;
+	Pic.Stone = LastRing ? TrophyStone(*LastRing) : 0xdff6ff;
+	Pic.Plate = LastBracelet ? TrophyStone(*LastBracelet) : 0x2a2a35;
 }
 } // namespace eventart
 } // namespace ui

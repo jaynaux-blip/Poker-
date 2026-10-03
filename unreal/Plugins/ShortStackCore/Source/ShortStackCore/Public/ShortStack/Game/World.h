@@ -319,6 +319,19 @@ struct Step
 	Chips Amount = 0;
 };
 
+/** A bracelet or a ring someone won: the trophy case on their card, and the frame around their picture. */
+struct Award
+{
+	int Day = 0;
+	bool Ring = false;   // a ring (Ring Rush, the Grand Circuit); else a bracelet (The Championship, online or in Las Vegas)
+	bool Online = true;
+	bool Main = false;   // the Main Event's
+	std::string Series;  // online: the series' id ("tco27", "ring28"); live: the festival ("The Championship 2027")
+	std::string Event;   // the event's name
+	Chips Prize = 0;
+	int Entries = 0;
+};
+
 struct Npc
 {
 	int Id = 0;
@@ -401,6 +414,7 @@ struct Npc
 	int Arrived = 0;    // the day they arrived (Came != None)
 	int CameWith = -1;  // who brought them, or who they watched (-1: nobody)
 	std::vector<Step> Path;
+	std::vector<Award> Awards; // every bracelet and ring, oldest first
 	std::vector<Tie> Ties;
 	std::map<std::string, int> Tickets; // event template id -> seats won
 
@@ -542,6 +556,7 @@ struct Profile
 	int Rings = 0;
 	int Titles = 0;
 	int Majors = 0;
+	std::vector<Award> Awards; // oldest first
 	std::string BestEvent;
 	Chips Best = 0;
 	int BestDay = 0;
@@ -732,6 +747,13 @@ public:
 	SHORTSTACKCORE_API std::string Greeting(int Npc, uint32_t Salt) const;
 	/** The player's name, as the world knows it (honors, headlines). */
 	std::string HeroName;
+	/** The bracelets and rings the player has won, oldest first. */
+	const std::vector<Award>& HeroAwards() const { return HeroTrophies; }
+	/**
+	 * Debug: a bracelet (The Championship Online's) or a ring (Ring Rush's) for someone (-1: the player), from the
+	 * latest of those series to have started, its Main Event's when Main. Their card and their frame show it.
+	 */
+	SHORTSTACKCORE_API void GrantAward(int Npc, bool Ring, bool Main);
 	/** The player's Player of the Year points this calendar year (online, live). */
 	double HeroSeasonPoints() const { return HeroPoints; }
 	double HeroSeasonLivePoints() const { return HeroLivePoints; }
@@ -787,6 +809,7 @@ private:
 	std::vector<Honor> Titles;    // forever
 	std::map<int, Bond> HeroBonds;
 	std::map<std::string, std::pair<int, Chips>> HeroResults; // event id -> place, prize (the player's finished events)
+	std::vector<Award> HeroTrophies;
 	std::set<std::string> HeroIn; // events the player is in right now
 	// The boards' running numbers.
 	std::string SeriesKey;

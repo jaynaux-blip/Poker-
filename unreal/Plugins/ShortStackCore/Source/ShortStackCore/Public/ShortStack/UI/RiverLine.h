@@ -206,9 +206,10 @@ private:
 	void PlayerCard(double Now);
 	/** The card's journey: how they arrived, and every step since. */
 	void CardJourney(const world::Profile& P, float X, float Y, float W, float H, double Now);
+	void CardTrophies(const world::Profile& P, float X, float Y, float W, float H, double Now);
 	int CardShown = -1;
 	double CardAt = 0.0;
-	int CardTab = 0; // 0: overview, 1: journey
+	int CardTab = 0; // 0: overview, 1: journey, 2: trophies
 	double CardTabAt = 0.0;
 	// Kast (RiverLineKast.cpp).
 	void KastApp(double Now);

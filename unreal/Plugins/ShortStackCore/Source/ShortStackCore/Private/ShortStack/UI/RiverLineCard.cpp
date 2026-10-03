@@ -6,6 +6,7 @@
 
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/UI/EventArt.h"
 
 #include <algorithm>
 #include <cmath>
@@ -86,6 +87,27 @@ void RiverLine::PlayerCard(double Now)
 	if (P.New)
 	{
 		NetPill(*C, "NEW FACE", Nx, R.Y + 40.0f, pal::Accent, true, 10.0f);
+	}
+	// Their bracelets and rings on a shelf, the latest first (the TROPHIES tab has them all).
+	if (!P.Awards.empty())
+	{
+		const size_t Shown = std::min<size_t>(P.Awards.size(), 4);
+		float Sx = R.X + R.W - 30.0f;
+		const float Sy = R.Y + 112.0f;
+		if (P.Awards.size() > Shown)
+		{
+			Sx -= UI.Text("+" + std::to_string(P.Awards.size() - Shown), Sx, Sy + 6.0f, Ts(15.0f, 800, pal::Gold, Align::Right, Baseline::Alphabetic, true)) + 10.0f;
+		}
+		const float Left = Sx - Nf(Shown) * 52.0f;
+		C->FillRoundRect({Left - 8.0f, Sy + 20.0f, Sx - Left + 12.0f, 5.0f}, 2.5f, Paint::Linear({Left, 0.0f}, {Sx, 0.0f}, Hex(0x3a2a0c), Hex(0x6b4e16)));
+		for (size_t K = 0; K < Shown; ++K)
+		{
+			const world::Award& A = P.Awards[P.Awards.size() - 1 - K];
+			const float X = Sx - 26.0f - Nf(K) * 52.0f;
+			eventart::Trophy(*C, A, X, Sy, 50.0f, Now + 0.7 * static_cast<double>(K));
+		}
+		NetSpaced(*C, P.Bracelets > 0 && P.Rings > 0 ? "BRACELETS & RINGS" : P.Bracelets > 0 ? (P.Bracelets == 1 ? "BRACELET" : "BRACELETS") : (P.Rings == 1 ? "RING" : "RINGS"),
+			Sx, Sy - 30.0f, 9.5f, 800, Hex(0xf28a3a), 1.6f, Align::Right);
 	}
 	const std::string Since = P.Arrived >= 0 ? "on RiverLine since " + net::DateLabel(P.Arrived) + ", " + std::to_string(world::YearOf(P.Arrived))
 											 : "on the scene since " + std::to_string(P.Since);
@@ -203,14 +225,14 @@ void RiverLine::PlayerCard(double Now)
 	const float Mx = R.X + 392.0f;
 	const float Mw = R.X + R.W - 26.0f - Mx;
 	{
-		const char* Tabs[2] = {"OVERVIEW", "JOURNEY"};
+		const std::string Tabs[3] = {"OVERVIEW", "JOURNEY", P.Awards.empty() ? std::string("TROPHIES") : "TROPHIES \xC2\xB7 " + std::to_string(P.Awards.size())};
 		float Tx = Mx + Mw;
-		for (int K = 1; K >= 0; --K)
+		for (int K = 2; K >= 0; --K)
 		{
 			const float Tw = UI.Measure(Tabs[K], 11.0f, 800) + 26.0f;
 			Tx -= Tw;
 			const Rect Tr{Tx, R.Y + 272.0f, Tw, 26.0f};
-			const Ui::ClickState St = UI.Clickable(std::string("cardtab") + Tabs[K], Tr);
+			const Ui::ClickState St = UI.Clickable("cardtab" + std::to_string(K), Tr);
 			if (St.Clicked && CardTab != K)
 			{
 				CardTab = K;
@@ -222,9 +244,16 @@ void RiverLine::PlayerCard(double Now)
 			Tx -= 8.0f;
 		}
 	}
-	if (CardTab == 1)
+	if (CardTab == 1 || CardTab == 2)
 	{
-		CardJourney(P, Mx, R.Y + 292.0f, Mw, R.Y + R.H - 20.0f - (R.Y + 292.0f), Now);
+		if (CardTab == 1)
+		{
+			CardJourney(P, Mx, R.Y + 292.0f, Mw, R.Y + R.H - 20.0f - (R.Y + 292.0f), Now);
+		}
+		else
+		{
+			CardTrophies(P, Mx, R.Y + 292.0f, Mw, R.Y + R.H - 20.0f - (R.Y + 292.0f), Now);
+		}
 		C->SetAlpha(A0);
 		if (Outside.Clicked && !Inside.Hover)
 		{
@@ -307,6 +336,96 @@ void RiverLine::PlayerCard(double Now)
 		CardShown = -1;
 	}
 }
+void RiverLine::CardTrophies(const world::Profile& P, float X, float Y, float W, float H, double Now)
+{
+	const float In = NetEase((Now - CardTabAt) / 0.4);
+	NetSpaced(*C, "BRACELETS AND RINGS", X, Y, 11.0f, 800, pal::Muted, 1.6f);
+	if (P.Awards.empty())
+	{
+		float Ty = NetParagraph(*C, "No bracelets or rings. Yet.", X, Y + 30.0f, W, 17.0f, 600, CardInk, 23.0f, 1);
+		NetParagraph(*C,
+			"Bracelets are won at The Championship (Las Vegas, every summer) and The Championship Online in June. Rings are won on the Grand Circuit, a stop every six "
+			"to eight weeks, and at Ring Rush in March.",
+			X, Ty + 22.0f, W, 13.5f, 500, pal::Muted, 20.0f, 4);
+		return;
+	}
+	// The newest first: big cards for a few, a tighter grid for a collection.
+	const bool Big = P.Awards.size() <= 6;
+	const int Cols = Big ? 3 : 4;
+	const float Gap = 12.0f;
+	const float Cw = (W - Gap * Nf(Cols - 1)) / Nf(Cols);
+	const float Ch = Big ? 228.0f : 150.0f;
+	const int Rows = std::max(1, static_cast<int>((H - 20.0f + Gap) / (Ch + Gap)));
+	const size_t Fit = static_cast<size_t>(Cols * Rows);
+	const size_t Shown = std::min(P.Awards.size(), Fit);
+	for (size_t K = 0; K < Shown; ++K)
+	{
+		const world::Award& A = P.Awards[P.Awards.size() - 1 - K];
+		const float Ri = NetEase((Now - CardTabAt - 0.05 * static_cast<double>(K)) / 0.35);
+		const float A0 = C->GetAlpha();
+		C->SetAlpha(A0 * Ri);
+		const Rect Cd{X + Nf(static_cast<int>(K) % Cols) * (Cw + Gap), Y + 18.0f + Nf(static_cast<int>(K) / Cols) * (Ch + Gap) + (1.0f - Ri) * 10.0f, Cw, Ch};
+		const Color Tint = Hex(eventart::TrophyStone(A));
+		C->FillRoundRect(Cd, 14.0f, Paint::Linear({0.0f, Cd.Y}, {0.0f, Cd.Y + Cd.H}, Mix(Hex(0x0f1b2e), Tint, 0.16f), Hex(0x0c1626)));
+		C->StrokeRoundRect(Cd, 14.0f, A.Main ? NetA(pal::Gold, 0.7f) : CardRule, A.Main ? 1.5f : 1.0f);
+		const float Ix = Cd.X + Cd.W / 2.0f;
+		const float Iy = Cd.Y + (Big ? 64.0f : 46.0f);
+		C->FillEllipse(Ix, Iy, Big ? 70.0f : 48.0f, Big ? 56.0f : 38.0f, Paint::Radial({Ix, Iy}, 0.0f, {Ix, Iy}, Big ? 70.0f : 48.0f, NetA(Tint, 0.28f), 0.5f, NetA(Tint, 0.08f), NetA(Tint, 0.0f)));
+		eventart::Trophy(*C, A, Ix, Iy, (Big ? 108.0f : 76.0f) * (0.9f + 0.1f * In), Now + 0.6 * static_cast<double>(K));
+		const float Ty = Cd.Y + (Big ? 132.0f : 98.0f);
+		NetSpaced(*C, A.Main ? (A.Ring ? "MAIN EVENT RING" : "MAIN EVENT BRACELET") : A.Ring ? "RING" : "BRACELET", Ix, Ty, Big ? 9.5f : 8.5f, 900, A.Main ? pal::Gold : Hex(0xf28a3a), 1.5f, Align::Center);
+		// The event's name, on two lines when it needs them.
+		const std::string Event = eventart::TrophyEvent(A).empty() ? std::string(A.Ring ? "A ring" : "A bracelet") : eventart::TrophyEvent(A);
+		const float Ts0 = Big ? 15.0f : 12.5f;
+		const float Room = Cd.W - 20.0f;
+		std::string First = Event;
+		std::string Second;
+		if (Big && UI.Measure(Event, Ts0, 800) > Room)
+		{
+			First.clear();
+			size_t At = 0;
+			while (At < Event.size())
+			{
+				const size_t Sp = Event.find(' ', At);
+				const std::string Word = Event.substr(At, Sp == std::string::npos ? std::string::npos : Sp - At);
+				const std::string Try = First.empty() ? Word : First + " " + Word;
+				if (!First.empty() && UI.Measure(Try, Ts0, 800) > Room)
+				{
+					Second = Event.substr(At);
+					break;
+				}
+				First = Try;
+				At = Sp == std::string::npos ? Event.size() : Sp + 1;
+			}
+		}
+		const float Off = Second.empty() ? 0.0f : 17.0f;
+		UI.Text(First, Ix, Ty + (Big ? 21.0f : 18.0f), Ts(Ts0, 800, CardInk, Align::Center, Baseline::Alphabetic, false, Room));
+		if (!Second.empty())
+		{
+			UI.Text(Second, Ix, Ty + 38.0f, Ts(Ts0, 800, CardInk, Align::Center, Baseline::Alphabetic, false, Room));
+		}
+		UI.Text(eventart::TrophySeries(A), Ix, Ty + (Big ? 40.0f : 34.0f) + Off, Ts(Big ? 12.0f : 10.5f, 600, CardSoft, Align::Center, Baseline::Alphabetic, false, Room));
+		if (Big)
+		{
+			std::string When = A.Day > 0 ? net::DateLabel(A.Day) + ", " + std::to_string(world::YearOf(A.Day)) : std::string();
+			if (A.Entries > 0)
+			{
+				When += (When.empty() ? "" : "  \xC2\xB7  ") + Grouped(A.Entries) + " entries";
+			}
+			UI.Text(When, Ix, Ty + 59.0f + Off, Ts(11.5f, 600, pal::Muted, Align::Center, Baseline::Alphabetic, false, Room));
+			if (A.Prize > 0)
+			{
+				UI.Text(NetMoney(A.Prize), Ix, Ty + 78.0f + Off, Ts(13.0f, 800, pal::Gold, Align::Center, Baseline::Alphabetic, true));
+			}
+		}
+		C->SetAlpha(A0);
+	}
+	if (P.Awards.size() > Shown)
+	{
+		UI.Text("and " + std::to_string(P.Awards.size() - Shown) + " more, won before these", X, Y + H - 2.0f, Ts(12.5f, 600, pal::Muted));
+	}
+}
+
 void RiverLine::CardJourney(const world::Profile& P, float X, float Y, float W, float H, double Now)
 {
 	const float In = NetEase((Now - CardTabAt) / 0.4);

@@ -140,6 +140,32 @@ FAutoConsoleCommandWithWorldAndArgs WorldSimulateCmd(TEXT("ss.World.Simulate"), 
 		}
 	}));
 
+FAutoConsoleCommandWithWorldAndArgs WorldAwardCmd(TEXT("ss.World.Award"),
+	TEXT("ss.World.Award <bracelet|ring> [main] [name]: a bracelet or a ring for the player (or someone by name), to see the trophy case and the champion's frame."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		ss::Session* S = WorldSession(World);
+		if (!S || Args.Num() == 0)
+		{
+			return;
+		}
+		const bool Ring = Args[0].Equals(TEXT("ring"), ESearchCase::IgnoreCase);
+		const bool Main = Args.Num() > 1 && Args[1].Equals(TEXT("main"), ESearchCase::IgnoreCase);
+		TArray<FString> Rest;
+		for (int32 I = Main ? 2 : 1; I < Args.Num(); ++I)
+		{
+			Rest.Add(Args[I]);
+		}
+		const std::string Name(TCHAR_TO_UTF8(*FString::Join(Rest, TEXT(" "))));
+		const int32 Id = Name.empty() ? -1 : S->Living().Find(Name);
+		if (!Name.empty() && Id < 0)
+		{
+			LogLines("Nobody called " + Name + "\n");
+			return;
+		}
+		S->Living().GrantAward(Id, Ring, Main);
+		LogLines(std::string(Ring ? "A ring" : "A bracelet") + " for " + (Name.empty() ? std::string("you") : Name) + "\n");
+	}));
+
 FAutoConsoleCommandWithWorldAndArgs WorldPreviewCmd(TEXT("ss.World.Preview"), TEXT("ss.World.Preview <days>: how the world would look then (a copy is played forward; nothing changes)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
 		if (ss::Session* S = WorldSession(World))

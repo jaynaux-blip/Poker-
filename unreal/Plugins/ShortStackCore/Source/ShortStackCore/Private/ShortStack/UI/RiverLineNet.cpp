@@ -2296,6 +2296,31 @@ void RiverLine::CareerPage(double Now)
 		UI.RRect({Bar.X, Bar.Y, std::max(8.0f, Bar.W * Frac), Bar.H}, 4.0f, Paint::Linear({Bar.X, 0.0f}, {Bar.X + Bar.W, 0.0f}, Lc, Hex(Tiers[Lv + 1].Col)));
 		UI.Text(Money(To - You.Earnings) + " in winnings to " + Tiers[Lv + 1].Name, P.X + 176.0f, P.Y + 170.0f, Ts(13.0f, 600, pal::Muted));
 	}
+	// The trophy case: the player's bracelets and rings, the latest first.
+	if (const world::World* Wd = Net.Attached())
+	{
+		const std::vector<world::Award>& Won = Wd->HeroAwards();
+		if (!Won.empty())
+		{
+			const size_t Shown = std::min<size_t>(Won.size(), 3);
+			const float Cx0 = P.X + 572.0f;
+			NetSpaced(*C, "TROPHY CASE", Cx0 - 26.0f, P.Y + 44.0f, 10.5f, 800, Hex(0xf28a3a), 1.6f);
+			C->FillRoundRect({Cx0 - 30.0f, P.Y + 132.0f, Nf(Shown) * 56.0f + 4.0f, 5.0f}, 2.5f, Paint::Linear({Cx0, 0.0f}, {Cx0 + 170.0f, 0.0f}, Hex(0x6b4e16), Hex(0x3a2a0c)));
+			for (size_t K = 0; K < Shown; ++K)
+			{
+				eventart::Trophy(*C, Won[Won.size() - 1 - K], Cx0 + Nf(K) * 56.0f, P.Y + 102.0f, 54.0f * (0.85f + 0.15f * In), Now + 0.7 * static_cast<double>(K));
+			}
+			int Bracelets = 0;
+			for (const world::Award& A : Won)
+			{
+				Bracelets += A.Ring ? 0 : 1;
+			}
+			const int Rings = static_cast<int>(Won.size()) - Bracelets;
+			std::string Count = Bracelets > 0 ? std::to_string(Bracelets) + (Bracelets == 1 ? " bracelet" : " bracelets") : std::string();
+			Count += Rings > 0 ? (Count.empty() ? "" : " \xC2\xB7 ") + std::to_string(Rings) + (Rings == 1 ? " ring" : " rings") : "";
+			UI.Text(Count, Cx0 - 26.0f, P.Y + 162.0f, Ts(13.0f, 700, pal::Gold));
+		}
+	}
 	// Bankroll and the rent.
 	const float Bx = P.X + P.W - 30.0f;
 	NetSpaced(*C, "BANKROLL", Bx, P.Y + 44.0f, 10.5f, 800, pal::Muted, 1.6f, Align::Right);

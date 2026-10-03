@@ -94,6 +94,25 @@ The whole online career is played from a first-person desk. The apartment is the
     - a high roller has a diamond set on top;
     - other events show their format (PKO, Omaha, mystery bounty, freezeout...) in a seal.
   - **Series pages:** the banner, the series picker, the day rows and the highlights show the same crests.
+- **Bracelets and rings (built).** Every bracelet and ring goes into its winner's trophy case, and its design says where it was won:
+  - **Bracelets:** gold links and a plaque with a spade.
+    - The Championship Online's have royal-blue enamel, a white-gold spade and sapphires.
+    - The Las Vegas bracelets have black onyx and a diamond spade.
+    - A Main Event's bracelet adds pavé round the plaque and a crown.
+  - **Rings:** a gold band with a halo of small diamonds around the stone.
+    - Ring Rush rings carry a garnet.
+    - Each Grand Circuit stop's rings carry its own stone (sapphire, emerald, ruby, amethyst, topaz, aquamarine or pink).
+    - A Main Event's ring has a bigger stone, a double halo and diamonds on the shoulders.
+  - **On a player's card:**
+    - a shelf of their latest bracelets and rings next to their name;
+    - a TROPHIES tab showing each one with its event, series, date, field size and prize.
+    - The player's own trophy case is on the Career page.
+  - **Champions' frames:** wherever a champion's picture appears online (table seats, boards, cards, the Career page):
+    - a bracelet winner's picture sits in a ring of polished gold links, with a plaque in their latest bracelet's enamel at the bottom;
+    - a ring winner's sits in a gold band with their latest ring's stone set on top;
+    - anyone with both gets the links and the stone;
+    - two or more wins add a small medal with the count;
+    - the player and the rival keep their glow under the frame.
 - **Players.** 1,600 named regulars from 28 countries, with skill, volume, stakes, lifetime records and weekly form, including Team RiverLine pros and the rival, gh0stfold. Events the player isn't in are resolved statistically: the regulars who make each final table are drawn by skill, volume and stakes.
 - **Screen names.** Handles read like the ones people really pick: slang compounds ("VelvetRiver", "lazy_owl"), real names in each country's style ("kenji.k", "pablo_ortega", "BramvdBerg"), poker words in the players' own languages ("Kartenhai", "ElTiburon", "ReiDoRio"), grind jokes ("OneMoreTable", "LandlordHatesMe") and the odd gamer tag ("n00bflop", "BlindsTTV"). High-stakes pros favor understated names ("YMorozov", "mbouchard"). Table fields are named the same way and seeded with real regulars from the right stakes (about 3% of the field, 4 to 40 players), so the names on the leaderboards turn up at your tables.
 - **Avatars.** Every account has a profile picture: one of 35 vector icons (sharks, owls, foxes, wolves, crowns, rockets, robots, pizza, eight balls and more) on a colored disc. Names pick fitting icons in any language: "ElTiburon" and "C0ldSh4rk" get sharks, "CoolerKing" a crown, "CoffeeAndCards" a mug. Everyone else draws one from the set by name. Frames mark status: a chip edge or colored ring for flair, gold with a star for Team RiverLine, neon for you and the rival, whose ghost no one else may wear. Seats show the player's country flag on the avatar.

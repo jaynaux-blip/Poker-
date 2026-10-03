@@ -237,6 +237,7 @@ Profile World::ProfileOf(int Id) const
 	}
 	Pr.Bracelets = N.Bracelets;
 	Pr.Rings = N.Rings;
+	Pr.Awards = N.Awards;
 	Pr.Titles = N.Titles;
 	Pr.Majors = N.Majors;
 	Pr.BestEvent = N.BestEvent;
@@ -335,7 +336,7 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 	{
 		const bool Qualifier = (E.Flags & FlagQualifier) != 0;
 		Title = Who + " wins " + E.What;
-		Body = Grouped(E.Value) + " entries Â· " + Money(E.Amount) + " to the winner.";
+		Body = Grouped(E.Value) + " entries \xC2\xB7 " + Money(E.Amount) + " to the winner.";
 		if (Qualifier)
 		{
 			Body = "From a satellite seat to the title: " + Body;
@@ -539,6 +540,11 @@ std::string World::Describe(int Id) const
 		O << "  sponsor " << N.Sponsor;
 	}
 	O << "\n  career " << Money(N.CareerWon()) << "  bracelets " << N.Bracelets << "  rings " << N.Rings << "  series titles " << N.Titles << "  majors " << N.Majors << "\n";
+	for (const Award& A : N.Awards)
+	{
+		O << "    " << (A.Ring ? "ring" : "bracelet") << (A.Main ? " (Main Event)" : "") << ": " << (A.Event.empty() ? std::string("(from an older save)") : A.Event)
+		  << (A.Series.empty() ? std::string() : "  [" + A.Series + "]") << "  day " << A.Day << "\n";
+	}
 	for (int V = 0; V < VenueCount; ++V)
 	{
 		const Ledger& L = N.Totals[static_cast<size_t>(V)];

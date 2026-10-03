@@ -110,6 +110,8 @@ struct Sim
 	static void Post(World& W, double At, EventKind K, int Who, const std::string& What, Chips Amount = 0, int Value = 0, int Other = -1);
 	/** A step on someone's journey (their card keeps the first few and the latest). */
 	static void Mark(Npc& N, int Day, StepKind K, const std::string& What, int Place = 0, int Of = 0, Chips Amount = 0);
+	/** The bracelet or ring an event's winner takes home. */
+	static Award AwardOf(const Pending& P, int Day, Chips Prize);
 	static void Reputation(Npc& N);
 	static void SetMood(Npc& N, Momentum M, int Day);
 	static Year& YearRow(Npc& N, int Day);

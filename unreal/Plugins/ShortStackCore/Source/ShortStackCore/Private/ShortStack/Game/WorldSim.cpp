@@ -355,6 +355,31 @@ void Sim::Mark(Npc& N, int Day, StepKind K, const std::string& What, int Place, 
 	}
 }
 
+Award Sim::AwardOf(const Pending& P, int Day, Chips Prize)
+{
+	Award A;
+	A.Day = Day;
+	A.Ring = P.Ring && !P.Bracelet;
+	A.Online = P.Online;
+	A.Series = P.Series;
+	A.Event = P.Name;
+	A.Prize = Prize;
+	A.Entries = P.Entries;
+	if (P.Online)
+	{
+		// Online: the series' own Main Event (its id says which).
+		const net::Network& Net = net::Shared();
+		const net::EventTemplate* T = P.Template >= 0 && static_cast<size_t>(P.Template) < Net.Templates().size() ? &Net.Templates()[static_cast<size_t>(P.Template)] : nullptr;
+		const net::SeriesInfo* Sr = T ? Net.FindSeries(T->Series) : nullptr;
+		A.Main = Sr && Sr->MainEvent == T->Id;
+	}
+	else
+	{
+		A.Main = P.Kind == static_cast<int>(LiveKind::ChampionshipMain) || P.Name.find("Main Event") != std::string::npos;
+	}
+	return A;
+}
+
 void Sim::SetMood(Npc& N, Momentum M, int Day)
 {
 	if (N.Mood != M)
@@ -1099,6 +1124,10 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 	{
 		N.Bracelets += P.Bracelet ? 1 : 0;
 		N.Rings += P.Ring ? 1 : 0;
+		if (P.Bracelet || P.Ring)
+		{
+			N.Awards.push_back(AwardOf(P, Day, Prize));
+		}
 		N.Titles += P.Online && !P.Series.empty() ? 1 : 0;
 		N.Majors += P.Major ? 1 : 0;
 	}

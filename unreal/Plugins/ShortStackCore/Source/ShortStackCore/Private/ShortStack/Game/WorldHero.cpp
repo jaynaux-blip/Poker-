@@ -285,6 +285,61 @@ void World::Join(const std::string& EventId, int Npc)
 	++HeroRev;
 }
 
+void World::GrantAward(int Npc, bool Ring, bool Main)
+{
+	if (!Created || (Npc != -1 && !Get(Npc)))
+	{
+		return;
+	}
+	const net::Network& Net = net::Shared();
+	const int Today = sim::DayAt(Now);
+	const net::SeriesInfo* Pick = nullptr;
+	for (const net::SeriesInfo& Sr : Net.Series())
+	{
+		if ((Ring ? Sr.Rings : Sr.Bracelets) == 0)
+		{
+			continue;
+		}
+		// The latest to have started; before the first, the first.
+		const bool Better = Sr.FirstDay <= Today ? !Pick || Pick->FirstDay > Today || Sr.FirstDay > Pick->FirstDay : !Pick || (Pick->FirstDay > Today && Sr.FirstDay < Pick->FirstDay);
+		Pick = Better ? &Sr : Pick;
+	}
+	if (!Pick)
+	{
+		return;
+	}
+	const net::EventTemplate* T = Main ? Net.FindTemplate(Pick->MainEvent) : nullptr;
+	for (const net::EventTemplate& E : Net.Templates())
+	{
+		if (!T && E.Series == Pick->Id && (Ring ? E.Ring : E.Bracelet))
+		{
+			T = &E;
+		}
+	}
+	Award A;
+	A.Day = Today;
+	A.Ring = Ring;
+	A.Main = T && T->Id == Pick->MainEvent;
+	A.Series = Pick->Id;
+	A.Event = T ? T->Name : Pick->Name;
+	A.Prize = T ? T->GtdCents / 5 : 0;
+	A.Entries = T ? T->Field : 0;
+	if (Npc == -1)
+	{
+		HeroTrophies.push_back(A);
+		++HeroRev;
+	}
+	else
+	{
+		world::Npc& N = Roster[static_cast<size_t>(Npc)];
+		N.Awards.push_back(A);
+		N.Bracelets += Ring ? 0 : 1;
+		N.Rings += Ring ? 1 : 0;
+		Refresh(Npc);
+	}
+	++Rev;
+}
+
 void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, const TableReport& Report)
 {
 	if (!Created)
@@ -336,6 +391,16 @@ void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, con
 		const bool Online = Ev.Online;
 		const double Pts = Ev.BuyIn > 0 ? net::Points(Place, Ev.Entries, Ev.BuyIn) : 0.0;
 		(Online ? HeroPoints : HeroLivePoints) += Pts;
+		// A bracelet or a ring for the player: into the trophy case (once).
+		if (Place == 1 && (Ev.Bracelet || Ev.Ring))
+		{
+			const Award A = Sim::AwardOf(Ev, sim::DayAt(At), Prize);
+			const bool Had = std::any_of(HeroTrophies.begin(), HeroTrophies.end(), [&](const Award& X) { return X.Day == A.Day && X.Event == A.Event; });
+			if (!Had)
+			{
+				HeroTrophies.push_back(A);
+			}
+		}
 	}
 	// What the people at the player's tables will remember.
 	for (int Npc : Report.Met)

@@ -92,6 +92,12 @@ void Invariants(const world::World& W, const std::string& When)
 		Check(N.Tier >= 1 && N.Tier <= 4, When + ": " + N.Name + " tier");
 		Check(N.Ties.size() <= 7, When + ": " + N.Name + " too many ties");
 		Check(N.Recent.size() <= 10, When + ": " + N.Name + " too many recent results");
+		int Rings = 0;
+		for (const world::Award& A : N.Awards)
+		{
+			Rings += A.Ring ? 1 : 0;
+		}
+		Check(Rings == N.Rings && static_cast<int>(N.Awards.size()) - Rings == N.Bracelets, When + ": " + N.Name + "'s trophy case holds every bracelet and ring");
 	}
 	Check(Active > 1000, When + ": the world emptied out (" + std::to_string(Active) + " active)");
 	Check(W.View().size() == W.People().size(), When + ": the network view is out of step");
@@ -253,7 +259,11 @@ int Checks()
 		Check(!Rival.Came.empty() && !Rival.Journey.empty() && Rival.Arrived < 0, "an old hand's card starts before the story did");
 	}
 
-	// Save and load: a world that's saved carries on exactly as one that isn't.
+	// Save and load: a world that's saved carries on exactly as one that isn't (the trophy cases too).
+	W.GrantAward(-1, false, true);
+	W.GrantAward(W.Find("Mei"), true, false);
+	Check(W.HeroAwards().size() == 1 && W.HeroAwards().front().Main && !W.HeroAwards().front().Ring && !W.HeroAwards().front().Series.empty(), "the player's bracelet is in their trophy case");
+	Check(!W.Get(W.Find("Mei"))->Awards.empty() && W.Get(W.Find("Mei"))->Awards.back().Ring, "a ring for Mei");
 	std::string Saved;
 	W.Write(Saved);
 	std::printf("save: %zu KB\n", Saved.size() / 1024);
@@ -263,6 +273,25 @@ int Checks()
 	std::string Again;
 	Copy.Write(Again);
 	Check(Again == Saved, "a loaded world writes the same save");
+	Check(Copy.HeroAwards().size() == 1 && Copy.HeroAwards().front().Series == W.HeroAwards().front().Series, "the player's trophy case loads");
+	{
+		// A save from before the trophy cases (counts only): the titles in history fill them in.
+		std::string Old;
+		size_t At = 0;
+		while (At < Saved.size())
+		{
+			const size_t End = Saved.find('\n', At);
+			const std::string Ln = Saved.substr(At, End == std::string::npos ? std::string::npos : End - At + 1);
+			if (Ln.rfind("world\tawards\t", 0) != 0 && Ln.rfind("world\theroawards\t", 0) != 0)
+			{
+				Old += Ln;
+			}
+			At = End == std::string::npos ? Saved.size() : End + 1;
+		}
+		world::World Before;
+		Load(Before, Old);
+		Invariants(Before, "an older save");
+	}
 	W.Simulate(20);
 	Copy.Simulate(20);
 	std::string A;

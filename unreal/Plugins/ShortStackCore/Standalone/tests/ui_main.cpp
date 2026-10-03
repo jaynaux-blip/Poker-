@@ -1555,6 +1555,42 @@ void WorldScreens()
 		Emit("world_card_bracelet", RL, Now);
 		RL.ShowPlayer(-1, Now);
 	}
+	// The champions: whoever has won the most bracelets and rings, on their card and in their trophy case.
+	int Champ = -1;
+	size_t Kept = 0;
+	for (const ss::world::Npc& N : W.People())
+	{
+		Expect(static_cast<int>(N.Awards.size()) == N.Bracelets + N.Rings, "every bracelet and ring is in its winner's trophy case");
+		if (N.Awards.size() > Kept)
+		{
+			Champ = N.Id;
+			Kept = N.Awards.size();
+		}
+	}
+	Expect(Champ >= 0, "someone has bracelets or rings to show");
+	if (Champ >= 0)
+	{
+		RL.ShowPlayer(Champ, Now);
+		RL.ShowCardTab(0);
+		Now = Run(S, RL, Now, 1.2);
+		Emit("world_card_champion", RL, Now);
+		RL.ShowCardTab(2);
+		Now = Run(S, RL, Now, 1.2);
+		Emit("world_card_trophies", RL, Now);
+		RL.ShowPlayer(-1, Now);
+	}
+	// The boards: champions wear their frames there too.
+	RL.ShowBoard(ss::net::Board::Earnings, Now);
+	RL.OpenPage(Page::Leaderboards, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_boards_champions", RL, Now);
+	// The player's own: a bracelet and a Main Event ring in the trophy case on the Career page.
+	S.Living().GrantAward(-1, false, false);
+	S.Living().GrantAward(-1, true, true);
+	Expect(W.HeroAwards().size() == 2, "the player's trophy case holds what they won");
+	RL.OpenPage(Page::Career, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_career_trophies", RL, Now);
 	// At the table: a name the player hasn't seen before catches their eye, and opens its card.
 	const std::vector<ss::LobbyEvent> Open = OpenEvents(S, 1, 3000);
 	Expect(!Open.empty(), "an event to sit down at");
@@ -1577,6 +1613,24 @@ void WorldScreens()
 			}
 		}
 		Expect(Face >= 0, "people the world knows sit at the player's table");
+		// Champions at the table: a bracelet winner and a ring winner in their frames (the player in theirs).
+		if (S.T)
+		{
+			const int Mine = S.T->Hero().TableId;
+			int Given = 0;
+			for (const ss::TPlayer& P : S.T->Players)
+			{
+				const auto It = S.FieldNpc.find(P.Id);
+				if (P.TableId == Mine && It != S.FieldNpc.end() && Given < 2)
+				{
+					S.Living().GrantAward(It->second, Given == 1, false);
+					++Given;
+				}
+			}
+			Expect(Given >= 1, "champions to seat at the player's table");
+			Now = Run(S, RL, Now, 1.0);
+			Emit("world_table_champions", RL, Now);
+		}
 		if (Face >= 0)
 		{
 			RL.ShowPlayer(Face, Now);
@@ -1743,6 +1797,94 @@ void EventArtGallery()
 		SaveSheet("eventart_crests", L);
 	}
 }
+
+/** Bracelets and rings as their winners keep them, and the frames champions wear at the tables. */
+void TrophyGallery()
+{
+	namespace ea = ss::ui::eventart;
+	TableMeasurer M;
+	const double Time = 2.4;
+	auto Make = [](bool Ring, bool Online, bool Main, const std::string& Series, const std::string& Event) {
+		ss::world::Award A;
+		A.Ring = Ring;
+		A.Online = Online;
+		A.Main = Main;
+		A.Series = Series;
+		A.Event = Event;
+		return A;
+	};
+	const std::vector<std::pair<ss::world::Award, std::string>> Shelf = {
+		{Make(false, true, false, "tco27", "TCO '27 #12: $215 Final Viper"), "Championship Online bracelet"},
+		{Make(false, true, true, "tco27", "TCO '27 #56: $5,300 Online Championship"), "Online Championship (Main)"},
+		{Make(false, false, false, "The Championship 2027", "The Championship 2027: $1,500 Bounty"), "Las Vegas bracelet"},
+		{Make(false, false, true, "The Championship 2027", "The Championship 2027: $10,000 Main Event"), "Championship Main Event"},
+		{Make(true, true, false, "ring27", "RING '27 #3: $109 Iron Renegade"), "Ring Rush ring"},
+		{Make(true, true, true, "ring27", "RING '27 #54: $1,050 Ring Main Event"), "Ring Main Event"},
+		{Make(true, false, false, "Grand Circuit Montreal 2027", "Grand Circuit Montreal 2027: $580 Opener"), "Grand Circuit Montreal"},
+		{Make(true, false, false, "Grand Circuit Prague 2027", "Grand Circuit Prague 2027: $1,100 Bounty"), "Grand Circuit Prague"},
+		{Make(true, false, false, "Grand Circuit Sydney 2027", "Grand Circuit Sydney 2027: $5,300 Championship"), "Grand Circuit Sydney"},
+		{Make(true, false, true, "Grand Circuit Montreal 2027", "Grand Circuit Montreal 2027: $1,700 Main Event"), "Grand Circuit Main Event"},
+	};
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "AWARDS \xC2\xB7 BRACELETS AND RINGS", "Each series' own design; a Main Event's carries more");
+		for (size_t I = 0; I < Shelf.size(); ++I)
+		{
+			const float X = 170.0f + static_cast<float>(I % 5) * 315.0f;
+			const float Y = 280.0f + static_cast<float>(I / 5) * 360.0f;
+			C.FillRoundRect({X - 130.0f, Y - 130.0f, 260.0f, 300.0f}, 22.0f, ss::ui::Hex(0x111c2e));
+			ea::Trophy(C, Shelf[I].first, X, Y, 200.0f, Time + static_cast<double>(I));
+			C.Text(Shelf[I].second, X, Y + 128.0f, ss::ui::Ts(15.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
+			C.Text(ea::TrophyEvent(Shelf[I].first), X, Y + 150.0f, ss::ui::Ts(11.0f, 600, ss::ui::Hex(0x8b9bb4), ss::ui::Align::Center, ss::ui::Baseline::Alphabetic, false, 240.0f));
+			// And as a profile's shelf shows them.
+			ea::Trophy(C, Shelf[I].first, X + 98.0f, Y - 102.0f, 40.0f, Time);
+		}
+		SaveSheet("awards_trophies", L);
+	}
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "AWARDS \xC2\xB7 CHAMPIONS' FRAMES", "Bracelet winners wear gold links, ring winners their ring's stone; the player and the rival keep their glow");
+		struct Case
+		{
+			std::string Name;
+			std::vector<ss::world::Award> Won;
+			bool Hero;
+			std::string Label;
+		};
+		const std::vector<Case> Cases = {
+			{"VelvetRiver", {Shelf[0].first}, false, "One bracelet (online)"},
+			{"kenji.k", {Shelf[2].first, Shelf[3].first, Shelf[0].first}, false, "Three bracelets"},
+			{"ElTiburon", {Shelf[4].first}, false, "A Ring Rush ring"},
+			{"BramvdBerg", {Shelf[6].first, Shelf[7].first}, false, "Two circuit rings"},
+			{"lazy_owl", {Shelf[1].first, Shelf[8].first}, false, "A bracelet and a ring"},
+			{"grinder_3c", {Shelf[0].first}, true, "The player, a champion"},
+		};
+		const float Radii[3] = {58.0f, 21.0f, 11.5f};
+		for (size_t I = 0; I < Cases.size(); ++I)
+		{
+			const float X = 150.0f + static_cast<float>(I) * 262.0f;
+			ss::ui::AvatarSpec Pic = ss::ui::AvatarFor(Cases[I].Name);
+			if (Cases[I].Hero)
+			{
+				Pic.Frame = ss::ui::AvatarFrame::Neon;
+				Pic.Rim = 0x27d3c3;
+			}
+			ea::Champion(Pic, Cases[I].Won);
+			Expect(Pic.Frame == ss::ui::AvatarFrame::Bracelet || Pic.Frame == ss::ui::AvatarFrame::Gem, "a champion's frame");
+			float Y = 300.0f;
+			for (float R : Radii)
+			{
+				ss::ui::DrawAvatar(C, X, Y, R, Pic);
+				Y += R * 2.0f + 70.0f;
+			}
+			C.Text(Cases[I].Label, X, 720.0f, ss::ui::Ts(15.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
+			C.Text(Cases[I].Name, X, 742.0f, ss::ui::Ts(12.0f, 600, ss::ui::Hex(0x8b9bb4), ss::ui::Align::Center));
+		}
+		SaveSheet("awards_frames", L);
+	}
+}
 } // namespace ui_test
 
 int main(int Argc, char** Argv)
@@ -1760,6 +1902,7 @@ int main(int Argc, char** Argv)
 	ui_test::Props();
 	ui_test::Avatars();
 	ui_test::EventArtGallery();
+	ui_test::TrophyGallery();
 	ui_test::MultiScreens();
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();

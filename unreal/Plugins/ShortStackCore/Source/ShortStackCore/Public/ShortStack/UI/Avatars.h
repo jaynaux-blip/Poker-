@@ -56,6 +56,8 @@ enum class AvatarFrame : int
 	Chip,  // a poker chip's edge spots
 	Gold,  // Team RiverLine
 	Neon,  // glowing: the player, the rival
+	Bracelet, // a bracelet winner: gold links all the way round, a plaque at the bottom (and a ring winner's stone on top)
+	Gem,      // a ring winner: a gold band with their ring's stone set on top
 };
 
 struct AvatarSpec
@@ -67,6 +69,12 @@ struct AvatarSpec
 	AvatarFrame Frame = AvatarFrame::None;
 	uint32_t Rim = 0xffffff; // Ring and Neon frames
 	std::string Initials;
+	// Champions (Bracelet and Gem frames).
+	int Bracelets = 0;
+	int Rings = 0;
+	uint32_t Stone = 0xdff6ff; // the latest ring's stone
+	uint32_t Plate = 0x2a2a35; // the latest bracelet's enamel
+	bool Halo = false;         // the Neon glow (in Rim) under the frame: the player, the rival
 };
 
 /** The avatar a screen name picked: an icon that fits the name when one does ("ElTiburon" is a shark), else one of the set. */
