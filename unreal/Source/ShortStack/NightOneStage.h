@@ -232,6 +232,9 @@ private:
 	// Each is optional: without it the prop is built from engine shapes.
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> CanMesh;
+	/** The building across the street (art/blender/assets/tenement.py). */
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> TenementMesh;
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> LaptopBaseMesh;
 	UPROPERTY()

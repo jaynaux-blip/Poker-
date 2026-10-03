@@ -38,6 +38,10 @@ FLinearColor Srgb(uint32 Hex)
 
 // Room (prototype meters).
 const double RoomFront = -0.95;
+// The building across the street at night: its street lamp and the neon's spill on the brick (candelas).
+const float FacadeLampCandela = 1100.0f;
+const float FacadeGlowCandela = 120.0f;
+const float NeonSpillCandela = 160.0f;
 const double RoomBack = 3.1;
 const double RoomLeft = -1.75;
 const double RoomRight = 2.35;
@@ -246,6 +250,7 @@ void ANightOneStage::BuildSet()
 	WidgetLitMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_WidgetLit.M_WidgetLit"));
 	RainCookieMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_RainCookie.M_RainCookie"));
 	CanMesh = LoadProp(TEXT("SM_EnergyCan"));
+	TenementMesh = LoadProp(TEXT("SM_Tenement"));
 	LaptopBaseMesh = LoadProp(TEXT("SM_Laptop_Base"));
 	LaptopLidMesh = LoadProp(TEXT("SM_Laptop_Lid"));
 	DeskMesh = LoadProp(TEXT("SM_Desk"));
@@ -616,8 +621,50 @@ void ANightOneStage::BuildOutside()
 		}
 		++Placed;
 	}
-	// Building across the street.
-	Buildings->AddInstance(FTransform(FRotator::ZeroRotator, Web(6.0, -16.0 + 20.0, -22.0), FVector(8.0, 60.0, 40.0)));
+	// The building across the street: a brick walk-up over the laundromat, its face 18 m from the window and the
+	// street 12 m below (art/blender/assets/tenement.py). Without the mesh, a block of the skyline stands in.
+	if (TenementMesh)
+	{
+		AddMesh(TenementMesh, nullptr, FVector(1800.0, 600.0, -1200.0), FVector(1.0), FRotator::ZeroRotator, nullptr, true);
+		// A sodium street lamp across the street, raking the brick from the right: the fire escape (left of the
+		// window's middle) throws its stairs and railings across the wall. The city's cold glow fills the shadows
+		// so the ironwork reads against them, and the neon's pink lies on the bricks around the sign.
+		USpotLightComponent* Lamp = NewPart<USpotLightComponent>();
+		const FVector LampAt(1250.0, 250.0, -650.0);
+		Lamp->SetRelativeLocationAndRotation(LampAt, (FVector(1800.0, -450.0, 50.0) - LampAt).Rotation());
+		Lamp->SetIntensityUnits(ELightUnits::Candelas);
+		Lamp->SetIntensity(FacadeLampCandela);
+		Lamp->SetLightColor(Srgb(0xffa04a));
+		Lamp->SetOuterConeAngle(62.0f);
+		Lamp->SetInnerConeAngle(22.0f);
+		Lamp->SetSourceRadius(15.0f);
+		Lamp->SetAttenuationRadius(2600.0f);
+		Lamp->SetCastShadows(true);
+		Lamp->SetVolumetricScatteringIntensity(0.0f);
+		URectLightComponent* Glow = NewPart<URectLightComponent>();
+		Glow->SetRelativeLocationAndRotation(FVector(900.0, 300.0, -200.0), FRotator::ZeroRotator);
+		Glow->SetIntensityUnits(ELightUnits::Candelas);
+		Glow->SetIntensity(FacadeGlowCandela);
+		Glow->SetLightColor(FLinearColor(0.38f, 0.46f, 0.75f));
+		Glow->SetSourceWidth(3000.0f);
+		Glow->SetSourceHeight(2400.0f);
+		Glow->SetAttenuationRadius(2600.0f);
+		Glow->SetCastShadows(false);
+		Glow->SetVolumetricScatteringIntensity(0.0f);
+		UPointLightComponent* Spill = NewPart<UPointLightComponent>();
+		Spill->SetRelativeLocation(FVector(1745.0, 320.0, -60.0));
+		Spill->SetIntensityUnits(ELightUnits::Candelas);
+		Spill->SetIntensity(NeonSpillCandela);
+		Spill->SetLightColor(Srgb(0xff2e88));
+		Spill->SetSourceRadius(120.0f);
+		Spill->SetAttenuationRadius(520.0f);
+		Spill->SetCastShadows(false);
+		Spill->SetVolumetricScatteringIntensity(0.0f);
+	}
+	else
+	{
+		Buildings->AddInstance(FTransform(FRotator::ZeroRotator, Web(6.0, -16.0 + 20.0, -22.0), FVector(8.0, 60.0, 40.0)));
+	}
 
 	// The laundromat's neon sign and its glow on the wet facade.
 	NeonWidget = AddWidget(Web(3.2, -0.6, -17.9), Facing(FVector::BackwardVector, FVector::UpVector), FVector2D(640.0, 200.0), FIntPoint(1024, 320), false, true);

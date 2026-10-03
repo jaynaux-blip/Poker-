@@ -20,7 +20,9 @@ from artkit import core, review  # noqa: E402
 
 ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chair', 'mouse', 'arms', 'table', 'cards', 'folding_chair', 'dryer',
           # GearDrop's gear in the apartment, and the career's mementos.
-          'monitor', 'tower', 'mic', 'webcam', 'lights', 'macro_pad', 'headphones', 'plant', 'curtains', 'router', 'trophy']
+          'monitor', 'tower', 'mic', 'webcam', 'lights', 'macro_pad', 'headphones', 'plant', 'curtains', 'router', 'trophy',
+          # What the apartment's window looks out on.
+          'tenement']
 
 
 def args():

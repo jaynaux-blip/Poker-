@@ -414,6 +414,8 @@ void ANightOneGameMode::StartPlay()
 
 void ANightOneGameMode::TestLook(float Lean, float Yaw, float Pitch)
 {
+	// A script is looking: the real pointer no longer steers the head.
+	bTestInput = true;
 	if (ANightOnePawn* Seat = GetSeat())
 	{
 		Seat->TargetFocus = FMath::Clamp(Lean, 0.0f, 1.0f);

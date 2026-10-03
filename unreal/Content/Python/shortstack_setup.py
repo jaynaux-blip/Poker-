@@ -221,13 +221,37 @@ float water = saturate(b1.z + b2.z + r1.z + r2.z);
 float clear = saturate(water + max(r1.w, r2.w));
 float rim = smoothstep(0.2, 0.6, water) * (1.0 - smoothstep(0.6, 1.0, water));
 float2 e = min(uv, 1.0 - uv);
-float edge = smoothstep(0.0, 0.06, min(e.x * AspectIn, e.y));
-float fog = (1.0 - clear);
-// Condensation: a pink-grey haze lit by the neon; drops and trails are clear, with bright rims.
-float3 col = float3(0.16, 0.1, 0.13) * fog + rim * float3(0.25, 0.28, 0.35) + float3(0.7, 0.75, 0.9) * FlashIn * 0.3;
+float edgeDist = min(e.x * AspectIn, e.y);
+float edge = smoothstep(0.0, 0.06, edgeDist);
+// Condensation gathers where the glass is coldest: thick along the sill and into the corners, thinning to a
+// faint bloom across the middle so the street stays readable; mottled, never a flat sheet.
+float mottle = S.Fbm(float2(uv.x * AspectIn, uv.y) * 5.0 + 3.1);
+float fogAmt = 0.1 + 0.5 * (1.0 - smoothstep(0.0, 0.3, uv.y)) + 0.22 * (1.0 - smoothstep(0.0, 0.16, edgeDist));
+fogAmt = saturate(fogAmt * lerp(0.55, 1.3, mottle));
+float fog = fogAmt * (1.0 - clear);
+// What the haze glows with: the laundromat's pink low on the right, the city's cold grey everywhere else.
+float2 dn = (uv - float2(0.72, 0.12)) * float2(AspectIn, 1.0);
+float neon = exp(-dot(dn, dn) * 3.5);
+float3 haze = lerp(float3(0.05, 0.055, 0.07), float3(0.22, 0.06, 0.13), neon);
+// Drops are lenses (the refraction carries the street through them); only their lit edge shows, faintly.
+float3 col = haze * fog + rim * lerp(float3(0.07, 0.08, 0.1), float3(0.2, 0.08, 0.14), neon) + float3(0.7, 0.75, 0.9) * FlashIn * 0.3;
 col *= lerp(0.55, 1.0, edge);
-float opacity = saturate(fog * 0.55 + rim * 0.35 + (1.0 - edge) * 0.3);
+float opacity = saturate(fog * 0.75 + rim * 0.18 + (1.0 - edge) * 0.3);
 return float4(col, opacity);
+"""
+
+# Each drop bends the street behind it like a small lens: an upside-down, shrunken view through the bead and a
+# sideways smear through the runners. A screen-space offset (the material's 2D-offset refraction).
+GLASS_REFRACT = DROPS + """
+float3 rel = P - ObjPos;
+float2 uv = float2(rel.y / WidthCm + 0.5, rel.z / HeightCm + 0.5);
+float3 b1 = D.Beads(float2(uv.x * AspectIn, uv.y), T, 20.0);
+float3 b2 = D.Beads(float2(uv.x * AspectIn, uv.y) + 7.3, T * 0.7, 48.0) * 0.5;
+float4 r1 = D.Runners(uv, T, 22.0, AspectIn);
+float4 r2 = D.Runners(uv + float2(0.013, 0.0), T * 0.83 + 11.0, 37.0, AspectIn);
+float2 lens = b1.xy * 0.05 + b2.xy * 0.02 + (r1.xy + r2.xy) * 0.018;
+// Pane y runs up, the screen's v runs down.
+return float2(lens.x, -lens.y) * Strength;
 """
 
 COOKIE = DROPS + """
@@ -252,6 +276,11 @@ def _new_material(name, force):
     if eal.does_asset_exist(path):
         if not force:
             return None
+        # Rebuilt in place: the open map's stage holds instances of it, so deleting it would fail.
+        mat = unreal.load_asset(path)
+        if mat:
+            mel.delete_all_material_expressions(mat)
+            return mat
         eal.delete_asset(path)
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     return tools.create_asset(name, MAT_DIR, unreal.Material, unreal.MaterialFactoryNew())
@@ -321,6 +350,7 @@ def _time(mat, x, y):
 F3 = unreal.CustomMaterialOutputType.CMOT_FLOAT3
 F4 = unreal.CustomMaterialOutputType.CMOT_FLOAT4
 F1 = unreal.CustomMaterialOutputType.CMOT_FLOAT1
+F2 = unreal.CustomMaterialOutputType.CMOT_FLOAT2
 
 # ---------------------------------------------------------------- materials
 
@@ -439,16 +469,33 @@ def build_glass(force):
     mat.set_editor_property("two_sided", True)
     names = ["P", "ObjPos", "WidthCm", "HeightCm", "AspectIn", "T", "FlashIn"]
     c = _custom(mat, GLASS, names, F4, -450, 0, "Rain-streaked, fogged window glass")
-    _link(_world_pos(mat, -900, -300), c, "P")
-    _link(_expr(mat, unreal.MaterialExpressionObjectPositionWS, -900, -200), c, "ObjPos")
-    _link(_scalar(mat, "WidthCm", 138.0, -900, -100), c, "WidthCm")
-    _link(_scalar(mat, "HeightCm", 108.0, -900, 0), c, "HeightCm")
-    _link(_scalar(mat, "Aspect", 1.28, -900, 100), c, "AspectIn")
+    pos = _world_pos(mat, -900, -300)
+    pivot = _expr(mat, unreal.MaterialExpressionObjectPositionWS, -900, -200)
+    width = _scalar(mat, "WidthCm", 138.0, -900, -100)
+    height = _scalar(mat, "HeightCm", 108.0, -900, 0)
+    aspect = _scalar(mat, "Aspect", 1.28, -900, 100)
+    _link(pos, c, "P")
+    _link(pivot, c, "ObjPos")
+    _link(width, c, "WidthCm")
+    _link(height, c, "HeightCm")
+    _link(aspect, c, "AspectIn")
     _timed_inputs(mat, c, names)
     rgb = _mask(mat, c, "rgb", -200, -50)
     a = _mask(mat, c, "a", -200, 100)
     mel.connect_material_property(rgb, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.connect_material_property(a, "", unreal.MaterialProperty.MP_OPACITY)
+    # The drops refract what is behind the glass (a screen-space offset, so the building and the neon swim in them).
+    mat.set_editor_property("refraction_method", unreal.RefractionMode.RM_2D_OFFSET)
+    rnames = ["P", "ObjPos", "WidthCm", "HeightCm", "AspectIn", "T", "Strength"]
+    r = _custom(mat, GLASS_REFRACT, rnames, F2, -450, 400, "Rain drops as lenses")
+    _link(pos, r, "P")
+    _link(pivot, r, "ObjPos")
+    _link(width, r, "WidthCm")
+    _link(height, r, "HeightCm")
+    _link(aspect, r, "AspectIn")
+    _link(_time(mat, -900, 700), r, "T")
+    _link(_scalar(mat, "Refraction", 1.0, -900, 780), r, "Strength")
+    mel.connect_material_property(r, "", unreal.MaterialProperty.MP_REFRACTION)
     return _finish(mat)
 
 
