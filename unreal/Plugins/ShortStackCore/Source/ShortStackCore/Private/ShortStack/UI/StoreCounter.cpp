@@ -348,9 +348,11 @@ std::vector<const store::Item*> StoreCounter::OnShelf() const
 	return Out;
 }
 
-void StoreCounter::Open(double Now)
+void StoreCounter::Open(double Now, int Shelf)
 {
 	Shown = true;
+	ShelfAt = std::clamp(Shelf, 0, store::ShelfCount - 1);
+	Sel = 0;
 	Left = false;
 	OpenedAt = Now;
 	SelAt = Now;
@@ -733,5 +735,84 @@ void StoreCounter::Draw(Canvas& C, double Now)
 	C.SetAlpha(Al);
 	Ptr.EndFrame();
 }
+// ------------------------------------------------------------------ the walking HUD
+
+void DrawStreetHud(Canvas& C, const StreetHudInfo& Info, double Now)
+{
+	const float W = C.Width();
+	const float H = StoreCounter::Height;
+	// Where and when, top left, over a soft shade so it reads on a bright window.
+	C.FillRect({0.0f, 0.0f, 760.0f, 260.0f}, Paint::Radial({0.0f, 0.0f}, 0.0f, {0.0f, 0.0f}, 700.0f, Rgba(0, 0, 0, 0.55f), 0.5f, Rgba(0, 0, 0, 0.25f), Rgba(0, 0, 0, 0.0f)));
+	C.FillRect({58.0f, 52.0f, 34.0f, 3.0f}, Paint(MenuNeon));
+	TrackedText(C, Info.Place, 104.0f, 60.0f, 15.0f, 800, MenuInk, 5.0f);
+	const float Cw = TrackedText(C, Info.Clock, 58.0f, 104.0f, 36.0f, 900, MenuInk, 2.0f);
+	C.Text(Money(Info.BankrollCents), 58.0f + Cw + 22.0f, 102.0f, Ts(20.0f, 800, MenuGold));
+	if (Info.Life)
+	{
+		DrawVitals(C, *Info.Life, 58.0f, 128.0f, 380.0f, Now, nullptr, 0.95f);
+	}
+	// The camera, top right.
+	const std::string Mode = Info.FirstPerson ? "FIRST PERSON" : "THIRD PERSON";
+	const float Mw = TrackedWidth(C, Mode, 12.0f, 800, 3.0f);
+	const float Gw = Glyph(C, Info.Gamepad ? "Y" : "V", W - 58.0f - Mw - 46.0f, 66.0f, 0.85f);
+	(void)Gw;
+	TrackedText(C, Mode, W - 58.0f, 62.0f, 12.0f, 800, Fade(MenuInk, 0.8f), 3.0f, Align::Right);
+	// Texts, top right under the camera chip: newest first, each for eight seconds.
+	float Ty = 104.0f;
+	for (auto It = Info.Toasts.rbegin(); It != Info.Toasts.rend(); ++It)
+	{
+		const double Age = Now - It->At;
+		if (Age < 0.0 || Age > 8.0)
+		{
+			continue;
+		}
+		const float A = std::min(Ease(Age / 0.35), Ease((8.0 - Age) / 0.6));
+		const float Tw = 420.0f;
+		const Rect R{W - 58.0f - Tw + (1.0f - A) * 40.0f, Ty, Tw, 0.0f};
+		const std::vector<std::string> Lines = WrapText(C, It->Body, Tw - 40.0f, 16.0f, 400);
+		const float Th = 52.0f + Cf(static_cast<int>(std::min<size_t>(Lines.size(), 3))) * 22.0f;
+		C.FillRoundRect({R.X, R.Y, Tw, Th}, 12.0f, Paint(Rgba(10, 13, 22, 0.86f * A)));
+		C.FillRoundRect({R.X, R.Y, 4.0f, Th}, 2.0f, Paint(Fade(MenuTeal, A)));
+		TrackedText(C, It->From, R.X + 20.0f, R.Y + 28.0f, 12.0f, 800, Fade(MenuTeal, A), 2.4f);
+		float Ly = R.Y + 30.0f;
+		for (size_t I = 0; I < Lines.size() && I < 3; ++I)
+		{
+			Ly += 22.0f;
+			C.Text(Lines[I], R.X + 20.0f, Ly, Ts(16.0f, 400, Fade(MenuInk, 0.92f * A)));
+		}
+		Ty += Th + 10.0f;
+	}
+	// The prompt, bottom center.
+	if (!Info.Prompt.empty())
+	{
+		const float Pw = TrackedWidth(C, Info.Prompt, 15.0f, 800, 2.6f) + 92.0f;
+		const float Px = W * 0.5f - Pw * 0.5f;
+		const float Py = H - 210.0f;
+		C.FillRoundRect({Px, Py, Pw, 52.0f}, 26.0f, Paint(Rgba(8, 10, 16, 0.78f)));
+		C.StrokeRoundRect({Px + 0.5f, Py + 0.5f, Pw - 1.0f, 51.0f}, 26.0f, Fade(MenuInk, 0.18f), 1.0f);
+		Glyph(C, Info.Gamepad ? "A" : Info.PromptKey, Px + 14.0f, Py + 38.0f, 1.0f);
+		TrackedText(C, Info.Prompt, Px + 62.0f, Py + 32.0f, 15.0f, 800, MenuInk, 2.6f);
+	}
+	// The controls, for the first while.
+	const double Since = Now - Info.HintsAt;
+	if (Since >= 0.0 && Since < 14.0)
+	{
+		const float A = std::min(Ease(Since / 0.6), Ease((14.0 - Since) / 1.0));
+		float Hx = 58.0f;
+		const float Hy = H - 62.0f;
+		const std::pair<const char*, const char*> Hints[6] = {{Info.Gamepad ? "LS" : "WASD", "MOVE"}, {Info.Gamepad ? "LB" : "SHIFT", "RUN"}, {Info.Gamepad ? "Y" : "V", "1ST / 3RD PERSON"},
+			{Info.Gamepad ? "A" : "E", "INTERACT"}, {Info.Gamepad ? "X" : "F", "EAT OR DRINK"}, {Info.Gamepad ? "B" : "ESC", "PAUSE"}};
+		for (const std::pair<const char*, const char*>& Hp : Hints)
+		{
+			Hx += Glyph(C, Hp.first, Hx, Hy, A) + 10.0f;
+			Hx += TrackedText(C, Hp.second, Hx, Hy - 2.0f, 13.0f, 700, Fade(MenuMuted, A), 2.6f) + 30.0f;
+		}
+	}
+	if (Info.Fade > 0.0f)
+	{
+		C.FillRect({0.0f, 0.0f, W, H}, Paint(Rgba(0, 0, 0, std::min(1.0f, Info.Fade))));
+	}
+}
+
 } // namespace ui
 } // namespace ss

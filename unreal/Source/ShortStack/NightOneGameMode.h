@@ -53,6 +53,8 @@ public:
 	void QuitToDesktop();
 	void ApplySettings(const ss::ui::GameSettings& Settings, bool bSave);
 
+	/** Leaves the apartment for the street outside (the Street level: the walk to the Lucky Penny). False when it can't. */
+	bool GoOutside();
 	/** Leaves the apartment for Dee's game across the street (the Back Room level), buying in with BuyInCents. */
 	bool GoOut(const FString& ActivityId, int64 BuyInCents);
 

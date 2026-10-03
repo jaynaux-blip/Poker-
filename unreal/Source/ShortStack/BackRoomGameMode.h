@@ -69,6 +69,11 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Short Stack")
 	float Pitch = -14.0f;
 
+	/** Third person (V): the camera over the hero's shoulder with their head in the shot; first person again on V. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack")
+	void SetThirdPerson(bool bOn) { bThirdPerson = bOn; }
+	bool IsThirdPerson() const { return bThirdPerson; }
+
 	/** A free camera for looking at the table from outside (for testing from scripts): bOn takes the view, off gives it back. */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	void TestExtCam(FVector Pos, FVector At, float Fov, bool bOn);
@@ -112,6 +117,8 @@ private:
 	float PeekBlend = 0.0f;
 	bool bPeekReported = false;
 	bool bExtCam = false;
+	bool bThirdPerson = false;
+	float ThirdBlend = 0.0f;
 	FVector ExtPos = FVector::ZeroVector;
 	FVector ExtAt = FVector::ZeroVector;
 	float ExtFov = 50.0f;

@@ -66,7 +66,7 @@ void ANightOnePlayerController::PlayerTick(float DeltaTime)
 	};
 	const FHotkey Hotkeys[] = {
 		{EKeys::SpaceBar, TEXT(" ")}, {EKeys::F, TEXT("f")}, {EKeys::C, TEXT("c")}, {EKeys::X, TEXT("x")}, {EKeys::R, TEXT("r")}, {EKeys::B, TEXT("b")},
-		{EKeys::A, TEXT("a")}, {EKeys::M, TEXT("m")}, {EKeys::Up, TEXT("ArrowUp")}, {EKeys::Down, TEXT("ArrowDown")},
+		{EKeys::A, TEXT("a")}, {EKeys::M, TEXT("m")}, {EKeys::G, TEXT("g")}, {EKeys::Up, TEXT("ArrowUp")}, {EKeys::Down, TEXT("ArrowDown")},
 	};
 	for (const FHotkey& H : Hotkeys)
 	{

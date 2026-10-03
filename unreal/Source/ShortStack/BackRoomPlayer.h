@@ -292,6 +292,12 @@ public:
 	FVector GetPeekFocus() const { return PeekGripAt(1.0f); }
 	/** Hero: where the camera looks (world), so the head and neck follow it. */
 	void SetHeroLook(const FVector& At) { HeroLook = At; }
+	/**
+	 * Hero: the head for the third-person view (BackRoomPlayerView.cpp). Shown, the face draws and the hair
+	 * is copied from the MetaHuman on the spot (the hair system only binds to a face that's drawn); hidden
+	 * again for first person, the hair copies go with it.
+	 */
+	void ShowHeroHead(bool bShow);
 
 	/** The game's result for this player: chips won (+) or lost (-), and whether cards were shown. */
 	void OnResult(int64 Delta, int64 PotSize, bool bShowdown);
@@ -354,6 +360,10 @@ private:
 	/** The Blueprint they were copied from. */
 	UPROPERTY()
 	TObjectPtr<UClass> WornClass;
+	/** Hero: the hair copied for the third-person view (none in first person). */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<USceneComponent>> HeroHair;
+	bool bHeroHeadShown = false;
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> ChairSeat;
 	UPROPERTY()

@@ -888,6 +888,29 @@ std::string Session::Consume(const std::string& ItemId)
 	return "";
 }
 
+std::string Session::BagPick() const
+{
+	const bool Hungry = Life.Hunger >= Life.Thirst;
+	std::string Best;
+	double BestScore = -1e9;
+	for (const auto& Held : Life.Pantry)
+	{
+		const store::Item* I = store::Find(Held.first);
+		if (!I || Held.second <= 0)
+		{
+			continue;
+		}
+		// Relief for the worse need first, the other need second, a little for energy.
+		const double Score = (Hungry ? I->Hunger * 2.0 + I->Thirst : I->Thirst * 2.0 + I->Hunger) + I->Energy * 0.5;
+		if (Score > BestScore)
+		{
+			BestScore = Score;
+			Best = Held.first;
+		}
+	}
+	return Best;
+}
+
 std::string Session::ClerkSays(const store::Basket& B) const
 {
 	return store::ClerkLine(WorldMinutes(), B, Life.Shifts, Life.Hunger, Life.Energy);

@@ -199,6 +199,10 @@ void SetConsoleInt(const TCHAR* Name, int32 Value)
 /** What Dee texts after a night at her game, from what the Back Room passed back (cents, reads learned). */
 FString HomeTextFromOptions(const FString& Options)
 {
+	if (UGameplayStatics::HasOption(Options, TEXT("Street")))
+	{
+		return FString(); // back from the corner store: nothing for Dee to say
+	}
 	if (UGameplayStatics::HasOption(Options, TEXT("Live")))
 	{
 		// Home from the Riverside: Dee saw it all from the box.
@@ -779,6 +783,38 @@ void ANightOneGameMode::Begin(const FString& Name)
 	UE_LOG(LogNightOne, Log, TEXT("Night One started as %s"), *Clean);
 }
 
+bool ANightOneGameMode::GoOutside()
+{
+	if (bLeaving || !bStarted || !Game)
+	{
+		return false;
+	}
+	const ss::Session& S = Game->Session;
+	if (S.TableCount() > 0 || S.TimeSkip.Active)
+	{
+		// Not with tables running: the tournament plays on without you, and the blinds don't wait.
+		Game->Text("RiverLine", "You have tables open. Finish or unregister before you head out.");
+		return false;
+	}
+	// Coat on, down the stairs, out onto Fifth (the Street level).
+	Game->Session.Save();
+	bLeaving = true;
+	LeaveAt = RealTime + 1.4;
+	LeaveFor = TEXT("street");
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	{
+		if (PC->PlayerCameraManager)
+		{
+			PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 1.3f, FLinearColor::Black, true, true);
+		}
+	}
+	if (Audio)
+	{
+		Audio->PlayEffect(ss::audio::Effect::Scrape, 0.7f);
+	}
+	return true;
+}
+
 bool ANightOneGameMode::GoOut(const FString& ActivityId, int64 BuyInCents)
 {
 	if (bLeaving || !bStarted || !Game)
@@ -907,6 +943,11 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	if (bLeaving && RealTime >= LeaveAt)
 	{
 		bLeaving = false;
+		if (LeaveFor == TEXT("street"))
+		{
+			UGameplayStatics::OpenLevel(this, FName(TEXT("Street")), true, FString::Printf(TEXT("From=%.0f"), Game->Session.WorldMinutes()));
+			return;
+		}
 		// The Back Room for Dee's game; the same map turns into the Riverside's poker room for the tournament.
 		const FString Options = LeaveFor == TEXT("riverside")
 			? FString::Printf(TEXT("Live=riverside?Day=%d"), ss::net::DayOf(Game->Session.WorldMinutes()))
@@ -1161,6 +1202,11 @@ void ANightOneGameMode::OnKey(const FString& Key)
 		{
 			Audio->SetMuted(!Audio->IsMuted());
 		}
+		return;
+	}
+	if (Key == TEXT("g"))
+	{
+		GoOutside();
 		return;
 	}
 	Game->Client.Key(std::string(TCHAR_TO_UTF8(*Key)));

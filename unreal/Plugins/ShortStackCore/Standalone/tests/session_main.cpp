@@ -1025,6 +1025,22 @@ void StoreChecks()
 	Expect(S.Checkout(Big) == "Card declined." && S.BankrollCents == 500 && S.Life.Pantry.empty(), "a declined card takes nothing");
 	Expect(!S.Checkout(store::Basket()).empty(), "an empty basket doesn't check out");
 
+	// What the eat key reaches for: the drink when thirst is worse, the food when hunger is.
+	store::Basket Both;
+	Both.Add("roller-dog");
+	Both.Add("cascade");
+	S.BankrollCents = 2000;
+	S.Checkout(Both);
+	S.Life.Hunger = 30.0;
+	S.Life.Thirst = 80.0;
+	Expect(S.BagPick() == "cascade", "thirsty: reach for the water");
+	S.Life.Hunger = 80.0;
+	S.Life.Thirst = 30.0;
+	Expect(S.BagPick() == "roller-dog", "hungry: reach for the hot dog");
+	S.Consume("roller-dog");
+	S.Consume("cascade");
+	Expect(S.BagPick().empty(), "nothing to reach for in an empty bag");
+
 	// The bag and the needs survive a save.
 	store::Basket Keep;
 	Keep.Add("volt-rush", 2);

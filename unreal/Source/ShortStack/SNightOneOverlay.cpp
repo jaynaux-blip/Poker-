@@ -64,7 +64,7 @@ void SNightOneOverlay::Construct(const FArguments& InArgs)
 		.Visibility(EVisibility::HitTestInvisible)
 		[
 			SNew(STextBlock)
-			.Text(FText::FromString(TEXT("Space: lean back    F C R A: fold / call / raise / all-in    Up/Down: bet size    P / Esc: pause")))
+			.Text(FText::FromString(TEXT("Space: lean back    F C R A: fold / call / raise / all-in    Up/Down: bet size    G: go outside    P / Esc: pause")))
 			.Font(OverlayFont(TEXT("Regular"), 11))
 			.ColorAndOpacity(OverlayColor(0.7f, 0.75f, 0.82f))
 		];

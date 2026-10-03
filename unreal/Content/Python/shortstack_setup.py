@@ -656,8 +656,13 @@ def _skin_material(folder, mesh):
 
 def run(force=False):
     import backroom_setup
+    import street_setup
     changed = build_materials(force)
     changed += backroom_setup.build_materials(force)
+    try:
+        changed += street_setup.build_materials(force)
+    except Exception as exc:  # the street falls back to M_Surface
+        unreal.log_error(f"ShortStack: street materials failed: {exc}")
     try:
         changed += import_meshes(force)
         changed += backroom_setup.fix_meshes()
@@ -667,3 +672,4 @@ def run(force=False):
         rebuild_stages()
     build_map(False)
     backroom_setup.build_map(False)
+    street_setup.build_map(False)

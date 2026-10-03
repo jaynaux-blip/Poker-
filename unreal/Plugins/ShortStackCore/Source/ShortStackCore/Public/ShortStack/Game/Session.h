@@ -339,6 +339,8 @@ public:
 	SHORTSTACKCORE_API std::string Checkout(const store::Basket& B);
 	/** Eats or drinks one of an item in the bag; "" or why not. */
 	SHORTSTACKCORE_API std::string Consume(const std::string& ItemId);
+	/** What to reach for in the bag: the food when hunger is worse, the drink when thirst is (an id, or ""). */
+	SHORTSTACKCORE_API std::string BagPick() const;
 	/** What the clerk says right now. */
 	SHORTSTACKCORE_API std::string ClerkSays(const store::Basket& B) const;
 	/** A new career for this character: a fresh save, then what their background starts them with. */

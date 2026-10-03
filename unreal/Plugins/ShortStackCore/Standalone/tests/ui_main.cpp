@@ -19,6 +19,7 @@
 #include "TestFontMetrics.h"
 
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -1971,6 +1972,33 @@ void EventArtGallery()
 	}
 }
 
+/** The street's printed and glowing things: the store's sign, the OPEN neon, the street blades, the door, a poster. */
+void StreetProps()
+{
+	namespace P = ss::ui::props;
+	TableMeasurer M;
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+	SheetBackground(C, "Fifth and Market", "The Lucky Penny #212's signs and windows, and the corner's street blades (drawn once, shown on quads in the Street level)");
+	auto Place = [&](float X, float Y, float Scale, float W, float H, const std::function<void()>& Paint) {
+		C.Save();
+		C.Translate(X, Y);
+		C.Scale(Scale, Scale);
+		C.FillRect({0.0f, 0.0f, W, H}, ss::ui::Paint(ss::ui::Rgba(0, 0, 0, 0.25f)));
+		Paint();
+		C.Restore();
+	};
+	Place(48.0f, 120.0f, 0.62f, P::StoreSignW, P::StoreSignH, [&] { P::StoreSign(C); });
+	Place(48.0f, 340.0f, 0.62f, P::OpenSignW, P::OpenSignH, [&] { P::OpenSign(C); });
+	Place(500.0f, 340.0f, 0.5f, P::StreetSignW, P::StreetSignH, [&] { P::StreetSign(C, "FIFTH ST", "1800"); });
+	Place(500.0f, 460.0f, 0.5f, P::StreetSignW, P::StreetSignH, [&] { P::StreetSign(C, "MARKET ST", "200"); });
+	Place(48.0f, 540.0f, 0.75f, P::DoorDecalW, P::DoorDecalH, [&] { P::DoorDecal(C); });
+	Place(1060.0f, 120.0f, 0.5f, P::PromoW, P::PromoH, [&] { P::Promo(C, "volt-rush", "2 FOR $5"); });
+	Place(1330.0f, 120.0f, 0.42f, P::PromoW, P::PromoH, [&] { P::Promo(C, "roller-dog", "$1.99"); });
+	Place(1330.0f, 520.0f, 0.42f, P::PromoW, P::PromoH, [&] { P::Promo(C, "night-owl-brew", "NEW"); });
+	SaveSheet("street_props", L);
+}
+
 /** The Lucky Penny's counter: the shelves, a basket on the receipt, a declined card, and the bag. */
 void StoreScreens()
 {
@@ -2028,6 +2056,26 @@ void StoreScreens()
 	Emit("store_counter_declined", Now);
 	Counter.Key("Escape", Now);
 	Expect(!Counter.IsOpen() && Counter.TakeLeave() && !Counter.TakeLeave(), "Escape walks away once");
+
+	// The walking HUD over a stand-in street (dark, a neon wash, the store's light spilling out).
+	{
+		ss::ui::DrawList Lh;
+		ss::ui::Canvas Ch(Lh, M, 1920.0f, 1080.0f, 1.0f);
+		Ch.FillRect({0.0f, 0.0f, 1920.0f, 1080.0f}, ss::ui::Paint::Linear({0.0f, 0.0f}, {0.0f, 1080.0f}, ss::ui::Hex(0x0b1220), ss::ui::Hex(0x05070b)));
+		Ch.FillCircle(1500.0f, 560.0f, 520.0f, ss::ui::Paint::Radial({1500.0f, 560.0f}, 0.0f, {1500.0f, 560.0f}, 520.0f, ss::ui::Rgba(255, 220, 160, 0.22f), 0.5f, ss::ui::Rgba(255, 200, 140, 0.06f), ss::ui::Rgba(0, 0, 0, 0.0f)));
+		Ch.FillCircle(420.0f, 420.0f, 460.0f, ss::ui::Paint::Radial({420.0f, 420.0f}, 0.0f, {420.0f, 420.0f}, 460.0f, ss::ui::Rgba(255, 46, 136, 0.16f), 0.5f, ss::ui::Rgba(255, 46, 136, 0.04f), ss::ui::Rgba(0, 0, 0, 0.0f)));
+		ss::ui::StreetHudInfo Hud;
+		Hud.Place = "FIFTH STREET";
+		Hud.Clock = "2:41 AM";
+		Hud.BankrollCents = 1864;
+		Hud.Life = &S.Life;
+		Hud.Prompt = "Go into the Lucky Penny";
+		Hud.Toasts.push_back({"Mom", "are you eating? you never answer when I ask if you're eating", 99.0});
+		Hud.Toasts.push_back({"Dee", "Tuesday game's on. Bring cash, not excuses.", 100.5});
+		Hud.HintsAt = 96.0;
+		ss::ui::DrawStreetHud(Ch, Hud, 101.0);
+		SaveSheet("street_hud", Lh);
+	}
 
 	// The open world's vitals block, over a street.
 	ss::ui::DrawList L;
@@ -2234,6 +2282,7 @@ int main(int Argc, char** Argv)
 	ui_test::TrophyGallery();
 	ui_test::PortraitGallery();
 	ui_test::StoreScreens();
+	ui_test::StreetProps();
 	ui_test::MultiScreens();
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();

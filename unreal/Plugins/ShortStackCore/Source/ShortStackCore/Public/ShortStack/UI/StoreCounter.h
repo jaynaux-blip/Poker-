@@ -17,6 +17,35 @@ SHORTSTACKCORE_API void DrawProduct(Canvas& C, const store::Item& I, float X, fl
  */
 SHORTSTACKCORE_API void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, double Now, const store::Basket* Preview = nullptr, float Alpha = 1.0f);
 
+/** What the HUD shows while walking around (the Street level fills it each frame). */
+struct StreetHudInfo
+{
+	std::string Place = "FIFTH STREET"; // where the player is
+	std::string Clock;                  // "2:41 AM"
+	Chips BankrollCents = 0;
+	const life::State* Life = nullptr;
+	/** The interaction in reach ("Talk to Benny"), and its key ("E"); empty when nothing is. */
+	std::string Prompt;
+	std::string PromptKey = "E";
+	/** Texts that arrived recently: sender, body and when (seconds, the HUD's clock). */
+	struct Toast
+	{
+		std::string From;
+		std::string Body;
+		double At = 0.0;
+	};
+	std::vector<Toast> Toasts;
+	bool FirstPerson = false;
+	/** When the controls hint first showed (it fades after a while); negative hides it. */
+	double HintsAt = -100.0;
+	bool Gamepad = false;
+	/** 0..1: the screen fading to black (leaving, arriving). */
+	float Fade = 0.0f;
+};
+
+/** The walking HUD: place and time, vitals, the prompt, texts, the camera mode and the controls. 1080 tall. */
+SHORTSTACKCORE_API void DrawStreetHud(Canvas& C, const StreetHudInfo& Info, double Now);
+
 /**
  * The counter at the Lucky Penny #212: the shelves on the left, Benny behind the register, the receipt
  * printing as the basket fills, and the bag to eat and drink from. Drawn full screen over the 3D store
@@ -37,7 +66,8 @@ public:
 	bool Gamepad = false;
 	store::Basket Basket;
 
-	SHORTSTACKCORE_API void Open(double Now);
+	/** Walks up to the counter (Shelf: the shelf to start on, from what the player was looking at). */
+	SHORTSTACKCORE_API void Open(double Now, int Shelf = 0);
 	SHORTSTACKCORE_API void Close(double Now);
 	bool IsOpen() const { return Shown; }
 	/** The player walked away from the counter since the last call (the host hands control back). */
