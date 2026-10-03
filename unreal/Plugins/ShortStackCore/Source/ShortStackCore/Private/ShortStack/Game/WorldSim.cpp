@@ -1053,6 +1053,11 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 	L.FinalTables += Ft ? 1 : 0;
 	L.Wins += Win ? 1 : 0;
 	L.Best = std::max(L.Best, Prize);
+	if (!Has(P.Kinds, KindUnderground))
+	{
+		// The stats page: every bullet, and a seat at its value.
+		N.Stats.Add(Gross, Prize + (Seat ? P.SeatValue : 0), Place, P.Entries, P.FinalSize, StakeOf(P), FormatOf(P));
+	}
 	const double Points = PointsFor(P, Place);
 	if (P.Online)
 	{
@@ -1127,6 +1132,7 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 		if (P.Bracelet || P.Ring)
 		{
 			N.Awards.push_back(AwardOf(P, Day, Prize));
+			N.Awards.back().Tourney = N.Stats.Events;
 		}
 		N.Titles += P.Online && !P.Series.empty() ? 1 : 0;
 		N.Majors += P.Major ? 1 : 0;

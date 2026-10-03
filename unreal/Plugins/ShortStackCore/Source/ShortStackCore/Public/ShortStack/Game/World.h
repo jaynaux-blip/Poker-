@@ -319,6 +319,83 @@ struct Step
 	Chips Amount = 0;
 };
 
+/** A stats page's breakdowns: tournaments by buy-in and by format. */
+enum class TrackStake : int
+{
+	Micro, // online, up to $5.50 (freerolls too)
+	Low,
+	Mid,
+	High,
+	Live,
+	Count,
+};
+constexpr int TrackStakeCount = static_cast<int>(TrackStake::Count);
+
+enum class TrackFormat : int
+{
+	Regular,
+	Deep,
+	Turbo,
+	Hyper,
+	Bounty,
+	Satellite,
+	Count,
+};
+constexpr int TrackFormatCount = static_cast<int>(TrackFormat::Count);
+
+struct TrackLine
+{
+	int Events = 0;
+	Chips BuyIns = 0;
+	Chips Prizes = 0; // satellite seats at their value
+	int Cashes = 0;
+};
+
+/**
+ * What a results tracker sees of someone: every tournament's buy-in and prize (as public as the results themselves,
+ * whoever was backing them), kept as totals, breakdowns, records and a profit graph. Cash games don't count.
+ * The regulars' years before the story began are filled in from their lifetime numbers, so a veteran's graph is
+ * a veteran's.
+ */
+struct Tracker
+{
+	static constexpr int CurveMax = 64;
+	int Events = 0;
+	Chips BuyIns = 0;
+	Chips Prizes = 0;
+	int Cashes = 0;
+	int FinalTables = 0;
+	int Podiums = 0; // finished 2nd or 3rd
+	int Wins = 0;
+	std::array<TrackLine, TrackStakeCount> ByStake{};
+	std::array<TrackLine, TrackFormatCount> ByFormat{};
+	// The profit graph: the running net (prizes after buy-ins) after every Stride tournaments; when it fills, every
+	// other point goes and the stride doubles. Net is the running net now (Events in).
+	std::vector<Chips> Curve;
+	int Stride = 1;
+	Chips Net = 0;
+	// Records.
+	Chips Peak = 0;
+	int PeakAt = 0;
+	Chips Downswing = 0; // the deepest fall from a peak
+	int DownFrom = 0;    // tournament numbers (1-based) of that peak and the bottom
+	int DownTo = 0;
+	Chips Best = 0; // the biggest single prize
+	int BestAt = 0;
+	int Dry = 0;        // tournaments since the last cash
+	int LongestDry = 0; // the longest run without one
+	double FinishSum = 0.0; // place / field, summed (lower is better)
+	int Finished = 0;
+
+	/** One tournament: what it cost (all bullets), what it paid (a seat at its value), where they finished. */
+	SHORTSTACKCORE_API void Add(Chips BuyIn, Chips Prize, int Place, int Field, int FinalSize, TrackStake Stake, TrackFormat Format);
+	double Roi() const { return BuyIns > 0 ? static_cast<double>(Prizes - BuyIns) / static_cast<double>(BuyIns) : 0.0; }
+	double Itm() const { return Events > 0 ? static_cast<double>(Cashes) / static_cast<double>(Events) : 0.0; }
+	/** The average finish as a share of the field (0.25: the top quarter). */
+	double AverageFinish() const { return Finished > 0 ? FinishSum / static_cast<double>(Finished) : 0.0; }
+	Chips AverageBuyIn() const { return Events > 0 ? BuyIns / Events : 0; }
+};
+
 /** A bracelet or a ring someone won: the trophy case on their card, and the frame around their picture. */
 struct Award
 {
@@ -330,6 +407,7 @@ struct Award
 	std::string Event;   // the event's name
 	Chips Prize = 0;
 	int Entries = 0;
+	int Tourney = 0;     // their tournament count when they won it (where it sits on their profit graph; 0: unknown)
 };
 
 struct Npc
@@ -415,6 +493,7 @@ struct Npc
 	int CameWith = -1;  // who brought them, or who they watched (-1: nobody)
 	std::vector<Step> Path;
 	std::vector<Award> Awards; // every bracelet and ring, oldest first
+	Tracker Stats;             // the stats page
 	std::vector<Tie> Ties;
 	std::map<std::string, int> Tickets; // event template id -> seats won
 
@@ -557,6 +636,7 @@ struct Profile
 	int Titles = 0;
 	int Majors = 0;
 	std::vector<Award> Awards; // oldest first
+	Tracker Stats;
 	std::string BestEvent;
 	Chips Best = 0;
 	int BestDay = 0;
@@ -749,11 +829,17 @@ public:
 	std::string HeroName;
 	/** The bracelets and rings the player has won, oldest first. */
 	const std::vector<Award>& HeroAwards() const { return HeroTrophies; }
+	/** The player's own stats page (their RiverLine tournaments since Night One). */
+	const Tracker& HeroStats() const { return HeroBook; }
+	/** Where a stats page's ROI ranks among the regulars with at least Min tournaments (0..1: the share it beats). */
+	SHORTSTACKCORE_API double RoiRank(double Roi, int Min = 200) const;
 	/**
 	 * Debug: a bracelet (The Championship Online's) or a ring (Ring Rush's) for someone (-1: the player), from the
 	 * latest of those series to have started, its Main Event's when Main. Their card and their frame show it.
 	 */
 	SHORTSTACKCORE_API void GrantAward(int Npc, bool Ring, bool Main);
+	/** Debug: Count micro- and low-stakes tournaments on the player's stats page (a small winner's luck), to preview it. */
+	SHORTSTACKCORE_API void GrantHeroResults(int Count);
 	/** The player's Player of the Year points this calendar year (online, live). */
 	double HeroSeasonPoints() const { return HeroPoints; }
 	double HeroSeasonLivePoints() const { return HeroLivePoints; }
@@ -810,6 +896,7 @@ private:
 	std::map<int, Bond> HeroBonds;
 	std::map<std::string, std::pair<int, Chips>> HeroResults; // event id -> place, prize (the player's finished events)
 	std::vector<Award> HeroTrophies;
+	Tracker HeroBook;
 	std::set<std::string> HeroIn; // events the player is in right now
 	// The boards' running numbers.
 	std::string SeriesKey;

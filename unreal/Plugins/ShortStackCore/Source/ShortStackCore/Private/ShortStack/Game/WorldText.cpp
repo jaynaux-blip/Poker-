@@ -5,6 +5,7 @@
 #include "WorldSim.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <sstream>
 
@@ -238,6 +239,7 @@ Profile World::ProfileOf(int Id) const
 	Pr.Bracelets = N.Bracelets;
 	Pr.Rings = N.Rings;
 	Pr.Awards = N.Awards;
+	Pr.Stats = N.Stats;
 	Pr.Titles = N.Titles;
 	Pr.Majors = N.Majors;
 	Pr.BestEvent = N.BestEvent;
@@ -540,6 +542,14 @@ std::string World::Describe(int Id) const
 		O << "  sponsor " << N.Sponsor;
 	}
 	O << "\n  career " << Money(N.CareerWon()) << "  bracelets " << N.Bracelets << "  rings " << N.Rings << "  series titles " << N.Titles << "  majors " << N.Majors << "\n";
+	{
+		const Tracker& T = N.Stats;
+		char Buf[256];
+		std::snprintf(Buf, sizeof(Buf), "  stats: %d tournaments, ROI %+.1f%%, ITM %.1f%%, ABI %s, net %s, peak %s, downswing %s (#%d-#%d), drought %d, avg finish top %.0f%%, graph %zu x %d\n",
+			T.Events, T.Roi() * 100.0, T.Itm() * 100.0, Money(T.AverageBuyIn()).c_str(), Money(T.Net).c_str(), Money(T.Peak).c_str(), Money(T.Downswing).c_str(), T.DownFrom, T.DownTo,
+			T.LongestDry, T.AverageFinish() * 100.0, T.Curve.size(), T.Stride);
+		O << Buf;
+	}
 	for (const Award& A : N.Awards)
 	{
 		O << "    " << (A.Ring ? "ring" : "bracelet") << (A.Main ? " (Main Event)" : "") << ": " << (A.Event.empty() ? std::string("(from an older save)") : A.Event)

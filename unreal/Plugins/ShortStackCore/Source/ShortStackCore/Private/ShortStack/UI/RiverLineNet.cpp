@@ -238,7 +238,7 @@ void RiverLine::PlayerName(int Index, float X, float Y, float Size, float MaxW, 
 	// The name opens their player card.
 	const float Fit = std::min(MaxW - Size * 1.2f - 8.0f, UI.Measure(P.Name, Size, 700));
 	const Ui::ClickState Click = UI.Clickable("player:" + std::to_string(Index) + "@" + std::to_string(static_cast<int>(X)) + "," + std::to_string(static_cast<int>(Y)), {Nx - 2.0f, Y - Size, Fit + 4.0f, Size * 1.3f},
-		S.CurrentScreen == Screen::Lobby && CardShown < 0);
+		S.CurrentScreen == Screen::Lobby && !CardOpen());
 	if (Click.Clicked)
 	{
 		ShowPlayer(Index, LastFrame);
@@ -1382,7 +1382,7 @@ void RiverLine::LobbyPages(double Now)
 	const float In = NetEase((Now - PageAt) / 0.4);
 	const float A0 = C->GetAlpha();
 	// A player card is up: the page underneath takes no input.
-	const bool Card = CardShown >= 0;
+	const bool Card = CardOpen();
 	const Pointer Real = UI.Ptr;
 	if (Card)
 	{
@@ -2390,6 +2390,17 @@ void RiverLine::CareerPage(double Now)
 
 	// Recent results.
 	Section("RECENT TOURNAMENTS", 24.0f, 578.0f, pal::Accent);
+	{
+		// RiverLine Stats: the player's own dashboard.
+		ButtonOpts O;
+		O.Kind = ButtonKind::Secondary;
+		O.Size = 13.0f;
+		O.Enabled = !CardOpen();
+		if (UI.Button("careerstats", {1076.0f - 168.0f, 552.0f, 168.0f, 34.0f}, "Your stats  \xE2\x80\xBA", O))
+		{
+			ShowPlayer(HeroCard, Now);
+		}
+	}
 	if (S.History.empty())
 	{
 		UI.Text("No tournaments yet. The Night Owl Turbo is running right now.", 24.0f, 620.0f, Ts(16.0f, 500, pal::Muted));
@@ -2491,7 +2502,7 @@ void RiverLine::CareerPage(double Now)
 	const std::string Level = Rv.Stake == net::Tier::High ? "High-stakes" : Rv.Stake == net::Tier::Mid ? "Mid-stakes" : "Low-stakes";
 	UI.Text(Level + " crusher \xC2\xB7 " + std::to_string(Rv.Wins) + " titles \xC2\xB7 never logs off", Rc.X + 134.0f, Rc.Y + 105.0f, Ts(13.0f, 600, pal::Muted));
 	// The rival's card, like anyone's.
-	if (UI.Clickable("rivalcard", {Rc.X + 20.0f, Rc.Y + 40.0f, Rc.W - 40.0f, 80.0f}, CardShown < 0).Clicked)
+	if (UI.Clickable("rivalcard", {Rc.X + 20.0f, Rc.Y + 40.0f, Rc.W - 40.0f, 80.0f}, !CardOpen()).Clicked)
 	{
 		ShowPlayer(Net.RivalIndex(), LastFrame);
 	}

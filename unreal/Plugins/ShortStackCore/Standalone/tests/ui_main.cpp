@@ -1577,6 +1577,36 @@ void WorldScreens()
 		RL.ShowCardTab(2);
 		Now = Run(S, RL, Now, 1.2);
 		Emit("world_card_trophies", RL, Now);
+		// RiverLine Stats: their profit graph, ROI by buy-in and format, finishes and records.
+		RL.ShowCardTab(3);
+		Now = Run(S, RL, Now, 1.5);
+		const ss::world::Tracker& T = W.Get(Champ)->Stats;
+		const ss::world::Npc& Cn = *W.Get(Champ);
+		Expect(T.Events == Cn.Totals[0].Events + Cn.Totals[1].Events, "the stats page counts every tournament");
+		Expect(T.BuyIns == Cn.Totals[0].Spent + Cn.Totals[1].Spent && T.Prizes >= Cn.Totals[0].Won + Cn.Totals[1].Won, "buy-ins and prizes add up");
+		Expect(!T.Curve.empty() && static_cast<int>(T.Curve.size()) < ss::world::Tracker::CurveMax, "the profit graph has its points");
+		Emit("world_card_stats", RL, Now);
+		// Hovering the graph: the crosshair and what it says.
+		RL.UI.Ptr.Active = true;
+		RL.UI.Ptr.X = 700.0f;
+		RL.UI.Ptr.Y = 560.0f;
+		Now = Run(S, RL, Now, 0.2);
+		Emit("world_card_stats_hover", RL, Now);
+		RL.UI.Ptr.Active = false;
+		RL.ShowPlayer(-1, Now);
+	}
+	// The network's biggest winner, on the same page.
+	{
+		int Top = -1;
+		for (const ss::world::Npc& N : W.People())
+		{
+			Top = !N.Faded && (Top < 0 || N.Stats.Net > W.Get(Top)->Stats.Net) ? N.Id : Top;
+		}
+		Expect(Top >= 0 && W.Get(Top)->Stats.Net > 0, "someone is up on the network");
+		RL.ShowPlayer(Top, Now);
+		RL.ShowCardTab(3);
+		Now = Run(S, RL, Now, 1.5);
+		Emit("world_card_stats_winner", RL, Now);
 		RL.ShowPlayer(-1, Now);
 	}
 	// The boards: champions wear their frames there too.
@@ -1585,12 +1615,22 @@ void WorldScreens()
 	Now = Run(S, RL, Now, 1.5);
 	Emit("world_boards_champions", RL, Now);
 	// The player's own: a bracelet and a Main Event ring in the trophy case on the Career page.
+	S.Living().GrantHeroResults(260);
 	S.Living().GrantAward(-1, false, false);
+	S.Living().GrantHeroResults(180);
 	S.Living().GrantAward(-1, true, true);
+	S.Living().GrantHeroResults(90);
 	Expect(W.HeroAwards().size() == 2, "the player's trophy case holds what they won");
+	Expect(W.HeroStats().Events >= 530 && W.HeroAwards().front().Tourney == 260, "the player's stats page, with their titles on the graph");
 	RL.OpenPage(Page::Career, Now);
 	Now = Run(S, RL, Now, 1.5);
 	Emit("world_career_trophies", RL, Now);
+	// Their own stats, from the Career page.
+	RL.ShowPlayer(ss::ui::RiverLine::HeroCard, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Expect(RL.CardOpen(), "the player's stats open");
+	Emit("world_hero_stats", RL, Now);
+	RL.ShowPlayer(-1, Now);
 	// At the table: a name the player hasn't seen before catches their eye, and opens its card.
 	const std::vector<ss::LobbyEvent> Open = OpenEvents(S, 1, 3000);
 	Expect(!Open.empty(), "an event to sit down at");

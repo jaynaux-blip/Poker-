@@ -112,6 +112,12 @@ struct Sim
 	static void Mark(Npc& N, int Day, StepKind K, const std::string& What, int Place = 0, int Of = 0, Chips Amount = 0);
 	/** The bracelet or ring an event's winner takes home. */
 	static Award AwardOf(const Pending& P, int Day, Chips Prize);
+
+	// ---- the stats pages (WorldStats.cpp)
+	static TrackStake StakeOf(const Pending& P);
+	static TrackFormat FormatOf(const Pending& P);
+	/** A regular's tracked history before the story began, from their lifetime numbers (once; not for the faded). */
+	static void SeedStats(Npc& N);
 	static void Reputation(Npc& N);
 	static void SetMood(Npc& N, Momentum M, int Day);
 	static Year& YearRow(Npc& N, int Day);

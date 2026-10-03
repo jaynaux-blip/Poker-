@@ -190,7 +190,7 @@ std::vector<std::string> AwardRecords(const std::vector<Award>& Awards)
 	std::vector<std::string> R;
 	for (const Award& A : Awards)
 	{
-		R.push_back(Rec({I(A.Day), I(A.Ring), I(A.Online), I(A.Main), Esc(A.Series), Esc(A.Event), I(A.Prize), I(A.Entries)}));
+		R.push_back(Rec({I(A.Day), I(A.Ring), I(A.Online), I(A.Main), Esc(A.Series), Esc(A.Event), I(A.Prize), I(A.Entries), I(A.Tourney)}));
 	}
 	return R;
 }
@@ -211,9 +211,80 @@ std::vector<Award> ReadAwards(const std::string& Field)
 		A.Event = Rc.Str();
 		A.Prize = Rc.Int();
 		A.Entries = Rc.Small();
+		A.Tourney = Rc.Small();
 		Out.push_back(A);
 	}
 	return Out;
+}
+/** A stats page: the totals, the breakdowns, the records, then the graph (dollars, as steps from the last point). */
+void WriteTracker(Line& L, const Tracker& T)
+{
+	L << I(T.Events) << I(T.BuyIns) << I(T.Prizes) << I(T.Cashes) << I(T.FinalTables) << I(T.Podiums) << I(T.Wins);
+	for (const TrackLine& X : T.ByStake)
+	{
+		L << I(X.Events) << I(X.BuyIns) << I(X.Prizes) << I(X.Cashes);
+	}
+	for (const TrackLine& X : T.ByFormat)
+	{
+		L << I(X.Events) << I(X.BuyIns) << I(X.Prizes) << I(X.Cashes);
+	}
+	L << I(T.Stride) << I(T.Net) << I(T.Peak) << I(T.PeakAt) << I(T.Downswing) << I(T.DownFrom) << I(T.DownTo) << I(T.Best) << I(T.BestAt) << I(T.Dry) << I(T.LongestDry)
+	  << D(T.FinishSum) << I(T.Finished);
+	std::string Steps;
+	long long Last = 0;
+	for (size_t K = 0; K < T.Curve.size(); ++K)
+	{
+		const long long Dollars = (T.Curve[K] >= 0 ? T.Curve[K] + 50 : T.Curve[K] - 50) / 100;
+		Steps += (K > 0 ? "~" : "") + I(Dollars - Last);
+		Last = Dollars;
+	}
+	L << Steps;
+}
+
+void ReadTracker(Cursor& C, Tracker& T)
+{
+	T = Tracker();
+	T.Events = C.Small();
+	T.BuyIns = C.Int();
+	T.Prizes = C.Int();
+	T.Cashes = C.Small();
+	T.FinalTables = C.Small();
+	T.Podiums = C.Small();
+	T.Wins = C.Small();
+	for (TrackLine& X : T.ByStake)
+	{
+		X.Events = C.Small();
+		X.BuyIns = C.Int();
+		X.Prizes = C.Int();
+		X.Cashes = C.Small();
+	}
+	for (TrackLine& X : T.ByFormat)
+	{
+		X.Events = C.Small();
+		X.BuyIns = C.Int();
+		X.Prizes = C.Int();
+		X.Cashes = C.Small();
+	}
+	T.Stride = std::max(1, C.Small());
+	T.Net = C.Int();
+	T.Peak = C.Int();
+	T.PeakAt = C.Small();
+	T.Downswing = C.Int();
+	T.DownFrom = C.Small();
+	T.DownTo = C.Small();
+	T.Best = C.Int();
+	T.BestAt = C.Small();
+	T.Dry = C.Small();
+	T.LongestDry = C.Small();
+	T.FinishSum = C.Dbl();
+	T.Finished = C.Small();
+	long long Run = 0;
+	for (const std::string& Step : Split(C.At < C.V.size() ? C.V[C.At] : std::string(), '~'))
+	{
+		Run += std::strtoll(Step.c_str(), nullptr, 10);
+		T.Curve.push_back(static_cast<Chips>(Run * 100));
+	}
+	++C.At;
 }
 } // namespace worldsave_detail
 
@@ -353,10 +424,23 @@ void World::Write(std::string& Out) const
 		{
 			Emit(Line("awards") << I(N.Id) << JoinRecords(AwardRecords(N.Awards)));
 		}
+		if (N.Stats.Events > 0)
+		{
+			Line Tl("track");
+			Tl << I(N.Id);
+			WriteTracker(Tl, N.Stats);
+			Emit(Tl);
+		}
 	}
 	if (!HeroTrophies.empty())
 	{
 		Emit(Line("heroawards") << JoinRecords(AwardRecords(HeroTrophies)));
+	}
+	if (HeroBook.Events > 0)
+	{
+		Line Hl("herotrack");
+		WriteTracker(Hl, HeroBook);
+		Emit(Hl);
 	}
 	for (const Pending& P : Queue)
 	{
@@ -650,6 +734,17 @@ bool World::Read(const std::vector<std::string>& Fields)
 		}
 		Roster[static_cast<size_t>(N.Id)] = std::move(N);
 	}
+	else if (Kind == "track")
+	{
+		if (Npc* N = Person(C.Int()))
+		{
+			ReadTracker(C, N->Stats);
+		}
+	}
+	else if (Kind == "herotrack")
+	{
+		ReadTracker(C, HeroBook);
+	}
 	else if (Kind == "heroawards")
 	{
 		HeroTrophies = ReadAwards(C.At < Fields.size() ? Fields[C.At] : std::string());
@@ -884,6 +979,11 @@ void World::Finish()
 		{
 			ByName[N.Name] = N.Id;
 		}
+	}
+	// Saves from before the stats pages: the history so far is drawn from the lifetime numbers.
+	for (Npc& N : Roster)
+	{
+		Sim::SeedStats(N);
 	}
 	// Saves from before the trophy case kept only counts: the titles in history say which, the rest stay plain.
 	for (Npc& N : Roster)

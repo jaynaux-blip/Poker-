@@ -113,6 +113,25 @@ The whole online career is played from a first-person desk. The apartment is the
     - anyone with both gets the links and the stone;
     - two or more wins add a small medal with the count;
     - the player and the rival keep their glow under the frame.
+- **RiverLine Stats (built).** Every player card has a STATS tab, and the player's own is on the Career page ("Your stats"). It's a results tracker's dashboard: every tournament's buy-in (all bullets) and prize count, as public as the results themselves. Staking deals and bankrolls stay private, and cash games don't count.
+  - **Up top:**
+    - profit (prizes after buy-ins);
+    - ROI, ranked against the regulars with 200 or more tournaments ("Beats 81% of regulars");
+    - ITM;
+    - tournaments, wins and final tables;
+    - average buy-in and their usual stakes;
+    - average finish ("Top 43%" of the field).
+  - **The profit graph:**
+    - the running net over every tournament, teal above zero and red below, with a light wash to the zero line;
+    - marked on it: the peak, the worst downswing (a shaded band with its size), the biggest score, and each bracelet and ring where it was won;
+    - hovering finds the nearest point and reads it out.
+  - **ROI by buy-in** (micro, low, mid and high online, then live) and **ROI by format** (regular, deepstack, turbo, hyper, bounty, satellite): columns up for a profit and down for a loss, with sample sizes; hovering adds ITM and profit.
+  - **Finishes:**
+    - ITM as a meter;
+    - where the cashes finished: won, 2nd or 3rd, the rest of the final table, other cashes.
+  - **Records:** biggest score, peak, worst downswing and how long it ran, longest dry run without a cash, profit per tournament, and the current run.
+  - **History:** the regulars' years before Night One are filled in from their lifetime numbers, as a steady bleed of buy-ins broken by scores, with their real biggest score in it. From then on every tournament the world plays is added as it ends. The player's page starts on Night One.
+  - **Colours:** profit teal and loss red were checked for colour-blind separation and contrast on the panels, and always come with a sign or an arrow, never colour alone.
 - **Players.** 1,600 named regulars from 28 countries, with skill, volume, stakes, lifetime records and weekly form, including Team RiverLine pros and the rival, gh0stfold. Events the player isn't in are resolved statistically: the regulars who make each final table are drawn by skill, volume and stakes.
 - **Screen names.** Handles read like the ones people really pick: slang compounds ("VelvetRiver", "lazy_owl"), real names in each country's style ("kenji.k", "pablo_ortega", "BramvdBerg"), poker words in the players' own languages ("Kartenhai", "ElTiburon", "ReiDoRio"), grind jokes ("OneMoreTable", "LandlordHatesMe") and the odd gamer tag ("n00bflop", "BlindsTTV"). High-stakes pros favor understated names ("YMorozov", "mbouchard"). Table fields are named the same way and seeded with real regulars from the right stakes (about 3% of the field, 4 to 40 players), so the names on the leaderboards turn up at your tables.
 - **Avatars.** Every account has a profile picture: one of 35 vector icons (sharks, owls, foxes, wolves, crowns, rockets, robots, pizza, eight balls and more) on a colored disc. Names pick fitting icons in any language: "ElTiburon" and "C0ldSh4rk" get sharks, "CoolerKing" a crown, "CoffeeAndCards" a mug. Everyone else draws one from the set by name. Frames mark status: a chip edge or colored ring for flair, gold with a star for Team RiverLine, neon for you and the rival, whose ghost no one else may wear. Seats show the player's country flag on the avatar.

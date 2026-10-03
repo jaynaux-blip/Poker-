@@ -324,6 +324,7 @@ void World::GrantAward(int Npc, bool Ring, bool Main)
 	A.Event = T ? T->Name : Pick->Name;
 	A.Prize = T ? T->GtdCents / 5 : 0;
 	A.Entries = T ? T->Field : 0;
+	A.Tourney = Npc == -1 ? HeroBook.Events : Roster[static_cast<size_t>(Npc)].Stats.Events;
 	if (Npc == -1)
 	{
 		HeroTrophies.push_back(A);
@@ -347,6 +348,7 @@ void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, con
 		return;
 	}
 	HeroIn.erase(EventId);
+	const bool Again = HeroResults.count(EventId) > 0;
 	HeroResults[EventId] = {Place, Prize};
 	Pending* P = FindPending(Queue, EventId);
 	const std::string Where = P ? P->Name : EventId;
@@ -391,10 +393,17 @@ void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, con
 		const bool Online = Ev.Online;
 		const double Pts = Ev.BuyIn > 0 ? net::Points(Place, Ev.Entries, Ev.BuyIn) : 0.0;
 		(Online ? HeroPoints : HeroLivePoints) += Pts;
+		// The player's stats page (a satellite seat at its value).
+		if (!Again)
+		{
+			const bool Seat = (Ev.Kinds & KindSatellite) != 0 && Place >= 1 && Place <= Ev.Seats;
+			HeroBook.Add(Ev.BuyIn, Prize + (Seat ? Ev.SeatValue : 0), Place, Ev.Entries, Ev.FinalSize, Sim::StakeOf(Ev), Sim::FormatOf(Ev));
+		}
 		// A bracelet or a ring for the player: into the trophy case (once).
 		if (Place == 1 && (Ev.Bracelet || Ev.Ring))
 		{
-			const Award A = Sim::AwardOf(Ev, sim::DayAt(At), Prize);
+			Award A = Sim::AwardOf(Ev, sim::DayAt(At), Prize);
+			A.Tourney = HeroBook.Events;
 			const bool Had = std::any_of(HeroTrophies.begin(), HeroTrophies.end(), [&](const Award& X) { return X.Day == A.Day && X.Event == A.Event; });
 			if (!Had)
 			{

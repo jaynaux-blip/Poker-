@@ -215,6 +215,7 @@ std::string Sim::UniqueName(World& W, Rng& R, const std::string& Country, bool P
 
 int Sim::Add(World& W, Npc&& N)
 {
+	SeedStats(N);
 	N.Id = static_cast<int>(W.Roster.size());
 	W.ByName[N.Name] = N.Id;
 	W.Roster.push_back(std::move(N));

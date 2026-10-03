@@ -42,6 +42,11 @@ void RiverLine::ShowPlayer(int Index, double Now)
 
 void RiverLine::PlayerCard(double Now)
 {
+	if (CardShown == HeroCard)
+	{
+		HeroStatsCard(Now);
+		return;
+	}
 	const world::World& W = S.Living();
 	const world::Npc* N = W.Get(CardShown);
 	if (!N)
@@ -129,95 +134,110 @@ void RiverLine::PlayerCard(double Now)
 		}
 	}
 
-	// The record: six numbers.
+	const bool StatsTab = CardTab == 3;
+	if (StatsTab)
 	{
-		const world::Ledger& On = P.Totals[0];
-		const world::Ledger& Lv = P.Totals[1];
-		struct Tile
+		// RiverLine Stats: the numbers up top, the dashboard below.
+		StatsKpis(P.Stats, {R.X + 24.0f, R.Y + 150.0f, R.W - 48.0f, 104.0f}, Now);
+		StatsBrand(R.X + 26.0f, R.Y + 290.0f);
+	}
+	else
+	{
+		// The record: six numbers.
 		{
-			std::string Value;
-			const char* Label;
-			Color Col;
-		};
-		const Tile Tiles[6] = {
-			{net::MoneyShort(On.Won), "ONLINE WINNINGS", pal::Accent},
-			{net::MoneyShort(Lv.Won), "LIVE WINNINGS", pal::Gold},
-			{Grouped(On.Wins + Lv.Wins), "TITLES", CardInk},
-			{Grouped(On.FinalTables + Lv.FinalTables), "FINAL TABLES", CardInk},
-			{net::MoneyShort(P.Best), "BIGGEST SCORE", pal::Gold},
-			{std::to_string(P.Bracelets) + " \xC2\xB7 " + std::to_string(P.Rings), "BRACELETS \xC2\xB7 RINGS", Hex(0xf28a3a)},
-		};
-		const float Tw = (R.W - 48.0f - 5.0f * 10.0f) / 6.0f;
-		for (int K = 0; K < 6; ++K)
-		{
-			const Rect T{R.X + 24.0f + Nf(K) * (Tw + 10.0f), R.Y + 152.0f, Tw, 78.0f};
-			C->FillRoundRect(T, 12.0f, Hex(0x0f1b2e));
-			C->StrokeRoundRect(T, 12.0f, CardRule, 1.0f);
-			UI.Text(Tiles[K].Value, T.X + 14.0f, T.Y + 40.0f, Ts(24.0f, 800, Tiles[K].Col, Align::Left, Baseline::Alphabetic, true, Tw - 20.0f));
-			NetSpaced(*C, Tiles[K].Label, T.X + 14.0f, T.Y + 62.0f, 9.5f, 800, pal::Muted, 1.2f);
+			const world::Ledger& On = P.Totals[0];
+			const world::Ledger& Lv = P.Totals[1];
+			struct Tile
+			{
+				std::string Value;
+				const char* Label;
+				Color Col;
+			};
+			const Tile Tiles[6] = {
+				{net::MoneyShort(On.Won), "ONLINE WINNINGS", pal::Accent},
+				{net::MoneyShort(Lv.Won), "LIVE WINNINGS", pal::Gold},
+				{Grouped(On.Wins + Lv.Wins), "TITLES", CardInk},
+				{Grouped(On.FinalTables + Lv.FinalTables), "FINAL TABLES", CardInk},
+				{net::MoneyShort(P.Best), "BIGGEST SCORE", pal::Gold},
+				{std::to_string(P.Bracelets) + " \xC2\xB7 " + std::to_string(P.Rings), "BRACELETS \xC2\xB7 RINGS", Hex(0xf28a3a)},
+			};
+			const float Tw = (R.W - 48.0f - 5.0f * 10.0f) / 6.0f;
+			for (int K = 0; K < 6; ++K)
+			{
+				const Rect T{R.X + 24.0f + Nf(K) * (Tw + 10.0f), R.Y + 152.0f, Tw, 78.0f};
+				C->FillRoundRect(T, 12.0f, Hex(0x0f1b2e));
+				C->StrokeRoundRect(T, 12.0f, CardRule, 1.0f);
+				UI.Text(Tiles[K].Value, T.X + 14.0f, T.Y + 40.0f, Ts(24.0f, 800, Tiles[K].Col, Align::Left, Baseline::Alphabetic, true, Tw - 20.0f));
+				NetSpaced(*C, Tiles[K].Label, T.X + 14.0f, T.Y + 62.0f, 9.5f, 800, pal::Muted, 1.2f);
+			}
+			if (!P.BestEvent.empty())
+			{
+				UI.Text("Biggest score: " + P.BestEvent + " (" + net::DateLabel(P.BestDay) + ", " + std::to_string(world::YearOf(P.BestDay)) + ")", R.X + 26.0f, R.Y + 254.0f,
+					Ts(13.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
+			}
 		}
-		if (!P.BestEvent.empty())
-		{
-			UI.Text("Biggest score: " + P.BestEvent + " (" + net::DateLabel(P.BestDay) + ", " + std::to_string(world::YearOf(P.BestDay)) + ")", R.X + 26.0f, R.Y + 254.0f,
-				Ts(13.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
-		}
+
 	}
 
-	// Left: reputations, form, the years.
-	const float Lx = R.X + 26.0f;
-	const float Lw = 330.0f;
-	float Y = R.Y + 292.0f;
-	NetSpaced(*C, "REPUTATION", Lx, Y, 11.0f, 800, pal::Muted, 1.6f);
-	Y += 14.0f;
-	for (int K = 0; K < world::RepCount; ++K)
+	if (!StatsTab)
 	{
-		const int V = P.Reps[static_cast<size_t>(K)];
-		const float By = Y + Nf(K) * 30.0f;
-		UI.Text(world::RepName(static_cast<world::Rep>(K)), Lx, By + 17.0f, Ts(13.0f, 600, CardSoft));
-		const Rect Bar{Lx + 108.0f, By + 8.0f, Lw - 150.0f, 9.0f};
-		C->FillRoundRect(Bar, 4.5f, Hex(0x1a2a44));
-		if (V > 0)
+		// Left: reputations, form, the years.
+		const float Lx = R.X + 26.0f;
+		const float Lw = 330.0f;
+		float Y = R.Y + 292.0f;
+		NetSpaced(*C, "REPUTATION", Lx, Y, 11.0f, 800, pal::Muted, 1.6f);
+		Y += 14.0f;
+		for (int K = 0; K < world::RepCount; ++K)
 		{
-			C->FillRoundRect({Bar.X, Bar.Y, std::max(9.0f, Bar.W * Nf(V) / 100.0f), Bar.H}, 4.5f, RepColor(K));
+			const int V = P.Reps[static_cast<size_t>(K)];
+			const float By = Y + Nf(K) * 30.0f;
+			UI.Text(world::RepName(static_cast<world::Rep>(K)), Lx, By + 17.0f, Ts(13.0f, 600, CardSoft));
+			const Rect Bar{Lx + 108.0f, By + 8.0f, Lw - 150.0f, 9.0f};
+			C->FillRoundRect(Bar, 4.5f, Hex(0x1a2a44));
+			if (V > 0)
+			{
+				C->FillRoundRect({Bar.X, Bar.Y, std::max(9.0f, Bar.W * Nf(V) / 100.0f), Bar.H}, 4.5f, RepColor(K));
+			}
+			UI.Text(std::to_string(V), Lx + Lw, By + 17.0f, Ts(13.0f, 800, V > 0 ? CardInk : pal::Dim, Align::Right, Baseline::Alphabetic, true));
 		}
-		UI.Text(std::to_string(V), Lx + Lw, By + 17.0f, Ts(13.0f, 800, V > 0 ? CardInk : pal::Dim, Align::Right, Baseline::Alphabetic, true));
-	}
-	Y += 6.0f * 30.0f + 22.0f;
-	// Form: board points the last eight weeks.
-	NetSpaced(*C, "FORM (8 WEEKS)", Lx, Y, 11.0f, 800, pal::Muted, 1.6f);
-	{
-		float Top = 1.0f;
-		for (float F : P.Form)
+		Y += 6.0f * 30.0f + 22.0f;
+		// Form: board points the last eight weeks.
+		NetSpaced(*C, "FORM (8 WEEKS)", Lx, Y, 11.0f, 800, pal::Muted, 1.6f);
 		{
-			Top = std::max(Top, F);
+			float Top = 1.0f;
+			for (float F : P.Form)
+			{
+				Top = std::max(Top, F);
+			}
+			const float Bw = (Lw - 7.0f * 6.0f) / 8.0f;
+			for (size_t K = 0; K < P.Form.size(); ++K)
+			{
+				const float H = std::max(3.0f, 46.0f * P.Form[K] / Top);
+				C->FillRoundRect({Lx + Nf(K) * (Bw + 6.0f), Y + 62.0f - H, Bw, H}, 3.0f, K + 1 == P.Form.size() ? pal::Accent : Hex(0x2b4a6e));
+			}
 		}
-		const float Bw = (Lw - 7.0f * 6.0f) / 8.0f;
-		for (size_t K = 0; K < P.Form.size(); ++K)
+		Y += 86.0f;
+		NetSpaced(*C, "BY YEAR", Lx, Y, 11.0f, 800, pal::Muted, 1.6f);
 		{
-			const float H = std::max(3.0f, 46.0f * P.Form[K] / Top);
-			C->FillRoundRect({Lx + Nf(K) * (Bw + 6.0f), Y + 62.0f - H, Bw, H}, 3.0f, K + 1 == P.Form.size() ? pal::Accent : Hex(0x2b4a6e));
+			const size_t First = P.Years.size() > 6 ? P.Years.size() - 6 : 0;
+			Chips Top = 1;
+			for (size_t K = First; K < P.Years.size(); ++K)
+			{
+				Top = std::max(Top, P.Years[K].Online + P.Years[K].Live);
+			}
+			for (size_t K = First; K < P.Years.size(); ++K)
+			{
+				const world::Year& Yr = P.Years[K];
+				const float Ry = Y + 14.0f + Nf(K - First) * 24.0f;
+				UI.Text(std::to_string(Yr.Number), Lx, Ry + 14.0f, Ts(12.0f, 700, pal::Muted, Align::Left, Baseline::Alphabetic, true));
+				const float Full = Lw - 150.0f;
+				const float Wd = std::max(2.0f, Full * Nf(static_cast<double>(Yr.Online + Yr.Live) / static_cast<double>(Top)));
+				C->FillRoundRect({Lx + 46.0f, Ry + 5.0f, Wd, 10.0f}, 3.0f, Yr.Live > Yr.Online ? pal::Gold : pal::Accent);
+				UI.Text(net::MoneyShort(Yr.Online + Yr.Live) + (Yr.Wins > 0 ? "  \xC2\xB7  " + std::to_string(Yr.Wins) + (Yr.Wins == 1 ? " win" : " wins") : ""), Lx + 54.0f + Wd, Ry + 14.0f,
+					Ts(12.0f, 600, CardSoft, Align::Left, Baseline::Alphabetic, false, Lx + Lw - (Lx + 54.0f + Wd) + 40.0f));
+			}
 		}
-	}
-	Y += 86.0f;
-	NetSpaced(*C, "BY YEAR", Lx, Y, 11.0f, 800, pal::Muted, 1.6f);
-	{
-		const size_t First = P.Years.size() > 6 ? P.Years.size() - 6 : 0;
-		Chips Top = 1;
-		for (size_t K = First; K < P.Years.size(); ++K)
-		{
-			Top = std::max(Top, P.Years[K].Online + P.Years[K].Live);
-		}
-		for (size_t K = First; K < P.Years.size(); ++K)
-		{
-			const world::Year& Yr = P.Years[K];
-			const float Ry = Y + 14.0f + Nf(K - First) * 24.0f;
-			UI.Text(std::to_string(Yr.Number), Lx, Ry + 14.0f, Ts(12.0f, 700, pal::Muted, Align::Left, Baseline::Alphabetic, true));
-			const float Full = Lw - 150.0f;
-			const float Wd = std::max(2.0f, Full * Nf(static_cast<double>(Yr.Online + Yr.Live) / static_cast<double>(Top)));
-			C->FillRoundRect({Lx + 46.0f, Ry + 5.0f, Wd, 10.0f}, 3.0f, Yr.Live > Yr.Online ? pal::Gold : pal::Accent);
-			UI.Text(net::MoneyShort(Yr.Online + Yr.Live) + (Yr.Wins > 0 ? "  \xC2\xB7  " + std::to_string(Yr.Wins) + (Yr.Wins == 1 ? " win" : " wins") : ""), Lx + 54.0f + Wd, Ry + 14.0f,
-				Ts(12.0f, 600, CardSoft, Align::Left, Baseline::Alphabetic, false, Lx + Lw - (Lx + 54.0f + Wd) + 40.0f));
-		}
+
 	}
 
 	// Middle and right: the overview (recent results, what they think of you, their story, who they run with), or the
@@ -225,9 +245,9 @@ void RiverLine::PlayerCard(double Now)
 	const float Mx = R.X + 392.0f;
 	const float Mw = R.X + R.W - 26.0f - Mx;
 	{
-		const std::string Tabs[3] = {"OVERVIEW", "JOURNEY", P.Awards.empty() ? std::string("TROPHIES") : "TROPHIES \xC2\xB7 " + std::to_string(P.Awards.size())};
+		const std::string Tabs[4] = {"OVERVIEW", "JOURNEY", P.Awards.empty() ? std::string("TROPHIES") : "TROPHIES \xC2\xB7 " + std::to_string(P.Awards.size()), "STATS"};
 		float Tx = Mx + Mw;
-		for (int K = 2; K >= 0; --K)
+		for (int K = 3; K >= 0; --K)
 		{
 			const float Tw = UI.Measure(Tabs[K], 11.0f, 800) + 26.0f;
 			Tx -= Tw;
@@ -244,9 +264,13 @@ void RiverLine::PlayerCard(double Now)
 			Tx -= 8.0f;
 		}
 	}
-	if (CardTab == 1 || CardTab == 2)
+	if (CardTab == 1 || CardTab == 2 || CardTab == 3)
 	{
-		if (CardTab == 1)
+		if (CardTab == 3)
+		{
+			StatsBoard(P.Stats, P.Awards, {R.X + 24.0f, R.Y + 306.0f, R.W - 48.0f, R.H - 306.0f - 22.0f}, Now);
+		}
+		else if (CardTab == 1)
 		{
 			CardJourney(P, Mx, R.Y + 292.0f, Mw, R.Y + R.H - 20.0f - (R.Y + 292.0f), Now);
 		}

@@ -146,6 +146,14 @@ The LED room kit is polled rather than pushed: call `Session::RoomGlow(Now)` eve
   - `Sim::Mark` adds them, from the firsts in `Apply` and from career events in `Post`.
 - **Profiles:** `World::ProfileOf` adds `Came` (the arrival in a sentence), `Arrived`, `New` (joined in the last 30 days) and `Journey` (dated lines).
 - **Debug:** `World::Describe`, behind `ss.World.Npc`, prints the arrival, the journey and every bracelet and ring; `World::Report`, behind `ss.World.Report`, counts arrivals.
+- **Stats pages:**
+  - `Npc::Stats` (and `Profile::Stats`) is a `world::Tracker`: totals, ROI and ITM, breakdowns by buy-in (`TrackStake`) and format (`TrackFormat`), finishes, records (peak, downswing, biggest score, dry runs, average finish), and the profit graph.
+  - The graph is at most 64 points; when it fills, every other point goes and the stride doubles.
+  - `Sim::Apply` adds every online and live tournament (every bullet; satellite seats at their value). `World::HeroFinished` adds the player's to `World::HeroStats`.
+  - `Sim::SeedStats` draws a regular's history before Night One from their lifetime ledgers, with an RNG seeded by their name (the world's own dice never move). It runs when someone joins, and on loading a save from before stats pages.
+  - `World::RoiRank` places an ROI among the regulars.
+  - `World::GrantHeroResults` plays preview tournaments for the player.
+  - The dashboard is `RiverLineStats.cpp`: `StatsKpis`, `StatsBoard`, and `HeroStatsCard` (`ShowPlayer(RiverLine::HeroCard)`).
 - **Trophy cases:**
   - `Npc::Awards` (and `Profile::Awards`) keeps every bracelet and ring (`world::Award`: day, ring or bracelet, online or live, Main Event, series, event, prize, entries).
   - `World::HeroAwards` keeps the player's.
@@ -166,12 +174,15 @@ The LED room kit is polled rather than pushed: call `Session::RoomGlow(Now)` eve
 - **Newcomer data:**
   - Each `npc` line ends with the arrival fields, and a `path` line holds the journey.
   - Saves from before newcomers read as old hands with empty journeys.
+- **Stats data:**
+  - A `track` line holds each person's stats page, and `herotrack` holds the player's.
+  - The graph's points are written in dollars, as steps from the previous point.
 - **Trophy data:**
   - An `awards` line holds a person's bracelets and rings, and a `heroawards` line holds the player's.
   - Saves from before trophy cases fill them from the titles in history; anything left is a plain bracelet or ring.
 - **Size and cost:**
   - Recent results are kept for 8 days (majors for 400 days), and long-gone retirees fold into `ghost` lines.
-  - A save is about 1.8 MB after a month, 2.8 MB after a year and 4.8 MB after ten years.
+  - A save is about 2.6 MB after a month, 3.8 MB after a year and 6.3 MB after ten years (about a third of it is the stats pages).
   - The session rewrites the world text only when something involving the player changed, or once an in-game hour has passed.
 
 **Nights away from the desk**
@@ -188,6 +199,7 @@ The LED room kit is polled rather than pushed: call `Session::RoomGlow(Now)` eve
 | `ss.World.Leaders` | The 20 best-known players and what they're known for |
 | `ss.World.Simulate <days>` | Sleep through 1, 7, 30 or 365 days (up to 3,650); the clock and the world move on |
 | `ss.World.Preview <days>` | How the world would look then (a copy is played forward; nothing changes) |
+| `ss.World.PlayerResults <count>` | Plays that many small tournaments onto your stats page (Career, Your stats), to preview it |
 | `ss.World.Award <bracelet\|ring> [main] [name]` | A bracelet or a ring for the player (or someone by name), from the latest Championship Online or Ring Rush: see the trophy case and the champion's frame |
 
 **Performance**
@@ -219,7 +231,8 @@ On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio
   - a card opened over the table;
   - four event-art sheets: every glyph, every schedule tile, the series' crests, and series events in each metal, including Main Events, bracelets, rings and high rollers;
   - two award sheets: every bracelet and ring design, and champions' frames at card, seat and board sizes;
-  - the champions: the biggest winner's card and TROPHIES tab, the boards with champions' frames, a bracelet and a ring winner at the player's table, and the player's trophy case on the Career page.
+  - the champions: the biggest winner's card and TROPHIES tab, the boards with champions' frames, a bracelet and a ring winner at the player's table, and the player's trophy case on the Career page;
+  - RiverLine Stats: a champion's STATS tab (and the same tab hovering the graph), the network's biggest winner's, and the player's own from the Career page.
 - `monkey_test`: random clicks and keys across every screen while it sits down at random events (up to four tables at once) and winds the sitting down to its results, about 15 s. It also shops on GearDrop, goes live on Kast and works the studio (ads, answers, timeouts, mods), changes the schedule, sometimes ends a stream with a raid, and changes the LED kit's colour, power and sync. Every frame it checks that the bankroll only moves through the ledger, tournament chips are conserved, the clock never runs backwards, no table stalls, saves round-trip, nobody streams without the PC upgrade, the stream's numbers stay in range, the community stays in its ranges (loyalty, affinity, stage, schedule), and the room's lights match the kit and its settings. `./build/monkey_test 40 30000` runs a longer sweep.
 - `living_world` (`world_test`): first the online calendar:
   - nine series a year from 2027 to 2040, none overlapping;
@@ -227,7 +240,7 @@ On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio
   - every series event name and every template id is used once;
   - RCOP seats carry over to every year's Main Event, and leap days are on the calendar.
 
-  Then a world is created and played for a month, about 1.5 s. It checks that newcomers arrive in different ways, with journeys that start the day they joined and cards that tell them. It also checks every person (no negative bankrolls, skills and stakes in range, sane ledgers, at most seven ties, a trophy case that matches their bracelet and ring counts), that tonight's events have the world's regulars registered, that final tables mix regulars and unknowns, that the rival keeps the network's index, that a night at Dee's leaves memories, that a saved world writes the same save (the trophy cases included) and plays on exactly as the original, and that an older save without trophy cases fills them in. `world_test years <n> [seed]` runs the long check above (it also fails if any Championship Online bracelet has no winner in the history), and `world_test npc <name> [days]` prints one person's career.
+  Then a world is created and played for a month, about 1.5 s. It checks that newcomers arrive in different ways, with journeys that start the day they joined and cards that tell them. It also checks every person (no negative bankrolls, skills and stakes in range, sane ledgers, at most seven ties, a trophy case that matches their bracelet and ring counts, a stats page whose tournaments, buy-ins and prizes match their ledgers), that tonight's events have the world's regulars registered, that final tables mix regulars and unknowns, that the rival keeps the network's index, that a night at Dee's leaves memories, that a saved world writes the same save (the trophy cases included) and plays on exactly as the original, and that an older save without trophy cases fills them in. `world_test years <n> [seed]` runs the long check above (it also fails if any Championship Online bracelet has no winner in the history), and `world_test npc <name> [days]` prints one person's career.
 - `audio_test`: every synthesized sound is audible, finite and in range.
 
 To look at the UI without Unreal:

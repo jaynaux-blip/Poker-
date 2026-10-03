@@ -166,6 +166,16 @@ FAutoConsoleCommandWithWorldAndArgs WorldAwardCmd(TEXT("ss.World.Award"),
 		LogLines(std::string(Ring ? "A ring" : "A bracelet") + " for " + (Name.empty() ? std::string("you") : Name) + "\n");
 	}));
 
+FAutoConsoleCommandWithWorldAndArgs WorldPlayerResultsCmd(TEXT("ss.World.PlayerResults"),
+	TEXT("ss.World.PlayerResults <count>: plays that many small tournaments onto your stats page (Career > Your stats), to preview it."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (ss::Session* S = WorldSession(World))
+		{
+			S->Living().GrantHeroResults(FMath::Clamp(Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 200, 1, 5000));
+			LogLines("Your stats page has " + std::to_string(S->Living().HeroStats().Events) + " tournaments\n");
+		}
+	}));
+
 FAutoConsoleCommandWithWorldAndArgs WorldPreviewCmd(TEXT("ss.World.Preview"), TEXT("ss.World.Preview <days>: how the world would look then (a copy is played forward; nothing changes)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
 		if (ss::Session* S = WorldSession(World))

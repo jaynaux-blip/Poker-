@@ -117,7 +117,7 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 		case Screen::Table:
 		{
 			// A player card (a name at the table caught the player's eye) holds the table's input while it's up.
-			const bool Card = CardShown >= 0;
+			const bool Card = CardOpen();
 			const Pointer Held = UI.Ptr;
 			if (Card)
 			{

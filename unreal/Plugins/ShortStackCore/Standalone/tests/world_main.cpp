@@ -98,6 +98,21 @@ void Invariants(const world::World& W, const std::string& When)
 			Rings += A.Ring ? 1 : 0;
 		}
 		Check(Rings == N.Rings && static_cast<int>(N.Awards.size()) - Rings == N.Bracelets, When + ": " + N.Name + "'s trophy case holds every bracelet and ring");
+		if (!N.Faded)
+		{
+			// The stats page: every tournament (online and live), every buy-in, every prize (and seats at their value).
+			const world::Tracker& T = N.Stats;
+			const world::Ledger& On = N.Totals[0];
+			const world::Ledger& Lv = N.Totals[1];
+			Check(T.Events == On.Events + Lv.Events && T.BuyIns == On.Spent + Lv.Spent && T.Prizes >= On.Won + Lv.Won, When + ": " + N.Name + "'s stats page adds up");
+			int Lines = 0;
+			for (const world::TrackLine& L : T.ByStake)
+			{
+				Lines += L.Events;
+			}
+			Check(Lines == T.Events && T.Cashes <= T.Events && T.Wins <= T.FinalTables && static_cast<int>(T.Curve.size()) < world::Tracker::CurveMax && T.Net == T.Prizes - T.BuyIns,
+				When + ": " + N.Name + "'s stats page is consistent");
+		}
 	}
 	Check(Active > 1000, When + ": the world emptied out (" + std::to_string(Active) + " active)");
 	Check(W.View().size() == W.People().size(), When + ": the network view is out of step");
