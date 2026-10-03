@@ -8,6 +8,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/UI/Avatars.h"
+#include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/FrontEnd.h"
 #include "ShortStack/UI/Phone.h"
 #include "ShortStack/UI/PropArt.h"
@@ -1587,6 +1588,161 @@ void WorldScreens()
 	}
 }
 
+
+// ------------------------------------------------------------------ event art
+
+void SaveSheet(const std::string& Name, const ss::ui::DrawList& L)
+{
+	Expect(!L.Cmds.empty() && L.Vertices.size() > 1000, (Name + " drew something").c_str());
+	std::printf("  %-22s %6zu vertices %4zu commands\n", Name.c_str(), L.Vertices.size(), L.Cmds.size());
+	if (!OutDir.empty())
+	{
+		if (FILE* F = std::fopen((OutDir + "/" + Name + ".json").c_str(), "wb"))
+		{
+			const std::string J = L.ToJson();
+			std::fwrite(J.data(), 1, J.size(), F);
+			std::fclose(F);
+		}
+	}
+}
+
+void SheetBackground(ss::ui::Canvas& C, const std::string& Title, const std::string& Sub)
+{
+	C.FillRect({0.0f, 0.0f, 1600.0f, 1000.0f}, ss::ui::Paint::Linear({0.0f, 0.0f}, {0.0f, 1000.0f}, ss::ui::Hex(0x111a2b), ss::ui::Hex(0x070b14)));
+	C.Text(Title, 48.0f, 62.0f, ss::ui::Ts(30.0f, 900, ss::ui::Hex(0xffffff)));
+	C.Text(Sub, 48.0f, 92.0f, ss::ui::Ts(16.0f, 500, ss::ui::Hex(0x8b9bb4)));
+}
+
+void EventArtGallery()
+{
+	namespace ea = ss::ui::eventart;
+	const ss::net::Network& Net = ss::net::Shared();
+	TableMeasurer M;
+	const double Time = 3.2;
+	// Every glyph.
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "EVENT ART \xC2\xB7 GLYPHS", "Every motif, white on the night");
+		const int Count = static_cast<int>(ea::Glyph::Count);
+		for (int K = 0; K < Count; ++K)
+		{
+			const float X = 90.0f + static_cast<float>(K % 12) * 128.0f;
+			const float Y = 170.0f + static_cast<float>(K / 12) * 134.0f;
+			C.FillRoundRect({X - 52.0f, Y - 52.0f, 104.0f, 104.0f}, 22.0f, ss::ui::Hex(0x18243a));
+			ea::DrawGlyph(C, static_cast<ea::Glyph>(K), X, Y, 72.0f);
+		}
+		SaveSheet("eventart_glyphs", L);
+	}
+	// Every tournament on the schedule, as the lobby shows it.
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "EVENT ART \xC2\xB7 THE SCHEDULE", "Every tournament brand on RiverLine has its own tile");
+		std::set<std::string> Seen;
+		int K = 0;
+		for (const ss::net::EventTemplate& T : Net.Templates())
+		{
+			if (!T.Series.empty())
+			{
+				continue;
+			}
+			std::string Key = T.Name;
+			if (!Seen.insert(Key).second && T.Id.rfind("step", 0) != 0)
+			{
+				continue;
+			}
+			const float X = 110.0f + static_cast<float>(K % 9) * 172.0f;
+			const float Y = 180.0f + static_cast<float>(K / 9) * 150.0f;
+			ea::Emblem(C, T, X, Y, 84.0f, Time);
+			C.Text(T.Name, X, Y + 66.0f, ss::ui::Ts(12.0f, 700, ss::ui::Hex(0xc3cedf), ss::ui::Align::Center, ss::ui::Baseline::Alphabetic, false, 160.0f));
+			++K;
+		}
+		Expect(K >= 40, "every brand on the schedule has a tile");
+		SaveSheet("eventart_tiles", L);
+	}
+	// The series: one year's crests.
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "EVENT ART \xC2\xB7 THE SERIES", "Each series wears its own crest; the flagships return every year, the seasonal ones change their names");
+		int K = 0;
+		for (const ss::net::SeriesInfo& Sr : Net.Series())
+		{
+			const int Year = ss::world::YearOf(Sr.FirstDay);
+			if (!(Year == 2027 || Sr.Id == "hol26" || Sr.Id == "rcop" || Sr.Id == "mm") || K >= 12)
+			{
+				continue;
+			}
+			const float X = 150.0f + static_cast<float>(K % 6) * 260.0f;
+			const float Y = 300.0f + static_cast<float>(K / 6) * 380.0f;
+			ea::SeriesCrest(C, Sr, X, Y, 190.0f, Time + K);
+			C.Text(Sr.Name, X, Y + 150.0f, ss::ui::Ts(15.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
+			C.Text(ss::net::DateLabel(Sr.FirstDay) + " \xE2\x80\x93 " + ss::net::DateLabel(Sr.LastDay) + ", " + std::to_string(Year), X, Y + 172.0f,
+				ss::ui::Ts(12.0f, 600, ss::ui::Hex(0x8b9bb4), ss::ui::Align::Center));
+			++K;
+		}
+		SaveSheet("eventart_series", L);
+	}
+	// Series events: what makes one matter, at the sizes the screens use.
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "EVENT ART \xC2\xB7 SERIES EVENTS", "Rims by stakes (bronze, silver, gold, platinum); Main Events, high rollers, bracelets and rings dressed for the occasion");
+		auto Find = [&](const std::string& Id) -> const ss::net::EventTemplate* { return Net.FindTemplate(Id); };
+		std::vector<std::pair<const ss::net::EventTemplate*, std::string>> Show;
+		auto Add = [&](const ss::net::EventTemplate* T, const std::string& Label) {
+			if (T)
+			{
+				Show.push_back({T, Label});
+			}
+		};
+		Add(Find("rcop27-main"), "RCOP Main Event");
+		Add(Find("tco27-main"), "Online Championship (bracelet)");
+		Add(Find("ring27-main"), "Ring Main Event");
+		Add(Find("slam27-mini"), "Mini Main Event");
+		Add(Find("hrs27-shr"), "Super High Roller");
+		Add(Find("hol26-main"), "Holiday Heist Main");
+		// A bracelet event, a ring event, and one plain event at each stake.
+		const ss::net::EventTemplate* Bracelet = nullptr;
+		const ss::net::EventTemplate* Ring = nullptr;
+		const ss::net::EventTemplate* ByTier[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+		for (const ss::net::EventTemplate& T : Net.Templates())
+		{
+			if (T.Series.rfind("tco27", 0) == 0 && T.Bracelet && !T.Main && !Bracelet)
+			{
+				Bracelet = &T;
+			}
+			if (T.Series.rfind("ring27", 0) == 0 && T.Ring && !T.Main && !Ring)
+			{
+				Ring = &T;
+			}
+			if (T.Series.rfind("win27", 0) == 0 && !T.Main && !T.Featured)
+			{
+				const int Tr = static_cast<int>(ss::net::TierOf(T.BuyInCents));
+				ByTier[Tr] = ByTier[Tr] ? ByTier[Tr] : &T;
+			}
+		}
+		Add(Bracelet, "Bracelet event");
+		Add(Ring, "Ring event");
+		Add(ByTier[1], "Micro (bronze)");
+		Add(ByTier[2], "Low (silver)");
+		Add(ByTier[3], "Mid (gold)");
+		Add(Find("spr27-hr"), "High Roller");
+		for (size_t I = 0; I < Show.size(); ++I)
+		{
+			const float X = 150.0f + static_cast<float>(I % 6) * 260.0f;
+			const float Y = 300.0f + static_cast<float>(I / 6) * 380.0f;
+			ea::Emblem(C, *Show[I].first, X, Y, 190.0f, Time + static_cast<double>(I));
+			C.Text(Show[I].second, X, Y + 150.0f, ss::ui::Ts(15.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
+			C.Text(Show[I].first->Name, X, Y + 172.0f, ss::ui::Ts(11.0f, 600, ss::ui::Hex(0x8b9bb4), ss::ui::Align::Center, ss::ui::Baseline::Alphabetic, false, 250.0f));
+			// The same emblem at row size.
+			ea::Emblem(C, *Show[I].first, X + 100.0f, Y - 130.0f, 40.0f, Time);
+		}
+		Expect(Show.size() == 12, "the special events are all there");
+		SaveSheet("eventart_crests", L);
+	}
+}
 } // namespace ui_test
 
 int main(int Argc, char** Argv)
@@ -1603,6 +1759,7 @@ int main(int Argc, char** Argv)
 	ui_test::Results();
 	ui_test::Props();
 	ui_test::Avatars();
+	ui_test::EventArtGallery();
 	ui_test::MultiScreens();
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();

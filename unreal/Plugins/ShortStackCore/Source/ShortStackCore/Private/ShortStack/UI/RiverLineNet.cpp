@@ -3,6 +3,7 @@
 #include "ShortStack/UI/RiverLine.h"
 #include "../StrictFloat.h"
 #include "RiverLineShared.h"
+#include "ShortStack/UI/EventArt.h"
 #include "ShortStack/Game/World.h"
 
 #include "ShortStack/Game/Chat.h"
@@ -481,9 +482,36 @@ void RiverLine::DrawSlide(const FeatureSlide& F, const Rect& R, double Now, floa
 		}
 		C->StrokePolyline(Wave, false, NetA(K % 2 ? Col2 : Col, 0.12f), 1.5f);
 	}
-	// Art.
-	switch (F.Art)
+	// Art: the event's emblem or the series' crest when there is one; otherwise the slide's own picture.
+	const net::SeriesInfo* ArtSeries = !F.HasEvent && !F.SeriesId.empty() ? Net.FindSeries(F.SeriesId) : nullptr;
+	if (F.HasEvent || ArtSeries)
 	{
+		const float Ex = Gx - 30.0f;
+		const float Ey = Gy - 16.0f + Nf(std::sin(Now * 1.1)) * 3.0f;
+		for (int K = 0; K < 3; ++K)
+		{
+			const float Ph = Nf(std::fmod(Now * 0.22 + K / 3.0, 1.0));
+			C->StrokeEllipse(Ex, Ey, 70.0f + Ph * 150.0f, 70.0f + Ph * 150.0f, NetA(K % 2 ? Col2 : Col, 0.32f * (1.0f - Ph)), 1.5f);
+		}
+		if (F.Art == 0)
+		{
+			const Chips Amounts[2] = {600000, 1200000};
+			DrawChipStack(*C, Amounts[0], Ex - 120.0f, Ey + 52.0f, 1.3f, C->GetAlpha());
+			DrawChipStack(*C, Amounts[1], Ex + 96.0f, Ey + 58.0f, 1.3f, C->GetAlpha());
+		}
+		if (ArtSeries)
+		{
+			eventart::SeriesCrest(*C, *ArtSeries, Ex, Ey, 184.0f, Now);
+		}
+		else
+		{
+			eventart::Emblem(*C, Net.TemplateOf(F.E), Ex, Ey, F.Art == 4 ? 150.0f : 176.0f, Now);
+		}
+	}
+	switch (F.HasEvent || ArtSeries ? -1 : F.Art)
+	{
+	case -1:
+		break;
 	case 0:
 	{
 		const Chips Amounts[5] = {250000, 1200000, 600000, 80000, 2500000};
@@ -827,9 +855,15 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	default: break;
 	}
 	UI.Text(When, R.X + 20.0f, Low, Ts(12.0f, 600, WhenCol, Align::Left, Baseline::Alphabetic, false, 100.0f));
-	// Name and badges.
-	const float Nx = R.X + 130.0f;
-	float Tw = UI.Text(T.Name, Nx, Top, Ts(17.0f, 700, Dim ? Hex(0xb4bfd0) : pal::Ink, Align::Left, Baseline::Alphabetic, false, 360.0f));
+	// The event's emblem, its name and badges.
+	{
+		const float Ea = C->GetAlpha();
+		C->SetAlpha(Ea * (Dim ? 0.6f : 1.0f));
+		eventart::Emblem(*C, T, R.X + 148.0f, R.Y + R.H / 2.0f, 42.0f, Now);
+		C->SetAlpha(Ea);
+	}
+	const float Nx = R.X + 180.0f;
+	float Tw = UI.Text(T.Name, Nx, Top, Ts(17.0f, 700, Dim ? Hex(0xb4bfd0) : pal::Ink, Align::Left, Baseline::Alphabetic, false, 318.0f));
 	if (T.Featured)
 	{
 		NetStar(*C, Nx + Tw + 12.0f, Top - 6.0f, 6.5f, pal::Gold);
@@ -957,12 +991,14 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 	// Header band.
 	C->FillRoundRect({R.X, R.Y, R.W, 168.0f}, 14.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + 168.0f}, Mix(Hex(0x122036), Edge, 0.3f), Hex(0x122036)));
 	C->PushClip({R.X, R.Y, R.W, 168.0f});
-	DrawSuit(*C, 3, R.X + R.W - 150.0f, R.Y - 20.0f + (1.0f - In) * 20.0f, 190.0f, NetA(Hex(0xffffff), 0.05f));
+	DrawSuit(*C, 3, R.X + R.W - 150.0f, R.Y - 20.0f + (1.0f - In) * 20.0f, 190.0f, NetA(Hex(0xffffff), 0.03f));
 	C->PopClip();
+	// The event's emblem (a series event's crest, dressed for what it means).
+	eventart::Emblem(*C, T, R.X + R.W - 84.0f, R.Y + 88.0f + (1.0f - In) * 10.0f, 132.0f, Now);
 	std::string Kicker;
 	if (const net::SeriesInfo* Sr = Net.FindSeries(T.Series))
 	{
-		Kicker = NetUpper(Sr->Name) + " \xC2\xB7 EVENT #" + std::to_string(T.EventNo) + (T.Bracelet ? " \xC2\xB7 BRACELET EVENT" : T.Ring ? " \xC2\xB7 RING EVENT" : "");
+		Kicker = NetUpper(Sr->Name.size() > 18 ? Sr->Short : Sr->Name) + " \xC2\xB7 EVENT #" + std::to_string(T.EventNo) + (T.Bracelet ? " \xC2\xB7 BRACELET" : T.Ring ? " \xC2\xB7 RING" : "");
 	}
 	else
 	{
@@ -970,9 +1006,9 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 	}
 	Kicker += " \xC2\xB7 " + NetUpper(net::WeekdayName(net::DayOf(E.Start))) + " " + NetUpper(net::DateLabel(net::DayOf(E.Start)));
 	NetSpaced(*C, Kicker, R.X + 26.0f, R.Y + 38.0f, 11.0f, 800, Edge, 1.6f);
-	float Ty = NetParagraph(*C, T.Name, R.X + 26.0f, R.Y + 74.0f, R.W - 52.0f, 27.0f, 900, pal::Ink, 32.0f, 2);
+	float Ty = NetParagraph(*C, T.Name, R.X + 26.0f, R.Y + 74.0f, R.W - 200.0f, 27.0f, 900, pal::Ink, 32.0f, 2);
 	std::string Sub = std::string(T.Omaha ? "PL Omaha" : "NL Hold'em") + " \xC2\xB7 " + T.Speed + " \xC2\xB7 " + std::to_string(static_cast<int>(T.LevelMinutes)) + "-min levels \xC2\xB7 " + std::to_string(T.TableSize) + "-max";
-	UI.Text(Sub, R.X + 26.0f, Ty + 2.0f, Ts(14.0f, 500, Hex(0xa9b5c8), Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
+	UI.Text(Sub, R.X + 26.0f, Ty + 2.0f, Ts(14.0f, 500, Hex(0xa9b5c8), Align::Left, Baseline::Alphabetic, false, R.W - 190.0f));
 	NetPill(*C, NetFormat(T), R.X + 26.0f, R.Y + 138.0f, Edge, false, 10.0f);
 
 	// Countdown and progress ring.
@@ -1433,7 +1469,7 @@ void RiverLine::SeriesPage(double Now)
 	{
 		const net::SeriesInfo& O = *Near[K];
 		const std::string Label = O.Name + (net::DayOf(World) > O.LastDay ? "" : net::DayOf(World) >= O.FirstDay ? "  \xC2\xB7  LIVE" : "  \xC2\xB7  " + NetUpper(net::DateLabel(O.FirstDay)));
-		const float W = UI.Measure(Label, 13.0f, 700) + 30.0f;
+		const float W = UI.Measure(Label, 13.0f, 700) + 30.0f + 22.0f;
 		Px -= W;
 		const Rect R{Px, 88.0f, W, 30.0f};
 		const Ui::ClickState St = UI.Clickable("series" + O.Id, R);
@@ -1443,7 +1479,8 @@ void RiverLine::SeriesPage(double Now)
 		}
 		const bool On = &O == Sr;
 		UI.RRect(R, 15.0f, On ? NetA(Hex(O.Color), 0.2f) : St.Hover ? Hex(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? Hex(O.Color) : pal::Line);
-		UI.Text(Label, R.X + W / 2.0f, R.Y + 15.5f, Ts(13.0f, 700, On ? pal::Ink : pal::Muted, Align::Center, Baseline::Middle));
+		eventart::SeriesCrest(*C, O, R.X + 18.0f, R.Y + 15.0f, 26.0f, Now);
+		UI.Text(Label, R.X + 11.0f + W / 2.0f, R.Y + 15.5f, Ts(13.0f, 700, On ? pal::Ink : pal::Muted, Align::Center, Baseline::Middle));
 		Px -= 8.0f;
 	}
 
@@ -1465,10 +1502,9 @@ void RiverLine::SeriesPage(double Now)
 	UI.Text(Sr->Short, B.X + B.W - 400.0f, B.Y + B.H + 40.0f, Ts(260.0f, 900, NetA(Hex(0xffffff), 0.04f), Align::Right));
 	C->PopClip();
 	C->StrokeRoundRect(B, 18.0f, NetA(Col, 0.35f), 1.0f);
-	const Rect Badge{B.X + 34.0f, B.Y + 32.0f, 92.0f, 92.0f};
-	C->GlowRoundRect(Badge, 22.0f, NetA(Col, 0.45f), 22.0f);
-	C->FillRoundRect(Badge, 22.0f, Paint::Linear({Badge.X, Badge.Y}, {Badge.X + Badge.W, Badge.Y + Badge.H}, Col, Col2));
-	UI.Text(Sr->Short, Badge.X + Badge.W / 2.0f, Badge.Y + Badge.H / 2.0f + 1.0f, Ts(Sr->Short.size() > 3 ? 24.0f : 30.0f, 900, Hex(0x07121c), Align::Center, Baseline::Middle));
+	// The series' crest.
+	C->FillEllipse(B.X + 82.0f, B.Y + 96.0f, 96.0f, 96.0f, Paint::Radial({B.X + 82.0f, B.Y + 96.0f}, 0.0f, {B.X + 82.0f, B.Y + 96.0f}, 96.0f, Rgba(4, 8, 16, 0.55f), 0.55f, Rgba(4, 8, 16, 0.25f), Rgba(4, 8, 16, 0.0f)));
+	eventart::SeriesCrest(*C, *Sr, B.X + 82.0f, B.Y + 96.0f + (1.0f - In) * 12.0f, 150.0f, Now);
 	UI.Text(Sr->Name, B.X + 150.0f, B.Y + 78.0f, Ts(46.0f, 900, pal::Ink));
 	UI.Text(Sr->Tagline, B.X + 150.0f, B.Y + 110.0f, Ts(17.0f, 500, Hex(0xc3cedf), Align::Left, Baseline::Alphabetic, false, 760.0f));
 	const int DayCount = Sr->LastDay - Sr->FirstDay + 1;
@@ -1608,8 +1644,9 @@ void RiverLine::SeriesPage(double Now)
 		UI.RRect(R, 10.0f, St.Hover ? Hex(0x15253d) : Hex(0x101a2b), Big ? NetA(pal::Gold, 0.55f) : Rgba(255, 255, 255, 0.04f));
 		C->FillRoundRect({R.X + 1.0f, R.Y + 10.0f, 4.0f, R.H - 20.0f}, 2.0f, Big ? pal::Gold : Col);
 		UI.Text(net::TimeLabel(E.Start), R.X + 20.0f, R.Y + 33.0f, Ts(15.0f, 700, pal::Muted));
-		const float Nw = NetPill(*C, "#" + std::to_string(T.EventNo), R.X + 110.0f, R.Y + 18.0f, Big ? pal::Gold : Col, true, 10.0f);
-		UI.Text(NetShortName(T.Name), R.X + 118.0f + Nw, R.Y + 33.0f, Ts(16.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, 330.0f));
+		eventart::Emblem(*C, T, R.X + 122.0f, R.Y + R.H / 2.0f, 46.0f, Now);
+		const float Nw = NetPill(*C, "#" + std::to_string(T.EventNo), R.X + 152.0f, R.Y + 18.0f, Big ? pal::Gold : Col, true, 10.0f);
+		UI.Text(NetShortName(T.Name), R.X + 160.0f + Nw, R.Y + 33.0f, Ts(16.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, 300.0f));
 		UI.Text(net::BuyIn(T.BuyInCents), R.X + 560.0f, R.Y + 33.0f, Ts(15.0f, 800, pal::Gold, Align::Right, Baseline::Alphabetic, true));
 		UI.Text(NetMoney(std::max(L.Pool, T.GtdCents)) + (L.St == net::Status::Finished ? "" : " GTD"), R.X + 590.0f, R.Y + 33.0f, Ts(15.0f, 700, pal::Ink));
 		if (L.St == net::Status::Finished)
@@ -1696,10 +1733,11 @@ void RiverLine::SeriesPage(double Now)
 			const float A0 = C->GetAlpha();
 			C->SetAlpha(A0 * Ri);
 			UI.Text(NetUpper(net::DateLabel(T.OnlyDay)), Rt.X + 24.0f, Y + 26.0f, Ts(11.5f, 800, pal::Muted, Align::Left, Baseline::Alphabetic, true));
-			UI.Text(NetShortName(T.Name), Rt.X + 92.0f, Y + 26.0f, Ts(15.0f, 700, T.Main ? pal::Gold : pal::Ink, Align::Left, Baseline::Alphabetic, false, Rt.W - 230.0f));
+			eventart::Emblem(*C, T, Rt.X + 108.0f, Y + 21.0f, 40.0f, Now);
+			UI.Text(NetShortName(T.Name), Rt.X + 136.0f, Y + 26.0f, Ts(15.0f, 700, T.Main ? pal::Gold : pal::Ink, Align::Left, Baseline::Alphabetic, false, Rt.W - 270.0f));
 			if (T.Bracelet || T.Ring)
 			{
-				NetPill(*C, T.Bracelet ? "BRACELET" : "RING", Rt.X + 92.0f, Y + 34.0f, Hex(0xf2c14e), true, 8.5f);
+				NetPill(*C, T.Bracelet ? "BRACELET" : "RING", Rt.X + 136.0f, Y + 34.0f, Hex(0xf2c14e), true, 8.5f);
 			}
 			UI.Text(NetMoney(T.GtdCents), Rt.X + Rt.W - 24.0f, Y + 26.0f, Ts(15.0f, 800, pal::Gold, Align::Right, Baseline::Alphabetic, true));
 			C->SetAlpha(A0);

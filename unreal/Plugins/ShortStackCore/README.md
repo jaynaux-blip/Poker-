@@ -13,7 +13,7 @@ On top of the engine, the plugin also carries the rest of Night One's logic as p
 - `ShortStack/Game`: the session (lobby, pacing, hero turns, sprint, story texts, results, saves, up to four tables at once) and the RiverLine network (`Network.h`: the schedule, series, regulars, simulated results, leaderboards and news, on a world clock)
 - `ShortStack/Game/Life.h`: life away from the tables: shifts, hustles, energy, police heat, rent, the ledger, and the clock skipping ahead while they happen
 - `ShortStack/Game/Handles.h`: RiverLine screen names in each country's style, for the regulars and table fields (display only: the engine's `Names.h` stays as it is for parity with TypeScript)
-- `ShortStack/UI`: a vector canvas, the RiverLine client (the table in `RiverLine.cpp`, the lobby pages in `RiverLineNet.cpp`, the laptop's other apps in `RiverLineApps.cpp`, multi-tabling's table tabs and tile view in `RiverLineTables.cpp`), profile pictures (`Avatars.h`: 35 icons picked by screen name, with frames), card art, the phone and printed props
+- `ShortStack/UI`: a vector canvas, the RiverLine client (the table in `RiverLine.cpp`, the lobby pages in `RiverLineNet.cpp`, the laptop's other apps in `RiverLineApps.cpp`, multi-tabling's table tabs and tile view in `RiverLineTables.cpp`), profile pictures (`Avatars.h`: 35 icons picked by screen name, with frames), event art (`EventArt.h`: a tile for every tournament on the schedule, a crest for every series and series event), card art, the phone and printed props
 - `ShortStack/Audio`: sound synthesis
 
 The Unreal project in `unreal/` (see `unreal/README.md`) is a thin host around them.
@@ -204,7 +204,8 @@ On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio
   - a newcomer's card (overview and journey);
   - December's series, the next one's highlights, and the home page's series slide;
   - The Championship Online in June, and a bracelet winner's journey;
-  - a card opened over the table.
+  - a card opened over the table;
+  - four event-art sheets: every glyph, every schedule tile, the series' crests, and series events in each metal, including Main Events, bracelets, rings and high rollers.
 - `monkey_test`: random clicks and keys across every screen while it sits down at random events (up to four tables at once) and winds the sitting down to its results, about 15 s. It also shops on GearDrop, goes live on Kast and works the studio (ads, answers, timeouts, mods), changes the schedule, sometimes ends a stream with a raid, and changes the LED kit's colour, power and sync. Every frame it checks that the bankroll only moves through the ledger, tournament chips are conserved, the clock never runs backwards, no table stalls, saves round-trip, nobody streams without the PC upgrade, the stream's numbers stay in range, the community stays in its ranges (loyalty, affinity, stage, schedule), and the room's lights match the kit and its settings. `./build/monkey_test 40 30000` runs a longer sweep.
 - `living_world` (`world_test`): first the online calendar:
   - nine series a year from 2027 to 2040, none overlapping;
