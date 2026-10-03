@@ -372,6 +372,7 @@ struct Tracker
 	// The profit graph: the running net (prizes after buy-ins) after every Stride tournaments; when it fills, every
 	// other point goes and the stride doubles. Net is the running net now (Events in).
 	std::vector<Chips> Curve;
+	std::vector<Chips> Spend; // buy-ins so far at each of the graph's points (the ABI graph: how their stakes moved)
 	int Stride = 1;
 	Chips Net = 0;
 	// Records.
@@ -394,6 +395,8 @@ struct Tracker
 	/** The average finish as a share of the field (0.25: the top quarter). */
 	double AverageFinish() const { return Finished > 0 ? FinishSum / static_cast<double>(Finished) : 0.0; }
 	Chips AverageBuyIn() const { return Events > 0 ? BuyIns / Events : 0; }
+	/** The ABI over the K-th stretch of the graph (Stride tournaments; the last, unfinished one when K == Curve.size()). */
+	SHORTSTACKCORE_API Chips StretchAbi(size_t K) const;
 };
 
 /** A bracelet or a ring someone won: the trophy case on their card, and the frame around their picture. */

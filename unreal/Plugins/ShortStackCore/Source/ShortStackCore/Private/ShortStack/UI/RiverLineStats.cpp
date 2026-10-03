@@ -221,7 +221,7 @@ void RiverLine::StatsKpis(const world::Tracker& T, const Rect& R, double Now)
 			Roi > 0.0005 ? 1 : Roi < -0.0005 ? -1 : 0},
 		{"ITM", StPct(T.Itm() * In), Grouped(T.Cashes) + (T.Cashes == 1 ? " cash" : " cashes"), 0},
 		{"TOURNAMENTS", Grouped(static_cast<int>(std::lround(static_cast<double>(T.Events) * static_cast<double>(In)))), Grouped(T.Wins) + (T.Wins == 1 ? " win" : " wins") + "  \xC2\xB7  " + Grouped(T.FinalTables) + " FTs", 0},
-		{"AVG BUY-IN", StAmount(T.AverageBuyIn()), T.Events > 0 ? std::string(StStakeLong[Own]) : std::string("\xE2\x80\x94"), 0},
+		{"ABI", StAmount(T.AverageBuyIn()), T.Events > 0 ? std::string(Own == static_cast<int>(world::TrackStake::Live) ? "Average buy-in, mostly live" : "Average buy-in") : std::string("\xE2\x80\x94"), 0},
 		{"AVG FINISH", T.Finished > 0 ? "Top " + Fixed(std::max(1.0, T.AverageFinish() * 100.0), 0) + "%" : std::string("\xE2\x80\x94"), "of the field", 0},
 	};
 	const float Gap = 10.0f;
@@ -272,216 +272,247 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 
 	// ---------------------------------------------------------------- the profit graph
 	StPlate(*C, Pg);
-	NetSpaced(*C, "PROFIT", Pg.X + 18.0f, Pg.Y + 26.0f, 11.0f, 800, pal::Muted, 1.6f);
-	UI.Text(Grouped(T.Events) + " tournaments  \xC2\xB7  prizes after buy-ins", Pg.X + Pg.W - 18.0f, Pg.Y + 26.0f, Ts(11.5f, 600, pal::Muted, Align::Right));
+	{
+		// The graph's two views: profit, or the ABI (how their buy-ins moved).
+		const char* const Views[2] = {"PROFIT", "ABI"};
+		float Tx = Pg.X + Pg.W - 14.0f;
+		for (int K = 1; K >= 0; --K)
+		{
+			const float Tw = UI.Measure(Views[K], 10.5f, 800) + 22.0f;
+			Tx -= Tw;
+			const Rect Tr{Tx, Pg.Y + 12.0f, Tw, 22.0f};
+			const Ui::ClickState St = UI.Clickable(std::string("statsgraph") + Views[K], Tr, CardOpen());
+			if (St.Clicked && StatsGraph != K)
+			{
+				StatsGraph = K;
+				CardTabAt = Now;
+			}
+			const bool On = StatsGraph == K;
+			UI.RRect(Tr, 11.0f, On ? NetA(pal::Accent, 0.18f) : St.Hover ? Hex(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? pal::Accent : StEdge);
+			NetSpaced(*C, Views[K], Tr.X + Tw / 2.0f, Tr.Y + 15.0f, 10.5f, 800, On ? StInk : pal::Muted, 1.2f, Align::Center);
+			Tx -= 6.0f;
+		}
+		NetSpaced(*C, StatsGraph == 1 ? "AVERAGE BUY-IN" : "PROFIT", Pg.X + 18.0f, Pg.Y + 28.0f, 11.0f, 800, pal::Muted, 1.6f);
+		UI.Text(StatsGraph == 1 ? Grouped(T.Events) + " tournaments  \xC2\xB7  every bullet" : Grouped(T.Events) + " tournaments  \xC2\xB7  prizes after buy-ins", Tx - 10.0f, Pg.Y + 28.0f,
+			Ts(11.5f, 600, pal::Muted, Align::Right));
+	}
 	const Rect Plot{Pg.X + 70.0f, Pg.Y + 48.0f, Pg.W - 70.0f - 84.0f, Pg.H - 48.0f - 34.0f};
-	std::vector<std::pair<double, double>> Pts;
-	Pts.push_back({0.0, 0.0});
-	for (size_t K = 0; K < T.Curve.size(); ++K)
+	if (StatsGraph == 1)
 	{
-		Pts.push_back({static_cast<double>((K + 1) * static_cast<size_t>(T.Stride)), static_cast<double>(T.Curve[K]) / 100.0});
+		StatsAbi(T, Pg, Plot, Now);
 	}
-	if (Pts.back().first < static_cast<double>(T.Events))
+	else
 	{
-		Pts.push_back({static_cast<double>(T.Events), static_cast<double>(T.Net) / 100.0});
-	}
-	double Lo = 0.0;
-	double Hi = 0.0;
-	for (const auto& Q : Pts)
-	{
-		Lo = std::min(Lo, Q.second);
-		Hi = std::max(Hi, Q.second);
-	}
-	Hi = std::max(Hi, static_cast<double>(T.Peak) / 100.0);
-	if (Hi - Lo < 1.0)
-	{
-		Hi = Lo + 1.0;
-	}
-	const double Step = StNiceStep((Hi - Lo) * 1.1, 4);
-	Lo = std::floor(Lo / Step) * Step;
-	Hi = std::ceil(Hi * 1.06 / Step) * Step;
-	const double Events = static_cast<double>(std::max(1, T.Events));
-	auto Xof = [&](double E) { return Plot.X + Plot.W * Nf(E / Events); };
-	auto Yof = [&](double V) { return Plot.Y + Plot.H * Nf((Hi - V) / (Hi - Lo)); };
-	// Gridlines and their labels (solid hairlines, one step off the panel).
-	for (double V = Lo; V <= Hi + Step * 0.5; V += Step)
-	{
-		const float Y = Yof(V);
-		C->FillRect({Plot.X, Y, Plot.W, 1.0f}, std::fabs(V) < Step * 0.01 ? StAxis : StGrid);
-		UI.Text(StAxisMoney(V), Plot.X - 10.0f, Y + 4.0f, Ts(11.0f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, true));
-	}
-	{
-		const double Xs = StNiceStep(Events, 5);
-		for (double E = 0.0; E <= Events + 0.5; E += Xs)
+		std::vector<std::pair<double, double>> Pts;
+		Pts.push_back({0.0, 0.0});
+		for (size_t K = 0; K < T.Curve.size(); ++K)
 		{
-			const float X = Xof(E);
-			C->FillRect({X, Plot.Y + Plot.H, 1.0f, 5.0f}, StAxis);
-			UI.Text(StAxisCount(E), X, Plot.Y + Plot.H + 20.0f, Ts(11.0f, 600, pal::Muted, Align::Center, Baseline::Alphabetic, true));
+			Pts.push_back({static_cast<double>((K + 1) * static_cast<size_t>(T.Stride)), static_cast<double>(T.Curve[K]) / 100.0});
 		}
-	}
-	// The worst downswing: a band from the peak to the bottom, named at the top (the note goes on with the others).
-	std::string DownText;
-	float DownX = 0.0f;
-	if (T.Downswing > 0 && T.DownTo > T.DownFrom)
-	{
-		const float X0 = Xof(T.DownFrom);
-		const float X1 = Xof(T.DownTo);
-		if (X1 - X0 >= 4.0f)
+		if (Pts.back().first < static_cast<double>(T.Events))
 		{
-			C->FillRect({X0, Plot.Y, X1 - X0, Plot.H}, NetA(StLoss, 0.07f * In));
-			C->FillRect({X0, Plot.Y, X1 - X0, 2.0f}, NetA(StLoss, 0.7f * In));
-			DownText = "Downswing " + std::string(StMinus) + StAmount(T.Downswing);
-			const float Lw0 = UI.Measure(DownText, 10.5f, 700);
-			DownX = std::min(std::max(X0 + (X1 - X0) / 2.0f - Lw0 / 2.0f, Plot.X + 8.0f), Plot.X + Plot.W - Lw0 - 8.0f);
+			Pts.push_back({static_cast<double>(T.Events), static_cast<double>(T.Net) / 100.0});
 		}
-	}
-	// The line, revealed left to right: teal above zero, red below, each with a light wash to the zero line.
-	{
-		std::vector<std::pair<float, double>> Path; // x, value (zero crossings put in)
-		for (size_t K = 0; K < Pts.size(); ++K)
+		double Lo = 0.0;
+		double Hi = 0.0;
+		for (const auto& Q : Pts)
 		{
-			if (K > 0 && ((Pts[K - 1].second < 0.0) != (Pts[K].second < 0.0)) && Pts[K - 1].second != 0.0 && Pts[K].second != 0.0)
+			Lo = std::min(Lo, Q.second);
+			Hi = std::max(Hi, Q.second);
+		}
+		Hi = std::max(Hi, static_cast<double>(T.Peak) / 100.0);
+		if (Hi - Lo < 1.0)
+		{
+			Hi = Lo + 1.0;
+		}
+		const double Step = StNiceStep((Hi - Lo) * 1.1, 4);
+		Lo = std::floor(Lo / Step) * Step;
+		Hi = std::ceil(Hi * 1.06 / Step) * Step;
+		const double Events = static_cast<double>(std::max(1, T.Events));
+		auto Xof = [&](double E) { return Plot.X + Plot.W * Nf(E / Events); };
+		auto Yof = [&](double V) { return Plot.Y + Plot.H * Nf((Hi - V) / (Hi - Lo)); };
+		// Gridlines and their labels (solid hairlines, one step off the panel).
+		for (double V = Lo; V <= Hi + Step * 0.5; V += Step)
+		{
+			const float Y = Yof(V);
+			C->FillRect({Plot.X, Y, Plot.W, 1.0f}, std::fabs(V) < Step * 0.01 ? StAxis : StGrid);
+			UI.Text(StAxisMoney(V), Plot.X - 10.0f, Y + 4.0f, Ts(11.0f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, true));
+		}
+		{
+			const double Xs = StNiceStep(Events, 5);
+			for (double E = 0.0; E <= Events + 0.5; E += Xs)
 			{
-				const double T0 = Pts[K - 1].second / (Pts[K - 1].second - Pts[K].second);
-				Path.push_back({Xof(Pts[K - 1].first + (Pts[K].first - Pts[K - 1].first) * T0), 0.0});
+				const float X = Xof(E);
+				C->FillRect({X, Plot.Y + Plot.H, 1.0f, 5.0f}, StAxis);
+				UI.Text(StAxisCount(E), X, Plot.Y + Plot.H + 20.0f, Ts(11.0f, 600, pal::Muted, Align::Center, Baseline::Alphabetic, true));
 			}
-			Path.push_back({Xof(Pts[K].first), Pts[K].second});
 		}
-		const float Y0 = Yof(0.0);
-		C->PushClip({Plot.X - 6.0f, Pg.Y, (Plot.W + 12.0f) * In, Pg.H});
-		std::vector<Vec2> Up{{Path.front().first, Y0}};
-		std::vector<Vec2> Down{{Path.front().first, Y0}};
-		for (const auto& Q : Path)
+		// The worst downswing: a band from the peak to the bottom, named at the top (the note goes on with the others).
+		std::string DownText;
+		float DownX = 0.0f;
+		if (T.Downswing > 0 && T.DownTo > T.DownFrom)
 		{
-			Up.push_back({Q.first, Yof(std::max(0.0, Q.second))});
-			Down.push_back({Q.first, Yof(std::min(0.0, Q.second))});
-		}
-		Up.push_back({Path.back().first, Y0});
-		Down.push_back({Path.back().first, Y0});
-		C->FillPolygon(Up, Paint::Linear({0.0f, Plot.Y}, {0.0f, Y0}, NetA(StProfit, 0.24f), NetA(StProfit, 0.02f)));
-		C->FillPolygon(Down, Paint::Linear({0.0f, Y0}, {0.0f, Plot.Y + Plot.H}, NetA(StLoss, 0.02f), NetA(StLoss, 0.24f)));
-		// The line in runs by sign.
-		std::vector<Vec2> Run;
-		bool Neg = Path.front().second < 0.0;
-		for (size_t K = 0; K < Path.size(); ++K)
-		{
-			const bool N = Path[K].second < 0.0 || (Path[K].second == 0.0 && K + 1 < Path.size() && Path[K + 1].second < 0.0);
-			const Vec2 P{Path[K].first, Yof(Path[K].second)};
-			if (!Run.empty() && N != Neg && Path[K].second == 0.0)
+			const float X0 = Xof(T.DownFrom);
+			const float X1 = Xof(T.DownTo);
+			if (X1 - X0 >= 4.0f)
 			{
+				C->FillRect({X0, Plot.Y, X1 - X0, Plot.H}, NetA(StLoss, 0.07f * In));
+				C->FillRect({X0, Plot.Y, X1 - X0, 2.0f}, NetA(StLoss, 0.7f * In));
+				DownText = "Downswing " + std::string(StMinus) + StAmount(T.Downswing);
+				const float Lw0 = UI.Measure(DownText, 10.5f, 700);
+				DownX = std::min(std::max(X0 + (X1 - X0) / 2.0f - Lw0 / 2.0f, Plot.X + 8.0f), Plot.X + Plot.W - Lw0 - 8.0f);
+			}
+		}
+		// The line, revealed left to right: teal above zero, red below, each with a light wash to the zero line.
+		{
+			std::vector<std::pair<float, double>> Path; // x, value (zero crossings put in)
+			for (size_t K = 0; K < Pts.size(); ++K)
+			{
+				if (K > 0 && ((Pts[K - 1].second < 0.0) != (Pts[K].second < 0.0)) && Pts[K - 1].second != 0.0 && Pts[K].second != 0.0)
+				{
+					const double T0 = Pts[K - 1].second / (Pts[K - 1].second - Pts[K].second);
+					Path.push_back({Xof(Pts[K - 1].first + (Pts[K].first - Pts[K - 1].first) * T0), 0.0});
+				}
+				Path.push_back({Xof(Pts[K].first), Pts[K].second});
+			}
+			const float Y0 = Yof(0.0);
+			C->PushClip({Plot.X - 6.0f, Pg.Y, (Plot.W + 12.0f) * In, Pg.H});
+			std::vector<Vec2> Up{{Path.front().first, Y0}};
+			std::vector<Vec2> Down{{Path.front().first, Y0}};
+			for (const auto& Q : Path)
+			{
+				Up.push_back({Q.first, Yof(std::max(0.0, Q.second))});
+				Down.push_back({Q.first, Yof(std::min(0.0, Q.second))});
+			}
+			Up.push_back({Path.back().first, Y0});
+			Down.push_back({Path.back().first, Y0});
+			C->FillPolygon(Up, Paint::Linear({0.0f, Plot.Y}, {0.0f, Y0}, NetA(StProfit, 0.24f), NetA(StProfit, 0.02f)));
+			C->FillPolygon(Down, Paint::Linear({0.0f, Y0}, {0.0f, Plot.Y + Plot.H}, NetA(StLoss, 0.02f), NetA(StLoss, 0.24f)));
+			// The line in runs by sign.
+			std::vector<Vec2> Run;
+			bool Neg = Path.front().second < 0.0;
+			for (size_t K = 0; K < Path.size(); ++K)
+			{
+				const bool N = Path[K].second < 0.0 || (Path[K].second == 0.0 && K + 1 < Path.size() && Path[K + 1].second < 0.0);
+				const Vec2 P{Path[K].first, Yof(Path[K].second)};
+				if (!Run.empty() && N != Neg && Path[K].second == 0.0)
+				{
+					Run.push_back(P);
+					C->StrokePolyline(Run, false, Neg ? StLoss : StProfit, 2.0f, true);
+					Run.clear();
+					Neg = N;
+				}
 				Run.push_back(P);
+			}
+			if (Run.size() >= 2)
+			{
 				C->StrokePolyline(Run, false, Neg ? StLoss : StProfit, 2.0f, true);
-				Run.clear();
-				Neg = N;
 			}
-			Run.push_back(P);
-		}
-		if (Run.size() >= 2)
-		{
-			C->StrokePolyline(Run, false, Neg ? StLoss : StProfit, 2.0f, true);
-		}
-		// The peak, the biggest score, the titles: marked where they happened (labels only where there is room).
-		const auto Dot = [&](float X, float Y, const Color& Col, float Rr) {
-			C->FillCircle(X, Y, Rr + 2.0f, StPanel);
-			C->FillCircle(X, Y, Rr, Col);
-		};
-		// Where the titles sit (their icons) and the downswing's note, so the other notes keep clear of them.
-		std::vector<Rect> Taken;
-		if (!DownText.empty())
-		{
-			Taken.push_back(StNote(*C, DownText, DownX, Plot.Y + 18.0f, true));
-		}
-		for (const world::Award& A : Awards)
-		{
-			if (A.Tourney > 0 && A.Tourney <= T.Events)
+			// The peak, the biggest score, the titles: marked where they happened (labels only where there is room).
+			const auto Dot = [&](float X, float Y, const Color& Col, float Rr) {
+				C->FillCircle(X, Y, Rr + 2.0f, StPanel);
+				C->FillCircle(X, Y, Rr, Col);
+			};
+			// Where the titles sit (their icons) and the downswing's note, so the other notes keep clear of them.
+			std::vector<Rect> Taken;
+			if (!DownText.empty())
 			{
-				const float X = Xof(A.Tourney);
-				const float Iy = std::max(Plot.Y + 14.0f, Yof(StNetAt(Pts, A.Tourney)) - 30.0f);
-				Taken.push_back({X - 16.0f, Iy - 16.0f, 32.0f, 32.0f});
+				Taken.push_back(StNote(*C, DownText, DownX, Plot.Y + 18.0f, true));
 			}
-		}
-		const auto Place = [&](const std::string& Text, float X, float Y, bool Above) {
-			const float Tw = C->Measure(Text, 10.5f, 700);
-			const float Lx = std::min(std::max(X - Tw / 2.0f, Plot.X + 8.0f), Plot.X + Plot.W - Tw - 8.0f);
-			const float Tries[2] = {Above ? Y - 12.0f : Y + 22.0f, Above ? Y + 22.0f : Y - 12.0f};
-			for (float Ly : Tries)
+			for (const world::Award& A : Awards)
 			{
-				if (Ly < Plot.Y + 14.0f || Ly > Plot.Y + Plot.H - 4.0f)
+				if (A.Tourney > 0 && A.Tourney <= T.Events)
+				{
+					const float X = Xof(A.Tourney);
+					const float Iy = std::max(Plot.Y + 14.0f, Yof(StNetAt(Pts, A.Tourney)) - 30.0f);
+					Taken.push_back({X - 16.0f, Iy - 16.0f, 32.0f, 32.0f});
+				}
+			}
+			const auto Place = [&](const std::string& Text, float X, float Y, bool Above) {
+				const float Tw = C->Measure(Text, 10.5f, 700);
+				const float Lx = std::min(std::max(X - Tw / 2.0f, Plot.X + 8.0f), Plot.X + Plot.W - Tw - 8.0f);
+				const float Tries[2] = {Above ? Y - 12.0f : Y + 22.0f, Above ? Y + 22.0f : Y - 12.0f};
+				for (float Ly : Tries)
+				{
+					if (Ly < Plot.Y + 14.0f || Ly > Plot.Y + Plot.H - 4.0f)
+					{
+						continue;
+					}
+					const Rect Box = StNote(*C, Text, Lx, Ly, false);
+					bool Clear = true;
+					for (const Rect& Q : Taken)
+					{
+						Clear = Clear && !StOverlap(Box, Q);
+					}
+					if (Clear)
+					{
+						StNote(*C, Text, Lx, Ly, true);
+						Taken.push_back(Box);
+						return;
+					}
+				}
+			};
+			float BestX = -1000.0f;
+			float BestY = 0.0f;
+			if (T.Best > 0 && T.BestAt > 0 && T.BestAt <= T.Events)
+			{
+				BestX = Xof(T.BestAt);
+				BestY = Yof(StNetAt(Pts, T.BestAt));
+				C->FillRect({BestX, BestY + 6.0f, 1.0f, std::max(0.0f, Plot.Y + Plot.H - BestY - 6.0f)}, NetA(StGold, 0.35f));
+				Dot(BestX, BestY, StGold, 4.5f);
+			}
+			if (T.Peak > 0 && T.PeakAt > 0 && std::fabs(Xof(T.PeakAt) - BestX) > 90.0f)
+			{
+				const float X = Xof(T.PeakAt);
+				const float Y = Yof(static_cast<double>(T.Peak) / 100.0);
+				Dot(X, Y, StInk, 3.5f);
+				Place("Peak " + StSigned(T.Peak), X, Y, true);
+			}
+			if (BestX > -1000.0f)
+			{
+				Place("Biggest score " + StAmount(T.Best), BestX, BestY, BestY < Plot.Y + Plot.H * 0.4f);
+			}
+			for (const world::Award& A : Awards)
+			{
+				if (A.Tourney <= 0 || A.Tourney > T.Events)
 				{
 					continue;
 				}
-				const Rect Box = StNote(*C, Text, Lx, Ly, false);
-				bool Clear = true;
-				for (const Rect& Q : Taken)
-				{
-					Clear = Clear && !StOverlap(Box, Q);
-				}
-				if (Clear)
-				{
-					StNote(*C, Text, Lx, Ly, true);
-					Taken.push_back(Box);
-					return;
-				}
+				const float X = Xof(A.Tourney);
+				const float Y = Yof(StNetAt(Pts, A.Tourney));
+				const float Iy = std::max(Plot.Y + 14.0f, Y - 30.0f);
+				C->FillRect({X, Iy + 10.0f, 1.0f, std::max(0.0f, Y - Iy - 14.0f)}, NetA(StGold, 0.6f));
+				Dot(X, Y, StGold, 3.5f);
+				eventart::Trophy(*C, A, X, Iy, 28.0f, Now);
 			}
-		};
-		float BestX = -1000.0f;
-		float BestY = 0.0f;
-		if (T.Best > 0 && T.BestAt > 0 && T.BestAt <= T.Events)
-		{
-			BestX = Xof(T.BestAt);
-			BestY = Yof(StNetAt(Pts, T.BestAt));
-			C->FillRect({BestX, BestY + 6.0f, 1.0f, std::max(0.0f, Plot.Y + Plot.H - BestY - 6.0f)}, NetA(StGold, 0.35f));
-			Dot(BestX, BestY, StGold, 4.5f);
-		}
-		if (T.Peak > 0 && T.PeakAt > 0 && std::fabs(Xof(T.PeakAt) - BestX) > 90.0f)
-		{
-			const float X = Xof(T.PeakAt);
-			const float Y = Yof(static_cast<double>(T.Peak) / 100.0);
-			Dot(X, Y, StInk, 3.5f);
-			Place("Peak " + StSigned(T.Peak), X, Y, true);
-		}
-		if (BestX > -1000.0f)
-		{
-			Place("Biggest score " + StAmount(T.Best), BestX, BestY, BestY < Plot.Y + Plot.H * 0.4f);
-		}
-		for (const world::Award& A : Awards)
-		{
-			if (A.Tourney <= 0 || A.Tourney > T.Events)
+			const float Ex = Path.back().first;
+			const float Ey = Yof(Path.back().second);
+			Dot(Ex, Ey, T.Net < 0 ? StLoss : StProfit, 4.5f);
+			C->PopClip();
+			if (In > 0.98f)
 			{
-				continue;
+				UI.Text(StSigned(T.Net), Ex + 12.0f, Ey + 5.0f, Ts(13.5f, 800, StInk));
 			}
-			const float X = Xof(A.Tourney);
-			const float Y = Yof(StNetAt(Pts, A.Tourney));
-			const float Iy = std::max(Plot.Y + 14.0f, Y - 30.0f);
-			C->FillRect({X, Iy + 10.0f, 1.0f, std::max(0.0f, Y - Iy - 14.0f)}, NetA(StGold, 0.6f));
-			Dot(X, Y, StGold, 3.5f);
-			eventart::Trophy(*C, A, X, Iy, 28.0f, Now);
 		}
-		const float Ex = Path.back().first;
-		const float Ey = Yof(Path.back().second);
-		Dot(Ex, Ey, T.Net < 0 ? StLoss : StProfit, 4.5f);
-		C->PopClip();
-		if (In > 0.98f)
+		// Hover: a crosshair that finds the nearest point, and what it says.
+		if (UI.Ptr.Active && UI.Hover(Plot) && CardOpen())
 		{
-			UI.Text(StSigned(T.Net), Ex + 12.0f, Ey + 5.0f, Ts(13.5f, 800, StInk));
+			const float Px = UI.Ptr.X;
+			size_t Near = 0;
+			for (size_t K = 1; K < Pts.size(); ++K)
+			{
+				Near = std::fabs(Xof(Pts[K].first) - Px) < std::fabs(Xof(Pts[Near].first) - Px) ? K : Near;
+			}
+			const float X = Xof(Pts[Near].first);
+			const float Y = Yof(Pts[Near].second);
+			C->FillRect({X, Plot.Y, 1.0f, Plot.H}, Hex(0x4a6280));
+			C->FillCircle(X, Y, 6.0f, StPanel);
+			C->FillCircle(X, Y, 4.5f, Pts[Near].second < 0.0 ? StLoss : StProfit);
+			StTip(*C, UI, X, Y, Pg, StSigned(static_cast<Chips>(std::llround(Pts[Near].second * 100.0))),
+				Near == 0 ? std::vector<std::string>{"The start"}
+					  : std::vector<std::string>{"After " + Grouped(static_cast<int64_t>(Pts[Near].first)) + " tournaments", "ABI " + StAmount(T.StretchAbi(Near - 1)) + " over that stretch"});
 		}
-	}
-	// Hover: a crosshair that finds the nearest point, and what it says.
-	if (UI.Ptr.Active && UI.Hover(Plot) && CardOpen())
-	{
-		const float Px = UI.Ptr.X;
-		size_t Near = 0;
-		for (size_t K = 1; K < Pts.size(); ++K)
-		{
-			Near = std::fabs(Xof(Pts[K].first) - Px) < std::fabs(Xof(Pts[Near].first) - Px) ? K : Near;
-		}
-		const float X = Xof(Pts[Near].first);
-		const float Y = Yof(Pts[Near].second);
-		C->FillRect({X, Plot.Y, 1.0f, Plot.H}, Hex(0x4a6280));
-		C->FillCircle(X, Y, 6.0f, StPanel);
-		C->FillCircle(X, Y, 4.5f, Pts[Near].second < 0.0 ? StLoss : StProfit);
-		StTip(*C, UI, X, Y, Pg, StSigned(static_cast<Chips>(std::llround(Pts[Near].second * 100.0))),
-			{Near == 0 ? std::string("The start") : "After " + Grouped(static_cast<int64_t>(Pts[Near].first)) + " tournaments"});
+
 	}
 
 	// ---------------------------------------------------------------- ROI by buy-in and by format
@@ -540,7 +571,9 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 		{
 			const world::TrackLine& L = Lines[Hovered];
 			StTip(*C, UI, UI.Ptr.X, UI.Ptr.Y, R, "ROI " + StSignedPct(Roi[static_cast<size_t>(Hovered)]),
-				{std::string(Long[Hovered]) + "  \xC2\xB7  " + Grouped(L.Events) + " tournaments", "ITM " + StPct(static_cast<double>(L.Cashes) / std::max(1, L.Events)) + "  \xC2\xB7  profit " + StSigned(L.Prizes - L.BuyIns)});
+				{std::string(Long[Hovered]) + "  \xC2\xB7  " + Grouped(L.Events) + " tournaments",
+					"ABI " + StAmount(L.BuyIns / std::max(1, L.Events)) + "  \xC2\xB7  ITM " + StPct(static_cast<double>(L.Cashes) / std::max(1, L.Events)),
+					"Profit " + StSigned(L.Prizes - L.BuyIns)});
 		}
 	};
 	Columns(Rs, "BY BUY-IN", StStakeNames, StStakeLong, T.ByStake.data(), world::TrackStakeCount);
@@ -613,6 +646,161 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 			UI.Text(Lines[K].first, Rc.X + 18.0f, Y, Ts(12.5f, 600, StSoft));
 			UI.Text(Lines[K].second, Rc.X + Rc.W - 18.0f, Y, Ts(12.5f, 800, StInk, Align::Right, Baseline::Alphabetic, false, Rc.W - 150.0f));
 		}
+	}
+}
+
+void RiverLine::StatsAbi(const world::Tracker& T, const Rect& Pg, const Rect& Plot, double Now)
+{
+	const float In = NetEase((Now - CardTabAt) / 0.9);
+	// The stretches: Stride tournaments each, and the unfinished one at the end.
+	struct Stretch
+	{
+		double From;
+		double To;
+		double Abi; // dollars
+	};
+	std::vector<Stretch> Parts;
+	const size_t Count = T.Curve.size() + (T.Events > static_cast<int>(T.Curve.size()) * T.Stride ? 1 : 0);
+	for (size_t K = 0; K < Count; ++K)
+	{
+		const double From = static_cast<double>(K * static_cast<size_t>(T.Stride));
+		const double To = std::min(static_cast<double>(T.Events), From + T.Stride);
+		Parts.push_back({From, To, static_cast<double>(T.StretchAbi(K)) / 100.0});
+	}
+	double Lo = 1e12;
+	double Hi = 0.0;
+	for (const Stretch& P : Parts)
+	{
+		Lo = std::min(Lo, std::max(0.1, P.Abi));
+		Hi = std::max(Hi, P.Abi);
+	}
+	if (Parts.empty())
+	{
+		return;
+	}
+	// A log scale: a career from $1 to $1,000 stays readable, and each stake gets its own band.
+	Lo = std::max(0.1, Lo / 1.6);
+	Hi = std::max(Lo * 4.0, Hi * 1.6);
+	const double L0 = std::log10(Lo);
+	const double L1 = std::log10(Hi);
+	const double Events = static_cast<double>(std::max(1, T.Events));
+	auto Xof = [&](double E) { return Plot.X + Plot.W * Nf(E / Events); };
+	auto Yof = [&](double V) { return Plot.Y + Plot.H * Nf((L1 - std::log10(std::max(0.1, V))) / (L1 - L0)); };
+	// The stakes, as bands: micro up to $5.50, low to $55, mid to $530, high above.
+	{
+		const double Edges[5] = {0.1, 5.5, 55.0, 530.0, 1e9};
+		const char* const Names[4] = {"MICRO", "LOW", "MID", "HIGH"};
+		for (int K = 0; K < 4; ++K)
+		{
+			const double A = std::max(Edges[K], Lo);
+			const double B = std::min(Edges[K + 1], Hi);
+			if (B <= A)
+			{
+				continue;
+			}
+			const float Ya = Yof(A);
+			const float Yb = Yof(B);
+			C->FillRect({Plot.X, Yb, Plot.W, Ya - Yb}, K % 2 == 0 ? Rgba(255, 255, 255, 0.025f) : Rgba(255, 255, 255, 0.0f));
+			if (Edges[K + 1] < Hi)
+			{
+				C->FillRect({Plot.X, Yb, Plot.W, 1.0f}, StAxis);
+			}
+			if (Ya - Yb >= 18.0f)
+			{
+				NetSpaced(*C, Names[K], Plot.X + 8.0f, Yb + 14.0f, 9.0f, 800, Hex(0x5b7290), 1.4f);
+			}
+		}
+	}
+	// Gridlines at clean amounts.
+	{
+		static const double Ticks[] = {0.25, 1.0, 2.5, 10.0, 25.0, 100.0, 250.0, 1000.0, 2500.0, 10000.0, 25000.0, 100000.0};
+		int Shown = 0;
+		for (double V : Ticks)
+		{
+			Shown += V >= Lo && V <= Hi ? 1 : 0;
+		}
+		int K = 0;
+		for (double V : Ticks)
+		{
+			if (V < Lo || V > Hi)
+			{
+				continue;
+			}
+			if (Shown > 6 && (K++ % 2) == 1)
+			{
+				continue;
+			}
+			const float Y = Yof(V);
+			C->FillRect({Plot.X, Y, Plot.W, 1.0f}, StGrid);
+			UI.Text(V < 1.0 ? "$" + Fixed(V, 2) : StAxisMoney(V), Plot.X - 10.0f, Y + 4.0f, Ts(11.0f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, true));
+		}
+		const double Xs = StNiceStep(Events, 5);
+		for (double E = 0.0; E <= Events + 0.5; E += Xs)
+		{
+			const float X = Xof(E);
+			C->FillRect({X, Plot.Y + Plot.H, 1.0f, 5.0f}, StAxis);
+			UI.Text(StAxisCount(E), X, Plot.Y + Plot.H + 20.0f, Ts(11.0f, 600, pal::Muted, Align::Center, Baseline::Alphabetic, true));
+		}
+	}
+	// The ABI, stretch by stretch: a stepped line with a light wash beneath, revealed left to right.
+	{
+		C->PushClip({Plot.X - 6.0f, Pg.Y, (Plot.W + 12.0f) * In, Pg.H});
+		std::vector<Vec2> Stair;
+		std::vector<Vec2> Area;
+		Area.push_back({Xof(Parts.front().From), Plot.Y + Plot.H});
+		for (const Stretch& P : Parts)
+		{
+			const float Y = Yof(P.Abi);
+			Stair.push_back({Xof(P.From), Y});
+			Stair.push_back({Xof(P.To), Y});
+			Area.push_back({Xof(P.From), Y});
+			Area.push_back({Xof(P.To), Y});
+		}
+		Area.push_back({Xof(Parts.back().To), Plot.Y + Plot.H});
+		C->FillPolygon(Area, Paint::Linear({0.0f, Plot.Y}, {0.0f, Plot.Y + Plot.H}, NetA(StBar, 0.22f), NetA(StBar, 0.02f)));
+		C->StrokePolyline(Stair, false, StBar, 2.0f, true);
+		// Their lifetime ABI, as a reference line.
+		const double Life = static_cast<double>(T.AverageBuyIn()) / 100.0;
+		if (Life >= Lo && Life <= Hi)
+		{
+			const float Y = Yof(Life);
+			C->FillRect({Plot.X, Y, Plot.W, 1.0f}, NetA(StGold, 0.55f));
+		}
+		const Vec2 End = Stair.back();
+		C->FillCircle(End.X, End.Y, 6.5f, StPanel);
+		C->FillCircle(End.X, End.Y, 4.5f, StBar);
+		C->PopClip();
+		if (In > 0.98f)
+		{
+			UI.Text(StAmount(T.StretchAbi(Parts.size() - 1)), End.X + 12.0f, End.Y + 5.0f, Ts(13.5f, 800, StInk));
+			if (Life >= Lo && Life <= Hi)
+			{
+				const float Y = Yof(Life);
+				const std::string Note = "Lifetime ABI " + StAmount(T.AverageBuyIn());
+				StNote(*C, Note, Plot.X + Plot.W * 0.5f - C->Measure(Note, 10.5f, 700) * 0.5f, Y < Plot.Y + 30.0f ? Y + 22.0f : Y - 8.0f, true);
+			}
+		}
+	}
+	// Hover: the stretch under the pointer.
+	if (UI.Ptr.Active && UI.Hover(Plot) && CardOpen())
+	{
+		const double E = static_cast<double>(UI.Ptr.X - Plot.X) / static_cast<double>(Plot.W) * Events;
+		size_t K = 0;
+		while (K + 1 < Parts.size() && Parts[K].To < E)
+		{
+			++K;
+		}
+		const Stretch& P = Parts[K];
+		const float X0 = Xof(P.From);
+		const float X1 = Xof(P.To);
+		C->FillRect({X0, Plot.Y, std::max(1.0f, X1 - X0), Plot.H}, Rgba(255, 255, 255, 0.05f));
+		const float Y = Yof(P.Abi);
+		C->FillRect({X0, Y - 1.0f, std::max(1.0f, X1 - X0), 3.0f}, Mix(StBar, Hex(0xffffff), 0.3f));
+		const Chips Cents = static_cast<Chips>(std::llround(P.Abi * 100.0));
+		const net::Tier Tr = net::TierOf(Cents);
+		const char* const TierNames[5] = {"Freerolls", "Micro stakes", "Low stakes", "Mid stakes", "High stakes"};
+		StTip(*C, UI, UI.Ptr.X, Y, Pg, "ABI " + StAmount(Cents),
+			{"Tournaments " + Grouped(static_cast<int64_t>(P.From) + 1) + "\xE2\x80\x93" + Grouped(static_cast<int64_t>(P.To)), TierNames[static_cast<int>(Tr)]});
 	}
 }
 

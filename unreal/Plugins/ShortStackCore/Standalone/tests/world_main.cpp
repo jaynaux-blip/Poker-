@@ -112,6 +112,12 @@ void Invariants(const world::World& W, const std::string& When)
 			}
 			Check(Lines == T.Events && T.Cashes <= T.Events && T.Wins <= T.FinalTables && static_cast<int>(T.Curve.size()) < world::Tracker::CurveMax && T.Net == T.Prizes - T.BuyIns,
 				When + ": " + N.Name + "'s stats page is consistent");
+			bool Rising = T.Spend.size() == T.Curve.size();
+			for (size_t K = 1; Rising && K < T.Spend.size(); ++K)
+			{
+				Rising = T.Spend[K] >= T.Spend[K - 1];
+			}
+			Check(Rising && (T.Spend.empty() || T.Spend.back() <= T.BuyIns + 100), When + ": " + N.Name + "'s ABI graph adds up");
 		}
 	}
 	Check(Active > 1000, When + ": the world emptied out (" + std::to_string(Active) + " active)");

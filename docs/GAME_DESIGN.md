@@ -119,13 +119,14 @@ The whole online career is played from a first-person desk. The apartment is the
     - ROI, ranked against the regulars with 200 or more tournaments ("Beats 81% of regulars");
     - ITM;
     - tournaments, wins and final tables;
-    - average buy-in and their usual stakes;
+    - ABI (average buy-in, every bullet counted);
     - average finish ("Top 43%" of the field).
   - **The profit graph:**
     - the running net over every tournament, teal above zero and red below, with a light wash to the zero line;
     - marked on it: the peak, the worst downswing (a shaded band with its size), the biggest score, and each bracelet and ring where it was won;
-    - hovering finds the nearest point and reads it out.
-  - **ROI by buy-in** (micro, low, mid and high online, then live) and **ROI by format** (regular, deepstack, turbo, hyper, bounty, satellite): columns up for a profit and down for a loss, with sample sizes; hovering adds ITM and profit.
+    - hovering finds the nearest point and reads it out, with the ABI over that stretch;
+    - a toggle switches the graph to **ABI**: their average buy-in stretch by stretch on a log scale, over shaded bands for micro (up to $5.50), low (to $55), mid (to $530) and high stakes, with their lifetime ABI as a reference line. It shows how they moved up (or back down) in stakes, and hovering names the stretch and its stakes.
+  - **ROI by buy-in** (micro, low, mid and high online, then live) and **ROI by format** (regular, deepstack, turbo, hyper, bounty, satellite): columns up for a profit and down for a loss, with sample sizes; hovering adds the ABI, ITM and profit.
   - **Finishes:**
     - ITM as a meter;
     - where the cashes finished: won, 2nd or 3rd, the rest of the final table, other cashes.

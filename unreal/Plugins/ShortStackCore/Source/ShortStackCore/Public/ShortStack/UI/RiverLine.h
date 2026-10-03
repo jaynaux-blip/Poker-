@@ -111,6 +111,8 @@ public:
 	bool CardOpen() const { return CardShown != -1; }
 	/** The open card's view (0: overview, 1: journey, 2: trophies, 3: stats). */
 	void ShowCardTab(int Tab) { CardTab = Tab; }
+	/** The stats page's big graph: 0 profit, 1 ABI. */
+	void ShowStatsGraph(int Graph) { StatsGraph = Graph; }
 	/** The event panel's tab: 0 overview, 1 payouts, 2 players (or the final table). */
 	void ShowEventTab(int Tab) { DetailTab = Tab; }
 	KastPage CurrentKastPage() const { return KastShown; }
@@ -214,6 +216,8 @@ private:
 	void StatsKpis(const world::Tracker& T, const Rect& R, double Now);
 	void StatsBoard(const world::Tracker& T, const std::vector<world::Award>& Awards, const Rect& R, double Now);
 	void StatsBrand(float X, float Y);
+	void StatsAbi(const world::Tracker& T, const Rect& Pg, const Rect& Plot, double Now);
+	int StatsGraph = 0; // 0 profit, 1 ABI
 	void HeroStatsCard(double Now);
 	int CardShown = -1;
 	double CardAt = 0.0;

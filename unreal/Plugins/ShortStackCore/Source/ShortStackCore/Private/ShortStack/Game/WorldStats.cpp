@@ -58,18 +58,34 @@ void Tracker::Add(Chips BuyIn, Chips Prize, int Place, int Field, int FinalSize,
 	if (Events % Stride == 0)
 	{
 		Curve.push_back(Net);
+		Spend.push_back(BuyIns);
 		if (static_cast<int>(Curve.size()) >= CurveMax)
 		{
 			std::vector<Chips> Half;
+			std::vector<Chips> HalfSpend;
 			Half.reserve(Curve.size() / 2);
 			for (size_t K = 1; K < Curve.size(); K += 2)
 			{
 				Half.push_back(Curve[K]);
+				HalfSpend.push_back(K < Spend.size() ? Spend[K] : BuyIns);
 			}
 			Curve.swap(Half);
+			Spend.swap(HalfSpend);
 			Stride *= 2;
 		}
 	}
+}
+
+Chips Tracker::StretchAbi(size_t K) const
+{
+	if (K > Curve.size() || K > Spend.size())
+	{
+		return AverageBuyIn();
+	}
+	const Chips Before = K == 0 ? 0 : Spend[K - 1];
+	const Chips After = K < Spend.size() ? Spend[K] : BuyIns;
+	const int Count = K < Curve.size() ? Stride : Events - static_cast<int>(Curve.size()) * Stride;
+	return Count > 0 ? (After - Before) / Count : 0;
 }
 
 TrackStake Sim::StakeOf(const Pending& P)
@@ -213,22 +229,35 @@ void Sim::SeedStats(Npc& N)
 	const int Segments = Points + (Events % T.Stride > 0 ? 1 : 0);
 	std::vector<double> Size;
 	std::vector<double> Weight;
+	std::vector<double> Stakes; // buy-ins per segment: most careers start smaller and move up, with spells back down
+	const double Start = R.Range(0.3, 0.8);
+	double Drift = 0.0;
 	for (int K = 0; K < Segments; ++K)
 	{
 		const double S = static_cast<double>(K < Points ? T.Stride : Events % T.Stride);
 		Size.push_back(S);
 		const double U = R.Next();
 		Weight.push_back(S * (0.35 + 4.0 * U * U * U * U * U));
+		const double Along = Segments > 1 ? static_cast<double>(K) / static_cast<double>(Segments - 1) : 1.0;
+		Drift = std::max(-0.35, std::min(0.35, Drift * 0.8 + R.Range(-0.12, 0.12)));
+		Stakes.push_back(S * std::max(0.1, Start + (1.0 - Start) * std::sqrt(Along) + Drift));
 	}
 	const Chips Best = std::min(T.Prizes, std::max(On.Best, Lv.Best));
 	const int BestSeg = R.Int(Segments);
-	const std::vector<Chips> Spent = Split<Chips>(T.BuyIns, Size);
+	const std::vector<Chips> Spent = Split<Chips>(T.BuyIns, Stakes);
+	// Prizes follow the stakes too (a score at $100 is bigger than one at $5).
+	for (size_t K = 0; K < Weight.size(); ++K)
+	{
+		Weight[K] *= Stakes[K] / std::max(1e-9, Size[K]);
+	}
 	std::vector<Chips> Won = Split<Chips>(T.Prizes - Best, Weight);
 	Won[static_cast<size_t>(BestSeg)] += Best;
 	Chips Run = 0;
+	Chips Paid = 0;
 	int At = 0;
 	for (int K = 0; K < Segments; ++K)
 	{
+		Paid += Spent[static_cast<size_t>(K)];
 		const int Before = At;
 		At += static_cast<int>(Size[static_cast<size_t>(K)]);
 		// Within a segment: the bleed first, then its prizes (the bottom of a swing is just before a score).
@@ -253,6 +282,7 @@ void Sim::SeedStats(Npc& N)
 		if (K < Points)
 		{
 			T.Curve.push_back(Run);
+			T.Spend.push_back(Paid);
 		}
 	}
 	T.Net = T.Prizes - T.BuyIns;

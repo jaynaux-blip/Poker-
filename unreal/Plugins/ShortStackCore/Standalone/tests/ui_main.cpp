@@ -1592,6 +1592,18 @@ void WorldScreens()
 		RL.UI.Ptr.Y = 560.0f;
 		Now = Run(S, RL, Now, 0.2);
 		Emit("world_card_stats_hover", RL, Now);
+		// The ABI view: how their buy-ins moved, against the stakes.
+		RL.UI.Ptr.Active = false;
+		RL.ShowStatsGraph(1);
+		Now = Run(S, RL, Now, 1.5);
+		Expect(T.Spend.size() == T.Curve.size() && (T.Spend.empty() || T.Spend.back() <= T.BuyIns), "the ABI graph has its points");
+		Emit("world_card_stats_abi", RL, Now);
+		RL.UI.Ptr.Active = true;
+		RL.UI.Ptr.X = 640.0f;
+		RL.UI.Ptr.Y = 560.0f;
+		Now = Run(S, RL, Now, 0.2);
+		Emit("world_card_stats_abi_hover", RL, Now);
+		RL.ShowStatsGraph(0);
 		RL.UI.Ptr.Active = false;
 		RL.ShowPlayer(-1, Now);
 	}

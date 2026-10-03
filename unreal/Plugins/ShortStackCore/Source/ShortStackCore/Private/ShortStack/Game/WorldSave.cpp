@@ -230,15 +230,18 @@ void WriteTracker(Line& L, const Tracker& T)
 	}
 	L << I(T.Stride) << I(T.Net) << I(T.Peak) << I(T.PeakAt) << I(T.Downswing) << I(T.DownFrom) << I(T.DownTo) << I(T.Best) << I(T.BestAt) << I(T.Dry) << I(T.LongestDry)
 	  << D(T.FinishSum) << I(T.Finished);
-	std::string Steps;
-	long long Last = 0;
-	for (size_t K = 0; K < T.Curve.size(); ++K)
-	{
-		const long long Dollars = (T.Curve[K] >= 0 ? T.Curve[K] + 50 : T.Curve[K] - 50) / 100;
-		Steps += (K > 0 ? "~" : "") + I(Dollars - Last);
-		Last = Dollars;
-	}
-	L << Steps;
+	const auto Steps = [](const std::vector<Chips>& V) {
+		std::string Out;
+		long long Last = 0;
+		for (size_t K = 0; K < V.size(); ++K)
+		{
+			const long long Dollars = (V[K] >= 0 ? V[K] + 50 : V[K] - 50) / 100;
+			Out += (K > 0 ? "~" : "") + I(Dollars - Last);
+			Last = Dollars;
+		}
+		return Out;
+	};
+	L << Steps(T.Curve) << Steps(T.Spend);
 }
 
 void ReadTracker(Cursor& C, Tracker& T)
@@ -278,13 +281,26 @@ void ReadTracker(Cursor& C, Tracker& T)
 	T.LongestDry = C.Small();
 	T.FinishSum = C.Dbl();
 	T.Finished = C.Small();
-	long long Run = 0;
-	for (const std::string& Step : Split(C.At < C.V.size() ? C.V[C.At] : std::string(), '~'))
+	const auto Steps = [&](std::vector<Chips>& Out) {
+		long long Run = 0;
+		for (const std::string& Step : Split(C.At < C.V.size() ? C.V[C.At] : std::string(), '~'))
+		{
+			Run += std::strtoll(Step.c_str(), nullptr, 10);
+			Out.push_back(static_cast<Chips>(Run * 100));
+		}
+		++C.At;
+	};
+	Steps(T.Curve);
+	Steps(T.Spend);
+	if (T.Spend.size() != T.Curve.size())
 	{
-		Run += std::strtoll(Step.c_str(), nullptr, 10);
-		T.Curve.push_back(static_cast<Chips>(Run * 100));
+		// Pages saved before the ABI graph: their buy-ins spread evenly.
+		T.Spend.clear();
+		for (size_t K = 0; K < T.Curve.size(); ++K)
+		{
+			T.Spend.push_back(T.Events > 0 ? T.BuyIns * static_cast<Chips>((K + 1) * static_cast<size_t>(T.Stride)) / T.Events : 0);
+		}
 	}
-	++C.At;
 }
 } // namespace worldsave_detail
 

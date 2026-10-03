@@ -149,6 +149,8 @@ The LED room kit is polled rather than pushed: call `Session::RoomGlow(Now)` eve
 - **Stats pages:**
   - `Npc::Stats` (and `Profile::Stats`) is a `world::Tracker`: totals, ROI and ITM, breakdowns by buy-in (`TrackStake`) and format (`TrackFormat`), finishes, records (peak, downswing, biggest score, dry runs, average finish), and the profit graph.
   - The graph is at most 64 points; when it fills, every other point goes and the stride doubles.
+  - `Tracker::Spend` keeps the buy-ins at each point, for the ABI graph. `Tracker::StretchAbi(K)` is the ABI over the K-th stretch.
+  - `RiverLine::ShowStatsGraph(1)` shows the ABI view.
   - `Sim::Apply` adds every online and live tournament (every bullet; satellite seats at their value). `World::HeroFinished` adds the player's to `World::HeroStats`.
   - `Sim::SeedStats` draws a regular's history before Night One from their lifetime ledgers, with an RNG seeded by their name (the world's own dice never move). It runs when someone joins, and on loading a save from before stats pages.
   - `World::RoiRank` places an ROI among the regulars.
@@ -176,13 +178,14 @@ The LED room kit is polled rather than pushed: call `Session::RoomGlow(Now)` eve
   - Saves from before newcomers read as old hands with empty journeys.
 - **Stats data:**
   - A `track` line holds each person's stats page, and `herotrack` holds the player's.
-  - The graph's points are written in dollars, as steps from the previous point.
+  - The graph's points (net, then buy-ins) are written in dollars, as steps from the previous point.
+  - Pages saved before the ABI graph spread their buy-ins evenly.
 - **Trophy data:**
   - An `awards` line holds a person's bracelets and rings, and a `heroawards` line holds the player's.
   - Saves from before trophy cases fill them from the titles in history; anything left is a plain bracelet or ring.
 - **Size and cost:**
   - Recent results are kept for 8 days (majors for 400 days), and long-gone retirees fold into `ghost` lines.
-  - A save is about 2.6 MB after a month, 3.8 MB after a year and 6.3 MB after ten years (about a third of it is the stats pages).
+  - A save is about 2.9 MB after a month, 4.1 MB after a year and 6.7 MB after ten years (about a third of it is the stats pages).
   - The session rewrites the world text only when something involving the player changed, or once an in-game hour has passed.
 
 **Nights away from the desk**
@@ -232,7 +235,7 @@ On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio
   - four event-art sheets: every glyph, every schedule tile, the series' crests, and series events in each metal, including Main Events, bracelets, rings and high rollers;
   - two award sheets: every bracelet and ring design, and champions' frames at card, seat and board sizes;
   - the champions: the biggest winner's card and TROPHIES tab, the boards with champions' frames, a bracelet and a ring winner at the player's table, and the player's trophy case on the Career page;
-  - RiverLine Stats: a champion's STATS tab (and the same tab hovering the graph), the network's biggest winner's, and the player's own from the Career page.
+  - RiverLine Stats: a champion's STATS tab (hovering the graph, then the ABI view, also hovered), the network's biggest winner's, and the player's own from the Career page.
 - `monkey_test`: random clicks and keys across every screen while it sits down at random events (up to four tables at once) and winds the sitting down to its results, about 15 s. It also shops on GearDrop, goes live on Kast and works the studio (ads, answers, timeouts, mods), changes the schedule, sometimes ends a stream with a raid, and changes the LED kit's colour, power and sync. Every frame it checks that the bankroll only moves through the ledger, tournament chips are conserved, the clock never runs backwards, no table stalls, saves round-trip, nobody streams without the PC upgrade, the stream's numbers stay in range, the community stays in its ranges (loyalty, affinity, stage, schedule), and the room's lights match the kit and its settings. `./build/monkey_test 40 30000` runs a longer sweep.
 - `living_world` (`world_test`): first the online calendar:
   - nine series a year from 2027 to 2040, none overlapping;
@@ -240,7 +243,7 @@ On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio
   - every series event name and every template id is used once;
   - RCOP seats carry over to every year's Main Event, and leap days are on the calendar.
 
-  Then a world is created and played for a month, about 1.5 s. It checks that newcomers arrive in different ways, with journeys that start the day they joined and cards that tell them. It also checks every person (no negative bankrolls, skills and stakes in range, sane ledgers, at most seven ties, a trophy case that matches their bracelet and ring counts, a stats page whose tournaments, buy-ins and prizes match their ledgers), that tonight's events have the world's regulars registered, that final tables mix regulars and unknowns, that the rival keeps the network's index, that a night at Dee's leaves memories, that a saved world writes the same save (the trophy cases included) and plays on exactly as the original, and that an older save without trophy cases fills them in. `world_test years <n> [seed]` runs the long check above (it also fails if any Championship Online bracelet has no winner in the history), and `world_test npc <name> [days]` prints one person's career.
+  Then a world is created and played for a month, about 1.5 s. It checks that newcomers arrive in different ways, with journeys that start the day they joined and cards that tell them. It also checks every person (no negative bankrolls, skills and stakes in range, sane ledgers, at most seven ties, a trophy case that matches their bracelet and ring counts, a stats page whose tournaments, buy-ins and prizes match their ledgers, an ABI graph whose buy-ins only rise), that tonight's events have the world's regulars registered, that final tables mix regulars and unknowns, that the rival keeps the network's index, that a night at Dee's leaves memories, that a saved world writes the same save (the trophy cases included) and plays on exactly as the original, and that an older save without trophy cases fills them in. `world_test years <n> [seed]` runs the long check above (it also fails if any Championship Online bracelet has no winner in the history), and `world_test npc <name> [days]` prints one person's career.
 - `audio_test`: every synthesized sound is audible, finite and in range.
 
 To look at the UI without Unreal:
