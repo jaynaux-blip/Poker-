@@ -706,7 +706,7 @@ void ANightOneGameMode::ApplySettings(const ss::ui::GameSettings& NewSettings, b
 	if (UGameUserSettings* User = GEngine ? GEngine->GetGameUserSettings() : nullptr)
 	{
 		User->SetOverallScalabilityLevel(FMath::Clamp(NewSettings.Quality, 0, 4));
-		User->SetResolutionScaleValueEx(static_cast<float>(NewSettings.ResolutionScale));
+		User->SetResolutionScaleValueEx(static_cast<float>(FMath::Min(NewSettings.ResolutionScale, 100)));
 		User->SetFrameRateLimit(static_cast<float>(NewSettings.FrameRateLimit));
 		User->SetVSyncEnabled(NewSettings.VSync);
 		if (GIsEditor)
@@ -722,6 +722,8 @@ void ANightOneGameMode::ApplySettings(const ss::ui::GameSettings& NewSettings, b
 			User->ApplySettings(false);
 		}
 	}
+	// The render scale: fixed, or moving to hold the chosen frame rate (FrameBudget.h).
+	FrameBudget.Configure(NewSettings.DynamicTarget, NewSettings.ResolutionScale);
 	// Hardware ray-traced Lumen (the project enables ray tracing support); hit lighting for reflections at Cinematic.
 	SetConsoleInt(TEXT("r.Lumen.HardwareRayTracing"), NewSettings.RayTracing ? 1 : 0);
 	SetConsoleInt(TEXT("r.Lumen.HardwareRayTracing.LightingMode"), NewSettings.RayTracing && NewSettings.Quality >= 4 ? 2 : 0);
@@ -941,6 +943,7 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	}
 	const bool bBeat = Audio && Audio->ConsumeBeat();
 	Game->Saver.Tick();
+	FrameBudget.Tick(static_cast<float>(Dt));
 	ss::Session& S = Game->Session;
 	if (!bPaused)
 	{

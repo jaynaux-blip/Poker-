@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FrameBudget.h"
 #include "SlateDrawList.h"
 #include "GameFramework/GameModeBase.h"
 #include "NightOneGame.h"
@@ -79,6 +80,8 @@ public:
 	void TestClick(float X, float Y);
 	/** The size of each screen's last draw list (the menu, the laptop, the phone, the two monitors). */
 	FDrawListHint MenuHint, ClientHint, PhoneHint, MonitorHint[2];
+	/** Dynamic resolution (FrameBudget.h). */
+	FFrameBudget FrameBudget;
 	/** A key, as the player's keyboard sends it ("f", "c", "r", "a", "ArrowUp", " " to lean...). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	void TestKey(const FString& Key);

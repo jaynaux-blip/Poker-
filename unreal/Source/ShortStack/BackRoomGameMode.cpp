@@ -1042,6 +1042,7 @@ void ABackRoomGameMode::StartPlay()
 			A->SetMix(Settings.MasterVolume / 100.0f, Settings.EffectsVolume / 100.0f, Settings.AmbienceVolume / 100.0f);
 		}
 		FApp::SetUnfocusedVolumeMultiplier(Settings.BackgroundAudio ? 1.0f : 0.0f);
+		FrameBudget.Configure(Settings.DynamicTarget, Settings.ResolutionScale);
 	}
 	if (bCareer)
 	{
@@ -1435,6 +1436,7 @@ FString ABackRoomGameMode::GoodbyeLine() const
 void ABackRoomGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	FrameBudget.Tick(DeltaSeconds);
 	const float RealDt = FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
 	if (!IsCareer() || !Table)
 	{

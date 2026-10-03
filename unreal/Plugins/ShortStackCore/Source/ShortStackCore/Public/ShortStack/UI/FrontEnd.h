@@ -15,7 +15,8 @@ struct GameSettings
 	// Graphics
 	int Quality = 3;             // 0 Low, 1 Medium, 2 High, 3 Epic, 4 Cinematic
 	bool RayTracing = true;      // hardware ray-traced global illumination and reflections
-	int ResolutionScale = 100;   // percent of the output resolution; temporal upscaling fills the rest
+	int ResolutionScale = 100;   // percent of the output resolution (over 100 supersamples); with dynamic resolution, the most it renders
+	int DynamicTarget = 60;      // frames per second the render scale moves to hold (0: a fixed resolution scale)
 	int FrameRateLimit = 0;      // frames per second, 0 = unlimited
 	bool VSync = false;
 	bool MotionBlur = false;

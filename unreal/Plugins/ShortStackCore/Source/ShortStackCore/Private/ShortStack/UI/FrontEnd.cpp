@@ -234,6 +234,7 @@ std::string GameSettings::Serialize() const
 	Put("quality", Quality);
 	Put("raytracing", RayTracing ? 1 : 0);
 	Put("resolutionscale", ResolutionScale);
+	Put("dynres", DynamicTarget);
 	Put("fpslimit", FrameRateLimit);
 	Put("vsync", VSync ? 1 : 0);
 	Put("motionblur", MotionBlur ? 1 : 0);
@@ -280,7 +281,8 @@ bool GameSettings::Parse(const std::string& Text, GameSettings& Out)
 		const int N = std::atoi(Value.c_str());
 		if (Name == "quality") S.Quality = std::clamp(N, 0, 4);
 		else if (Name == "raytracing") S.RayTracing = N != 0;
-		else if (Name == "resolutionscale") S.ResolutionScale = std::clamp(N, 50, 100);
+		else if (Name == "resolutionscale") S.ResolutionScale = std::clamp(N, 50, 150);
+		else if (Name == "dynres") S.DynamicTarget = N <= 0 ? 0 : std::clamp(N, 30, 240);
 		else if (Name == "fpslimit") S.FrameRateLimit = std::clamp(N, 0, 1000);
 		else if (Name == "vsync") S.VSync = N != 0;
 		else if (Name == "motionblur") S.MotionBlur = N != 0;
@@ -738,8 +740,23 @@ std::vector<FrontEnd::SettingRow> FrontEnd::Rows(int ForTab)
 			"Hardware ray tracing for global illumination and reflections: neon and screen light bouncing around the room, true reflections in the wet glass and on the desk. Needs a ray-tracing GPU.",
 			3, OffOn, [&S] { return S.RayTracing ? 1 : 0; }, [&S](int V) { S.RayTracing = V != 0; });
 		Slider("Resolution scale",
-			"Renders fewer pixels and rebuilds the rest with temporal super resolution. Lower it for a higher frame rate; 100% is native.",
-			2, 50, 100, 5, "%", [&S] { return S.ResolutionScale; }, [&S](int V) { S.ResolutionScale = V; });
+			"How many pixels are rendered; temporal super resolution rebuilds the full image from them. 100% is native, above 100% renders more and scales down for an even cleaner picture. With dynamic resolution on, this is the most it renders.",
+			2, 50, 150, 5, "%", [&S] { return S.ResolutionScale; }, [&S](int V) { S.ResolutionScale = V; });
+		static const int Targets[] = {0, 60, 90, 120, 144};
+		Choice("Dynamic resolution",
+			"Holds a frame rate by rendering a little less in the heaviest scenes (the Back Room's lamp, smoke and five heads of hair) and the full resolution scale everywhere else. Off keeps the resolution scale fixed.",
+			2, {"OFF", "60 FPS", "90 FPS", "120 FPS", "144 FPS"},
+			[&S] {
+				for (int I = 0; I < 5; ++I)
+				{
+					if (Targets[I] == S.DynamicTarget)
+					{
+						return I;
+					}
+				}
+				return 1;
+			},
+			[&S](int V) { S.DynamicTarget = Targets[V]; });
 		static const int Caps[] = {30, 60, 120, 144, 165, 240, 0};
 		Choice("Frame rate limit", "Caps the frame rate. Match your monitor's refresh rate for smooth, even frames.", -1, {"30", "60", "120", "144", "165", "240", "UNLIMITED"},
 			[&S] {

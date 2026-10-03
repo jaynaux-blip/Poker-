@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FrameBudget.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/HUD.h"
 #include "GameFramework/Pawn.h"
@@ -202,6 +203,8 @@ public:
 	virtual void RestartPlayer(AController* NewPlayer) override;
 	virtual void StartPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
+	/** Dynamic resolution, as the player set it in the apartment's menus (FrameBudget.h). */
+	FFrameBudget FrameBudget;
 
 	UPROPERTY(Transient)
 	TObjectPtr<ABackRoomStage> Stage;
