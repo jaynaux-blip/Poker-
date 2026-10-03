@@ -95,6 +95,15 @@ struct LiveEntry
 	int Place = 0;
 	Chips PrizeCents = 0;
 	double FinishedAt = 0.0;
+	/**
+	 * The night so far, for a game closed in the middle of it (cleared once settled): when the player got to the room
+	 * (world minutes, 0 until they did), where the tournament stood after the last hand they saw (Tournament::Checkpoint,
+	 * empty before the first), the world clock then, and what the room keeps of its own (the host's text).
+	 */
+	double ArrivedAt = 0.0;
+	std::string Checkpoint;
+	double CheckpointAt = 0.0;
+	std::string CheckpointHost;
 };
 
 /** Rent stages. */

@@ -171,6 +171,11 @@ std::string SaveData::Serialize() const
 		{
 			Out << "liveboard\t" << session_detail::Escape(E.Id) << "\t" << session_detail::Escape(B) << "\n";
 		}
+		if (E.ArrivedAt > 0.0)
+		{
+			Out << "livecheck\t" << session_detail::Escape(E.Id) << "\t" << Fixed(E.ArrivedAt, 2) << "\t" << Fixed(E.CheckpointAt, 3) << "\t"
+				<< session_detail::Escape(E.Checkpoint) << "\t" << session_detail::Escape(E.CheckpointHost) << "\n";
+		}
 	}
 	for (const auto& Rd : L.Reads)
 	{
@@ -419,6 +424,20 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 				if (E.Id == Id)
 				{
 					E.Board.push_back(session_detail::Unescape(P[2]));
+				}
+			}
+		}
+		else if (P.size() == 6 && P[0] == "livecheck")
+		{
+			const std::string Id = session_detail::Unescape(P[1]);
+			for (life::LiveEntry& E : D.Life.LiveEntries)
+			{
+				if (E.Id == Id)
+				{
+					E.ArrivedAt = std::atof(P[2].c_str());
+					E.CheckpointAt = std::atof(P[3].c_str());
+					E.Checkpoint = session_detail::Unescape(P[4]);
+					E.CheckpointHost = session_detail::Unescape(P[5]);
 				}
 			}
 		}
@@ -2988,6 +3007,35 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 	return Hooks.GoOut(O.Id, O.T->BuyInCents) ? "" : "Can't get there right now.";
 }
 
+std::string Session::LiveInProgress() const
+{
+	// Registered, in the room, not home: the game closed during the night (the room settles an entry the moment the
+	// player leaves it, busts or wins). Abandoned nights were resolved when the session loaded.
+	for (const life::LiveEntry& E : Life.LiveEntries)
+	{
+		if (E.State == life::LiveEntry::Registered && E.ArrivedAt > 0.0 && E.FareThere && !E.FareHome && live::FindOccurrence(E.Id).Valid())
+		{
+			return E.Id;
+		}
+	}
+	return std::string();
+}
+
+std::string Session::ResumeLive()
+{
+	const std::string Id = LiveInProgress();
+	if (Id.empty())
+	{
+		return "Nothing to go back to.";
+	}
+	if (Stream.Live)
+	{
+		EndStream();
+	}
+	const live::Occurrence O = live::FindOccurrence(Id);
+	return Hooks.GoOut(Id, O.T->BuyInCents) ? "" : "Can't get there right now.";
+}
+
 void Session::ResolveAbandonedLive()
 {
 	// The night the game closed on: the seat was dealt in without the player until it was blinded away (the
@@ -3009,6 +3057,12 @@ void Session::ResolveAbandonedLive()
 			Known.push_back(P);
 		}
 		std::unique_ptr<Tournament> Night = live::MakeField(O, E.Entrants, HeroName, live::SeedFor(E, HeroName), Known);
+		// From the last hand the player saw, if they got that far (a checkpoint that doesn't fit leaves the field as drawn).
+		if (!E.Checkpoint.empty())
+		{
+			Night->Restore(E.Checkpoint);
+		}
+		Night->HeroAway = false;
 		Night->HeroSitsOut = true;
 		int Place = 0;
 		Chips Prize = 0;

@@ -850,6 +850,12 @@ void ANightOneGameMode::Begin(const FString& Name)
 	Game->Session.Save();
 	ReturnInputToGame();
 	UE_LOG(LogNightOne, Log, TEXT("Night One started as %s"), *Clean);
+	// The game closed during a night at the Riverside: straight back to the seat.
+	if (!Game->Session.LiveInProgress().empty())
+	{
+		UE_LOG(LogNightOne, Log, TEXT("Back to %s, in progress"), UTF8_TO_TCHAR(Game->Session.LiveInProgress().c_str()));
+		Game->Session.ResumeLive();
+	}
 }
 
 bool ANightOneGameMode::GoOut(const FString& ActivityId, int64 BuyInCents)

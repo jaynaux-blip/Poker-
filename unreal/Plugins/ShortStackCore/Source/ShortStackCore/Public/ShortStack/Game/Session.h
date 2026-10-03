@@ -440,6 +440,10 @@ public:
 	 * world has for it, pays the bus and heads out. Registering again for an event already entered just goes back.
 	 */
 	SHORTSTACKCORE_API std::string GoToLive(const std::string& OccurrenceId);
+	/** The live tournament the player is in the middle of (the game closed during it): its occurrence id, or empty. */
+	SHORTSTACKCORE_API std::string LiveInProgress() const;
+	/** Back to that tournament's room, straight to the seat (no bus, nothing dealt without them while the game was closed). */
+	SHORTSTACKCORE_API std::string ResumeLive();
 	SHORTSTACKCORE_API bool PayRent();
 	SHORTSTACKCORE_API bool PayDebt();
 	SHORTSTACKCORE_API life::Context LifeContext() const;

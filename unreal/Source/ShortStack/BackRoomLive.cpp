@@ -152,6 +152,13 @@ bool ABackRoomGameMode::LoadLive()
 		UE_LOG(LogRiverside, Warning, TEXT("%s is already settled: practice table."), *Event);
 		return false;
 	}
+	// Back after the game closed during the night (the entry says the player got here): no bus this time, and
+	// nothing was dealt while the game was closed.
+	bBackInRoom = Entry->ArrivedAt > 0.0;
+	if (bBackInRoom)
+	{
+		LeftHomeAt = Entry->ArrivedAt - ss::live::TravelMinutes;
+	}
 	Save = D;
 	LiveEntryId = Str(O.Id);
 	LiveName = Str(O.T->Name);
@@ -183,7 +190,24 @@ bool ABackRoomGameMode::LoadLive()
 	Tourney = MakeShareable(ss::live::MakeField(O, FMath::Max(Entry->Entrants, 2), D->HeroName, ss::live::SeedFor(*Entry, D->HeroName), Known).release());
 	HeroBuyInChips = Tourney->Spec.StartingStack;
 	ABackRoomChips::ChipUnit = 100;
+	LiveSaver = MakeShared<FCareerSaver>();
+	if (bBackInRoom && !Entry->Checkpoint.empty())
 	{
+		// The room as it stood after the last hand the player saw.
+		bResumed = Tourney->Restore(Entry->Checkpoint);
+		if (bResumed)
+		{
+			Minutes = FMath::Max(Minutes, Entry->CheckpointAt);
+			ReadLiveHost(Str(Entry->CheckpointHost));
+			LastCheckpoint = Entry->Checkpoint;
+			LastCheckpointAt = Entry->CheckpointAt;
+		}
+		UE_CLOG(!bResumed, LogRiverside, Warning, TEXT("%s: the checkpoint doesn't fit the field; the night starts over"), *LiveName);
+	}
+	if (!bBackInRoom)
+	{
+		// Here: the entry remembers it (a game closed from now on comes back to this room).
+		Entry->ArrivedAt = Minutes;
 		ss::SaveData Arrived = *Save;
 		Arrived.ClockMinutes = Minutes - ss::net::MinutesPerDay * ss::net::NightOneDay;
 		CareerSave::SaveNow(Arrived.Serialize());
@@ -192,6 +216,8 @@ bool ABackRoomGameMode::LoadLive()
 	ArrivalDayText = FString::Printf(TEXT("%s   %s"), WeekdayName(LiveDay), *FString(UTF8_TO_TCHAR(ss::net::DateLabel(LiveDay).c_str())));
 	UE_LOG(LogRiverside, Log, TEXT("%s: %d entrants (%d the world follows), pool %lld cents, %d paid; bankroll %lld; arriving %s"), *LiveName, Tourney->Spec.Entrants,
 		static_cast<int32>(Known.size()), static_cast<int64>(Tourney->PrizePoolCents), Tourney->PaidPlaces(), StartBankrollCents, *ClockLabel());
+	UE_CLOG(bBackInRoom, LogRiverside, Log, TEXT("Back in the room%s: hand %d, level %d, %d left, stack %lld, %d hands played%s"), bResumed ? TEXT(" from the checkpoint") : TEXT(""),
+		Tourney->Tick, Tourney->LevelIndex + 1, Tourney->Remaining, static_cast<int64>(Tourney->Hero().Stack), HandsPlayed, bResumeDealt ? TEXT(", the dealt hand is dead") : TEXT(""));
 	return true;
 }
 
@@ -217,7 +243,7 @@ void ABackRoomGameMode::SeatLive()
 	// Late: the field has played the levels you missed. Inside late registration your seat waits with a full stack;
 	// after it (back to an entry you'd left), the seat was dealt in without you, and the blinds took their share.
 	const double SitAt = Minutes + 2.0;
-	if (SitAt > CardsAt)
+	if (SitAt > CardsAt && !bResumed)
 	{
 		const bool bReturning = SitAt > LiveLateRegEnds;
 		const int32 Missed = FMath::FloorToInt((SitAt - CardsAt) * 60.0 / Tourney->Spec.SecondsPerHand);
@@ -232,10 +258,46 @@ void ABackRoomGameMode::SeatLive()
 		UE_LOG(LogRiverside, Log, TEXT("%s: %d hands played without you, level %d, %d left"), bReturning ? TEXT("Back after leaving") : TEXT("Late registration"), Missed,
 			Tourney->LevelIndex + 1, Tourney->Remaining);
 	}
+	// The hand that was dealt when the game closed is dead: the player's cards go in the muck (checked through when it's
+	// free), the room plays it out, and the night goes on from the next hand. Nobody sees the same deck twice.
+	std::vector<ss::TEvent> DeadHand;
+	if (bResumed && bResumeDealt && !Tourney->Hero().Busted && !Tourney->bFinished)
+	{
+		Tourney->HeroSitsOut = true;
+		DeadHand = Tourney->SimulateTick();
+		Tourney->HeroSitsOut = false;
+		Minutes = FMath::Max(Minutes, LiveDayStart + Tourney->ClockMinutes());
+	}
+	if (bResumed)
+	{
+		// Where the night stands: the stage, hand for hand, what the player already knew of the regulars.
+		bFinalTable = Tourney->Tables.size() == 1;
+		bHandForHand = Tourney->HandForHand();
+		bAnnouncedStart = true;
+		for (const TPair<FString, int32>& R : ResumeReads)
+		{
+			Table->Reads.Add(R.Key, R.Value);
+		}
+		RaiseBanner(FString::Printf(TEXT("LEVEL %d   %s / %s   %d LEFT"), Tourney->LevelIndex + 1, *Num(Tourney->CurrentLevel().Sb), *Num(Tourney->CurrentLevel().Bb), Tourney->Remaining));
+	}
 	ArrivalDayText = FString::Printf(TEXT("%s, %s   %s"), WeekdayName(LiveDay), *FString(UTF8_TO_TCHAR(ss::net::DateLabel(LiveDay).c_str())), *ClockLabel().RightChop(5));
+	// The night as it stands before the first hand here is dealt (so even that hand is never dealt twice).
+	LiveCheckpoint(false);
 	// The first table, seated before you get there; the room placed round it, the rest of the room at theirs.
 	Table->PrepareNext();
 	Table->TakeEvents();
+	for (const ss::TEvent& E : DeadHand)
+	{
+		LiveEvent(E);
+	}
+	if (bOnBreak)
+	{
+		Table->Hold();
+	}
+	if (bFinalTable && Stage)
+	{
+		Stage->SetOnAir(true);
+	}
 	if (Stage)
 	{
 		Stage->SetRoomAnchor(SlotForTable(Tourney->Hero().TableId));
@@ -775,6 +837,8 @@ void ABackRoomGameMode::LiveNote(uint8 Note)
 	{
 	case EBackRoomTableNote::HandEnded:
 		++HandsPlayed;
+		// Saved once the room has heard this hand's news (a break, a move): LiveTick, next.
+		bCheckpointDue = true;
 		if (bHandForHand && !Tourney->InTheMoney())
 		{
 			// The other tables are still playing their hand: everyone waits for the floor.
@@ -795,8 +859,113 @@ void ABackRoomGameMode::LiveNote(uint8 Note)
 	case EBackRoomTableNote::TournamentOver:
 		LiveOver();
 		break;
+	case EBackRoomTableNote::HandDealt:
+		LiveCheckpoint(true);
+		break;
 	default:
 		break;
+	}
+}
+
+void ABackRoomGameMode::LiveCheckpoint(bool bDealt)
+{
+	if (!Save.IsValid() || !LiveSaver || !Tourney || bLiveOver || bCancelled)
+	{
+		return;
+	}
+	if (!bDealt)
+	{
+		bCheckpointDue = false;
+		const std::string Ck = Tourney->Checkpoint();
+		if (Ck.empty())
+		{
+			return;
+		}
+		LastCheckpoint = Ck;
+		LastCheckpointAt = FMath::Max(Minutes, LiveDayStart + Tourney->ClockMinutes());
+	}
+	if (LastCheckpoint.empty())
+	{
+		return;
+	}
+	ss::SaveData D = *Save;
+	ss::life::LiveEntry* E = ss::live::EntryFor(D.Life, std::string(TCHAR_TO_UTF8(*LiveEntryId)));
+	if (!E || E->State != ss::life::LiveEntry::Registered)
+	{
+		return;
+	}
+	E->Checkpoint = LastCheckpoint;
+	E->CheckpointAt = LastCheckpointAt;
+	E->CheckpointHost = std::string(TCHAR_TO_UTF8(*LiveHostText(bDealt)));
+	D.ClockMinutes = LastCheckpointAt - ss::net::MinutesPerDay * ss::net::NightOneDay;
+	D.Life.Energy = FMath::Clamp(static_cast<double>(Energy), 0.0, 100.0);
+	LiveSaver->Submit(D);
+	++Checkpoints;
+	UE_LOG(LogRiverside, Log, TEXT("Checkpoint %d%s: hand %d, level %d, %d left, stack %lld"), Checkpoints, bDealt ? TEXT(" (dealt)") : TEXT(""), Tourney->Tick, Tourney->LevelIndex + 1,
+		Tourney->Remaining, static_cast<int64>(Tourney->Hero().Stack));
+}
+
+FString ABackRoomGameMode::LiveHostText(bool bDealt) const
+{
+	// "key\tvalue" lines: what the room knows that the tournament doesn't.
+	FString Out = FString::Printf(TEXT("hands\t%d\n"), HandsPlayed);
+	if (bDealt)
+	{
+		Out += TEXT("dealt\t1\n");
+	}
+	if (bOnBreak)
+	{
+		Out += FString::Printf(TEXT("break\t%d\t%.2f\n"), BreakLevel, BreakT);
+	}
+	for (const FString& Id : LiveMet)
+	{
+		Out += TEXT("met\t") + Id + TEXT("\n");
+	}
+	if (Table && Save.IsValid())
+	{
+		// The reads that changed tonight (the rest are in the save already).
+		for (const TPair<FString, int32>& R : Table->Reads)
+		{
+			const auto Was = Save->Life.Reads.find(std::string(TCHAR_TO_UTF8(*R.Key)));
+			if (Was == Save->Life.Reads.end() || Was->second != R.Value)
+			{
+				Out += FString::Printf(TEXT("read\t%s\t%d\n"), *R.Key, R.Value);
+			}
+		}
+	}
+	return Out;
+}
+
+void ABackRoomGameMode::ReadLiveHost(const FString& Text)
+{
+	TArray<FString> Lines;
+	Text.ParseIntoArray(Lines, TEXT("\n"), true);
+	for (const FString& Line : Lines)
+	{
+		TArray<FString> F;
+		Line.ParseIntoArray(F, TEXT("\t"), false);
+		if (F.Num() == 2 && F[0] == TEXT("hands"))
+		{
+			HandsPlayed = FCString::Atoi(*F[1]);
+		}
+		else if (F.Num() == 2 && F[0] == TEXT("dealt"))
+		{
+			bResumeDealt = F[1] == TEXT("1");
+		}
+		else if (F.Num() == 3 && F[0] == TEXT("break"))
+		{
+			bOnBreak = true;
+			BreakLevel = FCString::Atoi(*F[1]);
+			BreakT = FMath::Clamp(FCString::Atof(*F[2]), 0.0f, BreakRealSeconds - 3.0f);
+		}
+		else if (F.Num() == 2 && F[0] == TEXT("met"))
+		{
+			LiveMet.Add(F[1]);
+		}
+		else if (F.Num() == 3 && F[0] == TEXT("read"))
+		{
+			ResumeReads.Add(F[1], FCString::Atoi(*F[2]));
+		}
 	}
 }
 
@@ -1055,6 +1224,11 @@ void ABackRoomGameMode::LiveSettle()
 		D.NoteLive(Minutes, EntryId, HeroPlace, HeroPrizeCents, Tourney->Spec.Entrants, Seen);
 	}
 	*Save = D;
+	// A checkpoint still being written lands first, so the settled night is the save that stays.
+	if (LiveSaver)
+	{
+		LiveSaver->Flush();
+	}
 	CareerSave::SaveNow(D.Serialize());
 }
 
@@ -1120,6 +1294,15 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 	{
 		LiveEvent(E);
 	}
+	// The hand's news heard: save the night where it stands (before the next hand is dealt).
+	if (LiveSaver)
+	{
+		LiveSaver->Tick();
+	}
+	if (bCheckpointDue && Table->IsBetweenHands() && !Tourney->FinishPending())
+	{
+		LiveCheckpoint(false);
+	}
 	// A blink in progress: the bodies swap with the eyes shut, then they open.
 	if (BlinkT >= 0.0f)
 	{
@@ -1170,6 +1353,7 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 		}
 		FastForwardLeft = 0;
 		Minutes = FMath::Max(Minutes, LiveDayStart + Tourney->ClockMinutes());
+		bCheckpointDue = true;
 		if (Tourney->Hero().Busted || Tourney->bFinished)
 		{
 			LiveOver();
@@ -1197,8 +1381,17 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			ArrivalBeat = 2;
 			// Dee deals the Sunday; any other day it's whoever's on the stick at the player's table.
 			const bool bSunday = ((LiveDay % 7) + 7) % 7 == 6;
-			Table->DealerLine(bSunday ? FString(TEXT("Look who made it across town. You're with me tonight, kid."))
-									  : FString::Printf(TEXT("Evening. Table %d, seat %d, you're all set. Good luck."), Tourney->Hero().TableId, ss::live::SeatLabel(Tourney->Hero().Seat)));
+			if (bBackInRoom && Tourney->Tick > 0)
+			{
+				Table->DealerLine(bResumeDealt ? FString(TEXT("Welcome back. Your hand was dead while you were up, you're in the next one."))
+											   : bSunday ? FString(TEXT("There you are. Sit down, kid, your chips didn't go anywhere."))
+														 : FString(TEXT("Welcome back. Your chips are right where you left them.")));
+			}
+			else
+			{
+				Table->DealerLine(bSunday ? FString(TEXT("Look who made it across town. You're with me tonight, kid."))
+										  : FString::Printf(TEXT("Evening. Table %d, seat %d, you're all set. Good luck."), Tourney->Hero().TableId, ss::live::SeatLabel(Tourney->Hero().Seat)));
+			}
 		}
 		AttentionTick -= RealDt;
 		if (Pawn && AttentionTick <= 0.0f)

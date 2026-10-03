@@ -36,6 +36,8 @@ struct GameSettings
 	int LookSensitivity = 100;   // percent
 	bool InvertLook = false;
 	bool ShowHints = true;
+	// Gameplay
+	int TablePace = 0;           // a live table: 0 Live (the room's own time), 1 Brisk, 2 Fast; never plays a hand for you
 
 	/** "key=value" lines, safe to store in any save system. Unknown keys are ignored when parsing. */
 	SHORTSTACKCORE_API std::string Serialize() const;

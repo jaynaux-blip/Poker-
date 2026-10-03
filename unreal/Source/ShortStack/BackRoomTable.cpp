@@ -429,6 +429,18 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 		if (!bHeroTurn)
 		{
 			OpenHeroTurn();
+			AwayActAt = Time + 1.3f;
+		}
+		if (bHeroAway && Time >= AwayActAt)
+		{
+			// An empty seat: checked when it's free, mucked when it isn't.
+			const ss::LegalActions L = Hand->GetLegalActions();
+			if (!L.CanCheck && Time - AwayLineAt > 40.0f)
+			{
+				AwayLineAt = Time;
+				DealerSays(TEXT("Player's away from the table. That hand's dead."));
+			}
+			HeroAct(static_cast<int32>(L.CanCheck ? ss::PlayerAction::Kind::Check : ss::PlayerAction::Kind::Fold), 0.0);
 		}
 		return;
 	}
@@ -449,7 +461,7 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 			ReadHero(*S, BotKind, BotTo, D.Equity);
 		}
 		// How long they sit with it: the engine's timing tell, slowed to a live table's pace.
-		BotAt = Time + FMath::Clamp(static_cast<float>(D.ThinkMs) / 1000.0f * 0.6f, 0.9f, 6.5f);
+		BotAt = Time + FMath::Clamp(static_cast<float>(D.ThinkMs) / 1000.0f * 0.6f * ThinkScale, FMath::Max(0.4f, 0.9f * ThinkScale), 6.5f * ThinkScale);
 		if (S->Player)
 		{
 			S->Player->SetHandStrength(static_cast<float>(D.Equity), true);
@@ -518,6 +530,10 @@ void ABackRoomTable::StartHand()
 		}
 		SyncTournamentSeats(*PendingHand);
 		Hand.Reset(PendingHand.Release());
+		if (OnNote)
+		{
+			OnNote(EBackRoomTableNote::HandDealt);
+		}
 		for (FSeat& S : Seats)
 		{
 			S.StartStack = S.Stack;

@@ -7,6 +7,9 @@
 #include <algorithm>
 #include <cmath>
 #include <climits>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 namespace ss
 {
@@ -775,5 +778,265 @@ std::vector<TEvent> Tournament::MoveToTable(const std::string& Id, int TableId)
 	}
 	MovePlayer(PIdx, Table, Events);
 	return Events;
+}
+
+// ---------------------------------------------------------------- checkpoints
+
+namespace
+{
+/** The field a checkpoint belongs to: who is in it, under which ids (FNV-1a). */
+uint64_t FieldPrint(const TournamentSpec& Spec, const std::vector<TPlayer>& Players)
+{
+	uint64_t H = 1469598103934665603ull;
+	auto Mix = [&H](const std::string& S) {
+		for (const char Ch : S)
+		{
+			H = (H ^ static_cast<unsigned char>(Ch)) * 1099511628211ull;
+		}
+		H = (H ^ 0x1fu) * 1099511628211ull;
+	};
+	Mix(Spec.Id);
+	Mix(std::to_string(Spec.Entrants));
+	for (const TPlayer& P : Players)
+	{
+		Mix(P.Id);
+		Mix(P.Name);
+	}
+	return H;
+}
+
+std::vector<std::string> SplitOn(const std::string& S, char Sep)
+{
+	std::vector<std::string> Out;
+	size_t From = 0;
+	for (;;)
+	{
+		const size_t At = S.find(Sep, From);
+		Out.push_back(S.substr(From, At == std::string::npos ? std::string::npos : At - From));
+		if (At == std::string::npos)
+		{
+			return Out;
+		}
+		From = At + 1;
+	}
+}
+
+/** Strict parsing: the whole field, or it's not a checkpoint. */
+bool ToInt(const std::string& S, long long& Out)
+{
+	if (S.empty())
+	{
+		return false;
+	}
+	char* End = nullptr;
+	Out = std::strtoll(S.c_str(), &End, 10);
+	return End && *End == '\0';
+}
+
+bool ToHex(const std::string& S, unsigned long long& Out)
+{
+	if (S.empty() || S[0] == '-')
+	{
+		return false;
+	}
+	char* End = nullptr;
+	Out = std::strtoull(S.c_str(), &End, 16);
+	return End && *End == '\0';
+}
+
+std::string Hex(unsigned long long V)
+{
+	char Buf[24];
+	std::snprintf(Buf, sizeof(Buf), "%llx", V);
+	return Buf;
+}
+} // namespace
+
+std::string Tournament::Checkpoint() const
+{
+	if (bFinishing)
+	{
+		return std::string();
+	}
+	// Records split by ';', fields by ' ': nothing in it needs escaping. Doubles go as their bits, so they come back exact.
+	std::string Out = "ck1 " + Hex(FieldPrint(Spec, Players)) + " " + std::to_string(Players.size()) + " " + std::to_string(Tables.size());
+	uint32_t S[4];
+	R.GetState(S);
+	Out += ";r " + Hex(S[0]) + " " + Hex(S[1]) + " " + Hex(S[2]) + " " + Hex(S[3]);
+	Out += ";c " + std::to_string(Tick) + " " + std::to_string(LevelIndex) + " " + std::to_string(Remaining) + " " + (bFinished ? "1" : "0") + " " + std::to_string(BreaksTaken) + " " +
+		(HeroAway ? "1" : "0") + " " + (HeroSitsOut ? "1" : "0") + " " + (bAnnouncedFinal ? "1" : "0") + " " + (bAnnouncedH4H ? "1" : "0") + " " + (bBurstBubble ? "1" : "0");
+	for (const TPlayer& P : Players)
+	{
+		uint64_t Tilt = 0;
+		std::memcpy(&Tilt, &P.Tilt, sizeof(Tilt));
+		const auto Start = StartStacks.find(P.Id);
+		Out += ";p " + std::to_string(P.Stack) + " " + std::to_string(P.TableId) + " " + std::to_string(P.Seat) + " " + (P.Busted ? "1" : "0") + " " + std::to_string(P.Place) + " " +
+			std::to_string(P.PrizeCents) + " " + Hex(Tilt) + " " + std::to_string(P.Hands) + " " + std::to_string(P.VpipHands) + " " + std::to_string(P.PfrHands) + " " +
+			std::to_string(P.KnockedOutBy.empty() ? -1 : PlayerIndex(P.KnockedOutBy)) + " " + (Start == StartStacks.end() ? std::string("-") : std::to_string(Start->second));
+	}
+	for (const auto& It : Tables)
+	{
+		Out += ";t " + std::to_string(It.second.Id) + " " + std::to_string(It.second.ButtonSeat);
+		for (const int Seat : It.second.Seats)
+		{
+			Out += " " + std::to_string(Seat);
+		}
+	}
+	return Out;
+}
+
+bool Tournament::Restore(const std::string& Text)
+{
+	if (bFinishing)
+	{
+		return false;
+	}
+	const std::vector<std::string> Records = SplitOn(Text, ';');
+	if (Records.size() < 3 + Players.size())
+	{
+		return false;
+	}
+	const std::vector<std::string> Head = SplitOn(Records[0], ' ');
+	unsigned long long Print = 0;
+	long long NPlayers = 0;
+	long long NTables = 0;
+	if (Head.size() != 4 || Head[0] != "ck1" || !ToHex(Head[1], Print) || Print != FieldPrint(Spec, Players) || !ToInt(Head[2], NPlayers) ||
+		NPlayers != static_cast<long long>(Players.size()) || !ToInt(Head[3], NTables) || NTables < 0 || Records.size() != 3 + Players.size() + static_cast<size_t>(NTables))
+	{
+		return false;
+	}
+	// Everything is read into copies first: a bad record leaves the tournament as it was.
+	const std::vector<std::string> RngF = SplitOn(Records[1], ' ');
+	if (RngF.size() != 5 || RngF[0] != "r")
+	{
+		return false;
+	}
+	uint32_t State[4];
+	for (int I = 0; I < 4; ++I)
+	{
+		unsigned long long V = 0;
+		if (!ToHex(RngF[static_cast<size_t>(I + 1)], V) || V > 0xffffffffull)
+		{
+			return false;
+		}
+		State[I] = static_cast<uint32_t>(V);
+	}
+	const std::vector<std::string> Clock = SplitOn(Records[2], ' ');
+	long long C[10];
+	if (Clock.size() != 11 || Clock[0] != "c")
+	{
+		return false;
+	}
+	for (int I = 0; I < 10; ++I)
+	{
+		if (!ToInt(Clock[static_cast<size_t>(I + 1)], C[I]))
+		{
+			return false;
+		}
+	}
+	if (C[0] < 0 || C[1] < 0 || C[2] < 0 || C[2] > static_cast<long long>(Players.size()) || C[4] < 0)
+	{
+		return false;
+	}
+	std::vector<TPlayer> NewPlayers = Players;
+	std::unordered_map<std::string, Chips> NewStarts;
+	for (size_t I = 0; I < Players.size(); ++I)
+	{
+		const std::vector<std::string> F = SplitOn(Records[3 + I], ' ');
+		unsigned long long Tilt = 0;
+		if (F.size() != 13 || F[0] != "p" || !ToHex(F[7], Tilt))
+		{
+			return false;
+		}
+		// Stack, table, seat, busted, place, prize, (tilt), hands, vpip, pfr, knocked out by.
+		const int Fields[10] = {1, 2, 3, 4, 5, 6, 8, 9, 10, 11};
+		long long V[10];
+		for (int K = 0; K < 10; ++K)
+		{
+			if (!ToInt(F[static_cast<size_t>(Fields[K])], V[K]))
+			{
+				return false;
+			}
+		}
+		if (V[0] < 0 || V[9] < -1 || V[9] >= static_cast<long long>(Players.size()))
+		{
+			return false;
+		}
+		TPlayer& P = NewPlayers[I];
+		P.Stack = V[0];
+		P.TableId = static_cast<int>(V[1]);
+		P.Seat = static_cast<int>(V[2]);
+		P.Busted = V[3] != 0;
+		P.Place = static_cast<int>(V[4]);
+		P.PrizeCents = V[5];
+		const uint64_t TiltBits = Tilt;
+		std::memcpy(&P.Tilt, &TiltBits, sizeof(TiltBits));
+		P.Hands = static_cast<int>(V[6]);
+		P.VpipHands = static_cast<int>(V[7]);
+		P.PfrHands = static_cast<int>(V[8]);
+		P.KnockedOutBy = V[9] < 0 ? std::string() : Players[static_cast<size_t>(V[9])].Id;
+		if (F[12] != "-")
+		{
+			long long Start = 0;
+			if (!ToInt(F[12], Start))
+			{
+				return false;
+			}
+			NewStarts[P.Id] = Start;
+		}
+	}
+	std::map<int, TTable> NewTables;
+	for (size_t I = 0; I < static_cast<size_t>(NTables); ++I)
+	{
+		const std::vector<std::string> F = SplitOn(Records[3 + Players.size() + I], ' ');
+		long long Id = 0;
+		long long Button = 0;
+		if (F.size() != 3 + static_cast<size_t>(TableSize) || F[0] != "t" || !ToInt(F[1], Id) || !ToInt(F[2], Button) || Button < -1 || Button >= TableSize)
+		{
+			return false;
+		}
+		TTable T;
+		T.Id = static_cast<int>(Id);
+		T.ButtonSeat = static_cast<int>(Button);
+		for (int K = 0; K < TableSize; ++K)
+		{
+			long long Seat = 0;
+			if (!ToInt(F[static_cast<size_t>(3 + K)], Seat) || Seat < -1 || Seat >= static_cast<long long>(Players.size()))
+			{
+				return false;
+			}
+			T.Seats.push_back(static_cast<int>(Seat));
+		}
+		NewTables[T.Id] = T;
+	}
+	// Seats and tables have to agree: everyone still in sits where their table says.
+	for (size_t I = 0; I < NewPlayers.size(); ++I)
+	{
+		const TPlayer& P = NewPlayers[I];
+		if (P.Busted)
+		{
+			continue;
+		}
+		const auto T = NewTables.find(P.TableId);
+		if (T == NewTables.end() || P.Seat < 0 || P.Seat >= TableSize || T->second.Seats[static_cast<size_t>(P.Seat)] != static_cast<int>(I))
+		{
+			return false;
+		}
+	}
+	R.SetState(State);
+	Players = std::move(NewPlayers);
+	StartStacks = std::move(NewStarts);
+	Tables = std::move(NewTables);
+	Tick = static_cast<int>(C[0]);
+	LevelIndex = static_cast<int>(C[1]);
+	Remaining = static_cast<int>(C[2]);
+	bFinished = C[3] != 0;
+	BreaksTaken = static_cast<int>(C[4]);
+	HeroAway = C[5] != 0;
+	HeroSitsOut = C[6] != 0;
+	bAnnouncedFinal = C[7] != 0;
+	bAnnouncedH4H = C[8] != 0;
+	bBurstBubble = C[9] != 0;
+	return true;
 }
 } // namespace ss

@@ -37,6 +37,8 @@ enum class EBackRoomTableNote : uint8
 	HeroMoved,
 	/** Tournament: no more hands for the hero (busted, or it's over). */
 	TournamentOver,
+	/** Tournament: the hero's next hand is dealt (the room's checkpoint marks it: a hand seen is never dealt again). */
+	HandDealt,
 };
 
 /**
@@ -197,6 +199,13 @@ public:
 	void SetCrowd(float Crowd);
 	/** Pressure the moment adds to the heart (the bubble, the final table), in bpm before sensitivity. */
 	float ExtraPressure = 0.0f;
+	/** The table's pace (the player's Table pace setting): how long the others sit with a decision, 1 = the room's own time. */
+	float ThinkScale = 1.0f;
+	/**
+	 * The player is up from the table (sitting out): still dealt in, and when the action is on them the dealer checks
+	 * their hand if it's free and mucks it if it isn't (the room's rule for an empty seat). Never a bet, call or raise.
+	 */
+	bool bHeroAway = false;
 	/** The big blind now (2 at Dee's game). */
 	int64 BigBlindNow() const;
 	/** Still in this hand (not folded): when not, the host lets the rest of it play out quicker. */
@@ -303,6 +312,8 @@ private:
 
 	// The hero deciding.
 	bool bHeroTurn = false;
+	float AwayActAt = 0.0f;
+	float AwayLineAt = -100.0f;
 	int64 HeroRaiseTo = 0;
 	bool bHeroPeeked = false;
 

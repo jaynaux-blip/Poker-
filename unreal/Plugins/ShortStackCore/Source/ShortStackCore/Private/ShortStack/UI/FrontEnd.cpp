@@ -250,6 +250,7 @@ std::string GameSettings::Serialize() const
 	Put("sensitivity", LookSensitivity);
 	Put("invert", InvertLook ? 1 : 0);
 	Put("hints", ShowHints ? 1 : 0);
+	Put("tablepace", TablePace);
 	Out += "resolution=" + Resolution + "\n";
 	return Out;
 }
@@ -298,6 +299,7 @@ bool GameSettings::Parse(const std::string& Text, GameSettings& Out)
 		else if (Name == "sensitivity") S.LookSensitivity = std::clamp(N, 20, 200);
 		else if (Name == "invert") S.InvertLook = N != 0;
 		else if (Name == "hints") S.ShowHints = N != 0;
+		else if (Name == "tablepace") S.TablePace = std::clamp(N, 0, 2);
 		else if (Name == "resolution") S.Resolution = Value;
 	}
 	Out = S;
@@ -816,6 +818,8 @@ std::vector<FrontEnd::SettingRow> FrontEnd::Rows(int ForTab)
 			[&S](int V) { S.LookSensitivity = V; });
 		Choice("Invert look", "Moving the mouse up looks down.", -1, OffOn, [&S] { return S.InvertLook ? 1 : 0; }, [&S](int V) { S.InvertLook = V != 0; });
 		Choice("Control hints", "Shows the controls reminder after you sit down at the laptop.", -1, OffOn, [&S] { return S.ShowHints ? 1 : 0; }, [&S](int V) { S.ShowHints = V != 0; });
+		Choice("Table pace", "At a live table: how long the other players take to act, and how quickly a hand you've folded plays out. Your own decisions always wait for you. P changes it at the table.", -1,
+			{"LIVE", "BRISK", "FAST"}, [&S] { return S.TablePace; }, [&S](int V) { S.TablePace = V; });
 		break;
 	}
 	return Out;

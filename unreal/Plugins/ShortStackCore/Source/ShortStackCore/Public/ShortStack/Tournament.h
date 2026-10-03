@@ -157,6 +157,19 @@ public:
 	/** Scripted move (story beats), e.g. seating the rival at the hero's table. */
 	SHORTSTACKCORE_API std::vector<TEvent> MoveToTable(const std::string& Id, int TableId);
 
+	// ---------------------------------------------------------------- checkpoints (C++ only, the live rooms)
+	/**
+	 * The tournament between ticks as one line of text: everything play changes (stacks, seats, buttons, the clock,
+	 * the flags, the draw's state), none of what the field was made with. Empty while a tick is being finished.
+	 */
+	SHORTSTACKCORE_API std::string Checkpoint() const;
+	/**
+	 * Carries on from a checkpoint: this tournament must have been made the same way as the one that wrote it (the
+	 * same spec, hero, seed and reserved players), and then plays on exactly as that one would have. False, with
+	 * nothing changed, for text that isn't a checkpoint of this field.
+	 */
+	SHORTSTACKCORE_API bool Restore(const std::string& Text);
+
 	TournamentSpec Spec;
 	Rng R;
 	std::vector<TPlayer> Players; // insertion order: hero, reserved, then the field

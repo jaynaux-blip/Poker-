@@ -6,6 +6,8 @@
 #include "GameFramework/HUD.h"
 #include "GameFramework/Pawn.h"
 
+#include <string>
+
 #include "BackRoomGameMode.generated.h"
 
 class ABackRoomPlayer;
@@ -22,6 +24,7 @@ struct TEvent;
 struct TPlayer;
 }
 struct FBackRoomPersona;
+class FCareerSaver;
 enum class EBackRoomRole : uint8;
 
 /**
@@ -94,6 +97,8 @@ public:
 	 */
 	void PlayWalk(const TArray<FVector>& Points, float Seconds, bool bOut, TFunction<void()> OnDone);
 	bool IsWalking() const { return bWalking; }
+	/** N: the rest of a hand the player has folded, played out quickly (until they're dealt in again). */
+	bool IsSkippingHand() const { return bSkipHand; }
 	/** 0..1 along the current walk. */
 	float WalkProgress() const { return bWalking ? FMath::Clamp(WalkT / WalkSeconds, 0.0f, 1.0f) : 1.0f; }
 	/** Where the camera is (for the regulars to look at while you walk by). */
@@ -133,6 +138,7 @@ private:
 	float BeatPhase = 0.0f;
 	/** The table's pace: quicker once you're out of the hand (a tournament). */
 	float Pace = 1.0f;
+	bool bSkipHand = false;
 	int32 StepCount = 0;
 	float Kick = 0.0f;
 	float Steady = 0.0f;
@@ -202,6 +208,7 @@ public:
 
 	virtual void RestartPlayer(AController* NewPlayer) override;
 	virtual void StartPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void Tick(float DeltaSeconds) override;
 	/** Dynamic resolution, as the player set it in the apartment's menus (FrameBudget.h). */
 	FFrameBudget FrameBudget;
@@ -281,6 +288,13 @@ public:
 	}
 	/** Leaving a tournament early: L asks, L again within a few seconds confirms (your stack is blinded off). */
 	bool IsQuitPending() const { return QuitAskedAt >= 0.0f; }
+	/** The live table's pace (the Table pace setting): 0 Live, 1 Brisk, 2 Fast. P cycles it (and saves it). */
+	int32 GetTablePace() const { return TablePace; }
+	void CycleTablePace();
+	/** Real seconds since the pace last changed (for the HUD's note). */
+	float PaceShownAge() const { return static_cast<float>(FPlatformTime::Seconds() - PaceShownAt); }
+	/** How quickly a hand the player is out of plays out, at this pace (time dilation). */
+	float FoldedPace() const { return TablePace == 2 ? 4.0f : (TablePace == 1 ? 2.8f : 1.9f); }
 	/** The persona for a cast member by name (the Back Room's regulars and the Riverside's Sunday faces). */
 	static FBackRoomPersona PersonaFor(const FString& Name);
 	/** The cast's MetaHuman asset name for a player name ("Big Lou" -> "BigLou"), or empty. */
@@ -320,9 +334,21 @@ private:
 	void LiveRequestLeave();
 	FString Chips(int64 Amount) const;
 	int32 SlotForTable(int32 TableId);
+	/**
+	 * After each hand the player sees, the night is saved where it stands (ss::Tournament::Checkpoint, on a worker
+	 * thread), and marked again when the next hand is dealt: a game closed during the night comes back to the seat
+	 * after the last hand, and a hand that was already dealt is dead (folded), never dealt again.
+	 */
+	void LiveCheckpoint(bool bDealt);
+	/** The room's own part of a checkpoint (hands played, who sat with the player, reads, a break), and reading it back. */
+	FString LiveHostText(bool bDealt) const;
+	void ReadLiveHost(const FString& Text);
 
 	bool bLive = false;
 	TSharedPtr<ss::Tournament> Tourney;
+	int32 TablePace = 0;
+	double PaceShownAt = -100.0;
+	void ApplyTablePace();
 	int32 LiveDay = 0;
 	/** The event day's midnight in world minutes (the tournament's clock is minutes after it). */
 	double LiveDayStart = 0.0;
@@ -343,6 +369,17 @@ private:
 	float RoomBoardTick = 0.0f;
 	/** The player confirmed leaving while a hand or the room's round was still being played: they go when it's done. */
 	bool bLeaveWhenFree = false;
+	/** Back after the game closed during the night: no bus, a few steps back to the chair. */
+	bool bBackInRoom = false;
+	/** ...and the room as it stood after the last hand (the checkpoint read back); the hand dealt then is dead. */
+	bool bResumed = false;
+	bool bResumeDealt = false;
+	TMap<FString, int32> ResumeReads;
+	bool bCheckpointDue = false;
+	int32 Checkpoints = 0;
+	std::string LastCheckpoint;
+	double LastCheckpointAt = 0.0;
+	TSharedPtr<FCareerSaver> LiveSaver;
 	/** Who's in which body: tournament player id -> actor (kept, hidden, while they're elsewhere). */
 	UPROPERTY(Transient)
 	TMap<FString, TObjectPtr<ABackRoomPlayer>> CastActors;

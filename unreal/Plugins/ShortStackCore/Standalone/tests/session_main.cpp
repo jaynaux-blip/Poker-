@@ -671,6 +671,214 @@ void Riverside()
 	}
 }
 
+/** One line per event, to compare two runs of a night. */
+std::string EventLine(const ss::TEvent& E)
+{
+	return std::to_string(static_cast<int>(E.Type)) + "|" + E.Id + "|" + E.Name + "|" + std::to_string(E.Place) + "|" + std::to_string(E.PrizeCents) + "|" + std::to_string(E.TableId) +
+		"|" + std::to_string(E.From) + ">" + std::to_string(E.To) + "|" + std::to_string(E.LevelNumber) + "|" + E.EliminatedBy;
+}
+
+/** The Riverside's checkpoints: a night closed after any hand carries on exactly as if it never was. */
+void RiversideCheckpoints()
+{
+	namespace life = ss::life;
+	namespace live = ss::live;
+	const live::Occurrence Sunday = live::FindOccurrence("riverside@13");
+	std::vector<ss::ReservedPlayer> Known(3);
+	Known[0].Name = "Mei";
+	Known[0].Type = ss::Archetype::Crusher;
+	Known[1].Name = "Big Lou";
+	Known[1].Type = ss::Archetype::Maniac;
+	Known[2].Name = "Mrs. Park";
+	Known[2].Type = ss::Archetype::Nit;
+	auto Field = [&](const std::string& Seed) { return live::MakeField(Sunday, 104, "grinder_3c", Seed, Known); };
+	// The player's own hands, played the same way in every run (their choices don't come from the room's draw).
+	ss::Rng AutoRng("checkpoint-auto");
+	const ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, AutoRng);
+	auto Step = [&](ss::Tournament& T, std::vector<std::string>& Log) {
+		std::vector<ss::TEvent> Ev;
+		std::unique_ptr<ss::Hand> Hand = T.StartTick(Ev);
+		for (const ss::TEvent& E : T.FinishTick(Hand.get(), &Auto))
+		{
+			Ev.push_back(E);
+		}
+		for (const ss::TEvent& E : Ev)
+		{
+			Log.push_back(std::to_string(T.Tick) + ":" + EventLine(E));
+		}
+	};
+
+	// The night straight through.
+	std::unique_ptr<ss::Tournament> Whole = Field("checkpoints");
+	std::vector<std::string> WholeLog;
+	std::vector<std::string> Marks; // the checkpoint after every hand
+	Marks.push_back(Whole->Checkpoint());
+	while (!Whole->bFinished && Whole->Tick < 6000)
+	{
+		Step(*Whole, WholeLog);
+		Marks.push_back(Whole->Checkpoint());
+	}
+	Expect(Whole->bFinished && Marks.size() > 100, "the Sunday plays to a winner");
+
+	// Closed and reopened after hand 0, 1, 7, a third of the way, the bubble's neighbourhood, the last hand: every one
+	// carries on to the same night, event for event, chip for chip.
+	bool Exact = true;
+	bool RoundTrip = true;
+	std::string Where;
+	const size_t N = Marks.size();
+	for (const size_t At : {static_cast<size_t>(0), static_cast<size_t>(1), static_cast<size_t>(7), N / 3, N / 2, (N * 4) / 5, N - 2, N - 1})
+	{
+		std::unique_ptr<ss::Tournament> Again = Field("checkpoints");
+		const bool Ok = Again->Restore(Marks[At]);
+		RoundTrip = RoundTrip && Ok && Again->Checkpoint() == Marks[At];
+		std::vector<std::string> Log;
+		while (Ok && !Again->bFinished && Again->Tick < 6000)
+		{
+			Step(*Again, Log);
+		}
+		// The events after the checkpoint, against the same stretch of the whole night.
+		std::vector<std::string> Tail;
+		for (const std::string& L : WholeLog)
+		{
+			if (std::atoi(L.c_str()) > static_cast<int>(At))
+			{
+				Tail.push_back(L);
+			}
+		}
+		const bool Same = Ok && Log == Tail && Again->Checkpoint() == Whole->Checkpoint();
+		if (!Same && Where.empty())
+		{
+			Where = "after hand " + std::to_string(At);
+		}
+		Exact = Exact && Same;
+	}
+	Expect(RoundTrip, "a checkpoint reads back to itself");
+	if (!Where.empty())
+	{
+		std::printf("  checkpoint diverged %s\n", Where.c_str());
+	}
+	Expect(Exact, "a night reopened after any hand plays on exactly as it would have");
+
+	// Closed again and again: a checkpoint every forty hands, each read into a fresh field.
+	{
+		std::unique_ptr<ss::Tournament> Hop = Field("checkpoints");
+		std::vector<std::string> Log;
+		int Reopened = 0;
+		while (!Hop->bFinished && Hop->Tick < 6000)
+		{
+			Step(*Hop, Log);
+			if (Hop->Tick % 40 == 0)
+			{
+				const std::string Ck = Hop->Checkpoint();
+				Hop = Field("checkpoints");
+				Reopened += Hop->Restore(Ck) ? 1 : 0;
+			}
+		}
+		Expect(Reopened >= 4 && Log == WholeLog && Hop->Checkpoint() == Whole->Checkpoint(), "a night closed every forty hands is still the same night");
+		std::printf("  riverside: %zu hands, reopened %d times, every hand and every chip where it was\n", Marks.size() - 1, Reopened);
+	}
+
+	// Only its own field takes it, and a bad one changes nothing.
+	{
+		std::unique_ptr<ss::Tournament> Other = Field("someone else's night");
+		const std::string Before = Other->Checkpoint();
+		const std::string Mid = Marks[N / 2];
+		Expect(!Other->Restore(Mid) && Other->Checkpoint() == Before, "another field's checkpoint is refused");
+		std::unique_ptr<ss::Tournament> Mine = Field("checkpoints");
+		const std::string Fresh = Mine->Checkpoint();
+		Expect(!Mine->Restore(Mid.substr(0, Mid.size() / 2)) && !Mine->Restore("") && !Mine->Restore("ck1 0 0 0") && Mine->Checkpoint() == Fresh, "a broken checkpoint is refused");
+		// Between ticks only.
+		std::vector<ss::TEvent> Ev;
+		std::unique_ptr<ss::Hand> Hand = Mine->StartTick(Ev);
+		Mine->BeginFinish(Hand.get(), &Auto);
+		Expect(Mine->Checkpoint().empty() && !Mine->Restore(Mid), "no checkpoint in the middle of a round");
+		while (!Mine->FinishSome(4))
+		{
+		}
+		Mine->EndFinish();
+	}
+
+	// The entry keeps it in the save, and settling clears it.
+	{
+		ss::SaveData D;
+		D.BankrollCents = 50000;
+		Expect(live::Register(D.BankrollCents, D.Life, Sunday, 13.0 * 1440.0 + 18.0 * 60.0, 104, {}).empty(), "registered for the Sunday");
+		life::LiveEntry* E = live::EntryFor(D.Life, Sunday.Id);
+		E->FareThere = true;
+		E->ArrivedAt = 13.0 * 1440.0 + 18.0 * 60.0 + 40.0;
+		E->Checkpoint = Marks[N / 3];
+		E->CheckpointAt = 13.0 * 1440.0 + 21.0 * 60.0 + 12.5;
+		E->CheckpointHost = "hands=88\tmet=npc:Mei,npc:Big Lou\nbreak=0";
+		ss::SaveData P;
+		const life::LiveEntry* K = ss::SaveData::Parse(D.Serialize(), P) ? live::EntryFor(P.Life, Sunday.Id) : nullptr;
+		Expect(K && K->Checkpoint == E->Checkpoint && K->CheckpointHost == E->CheckpointHost && std::fabs(K->CheckpointAt - E->CheckpointAt) < 1e-3 &&
+				   std::fabs(K->ArrivedAt - E->ArrivedAt) < 1e-2,
+			"a checkpoint survives a save");
+		ss::Chips B = D.BankrollCents;
+		life::State L = D.Life;
+		Expect(live::Settle(B, L, Sunday.Id, 30, 104, 0, E->CheckpointAt) && live::EntryFor(L, Sunday.Id)->Checkpoint.empty(), "settling clears the checkpoint");
+	}
+
+	// The game closed during the night: the next load goes back to the seat; nothing was dealt while it was closed.
+	{
+		struct BackHooks : Hooks
+		{
+			std::string Went;
+			bool GoOut(const std::string& Id, ss::Chips) override
+			{
+				Went = Id;
+				return true;
+			}
+		};
+		ss::SaveData D;
+		D.BankrollCents = 50000;
+		D.HeroName = "grinder_3c";
+		const double Reg = 13.0 * 1440.0 + 18.0 * 60.0;
+		Expect(live::Register(D.BankrollCents, D.Life, Sunday, Reg, 104, {}).empty(), "registered for the Sunday");
+		live::PayFare(D.BankrollCents, D.Life, Sunday.Id, false, Reg);
+		life::LiveEntry* E = live::EntryFor(D.Life, Sunday.Id);
+		std::unique_ptr<ss::Tournament> Night = live::MakeField(Sunday, E->Entrants, "grinder_3c", live::SeedFor(*E, "grinder_3c"), {});
+		// Forty hands in, folding most of them: still in, a stack to come back to.
+		ss::Rng Careful("careful");
+		const ss::Profile Nit = ss::MakeProfile(ss::Archetype::Nit, Careful);
+		for (int K = 0; K < 40; ++K)
+		{
+			std::vector<ss::TEvent> Ev;
+			std::unique_ptr<ss::Hand> Hand = Night->StartTick(Ev);
+			Night->FinishTick(Hand.get(), &Nit);
+		}
+		Expect(!Night->Hero().Busted && Night->Hero().Stack > 0, "still in after forty hands");
+		E->ArrivedAt = Reg + 20.0;
+		E->Checkpoint = Night->Checkpoint();
+		E->CheckpointAt = Sunday.Start + Night->ClockMinutes() - static_cast<double>(Sunday.T->StartMinute);
+		D.ClockMinutes = E->CheckpointAt - 1440.0;
+		const ss::Chips Bank = D.BankrollCents;
+		BackHooks H;
+		ss::Session S(H, "reopened", &D);
+		const life::LiveEntry* Still = live::EntryFor(S.Life, Sunday.Id);
+		Expect(Still && Still->State == life::LiveEntry::Registered && Still->Checkpoint == E->Checkpoint && S.BankrollCents == Bank, "reopened mid-night: the entry is untouched");
+		Expect(S.LiveInProgress() == Sunday.Id && S.ResumeLive().empty() && H.Went == Sunday.Id && S.BankrollCents == Bank, "the next load goes straight back to the seat, no bus");
+
+		// Never went back (a day later): the seat is dealt in from where the player left it, and blinded off.
+		std::unique_ptr<ss::Tournament> Gone = live::MakeField(Sunday, E->Entrants, "grinder_3c", live::SeedFor(*E, "grinder_3c"), {});
+		Gone->Restore(E->Checkpoint);
+		Gone->HeroSitsOut = true;
+		const int StartHands = Gone->Hero().Hands;
+		while (!Gone->Hero().Busted && !Gone->bFinished)
+		{
+			Gone->SimulateTick();
+		}
+		D.ClockMinutes = Sunday.Start + 24.0 * 60.0 - 1440.0;
+		BackHooks H2;
+		ss::Session S2(H2, "never went back", &D);
+		const life::LiveEntry* A = live::EntryFor(S2.Life, Sunday.Id);
+		Expect(A && A->State == life::LiveEntry::Finished && A->Place == Gone->Hero().Place && A->Checkpoint.empty() && S2.LiveInProgress().empty(),
+			"a night never gone back to is blinded off from the checkpoint, and settled once");
+		std::printf("  riverside: left at hand %d with %lld chips, blinded off in %s after %d more hands\n", Night->Tick, static_cast<long long>(Night->Hero().Stack),
+			ss::Ordinal(Gone->Hero().Place).c_str(), Gone->Hero().Hands - StartHands);
+	}
+}
+
 /** Shifts, hustles, sleep, rent, Night Shift prizes, unlocks, bounties, satellites and tickets. */
 void LifeChecks()
 {
@@ -1430,6 +1638,7 @@ int main()
 	session_test::LifeChecks();
 	session_test::DeeGame();
 	session_test::Riverside();
+	session_test::RiversideCheckpoints();
 	session_test::BountyTournament();
 	session_test::MultiTable();
 	session_test::FullTournament();

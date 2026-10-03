@@ -25,6 +25,21 @@ public:
 	SHORTSTACKCORE_API double Gauss(double Mean, double Sd);
 	/** Independent child generator. */
 	SHORTSTACKCORE_API Rng Fork(const std::string& Label);
+	/** The generator's whole state (checkpoints): setting it back continues the same stream. */
+	void GetState(uint32_t Out[4]) const
+	{
+		Out[0] = A;
+		Out[1] = B;
+		Out[2] = C;
+		Out[3] = D;
+	}
+	void SetState(const uint32_t In[4])
+	{
+		A = In[0];
+		B = In[1];
+		C = In[2];
+		D = In[3];
+	}
 
 	template <typename T>
 	const T& Pick(const std::vector<T>& Items)

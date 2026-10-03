@@ -218,7 +218,23 @@ void ABackRoomPawn::HandleInput(float RealDt)
 	FocusLeft = FMath::Clamp(FocusLeft + (Drain > 0.0f ? -Drain * RealDt : RealDt / 14.0f), 0.0f, 1.0f);
 	Focus = Ease(Focus, bFocusing ? 1.0f : 0.0f, 5.0f, RealDt);
 	const bool bFolded = GM && GM->IsLive() && GM->GetPhase() == EBackRoomPhase::Playing && Table && !Table->IsHeroInHand();
-	Pace = Ease(Pace, bFolded && !bFocusing ? 1.9f : 1.0f, 2.0f, RealDt);
+	// P: the table's pace. N, out of the hand: the rest of it at a glance, until you're dealt in again. Neither ever
+	// decides anything of yours.
+	if (GM && GM->IsLive() && PC->WasInputKeyJustPressed(EKeys::P))
+	{
+		GM->CycleTablePace();
+	}
+	if (bFolded && !bFocusing && PC->WasInputKeyJustPressed(EKeys::N))
+	{
+		bSkipHand = true;
+	}
+	if (bSkipHand && (!bFolded || bFocusing))
+	{
+		bSkipHand = false;
+		Pace = 1.0f;
+	}
+	const float Out = GM ? GM->FoldedPace() : 1.9f;
+	Pace = bSkipHand ? 6.0f : Ease(Pace, bFolded && !bFocusing ? Out : 1.0f, 2.0f, RealDt);
 	UGameplayStatics::SetGlobalTimeDilation(this, FMath::Lerp(Pace, 0.45f, Focus));
 	if (bFocusing && Table)
 	{
@@ -850,6 +866,23 @@ void ABackRoomHUD::DrawHUD()
 		}
 	}
 
+	// Out of the hand at a live table: the room's pace, and the rest of the hand at a glance.
+	if (bLive && !P.bYourTurn && Phase == EBackRoomPhase::Playing && !Table->IsHeroInHand())
+	{
+		static const TCHAR* PaceNames[3] = {TEXT("LIVE"), TEXT("BRISK"), TEXT("FAST")};
+		const bool bSkipping = Pawn && Pawn->IsSkippingHand();
+		Text(bSkipping ? FString(TEXT("to the next hand...")) : FString::Printf(TEXT("[N] Next hand     [P] Pace  %s"), PaceNames[FMath::Clamp(GM->GetTablePace(), 0, 2)]),
+			Fade(Dim, 0.85f), W * 0.5f, H - 66.0f * S, Small, 1.0f, 1);
+	}
+	if (bLive && GM->PaceShownAge() < 2.6f)
+	{
+		static const TCHAR* PaceNotes[3] = {TEXT("TABLE PACE   LIVE   \u00b7   the room's own time"), TEXT("TABLE PACE   BRISK   \u00b7   quicker decisions around you"),
+			TEXT("TABLE PACE   FAST   \u00b7   the room acts at once")};
+		const float A = FMath::Clamp((2.6f - GM->PaceShownAge()) / 0.5f, 0.0f, 1.0f);
+		Text(PaceNotes[FMath::Clamp(GM->GetTablePace(), 0, 2)], Fade(Warm, A), W * 0.5f, H * 0.3f, Small, 1.2f, 1);
+		Text(TEXT("your own decisions always wait for you"), Fade(Dim, A), W * 0.5f, H * 0.3f + 30.0f * S, Small, 1.0f, 1);
+	}
+
 	// Felted.
 	if (Phase == EBackRoomPhase::Busted)
 	{
@@ -957,6 +990,11 @@ void ABackRoomHUD::DrawHUD()
 		{
 			Hints.Add(GM->IsLive() ? TEXT("L  walk away (blinded off)") : TEXT("L  rack up and go home"));
 		}
+		if (GM->IsLive())
+		{
+			Hints.Add(TEXT("N  next hand (once you've folded)"));
+			Hints.Add(TEXT("P  table pace"));
+		}
 		for (const TCHAR* Hint : Hints)
 		{
 			Text(Hint, Fade(Dim, HintA), Hx, Hy, Small, 0.95f, 2);
@@ -976,6 +1014,16 @@ ABackRoomGameMode::ABackRoomGameMode()
 }
 
 ABackRoomGameMode::~ABackRoomGameMode() = default;
+
+void ABackRoomGameMode::EndPlay(const EEndPlayReason::Type Reason)
+{
+	// The night's last checkpoint lands before the next scene (or the desktop) reads the save.
+	if (LiveSaver)
+	{
+		LiveSaver->Flush();
+	}
+	Super::EndPlay(Reason);
+}
 
 ABackRoomStage* ABackRoomGameMode::FindOrSpawnStage()
 {
@@ -1043,6 +1091,8 @@ void ABackRoomGameMode::StartPlay()
 		}
 		FApp::SetUnfocusedVolumeMultiplier(Settings.BackgroundAudio ? 1.0f : 0.0f);
 		FrameBudget.Configure(Settings.DynamicTarget, Settings.ResolutionScale);
+		TablePace = FMath::Clamp(Settings.TablePace, 0, 2);
+		ApplyTablePace();
 	}
 	if (bCareer)
 	{
@@ -1052,6 +1102,36 @@ void ABackRoomGameMode::StartPlay()
 	{
 		Phase = EBackRoomPhase::Practice;
 		Table->Begin(4.0f);
+	}
+}
+
+void ABackRoomGameMode::ApplyTablePace()
+{
+	if (Table)
+	{
+		Table->ThinkScale = TablePace == 2 ? 0.35f : (TablePace == 1 ? 0.6f : 1.0f);
+	}
+}
+
+void ABackRoomGameMode::CycleTablePace()
+{
+	TablePace = (TablePace + 1) % 3;
+	ApplyTablePace();
+	PaceShownAt = FPlatformTime::Seconds();
+	// Kept with the rest of the player's settings (the apartment's menus show it too).
+	ss::ui::GameSettings Settings;
+	if (UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SettingsSlotName(), 0))
+	{
+		if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SettingsSlotName(), 0)))
+		{
+			ss::ui::GameSettings::Parse(std::string(TCHAR_TO_UTF8(*Obj->Data)), Settings);
+		}
+	}
+	Settings.TablePace = TablePace;
+	if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::CreateSaveGameObject(UNightOneSaveGame::StaticClass())))
+	{
+		Obj->Data = FString(UTF8_TO_TCHAR(Settings.Serialize().c_str()));
+		UGameplayStatics::SaveGameToSlot(Obj, UNightOneSaveGame::SettingsSlotName(), 0);
 	}
 }
 
@@ -1275,10 +1355,12 @@ void ABackRoomGameMode::StartWalkIn(ABackRoomPawn* Pawn)
 	ArrivalBeat = 1;
 	ArrivalT = 0.0f;
 	const FVector Eye = Stage ? Stage->EyeLocation() : FVector(-91.0, 0.0, 118.0);
-	const TArray<FVector> Path = bLive && Stage ? Stage->CardRoomWalkIn(Eye) : TArray<FVector>{FVector(166.0, 540.0, 166.0), FVector(174.0, 360.0, 166.0), FVector(194.0, 258.0, 165.0), FVector(168.0, 176.0, 165.0),
+	// Back after the game closed: a few steps up the aisle to the chair, not the whole room.
+	const bool bShort = bLive && bBackInRoom && Stage;
+	const TArray<FVector> Path = bShort ? Stage->CardRoomMoveIn(Eye, Stage->GetRoomAnchor()) : bLive && Stage ? Stage->CardRoomWalkIn(Eye) : TArray<FVector>{FVector(166.0, 540.0, 166.0), FVector(174.0, 360.0, 166.0), FVector(194.0, 258.0, 165.0), FVector(168.0, 176.0, 165.0),
 		FVector(40.0, 210.0, 165.0), FVector(-90.0, 228.0, 164.0), FVector(-196.0, 168.0, 163.0), FVector(-206.0, 50.0, 161.0), FVector(-160.0, 6.0, 148.0), Eye};
 	TWeakObjectPtr<ABackRoomGameMode> Self = this;
-	Pawn->PlayWalk(Path, 9.5f, false, [Self]() {
+	Pawn->PlayWalk(Path, bShort ? 3.6f : 9.5f, false, [Self]() {
 		if (ABackRoomGameMode* GM = Self.Get())
 		{
 			GM->Phase = EBackRoomPhase::Playing;

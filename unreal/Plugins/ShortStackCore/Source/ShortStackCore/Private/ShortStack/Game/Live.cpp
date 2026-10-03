@@ -388,6 +388,8 @@ bool Settle(Chips& Bankroll, life::State& L, const std::string& Id, int Place, i
 		return false;
 	}
 	E->State = life::LiveEntry::Finished;
+	E->Checkpoint.clear();
+	E->CheckpointHost.clear();
 	E->Place = Place;
 	E->Entrants = Field > 0 ? Field : E->Entrants;
 	E->PrizeCents = std::max<Chips>(0, Prize);
@@ -412,6 +414,8 @@ bool Refund(Chips& Bankroll, life::State& L, const std::string& Id, double World
 		return false;
 	}
 	E->State = life::LiveEntry::Refunded;
+	E->Checkpoint.clear();
+	E->CheckpointHost.clear();
 	E->FinishedAt = World;
 	Bankroll += E->PaidCents;
 	L.Record(World, E->Name + ": refunded" + (Why.empty() ? std::string() : " (" + Why + ")"), E->PaidCents, 0);
