@@ -58,7 +58,8 @@ void Tracker::Add(Chips BuyIn, Chips Prize, int Place, int Field, int FinalSize,
 	if (Events % Stride == 0)
 	{
 		Curve.push_back(Net);
-		Spend.push_back(BuyIns);
+		// (Never below the last point: a point loaded from a save is rounded to the dollar, and a ticket adds no buy-in.)
+		Spend.push_back(std::max(BuyIns, Spend.empty() ? Chips(0) : Spend.back()));
 		if (static_cast<int>(Curve.size()) >= CurveMax)
 		{
 			std::vector<Chips> Half;

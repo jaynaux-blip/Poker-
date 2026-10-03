@@ -2002,7 +2002,7 @@ void Sim::Lifecycle(World& W, Npc& N, int Day, Rng& R)
 				for (const Tie& T : N.Ties)
 				{
 					const Npc& O = W.Roster[static_cast<size_t>(T.Other)];
-					const long Backing = std::count_if(O.Ties.begin(), O.Ties.end(), [](const Tie& X) { return X.Kind == TieKind::Backer; });
+					const std::ptrdiff_t Backing = std::count_if(O.Ties.begin(), O.Ties.end(), [](const Tie& X) { return X.Kind == TieKind::Backer; });
 					if ((T.Kind == TieKind::Friend || T.Kind == TieKind::TrainingPartner) && O.Playing() && O.Bankroll > sim::TierAbi[sim::TierIndex(N.Tier)] * 400 && Backing < 3)
 					{
 						Backer = T.Other;
