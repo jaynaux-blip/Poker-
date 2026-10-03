@@ -30,7 +30,7 @@ TEXTURE_SIZE = 1024
 TEXTURE_SIZES = {'beanie_label': 128, 'cap_under': 512, 'cap_button': 64, 'lens_clear': 128, 'lens_dark': 128, 'hinge_metal': 128,
                  'pads': 64, 'frame_acetate': 512, 'frame_wire': 512, 'frame_shades': 512}
 AO_DISTANCE = 0.006
-REVIEW_VIEWS = [('front', -25, 15, 1.1), ('top', 10, 60, 1.0), ('detail', -35, 12, 0.55, (0.0, -0.09, -0.05))]
+REVIEW_VIEWS = [('front', -20, 15, 2.3), ('top', 0, 55, 2.3), ('detail', -25, 12, 0.85, (0.0, 0.12, 0.1))]
 
 HEAD_W = 0.156  # ear to ear
 HEAD_L = 0.196  # brow to back
@@ -69,8 +69,9 @@ def knit():
     return m
 
 
-def twill(name, seams=0, rings=False):
-    """Cotton twill, light grey; seams (count of panels round the crown) or stitched rings on a brim."""
+def twill(name, seams=0, rings=False, seams_above=-1.0, rings_below=1.0):
+    """Cotton twill, light grey; seams (count of panels round the crown, above seams_above) or stitched rings
+    (on a brim, below rings_below). One material per hat, so the game's tint covers all of it."""
     m = core.Mat(name)
     tc, sep = object_coords(m)
     diag = m.math('SINE', m.math('MULTIPLY', m.math('ADD', sep.outputs['X'], sep.outputs['Z']), 2 * math.pi / 0.0012))
@@ -80,11 +81,11 @@ def twill(name, seams=0, rings=False):
     if seams:
         ang = m.math('ARCTAN2', sep.outputs['Y'], sep.outputs['X'])
         seam = m.math('ABSOLUTE', m.math('SINE', m.math('MULTIPLY', m.math('ADD', ang, math.pi / seams), seams / 2.0)))
-        lines = ramp(m, m.math('SUBTRACT', 1.0, seam), 0.965, 0.99)
+        lines = m.math('MULTIPLY', ramp(m, m.math('SUBTRACT', 1.0, seam), 0.965, 0.99), m.math('GREATER_THAN', sep.outputs['Z'], seams_above))
     if rings:
         r = m.math('SQRT', m.math('ADD', m.math('MULTIPLY', sep.outputs['X'], sep.outputs['X']), m.math('MULTIPLY', sep.outputs['Y'], sep.outputs['Y'])))
         ring = m.math('ABSOLUTE', m.math('SINE', m.math('MULTIPLY', r, 2 * math.pi / 0.008)))
-        lines = ramp(m, ring, 0.93, 0.99)
+        lines = m.math('MULTIPLY', ramp(m, ring, 0.93, 0.99), m.math('LESS_THAN', sep.outputs['Z'], rings_below))
     col = m.mix(m.math('MULTIPLY', h, 0.25), core.hex_linear(0xc4c4c4), core.hex_linear(0xdedede))
     if lines is not None:
         col = m.mix(m.math('MULTIPLY', lines, 0.5), col, core.hex_linear(0x8a8a8a))
@@ -100,7 +101,6 @@ def twill(name, seams=0, rings=False):
 
 def spade_sheet():
     s = Sheet(100, 100)
-    s.rect(0, 0, 100, 100, 0xc8c8c8, rough=0.9)
     pts = []
     for k in range(64):
         t = 2 * math.pi * k / 64
@@ -164,11 +164,11 @@ def beanie():
 
 
 def cap():
-    crown_m = twill('cap_crown', seams=6)
+    band = -0.082
+    crown_m = twill('cap_crown', seams=6, seams_above=band + 0.003)
     under_m = street.shop_plastic('cap_under', 0x2e3a2e, rough=0.9, grime=0.2)
     button_m = twill('cap_button')
     spade_img = spade_sheet()
-    band = -0.082
     prof = [(0.0, 0.004)]
     for k in range(1, 11):
         z = band * k / 10
@@ -182,9 +182,9 @@ def cap():
     tc, sep = object_coords(m)
     uv = planar(m, sep, 'X', 'Z', -0.03, 0.03, -0.065, -0.005)
     ink, alpha, metal, rough = image_surface(m, spade_img, uv)
-    front = m.math('MULTIPLY', m.math('LESS_THAN', sep.outputs['Y'], -0.05), m.math('SUBTRACT', 1.0, m.math('GREATER_THAN', m.math('ABSOLUTE', sep.outputs['X']), 0.03)))
-    front = m.math('MULTIPLY', front, m.math('GREATER_THAN', sep.outputs['Z'], -0.07))  # the front panel, not the bill
-    mask = m.math('MULTIPLY', front, m.math('SUBTRACT', 1.0, ramp(m, ink_mask(m, ink), 0.4, 0.6)))
+    # The stitched spade is the print's alpha, on the front panel only (the projection runs through the cap).
+    front = m.math('MULTIPLY', m.math('LESS_THAN', sep.outputs['Y'], -0.05), m.math('GREATER_THAN', sep.outputs['Z'], band + 0.003))
+    mask = m.math('MULTIPLY', front, alpha)
     base = m.bsdf.inputs['Base Color'].links[0].from_socket
     m.set('Base Color', m.mix(mask, base, core.hex_linear(0x121214)))
     core.assign(shell, crown_m)
@@ -230,9 +230,9 @@ def ink_mask(m, ink):
 
 
 def bucket():
-    m = twill('bucket_twill', rings=False)
-    brim_m = twill('bucket_brim', rings=True)
     band = -0.08
+    m = twill('bucket_twill', rings=True, rings_below=band - 0.001)
+    brim_m = m
     prof = [(0.0, 0.016), (0.045, 0.015), (0.062, 0.012), (0.072, 0.005), (0.08, -0.006), (head_r(-0.03, 0.012), -0.022), (head_r(band, 0.012), band),
             (head_r(band, 0.002), band), (head_r(band * 0.5, 0.002), band * 0.5), (0.05, 0.005), (0.0, 0.005)]
     crown = core.lathe('bucket', list(reversed(prof)), segments=96)
@@ -302,7 +302,7 @@ def shades_shape(t, w, h):
     return (x, z + 0.004 * c)
 
 
-def glasses(name, shape, w, h, rim, depth, frame_m, lens_m, metal_m, bridge_h=0.0, wire=False, wrap=6.0):
+def glasses(name, shape, w, h, rim, depth, frame_m, lens_m, metal_m, bridge_h=0.0, wire=False, wrap=6.0, pad_m=None):
     out = []
     for side in (-1, 1):
         cx = side * LENS_X
@@ -321,7 +321,7 @@ def glasses(name, shape, w, h, rim, depth, frame_m, lens_m, metal_m, bridge_h=0.
         out.append((parts.rbox('hinge', (hx, 0.002, 0.004), (0.006, 0.006, 0.004), 0.001), metal_m))
         if wire:
             # Nose pads on little arms.
-            out.append((parts.disc('pad', (side * 0.009, -0.004, -0.012), (side, 0.4, 0.0), 0.0045, 0.0015, 16), lens_m))
+            out.append((parts.disc('pad', (side * 0.009, -0.004, -0.012), (side, 0.4, 0.0), 0.0045, 0.0015, 16), pad_m or lens_m))
             out.append((parts.tube('pad_arm', [(side * 0.013, 0.0, -0.004), (side * 0.011, -0.003, -0.008), (side * 0.0095, -0.004, -0.011)], 0.0005, 6, 4), metal_m))
     # The bridge.
     if wire:
@@ -348,7 +348,7 @@ def build():
     pads = street.shop_plastic('pads', 0xd8dde0, rough=0.2, grime=0.0)
     out.append(glasses('SM_Glasses_Round', round_shape, 0.046, 0.044, 0.0042, 0.0045, acetate_m, clear, hinge))
     out.append(glasses('SM_Glasses_Square', rect_shape, 0.052, 0.036, 0.0048, 0.005, acetate_m, clear, hinge, bridge_h=0.006))
-    out.append(glasses('SM_Glasses_Wire', round_shape, 0.05, 0.04, 0.0012, 0.0016, wire_m, pads, hinge, wire=True))
+    out.append(glasses('SM_Glasses_Wire', round_shape, 0.05, 0.04, 0.0012, 0.0016, wire_m, clear, hinge, wire=True, pad_m=pads))
     out.append(glasses('SM_Glasses_Shades', shades_shape, 0.058, 0.044, 0.004, 0.005, shades_m, dark, hinge, bridge_h=0.008, wrap=12.0))
     return out
 
