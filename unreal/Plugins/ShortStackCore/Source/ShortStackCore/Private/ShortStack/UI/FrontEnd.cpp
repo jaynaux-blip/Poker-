@@ -1,5 +1,6 @@
 #include "ShortStack/UI/FrontEnd.h"
 #include "../StrictFloat.h"
+#include "FrontEndShared.h"
 
 #include "ShortStack/Game/Format.h"
 
@@ -11,212 +12,6 @@ namespace ss
 {
 namespace ui
 {
-namespace frontend_detail
-{
-const Color MenuInk = Hex(0xeef1f6);
-const Color MenuMuted = Hex(0x8c95a8);
-const Color MenuDim = Hex(0x4a5366);
-const Color MenuNeon = Hex(0xff2e88);
-const Color MenuTeal = Hex(0x27d3c3);
-const Color MenuGold = Hex(0xf2c14e);
-const Color MenuWarn = Hex(0xff5a5f);
-const Color MenuShade = Hex(0x030408);
-const Color MenuPanel = Hex(0x080a12);
-const float MenuMargin = 132.0f;
-
-/** Credits, top to bottom. "#" starts a heading, "*" the title, "~" small print, "" a gap. */
-const char* const CreditLines[] = {
-	"*SHORT STACK",
-	"~NIGHT ONE",
-	"",
-	"#CREATED BY",
-	"jaynaux",
-	"",
-	"#POKER ENGINE",
-	"ShortStackCore",
-	"~No-Limit Hold'em with side pots, multi-table tournaments with ICM,",
-	"~nine opponent archetypes and a coach that grades every decision",
-	"",
-	"#BUILT WITH",
-	"Unreal Engine 5",
-	"Blender",
-	"Claude by Anthropic",
-	"",
-	"#TYPE",
-	"Roboto",
-	"~Apache License 2.0",
-	"",
-	"#SOUND",
-	"Synthesized in code",
-	"~Every chip, card, drop of rain and roll of thunder",
-	"",
-	"#THANKS FOR PLAYING",
-	"Don't tilt.",
-};
-
-float Ease(double V)
-{
-	return static_cast<float>(EaseOutCubic(Clamp01(V)));
-}
-
-bool Inside(const Rect& R, float X, float Y)
-{
-	return X >= R.X && X <= R.X + R.W && Y >= R.Y && Y <= R.Y + R.H;
-}
-
-std::vector<std::string> Utf8Glyphs(const std::string& S)
-{
-	std::vector<std::string> Out;
-	for (size_t I = 0; I < S.size();)
-	{
-		const unsigned char Lead = static_cast<unsigned char>(S[I]);
-		const size_t Len = Lead >= 0xF0 ? 4 : Lead >= 0xE0 ? 3 : Lead >= 0xC0 ? 2 : 1;
-		Out.push_back(S.substr(I, Len));
-		I += Len;
-	}
-	return Out;
-}
-
-float TrackedWidth(Canvas& Cv, const std::string& S, float Size, int Weight, float Track)
-{
-	const std::vector<std::string> Glyphs = Utf8Glyphs(S);
-	float Sum = 0.0f;
-	for (const std::string& G : Glyphs)
-	{
-		Sum += Cv.Measure(G, Size, Weight);
-	}
-	return Sum + Track * static_cast<float>(Glyphs.empty() ? 0 : Glyphs.size() - 1);
-}
-
-/** Letter-spaced text, one run per glyph. Returns the width. */
-float TrackedText(Canvas& Cv, const std::string& S, float X, float Y, float Size, int Weight, const Color& Col, float Track, Align A = Align::Left)
-{
-	const float Wd = TrackedWidth(Cv, S, Size, Weight, Track);
-	float Px = X - (A == Align::Center ? Wd * 0.5f : A == Align::Right ? Wd : 0.0f);
-	for (const std::string& G : Utf8Glyphs(S))
-	{
-		Px += Cv.Text(G, Px, Y, Ts(Size, Weight, Col)) + Track;
-	}
-	return Wd;
-}
-
-std::vector<std::string> WrapText(Canvas& Cv, const std::string& Text, float MaxW, float Size, int Weight)
-{
-	std::vector<std::string> Lines;
-	std::string Line;
-	size_t Start = 0;
-	while (Start <= Text.size())
-	{
-		size_t End = Text.find(' ', Start);
-		if (End == std::string::npos)
-		{
-			End = Text.size();
-		}
-		const std::string Word = Text.substr(Start, End - Start);
-		const std::string Trial = Line.empty() ? Word : Line + " " + Word;
-		if (!Line.empty() && Cv.Measure(Trial, Size, Weight) > MaxW)
-		{
-			Lines.push_back(Line);
-			Line = Word;
-		}
-		else
-		{
-			Line = Trial;
-		}
-		Start = End + 1;
-	}
-	if (!Line.empty())
-	{
-		Lines.push_back(Line);
-	}
-	return Lines;
-}
-
-/** A thin chevron centered at (X, Y) pointing left or right. */
-void Chevron(Canvas& Cv, float X, float Y, float Size, bool Right, const Color& Col)
-{
-	const float D = Right ? 1.0f : -1.0f;
-	Cv.StrokePolyline({{X - D * Size * 0.4f, Y - Size}, {X + D * Size * 0.5f, Y}, {X - D * Size * 0.4f, Y + Size}}, false, Col, 2.2f, true);
-}
-
-/** A small filled triangle arrow centered at (X, Y): 0 up, 1 down, 2 left, 3 right. */
-void Arrow(Canvas& Cv, float X, float Y, float Size, int Dir, const Color& Col)
-{
-	std::vector<Vec2> P;
-	switch (Dir)
-	{
-	case 0: P = {{X, Y - Size}, {X + Size, Y + Size * 0.6f}, {X - Size, Y + Size * 0.6f}}; break;
-	case 1: P = {{X, Y + Size}, {X + Size, Y - Size * 0.6f}, {X - Size, Y - Size * 0.6f}}; break;
-	case 2: P = {{X - Size, Y}, {X + Size * 0.6f, Y - Size}, {X + Size * 0.6f, Y + Size}}; break;
-	default: P = {{X + Size, Y}, {X - Size * 0.6f, Y - Size}, {X - Size * 0.6f, Y + Size}}; break;
-	}
-	Cv.FillPolygon(P, Paint(Col));
-}
-
-/** Keyboard key or gamepad button glyph with its baseline at Y. Returns the width. */
-float Glyph(Canvas& Cv, const std::string& Name, float X, float Y, float Alpha)
-{
-	const float Top = Y - 21.0f;
-	const float Hh = 28.0f;
-	const Color Line = Rgba(238, 241, 246, 0.55f * Alpha);
-	const Color Label = Rgba(238, 241, 246, 0.95f * Alpha);
-	if (Name == "A" || Name == "B" || Name == "X" || Name == "Y")
-	{
-		const uint32_t Hue = Name == "A" ? 0x3ecf6eu : Name == "B" ? 0xef4d5au : Name == "X" ? 0x3b82f6u : 0xf2c14eu;
-		Cv.FillCircle(X + 14.0f, Top + 14.0f, 14.0f, Paint(Hex(Hue, 0.92f * Alpha)));
-		Cv.Text(Name, X + 14.0f, Top + 14.0f, Ts(14.0f, 900, Hex(0x07090d, Alpha), Align::Center, Baseline::Middle));
-		return 28.0f;
-	}
-	if (Name == "DPAD")
-	{
-		const float Cx = X + 14.0f;
-		const float Cy = Top + 14.0f;
-		Cv.FillRoundRect({Cx - 4.5f, Cy - 13.0f, 9.0f, 26.0f}, 2.0f, Paint(Line));
-		Cv.FillRoundRect({Cx - 13.0f, Cy - 4.5f, 26.0f, 9.0f}, 2.0f, Paint(Line));
-		return 28.0f;
-	}
-	const bool IsArrow = Name == "UP" || Name == "DOWN" || Name == "LEFT" || Name == "RIGHT";
-	const float TextW = IsArrow ? 0.0f : Cv.Measure(Name, 13.0f, 700);
-	const float Bw = std::max(28.0f, TextW + 18.0f);
-	Cv.StrokeRoundRect({X + 0.75f, Top + 0.75f, Bw - 1.5f, Hh - 1.5f}, 5.0f, Line, 1.5f);
-	if (IsArrow)
-	{
-		const int Dir = Name == "UP" ? 0 : Name == "DOWN" ? 1 : Name == "LEFT" ? 2 : 3;
-		Arrow(Cv, X + Bw * 0.5f, Top + Hh * 0.5f, 5.0f, Dir, Label);
-	}
-	else
-	{
-		Cv.Text(Name, X + Bw * 0.5f, Top + Hh * 0.5f, Ts(13.0f, 700, Label, Align::Center, Baseline::Middle));
-	}
-	return Bw;
-}
-
-/** Neon tube brightness: an ignition flicker when the sign first lights, then an occasional buzz. */
-float NeonLevel(double Since, bool Ignite)
-{
-	if (Ignite)
-	{
-		static const double Steps[][2] = {{0.00, 0.0}, {0.30, 1.0}, {0.36, 0.15}, {0.47, 1.0}, {0.52, 0.3}, {0.66, 1.0}, {0.70, 0.55}, {0.80, 1.0}};
-		if (Since < 0.30)
-		{
-			return 0.0f;
-		}
-		for (int I = 7; I >= 0; --I)
-		{
-			if (Since >= Steps[I][0])
-			{
-				if (I < 7)
-				{
-					return static_cast<float>(Steps[I][1]);
-				}
-				break;
-			}
-		}
-	}
-	const double Phase = std::fmod(Since + 3.1, 7.3);
-	return Phase < 0.09 ? 0.35f : Phase < 0.14 ? 0.8f : 1.0f;
-}
-} // namespace frontend_detail
 
 using namespace frontend_detail;
 
@@ -309,6 +104,7 @@ FrontEndInfo DescribeSession(const Session& S, bool HasSave)
 	FrontEndInfo Out;
 	Out.HasSave = HasSave;
 	Out.HeroName = S.HeroName;
+	Out.Person = S.Person;
 	Out.BankrollCents = S.BankrollCents;
 	Out.Tournaments = static_cast<int>(S.History.size());
 	const HistoryEntry* Best = nullptr;
@@ -386,6 +182,7 @@ void FrontEnd::Go(Page Target, double Now)
 			ScreenName = Info.HeroName;
 		}
 		NameErrorAt = -10.0;
+		CreatorOpen(Now);
 		break;
 	default: break;
 	}
@@ -509,19 +306,6 @@ bool FrontEnd::NameValid() const
 	return true;
 }
 
-void FrontEnd::BeginNewGame(double Now)
-{
-	if (!NameValid())
-	{
-		NameErrorAt = Now;
-		Sound(SoundId::Fold, 0.5);
-		return;
-	}
-	Sound(SoundId::ChipStack, 0.8);
-	Close(Now);
-	Hooks.NewGame(ScreenName);
-}
-
 void FrontEnd::Key(const std::string& Name, double Now)
 {
 	if (Cur == Page::Hidden)
@@ -603,23 +387,7 @@ void FrontEnd::Key(const std::string& Name, double Now)
 			}
 		}
 		break;
-	case Page::NewGame:
-		if (Name == "Enter")
-		{
-			BeginNewGame(Now);
-		}
-		else if (Back)
-		{
-			Sound(SoundId::Check, 0.4);
-			Go(Page::Main, Now);
-			Sel = 1;
-		}
-		else if (Name == "Backspace" && !ScreenName.empty())
-		{
-			ScreenName.pop_back();
-			Sound(SoundId::Click, 0.2);
-		}
-		break;
+	case Page::NewGame: CreatorKey(Name, Now); break;
 	case Page::Settings:
 	{
 		const int Count = static_cast<int>(Rows(SelTab).size());
@@ -683,15 +451,9 @@ void FrontEnd::Char(uint32_t Codepoint, double Now)
 		Key("Any", Now);
 		return;
 	}
-	if (Cur != Page::NewGame || Confirm != Modal::None || ScreenName.size() >= 16)
+	if (Cur == Page::NewGame && Confirm == Modal::None)
 	{
-		return;
-	}
-	const bool Ok = (Codepoint >= 'a' && Codepoint <= 'z') || (Codepoint >= 'A' && Codepoint <= 'Z') || (Codepoint >= '0' && Codepoint <= '9') || Codepoint == '_' || Codepoint == '.' || Codepoint == '-';
-	if (Ok)
-	{
-		ScreenName += static_cast<char>(Codepoint);
-		Sound(SoundId::Click, 0.2);
+		CreatorChar(Codepoint, Now);
 	}
 }
 
@@ -1088,6 +850,10 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 		case 0:
 			Label("CONTINUE CAREER", MenuTeal);
 			Title(Info.HeroName);
+			if (Info.Person.Created)
+			{
+				Row("PLAYING AS", Info.Person.FullName() + " \xC2\xB7 " + hero::InfoOf(Info.Person.Story).Name, MenuInk);
+			}
 			Row("BANKROLL", Money(Info.BankrollCents), MenuGold);
 			Row("TOURNAMENTS PLAYED", std::to_string(Info.Tournaments), MenuInk);
 			if (!Info.BestFinish.empty())
@@ -1234,57 +1000,6 @@ void FrontEnd::PausePage(double Now)
 	const float CardW = 540.0f;
 	ContextCard(ViewW - MenuMargin - CardW, 410.0f, CardW, Now);
 	Hints({{"UP|DOWN/DPAD", "NAVIGATE"}, {"ENTER/A", "SELECT"}, {"ESC/B", "RESUME"}});
-	Footer();
-}
-
-void FrontEnd::NewGamePage(double Now)
-{
-	const float X = MenuMargin;
-	const float In = Ease(PageTime / 0.45);
-	const float Dx = (1.0f - In) * -30.0f;
-	C->FillRect({X + Dx + 2.0f, 239.0f, 44.0f, 3.0f}, Paint(F(MenuNeon, In)));
-	TrackedText(*C, "CHAPTER ONE", X + Dx + 62.0f, 247.0f, 15.0f, 700, F(MenuNeon, In), 6.0f);
-	TrackedText(*C, "NIGHT ONE", X + Dx, 340.0f, 96.0f, 900, F(MenuInk, In), 4.0f);
-	float Yp = 380.0f;
-	for (const std::string& L : WrapText(*C, "2:07 AM. Rain on the window, $2.37 in your RiverLine account and a final notice on the door. Rent is due Friday.", 700.0f, 24.0f, 300))
-	{
-		Yp += 36.0f;
-		C->Text(L, X + Dx, Yp, Ts(24.0f, 300, F(MenuInk, 0.9f * In)));
-	}
-
-	const float FieldY = 560.0f;
-	TrackedText(*C, "SCREEN NAME", X, FieldY - 16.0f, 13.0f, 700, F(MenuMuted, In), 3.2f);
-	const double Err = Now - NameErrorAt;
-	const float Shake = Err < 0.4 ? static_cast<float>(std::sin(Err * 70.0) * 8.0 * (1.0 - Err / 0.4)) : 0.0f;
-	const Rect Field = {X + Shake, FieldY, 560.0f, 76.0f};
-	const bool Bad = Err < 1.6 || (!NameValid() && !ScreenName.empty() && ScreenName.size() > 16);
-	C->FillRect(Field, Paint(F(MenuInk, 0.05f * In)));
-	C->FillRect({Field.X, Field.Y + Field.H - 3.0f, Field.W, 3.0f}, Paint(F(Bad ? MenuWarn : MenuNeon, In)));
-	const float TextW = C->Text(ScreenName, Field.X + 24.0f, Field.Y + 52.0f, Ts(36.0f, 700, F(MenuInk, In)));
-	if (std::fmod(Now, 1.0) < 0.55)
-	{
-		C->FillRect({Field.X + 28.0f + TextW, Field.Y + 20.0f, 3.0f, 40.0f}, Paint(F(MenuNeon, In)));
-	}
-	TrackedText(*C, ScreenName.empty() ? "TYPE A NAME" : std::to_string(ScreenName.size()) + " / 16", Field.X + Field.W - 22.0f, Field.Y + 48.0f, 12.0f, 700, F(MenuDim, In), 2.4f,
-		Align::Right);
-	C->Text("3 to 16 characters: letters, numbers, _ . -", X, FieldY + 112.0f, Ts(16.0f, 400, F(Err < 1.6 ? MenuWarn : MenuMuted, In)));
-
-	const float By = 740.0f;
-	if (Button({X, By, 270.0f, 68.0f}, "BEGIN", true, true))
-	{
-		BeginNewGame(Now);
-		return;
-	}
-	if (Button({X + 290.0f, By, 190.0f, 68.0f}, "BACK", false, false))
-	{
-		Sound(SoundId::Check, 0.4);
-		Go(Page::Main, Now);
-		Sel = 1;
-		return;
-	}
-	const float CardW = 540.0f;
-	ContextCard(ViewW - MenuMargin - CardW, 410.0f, CardW, Now);
-	Hints({{"ENTER/A", "BEGIN"}, {"ESC/B", "BACK"}});
 	Footer();
 }
 

@@ -1,6 +1,8 @@
 // Plays whole tournaments through the Night One session (the layer the Unreal
 // client drives), with a scripted hero, and checks the flow end to end.
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Hero.h"
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
@@ -9,6 +11,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <map>
+#include <set>
 #include <vector>
 
 namespace session_test
@@ -528,7 +531,7 @@ void LifeChecks()
 	double Now = Wait(S, 0.0, 0.5);
 	const ss::Chips Start = S.BankrollCents;
 	Expect(S.StartActivity("washfold").find("Next start") == 0, "the laundromat shift opens in the morning");
-	Expect(S.StartActivity("quikstop").empty() && S.TimeSkip.Active, "a night shift at the Quik Stop starts at 2:07 AM");
+	Expect(S.StartActivity("quikstop").empty() && S.TimeSkip.Active, "a night shift at the Lucky Penny starts at 2:07 AM");
 	Expect(!S.CanAfford(ss::Lobby()[0]), "no registering while at work");
 	Now = Wait(S, Now, 6.0);
 	Expect(!S.TimeSkip.Active && S.HasOutcome && S.Life.Shifts == 1, "the shift finishes");
@@ -847,6 +850,115 @@ void Formatting()
 	Expect(ss::Ordinal(21) == "21st" && ss::Ordinal(112) == "112th" && ss::Ordinal(1000) == "1,000th", "ordinals large");
 	Expect(ss::ClockString(127) == "2:07 AM" && ss::ClockString(0) == "12:00 AM" && ss::ClockString(13 * 60 + 5) == "1:05 PM", "clock");
 }
+/** The character creator's person: validation, the save, and the background perks where the game honors them. */
+void CharacterChecks()
+{
+	namespace hero = ss::hero;
+	// Every background has its words, and the perks differ from neutral.
+	for (int I = 0; I < hero::BackgroundCount; ++I)
+	{
+		const hero::BackgroundInfo& B = hero::InfoOf(static_cast<hero::Background>(I));
+		Expect(B.Id == static_cast<hero::Background>(I) && hero::FindBackground(B.Key) == &B && std::string(B.Story).size() > 80 && std::string(B.PerkText).size() > 20, "backgrounds are complete");
+	}
+	Expect(hero::Countries().size() == 28 && hero::FindCountry("JP") && !hero::FindCountry("XX"), "28 countries with a home city each");
+	Expect(hero::OptionName(hero::Slot::Height, 185) == "6'1\" \xC2\xB7 185 cm" && hero::OptionName(hero::Slot::Hair, 0) == "Shaved", "option names");
+
+	// Validation.
+	hero::Character C;
+	Expect(C.Problem().empty() && !C.Created, "the default character is valid but not created");
+	C.FirstName = "";
+	Expect(!C.Problem().empty(), "a first name is required");
+	C.FirstName = "Ana\tMaria";
+	Expect(!C.Problem().empty(), "names can't carry tabs into the save");
+	C.FirstName = "Jos\xC3\xA9";
+	C.LastName = "O'Neill-Ruiz";
+	Expect(C.Problem().empty(), "accents, apostrophes and hyphens are fine");
+	C.Age = 17;
+	Expect(!C.Problem().empty(), "18 or older");
+	C.Age = 30;
+	C.Country = "ZZ";
+	Expect(!C.Problem().empty(), "a known country");
+
+	// Looks clamp and wrap.
+	hero::Look L;
+	L.Set(hero::Slot::Hair, -1, true);
+	L.Set(hero::Slot::Height, 400);
+	L.Set(hero::Slot::Skin, 99);
+	Expect(L.Hair == hero::OptionCount(hero::Slot::Hair) - 1 && L.Height == hero::MaxHeight && L.Skin == hero::OptionCount(hero::Slot::Skin) - 1, "look values wrap and clamp");
+
+	// Random people are valid, varied and in range.
+	ss::Rng R("hero");
+	std::set<std::string> Names;
+	bool AllValid = true;
+	for (int I = 0; I < 300; ++I)
+	{
+		const hero::Character Rc = hero::Random(R);
+		AllValid = AllValid && Rc.Problem().empty() && Rc.Created && Rc.Appearance.Height >= hero::MinHeight && Rc.Appearance.Height <= hero::MaxHeight;
+		for (int K = 0; K < hero::SlotCount; ++K)
+		{
+			const hero::Slot Sl = static_cast<hero::Slot>(K);
+			AllValid = AllValid && (Sl == hero::Slot::Height || (Rc.Appearance.Get(Sl) >= 0 && Rc.Appearance.Get(Sl) < hero::OptionCount(Sl)));
+		}
+		Names.insert(Rc.FullName());
+	}
+	Expect(AllValid && Names.size() > 150, "random characters are valid and varied");
+
+	// The save: a new career for a line cook, saved, parsed and loaded.
+	Hooks H;
+	ss::Session S(H, "character");
+	Expect(!S.Person.Created && S.Life.Perks.JobPay == 1.0, "a session with no character has neutral perks");
+	hero::Character Cook = hero::Random(R);
+	Cook.FirstName = "Rosa";
+	Cook.LastName = "Delgado";
+	Cook.Age = 31;
+	Cook.Country = "MX";
+	Cook.Story = hero::Background::Kitchen;
+	Cook.Appearance.Hat = 2;
+	S.NewCareer(Cook);
+	Expect(S.Person.Created && S.Person.FullName() == "Rosa Delgado" && S.Life.Perks.JobPay > 1.0 && S.BankrollCents == 237, "a new career takes the character");
+	ss::SaveData Parsed;
+	Expect(ss::SaveData::Parse(H.Last.Serialize(), Parsed), "the save with a character parses");
+	Expect(Parsed.Person.FullName() == "Rosa Delgado" && Parsed.Person.Age == 31 && Parsed.Person.Country == "MX" && Parsed.Person.Story == hero::Background::Kitchen &&
+			Parsed.Person.Appearance == Cook.Appearance && Parsed.Person.Created,
+		"the character survives the save");
+	ss::Session Reloaded(H, "character", &Parsed);
+	Expect(Reloaded.Person.Created && Reloaded.Life.Perks.JobPay > 1.0, "the perk comes back with the save");
+
+	// The line cook's shift pays 20% more than the same shift for nobody in particular.
+	const ss::life::Activity* Shift = ss::life::Find("quikstop");
+	ss::life::State Plain;
+	ss::Rng R1("shift");
+	ss::Rng R2("shift");
+	const ss::life::Outcome Base = ss::life::Resolve(*Shift, Plain, 0.0, R1, 1000);
+	const ss::life::Outcome Cooked = ss::life::Resolve(*Shift, Reloaded.Life, 0.0, R2, 1000);
+	Expect(Base.Money > 0 && std::llabs(Cooked.Money - static_cast<ss::Chips>(std::llround(static_cast<double>(Base.Money) * 1.2))) <= 1, "a line cook's shift pays 20% more");
+
+	// The others.
+	auto Career = [&](hero::Background B) {
+		Hooks Hb;
+		ss::Session Sb(Hb, "bg");
+		hero::Character Who;
+		Who.Story = B;
+		Sb.NewCareer(Who);
+		return std::make_pair(Sb.BankrollCents, Sb.Life);
+	};
+	const auto Fresh = Career(hero::Background::Newcomer);
+	Expect(Fresh.first == 237 + 4000 && !Fresh.second.Ledger.empty() && Fresh.second.Ledger.front().Kind == 7, "a fresh start brings $40 of savings");
+	Expect(Career(hero::Background::Dropout).second.Unlocks.count("bounty") == 1 && Career(hero::Background::Kitchen).second.Unlocks.empty(), "a stats dropout starts with bounty events open");
+	const auto Hustle = Career(hero::Background::Hustler);
+	const ss::life::Activity* Run = ss::life::Find("marcus-run");
+	Expect(ss::life::RiskOf(*Run, Hustle.second) < ss::life::RiskOf(*Run, Plain) - 0.04 && Hustle.second.Perks.HeatCool > 1.0, "a corner hustler runs safer and cools faster");
+	Expect(Career(hero::Background::Bouncer).second.Perks.TiltGain < 1.0 && Career(hero::Background::DealersKid).second.Perks.ReadWeight == 2, "a bouncer tilts less, a dealer's kid reads faster");
+
+	// A save from before the creator: no hero lines, a neutral person.
+	ss::SaveData Old;
+	Expect(ss::SaveData::Parse("shortstack.nightone.v1\nbankroll\t500\nname\told_timer\n", Old) && !Old.Person.Created && Old.Person.FirstName == "Jesse", "older saves load without a character");
+	Expect(hero::Bio(Cook).find("Guadalajara, Mexico") != std::string::npos && hero::Bio(Cook).find("Rosa Delgado, 31") == 0, "the bio reads from the character");
+	// A new career resets the person too.
+	Reloaded.ResetSave();
+	Expect(!Reloaded.Person.Created && Reloaded.Life.Perks.JobPay == 1.0, "starting over clears the character");
+}
+
 } // namespace session_test
 
 namespace session_test
@@ -1286,6 +1398,7 @@ int main()
 	session_test::StreamGrind();
 	session_test::LedChecks();
 	session_test::LivingWorld();
+	session_test::CharacterChecks();
 	if (session_test::Failures == 0)
 	{
 		std::printf("session tests: all passed\n");

@@ -422,7 +422,7 @@ Skills give you information. They never make decisions for you.
 
 **Getting on your feet (built).** Early on, the bankroll is $2.37 and the rent is $1,225 by Friday midnight. The laptop has apps beside RiverLine for the other ways to get there; each one fast-forwards the clock while the room goes from night to day and back:
 
-- **ShiftLink:** minimum-wage gig shifts. Night cashier at the Quik Stop ($7.25/hr), attendant at the Wash & Fold across the street ($8), delivery driver ($6 plus tips), warehouse loader ($9.50, early mornings). Safe, slow, exhausting.
+- **ShiftLink:** minimum-wage gig shifts. Night cashier at the Lucky Penny on Fifth ($7.25/hr), attendant at the Wash & Fold across the street ($8), delivery driver ($6 plus tips), warehouse loader ($9.50, early mornings). Safe, slow, exhausting.
 - **Burner:** Marcus pays $120 to $200 a drop-off (and $380 to $600 for the long run once you've proven yourself). Every run adds police heat, and heat raises the chance of getting picked up: a fine, a night in holding, and a debt to Marcus for the lost bag. Sam, a rich player who notices you once you cash, pays you to play his RiverLine account ("ghosting"). If site security catches it, your account is restricted for 24 hours.
 - **Bank:** the balance, the rent countdown and payment, and where every dollar came from and went.
 - **Sleep:** a nap or a full night. Energy drains while you're awake and with every shift; under 20% your time bank at the table is halved.

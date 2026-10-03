@@ -46,7 +46,8 @@ public:
 
 	// From the menus (FNightOneGame's front-end hooks).
 	void ContinueCareer();
-	void StartNewCareer(const FString& ScreenName);
+	/** A new career; Who is the person the character creator made (none: the defaults). */
+	void StartNewCareer(const FString& ScreenName, const ss::hero::Character* Who = nullptr);
 	void ResumePlay();
 	void QuitToMainMenu();
 	void QuitToDesktop();

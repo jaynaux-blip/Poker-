@@ -411,7 +411,7 @@ void Study(Canvas& C, const Session& S, double Now)
 		{
 			const float T = static_cast<float>(Clamp01(Since * 3.0 - (R + Cc) * 0.06));
 			const Color Col = Mix(Shade(Charts[Prev][R][Cc], R == Cc), Shade(Charts[Pos][R][Cc], R == Cc), T);
-			const Rect Rc{Gx + Cc * Cell, Gy + R * Cell, Cell - 3.0f, Cell - 3.0f};
+			const Rect Rc{Gx + static_cast<float>(Cc) * Cell, Gy + static_cast<float>(R) * Cell, Cell - 3.0f, Cell - 3.0f};
 			C.FillRoundRect(Rc, 6.0f, Paint::Solid(Col));
 			const int Hi = std::min(R, Cc);
 			const int Lo = std::max(R, Cc);

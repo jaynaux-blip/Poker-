@@ -429,7 +429,7 @@ void ANightOneGameMode::TestNewCareer(const FString& ScreenName)
 	{
 		// As the title screen does: the menu closes, then the career starts.
 		Game->Menu.Close(RealTime);
-		StartNewCareer(ScreenName);
+		StartNewCareer(ScreenName, &Game->Menu.Draft);
 	}
 }
 
@@ -642,11 +642,19 @@ void ANightOneGameMode::ContinueCareer()
 	}
 }
 
-void ANightOneGameMode::StartNewCareer(const FString& ScreenName)
+void ANightOneGameMode::StartNewCareer(const FString& ScreenName, const ss::hero::Character* Who)
 {
 	if (Game)
 	{
-		Game->Session.ResetSave();
+		if (Who)
+		{
+			// A fresh save, then what the character's background starts them with.
+			Game->Session.NewCareer(*Who);
+		}
+		else
+		{
+			Game->Session.ResetSave();
+		}
 		Begin(ScreenName);
 	}
 }

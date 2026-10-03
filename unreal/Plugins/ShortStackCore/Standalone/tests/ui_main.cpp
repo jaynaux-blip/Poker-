@@ -10,6 +10,7 @@
 #include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/FrontEnd.h"
+#include "ShortStack/UI/Portrait.h"
 #include "ShortStack/UI/Phone.h"
 #include "ShortStack/UI/PropArt.h"
 #include "ShortStack/UI/RiverLine.h"
@@ -485,9 +486,15 @@ struct MenuHooks : ss::ui::FrontEndHooks
 	int SettingsChanges = 0;
 	int Sounds = 0;
 	std::string NewGameName;
+	ss::hero::Character Who;
 	void UiSound(ss::SoundId, double) override { ++Sounds; }
 	void Continue() override { ++Continues; }
 	void NewGame(const std::string& Name) override { NewGameName = Name; }
+	void NewCareer(const std::string& Name, const ss::hero::Character& Person) override
+	{
+		NewGameName = Name;
+		Who = Person;
+	}
 	void Resume() override { ++Resumes; }
 	void QuitToMenu() override { ++QuitsToMenu; }
 	void QuitGame() override { ++Quits; }
@@ -538,20 +545,73 @@ void FrontEndFlows()
 	Expect(Fe.Current() == ss::ui::FrontEnd::Page::Main, "any key leaves the title screen");
 	Now = Settle(Fe, Now, 1.0);
 	Fe.Key("Enter", Now); // no save: New Game is selected
-	Expect(Fe.Current() == ss::ui::FrontEnd::Page::NewGame, "Enter on New Game opens it");
-	for (int I = 0; I < 20; ++I)
-	{
-		Fe.Key("Backspace", Now);
-	}
+	using Step = ss::ui::FrontEnd::CreatorStage;
+	Expect(Fe.Current() == ss::ui::FrontEnd::Page::NewGame && Fe.CreatorStep() == Step::Identity && Fe.Draft.Problem().empty(), "Enter on New Game opens the creator with someone to start from");
+	auto Type = [&](const std::string& Text, bool Clear = true) {
+		for (int I = 0; Clear && I < 20; ++I)
+		{
+			Fe.Key("Backspace", Now);
+		}
+		for (const char Ch : Text)
+		{
+			// Unreal sends Q, E and R as keys too: typing them must not switch tabs or reroll.
+			if (Ch == 'R' || Ch == 'Q' || Ch == 'E')
+			{
+				Fe.Key(std::string(1, Ch), Now);
+			}
+			Fe.Char(static_cast<uint32_t>(static_cast<unsigned char>(Ch)), Now);
+		}
+	};
+	Type("");
 	Fe.Key("Enter", Now);
-	Expect(Fe.Current() == ss::ui::FrontEnd::Page::NewGame && H.NewGameName.empty(), "an empty name is refused");
-	for (const char Ch : std::string("ace high!"))
-	{
-		Fe.Char(static_cast<uint32_t>(static_cast<unsigned char>(Ch)), Now);
-	}
-	Expect(Fe.ScreenName == "acehigh", "only valid name characters are typed");
+	Expect(Fe.Current() == ss::ui::FrontEnd::Page::NewGame && Fe.CreatorStep() == Step::Identity && H.NewGameName.empty() && Fe.CreatorField() == 0, "an empty first name is refused");
+	const ss::hero::Look Before = Fe.Draft.Appearance;
+	Type("Rosa Mar");
+	Fe.Char(0xED, Now); // i with an acute accent
+	Type("a", false);
+	Fe.Char(0xED, Now);
+	Expect(Fe.Draft.FirstName == "Rosa Mar\xC3\xAD" "a\xC3\xAD" && Fe.Draft.Appearance == Before, "names take spaces and accents; typing R doesn't reroll");
+	Fe.Key("Backspace", Now);
+	Expect(Fe.Draft.FirstName == "Rosa Mar\xC3\xAD" "a", "backspace removes a whole accented letter");
+	Fe.Key("Tab", Now);
+	Type("Delgado");
+	Fe.Key("Tab", Now);
+	Type("ace high!");
+	Expect(Fe.ScreenName == "acehigh", "only valid screen name characters are typed");
+	Fe.Key("Tab", Now);
+	const int Age = Fe.Draft.Age;
+	Fe.Key(Age > 30 ? "Left" : "Right", Now);
+	Expect(Fe.CreatorField() == 3 && Fe.Draft.Age == Age + (Age > 30 ? -1 : 1), "Left and Right change the age");
+	Fe.Key("Down", Now);
+	const std::string Country = Fe.Draft.Country;
+	Fe.Key("Right", Now);
+	Expect(Fe.Draft.Country != Country, "the country grid moves");
 	Fe.Key("Enter", Now);
-	Expect(H.NewGameName == "acehigh" && !Fe.IsOpen(), "Enter begins a new game and closes the menu");
+	Expect(Fe.CreatorStep() == Step::Background, "a complete identity moves on to the background");
+	const ss::hero::Background Was = Fe.Draft.Story;
+	Fe.Key("Right", Now);
+	Expect(Fe.Draft.Story != Was, "arrows choose a background");
+	const ss::hero::Background Chosen = Fe.Draft.Story;
+	Fe.Key("Enter", Now);
+	Expect(Fe.CreatorStep() == Step::Look && Fe.CreatorTab() == 0, "then the look, on the face tab");
+	Fe.Key("E", Now);
+	const int Hair = Fe.Draft.Appearance.Hair;
+	Fe.Key("Right", Now);
+	Expect(Fe.CreatorTab() == 1 && Fe.Draft.Appearance.Hair == (Hair + 1) % ss::hero::OptionCount(ss::hero::Slot::Hair), "E opens the hair tab and Right changes the style");
+	Fe.Key("Q", Now);
+	Fe.Key("Q", Now);
+	Fe.Key("Down", Now);
+	const int Height = Fe.Draft.Appearance.Height;
+	Fe.Key("Right", Now);
+	Expect(Fe.CreatorTab() == 3 || (Fe.CreatorTab() == 2 && Fe.Draft.Appearance.Height == std::min(ss::hero::MaxHeight, Height + 1)), "the body tab sets the height");
+	Fe.Key("Enter", Now);
+	Expect(Fe.CreatorStep() == Step::Review, "then the review");
+	Fe.Key("Escape", Now);
+	Expect(Fe.CreatorStep() == Step::Look, "Escape steps back");
+	Fe.Key("Enter", Now);
+	Fe.Key("Enter", Now);
+	Expect(H.NewGameName == "acehigh" && !Fe.IsOpen() && H.Who.FirstName == "Rosa Mar\xC3\xAD" "a" && H.Who.LastName == "Delgado" && H.Who.Story == Chosen && H.Who.Created,
+		"Begin starts a new career as the person made");
 
 	// Pause menu: settings round trip, then resume.
 	Fe.Open(ss::ui::FrontEnd::Page::Pause, Now);
@@ -594,6 +654,8 @@ void FrontEndScreens()
 	ss::ui::FrontEnd Fe(H);
 	Fe.Info.HasSave = true;
 	Fe.Info.HeroName = "grinder_3c";
+	Fe.Info.Person.Created = true;
+	Fe.Info.Person.Story = ss::hero::Background::Dropout;
 	Fe.Info.BankrollCents = 1864;
 	Fe.Info.Tournaments = 3;
 	Fe.Info.BestFinish = "12th of 180";
@@ -615,6 +677,64 @@ void FrontEndScreens()
 	Fe.Key("Enter", Now);
 	Now = Settle(Fe, Now, 1.0);
 	EmitMenu("menu_newgame", Fe, Now);
+	for (int I = 0; I < 20; ++I)
+	{
+		Fe.Key("Backspace", Now);
+	}
+	for (const char Ch : std::string("Rosa"))
+	{
+		Fe.Char(static_cast<uint32_t>(Ch), Now);
+	}
+	Fe.Key("Tab", Now);
+	for (int I = 0; I < 20; ++I)
+	{
+		Fe.Key("Backspace", Now);
+	}
+	for (const char Ch : std::string("Delgado"))
+	{
+		Fe.Char(static_cast<uint32_t>(Ch), Now);
+	}
+	Fe.Draft.Country = "MX";
+	Fe.Draft.Age = 31;
+	Fe.Key("Down", Now);
+	Fe.Key("Down", Now);
+	Fe.Key("Down", Now);
+	Now = Settle(Fe, Now, 0.5);
+	EmitMenu("menu_creator_identity", Fe, Now);
+	Fe.Key("Enter", Now);
+	Fe.Draft.Story = ss::hero::Background::Kitchen;
+	Now = Settle(Fe, Now, 0.8);
+	EmitMenu("menu_creator_background", Fe, Now);
+	Fe.Key("Enter", Now);
+	Fe.Draft.Appearance.Body = 1;
+	Fe.Draft.Appearance.Face = 4;
+	Fe.Draft.Appearance.Skin = 5;
+	Fe.Draft.Appearance.Hair = 8;
+	Fe.Draft.Appearance.HairColor = 0;
+	Fe.Draft.Appearance.FacialHair = 0;
+	Fe.Draft.Appearance.Outfit = 4;
+	Fe.Draft.Appearance.OutfitColor = 5;
+	Fe.Draft.Appearance.Glasses = 0;
+	Fe.Draft.Appearance.Hat = 0;
+	Fe.Draft.Appearance.Height = 168;
+	Fe.Key("Down", Now);
+	Fe.Key("Down", Now);
+	Now = Settle(Fe, Now, 0.8);
+	EmitMenu("menu_creator_look", Fe, Now);
+	Fe.Key("E", Now);
+	Fe.Key("E", Now);
+	Now = Settle(Fe, Now, 0.8);
+	EmitMenu("menu_creator_body", Fe, Now);
+	Fe.Key("E", Now);
+	Now = Settle(Fe, Now, 0.8);
+	EmitMenu("menu_creator_style", Fe, Now);
+	Fe.Key("Enter", Now);
+	Now = Settle(Fe, Now, 1.0);
+	EmitMenu("menu_creator_review", Fe, Now);
+	EmitMenu("menu_creator_review_ultrawide", Fe, Now + 0.05, 2520.0f);
+	Fe.Key("Escape", Now);
+	Fe.Key("Escape", Now);
+	Fe.Key("Escape", Now);
 	Fe.Key("Escape", Now);
 	Fe.Key("Down", Now);
 	Fe.Key("Enter", Now);
@@ -751,7 +871,7 @@ void AppScreens()
 	Now = Run(S, RL, Now, 0.3);
 	Emit("app_sleep", RL, Now);
 	RL.ShowSleepMenu(false);
-	// A night shift at the Quik Stop: the time-lapse, then the result.
+	// A night shift at the Lucky Penny: the time-lapse, then the result.
 	Expect(S.StartActivity("quikstop").empty(), "the night shift starts from the app");
 	Now = Run(S, RL, Now, 1.6);
 	Emit("app_skip", RL, Now);
@@ -1048,7 +1168,7 @@ void Clicks()
 	Expect(RL.CurrentApp() == ss::ui::RiverLine::App::ShiftLink, "the taskbar opens ShiftLink");
 	Frame(290.0f, 516.0f, true, true, false);
 	Frame(290.0f, 516.0f, false, false, true);
-	Expect(S.TimeSkip.Active && S.TimeSkip.Result.ActivityId == "quikstop", "Take shift starts the Quik Stop shift");
+	Expect(S.TimeSkip.Active && S.TimeSkip.Result.ActivityId == "quikstop", "Take shift starts the Lucky Penny shift");
 }
 /** GearDrop and Kast: the store, the locked studio on the laptop, the upgrade that unlocks it, a stream from the lobby to a
  * table, the channel, the directory, the end-of-stream card. */
@@ -1850,6 +1970,80 @@ void EventArtGallery()
 	}
 }
 
+/** The character creator's portraits: a cast that covers every hairstyle, face, outfit, hat and pair of glasses. */
+void PortraitGallery()
+{
+	namespace hero = ss::hero;
+	using ss::ui::Hex;
+	struct Pick
+	{
+		const char* First;
+		int Age;
+		hero::Background Story;
+		hero::Look L;
+	};
+	auto Look = [](int Body, int Face, int Skin, int Eyes, int Brows, int Hair, int HairColor, int Facial, int Build, int Outfit, int OutfitColor, int Glasses, int Hat) {
+		hero::Look L;
+		L.Body = Body;
+		L.Face = Face;
+		L.Skin = Skin;
+		L.Eyes = Eyes;
+		L.Brows = Brows;
+		L.Hair = Hair;
+		L.HairColor = HairColor;
+		L.FacialHair = Facial;
+		L.Build = Build;
+		L.Outfit = Outfit;
+		L.OutfitColor = OutfitColor;
+		L.Glasses = Glasses;
+		L.Hat = Hat;
+		return L;
+	};
+	const Pick Cast[12] = {
+		{"Jesse", 24, hero::Background::Newcomer, Look(0, 0, 3, 1, 1, 3, 1, 1, 1, 0, 0, 0, 0)},
+		{"Rosa", 31, hero::Background::Kitchen, Look(1, 4, 5, 0, 3, 8, 0, 0, 1, 4, 5, 0, 0)},
+		{"Malik", 27, hero::Background::Hustler, Look(0, 1, 8, 1, 2, 1, 0, 4, 2, 1, 2, 0, 0)},
+		{"Yui", 22, hero::Background::Dropout, Look(1, 2, 1, 1, 0, 11, 0, 0, 0, 5, 6, 1, 0)},
+		{"Sean", 46, hero::Background::Bouncer, Look(0, 5, 1, 4, 2, 5, 4, 5, 3, 3, 1, 0, 0)},
+		{"Ama", 29, hero::Background::DealersKid, Look(1, 0, 9, 0, 1, 10, 0, 0, 1, 2, 3, 0, 0)},
+		{"Diego", 35, hero::Background::Hustler, Look(0, 3, 5, 0, 1, 6, 0, 3, 1, 4, 5, 4, 0)},
+		{"Freya", 26, hero::Background::Dropout, Look(1, 0, 0, 4, 1, 9, 5, 0, 0, 0, 4, 0, 1)},
+		{"Kenji", 58, hero::Background::DealersKid, Look(0, 1, 2, 1, 0, 4, 7, 2, 1, 2, 0, 2, 0)},
+		{"Nia", 33, hero::Background::Kitchen, Look(1, 4, 7, 2, 3, 7, 0, 0, 2, 1, 7, 0, 0)},
+		{"Marco", 41, hero::Background::Bouncer, Look(0, 1, 4, 3, 2, 0, 0, 5, 3, 0, 5, 0, 2)},
+		{"Theo", 20, hero::Background::Newcomer, Look(0, 4, 3, 2, 1, 2, 5, 0, 0, 5, 2, 3, 3)},
+	};
+	const char* const Labels[12] = {"textured crop, stubble", "shoulder length, leather", "buzz cut, short beard", "bob, round frames", "undercut, full beard",
+		"braids, flannel", "curls, goatee, shades", "ponytail, beanie", "side part, square frames", "afro, bomber", "shaved, ball cap", "crew cut, cap backwards"};
+	for (int Page = 0; Page < 2; ++Page)
+	{
+		TableMeasurer M;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, Page == 0 ? "Character portraits" : "Character portraits, continued", "Live vector portraits from the creator's look: every hairstyle, face, jacket, hat and pair of glasses");
+		for (int I = 0; I < 6; ++I)
+		{
+			const Pick& P = Cast[Page * 6 + I];
+			hero::Character Who;
+			Who.FirstName = P.First;
+			Who.Age = P.Age;
+			Who.Story = P.Story;
+			Who.Appearance = P.L;
+			const float X = 48.0f + static_cast<float>(I % 3) * 512.0f;
+			const float Y = 124.0f + static_cast<float>(I / 3) * 432.0f;
+			const ss::ui::Rect R{X, Y, 488.0f, 412.0f};
+			C.FillRoundRect(R, 14.0f, ss::ui::Paint::Radial({X + 200.0f, Y + 120.0f}, 0.0f, {X + 244.0f, Y + 206.0f}, 330.0f, Hex(0x24304a), 0.5f, Hex(0x141b2c), Hex(0x0a0e18)));
+			C.PushClip(R);
+			ss::ui::DrawPortrait(C, Who, X + 244.0f, Y + 170.0f, 1.0f, 0.0);
+			C.PopClip();
+			C.FillRoundRect({X, Y + R.H - 54.0f, R.W, 54.0f}, 0.0f, ss::ui::Rgba(4, 6, 12, 0.82f));
+			C.Text(std::string(P.First) + ", " + std::to_string(P.Age), X + 20.0f, Y + R.H - 22.0f, ss::ui::Ts(20.0f, 800, Hex(0xffffff)));
+			C.Text(Labels[Page * 6 + I], X + R.W - 20.0f, Y + R.H - 22.0f, ss::ui::Ts(14.0f, 600, Hex(0x8b9bb4), ss::ui::Align::Right));
+		}
+		SaveSheet(Page == 0 ? "creator_portraits" : "creator_portraits_2", L);
+	}
+}
+
 /** Bracelets and rings as their winners keep them, and the frames champions wear at the tables. */
 void TrophyGallery()
 {
@@ -1955,6 +2149,7 @@ int main(int Argc, char** Argv)
 	ui_test::Avatars();
 	ui_test::EventArtGallery();
 	ui_test::TrophyGallery();
+	ui_test::PortraitGallery();
 	ui_test::MultiScreens();
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();

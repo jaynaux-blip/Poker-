@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShortStack/Common.h"
+#include "ShortStack/Game/Hero.h"
 
 #include <map>
 #include <set>
@@ -36,7 +37,7 @@ struct Activity
 	std::string Id;
 	Kind Type = Kind::Job;
 	std::string Title;   // "Night cashier"
-	std::string Place;   // "Quik Stop #212", or the contact
+	std::string Place;   // "Lucky Penny #212", or the contact
 	std::string Blurb;
 	double Hours = 6.0;
 	Chips WageCents = 0; // per hour (jobs)
@@ -64,7 +65,7 @@ struct LedgerEntry
 	double At = 0.0;
 	std::string Label;
 	Chips Amount = 0;
-	int Kind = 0; // 0 poker, 1 job, 2 hustle, 3 bills, 4 prizes
+	int Kind = 0; // 0 poker, 1 job, 2 hustle, 3 bills, 4 prizes, 5 gear, 6 streaming, 7 transfers, 8 the corner store
 };
 
 /** Rent stages. */
@@ -108,6 +109,8 @@ struct State
 	int LiveCashes = 0;
 	int LiveBestPlace = 0; // 0: none yet
 	Chips LiveWonCents = 0; // prizes, before buy-ins
+	/** The character's background at work (not saved here: the session sets it from the character). */
+	hero::Perks Perks;
 
 	SHORTSTACKCORE_API void Record(double At, const std::string& Label, Chips Amount, int Kind);
 	int TicketsFor(const std::string& TemplateId) const;

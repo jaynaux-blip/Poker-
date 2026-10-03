@@ -147,6 +147,7 @@ std::string SaveData::Serialize() const
 	Out << "shortstack.nightone.v1\n";
 	Out << "bankroll\t" << BankrollCents << "\n";
 	Out << "name\t" << session_detail::Escape(HeroName) << "\n";
+	Out << Person.Serialize();
 	Out << "clock\t" << Fixed(ClockMinutes, 2) << "\n";
 	const life::State& L = Life;
 	Out << "life\tenergy\t" << Fixed(L.Energy, 2) << "\n";
@@ -305,6 +306,10 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 		else if (P.size() == 2 && P[0] == "name")
 		{
 			D.HeroName = session_detail::Unescape(P[1]);
+		}
+		else if (P.size() >= 3 && P[0] == "hero")
+		{
+			D.Person.Read(P);
 		}
 		else if (P.size() == 2 && P[0] == "clock")
 		{
@@ -572,9 +577,11 @@ Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData*
 	{
 		BankrollCents = Loaded->BankrollCents;
 		HeroName = Loaded->HeroName;
+		Person = Loaded->Person;
 		History = Loaded->History;
 		LobbyMinutes = Loaded->ClockMinutes;
 		Life = Loaded->Life;
+		Life.Perks = hero::PerksOf(Person);
 		Gear = Loaded->Gear;
 		Leds = Loaded->Leds;
 		Channel = Loaded->Channel;
@@ -749,6 +756,7 @@ void Session::Save()
 	SaveData D;
 	D.BankrollCents = BankrollCents;
 	D.HeroName = HeroName;
+	D.Person = Person;
 	D.History = History;
 	D.ClockMinutes = LobbyMinutes;
 	D.Life = Life;
@@ -773,6 +781,7 @@ void Session::ResetSave()
 	History.clear();
 	TextsSeen.clear();
 	LobbyMinutes = 2.0 * 60.0 + 7.0;
+	Person = hero::Character();
 	Life = life::State();
 	CalendarAt = -1.0;
 	if (Stream.Live)
@@ -793,6 +802,24 @@ void Session::ResetSave()
 	LivingWorld = world::World();
 	WorldSaved.clear();
 	StartWorld(nullptr);
+	Save();
+}
+
+void Session::NewCareer(const hero::Character& Who)
+{
+	ResetSave();
+	Person = Who;
+	Person.Created = true;
+	Life.Perks = hero::PerksOf(Person);
+	if (Life.Perks.StartCents > 0)
+	{
+		BankrollCents += Life.Perks.StartCents;
+		Life.Record(WorldMinutes(), "Savings from home", Life.Perks.StartCents, 7);
+	}
+	for (const std::string& U : Life.Perks.StartUnlocks)
+	{
+		Life.Unlocks.insert(U);
+	}
 	Save();
 }
 
@@ -1875,12 +1902,12 @@ void Session::AfterAward()
 		}
 		if (Lost && HeroVis.HasEquity && HeroVis.Equity >= 0.6)
 		{
-			HeroTilt = Min(1.0, HeroTilt + 0.45);
+			HeroTilt = Min(1.0, HeroTilt + 0.45 * Life.Perks.TiltGain);
 			SystemLine("Bad beat. You were " + std::to_string(static_cast<int>(JsRound(HeroVis.Equity * 100.0))) + "% to win.");
 		}
 		else if (Lost && BigPot)
 		{
-			HeroTilt = Min(1.0, HeroTilt + 0.2);
+			HeroTilt = Min(1.0, HeroTilt + 0.2 * Life.Perks.TiltGain);
 		}
 		else if (!Lost)
 		{
@@ -3245,7 +3272,7 @@ void Session::StreamStep()
 	if (Stream.Missed > MissedBefore)
 	{
 		// A troll gets through after a bad beat: it gets under the skin.
-		HeroTilt = std::min(1.0, HeroTilt + 0.03 * static_cast<double>(Stream.Missed - MissedBefore) * (1.0 - Fx.Calm));
+		HeroTilt = std::min(1.0, HeroTilt + 0.03 * static_cast<double>(Stream.Missed - MissedBefore) * (1.0 - Fx.Calm) * Life.Perks.TiltGain);
 	}
 	PlayStreamNotices();
 }
@@ -3709,7 +3736,7 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 		Life.Energy = std::min(100.0, std::max(0.0, Life.Energy - Hours * Drain));
 	}
 	RenewGear(From, To);
-	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat - Hours * 1.0));
+	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat - Hours * Life.Perks.HeatCool));
 	// The Night Shift closes at 6 AM.
 	for (double End = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 6.0 * 60.0; End <= To; End += net::MinutesPerDay)
 	{

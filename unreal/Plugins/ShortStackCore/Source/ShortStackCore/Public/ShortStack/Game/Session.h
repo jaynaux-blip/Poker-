@@ -217,6 +217,8 @@ struct SaveData
 {
 	Chips BankrollCents = 237;
 	std::string HeroName = "grinder_3c";
+	/** The person behind the screen name (the character creator's; "hero" lines). */
+	hero::Character Person;
 	std::vector<HistoryEntry> History;
 	std::vector<std::string> TextsSeen;
 	double ClockMinutes = 2.0 * 60.0 + 7.0; // the lobby clock
@@ -276,6 +278,8 @@ public:
 	Chips BankrollCents = 237;
 	std::string HeroName = "grinder_3c";
 	std::vector<HistoryEntry> History;
+	/** Who the player made in the character creator (defaults, not Created, for a career from before it). */
+	hero::Character Person;
 
 	// ------------------------------------------------------------ ui state
 	ss::Screen CurrentScreen = ss::Screen::Boot;
@@ -329,6 +333,8 @@ public:
 
 	SHORTSTACKCORE_API void Save();
 	SHORTSTACKCORE_API void ResetSave();
+	/** A new career for this character: a fresh save, then what their background starts them with. */
+	SHORTSTACKCORE_API void NewCareer(const hero::Character& Who);
 	void OnBoot();
 
 	bool CanAfford(const LobbyEvent& Ev) const;

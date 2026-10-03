@@ -63,6 +63,8 @@ Color KindColor(int Kind)
 	case 3: return Hex(0xef4d5a);
 	case 5: return Hex(0xff6b2c);
 	case 6: return Hex(0x9b5cff);
+	case 7: return Hex(0x60a5fa);
+	case 8: return Hex(0xe23b4e);
 	default: return Hex(0xf2c14e);
 	}
 }
@@ -77,11 +79,13 @@ const char* KindName(int Kind)
 	case 3: return "Bills";
 	case 5: return "GearDrop";
 	case 6: return "Kast";
+	case 7: return "Transfer";
+	case 8: return "Corner store";
 	default: return "Prizes";
 	}
 }
 
-/** "QS" for Quik Stop #212: the first letters of the first two words. */
+/** "LP" for Lucky Penny #212: the first letters of the first two words. */
 std::string AppInitials(const std::string& Name)
 {
 	std::string Out;
@@ -457,11 +461,18 @@ void RiverLine::ShiftLinkApp(double Now)
 		UI.RRect({R.X + R.W - 24.0f - Cw, R.Y + 34.0f, Cw, 24.0f}, 12.0f, Open ? Hex(0xdcfce7) : Hex(0xefebe4));
 		UI.Text(Chip, R.X + R.W - 24.0f - Cw / 2.0f, R.Y + 47.0f, Ts(11.0f, 800, Open ? Hex(0x15803d) : Gray, Align::Center, Baseline::Middle));
 		// Pay.
-		const float Pw = UI.Text(Money(A.WageCents), R.X + 28.0f, R.Y + 148.0f, Ts(36.0f, 900, Dark, Align::Left, Baseline::Alphabetic, true));
-		UI.Text("/hr", R.X + 32.0f + Pw, R.Y + 148.0f, Ts(16.0f, 600, Gray));
+		// The character's background can raise the rate (a line cook's), and the card says so.
+		const double Rate = L.Perks.JobPay;
+		auto Scaled = [Rate](Chips Cents) { return static_cast<Chips>(std::llround(static_cast<double>(Cents) * Rate)); };
+		const float Pw = UI.Text(Money(Scaled(A.WageCents)), R.X + 28.0f, R.Y + 148.0f, Ts(36.0f, 900, Dark, Align::Left, Baseline::Alphabetic, true));
+		const float Hw = UI.Text("/hr", R.X + 32.0f + Pw, R.Y + 148.0f, Ts(16.0f, 600, Gray));
+		if (Rate > 1.0)
+		{
+			UI.Text("+" + std::to_string(static_cast<int>(std::lround((Rate - 1.0) * 100.0))) + "% cook's rate", R.X + 42.0f + Pw + Hw, R.Y + 148.0f, Ts(13.0f, 800, ShiftOrange));
+		}
 		UI.Text(std::to_string(static_cast<int>(A.Hours)) + "-hour shift", R.X + R.W - 28.0f, R.Y + 148.0f, Ts(16.0f, 700, Dark, Align::Right));
-		const Chips Base = static_cast<Chips>(std::llround(static_cast<double>(A.WageCents) * A.Hours));
-		const std::string Extra = A.PayMax <= 0 ? std::string() : A.PayMin > 0 ? " + " + NetMoney(A.PayMin) + "\xE2\x80\x93" + NetMoney(A.PayMax) + " in tips" : " + up to " + NetMoney(A.PayMax) + " extra";
+		const Chips Base = static_cast<Chips>(std::llround(static_cast<double>(A.WageCents) * A.Hours * Rate));
+		const std::string Extra = A.PayMax <= 0 ? std::string() : A.PayMin > 0 ? " + " + NetMoney(Scaled(A.PayMin)) + "\xE2\x80\x93" + NetMoney(Scaled(A.PayMax)) + " in tips" : " + up to " + NetMoney(Scaled(A.PayMax)) + " extra";
 		UI.Text("Est. " + Money(Base) + Extra, R.X + 28.0f, R.Y + 178.0f,
 			Ts(16.0f, 700, Hex(0x16a34a)));
 		UI.Text("Shifts start " + net::TimeLabel(static_cast<double>(A.Opens)) + " \xE2\x80\x93 " + net::TimeLabel(static_cast<double>(A.Closes)), R.X + 28.0f, R.Y + 204.0f, Ts(14.0f, 500, Gray));
@@ -511,7 +522,7 @@ void RiverLine::ShiftLinkApp(double Now)
 	UI.Text("due in " + net::Countdown(std::max(0.0, L.RentDeadline - World)), Rr.X + 28.0f, Rr.Y + 116.0f, Ts(15.0f, 600, Hex(0xf5d0a9)));
 	const Chips Short = std::max<Chips>(0, L.RentDueCents - S.BankrollCents);
 	const double Shifts = static_cast<double>(Short) / 4350.0;
-	NetParagraph(*C, Short > 0 ? "You're " + Money(Short) + " short. That's about " + std::to_string(static_cast<int>(std::ceil(Shifts))) + " night shifts at the Quik Stop." : "You have the rent. Pay it from the Bank app.",
+	NetParagraph(*C, Short > 0 ? "You're " + Money(Short) + " short. That's about " + std::to_string(static_cast<int>(std::ceil(Shifts))) + " night shifts at the Lucky Penny." : "You have the rent. Pay it from the Bank app.",
 		Rr.X + 28.0f, Rr.Y + 152.0f, Rr.W - 56.0f, 14.0f, 500, Hex(0xf5d0a9), 20.0f, 2);
 }
 
