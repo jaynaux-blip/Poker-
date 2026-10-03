@@ -1520,8 +1520,8 @@ void RiverLine::SeriesPage(double Now)
 	for (int I = 0; I < 4; ++I)
 	{
 		const float W = UI.Text(Stats[I].first, Sx, B.Y + 166.0f, Ts(I == 0 ? 30.0f : 24.0f, 900, I == 0 ? pal::Gold : pal::Ink));
-		NetSpaced(*C, Stats[I].second, Sx, B.Y + 188.0f, 10.5f, 800, pal::Muted, 1.6f);
-		Sx += std::max(W, 120.0f) + 48.0f;
+		const float Lw = NetSpaced(*C, Stats[I].second, Sx, B.Y + 188.0f, 10.5f, 800, pal::Muted, 1.6f);
+		Sx += std::max({W, Lw, 120.0f}) + 48.0f;
 	}
 	// Progress through the series.
 	const float Prog = Nf(Clamp01((World - static_cast<double>(Sr->FirstDay) * net::MinutesPerDay) / (static_cast<double>(DayCount) * net::MinutesPerDay)));

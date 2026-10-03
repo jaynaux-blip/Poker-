@@ -1475,6 +1475,11 @@ void Network::FoundingTally(double To, std::vector<double>& Points, std::vector<
 	FinalTables = T.FinalTables;
 }
 
+std::vector<double> Network::SeriesTally(const SeriesInfo& Series, double To) const
+{
+	return Tally(static_cast<double>(Series.FirstDay) * MinutesPerDay, To, Series.Id, false).Points;
+}
+
 Chips Network::NightShiftPrize(int Rank)
 {
 	static const Chips Top[10] = {25000, 15000, 10000, 7500, 6000, 5000, 4500, 4000, 3500, 3000};

@@ -837,6 +837,11 @@ public:
 	/** Where a stats page's ROI ranks among the regulars with at least Min tournaments (0..1: the share it beats). */
 	SHORTSTACKCORE_API double RoiRank(double Roi, int Min = 200) const;
 	/**
+	 * Where an ROI places among everyone with Min tournaments (the regulars and the player): 1 + how many have a
+	 * better one. bHero: the player's own page (they aren't counted against themselves).
+	 */
+	SHORTSTACKCORE_API int RoiPlace(double Roi, bool bHero, int Min = 200) const;
+	/**
 	 * Debug: a bracelet (The Championship Online's) or a ring (Ring Rush's) for someone (-1: the player), from the
 	 * latest of those series to have started, its Main Event's when Main. Their card and their frame show it.
 	 */

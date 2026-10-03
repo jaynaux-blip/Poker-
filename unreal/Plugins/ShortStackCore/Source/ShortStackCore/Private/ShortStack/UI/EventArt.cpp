@@ -1862,7 +1862,58 @@ void Enamel(CrestLook& L, const std::string& Slot, uint32_t A, uint32_t B)
 	L.Field2 = Slot == "tco" ? Hex(0x0a1747) : Slot == "ring" ? Hex(0x3d0618) : Hex(B);
 }
 
+// A crest's layers, back to front: the ones that move (the rays, the sun's points, the glints) are drawn every frame,
+// the rest once (Canvas::Cached) and copied in after.
+enum CrestLayer : int
+{
+	CrestShadow = 1,
+	CrestRays = 2,
+	CrestBehind = 4, // laurel, the back of a bracelet
+	CrestSun = 8,
+	CrestBadge = 16, // the frame, the badge, the motif and everything in front of it but the glints
+	CrestGlints = 32,
+};
+
+uint64_t Fnv(uint64_t H, const void* Data, size_t Size)
+{
+	const unsigned char* B = static_cast<const unsigned char*>(Data);
+	for (size_t K = 0; K < Size; ++K)
+	{
+		H = (H ^ B[K]) * 0x100000001b3ull;
+	}
+	return H;
+}
+
+uint64_t CrestKey(const CrestLook& L, float Size)
+{
+	uint64_t H = 0xcbf29ce484222325ull;
+	const int Ints[4] = {static_cast<int>(L.Shape), static_cast<int>(L.Rim), static_cast<int>(L.Motif), static_cast<int>(L.Seal)};
+	const bool Flags[6] = {L.Main, L.Laurel, L.Crown, L.Bracelet, L.Ring, L.HighRoller};
+	const float Floats[9] = {L.Field.R, L.Field.G, L.Field.B, L.Field.A, L.Field2.R, L.Field2.G, L.Field2.B, L.Field2.A, Size};
+	H = Fnv(H, "crest1", 6);
+	H = Fnv(H, Ints, sizeof(Ints));
+	H = Fnv(H, Flags, sizeof(Flags));
+	H = Fnv(H, Floats, sizeof(Floats));
+	return Fnv(H, L.Banner.data(), L.Banner.size());
+}
+
+void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double Time, int Which);
+
 void Crest(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double Time)
+{
+	const uint64_t Key = CrestKey(L, Size);
+	const auto Still = [&](int Layer) {
+		C.Cached(Key * 131 + static_cast<uint64_t>(Layer), Cx, Cy, [&](Canvas& At) { CrestLayers(At, L, 0.0f, 0.0f, Size, 0.0, Layer); });
+	};
+	Still(CrestShadow);
+	CrestLayers(C, L, Cx, Cy, Size, Time, CrestRays);
+	Still(CrestBehind);
+	CrestLayers(C, L, Cx, Cy, Size, Time, CrestSun);
+	Still(CrestBadge);
+	CrestLayers(C, L, Cx, Cy, Size, Time, CrestGlints);
+}
+
+void CrestLayers(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double Time, int Which)
 {
 	// Small crests (a schedule row, a chip) drop the banner and the finer work, and fill more of their box.
 	const bool Rich = Size >= 44.0f;
@@ -1876,22 +1927,29 @@ void Crest(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double
 	const Color Stone = Lift(L.Field, 0.1f);
 
 	// Behind: shadow, rays, laurel, the back of a bracelet, the sun's points.
-	Oval(P, 0.0f, 0.12f, 1.05f, 1.0f, Paint::Radial(P.P(0.0f, 0.12f), 0.0f, P.P(0.0f, 0.12f), 1.05f * P.S, Rgba(0, 0, 0, 0.5f), 0.6f, Rgba(0, 0, 0, 0.25f), Rgba(0, 0, 0, 0.0f)));
-	if (L.Main && Rich)
+	if (Which & CrestShadow)
+	{
+		Oval(P, 0.0f, 0.12f, 1.05f, 1.0f, Paint::Radial(P.P(0.0f, 0.12f), 0.0f, P.P(0.0f, 0.12f), 1.05f * P.S, Rgba(0, 0, 0, 0.5f), 0.6f, Rgba(0, 0, 0, 0.25f), Rgba(0, 0, 0, 0.0f)));
+	}
+	if ((Which & CrestRays) && L.Main && Rich)
 	{
 		Rays(P, M, Time, 1.0f);
 	}
-	if (L.Main || L.Laurel)
+	if (!(Which & (CrestBehind | CrestSun | CrestBadge | CrestGlints)))
+	{
+		return;
+	}
+	if ((Which & CrestBehind) && (L.Main || L.Laurel))
 	{
 		const Color Leaf1 = L.Rim == Alloy::Platinum ? M.Hi : Lift(M.Mid, 0.12f);
 		Laurel(P, 1.06f, HalfPiF + 0.3f, HalfPiF + 2.5f, Leaf1, M.Lo, M.Lo, Rich ? 8 : 5);
 		Laurel(P, 1.06f, HalfPiF - 0.3f, HalfPiF - 2.5f, Leaf1, M.Lo, M.Lo, Rich ? 8 : 5);
 	}
-	if (L.Bracelet)
+	if ((Which & CrestBehind) && L.Bracelet)
 	{
 		BraceletBand(P, M, Stone, false);
 	}
-	if (L.Shape == Frame::Sunburst)
+	if ((Which & CrestSun) && L.Shape == Frame::Sunburst)
 	{
 		for (int K = 0; K < 16; ++K)
 		{
@@ -1900,6 +1958,18 @@ void Crest(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double
 			Poly(P, {{0.86f * std::cos(A - 0.13f), 0.86f * std::sin(A - 0.13f)}, {R1 * std::cos(A), R1 * std::sin(A)}, {0.86f * std::cos(A + 0.13f), 0.86f * std::sin(A + 0.13f)}},
 				Lin(P, 0.0f, -1.2f, 0.0f, 1.2f, K % 2 == 0 ? M.Hi : M.Mid, M.Lo));
 		}
+	}
+	if (Which & CrestGlints)
+	{
+		if (Rich)
+		{
+			Sparkles(P, Time, L.Main ? 6 : 3, 1.0f);
+		}
+		return;
+	}
+	if (!(Which & CrestBadge))
+	{
+		return;
 	}
 	if (L.Shape == Frame::Hexagon)
 	{
@@ -1987,10 +2057,6 @@ void Crest(Canvas& C, const CrestLook& L, float Cx, float Cy, float Size, double
 		const Tone White{Hex(0xf8fafc), Hex(0xc7d2e4), Hex(0x0b1220), Stone, Hex(0xffffff)};
 		Draw(P.At(Su, -0.64f, 0.14f), L.Seal, White);
 	}
-	if (Rich)
-	{
-		Sparkles(P, Time, L.Main ? 6 : 3, 1.0f);
-	}
 }
 
 struct Family
@@ -2063,7 +2129,26 @@ const Family* FamilyOf(const std::string& Id)
 }
 
 /** An icon tile for one of the schedule's tournaments. */
+void TileBody(Canvas& C, Glyph G, uint32_t A, uint32_t B, uint32_t GemColor, bool Featured, int Badge, float Cx, float Cy, float Size);
+
 void Tile(Canvas& C, Glyph G, uint32_t A, uint32_t B, uint32_t GemColor, bool Featured, int Badge, float Cx, float Cy, float Size, double Time)
+{
+	// The tile is drawn once and copied in after (Canvas::Cached); the featured glint pulses on top.
+	uint64_t Key = 0xcbf29ce484222325ull;
+	const uint32_t Ints[6] = {static_cast<uint32_t>(G), A, B, GemColor, Featured ? 1u : 0u, static_cast<uint32_t>(Badge)};
+	Key = Fnv(Key, "tile1", 5);
+	Key = Fnv(Key, Ints, sizeof(Ints));
+	Key = Fnv(Key, &Size, sizeof(Size));
+	C.Cached(Key, Cx, Cy, [&](Canvas& At) { TileBody(At, G, A, B, GemColor, Featured, Badge, 0.0f, 0.0f, Size); });
+	if (Featured && Size >= 40.0f)
+	{
+		const float H = Size * 0.5f;
+		const float A0 = 0.6f + 0.4f * Fl(std::sin(Time * 2.2 + Fl(Cx) * 0.01f));
+		Glint(Pen{&C, Cx + H - Size * 0.12f, Cy - H + Size * 0.12f, Size * 0.3f}, 0.0f, 0.0f, 0.32f, Fade(Hex(0xfff4c6), A0));
+	}
+}
+
+void TileBody(Canvas& C, Glyph G, uint32_t A, uint32_t B, uint32_t GemColor, bool Featured, int Badge, float Cx, float Cy, float Size)
 {
 	const float H = Size * 0.5f;
 	const Rect R{Cx - H, Cy - H, Size, Size};
@@ -2081,11 +2166,6 @@ void Tile(Canvas& C, Glyph G, uint32_t A, uint32_t B, uint32_t GemColor, bool Fe
 	Draw(P.At(0.0f, 0.07f, 1.0f), G, Shadowed(0.4f));
 	Draw(P, G, White);
 	C.StrokeRoundRect(R, Rad, Featured ? Hex(0xf2c14e) : Rgba(255, 255, 255, 0.16f), Featured ? std::max(1.5f, Size * 0.035f) : 1.0f);
-	if (Featured && Size >= 40.0f)
-	{
-		const float A0 = 0.6f + 0.4f * Fl(std::sin(Time * 2.2 + Fl(Cx) * 0.01f));
-		Glint(Pen{&C, R.X + R.W - Size * 0.12f, R.Y + Size * 0.12f, Size * 0.3f}, 0.0f, 0.0f, 0.32f, Fade(Hex(0xfff4c6), A0));
-	}
 	if (Badge > 0)
 	{
 		const float Br = Size * 0.17f;

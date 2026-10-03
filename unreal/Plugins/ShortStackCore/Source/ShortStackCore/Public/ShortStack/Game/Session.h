@@ -226,6 +226,12 @@ struct SaveData
 	kast::Channel Channel;
 	/** The living world (its own "world" lines, passed through untouched by anything that edits a save). */
 	std::string WorldText;
+	/**
+	 * For a host that saves in the background (SessionHooks::SavesInBackground): the world as it was at the save,
+	 * frozen, for the host to write into WorldText off the game thread (WorldText is empty then). The same snapshot
+	 * comes back on every save until the world moves on, so its text need only be written once.
+	 */
+	std::shared_ptr<const world::World> WorldSnapshot;
 	/** What happened away from the desk for the world to hear about (written by the host, read by the next session). */
 	std::vector<std::string> WorldNotes;
 
@@ -249,6 +255,11 @@ public:
 	virtual void AddCan() {}
 	virtual void Celebrate() {}
 	virtual void Save(const SaveData& /*Data*/) {}
+	/**
+	 * True when the host writes saves off the game thread: the session then hands it a frozen copy of the world
+	 * (SaveData::WorldSnapshot, a few milliseconds) instead of the world's text (tens of milliseconds to write).
+	 */
+	virtual bool SavesInBackground() const { return false; }
 	/** Leaves the apartment for a place the host plays out itself (Dee's game). False when it can't. */
 	virtual bool GoOut(const std::string& /*ActivityId*/, Chips /*BuyInCents*/) { return false; }
 	/** Something from GearDrop arrived (or a subscription ended): the desk can show it (a second monitor, a ring light). */
@@ -607,6 +618,7 @@ private:
 	// The world's save text, rewritten when something involving the player happened or an hour has passed (writing
 	// a couple of megabytes on every save would hitch).
 	std::string WorldSaved;
+	std::shared_ptr<const world::World> WorldSnap; // the same, frozen, for a host that saves in the background
 	double WorldSavedAt = -1.0e9;
 	int WorldSavedRev = -1;
 	void StartWorld(const SaveData* Loaded);

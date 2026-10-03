@@ -347,6 +347,45 @@ void Sim::Found(World& W, double Start)
 			N.Income = sim::Cents(1500.0);
 		}
 		N.Joined = Today - 365 * std::max(0, std::min(Age - 19, 1 + R.Int(10)));
+		{
+			// The years before this one: what's left of the lifetime record, spread over them (careers start small and
+			// grow, with good years and bad), so the card's years add up to its totals.
+			const int First = YearOf(N.Joined);
+			const int Count = std::min(Year0 - First, 12);
+			const Chips PastWon = std::max<Chips>(0, On.Won - N.ThisSeason.Won);
+			const int PastWins = std::max(0, On.Wins - N.ThisSeason.Wins);
+			const int PastEvents = std::max(0, On.Events - N.Years.back().Events);
+			if (Count > 0 && (PastWon > 0 || PastEvents > 0))
+			{
+				std::vector<double> Share;
+				double Sum = 0.0;
+				for (int K = 0; K < Count; ++K)
+				{
+					Share.push_back((0.35 + static_cast<double>(K)) * R.Range(0.55, 1.45));
+					Sum += Share.back();
+				}
+				std::vector<Year> Past;
+				Chips WonLeft = PastWon;
+				int WinsLeft = PastWins;
+				int EventsLeft = PastEvents;
+				for (int K = 0; K < Count; ++K)
+				{
+					const bool Last = K == Count - 1;
+					const double Frac = Share[static_cast<size_t>(K)] / Sum;
+					Year Prior;
+					Prior.Number = Year0 - Count + K;
+					Prior.Online = Last ? WonLeft : std::min(WonLeft, static_cast<Chips>(static_cast<double>(PastWon) * Frac));
+					Prior.Wins = Last ? WinsLeft : std::min(WinsLeft, static_cast<int>(std::lround(static_cast<double>(PastWins) * Frac)));
+					Prior.Events = Last ? EventsLeft : std::min(EventsLeft, static_cast<int>(std::lround(static_cast<double>(PastEvents) * Frac)));
+					Prior.Net = static_cast<Chips>(static_cast<double>(Prior.Online) * Roi / (1.0 + Roi));
+					WonLeft -= Prior.Online;
+					WinsLeft -= Prior.Wins;
+					EventsLeft -= Prior.Events;
+					Past.push_back(Prior);
+				}
+				N.Years.insert(N.Years.begin(), Past.begin(), Past.end());
+			}
+		}
 		N.LastDay = Today - 1;
 		N.Began = Identity::OnlineGrinder;
 		if (P.Rival)
@@ -753,6 +792,23 @@ void World::Create(uint32_t InSeed, double StartWorld)
 	// [0] is the whole world's average skill: the fields move with it.
 	FieldRef[0] = People > 0 ? All / static_cast<double>(People) : 0.5;
 	Sim::RefreshField(*this);
+	// A series already under way: the standings from its days so far (the network's results for those days, by the
+	// same regulars), so its leaderboard isn't empty on day six.
+	if (const net::SeriesInfo* Sr = net::Shared().CurrentSeries(StartWorld))
+	{
+		if (static_cast<double>(Sr->FirstDay) * net::MinutesPerDay < StartWorld)
+		{
+			const std::vector<double> Pts = net::Shared().SeriesTally(*Sr, StartWorld);
+			for (size_t I = 0; I < Pts.size() && I < static_cast<size_t>(Founding); ++I)
+			{
+				if (Pts[I] > 0.0)
+				{
+					SeriesPoints[static_cast<int>(I)] = Pts[I];
+				}
+			}
+			SeriesKey = Sr->Id;
+		}
+	}
 	// Yesterday's late events still running, today's and tomorrow's registrations.
 	Planned = Today - 2;
 	Sim::PlanDay(*this, Today - 1);

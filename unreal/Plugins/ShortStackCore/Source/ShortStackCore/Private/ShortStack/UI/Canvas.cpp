@@ -1,6 +1,8 @@
 #include "ShortStack/UI/Canvas.h"
 #include "../StrictFloat.h"
 
+#include <cstring>
+#include <unordered_map>
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -526,6 +528,147 @@ void Canvas::PopClip()
 	}
 }
 
+namespace
+{
+/**
+ * The pages are redrawn 30 times a second, tens of thousands of vertices each: the tessellator works in buffers kept
+ * from shape to shape (one per role, so a shape's path can be handed to the fill or the stroke that uses another), and
+ * reads its corners and circles from tables instead of calling cos and sin for every point.
+ */
+enum class Buf : int
+{
+	Path,     // a shape's outline, built by FillRoundRect, FillEllipse and the like
+	Device,   // FillPath: the outline in device space
+	Reversed, // FillPath: the outline turned around (counterclockwise in, clockwise out)
+	Stroke,   // the points of a stroke, in device space
+	Clean,    // StrokeDevice: those points without repeats
+	Count,
+};
+
+std::vector<Vec2>& Scratch(Buf B)
+{
+	thread_local std::vector<Vec2> Bufs[static_cast<int>(Buf::Count)];
+	std::vector<Vec2>& V = Bufs[static_cast<int>(B)];
+	V.clear();
+	return V;
+}
+
+/** cos and sin at I/N of a full turn, I = 0..N (N up to 320 segments: a dashed circle at the largest radius). */
+const std::vector<Vec2>& TurnTable(int N)
+{
+	thread_local std::vector<std::vector<Vec2>> Tables;
+	if (N < 1 || N > 320)
+	{
+		thread_local std::vector<Vec2> Odd;
+		Odd.clear();
+		for (int I = 0; I <= N; ++I)
+		{
+			const float A = 2.0f * Pi * static_cast<float>(I) / static_cast<float>(N);
+			Odd.push_back({std::cos(A), std::sin(A)});
+		}
+		return Odd;
+	}
+	if (Tables.size() <= static_cast<size_t>(N))
+	{
+		Tables.resize(static_cast<size_t>(N) + 1);
+	}
+	std::vector<Vec2>& T = Tables[static_cast<size_t>(N)];
+	if (T.empty())
+	{
+		for (int I = 0; I <= N; ++I)
+		{
+			const float A = 2.0f * Pi * static_cast<float>(I) / static_cast<float>(N);
+			T.push_back({std::cos(A), std::sin(A)});
+		}
+	}
+	return T;
+}
+
+/** cos and sin at I/Segs of a quarter turn, I = 0..Segs. */
+const std::vector<Vec2>& QuarterTable(int Segs)
+{
+	thread_local std::vector<std::vector<Vec2>> Tables;
+	const size_t K = static_cast<size_t>(Segs < 1 ? 1 : Segs);
+	if (Tables.size() <= K)
+	{
+		Tables.resize(K + 1);
+	}
+	std::vector<Vec2>& T = Tables[K];
+	if (T.empty())
+	{
+		for (size_t I = 0; I <= K; ++I)
+		{
+			const float A = (Pi * 0.5f) * static_cast<float>(I) / static_cast<float>(K);
+			T.push_back({std::cos(A), std::sin(A)});
+		}
+	}
+	return T;
+}
+
+void RoundRectInto(std::vector<Vec2>& P, const Rect& R, float Radius, int Segs)
+{
+	const float MaxR = (R.W < R.H ? R.W : R.H) * 0.5f;
+	const float Rad = Clampf(Radius, 0.0f, MaxR);
+	if (Rad < 0.01f)
+	{
+		P.push_back({R.X, R.Y});
+		P.push_back({R.X + R.W, R.Y});
+		P.push_back({R.X + R.W, R.Y + R.H});
+		P.push_back({R.X, R.Y + R.H});
+		return;
+	}
+	// The four corners from one quarter-turn table: from 180 degrees (top left), 270, 0 and 90.
+	const std::vector<Vec2>& Q = QuarterTable(Segs);
+	const Vec2 Centers[4] = {{R.X + Rad, R.Y + Rad}, {R.X + R.W - Rad, R.Y + Rad}, {R.X + R.W - Rad, R.Y + R.H - Rad}, {R.X + Rad, R.Y + R.H - Rad}};
+	P.reserve(Q.size() * 4);
+	for (const Vec2& U : Q)
+	{
+		P.push_back({Centers[0].X - Rad * U.X, Centers[0].Y - Rad * U.Y});
+	}
+	for (const Vec2& U : Q)
+	{
+		P.push_back({Centers[1].X + Rad * U.Y, Centers[1].Y - Rad * U.X});
+	}
+	for (const Vec2& U : Q)
+	{
+		P.push_back({Centers[2].X + Rad * U.X, Centers[2].Y + Rad * U.Y});
+	}
+	for (const Vec2& U : Q)
+	{
+		P.push_back({Centers[3].X - Rad * U.Y, Centers[3].Y + Rad * U.X});
+	}
+}
+
+void EllipseInto(std::vector<Vec2>& P, float CX, float CY, float RX, float RY, float A0, float A1, int Segments, bool IncludeEnd)
+{
+	const int N = Segments < 2 ? 2 : Segments;
+	const int Count = N + (IncludeEnd ? 1 : 0);
+	P.reserve(static_cast<size_t>(Count));
+	if (A0 == 0.0f && A1 == 2.0f * Pi)
+	{
+		const std::vector<Vec2>& T = TurnTable(N);
+		for (int I = 0; I < Count; ++I)
+		{
+			P.push_back({CX + RX * T[static_cast<size_t>(I)].X, CY + RY * T[static_cast<size_t>(I)].Y});
+		}
+		return;
+	}
+	// An arc: one cos and sin for the step, then each point is the last turned by it.
+	const float Step = (A1 - A0) / static_cast<float>(N);
+	const float Cs = std::cos(Step);
+	const float Sn = std::sin(Step);
+	float Ux = std::cos(A0);
+	float Uy = std::sin(A0);
+	for (int I = 0; I < Count; ++I)
+	{
+		P.push_back({CX + RX * Ux, CY + RY * Uy});
+		const float Nx = Ux * Cs - Uy * Sn;
+		Uy = Ux * Sn + Uy * Cs;
+		Ux = Nx;
+	}
+}
+} // namespace
+
 int Canvas::SegmentsFor(float RadiusLogical, float ArcRadians) const
 {
 	const float Rd = RadiusLogical * State.Xf.UniformScale() * PxScale;
@@ -536,38 +679,14 @@ int Canvas::SegmentsFor(float RadiusLogical, float ArcRadians) const
 std::vector<Vec2> Canvas::RoundRectPath(const Rect& R, float Radius, int Segs)
 {
 	std::vector<Vec2> P;
-	const float MaxR = (R.W < R.H ? R.W : R.H) * 0.5f;
-	const float Rad = Clampf(Radius, 0.0f, MaxR);
-	if (Rad < 0.01f)
-	{
-		P.push_back({R.X, R.Y});
-		P.push_back({R.X + R.W, R.Y});
-		P.push_back({R.X + R.W, R.Y + R.H});
-		P.push_back({R.X, R.Y + R.H});
-		return P;
-	}
-	const Vec2 Centers[4] = {{R.X + Rad, R.Y + Rad}, {R.X + R.W - Rad, R.Y + Rad}, {R.X + R.W - Rad, R.Y + R.H - Rad}, {R.X + Rad, R.Y + R.H - Rad}};
-	const float Starts[4] = {Pi, Pi * 1.5f, 0.0f, Pi * 0.5f};
-	for (int C = 0; C < 4; ++C)
-	{
-		for (int I = 0; I <= Segs; ++I)
-		{
-			const float A = Starts[C] + (Pi * 0.5f) * static_cast<float>(I) / static_cast<float>(Segs);
-			P.push_back({Centers[C].X + Rad * std::cos(A), Centers[C].Y + Rad * std::sin(A)});
-		}
-	}
+	RoundRectInto(P, R, Radius, Segs);
 	return P;
 }
 
 std::vector<Vec2> Canvas::EllipsePath(float CX, float CY, float RX, float RY, float A0, float A1, int Segments, bool IncludeEnd)
 {
 	std::vector<Vec2> P;
-	const int N = Segments < 2 ? 2 : Segments;
-	for (int I = 0; I < N + (IncludeEnd ? 1 : 0); ++I)
-	{
-		const float A = A0 + (A1 - A0) * static_cast<float>(I) / static_cast<float>(N);
-		P.push_back({CX + RX * std::cos(A), CY + RY * std::sin(A)});
-	}
+	EllipseInto(P, CX, CY, RX, RY, A0, A1, Segments, IncludeEnd);
 	return P;
 }
 
@@ -579,10 +698,9 @@ void Canvas::FillPath(const std::vector<Vec2>& LogicalIn, const Paint& P, float 
 	{
 		return;
 	}
-	std::vector<Vec2> Logical = LogicalIn;
-	std::vector<Vec2> Dev;
-	Dev.reserve(Logical.size());
-	for (const Vec2& L : Logical)
+	std::vector<Vec2>& Dev = Scratch(Buf::Device);
+	Dev.reserve(LogicalIn.size());
+	for (const Vec2& L : LogicalIn)
 	{
 		Dev.push_back(State.Xf.Apply(L));
 	}
@@ -591,11 +709,15 @@ void Canvas::FillPath(const std::vector<Vec2>& LogicalIn, const Paint& P, float 
 	{
 		return;
 	}
+	const std::vector<Vec2>* LogicalP = &LogicalIn;
 	if (Area < 0.0f)
 	{
-		std::reverse(Logical.begin(), Logical.end());
+		std::vector<Vec2>& Turned = Scratch(Buf::Reversed);
+		Turned.assign(LogicalIn.rbegin(), LogicalIn.rend());
+		LogicalP = &Turned;
 		std::reverse(Dev.begin(), Dev.end());
 	}
+	const std::vector<Vec2>& Logical = *LogicalP;
 	const size_t N = Dev.size();
 	const bool IsConvexShape = Convex || IsConvex(Dev);
 	const uint32_t Base = Out.BeginTriangles(N * 2 + 1);
@@ -726,7 +848,8 @@ void Canvas::FillRings(float CX, float CY, float RX, float RY, const Paint& P)
 
 void Canvas::StrokeDevice(const std::vector<Vec2>& DevIn, bool Closed, const Color& CIn, float WidthUnits, bool ExtendCaps)
 {
-	std::vector<Vec2> Dev;
+	std::vector<Vec2>& Dev = Scratch(Buf::Clean);
+	Dev.reserve(DevIn.size());
 	for (const Vec2& P : DevIn)
 	{
 		if (Dev.empty() || Len(Sub(P, Dev.back())) > 1e-4f)
@@ -817,7 +940,12 @@ void Canvas::StrokeDevice(const std::vector<Vec2>& DevIn, bool Closed, const Col
 
 void Canvas::FillRect(const Rect& R, const Paint& P)
 {
-	FillPath({{R.X, R.Y}, {R.X + R.W, R.Y}, {R.X + R.W, R.Y + R.H}, {R.X, R.Y + R.H}}, P, Feather(), true);
+	std::vector<Vec2>& Path = Scratch(Buf::Path);
+	Path.push_back({R.X, R.Y});
+	Path.push_back({R.X + R.W, R.Y});
+	Path.push_back({R.X + R.W, R.Y + R.H});
+	Path.push_back({R.X, R.Y + R.H});
+	FillPath(Path, P, Feather(), true);
 }
 
 void Canvas::FillRoundRect(const Rect& R, float Radius, const Paint& P)
@@ -826,7 +954,9 @@ void Canvas::FillRoundRect(const Rect& R, float Radius, const Paint& P)
 	{
 		return;
 	}
-	FillPath(RoundRectPath(R, Radius, SegmentsFor(Radius, Pi * 0.5f)), P, Feather(), true);
+	std::vector<Vec2>& Path = Scratch(Buf::Path);
+	RoundRectInto(Path, R, Radius, SegmentsFor(Radius, Pi * 0.5f));
+	FillPath(Path, P, Feather(), true);
 }
 
 void Canvas::StrokeRoundRect(const Rect& R, float Radius, const Color& C, float LineWidth)
@@ -835,8 +965,10 @@ void Canvas::StrokeRoundRect(const Rect& R, float Radius, const Color& C, float 
 	{
 		return;
 	}
-	const std::vector<Vec2> L = RoundRectPath(R, Radius, SegmentsFor(Radius, Pi * 0.5f));
-	std::vector<Vec2> D;
+	std::vector<Vec2>& L = Scratch(Buf::Path);
+	RoundRectInto(L, R, Radius, SegmentsFor(Radius, Pi * 0.5f));
+	std::vector<Vec2>& D = Scratch(Buf::Stroke);
+	D.reserve(L.size());
 	for (const Vec2& P : L)
 	{
 		D.push_back(State.Xf.Apply(P));
@@ -855,13 +987,17 @@ void Canvas::FillEllipse(float CX, float CY, float RX, float RY, const Paint& P)
 		FillRings(CX, CY, RX, RY, P);
 		return;
 	}
-	FillPath(EllipsePath(CX, CY, RX, RY, 0.0f, 2.0f * Pi, SegmentsFor(RX > RY ? RX : RY, 2.0f * Pi), false), P, Feather(), true);
+	std::vector<Vec2>& Path = Scratch(Buf::Path);
+	EllipseInto(Path, CX, CY, RX, RY, 0.0f, 2.0f * Pi, SegmentsFor(RX > RY ? RX : RY, 2.0f * Pi), false);
+	FillPath(Path, P, Feather(), true);
 }
 
 void Canvas::StrokeEllipse(float CX, float CY, float RX, float RY, const Color& C, float LineWidth, float Dash)
 {
-	const std::vector<Vec2> L = EllipsePath(CX, CY, RX, RY, 0.0f, 2.0f * Pi, SegmentsFor(RX > RY ? RX : RY, 2.0f * Pi) * (Dash > 0.0f ? 2 : 1), false);
-	std::vector<Vec2> D;
+	std::vector<Vec2>& L = Scratch(Buf::Path);
+	EllipseInto(L, CX, CY, RX, RY, 0.0f, 2.0f * Pi, SegmentsFor(RX > RY ? RX : RY, 2.0f * Pi) * (Dash > 0.0f ? 2 : 1), false);
+	std::vector<Vec2>& D = Scratch(Buf::Stroke);
+	D.reserve(L.size() + 1);
 	for (const Vec2& P : L)
 	{
 		D.push_back(State.Xf.Apply(P));
@@ -921,8 +1057,10 @@ void Canvas::StrokeEllipse(float CX, float CY, float RX, float RY, const Color& 
 
 void Canvas::StrokeArc(float CX, float CY, float R, float A0, float A1, const Color& C, float LineWidth, bool RoundCap)
 {
-	const std::vector<Vec2> L = EllipsePath(CX, CY, R, R, A0, A1, SegmentsFor(R, A1 - A0), true);
-	std::vector<Vec2> D;
+	std::vector<Vec2>& L = Scratch(Buf::Path);
+	EllipseInto(L, CX, CY, R, R, A0, A1, SegmentsFor(R, A1 - A0), true);
+	std::vector<Vec2>& D = Scratch(Buf::Stroke);
+	D.reserve(L.size());
 	for (const Vec2& P : L)
 	{
 		D.push_back(State.Xf.Apply(P));
@@ -937,7 +1075,8 @@ void Canvas::FillPolygon(const std::vector<Vec2>& Points, const Paint& P)
 
 void Canvas::StrokePolyline(const std::vector<Vec2>& Points, bool Closed, const Color& C, float LineWidth, bool RoundCap)
 {
-	std::vector<Vec2> D;
+	std::vector<Vec2>& D = Scratch(Buf::Stroke);
+	D.reserve(Points.size());
 	for (const Vec2& P : Points)
 	{
 		D.push_back(State.Xf.Apply(P));
@@ -955,7 +1094,138 @@ void Canvas::GlowRoundRect(const Rect& R, float Radius, const Color& C, float Bl
 		return;
 	}
 	const float Rad = Radius > Inset ? Radius - Inset : 0.0f;
-	FillPath(RoundRectPath(Core, Rad, SegmentsFor(Rad + Blur, Pi * 0.5f)), Paint(C), Blur * 1.3f * State.Xf.UniformScale(), true);
+	std::vector<Vec2>& Path = Scratch(Buf::Path);
+	RoundRectInto(Path, Core, Rad, SegmentsFor(Rad + Blur, Pi * 0.5f));
+	FillPath(Path, Paint(C), Blur * 1.3f * State.Xf.UniformScale(), true);
+}
+
+// ------------------------------------------------------------------ fragments
+
+namespace
+{
+struct FragmentCache
+{
+	std::unordered_map<uint64_t, Fragment> Map;
+	size_t Vertices = 0;
+};
+
+FragmentCache& Fragments()
+{
+	thread_local FragmentCache Cache;
+	return Cache;
+}
+
+uint64_t MixKey(uint64_t H, uint64_t V)
+{
+	H ^= V + 0x9E3779B97F4A7C15ull + (H << 6) + (H >> 2);
+	return H;
+}
+
+uint64_t FloatBits(float F)
+{
+	uint32_t U = 0;
+	std::memcpy(&U, &F, sizeof(U));
+	return U;
+}
+} // namespace
+
+void Canvas::Cached(uint64_t Key, float X, float Y, const std::function<void(Canvas&)>& PaintFn)
+{
+	const Affine& Xf = State.Xf;
+	const float S = Xf.A;
+	if (std::fabs(Xf.B) > 1e-6f || std::fabs(Xf.C) > 1e-6f || S <= 0.0f || std::fabs(Xf.D - S) > 1e-5f * S)
+	{
+		Save();
+		Translate(X, Y);
+		PaintFn(*this);
+		Restore();
+		return;
+	}
+	const uint64_t Full = MixKey(MixKey(Key, FloatBits(S)), FloatBits(PxScale));
+	FragmentCache& Cache = Fragments();
+	auto Found = Cache.Map.find(Full);
+	if (Found == Cache.Map.end())
+	{
+		DrawList Temp;
+		Canvas Tc(Temp, Measurer, W, H, PxScale);
+		Tc.State.Xf.A = S;
+		Tc.State.Xf.D = S;
+		PaintFn(Tc);
+		Fragment F;
+		F.Vertices = std::move(Temp.Vertices);
+		F.Indices = std::move(Temp.Indices);
+		F.Cmds = std::move(Temp.Cmds);
+		// A page's worth of art is a few hundred thousand vertices: the cache starts over well past that.
+		if (Cache.Vertices + F.Vertices.size() > 1500000)
+		{
+			Cache.Map.clear();
+			Cache.Vertices = 0;
+		}
+		Cache.Vertices += F.Vertices.size();
+		Found = Cache.Map.emplace(Full, std::move(F)).first;
+	}
+	Replay(Found->second, S * X + Xf.Tx, S * Y + Xf.Ty);
+}
+
+void Canvas::Replay(const Fragment& F, float Dx, float Dy)
+{
+	const float Alpha = State.Alpha;
+	if (Alpha <= 0.001f)
+	{
+		return;
+	}
+	for (const DrawCmd& Cmd : F.Cmds)
+	{
+		switch (Cmd.Type)
+		{
+		case DrawCmd::Kind::Triangles:
+		{
+			if (Cmd.VertexCount == 0)
+			{
+				break;
+			}
+			const uint32_t Base = Out.BeginTriangles(Cmd.VertexCount);
+			const size_t V0 = Out.Vertices.size();
+			Out.Vertices.resize(V0 + Cmd.VertexCount);
+			for (uint32_t K = 0; K < Cmd.VertexCount; ++K)
+			{
+				Vertex V = F.Vertices[Cmd.VertexStart + K];
+				V.X += Dx;
+				V.Y += Dy;
+				V.Col.A *= Alpha;
+				Out.Vertices[V0 + K] = V;
+			}
+			const size_t I0 = Out.Indices.size();
+			Out.Indices.resize(I0 + Cmd.IndexCount);
+			for (uint32_t K = 0; K < Cmd.IndexCount; ++K)
+			{
+				Out.Indices[I0 + K] = F.Indices[Cmd.IndexStart + K] + Base;
+			}
+			Out.Cmds.back().VertexCount += Cmd.VertexCount;
+			Out.Cmds.back().IndexCount += Cmd.IndexCount;
+			break;
+		}
+		case DrawCmd::Kind::Text:
+		{
+			TextItem Item = Cmd.Text;
+			Item.X += Dx;
+			Item.Y += Dy;
+			Item.BaselineY += Dy;
+			Item.Col.A *= Alpha;
+			if (Item.Col.A > 0.003f)
+			{
+				Out.AddText(Item);
+			}
+			break;
+		}
+		case DrawCmd::Kind::PushClip:
+			PushClip({Cmd.Clip.X + Dx, Cmd.Clip.Y + Dy, Cmd.Clip.W, Cmd.Clip.H});
+			break;
+		case DrawCmd::Kind::PopClip:
+			PopClip();
+			break;
+		}
+	}
 }
 
 // ------------------------------------------------------------------ text

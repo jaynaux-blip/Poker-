@@ -4,7 +4,10 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Rendering/DrawElements.h"
 #include "Rendering/SlateRenderer.h"
+#include "HAL/IConsoleManager.h"
 #include "Styling/CoreStyle.h"
+
+static TAutoConsoleVariable<int32> CVarTextCache(TEXT("ss.TextCache"), 1, TEXT("1: remember text widths the UI has measured (the pages measure the same strings every frame)."));
 
 // ------------------------------------------------------------------ text measurement
 
@@ -30,15 +33,47 @@ FSlateFontInfo FSlateTextMeasurer::FontFor(ss::ui::Font Face, float SizePx)
 	return Font;
 }
 
+const FSlateFontInfo& FSlateTextMeasurer::CachedFont(ss::ui::Font Face, float SizePx) const
+{
+	const uint64 Key = (static_cast<uint64>(Face) << 32) | static_cast<uint32>(FMath::RoundToInt(SizePx * 64.0f));
+	if (const FSlateFontInfo* Found = Fonts.Find(Key))
+	{
+		return *Found;
+	}
+	return Fonts.Add(Key, FontFor(Face, SizePx));
+}
+
 float FSlateTextMeasurer::Width(const std::string& Text, ss::ui::Font Face, float SizePx) const
 {
 	if (Text.empty() || !IsAvailable())
 	{
 		return static_cast<float>(Text.size()) * SizePx * 0.55f;
 	}
+	const bool bCache = CVarTextCache.GetValueOnAnyThread() != 0;
+	FKey Key;
+	if (bCache)
+	{
+		Key.Text = Text;
+		Key.Face = static_cast<int32>(Face);
+		Key.Size = FMath::RoundToInt(SizePx * 64.0f);
+		const auto Found = Widths.find(Key);
+		if (Found != Widths.end())
+		{
+			return Found->second;
+		}
+	}
 	const TSharedRef<FSlateFontMeasure> Measure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
 	const FString Str = FString(UTF8_TO_TCHAR(Text.c_str()));
-	return static_cast<float>(Measure->Measure(Str, FontFor(Face, SizePx)).X);
+	const float W = static_cast<float>(Measure->Measure(Str, bCache ? CachedFont(Face, SizePx) : FontFor(Face, SizePx)).X);
+	if (bCache)
+	{
+		if (Widths.size() > 20000)
+		{
+			Widths.clear();
+		}
+		Widths.emplace(MoveTemp(Key), W);
+	}
+	return W;
 }
 
 float FSlateTextMeasurer::Ascent(ss::ui::Font Face, float SizePx) const
@@ -47,10 +82,15 @@ float FSlateTextMeasurer::Ascent(ss::ui::Font Face, float SizePx) const
 	{
 		return SizePx * 0.93f;
 	}
+	const uint64 AKey = (static_cast<uint64>(Face) << 32) | static_cast<uint32>(FMath::RoundToInt(SizePx * 64.0f));
+	if (const float* Found = Ascents.Find(AKey))
+	{
+		return *Found;
+	}
 	const TSharedRef<FSlateFontMeasure> Measure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
-	const FSlateFontInfo Font = FontFor(Face, SizePx);
+	const FSlateFontInfo& Font = CachedFont(Face, SizePx);
 	// The baseline is reported as a negative offset from the bottom of the line.
-	return static_cast<float>(Measure->GetMaxCharacterHeight(Font)) + static_cast<float>(Measure->GetBaseline(Font));
+	return Ascents.Add(AKey, static_cast<float>(Measure->GetMaxCharacterHeight(Font)) + static_cast<float>(Measure->GetBaseline(Font)));
 }
 
 // ------------------------------------------------------------------ widget

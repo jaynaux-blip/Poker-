@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CareerSave.h"
 #include "CoreMinimal.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/UI/FrontEnd.h"
@@ -16,6 +17,8 @@ public:
 	FNightOneGame(ANightOneGameMode& InMode, const ss::SaveData* Loaded, const std::string& Seed);
 
 	ANightOneGameMode& Mode;
+	/** Writes the career off the game thread (declared before the session, which may save as it starts). */
+	FCareerSaver Saver;
 	ss::Session Session;
 	ss::ui::RiverLine Client;
 	ss::ui::PhoneScreen Phone;
@@ -30,6 +33,7 @@ public:
 	virtual void AddCan() override;
 	virtual void Celebrate() override;
 	virtual void Save(const ss::SaveData& Data) override;
+	virtual bool SavesInBackground() const override { return true; }
 	virtual bool GoOut(const std::string& ActivityId, ss::Chips BuyInCents) override;
 
 	// ss::ui::FrontEndHooks

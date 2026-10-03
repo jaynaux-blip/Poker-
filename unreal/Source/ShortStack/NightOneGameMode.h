@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "SlateDrawList.h"
 #include "GameFramework/GameModeBase.h"
 #include "NightOneGame.h"
 
@@ -76,6 +77,8 @@ public:
 	 *  then on the real mouse no longer moves the screen's pointer (a script is playing). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	void TestClick(float X, float Y);
+	/** The size of each screen's last draw list (the menu, the laptop, the phone, the two monitors). */
+	FDrawListHint MenuHint, ClientHint, PhoneHint, MonitorHint[2];
 	/** A key, as the player's keyboard sends it ("f", "c", "r", "a", "ArrowUp", " " to lean...). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	void TestKey(const FString& Key);

@@ -213,11 +213,12 @@ void RiverLine::StatsKpis(const world::Tracker& T, const Rect& R, double Now)
 		int Sign; // +1 good, -1 bad, 0 neither
 	};
 	const double Rank = Wd && T.Events >= 200 ? Wd->RoiRank(Roi) : -1.0;
+	const int Place = Wd && T.Events >= 200 ? Wd->RoiPlace(Roi, &T == &Wd->HeroStats()) : 0;
 	const int Own = static_cast<int>(std::max_element(T.ByStake.begin(), T.ByStake.end(), [](const world::TrackLine& A, const world::TrackLine& B) { return A.Events < B.Events; }) - T.ByStake.begin());
 	const Kpi Tiles[6] = {
 		{"PROFIT", StSigned(static_cast<Chips>(static_cast<double>(T.Net) * In)), "Prizes " + StAmount(T.Prizes) + "  \xC2\xB7  buy-ins " + StAmount(T.BuyIns), T.Net > 0 ? 1 : T.Net < 0 ? -1 : 0},
 		{"ROI", StSignedPct(Roi * In, std::fabs(Roi) >= 1.0 ? 0 : 1),
-			Rank >= 0.995 ? std::string("No. 1 on RiverLine") : Rank >= 0.0 ? "Beats " + Fixed(Rank * 100.0, 0) + "% of regulars" : Grouped(T.Events) + " tournaments in",
+			Place >= 1 && Place <= 10 ? "No. " + std::to_string(Place) + " on RiverLine" : Rank >= 0.0 ? "Beats " + Fixed(std::min(Rank * 100.0, 99.0), 0) + "% of regulars" : Grouped(T.Events) + " tournaments in",
 			Roi > 0.0005 ? 1 : Roi < -0.0005 ? -1 : 0},
 		{"ITM", StPct(T.Itm() * In), Grouped(T.Cashes) + (T.Cashes == 1 ? " cash" : " cashes"), 0},
 		{"TOURNAMENTS", Grouped(static_cast<int>(std::lround(static_cast<double>(T.Events) * static_cast<double>(In)))), Grouped(T.Wins) + (T.Wins == 1 ? " win" : " wins") + "  \xC2\xB7  " + Grouped(T.FinalTables) + " FTs", 0},
@@ -686,7 +687,8 @@ void RiverLine::StatsAbi(const world::Tracker& T, const Rect& Pg, const Rect& Pl
 	const double Events = static_cast<double>(std::max(1, T.Events));
 	auto Xof = [&](double E) { return Plot.X + Plot.W * Nf(E / Events); };
 	auto Yof = [&](double V) { return Plot.Y + Plot.H * Nf((L1 - std::log10(std::max(0.1, V))) / (L1 - L0)); };
-	// The stakes, as bands: micro up to $5.50, low to $55, mid to $530, high above.
+	// The stakes, as bands: micro up to $5.50, low to $55, mid to $530, high above (named after the line is drawn).
+	std::vector<std::pair<const char*, float>> BandNames;
 	{
 		const double Edges[5] = {0.1, 5.5, 55.0, 530.0, 1e9};
 		const char* const Names[4] = {"MICRO", "LOW", "MID", "HIGH"};
@@ -707,7 +709,7 @@ void RiverLine::StatsAbi(const world::Tracker& T, const Rect& Pg, const Rect& Pl
 			}
 			if (Ya - Yb >= 18.0f)
 			{
-				NetSpaced(*C, Names[K], Plot.X + 8.0f, Yb + 14.0f, 9.0f, 800, Hex(0x5b7290), 1.4f);
+				BandNames.push_back({Names[K], Yb + 14.0f});
 			}
 		}
 	}
@@ -780,6 +782,16 @@ void RiverLine::StatsAbi(const world::Tracker& T, const Rect& Pg, const Rect& Pl
 				StNote(*C, Note, Plot.X + Plot.W * 0.5f - C->Measure(Note, 10.5f, 700) * 0.5f, Y < Plot.Y + 30.0f ? Y + 22.0f : Y - 8.0f, true);
 			}
 		}
+	}
+	for (const auto& Band : BandNames)
+	{
+		float Wd = 0.0f;
+		for (const char* Ch = Band.first; *Ch; ++Ch)
+		{
+			Wd += C->Measure(std::string(1, *Ch), 9.0f, 800) + 1.4f;
+		}
+		C->FillRoundRect({Plot.X + 4.0f, Band.second - 10.0f, Wd + 6.0f, 14.0f}, 4.0f, NetA(StPanel, 0.82f));
+		NetSpaced(*C, Band.first, Plot.X + 8.0f, Band.second, 9.0f, 800, Hex(0x6d86a6), 1.4f);
 	}
 	// Hover: the stretch under the pointer.
 	if (UI.Ptr.Active && UI.Hover(Plot) && CardOpen())

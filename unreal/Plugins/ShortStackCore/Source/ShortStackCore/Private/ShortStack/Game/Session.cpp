@@ -690,6 +690,7 @@ void Session::WorldSkip(int DayCount)
 	LivingWorld.AdvanceTo(WorldMinutes());
 	WorldNewsAt = LivingWorld.Clock();
 	WorldSaved.clear();
+	WorldSnap.reset();
 	Save();
 }
 
@@ -756,7 +757,22 @@ void Session::Save()
 	D.Leds = Leds;
 	D.Channel = Channel;
 	D.TextsSeen.assign(TextsSeen.begin(), TextsSeen.end());
-	if (WorldSaved.empty() || LivingWorld.HeroRevision() != WorldSavedRev || LivingWorld.Clock() - WorldSavedAt >= 60.0)
+	const bool bBackground = Hooks.SavesInBackground();
+	const bool bStale = LivingWorld.HeroRevision() != WorldSavedRev || LivingWorld.Clock() - WorldSavedAt >= 60.0;
+	if (bBackground)
+	{
+		// A frozen copy for the host to write off the game thread (it writes each copy's text only once).
+		if (!WorldSnap || bStale)
+		{
+			WorldSnap = LivingWorld.Ready() ? std::make_shared<const world::World>(LivingWorld) : nullptr;
+			WorldSavedAt = LivingWorld.Clock();
+			WorldSavedRev = LivingWorld.HeroRevision();
+		}
+		D.WorldSnapshot = WorldSnap;
+		Hooks.Save(D);
+		return;
+	}
+	if (WorldSaved.empty() || bStale)
 	{
 		WorldSaved.clear();
 		LivingWorld.Write(WorldSaved);
@@ -792,6 +808,7 @@ void Session::ResetSave()
 	// A new career, a new world.
 	LivingWorld = world::World();
 	WorldSaved.clear();
+	WorldSnap.reset();
 	StartWorld(nullptr);
 	Save();
 }

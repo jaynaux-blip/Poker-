@@ -56,6 +56,10 @@ void World::AdvanceTo(double To)
 	{
 		return;
 	}
+	// The revision moves only when something the boards show did (the clock moves every frame; a ranking of the
+	// world is kept until the world itself changes).
+	const int PlannedBefore = Planned;
+	bool Changed = false;
 	while (Now < To)
 	{
 		const int Day = sim::DayAt(Now);
@@ -86,6 +90,7 @@ void World::AdvanceTo(double To)
 			Sim::Resolve(*this, P);
 		}
 		Queue.erase(Queue.begin(), Queue.begin() + static_cast<std::ptrdiff_t>(Done));
+		Changed = Changed || Done > 0;
 		if (!Later.empty())
 		{
 			for (Pending& P : Later)
@@ -99,13 +104,18 @@ void World::AdvanceTo(double To)
 		{
 			NightPointsHourAgo = NightPoints;
 			NightHour = Now;
+			Changed = true;
 		}
 		if (Now >= DayEnd)
 		{
 			Sim::NewDay(*this, Day + 1);
+			Changed = true;
 		}
 	}
-	++Rev;
+	if (Changed || Planned != PlannedBefore)
+	{
+		++Rev;
+	}
 }
 
 void World::Simulate(int DayCount)

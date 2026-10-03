@@ -60,12 +60,8 @@ void FNightOneGame::Celebrate()
 
 void FNightOneGame::Save(const ss::SaveData& Data)
 {
-	UNightOneSaveGame* SaveObject = Cast<UNightOneSaveGame>(UGameplayStatics::CreateSaveGameObject(UNightOneSaveGame::StaticClass()));
-	if (SaveObject)
-	{
-		SaveObject->Data = FString(UTF8_TO_TCHAR(Data.Serialize().c_str()));
-		UGameplayStatics::SaveGameToSlot(SaveObject, UNightOneSaveGame::SlotName(), 0);
-	}
+	// The world's text, compression and the write happen on a worker (CareerSave.h): nothing here hitches.
+	Saver.Submit(Data);
 }
 
 bool FNightOneGame::GoOut(const std::string& ActivityId, ss::Chips BuyInCents)

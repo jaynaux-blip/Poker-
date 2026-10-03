@@ -1,4 +1,5 @@
 #include "BackRoomGameMode.h"
+#include "CareerSave.h"
 
 #include "BackRoomCard.h"
 #include "BackRoomChips.h"
@@ -1062,11 +1063,9 @@ bool ABackRoomGameMode::LoadCareer()
 	{
 		return false;
 	}
-	UNightOneSaveGame* Obj = UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SlotName(), 0)
-		? Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SlotName(), 0))
-		: nullptr;
+	std::string CareerText;
 	TSharedPtr<ss::SaveData> D = MakeShared<ss::SaveData>();
-	if (!Obj || !ss::SaveData::Parse(std::string(TCHAR_TO_UTF8(*Obj->Data)), *D))
+	if (!CareerSave::LoadText(CareerText) || !ss::SaveData::Parse(CareerText, *D))
 	{
 		UE_LOG(LogBackRoom, Warning, TEXT("BuyIn given but no career save to play from: practice table."));
 		return false;
@@ -1160,11 +1159,7 @@ void ABackRoomGameMode::SaveCareer(bool bFinal)
 		StartBankrollCents = D.BankrollCents;
 		BaseCents = D.BankrollCents - Table->GetHeroStack() * 100;
 	}
-	if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::CreateSaveGameObject(UNightOneSaveGame::StaticClass())))
-	{
-		Obj->Data = FString(UTF8_TO_TCHAR(D.Serialize().c_str()));
-		UGameplayStatics::SaveGameToSlot(Obj, UNightOneSaveGame::SlotName(), 0);
-	}
+	CareerSave::SaveNow(D.Serialize());
 }
 
 void ABackRoomGameMode::OnTableNote(uint8 Note)

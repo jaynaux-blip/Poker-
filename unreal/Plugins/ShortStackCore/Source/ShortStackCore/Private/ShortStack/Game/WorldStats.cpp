@@ -244,7 +244,12 @@ void Sim::SeedStats(Npc& N)
 		Stakes.push_back(S * std::max(0.1, Start + (1.0 - Start) * std::sqrt(Along) + Drift));
 	}
 	const Chips Best = std::min(T.Prizes, std::max(On.Best, Lv.Best));
-	const int BestSeg = R.Int(Segments);
+	int BestSeg = R.Int(Segments);
+	if (!N.BestEvent.empty() && N.BestDay > N.Joined && N.LastDay > N.Joined)
+	{
+		const double Along = std::min(1.0, static_cast<double>(N.BestDay - N.Joined) / static_cast<double>(N.LastDay + 1 - N.Joined));
+		BestSeg = std::min(Segments - 1, static_cast<int>(Along * static_cast<double>(Segments)));
+	}
 	const std::vector<Chips> Spent = Split<Chips>(T.BuyIns, Stakes);
 	// Prizes follow the stakes too (a score at $100 is bigger than one at $5).
 	for (size_t K = 0; K < Weight.size(); ++K)
@@ -336,6 +341,24 @@ double World::RoiRank(double Roi, int Min) const
 		Below += N.Stats.Roi() < Roi ? 1 : 0;
 	}
 	return Count > 0 ? static_cast<double>(Below) / static_cast<double>(Count) : 0.0;
+}
+
+int World::RoiPlace(double Roi, bool bHero, int Min) const
+{
+	int Above = 0;
+	for (const Npc& N : Roster)
+	{
+		if (N.Faded || N.Stats.Events < Min || N.Stats.BuyIns <= 0)
+		{
+			continue;
+		}
+		Above += N.Stats.Roi() > Roi ? 1 : 0;
+	}
+	if (!bHero && HeroBook.Events >= Min && HeroBook.BuyIns > 0 && HeroBook.Roi() > Roi)
+	{
+		++Above;
+	}
+	return Above + 1;
 }
 } // namespace world
 } // namespace ss

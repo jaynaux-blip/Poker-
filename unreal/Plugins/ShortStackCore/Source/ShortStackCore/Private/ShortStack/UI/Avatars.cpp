@@ -739,7 +739,39 @@ AvatarSpec AvatarFor(const std::string& Name)
 	return A;
 }
 
+namespace
+{
+void DrawAvatarNow(Canvas& C, float Cx, float Cy, float R, const AvatarSpec& A);
+
+uint64_t AvatarKey(const AvatarSpec& A, float R)
+{
+	uint64_t H = 0xcbf29ce484222325ull;
+	const auto Mix = [&](const void* Data, size_t Size) {
+		const unsigned char* B = static_cast<const unsigned char*>(Data);
+		for (size_t K = 0; K < Size; ++K)
+		{
+			H = (H ^ B[K]) * 0x100000001b3ull;
+		}
+	};
+	const uint32_t Ints[11] = {static_cast<uint32_t>(A.Icon), A.Bg, A.Bg2, A.Ink, static_cast<uint32_t>(A.Frame), A.Rim, static_cast<uint32_t>(A.Bracelets), static_cast<uint32_t>(A.Rings), A.Stone, A.Plate,
+		A.Halo ? 1u : 0u};
+	Mix("avatar1", 7);
+	Mix(Ints, sizeof(Ints));
+	Mix(&R, sizeof(R));
+	Mix(A.Initials.data(), A.Initials.size());
+	return H;
+}
+} // namespace
+
+// Avatars don't move: each is drawn once and copied in after (Canvas::Cached).
 void DrawAvatar(Canvas& C, float Cx, float Cy, float R, const AvatarSpec& A)
+{
+	C.Cached(AvatarKey(A, R), Cx, Cy, [&](Canvas& At) { DrawAvatarNow(At, 0.0f, 0.0f, R, A); });
+}
+
+namespace
+{
+void DrawAvatarNow(Canvas& C, float Cx, float Cy, float R, const AvatarSpec& A)
 {
 	const Color Bg = Hex(A.Bg);
 	const Color Bg2 = Hex(A.Bg2);
@@ -786,5 +818,6 @@ void DrawAvatar(Canvas& C, float Cx, float Cy, float R, const AvatarSpec& A)
 		break;
 	}
 }
+} // namespace
 } // namespace ui
 } // namespace ss

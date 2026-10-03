@@ -100,6 +100,22 @@ void LogLines(const std::string& Text)
 	}
 }
 
+#if !UE_BUILD_SHIPPING
+// The career save is compressed (CareerSave.h): a test bankroll is set from inside the game instead.
+FAutoConsoleCommandWithWorldAndArgs CareerBankrollCmd(TEXT("ss.Career.Bankroll"), TEXT("ss.Career.Bankroll <dollars>: sets the bankroll and saves (testing)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (ss::Session* S = WorldSession(World))
+		{
+			if (Args.Num() > 0)
+			{
+				S->BankrollCents = static_cast<ss::Chips>(FMath::RoundToDouble(FCString::Atod(*Args[0]) * 100.0));
+				S->Save();
+			}
+			UE_LOG(LogNightOne, Display, TEXT("Bankroll $%.2f"), static_cast<double>(S->BankrollCents) / 100.0);
+		}
+	}));
+#endif
+
 FAutoConsoleCommandWithWorldAndArgs WorldReportCmd(TEXT("ss.World.Report"), TEXT("The living world's health: population, stakes, bankrolls, moods, reputations."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>&, UWorld* World) {
 		if (ss::Session* S = WorldSession(World))
@@ -327,12 +343,9 @@ void ANightOneGameMode::StartPlay()
 	// Progress from the last session.
 	ss::SaveData Loaded;
 	bool bLoaded = false;
-	if (UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SlotName(), 0))
 	{
-		if (UNightOneSaveGame* SaveObject = Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SlotName(), 0)))
-		{
-			bLoaded = ss::SaveData::Parse(std::string(TCHAR_TO_UTF8(*SaveObject->Data)), Loaded);
-		}
+		std::string Text;
+		bLoaded = CareerSave::LoadText(Text) && ss::SaveData::Parse(Text, Loaded);
 	}
 	bHasSave = bLoaded;
 	const std::string Seed = std::string(TCHAR_TO_UTF8(*FString::Printf(TEXT("%lld"), FDateTime::Now().GetTicks())));
@@ -803,6 +816,11 @@ void ANightOneGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		SaveSettingsNow();
 	}
+	// The save being written (and any waiting) lands before the next scene reads it.
+	if (Game)
+	{
+		Game->Saver.Flush();
+	}
 	if (UWorld* World = GetWorld())
 	{
 		if (UGameViewportClient* Viewport = World->GetGameViewport())
@@ -851,9 +869,10 @@ void ANightOneGameMode::DrawMenu()
 	}
 	const float LogicalH = ss::ui::FrontEnd::Height;
 	const float LogicalW = LogicalH * static_cast<float>(ViewSize.X / ViewSize.Y);
-	TSharedPtr<ss::ui::DrawList> List = MakeShared<ss::ui::DrawList>();
+	TSharedPtr<ss::ui::DrawList> List = MenuHint.Make();
 	ss::ui::Canvas Cv(*List, Game->Measurer, LogicalW, LogicalH, static_cast<float>(ViewSize.Y) / LogicalH);
 	Game->Menu.Draw(Cv, RealTime);
+	MenuHint.Note(*List);
 	MenuWidget->SetDrawList(List);
 	if (MenuBlur)
 	{
@@ -921,6 +940,7 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		OnRelease();
 	}
 	const bool bBeat = Audio && Audio->ConsumeBeat();
+	Game->Saver.Tick();
 	ss::Session& S = Game->Session;
 	if (!bPaused)
 	{
@@ -933,9 +953,10 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	if (UiAccum >= 1.0 / 30.0)
 	{
 		UiAccum = 0.0;
-		TSharedPtr<ss::ui::DrawList> List = MakeShared<ss::ui::DrawList>();
+		TSharedPtr<ss::ui::DrawList> List = ClientHint.Make();
 		ss::ui::Canvas Cv(*List, Game->Measurer, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, static_cast<float>(Stage->ScreenResolution.X) / ss::ui::RiverLine::Width);
 		Game->Client.Draw(Cv, GameTime);
+		ClientHint.Note(*List);
 		Stage->SetScreenDrawList(List);
 	}
 	if (Game->Client.LeanBackRequested)
@@ -973,9 +994,10 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	if (PhoneLevel > 0.0f && PhoneAccum >= 0.1)
 	{
 		PhoneAccum = 0.0;
-		TSharedPtr<ss::ui::DrawList> List = MakeShared<ss::ui::DrawList>();
+		TSharedPtr<ss::ui::DrawList> List = PhoneHint.Make();
 		ss::ui::Canvas Cv(*List, Game->Measurer, ss::ui::PhoneScreen::Width, ss::ui::PhoneScreen::Height, 1.0f);
 		Game->Phone.Draw(Cv, Clock);
+		PhoneHint.Note(*List);
 		Stage->SetPhoneDrawList(List);
 	}
 	Tilt += (static_cast<float>(S.HeroTilt) * 0.85f - Tilt) * static_cast<float>(FMath::Min(1.0, Dt * 2.0));
@@ -1025,10 +1047,11 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		{
 			if (Stage->MonitorShown(M))
 			{
-				TSharedPtr<ss::ui::DrawList> List = MakeShared<ss::ui::DrawList>();
+				TSharedPtr<ss::ui::DrawList> List = MonitorHint[M].Make();
 				ss::ui::Canvas Cv(*List, Game->Measurer, ss::ui::secondscreen::Width, ss::ui::secondscreen::Height,
 				                  static_cast<float>(Stage->MonitorResolution.X) / ss::ui::secondscreen::Width);
 				ss::ui::secondscreen::Draw(Cv, S, M, GameTime);
+				MonitorHint[M].Note(*List);
 				Stage->SetMonitorDrawList(M, List);
 			}
 		}

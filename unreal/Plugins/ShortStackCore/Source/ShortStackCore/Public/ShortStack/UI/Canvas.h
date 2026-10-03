@@ -2,6 +2,8 @@
 
 #include "ShortStack/Common.h"
 
+#include <functional>
+
 namespace ss
 {
 namespace ui
@@ -195,6 +197,14 @@ struct DrawList
 	std::string ToJson() const;
 };
 
+/** Geometry drawn once and replayed (Canvas::Cached): triangles, text and clips, as drawn around the origin. */
+struct Fragment
+{
+	std::vector<Vertex> Vertices;
+	std::vector<uint32_t> Indices;
+	std::vector<DrawCmd> Cmds;
+};
+
 /**
  * A small canvas-style vector painter. Paths are transformed on the CPU and
  * tessellated with a one-pixel alpha fringe for anti-aliasing, so any host
@@ -232,6 +242,14 @@ public:
 	/** Soft shadow or glow around a rounded rectangle (canvas shadowBlur). */
 	void GlowRoundRect(const Rect& R, float Radius, const Color& C, float Blur);
 
+	/**
+	 * Draws Paint at (X, Y) through a cache kept by every canvas on this thread: the first time Key is seen at this
+	 * scale, Paint draws around the origin into a fragment, and from then on the fragment is copied in (no
+	 * tessellation). Key must stand for everything Paint draws (it is drawn once). Under a rotation or an uneven scale,
+	 * Paint just draws.
+	 */
+	SHORTSTACKCORE_API void Cached(uint64_t Key, float X, float Y, const std::function<void(Canvas&)>& Paint);
+
 	// Text.
 	float Text(const std::string& S, float X, float Y, const TextStyle& Style);
 	float Measure(const std::string& S, float Size, int Weight = 500, bool Mono = false) const;
@@ -255,6 +273,7 @@ private:
 	};
 
 	void FillPath(const std::vector<Vec2>& Logical, const Paint& P, float FeatherUnits, bool Convex);
+	void Replay(const Fragment& F, float Dx, float Dy);
 	void FillRings(float CX, float CY, float RX, float RY, const Paint& P);
 	void StrokeDevice(const std::vector<Vec2>& Device, bool Closed, const Color& C, float Width, bool ExtendCaps);
 	float Feather() const { return 1.0f / PxScale; }

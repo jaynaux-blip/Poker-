@@ -297,6 +297,8 @@ public:
 	 * prize money, wins and final tables (the numbers the boards showed before a living world took over).
 	 */
 	SHORTSTACKCORE_API void FoundingTally(double To, std::vector<double>& Points, std::vector<Chips>& Money, std::vector<int>& Wins, std::vector<int>& FinalTables) const;
+	/** Series points per player from a series' first day up to To (the network's own results). */
+	SHORTSTACKCORE_API std::vector<double> SeriesTally(const SeriesInfo& Series, double To) const;
 	const std::vector<EventTemplate>& Templates() const { return Temps; }
 	const std::vector<SeriesInfo>& Series() const { return AllSeries; }
 	const EventTemplate& TemplateOf(const EventInstance& E) const { return Temps[static_cast<size_t>(E.Template)]; }

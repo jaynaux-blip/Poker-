@@ -12,6 +12,7 @@
 // way out.
 
 #include "BackRoomChips.h"
+#include "CareerSave.h"
 #include "BackRoomGameMode.h"
 #include "BackRoomPlayer.h"
 #include "BackRoomStage.h"
@@ -93,11 +94,9 @@ bool ABackRoomGameMode::LoadLive()
 	{
 		return false;
 	}
-	UNightOneSaveGame* Obj = UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SlotName(), 0)
-		? Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SlotName(), 0))
-		: nullptr;
+	std::string CareerText;
 	TSharedPtr<ss::SaveData> D = MakeShared<ss::SaveData>();
-	if (!Obj || !ss::SaveData::Parse(std::string(TCHAR_TO_UTF8(*Obj->Data)), *D))
+	if (!CareerSave::LoadText(CareerText) || !ss::SaveData::Parse(CareerText, *D))
 	{
 		UE_LOG(LogRiverside, Warning, TEXT("Live=%s but no career save: practice table."), *Event);
 		return false;
@@ -130,11 +129,7 @@ bool ABackRoomGameMode::LoadLive()
 		ss::SaveData Registered = *Save;
 		Registered.BankrollCents = BaseCents;
 		Registered.ClockMinutes = Minutes - ss::net::MinutesPerDay * ss::net::NightOneDay;
-		if (UNightOneSaveGame* Out = Cast<UNightOneSaveGame>(UGameplayStatics::CreateSaveGameObject(UNightOneSaveGame::StaticClass())))
-		{
-			Out->Data = FString(UTF8_TO_TCHAR(Registered.Serialize().c_str()));
-			UGameplayStatics::SaveGameToSlot(Out, UNightOneSaveGame::SlotName(), 0);
-		}
+		CareerSave::SaveNow(Registered.Serialize());
 	}
 	Phase = EBackRoomPhase::Arriving;
 	ArrivalDayText = FString::Printf(TEXT("Sunday   %s"), *FString(UTF8_TO_TCHAR(ss::net::DateLabel(LiveDay).c_str())));
@@ -817,11 +812,7 @@ void ABackRoomGameMode::LiveSettle()
 	D.Life.Record(Minutes, std::string(TCHAR_TO_UTF8(*FString::Printf(TEXT("Riverside $150: %s of %d"), *Ordinal(HeroPlace), Tourney->Spec.Entrants))),
 		HeroPrizeCents - BoughtInCents, 0);
 	*Save = D;
-	if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::CreateSaveGameObject(UNightOneSaveGame::StaticClass())))
-	{
-		Obj->Data = FString(UTF8_TO_TCHAR(D.Serialize().c_str()));
-		UGameplayStatics::SaveGameToSlot(Obj, UNightOneSaveGame::SlotName(), 0);
-	}
+	CareerSave::SaveNow(D.Serialize());
 }
 
 void ABackRoomGameMode::LiveGoHome()

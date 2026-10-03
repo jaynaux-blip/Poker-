@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <chrono>
 // Renders the RiverLine client and the phone screen into draw lists for a set
 // of game states and writes them as JSON. web/scripts/render-drawlists.mjs
 // replays them in Chromium so the C++ UI can be compared with the prototype.
@@ -104,6 +106,21 @@ struct QuietHooks : ss::SessionHooks
 void Emit(const std::string& Name, ss::ui::RiverLine& RL, double Now)
 {
 	TableMeasurer M;
+	// SS_UI_BENCH=1: how long each page takes to draw (the game redraws the laptop's screen 30 times a second).
+	static const bool Bench = std::getenv("SS_UI_BENCH") != nullptr;
+	if (Bench)
+	{
+		const auto T0 = std::chrono::steady_clock::now();
+		size_t Verts = 0;
+		for (int K = 0; K < 100; ++K)
+		{
+			ss::ui::DrawList Lb;
+			ss::ui::Canvas Cb(Lb, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+			RL.Draw(Cb, Now);
+			Verts = Lb.Vertices.size();
+		}
+		std::printf("UI BENCH %-28s %6.2f ms/draw  %6zu vertices\n", Name.c_str(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count() / 100.0, Verts);
+	}
 	ss::ui::DrawList L;
 	ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
 	RL.Draw(C, Now);
