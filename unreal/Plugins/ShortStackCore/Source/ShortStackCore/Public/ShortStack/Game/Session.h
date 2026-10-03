@@ -254,6 +254,12 @@ struct SaveData
 	SHORTSTACKCORE_API void NoteRiverside(double World, int HeroPlace, int Field, const std::vector<std::pair<std::string, int>>& Places);
 	/** A live tournament the host played: the player's finish and what their tables saw, for the world. */
 	SHORTSTACKCORE_API void NoteLive(double World, const std::string& EventId, int HeroPlace, Chips Prize, int Field, const std::vector<LiveSeen>& Seen);
+	/**
+	 * What the player saw of the rest of a live tournament after their own finish (railing it): who went out where, the
+	 * winner too (P tags only). The world's result agrees with it. World: the player's own finish (the same as
+	 * NoteLive's), so the places are in before the world resolves the event.
+	 */
+	SHORTSTACKCORE_API void NoteLivePlaces(double World, const std::string& EventId, const std::vector<LiveSeen>& Places);
 };
 
 /** How the session reaches the world: sounds, the phone, the heartbeat, the desk. */

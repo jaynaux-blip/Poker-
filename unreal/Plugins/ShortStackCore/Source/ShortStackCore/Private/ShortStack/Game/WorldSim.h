@@ -85,6 +85,8 @@ struct Sim
 {
 	// ---- the people (World.cpp)
 	static void Found(World& W, double Start);
+	/** The Riverside's own regulars (live::RoomLocals), whoever of them a world doesn't have yet. */
+	static void RoomLocals(World& W, int Today);
 	static int Add(World& W, Npc&& N);
 	static std::string UniqueName(World& W, Rng& R, const std::string& Country, bool Pro);
 	static void MakeSkills(Npc& N, Rng& R, double Base);

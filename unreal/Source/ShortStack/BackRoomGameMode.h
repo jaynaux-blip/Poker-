@@ -25,6 +25,7 @@ struct TPlayer;
 }
 struct FBackRoomPersona;
 class FCareerSaver;
+enum class ECardRoomSpot : uint8;
 enum class EBackRoomRole : uint8;
 
 /**
@@ -97,6 +98,20 @@ public:
 	 */
 	void PlayWalk(const TArray<FVector>& Points, float Seconds, bool bOut, TFunction<void()> OnDone);
 	bool IsWalking() const { return bWalking; }
+	/** On foot in the card room (WASD or the arrows and the mouse, Shift to hurry, E at whatever's in reach). */
+	void BeginFreeWalk();
+	void EndFreeWalk() { bFreeWalk = false; }
+	bool IsFreeWalking() const { return bFreeWalk; }
+	/** The room moved under a walker (a table move re-anchors it): keep them where they stood in it. */
+	void ShiftWalk(const FVector& Delta) { WalkBase += Delta; }
+	/** Testing: hold a key down (or let it go), or press one once ("W", "E", "Q", "N", "P"...). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestHold(const FString& Key, bool bDown);
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestPress(const FString& Key);
+	/** Testing: a walker at a point of the room (room space; eye height comes with it), facing Yaw and Pitch (degrees). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestWalker(float RoomX, float RoomY, float InYaw, float InPitch);
 	/** N: the rest of a hand the player has folded, played out quickly (until they're dealt in again). */
 	bool IsSkippingHand() const { return bSkipHand; }
 	/** 0..1 along the current walk. */
@@ -107,6 +122,10 @@ public:
 private:
 	void HandleInput(float RealDt);
 	void TickWalk(float RealDt);
+	void TickFreeWalk(float RealDt);
+	/** A key held, or pressed this frame (the real one, or a test's). */
+	bool Held(const APlayerController* PC, const FKey& Key) const;
+	bool Pressed(const APlayerController* PC, const FKey& Key) const;
 	/** The heart: the beat you hear and the pulse you see. */
 	void TickHeart(float RealDt, float& PitchKick, float& Intensity);
 	ABackRoomTable* GetTable() const;
@@ -133,6 +152,16 @@ private:
 	bool bBodyShown = true;
 	TFunction<void()> WalkDone;
 	FVector WalkAt(float Distance) const;
+
+	// On foot.
+	bool bFreeWalk = false;
+	FVector WalkBase = FVector::ZeroVector; // the eye, without the stride's bob
+	FVector WalkVel = FVector::ZeroVector;
+	float WalkYaw = 0.0f;
+	float WalkPitch = -6.0f;
+	float WalkDist = 0.0f;
+	TSet<FName> TestHeld;
+	TSet<FName> TestPressed;
 
 	// The heart.
 	float BeatPhase = 0.0f;
@@ -297,6 +326,30 @@ public:
 	float FoldedPace() const { return TablePace == 2 ? 4.0f : (TablePace == 1 ? 2.8f : 1.9f); }
 	/** The persona for a cast member by name (the Back Room's regulars and the Riverside's Sunday faces). */
 	static FBackRoomPersona PersonaFor(const FString& Name);
+	/** Who someone in tonight's field is to the player ("Riverside regular", "Knows you", ...; empty for a stranger). */
+	FString FaceNote(const FString& Name) const;
+
+	// ------------------------------------------------------------ the Riverside on foot (BackRoomLive.cpp)
+	/** Q at the table: up and walking (still dealt in: the dealer checks the hand when it's free and mucks it when not). */
+	void LiveStandUp();
+	/** E on foot: the chair (sit back down), the desk, the cashier, the bar, the river deck, the door. */
+	void LiveInteract();
+	/** Out of the tournament: Q stays in the room to watch the rest of it, on foot; L goes home now. */
+	void LiveStay();
+	void LiveLeaveNow();
+	bool IsHeroUp() const { return bHeroUp; }
+	bool IsRailing() const { return bRailing; }
+	/** What the walker can reach right now, and its prompt ("" for nothing). */
+	ECardRoomSpot CurrentSpot() const;
+	FString SpotPrompt() const;
+	/** Seconds into the leaving summary while staying is still offered (-1 when it isn't). */
+	float StayOffer() const;
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestStandUp() { LiveStandUp(); }
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestInteract() { LiveInteract(); }
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestStay() { LiveStay(); }
 	/** The cast's MetaHuman asset name for a player name ("Big Lou" -> "BigLou"), or empty. */
 	static FString CastAssetFor(const FString& Name);
 
@@ -369,6 +422,9 @@ private:
 	float RoomBoardTick = 0.0f;
 	/** The player confirmed leaving while a hand or the room's round was still being played: they go when it's done. */
 	bool bLeaveWhenFree = false;
+	/** The faces in tonight's field (the entry's): name -> (who they are to the player, what they say sitting down). */
+	TMap<FString, TPair<FString, FString>> LiveFaces;
+	int32 GreetCount = 0;
 	/** Back after the game closed during the night: no bus, a few steps back to the chair. */
 	bool bBackInRoom = false;
 	/** ...and the room as it stood after the last hand (the checkpoint read back); the hand dealt then is dead. */
@@ -377,6 +433,27 @@ private:
 	TMap<FString, int32> ResumeReads;
 	bool bCheckpointDue = false;
 	int32 Checkpoints = 0;
+	// On foot.
+	bool bHeroUp = false;
+	bool bAwayExplained = false;
+	bool bRailing = false;
+	bool bCollected = false;
+	bool bExitNow = false;
+	float ExitT = 0.0f;
+	float ExitAskedAt = -100.0f;
+	float RailT = 0.0f;
+	float LastWater = -1000.0f;
+	float LastAir = -1000.0f;
+	double BustMinutes = 0.0;
+	/** The player's live record before tonight (the desk and the cage know a regular). */
+	int32 PastLiveEvents = 0;
+	int32 PastLiveCashes = 0;
+	int32 PastBestPlace = 0;
+	void LiveSitDown();
+	/** Railing: the room plays on (a round every few seconds), the floor calls it, the boards keep up. */
+	void LiveRail(float RealDt);
+	/** What the player watched after their finish, for the world (and the clock they got home by). */
+	void NoteRailedPlaces();
 	std::string LastCheckpoint;
 	double LastCheckpointAt = 0.0;
 	TSharedPtr<FCareerSaver> LiveSaver;

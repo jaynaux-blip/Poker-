@@ -171,6 +171,11 @@ std::string SaveData::Serialize() const
 		{
 			Out << "liveboard\t" << session_detail::Escape(E.Id) << "\t" << session_detail::Escape(B) << "\n";
 		}
+		for (const life::LiveFace& F : E.Faces)
+		{
+			Out << "liveface\t" << session_detail::Escape(E.Id) << "\t" << session_detail::Escape(F.Name) << "\t" << session_detail::Escape(F.Label) << "\t"
+				<< session_detail::Escape(F.Line) << "\n";
+		}
 		if (E.ArrivedAt > 0.0)
 		{
 			Out << "livecheck\t" << session_detail::Escape(E.Id) << "\t" << Fixed(E.ArrivedAt, 2) << "\t" << Fixed(E.CheckpointAt, 3) << "\t"
@@ -302,6 +307,19 @@ void SaveData::NoteLive(double World, const std::string& EventId, int HeroPlace,
 	WorldNotes.push_back(Line);
 }
 
+void SaveData::NoteLivePlaces(double World, const std::string& EventId, const std::vector<LiveSeen>& Places)
+{
+	std::string Line = "worldnote\tliveplaces\t" + Fixed(World, 2) + "\t" + session_detail::Escape(EventId);
+	for (const LiveSeen& S : Places)
+	{
+		if (S.Tag == 'P')
+		{
+			Line += "\t" + session_detail::Escape(S.Name) + "\t" + std::to_string(S.Value);
+		}
+	}
+	WorldNotes.push_back(Line);
+}
+
 bool SaveData::Parse(const std::string& Text, SaveData& Out)
 {
 	std::istringstream In(Text);
@@ -424,6 +442,17 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 				if (E.Id == Id)
 				{
 					E.Board.push_back(session_detail::Unescape(P[2]));
+				}
+			}
+		}
+		else if (P.size() == 5 && P[0] == "liveface")
+		{
+			const std::string Id = session_detail::Unescape(P[1]);
+			for (life::LiveEntry& E : D.Life.LiveEntries)
+			{
+				if (E.Id == Id)
+				{
+					E.Faces.push_back({session_detail::Unescape(P[2]), session_detail::Unescape(P[3]), session_detail::Unescape(P[4])});
 				}
 			}
 		}
@@ -799,6 +828,20 @@ void Session::WorldNote(const std::vector<std::string>& F)
 			}
 		}
 		LivingWorld.HeroFinished(session_detail::Unescape(F[3]), std::atoi(F[4].c_str()), static_cast<Chips>(std::strtoll(F[5].c_str(), nullptr, 10)), Rp);
+	}
+	else if (F[1] == "liveplaces" && F.size() >= 4)
+	{
+		// The rest of a live tournament as the player watched it from the rail (SaveData::NoteLivePlaces).
+		std::vector<std::pair<int, int>> Places;
+		for (size_t K = 4; K + 1 < F.size(); K += 2)
+		{
+			const int Npc = LivingWorld.Find(session_detail::Unescape(F[K]));
+			if (Npc >= 0)
+			{
+				Places.push_back({Npc, std::atoi(F[K + 1].c_str())});
+			}
+		}
+		LivingWorld.KnownPlaces(session_detail::Unescape(F[3]), Places);
 	}
 }
 
@@ -2964,6 +3007,31 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 			return Not;
 		}
 		LivingWorld.HeroEntered(O.Id, O.T->Name);
+		// The faces in the field: the room's regulars, and whoever remembers the player (what they'll say sitting down).
+		if (life::LiveEntry* Mine = live::EntryFor(Life, O.Id); Mine && LivingWorld.Ready())
+		{
+			const std::vector<int> Regulars = LivingWorld.RiversideRegulars();
+			for (int Npc : LivingWorld.Registered(O.Id))
+			{
+				const world::Npc* N = LivingWorld.Get(Npc);
+				if (!N || N->Name == HeroName)
+				{
+					continue;
+				}
+				const world::Bond* Bd = LivingWorld.BondWith(Npc);
+				const bool Regular = std::find(Regulars.begin(), Regulars.end(), Npc) != Regulars.end();
+				const std::string Known = Bd ? Bd->Label() : std::string();
+				if (!Regular && Known.empty() && !(Bd && !Bd->Memories.empty()))
+				{
+					continue;
+				}
+				life::LiveFace F;
+				F.Name = N->Name;
+				F.Label = !Known.empty() ? Known : Bd && !Bd->Memories.empty() ? std::string("Has met you") : std::string("Riverside regular");
+				F.Line = LivingWorld.SpokenGreeting(Npc, live::FaceHash(O.Id + N->Name));
+				Mine->Faces.push_back(F);
+			}
+		}
 		// The champions' board by the desk: the room's last winners, newest first, from the world's results.
 		if (life::LiveEntry* Mine = live::EntryFor(Life, O.Id))
 		{

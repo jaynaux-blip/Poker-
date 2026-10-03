@@ -337,6 +337,142 @@ TArray<FVector> ABackRoomStage::CardRoomCageToDoor(const FVector& At) const
 	return Out;
 }
 
+// ------------------------------------------------------------------ on foot
+
+namespace CardRoomDetail
+{
+/** A person's half-width on the floor. */
+constexpr double Body = 22.0;
+
+/** Whether a person can stand at P (room space). */
+bool Blocked(const FVector2D& P)
+{
+	// The walls, but for the entrance (open to the casino floor a little way).
+	const bool bInDoor = P.X > DoorX0 + Body && P.X < DoorX1 - Body;
+	if (P.X < RX0 + Body || P.X > RX1 - Body || P.Y > RY1 - Body || P.Y < (bInDoor ? RY0 - 170.0 : RY0 + Body))
+	{
+		return true;
+	}
+	// The desk and the cage (their counters run back to the wall), and the desk's queue rope.
+	for (const double Y : {DeskY, CageY})
+	{
+		if (P.X < CounterX + 12.0 + Body && FMath::Abs(P.Y - Y) < 304.0 + Body)
+		{
+			return true;
+		}
+	}
+	if (FMath::Abs(P.X - (CounterX + 120.0)) < 5.0 + Body && FMath::Abs(P.Y - DeskY) < 242.0)
+	{
+		return true;
+	}
+	// The bar and its stools; the stage (the feature table is watched from its edge).
+	if (FMath::Abs(P.X - BarX) < 410.0 + Body && P.Y > RY1 - 285.0 - Body)
+	{
+		return true;
+	}
+	if (P.X > StageX - 8.0 - Body && FMath::Abs(P.Y) < 560.0)
+	{
+		return true;
+	}
+	for (const FVector2D& C : Columns)
+	{
+		if (FVector2D::Distance(P, C) < 38.0 + Body)
+		{
+			return true;
+		}
+	}
+	// The tables with their chairs (the aisles between columns and the lanes between rows stay clear).
+	for (int32 S = 0; S < TableSlots; ++S)
+	{
+		const FVector T = SlotPoint(S);
+		const double Dx = (P.X - T.X) / (212.0 + Body);
+		const double Dy = (P.Y - T.Y) / (222.0 + Body);
+		if (Dx * Dx + Dy * Dy < 1.0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+} // namespace CardRoomDetail
+
+FVector ABackRoomStage::RoomToWorld(const FVector& RoomAt) const
+{
+	return (RoomRoot ? RoomRoot->GetComponentTransform() : GetActorTransform()).TransformPosition(RoomAt);
+}
+
+FVector ABackRoomStage::WorldToRoom(const FVector& WorldAt) const
+{
+	return (RoomRoot ? RoomRoot->GetComponentTransform() : GetActorTransform()).InverseTransformPosition(WorldAt);
+}
+
+FVector ABackRoomStage::CardRoomStep(const FVector& From, const FVector& To) const
+{
+	const FVector A = WorldToRoom(From);
+	const FVector B = WorldToRoom(To);
+	// Somewhere nobody could stand (just up from a chair, on the stage): free to step away.
+	if (Blocked(FVector2D(A.X, A.Y)))
+	{
+		return To;
+	}
+	if (!Blocked(FVector2D(B.X, B.Y)))
+	{
+		return To;
+	}
+	// Along whatever's in the way.
+	if (!Blocked(FVector2D(B.X, A.Y)))
+	{
+		return RoomToWorld(FVector(B.X, A.Y, B.Z));
+	}
+	if (!Blocked(FVector2D(A.X, B.Y)))
+	{
+		return RoomToWorld(FVector(A.X, B.Y, B.Z));
+	}
+	return From;
+}
+
+double ABackRoomStage::CardRoomFloorZ(const FVector& At) const
+{
+	const FVector P = WorldToRoom(At);
+	const bool bStage = P.X > StageX && FMath::Abs(P.Y) < 500.0;
+	return RoomToWorld(FVector(P.X, P.Y, bStage ? StageZ : 0.0)).Z;
+}
+
+ECardRoomSpot ABackRoomStage::CardRoomSpot(const FVector& Eye) const
+{
+	const FVector P = WorldToRoom(Eye);
+	const FVector Me = SlotPoint(AnchorSlot);
+	if (FVector2D::Distance(FVector2D(P.X, P.Y), FVector2D(Me.X - AisleX, Me.Y - 60.0)) < 125.0)
+	{
+		return ECardRoomSpot::Seat;
+	}
+	if (P.X < CounterX + 200.0 && FMath::Abs(P.Y - DeskY) < 300.0)
+	{
+		return ECardRoomSpot::Desk;
+	}
+	if (P.X < CounterX + 200.0 && FMath::Abs(P.Y - CageY) < 320.0)
+	{
+		return ECardRoomSpot::Cage;
+	}
+	if (FMath::Abs(P.X - BarX) < 430.0 && P.Y > RY1 - 420.0)
+	{
+		return ECardRoomSpot::Bar;
+	}
+	if (FMath::Abs(P.X - RiverX) < 190.0 && P.Y > RY1 - 220.0)
+	{
+		return ECardRoomSpot::River;
+	}
+	if (P.X > DoorX0 && P.X < DoorX1 && P.Y < RY0 + 140.0)
+	{
+		return ECardRoomSpot::Exit;
+	}
+	if (P.X > StageX - 260.0 && FMath::Abs(P.Y) < 560.0)
+	{
+		return ECardRoomSpot::Rail;
+	}
+	return ECardRoomSpot::None;
+}
+
 // ------------------------------------------------------------------ building
 
 UTextRenderComponent* ABackRoomStage::AddText(const FString& Text, const FVector& At, const FRotator& Facing, float Size, const FLinearColor& Color, USceneComponent* Parent)

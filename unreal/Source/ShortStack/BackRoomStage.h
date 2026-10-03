@@ -17,6 +17,19 @@ class UStaticMesh;
 class UStaticMeshComponent;
 class UTextRenderComponent;
 
+/** What the player can walk up to in the card room. */
+enum class ECardRoomSpot : uint8
+{
+	None,
+	Seat,  // the player's own chair
+	Desk,  // the tournament desk
+	Cage,  // the cashier
+	Bar,
+	River, // the doors to the river deck
+	Exit,  // the entrance, out to the casino floor
+	Rail,  // in front of the stage, watching the feature table
+};
+
 /**
  * The Back Room: the Spin Cycle Club's game behind the 24-hour laundromat, Tuesday, 1 a.m.
  *
@@ -114,6 +127,19 @@ public:
 	/** The walk in from the casino floor to the feature table's seat (world points, eye height). */
 	TArray<FVector> CardRoomWalkIn(const FVector& Eye) const;
 	TArray<FVector> CardRoomWalkOut(const FVector& Eye) const;
+	/**
+	 * Walking the card room on foot (world points at eye height): From toward To as far as the room allows, stopped by
+	 * the tables and their chairs, the columns, the counters and the desk's rope, the bar's stools, the stage and the
+	 * walls (the entrance is open), sliding along whatever it meets.
+	 */
+	FVector CardRoomStep(const FVector& From, const FVector& To) const;
+	/** The floor's height under a world point (the stage is raised). */
+	double CardRoomFloorZ(const FVector& At) const;
+	/** What a player standing at Eye (world) can reach. */
+	ECardRoomSpot CardRoomSpot(const FVector& Eye) const;
+	/** Room space to world and back (the room moves so the player's table sits at the origin). */
+	FVector RoomToWorld(const FVector& RoomAt) const;
+	FVector WorldToRoom(const FVector& WorldAt) const;
 
 	// ------------------------------------------------------------ tuning
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")

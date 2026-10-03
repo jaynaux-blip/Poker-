@@ -205,6 +205,12 @@ void RiversideWeeks(const world::World& Base)
 	std::set<std::string> CastSeen;
 	int Doubles = 0;
 	int Tracked = 0;
+	// The room's regulars: who they are, how often they come, how many a night.
+	const std::vector<int> Regulars = W.RiversideRegulars();
+	const std::set<int> RegularSet(Regulars.begin(), Regulars.end());
+	std::map<int, int> RegularNights;
+	int NightlyRegulars = 0;
+	int Nightlies = 0;
 	for (int D = First; D < First + 28; ++D)
 	{
 		W.EnsurePlanned(D);
@@ -221,6 +227,11 @@ void RiversideWeeks(const world::World& Base)
 			{
 				++Seen[Id];
 				++Tracked;
+				if (RegularSet.count(Id) > 0)
+				{
+					++RegularNights[Id];
+					NightlyRegulars += std::string(O.T->Key) == "nightly" ? 1 : 0;
+				}
 				const world::Npc* N = W.Get(Id);
 				Check(N && N->Playing(), "the Riverside registered someone who isn't playing");
 				for (const live::CastMember& C : live::RiversideCast())
@@ -236,6 +247,7 @@ void RiversideWeeks(const world::World& Base)
 			{
 				SundayFaces.push_back(Faces);
 			}
+			Nightlies += std::string(O.T->Key) == "nightly" ? 1 : 0;
 		}
 		for (const auto& It : Seen)
 		{
@@ -254,6 +266,24 @@ void RiversideWeeks(const world::World& Base)
 	Check(SundayFaces.size() == 4 && Varies, "the Sunday's faces change from week to week");
 	Check(CastSeen.size() >= 6, "most of the cast play the Riverside in a month (" + std::to_string(CastSeen.size()) + ")");
 	std::printf("riverside: 4 weeks, %zu events, %d registrations the world follows, %zu of the cast seen\n", Ids.size(), Tracked, CastSeen.size());
+	// The regulars: a room's worth, the same people a month later, and back week after week.
+	int Recurring = 0;
+	for (const auto& It : RegularNights)
+	{
+		Recurring += It.second >= 3 ? 1 : 0;
+	}
+	const std::vector<int> Later = W.RiversideRegulars();
+	int Stayed = 0;
+	for (int Id : Later)
+	{
+		Stayed += RegularSet.count(Id) > 0 ? 1 : 0;
+	}
+	const double PerNightly = Nightlies > 0 ? static_cast<double>(NightlyRegulars) / Nightlies : 0.0;
+	Check(static_cast<int>(Regulars.size()) == world::World::RiversideRegularCount, "the Riverside has its regulars (" + std::to_string(Regulars.size()) + ")");
+	Check(Stayed >= static_cast<int>(Regulars.size()) * 9 / 10, "the regulars are mostly the same people a month later (" + std::to_string(Stayed) + ")");
+	Check(PerNightly >= 5.0, "a Nightly has its regulars (" + std::to_string(PerNightly) + " a night)");
+	Check(Recurring >= static_cast<int>(Regulars.size()) / 2, "most regulars are back three or more times a month (" + std::to_string(Recurring) + ")");
+	std::printf("riverside: %zu regulars, %.1f at a Nightly, %d back three or more times in four weeks, %d still regulars a month on\n", Regulars.size(), PerNightly, Recurring, Stayed);
 }
 
 int Checks()
@@ -376,6 +406,50 @@ int Checks()
 		world::World Before;
 		Load(Before, Old);
 		Invariants(Before, "an older save");
+	}
+	{
+		// A save from before the Riverside had regulars of its own: they join on load, once, as the same people.
+		world::World Fresh;
+		Fresh.Create(4321u, NightOne);
+		std::string Text;
+		Fresh.Write(Text);
+		std::string Old;
+		int Dropped = 0;
+		size_t At = 0;
+		while (At < Text.size())
+		{
+			const size_t End = Text.find('\n', At);
+			const std::string Ln = Text.substr(At, End == std::string::npos ? std::string::npos : End - At + 1);
+			bool Local = false;
+			for (const live::RoomLocal& L : live::RoomLocals())
+			{
+				Local = Local || (Ln.rfind("world\tnpc\t", 0) == 0 && Ln.find("\t" + std::string(L.Name) + "\t") != std::string::npos);
+			}
+			Dropped += Local ? 1 : 0;
+			Old += Local ? std::string() : Ln;
+			At = End == std::string::npos ? Text.size() : End + 1;
+		}
+		world::World Migrated;
+		Load(Migrated, Old);
+		int Locals = 0;
+		bool SameIds = true;
+		for (const live::RoomLocal& L : live::RoomLocals())
+		{
+			const int Id = Migrated.Find(L.Name);
+			const world::Npc* N = Migrated.Get(Id);
+			Locals += N && N->From == world::Origin::Local ? 1 : 0;
+			SameIds = SameIds && Id == Fresh.Find(L.Name);
+		}
+		Check(Dropped == static_cast<int>(live::RoomLocals().size()), "the older save had none of the room's regulars");
+		Check(Locals == static_cast<int>(live::RoomLocals().size()) && SameIds, "an older save gets the room's regulars, the same people");
+		std::string Joined;
+		Migrated.Write(Joined);
+		world::World Twice;
+		Load(Twice, Joined);
+		std::string Third;
+		Twice.Write(Third);
+		Check(Third == Joined && Twice.People().size() == Migrated.People().size(), "the regulars join once");
+		Invariants(Migrated, "an older save, with the regulars");
 	}
 	W.Simulate(20);
 	Copy.Simulate(20);

@@ -1070,6 +1070,8 @@ void World::Finish()
 		}
 		std::stable_sort(N.Awards.begin(), N.Awards.end(), [](const Award& A, const Award& B) { return A.Day < B.Day; });
 	}
+	// Saves from before the Riverside had regulars of its own: they join (once; the same people as in a new world).
+	Sim::RoomLocals(*this, sim::DayAt(Now));
 	std::stable_sort(Queue.begin(), Queue.end(), [](const Pending& A, const Pending& B) { return A.End < B.End; });
 	RefreshAll();
 	Sim::Ranks(*this);

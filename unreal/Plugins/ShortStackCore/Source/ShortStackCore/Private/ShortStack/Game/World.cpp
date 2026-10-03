@@ -3,6 +3,7 @@
 
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Kast.h"
+#include "ShortStack/Game/Live.h"
 #include "WorldSim.h"
 
 #include <algorithm>
@@ -211,6 +212,59 @@ std::string Sim::UniqueName(World& W, Rng& R, const std::string& Country, bool P
 		Name = Try < 8 ? handles::Make(R, Country, Pro) : Name.substr(0, std::min<size_t>(Name.size(), 13)) + std::to_string(R.Int(1000));
 	}
 	return Name;
+}
+
+void Sim::RoomLocals(World& W, int Today)
+{
+	// The same people in every world: each drawn from their own name, not the world's seed.
+	const int Year0 = YearOf(Today);
+	for (const live::RoomLocal& L : live::RoomLocals())
+	{
+		if (W.ByName.count(L.Name) > 0)
+		{
+			continue;
+		}
+		Rng R(std::string("riverside-local:") + L.Name);
+		Npc N;
+		N.Name = L.Name;
+		N.Country = "US";
+		N.Hue = R.Int(360);
+		N.From = Origin::Local;
+		N.Home = Region::Americas;
+		N.Born = Year0 - L.Age;
+		world_detail::SetTraits(N, R, 0.5, 0.35, 0.45, 0.55, 0.65, 0.55, 0.45);
+		// A live game a few nights a week; a few hands on the phone now and then.
+		N.OnlineShare = static_cast<float>(R.Range(0.05, 0.3));
+		N.Formats = LikeDeep | (R.Chance(0.3) ? LikeTurbo : 0) | (R.Chance(0.25) ? LikeBounty : 0);
+		MakeSkills(N, R, L.Skill);
+		N.Skills[static_cast<size_t>(Skill::Live)] = sim::Clampf(L.Skill + 0.1, 0.0, 0.95);
+		N.Peak = static_cast<float>(sim::Clamp(L.Skill + R.Range(0.0, 0.12), 0.0, 0.95));
+		N.Potential = static_cast<float>(L.Age < 32 ? R.Range(0.35, 0.6) : R.Range(0.05, 0.2));
+		// A job pays for it (the money's theirs, so it comes and goes).
+		N.Bankroll = sim::Cents(R.Range(900.0, 7000.0));
+		N.PeakRoll = N.Bankroll;
+		N.Income = sim::Cents(R.Range(180.0, 650.0));
+		N.Tier = 1;
+		N.TierSince = Today - 200;
+		N.Live = LiveLevel::Local;
+		N.Schedule = R.Chance(0.5) ? Plan::Nights : R.Chance(0.5) ? Plan::Weekends : Plan::Occasional;
+		N.Anchored = true;
+		N.Joined = Today - 365 * (2 + R.Int(12));
+		N.LastDay = Today - 1;
+		Ledger& Lg = N.Totals[static_cast<size_t>(Venue::Live)];
+		Lg.Events = 40 + R.Int(260);
+		Lg.Cashes = Lg.Events / 8;
+		Lg.Spent = static_cast<Chips>(Lg.Events) * 11000;
+		Lg.Won = static_cast<Chips>(static_cast<double>(Lg.Spent) * (0.5 + L.Skill));
+		Lg.Best = Lg.Won / 7;
+		N.Fame[static_cast<size_t>(Rep::Live)] = 0.6f;
+		N.ThisSeason.Year = Year0;
+		Year Y;
+		Y.Number = Year0;
+		N.Years.push_back(Y);
+		N.Began = N.Is = Identity::LiveRegular;
+		Add(W, std::move(N));
+	}
 }
 
 int Sim::Add(World& W, Npc&& N)
@@ -771,6 +825,7 @@ void World::Create(uint32_t InSeed, double StartWorld)
 	Week = Today - net::Weekday(Today);
 	Month = YearOf(Today) * 12; // refined on the first month change
 	Sim::Found(*this, StartWorld);
+	Sim::RoomLocals(*this, Today);
 	Target = static_cast<int>(Roster.size());
 	// The fields each tier plays against start where the network's regulars are.
 	std::array<double, 5> Sum{};

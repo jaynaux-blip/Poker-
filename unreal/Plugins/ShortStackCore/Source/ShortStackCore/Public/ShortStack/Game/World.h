@@ -147,6 +147,7 @@ enum class Origin : int
 	Directory,  // Kast's established streamers
 	Rookie,     // joined later
 	Discovered, // an unknown who made a name with one result
+	Local,      // the Riverside's own regulars (live::RoomLocals), in every world (added to older saves on load)
 };
 
 /** How a newcomer found their way to RiverLine (the first line of their story). */
@@ -821,6 +822,8 @@ public:
 		std::vector<std::pair<int, Chips>> BigPots; // npc, net to the player (+ won, - lost)
 	};
 	SHORTSTACKCORE_API void HeroFinished(const std::string& EventId, int Place, Chips Prize, const TableReport& Report);
+	/** Places the player saw in an event after their own finish (from the rail): the world's result keeps them. */
+	SHORTSTACKCORE_API void KnownPlaces(const std::string& EventId, const std::vector<std::pair<int, int>>& Places);
 	/** A night at Dee's game with these people (names as the Back Room knows them). */
 	SHORTSTACKCORE_API void BackRoomNight(double At, const std::vector<std::string>& Names, Chips HeroNet);
 	/** A Riverside Sunday: who finished where (names as the field knows them), and the player's place. */
@@ -830,6 +833,16 @@ public:
 	SHORTSTACKCORE_API const Bond* BondWith(int Npc) const;
 	/** A line for a table chat when the player sits down with someone who remembers them ("" for nothing to say). */
 	SHORTSTACKCORE_API std::string Greeting(int Npc, uint32_t Salt) const;
+	/** The same, said out loud across a live table ("" for nothing to say). */
+	SHORTSTACKCORE_API std::string SpokenGreeting(int Npc, uint32_t Salt) const;
+	/** How many regulars the Riverside's card room has. */
+	static constexpr int RiversideRegularCount = 64;
+	/**
+	 * The Riverside's regulars: locals who play its card room every week, each on nights of their own
+	 * (live::RegularHabit), the faces the player gets to know there. Drawn by name from the people who live near and
+	 * play live, so they're the same people in every save for as long as they do.
+	 */
+	SHORTSTACKCORE_API std::vector<int> RiversideRegulars() const;
 	/** The player's name, as the world knows it (honors, headlines). */
 	std::string HeroName;
 	/** The bracelets and rings the player has won, oldest first. */

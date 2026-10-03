@@ -376,6 +376,38 @@ void World::GrantAward(int Npc, bool Ring, bool Main)
 	++Rev;
 }
 
+void World::KnownPlaces(const std::string& EventId, const std::vector<std::pair<int, int>>& Places)
+{
+	Pending* P = Created ? FindPending(Queue, EventId) : nullptr;
+	if (!P)
+	{
+		return;
+	}
+	for (const std::pair<int, int>& It : Places)
+	{
+		Entry* Found = nullptr;
+		for (Entry& E : P->Who)
+		{
+			if (E.Npc == It.first)
+			{
+				Found = &E;
+				break;
+			}
+		}
+		if (!Found && Get(It.first))
+		{
+			Entry E;
+			E.Npc = It.first;
+			P->Who.push_back(E);
+			Found = &P->Who.back();
+		}
+		if (Found)
+		{
+			Found->Known = It.second;
+		}
+	}
+}
+
 void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, const TableReport& Report)
 {
 	if (!Created)
@@ -692,6 +724,57 @@ std::string Bond::Label() const
 		return "Knows you";
 	}
 	return "";
+}
+
+std::vector<int> World::RiversideRegulars() const
+{
+	// Not who's playing this week (a break or a broke spell doesn't change who the room's regulars are). The room's
+	// own locals, then the town's live players, then its online players who've had the money for a live game (their
+	// best bankroll only grows, so they stay).
+	std::vector<std::pair<uint64_t, int>> Pool;
+	for (const Npc& N : Roster)
+	{
+		if (!N.Faded && N.St != Status::Retired && N.From != Origin::Cast && !N.Rival && N.Home == Region::Americas && N.Country == "US" &&
+			(N.Live >= LiveLevel::Local || N.PeakRoll >= 100000))
+		{
+			const uint64_t Tier = N.From == Origin::Local ? 0u : N.Live >= LiveLevel::Local ? 1u : 2u;
+			Pool.push_back({(Tier << 32) | live::FaceHash(N.Name), N.Id});
+		}
+	}
+	std::sort(Pool.begin(), Pool.end());
+	std::vector<int> Out;
+	for (size_t I = 0; I < Pool.size() && I < static_cast<size_t>(RiversideRegularCount); ++I)
+	{
+		Out.push_back(Pool[I].second);
+	}
+	return Out;
+}
+
+std::string World::SpokenGreeting(int Npc, uint32_t Salt) const
+{
+	const Bond* B = BondWith(Npc);
+	if (!B || B->Memories.empty())
+	{
+		return "";
+	}
+	const Memory& Last = B->Memories.back();
+	const int Pick = static_cast<int>(Salt % 3u);
+	auto One = [&](const char* A, const char* Bb, const char* C) { return std::string(Pick == 0 ? A : Pick == 1 ? Bb : C); };
+	switch (Last.Kind)
+	{
+	case MemoryKind::KnockedOutHero: return One("You again. It went better for me last time.", "Rematch, huh?", "Remember that hand? I do.");
+	case MemoryKind::HeroKnockedOut:
+		return B->Resentment >= 0.3f ? One("Still thinking about that river.", "You owe me one.", "Not you again.")
+									 : One("Good luck. You got me last time.", "Careful with this one, everybody.", "Nice hand last time, honestly.");
+	case MemoryKind::HeadsUpWon: return One("Heads-up rematch, whenever you want.", "Look who it is. Good luck.", "I still think about that final.");
+	case MemoryKind::HeadsUpLost: return One("Back for more?", "Good game last time.", "Good luck. See you heads-up again.");
+	case MemoryKind::FinalTable: return One("Final table buddy. Good luck.", "See you at another final.", "This one again. Good luck.");
+	case MemoryKind::BackRoom: return One("How's Dee?", "The laundromat crew, out in daylight.", "I hear you play better at Dee's.");
+	case MemoryKind::BigPotWon: return One("I want my chips back.", "Not you again.", "That pot still hurts.");
+	case MemoryKind::BigPotLost: return One("Thanks for the chips last time.", "Good to see you. Bring chips?", "Evening. Feeling lucky?");
+	default: break;
+	}
+	return B->Encounters >= 2 ? One("Hey again.", "Good to see you.", "Evening.") : One("I know you. Good luck.", "Hey, I remember you.", "Good luck again.");
 }
 
 std::string World::Greeting(int Npc, uint32_t Salt) const

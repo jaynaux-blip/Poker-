@@ -621,6 +621,11 @@ void Sim::PlanDay(World& W, int Day)
 			}
 		}
 		R.Shuffle(Order);
+		std::vector<char> RoomRegular(W.Roster.size(), 0);
+		for (const int Id : W.RiversideRegulars())
+		{
+			RoomRegular[static_cast<size_t>(Id)] = 1;
+		}
 		std::vector<double> Weight(Online.size(), 0.0);
 		for (int Id : Order)
 		{
@@ -667,6 +672,14 @@ void Sim::PlanDay(World& W, int Day)
 						const int H = live::Habit(N.Name, live::FindOccurrence(O.P.Id));
 						const double Want = H >= 2 ? 0.7 : H == 1 ? 0.18 : 0.0;
 						Go = Want > 0.0 && O.P.BuyIn * 4 <= Avail && Q.Chance(Want);
+						break;
+					}
+					if (Riverside && RoomRegular[static_cast<size_t>(N.Id)] != 0 && N.TripUntil < D)
+					{
+						// The room's regulars have their nights (live::RegularHabit), when the money's there.
+						const int H = live::RegularHabit(N.Name, live::FindOccurrence(O.P.Id));
+						const double Want = H >= 2 ? 0.8 : H == 1 ? 0.2 : 0.02;
+						Go = O.P.BuyIn * 3 <= std::max(Avail, N.Income * 2) && Q.Chance(Want);
 						break;
 					}
 					if (O.Where != N.Home || N.Live < LiveLevel::Local || (Riverside && N.Country != "US") || N.TripUntil >= D)
@@ -1538,7 +1551,8 @@ void Sim::Resolve(World& W, Pending& P)
 	{
 		W.WeekPairs.push_back({std::min(Winner, Second), std::max(Winner, Second)});
 	}
-	if (P.Online || P.Major || P.Bracelet || P.Ring)
+	// (And the Riverside's: its champions' board, and what the player watched from its rail.)
+	if (P.Online || P.Major || P.Bracelet || P.Ring || live::IsRiverside(P.Id))
 	{
 		W.Results[P.Id] = std::move(Res);
 		W.ResultEnds[P.Id] = P.End;
@@ -1679,6 +1693,11 @@ void Sim::PlanTrips(World& W, int Day, Rng& R)
 			if (N.Anchored && N.From == Origin::Cast)
 			{
 				Want *= 0.5;
+			}
+			else if (N.From == Origin::Local)
+			{
+				// The Riverside's regulars have their room; a festival is a once-in-a-while thing.
+				Want *= 0.15;
 			}
 			if (Can && Q.Chance(Want))
 			{

@@ -242,7 +242,28 @@ Saturday, 12:10 PM. Rent's paid, $640 in the bank. The calendar has three blue c
   - Measured about 63 fps, GPU 14.6 ms, with dynamic resolution holding 60 in PIE at 2552×1222 on an RTX 4070 SUPER.
   - Played: the walk in, a table move, a bust and the walk out, and a final table on the stage.
   - Not yet built from M2: walk mode and walkable breaks (breaks are timed holds), and cash tables.
-- **M3 is open**, plus the parts of M2 above. An interrupted entry is settled by the leaving rule until per-hand checkpoints land.
+- **M3 is mostly built** (10b3fc9, and the commit after it), with the walk mode M2 owed:
+  - **Checkpoints (R5).** `Tournament::Checkpoint`/`Restore` save the whole tournament state after every hand. The card room writes the save on a worker thread and marks it again when the next hand is dealt.
+    - A game closed mid-night goes back to the seat on the next launch (`Session::LiveInProgress`/`ResumeLive`). There's no bus fare, and nothing is dealt while the game is closed.
+    - A hand already dealt when the game closed is dead (checked through or mucked), so no deck is seen twice.
+    - A night the player never returns to is blinded off from its checkpoint.
+    - Tested: session_test reopens a Sunday after any hand, and every forty hands; it plays on event for event and chip for chip. In the editor, the editor process was killed mid-hand and resumed into the same seat.
+  - **Pacing.** A Table pace setting (Live / Brisk / Fast; also P at the table) scales the others' thinking and the folded speed-up. N plays out a folded hand quickly. Neither ever decides anything for the player.
+  - **Recurring faces.**
+    - The room has 39 regulars of its own in the living world (`live::RoomLocals`, `world::Origin::Local`), added to older saves on load. 64 regulars in all (`World::RiversideRegulars`), each with their own nights (`live::RegularHabit`). world_test measures about 8 at a Nightly, and most come back three or more times a month.
+    - The entry records the faces in its field: who they are to the player, and what they say on sitting down (`life::LiveFace`, from the world's bonds).
+    - The dealer greets regulars by name, studying a face shows its name and label, and weekday dealers have their own names and faces (Dee deals the Sunday).
+  - **On foot.**
+    - Q gets up from the table. The player stays dealt in: the dealer checks the hand when it's free and mucks it otherwise.
+    - WASD and the mouse walk the room, with collision against tables, columns, counters, the rope, the bar, the stage and the walls. E reaches the chair, the desk, the cashier, the bar, the river deck and the door.
+    - The desk and the cage recognize a first-timer, a regular and a past cash. Breaks can be walked.
+    - After a bust, the summary waits: Q stays to rail while the room plays on (PA, boards, champion) and L goes home. The door ends the night.
+    - What the player watched from the rail goes to the world (`SaveData::NoteLivePlaces`, `World::KnownPlaces`), and the world's result agrees: session_test checks a railed final. Riverside results are kept, which also fills the champions' board.
+  - **Still open:**
+    - The near-table bodies are four extra MetaHumans, so faces repeat (shirts and names differ).
+    - Cash tables.
+    - The player's old table freezes while railing (its people don't play on visibly).
+    - Messages from bonds outside the room.
 
 **M1, the schedule and the honest field (core, standalone-tested, no new art)**
 1. `live::Venue` and `live::EventTemplate` data: the Riverside and its weekly schedule.

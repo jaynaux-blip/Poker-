@@ -92,10 +92,31 @@ struct CastMember
 };
 SHORTSTACKCORE_API const std::vector<CastMember>& RiversideCast();
 /**
+ * The Riverside's own regulars: locals who play its card room (the names on the cash list), in the living world like
+ * everyone else (world::Origin::Local). Woman: which of the room's bodies they get.
+ */
+struct RoomLocal
+{
+	const char* Name;
+	bool Woman;
+	int Age;
+	double Skill;
+};
+SHORTSTACKCORE_API const std::vector<RoomLocal>& RoomLocals();
+SHORTSTACKCORE_API const RoomLocal* FindRoomLocal(const std::string& Name);
+/**
  * How much one of the cast likes an occurrence: 0 never, 1 sometimes, 2 it's their game. Mrs. Park plays the noon
  * game, Rick the turbos, Dee's regulars keep her Tuesday, Thursday and Saturday nights.
  */
 SHORTSTACKCORE_API int Habit(const std::string& Name, const Occurrence& O);
+/** A name's own number (FNV-1a): who is a regular, their nights, the same in every save. */
+SHORTSTACKCORE_API uint32_t FaceHash(const std::string& Name);
+/**
+ * The same for one of the room's regulars (world::World::RiversideRegulars): most play the Nightly on two or
+ * three nights of their own, some the noon game, some only the weekend's bigger ones; everyone turns up for a
+ * Sunday now and then.
+ */
+SHORTSTACKCORE_API int RegularHabit(const std::string& Name, const Occurrence& O);
 
 // ------------------------------------------------------------------ the player's entries
 

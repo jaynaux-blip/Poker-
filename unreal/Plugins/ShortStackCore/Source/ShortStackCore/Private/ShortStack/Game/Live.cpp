@@ -204,6 +204,70 @@ const std::vector<CastMember>& RiversideCast()
 	return Cast;
 }
 
+const std::vector<RoomLocal>& RoomLocals()
+{
+	static const std::vector<RoomLocal> Locals = {
+		// The cash list's names first.
+		{"Boots", false, 61, 0.44}, {"T.J.", false, 38, 0.5}, {"Maria G.", true, 47, 0.46}, {"Omar", false, 33, 0.52}, {"Lin", true, 29, 0.55},
+		{"Duke", false, 66, 0.4}, {"Bev", true, 58, 0.42}, {"Sonny", false, 44, 0.45}, {"J.P.", false, 51, 0.48}, {"Rosie", true, 63, 0.43},
+		{"Hector", false, 40, 0.47}, {"Gloria", true, 55, 0.44}, {"Vince", false, 49, 0.41}, {"Tammy", true, 42, 0.39}, {"Earl", false, 72, 0.43},
+		{"Danny Q.", false, 27, 0.53}, {"Priya", true, 31, 0.5}, {"Walt", false, 68, 0.45}, {"Connie", true, 52, 0.4}, {"Nina", true, 36, 0.49},
+		{"Big Sam", false, 45, 0.38}, {"Kevin", false, 24, 0.46}, {"Lorraine", true, 60, 0.42}, {"Teddy", false, 35, 0.44}, {"Arturo", false, 57, 0.47},
+		{"Shirley", true, 70, 0.41}, {"Moe", false, 64, 0.46}, {"Fitz", false, 39, 0.5}, {"Carla", true, 34, 0.45}, {"Jimmy Two", false, 50, 0.37},
+		{"Yolanda", true, 46, 0.44}, {"Rusty", false, 59, 0.39}, {"Deb", true, 53, 0.43}, {"Ozzie", false, 30, 0.48}, {"Frankie", false, 43, 0.42},
+		{"Gus", false, 74, 0.44}, {"Ines", true, 28, 0.51}, {"Ray-Ray", false, 26, 0.4}, {"Patty", true, 62, 0.4},
+	};
+	return Locals;
+}
+
+const RoomLocal* FindRoomLocal(const std::string& Name)
+{
+	for (const RoomLocal& L : RoomLocals())
+	{
+		if (Name == L.Name)
+		{
+			return &L;
+		}
+	}
+	return nullptr;
+}
+
+uint32_t FaceHash(const std::string& Name)
+{
+	uint32_t H = 2166136261u;
+	for (const char Ch : Name)
+	{
+		H = (H ^ static_cast<unsigned char>(Ch)) * 16777619u;
+	}
+	return H;
+}
+
+int RegularHabit(const std::string& Name, const Occurrence& O)
+{
+	if (!O.Valid())
+	{
+		return 0;
+	}
+	const uint32_t H = FaceHash(Name);
+	static const char* Games[10] = {"nightly", "nightly", "nightly", "nightly", "noon", "noon", "sunday", "sunday", "bigstack", "turbo"};
+	const std::string Mine = Games[H % 10u];
+	const std::string Also = Games[(H / 10u) % 10u];
+	// Their nights, for the games that run most days: two, sometimes three.
+	const int Days = (1 << ((H >> 8) % 7u)) | (1 << ((H >> 12) % 7u)) | ((H >> 16) % 3u == 0 ? 1 << ((H >> 20) % 7u) : 0);
+	const std::string Key = O.T->Key;
+	const bool MostDays = Key == "nightly" || Key == "noon";
+	if (Key == Mine && (!MostDays || (Days & (1 << WeekdayOfDay(O.Day))) != 0))
+	{
+		return 2;
+	}
+	if (Key == Mine || Key == Also)
+	{
+		return 1;
+	}
+	// The Sunday is the room's big night.
+	return Key == "sunday" ? 1 : 0;
+}
+
 int Habit(const std::string& Name, const Occurrence& O)
 {
 	if (!O.Valid())

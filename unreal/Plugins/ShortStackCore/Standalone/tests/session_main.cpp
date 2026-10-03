@@ -463,6 +463,27 @@ void Riverside()
 	{
 		return;
 	}
+	// The faces in the field: the room's regulars by name (and anyone who remembers the player), each in the roster.
+	{
+		bool InRoster = true;
+		bool Labelled = true;
+		int Locals = 0;
+		std::string Who;
+		for (const life::LiveFace& F : E->Faces)
+		{
+			bool Found = false;
+			for (const std::pair<std::string, int>& R : E->Roster)
+			{
+				Found = Found || R.first == F.Name;
+			}
+			InRoster = InRoster && Found;
+			Labelled = Labelled && !F.Label.empty();
+			Locals += live::FindRoomLocal(F.Name) ? 1 : 0;
+			Who += (Who.empty() ? "" : ", ") + F.Name + " (" + F.Label + ")";
+		}
+		Expect(E->Faces.size() >= 3 && InRoster && Labelled && Locals >= 1, "the Nightly's regulars are in its field, by name");
+		std::printf("  riverside: faces in the Nightly: %s\n", Who.c_str());
+	}
 	H.Went.clear();
 	Expect(S.GoToLive(Nightly.Id).empty() && H.Went == Nightly.Id && S.BankrollCents == 50000 - 12000 - live::BusFareCents && S.Life.LiveEntries.size() == 1 &&
 			   S.Life.Ledger.size() == Lines0 + 3,
@@ -569,6 +590,7 @@ void Riverside()
 		ss::SaveData P;
 		const life::LiveEntry* Kept = ss::SaveData::Parse(D.Serialize(), P) ? live::EntryFor(P.Life, Nightly.Id) : nullptr;
 		Expect(Kept && Kept->State == life::LiveEntry::Finished && Kept->Place == 7 && Kept->PrizeCents == 41000 && Kept->Roster.size() == E->Roster.size() && Kept->FareHome &&
+				   Kept->Faces.size() == E->Faces.size() && (Kept->Faces.empty() || Kept->Faces.front().Label == E->Faces.front().Label) &&
 				   P.Life.LiveEvents == 1,
 			"entries survive a save");
 	}
@@ -877,6 +899,71 @@ void RiversideCheckpoints()
 		std::printf("  riverside: left at hand %d with %lld chips, blinded off in %s after %d more hands\n", Night->Tick, static_cast<long long>(Night->Hero().Stack),
 			ss::Ordinal(Gone->Hero().Place).c_str(), Gone->Hero().Hands - StartHands);
 	}
+}
+
+/** Railing a live tournament after busting: the places the player watched are the world's result. */
+void RiversideRail()
+{
+	namespace life = ss::life;
+	namespace live = ss::live;
+	struct OutHooks : Hooks
+	{
+		bool GoOut(const std::string&, ss::Chips) override { return true; }
+	};
+	OutHooks H;
+	ss::Session S(H, "railing");
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	S.LobbyMinutes = 9.0 * 1440.0 - 1440.0 + 17.0 * 60.0 + 30.0;
+	Now = Wait(S, Now, 0.2);
+	S.Life.Energy = 60.0;
+	S.BankrollCents = 50000;
+	const live::Occurrence Nightly = live::FindOccurrence("riverside-nightly@9");
+	Expect(S.GoToLive(Nightly.Id).empty(), "registered for Wednesday's Nightly");
+	const life::LiveEntry* E = live::EntryFor(S.Life, Nightly.Id);
+	if (!E || E->Faces.size() < 2)
+	{
+		Expect(false, "the Nightly has faces to watch");
+		return;
+	}
+	const std::string Winner = E->Faces[0].Name;
+	const std::string Second = E->Faces[1].Name;
+	// The player went out 40th, stayed on the rail and watched the last two.
+	ss::SaveData D = H.Last;
+	D.Life = S.Life;
+	const double End = Nightly.Start + Nightly.T->Hours * 60.0;
+	live::Settle(D.BankrollCents, D.Life, Nightly.Id, 40, E->Entrants, 0, Nightly.Start + 200.0);
+	D.NoteLive(Nightly.Start + 200.0, Nightly.Id, 40, 0, E->Entrants, {});
+	ss::LiveSeen A;
+	A.Tag = 'P';
+	A.Name = Winner;
+	A.Value = 1;
+	ss::LiveSeen B = A;
+	B.Name = Second;
+	B.Value = 2;
+	D.NoteLivePlaces(Nightly.Start + 200.0, Nightly.Id, {A, B});
+	D.ClockMinutes = End + 60.0 - 1440.0;
+	Expect(!D.WorldText.empty() || D.WorldSnapshot != nullptr, "the save carries the world");
+	if (D.WorldText.empty() && D.WorldSnapshot)
+	{
+		D.WorldSnapshot->Write(D.WorldText);
+	}
+	OutHooks H2;
+	ss::Session S2(H2, "railed", &D);
+	S2.Living().AdvanceTo(End + 180.0);
+	const ss::net::EventResult* Res = S2.Living().ResultOf(Nightly.Id);
+	int First = -9;
+	int Runner = -9;
+	if (Res)
+	{
+		for (const ss::net::Placing& P : Res->FinalTable)
+		{
+			First = P.Place == 1 ? P.Player : First;
+			Runner = P.Place == 2 ? P.Player : Runner;
+		}
+	}
+	Expect(Res && First == S2.Living().Find(Winner) && Runner == S2.Living().Find(Second), "the world's result is the final the player watched from the rail");
+	std::printf("  riverside: from the rail, %s beat %s heads-up; the world's result agrees\n", Winner.c_str(), Second.c_str());
 }
 
 /** Shifts, hustles, sleep, rent, Night Shift prizes, unlocks, bounties, satellites and tickets. */
@@ -1639,6 +1726,7 @@ int main()
 	session_test::DeeGame();
 	session_test::Riverside();
 	session_test::RiversideCheckpoints();
+	session_test::RiversideRail();
 	session_test::BountyTournament();
 	session_test::MultiTable();
 	session_test::FullTournament();

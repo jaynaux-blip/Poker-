@@ -67,6 +67,14 @@ struct LedgerEntry
 	int Kind = 0; // 0 poker, 1 job, 2 hustle, 3 bills, 4 prizes
 };
 
+/** Someone in a live field the room knows (a regular), or who knows the player, as it stood at registration. */
+struct LiveFace
+{
+	std::string Name;
+	std::string Label; // "Riverside regular", "Knows you", "Holds a grudge"...
+	std::string Line;  // what they say sitting down with the player ("" for nothing)
+};
+
 /**
  * The player's entry in a live tournament (live::Register): one per occurrence, keyed by its id, so paying,
  * refunding and settling each happen once however often they're asked for.
@@ -90,6 +98,8 @@ struct LiveEntry
 	std::vector<std::pair<std::string, int>> Roster;
 	/** The champions' board by the desk as it stood that night (newest first: "SAT NIGHTLY\tMei\t221500"). */
 	std::vector<std::string> Board;
+	/** The faces in the field: the room's regulars and whoever remembers the player. */
+	std::vector<LiveFace> Faces;
 	bool FareThere = false;
 	bool FareHome = false;
 	int Place = 0;
