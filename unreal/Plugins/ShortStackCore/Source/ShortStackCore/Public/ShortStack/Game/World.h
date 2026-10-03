@@ -797,6 +797,8 @@ public:
 	SHORTSTACKCORE_API const net::EventResult* ResultOf(const std::string& EventId) const;
 	/** Who the world has registered for an event (planned for its day). */
 	SHORTSTACKCORE_API std::vector<int> Registered(const std::string& EventId);
+	/** How many will play it, the people the world follows and everyone else (0: not an event it has). */
+	SHORTSTACKCORE_API int PlannedEntries(const std::string& EventId);
 	/** Makes sure the events starting on Day have their registrations (the player is looking at tomorrow). */
 	SHORTSTACKCORE_API void EnsurePlanned(int Day);
 	/** Board value for a person (the network's leaderboards, live data), and their rank a day (an hour) ago. */

@@ -3,6 +3,7 @@
 #include "ShortStack/Game/World.h"
 
 #include "ShortStack/Game/Life.h"
+#include "ShortStack/Game/Live.h"
 #include "WorldSim.h"
 
 #include <algorithm>
@@ -36,7 +37,7 @@ int EventDay(const std::string& Id)
 		return -1;
 	}
 	const double V = std::atof(Id.c_str() + At + 1);
-	const bool ByDay = Id.rfind("riverside@", 0) == 0 || Id.rfind("dees@", 0) == 0;
+	const bool ByDay = live::IsRiverside(Id) || Id.rfind("dees@", 0) == 0;
 	return ByDay ? static_cast<int>(V) : sim::DayAt(V);
 }
 
@@ -272,6 +273,30 @@ void World::HeroEntered(const std::string& EventId, const std::string& EventName
 	HeroIn.insert(EventId);
 	++Rev;
 	++HeroRev;
+}
+
+int World::PlannedEntries(const std::string& EventId)
+{
+	Registered(EventId); // plans its day if it hasn't been
+	if (const Pending* P = FindPending(Queue, EventId))
+	{
+		return P->Entries;
+	}
+	// Nobody the world follows is in it: the crowd it has anyway.
+	net::EventInstance E;
+	if (net::Shared().FindInstance(EventId, E))
+	{
+		return Sim::OnlineEvent(*this, E).Entries;
+	}
+	const int Day = EventDay(EventId);
+	for (const LiveEvent& L : LiveCalendar(Day >= 0 ? Day : sim::DayAt(Now)))
+	{
+		if (L.Id == EventId)
+		{
+			return Sim::LiveEventOf(*this, L).Entries;
+		}
+	}
+	return 0;
 }
 
 void World::Join(const std::string& EventId, int Npc)

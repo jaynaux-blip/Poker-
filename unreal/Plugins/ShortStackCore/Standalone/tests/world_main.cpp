@@ -3,6 +3,7 @@
 //   world_test                     the checks (ctest)
 //   world_test years N [seed]      plays N years and prints the world's health every year
 //   world_test npc NAME [days]     plays some days and describes someone
+#include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/World.h"
 
@@ -193,6 +194,68 @@ void Calendar()
 	std::printf("calendar: %zu series, %d series events, %zu templates\n", All.size(), SeriesEvents, Net.Templates().size());
 }
 
+/** The Riverside's card room over four weeks: the schedule, its crowds, and the cast by habit and money. */
+void RiversideWeeks(const world::World& Base)
+{
+	world::World W = Base;
+	const int First = net::DayOf(W.Clock()) + 1;
+	std::map<int, int> PerWeekday;
+	std::set<std::string> Ids;
+	std::vector<std::set<std::string>> SundayFaces;
+	std::set<std::string> CastSeen;
+	int Doubles = 0;
+	int Tracked = 0;
+	for (int D = First; D < First + 28; ++D)
+	{
+		W.EnsurePlanned(D);
+		const std::vector<live::Occurrence> Day = live::Occurrences(D);
+		PerWeekday[((D % 7) + 7) % 7] += static_cast<int>(Day.size());
+		std::map<int, int> Seen;
+		for (const live::Occurrence& O : Day)
+		{
+			Check(Ids.insert(O.Id).second, "an occurrence id is used once: " + O.Id);
+			const int Entries = W.PlannedEntries(O.Id);
+			Check(Entries >= 60 && Entries <= 120, O.Id + " plans 60 to 120 runners (" + std::to_string(Entries) + ")");
+			std::set<std::string> Faces;
+			for (int Id : W.Registered(O.Id))
+			{
+				++Seen[Id];
+				++Tracked;
+				const world::Npc* N = W.Get(Id);
+				Check(N && N->Playing(), "the Riverside registered someone who isn't playing");
+				for (const live::CastMember& C : live::RiversideCast())
+				{
+					if (N && N->Name == C.Name)
+					{
+						Faces.insert(N->Name);
+						CastSeen.insert(N->Name);
+					}
+				}
+			}
+			if (std::string(O.T->Key) == "sunday")
+			{
+				SundayFaces.push_back(Faces);
+			}
+		}
+		for (const auto& It : Seen)
+		{
+			Doubles += It.second > 1 ? 1 : 0;
+		}
+		W.Simulate(1);
+	}
+	Check(PerWeekday[0] == 8 && PerWeekday[1] == 8 && PerWeekday[2] == 8 && PerWeekday[3] == 8 && PerWeekday[4] == 12 && PerWeekday[5] == 12 && PerWeekday[6] == 8,
+		"two events Monday to Thursday and Sunday, three Friday and Saturday");
+	Check(Doubles == 0, "nobody plays two of the Riverside's events in a day");
+	bool Varies = false;
+	for (size_t K = 1; K < SundayFaces.size(); ++K)
+	{
+		Varies = Varies || SundayFaces[K] != SundayFaces[0];
+	}
+	Check(SundayFaces.size() == 4 && Varies, "the Sunday's faces change from week to week");
+	Check(CastSeen.size() >= 6, "most of the cast play the Riverside in a month (" + std::to_string(CastSeen.size()) + ")");
+	std::printf("riverside: 4 weeks, %zu events, %d registrations the world follows, %zu of the cast seen\n", Ids.size(), Tracked, CastSeen.size());
+}
+
 int Checks()
 {
 	Calendar();
@@ -237,6 +300,7 @@ int Checks()
 	const double Month = Seconds(T1);
 	std::printf("30 days in %.2fs\n", Month);
 	Invariants(W, "day 30");
+	RiversideWeeks(W);
 	int Finished = 0;
 	int Anonymous = 0;
 	int Ours = 0;

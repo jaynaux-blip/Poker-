@@ -34,6 +34,9 @@ struct TournamentSpec
 	Chips SeatValueCents = 0; // satellites: the prize pool is paid as seats of this value
 	bool MysteryBounty = false; // bounties are drawn from envelopes once in the money (the session pays them)
 	std::string SeatTicket;     // satellites: the event a seat enters (schedule template id)
+	// Breaks (C++ only, the live rooms): after every BreakEvery levels the room takes BreakMinutes off, no hands dealt.
+	int BreakEvery = 0;
+	double BreakMinutes = 0.0;
 };
 
 struct TPlayer
@@ -73,6 +76,7 @@ enum class TEventType : int
 	Bubble,
 	FinalTable,
 	Finished,
+	Break, // a break before the level in LevelNumber (C++ only)
 };
 
 struct TEvent
@@ -119,7 +123,8 @@ public:
 	SHORTSTACKCORE_API bool HandForHand() const;
 	double ElapsedSeconds() const { return static_cast<double>(Tick) * Spec.SecondsPerHand; }
 	SHORTSTACKCORE_API double LevelSecondsLeft() const;
-	double ClockMinutes() const { return Spec.StartClock + ElapsedSeconds() / 60.0; }
+	/** The room's clock: the start, the hands played, and the breaks taken. */
+	double ClockMinutes() const { return Spec.StartClock + ElapsedSeconds() / 60.0 + static_cast<double>(BreaksTaken) * Spec.BreakMinutes; }
 	SHORTSTACKCORE_API double AverageStack() const;
 	SHORTSTACKCORE_API std::vector<const TPlayer*> AlivePlayers() const;
 	SHORTSTACKCORE_API std::vector<const TPlayer*> Standings() const;
@@ -164,13 +169,8 @@ public:
 	int LevelIndex = 0;
 	int Remaining = 0;
 	bool bFinished = false;
-	/**
-	 * A feature table (C++ only): while any of these players are alive, the hero's table is filled
-	 * with them, swapped seat for seat with whoever else balancing put there. Players the hero hasn't
-	 * sat with yet come first. Empty (the default) leaves the shared behavior alone.
-	 */
-	std::vector<std::string> FeatureIds;
-	std::set<std::string> FeatureMet;
+	/** Breaks the room has taken (C++ only): each is Spec.BreakMinutes on the clock. */
+	int BreaksTaken = 0;
 	/** The hero's seat is held but not dealt in (late registration, C++ only): their table plays without them. */
 	bool HeroAway = false;
 	/** The hero has walked away (C++ only): dealt in, they check or fold every hand until blinded off. */
@@ -184,7 +184,6 @@ private:
 	int Count(const TTable& T) const;
 	void SeatPlayer(int PlayerIdx, TTable& Table);
 	void MovePlayer(int PlayerIdx, TTable& To, std::vector<TEvent>& Events);
-	void KeepFeature(std::vector<TEvent>& Events);
 
 	std::unordered_map<std::string, int> IndexById;
 	std::unordered_map<std::string, Chips> StartStacks;

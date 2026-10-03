@@ -462,6 +462,15 @@ std::vector<TEvent> Tournament::EndFinish()
 	const int NewLevel = static_cast<int>(std::floor(ElapsedSeconds() / (Spec.LevelMinutes * 60.0)));
 	if (NewLevel != LevelIndex && NewLevel < static_cast<int>(Levels.size()))
 	{
+		if (Spec.BreakEvery > 0 && NewLevel % Spec.BreakEvery == 0)
+		{
+			// The room stops between levels: the clock takes the break, then the new level starts.
+			++BreaksTaken;
+			TEvent B;
+			B.Type = TEventType::Break;
+			B.LevelNumber = NewLevel + 1;
+			Events.push_back(B);
+		}
 		LevelIndex = NewLevel;
 		TEvent E;
 		E.Type = TEventType::Level;
@@ -706,7 +715,6 @@ std::vector<TEvent> Tournament::Balance()
 		const int Mover = Big->Seats[static_cast<size_t>(AfterButton[Pick])];
 		MovePlayer(Mover, *Small, Events);
 	}
-	KeepFeature(Events);
 	if (!bAnnouncedFinal && Tables.size() == 1 && Alive > 1)
 	{
 		bAnnouncedFinal = true;
@@ -715,78 +723,6 @@ std::vector<TEvent> Tournament::Balance()
 		Events.push_back(E);
 	}
 	return Events;
-}
-
-void Tournament::KeepFeature(std::vector<TEvent>& Events)
-{
-	if (FeatureIds.empty() || Hero().Busted)
-	{
-		return;
-	}
-	const auto HomeIt = Tables.find(Hero().TableId);
-	if (HomeIt == Tables.end())
-	{
-		return;
-	}
-	TTable& Home = HomeIt->second;
-	auto IsFeatured = [&](int Idx) { return std::find(FeatureIds.begin(), FeatureIds.end(), Players[static_cast<size_t>(Idx)].Id) != FeatureIds.end(); };
-	for (int K = 0; K < TableSize; ++K)
-	{
-		const int Idx = Home.Seats[static_cast<size_t>(K)];
-		if (Idx < 0 || Idx == HeroIndex || IsFeatured(Idx))
-		{
-			continue;
-		}
-		// The featured player to bring over: someone the hero hasn't sat with, if anyone.
-		int Best = -1;
-		for (const std::string& Id : FeatureIds)
-		{
-			const int C = PlayerIndex(Id);
-			if (C < 0 || Players[static_cast<size_t>(C)].Busted || Players[static_cast<size_t>(C)].TableId == Home.Id)
-			{
-				continue;
-			}
-			if (Best < 0 || (FeatureMet.count(Players[static_cast<size_t>(Best)].Id) > 0 && FeatureMet.count(Id) == 0))
-			{
-				Best = C;
-			}
-		}
-		if (Best < 0)
-		{
-			break;
-		}
-		// Swap them seat for seat.
-		TPlayer& Out = Players[static_cast<size_t>(Idx)];
-		TPlayer& In = Players[static_cast<size_t>(Best)];
-		TTable& Other = Tables[In.TableId];
-		const int OutSeat = Out.Seat;
-		const int InSeat = In.Seat;
-		Home.Seats[static_cast<size_t>(OutSeat)] = Best;
-		Other.Seats[static_cast<size_t>(InSeat)] = Idx;
-		Out.TableId = Other.Id;
-		Out.Seat = InSeat;
-		In.TableId = Home.Id;
-		In.Seat = OutSeat;
-		TEvent A;
-		A.Type = TEventType::Moved;
-		A.Id = Out.Id;
-		A.From = Home.Id;
-		A.To = Other.Id;
-		Events.push_back(A);
-		TEvent B;
-		B.Type = TEventType::Moved;
-		B.Id = In.Id;
-		B.From = Other.Id;
-		B.To = Home.Id;
-		Events.push_back(B);
-	}
-	for (int S : Home.Seats)
-	{
-		if (S >= 0 && S != HeroIndex)
-		{
-			FeatureMet.insert(Players[static_cast<size_t>(S)].Id);
-		}
-	}
 }
 
 std::vector<TEvent> Tournament::MoveToTable(const std::string& Id, int TableId)

@@ -265,8 +265,10 @@ public:
 	bool IsLeaveRequested() const { return bLeaveAsked; }
 
 	// ------------------------------------------------------------ the Riverside (BackRoomLive.cpp)
-	/** A live tournament tonight (opened with "?Live=riverside") instead of Dee's game. */
+	/** A live tournament tonight (opened with "?Live=<occurrence id>") instead of Dee's game. */
 	bool IsLive() const { return bLive; }
+	/** Tonight's event as the room calls it ("Riverside Nightly $120"). */
+	const FString& GetLiveName() const { return LiveName; }
 	/** The tournament for the HUD (null at Dee's game). */
 	const ss::Tournament* GetTourney() const { return Tourney.Get(); }
 	/** The level's time left on the clock screens, counting down between hands (game seconds). */
@@ -320,8 +322,24 @@ private:
 	bool bLive = false;
 	TSharedPtr<ss::Tournament> Tourney;
 	int32 LiveDay = 0;
-	/** Sunday's midnight in world minutes (the tournament's clock is minutes after it). */
+	/** The event day's midnight in world minutes (the tournament's clock is minutes after it). */
 	double LiveDayStart = 0.0;
+	/** The player's entry (the occurrence id) and the event as the room names it. */
+	FString LiveEntryId;
+	FString LiveName;
+	FString LiveShort;
+	double LiveLateRegEnds = 0.0;
+	double LiveBreakMinutes = 0.0;
+	/** Fewer entrants than the event runs with: cancelled, the entry refunded. */
+	bool bCancelled = false;
+	/** On a break: the table holds, the screens count down, then the floor calls everyone back. */
+	bool bOnBreak = false;
+	float BreakT = 0.0f;
+	int32 BreakLevel = 0;
+	/** Everyone who sat at the player's table tonight (tournament ids), for the world to remember. */
+	TSet<FString> LiveMet;
+	/** The player confirmed leaving while a hand or the room's round was still being played: they go when it's done. */
+	bool bLeaveWhenFree = false;
 	/** Who's in which body: tournament player id -> actor (kept, hidden, while they're elsewhere). */
 	UPROPERTY(Transient)
 	TMap<FString, TObjectPtr<ABackRoomPlayer>> CastActors;

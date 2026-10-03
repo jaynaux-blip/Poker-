@@ -2,6 +2,7 @@
 #include "../StrictFloat.h"
 
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Rng.h"
 
@@ -69,10 +70,10 @@ std::vector<Activity> Build()
 	Add("dee-game", Kind::Game, "Dee's game", "Spin Cycle Laundromat, the back room", 6.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 21 * 60, 3 * 60, 0xf2a541,
 		"One-two no-limit behind the dryers. $40 to sit, $200 max. Dee deals, the regulars talk, and you can read every one of them.");
 	L.back().Days = (1 << 1) | (1 << 3) | (1 << 5);
-	// The Riverside's Sunday $150: registration from six, cards at seven, late registration until 7:45.
-	Add("riverside", Kind::Live, "Riverside Sunday $150", "Riverside Casino, the poker room", 8.0, 0.0, 0.0, 0.0, 25.0, 0.0, 0.0, 18 * 60, 19 * 60 + 45, 0x5fb4ff,
-		"A live 6-max deepstack. 20,000 chips, twenty-minute levels, forty-odd runners and a real prize pool. Dee deals the feature table on Sundays.");
-	L.back().Days = 1 << 6;
+	// The Riverside's card room: its desk is open from three hours before the noon game to the turbo's last call
+	// (each event's own window is live::CanRegister's).
+	Add("riverside", Kind::Live, "The Riverside", "Riverside Casino, the card room", 8.0, 0.0, 0.0, 0.0, 25.0, 0.0, 0.0, 9 * 60, 23 * 60 + 10, 0x5fb4ff,
+		"The city's card room: two or three 6-max freezeouts a day, sixty to a hundred and twenty runners, deep stacks. The 14 bus, twenty minutes.");
 	// Sleep.
 	Add("nap", Kind::Sleep, "Nap", "Bed", 4.0, 0.0, 0.0, 0.0, -45.0, 0.0, 0.0, 0, 1440, 0x8b5cf6, "Four hours. Enough to function.");
 	Add("sleep", Kind::Sleep, "Sleep", "Bed", 8.0, 0.0, 0.0, 0.0, -90.0, 0.0, 0.0, 0, 1440, 0x8b5cf6, "A real night's sleep. The world keeps going without you.");
@@ -166,16 +167,34 @@ std::string Blocked(const Activity& A, const State& L, const Context& Ctx)
 	{
 		return L.Energy >= 92.0 ? "You're wide awake." : "";
 	}
-	if (A.Type == Kind::Game || A.Type == Kind::Live)
+	if (A.Type == Kind::Live)
 	{
-		const Chips Need = A.Type == Kind::Live ? 15000 : GameMinBuyInCents;
+		// The first of the coming events the player could enter now, or why the soonest one is out of reach.
+		std::string Why = "Nothing on at the Riverside.";
+		for (const live::Occurrence& O : live::Reachable(Ctx.World, 30.0))
+		{
+			const std::string Not = live::CanRegister(Ctx.Bankroll, L, O, Ctx.World);
+			if (Not.empty())
+			{
+				return L.Energy < A.Energy ? "A tournament is a long night. Sleep first." : "";
+			}
+			if (Why == "Nothing on at the Riverside.")
+			{
+				Why = Not;
+			}
+		}
+		return Why;
+	}
+	if (A.Type == Kind::Game)
+	{
+		const Chips Need = GameMinBuyInCents;
 		if (Ctx.Bankroll < Need)
 		{
-			return (A.Type == Kind::Live ? "The Riverside is " : "Dee's game is ") + Money(Need) + (A.Type == Kind::Live ? " to enter." : " to sit.");
+			return "Dee's game is " + Money(Need) + " to sit.";
 		}
 		if (L.Energy < A.Energy)
 		{
-			return A.Type == Kind::Live ? "A tournament is a long night. Sleep first." : "Too tired to sit at a live game. Sleep first.";
+			return "Too tired to sit at a live game. Sleep first.";
 		}
 		if (!InWindow(A, Ctx.World))
 		{

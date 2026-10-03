@@ -16,6 +16,7 @@
 #include "Misc/DateTime.h"
 #include "NightOneAudio.h"
 #include "NightOneGame.h"
+#include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/World.h"
 #include "NightOnePawn.h"
@@ -114,7 +115,64 @@ FAutoConsoleCommandWithWorldAndArgs CareerBankrollCmd(TEXT("ss.Career.Bankroll")
 			UE_LOG(LogNightOne, Display, TEXT("Bankroll $%.2f"), static_cast<double>(S->BankrollCents) / 100.0);
 		}
 	}));
+
+FAutoConsoleCommandWithWorldAndArgs LifeDoCmd(TEXT("ss.Life.Do"), TEXT("ss.Life.Do <activity id>: starts a shift, a nap or a night's sleep as the apps would (testing)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (ss::Session* S = WorldSession(World))
+		{
+			const std::string Why = S->StartActivity(Args.Num() > 0 ? std::string(TCHAR_TO_UTF8(*Args[0])) : std::string("sleep"));
+			LogLines(Why.empty() ? std::string("Started\n") : Why + "\n");
+		}
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs LiveGoCmd(TEXT("ss.Live.Go"),
+	TEXT("ss.Live.Go [occurrence id]: registers for one of the Riverside's events (the next open one without an id) and heads out, as the Burner app's button does."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (ss::Session* S = WorldSession(World))
+		{
+			const std::string Why = S->GoToLive(Args.Num() > 0 ? std::string(TCHAR_TO_UTF8(*Args[0])) : std::string());
+			LogLines(Why.empty() ? std::string("Heading out\n") : Why + "\n");
+		}
+	}));
 #endif
+
+std::string UsdText(ss::Chips Cents)
+{
+	return std::string(TCHAR_TO_UTF8(*FString::Printf(TEXT("$%.2f"), static_cast<double>(Cents) / 100.0)));
+}
+
+FAutoConsoleCommandWithWorldAndArgs LiveDescribeCmd(TEXT("ss.Live.Describe"),
+	TEXT("The Riverside as the player sees it now: the coming events (desk, cards, late reg, field, why not), the player's entry and the last ledger lines."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		ss::Session* S = WorldSession(World);
+		if (!S)
+		{
+			return;
+		}
+		const double Now = S->WorldMinutes();
+		std::string Out = "Riverside at " + ss::net::DateLabel(ss::net::DayOf(Now)) + " " + ss::net::TimeLabel(Now) + " (world " + std::to_string(static_cast<long long>(Now)) +
+			"), bankroll " + UsdText(S->BankrollCents) + ", energy " + std::to_string(static_cast<int>(S->Life.Energy)) + "\n";
+		for (const ss::live::Occurrence& O : ss::live::Reachable(Now, 30.0))
+		{
+			const std::string Why = ss::live::CanRegister(S->BankrollCents, S->Life, O, Now);
+			Out += "  " + O.Id + "  " + O.T->Name + "  cards " + ss::net::DateLabel(O.Day) + " " + ss::net::TimeLabel(O.Start) + ", desk " + ss::net::TimeLabel(O.DeskOpens) +
+				", late reg " + ss::net::TimeLabel(O.LateRegEnds) + ", field " + std::to_string(S->Living().PlannedEntries(O.Id)) + ", the world's people " +
+				std::to_string(S->Living().Registered(O.Id).size()) + "  -> " + (Why.empty() ? std::string("open") : Why) + "\n";
+		}
+		for (const ss::life::LiveEntry& E : S->Life.LiveEntries)
+		{
+			static const char* States[3] = {"registered", "finished", "refunded"};
+			Out += "  entry " + E.Id + " (" + E.Name + "): " + States[FMath::Clamp(E.State, 0, 2)] + ", paid " + UsdText(E.PaidCents) + ", field " + std::to_string(E.Entrants) +
+				" (" + std::to_string(E.Roster.size()) + " followed), bus " + (E.FareThere ? "there" : "-") + "/" + (E.FareHome ? "home" : "-") +
+				(E.State == ss::life::LiveEntry::Finished ? ", place " + std::to_string(E.Place) + " for " + UsdText(E.PrizeCents) : std::string()) + "\n";
+		}
+		for (size_t K = 0; K < S->Life.Ledger.size() && K < 8; ++K)
+		{
+			const ss::life::LedgerEntry& L = S->Life.Ledger[K];
+			Out += "  ledger " + ss::net::TimeLabel(L.At) + "  " + L.Label + "  " + (L.Amount < 0 ? "-" : "+") + UsdText(L.Amount < 0 ? -L.Amount : L.Amount) + "\n";
+		}
+		LogLines(Out);
+	}));
 
 FAutoConsoleCommandWithWorldAndArgs WorldReportCmd(TEXT("ss.World.Report"), TEXT("The living world's health: population, stakes, bankrolls, moods, reputations."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>&, UWorld* World) {
@@ -224,10 +282,16 @@ FString HomeTextFromOptions(const FString& Options)
 		const int32 Learned = FCString::Atoi(*UGameplayStatics::ParseOption(Options, TEXT("Learned")));
 		const int32 Tens = Place % 100;
 		const TCHAR* Suffix = (Tens >= 11 && Tens <= 13) ? TEXT("th") : (Place % 10 == 1 ? TEXT("st") : (Place % 10 == 2 ? TEXT("nd") : (Place % 10 == 3 ? TEXT("rd") : TEXT("th"))));
+		const FString Event = UGameplayStatics::ParseOption(Options, TEXT("Event")).Replace(TEXT("_"), TEXT(" ")).ToLower();
 		FString Text;
-		if (UGameplayStatics::HasOption(Options, TEXT("Won")))
+		if (UGameplayStatics::HasOption(Options, TEXT("Cancelled")))
 		{
-			Text = FString::Printf(TEXT("YOU WON THE RIVERSIDE. $%lld. the whole floor's talking about you. pay your rent, then call me."), Prize / 100);
+			Text = FString::Printf(TEXT("they cancelled the %s? not enough people. happens on a slow night. you got your money back at least."), *Event);
+		}
+		else if (UGameplayStatics::HasOption(Options, TEXT("Won")))
+		{
+			Text = Event.IsEmpty() ? FString::Printf(TEXT("YOU WON THE RIVERSIDE. $%lld. the whole floor's talking about you. pay your rent, then call me."), Prize / 100)
+								   : FString::Printf(TEXT("YOU WON THE %s. $%lld. your name's going on the wall. pay your rent, then call me."), *Event.ToUpper(), Prize / 100);
 		}
 		else if (Prize > 0)
 		{
@@ -922,10 +986,10 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	if (bLeaving && RealTime >= LeaveAt)
 	{
 		bLeaving = false;
-		// The Back Room for Dee's game; the same map turns into the Riverside's poker room for the tournament.
-		const FString Options = LeaveFor == TEXT("riverside")
-			? FString::Printf(TEXT("Live=riverside?Day=%d"), ss::net::DayOf(Game->Session.WorldMinutes()))
-			: FString::Printf(TEXT("BuyIn=%lld"), LeaveBuyInCents);
+		// The Back Room for Dee's game; the same map turns into the Riverside's card room for a tournament (the event
+		// the session registered the player for).
+		const FString Options = ss::live::IsRiverside(std::string(TCHAR_TO_UTF8(*LeaveFor))) ? FString::Printf(TEXT("Live=%s"), *LeaveFor)
+																							   : FString::Printf(TEXT("BuyIn=%lld"), LeaveBuyInCents);
 		UGameplayStatics::OpenLevel(this, FName(TEXT("BackRoom")), true, Options);
 		return;
 	}

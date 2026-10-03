@@ -1191,6 +1191,17 @@ bool ABackRoomTable::FetchTournamentHand()
 	if (!H)
 	{
 		// Out (or the hero is away): nothing to deal; the host plays out the rest of the night.
+		const ss::TPlayer& Me = Tourney->Hero();
+		int32 AtMine = 0;
+		if (Tourney->Tables.count(Me.TableId) > 0)
+		{
+			for (int32 Idx : Tourney->Tables.at(Me.TableId).Seats)
+			{
+				AtMine += Idx >= 0 ? 1 : 0;
+			}
+		}
+		UE_CLOG(!Me.Busted && !Tourney->bFinished && !Tourney->HeroAway, LogTemp, Warning, TEXT("Tournament hand: none for a player still in (busted %d, finished %d, away %d, table %d with %d seated, %d tables, tick %d)"), Me.Busted ? 1 : 0,
+			Tourney->bFinished ? 1 : 0, Tourney->HeroAway ? 1 : 0, Me.TableId, AtMine, static_cast<int32>(Tourney->Tables.size()), Tourney->Tick);
 		bHolding = true;
 		if (!bTournamentOverNoted && OnNote)
 		{

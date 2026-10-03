@@ -67,6 +67,34 @@ struct LedgerEntry
 	int Kind = 0; // 0 poker, 1 job, 2 hustle, 3 bills, 4 prizes
 };
 
+/**
+ * The player's entry in a live tournament (live::Register): one per occurrence, keyed by its id, so paying,
+ * refunding and settling each happen once however often they're asked for.
+ */
+struct LiveEntry
+{
+	enum Stage : int
+	{
+		Registered,
+		Finished,
+		Refunded,
+	};
+	std::string Id;   // the occurrence ("riverside-nightly@31")
+	std::string Name; // "Riverside Nightly $120"
+	int State = Registered;
+	Chips PaidCents = 0; // the buy-in, fee included
+	Chips FeeCents = 0;
+	double RegisteredAt = 0.0;
+	int Entrants = 0; // the field, the player included
+	/** The people the world registered (name, how they play: an ss::Archetype): the field is fixed at registration. */
+	std::vector<std::pair<std::string, int>> Roster;
+	bool FareThere = false;
+	bool FareHome = false;
+	int Place = 0;
+	Chips PrizeCents = 0;
+	double FinishedAt = 0.0;
+};
+
 /** Rent stages. */
 enum class Rent : int
 {
@@ -108,6 +136,7 @@ struct State
 	int LiveCashes = 0;
 	int LiveBestPlace = 0; // 0: none yet
 	Chips LiveWonCents = 0; // prizes, before buy-ins
+	std::vector<LiveEntry> LiveEntries; // oldest first (the last sixty)
 
 	SHORTSTACKCORE_API void Record(double At, const std::string& Label, Chips Amount, int Kind);
 	int TicketsFor(const std::string& TemplateId) const;

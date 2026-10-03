@@ -212,6 +212,16 @@ struct HistoryEntry
 	std::string EventId;    // the scheduled instance ("mm-26@1530"), if known
 };
 
+/** What the player's tables saw of someone at a live tournament (SaveData::NoteLive). */
+struct LiveSeen
+{
+	/** P busted before the player (Value: their place), S still in when the player finished, M sat with the player,
+	 * K knocked the player out, H knocked out by the player, B a big pot with the player (Value: the player's net). */
+	char Tag = 'M';
+	std::string Name; // as the field knows them
+	long long Value = 0;
+};
+
 /** Everything that persists between runs. */
 struct SaveData
 {
@@ -240,8 +250,10 @@ struct SaveData
 	static SHORTSTACKCORE_API bool Parse(const std::string& Text, SaveData& Out);
 	/** A night at Dee's game with these people (as the room knows them), and how it went. */
 	SHORTSTACKCORE_API void NoteBackRoom(double World, const std::vector<std::string>& Names, Chips NetCents);
-	/** A Riverside Sunday: where the player and the people with faces finished. */
+	/** A Riverside Sunday: where the player and the people with faces finished (saves from before the daily schedule). */
 	SHORTSTACKCORE_API void NoteRiverside(double World, int HeroPlace, int Field, const std::vector<std::pair<std::string, int>>& Places);
+	/** A live tournament the host played: the player's finish and what their tables saw, for the world. */
+	SHORTSTACKCORE_API void NoteLive(double World, const std::string& EventId, int HeroPlace, Chips Prize, int Field, const std::vector<LiveSeen>& Seen);
 };
 
 /** How the session reaches the world: sounds, the phone, the heartbeat, the desk. */
@@ -423,6 +435,11 @@ public:
 	/** Heads out to a live game (life::Kind::Game, a buy-in from the bankroll) or a live tournament (life::Kind::Live,
 	 * its fixed buy-in); returns why not, or "". */
 	SHORTSTACKCORE_API std::string GoToGame(const std::string& Id, Chips BuyInCents);
+	/**
+	 * Registers for one of the Riverside's events (live::Occurrence id; "" for the next one open) with the field the
+	 * world has for it, pays the bus and heads out. Registering again for an event already entered just goes back.
+	 */
+	SHORTSTACKCORE_API std::string GoToLive(const std::string& OccurrenceId);
 	SHORTSTACKCORE_API bool PayRent();
 	SHORTSTACKCORE_API bool PayDebt();
 	SHORTSTACKCORE_API life::Context LifeContext() const;
@@ -641,6 +658,8 @@ private:
 	void ShowResults();
 	void HandleKnockout(const TEvent& E);
 	void NameField();
+	/** Live entries left registered after their event ended (the game closed mid-tournament) are resolved. */
+	void ResolveAbandonedLive();
 	bool CheckSatellite();
 	void CheckUnlocks();
 	void CheckCalendar(double From, double To, bool Awake);

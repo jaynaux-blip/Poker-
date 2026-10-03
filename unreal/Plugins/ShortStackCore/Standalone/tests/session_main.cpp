@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <map>
+#include <set>
 #include <vector>
 
 namespace session_test
@@ -388,7 +389,7 @@ void DeeGame()
 	std::printf("  dee: %d text(s), sat with %s\n", H.FromDee, ss::Money(H.BuyIn).c_str());
 }
 
-/** The Riverside's Sunday $150: the schedule, entering, and the feature table holding through a whole tournament. */
+/** The Riverside's card room: the schedule, registering once, the world's field, breaks, settling once, saves. */
 void Riverside()
 {
 	namespace life = ss::life;
@@ -399,10 +400,34 @@ void Riverside()
 	{
 		return;
 	}
-	const double Sunday = 6.0 * 1440.0;
-	Expect(!life::InWindow(*Rv, 5.0 * 1440.0 + 19.0 * 60.0) && life::InWindow(*Rv, Sunday + 18.0 * 60.0 + 30.0) && !life::InWindow(*Rv, Sunday + 20.0 * 60.0),
-		"registration Sunday 6:00 to 7:45 PM");
-	Expect(life::NextOpen(*Rv, 1440.0 + 127.0) == Sunday + 18.0 * 60.0, "from Tuesday, the next Riverside is Sunday at six");
+
+	// The schedule, eight weeks of it.
+	{
+		bool Counts = true;
+		bool Times = true;
+		bool Fields = true;
+		bool Unique = true;
+		std::set<std::string> Ids;
+		for (int Day = 0; Day < 56; ++Day)
+		{
+			const std::vector<live::Occurrence> Os = live::Occurrences(Day);
+			const int Wd = Day % 7;
+			Counts = Counts && static_cast<int>(Os.size()) == (Wd == 4 || Wd == 5 ? 3 : 2);
+			for (const live::Occurrence& O : Os)
+			{
+				Unique = Unique && Ids.insert(O.Id).second;
+				Fields = Fields && O.Field >= 60 && O.Field <= 120 && O.Field >= O.T->FieldLo && O.Field <= O.T->FieldHi;
+				Times = Times && O.Start == Day * 1440.0 + O.T->StartMinute && live::FindOccurrence(O.Id).Id == O.Id && O.LateRegEnds > O.Start;
+				if (std::string(O.T->Key) == "sunday")
+				{
+					Times = Times && O.Id == "riverside@" + std::to_string(Day);
+				}
+			}
+		}
+		Expect(Counts, "two events a day Monday to Thursday and Sunday, three on Friday and Saturday");
+		Expect(Unique && Times, "every occurrence has its own id and its published start; the Sunday keeps riverside@<day>");
+		Expect(Fields, "planned fields of 60 to 120");
+	}
 
 	struct OutHooks : Hooks
 	{
@@ -419,69 +444,168 @@ void Riverside()
 	ss::Session S(H, "riverside");
 	S.CurrentScreen = ss::Screen::Lobby;
 	double Now = Wait(S, 0.0, 0.2);
-	S.BankrollCents = 10000;
-	Expect(S.GoToGame("riverside", 0).find("$150") != std::string::npos, "$100 can't enter");
-	S.BankrollCents = 40000;
-	S.LobbyMinutes = Sunday - 1440.0 + 18.0 * 60.0 + 40.0; // Sunday 6:40 PM
+	// Wednesday, October 14 (world day 9), 5:30 PM: the Nightly's desk is open.
+	const double Wednesday = 9.0 * 1440.0;
+	S.LobbyMinutes = Wednesday - 1440.0 + 17.0 * 60.0 + 30.0;
 	Now = Wait(S, Now, 0.2);
 	S.Life.Energy = 60.0;
-	Expect(S.GoToGame("riverside", 0).empty() && H.Went == "riverside" && H.BuyIn == live::RiversideBuyInCents, "registering heads out with the $150");
-
-	// The tournament itself: the hero's table is the feature table.
-	std::unique_ptr<ss::Tournament> T = live::MakeRiverside(6, "grinder_3c", "riverside-test");
-	Expect(T->Spec.Entrants >= 42 && T->Spec.Entrants <= 60 && T->TableSize == 6 && T->PrizePoolCents == T->Spec.Entrants * 13500, "a 6-max field with a $135 share each in the pool");
-	auto IsCast = [](const std::string& Id) {
-		for (const live::CastMember& C : live::RiversideCast())
-		{
-			if (Id == C.Id)
-			{
-				return true;
-			}
-		}
-		return false;
-	};
-	auto CastAlive = [&]() {
-		int N = 0;
-		for (const ss::TPlayer& P : T->Players)
-		{
-			N += IsCast(P.Id) && !P.Busted ? 1 : 0;
-		}
-		return N;
-	};
-	bool Featured = true;
-	int Ticks = 0;
-	ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, T->R);
-	while (!T->Hero().Busted && !T->bFinished && Ticks < 2000)
+	const live::Occurrence Nightly = live::FindOccurrence("riverside-nightly@9");
+	Expect(Nightly.Valid() && Nightly.T->BuyInCents == 12000, "Wednesday's Nightly, $120");
+	S.BankrollCents = 12000;
+	Expect(S.GoToLive(Nightly.Id).find("bus") != std::string::npos && S.Life.LiveEntries.empty(), "the buy-in without the bus can't enter");
+	S.BankrollCents = 50000;
+	const size_t Lines0 = S.Life.Ledger.size();
+	Expect(S.GoToLive(Nightly.Id).empty() && H.Went == Nightly.Id && H.BuyIn == 12000, "registering heads out to the Nightly");
+	Expect(S.BankrollCents == 50000 - 12000 - live::BusFareCents && S.Life.Ledger.size() == Lines0 + 3, "the buy-in, the fee and the bus: three lines, charged once");
+	const life::LiveEntry* E = live::EntryFor(S.Life, Nightly.Id);
+	Expect(E && E->State == life::LiveEntry::Registered && E->Entrants >= 61 && E->Entrants <= 101, "an entry with the world's field, the player included");
+	if (!E)
 	{
+		return;
+	}
+	H.Went.clear();
+	Expect(S.GoToLive(Nightly.Id).empty() && H.Went == Nightly.Id && S.BankrollCents == 50000 - 12000 - live::BusFareCents && S.Life.LiveEntries.size() == 1 &&
+			   S.Life.Ledger.size() == Lines0 + 3,
+		"registering again charges nothing and goes back");
+	Expect(!S.GoToLive("riverside-turbo@11").empty() && S.Life.LiveEntries.size() == 1, "one live entry at a time");
+
+	// The field: the world's people by name among the room's regulars, and the same draw every time it's opened.
+	std::vector<ss::ReservedPlayer> Known;
+	for (const std::pair<std::string, int>& R : E->Roster)
+	{
+		ss::ReservedPlayer P;
+		P.Name = R.first;
+		P.Type = static_cast<ss::Archetype>(R.second);
+		Known.push_back(P);
+	}
+	std::unique_ptr<ss::Tournament> T = live::MakeField(Nightly, E->Entrants, "grinder_3c", live::SeedFor(*E, "grinder_3c"), Known);
+	std::unique_ptr<ss::Tournament> Twin = live::MakeField(Nightly, E->Entrants, "grinder_3c", live::SeedFor(*E, "grinder_3c"), Known);
+	int Named = 0;
+	bool SameDraw = T->Players.size() == Twin->Players.size();
+	for (size_t I = 0; I < T->Players.size(); ++I)
+	{
+		for (const std::pair<std::string, int>& R : E->Roster)
+		{
+			Named += T->Players[I].Name == R.first ? 1 : 0;
+		}
+		SameDraw = SameDraw && I < Twin->Players.size() && T->Players[I].TableId == Twin->Players[I].TableId && T->Players[I].Seat == Twin->Players[I].Seat;
+	}
+	Expect(T->Spec.Entrants == E->Entrants && static_cast<int>(T->Players.size()) == E->Entrants && Named == static_cast<int>(E->Roster.size()) && T->TableSize == 6,
+		"the field is the world's people and the room's regulars, 6-max");
+	Expect(SameDraw, "the same entry draws the same seats");
+
+	// A whole night: only balancing moves anyone, breaks fall between levels, the chips are all still there.
+	bool Balanced = true;
+	bool Conserved = true;
+	bool BreaksOk = true;
+	int Breaks = 0;
+	int Moves = 0;
+	int Ticks = 0;
+	const ss::Chips Total = static_cast<ss::Chips>(T->Spec.Entrants) * T->Spec.StartingStack;
+	ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, T->R);
+	while (!T->bFinished && Ticks < 6000)
+	{
+		int Lo = 1 << 30;
+		int Hi = 0;
+		for (const auto& It : T->Tables)
+		{
+			int N = 0;
+			for (int Idx : It.second.Seats)
+			{
+				N += Idx >= 0 ? 1 : 0;
+			}
+			Lo = std::min(Lo, N);
+			Hi = std::max(Hi, N);
+		}
 		std::vector<ss::TEvent> Events;
 		std::unique_ptr<ss::Hand> Hand = T->StartTick(Events);
-		if (Hand)
+		bool Broke = false;
+		int MovedNow = 0;
+		for (const ss::TEvent& Ev : Events)
 		{
-			// Every seat at the hero's table is the cast while enough of them are alive.
-			int Strangers = 0;
-			int Seated = 0;
-			for (const ss::HandSeat& Hs : Hand->Seats)
-			{
-				if (Hs.Id != ss::HeroId)
-				{
-					++Seated;
-					Strangers += IsCast(Hs.Id) ? 0 : 1;
-				}
-			}
-			const int CastElsewhere = CastAlive() - (Seated - Strangers);
-			Featured = Featured && (Strangers == 0 || CastElsewhere == 0);
+			Broke = Broke || Ev.Type == ss::TEventType::TableBroken;
+			MovedNow += Ev.Type == ss::TEventType::Moved ? 1 : 0;
 		}
-		T->FinishTick(Hand.get(), &Auto);
+		Moves += MovedNow;
+		Balanced = Balanced && (MovedNow == 0 || Broke || Hi - Lo >= 2);
+		for (const ss::TEvent& Ev : T->FinishTick(Hand.get(), &Auto))
+		{
+			if (Ev.Type == ss::TEventType::Break)
+			{
+				++Breaks;
+				BreaksOk = BreaksOk && (Ev.LevelNumber - 1) % Nightly.T->BreakEvery == 0;
+			}
+		}
+		ss::Chips Sum = 0;
+		for (const ss::TPlayer& P : T->Players)
+		{
+			Sum += P.Stack;
+		}
+		Conserved = Conserved && Sum == Total;
 		++Ticks;
 	}
-	Expect(Featured, "the feature table seats the cast while any are left elsewhere");
-	Expect(T->Hero().Busted || T->bFinished, "the tournament plays out");
-	std::printf("  riverside: %d entrants, hero %s after %d hands, level %d, %d of the cast left\n", T->Spec.Entrants,
-		T->Hero().Busted ? ss::Ordinal(T->Hero().Place).c_str() : "won", Ticks, T->LevelIndex + 1, CastAlive());
+	const double Clock = T->Spec.StartClock + T->ElapsedSeconds() / 60.0 + static_cast<double>(Breaks) * Nightly.T->BreakMinutes;
+	Expect(T->bFinished, "the night plays out to a winner");
+	Expect(Balanced && Moves > 0, "nobody is moved but by breaking or evening out tables");
+	Expect(BreaksOk && Breaks >= 1 && Breaks == T->BreaksTaken && std::fabs(T->ClockMinutes() - Clock) < 1e-6, "breaks fall between levels and go on the clock");
+	Expect(Conserved, "every chip is still on the tables");
+	std::printf("  riverside: %s, %d entrants, %d hands, %d moves, %d breaks, done at %s\n", Nightly.T->Name, T->Spec.Entrants, Ticks, Moves, Breaks,
+		ss::net::TimeLabel(T->ClockMinutes()).c_str());
 
-	// Late registration: the field plays on without the hero, whose stack waits untouched.
+	// Settling: once, however often it's asked for, and the save keeps it.
 	{
-		std::unique_ptr<ss::Tournament> Late = live::MakeRiverside(13, "grinder_3c", "late");
+		const ss::Chips Before = S.BankrollCents;
+		const double At = Wednesday + 23.0 * 60.0;
+		Expect(live::Settle(S.BankrollCents, S.Life, Nightly.Id, 7, E->Entrants, 41000, At) && !live::Settle(S.BankrollCents, S.Life, Nightly.Id, 7, E->Entrants, 41000, At) &&
+				   S.BankrollCents == Before + 41000 && S.Life.LiveEvents == 1 && S.Life.LiveCashes == 1 && S.Life.LiveBestPlace == 7,
+			"a result settles once");
+		Expect(!live::Refund(S.BankrollCents, S.Life, Nightly.Id, At, "late") && S.BankrollCents == Before + 41000, "a settled entry can't be refunded");
+		Expect(live::PayFare(S.BankrollCents, S.Life, Nightly.Id, true, At) && !live::PayFare(S.BankrollCents, S.Life, Nightly.Id, true, At) &&
+				   S.BankrollCents == Before + 41000 - live::BusFareCents,
+			"the bus home is paid once");
+		ss::SaveData D;
+		D.BankrollCents = S.BankrollCents;
+		D.Life = S.Life;
+		ss::SaveData P;
+		const life::LiveEntry* Kept = ss::SaveData::Parse(D.Serialize(), P) ? live::EntryFor(P.Life, Nightly.Id) : nullptr;
+		Expect(Kept && Kept->State == life::LiveEntry::Finished && Kept->Place == 7 && Kept->PrizeCents == 41000 && Kept->Roster.size() == E->Roster.size() && Kept->FareHome &&
+				   P.Life.LiveEvents == 1,
+			"entries survive a save");
+	}
+
+	// A thin noon game: below the minimum it's cancelled, and everything comes back once.
+	{
+		ss::Chips B = 50000;
+		life::State L;
+		const live::Occurrence Noon = live::FindOccurrence("riverside-noon@10");
+		Expect(Noon.Valid() && live::Register(B, L, Noon, 10.0 * 1440.0 + 11.0 * 60.0, 12, {}).empty() && B == 50000 - 8000, "registered for Thursday's noon game");
+		Expect(live::BelowMinimum(Noon, 12) && !live::BelowMinimum(Noon, 60), "twelve is below the room's minimum");
+		Expect(live::Refund(B, L, Noon.Id, 10.0 * 1440.0 + 12.0 * 60.0, "not enough players") && !live::Refund(B, L, Noon.Id, 10.0 * 1440.0 + 12.0 * 60.0, "") && B == 50000 &&
+				   L.Ledger.size() == 3 && L.LiveEvents == 0,
+			"a cancelled event refunds once");
+		Expect(!live::CanRegister(B, L, Noon, 10.0 * 1440.0 + 11.5 * 60.0).empty(), "a cancelled event can't be entered again");
+	}
+
+	// The game closed mid-tournament: the next load settles the entry by the rule for leaving, once.
+	{
+		ss::SaveData D;
+		D.BankrollCents = 50000;
+		const live::Occurrence Sunday = live::FindOccurrence("riverside@13");
+		Expect(live::Register(D.BankrollCents, D.Life, Sunday, 13.0 * 1440.0 + 18.0 * 60.0, 95, {}).empty(), "registered for the Sunday");
+		D.ClockMinutes = 14.0 * 1440.0 + 12.0 * 60.0 - 1440.0; // Monday noon
+		Hooks H2;
+		ss::Session S2(H2, "abandoned", &D);
+		const life::LiveEntry* A = live::EntryFor(S2.Life, Sunday.Id);
+		Expect(A && A->State == life::LiveEntry::Finished && A->Place >= 1 && A->Place <= 95 && S2.Life.LiveEvents == 1, "an entry left mid-tournament is blinded out and settled on the next load");
+		if (A)
+		{
+			std::printf("  riverside: left the Sunday, blinded out in %s of 95\n", ss::Ordinal(A->Place).c_str());
+		}
+	}
+
+	// Late registration: the field plays on without the player, whose stack waits untouched.
+	{
+		std::unique_ptr<ss::Tournament> Late = live::MakeField(live::FindOccurrence("riverside@13"), 90, "grinder_3c", "late", {});
 		Late->HeroAway = true;
 		for (int K = 0; K < 12; ++K)
 		{
@@ -494,12 +618,50 @@ void Riverside()
 			"a late registration sits down with a full stack, levels in");
 		Late->FinishTick(First.get(), &Auto);
 	}
+	// Every night, every field size: while the player is in and the night isn't over, there's a hand for them.
+	{
+		bool Dealt = true;
+		std::string Where;
+		int Nights = 0;
+		for (int Day = 140; Day < 147; ++Day)
+		{
+			for (const live::Occurrence& O : live::Occurrences(Day))
+			{
+				std::unique_ptr<ss::Tournament> N = live::MakeField(O, O.Field + 1, "grinder_3c", O.Id + ":dealt", {});
+				ss::Profile Me = ss::MakeProfile(ss::Archetype::Lag, N->R);
+				for (int K = 0; K < 6000 && !N->bFinished && !N->Hero().Busted; ++K)
+				{
+					std::vector<ss::TEvent> Ev;
+					std::unique_ptr<ss::Hand> Hand = N->StartTick(Ev);
+					if (!Hand && !N->Hero().Busted && !N->bFinished && Dealt)
+					{
+						Dealt = false;
+						int Seated = 0;
+						for (int Idx : N->Tables[N->Hero().TableId].Seats)
+						{
+							Seated += Idx >= 0 ? 1 : 0;
+						}
+						Where = O.Id + " tick " + std::to_string(N->Tick) + ", table " + std::to_string(N->Hero().TableId) + " with " + std::to_string(Seated) + ", " +
+							std::to_string(N->Tables.size()) + " tables, " + std::to_string(N->Remaining) + " left";
+					}
+					N->FinishTick(Hand.get(), &Me);
+				}
+				++Nights;
+			}
+		}
+		if (!Where.empty())
+		{
+			std::printf("  no hand for the player at %s\n", Where.c_str());
+		}
+		Expect(Dealt, "a player still in always has a hand dealt");
+		std::printf("  riverside: %d nights, the player dealt in every hand they were in\n", Nights);
+	}
 	// Walking away: dealt in, checking and folding, the blinds take the stack.
 	{
-		std::unique_ptr<ss::Tournament> Gone = live::MakeRiverside(20, "grinder_3c", "gone");
+		std::unique_ptr<ss::Tournament> Gone = live::MakeField(live::FindOccurrence("riverside-nightly@16"), 70, "grinder_3c", "gone", {});
 		Gone->HeroSitsOut = true;
 		int Ticks2 = 0;
-		while (!Gone->Hero().Busted && !Gone->bFinished && Ticks2 < 4000)
+		while (!Gone->Hero().Busted && !Gone->bFinished && Ticks2 < 6000)
 		{
 			Gone->SimulateTick();
 			++Ticks2;
@@ -507,15 +669,6 @@ void Riverside()
 		Expect(Gone->Hero().Busted && Gone->Hero().Place > 1 && Gone->Hero().VpipHands == 0, "a player who walks away is blinded off, never putting a chip in voluntarily");
 		std::printf("  riverside: walked away, blinded off in %s after %d hands\n", ss::Ordinal(Gone->Hero().Place).c_str(), Gone->Hero().Hands);
 	}
-
-	ss::SaveData D;
-	D.Life.LiveEvents = 2;
-	D.Life.LiveCashes = 1;
-	D.Life.LiveBestPlace = 4;
-	D.Life.LiveWonCents = 61200;
-	ss::SaveData P;
-	Expect(ss::SaveData::Parse(D.Serialize(), P) && P.Life.LiveEvents == 2 && P.Life.LiveCashes == 1 && P.Life.LiveBestPlace == 4 && P.Life.LiveWonCents == 61200,
-		"live results survive a save");
 }
 
 /** Shifts, hustles, sleep, rent, Night Shift prizes, unlocks, bounties, satellites and tickets. */

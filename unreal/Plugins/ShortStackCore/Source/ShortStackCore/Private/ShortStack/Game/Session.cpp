@@ -158,6 +158,16 @@ std::string SaveData::Serialize() const
 	Out << "life\tearned\t" << L.EarnedJobs << "\t" << L.EarnedHustles << "\n";
 	Out << "life\tbackroom\t" << L.BackRoomNights << "\t" << L.BackRoomNetCents << "\n";
 	Out << "life\tlive\t" << L.LiveEvents << "\t" << L.LiveCashes << "\t" << L.LiveBestPlace << "\t" << L.LiveWonCents << "\n";
+	for (const life::LiveEntry& E : L.LiveEntries)
+	{
+		Out << "liveentry\t" << session_detail::Escape(E.Id) << "\t" << E.State << "\t" << E.PaidCents << "\t" << E.FeeCents << "\t" << Fixed(E.RegisteredAt, 2) << "\t" << E.Entrants
+			<< "\t" << (E.FareThere ? 1 : 0) << "\t" << (E.FareHome ? 1 : 0) << "\t" << E.Place << "\t" << E.PrizeCents << "\t" << Fixed(E.FinishedAt, 2) << "\t"
+			<< session_detail::Escape(E.Name) << "\n";
+		for (const std::pair<std::string, int>& R : E.Roster)
+		{
+			Out << "liveroster\t" << session_detail::Escape(E.Id) << "\t" << session_detail::Escape(R.first) << "\t" << R.second << "\n";
+		}
+	}
 	for (const auto& Rd : L.Reads)
 	{
 		Out << "read\t" << session_detail::Escape(Rd.first) << "\t" << Rd.second << "\n";
@@ -272,6 +282,17 @@ void SaveData::NoteRiverside(double World, int HeroPlace, int Field, const std::
 	WorldNotes.push_back(Line);
 }
 
+void SaveData::NoteLive(double World, const std::string& EventId, int HeroPlace, Chips Prize, int Field, const std::vector<LiveSeen>& Seen)
+{
+	std::string Line = "worldnote\tlive\t" + Fixed(World, 2) + "\t" + session_detail::Escape(EventId) + "\t" + std::to_string(HeroPlace) + "\t" + std::to_string(Prize) + "\t" +
+		std::to_string(Field);
+	for (const LiveSeen& S : Seen)
+	{
+		Line += "\t" + std::string(1, S.Tag) + "\t" + session_detail::Escape(S.Name) + "\t" + std::to_string(S.Value);
+	}
+	WorldNotes.push_back(Line);
+}
+
 bool SaveData::Parse(const std::string& Text, SaveData& Out)
 {
 	std::istringstream In(Text);
@@ -368,6 +389,34 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 		else if (P.size() == 2 && P[0] == "unlock")
 		{
 			D.Life.Unlocks.insert(session_detail::Unescape(P[1]));
+		}
+		else if (P.size() == 13 && P[0] == "liveentry")
+		{
+			life::LiveEntry E;
+			E.Id = session_detail::Unescape(P[1]);
+			E.State = std::atoi(P[2].c_str());
+			E.PaidCents = std::strtoll(P[3].c_str(), nullptr, 10);
+			E.FeeCents = std::strtoll(P[4].c_str(), nullptr, 10);
+			E.RegisteredAt = std::atof(P[5].c_str());
+			E.Entrants = std::atoi(P[6].c_str());
+			E.FareThere = P[7] == "1";
+			E.FareHome = P[8] == "1";
+			E.Place = std::atoi(P[9].c_str());
+			E.PrizeCents = std::strtoll(P[10].c_str(), nullptr, 10);
+			E.FinishedAt = std::atof(P[11].c_str());
+			E.Name = session_detail::Unescape(P[12]);
+			D.Life.LiveEntries.push_back(E);
+		}
+		else if (P.size() == 4 && P[0] == "liveroster")
+		{
+			const std::string Id = session_detail::Unescape(P[1]);
+			for (life::LiveEntry& E : D.Life.LiveEntries)
+			{
+				if (E.Id == Id)
+				{
+					E.Roster.push_back({session_detail::Unescape(P[2]), std::atoi(P[3].c_str())});
+				}
+			}
 		}
 		else if (P.size() == 3 && P[0] == "read")
 		{
@@ -582,12 +631,34 @@ Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData*
 	}
 	RefreshGear();
 	StartWorld(Loaded);
+	ResolveAbandonedLive();
 	// While the game loads: simulate the network's past results now, so the first leaderboard or page doesn't stall.
 	net::Shared().Prewarm(WorldMinutes());
 }
 
 namespace session_detail
 {
+/** The engine's bot closest to how someone in the world plays. */
+Archetype StyleOf(const world::Npc& N)
+{
+	const float Sk = N.Overall();
+	const float Aggro = N.TraitOf(world::Trait::Aggro);
+	const float Risk = N.TraitOf(world::Trait::Risk);
+	if (Sk >= 0.72f)
+	{
+		return Aggro > 0.6f ? Archetype::Crusher : Archetype::Reg;
+	}
+	if (Sk >= 0.58f)
+	{
+		return Aggro > 0.62f ? Archetype::Lag : Aggro < 0.35f ? Archetype::Tag : Archetype::Reg;
+	}
+	if (Sk >= 0.45f)
+	{
+		return Aggro > 0.8f && Risk > 0.7f ? Archetype::Maniac : Aggro < 0.3f ? Archetype::Nit : Archetype::Tag;
+	}
+	return Aggro > 0.8f ? Archetype::Maniac : Aggro < 0.3f ? Archetype::Station : N.TraitOf(world::Trait::Patience) > 0.7f ? Archetype::Nit : Archetype::Fish;
+}
+
 /** The worlds of the sessions alive now, newest last: the network shows the newest. */
 std::vector<const world::World*>& LiveWorlds()
 {
@@ -669,6 +740,31 @@ void Session::WorldNote(const std::vector<std::string>& F)
 			Places.push_back({session_detail::Unescape(F[K]), std::atoi(F[K + 1].c_str())});
 		}
 		LivingWorld.RiversideDone(At, Places, std::atoi(F[3].c_str()), std::atoi(F[4].c_str()));
+	}
+	else if (F[1] == "live" && F.size() >= 7)
+	{
+		// The player's finish at a live tournament and what their tables saw (SaveData::NoteLive).
+		world::World::TableReport Rp;
+		for (size_t K = 7; K + 2 < F.size(); K += 3)
+		{
+			const int Npc = LivingWorld.Find(session_detail::Unescape(F[K + 1]));
+			if (Npc < 0 || F[K].empty())
+			{
+				continue;
+			}
+			const long long V = std::strtoll(F[K + 2].c_str(), nullptr, 10);
+			switch (F[K][0])
+			{
+			case 'P': Rp.Places.push_back({Npc, static_cast<int>(V)}); break;
+			case 'S': Rp.StillIn.push_back(Npc); break;
+			case 'M': Rp.Met.push_back(Npc); break;
+			case 'K': Rp.KnockedOutHero = Npc; break;
+			case 'H': Rp.HeroKnockedOut.push_back(Npc); break;
+			case 'B': Rp.BigPots.push_back({Npc, static_cast<Chips>(V)}); break;
+			default: break;
+			}
+		}
+		LivingWorld.HeroFinished(session_detail::Unescape(F[3]), std::atoi(F[4].c_str()), static_cast<Chips>(std::strtoll(F[5].c_str(), nullptr, 10)), Rp);
 	}
 }
 
@@ -2731,7 +2827,7 @@ std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
 	}
 	if (A->Type == life::Kind::Live)
 	{
-		BuyInCents = live::RiversideBuyInCents;
+		return GoToLive(std::string());
 	}
 	if (TimeSkip.Active)
 	{
@@ -2754,6 +2850,140 @@ std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
 	Save();
 	Sound(SoundId::Click, 0.8);
 	return Hooks.GoOut(Id, BuyInCents) ? "" : "Can't get there right now.";
+}
+
+std::string Session::GoToLive(const std::string& OccurrenceId)
+{
+	const life::Activity* A = life::Find("riverside");
+	if (!A)
+	{
+		return "Unknown game.";
+	}
+	if (TimeSkip.Active)
+	{
+		return "You're busy.";
+	}
+	if (LifeContext().InTournament)
+	{
+		return "Finish your tournament first.";
+	}
+	const double World = WorldMinutes();
+	live::Occurrence O = live::FindOccurrence(OccurrenceId);
+	if (!O.Valid())
+	{
+		// The next one the player can enter.
+		for (const live::Occurrence& C : live::Reachable(World, 30.0))
+		{
+			if (live::CanRegister(BankrollCents, Life, C, World).empty())
+			{
+				O = C;
+				break;
+			}
+		}
+		if (!O.Valid())
+		{
+			const std::string Why = life::Blocked(*A, Life, LifeContext());
+			return Why.empty() ? "Nothing on at the Riverside." : Why;
+		}
+	}
+	const bool Already = live::EntryFor(Life, O.Id) != nullptr;
+	if (!Already && Life.Energy < A->Energy)
+	{
+		return "A tournament is a long night. Sleep first.";
+	}
+	const std::string Why = live::CanRegister(BankrollCents, Life, O, World);
+	if (!Why.empty())
+	{
+		return Why;
+	}
+	if (!Already)
+	{
+		// The field as the world has it: the people it registered (the room's faces as the Back Room knows them play
+		// their own way), and everyone else the room expects.
+		std::vector<std::pair<std::string, int>> Roster;
+		int Planned = O.Field;
+		if (LivingWorld.Ready())
+		{
+			Planned = std::max(1, LivingWorld.PlannedEntries(O.Id));
+			for (int Npc : LivingWorld.Registered(O.Id))
+			{
+				const world::Npc* N = LivingWorld.Get(Npc);
+				if (!N || N->Name == HeroName)
+				{
+					continue;
+				}
+				int Type = static_cast<int>(session_detail::StyleOf(*N));
+				for (const live::CastMember& Cm : live::RiversideCast())
+				{
+					if (N->Name == Cm.Name)
+					{
+						Type = static_cast<int>(Cm.Type);
+					}
+				}
+				Roster.push_back({N->Name, Type});
+			}
+		}
+		const int Entrants = std::max(Planned, static_cast<int>(Roster.size())) + 1;
+		const std::string Not = live::Register(BankrollCents, Life, O, World, Entrants, Roster);
+		if (!Not.empty())
+		{
+			return Not;
+		}
+		LivingWorld.HeroEntered(O.Id, O.T->Name);
+	}
+	live::PayFare(BankrollCents, Life, O.Id, false, World);
+	if (Stream.Live)
+	{
+		EndStream();
+	}
+	Save();
+	Sound(SoundId::Click, 0.8);
+	return Hooks.GoOut(O.Id, O.T->BuyInCents) ? "" : "Can't get there right now.";
+}
+
+void Session::ResolveAbandonedLive()
+{
+	// The night the game closed on: the seat was dealt in without the player until it was blinded away (the
+	// published rule for leaving a live tournament), played out by the engine with the entry's own draw.
+	const double World = WorldMinutes();
+	for (const life::LiveEntry& E : std::vector<life::LiveEntry>(Life.LiveEntries))
+	{
+		const live::Occurrence O = live::FindOccurrence(E.Id);
+		if (E.State != life::LiveEntry::Registered || !O.Valid() || World < O.Start + O.T->Hours * 60.0 + 60.0)
+		{
+			continue;
+		}
+		std::vector<ReservedPlayer> Known;
+		for (const std::pair<std::string, int>& Who : E.Roster)
+		{
+			ReservedPlayer P;
+			P.Name = Who.first;
+			P.Type = static_cast<Archetype>(Who.second);
+			Known.push_back(P);
+		}
+		std::unique_ptr<Tournament> Night = live::MakeField(O, E.Entrants, HeroName, live::SeedFor(E, HeroName), Known);
+		Night->HeroSitsOut = true;
+		int Place = 0;
+		Chips Prize = 0;
+		for (int Guard = 0; Guard < 6000 && !Night->Hero().Busted && !Night->bFinished; ++Guard)
+		{
+			for (const TEvent& Ev : Night->SimulateTick())
+			{
+				if (Ev.Type == TEventType::Bust && Ev.IsHero)
+				{
+					Place = Ev.Place;
+					Prize = Ev.PrizeCents;
+				}
+			}
+		}
+		if (Place <= 0)
+		{
+			Place = Night->Hero().Place > 0 ? Night->Hero().Place : Night->HeroRank();
+			Prize = Night->PrizeFor(Place);
+		}
+		live::Settle(BankrollCents, Life, E.Id, Place, Night->Spec.Entrants, Prize, O.Start + Night->ClockMinutes() - static_cast<double>(O.T->StartMinute));
+		LivingWorld.HeroFinished(E.Id, Place, Prize, world::World::TableReport());
+	}
 }
 
 std::string Session::StartActivity(const std::string& Id)
@@ -3522,24 +3752,7 @@ void Session::NameField()
 	}
 	int AtHeroTable = std::min(5, static_cast<int>(Who.size()) / 3 + 1);
 	auto Strong = [](int A) { return A == static_cast<int>(Archetype::Reg) || A == static_cast<int>(Archetype::Crusher) || A == static_cast<int>(Archetype::Tag) || A == static_cast<int>(Archetype::Lag); };
-	auto Style = [](const world::Npc& N) {
-		const float Sk = N.Overall();
-		const float Aggro = N.TraitOf(world::Trait::Aggro);
-		const float Risk = N.TraitOf(world::Trait::Risk);
-		if (Sk >= 0.72f)
-		{
-			return Aggro > 0.6f ? Archetype::Crusher : Archetype::Reg;
-		}
-		if (Sk >= 0.58f)
-		{
-			return Aggro > 0.62f ? Archetype::Lag : Aggro < 0.35f ? Archetype::Tag : Archetype::Reg;
-		}
-		if (Sk >= 0.45f)
-		{
-			return Aggro > 0.8f && Risk > 0.7f ? Archetype::Maniac : Aggro < 0.3f ? Archetype::Nit : Archetype::Tag;
-		}
-		return Aggro > 0.8f ? Archetype::Maniac : Aggro < 0.3f ? Archetype::Station : N.TraitOf(world::Trait::Patience) > 0.7f ? Archetype::Nit : Archetype::Fish;
-	};
+	auto Style = [](const world::Npc& N) { return session_detail::StyleOf(N); };
 	auto TakeFrom = [&](std::map<int, std::vector<size_t>>& Pool, int Wanted) -> size_t {
 		auto Exact = Pool.find(Wanted);
 		if (Exact != Pool.end() && !Exact->second.empty())
@@ -3758,18 +3971,20 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 		Hooks.Text("RiverLine", "Review complete. Your account is active again. Further violations may result in permanent closure.");
 	}
 	// Sundays: Dee deals the Riverside's $150, and says so in the afternoon.
-	if (const life::Activity* Live = life::Find("riverside"))
+	for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 16.0 * 60.0; At <= To; At += net::MinutesPerDay)
 	{
-		for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 16.0 * 60.0; At <= To; At += net::MinutesPerDay)
+		bool Sunday = false;
+		for (const live::Occurrence& O : live::Occurrences(net::DayOf(At)))
 		{
-			if (At <= From || !life::InWindow(*Live, At + 2.0 * 60.0 + 1.0) || Life.RentStage == life::Rent::Evicted)
-			{
-				continue;
-			}
-			StoryText("dee-riverside-" + std::to_string(net::DayOf(At)), "Dee",
-				Life.LiveEvents == 0 ? "i deal the riverside $150 on sundays. seven o'clock, forty-something players, deep stacks. sal and mei play it. you should too."
-									 : "riverside tonight. seven. i've got the feature table.");
+			Sunday = Sunday || std::string(O.T->Key) == "sunday";
 		}
+		if (At <= From || !Sunday || Life.RentStage == life::Rent::Evicted)
+		{
+			continue;
+		}
+		StoryText("dee-riverside-" + std::to_string(net::DayOf(At)), "Dee",
+			Life.LiveEvents == 0 ? "the riverside runs every day now. i deal the sunday $150, seven o'clock, a hundred people some weeks. deep stacks. you should come."
+								 : "riverside sunday tonight. seven. i've got the stream table.");
 	}
 	// Game nights at Dee's: a heads-up half an hour before the doors open.
 	if (const life::Activity* Game = life::Find("dee-game"))

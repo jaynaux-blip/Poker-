@@ -1,9 +1,11 @@
 #pragma once
 
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Tournament.h"
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ss
@@ -11,40 +13,110 @@ namespace ss
 namespace live
 {
 /**
- * The Riverside's Sunday $150: a live 6-max deepstack in the casino's poker room, 7 PM, late
- * registration until 7:45. Dee deals the feature table on weekends.
+ * The Riverside Casino's card room: the city's poker room, in the old showroom of a riverboat casino moored for
+ * good in 1994. Two or three freezeouts every day for fields of sixty to a hundred and twenty, 6-max and deep
+ * (docs/LIVE_TOURNAMENTS.md §4).
  *
- * The field is ss::Tournament like an online event; the host plays the player's table hand by hand
- * at a real table and the rest of the room in the background. The feature table is where the
- * people with faces are: the Back Room's regulars, gh0stfold, and a few Sunday faces. Tournament::
- * FeatureIds keeps the player's table stocked with them while any are left in.
+ * The schedule is data. Each day's events are occurrences with ids that are the same in every save, so the living
+ * world plans who plays them (LiveCalendar reads them from here), and the player's entry, the world's result and
+ * the host's night all name the same event. The field is the world's: the people it registered, seated by the
+ * engine's draw among the room's anonymous regulars. Nobody is moved anywhere but by the engine's balancing.
  */
-constexpr Chips RiversideBuyInCents = 15000;
-constexpr Chips RiversideFeeCents = 1500;
 constexpr int RiversideTableSize = 6;
+/** The 14 bus across town, each way. */
+constexpr Chips BusFareCents = 290;
+constexpr double TravelMinutes = 20.0;
+/** The desk takes registrations from three hours before cards. */
+constexpr double DeskOpensBefore = 180.0;
 
-/** Someone you can meet at the feature table: their name in the field and how they play. */
+struct EventTemplate
+{
+	const char* Key;   // occurrence ids: "riverside-<Key>@<day>" ("riverside@<day>" for the Sunday)
+	const char* Name;  // "Riverside Nightly $120"
+	const char* Short; // "Nightly"
+	int Days;          // weekdays it runs (bit 0 Monday .. bit 6 Sunday)
+	int StartMinute;   // after midnight
+	Chips BuyInCents;  // total, fee included
+	Chips FeeCents;
+	Chips StartingStack;
+	double LevelMinutes;
+	int LateRegLevels;
+	int BreakEvery; // levels between breaks
+	double BreakMinutes;
+	int MinEntrants; // fewer and it's cancelled, every entry refunded
+	int FieldLo;     // the usual field
+	int FieldHi;
+	double Hours; // cards to the last hand, about
+	const char* Speed;
+};
+SHORTSTACKCORE_API const std::vector<EventTemplate>& Schedule();
+
+/** One day's event. */
+struct Occurrence
+{
+	std::string Id;
+	const EventTemplate* T = nullptr;
+	int Day = 0;
+	double Start = 0.0; // world minutes
+	double DeskOpens = 0.0;
+	double LateRegEnds = 0.0;
+	int Field = 0; // planned entrants
+	bool Valid() const { return T != nullptr; }
+};
+/** The day's events, in start order. */
+SHORTSTACKCORE_API std::vector<Occurrence> Occurrences(int Day);
+SHORTSTACKCORE_API Occurrence FindOccurrence(const std::string& Id);
+SHORTSTACKCORE_API bool IsRiverside(const std::string& EventId);
+/** The events the player could still make from World (there before late registration closes), in start order. */
+SHORTSTACKCORE_API std::vector<Occurrence> Reachable(double World, double HoursAhead);
+
+/** Levels from 100/200, a big-blind ante from level 3. */
+SHORTSTACKCORE_API const std::vector<Level>& DeepstackLevels();
+SHORTSTACKCORE_API TournamentSpec SpecFor(const Occurrence& O, int Entrants);
+/** The field: Known (the world's people, as they play) and anonymous regulars to Entrants, the player among them. */
+SHORTSTACKCORE_API std::unique_ptr<Tournament> MakeField(const Occurrence& O, int Entrants, const std::string& HeroName, const std::string& Seed,
+	const std::vector<ReservedPlayer>& Known);
+/** Fewer entrants than the event runs with: it's cancelled and every entry refunded (no fabricated field). */
+inline bool BelowMinimum(const Occurrence& O, int Entrants) { return O.Valid() && Entrants < O.T->MinEntrants; }
+/** The draw's seed for an entry: the same field and the same seats however often the night is opened. */
+SHORTSTACKCORE_API std::string SeedFor(const life::LiveEntry& E, const std::string& HeroName);
+
+// ------------------------------------------------------------------ the people with faces
+
+/** Someone you can meet at the Riverside: their name in the field and how they play. */
 struct CastMember
 {
 	const char* Id;   // the tournament player id ("npc:" + Name)
 	const char* Name; // as the field knows them
 	Archetype Type;
 };
-
-/** The feature table's cast, in the order they're seated from the start. */
 SHORTSTACKCORE_API const std::vector<CastMember>& RiversideCast();
+/**
+ * How much one of the cast likes an occurrence: 0 never, 1 sometimes, 2 it's their game. Mrs. Park plays the noon
+ * game, Rick the turbos, Dee's regulars keep her Tuesday, Thursday and Saturday nights.
+ */
+SHORTSTACKCORE_API int Habit(const std::string& Name, const Occurrence& O);
 
-/** Twenty-minute levels from 100/200, a big-blind ante from level 3; 20,000 starts (100 BB). */
-SHORTSTACKCORE_API const std::vector<Level>& DeepstackLevels();
+// ------------------------------------------------------------------ the player's entries
 
-/** The event as it runs on Day (net:: day number of the Sunday); the field size varies week to week. */
-SHORTSTACKCORE_API TournamentSpec RiversideSpec(int Day);
-
-/** The cast as tournament reserved players. */
-SHORTSTACKCORE_API std::vector<ReservedPlayer> RiversideReserved();
-
-/** A full Riverside tournament for the player, with the feature table switched on. */
-SHORTSTACKCORE_API std::unique_ptr<Tournament> MakeRiverside(int Day, const std::string& HeroName, const std::string& Seed);
+SHORTSTACKCORE_API life::LiveEntry* EntryFor(life::State& L, const std::string& OccurrenceId);
+SHORTSTACKCORE_API const life::LiveEntry* EntryFor(const life::State& L, const std::string& OccurrenceId);
+/** The entry the player holds and hasn't finished (nullptr: none). */
+SHORTSTACKCORE_API const life::LiveEntry* ActiveEntry(const life::State& L);
+/** Why the player can't register for O at World ("" when they can, or when they already have). */
+SHORTSTACKCORE_API std::string CanRegister(Chips Bankroll, const life::State& L, const Occurrence& O, double World);
+/**
+ * Registers the player: the buy-in and the fee as two ledger lines, and the field as it stands. Registering again
+ * for the same occurrence changes nothing and charges nothing. Returns why not ("" when registered).
+ */
+SHORTSTACKCORE_API std::string Register(Chips& Bankroll, life::State& L, const Occurrence& O, double World, int Entrants,
+	const std::vector<std::pair<std::string, int>>& Roster);
+/** The bus there or home, once each per entry. False when already paid (or no entry). */
+SHORTSTACKCORE_API bool PayFare(Chips& Bankroll, life::State& L, const std::string& Id, bool Home, double World);
+/** The result, once: the prize to the bankroll and its ledger line. False when already settled (or not registered). */
+SHORTSTACKCORE_API bool Settle(Chips& Bankroll, life::State& L, const std::string& Id, int Place, int Field, Chips Prize, double World);
+/** A cancelled event: the buy-in and fee back, once. */
+SHORTSTACKCORE_API bool Refund(Chips& Bankroll, life::State& L, const std::string& Id, double World, const std::string& Why);
 
 /** "Table 6, seat 3" style seat labels start at 1. */
 inline int SeatLabel(int Seat) { return Seat + 1; }

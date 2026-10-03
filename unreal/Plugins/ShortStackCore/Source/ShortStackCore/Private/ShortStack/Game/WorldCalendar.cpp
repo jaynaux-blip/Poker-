@@ -4,6 +4,7 @@
 #include "ShortStack/Game/World.h"
 
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Live.h"
 #include "WorldSim.h"
 
 #include <algorithm>
@@ -307,13 +308,15 @@ std::vector<LiveEvent> LiveCalendar(int Day)
 	const int Doy = Day - YearStart(Y);
 	auto At = [](int H, int Mi) { return H * 60 + Mi; };
 
-	// The local weeklies. The Riverside's Sunday $150 is the one the player can walk to (live::RiversideSpec).
-	if (Wd == 6)
+	// The Riverside's card room, the one the player can take the bus to: two or three a day (live::Schedule).
+	for (const live::Occurrence& O : live::Occurrences(Day))
 	{
-		LiveEvent E = Make("Riverside Sunday $150", "the Riverside", "", Region::Americas, LiveKind::Local, LiveLevel::Local, 150.0, 42 + ((Day * 37 + 11) % 19), Day, At(19, 0), 8.0);
-		E.Id = "riverside@" + std::to_string(Day);
+		LiveEvent E = Make(O.T->Name, "the Riverside", "", Region::Americas, LiveKind::Local, LiveLevel::Local, static_cast<double>(O.T->BuyInCents) / 100.0, O.Field, Day,
+			O.T->StartMinute, O.T->Hours);
+		E.Id = O.Id;
 		Out.push_back(E);
 	}
+	// The other local weeklies, in other cities.
 	if (Wd == 3)
 	{
 		Out.push_back(Make("Lone Star Thursday $200", "Austin", "", Region::Americas, LiveKind::Local, LiveLevel::Local, 200.0, Vary(60, Day, 1, 30), Day, At(19, 0), 8.0));

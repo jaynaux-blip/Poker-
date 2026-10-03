@@ -720,7 +720,7 @@ void ABackRoomHUD::DrawHUD()
 	{
 		const float A = Smooth(0.6f, 1.8f, Arrive) * (1.0f - Smooth(5.0f, 6.4f, Arrive));
 		Text(GM->IsLive() ? TEXT("R I V E R S I D E    C A S I N O") : TEXT("S P I N    C Y C L E    L A U N D R O M A T"), Fade(Paper, A), W * 0.5f, H * 0.4f, Big, 1.35f, 1);
-		Text(GM->IsLive() ? TEXT("the poker room   \u00b7   sunday $150") : TEXT("the back room"), Fade(Warm, A), W * 0.5f, H * 0.4f + 50.0f * S, Small, 1.45f, 1);
+		Text(GM->IsLive() ? TEXT("the card room   \u00b7   ") + GM->GetLiveName().ToLower() : FString(TEXT("the back room")), Fade(Warm, A), W * 0.5f, H * 0.4f + 50.0f * S, Small, 1.45f, 1);
 		Text(GM->ArrivalDay(), Fade(Dim, A), W * 0.5f, H * 0.4f + 88.0f * S, Small, 1.1f, 1);
 	}
 
