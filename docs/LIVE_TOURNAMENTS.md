@@ -234,6 +234,16 @@ Saturday, 12:10 PM. Rent's paid, $640 in the bank. The calendar has three blue c
 
 ## 15. Milestones for this update
 
+**Status, 2026-10-03.**
+
+- **M1 is built** (254923e). Covered by session_test and world_test, and played in the editor: registered from the Burner app, a Noon Deepstack and Nightlies, one to 11th of 97 and a cash.
+- **M2 is built** (ad45abb):
+  - The room is the cardroom kit and the crowd kit, plus MegaLights in this room only.
+  - Measured about 63 fps, GPU 14.6 ms, with dynamic resolution holding 60 in PIE at 2552×1222 on an RTX 4070 SUPER.
+  - Played: the walk in, a table move, a bust and the walk out, and a final table on the stage.
+  - Not yet built from M2: walk mode and walkable breaks (breaks are timed holds), and cash tables.
+- **M3 is open**, plus the parts of M2 above. An interrupted entry is settled by the leaving rule until per-hand checkpoints land.
+
 **M1, the schedule and the honest field (core, standalone-tested, no new art)**
 1. `live::Venue` and `live::EventTemplate` data: the Riverside and its weekly schedule.
 2. `LiveCalendar` holds the schedule.
