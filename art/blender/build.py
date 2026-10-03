@@ -22,7 +22,9 @@ ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chai
           # GearDrop's gear in the apartment, and the career's mementos.
           'monitor', 'tower', 'mic', 'webcam', 'lights', 'macro_pad', 'headphones', 'plant', 'curtains', 'router', 'trophy',
           # What the apartment's window looks out on.
-          'tenement']
+          'tenement',
+          # The Riverside Casino's card room: its kit, and the crowd at its far tables.
+          'cardroom', 'crowd']
 
 
 def args():

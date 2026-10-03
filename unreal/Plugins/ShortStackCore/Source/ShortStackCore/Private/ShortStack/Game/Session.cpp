@@ -167,6 +167,10 @@ std::string SaveData::Serialize() const
 		{
 			Out << "liveroster\t" << session_detail::Escape(E.Id) << "\t" << session_detail::Escape(R.first) << "\t" << R.second << "\n";
 		}
+		for (const std::string& B : E.Board)
+		{
+			Out << "liveboard\t" << session_detail::Escape(E.Id) << "\t" << session_detail::Escape(B) << "\n";
+		}
 	}
 	for (const auto& Rd : L.Reads)
 	{
@@ -406,6 +410,17 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 			E.FinishedAt = std::atof(P[11].c_str());
 			E.Name = session_detail::Unescape(P[12]);
 			D.Life.LiveEntries.push_back(E);
+		}
+		else if (P.size() == 3 && P[0] == "liveboard")
+		{
+			const std::string Id = session_detail::Unescape(P[1]);
+			for (life::LiveEntry& E : D.Life.LiveEntries)
+			{
+				if (E.Id == Id)
+				{
+					E.Board.push_back(session_detail::Unescape(P[2]));
+				}
+			}
 		}
 		else if (P.size() == 4 && P[0] == "liveroster")
 		{
@@ -2930,6 +2945,38 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 			return Not;
 		}
 		LivingWorld.HeroEntered(O.Id, O.T->Name);
+		// The champions' board by the desk: the room's last winners, newest first, from the world's results.
+		if (life::LiveEntry* Mine = live::EntryFor(Life, O.Id))
+		{
+			static const char* Days[7] = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"};
+			for (int Day = O.Day; Day >= O.Day - 10 && Mine->Board.size() < 8; --Day)
+			{
+				const std::vector<live::Occurrence> Os = live::Occurrences(Day);
+				for (auto It = Os.rbegin(); It != Os.rend() && Mine->Board.size() < 8; ++It)
+				{
+					const net::EventResult* Res = It->Start < World ? LivingWorld.ResultOf(It->Id) : nullptr;
+					if (!Res)
+					{
+						continue;
+					}
+					for (const net::Placing& Pl : Res->FinalTable)
+					{
+						if (Pl.Place != 1)
+						{
+							continue;
+						}
+						const world::Npc* N = Pl.Player >= 0 ? LivingWorld.Get(Pl.Player) : nullptr;
+						const std::string Who = Pl.Player == -1 ? HeroName : N ? N->Name : Pl.Name;
+						std::string Short = It->T->Short;
+						for (char& Ch : Short)
+						{
+							Ch = static_cast<char>(std::toupper(static_cast<unsigned char>(Ch)));
+						}
+						Mine->Board.push_back(std::string(Days[((Day % 7) + 7) % 7]) + " " + Short + "\t" + Who + "\t" + std::to_string(Pl.Prize));
+					}
+				}
+			}
+		}
 	}
 	live::PayFare(BankrollCents, Life, O.Id, false, World);
 	if (Stream.Live)

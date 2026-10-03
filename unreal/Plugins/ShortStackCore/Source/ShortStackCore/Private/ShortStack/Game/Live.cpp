@@ -53,13 +53,14 @@ std::string Fixed2(double V)
 const std::vector<EventTemplate>& Schedule()
 {
 	// Key, name, short, days, start, buy-in, fee, stack, level minutes, late-reg levels, break every, break minutes,
-	// minimum, field, hours, speed. Two events Monday to Thursday and Sunday, three on Friday and Saturday.
+	// minimum, field, hours, speed. Two events Monday to Thursday and Sunday, three on Friday and Saturday. The biggest
+	// fields stop at 114 so that, the player in, the room's twenty tables seat everyone (6-max).
 	static const std::vector<EventTemplate> Events = {
 		{"noon", "Noon Deepstack $80", "Noon Deepstack", Mon | Tue | Wed | Thu | Fri, 12 * 60, 8000, 1000, 15000, 20.0, 3, 6, 15.0, 18, 60, 80, 9.0, "Deepstack"},
-		{"bigstack", "Saturday Big Stack $200", "Big Stack", Sat, 13 * 60, 20000, 2000, 30000, 25.0, 3, 6, 15.0, 18, 90, 120, 11.0, "Deepstack"},
+		{"bigstack", "Saturday Big Stack $200", "Big Stack", Sat, 13 * 60, 20000, 2000, 30000, 25.0, 3, 6, 15.0, 18, 90, 114, 11.0, "Deepstack"},
 		{"warmup", "Sunday Warm-Up $80", "Warm-Up", Sun, 12 * 60, 8000, 1000, 15000, 20.0, 3, 6, 15.0, 18, 60, 85, 9.0, "Deepstack"},
 		{"nightly", "Riverside Nightly $120", "Nightly", Mon | Tue | Wed | Thu | Fri | Sat, 19 * 60, 12000, 1500, 20000, 20.0, 3, 6, 15.0, 18, 70, 100, 8.0, "Deepstack"},
-		{"sunday", "Riverside Sunday $150", "Sunday", Sun, 19 * 60, 15000, 1500, 20000, 20.0, 3, 6, 15.0, 18, 90, 120, 9.0, "Deepstack"},
+		{"sunday", "Riverside Sunday $150", "Sunday", Sun, 19 * 60, 15000, 1500, 20000, 20.0, 3, 6, 15.0, 18, 90, 114, 9.0, "Deepstack"},
 		{"turbo", "Midnight Turbo $60", "Midnight Turbo", Fri | Sat, 22 * 60 + 30, 6000, 800, 10000, 10.0, 4, 6, 10.0, 18, 60, 75, 4.5, "Turbo"},
 	};
 	return Events;

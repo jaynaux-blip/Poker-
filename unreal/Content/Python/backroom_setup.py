@@ -294,6 +294,8 @@ def build_screen_text(force):
         return False
     mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
     mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    # The font is a distance field: its edge is at 0.5 (the default clip, a third, fattens the letters into blocks).
+    mat.set_editor_property("opacity_mask_clip_value", 0.5)
     font = ss._expr(mat, unreal.MaterialExpressionFontSampleParameter, -700, 0)
     font.set_editor_property("parameter_name", "Font")
     default_font = unreal.load_object(None, "/Engine/EngineFonts/RobotoDistanceField.RobotoDistanceField")

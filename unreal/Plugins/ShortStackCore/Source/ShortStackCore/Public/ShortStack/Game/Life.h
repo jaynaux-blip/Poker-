@@ -88,6 +88,8 @@ struct LiveEntry
 	int Entrants = 0; // the field, the player included
 	/** The people the world registered (name, how they play: an ss::Archetype): the field is fixed at registration. */
 	std::vector<std::pair<std::string, int>> Roster;
+	/** The champions' board by the desk as it stood that night (newest first: "SAT NIGHTLY\tMei\t221500"). */
+	std::vector<std::string> Board;
 	bool FareThere = false;
 	bool FareHome = false;
 	int Place = 0;

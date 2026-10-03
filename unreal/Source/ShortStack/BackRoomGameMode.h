@@ -312,6 +312,8 @@ private:
 	void LiveSettle();
 	void LiveGoHome();
 	void PlaceExtras();
+	/** Today's schedule by the entrance, with each event's state now. */
+	void UpdateRoomBoards();
 	void UpdateBoard(float RealDt);
 	void RaiseBanner(const FString& Text);
 	void Floor(const FString& Line, bool bChime = true);
@@ -338,6 +340,7 @@ private:
 	int32 BreakLevel = 0;
 	/** Everyone who sat at the player's table tonight (tournament ids), for the world to remember. */
 	TSet<FString> LiveMet;
+	float RoomBoardTick = 0.0f;
 	/** The player confirmed leaving while a hand or the room's round was still being played: they go when it's done. */
 	bool bLeaveWhenFree = false;
 	/** Who's in which body: tournament player id -> actor (kept, hidden, while they're elsewhere). */

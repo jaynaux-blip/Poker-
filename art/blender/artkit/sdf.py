@@ -176,13 +176,87 @@ def field(prims, voxel, pad=0.004):
     return F, lo
 
 
+def surface_nets(F, voxel):
+    """Dual mesh of the zero level of a grid (surface nets): one vertex per cell the surface crosses, at the mean
+    of its edges' crossings, and a quad across every grid edge with a sign change. No dependencies beyond numpy;
+    used when scikit-image isn't there. Returns (verts, faces) in grid units times voxel."""
+    inside = F < 0.0
+    nx, ny, nz = F.shape
+    corners = [(a, b, c) for a in (0, 1) for b in (0, 1) for c in (0, 1)]
+    cnt = np.zeros((nx - 1, ny - 1, nz - 1), dtype=np.int32)
+    for a, b, c in corners:
+        cnt += inside[a:nx - 1 + a, b:ny - 1 + b, c:nz - 1 + c]
+    cells = (cnt > 0) & (cnt < 8)
+    acc = np.zeros(cells.shape + (3,), dtype=np.float64)
+    hits = np.zeros(cells.shape, dtype=np.int32)
+    # The cell's twelve edges: from each corner along the axis where its bit is 0.
+    for a, b, c in corners:
+        for axis in range(3):
+            o = [a, b, c]
+            if o[axis] == 1:
+                continue
+            e = list(o)
+            e[axis] = 1
+            f0 = F[o[0]:nx - 1 + o[0], o[1]:ny - 1 + o[1], o[2]:nz - 1 + o[2]]
+            f1 = F[e[0]:nx - 1 + e[0], e[1]:ny - 1 + e[1], e[2]:nz - 1 + e[2]]
+            cross = (f0 < 0.0) != (f1 < 0.0)
+            t = np.where(cross, f0 / np.where(cross, f0 - f1, 1.0), 0.0)
+            pos = np.zeros(cells.shape + (3,))
+            pos[..., 0], pos[..., 1], pos[..., 2] = o
+            pos[..., axis] += t
+            acc += pos * cross[..., None]
+            hits += cross
+    idx = np.full(cells.shape, -1, dtype=np.int64)
+    where = np.nonzero(cells)
+    idx[where] = np.arange(len(where[0]))
+    base = np.stack(where, axis=1).astype(np.float64)
+    verts = (base + acc[where] / np.maximum(hits[where], 1)[:, None]) * voxel
+    faces = []
+    # Quads across grid edges: an edge along an axis is shared by the four cells around it.
+    for axis in range(3):
+        u, v = [k for k in range(3) if k != axis]
+        sl0 = [slice(None)] * 3
+        sl1 = [slice(None)] * 3
+        sl0[axis] = slice(0, F.shape[axis] - 1)
+        sl1[axis] = slice(1, F.shape[axis])
+        a = inside[tuple(sl0)]
+        b = inside[tuple(sl1)]
+        change = a != b
+        # Only edges with all four neighboring cells inside the grid.
+        lim = [slice(None)] * 3
+        lim[u] = slice(1, F.shape[u] - 1)
+        lim[v] = slice(1, F.shape[v] - 1)
+        mask = np.zeros_like(change)
+        mask[tuple(lim)] = change[tuple(lim)]
+        pts = np.stack(np.nonzero(mask), axis=1)
+        if not len(pts):
+            continue
+        flip = a[tuple(pts.T)]
+        def cell(du, dv):
+            q = pts.copy()
+            q[:, u] -= du
+            q[:, v] -= dv
+            return idx[tuple(q.T)]
+        c00, c10, c11, c01 = cell(1, 1), cell(0, 1), cell(0, 0), cell(1, 0)
+        quad = np.stack([c00, c10, c11, c01], axis=1)
+        quad[flip] = quad[flip][:, ::-1]
+        faces.append(quad)
+    faces = np.concatenate(faces, axis=0) if faces else np.zeros((0, 4), dtype=np.int64)
+    faces = faces[(faces >= 0).all(axis=1)]
+    return verts, faces
+
+
 def mesh(prims, voxel, name):
-    """Marching-cubes mesh of the field, as a Blender object (outward-facing, watertight)."""
-    from skimage.measure import marching_cubes
+    """Marching-cubes mesh of the field (surface nets without scikit-image), as a Blender object (outward-facing,
+    watertight)."""
     import bpy
     F, lo = field(prims, voxel)
-    verts, faces, _, _ = marching_cubes(F, level=0.0, spacing=(voxel, voxel, voxel), gradient_direction='ascent',
-                                        allow_degenerate=False)
+    try:
+        from skimage.measure import marching_cubes
+        verts, faces, _, _ = marching_cubes(F, level=0.0, spacing=(voxel, voxel, voxel), gradient_direction='ascent',
+                                            allow_degenerate=False)
+    except ImportError:
+        verts, faces = surface_nets(F, voxel)
     verts += lo
     me = bpy.data.meshes.new(name)
     me.from_pydata(verts.tolist(), [], faces.tolist())

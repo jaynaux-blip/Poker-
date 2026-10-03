@@ -6,6 +6,7 @@
 #include "BackRoomStage.generated.h"
 
 class UExponentialHeightFogComponent;
+class UInstancedStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UPointLightComponent;
@@ -72,22 +73,39 @@ public:
 
 	// ------------------------------------------------------------ the Riverside (card room venue)
 	/**
-	 * The Riverside Casino's poker room instead of the Back Room: the player's table stays at the origin
-	 * (the feature table, roped off, under the stream's lights) and the rest of the room is built around
-	 * it on RoomRoot, which turns when the player is moved to another table.
+	 * The Riverside Casino's card room instead of the Back Room (BackRoomStageCardRoom.cpp): twenty numbered tables
+	 * and the stream table on the old showroom's stage, built from the card room kit (art/blender/assets/cardroom.py).
+	 * The player's table is always the one at the origin; the room (RoomRoot) is placed so that it's the table the
+	 * tournament seated them at, so every table number is a real place in the room.
 	 */
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Card Room")
 	bool bCardRoom = false;
-	/** How many other tables the room holds, and where each stands in the room (its frame: player side -X). */
+	/** How many tables the room holds (the stream table last), and where each stands in the room (its frame: player side -X). */
 	static int32 NumTableSlots();
+	/** The stream table's slot, on the stage (the final table plays there). */
+	static int32 StreamSlot();
 	/** Slot's frame in room space (RoomRoot), and in the world as the room is turned now. */
 	static FTransform TableSlotLocal(int32 Slot);
 	FTransform TableSlot(int32 Slot) const;
 	/** A table running, or closed for the night (lights down, chairs pushed in, a cover over the felt). */
 	void SetTableOpen(int32 Slot, bool bOpen);
-	/** Turns the room around the feature table (quarter turns): the player was moved, the view changes. */
-	void SetRoomTurn(int32 QuarterTurns);
-	int32 GetRoomTurn() const { return RoomTurn; }
+	/** Places the room so that Slot's table is the player's, at the origin (its own furniture and light hide). */
+	void SetRoomAnchor(int32 Slot);
+	int32 GetRoomAnchor() const { return AnchorSlot; }
+	/** The crowd at the far tables: cheap figures (kinds 0-5 seated players, 6 a dealer, 7-8 standing), room space. */
+	static constexpr int32 CrowdKinds = 9;
+	void ClearCrowd();
+	void AddCrowd(int32 Kind, const FTransform& RoomLocal);
+	/** The boards: today's events by the entrance, the champions between the desk and the cage, the cash list. */
+	void SetSchedule(const TArray<FString>& Lines);
+	void SetChampions(const TArray<FString>& Lines);
+	void SetCashList(const TArray<FString>& Lines);
+	/** A move to another table: out of the player's seat toward ToSlot (before the room re-anchors), in from FromSlot's side (after). */
+	TArray<FVector> CardRoomMoveOut(const FVector& Eye, int32 ToSlot) const;
+	TArray<FVector> CardRoomMoveIn(const FVector& Eye, int32 FromSlot) const;
+	/** From the seat to the cashier's window, and from the window out through the doors to the casino floor. */
+	TArray<FVector> CardRoomToCage(const FVector& Eye) const;
+	TArray<FVector> CardRoomCageToDoor(const FVector& At) const;
 	USceneComponent* GetRoomRoot() const { return RoomRoot; }
 	/** The tournament clock screens: a title, the level, the time left, blinds, what's next, and the field. */
 	void SetBoard(const FString& Title, const FString& Level, const FString& Clock, const FString& Blinds, const FString& Next, const FString& Field);
@@ -206,7 +224,25 @@ private:
 	TObjectPtr<UPointLightComponent> Tally;
 	UPROPERTY()
 	TObjectPtr<UMaterialInstanceDynamic> TallyGlow;
-	int32 RoomTurn = 0;
+	/** Each table slot's furniture, light and sign (hidden for the player's own, which is the real table at the origin). */
+	UPROPERTY()
+	TArray<TObjectPtr<USceneComponent>> SlotRoots;
+	UPROPERTY()
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> CrowdMeshes;
+	UPROPERTY()
+	TArray<TObjectPtr<UTextRenderComponent>> ScheduleLines;
+	UPROPERTY()
+	TArray<TObjectPtr<UTextRenderComponent>> ChampionLines;
+	UPROPERTY()
+	TArray<TObjectPtr<UTextRenderComponent>> CashLines;
+	/** The player's table's own pendant and its light (off at the stream table, which has the truss). */
+	UPROPERTY()
+	TObjectPtr<USceneComponent> HeroPendant;
+	UPROPERTY()
+	TObjectPtr<URectLightComponent> HeroLight;
+	UStaticMesh* Kit(const TCHAR* Name) const;
+	UInstancedStaticMeshComponent* Instances(UStaticMesh* Mesh, UMaterialInterface* Override, USceneComponent* Parent, bool bShadows);
+	int32 AnchorSlot = 0;
 	bool bOnAir = false;
 };
 

@@ -233,10 +233,45 @@ void ABackRoomGameMode::SeatLive()
 			Tourney->LevelIndex + 1, Tourney->Remaining);
 	}
 	ArrivalDayText = FString::Printf(TEXT("%s, %s   %s"), WeekdayName(LiveDay), *FString(UTF8_TO_TCHAR(ss::net::DateLabel(LiveDay).c_str())), *ClockLabel().RightChop(5));
-	// The first table, seated before you get there; the rest of the room around it.
+	// The first table, seated before you get there; the room placed round it, the rest of the room at theirs.
 	Table->PrepareNext();
 	Table->TakeEvents();
+	if (Stage)
+	{
+		Stage->SetRoomAnchor(SlotForTable(Tourney->Hero().TableId));
+		// The champions' board as it stood tonight, and the cash list on the desk's whiteboard.
+		TArray<FString> Champions;
+		if (const ss::life::LiveEntry* Mine = ss::live::EntryFor(Save->Life, std::string(TCHAR_TO_UTF8(*LiveEntryId))))
+		{
+			for (const std::string& B : Mine->Board)
+			{
+				TArray<FString> Parts;
+				Str(B).ParseIntoArray(Parts, TEXT("\t"), false);
+				if (Parts.Num() == 3)
+				{
+					Champions.Add(FString::Printf(TEXT("%s     %s     %s"), *Parts[0], *Parts[1].ToUpper(), *Dollars(FCString::Atoi64(*Parts[2]))));
+				}
+			}
+		}
+		if (Champions.Num() == 0)
+		{
+			Champions.Add(TEXT("YOUR NAME HERE"));
+		}
+		Stage->SetChampions(Champions);
+		static const TCHAR* Regulars[] = {TEXT("BOOTS"), TEXT("T.J."), TEXT("MARIA G."), TEXT("OMAR"), TEXT("LIN"), TEXT("DUKE"), TEXT("BEV"), TEXT("SONNY"), TEXT("J.P."), TEXT("ROSIE")};
+		TArray<FString> Cash = {TEXT("1-2 NLH     3 TABLES")};
+		FString List = TEXT("LIST:");
+		for (int32 I = 0; I < 5; ++I)
+		{
+			List += TEXT("  ") + FString(Regulars[(LiveDay * 3 + I * 7) % 10]);
+		}
+		Cash.Add(List);
+		Cash.Add(TEXT("2-5 NLH     1 TABLE"));
+		Cash.Add(TEXT("4-8 LIMIT   FRI & SAT"));
+		Stage->SetCashList(Cash);
+	}
 	PlaceExtras();
+	UpdateRoomBoards();
 }
 
 // ------------------------------------------------------------------ people
@@ -378,24 +413,12 @@ void ABackRoomGameMode::ApplyBlinkSwaps()
 
 int32 ABackRoomGameMode::SlotForTable(int32 TableId)
 {
-	if (const int32* Found = SlotByTable.Find(TableId))
+	// Every table has its place: table N stands at slot N - 1, and the final table plays on the stage.
+	if (Tourney && Tourney->Tables.size() == 1)
 	{
-		return *Found;
+		return ABackRoomStage::StreamSlot();
 	}
-	TSet<int32> Used;
-	for (const TPair<int32, int32>& It : SlotByTable)
-	{
-		Used.Add(It.Value);
-	}
-	for (int32 S = 0; S < ABackRoomStage::NumTableSlots(); ++S)
-	{
-		if (!Used.Contains(S))
-		{
-			SlotByTable.Add(TableId, S);
-			return S;
-		}
-	}
-	return -1;
+	return FMath::Clamp(TableId - 1, 0, ABackRoomStage::StreamSlot() - 1);
 }
 
 void ABackRoomGameMode::PlaceExtras()
@@ -404,91 +427,170 @@ void ABackRoomGameMode::PlaceExtras()
 	{
 		return;
 	}
-	// The tables still running besides yours, each at a slot it keeps.
-	const int32 HeroTable = Tourney->Hero().TableId;
-	TSet<int32> Running;
+	// The room's fidelity tiers (docs/LIVE_TOURNAMENTS.md section 4): the nearest tables get MetaHumans, as many as
+	// the budget seats; every other running table gets the crowd kit's figures. Either way, a table shows exactly
+	// the players the tournament has at it, and its dealer.
+	constexpr int32 NearBudget = 16;
+	constexpr double NearReach = 1150.0;
+	static const int32 PhysicalSeat[6] = {0, 1, 2, 3, 5, 6};
+	const int32 Anchor = Stage->GetRoomAnchor();
+	const FVector Me = ABackRoomStage::TableSlotLocal(Anchor).GetLocation();
+	const int32 HeroTable = Tourney->Hero().Busted ? -1 : Tourney->Hero().TableId;
+	USceneComponent* RoomRoot = Stage->GetRoomRoot();
+	const FTransform RoomWorld = RoomRoot ? RoomRoot->GetComponentTransform() : FTransform::Identity;
+	struct FRunning
+	{
+		int32 Slot;
+		int32 TableId;
+		double Dist;
+	};
+	TArray<FRunning> Running;
+	TSet<int32> Open;
 	for (const auto& It : Tourney->Tables)
 	{
-		if (It.first != HeroTable)
+		if (It.first == HeroTable)
 		{
-			Running.Add(It.first);
+			continue;
+		}
+		const int32 Slot = SlotForTable(It.first);
+		Open.Add(Slot);
+		Running.Add({Slot, It.first, FVector::Dist2D(Me, ABackRoomStage::TableSlotLocal(Slot).GetLocation())});
+	}
+	Running.Sort([](const FRunning& A, const FRunning& B) { return A.Dist < B.Dist; });
+	for (int32 Slot = 0; Slot < ABackRoomStage::NumTableSlots(); ++Slot)
+	{
+		Stage->SetTableOpen(Slot, Open.Contains(Slot));
+	}
+	Stage->ClearCrowd();
+	int32 Used = 0;
+	auto Seat = [&](const FTransform& Frame, int32 Physical, int32 Index, bool bDealer) {
+		const FTransform Local = ABackRoomStage::SeatTransform(Physical) * Frame;
+		if (!Extras.IsValidIndex(Index))
+		{
+			Extras.SetNum(Index + 1);
+		}
+		TObjectPtr<ABackRoomPlayer>& E = Extras[Index];
+		if (!E)
+		{
+			FBackRoomPersona Persona = PersonaFor(FString::Printf(TEXT("Extra%d"), Index));
+			const uint32 Shirt = bDealer ? 0x141418 : ExtraShirts[(Index * 5 + 3) % 9];
+			Persona.Shirt = FLinearColor(FColor((Shirt >> 16) & 0xff, (Shirt >> 8) & 0xff, Shirt & 0xff));
+			E = SpawnPerson(ExtraBodies[(Index * 3 + Physical) % 4], Local * RoomWorld, EBackRoomRole::Extra, Persona);
+			if (RoomRoot)
+			{
+				E->AttachToComponent(RoomRoot, FAttachmentTransformRules::KeepWorldTransform);
+			}
+		}
+		E->SetActorRelativeTransform(Local);
+		E->SetActorHiddenInGame(false);
+		// They watch their own table: the pot, the dealer, the others at it.
+		const FTransform World = Frame * RoomWorld;
+		E->TableToWorld = World;
+		E->PotAt = World.TransformPosition(FVector(10.0, 0.0, ABackRoomStage::FeltZ));
+		E->DealerAt = World.TransformPosition(ABackRoomStage::SeatTransform(4).TransformPosition(FVector(-14.0, 0.0, 112.0)));
+		E->HeroEyes = World.TransformPosition(ABackRoomStage::SeatTransform((Physical + 3) % 7).TransformPosition(FVector(-14.0, 0.0, 112.0)));
+		E->OthersAt.Reset();
+		for (int32 J : {0, 2, 5})
+		{
+			if (J != Physical)
+			{
+				E->OthersAt.Add(World.TransformPosition(ABackRoomStage::SeatTransform(J).TransformPosition(FVector(-14.0, 0.0, 112.0))));
+			}
+		}
+	};
+	for (const FRunning& R : Running)
+	{
+		const ss::TTable& T = Tourney->Tables[R.TableId];
+		const FTransform Frame = ABackRoomStage::TableSlotLocal(R.Slot);
+		TArray<int32> Players;
+		for (size_t K = 0; K < T.Seats.size() && K < 6; ++K)
+		{
+			if (T.Seats[K] >= 0)
+			{
+				Players.Add(PhysicalSeat[K]);
+			}
+		}
+		const int32 Need = 1 + Players.Num();
+		if (R.Dist < NearReach && Used + Need <= NearBudget)
+		{
+			Seat(Frame, 4, Used++, true);
+			for (int32 P : Players)
+			{
+				Seat(Frame, P, Used++, false);
+			}
+			continue;
+		}
+		Stage->AddCrowd(6, ABackRoomStage::SeatTransform(4) * Frame);
+		for (int32 P : Players)
+		{
+			// Their look is theirs: the same figure each time this player is drawn at this seat.
+			const int32 Idx = T.Seats[static_cast<size_t>(FMath::Max(0, P == 5 ? 4 : P == 6 ? 5 : P))];
+			const uint32 Hash = Idx >= 0 ? FCrc::StrCrc32(*Str(Tourney->Players[static_cast<size_t>(Idx)].Id)) : static_cast<uint32>(P);
+			Stage->AddCrowd(static_cast<int32>(Hash % 6), ABackRoomStage::SeatTransform(P) * Frame);
 		}
 	}
-	for (auto It = SlotByTable.CreateIterator(); It; ++It)
+	for (int32 I = Used; I < Extras.Num(); ++I)
 	{
-		if (!Running.Contains(It.Key()))
+		if (Extras[I])
 		{
-			It.RemoveCurrent();
+			Extras[I]->SetActorHiddenInGame(true);
 		}
 	}
-	TArray<int32> Ids = Running.Array();
-	Ids.Sort();
-	for (int32 Id : Ids)
+	// Railbirds: a few at the bar all night, and a crowd at the stage's edge once the money's close.
+	for (int32 I = 0; I < 5; ++I)
 	{
-		SlotForTable(Id);
+		const FVector At(-1250.0 + I * 170.0 + (I % 2) * 30.0, 1680.0 - 330.0 - (I % 2) * 40.0, 0.0);
+		Stage->AddCrowd(7 + I % 2, FTransform(FRotator(0.0f, -90.0f + (I - 2) * 14.0f, 0.0f), At));
 	}
-	USceneComponent* RoomRoot = Stage->GetRoomRoot();
-	const int32 Slots = ABackRoomStage::NumTableSlots();
-	Extras.SetNum(Slots * 3);
-	for (int32 Slot = 0; Slot < Slots; ++Slot)
+	const bool bMoneyClose = Tourney->Remaining <= Tourney->PaidPlaces() + 8;
+	const int32 Watching = bFinalTable ? 12 : bMoneyClose ? 6 : 0;
+	for (int32 I = 0; I < Watching; ++I)
 	{
-		const int32* TableId = SlotByTable.FindKey(Slot);
-		const bool bOpen = TableId != nullptr;
-		Stage->SetTableOpen(Slot, bOpen);
-		int32 Seated = 0;
-		if (bOpen)
-		{
-			for (int32 S : Tourney->Tables[*TableId].Seats)
-			{
-				Seated += S >= 0 ? 1 : 0;
-			}
-		}
-		const FTransform TableFrame = ABackRoomStage::TableSlotLocal(Slot);
-		for (int32 K = 0; K < 3; ++K)
-		{
-			const int32 Index = Slot * 3 + K;
-			// The dealer, and as many as two of the players there.
-			const bool bWanted = bOpen && (K == 0 || K <= Seated - 1);
-			TObjectPtr<ABackRoomPlayer>& E = Extras[Index];
-			if (!bWanted)
-			{
-				if (E)
-				{
-					E->SetActorHiddenInGame(true);
-				}
-				continue;
-			}
-			const FTransform Local = ABackRoomStage::SeatTransform(ExtraSeats[K]) * TableFrame;
-			if (!E)
-			{
-				FBackRoomPersona Persona = PersonaFor(FString::Printf(TEXT("Extra%d"), Index));
-				const uint32 Shirt = K == 0 ? 0x141418 : ExtraShirts[(Index * 5 + 3) % 9];
-				Persona.Shirt = FLinearColor(FColor((Shirt >> 16) & 0xff, (Shirt >> 8) & 0xff, Shirt & 0xff));
-				E = SpawnPerson(ExtraBodies[(Index * 3 + Slot) % 4], Local * (RoomRoot ? RoomRoot->GetComponentTransform() : FTransform::Identity), EBackRoomRole::Extra, Persona);
-				if (RoomRoot)
-				{
-					E->AttachToComponent(RoomRoot, FAttachmentTransformRules::KeepWorldTransform);
-				}
-			}
-			E->SetActorRelativeTransform(Local);
-			E->SetActorHiddenInGame(false);
-			// They look at their own table.
-			const FTransform World = TableFrame * (RoomRoot ? RoomRoot->GetComponentTransform() : FTransform::Identity);
-			E->TableToWorld = World;
-			E->PotAt = World.TransformPosition(FVector(10.0, 0.0, ABackRoomStage::FeltZ));
-			E->DealerAt = World.TransformPosition(ABackRoomStage::SeatTransform(4).TransformPosition(FVector(-14.0, 0.0, 112.0)));
-			E->HeroEyes = World.TransformPosition(ABackRoomStage::SeatTransform(ExtraSeats[(K + 1) % 3]).TransformPosition(FVector(-14.0, 0.0, 112.0)));
-			E->OthersAt.Reset();
-			for (int32 J = 0; J < 3; ++J)
-			{
-				if (J != K)
-				{
-					E->OthersAt.Add(World.TransformPosition(ABackRoomStage::SeatTransform(ExtraSeats[J]).TransformPosition(FVector(-14.0, 0.0, 112.0))));
-				}
-			}
-		}
+		const double Y = -420.0 + (I % 6) * 168.0 + (I / 6) * 70.0;
+		const FVector At(1150.0 - (I / 6) * 70.0, Y, 0.0);
+		Stage->AddCrowd(7 + (I * 7) % 2, FTransform(FRotator(0.0f, (FVector(1530.0, 0.0, 0.0) - At).Rotation().Yaw, 0.0f), At));
 	}
 	Table->SetCrowd(static_cast<float>(Running.Num() + 1) / static_cast<float>(FMath::Max(1, (Tourney->Spec.Entrants + Tourney->TableSize - 1) / Tourney->TableSize)));
+}
+
+void ABackRoomGameMode::UpdateRoomBoards()
+{
+	if (!Stage || !Tourney || !Save.IsValid())
+	{
+		return;
+	}
+	// Today's events by the entrance, each with where it stands now.
+	TArray<FString> Lines;
+	for (const ss::live::Occurrence& O : ss::live::Occurrences(LiveDay))
+	{
+		FString State;
+		if (Str(O.Id) == LiveEntryId)
+		{
+			State = bLiveOver ? FString(TEXT("YOUR NIGHT IS OVER")) : FString::Printf(TEXT("PLAYING  \u00b7  %d OF %d LEFT"), Tourney->Remaining, Tourney->Spec.Entrants);
+		}
+		else if (Minutes < O.DeskOpens)
+		{
+			State = TEXT("REGISTRATION ") + Str(ss::net::TimeLabel(O.DeskOpens));
+		}
+		else if (Minutes < O.Start)
+		{
+			State = TEXT("REGISTERING NOW");
+		}
+		else if (Minutes < O.LateRegEnds)
+		{
+			State = TEXT("LATE REG TO ") + Str(ss::net::TimeLabel(O.LateRegEnds));
+		}
+		else if (Minutes < O.Start + O.T->Hours * 60.0)
+		{
+			State = TEXT("RUNNING");
+		}
+		else
+		{
+			State = TEXT("FINISHED");
+		}
+		Lines.Add(FString::Printf(TEXT("%-9s %-24s %s"), *Str(ss::net::TimeLabel(O.Start)), *Str(O.T->Name).ToUpper(), *State));
+	}
+	Stage->SetSchedule(Lines);
 }
 
 // ------------------------------------------------------------------ the night
@@ -630,6 +732,12 @@ void ABackRoomGameMode::LiveEvent(const ss::TEvent& E)
 		break;
 	case ss::TEventType::FinalTable:
 		bFinalTable = true;
+		if (!Tourney->Hero().Busted && Stage && Stage->GetRoomAnchor() != ABackRoomStage::StreamSlot() && Phase == EBackRoomPhase::Playing)
+		{
+			// Up onto the stage with your chips: the final table plays at the stream table.
+			Table->Hold();
+			LiveMove();
+		}
 		Floor(TEXT("Ladies and gentlemen, we are down to our final table! Players, please bring your chips to the feature table."));
 		RaiseBanner(TEXT("FINAL TABLE"));
 		Stage->SetOnAir(true);
@@ -707,11 +815,13 @@ void ABackRoomGameMode::LiveMove()
 		Table->Resume(1.0f);
 		return;
 	}
-	// Up from the seat, out through the rope and into the aisle...
+	// Up from the seat and along the aisle toward the new table...
 	const FVector Eye = Pawn->GetEye();
-	const TArray<FVector> Out = {Eye, Eye + FVector(-34.0, -16.0, 44.0), FVector(-200.0, -150.0, 165.0), FVector(-140.0, -380.0, 166.0), FVector(-200.0, -700.0, 166.0)};
+	const int32 FromSlot = Stage ? Stage->GetRoomAnchor() : 0;
+	const int32 ToSlot = SlotForTable(H.TableId);
+	const TArray<FVector> Out = Stage ? Stage->CardRoomMoveOut(Eye, ToSlot) : TArray<FVector>{Eye, Eye + FVector(-34.0, -16.0, 44.0), FVector(-262.0, -60.0, 166.0)};
 	TWeakObjectPtr<ABackRoomGameMode> Self = this;
-	Pawn->PlayWalk(Out, 4.0f, true, [Self]() {
+	Pawn->PlayWalk(Out, 4.0f, true, [Self, FromSlot, ToSlot]() {
 		ABackRoomGameMode* GM = Self.Get();
 		if (!GM)
 		{
@@ -724,8 +834,8 @@ void ABackRoomGameMode::LiveMove()
 			PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 0.35f, FLinearColor::Black, true, true);
 		}
 		FTimerHandle Handle;
-		GM->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(GM, [GM]() {
-			GM->Stage->SetRoomTurn(GM->Stage->GetRoomTurn() + 1);
+		GM->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(GM, [GM, FromSlot, ToSlot]() {
+			GM->Stage->SetRoomAnchor(ToSlot);
 			GM->Table->PrepareNext();
 			GM->PlaceExtras();
 			APlayerController* PC2 = GM->GetWorld()->GetFirstPlayerController();
@@ -735,7 +845,7 @@ void ABackRoomGameMode::LiveMove()
 			}
 			ABackRoomPawn* P = Cast<ABackRoomPawn>(UGameplayStatics::GetPlayerPawn(GM, 0));
 			const FVector SeatEye = GM->Stage ? GM->Stage->EyeLocation() : FVector(-91.0, 0.0, 118.0);
-			const TArray<FVector> In = {FVector(-200.0, -700.0, 166.0), FVector(-140.0, -380.0, 166.0), FVector(-205.0, -130.0, 162.0), FVector(-160.0, 6.0, 148.0), SeatEye};
+			const TArray<FVector> In = GM->Stage->CardRoomMoveIn(SeatEye, FromSlot);
 			TWeakObjectPtr<ABackRoomGameMode> Self2 = GM;
 			if (P)
 			{
@@ -978,6 +1088,12 @@ void ABackRoomGameMode::UpdateBoard(float RealDt)
 		return;
 	}
 	BoardTick = 0.25f;
+	RoomBoardTick -= 0.25f;
+	if (RoomBoardTick <= 0.0f)
+	{
+		RoomBoardTick = 3.0f;
+		UpdateRoomBoards();
+	}
 	const ss::Level& L = Tourney->CurrentLevel();
 	const ss::Level& N = Tourney->NextLevel();
 	const int32 Secs = FMath::FloorToInt(LevelTimeLeft());
@@ -1079,7 +1195,10 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 		if (ArrivalBeat == 1 && ArrivalT > 3.2f)
 		{
 			ArrivalBeat = 2;
-			Table->DealerLine(TEXT("Look who made it across town. You're with me tonight, kid."));
+			// Dee deals the Sunday; any other day it's whoever's on the stick at the player's table.
+			const bool bSunday = ((LiveDay % 7) + 7) % 7 == 6;
+			Table->DealerLine(bSunday ? FString(TEXT("Look who made it across town. You're with me tonight, kid."))
+									  : FString::Printf(TEXT("Evening. Table %d, seat %d, you're all set. Good luck."), Tourney->Hero().TableId, ss::live::SeatLabel(Tourney->Hero().Seat)));
 		}
 		AttentionTick -= RealDt;
 		if (Pawn && AttentionTick <= 0.0f)
@@ -1207,8 +1326,7 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			if (HeroPrizeCents > 0)
 			{
 				// To the cage first.
-				const TArray<FVector> ToCage = {Eye, Eye + FVector(-34.0, -16.0, 44.0), FVector(-200.0, -150.0, 165.0), FVector(-140.0, -390.0, 166.0),
-					Room.TransformPosition(FVector(-1000.0, -380.0, 166.0)), Room.TransformPosition(FVector(-1300.0, -60.0, 166.0))};
+				const TArray<FVector> ToCage = Stage->CardRoomToCage(Eye);
 				Pawn->PlayWalk(ToCage, 7.0f, true, [Self, Room]() {
 					ABackRoomGameMode* GM = Self.Get();
 					if (!GM)
@@ -1228,8 +1346,7 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 							GM->LiveGoHome();
 							return;
 						}
-						const TArray<FVector> Out = {P->GetEye(), Room.TransformPosition(FVector(-1000.0, -600.0, 166.0)), Room.TransformPosition(FVector(-880.0, -1005.0, 166.0)),
-							Room.TransformPosition(FVector(380.0, -1000.0, 166.0)), Room.TransformPosition(FVector(400.0, -1080.0, 166.0))};
+						const TArray<FVector> Out = GM->Stage->CardRoomCageToDoor(P->GetEye());
 						TWeakObjectPtr<ABackRoomGameMode> Self3 = GM;
 						P->PlayWalk(Out, 9.0f, true, [Self3]() {
 							if (ABackRoomGameMode* G = Self3.Get())
