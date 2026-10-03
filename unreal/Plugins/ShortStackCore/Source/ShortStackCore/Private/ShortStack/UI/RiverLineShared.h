@@ -3,7 +3,9 @@
 
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/World.h"
 #include "ShortStack/UI/Avatars.h"
+#include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/RiverLine.h"
 
 #include <algorithm>
@@ -103,6 +105,7 @@ inline Color NetKind(net::NewsKind K)
 	case net::NewsKind::Schedule: return Hex(0x4f9bff);
 	case net::NewsKind::Record: return Hex(0xf28a3a);
 	case net::NewsKind::Hero: return Hex(0x27d3c3);
+	case net::NewsKind::People: return Hex(0xc084fc);
 	}
 	return pal::Accent;
 }
@@ -323,9 +326,27 @@ inline uint32_t NetRgb(const Color& Cl)
 	return Byte(Cl.R) << 16 | Byte(Cl.G) << 8 | Byte(Cl.B);
 }
 
+/** A champion's frame (their bracelets and rings) for someone the living world knows, or for the player (Hero). */
+inline void NetChampion(AvatarSpec& A, const std::string& Name, bool Hero)
+{
+	const world::World* W = net::Shared().Attached();
+	if (!W)
+	{
+		return;
+	}
+	if (Hero)
+	{
+		eventart::Champion(A, W->HeroAwards());
+	}
+	else if (const world::Npc* N = W->Get(W->Find(Name)))
+	{
+		eventart::Champion(A, N->Awards);
+	}
+}
+
 /**
  * A RiverLine profile picture: the icon the name picked, Team RiverLine pros framed in gold, the player in neon.
- * A visible Ring (medals, the rival's purple) replaces the frame.
+ * A visible Ring (medals, the rival's purple) replaces the frame; a champion's bracelet or ring frame replaces that.
  */
 inline void NetAvatar(Canvas& Cv, float Cx, float Cy, float R, const std::string& Name, const Color& Ring, bool Hero = false)
 {
@@ -345,6 +366,7 @@ inline void NetAvatar(Canvas& Cv, float Cx, float Cy, float R, const std::string
 		A.Frame = A.Frame == AvatarFrame::Neon ? AvatarFrame::Neon : AvatarFrame::Ring;
 		A.Rim = NetRgb(Ring);
 	}
+	NetChampion(A, Name, Hero);
 	DrawAvatar(Cv, Cx, Cy, R, A);
 }
 
@@ -526,6 +548,7 @@ inline const char* NetBoardName(net::Board B)
 	case net::Board::FinalTables: return "Final Tables";
 	case net::Board::Series: return "Series Leaderboard";
 	case net::Board::NightShift: return "Night Shift";
+	case net::Board::Live: return "Live Player of the Year";
 	}
 	return "";
 }

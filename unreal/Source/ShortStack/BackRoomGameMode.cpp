@@ -1153,6 +1153,8 @@ void ABackRoomGameMode::SaveCareer(bool bFinal)
 		D.Life.Record(Minutes, "Dee's game", Net, 0);
 		D.Life.BackRoomNights += 1;
 		D.Life.BackRoomNetCents += Net;
+		// The living world hears about the night: Dee's regulars remember it.
+		D.NoteBackRoom(Minutes, {"Sal", "Big Lou", "Twitch", "Mei"}, Net);
 		// Settled: a second save can't count the night twice.
 		*Save = D;
 		StartBankrollCents = D.BankrollCents;

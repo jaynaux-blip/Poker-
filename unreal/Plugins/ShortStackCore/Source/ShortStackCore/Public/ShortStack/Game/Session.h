@@ -6,6 +6,7 @@
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
+#include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Tournament.h"
 
@@ -223,10 +224,18 @@ struct SaveData
 	gear::Owned Gear;
 	gear::LedState Leds;
 	kast::Channel Channel;
+	/** The living world (its own "world" lines, passed through untouched by anything that edits a save). */
+	std::string WorldText;
+	/** What happened away from the desk for the world to hear about (written by the host, read by the next session). */
+	std::vector<std::string> WorldNotes;
 
 	/** Line-based text, safe to store in any save system. */
 	SHORTSTACKCORE_API std::string Serialize() const;
 	static SHORTSTACKCORE_API bool Parse(const std::string& Text, SaveData& Out);
+	/** A night at Dee's game with these people (as the room knows them), and how it went. */
+	SHORTSTACKCORE_API void NoteBackRoom(double World, const std::vector<std::string>& Names, Chips NetCents);
+	/** A Riverside Sunday: where the player and the people with faces finished. */
+	SHORTSTACKCORE_API void NoteRiverside(double World, int HeroPlace, int Field, const std::vector<std::pair<std::string, int>>& Places);
 };
 
 /** How the session reaches the world: sounds, the phone, the heartbeat, the desk. */
@@ -259,6 +268,9 @@ class Session
 {
 public:
 	SHORTSTACKCORE_API Session(SessionHooks& InHooks, const std::string& Seed, const SaveData* Loaded = nullptr);
+	SHORTSTACKCORE_API ~Session();
+	Session(const Session&) = delete;
+	Session& operator=(const Session&) = delete;
 
 	// ------------------------------------------------------------ persistent
 	Chips BankrollCents = 237;
@@ -461,6 +473,15 @@ public:
 	SHORTSTACKCORE_API void DeclineDeal(const std::string& Id);
 	/** Sends the channel's balance to the bank; returns the amount. */
 	SHORTSTACKCORE_API Chips CashOut();
+	// ------------------------------------------------------------ the living world (World.h)
+	/** Everyone else's careers, going on whether the player is watching or not. */
+	world::World& Living() { return LivingWorld; }
+	const world::World& Living() const { return LivingWorld; }
+	/** Debug: how the world would look Days from now (a copy is played forward; nothing changes). */
+	SHORTSTACKCORE_API std::string WorldPreview(int DayCount) const;
+	/** Debug: the player sleeps through Days (the clock and the world move on; nothing else happens to the player). */
+	SHORTSTACKCORE_API void WorldSkip(int DayCount);
+
 	/** On Team RiverLine (the sponsor deal): the patch on the hero's avatar. */
 	bool TeamRiverLine() const { return Channel.ActiveDeal("riverline", WorldMinutes()) != nullptr; }
 
@@ -468,6 +489,11 @@ public:
 	std::map<std::string, std::string> FieldCountry;
 	std::set<std::string> FieldRegulars;
 	std::set<std::string> FieldPros;
+	// The living world's people in the tournament being played: player id -> who, who sat with the player, who said hello.
+	std::map<std::string, int> FieldNpc;
+	std::set<int> FieldMet;
+	std::set<int> FieldGreeted;
+	std::vector<std::pair<int, Chips>> FieldPots;
 	// Bounties and seats in the tournament being played.
 	std::map<std::string, Chips> Bounties; // player id -> bounty on their head (PKO)
 	Chips BountyWon = 0;
@@ -523,6 +549,10 @@ private:
 		std::map<std::string, std::string> FieldCountry;
 		std::set<std::string> FieldRegulars;
 		std::set<std::string> FieldPros;
+		std::map<std::string, int> FieldNpc;
+		std::set<int> FieldMet;
+		std::set<int> FieldGreeted;
+		std::vector<std::pair<int, Chips>> FieldPots;
 		std::map<std::string, Chips> Bounties;
 		Chips BountyWon = 0;
 		int Knockouts = 0;
@@ -571,6 +601,18 @@ private:
 	int SessionEvents = 0;
 
 	void StoryText(const std::string& Key, const std::string& From, const std::string& Body, bool Once = true);
+	// The living world: started or loaded with the session, saved with it, played forward with the clock.
+	world::World LivingWorld;
+	double WorldNewsAt = 0.0; // world events up to here have been considered for the phone
+	// The world's save text, rewritten when something involving the player happened or an hour has passed (writing
+	// a couple of megabytes on every save would hitch).
+	std::string WorldSaved;
+	double WorldSavedAt = -1.0e9;
+	int WorldSavedRev = -1;
+	void StartWorld(const SaveData* Loaded);
+	void WorldStep();
+	void WorldNote(const std::vector<std::string>& Fields);
+	void ReportToWorld();
 	void Push(const std::string& Who, const std::string& Text, ChatKind Kind);
 	std::string SeatName(int Seat) const;
 	void BuildSeats();

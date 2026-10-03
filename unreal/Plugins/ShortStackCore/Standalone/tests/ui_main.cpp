@@ -8,6 +8,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/UI/Avatars.h"
+#include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/FrontEnd.h"
 #include "ShortStack/UI/Phone.h"
 #include "ShortStack/UI/PropArt.h"
@@ -1398,6 +1399,544 @@ void LedScreens()
 	Expect(S.RoomGlow(Now + 0.2).Rgb == ss::gear::LedColor(1, Now + 0.2) && S.RoomGlow(Now + 0.2).Level == 1.0, "unsynced, the room holds its colour");
 	S.EndStream();
 }
+/** The living world on RiverLine: boards, news and player cards two months into a career. */
+void WorldScreens()
+{
+	using Page = ss::ui::RiverLine::Page;
+	QuietHooks H;
+	ss::Session S(H, "ui-world");
+	ss::ui::RiverLine RL(S);
+	S.CurrentScreen = ss::Screen::Lobby;
+	RL.UI.Ptr.Active = true;
+	RL.UI.Ptr.X = -1.0f;
+	RL.UI.Ptr.Y = -1.0f;
+	double Now = Run(S, RL, 10.0, 0.5);
+	S.WorldSkip(61);
+	const ss::world::World& W = S.Living();
+	Expect(ss::net::Shared().Attached() == &W, "the boards read the world");
+	RL.ShowBoard(ss::net::Board::Season, Now);
+	RL.OpenPage(Page::Leaderboards, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_boards", RL, Now);
+	RL.ShowBoard(ss::net::Board::Live, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_boards_live", RL, Now);
+	RL.OpenPage(Page::News, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_news", RL, Now);
+	// Player cards: the rival, and someone from the Riverside.
+	RL.OpenPage(Page::Leaderboards, Now);
+	RL.ShowPlayer(W.Find(ss::RivalName), Now);
+	Now = Run(S, RL, Now, 1.0);
+	Expect(RL.PlayerShown() == W.Find(ss::RivalName), "a player card opens");
+	Emit("world_card_rival", RL, Now);
+	S.Living().Remember(W.Find("Mei"), ss::world::MemoryKind::Riverside, "the Riverside Sunday", 0, S.WorldMinutes() - 3000.0);
+	S.Living().Remember(W.Find("Mei"), ss::world::MemoryKind::HeroKnockedOut, "Riverside Sunday $150", 0, S.WorldMinutes() - 2900.0);
+	RL.ShowPlayer(W.Find("Mei"), Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("world_card_mei", RL, Now);
+	// A click outside closes it.
+	RL.UI.Ptr.X = 60.0f;
+	RL.UI.Ptr.Y = 950.0f;
+	RL.UI.Ptr.Pressed = true;
+	RL.UI.Ptr.Down = true;
+	Now = Run(S, RL, Now, 0.05);
+	RL.UI.Ptr.Pressed = false;
+	RL.UI.Ptr.Down = false;
+	RL.UI.Ptr.Released = true;
+	Now = Run(S, RL, Now, 0.05);
+	RL.UI.Ptr.Released = false;
+	Expect(RL.PlayerShown() < 0, "clicking outside closes the card");
+	// Who's playing tonight: the event panel lists the regulars registered.
+	RL.OpenPage(Page::Lobby, Now);
+	std::string Busy;
+	size_t Most = 0;
+	for (const ss::net::EventInstance& E : ss::net::Shared().Window(S.WorldMinutes(), S.WorldMinutes() + 240.0))
+	{
+		const size_t N = S.Living().Registered(E.Id).size();
+		if (N > Most && ss::net::Shared().TemplateOf(E).BuyInCents >= 1000)
+		{
+			Most = N;
+			Busy = E.Id;
+		}
+	}
+	RL.SelectEvent(Busy);
+	RL.ShowEventTab(2);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("world_lobby_players", RL, Now);
+	Expect(Most > 0, "tonight's events show who's registered");
+	// A newcomer's card: how they got here, and every step since.
+	int Fresh = -1;
+	size_t Steps = 0;
+	for (const ss::world::Npc& N : W.People())
+	{
+		if (N.Came != ss::world::Arrival::None && N.Playing() && N.Path.size() > Steps)
+		{
+			Steps = N.Path.size();
+			Fresh = N.Id;
+		}
+	}
+	Expect(Fresh >= 0 && Steps >= 3, "newcomers have joined and started their journeys");
+	RL.ShowPlayer(Fresh, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("world_card_newcomer", RL, Now);
+	RL.ShowCardTab(1);
+	Now = Run(S, RL, Now, 1.2);
+	Expect(!W.ProfileOf(Fresh).Journey.empty() && !W.ProfileOf(Fresh).Came.empty(), "a newcomer's card tells their journey");
+	Emit("world_card_journey", RL, Now);
+	RL.ShowPlayer(-1, Now);
+	// A week on: December's series is running.
+	S.WorldSkip(8);
+	const ss::net::SeriesInfo* December = ss::net::Shared().CurrentSeries(S.WorldMinutes());
+	Expect(December && ss::net::DayOf(S.WorldMinutes()) >= December->FirstDay && December->Id == "hol26", "a series runs in December");
+	RL.ShowSeries(December ? December->Id : std::string(), Now);
+	RL.OpenPage(Page::Series, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_series_december", RL, Now);
+	// The next one on the calendar: what to circle.
+	const ss::net::SeriesInfo* Upcoming = nullptr;
+	for (const ss::net::SeriesInfo& Sr : ss::net::Shared().Series())
+	{
+		if (December && Sr.FirstDay > December->LastDay && (!Upcoming || Sr.FirstDay < Upcoming->FirstDay))
+		{
+			Upcoming = &Sr;
+		}
+	}
+	Expect(Upcoming != nullptr, "another series is on the calendar");
+	RL.ShowSeries(Upcoming ? Upcoming->Id : std::string(), Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_series_upcoming", RL, Now);
+	RL.OpenPage(Page::Lobby, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_home_series", RL, Now);
+	// A year and a half on: the season, the best-known player, the rival.
+	S.WorldSkip(420);
+	RL.ShowBoard(ss::net::Board::Season, Now);
+	RL.OpenPage(Page::Leaderboards, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_boards_later", RL, Now);
+	RL.ShowPlayer(W.Leaders(ss::world::Rep::Overall, 1).front(), Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("world_card_leader", RL, Now);
+	RL.ShowPlayer(W.Find(ss::RivalName), Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("world_card_rival_later", RL, Now);
+	RL.ShowPlayer(-1, Now);
+	RL.OpenPage(Page::News, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_news_later", RL, Now);
+	std::printf("%s", W.Describe(W.Find("Mei")).c_str());
+	// June: The Championship Online's bracelet events, and someone who has won one.
+	const int June = ss::world::DayOn(ss::world::YearOf(ss::net::DayOf(S.WorldMinutes())), 6, 14);
+	S.WorldSkip(June - ss::net::DayOf(S.WorldMinutes()));
+	const ss::net::SeriesInfo* Bracelets = ss::net::Shared().CurrentSeries(S.WorldMinutes());
+	Expect(Bracelets && Bracelets->Bracelets > 0 && ss::net::DayOf(S.WorldMinutes()) >= Bracelets->FirstDay, "June brings The Championship Online");
+	RL.ShowSeries(Bracelets ? Bracelets->Id : std::string(), Now);
+	RL.OpenPage(Page::Series, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_series_bracelets", RL, Now);
+	int Wearer = -1;
+	for (const ss::world::Npc& N : W.People())
+	{
+		for (const ss::world::Step& St : N.Path)
+		{
+			if ((St.Kind == ss::world::StepKind::Bracelet || St.Kind == ss::world::StepKind::Ring) && (Wearer < 0 || N.Path.size() > W.Get(Wearer)->Path.size()))
+			{
+				Wearer = N.Id;
+			}
+		}
+	}
+	Expect(Wearer >= 0, "someone has won an online bracelet or ring");
+	if (Wearer >= 0)
+	{
+		RL.ShowPlayer(Wearer, Now);
+		RL.ShowCardTab(1);
+		Now = Run(S, RL, Now, 1.2);
+		Emit("world_card_bracelet", RL, Now);
+		RL.ShowPlayer(-1, Now);
+	}
+	// The champions: whoever has won the most bracelets and rings, on their card and in their trophy case.
+	int Champ = -1;
+	size_t Kept = 0;
+	for (const ss::world::Npc& N : W.People())
+	{
+		Expect(static_cast<int>(N.Awards.size()) == N.Bracelets + N.Rings, "every bracelet and ring is in its winner's trophy case");
+		if (N.Awards.size() > Kept)
+		{
+			Champ = N.Id;
+			Kept = N.Awards.size();
+		}
+	}
+	Expect(Champ >= 0, "someone has bracelets or rings to show");
+	if (Champ >= 0)
+	{
+		RL.ShowPlayer(Champ, Now);
+		RL.ShowCardTab(0);
+		Now = Run(S, RL, Now, 1.2);
+		Emit("world_card_champion", RL, Now);
+		RL.ShowCardTab(2);
+		Now = Run(S, RL, Now, 1.2);
+		Emit("world_card_trophies", RL, Now);
+		// RiverLine Stats: their profit graph, ROI by buy-in and format, finishes and records.
+		RL.ShowCardTab(3);
+		Now = Run(S, RL, Now, 1.5);
+		const ss::world::Tracker& T = W.Get(Champ)->Stats;
+		const ss::world::Npc& Cn = *W.Get(Champ);
+		Expect(T.Events == Cn.Totals[0].Events + Cn.Totals[1].Events, "the stats page counts every tournament");
+		Expect(T.BuyIns == Cn.Totals[0].Spent + Cn.Totals[1].Spent && T.Prizes >= Cn.Totals[0].Won + Cn.Totals[1].Won, "buy-ins and prizes add up");
+		Expect(!T.Curve.empty() && static_cast<int>(T.Curve.size()) < ss::world::Tracker::CurveMax, "the profit graph has its points");
+		Emit("world_card_stats", RL, Now);
+		// Hovering the graph: the crosshair and what it says.
+		RL.UI.Ptr.Active = true;
+		RL.UI.Ptr.X = 700.0f;
+		RL.UI.Ptr.Y = 560.0f;
+		Now = Run(S, RL, Now, 0.2);
+		Emit("world_card_stats_hover", RL, Now);
+		// The ABI view: how their buy-ins moved, against the stakes.
+		RL.UI.Ptr.Active = false;
+		RL.ShowStatsGraph(1);
+		Now = Run(S, RL, Now, 1.5);
+		Expect(T.Spend.size() == T.Curve.size() && (T.Spend.empty() || T.Spend.back() <= T.BuyIns), "the ABI graph has its points");
+		Emit("world_card_stats_abi", RL, Now);
+		RL.UI.Ptr.Active = true;
+		RL.UI.Ptr.X = 640.0f;
+		RL.UI.Ptr.Y = 560.0f;
+		Now = Run(S, RL, Now, 0.2);
+		Emit("world_card_stats_abi_hover", RL, Now);
+		RL.ShowStatsGraph(0);
+		RL.UI.Ptr.Active = false;
+		RL.ShowPlayer(-1, Now);
+	}
+	// The network's biggest winner, on the same page.
+	{
+		int Top = -1;
+		for (const ss::world::Npc& N : W.People())
+		{
+			Top = !N.Faded && (Top < 0 || N.Stats.Net > W.Get(Top)->Stats.Net) ? N.Id : Top;
+		}
+		Expect(Top >= 0 && W.Get(Top)->Stats.Net > 0, "someone is up on the network");
+		RL.ShowPlayer(Top, Now);
+		RL.ShowCardTab(3);
+		Now = Run(S, RL, Now, 1.5);
+		Emit("world_card_stats_winner", RL, Now);
+		RL.ShowPlayer(-1, Now);
+	}
+	// The boards: champions wear their frames there too.
+	RL.ShowBoard(ss::net::Board::Earnings, Now);
+	RL.OpenPage(Page::Leaderboards, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_boards_champions", RL, Now);
+	// The player's own: a bracelet and a Main Event ring in the trophy case on the Career page.
+	S.Living().GrantHeroResults(260);
+	S.Living().GrantAward(-1, false, false);
+	S.Living().GrantHeroResults(180);
+	S.Living().GrantAward(-1, true, true);
+	S.Living().GrantHeroResults(90);
+	Expect(W.HeroAwards().size() == 2, "the player's trophy case holds what they won");
+	Expect(W.HeroStats().Events >= 530 && W.HeroAwards().front().Tourney == 260, "the player's stats page, with their titles on the graph");
+	RL.OpenPage(Page::Career, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_career_trophies", RL, Now);
+	// Their own stats, from the Career page.
+	RL.ShowPlayer(ss::ui::RiverLine::HeroCard, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Expect(RL.CardOpen(), "the player's stats open");
+	Emit("world_hero_stats", RL, Now);
+	RL.ShowPlayer(-1, Now);
+	// At the table: a name the player hasn't seen before catches their eye, and opens its card.
+	const std::vector<ss::LobbyEvent> Open = OpenEvents(S, 1, 3000);
+	Expect(!Open.empty(), "an event to sit down at");
+	if (!Open.empty())
+	{
+		S.BankrollCents = std::max<ss::Chips>(S.BankrollCents, Open[0].BuyInCents + 1000);
+		S.RegisterEvent(Open[0]);
+		Now = Run(S, RL, Now, 3.0);
+		int Face = -1;
+		if (S.T)
+		{
+			const int Mine = S.T->Hero().TableId;
+			for (const ss::TPlayer& P : S.T->Players)
+			{
+				const auto It = S.FieldNpc.find(P.Id);
+				if (P.TableId == Mine && It != S.FieldNpc.end() && (Face < 0 || W.Get(It->second)->Came != ss::world::Arrival::None))
+				{
+					Face = It->second;
+				}
+			}
+		}
+		Expect(Face >= 0, "people the world knows sit at the player's table");
+		// Champions at the table: a bracelet winner and a ring winner in their frames (the player in theirs).
+		if (S.T)
+		{
+			const int Mine = S.T->Hero().TableId;
+			int Given = 0;
+			for (const ss::TPlayer& P : S.T->Players)
+			{
+				const auto It = S.FieldNpc.find(P.Id);
+				if (P.TableId == Mine && It != S.FieldNpc.end() && Given < 2)
+				{
+					S.Living().GrantAward(It->second, Given == 1, false);
+					++Given;
+				}
+			}
+			Expect(Given >= 1, "champions to seat at the player's table");
+			Now = Run(S, RL, Now, 1.0);
+			Emit("world_table_champions", RL, Now);
+		}
+		if (Face >= 0)
+		{
+			RL.ShowPlayer(Face, Now);
+			RL.ShowCardTab(1);
+			Now = Run(S, RL, Now, 1.2);
+			Expect(RL.PlayerShown() == Face, "a card opens over the table");
+			Emit("world_table_card", RL, Now);
+		}
+	}
+}
+
+
+// ------------------------------------------------------------------ event art
+
+void SaveSheet(const std::string& Name, const ss::ui::DrawList& L)
+{
+	Expect(!L.Cmds.empty() && L.Vertices.size() > 1000, (Name + " drew something").c_str());
+	std::printf("  %-22s %6zu vertices %4zu commands\n", Name.c_str(), L.Vertices.size(), L.Cmds.size());
+	if (!OutDir.empty())
+	{
+		if (FILE* F = std::fopen((OutDir + "/" + Name + ".json").c_str(), "wb"))
+		{
+			const std::string J = L.ToJson();
+			std::fwrite(J.data(), 1, J.size(), F);
+			std::fclose(F);
+		}
+	}
+}
+
+void SheetBackground(ss::ui::Canvas& C, const std::string& Title, const std::string& Sub)
+{
+	C.FillRect({0.0f, 0.0f, 1600.0f, 1000.0f}, ss::ui::Paint::Linear({0.0f, 0.0f}, {0.0f, 1000.0f}, ss::ui::Hex(0x111a2b), ss::ui::Hex(0x070b14)));
+	C.Text(Title, 48.0f, 62.0f, ss::ui::Ts(30.0f, 900, ss::ui::Hex(0xffffff)));
+	C.Text(Sub, 48.0f, 92.0f, ss::ui::Ts(16.0f, 500, ss::ui::Hex(0x8b9bb4)));
+}
+
+void EventArtGallery()
+{
+	namespace ea = ss::ui::eventart;
+	const ss::net::Network& Net = ss::net::Shared();
+	TableMeasurer M;
+	const double Time = 3.2;
+	// Every glyph.
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "EVENT ART \xC2\xB7 GLYPHS", "Every motif, white on the night");
+		const int Count = static_cast<int>(ea::Glyph::Count);
+		for (int K = 0; K < Count; ++K)
+		{
+			const float X = 90.0f + static_cast<float>(K % 12) * 128.0f;
+			const float Y = 170.0f + static_cast<float>(K / 12) * 134.0f;
+			C.FillRoundRect({X - 52.0f, Y - 52.0f, 104.0f, 104.0f}, 22.0f, ss::ui::Hex(0x18243a));
+			ea::DrawGlyph(C, static_cast<ea::Glyph>(K), X, Y, 72.0f);
+		}
+		SaveSheet("eventart_glyphs", L);
+	}
+	// Every tournament on the schedule, as the lobby shows it.
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "EVENT ART \xC2\xB7 THE SCHEDULE", "Every tournament brand on RiverLine has its own tile");
+		std::set<std::string> Seen;
+		int K = 0;
+		for (const ss::net::EventTemplate& T : Net.Templates())
+		{
+			if (!T.Series.empty())
+			{
+				continue;
+			}
+			std::string Key = T.Name;
+			if (!Seen.insert(Key).second && T.Id.rfind("step", 0) != 0)
+			{
+				continue;
+			}
+			const float X = 110.0f + static_cast<float>(K % 9) * 172.0f;
+			const float Y = 180.0f + static_cast<float>(K / 9) * 150.0f;
+			ea::Emblem(C, T, X, Y, 84.0f, Time);
+			C.Text(T.Name, X, Y + 66.0f, ss::ui::Ts(12.0f, 700, ss::ui::Hex(0xc3cedf), ss::ui::Align::Center, ss::ui::Baseline::Alphabetic, false, 160.0f));
+			++K;
+		}
+		Expect(K >= 40, "every brand on the schedule has a tile");
+		SaveSheet("eventart_tiles", L);
+	}
+	// The series: one year's crests.
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "EVENT ART \xC2\xB7 THE SERIES", "Each series wears its own crest; the flagships return every year, the seasonal ones change their names");
+		int K = 0;
+		for (const ss::net::SeriesInfo& Sr : Net.Series())
+		{
+			const int Year = ss::world::YearOf(Sr.FirstDay);
+			if (!(Year == 2027 || Sr.Id == "hol26" || Sr.Id == "rcop" || Sr.Id == "mm") || K >= 12)
+			{
+				continue;
+			}
+			const float X = 150.0f + static_cast<float>(K % 6) * 260.0f;
+			const float Y = 300.0f + static_cast<float>(K / 6) * 380.0f;
+			ea::SeriesCrest(C, Sr, X, Y, 190.0f, Time + K);
+			C.Text(Sr.Name, X, Y + 150.0f, ss::ui::Ts(15.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
+			C.Text(ss::net::DateLabel(Sr.FirstDay) + " \xE2\x80\x93 " + ss::net::DateLabel(Sr.LastDay) + ", " + std::to_string(Year), X, Y + 172.0f,
+				ss::ui::Ts(12.0f, 600, ss::ui::Hex(0x8b9bb4), ss::ui::Align::Center));
+			++K;
+		}
+		SaveSheet("eventart_series", L);
+	}
+	// Series events: what makes one matter, at the sizes the screens use.
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "EVENT ART \xC2\xB7 SERIES EVENTS", "Rims by stakes (bronze, silver, gold, platinum); Main Events, high rollers, bracelets and rings dressed for the occasion");
+		auto Find = [&](const std::string& Id) -> const ss::net::EventTemplate* { return Net.FindTemplate(Id); };
+		std::vector<std::pair<const ss::net::EventTemplate*, std::string>> Show;
+		auto Add = [&](const ss::net::EventTemplate* T, const std::string& Label) {
+			if (T)
+			{
+				Show.push_back({T, Label});
+			}
+		};
+		Add(Find("rcop27-main"), "RCOP Main Event");
+		Add(Find("tco27-main"), "Online Championship (bracelet)");
+		Add(Find("ring27-main"), "Ring Main Event");
+		Add(Find("slam27-mini"), "Mini Main Event");
+		Add(Find("hrs27-shr"), "Super High Roller");
+		Add(Find("hol26-main"), "Holiday Heist Main");
+		// A bracelet event, a ring event, and one plain event at each stake.
+		const ss::net::EventTemplate* Bracelet = nullptr;
+		const ss::net::EventTemplate* Ring = nullptr;
+		const ss::net::EventTemplate* ByTier[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+		for (const ss::net::EventTemplate& T : Net.Templates())
+		{
+			if (T.Series.rfind("tco27", 0) == 0 && T.Bracelet && !T.Main && !Bracelet)
+			{
+				Bracelet = &T;
+			}
+			if (T.Series.rfind("ring27", 0) == 0 && T.Ring && !T.Main && !Ring)
+			{
+				Ring = &T;
+			}
+			if (T.Series.rfind("win27", 0) == 0 && !T.Main && !T.Featured)
+			{
+				const int Tr = static_cast<int>(ss::net::TierOf(T.BuyInCents));
+				ByTier[Tr] = ByTier[Tr] ? ByTier[Tr] : &T;
+			}
+		}
+		Add(Bracelet, "Bracelet event");
+		Add(Ring, "Ring event");
+		Add(ByTier[1], "Micro (bronze)");
+		Add(ByTier[2], "Low (silver)");
+		Add(ByTier[3], "Mid (gold)");
+		Add(Find("spr27-hr"), "High Roller");
+		for (size_t I = 0; I < Show.size(); ++I)
+		{
+			const float X = 150.0f + static_cast<float>(I % 6) * 260.0f;
+			const float Y = 300.0f + static_cast<float>(I / 6) * 380.0f;
+			ea::Emblem(C, *Show[I].first, X, Y, 190.0f, Time + static_cast<double>(I));
+			C.Text(Show[I].second, X, Y + 150.0f, ss::ui::Ts(15.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
+			C.Text(Show[I].first->Name, X, Y + 172.0f, ss::ui::Ts(11.0f, 600, ss::ui::Hex(0x8b9bb4), ss::ui::Align::Center, ss::ui::Baseline::Alphabetic, false, 250.0f));
+			// The same emblem at row size.
+			ea::Emblem(C, *Show[I].first, X + 100.0f, Y - 130.0f, 40.0f, Time);
+		}
+		Expect(Show.size() == 12, "the special events are all there");
+		SaveSheet("eventart_crests", L);
+	}
+}
+
+/** Bracelets and rings as their winners keep them, and the frames champions wear at the tables. */
+void TrophyGallery()
+{
+	namespace ea = ss::ui::eventart;
+	TableMeasurer M;
+	const double Time = 2.4;
+	auto Make = [](bool Ring, bool Online, bool Main, const std::string& Series, const std::string& Event) {
+		ss::world::Award A;
+		A.Ring = Ring;
+		A.Online = Online;
+		A.Main = Main;
+		A.Series = Series;
+		A.Event = Event;
+		return A;
+	};
+	const std::vector<std::pair<ss::world::Award, std::string>> Shelf = {
+		{Make(false, true, false, "tco27", "TCO '27 #12: $215 Final Viper"), "Championship Online bracelet"},
+		{Make(false, true, true, "tco27", "TCO '27 #56: $5,300 Online Championship"), "Online Championship (Main)"},
+		{Make(false, false, false, "The Championship 2027", "The Championship 2027: $1,500 Bounty"), "Las Vegas bracelet"},
+		{Make(false, false, true, "The Championship 2027", "The Championship 2027: $10,000 Main Event"), "Championship Main Event"},
+		{Make(true, true, false, "ring27", "RING '27 #3: $109 Iron Renegade"), "Ring Rush ring"},
+		{Make(true, true, true, "ring27", "RING '27 #54: $1,050 Ring Main Event"), "Ring Main Event"},
+		{Make(true, false, false, "Grand Circuit Montreal 2027", "Grand Circuit Montreal 2027: $580 Opener"), "Grand Circuit Montreal"},
+		{Make(true, false, false, "Grand Circuit Prague 2027", "Grand Circuit Prague 2027: $1,100 Bounty"), "Grand Circuit Prague"},
+		{Make(true, false, false, "Grand Circuit Sydney 2027", "Grand Circuit Sydney 2027: $5,300 Championship"), "Grand Circuit Sydney"},
+		{Make(true, false, true, "Grand Circuit Montreal 2027", "Grand Circuit Montreal 2027: $1,700 Main Event"), "Grand Circuit Main Event"},
+	};
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "AWARDS \xC2\xB7 BRACELETS AND RINGS", "Each series' own design; a Main Event's carries more");
+		for (size_t I = 0; I < Shelf.size(); ++I)
+		{
+			const float X = 170.0f + static_cast<float>(I % 5) * 315.0f;
+			const float Y = 280.0f + static_cast<float>(I / 5) * 360.0f;
+			C.FillRoundRect({X - 130.0f, Y - 130.0f, 260.0f, 300.0f}, 22.0f, ss::ui::Hex(0x111c2e));
+			ea::Trophy(C, Shelf[I].first, X, Y, 200.0f, Time + static_cast<double>(I));
+			C.Text(Shelf[I].second, X, Y + 128.0f, ss::ui::Ts(15.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
+			C.Text(ea::TrophyEvent(Shelf[I].first), X, Y + 150.0f, ss::ui::Ts(11.0f, 600, ss::ui::Hex(0x8b9bb4), ss::ui::Align::Center, ss::ui::Baseline::Alphabetic, false, 240.0f));
+			// And as a profile's shelf shows them.
+			ea::Trophy(C, Shelf[I].first, X + 98.0f, Y - 102.0f, 40.0f, Time);
+		}
+		SaveSheet("awards_trophies", L);
+	}
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, "AWARDS \xC2\xB7 CHAMPIONS' FRAMES", "Bracelet winners wear gold links, ring winners their ring's stone; the player and the rival keep their glow");
+		struct Case
+		{
+			std::string Name;
+			std::vector<ss::world::Award> Won;
+			bool Hero;
+			std::string Label;
+		};
+		const std::vector<Case> Cases = {
+			{"VelvetRiver", {Shelf[0].first}, false, "One bracelet (online)"},
+			{"kenji.k", {Shelf[2].first, Shelf[3].first, Shelf[0].first}, false, "Three bracelets"},
+			{"ElTiburon", {Shelf[4].first}, false, "A Ring Rush ring"},
+			{"BramvdBerg", {Shelf[6].first, Shelf[7].first}, false, "Two circuit rings"},
+			{"lazy_owl", {Shelf[1].first, Shelf[8].first}, false, "A bracelet and a ring"},
+			{"grinder_3c", {Shelf[0].first}, true, "The player, a champion"},
+		};
+		const float Radii[3] = {58.0f, 21.0f, 11.5f};
+		for (size_t I = 0; I < Cases.size(); ++I)
+		{
+			const float X = 150.0f + static_cast<float>(I) * 262.0f;
+			ss::ui::AvatarSpec Pic = ss::ui::AvatarFor(Cases[I].Name);
+			if (Cases[I].Hero)
+			{
+				Pic.Frame = ss::ui::AvatarFrame::Neon;
+				Pic.Rim = 0x27d3c3;
+			}
+			ea::Champion(Pic, Cases[I].Won);
+			Expect(Pic.Frame == ss::ui::AvatarFrame::Bracelet || Pic.Frame == ss::ui::AvatarFrame::Gem, "a champion's frame");
+			float Y = 300.0f;
+			for (float R : Radii)
+			{
+				ss::ui::DrawAvatar(C, X, Y, R, Pic);
+				Y += R * 2.0f + 70.0f;
+			}
+			C.Text(Cases[I].Label, X, 720.0f, ss::ui::Ts(15.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
+			C.Text(Cases[I].Name, X, 742.0f, ss::ui::Ts(12.0f, 600, ss::ui::Hex(0x8b9bb4), ss::ui::Align::Center));
+		}
+		SaveSheet("awards_frames", L);
+	}
+}
 } // namespace ui_test
 
 int main(int Argc, char** Argv)
@@ -1407,12 +1946,15 @@ int main(int Argc, char** Argv)
 		ui_test::OutDir = Argv[1];
 	}
 	ui_test::NetScreens();
+	ui_test::WorldScreens();
 	ui_test::AppScreens();
 	ui_test::Clicks();
 	ui_test::Screens();
 	ui_test::Results();
 	ui_test::Props();
 	ui_test::Avatars();
+	ui_test::EventArtGallery();
+	ui_test::TrophyGallery();
 	ui_test::MultiScreens();
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();

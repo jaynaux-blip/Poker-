@@ -17,6 +17,7 @@
 #include "NightOneAudio.h"
 #include "NightOneGame.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/World.h"
 #include "NightOnePawn.h"
 #include "NightOnePlayerController.h"
 #include "NightOneSaveGame.h"
@@ -79,6 +80,114 @@ std::vector<std::string> SupportedResolutions()
 	}
 	return Out;
 }
+
+/** The living world's debug tools (non-shipping): inspect anyone, see the world's health, play it forward. */
+#if !UE_BUILD_SHIPPING
+ss::Session* WorldSession(UWorld* World)
+{
+	ANightOneGameMode* Mode = World ? World->GetAuthGameMode<ANightOneGameMode>() : nullptr;
+	FNightOneGame* G = Mode ? Mode->GetGame() : nullptr;
+	return G ? &G->Session : nullptr;
+}
+
+void LogLines(const std::string& Text)
+{
+	TArray<FString> Lines;
+	FString(UTF8_TO_TCHAR(Text.c_str())).ParseIntoArrayLines(Lines, false);
+	for (const FString& L : Lines)
+	{
+		UE_LOG(LogNightOne, Display, TEXT("%s"), *L);
+	}
+}
+
+FAutoConsoleCommandWithWorldAndArgs WorldReportCmd(TEXT("ss.World.Report"), TEXT("The living world's health: population, stakes, bankrolls, moods, reputations."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>&, UWorld* World) {
+		if (ss::Session* S = WorldSession(World))
+		{
+			LogLines(S->Living().Report());
+		}
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs WorldNpcCmd(TEXT("ss.World.Npc"), TEXT("ss.World.Npc <name>: everything about someone (bankroll, skills, results, reputation, schedule, ties, history)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		ss::Session* S = WorldSession(World);
+		if (!S || Args.Num() == 0)
+		{
+			return;
+		}
+		const std::string Name(TCHAR_TO_UTF8(*FString::Join(Args, TEXT(" "))));
+		const int32 Id = S->Living().Find(Name);
+		LogLines(Id >= 0 ? S->Living().Describe(Id) : "Nobody called " + Name + "\n");
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs WorldLeadersCmd(TEXT("ss.World.Leaders"), TEXT("The 20 best-known players and what they're known for."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>&, UWorld* World) {
+		if (ss::Session* S = WorldSession(World))
+		{
+			std::string Out;
+			for (const int Id : S->Living().Leaders(ss::world::Rep::Overall, 20))
+			{
+				const ss::world::Npc* N = S->Living().Get(Id);
+				Out += N->Name + " (" + ss::world::IdentityName(N->Is) + ", reputation " + std::to_string(static_cast<int>(N->RepOf(ss::world::Rep::Overall))) + ")\n";
+			}
+			LogLines(Out);
+		}
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs WorldSimulateCmd(TEXT("ss.World.Simulate"), TEXT("ss.World.Simulate <days> (1, 7, 30, 365): sleep through the days; the world and the clock move on."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (ss::Session* S = WorldSession(World))
+		{
+			const int32 Days = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 1;
+			S->WorldSkip(FMath::Clamp(Days, 1, 3650));
+			LogLines(S->Living().Report());
+		}
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs WorldAwardCmd(TEXT("ss.World.Award"),
+	TEXT("ss.World.Award <bracelet|ring> [main] [name]: a bracelet or a ring for the player (or someone by name), to see the trophy case and the champion's frame."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		ss::Session* S = WorldSession(World);
+		if (!S || Args.Num() == 0)
+		{
+			return;
+		}
+		const bool Ring = Args[0].Equals(TEXT("ring"), ESearchCase::IgnoreCase);
+		const bool Main = Args.Num() > 1 && Args[1].Equals(TEXT("main"), ESearchCase::IgnoreCase);
+		TArray<FString> Rest;
+		for (int32 I = Main ? 2 : 1; I < Args.Num(); ++I)
+		{
+			Rest.Add(Args[I]);
+		}
+		const std::string Name(TCHAR_TO_UTF8(*FString::Join(Rest, TEXT(" "))));
+		const int32 Id = Name.empty() ? -1 : S->Living().Find(Name);
+		if (!Name.empty() && Id < 0)
+		{
+			LogLines("Nobody called " + Name + "\n");
+			return;
+		}
+		S->Living().GrantAward(Id, Ring, Main);
+		LogLines(std::string(Ring ? "A ring" : "A bracelet") + " for " + (Name.empty() ? std::string("you") : Name) + "\n");
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs WorldPlayerResultsCmd(TEXT("ss.World.PlayerResults"),
+	TEXT("ss.World.PlayerResults <count>: plays that many small tournaments onto your stats page (Career > Your stats), to preview it."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (ss::Session* S = WorldSession(World))
+		{
+			S->Living().GrantHeroResults(FMath::Clamp(Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 200, 1, 5000));
+			LogLines("Your stats page has " + std::to_string(S->Living().HeroStats().Events) + " tournaments\n");
+		}
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs WorldPreviewCmd(TEXT("ss.World.Preview"), TEXT("ss.World.Preview <days>: how the world would look then (a copy is played forward; nothing changes)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (ss::Session* S = WorldSession(World))
+		{
+			LogLines(S->WorldPreview(FMath::Clamp(Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 30, 1, 3650)));
+		}
+	}));
+#endif
 
 void SetConsoleInt(const TCHAR* Name, int32 Value)
 {

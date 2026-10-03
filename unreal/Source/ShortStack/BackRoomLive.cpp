@@ -797,6 +797,21 @@ void ABackRoomGameMode::LiveSettle()
 	}
 	D.Life.LiveEvents += 1;
 	D.Life.LiveCashes += HeroPrizeCents > 0 ? 1 : 0;
+	{
+		// The living world hears where the feature table's people finished (0: still in when the player left).
+		std::vector<std::pair<std::string, int>> Places;
+		for (const ss::live::CastMember& C : ss::live::RiversideCast())
+		{
+			for (const ss::TPlayer& P : Tourney->Players)
+			{
+				if (P.Name == C.Name)
+				{
+					Places.push_back({P.Name, P.Busted ? P.Place : 0});
+				}
+			}
+		}
+		D.NoteRiverside(Minutes, HeroPlace, Tourney->Spec.Entrants, Places);
+	}
 	D.Life.LiveBestPlace = D.Life.LiveBestPlace <= 0 ? HeroPlace : FMath::Min(D.Life.LiveBestPlace, HeroPlace);
 	D.Life.LiveWonCents += HeroPrizeCents;
 	D.Life.Record(Minutes, std::string(TCHAR_TO_UTF8(*FString::Printf(TEXT("Riverside $150: %s of %d"), *Ordinal(HeroPlace), Tourney->Spec.Entrants))),

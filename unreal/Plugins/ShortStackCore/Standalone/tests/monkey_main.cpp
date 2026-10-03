@@ -76,6 +76,11 @@ std::vector<Spot> Hotspots()
 	{
 		H.push_back({673.0f + 72.0f * static_cast<float>(K), 803});
 	}
+	// Names on the boards and in event panels (player cards), the card's close button and the backdrop around it.
+	H.push_back({240.0f, 513.0f});
+	H.push_back({1240.0f, 561.0f});
+	H.push_back({1292.0f, 136.0f});
+	H.push_back({60.0f, 950.0f});
 	for (int K = 0; K < 8; ++K)
 	{
 		H.push_back({760.0f + 72.0f * static_cast<float>(K), 32}); // table tabs, +, tile toggle
@@ -421,6 +426,15 @@ int main(int Argc, char** Argv)
 				}
 				PrevBank = S.BankrollCents;
 				PrevLedger = S.Life.Ledger;
+			}
+			// The living world keeps up with the clock, and the network shows it.
+			if (S.Living().Clock() + 1e-6 < S.WorldMinutes() - 60.0 || ss::net::Shared().Attached() != &S.Living())
+			{
+				Fail("the living world fell behind the clock or came loose from the network", Seed, F);
+			}
+			if (RL.PlayerShown() >= static_cast<int>(ss::net::Shared().Players().size()))
+			{
+				Fail("a player card for nobody", Seed, F);
 			}
 			const double World = S.WorldMinutes();
 			if (World + 1e-6 < PrevWorld)

@@ -426,6 +426,7 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		{
 			Pic.Frame = AvatarFrame::Gold;
 		}
+		NetChampion(Pic, Sv.Name, Sv.IsHero);
 		DrawAvatar(*C, Plate.X + 17.0f, P.Y, 11.5f, Pic);
 		UI.Text(Sv.Name, Plate.X + 34.0f, P.Y - 2.0f, Ts(12.0f, 700, Sv.IsRival ? Hex(0xff8da0) : pal::Ink, Align::Left, Baseline::Alphabetic, false, Plate.W - 40.0f));
 		std::string Under = Sv.Stack <= 0 && Sv.AllIn ? std::string("ALL-IN") : ChipsText(static_cast<double>(Sv.Stack));

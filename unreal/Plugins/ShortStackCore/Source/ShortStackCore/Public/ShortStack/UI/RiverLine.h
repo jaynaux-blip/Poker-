@@ -103,6 +103,18 @@ public:
 	void ShowRoomLights(bool On, double Now = 0.0) { LightsShown = On; LightsAt = Now; }
 	bool RoomLightsShown() const { return LightsShown; }
 	void ShowKastPage(KastPage P) { KastShown = P; }
+	/** A player card over the RiverLine pages (an index into the network's players; -1 closes it). */
+	SHORTSTACKCORE_API void ShowPlayer(int Index, double Now);
+	int PlayerShown() const { return CardShown; }
+	/** ShowPlayer(HeroCard) opens the player's own stats (from the Career page). */
+	static constexpr int HeroCard = -2;
+	bool CardOpen() const { return CardShown != -1; }
+	/** The open card's view (0: overview, 1: journey, 2: trophies, 3: stats). */
+	void ShowCardTab(int Tab) { CardTab = Tab; }
+	/** The stats page's big graph: 0 profit, 1 ABI. */
+	void ShowStatsGraph(int Graph) { StatsGraph = Graph; }
+	/** The event panel's tab: 0 overview, 1 payouts, 2 players (or the final table). */
+	void ShowEventTab(int Tab) { DetailTab = Tab; }
 	KastPage CurrentKastPage() const { return KastShown; }
 
 private:
@@ -169,6 +181,8 @@ private:
 	void CareerPage(double Now);
 	std::string BoardValue(net::Board B, double V) const;
 	void PlayerName(int Index, float X, float Y, float Size, float MaxW, bool Badges);
+	void PlayerName(const net::Placing& P, float X, float Y, float Size, float MaxW, bool Badges);
+	std::string PlacingName(const net::Placing& P) const;
 	void Panel(const Rect& R, float Radius = 14.0f);
 	float Section(const std::string& Title, float X, float Y, const Color& Col);
 	float Wrap(const std::string& Text, float X, float Y, float MaxW, float Size, const Color& Col, float LineHeight);
@@ -196,6 +210,21 @@ private:
 	void SetupPanel(const Rect& R, double Now);
 	void OrderCard(double Now);
 	void RoomLightsCard(double Now);
+	void PlayerCard(double Now);
+	/** The card's journey: how they arrived, and every step since. */
+	void CardJourney(const world::Profile& P, float X, float Y, float W, float H, double Now);
+	void CardTrophies(const world::Profile& P, float X, float Y, float W, float H, double Now);
+	// RiverLine Stats (RiverLineStats.cpp): the dashboard on a card, and the player's own.
+	void StatsKpis(const world::Tracker& T, const Rect& R, double Now);
+	void StatsBoard(const world::Tracker& T, const std::vector<world::Award>& Awards, const Rect& R, double Now);
+	void StatsBrand(float X, float Y);
+	void StatsAbi(const world::Tracker& T, const Rect& Pg, const Rect& Plot, double Now);
+	int StatsGraph = 0; // 0 profit, 1 ABI
+	void HeroStatsCard(double Now);
+	int CardShown = -1;
+	double CardAt = 0.0;
+	int CardTab = 0; // 0: overview, 1: journey, 2: trophies, 3: stats
+	double CardTabAt = 0.0;
 	// Kast (RiverLineKast.cpp).
 	void KastApp(double Now);
 	void KastHeader(double Now);

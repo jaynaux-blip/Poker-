@@ -58,6 +58,8 @@ public:
 	ANightOneStage* GetStage() const { return Stage; }
 	ANightOnePawn* GetSeat() const;
 	UNightOneAudio* GetAudio() const { return Audio; }
+	/** The running game (null before the title screen starts one). */
+	FNightOneGame* GetGame() const { return Game.Get(); }
 	void ShowToast(const FString& From, const FString& Body);
 
 	// Test hooks, driven from the editor's Python for screenshots and checks.

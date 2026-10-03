@@ -529,6 +529,136 @@ void DrawIcon(Canvas& C, const AvatarSpec& A, float Cx, float Cy, float S, float
 	}
 	}
 }
+// ---- champions' frames
+
+const Color GoldHi = Hex(0xfff4c6);
+const Color GoldMid = Hex(0xf2c14e);
+const Color GoldLo = Hex(0x7a4e0e);
+
+Color Shade(const Color& A, const Color& B, float T)
+{
+	return {A.R + (B.R - A.R) * T, A.G + (B.G - A.G) * T, A.B + (B.B - A.B) * T, A.A + (B.A - A.A) * T};
+}
+
+/** A cut stone seen from the side (table, crown, pavilion), K across, its girdle at (X, Y). */
+void CutStone(Canvas& C, float X, float Y, float K, const Color& Col)
+{
+	const Color Hi = Shade(Col, Hex(0xffffff), 0.55f);
+	const Color Lo = Shade(Col, Hex(0x000000), 0.35f);
+	auto Q = [&](float U, float V) { return Vec2{X + U * K, Y + V * K}; };
+	C.FillPolygon({Q(-0.5f, 0.0f), Q(-0.24f, -0.3f), Q(-0.11f, 0.0f)}, Shade(Col, Hex(0xffffff), 0.3f));
+	C.FillPolygon({Q(-0.24f, -0.3f), Q(0.24f, -0.3f), Q(0.11f, 0.0f), Q(-0.11f, 0.0f)}, Hi);
+	C.FillPolygon({Q(0.24f, -0.3f), Q(0.5f, 0.0f), Q(0.11f, 0.0f)}, Col);
+	C.FillPolygon({Q(-0.5f, 0.0f), Q(-0.11f, 0.0f), Q(0.0f, 0.55f)}, Col);
+	C.FillPolygon({Q(-0.11f, 0.0f), Q(0.11f, 0.0f), Q(0.0f, 0.55f)}, Shade(Col, Hex(0xffffff), 0.15f));
+	C.FillPolygon({Q(0.11f, 0.0f), Q(0.5f, 0.0f), Q(0.0f, 0.55f)}, Lo);
+	if (K >= 8.0f)
+	{
+		C.StrokePolyline({Q(-0.5f, 0.0f), Q(-0.24f, -0.3f), Q(0.24f, -0.3f), Q(0.5f, 0.0f), Q(0.0f, 0.55f)}, true, Rgba(255, 255, 255, 0.5f), std::max(0.6f, K * 0.03f), true);
+	}
+	StarShape(C, X - 0.16f * K, Y - 0.2f * K, std::max(1.2f, 0.13f * K), Rgba(255, 255, 255, 0.95f));
+}
+
+/** A ring winner's stone, set on top of the frame: prongs, a basket, the stone. */
+void SetStone(Canvas& C, float Cx, float Top, float K, const Color& Stone)
+{
+	C.FillPolygon({{Cx - K * 0.2f, Top + K * 0.32f}, {Cx + K * 0.2f, Top + K * 0.32f}, {Cx + K * 0.34f, Top + K * 0.02f}, {Cx - K * 0.34f, Top + K * 0.02f}},
+		Paint::Linear({Cx - K * 0.34f, Top}, {Cx + K * 0.34f, Top}, GoldHi, GoldLo));
+	CutStone(C, Cx, Top - K * 0.02f, K, Stone);
+	C.FillCircle(Cx - K * 0.44f, Top - K * 0.04f, std::max(0.8f, K * 0.05f), GoldHi);
+	C.FillCircle(Cx + K * 0.44f, Top - K * 0.04f, std::max(0.8f, K * 0.05f), GoldHi);
+}
+
+/** How many they've won, in a small medal at the lower right. */
+void CountMedal(Canvas& C, float Cx, float Cy, float R, int Count)
+{
+	if (Count < 2 || R < 14.0f)
+	{
+		return;
+	}
+	const float Mx = Cx + R * 0.76f;
+	const float My = Cy + R * 0.7f;
+	const float Mr = std::max(7.0f, R * 0.3f);
+	C.FillCircle(Mx, My + Mr * 0.08f, Mr * 1.08f, Rgba(0, 0, 0, 0.45f));
+	C.FillCircle(Mx, My, Mr, Paint::Linear({Mx - Mr, My - Mr}, {Mx + Mr, My + Mr}, GoldHi, GoldLo));
+	C.FillCircle(Mx, My, Mr * 0.8f, Paint::Linear({Mx, My - Mr}, {Mx, My + Mr}, Hex(0x2a1b04), Hex(0x120b02)));
+	C.Text(std::to_string(Count), Mx, My + Mr * 0.04f, Ts(Mr * (Count >= 10 ? 0.9f : 1.1f), 900, GoldHi, Align::Center, Baseline::Middle));
+}
+
+/** A bracelet winner: polished gold links all the way round, a plaque in their bracelet's enamel at the bottom. */
+void BraceletFrame(Canvas& C, float Cx, float Cy, float R, const AvatarSpec& A)
+{
+	const float T = std::max(3.0f, R * 0.2f);
+	const float R0 = R - T * 0.2f;
+	const float R1 = R + T * 0.8f;
+	C.StrokeEllipse(Cx, Cy, (R0 + R1) * 0.5f, (R0 + R1) * 0.5f, Hex(0x2e1c03), R1 - R0 + 1.5f);
+	const int N = std::max(12, std::min(30, static_cast<int>(R * 0.85f)));
+	const float Gap = std::min(0.05f, 0.6f / R);
+	for (int K = 0; K < N; ++K)
+	{
+		const float A0 = 2.0f * Pi * static_cast<float>(K) / static_cast<float>(N) + Gap;
+		const float A1 = 2.0f * Pi * static_cast<float>(K + 1) / static_cast<float>(N) - Gap;
+		const float Am = (A0 + A1) * 0.5f;
+		// The light comes from the upper left.
+		const float Lit = 0.5f + 0.5f * std::cos(Am + 2.3f);
+		const Color Outer = K % 2 == 0 ? Shade(GoldMid, GoldHi, Lit) : Shade(GoldLo, GoldMid, Lit);
+		const Color Inner = K % 2 == 0 ? Shade(GoldLo, GoldMid, Lit * 0.8f) : Shade(Hex(0x4a2e06), GoldLo, Lit);
+		const float Cs0 = std::cos(A0);
+		const float Sn0 = std::sin(A0);
+		const float Cs1 = std::cos(A1);
+		const float Sn1 = std::sin(A1);
+		C.FillPolygon({{Cx + R0 * Cs0, Cy + R0 * Sn0}, {Cx + R1 * Cs0, Cy + R1 * Sn0}, {Cx + R1 * Cs1, Cy + R1 * Sn1}, {Cx + R0 * Cs1, Cy + R0 * Sn1}},
+			Paint::Linear({Cx + R1 * std::cos(Am), Cy + R1 * std::sin(Am)}, {Cx + R0 * std::cos(Am), Cy + R0 * std::sin(Am)}, Outer, Inner));
+	}
+	C.StrokeArc(Cx, Cy, R1 - T * 0.22f, Pi * 1.02f, Pi * 1.48f, Rgba(255, 255, 255, 0.55f), std::max(1.0f, T * 0.14f), true);
+	// The plaque.
+	const float Pw = std::max(9.0f, R * 0.8f);
+	const float Ph = std::max(6.0f, R * 0.44f);
+	const Rect Pl{Cx - Pw * 0.5f, Cy + R1 - Ph * 0.62f, Pw, Ph};
+	C.FillRoundRect({Pl.X - 1.0f, Pl.Y + 1.5f, Pl.W + 2.0f, Pl.H}, Ph * 0.3f, Rgba(0, 0, 0, 0.45f));
+	C.FillRoundRect(Pl, Ph * 0.28f, Paint::Linear({Pl.X, Pl.Y}, {Pl.X + Pl.W, Pl.Y + Pl.H}, GoldHi, GoldLo));
+	const float In = std::max(1.2f, Ph * 0.16f);
+	const Rect En{Pl.X + In, Pl.Y + In, Pl.W - 2.0f * In, Pl.H - 2.0f * In};
+	const Color Plate = Hex(A.Plate);
+	C.FillRoundRect(En, std::max(1.0f, Ph * 0.18f), Paint::Linear({0.0f, En.Y}, {0.0f, En.Y + En.H}, Shade(Plate, Hex(0xffffff), 0.12f), Shade(Plate, Hex(0x000000), 0.55f)));
+	if (Ph >= 8.0f)
+	{
+		StarShape(C, Cx, En.Y + En.H * 0.52f, En.H * 0.42f, Hex(0xf4f7ff));
+	}
+	else
+	{
+		C.FillCircle(Cx, En.Y + En.H * 0.5f, std::max(0.8f, En.H * 0.3f), Hex(0xf4f7ff));
+	}
+	if (A.Rings > 0)
+	{
+		SetStone(C, Cx, Cy - R1 - std::max(2.0f, R * 0.08f), std::max(7.0f, R * 0.46f), Hex(A.Stone));
+	}
+	CountMedal(C, Cx, Cy, R, A.Bracelets);
+}
+
+/** A ring winner: the picture set in a polished band, their ring's stone on top. */
+void GemFrame(Canvas& C, float Cx, float Cy, float R, const AvatarSpec& A)
+{
+	const float T = std::max(2.5f, R * 0.17f);
+	const float Rm = R + T * 0.3f;
+	C.StrokeEllipse(Cx, Cy, Rm, Rm, Hex(0x2e1c03), T + 1.5f);
+	C.StrokeEllipse(Cx, Cy, Rm, Rm, GoldLo, T);
+	C.StrokeEllipse(Cx, Cy, Rm, Rm, GoldMid, T * 0.62f);
+	C.StrokeArc(Cx, Cy, Rm + T * 0.12f, Pi * 0.98f, Pi * 1.55f, GoldHi, std::max(1.0f, T * 0.28f), true);
+	C.StrokeArc(Cx, Cy, Rm + T * 0.12f, Pi * 0.1f, Pi * 0.38f, Rgba(255, 244, 198, 0.6f), std::max(0.8f, T * 0.2f), true);
+	const float K = std::max(7.0f, R * 0.5f);
+	if (R >= 16.0f)
+	{
+		// A halo of small diamonds round the stone.
+		for (int I = 0; I < 9; ++I)
+		{
+			const float Ang = Pi + Pi * (static_cast<float>(I) + 0.5f) / 9.0f;
+			C.FillCircle(Cx + std::cos(Ang) * K * 0.62f, Cy - Rm - K * 0.12f + std::sin(Ang) * K * 0.2f, std::max(0.9f, K * 0.06f), Hex(0xeaf7ff));
+		}
+	}
+	SetStone(C, Cx, Cy - Rm - T * 0.2f, K, Hex(A.Stone));
+	CountMedal(C, Cx, Cy, R, A.Rings);
+}
 } // namespace avatars_detail
 
 using namespace avatars_detail;
@@ -614,7 +744,7 @@ void DrawAvatar(Canvas& C, float Cx, float Cy, float R, const AvatarSpec& A)
 	const Color Bg = Hex(A.Bg);
 	const Color Bg2 = Hex(A.Bg2);
 	const Color Rim = Hex(A.Rim);
-	if (A.Frame == AvatarFrame::Neon)
+	if (A.Frame == AvatarFrame::Neon || A.Halo)
 	{
 		C.FillCircle(Cx, Cy, R * 1.45f, Paint::Radial({Cx, Cy}, R * 0.9f, {Cx, Cy}, R * 1.45f, Color{Rim.R, Rim.G, Rim.B, 0.45f}, -1.0f, Color(), Color{Rim.R, Rim.G, Rim.B, 0.0f}));
 	}
@@ -644,6 +774,12 @@ void DrawAvatar(Canvas& C, float Cx, float Cy, float R, const AvatarSpec& A)
 	}
 	case AvatarFrame::Neon:
 		C.StrokeEllipse(Cx, Cy, R + R * 0.06f, R + R * 0.06f, Rim, std::max(1.5f, R * 0.12f));
+		break;
+	case AvatarFrame::Bracelet:
+		BraceletFrame(C, Cx, Cy, R, A);
+		break;
+	case AvatarFrame::Gem:
+		GemFrame(C, Cx, Cy, R, A);
 		break;
 	default:
 		C.StrokeEllipse(Cx, Cy, R, R, Rgba(0, 0, 0, 0.35f), 1.0f);

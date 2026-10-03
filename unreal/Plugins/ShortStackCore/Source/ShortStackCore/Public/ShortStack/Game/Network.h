@@ -9,6 +9,10 @@
 namespace ss
 {
 struct HistoryEntry;
+namespace world
+{
+class World;
+}
 
 /**
  * The RiverLine poker network around the player: a week-round tournament schedule in the style of the big
@@ -108,6 +112,10 @@ struct EventTemplate
 	std::string SeatTicket; // satellites: the template a seat enters
 	Chips SeatValueCents = 0;
 	std::string Blurb;
+	bool Main = false;     // a series' main event (a major)
+	bool Bracelet = false; // the winner gets a Championship bracelet (The Championship Online)
+	bool Ring = false;     // the winner gets a Grand Circuit ring (Ring Rush)
+	std::string Ticket;    // the seat it takes ("" = its own id; every year's RCOP Main takes "rcop-main")
 };
 
 struct EventInstance
@@ -164,9 +172,11 @@ struct Player
 
 struct Placing
 {
-	int Player = -1; // index into Players(), or -1 for the player (an event they played)
+	int Player = -1; // index into Players(), -1 for the player (an event they played), -2 for someone nobody follows
 	int Place = 0;
 	Chips Prize = 0;
+	std::string Name;    // Player -2: their screen name
+	std::string Country; // and flag
 };
 
 struct EventResult
@@ -188,6 +198,10 @@ struct HeroStats
 	double SeriesPoints = 0.0;
 	int SeriesTitles = 0;
 	int Tournaments = 0;
+	// This calendar year only (the season boards).
+	int SeasonWins = 0;
+	int SeasonFinalTables = 0;
+	double LivePoints = 0.0; // live Player of the Year (the session fills it from its world)
 };
 /** Night points count the Night Shift that contains Now (life::NightShiftStart). */
 SHORTSTACKCORE_API HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& History, double Now = MinutesPerDay + 127.0);
@@ -212,6 +226,7 @@ enum class Board : int
 	FinalTables, // 2026
 	Series,      // the running series
 	NightShift,  // tonight's micro-stakes leaderboard
+	Live,        // live Player of the Year points (a living world only)
 };
 
 struct BoardRow
@@ -237,6 +252,8 @@ struct SeriesInfo
 	uint32_t Color2 = 0x3b82f6;
 	std::string Tagline;
 	std::string MainEvent; // template id
+	int Bracelets = 0;     // events that award a bracelet
+	int Rings = 0;         // events that award a ring
 };
 
 enum class NewsKind : int
@@ -246,6 +263,7 @@ enum class NewsKind : int
 	Schedule,
 	Record,
 	Hero,
+	People, // careers: moves, comebacks, retirements, sponsorships (a living world)
 };
 
 struct NewsItem
@@ -264,11 +282,33 @@ class Network
 public:
 	SHORTSTACKCORE_API Network();
 
-	const std::vector<Player>& Players() const { return People; }
+	/** Everyone on the network: the living world's people when one is attached (the same first indices). */
+	const std::vector<Player>& Players() const { return Living ? LivingRows() : People; }
+	/**
+	 * A living world takes over the people: their results, the boards and the news come from it (the calendar is
+	 * still the network's). Detached (nullptr), everything is the network's own fixed simulation again.
+	 */
+	SHORTSTACKCORE_API void Attach(const world::World* W);
+	const world::World* Attached() const { return Living; }
+	/** The regulars as they were on Night One (the living world starts from these). */
+	const std::vector<Player>& Founding() const { return People; }
+	/**
+	 * What each regular did in the network's own simulated past, from SimFirstDay up to To: season points,
+	 * prize money, wins and final tables (the numbers the boards showed before a living world took over).
+	 */
+	SHORTSTACKCORE_API void FoundingTally(double To, std::vector<double>& Points, std::vector<Chips>& Money, std::vector<int>& Wins, std::vector<int>& FinalTables) const;
 	const std::vector<EventTemplate>& Templates() const { return Temps; }
 	const std::vector<SeriesInfo>& Series() const { return AllSeries; }
 	const EventTemplate& TemplateOf(const EventInstance& E) const { return Temps[static_cast<size_t>(E.Template)]; }
-	const SeriesInfo* FindSeries(const std::string& Id) const;
+	/** A template by id (nullptr when there is none). */
+	SHORTSTACKCORE_API const EventTemplate* FindTemplate(const std::string& Id) const;
+	/** The ticket an event takes (a satellite seat into it): its own id, or "rcop-main" for every year's RCOP Main. */
+	SHORTSTACKCORE_API std::string TicketOf(const std::string& TemplateId) const;
+	/** What a ticket is worth (the seat's value), 0 when nothing awards it. */
+	SHORTSTACKCORE_API Chips SeatValue(const std::string& Ticket) const;
+	/** The next event a ticket enters, starting at or after From. */
+	SHORTSTACKCORE_API bool NextFor(const std::string& Ticket, double From, EventInstance& Out) const;
+	SHORTSTACKCORE_API const SeriesInfo* FindSeries(const std::string& Id) const;
 	/** The series running at this time (or the next one to start). */
 	SHORTSTACKCORE_API const SeriesInfo* CurrentSeries(double Now) const;
 	int RivalIndex() const { return Rival; }
@@ -311,9 +351,18 @@ public:
 	SHORTSTACKCORE_API std::vector<NewsItem> News(double Now, const HeroStats& Hero, int Count) const;
 
 private:
+	const std::vector<Player>& LivingRows() const;
+	/** The network's own result (its regulars by weighted draw), and a final table of unknowns (a living world's
+	 * events it didn't play). */
+	const EventResult& Deterministic(const EventInstance& E) const;
+	const EventResult& Unknowns(const EventInstance& E) const;
 	void BuildPlayers();
 	void BuildSchedule();
 	void BuildSeries();
+	/** Every year's online series after RCOP 2026 (NetworkSeries.cpp), appended after the schedule (saves keep template indices). */
+	void BuildCalendar();
+	/** The lookups: templates by id and by day, tickets and what they're worth. */
+	void Index();
 	void Instances(int Day, std::vector<EventInstance>& Out) const;
 	EventInstance Make(int TemplateIndex, double Start) const;
 	/** Finished events in [From, To) by finish time, with results. */
@@ -341,6 +390,11 @@ private:
 	std::array<std::vector<double>, 5> TierWeights; // final-table odds of each player by the event's tier
 	std::vector<EventTemplate> Temps;
 	std::vector<SeriesInfo> AllSeries;
+	std::map<std::string, int> TempIndex;            // template id -> index
+	std::vector<int> Recurring;                      // templates on a weekly pattern
+	std::map<int, std::vector<int>> OnDay;           // one-off templates by day
+	std::map<std::string, std::vector<int>> Takes;   // ticket -> the one-off events it enters, by day
+	std::map<std::string, Chips> SeatValues;         // ticket -> what a seat is worth
 	int Rival = -1;
 	mutable std::map<std::string, EventResult> Results;
 	mutable std::map<int, std::vector<EventInstance>> DayCache;
@@ -348,6 +402,9 @@ private:
 	mutable std::map<std::string, Totals> TallyCache;              // whole days, by range and filter
 	std::string YouName;
 	std::map<std::string, std::pair<int, Chips>> HeroFinishes; // instance id -> (place, prize)
+	const world::World* Living = nullptr;
+	mutable int LivingRev = -1;
+	mutable std::map<std::string, EventResult> Unknown;
 };
 
 /** The network every screen shows (built on first use). */

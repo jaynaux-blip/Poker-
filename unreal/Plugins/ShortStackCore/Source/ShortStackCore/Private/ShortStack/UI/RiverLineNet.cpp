@@ -3,6 +3,8 @@
 #include "ShortStack/UI/RiverLine.h"
 #include "../StrictFloat.h"
 #include "RiverLineShared.h"
+#include "ShortStack/UI/EventArt.h"
+#include "ShortStack/Game/World.h"
 
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
@@ -30,6 +32,7 @@ void RiverLine::NetFrame(double Now)
 	World = S.WorldMinutes();
 	net::Shared().SetHero(S.HeroName, S.History);
 	You = net::StatsFrom(S.HeroName, S.History, World);
+	You.LivePoints = S.Living().HeroSeasonLivePoints();
 	if (NewsSeenAt == 0.0)
 	{
 		NewsSeenAt = World - 6.0 * 60.0;
@@ -200,6 +203,23 @@ float RiverLine::Section(const std::string& Title, float X, float Y, const Color
 	return NetSpaced(*C, Title, X + 11.0f, Y, 12.0f, 800, pal::Muted, 1.6f) + 11.0f;
 }
 
+std::string RiverLine::PlacingName(const net::Placing& P) const
+{
+	return P.Player == -1 ? S.HeroName : P.Player == -2 ? P.Name : net::Shared().Players()[static_cast<size_t>(P.Player)].Name;
+}
+
+void RiverLine::PlayerName(const net::Placing& P, float X, float Y, float Size, float MaxW, bool Badges)
+{
+	if (P.Player != -2)
+	{
+		PlayerName(P.Player, X, Y, Size, MaxW, Badges);
+		return;
+	}
+	// Someone nobody follows: just a name and a flag.
+	NetFlag(*C, P.Country, X, Y - Size * 0.72f, Size * 1.2f, Size * 0.8f);
+	UI.Text(P.Name, X + Size * 1.2f + 8.0f, Y, Ts(Size, 600, Hex(0xc3cedf), Align::Left, Baseline::Alphabetic, false, MaxW - Size * 1.2f - 8.0f));
+}
+
 void RiverLine::PlayerName(int Index, float X, float Y, float Size, float MaxW, bool Badges)
 {
 	const net::Network& Net = net::Shared();
@@ -215,7 +235,19 @@ void RiverLine::PlayerName(int Index, float X, float Y, float Size, float MaxW, 
 	const net::Player& P = Net.Players()[static_cast<size_t>(Index)];
 	NetFlag(*C, P.Country, X, Y - Size * 0.72f, Size * 1.2f, Size * 0.8f);
 	const float Nx = X + Size * 1.2f + 8.0f;
-	const float W = UI.Text(P.Name, Nx, Y, Ts(Size, 700, P.Rival ? Hex(0xd5b8ff) : pal::Ink, Align::Left, Baseline::Alphabetic, false, MaxW - Size * 1.2f - 8.0f));
+	// The name opens their player card.
+	const float Fit = std::min(MaxW - Size * 1.2f - 8.0f, UI.Measure(P.Name, Size, 700));
+	const Ui::ClickState Click = UI.Clickable("player:" + std::to_string(Index) + "@" + std::to_string(static_cast<int>(X)) + "," + std::to_string(static_cast<int>(Y)), {Nx - 2.0f, Y - Size, Fit + 4.0f, Size * 1.3f},
+		S.CurrentScreen == Screen::Lobby && !CardOpen());
+	if (Click.Clicked)
+	{
+		ShowPlayer(Index, LastFrame);
+	}
+	const float W = UI.Text(P.Name, Nx, Y, Ts(Size, 700, P.Rival ? Hex(0xd5b8ff) : Click.Hover ? pal::Accent : pal::Ink, Align::Left, Baseline::Alphabetic, false, MaxW - Size * 1.2f - 8.0f));
+	if (Click.Hover)
+	{
+		C->FillRect({Nx, Y + 3.0f, std::min(W, Fit), 1.5f}, pal::Accent);
+	}
 	if (Badges && P.Rival)
 	{
 		NetPill(*C, "RIVAL", Nx + W + 8.0f, Y - Size * 0.78f, Hex(0xb36bff), true, 9.0f);
@@ -223,6 +255,15 @@ void RiverLine::PlayerName(int Index, float X, float Y, float Size, float MaxW, 
 	else if (Badges && P.Pro)
 	{
 		NetPill(*C, "TEAM RL", Nx + W + 8.0f, Y - Size * 0.78f, pal::Gold, false, 9.0f);
+	}
+	else if (Badges)
+	{
+		// New on RiverLine this month: the kind of name that catches the eye.
+		const world::Npc* N = S.Living().Get(Index);
+		if (N && N->Came != world::Arrival::None && net::DayOf(World) - N->Arrived <= 30)
+		{
+			NetPill(*C, "NEW", Nx + W + 8.0f, Y - Size * 0.78f, pal::Accent, true, 9.0f);
+		}
 	}
 }
 
@@ -351,6 +392,31 @@ const std::vector<RiverLine::FeatureSlide>& RiverLine::FeatureSlides()
 			Slides.push_back(F);
 		}
 	}
+	// The series on now or coming up (every year's calendar after RCOP 2026).
+	if (const net::SeriesInfo* Cur = Net.CurrentSeries(World))
+	{
+		const int Today = net::DayOf(World);
+		if (Cur->Id != "mm" && Cur->Id != "rcop" && Cur->Id != "slam" && Today >= Cur->FirstDay - 21 && Today <= Cur->LastDay)
+		{
+			FeatureSlide F;
+			F.Art = Cur->Bracelets > 0 || Cur->Rings > 0 ? 1 : 2;
+			F.SeriesId = Cur->Id;
+			F.Col = Cur->Color;
+			F.Col2 = Cur->Color2;
+			F.Kicker = NetUpper(net::DateLabel(Cur->FirstDay)) + " \xE2\x80\x93 " + NetUpper(net::DateLabel(Cur->LastDay)) +
+				(Cur->Bracelets > 0 ? " \xC2\xB7 " + std::to_string(Cur->Bracelets) + " BRACELETS" : Cur->Rings > 0 ? " \xC2\xB7 " + std::to_string(Cur->Rings) + " RINGS" : "");
+			F.Title = Cur->Name;
+			const net::EventTemplate* Main = Net.FindTemplate(Cur->MainEvent);
+			F.Sub = std::to_string(Cur->Events) + " events" + (Main ? " \xC2\xB7 " + NetShortName(Main->Name) + ", " + NetMoney(Main->GtdCents) + " guaranteed" : std::string());
+			F.Big = NetMoney(Cur->GtdCents);
+			F.BigLabel = "GUARANTEED";
+			F.ClockLabel = Today < Cur->FirstDay ? "SERIES STARTS IN" : "SERIES ENDS IN";
+			F.ClockAt = Today < Cur->FirstDay ? static_cast<double>(Cur->FirstDay) * net::MinutesPerDay + 12.0 * 60.0 : static_cast<double>(Cur->LastDay + 1) * net::MinutesPerDay;
+			F.Cta = Cur->Bracelets > 0 ? "The bracelet events" : Cur->Rings > 0 ? "The ring events" : "View the series";
+			F.Action = 1;
+			Slides.push_back(F);
+		}
+	}
 	if (Net.Next("millions", World, E))
 	{
 		FeatureSlide F;
@@ -416,9 +482,36 @@ void RiverLine::DrawSlide(const FeatureSlide& F, const Rect& R, double Now, floa
 		}
 		C->StrokePolyline(Wave, false, NetA(K % 2 ? Col2 : Col, 0.12f), 1.5f);
 	}
-	// Art.
-	switch (F.Art)
+	// Art: the event's emblem or the series' crest when there is one; otherwise the slide's own picture.
+	const net::SeriesInfo* ArtSeries = !F.HasEvent && !F.SeriesId.empty() ? Net.FindSeries(F.SeriesId) : nullptr;
+	if (F.HasEvent || ArtSeries)
 	{
+		const float Ex = Gx - 30.0f;
+		const float Ey = Gy - 16.0f + Nf(std::sin(Now * 1.1)) * 3.0f;
+		for (int K = 0; K < 3; ++K)
+		{
+			const float Ph = Nf(std::fmod(Now * 0.22 + K / 3.0, 1.0));
+			C->StrokeEllipse(Ex, Ey, 70.0f + Ph * 150.0f, 70.0f + Ph * 150.0f, NetA(K % 2 ? Col2 : Col, 0.32f * (1.0f - Ph)), 1.5f);
+		}
+		if (F.Art == 0)
+		{
+			const Chips Amounts[2] = {600000, 1200000};
+			DrawChipStack(*C, Amounts[0], Ex - 120.0f, Ey + 52.0f, 1.3f, C->GetAlpha());
+			DrawChipStack(*C, Amounts[1], Ex + 96.0f, Ey + 58.0f, 1.3f, C->GetAlpha());
+		}
+		if (ArtSeries)
+		{
+			eventart::SeriesCrest(*C, *ArtSeries, Ex, Ey, 184.0f, Now);
+		}
+		else
+		{
+			eventart::Emblem(*C, Net.TemplateOf(F.E), Ex, Ey, F.Art == 4 ? 150.0f : 176.0f, Now);
+		}
+	}
+	switch (F.HasEvent || ArtSeries ? -1 : F.Art)
+	{
+	case -1:
+		break;
 	case 0:
 	{
 		const Chips Amounts[5] = {250000, 1200000, 600000, 80000, 2500000};
@@ -620,7 +713,7 @@ std::vector<RiverLine::ListRow> RiverLine::ScheduleRows() const
 		const net::Tier Tr = net::TierOf(T.BuyInCents);
 		std::string Lock;
 		const bool Joinable = Net.Joinable(E, &Lock, S.Unlocks());
-		const bool Pays = S.BankrollCents >= T.BuyInCents || S.Life.TicketsFor(T.Id) > 0;
+		const bool Pays = S.BankrollCents >= T.BuyInCents || S.Life.TicketsFor(Net.TicketOf(T.Id)) > 0;
 		bool Keep = FilterShown == Filter::Running ? InPlay : Open;
 		switch (FilterShown)
 		{
@@ -745,7 +838,7 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	C->FillRoundRect({R.X + 1.0f, R.Y + 10.0f, 4.0f, R.H - 20.0f}, 2.0f, Edge);
 	const float Top = R.Y + 24.0f;
 	const float Low = R.Y + 43.0f;
-	const int Tickets = S.Life.TicketsFor(T.Id);
+	const int Tickets = S.Life.TicketsFor(Net.TicketOf(T.Id));
 	const bool Affordable = S.BankrollCents >= T.BuyInCents || Tickets > 0;
 	const bool Dim = !Row.Joinable || !Affordable;
 	// Start.
@@ -762,9 +855,15 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	default: break;
 	}
 	UI.Text(When, R.X + 20.0f, Low, Ts(12.0f, 600, WhenCol, Align::Left, Baseline::Alphabetic, false, 100.0f));
-	// Name and badges.
-	const float Nx = R.X + 130.0f;
-	float Tw = UI.Text(T.Name, Nx, Top, Ts(17.0f, 700, Dim ? Hex(0xb4bfd0) : pal::Ink, Align::Left, Baseline::Alphabetic, false, 360.0f));
+	// The event's emblem, its name and badges.
+	{
+		const float Ea = C->GetAlpha();
+		C->SetAlpha(Ea * (Dim ? 0.6f : 1.0f));
+		eventart::Emblem(*C, T, R.X + 148.0f, R.Y + R.H / 2.0f, 42.0f, Now);
+		C->SetAlpha(Ea);
+	}
+	const float Nx = R.X + 180.0f;
+	float Tw = UI.Text(T.Name, Nx, Top, Ts(17.0f, 700, Dim ? Hex(0xb4bfd0) : pal::Ink, Align::Left, Baseline::Alphabetic, false, 318.0f));
 	if (T.Featured)
 	{
 		NetStar(*C, Nx + Tw + 12.0f, Top - 6.0f, 6.5f, pal::Gold);
@@ -775,6 +874,14 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	{
 		const net::SeriesInfo* Sr = Net.FindSeries(T.Series);
 		Bx += NetPill(*C, Sr ? Sr->Short : T.Series, Bx, By, Edge, true, 9.5f) + 5.0f;
+	}
+	if (T.Bracelet || T.Ring)
+	{
+		Bx += NetPill(*C, T.Bracelet ? "BRACELET" : "RING", Bx, By, Hex(0xf2c14e), true, 9.5f) + 5.0f;
+	}
+	if (T.Main)
+	{
+		Bx += NetPill(*C, "MAIN EVENT", Bx, By, pal::Gold, false, 9.5f) + 5.0f;
 	}
 	if (T.Speed == "Hyper" || T.Speed == "Turbo" || T.Speed == "Deep")
 	{
@@ -884,12 +991,14 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 	// Header band.
 	C->FillRoundRect({R.X, R.Y, R.W, 168.0f}, 14.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + 168.0f}, Mix(Hex(0x122036), Edge, 0.3f), Hex(0x122036)));
 	C->PushClip({R.X, R.Y, R.W, 168.0f});
-	DrawSuit(*C, 3, R.X + R.W - 150.0f, R.Y - 20.0f + (1.0f - In) * 20.0f, 190.0f, NetA(Hex(0xffffff), 0.05f));
+	DrawSuit(*C, 3, R.X + R.W - 150.0f, R.Y - 20.0f + (1.0f - In) * 20.0f, 190.0f, NetA(Hex(0xffffff), 0.03f));
 	C->PopClip();
+	// The event's emblem (a series event's crest, dressed for what it means).
+	eventart::Emblem(*C, T, R.X + R.W - 84.0f, R.Y + 88.0f + (1.0f - In) * 10.0f, 132.0f, Now);
 	std::string Kicker;
 	if (const net::SeriesInfo* Sr = Net.FindSeries(T.Series))
 	{
-		Kicker = NetUpper(Sr->Name) + " \xC2\xB7 EVENT #" + std::to_string(T.EventNo);
+		Kicker = NetUpper(Sr->Name.size() > 18 ? Sr->Short : Sr->Name) + " \xC2\xB7 EVENT #" + std::to_string(T.EventNo) + (T.Bracelet ? " \xC2\xB7 BRACELET" : T.Ring ? " \xC2\xB7 RING" : "");
 	}
 	else
 	{
@@ -897,9 +1006,9 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 	}
 	Kicker += " \xC2\xB7 " + NetUpper(net::WeekdayName(net::DayOf(E.Start))) + " " + NetUpper(net::DateLabel(net::DayOf(E.Start)));
 	NetSpaced(*C, Kicker, R.X + 26.0f, R.Y + 38.0f, 11.0f, 800, Edge, 1.6f);
-	float Ty = NetParagraph(*C, T.Name, R.X + 26.0f, R.Y + 74.0f, R.W - 52.0f, 27.0f, 900, pal::Ink, 32.0f, 2);
+	float Ty = NetParagraph(*C, T.Name, R.X + 26.0f, R.Y + 74.0f, R.W - 200.0f, 27.0f, 900, pal::Ink, 32.0f, 2);
 	std::string Sub = std::string(T.Omaha ? "PL Omaha" : "NL Hold'em") + " \xC2\xB7 " + T.Speed + " \xC2\xB7 " + std::to_string(static_cast<int>(T.LevelMinutes)) + "-min levels \xC2\xB7 " + std::to_string(T.TableSize) + "-max";
-	UI.Text(Sub, R.X + 26.0f, Ty + 2.0f, Ts(14.0f, 500, Hex(0xa9b5c8), Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
+	UI.Text(Sub, R.X + 26.0f, Ty + 2.0f, Ts(14.0f, 500, Hex(0xa9b5c8), Align::Left, Baseline::Alphabetic, false, R.W - 190.0f));
 	NetPill(*C, NetFormat(T), R.X + 26.0f, R.Y + 138.0f, Edge, false, 10.0f);
 
 	// Countdown and progress ring.
@@ -979,8 +1088,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 	C->FillRect({R.X + 26.0f, R.Y + 426.0f, R.W - 52.0f, 1.0f}, pal::Line);
 
 	// Tabs.
-	const bool Done = L.St == net::Status::Finished || L.St == net::Status::FinalTable;
-	const std::string Tabs[3] = {"Overview", "Payouts", Done ? "Final table" : L.St == net::Status::Running ? "Chip leaders" : "Players"};
+	const std::string Tabs[3] = {"Overview", "Payouts", L.St == net::Status::Finished ? "Final table" : "Players"};
 	float Tx = R.X + 26.0f;
 	for (int I = 0; I < 3; ++I)
 	{
@@ -1052,6 +1160,25 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 		}
 		UI.Text(Grouped(static_cast<int64_t>(Pay.size())) + " places paid \xC2\xB7 min cash " + (Pay.empty() ? std::string("-") : Money(Pay.back())), Body.X, Body.Y + Body.H - 4.0f, Ts(13.0f, 500, pal::Muted));
 	}
+	else if (L.St != net::Status::Finished)
+	{
+		// Who's in it: the regulars the world has registered, the best known first.
+		std::vector<int> Who = S.Living().Registered(E.Id);
+		const world::World& W = S.Living();
+		std::stable_sort(Who.begin(), Who.end(), [&](int A, int B) { return W.Get(A)->RepOf(world::Rep::Overall) > W.Get(B)->RepOf(world::Rep::Overall); });
+		UI.Text(Who.empty() ? std::string("No regulars registered yet") : "Regulars registered \xC2\xB7 " + std::to_string(Who.size()), Body.X, Body.Y + 18.0f, Ts(13.0f, 600, pal::Muted));
+		for (size_t I = 0; I < Who.size() && I < 8; ++I)
+		{
+			const world::Npc* N = W.Get(Who[I]);
+			const float Y = Body.Y + 30.0f + Nf(I) * 29.0f;
+			NetAvatar(*C, Body.X + 12.0f, Y + 13.0f, 11.0f, N->Name, Color{0.0f, 0.0f, 0.0f, 0.0f});
+			PlayerName(Who[I], Body.X + 32.0f, Y + 18.0f, 14.0f, Body.W - 230.0f, true);
+			// A name nobody has seen before: when they joined.
+			const bool Fresh = N->Came != world::Arrival::None && net::DayOf(World) - N->Arrived <= 30;
+			UI.Text(Fresh ? std::string("Joined ") + net::DateLabel(N->Arrived) : std::string(world::IdentityName(N->Is)), Body.X + Body.W, Y + 18.0f,
+				Ts(12.0f, 600, Fresh ? pal::Accent : pal::Muted, Align::Right, Baseline::Alphabetic, false, 150.0f));
+		}
+	}
 	else
 	{
 		const net::EventResult& Res = Net.Result(E);
@@ -1066,9 +1193,9 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 			{
 				UI.Text(std::to_string(P.Place), Body.X + 12.0f, Y + 18.0f, Ts(14.0f, 800, P.Place == 1 ? pal::Gold : pal::Muted, Align::Center));
 			}
-			const std::string& Nm = P.Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(P.Player)].Name;
-			NetAvatar(*C, Body.X + 40.0f, Y + 13.0f, 11.0f, Nm, Color{0.0f, 0.0f, 0.0f, 0.0f}, P.Player < 0);
-			PlayerName(P.Player, Body.X + 60.0f, Y + 18.0f, 14.0f, Body.W - 170.0f, true);
+			const std::string Nm = PlacingName(P);
+			NetAvatar(*C, Body.X + 40.0f, Y + 13.0f, 11.0f, Nm, Color{0.0f, 0.0f, 0.0f, 0.0f}, P.Player == -1);
+			PlayerName(P, Body.X + 60.0f, Y + 18.0f, 14.0f, Body.W - 170.0f, true);
 			if (Finished)
 			{
 				UI.Text(Money(P.Prize), Body.X + Body.W, Y + 18.0f, Ts(14.0f, 700, P.Place == 1 ? pal::Gold : pal::Ink, Align::Right, Baseline::Alphabetic, true));
@@ -1085,7 +1212,7 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 	const net::EventTemplate& T = Net.TemplateOf(E);
 	std::string Lock;
 	const bool Joinable = Net.Joinable(E, &Lock, S.Unlocks());
-	const int Tickets = S.Life.TicketsFor(T.Id);
+	const int Tickets = S.Life.TicketsFor(Net.TicketOf(T.Id));
 	const bool Affordable = S.BankrollCents >= T.BuyInCents || Tickets > 0;
 	const bool Open = L.St == net::Status::LateReg || (L.St == net::Status::Registering && L.StartsIn <= 60.0);
 	ButtonOpts O;
@@ -1123,7 +1250,7 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 		UI.Text("Winner", R.X + 68.0f, R.Y + 28.0f, Ts(12.0f, 700, pal::Muted));
 		if (W)
 		{
-			UI.Text(W->Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(W->Player)].Name, R.X + 68.0f, R.Y + 52.0f, Ts(19.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, R.W - 200.0f));
+			UI.Text(PlacingName(*W), R.X + 68.0f, R.Y + 52.0f, Ts(19.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, R.W - 200.0f));
 			UI.Text(Money(W->Prize), R.X + R.W - 18.0f, R.Y + 44.0f, Ts(22.0f, 800, pal::Gold, Align::Right, Baseline::Alphabetic, true));
 		}
 	}
@@ -1254,6 +1381,17 @@ void RiverLine::LobbyPages(double Now)
 {
 	const float In = NetEase((Now - PageAt) / 0.4);
 	const float A0 = C->GetAlpha();
+	// A player card is up: the page underneath takes no input.
+	const bool Card = CardOpen();
+	const Pointer Real = UI.Ptr;
+	if (Card)
+	{
+		UI.Ptr.Pressed = false;
+		UI.Ptr.Released = false;
+		UI.Ptr.Wheel = 0.0f;
+		UI.Ptr.X = -1.0f;
+		UI.Ptr.Y = -1.0f;
+	}
 	C->Save();
 	C->SetAlpha(A0 * In);
 	C->Translate(0.0f, (1.0f - In) * 16.0f);
@@ -1267,6 +1405,11 @@ void RiverLine::LobbyPages(double Now)
 	}
 	C->Restore();
 	C->SetAlpha(A0);
+	if (Card)
+	{
+		UI.Ptr = Real;
+		PlayerCard(Now);
+	}
 }
 
 // ------------------------------------------------------------------ series
@@ -1291,14 +1434,42 @@ void RiverLine::SeriesPage(double Now)
 		SeriesDay = std::min(std::max(Today, Sr->FirstDay), Sr->LastDay);
 	}
 
-	// Series picker.
+	// Series picker: the last one played, the one running, the next ones (and the one shown, wherever it is).
 	Section("SERIES", 24.0f, 108.0f, Col);
-	float Px = NetW - 24.0f;
-	for (size_t K = Net.Series().size(); K-- > 0;)
+	std::vector<const net::SeriesInfo*> Near;
 	{
-		const net::SeriesInfo& O = Net.Series()[K];
+		std::vector<const net::SeriesInfo*> All;
+		for (const net::SeriesInfo& O : Net.Series())
+		{
+			All.push_back(&O);
+		}
+		std::sort(All.begin(), All.end(), [](const net::SeriesInfo* A, const net::SeriesInfo* B) { return A->FirstDay < B->FirstDay; });
+		size_t Now0 = All.size();
+		for (size_t K = 0; K < All.size(); ++K)
+		{
+			if (All[K]->LastDay >= Today)
+			{
+				Now0 = K;
+				break;
+			}
+		}
+		const size_t From = Now0 > 0 ? Now0 - 1 : 0;
+		for (size_t K = From; K < All.size() && Near.size() < 4; ++K)
+		{
+			Near.push_back(All[K]);
+		}
+		if (std::find(Near.begin(), Near.end(), Sr) == Near.end())
+		{
+			Near.back() = Sr;
+			std::sort(Near.begin(), Near.end(), [](const net::SeriesInfo* A, const net::SeriesInfo* B) { return A->FirstDay < B->FirstDay; });
+		}
+	}
+	float Px = NetW - 24.0f;
+	for (size_t K = Near.size(); K-- > 0;)
+	{
+		const net::SeriesInfo& O = *Near[K];
 		const std::string Label = O.Name + (net::DayOf(World) > O.LastDay ? "" : net::DayOf(World) >= O.FirstDay ? "  \xC2\xB7  LIVE" : "  \xC2\xB7  " + NetUpper(net::DateLabel(O.FirstDay)));
-		const float W = UI.Measure(Label, 13.0f, 700) + 30.0f;
+		const float W = UI.Measure(Label, 13.0f, 700) + 30.0f + 22.0f;
 		Px -= W;
 		const Rect R{Px, 88.0f, W, 30.0f};
 		const Ui::ClickState St = UI.Clickable("series" + O.Id, R);
@@ -1308,7 +1479,8 @@ void RiverLine::SeriesPage(double Now)
 		}
 		const bool On = &O == Sr;
 		UI.RRect(R, 15.0f, On ? NetA(Hex(O.Color), 0.2f) : St.Hover ? Hex(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? Hex(O.Color) : pal::Line);
-		UI.Text(Label, R.X + W / 2.0f, R.Y + 15.5f, Ts(13.0f, 700, On ? pal::Ink : pal::Muted, Align::Center, Baseline::Middle));
+		eventart::SeriesCrest(*C, O, R.X + 18.0f, R.Y + 15.0f, 26.0f, Now);
+		UI.Text(Label, R.X + 11.0f + W / 2.0f, R.Y + 15.5f, Ts(13.0f, 700, On ? pal::Ink : pal::Muted, Align::Center, Baseline::Middle));
 		Px -= 8.0f;
 	}
 
@@ -1330,17 +1502,17 @@ void RiverLine::SeriesPage(double Now)
 	UI.Text(Sr->Short, B.X + B.W - 400.0f, B.Y + B.H + 40.0f, Ts(260.0f, 900, NetA(Hex(0xffffff), 0.04f), Align::Right));
 	C->PopClip();
 	C->StrokeRoundRect(B, 18.0f, NetA(Col, 0.35f), 1.0f);
-	const Rect Badge{B.X + 34.0f, B.Y + 32.0f, 92.0f, 92.0f};
-	C->GlowRoundRect(Badge, 22.0f, NetA(Col, 0.45f), 22.0f);
-	C->FillRoundRect(Badge, 22.0f, Paint::Linear({Badge.X, Badge.Y}, {Badge.X + Badge.W, Badge.Y + Badge.H}, Col, Col2));
-	UI.Text(Sr->Short, Badge.X + Badge.W / 2.0f, Badge.Y + Badge.H / 2.0f + 1.0f, Ts(Sr->Short.size() > 3 ? 24.0f : 30.0f, 900, Hex(0x07121c), Align::Center, Baseline::Middle));
+	// The series' crest.
+	C->FillEllipse(B.X + 82.0f, B.Y + 96.0f, 96.0f, 96.0f, Paint::Radial({B.X + 82.0f, B.Y + 96.0f}, 0.0f, {B.X + 82.0f, B.Y + 96.0f}, 96.0f, Rgba(4, 8, 16, 0.55f), 0.55f, Rgba(4, 8, 16, 0.25f), Rgba(4, 8, 16, 0.0f)));
+	eventart::SeriesCrest(*C, *Sr, B.X + 82.0f, B.Y + 96.0f + (1.0f - In) * 12.0f, 150.0f, Now);
 	UI.Text(Sr->Name, B.X + 150.0f, B.Y + 78.0f, Ts(46.0f, 900, pal::Ink));
 	UI.Text(Sr->Tagline, B.X + 150.0f, B.Y + 110.0f, Ts(17.0f, 500, Hex(0xc3cedf), Align::Left, Baseline::Alphabetic, false, 760.0f));
 	const int DayCount = Sr->LastDay - Sr->FirstDay + 1;
 	std::string State = Ahead ? "Starts in " + net::Countdown(static_cast<double>(Sr->FirstDay) * net::MinutesPerDay - World) : Over ? "Complete" : "Day " + std::to_string(Today - Sr->FirstDay + 1) + " of " + std::to_string(DayCount);
 	const std::pair<std::string, std::string> Stats[4] = {
 		{NetMoney(static_cast<Chips>(static_cast<double>(Sr->GtdCents) * static_cast<double>(In) / 100.0) * 100), "GUARANTEED"},
-		{std::to_string(static_cast<int>(std::round(static_cast<double>(Sr->Events) * static_cast<double>(In)))), "EVENTS"},
+		{std::to_string(static_cast<int>(std::round(static_cast<double>(Sr->Events) * static_cast<double>(In)))),
+			Sr->Bracelets > 0 ? "EVENTS \xC2\xB7 " + std::to_string(Sr->Bracelets) + " BRACELETS" : Sr->Rings > 0 ? "EVENTS \xC2\xB7 " + std::to_string(Sr->Rings) + " RINGS" : std::string("EVENTS")},
 		{net::DateLabel(Sr->FirstDay) + " \xE2\x80\x93 " + net::DateLabel(Sr->LastDay), "DATES"},
 		{State, Ahead ? "COUNTDOWN" : "PROGRESS"},
 	};
@@ -1379,7 +1551,7 @@ void RiverLine::SeriesPage(double Now)
 			{
 				const net::Placing& W = Res.FinalTable.front();
 				NetTrophy(*C, M.X + 34.0f, M.Y + 118.0f, 40.0f, Hex(0xffe08a), Hex(0xc9962b));
-				UI.Text(W.Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(W.Player)].Name, M.X + 64.0f, M.Y + 140.0f, Ts(17.0f, 800, pal::Ink));
+				UI.Text(PlacingName(W), M.X + 64.0f, M.Y + 140.0f, Ts(17.0f, 800, pal::Ink));
 				UI.Text("won " + Money(W.Prize), M.X + 64.0f, M.Y + 160.0f, Ts(13.0f, 600, pal::Gold));
 			}
 		}
@@ -1472,8 +1644,9 @@ void RiverLine::SeriesPage(double Now)
 		UI.RRect(R, 10.0f, St.Hover ? Hex(0x15253d) : Hex(0x101a2b), Big ? NetA(pal::Gold, 0.55f) : Rgba(255, 255, 255, 0.04f));
 		C->FillRoundRect({R.X + 1.0f, R.Y + 10.0f, 4.0f, R.H - 20.0f}, 2.0f, Big ? pal::Gold : Col);
 		UI.Text(net::TimeLabel(E.Start), R.X + 20.0f, R.Y + 33.0f, Ts(15.0f, 700, pal::Muted));
-		const float Nw = NetPill(*C, "#" + std::to_string(T.EventNo), R.X + 110.0f, R.Y + 18.0f, Big ? pal::Gold : Col, true, 10.0f);
-		UI.Text(NetShortName(T.Name), R.X + 118.0f + Nw, R.Y + 33.0f, Ts(16.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, 330.0f));
+		eventart::Emblem(*C, T, R.X + 122.0f, R.Y + R.H / 2.0f, 46.0f, Now);
+		const float Nw = NetPill(*C, "#" + std::to_string(T.EventNo), R.X + 152.0f, R.Y + 18.0f, Big ? pal::Gold : Col, true, 10.0f);
+		UI.Text(NetShortName(T.Name), R.X + 160.0f + Nw, R.Y + 33.0f, Ts(16.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, 300.0f));
 		UI.Text(net::BuyIn(T.BuyInCents), R.X + 560.0f, R.Y + 33.0f, Ts(15.0f, 800, pal::Gold, Align::Right, Baseline::Alphabetic, true));
 		UI.Text(NetMoney(std::max(L.Pool, T.GtdCents)) + (L.St == net::Status::Finished ? "" : " GTD"), R.X + 590.0f, R.Y + 33.0f, Ts(15.0f, 700, pal::Ink));
 		if (L.St == net::Status::Finished)
@@ -1483,7 +1656,7 @@ void RiverLine::SeriesPage(double Now)
 			{
 				const net::Placing& W = Res.FinalTable.front();
 				NetTrophy(*C, R.X + 744.0f, R.Y + 13.0f, 26.0f, Hex(0xffe08a), Hex(0xc9962b));
-				UI.Text(W.Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(W.Player)].Name, R.X + 764.0f, R.Y + 27.0f, Ts(14.0f, 700, W.Player < 0 ? pal::Accent : pal::Ink, Align::Left, Baseline::Alphabetic, false, 150.0f));
+				UI.Text(PlacingName(W), R.X + 764.0f, R.Y + 27.0f, Ts(14.0f, 700, W.Player == -1 ? pal::Accent : pal::Ink, Align::Left, Baseline::Alphabetic, false, 150.0f));
 				UI.Text(Money(W.Prize), R.X + 764.0f, R.Y + 44.0f, Ts(12.0f, 700, pal::Gold, Align::Left, Baseline::Alphabetic, true));
 			}
 		}
@@ -1529,7 +1702,46 @@ void RiverLine::SeriesPage(double Now)
 		UI.Text("You", Rt.X + 24.0f, Fy + 32.0f, Ts(14.0f, 600, pal::Muted));
 		UI.Text(Mine.Rank > 0 ? "#" + Grouped(Mine.Rank) + " \xC2\xB7 " + Grouped(static_cast<int64_t>(std::llround(Mine.Value))) + " pts" : std::string("No points yet"), Rt.X + Rt.W - 24.0f, Fy + 32.0f,
 			Ts(16.0f, 800, Mine.Rank > 0 ? pal::Accent : pal::Muted, Align::Right));
-		NetParagraph(*C, "Every final table scores. The top three win RCOP Main Event packages worth $6,500.", Rt.X + 24.0f, Fy + 60.0f, Rt.W - 48.0f, 13.0f, 500, pal::Muted, 18.0f, 2);
+		const std::string Note = Sr->Id == "mm" ? "Every final table scores. The top three win RCOP Main Event packages worth $6,500."
+			: Sr->Bracelets > 0 ? "Every cash scores. " + std::to_string(Sr->Bracelets) + " of the titles come with a Championship bracelet."
+			: Sr->Rings > 0 ? "Every cash scores. " + std::to_string(Sr->Rings) + " of the titles come with a Grand Circuit ring."
+							: "Every cash scores; the deeper the run and the bigger the field, the more it's worth.";
+		NetParagraph(*C, Note, Rt.X + 24.0f, Fy + 60.0f, Rt.W - 48.0f, 13.0f, 500, pal::Muted, 18.0f, 2);
+	}
+	else if (Ahead && Sr->Id.rfind("rcop", 0) != 0)
+	{
+		// What to circle on the calendar: the Main Event, the high rollers, the ring and bracelet events.
+		Section("HIGHLIGHTS", Rt.X + 24.0f, Rt.Y + 36.0f, Col);
+		std::vector<const net::EventTemplate*> Picks;
+		for (int D = Sr->FirstDay; D <= Sr->LastDay; ++D)
+		{
+			for (const net::EventInstance& E : Net.Window(static_cast<double>(D) * net::MinutesPerDay, static_cast<double>(D + 1) * net::MinutesPerDay))
+			{
+				const net::EventTemplate& T = Net.TemplateOf(E);
+				if (T.Series == Sr->Id)
+				{
+					Picks.push_back(&T);
+				}
+			}
+		}
+		std::stable_sort(Picks.begin(), Picks.end(), [](const net::EventTemplate* Lhs, const net::EventTemplate* Rhs) { return Lhs->GtdCents > Rhs->GtdCents; });
+		for (size_t I = 0; I < Picks.size() && I < 9; ++I)
+		{
+			const net::EventTemplate& T = *Picks[I];
+			const float Y = Rt.Y + 58.0f + Nf(I) * 50.0f;
+			const float Ri = NetEase((Since - 0.15 - 0.05 * static_cast<double>(I)) / 0.45);
+			const float A0 = C->GetAlpha();
+			C->SetAlpha(A0 * Ri);
+			UI.Text(NetUpper(net::DateLabel(T.OnlyDay)), Rt.X + 24.0f, Y + 26.0f, Ts(11.5f, 800, pal::Muted, Align::Left, Baseline::Alphabetic, true));
+			eventart::Emblem(*C, T, Rt.X + 108.0f, Y + 21.0f, 40.0f, Now);
+			UI.Text(NetShortName(T.Name), Rt.X + 136.0f, Y + 26.0f, Ts(15.0f, 700, T.Main ? pal::Gold : pal::Ink, Align::Left, Baseline::Alphabetic, false, Rt.W - 270.0f));
+			if (T.Bracelet || T.Ring)
+			{
+				NetPill(*C, T.Bracelet ? "BRACELET" : "RING", Rt.X + 136.0f, Y + 34.0f, Hex(0xf2c14e), true, 8.5f);
+			}
+			UI.Text(NetMoney(T.GtdCents), Rt.X + Rt.W - 24.0f, Y + 26.0f, Ts(15.0f, 800, pal::Gold, Align::Right, Baseline::Alphabetic, true));
+			C->SetAlpha(A0);
+		}
 	}
 	else if (Ahead)
 	{
@@ -1597,7 +1809,7 @@ void RiverLine::SeriesPage(double Now)
 				const net::Placing& P = Res.FinalTable[I];
 				const float Y = Rt.Y + 116.0f + Nf(I) * 44.0f;
 				UI.Text(Ordinal(P.Place), Rt.X + 24.0f, Y + 26.0f, Ts(14.0f, 800, P.Place == 1 ? pal::Gold : pal::Muted));
-				PlayerName(P.Player, Rt.X + 76.0f, Y + 26.0f, 15.0f, 260.0f, true);
+				PlayerName(P, Rt.X + 76.0f, Y + 26.0f, 15.0f, 260.0f, true);
 				UI.Text(Money(P.Prize), Rt.X + Rt.W - 24.0f, Y + 26.0f, Ts(15.0f, 700, P.Place == 1 ? pal::Gold : pal::Ink, Align::Right, Baseline::Alphabetic, true));
 			}
 		}
@@ -1621,7 +1833,7 @@ std::string RiverLine::BoardValue(net::Board B, double V) const
 void RiverLine::BoardsPage(double Now)
 {
 	const net::Network& Net = net::Shared();
-	const net::Board Order[6] = {net::Board::NightShift, net::Board::Season, net::Board::Earnings, net::Board::Wins, net::Board::FinalTables, net::Board::Series};
+	const net::Board Order[7] = {net::Board::NightShift, net::Board::Season, net::Board::Earnings, net::Board::Wins, net::Board::FinalTables, net::Board::Live, net::Board::Series};
 	const net::SeriesInfo* Sr = Net.CurrentSeries(World);
 	const bool SeriesLive = Sr && net::DayOf(World) >= Sr->FirstDay;
 	auto Name = [&](net::Board B) { return B == net::Board::Series && Sr ? Sr->Name : std::string(NetBoardName(B)); };
@@ -1632,7 +1844,7 @@ void RiverLine::BoardsPage(double Now)
 		{
 			continue;
 		}
-		const std::string Label = Name(B);
+		const std::string Label = B == net::Board::Live ? std::string("Live") : Name(B);
 		const Rect R{X, 84.0f, UI.Measure(Label, 15.0f, 700) + 36.0f, 36.0f};
 		const Ui::ClickState St = UI.Clickable("board" + Label, R);
 		if (St.Clicked)
@@ -1748,6 +1960,10 @@ void RiverLine::BoardsPage(double Now)
 	UI.Text(Name(BoardShown), Rt.X + 26.0f, Rt.Y + 54.0f, Ts(28.0f, 900, pal::Ink, Align::Left, Baseline::Alphabetic, false, Rt.W - 52.0f));
 	std::string About;
 	double Ends = -1.0;
+	// The season boards run January to December (and start again).
+	const int Year = world::YearOf(net::DayOf(World));
+	const std::string Yr = std::to_string(Year);
+	const double YearEnds = static_cast<double>(world::YearStart(Year + 1)) * net::MinutesPerDay;
 	switch (BoardShown)
 	{
 	case net::Board::NightShift:
@@ -1755,15 +1971,19 @@ void RiverLine::BoardsPage(double Now)
 		Ends = life::NightShiftStart(World) + 12.0 * 60.0;
 		break;
 	case net::Board::Season:
-		About = "Player of the Year 2026. Points from every final table since January. The top three win RCOP 2027 Platinum Passes worth $25,000.";
-		Ends = 88.0 * net::MinutesPerDay;
+		About = "Player of the Year " + Yr + ". Points from every final table since January. The top three win RCOP " + std::to_string(Year + 1) + " Platinum Passes worth $25,000.";
+		Ends = YearEnds;
 		break;
 	case net::Board::Earnings: About = "All-time tournament winnings on RiverLine. Every cash counts, every buy-in forgotten."; break;
-	case net::Board::Wins: About = "Tournament titles won in 2026. Anyone can run deep once."; Ends = 88.0 * net::MinutesPerDay; break;
-	case net::Board::FinalTables: About = "Final tables reached in 2026. The consistency board."; Ends = 88.0 * net::MinutesPerDay; break;
+	case net::Board::Wins: About = "Tournament titles won in " + Yr + ". Anyone can run deep once."; Ends = YearEnds; break;
+	case net::Board::FinalTables: About = "Final tables reached in " + Yr + ". The consistency board."; Ends = YearEnds; break;
 	case net::Board::Series:
 		About = "Points from every final table at " + (Sr ? Sr->Name : std::string("the series")) + ". The top three win RCOP Main Event packages.";
 		Ends = Sr ? static_cast<double>(Sr->LastDay + 1) * net::MinutesPerDay : -1.0;
+		break;
+	case net::Board::Live:
+		About = "Live Player of the Year " + Yr + ": points from every live final table, from the Riverside's Sunday $150 to the Grand Circuit and the Championship in Las Vegas.";
+		Ends = YearEnds;
 		break;
 	}
 	float Y = NetParagraph(*C, About, Rt.X + 26.0f, Rt.Y + 90.0f, Rt.W - 52.0f, 15.0f, 500, Hex(0xc3cedf), 22.0f, 5) + 12.0f;
@@ -2076,6 +2296,31 @@ void RiverLine::CareerPage(double Now)
 		UI.RRect({Bar.X, Bar.Y, std::max(8.0f, Bar.W * Frac), Bar.H}, 4.0f, Paint::Linear({Bar.X, 0.0f}, {Bar.X + Bar.W, 0.0f}, Lc, Hex(Tiers[Lv + 1].Col)));
 		UI.Text(Money(To - You.Earnings) + " in winnings to " + Tiers[Lv + 1].Name, P.X + 176.0f, P.Y + 170.0f, Ts(13.0f, 600, pal::Muted));
 	}
+	// The trophy case: the player's bracelets and rings, the latest first.
+	if (const world::World* Wd = Net.Attached())
+	{
+		const std::vector<world::Award>& Won = Wd->HeroAwards();
+		if (!Won.empty())
+		{
+			const size_t Shown = std::min<size_t>(Won.size(), 3);
+			const float Cx0 = P.X + 572.0f;
+			NetSpaced(*C, "TROPHY CASE", Cx0 - 26.0f, P.Y + 44.0f, 10.5f, 800, Hex(0xf28a3a), 1.6f);
+			C->FillRoundRect({Cx0 - 30.0f, P.Y + 132.0f, Nf(Shown) * 56.0f + 4.0f, 5.0f}, 2.5f, Paint::Linear({Cx0, 0.0f}, {Cx0 + 170.0f, 0.0f}, Hex(0x6b4e16), Hex(0x3a2a0c)));
+			for (size_t K = 0; K < Shown; ++K)
+			{
+				eventart::Trophy(*C, Won[Won.size() - 1 - K], Cx0 + Nf(K) * 56.0f, P.Y + 102.0f, 54.0f * (0.85f + 0.15f * In), Now + 0.7 * static_cast<double>(K));
+			}
+			int Bracelets = 0;
+			for (const world::Award& A : Won)
+			{
+				Bracelets += A.Ring ? 0 : 1;
+			}
+			const int Rings = static_cast<int>(Won.size()) - Bracelets;
+			std::string Count = Bracelets > 0 ? std::to_string(Bracelets) + (Bracelets == 1 ? " bracelet" : " bracelets") : std::string();
+			Count += Rings > 0 ? (Count.empty() ? "" : " \xC2\xB7 ") + std::to_string(Rings) + (Rings == 1 ? " ring" : " rings") : "";
+			UI.Text(Count, Cx0 - 26.0f, P.Y + 162.0f, Ts(13.0f, 700, pal::Gold));
+		}
+	}
 	// Bankroll and the rent.
 	const float Bx = P.X + P.W - 30.0f;
 	NetSpaced(*C, "BANKROLL", Bx, P.Y + 44.0f, 10.5f, 800, pal::Muted, 1.6f, Align::Right);
@@ -2145,6 +2390,17 @@ void RiverLine::CareerPage(double Now)
 
 	// Recent results.
 	Section("RECENT TOURNAMENTS", 24.0f, 578.0f, pal::Accent);
+	{
+		// RiverLine Stats: the player's own dashboard.
+		ButtonOpts O;
+		O.Kind = ButtonKind::Secondary;
+		O.Size = 13.0f;
+		O.Enabled = !CardOpen();
+		if (UI.Button("careerstats", {1076.0f - 168.0f, 552.0f, 168.0f, 34.0f}, "Your stats  \xE2\x80\xBA", O))
+		{
+			ShowPlayer(HeroCard, Now);
+		}
+	}
 	if (S.History.empty())
 	{
 		UI.Text("No tournaments yet. The Night Owl Turbo is running right now.", 24.0f, 620.0f, Ts(16.0f, 500, pal::Muted));
@@ -2186,7 +2442,7 @@ void RiverLine::CareerPage(double Now)
 		{"Final table", "Make the last nine. Unlocks satellites.", You.FinalTables > 0, false},
 		{"Champion", "Win a tournament. Unlocks six-max.", You.Wins > 0, false},
 		{"Night Shift top 20", "Finish a night in the leaderboard's money.", NightMoney, false},
-		{"Series title", "Win a Micro Madness event.", You.SeriesTitles > 0, false},
+		{"Series title", "Win an event in any RiverLine series.", You.SeriesTitles > 0, false},
 		{"Make rent", "Pay the $1,225 before Friday midnight.", S.Life.RentsPaid > 0, false},
 		{"Road to the Main", "Win a $5,250 seat to the RCOP Main Event.", S.Life.TicketsFor("rcop-main") > 0, !Satellites},
 		{"Life changer", "Win the RCOP Main Event. Last year: $4,108,220.", false, true},
@@ -2243,7 +2499,13 @@ void RiverLine::CareerPage(double Now)
 	NetAvatar(*C, Rc.X + 60.0f, Rc.Y + 84.0f, 32.0f, Rv.Name, Hex(0xb36bff));
 	UI.Text(Rv.Name, Rc.X + 108.0f, Rc.Y + 82.0f, Ts(24.0f, 900, Hex(0xe7dbff)));
 	NetFlag(*C, Rv.Country, Rc.X + 108.0f, Rc.Y + 94.0f, 18.0f, 12.0f);
-	UI.Text("Low-stakes crusher \xC2\xB7 " + std::to_string(Rv.Wins) + " titles \xC2\xB7 never logs off", Rc.X + 134.0f, Rc.Y + 105.0f, Ts(13.0f, 600, pal::Muted));
+	const std::string Level = Rv.Stake == net::Tier::High ? "High-stakes" : Rv.Stake == net::Tier::Mid ? "Mid-stakes" : "Low-stakes";
+	UI.Text(Level + " crusher \xC2\xB7 " + std::to_string(Rv.Wins) + " titles \xC2\xB7 never logs off", Rc.X + 134.0f, Rc.Y + 105.0f, Ts(13.0f, 600, pal::Muted));
+	// The rival's card, like anyone's.
+	if (UI.Clickable("rivalcard", {Rc.X + 20.0f, Rc.Y + 40.0f, Rc.W - 40.0f, 80.0f}, !CardOpen()).Clicked)
+	{
+		ShowPlayer(Net.RivalIndex(), LastFrame);
+	}
 	const std::pair<const char*, std::pair<double, double>> Versus[3] = {
 		{"Winnings", {static_cast<double>(You.Earnings), static_cast<double>(Rv.Earnings)}},
 		{"Titles", {static_cast<double>(You.Wins), static_cast<double>(Rv.Wins)}},
