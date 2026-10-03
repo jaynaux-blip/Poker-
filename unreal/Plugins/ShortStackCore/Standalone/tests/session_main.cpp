@@ -3,6 +3,7 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Life.h"
+#include "ShortStack/Game/Store.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
@@ -959,6 +960,99 @@ void CharacterChecks()
 	Expect(!Reloaded.Person.Created && Reloaded.Life.Perks.JobPay == 1.0, "starting over clears the character");
 }
 
+/** Hunger and thirst over the hours, the corner store's counter, and the bag. */
+void StoreChecks()
+{
+	namespace store = ss::store;
+	Expect(store::Catalog().size() >= 12 && store::Find("volt-rush") && !store::Find("nope"), "the Lucky Penny is stocked");
+	for (int Sh = 0; Sh < store::ShelfCount; ++Sh)
+	{
+		int Count = 0;
+		for (const store::Item& I : store::Catalog())
+		{
+			Count += static_cast<int>(I.Where) == Sh ? 1 : 0;
+		}
+		Expect(Count >= 2 && Count <= 6, "every shelf has a few things (and fits the counter's grid)");
+	}
+	store::Basket B;
+	B.Add("volt-rush", 2);
+	B.Add("roller-dog");
+	B.Add("volt-rush");
+	B.Add("nope");
+	Expect(B.Count() == 4 && B.Lines.size() == 2 && B.Subtotal() == 3 * 299 + 199 && B.Total() == B.Subtotal() + store::Tax(B.Subtotal()), "a basket adds up, with tax");
+	B.Remove("volt-rush");
+	Expect(B.Count() == 3, "putting one back");
+	Expect(store::Tax(1000) == 73, "7.25% tax");
+	Expect(!store::ClerkLine(130.0, store::Basket(), 0, 30.0, 60.0).empty() && store::ClerkLine(130.0, B, 0, 30.0, 60.0).find("Two of those") == 0, "Benny has something to say");
+
+	// Needs climb with the hours; past 70 they cost energy.
+	Hooks H;
+	ss::Session S(H, "store");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.Life.Hunger = 40.0;
+	S.Life.Thirst = 40.0;
+	S.Life.Energy = 80.0;
+	S.WorldSkip(0);
+	double Now = 0.0;
+	S.Update(Now);
+	const double Hunger0 = S.Life.Hunger;
+	const double Energy0 = S.Life.Energy;
+	S.LobbyMinutes += 120.0;
+	S.Update(Now += 0.5);
+	Expect(S.Life.Hunger > Hunger0 + 5.0 && S.Life.Thirst > 40.0 + 7.0 && S.Life.Energy < Energy0, "two hours make you hungrier, thirstier and more tired");
+	S.Life.Hunger = 95.0;
+	S.Life.Thirst = 95.0;
+	ss::life::State Calm = S.Life;
+	Calm.Hunger = 20.0;
+	Calm.Thirst = 20.0;
+	Expect(ss::life::NeedsDrain(S.Life) > 4.0 && ss::life::NeedsDrain(Calm) == 0.0, "starving and parched drain energy; fed and watered don't");
+	Expect(std::string(ss::life::HungerWord(95.0)) == "Starving" && std::string(ss::life::ThirstWord(10.0)) == "Hydrated", "needs have words");
+
+	// The counter: pay, then eat and drink from the bag.
+	S.BankrollCents = 1000;
+	store::Basket Snack;
+	Snack.Add("roller-dog");
+	Snack.Add("cascade");
+	const ss::Chips Total = Snack.Total();
+	Expect(S.Checkout(Snack).empty() && S.BankrollCents == 1000 - Total && S.Life.Pantry["roller-dog"] == 1 && S.Life.Pantry["cascade"] == 1, "checkout pays and bags it");
+	Expect(!S.Life.Ledger.empty() && S.Life.Ledger.front().Kind == 8 && S.Life.Ledger.front().Amount == -Total, "the bank shows the corner store");
+	Expect(S.Consume("roller-dog").empty() && S.Life.Hunger < 95.0 - 25.0 && S.Life.Pantry.count("roller-dog") == 0, "a hot dog takes the edge off");
+	Expect(S.Consume("cascade").empty() && S.Life.Thirst < 95.0 - 40.0, "water helps");
+	Expect(!S.Consume("cascade").empty(), "can't drink what you don't have");
+	store::Basket Big;
+	Big.Add("egg-salad", 9);
+	S.BankrollCents = 500;
+	Expect(S.Checkout(Big) == "Card declined." && S.BankrollCents == 500 && S.Life.Pantry.empty(), "a declined card takes nothing");
+	Expect(!S.Checkout(store::Basket()).empty(), "an empty basket doesn't check out");
+
+	// The bag and the needs survive a save.
+	store::Basket Keep;
+	Keep.Add("volt-rush", 2);
+	S.BankrollCents = 2000;
+	S.Checkout(Keep);
+	S.Life.Hunger = 61.5;
+	S.Save();
+	ss::SaveData Parsed;
+	Expect(ss::SaveData::Parse(H.Last.Serialize(), Parsed) && Parsed.Life.Pantry["volt-rush"] == 2 && std::fabs(Parsed.Life.Hunger - 61.5) < 0.01, "the bag and the needs are saved");
+
+	// A line cook makes more of a meal.
+	auto Fed = [&](ss::hero::Background Story) {
+		Hooks Hc;
+		ss::Session Sc(Hc, "meal");
+		ss::hero::Character Who;
+		Who.Story = Story;
+		Sc.NewCareer(Who);
+		Sc.Life.Hunger = 90.0;
+		Sc.BankrollCents = 1000;
+		store::Basket Dog;
+		Dog.Add("bean-burrito");
+		Sc.Checkout(Dog);
+		Sc.Consume("bean-burrito");
+		return Sc.Life.Hunger;
+	};
+	Expect(Fed(ss::hero::Background::Kitchen) < Fed(ss::hero::Background::Newcomer) - 5.0, "a line cook's meals go further");
+}
+
 } // namespace session_test
 
 namespace session_test
@@ -1399,6 +1493,7 @@ int main()
 	session_test::LedChecks();
 	session_test::LivingWorld();
 	session_test::CharacterChecks();
+	session_test::StoreChecks();
 	if (session_test::Failures == 0)
 	{
 		std::printf("session tests: all passed\n");

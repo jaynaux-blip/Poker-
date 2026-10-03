@@ -82,6 +82,11 @@ struct State
 {
 	double Energy = 45.0; // 0..100
 	double Heat = 0.0;    // 0..100
+	/** Needs, 0 (fed, watered) to 100 (starving, parched): they climb with the hours and drag energy down past 70. */
+	double Hunger = 35.0;
+	double Thirst = 30.0;
+	/** What's in the bag from the corner store (item id -> count). */
+	std::map<std::string, int> Pantry;
 	Rent RentStage = Rent::Due;
 	Chips RentDueCents = 122500;
 	double RentDeadline = 5.0 * 1440.0; // Friday, October 9, midnight
@@ -115,6 +120,16 @@ struct State
 	SHORTSTACKCORE_API void Record(double At, const std::string& Label, Chips Amount, int Kind);
 	int TicketsFor(const std::string& TemplateId) const;
 };
+
+/** Hours of being awake (or asleep) added to hunger and thirst. */
+constexpr double HungerPerHour = 3.0;
+constexpr double ThirstPerHour = 4.2;
+constexpr double SleepNeedsRate = 0.35;
+/** Energy drained per hour on top of the usual, by how far past 70 hunger and thirst are. */
+SHORTSTACKCORE_API double NeedsDrain(const State& L);
+/** "Starving", "Hungry", "Peckish", "Fed" (and the same for thirst). */
+SHORTSTACKCORE_API const char* HungerWord(double Hunger);
+SHORTSTACKCORE_API const char* ThirstWord(double Thirst);
 
 /** The player's situation when choosing (what the catalog needs to know). */
 struct Context

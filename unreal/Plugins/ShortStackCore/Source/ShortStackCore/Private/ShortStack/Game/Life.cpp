@@ -217,6 +217,21 @@ std::string Blocked(const Activity& A, const State& L, const Context& Ctx)
 	return "";
 }
 
+double NeedsDrain(const State& L)
+{
+	return std::max(0.0, L.Hunger - 70.0) / 30.0 * 2.5 + std::max(0.0, L.Thirst - 70.0) / 30.0 * 3.0;
+}
+
+const char* HungerWord(double Hunger)
+{
+	return Hunger >= 85.0 ? "Starving" : Hunger >= 65.0 ? "Hungry" : Hunger >= 40.0 ? "Peckish" : "Fed";
+}
+
+const char* ThirstWord(double Thirst)
+{
+	return Thirst >= 85.0 ? "Parched" : Thirst >= 65.0 ? "Thirsty" : Thirst >= 40.0 ? "Dry" : "Hydrated";
+}
+
 double RiskOf(const Activity& A, const State& L)
 {
 	switch (A.Type)

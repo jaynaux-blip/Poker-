@@ -152,6 +152,11 @@ std::string SaveData::Serialize() const
 	const life::State& L = Life;
 	Out << "life\tenergy\t" << Fixed(L.Energy, 2) << "\n";
 	Out << "life\theat\t" << Fixed(L.Heat, 2) << "\n";
+	Out << "life\tneeds\t" << Fixed(L.Hunger, 2) << "\t" << Fixed(L.Thirst, 2) << "\n";
+	for (const auto& Held : L.Pantry)
+	{
+		Out << "pantry\t" << session_detail::Escape(Held.first) << "\t" << Held.second << "\n";
+	}
 	Out << "life\trent\t" << static_cast<int>(L.RentStage) << "\t" << L.RentDueCents << "\t" << Fixed(L.RentDeadline, 2) << "\t" << L.RentsPaid << "\n";
 	Out << "life\tdebt\t" << L.DebtCents << "\n";
 	Out << "life\tban\t" << Fixed(L.BannedUntil, 2) << "\n";
@@ -329,6 +334,11 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 			{
 				L.Heat = Num(2);
 			}
+			else if (P[1] == "needs" && P.size() >= 4)
+			{
+				L.Hunger = std::clamp(Num(2), 0.0, 100.0);
+				L.Thirst = std::clamp(Num(3), 0.0, 100.0);
+			}
 			else if (P[1] == "rent" && P.size() >= 6)
 			{
 				L.RentStage = static_cast<life::Rent>(Int(2));
@@ -377,6 +387,14 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 		else if (P.size() == 3 && P[0] == "read")
 		{
 			D.Life.Reads[session_detail::Unescape(P[1])] = std::atoi(P[2].c_str());
+		}
+		else if (P.size() == 3 && P[0] == "pantry")
+		{
+			const int Count = std::atoi(P[2].c_str());
+			if (Count > 0)
+			{
+				D.Life.Pantry[session_detail::Unescape(P[1])] = Count;
+			}
 		}
 		else if (P.size() == 3 && P[0] == "ticket")
 		{
@@ -821,6 +839,58 @@ void Session::NewCareer(const hero::Character& Who)
 		Life.Unlocks.insert(U);
 	}
 	Save();
+}
+
+// ------------------------------------------------------------------ the corner store
+
+std::string Session::Checkout(const store::Basket& B)
+{
+	if (B.Empty())
+	{
+		return "Nothing in the basket.";
+	}
+	const Chips Total = B.Total();
+	if (Total > BankrollCents)
+	{
+		Sound(SoundId::Fold, 0.5);
+		return "Card declined.";
+	}
+	BankrollCents -= Total;
+	for (const std::pair<std::string, int>& L : B.Lines)
+	{
+		Life.Pantry[L.first] += L.second;
+	}
+	Life.Record(WorldMinutes(), "Lucky Penny #212 \xC2\xB7 " + std::to_string(B.Count()) + (B.Count() == 1 ? " item" : " items"), -Total, 8);
+	Sound(SoundId::Cash, 0.6);
+	Save();
+	return "";
+}
+
+std::string Session::Consume(const std::string& ItemId)
+{
+	const store::Item* I = store::Find(ItemId);
+	const auto Have = Life.Pantry.find(ItemId);
+	if (!I || Have == Life.Pantry.end() || Have->second <= 0)
+	{
+		return "You don't have one.";
+	}
+	if (--Have->second <= 0)
+	{
+		Life.Pantry.erase(Have);
+	}
+	// A line cook knows how to make a meal of it.
+	const double Boost = I->Food() ? Life.Perks.MealBoost : 1.0;
+	Life.Hunger = std::clamp(Life.Hunger - I->Hunger * Boost, 0.0, 100.0);
+	Life.Thirst = std::clamp(Life.Thirst - I->Thirst, 0.0, 100.0);
+	Life.Energy = std::clamp(Life.Energy + I->Energy * Boost, 0.0, 100.0);
+	Sound(I->Food() ? SoundId::Check : SoundId::Click, 0.5);
+	Save();
+	return "";
+}
+
+std::string Session::ClerkSays(const store::Basket& B) const
+{
+	return store::ClerkLine(WorldMinutes(), B, Life.Shifts, Life.Hunger, Life.Energy);
 }
 
 // ------------------------------------------------------------------ story
@@ -3737,6 +3807,20 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	}
 	RenewGear(From, To);
 	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat - Hours * Life.Perks.HeatCool));
+	// Needs climb with the hours (slowly in bed), and past 70 they wear the player down.
+	const life::Activity* Doing = TimeSkip.Active ? life::Find(TimeSkip.Result.ActivityId) : nullptr;
+	const double Rate = Doing && Doing->Type == life::Kind::Sleep ? life::SleepNeedsRate : 1.0;
+	const bool WasHungry = Life.Hunger >= 75.0;
+	const bool WasThirsty = Life.Thirst >= 75.0;
+	Life.Energy = std::max(0.0, Life.Energy - Hours * life::NeedsDrain(Life));
+	Life.Hunger = std::min(100.0, Life.Hunger + Hours * life::HungerPerHour * Rate);
+	Life.Thirst = std::min(100.0, Life.Thirst + Hours * life::ThirstPerHour * Rate);
+	if (!WasHungry && Life.Hunger >= 75.0)
+	{
+		const int Day = static_cast<int>(std::floor(To / net::MinutesPerDay));
+		StoryText("needs:hungry:" + std::to_string(Day), "Mom", Day % 2 == 0 ? "are you eating? you never answer when I ask if you're eating" : "call me when you can. and eat something real, not chips");
+	}
+	(void)WasThirsty;
 	// The Night Shift closes at 6 AM.
 	for (double End = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 6.0 * 60.0; End <= To; End += net::MinutesPerDay)
 	{

@@ -6,6 +6,7 @@
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
+#include "ShortStack/Game/Store.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Tournament.h"
@@ -333,6 +334,13 @@ public:
 
 	SHORTSTACKCORE_API void Save();
 	SHORTSTACKCORE_API void ResetSave();
+	// The Lucky Penny #212 (the corner store): pay at the counter, then eat and drink from the bag.
+	/** Pays for the basket from the bankroll and puts it in the bag; "" or why not ("Card declined."). */
+	SHORTSTACKCORE_API std::string Checkout(const store::Basket& B);
+	/** Eats or drinks one of an item in the bag; "" or why not. */
+	SHORTSTACKCORE_API std::string Consume(const std::string& ItemId);
+	/** What the clerk says right now. */
+	SHORTSTACKCORE_API std::string ClerkSays(const store::Basket& B) const;
 	/** A new career for this character: a fresh save, then what their background starts them with. */
 	SHORTSTACKCORE_API void NewCareer(const hero::Character& Who);
 	void OnBoot();

@@ -11,6 +11,7 @@
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/FrontEnd.h"
 #include "ShortStack/UI/Portrait.h"
+#include "ShortStack/UI/StoreCounter.h"
 #include "ShortStack/UI/Phone.h"
 #include "ShortStack/UI/PropArt.h"
 #include "ShortStack/UI/RiverLine.h"
@@ -1970,6 +1971,88 @@ void EventArtGallery()
 	}
 }
 
+/** The Lucky Penny's counter: the shelves, a basket on the receipt, a declined card, and the bag. */
+void StoreScreens()
+{
+	struct NoHooks : ss::SessionHooks
+	{
+	};
+	NoHooks H;
+	ss::Session S(H, "store-ui");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 1864;
+	S.Life.Hunger = 78.0;
+	S.Life.Thirst = 66.0;
+	S.Life.Energy = 31.0;
+	ss::ui::StoreCounter Counter(S);
+	TableMeasurer M;
+	auto Emit = [&](const std::string& Name, double Now, float Width = 1920.0f) {
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, Width, ss::ui::StoreCounter::Height, 1.0f);
+		C.FillRect({0.0f, 0.0f, Width, 1080.0f}, ss::ui::Paint::Linear({0.0f, 0.0f}, {Width, 1080.0f}, ss::ui::Hex(0x2a3a3c), ss::ui::Hex(0x10161c)));
+		Counter.Draw(C, Now);
+		Expect(!L.Cmds.empty(), "the counter drew something");
+		std::printf("  %-22s %6zu vertices %4zu commands\n", Name.c_str(), L.Vertices.size(), L.Cmds.size());
+		WriteList(Name, L);
+	};
+	double Now = 10.0;
+	Counter.Open(Now);
+	Expect(Counter.IsOpen() && Counter.Basket.Empty(), "the counter opens with an empty basket");
+	Now += 1.0;
+	Emit("store_counter", Now);
+	Counter.Key("Right", Now);
+	Counter.Key("Right", Now);
+	Counter.Key("Enter", Now);
+	Counter.Key("Enter", Now);
+	Counter.Key("E", Now);
+	Counter.Key("Enter", Now);
+	Counter.Key("E", Now);
+	Counter.Key("Enter", Now);
+	Expect(Counter.Basket.Count() == 4 && Counter.Shelf() == 2, "arrows, Enter and E fill the basket across shelves");
+	Now += 1.0;
+	Emit("store_counter_basket", Now);
+	Counter.Key("Tab", Now);
+	Expect(Counter.Basket.Empty() && S.Life.Pantry.size() == 3, "Tab pays and bags it");
+	Now += 0.5;
+	Emit("store_counter_paid", Now);
+	Counter.Key("Q", Now);
+	Counter.Key("Q", Now);
+	for (int I = 0; I < 9; ++I)
+	{
+		Counter.Key("Enter", Now);
+	}
+	S.BankrollCents = 120;
+	Counter.Key("Tab", Now);
+	Expect(!Counter.Basket.Empty(), "a declined card keeps the basket");
+	Now += 0.5;
+	Emit("store_counter_declined", Now);
+	Counter.Key("Escape", Now);
+	Expect(!Counter.IsOpen() && Counter.TakeLeave() && !Counter.TakeLeave(), "Escape walks away once");
+
+	// The open world's vitals block, over a street.
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+	SheetBackground(C, "Vitals and the shelves", "The open world's HUD block, every product's art, and the needs from fed to starving");
+	for (int I = 0; I < 3; ++I)
+	{
+		ss::life::State Lf;
+		Lf.Hunger = I == 0 ? 15.0 : I == 1 ? 68.0 : 94.0;
+		Lf.Thirst = I == 0 ? 20.0 : I == 1 ? 72.0 : 90.0;
+		Lf.Energy = I == 0 ? 88.0 : I == 1 ? 46.0 : 14.0;
+		C.FillRoundRect({48.0f + static_cast<float>(I) * 512.0f, 130.0f, 488.0f, 140.0f}, 12.0f, ss::ui::Paint(ss::ui::Rgba(4, 6, 10, 0.7f)));
+		ss::ui::DrawVitals(C, Lf, 72.0f + static_cast<float>(I) * 512.0f, 160.0f, 440.0f, 3.0);
+	}
+	const std::vector<ss::store::Item>& All = ss::store::Catalog();
+	for (size_t I = 0; I < All.size(); ++I)
+	{
+		const float X = 110.0f + static_cast<float>(I % 7) * 220.0f;
+		const float Y = 440.0f + static_cast<float>(I / 7) * 300.0f;
+		ss::ui::DrawProduct(C, All[I], X, Y, 180.0f);
+		C.Text(All[I].Name, X, Y + 128.0f, ss::ui::Ts(16.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
+	}
+	SaveSheet("store_products", L);
+}
+
 /** The character creator's portraits: a cast that covers every hairstyle, face, outfit, hat and pair of glasses. */
 void PortraitGallery()
 {
@@ -2150,6 +2233,7 @@ int main(int Argc, char** Argv)
 	ui_test::EventArtGallery();
 	ui_test::TrophyGallery();
 	ui_test::PortraitGallery();
+	ui_test::StoreScreens();
 	ui_test::MultiScreens();
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();
