@@ -547,15 +547,65 @@ Npc Sim::Rookie(World& W, Rng& R, int Day)
 	N.Hue = R.Int(360);
 	N.From = Origin::Rookie;
 	N.Home = RegionOf(N.Country);
-	const int Age = static_cast<int>(sim::Clamp(std::round(18.0 + std::fabs(R.Gauss(0.0, 7.0))), 18.0, 58.0));
+	// How they got here: most are new to the game; some bring a past with them.
+	static const int Weights[static_cast<int>(Arrival::Count)] = {0, 35, 10, 8, 10, 8, 12, 14, 3};
+	int Pick = R.Int(100);
+	Arrival Came = Arrival::FirstTimer;
+	for (int K = 1; K < static_cast<int>(Arrival::Count); ++K)
+	{
+		Pick -= Weights[K];
+		if (Pick < 0)
+		{
+			Came = static_cast<Arrival>(K);
+			break;
+		}
+	}
+	// Someone to have come with (a friend from a home game, a streamer or a champion they watched).
+	int With = -1;
+	if (Came == Arrival::HomeGame || Came == Arrival::Watched)
+	{
+		std::vector<int> Pool;
+		for (const Npc& O : W.Roster)
+		{
+			if (!O.Playing())
+			{
+				continue;
+			}
+			if (Came == Arrival::HomeGame ? (O.Home == N.Home && O.Live >= LiveLevel::Local && O.Overall() < 0.6f)
+										  : (O.Streams && O.Followers >= 2000) || O.Bracelets + O.Majors > 0)
+			{
+				Pool.push_back(O.Id);
+			}
+		}
+		if (Pool.empty())
+		{
+			Came = Arrival::FirstTimer;
+		}
+		else
+		{
+			With = Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
+		}
+	}
+	const int MinAge = Came == Arrival::Comeback ? 30 : Came == Arrival::SiteClosed || Came == Arrival::LiveCrossover ? 22 : 18;
+	const int Age = Came == Arrival::CameOfAge ? 18 + R.Int(3)
+											   : static_cast<int>(sim::Clamp(std::round(static_cast<double>(MinAge) + std::fabs(R.Gauss(0.0, 7.0))), static_cast<double>(MinAge), 62.0));
 	N.Born = YearOf(Day) - Age;
-	SetTraits(N, R, 0.4, 0.5, 0.5, 0.45, 0.45, 0.5, 0.5);
+	SetTraits(N, R, 0.4, 0.5, 0.5, 0.45, Came == Arrival::HomeGame || Came == Arrival::Streamer ? 0.65 : 0.45, 0.5, 0.5);
 	N.OnlineShare = R.Chance(0.08) ? static_cast<float>(R.Range(0.25, 0.6)) : static_cast<float>(R.Range(0.9, 1.0));
 	N.Formats = RandomLikes(R);
-	// Most newcomers are ordinary; a few are the real thing.
-	const bool Talent = R.Chance(0.035);
-	const double Base = sim::Clamp(R.Gauss(Talent ? 0.52 : 0.36, 0.09), 0.1, 0.78);
+	// Most newcomers are ordinary; a few are the real thing (more of them among the ones who just came of age).
+	const bool Talent = R.Chance(Came == Arrival::CameOfAge ? 0.06 : 0.035);
+	double Base = R.Gauss(Talent ? 0.52 : 0.36, 0.09);
+	// Experience counts for something.
+	Base += Came == Arrival::SiteClosed ? 0.08 : Came == Arrival::LiveCrossover ? 0.05 : Came == Arrival::Comeback ? 0.04 : 0.0;
+	Base = sim::Clamp(Base, 0.1, 0.8);
 	MakeSkills(N, R, Base);
+	if (Came == Arrival::LiveCrossover)
+	{
+		// Years of reading people across a table; the online numbers are new.
+		N.Skills[static_cast<size_t>(Skill::Live)] = sim::Clampf(static_cast<double>(N.SkillOf(Skill::Live)) + 0.15, 0.05, 0.97);
+		N.Skills[static_cast<size_t>(Skill::Adjust)] = sim::Clampf(static_cast<double>(N.SkillOf(Skill::Adjust)) - 0.05, 0.05, 0.97);
+	}
 	const double Youth = Age < 24 ? 1.6 : Age < 30 ? 1.1 : Age < 40 ? 0.5 : 0.2;
 	N.Peak = sim::Clampf(Base + std::max(0.02, R.Gauss(Talent ? 0.28 : 0.12, 0.07)) * Youth, Base, 0.97);
 	N.Potential = sim::Clampf((Talent ? R.Gauss(0.85, 0.1) : R.Gauss(0.45, 0.2)) * (0.6 + 0.4 * Youth), 0.05, 1.0);
@@ -566,18 +616,59 @@ Npc Sim::Rookie(World& W, Rng& R, int Day)
 	N.Professional = false;
 	N.Income = sim::Cents(R.Range(3.0, 25.0) * (R.Chance(0.04) ? 20.0 : 1.0)); // what goes into poker a week
 	N.Bankroll = sim::Cents(std::exp(R.Gauss(std::log(120.0), 0.7)));
-	N.PeakRoll = N.Bankroll;
-	N.Tier = 1;
-	N.TierSince = Day;
 	N.Live = N.OnlineShare < 0.7f ? LiveLevel::Local : LiveLevel::None;
+	N.Joined = Day;
+	switch (Came)
+	{
+	case Arrival::SiteClosed:
+		// A grinder with a roll, whose site went dark.
+		N.Bankroll = sim::Cents(std::exp(R.Gauss(std::log(600.0), 0.6)));
+		N.Income = sim::Cents(R.Range(15.0, 80.0));
+		N.Joined = Day - 365 * (2 + R.Int(8));
+		break;
+	case Arrival::LiveCrossover:
+		N.OnlineShare = static_cast<float>(R.Range(0.35, 0.7));
+		N.Live = R.Chance(0.3) ? LiveLevel::Regional : LiveLevel::Local;
+		N.Bankroll = sim::Cents(std::exp(R.Gauss(std::log(400.0), 0.6)));
+		N.Income = sim::Cents(R.Range(20.0, 90.0));
+		N.Joined = Day - 365 * (2 + R.Int(10));
+		break;
+	case Arrival::Comeback:
+		N.Bankroll = sim::Cents(std::exp(R.Gauss(std::log(200.0), 0.7)));
+		N.Income = sim::Cents(R.Range(10.0, 60.0));
+		N.Joined = Day - 365 * (6 + R.Int(12));
+		break;
+	case Arrival::HomeGame:
+		N.OnlineShare = std::min(N.OnlineShare, static_cast<float>(R.Range(0.6, 0.85)));
+		N.Live = LiveLevel::Local;
+		break;
+	case Arrival::Streamer:
+		N.Streams = true;
+		N.Followers = 1 + R.Int(12);
+		break;
+	default: break;
+	}
+	N.PeakRoll = N.Bankroll;
+	N.Tier = std::max(1, std::min(TierFor(Comfort(N)), 2));
+	N.TierSince = Day;
 	const double P = R.Next();
 	N.Schedule = N.OnlineShare < 0.7f ? Plan::Weekends : P < 0.35 ? Plan::Nights : P < 0.6 ? Plan::Weekends : P < 0.85 ? Plan::Occasional : P < 0.95 ? Plan::Daily : Plan::MajorsOnly;
-	N.Joined = Day;
+	if (Came == Arrival::CameOfAge || Came == Arrival::SiteClosed)
+	{
+		N.Schedule = R.Chance(0.6) ? Plan::Nights : Plan::Daily;
+	}
 	N.ThisSeason.Year = YearOf(Day);
 	Year Y;
 	Y.Number = N.ThisSeason.Year;
 	N.Years.push_back(Y);
-	N.Began = N.Is = Identity::Recreational;
+	N.Began = N.Is = Came == Arrival::SiteClosed ? Identity::OnlineGrinder : Came == Arrival::LiveCrossover ? Identity::LiveRegular : Identity::Recreational;
+	N.Came = Came;
+	N.Arrived = Day;
+	N.CameWith = With;
+	Step First;
+	First.Day = Day;
+	First.Kind = StepKind::Joined;
+	N.Path.push_back(First);
 	return N;
 }
 

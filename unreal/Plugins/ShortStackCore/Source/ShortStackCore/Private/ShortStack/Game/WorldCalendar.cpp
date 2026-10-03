@@ -160,12 +160,40 @@ int YearStart(int Year)
 	return CivilDays(Year, 1, 1) - Epoch();
 }
 
+void CivilDate(int Day, int& Year, int& Month, int& DayOfMonth)
+{
+	CivilFrom(Epoch() + Day, Year, Month, DayOfMonth);
+}
+
+int DayOn(int Year, int Month, int DayOfMonth)
+{
+	return CivilDays(Year, Month, DayOfMonth) - Epoch();
+}
+
 const char* SkillName(Skill S)
 {
 	static const char* const Names[SkillCount] = {"Preflop", "Postflop", "Aggression", "Bluffing", "Value betting", "ICM", "Short stack", "Deep stack", "Heads-up", "Bounties",
 		"Satellites", "Live reads", "Adjusting", "Emotional control"};
 	const int I = static_cast<int>(S);
 	return I >= 0 && I < SkillCount ? Names[I] : "";
+}
+
+const char* ArrivalName(Arrival A)
+{
+	switch (A)
+	{
+	case Arrival::None: return "None";
+	case Arrival::FirstTimer: return "First timer";
+	case Arrival::CameOfAge: return "Came of age";
+	case Arrival::SiteClosed: return "Site closed";
+	case Arrival::LiveCrossover: return "Live crossover";
+	case Arrival::Comeback: return "Comeback";
+	case Arrival::HomeGame: return "Home game";
+	case Arrival::Watched: return "Watched";
+	case Arrival::Streamer: return "Streamer";
+	case Arrival::Count: break;
+	}
+	return "";
 }
 
 const char* IdentityName(Identity I)

@@ -824,7 +824,7 @@ bool Session::CanAfford(const LobbyEvent& Ev) const
 int Session::TicketsFor(const LobbyEvent& Ev) const
 {
 	const size_t At = Ev.Spec.Id.find('@');
-	return At == std::string::npos ? 0 : Life.TicketsFor(Ev.Spec.Id.substr(0, At));
+	return At == std::string::npos ? 0 : Life.TicketsFor(net::Shared().TicketOf(Ev.Spec.Id.substr(0, At)));
 }
 
 void Session::Register(int Index)
@@ -871,7 +871,7 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	const LobbyEvent& Ev = Joined;
 	if (TicketsFor(Ev) > 0)
 	{
-		const std::string Tid = Ev.Spec.Id.substr(0, Ev.Spec.Id.find('@'));
+		const std::string Tid = net::Shared().TicketOf(Ev.Spec.Id.substr(0, Ev.Spec.Id.find('@')));
 		if (--Life.Tickets[Tid] <= 0)
 		{
 			Life.Tickets.erase(Tid);
@@ -2285,7 +2285,21 @@ void Session::ShowResults()
 	}
 	CheckUnlocks();
 	// Series results reach the people who follow the boards.
-	const bool SeriesEvent = T->Spec.Name.rfind("MM #", 0) == 0;
+	const net::EventTemplate* Tmpl = net::Shared().FindTemplate(T->Spec.Id.substr(0, T->Spec.Id.find('@')));
+	const net::SeriesInfo* Played = Tmpl ? net::Shared().FindSeries(Tmpl->Series) : nullptr;
+	if (Tmpl && BustPlace == 1 && Tmpl->Bracelet)
+	{
+		StoryText("bracelet-first", "Dee", "A BRACELET. A real Championship bracelet. Online counts, kid. Don't let anybody tell you different.");
+	}
+	else if (Tmpl && BustPlace == 1 && Tmpl->Ring)
+	{
+		StoryText("ring-first", "Dee", "A Grand Circuit ring! Wear it Tuesday. The dryers deserve to see it.");
+	}
+	else if (Played && Played->Id.rfind("mm", 0) != 0 && BustPlace == 1)
+	{
+		StoryText("series-title", "Dee", "Your name is on the " + Played->Name + " leaderboard. A series title. Nobody can take that off the page.");
+	}
+	const bool SeriesEvent = T->Spec.Name.rfind("MM #", 0) == 0 || (Played && Played->Id.rfind("mm", 0) == 0);
 	if (SeriesEvent && BustPlace == 1)
 	{
 		StoryText("mm-title", "Dee", "Your name is on the Micro Madness leaderboard. A TITLE. The whole laundromat is refreshing the page.");
@@ -3454,6 +3468,20 @@ void Session::NameField()
 		}
 	}
 	Nr.Shuffle(Who);
+	// Fresh faces first: a name or two the player has never seen before, at their own table.
+	{
+		const int Today = net::DayOf(WorldMinutes());
+		int Fresh = 0;
+		for (size_t K = 0; K < Who.size() && Fresh < 2; ++K)
+		{
+			const world::Npc* N = LivingWorld.Get(Who[K]);
+			if (N && N->Came != world::Arrival::None && Today - N->Arrived <= 60 && !LivingWorld.BondWith(N->Id))
+			{
+				std::swap(Who[static_cast<size_t>(Fresh)], Who[K]);
+				++Fresh;
+			}
+		}
+	}
 	// Seats by how the engine's bots play: each person takes the one most like them. A few open at the player's own
 	// table (the faces of the night); the rest are somewhere in the room.
 	std::map<int, std::vector<size_t>> SeatsBy;
@@ -3475,7 +3503,7 @@ void Session::NameField()
 	{
 		Nr.Shuffle(It.second);
 	}
-	int AtHeroTable = std::min(3, static_cast<int>(Who.size()) / 3 + 1);
+	int AtHeroTable = std::min(5, static_cast<int>(Who.size()) / 3 + 1);
 	auto Strong = [](int A) { return A == static_cast<int>(Archetype::Reg) || A == static_cast<int>(Archetype::Crusher) || A == static_cast<int>(Archetype::Tag) || A == static_cast<int>(Archetype::Lag); };
 	auto Style = [](const world::Npc& N) {
 		const float Sk = N.Overall();

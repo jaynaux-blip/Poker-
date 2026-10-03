@@ -106,6 +106,8 @@ public:
 	/** A player card over the RiverLine pages (an index into the network's players; -1 closes it). */
 	SHORTSTACKCORE_API void ShowPlayer(int Index, double Now);
 	int PlayerShown() const { return CardShown; }
+	/** The open card's view (0: overview, 1: journey). */
+	void ShowCardTab(int Tab) { CardTab = Tab; }
 	/** The event panel's tab: 0 overview, 1 payouts, 2 players (or the final table). */
 	void ShowEventTab(int Tab) { DetailTab = Tab; }
 	KastPage CurrentKastPage() const { return KastShown; }
@@ -202,8 +204,12 @@ private:
 	void OrderCard(double Now);
 	void RoomLightsCard(double Now);
 	void PlayerCard(double Now);
+	/** The card's journey: how they arrived, and every step since. */
+	void CardJourney(const world::Profile& P, float X, float Y, float W, float H, double Now);
 	int CardShown = -1;
 	double CardAt = 0.0;
+	int CardTab = 0; // 0: overview, 1: journey
+	double CardTabAt = 0.0;
 	// Kast (RiverLineKast.cpp).
 	void KastApp(double Now);
 	void KastHeader(double Now);

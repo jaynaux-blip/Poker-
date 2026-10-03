@@ -1464,6 +1464,50 @@ void WorldScreens()
 	Now = Run(S, RL, Now, 1.0);
 	Emit("world_lobby_players", RL, Now);
 	Expect(Most > 0, "tonight's events show who's registered");
+	// A newcomer's card: how they got here, and every step since.
+	int Fresh = -1;
+	size_t Steps = 0;
+	for (const ss::world::Npc& N : W.People())
+	{
+		if (N.Came != ss::world::Arrival::None && N.Playing() && N.Path.size() > Steps)
+		{
+			Steps = N.Path.size();
+			Fresh = N.Id;
+		}
+	}
+	Expect(Fresh >= 0 && Steps >= 3, "newcomers have joined and started their journeys");
+	RL.ShowPlayer(Fresh, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("world_card_newcomer", RL, Now);
+	RL.ShowCardTab(1);
+	Now = Run(S, RL, Now, 1.2);
+	Expect(!W.ProfileOf(Fresh).Journey.empty() && !W.ProfileOf(Fresh).Came.empty(), "a newcomer's card tells their journey");
+	Emit("world_card_journey", RL, Now);
+	RL.ShowPlayer(-1, Now);
+	// A week on: December's series is running.
+	S.WorldSkip(8);
+	const ss::net::SeriesInfo* December = ss::net::Shared().CurrentSeries(S.WorldMinutes());
+	Expect(December && ss::net::DayOf(S.WorldMinutes()) >= December->FirstDay && December->Id == "hol26", "a series runs in December");
+	RL.ShowSeries(December ? December->Id : std::string(), Now);
+	RL.OpenPage(Page::Series, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_series_december", RL, Now);
+	// The next one on the calendar: what to circle.
+	const ss::net::SeriesInfo* Upcoming = nullptr;
+	for (const ss::net::SeriesInfo& Sr : ss::net::Shared().Series())
+	{
+		if (December && Sr.FirstDay > December->LastDay && (!Upcoming || Sr.FirstDay < Upcoming->FirstDay))
+		{
+			Upcoming = &Sr;
+		}
+	}
+	Expect(Upcoming != nullptr, "another series is on the calendar");
+	RL.ShowSeries(Upcoming ? Upcoming->Id : std::string(), Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_series_upcoming", RL, Now);
+	RL.OpenPage(Page::Lobby, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_home_series", RL, Now);
 	// A year and a half on: the season, the best-known player, the rival.
 	S.WorldSkip(420);
 	RL.ShowBoard(ss::net::Board::Season, Now);
@@ -1481,6 +1525,66 @@ void WorldScreens()
 	Now = Run(S, RL, Now, 1.5);
 	Emit("world_news_later", RL, Now);
 	std::printf("%s", W.Describe(W.Find("Mei")).c_str());
+	// June: The Championship Online's bracelet events, and someone who has won one.
+	const int June = ss::world::DayOn(ss::world::YearOf(ss::net::DayOf(S.WorldMinutes())), 6, 14);
+	S.WorldSkip(June - ss::net::DayOf(S.WorldMinutes()));
+	const ss::net::SeriesInfo* Bracelets = ss::net::Shared().CurrentSeries(S.WorldMinutes());
+	Expect(Bracelets && Bracelets->Bracelets > 0 && ss::net::DayOf(S.WorldMinutes()) >= Bracelets->FirstDay, "June brings The Championship Online");
+	RL.ShowSeries(Bracelets ? Bracelets->Id : std::string(), Now);
+	RL.OpenPage(Page::Series, Now);
+	Now = Run(S, RL, Now, 1.5);
+	Emit("world_series_bracelets", RL, Now);
+	int Wearer = -1;
+	for (const ss::world::Npc& N : W.People())
+	{
+		for (const ss::world::Step& St : N.Path)
+		{
+			if ((St.Kind == ss::world::StepKind::Bracelet || St.Kind == ss::world::StepKind::Ring) && (Wearer < 0 || N.Path.size() > W.Get(Wearer)->Path.size()))
+			{
+				Wearer = N.Id;
+			}
+		}
+	}
+	Expect(Wearer >= 0, "someone has won an online bracelet or ring");
+	if (Wearer >= 0)
+	{
+		RL.ShowPlayer(Wearer, Now);
+		RL.ShowCardTab(1);
+		Now = Run(S, RL, Now, 1.2);
+		Emit("world_card_bracelet", RL, Now);
+		RL.ShowPlayer(-1, Now);
+	}
+	// At the table: a name the player hasn't seen before catches their eye, and opens its card.
+	const std::vector<ss::LobbyEvent> Open = OpenEvents(S, 1, 3000);
+	Expect(!Open.empty(), "an event to sit down at");
+	if (!Open.empty())
+	{
+		S.BankrollCents = std::max<ss::Chips>(S.BankrollCents, Open[0].BuyInCents + 1000);
+		S.RegisterEvent(Open[0]);
+		Now = Run(S, RL, Now, 3.0);
+		int Face = -1;
+		if (S.T)
+		{
+			const int Mine = S.T->Hero().TableId;
+			for (const ss::TPlayer& P : S.T->Players)
+			{
+				const auto It = S.FieldNpc.find(P.Id);
+				if (P.TableId == Mine && It != S.FieldNpc.end() && (Face < 0 || W.Get(It->second)->Came != ss::world::Arrival::None))
+				{
+					Face = It->second;
+				}
+			}
+		}
+		Expect(Face >= 0, "people the world knows sit at the player's table");
+		if (Face >= 0)
+		{
+			RL.ShowPlayer(Face, Now);
+			RL.ShowCardTab(1);
+			Now = Run(S, RL, Now, 1.2);
+			Expect(RL.PlayerShown() == Face, "a card opens over the table");
+			Emit("world_table_card", RL, Now);
+		}
+	}
 }
 
 } // namespace ui_test

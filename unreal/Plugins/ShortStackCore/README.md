@@ -126,13 +126,41 @@ The LED room kit is polled rather than pushed: call `Session::RoomGlow(Now)` eve
 - `World::ProfileOf(Npc)` is the public player card RiverLine draws (`RiverLineCard.cpp`); it never exposes hidden numbers.
 - `World::Headline` turns world events into news.
 
+**The series calendar** (`NetworkSeries.cpp`)
+
+- **What's in it:**
+  - Nine online series a year through 2040 (and December 2026's).
+  - Twelve named weekly tournaments, appended after the original schedule. Template indices never move, because saves keep them for the events they've planned.
+  - `EventTemplate` gains `Main`, `Bracelet`, `Ring` and `Ticket`.
+- **Seats:** every year's RCOP Main takes the `rcop-main` seat that the step satellites award. Use `Network::TicketOf(TemplateId)` for the ticket an event takes and `NextFor(Ticket, From, Out)` for the event it enters next.
+- **Lookups:** `Network::Index()` builds the lookups by id, day and ticket, so a day's schedule doesn't scan all 8,000-odd templates.
+- **Dates:** `net::DateLabel` now uses the world's calendar (`world::CivilDate`, `world::DayOn`), so leap days fall where they should.
+
+**Newcomers and journeys**
+
+- **Arrivals:**
+  - Rookies arrive one of eight ways (`world::Arrival`); see the design doc for what each is like.
+  - `Npc::Came`, `Arrived` and `CameWith` say how and when. `CameWith` is the friend from the home game, or the streamer or champion they watched.
+- **Journeys:**
+  - `Npc::Path` keeps the steps of a career (`world::StepKind`): the first six steps and the latest ten.
+  - `Sim::Mark` adds them, from the firsts in `Apply` and from career events in `Post`.
+- **Profiles:** `World::ProfileOf` adds `Came` (the arrival in a sentence), `Arrived`, `New` (joined in the last 30 days) and `Journey` (dated lines).
+- **Debug:** `World::Describe`, behind `ss.World.Npc`, prints the arrival and the journey; `World::Report`, behind `ss.World.Report`, counts arrivals.
+- **The UI:**
+  - `RiverLine::ShowCardTab(1)` opens a card on its Journey tab.
+  - A world player's seat at the table opens their card.
+  - A NEW tag follows recent arrivals' names.
+
 **Save**
 
 - The world writes its own `world\t...` lines after the session's lines. The first line carries `world::Version`. Hosts that edit a save pass these lines through untouched (`SaveData::WorldText`).
 - A save without world lines gets a new world, starting tonight.
+- **Newcomer data:**
+  - Each `npc` line ends with the arrival fields, and a `path` line holds the journey.
+  - Saves from before newcomers read as old hands with empty journeys.
 - **Size and cost:**
   - Recent results are kept for 8 days (majors for 400 days), and long-gone retirees fold into `ghost` lines.
-  - A save is about 1.7 MB after a month, 2.5 MB after a year and 4 MB after ten years.
+  - A save is about 1.8 MB after a month, 2.8 MB after a year and 4.8 MB after ten years.
   - The session rewrites the world text only when something involving the player changed, or once an in-game hour has passed.
 
 **Nights away from the desk**
@@ -152,11 +180,11 @@ The LED room kit is polled rather than pushed: call `Session::RoomGlow(Now)` eve
 
 **Performance**
 
-- About 9 ms per simulated day (spread over the hour ticks), 0.05 ms per in-game minute, and 4 to 5 s per simulated year.
+- About 15 to 19 ms per simulated day (spread over the hour ticks) and 5 to 7 s per simulated year. The yearly series calendar added about a third.
 - `world_test years 10 11` runs a ten-year check with seed 11. Over ten years:
-  - The active population follows its slowly growing target (about 1,600 to 1,870).
+  - The active population follows its slowly growing target (about 1,640 to 1,880).
   - The number of players at each stake stays steady, and per-stake median bankrolls stay flat.
-  - There are about 100 to 120 pros, and 125 to 150 players with skill of 0.75 or more.
+  - There are about 100 to 140 pros, and 130 to 170 players with skill of 0.75 or more. Experienced newcomers move a few percent of players from micro to low stakes over ten years.
   - The run fails if any finished Summit or Championship Main has no champion in the history.
 
 ## Build and test without Unreal
@@ -172,9 +200,19 @@ On Windows, run this from a *Developer Command Prompt for VS*. The Visual Studio
 - `golden_test`: the 4,201 golden vectors.
 - `unit_test`: 5,000 fuzzed hands checking chip conservation, illegal-action rejection, and a 1,000-player tournament played to the end, about 0.7 s.
 - `session_test`: whole tournaments played through the Night One session, with random and best-EV heroes. It covers the bubble, the money, the final table, sprint mode and save round trips. It also checks the network: tonight's schedule at 2:07 AM, fees, locked formats, the Night Shift board, the player's results landing in final tables and the news, the lobby clock, and registering for a scheduled event. The life checks cover shifts, Marcus's runs, sleep, rent collection and eviction, the Night Shift payout, unlocks, bounty and satellite specs, tickets, a satellite played on a ticket, and a progressive knockout played out. The streaming checks cover GearDrop (screens add tables, the laptop can't stream until the PC upgrade, side-grades are blocked), a whole tournament on stream on Kast, the payout, a shift ending the stream, subscriptions renewing and lapsing, and the gear and channel in the save. They also check Dee and Mei on night one, a first stream that draws a handful of people, a posted schedule, a stream ended with a raid, and the community in the save. A 50-stream grind checks that growth is slow but real: tens of followers after ten streams, Affiliate only once the 30-day rules are met, more regulars and more people coming back, the community drifting after three weeks away, and a schedule and a streamer who talks to chat building a bigger community. The LED checks cover the room kit: no light without it, each colour's perk (and only that one), Aurora's drift, the power switch, the save (and old saves without it), a sub flashing the room, a won all-in sweeping it gold, a bad beat dimming it, the room breathing with hype, and sync off holding the colour.
-- `ui_test`: clicks drive the session (log in, filter the schedule, select an event, register, open a page). It also draws every screen, including each lobby page before and after a big night, the laptop apps, the time-lapse, a bounty table and the seat and bounty result screens, GearDrop (the store, an order, the delivery) and Kast (the locked studio, the studio live at a table, the Community page offline and live, the channel, the directory, the end-of-stream card). On Kast it also clicks the schedule's day toggles and start time, and ends a stream with Raid & end. For the LED room kit it buys the kit, picks a colour from Your setup, opens the Room lights card and draws it in each of the seven colours and switched off, toggles power and sync, and opens it from the Kast studio while live (the facecam lit, and swept gold by a won all-in). It ends with a gallery of every product picture, emote and facecam mood. For the living world it draws the boards (including Live), the news, player cards (the rival, Mei, the world's best-known player) and the regulars registered for an event, then sleeps 420 days and draws them again.
+- `ui_test`: clicks drive the session (log in, filter the schedule, select an event, register, open a page). It also draws every screen, including each lobby page before and after a big night, the laptop apps, the time-lapse, a bounty table and the seat and bounty result screens, GearDrop (the store, an order, the delivery) and Kast (the locked studio, the studio live at a table, the Community page offline and live, the channel, the directory, the end-of-stream card). On Kast it also clicks the schedule's day toggles and start time, and ends a stream with Raid & end. For the LED room kit it buys the kit, picks a colour from Your setup, opens the Room lights card and draws it in each of the seven colours and switched off, toggles power and sync, and opens it from the Kast studio while live (the facecam lit, and swept gold by a won all-in). It ends with a gallery of every product picture, emote and facecam mood. For the living world it draws the boards (including Live), the news, player cards (the rival, Mei, the world's best-known player) and the regulars registered for an event, then sleeps 420 days and draws them again. It also draws:
+  - a newcomer's card (overview and journey);
+  - December's series, the next one's highlights, and the home page's series slide;
+  - The Championship Online in June, and a bracelet winner's journey;
+  - a card opened over the table.
 - `monkey_test`: random clicks and keys across every screen while it sits down at random events (up to four tables at once) and winds the sitting down to its results, about 15 s. It also shops on GearDrop, goes live on Kast and works the studio (ads, answers, timeouts, mods), changes the schedule, sometimes ends a stream with a raid, and changes the LED kit's colour, power and sync. Every frame it checks that the bankroll only moves through the ledger, tournament chips are conserved, the clock never runs backwards, no table stalls, saves round-trip, nobody streams without the PC upgrade, the stream's numbers stay in range, the community stays in its ranges (loyalty, affinity, stage, schedule), and the room's lights match the kit and its settings. `./build/monkey_test 40 30000` runs a longer sweep.
-- `living_world` (`world_test`): a world is created and played for a month, about 1.5 s. It checks every person (no negative bankrolls, skills and stakes in range, sane ledgers, at most seven ties), that tonight's events have the world's regulars registered, that final tables mix regulars and unknowns, that the rival keeps the network's index, that a night at Dee's leaves memories, and that a saved world writes the same save and plays on exactly as the original. `world_test years <n> [seed]` runs the long check above, and `world_test npc <name> [days]` prints one person's career.
+- `living_world` (`world_test`): first the online calendar:
+  - nine series a year from 2027 to 2040, none overlapping;
+  - every series has its Main Event, its events and its counts of rings and bracelets;
+  - every series event name and every template id is used once;
+  - RCOP seats carry over to every year's Main Event, and leap days are on the calendar.
+
+  Then a world is created and played for a month, about 1.5 s. It checks that newcomers arrive in different ways, with journeys that start the day they joined and cards that tell them. It also checks every person (no negative bankrolls, skills and stakes in range, sane ledgers, at most seven ties), that tonight's events have the world's regulars registered, that final tables mix regulars and unknowns, that the rival keeps the network's index, that a night at Dee's leaves memories, and that a saved world writes the same save and plays on exactly as the original. `world_test years <n> [seed]` runs the long check above (it also fails if any Championship Online bracelet has no winner in the history), and `world_test npc <name> [days]` prints one person's career.
 - `audio_test`: every synthesized sound is audible, finite and in range.
 
 To look at the UI without Unreal:

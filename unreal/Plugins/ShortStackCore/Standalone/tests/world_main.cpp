@@ -6,6 +6,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/World.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -96,8 +97,78 @@ void Invariants(const world::World& W, const std::string& When)
 	Check(W.View().size() == W.People().size(), When + ": the network view is out of step");
 }
 
+/** RiverLine's online calendar: a series in every season of every year, each name used once. */
+void Calendar()
+{
+	const net::Network& Net = net::Shared();
+	std::vector<const net::SeriesInfo*> All;
+	std::set<std::string> SeriesNames;
+	std::map<int, int> PerYear;
+	for (const net::SeriesInfo& Sr : Net.Series())
+	{
+		All.push_back(&Sr);
+		Check(SeriesNames.insert(Sr.Name).second, "a series name is used once: " + Sr.Name);
+		++PerYear[world::YearOf(Sr.FirstDay)];
+		const net::EventTemplate* Main = Net.FindTemplate(Sr.MainEvent);
+		Check(Main && Main->Series == Sr.Id, Sr.Name + " has its Main Event");
+		int Events = 0;
+		int Awards = 0;
+		for (const net::EventTemplate& T : Net.Templates())
+		{
+			if (T.Series == Sr.Id)
+			{
+				++Events;
+				Awards += T.Bracelet || T.Ring ? 1 : 0;
+				Check(T.OnlyDay >= Sr.FirstDay && T.OnlyDay <= Sr.LastDay, T.Name + " is inside its series");
+			}
+		}
+		// (2026's three were written by hand: Summer Slam's events are history, only its Main Event is kept.)
+		Check(Events == Sr.Events || Sr.Id == "mm" || Sr.Id == "rcop" || Sr.Id == "slam", Sr.Name + " lists its events");
+		Check(Awards == Sr.Bracelets + Sr.Rings, Sr.Name + " counts its rings and bracelets");
+		if (Sr.Short == "TCO")
+		{
+			Check(Sr.Bracelets >= 30, Sr.Name + " has its bracelet events");
+		}
+		if (Sr.Short == "RING")
+		{
+			Check(Sr.Rings >= 20, Sr.Name + " has its ring events");
+		}
+	}
+	for (int Y = 2027; Y <= 2040; ++Y)
+	{
+		Check(PerYear[Y] == 9, "nine series in " + std::to_string(Y));
+	}
+	Check(PerYear[2026] >= 4, "December 2026 has a series of its own");
+	std::sort(All.begin(), All.end(), [](const net::SeriesInfo* A, const net::SeriesInfo* B) { return A->FirstDay < B->FirstDay; });
+	for (size_t K = 1; K < All.size(); ++K)
+	{
+		Check(All[K]->FirstDay > All[K - 1]->LastDay, All[K]->Name + " doesn't overlap " + All[K - 1]->Name);
+	}
+	// Every event in every series has a name of its own; every template its own id.
+	std::set<std::string> Names;
+	std::set<std::string> Ids;
+	int SeriesEvents = 0;
+	for (const net::EventTemplate& T : Net.Templates())
+	{
+		Check(Ids.insert(T.Id).second, "a template id is used once: " + T.Id);
+		if (!T.Series.empty())
+		{
+			++SeriesEvents;
+			Check(Names.insert(T.Name).second, "an event name is used once: " + T.Name);
+		}
+	}
+	// Seats into the RCOP Main carry over to every year's Main Event.
+	Check(Net.TicketOf("rcop27-main") == "rcop-main", "every RCOP Main takes an RCOP Main seat");
+	net::EventInstance Next;
+	Check(Net.NextFor("rcop-main", static_cast<double>(world::YearStart(2027)) * net::MinutesPerDay, Next) && Net.TemplateOf(Next).Id == "rcop27-main",
+		"a seat won in 2027 is for RCOP 2027");
+	Check(net::DateLabel(world::DayOn(2028, 2, 29)) == "Feb 29" && net::DateLabel(world::DayOn(2028, 3, 1)) == "Mar 1", "leap days are on the calendar");
+	std::printf("calendar: %zu series, %d series events, %zu templates\n", All.size(), SeriesEvents, Net.Templates().size());
+}
+
 int Checks()
 {
+	Calendar();
 	const auto T0 = std::chrono::steady_clock::now();
 	world::World W;
 	W.Create(1234u, NightOne);
@@ -161,6 +232,26 @@ int Checks()
 	std::printf("yesterday: %d results, %d regulars and %d others at final tables\n", Finished, Ours, Anonymous);
 	Check(!W.Events().empty(), "things happened");
 	Check(W.BoardValue(net::Board::Season, W.Find("gh0stfold"), W.Clock()) > 0.0, "the rival has season points");
+	// Newcomers: new names keep arriving, each with a story and a journey that starts the day they joined.
+	{
+		int Newcomers = 0;
+		std::set<int> Kinds;
+		for (const world::Npc& N : W.People())
+		{
+			if (N.Came == world::Arrival::None)
+			{
+				continue;
+			}
+			++Newcomers;
+			Kinds.insert(static_cast<int>(N.Came));
+			Check(!N.Path.empty() && N.Path.front().Kind == world::StepKind::Joined && N.Path.front().Day == N.Arrived, N.Name + "'s journey starts the day they joined");
+			const world::Profile P = W.ProfileOf(N.Id);
+			Check(!P.Came.empty() && !P.Journey.empty() && P.Arrived == N.Arrived, N.Name + "'s card tells how they got here");
+		}
+		Check(Newcomers >= 10 && Kinds.size() >= 4, "newcomers arrive, in different ways (" + std::to_string(Newcomers) + ")");
+		const world::Profile Rival = W.ProfileOf(W.Find("gh0stfold"));
+		Check(!Rival.Came.empty() && !Rival.Journey.empty() && Rival.Arrived < 0, "an old hand's card starts before the story did");
+	}
 
 	// Save and load: a world that's saved carries on exactly as one that isn't.
 	std::string Saved;
@@ -249,6 +340,21 @@ int Years(int Count, uint32_t Seed)
 					static_cast<long long>(H.Prize / 100));
 			}
 		}
+	}
+	// Every online bracelet that has been played for is in the history books too.
+	for (const net::SeriesInfo& Sr : net::Shared().Series())
+	{
+		if (Sr.Bracelets == 0 || static_cast<double>(Sr.LastDay + 3) * net::MinutesPerDay > W.Clock() || static_cast<double>(Sr.FirstDay) * net::MinutesPerDay < W.StartedAt())
+		{
+			continue;
+		}
+		int Won = 0;
+		for (const world::Honor& H : W.Honors())
+		{
+			const net::EventTemplate* T = net::Shared().FindTemplate(H.EventId.substr(0, H.EventId.find('@')));
+			Won += T && T->Series == Sr.Id && T->Bracelet ? 1 : 0;
+		}
+		Check(Won == Sr.Bracelets, Sr.Name + ": every bracelet has a winner (" + std::to_string(Won) + " of " + std::to_string(Sr.Bracelets) + ")");
 	}
 	// Every big one that has finished has a champion in the history books.
 	for (int Day = static_cast<int>(W.StartedAt() / 1440.0); Day < static_cast<int>(W.Clock() / 1440.0); ++Day)

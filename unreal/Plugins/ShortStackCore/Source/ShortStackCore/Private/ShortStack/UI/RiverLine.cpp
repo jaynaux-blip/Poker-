@@ -115,6 +115,17 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 		case Screen::Boot: Boot(Now); break;
 		case Screen::Lobby: LobbyPages(Now); break;
 		case Screen::Table:
+		{
+			// A player card (a name at the table caught the player's eye) holds the table's input while it's up.
+			const bool Card = CardShown >= 0;
+			const Pointer Held = UI.Ptr;
+			if (Card)
+			{
+				UI.Ptr.Pressed = false;
+				UI.Ptr.Released = false;
+				UI.Ptr.Wheel = 0.0f;
+				UI.Ptr.Active = false;
+			}
 			if (S.Tiled && S.TableCount() >= 2)
 			{
 				Tiles(Now);
@@ -123,7 +134,13 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 			{
 				Table(Now);
 			}
+			if (Card)
+			{
+				UI.Ptr = Held;
+				PlayerCard(Now);
+			}
 			break;
+		}
 		case Screen::Results: ResultsScreen(Now); break;
 		}
 		FinishedToasts(Now);
@@ -722,7 +739,19 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 		C->FillRoundRect({Fl.X - 2.0f, Fl.Y - 2.0f, Fl.W + 4.0f, Fl.H + 4.0f}, 3.5f, Hex(0x0b1220));
 		rlnet_detail::NetFlag(*C, Seat.Country, Fl.X, Fl.Y, Fl.W, Fl.H);
 	}
-	UI.Text(Seat.Name, Plate.X + 62.0f, P.Y - 6.0f, Ts(16.0f, 700, Seat.IsRival ? Hex(0xff8da0) : pal::Ink, Align::Left, Baseline::Alphabetic, false, Pw - 72.0f));
+	// Someone the world knows: their name opens their card.
+	const auto Known = IsHero ? S.FieldNpc.end() : S.FieldNpc.find(Seat.Id);
+	bool NameHover = false;
+	if (Known != S.FieldNpc.end())
+	{
+		const Ui::ClickState St = UI.Clickable("seatcard" + Seat.Id, Plate);
+		NameHover = St.Hover;
+		if (St.Clicked)
+		{
+			ShowPlayer(Known->second, Now);
+		}
+	}
+	UI.Text(Seat.Name, Plate.X + 62.0f, P.Y - 6.0f, Ts(16.0f, 700, Seat.IsRival ? Hex(0xff8da0) : NameHover ? pal::Accent : pal::Ink, Align::Left, Baseline::Alphabetic, false, Pw - 72.0f));
 	if (S.T && S.T->Spec.BountyCents > 0 && !S.T->Spec.MysteryBounty)
 	{
 		const auto Head = S.Bounties.find(Seat.Id);

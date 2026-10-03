@@ -99,6 +99,109 @@ double Percentile(std::vector<double> V, double P)
 	const size_t K = static_cast<size_t>(sim::Clamp(P, 0.0, 1.0) * static_cast<double>(V.size() - 1));
 	return V[K];
 }
+const char* const Months[12] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+
+/** Small numbers as words ("six years"), the rest as digits. */
+std::string Count(int N)
+{
+	static const char* const Words[13] = {"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"};
+	return N >= 0 && N <= 12 ? Words[N] : std::to_string(N);
+}
+
+/** "in the $1.10 Night Owl Turbo", "in FROST #12: $55 Iron Gambit PKO". */
+std::string In(const std::string& Event)
+{
+	return Event.find('#') != std::string::npos ? "in " + Event : "in the " + Event;
+}
+
+std::string Prize(Chips C)
+{
+	return C >= 1000000 ? net::MoneyShort(C) : Money(C);
+}
+
+/** How they arrived, in a sentence (the same every time for the same person). */
+std::string ArrivalText(const World& W, const Npc& N)
+{
+	const uint32_t H = Fnv1a(N.Name);
+	const int Years = std::max(1, (N.Arrived - N.Joined) / 365);
+	int Y = 0;
+	int M = 1;
+	int D = 1;
+	CivilDate(N.Arrived, Y, M, D);
+	const Npc* With = W.Get(N.CameWith);
+	switch (N.Came)
+	{
+	case Arrival::FirstTimer:
+	{
+		static const char* const Lines[4] = {"Downloaded RiverLine on a slow night and never uninstalled it.", "Signed up for the freerolls. Stayed for everything else.",
+			"A friend's referral link, a ten-dollar deposit, and here they are.", "Watched one hand over a roommate's shoulder. Opened an account that night."};
+		return Lines[H % 4];
+	}
+	case Arrival::CameOfAge: return "Turned " + std::to_string(std::max(18, Y - N.Born)) + " in " + Months[M - 1] + " and registered the same night.";
+	case Arrival::SiteClosed:
+	{
+		static const char* const Sites[10] = {"NorthPot", "BluffHarbor", "AceLine", "ChipCity", "Felt Republic", "PocketRocket", "RiverBend Poker", "Saltwater Poker",
+			"CardRoom 88", "Tiltproof"};
+		return std::string("Came over when ") + Sites[H % 10] + " closed its doors, after " + Count(Years) + (Years == 1 ? " year" : " years") + " grinding there.";
+	}
+	case Arrival::LiveCrossover:
+	{
+		static const char* const Cities[3][4] = {{"Austin", "Toronto", "Atlantic City", "Reno"}, {"London", "Berlin", "Lyon", "Dublin"}, {"Sydney", "Seoul", "Manila", "Auckland"}};
+		const int R = std::max(0, std::min(2, static_cast<int>(N.Home)));
+		return std::string("A regular in the ") + Cities[R][H % 4] + " card rooms for " + Count(Years) + (Years == 1 ? " year" : " years") + ", now trying the online grind.";
+	}
+	case Arrival::Comeback: return "First played online in " + std::to_string(YearOf(N.Joined)) + ". Back after " + Count(Years) + " years away.";
+	case Arrival::HomeGame:
+		return With ? "Talked into it by " + With->Name + " and the rest of their home game." : "Talked into it by the regulars at a home game.";
+	case Arrival::Watched:
+		if (With && With->Streams && With->Followers >= 2000)
+		{
+			return "Signed up after a night of watching " + With->Name + " stream on Kast.";
+		}
+		return With ? "Signed up after watching " + With->Name + " at a televised final table." : "Signed up after a night of watching poker on TV.";
+	case Arrival::Streamer: return "Started a Kast channel on day one: learning poker live, one stream at a time.";
+	case Arrival::None:
+	case Arrival::Count: break;
+	}
+	return "";
+}
+
+/** A step of the journey, in a line. */
+std::string StepText(const Step& S)
+{
+	const std::string Place = S.Place > 0 ? Ordinal(S.Place) : std::string();
+	const std::string Of = S.Of > 0 ? " of " + Grouped(S.Of) : std::string();
+	const std::string Paid = S.Amount > 0 ? " (" + Prize(S.Amount) + ")" : std::string();
+	switch (S.Kind)
+	{
+	case StepKind::Joined: return "Joined RiverLine.";
+	case StepKind::FirstEvent: return "First tournament: " + Place + Of + " " + In(S.What) + Paid + ".";
+	case StepKind::FirstCash:
+		// Out of the money but a head or two collected: a bounty, not a cash.
+		return S.Of > 0 && S.Place > std::max(1, S.Of / 5) ? "First money: a " + Prize(S.Amount) + " bounty " + In(S.What) + "."
+														  : "First cash: " + Prize(S.Amount) + " for " + Place + " " + In(S.What) + ".";
+	case StepKind::FirstFinalTable: return "First final table: " + Place + Of + " " + In(S.What) + Paid + ".";
+	case StepKind::FirstWin: return "First title: won " + (S.What.find('#') != std::string::npos ? S.What : "the " + S.What) + Paid + ".";
+	case StepKind::FirstLive: return "First live event: " + Place + Of + " " + In(S.What) + Paid + ".";
+	case StepKind::FirstSeries: return "First series title: " + S.What + Paid + ".";
+	case StepKind::Bracelet: return "Won a Championship bracelet: " + S.What + Paid + ".";
+	case StepKind::Ring: return "Won a Grand Circuit ring: " + S.What + Paid + ".";
+	case StepKind::Major: return "Won " + (S.What.find('#') != std::string::npos ? S.What : "the " + S.What) + Paid + ".";
+	case StepKind::BigScore: return "Career-best score: " + Prize(S.Amount) + " for " + Place + " " + In(S.What) + ".";
+	case StepKind::MovedUp: return "Moved up to " + S.What + " stakes.";
+	case StepKind::MovedDown: return "Moved back down to " + S.What + " stakes.";
+	case StepKind::TurnedPro: return "Quit the day job to play full time.";
+	case StepKind::Sponsored: return "Signed with " + S.What + ".";
+	case StepKind::StartedStreaming: return "Went live on Kast for the first time.";
+	case StepKind::WentBroke: return "Went broke.";
+	case StepKind::Break: return "Stepped away from the tables.";
+	case StepKind::Returned: return S.What == "broke" ? "Rebuilt a bankroll and came back." : S.What == "retired" ? "Came out of retirement." : "Back from a break.";
+	case StepKind::Retired: return "Retired.";
+	case StepKind::PlayerOfYear: return "Named " + S.What + " for " + std::to_string(YearOf(S.Day - 1)) + ".";
+	case StepKind::Count: break;
+	}
+	return "";
+}
 } // namespace worldtext_detail
 
 using namespace worldtext_detail;
@@ -180,6 +283,35 @@ Profile World::ProfileOf(int Id) const
 		{
 			Pr.Story.push_back(net::DateLabel(sim::DayAt(It->At)) + ", " + std::to_string(YearOf(sim::DayAt(It->At))) + ": " + Title);
 		}
+	}
+	// The journey: how they got here, then the steps since.
+	if (N.Came != Arrival::None)
+	{
+		Pr.Came = ArrivalText(*this, N);
+		Pr.Arrived = N.Arrived;
+		Pr.New = Day - N.Arrived <= 30;
+	}
+	else
+	{
+		Profile::Moment Start;
+		Start.Day = N.Joined;
+		switch (N.From)
+		{
+		case Origin::Cast: Pr.Came = "One of the faces at the Riverside and Dee's Tuesday game."; break;
+		case Origin::Directory: Pr.Came = "Streaming poker on Kast since " + std::to_string(Pr.Since) + "."; break;
+		case Origin::Discovered: Pr.Came = "Nobody was following them until " + (N.BestEvent.empty() ? std::string("one big night") : "the " + N.BestEvent) + "."; break;
+		default: Pr.Came = "On the scene since " + std::to_string(Pr.Since) + ": one of RiverLine's regulars."; break;
+		}
+		Start.Text = "Playing since " + std::to_string(Pr.Since) + ".";
+		Pr.Journey.push_back(Start);
+	}
+	for (const Step& S : N.Path)
+	{
+		Profile::Moment Mo;
+		Mo.Day = S.Day;
+		Mo.Kind = S.Kind;
+		Mo.Text = StepText(S);
+		Pr.Journey.push_back(std::move(Mo));
 	}
 	return Pr;
 }
@@ -491,6 +623,14 @@ std::string World::Describe(int Id) const
 			++Story;
 		}
 	}
+	// How they got here, and the steps since.
+	const Profile Pr = ProfileOf(N.Id);
+	O << "  arrival: " << (N.Came == Arrival::None ? std::string("before the story began") : std::string(ArrivalName(N.Came)) + ", " + net::DateLabel(N.Arrived) + " " + std::to_string(YearOf(N.Arrived)))
+	  << " - " << Pr.Came << "\n";
+	for (const Profile::Moment& M : Pr.Journey)
+	{
+		O << "    " << net::DateLabel(M.Day) << " " << YearOf(M.Day) << "  " << M.Text << "\n";
+	}
 	return O.str();
 }
 
@@ -537,6 +677,21 @@ std::string World::Report() const
 	}
 	O << "  people " << Roster.size() << ": active " << ByStatus[0] << ", break " << ByStatus[1] << ", broke " << ByStatus[2] << ", retired " << ByStatus[3] << "  (target " << Target << ")\n";
 	O << "  origins: founding " << ByOrigin[0] << ", cast " << ByOrigin[1] << ", streamers " << ByOrigin[2] << ", newcomers " << ByOrigin[3] << ", discovered " << ByOrigin[4] << "\n";
+	{
+		std::array<int, static_cast<int>(Arrival::Count)> Came{};
+		int Fresh = 0;
+		for (const Npc& N : Roster)
+		{
+			++Came[static_cast<size_t>(N.Came)];
+			Fresh += N.Came != Arrival::None && Day - N.Arrived <= 30 ? 1 : 0;
+		}
+		O << "  newcomers: " << Fresh << " in the last month;";
+		for (int K = 1; K < static_cast<int>(Arrival::Count); ++K)
+		{
+			O << " " << ArrivalName(static_cast<Arrival>(K)) << " " << Came[static_cast<size_t>(K)] << (K + 1 < static_cast<int>(Arrival::Count) ? "," : "");
+		}
+		O << "\n";
+	}
 	O << "  active by stakes: micro " << ByTier[1] << ", low " << ByTier[2] << ", mid " << ByTier[3] << ", high " << ByTier[4] << "   live: none " << ByLive[0] << ", local " << ByLive[1]
 	  << ", regional " << ByLive[2] << ", circuit " << ByLive[3] << ", championship " << ByLive[4] << ", high roller " << ByLive[5] << "\n";
 	O << "  professionals " << Pros << ", streamers " << Streamers << ", backed " << Backed << ", skill >= .75: " << Elite << "\n";

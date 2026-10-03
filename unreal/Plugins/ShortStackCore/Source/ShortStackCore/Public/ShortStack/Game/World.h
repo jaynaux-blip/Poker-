@@ -149,6 +149,22 @@ enum class Origin : int
 	Discovered, // an unknown who made a name with one result
 };
 
+/** How a newcomer found their way to RiverLine (the first line of their story). */
+enum class Arrival : int
+{
+	None,          // they were here before the story began
+	FirstTimer,    // downloaded it one night and stayed
+	CameOfAge,     // old enough at last, registered that night
+	SiteClosed,    // their old site shut down
+	LiveCrossover, // a live regular trying the online grind
+	Comeback,      // played years ago, back after a long time away
+	HomeGame,      // talked into it by a home game's regulars
+	Watched,       // signed up after watching someone (a stream, a Main Event)
+	Streamer,      // started a Kast channel on day one
+	Count,
+};
+SHORTSTACKCORE_API const char* ArrivalName(Arrival A);
+
 /** When they play. */
 enum class Plan : int
 {
@@ -266,6 +282,43 @@ struct Tie
 	int Since = 0; // day
 };
 
+/** A step on someone's way (the player card's journey). */
+enum class StepKind : int
+{
+	Joined,          // arrived on RiverLine
+	FirstEvent,      // their first tournament
+	FirstCash,
+	FirstFinalTable,
+	FirstWin,
+	FirstLive,       // their first live event
+	FirstSeries,     // a series title
+	Bracelet,
+	Ring,
+	Major,           // a Main Event, the Summit
+	BigScore,        // a new career-best score of note
+	MovedUp,
+	MovedDown,
+	TurnedPro,
+	Sponsored,
+	StartedStreaming,
+	WentBroke,
+	Break,
+	Returned,
+	Retired,
+	PlayerOfYear,
+	Count,
+};
+
+struct Step
+{
+	int Day = 0;
+	StepKind Kind = StepKind::Joined;
+	std::string What; // the event, the stakes, the sponsor
+	int Place = 0;    // a finish (or a count: followers, a tier)
+	int Of = 0;       // entries
+	Chips Amount = 0;
+};
+
 struct Npc
 {
 	int Id = 0;
@@ -343,6 +396,11 @@ struct Npc
 	std::string Trip;    // the series
 	Identity Is = Identity::OnlineGrinder;
 	Identity Began = Identity::OnlineGrinder; // what they were on their first day
+	// A newcomer's arrival (the card's journey starts here) and the steps since, oldest first (a few kept).
+	Arrival Came = Arrival::None;
+	int Arrived = 0;    // the day they arrived (Came != None)
+	int CameWith = -1;  // who brought them, or who they watched (-1: nobody)
+	std::vector<Step> Path;
 	std::vector<Tie> Ties;
 	std::map<std::string, int> Tickets; // event template id -> seats won
 
@@ -500,6 +558,17 @@ struct Profile
 	std::string Bond;                  // what they think of the player ("" for a stranger)
 	std::vector<std::string> Memories; // why, newest first
 	std::vector<std::string> Story;    // headlines about them, newest first
+	// The journey: how they got here and the steps since.
+	std::string Came; // "Came over when NorthPot closed its doors, after six years there." ("" for an old hand)
+	int Arrived = -1;    // the day they arrived on RiverLine (-1: before the story began)
+	bool New = false;    // arrived in the last month
+	struct Moment
+	{
+		int Day = 0;
+		StepKind Kind = StepKind::Joined;
+		std::string Text;
+	};
+	std::vector<Moment> Journey; // oldest first
 };
 
 // ------------------------------------------------------------------ the live calendar
@@ -546,6 +615,10 @@ SHORTSTACKCORE_API std::vector<LiveEvent> LiveFestivals(int Day, int Span);
 /** The calendar year of a world day (Day 0 is October 5, 2026) and the day each year begins. */
 SHORTSTACKCORE_API int YearOf(int Day);
 SHORTSTACKCORE_API int YearStart(int Year);
+/** The calendar date of a world day (Month and DayOfMonth from 1). */
+SHORTSTACKCORE_API void CivilDate(int Day, int& Year, int& Month, int& DayOfMonth);
+/** The world day of a calendar date. */
+SHORTSTACKCORE_API int DayOn(int Year, int Month, int DayOfMonth);
 
 /** Someone entered in an event. */
 struct Entry

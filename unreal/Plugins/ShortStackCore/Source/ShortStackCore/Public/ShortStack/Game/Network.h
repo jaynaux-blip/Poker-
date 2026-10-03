@@ -112,6 +112,10 @@ struct EventTemplate
 	std::string SeatTicket; // satellites: the template a seat enters
 	Chips SeatValueCents = 0;
 	std::string Blurb;
+	bool Main = false;     // a series' main event (a major)
+	bool Bracelet = false; // the winner gets a Championship bracelet (The Championship Online)
+	bool Ring = false;     // the winner gets a Grand Circuit ring (Ring Rush)
+	std::string Ticket;    // the seat it takes ("" = its own id; every year's RCOP Main takes "rcop-main")
 };
 
 struct EventInstance
@@ -248,6 +252,8 @@ struct SeriesInfo
 	uint32_t Color2 = 0x3b82f6;
 	std::string Tagline;
 	std::string MainEvent; // template id
+	int Bracelets = 0;     // events that award a bracelet
+	int Rings = 0;         // events that award a ring
 };
 
 enum class NewsKind : int
@@ -294,7 +300,15 @@ public:
 	const std::vector<EventTemplate>& Templates() const { return Temps; }
 	const std::vector<SeriesInfo>& Series() const { return AllSeries; }
 	const EventTemplate& TemplateOf(const EventInstance& E) const { return Temps[static_cast<size_t>(E.Template)]; }
-	const SeriesInfo* FindSeries(const std::string& Id) const;
+	/** A template by id (nullptr when there is none). */
+	SHORTSTACKCORE_API const EventTemplate* FindTemplate(const std::string& Id) const;
+	/** The ticket an event takes (a satellite seat into it): its own id, or "rcop-main" for every year's RCOP Main. */
+	SHORTSTACKCORE_API std::string TicketOf(const std::string& TemplateId) const;
+	/** What a ticket is worth (the seat's value), 0 when nothing awards it. */
+	SHORTSTACKCORE_API Chips SeatValue(const std::string& Ticket) const;
+	/** The next event a ticket enters, starting at or after From. */
+	SHORTSTACKCORE_API bool NextFor(const std::string& Ticket, double From, EventInstance& Out) const;
+	SHORTSTACKCORE_API const SeriesInfo* FindSeries(const std::string& Id) const;
 	/** The series running at this time (or the next one to start). */
 	SHORTSTACKCORE_API const SeriesInfo* CurrentSeries(double Now) const;
 	int RivalIndex() const { return Rival; }
@@ -345,6 +359,10 @@ private:
 	void BuildPlayers();
 	void BuildSchedule();
 	void BuildSeries();
+	/** Every year's online series after RCOP 2026 (NetworkSeries.cpp), appended after the schedule (saves keep template indices). */
+	void BuildCalendar();
+	/** The lookups: templates by id and by day, tickets and what they're worth. */
+	void Index();
 	void Instances(int Day, std::vector<EventInstance>& Out) const;
 	EventInstance Make(int TemplateIndex, double Start) const;
 	/** Finished events in [From, To) by finish time, with results. */
@@ -372,6 +390,11 @@ private:
 	std::array<std::vector<double>, 5> TierWeights; // final-table odds of each player by the event's tier
 	std::vector<EventTemplate> Temps;
 	std::vector<SeriesInfo> AllSeries;
+	std::map<std::string, int> TempIndex;            // template id -> index
+	std::vector<int> Recurring;                      // templates on a weekly pattern
+	std::map<int, std::vector<int>> OnDay;           // one-off templates by day
+	std::map<std::string, std::vector<int>> Takes;   // ticket -> the one-off events it enters, by day
+	std::map<std::string, Chips> SeatValues;         // ticket -> what a seat is worth
 	int Rival = -1;
 	mutable std::map<std::string, EventResult> Results;
 	mutable std::map<int, std::vector<EventInstance>> DayCache;

@@ -35,6 +35,8 @@ void RiverLine::ShowPlayer(int Index, double Now)
 {
 	CardShown = Index;
 	CardAt = Now;
+	CardTab = 0;
+	CardTabAt = Now;
 }
 
 void RiverLine::PlayerCard(double Now)
@@ -79,9 +81,15 @@ void RiverLine::PlayerCard(double Now)
 	}
 	if (P.Streams)
 	{
-		NetPill(*C, "KAST \xC2\xB7 " + Grouped(P.Followers), Nx, R.Y + 40.0f, Hex(0xa855f7), true, 10.0f);
+		Nx += NetPill(*C, "KAST \xC2\xB7 " + Grouped(P.Followers), Nx, R.Y + 40.0f, Hex(0xa855f7), true, 10.0f) + 8.0f;
 	}
-	UI.Text(P.Known + "  \xC2\xB7  " + std::to_string(P.Age) + "  \xC2\xB7  on the scene since " + std::to_string(P.Since), R.X + 142.0f, R.Y + 98.0f,
+	if (P.New)
+	{
+		NetPill(*C, "NEW FACE", Nx, R.Y + 40.0f, pal::Accent, true, 10.0f);
+	}
+	const std::string Since = P.Arrived >= 0 ? "on RiverLine since " + net::DateLabel(P.Arrived) + ", " + std::to_string(world::YearOf(P.Arrived))
+											 : "on the scene since " + std::to_string(P.Since);
+	UI.Text(P.Known + "  \xC2\xB7  " + std::to_string(P.Age) + "  \xC2\xB7  " + Since, R.X + 142.0f, R.Y + 98.0f,
 		Ts(16.0f, 600, CardSoft, Align::Left, Baseline::Alphabetic, false, 640.0f));
 	UI.Text(P.Stakes + "  \xC2\xB7  " + P.Live + "  \xC2\xB7  " + P.Style, R.X + 142.0f, R.Y + 124.0f, Ts(14.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, false, 700.0f));
 	// Status and the close button.
@@ -190,9 +198,40 @@ void RiverLine::PlayerCard(double Now)
 		}
 	}
 
-	// Middle and right: recent results, what they think of you, their story, who they run with.
+	// Middle and right: the overview (recent results, what they think of you, their story, who they run with), or the
+	// journey (how they got here and every step since).
 	const float Mx = R.X + 392.0f;
 	const float Mw = R.X + R.W - 26.0f - Mx;
+	{
+		const char* Tabs[2] = {"OVERVIEW", "JOURNEY"};
+		float Tx = Mx + Mw;
+		for (int K = 1; K >= 0; --K)
+		{
+			const float Tw = UI.Measure(Tabs[K], 11.0f, 800) + 26.0f;
+			Tx -= Tw;
+			const Rect Tr{Tx, R.Y + 272.0f, Tw, 26.0f};
+			const Ui::ClickState St = UI.Clickable(std::string("cardtab") + Tabs[K], Tr);
+			if (St.Clicked && CardTab != K)
+			{
+				CardTab = K;
+				CardTabAt = Now;
+			}
+			const bool On = CardTab == K;
+			UI.RRect(Tr, 13.0f, On ? NetA(pal::Accent, 0.18f) : St.Hover ? Hex(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? pal::Accent : CardRule);
+			NetSpaced(*C, Tabs[K], Tr.X + Tw / 2.0f, Tr.Y + 17.0f, 11.0f, 800, On ? CardInk : pal::Muted, 1.2f, Align::Center);
+			Tx -= 8.0f;
+		}
+	}
+	if (CardTab == 1)
+	{
+		CardJourney(P, Mx, R.Y + 292.0f, Mw, R.Y + R.H - 20.0f - (R.Y + 292.0f), Now);
+		C->SetAlpha(A0);
+		if (Outside.Clicked && !Inside.Hover)
+		{
+			CardShown = -1;
+		}
+		return;
+	}
 	float My = R.Y + 292.0f;
 	NetSpaced(*C, "RECENT RESULTS", Mx, My, 11.0f, 800, pal::Muted, 1.6f);
 	My += 10.0f;
@@ -266,6 +305,104 @@ void RiverLine::PlayerCard(double Now)
 	if (Outside.Clicked && !Inside.Hover)
 	{
 		CardShown = -1;
+	}
+}
+void RiverLine::CardJourney(const world::Profile& P, float X, float Y, float W, float H, double Now)
+{
+	const float In = NetEase((Now - CardTabAt) / 0.4);
+	const int Today = net::DayOf(S.WorldMinutes());
+	NetSpaced(*C, "HOW THEY GOT HERE", X, Y, 11.0f, 800, pal::Muted, 1.6f);
+	float Ty = NetParagraph(*C, P.Came, X, Y + 26.0f, W, 17.0f, 600, CardInk, 23.0f, 2);
+	if (P.Arrived >= 0)
+	{
+		const int Ago = Today - P.Arrived;
+		const std::string When = Ago <= 0 ? "today" : Ago == 1 ? "yesterday" : Ago < 60 ? std::to_string(Ago) + " days ago" : Ago < 730 ? std::to_string(Ago / 30) + " months ago"
+																																: std::to_string(Ago / 365) + " years ago";
+		UI.Text("Joined RiverLine " + net::DateLabel(P.Arrived) + ", " + std::to_string(world::YearOf(P.Arrived)) + "  \xC2\xB7  " + When, X, Ty + 18.0f,
+			Ts(13.0f, 600, P.New ? pal::Accent : pal::Muted));
+		Ty += 22.0f;
+	}
+	Ty += 24.0f;
+	C->FillRect({X, Ty - 10.0f, W, 1.0f}, CardRule);
+	NetSpaced(*C, "THE JOURNEY", X, Ty + 10.0f, 11.0f, 800, pal::Muted, 1.6f);
+	Ty += 22.0f;
+	// The timeline: the first steps always, then the latest (as many as fit).
+	const float Row = 33.0f;
+	const int Fit = std::max(1, static_cast<int>((Y + H - Ty) / Row));
+	std::vector<const world::Profile::Moment*> Shown;
+	const int Total = static_cast<int>(P.Journey.size());
+	if (Total <= Fit)
+	{
+		for (const world::Profile::Moment& M : P.Journey)
+		{
+			Shown.push_back(&M);
+		}
+	}
+	else
+	{
+		const int Head = std::min(4, Fit / 2);
+		for (int K = 0; K < Head; ++K)
+		{
+			Shown.push_back(&P.Journey[static_cast<size_t>(K)]);
+		}
+		Shown.push_back(nullptr); // the gap
+		for (int K = Total - (Fit - Head - 1); K < Total; ++K)
+		{
+			Shown.push_back(&P.Journey[static_cast<size_t>(K)]);
+		}
+	}
+	const float Lx = X + 118.0f;
+	if (!Shown.empty())
+	{
+		C->FillRect({Lx - 1.0f, Ty + 8.0f, 2.0f, Nf(Shown.size() - 1) * Row * In}, Hex(0x2b4a6e));
+	}
+	for (size_t K = 0; K < Shown.size(); ++K)
+	{
+		const float Ry = Ty + Nf(K) * Row;
+		const float Ri = NetEase((Now - CardTabAt - 0.04 * static_cast<double>(K)) / 0.35);
+		const float A0 = C->GetAlpha();
+		C->SetAlpha(A0 * Ri);
+		const world::Profile::Moment* M = Shown[K];
+		if (!M)
+		{
+			for (int Dot = 0; Dot < 3; ++Dot)
+			{
+				C->FillCircle(Lx, Ry + 2.0f + Nf(Dot) * 6.0f, 1.8f, pal::Dim);
+			}
+			C->SetAlpha(A0);
+			continue;
+		}
+		Color Col = Hex(0x5f7fa6);
+		switch (M->Kind)
+		{
+		case world::StepKind::Joined: Col = pal::Accent; break;
+		case world::StepKind::FirstEvent:
+		case world::StepKind::FirstCash:
+		case world::StepKind::FirstFinalTable:
+		case world::StepKind::FirstLive: Col = Hex(0x27d3c3); break;
+		case world::StepKind::FirstWin:
+		case world::StepKind::FirstSeries:
+		case world::StepKind::Major:
+		case world::StepKind::BigScore:
+		case world::StepKind::PlayerOfYear: Col = pal::Gold; break;
+		case world::StepKind::Bracelet:
+		case world::StepKind::Ring: Col = Hex(0xf28a3a); break;
+		case world::StepKind::MovedUp:
+		case world::StepKind::TurnedPro:
+		case world::StepKind::Sponsored:
+		case world::StepKind::StartedStreaming: Col = Hex(0x3b82f6); break;
+		case world::StepKind::WentBroke:
+		case world::StepKind::MovedDown: Col = pal::Red; break;
+		case world::StepKind::Break:
+		case world::StepKind::Retired: Col = pal::Dim; break;
+		default: break;
+		}
+		UI.Text(net::DateLabel(M->Day), X + 100.0f, Ry + 13.0f, Ts(12.0f, 700, pal::Muted, Align::Right, Baseline::Alphabetic, true));
+		UI.Text(std::to_string(world::YearOf(M->Day)), X + 100.0f, Ry + 27.0f, Ts(10.0f, 600, pal::Dim, Align::Right, Baseline::Alphabetic, true));
+		C->FillCircle(Lx, Ry + 8.0f, 6.0f, Hex(0x0c1626));
+		C->FillCircle(Lx, Ry + 8.0f, 4.5f, Col);
+		UI.Text(M->Text, Lx + 18.0f, Ry + 13.0f, Ts(13.5f, 600, M->Kind == world::StepKind::Joined ? CardInk : CardSoft, Align::Left, Baseline::Alphabetic, false, W - 140.0f));
+		C->SetAlpha(A0);
 	}
 }
 } // namespace ui

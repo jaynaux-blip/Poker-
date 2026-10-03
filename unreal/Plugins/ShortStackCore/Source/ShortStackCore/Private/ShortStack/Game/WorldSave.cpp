@@ -270,7 +270,8 @@ void World::Write(std::string& Out) const
 			L << F(V);
 		}
 		L << I(N.Streams) << I(N.Followers) << Esc(N.Sponsor) << I(N.Pro) << I(N.Rival) << I(N.Anchored) << I(static_cast<int>(N.St)) << I(N.Until) << I(N.Joined)
-		  << I(N.LastDay) << I(N.Left) << I(N.TripFrom) << I(N.TripUntil) << Esc(N.Trip) << I(static_cast<int>(N.Is)) << I(static_cast<int>(N.Began));
+		  << I(N.LastDay) << I(N.Left) << I(N.TripFrom) << I(N.TripUntil) << Esc(N.Trip) << I(static_cast<int>(N.Is)) << I(static_cast<int>(N.Began))
+		  << I(static_cast<int>(N.Came)) << I(N.Arrived) << I(N.CameWith);
 		Emit(L);
 		if (!N.Recent.empty())
 		{
@@ -307,6 +308,15 @@ void World::Write(std::string& Out) const
 				R.push_back(Rec({Esc(T.first), I(T.second)}));
 			}
 			Emit(Line("tickets") << I(N.Id) << JoinRecords(R));
+		}
+		if (!N.Path.empty())
+		{
+			std::vector<std::string> R;
+			for (const Step& St : N.Path)
+			{
+				R.push_back(Rec({I(St.Day), I(static_cast<int>(St.Kind)), Esc(St.What), I(St.Place), I(St.Of), I(St.Amount)}));
+			}
+			Emit(Line("path") << I(N.Id) << JoinRecords(R));
 		}
 	}
 	for (const Pending& P : Queue)
@@ -540,6 +550,16 @@ bool World::Read(const std::vector<std::string>& Fields)
 		N.Trip = C.Str();
 		N.Is = static_cast<Identity>(C.Small());
 		N.Began = static_cast<Identity>(C.Small());
+		// Newcomers' arrivals (saves from before them have none).
+		const int Came = C.Small();
+		N.Came = Came > 0 && Came < static_cast<int>(Arrival::Count) ? static_cast<Arrival>(Came) : Arrival::None;
+		N.Arrived = C.Small();
+		N.CameWith = C.Small();
+		if (N.Came == Arrival::None)
+		{
+			N.Arrived = 0;
+			N.CameWith = -1;
+		}
 		if (N.Id < 0 || N.Id > 1000000)
 		{
 			return true;
@@ -591,7 +611,7 @@ bool World::Read(const std::vector<std::string>& Fields)
 		}
 		Roster[static_cast<size_t>(N.Id)] = std::move(N);
 	}
-	else if (Kind == "recent" || Kind == "years" || Kind == "ties" || Kind == "tickets")
+	else if (Kind == "recent" || Kind == "years" || Kind == "ties" || Kind == "tickets" || Kind == "path")
 	{
 		Npc* N = Person(C.Int());
 		if (!N)
@@ -634,6 +654,18 @@ bool World::Read(const std::vector<std::string>& Fields)
 				T.Strength = Rc.Flt();
 				T.Since = Rc.Small();
 				N->Ties.push_back(T);
+			}
+			else if (Kind == "path")
+			{
+				Step St;
+				St.Day = Rc.Small();
+				const int K = Rc.Small();
+				St.Kind = K >= 0 && K < static_cast<int>(StepKind::Count) ? static_cast<StepKind>(K) : StepKind::Joined;
+				St.What = Rc.Str();
+				St.Place = Rc.Small();
+				St.Of = Rc.Small();
+				St.Amount = Rc.Int();
+				N->Path.push_back(std::move(St));
 			}
 			else
 			{

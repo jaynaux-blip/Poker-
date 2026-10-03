@@ -64,6 +64,25 @@ The whole online career is played from a first-person desk. The apartment is the
 
 - **Schedule.** About 270 recurring events: dailies across the stakes ($0.25 hypers to a $525 High Roller), PKOs, mystery bounties, flip & gos, six-max, Omaha, deepstacks, step satellites, and weekly majors (Monday Madness, Thursday Heater, the $1,050 RiverLine Millions with $3M guaranteed, the $215 Sunday Showdown with $1M guaranteed). Every event has a registration curve, late registration, a field that shrinks, a final table and an overlay when the guarantee isn't met.
 - **Series.** Micro Madness (Oct 1 to 14: 70 events, $5M guaranteed, an $11 Main Event for $1M) is running on Night One. RCOP 2026 (Oct 18 to Nov 8: 154 events, $100M guaranteed, a $5,250 Main Event with $25M guaranteed) is announced, with a step-satellite ladder from $2.20. Summer Slam is history.
+- **The series calendar (built).** After RCOP 2026, RiverLine runs nine series a year, every year through 2040, starting with Holiday Heist in December 2026. Each year:
+
+  | When | Series | What it is |
+  |---|---|---|
+  | January | A new winter series every year (Frostbite Open, Black Ice Classic, Polar Night Festival...) | 48 events, a $215 Main Event for $2M |
+  | March | Ring Rush | Grand Circuit Online: 28 ring events, the $1,050 Ring Main Event among them |
+  | Late April | A new spring series every year (Spring Fever Festival, Bloom & Bust...) | Micro and low stakes, a $55 Main Event for $1M |
+  | June | The Championship Online | 38 bracelet events before the Main Event in Las Vegas, the last of them the $5,300 Online Championship for $5M |
+  | July | A new high-roller series every year (Top Floor Series, Thin Air Classic...) | $530 to $25,500, a $10,300 Main Event for $3M |
+  | August | Summer Slam | 85 events, a $1,050 Main Event for $10M |
+  | October | Micro Madness | 70 events, an $11 Main Event for $1M |
+  | October to November | RCOP | 132 events, the $5,250 Main Event for $25M |
+  | December | A new holiday series every year (Holiday Heist, Snowed-In Series, The Midwinter Ball...) | A $109 Main Event for $1.5M |
+
+  - **Names:** the seasonal series never repeat a name, and the flagships carry their year ("RCOP '27 #129: $5,250 Main Event").
+  - **Events:** every event has a name of its own, such as "$215 Iron Gambit PKO" or "$5.50 Relentless Sprint Deepstack"; no two events anywhere in the calendar share one.
+  - **Awards:** online bracelets and rings count on a player's record like live ones, and every bracelet's winner goes into the history.
+  - **RCOP seats:** a seat won on the step-satellite ladder is good for the next RCOP Main Event, whatever the year.
+  - **New weeklies:** twelve new weekly tournaments with names of their own fill out the schedule: Moonlight Marathon, Tuesday Tycoon, High Noon Showdown, Hump Day Heater, Lucky Sevens, The Ante Up, Friday Fireworks, Twilight Omaha, Saturday Night Stampede, Sunday Brunch Stack, The Sunday Slingshot and The Bankroll Builder.
 - **Players.** 1,600 named regulars from 28 countries, with skill, volume, stakes, lifetime records and weekly form, including Team RiverLine pros and the rival, gh0stfold. Events the player isn't in are resolved statistically: the regulars who make each final table are drawn by skill, volume and stakes.
 - **Screen names.** Handles read like the ones people really pick: slang compounds ("VelvetRiver", "lazy_owl"), real names in each country's style ("kenji.k", "pablo_ortega", "BramvdBerg"), poker words in the players' own languages ("Kartenhai", "ElTiburon", "ReiDoRio"), grind jokes ("OneMoreTable", "LandlordHatesMe") and the odd gamer tag ("n00bflop", "BlindsTTV"). High-stakes pros favor understated names ("YMorozov", "mbouchard"). Table fields are named the same way and seeded with real regulars from the right stakes (about 3% of the field, 4 to 40 players), so the names on the leaderboards turn up at your tables.
 - **Avatars.** Every account has a profile picture: one of 35 vector icons (sharks, owls, foxes, wolves, crowns, rockets, robots, pizza, eight balls and more) on a colored disc. Names pick fitting icons in any language: "ElTiburon" and "C0ldSh4rk" get sharks, "CoolerKing" a crown, "CoffeeAndCards" a mug. Everyone else draws one from the set by name. Frames mark status: a chip edge or colored ring for flair, gold with a star for Team RiverLine, neon for you and the rival, whose ghost no one else may wear. Seats show the player's country flag on the avatar.
@@ -286,6 +305,21 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
   - Click any name in RiverLine to open a player card. It shows only what's public: results, reputation, form, years, what they know about you, their story and who they run with.
   - The leaderboards (Overall, Online, Live, the season and the years) and the news are the world's real results, with you on them.
   - Dee and the cast text you when someone you know wins, moves up or retires.
+- **New faces (built).** A few new players join every week for as long as the save runs. Each arrives one of eight ways, which shapes who they are, and their card says so:
+
+  | How they arrive | What their card says | What they're like |
+  |---|---|---|
+  | First timer | "Downloaded RiverLine on a slow night and never uninstalled it." | Brand new, micro stakes |
+  | Came of age | "Turned 18 in March and registered the same night." | Young; talents are more common |
+  | Site closed | "Came over when NorthPot closed its doors, after six years grinding there." | Experienced, a small roll |
+  | Live crossover | "A regular in the Lyon card rooms for eight years, now trying the online grind." | Good live reads, part-time online |
+  | Comeback | "First played online in 2014. Back after twelve years away." | Rusty but experienced |
+  | Home game | "Talked into it by GG_queen and the rest of their home game." | Knows someone already in the world (they're tied) |
+  | Watched | "Signed up after a night of watching chipleader_carla stream on Kast." | Inspired by a real streamer or champion in the world |
+  | Streamer | "Started a Kast channel on day one: learning poker live, one stream at a time." | Streams from the start |
+
+  - **Their journey:** every card has a Journey tab with dated steps, kept for good: joined, first tournament, first cash (or first bounty), first final table, first title, first live event, stake moves, bracelets and rings, career-best scores, turning pro, sponsorships, breaks, comebacks and retirement. Old hands' journeys start with "Playing since 2019" and grow from there.
+  - **Where you meet them:** up to five of the world's players sit at your table, a new face or two first. Their names open their cards at the table itself, as well as anywhere on RiverLine. Players who joined in the last month carry a NEW tag.
 
 ## 9. RPG systems
 

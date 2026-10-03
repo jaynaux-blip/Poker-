@@ -50,6 +50,7 @@ struct Option
 	bool Underground = false;
 	int Cap = 0;
 	std::string Template; // online template id ("" live)
+	std::string Final;    // satellites: the Main Event the chain of seats ends at
 	LiveLevel Level = LiveLevel::None;
 	Region Where = Region::Americas;
 	std::set<int> Invited; // the Summit
@@ -74,7 +75,7 @@ std::string TicketKey(const Pending& P)
 		return P.Kind == static_cast<int>(LiveKind::ChampionshipMain) ? "championship-main" : "";
 	}
 	const size_t At = P.Id.rfind('@');
-	return At == std::string::npos ? P.Id : P.Id.substr(0, At);
+	return net::Shared().TicketOf(At == std::string::npos ? P.Id : P.Id.substr(0, At));
 }
 
 /** Where a satellite's chain of seats ends (step 1 -> step 2 -> ... -> the Main Event). */
@@ -84,20 +85,12 @@ std::string FinalTarget(const std::string& Ticket)
 	std::string At = Ticket;
 	for (int Guard = 0; Guard < 8; ++Guard)
 	{
-		bool Next = false;
-		for (const net::EventTemplate& T : Net.Templates())
-		{
-			if (T.Id == At && T.Fmt == net::Format::Satellite && !T.SeatTicket.empty())
-			{
-				At = T.SeatTicket;
-				Next = true;
-				break;
-			}
-		}
-		if (!Next)
+		const net::EventTemplate* T = Net.FindTemplate(At);
+		if (!T || T->Fmt != net::Format::Satellite || T->SeatTicket.empty())
 		{
 			break;
 		}
+		At = T->SeatTicket;
 	}
 	return At;
 }
@@ -108,14 +101,7 @@ Chips SeatValueOf(const std::string& Ticket)
 	{
 		return 1000000;
 	}
-	for (const net::EventTemplate& T : net::Shared().Templates())
-	{
-		if (T.SeatTicket == Ticket && T.SeatValueCents > 0)
-		{
-			return T.SeatValueCents;
-		}
-	}
-	return 0;
+	return net::Shared().SeatValue(Ticket);
 }
 
 /** Notable enough for the record (a player card's recent results, the news). */
@@ -318,6 +304,55 @@ void Sim::Post(World& W, double At, EventKind K, int Who, const std::string& Wha
 	{
 		W.Log.erase(W.Log.begin(), W.Log.begin() + 1000);
 	}
+	// The turns of a career go on their journey too.
+	if (Who < 0 || Who >= static_cast<int>(W.Roster.size()))
+	{
+		return;
+	}
+	Npc& N = W.Roster[static_cast<size_t>(Who)];
+	const int Day = sim::DayAt(At);
+	switch (K)
+	{
+	case EventKind::MovedUp: Mark(N, Day, StepKind::MovedUp, What, Value); break;
+	case EventKind::MovedDown: Mark(N, Day, StepKind::MovedDown, What, Value); break;
+	case EventKind::WentBroke: Mark(N, Day, StepKind::WentBroke, What); break;
+	case EventKind::Retired: Mark(N, Day, StepKind::Retired, What, Value, 0, Amount); break;
+	case EventKind::Break: Mark(N, Day, StepKind::Break, What, Value); break;
+	case EventKind::Returned: Mark(N, Day, StepKind::Returned, What, Value); break;
+	case EventKind::Sponsored: Mark(N, Day, StepKind::Sponsored, What); break;
+	case EventKind::StartedStreaming: Mark(N, Day, StepKind::StartedStreaming, What, Value); break;
+	case EventKind::PlayerOfYear: Mark(N, Day, StepKind::PlayerOfYear, What, Value); break;
+	case EventKind::Milestone:
+		if (What == "turned-pro")
+		{
+			Mark(N, Day, StepKind::TurnedPro, What, Value);
+		}
+		break;
+	default: break;
+	}
+}
+
+void Sim::Mark(Npc& N, int Day, StepKind K, const std::string& What, int Place, int Of, Chips Amount)
+{
+	if (N.Faded)
+	{
+		return;
+	}
+	Step S;
+	S.Day = Day;
+	S.Kind = K;
+	S.What = What;
+	S.Place = Place;
+	S.Of = Of;
+	S.Amount = Amount;
+	N.Path.push_back(std::move(S));
+	// The beginning stays (how they arrived and their firsts); after that, the latest.
+	const size_t Keep = 6;
+	const size_t Most = 16;
+	if (N.Path.size() > Most)
+	{
+		N.Path.erase(N.Path.begin() + static_cast<std::ptrdiff_t>(Keep));
+	}
 }
 
 void Sim::SetMood(Npc& N, Momentum M, int Day)
@@ -407,7 +442,9 @@ Pending Sim::OnlineEvent(World& W, const net::EventInstance& E)
 	S -= Has(K, KindSatellite) ? 0.02 : 0.0;
 	S -= !T.Series.empty() ? 0.01 : 0.0;
 	P.Strength = S;
-	P.Major = E.Pool >= 100000000 || T.Id == "mm-main" || T.Id == "rcop-main" || T.Id == "rcop-mini" || T.Id == "rcop-micro" || T.Id == "slam-main";
+	P.Major = T.Main || E.Pool >= 100000000;
+	P.Bracelet = T.Bracelet;
+	P.Ring = T.Ring;
 	return P;
 }
 
@@ -497,7 +534,7 @@ void Sim::PlanDay(World& W, int Day)
 				if (Found == Alive.end())
 				{
 					net::EventInstance Next;
-					Found = Alive.emplace(T.SeatTicket, Net.Next(FinalTarget(T.SeatTicket), E.Start, Next)).first;
+					Found = Alive.emplace(T.SeatTicket, Net.NextFor(FinalTarget(T.SeatTicket), E.Start, Next)).first;
 				}
 				if (!Found->second)
 				{
@@ -511,6 +548,7 @@ void Sim::PlanDay(World& W, int Day)
 			O.Featured = T.Featured;
 			O.Weekly = T.OnlyDay == -9999 && T.Days != 0x7f;
 			O.Template = T.Id;
+			O.Final = T.Fmt == net::Format::Satellite ? FinalTarget(T.SeatTicket) : std::string();
 			O.Cap = std::max(2, E.Entries * 7 / 10);
 			SeriesOn = SeriesOn || !T.Series.empty();
 			Online.push_back(std::move(O));
@@ -694,7 +732,7 @@ void Sim::PlanDay(World& W, int Day)
 			{
 				for (Option& O : Online)
 				{
-					auto T = N.Tickets.find(O.Template);
+					auto T = N.Tickets.find(net::Shared().TicketOf(O.Template));
 					if (T != N.Tickets.end() && static_cast<int>(O.P.Who.size()) < O.Cap)
 					{
 						Enter(O, 0, true, 1, 1.0f);
@@ -770,7 +808,9 @@ void Sim::PlanDay(World& W, int Day)
 					}
 					if (Has(Kn, KindSatellite))
 					{
-						Wt *= (N.Formats & LikeSatellite) ? 2.0 : 0.3;
+						// Nobody keeps winning seats they already hold.
+						const bool Holding = N.Tickets.count(O.P.Ticket) > 0 || (!O.Final.empty() && N.Tickets.count(O.Final) > 0);
+						Wt *= Holding ? 0.0 : (N.Formats & LikeSatellite) ? 2.0 : 0.3;
 					}
 					if (Has(Kn, KindTurbo) || Has(Kn, KindHyper))
 					{
@@ -1035,11 +1075,12 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 	}
 	if (Win && P.Bracelet)
 	{
-		AddFame(N, Rep::Live, P.Kind == static_cast<int>(LiveKind::ChampionshipMain) ? 40.0 : 12.0);
+		// An online bracelet is still a bracelet (the live ones travel further).
+		AddFame(N, P.Online ? Rep::Online : Rep::Live, P.Online ? 8.0 : P.Kind == static_cast<int>(LiveKind::ChampionshipMain) ? 40.0 : 12.0);
 	}
 	if (Win && P.Ring)
 	{
-		AddFame(N, Rep::Live, P.Major ? 8.0 : 4.0);
+		AddFame(N, P.Online ? Rep::Online : Rep::Live, P.Major ? 8.0 : P.Online ? 3.0 : 4.0);
 	}
 	if (Win && !P.Series.empty() && P.Online)
 	{
@@ -1060,6 +1101,61 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 		N.Rings += P.Ring ? 1 : 0;
 		N.Titles += P.Online && !P.Series.empty() ? 1 : 0;
 		N.Majors += P.Major ? 1 : 0;
+	}
+	// Their journey: the firsts, and the titles that last.
+	{
+		int Events = 0;
+		int Cashes = 0;
+		int Fts = 0;
+		int Wins = 0;
+		for (const Ledger& G : N.Totals)
+		{
+			Events += G.Events;
+			Cashes += G.Cashes;
+			Fts += G.FinalTables;
+			Wins += G.Wins;
+		}
+		const int LiveEvents = N.Totals[static_cast<size_t>(Venue::Live)].Events + N.Totals[static_cast<size_t>(Venue::Underground)].Events;
+		if (Events == 1)
+		{
+			Mark(N, Day, StepKind::FirstEvent, P.Name, Place, P.Entries, Prize);
+		}
+		if (!P.Online && LiveEvents == 1 && Events > 1)
+		{
+			Mark(N, Day, StepKind::FirstLive, P.Name, Place, P.Entries, Prize);
+		}
+		if (Cash && Cashes == 1 && Events > 1)
+		{
+			Mark(N, Day, StepKind::FirstCash, P.Name, Place, P.Entries, Prize);
+		}
+		if (Ft && Fts == 1 && !Win)
+		{
+			Mark(N, Day, StepKind::FirstFinalTable, P.Name, Place, P.Entries, Prize);
+		}
+		if (Win && Wins == 1)
+		{
+			Mark(N, Day, StepKind::FirstWin, P.Name, Place, P.Entries, Prize);
+		}
+		else if (Win && P.Bracelet)
+		{
+			Mark(N, Day, StepKind::Bracelet, P.Name, Place, P.Entries, Prize);
+		}
+		else if (Win && P.Ring)
+		{
+			Mark(N, Day, StepKind::Ring, P.Name, Place, P.Entries, Prize);
+		}
+		else if (Win && P.Major)
+		{
+			Mark(N, Day, StepKind::Major, P.Name, Place, P.Entries, Prize);
+		}
+		else if (Win && P.Online && !P.Series.empty() && N.Titles == 1)
+		{
+			Mark(N, Day, StepKind::FirstSeries, P.Name, Place, P.Entries, Prize);
+		}
+		else if (Prize > BestBefore && Prize >= 1000000 && Events > 1)
+		{
+			Mark(N, Day, StepKind::BigScore, P.Name, Place, P.Entries, Prize);
+		}
 	}
 	// The record a card shows.
 	if (Notable(P, Place, Prize, N.Tier))
@@ -2130,7 +2226,15 @@ void Sim::Newcomers(World& W, int Day, Rng& R)
 	{
 		Npc N = Sim::Rookie(W, R, Day);
 		const bool Talent = N.Potential > 0.75f || N.Overall() > 0.55f;
+		const bool Friend = N.Came == Arrival::HomeGame && N.CameWith >= 0;
+		const int With = N.CameWith;
 		const int Id = Sim::Add(W, std::move(N));
+		if (Friend)
+		{
+			// The friend who talked them into it: they know each other from the home game.
+			Sim::Bind(W, Id, With, TieKind::HomeGame, 0.5f, Day);
+			Sim::Bind(W, With, Id, TieKind::HomeGame, 0.5f, Day);
+		}
 		if (Talent)
 		{
 			Sim::Post(W, static_cast<double>(Day) * 1440.0, EventKind::Debut, Id, "", 0, 0);
@@ -2274,7 +2378,7 @@ void ExpireTickets(Npc& N, double Now)
 	{
 		net::EventInstance Next;
 		const std::string Target = FinalTarget(It->first);
-		if (It->first != "championship-main" && !Net.Next(It->first, Now, Next) && !Net.Next(Target, Now, Next))
+		if (It->first != "championship-main" && !Net.NextFor(It->first, Now, Next) && !Net.NextFor(Target, Now, Next))
 		{
 			// The event is gone: the site credits the seat's value.
 			N.Bankroll += SeatValueOf(It->first) * It->second;
