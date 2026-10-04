@@ -133,7 +133,7 @@ const std::vector<std::string>& Questions()
 const std::vector<std::string>& Answers()
 {
 	static const std::vector<std::string> V = {"a couple of years. seriously only this year", "raise it. every time. folding AQ is for the 3am version of me",
-		"Dee's game sometimes. the Riverside on sundays", "biggest? not yet. ask me after tonight", "walk away. water. come back. mostly I fail", "bankroll management and a lot of folding",
+		"Dee's game sometimes. the Embercrest on sundays", "biggest? not yet. ask me after tonight", "walk away. water. come back. mostly I fail", "bankroll management and a lot of folding",
 		"tournament chips aren't money. near the bubble, losing hurts more than winning helps", "four on a good night. two when I'm tired", "softer than you'd think at this hour",
 		"!gear in the panels, everything I bought off GearDrop", "I pick up shifts. this is the dream though", "enough to make rent if I don't punt",
 		"after the last tournament. so... maybe", "pocket nines. don't ask", "RiverLine shows the stats. I just read them"};

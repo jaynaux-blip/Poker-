@@ -569,13 +569,77 @@ def _file_hash(path):
         return hashlib.md5(f.read()).hexdigest()
 
 
-def import_meshes(force=False):
+LOOK_CLASSES = ("Texture2D", "Material", "MaterialInstanceConstant")
+
+
+def _looks(folder):
+    """The textures and materials under a folder, by package path."""
+    looks = []
+    for asset_path in eal.list_assets(folder, recursive=True, include_folder=False):
+        if str(eal.find_asset_data(asset_path).asset_class_path.asset_name) in LOOK_CLASSES:
+            looks.append(asset_path.split(".")[0])
+    return looks
+
+
+def _fresh_looks(folder, path, mesh):
+    """Brings a changed glb's textures and materials to its existing mesh. Importing over an existing mesh updates only
+    its geometry (the textures and materials already there stay, so a rebaked print never arrives): the file is
+    imported again into a scratch folder, its textures and materials take the old ones' places, and the mesh's slots
+    take them; the mesh itself stays the same object, so whatever uses it still does. Skipped, with a warning, if
+    something outside the folder uses one of the old ones."""
+    old = _looks(folder)
+    for look in old:
+        for user in eal.find_package_referencers_for_asset(look, False):
+            if not str(user).startswith(folder + "/"):
+                unreal.log_warning(f"ShortStack: {look} is used by {user}; keeping {folder}'s old textures")
+                return False
+    scratch = folder + "_Fresh"
+    if eal.does_directory_exist(scratch):
+        eal.delete_directory(scratch)
+    task = unreal.AssetImportTask()
+    task.filename = path
+    task.destination_path = scratch
+    task.automated = True
+    task.replace_existing = True
+    task.save = False
+    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+    fresh_mesh = None
+    for asset_path in eal.list_assets(scratch, recursive=True, include_folder=False):
+        asset = eal.load_asset(asset_path)
+        if isinstance(asset, type(mesh)):
+            fresh_mesh = asset
+            break
+    if fresh_mesh is None:
+        unreal.log_error(f"ShortStack: importing {path} again produced no mesh")
+        eal.delete_directory(scratch)
+        return False
+    for look in old:
+        eal.delete_asset(look)
+    for look in _looks(scratch):
+        eal.rename_asset(look, folder + look[len(scratch):])
+    if isinstance(mesh, unreal.StaticMesh):
+        for i, slot in enumerate(fresh_mesh.static_materials):
+            if i < len(mesh.static_materials):
+                mesh.set_material(i, slot.material_interface)
+    else:
+        mats = mesh.get_editor_property("materials")
+        for i, slot in enumerate(fresh_mesh.get_editor_property("materials")):
+            if i < len(mats):
+                mats[i].material_interface = slot.material_interface
+        mesh.set_editor_property("materials", mats)
+    eal.delete_directory(scratch)
+    eal.save_directory(folder)
+    return True
+
+
+def import_meshes(force=False, only=None):
     """Imports the props exported by art/blender/build.py (unreal/Art/Meshes/*.glb).
 
     Each file lands in /Game/ShortStack/Meshes/<Name>/ with its materials and textures, and
     its mesh (static, or skeletal for a rigged file like SK_Arms) is named <Name>, which is where
     NightOneStage looks for it. A file is
-    reimported only when it changed (its hash is kept as metadata on the mesh).
+    reimported only when it changed (its hash is kept as metadata on the mesh), textures and materials included (see
+    _fresh_looks). `only` limits it to those names (with force, to reimport a few files).
     Returns how many files were imported.
     """
     import os
@@ -588,13 +652,16 @@ def import_meshes(force=False):
         if not file.lower().endswith(".glb"):
             continue
         name = os.path.splitext(file)[0]
+        if only is not None and name not in only:
+            continue
         path = os.path.join(src_dir, file)
         folder = f"{MESH_DIR}/{name}"
         mesh_path = f"{folder}/{name}"
         digest = _file_hash(path)
-        if not force and eal.does_asset_exist(mesh_path):
+        reimport = eal.does_asset_exist(mesh_path)
+        if reimport:
             existing = eal.load_asset(mesh_path)
-            if existing and eal.get_metadata_tag(existing, "SourceHash") == digest:
+            if not force and existing and eal.get_metadata_tag(existing, "SourceHash") == digest:
                 continue
         task = unreal.AssetImportTask()
         task.filename = path
@@ -615,6 +682,8 @@ def import_meshes(force=False):
         if mesh is None:
             unreal.log_error(f"ShortStack: importing {file} produced no mesh")
             continue
+        if reimport:
+            _fresh_looks(folder, path, mesh)
         if name.startswith("SM_Wear_") and isinstance(mesh, unreal.StaticMesh):
             # Glasses and hats are small and seen up close: their own triangles, not Nanite (whose fallback for a mesh
             # this small cuts the frames' rounded corners down to chamfers).
@@ -638,10 +707,11 @@ TEXTURE_DIR = "/Game/ShortStack/Textures"
 
 
 def import_textures(force=False):
-    """Imports the masks made by art/blender (unreal/Art/Textures/<Group>/*.png, e.g. the shirt prints from prints.py).
+    """Imports the textures made by art/blender (unreal/Art/Textures/<Group>/*.png): the shirt prints from prints.py
+    (Clothing, linear masks) and the Embercrest's brand art from brand.py (Brand, color).
 
-    Each lands in /Game/ShortStack/Textures/<Group>/<Name> as a linear mask (no sRGB), reimported only when the file
-    changed (its hash kept as metadata). Returns how many were imported.
+    Each lands in /Game/ShortStack/Textures/<Group>/<Name>, reimported only when the file changed (its hash kept as
+    metadata). Returns how many were imported.
     """
     import os
     src_root = os.path.join(unreal.Paths.project_dir(), "Art", "Textures")
@@ -677,8 +747,9 @@ def import_textures(force=False):
             if not isinstance(tex, unreal.Texture2D):
                 unreal.log_error(f"ShortStack: importing {file} produced no texture")
                 continue
-            tex.set_editor_property("srgb", False)
-            tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_MASKS)
+            masks = group.lower() == "clothing"
+            tex.set_editor_property("srgb", not masks)
+            tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_MASKS if masks else unreal.TextureCompressionSettings.TC_DEFAULT)
             eal.set_metadata_tag(tex, "SourceHash", digest)
             eal.save_loaded_asset(tex)
             unreal.log(f"ShortStack: imported {group}/{file} as {asset_path}")

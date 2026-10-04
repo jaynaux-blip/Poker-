@@ -172,7 +172,7 @@ public:
 	/** Someone not at the table speaks (the tournament floor over the PA). */
 	void Announce(const FString& Speaker, const FString& Line) { Lines.Add({Speaker, Line, Time}); }
 
-	// ------------------------------------------------------------ a tournament (the Riverside)
+	// ------------------------------------------------------------ a tournament (the Embercrest)
 	/**
 	 * Plays the hero's table of a tournament instead of a cash game: each hand is the tournament's next
 	 * tick at the hero's table, the seats follow its seating (6-max, physical seats around the hero), the
@@ -193,7 +193,7 @@ public:
 	void Hold() { bHolding = true; }
 	/** Seats the tournament's next hand now (while the hero walks in), without dealing it. */
 	void PrepareNext();
-	/** The Riverside's room tone instead of the Back Room's (set before Begin). */
+	/** The Embercrest's room tone instead of the Back Room's (set before Begin). */
 	bool bCardRoomTone = false;
 	/** How full the room is (0..1), for the card room's murmur and chips. */
 	void SetCrowd(float Crowd);

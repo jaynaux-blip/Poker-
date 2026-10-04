@@ -283,7 +283,7 @@ const TCHAR* Prints[] = {nullptr, TEXT("T_Print_Stripes"), TEXT("T_Print_Breton"
 	TEXT("T_Print_Dots"), TEXT("T_Print_Camo")};
 // How many repeats across the shirt's layout each print reads best at.
 const float PrintTiling[] = {1.0f, 7.0f, 9.0f, 5.0f, 3.0f, 7.0f, 9.0f, 2.0f};
-const TCHAR* Graphics[] = {nullptr, TEXT("T_Graphic_Riverside"), TEXT("T_Graphic_AllIn"), TEXT("T_Graphic_Chip"), TEXT("T_Graphic_BadBeat"),
+const TCHAR* Graphics[] = {nullptr, TEXT("T_Graphic_Embercrest"), TEXT("T_Graphic_AllIn"), TEXT("T_Graphic_Chip"), TEXT("T_Graphic_BadBeat"),
 	TEXT("T_Graphic_Sunset"), TEXT("T_Graphic_Number")};
 const TCHAR* Heads[] = {nullptr, TEXT("SM_Wear_Cap"), TEXT("SM_Wear_Beanie"), TEXT("SM_Wear_Trilby")};
 const TCHAR* Eyes[] = {nullptr, TEXT("SM_Wear_Glasses"), TEXT("SM_Wear_Shades"), TEXT("SM_Wear_Aviators")};

@@ -190,7 +190,7 @@ The LED room kit is polled rather than pushed: call `Session::RoomGlow(Now)` eve
 
 **Nights away from the desk**
 
-- The host records Dee's game and the Riverside with `SaveData::NoteBackRoom` and `NoteRiverside`.
+- The host records Dee's game and the Embercrest with `SaveData::NoteBackRoom` and `NoteEmbercrest`.
 - These write `worldnote` lines, and the next session plays them into the world once.
 
 **Debug console commands** (non-shipping builds, `NightOneGameMode.cpp`)

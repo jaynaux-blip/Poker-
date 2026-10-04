@@ -1,4 +1,4 @@
-"""The Riverside Casino's card room: a modular kit for the old showroom of a riverboat casino moored for good in 1994.
+"""The Embercrest Casino's card room: a modular kit for the old showroom of a riverboat casino moored for good in 1994.
 
 The game assembles the room from these pieces (BackRoomStageCardRoom.cpp), each modeled once and instanced:
 - SM_CR_Wall: a 4 m bay of wall. Walnut wainscot with raised panels to the chair rail, a brass inlay in the rail,

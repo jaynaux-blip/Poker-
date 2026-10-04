@@ -194,8 +194,8 @@ void Calendar()
 	std::printf("calendar: %zu series, %d series events, %zu templates\n", All.size(), SeriesEvents, Net.Templates().size());
 }
 
-/** The Riverside's card room over four weeks: the schedule, its crowds, and the cast by habit and money. */
-void RiversideWeeks(const world::World& Base)
+/** The Embercrest's card room over four weeks: the schedule, its crowds, and the cast by habit and money. */
+void EmbercrestWeeks(const world::World& Base)
 {
 	world::World W = Base;
 	const int First = net::DayOf(W.Clock()) + 1;
@@ -206,7 +206,7 @@ void RiversideWeeks(const world::World& Base)
 	int Doubles = 0;
 	int Tracked = 0;
 	// The room's regulars: who they are, how often they come, how many a night.
-	const std::vector<int> Regulars = W.RiversideRegulars();
+	const std::vector<int> Regulars = W.EmbercrestRegulars();
 	const std::set<int> RegularSet(Regulars.begin(), Regulars.end());
 	std::map<int, int> RegularNights;
 	int NightlyRegulars = 0;
@@ -233,8 +233,8 @@ void RiversideWeeks(const world::World& Base)
 					NightlyRegulars += std::string(O.T->Key) == "nightly" ? 1 : 0;
 				}
 				const world::Npc* N = W.Get(Id);
-				Check(N && N->Playing(), "the Riverside registered someone who isn't playing");
-				for (const live::CastMember& C : live::RiversideCast())
+				Check(N && N->Playing(), "the Embercrest registered someone who isn't playing");
+				for (const live::CastMember& C : live::EmbercrestCast())
 				{
 					if (N && N->Name == C.Name)
 					{
@@ -257,33 +257,33 @@ void RiversideWeeks(const world::World& Base)
 	}
 	Check(PerWeekday[0] == 8 && PerWeekday[1] == 8 && PerWeekday[2] == 8 && PerWeekday[3] == 8 && PerWeekday[4] == 12 && PerWeekday[5] == 12 && PerWeekday[6] == 8,
 		"two events Monday to Thursday and Sunday, three Friday and Saturday");
-	Check(Doubles == 0, "nobody plays two of the Riverside's events in a day");
+	Check(Doubles == 0, "nobody plays two of the Embercrest's events in a day");
 	bool Varies = false;
 	for (size_t K = 1; K < SundayFaces.size(); ++K)
 	{
 		Varies = Varies || SundayFaces[K] != SundayFaces[0];
 	}
 	Check(SundayFaces.size() == 4 && Varies, "the Sunday's faces change from week to week");
-	Check(CastSeen.size() >= 6, "most of the cast play the Riverside in a month (" + std::to_string(CastSeen.size()) + ")");
-	std::printf("riverside: 4 weeks, %zu events, %d registrations the world follows, %zu of the cast seen\n", Ids.size(), Tracked, CastSeen.size());
+	Check(CastSeen.size() >= 6, "most of the cast play the Embercrest in a month (" + std::to_string(CastSeen.size()) + ")");
+	std::printf("embercrest: 4 weeks, %zu events, %d registrations the world follows, %zu of the cast seen\n", Ids.size(), Tracked, CastSeen.size());
 	// The regulars: a room's worth, the same people a month later, and back week after week.
 	int Recurring = 0;
 	for (const auto& It : RegularNights)
 	{
 		Recurring += It.second >= 3 ? 1 : 0;
 	}
-	const std::vector<int> Later = W.RiversideRegulars();
+	const std::vector<int> Later = W.EmbercrestRegulars();
 	int Stayed = 0;
 	for (int Id : Later)
 	{
 		Stayed += RegularSet.count(Id) > 0 ? 1 : 0;
 	}
 	const double PerNightly = Nightlies > 0 ? static_cast<double>(NightlyRegulars) / Nightlies : 0.0;
-	Check(static_cast<int>(Regulars.size()) == world::World::RiversideRegularCount, "the Riverside has its regulars (" + std::to_string(Regulars.size()) + ")");
+	Check(static_cast<int>(Regulars.size()) == world::World::EmbercrestRegularCount, "the Embercrest has its regulars (" + std::to_string(Regulars.size()) + ")");
 	Check(Stayed >= static_cast<int>(Regulars.size()) * 9 / 10, "the regulars are mostly the same people a month later (" + std::to_string(Stayed) + ")");
 	Check(PerNightly >= 5.0, "a Nightly has its regulars (" + std::to_string(PerNightly) + " a night)");
 	Check(Recurring >= static_cast<int>(Regulars.size()) / 2, "most regulars are back three or more times a month (" + std::to_string(Recurring) + ")");
-	std::printf("riverside: %zu regulars, %.1f at a Nightly, %d back three or more times in four weeks, %d still regulars a month on\n", Regulars.size(), PerNightly, Recurring, Stayed);
+	std::printf("embercrest: %zu regulars, %.1f at a Nightly, %d back three or more times in four weeks, %d still regulars a month on\n", Regulars.size(), PerNightly, Recurring, Stayed);
 }
 
 int Checks()
@@ -312,12 +312,12 @@ int Checks()
 		}
 	}
 	Check(Registered > 200, "tonight's events have the world's regulars in them (" + std::to_string(Registered) + ")");
-	// The Riverside's Sunday has its cast.
+	// The Embercrest's Sunday has its cast.
 	{
 		const int Sunday = 6; // Sunday, October 11
 		W.EnsurePlanned(Sunday);
 		bool Planned = false;
-		for (int Id : W.Registered("riverside@" + std::to_string(Sunday)))
+		for (int Id : W.Registered("embercrest@" + std::to_string(Sunday)))
 		{
 			Planned = Planned || W.Get(Id)->Name == "Sal";
 		}
@@ -330,7 +330,7 @@ int Checks()
 	const double Month = Seconds(T1);
 	std::printf("30 days in %.2fs\n", Month);
 	Invariants(W, "day 30");
-	RiversideWeeks(W);
+	EmbercrestWeeks(W);
 	int Finished = 0;
 	int Anonymous = 0;
 	int Ours = 0;
@@ -408,7 +408,7 @@ int Checks()
 		Invariants(Before, "an older save");
 	}
 	{
-		// A save from before the Riverside had regulars of its own: they join on load, once, as the same people.
+		// A save from before the Embercrest had regulars of its own: they join on load, once, as the same people.
 		world::World Fresh;
 		Fresh.Create(4321u, NightOne);
 		std::string Text;

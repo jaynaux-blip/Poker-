@@ -1334,10 +1334,18 @@ void ABackRoomTable::HeroReload(int64 Chips)
 	// Dee counts out a fresh stack and pushes it across.
 	ABackRoomChips* Rack = NewPile(PotSpot() + FVector(26.0, 0.0, 0.0), FRotator::ZeroRotator, 77, static_cast<uint8>(EBackRoomChipStyle::Stack));
 	Rack->SetAmount(Chips);
-	ABackRoomChips* Stack = H->StackPile;
-	auto Land = [Rack, Stack, Chips]() {
-		Stack->SetAmount(Chips);
-		Rack->Destroy();
+	// Held weakly: the sweep lands later, and either pile may be gone by then.
+	const TWeakObjectPtr<ABackRoomChips> Stack = H->StackPile;
+	const TWeakObjectPtr<ABackRoomChips> RackPile = Rack;
+	auto Land = [RackPile, Stack, Chips]() {
+		if (ABackRoomChips* S = Stack.Get())
+		{
+			S->SetAmount(Chips);
+		}
+		if (ABackRoomChips* Pile = RackPile.Get())
+		{
+			Pile->Destroy();
+		}
 	};
 	if (Dealer)
 	{

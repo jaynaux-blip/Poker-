@@ -13,7 +13,7 @@ namespace ss
 namespace live
 {
 /**
- * The Riverside Casino's card room: the city's poker room, in the old showroom of a riverboat casino moored for
+ * The Embercrest Casino's card room: the city's poker room, in the old showroom of a riverboat casino moored for
  * good in 1994. Two or three freezeouts every day for fields of sixty to a hundred and twenty, 6-max and deep
  * (docs/LIVE_TOURNAMENTS.md §4).
  *
@@ -22,7 +22,7 @@ namespace live
  * the host's night all name the same event. The field is the world's: the people it registered, seated by the
  * engine's draw among the room's anonymous regulars. Nobody is moved anywhere but by the engine's balancing.
  */
-constexpr int RiversideTableSize = 6;
+constexpr int EmbercrestTableSize = 6;
 /** The 14 bus across town, each way. */
 constexpr Chips BusFareCents = 290;
 constexpr double TravelMinutes = 20.0;
@@ -31,8 +31,8 @@ constexpr double DeskOpensBefore = 180.0;
 
 struct EventTemplate
 {
-	const char* Key;   // occurrence ids: "riverside-<Key>@<day>" ("riverside@<day>" for the Sunday)
-	const char* Name;  // "Riverside Nightly $120"
+	const char* Key;   // occurrence ids: "embercrest-<Key>@<day>" ("embercrest@<day>" for the Sunday)
+	const char* Name;  // "Embercrest Nightly $120"
 	const char* Short; // "Nightly"
 	int Days;          // weekdays it runs (bit 0 Monday .. bit 6 Sunday)
 	int StartMinute;   // after midnight
@@ -66,7 +66,7 @@ struct Occurrence
 /** The day's events, in start order. */
 SHORTSTACKCORE_API std::vector<Occurrence> Occurrences(int Day);
 SHORTSTACKCORE_API Occurrence FindOccurrence(const std::string& Id);
-SHORTSTACKCORE_API bool IsRiverside(const std::string& EventId);
+SHORTSTACKCORE_API bool IsEmbercrest(const std::string& EventId);
 /** The events the player could still make from World (there before late registration closes), in start order. */
 SHORTSTACKCORE_API std::vector<Occurrence> Reachable(double World, double HoursAhead);
 
@@ -80,19 +80,24 @@ SHORTSTACKCORE_API std::unique_ptr<Tournament> MakeField(const Occurrence& O, in
 inline bool BelowMinimum(const Occurrence& O, int Entrants) { return O.Valid() && Entrants < O.T->MinEntrants; }
 /** The draw's seed for an entry: the same field and the same seats however often the night is opened. */
 SHORTSTACKCORE_API std::string SeedFor(const life::LiveEntry& E, const std::string& HeroName);
+/** The night as the engine drew it for an entry (MakeField from SeedFor), back where its checkpoint left it when
+ *  bRestore and it fits (bRestored says whether it did). A checkpoint from before the casino became the Embercrest
+ *  was drawn under the occurrence's old id: the night is drawn again under that id for it. */
+SHORTSTACKCORE_API std::unique_ptr<Tournament> ResumeField(const Occurrence& O, const life::LiveEntry& E, int Entrants, const std::string& HeroName,
+	const std::vector<ReservedPlayer>& Known, bool bRestore, bool& bRestored);
 
 // ------------------------------------------------------------------ the people with faces
 
-/** Someone you can meet at the Riverside: their name in the field and how they play. */
+/** Someone you can meet at the Embercrest: their name in the field and how they play. */
 struct CastMember
 {
 	const char* Id;   // the tournament player id ("npc:" + Name)
 	const char* Name; // as the field knows them
 	Archetype Type;
 };
-SHORTSTACKCORE_API const std::vector<CastMember>& RiversideCast();
+SHORTSTACKCORE_API const std::vector<CastMember>& EmbercrestCast();
 /**
- * The Riverside's own regulars: locals who play its card room (the names on the cash list), in the living world like
+ * The Embercrest's own regulars: locals who play its card room (the names on the cash list), in the living world like
  * everyone else (world::Origin::Local). Woman: which of the room's bodies they get.
  */
 struct RoomLocal
@@ -112,7 +117,7 @@ SHORTSTACKCORE_API int Habit(const std::string& Name, const Occurrence& O);
 /** A name's own number (FNV-1a): who is a regular, their nights, the same in every save. */
 SHORTSTACKCORE_API uint32_t FaceHash(const std::string& Name);
 /**
- * The same for one of the room's regulars (world::World::RiversideRegulars): most play the Nightly on two or
+ * The same for one of the room's regulars (world::World::EmbercrestRegulars): most play the Nightly on two or
  * three nights of their own, some the noon game, some only the weekend's bigger ones; everyone turns up for a
  * Sunday now and then.
  */

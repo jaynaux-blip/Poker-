@@ -147,7 +147,7 @@ void Tracker(Canvas& C, const Session& S, double Now)
 		C.Text("The story starts tonight.", G.X + G.W / 2.0f, G.Y + G.H / 2.0f - 30.0f, Ts(22.0f, 600, pal::Muted, Align::Center));
 	}
 
-	// Rent, Dee's game and the Riverside.
+	// Rent, Dee's game and the Embercrest.
 	const float Ty = 586.0f;
 	const float Tw = (W - 120.0f - 40.0f) / 3.0f;
 	{
@@ -171,7 +171,7 @@ void Tracker(Canvas& C, const Session& S, double Now)
 	Stat(C, {60.0f + Tw + 20.0f, Ty, Tw, 140.0f}, "DEE'S GAME", L.BackRoomNights > 0 ? Signed(L.BackRoomNetCents) : std::string("\xE2\x80\x94"),
 	     L.BackRoomNetCents > 0 ? pal::Green : (L.BackRoomNetCents < 0 ? pal::Red : pal::Ink),
 	     L.BackRoomNights > 0 ? std::to_string(L.BackRoomNights) + (L.BackRoomNights == 1 ? " night in the back room" : " nights in the back room") : std::string("Laundromat, back room. Ask Dee."));
-	Stat(C, {60.0f + 2.0f * (Tw + 20.0f), Ty, Tw, 140.0f}, "THE RIVERSIDE", L.LiveBestPlace > 0 ? Ordinal(L.LiveBestPlace) : std::string("\xE2\x80\x94"),
+	Stat(C, {60.0f + 2.0f * (Tw + 20.0f), Ty, Tw, 140.0f}, "THE EMBERCREST", L.LiveBestPlace > 0 ? Ordinal(L.LiveBestPlace) : std::string("\xE2\x80\x94"),
 	     L.LiveBestPlace == 1 ? pal::Gold : pal::Ink,
 	     L.LiveEvents > 0 ? std::to_string(L.LiveEvents) + " played \xC2\xB7 " + std::to_string(L.LiveCashes) + " cashed \xC2\xB7 " + Money(L.LiveWonCents) : std::string("Sunday tournament. Bring a buy-in."));
 

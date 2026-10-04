@@ -1270,7 +1270,7 @@ void ANightOneStage::BuildGear()
 	Place(GearPlant, TEXT("SM_Plant"), FVector(-0.13, WinY0, RoomFront - 0.02), 0.0f);
 	Place(GearCurtains, TEXT("SM_Curtains"), FVector(0.0, 0.0, RoomFront), 0.0f);
 	Place(GearRouter, TEXT("SM_Router"), FVector(0.56, WinY0, RoomFront - 0.035), 0.0f);
-	// Mementos on the sill: the Riverside's cup, and the chip from Dee's back room standing in its stand.
+	// Mementos on the sill: the Embercrest's cup, and the chip from Dee's back room standing in its stand.
 	Place(GearTrophy, TEXT("SM_Trophy"), FVector(0.26, WinY0, RoomFront - 0.025), 13.0f);
 	{
 		const FVector At(0.05, WinY0, RoomFront + 0.015);

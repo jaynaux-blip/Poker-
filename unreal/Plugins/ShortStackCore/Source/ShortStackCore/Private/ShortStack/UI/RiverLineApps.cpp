@@ -669,8 +669,8 @@ void RiverLine::BurnerApp(double Now)
 		}
 		if (L.BackRoomNights >= 1 || L.LiveEvents >= 1)
 		{
-			Thread.push_back({false, L.LiveEvents == 0 ? "the riverside runs every day now. noon and seven, a turbo late on weekends. sixty, a hundred people a night. i deal sundays."
-														   : L.LiveCashes > 0 ? "you cashed at the riverside. the floor knows your name now." : "the riverside's there every day. strangers are easier to read than my regulars. mostly."});
+			Thread.push_back({false, L.LiveEvents == 0 ? "the embercrest runs every day now. noon and seven, a turbo late on weekends. sixty, a hundred people a night. i deal sundays."
+														   : L.LiveCashes > 0 ? "you cashed at the embercrest. the floor knows your name now." : "the embercrest's there every day. strangers are easier to read than my regulars. mostly."});
 			if (L.LiveEvents == 0)
 			{
 				Thread.push_back({false, "sal plays the nightly. mrs. park's been playing the noon game since before you were born. start with the nightly."});
@@ -682,7 +682,7 @@ void RiverLine::BurnerApp(double Now)
 		}
 	}
 	// Bubbles, newest at the bottom, above the offers.
-	// Dee's offers are the two games and the Riverside's schedule: a taller strip.
+	// Dee's offers are the two games and the Embercrest's schedule: a taller strip.
 	const float OffersTop = AppH - (BurnerContact == 2 ? 318.0f : 260.0f);
 	float By = OffersTop - 24.0f;
 	const float Mx = 380.0f;
@@ -735,9 +735,9 @@ void RiverLine::BurnerApp(double Now)
 	}
 	if (BurnerContact == 2)
 	{
-		// Dee's two games: the back room's, with a buy-in from the bankroll, and the Riverside's Sunday tournament.
+		// Dee's two games: the back room's, with a buy-in from the bankroll, and the Embercrest's Sunday tournament.
 		const life::Activity* G = life::Find("dee-game");
-		const life::Activity* Rv = life::Find("riverside");
+		const life::Activity* Rv = life::Find("embercrest");
 		if (!G || !Rv)
 		{
 			return;
@@ -785,11 +785,11 @@ void RiverLine::BurnerApp(double Now)
 			}
 		}
 		{
-			// The Riverside: a casino's blue, the next events the bus can still make, and what you've done there.
+			// The Embercrest: a casino's blue, the next events the bus can still make, and what you've done there.
 			const Color Blue = Hex(Rv->Color);
 			UI.RRect(Rr, 16.0f, Hex(0x0b1119), NetA(Blue, 0.45f));
 			UI.Text(Rv->Title, Rr.X + 24.0f, Rr.Y + 36.0f, Ts(20.0f, 800, Text));
-			UI.Text("Riverside Casino card room  \xC2\xB7  6-max freezeouts  \xC2\xB7  the 14 bus, " + Money(live::BusFareCents), Rr.X + Rr.W - 24.0f, Rr.Y + 36.0f,
+			UI.Text("Embercrest Casino card room  \xC2\xB7  6-max freezeouts  \xC2\xB7  the 14 bus, " + Money(live::BusFareCents), Rr.X + Rr.W - 24.0f, Rr.Y + 36.0f,
 				Ts(12.5f, 600, Dim, Align::Right));
 			const std::string Record = L.LiveEvents == 0 ? std::string("Two or three a day, sixty to a hundred and twenty runners. Registration at the desk until late reg closes.")
 				: "Played " + std::to_string(L.LiveEvents) + "  \xC2\xB7  cashed " + std::to_string(L.LiveCashes) +

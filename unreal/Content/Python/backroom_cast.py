@@ -33,7 +33,7 @@ CAST = [
     ("Twitch", "Victor", 2),  # young, wired, bets too much
     ("Mei", "Tuya", 6),       # quiet, sharp, hard to read
     ("Hero", "Mateo", 0),     # you: only your hands, arms and chest are ever seen
-    # The Riverside's Sunday $150 (seats are dealt by the tournament, so no fixed seat).
+    # The Embercrest's Sunday $150 (seats are dealt by the tournament, so no fixed seat).
     ("Ghost", "Kelvin", -1),   # gh0stfold, the online rival, in the flesh
     ("MrsPark", "Sook-ja", -1),  # retired, plays every Sunday, folds everything but aces
     ("Rick", "Bruce", -1),     # car dealership money, splashes around
@@ -43,7 +43,7 @@ CAST = [
     ("ExtraB", "Isaiah", -1),
     ("ExtraC", "Jelena", -1),
     ("ExtraD", "Trey", -1),
-    # The Riverside's regulars (2026-10-03): more faces for the room, each with a look of their own (STYLE).
+    # The Embercrest's regulars (2026-10-03): more faces for the room, each with a look of their own (STYLE).
     ("ExtraE", "Aera", -1),
     ("ExtraF", "Lorenzo", -1),
     ("ExtraG", "Etta", -1),

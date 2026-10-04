@@ -44,11 +44,11 @@ const char* OriginName(Origin O)
 	switch (O)
 	{
 	case Origin::Founding: return "network regular";
-	case Origin::Cast: return "Riverside / Back Room";
+	case Origin::Cast: return "Embercrest / Back Room";
 	case Origin::Directory: return "Kast streamer";
 	case Origin::Rookie: return "newcomer";
 	case Origin::Discovered: return "discovered";
-	case Origin::Local: return "Riverside regular";
+	case Origin::Local: return "Embercrest regular";
 	}
 	return "";
 }
@@ -301,8 +301,8 @@ Profile World::ProfileOf(int Id) const
 		Start.Day = N.Joined;
 		switch (N.From)
 		{
-		case Origin::Cast: Pr.Came = "One of the faces at the Riverside and Dee's Tuesday game."; break;
-		case Origin::Local: Pr.Came = "A regular in the Riverside's card room since " + std::to_string(Pr.Since) + "."; break;
+		case Origin::Cast: Pr.Came = "One of the faces at the Embercrest and Dee's Tuesday game."; break;
+		case Origin::Local: Pr.Came = "A regular in the Embercrest's card room since " + std::to_string(Pr.Since) + "."; break;
 		case Origin::Directory: Pr.Came = "Streaming poker on Kast since " + std::to_string(Pr.Since) + "."; break;
 		case Origin::Discovered: Pr.Came = "Nobody was following them until " + (N.BestEvent.empty() ? std::string("one big night") : "the " + N.BestEvent) + "."; break;
 		default: Pr.Came = "On the scene since " + std::to_string(Pr.Since) + ": one of RiverLine's regulars."; break;

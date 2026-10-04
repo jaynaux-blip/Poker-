@@ -893,7 +893,7 @@ void ABackRoomHUD::DrawHUD()
 	if (Arrive >= 0.0f)
 	{
 		const float A = Smooth(0.6f, 1.8f, Arrive) * (1.0f - Smooth(5.0f, 6.4f, Arrive));
-		Text(GM->IsLive() ? TEXT("R I V E R S I D E    C A S I N O") : TEXT("S P I N    C Y C L E    L A U N D R O M A T"), Fade(Paper, A), W * 0.5f, H * 0.4f, Big, 1.35f, 1);
+		Text(GM->IsLive() ? TEXT("E M B E R C R E S T    C A S I N O") : TEXT("S P I N    C Y C L E    L A U N D R O M A T"), Fade(Paper, A), W * 0.5f, H * 0.4f, Big, 1.35f, 1);
 		Text(GM->IsLive() ? TEXT("the card room   \u00b7   ") + GM->GetLiveName().ToLower() : FString(TEXT("the back room")), Fade(Warm, A), W * 0.5f, H * 0.4f + 50.0f * S, Small, 1.45f, 1);
 		Text(GM->ArrivalDay(), Fade(Dim, A), W * 0.5f, H * 0.4f + 88.0f * S, Small, 1.1f, 1);
 	}
@@ -989,7 +989,7 @@ void ABackRoomHUD::DrawHUD()
 	const FBackRoomPrompt P = Table->GetPrompt();
 	const float Left = 48.0f * S;
 	const bool bLive = GM->IsLive();
-	// Money as the table counts it: dollars at Dee's, tournament chips at the Riverside.
+	// Money as the table counts it: dollars at Dee's, tournament chips at the Embercrest.
 	auto Amount = [bLive](int64 V) { return bLive ? FText::AsNumber(V).ToString() : FString::Printf(TEXT("$%lld"), V); };
 	const float StackW = Text(Amount(P.Stack), Paper, Left, H - 128.0f * S, Big, 1.6f, 0);
 	if (bLive && P.BigBlind > 0)
@@ -1043,21 +1043,57 @@ void ABackRoomHUD::DrawHUD()
 		}
 	}
 
-	// Your turn: what you can do.
+	// Your turn: what you can do, a ladder of keys on the right, the call (or check) lit; the wheel sizes the raise.
+	const FLinearColor Ember(1.0f, 0.42f, 0.14f, 0.95f);
+	const FLinearColor Night(0.015f, 0.025f, 0.055f, 0.66f);
+	// Where the ladder starts and the tournament panel ends, for what else shares the screen's sides.
+	float LadderTop = H;
+	float PanelBottom = 0.0f;
 	if (P.bYourTurn && Phase != EBackRoomPhase::Busted && Phase != EBackRoomPhase::Moving && !GM->IsHeroUp())
 	{
-		const FString Head = P.ToCall > 0 ? Amount(P.ToCall) + TEXT(" to call") : TEXT("Checks to you");
-		Text(Head, Warm, W * 0.5f, H - 150.0f * S, Big, 1.25f, 1);
-		FString Keys = TEXT("[F] Fold     ");
-		Keys += P.bCanCheck ? FString(TEXT("[C] Check")) : TEXT("[C] Call ") + Amount(P.ToCall);
+		struct FRung
+		{
+			const TCHAR* Key;
+			FString Label;
+			FString Value;
+			bool bMain;
+		};
+		TArray<FRung> Rungs;
+		Rungs.Add({TEXT("F"), TEXT("FOLD"), FString(), false});
+		Rungs.Add({TEXT("C"), P.bCanCheck ? TEXT("CHECK") : TEXT("CALL"), P.bCanCheck ? FString() : Amount(P.ToCall), true});
 		if (P.bCanRaise)
 		{
-			Keys += FString::Printf(TEXT("     [R] %s %s     [A] All in"), P.bIsBet ? TEXT("Bet") : TEXT("Raise to"), *Amount(P.RaiseTo));
+			Rungs.Add({TEXT("R"), P.bIsBet ? TEXT("BET") : TEXT("RAISE TO"), Amount(P.RaiseTo), false});
+			Rungs.Add({TEXT("A"), TEXT("ALL IN"), Amount(P.Stack), false});
 		}
-		Text(Keys, Paper, W * 0.5f, H - 100.0f * S, Small, 1.25f, 1);
+		const float Rw = 320.0f * S, Rh = 46.0f * S, Gap = 8.0f * S;
+		const float Rx = W - 48.0f * S - Rw;
+		float Ry = H - 96.0f * S - Rungs.Num() * (Rh + Gap);
+		LadderTop = Ry - 46.0f * S;
+		const FString Head = P.ToCall > 0 ? Amount(P.ToCall) + TEXT(" to call") : TEXT("Checks to you");
+		Text(Head, Warm, Rx + Rw, Ry - 46.0f * S, Big, 1.05f, 2);
+		for (const FRung& R : Rungs)
+		{
+			DrawRect(R.bMain ? FLinearColor(0.05f, 0.08f, 0.15f, 0.84f) : Night, Rx, Ry, Rw, Rh);
+			if (R.bMain)
+			{
+				DrawRect(Ember, Rx, Ry, Rw, 2.0f * S);
+				DrawRect(Ember, Rx, Ry + Rh - 2.0f * S, Rw, 2.0f * S);
+				DrawRect(Ember, Rx, Ry, 2.0f * S, Rh);
+				DrawRect(Ember, Rx + Rw - 2.0f * S, Ry, 2.0f * S, Rh);
+			}
+			DrawRect(FLinearColor(0.93f, 0.9f, 0.82f, 0.14f), Rx + 10.0f * S, Ry + 9.0f * S, 28.0f * S, 28.0f * S);
+			Text(R.Key, Paper, Rx + 24.0f * S, Ry + 11.0f * S, Small, 1.05f, 1);
+			Text(R.Label, Paper, Rx + 52.0f * S, Ry + 11.0f * S, Small, 1.15f, 0);
+			if (!R.Value.IsEmpty())
+			{
+				Text(R.Value, R.bMain ? Warm : Paper, Rx + Rw - 16.0f * S, Ry + 11.0f * S, Small, 1.15f, 2);
+			}
+			Ry += Rh + Gap;
+		}
 		if (P.bCanRaise)
 		{
-			Text(TEXT("wheel to size"), Dim, W * 0.5f, H - 66.0f * S, Small, 1.0f, 1);
+			Text(TEXT("wheel to size the raise"), Dim, Rx + Rw, Ry + 2.0f * S, Small, 0.95f, 2);
 		}
 	}
 
@@ -1098,29 +1134,45 @@ void ABackRoomHUD::DrawHUD()
 		Text(TEXT("Racking up after this hand"), Dim, W * 0.5f, H - 190.0f * S, Small, 1.1f, 1);
 	}
 
-	// The clock, and how tired you are.
+	// The clock, and how tired you are; at a tournament, its panel at the top left: the event, the level and its
+	// time, the blinds, the field, your place, the money.
 	if (GM->IsCareer())
 	{
 		Text(GM->ClockLabel(), Dim, W - 48.0f * S, 36.0f * S, Small, 1.15f, 2);
 		float Ty = 66.0f * S;
 		if (const ss::Tournament* T = GM->GetTourney())
 		{
-			// The tournament at a glance: the level, the field, the money.
 			const ss::Level& L = T->CurrentLevel();
 			const int32 Secs = FMath::FloorToInt(GM->LevelTimeLeft());
 			auto N = [](int64 V) { return FText::AsNumber(V).ToString(); };
-			Text(FString::Printf(TEXT("LEVEL %d   %s / %s%s   %d:%02d"), T->LevelIndex + 1, *N(L.Sb), *N(L.Bb), L.Ante > 0 ? *FString::Printf(TEXT(" (%s)"), *N(L.Ante)) : TEXT(""), Secs / 60, Secs % 60),
-				Paper, W - 48.0f * S, Ty, Small, 1.1f, 2);
-			Ty += 27.0f * S;
-			Text(FString::Printf(TEXT("%d of %d left   \u00b7   avg %s   \u00b7   you're %d%s"), T->Remaining, T->Spec.Entrants, *N(static_cast<int64>(T->AverageStack())), T->HeroRank(),
-					 T->HeroRank() % 10 == 1 && T->HeroRank() % 100 != 11 ? TEXT("st") : (T->HeroRank() % 10 == 2 && T->HeroRank() % 100 != 12 ? TEXT("nd") : (T->HeroRank() % 10 == 3 && T->HeroRank() % 100 != 13 ? TEXT("rd") : TEXT("th")))),
-				Dim, W - 48.0f * S, Ty, Small, 1.0f, 2);
-			Ty += 25.0f * S;
+			const int32 Rank = T->HeroRank();
+			const TCHAR* Nth = (Rank % 100 >= 11 && Rank % 100 <= 13) ? TEXT("th") : Rank % 10 == 1 ? TEXT("st") : Rank % 10 == 2 ? TEXT("nd") : Rank % 10 == 3 ? TEXT("rd") : TEXT("th");
 			const int32 Paid = T->PaidPlaces();
-			Text(T->InTheMoney() ? FString::Printf(TEXT("in the money   \u00b7   next out gets $%s"), *N(T->PrizeFor(T->Remaining) / 100))
-								 : FString::Printf(TEXT("%d paid   \u00b7   min cash $%s   \u00b7   %d to the money"), Paid, *N(T->PrizeFor(Paid) / 100), T->Remaining - Paid),
-				T->InTheMoney() ? Fade(FLinearColor(0.55f, 0.92f, 0.6f, 1.0f), 0.85f) : Dim, W - 48.0f * S, Ty, Small, 1.0f, 2);
-			Ty += 25.0f * S;
+			const bool bMoney = T->InTheMoney();
+			const TPair<FString, FString> Rows[] = {
+				{TEXT("LEVEL"), FString::Printf(TEXT("%d     %d:%02d"), T->LevelIndex + 1, Secs / 60, Secs % 60)},
+				{TEXT("BLINDS"), FString::Printf(TEXT("%s / %s"), *N(L.Sb), *N(L.Bb))},
+				{TEXT("ANTE"), L.Ante > 0 ? N(L.Ante) : FString(TEXT("\u2014"))},
+				{TEXT("PLAYERS"), FString::Printf(TEXT("%d / %d"), T->Remaining, T->Spec.Entrants)},
+				{TEXT("AVG STACK"), N(static_cast<int64>(T->AverageStack()))},
+				{TEXT("YOU"), FString::Printf(TEXT("%d%s"), Rank, Nth)},
+				{bMoney ? TEXT("NEXT OUT") : TEXT("PAID"), bMoney ? TEXT("$") + N(T->PrizeFor(T->Remaining) / 100) : FString::Printf(TEXT("%d   \u00b7   %d to go"), Paid, T->Remaining - Paid)},
+			};
+			const int32 NumRows = UE_ARRAY_COUNT(Rows);
+			const float Px = 40.0f * S, Py = 40.0f * S, Pw = 340.0f * S, RowH = 30.0f * S;
+			DrawRect(Night, Px, Py, Pw, 54.0f * S + NumRows * RowH + 10.0f * S);
+			PanelBottom = Py + 54.0f * S + NumRows * RowH + 10.0f * S;
+			DrawRect(Ember, Px, Py, Pw, 2.0f * S);
+			const FString Event = GM->GetLiveName().IsEmpty() ? FString(TEXT("TOURNAMENT")) : GM->GetLiveName().ToUpper();
+			Text(Event, Warm, Px + 18.0f * S, Py + 14.0f * S, Small, 1.0f, 0);
+			float Ry = Py + 50.0f * S;
+			for (int32 I = 0; I < NumRows; ++I)
+			{
+				DrawRect(FLinearColor(0.93f, 0.9f, 0.82f, 0.06f), Px + 18.0f * S, Ry - 4.0f * S, Pw - 36.0f * S, 1.0f * S);
+				Text(Rows[I].Key, Fade(Read, 0.8f), Px + 18.0f * S, Ry, Small, 0.95f, 0);
+				Text(Rows[I].Value, I == NumRows - 1 && bMoney ? FLinearColor(0.55f, 0.92f, 0.6f, 0.95f) : Paper, Px + Pw - 18.0f * S, Ry, Small, 1.1f, 2);
+				Ry += RowH;
+			}
 		}
 		if (GM->GetEnergy() < 30.0f)
 		{
@@ -1165,7 +1217,7 @@ void ABackRoomHUD::DrawHUD()
 	{
 		// The read book: what you have seen of each of them, and what the cards said it meant.
 		const float Rx = 48.0f * S;
-		float Ry = H * 0.2f;
+		float Ry = FMath::Max(H * 0.2f, PanelBottom + 24.0f * S);
 		Text(TEXT("R E A D S"), Warm, Rx, Ry, Small, 1.15f, 0);
 		Ry += 34.0f * S;
 		int32 Shown = 0;
@@ -1196,7 +1248,6 @@ void ABackRoomHUD::DrawHUD()
 	if (HintA > 0.0f)
 	{
 		const float Hx = W - 48.0f * S;
-		float Hy = H - 250.0f * S;
 		TArray<const TCHAR*> Hints = {TEXT("Space  look at your cards"), TEXT("Right mouse  study a face"), TEXT("Shift  breathe, slow the heart"), TEXT("Tab  your reads")};
 		if (GM->IsCareer())
 		{
@@ -1207,6 +1258,8 @@ void ABackRoomHUD::DrawHUD()
 			Hints.Add(TEXT("N  next hand (once you've folded)"));
 			Hints.Add(TEXT("P  table pace"));
 		}
+		// Above the action ladder when it's up.
+		float Hy = FMath::Min(H - 250.0f * S, LadderTop - 16.0f * S - Hints.Num() * 24.0f * S);
 		for (const TCHAR* Hint : Hints)
 		{
 			Text(Hint, Fade(Dim, HintA), Hx, Hy, Small, 0.95f, 2);
@@ -1252,7 +1305,7 @@ ABackRoomStage* ABackRoomGameMode::FindOrSpawnStage()
 			Stage = *It;
 			return Stage;
 		}
-		// The map's Back Room makes way for the Riverside (or the other way round).
+		// The map's Back Room makes way for the Embercrest (or the other way round).
 		It->Destroy();
 	}
 	Stage = GetWorld()->SpawnActorDeferred<ABackRoomStage>(ABackRoomStage::StaticClass(), FTransform::Identity);
@@ -1944,7 +1997,7 @@ FBackRoomPersona ABackRoomGameMode::PersonaFor(const FString& Name)
 			{Tell(T::Sigh, M::Strong, 0.65f, 0.08f), Tell(T::LookAway, M::Strong, 0.5f, 0.15f), Tell(T::PupilFlare, M::Strong, 0.6f, 0.05f),
 				Tell(T::LipPress, M::Bluff, 0.45f, 0.12f)}, 0x34383d, 0.9f);
 	}
-	// The Riverside's Sunday faces.
+	// The Embercrest's Sunday faces.
 	if (Name == TEXT("Mrs. Park"))
 	{
 		// Thirty years of the Sunday tournament. Folds and folds; when she finally bluffs she goes
@@ -1956,7 +2009,7 @@ FBackRoomPersona ABackRoomGameMode::PersonaFor(const FString& Name)
 	{
 		// Car-dealership money, loud and loose. Bluffing he stares you down and rubs his neck; with a
 		// hand he goes quiet and looks off at the room.
-		// Aviators, gold, from the showroom floor.
+		// Aviators, gold, from the car showroom's floor.
 		return Eyed(Persona(TEXT("Rick"), 0.35f, 0.7f, 0.6f, 0.7f, 0.25f, 0.75f, 67,
 			{Tell(T::StareDown, M::Bluff, 0.8f, 0.15f), Tell(T::NeckTouch, M::Bluff, 0.55f, 0.1f), Tell(T::LookAway, M::Strong, 0.6f, 0.1f)}, 0x2b4d7a, -0.3f), 3, 0xc9a24a);
 	}
@@ -2091,7 +2144,7 @@ void ABackRoomGameMode::SeatEveryone()
 			GM->OnTableNote(static_cast<uint8>(Note));
 		}
 	};
-	// Dee deals her Tuesday game and the Riverside's Sunday; the card room's other days have dealers of their own, the
+	// Dee deals her Tuesday game and the Embercrest's Sunday; the card room's other days have dealers of their own, the
 	// same one every week (a vest and a bow tie on one of the room's faces).
 	FString DealerBody = TEXT("Dee");
 	FBackRoomPersona DealerPersona = PersonaFor(TEXT("Dee"));
@@ -2117,7 +2170,7 @@ void ABackRoomGameMode::SeatEveryone()
 
 	if (bLive)
 	{
-		// The Riverside: the tournament seats the table (BackRoomLive.cpp).
+		// The Embercrest: the tournament seats the table (BackRoomLive.cpp).
 		SeatLive();
 	}
 	else

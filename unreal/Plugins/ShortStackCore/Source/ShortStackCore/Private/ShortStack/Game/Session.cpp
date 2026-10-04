@@ -137,6 +137,38 @@ double OpenThreshold(Position P)
 	default: return 0.3;
 	}
 }
+/** A save from before the casino was the Embercrest (it was the "Riverside"): its ids, names and labels renamed,
+ *  line by line, except the player's own name ("name" line), which is theirs. */
+std::string Rebranded(const std::string& Text)
+{
+	static const std::pair<std::string, std::string> Names[] = {{"riverside", "embercrest"}, {"Riverside", "Embercrest"}, {"RIVERSIDE", "EMBERCREST"}};
+	std::string Out;
+	Out.reserve(Text.size() + 64);
+	size_t Start = 0;
+	while (Start <= Text.size())
+	{
+		const size_t End = Text.find('\n', Start);
+		std::string Line = Text.substr(Start, End == std::string::npos ? std::string::npos : End - Start);
+		if (Line.rfind("name\t", 0) != 0)
+		{
+			for (const auto& [From, To] : Names)
+			{
+				for (size_t At = Line.find(From); At != std::string::npos; At = Line.find(From, At + To.size()))
+				{
+					Line.replace(At, From.size(), To);
+				}
+			}
+		}
+		Out += Line;
+		if (End == std::string::npos)
+		{
+			break;
+		}
+		Out += '\n';
+		Start = End + 1;
+	}
+	return Out;
+}
 } // namespace session_detail
 
 // ------------------------------------------------------------------ save data
@@ -144,7 +176,8 @@ double OpenThreshold(Position P)
 std::string SaveData::Serialize() const
 {
 	std::ostringstream Out;
-	Out << "shortstack.nightone.v1\n";
+	// v2: written since the casino became the Embercrest (a v1 save is migrated when read).
+	Out << "shortstack.nightone.v2\n";
 	Out << "bankroll\t" << BankrollCents << "\n";
 	Out << "name\t" << session_detail::Escape(HeroName) << "\n";
 	Out << "clock\t" << Fixed(ClockMinutes, 2) << "\n";
@@ -286,9 +319,9 @@ void SaveData::NoteBackRoom(double World, const std::vector<std::string>& Names,
 	WorldNotes.push_back(Line);
 }
 
-void SaveData::NoteRiverside(double World, int HeroPlace, int Field, const std::vector<std::pair<std::string, int>>& Places)
+void SaveData::NoteEmbercrest(double World, int HeroPlace, int Field, const std::vector<std::pair<std::string, int>>& Places)
 {
-	std::string Line = "worldnote\triverside\t" + Fixed(World, 2) + "\t" + std::to_string(HeroPlace) + "\t" + std::to_string(Field);
+	std::string Line = "worldnote\tembercrest\t" + Fixed(World, 2) + "\t" + std::to_string(HeroPlace) + "\t" + std::to_string(Field);
 	for (const std::pair<std::string, int>& P : Places)
 	{
 		Line += "\t" + session_detail::Escape(P.first) + "\t" + std::to_string(P.second);
@@ -320,11 +353,12 @@ void SaveData::NoteLivePlaces(double World, const std::string& EventId, const st
 	WorldNotes.push_back(Line);
 }
 
-bool SaveData::Parse(const std::string& Text, SaveData& Out)
+bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 {
-	std::istringstream In(Text);
+	const bool bLegacy = Saved.rfind("shortstack.nightone.v1\n", 0) == 0 || Saved == "shortstack.nightone.v1";
+	std::istringstream In(bLegacy ? session_detail::Rebranded(Saved) : Saved);
 	std::string Line;
-	if (!std::getline(In, Line) || Line != "shortstack.nightone.v1")
+	if (!std::getline(In, Line) || (Line != "shortstack.nightone.v1" && Line != "shortstack.nightone.v2"))
 	{
 		return false;
 	}
@@ -766,7 +800,7 @@ void Session::StartWorld(const SaveData* Loaded)
 	net::Shared().Attach(&LivingWorld);
 	net::Shared().SetHero(HeroName, History);
 	WorldNewsAt = LivingWorld.Clock();
-	// The night out the host played (Dee's game, the Riverside), and the time it took.
+	// The night out the host played (Dee's game, the Embercrest), and the time it took.
 	if (Loaded)
 	{
 		for (const std::string& Note : Loaded->WorldNotes)
@@ -795,14 +829,14 @@ void Session::WorldNote(const std::vector<std::string>& F)
 		}
 		LivingWorld.BackRoomNight(At, Names, std::strtoll(F[3].c_str(), nullptr, 10));
 	}
-	else if (F[1] == "riverside" && F.size() >= 5)
+	else if (F[1] == "embercrest" && F.size() >= 5)
 	{
 		std::vector<std::pair<std::string, int>> Places;
 		for (size_t K = 5; K + 1 < F.size(); K += 2)
 		{
 			Places.push_back({session_detail::Unescape(F[K]), std::atoi(F[K + 1].c_str())});
 		}
-		LivingWorld.RiversideDone(At, Places, std::atoi(F[3].c_str()), std::atoi(F[4].c_str()));
+		LivingWorld.EmbercrestDone(At, Places, std::atoi(F[3].c_str()), std::atoi(F[4].c_str()));
 	}
 	else if (F[1] == "live" && F.size() >= 7)
 	{
@@ -2931,7 +2965,7 @@ std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
 
 std::string Session::GoToLive(const std::string& OccurrenceId)
 {
-	const life::Activity* A = life::Find("riverside");
+	const life::Activity* A = life::Find("embercrest");
 	if (!A)
 	{
 		return "Unknown game.";
@@ -2960,7 +2994,7 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 		if (!O.Valid())
 		{
 			const std::string Why = life::Blocked(*A, Life, LifeContext());
-			return Why.empty() ? "Nothing on at the Riverside." : Why;
+			return Why.empty() ? "Nothing on at the Embercrest." : Why;
 		}
 	}
 	const bool Already = live::EntryFor(Life, O.Id) != nullptr;
@@ -2990,7 +3024,7 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 					continue;
 				}
 				int Type = static_cast<int>(session_detail::StyleOf(*N));
-				for (const live::CastMember& Cm : live::RiversideCast())
+				for (const live::CastMember& Cm : live::EmbercrestCast())
 				{
 					if (N->Name == Cm.Name)
 					{
@@ -3010,7 +3044,7 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 		// The faces in the field: the room's regulars, and whoever remembers the player (what they'll say sitting down).
 		if (life::LiveEntry* Mine = live::EntryFor(Life, O.Id); Mine && LivingWorld.Ready())
 		{
-			const std::vector<int> Regulars = LivingWorld.RiversideRegulars();
+			const std::vector<int> Regulars = LivingWorld.EmbercrestRegulars();
 			for (int Npc : LivingWorld.Registered(O.Id))
 			{
 				const world::Npc* N = LivingWorld.Get(Npc);
@@ -3027,7 +3061,7 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 				}
 				life::LiveFace F;
 				F.Name = N->Name;
-				F.Label = !Known.empty() ? Known : Bd && !Bd->Memories.empty() ? std::string("Has met you") : std::string("Riverside regular");
+				F.Label = !Known.empty() ? Known : Bd && !Bd->Memories.empty() ? std::string("Has met you") : std::string("Embercrest regular");
 				F.Line = LivingWorld.SpokenGreeting(Npc, live::FaceHash(O.Id + N->Name));
 				Mine->Faces.push_back(F);
 			}
@@ -3124,12 +3158,9 @@ void Session::ResolveAbandonedLive()
 			P.Type = static_cast<Archetype>(Who.second);
 			Known.push_back(P);
 		}
-		std::unique_ptr<Tournament> Night = live::MakeField(O, E.Entrants, HeroName, live::SeedFor(E, HeroName), Known);
 		// From the last hand the player saw, if they got that far (a checkpoint that doesn't fit leaves the field as drawn).
-		if (!E.Checkpoint.empty())
-		{
-			Night->Restore(E.Checkpoint);
-		}
+		bool bFits = false;
+		std::unique_ptr<Tournament> Night = live::ResumeField(O, E, E.Entrants, HeroName, Known, true, bFits);
 		Night->HeroAway = false;
 		Night->HeroSitsOut = true;
 		int Place = 0;
@@ -4139,7 +4170,7 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	{
 		Hooks.Text("RiverLine", "Review complete. Your account is active again. Further violations may result in permanent closure.");
 	}
-	// Sundays: Dee deals the Riverside's $150, and says so in the afternoon.
+	// Sundays: Dee deals the Embercrest's $150, and says so in the afternoon.
 	for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 16.0 * 60.0; At <= To; At += net::MinutesPerDay)
 	{
 		bool Sunday = false;
@@ -4151,9 +4182,9 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 		{
 			continue;
 		}
-		StoryText("dee-riverside-" + std::to_string(net::DayOf(At)), "Dee",
-			Life.LiveEvents == 0 ? "the riverside runs every day now. i deal the sunday $150, seven o'clock, a hundred people some weeks. deep stacks. you should come."
-								 : "riverside sunday tonight. seven. i've got the stream table.");
+		StoryText("dee-embercrest-" + std::to_string(net::DayOf(At)), "Dee",
+			Life.LiveEvents == 0 ? "the embercrest runs every day now. i deal the sunday $150, seven o'clock, a hundred people some weeks. deep stacks. you should come."
+								 : "embercrest sunday tonight. seven. i've got the stream table.");
 	}
 	// Game nights at Dee's: a heads-up half an hour before the doors open.
 	if (const life::Activity* Game = life::Find("dee-game"))

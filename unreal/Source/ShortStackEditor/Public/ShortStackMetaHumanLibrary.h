@@ -65,4 +65,16 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|MetaHuman")
 	static bool SetWardrobe(UMetaHumanCharacter* Character, const FString& SlotName, const FString& WardrobeItemPath);
+
+	/**
+	 * Bakes an actor's MetaHuman as it stands this frame into one static mesh, for the card room's far tables: its
+	 * skeletal meshes in their pose at a mesh LOD, what it wears (hats, glasses), and its grooms' nearest hair cards
+	 * carried by the head from the face's rest pose. In the actor's own frame (its pivot at the actor), Nanite, its
+	 * materials kept (dyed instances copied into the mesh); translucent sections (eye shells, tear lines) take
+	 * Invisible; the hair cards take an instance of HairCards (M_HairCardsStatic: the groom's own material only draws
+	 * through the groom) with their coverage atlas and the groom's color. BasePath "/Game/.../Crowd_X" saves
+	 * "/Game/.../SM_Crowd_X". Returns the mesh, saved.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|MetaHuman")
+	static UStaticMesh* BakeFigure(AActor* Source, const FString& BasePath, int32 LOD, UMaterialInterface* Invisible, UMaterialInterface* HairCards);
 };

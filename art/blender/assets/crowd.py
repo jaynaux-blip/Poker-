@@ -1,4 +1,4 @@
-"""The Riverside's crowd at the far tables: people sculpted as signed distance fields, light enough to fill a room.
+"""The Embercrest's crowd at the far tables: people sculpted as signed distance fields, light enough to fill a room.
 
 The card room's near tables seat MetaHumans; everyone farther away is one of these, instanced (the room's
 fidelity tiers, docs/LIVE_TOURNAMENTS.md section 4). Seen across a dim room under the pendants they need the right

@@ -1,4 +1,4 @@
-// ABackRoomGameMode's live tournaments: the Riverside Casino card room's events (opened from Dee's Burner
+// ABackRoomGameMode's live tournaments: the Embercrest Casino card room's events (opened from Dee's Burner
 // thread with "?Live=<occurrence id>", after ss::Session::GoToLive registered the player).
 //
 // The field is the player's entry (ss::life::LiveEntry): the people the living world registered and the
@@ -30,7 +30,7 @@
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Tournament.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogRiverside, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogEmbercrest, Log, All);
 
 namespace LiveDetail
 {
@@ -108,14 +108,14 @@ bool ABackRoomGameMode::LoadLive()
 	{
 		return false;
 	}
-	if (Event == TEXT("riverside"))
+	if (Event == TEXT("embercrest"))
 	{
 		// From before the daily schedule (and the editor's test hooks): that day's evening event.
 		const FString DayOption = UGameplayStatics::ParseOption(OptionsString, TEXT("Day"));
 		const int32 Day = DayOption.IsEmpty() ? 6 : FCString::Atoi(*DayOption);
 		for (const ss::live::Occurrence& O : ss::live::Occurrences(Day))
 		{
-			if (Event == TEXT("riverside") || O.T->StartMinute == 19 * 60)
+			if (Event == TEXT("embercrest") || O.T->StartMinute == 19 * 60)
 			{
 				Event = Str(O.Id);
 			}
@@ -125,13 +125,13 @@ bool ABackRoomGameMode::LoadLive()
 	TSharedPtr<ss::SaveData> D = MakeShared<ss::SaveData>();
 	if (!CareerSave::LoadText(CareerText) || !ss::SaveData::Parse(CareerText, *D))
 	{
-		UE_LOG(LogRiverside, Warning, TEXT("Live=%s but no career save: practice table."), *Event);
+		UE_LOG(LogEmbercrest, Warning, TEXT("Live=%s but no career save: practice table."), *Event);
 		return false;
 	}
 	const ss::live::Occurrence O = ss::live::FindOccurrence(std::string(TCHAR_TO_UTF8(*Event)));
 	if (!O.Valid())
 	{
-		UE_LOG(LogRiverside, Warning, TEXT("Live=%s isn't one of the Riverside's events: practice table."), *Event);
+		UE_LOG(LogEmbercrest, Warning, TEXT("Live=%s isn't one of the Embercrest's events: practice table."), *Event);
 		return false;
 	}
 	LeftHomeAt = ss::net::MinutesPerDay * ss::net::NightOneDay + D->ClockMinutes;
@@ -144,7 +144,7 @@ bool ABackRoomGameMode::LoadLive()
 		Entry = Why.empty() ? ss::live::EntryFor(D->Life, O.Id) : nullptr;
 		if (!Entry)
 		{
-			UE_LOG(LogRiverside, Warning, TEXT("Can't register for %s (%s): practice table."), *Event, *Str(Why));
+			UE_LOG(LogEmbercrest, Warning, TEXT("Can't register for %s (%s): practice table."), *Event, *Str(Why));
 			return false;
 		}
 		LeftHomeAt = FMath::Max(LeftHomeAt, At - ss::live::TravelMinutes);
@@ -152,7 +152,7 @@ bool ABackRoomGameMode::LoadLive()
 	}
 	if (Entry->State != ss::life::LiveEntry::Registered)
 	{
-		UE_LOG(LogRiverside, Warning, TEXT("%s is already settled: practice table."), *Event);
+		UE_LOG(LogEmbercrest, Warning, TEXT("%s is already settled: practice table."), *Event);
 		return false;
 	}
 	// Back after the game closed during the night (the entry says the player got here): no bus this time, and
@@ -197,14 +197,16 @@ bool ABackRoomGameMode::LoadLive()
 		Known.push_back(P);
 	}
 	bCancelled = ss::live::BelowMinimum(O, Entry->Entrants);
-	Tourney = MakeShareable(ss::live::MakeField(O, FMath::Max(Entry->Entrants, 2), D->HeroName, ss::live::SeedFor(*Entry, D->HeroName), Known).release());
+	const bool bRestore = bBackInRoom && !Entry->Checkpoint.empty();
+	bool bFits = false;
+	Tourney = MakeShareable(ss::live::ResumeField(O, *Entry, FMath::Max(Entry->Entrants, 2), D->HeroName, Known, bRestore, bFits).release());
 	HeroBuyInChips = Tourney->Spec.StartingStack;
 	ABackRoomChips::ChipUnit = 100;
 	LiveSaver = MakeShared<FCareerSaver>();
-	if (bBackInRoom && !Entry->Checkpoint.empty())
+	if (bRestore)
 	{
 		// The room as it stood after the last hand the player saw.
-		bResumed = Tourney->Restore(Entry->Checkpoint);
+		bResumed = bFits;
 		if (bResumed)
 		{
 			Minutes = FMath::Max(Minutes, Entry->CheckpointAt);
@@ -212,7 +214,7 @@ bool ABackRoomGameMode::LoadLive()
 			LastCheckpoint = Entry->Checkpoint;
 			LastCheckpointAt = Entry->CheckpointAt;
 		}
-		UE_CLOG(!bResumed, LogRiverside, Warning, TEXT("%s: the checkpoint doesn't fit the field; the night starts over"), *LiveName);
+		UE_CLOG(!bResumed, LogEmbercrest, Warning, TEXT("%s: the checkpoint doesn't fit the field; the night starts over"), *LiveName);
 	}
 	if (!bBackInRoom)
 	{
@@ -224,7 +226,7 @@ bool ABackRoomGameMode::LoadLive()
 	}
 	Phase = EBackRoomPhase::Arriving;
 	ArrivalDayText = FString::Printf(TEXT("%s   %s"), WeekdayName(LiveDay), *FString(UTF8_TO_TCHAR(ss::net::DateLabel(LiveDay).c_str())));
-	UE_LOG(LogRiverside, Log, TEXT("%s: %d entrants (%d the world follows), pool %lld cents, %d paid; bankroll %lld; arriving %s"), *LiveName, Tourney->Spec.Entrants,
+	UE_LOG(LogEmbercrest, Log, TEXT("%s: %d entrants (%d the world follows), pool %lld cents, %d paid; bankroll %lld; arriving %s"), *LiveName, Tourney->Spec.Entrants,
 		static_cast<int32>(Known.size()), static_cast<int64>(Tourney->PrizePoolCents), Tourney->PaidPlaces(), StartBankrollCents, *ClockLabel());
 	{
 		FString Faces;
@@ -232,9 +234,9 @@ bool ABackRoomGameMode::LoadLive()
 		{
 			Faces += (Faces.IsEmpty() ? TEXT("") : TEXT(", ")) + F.Key + TEXT(" (") + F.Value.Key + TEXT(")");
 		}
-		UE_CLOG(!Faces.IsEmpty(), LogRiverside, Log, TEXT("Faces in the field: %s"), *Faces);
+		UE_CLOG(!Faces.IsEmpty(), LogEmbercrest, Log, TEXT("Faces in the field: %s"), *Faces);
 	}
-	UE_CLOG(bBackInRoom, LogRiverside, Log, TEXT("Back in the room%s: hand %d, level %d, %d left, stack %lld, %d hands played%s"), bResumed ? TEXT(" from the checkpoint") : TEXT(""),
+	UE_CLOG(bBackInRoom, LogEmbercrest, Log, TEXT("Back in the room%s: hand %d, level %d, %d left, stack %lld, %d hands played%s"), bResumed ? TEXT(" from the checkpoint") : TEXT(""),
 		Tourney->Tick, Tourney->LevelIndex + 1, Tourney->Remaining, static_cast<int64>(Tourney->Hero().Stack), HandsPlayed, bResumeDealt ? TEXT(", the dealt hand is dead") : TEXT(""));
 	return true;
 }
@@ -273,7 +275,7 @@ void ABackRoomGameMode::SeatLive()
 		}
 		Tourney->HeroAway = false;
 		Tourney->HeroSitsOut = false;
-		UE_LOG(LogRiverside, Log, TEXT("%s: %d hands played without you, level %d, %d left"), bReturning ? TEXT("Back after leaving") : TEXT("Late registration"), Missed,
+		UE_LOG(LogEmbercrest, Log, TEXT("%s: %d hands played without you, level %d, %d left"), bReturning ? TEXT("Back after leaving") : TEXT("Late registration"), Missed,
 			Tourney->LevelIndex + 1, Tourney->Remaining);
 	}
 	// The hand that was dealt when the game closed is dead: the player's cards go in the muck (checked through when it's
@@ -420,7 +422,7 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 	if (Face)
 	{
 		const FString Line = Face->Value;
-		const bool bRegular = Face->Key == TEXT("Riverside regular");
+		const bool bRegular = Face->Key == TEXT("Embercrest regular");
 		const float Delay = (Phase == EBackRoomPhase::Arriving ? 11.0f : 2.4f) + 3.4f * static_cast<float>(GreetCount++ % 3);
 		TWeakObjectPtr<ABackRoomPlayer> Who = A;
 		TWeakObjectPtr<ABackRoomTable> Tb = Table.Get();
@@ -542,7 +544,7 @@ void ABackRoomGameMode::BlinkSwap(ABackRoomPlayer* Player, bool bShow)
 
 void ABackRoomGameMode::ApplyBlinkSwaps()
 {
-	UE_LOG(LogRiverside, Log, TEXT("Seat change in a blink: %d bodies"), BlinkSwaps.Num());
+	UE_LOG(LogEmbercrest, Log, TEXT("Seat change in a blink: %d bodies"), BlinkSwaps.Num());
 	for (const TPair<TWeakObjectPtr<ABackRoomPlayer>, bool>& S : BlinkSwaps)
 	{
 		if (ABackRoomPlayer* A = S.Key.Get())
@@ -680,7 +682,9 @@ void ABackRoomGameMode::PlaceExtras()
 			// Their look is theirs: the same figure each time this player is drawn at this seat.
 			const int32 Idx = T.Seats[static_cast<size_t>(FMath::Max(0, P == 5 ? 4 : P == 6 ? 5 : P))];
 			const uint32 Hash = Idx >= 0 ? FCrc::StrCrc32(*Str(Tourney->Players[static_cast<size_t>(Idx)].Id)) : static_cast<uint32>(P);
-			Stage->AddCrowd(static_cast<int32>(Hash % 6), ABackRoomStage::SeatTransform(P) * Frame);
+			// One of the twelve seated figures (0-5, 9-14).
+			const int32 Kind = static_cast<int32>(Hash % 12);
+			Stage->AddCrowd(Kind < 6 ? Kind : Kind + 3, ABackRoomStage::SeatTransform(P) * Frame);
 		}
 	}
 	for (int32 I = Used; I < Extras.Num(); ++I)
@@ -903,7 +907,7 @@ void ABackRoomGameMode::LiveEvent(const ss::TEvent& E)
 	case ss::TEventType::Finished:
 		if (E.Id != ss::HeroId && bRailing)
 		{
-			Floor(FString::Printf(TEXT("Ladies and gentlemen, your Riverside %s champion... %s!"), *LiveShort, *Str(E.Name)));
+			Floor(FString::Printf(TEXT("Ladies and gentlemen, your Embercrest %s champion... %s!"), *LiveShort, *Str(E.Name)));
 			RaiseBanner(FString::Printf(TEXT("CHAMPION   %s"), *Str(E.Name).ToUpper()));
 			if (Table->GetAudio())
 			{
@@ -915,7 +919,7 @@ void ABackRoomGameMode::LiveEvent(const ss::TEvent& E)
 			bHeroWon = true;
 			HeroPlace = 1;
 			HeroPrizeCents = Tourney->PrizeFor(1);
-			Floor(FString::Printf(TEXT("Ladies and gentlemen, your Riverside %s champion... %s!"), *LiveShort, *Str(E.Name)));
+			Floor(FString::Printf(TEXT("Ladies and gentlemen, your Embercrest %s champion... %s!"), *LiveShort, *Str(E.Name)));
 			RaiseBanner(TEXT("CHAMPION"));
 			if (Table->GetAudio())
 			{
@@ -1002,7 +1006,7 @@ void ABackRoomGameMode::LiveCheckpoint(bool bDealt)
 	D.Life.Energy = FMath::Clamp(static_cast<double>(Energy), 0.0, 100.0);
 	LiveSaver->Submit(D);
 	++Checkpoints;
-	UE_LOG(LogRiverside, Log, TEXT("Checkpoint %d%s: hand %d, level %d, %d left, stack %lld"), Checkpoints, bDealt ? TEXT(" (dealt)") : TEXT(""), Tourney->Tick, Tourney->LevelIndex + 1,
+	UE_LOG(LogEmbercrest, Log, TEXT("Checkpoint %d%s: hand %d, level %d, %d left, stack %lld"), Checkpoints, bDealt ? TEXT(" (dealt)") : TEXT(""), Tourney->Tick, Tourney->LevelIndex + 1,
 		Tourney->Remaining, static_cast<int64>(Tourney->Hero().Stack));
 }
 
@@ -1203,7 +1207,7 @@ void ABackRoomGameMode::LiveOver()
 		bRailing = true;
 		RailT = 0.0f;
 	}
-	UE_LOG(LogRiverside, Log, TEXT("Over: phase %d, break %d, hero busted %d, finished %d, moving %d"), static_cast<int32>(Phase), bOnBreak ? 1 : 0, Tourney->Hero().Busted ? 1 : 0, Tourney->bFinished ? 1 : 0, MoveT >= 0.0f ? 1 : 0);
+	UE_LOG(LogEmbercrest, Log, TEXT("Over: phase %d, break %d, hero busted %d, finished %d, moving %d"), static_cast<int32>(Phase), bOnBreak ? 1 : 0, Tourney->Hero().Busted ? 1 : 0, Tourney->bFinished ? 1 : 0, MoveT >= 0.0f ? 1 : 0);
 	const int32 Field = Tourney->Spec.Entrants;
 	if (bCancelled)
 	{
@@ -1275,7 +1279,7 @@ void ABackRoomGameMode::LiveOver()
 	}
 	Table->DealerLine(Line);
 	UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
-	UE_LOG(LogRiverside, Log, TEXT("Riverside over: %s of %d, prize %lld cents, net %lld, %d hands"), *Ordinal(HeroPlace), Field, HeroPrizeCents, NetCents, HandsPlayed);
+	UE_LOG(LogEmbercrest, Log, TEXT("Embercrest over: %s of %d, prize %lld cents, net %lld, %d hands"), *Ordinal(HeroPlace), Field, HeroPrizeCents, NetCents, HandsPlayed);
 }
 
 // ------------------------------------------------------------------ on foot
@@ -1301,7 +1305,7 @@ void ABackRoomGameMode::LiveStandUp()
 			W->BeginFreeWalk();
 		}
 	});
-	UE_LOG(LogRiverside, Log, TEXT("Up from the table (hand %d, %s)"), Tourney->Tick, bOnBreak ? TEXT("on a break") : TEXT("dealt in while away"));
+	UE_LOG(LogEmbercrest, Log, TEXT("Up from the table (hand %d, %s)"), Tourney->Tick, bOnBreak ? TEXT("on a break") : TEXT("dealt in while away"));
 }
 
 void ABackRoomGameMode::LiveSitDown()
@@ -1326,7 +1330,7 @@ void ABackRoomGameMode::LiveSitDown()
 			}
 		}
 	});
-	UE_LOG(LogRiverside, Log, TEXT("Back in the chair (hand %d)"), Tourney->Tick);
+	UE_LOG(LogEmbercrest, Log, TEXT("Back in the chair (hand %d)"), Tourney->Tick);
 }
 
 void ABackRoomGameMode::LiveStay()
@@ -1361,7 +1365,7 @@ void ABackRoomGameMode::LiveStay()
 	{
 		Table->DealerLine(TEXT("Stick around. The cage is open all night."));
 	}
-	UE_LOG(LogRiverside, Log, TEXT("Staying to watch: %d left"), Tourney->Remaining);
+	UE_LOG(LogEmbercrest, Log, TEXT("Staying to watch: %d left"), Tourney->Remaining);
 }
 
 void ABackRoomGameMode::LiveLeaveNow()
@@ -1397,7 +1401,7 @@ FString ABackRoomGameMode::SpotPrompt() const
 	case ECardRoomSpot::Desk: return TEXT("[E] Tournament desk");
 	case ECardRoomSpot::Cage: return bLiveOver && HeroPrizeCents > 0 && !bCollected ? FString(TEXT("[E] Collect your winnings")) : FString(TEXT("[E] Cashier"));
 	case ECardRoomSpot::Bar: return TEXT("[E] The bar");
-	case ECardRoomSpot::River: return TEXT("[E] Step out on the deck");
+	case ECardRoomSpot::Terrace: return TEXT("[E] Step out on the terrace");
 	case ECardRoomSpot::Exit:
 		return bLiveOver ? FString(TEXT("[E] Go home")) : (LiveT - ExitAskedAt < 5.0f ? FString(TEXT("[E] again: leave the tournament (your stack is blinded off)")) : FString(TEXT("[E] Leave the tournament")));
 	default: return FString();
@@ -1442,7 +1446,7 @@ void ABackRoomGameMode::LiveInteract()
 			const int32 NextBreak = (Tourney->LevelIndex / Every + 1) * Every + 1;
 			const FString Status = FString::Printf(TEXT("%d left, %d paid. Level %d, %s and %s; the next break's before level %d."), Tourney->Remaining, Tourney->PaidPlaces(),
 				Tourney->LevelIndex + 1, *Num(L.Sb), *Num(L.Bb), NextBreak);
-			Line = PastLiveEvents == 0 ? TEXT("First time with us? Welcome to the Riverside. ") + Status
+			Line = PastLiveEvents == 0 ? TEXT("First time with us? Welcome to the Embercrest. ") + Status
 				   : PastLiveEvents >= 4 ? TEXT("There's my regular. ") + Status
 										 : Status;
 		}
@@ -1484,16 +1488,16 @@ void ABackRoomGameMode::LiveInteract()
 			Table->Announce(TEXT("Bartender"), TEXT("Another one? Pace yourself, the night's long."));
 		}
 		break;
-	case ECardRoomSpot::River:
+	case ECardRoomSpot::Terrace:
 		if (LiveT - LastAir > 420.0f)
 		{
 			LastAir = LiveT;
 			Energy = FMath::Min(100.0f, Energy + 6.0f);
-			Table->Announce(FString(), TEXT("Cold air off the river, barge lights on the water. You wake up a little."));
+			Table->Announce(FString(), TEXT("Cold mountain air, the ridge white under the stars. You wake up a little."));
 		}
 		else
 		{
-			Table->Announce(FString(), TEXT("The river, black and slow. The room's warm behind you."));
+			Table->Announce(FString(), TEXT("The ranges, dark and huge. The room's warm behind you."));
 		}
 		break;
 	case ECardRoomSpot::Exit:
@@ -1574,7 +1578,7 @@ void ABackRoomGameMode::NoteRailedPlaces()
 		LiveSaver->Flush();
 	}
 	CareerSave::SaveNow(D.Serialize());
-	UE_LOG(LogRiverside, Log, TEXT("Railed: %d places seen after %s, home at %s"), static_cast<int32>(Places.size()), *Ordinal(HeroPlace), *ClockLabel());
+	UE_LOG(LogEmbercrest, Log, TEXT("Railed: %d places seen after %s, home at %s"), static_cast<int32>(Places.size()), *Ordinal(HeroPlace), *ClockLabel());
 }
 
 void ABackRoomGameMode::LiveSettle()
@@ -1841,7 +1845,7 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 		bAnnouncedStart = true;
 		if (Tourney->Tick == 0)
 		{
-			Floor(FString::Printf(TEXT("Ladies and gentlemen, welcome to the Riverside %s. %d players, a prize pool of %s. Dealers, shuffle up and deal!"), *LiveShort,
+			Floor(FString::Printf(TEXT("Ladies and gentlemen, welcome to the Embercrest %s. %d players, a prize pool of %s. Dealers, shuffle up and deal!"), *LiveShort,
 				Tourney->Spec.Entrants, *Dollars(Tourney->PrizePoolCents)));
 			RaiseBanner(TEXT("SHUFFLE UP AND DEAL"));
 		}

@@ -181,11 +181,11 @@ The whole online career is played from a first-person desk. The apartment is the
 The best item in each slot counts (a 1080p webcam replaces the 720p one; buying down is blocked). The store shows "Your setup": the desk drawn with everything you own on it, the totals (tables, stream resolution, production value, fatigue, sleep, tilt, monthly costs), a recommended next buy and the running subscriptions. Every purchase and renewal is in the bank's ledger.
 
 **Your setup, in the room (built).** What you buy turns up in the apartment, where it would go:
-- **Monitors** on desk-clamp arms either side of the laptop, turned to the chair. The 24" shows Kast's studio while you're live (the stream as it goes out, your facecam, the chat, the viewer graph) and otherwise your life on one screen: the bankroll's story from the ledger, rent and its deadline, Dee's game, the Riverside, the latest entries. The 27" is for study: a preflop opening chart that cycles through the positions, beside the tells you've seen confirmed at Dee's table. The 27" takes the desk lamp's corner, so the lamp moves up to the windowsill.
+- **Monitors** on desk-clamp arms either side of the laptop, turned to the chair. The 24" shows Kast's studio while you're live (the stream as it goes out, your facecam, the chat, the viewer graph) and otherwise your life on one screen: the bankroll's story from the ledger, rent and its deadline, Dee's game, the Embercrest, the latest entries. The 27" is for study: a preflop opening chart that cycles through the positions, beside the tells you've seen confirmed at Dee's table. The 27" takes the desk lamp's corner, so the lamp moves up to the windowsill.
 - **The PC** stands on the floor by the desk's front corner with its side panel off, its fans, pump, RAM and graphics card lit in the LED kit's colour (a slow rainbow without the kit), spilling light across the floor; the two-PC setup puts a second one beside it.
 - **Cameras:** the webcams clip onto the laptop's lid; the mirrorless stands on a mini tripod behind the laptop. **Mics:** the USB mic on its stand beside the laptop, or the broadcast mic on a spring-balanced boom arm from the desk's left edge. **Lights:** a ring light behind the laptop or key lights on the desk's edges, dark until you go live, then lighting the desk and your hands.
 - The macro pad's keys (live, scenes, mute, clip, fold, call, raise, all-in), headphones on a stand, the pothos on the sill, blackout curtains, the fiber router plugged in beside the window.
-- **Mementos:** the Riverside's cup on the sill once you win the Sunday tournament, and a $100 chip from Dee's back room on a little stand once you're ahead there.
+- **Mementos:** the Embercrest's cup on the sill once you win the Sunday tournament, and a $100 chip from Dee's back room on a little stand once you're ahead there.
 
 **Kast: streaming (built).** Once the PC is upgraded, you can go live and play RiverLine on stream. Before that, Kast's studio is locked and points at the RAM kit.
 
@@ -357,7 +357,7 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
 - **The calendar:** local weeklies, Dee's back room, regional festivals, the Grand Circuit, the Championship (with its summer Main Event), The Summit and RiverLine's online series. Everyone in the world plays them, and the results stand.
 - **History:** titles, Player of the Year and every honor are kept forever. Results and events are kept for as long as they matter, and old retirees fold into short records.
 - **You, in their world:**
-  - People who sat with you remember it: met, said hello, big pots, who busted whom, nights at Dee's game, the Riverside.
+  - People who sat with you remember it: met, said hello, big pots, who busted whom, nights at Dee's game, the Embercrest.
   - Their memories show on their player card ("Knows you") and in what they say at the table.
   - Click any name in RiverLine to open a player card. It shows only what's public: results, reputation, form, years, what they know about you, their story and who they run with.
   - The leaderboards (Overall, Online, Live, the season and the years) and the news are the world's real results, with you on them.

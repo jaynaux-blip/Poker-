@@ -250,8 +250,8 @@ struct SaveData
 	static SHORTSTACKCORE_API bool Parse(const std::string& Text, SaveData& Out);
 	/** A night at Dee's game with these people (as the room knows them), and how it went. */
 	SHORTSTACKCORE_API void NoteBackRoom(double World, const std::vector<std::string>& Names, Chips NetCents);
-	/** A Riverside Sunday: where the player and the people with faces finished (saves from before the daily schedule). */
-	SHORTSTACKCORE_API void NoteRiverside(double World, int HeroPlace, int Field, const std::vector<std::pair<std::string, int>>& Places);
+	/** A Embercrest Sunday: where the player and the people with faces finished (saves from before the daily schedule). */
+	SHORTSTACKCORE_API void NoteEmbercrest(double World, int HeroPlace, int Field, const std::vector<std::pair<std::string, int>>& Places);
 	/** A live tournament the host played: the player's finish and what their tables saw, for the world. */
 	SHORTSTACKCORE_API void NoteLive(double World, const std::string& EventId, int HeroPlace, Chips Prize, int Field, const std::vector<LiveSeen>& Seen);
 	/**
@@ -442,7 +442,7 @@ public:
 	 * its fixed buy-in); returns why not, or "". */
 	SHORTSTACKCORE_API std::string GoToGame(const std::string& Id, Chips BuyInCents);
 	/**
-	 * Registers for one of the Riverside's events (live::Occurrence id; "" for the next one open) with the field the
+	 * Registers for one of the Embercrest's events (live::Occurrence id; "" for the next one open) with the field the
 	 * world has for it, pays the bus and heads out. Registering again for an event already entered just goes back.
 	 */
 	SHORTSTACKCORE_API std::string GoToLive(const std::string& OccurrenceId);

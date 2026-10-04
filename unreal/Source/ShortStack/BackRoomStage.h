@@ -25,7 +25,7 @@ enum class ECardRoomSpot : uint8
 	Desk,  // the tournament desk
 	Cage,  // the cashier
 	Bar,
-	River, // the doors to the river deck
+	Terrace, // the glass doors onto the terrace
 	Exit,  // the entrance, out to the casino floor
 	Rail,  // in front of the stage, watching the feature table
 };
@@ -84,10 +84,11 @@ public:
 	 */
 	static bool TableContact(const FVector& P, float Radius, bool bUnderTableFree, FVector& OutPush, float& OutClearance);
 
-	// ------------------------------------------------------------ the Riverside (card room venue)
+	// ------------------------------------------------------------ the Embercrest (card room venue)
 	/**
-	 * The Riverside Casino's card room instead of the Back Room (BackRoomStageCardRoom.cpp): twenty numbered tables
-	 * and the stream table on the old showroom's stage, built from the card room kit (art/blender/assets/cardroom.py).
+	 * The Embercrest Casino's card room instead of the Back Room (BackRoomStageCardRoom.cpp): twenty numbered tables
+	 * and the stream table on the final table's stage, built from the Embercrest kit (art/blender/assets/embercrest.py;
+	 * the old showroom kit, art/blender/assets/cardroom.py, where it isn't imported).
 	 * The player's table is always the one at the origin; the room (RoomRoot) is placed so that it's the table the
 	 * tournament seated them at, so every table number is a real place in the room.
 	 */
@@ -106,7 +107,8 @@ public:
 	void SetRoomAnchor(int32 Slot);
 	int32 GetRoomAnchor() const { return AnchorSlot; }
 	/** The crowd at the far tables: cheap figures (kinds 0-5 seated players, 6 a dealer, 7-8 standing), room space. */
-	static constexpr int32 CrowdKinds = 9;
+	/** The crowd's figures: seated (0-5, and 9-14 where the baked crowd has them), the dealer (6), standing (7, 8). */
+	static constexpr int32 CrowdKinds = 15;
 	void ClearCrowd();
 	void AddCrowd(int32 Kind, const FTransform& RoomLocal);
 	/** The boards: today's events by the entrance, the champions between the desk and the cage, the cash list. */
@@ -179,6 +181,9 @@ private:
 	UMaterialInstanceDynamic* Room(FName Key, int32 Pattern, uint32 SrgbHex, uint32 SrgbHex2 = 0, float Split = 0.0f, float Metallic = 0.0f);
 	/** An unlit glow for stand-in light sources (tubes, signs). */
 	UMaterialInstanceDynamic* Glow(FName Key, const FLinearColor& Color, float Strength);
+	/** An LED screen showing one of the Embercrest's images (Textures/Brand/<Image>, art/blender/brand.py); a dark
+	 *  glow if it isn't imported. */
+	UMaterialInstanceDynamic* ScreenImage(FName Key, const TCHAR* Image, float Strength, const FLinearColor& Tint = FLinearColor::White);
 
 	UPROPERTY()
 	TMap<FName, TObjectPtr<UMaterialInstanceDynamic>> Materials;
@@ -207,6 +212,9 @@ private:
 	TObjectPtr<UMaterialInterface> SurfaceMaterial;
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> EmissiveMaterial;
+	/** M_ScreenImage: an image on an LED screen (backroom_setup.py). */
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> ScreenImageMaterial;
 
 	// Blender props (art/blender), imported from unreal/Art/Meshes; each is optional.
 	UPROPERTY()

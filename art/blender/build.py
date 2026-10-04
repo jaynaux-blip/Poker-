@@ -23,10 +23,10 @@ ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chai
           'monitor', 'tower', 'mic', 'webcam', 'lights', 'macro_pad', 'headphones', 'plant', 'curtains', 'router', 'trophy',
           # What the apartment's window looks out on.
           'tenement',
-          # The Riverside Casino's card room: its kit, and the crowd at its far tables.
+          # The Embercrest Casino's card room: its kit, and the crowd at its far tables.
           'cardroom', 'crowd',
           # What the room's people wear: caps, a beanie, a trilby, glasses and shades (fitted at runtime).
-          'wear']
+          'wear', 'embercrest', 'table_ec']
 
 
 def args():

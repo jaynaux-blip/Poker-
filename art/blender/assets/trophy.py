@@ -1,6 +1,6 @@
 """SM_Trophy and SM_ChipStand: mementos the apartment collects as the career goes.
 
-- SM_Trophy: the Riverside Card Room's Sunday tournament cup, a gold cup with loop handles on a stepped
+- SM_Trophy: the Embercrest Card Room's Sunday tournament cup, a gold cup with loop handles on a stepped
   black base, an engraved brass plaque on the front.
 - SM_ChipStand: a little walnut stand with a slot and a brass plate, for the $100 chip from Dee's back
   room (the game sets SM_Chip_100 into the slot, upright).
@@ -36,7 +36,7 @@ def plaque_sheet():
     s.rect(0, 0, w, h, 0xb08d4a, metal=1.0, rough=0.25)
     s.rect(1.0, 1.0, w - 2.0, 0.35, 0x5a4422, metal=0.6, rough=0.5)
     s.rect(1.0, h - 1.35, w - 2.0, 0.35, 0x5a4422, metal=0.6, rough=0.5)
-    s.text('RIVERSIDE CARD ROOM', w / 2, h * 0.5, 4.4, 0x3b2c15, face='Black', align='CENTER', tracking=1.2, metal=0.4, rough=0.6)
+    s.text('EMBERCREST CARD ROOM', w / 2, h * 0.5, 4.4, 0x3b2c15, face='Black', align='CENTER', tracking=1.2, metal=0.4, rough=0.6)
     s.text('SUNDAY TOURNAMENT  ·  CHAMPION', w / 2, h * 0.2, 2.4, 0x3b2c15, face='Bold', align='CENTER', tracking=1.3, metal=0.4, rough=0.6)
     return s.render('trophy_plaque', 1024)
 

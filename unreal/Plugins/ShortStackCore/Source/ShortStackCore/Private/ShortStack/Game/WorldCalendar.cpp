@@ -261,7 +261,7 @@ const char* MemoryText(MemoryKind K)
 	case MemoryKind::HeadsUpWon: return "You beat them heads-up for the title";
 	case MemoryKind::HeadsUpLost: return "They beat you heads-up for the title";
 	case MemoryKind::BackRoom: return "A night at Dee's game";
-	case MemoryKind::Riverside: return "The Riverside Sunday";
+	case MemoryKind::Embercrest: return "The Embercrest Sunday";
 	case MemoryKind::ShowedBluff: return "Showed you a bluff";
 	default: return "";
 	}
@@ -308,10 +308,10 @@ std::vector<LiveEvent> LiveCalendar(int Day)
 	const int Doy = Day - YearStart(Y);
 	auto At = [](int H, int Mi) { return H * 60 + Mi; };
 
-	// The Riverside's card room, the one the player can take the bus to: two or three a day (live::Schedule).
+	// The Embercrest's card room, the one the player can take the bus to: two or three a day (live::Schedule).
 	for (const live::Occurrence& O : live::Occurrences(Day))
 	{
-		LiveEvent E = Make(O.T->Name, "the Riverside", "", Region::Americas, LiveKind::Local, LiveLevel::Local, static_cast<double>(O.T->BuyInCents) / 100.0, O.Field, Day,
+		LiveEvent E = Make(O.T->Name, "the Embercrest", "", Region::Americas, LiveKind::Local, LiveLevel::Local, static_cast<double>(O.T->BuyInCents) / 100.0, O.Field, Day,
 			O.T->StartMinute, O.T->Hours);
 		E.Id = O.Id;
 		Out.push_back(E);

@@ -15,7 +15,7 @@ namespace ss
  *
  * net::Network stays the calendar (the schedule, registrations, prize pools, listings). The World is the people
  * and what happens to them. Each save has its own World (its own seed and history): on Night One it holds the
- * network's 1,600 regulars, the Back Room and Riverside regulars, Kast's big streamers and the rival, and from
+ * network's 1,600 regulars, the Back Room and Embercrest regulars, Kast's big streamers and the rival, and from
  * then on they choose events by bankroll, form and schedule, win and lose, move up and down, take breaks, go
  * broke, retire and come back, while new players join every week.
  *
@@ -143,11 +143,11 @@ SHORTSTACKCORE_API const char* RepName(Rep R);
 enum class Origin : int
 {
 	Founding,   // the network's regulars on Night One
-	Cast,       // the Back Room and the Riverside
+	Cast,       // the Back Room and the Embercrest
 	Directory,  // Kast's established streamers
 	Rookie,     // joined later
 	Discovered, // an unknown who made a name with one result
-	Local,      // the Riverside's own regulars (live::RoomLocals), in every world (added to older saves on load)
+	Local,      // the Embercrest's own regulars (live::RoomLocals), in every world (added to older saves on load)
 };
 
 /** How a newcomer found their way to RiverLine (the first line of their story). */
@@ -523,7 +523,7 @@ enum class MemoryKind : int
 	HeadsUpWon, // the player beat them heads-up for a title
 	HeadsUpLost,
 	BackRoom,  // a night at Dee's game together
-	Riverside, // the Sunday tournament together
+	Embercrest, // the Sunday tournament together
 	ShowedBluff, // they showed the player a bluff
 	Count,
 };
@@ -674,7 +674,7 @@ struct Profile
 
 enum class LiveKind : int
 {
-	Local,        // the Riverside's Sunday $150 and rooms like it
+	Local,        // the Embercrest's Sunday $150 and rooms like it
 	Underground,  // back-room cash games
 	Regional,
 	Circuit,
@@ -684,7 +684,7 @@ enum class LiveKind : int
 	Summit,       // the invitation-only $1,000,000 buy-in finale of the year
 };
 
-/** A live event (the world plays these; the player meets them at the Riverside and the Back Room). */
+/** A live event (the world plays these; the player meets them at the Embercrest and the Back Room). */
 struct LiveEvent
 {
 	std::string Id;
@@ -826,8 +826,8 @@ public:
 	SHORTSTACKCORE_API void KnownPlaces(const std::string& EventId, const std::vector<std::pair<int, int>>& Places);
 	/** A night at Dee's game with these people (names as the Back Room knows them). */
 	SHORTSTACKCORE_API void BackRoomNight(double At, const std::vector<std::string>& Names, Chips HeroNet);
-	/** A Riverside Sunday: who finished where (names as the field knows them), and the player's place. */
-	SHORTSTACKCORE_API void RiversideDone(double At, const std::vector<std::pair<std::string, int>>& Places, int HeroPlace, int Field);
+	/** A Embercrest Sunday: who finished where (names as the field knows them), and the player's place. */
+	SHORTSTACKCORE_API void EmbercrestDone(double At, const std::vector<std::pair<std::string, int>>& Places, int HeroPlace, int Field);
 	SHORTSTACKCORE_API void Remember(int Npc, MemoryKind Kind, const std::string& Where, Chips Amount, double At);
 	const std::map<int, Bond>& Bonds() const { return HeroBonds; }
 	SHORTSTACKCORE_API const Bond* BondWith(int Npc) const;
@@ -835,14 +835,14 @@ public:
 	SHORTSTACKCORE_API std::string Greeting(int Npc, uint32_t Salt) const;
 	/** The same, said out loud across a live table ("" for nothing to say). */
 	SHORTSTACKCORE_API std::string SpokenGreeting(int Npc, uint32_t Salt) const;
-	/** How many regulars the Riverside's card room has. */
-	static constexpr int RiversideRegularCount = 64;
+	/** How many regulars the Embercrest's card room has. */
+	static constexpr int EmbercrestRegularCount = 64;
 	/**
-	 * The Riverside's regulars: locals who play its card room every week, each on nights of their own
+	 * The Embercrest's regulars: locals who play its card room every week, each on nights of their own
 	 * (live::RegularHabit), the faces the player gets to know there. Drawn by name from the people who live near and
 	 * play live, so they're the same people in every save for as long as they do.
 	 */
-	SHORTSTACKCORE_API std::vector<int> RiversideRegulars() const;
+	SHORTSTACKCORE_API std::vector<int> EmbercrestRegulars() const;
 	/** The player's name, as the world knows it (honors, headlines). */
 	std::string HeroName;
 	/** The bracelets and rings the player has won, oldest first. */

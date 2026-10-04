@@ -24,7 +24,7 @@ enum class Kind : int
 	Ghost,  // Burner: playing Sam's RiverLine account; risks the player's own account
 	Sleep,
 	Game, // Burner: Dee's live game in the laundromat's back room (the host takes the player there)
-	Live, // Burner: the Riverside's Sunday tournament (the host takes the player there)
+	Live, // Burner: the Embercrest's Sunday tournament (the host takes the player there)
 };
 
 /** Dee's game: $1/$2 no-limit, bought into from the bankroll. */
@@ -71,7 +71,7 @@ struct LedgerEntry
 struct LiveFace
 {
 	std::string Name;
-	std::string Label; // "Riverside regular", "Knows you", "Holds a grudge"...
+	std::string Label; // "Embercrest regular", "Knows you", "Holds a grudge"...
 	std::string Line;  // what they say sitting down with the player ("" for nothing)
 };
 
@@ -87,8 +87,8 @@ struct LiveEntry
 		Finished,
 		Refunded,
 	};
-	std::string Id;   // the occurrence ("riverside-nightly@31")
-	std::string Name; // "Riverside Nightly $120"
+	std::string Id;   // the occurrence ("embercrest-nightly@31")
+	std::string Name; // "Embercrest Nightly $120"
 	int State = Registered;
 	Chips PaidCents = 0; // the buy-in, fee included
 	Chips FeeCents = 0;
@@ -152,7 +152,7 @@ struct State
 	Chips BackRoomNetCents = 0;
 	/** Tells seen and confirmed at showdown, by "Player/Tell" (2 or more: learned). */
 	std::map<std::string, int> Reads;
-	// Live tournaments (the Riverside).
+	// Live tournaments (the Embercrest).
 	int LiveEvents = 0;
 	int LiveCashes = 0;
 	int LiveBestPlace = 0; // 0: none yet

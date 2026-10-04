@@ -224,7 +224,7 @@ void Sim::RoomLocals(World& W, int Today)
 		{
 			continue;
 		}
-		Rng R(std::string("riverside-local:") + L.Name);
+		Rng R(std::string("embercrest-local:") + L.Name);
 		Npc N;
 		N.Name = L.Name;
 		N.Country = "US";
@@ -473,7 +473,7 @@ void Sim::Found(World& W, double Start)
 	}
 	W.Founding = static_cast<int>(F.size());
 
-	// The people with faces: the Back Room's regulars and the Riverside's Sunday crowd.
+	// The people with faces: the Back Room's regulars and the Embercrest's Sunday crowd.
 	struct CastSpec
 	{
 		const char* Name;

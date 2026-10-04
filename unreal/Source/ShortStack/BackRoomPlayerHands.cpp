@@ -871,20 +871,28 @@ float ABackRoomPlayer::GestureFold(const FVector& Muck)
 	}
 	const FVector C = (Hole[0]->GetActorLocation() + Hole[1]->GetActorLocation()) * 0.5;
 	const bool bToss = Persona.Nervousness > 0.6f;
-	TArray<ABackRoomCard*> Cards = {Hole[0], Hole[1]};
+	// Held weakly: the gesture finishes later, and the table may have cleared the cards by then.
+	const TArray<TWeakObjectPtr<ABackRoomCard>> Cards = {Hole[0], Hole[1]};
 	Queue(1, Touch(C + Spots.Inward * 2.0 + FVector(0.0, 0.0, 0.6), FVector(0.0, 1.0, -0.2), FVector(0.0, 0.0, -1.0), 0.1f), 0.32f, 2.5f, [this, Cards]() {
-		for (ABackRoomCard* Card : Cards)
+		for (const TWeakObjectPtr<ABackRoomCard>& Weak : Cards)
 		{
-			Card->Stop();
-			Grab(Card, 1, Card->GetActorTransform().GetRelativeTransform(HandFrame(1)));
+			if (ABackRoomCard* Card = Weak.Get())
+			{
+				Card->Stop();
+				Grab(Card, 1, Card->GetActorTransform().GetRelativeTransform(HandFrame(1)));
+			}
 		}
 	});
 	Queue(1, Touch(C + Spots.Inward * (bToss ? 14.0 : 22.0) + FVector(0.0, 0.0, bToss ? 6.0 : 0.6), FVector(0.0, 1.0, bToss ? 0.1 : -0.2), FVector(0.0, 0.0, -1.0), 0.1f), bToss ? 0.16f : 0.3f, 0.0f,
-		[this, Cards, Muck, bToss]() {
-			Sound(Snd(ss::SoundId::Fold), Cards[0]->GetActorLocation(), 0.8f);
+		[this, Cards, Muck, bToss, C]() {
+			Sound(Snd(ss::SoundId::Fold), C, 0.8f);
 			for (int32 I = 0; I < Cards.Num(); ++I)
 			{
-				ABackRoomCard* Card = Cards[I];
+				ABackRoomCard* Card = Cards[I].Get();
+				if (!Card)
+				{
+					continue;
+				}
 				LetGo(Card);
 				const FTransform Target(FRotator(0.0f, Rng.FRandRange(0.0f, 360.0f), 0.0f), Muck + FVector(Rng.FRandRange(-3.0f, 3.0f), Rng.FRandRange(-3.0f, 3.0f), 0.1 * I));
 				if (bToss)
@@ -928,10 +936,14 @@ float ABackRoomPlayer::GestureShow()
 	{
 		ABackRoomCard* Card = Hole[I];
 		const FVector At = bSpread ? Spots.Spread[I].GetLocation() : Card->GetActorLocation();
+		const TWeakObjectPtr<ABackRoomCard> Weak = Card;
 		Queue(1, Touch(At - Spots.Inward * 3.0 + FVector(0.0, 0.0, 0.8), FVector(0.0, 1.0, -0.3), FVector(0.3, 0.0, -1.0), 0.3f, 0.5f), 0.3f, 2.0f,
-			[this, Card]() {
-				Card->Flip(true, 0.3f);
-				Sound(Snd(ss::SoundId::Flip), Card->GetActorLocation(), 0.7f);
+			[this, Weak]() {
+				if (ABackRoomCard* Shown = Weak.Get())
+				{
+					Shown->Flip(true, 0.3f);
+					Sound(Snd(ss::SoundId::Flip), Shown->GetActorLocation(), 0.7f);
+				}
 			});
 		Queue(1, Touch(At - Spots.Inward * 3.0 + FVector(0.0, 0.0, 3.0), FVector(0.0, 1.0, -0.3), FVector(-0.4, 0.0, -0.9), 0.3f, 0.2f), 0.25f);
 	}
@@ -972,13 +984,24 @@ float ABackRoomPlayer::GestureDeal(ABackRoomCard* Card, const FTransform& Target
 	Flick.Pinch = 0.2f;
 	const float Distance = FVector::Dist2D(GetDeckTop().GetLocation(), Target.GetLocation());
 	const float Flight = 0.18f + Distance / 420.0f;
-	Queue(1, Take, 0.13f, 1.0f, [this, Card]() {
+	const TWeakObjectPtr<ABackRoomCard> Weak = Card;
+	Queue(1, Take, 0.13f, 1.0f, [this, Weak]() {
+		ABackRoomCard* Card = Weak.Get();
+		if (!Card)
+		{
+			return;
+		}
 		Card->Stop();
 		Card->SetActorTransform(GetDeckTop());
 		Card->SetActorHiddenInGame(false);
 		Grab(Card, 1, Card->GetActorTransform().GetRelativeTransform(HandFrame(1)));
 	});
-	Queue(1, Flick, 0.13f, 0.0f, [this, Card, Target, Flight, bFaceUp]() {
+	Queue(1, Flick, 0.13f, 0.0f, [this, Weak, Target, Flight, bFaceUp]() {
+		ABackRoomCard* Card = Weak.Get();
+		if (!Card)
+		{
+			return;
+		}
 		LetGo(Card);
 		Card->PitchTo(Target, Flight, 3.5f, Rng.FRandRange(-25.0f, 25.0f), bFaceUp);
 		Sound(Snd(ss::SoundId::Deal), Card->GetActorLocation(), 0.6f);
@@ -1012,7 +1035,13 @@ float ABackRoomPlayer::GestureSweep(ABackRoomChips* Pile, const FVector& To, TFu
 	const FVector Palm = ToBodyDir(Dir) + FVector(0.0, 0.0, -0.6);
 	const FVector Finger = ToBodyDir(FVector::CrossProduct(FVector::UpVector, Dir)) + FVector(0.0, 0.0, -0.2);
 	LeanTarget = 0.9f;
-	Queue(1, Touch(Reachable(From - Dir * 5.0 + FVector(0.0, 0.0, 1.5)), Finger, Palm, 0.2f), 0.3f, 3.0f, [Pile, To]() { Pile->SlideTo(To, 0.45f); });
+	const TWeakObjectPtr<ABackRoomChips> WeakPile = Pile;
+	Queue(1, Touch(Reachable(From - Dir * 5.0 + FVector(0.0, 0.0, 1.5)), Finger, Palm, 0.2f), 0.3f, 3.0f, [WeakPile, To]() {
+		if (ABackRoomChips* P = WeakPile.Get())
+		{
+			P->SlideTo(To, 0.45f);
+		}
+	});
 	Queue(1, Touch(Reachable(To - Dir * 5.0 + FVector(0.0, 0.0, 1.5)), Finger, Palm, 0.2f), 0.45f, 0.0f, [this, To, Done = MoveTemp(OnDone)]() {
 		Sound(Snd(ss::SoundId::ChipStack), To, 0.7f);
 		if (Done)
@@ -1040,10 +1069,16 @@ float ABackRoomPlayer::GestureCollect(const TArray<ABackRoomCard*>& Cards, const
 	const FVector D = Mid - Shoulder;
 	const FVector Reach = D.Size() > 78.0 ? Shoulder + D.GetSafeNormal() * 78.0 : Mid;
 	LeanTarget = 0.85f;
-	Queue(1, Touch(Reach + FVector(0.0, 0.0, 1.0), FVector(0.6, 0.6, -0.3), FVector(-0.4, -0.3, -0.8), 0.2f), 0.35f, 3.0f, [this, Cards, Muck]() {
-		for (int32 I = 0; I < Cards.Num(); ++I)
+	// Held weakly: the table may clear the cards before the hand gets there.
+	TArray<TWeakObjectPtr<ABackRoomCard>> Weak;
+	for (ABackRoomCard* Card : Cards)
+	{
+		Weak.Add(Card);
+	}
+	Queue(1, Touch(Reach + FVector(0.0, 0.0, 1.0), FVector(0.6, 0.6, -0.3), FVector(-0.4, -0.3, -0.8), 0.2f), 0.35f, 3.0f, [this, Weak, Muck]() {
+		for (int32 I = 0; I < Weak.Num(); ++I)
 		{
-			if (ABackRoomCard* Card = Cards[I])
+			if (ABackRoomCard* Card = Weak[I].Get())
 			{
 				Card->SetPeek(0.0f, Muck);
 				Card->SlideTo(FTransform(GetActorRotation(), Muck + FVector(0.0, 0.0, 0.05 * I)), 0.45f + 0.03f * I);

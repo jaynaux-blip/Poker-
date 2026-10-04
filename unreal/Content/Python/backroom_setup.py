@@ -188,6 +188,44 @@ struct SSRoom
             rough = lerp(0.32, 0.55, grain) + groove * 0.3 - rail * 0.15;
             h = -groove * 0.004 + 0.0002 * figure + rail * 0.012;
         }
+        else if (k == 8)
+        {
+            // The Embercrest's carpet: an ember four-lobed star in every 1.2 m tile, ringed in gold, steel-blue
+            // scallops from the tiles' corners, a faint ember lattice, confetti, on a deep navy cut pile.
+            float t = 1.2;
+            float2 c = uv / t;
+            float2 f = frac(c) - 0.5;
+            float r = length(f);
+            float ang = atan2(f.y, f.x);
+            float lobe = 0.065 + 0.035 * cos(ang * 4.0);
+            float star = 1.0 - smoothstep(-0.006, 0.006, r - lobe);
+            float halo = 1.0 - smoothstep(0.004, 0.012, abs(r - lobe - 0.04));
+            float scallop = 0.0;
+            for (int q = 0; q < 4; q++)
+            {
+                float2 corner = float2((q & 1) ? 0.5 : -0.5, (q & 2) ? 0.5 : -0.5);
+                float rc = length(f - corner);
+                scallop = max(scallop, 1.0 - smoothstep(0.008, 0.02, abs(rc - 0.36)));
+                scallop = max(scallop, (1.0 - smoothstep(0.006, 0.014, abs(rc - 0.30))) * 0.7);
+            }
+            float2 g = abs(frac(c * 2.0 + 0.25) - 0.5);
+            float lattice = 1.0 - smoothstep(0.006, 0.018, abs(g.x - g.y));
+            float2 dc = floor(uv * 26.0);
+            float dotm = step(0.94, Hash(dc)) * (1.0 - smoothstep(0.16, 0.3, length(frac(uv * 26.0) - 0.5)));
+            float3 steel = float3(0.035, 0.06, 0.12);
+            float3 gold = float3(0.5, 0.28, 0.08);
+            col = base;
+            col = lerp(col, base2 * 0.45 + base * 0.55, lattice * 0.45);
+            col = lerp(col, steel, scallop);
+            col = lerp(col, gold, halo * 0.85);
+            col = lerp(col, base2, star);
+            col = lerp(col, lerp(steel * 1.6, gold, Hash(dc + 3.0)), dotm);
+            float pile = Fbm(uv * 260.0);
+            float wear = Fbm(uv * 0.6 + 4.0);
+            col *= (0.82 + 0.3 * pile) * (0.92 + 0.12 * wear);
+            rough = 0.97;
+            h = 0.0007 * pile;
+        }
         else if (k == 7)
         {
             // A black ceiling deck: big acoustic panels, faint seams, a dusty matte.
@@ -257,7 +295,7 @@ def build_room(force):
 
 
 def build_card_room(force):
-    """M_CardRoom: M_Room's surfaces plus the Riverside's carpet, walnut and black ceiling (Pattern 5-7)."""
+    """M_CardRoom: M_Room's surfaces plus the card room's carpets, walnut and black ceiling (Pattern 5-8)."""
     mat = ss._new_material("M_CardRoom", force)
     if not mat:
         return False
@@ -316,9 +354,100 @@ def build_screen_text(force):
     return ss._finish(mat)
 
 
+def build_screen_image(force):
+    """M_ScreenImage: an LED screen showing an image (Image, a color texture) at Strength, tinted, with a faint
+    pixel grid when seen up close (Cells across the screen's width, Grid its depth)."""
+    mat = ss._new_material("M_ScreenImage", force)
+    if not mat:
+        return False
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    uv = ss._expr(mat, unreal.MaterialExpressionTextureCoordinate, -1000, -100)
+    tex = ss._expr(mat, unreal.MaterialExpressionTextureSampleParameter2D, -700, -300)
+    tex.set_editor_property("parameter_name", "Image")
+    default_tex = unreal.load_object(None, "/Engine/EngineResources/DefaultTexture.DefaultTexture")
+    if default_tex:
+        tex.set_editor_property("texture", default_tex)
+    mel.connect_material_expressions(uv, "", tex, "UVs")
+    tint = ss._vector(mat, "Tint", (1.0, 1.0, 1.0), -700, -50)
+    strength = ss._scalar(mat, "Strength", 1.0, -700, 50)
+    cells = ss._scalar(mat, "Cells", 320.0, -1000, 100)
+    grid = ss._scalar(mat, "Grid", 0.3, -1000, 200)
+    c = ss._custom(mat, """
+float2 cell = frac(UV * float2(Cells, Cells * 0.5625));
+float2 d = abs(cell - 0.5);
+float pixel = 1.0 - Grid * smoothstep(0.32, 0.5, max(d.x, d.y));
+return Rgb * Tint * Strength * pixel;
+""", ["UV", "Rgb", "Tint", "Strength", "Cells", "Grid"], F3, -350, -100, "LED screen")
+    ss._link(uv, c, "UV")
+    mel.connect_material_expressions(tex, "RGB", c, "Rgb")
+    ss._link(tint, c, "Tint")
+    ss._link(strength, c, "Strength")
+    ss._link(cells, c, "Cells")
+    ss._link(grid, c, "Grid")
+    mel.connect_material_property(c, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    return ss._finish(mat)
+
+
+def build_invisible(force):
+    """M_Invisible: draws nothing (masked out everywhere). The baked crowd's translucent sections take it, since Nanite
+    draws no translucency (backroom_crowd.py)."""
+    mat = ss._new_material("M_Invisible", force)
+    if not mat:
+        return False
+    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    zero = ss._expr(mat, unreal.MaterialExpressionConstant, -400, 0)
+    mel.connect_material_property(zero, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+    return ss._finish(mat)
+
+
+def build_hair_cards(force):
+    """M_HairCardsStatic: a groom's hair cards drawn as an ordinary mesh, for the baked crowd (the groom's own hair
+    material only draws through the groom). Coverage is the cards' atlas texture holding coverage, CoverageChannel which
+    channel (0 red, 3 alpha); HairColor the groom's color, a little lighter toward the tips (the atlas's depth)."""
+    mat = ss._new_material("M_HairCardsStatic", force)
+    if not mat:
+        return False
+    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    mat.set_editor_property("two_sided", True)
+    mat.set_editor_property("opacity_mask_clip_value", 0.25)
+    uv = ss._expr(mat, unreal.MaterialExpressionTextureCoordinate, -1000, -100)
+    tex = ss._expr(mat, unreal.MaterialExpressionTextureSampleParameter2D, -700, -250)
+    tex.set_editor_property("parameter_name", "Coverage")
+    tex.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_MASKS)
+    # The default must be a linear mask like the atlases (a color texture fails the masks sampler, and the material
+    # with it): one of the shirt prints stands in until an instance sets the groom's atlas.
+    default_tex = unreal.load_object(None, "/Game/ShortStack/Textures/Clothing/T_Print_Dots.T_Print_Dots")
+    if default_tex:
+        tex.set_editor_property("texture", default_tex)
+    mel.connect_material_expressions(uv, "", tex, "UVs")
+    color = ss._vector(mat, "HairColor", (0.05, 0.035, 0.025), -700, 0)
+    channel = ss._scalar(mat, "CoverageChannel", 0.0, -700, 100)
+    c = ss._custom(mat, """
+float coverage = Channel > 1.5 ? T.a : T.r;
+// Darker than the groom's color as given: real hair absorbs steeply with melanin (the hair shader's scattering), and
+// cards lit from above without that shading read light.
+return float4(pow(max(Color, 0.0), 1.5) * 0.75, coverage);
+""", ["T", "Color", "Channel"], ss.F4, -400, -100, "Hair cards")
+    mel.connect_material_expressions(tex, "RGBA", c, "T")
+    ss._link(color, c, "Color")
+    ss._link(channel, c, "Channel")
+    rgb = ss._mask(mat, c, "rgb", -150, -150)
+    a = ss._mask(mat, c, "a", -150, 0)
+    mel.connect_material_property(rgb, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(a, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+    rough = ss._expr(mat, unreal.MaterialExpressionConstant, -150, 150)
+    rough.set_editor_property("r", 0.58)
+    mel.connect_material_property(rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    spec = ss._expr(mat, unreal.MaterialExpressionConstant, -150, 250)
+    spec.set_editor_property("r", 0.18)
+    mel.connect_material_property(spec, "", unreal.MaterialProperty.MP_SPECULAR)
+    return ss._finish(mat)
+
+
 def build_materials(force=False):
     built = import_cards(force)
-    for build in (build_room, build_card, build_card_room, build_screen_text):
+    for build in (build_room, build_card, build_card_room, build_screen_text, build_screen_image, build_invisible, build_hair_cards):
         try:
             if build(force):
                 built += 1

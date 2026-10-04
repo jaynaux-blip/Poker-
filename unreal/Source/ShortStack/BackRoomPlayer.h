@@ -148,7 +148,7 @@ struct FBackRoomPersona
 
 	/**
 	 * What's on the shirt: a repeating print (0 plain; 1 stripes, 2 breton, 3 ringer, 4 tartan, 5 gingham, 6 dots,
-	 * 7 camo) or a chest graphic (0 none; 1 the Riverside's spade, 2 ALL IN, 3 a chip, 4 BAD BEAT CLUB, 5 a sunset,
+	 * 7 camo) or a chest graphic (0 none; 1 the Embercrest's spade, 2 ALL IN, 3 a chip, 4 BAD BEAT CLUB, 5 a sunset,
 	 * 6 a number), in its second and third colors (art/blender/prints.py's masks).
 	 */
 	UPROPERTY(EditAnywhere, Category = "Persona")

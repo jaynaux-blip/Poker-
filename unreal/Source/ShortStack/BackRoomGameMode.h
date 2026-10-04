@@ -300,10 +300,10 @@ public:
 	bool IsFirstVisit() const { return bFirstVisit; }
 	bool IsLeaveRequested() const { return bLeaveAsked; }
 
-	// ------------------------------------------------------------ the Riverside (BackRoomLive.cpp)
+	// ------------------------------------------------------------ the Embercrest (BackRoomLive.cpp)
 	/** A live tournament tonight (opened with "?Live=<occurrence id>") instead of Dee's game. */
 	bool IsLive() const { return bLive; }
-	/** Tonight's event as the room calls it ("Riverside Nightly $120"). */
+	/** Tonight's event as the room calls it ("Embercrest Nightly $120"). */
 	const FString& GetLiveName() const { return LiveName; }
 	/** The tournament for the HUD (null at Dee's game). */
 	const ss::Tournament* GetTourney() const { return Tourney.Get(); }
@@ -324,15 +324,15 @@ public:
 	float PaceShownAge() const { return static_cast<float>(FPlatformTime::Seconds() - PaceShownAt); }
 	/** How quickly a hand the player is out of plays out, at this pace (time dilation). */
 	float FoldedPace() const { return TablePace == 2 ? 4.0f : (TablePace == 1 ? 2.8f : 1.9f); }
-	/** The persona for a cast member by name (the Back Room's regulars and the Riverside's Sunday faces). */
+	/** The persona for a cast member by name (the Back Room's regulars and the Embercrest's Sunday faces). */
 	static FBackRoomPersona PersonaFor(const FString& Name);
-	/** Who someone in tonight's field is to the player ("Riverside regular", "Knows you", ...; empty for a stranger). */
+	/** Who someone in tonight's field is to the player ("Embercrest regular", "Knows you", ...; empty for a stranger). */
 	FString FaceNote(const FString& Name) const;
 
-	// ------------------------------------------------------------ the Riverside on foot (BackRoomLive.cpp)
+	// ------------------------------------------------------------ the Embercrest on foot (BackRoomLive.cpp)
 	/** Q at the table: up and walking (still dealt in: the dealer checks the hand when it's free and mucks it when not). */
 	void LiveStandUp();
-	/** E on foot: the chair (sit back down), the desk, the cashier, the bar, the river deck, the door. */
+	/** E on foot: the chair (sit back down), the desk, the cashier, the bar, the terrace, the door. */
 	void LiveInteract();
 	/** Out of the tournament: Q stays in the room to watch the rest of it, on foot; L goes home now. */
 	void LiveStay();
@@ -358,7 +358,7 @@ private:
 	void SeatEveryone();
 	ABackRoomPlayer* SpawnPerson(const FString& CastName, const FTransform& At, EBackRoomRole AtTableAs, const FBackRoomPersona& Persona);
 
-	// The Riverside (BackRoomLive.cpp).
+	// The Embercrest (BackRoomLive.cpp).
 	bool LoadLive();
 	void SeatLive();
 	void LiveTick(float RealDt);

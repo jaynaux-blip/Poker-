@@ -24,7 +24,7 @@ int WeekdayOfDay(int Day)
 std::string OccurrenceId(const EventTemplate& T, int Day)
 {
 	// The Sunday keeps the id it had when it was the room's only event (saves and memories point at it).
-	return std::string(T.Key) == "sunday" ? "riverside@" + std::to_string(Day) : "riverside-" + std::string(T.Key) + "@" + std::to_string(Day);
+	return std::string(T.Key) == "sunday" ? "embercrest@" + std::to_string(Day) : "embercrest-" + std::string(T.Key) + "@" + std::to_string(Day);
 }
 
 Occurrence Make(const EventTemplate& T, int Day)
@@ -59,8 +59,8 @@ const std::vector<EventTemplate>& Schedule()
 		{"noon", "Noon Deepstack $80", "Noon Deepstack", Mon | Tue | Wed | Thu | Fri, 12 * 60, 8000, 1000, 15000, 20.0, 3, 6, 15.0, 18, 60, 80, 9.0, "Deepstack"},
 		{"bigstack", "Saturday Big Stack $200", "Big Stack", Sat, 13 * 60, 20000, 2000, 30000, 25.0, 3, 6, 15.0, 18, 90, 114, 11.0, "Deepstack"},
 		{"warmup", "Sunday Warm-Up $80", "Warm-Up", Sun, 12 * 60, 8000, 1000, 15000, 20.0, 3, 6, 15.0, 18, 60, 85, 9.0, "Deepstack"},
-		{"nightly", "Riverside Nightly $120", "Nightly", Mon | Tue | Wed | Thu | Fri | Sat, 19 * 60, 12000, 1500, 20000, 20.0, 3, 6, 15.0, 18, 70, 100, 8.0, "Deepstack"},
-		{"sunday", "Riverside Sunday $150", "Sunday", Sun, 19 * 60, 15000, 1500, 20000, 20.0, 3, 6, 15.0, 18, 90, 114, 9.0, "Deepstack"},
+		{"nightly", "Embercrest Nightly $120", "Nightly", Mon | Tue | Wed | Thu | Fri | Sat, 19 * 60, 12000, 1500, 20000, 20.0, 3, 6, 15.0, 18, 70, 100, 8.0, "Deepstack"},
+		{"sunday", "Embercrest Sunday $150", "Sunday", Sun, 19 * 60, 15000, 1500, 20000, 20.0, 3, 6, 15.0, 18, 90, 114, 9.0, "Deepstack"},
 		{"turbo", "Midnight Turbo $60", "Midnight Turbo", Fri | Sat, 22 * 60 + 30, 6000, 800, 10000, 10.0, 4, 6, 10.0, 18, 60, 75, 4.5, "Turbo"},
 	};
 	return Events;
@@ -84,7 +84,7 @@ std::vector<Occurrence> Occurrences(int Day)
 Occurrence FindOccurrence(const std::string& Id)
 {
 	const size_t At = Id.find('@');
-	if (!IsRiverside(Id) || At == std::string::npos)
+	if (!IsEmbercrest(Id) || At == std::string::npos)
 	{
 		return Occurrence();
 	}
@@ -99,9 +99,9 @@ Occurrence FindOccurrence(const std::string& Id)
 	return Occurrence();
 }
 
-bool IsRiverside(const std::string& EventId)
+bool IsEmbercrest(const std::string& EventId)
 {
-	return EventId.rfind("riverside@", 0) == 0 || EventId.rfind("riverside-", 0) == 0;
+	return EventId.rfind("embercrest@", 0) == 0 || EventId.rfind("embercrest-", 0) == 0;
 }
 
 std::vector<Occurrence> Reachable(double World, double HoursAhead)
@@ -162,7 +162,7 @@ TournamentSpec SpecFor(const Occurrence& O, int Entrants)
 	S.Population = "low";
 	S.Speed = T.Speed;
 	S.StartClock = static_cast<double>(T.StartMinute);
-	S.TableSize = RiversideTableSize;
+	S.TableSize = EmbercrestTableSize;
 	S.Levels = DeepstackLevels();
 	S.BreakEvery = T.BreakEvery;
 	S.BreakMinutes = T.BreakMinutes;
@@ -187,9 +187,38 @@ std::string SeedFor(const life::LiveEntry& E, const std::string& HeroName)
 	return E.Id + ":" + HeroName + ":" + Fixed2(E.RegisteredAt);
 }
 
+std::unique_ptr<Tournament> ResumeField(const Occurrence& O, const life::LiveEntry& E, int Entrants, const std::string& HeroName,
+	const std::vector<ReservedPlayer>& Known, bool bRestore, bool& bRestored)
+{
+	std::unique_ptr<Tournament> Night = MakeField(O, Entrants, HeroName, SeedFor(E, HeroName), Known);
+	bRestored = false;
+	if (!bRestore || E.Checkpoint.empty())
+	{
+		return Night;
+	}
+	bRestored = Night->Restore(E.Checkpoint);
+	// The ids were renamed (the seed and the checkpoint's field print both carry them): an old night's checkpoint
+	// only fits the field drawn under its old id.
+	static const std::string Now = "embercrest", Was = "riverside";
+	if (!bRestored && E.Id.rfind(Now, 0) == 0 && O.Id.rfind(Now, 0) == 0)
+	{
+		Occurrence Legacy = O;
+		Legacy.Id = Was + O.Id.substr(Now.size());
+		life::LiveEntry LegacyEntry = E;
+		LegacyEntry.Id = Was + E.Id.substr(Now.size());
+		std::unique_ptr<Tournament> Old = MakeField(Legacy, Entrants, HeroName, SeedFor(LegacyEntry, HeroName), Known);
+		if (Old->Restore(E.Checkpoint))
+		{
+			bRestored = true;
+			return Old;
+		}
+	}
+	return Night;
+}
+
 // ------------------------------------------------------------------ the people with faces
 
-const std::vector<CastMember>& RiversideCast()
+const std::vector<CastMember>& EmbercrestCast()
 {
 	static const std::vector<CastMember> Cast = {
 		{"npc:Sal", "Sal", Archetype::Nit},
@@ -440,7 +469,7 @@ bool PayFare(Chips& Bankroll, life::State& L, const std::string& Id, bool Home, 
 	}
 	(Home ? E->FareHome : E->FareThere) = true;
 	Bankroll -= BusFareCents;
-	L.Record(World, Home ? "The 14 bus home" : "The 14 bus to the Riverside", -BusFareCents, 3);
+	L.Record(World, Home ? "The 14 bus home" : "The 14 bus to the Embercrest", -BusFareCents, 3);
 	return true;
 }
 

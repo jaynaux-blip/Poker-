@@ -7,6 +7,7 @@
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
@@ -306,6 +307,25 @@ UMaterialInstanceDynamic* ABackRoomStage::Glow(FName Key, const FLinearColor& Co
 	return M;
 }
 
+UMaterialInstanceDynamic* ABackRoomStage::ScreenImage(FName Key, const TCHAR* Image, float Strength, const FLinearColor& Tint)
+{
+	if (TObjectPtr<UMaterialInstanceDynamic>* Found = Materials.Find(Key))
+	{
+		return *Found;
+	}
+	UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *FString::Printf(TEXT("/Game/ShortStack/Textures/Brand/%s.%s"), Image, Image), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!ScreenImageMaterial || !Tex)
+	{
+		return Glow(Key, Srgb(0x0b1428), 3.0f);
+	}
+	UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(ScreenImageMaterial, this);
+	M->SetTextureParameterValue(TEXT("Image"), Tex);
+	M->SetScalarParameterValue(TEXT("Strength"), Strength);
+	M->SetVectorParameterValue(TEXT("Tint"), Tint);
+	Materials.Add(Key, M);
+	return M;
+}
+
 // ------------------------------------------------------------------ construction
 
 void ABackRoomStage::OnConstruction(const FTransform& Transform)
@@ -327,7 +347,13 @@ void ABackRoomStage::BuildSet()
 	RoomMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Room.M_Room"));
 	CardRoomMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_CardRoom.M_CardRoom"));
 	SurfaceMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Surface.M_Surface"));
-	TableMesh = LoadProp(TEXT("SM_PokerTable"));
+	ScreenImageMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_ScreenImage.M_ScreenImage"));
+	// The card room's tables are the Embercrest's (the same table, its tournament cloth and rail).
+	TableMesh = bCardRoom ? LoadProp(TEXT("SM_PokerTable_EC")) : nullptr;
+	if (!TableMesh)
+	{
+		TableMesh = LoadProp(TEXT("SM_PokerTable"));
+	}
 	if (bCardRoom)
 	{
 		BuildCardRoom();

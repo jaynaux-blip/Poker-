@@ -28,7 +28,7 @@ Pending* FindPending(std::vector<Pending>& Queue, const std::string& Id)
 	return nullptr;
 }
 
-/** The day an event id starts on ("riverside@<day>", "dees@<day>", otherwise "<id>@<minute>"). */
+/** The day an event id starts on ("embercrest@<day>", "dees@<day>", otherwise "<id>@<minute>"). */
 int EventDay(const std::string& Id)
 {
 	const size_t At = Id.rfind('@');
@@ -37,7 +37,7 @@ int EventDay(const std::string& Id)
 		return -1;
 	}
 	const double V = std::atof(Id.c_str() + At + 1);
-	const bool ByDay = live::IsRiverside(Id) || Id.rfind("dees@", 0) == 0;
+	const bool ByDay = live::IsEmbercrest(Id) || Id.rfind("dees@", 0) == 0;
 	return ByDay ? static_cast<int>(V) : sim::DayAt(V);
 }
 
@@ -543,10 +543,10 @@ void World::BackRoomNight(double At, const std::vector<std::string>& Names, Chip
 	++HeroRev;
 }
 
-void World::RiversideDone(double At, const std::vector<std::pair<std::string, int>>& Places, int HeroPlace, int FieldSize)
+void World::EmbercrestDone(double At, const std::vector<std::pair<std::string, int>>& Places, int HeroPlace, int FieldSize)
 {
 	const int Day = sim::DayAt(At - 6.0 * 60.0); // it starts at 7 PM and can run past midnight
-	const std::string Id = "riverside@" + std::to_string(Day);
+	const std::string Id = "embercrest@" + std::to_string(Day);
 	Registered(Id);
 	Pending* P = FindPending(Queue, Id);
 	if (P)
@@ -580,10 +580,10 @@ void World::RiversideDone(double At, const std::vector<std::pair<std::string, in
 				P->Who.push_back(E);
 			}
 		}
-		Remember(Npc, MemoryKind::Riverside, "the Riverside Sunday", 0, At);
+		Remember(Npc, MemoryKind::Embercrest, "the Embercrest Sunday", 0, At);
 		if (HeroPlace >= 1 && HeroPlace <= 6 && It.second <= 6)
 		{
-			Remember(Npc, MemoryKind::FinalTable, "the Riverside Sunday", 0, At);
+			Remember(Npc, MemoryKind::FinalTable, "the Embercrest Sunday", 0, At);
 		}
 	}
 	HeroResults[Id] = {HeroPlace, 0};
@@ -633,7 +633,7 @@ void Sim::Feel(Bond& B, MemoryKind K, float Emotion)
 		B.Familiarity = Add01(B.Familiarity, 0.08);
 		B.Trust = Add01(B.Trust, 0.05);
 		break;
-	case MemoryKind::Riverside: B.Familiarity = Add01(B.Familiarity, 0.06); break;
+	case MemoryKind::Embercrest: B.Familiarity = Add01(B.Familiarity, 0.06); break;
 	case MemoryKind::ShowedBluff: B.Rivalry = Add01(B.Rivalry, 0.05); break;
 	default: break;
 	}
@@ -726,7 +726,7 @@ std::string Bond::Label() const
 	return "";
 }
 
-std::vector<int> World::RiversideRegulars() const
+std::vector<int> World::EmbercrestRegulars() const
 {
 	// Not who's playing this week (a break or a broke spell doesn't change who the room's regulars are). The room's
 	// own locals, then the town's live players, then its online players who've had the money for a live game (their
@@ -743,7 +743,7 @@ std::vector<int> World::RiversideRegulars() const
 	}
 	std::sort(Pool.begin(), Pool.end());
 	std::vector<int> Out;
-	for (size_t I = 0; I < Pool.size() && I < static_cast<size_t>(RiversideRegularCount); ++I)
+	for (size_t I = 0; I < Pool.size() && I < static_cast<size_t>(EmbercrestRegularCount); ++I)
 	{
 		Out.push_back(Pool[I].second);
 	}
@@ -797,7 +797,7 @@ std::string World::Greeting(int Npc, uint32_t Salt) const
 	case MemoryKind::HeadsUpLost: return One("gl, see you heads-up again", "back for more?", "gg last time");
 	case MemoryKind::FinalTable: return One("ft buddy, gl", "see you at another final", "this one again. gl");
 	case MemoryKind::BackRoom: return One("Dee says hi", "the laundromat crew online", "you play better at Dee's");
-	case MemoryKind::Riverside: return One("see you Sunday?", "Riverside regular in the house", "gl, Sunday was fun");
+	case MemoryKind::Embercrest: return One("see you Sunday?", "Embercrest regular in the house", "gl, Sunday was fun");
 	case MemoryKind::BigPotWon: return One("I want my chips back", "gl. not you again", "that pot still hurts");
 	default: break;
 	}

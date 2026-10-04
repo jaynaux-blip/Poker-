@@ -1441,14 +1441,14 @@ void WorldScreens()
 	RL.OpenPage(Page::News, Now);
 	Now = Run(S, RL, Now, 1.5);
 	Emit("world_news", RL, Now);
-	// Player cards: the rival, and someone from the Riverside.
+	// Player cards: the rival, and someone from the Embercrest.
 	RL.OpenPage(Page::Leaderboards, Now);
 	RL.ShowPlayer(W.Find(ss::RivalName), Now);
 	Now = Run(S, RL, Now, 1.0);
 	Expect(RL.PlayerShown() == W.Find(ss::RivalName), "a player card opens");
 	Emit("world_card_rival", RL, Now);
-	S.Living().Remember(W.Find("Mei"), ss::world::MemoryKind::Riverside, "the Riverside Sunday", 0, S.WorldMinutes() - 3000.0);
-	S.Living().Remember(W.Find("Mei"), ss::world::MemoryKind::HeroKnockedOut, "Riverside Sunday $150", 0, S.WorldMinutes() - 2900.0);
+	S.Living().Remember(W.Find("Mei"), ss::world::MemoryKind::Embercrest, "the Embercrest Sunday", 0, S.WorldMinutes() - 3000.0);
+	S.Living().Remember(W.Find("Mei"), ss::world::MemoryKind::HeroKnockedOut, "Embercrest Sunday $150", 0, S.WorldMinutes() - 2900.0);
 	RL.ShowPlayer(W.Find("Mei"), Now);
 	Now = Run(S, RL, Now, 1.0);
 	Emit("world_card_mei", RL, Now);

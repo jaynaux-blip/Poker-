@@ -389,13 +389,13 @@ void DeeGame()
 	std::printf("  dee: %d text(s), sat with %s\n", H.FromDee, ss::Money(H.BuyIn).c_str());
 }
 
-/** The Riverside's card room: the schedule, registering once, the world's field, breaks, settling once, saves. */
-void Riverside()
+/** The Embercrest's card room: the schedule, registering once, the world's field, breaks, settling once, saves. */
+void Embercrest()
 {
 	namespace life = ss::life;
 	namespace live = ss::live;
-	const life::Activity* Rv = life::Find("riverside");
-	Expect(Rv != nullptr && Rv->Type == life::Kind::Live, "the Riverside is in the catalog");
+	const life::Activity* Rv = life::Find("embercrest");
+	Expect(Rv != nullptr && Rv->Type == life::Kind::Live, "the Embercrest is in the catalog");
 	if (!Rv)
 	{
 		return;
@@ -420,12 +420,12 @@ void Riverside()
 				Times = Times && O.Start == Day * 1440.0 + O.T->StartMinute && live::FindOccurrence(O.Id).Id == O.Id && O.LateRegEnds > O.Start;
 				if (std::string(O.T->Key) == "sunday")
 				{
-					Times = Times && O.Id == "riverside@" + std::to_string(Day);
+					Times = Times && O.Id == "embercrest@" + std::to_string(Day);
 				}
 			}
 		}
 		Expect(Counts, "two events a day Monday to Thursday and Sunday, three on Friday and Saturday");
-		Expect(Unique && Times, "every occurrence has its own id and its published start; the Sunday keeps riverside@<day>");
+		Expect(Unique && Times, "every occurrence has its own id and its published start; the Sunday keeps embercrest@<day>");
 		Expect(Fields, "planned fields of 60 to 120");
 	}
 
@@ -441,7 +441,7 @@ void Riverside()
 		}
 	};
 	OutHooks H;
-	ss::Session S(H, "riverside");
+	ss::Session S(H, "embercrest");
 	S.CurrentScreen = ss::Screen::Lobby;
 	double Now = Wait(S, 0.0, 0.2);
 	// Wednesday, October 14 (world day 9), 5:30 PM: the Nightly's desk is open.
@@ -449,7 +449,7 @@ void Riverside()
 	S.LobbyMinutes = Wednesday - 1440.0 + 17.0 * 60.0 + 30.0;
 	Now = Wait(S, Now, 0.2);
 	S.Life.Energy = 60.0;
-	const live::Occurrence Nightly = live::FindOccurrence("riverside-nightly@9");
+	const live::Occurrence Nightly = live::FindOccurrence("embercrest-nightly@9");
 	Expect(Nightly.Valid() && Nightly.T->BuyInCents == 12000, "Wednesday's Nightly, $120");
 	S.BankrollCents = 12000;
 	Expect(S.GoToLive(Nightly.Id).find("bus") != std::string::npos && S.Life.LiveEntries.empty(), "the buy-in without the bus can't enter");
@@ -482,13 +482,13 @@ void Riverside()
 			Who += (Who.empty() ? "" : ", ") + F.Name + " (" + F.Label + ")";
 		}
 		Expect(E->Faces.size() >= 3 && InRoster && Labelled && Locals >= 1, "the Nightly's regulars are in its field, by name");
-		std::printf("  riverside: faces in the Nightly: %s\n", Who.c_str());
+		std::printf("  embercrest: faces in the Nightly: %s\n", Who.c_str());
 	}
 	H.Went.clear();
 	Expect(S.GoToLive(Nightly.Id).empty() && H.Went == Nightly.Id && S.BankrollCents == 50000 - 12000 - live::BusFareCents && S.Life.LiveEntries.size() == 1 &&
 			   S.Life.Ledger.size() == Lines0 + 3,
 		"registering again charges nothing and goes back");
-	Expect(!S.GoToLive("riverside-turbo@11").empty() && S.Life.LiveEntries.size() == 1, "one live entry at a time");
+	Expect(!S.GoToLive("embercrest-turbo@11").empty() && S.Life.LiveEntries.size() == 1, "one live entry at a time");
 
 	// The field: the world's people by name among the room's regulars, and the same draw every time it's opened.
 	std::vector<ss::ReservedPlayer> Known;
@@ -570,7 +570,7 @@ void Riverside()
 	Expect(Balanced && Moves > 0, "nobody is moved but by breaking or evening out tables");
 	Expect(BreaksOk && Breaks >= 1 && Breaks == T->BreaksTaken && std::fabs(T->ClockMinutes() - Clock) < 1e-6, "breaks fall between levels and go on the clock");
 	Expect(Conserved, "every chip is still on the tables");
-	std::printf("  riverside: %s, %d entrants, %d hands, %d moves, %d breaks, done at %s\n", Nightly.T->Name, T->Spec.Entrants, Ticks, Moves, Breaks,
+	std::printf("  embercrest: %s, %d entrants, %d hands, %d moves, %d breaks, done at %s\n", Nightly.T->Name, T->Spec.Entrants, Ticks, Moves, Breaks,
 		ss::net::TimeLabel(T->ClockMinutes()).c_str());
 
 	// Settling: once, however often it's asked for, and the save keeps it.
@@ -593,13 +593,52 @@ void Riverside()
 				   Kept->Faces.size() == E->Faces.size() && (Kept->Faces.empty() || Kept->Faces.front().Label == E->Faces.front().Label) &&
 				   P.Life.LiveEvents == 1,
 			"entries survive a save");
+		// A save from when the casino had its old name (a v1 save): the same entry, under its old id and name, loads as
+		// the Embercrest's; the player's own name is theirs and stays as it was.
+		ss::SaveData LegacySave = D;
+		LegacySave.HeroName = "RiversideRat";
+		std::string Old = LegacySave.Serialize();
+		Expect(Old.rfind("shortstack.nightone.v2\n", 0) == 0, "saves are written as v2");
+		Old.replace(0, std::string("shortstack.nightone.v2").size(), "shortstack.nightone.v1");
+		for (const auto& [To, From] : {std::pair<std::string, std::string>{"embercrest", "riverside"}, {"Embercrest", "Riverside"}})
+		{
+			for (size_t Pos = Old.find(To); Pos != std::string::npos; Pos = Old.find(To, Pos + From.size()))
+			{
+				Old.replace(Pos, To.size(), From);
+			}
+		}
+		ss::SaveData R;
+		const life::LiveEntry* Renamed = Old.find("riverside") != std::string::npos && ss::SaveData::Parse(Old, R) ? live::EntryFor(R.Life, Nightly.Id) : nullptr;
+		Expect(Renamed && Renamed->State == life::LiveEntry::Finished && Renamed->Name == Kept->Name && Renamed->Name.find("Embercrest") != std::string::npos,
+			"a save from before the rename loads as the Embercrest's");
+		Expect(R.HeroName == "RiversideRat", "the rename leaves the player's own name alone");
+		ss::SaveData Again;
+		Expect(ss::SaveData::Parse(R.Serialize(), Again) && Again.HeroName == "RiversideRat", "a v2 save isn't migrated again");
+		// A night checkpointed before the rename (drawn under its old id) still resumes from its checkpoint.
+		{
+			live::Occurrence Legacy = Nightly;
+			Legacy.Id = "riverside" + Nightly.Id.substr(std::string("embercrest").size());
+			life::LiveEntry LegacyEntry = *Kept;
+			LegacyEntry.Id = Legacy.Id;
+			std::unique_ptr<ss::Tournament> Drawn = live::MakeField(Legacy, std::max(Kept->Entrants, 2), "Hero", live::SeedFor(LegacyEntry, "Hero"), {});
+			life::LiveEntry Resumed = *Kept;
+			Resumed.Checkpoint = Drawn->Checkpoint();
+			bool bFits = false;
+			std::unique_ptr<ss::Tournament> Back = live::ResumeField(Nightly, Resumed, std::max(Kept->Entrants, 2), "Hero", {}, true, bFits);
+			Expect(bFits && Back && Back->Spec.Id == Legacy.Id, "a night checkpointed before the rename resumes");
+			bool bFresh = false;
+			life::LiveEntry Fresh = *Kept;
+			Fresh.Checkpoint = live::MakeField(Nightly, std::max(Kept->Entrants, 2), "Hero", live::SeedFor(Fresh, "Hero"), {})->Checkpoint();
+			std::unique_ptr<ss::Tournament> Same = live::ResumeField(Nightly, Fresh, std::max(Kept->Entrants, 2), "Hero", {}, true, bFresh);
+			Expect(bFresh && Same && Same->Spec.Id == Nightly.Id, "a night checkpointed after the rename resumes under its own id");
+		}
 	}
 
 	// A thin noon game: below the minimum it's cancelled, and everything comes back once.
 	{
 		ss::Chips B = 50000;
 		life::State L;
-		const live::Occurrence Noon = live::FindOccurrence("riverside-noon@10");
+		const live::Occurrence Noon = live::FindOccurrence("embercrest-noon@10");
 		Expect(Noon.Valid() && live::Register(B, L, Noon, 10.0 * 1440.0 + 11.0 * 60.0, 12, {}).empty() && B == 50000 - 8000, "registered for Thursday's noon game");
 		Expect(live::BelowMinimum(Noon, 12) && !live::BelowMinimum(Noon, 60), "twelve is below the room's minimum");
 		Expect(live::Refund(B, L, Noon.Id, 10.0 * 1440.0 + 12.0 * 60.0, "not enough players") && !live::Refund(B, L, Noon.Id, 10.0 * 1440.0 + 12.0 * 60.0, "") && B == 50000 &&
@@ -612,7 +651,7 @@ void Riverside()
 	{
 		ss::SaveData D;
 		D.BankrollCents = 50000;
-		const live::Occurrence Sunday = live::FindOccurrence("riverside@13");
+		const live::Occurrence Sunday = live::FindOccurrence("embercrest@13");
 		Expect(live::Register(D.BankrollCents, D.Life, Sunday, 13.0 * 1440.0 + 18.0 * 60.0, 95, {}).empty(), "registered for the Sunday");
 		D.ClockMinutes = 14.0 * 1440.0 + 12.0 * 60.0 - 1440.0; // Monday noon
 		Hooks H2;
@@ -621,13 +660,13 @@ void Riverside()
 		Expect(A && A->State == life::LiveEntry::Finished && A->Place >= 1 && A->Place <= 95 && S2.Life.LiveEvents == 1, "an entry left mid-tournament is blinded out and settled on the next load");
 		if (A)
 		{
-			std::printf("  riverside: left the Sunday, blinded out in %s of 95\n", ss::Ordinal(A->Place).c_str());
+			std::printf("  embercrest: left the Sunday, blinded out in %s of 95\n", ss::Ordinal(A->Place).c_str());
 		}
 	}
 
 	// Late registration: the field plays on without the player, whose stack waits untouched.
 	{
-		std::unique_ptr<ss::Tournament> Late = live::MakeField(live::FindOccurrence("riverside@13"), 90, "grinder_3c", "late", {});
+		std::unique_ptr<ss::Tournament> Late = live::MakeField(live::FindOccurrence("embercrest@13"), 90, "grinder_3c", "late", {});
 		Late->HeroAway = true;
 		for (int K = 0; K < 12; ++K)
 		{
@@ -676,11 +715,11 @@ void Riverside()
 			std::printf("  no hand for the player at %s\n", Where.c_str());
 		}
 		Expect(Dealt, "a player still in always has a hand dealt");
-		std::printf("  riverside: %d nights, the player dealt in every hand they were in\n", Nights);
+		std::printf("  embercrest: %d nights, the player dealt in every hand they were in\n", Nights);
 	}
 	// Walking away: dealt in, checking and folding, the blinds take the stack.
 	{
-		std::unique_ptr<ss::Tournament> Gone = live::MakeField(live::FindOccurrence("riverside-nightly@16"), 70, "grinder_3c", "gone", {});
+		std::unique_ptr<ss::Tournament> Gone = live::MakeField(live::FindOccurrence("embercrest-nightly@16"), 70, "grinder_3c", "gone", {});
 		Gone->HeroSitsOut = true;
 		int Ticks2 = 0;
 		while (!Gone->Hero().Busted && !Gone->bFinished && Ticks2 < 6000)
@@ -689,7 +728,7 @@ void Riverside()
 			++Ticks2;
 		}
 		Expect(Gone->Hero().Busted && Gone->Hero().Place > 1 && Gone->Hero().VpipHands == 0, "a player who walks away is blinded off, never putting a chip in voluntarily");
-		std::printf("  riverside: walked away, blinded off in %s after %d hands\n", ss::Ordinal(Gone->Hero().Place).c_str(), Gone->Hero().Hands);
+		std::printf("  embercrest: walked away, blinded off in %s after %d hands\n", ss::Ordinal(Gone->Hero().Place).c_str(), Gone->Hero().Hands);
 	}
 }
 
@@ -700,12 +739,12 @@ std::string EventLine(const ss::TEvent& E)
 		"|" + std::to_string(E.From) + ">" + std::to_string(E.To) + "|" + std::to_string(E.LevelNumber) + "|" + E.EliminatedBy;
 }
 
-/** The Riverside's checkpoints: a night closed after any hand carries on exactly as if it never was. */
-void RiversideCheckpoints()
+/** The Embercrest's checkpoints: a night closed after any hand carries on exactly as if it never was. */
+void EmbercrestCheckpoints()
 {
 	namespace life = ss::life;
 	namespace live = ss::live;
-	const live::Occurrence Sunday = live::FindOccurrence("riverside@13");
+	const live::Occurrence Sunday = live::FindOccurrence("embercrest@13");
 	std::vector<ss::ReservedPlayer> Known(3);
 	Known[0].Name = "Mei";
 	Known[0].Type = ss::Archetype::Crusher;
@@ -797,7 +836,7 @@ void RiversideCheckpoints()
 			}
 		}
 		Expect(Reopened >= 4 && Log == WholeLog && Hop->Checkpoint() == Whole->Checkpoint(), "a night closed every forty hands is still the same night");
-		std::printf("  riverside: %zu hands, reopened %d times, every hand and every chip where it was\n", Marks.size() - 1, Reopened);
+		std::printf("  embercrest: %zu hands, reopened %d times, every hand and every chip where it was\n", Marks.size() - 1, Reopened);
 	}
 
 	// Only its own field takes it, and a bad one changes nothing.
@@ -896,13 +935,13 @@ void RiversideCheckpoints()
 		const life::LiveEntry* A = live::EntryFor(S2.Life, Sunday.Id);
 		Expect(A && A->State == life::LiveEntry::Finished && A->Place == Gone->Hero().Place && A->Checkpoint.empty() && S2.LiveInProgress().empty(),
 			"a night never gone back to is blinded off from the checkpoint, and settled once");
-		std::printf("  riverside: left at hand %d with %lld chips, blinded off in %s after %d more hands\n", Night->Tick, static_cast<long long>(Night->Hero().Stack),
+		std::printf("  embercrest: left at hand %d with %lld chips, blinded off in %s after %d more hands\n", Night->Tick, static_cast<long long>(Night->Hero().Stack),
 			ss::Ordinal(Gone->Hero().Place).c_str(), Gone->Hero().Hands - StartHands);
 	}
 }
 
 /** Railing a live tournament after busting: the places the player watched are the world's result. */
-void RiversideRail()
+void EmbercrestRail()
 {
 	namespace life = ss::life;
 	namespace live = ss::live;
@@ -918,7 +957,7 @@ void RiversideRail()
 	Now = Wait(S, Now, 0.2);
 	S.Life.Energy = 60.0;
 	S.BankrollCents = 50000;
-	const live::Occurrence Nightly = live::FindOccurrence("riverside-nightly@9");
+	const live::Occurrence Nightly = live::FindOccurrence("embercrest-nightly@9");
 	Expect(S.GoToLive(Nightly.Id).empty(), "registered for Wednesday's Nightly");
 	const life::LiveEntry* E = live::EntryFor(S.Life, Nightly.Id);
 	if (!E || E->Faces.size() < 2)
@@ -963,7 +1002,7 @@ void RiversideRail()
 		}
 	}
 	Expect(Res && First == S2.Living().Find(Winner) && Runner == S2.Living().Find(Second), "the world's result is the final the player watched from the rail");
-	std::printf("  riverside: from the rail, %s beat %s heads-up; the world's result agrees\n", Winner.c_str(), Second.c_str());
+	std::printf("  embercrest: from the rail, %s beat %s heads-up; the world's result agrees\n", Winner.c_str(), Second.c_str());
 }
 
 /** Shifts, hustles, sleep, rent, Night Shift prizes, unlocks, bounties, satellites and tickets. */
@@ -1724,9 +1763,9 @@ int main()
 	session_test::ScheduledTournament();
 	session_test::LifeChecks();
 	session_test::DeeGame();
-	session_test::Riverside();
-	session_test::RiversideCheckpoints();
-	session_test::RiversideRail();
+	session_test::Embercrest();
+	session_test::EmbercrestCheckpoints();
+	session_test::EmbercrestRail();
 	session_test::BountyTournament();
 	session_test::MultiTable();
 	session_test::FullTournament();

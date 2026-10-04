@@ -1982,7 +1982,7 @@ void RiverLine::BoardsPage(double Now)
 		Ends = Sr ? static_cast<double>(Sr->LastDay + 1) * net::MinutesPerDay : -1.0;
 		break;
 	case net::Board::Live:
-		About = "Live Player of the Year " + Yr + ": points from every live final table, from the Riverside's Sunday $150 to the Grand Circuit and the Championship in Las Vegas.";
+		About = "Live Player of the Year " + Yr + ": points from every live final table, from the Embercrest's Sunday $150 to the Grand Circuit and the Championship in Las Vegas.";
 		Ends = YearEnds;
 		break;
 	}

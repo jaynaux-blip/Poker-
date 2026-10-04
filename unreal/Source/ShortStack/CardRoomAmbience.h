@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 
 /**
- * The Riverside's poker room, synthesized: the murmur of a room full of people talking at their
+ * The Embercrest's poker room, synthesized: the murmur of a room full of people talking at their
  * tables (a handful of voices, each a band of noise opening and closing in syllables and phrases),
  * chips riffled and stacked at the other tables, a dealer's shuffle now and then, the slot floor's
  * chimes through the doorway, and the building's air handling under it all. Busier while the room is

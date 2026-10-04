@@ -1,4 +1,4 @@
-"""What the Riverside's people wear on their heads and faces: caps, a beanie, a trilby, glasses and two kinds of shades.
+"""What the Embercrest's people wear on their heads and faces: caps, a beanie, a trilby, glasses and two kinds of shades.
 
 The game fits each piece to a MetaHuman at runtime (ABackRoomPlayer::ApplyWear): the origin is the midpoint
 between the eyes and the piece is scaled by the face's eye spacing (6.3 cm here), so one mesh fits every head.

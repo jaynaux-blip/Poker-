@@ -47,7 +47,7 @@ const FLines& LinesFor(const FString& Name)
 			{TEXT("Thank you."), TEXT("Nice try.")},
 			{TEXT("Good call."), TEXT("Well played.")},
 			{TEXT("See something you like?"), TEXT("Careful. I look back.")}},
-		// The Riverside's Sunday faces.
+		// The Embercrest's Sunday faces.
 		{TEXT("Mrs. Park"),
 			{TEXT("My grandson plays on the computer. He is not good."), TEXT("Fold, fold, fold. Then I win."), TEXT("Thirty years I play this tournament."),
 				TEXT("Dealer, slower please. My eyes.")},

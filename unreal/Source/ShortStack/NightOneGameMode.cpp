@@ -126,7 +126,7 @@ FAutoConsoleCommandWithWorldAndArgs LifeDoCmd(TEXT("ss.Life.Do"), TEXT("ss.Life.
 	}));
 
 FAutoConsoleCommandWithWorldAndArgs LiveGoCmd(TEXT("ss.Live.Go"),
-	TEXT("ss.Live.Go [occurrence id]: registers for one of the Riverside's events (the next open one without an id) and heads out, as the Burner app's button does."),
+	TEXT("ss.Live.Go [occurrence id]: registers for one of the Embercrest's events (the next open one without an id) and heads out, as the Burner app's button does."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
 		if (ss::Session* S = WorldSession(World))
 		{
@@ -142,7 +142,7 @@ std::string UsdText(ss::Chips Cents)
 }
 
 FAutoConsoleCommandWithWorldAndArgs LiveDescribeCmd(TEXT("ss.Live.Describe"),
-	TEXT("The Riverside as the player sees it now: the coming events (desk, cards, late reg, field, why not), the player's entry and the last ledger lines."),
+	TEXT("The Embercrest as the player sees it now: the coming events (desk, cards, late reg, field, why not), the player's entry and the last ledger lines."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
 		ss::Session* S = WorldSession(World);
 		if (!S)
@@ -150,7 +150,7 @@ FAutoConsoleCommandWithWorldAndArgs LiveDescribeCmd(TEXT("ss.Live.Describe"),
 			return;
 		}
 		const double Now = S->WorldMinutes();
-		std::string Out = "Riverside at " + ss::net::DateLabel(ss::net::DayOf(Now)) + " " + ss::net::TimeLabel(Now) + " (world " + std::to_string(static_cast<long long>(Now)) +
+		std::string Out = "Embercrest at " + ss::net::DateLabel(ss::net::DayOf(Now)) + " " + ss::net::TimeLabel(Now) + " (world " + std::to_string(static_cast<long long>(Now)) +
 			"), bankroll " + UsdText(S->BankrollCents) + ", energy " + std::to_string(static_cast<int>(S->Life.Energy)) + "\n";
 		for (const ss::live::Occurrence& O : ss::live::Reachable(Now, 30.0))
 		{
@@ -275,7 +275,7 @@ FString HomeTextFromOptions(const FString& Options)
 {
 	if (UGameplayStatics::HasOption(Options, TEXT("Live")))
 	{
-		// Home from the Riverside: Dee saw it all from the box.
+		// Home from the Embercrest: Dee saw it all from the box.
 		const int32 Place = FCString::Atoi(*UGameplayStatics::ParseOption(Options, TEXT("Place")));
 		const int32 Of = FCString::Atoi(*UGameplayStatics::ParseOption(Options, TEXT("Of")));
 		const int64 Prize = FCString::Atoi64(*UGameplayStatics::ParseOption(Options, TEXT("Prize")));
@@ -290,7 +290,7 @@ FString HomeTextFromOptions(const FString& Options)
 		}
 		else if (UGameplayStatics::HasOption(Options, TEXT("Won")))
 		{
-			Text = Event.IsEmpty() ? FString::Printf(TEXT("YOU WON THE RIVERSIDE. $%lld. the whole floor's talking about you. pay your rent, then call me."), Prize / 100)
+			Text = Event.IsEmpty() ? FString::Printf(TEXT("YOU WON THE EMBERCREST. $%lld. the whole floor's talking about you. pay your rent, then call me."), Prize / 100)
 								   : FString::Printf(TEXT("YOU WON THE %s. $%lld. your name's going on the wall. pay your rent, then call me."), *Event.ToUpper(), Prize / 100);
 		}
 		else if (Prize > 0)
@@ -850,7 +850,7 @@ void ANightOneGameMode::Begin(const FString& Name)
 	Game->Session.Save();
 	ReturnInputToGame();
 	UE_LOG(LogNightOne, Log, TEXT("Night One started as %s"), *Clean);
-	// The game closed during a night at the Riverside: straight back to the seat.
+	// The game closed during a night at the Embercrest: straight back to the seat.
 	if (!Game->Session.LiveInProgress().empty())
 	{
 		UE_LOG(LogNightOne, Log, TEXT("Back to %s, in progress"), UTF8_TO_TCHAR(Game->Session.LiveInProgress().c_str()));
@@ -992,9 +992,9 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	if (bLeaving && RealTime >= LeaveAt)
 	{
 		bLeaving = false;
-		// The Back Room for Dee's game; the same map turns into the Riverside's card room for a tournament (the event
+		// The Back Room for Dee's game; the same map turns into the Embercrest's card room for a tournament (the event
 		// the session registered the player for).
-		const FString Options = ss::live::IsRiverside(std::string(TCHAR_TO_UTF8(*LeaveFor))) ? FString::Printf(TEXT("Live=%s"), *LeaveFor)
+		const FString Options = ss::live::IsEmbercrest(std::string(TCHAR_TO_UTF8(*LeaveFor))) ? FString::Printf(TEXT("Live=%s"), *LeaveFor)
 																							   : FString::Printf(TEXT("BuyIn=%lld"), LeaveBuyInCents);
 		UGameplayStatics::OpenLevel(this, FName(TEXT("BackRoom")), true, Options);
 		return;

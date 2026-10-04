@@ -486,11 +486,11 @@ Pending Sim::LiveEventOf(World& W, const LiveEvent& E)
 	P.Ticket = E.Ticket;
 	P.Bracelet = E.Bracelet;
 	P.Ring = E.Ring;
-	P.TableSize = E.Kind == LiveKind::Summit ? 8 : live::IsRiverside(E.Id) ? live::RiversideTableSize : 9;
+	P.TableSize = E.Kind == LiveKind::Summit ? 8 : live::IsEmbercrest(E.Id) ? live::EmbercrestTableSize : 9;
 	P.FinalSize = std::min(P.TableSize, std::max(2, E.Field));
 	const bool Summit = E.Kind == LiveKind::Summit;
-	// The calendar is the same in every save; the crowds aren't (the Riverside's is the player's own room's).
-	if (!Summit && E.Kind != LiveKind::Underground && !live::IsRiverside(E.Id))
+	// The calendar is the same in every save; the crowds aren't (the Embercrest's is the player's own room's).
+	if (!Summit && E.Kind != LiveKind::Underground && !live::IsEmbercrest(E.Id))
 	{
 		const double Unit = static_cast<double>(Fnv1a(std::to_string(W.Seed()) + "/" + E.Id) % 10000u) / 10000.0;
 		P.Entries = std::max(8, static_cast<int>(std::lround(static_cast<double>(E.Field) * (0.88 + 0.24 * Unit))));
@@ -622,7 +622,7 @@ void Sim::PlanDay(World& W, int Day)
 		}
 		R.Shuffle(Order);
 		std::vector<char> RoomRegular(W.Roster.size(), 0);
-		for (const int Id : W.RiversideRegulars())
+		for (const int Id : W.EmbercrestRegulars())
 		{
 			RoomRegular[static_cast<size_t>(Id)] = 1;
 		}
@@ -664,8 +664,8 @@ void Sim::PlanDay(World& W, int Day)
 				{
 				case LiveKind::Local:
 				{
-					const bool Riverside = live::IsRiverside(O.P.Id);
-					if (Riverside && (N.From == Origin::Cast || N.Rival))
+					const bool Embercrest = live::IsEmbercrest(O.P.Id);
+					if (Embercrest && (N.From == Origin::Cast || N.Rival))
 					{
 						// The room's faces have their games (live::Habit) and play them when the money's there: a broke
 						// week keeps even Mrs. Park at home.
@@ -674,7 +674,7 @@ void Sim::PlanDay(World& W, int Day)
 						Go = Want > 0.0 && O.P.BuyIn * 4 <= Avail && Q.Chance(Want);
 						break;
 					}
-					if (Riverside && RoomRegular[static_cast<size_t>(N.Id)] != 0 && N.TripUntil < D)
+					if (Embercrest && RoomRegular[static_cast<size_t>(N.Id)] != 0 && N.TripUntil < D)
 					{
 						// The room's regulars have their nights (live::RegularHabit), when the money's there.
 						const int H = live::RegularHabit(N.Name, live::FindOccurrence(O.P.Id));
@@ -682,12 +682,12 @@ void Sim::PlanDay(World& W, int Day)
 						Go = O.P.BuyIn * 3 <= std::max(Avail, N.Income * 2) && Q.Chance(Want);
 						break;
 					}
-					if (O.Where != N.Home || N.Live < LiveLevel::Local || (Riverside && N.Country != "US") || N.TripUntil >= D)
+					if (O.Where != N.Home || N.Live < LiveLevel::Local || (Embercrest && N.Country != "US") || N.TripUntil >= D)
 					{
 						break;
 					}
-					// The Riverside runs most days: a local picks a night or two a week.
-					const double Want = (N.OnlineShare < 0.7f ? 0.35 : 0.06) * (N.Schedule == Plan::Weekends ? 1.5 : 1.0) * (Riverside ? 0.12 : 1.0);
+					// The Embercrest runs most days: a local picks a night or two a week.
+					const double Want = (N.OnlineShare < 0.7f ? 0.35 : 0.06) * (N.Schedule == Plan::Weekends ? 1.5 : 1.0) * (Embercrest ? 0.12 : 1.0);
 					Go = Q.Chance(Want) && O.P.BuyIn * 10 <= std::max(Avail, N.Income * 4);
 					break;
 				}
@@ -1551,8 +1551,8 @@ void Sim::Resolve(World& W, Pending& P)
 	{
 		W.WeekPairs.push_back({std::min(Winner, Second), std::max(Winner, Second)});
 	}
-	// (And the Riverside's: its champions' board, and what the player watched from its rail.)
-	if (P.Online || P.Major || P.Bracelet || P.Ring || live::IsRiverside(P.Id))
+	// (And the Embercrest's: its champions' board, and what the player watched from its rail.)
+	if (P.Online || P.Major || P.Bracelet || P.Ring || live::IsEmbercrest(P.Id))
 	{
 		W.Results[P.Id] = std::move(Res);
 		W.ResultEnds[P.Id] = P.End;
@@ -1696,7 +1696,7 @@ void Sim::PlanTrips(World& W, int Day, Rng& R)
 			}
 			else if (N.From == Origin::Local)
 			{
-				// The Riverside's regulars have their room; a festival is a once-in-a-while thing.
+				// The Embercrest's regulars have their room; a festival is a once-in-a-while thing.
 				Want *= 0.15;
 			}
 			if (Can && Q.Chance(Want))

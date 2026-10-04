@@ -322,6 +322,10 @@ def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64, sizes=None):
         px_size = sizes.get(mat.name, size)
         px_w, px_h = px_size if isinstance(px_size, (tuple, list)) else (px_size, px_size)
         strength = bsdf.inputs['Emission Strength'].default_value
+        # Specular can't be baked into the glTF set, but a constant one rides along (KHR_materials_specular): cloth
+        # and paper need far less than the default, or a dark one reads grey at a glancing look.
+        spec_in = bsdf.inputs['Specular IOR Level']
+        specular = 0.5 if spec_in.is_linked else spec_in.default_value
         emissive = strength > 0.0 and (bsdf.inputs['Emission Color'].is_linked or any(c > 0.0 for c in bsdf.inputs['Emission Color'].default_value[:3]))
         maps = {}
         for key, non_color in (('BaseColor', False), ('Roughness', True), ('Metallic', True), ('Normal', True), ('AO', True), ('Emissive', False)):
@@ -330,7 +334,8 @@ def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64, sizes=None):
             maps[key] = img
         target = nt.nodes.new('ShaderNodeTexImage')
         results.append({'mat': mat, 'bsdf': bsdf, 'out': out, 'surface': surface_src, 'target': target, 'maps': maps,
-                        'suffix': suffix, 'size': (px_w, px_h), 'emissive': emissive, 'strength': strength})
+                        'suffix': suffix, 'size': (px_w, px_h), 'emissive': emissive, 'strength': strength,
+                        'specular': specular})
 
     # Cycles (5.2, GPU) crashes baking images of different shapes in one pass, so each pass bakes
     # one texture size at a time; the other materials write into a scratch image of the same size.
@@ -419,15 +424,18 @@ def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64, sizes=None):
             img.save()
             saved[key] = path
         new_mats.append(gltf_material(f"M_{name}{r['suffix']}", saved['BaseColor'], saved['ORM'], saved['Normal'],
-                                      saved.get('Emissive'), r['strength']))
+                                      saved.get('Emissive'), r['strength'], r['specular']))
     for i, m in enumerate(new_mats):
         obj.material_slots[i].material = m
     return new_mats
 
 
-def gltf_material(name, base_color, orm, normal, emissive=None, emissive_strength=1.0):
-    """Principled material wired the way the glTF exporter expects (including occlusion)."""
+def gltf_material(name, base_color, orm, normal, emissive=None, emissive_strength=1.0, specular=0.5):
+    """Principled material wired the way the glTF exporter expects (including occlusion); a specular other than the
+    default 0.5 goes out as KHR_materials_specular."""
     mat = Mat(name)
+    if abs(specular - 0.5) > 1e-4:
+        mat.set('Specular IOR Level', specular)
     if emissive:
         em = mat.image(emissive)
         mat.link(em.outputs['Color'], mat.bsdf.inputs['Emission Color'])

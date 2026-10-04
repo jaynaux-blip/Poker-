@@ -165,14 +165,12 @@ def graphic(name, draw, size=1024):
 RED, GREEN, BLUE = 0xff0000, 0x00ff00, 0x0000ff
 
 
-def g_riverside(s):
-    s.text_on_arc('RIVERSIDE', 50, 40, 34, 13, RED, face='Black', center_angle=math.pi / 2, tracking=1.1)
-    # A spade: two circles, a point up, a flared stem.
-    s.circle(41.5, 42, 9.5, GREEN)
-    s.circle(58.5, 42, 9.5, GREEN)
-    s.poly([(32.5, 45), (67.5, 45), (50, 70)], GREEN)
-    s.poly([(50, 44), (43, 22), (57, 22)], GREEN)
-    s.text('CARD ROOM', 50, 10, 7, BLUE, face='Bold', align='CENTER', tracking=1.6)
+def g_embercrest(s):
+    """The Embercrest Poker Series' tee: the mark (the crest in ink A, its ember ring in B), the name, the series in C."""
+    import brand
+    brand.mark(s, 50, 60, 54, mono=RED, ground=0x000000, mono_ember=GREEN)
+    s.text('EMBERCREST', 50, 22, 12.0, RED, face='Black', align='CENTER', tracking=1.15)
+    s.text('POKER SERIES', 50, 13, 5.0, BLUE, face='Bold', align='CENTER', tracking=1.8)
 
 
 def g_allin(s):
@@ -219,7 +217,7 @@ def main():
     gingham('T_Print_Gingham')
     dots('T_Print_Dots')
     camo('T_Print_Camo')
-    for name, draw in (('T_Graphic_Riverside', g_riverside), ('T_Graphic_AllIn', g_allin), ('T_Graphic_Chip', g_chip),
+    for name, draw in (('T_Graphic_Embercrest', g_embercrest), ('T_Graphic_AllIn', g_allin), ('T_Graphic_Chip', g_chip),
                        ('T_Graphic_BadBeat', g_badbeat), ('T_Graphic_Sunset', g_sunset), ('T_Graphic_Number', g_number)):
         graphic(name, draw)
 

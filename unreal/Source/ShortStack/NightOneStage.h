@@ -39,7 +39,7 @@ struct FRoomGear
 	bool bPlant = false;       // on the windowsill
 	bool bCurtains = false;
 	bool bRouter = false;      // fiber
-	bool bTrophy = false;      // won the Riverside's Sunday tournament
+	bool bTrophy = false;      // won the Embercrest's Sunday tournament
 	bool bDeeChip = false;     // came out ahead at Dee's game: a $100 chip on a little stand on the sill
 
 	bool operator==(const FRoomGear& O) const = default;
