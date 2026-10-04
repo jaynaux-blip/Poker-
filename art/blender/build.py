@@ -28,7 +28,9 @@ ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chai
           # What the room's people wear: caps, a beanie, a trilby, glasses and shades (fitted at runtime).
           'wear', 'embercrest', 'table_ec',
           # The street and the Lucky Penny, and what the player wears.
-          'hydrant', 'trash_can', 'newsbox', 'streetlight', 'sedan', 'cooler', 'store_shelf', 'register', 'wearables']
+          'hydrant', 'trash_can', 'newsbox', 'streetlight', 'sedan', 'cooler', 'store_shelf', 'register', 'wearables',
+          # The Lucky Penny's stock, Fifth Street's buildings, and real shoes for the street's people.
+          'stock', 'facades', 'sneakers']
 
 
 def args():
