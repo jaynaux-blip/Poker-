@@ -98,7 +98,7 @@ The imported glTF materials are tinted by whatever base-color parameter they exp
 
 Each step keeps the walk-around world small, dense and tied to the career. There are no empty streets.
 
-1. **The block.** The Wash & Fold is enterable, and Dee's Tuesday game moves from a menu into the back room you walk into. It reuses the Back Room stage with the third-person toggle. Pedestrians walk the sidewalks: a handful of MetaHumans on the procedural gait, following waypoint loops. Shift work at the Lucky Penny becomes a playable night behind Benny's counter.
+1. **The block.** Evicted, you wake on Dee's couch, and door 1812 is locked to you. The Wash & Fold is enterable, and Dee's Tuesday game moves from a menu into the back room you walk into. It reuses the Back Room stage with the third-person toggle. Pedestrians walk the sidewalks: a handful of MetaHumans on the procedural gait, following waypoint loops. Shift work at the Lucky Penny becomes a playable night behind Benny's counter.
 2. **Time and weather on the street.** The street follows the session clock: dusk, the dead hours, sunrise. Rain comes and goes (the materials already carry a Wet parameter). The store's stock and Benny's lines follow the hour.
 3. **Getting around.** A bus stop on Market St with a timetable takes you to the Riverside Card Room for live events and to the bank. Each stop is a small, dense scene, not an open map. Later, rideshare costs money and saves time.
 4. **Clothes and looks that move with the career.** A thrift store and then better shops sell jackets, hats and glasses (more Blender wearables), and the creator's choices become things you own. Fame changes how the street reacts: a double take, someone asking for a photo.
@@ -110,6 +110,8 @@ Each step keeps the walk-around world small, dense and tied to the career. There
 - [x] Character creator, perks, save, main-menu card
 - [x] Hunger and thirst, the store's catalog, checkout, the bag, Benny
 - [x] Penny Drop on the laptop: delivery, eating at home, the kitchen tap, a week's pacing check
+- [x] Rent with teeth: monthly reminders, a late fee without drift, and eviction to Dee's couch. While you're out the gear is in storage, the desk is empty, and an unpaid unit goes to auction. **Move back in** gets you home (GAME_DESIGN §10)
+- [ ] Dee's couch as a place: wake up in her front room, not the apartment, while evicted. Door 1812's lock refuses your key
 - [x] The street level, the character, procedural gait, first and third person, the HUD, the counter UI, the pause menu
 - [x] Apartment ↔ street travel with the clock carried over
 - [x] Third person at the Back Room table

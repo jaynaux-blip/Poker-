@@ -121,7 +121,7 @@ bool SameEntry(const ss::life::LedgerEntry& A, const ss::life::LedgerEntry& B)
 
 int main(int Argc, char** Argv)
 {
-	const int Seeds = Argc > 1 ? std::atoi(Argv[1]) : 3;
+	const int Seeds = Argc > 1 ? std::atoi(Argv[1]) : 4;
 	const int Frames = Argc > 2 ? std::atoi(Argv[2]) : 15000;
 	const int First = Argc > 3 ? std::atoi(Argv[3]) : 0;
 	const std::vector<Spot> Spots = Hotspots();
@@ -155,6 +155,23 @@ int main(int Argc, char** Argv)
 			S.BankrollCents += 14900 + 28900;
 			S.Buy("monitor-24");
 			S.Buy("monitor-27");
+		}
+		// The fourth seed plays it locked out: rent missed twice, the rig in storage, Dee's couch, and the money to move
+		// back in (if the monkey finds the Bank's button).
+		if (Seed % 4 == 3)
+		{
+			S.BankrollCents = 50000;
+			S.Buy("ram-32");
+			S.Buy("monitor-24");
+			S.BankrollCents = 0;
+			S.Update(0.0);
+			S.LobbyMinutes += 8.0 * ss::net::MinutesPerDay + 1.0 - S.WorldMinutes();
+			S.Update(0.0);
+			if (!S.Evicted())
+			{
+				Fail("the evicted seed isn't evicted", Seed, 0);
+			}
+			S.BankrollCents = 250000;
 		}
 		double Now = 0.0;
 		ss::Chips PrevBank = S.BankrollCents;
@@ -489,6 +506,22 @@ int main(int Argc, char** Argv)
 				Fail("the clock ran backwards (" + ss::Fixed(PrevWorld - World, 3) + " min)", Seed, F);
 			}
 			PrevWorld = World;
+			{
+				// Rent: a stage in range, nothing left due behind the clock, and while evicted the rig in storage.
+				const ss::life::State& Lf = S.Life;
+				const int Stage = static_cast<int>(Lf.RentStage);
+				const bool Out = S.Evicted();
+				if (Stage < 0 || Stage > 3 || Lf.RentDueCents <= 0 || (!Out && Lf.RentDeadline <= World - 1e-6) || (!Out && Lf.StorageDue != 0.0) ||
+					(Lf.StorageDue > 0.0 && Lf.StorageDue <= World - 1e-6))
+				{
+					Fail("the rent left its rules", Seed, F);
+				}
+				if (Out && (S.GearFx().CanStream() || S.GearFx().Tables != 2 || S.Streaming() || S.RestFactor() >= 1.0))
+				{
+					Fail("evicted, with the rig still set up", Seed, F);
+				}
+				Reached["evicted"] += Out ? 1 : 0;
+			}
 			if (S.CurrentScreen == ss::Screen::Table && !S.T)
 			{
 				Fail("table screen without a tournament", Seed, F);

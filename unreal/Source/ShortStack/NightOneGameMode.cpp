@@ -187,6 +187,24 @@ FAutoConsoleCommandWithWorldAndArgs WorldPreviewCmd(TEXT("ss.World.Preview"), TE
 			LogLines(S->WorldPreview(FMath::Clamp(Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 30, 1, 3650)));
 		}
 	}));
+
+FAutoConsoleCommandWithWorldAndArgs RentNextCmd(TEXT("ss.Rent.Next"),
+	TEXT("ss.Rent.Next: the clock to a minute before the next rent deadline (evicted: the storage unit's renewal), to watch it land. Not with tables open."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>&, UWorld* World) {
+		ss::Session* S = WorldSession(World);
+		if (!S || S->T)
+		{
+			return;
+		}
+		const double Target = S->Evicted() ? S->Life.StorageDue : S->Life.RentDeadline;
+		if (Target > S->WorldMinutes() + 1.0)
+		{
+			S->LobbyMinutes += Target - 1.0 - S->WorldMinutes();
+		}
+		static const char* Stages[4] = {"due", "paid", "final notice", "evicted"};
+		LogLines(std::string("Rent: ") + Stages[FMath::Clamp(static_cast<int32>(S->Life.RentStage), 0, 3)] + ", $" + std::to_string(S->Life.RentDueCents / 100) + " (bankroll $" +
+				 std::to_string(S->BankrollCents / 100) + "). A minute to go.");
+	}));
 #endif
 
 void SetConsoleInt(const TCHAR* Name, int32 Value)
@@ -1046,18 +1064,20 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		Stage->SetRoomLights(Leds.On, LedColor, static_cast<float>(Leds.Level));
 		// What the player owns, set up in the room, and what their career has left on the windowsill. The PC's RGB
 		// follows the kit (or cycles through the rainbow on its own); the streaming lights come on while live.
+		// Evicted, the gear is in a storage unit: the desk is down to the laptop (GearFx already is).
 		const ss::gear::Effects& Fx = S.GearFx();
+		const bool bStored = S.Evicted();
 		FRoomGear Room;
-		Room.bMonitor = S.Owns("monitor-24");
-		Room.bMonitorWide = S.Owns("monitor-27");
+		Room.bMonitor = !bStored && S.Owns("monitor-24");
+		Room.bMonitorWide = !bStored && S.Owns("monitor-27");
 		Room.Towers = Fx.PcTier >= 3 ? 2 : (Fx.PcTier >= 2 ? 1 : 0);
 		Room.Cam = Fx.CamTier;
 		Room.Mic = Fx.MicTier;
 		Room.Lights = Fx.Lights;
 		Room.bMacroPad = Fx.MacroPad;
-		Room.bHeadphones = S.Owns("headphones");
-		Room.bPlant = S.Owns("plant");
-		Room.bCurtains = S.Owns("curtains");
+		Room.bHeadphones = !bStored && S.Owns("headphones");
+		Room.bPlant = !bStored && S.Owns("plant");
+		Room.bCurtains = !bStored && S.Owns("curtains");
 		Room.bRouter = Fx.Fiber;
 		Room.bTrophy = S.Life.LiveBestPlace == 1;
 		Room.bDeeChip = S.Life.BackRoomNetCents > 0;

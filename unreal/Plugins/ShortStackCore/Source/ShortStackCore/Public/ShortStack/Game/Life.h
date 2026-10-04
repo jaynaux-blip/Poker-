@@ -68,14 +68,30 @@ struct LedgerEntry
 	int Kind = 0; // 0 poker, 1 job, 2 hustle, 3 bills, 4 prizes, 5 gear, 6 streaming, 7 transfers, 8 the corner store
 };
 
-/** Rent stages. */
+/**
+ * Rent stages. The first month is $1,225 (already late: the fee is in it) by Friday midnight; after that it's
+ * $1,075 a month, due at midnight on October 31 and every thirty days after. A week out, a paid month turns due
+ * again and the landlord starts texting. Miss it and there's a final notice: $150 more and three days. Miss that
+ * and the locks change: the gear goes into storage (auctioned if the unit isn't paid after a month), the bed is
+ * Dee's couch, and the way back is the back rent plus a month up front.
+ */
 enum class Rent : int
 {
-	Due,         // $1,225 by Friday midnight
-	Paid,        // next month's rent is the new deadline
+	Due,         // the landlord collects at the deadline if the money is there
+	Paid,        // until a week before the next deadline
 	FinalNotice, // missed: late fee added, three more days
-	Evicted,
+	Evicted,     // RentDueCents is what it takes to move back in
 };
+constexpr Chips MonthlyRentCents = 107500;
+constexpr Chips LateFeeCents = 15000;
+constexpr double RentGraceDays = 3.0;
+constexpr double RentNoticeDays = 7.0;
+/** On Dee's couch: what a night's sleep gives back, and a daily chip-in for groceries. */
+constexpr double CouchRest = 0.7;
+constexpr Chips CouchChipInCents = 1000;
+/** The storage unit the gear goes to: the deposit covers the first thirty days; unpaid after that, it's auctioned. */
+constexpr Chips StorageCents = 6000;
+constexpr double StorageDays = 30.0;
 
 /** What persists about the player's life (saved with the session). */
 struct State
@@ -102,6 +118,11 @@ struct State
 	Chips RentDueCents = 122500;
 	double RentDeadline = 5.0 * 1440.0; // Friday, October 9, midnight
 	int RentsPaid = 0;
+	int Evictions = 0;
+	double EvictedAt = 0.0;   // when the locks last changed (world minutes)
+	Chips CouchCents = 0;     // chipped in at Dee's, this stay
+	double StorageDue = 0.0;  // when the storage unit renews (0: no unit)
+	int Auctions = 0;         // storage units lost to auction
 	Chips DebtCents = 0;      // owed to Marcus
 	double BannedUntil = 0.0; // RiverLine account restricted until
 	int Shifts = 0;

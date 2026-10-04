@@ -36,11 +36,25 @@ struct Hooks : ss::SessionHooks
 	int Beats = 0;
 	int Saves = 0;
 	ss::SaveData Last;
+	std::vector<std::pair<std::string, std::string>> Inbox;
 	void Sound(ss::SoundId Id, double) override { ++Sounds[Id]; }
 	void Text(const std::string& From, const std::string& Body) override
 	{
 		++Texts;
+		Inbox.emplace_back(From, Body);
 		std::printf("  [phone] %s: %s\n", From.c_str(), Body.c_str());
+	}
+	/** A text from From with Part in it, since the inbox held Since. */
+	bool Got(size_t Since, const char* From, const char* Part) const
+	{
+		for (size_t I = Since; I < Inbox.size(); ++I)
+		{
+			if (Inbox[I].first == From && Inbox[I].second.find(Part) != std::string::npos)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 	void Heartbeat(bool On) override { Beats += On ? 1 : 0; }
 	void AddCan() override { ++Cans; }
@@ -596,6 +610,7 @@ void LifeChecks()
 		Poor.LobbyMinutes = 7.0 * 1440.0 + 1.0;
 		T0 = Wait(Poor, T0, 0.2);
 		Expect(Poor.Life.RentStage == ss::life::Rent::Evicted, "and then the locks change");
+		Expect(Poor.Life.StorageDue == 0.0 && Poor.Life.RentDueCents == 137500 + ss::life::MonthlyRentCents, "nothing to put in storage; the back rent and a month to get back in");
 	}
 
 	// The Night Shift pays the top 20 at 6 AM.
@@ -1206,6 +1221,174 @@ void NeedsPacing()
 	Expect(Spent >= 1000 && Spent <= 5000, "food runs a few dollars a day at the shelf");
 }
 
+/**
+ * Rent, month after month: collected on time, the week-out notice and the reminders, paid late without the next
+ * month moving, the final notice, the locks, Dee's couch, the storage unit (renewed, then auctioned), and moving
+ * back in, with and without the gear.
+ */
+void RentChecks()
+{
+	using ss::life::Rent;
+	const double Day = ss::net::MinutesPerDay;
+	auto At = [](ss::Session& S, double& Now, double World) {
+		S.LobbyMinutes += World - S.WorldMinutes();
+		Now = Wait(S, Now, 0.1);
+	};
+	auto Fed = [](ss::Session& S) {
+		S.Life.Hunger = 0.0;
+		S.Life.Thirst = 0.0;
+	};
+
+	// On time, every month.
+	{
+		Hooks H;
+		ss::Session S(H, "rent-months");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.BankrollCents = 130000;
+		At(S, Now, 5.0 * Day - 0.02);
+		Now = Wait(S, Now, 2.0);
+		Expect(S.Life.RentStage == Rent::Paid && S.BankrollCents == 7500 && S.Life.RentDeadline == 27.0 * Day && S.Life.Ledger.front().Label == "Rent (collected)",
+			"the landlord collects the first month at midnight Friday; the next is due October 31");
+		At(S, Now, 20.0 * Day - 60.0);
+		Expect(S.Life.RentStage == Rent::Paid, "paid up until a week out");
+		size_t Mark = H.Inbox.size();
+		At(S, Now, 20.0 * Day + 1.0);
+		Expect(S.Life.RentStage == Rent::Due && H.Got(Mark, "Landlord", "Reminder: rent is $1,075.00, due by midnight Saturday, Oct 31"), "a week out the next month is due, and the landlord says when");
+		Mark = H.Inbox.size();
+		At(S, Now, 27.0 * Day - 39.0 * 60.0 + 1.0);
+		Expect(H.Got(Mark, "Landlord", "due tomorrow at midnight"), "a reminder the morning before");
+		At(S, Now, 27.0 * Day - 6.0 * 60.0 + 1.0);
+		Expect(H.Got(Mark, "Landlord", "Midnight tonight. $1,075"), "and the evening it's due");
+
+		// Missed: the final notice. Paid in the grace days, the next month is still due on its own day.
+		S.BankrollCents = 0;
+		Mark = H.Inbox.size();
+		At(S, Now, 27.0 * Day + 1.0);
+		Expect(S.Life.RentStage == Rent::FinalNotice && S.Life.RentDueCents == ss::life::MonthlyRentCents + ss::life::LateFeeCents && S.Life.RentDeadline == 30.0 * Day,
+			"missed: a final notice, the late fee, three days");
+		Expect(H.Got(Mark, "Landlord", "until Tuesday at midnight"), "the final notice names the day");
+		Mark = H.Inbox.size();
+		At(S, Now, 30.0 * Day - 39.0 * 60.0 + 1.0);
+		Expect(H.Got(Mark, "Landlord", "the locks change"), "one last warning the morning before");
+		S.BankrollCents = 300000;
+		Expect(S.PayRent() && S.Life.RentStage == Rent::Paid && S.BankrollCents == 300000 - 122500 && S.Life.RentDeadline == 57.0 * Day && S.Life.Ledger.front().Label == "Rent + late fee",
+			"paid late: the next month doesn't move back (no drift)");
+		At(S, Now, 57.0 * Day + 1.0);
+		Expect(S.Life.RentStage == Rent::Paid && S.Life.RentsPaid == 3 && S.Life.RentDeadline == 87.0 * Day && S.BankrollCents == 300000 - 122500 - 107500,
+			"and thirty days on it's collected on time");
+		// Paying ahead.
+		S.BankrollCents = 200000;
+		Expect(S.PayRent() && S.Life.RentDeadline == 117.0 * Day && S.Life.Ledger.front().Label == "Rent (paid ahead)", "a month paid ahead");
+		Expect(S.MoveBackIn() == "You still have the apartment.", "nothing to move back into");
+	}
+
+	// Evicted with a rig, then the couch, the storage unit, and the auction.
+	{
+		Hooks H;
+		ss::Session S(H, "rent-evicted");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.BankrollCents = 100000;
+		Expect(S.Buy("ram-32").empty() && S.Buy("monitor-24").empty() && S.Buy("mattress").empty(), "a rig and a better bed");
+		const int HomeTables = S.GearFx().Tables;
+		Expect(HomeTables == 3 && S.GearFx().CanStream() && S.RestFactor() > 1.0, "at home: three tables, a stream, a good night's sleep");
+		S.BankrollCents = 0;
+		At(S, Now, 5.0 * Day + 1.0);
+		Expect(S.Life.RentStage == Rent::FinalNotice && S.Life.RentDueCents == 137500 && S.Life.RentDeadline == 8.0 * Day, "late");
+		At(S, Now, 8.0 * Day - 10.0);
+		Fed(S);
+		Expect(S.GoLive().empty() && S.Streaming(), "live as the clock runs out");
+		size_t Mark = H.Inbox.size();
+		At(S, Now, 8.0 * Day + 1.0);
+		Expect(S.Life.RentStage == Rent::Evicted && S.Life.RentDueCents == 137500 + ss::life::MonthlyRentCents && S.Life.Evictions == 1 && S.Life.EvictedAt == 8.0 * Day,
+			"the locks change: what's owed, plus a month up front to get back in");
+		Expect(H.Got(Mark, "Landlord", "You owe $1,375") && H.Got(Mark, "Landlord", "Ninth Street Storage") && H.Got(Mark, "Dee", "couch"), "the landlord says what it takes; Dee offers the couch");
+		Expect(!S.Streaming() && !S.GearFx().CanStream() && S.GearFx().Tables == 2 && S.GearFx().Rest == 0.0 && S.Owns("monitor-24") && S.Life.StorageDue == 38.0 * Day,
+			"the gear's in storage (still yours): the laptop, two tables, no stream");
+		Expect(S.GoLive() == "No apartment, no internet." && !S.PayRent(), "no stream, and no rent on an apartment you're locked out of");
+		Expect(S.CanBuy("webcam-720").find("Nowhere") == 0 && S.CanBuy("gym").find("Nowhere") == std::string::npos, "nowhere to put new gear (subscriptions still sell)");
+		Expect(S.MaxTables() == 2, "the laptop still plays two tables");
+
+		// Dee's couch: worse sleep, and a share of the groceries.
+		S.Life.Energy = 0.0;
+		Fed(S);
+		Expect(S.StartActivity("sleep").empty(), "lights out on the couch");
+		Now = Wait(S, Now, 6.0);
+		Expect(std::fabs(S.LastOutcome.Energy - 90.0 * ss::life::CouchRest) < 0.01 && S.LastOutcome.Body.find("couch") != std::string::npos, "a night on the couch gives back less");
+		S.BankrollCents = 5000;
+		At(S, Now, 8.0 * Day + 10.0 * 60.0 + 1.0);
+		Expect(S.BankrollCents == 4000 && S.Life.CouchCents == 1000 && S.Life.Ledger.front().Label == "Groceries at Dee's", "ten dollars a day toward Dee's groceries");
+		S.BankrollCents = 500;
+		At(S, Now, 9.0 * Day + 10.0 * 60.0 + 1.0);
+		Expect(S.BankrollCents == 500 && S.Life.CouchCents == 1000, "Dee covers it when you're broke");
+		S.Save();
+		ss::SaveData Parsed;
+		Expect(ss::SaveData::Parse(H.Last.Serialize(), Parsed) && Parsed.Life.RentStage == Rent::Evicted && Parsed.Life.RentDueCents == S.Life.RentDueCents && Parsed.Life.Evictions == 1 &&
+				   std::fabs(Parsed.Life.EvictedAt - 8.0 * Day) < 0.01 && std::fabs(Parsed.Life.StorageDue - 38.0 * Day) < 0.01 && Parsed.Life.CouchCents == 1000,
+			"the eviction is saved");
+
+		// The storage unit: a warning, the card on file, then nothing on the card.
+		Mark = H.Inbox.size();
+		At(S, Now, 36.0 * Day + 1.0);
+		Expect(H.Got(Mark, "Ninth St. Storage", "renews in 2 days"), "the storage unit warns two days out");
+		At(S, Now, 38.0 * Day - 60.0);
+		S.BankrollCents = ss::life::StorageCents;
+		At(S, Now, 38.0 * Day + 1.0);
+		Expect(S.BankrollCents == 0 && S.Life.StorageDue == 68.0 * Day && S.Owns("monitor-24") && S.Life.Ledger.front().Label == "Ninth St. Storage (month)", "the card on file renews the unit");
+		Mark = H.Inbox.size();
+		At(S, Now, 68.0 * Day + 1.0);
+		Expect(!S.Owns("monitor-24") && !S.Owns("ram-32") && !S.Owns("mattress") && S.Life.StorageDue == 0.0 && S.Life.Auctions == 1 && H.Got(Mark, "Ninth St. Storage", "auction"),
+			"unpaid, the unit is sold at auction and the gear is gone");
+
+		// Back in: the back rent and a month, a key, and the next month from tonight.
+		Expect(S.MoveBackIn().find("Short $2,450") == 0, "moving back in takes the back rent and a month");
+		S.BankrollCents = 300000;
+		const double World = S.WorldMinutes();
+		Expect(S.MoveBackIn().empty() && S.Life.RentStage == Rent::Paid && S.BankrollCents == 300000 - 245000 && S.Life.RentDueCents == ss::life::MonthlyRentCents,
+			"paid in full: a key");
+		Expect(S.Life.RentDeadline == (std::floor(World / Day) + 31.0) * Day && S.Life.Ledger.front().Label == "Back rent + a month up front", "paid through thirty days from tonight");
+		Expect(S.GearFx().Tables == 2 && !S.GearFx().CanStream() && S.RestFactor() == 1.0, "home, but the auction took the rig and the mattress");
+	}
+
+	// Evicted and back within the month: the gear comes out of storage; the rent goes on from the new date.
+	{
+		Hooks H;
+		ss::Session S(H, "rent-back");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.BankrollCents = 50000;
+		Expect(S.Buy("ram-32").empty() && S.Buy("monitor-24").empty(), "a rig");
+		S.BankrollCents = 0;
+		At(S, Now, 5.0 * Day + 1.0);
+		At(S, Now, 8.0 * Day + 1.0);
+		Expect(S.Evicted() && S.GearFx().Tables == 2, "evicted");
+		At(S, Now, 12.0 * Day);
+		S.BankrollCents = 245000;
+		Expect(S.MoveBackIn().empty() && S.GearFx().Tables == 3 && S.GearFx().CanStream() && S.Life.StorageDue == 0.0 && S.Life.CouchCents == 0, "home: the gear comes back out of storage");
+		Fed(S);
+		Expect(S.GoLive().empty() && S.Streaming(), "and the stream's back");
+		S.EndStream();
+		const double Next = S.Life.RentDeadline;
+		Expect(Next == 43.0 * Day, "due thirty days from tonight");
+		At(S, Now, Next - ss::life::RentNoticeDays * Day + 1.0);
+		Expect(S.Life.RentStage == Rent::Due, "and due again a week before");
+	}
+
+	// The world-skip tool goes around the calendar: the bills move with it instead of being left behind the clock.
+	{
+		Hooks H;
+		ss::Session S(H, "rent-skip");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.WorldSkip(40);
+		Now = Wait(S, Now, 0.5);
+		Expect(S.Life.RentStage == Rent::Due && S.Life.RentDeadline > S.WorldMinutes() && S.Life.RentDeadline == 65.0 * Day, "a skipped month's deadline moves past the skip");
+		At(S, Now, 65.0 * Day + 1.0);
+		Expect(S.Life.RentStage == Rent::FinalNotice, "and still comes round");
+	}
+}
+
 } // namespace session_test
 
 namespace session_test
@@ -1649,6 +1832,7 @@ int main()
 	session_test::StoreChecks();
 	session_test::DeliveryChecks();
 	session_test::NeedsPacing();
+	session_test::RentChecks();
 	if (session_test::Failures == 0)
 	{
 		std::printf("session tests: all passed\n");

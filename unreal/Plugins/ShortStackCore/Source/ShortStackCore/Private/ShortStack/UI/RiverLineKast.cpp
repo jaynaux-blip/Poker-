@@ -879,7 +879,32 @@ void RiverLine::KastStudio(double Now)
 	const Rect Prev{20.0f, 74.0f, 1008.0f, 567.0f};
 	StreamPreview(Prev, Now);
 	const bool CanStream = S.GearFx().CanStream();
-	if (!CanStream)
+	if (S.Evicted())
+	{
+		// Locked out of the apartment: the rig is in a storage unit, and Dee's Wi-Fi won't carry a stream.
+		C->FillRect(Prev, Rgba(10, 6, 20, 0.86f));
+		C->StrokeRoundRect(Prev, 4.0f, KLine, 2.0f);
+		const float Cx = Prev.X + Prev.W / 2.0f;
+		C->FillCircle(Cx, Prev.Y + 120.0f, 46.0f, NetA(KRed, 0.18f));
+		NetLockIcon(*C, Cx - 26.0f, Prev.Y + 90.0f, 52.0f, KInk);
+		UI.Text("Your rig is in storage", Cx, Prev.Y + 222.0f, Ts(32.0f, 900, KInk, Align::Center));
+		UI.Text("The locks changed. The PC, the camera and the lights are in a unit on Ninth; you're on Dee's couch with the laptop.", Cx, Prev.Y + 256.0f,
+			Ts(15.0f, 500, KMuted, Align::Center));
+		UI.Text("Your channel waits. Move back in and the stream comes back with the gear.", Cx, Prev.Y + 280.0f, Ts(15.0f, 500, KMuted, Align::Center));
+		const Rect Card{Cx - 260.0f, Prev.Y + 312.0f, 520.0f, 110.0f};
+		C->FillRoundRect(Card, 16.0f, KPanel2);
+		C->StrokeRoundRect(Card, 16.0f, NetA(KRed, 0.5f), 1.5f);
+		NetSpaced(*C, "TO GET A KEY BACK", Card.X + 28.0f, Card.Y + 36.0f, 10.0f, 900, KLime, 1.4f);
+		UI.Text("Back rent + a month up front", Card.X + 28.0f, Card.Y + 66.0f, Ts(18.0f, 800, KInk));
+		const Chips Short = std::max<Chips>(0, S.Life.RentDueCents - S.BankrollCents);
+		UI.Text(Short > 0 ? Money(Short) + " short" : std::string("You have it"), Card.X + 28.0f, Card.Y + 90.0f, Ts(13.5f, 700, Short > 0 ? KRed : KLime));
+		UI.Text(Money(S.Life.RentDueCents), Card.X + Card.W - 24.0f, Card.Y + 68.0f, Ts(24.0f, 900, KInk, Align::Right, Baseline::Alphabetic, true));
+		if (AppButton("kastbank", {Cx - 160.0f, Prev.Y + 446.0f, 320.0f, 54.0f}, "Open the Bank", KLime, Hex(0x1b1036), true))
+		{
+			OpenApp(App::Bank, Now);
+		}
+	}
+	else if (!CanStream)
 	{
 		// Locked: the laptop can't run the client and an encoder at once. The way in is the next PC upgrade.
 		const gear::Item& Up = gear::FirstPcUpgrade();
@@ -940,7 +965,7 @@ void RiverLine::KastStudio(double Now)
 	{
 		const kast::Inputs In = S.StreamInputs();
 		const int Est = static_cast<int>(std::round(kast::Stream::Expected(Ch, In)));
-		if (AppButton("kastlive", Go, "Go live", KLime, Hex(0x1b1036), CanStream && !S.TimeSkip.Active, CanStream ? "~" + std::to_string(Est) + " viewers to start" : std::string("needs a PC upgrade")))
+		if (AppButton("kastlive", Go, "Go live", KLime, Hex(0x1b1036), CanStream && !S.TimeSkip.Active, CanStream ? "~" + std::to_string(Est) + " viewers to start" : std::string(S.Evicted() ? "the rig is in storage" : "needs a PC upgrade")))
 		{
 			S.GoLive();
 		}

@@ -1242,6 +1242,93 @@ void PennyDropScreens()
 	Emit("drop_home", RL, Now + 0.2);
 }
 
+/**
+ * Rent past the first month: due again, the final notice, evicted (the Bank's way back, the lobby, Kast locked
+ * with the rig in storage, the couch in the sleep menu), and moving back in from the Bank's button.
+ */
+void RentScreens()
+{
+	QuietHooks H;
+	ss::Session S(H, "ui-rent");
+	ss::ui::RiverLine RL(S);
+	TableMeasurer M;
+	S.CurrentScreen = ss::Screen::Lobby;
+	const double Day = ss::net::MinutesPerDay;
+	using App = ss::ui::RiverLine::App;
+	using Rent = ss::life::Rent;
+	RL.UI.Ptr.Active = false;
+	double Now = Run(S, RL, 1.0, 0.2);
+	auto At = [&](double World) {
+		S.LobbyMinutes += World - S.WorldMinutes();
+		Now = Run(S, RL, Now, 0.2);
+		S.Life.Hunger = 20.0;
+		S.Life.Thirst = 20.0;
+	};
+	auto Click = [&](float X, float Y) {
+		for (int K = 0; K < 2; ++K)
+		{
+			RL.UI.Ptr.Active = true;
+			RL.UI.Ptr.X = X;
+			RL.UI.Ptr.Y = Y;
+			RL.UI.Ptr.Down = K == 0;
+			RL.UI.Ptr.Pressed = K == 0;
+			RL.UI.Ptr.Released = K == 1;
+			ss::ui::DrawList L;
+			ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+			RL.Draw(C, Now);
+			RL.UI.Ptr.EndFrame();
+			Now += 0.05;
+		}
+		RL.UI.Ptr.Active = false;
+	};
+	// A rig, the first month paid; November is due.
+	S.BankrollCents = 300000;
+	Expect(S.Buy("ram-32").empty() && S.Buy("monitor-24").empty() && S.Buy("webcam-720").empty() && S.Buy("ring-light").empty(), "rent screens: a rig");
+	Expect(S.PayRent(), "rent screens: October paid");
+	S.BankrollCents = 61250;
+	At(22.0 * Day + 15.0 * 60.0);
+	Expect(S.Life.RentStage == Rent::Due, "rent screens: November is due");
+	RL.OpenApp(App::Bank, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_due", RL, Now);
+	// Missed: the final notice.
+	At(27.0 * Day + 11.0 * 60.0);
+	Expect(S.Life.RentStage == Rent::FinalNotice, "rent screens: the final notice");
+	RL.OpenApp(App::Bank, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_final", RL, Now);
+	// Evicted: what a key costs, the storage unit, the couch.
+	S.BankrollCents = 0;
+	At(30.0 * Day + 1.0);
+	Expect(S.Evicted(), "rent screens: evicted");
+	S.BankrollCents = 4500;
+	At(33.0 * Day + 16.0 * 60.0);
+	S.BankrollCents += 183000;
+	RL.OpenApp(App::Bank, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_evicted", RL, Now);
+	RL.OpenApp(App::Kast, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_kast_storage", RL, Now);
+	RL.OpenApp(App::ShiftLink, Now);
+	RL.ShowSleepMenu(true);
+	Now = Run(S, RL, Now, 0.6);
+	Emit("rent_couch", RL, Now);
+	RL.ShowSleepMenu(false);
+	RL.OpenApp(App::RiverLine, Now);
+	RL.OpenPage(ss::ui::RiverLine::Page::Career, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_career_evicted", RL, Now);
+	// Back in, from the button.
+	S.BankrollCents = 260000;
+	RL.OpenApp(App::Bank, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Click(226.0f, 509.0f);
+	Expect(S.Life.RentStage == Rent::Paid && S.GearFx().CanStream() && S.BankrollCents == 260000 - (122500 + 107500), "rent screens: moving back in from the Bank");
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_home", RL, Now);
+}
+
 /** GearDrop and Kast: the store, the locked studio on the laptop, the upgrade that unlocks it, a stream from the lobby to a
  * table, the channel, the directory, the end-of-stream card. */
 void StreamScreens()
@@ -2358,6 +2445,7 @@ int main(int Argc, char** Argv)
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();
 	ui_test::PennyDropScreens();
+	ui_test::RentScreens();
 	ui_test::LedScreens();
 	ui_test::FrontEndFlows();
 	ui_test::FrontEndScreens();

@@ -168,6 +168,7 @@ std::string SaveData::Serialize() const
 	}
 	Out << "life\tdrop\t" << L.Orders << "\t" << Fixed(L.TapAt, 2) << "\n";
 	Out << "life\trent\t" << static_cast<int>(L.RentStage) << "\t" << L.RentDueCents << "\t" << Fixed(L.RentDeadline, 2) << "\t" << L.RentsPaid << "\n";
+	Out << "life\tevicted\t" << L.Evictions << "\t" << Fixed(L.EvictedAt, 2) << "\t" << L.CouchCents << "\t" << Fixed(L.StorageDue, 2) << "\t" << L.Auctions << "\n";
 	Out << "life\tdebt\t" << L.DebtCents << "\n";
 	Out << "life\tban\t" << Fixed(L.BannedUntil, 2) << "\n";
 	Out << "life\tcount\t" << L.Shifts << "\t" << L.Runs << "\t" << L.Busts << "\t" << L.Ghosts << "\t" << L.Bans << "\n";
@@ -360,6 +361,14 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 				L.RentDueCents = Cents(3);
 				L.RentDeadline = Num(4);
 				L.RentsPaid = Int(5);
+			}
+			else if (P[1] == "evicted" && P.size() >= 7)
+			{
+				L.Evictions = Int(2);
+				L.EvictedAt = Num(3);
+				L.CouchCents = Cents(4);
+				L.StorageDue = Num(5);
+				L.Auctions = Int(6);
 			}
 			else if (P[1] == "debt")
 			{
@@ -746,6 +755,16 @@ void Session::WorldSkip(int DayCount)
 	}
 	LobbyMinutes += static_cast<double>(DayCount) * net::MinutesPerDay;
 	CalendarAt = WorldMinutes();
+	// The skip goes around the calendar (a tool for seeing the world move on): the bills move with it, unbilled,
+	// so no deadline is left behind the clock where it would never come round.
+	while (!Evicted() && Life.RentDeadline <= CalendarAt)
+	{
+		Life.RentDeadline += 30.0 * net::MinutesPerDay;
+	}
+	while (Life.StorageDue > 0.0 && Life.StorageDue <= CalendarAt)
+	{
+		Life.StorageDue += life::StorageDays * net::MinutesPerDay;
+	}
 	LivingWorld.AdvanceTo(WorldMinutes());
 	WorldNewsAt = LivingWorld.Clock();
 	WorldSaved.clear();
@@ -2496,7 +2515,7 @@ void Session::ShowResults()
 	{
 		StoryText("broke", "Dee", "Broke? It happens to everybody. Freeroll's always running. Or come by Tuesday. Bring quarters for the dryers.", false);
 	}
-	else if (BustPrize > 0)
+	else if (BustPrize > 0 && Life.RentStage == life::Rent::Due && Life.RentsPaid == 0 && Life.Evictions == 0)
 	{
 		StoryText("first-cash", "Landlord", "Saw your light on all night. Rent + late fee is $1,225. Friday.");
 	}
@@ -3012,7 +3031,7 @@ void Session::FinishSkip()
 	const life::Activity* A = life::Find(O.ActivityId);
 	const Chips Change = std::max(O.Money, -BankrollCents);
 	BankrollCents += Change;
-	const double EnergyGain = O.Energy > 0.0 ? O.Energy * (1.0 + Fx.Rest) : O.Energy; // a better bed, darker curtains
+	const double EnergyGain = O.Energy > 0.0 ? O.Energy * RestFactor() : O.Energy; // a better bed, darker curtains, or Dee's couch
 	Life.Energy = std::min(100.0, std::max(0.0, Life.Energy + EnergyGain));
 	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat + O.Heat));
 	Life.DebtCents += O.Debt;
@@ -3068,6 +3087,10 @@ void Session::FinishSkip()
 	LastOutcome = O;
 	LastOutcome.Money = Change;
 	LastOutcome.Energy = EnergyGain;
+	if (A && A->Type == life::Kind::Sleep && Evicted())
+	{
+		LastOutcome.Body = A->Hours >= 8.0 ? "Dee's couch. A spring in the small of your back, and her cat on your feet at five." : "Four hours sideways on Dee's couch with the TV on.";
+	}
 	HasOutcome = true;
 	Sound(O.Bad ? SoundId::Bust : Change > 0 ? SoundId::Cash : SoundId::Click, 1.0);
 	Save();
@@ -3077,6 +3100,12 @@ void Session::FinishSkip()
 
 void Session::RefreshGear()
 {
+	if (Evicted())
+	{
+		// In a storage unit across town: what's left is the laptop.
+		Fx = gear::Effects();
+		return;
+	}
 	Fx = gear::Sum(Gear);
 	if (Owns(gear::LedKitId) && Leds.On)
 	{
@@ -3188,6 +3217,10 @@ std::string Session::CanBuy(const std::string& Id) const
 	if (Owns(Id))
 	{
 		return I->Monthly ? "Subscribed." : "Owned.";
+	}
+	if (Evicted() && !I->Monthly)
+	{
+		return "Nowhere to put it. You're on Dee's couch.";
 	}
 	if (!I->Requires.empty() && !Owns(I->Requires))
 	{
@@ -3576,18 +3609,64 @@ bool Session::PayRent()
 	{
 		return false;
 	}
+	const life::Rent Was = Life.RentStage;
 	BankrollCents -= Life.RentDueCents;
-	Life.Record(WorldMinutes(), "Rent", -Life.RentDueCents, 3);
-	++Life.RentsPaid;
-	Life.RentStage = life::Rent::Paid;
-	Life.RentDueCents = 107500;
-	// Next month: November 1, then every thirty days.
-	Life.RentDeadline = Life.RentsPaid == 1 ? 27.0 * net::MinutesPerDay : Life.RentDeadline + 30.0 * net::MinutesPerDay;
-	Hooks.Text("Landlord", "Got it. Don't make me come up there again.");
+	Life.Record(WorldMinutes(), Was == life::Rent::Paid ? "Rent (paid ahead)" : Was == life::Rent::FinalNotice ? "Rent + late fee" : "Rent", -Life.RentDueCents, 3);
+	SettleRent();
+	Hooks.Text("Landlord", Was == life::Rent::FinalNotice ? "Late, but it's all here. Next month's still due the same day. Don't make it a habit." : "Got it. Don't make me come up there again.");
 	StoryText("rent-paid", "Dee", "RENT PAID?! Look at you. Laundromat's buying the coffee.");
 	Sound(SoundId::Cash, 1.0);
 	Save();
 	return true;
+}
+
+void Session::SettleRent()
+{
+	// The month's own due date: paying in the grace days doesn't push next month back.
+	const double DueAt = Life.RentStage == life::Rent::FinalNotice ? Life.RentDeadline - life::RentGraceDays * net::MinutesPerDay : Life.RentDeadline;
+	++Life.RentsPaid;
+	Life.RentStage = life::Rent::Paid;
+	Life.RentDueCents = life::MonthlyRentCents;
+	// Next month: October 31 at midnight, then every thirty days.
+	Life.RentDeadline = Life.RentsPaid == 1 ? 27.0 * net::MinutesPerDay : DueAt + 30.0 * net::MinutesPerDay;
+}
+
+std::string Session::MoveBackIn()
+{
+	if (!Evicted())
+	{
+		return "You still have the apartment.";
+	}
+	if (T || TimeSkip.Active)
+	{
+		return "Finish what you're doing first.";
+	}
+	if (BankrollCents < Life.RentDueCents)
+	{
+		return "Short " + Money(Life.RentDueCents - BankrollCents) + ".";
+	}
+	const double World = WorldMinutes();
+	BankrollCents -= Life.RentDueCents;
+	Life.Record(World, "Back rent + a month up front", -Life.RentDueCents, 3);
+	++Life.RentsPaid;
+	Life.RentStage = life::Rent::Paid;
+	Life.RentDueCents = life::MonthlyRentCents;
+	// Paid through thirty days from tonight's midnight.
+	Life.RentDeadline = (std::floor(World / net::MinutesPerDay) + 31.0) * net::MinutesPerDay;
+	Life.CouchCents = 0;
+	const bool Stored = Life.StorageDue > 0.0;
+	Life.StorageDue = 0.0;
+	RefreshGear();
+	Hooks.Text("Landlord", Stored ? "Paid in full. New locks; your key's under the mat. Go get your stuff out of storage." : "Paid in full. New locks; your key's under the mat.");
+	Hooks.Text("Dee", "you're going HOME? the couch will miss you. lou won't. go, before i make you pay for the coffee you drank.");
+	Sound(SoundId::Cash, 1.0);
+	Save();
+	return "";
+}
+
+double Session::RestFactor() const
+{
+	return (1.0 + Fx.Rest) * (Evicted() ? life::CouchRest : 1.0);
 }
 
 bool Session::PayDebt()
@@ -3969,22 +4048,92 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 			PayNightShift(End);
 		}
 	}
-	if (Life.RentStage != life::Rent::Evicted && Life.RentDeadline > From && Life.RentDeadline <= To)
+	// Rent. A week out, a paid month is due again, and the landlord says so.
+	auto Crosses = [&](double At) { return At > From && At <= To; };
+	if (Life.RentStage == life::Rent::Paid && To >= Life.RentDeadline - life::RentNoticeDays * net::MinutesPerDay)
+	{
+		Life.RentStage = life::Rent::Due;
+		const int DueDay = net::DayOf(Life.RentDeadline - 1.0);
+		StoryText("rent-notice:" + std::to_string(DueDay), "Landlord",
+			"Reminder: rent is " + Money(Life.RentDueCents) + ", due by midnight " + net::WeekdayName(DueDay, true) + ", " + net::DateLabel(DueDay) + ". Have it in your account and I'll collect.");
+	}
+	// (A loop: a long skip can cross the deadline and the grace days both. Each pass moves the deadline on, or evicts.)
+	while (!Evicted() && Crosses(Life.RentDeadline))
 	{
 		RentDeadline();
 	}
-	// The landlord's reminders.
-	const double Thursday = 3.0 * net::MinutesPerDay + 9.0 * 60.0;
-	const double FridayEvening = 4.0 * net::MinutesPerDay + 18.0 * 60.0;
-	if (Life.RentStage == life::Rent::Due && Life.RentsPaid == 0)
+	// The landlord's reminders: 9 AM the day before, and 6 PM on the day. In the grace days, one last warning.
+	if (Life.RentStage == life::Rent::Due || Life.RentStage == life::Rent::FinalNotice)
 	{
-		if (Thursday > From && Thursday <= To)
+		const bool First = Life.RentsPaid == 0 && Life.Evictions == 0;
+		const std::string Day = std::to_string(net::DayOf(Life.RentDeadline - 1.0));
+		const double Morning = Life.RentDeadline - 39.0 * 60.0;
+		const double Evening = Life.RentDeadline - 6.0 * 60.0;
+		if (Life.RentStage == life::Rent::FinalNotice)
 		{
-			StoryText("rent-thursday", "Landlord", "Tomorrow. $1,225. I'm not asking again.");
+			if (Crosses(Morning))
+			{
+				StoryText("rent-last:" + Day, "Landlord", "Tomorrow at midnight the locks change. " + Money(Life.RentDueCents) + ". This is the last time I ask.");
+			}
 		}
-		if (FridayEvening > From && FridayEvening <= To)
+		else if (First)
 		{
-			StoryText("rent-friday", "Landlord", "Midnight. Have it or start packing.");
+			if (Crosses(Morning))
+			{
+				StoryText("rent-thursday", "Landlord", "Tomorrow. $1,225. I'm not asking again.");
+			}
+			if (Crosses(Evening))
+			{
+				StoryText("rent-friday", "Landlord", "Midnight. Have it or start packing.");
+			}
+		}
+		else
+		{
+			if (Crosses(Morning))
+			{
+				StoryText("rent-soon:" + Day, "Landlord", "Rent's due tomorrow at midnight. " + Money(Life.RentDueCents) + ".");
+			}
+			if (Crosses(Evening))
+			{
+				StoryText("rent-tonight:" + Day, "Landlord", "Midnight tonight. " + Money(Life.RentDueCents) + ". It's in your account or it's late.");
+			}
+		}
+	}
+	if (Evicted())
+	{
+		// Dee's couch: a share of the groceries every morning, when there's money for it.
+		for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 10.0 * 60.0; At <= To; At += net::MinutesPerDay)
+		{
+			if (At > From && At > Life.EvictedAt && BankrollCents >= life::CouchChipInCents)
+			{
+				BankrollCents -= life::CouchChipInCents;
+				Life.CouchCents += life::CouchChipInCents;
+				Life.Record(At, "Groceries at Dee's", -life::CouchChipInCents, 3);
+			}
+		}
+		// The storage unit: a warning two days out, then the card on file, or the auction.
+		if (Life.StorageDue > 0.0)
+		{
+			const int DueDay = net::DayOf(Life.StorageDue);
+			if (Crosses(Life.StorageDue - 2.0 * net::MinutesPerDay))
+			{
+				StoryText("storage-warn:" + std::to_string(DueDay), "Ninth St. Storage",
+					"Unit 114: " + Money(life::StorageCents) + " renews in 2 days. If the card on file declines, the contents are sold at lien auction.");
+			}
+			while (Life.StorageDue > 0.0 && Crosses(Life.StorageDue))
+			{
+				if (BankrollCents >= life::StorageCents)
+				{
+					BankrollCents -= life::StorageCents;
+					Life.Record(Life.StorageDue, "Ninth St. Storage (month)", -life::StorageCents, 3);
+					Life.StorageDue += life::StorageDays * net::MinutesPerDay;
+				}
+				else
+				{
+					Auction();
+				}
+				Save();
+			}
 		}
 	}
 	if (Life.BannedUntil > From && Life.BannedUntil <= To)
@@ -3996,7 +4145,7 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	{
 		for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 16.0 * 60.0; At <= To; At += net::MinutesPerDay)
 		{
-			if (At <= From || !life::InWindow(*Live, At + 2.0 * 60.0 + 1.0) || Life.RentStage == life::Rent::Evicted)
+			if (At <= From || !life::InWindow(*Live, At + 2.0 * 60.0 + 1.0))
 			{
 				continue;
 			}
@@ -4010,7 +4159,7 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	{
 		for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + Game->Opens - 30.0; At <= To; At += net::MinutesPerDay)
 		{
-			if (At <= From || !life::InWindow(*Game, At + 31.0) || Life.RentStage == life::Rent::Evicted)
+			if (At <= From || !life::InWindow(*Game, At + 31.0))
 			{
 				continue;
 			}
@@ -4022,7 +4171,9 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 			};
 			const int Day = net::DayOf(At);
 			StoryText("dee-night-" + std::to_string(Day), "Dee",
-				Life.BackRoomNights == 0 ? "game's tonight at nine. back room of the laundromat, across the street. bring forty. open the burner if you're in." : Nights[Day % 4]);
+				Evicted() ? "game's at nine. you're already sleeping on my couch, so you've got no excuse."
+				: Life.BackRoomNights == 0 ? "game's tonight at nine. back room of the laundromat, across the street. bring forty. open the burner if you're in."
+										   : Nights[Day % 4]);
 		}
 	}
 }
@@ -4055,26 +4206,76 @@ void Session::RentDeadline()
 	{
 		// The landlord comes up the stairs and takes it.
 		BankrollCents -= Life.RentDueCents;
-		Life.Record(Life.RentDeadline, "Rent (collected)", -Life.RentDueCents, 3);
-		++Life.RentsPaid;
-		Life.RentStage = life::Rent::Paid;
-		Life.RentDueCents = 107500;
-		Life.RentDeadline = Life.RentsPaid == 1 ? 27.0 * net::MinutesPerDay : Life.RentDeadline + 30.0 * net::MinutesPerDay;
+		Life.Record(Life.RentDeadline, Life.RentStage == life::Rent::FinalNotice ? "Rent + late fee (collected)" : "Rent (collected)", -Life.RentDueCents, 3);
+		SettleRent();
 		Hooks.Text("Landlord", "Came by for the rent. It's on the counter? Fine. Next month, don't make me climb the stairs.");
 	}
 	else if (Life.RentStage != life::Rent::FinalNotice)
 	{
 		Life.RentStage = life::Rent::FinalNotice;
-		Life.RentDueCents += 15000;
-		Life.RentDeadline += 3.0 * net::MinutesPerDay;
-		Hooks.Text("Landlord", "FINAL NOTICE. " + Money(Life.RentDueCents) + " with the late fee. You have until Monday at midnight, then the locks change.");
+		Life.RentDueCents += life::LateFeeCents;
+		Life.RentDeadline += life::RentGraceDays * net::MinutesPerDay;
+		Hooks.Text("Landlord", "FINAL NOTICE. " + Money(Life.RentDueCents) + " with the late fee. You have until " + net::WeekdayName(net::DayOf(Life.RentDeadline - 1.0), true) +
+								   " at midnight, then the locks change.");
 	}
 	else
 	{
-		Life.RentStage = life::Rent::Evicted;
-		Hooks.Text("Landlord", "Locks change tomorrow. Leave the key on the counter.");
-		Hooks.Text("Dee", "I heard. My couch is yours as long as you need it. Bring the laptop.");
+		Evict();
 	}
 	Save();
+}
+
+void Session::Evict()
+{
+	// What was owed stays owed, and the landlord wants a month up front on top of it to hand back a key.
+	const Chips Back = Life.RentDueCents;
+	Life.RentStage = life::Rent::Evicted;
+	Life.RentDueCents = Back + life::MonthlyRentCents;
+	Life.EvictedAt = Life.RentDeadline;
+	Life.CouchCents = 0;
+	++Life.Evictions;
+	// The gear goes into a storage unit (the deposit covers the movers and the first month); the laptop goes to
+	// Dee's. No apartment, no internet, no stream.
+	bool Stored = false;
+	for (const auto& G : Gear)
+	{
+		const gear::Item* I = gear::Find(G.first);
+		Stored = Stored || (I && !I->Monthly);
+	}
+	Life.StorageDue = Stored ? Life.EvictedAt + life::StorageDays * net::MinutesPerDay : 0.0;
+	EndStream();
+	RefreshGear();
+	Hooks.Text("Landlord", "Locks changed. You owe " + Money(Back) + ". Pay that plus a month up front and you get a key back." +
+							   (Stored ? " Your deposit paid the movers and a month at Ninth Street Storage. After that the unit's on you." : ""));
+	Hooks.Text("Dee", Life.Evictions == 1 ? "I heard. My couch is yours as long as you need it. Bring the laptop. Chip in for groceries when you can."
+										  : "again?? ok. couch is made up. you know the rules: groceries, and you do the dishes.");
+	Sound(SoundId::Bust, 0.8);
+}
+
+void Session::Auction()
+{
+	// Nobody paid for the unit: everything in it goes to the highest bidder (the subscriptions were never in it).
+	std::string Lost;
+	int Count = 0;
+	for (auto It = Gear.begin(); It != Gear.end();)
+	{
+		const gear::Item* I = gear::Find(It->first);
+		if (!I || I->Monthly)
+		{
+			++It;
+			continue;
+		}
+		Lost += (Lost.empty() ? "" : ", ") + I->Name;
+		++Count;
+		Hooks.GearChanged(It->first, false);
+		It = Gear.erase(It);
+	}
+	Life.StorageDue = 0.0;
+	++Life.Auctions;
+	RefreshGear();
+	Hooks.Text("Ninth St. Storage", "Unit 114 was sold at auction this morning for nonpayment. Contents: " + Lost + ". The lien is satisfied; no further balance is owed.");
+	Hooks.Text("Dee", Count > 2 ? "some guy from the auction is already selling your stuff on the laundromat's corkboard. i'm so sorry."
+								: "they auctioned the unit? i'm sorry. it's just stuff. you've still got the laptop.");
+	Sound(SoundId::Bust, 0.8);
 }
 } // namespace ss

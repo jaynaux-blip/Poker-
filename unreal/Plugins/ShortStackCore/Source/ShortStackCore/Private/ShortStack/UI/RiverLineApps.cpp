@@ -321,9 +321,21 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 				Dot = pal::Gold;
 			}
 		}
-		if (A == App::Bank && S.Life.RentStage != life::Rent::Paid && S.Life.RentStage != life::Rent::Evicted && S.Life.RentDeadline - World < 24.0 * 60.0)
+		if (A == App::Bank)
 		{
-			Dot = pal::Red;
+			// Rent due within the day, or a final notice: red. Evicted: orange, red when the storage unit is about to
+			// go, green once there's enough to move back in.
+			const life::State& Lf = S.Life;
+			if (S.Evicted())
+			{
+				Dot = S.BankrollCents >= Lf.RentDueCents ? pal::Green
+					: Lf.StorageDue > 0.0 && Lf.StorageDue - World < 2.0 * net::MinutesPerDay && S.BankrollCents < life::StorageCents ? pal::Red
+																														   : pal::Orange;
+			}
+			else if (Lf.RentStage == life::Rent::FinalNotice || (Lf.RentStage == life::Rent::Due && Lf.RentDeadline - World < 24.0 * 60.0))
+			{
+				Dot = pal::Red;
+			}
 		}
 		if (A == App::Kast)
 		{
@@ -546,12 +558,16 @@ void RiverLine::ShiftLinkApp(double Now)
 	// The point of it all.
 	const Rect Rr{1090.0f, 544.0f, 470.0f, 210.0f};
 	UI.RRect(Rr, 16.0f, Hex(0x2a1a0e));
-	UI.Text(L.RentStage == life::Rent::Paid ? "Next rent" : "Rent", Rr.X + 28.0f, Rr.Y + 42.0f, Ts(14.0f, 700, Hex(0xffb36b)));
+	const bool Out = S.Evicted();
+	UI.Text(Out ? "To get your key back" : L.RentStage == life::Rent::Paid ? "Next rent" : "Rent", Rr.X + 28.0f, Rr.Y + 42.0f, Ts(14.0f, 700, Hex(0xffb36b)));
 	UI.Text(Money(L.RentDueCents), Rr.X + 28.0f, Rr.Y + 88.0f, Ts(38.0f, 900, Hex(0xffffff), Align::Left, Baseline::Alphabetic, true));
-	UI.Text("due in " + net::Countdown(std::max(0.0, L.RentDeadline - World)), Rr.X + 28.0f, Rr.Y + 116.0f, Ts(15.0f, 600, Hex(0xf5d0a9)));
+	UI.Text(Out ? std::string("back rent + a month up front") : "due in " + net::Countdown(std::max(0.0, L.RentDeadline - World)), Rr.X + 28.0f, Rr.Y + 116.0f, Ts(15.0f, 600, Hex(0xf5d0a9)));
 	const Chips Short = std::max<Chips>(0, L.RentDueCents - S.BankrollCents);
 	const double Shifts = static_cast<double>(Short) / 4350.0;
-	NetParagraph(*C, Short > 0 ? "You're " + Money(Short) + " short. That's about " + std::to_string(static_cast<int>(std::ceil(Shifts))) + " night shifts at the Lucky Penny." : "You have the rent. Pay it from the Bank app.",
+	NetParagraph(*C,
+		Short > 0 ? "You're " + Money(Short) + " short. That's about " + std::to_string(static_cast<int>(std::ceil(Shifts))) + " night shifts at the Lucky Penny."
+		: Out     ? "You have it. Move back in from the Bank app."
+				  : "You have the rent. Pay it from the Bank app.",
 		Rr.X + 28.0f, Rr.Y + 152.0f, Rr.W - 56.0f, 14.0f, 500, Hex(0xf5d0a9), 20.0f, 2);
 }
 
@@ -919,18 +935,53 @@ void RiverLine::BankApp(double Now)
 	C->GlowRoundRect({Rr.X, Rr.Y + 6.0f, Rr.W, Rr.H}, 18.0f, Rgba(13, 37, 71, 0.1f), 16.0f);
 	UI.RRect(Rr, 18.0f, Hex(0xffffff), NetA(Tone, 0.5f), 1.5f);
 	C->FillRoundRect({Rr.X, Rr.Y, 8.0f, Rr.H}, 4.0f, Tone);
-	const std::string Head = Out ? "EVICTED" : Late ? "FINAL NOTICE \xC2\xB7 RENT + LATE FEES" : Paid ? "RENT PAID \xC2\xB7 NEXT MONTH" : "RENT + LATE FEE \xC2\xB7 DUE FRIDAY";
+	const std::string DueDay = NetUpper(net::WeekdayName(net::DayOf(L.RentDeadline - 1.0), true));
+	const std::string Head = Out ? "EVICTED \xC2\xB7 ON DEE'S COUCH"
+		: Late ? "FINAL NOTICE \xC2\xB7 RENT + LATE FEE \xC2\xB7 LOCKS CHANGE " + DueDay
+		: Paid ? "RENT PAID \xC2\xB7 NEXT MONTH"
+		: L.RentsPaid == 0 && L.Evictions == 0 ? "RENT + LATE FEE \xC2\xB7 DUE " + DueDay : "RENT \xC2\xB7 DUE " + DueDay;
 	NetSpaced(*C, Head, Rr.X + 36.0f, Rr.Y + 44.0f, 12.0f, 900, Tone, 1.8f);
 	if (Out)
 	{
-		UI.Text("The locks changed.", Rr.X + 36.0f, Rr.Y + 100.0f, Ts(36.0f, 900, Dark));
-		NetParagraph(*C, "You're on Dee's couch with a laptop and a bankroll. Win it back.", Rr.X + 36.0f, Rr.Y + 140.0f, Rr.W - 72.0f, 16.0f, 500, Gray, 22.0f, 2);
+		// What it takes to get a key back, and what being out costs meanwhile.
+		const Chips Back = std::max<Chips>(0, L.RentDueCents - life::MonthlyRentCents);
+		UI.Text(Money(L.RentDueCents), Rr.X + 36.0f, Rr.Y + 104.0f, Ts(46.0f, 900, Dark, Align::Left, Baseline::Alphabetic, true));
+		UI.Text("Back rent " + Money(Back) + " + a month up front " + Money(life::MonthlyRentCents), Rr.X + 36.0f, Rr.Y + 134.0f, Ts(15.0f, 600, Gray));
+		const int Nights = std::max(0, net::DayOf(World) - net::DayOf(L.EvictedAt));
+		std::string Unit = "Nothing in storage";
+		Color UnitInk = Gray;
+		if (L.StorageDue > 0.0)
+		{
+			const double ToUnit = L.StorageDue - World;
+			Unit = "Storage renews in " + net::Countdown(std::max(0.0, ToUnit)) + " \xC2\xB7 " + Money(life::StorageCents);
+			UnitInk = ToUnit < 2.0 * net::MinutesPerDay && S.BankrollCents < life::StorageCents ? Hex(0xdc2626) : Dark;
+		}
+		else if (L.Auctions > 0)
+		{
+			Unit = "The storage unit went to auction";
+			UnitInk = Hex(0xdc2626);
+		}
+		UI.Text(Unit, Rr.X + Rr.W - 36.0f, Rr.Y + 98.0f, Ts(15.0f, 800, UnitInk, Align::Right));
+		UI.Text(Nights == 0 ? "First night on the couch" : "Night " + std::to_string(Nights + 1) + " on the couch \xC2\xB7 " + Money(L.CouchCents) + " to Dee", Rr.X + Rr.W - 36.0f, Rr.Y + 122.0f,
+			Ts(13.0f, 600, Gray, Align::Right));
+		const float Have = Nf(Clamp01(static_cast<double>(S.BankrollCents) / static_cast<double>(std::max<Chips>(1, L.RentDueCents))));
+		UI.RRect({Rr.X + 36.0f, Rr.Y + 158.0f, Rr.W - 72.0f, 12.0f}, 6.0f, Hex(0xe6ebf3));
+		UI.RRect({Rr.X + 36.0f, Rr.Y + 158.0f, std::max(12.0f, (Rr.W - 72.0f) * Have * In), 12.0f}, 6.0f, Paint::Linear({Rr.X, 0.0f}, {Rr.X + Rr.W, 0.0f}, Tone, Mix(Tone, Hex(0x16a34a), Have)));
+		const bool Can = S.BankrollCents >= L.RentDueCents && !S.T && !S.TimeSkip.Active;
+		const Chips Short = std::max<Chips>(0, L.RentDueCents - S.BankrollCents);
+		if (AppButton("movein", {Rr.X + 36.0f, Rr.Y + 186.0f, 300.0f, 46.0f}, "Move back in", Hex(0x16a34a), Hex(0xffffff), Can, Can ? std::string() : "Short " + Money(Short)))
+		{
+			S.MoveBackIn();
+		}
+		NetParagraph(*C, "Meanwhile: the gear's in storage (two tables, no stream), the couch gives back 30% less sleep, and $10 a day goes to Dee's groceries.", Rr.X + 356.0f, Rr.Y + 200.0f,
+			Rr.W - 392.0f, 13.0f, 500, Gray, 18.0f, 2);
 	}
 	else
 	{
 		UI.Text(Money(L.RentDueCents), Rr.X + 36.0f, Rr.Y + 104.0f, Ts(46.0f, 900, Dark, Align::Left, Baseline::Alphabetic, true));
 		const double Left = L.RentDeadline - World;
-		UI.Text("Due " + std::string(net::WeekdayName(net::DayOf(L.RentDeadline - 1.0), true)) + ", " + net::DateLabel(net::DayOf(L.RentDeadline - 1.0)) + " at midnight", Rr.X + 36.0f, Rr.Y + 134.0f, Ts(15.0f, 600, Gray));
+		UI.Text(std::string(Late ? "Last day: " : "Due ") + net::WeekdayName(net::DayOf(L.RentDeadline - 1.0), true) + ", " + net::DateLabel(net::DayOf(L.RentDeadline - 1.0)) + " at midnight", Rr.X + 36.0f,
+			Rr.Y + 134.0f, Ts(15.0f, 600, Late ? Hex(0xdc2626) : Gray));
 		UI.Text(NetHms(std::max(0.0, Left)), Rr.X + Rr.W - 36.0f, Rr.Y + 98.0f, Ts(32.0f, 700, Left < 24.0 * 60.0 ? Hex(0xdc2626) : Dark, Align::Right, Baseline::Alphabetic, true));
 		UI.Text("left", Rr.X + Rr.W - 36.0f, Rr.Y + 122.0f, Ts(13.0f, 600, Gray, Align::Right));
 		const float Have = Nf(Clamp01(static_cast<double>(S.BankrollCents) / static_cast<double>(std::max<Chips>(1, L.RentDueCents))));
@@ -942,8 +993,16 @@ void RiverLine::BankApp(double Now)
 		{
 			S.PayRent();
 		}
-		UI.Text(Paid ? "Paid " + std::to_string(L.RentsPaid) + (L.RentsPaid == 1 ? " month" : " months") + " so far." : "The landlord collects at the deadline if the money is here.", Rr.X + 356.0f, Rr.Y + 214.0f,
-			Ts(14.0f, 500, Gray));
+		if (Late)
+		{
+			NetParagraph(*C, "Miss this and the locks change: the gear goes to storage, you go to Dee's couch, and a key costs the back rent plus a month.", Rr.X + 356.0f, Rr.Y + 200.0f,
+				Rr.W - 392.0f, 13.0f, 600, Hex(0xdc2626), 18.0f, 2);
+		}
+		else
+		{
+			UI.Text(Paid ? "Paid " + std::to_string(L.RentsPaid) + (L.RentsPaid == 1 ? " month" : " months") + " so far." : "The landlord collects at the deadline if the money is here.", Rr.X + 356.0f,
+				Rr.Y + 214.0f, Ts(14.0f, 500, Gray));
+		}
 	}
 
 	// Where the money came from.
@@ -1023,7 +1082,7 @@ void RiverLine::SleepMenu(double Now)
 	C->GlowRoundRect({R.X, R.Y + 8.0f, R.W, R.H}, 16.0f, Rgba(0, 0, 0, 0.55f), 22.0f);
 	UI.RRect(R, 16.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x1b1433), Hex(0x110c22)), Hex(0x3b2a6b));
 	AppMoon(*C, R.X + 34.0f, R.Y + 36.0f, 12.0f, Hex(0xd8c8ff), Hex(0x1a1331));
-	UI.Text("Sleep", R.X + 58.0f, R.Y + 43.0f, Ts(20.0f, 900, Hex(0xeee6ff)));
+	UI.Text(S.Evicted() ? "Dee's couch" : "Sleep", R.X + 58.0f, R.Y + 43.0f, Ts(20.0f, 900, Hex(0xeee6ff)));
 	UI.Text("Energy " + std::to_string(static_cast<int>(std::round(S.Life.Energy))) + "%", R.X + R.W - 22.0f, R.Y + 42.0f, Ts(14.0f, 700, Hex(0xb9a6e8), Align::Right));
 	const char* Ids[2] = {"nap", "sleep"};
 	const life::Context Ctx = S.LifeContext();
@@ -1036,7 +1095,9 @@ void RiverLine::SleepMenu(double Now)
 		}
 		const std::string Why = life::Blocked(*A, S.Life, Ctx);
 		const std::string Label = A->Title + " \xC2\xB7 " + std::to_string(static_cast<int>(A->Hours)) + " hours";
-		const std::string Sub = Why.empty() ? "Wake at " + net::TimeLabel(World + A->Hours * 60.0) + " \xC2\xB7 +" + std::to_string(static_cast<int>(-A->Energy)) + " energy" : Why;
+		// What it actually gives back: more with the mattress and the curtains, less on a couch.
+		const int Gain = static_cast<int>(std::round(std::min(100.0, -A->Energy * S.RestFactor())));
+		const std::string Sub = Why.empty() ? "Wake at " + net::TimeLabel(World + A->Hours * 60.0) + " \xC2\xB7 +" + std::to_string(Gain) + " energy" : Why;
 		if (AppButton(std::string("sleep:") + Ids[I], {R.X + 18.0f, R.Y + 66.0f + Nf(I) * 72.0f, R.W - 36.0f, 60.0f}, Label, Hex(0x7c3aed), Hex(0xffffff), Why.empty(), Sub))
 		{
 			TryActivity(Ids[I], Now);
@@ -1096,7 +1157,7 @@ void RiverLine::OutcomeCard(double Now)
 	const Rect R{470.0f, 270.0f, 660.0f, 380.0f};
 	C->GlowRoundRect({R.X, R.Y + 10.0f, R.W, R.H}, 20.0f, NetA(Tone, 0.25f), 30.0f);
 	UI.RRect(R, 20.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Mix(Hex(0x111c2e), Tone, 0.14f), Hex(0x0d1729)), NetA(Tone, 0.6f), 1.5f);
-	NetSpaced(*C, A ? NetUpper(A->Place == "Bed" ? std::string("Rest") : A->Place) : std::string(), R.X + 36.0f, R.Y + 46.0f, 12.0f, 900, Tone, 2.0f);
+	NetSpaced(*C, A ? NetUpper(A->Place == "Bed" ? std::string(S.Evicted() ? "Dee's couch" : "Rest") : A->Place) : std::string(), R.X + 36.0f, R.Y + 46.0f, 12.0f, 900, Tone, 2.0f);
 	UI.Text(O.Title, R.X + 36.0f, R.Y + 92.0f, Ts(38.0f, 900, pal::Ink));
 	UI.Text(net::TimeLabel(O.Start) + "  \xE2\x86\x92  " + net::TimeLabel(O.End) + "  \xC2\xB7  " + net::Countdown(O.End - O.Start), R.X + 36.0f, R.Y + 120.0f, Ts(14.0f, 600, pal::Muted));
 	NetParagraph(*C, O.Body, R.X + 36.0f, R.Y + 160.0f, R.W - 72.0f, 16.0f, 500, Hex(0xc9d3e2), 23.0f, 4);

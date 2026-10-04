@@ -438,7 +438,14 @@ public:
 	/** Heads out to a live game (life::Kind::Game, a buy-in from the bankroll) or a live tournament (life::Kind::Live,
 	 * its fixed buy-in); returns why not, or "". */
 	SHORTSTACKCORE_API std::string GoToGame(const std::string& Id, Chips BuyInCents);
+	/** Pays what's due now (or, paid up, next month early). Late payment doesn't move the next month's due date. */
 	SHORTSTACKCORE_API bool PayRent();
+	/** The locks changed (life::Rent::Evicted): on Dee's couch, the gear in storage, no stream. */
+	bool Evicted() const { return Life.RentStage == life::Rent::Evicted; }
+	/** Evicted: pays the back rent and a month up front (Life.RentDueCents), gets the key and the gear back. "" or why not. */
+	SHORTSTACKCORE_API std::string MoveBackIn();
+	/** What a night's sleep gives back, as a multiple (a better bed and dark curtains add; Dee's couch takes away). */
+	SHORTSTACKCORE_API double RestFactor() const;
 	SHORTSTACKCORE_API bool PayDebt();
 	SHORTSTACKCORE_API life::Context LifeContext() const;
 	/** Formats unlocked so far (net::Unlock bits). */
@@ -660,6 +667,9 @@ private:
 	void CheckCalendar(double From, double To, bool Awake);
 	void PayNightShift(double End);
 	void RentDeadline();
+	void SettleRent();
+	void Evict();
+	void Auction();
 	void FinishSkip();
 	void BustBanner(const TPlayer& Hero, const char* NoCashSub);
 	void RefreshGear();
