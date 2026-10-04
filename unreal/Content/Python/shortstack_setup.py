@@ -581,6 +581,18 @@ def _looks(folder):
     return looks
 
 
+def _scratch_refs(folder, scratch):
+    """Packages under folder that still depend on something under scratch, by the asset registry (what's on disk)."""
+    ar = unreal.AssetRegistryHelpers.get_asset_registry()
+    opts = unreal.AssetRegistryDependencyOptions(include_soft_package_references=True, include_hard_package_references=True)
+    stale = []
+    for data in ar.get_assets_by_path(folder, recursive=True):
+        deps = ar.get_dependencies(data.package_name, opts) or []
+        if any(str(d).startswith(scratch + "/") for d in deps):
+            stale.append(str(data.package_name))
+    return stale
+
+
 def _fresh_looks(folder, path, mesh):
     """Brings a changed glb's textures and materials to its existing mesh. Importing over an existing mesh updates only
     its geometry (the textures and materials already there stay, so a rebaked print never arrives): the file is
@@ -615,8 +627,16 @@ def _fresh_looks(folder, path, mesh):
         return False
     for look in old:
         eal.delete_asset(look)
-    for look in _looks(scratch):
-        eal.rename_asset(look, folder + look[len(scratch):])
+    # Textures before the materials that use them: a material moved first is saved pointing at its textures' scratch
+    # paths and nothing fixes that when they follow (it looks right only while the editor still holds the objects).
+    fresh = _looks(scratch)
+    textures = [look for look in fresh if str(eal.find_asset_data(look).asset_class_path.asset_name) == "Texture2D"]
+    moved = []
+    for look in textures + [look for look in fresh if look not in textures]:
+        dest = folder + look[len(scratch):]
+        if not eal.rename_asset(look, dest):
+            unreal.log_error(f"ShortStack: couldn't move {look} to {dest}")
+        moved.append(dest)
     if isinstance(mesh, unreal.StaticMesh):
         for i, slot in enumerate(fresh_mesh.static_materials):
             if i < len(mesh.static_materials):
@@ -627,8 +647,15 @@ def _fresh_looks(folder, path, mesh):
             if i < len(mats):
                 mats[i].material_interface = slot.material_interface
         mesh.set_editor_property("materials", mats)
+    # Saved whether or not the editor counts them dirty: the files must point at the new paths.
+    for dest in moved:
+        eal.save_asset(dest, only_if_is_dirty=False)
+    eal.save_asset(mesh.get_path_name().split(".")[0], only_if_is_dirty=False)
     eal.delete_directory(scratch)
-    eal.save_directory(folder)
+    stale = _scratch_refs(folder, scratch)
+    if stale:
+        unreal.log_error(f"ShortStack: {len(stale)} packages in {folder} still point into {scratch}: {stale[:3]}")
+        return False
     return True
 
 
