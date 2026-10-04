@@ -87,8 +87,8 @@ Unreal can't run in the cloud, so the gait and the wearable offsets were set by 
 |---|---|---|
 | `ss.Walk.Sign` | 1 | Set it to -1 if the legs swing backward |
 | `ss.Walk.Stride`, `ss.Walk.Arms`, `ss.Walk.Bob` | 1 | Scale the leg swing, the arm swing, and the pelvis bob and twist |
-| `ss.Wear.HatUp`, `ss.Wear.HatForward` | fitted (21.4, 0.4 cm on the hero) | Hat crown from the head bone; fitted to each face (scalp, eye spacing) until set, then fixed for all |
-| `ss.Wear.GlassesUp`, `ss.Wear.GlassesForward` | fitted (5, 10.8 cm on the hero) | Glasses' bridge from the head bone; fitted to the eyes until set |
+| `ss.Wear.HatUp`, `ss.Wear.HatForward` | fitted (about 22, 0.4 cm) | Hat crown from the head bone; fitted to each face (eye height and spacing: the cuff 3.5 cm over the eyes) until set, then fixed for all |
+| `ss.Wear.GlassesUp`, `ss.Wear.GlassesForward` | fitted (the eyes) | Glasses' bridge from the head bone; fitted to the eyes until set |
 | `ss.Wear.Refit` | | Puts the hats and glasses on again after changing the above |
 | `ss.Walk.Curl` | 1 | Scales how far the hands curl |
 | `ss.Walk.SipSide`, `ss.Walk.SipAhead`, `ss.Walk.SipUp` | 3, 8, -11 cm | Where a sip brings the right wrist, from the mouth |

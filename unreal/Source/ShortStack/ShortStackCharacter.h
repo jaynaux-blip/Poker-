@@ -104,6 +104,8 @@ private:
 	void FitToHeight(float HeightCm);
 	void FitFace();
 	void BuildShoes(const FStreetOutfit& Outfit);
+	/** Hides one foot's toes in a shoe (0 left, 1 right), or shows them again. */
+	void HideToes(int32 Side, bool bHide);
 	void PutOnHeadwear();
 	/** What carries the hat and glasses: the face, or the body when the face has no head bone (none without either). */
 	USkeletalMeshComponent* HeadCarrier() const;
@@ -123,13 +125,16 @@ private:
 	TObjectPtr<UStaticMeshComponent> HatMesh;
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> GlassesMesh;
-	/** Sneakers, made at run time to fit this body's feet (0 left, 1 right). */
+	/** The shoes on the foot bones (0 left, 1 right): the modeled pair fitted to this body's feet, or a pair made here to fit. */
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> Shoes[2];
+	/** The shoes made here, when the modeled pair isn't imported. */
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> ShoeMeshes[2];
 	/** The body the shoe meshes were made for (they're made again for another). */
 	TWeakObjectPtr<USkeletalMesh> ShoesFitFor;
+	/** The toe bones hidden in the shoes, by index on the body (none: INDEX_NONE). */
+	int32 HiddenToes[2] = {INDEX_NONE, INDEX_NONE};
 
 	ss::hero::Look LookNow;
 	/** The hero's age: the hair greys from the mid-forties and the hat's color is picked against it, as the creator's portrait has them. */

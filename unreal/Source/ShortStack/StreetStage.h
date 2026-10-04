@@ -46,7 +46,9 @@ struct FStreetSpot
  * the street (Dee's game is in its back room), streetlights, rain, and the store itself, lit inside, with
  * sliding doors, coolers, aisles, the counter, the roller grill and the coffee bar. Built procedurally
  * from engine shapes with collision, like the apartment; Blender props (street_setup.py imports them)
- * replace the boxes where they exist.
+ * replace the boxes where they exist: the building fronts (1812 itself, the walk-up, the brownstones, the
+ * floors over the store, and across the street the laundromat's building as the apartment's window sees
+ * it) and the store's stock, row by row on its shelves.
  *
  * Coordinates (cm): the building fronts on the player's side of the street stand on X = 0, the road
  * runs along Y at X 420..1620, up is Z with the sidewalk's top at 0. The store spans Y 3700..4950.
@@ -110,7 +112,11 @@ private:
 	void BuildEnds();
 	void BuildHomeBlock();
 	void BuildEntrance();
+	/** The stand-in's door, buzzer, lamp and number when 1812's own front isn't imported. */
+	void BuildDoor();
 	void BuildAcross();
+	/** The stand-in laundromat across from the door (its room, washers, glass and neon) when the tenement isn't imported. */
+	void BuildWashAndFold();
 	void BuildStore();
 	void BuildStoreDressing();
 	void BuildStreetlights();
@@ -135,6 +141,22 @@ private:
 	UStaticMeshComponent* Cyl(UMaterialInterface* Material, const FVector& Base, float Radius, float Height, bool bCollide = true);
 	/** An imported Blender prop (nullptr when it isn't), its origin at At and its front facing Yaw (degrees, 0 is +X). */
 	UStaticMeshComponent* Prop(const TCHAR* Name, const FVector& At, float Yaw, const FVector& Scale = FVector(1.0));
+	/**
+	 * One of Blender's building fronts (facades.py, tenement.py; nullptr when it isn't imported), its origin on its face at Y
+	 * along the street: on the home side's building line turned to face the street, or on the far side's as modeled. It
+	 * doesn't collide (FrontBox blocks what should) and its own glow dims by day.
+	 */
+	UStaticMeshComponent* Facade(const TCHAR* Name, double Y, bool bFar);
+	/** An invisible blocking box in the meters of the front at Y: x out of its face toward the street negative, y along it, z up. */
+	void FrontBox(double Y, bool bFar, double X0, double X1, double Y0, double Y1, double Z0, double Z1);
+	/** Brownstones side by side from Y0 toward Y1, their block behind them; false (nothing built) when they aren't imported. */
+	bool BrownstoneRow(double Y0, double Y1, bool bFar, UMaterialInterface* Massing);
+	/** One kind of the store's stock rows (stock.py), every copy one instance. */
+	UInstancedStaticMeshComponent* StockRows(UStaticMesh* Mesh);
+	/** Every shelf of every door in the cooler (given its frame) stocked; false, nothing placed, unless every cooler row is imported. */
+	bool StockCooler(const FTransform& Cooler);
+	/** Every bay and level of both gondolas (their SM_Shelf frames, the south one first) stocked; false as StockCooler. */
+	bool StockShelves(const TArray<FTransform>& Gondolas);
 	/**
 	 * A flat sign drawn by AttachSlate. Art names what it shows ("number:1812", "street:FIFTH ST:1800", "promo:roller-dog",
 	 * "menu", see AttachSlate).
@@ -245,6 +267,27 @@ private:
 	TArray<TObjectPtr<UStaticMeshComponent>> ParkedCars;
 	UPROPERTY()
 	TArray<FLinearColor> ParkedPaints;
+	/** Blender's building fronts: their lit rooms, lanterns and transoms are baked for the night and dim by day (ApplyDaylight). */
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> LitFronts;
+	/**
+	 * The tenement, when it stands across the street: its rooms and the laundromat's window were baked for the apartment's
+	 * view (seen through rain from a lit room, a brighter exposure than the street's night), so here they glow less.
+	 */
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> TenementFront;
+	/**
+	 * The laundromat's room seen through its window, where no rain falls, and where the rain catches the neon's pink (the
+	 * stage's own cm): the tenement's, or the stand-in's (these), as BuildAcross built them.
+	 */
+	UPROPERTY()
+	FVector WashMin = FVector(2051.0, -700.0, -60.0);
+	UPROPERTY()
+	FVector WashMax = FVector(3340.0, 700.0, 450.0);
+	UPROPERTY()
+	FVector NeonGlowAt = FVector(1980.0, 0.0, 260.0);
+	/** While building: 1812's own front stands, so BuildEntrance adds only what it lacks. */
+	bool bHomeFront = false;
 
 	TArray<TSharedPtr<SDrawListWidget>> SignSlates;
 	TArray<TSharedPtr<const ss::ui::DrawList>> SignLists;

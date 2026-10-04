@@ -51,6 +51,14 @@ const double DoorY1 = 4850.0;
 // The sliding doors run on a track just inside the fixed glass (X -12..-10), clear of its mullions (X -18..-6) and of
 // the low wall under the glass (X -20..0) as they slide behind it: each leaf spans X -26.5..-20.5.
 const double DoorTrackX = -23.5;
+// Blender's building fronts (art/blender/assets/facades.py, tenement.py), each modeled facing Blender's -X with its origin on
+// its face at street level: its own rooms reach 3.6 m back into the block, so the block's massing starts behind them.
+const double FrontBack = 365.0;
+const double BrownstoneW = 675.0;
+// The laundromat's building, as the apartment's window sees it: NightOneStage stands its middle 6 m to the right of the
+// window, which is 3.2 m right of door 1812 here (facades.py). 36 m wide.
+const double TenementY = 920.0;
+const double TenementHalf = 1800.0;
 
 // Patterns understood by M_Street (Content/Python/street_setup.py); 0 is plain.
 const float PatBrick = 1.0f;
@@ -85,6 +93,10 @@ TAutoConsoleVariable<float> CVarStoreEV(TEXT("ss.Street.StoreEV"), 5.0f, TEXT("T
 TAutoConsoleVariable<float> CVarStoreRange(TEXT("ss.Street.StoreRange"), 2.2f, TEXT("How far the store's exposure may rise over its floor."));
 TAutoConsoleVariable<float> CVarBias(TEXT("ss.Street.Bias"), 0.0f, TEXT("Extra exposure compensation on the street (stops; + brighter)."));
 TAutoConsoleVariable<float> CVarRain(TEXT("ss.Street.Rain"), 1.0f, TEXT("The rain's strength (0 hides it)."));
+TAutoConsoleVariable<float> CVarTenementGlow(TEXT("ss.Street.TenementGlow"), 0.4f,
+	TEXT("How brightly the tenement's rooms glow from the street, against their bake for the apartment's view."));
+TAutoConsoleVariable<float> CVarLaundromatGlow(TEXT("ss.Street.LaundromatGlow"), 0.08f,
+	TEXT("How brightly the laundromat's shop window (the tenement's brightest bake) glows from the street."));
 
 FLinearColor SrgbHex(uint32 Hex)
 {
@@ -94,6 +106,86 @@ FLinearColor SrgbHex(uint32 Hex)
 UMaterialInterface* OptionalMaterial(const TCHAR* Path)
 {
 	return LoadObject<UMaterialInterface>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+}
+
+/** A mesh from the Blender pipeline (unreal/Art/Meshes, imported when the editor opens), nullptr when it isn't. */
+UStaticMesh* ImportedMesh(const TCHAR* Name)
+{
+	return LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s.%s"), Name, Name, Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+}
+
+/**
+ * An imported front's own light (the rooms behind its lit windows, its lanterns, a lit transom: all baked for the night)
+ * at Level times its bake. The dimmed copies are made only while it's day and never saved, like the cars' paint
+ * (PaintCars): a saved copy would tie the level to the front's own materials, and the importer then won't refresh them.
+ * The glTF importer's materials scale their emissive texture by a color factor (EmissiveFactor, _RGB in this engine) or
+ * a strength; whichever a material lists is scaled, and a slot that doesn't glow is left alone.
+ */
+void DimImportedGlow(UStaticMeshComponent* Mesh, float Level)
+{
+	const UStaticMesh* Source = Mesh ? Mesh->GetStaticMesh().Get() : nullptr;
+	if (!Source)
+	{
+		return;
+	}
+	auto Key = [](const FName& Name) { return Name.ToString().ToLower().Replace(TEXT("_"), TEXT("")).Replace(TEXT(" "), TEXT("")); };
+	for (int32 Slot = 0; Slot < Source->GetStaticMaterials().Num(); ++Slot)
+	{
+		UMaterialInterface* Baked = Source->GetMaterial(Slot);
+		UMaterialInstanceDynamic* Dim = Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(Slot));
+		if (!Baked || Level > 0.999f)
+		{
+			if (Dim)
+			{
+				Mesh->SetMaterial(Slot, nullptr); // the bake again
+			}
+			continue;
+		}
+		auto Dimmed = [&]() -> UMaterialInstanceDynamic* {
+			if (!Dim || Dim->Parent != Baked)
+			{
+				Dim = UMaterialInstanceDynamic::Create(Baked, Mesh);
+				Dim->SetFlags(RF_Transient);
+				Mesh->SetMaterial(Slot, Dim);
+			}
+			return Dim;
+		};
+		// A slot that lists a color factor glows by it: black (the walls, the glass), it doesn't glow and keeps its bake,
+		// whatever strength it lists too.
+		bool bFactor = false;
+		TArray<FMaterialParameterInfo> Infos;
+		TArray<FGuid> Ids;
+		Baked->GetAllVectorParameterInfo(Infos, Ids);
+		for (const FMaterialParameterInfo& Info : Infos)
+		{
+			const FString K = Key(Info.Name);
+			FLinearColor Glow;
+			if ((K.StartsWith(TEXT("emissivefactor")) || K == TEXT("emissivecolor")) && Baked->GetVectorParameterValue(FHashedMaterialParameterInfo(Info), Glow))
+			{
+				bFactor = true;
+				if (!Glow.IsAlmostBlack())
+				{
+					Dimmed()->SetVectorParameterValue(Info.Name, FLinearColor(Glow.R * Level, Glow.G * Level, Glow.B * Level, Glow.A));
+				}
+			}
+		}
+		if (bFactor)
+		{
+			continue;
+		}
+		Infos.Reset();
+		Ids.Reset();
+		Baked->GetAllScalarParameterInfo(Infos, Ids);
+		for (const FMaterialParameterInfo& Info : Infos)
+		{
+			const FString K = Key(Info.Name);
+			float Strength = 0.0f;
+			if ((K == TEXT("emissivestrength") || K == TEXT("emissiveintensity")) && Baked->GetScalarParameterValue(FHashedMaterialParameterInfo(Info), Strength) && Strength > 0.0f)
+			{
+				Dimmed()->SetScalarParameterValue(Info.Name, Strength * Level);
+			}
+		}
+	}
 }
 
 /** A small deterministic random sequence for windows and shelves. */
@@ -208,7 +300,7 @@ UStaticMeshComponent* AStreetStage::Cyl(UMaterialInterface* Material, const FVec
 
 UStaticMeshComponent* AStreetStage::Prop(const TCHAR* Name, const FVector& At, float Yaw, const FVector& Scale)
 {
-	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s.%s"), Name, Name, Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	UStaticMesh* Mesh = ImportedMesh(Name);
 	if (!Mesh)
 	{
 		return nullptr;
@@ -219,6 +311,155 @@ UStaticMeshComponent* AStreetStage::Prop(const TCHAR* Name, const FVector& At, f
 	C->SetRelativeScale3D(Scale);
 	C->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 	return C;
+}
+
+UStaticMeshComponent* AStreetStage::Facade(const TCHAR* Name, double Y, bool bFar)
+{
+	UStaticMesh* Mesh = ImportedMesh(Name);
+	if (!Mesh)
+	{
+		return nullptr;
+	}
+	UStaticMeshComponent* C = NewPart<UStaticMeshComponent>();
+	C->SetStaticMesh(Mesh);
+	// Turned as the apartment turns the tenement, not as the props are (BlenderFacing): the importer keeps Blender's -X
+	// front facing -X (it mirrors Y), so the far side stands as modeled and the home side turns half round.
+	C->SetRelativeLocationAndRotation(FVector(bFar ? FarFront : 0.0, Y, 0.0), FRotator(0.0f, bFar ? 0.0f : 180.0f, 0.0f));
+	// The importer's collision is one hull round all of it (the stoops and fire escapes, the store under its upper floors):
+	// FrontBox blocks what should.
+	C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	LitFronts.Add(C);
+	return C;
+}
+
+void AStreetStage::FrontBox(double Y, bool bFar, double X0, double X1, double Y0, double Y1, double Z0, double Z1)
+{
+	// The front's meters: x out of its face toward the street negative; y up the street on the home side (turned half
+	// round), down it on the far side.
+	const double Ax = bFar ? FarFront + X0 * 100.0 : -X0 * 100.0;
+	const double Bx = bFar ? FarFront + X1 * 100.0 : -X1 * 100.0;
+	const double Ay = bFar ? Y - Y0 * 100.0 : Y + Y0 * 100.0;
+	const double By = bFar ? Y - Y1 * 100.0 : Y + Y1 * 100.0;
+	Box(nullptr, FVector(FMath::Min(Ax, Bx), FMath::Min(Ay, By), Z0 * 100.0), FVector(FMath::Max(Ax, Bx), FMath::Max(Ay, By), Z1 * 100.0))->SetVisibility(false);
+}
+
+bool AStreetStage::BrownstoneRow(double Y0, double Y1, bool bFar, UMaterialInterface* Massing)
+{
+	if (!ImportedMesh(TEXT("SM_Facade_Brownstone")))
+	{
+		return false;
+	}
+	// Row houses: the same front side by side, the stoop at the same end of each (mirrored, their signs would read
+	// backwards).
+	const int32 Count = FMath::Max(1, static_cast<int32>((Y1 - Y0) / BrownstoneW + 0.01));
+	for (int32 K = 0; K < Count; ++K)
+	{
+		const double Y = Y0 + BrownstoneW * (K + 0.5);
+		Facade(TEXT("SM_Facade_Brownstone"), Y, bFar);
+		// The stoop and the areaway's fence take 2 m of the sidewalk; over them the bay stands 80 cm out from the face.
+		FrontBox(Y, bFar, -2.05, 0.6, -3.375, 3.375, 0.0, 1.6);
+		FrontBox(Y, bFar, -0.85, 0.6, -3.375, 3.375, 1.6, 12.1);
+	}
+	const double BackX0 = bFar ? FarFront + FrontBack : -1500.0;
+	const double BackX1 = bFar ? FarFront + 1500.0 : -FrontBack;
+	Box(Massing, FVector(BackX0, Y0, 0.0), FVector(BackX1, Y0 + Count * BrownstoneW, 1190.0));
+	return true;
+}
+
+UInstancedStaticMeshComponent* AStreetStage::StockRows(UStaticMesh* Mesh)
+{
+	UInstancedStaticMeshComponent* Rows = NewPart<UInstancedStaticMeshComponent>();
+	Rows->SetStaticMesh(Mesh);
+	// The cooler and the gondolas block; what's on their shelves doesn't.
+	Rows->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	return Rows;
+}
+
+bool AStreetStage::StockCooler(const FTransform& Cooler)
+{
+	// Each kind of row one instanced mesh: S soda, C cans, E energy, W water, T tea and juice, I ice, D deli and dairy.
+	static const TCHAR* const Kinds = TEXT("SCEWTID");
+	static const TCHAR* const Names[7] = {TEXT("SM_Stock_CoolerRow_Soda"), TEXT("SM_Stock_CoolerRow_Cans"), TEXT("SM_Stock_CoolerRow_Energy"), TEXT("SM_Stock_CoolerRow_Water"),
+		TEXT("SM_Stock_CoolerRow_Tea"), TEXT("SM_Stock_CoolerRow_Ice"), TEXT("SM_Stock_CoolerRow_Deli")};
+	UStaticMesh* Meshes[7];
+	for (int32 K = 0; K < 7; ++K)
+	{
+		Meshes[K] = ImportedMesh(Names[K]);
+		if (!Meshes[K])
+		{
+			return false;
+		}
+	}
+	UInstancedStaticMeshComponent* Rows[7];
+	for (int32 K = 0; K < 7; ++K)
+	{
+		Rows[K] = StockRows(Meshes[K]);
+	}
+	// Door by door from the Market end, shelf by shelf from the bottom, under the header's sections (cooler.py): COLD
+	// DRINKS 0-1, ENERGY 2, WATER 3-4, JUICE 5-6, ICE 7, DAIRY 8-9. No two doors stocked alike.
+	static const TCHAR* const Doors[10] = {TEXT("CSSS"), TEXT("SCSC"), TEXT("EEEE"), TEXT("WWWW"), TEXT("WWWT"), TEXT("TTTT"), TEXT("TTSE"), TEXT("IIIW"), TEXT("DDTD"), TEXT("DTDC")};
+	static const double ShelfZ[4] = {28.0, 73.0, 118.0, 163.0};
+	for (int32 Door = 0; Door < 10; ++Door)
+	{
+		for (int32 Level = 0; Level < 4; ++Level)
+		{
+			const TCHAR* At = FCString::Strchr(Kinds, Doors[Door][Level]);
+			const int32 K = At ? static_cast<int32>(At - Kinds) : 0;
+			// A row's origin is on its shelf's top at the door's middle, on the cooler's own center plane: placed in the
+			// cooler's frame, it turns with the cooler.
+			Rows[K]->AddInstance(FTransform(FVector(-342.0 + 76.0 * Door, 0.0, ShelfZ[Level])) * Cooler);
+		}
+	}
+	return true;
+}
+
+bool AStreetStage::StockShelves(const TArray<FTransform>& Gondolas)
+{
+	// C chips, T trail mix and jerky, S sweets, G grocery, H household; B the bulk packs on every base deck.
+	static const TCHAR* const Kinds = TEXT("CTSGHB");
+	static const TCHAR* const Names[6] = {TEXT("SM_Stock_ShelfRow_Chips"), TEXT("SM_Stock_ShelfRow_Trail"), TEXT("SM_Stock_ShelfRow_Candy"), TEXT("SM_Stock_ShelfRow_Grocery"),
+		TEXT("SM_Stock_ShelfRow_Household"), TEXT("SM_Stock_ShelfRow_Bulk")};
+	UStaticMesh* Meshes[6];
+	for (int32 K = 0; K < 6; ++K)
+	{
+		Meshes[K] = ImportedMesh(Names[K]);
+		if (!Meshes[K])
+		{
+			return false;
+		}
+	}
+	UInstancedStaticMeshComponent* Rows[6];
+	for (int32 K = 0; K < 6; ++K)
+	{
+		Rows[K] = StockRows(Meshes[K]);
+	}
+	// Each gondola's two faces bay by bay along the run (its X), the top shelf, the middle, the low: the snacks face the
+	// aisle between the two (the first one's +Y face, the second's -Y), the groceries and the household face out.
+	static const TCHAR* const Snacks[2][3] = {{TEXT("CTCCT"), TEXT("GCTGC"), TEXT("SSCSS")}, {TEXT("TCCTC"), TEXT("CGCTG"), TEXT("SCSSC")}};
+	static const TCHAR* const Staples[2][3] = {{TEXT("GHGGH"), TEXT("GGHGG"), TEXT("HHGHH")}, {TEXT("HGGHG"), TEXT("GHGGH"), TEXT("HGHHG")}};
+	static const double LevelZ[3] = {130.0, 85.0, 40.0};
+	for (int32 G = 0; G < Gondolas.Num() && G < 2; ++G)
+	{
+		for (int32 Face = 0; Face < 2; ++Face)
+		{
+			// A row's packs face its gondola's +Y here (Blender's -Y: the importer mirrors Y); turned round for the other face.
+			const bool bPlusY = (G == 0) == (Face == 0);
+			const FRotator Turn(0.0f, bPlusY ? 0.0f : 180.0f, 0.0f);
+			const TCHAR* const* Plan = Face == 0 ? Snacks[G] : Staples[G];
+			for (int32 Bay = 0; Bay < 5; ++Bay)
+			{
+				// The bays every 1.2 m from the run's middle, the end ones a centimeter in.
+				const double X = FMath::Clamp(-240.0 + 120.0 * Bay, -239.0, 239.0);
+				for (int32 Level = 0; Level < 3; ++Level)
+				{
+					const TCHAR* At = FCString::Strchr(Kinds, Plan[Level][Bay]);
+					Rows[At ? static_cast<int32>(At - Kinds) : 0]->AddInstance(FTransform(Turn, FVector(X, 0.0, LevelZ[Level])) * Gondolas[G]);
+				}
+				Rows[5]->AddInstance(FTransform(Turn, FVector(X, 0.0, 12.0)) * Gondolas[G]);
+			}
+		}
+	}
+	return true;
 }
 
 UWidgetComponent* AStreetStage::Sign(const FString& Art, const FVector& At, float Yaw, const FVector2D& SizeCm, const FIntPoint& Pixels, float Glow, bool bTwoSided, USceneComponent* Parent)
@@ -350,6 +591,8 @@ void AStreetStage::BuildSet()
 	SignGlow.Reset();
 	ParkedCars.Reset();
 	ParkedPaints.Reset();
+	LitFronts.Reset();
+	bHomeFront = false;
 	DoorLeft = nullptr;
 	DoorRight = nullptr;
 	DoorDecal = nullptr;
@@ -537,29 +780,69 @@ void AStreetStage::BuildHomeBlock()
 	UMaterialInterface* Iron = Mat(TEXT("Iron"), 0x1c1e21, 0.45f, 0.0f, 0.0f, 0.7f);
 	const FVector2D Win(120.0, 170.0);
 
-	// The apartment building: four floors of brick around the door's recess (BuildEntrance dresses it), a cornice.
-	Box(Brick, FVector(-1500.0, -800.0, 0.0), FVector(0.0, -110.0, 1500.0));
-	Box(Brick, FVector(-1500.0, 110.0, 0.0), FVector(0.0, 800.0, 1500.0));
-	Box(Brick, FVector(-1500.0, -110.0, 270.0), FVector(0.0, 110.0, 1500.0));
-	Box(Brick, FVector(-1500.0, -110.0, 0.0), FVector(-70.0, 110.0, 270.0));
-	Box(Stone, FVector(-4.0, -820.0, 1490.0), FVector(18.0, 820.0, 1520.0), false);
-	Box(Stone, FVector(-2.0, -800.0, 352.0), FVector(6.0, 800.0, 364.0), false);
-	// Its windows, each on a stone sill; the player's, on the third floor, still has the laptop's glow.
-	for (int32 Floor = 0; Floor < 3; ++Floor)
+	// The apartment building, 1812 Fifth Street (facades.py): buff brick over a limestone base, the door in its recess where
+	// the stand-in has it (BuildEntrance), the player's window on the third floor still lit by the laptop; its block behind
+	// it. What blocks is its face, the entrance's pilasters and the recess back to the door. Without it, four floors of
+	// brick around the door's recess, a cornice.
+	bHomeFront = Facade(TEXT("SM_Facade_1812"), 0.0, false) != nullptr;
+	if (bHomeFront)
 	{
-		for (int32 W = 0; W < 4; ++W)
+		Box(Mat(TEXT("BrickBuff"), 0x8a7155, 0.85f, PatBrick), FVector(-1500.0, -800.0, 0.0), FVector(-FrontBack, 800.0, 1500.0));
+		FrontBox(0.0, false, -0.06, 0.6, -8.0, -1.1, 0.0, 15.2);
+		FrontBox(0.0, false, -0.06, 0.6, 1.1, 8.0, 0.0, 15.2);
+		FrontBox(0.0, false, -0.06, 0.6, -1.1, 1.1, 2.7, 15.2);
+		FrontBox(0.0, false, 0.62, 0.9, -1.1, 1.1, 0.0, 2.7);
+		FrontBox(0.0, false, -0.18, -0.06, -1.5, -1.1, 0.0, 2.86);
+		FrontBox(0.0, false, -0.18, -0.06, 1.1, 1.5, 0.0, 2.86);
+	}
+	else
+	{
+		Box(Brick, FVector(-1500.0, -800.0, 0.0), FVector(0.0, -110.0, 1500.0));
+		Box(Brick, FVector(-1500.0, 110.0, 0.0), FVector(0.0, 800.0, 1500.0));
+		Box(Brick, FVector(-1500.0, -110.0, 270.0), FVector(0.0, 110.0, 1500.0));
+		Box(Brick, FVector(-1500.0, -110.0, 0.0), FVector(-70.0, 110.0, 270.0));
+		Box(Stone, FVector(-4.0, -820.0, 1490.0), FVector(18.0, 820.0, 1520.0), false);
+		Box(Stone, FVector(-2.0, -800.0, 352.0), FVector(6.0, 800.0, 364.0), false);
+		// Its windows, each on a stone sill; the player's, on the third floor, still has the laptop's glow.
+		for (int32 Floor = 0; Floor < 3; ++Floor)
 		{
-			const double Y = -700.0 + W * 360.0;
-			const bool bMine = Floor == 1 && W == 2;
-			const double Z0 = 420.0 + Floor * 340.0;
-			const double Roll = Dice.Next();
-			const int32 Kind = bMine ? WinCool : (Roll < 0.25 ? WinWarm : Roll < 0.32 ? WinTv : WinDark);
-			Window(FVector(0.5, Y + 65.0, Z0 + 90.0), 0.0f, FVector2D(130.0, 180.0), Kind, bMine ? 0.37f : static_cast<float>(Dice.Next()), bMine ? 0.55f : 0.8f);
-			Box(Stone, FVector(-2.0, Y - 6.0, Z0 - 8.0), FVector(9.0, Y + 136.0, Z0), false);
+			for (int32 W = 0; W < 4; ++W)
+			{
+				const double Y = -700.0 + W * 360.0;
+				const bool bMine = Floor == 1 && W == 2;
+				const double Z0 = 420.0 + Floor * 340.0;
+				const double Roll = Dice.Next();
+				const int32 Kind = bMine ? WinCool : (Roll < 0.25 ? WinWarm : Roll < 0.32 ? WinTv : WinDark);
+				Window(FVector(0.5, Y + 65.0, Z0 + 90.0), 0.0f, FVector2D(130.0, 180.0), Kind, bMine ? 0.37f : static_cast<float>(Dice.Next()), bMine ? 0.55f : 0.8f);
+				Box(Stone, FVector(-2.0, Y - 6.0, Z0 - 8.0), FVector(9.0, Y + 136.0, Z0), false);
+			}
 		}
 	}
 
-	// Neighbors along Fifth: the pawn shop and the barber's, both shut, the rest gated for the night.
+	// Neighbors along Fifth, from Blender where they're imported: the walk-up over the barber's (its pole lit) and the
+	// cleaners', next to the Lucky Penny, and two brownstones next door to the south, their stoops out on the sidewalk.
+	// The pawn shop's lit window stays between 1812 and the walk-up; past the brownstones, brick with its shops gated for
+	// the night. Without them, the barber's shut in a box of its own and the brick runs up to 1812.
+	const double WalkupY = (2300.0 + StoreY0 - 20.0) * 0.5;
+	const bool bWalkup = Facade(TEXT("SM_Facade_Walkup"), WalkupY, false) != nullptr;
+	if (bWalkup)
+	{
+		// Its 13.5 m in the 13.8 m between the pawn shop and the store: the gaps show its party walls.
+		Box(Brick, FVector(-1500.0, 2300.0, 0.0), FVector(-FrontBack, StoreY0 - 20.0, 1745.0));
+		FrontBox(WalkupY, false, -0.06, 0.6, -6.9, 6.9, 0.0, 17.6);
+		// What stands out of it at the sidewalk blocks too: the shopfront's cast-iron piers (18 cm), the tenants' granite
+		// step (36 cm out, low enough to step onto) and the standpipe's brass inlets at the knee.
+		for (const FVector2D& Pier : {FVector2D(-6.77, -6.28), FVector2D(-1.22, -0.6), FVector2D(0.6, 1.22), FVector2D(6.28, 6.77)})
+		{
+			FrontBox(WalkupY, false, -0.18, -0.06, Pier.X, Pier.Y, 0.0, 3.35);
+		}
+		FrontBox(WalkupY, false, -0.36, -0.06, -0.62, 0.62, 0.0, 0.16);
+		FrontBox(WalkupY, false, -0.4, -0.18, -1.05, -0.77, 0.0, 0.65);
+	}
+	const double RowY0 = -800.0 - 2.0 * BrownstoneW;
+	const bool bBrownstones = BrownstoneRow(RowY0, -800.0, false, BrickDark);
+	const double South = bBrownstones ? RowY0 : -800.0;
+	const double Mid = bBrownstones ? -3600.0 : -2400.0;
 	struct FFront
 	{
 		double Y0, Y1, Height;
@@ -567,13 +850,18 @@ void AStreetStage::BuildHomeBlock()
 		int32 Shop; // 0 a rolled-down gate, 1 the pawn shop, 2 the barber's
 	};
 	// Each stops short of its neighbor's wall: two faces in one plane would flicker (the store's south wall is at 3680..3700).
-	const FFront Fronts[] = {{800.0, 2300.0, 1100.0, false, 1}, {2300.0, StoreY0 - 20.0, 900.0, true, 2}, {-2400.0, -800.0, 1900.0, true, 0}, {EndY0, -2400.0, 1300.0, false, 0}};
+	const FFront Fronts[] = {{800.0, 2300.0, 1100.0, false, 1}, {2300.0, StoreY0 - 20.0, 900.0, true, 2}, {Mid, South, 1900.0, true, 0}, {EndY0, Mid, 1300.0, false, 0}};
 	int64 Seed = 101;
 	for (const FFront& Fr : Fronts)
 	{
+		const int64 FrontSeed = (Seed++) * 7919;
+		if (Fr.Shop == 2 && bWalkup)
+		{
+			continue;
+		}
 		Box(Fr.bDark ? BrickDark : Brick, FVector(-1500.0, Fr.Y0, 0.0), FVector(0.0, Fr.Y1, Fr.Height));
 		Box(Stone, FVector(-2.0, Fr.Y0, 300.0), FVector(5.0, Fr.Y1, 318.0), false);
-		WindowRows(FVector(0.5, Fr.Y0, 0.0), FVector(0.0, 1.0, 0.0), Fr.Y1 - Fr.Y0, 0.0f, 420.0, Fr.Height, Win, 260.0, 330.0, 0.3, (Seed++) * 7919);
+		WindowRows(FVector(0.5, Fr.Y0, 0.0), FVector(0.0, 1.0, 0.0), Fr.Y1 - Fr.Y0, 0.0f, 420.0, Fr.Height, Win, 260.0, 330.0, 0.3, FrontSeed);
 		const double S0 = Fr.Y0 + 150.0;
 		const double S1 = Fr.Y1 - 150.0;
 		if (Fr.Shop == 1)
@@ -673,6 +961,56 @@ void AStreetStage::BuildHomeBlock()
 
 void AStreetStage::BuildEntrance()
 {
+	if (bHomeFront)
+	{
+		// 1812's own front has the entrance where this one stands: the granite step, the recess lined in marble, the door
+		// with its lit transom (the number in gold leaf on it), the buzzer panel on the recess's right-hand wall facing the
+		// door's approach, the brass number over the opening and a carriage lamp each side. The step blocks; the lanterns
+		// each throw a little warm light on the brick and the sidewalk, too faint and too far round to wash the number out.
+		Box(nullptr, FVector(-70.0, -112.0, 0.0), FVector(45.0, 112.0, 14.0))->SetVisibility(false);
+		for (const double Side : {-1.0, 1.0})
+		{
+			UPointLightComponent* Lantern = NewPart<UPointLightComponent>();
+			Lantern->SetRelativeLocation(FVector(33.0, Side * 185.0, 222.0));
+			Lantern->SetIntensityUnits(ELightUnits::Candelas);
+			Lantern->SetIntensity(14.0f);
+			Lantern->SetUseTemperature(true);
+			Lantern->SetTemperature(2600.0f);
+			Lantern->SetAttenuationRadius(380.0f);
+			Lantern->SetSourceRadius(6.0f);
+			// Inside its frosted glass: shadowed, the glass would keep all of it in.
+			Lantern->SetCastShadows(false);
+			Lantern->SetVolumetricScatteringIntensity(0.4f);
+			NightLights.Add(Lantern);
+			NightLightLevels.Add(14.0f);
+		}
+	}
+	else
+	{
+		BuildDoor();
+	}
+	// The step's light: a spot turned down onto the step and the sidewalk (under the cornice over 1812's entrance, just
+	// clear of its entablature, or from the stand-in's jelly jar), none of it up onto the number.
+	if (USpotLightComponent* Lamp = NewPart<USpotLightComponent>())
+	{
+		Lamp->SetRelativeLocationAndRotation(bHomeFront ? FVector(24.0, 0.0, 266.0) : FVector(18.0, 0.0, 270.0), FRotator(-72.0f, 0.0f, 0.0f));
+		Lamp->SetIntensityUnits(ELightUnits::Candelas);
+		Lamp->SetIntensity(140.0f);
+		Lamp->SetUseTemperature(true);
+		Lamp->SetTemperature(2700.0f);
+		Lamp->SetAttenuationRadius(650.0f);
+		Lamp->SetInnerConeAngle(25.0f);
+		Lamp->SetOuterConeAngle(62.0f);
+		Lamp->SetSourceRadius(6.0f);
+		Lamp->SetCastShadows(true);
+		Lamp->SetVolumetricScatteringIntensity(0.6f);
+		NightLights.Add(Lamp);
+		NightLightLevels.Add(140.0f);
+	}
+}
+
+void AStreetStage::BuildDoor()
+{
 	// Door 1812: a painted door in the recess (proud of its back wall at X -70, so the two never share a plane), a cream
 	// casing, brass, a glass lite with the hall light behind it, the buzzer panel on the recess wall, the number over
 	// the opening and a downlight that lights the step without washing the brick or the number out.
@@ -717,7 +1055,7 @@ void AStreetStage::BuildEntrance()
 		Box(Black, FVector(-41.0, 107.6, 122.0 + Slot * 2.4), FVector(-25.0, 108.0, 123.0 + Slot * 2.4), false)->SetCastShadow(false); // the speaker grille
 	}
 
-	// The light: a jelly-jar fixture on the brick over the opening, its spot turned down onto the step and the sidewalk.
+	// The light: a jelly-jar fixture on the brick over the opening (its spot, BuildEntrance's, turned down onto the step).
 	Box(Black, FVector(0.0, -9.0, 282.0), FVector(6.0, 9.0, 300.0), false);
 	Box(Black, FVector(0.0, -2.0, 289.0), FVector(16.0, 2.0, 293.0), false);
 	UMaterialInstanceDynamic* Jar = Mat(TEXT("DoorLampGlass"), 0xffd9a0, 0.3f, 0.0f, 9.0f);
@@ -725,36 +1063,17 @@ void AStreetStage::BuildEntrance()
 	NightGlowLevels.Add(9.0f);
 	Cyl(Jar, FVector(16.0, 0.0, 272.0), 6.0f, 16.0f, false)->SetCastShadow(false);
 	Cyl(Black, FVector(16.0, 0.0, 288.0), 7.0f, 3.0f, false);
-	if (USpotLightComponent* Lamp = NewPart<USpotLightComponent>())
-	{
-		Lamp->SetRelativeLocationAndRotation(FVector(18.0, 0.0, 270.0), FRotator(-72.0f, 0.0f, 0.0f));
-		Lamp->SetIntensityUnits(ELightUnits::Candelas);
-		Lamp->SetIntensity(140.0f);
-		Lamp->SetUseTemperature(true);
-		Lamp->SetTemperature(2700.0f);
-		Lamp->SetAttenuationRadius(650.0f);
-		Lamp->SetInnerConeAngle(25.0f);
-		Lamp->SetOuterConeAngle(62.0f);
-		Lamp->SetSourceRadius(6.0f);
-		Lamp->SetCastShadows(true);
-		Lamp->SetVolumetricScatteringIntensity(0.6f);
-		NightLights.Add(Lamp);
-		NightLightLevels.Add(140.0f);
-	}
 	// The number on the brick above the opening: enamel and brass that read from across the street, not lit by the lamp below.
 	Sign(TEXT("number:1812"), FVector(1.5, 0.0, 322.0), 0.0f, FVector2D(90.0, 20.0), FIntPoint(400, 90), 1.4f);
 }
 
-void AStreetStage::BuildAcross()
+void AStreetStage::BuildWashAndFold()
 {
-	UMaterialInterface* Brick = Mat(TEXT("BrickFar"), 0x5a3a30, 0.85f, PatBrick);
 	UMaterialInterface* Stucco = Mat(TEXT("Stucco"), 0x8a8478, 0.9f, PatConcrete);
 	UMaterialInterface* Fluor = Mat(TEXT("Fluorescent"), 0xe8f4ff, 0.3f, 0.0f, 4.0f);
 	UMaterialInterface* Washer = Mat(TEXT("Washer"), 0xd9dcdf, 0.3f, 0.0f, 0.0f, 0.2f);
 	UMaterialInterface* WasherDoor = Mat(TEXT("WasherDoor"), 0x2a3440, 0.1f, 0.0f, 0.3f, 0.5f);
-	UMaterialInterface* Shutter = Mat(TEXT("Shutter"), 0x5d6166, 0.5f, PatShutter, 0.0f, 0.6f);
 	UMaterialInterface* Iron = Mat(TEXT("Iron"), 0x1c1e21, 0.45f, 0.0f, 0.0f, 0.7f);
-	const FVector2D Win(120.0, 170.0);
 
 	// The Wash & Fold: a low storefront lit all night, its glass on the building line and the room behind it (the
 	// washers along the back wall, tubes on the ceiling), the neon over the windows.
@@ -842,18 +1161,126 @@ void AStreetStage::BuildAcross()
 		Spill->SetLightColor(SrgbHex(0xdff0ff));
 		Spill->SetCastShadows(false);
 	}
-	// Taller buildings either side of it, windows lit at random, their shops gated for the night.
-	const double Spans[][3] = {{EndY0, -700.0, 1800.0}, {700.0, 3000.0, 1400.0}, {3000.0, EndY1, 2200.0}};
-	int64 Seed = 777;
-	for (const auto& Sp : Spans)
+	// No rain falls in its room seen through the glass; the rain by its windows catches the neon's pink.
+	WashMin = FVector(FarFront + 11.0, -700.0, -60.0);
+	WashMax = FVector(FarFront + 1300.0, 700.0, 450.0);
+	NeonGlowAt = FVector(FarFront - 60.0, 0.0, 260.0);
+}
+
+void AStreetStage::BuildAcross()
+{
+	UMaterialInterface* Brick = Mat(TEXT("BrickFar"), 0x5a3a30, 0.85f, PatBrick);
+	UMaterialInterface* Shutter = Mat(TEXT("Shutter"), 0x5d6166, 0.5f, PatShutter, 0.0f, 0.6f);
+	UMaterialInterface* Iron = Mat(TEXT("Iron"), 0x1c1e21, 0.45f, 0.0f, 0.0f, 0.7f);
+	const FVector2D Win(120.0, 170.0);
+
+	// The laundromat's building: the brick walk-up the apartment's window looks out on (tenement.py), the Wash & Fold in its
+	// long shop window, standing where that window sees it: its fire escape and the tenants' door across from 1812, the
+	// laundromat to their right and the neon over it on the third floor. Without it, the laundromat on its own, low.
+	TenementFront = Facade(TEXT("SM_Tenement"), TenementY, true);
+	const bool bTenement = TenementFront != nullptr;
+	if (bTenement)
 	{
-		Box(Brick, FVector(FarFront, Sp[0], 0.0), FVector(FarFront + 1500.0, Sp[1], Sp[2]));
-		WindowRows(FVector(FarFront - 0.5, Sp[0], 0.0), FVector(0.0, 1.0, 0.0), Sp[1] - Sp[0], 180.0f, 380.0, Sp[2], Win, 250.0, 330.0, 0.24, (Seed++) * 104729);
-		for (double Y = Sp[0] + 200.0; Y + 700.0 < Sp[1]; Y += 1100.0)
+		const double Y0 = TenementY - TenementHalf;
+		const double Y1 = TenementY + TenementHalf;
+		// Its shop window (tenement.py SHOP_Y), its Blender y running down the street.
+		const double Shop0 = TenementY - 860.0;
+		const double Shop1 = TenementY + 860.0;
+		// Its block behind it (the laundromat's room reaches 3.9 m back), brick returns closing its ends over its lower
+		// neighbors, and its face blocking.
+		Box(Brick, FVector(FarFront + 390.0, Y0, 0.0), FVector(FarFront + 1500.0, Y1, 2480.0));
+		Box(Brick, FVector(FarFront + 45.0, Y0, 0.0), FVector(FarFront + 390.0, Y0 + 30.0, 2485.0));
+		Box(Brick, FVector(FarFront + 45.0, Y1 - 30.0, 0.0), FVector(FarFront + 390.0, Y1, 2485.0));
+		FrontBox(TenementY, true, -0.06, 0.45, -18.0, 18.0, 0.0, 24.95);
+		// The rain beaded on the laundromat's window: a pane through the middle of its mullions (12-22 cm into the opening).
+		if (StoreGlassMaterial)
+		{
+			Box(StoreGlassMaterial, FVector(FarFront + 16.5, Shop0, 45.0), FVector(FarFront + 17.5, Shop1, 335.0), false);
+		}
+		// The neon where the apartment's window sees it, on the bricked-up third floor over the laundromat (SIGN_BLANK) and
+		// as big as it is there, its halo on the wet brick.
+		const FVector NeonAt(FarFront - 10.0, TenementY - 280.0, 1140.0);
+		Sign(TEXT("neon"), NeonAt, 180.0f, FVector2D(640.0, 200.0), FIntPoint(1024, 320), 6.0f);
+		if (GlowMaterial)
+		{
+			UMaterialInstanceDynamic* Halo = UMaterialInstanceDynamic::Create(GlowMaterial, this);
+			Halo->SetVectorParameterValue(TEXT("Color"), SrgbHex(0xff2e88));
+			Halo->SetScalarParameterValue(TEXT("Strength"), 0.4f);
+			NightGlowMids.Add(Halo);
+			NightGlowLevels.Add(0.4f);
+			UStaticMeshComponent* Plane = NewPart<UStaticMeshComponent>();
+			Plane->SetStaticMesh(PlaneMesh);
+			Plane->SetMaterial(0, Halo);
+			// The engine plane faces +Z: pitched up it faces the street (-X), its local X running up the wall.
+			Plane->SetRelativeLocationAndRotation(NeonAt - FVector(2.0, 0.0, 0.0), FRotator(90.0f, 0.0f, 0.0f));
+			Plane->SetRelativeScale3D(FVector(6.1, 13.7, 1.0));
+			Plane->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Plane->SetCastShadow(false);
+		}
+		// Its pink on the wet street: a rect light the sign's size, aimed down across the road from up there (the road gets
+		// about what it got from the low sign; the puddles still reflect its shape).
+		if (URectLightComponent* Pink = NewPart<URectLightComponent>())
+		{
+			Pink->SetRelativeLocationAndRotation(NeonAt + FVector(-20.0, 0.0, -10.0), FRotator(-45.0f, 180.0f, 0.0f));
+			Pink->SetIntensityUnits(ELightUnits::Lumens);
+			Pink->SetIntensity(600.0f);
+			Pink->SetSourceWidth(640.0f);
+			Pink->SetSourceHeight(170.0f);
+			Pink->SetAttenuationRadius(2600.0f);
+			Pink->SetLightColor(SrgbHex(0xff3a8c));
+			Pink->SetCastShadows(false);
+			Pink->SetVolumetricScatteringIntensity(0.8f);
+			NightLights.Add(Pink);
+			NightLightLevels.Add(600.0f);
+		}
+		if (URectLightComponent* Spill = NewPart<URectLightComponent>())
+		{
+			// The laundromat's light through its window onto the wet sidewalk.
+			Spill->SetRelativeLocationAndRotation(FVector(FarFront + 25.0, TenementY, 180.0), FRotator(-15.0f, 180.0f, 0.0f));
+			Spill->SetIntensityUnits(ELightUnits::Lumens);
+			Spill->SetIntensity(2300.0f);
+			Spill->SetSourceWidth(static_cast<float>(Shop1 - Shop0));
+			Spill->SetSourceHeight(240.0f);
+			Spill->SetAttenuationRadius(1400.0f);
+			Spill->SetLightColor(SrgbHex(0xdff0ff));
+			Spill->SetCastShadows(false);
+		}
+		// No rain falls in the laundromat seen through its window; the rain catches the neon's pink in its beam.
+		WashMin = FVector(FarFront + 16.0, Shop0 - 10.0, -60.0);
+		WashMax = FVector(FarFront + 400.0, Shop1 + 10.0, 360.0);
+		NeonGlowAt = FVector(FarFront - 450.0, NeonAt.Y, 700.0);
+	}
+	else
+	{
+		BuildWashAndFold();
+	}
+
+	// Taller buildings either side of it, windows lit at random, their shops gated for the night; up the street, across
+	// from the walk-up and the store, three brownstones (facades.py) where they're imported.
+	int64 Seed = 777;
+	auto Block = [&](double Y0, double Y1, double Height) {
+		Box(Brick, FVector(FarFront, Y0, 0.0), FVector(FarFront + 1500.0, Y1, Height));
+		WindowRows(FVector(FarFront - 0.5, Y0, 0.0), FVector(0.0, 1.0, 0.0), Y1 - Y0, 180.0f, 380.0, Height, Win, 250.0, 330.0, 0.24, (Seed++) * 104729);
+		for (double Y = Y0 + 200.0; Y + 700.0 < Y1; Y += 1100.0)
 		{
 			Box(Shutter, FVector(FarFront - 4.0, Y, 20.0), FVector(FarFront, Y + 600.0, 290.0), false);
 			Box(Iron, FVector(FarFront - 16.0, Y - 10.0, 290.0), FVector(FarFront, Y + 610.0, 312.0), false);
 		}
+	};
+	const double North = TenementY + TenementHalf;
+	const double RowEnd = North + 3.0 * BrownstoneW;
+	Block(EndY0, bTenement ? TenementY - TenementHalf : -700.0, 1800.0);
+	if (!bTenement)
+	{
+		Block(700.0, ImportedMesh(TEXT("SM_Facade_Brownstone")) ? North : 3000.0, 1400.0);
+	}
+	if (BrownstoneRow(North, RowEnd, true, Brick))
+	{
+		Block(RowEnd, EndY1, 2200.0);
+	}
+	else
+	{
+		Block(bTenement ? North : 3000.0, EndY1, 2200.0);
 	}
 
 	// Parked cars, each with the traffic on its side (the curb on its right): the far curb's facing down the street,
@@ -932,11 +1359,17 @@ void AStreetStage::BuildStore()
 	UMaterialInterface* Shelf = Mat(TEXT("Shelf"), 0xe2e2e0, 0.5f, 0.0f, 0.0f, 0.4f);
 	UMaterialInterface* CoolerGlow = Mat(TEXT("CoolerGlow"), 0xe6f3ff, 0.2f, 0.0f, 60.0f);
 
+	// The three floors over the store (facades.py) where they're imported: painted brick from the roof's edge up, round the
+	// corner onto Market, a cast-stone band along both hiding the roof slab's edge. On the south side, where no band
+	// runs, the block's plain wall comes down to Z 476 in the store's own south wall's plane: that wall stops there, and
+	// the slab 2 cm short of it, so neither shares its face.
+	const bool bUpper = Facade(TEXT("SM_Facade_StoreUpper"), (StoreY0 + StoreY1) * 0.5, false) != nullptr;
+
 	// Shell: back, sides, roof with a parapet, the front's low wall, mullions and the header over the windows.
 	Box(Outside, FVector(X0 - 20.0, StoreY0, 0.0), FVector(X0, StoreY1, 480.0));
-	Box(Outside, FVector(X0, StoreY0 - 20.0, 0.0), FVector(0.0, StoreY0, 480.0));
+	Box(Outside, FVector(X0, StoreY0 - 20.0, 0.0), FVector(0.0, StoreY0, bUpper ? 476.0 : 480.0));
 	Box(Outside, FVector(X0, StoreY1, 0.0), FVector(0.0, StoreY1 + 20.0, 480.0));
-	Box(Outside, FVector(X0 - 20.0, StoreY0 - 20.0, 480.0), FVector(10.0, StoreY1 + 20.0, 520.0));
+	Box(Outside, FVector(X0 - 20.0, StoreY0 - (bUpper ? 18.0 : 20.0), 480.0), FVector(10.0, StoreY1 + 20.0, 520.0));
 	// The ceiling stops the camera (a third-person view pitched down inside would otherwise rise through it).
 	Box(Ceiling, FVector(X0, StoreY0, StoreCeiling), FVector(0.0, StoreY1, StoreCeiling + 4.0), true);
 	// The doorway's mullions stand on its edges (DoorY0, DoorY1): the closed doors tuck in behind them, so no slot of
@@ -1064,47 +1497,46 @@ void AStreetStage::BuildStore()
 		Spill->SetCastShadows(false);
 	}
 
-	// The cooler wall at the back: glass doors lit from inside, the drinks in columns behind them (each column one
-	// product, as the cooler's stocked).
-	if (!Prop(TEXT("SM_Cooler"), FVector(X0 + 45.0, 4500.0, 0.0), 0.0f))
+	// The cooler wall at the back: glass doors lit from inside, every shelf stocked with a row of real packs (stock.py)
+	// under the header's sections. Without the rows (or the cooler, whose stand-in box would hide them), the drinks in
+	// columns behind the glass, each column one product.
+	UStaticMeshComponent* Cooler = Prop(TEXT("SM_Cooler"), FVector(X0 + 45.0, 4500.0, 0.0), 0.0f);
+	if (!Cooler)
 	{
 		Box(Metal, FVector(X0, 4100.0, 0.0), FVector(X0 + 90.0, StoreY1 - 50.0, 230.0));
 		Box(CoolerGlow, FVector(X0 + 90.0, 4130.0, 20.0), FVector(X0 + 92.0, StoreY1 - 80.0, 215.0), false);
 	}
-	static const char* const DrinkIds[4] = {"cascade", "fizz-cola", "volt-rush", "sunny-peach"};
-	UInstancedStaticMeshComponent* Drinks[4];
-	for (int32 K = 0; K < 4; ++K)
+	if (!Cooler || !StockCooler(Cooler->GetRelativeTransform()))
 	{
-		const ss::store::Item* Item = ss::store::Find(DrinkIds[K]);
-		Drinks[K] = NewPart<UInstancedStaticMeshComponent>();
-		Drinks[K]->SetStaticMesh(CylinderMesh);
-		Drinks[K]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Drinks[K]->SetCastShadow(false);
-		Drinks[K]->SetMaterial(0, Mat(*FString::Printf(TEXT("Drink%d"), K), Item ? Item->Color : 0xc8262f, 0.3f, 0.0f, 0.0f, 0.5f));
-	}
-	for (double Z = 30.0; Z < 210.0; Z += 45.0)
-	{
-		for (double Y = 4150.0; Y < StoreY1 - 90.0; Y += 14.0)
+		static const char* const DrinkIds[4] = {"cascade", "fizz-cola", "volt-rush", "sunny-peach"};
+		UInstancedStaticMeshComponent* Drinks[4];
+		for (int32 K = 0; K < 4; ++K)
 		{
-			const int32 K = static_cast<int32>((Y - 4150.0) / 98.0) % 4;
-			Drinks[K]->AddInstance(FTransform(FRotator::ZeroRotator, FVector(X0 + 70.0, Y, Z + 9.0), FVector(0.13, 0.13, 0.2)));
+			const ss::store::Item* Item = ss::store::Find(DrinkIds[K]);
+			Drinks[K] = NewPart<UInstancedStaticMeshComponent>();
+			Drinks[K]->SetStaticMesh(CylinderMesh);
+			Drinks[K]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Drinks[K]->SetCastShadow(false);
+			Drinks[K]->SetMaterial(0, Mat(*FString::Printf(TEXT("Drink%d"), K), Item ? Item->Color : 0xc8262f, 0.3f, 0.0f, 0.0f, 0.5f));
+		}
+		for (double Z = 30.0; Z < 210.0; Z += 45.0)
+		{
+			for (double Y = 4150.0; Y < StoreY1 - 90.0; Y += 14.0)
+			{
+				const int32 K = static_cast<int32>((Y - 4150.0) / 98.0) % 4;
+				Drinks[K]->AddInstance(FTransform(FRotator::ZeroRotator, FVector(X0 + 70.0, Y, Z + 9.0), FVector(0.13, 0.13, 0.2)));
+			}
 		}
 	}
 
-	// Two aisles of shelves, stocked with the store's own colors.
-	const std::vector<ss::store::Item>& Catalog = ss::store::Catalog();
-	UInstancedStaticMeshComponent* Goods[4];
-	for (int32 K = 0; K < 4; ++K)
+	// Two aisles of shelves (the gondolas' frame as SM_Shelf's, so the stock sits on it or on the stand-in's boxes), every
+	// bay and level on both faces stocked with rows of real packs: snacks facing the aisle between them, groceries and
+	// household outward, the bulk packs on the base decks. Without the rows, boxes in the store's own colors.
+	const TArray<FTransform> Gondolas = {FTransform(BlenderFacing(90.0f), FVector(-850.0, 4330.0, 0.0)), FTransform(BlenderFacing(90.0f), FVector(-850.0, 4560.0, 0.0))};
+	for (const FTransform& Gondola : Gondolas)
 	{
-		const ss::store::Item& Item = Catalog[static_cast<size_t>(K * 3 + 5) % Catalog.size()];
-		Goods[K] = NewPart<UInstancedStaticMeshComponent>();
-		Goods[K]->SetStaticMesh(CubeMesh);
-		Goods[K]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Goods[K]->SetMaterial(0, Mat(*FString::Printf(TEXT("Goods%d"), K), Item.Color, 0.5f));
-	}
-	for (double Ay : {4330.0, 4560.0})
-	{
-		if (!Prop(TEXT("SM_Shelf"), FVector(-850.0, Ay, 0.0), 90.0f))
+		const double Ay = Gondola.GetLocation().Y;
+		if (!Prop(TEXT("SM_Shelf"), Gondola.GetLocation(), 90.0f))
 		{
 			Box(Shelf, FVector(-1150.0, Ay - 30.0, 0.0), FVector(-550.0, Ay + 30.0, 12.0));
 			Box(Shelf, FVector(-1150.0, Ay - 3.0, 12.0), FVector(-550.0, Ay + 3.0, 160.0));
@@ -1113,14 +1545,31 @@ void AStreetStage::BuildStore()
 				Box(Shelf, FVector(-1150.0, Ay - 30.0, Z - 3.0), FVector(-550.0, Ay + 30.0, Z), false);
 			}
 		}
-		for (double Z : {40.0, 85.0, 130.0})
+	}
+	if (!StockShelves(Gondolas))
+	{
+		const std::vector<ss::store::Item>& Catalog = ss::store::Catalog();
+		UInstancedStaticMeshComponent* Goods[4];
+		for (int32 K = 0; K < 4; ++K)
 		{
-			for (double X = -1140.0; X < -560.0; X += 22.0)
+			const ss::store::Item& Item = Catalog[static_cast<size_t>(K * 3 + 5) % Catalog.size()];
+			Goods[K] = NewPart<UInstancedStaticMeshComponent>();
+			Goods[K]->SetStaticMesh(CubeMesh);
+			Goods[K]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Goods[K]->SetMaterial(0, Mat(*FString::Printf(TEXT("Goods%d"), K), Item.Color, 0.5f));
+		}
+		for (const FTransform& Gondola : Gondolas)
+		{
+			const double Ay = Gondola.GetLocation().Y;
+			for (double Z : {40.0, 85.0, 130.0})
 			{
-				for (double Side : {-1.0, 1.0})
+				for (double X = -1140.0; X < -560.0; X += 22.0)
 				{
-					const int32 K = static_cast<int32>(Dice.Next() * 4.0) % 4;
-					Goods[K]->AddInstance(FTransform(FRotator(0.0f, static_cast<float>(Dice.Next() * 8.0 - 4.0), 0.0f), FVector(X, Ay + Side * 17.0, Z + 12.0), FVector(0.16, 0.2, 0.24)));
+					for (double Side : {-1.0, 1.0})
+					{
+						const int32 K = static_cast<int32>(Dice.Next() * 4.0) % 4;
+						Goods[K]->AddInstance(FTransform(FRotator(0.0f, static_cast<float>(Dice.Next() * 8.0 - 4.0), 0.0f), FVector(X, Ay + Side * 17.0, Z + 12.0), FVector(0.16, 0.2, 0.24)));
+					}
 				}
 			}
 		}
@@ -1201,27 +1650,48 @@ void AStreetStage::BuildStoreDressing()
 		Box(Groove, FVector(X, 4060.0, 14.0), FVector(X + 1.5, 4061.0, 93.0), false)->SetCastShadow(false);
 	}
 	Box(Metal, FVector(-575.0, 4062.0, 38.0), FVector(-455.0, 4064.0, 92.0), false);
-	UInstancedStaticMeshComponent* Candy[3];
-	static const uint32 CandyColors[3] = {0xf2c14e, 0x5b2a17, 0xd8262f};
-	for (int32 K = 0; K < 3; ++K)
+	// The candy rack on the counter's front: stock.py's candy rows, three high, faced to the customer (as the gondolas'
+	// rows: their products stand 3.5 to 29.5 cm before the origin; here a little shallower, the rack being a rack).
+	bool bCandyRows = false;
+	for (const double Z : {40.0, 58.0, 76.0})
 	{
-		Candy[K] = NewPart<UInstancedStaticMeshComponent>();
-		Candy[K]->SetStaticMesh(CubeMesh);
-		Candy[K]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Candy[K]->SetCastShadow(false);
-		Candy[K]->SetMaterial(0, Mat(*FString::Printf(TEXT("Candy%d"), K), CandyColors[K], 0.45f));
-	}
-	for (double Z : {44.0, 62.0, 80.0})
-	{
-		for (double X = -570.0; X < -462.0; X += 9.0)
+		if (UStaticMeshComponent* Row = Prop(TEXT("SM_Stock_ShelfRow_Candy"), FVector(-515.0, 4061.0, Z), 90.0f))
 		{
-			Candy[static_cast<int32>(Dice.Next() * 3.0) % 3]->AddInstance(FTransform(FRotator::ZeroRotator, FVector(X + 4.0, 4068.0, Z + 6.0), FVector(0.08, 0.06, 0.13)));
+			Row->SetRelativeScale3D(FVector(1.0, 0.6, 0.96));
+			Row->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			bCandyRows = true;
+		}
+	}
+	if (!bCandyRows)
+	{
+		UInstancedStaticMeshComponent* Candy[3];
+		static const uint32 CandyColors[3] = {0xf2c14e, 0x5b2a17, 0xd8262f};
+		for (int32 K = 0; K < 3; ++K)
+		{
+			Candy[K] = NewPart<UInstancedStaticMeshComponent>();
+			Candy[K]->SetStaticMesh(CubeMesh);
+			Candy[K]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Candy[K]->SetCastShadow(false);
+			Candy[K]->SetMaterial(0, Mat(*FString::Printf(TEXT("Candy%d"), K), CandyColors[K], 0.45f));
+		}
+		for (double Z : {44.0, 62.0, 80.0})
+		{
+			for (double X = -570.0; X < -462.0; X += 9.0)
+			{
+				Candy[static_cast<int32>(Dice.Next() * 3.0) % 3]->AddInstance(FTransform(FRotator::ZeroRotator, FVector(X + 4.0, 4068.0, Z + 6.0), FVector(0.08, 0.06, 0.13)));
+			}
 		}
 	}
 	if (!Prop(TEXT("SM_Register"), FVector(-300.0, 4020.0, 100.0), -90.0f)) // its screen to Benny, the card reader to us
 	{
 		Box(Mat(TEXT("Register"), 0x1b1d22, 0.35f), FVector(-340.0, 3995.0, 100.0), FVector(-260.0, 4045.0, 128.0), false);
 		Box(Mat(TEXT("RegisterScreen"), 0x6ad1ff, 0.3f, 0.0f, 25.0f), FVector(-330.0, 3996.0, 128.0), FVector(-270.0, 3998.0, 150.0), false);
+	}
+	// The impulse buys on the counter between the grill and the register, faced to the customer (stock.py): the Choco
+	// Stack caddy, the lighters, the gum rack and the mints.
+	if (UStaticMeshComponent* Impulse = Prop(TEXT("SM_Stock_Counter"), FVector(-405.0, 4030.0, 100.0), 90.0f))
+	{
+		Impulse->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 	// The scratch-off case on the counter: rolls of tickets in their colors behind clear acrylic.
 	Box(Cabinet, FVector(-250.0, 3990.0, 100.0), FVector(-166.0, 4050.0, 103.0), false);
@@ -1286,37 +1756,51 @@ void AStreetStage::BuildStoreDressing()
 	}
 	Sign(TEXT("promo:roller-dog"), FVector(-535.0, 4053.0, 150.0), 90.0f, FVector2D(16.0, 24.0), FIntPoint(600, 900), 0.0f);
 
-	// Behind Benny: the tobacco rack (pack faces in rows behind acrylic, a lit price strip over them), the menu board
-	// above it, backlit.
-	Box(Cabinet, FVector(-640.0, StoreY0 + 2.0, 128.0), FVector(-180.0, StoreY0 + 36.0, 248.0));
-	static const uint32 Brands[5] = {0xc8202c, 0x1f4fa8, 0x2e8b57, 0xc9a24d, 0x2a2b2e};
-	UInstancedStaticMeshComponent* Packs[5];
-	for (int32 K = 0; K < 5; ++K)
+	// Behind Benny, against the wall between the half doors: the back bar (stock.py), its cabinet with cartons on top, the
+	// phone and gift cards on their slatwall, the tobacco merchandiser with a pack in every pusher and the scratch-off
+	// dispenser, the acrylic 3.5 cm in front of the cigarettes. Without it, a rack of pack faces behind the acrylic, a lit
+	// price strip over them. The menu board above either, backlit.
+	const FVector BackBarAt(-410.0, StoreY0 + 2.0, 0.0);
+	if (ImportedMesh(TEXT("SM_Stock_BackBar")) && ImportedMesh(TEXT("SM_Stock_BackBar_Tobacco")))
 	{
-		Packs[K] = NewPart<UInstancedStaticMeshComponent>();
-		Packs[K]->SetStaticMesh(CubeMesh);
-		Packs[K]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Packs[K]->SetCastShadow(false);
-		Packs[K]->SetMaterial(0, Mat(*FString::Printf(TEXT("Pack%d"), K), Brands[K], 0.45f));
-	}
-	UInstancedStaticMeshComponent* PackWhite = NewPart<UInstancedStaticMeshComponent>();
-	PackWhite->SetStaticMesh(CubeMesh);
-	PackWhite->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PackWhite->SetCastShadow(false);
-	PackWhite->SetMaterial(0, Mat(TEXT("PackWhite"), 0xeeece6, 0.45f));
-	for (int32 Row = 0; Row < 8; ++Row)
-	{
-		const double Z = 134.0 + Row * 13.0;
-		for (double X = -632.0; X < -190.0; X += 7.0)
+		Prop(TEXT("SM_Stock_BackBar"), BackBarAt, 90.0f);
+		if (UStaticMeshComponent* Tobacco = Prop(TEXT("SM_Stock_BackBar_Tobacco"), BackBarAt, 90.0f))
 		{
-			// A brand runs a few columns wide, as the rack's stocked; each pack two-tone, its color over white.
-			// The faces stand on the cabinet's front (Y +36), the acrylic just in front of them.
-			const int32 Brand = static_cast<int32>((X + 632.0) / 49.0) % 5;
-			Packs[Brand]->AddInstance(FTransform(FRotator::ZeroRotator, FVector(X + 2.8, StoreY0 + 37.2, Z + 6.5), FVector(0.055, 0.022, 0.05)));
-			PackWhite->AddInstance(FTransform(FRotator::ZeroRotator, FVector(X + 2.8, StoreY0 + 37.2, Z + 2.0), FVector(0.055, 0.022, 0.04)));
+			Tobacco->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		}
 	}
-	Box(Mat(TEXT("PriceStrip"), 0xfff4e0, 0.3f, 0.0f, 50.0f), FVector(-638.0, StoreY0 + 36.0, 238.0), FVector(-182.0, StoreY0 + 38.5, 246.0), false)->SetCastShadow(false);
+	else
+	{
+		Box(Cabinet, FVector(-640.0, StoreY0 + 2.0, 128.0), FVector(-180.0, StoreY0 + 36.0, 248.0));
+		static const uint32 Brands[5] = {0xc8202c, 0x1f4fa8, 0x2e8b57, 0xc9a24d, 0x2a2b2e};
+		UInstancedStaticMeshComponent* Packs[5];
+		for (int32 K = 0; K < 5; ++K)
+		{
+			Packs[K] = NewPart<UInstancedStaticMeshComponent>();
+			Packs[K]->SetStaticMesh(CubeMesh);
+			Packs[K]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Packs[K]->SetCastShadow(false);
+			Packs[K]->SetMaterial(0, Mat(*FString::Printf(TEXT("Pack%d"), K), Brands[K], 0.45f));
+		}
+		UInstancedStaticMeshComponent* PackWhite = NewPart<UInstancedStaticMeshComponent>();
+		PackWhite->SetStaticMesh(CubeMesh);
+		PackWhite->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		PackWhite->SetCastShadow(false);
+		PackWhite->SetMaterial(0, Mat(TEXT("PackWhite"), 0xeeece6, 0.45f));
+		for (int32 Row = 0; Row < 8; ++Row)
+		{
+			const double Z = 134.0 + Row * 13.0;
+			for (double X = -632.0; X < -190.0; X += 7.0)
+			{
+				// A brand runs a few columns wide, as the rack's stocked; each pack two-tone, its color over white.
+				// The faces stand on the cabinet's front (Y +36), the acrylic just in front of them.
+				const int32 Brand = static_cast<int32>((X + 632.0) / 49.0) % 5;
+				Packs[Brand]->AddInstance(FTransform(FRotator::ZeroRotator, FVector(X + 2.8, StoreY0 + 37.2, Z + 6.5), FVector(0.055, 0.022, 0.05)));
+				PackWhite->AddInstance(FTransform(FRotator::ZeroRotator, FVector(X + 2.8, StoreY0 + 37.2, Z + 2.0), FVector(0.055, 0.022, 0.04)));
+			}
+		}
+		Box(Mat(TEXT("PriceStrip"), 0xfff4e0, 0.3f, 0.0f, 50.0f), FVector(-638.0, StoreY0 + 36.0, 238.0), FVector(-182.0, StoreY0 + 38.5, 246.0), false)->SetCastShadow(false);
+	}
 	if (Glass)
 	{
 		Box(Glass, FVector(-640.0, StoreY0 + 39.0, 128.0), FVector(-180.0, StoreY0 + 40.0, 236.0), false);
@@ -1583,12 +2067,12 @@ void AStreetStage::BeginPlay()
 	AttachSlate();
 	PaintCars();
 	// Where the store and the laundromat's room are, for the rain (nothing falls inside them, the sheets crossing them
-	// as they follow the eye), and the two lit fronts the rain catches.
+	// as they follow the eye), and the two lit fronts the rain catches (the laundromat's as BuildAcross built it).
 	const FTransform& T = GetActorTransform();
 	const FBox Store = FBox(FVector(-StoreDepth - 30.0, StoreY0, -60.0), FVector(-6.0, StoreY1, StoreCeiling + 120.0)).TransformBy(T);
-	const FBox Wash = FBox(FVector(FarFront + 11.0, -700.0, -60.0), FVector(FarFront + 1300.0, 700.0, 450.0)).TransformBy(T);
+	const FBox Wash = FBox(WashMin, WashMax).TransformBy(T);
 	const FVector StoreGlow = T.TransformPosition(FVector(60.0, (StoreY0 + StoreY1) * 0.5, 200.0));
-	const FVector WashGlow = T.TransformPosition(FVector(FarFront - 60.0, 0.0, 260.0));
+	const FVector WashGlow = T.TransformPosition(NeonGlowAt);
 	for (UMaterialInstanceDynamic* M : RainMids)
 	{
 		if (M)
@@ -1913,6 +2397,27 @@ void AStreetStage::ApplyDaylight()
 		{
 			L->SetIntensity(NightLightLevels[I] * Night);
 			L->SetVisibility(Night > 0.01f);
+		}
+	}
+	// Blender's fronts glow by themselves too (their lit rooms, lanterns and transoms, baked for the night): out by day
+	// with the lamps.
+	for (UStaticMeshComponent* Lit : LitFronts)
+	{
+		DimImportedGlow(Lit, Night * (Lit == TenementFront ? CVarTenementGlow.GetValueOnGameThread() : 1.0f));
+	}
+	// The laundromat's shop window is the brightest of the tenement's bakes (tenement_store, the bake's M_SM_Tenement_9):
+	// made to read through the apartment's rainy window, it whites out against the street's night exposure.
+	if (const UStaticMesh* Tenement = TenementFront ? TenementFront->GetStaticMesh().Get() : nullptr)
+	{
+		for (int32 Slot = 0; Slot < Tenement->GetStaticMaterials().Num(); ++Slot)
+		{
+			const UMaterialInterface* Baked = Tenement->GetMaterial(Slot);
+			UMaterialInstanceDynamic* Dim = Cast<UMaterialInstanceDynamic>(TenementFront->GetMaterial(Slot));
+			if (Baked && Dim && Baked->GetName().EndsWith(TEXT("_9")))
+			{
+				const float Level = Night * CVarLaundromatGlow.GetValueOnGameThread();
+				Dim->SetVectorParameterValue(TEXT("EmissiveFactor"), FLinearColor(Level, Level, Level, 1.0f));
+			}
 		}
 	}
 	// The streetlights' photocells, each a little apart.

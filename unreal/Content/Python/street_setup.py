@@ -24,7 +24,7 @@ MAP_PATH = "/Game/Maps/Street"
 VERSION = "4"
 # Bump when AStreetStage builds the set differently: the saved level (what Play on the map and a cooked build use,
 # since neither runs the stage's construction again) is rebuilt once.
-MAP_VERSION = "4"
+MAP_VERSION = "6"
 VERSION_TAG = "StreetVersion"
 
 STREET = ss.NOISE + """

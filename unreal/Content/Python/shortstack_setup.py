@@ -759,8 +759,9 @@ def import_meshes(force=False, only=None):
     return imported
 
 
-# What the people wear on their heads: the Back Room's (wear.py) and the street's hats and glasses (wearables.py).
-WEAR_PREFIXES = ("SM_Wear_", "SM_Hat_", "SM_Glasses_")
+# What the people wear on their heads and feet: the Back Room's (wear.py), the street's hats and glasses (wearables.py)
+# and shoes (sneakers.py). Small and seen up close: their own triangles, not Nanite's fallback.
+WEAR_PREFIXES = ("SM_Wear_", "SM_Hat_", "SM_Glasses_", "SM_Sneaker_", "SM_WorkShoe_")
 
 
 def _without_nanite(mesh):

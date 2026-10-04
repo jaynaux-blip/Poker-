@@ -40,7 +40,14 @@ struct FStreetOutfit
 	FLinearColor PrintA = FLinearColor::Black;
 	FLinearColor PrintB = FLinearColor::Black;
 	FLinearColor PrintC = FLinearColor::Black;
-	/** The sneakers: the canvas, the rubber (sole and toe cap), the accents (heel tab, stripe), the opening's lining, laces, the tread. */
+	/**
+	 * The modeled shoes (art/blender/assets/sneakers.py: <ShoePair>_L and _R), when imported. They come in their own
+	 * colors; when bDyeShoes their canvas, accents and laces take ShoeUpper, ShoeAccent and ShoeLaces below (the rubber,
+	 * the lining and the tread stay as baked).
+	 */
+	const TCHAR* ShoePair = TEXT("SM_Sneaker");
+	bool bDyeShoes = false;
+	/** The shoes' colors (all six for the shoes made here when the pair isn't imported): the canvas, the rubber (sole and toe cap), the accents (heel tab, stripe), the opening's lining, laces, the tread. */
 	FLinearColor ShoeUpper = FLinearColor(0.05f, 0.05f, 0.055f);
 	FLinearColor ShoeRubber = FLinearColor(0.8f, 0.78f, 0.72f);
 	FLinearColor ShoeAccent = FLinearColor(0.05f, 0.05f, 0.055f);
@@ -395,15 +402,21 @@ FStreetOutfit HeroOutfit(const ss::hero::Look& L)
 	O.ShoeLining = SrgbOf(0x1a1a1d);
 	O.ShoeLaces = SrgbOf(bLightJacket ? 0x2a2b30 : 0xefebe1);
 	O.ShoeOutsole = SrgbOf(0x3b3029);
+	// The modeled sneaker in the same colors, where its bake takes a tint (the canvas, the stripe, heel tape and pull tab,
+	// the laces); its off-white rubber and gum tread stay as baked.
+	O.ShoePair = TEXT("SM_Sneaker");
+	O.bDyeShoes = true;
 	return O;
 }
 
-/** A cast member at work: their shirt, dark trousers, black shoes. */
+/** A cast member at work: their shirt, dark trousers, black shoes (the work shoes, baked black all over: never dyed). */
 FStreetOutfit CastOutfit(const FLinearColor& Shirt)
 {
 	FStreetOutfit O;
 	O.Shirt = Shirt;
 	O.Pants = SrgbOf(0x2a2b30);
+	O.ShoePair = TEXT("SM_WorkShoe");
+	O.bDyeShoes = false;
 	O.ShoeUpper = SrgbOf(0x161619);
 	O.ShoeRubber = SrgbOf(0x232327);
 	O.ShoeAccent = SrgbOf(0x161619);
@@ -547,6 +560,33 @@ bool FitFoot(const FReferenceSkeleton& Ref, int32 Side, FFootFit& Out)
 	return true;
 }
 
+// The modeled pair's own frame (sneakers.py), once imported: the origin at the ankle joint, the ground 8.5 cm under
+// it and the ball of the foot 14.2 cm ahead of it (level), the toe toward -Y and up +Z; the left shoe's outside toward
+// -X, the right shoe the left one's mirror image.
+const float ModelAnkleToBall = 14.2f;
+const float ModelAnkleHeight = 8.5f;
+
+/**
+ * Where one of the modeled shoes goes, in the body's component space in its reference pose (the foot bone carries it
+ * from there): its toe along the foot's heel-to-toe line and its up the world's, sized to the foot by the ankle-to-ball
+ * span, standing on the floor where the bare foot stood (Floor). Its height follows the ankle's over that floor a little
+ * way (12% taller at most, 8% lower), so the collar stays under the ankle bones and the vamp over the instep of a foot
+ * whose ankle stands higher or lower than the model's. The tread goes 3 mm into the floor, as the shoes made here do,
+ * so the bare sole of the foot stays inside it.
+ */
+FTransform ModelFit(const FFootFit& Fit, float Floor)
+{
+	const float Size = Fit.AnkleToBall / ModelAnkleToBall;
+	const float Tall = FMath::Clamp((static_cast<float>(Fit.Ankle.Z) - Floor) / (ModelAnkleHeight * Size), 0.92f, 1.12f);
+	// The importer's turn (BlenderImportYaw) is always a quarter turn's multiple: snapped, so the laptop's bounds can't
+	// tilt the shoes by a degree. At its usual 90 this is FRotationMatrix::MakeFromXZ(-Fit.Left, Up): the model's +X to
+	// the body's right, its -Y along the foot. One turn suits both feet: the right shoe is already the mirror image.
+	const float Import = 90.0f * FMath::RoundToFloat(BlenderImportYaw() / 90.0f);
+	const float AheadYaw = FMath::RadiansToDegrees(FMath::Atan2(static_cast<float>(Fit.Ahead.Y), static_cast<float>(Fit.Ahead.X)));
+	const FVector At(Fit.Ankle.X, Fit.Ankle.Y, Floor - 0.3f + ModelAnkleHeight * Size * Tall);
+	return FTransform(FRotator(0.0f, Import + AheadYaw, 0.0f).Quaternion(), At, FVector(Size, Size, Size * Tall));
+}
+
 /** A smooth curve through (Ts, Vs): cubic between the knots with finite-difference slopes, held flat past the ends. */
 float Smooth(float T, const float* Ts, const float* Vs, int32 N)
 {
@@ -649,10 +689,10 @@ struct FPoint
 };
 
 /**
- * Builds a sneaker for one foot: a rubber sole (tread, midsole, a lip where the upper sits in it) and a canvas upper
- * lofted over it, closing along its top line, with a rubber toe cap and foxing, a heel tab and side stripe, laces and
- * the dark of the opening. Vertices are in the foot bone's position with the body's axes; the component undoes the
- * bone's rest rotation when it attaches, so the shoe follows the foot.
+ * Builds a sneaker for one foot, the stand-in when the modeled pair isn't imported: a rubber sole (tread, midsole, a lip
+ * where the upper sits in it) and a canvas upper lofted over it, closing along its top line, with a rubber toe cap and
+ * foxing, a heel tab and side stripe, laces and the dark of the opening. Vertices are in the foot bone's position with
+ * the body's axes; the component undoes the bone's rest rotation when it attaches, so the shoe follows the foot.
  */
 UStaticMesh* BuildShoeMesh(UObject* Outer, const FFootFit& Fit, UMaterialInterface* Material)
 {
@@ -1346,25 +1386,29 @@ FTransform AShortStackCharacter::FitHeadWear(const USkeletalMesh* FaceAsset, boo
 	}
 	if (bHat)
 	{
-		// The crown (the hat's origin is the top of the head inside it) on the top of the face mesh, which is the scalp,
-		// with a few millimetres for close hair. Sized from the eyes' spacing: a MetaHuman face mesh's bounds take in the
-		// neck and the shoulders' tops, so they can't say how wide the head is. Fitted by eye on the hero's face (eyes 6.8 cm
-		// apart), where the hats (made for a 15.6 cm head) want 15% more to cover the skull, front to back; a bigger hat
-		// grows down from its crown, so it rides up by as much to keep the cuff above the brows.
-		float Crown = static_cast<float>(Bounds.Origin.Z + Bounds.BoxExtent.Z - Head.Z) + 0.4f;
-		if (Crown < 12.0f || Crown > 26.0f)
+		// Sized from the eyes' spacing (a MetaHuman face mesh's bounds take in the neck and the shoulders' tops, so they
+		// can't say how wide the head is): the hats, made for a 15.6 cm head, want 15% more over eyes 6.8 cm apart to
+		// cover the skull front to back. Worn as a hat is, by the brow: the cuff 3.5 cm over the eyes, the crown (the hat's
+		// origin, the top of the head inside it) 11.3 cm of hat above that. Fitted by eye on the hero MetaHumans; the top of
+		// the face mesh (the scalp) stands in when there are no eye bones.
+		const float Size = FMath::Clamp(1.15f * (bEyes ? Apart / 6.79f : 1.0f), 1.0f, 1.3f);
+		float Crown = static_cast<float>(Bounds.Origin.Z + Bounds.BoxExtent.Z - Head.Z) + 0.4f + (Size - 1.0f) * 10.0f;
+		if (bEyes)
+		{
+			Crown = static_cast<float>((Eyes - Head).Z) + 3.5f + 11.3f * Size;
+		}
+		if (Crown < 12.0f || Crown > 28.0f)
 		{
 			Crown = 19.0f;
 		}
-		const float Size = FMath::Clamp(1.15f * (bEyes ? Apart / 6.79f : 1.0f), 1.0f, 1.3f);
-		const FVector At = Head + Up * Tuned(CVarHatUp, Crown + (Size - 1.0f) * 10.0f) + Ahead * Tuned(CVarHatForward, 0.4f);
+		const FVector At = Head + Up * Tuned(CVarHatUp, Crown) + Ahead * Tuned(CVarHatForward, 0.4f);
 		return FTransform(BlenderFacing(FaceYaw + Turn).Quaternion(), At, FVector(Size));
 	}
 	// The glasses' origin is the bridge of the nose, the lenses' plane: before the eyes' centers (the eyeball's radius and
-	// the lenses' distance from it), between them; sized to how far apart they are. The eye bones sit above and ahead of
-	// where the pupils show (fitted by eye on the hero's face), hence the 2 cm down and the 1.7 cm forward, not 2.4.
+	// the lenses' distance from it, 1.7 cm fitted by eye on the hero MetaHumans), at their height and between them; sized
+	// to how far apart they are.
 	const FVector FromHead = Eyes - Head;
-	const float Rise = static_cast<float>(FromHead.Z) - (bEyes ? 2.0f : 0.0f);
+	const float Rise = static_cast<float>(FromHead.Z);
 	const float Forward = static_cast<float>(FVector::DotProduct(FromHead, Ahead)) + (bEyes ? 1.7f : 0.0f);
 	const float Side = static_cast<float>(FVector::DotProduct(FromHead, Across));
 	const FVector At = Head + Up * Tuned(CVarGlassesUp, bEyes ? Rise : 8.5f) + Ahead * Tuned(CVarGlassesForward, bEyes ? Forward : 10.5f) + Across * (bEyes ? Side : 0.0f);
@@ -1500,41 +1544,93 @@ FAutoConsoleCommandWithWorld CmdWearRefit(TEXT("ss.Wear.Refit"), TEXT("Puts the 
 	}));
 } // namespace ShortStackCharacterDetail
 
+void AShortStackCharacter::HideToes(int32 Side, bool bHide)
+{
+	// The bone hidden last time first, by its index: a body swapped for one with as many bones keeps the hidden ones.
+	USkeletalMeshComponent* Body = GetMesh();
+	if (HiddenToes[Side] != INDEX_NONE && HiddenToes[Side] < Body->GetNumBones())
+	{
+		Body->UnHideBone(HiddenToes[Side]);
+	}
+	HiddenToes[Side] = INDEX_NONE;
+	const USkeletalMesh* Asset = Body->GetSkeletalMeshAsset();
+	if (!bHide || !Asset)
+	{
+		return;
+	}
+	// A hidden bone draws shrunk to its parent, so the toes go to the ankle, inside the shoe: the toe box needn't hold
+	// them, and nothing of them comes through it. The foot itself stays (hidden, it would be drawn shrunk to the knee,
+	// pulling the ankle up the shin with it); the shoe is made to hold it.
+	const int32 Ball = Asset->GetRefSkeleton().FindBoneIndex(Side == 0 ? FName(TEXT("ball_l")) : FName(TEXT("ball_r")));
+	if (Ball != INDEX_NONE)
+	{
+		Body->HideBone(Ball, PBO_None);
+		HiddenToes[Side] = Ball;
+	}
+}
+
 void AShortStackCharacter::BuildShoes(const FStreetOutfit& Outfit)
 {
 	USkeletalMesh* BodyAsset = GetMesh()->GetSkeletalMeshAsset();
-	UMaterialInterface* Surface = LoadObject<UMaterialInterface>(nullptr, SurfaceMaterial, nullptr, LOAD_NoWarn | LOAD_Quiet);
-	if (!Surface)
+	// The modeled pair when both shoes are imported; otherwise a pair made here to fit the feet.
+	UStaticMesh* Pair[2] = {nullptr, nullptr};
+	if (Outfit.ShoePair)
 	{
-		Surface = LoadObject<UMaterialInterface>(nullptr, BasicMaterial, nullptr, LOAD_NoWarn | LOAD_Quiet);
+		Pair[0] = Wearable(*FString::Printf(TEXT("%s_L"), Outfit.ShoePair));
+		Pair[1] = Wearable(*FString::Printf(TEXT("%s_R"), Outfit.ShoePair));
 	}
-	if (!BodyAsset || !Surface)
+	const bool bModeled = Pair[0] && Pair[1];
+	UMaterialInterface* Surface = nullptr;
+	if (!bModeled)
 	{
-		for (UStaticMeshComponent* S : Shoes)
+		if (Outfit.ShoePair)
 		{
-			Conceal(S);
+			UE_LOG(LogStreetHero, Log, TEXT("%s_L/_R aren't imported (shortstack_setup.import_meshes): shoes made to fit stand in"), Outfit.ShoePair);
+		}
+		Surface = LoadObject<UMaterialInterface>(nullptr, SurfaceMaterial, nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (!Surface)
+		{
+			Surface = LoadObject<UMaterialInterface>(nullptr, BasicMaterial, nullptr, LOAD_NoWarn | LOAD_Quiet);
+		}
+	}
+	if (!BodyAsset || (!bModeled && !Surface))
+	{
+		for (int32 Side = 0; Side < 2; ++Side)
+		{
+			Conceal(Shoes[Side].Get());
+			HideToes(Side, false);
 		}
 		return;
 	}
 	const FReferenceSkeleton& Ref = BodyAsset->GetRefSkeleton();
 	const bool bRefit = ShoesFitFor.Get() != BodyAsset;
 	const FLinearColor Colors[Shoe::SlotCount] = {Outfit.ShoeUpper, Outfit.ShoeRubber, Outfit.ShoeAccent, Outfit.ShoeLining, Outfit.ShoeLaces, Outfit.ShoeOutsole};
+	// Where the bare feet stand: the floor, or as far into it as the body's soles go (its lowest point, a centimeter at most).
+	float Floor = 0.0f;
+	const FBoxSphereBounds Bounds = BodyAsset->GetImportedBounds();
+	if (Bounds.BoxExtent.Z > 50.0)
+	{
+		Floor = FMath::Clamp(static_cast<float>(Bounds.Origin.Z - Bounds.BoxExtent.Z), -1.0f, 0.0f);
+	}
 	for (int32 Side = 0; Side < 2; ++Side)
 	{
 		Shoe::FFootFit Fit;
 		if (!Shoe::FitFoot(Ref, Side, Fit))
 		{
 			Conceal(Shoes[Side].Get());
+			HideToes(Side, false);
 			continue;
 		}
-		if (bRefit || !ShoeMeshes[Side])
+		if (!bModeled && (bRefit || !ShoeMeshes[Side]))
 		{
 			// Made once for each body: a couple of thousand triangles, fitted to its feet.
 			ShoeMeshes[Side] = Shoe::BuildShoeMesh(this, Fit, Surface);
 		}
-		if (!ShoeMeshes[Side])
+		UStaticMesh* ShoeMesh = bModeled ? Pair[Side] : ShoeMeshes[Side].Get();
+		if (!ShoeMesh)
 		{
 			Conceal(Shoes[Side].Get());
+			HideToes(Side, false);
 			continue;
 		}
 		if (!Shoes[Side])
@@ -1550,16 +1646,45 @@ void AShortStackCharacter::BuildShoes(const FStreetOutfit& Outfit)
 		{
 			Shoes[Side]->AttachToComponent(GetMesh(), FAttachmentTransformRules::KeepRelativeTransform, Fit.Bone);
 		}
-		Shoes[Side]->SetStaticMesh(ShoeMeshes[Side]);
-		// The mesh is built in the body's axes at the foot: undo the bone's rest rotation and the shoe sits as built, then follows the foot.
-		Shoes[Side]->SetRelativeTransform(FTransform(Fit.FootRest.GetRotation().Inverse(), FVector::ZeroVector));
-		for (int32 Slot = 0; Slot < Shoe::SlotCount; ++Slot)
+		Shoes[Side]->SetStaticMesh(ShoeMesh);
+		// The other pair's colors would otherwise stay on as overrides.
+		Shoes[Side]->EmptyOverrideMaterials();
+		if (bModeled)
 		{
-			Shoes[Side]->SetMaterial(Slot, PlainSurface(Surface, Shoes[Side].Get(), Colors[Slot], Shoe::SlotRoughness[Slot]));
+			// Carried by the foot bone, so it follows the foot through the stride. As the hat on the head (WearOnHead): the
+			// offset is put where the scaled body has it, and the shoe's own axes (its width, length and height, the body's
+			// own in the reference pose) take the height and build as the leg does.
+			const FTransform InBody = Shoe::ModelFit(Fit, Floor);
+			const FQuat Rest = Fit.FootRest.GetRotation();
+			const FVector Scale = GetMesh()->GetComponentScale();
+			const FVector Local = Rest.UnrotateVector(Scale * (InBody.GetLocation() - Fit.Ankle)) / Scale;
+			Shoes[Side]->SetRelativeTransform(FTransform(Rest.Inverse() * InBody.GetRotation(), Local, InBody.GetScale3D()));
+			if (Outfit.bDyeShoes)
+			{
+				// The canvas, the trims and the laces bake light and take the outfit's colors (lifted back by about as much as
+				// the bake darkens them); the rubber, the lining and the tread keep their own.
+				UStaticMeshComponent* Worn = Shoes[Side].Get();
+				TintSlot(Worn, BakedSlot(Worn, Shoe::SlotUpper), Outfit.ShoeUpper, 1.5f);
+				TintSlot(Worn, BakedSlot(Worn, Shoe::SlotAccent), Outfit.ShoeAccent, 1.5f);
+				TintSlot(Worn, BakedSlot(Worn, Shoe::SlotLaces), Outfit.ShoeLaces, 1.3f);
+			}
+		}
+		else
+		{
+			// The mesh is built in the body's axes at the foot: undo the bone's rest rotation and the shoe sits as built, then follows the foot.
+			Shoes[Side]->SetRelativeTransform(FTransform(Fit.FootRest.GetRotation().Inverse(), FVector::ZeroVector));
+			for (int32 Slot = 0; Slot < Shoe::SlotCount; ++Slot)
+			{
+				Shoes[Side]->SetMaterial(Slot, PlainSurface(Surface, Shoes[Side].Get(), Colors[Slot], Shoe::SlotRoughness[Slot]));
+			}
 		}
 		Reveal(Shoes[Side].Get());
+		HideToes(Side, true);
 	}
-	ShoesFitFor = BodyAsset;
+	if (!bModeled)
+	{
+		ShoesFitFor = BodyAsset;
+	}
 }
 
 // ------------------------------------------------------------------ view
