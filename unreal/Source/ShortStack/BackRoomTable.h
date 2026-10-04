@@ -160,6 +160,8 @@ public:
 	/** The read book: "Player/Tell" -> sightings confirmed at showdown (2 or more: learned). */
 	TMap<FString, int32> Reads;
 	int32 LearnedThisNight = 0;
+	/** What one confirmed sighting counts for in the read book (the Dealer's Kid: 2, learned the first time). */
+	int32 ReadWeight = 1;
 	/** A tell just played across the table (from ABackRoomPlayer); Studied is how hard you were looking. */
 	void OnTellSeen(ABackRoomPlayer* Player, uint8 Tell, uint8 Means, bool bHonest, float Studied);
 	/** "Player/Tell" for the read book. */

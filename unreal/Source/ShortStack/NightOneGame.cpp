@@ -89,6 +89,11 @@ void FNightOneGame::NewGame(const std::string& ScreenName)
 	Mode.StartNewCareer(FString(UTF8_TO_TCHAR(ScreenName.c_str())));
 }
 
+void FNightOneGame::NewCareer(const std::string& ScreenName, const ss::hero::Character& Who)
+{
+	Mode.StartNewCareer(FString(UTF8_TO_TCHAR(ScreenName.c_str())), &Who);
+}
+
 void FNightOneGame::Resume()
 {
 	Mode.ResumePlay();

@@ -393,7 +393,7 @@ def bake(obj, name, size=2048, ao_distance=0.01, ao_samples=64, sizes=None):
     sc.cycles.samples = 4
     sc.render.bake.normal_space = 'TANGENT'
     bake_pass('NORMAL', 'Normal')
-    sc.cycles.samples = ao_samples
+    sc.cycles.samples = int(os.environ.get('SHORTSTACK_AO_SAMPLES', ao_samples))
     bake_pass('AO', 'AO')
     for img in scratch.values():
         bpy.data.images.remove(img)

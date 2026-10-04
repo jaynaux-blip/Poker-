@@ -2335,13 +2335,12 @@ void RiverLine::CareerPage(double Now)
 		: Lf.RentStage == life::Rent::Paid ? "RENT PAID \xC2\xB7 NEXT DUE " + NetUpper(net::DateLabel(net::DayOf(Lf.RentDeadline - 1.0)))
 		: "RENT DUE " + NetUpper(net::WeekdayName(net::DayOf(Lf.RentDeadline - 1.0), true)) + " \xC2\xB7 " + NetUpper(net::Countdown(Lf.RentDeadline - World));
 	NetSpaced(*C, RentHead, Rb.X, P.Y + 120.0f, 10.0f, 800, Lf.RentStage == life::Rent::Paid ? pal::Green : pal::Red, 1.4f);
-	if (!Evicted)
-	{
-		UI.RRect(Rb, 4.0f, Rgba(255, 255, 255, 0.08f));
-		UI.RRect({Rb.X, Rb.Y, std::max(8.0f, Rb.W * RentFrac * In), Rb.H}, 4.0f, Paint::Linear({Rb.X, 0.0f}, {Rb.X + Rb.W, 0.0f}, pal::Red, pal::Gold));
-		UI.Text(S.BankrollCents >= Rent ? "Covered: pay it in the Bank app." : Money(Rent - S.BankrollCents) + " to go of " + Money(Rent), Bx, P.Y + 160.0f,
-			Ts(13.0f, 600, S.BankrollCents >= Rent ? pal::Green : Hex(0xc3cedf), Align::Right));
-	}
+	// (Evicted, the bar is the way back: the back rent and a month up front.)
+	UI.RRect(Rb, 4.0f, Rgba(255, 255, 255, 0.08f));
+	UI.RRect({Rb.X, Rb.Y, std::max(8.0f, Rb.W * RentFrac * In), Rb.H}, 4.0f, Paint::Linear({Rb.X, 0.0f}, {Rb.X + Rb.W, 0.0f}, pal::Red, pal::Gold));
+	const std::string RentNote = S.BankrollCents >= Rent ? (Evicted ? "Enough to move back in: the Bank app." : "Covered: pay it in the Bank app.")
+														 : Money(Rent - S.BankrollCents) + (Evicted ? " to go to move back in" : " to go of " + Money(Rent));
+	UI.Text(RentNote, Bx, P.Y + 160.0f, Ts(13.0f, 600, S.BankrollCents >= Rent ? pal::Green : Hex(0xc3cedf), Align::Right));
 
 	// Numbers.
 	const int Cashes = You.Cashes;

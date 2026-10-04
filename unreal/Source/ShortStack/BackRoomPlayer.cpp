@@ -756,8 +756,9 @@ void ABackRoomPlayer::UpdateFace(float Dt)
 		return;
 	}
 	Anim->Body = Body;
-	// Your own face is never seen, only its shadow: no expressions to work out or for RigLogic to run.
-	Anim->bExpressionless = SeatRole == EBackRoomRole::Hero;
+	// Your own face is only seen in third person; in first person it's there for its shadow, with no expressions
+	// to work out or for RigLogic to run.
+	Anim->bExpressionless = SeatRole == EBackRoomRole::Hero && !bHeroHeadShown;
 	if (Anim->bExpressionless)
 	{
 		return;

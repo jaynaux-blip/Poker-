@@ -12,6 +12,8 @@
 #include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/FrontEnd.h"
+#include "ShortStack/UI/Portrait.h"
+#include "ShortStack/UI/StoreCounter.h"
 #include "ShortStack/UI/Phone.h"
 #include "ShortStack/UI/PropArt.h"
 #include "ShortStack/UI/RiverLine.h"
@@ -19,6 +21,7 @@
 #include "TestFontMetrics.h"
 
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -502,9 +505,15 @@ struct MenuHooks : ss::ui::FrontEndHooks
 	int SettingsChanges = 0;
 	int Sounds = 0;
 	std::string NewGameName;
+	ss::hero::Character Who;
 	void UiSound(ss::SoundId, double) override { ++Sounds; }
 	void Continue() override { ++Continues; }
 	void NewGame(const std::string& Name) override { NewGameName = Name; }
+	void NewCareer(const std::string& Name, const ss::hero::Character& Person) override
+	{
+		NewGameName = Name;
+		Who = Person;
+	}
 	void Resume() override { ++Resumes; }
 	void QuitToMenu() override { ++QuitsToMenu; }
 	void QuitGame() override { ++Quits; }
@@ -555,20 +564,73 @@ void FrontEndFlows()
 	Expect(Fe.Current() == ss::ui::FrontEnd::Page::Main, "any key leaves the title screen");
 	Now = Settle(Fe, Now, 1.0);
 	Fe.Key("Enter", Now); // no save: New Game is selected
-	Expect(Fe.Current() == ss::ui::FrontEnd::Page::NewGame, "Enter on New Game opens it");
-	for (int I = 0; I < 20; ++I)
-	{
-		Fe.Key("Backspace", Now);
-	}
+	using Step = ss::ui::FrontEnd::CreatorStage;
+	Expect(Fe.Current() == ss::ui::FrontEnd::Page::NewGame && Fe.CreatorStep() == Step::Identity && Fe.Draft.Problem().empty(), "Enter on New Game opens the creator with someone to start from");
+	auto Type = [&](const std::string& Text, bool Clear = true) {
+		for (int I = 0; Clear && I < 20; ++I)
+		{
+			Fe.Key("Backspace", Now);
+		}
+		for (const char Ch : Text)
+		{
+			// Unreal sends Q, E and R as keys too: typing them must not switch tabs or reroll.
+			if (Ch == 'R' || Ch == 'Q' || Ch == 'E')
+			{
+				Fe.Key(std::string(1, Ch), Now);
+			}
+			Fe.Char(static_cast<uint32_t>(static_cast<unsigned char>(Ch)), Now);
+		}
+	};
+	Type("");
 	Fe.Key("Enter", Now);
-	Expect(Fe.Current() == ss::ui::FrontEnd::Page::NewGame && H.NewGameName.empty(), "an empty name is refused");
-	for (const char Ch : std::string("ace high!"))
-	{
-		Fe.Char(static_cast<uint32_t>(static_cast<unsigned char>(Ch)), Now);
-	}
-	Expect(Fe.ScreenName == "acehigh", "only valid name characters are typed");
+	Expect(Fe.Current() == ss::ui::FrontEnd::Page::NewGame && Fe.CreatorStep() == Step::Identity && H.NewGameName.empty() && Fe.CreatorField() == 0, "an empty first name is refused");
+	const ss::hero::Look Before = Fe.Draft.Appearance;
+	Type("Rosa Mar");
+	Fe.Char(0xED, Now); // i with an acute accent
+	Type("a", false);
+	Fe.Char(0xED, Now);
+	Expect(Fe.Draft.FirstName == "Rosa Mar\xC3\xAD" "a\xC3\xAD" && Fe.Draft.Appearance == Before, "names take spaces and accents; typing R doesn't reroll");
+	Fe.Key("Backspace", Now);
+	Expect(Fe.Draft.FirstName == "Rosa Mar\xC3\xAD" "a", "backspace removes a whole accented letter");
+	Fe.Key("Tab", Now);
+	Type("Delgado");
+	Fe.Key("Tab", Now);
+	Type("ace high!");
+	Expect(Fe.ScreenName == "acehigh", "only valid screen name characters are typed");
+	Fe.Key("Tab", Now);
+	const int Age = Fe.Draft.Age;
+	Fe.Key(Age > 30 ? "Left" : "Right", Now);
+	Expect(Fe.CreatorField() == 3 && Fe.Draft.Age == Age + (Age > 30 ? -1 : 1), "Left and Right change the age");
+	Fe.Key("Down", Now);
+	const std::string Country = Fe.Draft.Country;
+	Fe.Key("Right", Now);
+	Expect(Fe.Draft.Country != Country, "the country grid moves");
 	Fe.Key("Enter", Now);
-	Expect(H.NewGameName == "acehigh" && !Fe.IsOpen(), "Enter begins a new game and closes the menu");
+	Expect(Fe.CreatorStep() == Step::Background, "a complete identity moves on to the background");
+	const ss::hero::Background Was = Fe.Draft.Story;
+	Fe.Key("Right", Now);
+	Expect(Fe.Draft.Story != Was, "arrows choose a background");
+	const ss::hero::Background Chosen = Fe.Draft.Story;
+	Fe.Key("Enter", Now);
+	Expect(Fe.CreatorStep() == Step::Look && Fe.CreatorTab() == 0, "then the look, on the face tab");
+	Fe.Key("E", Now);
+	const int Hair = Fe.Draft.Appearance.Hair;
+	Fe.Key("Right", Now);
+	Expect(Fe.CreatorTab() == 1 && Fe.Draft.Appearance.Hair == (Hair + 1) % ss::hero::OptionCount(ss::hero::Slot::Hair), "E opens the hair tab and Right changes the style");
+	Fe.Key("Q", Now);
+	Fe.Key("Q", Now);
+	Fe.Key("Down", Now);
+	const int Height = Fe.Draft.Appearance.Height;
+	Fe.Key("Right", Now);
+	Expect(Fe.CreatorTab() == 3 || (Fe.CreatorTab() == 2 && Fe.Draft.Appearance.Height == std::min(ss::hero::MaxHeight, Height + 1)), "the body tab sets the height");
+	Fe.Key("Enter", Now);
+	Expect(Fe.CreatorStep() == Step::Review, "then the review");
+	Fe.Key("Escape", Now);
+	Expect(Fe.CreatorStep() == Step::Look, "Escape steps back");
+	Fe.Key("Enter", Now);
+	Fe.Key("Enter", Now);
+	Expect(H.NewGameName == "acehigh" && !Fe.IsOpen() && H.Who.FirstName == "Rosa Mar\xC3\xAD" "a" && H.Who.LastName == "Delgado" && H.Who.Story == Chosen && H.Who.Created,
+		"Begin starts a new career as the person made");
 
 	// Pause menu: settings round trip, then resume.
 	Fe.Open(ss::ui::FrontEnd::Page::Pause, Now);
@@ -611,6 +673,8 @@ void FrontEndScreens()
 	ss::ui::FrontEnd Fe(H);
 	Fe.Info.HasSave = true;
 	Fe.Info.HeroName = "grinder_3c";
+	Fe.Info.Person.Created = true;
+	Fe.Info.Person.Story = ss::hero::Background::Dropout;
 	Fe.Info.BankrollCents = 1864;
 	Fe.Info.Tournaments = 3;
 	Fe.Info.BestFinish = "12th of 180";
@@ -632,6 +696,64 @@ void FrontEndScreens()
 	Fe.Key("Enter", Now);
 	Now = Settle(Fe, Now, 1.0);
 	EmitMenu("menu_newgame", Fe, Now);
+	for (int I = 0; I < 20; ++I)
+	{
+		Fe.Key("Backspace", Now);
+	}
+	for (const char Ch : std::string("Rosa"))
+	{
+		Fe.Char(static_cast<uint32_t>(Ch), Now);
+	}
+	Fe.Key("Tab", Now);
+	for (int I = 0; I < 20; ++I)
+	{
+		Fe.Key("Backspace", Now);
+	}
+	for (const char Ch : std::string("Delgado"))
+	{
+		Fe.Char(static_cast<uint32_t>(Ch), Now);
+	}
+	Fe.Draft.Country = "MX";
+	Fe.Draft.Age = 31;
+	Fe.Key("Down", Now);
+	Fe.Key("Down", Now);
+	Fe.Key("Down", Now);
+	Now = Settle(Fe, Now, 0.5);
+	EmitMenu("menu_creator_identity", Fe, Now);
+	Fe.Key("Enter", Now);
+	Fe.Draft.Story = ss::hero::Background::Kitchen;
+	Now = Settle(Fe, Now, 0.8);
+	EmitMenu("menu_creator_background", Fe, Now);
+	Fe.Key("Enter", Now);
+	Fe.Draft.Appearance.Body = 1;
+	Fe.Draft.Appearance.Face = 4;
+	Fe.Draft.Appearance.Skin = 5;
+	Fe.Draft.Appearance.Hair = 8;
+	Fe.Draft.Appearance.HairColor = 0;
+	Fe.Draft.Appearance.FacialHair = 0;
+	Fe.Draft.Appearance.Outfit = 4;
+	Fe.Draft.Appearance.OutfitColor = 5;
+	Fe.Draft.Appearance.Glasses = 0;
+	Fe.Draft.Appearance.Hat = 0;
+	Fe.Draft.Appearance.Height = 168;
+	Fe.Key("Down", Now);
+	Fe.Key("Down", Now);
+	Now = Settle(Fe, Now, 0.8);
+	EmitMenu("menu_creator_look", Fe, Now);
+	Fe.Key("E", Now);
+	Fe.Key("E", Now);
+	Now = Settle(Fe, Now, 0.8);
+	EmitMenu("menu_creator_body", Fe, Now);
+	Fe.Key("E", Now);
+	Now = Settle(Fe, Now, 0.8);
+	EmitMenu("menu_creator_style", Fe, Now);
+	Fe.Key("Enter", Now);
+	Now = Settle(Fe, Now, 1.0);
+	EmitMenu("menu_creator_review", Fe, Now);
+	EmitMenu("menu_creator_review_ultrawide", Fe, Now + 0.05, 2520.0f);
+	Fe.Key("Escape", Now);
+	Fe.Key("Escape", Now);
+	Fe.Key("Escape", Now);
 	Fe.Key("Escape", Now);
 	Fe.Key("Down", Now);
 	Fe.Key("Enter", Now);
@@ -768,7 +890,7 @@ void AppScreens()
 	Now = Run(S, RL, Now, 0.3);
 	Emit("app_sleep", RL, Now);
 	RL.ShowSleepMenu(false);
-	// A night shift at the Quik Stop: the time-lapse, then the result.
+	// A night shift at the Lucky Penny: the time-lapse, then the result.
 	Expect(S.StartActivity("quikstop").empty(), "the night shift starts from the app");
 	Now = Run(S, RL, Now, 1.6);
 	Emit("app_skip", RL, Now);
@@ -1065,8 +1187,165 @@ void Clicks()
 	Expect(RL.CurrentApp() == ss::ui::RiverLine::App::ShiftLink, "the taskbar opens ShiftLink");
 	Frame(290.0f, 516.0f, true, true, false);
 	Frame(290.0f, 516.0f, false, false, true);
-	Expect(S.TimeSkip.Active && S.TimeSkip.Result.ActivityId == "quikstop", "Take shift starts the Quik Stop shift");
+	Expect(S.TimeSkip.Active && S.TimeSkip.Result.ActivityId == "quikstop", "Take shift starts the Lucky Penny shift");
 }
+/** Penny Drop on the laptop: the shelves, a cart, an order on its way, eating from the bag, the kitchen tap, the order arriving. */
+void PennyDropScreens()
+{
+	QuietHooks H;
+	ss::Session S(H, "ui-drop");
+	ss::ui::RiverLine RL(S);
+	TableMeasurer M;
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 4280;
+	S.Life.Hunger = 72.0;
+	S.Life.Thirst = 66.0;
+	S.Life.Energy = 41.0;
+	S.Life.Pantry["oodle-cup"] = 2;
+	double Now = 1.0;
+	auto Frame = [&](float X, float Y, bool Down, bool Pressed, bool Released) {
+		RL.UI.Ptr.Active = true;
+		RL.UI.Ptr.X = X;
+		RL.UI.Ptr.Y = Y;
+		RL.UI.Ptr.Down = Down;
+		RL.UI.Ptr.Pressed = Pressed;
+		RL.UI.Ptr.Released = Released;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		RL.Draw(C, Now);
+		RL.UI.Ptr.EndFrame();
+	};
+	auto Click = [&](float X, float Y) {
+		Frame(X, Y, true, true, false);
+		Now += 0.05;
+		Frame(X, Y, false, false, true);
+		Now += 0.05;
+	};
+	using App = ss::ui::RiverLine::App;
+	RL.UI.Ptr.Active = false;
+	RL.OpenApp(App::PennyDrop, Now);
+	Emit("drop_app", RL, Now + 1.0);
+	Now += 1.0;
+	// Two waters and a cola from the cooler, a hot dog from the grill.
+	Click(276.0f, 377.0f);
+	Click(276.0f, 377.0f);
+	Click(592.0f, 377.0f);
+	RL.ShowDropShelf(static_cast<int>(ss::store::Shelf::Hot));
+	Frame(0.0f, 0.0f, false, false, false);
+	Now += 0.6;
+	Click(276.0f, 377.0f);
+	Expect(RL.DropBasket().Count() == 4 && RL.DropBasket().Lines.size() == 3, "Penny Drop: four things in the cart");
+	RL.UI.Ptr.Active = false;
+	Emit("drop_cart", RL, Now + 0.3);
+	Now += 0.3;
+	const ss::Chips Total = ss::store::DeliveryTotal(RL.DropBasket());
+	Click(1290.0f, 512.0f);
+	Expect(S.Life.Deliveries.size() == 1 && RL.DropBasket().Empty() && S.BankrollCents == 4280 - Total, "Penny Drop: placing the order pays for it and clears the cart");
+	S.LobbyMinutes += 18.0;
+	S.Update(Now);
+	// Eat a noodle cup from the bag while you wait, and have a glass from the tap.
+	const double Hunger = S.Life.Hunger;
+	Click(580.0f, 798.0f);
+	Expect(S.Life.Hunger < Hunger - 20.0 && S.Life.Pantry["oodle-cup"] == 1, "Penny Drop: eating from the bag at home");
+	const double Thirst = S.Life.Thirst;
+	Click(268.0f, 897.0f);
+	Expect(S.Life.Thirst < Thirst - 10.0, "Penny Drop: a glass of tap water");
+	RL.UI.Ptr.Active = false;
+	Emit("drop_tracking", RL, Now + 0.2);
+	Now += 0.2;
+	S.LobbyMinutes += 60.0;
+	S.Update(Now);
+	Expect(S.Life.Deliveries.empty() && S.Life.Pantry["cascade"] == 2 && S.Life.Pantry["roller-dog"] == 1, "Penny Drop: the order arrives in the bag");
+	Emit("drop_home", RL, Now + 0.2);
+}
+
+/**
+ * Rent past the first month: due again, the final notice, evicted (the Bank's way back, the lobby, Kast locked
+ * with the rig in storage, the couch in the sleep menu), and moving back in from the Bank's button.
+ */
+void RentScreens()
+{
+	QuietHooks H;
+	ss::Session S(H, "ui-rent");
+	ss::ui::RiverLine RL(S);
+	TableMeasurer M;
+	S.CurrentScreen = ss::Screen::Lobby;
+	const double Day = ss::net::MinutesPerDay;
+	using App = ss::ui::RiverLine::App;
+	using Rent = ss::life::Rent;
+	RL.UI.Ptr.Active = false;
+	double Now = Run(S, RL, 1.0, 0.2);
+	auto At = [&](double World) {
+		S.LobbyMinutes += World - S.WorldMinutes();
+		Now = Run(S, RL, Now, 0.2);
+		S.Life.Hunger = 20.0;
+		S.Life.Thirst = 20.0;
+	};
+	auto Click = [&](float X, float Y) {
+		for (int K = 0; K < 2; ++K)
+		{
+			RL.UI.Ptr.Active = true;
+			RL.UI.Ptr.X = X;
+			RL.UI.Ptr.Y = Y;
+			RL.UI.Ptr.Down = K == 0;
+			RL.UI.Ptr.Pressed = K == 0;
+			RL.UI.Ptr.Released = K == 1;
+			ss::ui::DrawList L;
+			ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+			RL.Draw(C, Now);
+			RL.UI.Ptr.EndFrame();
+			Now += 0.05;
+		}
+		RL.UI.Ptr.Active = false;
+	};
+	// A rig, the first month paid; November is due.
+	S.BankrollCents = 300000;
+	Expect(S.Buy("ram-32").empty() && S.Buy("monitor-24").empty() && S.Buy("webcam-720").empty() && S.Buy("ring-light").empty(), "rent screens: a rig");
+	Expect(S.PayRent(), "rent screens: October paid");
+	S.BankrollCents = 61250;
+	At(22.0 * Day + 15.0 * 60.0);
+	Expect(S.Life.RentStage == Rent::Due, "rent screens: November is due");
+	RL.OpenApp(App::Bank, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_due", RL, Now);
+	// Missed: the final notice.
+	At(27.0 * Day + 11.0 * 60.0);
+	Expect(S.Life.RentStage == Rent::FinalNotice, "rent screens: the final notice");
+	RL.OpenApp(App::Bank, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_final", RL, Now);
+	// Evicted: what a key costs, the storage unit, the couch.
+	S.BankrollCents = 0;
+	At(30.0 * Day + 1.0);
+	Expect(S.Evicted(), "rent screens: evicted");
+	S.BankrollCents = 4500;
+	At(33.0 * Day + 16.0 * 60.0);
+	S.BankrollCents += 183000;
+	RL.OpenApp(App::Bank, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_evicted", RL, Now);
+	RL.OpenApp(App::Kast, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_kast_storage", RL, Now);
+	RL.OpenApp(App::ShiftLink, Now);
+	RL.ShowSleepMenu(true);
+	Now = Run(S, RL, Now, 0.6);
+	Emit("rent_couch", RL, Now);
+	RL.ShowSleepMenu(false);
+	RL.OpenApp(App::RiverLine, Now);
+	RL.OpenPage(ss::ui::RiverLine::Page::Career, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_career_evicted", RL, Now);
+	// Back in, from the button.
+	S.BankrollCents = 260000;
+	RL.OpenApp(App::Bank, Now);
+	Now = Run(S, RL, Now, 1.0);
+	Click(226.0f, 509.0f);
+	Expect(S.Life.RentStage == Rent::Paid && S.GearFx().CanStream() && S.BankrollCents == 260000 - (122500 + 107500), "rent screens: moving back in from the Bank");
+	Now = Run(S, RL, Now, 1.0);
+	Emit("rent_home", RL, Now);
+}
+
 /** GearDrop and Kast: the store, the locked studio on the laptop, the upgrade that unlocks it, a stream from the lobby to a
  * table, the channel, the directory, the end-of-stream card. */
 void StreamScreens()
@@ -1867,6 +2146,210 @@ void EventArtGallery()
 	}
 }
 
+/** The street's printed and glowing things: the store's sign, the OPEN neon, the street blades, the door, a poster. */
+void StreetProps()
+{
+	namespace P = ss::ui::props;
+	TableMeasurer M;
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+	SheetBackground(C, "Fifth and Market", "The Lucky Penny #212's signs and windows, and the corner's street blades (drawn once, shown on quads in the Street level)");
+	auto Place = [&](float X, float Y, float Scale, float W, float H, const std::function<void()>& Paint) {
+		C.Save();
+		C.Translate(X, Y);
+		C.Scale(Scale, Scale);
+		C.FillRect({0.0f, 0.0f, W, H}, ss::ui::Paint(ss::ui::Rgba(0, 0, 0, 0.25f)));
+		Paint();
+		C.Restore();
+	};
+	Place(48.0f, 120.0f, 0.62f, P::StoreSignW, P::StoreSignH, [&] { P::StoreSign(C); });
+	Place(48.0f, 340.0f, 0.62f, P::OpenSignW, P::OpenSignH, [&] { P::OpenSign(C); });
+	Place(500.0f, 340.0f, 0.5f, P::StreetSignW, P::StreetSignH, [&] { P::StreetSign(C, "FIFTH ST", "1800"); });
+	Place(500.0f, 460.0f, 0.5f, P::StreetSignW, P::StreetSignH, [&] { P::StreetSign(C, "MARKET ST", "200"); });
+	Place(500.0f, 580.0f, 0.75f, P::BuildingNumberW, P::BuildingNumberH, [&] { P::BuildingNumber(C, "1812"); });
+	Place(48.0f, 540.0f, 0.75f, P::DoorDecalW, P::DoorDecalH, [&] { P::DoorDecal(C); });
+	Place(1060.0f, 120.0f, 0.5f, P::PromoW, P::PromoH, [&] { P::Promo(C, "volt-rush", "2 FOR $5"); });
+	Place(1330.0f, 120.0f, 0.42f, P::PromoW, P::PromoH, [&] { P::Promo(C, "roller-dog", "$1.99"); });
+	Place(1330.0f, 520.0f, 0.42f, P::PromoW, P::PromoH, [&] { P::Promo(C, "night-owl-brew", "NEW"); });
+	SaveSheet("street_props", L);
+}
+
+/** The Lucky Penny's counter: the shelves, a basket on the receipt, a declined card, and the bag. */
+void StoreScreens()
+{
+	struct NoHooks : ss::SessionHooks
+	{
+	};
+	NoHooks H;
+	ss::Session S(H, "store-ui");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 1864;
+	S.Life.Hunger = 78.0;
+	S.Life.Thirst = 66.0;
+	S.Life.Energy = 31.0;
+	ss::ui::StoreCounter Counter(S);
+	TableMeasurer M;
+	auto Emit = [&](const std::string& Name, double Now, float Width = 1920.0f) {
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, Width, ss::ui::StoreCounter::Height, 1.0f);
+		C.FillRect({0.0f, 0.0f, Width, 1080.0f}, ss::ui::Paint::Linear({0.0f, 0.0f}, {Width, 1080.0f}, ss::ui::Hex(0x2a3a3c), ss::ui::Hex(0x10161c)));
+		Counter.Draw(C, Now);
+		Expect(!L.Cmds.empty(), "the counter drew something");
+		std::printf("  %-22s %6zu vertices %4zu commands\n", Name.c_str(), L.Vertices.size(), L.Cmds.size());
+		WriteList(Name, L);
+	};
+	double Now = 10.0;
+	Counter.Open(Now);
+	Expect(Counter.IsOpen() && Counter.Basket.Empty(), "the counter opens with an empty basket");
+	Now += 1.0;
+	Emit("store_counter", Now);
+	Counter.Key("Right", Now);
+	Counter.Key("Right", Now);
+	Counter.Key("Enter", Now);
+	Counter.Key("Enter", Now);
+	Counter.Key("E", Now);
+	Counter.Key("Enter", Now);
+	Counter.Key("E", Now);
+	Counter.Key("Enter", Now);
+	Expect(Counter.Basket.Count() == 4 && Counter.Shelf() == 2, "arrows, Enter and E fill the basket across shelves");
+	Now += 1.0;
+	Emit("store_counter_basket", Now);
+	Counter.Key("Tab", Now);
+	Expect(Counter.Basket.Empty() && S.Life.Pantry.size() == 3, "Tab pays and bags it");
+	Now += 0.5;
+	Emit("store_counter_paid", Now);
+	Counter.Key("Q", Now);
+	Counter.Key("Q", Now);
+	for (int I = 0; I < 9; ++I)
+	{
+		Counter.Key("Enter", Now);
+	}
+	S.BankrollCents = 120;
+	Counter.Key("Tab", Now);
+	Expect(!Counter.Basket.Empty(), "a declined card keeps the basket");
+	Now += 0.5;
+	Emit("store_counter_declined", Now);
+	Counter.Key("Escape", Now);
+	Expect(!Counter.IsOpen() && Counter.TakeLeave() && !Counter.TakeLeave(), "Escape walks away once");
+
+	// The walking HUD over a stand-in street (dark, a neon wash, the store's light spilling out).
+	{
+		ss::ui::DrawList Lh;
+		ss::ui::Canvas Ch(Lh, M, 1920.0f, 1080.0f, 1.0f);
+		Ch.FillRect({0.0f, 0.0f, 1920.0f, 1080.0f}, ss::ui::Paint::Linear({0.0f, 0.0f}, {0.0f, 1080.0f}, ss::ui::Hex(0x0b1220), ss::ui::Hex(0x05070b)));
+		Ch.FillCircle(1500.0f, 560.0f, 520.0f, ss::ui::Paint::Radial({1500.0f, 560.0f}, 0.0f, {1500.0f, 560.0f}, 520.0f, ss::ui::Rgba(255, 220, 160, 0.22f), 0.5f, ss::ui::Rgba(255, 200, 140, 0.06f), ss::ui::Rgba(0, 0, 0, 0.0f)));
+		Ch.FillCircle(420.0f, 420.0f, 460.0f, ss::ui::Paint::Radial({420.0f, 420.0f}, 0.0f, {420.0f, 420.0f}, 460.0f, ss::ui::Rgba(255, 46, 136, 0.16f), 0.5f, ss::ui::Rgba(255, 46, 136, 0.04f), ss::ui::Rgba(0, 0, 0, 0.0f)));
+		ss::ui::StreetHudInfo Hud;
+		Hud.Place = "FIFTH STREET";
+		Hud.Clock = "2:41 AM";
+		Hud.BankrollCents = 1864;
+		Hud.Life = &S.Life;
+		Hud.Prompt = "Go into the Lucky Penny";
+		Hud.Toasts.push_back({"Mom", "are you eating? you never answer when I ask if you're eating", 99.0});
+		Hud.Toasts.push_back({"Dee", "Tuesday game's on. Bring cash, not excuses.", 100.5});
+		Hud.HintsAt = 96.0;
+		ss::ui::DrawStreetHud(Ch, Hud, 101.0);
+		SaveSheet("street_hud", Lh);
+	}
+
+	// The open world's vitals block, over a street.
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+	SheetBackground(C, "Vitals and the shelves", "The open world's HUD block, every product's art, and the needs from fed to starving");
+	for (int I = 0; I < 3; ++I)
+	{
+		ss::life::State Lf;
+		Lf.Hunger = I == 0 ? 15.0 : I == 1 ? 68.0 : 94.0;
+		Lf.Thirst = I == 0 ? 20.0 : I == 1 ? 72.0 : 90.0;
+		Lf.Energy = I == 0 ? 88.0 : I == 1 ? 46.0 : 14.0;
+		C.FillRoundRect({48.0f + static_cast<float>(I) * 512.0f, 130.0f, 488.0f, 140.0f}, 12.0f, ss::ui::Paint(ss::ui::Rgba(4, 6, 10, 0.7f)));
+		ss::ui::DrawVitals(C, Lf, 72.0f + static_cast<float>(I) * 512.0f, 160.0f, 440.0f, 3.0);
+	}
+	const std::vector<ss::store::Item>& All = ss::store::Catalog();
+	for (size_t I = 0; I < All.size(); ++I)
+	{
+		const float X = 110.0f + static_cast<float>(I % 7) * 220.0f;
+		const float Y = 440.0f + static_cast<float>(I / 7) * 300.0f;
+		ss::ui::DrawProduct(C, All[I], X, Y, 180.0f);
+		C.Text(All[I].Name, X, Y + 128.0f, ss::ui::Ts(16.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
+	}
+	SaveSheet("store_products", L);
+}
+
+/** The character creator's portraits: a cast that covers every hairstyle, face, outfit, hat and pair of glasses. */
+void PortraitGallery()
+{
+	namespace hero = ss::hero;
+	using ss::ui::Hex;
+	struct Pick
+	{
+		const char* First;
+		int Age;
+		hero::Background Story;
+		hero::Look L;
+	};
+	auto Look = [](int Body, int Face, int Skin, int Eyes, int Brows, int Hair, int HairColor, int Facial, int Build, int Outfit, int OutfitColor, int Glasses, int Hat) {
+		hero::Look L;
+		L.Body = Body;
+		L.Face = Face;
+		L.Skin = Skin;
+		L.Eyes = Eyes;
+		L.Brows = Brows;
+		L.Hair = Hair;
+		L.HairColor = HairColor;
+		L.FacialHair = Facial;
+		L.Build = Build;
+		L.Outfit = Outfit;
+		L.OutfitColor = OutfitColor;
+		L.Glasses = Glasses;
+		L.Hat = Hat;
+		return L;
+	};
+	const Pick Cast[12] = {
+		{"Jesse", 24, hero::Background::Newcomer, Look(0, 0, 3, 1, 1, 3, 1, 1, 1, 0, 0, 0, 0)},
+		{"Rosa", 31, hero::Background::Kitchen, Look(1, 4, 5, 0, 3, 8, 0, 0, 1, 4, 5, 0, 0)},
+		{"Malik", 27, hero::Background::Hustler, Look(0, 1, 8, 1, 2, 1, 0, 4, 2, 1, 2, 0, 0)},
+		{"Yui", 22, hero::Background::Dropout, Look(1, 2, 1, 1, 0, 11, 0, 0, 0, 5, 6, 1, 0)},
+		{"Sean", 46, hero::Background::Bouncer, Look(0, 5, 1, 4, 2, 5, 4, 5, 3, 3, 1, 0, 0)},
+		{"Ama", 29, hero::Background::DealersKid, Look(1, 0, 9, 0, 1, 10, 0, 0, 1, 2, 3, 0, 0)},
+		{"Diego", 35, hero::Background::Hustler, Look(0, 3, 5, 0, 1, 6, 0, 3, 1, 4, 5, 4, 0)},
+		{"Freya", 26, hero::Background::Dropout, Look(1, 0, 0, 4, 1, 9, 5, 0, 0, 0, 4, 0, 1)},
+		{"Kenji", 58, hero::Background::DealersKid, Look(0, 1, 2, 1, 0, 4, 7, 2, 1, 2, 0, 2, 0)},
+		{"Nia", 33, hero::Background::Kitchen, Look(1, 4, 7, 2, 3, 7, 0, 0, 2, 1, 7, 0, 0)},
+		{"Marco", 41, hero::Background::Bouncer, Look(0, 1, 4, 3, 2, 0, 0, 5, 3, 0, 5, 0, 2)},
+		{"Theo", 20, hero::Background::Newcomer, Look(0, 4, 3, 2, 1, 2, 5, 0, 0, 5, 2, 3, 3)},
+	};
+	const char* const Labels[12] = {"textured crop, stubble", "shoulder length, leather", "buzz cut, short beard", "bob, round frames", "undercut, full beard",
+		"braids, flannel", "curls, goatee, shades", "ponytail, beanie", "side part, square frames", "afro, bomber", "shaved, ball cap", "crew cut, cap backwards"};
+	for (int Page = 0; Page < 2; ++Page)
+	{
+		TableMeasurer M;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		SheetBackground(C, Page == 0 ? "Character portraits" : "Character portraits, continued", "Live vector portraits from the creator's look: every hairstyle, face, jacket, hat and pair of glasses");
+		for (int I = 0; I < 6; ++I)
+		{
+			const Pick& P = Cast[Page * 6 + I];
+			hero::Character Who;
+			Who.FirstName = P.First;
+			Who.Age = P.Age;
+			Who.Story = P.Story;
+			Who.Appearance = P.L;
+			const float X = 48.0f + static_cast<float>(I % 3) * 512.0f;
+			const float Y = 124.0f + static_cast<float>(I / 3) * 432.0f;
+			const ss::ui::Rect R{X, Y, 488.0f, 412.0f};
+			C.FillRoundRect(R, 14.0f, ss::ui::Paint::Radial({X + 200.0f, Y + 120.0f}, 0.0f, {X + 244.0f, Y + 206.0f}, 330.0f, Hex(0x24304a), 0.5f, Hex(0x141b2c), Hex(0x0a0e18)));
+			C.PushClip(R);
+			ss::ui::DrawPortrait(C, Who, X + 244.0f, Y + 170.0f, 1.0f, 0.0);
+			C.PopClip();
+			C.FillRoundRect({X, Y + R.H - 54.0f, R.W, 54.0f}, 0.0f, ss::ui::Rgba(4, 6, 12, 0.82f));
+			C.Text(std::string(P.First) + ", " + std::to_string(P.Age), X + 20.0f, Y + R.H - 22.0f, ss::ui::Ts(20.0f, 800, Hex(0xffffff)));
+			C.Text(Labels[Page * 6 + I], X + R.W - 20.0f, Y + R.H - 22.0f, ss::ui::Ts(14.0f, 600, Hex(0x8b9bb4), ss::ui::Align::Right));
+		}
+		SaveSheet(Page == 0 ? "creator_portraits" : "creator_portraits_2", L);
+	}
+}
+
 /** Bracelets and rings as their winners keep them, and the frames champions wear at the tables. */
 void TrophyGallery()
 {
@@ -1972,9 +2455,14 @@ int main(int Argc, char** Argv)
 	ui_test::Avatars();
 	ui_test::EventArtGallery();
 	ui_test::TrophyGallery();
+	ui_test::PortraitGallery();
+	ui_test::StoreScreens();
+	ui_test::StreetProps();
 	ui_test::MultiScreens();
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();
+	ui_test::PennyDropScreens();
+	ui_test::RentScreens();
 	ui_test::LedScreens();
 	ui_test::FrontEndFlows();
 	ui_test::FrontEndScreens();

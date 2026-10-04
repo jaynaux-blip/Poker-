@@ -261,6 +261,24 @@ FAutoConsoleCommandWithWorldAndArgs WorldPreviewCmd(TEXT("ss.World.Preview"), TE
 			LogLines(S->WorldPreview(FMath::Clamp(Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 30, 1, 3650)));
 		}
 	}));
+
+FAutoConsoleCommandWithWorldAndArgs RentNextCmd(TEXT("ss.Rent.Next"),
+	TEXT("ss.Rent.Next: the clock to a minute before the next rent deadline (evicted: the storage unit's renewal), to watch it land. Not with tables open."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>&, UWorld* World) {
+		ss::Session* S = WorldSession(World);
+		if (!S || S->T)
+		{
+			return;
+		}
+		const double Target = S->Evicted() ? S->Life.StorageDue : S->Life.RentDeadline;
+		if (Target > S->WorldMinutes() + 1.0)
+		{
+			S->LobbyMinutes += Target - 1.0 - S->WorldMinutes();
+		}
+		static const char* Stages[4] = {"due", "paid", "final notice", "evicted"};
+		LogLines(std::string("Rent: ") + Stages[FMath::Clamp(static_cast<int32>(S->Life.RentStage), 0, 3)] + ", $" + std::to_string(S->Life.RentDueCents / 100) + " (bankroll $" +
+				 std::to_string(S->BankrollCents / 100) + "). A minute to go.");
+	}));
 #endif
 
 void SetConsoleInt(const TCHAR* Name, int32 Value)
@@ -273,6 +291,10 @@ void SetConsoleInt(const TCHAR* Name, int32 Value)
 /** What Dee texts after a night at her game, from what the Back Room passed back (cents, reads learned). */
 FString HomeTextFromOptions(const FString& Options)
 {
+	if (UGameplayStatics::HasOption(Options, TEXT("Street")))
+	{
+		return FString(); // back from the corner store: nothing for Dee to say
+	}
 	if (UGameplayStatics::HasOption(Options, TEXT("Live")))
 	{
 		// Home from the Embercrest: Dee saw it all from the box.
@@ -508,7 +530,7 @@ void ANightOneGameMode::TestNewCareer(const FString& ScreenName)
 	{
 		// As the title screen does: the menu closes, then the career starts.
 		Game->Menu.Close(RealTime);
-		StartNewCareer(ScreenName);
+		StartNewCareer(ScreenName, &Game->Menu.Draft);
 	}
 }
 
@@ -721,11 +743,19 @@ void ANightOneGameMode::ContinueCareer()
 	}
 }
 
-void ANightOneGameMode::StartNewCareer(const FString& ScreenName)
+void ANightOneGameMode::StartNewCareer(const FString& ScreenName, const ss::hero::Character* Who)
 {
 	if (Game)
 	{
-		Game->Session.ResetSave();
+		if (Who)
+		{
+			// A fresh save, then what the character's background starts them with.
+			Game->Session.NewCareer(*Who);
+		}
+		else
+		{
+			Game->Session.ResetSave();
+		}
 		Begin(ScreenName);
 	}
 }
@@ -856,6 +886,38 @@ void ANightOneGameMode::Begin(const FString& Name)
 		UE_LOG(LogNightOne, Log, TEXT("Back to %s, in progress"), UTF8_TO_TCHAR(Game->Session.LiveInProgress().c_str()));
 		Game->Session.ResumeLive();
 	}
+}
+
+bool ANightOneGameMode::GoOutside()
+{
+	if (bLeaving || !bStarted || !Game)
+	{
+		return false;
+	}
+	const ss::Session& S = Game->Session;
+	if (S.TableCount() > 0 || S.TimeSkip.Active)
+	{
+		// Not with tables running: the tournament plays on without you, and the blinds don't wait.
+		Game->Text("RiverLine", "You have tables open. Finish or unregister before you head out.");
+		return false;
+	}
+	// Coat on, down the stairs, out onto Fifth (the Street level).
+	Game->Session.Save();
+	bLeaving = true;
+	LeaveAt = RealTime + 1.4;
+	LeaveFor = TEXT("street");
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	{
+		if (PC->PlayerCameraManager)
+		{
+			PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 1.3f, FLinearColor::Black, true, true);
+		}
+	}
+	if (Audio)
+	{
+		Audio->PlayEffect(ss::audio::Effect::Scrape, 0.7f);
+	}
+	return true;
 }
 
 bool ANightOneGameMode::GoOut(const FString& ActivityId, int64 BuyInCents)
@@ -992,6 +1054,11 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	if (bLeaving && RealTime >= LeaveAt)
 	{
 		bLeaving = false;
+		if (LeaveFor == TEXT("street"))
+		{
+			UGameplayStatics::OpenLevel(this, FName(TEXT("Street")), true, FString::Printf(TEXT("From=%.0f"), Game->Session.WorldMinutes()));
+			return;
+		}
 		// The Back Room for Dee's game; the same map turns into the Embercrest's card room for a tournament (the event
 		// the session registered the player for).
 		const FString Options = ss::live::IsEmbercrest(std::string(TCHAR_TO_UTF8(*LeaveFor))) ? FString::Printf(TEXT("Live=%s"), *LeaveFor)
@@ -1094,18 +1161,20 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		Stage->SetRoomLights(Leds.On, LedColor, static_cast<float>(Leds.Level));
 		// What the player owns, set up in the room, and what their career has left on the windowsill. The PC's RGB
 		// follows the kit (or cycles through the rainbow on its own); the streaming lights come on while live.
+		// Evicted, the gear is in a storage unit: the desk is down to the laptop (GearFx already is).
 		const ss::gear::Effects& Fx = S.GearFx();
+		const bool bStored = S.Evicted();
 		FRoomGear Room;
-		Room.bMonitor = S.Owns("monitor-24");
-		Room.bMonitorWide = S.Owns("monitor-27");
+		Room.bMonitor = !bStored && S.Owns("monitor-24");
+		Room.bMonitorWide = !bStored && S.Owns("monitor-27");
 		Room.Towers = Fx.PcTier >= 3 ? 2 : (Fx.PcTier >= 2 ? 1 : 0);
 		Room.Cam = Fx.CamTier;
 		Room.Mic = Fx.MicTier;
 		Room.Lights = Fx.Lights;
 		Room.bMacroPad = Fx.MacroPad;
-		Room.bHeadphones = S.Owns("headphones");
-		Room.bPlant = S.Owns("plant");
-		Room.bCurtains = S.Owns("curtains");
+		Room.bHeadphones = !bStored && S.Owns("headphones");
+		Room.bPlant = !bStored && S.Owns("plant");
+		Room.bCurtains = !bStored && S.Owns("curtains");
 		Room.bRouter = Fx.Fiber;
 		Room.bTrophy = S.Life.LiveBestPlace == 1;
 		Room.bDeeChip = S.Life.BackRoomNetCents > 0;
@@ -1251,6 +1320,11 @@ void ANightOneGameMode::OnKey(const FString& Key)
 		{
 			Audio->SetMuted(!Audio->IsMuted());
 		}
+		return;
+	}
+	if (Key == TEXT("g"))
+	{
+		GoOutside();
 		return;
 	}
 	Game->Client.Key(std::string(TCHAR_TO_UTF8(*Key)));

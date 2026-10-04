@@ -1,8 +1,11 @@
 #include "ShortStack/UI/PropArt.h"
+#include "ShortStack/Game/Store.h"
+#include "ShortStack/UI/StoreCounter.h"
 #include "../StrictFloat.h"
 
 #include "ShortStack/UI/Ui.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace ss
@@ -160,6 +163,123 @@ void Keyboard(Canvas& C)
 		Y += RowH[Ri];
 	}
 }
+// ------------------------------------------------------------------ the street
+
+namespace propart_street
+{
+/** A coin with a clover, the Lucky Penny's mark. */
+void Penny(Canvas& C, float X, float Y, float R)
+{
+	C.FillCircle(X, Y, R, Paint::Linear({X - R, Y - R}, {X + R, Y + R}, Hex(0xf6c58f), Hex(0x8a4a1c)));
+	C.StrokeEllipse(X, Y, R * 0.84f, R * 0.84f, Rgba(107, 52, 18, 0.6f), R * 0.06f);
+	for (int I = 0; I < 4; ++I)
+	{
+		const float A = static_cast<float>(I) * 1.5707963f + 0.785398f;
+		C.FillCircle(X + std::cos(A) * R * 0.22f, Y - R * 0.06f + std::sin(A) * R * 0.22f, R * 0.2f, Hex(0x5a2a0c));
+	}
+	C.StrokePolyline({{X, Y + R * 0.05f}, {X + R * 0.08f, Y + R * 0.46f}}, false, Hex(0x5a2a0c), R * 0.08f, true);
+}
+
+void NeonText(Canvas& C, const std::string& Text, float X, float Y, float Size, const Color& Col, int Weight = 700)
+{
+	for (int R = 3; R >= 1; --R)
+	{
+		const float D = static_cast<float>(R) * Size * 0.02f;
+		const Color Halo{Col.R, Col.G, Col.B, 0.16f};
+		for (int K = 0; K < 8; ++K)
+		{
+			const float A = static_cast<float>(K) * 0.785398f;
+			C.Text(Text, X + D * std::cos(A), Y + D * std::sin(A), Ts(Size, Weight, Halo, Align::Center, Baseline::Middle));
+		}
+	}
+	C.Text(Text, X, Y, Ts(Size, Weight, Col, Align::Center, Baseline::Middle));
+	C.Text(Text, X, Y, Ts(Size, Weight, Rgba(255, 255, 255, 0.55f), Align::Center, Baseline::Middle));
+}
+} // namespace propart_street
+
+void StoreSign(Canvas& C)
+{
+	const float W = StoreSignW;
+	const float H = StoreSignH;
+	// A lightbox: warm white face, a red band, the coin.
+	C.FillRect({0.0f, 0.0f, W, H}, Paint::Linear({0.0f, 0.0f}, {0.0f, H}, Hex(0xfffaf0), Hex(0xf1e6cf)));
+	C.FillRect({0.0f, H - 64.0f, W, 64.0f}, Hex(0xd7263d));
+	C.FillRect({0.0f, 0.0f, W, 10.0f}, Hex(0x2b2723));
+	propart_street::Penny(C, 150.0f, 122.0f, 92.0f);
+	C.Text("LUCKY PENNY", 280.0f, 168.0f, Ts(150.0f, 900, Hex(0xd7263d)));
+	C.Text("#212", W - 70.0f, 120.0f, Ts(64.0f, 900, Hex(0x2b2723), Align::Right));
+	C.Text("FOOD \xC2\xB7 DRINKS \xC2\xB7 COFFEE \xC2\xB7 LOTTO \xC2\xB7 OPEN 24 HOURS", W * 0.5f, H - 32.0f, Ts(34.0f, 800, Hex(0xfffaf0), Align::Center, Baseline::Middle));
+	// Dust and a dead tube: it's been up a while.
+	C.FillRect({W * 0.72f, 12.0f, 120.0f, H - 78.0f}, Rgba(60, 50, 30, 0.08f));
+}
+
+void OpenSign(Canvas& C)
+{
+	C.StrokeRoundRect({20.0f, 20.0f, OpenSignW - 40.0f, OpenSignH - 40.0f}, 40.0f, Rgba(53, 211, 255, 0.85f), 6.0f);
+	propart_street::NeonText(C, "OPEN", OpenSignW * 0.5f, 120.0f, 150.0f, Hex(0xff3b3b), 900);
+	propart_street::NeonText(C, "24 HOURS", OpenSignW * 0.5f, 220.0f, 52.0f, Hex(0x35d3ff));
+}
+
+void StreetSign(Canvas& C, const std::string& Name, const std::string& Block)
+{
+	const float W = StreetSignW;
+	const float H = StreetSignH;
+	C.FillRoundRect({0.0f, 0.0f, W, H}, 18.0f, Hex(0x0f6b3a));
+	C.StrokeRoundRect({10.0f, 10.0f, W - 20.0f, H - 20.0f}, 12.0f, Hex(0xf2f5f0), 6.0f);
+	// Long names shrink to clear the block number.
+	const float Fit = std::min(136.0f, 136.0f * (W - 270.0f) / std::max(1.0f, C.Measure(Name, 136.0f, 800)));
+	C.Text(Name, 60.0f, H * 0.5f + Fit * 0.34f, Ts(Fit, 800, Hex(0xf2f5f0)));
+	C.Text(Block, W - 50.0f, H * 0.5f - 34.0f, Ts(46.0f, 800, Hex(0xf2f5f0), Align::Right));
+}
+
+void BuildingNumber(Canvas& C, const std::string& Number)
+{
+	C.FillRoundRect({0.0f, 0.0f, BuildingNumberW, BuildingNumberH}, 8.0f, Hex(0x1b1d22));
+	C.Text(Number, BuildingNumberW * 0.5f, 66.0f, Ts(64.0f, 900, Hex(0xd9c79a), Align::Center));
+}
+
+void DoorDecal(Canvas& C)
+{
+	const float W = DoorDecalW;
+	C.FillRoundRect({0.0f, 0.0f, W, DoorDecalH}, 16.0f, Rgba(255, 255, 255, 0.92f));
+	propart_street::Penny(C, W * 0.5f, 92.0f, 58.0f);
+	C.Text("LUCKY PENNY", W * 0.5f, 196.0f, Ts(46.0f, 900, Hex(0xd7263d), Align::Center));
+	C.Text("#212", W * 0.5f, 240.0f, Ts(30.0f, 800, Hex(0x2b2723), Align::Center));
+	C.FillRect({40.0f, 268.0f, W - 80.0f, 3.0f}, Hex(0x2b2723));
+	C.Text("OPEN", W * 0.5f, 330.0f, Ts(52.0f, 900, Hex(0x2b2723), Align::Center));
+	C.Text("24 HOURS", W * 0.5f, 382.0f, Ts(40.0f, 900, Hex(0x2b2723), Align::Center));
+	C.Text("7 DAYS A WEEK", W * 0.5f, 424.0f, Ts(26.0f, 700, Hex(0x6b6560), Align::Center));
+	C.Text("NO SHIRT \xC2\xB7 NO SHOES \xC2\xB7 NO SERVICE", W * 0.5f, 484.0f, Ts(17.0f, 700, Hex(0x6b6560), Align::Center));
+}
+
+void Promo(Canvas& C, const std::string& ItemId, const std::string& Deal)
+{
+	const store::Item* I = store::Find(ItemId);
+	const float W = PromoW;
+	const float H = PromoH;
+	const Color Body = I ? Hex(I->Color) : Hex(0x222222);
+	const Color Label = I ? Hex(I->Accent) : Hex(0xffffff);
+	C.PushClip({0.0f, 0.0f, W, H});
+	C.FillRect({0.0f, 0.0f, W, H}, Paint::Linear({0.0f, 0.0f}, {W, H}, Mix(Body, Hex(0x000000), 0.2f), Mix(Body, Hex(0x000000), 0.65f)));
+	// Rays behind the product.
+	for (int K = 0; K < 18; ++K)
+	{
+		const float A0 = static_cast<float>(K) * 0.349f;
+		C.FillPolygon({{W * 0.5f, H * 0.42f}, {W * 0.5f + std::cos(A0) * 900.0f, H * 0.42f + std::sin(A0) * 900.0f}, {W * 0.5f + std::cos(A0 + 0.17f) * 900.0f, H * 0.42f + std::sin(A0 + 0.17f) * 900.0f}},
+			Paint(Rgba(255, 255, 255, 0.05f)));
+	}
+	if (I)
+	{
+		DrawProduct(C, *I, W * 0.5f, H * 0.42f, 420.0f);
+		C.Text(I->Name, W * 0.5f, 110.0f, Ts(76.0f, 900, Label, Align::Center));
+	}
+	C.FillRect({0.0f, H - 230.0f, W, 230.0f}, Hex(0xffd23f));
+	C.FillRect({0.0f, H - 230.0f, W, 12.0f}, Hex(0xd7263d));
+	C.Text(Deal, W * 0.5f, H - 110.0f, Ts(96.0f, 900, Hex(0x1a1408), Align::Center));
+	C.Text("AT YOUR LUCKY PENNY", W * 0.5f, H - 46.0f, Ts(30.0f, 800, Hex(0xd7263d), Align::Center));
+	C.PopClip();
+}
+
 } // namespace props
 } // namespace ui
 } // namespace ss

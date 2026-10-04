@@ -48,12 +48,15 @@ public:
 
 	// From the menus (FNightOneGame's front-end hooks).
 	void ContinueCareer();
-	void StartNewCareer(const FString& ScreenName);
+	/** A new career; Who is the person the character creator made (none: the defaults). */
+	void StartNewCareer(const FString& ScreenName, const ss::hero::Character* Who = nullptr);
 	void ResumePlay();
 	void QuitToMainMenu();
 	void QuitToDesktop();
 	void ApplySettings(const ss::ui::GameSettings& Settings, bool bSave);
 
+	/** Leaves the apartment for the street outside (the Street level: the walk to the Lucky Penny). False when it can't. */
+	bool GoOutside();
 	/** Leaves the apartment for Dee's game across the street (the Back Room level), buying in with BuyInCents. */
 	bool GoOut(const FString& ActivityId, int64 BuyInCents);
 

@@ -121,7 +121,7 @@ bool SameEntry(const ss::life::LedgerEntry& A, const ss::life::LedgerEntry& B)
 
 int main(int Argc, char** Argv)
 {
-	const int Seeds = Argc > 1 ? std::atoi(Argv[1]) : 3;
+	const int Seeds = Argc > 1 ? std::atoi(Argv[1]) : 4;
 	const int Frames = Argc > 2 ? std::atoi(Argv[2]) : 15000;
 	const int First = Argc > 3 ? std::atoi(Argv[3]) : 0;
 	const std::vector<Spot> Spots = Hotspots();
@@ -137,6 +137,7 @@ int main(int Argc, char** Argv)
 		ss::Session S(H, "monkey-" + std::to_string(Seed));
 		ss::ui::RiverLine RL(S);
 		ss::Rng R("monkey-rng-" + std::to_string(Seed));
+		ss::Rng Dr(std::string("monkey-drop-") + std::to_string(Seed)); // Penny Drop's own draws, so the rest of the run is as before
 		if (Seed % 3 == 1)
 		{
 			S.BankrollCents = 5000;
@@ -154,6 +155,23 @@ int main(int Argc, char** Argv)
 			S.BankrollCents += 14900 + 28900;
 			S.Buy("monitor-24");
 			S.Buy("monitor-27");
+		}
+		// The fourth seed plays it locked out: rent missed twice, the rig in storage, Dee's couch, and the money to move
+		// back in (if the monkey finds the Bank's button).
+		if (Seed % 4 == 3)
+		{
+			S.BankrollCents = 50000;
+			S.Buy("ram-32");
+			S.Buy("monitor-24");
+			S.BankrollCents = 0;
+			S.Update(0.0);
+			S.LobbyMinutes += 8.0 * ss::net::MinutesPerDay + 1.0 - S.WorldMinutes();
+			S.Update(0.0);
+			if (!S.Evicted())
+			{
+				Fail("the evicted seed isn't evicted", Seed, 0);
+			}
+			S.BankrollCents = 250000;
 		}
 		double Now = 0.0;
 		ss::Chips PrevBank = S.BankrollCents;
@@ -250,6 +268,52 @@ int main(int Argc, char** Argv)
 			{
 				const double Pick = R.Next();
 				RL.OpenApp(Pick < 0.5 ? ss::ui::RiverLine::App::RiverLine : Pick < 0.75 ? ss::ui::RiverLine::App::Kast : ss::ui::RiverLine::App::GearDrop, Now);
+			}
+			if (S.CurrentScreen != ss::Screen::Boot && Dr.Chance(0.0002))
+			{
+				RL.OpenApp(ss::ui::RiverLine::App::PennyDrop, Now);
+			}
+			// Penny Drop: order now and then (what the bankroll can spare), eat and drink from the bag, the tap.
+			if (Dr.Chance(0.0015))
+			{
+				ss::store::Basket B;
+				const std::vector<ss::store::Item>& Cat = ss::store::Catalog();
+				for (int K = 1 + Dr.Int(4); K > 0; --K)
+				{
+					B.Add(Cat[static_cast<size_t>(Dr.Int(static_cast<int>(Cat.size())))].Id);
+				}
+				if (ss::store::DeliveryTotal(B) * 6 <= S.BankrollCents)
+				{
+					Reached["ordered"] += S.PlaceOrder(B).empty() ? 1 : 0;
+				}
+			}
+			if (!S.Life.Pantry.empty() && Dr.Chance(0.003))
+			{
+				auto It = S.Life.Pantry.begin();
+				std::advance(It, Dr.Int(static_cast<int>(S.Life.Pantry.size())));
+				Reached["ate"] += S.Consume(It->first).empty() ? 1 : 0;
+			}
+			if (Dr.Chance(0.002))
+			{
+				S.DrinkTapWater();
+			}
+			if (S.Life.Deliveries.size() > 3 || S.Life.Hunger < 0.0 || S.Life.Hunger > 100.0 || S.Life.Thirst < 0.0 || S.Life.Thirst > 100.0)
+			{
+				Fail("Penny Drop or the needs left their ranges", Seed, F);
+			}
+			for (const auto& Held : S.Life.Pantry)
+			{
+				if (Held.second <= 0 || !ss::store::Find(Held.first))
+				{
+					Fail("something impossible in the bag", Seed, F);
+				}
+			}
+			for (const ss::life::State::Delivery& Dv : S.Life.Deliveries)
+			{
+				if (Dv.ArriveAt < Dv.PlacedAt + 25.0 || Dv.ArriveAt > Dv.PlacedAt + 60.0 || Dv.ArriveAt + 1.0 < S.WorldMinutes() - 1440.0)
+				{
+					Fail("a delivery that can't arrive", Seed, F);
+				}
 			}
 			if (!S.GearFx().CanStream() && S.Streaming())
 			{
@@ -442,6 +506,22 @@ int main(int Argc, char** Argv)
 				Fail("the clock ran backwards (" + ss::Fixed(PrevWorld - World, 3) + " min)", Seed, F);
 			}
 			PrevWorld = World;
+			{
+				// Rent: a stage in range, nothing left due behind the clock, and while evicted the rig in storage.
+				const ss::life::State& Lf = S.Life;
+				const int Stage = static_cast<int>(Lf.RentStage);
+				const bool Out = S.Evicted();
+				if (Stage < 0 || Stage > 3 || Lf.RentDueCents <= 0 || (!Out && Lf.RentDeadline <= World - 1e-6) || (!Out && Lf.StorageDue != 0.0) ||
+					(Lf.StorageDue > 0.0 && Lf.StorageDue <= World - 1e-6))
+				{
+					Fail("the rent left its rules", Seed, F);
+				}
+				if (Out && (S.GearFx().CanStream() || S.GearFx().Tables != 2 || S.Streaming() || S.RestFactor() >= 1.0))
+				{
+					Fail("evicted, with the rig still set up", Seed, F);
+				}
+				Reached["evicted"] += Out ? 1 : 0;
+			}
 			if (S.CurrentScreen == ss::Screen::Table && !S.T)
 			{
 				Fail("table screen without a tournament", Seed, F);

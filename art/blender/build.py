@@ -26,7 +26,9 @@ ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chai
           # The Embercrest Casino's card room: its kit, and the crowd at its far tables.
           'cardroom', 'crowd',
           # What the room's people wear: caps, a beanie, a trilby, glasses and shades (fitted at runtime).
-          'wear', 'embercrest', 'table_ec']
+          'wear', 'embercrest', 'table_ec',
+          # The street and the Lucky Penny, and what the player wears.
+          'hydrant', 'trash_can', 'newsbox', 'streetlight', 'sedan', 'cooler', 'store_shelf', 'register', 'wearables']
 
 
 def args():

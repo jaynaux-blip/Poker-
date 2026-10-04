@@ -48,6 +48,8 @@ The whole online career is played from a first-person desk. The apartment is the
 - **Bed:** sleeping ends the day and restores energy.
 - **Door:** travel to the laundromat, the casino and the airport.
 
+**Outside the door (built, step 1 of the open world).** G at the desk walks you out of building 1812 onto Fifth Street, in first or third person (V switches). Two blocks down is the Lucky Penny #212, where Benny sells drinks and food over the counter. Hunger and thirst rise with the clock, and the clock keeps running outside. The scope, the controls and what comes next are in `docs/OPEN_WORLD.md`.
+
 **How the apartment changes**
 
 - It moves through three tiers: studio → loft → penthouse.
@@ -394,6 +396,14 @@ Skills give you information. They never make decisions for you.
 
 **Decision grading.** Every meaningful decision is graded against an EV estimate as Best, Good, Inaccuracy, Mistake or Blunder, and the grades roll up into an Accuracy score for the session. XP comes from Accuracy plus milestones (first cash, first final table, first title).
 
+**Your character (built).** A new career starts in the character creator:
+
+- **Who:** name, screen name, age and country.
+- **Background:** one of six backstories, each with a small permanent perk. A line cook's shifts pay more, a dealer's kid learns tells at the first showdown that confirms them, a dropout starts with bounty events open, a bouncer tilts slower, a hustler runs safer, a newcomer has savings.
+- **Look:** face, hair, body, height, jacket, glasses and hat.
+
+The player walks the street as that character, a MetaHuman matched to the look, and sees their own head at the table in third person.
+
 **Study**
 
 - **Hand replayer:** step through any hand on a 3D table and see the EV of the actions you didn't take.
@@ -422,12 +432,23 @@ Skills give you information. They never make decisions for you.
 
 **Getting on your feet (built).** Early on, the bankroll is $2.37 and the rent is $1,225 by Friday midnight. The laptop has apps beside RiverLine for the other ways to get there; each one fast-forwards the clock while the room goes from night to day and back:
 
-- **ShiftLink:** minimum-wage gig shifts. Night cashier at the Quik Stop ($7.25/hr), attendant at the Wash & Fold across the street ($8), delivery driver ($6 plus tips), warehouse loader ($9.50, early mornings). Safe, slow, exhausting.
+- **ShiftLink:** minimum-wage gig shifts. Night cashier at the Lucky Penny on Fifth ($7.25/hr), attendant at the Wash & Fold across the street ($8), delivery driver ($6 plus tips), warehouse loader ($9.50, early mornings). Safe, slow, exhausting.
 - **Burner:** Marcus pays $120 to $200 a drop-off (and $380 to $600 for the long run once you've proven yourself). Every run adds police heat, and heat raises the chance of getting picked up: a fine, a night in holding, and a debt to Marcus for the lost bag. Sam, a rich player who notices you once you cash, pays you to play his RiverLine account ("ghosting"). If site security catches it, your account is restricted for 24 hours.
 - **Bank:** the balance, the rent countdown and payment, and where every dollar came from and went.
 - **Sleep:** a nap or a full night. Energy drains while you're awake and with every shift; under 20% your time bank at the table is halved.
 - **GearDrop and Kast:** the store and the streaming site (see Online play). Streaming becomes a second career, slowly: it takes months of steady streaming to build a community, and by the time a channel is Partner, a month of streams pays the rent.
-- **Rent day:** the landlord collects at Friday midnight if the money is there. If not, it's a final notice with a $150 late fee and three more days, then eviction (Dee's couch). After that, $1,075 on the 1st of every month.
+- **Rent day:** the first month is $1,225 (the late fee is already in it), due Friday at midnight. After that it's $1,075 a month: due at midnight on October 31, then every 30 days.
+  - **Reminders.** A week out, a paid month turns due again and the landlord texts the amount and the date. More texts come at 9 AM the day before and at 6 PM on the day. The Bank's taskbar badge goes red in the last 24 hours.
+  - **Collection.** At the deadline the landlord takes it if it's in the account. You can also pay early from the Bank app, or pay a month ahead.
+  - **Late.** Miss it and it's a final notice: $150 more and three days. Paying in those three days doesn't move the next due date back.
+  - **Evicted.** Miss the final notice and the locks change:
+    - What you owed stays owed. A key back costs that plus a month up front: $2,450 after a first-month eviction.
+    - Your gear goes to a storage unit on Ninth. The laptop plays two tables with no gear bonuses, and there's no stream ("No apartment, no internet"). GearDrop won't sell you anything you'd need a room for.
+    - You sleep on Dee's couch: 30% less energy from a night or a nap.
+    - $10 a day goes to Dee's groceries, when you have it.
+    - Your security deposit paid the first 30 days of storage. After that the unit is $60 every 30 days, with a warning two days before. If it isn't paid, the gear is sold at a lien auction and it's gone.
+  - **Moving back in.** The Bank's **Move back in** button pays the back rent and the month. You get the key and the gear (whatever wasn't auctioned), and the next rent is due 30 days from that night.
+  - **On the desktop.** The apartment's desk empties while you're out. `ss.Rent.Next` jumps the clock to a minute before the next deadline, or the storage renewal while you're evicted.
 - **Career unlocks:** your first cash opens bounty events (progressive knockouts and mystery bounties), your first final table opens satellites (the steps to the RCOP Main Event pay tickets), and your first title opens six-max.
 - **The Night Shift pays:** at 6 AM the top 20 on the night's micro-stakes leaderboard are paid into your balance.
 
@@ -517,3 +538,4 @@ The tone is grounded drama.
 **Decided:**
 - Engine: Unreal Engine 5 with Blender for production; browser prototype first.
 - First slice: Night One. The browser prototype is playable.
+- The open world grows from the apartment door outward in small, dense steps (the street and the store first). Third person is a toggle everywhere, including at live tables. See `docs/OPEN_WORLD.md`.

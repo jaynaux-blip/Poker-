@@ -55,6 +55,7 @@ public:
 		Bank,      // balance, rent, history
 		GearDrop,  // the store: screens, the rig, stream gear, the apartment
 		Kast,      // streaming: the studio, the channel, the directory
+		PennyDrop, // the Lucky Penny's delivery app: order food, eat and drink at home
 	};
 	/** Kast's pages. */
 	enum class KastPage : int
@@ -99,6 +100,9 @@ public:
 	/** Opens the order card for an item (the confirm step). */
 	void ShowOrder(const std::string& ItemId) { OrderId = ItemId; }
 	const std::string& OrderShown() const { return OrderId; }
+	/** Penny Drop: the shelf showing, and the cart (for scripts and tests). */
+	void ShowDropShelf(int Shelf) { DropShelf = Shelf; }
+	const store::Basket& DropBasket() const { return DropCart; }
 	/** The LED kit's controls (Prism): colours, power, sync with the stream. Opens over GearDrop or Kast. */
 	void ShowRoomLights(bool On, double Now = 0.0) { LightsShown = On; LightsAt = Now; }
 	bool RoomLightsShown() const { return LightsShown; }
@@ -227,6 +231,13 @@ private:
 	double CardTabAt = 0.0;
 	// Kast (RiverLineKast.cpp).
 	void KastApp(double Now);
+	// Penny Drop (RiverLineDrop.cpp).
+	void PennyDropApp(double Now);
+	store::Basket DropCart;
+	int DropShelf = 0;
+	std::string DropNote;
+	bool DropNoteBad = false;
+	double DropNoteAt = -100.0;
 	void KastHeader(double Now);
 	void KastStudio(double Now);
 	void KastCommunity(double Now);

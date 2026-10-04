@@ -6,6 +6,7 @@
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
+#include "ShortStack/Game/Store.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Tournament.h"
@@ -227,6 +228,8 @@ struct SaveData
 {
 	Chips BankrollCents = 237;
 	std::string HeroName = "grinder_3c";
+	/** The person behind the screen name (the character creator's; "hero" lines). */
+	hero::Character Person;
 	std::vector<HistoryEntry> History;
 	std::vector<std::string> TextsSeen;
 	double ClockMinutes = 2.0 * 60.0 + 7.0; // the lobby clock
@@ -305,6 +308,8 @@ public:
 	Chips BankrollCents = 237;
 	std::string HeroName = "grinder_3c";
 	std::vector<HistoryEntry> History;
+	/** Who the player made in the character creator (defaults, not Created, for a career from before it). */
+	hero::Character Person;
 
 	// ------------------------------------------------------------ ui state
 	ss::Screen CurrentScreen = ss::Screen::Boot;
@@ -358,6 +363,27 @@ public:
 
 	SHORTSTACKCORE_API void Save();
 	SHORTSTACKCORE_API void ResetSave();
+	// The Lucky Penny #212 (the corner store): pay at the counter, then eat and drink from the bag.
+	/** Pays for the basket from the bankroll and puts it in the bag; "" or why not ("Card declined."). */
+	SHORTSTACKCORE_API std::string Checkout(const store::Basket& B);
+	/** Eats or drinks one of an item in the bag; "" or why not. */
+	SHORTSTACKCORE_API std::string Consume(const std::string& ItemId);
+	/** What to reach for in the bag: the food when hunger is worse, the drink when thirst is (an id, or ""). */
+	SHORTSTACKCORE_API std::string BagPick() const;
+	/** What the clerk says right now. */
+	SHORTSTACKCORE_API std::string ClerkSays(const store::Basket& B) const;
+	/**
+	 * Penny Drop (the laptop): orders the basket to the door at the app's prices, plus the fee and tax; it
+	 * arrives 25 to 45 minutes later (the clock brings it, into the bag). "" or why not.
+	 */
+	SHORTSTACKCORE_API std::string PlaceOrder(const store::Basket& B);
+	/** A glass of water from the kitchen tap (at home): free, a little at a time, and never past TapFloor. "" or why not. */
+	SHORTSTACKCORE_API std::string DrinkTapWater();
+	static constexpr double TapFloor = 40.0;
+	/** Minutes until the tap is worth another glass (0: now). */
+	SHORTSTACKCORE_API double TapWait() const;
+	/** A new career for this character: a fresh save, then what their background starts them with. */
+	SHORTSTACKCORE_API void NewCareer(const hero::Character& Who);
 	void OnBoot();
 
 	bool CanAfford(const LobbyEvent& Ev) const;
@@ -450,7 +476,14 @@ public:
 	SHORTSTACKCORE_API std::string LiveInProgress() const;
 	/** Back to that tournament's room, straight to the seat (no bus, nothing dealt without them while the game was closed). */
 	SHORTSTACKCORE_API std::string ResumeLive();
+	/** Pays what's due now (or, paid up, next month early). Late payment doesn't move the next month's due date. */
 	SHORTSTACKCORE_API bool PayRent();
+	/** The locks changed (life::Rent::Evicted): on Dee's couch, the gear in storage, no stream. */
+	bool Evicted() const { return Life.RentStage == life::Rent::Evicted; }
+	/** Evicted: pays the back rent and a month up front (Life.RentDueCents), gets the key and the gear back. "" or why not. */
+	SHORTSTACKCORE_API std::string MoveBackIn();
+	/** What a night's sleep gives back, as a multiple (a better bed and dark curtains add; Dee's couch takes away). */
+	SHORTSTACKCORE_API double RestFactor() const;
 	SHORTSTACKCORE_API bool PayDebt();
 	SHORTSTACKCORE_API life::Context LifeContext() const;
 	/** Formats unlocked so far (net::Unlock bits). */
@@ -675,6 +708,9 @@ private:
 	void CheckCalendar(double From, double To, bool Awake);
 	void PayNightShift(double End);
 	void RentDeadline();
+	void SettleRent();
+	void Evict();
+	void Auction();
 	void FinishSkip();
 	void BustBanner(const TPlayer& Hero, const char* NoCashSub);
 	void RefreshGear();

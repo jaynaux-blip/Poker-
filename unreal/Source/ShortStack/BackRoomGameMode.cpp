@@ -192,6 +192,11 @@ void ABackRoomPawn::HandleInput(float RealDt)
 	{
 		return;
 	}
+	// V: first or third person.
+	if (PC->WasInputKeyJustPressed(EKeys::V))
+	{
+		bThirdPerson = !bThirdPerson;
+	}
 	// Peek: hold to lift the corners.
 	const bool bPeek = bTestPeek || PC->IsInputKeyDown(EKeys::SpaceBar) || PC->IsInputKeyDown(EKeys::LeftMouseButton);
 	PeekBlend = Ease(PeekBlend, bPeek ? 1.0f : 0.0f, 6.0f, RealDt);
@@ -768,6 +773,29 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	P.VignetteIntensity = 0.45f + 0.5f * Focus + 0.55f * Racing + 0.18f * Racing * Kick;
 	P.ColorSaturation = FVector4(1.0, 1.0, 1.0, 1.0 - 0.38 * Racing);
 	P.SceneFringeIntensity = 1.1f * Racing + 0.7f * Racing * Kick;
+
+	// Third person: the camera eases back and up over the right shoulder, turning with the look, the hero's own
+	// head in the shot. Peeking and Focus pull it back in close (they're the first person's business). The camera
+	// is the pawn's root, put back at the eyes at the top of each tick, so there's nothing to restore.
+	const float ThirdWant = bThirdPerson ? FMath::Clamp(1.0f - PeekBlend - Focus, 0.0f, 1.0f) : 0.0f;
+	ThirdBlend = Ease(ThirdBlend, ThirdWant, 5.0f, RealDt);
+	if (Me)
+	{
+		Me->ShowHeroHead(ThirdBlend > 0.2f);
+	}
+	if (ThirdBlend > 0.001f)
+	{
+		const float B = ThirdBlend * ThirdBlend * (3.0f - 2.0f * ThirdBlend);
+		const FVector Dir = FRotator(FMath::Clamp(Smoothed.Pitch, -40.0f, 10.0f) - 10.0f, Smoothed.Yaw, 0.0f).Vector();
+		const FVector Side = FVector::CrossProduct(FVector::UpVector, Dir).GetSafeNormal();
+		const FVector Back = Eye - Dir * 170.0 + FVector(0.0, 0.0, 42.0) + Side * 36.0;
+		const FVector LookAt = Eye + Smoothed.Vector() * 160.0;
+		Camera->SetWorldLocationAndRotation(FMath::Lerp(GetActorLocation(), Back, static_cast<double>(B)),
+			FQuat::Slerp(GetActorQuat(), (LookAt - Back).Rotation().Quaternion(), B));
+		Camera->SetFieldOfView(FMath::Lerp(Camera->FieldOfView, 68.0f, B));
+		P.DepthOfFieldFocalDistance = FMath::Lerp(P.DepthOfFieldFocalDistance, static_cast<float>(FVector::Dist(Back, LookAt)), B);
+		P.DepthOfFieldFstop = FMath::Lerp(P.DepthOfFieldFstop, 5.6f, B);
+	}
 
 	if (bExtCam)
 	{
@@ -2134,6 +2162,7 @@ void ABackRoomGameMode::SeatEveryone()
 		{
 			Table->Reads.Add(FString(UTF8_TO_TCHAR(R.first.c_str())), R.second);
 		}
+		Table->ReadWeight = FMath::Max(1, static_cast<int32>(ss::hero::PerksOf(Save->Person).ReadWeight));
 		// Each night at the table, the pressure gets to you a little less.
 		Table->Composure.Sensitivity = FMath::Clamp(1.0f - 0.06f * PastNights, 0.65f, 1.0f);
 	}

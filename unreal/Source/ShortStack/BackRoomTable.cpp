@@ -1518,8 +1518,9 @@ void ABackRoomTable::ConfirmSightings(const ABackRoomPlayer* Shown)
 			continue;
 		}
 		int32& Count = Reads.FindOrAdd(S.Key);
-		++Count;
-		if (Count == 2)
+		const int32 Before = Count;
+		Count += FMath::Max(1, ReadWeight);
+		if (Before < 2 && Count >= 2)
 		{
 			++LearnedThisNight;
 			Whisper(FString::Printf(TEXT("READ LEARNED  %s: %s means %s."), *Name, *TellPhrase(S.Tell), MeaningWord(S.Means)));

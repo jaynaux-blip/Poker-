@@ -40,6 +40,7 @@ public:
 	virtual void UiSound(ss::SoundId Id, double Volume) override;
 	virtual void Continue() override;
 	virtual void NewGame(const std::string& ScreenName) override;
+	virtual void NewCareer(const std::string& ScreenName, const ss::hero::Character& Who) override;
 	virtual void Resume() override;
 	virtual void QuitToMenu() override;
 	virtual void QuitGame() override;

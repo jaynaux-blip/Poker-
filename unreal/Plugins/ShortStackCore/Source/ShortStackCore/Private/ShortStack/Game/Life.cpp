@@ -51,7 +51,7 @@ std::vector<Activity> Build()
 		L.push_back(A);
 	};
 	// ShiftLink: the gig app. Minimum wage, steady, exhausting.
-	Add("quikstop", Kind::Job, "Night cashier", "Quik Stop #212", 6.0, 7.25, 0.0, 6.0, 30.0, 0.0, 0.0, 21 * 60, 3 * 60, 0xff7a1a,
+	Add("quikstop", Kind::Job, "Night cashier", "Lucky Penny #212", 6.0, 7.25, 0.0, 6.0, 30.0, 0.0, 0.0, 21 * 60, 3 * 60, 0xff7a1a,
 		"Graveyard shift at the gas station on Fifth. Scratch tickets, energy drinks, the occasional weirdo.");
 	Add("washfold", Kind::Job, "Attendant", "Wash & Fold", 6.0, 8.00, 0.0, 4.0, 24.0, 0.0, 0.0, 6 * 60, 16 * 60, 0xff2e88,
 		"The laundromat across the street. Folding, mopping, change for the machines. Dee's regulars tip in quarters.");
@@ -236,11 +236,26 @@ std::string Blocked(const Activity& A, const State& L, const Context& Ctx)
 	return "";
 }
 
+double NeedsDrain(const State& L)
+{
+	return std::max(0.0, L.Hunger - 70.0) / 30.0 * 2.5 + std::max(0.0, L.Thirst - 70.0) / 30.0 * 3.0;
+}
+
+const char* HungerWord(double Hunger)
+{
+	return Hunger >= 85.0 ? "Starving" : Hunger >= 65.0 ? "Hungry" : Hunger >= 40.0 ? "Peckish" : "Fed";
+}
+
+const char* ThirstWord(double Thirst)
+{
+	return Thirst >= 85.0 ? "Parched" : Thirst >= 65.0 ? "Thirsty" : Thirst >= 40.0 ? "Dry" : "Hydrated";
+}
+
 double RiskOf(const Activity& A, const State& L)
 {
 	switch (A.Type)
 	{
-	case Kind::Hustle: return std::min(0.85, A.Risk + L.Heat * 0.004);
+	case Kind::Hustle: return std::min(0.85, std::max(0.0, A.Risk + L.Heat * 0.004 + L.Perks.HustleRisk));
 	case Kind::Ghost: return std::min(0.85, A.Risk + 0.06 * static_cast<double>(L.Ghosts));
 	default: return 0.0;
 	}
@@ -258,10 +273,12 @@ Outcome Resolve(const Activity& A, const State& L, double Start, Rng& R, Chips B
 	{
 	case Kind::Job:
 	{
-		const Chips Wage = static_cast<Chips>(std::llround(static_cast<double>(A.WageCents) * A.Hours));
-		O.Money = Wage + Flat;
+		// A line cook knows how to work a shift: the wage and the tips both go further.
+		const Chips Wage = static_cast<Chips>(std::llround(static_cast<double>(A.WageCents) * A.Hours * L.Perks.JobPay));
+		const Chips Extra = static_cast<Chips>(std::llround(static_cast<double>(Flat) * L.Perks.JobPay));
+		O.Money = Wage + Extra;
 		O.Title = "Shift done";
-		O.Body = std::to_string(static_cast<int>(A.Hours)) + " hours at " + A.Place + ". " + Money(Wage) + " in wages" + (Flat > 0 ? " and " + Money(Flat) + (A.Id == "dashdrop" ? " in tips." : " on the side.") : ".");
+		O.Body = std::to_string(static_cast<int>(A.Hours)) + " hours at " + A.Place + ". " + Money(Wage) + " in wages" + (Extra > 0 ? " and " + Money(Extra) + (A.Id == "dashdrop" ? " in tips." : " on the side.") : ".");
 		break;
 	}
 	case Kind::Hustle:

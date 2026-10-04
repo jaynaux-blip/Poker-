@@ -49,6 +49,8 @@ struct FrontEndInfo
 {
 	bool HasSave = false;
 	std::string HeroName = "grinder_3c";
+	/** The person behind it (Created false for a career from before the creator). */
+	hero::Character Person;
 	Chips BankrollCents = 237;
 	int Tournaments = 0;
 	std::string BestFinish; // "12th of 180"
@@ -72,6 +74,8 @@ public:
 	virtual void UiSound(SoundId /*Id*/, double /*Volume*/) {}
 	virtual void Continue() {}
 	virtual void NewGame(const std::string& /*ScreenName*/) {}
+	/** A new career for the character the creator made. Hosts from before the creator get NewGame. */
+	virtual void NewCareer(const std::string& ScreenName, const hero::Character& /*Who*/) { NewGame(ScreenName); }
 	virtual void Resume() {}
 	virtual void QuitToMenu() {}
 	virtual void QuitGame() {}
@@ -114,6 +118,19 @@ public:
 	bool Gamepad = false;
 	/** The screen name typed on the New Game page. */
 	std::string ScreenName = "grinder_3c";
+	/** The person the character creator is making (New Game). */
+	hero::Character Draft;
+	/** The creator's steps, in order. */
+	enum class CreatorStage : int
+	{
+		Identity,
+		Background,
+		Look,
+		Review,
+	};
+	CreatorStage CreatorStep() const { return Stage; }
+	int CreatorField() const { return Field; }
+	int CreatorTab() const { return LookTab; }
 
 	/** Attract at boot, Main after quitting to the menu, Pause during play. */
 	SHORTSTACKCORE_API void Open(Page Target, double Now);
@@ -168,6 +185,28 @@ private:
 	void ChangeSetting(int RowIndex, int Delta, bool Wrap);
 	void BeginNewGame(double Now);
 	bool NameValid() const;
+
+	// The character creator (FrontEndCreator.cpp): New Game's four steps around a live portrait.
+	void CreatorOpen(double Now);
+	void CreatorGo(CreatorStage Target, double Now);
+	void CreatorNext(double Now);
+	void CreatorBack(double Now);
+	void CreatorKey(const std::string& Name, double Now);
+	void CreatorChar(uint32_t Codepoint, double Now);
+	void CreatorRandomize(bool LookOnly, double Now);
+	void CreatorChange(int Delta, bool Wrap);
+	void CreatorRefuse(const std::string& Why, double Now);
+	std::string CreatorProblem() const;
+	std::string* FocusedText();
+	int CreatorRows() const;
+	void CreatorHeader(double Now);
+	void CreatorPortrait(const Rect& R, double Now);
+	void IdentityStep(double Now);
+	void BackgroundStep(double Now);
+	void LookStep(double Now);
+	void ReviewStep(double Now);
+	void PlayersCard(const Rect& R, double Now);
+	bool TextBox(const Rect& R, const std::string& Label, const std::string& Value, int Index, double Now);
 	void Sound(SoundId Id, double Volume) { Hooks.UiSound(Id, Volume); }
 
 	// Drawing (Draw sets C, ViewW, Fade and PageTime for the page being drawn).
@@ -215,6 +254,14 @@ private:
 	float PressY = -1.0f;
 	bool SliderDrag = false;
 	double NameErrorAt = -10.0;
+	CreatorStage Stage = CreatorStage::Identity;
+	int Field = 0;
+	int LookTab = 0;
+	double StageAt = 0.0;
+	std::string Refusal;
+	double RefusalAt = -10.0;
+	int Creations = 0;
+	int Rolls = 0;
 	double CreditsOffset = 0.0;
 	double CreditsManualAt = -10.0;
 

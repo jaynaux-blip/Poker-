@@ -159,7 +159,7 @@ void Tracker(Canvas& C, const Session& S, double Now)
 		{
 		case life::Rent::Paid: Big = "PAID"; Col = pal::Green; Sub = "Next: " + Money(L.RentDueCents) + " in " + std::to_string(static_cast<int>(std::max(0.0, Left) / 1440.0)) + " days"; break;
 		case life::Rent::FinalNotice: Col = pal::Red; Sub = "FINAL NOTICE \xC2\xB7 " + HoursMinutes(Left) + " left"; break;
-		case life::Rent::Evicted: Big = "EVICTED"; Col = pal::Red; Sub = "The locks are changed."; break;
+		case life::Rent::Evicted: Big = "EVICTED"; Col = pal::Red; Sub = "A key back: " + Money(L.RentDueCents); break;
 		default:
 			Col = Left < 1440.0 ? pal::Orange : pal::Ink;
 			Sub = Left > 1440.0 ? "Due in " + std::to_string(static_cast<int>(Left / 1440.0)) + "d " + std::to_string(static_cast<int>(std::fmod(Left, 1440.0) / 60.0)) + "h"
@@ -411,7 +411,7 @@ void Study(Canvas& C, const Session& S, double Now)
 		{
 			const float T = static_cast<float>(Clamp01(Since * 3.0 - (R + Cc) * 0.06));
 			const Color Col = Mix(Shade(Charts[Prev][R][Cc], R == Cc), Shade(Charts[Pos][R][Cc], R == Cc), T);
-			const Rect Rc{Gx + Cc * Cell, Gy + R * Cell, Cell - 3.0f, Cell - 3.0f};
+			const Rect Rc{Gx + static_cast<float>(Cc) * Cell, Gy + static_cast<float>(R) * Cell, Cell - 3.0f, Cell - 3.0f};
 			C.FillRoundRect(Rc, 6.0f, Paint::Solid(Col));
 			const int Hi = std::min(R, Cc);
 			const int Lo = std::max(R, Cc);
