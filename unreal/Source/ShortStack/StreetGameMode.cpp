@@ -38,6 +38,7 @@ using namespace StreetGameDetail;
 
 FStreetGame::FStreetGame(AStreetGameMode& InMode, const ss::SaveData* Loaded, const std::string& Seed)
 	: Mode(InMode)
+	, bCareer(Loaded != nullptr)
 	, Session(*this, Seed, Loaded)
 	, Counter(Session)
 	, Menu(*this)
@@ -62,10 +63,10 @@ void FStreetGame::Text(const std::string& From, const std::string& Body)
 
 void FStreetGame::Save(const ss::SaveData& Data)
 {
-	if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::CreateSaveGameObject(UNightOneSaveGame::StaticClass())))
+	// The career file the desk reads when the player gets home (an old-style slot here would be a second, stale career).
+	if (bCareer)
 	{
-		Obj->Data = Utf8ToFString(Data.Serialize());
-		UGameplayStatics::SaveGameToSlot(Obj, UNightOneSaveGame::SlotName(), 0);
+		Saver.Submit(Data);
 	}
 }
 
@@ -82,12 +83,14 @@ void FStreetGame::Resume()
 void FStreetGame::QuitToMenu()
 {
 	Session.Save();
+	Saver.Flush();
 	UGameplayStatics::OpenLevel(&Mode, FName(TEXT("NightOne")), true, TEXT("Menu"));
 }
 
 void FStreetGame::QuitGame()
 {
 	Session.Save();
+	Saver.Flush();
 	UKismetSystemLibrary::QuitGame(&Mode, UGameplayStatics::GetPlayerController(&Mode, 0), EQuitPreference::Quit, false);
 }
 
@@ -112,14 +115,8 @@ void AStreetGameMode::InitGame(const FString& MapName, const FString& Options, F
 	Super::InitGame(MapName, Options, ErrorMessage);
 	StartFrom = UGameplayStatics::HasOption(Options, TEXT("Start")) ? UGameplayStatics::ParseOption(Options, TEXT("Start")) : TEXT("home");
 	ss::SaveData Loaded;
-	bool bLoaded = false;
-	if (UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SlotName(), 0))
-	{
-		if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SlotName(), 0)))
-		{
-			bLoaded = ss::SaveData::Parse(FStringToUtf8(Obj->Data), Loaded);
-		}
-	}
+	std::string CareerText;
+	const bool bLoaded = CareerSave::LoadText(CareerText) && ss::SaveData::Parse(CareerText, Loaded);
 	const std::string Seed = FStringToUtf8(FString::Printf(TEXT("street:%lld"), FDateTime::Now().GetTicks()));
 	Game = MakeUnique<FStreetGame>(*this, bLoaded ? &Loaded : nullptr, Seed);
 	if (UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SettingsSlotName(), 0))
@@ -221,6 +218,11 @@ void AStreetGameMode::EndPlay(const EEndPlayReason::Type Reason)
 	if (Game && !bGoingHome)
 	{
 		Game->Session.Save();
+	}
+	// The save being written (and any waiting) lands before the next scene reads it.
+	if (Game)
+	{
+		Game->Saver.Flush();
 	}
 	if (UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
 	{
@@ -426,10 +428,22 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 	}
 	const double Dt = FMath::Clamp(static_cast<double>(DeltaSeconds), 0.0, 0.05);
 	RealTime += Dt;
+	if (!Game->bCareer)
+	{
+		// Nobody to walk out as: the title screen makes (or continues) a career.
+		if (!bBackToTitle)
+		{
+			bBackToTitle = true;
+			UE_LOG(LogStreet, Warning, TEXT("No career saved: back to the title"));
+			UGameplayStatics::OpenLevel(this, FName(TEXT("NightOne")), true);
+		}
+		return;
+	}
 	if (!Game->Menu.IsPaused())
 	{
 		Game->Session.Update(RealTime);
 	}
+	Game->Saver.Tick();
 	AShortStackCharacter* Hero = GetHero();
 	if (Hero && Stage)
 	{

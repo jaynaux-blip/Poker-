@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CareerSave.h"
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
@@ -23,6 +24,10 @@ public:
 	FStreetGame(AStreetGameMode& InMode, const ss::SaveData* Loaded, const std::string& Seed);
 
 	AStreetGameMode& Mode;
+	/** The career's own save (CareerSave.h, the same file the desk and the Back Room use), written on a worker. */
+	FCareerSaver Saver;
+	/** Whether there was a career to walk out with (the level opened on its own, in the editor, has none). */
+	bool bCareer = false;
 	ss::Session Session;
 	ss::ui::StoreCounter Counter;
 	ss::ui::FrontEnd Menu;
@@ -61,6 +66,8 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
+	/** No career to walk out with: the title has been asked for. */
+	bool bBackToTitle = false;
 	virtual void RestartPlayer(AController* NewPlayer) override;
 
 	// From AStreetPlayerController, each frame or on a key.
