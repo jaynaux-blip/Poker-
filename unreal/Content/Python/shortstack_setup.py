@@ -527,12 +527,45 @@ def build_widget_lit(force):
     return _finish(mat)
 
 
+def build_lens(force):
+    """Clear spectacle lenses for the street's glasses: a thin glossy film the eyes show through, more opaque toward the
+    rim as glass is. Glass has next to no colour of its own: what shows is reflection (a streetlight's glint, the store's
+    tubes) and a darkening at grazing angles, so the base colour is near black; a light one lit by the street reads as a
+    milky film over the eyes. The lens baked into the glasses' glb is a dark mirror (the bake has no transmission); the game puts
+    this on in its place (AShortStackCharacter), and keeps the baked one for the shades."""
+    mat = _new_material("M_Lens", force)
+    if not mat:
+        return
+    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    mat.set_editor_property("two_sided", True)
+    try:
+        # Lit per pixel, so a streetlight or the store's tubes glint off it.
+        mat.set_editor_property("translucency_lighting_mode", unreal.TranslucencyLightingMode.TLM_SURFACE_PER_PIXEL_LIGHTING)
+    except Exception as exc:  # the default volumetric lighting still reads as glass, just without the glint
+        unreal.log_warning(f"ShortStack: M_Lens keeps volumetric lighting ({exc})")
+    tint = _vector(mat, "Tint", (0.012, 0.016, 0.02), -700, -200)
+    clear = _scalar(mat, "Opacity", 0.06, -700, 0)
+    rim = _scalar(mat, "RimOpacity", 0.5, -700, 100)
+    fresnel = _expr(mat, unreal.MaterialExpressionFresnel, -700, 250)
+    fresnel.set_editor_property("exponent", 4.0)
+    fresnel.set_editor_property("base_reflect_fraction", 0.0)
+    opacity = _expr(mat, unreal.MaterialExpressionLinearInterpolate, -400, 50)
+    _link(clear, opacity, "A")
+    _link(rim, opacity, "B")
+    _link(fresnel, opacity, "Alpha")
+    mel.connect_material_property(tint, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
+    mel.connect_material_property(_scalar(mat, "Roughness", 0.04, -700, 400), "", unreal.MaterialProperty.MP_ROUGHNESS)
+    mel.connect_material_property(_scalar(mat, "Specular", 0.9, -700, 500), "", unreal.MaterialProperty.MP_SPECULAR)
+    return _finish(mat)
+
+
 def build_materials(force=False):
     """Builds the materials that are missing (all of them with force). Returns how many were built."""
     if not eal.does_directory_exist(MAT_DIR):
         eal.make_directory(MAT_DIR)
     built = 0
-    for build in (build_surface, build_glow, build_sky, build_city, build_rain, build_glass, build_cookie, build_widget_lit):
+    for build in (build_surface, build_glow, build_sky, build_city, build_rain, build_glass, build_cookie, build_widget_lit, build_lens):
         try:
             if build(force):
                 built += 1
@@ -711,13 +744,8 @@ def import_meshes(force=False, only=None):
             continue
         if reimport:
             _fresh_looks(folder, path, mesh)
-        if name.startswith("SM_Wear_") and isinstance(mesh, unreal.StaticMesh):
-            # Glasses and hats are small and seen up close: their own triangles, not Nanite (whose fallback for a mesh
-            # this small cuts the frames' rounded corners down to chamfers).
-            nanite = mesh.get_editor_property("nanite_settings")
-            nanite.enabled = False
-            # Through the subsystem, which rebuilds the mesh (setting the property alone keeps the fallback's triangles).
-            unreal.get_editor_subsystem(unreal.StaticMeshEditorSubsystem).set_nanite_settings(mesh, nanite, True)
+        if name.startswith(WEAR_PREFIXES) and isinstance(mesh, unreal.StaticMesh):
+            _without_nanite(mesh)
         if isinstance(mesh, unreal.SkeletalMesh):
             try:
                 _skin_material(folder, mesh)
@@ -727,7 +755,47 @@ def import_meshes(force=False, only=None):
         eal.save_loaded_asset(mesh)
         unreal.log(f"ShortStack: imported {file} as {mesh_path}")
         imported += 1
+    wear_without_nanite(only)
     return imported
+
+
+# What the people wear on their heads: the Back Room's (wear.py) and the street's hats and glasses (wearables.py).
+WEAR_PREFIXES = ("SM_Wear_", "SM_Hat_", "SM_Glasses_")
+
+
+def _without_nanite(mesh):
+    """Glasses and hats are small and seen up close: their own triangles, not Nanite (whose fallback for a mesh this small
+    cuts the frames' rounded corners down to chamfers, and which can't draw the clear lenses' glass). True if it changed."""
+    nanite = mesh.get_editor_property("nanite_settings")
+    if not nanite.enabled:
+        return False
+    nanite.enabled = False
+    # Through the subsystem, which rebuilds the mesh (setting the property alone keeps the fallback's triangles).
+    unreal.get_editor_subsystem(unreal.StaticMeshEditorSubsystem).set_nanite_settings(mesh, nanite, True)
+    return True
+
+
+def wear_without_nanite(only=None):
+    """Turns Nanite off on wear imported before the importer did it for every hat and pair of glasses (a file that
+    hasn't changed isn't imported again, so the rule alone wouldn't reach it). Returns how many meshes it rebuilt."""
+    import os
+    src_dir = os.path.join(unreal.Paths.project_dir(), "Art", "Meshes")
+    if not os.path.isdir(src_dir):
+        return 0
+    rebuilt = 0
+    for file in sorted(os.listdir(src_dir)):
+        name = os.path.splitext(file)[0]
+        if not file.lower().endswith(".glb") or not name.startswith(WEAR_PREFIXES) or (only is not None and name not in only):
+            continue
+        mesh_path = f"{MESH_DIR}/{name}/{name}"
+        if not eal.does_asset_exist(mesh_path):
+            continue
+        mesh = eal.load_asset(mesh_path)
+        if isinstance(mesh, unreal.StaticMesh) and _without_nanite(mesh):
+            eal.save_loaded_asset(mesh)
+            unreal.log(f"ShortStack: {name} now draws without Nanite")
+            rebuilt += 1
+    return rebuilt
 
 
 TEXTURE_DIR = "/Game/ShortStack/Textures"

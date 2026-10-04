@@ -1,13 +1,22 @@
 #include "StreetGameMode.h"
 
+#include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/GameUserSettings.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "HAL/IConsoleManager.h"
 #include "InputCoreTypes.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Misc/App.h"
 #include "NightOneAudio.h"
 #include "NightOneSaveGame.h"
 #include "SFrontEndWidget.h"
@@ -16,6 +25,10 @@
 #include "ShortStack/Game/Store.h"
 #include "ShortStackCharacter.h"
 #include "StreetStage.h"
+
+#include <algorithm>
+#include <string>
+#include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogStreet, Log, All);
 
@@ -29,6 +42,57 @@ FString Utf8ToFString(const std::string& S)
 std::string FStringToUtf8(const FString& S)
 {
 	return std::string(TCHAR_TO_UTF8(*S));
+}
+
+/** "2560 x 1440" to (2560, 1440); (0, 0) when empty or malformed (as the apartment reads it). */
+FIntPoint StreetParseResolution(const std::string& Text)
+{
+	FString Left;
+	FString Right;
+	if (!FString(UTF8_TO_TCHAR(Text.c_str())).Split(TEXT("x"), &Left, &Right))
+	{
+		return FIntPoint(0, 0);
+	}
+	const int32 Wd = FCString::Atoi(*Left.TrimStartAndEnd());
+	const int32 Ht = FCString::Atoi(*Right.TrimStartAndEnd());
+	return Wd > 0 && Ht > 0 ? FIntPoint(Wd, Ht) : FIntPoint(0, 0);
+}
+
+/** Fullscreen resolutions the display supports, largest first, as "W x H" (the pause menu's Resolution list). */
+std::vector<std::string> StreetResolutions()
+{
+	TArray<FIntPoint> Modes;
+	UKismetSystemLibrary::GetSupportedFullscreenResolutions(Modes);
+	Modes.Sort([](const FIntPoint& L, const FIntPoint& R) { return L.X * L.Y > R.X * R.Y; });
+	std::vector<std::string> Out;
+	for (const FIntPoint& Mode : Modes)
+	{
+		const std::string Label = std::to_string(Mode.X) + " x " + std::to_string(Mode.Y);
+		if (std::find(Out.begin(), Out.end(), Label) == Out.end())
+		{
+			Out.push_back(Label);
+		}
+	}
+	return Out;
+}
+
+void SetStreetCvar(const TCHAR* Name, int32 Value)
+{
+	if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(Name))
+	{
+		Var->Set(Value, ECVF_SetByGameSetting);
+	}
+}
+
+/**
+ * A camera's horizontal field of view for the player's Field of View setting (vertical degrees, 50 the default):
+ * DefaultHorizontal at 50, scaled as the setting scales the view (the half-angles' tangents), so its shape holds.
+ */
+float StreetFov(float DefaultHorizontal, int32 VerticalSetting)
+{
+	const double K = FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(VerticalSetting, 30, 110) * 0.5)) / FMath::Tan(FMath::DegreesToRadians(25.0));
+	const double Half = FMath::Atan(FMath::Tan(FMath::DegreesToRadians(DefaultHorizontal * 0.5)) * K);
+	return FMath::Clamp(static_cast<float>(FMath::RadiansToDegrees(Half * 2.0)), 50.0f, 125.0f);
 }
 } // namespace StreetGameDetail
 
@@ -45,6 +109,8 @@ FStreetGame::FStreetGame(AStreetGameMode& InMode, const ss::SaveData* Loaded, co
 {
 	// Out of the apartment the clock runs as it does in the lobby: real minutes.
 	Session.CurrentScreen = ss::Screen::Lobby;
+	// Penny Drop orders wait at the apartment's door while the player is out here (they land in the bag back home).
+	Session.DeferDeliveries = true;
 }
 
 void FStreetGame::Sound(ss::SoundId Id, double Volume)
@@ -64,6 +130,7 @@ void FStreetGame::Text(const std::string& From, const std::string& Body)
 void FStreetGame::Save(const ss::SaveData& Data)
 {
 	// The career file the desk reads when the player gets home (an old-style slot here would be a second, stale career).
+	// Its world comes as a frozen snapshot (SavesInBackground): the saver writes its text on the worker.
 	if (bCareer)
 	{
 		Saver.Submit(Data);
@@ -84,6 +151,7 @@ void FStreetGame::QuitToMenu()
 {
 	Session.Save();
 	Saver.Flush();
+	Mode.SaveSettingsNow();
 	UGameplayStatics::OpenLevel(&Mode, FName(TEXT("NightOne")), true, TEXT("Menu"));
 }
 
@@ -91,12 +159,13 @@ void FStreetGame::QuitGame()
 {
 	Session.Save();
 	Saver.Flush();
+	Mode.SaveSettingsNow();
 	UKismetSystemLibrary::QuitGame(&Mode, UGameplayStatics::GetPlayerController(&Mode, 0), EQuitPreference::Quit, false);
 }
 
 void FStreetGame::SettingsChanged(const ss::ui::GameSettings& Settings)
 {
-	Mode.SaveSettings(Settings);
+	Mode.ApplySettings(Settings, true);
 }
 
 // ------------------------------------------------------------------ the mode
@@ -119,6 +188,7 @@ void AStreetGameMode::InitGame(const FString& MapName, const FString& Options, F
 	const bool bLoaded = CareerSave::LoadText(CareerText) && ss::SaveData::Parse(CareerText, Loaded);
 	const std::string Seed = FStringToUtf8(FString::Printf(TEXT("street:%lld"), FDateTime::Now().GetTicks()));
 	Game = MakeUnique<FStreetGame>(*this, bLoaded ? &Loaded : nullptr, Seed);
+	Game->Menu.SetVenue(ss::ui::Venue::Street); // the pause heading says FIFTH STREET, the quit copy is the street's
 	if (UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SettingsSlotName(), 0))
 	{
 		if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SettingsSlotName(), 0)))
@@ -174,18 +244,47 @@ void AStreetGameMode::DressHero()
 
 void AStreetGameMode::SpawnClerk()
 {
-	if (!Stage || Clerk)
+	if (!Stage || Clerk || !GetWorld())
 	{
 		return;
 	}
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	Clerk = GetWorld()->SpawnActor<AShortStackCharacter>(AShortStackCharacter::StaticClass(), Stage->ClerkSpot(), Params);
-	if (Clerk)
+	const FTransform Spot = Stage->ClerkSpot();
+	// Dressed before he begins play, so he isn't built as the default hero first and then thrown away for Benny.
+	Clerk = GetWorld()->SpawnActorDeferred<AShortStackCharacter>(AShortStackCharacter::StaticClass(), Spot, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!Clerk)
 	{
-		// Benny, nights, in the store's red polo.
-		Clerk->AutoPossessAI = EAutoPossessAI::Disabled;
-		Clerk->ApplyCast(TEXT("ExtraB"), FLinearColor::FromSRGBColor(FColor(0xd7, 0x26, 0x3d)));
+		return;
+	}
+	// Benny, nights, in the store's red polo.
+	Clerk->AutoPossessAI = EAutoPossessAI::Disabled;
+	Clerk->ApplyCast(TEXT("ExtraB"), FLinearColor::FromSRGBColor(FColor(0xd7, 0x26, 0x3d)));
+	Clerk->FinishSpawning(Spot);
+	// His feet on the store's floor (nothing drops him there: with no controller his movement never runs).
+	FVector At = Clerk->GetActorLocation();
+	At.Z = Stage->StoreFloorZ() + Clerk->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	Clerk->SetActorLocation(At, false, nullptr, ETeleportType::TeleportPhysics);
+	UE_LOG(LogStreet, Log, TEXT("Benny behind the counter: body %s, face %s, %.0f cm"), *GetNameSafe(Clerk->GetMesh()->GetSkeletalMeshAsset()),
+		*GetNameSafe(Clerk->Face ? Clerk->Face->GetSkeletalMeshAsset() : nullptr), Clerk->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * 2.0f);
+	// He stands behind the counter: no movement to simulate, no camera of his own; his pose only while he's seen (the
+	// character does as much for a cast member itself; this keeps him so whichever way he was dressed).
+	if (UCharacterMovementComponent* Move = Clerk->GetCharacterMovement())
+	{
+		Move->StopMovementImmediately();
+		Move->SetComponentTickEnabled(false);
+	}
+	if (Clerk->Boom)
+	{
+		Clerk->Boom->bDoCollisionTest = false;
+		Clerk->Boom->SetComponentTickEnabled(false);
+	}
+	if (Clerk->Camera)
+	{
+		Clerk->Camera->Deactivate();
+	}
+	Clerk->GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+	if (Clerk->Face)
+	{
+		Clerk->Face->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
 	}
 }
 
@@ -197,10 +296,10 @@ void AStreetGameMode::BeginPlay()
 	SpawnClerk();
 	CreateWidgets();
 	ReturnInputToGame();
+	// The player's settings, as at the desk (the stage's lens and the hero's field of view are here now).
+	ApplySettings(Game->Menu.Settings, false);
 	if (Audio)
 	{
-		const ss::ui::GameSettings& S = Game->Menu.Settings;
-		Audio->SetMix(S.MasterVolume / 100.0f, S.EffectsVolume / 100.0f, S.AmbienceVolume / 100.0f);
 		Audio->StartAmbience();
 		Audio->PlayEffect(ss::audio::Effect::Thump, 0.5f); // the building's door closing behind you
 	}
@@ -223,6 +322,10 @@ void AStreetGameMode::EndPlay(const EEndPlayReason::Type Reason)
 	if (Game)
 	{
 		Game->Saver.Flush();
+	}
+	if (SettingsDirtyAt >= 0.0)
+	{
+		SaveSettingsNow();
 	}
 	if (UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
 	{
@@ -272,6 +375,7 @@ void AStreetGameMode::CreateWidgets()
 	CounterWidget->OnMenuKey = [WeakThis](const FString& KeyName, bool bFromGamepad) {
 		if (WeakThis.IsValid() && WeakThis->Game)
 		{
+			WeakThis->bGamepad = bFromGamepad;
 			ss::ui::StoreCounter& Counter = WeakThis->Game->Counter;
 			Counter.Gamepad = bFromGamepad;
 			Counter.Key(FStringToUtf8(KeyName), WeakThis->RealTime);
@@ -294,6 +398,7 @@ void AStreetGameMode::CreateWidgets()
 	MenuWidget->OnMenuKey = [WeakThis](const FString& KeyName, bool bFromGamepad) {
 		if (WeakThis.IsValid() && WeakThis->Game)
 		{
+			WeakThis->bGamepad = bFromGamepad;
 			WeakThis->Game->Menu.Gamepad = bFromGamepad;
 			WeakThis->Game->Menu.Key(FStringToUtf8(KeyName), WeakThis->RealTime);
 		}
@@ -392,6 +497,8 @@ void AStreetGameMode::DrawHud()
 	ss::ui::StreetHudInfo Info;
 	Info.Place = Stage ? FStringToUtf8(Stage->PlaceName(Hero->GetActorLocation())) : "FIFTH STREET";
 	Info.Clock = ss::net::TimeLabel(Game->Session.WorldMinutes());
+	// With the clock the HUD counts down to a Penny Drop order on its way (the player knows when to head home).
+	Info.World = Game->Session.WorldMinutes();
 	Info.BankrollCents = Game->Session.BankrollCents;
 	Info.Life = &Game->Session.Life;
 	Info.FirstPerson = Hero->IsFirstPerson();
@@ -444,21 +551,51 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 		Game->Session.Update(RealTime);
 	}
 	Game->Saver.Tick();
+	FrameBudget.Tick(DeltaSeconds);
+	if (SettingsDirtyAt >= 0.0 && RealTime - SettingsDirtyAt > 0.75)
+	{
+		SaveSettingsNow();
+	}
+	if (Stage)
+	{
+		// The street's hour: the sky, the lamps' photocells, the windows and the exposure follow the clock.
+		Stage->SetDaylight(static_cast<float>(Game->Session.Daylight()));
+	}
 	AShortStackCharacter* Hero = GetHero();
 	if (Hero && Stage)
 	{
-		Stage->UpdateDoors(Hero->GetActorLocation(), static_cast<float>(Dt));
-		if (APlayerController* Pc = GetWorld()->GetFirstPlayerController())
+		KeepOnTheSet();
+		if (Stage->UpdateDoors(Hero->GetActorLocation(), static_cast<float>(Dt)) && Audio)
 		{
-			if (Pc->PlayerCameraManager)
-			{
-				Stage->FollowCamera(Pc->PlayerCameraManager->GetCameraLocation(), Pc->PlayerCameraManager->GetCameraRotation());
-			}
+			// The doors' chime as they part (the store's two notes, kept small).
+			Audio->PlayEffect(ss::audio::Effect::Chime, 0.22f);
 		}
 		float Volume = 0.0f;
 		if (Hero->TakeFootstep(Volume) && Audio)
 		{
 			Audio->PlayEffect(ss::audio::Effect::Step, Volume * (Stage->IsInsideStore(Hero->GetActorLocation()) ? 0.7f : 1.0f));
+		}
+		// Behind the store's glass the rain is quieter.
+		const float Duck = FMath::Lerp(1.0f, 0.45f, Stage->CameraInside());
+		if (Audio && FMath::Abs(Duck - AmbienceDuck) > 0.02f)
+		{
+			AmbienceDuck = Duck;
+			const ss::ui::GameSettings& S = Game->Menu.Settings;
+			Audio->SetMix(S.MasterVolume / 100.0f, S.EffectsVolume / 100.0f, S.AmbienceVolume / 100.0f * AmbienceDuck);
+		}
+		// Worn out shows in the walk: from 40 energy down the shoulders drop and the trunk sags.
+		Hero->SetTired(static_cast<float>((40.0 - Game->Session.Life.Energy) / 40.0));
+	}
+	else if (!Hero && !bGoingHome && GetWorld())
+	{
+		// The pawn is gone (killed below the world's floor before KeepOnTheSet could catch it): a new one at the door.
+		if (APlayerController* Pc = GetWorld()->GetFirstPlayerController(); Pc && !Pc->GetPawn())
+		{
+			UE_LOG(LogStreet, Warning, TEXT("The hero was lost: back at the building's door"));
+			bDressed = false;
+			StartFrom = TEXT("home");
+			RestartPlayer(Pc);
+			ApplySettings(Game->Menu.Settings, false);
 		}
 	}
 	DrawHud();
@@ -477,10 +614,38 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 	if (bGoingHome && RealTime >= HomeAt)
 	{
 		bGoingHome = false;
-		UGameplayStatics::OpenLevel(this, FName(TEXT("NightOne")), true, FString::Printf(TEXT("Home?Street?From=%.0f"), Game->Session.WorldMinutes()));
+		// The clock to the thousandth of a minute: rounded, a deadline at the stroke of midnight could be skipped.
+		UGameplayStatics::OpenLevel(this, FName(TEXT("NightOne")), true, FString::Printf(TEXT("Home?Street?From=%.3f"), Game->Session.WorldMinutes()));
 	}
-	// Toasts older than ten seconds go.
+	// Texts don't age while the counter has the screen (the HUD that shows them is hidden then); otherwise ten seconds.
+	if (Game->Counter.IsOpen())
+	{
+		for (ss::ui::StreetHudInfo::Toast& T : Toasts)
+		{
+			T.At += Dt;
+		}
+	}
 	Toasts.RemoveAll([this](const ss::ui::StreetHudInfo::Toast& T) { return RealTime - T.At > 10.0; });
+}
+
+void AStreetGameMode::KeepOnTheSet()
+{
+	AShortStackCharacter* Hero = GetHero();
+	if (!Hero || !Stage || bGoingHome || !Stage->IsOffTheSet(Hero->GetActorLocation()))
+	{
+		return;
+	}
+	UE_LOG(LogStreet, Warning, TEXT("Off the set at %s: back to the building's door"), *Hero->GetActorLocation().ToCompactString());
+	const FTransform T = Stage->StartAt(TEXT("home"));
+	Hero->SetActorLocation(T.GetLocation(), false, nullptr, ETeleportType::TeleportPhysics);
+	if (UCharacterMovementComponent* Move = Hero->GetCharacterMovement())
+	{
+		Move->StopMovementImmediately();
+	}
+	if (AController* C = Hero->GetController())
+	{
+		C->SetControlRotation(T.Rotator());
+	}
 }
 
 // ------------------------------------------------------------------ actions
@@ -520,6 +685,7 @@ void AStreetGameMode::OnZoom(float Delta)
 
 void AStreetGameMode::OpenCounter(int32 Shelf)
 {
+	Game->Counter.Gamepad = bGamepad;
 	Game->Counter.Open(RealTime, FMath::Max(0, Shelf));
 	FocusWidget(CounterWidget.Get());
 }
@@ -548,26 +714,29 @@ void AStreetGameMode::OnInteract()
 
 void AStreetGameMode::OnEat()
 {
-	AShortStackCharacter* Hero = GetHero();
-	const std::string Id = Game->Session.BagPick();
-	if (Id.empty())
+	if (!Game || bGoingHome)
 	{
-		Toast(TEXT("Your bag"), TEXT("Nothing in it. The Lucky Penny's on the corner."));
 		return;
 	}
-	const ss::store::Item* Item = ss::store::Find(Id);
-	if (Game->Session.Consume(Id).empty() && Item)
+	// The session picks what helps most and says why not when nothing would (an empty bag, nothing needed).
+	const std::string Why = Game->Session.EatFromBag();
+	if (!Why.empty())
 	{
-		if (Hero)
-		{
-			Hero->Sip();
-		}
-		if (Audio && !Item->Food())
-		{
-			Audio->PlayEffect(ss::audio::Effect::CanOpen, 0.6f);
-		}
-		Toast(TEXT("You"), FString::Printf(TEXT("%s the %s."), Item->Food() ? TEXT("Eat") : TEXT("Drink"), *Utf8ToFString(Item->Name)));
+		Toast(TEXT("Your bag"), Utf8ToFString(Why));
+		return;
 	}
+	const ss::Session::Eaten& Ate = Game->Session.LastEaten;
+	const ss::store::Item* Item = ss::store::Find(Ate.ItemId);
+	if (AShortStackCharacter* Hero = GetHero())
+	{
+		Hero->Sip();
+	}
+	if (Audio && Item && Item->Look == ss::store::Art::Can)
+	{
+		Audio->PlayEffect(ss::audio::Effect::CanOpen, 0.6f);
+	}
+	// "Drank the Cascade. Thirst -45, energy +2."
+	Toast(TEXT("You"), Utf8ToFString(Ate.Line));
 }
 
 void AStreetGameMode::OnPause()
@@ -577,6 +746,10 @@ void AStreetGameMode::OnPause()
 		return;
 	}
 	Game->Menu.Info = ss::ui::DescribeSession(Game->Session, true);
+	Game->Menu.Info.Resolutions = StreetResolutions();
+	Game->Menu.Gamepad = bGamepad;
+	const bool bInStore = Stage && GetHero() && Stage->IsInsideStore(GetHero()->GetActorLocation());
+	Game->Menu.SetVenue(ss::ui::Venue::Street, bInStore ? std::string("LUCKY PENNY #212") : std::string());
 	Game->Menu.Open(ss::ui::FrontEnd::Page::Pause, RealTime);
 	FocusWidget(MenuWidget.Get());
 }
@@ -617,17 +790,68 @@ void AStreetGameMode::Toast(const FString& From, const FString& Body)
 	}
 }
 
-void AStreetGameMode::SaveSettings(const ss::ui::GameSettings& Settings)
+void AStreetGameMode::ApplySettings(const ss::ui::GameSettings& Settings, bool bSave)
 {
-	Sensitivity = 0.11f * static_cast<float>(Settings.LookSensitivity) / 100.0f;
-	bInvertLook = Settings.InvertLook;
+	// As the apartment applies them (NightOneGameMode::ApplySettings): scalability, the render scale and the frame cap,
+	// ray-traced Lumen, the lens, the field of view, the mix and the controls.
+	if (UGameUserSettings* User = GEngine ? GEngine->GetGameUserSettings() : nullptr)
+	{
+		User->SetOverallScalabilityLevel(FMath::Clamp(Settings.Quality, 0, 4));
+		User->SetResolutionScaleValueEx(static_cast<float>(FMath::Min(Settings.ResolutionScale, 100)));
+		User->SetFrameRateLimit(static_cast<float>(Settings.FrameRateLimit));
+		User->SetVSyncEnabled(Settings.VSync);
+		if (GIsEditor)
+		{
+			// Play-In-Editor shares the editor's window: leave its size and mode alone.
+			User->ApplyNonResolutionSettings();
+		}
+		else
+		{
+			const FIntPoint Res = StreetParseResolution(Settings.Resolution);
+			User->SetScreenResolution(Res.X > 0 ? Res : User->GetDesktopResolution());
+			User->SetFullscreenMode(Settings.WindowMode == 0 ? EWindowMode::Fullscreen : Settings.WindowMode == 1 ? EWindowMode::WindowedFullscreen : EWindowMode::Windowed);
+			User->ApplySettings(false);
+		}
+	}
+	// The render scale: fixed, or moving to hold the chosen frame rate (FrameBudget.h).
+	FrameBudget.Configure(Settings.DynamicTarget, Settings.ResolutionScale);
+	SetStreetCvar(TEXT("r.Lumen.HardwareRayTracing"), Settings.RayTracing ? 1 : 0);
+	SetStreetCvar(TEXT("r.Lumen.HardwareRayTracing.LightingMode"), Settings.RayTracing && Settings.Quality >= 4 ? 2 : 0);
+	if (Stage)
+	{
+		Stage->SetLensOptions(static_cast<float>(Settings.Brightness - 50) / 50.0f * 1.5f, Settings.FilmGrain == 0 ? 0.0f : Settings.FilmGrain == 1 ? 1.0f : 2.2f,
+			Settings.ChromaticAberration ? 1.0f : 0.0f, Settings.MotionBlur);
+	}
+	if (AShortStackCharacter* Hero = GetHero())
+	{
+		// The game's own views at the default 50, wider or narrower with the setting.
+		Hero->FirstPersonFov = StreetFov(84.0f, Settings.FieldOfView);
+		Hero->ThirdPersonFov = StreetFov(72.0f, Settings.FieldOfView);
+	}
 	if (Audio)
 	{
-		Audio->SetMix(Settings.MasterVolume / 100.0f, Settings.EffectsVolume / 100.0f, Settings.AmbienceVolume / 100.0f);
+		Audio->SetMix(Settings.MasterVolume / 100.0f, Settings.EffectsVolume / 100.0f, Settings.AmbienceVolume / 100.0f * AmbienceDuck);
+	}
+	// The engine mutes a game whose window isn't in front unless told otherwise.
+	FApp::SetUnfocusedVolumeMultiplier(Settings.BackgroundAudio ? 1.0f : 0.0f);
+	Sensitivity = 0.11f * static_cast<float>(Settings.LookSensitivity) / 100.0f;
+	bInvertLook = Settings.InvertLook;
+	if (bSave)
+	{
+		SettingsDirtyAt = RealTime; // written once the player stops changing things
+	}
+}
+
+void AStreetGameMode::SaveSettingsNow()
+{
+	SettingsDirtyAt = -1.0;
+	if (!Game)
+	{
+		return;
 	}
 	if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::CreateSaveGameObject(UNightOneSaveGame::StaticClass())))
 	{
-		Obj->Data = Utf8ToFString(Settings.Serialize());
+		Obj->Data = Utf8ToFString(Game->Menu.Settings.Serialize());
 		UGameplayStatics::SaveGameToSlot(Obj, UNightOneSaveGame::SettingsSlotName(), 0);
 	}
 }
@@ -643,10 +867,10 @@ FString AStreetGameMode::TestDescribe() const
 	}
 	const ss::life::State& L = Game->Session.Life;
 	const FStreetSpot* Spot = Stage ? Stage->SpotFor(Hero->EyeLocation(), Hero->LookDirection()) : nullptr;
-	return FString::Printf(TEXT("%s at %s %s | %s view | spot %s | hunger %.0f thirst %.0f energy %.0f | $%.2f | bag %d | counter %s"), *Utf8ToFString(ss::net::TimeLabel(Game->Session.WorldMinutes())),
-		*Hero->GetActorLocation().ToCompactString(), Stage ? *Stage->PlaceName(Hero->GetActorLocation()) : TEXT("?"), Hero->IsFirstPerson() ? TEXT("first") : TEXT("third"),
-		Spot ? *Spot->Id.ToString() : TEXT("none"), L.Hunger, L.Thirst, L.Energy, Game->Session.BankrollCents / 100.0, static_cast<int32>(L.Pantry.size()),
-		Game->Counter.IsOpen() ? TEXT("open") : TEXT("closed"));
+	return FString::Printf(TEXT("%s at %s %s | %s view | spot %s | hunger %.0f thirst %.0f energy %.0f | $%.2f | bag %d | counter %s | inside %.2f | daylight %.2f"),
+		*Utf8ToFString(ss::net::TimeLabel(Game->Session.WorldMinutes())), *Hero->GetActorLocation().ToCompactString(), Stage ? *Stage->PlaceName(Hero->GetActorLocation()) : TEXT("?"),
+		Hero->IsFirstPerson() ? TEXT("first") : TEXT("third"), Spot ? *Spot->Id.ToString() : TEXT("none"), L.Hunger, L.Thirst, L.Energy, Game->Session.BankrollCents / 100.0,
+		static_cast<int32>(L.Pantry.size()), Game->Counter.IsOpen() ? TEXT("open") : TEXT("closed"), Stage ? Stage->CameraInside() : 0.0f, Game->Session.Daylight());
 }
 
 void AStreetGameMode::TestTeleport(const FString& Where)
@@ -693,6 +917,30 @@ void AStreetPlayerController::PlayerTick(float DeltaTime)
 	const float StickYaw = GetInputAnalogKeyState(EKeys::Gamepad_RightX) * 170.0f * DeltaTime;
 	const float StickPitch = GetInputAnalogKeyState(EKeys::Gamepad_RightY) * 120.0f * DeltaTime;
 	Mode->OnLook(Mx * Mode->Sensitivity * 10.0f + StickYaw, My * Mode->Sensitivity * 10.0f + StickPitch);
+	// The HUD's buttons follow the last device used: a gamepad's button or a stick pushed, or the keyboard and mouse.
+	static const FKey PadButtons[] = {EKeys::Gamepad_FaceButton_Bottom, EKeys::Gamepad_FaceButton_Right, EKeys::Gamepad_FaceButton_Left, EKeys::Gamepad_FaceButton_Top,
+		EKeys::Gamepad_LeftShoulder, EKeys::Gamepad_RightShoulder, EKeys::Gamepad_LeftTrigger, EKeys::Gamepad_RightTrigger, EKeys::Gamepad_DPad_Up, EKeys::Gamepad_DPad_Down,
+		EKeys::Gamepad_DPad_Left, EKeys::Gamepad_DPad_Right, EKeys::Gamepad_Special_Left, EKeys::Gamepad_Special_Right, EKeys::Gamepad_LeftThumbstick, EKeys::Gamepad_RightThumbstick};
+	static const FKey DeskKeys[] = {EKeys::W, EKeys::A, EKeys::S, EKeys::D, EKeys::E, EKeys::F, EKeys::V, EKeys::P, EKeys::Escape, EKeys::LeftShift, EKeys::LeftMouseButton};
+	bool bPad = FMath::Abs(GetInputAnalogKeyState(EKeys::Gamepad_LeftX)) > 0.25f || FMath::Abs(GetInputAnalogKeyState(EKeys::Gamepad_LeftY)) > 0.25f ||
+		FMath::Abs(GetInputAnalogKeyState(EKeys::Gamepad_RightX)) > 0.25f || FMath::Abs(GetInputAnalogKeyState(EKeys::Gamepad_RightY)) > 0.25f;
+	for (const FKey& Key : PadButtons)
+	{
+		bPad = bPad || WasInputKeyJustPressed(Key);
+	}
+	bool bDesk = FMath::Abs(Mx) + FMath::Abs(My) > 0.5f;
+	for (const FKey& Key : DeskKeys)
+	{
+		bDesk = bDesk || WasInputKeyJustPressed(Key);
+	}
+	if (bPad)
+	{
+		Mode->SetGamepad(true);
+	}
+	else if (bDesk)
+	{
+		Mode->SetGamepad(false);
+	}
 	if (WasInputKeyJustPressed(EKeys::V) || WasInputKeyJustPressed(EKeys::Gamepad_FaceButton_Top))
 	{
 		Mode->OnToggleView();
@@ -713,8 +961,10 @@ void AStreetPlayerController::PlayerTick(float DeltaTime)
 	{
 		Mode->OnZoom(30.0f);
 	}
-	// Pause. In Play-In-Editor, Escape stops the session before the game sees it, so P works too.
-	if (WasInputKeyJustPressed(EKeys::Escape) || WasInputKeyJustPressed(EKeys::P) || WasInputKeyJustPressed(EKeys::Gamepad_Special_Right))
+	// Pause. In Play-In-Editor, Escape stops the session before the game sees it, so P works too. On a gamepad Start
+	// or B (the HUD shows B: it's free out here).
+	if (WasInputKeyJustPressed(EKeys::Escape) || WasInputKeyJustPressed(EKeys::P) || WasInputKeyJustPressed(EKeys::Gamepad_Special_Right) ||
+		WasInputKeyJustPressed(EKeys::Gamepad_FaceButton_Right))
 	{
 		Mode->OnPause();
 	}

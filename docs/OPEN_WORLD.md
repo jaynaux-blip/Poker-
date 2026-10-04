@@ -27,7 +27,7 @@ the casino, the laundromat where Dee's game runs.
   - **Hair:** hair, hair color, facial hair.
   - **Body:** build and height (152 to 203 cm, shown against the door frame).
   - **Style:** jacket, jacket color, glasses, hat.
-- **Review.** The Riverside Players Club ID, the bio, and **Begin**.
+- **Review.** The Embercrest Players Club ID, the bio, and **Begin**.
 
 Q/E switch tabs and R randomizes. The character is saved with the career (`hero` lines in the save) and shows up as **PLAYING AS** on the main menu.
 
@@ -51,7 +51,7 @@ Q/E switch tabs and R randomizes. The character is saved with the career (`hero`
 
 | Piece | What it is |
 |---|---|
-| `AShortStackCharacter` | You, as you made yourself: a MetaHuman, `Hero<A or B><skin band>` from `hero_cast.py`, falling back to the Back Room's "Hero" and then the archetype body. It wears your jacket color, hair color, hat and glasses, and is scaled to your height. Benny uses the same class. |
+| `AShortStackCharacter` | You, as you made yourself: a MetaHuman, `Hero<A or B><skin band>` from `hero_cast.py`, falling back to the Back Room's "Hero" and then the archetype body. It wears the jacket's color on the shirt (Flannel brings its plaid), shorts that go with it, sneakers made at run time to fit its feet, your hair color, facial hair, hat and glasses (fitted to the face, carried by the head), and is scaled to your height and build. Benny uses the same class. |
 | `UStreetBodyAnim` | A procedural gait: legs, pelvis bob and twist, counter-swinging arms, the head following the look, a sip animation. It needs no animation assets. |
 | `AStreetStage` | Fifth Street from door 1812 to the Lucky Penny: sidewalks, the wet road, building fronts both sides, the Wash & Fold's neon across the street, streetlights, rain, fog, and the store inside and out (sliding doors, coolers, aisles, counter, roller grill, coffee bar). Signs are drawn by the core's `PropArt`. Blender props replace the engine shapes where they're imported. |
 | `AStreetGameMode` | The session runs outside as it does at the desk: the clock, needs, texts, and saves to the same slot. It also runs the HUD, the store counter and the pause menu. |
@@ -76,7 +76,7 @@ Q/E switch tabs and R randomizes. The character is saved with the career (`hero`
 ### Setting it up on the desktop
 
 1. **Build** the C++ module. The editor runs `shortstack_setup.run()`, which builds `M_Street` and the `/Game/Maps/Street` level (`street_setup.py`) and imports the new props from `unreal/Art/Meshes`.
-2. **Hero MetaHumans (optional).** In the editor's Python console, run `import hero_cast as h; h.step()` until it returns `done`. This builds six MetaHumans (two body types times three skin bands). Without them, the player wears the Back Room's hero.
+2. **Hero MetaHumans (optional).** In the editor's Python console, run `import hero_cast as h; h.step()` until it returns `done`. This builds six MetaHumans (two body types times three skin bands). Without them, the player wears the Back Room's hero. Each hero's preset is in `hero_cast.DEFAULTS` (override per hero in `HERO_PRESETS`; a face the cast already wears is refused), with hair from `STYLE` that sits under the creator's hats; `h.rebuild("HeroA0")` makes one again.
 3. **Play.** Press **G** in the apartment, or open `/Game/Maps/Street` and Play.
 
 ### Tuning on the desktop (written blind)
@@ -87,12 +87,15 @@ Unreal can't run in the cloud, so the gait and the wearable offsets were set by 
 |---|---|---|
 | `ss.Walk.Sign` | 1 | Set it to -1 if the legs swing backward |
 | `ss.Walk.Stride`, `ss.Walk.Arms`, `ss.Walk.Bob` | 1 | Scale the leg swing, the arm swing, and the pelvis bob and twist |
-| `ss.Wear.HatUp`, `ss.Wear.HatForward` | 19, 1.5 cm | Hat crown from the head bone |
-| `ss.Wear.GlassesUp`, `ss.Wear.GlassesForward` | 8.5, 10.5 cm | Glasses' bridge from the head bone |
+| `ss.Wear.HatUp`, `ss.Wear.HatForward` | fitted (21.4, 0.4 cm on the hero) | Hat crown from the head bone; fitted to each face (scalp, eye spacing) until set, then fixed for all |
+| `ss.Wear.GlassesUp`, `ss.Wear.GlassesForward` | fitted (5, 10.8 cm on the hero) | Glasses' bridge from the head bone; fitted to the eyes until set |
+| `ss.Wear.Refit` | | Puts the hats and glasses on again after changing the above |
+| `ss.Walk.Curl` | 1 | Scales how far the hands curl |
+| `ss.Walk.SipSide`, `ss.Walk.SipAhead`, `ss.Walk.SipUp` | 3, 8, -11 cm | Where a sip brings the right wrist, from the mouth |
 
 Props face the way the stage intends through `BlenderFacing()` (`BlenderProps.h`), which works out the importer's yaw from the laptop mesh, as the apartment does.
 
-The imported glTF materials are tinted by whatever base-color parameter they expose (`TintImported`). This covers the parked cars' paint, the hats and the frames. If the hats or cars come out light grey, the importer named that parameter something else.
+The imported glTF materials are tinted by whatever base-color parameter they expose (`TintImported`). This covers the parked cars' paint, the hats and the frames. If the hats or cars come out light grey, the importer named that parameter something else. Clear lenses use M_Lens (built by shortstack_setup); hats and glasses import without Nanite.
 
 ## What comes next
 
@@ -100,7 +103,7 @@ Each step keeps the walk-around world small, dense and tied to the career. There
 
 1. **The block.** Evicted, you wake on Dee's couch, and door 1812 is locked to you. The Wash & Fold is enterable, and Dee's Tuesday game moves from a menu into the back room you walk into. It reuses the Back Room stage with the third-person toggle. Pedestrians walk the sidewalks: a handful of MetaHumans on the procedural gait, following waypoint loops. Shift work at the Lucky Penny becomes a playable night behind Benny's counter.
 2. **Time and weather on the street.** The street follows the session clock: dusk, the dead hours, sunrise. Rain comes and goes (the materials already carry a Wet parameter). The store's stock and Benny's lines follow the hour.
-3. **Getting around.** A bus stop on Market St with a timetable takes you to the Riverside Card Room for live events and to the bank. Each stop is a small, dense scene, not an open map. Later, rideshare costs money and saves time.
+3. **Getting around.** A bus stop on Market St with a timetable takes you to the Embercrest's card room for live events and to the bank. Each stop is a small, dense scene, not an open map. Later, rideshare costs money and saves time.
 4. **Clothes and looks that move with the career.** A thrift store and then better shops sell jackets, hats and glasses (more Blender wearables), and the creator's choices become things you own. Fame changes how the street reacts: a double take, someone asking for a photo.
 5. **Live events in third person.** The casino floor is walkable between levels: the cage, the rail, the bathroom break. You walk to your table and sit, and the table switches to the first-person camera with V for third person.
 6. **The apartment tiers outside.** The loft and the penthouse each come with a neighborhood: different shops, a different walk, different neighbors.

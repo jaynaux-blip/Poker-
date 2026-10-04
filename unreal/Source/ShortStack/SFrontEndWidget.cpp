@@ -19,6 +19,14 @@ FVector2D SFrontEndWidget::ToLogical(const FGeometry& MyGeometry, const FPointer
 FReply SFrontEndWidget::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
 	const FKey Key = InKeyEvent.GetKey();
+	// A held button's repeats: arrows and the stick keep them (hold to move along); confirming, paging and backing out
+	// don't (holding A or E to talk to Benny would otherwise drop a Cascade in the basket or flip the shelf).
+	if (InKeyEvent.IsRepeat() && (Key == EKeys::Enter || Key == EKeys::SpaceBar || Key == EKeys::Tab || Key == EKeys::Escape || Key == EKeys::P || Key == EKeys::Q
+		|| Key == EKeys::E || Key == EKeys::R || Key == EKeys::Gamepad_FaceButton_Bottom || Key == EKeys::Gamepad_FaceButton_Right || Key == EKeys::Gamepad_FaceButton_Top
+		|| Key == EKeys::Gamepad_FaceButton_Left || Key == EKeys::Gamepad_LeftShoulder || Key == EKeys::Gamepad_RightShoulder || Key == EKeys::Gamepad_Special_Right))
+	{
+		return FReply::Handled();
+	}
 	FString Name = TEXT("Any");
 	if (Key == EKeys::Up || Key == EKeys::Gamepad_DPad_Up || Key == EKeys::Gamepad_LeftStick_Up)
 	{
@@ -57,6 +65,11 @@ FReply SFrontEndWidget::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& 
 	{
 		Name = TEXT("Tab");
 	}
+	else if (Key == EKeys::Z && InKeyEvent.IsControlDown() && !InKeyEvent.IsAltDown())
+	{
+		// Not with Alt: AltGr arrives as Ctrl+Alt, and AltGr+Z types a letter on some layouts (Polish z with a dot).
+		Name = TEXT("Undo");
+	}
 	else if (Key == EKeys::Q || Key == EKeys::E || Key == EKeys::R)
 	{
 		Name = Key.GetFName().ToString();
@@ -72,6 +85,11 @@ FReply SFrontEndWidget::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& 
 	else if (Key == EKeys::Gamepad_FaceButton_Top)
 	{
 		Name = TEXT("Reset");
+	}
+	else if (Key == EKeys::Gamepad_FaceButton_Left)
+	{
+		// Not "Backspace": the creator's text fields eat that. The counter puts an item back, the creator undoes.
+		Name = TEXT("PutBack");
 	}
 	if (OnMenuKey)
 	{
