@@ -159,6 +159,9 @@ struct FBackRoomPersona
 	FLinearColor ShirtB = FLinearColor(0.85f, 0.85f, 0.82f);
 	UPROPERTY(EditAnywhere, Category = "Persona")
 	FLinearColor ShirtC = FLinearColor(0.05f, 0.05f, 0.06f);
+	/** The print's third color (where its bands cross); alpha 0 for halfway between the other two. */
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	FLinearColor ShirtD = FLinearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	/** Their trousers. */
 	UPROPERTY(EditAnywhere, Category = "Persona")
 	FLinearColor Pants = FLinearColor(0.035f, 0.037f, 0.045f);
@@ -174,6 +177,26 @@ struct FBackRoomPersona
 	FLinearColor WearColor = FLinearColor(0.05f, 0.06f, 0.1f);
 	UPROPERTY(EditAnywhere, Category = "Persona")
 	FLinearColor FrameColor = FLinearColor(0.01f, 0.01f, 0.01f);
+	/**
+	 * The hero only: what the character creator put on their head (1 beanie, 2 cap, 3 cap backwards, 4 bucket hat) and
+	 * face (1 round, 2 square, 3 wire, 4 shades), the street's own pieces in WearColor and FrameColor; the hairstyle (0
+	 * shaved, 1 a buzz cut) and facial hair (0 none, 1 stubble, 2 a mustache, 3 and up a beard) as far as the MetaHuman's
+	 * own grooms go (below 0: all of them); and the hair's melanin, redness and grey (melanin below 0: the MetaHuman's own).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	int32 HeroHat = 0;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	int32 HeroGlasses = 0;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	int32 HeroHairStyle = -1;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	int32 HeroFacialHair = -1;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	float HairMelanin = -1.0f;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	float HairRedness = 0.0f;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	float HairWhite = 0.0f;
 
 	/** What their body gives away (2 to 4 each; pros have reverse tells). */
 	UPROPERTY(EditAnywhere, Category = "Persona")
@@ -322,11 +345,18 @@ public:
 	/** Hero: where the camera looks (world), so the head and neck follow it. */
 	void SetHeroLook(const FVector& At) { HeroLook = At; }
 	/**
-	 * Hero: the head for the third-person view (BackRoomPlayerView.cpp). Shown, the face draws and the hair
-	 * is copied from the MetaHuman on the spot (the hair system only binds to a face that's drawn); hidden
-	 * again for first person, the hair copies go with it.
+	 * Hero: the head for the third-person view (BackRoomPlayerView.cpp). Built, the face keeps its full detail and the
+	 * hair is copied from the MetaHuman (in the creator's color), once: Build skips it, since first person never sees it.
+	 * Dropped again (the hair copies go) only when the player goes back to first person for good.
+	 */
+	void SetHeroHeadBuilt(bool bBuild);
+	bool IsHeroHeadBuilt() const { return bHeroHeadBuilt; }
+	/**
+	 * Hero: the built head in the shot (the camera clear of it) or not (a peek, Focus, a walk: the camera is in it). Only
+	 * hidden, never remade, so a peek costs nothing and the hair doesn't start over. Not built, it stays hidden.
 	 */
 	void ShowHeroHead(bool bShow);
+	bool IsHeroHeadShown() const { return bHeroHeadShown; }
 
 	/** The game's result for this player: chips won (+) or lost (-), and whether cards were shown. */
 	void OnResult(int64 Delta, int64 PotSize, bool bShowdown);
@@ -365,6 +395,10 @@ private:
 	void DressOutfit(UMaterialInstanceDynamic* Mid, bool bShirt) const;
 	/** The persona's hat and eyewear, fitted to the face (the eyes' midpoint and spacing in the reference pose). */
 	void ApplyWear();
+	/** Hero: the face, the hair and what's worn on the head hidden or drawn as the head's state says (first person: shadows only). */
+	void ApplyHeroHeadState();
+	/** Hero: whether the creator's hairstyle (and hat) keep any of the MetaHuman's scalp hair (a hat then sits over it). */
+	bool HeroWearsScalpHair() const;
 	void UpdateMood(float Dt);
 	void UpdateBody(float Dt);
 	void UpdateHands(float Dt);
@@ -398,9 +432,10 @@ private:
 	/** Hats and glasses (ApplyWear). */
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> Worn;
-	/** Hero: the hair copied for the third-person view (none in first person). */
+	/** Hero: the hair copied for the third-person view (none until the shoulder camera is first used). */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<USceneComponent>> HeroHair;
+	bool bHeroHeadBuilt = false;
 	bool bHeroHeadShown = false;
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> ChairSeat;

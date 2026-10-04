@@ -143,7 +143,9 @@ private:
 	int64 LeaveBuyInCents = 0;
 	/** Where to: "dee-game" (the Back Room) or "embercrest" (the casino's tournament). */
 	FString LeaveFor;
-	// Home from Dee's game: what she texts once the room fades back in.
-	FString HomeText;
+	// Home from Dee's game (or the Embercrest): what the night passed back, for her text once the room fades back in.
+	FString HomeOptions;
 	double HomeTextAt = -1.0;
+	/** Whether the locks were changed last frame (-1 before the first): the room's dressing follows it. */
+	int32 EvictedShown = -1;
 };

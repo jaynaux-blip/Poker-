@@ -266,18 +266,41 @@ FAutoConsoleCommandWithWorldAndArgs RentNextCmd(TEXT("ss.Rent.Next"),
 	TEXT("ss.Rent.Next: the clock to a minute before the next rent deadline (evicted: the storage unit's renewal), to watch it land. Not with tables open."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>&, UWorld* World) {
 		ss::Session* S = WorldSession(World);
-		if (!S || S->T)
+		if (!S)
 		{
 			return;
 		}
-		const double Target = S->Evicted() ? S->Life.StorageDue : S->Life.RentDeadline;
-		if (Target > S->WorldMinutes() + 1.0)
-		{
-			S->LobbyMinutes += Target - 1.0 - S->WorldMinutes();
-		}
 		static const char* Stages[4] = {"due", "paid", "final notice", "evicted"};
-		LogLines(std::string("Rent: ") + Stages[FMath::Clamp(static_cast<int32>(S->Life.RentStage), 0, 3)] + ", $" + std::to_string(S->Life.RentDueCents / 100) + " (bankroll $" +
-				 std::to_string(S->BankrollCents / 100) + "). A minute to go.");
+		const bool bEvicted = S->Evicted();
+		const std::string Head = std::string("Rent: ") + Stages[FMath::Clamp(static_cast<int32>(S->Life.RentStage), 0, 3)] + ", $" + std::to_string(S->Life.RentDueCents / 100) +
+								 (bEvicted ? " to move back in" : "") + " (bankroll $" + std::to_string(S->BankrollCents / 100) + ").";
+		// The clock can't be moved under an open table, or during a nap, a shift or a night's sleep (the skip sets the clock
+		// every frame from where it began).
+		if (S->T)
+		{
+			LogLines(Head + " Not with a table open: the clock stays.\n");
+			return;
+		}
+		if (S->TimeSkip.Active)
+		{
+			LogLines(Head + " Not during a time skip" + (S->TimeSkip.Label.empty() ? std::string() : " (" + S->TimeSkip.Label + ")") + ": the clock stays.\n");
+			return;
+		}
+		const double Target = bEvicted ? S->Life.StorageDue : S->Life.RentDeadline;
+		if (Target <= 0.0)
+		{
+			LogLines(Head + (bEvicted ? " Evicted, nothing in storage: no deadline to skip to.\n" : " No deadline to skip to.\n"));
+			return;
+		}
+		const std::string What = bEvicted ? "the storage unit's renewal" : "the deadline";
+		const double Left = Target - S->WorldMinutes();
+		if (Left > 1.0)
+		{
+			S->LobbyMinutes += Left - 1.0;
+			LogLines(Head + " A minute to " + What + ".\n");
+			return;
+		}
+		LogLines(Head + (Left > 0.0 ? " Less than a minute to " + What + " already.\n" : " Already past " + What + ": it lands on the next update.\n"));
 	}));
 #endif
 
@@ -288,13 +311,19 @@ void SetConsoleInt(const TCHAR* Name, int32 Value)
 		Var->Set(Value, ECVF_SetByGameSetting);
 	}
 }
-/** What Dee texts after a night at her game, from what the Back Room passed back (cents, reads learned). */
-FString HomeTextFromOptions(const FString& Options)
+/**
+ * What Dee texts after a night at her game, from what the Back Room passed back (cents, reads learned), and the career as
+ * it stands when she sends it: locked out, the player sleeps on her couch, and a big night is the key back (or a start on it).
+ */
+FString HomeTextFromOptions(const FString& Options, const ss::Session& S)
 {
 	if (UGameplayStatics::HasOption(Options, TEXT("Street")))
 	{
 		return FString(); // back from the corner store: nothing for Dee to say
 	}
+	const bool bEvicted = S.Evicted();
+	const bool bKeyMoney = S.BankrollCents >= S.Life.RentDueCents;
+	const TCHAR* KeyBack = bKeyMoney ? TEXT("go get your key back") : TEXT("put it toward your key");
 	if (UGameplayStatics::HasOption(Options, TEXT("Live")))
 	{
 		// Home from the Embercrest: Dee saw it all from the box.
@@ -312,8 +341,9 @@ FString HomeTextFromOptions(const FString& Options)
 		}
 		else if (UGameplayStatics::HasOption(Options, TEXT("Won")))
 		{
-			Text = Event.IsEmpty() ? FString::Printf(TEXT("YOU WON THE EMBERCREST. $%lld. the whole floor's talking about you. pay your rent, then call me."), Prize / 100)
-								   : FString::Printf(TEXT("YOU WON THE %s. $%lld. your name's going on the wall. pay your rent, then call me."), *Event.ToUpper(), Prize / 100);
+			const FString Then = bEvicted ? FString(KeyBack) : FString(TEXT("pay your rent"));
+			Text = Event.IsEmpty() ? FString::Printf(TEXT("YOU WON THE EMBERCREST. $%lld. the whole floor's talking about you. %s, then call me."), Prize / 100, *Then)
+								   : FString::Printf(TEXT("YOU WON THE %s. $%lld. your name's going on the wall. %s, then call me."), *Event.ToUpper(), Prize / 100, *Then);
 		}
 		else if (Prize > 0)
 		{
@@ -341,11 +371,13 @@ FString HomeTextFromOptions(const FString& Options)
 	FString Text;
 	if (bBusted)
 	{
-		Text = TEXT("Rough night. Everybody gets felted. Sleep, then come back and watch more than you play.");
+		Text = bEvicted ? TEXT("Rough night. Everybody gets felted. Couch is yours, sleep. Then come back and watch more than you play.")
+						: TEXT("Rough night. Everybody gets felted. Sleep, then come back and watch more than you play.");
 	}
 	else if (Net >= 10000)
 	{
-		Text = FString::Printf(TEXT("You took %s off my table. Sal's still muttering. Pay your rent before you get ideas."), *Dollars);
+		Text = FString::Printf(TEXT("You took %s off my table. Sal's still muttering. %s before you get ideas."), *Dollars,
+			!bEvicted ? TEXT("Pay your rent") : (bKeyMoney ? TEXT("Go get your key back") : TEXT("Put it toward your key")));
 	}
 	else if (Net > 0)
 	{
@@ -450,6 +482,9 @@ void ANightOneGameMode::StartPlay()
 	Game->Menu.Info = ss::ui::DescribeSession(Game->Session, bHasSave);
 	Game->Menu.Info.Resolutions = SupportedResolutions();
 	Game->Menu.ScreenName = Game->Session.HeroName;
+	// A different first face in the creator each launch, and the pause menu's heading names the room.
+	Game->Menu.CreatorSalt = Seed;
+	Game->Menu.SetVenue(ss::ui::Venue::Home);
 
 	if (ANightOnePawn* Seat = GetSeat())
 	{
@@ -467,8 +502,9 @@ void ANightOneGameMode::StartPlay()
 	CreateViewportWidgets();
 	if (UGameplayStatics::HasOption(OptionsString, TEXT("Home")) && bLoaded)
 	{
-		// Back from Dee's game (the Back Room level opened this one with "?Home"): straight to the desk.
-		HomeText = HomeTextFromOptions(OptionsString);
+		// Back from Dee's game (the Back Room level opened this one with "?Home"): straight to the desk. Dee's text is
+		// written when it's sent, once the hours away have been caught up (the locks may have changed at 3 AM).
+		HomeOptions = OptionsString;
 		HomeTextAt = 4.5;
 		// What happened on the calendar while out (a deadline passing at 3 AM) still happens.
 		const FString From = UGameplayStatics::ParseOption(OptionsString, TEXT("From"));
@@ -747,6 +783,13 @@ void ANightOneGameMode::StartNewCareer(const FString& ScreenName, const ss::hero
 {
 	if (Game)
 	{
+		// The screen name first: the new career's living world is made (and seeded) for whoever it's about, and it knows
+		// the player by it from the first night's results on.
+		const FString Clean = SanitizeName(ScreenName);
+		if (Clean.Len() >= 3)
+		{
+			Game->Session.HeroName = std::string(TCHAR_TO_UTF8(*Clean));
+		}
 		if (Who)
 		{
 			// A fresh save, then what the character's background starts them with.
@@ -769,6 +812,8 @@ void ANightOneGameMode::QuitToMainMenu()
 {
 	if (Game && bStarted)
 	{
+		// A stream still live ends here (credited), as leaving the desk any other way ends it.
+		Game->Session.EndStream();
 		Game->Session.Save();
 	}
 	SaveSettingsNow();
@@ -779,6 +824,7 @@ void ANightOneGameMode::QuitToDesktop()
 {
 	if (Game && bStarted)
 	{
+		Game->Session.EndStream();
 		Game->Session.Save();
 	}
 	SaveSettingsNow();
@@ -872,10 +918,14 @@ void ANightOneGameMode::Begin(const FString& Name)
 	bStarted = true;
 	bHasSave = true;
 	BeganAt = RealTime;
+	// The room as this career has it from the first frame (a new career's may differ from the title screen's): no door.
+	EvictedShown = -1;
 	const FString Clean = SanitizeName(Name);
 	if (Clean.Len() >= 3)
 	{
 		Game->Session.HeroName = std::string(TCHAR_TO_UTF8(*Clean));
+		// The living world names the player in its results (a new career's was made with the name already).
+		Game->Session.Living().HeroName = Game->Session.HeroName;
 	}
 	Game->Session.Save();
 	ReturnInputToGame();
@@ -900,6 +950,12 @@ bool ANightOneGameMode::GoOutside()
 		// Not with tables running: the tournament plays on without you, and the blinds don't wait.
 		Game->Text("RiverLine", "You have tables open. Finish or unregister before you head out.");
 		return false;
+	}
+	// Live on Kast: the stream ends as the player gets up, as it does on every other way out, so its hours, viewers and
+	// payout are credited (an unended stream isn't saved: it would just vanish with the level).
+	if (Game->Session.Streaming())
+	{
+		Game->Session.EndStream();
 	}
 	// Coat on, down the stairs, out onto Fifth (the Street level).
 	Game->Session.Save();
@@ -955,6 +1011,10 @@ void ANightOneGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	// The save being written (and any waiting) lands before the next scene reads it.
 	if (Game)
 	{
+		if (bStarted)
+		{
+			Game->Session.Save();
+		}
 		Game->Saver.Flush();
 	}
 	if (UWorld* World = GetWorld())
@@ -1069,6 +1129,7 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	if (HomeTextAt >= 0.0 && RealTime >= HomeTextAt)
 	{
 		HomeTextAt = -1.0;
+		const FString HomeText = HomeTextFromOptions(HomeOptions, Game->Session);
 		if (!HomeText.IsEmpty())
 		{
 			Game->Text("Dee", std::string(TCHAR_TO_UTF8(*HomeText)));
@@ -1154,17 +1215,28 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		Stage->SetLens(Seat->Focus, Tilt, Pulse);
 	}
 	Stage->SetScreenGlow(S.CurrentScreen == ss::Screen::Table ? FLinearColor(0.55f, 0.9f, 0.8f) : FLinearColor(0.72f, 0.84f, 1.0f), 1.0f);
-	// The GearDrop LED kit: the room in the chosen colour, flashing with the stream when synced.
+	// The GearDrop LED kit: the room in the chosen colour, flashing with the stream when synced. Evicted, the kit is in
+	// the storage unit with the rest of the rig: dark.
 	{
+		const bool bStored = S.Evicted();
 		const ss::gear::Glow Leds = S.RoomGlow(GameTime);
+		const bool bLedsOn = Leds.On && !bStored;
 		const FLinearColor LedColor = FLinearColor::FromSRGBColor(FColor(static_cast<uint8>((Leds.Rgb >> 16) & 0xff), static_cast<uint8>((Leds.Rgb >> 8) & 0xff), static_cast<uint8>(Leds.Rgb & 0xff)));
-		Stage->SetRoomLights(Leds.On, LedColor, static_cast<float>(Leds.Level));
+		Stage->SetRoomLights(bLedsOn, LedColor, static_cast<float>(Leds.Level));
+		// The locks changing (or the key back) while the player is in the room: the door, heard; the room changes with it.
+		const int32 EvictedNow = bStored ? 1 : 0;
+		if (EvictedShown >= 0 && EvictedShown != EvictedNow && Audio)
+		{
+			Audio->PlayEffect(ss::audio::Effect::Scrape, bStored ? 0.9f : 0.6f);
+		}
+		EvictedShown = EvictedNow;
 		// What the player owns, set up in the room, and what their career has left on the windowsill. The PC's RGB
 		// follows the kit (or cycles through the rainbow on its own); the streaming lights come on while live.
-		// Evicted, the gear is in a storage unit: the desk is down to the laptop (GearFx already is).
+		// Evicted, the gear is in a storage unit: the desk is down to the laptop (GearFx already is), what's left of the
+		// room is packed in boxes, and it isn't theirs any more.
 		const ss::gear::Effects& Fx = S.GearFx();
-		const bool bStored = S.Evicted();
 		FRoomGear Room;
+		Room.bEvicted = bStored;
 		Room.bMonitor = !bStored && S.Owns("monitor-24");
 		Room.bMonitorWide = !bStored && S.Owns("monitor-27");
 		Room.Towers = Fx.PcTier >= 3 ? 2 : (Fx.PcTier >= 2 ? 1 : 0);
@@ -1179,8 +1251,8 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		Room.bTrophy = S.Life.LiveBestPlace == 1;
 		Room.bDeeChip = S.Life.BackRoomNetCents > 0;
 		Stage->SetGear(Room);
-		const FLinearColor Rgb = Leds.On ? LedColor : FLinearColor::MakeFromHSV8(static_cast<uint8>(FMath::Fmod(RealTime * 12.0, 256.0)), 190, 255);
-		Stage->SetGearGlow(Rgb, Leds.On ? static_cast<float>(Leds.Level) : 1.0f, S.Streaming());
+		const FLinearColor Rgb = bLedsOn ? LedColor : FLinearColor::MakeFromHSV8(static_cast<uint8>(FMath::Fmod(RealTime * 12.0, 256.0)), 190, 255);
+		Stage->SetGearGlow(Rgb, bLedsOn ? static_cast<float>(Leds.Level) : 1.0f, S.Streaming() && !bStored);
 	}
 	// The monitors' pictures, ten times a second (ss::ui::secondscreen).
 	MonitorAccum += Dt;
@@ -1248,7 +1320,8 @@ void ANightOneGameMode::OnMouse(bool bOverScreen, const FVector2D& Client, float
 void ANightOneGameMode::OnPress(bool bOverScreen)
 {
 	ANightOnePawn* Seat = GetSeat();
-	if (!bStarted || !Game || !Seat || IsMenuOpen())
+	// Not while the coat's going on (the leave fade): a click then would land on the laptop of a scene that's ending.
+	if (!bStarted || !Game || !Seat || IsMenuOpen() || bLeaving)
 	{
 		return;
 	}
@@ -1290,7 +1363,7 @@ void ANightOneGameMode::OnRelease()
 
 void ANightOneGameMode::OnWheel(float Delta)
 {
-	if (Game && !IsMenuOpen())
+	if (Game && !IsMenuOpen() && !bLeaving)
 	{
 		Game->Client.UI.Ptr.Wheel += Delta;
 	}
@@ -1298,7 +1371,7 @@ void ANightOneGameMode::OnWheel(float Delta)
 
 void ANightOneGameMode::OnKey(const FString& Key)
 {
-	if (!bStarted || !Game || IsMenuOpen())
+	if (!bStarted || !Game || IsMenuOpen() || bLeaving)
 	{
 		return;
 	}

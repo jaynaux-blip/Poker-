@@ -1060,7 +1060,7 @@ void ABackRoomTable::EndHand()
 		if (Delta < -20)
 		{
 			const float Hurt = static_cast<float>(-Delta) / static_cast<float>(FMath::Max<int64>(HeroStartOfHand, 1));
-			Composure.Tilt = FMath::Min(1.0f, Composure.Tilt + FMath::Clamp(Hurt * 1.2f, 0.15f, 0.9f) * (bShowdown ? 1.0f : 0.6f));
+			Composure.Tilt = FMath::Min(1.0f, Composure.Tilt + FMath::Clamp(Hurt * 1.2f, 0.15f, 0.9f) * (bShowdown ? 1.0f : 0.6f) * FMath::Max(0.0f, TiltGain));
 		}
 		else if (Delta > 20)
 		{

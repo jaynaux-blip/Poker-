@@ -162,6 +162,8 @@ public:
 	int32 LearnedThisNight = 0;
 	/** What one confirmed sighting counts for in the read book (the Dealer's Kid: 2, learned the first time). */
 	int32 ReadWeight = 1;
+	/** How hard a painful loss tilts the hero (the Bouncer's thick skin: 0.7, years of drunks and sore losers). */
+	float TiltGain = 1.0f;
 	/** A tell just played across the table (from ABackRoomPlayer); Studied is how hard you were looking. */
 	void OnTellSeen(ABackRoomPlayer* Player, uint8 Tell, uint8 Means, bool bHonest, float Studied);
 	/** "Player/Tell" for the read book. */

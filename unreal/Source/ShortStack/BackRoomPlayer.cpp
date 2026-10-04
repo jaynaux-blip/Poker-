@@ -17,6 +17,7 @@
 #include "GroomAsset.h"
 #include "GroomComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "ShortStackCharacter.h"
 #include "UObject/ConstructorHelpers.h"
 
 using namespace BackRoomPlayerDetail;
@@ -298,6 +299,71 @@ UStaticMesh* WearMesh(const TCHAR* Name)
 	return Name ? LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s.%s"), Name, Name, Name), nullptr, LOAD_NoWarn | LOAD_Quiet) : nullptr;
 }
 
+/**
+ * The slot an imported prop's Blender material landed in (as ShortStackCharacter.cpp's BakedSlot): the bake names each
+ * material after its Blender slot ("M_SM_Hat_Cap_2"), and the importer needn't keep Blender's order.
+ */
+int32 StreetWearSlot(const UMeshComponent* Mesh, int32 Index)
+{
+	const FString Suffix = FString::Printf(TEXT("_%d"), Index);
+	const TArray<FName> Slots = Mesh->GetMaterialSlotNames();
+	for (int32 Slot = 0; Slot < Slots.Num(); ++Slot)
+	{
+		if (Slots[Slot].ToString().EndsWith(Suffix))
+		{
+			return Slot;
+		}
+	}
+	for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
+	{
+		const UMaterialInterface* Material = Mesh->GetMaterial(Slot);
+		if (Material && !Material->IsA<UMaterialInstanceDynamic>() && Material->GetName().EndsWith(Suffix))
+		{
+			return Slot;
+		}
+	}
+	return Index;
+}
+
+/**
+ * Tints one of the street's hats or frames as the street does (ShortStackCharacter.cpp's TintSlot): the Blender bake is
+ * light grey and the importer's material multiplies it by its base color factor (BaseColorFactor_RGB in this engine);
+ * Lift brightens the color back by about as much as the grey darkens it.
+ */
+void TintStreetWear(UMeshComponent* Mesh, int32 Slot, const FLinearColor& Tint, float Lift)
+{
+	UMaterialInterface* Material = Mesh && Slot < Mesh->GetNumMaterials() ? Mesh->GetMaterial(Slot) : nullptr;
+	if (!Material)
+	{
+		return;
+	}
+	UMaterialInstanceDynamic* Mid = Cast<UMaterialInstanceDynamic>(Material);
+	if (!Mid)
+	{
+		Mid = UMaterialInstanceDynamic::Create(Material, Mesh);
+		Mesh->SetMaterial(Slot, Mid);
+	}
+	const FLinearColor Lifted(Tint.R * Lift, Tint.G * Lift, Tint.B * Lift, 1.0f);
+	bool bTinted = false;
+	TArray<FMaterialParameterInfo> Infos;
+	TArray<FGuid> Ids;
+	Mid->GetAllVectorParameterInfo(Infos, Ids);
+	for (const FMaterialParameterInfo& Info : Infos)
+	{
+		const FString Key = Info.Name.ToString().ToLower().Replace(TEXT("_"), TEXT("")).Replace(TEXT(" "), TEXT(""));
+		if (Key == TEXT("basecolorfactor") || Key == TEXT("basecolorfactorrgb") || Key == TEXT("basecolor") || Key == TEXT("basecolortint") || Key == TEXT("tint"))
+		{
+			Mid->SetVectorParameterValue(Info.Name, Lifted);
+			bTinted = true;
+		}
+	}
+	if (!bTinted)
+	{
+		// The listing came back empty (a parent not loaded yet): the importer's own name, set blind, as the street does.
+		Mid->SetVectorParameterValue(TEXT("BaseColorFactor"), Lifted);
+	}
+}
+
 /** The room's bodies whose hair fits under a hat: none, waves, slicked back, short and receding. Fuller hair (coils,
  *  an afro, a fringe, anything long) comes up through the crown. */
 bool HatFits(const FString& BlueprintPath)
@@ -355,7 +421,7 @@ void ABackRoomPlayer::DressOutfit(UMaterialInstanceDynamic* Mid, bool bShirt) co
 		Mid->SetScalarParameterValue(TEXT("Print1Tiling"), PrintTiling[Print]);
 		Mid->SetVectorParameterValue(TEXT("Print1ColorA"), Persona.ShirtB);
 		Mid->SetVectorParameterValue(TEXT("Print1ColorB"), Persona.ShirtC);
-		Mid->SetVectorParameterValue(TEXT("Print1ColorC"), FMath::Lerp(Persona.ShirtB, Persona.ShirtC, 0.5f));
+		Mid->SetVectorParameterValue(TEXT("Print1ColorC"), Persona.ShirtD.A > 0.0f ? Persona.ShirtD : FMath::Lerp(Persona.ShirtB, Persona.ShirtC, 0.5f));
 	}
 	else
 	{
@@ -393,7 +459,7 @@ void ABackRoomPlayer::ApplyWear()
 	}
 	Worn.Reset();
 	USkeletalMesh* FaceAsset = Face ? Face->GetSkeletalMeshAsset() : nullptr;
-	if (!FaceAsset || SeatRole == EBackRoomRole::Hero)
+	if (!FaceAsset)
 	{
 		return;
 	}
@@ -412,6 +478,66 @@ void ABackRoomPlayer::ApplyWear()
 	const FVector R = RefComponentSpace(Ref, EyeR).GetLocation();
 	const FVector Across = (L - R).GetSafeNormal();
 	const FVector Ahead = (FVector(0.0, 1.0, 0.0) - Across * FVector::DotProduct(FVector(0.0, 1.0, 0.0), Across)).GetSafeNormal();
+	if (SeatRole == EBackRoomRole::Hero)
+	{
+		// The hero wears what the character creator chose: the street's own pieces, fitted to this face exactly as the
+		// street fits them (AShortStackCharacter::FitHeadWear: the hat's crown on the scalp, the glasses' bridge before the
+		// eyes, sized to the head) and tinted as it tints them. Carried by the head; seen over the shoulder, and in first
+		// person only as shadows.
+		static const TCHAR* const StreetHats[5] = {nullptr, TEXT("SM_Hat_Beanie"), TEXT("SM_Hat_Cap"), TEXT("SM_Hat_Cap"), TEXT("SM_Hat_Bucket")};
+		static const TCHAR* const StreetSpecs[5] = {nullptr, TEXT("SM_Glasses_Round"), TEXT("SM_Glasses_Square"), TEXT("SM_Glasses_Wire"), TEXT("SM_Glasses_Shades")};
+		auto PutStreet = [&](const TCHAR* MeshName, const FTransform& Placed) -> UStaticMeshComponent* {
+			UStaticMesh* Mesh = WearMesh(MeshName);
+			if (!Mesh)
+			{
+				return nullptr;
+			}
+			UStaticMeshComponent* C = NewObject<UStaticMeshComponent>(this, MakeUniqueObjectName(this, UStaticMeshComponent::StaticClass(), *Mesh->GetName()), RF_Transient);
+			C->SetStaticMesh(Mesh);
+			C->SetupAttachment(Face, TEXT("head"));
+			C->SetRelativeTransform(Placed.GetRelativeTransform(Head));
+			C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			C->bCastHiddenShadow = true;
+			C->SetHiddenInGame(true);
+			Worn.Add(C);
+			return C;
+		};
+		const int32 Hat = FMath::Clamp(Persona.HeroHat, 0, 4);
+		const int32 Glasses = FMath::Clamp(Persona.HeroGlasses, 0, 4);
+		FTransform HatFit = AShortStackCharacter::FitHeadWear(FaceAsset, true, Hat == 3 ? 180.0f : 0.0f);
+		if (Hat > 0 && HeroWearsScalpHair())
+		{
+			// Over close-cropped hair (the only kind kept under a hat): a little higher and roomier than on the bare scalp, as
+			// the street wears it.
+			HatFit.AddToTranslation(FVector(0.0, 0.0, 0.8));
+			HatFit.SetScale3D(HatFit.GetScale3D() * 1.03);
+		}
+		if (UStaticMeshComponent* C = Hat > 0 ? PutStreet(StreetHats[Hat], HatFit) : nullptr)
+		{
+			// The fabric (and a cap's top button); the bill's underside keeps its green.
+			TintStreetWear(C, StreetWearSlot(C, 0), Persona.WearColor, 1.45f);
+			if (Hat == 2 || Hat == 3)
+			{
+				TintStreetWear(C, StreetWearSlot(C, 2), Persona.WearColor, 1.45f);
+			}
+			C->RegisterComponent();
+		}
+		if (UStaticMeshComponent* C = Glasses > 0 ? PutStreet(StreetSpecs[Glasses], AShortStackCharacter::FitHeadWear(FaceAsset, false)) : nullptr)
+		{
+			// Black acetate or gold wire; clear lenses get the glass the eyes show through (the shades keep their mirror).
+			TintStreetWear(C, StreetWearSlot(C, 0), Persona.FrameColor, Glasses == 3 ? 1.4f : 1.0f);
+			if (Glasses != 4 && C->GetNumMaterials() > 1)
+			{
+				if (UMaterialInterface* Lens = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/ShortStack/Materials/M_Lens.M_Lens"), nullptr, LOAD_NoWarn | LOAD_Quiet))
+				{
+					C->SetMaterial(StreetWearSlot(C, 1), Lens);
+				}
+			}
+			C->RegisterComponent();
+		}
+		ApplyHeroHeadState();
+		return;
+	}
 	const FRotator Facing = FRotationMatrix::MakeFromXZ(Ahead, FVector::UpVector).Rotator();
 	const double Scale = FMath::Clamp(FVector::Dist(L, R) / 6.3, 0.9, 1.12);
 	const FTransform AtEyes(Facing, (L + R) * 0.5 + Ahead * CVarNudgeX.GetValueOnGameThread() + FVector(0.0, 0.0, CVarNudgeZ.GetValueOnGameThread()), FVector(Scale));

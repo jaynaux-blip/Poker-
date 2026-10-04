@@ -41,6 +41,7 @@ struct FRoomGear
 	bool bRouter = false;      // fiber
 	bool bTrophy = false;      // won the Embercrest's Sunday tournament
 	bool bDeeChip = false;     // came out ahead at Dee's game: a $100 chip on a little stand on the sill
+	bool bEvicted = false;     // the locks changed: what's left of the room taped up in cartons, where the PC stood and by the wall
 
 	bool operator==(const FRoomGear& O) const = default;
 };

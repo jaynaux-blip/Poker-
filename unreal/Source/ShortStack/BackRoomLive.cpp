@@ -56,6 +56,15 @@ FString Str(const std::string& S)
 	return FString(UTF8_TO_TCHAR(S.c_str()));
 }
 
+/**
+ * How the room's staff address the player: ", Dana" from the character creator's first name (the person, in person; the
+ * screen name is for RiverLine), or nothing for a career from before the creator.
+ */
+FString AddressTo(const TSharedPtr<ss::SaveData>& Save)
+{
+	return Save.IsValid() && Save->Person.Created && !Save->Person.FirstName.empty() ? TEXT(", ") + Str(Save->Person.FirstName) : FString();
+}
+
 /** The room's extras: low-detail MetaHumans for the other tables. */
 const TCHAR* ExtraBodies[12] = {TEXT("ExtraA"), TEXT("ExtraB"), TEXT("ExtraC"), TEXT("ExtraD"), TEXT("ExtraE"), TEXT("ExtraF"), TEXT("ExtraG"),
 	TEXT("ExtraH"), TEXT("ExtraI"), TEXT("ExtraJ"), TEXT("ExtraK"), TEXT("ExtraL")};
@@ -919,7 +928,9 @@ void ABackRoomGameMode::LiveEvent(const ss::TEvent& E)
 			bHeroWon = true;
 			HeroPlace = 1;
 			HeroPrizeCents = Tourney->PrizeFor(1);
-			Floor(FString::Printf(TEXT("Ladies and gentlemen, your Embercrest %s champion... %s!"), *LiveShort, *Str(E.Name)));
+			// The floor calls the name on the player's registration: the person's (the screen name is RiverLine's).
+			const FString Winner = Save.IsValid() && Save->Person.Created ? Str(Save->Person.FullName()) : Str(E.Name);
+			Floor(FString::Printf(TEXT("Ladies and gentlemen, your Embercrest %s champion... %s!"), *LiveShort, *Winner));
 			RaiseBanner(TEXT("CHAMPION"));
 			if (Table->GetAudio())
 			{
@@ -1447,7 +1458,7 @@ void ABackRoomGameMode::LiveInteract()
 			const FString Status = FString::Printf(TEXT("%d left, %d paid. Level %d, %s and %s; the next break's before level %d."), Tourney->Remaining, Tourney->PaidPlaces(),
 				Tourney->LevelIndex + 1, *Num(L.Sb), *Num(L.Bb), NextBreak);
 			Line = PastLiveEvents == 0 ? TEXT("First time with us? Welcome to the Embercrest. ") + Status
-				   : PastLiveEvents >= 4 ? TEXT("There's my regular. ") + Status
+				   : PastLiveEvents >= 4 ? FString::Printf(TEXT("There's my regular%s. "), *AddressTo(Save)) + Status
 										 : Status;
 		}
 		Table->Announce(TEXT("Desk"), Line);
@@ -1457,7 +1468,7 @@ void ABackRoomGameMode::LiveInteract()
 		if (bLiveOver && HeroPrizeCents > 0 && !bCollected)
 		{
 			bCollected = true;
-			Table->Announce(TEXT("Cashier"), FString::Printf(TEXT("Congratulations. %s, cash. Count it with me... there you go."), *Dollars(HeroPrizeCents)));
+			Table->Announce(TEXT("Cashier"), FString::Printf(TEXT("Congratulations%s. %s, cash. Count it with me... there you go."), *AddressTo(Save), *Dollars(HeroPrizeCents)));
 			if (Table->GetAudio())
 			{
 				Table->GetAudio()->Play(ss::SoundId::Cash, 0.8f);
@@ -1469,11 +1480,13 @@ void ABackRoomGameMode::LiveInteract()
 		}
 		else if (PastLiveCashes > 0)
 		{
-			Table->Announce(TEXT("Cashier"), FString::Printf(TEXT("Back again. Your best here's %s place. Bring me something bigger tonight."), *Ordinal(FMath::Max(1, PastBestPlace))));
+			Table->Announce(TEXT("Cashier"), FString::Printf(TEXT("Back again%s. Your best here's %s place. Bring me something bigger tonight."), *AddressTo(Save),
+				*Ordinal(FMath::Max(1, PastBestPlace))));
 		}
 		else
 		{
-			Table->Announce(TEXT("Cashier"), PastLiveEvents == 0 ? TEXT("Nothing to cash yet. First night? Good luck in there.") : TEXT("Nothing for you yet. Come back with good news."));
+			Table->Announce(TEXT("Cashier"), PastLiveEvents == 0 ? FString(TEXT("Nothing to cash yet. First night? Good luck in there."))
+																 : FString::Printf(TEXT("Nothing for you yet%s. Come back with good news."), *AddressTo(Save)));
 		}
 		break;
 	case ECardRoomSpot::Bar:
@@ -1704,7 +1717,9 @@ void ABackRoomGameMode::UpdateBoard(float RealDt)
 	const FString Clock = bBeforeCards ? TEXT("SOON") : bOnBreak ? FString::Printf(TEXT("%02d:%02d"), BreakSecs / 60, BreakSecs % 60) : FString::Printf(TEXT("%02d:%02d"), Secs / 60, Secs % 60);
 	const FString Blinds = L.Ante > 0 ? FString::Printf(TEXT("%s / %s   ANTE %s"), *Num(L.Sb), *Num(L.Bb), *Num(L.Ante)) : FString::Printf(TEXT("%s / %s"), *Num(L.Sb), *Num(L.Bb));
 	const FString Next = FString::Printf(TEXT("NEXT   %s / %s"), *Num(N.Sb), *Num(N.Bb));
-	const FString Field = bHeroWon ? FString::Printf(TEXT("CHAMPION   %s"), Save.IsValid() ? *Str(Save->HeroName) : TEXT(""))
+	// The champion as the room knows them: the person's name (the creator's), or the screen name for a career from before it.
+	const FString Champion = !Save.IsValid() ? FString() : Save->Person.Created ? Str(Save->Person.FullName()).ToUpper() : Str(Save->HeroName);
+	const FString Field = bHeroWon ? FString::Printf(TEXT("CHAMPION   %s"), *Champion)
 								   : FString::Printf(TEXT("PLAYERS %d / %d     AVG %s     PAID %d"), Tourney->Remaining, Tourney->Spec.Entrants, *Num(static_cast<int64>(Tourney->AverageStack())), Tourney->PaidPlaces());
 	Stage->SetBoard(Title, FString::Printf(TEXT("LEVEL %d"), Tourney->LevelIndex + 1), Clock, Blinds, Next, Field);
 }
@@ -1974,7 +1989,8 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 					{
 						return;
 					}
-					GM->Table->Announce(TEXT("Cashier"), FString::Printf(TEXT("Congratulations. %s, cash. Count it with me... there you go."), *Dollars(GM->HeroPrizeCents)));
+					GM->Table->Announce(TEXT("Cashier"), FString::Printf(TEXT("Congratulations%s. %s, cash. Count it with me... there you go."), *AddressTo(GM->Save),
+						*Dollars(GM->HeroPrizeCents)));
 					if (GM->Table->GetAudio())
 					{
 						GM->Table->GetAudio()->Play(ss::SoundId::Cash, 0.8f);

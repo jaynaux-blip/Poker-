@@ -1111,6 +1111,7 @@ enum EGearPiece : int32
 	GearRouter,
 	GearTrophy,
 	GearDeeChip,
+	GearEvicted,
 	GearPieces
 };
 
@@ -1285,6 +1286,41 @@ void ANightOneStage::BuildGear()
 			AddMesh(Chip, nullptr, Seat, FVector(1.0), Upright, GearGroups[GearDeeChip]);
 		}
 	}
+	// Evicted: what's left of the room packed into kraft cartons, taped shut (a red sticker on one), stacked where the PC
+	// stood beside the desk and against the left wall. The room reads as somebody else's now, the laptop the last thing out.
+	{
+		UMaterialInterface* Kraft = Surface(TEXT("Cardboard"), 0xa77d4f, 0.9f);
+		UMaterialInterface* Tape = Surface(TEXT("PackingTape"), 0xcdb98f, 0.35f);
+		UMaterialInterface* Sticker = Surface(TEXT("CartonSticker"), 0xb3261e, 0.6f);
+		struct FCarton
+		{
+			FVector At;   // web meters: the middle of its base
+			FVector Size; // width, height, depth (m)
+			float Yaw;
+			bool bSticker;
+		};
+		const FCarton Cartons[] = {
+			{FVector(1.18, 0.0, -0.32), FVector(0.55, 0.44, 0.45), 8.0f, false},
+			{FVector(1.15, 0.44, -0.30), FVector(0.42, 0.34, 0.36), -7.0f, true},
+			{FVector(1.66, 0.0, -0.62), FVector(0.40, 0.30, 0.38), 21.0f, false},
+			{FVector(-1.22, 0.0, -0.42), FVector(0.50, 0.36, 0.42), -13.0f, false},
+		};
+		for (const FCarton& C : Cartons)
+		{
+			USceneComponent* Carton = NewPart<USceneComponent>(GearGroups[GearEvicted]);
+			Carton->SetRelativeLocationAndRotation(Web(C.At.X, C.At.Y, C.At.Z), FRotator(0.0f, C.Yaw, 0.0f));
+			BoxWeb(Kraft, FVector(0.0, C.Size.Y * 0.5, 0.0), C.Size, 0.0f, Carton);
+			// A strip of tape down the middle of the lid and over its front and back edges.
+			BoxWeb(Tape, FVector(0.0, C.Size.Y + 0.0015, 0.0), FVector(0.05, 0.003, C.Size.Z + 0.004), 0.0f, Carton);
+			BoxWeb(Tape, FVector(0.0, C.Size.Y - 0.05, C.Size.Z * 0.5 + 0.0015), FVector(0.05, 0.1, 0.003), 0.0f, Carton);
+			BoxWeb(Tape, FVector(0.0, C.Size.Y - 0.05, -C.Size.Z * 0.5 - 0.0015), FVector(0.05, 0.1, 0.003), 0.0f, Carton);
+			if (C.bSticker)
+			{
+				// On the side facing the chair.
+				BoxWeb(Sticker, FVector(-C.Size.X * 0.2, C.Size.Y * 0.55, C.Size.Z * 0.5 + 0.002), FVector(0.12, 0.08, 0.002), 0.0f, Carton);
+			}
+		}
+	}
 	for (USceneComponent* Group : GearGroups)
 	{
 		Group->SetVisibility(false, true);
@@ -1301,7 +1337,7 @@ void ANightOneStage::SetGear(const FRoomGear& NewGear)
 	bGearApplied = true;
 	const bool Shown[GearPieces] = {Gear.bMonitor, Gear.bMonitorWide, Gear.Towers >= 1, Gear.Towers >= 2, Gear.Cam == 1, Gear.Cam == 2, Gear.Cam >= 3,
 	                                Gear.Mic == 1, Gear.Mic >= 2, Gear.Lights == 1, Gear.Lights >= 2, Gear.bMacroPad, Gear.bHeadphones, Gear.bPlant,
-	                                Gear.bCurtains, Gear.bRouter, Gear.bTrophy, Gear.bDeeChip};
+	                                Gear.bCurtains, Gear.bRouter, Gear.bTrophy, Gear.bDeeChip, Gear.bEvicted};
 	for (int32 I = 0; I < GearGroups.Num() && I < GearPieces; ++I)
 	{
 		if (GearGroups[I])

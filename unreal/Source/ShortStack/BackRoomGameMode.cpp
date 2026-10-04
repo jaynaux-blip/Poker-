@@ -14,13 +14,16 @@
 #include "Engine/Font.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/App.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/PackageName.h"
 #include "NightOneAudio.h"
 #include "NightOneSaveGame.h"
 #include "ShortStack/AI/Profiles.h"
 #include "ShortStack/Audio/Synth.h"
+#include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
@@ -105,6 +108,111 @@ float Ecg(float P)
 	auto G = [P](float Mu, float Sigma) { return FMath::Exp(-0.5f * FMath::Square((P - Mu) / Sigma)); };
 	return 0.12f * G(0.12f, 0.025f) - 0.14f * G(0.232f, 0.008f) + 1.0f * G(0.25f, 0.009f) - 0.28f * G(0.27f, 0.01f) + 0.22f * G(0.48f, 0.045f);
 }
+
+// The shoulder camera (V), tunable live: how far behind the eyes, how far over the shoulder and how high over the eyes
+// (cm), how much of the head's turn it swings with, its lens, and how quickly it catches up with the head. Close and
+// low, as a shoulder camera is: the head a little left of center and level with it, the pot and the board just clear of
+// it below and to the right, the faces across the table above.
+TAutoConsoleVariable<float> CVarShoulderBack(TEXT("ss.Table.ShoulderBack"), 90.0f, TEXT("Over the shoulder at the table: the camera's distance behind the eyes (cm)."));
+TAutoConsoleVariable<float> CVarShoulderSide(TEXT("ss.Table.ShoulderSide"), 42.0f, TEXT("Over the shoulder at the table: how far out over the shoulder (cm)."));
+TAutoConsoleVariable<float> CVarShoulderUp(TEXT("ss.Table.ShoulderUp"), 22.0f, TEXT("Over the shoulder at the table: the camera's height over the eyes (cm)."));
+TAutoConsoleVariable<float> CVarShoulderFollow(TEXT("ss.Table.ShoulderFollow"), 0.55f, TEXT("Over the shoulder at the table: how much of the head's turn the camera swings with (0..1)."));
+TAutoConsoleVariable<float> CVarShoulderFov(TEXT("ss.Table.ShoulderFov"), 62.0f, TEXT("Over the shoulder at the table: the field of view (degrees)."));
+TAutoConsoleVariable<float> CVarShoulderLag(TEXT("ss.Table.ShoulderLag"), 9.0f, TEXT("Over the shoulder at the table: how quickly the camera catches up with the head (per second; 0: at once)."));
+
+// The player's choice of view at the table, kept with the engine's own user settings (it isn't the career's).
+const TCHAR* TableViewSection = TEXT("ShortStack.Table");
+const TCHAR* TableViewKey = TEXT("ThirdPerson");
+const TCHAR* TableShoulderKey = TEXT("LeftShoulder");
+
+bool SavedTableView(const TCHAR* Key)
+{
+	bool bOn = false;
+	if (GConfig)
+	{
+		GConfig->GetBool(TableViewSection, Key, bOn, GGameUserSettingsIni);
+	}
+	return bOn;
+}
+
+void SaveTableView(const TCHAR* Key, bool bOn)
+{
+	if (GConfig)
+	{
+		GConfig->SetBool(TableViewSection, Key, bOn, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+}
+
+// The Back Room's inside (stage space, from BackRoomStage.cpp's shell: the walls at X -330 and 390, Y -300 and 320, the
+// ceiling at 285 with its pipes), less a margin the camera keeps from them.
+const FBox BackRoomInside(FVector(-330.0 + 18.0, -300.0 + 18.0, 12.0), FVector(390.0 - 18.0, 320.0 - 18.0, 285.0 - 34.0));
+
+/** Where the segment A -> B first goes into the sphere (C, R), as a fraction along it; 1 when it doesn't (or starts in it). */
+double SegmentIntoSphere(const FVector& A, const FVector& B, const FVector& C, double R)
+{
+	const FVector D = B - A;
+	const double L2 = D.SizeSquared();
+	const FVector M = A - C;
+	const double Outside = M.SizeSquared() - R * R;
+	const double Toward = FVector::DotProduct(M, D);
+	if (L2 < KINDA_SMALL_NUMBER || Outside <= 0.0 || Toward >= 0.0)
+	{
+		return 1.0;
+	}
+	const double Disc = Toward * Toward - L2 * Outside;
+	return Disc < 0.0 ? 1.0 : FMath::Clamp((-Toward - FMath::Sqrt(Disc)) / L2, 0.0, 1.0);
+}
+
+/** How far along A -> B (0..1) stays inside Box; 1 when A isn't in it (nothing to keep in). */
+double SegmentInBox(const FVector& A, const FVector& B, const FBox& Box)
+{
+	if (!Box.IsInside(A))
+	{
+		return 1.0;
+	}
+	double T = 1.0;
+	for (int32 Axis = 0; Axis < 3; ++Axis)
+	{
+		const double D = B[Axis] - A[Axis];
+		if (D > 0.0 && B[Axis] > Box.Max[Axis])
+		{
+			T = FMath::Min(T, (Box.Max[Axis] - A[Axis]) / D);
+		}
+		else if (D < 0.0 && B[Axis] < Box.Min[Axis])
+		{
+			T = FMath::Min(T, (Box.Min[Axis] - A[Axis]) / D);
+		}
+	}
+	return FMath::Clamp(T, 0.0, 1.0);
+}
+
+/** One of the character creator's palette colors (0xRRGGBB, sRGB), linear, as the street dyes with it. */
+FLinearColor CreatorTone(uint32 Hex)
+{
+	return FLinearColor::FromSRGBColor(FColor(static_cast<uint8>((Hex >> 16) & 0xff), static_cast<uint8>((Hex >> 8) & 0xff), static_cast<uint8>(Hex & 0xff)));
+}
+
+/**
+ * The hair material's melanin, redness and grey for the creator's hair colors (black, dark brown, brown, auburn, copper,
+ * blonde, platinum, grey), as ShortStackCharacter.cpp's HairShadeOf colors the street's: kept in step with it by hand.
+ */
+void HeroHairShade(int32 Index, FBackRoomPersona& P)
+{
+	static const float Table[8][3] = {{0.95f, 0.08f, 0.0f}, {0.75f, 0.2f, 0.0f}, {0.55f, 0.28f, 0.0f}, {0.45f, 0.7f, 0.0f}, {0.3f, 0.95f, 0.0f},
+		{0.13f, 0.3f, 0.0f}, {0.04f, 0.05f, 0.3f}, {0.35f, 0.05f, 0.85f}};
+	const int32 I = FMath::Clamp(Index, 0, 7);
+	P.HairMelanin = Table[I][0];
+	P.HairRedness = Table[I][1];
+	P.HairWhite = Table[I][2];
+}
+
+/** The street's trousers for each jacket color (ShortStackCharacter.cpp's HeroOutfit): denim, charcoal, dark brown, black... */
+uint32 HeroPantsTone(int32 OutfitColor)
+{
+	static const uint32 PantsFor[8] = {0x283244, 0x2b2c31, 0x3a3128, 0x1d1d21, 0x283447, 0x3b3d43, 0x2b2c31, 0x1d1d21};
+	return PantsFor[FMath::Clamp(OutfitColor, 0, 7)];
+}
 } // namespace BackRoomGameDetail
 
 using namespace BackRoomGameDetail;
@@ -135,6 +243,13 @@ void ABackRoomPawn::BeginPlay()
 {
 	Super::BeginPlay();
 	Seat = GetActorLocation();
+	FirstEye = Seat;
+	// The view the player kept: over the shoulder (and which one). A night's walk in is first person, and the camera eases
+	// out once they sit (in practice, once the head it looks past is made).
+	bThirdPerson = SavedTableView(TableViewKey);
+	ThirdBlend = 0.0f;
+	ShoulderSideWant = SavedTableView(TableShoulderKey) ? -1.0f : 1.0f;
+	ShoulderSide = ShoulderSideWant;
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		PC->SetInputMode(FInputModeGameOnly());
@@ -179,7 +294,15 @@ void ABackRoomPawn::TestExtCam(FVector Pos, FVector At, float Fov, bool bOn)
 
 FVector ABackRoomPawn::GetEye() const
 {
-	return Camera ? Camera->GetComponentLocation() : GetActorLocation();
+	// (The camera is the root: over the shoulder it isn't where the eyes are, and a walk must set off from the body.)
+	return FirstEye.IsZero() ? GetActorLocation() : FirstEye;
+}
+
+void ABackRoomPawn::ToggleThirdPerson()
+{
+	bThirdPerson = !bThirdPerson;
+	ViewShownAt = FPlatformTime::Seconds();
+	SaveTableView(TableViewKey, bThirdPerson);
 }
 
 void ABackRoomPawn::HandleInput(float RealDt)
@@ -192,10 +315,20 @@ void ABackRoomPawn::HandleInput(float RealDt)
 	{
 		return;
 	}
-	// V: first or third person.
-	if (PC->WasInputKeyJustPressed(EKeys::V))
+	// V: over the shoulder, or back in your own head. B (or the middle button): the other shoulder.
+	if (Pressed(PC, EKeys::V))
 	{
-		bThirdPerson = !bThirdPerson;
+		ToggleThirdPerson();
+	}
+	if (bThirdPerson && (Pressed(PC, EKeys::B) || Pressed(PC, EKeys::MiddleMouseButton)))
+	{
+		// Away from the shoulder the camera is on now (even one it moved to by itself while they look across), and kept
+		// there while they go on looking that way.
+		const float SideNow = bShoulderFlipped ? -ShoulderSideWant : ShoulderSideWant;
+		ShoulderSideWant = -SideNow;
+		bShoulderFlipped = false;
+		bShoulderHeld = static_cast<float>(Smoothed.Yaw) * ShoulderSideWant < -18.0f;
+		SaveTableView(TableShoulderKey, ShoulderSideWant < 0.0f);
 	}
 	// Peek: hold to lift the corners.
 	const bool bPeek = bTestPeek || PC->IsInputKeyDown(EKeys::SpaceBar) || PC->IsInputKeyDown(EKeys::LeftMouseButton);
@@ -371,13 +504,26 @@ void ABackRoomPawn::TestWalker(float RoomX, float RoomY, float InYaw, float InPi
 	WalkYaw = InYaw;
 	WalkPitch = InPitch;
 	Smoothed = FRotator(InPitch, InYaw, 0.0f);
+	FirstEye = WalkBase;
 	SetActorLocationAndRotation(WalkBase, Smoothed);
 }
 
 void ABackRoomPawn::BeginFreeWalk()
 {
 	bFreeWalk = true;
-	WalkBase = GetActorLocation();
+	bHoldWalkEnd = false;
+	bWalkPending = false;
+	// On foot is first person (the body walking is the camera's own).
+	ThirdBlend = 0.0f;
+	if (ABackRoomTable* T = GetTable())
+	{
+		if (ABackRoomPlayer* Me = T->GetHeroPlayer())
+		{
+			Me->ShowHeroHead(false);
+		}
+	}
+	WalkBase = GetEye();
+	FirstEye = WalkBase;
 	WalkVel = FVector::ZeroVector;
 	WalkYaw = Smoothed.Yaw;
 	WalkPitch = FMath::Clamp(Smoothed.Pitch, -40.0f, 20.0f);
@@ -445,6 +591,7 @@ void ABackRoomPawn::TickFreeWalk(float RealDt)
 	Eye.Z += Moving * (1.4f * FMath::Abs(FMath::Sin(Steps)) - 0.7f);
 	const FRotator Look(WalkPitch, WalkYaw, Moving * 0.45f * FMath::Sin(Steps * 0.5f));
 	Smoothed = FMath::RInterpTo(Smoothed, Look, RealDt, 16.0f);
+	FirstEye = Eye;
 	SetActorLocationAndRotation(Eye, Smoothed);
 	Camera->SetFieldOfView(74.0f);
 	FPostProcessSettings& P = Camera->PostProcessSettings;
@@ -452,10 +599,15 @@ void ABackRoomPawn::TickFreeWalk(float RealDt)
 	P.DepthOfFieldFstop = 5.6f;
 	P.SceneFringeIntensity = 0.0f;
 	PeekLight->SetIntensity(0.0f);
-	// E: whatever's in reach (your chair, the desk, the cage, the bar, the deck, the door).
+	// E: whatever's in reach (your chair, the desk, the cage, the bar, the deck, the door). V picks the view for the table
+	// (on foot it's always your own eyes).
 	if (GM && Pressed(PC, EKeys::E))
 	{
 		GM->LiveInteract();
+	}
+	if (Pressed(PC, EKeys::V))
+	{
+		ToggleThirdPerson();
 	}
 	float PitchKick = 0.0f, Racing = 0.0f;
 	TickHeart(RealDt, PitchKick, Racing);
@@ -476,19 +628,49 @@ void ABackRoomPawn::PlayWalk(const TArray<FVector>& Points, float Seconds, bool 
 	StepCount = 0;
 	WalkSeconds = FMath::Max(Seconds, 0.1f);
 	bWalkOut = bOut;
-	bBodyShown = bOut;
+	ABackRoomTable* Table = GetTable();
+	ABackRoomPlayer* Me = Table ? Table->GetHeroPlayer() : nullptr;
+	// Going out, the body is left in the chair as the walk gets up (unless an earlier walk already took it: from the
+	// cashier's window there's no chair to scrape).
+	bBodyShown = bOut && Me && !Me->IsHidden();
 	WalkDone = MoveTemp(OnDone);
-	bWalking = WalkPoints.Num() >= 2 && WalkTotal > 1.0f;
+	bHoldWalkEnd = false;
+	bWalkPending = false;
+	const bool bCanWalk = WalkPoints.Num() >= 2 && WalkTotal > 1.0f;
 	UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
 	Focus = 0.0f;
 	Studying = nullptr;
+	// Nobody is studied from a walk, or from where one stops (the seated view sets it again on sitting down).
+	if (Table)
+	{
+		for (ABackRoomPlayer* O : Table->GetOpponents())
+		{
+			O->SetStudied(0.0f);
+		}
+	}
+	if (bCanWalk && bOut && ThirdBlend > 0.02f && !bFreeWalk)
+	{
+		// Over the shoulder: the camera comes back into the head first (Tick eases it), then the walk sets off from the eyes.
+		bWalking = false;
+		bWalkPending = true;
+		return;
+	}
+	bWalking = bCanWalk;
 	if (bWalking)
 	{
+		StartPendingWalk();
 		if (!bOut)
 		{
 			SetActorLocation(WalkPoints[0]);
+			FirstEye = WalkPoints[0];
 			Smoothed = (WalkPoints[1] - WalkPoints[0]).Rotation();
 			Smoothed.Pitch = -4.0f;
+			// Back to the seat over the shoulder: the head is ready before the body is seen again (the actor is hidden
+			// while it's made, as anyone's is between tables), and the camera eases out once they sit.
+			if (Me && bThirdPerson)
+			{
+				Me->SetHeroHeadBuilt(true);
+			}
 		}
 	}
 	else if (WalkDone)
@@ -496,6 +678,36 @@ void ABackRoomPawn::PlayWalk(const TArray<FVector>& Points, float Seconds, bool 
 		TFunction<void()> Done = MoveTemp(WalkDone);
 		WalkDone = nullptr;
 		Done();
+	}
+}
+
+void ABackRoomPawn::StartPendingWalk()
+{
+	bWalkPending = false;
+	bWalking = true;
+	// First person from its first step: the camera in the head, the face (and over-the-shoulder hair) out of the view.
+	ThirdBlend = 0.0f;
+	bShoulderFresh = true;
+	if (ABackRoomTable* Table = GetTable())
+	{
+		if (ABackRoomPlayer* Me = Table->GetHeroPlayer())
+		{
+			Me->ShowHeroHead(false);
+		}
+	}
+	if (bWalkOut)
+	{
+		// From where the eyes are now: the path was asked for from them a moment ago (over the shoulder, before the camera
+		// came back in; maybe mid-peek, down at the cards), and the head has moved since.
+		const FVector Now = GetEye();
+		if (WalkPoints.Num() >= 2 && WalkLengths.Num() >= 1 && FVector::DistSquared(Now, WalkPoints[0]) < FMath::Square(60.0))
+		{
+			WalkPoints[0] = Now;
+			WalkTotal -= WalkLengths[0];
+			WalkLengths[0] = static_cast<float>(FVector::Dist(WalkPoints[0], WalkPoints[1]));
+			WalkTotal = FMath::Max(1.0f, WalkTotal + WalkLengths[0]);
+		}
+		SetActorLocationAndRotation(Now, Smoothed);
 	}
 }
 
@@ -564,7 +776,8 @@ void ABackRoomPawn::TickWalk(float RealDt)
 			At = FMath::Lerp(At, Me->GetEyes() + FVector(1.5, 0.0, 0.0), static_cast<double>(Smooth(0.86f, 1.0f, T)));
 			if (!bBodyShown && T > 0.88f)
 			{
-				// Pull the chair in and sit.
+				// Pull the chair in and sit (the face stays out of the view the camera is settling into).
+				Me->ShowHeroHead(false);
 				Me->SetActorHiddenInGame(false);
 				bBodyShown = true;
 				if (Sound)
@@ -592,6 +805,7 @@ void ABackRoomPawn::TickWalk(float RealDt)
 	}
 	Look.Roll = Stride * 0.5f * FMath::Sin(Steps * 0.5f);
 	Smoothed = FMath::RInterpTo(Smoothed, Look, RealDt, bWalkOut ? 6.0f : 8.0f);
+	FirstEye = At;
 	SetActorLocationAndRotation(At, Smoothed);
 	Camera->SetFieldOfView(72.0f);
 	FPostProcessSettings& P = Camera->PostProcessSettings;
@@ -610,6 +824,9 @@ void ABackRoomPawn::TickWalk(float RealDt)
 			Pitch = -14.0f;
 			Smoothed = FRotator(-14.0f, 0.0f, 0.0f);
 		}
+		// Out of the chair and somewhere else: stay there (not back in the empty chair) until whatever's next moves on.
+		// A Done that starts another walk, or goes on foot, lets go of it.
+		bHoldWalkEnd = bWalkOut;
 		TFunction<void()> Done = MoveTemp(WalkDone);
 		WalkDone = nullptr;
 		if (Done)
@@ -617,6 +834,23 @@ void ABackRoomPawn::TickWalk(float RealDt)
 			Done();
 		}
 	}
+}
+
+void ABackRoomPawn::TickHold(float RealDt)
+{
+	// Where the walk stopped (the cashier's window, the aisle while the room turns): the head looks about, nothing else.
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		float Dx = 0.0f, Dy = 0.0f;
+		PC->GetInputMouseDelta(Dx, Dy);
+		Smoothed.Yaw += Dx * 0.9f;
+		Smoothed.Pitch = FMath::Clamp(Smoothed.Pitch + Dy * 0.9f, -50.0f, 35.0f);
+	}
+	Smoothed.Roll = FMath::FInterpTo(Smoothed.Roll, 0.0f, RealDt, 4.0f);
+	SetActorRotation(Smoothed);
+	PeekLight->SetIntensity(0.0f);
+	float PitchKick = 0.0f, Racing = 0.0f;
+	TickHeart(RealDt, PitchKick, Racing);
 }
 
 void ABackRoomPawn::TickHeart(float RealDt, float& PitchKick, float& Intensity)
@@ -660,6 +894,10 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	// Focus slows the world; the head and the meter run on real time.
 	const float RealDt = FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
 	Time += RealDt;
+	if (bWalkPending && ThirdBlend <= 0.02f)
+	{
+		StartPendingWalk();
+	}
 	if (bWalking)
 	{
 		TickWalk(RealDt);
@@ -669,6 +907,12 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	if (bFreeWalk)
 	{
 		TickFreeWalk(RealDt);
+		TestPressed.Reset();
+		return;
+	}
+	if (bHoldWalkEnd)
+	{
+		TickHold(RealDt);
 		TestPressed.Reset();
 		return;
 	}
@@ -685,9 +929,21 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 		Yaw = FMath::Clamp(Yaw + Dx * Sens, -MaxYaw, MaxYaw);
 		Pitch = FMath::Clamp(Pitch + Dy * Sens, MinPitch, MaxPitch);
 	}
-	if (!bDone)
+	if (!bDone && !bWalkPending)
 	{
 		HandleInput(RealDt);
+	}
+	else if (bWalkPending)
+	{
+		// Getting up: the camera on its way back into the head, nothing more to decide at the table.
+		bSteadying = false;
+		Focus = Ease(Focus, 0.0f, 5.0f, RealDt);
+		PeekBlend = Ease(PeekBlend, 0.0f, 6.0f, RealDt);
+		if (Me)
+		{
+			Me->SetHeroPeek(false);
+		}
+		UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
 	}
 	else
 	{
@@ -716,6 +972,8 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	FVector Eye = Me ? Me->GetEyes() + FVector(1.5, 0.0, 0.0) : Seat;
 	// A slow, deep breath while steadying.
 	Eye.Z += Steady * 1.1f * FMath::Sin(BreathT * 2.0f * PI);
+	// The head itself: what the shoulder camera pivots on (a peek takes the first-person eye down to the cards).
+	const FVector HeadEye = Eye;
 	FRotator Want(Pitch, Yaw, 0.0f);
 	FVector FocusAt = Eye + Want.Vector() * 120.0;
 	float PeekLit = 0.0f;
@@ -747,6 +1005,7 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	const FRotator Shaken = Smoothed + FRotator(PitchKick + Tremor * FMath::Sin(Time * 37.0f) * FMath::Sin(Time * 11.3f), Tremor * FMath::Sin(Time * 29.0f + 1.7f), 0.0f);
 	if (Me)
 	{
+		FirstEye = Eye;
 		SetActorLocationAndRotation(Eye, Shaken);
 		Me->SetHeroLook(Eye + Smoothed.Vector() * 200.0);
 	}
@@ -754,7 +1013,8 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	{
 		// No body yet: a head that breathes.
 		const float Breath = FMath::Sin(Time * 1.35f);
-		SetActorLocationAndRotation(Seat + FVector(0.25 * Breath, 0.0, 0.35 * Breath), Shaken + FRotator(0.2f * Breath, 0.0f, 0.15f * FMath::Sin(Time * 0.37f)));
+		FirstEye = Seat + FVector(0.25 * Breath, 0.0, 0.35 * Breath);
+		SetActorLocationAndRotation(FirstEye, Shaken + FRotator(0.2f * Breath, 0.0f, 0.15f * FMath::Sin(Time * 0.37f)));
 	}
 	if (!Studying.IsValid() && PeekBlend < 0.01f)
 	{
@@ -774,28 +1034,12 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	P.ColorSaturation = FVector4(1.0, 1.0, 1.0, 1.0 - 0.38 * Racing);
 	P.SceneFringeIntensity = 1.1f * Racing + 0.7f * Racing * Kick;
 
-	// Third person: the camera eases back and up over the right shoulder, turning with the look, the hero's own
-	// head in the shot. Peeking and Focus pull it back in close (they're the first person's business). The camera
-	// is the pawn's root, put back at the eyes at the top of each tick, so there's nothing to restore.
-	const float ThirdWant = bThirdPerson ? FMath::Clamp(1.0f - PeekBlend - Focus, 0.0f, 1.0f) : 0.0f;
-	ThirdBlend = Ease(ThirdBlend, ThirdWant, 5.0f, RealDt);
-	if (Me)
-	{
-		Me->ShowHeroHead(ThirdBlend > 0.2f);
-	}
-	if (ThirdBlend > 0.001f)
-	{
-		const float B = ThirdBlend * ThirdBlend * (3.0f - 2.0f * ThirdBlend);
-		const FVector Dir = FRotator(FMath::Clamp(Smoothed.Pitch, -40.0f, 10.0f) - 10.0f, Smoothed.Yaw, 0.0f).Vector();
-		const FVector Side = FVector::CrossProduct(FVector::UpVector, Dir).GetSafeNormal();
-		const FVector Back = Eye - Dir * 170.0 + FVector(0.0, 0.0, 42.0) + Side * 36.0;
-		const FVector LookAt = Eye + Smoothed.Vector() * 160.0;
-		Camera->SetWorldLocationAndRotation(FMath::Lerp(GetActorLocation(), Back, static_cast<double>(B)),
-			FQuat::Slerp(GetActorQuat(), (LookAt - Back).Rotation().Quaternion(), B));
-		Camera->SetFieldOfView(FMath::Lerp(Camera->FieldOfView, 68.0f, B));
-		P.DepthOfFieldFocalDistance = FMath::Lerp(P.DepthOfFieldFocalDistance, static_cast<float>(FVector::Dist(Back, LookAt)), B);
-		P.DepthOfFieldFstop = FMath::Lerp(P.DepthOfFieldFstop, 5.6f, B);
-	}
+	// Over the shoulder (V): the camera eases out of the head along its boom, the hero's own head in the shot. The camera
+	// is the pawn's root, put back at the eyes above each tick, so there's nothing to restore.
+	PlaceShoulderCamera(HeadEye, Shaken - Smoothed, Racing, RealDt);
+	// Where the player's view is from and looking (the shoulder camera's when it's out), for who feels watched.
+	const FVector ViewFrom = Camera->GetComponentLocation();
+	const FVector ViewFwd = Camera->GetForwardVector();
 
 	if (bExtCam)
 	{
@@ -804,19 +1048,177 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 		Camera->PostProcessSettings.DepthOfFieldFstop = 32.0f;
 	}
 
-	// The opponents feel being looked at: more so through Focus.
+	// The opponents feel being looked at: more so through Focus. Whoever is in the middle of the view counts, measured
+	// from where the view is (the eyes, or over the shoulder), so reads are gathered from either.
 	if (Table)
 	{
-		const FVector Fwd = Camera->GetForwardVector();
 		const float Lo = FMath::Cos(FMath::DegreesToRadians(9.0f));
 		const float Hi = FMath::Cos(FMath::DegreesToRadians(2.5f));
 		for (ABackRoomPlayer* O : Table->GetOpponents())
 		{
-			const float C = FVector::DotProduct(Fwd, (O->GetEyes() - Eye).GetSafeNormal());
-			O->SetStudied(bDone ? 0.0f : FMath::Clamp((C - Lo) / (Hi - Lo), 0.0f, 1.0f) * (0.6f + 0.4f * Focus));
+			const float C = FVector::DotProduct(ViewFwd, (O->GetEyes() - ViewFrom).GetSafeNormal());
+			O->SetStudied(bDone || bWalkPending ? 0.0f : FMath::Clamp((C - Lo) / (Hi - Lo), 0.0f, 1.0f) * (0.6f + 0.4f * Focus));
 		}
 	}
 	TestPressed.Reset();
+}
+
+void ABackRoomPawn::PlaceShoulderCamera(const FVector& Head, const FRotator& Shake, float Racing, float RealDt)
+{
+	ABackRoomTable* Table = GetTable();
+	ABackRoomPlayer* Me = Table ? Table->GetHeroPlayer() : nullptr;
+	// Peeking and Focus are the first person's business, and so is getting up (quicker then: the walk is waiting on it).
+	const float Want = bThirdPerson && !bWalkPending ? FMath::Clamp(1.0f - PeekBlend - Focus, 0.0f, 1.0f) : 0.0f;
+	ThirdBlend = Ease(ThirdBlend, Want, bWalkPending ? 9.0f : 5.0f, RealDt);
+	if (!Me)
+	{
+		ThirdBlend = 0.0f;
+		bShoulderFresh = true;
+		return;
+	}
+	// The head is built (full detail, the hair copied) while the choice is over the shoulder, and dropped a moment
+	// after it's back to first person, so a quick V and V again doesn't rebuild it.
+	if (bThirdPerson)
+	{
+		HeadIdleT = 0.0f;
+		if (!Me->IsHeroHeadBuilt())
+		{
+			// Made now and drawn a few frames on: the hair is bound to the face (back at full detail) before either shows,
+			// never in the same frame it's registered.
+			Me->SetHeroHeadBuilt(true);
+			HeadWarmFrames = 3;
+		}
+	}
+	else if (ThirdBlend < 0.01f && Me->IsHeroHeadBuilt())
+	{
+		HeadIdleT += RealDt;
+		if (HeadIdleT > 1.5f)
+		{
+			Me->SetHeroHeadBuilt(false);
+		}
+	}
+	// A head just made can't be drawn yet: the camera waits in it until it can (a night opened over the shoulder would
+	// otherwise start out behind a body with no head on it), then eases out.
+	if (HeadWarmFrames > 0)
+	{
+		--HeadWarmFrames;
+		ThirdBlend = 0.0f;
+	}
+	if (ThirdBlend <= 0.001f)
+	{
+		Me->ShowHeroHead(false);
+		bShoulderFresh = true;
+		return;
+	}
+	const float B = ThirdBlend * ThirdBlend * (3.0f - 2.0f * ThirdBlend);
+
+	// Which shoulder: the player's (B), or the other one while they look well across that way. The camera stays behind
+	// the chair (not out over a neighbor's), and their own head never sits between them and whoever they look at.
+	// (B pressed while looking across holds their pick until the look comes back.)
+	const float Across = static_cast<float>(Smoothed.Yaw) * ShoulderSideWant;
+	if (bShoulderHeld)
+	{
+		bShoulderHeld = Across < -18.0f;
+	}
+	else if (!bShoulderFlipped && Across < -32.0f)
+	{
+		bShoulderFlipped = true;
+	}
+	else if (bShoulderFlipped && Across > -18.0f)
+	{
+		bShoulderFlipped = false;
+	}
+	const float SideNow = bShoulderFlipped ? -ShoulderSideWant : ShoulderSideWant;
+	ShoulderSide = bShoulderFresh ? SideNow : Ease(ShoulderSide, SideNow, 3.5f, RealDt);
+
+	// The boom: back from the eyes, out over the shoulder and a little up. It swings with part of the head's turn and
+	// rises as the look drops (over the shoulder and down at the felt), trailing the head a little so it has some weight.
+	const float Follow = FMath::Clamp(CVarShoulderFollow.GetValueOnGameThread(), 0.0f, 1.0f);
+	const FRotator Orbit(FMath::Clamp(static_cast<float>(Smoothed.Pitch) * 0.45f, -22.0f, 6.0f), static_cast<float>(Smoothed.Yaw) * Follow, 0.0f);
+	const FVector Right = FRotationMatrix(FRotator(0.0f, Orbit.Yaw, 0.0f)).GetScaledAxis(EAxis::Y);
+	const FVector Boom = -Orbit.Vector() * FMath::Max(20.0f, CVarShoulderBack.GetValueOnGameThread()) + Right * (CVarShoulderSide.GetValueOnGameThread() * ShoulderSide) +
+		FVector(0.0, 0.0, CVarShoulderUp.GetValueOnGameThread());
+	const float Lag = CVarShoulderLag.GetValueOnGameThread();
+	ShoulderAt = bShoulderFresh || Lag <= 0.0f ? Boom : FMath::VInterpTo(ShoulderAt, Boom, RealDt, Lag);
+	// Kept clear of the room and the people at the table: in at once when something's in the way, back out slowly, as a
+	// spring arm does.
+	const float Clear = BoomClearance(Head, Head + ShoulderAt);
+	BoomFrac = bShoulderFresh || Clear < BoomFrac ? Clear : Ease(BoomFrac, Clear, 3.0f, RealDt);
+	bShoulderFresh = false;
+	const FVector Shoulder = Head + ShoulderAt * BoomFrac;
+
+	// What the head looks at, in the middle of the frame: where the gaze meets the felt, or a couple of meters out (a face
+	// across the table). The heart's kick and tremor stay in the view.
+	const FVector Gaze = Smoothed.Vector();
+	const double Down = -Gaze.Z;
+	const double AimDist = Down > 0.05 ? FMath::Clamp((Head.Z - ABackRoomStage::FeltZ) / Down, 110.0, 260.0) : 260.0;
+	const FVector LookAt = Head + Gaze * AimDist;
+	const FQuat Aim = ((LookAt - Shoulder).Rotation() + Shake).Quaternion();
+
+	// From the first-person eye (where Tick just put the camera) out along the boom. A peek's eye, down at the cards,
+	// only comes into it once the camera is nearly back in the head, so the way between never passes through a shoulder.
+	const FVector FirstAt = GetActorLocation();
+	const FVector Pos = Head + (Shoulder - Head) * static_cast<double>(B) + (FirstAt - Head) * static_cast<double>(FMath::Square(1.0f - B));
+	Camera->SetWorldLocationAndRotation(Pos, FQuat::Slerp(GetActorQuat(), Aim, B));
+	// A slightly longer lens than the eyes', still squeezed by a racing heart; the felt and the faces sharp, your own
+	// head soft in the foreground.
+	Camera->SetFieldOfView(FMath::Lerp(Camera->FieldOfView, CVarShoulderFov.GetValueOnGameThread() - 4.0f * Racing, B));
+	FPostProcessSettings& P = Camera->PostProcessSettings;
+	P.DepthOfFieldFocalDistance = FMath::Lerp(P.DepthOfFieldFocalDistance, static_cast<float>(FVector::Dist(Pos, LookAt)), B);
+	P.DepthOfFieldFstop = FMath::Lerp(P.DepthOfFieldFstop, 7.0f, B);
+
+	// The head shows once the camera is clear of it (the eyes are at the front of the skull: the back of it, the hair and
+	// a hat are about 25 cm behind them), and goes again before the camera is back inside it.
+	const double Gap = FVector::Dist(Pos, Head);
+	Me->ShowHeroHead(Me->IsHeroHeadShown() ? Gap > 34.0 : Gap > 44.0);
+}
+
+float ABackRoomPawn::BoomClearance(const FVector& From, const FVector& To) const
+{
+	const double Length = FVector::Dist(From, To);
+	if (Length < 1.0)
+	{
+		return 1.0f;
+	}
+	double T = 1.0;
+	const ABackRoomGameMode* GM = GetMode();
+	// The Back Room's walls and ceiling (nothing collides there: the stage is drawn, not simulated). The Embercrest is a
+	// big room whose tables stand well apart: around the player's own, the people are what's near.
+	if (GM && GM->Stage && !GM->Stage->bCardRoom)
+	{
+		const FTransform& Room = GM->Stage->GetActorTransform();
+		T = FMath::Min(T, SegmentInBox(Room.InverseTransformPosition(From), Room.InverseTransformPosition(To), BackRoomInside));
+	}
+	// The people at the table: a head, and the shoulders under it (a hand's width more, for the lens).
+	const ABackRoomTable* Table = GetTable();
+	const ABackRoomPlayer* Me = Table ? Table->GetHeroPlayer() : nullptr;
+	auto Around = [&](const ABackRoomPlayer* Who) {
+		if (!Who || Who == Me || Who->IsHidden())
+		{
+			return;
+		}
+		const FVector Eyes = Who->GetEyes();
+		if (FVector::DistSquared(Eyes, From) > FMath::Square(Length + 90.0))
+		{
+			return;
+		}
+		// (A seat faces the table: the skull and the shoulders are a little behind the eyes.)
+		const FVector Facing = Who->GetActorForwardVector();
+		T = FMath::Min(T, SegmentIntoSphere(From, To, Eyes - Facing * 8.0, 26.0));
+		T = FMath::Min(T, SegmentIntoSphere(From, To, Eyes - Facing * 6.0 - FVector(0.0, 0.0, 42.0), 34.0));
+	};
+	if (Table)
+	{
+		for (const ABackRoomPlayer* O : Table->GetOpponents())
+		{
+			Around(O);
+		}
+	}
+	if (GM)
+	{
+		Around(GM->Dealer);
+	}
+	return static_cast<float>(T);
 }
 
 // ------------------------------------------------------------------ HUD
@@ -863,10 +1265,16 @@ void ABackRoomHUD::DrawHUD()
 		return C;
 	};
 
-	// Tired: the lids come down from above and below, soft-edged.
-	if (GM->GetEyelids() > 0.01f)
+	// Tired: the lids come down from above and below, soft-edged. Over the shoulder they aren't the camera's: the room
+	// dims instead, as the eyes it's watching go heavy.
+	const float Outside = Pawn ? Pawn->GetThirdBlend() : 0.0f;
+	if (GM->GetEyelids() > 0.01f && Outside > 0.01f)
 	{
-		const float Lid = GM->GetEyelids() * H * 0.5f;
+		DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.78f * GM->GetEyelids() * Outside), 0.0f, 0.0f, W, H);
+	}
+	if (GM->GetEyelids() > 0.01f && Outside < 0.99f)
+	{
+		const float Lid = GM->GetEyelids() * (1.0f - Outside) * H * 0.5f;
 		DrawRect(FLinearColor::Black, 0.0f, 0.0f, W, Lid);
 		DrawRect(FLinearColor::Black, 0.0f, H - Lid, W, Lid);
 		const float Band = 10.0f * S;
@@ -972,6 +1380,20 @@ void ABackRoomHUD::DrawHUD()
 			DrawRect(FLinearColor(Warm.R, Warm.G, Warm.B, 0.65f * A), W * 0.38f, By + 50.0f * S, W * 0.24f, 2.0f * S);
 		}
 	};
+	// V: the view, named for a moment at Vy (on foot it's for when they sit again).
+	auto DrawViewNote = [&](float Vy) {
+		if (!Pawn || Pawn->ViewShownAge() >= 2.4f)
+		{
+			return;
+		}
+		const float A = FMath::Clamp((2.4f - Pawn->ViewShownAge()) / 0.5f, 0.0f, 1.0f);
+		const bool bOver = Pawn->IsThirdPerson();
+		Text(bOver ? TEXT("OVER THE SHOULDER") : TEXT("FIRST PERSON"), Fade(Warm, A), W * 0.5f, Vy, Small, 1.2f, 1);
+		Text(bOver ? (Pawn->IsFreeWalking() ? TEXT("back at the table   ·   peeks and Focus are still through your own eyes")
+											: TEXT("B  other shoulder   ·   peeks and Focus are still through your own eyes"))
+				   : TEXT("V  over the shoulder"),
+			Fade(Dim, A), W * 0.5f, Vy + 30.0f * S, Small, 1.0f, 1);
+	};
 
 	// Racked up: the night, totted up, over the walk out.
 	if (Phase == EBackRoomPhase::Leaving)
@@ -1005,9 +1427,13 @@ void ABackRoomHUD::DrawHUD()
 		}
 		DrawOnFoot();
 		DrawBanner();
+		// (On the rail, below where the night's summary stands.)
+		DrawViewNote(H * 0.62f);
 		return;
 	}
 	DrawBanner();
+	// Under the pace's note when both are up.
+	DrawViewNote(H * 0.3f + (GM->IsLive() && GM->PaceShownAge() < 2.6f ? 76.0f * S : 0.0f));
 	if ((Pawn && Pawn->IsWalking()) || Phase == EBackRoomPhase::Moving)
 	{
 		return;
@@ -1276,7 +1702,8 @@ void ABackRoomHUD::DrawHUD()
 	if (HintA > 0.0f)
 	{
 		const float Hx = W - 48.0f * S;
-		TArray<const TCHAR*> Hints = {TEXT("Space  look at your cards"), TEXT("Right mouse  study a face"), TEXT("Shift  breathe, slow the heart"), TEXT("Tab  your reads")};
+		TArray<const TCHAR*> Hints = {TEXT("Space  look at your cards"), TEXT("Right mouse  study a face"), TEXT("Shift  breathe, slow the heart"), TEXT("Tab  your reads"),
+			Pawn && Pawn->IsThirdPerson() ? TEXT("V  your own eyes   ·   B  other shoulder") : TEXT("V  over the shoulder")};
 		if (GM->IsCareer())
 		{
 			Hints.Add(GM->IsLive() ? TEXT("L  walk away (blinded off)") : TEXT("L  rack up and go home"));
@@ -1737,9 +2164,16 @@ FString ABackRoomGameMode::ArrivalLine() const
 	const ss::life::State& L = Save->Life;
 	const double ToRent = L.RentDeadline - Minutes;
 	const bool bRentSoon = (L.RentStage == ss::life::Rent::Due || L.RentStage == ss::life::Rent::FinalNotice) && ToRent > 0.0 && ToRent < 2.0 * ss::net::MinutesPerDay;
+	// Locked out: the kid sleeps on her couch, and she knows it.
+	const bool bEvicted = L.RentStage == ss::life::Rent::Evicted;
 	if (bFirstVisit)
 	{
-		return TEXT("There's the kid from across the street. Sit, sit. Forty to two hundred, no phones, no crying.");
+		return bEvicted ? TEXT("You sleep on my couch, you play at my table. Forty to two hundred, no phones, no crying.")
+						: TEXT("There's the kid from across the street. Sit, sit. Forty to two hundred, no phones, no crying.");
+	}
+	if (bEvicted)
+	{
+		return bLate ? TEXT("Couch not comfy enough? Sit down, kid. Let's win you your key back.") : TEXT("Couch treating you okay? Sit. Let's win you your key back.");
 	}
 	if (bLate)
 	{
@@ -1785,20 +2219,29 @@ FString ABackRoomGameMode::GoodbyeLine() const
 {
 	const int32 Day = NightWeekday();
 	const TCHAR* Next = Day == 1 ? TEXT("Thursday") : (Day == 3 ? TEXT("Saturday") : TEXT("Tuesday"));
+	// Locked out, "home" is her couch.
+	const bool bEvicted = Save.IsValid() && Save->Life.RentStage == ss::life::Rent::Evicted;
 	if (bClosed)
 	{
 		return TEXT("That's the game, folks. Dryers go off at five. Get home safe.");
 	}
 	if (bSentHome)
 	{
-		return FString::Printf(TEXT("Go sleep, kid. %s, nine o'clock."), Next);
+		return bEvicted ? FString::Printf(TEXT("Go sleep, kid. Couch is made up. %s, nine o'clock."), Next) : FString::Printf(TEXT("Go sleep, kid. %s, nine o'clock."), Next);
 	}
 	if (bBustedOut)
 	{
-		return FString::Printf(TEXT("Go home, kid. Sleep. Game's back on %s."), Next);
+		return bEvicted ? FString::Printf(TEXT("Couch is made up, kid. Sleep. Game's back on %s."), Next) : FString::Printf(TEXT("Go home, kid. Sleep. Game's back on %s."), Next);
 	}
 	if (NetCents >= 5000)
 	{
+		if (bEvicted)
+		{
+			// Enough tonight to move back in (what's in the bankroll now), or a start on it.
+			const bool bKeyMoney = StartBankrollCents + NetCents >= Save->Life.RentDueCents;
+			return bKeyMoney ? FString(TEXT("That's your key back. Landlord first, kid. Then Lou."))
+							 : FString(TEXT("That's a start on your key. Don't you dare spend it on Lou."));
+		}
 		return FString::Printf(TEXT("Taking my regulars' money home? Come back %s so they can win it back."), Next);
 	}
 	if (NetCents < 0)
@@ -2162,7 +2605,12 @@ void ABackRoomGameMode::SeatEveryone()
 		{
 			Table->Reads.Add(FString(UTF8_TO_TCHAR(R.first.c_str())), R.second);
 		}
-		Table->ReadWeight = FMath::Max(1, static_cast<int32>(ss::hero::PerksOf(Save->Person).ReadWeight));
+		const ss::hero::Perks HeroPerks = ss::hero::PerksOf(Save->Person);
+		Table->ReadWeight = FMath::Max(1, static_cast<int32>(HeroPerks.ReadWeight));
+		// How hard a painful loss tilts you: the Bouncer's thick skin takes some of it, and (as online) starving or parched
+		// a bad beat lands a fifth harder.
+		const double Needs = Save->Life.Hunger >= 85.0 || Save->Life.Thirst >= 85.0 ? 1.2 : 1.0;
+		Table->TiltGain = static_cast<float>(FMath::Clamp(HeroPerks.TiltGain * Needs, 0.0, 2.0));
 		// Each night at the table, the pressure gets to you a little less.
 		Table->Composure.Sensitivity = FMath::Clamp(1.0f - 0.06f * PastNights, 0.65f, 1.0f);
 	}
@@ -2193,7 +2641,44 @@ void ABackRoomGameMode::SeatEveryone()
 		DealerPersona.Pants = FLinearColor(FColor(0x12, 0x12, 0x14));
 	}
 	Dealer = SpawnPerson(DealerBody, ABackRoomStage::SeatTransform(4), EBackRoomRole::Dealer, DealerPersona);
-	Hero = SpawnPerson(TEXT("Hero"), ABackRoomStage::SeatTransform(0), EBackRoomRole::Hero, PersonaFor(TEXT("You")));
+	// The player, as the character creator made them (and as the street dresses them): the hero MetaHuman nearest the look
+	// (body type, then skin tone in three bands; the default one until those are built), the jacket's color on the shirt
+	// (a flannel's plaid in it) over trousers that go with it, the hat and the glasses in theirs, the hairstyle and facial
+	// hair as far as the MetaHuman's grooms go, in the hair's color. Seen over the shoulder; in first person, the hands'
+	// sleeves and the shadows. A career from before the creator sits down as the default.
+	FString HeroBody = TEXT("Hero");
+	FBackRoomPersona HeroPersona = PersonaFor(TEXT("You"));
+	if (Save.IsValid() && Save->Person.Created)
+	{
+		const ss::hero::Look& L = Save->Person.Appearance;
+		const int32 Band = L.Skin <= 2 ? 0 : (L.Skin <= 5 ? 1 : 2);
+		const FString Nearest = FString::Printf(TEXT("Hero%c%d"), L.Body == 1 ? TEXT('B') : TEXT('A'), Band);
+		if (!CastBlueprint(*Nearest).IsNull())
+		{
+			HeroBody = Nearest;
+		}
+		HeroPersona.Shirt = CreatorTone(ss::hero::OutfitTone(L.OutfitColor));
+		HeroPersona.Pants = CreatorTone(HeroPantsTone(L.OutfitColor));
+		HeroPersona.ShirtGraphic = 0;
+		HeroPersona.ShirtPrint = 0;
+		if (L.Outfit == 2)
+		{
+			// Flannel: the wide bands darker, a pale thread, darkest where they cross (as the street's).
+			const FLinearColor S = HeroPersona.Shirt;
+			HeroPersona.ShirtPrint = 4;
+			HeroPersona.ShirtB = FLinearColor(S.R * 0.42f, S.G * 0.42f, S.B * 0.42f, 1.0f);
+			HeroPersona.ShirtC = FMath::Lerp(S, CreatorTone(0xd9cfb8), 0.7f);
+			HeroPersona.ShirtD = FLinearColor(S.R * 0.2f, S.G * 0.2f, S.B * 0.2f, 1.0f);
+		}
+		HeroPersona.HeroHat = FMath::Clamp(L.Hat, 0, 4);
+		HeroPersona.HeroGlasses = FMath::Clamp(L.Glasses, 0, 4);
+		HeroPersona.HeroHairStyle = FMath::Max(0, L.Hair);
+		HeroPersona.HeroFacialHair = FMath::Max(0, L.FacialHair);
+		HeroPersona.WearColor = CreatorTone(ss::hero::HatTone(L));
+		HeroPersona.FrameColor = CreatorTone(L.Glasses == 3 ? 0xc9a24d : 0x161618);
+		HeroHairShade(L.HairColor, HeroPersona);
+	}
+	Hero = SpawnPerson(HeroBody, ABackRoomStage::SeatTransform(0), EBackRoomRole::Hero, HeroPersona);
 	Table->SetDealer(Dealer);
 	Table->AddPlayer(Hero, 0, ss::Archetype::Tag, HeroBuyInChips);
 

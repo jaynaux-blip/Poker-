@@ -36,7 +36,10 @@ enum class EBackRoomRole : uint8;
  * button) to lift the corners of your cards; hold the right mouse button to study whoever you look at
  * (Focus: the view narrows, time slows, a face sharpens; it drains while you hold it). F folds, C
  * checks or calls, R bets or raises to the amount shown (the mouse wheel changes it), A goes all in.
- * Hold Shift to breathe slowly (the heart settles; it costs Focus). L racks up and goes home.
+ * Hold Shift to breathe slowly (the heart settles; it costs Focus). L racks up and goes home. V takes the
+ * camera out over your shoulder (your own head in the shot, the table past it) and back in; B (or the middle
+ * mouse button) moves it to the other shoulder. Both are kept from night to night. Peeking, Focus and walking
+ * are first person's business: they take the camera back in.
  *
  * Your heart is in the camera: past about 90 bpm you hear it, the view pulses with it and the edges
  * of the room fall away; your hands shake when they push chips, and the sharper regulars notice.
@@ -74,10 +77,15 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Short Stack")
 	float Pitch = -14.0f;
 
-	/** Third person (V): the camera over the hero's shoulder with their head in the shot; first person again on V. */
+	/** Third person (V): the camera over the hero's shoulder with their head in the shot; first person again on V. (For
+	 *  scripts: this doesn't change the player's kept choice; V does.) */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack")
 	void SetThirdPerson(bool bOn) { bThirdPerson = bOn; }
 	bool IsThirdPerson() const { return bThirdPerson; }
+	/** 0..1: how far out over the shoulder the camera is right now (a peek or Focus brings it in). */
+	float GetThirdBlend() const { return ThirdBlend; }
+	/** Real seconds since V last changed the view (for the HUD's note). */
+	float ViewShownAge() const { return static_cast<float>(FPlatformTime::Seconds() - ViewShownAt); }
 
 	/** A free camera for looking at the table from outside (for testing from scripts): bOn takes the view, off gives it back. */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
@@ -99,10 +107,12 @@ public:
 
 	/**
 	 * Walks the camera through the room along Points (world, eye height) over Seconds: in from the
-	 * laundromat to the seat, or (bOut) up from the seat and out the door. OnDone when it arrives.
+	 * laundromat to the seat, or (bOut) up from the seat and out the door. OnDone when it arrives. A walk is
+	 * first person: over the shoulder, the camera eases back into the head first, then sets off. A walk out that
+	 * ends where another starts later (the cashier's window, the aisle on a table move) holds there until it does.
 	 */
 	void PlayWalk(const TArray<FVector>& Points, float Seconds, bool bOut, TFunction<void()> OnDone);
-	bool IsWalking() const { return bWalking; }
+	bool IsWalking() const { return bWalking || bWalkPending; }
 	/** On foot in the card room (WASD or the arrows and the mouse, Shift to hurry, E at whatever's in reach). */
 	void BeginFreeWalk();
 	void EndFreeWalk() { bFreeWalk = false; }
@@ -120,14 +130,32 @@ public:
 	/** N: the rest of a hand the player has folded, played out quickly (until they're dealt in again). */
 	bool IsSkippingHand() const { return bSkipHand; }
 	/** 0..1 along the current walk. */
-	float WalkProgress() const { return bWalking ? FMath::Clamp(WalkT / WalkSeconds, 0.0f, 1.0f) : 1.0f; }
-	/** Where the camera is (for the regulars to look at while you walk by). */
+	float WalkProgress() const { return bWalking ? FMath::Clamp(WalkT / WalkSeconds, 0.0f, 1.0f) : (bWalkPending ? 0.0f : 1.0f); }
+	/**
+	 * Where the player's eyes are: where a walk sets off from, and what the regulars look at as you go by. In first
+	 * person that's the camera; over the shoulder, the head the camera looks past.
+	 */
 	FVector GetEye() const;
 
 private:
 	void HandleInput(float RealDt);
 	void TickWalk(float RealDt);
 	void TickFreeWalk(float RealDt);
+	/** A walk out waiting on the camera to come back into the head: it sets off now. */
+	void StartPendingWalk();
+	/** Holding at a walk's end (see PlayWalk): the head still looks about, the heart still beats. */
+	void TickHold(float RealDt);
+	/**
+	 * Over the shoulder: the camera for this frame, eased out from the first-person eye (where Tick has just put it) by
+	 * ThirdBlend, pivoting on Head (the eyes, before a peek takes them down to the cards), kept clear of the room and the
+	 * people in it, with the heart's kick (Shake) and its squeeze on the lens (Racing). Also shows the hero's head once
+	 * the camera is clear of it, and builds or drops it with the choice.
+	 */
+	void PlaceShoulderCamera(const FVector& Head, const FRotator& Shake, float Racing, float RealDt);
+	/** How far out along the boom From -> To (0..1) the camera can go before it meets the room or someone at the table. */
+	float BoomClearance(const FVector& From, const FVector& To) const;
+	/** V: the view the other way, kept for the next night. */
+	void ToggleThirdPerson();
 	/** A key held, or pressed this frame (the real one, or a test's). */
 	bool Held(const APlayerController* PC, const FKey& Key) const;
 	bool Pressed(const APlayerController* PC, const FKey& Key) const;
@@ -144,6 +172,23 @@ private:
 	bool bExtCam = false;
 	bool bThirdPerson = false;
 	float ThirdBlend = 0.0f;
+	double ViewShownAt = -100.0;
+	/** The eyes (GetEye), wherever the camera is. */
+	FVector FirstEye = FVector::ZeroVector;
+	// The shoulder camera: which shoulder (+1 right, -1 left; eased) and the one the player picked (B), switched while they
+	// look well across the other way; the boom from the head (trailing it a little), and how much of it is clear.
+	float ShoulderSide = 1.0f;
+	float ShoulderSideWant = 1.0f;
+	bool bShoulderFlipped = false;
+	/** B pressed while looking across: the shoulder they picked stays put until the look comes back. */
+	bool bShoulderHeld = false;
+	FVector ShoulderAt = FVector::ZeroVector;
+	bool bShoulderFresh = true;
+	float BoomFrac = 1.0f;
+	/** Seconds the shoulder camera has been put away (the hero's copied hair goes after a moment of it). */
+	float HeadIdleT = 0.0f;
+	/** Frames the camera keeps to the eyes while a head just built gets ready to be drawn. */
+	int32 HeadWarmFrames = 0;
 	FVector ExtPos = FVector::ZeroVector;
 	FVector ExtAt = FVector::ZeroVector;
 	float ExtFov = 50.0f;
@@ -156,6 +201,10 @@ private:
 	float WalkSeconds = 1.0f;
 	bool bWalking = false;
 	bool bWalkOut = false;
+	/** A walk out asked for over the shoulder: it sets off once the camera is back in the head. */
+	bool bWalkPending = false;
+	/** A walk out ended and the next one isn't under way yet: the view stays where it stopped. */
+	bool bHoldWalkEnd = false;
 	bool bBodyShown = true;
 	TFunction<void()> WalkDone;
 	FVector WalkAt(float Distance) const;
