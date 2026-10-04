@@ -1,4 +1,4 @@
-"""SM_Newsbox: a coin-op newspaper box for the Riverside Ledger, on the curb by the corner store.
+"""SM_Newsbox: a coin-op newspaper box for the Northside Ledger, on the curb by the corner store.
 
 A sheet-steel box in the Ledger's blue on a square post with a base plate: a sloped lid, the door with its
 window (the morning's front page behind the glass), a pull handle, the coin mechanism on top with its
@@ -25,9 +25,10 @@ REVIEW_VIEWS = [('front', -28, 12, 2.5), ('back', 140, 18, 2.5), ('detail', -12,
 W, D = 0.44, 0.40
 BOX0, BOX1 = 0.42, 1.02
 WIN = (0.32, 0.30)  # window width, height
-WIN_Z = 0.62
+WIN_Z = 0.635  # high enough to leave room for the lip under the door
 HEADER = (0.40, 0.07)
 HEADER_Z = 0.935
+LID_SLOPE = math.radians(5)  # the lid falls to the front
 
 
 def page_sheet():
@@ -36,7 +37,7 @@ def page_sheet():
     s = Sheet(w, h)
     ink = 0x1b1b1d
     s.rect(0, 0, w, h, 0xe6e1d3, rough=0.85)
-    s.text('THE RIVERSIDE LEDGER', w / 2, h - 30, 22, ink, face='Black', align='CENTER', tracking=1.05, rough=0.85)
+    s.text('THE NORTHSIDE LEDGER', w / 2, h - 30, 22, ink, face='Black', align='CENTER', tracking=1.05, rough=0.85)
     s.rect(10, h - 40, w - 20, 1.2, ink, rough=0.85)
     s.text('SATURDAY  ·  LATE CITY EDITION  ·  $1.50', w / 2, h - 50, 6.5, ink, face='Bold', align='CENTER', tracking=1.2, rough=0.85)
     s.rect(10, h - 56, w - 20, 0.8, ink, rough=0.85)
@@ -47,7 +48,7 @@ def page_sheet():
     s.rect(18, 76, 138, 50, 0x8a8a88, rough=0.85)
     s.circle(60, 120, 16, 0x3a3a3c, rough=0.85)
     s.circle(115, 116, 13, 0x48484a, rough=0.85)
-    s.text('Regulars line up outside the Riverside at dusk.', 87, 60, 5.0, ink, face='Regular', align='CENTER', rough=0.85)
+    s.text('Regulars line up outside the Embercrest at dusk.', 87, 60, 5.0, ink, face='Regular', align='CENTER', rough=0.85)
     for col in range(2):
         x0 = 172 + col * 72
         for k in range(22):
@@ -58,7 +59,7 @@ def page_sheet():
             s.rect(x0, y, wl, 2.6, 0x56565a, rough=0.85)
     for k in range(6):
         s.rect(12, 46 - k * 7.0, 150 if k != 5 else 90, 2.6, 0x56565a, rough=0.85)
-    s.text('RIVERSIDE REZONES FIFTH ST.', w / 2, 5, 7.5, ink, face='Bold', align='CENTER', rough=0.85)
+    s.text('NORTHSIDE REZONES FIFTH ST.', w / 2, 5, 7.5, ink, face='Bold', align='CENTER', rough=0.85)
     return s.render('news_page', 1024)
 
 
@@ -66,7 +67,7 @@ def header_sheet():
     w, h = HEADER[0] * 1000, HEADER[1] * 1000
     s = Sheet(w, h)
     s.rect(0, 0, w, h, 0xf2efe6, rough=0.4)
-    s.text('The Riverside', w / 2, h * 0.5, 28, 0x13254a, face='Black', align='CENTER', rough=0.4)
+    s.text('The Northside', w / 2, h * 0.5, 28, 0x13254a, face='Black', align='CENTER', rough=0.4)
     s.text('LEDGER', w / 2, h * 0.1, 19, 0xb5262f, face='Black', align='CENTER', tracking=1.6, rough=0.4)
     return s.render('news_header', 1024)
 
@@ -112,29 +113,47 @@ def build():
         for sy in (-1, 1):
             out.append((parts.disc('anchor', (sx * 0.11, sy * 0.11, 0.016), (0, 0, 1), 0.012, 0.01, 6), trim_m))
     # The box: a body, a lid sloping down to the front, a lip under the door.
-    out.append((parts.rbox('body', (0, 0, (BOX0 + BOX1 - 0.03) / 2), (W, D, BOX1 - BOX0 - 0.03), 0.012), body_m))
-    lid = parts.rbox('lid', (0, 0, BOX1 - 0.02), (W + 0.02, D + 0.02, 0.03), 0.008, rot=Matrix.Rotation(math.radians(5), 3, 'X'))
+    top = BOX1 - 0.03
+    body = parts.rbox('body', (0, 0, (BOX0 + top) / 2), (W, D, top - BOX0), 0.012)
+    lid_z, lid_t = BOX1 - 0.02, 0.03
+    # The lid rises toward the back, so the top of the box rises with it (the front stays put); otherwise a
+    # wedge of daylight opens under the back of the lid. At the back the top ends 6 mm up inside the lid.
+    lid_back = lid_z - lid_t / 2 / math.cos(LID_SLOPE) + math.tan(LID_SLOPE) * D / 2
+    rise = (lid_back + 0.006 - top) / D
+    for v in body.data.vertices:
+        if v.co.z > top - 0.03:
+            v.co.z += rise * (v.co.y + D / 2)
+    out.append((body, body_m))
+    lid = parts.rbox('lid', (0, 0, lid_z), (W + 0.02, D + 0.02, lid_t), 0.008, rot=Matrix.Rotation(LID_SLOPE, 3, 'X'))
     out.append((lid, body_m))
-    # Door: a raised frame round the window, the window, the masthead, a handle.
+    # Door: a raised frame round the window, the window, the masthead, a handle. The frame is one piece with
+    # the opening cut out: overlapping bars would leave coplanar faces at the corners that bake black.
     fy = -D / 2 - 0.006
     frame_w, frame_h = WIN[0] + 0.05, WIN[1] + 0.05
-    for (cx, cz, sx, sz) in ((0, WIN_Z + frame_h / 2 - 0.0125, frame_w, 0.025), (0, WIN_Z - frame_h / 2 + 0.0125, frame_w, 0.025),
-                             (-frame_w / 2 + 0.0125, WIN_Z, 0.025, frame_h), (frame_w / 2 - 0.0125, WIN_Z, 0.025, frame_h)):
-        out.append((parts.rbox('frame', (cx, fy, cz), (sx, 0.012, sz), 0.004), body_m))
+    frame = parts.rbox('frame', (0, fy, WIN_Z), (frame_w, 0.012, frame_h), 0.004)
+    # The opening is 2 mm smaller than the page all round, so the page's edges tuck under the frame.
+    core.boolean(frame, parts.rbox('frame_cut', (0, fy, WIN_Z), (WIN[0] - 0.004, 0.04, WIN[1] - 0.004)))
+    out.append((frame, body_m))
     out.append((parts.rbox('window', (0, fy + 0.003, WIN_Z), (WIN[0], 0.004, WIN[1]), 0.0), page_m))
     out.append((parts.rbox('header', (0, -D / 2 - 0.002, HEADER_Z), (HEADER[0], 0.004, HEADER[1]), 0.002), header_m))
-    out.append((parts.rbox('door_lip', (0, -D / 2 - 0.004, BOX0 + 0.04), (W - 0.04, 0.008, 0.03), 0.003), body_m))
-    # The pull handle across the top of the door, under the masthead.
+    # The lip runs under the door, below the frame, so it never covers the bottom of the page.
+    lip0, lip1 = BOX0 + 0.013, WIN_Z - frame_h / 2 - 0.005
+    out.append((parts.rbox('door_lip', (0, -D / 2 - 0.004, (lip0 + lip1) / 2), (W - 0.04, 0.008, lip1 - lip0), 0.003), body_m))
+    # The pull handle across the top of the door, under the masthead: a grip on two legs that reach the box.
     handle_z = WIN_Z + frame_h / 2 + 0.035
-    out.append((parts.rbox('handle', (0, fy - 0.022, handle_z), (0.12, 0.012, 0.02), 0.005), trim_m))
+    grip_y = fy - 0.022
+    out.append((parts.rbox('handle', (0, grip_y, handle_z), (0.12, 0.012, 0.02), 0.005), trim_m))
+    leg0, leg1 = -D / 2 + 0.001, grip_y + 0.004  # from just inside the box to just inside the grip
     for sx in (-1, 1):
-        out.append((parts.rbox('handle_leg', (sx * 0.05, fy - 0.011, handle_z), (0.012, 0.02, 0.016), 0.004), trim_m))
+        out.append((parts.rbox('handle_leg', (sx * 0.05, (leg0 + leg1) / 2, handle_z), (0.012, leg0 - leg1, 0.016), 0.004), trim_m))
     # The coin mechanism on the right of the lid: a steel housing, the price window, a slot and a return lever.
+    # The housing's foot sinks into the lid, which falls away under its front.
     coin_m = printed_face('news_coin', coin_sheet(), 0.1 - 0.05, 0.1 + 0.05, BOX1 + 0.035 - 0.03, BOX1 + 0.035 + 0.03, gloss=0.1)
-    out.append((parts.rbox('coin_box', (0.1, -0.06, BOX1 + 0.04), (0.14, 0.13, 0.09), 0.01), trim_m))
+    coin0, coin1 = BOX1 - 0.022, BOX1 + 0.085
+    out.append((parts.rbox('coin_box', (0.1, -0.06, (coin0 + coin1) / 2), (0.14, 0.13, coin1 - coin0), 0.01), trim_m))
     out.append((parts.rbox('coin_window', (0.1, -0.126, BOX1 + 0.035), (0.1, 0.004, 0.06), 0.002), coin_m))
     out.append((parts.rbox('coin_slot', (0.1, -0.05, BOX1 + 0.086), (0.03, 0.004, 0.003), 0.001), post_m))
-    out.append((parts.rod('coin_lever', (0.172, -0.08, BOX1 + 0.05), (0.2, -0.08, BOX1 + 0.05), 0.006, 12), trim_m))
+    out.append((parts.rod('coin_lever', (0.165, -0.08, BOX1 + 0.05), (0.2, -0.08, BOX1 + 0.05), 0.006, 12), trim_m))
     out.append((parts.disc('coin_knob', (0.205, -0.08, BOX1 + 0.05), (1, 0, 0), 0.012, 0.012, 16), post_m))
     for o, m in out:
         core.assign(o, m)

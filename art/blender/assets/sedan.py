@@ -2,7 +2,7 @@
 
 A mid-size four-door: a lofted body (bumpers, hood, beltline, trunk), the greenhouse with its pillars and
 glass, wheel arches cut and lined, 17" alloys on tires, headlights and the grille, tail lights, mirrors,
-door handles and shut lines, Riverside plates front and back. The paint is metallic light grey under clear
+door handles and shut lines, Northside plates front and back. The paint is metallic light grey under clear
 coat with road film along the sills: AStreetStage tints its first material per car.
 
 Coordinates (meters), front toward -Y, Z up: origin on the road under the middle of the car.
@@ -21,7 +21,8 @@ DOUBLE_SIDED = False
 TEXTURE_SIZE = 1024
 TEXTURE_SIZES = {'car_paint': 2048, 'car_glass': 1024, 'car_plate': 512, 'car_chrome': 256, 'car_red': 256, 'car_amber': 128, 'car_head': 512}
 AO_DISTANCE = 0.15
-REVIEW_VIEWS = [('front', -35, 12, 2.4), ('rear', 145, 15, 2.4), ('wheel', -75, 5, 0.75, (-0.9, -1.45, 0.4))]
+# The rear view comes in close enough to read the plate.
+REVIEW_VIEWS = [('front', -35, 12, 2.4), ('rear', 150, 12, 0.85, (0.0, 1.9, 0.75)), ('wheel', -75, 5, 0.75, (-0.9, -1.45, 0.4))]
 
 WHEEL_R = 0.33
 WHEEL_W = 0.215
@@ -36,8 +37,9 @@ BODY = [(-2.39, 0.66, 0.36, 0.6), (-2.36, 0.8, 0.26, 0.7), (-2.25, 0.87, 0.2, 0.
         (1.0, 0.91, 0.17, BELT + 0.02), (1.45, 0.905, 0.18, BELT + 0.035), (1.8, 0.895, 0.2, 1.0), (2.1, 0.88, 0.24, 1.0),
         (2.3, 0.84, 0.3, 0.97), (2.37, 0.76, 0.36, 0.9), (2.39, 0.64, 0.42, 0.8)]
 # Greenhouse stations: y, roof height (the windshield climbs from the cowl, the backlight drops to the deck).
-CABIN = [(-0.86, BELT - 0.02), (-0.7, 1.06), (-0.5, 1.2), (-0.3, 1.32), (-0.1, 1.405), (0.1, ROOF), (0.35, ROOF), (0.8, 1.435), (1.05, 1.41),
-         (1.25, 1.33), (1.45, 1.21), (1.65, 1.09), (1.8, BELT + 0.04)]
+# A pillar is the faces whose middle falls in its span, so the B pillar's ends are stations of their own.
+CABIN = [(-0.86, BELT - 0.02), (-0.7, 1.06), (-0.5, 1.2), (-0.3, 1.32), (-0.1, 1.405), (0.1, ROOF), (0.3, ROOF), (0.42, ROOF), (0.8, 1.435),
+         (1.05, 1.41), (1.25, 1.33), (1.45, 1.21), (1.65, 1.09), (1.8, BELT + 0.04)]
 PILLARS = {'a': (-0.86, -0.22), 'b': (0.3, 0.42), 'c': (1.02, 1.8)}
 DOOR_SEAMS = (-0.84, 0.36, 1.12)
 
@@ -62,9 +64,10 @@ def plate_sheet():
     s.rect(0, 0, 300, 150, 0xf2f1ec, rough=0.3)
     s.rect(4, 4, 292, 142, 0x1e3a6e, rough=0.3)
     s.rect(8, 8, 284, 134, 0xf2f1ec, rough=0.3)
-    s.text('RIVERSIDE', 150, 118, 22, 0xb5262f, face='Black', align='CENTER', tracking=1.3, rough=0.3)
+    s.text('NORTHSIDE', 150, 118, 22, 0xb5262f, face='Black', align='CENTER', tracking=1.3, rough=0.3)
     s.text('7FTH 212', 150, 40, 62, 0x1e3a6e, face='Black', align='CENTER', rough=0.3)
-    s.text('THE RIVER CITY', 150, 14, 13, 0x1e3a6e, face='Bold', align='CENTER', tracking=1.3, rough=0.3)
+    # Not "the river city": River City is the town down the line where the Classic is played.
+    s.text('OPEN ALL NIGHT', 150, 14, 13, 0x1e3a6e, face='Bold', align='CENTER', tracking=1.3, rough=0.3)
     return s.render('car_plate', 1024)
 
 
@@ -196,8 +199,12 @@ def build():
         if n.z > 0.75 and abs(c.x) < 0.66 and -0.12 < c.y < 0.95:
             poly.material_index = 0  # the roof
         elif abs(n.x) > 0.6 and abs(n.z) < 0.75:
-            in_pillar = any(a <= c.y <= b for a, b in PILLARS.values())
-            poly.material_index = 2 if in_pillar else 1
+            if PILLARS['c'][0] <= c.y <= PILLARS['c'][1]:
+                poly.material_index = 0  # the C pillar's sail is body color, so the car reads as a sedan
+            elif any(a <= c.y <= b for a, b in (PILLARS['a'], PILLARS['b'])):
+                poly.material_index = 2
+            else:
+                poly.material_index = 1
         else:
             poly.material_index = 1  # windshield and backlight
     out.append((cabin, None))

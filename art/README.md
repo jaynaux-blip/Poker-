@@ -23,7 +23,7 @@ blender -b -P art/blender/build.py -- energy_can  # or any Blender 4.2+
 - With no asset name, the script builds all of them.
 - `--no-review` skips the review renders, which take several minutes on a CPU.
 - `--review-only` renders the review from the exported `.glb` files without rebuilding. It is also the check that the export carries everything: the sheet shows exactly what Unreal imports.
-- Without a GPU, environment variables trade time for quality: `SHORTSTACK_AO_SAMPLES` (the occlusion bake, 64 by default), `SHORTSTACK_REVIEW_SAMPLES` (96) and `SHORTSTACK_REVIEW_TILE` (900 px). The street's props were built in the cloud with 24, 40 and 720.
+- Without a GPU, environment variables trade time for quality: `SHORTSTACK_AO_SAMPLES` (the occlusion bake, 64 by default), `SHORTSTACK_REVIEW_SAMPLES` (96) and `SHORTSTACK_REVIEW_TILE` (900 px). The street's props were first built in the cloud with 24, 40 and 720; the newsbox, the sedan and the litter basket have since been rebuilt on the desktop's GPU at the defaults.
 
 Intermediate textures and review tiles go to `art/build/`, which git ignores.
 
@@ -85,10 +85,10 @@ These use `artkit/street.py`: finishes scaled for things a meter or more tall th
 | Asset | File | Notes |
 |---|---|---|
 | Fire hydrant | `assets/hydrant.py` | Dry-barrel hydrant in chrome yellow: a bolted ground flange, the nozzle section with the pumper nozzle to the street and a hose nozzle each side, the bonnet with its pentagon nut. Bonnet and caps in high-flow light blue, a chain on the pumper cap. Chipped, streaked and splashed with road grime. |
-| Litter basket | `assets/trash_can.py` | Slatted steel basket in municipal green on three feet, a rain hood on struts, a black liner bunched over the rim, a RIVERSIDE SANITATION plate. |
-| Newspaper box | `assets/newsbox.py` | The Riverside Ledger's coin-op box on a post: the front page behind the door's glass, the masthead, a pull handle, the coin mechanism with its price window and return lever. |
+| Litter basket | `assets/trash_can.py` | Slatted steel basket in municipal green on three feet, a rain hood on struts, a black liner bunched over the rim, a NORTHSIDE SANITATION plate. |
+| Newspaper box | `assets/newsbox.py` | The Northside Ledger's coin-op box on a post: the front page behind the door's glass (regulars lining up outside the Embercrest), the masthead, a pull handle, the coin mechanism with its price window and return lever. |
 | Streetlight | `assets/streetlight.py` | 7.6 m tapered pole on a fluted base cover, an access hatch, a davit arm 1.5 m out over the road and a cobra head with its warm lens and photocell. |
-| Parked sedan | `assets/sedan.py` | A four-door with a lofted body, arches cut and lined, alloys with brake discs, glass and pillars, lights, mirrors, shut lines, RIVERSIDE plates. Baked light grey: the stage paints each car (navy, oxblood, silver, black). |
+| Parked sedan | `assets/sedan.py` | A four-door with a lofted body, arches cut and lined, alloys with brake discs, glass, black A and B pillars and body-colored C pillars, lights, mirrors, shut lines, NORTHSIDE plates. Baked light grey: the stage paints each car (navy, oxblood, silver, black). |
 | Cooler wall | `assets/cooler.py` | The Lucky Penny's ten-door cooler: a lit header (COLD DRINKS · ENERGY · WATER · JUICE · ICE · DAIRY), chrome pulls, LED mullions, wire shelves with price rails. The glass is left out; the stage stocks the shelves. |
 | Gondola shelf | `assets/store_shelf.py` | A 6 m double-sided run: slotted spine and uprights, three shelves a side on brackets, price channels with tags, kick plates, end panels. |
 | Register | `assets/register.py` | The point of sale on the counter: cash drawer, the clerk's touchscreen mid-sale, receipt printer, the customer's pole display and PIN pad, a scanner in its cradle. |

@@ -2,7 +2,7 @@
 
 A slatted steel basket in municipal green: a solid band at the foot and the rim, vertical bars between,
 a rain hood raised on four struts over the opening, three leveling feet. A black liner bag shows through
-the bars and bunches over the rim under the hood. A stenciled plate on the rim: RIVERSIDE SANITATION.
+the bars and bunches over the rim under the hood. A stenciled plate on the rim: NORTHSIDE SANITATION.
 
 Coordinates (meters), front toward -Y (the plate), Z up: origin on the sidewalk under the basket's axis.
 """
@@ -35,7 +35,7 @@ def plate_sheet():
     s = Sheet(w, h)
     s.rect(0, 0, w, h, 0xe9e4d6, rough=0.5)
     s.rect(3, 3, w - 6, h - 6, 0x1d5a3c, rough=0.5)
-    s.text('RIVERSIDE', w / 2, h * 0.52, 15, 0xe9e4d6, face='Black', align='CENTER', tracking=1.25, rough=0.5)
+    s.text('NORTHSIDE', w / 2, h * 0.52, 15, 0xe9e4d6, face='Black', align='CENTER', tracking=1.25, rough=0.5)
     s.text('SANITATION  ·  KEEP FIFTH CLEAN', w / 2, h * 0.2, 6.5, 0xe9e4d6, face='Bold', align='CENTER', tracking=1.3, rough=0.5)
     return s.render('can_plate', 1024)
 
