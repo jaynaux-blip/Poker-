@@ -343,6 +343,16 @@ public:
 	SHORTSTACKCORE_API std::string BagPick() const;
 	/** What the clerk says right now. */
 	SHORTSTACKCORE_API std::string ClerkSays(const store::Basket& B) const;
+	/**
+	 * Penny Drop (the laptop): orders the basket to the door at the app's prices, plus the fee and tax; it
+	 * arrives 25 to 45 minutes later (the clock brings it, into the bag). "" or why not.
+	 */
+	SHORTSTACKCORE_API std::string PlaceOrder(const store::Basket& B);
+	/** A glass of water from the kitchen tap (at home): free, a little at a time, and never past TapFloor. "" or why not. */
+	SHORTSTACKCORE_API std::string DrinkTapWater();
+	static constexpr double TapFloor = 40.0;
+	/** Minutes until the tap is worth another glass (0: now). */
+	SHORTSTACKCORE_API double TapWait() const;
 	/** A new career for this character: a fresh save, then what their background starts them with. */
 	SHORTSTACKCORE_API void NewCareer(const hero::Character& Who);
 	void OnBoot();

@@ -161,6 +161,10 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	{
 		KastApp(Now);
 	}
+	else if (AppShown == App::PennyDrop)
+	{
+		PennyDropApp(Now);
+	}
 	else
 	{
 		BankApp(Now);

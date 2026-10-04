@@ -1172,6 +1172,76 @@ void Clicks()
 	Frame(290.0f, 516.0f, false, false, true);
 	Expect(S.TimeSkip.Active && S.TimeSkip.Result.ActivityId == "quikstop", "Take shift starts the Lucky Penny shift");
 }
+/** Penny Drop on the laptop: the shelves, a cart, an order on its way, eating from the bag, the kitchen tap, the order arriving. */
+void PennyDropScreens()
+{
+	QuietHooks H;
+	ss::Session S(H, "ui-drop");
+	ss::ui::RiverLine RL(S);
+	TableMeasurer M;
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 4280;
+	S.Life.Hunger = 72.0;
+	S.Life.Thirst = 66.0;
+	S.Life.Energy = 41.0;
+	S.Life.Pantry["oodle-cup"] = 2;
+	double Now = 1.0;
+	auto Frame = [&](float X, float Y, bool Down, bool Pressed, bool Released) {
+		RL.UI.Ptr.Active = true;
+		RL.UI.Ptr.X = X;
+		RL.UI.Ptr.Y = Y;
+		RL.UI.Ptr.Down = Down;
+		RL.UI.Ptr.Pressed = Pressed;
+		RL.UI.Ptr.Released = Released;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		RL.Draw(C, Now);
+		RL.UI.Ptr.EndFrame();
+	};
+	auto Click = [&](float X, float Y) {
+		Frame(X, Y, true, true, false);
+		Now += 0.05;
+		Frame(X, Y, false, false, true);
+		Now += 0.05;
+	};
+	using App = ss::ui::RiverLine::App;
+	RL.UI.Ptr.Active = false;
+	RL.OpenApp(App::PennyDrop, Now);
+	Emit("drop_app", RL, Now + 1.0);
+	Now += 1.0;
+	// Two waters and a cola from the cooler, a hot dog from the grill.
+	Click(276.0f, 377.0f);
+	Click(276.0f, 377.0f);
+	Click(592.0f, 377.0f);
+	RL.ShowDropShelf(static_cast<int>(ss::store::Shelf::Hot));
+	Frame(0.0f, 0.0f, false, false, false);
+	Now += 0.6;
+	Click(276.0f, 377.0f);
+	Expect(RL.DropBasket().Count() == 4 && RL.DropBasket().Lines.size() == 3, "Penny Drop: four things in the cart");
+	RL.UI.Ptr.Active = false;
+	Emit("drop_cart", RL, Now + 0.3);
+	Now += 0.3;
+	const ss::Chips Total = ss::store::DeliveryTotal(RL.DropBasket());
+	Click(1290.0f, 512.0f);
+	Expect(S.Life.Deliveries.size() == 1 && RL.DropBasket().Empty() && S.BankrollCents == 4280 - Total, "Penny Drop: placing the order pays for it and clears the cart");
+	S.LobbyMinutes += 18.0;
+	S.Update(Now);
+	// Eat a noodle cup from the bag while you wait, and have a glass from the tap.
+	const double Hunger = S.Life.Hunger;
+	Click(580.0f, 798.0f);
+	Expect(S.Life.Hunger < Hunger - 20.0 && S.Life.Pantry["oodle-cup"] == 1, "Penny Drop: eating from the bag at home");
+	const double Thirst = S.Life.Thirst;
+	Click(268.0f, 897.0f);
+	Expect(S.Life.Thirst < Thirst - 10.0, "Penny Drop: a glass of tap water");
+	RL.UI.Ptr.Active = false;
+	Emit("drop_tracking", RL, Now + 0.2);
+	Now += 0.2;
+	S.LobbyMinutes += 60.0;
+	S.Update(Now);
+	Expect(S.Life.Deliveries.empty() && S.Life.Pantry["cascade"] == 2 && S.Life.Pantry["roller-dog"] == 1, "Penny Drop: the order arrives in the bag");
+	Emit("drop_home", RL, Now + 0.2);
+}
+
 /** GearDrop and Kast: the store, the locked studio on the laptop, the upgrade that unlocks it, a stream from the lobby to a
  * table, the channel, the directory, the end-of-stream card. */
 void StreamScreens()
@@ -2287,6 +2357,7 @@ int main(int Argc, char** Argv)
 	ui_test::MultiScreens();
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();
+	ui_test::PennyDropScreens();
 	ui_test::LedScreens();
 	ui_test::FrontEndFlows();
 	ui_test::FrontEndScreens();

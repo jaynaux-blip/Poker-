@@ -137,6 +137,7 @@ int main(int Argc, char** Argv)
 		ss::Session S(H, "monkey-" + std::to_string(Seed));
 		ss::ui::RiverLine RL(S);
 		ss::Rng R("monkey-rng-" + std::to_string(Seed));
+		ss::Rng Dr(std::string("monkey-drop-") + std::to_string(Seed)); // Penny Drop's own draws, so the rest of the run is as before
 		if (Seed % 3 == 1)
 		{
 			S.BankrollCents = 5000;
@@ -250,6 +251,52 @@ int main(int Argc, char** Argv)
 			{
 				const double Pick = R.Next();
 				RL.OpenApp(Pick < 0.5 ? ss::ui::RiverLine::App::RiverLine : Pick < 0.75 ? ss::ui::RiverLine::App::Kast : ss::ui::RiverLine::App::GearDrop, Now);
+			}
+			if (S.CurrentScreen != ss::Screen::Boot && Dr.Chance(0.0002))
+			{
+				RL.OpenApp(ss::ui::RiverLine::App::PennyDrop, Now);
+			}
+			// Penny Drop: order now and then (what the bankroll can spare), eat and drink from the bag, the tap.
+			if (Dr.Chance(0.0015))
+			{
+				ss::store::Basket B;
+				const std::vector<ss::store::Item>& Cat = ss::store::Catalog();
+				for (int K = 1 + Dr.Int(4); K > 0; --K)
+				{
+					B.Add(Cat[static_cast<size_t>(Dr.Int(static_cast<int>(Cat.size())))].Id);
+				}
+				if (ss::store::DeliveryTotal(B) * 6 <= S.BankrollCents)
+				{
+					Reached["ordered"] += S.PlaceOrder(B).empty() ? 1 : 0;
+				}
+			}
+			if (!S.Life.Pantry.empty() && Dr.Chance(0.003))
+			{
+				auto It = S.Life.Pantry.begin();
+				std::advance(It, Dr.Int(static_cast<int>(S.Life.Pantry.size())));
+				Reached["ate"] += S.Consume(It->first).empty() ? 1 : 0;
+			}
+			if (Dr.Chance(0.002))
+			{
+				S.DrinkTapWater();
+			}
+			if (S.Life.Deliveries.size() > 3 || S.Life.Hunger < 0.0 || S.Life.Hunger > 100.0 || S.Life.Thirst < 0.0 || S.Life.Thirst > 100.0)
+			{
+				Fail("Penny Drop or the needs left their ranges", Seed, F);
+			}
+			for (const auto& Held : S.Life.Pantry)
+			{
+				if (Held.second <= 0 || !ss::store::Find(Held.first))
+				{
+					Fail("something impossible in the bag", Seed, F);
+				}
+			}
+			for (const ss::life::State::Delivery& Dv : S.Life.Deliveries)
+			{
+				if (Dv.ArriveAt < Dv.PlacedAt + 25.0 || Dv.ArriveAt > Dv.PlacedAt + 60.0 || Dv.ArriveAt + 1.0 < S.WorldMinutes() - 1440.0)
+				{
+					Fail("a delivery that can't arrive", Seed, F);
+				}
 			}
 			if (!S.GearFx().CanStream() && S.Streaming())
 			{

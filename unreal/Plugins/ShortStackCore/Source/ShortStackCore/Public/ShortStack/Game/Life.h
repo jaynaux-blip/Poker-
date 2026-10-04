@@ -87,6 +87,17 @@ struct State
 	double Thirst = 30.0;
 	/** What's in the bag from the corner store (item id -> count). */
 	std::map<std::string, int> Pantry;
+	/** Penny Drop orders on their way to the door. */
+	struct Delivery
+	{
+		std::vector<std::pair<std::string, int>> Lines;
+		double PlacedAt = 0.0; // world minutes
+		double ArriveAt = 0.0;
+		Chips PaidCents = 0;
+	};
+	std::vector<Delivery> Deliveries;
+	int Orders = 0;            // Penny Drop orders placed, ever
+	double TapAt = -1.0e9;     // the last glass of water from the kitchen tap (world minutes)
 	Rent RentStage = Rent::Due;
 	Chips RentDueCents = 122500;
 	double RentDeadline = 5.0 * 1440.0; // Friday, October 9, midnight

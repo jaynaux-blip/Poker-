@@ -123,6 +123,32 @@ int Basket::Count() const
 	return N;
 }
 
+Chips AppPrice(const Item& I)
+{
+	// 15% over the shelf, up to the next price ending in 9.
+	const Chips Raw = (I.PriceCents * 115 + 99) / 100;
+	return Raw / 10 * 10 + 9;
+}
+
+Chips DeliveryTotal(const Basket& B)
+{
+	const Chips Goods = B.AppSubtotal() + DeliveryFeeCents;
+	return Goods + Tax(Goods);
+}
+
+Chips Basket::AppSubtotal() const
+{
+	Chips Sum = 0;
+	for (const std::pair<std::string, int>& L : Lines)
+	{
+		if (const Item* I = Find(L.first))
+		{
+			Sum += AppPrice(*I) * L.second;
+		}
+	}
+	return Sum;
+}
+
 Chips Basket::Subtotal() const
 {
 	Chips Sum = 0;

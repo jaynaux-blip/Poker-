@@ -157,6 +157,16 @@ std::string SaveData::Serialize() const
 	{
 		Out << "pantry\t" << session_detail::Escape(Held.first) << "\t" << Held.second << "\n";
 	}
+	for (const life::State::Delivery& Dv : L.Deliveries)
+	{
+		Out << "delivery\t" << Fixed(Dv.ArriveAt, 2) << "\t" << Dv.PaidCents << "\t" << Fixed(Dv.PlacedAt, 2);
+		for (const auto& Ln : Dv.Lines)
+		{
+			Out << "\t" << session_detail::Escape(Ln.first) << "\t" << Ln.second;
+		}
+		Out << "\n";
+	}
+	Out << "life\tdrop\t" << L.Orders << "\t" << Fixed(L.TapAt, 2) << "\n";
 	Out << "life\trent\t" << static_cast<int>(L.RentStage) << "\t" << L.RentDueCents << "\t" << Fixed(L.RentDeadline, 2) << "\t" << L.RentsPaid << "\n";
 	Out << "life\tdebt\t" << L.DebtCents << "\n";
 	Out << "life\tban\t" << Fixed(L.BannedUntil, 2) << "\n";
@@ -334,6 +344,11 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 			{
 				L.Heat = Num(2);
 			}
+			else if (P[1] == "drop" && P.size() >= 4)
+			{
+				L.Orders = Int(2);
+				L.TapAt = Num(3);
+			}
 			else if (P[1] == "needs" && P.size() >= 4)
 			{
 				L.Hunger = std::clamp(Num(2), 0.0, 100.0);
@@ -387,6 +402,25 @@ bool SaveData::Parse(const std::string& Text, SaveData& Out)
 		else if (P.size() == 3 && P[0] == "read")
 		{
 			D.Life.Reads[session_detail::Unescape(P[1])] = std::atoi(P[2].c_str());
+		}
+		else if (P.size() >= 4 && P[0] == "delivery")
+		{
+			life::State::Delivery Dv;
+			Dv.ArriveAt = std::atof(P[1].c_str());
+			Dv.PaidCents = static_cast<Chips>(std::atoll(P[2].c_str()));
+			Dv.PlacedAt = std::atof(P[3].c_str());
+			for (size_t K = 4; K + 1 < P.size(); K += 2)
+			{
+				const int Count = std::atoi(P[K + 1].c_str());
+				if (Count > 0 && store::Find(session_detail::Unescape(P[K])))
+				{
+					Dv.Lines.emplace_back(session_detail::Unescape(P[K]), Count);
+				}
+			}
+			if (!Dv.Lines.empty())
+			{
+				D.Life.Deliveries.push_back(Dv);
+			}
 		}
 		else if (P.size() == 3 && P[0] == "pantry")
 		{
@@ -838,6 +872,8 @@ void Session::NewCareer(const hero::Character& Who)
 	{
 		Life.Unlocks.insert(U);
 	}
+	// What's in the cupboard on night one.
+	Life.Pantry["oodle-cup"] = 2;
 	Save();
 }
 
@@ -884,6 +920,67 @@ std::string Session::Consume(const std::string& ItemId)
 	Life.Thirst = std::clamp(Life.Thirst - I->Thirst, 0.0, 100.0);
 	Life.Energy = std::clamp(Life.Energy + I->Energy * Boost, 0.0, 100.0);
 	Sound(I->Food() ? SoundId::Check : SoundId::Click, 0.5);
+	Save();
+	return "";
+}
+
+std::string Session::PlaceOrder(const store::Basket& B)
+{
+	if (B.Empty())
+	{
+		return "Your cart is empty.";
+	}
+	if (B.AppSubtotal() < store::DeliveryMinimumCents)
+	{
+		return "Delivery starts at " + Money(store::DeliveryMinimumCents) + ".";
+	}
+	if (Life.Deliveries.size() >= 3)
+	{
+		return "Three orders are already on the way.";
+	}
+	const Chips Total = store::DeliveryTotal(B);
+	if (Total > BankrollCents)
+	{
+		Sound(SoundId::Fold, 0.5);
+		return "Card declined.";
+	}
+	const double World = WorldMinutes();
+	BankrollCents -= Total;
+	life::State::Delivery Dv;
+	Dv.Lines = B.Lines;
+	Dv.PaidCents = Total;
+	// 25 to 45 minutes, a little longer in the dead hours (one courier on nights).
+	const double Hour = std::fmod(World, net::MinutesPerDay) / 60.0;
+	const double Spread = std::fmod(static_cast<double>(Life.Orders) * 7.0 + std::floor(World) * 0.37, 20.0);
+	Dv.PlacedAt = World;
+	Dv.ArriveAt = World + 25.0 + Spread + (Hour >= 2.0 && Hour < 6.0 ? 8.0 : 0.0);
+	Life.Deliveries.push_back(Dv);
+	++Life.Orders;
+	Life.Record(World, "Penny Drop \xC2\xB7 " + std::to_string(B.Count()) + (B.Count() == 1 ? " item" : " items"), -Total, 8);
+	Sound(SoundId::Cash, 0.6);
+	Save();
+	return "";
+}
+
+double Session::TapWait() const
+{
+	return std::max(0.0, Life.TapAt + 45.0 - WorldMinutes());
+}
+
+std::string Session::DrinkTapWater()
+{
+	// The tap keeps you going; it doesn't do what a cold drink does.
+	if (Life.Thirst < TapFloor + 1.0)
+	{
+		return "You're not thirsty.";
+	}
+	if (TapWait() > 0.0)
+	{
+		return "You just had a glass.";
+	}
+	Life.TapAt = WorldMinutes();
+	Life.Thirst = std::max(TapFloor, Life.Thirst - 15.0);
+	Sound(SoundId::Click, 0.5);
 	Save();
 	return "";
 }
@@ -3838,6 +3935,26 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	Life.Energy = std::max(0.0, Life.Energy - Hours * life::NeedsDrain(Life));
 	Life.Hunger = std::min(100.0, Life.Hunger + Hours * life::HungerPerHour * Rate);
 	Life.Thirst = std::min(100.0, Life.Thirst + Hours * life::ThirstPerHour * Rate);
+	// Penny Drop orders reach the door.
+	for (auto It = Life.Deliveries.begin(); It != Life.Deliveries.end();)
+	{
+		if (It->ArriveAt > To)
+		{
+			++It;
+			continue;
+		}
+		std::string What;
+		for (const auto& Ln : It->Lines)
+		{
+			Life.Pantry[Ln.first] += Ln.second;
+			if (const store::Item* I = store::Find(Ln.first))
+			{
+				What += (What.empty() ? "" : ", ") + (Ln.second > 1 ? std::to_string(Ln.second) + " " : std::string()) + I->Name;
+			}
+		}
+		StoryText("drop:" + std::to_string(static_cast<long long>(It->ArriveAt * 100.0)), "Penny Drop", "Left at your door: " + What + ". It's in your bag. Thanks for ordering from the Lucky Penny #212!");
+		It = Life.Deliveries.erase(It);
+	}
 	if (!WasHungry && Life.Hunger >= 75.0)
 	{
 		const int Day = static_cast<int>(std::floor(To / net::MinutesPerDay));

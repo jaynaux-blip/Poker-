@@ -1069,6 +1069,143 @@ void StoreChecks()
 	Expect(Fed(ss::hero::Background::Kitchen) < Fed(ss::hero::Background::Newcomer) - 5.0, "a line cook's meals go further");
 }
 
+/** Penny Drop: the store's delivery app on the laptop, the order arriving with the clock, and the kitchen tap. */
+void DeliveryChecks()
+{
+	namespace store = ss::store;
+	for (const store::Item& I : store::Catalog())
+	{
+		const ss::Chips App = store::AppPrice(I);
+		Expect(App >= I.PriceCents * 115 / 100 && App % 10 == 9 && App <= I.PriceCents * 115 / 100 + 10, "app prices run 15% over the shelf, ending in 9");
+	}
+	store::Basket Lunch;
+	Lunch.Add("bean-burrito");
+	Lunch.Add("fizz-cola", 2);
+	const ss::Chips Goods = Lunch.AppSubtotal() + store::DeliveryFeeCents;
+	Expect(store::DeliveryTotal(Lunch) == Goods + store::Tax(Goods) && store::DeliveryTotal(Lunch) > Lunch.Total() + store::DeliveryFeeCents, "delivery costs the app's prices, the fee and tax: more than walking");
+
+	Hooks H;
+	ss::Session S(H, "drop");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.WorldSkip(0);
+	double Now = 0.0;
+	S.Update(Now);
+	S.BankrollCents = 300;
+	Expect(S.PlaceOrder(store::Basket()) == "Your cart is empty.", "an empty cart doesn't order");
+	store::Basket Tiny;
+	Tiny.Add("oodle-cup");
+	Expect(S.PlaceOrder(Tiny).find("Delivery starts at") == 0, "a delivery minimum");
+	Expect(S.PlaceOrder(Lunch) == "Card declined." && S.BankrollCents == 300 && S.Life.Deliveries.empty(), "a declined card orders nothing");
+	S.BankrollCents = 5000;
+	const double Ordered = S.WorldMinutes();
+	const ss::Chips Cost = store::DeliveryTotal(Lunch);
+	Expect(S.PlaceOrder(Lunch).empty() && S.BankrollCents == 5000 - Cost, "an order is paid up front");
+	Expect(S.Life.Deliveries.size() == 1 && S.Life.Deliveries[0].ArriveAt >= Ordered + 25.0 && S.Life.Deliveries[0].ArriveAt <= Ordered + 53.0, "it's 25 to 45 minutes out (a little more in the dead hours)");
+	Expect(!S.Life.Ledger.empty() && S.Life.Ledger.front().Kind == 8 && S.Life.Ledger.front().Amount == -Cost && S.Life.Ledger.front().Label.find("Penny Drop") == 0, "the bank shows the order");
+	Expect(S.Life.Pantry.empty(), "nothing's in the bag until it arrives");
+	S.Save();
+	ss::SaveData Parsed;
+	Expect(ss::SaveData::Parse(H.Last.Serialize(), Parsed) && Parsed.Life.Deliveries.size() == 1 && Parsed.Life.Deliveries[0].Lines.size() == 2 &&
+			   std::fabs(Parsed.Life.Deliveries[0].ArriveAt - S.Life.Deliveries[0].ArriveAt) < 0.01 && Parsed.Life.Orders == 1,
+		"an order on the way is saved");
+	const int Texts = H.Texts;
+	S.LobbyMinutes += 60.0;
+	S.Update(Now += 0.5);
+	Expect(S.Life.Deliveries.empty() && S.Life.Pantry["bean-burrito"] == 1 && S.Life.Pantry["fizz-cola"] == 2 && H.Texts > Texts, "the order arrives at the door, into the bag, with a text");
+	Expect(S.Consume("bean-burrito").empty(), "and you can eat it at home");
+
+	// Three on the way at most.
+	S.BankrollCents = 100000;
+	Expect(S.PlaceOrder(Lunch).empty() && S.PlaceOrder(Lunch).empty() && S.PlaceOrder(Lunch).empty(), "three orders at once");
+	Expect(!S.PlaceOrder(Lunch).empty() && S.Life.Deliveries.size() == 3, "not a fourth");
+
+	// The kitchen tap: free, a little at a time, and only so far.
+	S.Life.Thirst = 70.0;
+	Expect(S.DrinkTapWater().empty() && std::fabs(S.Life.Thirst - 55.0) < 0.01, "a glass of tap water");
+	Expect(!S.DrinkTapWater().empty() && S.TapWait() > 0.0, "not another one straight away");
+	S.LobbyMinutes += 50.0;
+	S.Update(Now += 0.5);
+	Expect(S.TapWait() == 0.0 && S.DrinkTapWater().empty(), "the tap's there again later");
+	S.Life.Thirst = 45.0;
+	S.Life.TapAt = -1.0e9;
+	Expect(S.DrinkTapWater().empty() && std::fabs(S.Life.Thirst - ss::Session::TapFloor) < 0.01, "the tap takes the edge off, no further");
+	S.Life.TapAt = -1.0e9;
+	Expect(S.DrinkTapWater() == "You're not thirsty.", "not when you're not thirsty");
+}
+
+/**
+ * Pacing: a week of a sensible player who eats and drinks when they're getting hungry or thirsty, walks to the
+ * Lucky Penny when the bag's empty, and sleeps eight hours a night. The needs should take a couple of meals and
+ * drinks a day (a few dollars at the shelf), never get bad enough to drain energy, and a store run a day covers it.
+ */
+void NeedsPacing()
+{
+	namespace store = ss::store;
+	Hooks H;
+	ss::Session S(H, "pacing");
+	ss::hero::Character Who;
+	S.NewCareer(Who);
+	Expect(S.Life.Pantry["oodle-cup"] == 2, "two noodle cups in the cupboard on night one");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 1000000;
+	double Now = Wait(S, 0.0, 0.2);
+	ss::Chips Spent = 0;
+	int Trips = 0;
+	int Taps = 0;
+	int Eaten = 0;
+	double Worst = 0.0;
+	auto Tend = [&] {
+		Worst = std::max({Worst, S.Life.Hunger, S.Life.Thirst});
+		if (S.Life.Thirst >= 55.0 && S.DrinkTapWater().empty())
+		{
+			++Taps;
+		}
+		const bool NeedFood = S.Life.Hunger >= 55.0;
+		const bool NeedDrink = S.Life.Thirst >= 60.0;
+		auto Has = [&](const char* Id) { return S.Life.Pantry.count(Id) > 0 && S.Life.Pantry[Id] > 0; };
+		if ((NeedFood && !Has("oodle-cup") && !Has("bean-burrito")) || (NeedDrink && !Has("cascade")))
+		{
+			// The bag's empty: one walk to the store for the day's food and drink.
+			store::Basket Run;
+			Run.Add("bean-burrito", 2);
+			Run.Add("cascade", 2);
+			const ss::Chips Before = S.BankrollCents;
+			Expect(S.Checkout(Run).empty(), "a store run");
+			Spent += Before - S.BankrollCents;
+			++Trips;
+		}
+		if (NeedFood)
+		{
+			Eaten += S.Consume(Has("oodle-cup") ? "oodle-cup" : "bean-burrito").empty() ? 1 : 0;
+		}
+		if (NeedDrink)
+		{
+			Eaten += S.Consume("cascade").empty() ? 1 : 0;
+		}
+	};
+	const double Start = S.WorldMinutes();
+	for (int Day = 0; Day < 7; ++Day)
+	{
+		for (int Hour = 0; Hour < 16; ++Hour)
+		{
+			S.LobbyMinutes += 60.0;
+			Now = Wait(S, Now, 0.05);
+			S.Life.Energy = 80.0; // (the grind's own drain isn't what this measures)
+			Tend();
+		}
+		Expect(S.StartActivity("sleep").empty(), "bed");
+		Now = Wait(S, Now, 6.0);
+		Tend();
+	}
+	const double Days = (S.WorldMinutes() - Start) / ss::net::MinutesPerDay;
+	std::printf("  needs: %.1f days, %d store runs, %s spent (%s a day), %d meals and drinks, %d glasses of tap water, worst need %.0f\n", Days, Trips, ss::Money(Spent).c_str(),
+		ss::Money(static_cast<ss::Chips>(static_cast<double>(Spent) / Days)).c_str(), Eaten, Taps, Worst);
+	Expect(Days > 6.5 && Days < 8.0, "a week went by");
+	Expect(Worst < 70.0, "a sensible player never gets hungry or thirsty enough to lose energy");
+	Expect(Trips >= 3 && Trips <= 10, "about a store run a day, or less");
+	Expect(Spent >= 1000 && Spent <= 5000, "food runs a few dollars a day at the shelf");
+}
+
 } // namespace session_test
 
 namespace session_test
@@ -1510,6 +1647,8 @@ int main()
 	session_test::LivingWorld();
 	session_test::CharacterChecks();
 	session_test::StoreChecks();
+	session_test::DeliveryChecks();
+	session_test::NeedsPacing();
 	if (session_test::Failures == 0)
 	{
 		std::printf("session tests: all passed\n");

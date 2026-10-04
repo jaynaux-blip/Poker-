@@ -76,7 +76,20 @@ struct Basket
 	SHORTSTACKCORE_API Chips Subtotal() const;
 	Chips Total() const { return Subtotal() + Tax(Subtotal()); }
 	bool Empty() const { return Lines.empty(); }
+	/** The same basket at Penny Drop's prices. */
+	SHORTSTACKCORE_API Chips AppSubtotal() const;
 };
+
+/**
+ * Penny Drop: the store's own delivery app on the laptop. Everything costs 15% more than on the shelf
+ * (rounded up to the next 9 cents), plus a flat fee, and taxed; it's at the door in 25 to 45 minutes.
+ * Walking down there stays cheaper.
+ */
+constexpr Chips DeliveryFeeCents = 399;
+constexpr Chips DeliveryMinimumCents = 500; // of goods, at app prices
+SHORTSTACKCORE_API Chips AppPrice(const Item& I);
+/** What an order costs in all: the app's prices, the fee, and tax on both. */
+SHORTSTACKCORE_API Chips DeliveryTotal(const Basket& B);
 
 /** What the clerk (Benny, nights) says as the player walks up, by the hour, the basket and their history. */
 SHORTSTACKCORE_API std::string ClerkLine(double World, const Basket& B, int ShiftsWorked, double Hunger, double Energy);

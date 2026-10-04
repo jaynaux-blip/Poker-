@@ -37,6 +37,15 @@ Q/E switch tabs and R randomizes. The character is saved with the career (`hero`
 - **The store.** The Lucky Penny #212, on the corner of Fifth and Market, sells 14 items from four shelves: drinks, snacks, hot food and coffee. Every item is a fictional brand, from Cascade water at $1.49 to an egg salad sandwich at $4.49. Tax is 7.25%.
 - **The counter.** The store UI is a receipt that prints as you add items and gets stamped PAID or DECLINED. Benny, the night clerk, has a line for the hour, your shifts at his counter, and how hungry or tired you look.
 - **The bag.** What you buy goes in the bag. **F** eats or drinks the best item for whichever need is higher.
+- **At home: Penny Drop.** The store's own delivery app is on the laptop's taskbar.
+  - **Ordering.** The same shelves cost 15% more, plus a $3.99 fee and tax, with a $5 minimum. An order arrives at the door 25 to 45 minutes later, a little longer between 2 and 6 AM. It comes with a text and goes into the bag.
+  - **Tracking.** Up to three orders can be on the way at once.
+  - **Walking is cheaper.** The cart shows what the same food costs at the counter.
+  - **The At home card** shows hunger, thirst and energy and lets you eat or drink from the bag.
+  - **The kitchen tap** is free. Each glass takes 15 off thirst, once every 45 minutes, and never below 40. It keeps you going; it doesn't replace a cold drink.
+  - **The taskbar badge** turns orange when you're getting hungry or thirsty, red when it's bad, and gold while an order is on the way.
+- **Night one** starts with two noodle cups in the cupboard.
+- **Pacing.** The session test simulates a week of sensible play: eating and drinking when needs climb, walking to the store when the bag is empty, sleeping eight hours. It takes about five store runs at about $6.50 a day. Needs peak at 66, below the 70 where energy drain starts.
 
 ### The street, in Unreal
 
@@ -100,6 +109,7 @@ Each step keeps the walk-around world small, dense and tied to the career. There
 
 - [x] Character creator, perks, save, main-menu card
 - [x] Hunger and thirst, the store's catalog, checkout, the bag, Benny
+- [x] Penny Drop on the laptop: delivery, eating at home, the kitchen tap, a week's pacing check
 - [x] The street level, the character, procedural gait, first and third person, the HUD, the counter UI, the pause menu
 - [x] Apartment ↔ street travel with the clock carried over
 - [x] Third person at the Back Room table

@@ -38,6 +38,7 @@ AppBrand BrandOf(RiverLine::App A)
 	case RiverLine::App::Bank: return {"Bank", 0x3b82f6, 0x1d4ed8};
 	case RiverLine::App::GearDrop: return {"GearDrop", 0xff6b2c, 0xf43f5e};
 	case RiverLine::App::Kast: return {"Kast", 0xb07cff, 0x6d28d9};
+	case RiverLine::App::PennyDrop: return {"Penny Drop", 0xe23a4f, 0xa3122a};
 	default: return {"RiverLine", 0x27d3c3, 0x1a8fd8};
 	}
 }
@@ -211,6 +212,17 @@ void RiverLine::AppIcon(App A, float X, float Y, float Sz)
 		C->FillPolygon({{Cx - Sz * 0.14f, Cy - Sz * 0.22f}, {Cx + Sz * 0.24f, Cy}, {Cx - Sz * 0.14f, Cy + Sz * 0.22f}}, Hex(0xc6f432));
 		C->StrokeArc(Cx - Sz * 0.14f, Cy, Sz * 0.44f, -0.6f, 0.6f, NetA(W, 0.6f), Sz * 0.06f, true);
 		break;
+	case App::PennyDrop:
+		// A penny with speed lines.
+		for (int K = 0; K < 3; ++K)
+		{
+			const float Ly = Cy - Sz * 0.12f + Nf(K) * Sz * 0.12f;
+			C->FillRoundRect({X + Sz * 0.12f, Ly - Sz * 0.025f, Sz * (0.18f - 0.04f * Nf(K % 2)), Sz * 0.05f}, Sz * 0.025f, NetA(W, 0.75f));
+		}
+		C->FillCircle(Cx + Sz * 0.1f, Cy, Sz * 0.27f, Hex(0xe0a15a));
+		C->StrokeEllipse(Cx + Sz * 0.1f, Cy, Sz * 0.21f, Sz * 0.21f, Hex(0x9a5b22), Sz * 0.05f);
+		C->FillCircle(Cx + Sz * 0.1f, Cy, Sz * 0.08f, Hex(0x9a5b22));
+		break;
 	}
 }
 
@@ -251,7 +263,7 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 	C->FillRect(R, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x0c1422), Hex(0x060a12)));
 	C->FillRect({R.X, R.Y, R.W, 1.0f}, Rgba(255, 255, 255, 0.08f));
 	const life::Context Ctx = S.LifeContext();
-	const App Apps[6] = {App::RiverLine, App::ShiftLink, App::Burner, App::Bank, App::GearDrop, App::Kast};
+	const App Apps[7] = {App::RiverLine, App::ShiftLink, App::Burner, App::Bank, App::GearDrop, App::Kast, App::PennyDrop};
 	float X = R.X + 8.0f;
 	for (const App A : Apps)
 	{
@@ -290,6 +302,23 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 			else if (Drop && life::Blocked(*Drop, S.Life, Ctx).empty())
 			{
 				Dot = pal::Green;
+			}
+		}
+		if (A == App::PennyDrop)
+		{
+			// Hungry or thirsty: orange, then red; an order on the way: gold.
+			const double Need = std::max(S.Life.Hunger, S.Life.Thirst);
+			if (Need >= 85.0)
+			{
+				Dot = NetA(pal::Red, 0.6f + 0.4f * Nf(std::sin(Now * 4.0)));
+			}
+			else if (Need >= 65.0)
+			{
+				Dot = pal::Orange;
+			}
+			else if (!S.Life.Deliveries.empty())
+			{
+				Dot = pal::Gold;
 			}
 		}
 		if (A == App::Bank && S.Life.RentStage != life::Rent::Paid && S.Life.RentStage != life::Rent::Evicted && S.Life.RentDeadline - World < 24.0 * 60.0)
