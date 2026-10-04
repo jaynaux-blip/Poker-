@@ -2,7 +2,9 @@
 #include "../StrictFloat.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <string>
 
 namespace ss
 {
@@ -76,9 +78,57 @@ const Item* Find(const std::string& Id)
 	return nullptr;
 }
 
+Relief ReliefOf(const Item& I, double MealBoost)
+{
+	// A line cook makes a meal go further (food's hunger, not a cola's sugar), and gets more energy out of anything.
+	Relief Out;
+	Out.Hunger = I.Food() && I.Hunger > 0.0 ? I.Hunger * MealBoost : I.Hunger;
+	Out.Thirst = I.Thirst;
+	Out.Energy = I.Energy > 0.0 ? I.Energy * MealBoost : I.Energy;
+	return Out;
+}
+
+std::string Called(const Item& I)
+{
+	// The shelf's brand names, as someone would say them: a bag is chips, a pouch is trail mix, a bottle of cold brew
+	// is cold brew (water is just its name).
+	const std::string Kind = I.Kind.substr(0, I.Kind.find(','));
+	switch (I.Look)
+	{
+	case Art::Bag: return "the " + I.Name + " chips";
+	case Art::Pouch: return "the " + I.Name + " trail mix";
+	case Art::Burrito: return "the " + I.Name + " burrito";
+	case Art::Bottle: return Kind == "Cold brew" ? "the " + I.Name + " cold brew" : Kind == "Iced tea" ? "the " + I.Name + " iced tea" : "the " + I.Name;
+	default: return "the " + I.Name;
+	}
+}
+
+std::string UsedLine(const Item& I, double HungerChange, double ThirstChange, double EnergyChange)
+{
+	const std::string Did = std::string(I.Drink() ? "Drank " : "Ate ") + Called(I) + ".";
+	std::string Changes;
+	auto Add = [&Changes](double V, const char* What) {
+		const long N = std::lround(V);
+		if (N != 0)
+		{
+			Changes += (Changes.empty() ? std::string() : std::string(", ")) + What + " " + (N > 0 ? "+" : "\xE2\x88\x92") + std::to_string(N > 0 ? N : -N);
+		}
+	};
+	Add(HungerChange, "hunger");
+	Add(ThirstChange, "thirst");
+	Add(EnergyChange, "energy");
+	if (Changes.empty())
+	{
+		return Did + " You didn't need it.";
+	}
+	Changes[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(Changes[0])));
+	return Did + " " + Changes + ".";
+}
+
 Chips Tax(Chips Subtotal)
 {
-	return static_cast<Chips>(std::llround(static_cast<double>(Subtotal) * 0.0725));
+	// In whole cents, half a cent up. (A double's 7.25% isn't exact: $2.00 and $30.00 used to round down.)
+	return (std::max<Chips>(0, Subtotal) * 725 + 5000) / 10000;
 }
 
 void Basket::Add(const std::string& Id, int Count)
@@ -162,10 +212,10 @@ Chips Basket::Subtotal() const
 	return Sum;
 }
 
-std::string ClerkLine(double World, const Basket& B, int ShiftsWorked, double Hunger, double Energy)
+std::string ClerkLine(const ClerkContext& Ctx, const Basket& B)
 {
 	const double Day = 1440.0;
-	const double T = std::fmod(std::fmod(World, Day) + Day, Day) / 60.0;
+	const double T = std::fmod(std::fmod(Ctx.World, Day) + Day, Day) / 60.0;
 	int Energies = 0;
 	for (const std::pair<std::string, int>& L : B.Lines)
 	{
@@ -175,24 +225,46 @@ std::string ClerkLine(double World, const Basket& B, int ShiftsWorked, double Hu
 	{
 		return "Two of those? You're either studying or playing cards.";
 	}
-	if (ShiftsWorked > 0 && B.Empty())
+	if (!B.Empty())
 	{
-		return "Hey, you're on the schedule this week, right? Don't tell Ray I gave you the employee discount. I didn't.";
+		return B.Count() >= 4 ? "Big night in, huh?" : "That it? Bag?";
 	}
-	if (B.Empty() && Hunger > 70.0)
+	// Walking up: how the player looks first, then what Benny knows about them, then the hour.
+	if (Ctx.Hunger > 70.0)
 	{
 		return "You look like you need a roller dog. They're fresh. Ish.";
 	}
-	if (B.Empty() && Energy < 25.0)
+	if (Ctx.Energy < 25.0)
 	{
-		return "Coffee's fresh at midnight. It's not midnight. Still hot, though.";
+		return T < 1.0 ? "Fresh pot at midnight. You look like you need the whole thing." : "Coffee's fresh at midnight. It's not midnight. Still hot, though.";
 	}
-	if (B.Empty())
+	if (Ctx.Declined)
 	{
-		return T >= 0.0 && T < 5.0 ? "Rough night? Everybody in here at this hour is having one." : T < 12.0 ? "Morning. Coffee's on the left." : T < 18.0 ? "Afternoon. Need anything, holler."
-																														 : "Evening. Lotto's up to forty million if you're feeling lucky.";
+		return "Card's having a night, huh? Happens. Prices aren't going anywhere.";
 	}
-	return B.Count() >= 4 ? "Big night in, huh?" : "That it? Bag?";
+	if (Ctx.OnSchedule)
+	{
+		return "Hey, you're on the schedule this week, right? Don't tell Ray I gave you the employee discount. I didn't.";
+	}
+	if (Ctx.Evicted)
+	{
+		return "Dee says you're on her couch for a while. She's good people. Don't eat all her cereal.";
+	}
+	if (Ctx.SinceVisit >= 0.0 && Ctx.SinceVisit < 60.0)
+	{
+		return "Back already? Forget something?";
+	}
+	if (Ctx.SinceVisit >= 3.0 * Day)
+	{
+		return "Look who it is. I thought you moved.";
+	}
+	// A regular's order, every other hour (the rest of the time he just says hello).
+	if (!Ctx.Usual.empty() && static_cast<long long>(std::floor(Ctx.World / 60.0)) % 2 == 0)
+	{
+		return "The usual? " + Ctx.Usual + ". I'd ring it up before you ask, but Ray says that's creepy.";
+	}
+	return T >= 0.0 && T < 5.0 ? "Rough night? Everybody in here at this hour is having one." : T < 12.0 ? "Morning. Coffee's on the left." : T < 18.0 ? "Afternoon. Need anything, holler."
+																													 : "Evening. Lotto's up to forty million if you're feeling lucky.";
 }
 } // namespace store
 } // namespace ss

@@ -86,6 +86,24 @@ const char* KindName(int Kind)
 	}
 }
 
+/** life::State::Record keeps this many ledger lines (the newest). */
+const size_t LedgerKept = 60;
+/** The Embercrest's ember, for its lines in the Bank. */
+const uint32_t EmberRgb = 0xff6a24;
+
+/** A ledger line from the Embercrest (a live buy-in, fee, prize or refund): its label starts with the event's name. */
+bool LiveLine(const life::State& L, const std::string& Label)
+{
+	for (const life::LiveEntry& E : L.LiveEntries)
+	{
+		if (!E.Name.empty() && Label.size() > E.Name.size() + 2 && Label.compare(0, E.Name.size(), E.Name) == 0 && Label.compare(E.Name.size(), 2, ": ") == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 /** "LP" for Lucky Penny #212: the first letters of the first two words. */
 std::string AppInitials(const std::string& Name)
 {
@@ -998,19 +1016,64 @@ void RiverLine::BankApp(double Now)
 			UnitInk = Hex(0xdc2626);
 		}
 		UI.Text(Unit, Rr.X + Rr.W - 36.0f, Rr.Y + 98.0f, Ts(15.0f, 800, UnitInk, Align::Right));
+		if (L.StorageDue > 0.0)
+		{
+			// The unit's next month, paid ahead from here (Session::PayStorage: no more than a month ahead), so the card
+			// on file isn't the gear's last chance.
+			const bool Ahead = L.StorageDue - World > life::StorageDays * net::MinutesPerDay;
+			const bool Can = !Ahead && S.BankrollCents >= life::StorageCents;
+			const std::string Label = Ahead ? "Unit paid through " + net::DateLabel(net::DayOf(L.StorageDue - 1.0)) : "Pay the unit ahead \xC2\xB7 " + NetMoney(life::StorageCents);
+			const float Lead = Ahead ? 34.0f : 16.0f; // room for the check mark once it's paid
+			const float Bw = UI.Measure(Label, 13.0f, 800) + Lead + 16.0f;
+			const Rect Sb{Rr.X + Rr.W - 36.0f - Bw, Rr.Y + 22.0f, Bw, 30.0f};
+			const Ui::ClickState Cs = UI.Clickable("paystorage", Sb, Can);
+			const Color Ink = Ahead ? Hex(0x16a34a) : Can ? Dark : Gray;
+			UI.RRect(Sb, 15.0f, Cs.Hover ? Hex(0xeef2f7) : Hex(0xffffff), Ahead ? NetA(Hex(0x16a34a), 0.5f) : Hex(0xd5dde8), 1.0f);
+			if (Ahead)
+			{
+				NetCheck(*C, Sb.X + 18.0f, Sb.Y + 15.0f, 10.0f, Ink);
+			}
+			UI.Text(Label, Sb.X + Lead, Sb.Y + 20.0f, Ts(13.0f, 800, Ink));
+			if (Cs.Clicked)
+			{
+				const std::string Fail = S.PayStorage();
+				if (!Fail.empty())
+				{
+					Toast = Fail;
+					ToastAt = Now;
+				}
+			}
+		}
 		UI.Text(Nights == 0 ? "First night on the couch" : "Night " + std::to_string(Nights + 1) + " on the couch \xC2\xB7 " + Money(L.CouchCents) + " to Dee", Rr.X + Rr.W - 36.0f, Rr.Y + 122.0f,
 			Ts(13.0f, 600, Gray, Align::Right));
 		const float Have = Nf(Clamp01(static_cast<double>(S.BankrollCents) / static_cast<double>(std::max<Chips>(1, L.RentDueCents))));
 		UI.RRect({Rr.X + 36.0f, Rr.Y + 158.0f, Rr.W - 72.0f, 12.0f}, 6.0f, Hex(0xe6ebf3));
 		UI.RRect({Rr.X + 36.0f, Rr.Y + 158.0f, std::max(12.0f, (Rr.W - 72.0f) * Have * In), 12.0f}, 6.0f, Paint::Linear({Rr.X, 0.0f}, {Rr.X + Rr.W, 0.0f}, Tone, Mix(Tone, Hex(0x16a34a), Have)));
-		const bool Can = S.BankrollCents >= L.RentDueCents && !S.T && !S.TimeSkip.Active;
+		// The same checks MoveBackIn makes; the button's second line says which one is in the way.
 		const Chips Short = std::max<Chips>(0, L.RentDueCents - S.BankrollCents);
-		if (AppButton("movein", {Rr.X + 36.0f, Rr.Y + 186.0f, 300.0f, 46.0f}, "Move back in", Hex(0x16a34a), Hex(0xffffff), Can, Can ? std::string() : "Short " + Money(Short)))
+		const std::string Why = Short > 0 ? "Short " + Money(Short) : S.T ? std::string("Finish your tables first") : S.TimeSkip.Active ? std::string("Busy right now") : std::string();
+		if (AppButton("movein", {Rr.X + 36.0f, Rr.Y + 186.0f, 300.0f, 46.0f}, "Move back in", Hex(0x16a34a), Hex(0xffffff), Why.empty(), Why))
 		{
-			S.MoveBackIn();
+			const std::string Fail = S.MoveBackIn();
+			if (!Fail.empty())
+			{
+				Toast = Fail;
+				ToastAt = Now;
+			}
 		}
-		NetParagraph(*C, "Meanwhile: the gear's in storage (two tables, no stream), the couch gives back 30% less sleep, and $10 a day goes to Dee's groceries.", Rr.X + 356.0f, Rr.Y + 200.0f,
-			Rr.W - 392.0f, 13.0f, 500, Gray, 18.0f, 2);
+		// What being out costs meanwhile, as it stands: the gear in the unit, gone at auction, or never stored.
+		std::string Rig = "it's just the laptop (two tables, no stream)";
+		if (L.StorageDue > 0.0)
+		{
+			Rig = "the gear's in storage (two tables, no stream)";
+		}
+		else if (L.Auctions > 0)
+		{
+			Rig = "the unit was auctioned, so it's the laptop (two tables, no stream)";
+		}
+		const int Less = static_cast<int>(std::lround((1.0 - life::CouchRest) * 100.0));
+		NetParagraph(*C, "Meanwhile: " + Rig + ", the couch gives back " + std::to_string(Less) + "% less sleep, and " + NetMoney(life::CouchChipInCents) + " a day goes to Dee's groceries.",
+			Rr.X + 356.0f, Rr.Y + 200.0f, Rr.W - 392.0f, 13.0f, 500, Gray, 18.0f, 2);
 	}
 	else
 	{
@@ -1023,16 +1086,26 @@ void RiverLine::BankApp(double Now)
 		const float Have = Nf(Clamp01(static_cast<double>(S.BankrollCents) / static_cast<double>(std::max<Chips>(1, L.RentDueCents))));
 		UI.RRect({Rr.X + 36.0f, Rr.Y + 158.0f, Rr.W - 72.0f, 12.0f}, 6.0f, Hex(0xe6ebf3));
 		UI.RRect({Rr.X + 36.0f, Rr.Y + 158.0f, std::max(12.0f, (Rr.W - 72.0f) * Have * In), 12.0f}, 6.0f, Paint::Linear({Rr.X, 0.0f}, {Rr.X + Rr.W, 0.0f}, Tone, Mix(Tone, Hex(0x16a34a), Have)));
-		const bool Can = S.BankrollCents >= L.RentDueCents && !S.T;
+		// The same checks PayRent makes; the button's second line says which one is in the way.
 		const Chips Short = std::max<Chips>(0, L.RentDueCents - S.BankrollCents);
-		if (AppButton("payrent", {Rr.X + 36.0f, Rr.Y + 186.0f, 300.0f, 46.0f}, Paid ? "Pay next month early" : "Pay rent", Hex(0x1d4ed8), Hex(0xffffff), Can, Can ? std::string() : "Short " + Money(Short)))
+		const std::string Why = Short > 0 ? "Short " + Money(Short) : S.T ? std::string("Finish your tables first") : std::string();
+		if (AppButton("payrent", {Rr.X + 36.0f, Rr.Y + 186.0f, 300.0f, 46.0f}, Paid ? "Pay next month early" : "Pay rent", Hex(0x1d4ed8), Hex(0xffffff), Why.empty(), Why))
 		{
 			S.PayRent();
 		}
 		if (Late)
 		{
-			NetParagraph(*C, "Miss this and the locks change: the gear goes to storage, you go to Dee's couch, and a key costs the back rent plus a month.", Rr.X + 356.0f, Rr.Y + 200.0f,
-				Rr.W - 392.0f, 13.0f, 600, Hex(0xdc2626), 18.0f, 2);
+			// Only gear bought outright goes into a unit (Session::Evict); with none, it's just the laptop and the couch.
+			bool Stores = false;
+			for (const auto& G : S.Gear)
+			{
+				const gear::Item* I = gear::Find(G.first);
+				Stores = Stores || (I && !I->Monthly);
+			}
+			NetParagraph(*C,
+				Stores ? "Miss this and the locks change: the gear goes to storage, you go to Dee's couch, and a key costs the back rent plus a month."
+					   : "Miss this and the locks change: you and the laptop go to Dee's couch, and a key costs the back rent plus a month.",
+				Rr.X + 356.0f, Rr.Y + 200.0f, Rr.W - 392.0f, 13.0f, 600, Hex(0xdc2626), 18.0f, 2);
 		}
 		else
 		{
@@ -1041,39 +1114,119 @@ void RiverLine::BankApp(double Now)
 		}
 	}
 
-	// Where the money came from.
+	// Money in and money out, over the same stretch of the ledger for every row (it keeps the last sixty lines, so
+	// lifetime counters and ledger sums would disagree): where it came from on the left, where it went on the right.
 	const Rect Flow{40.0f, 570.0f, 860.0f, 360.0f};
 	UI.RRect(Flow, 18.0f, Hex(0xffffff), Hex(0xe2e8f0));
-	UI.Text("Where your money came from", Flow.X + 32.0f, Flow.Y + 46.0f, Ts(20.0f, 900, Dark));
-	Chips Poker = 0;
-	Chips Prizes = 0;
-	Chips Spent = 0;
+	UI.Text("Money in, money out", Flow.X + 32.0f, Flow.Y + 44.0f, Ts(20.0f, 900, Dark));
+	std::string Window = "Nothing yet: it all shows up here.";
+	if (!L.Ledger.empty())
+	{
+		const int Since = net::DayOf(L.Ledger.back().At);
+		const std::string When = std::string(net::WeekdayName(Since)) + ", " + net::DateLabel(Since);
+		Window = L.Ledger.size() >= LedgerKept ? "Your last " + std::to_string(LedgerKept) + " transactions, since " + When : "Everything since " + When;
+	}
+	UI.Text(Window, Flow.X + 32.0f, Flow.Y + 66.0f, Ts(12.5f, 600, Gray));
+	// In: 0 tournament cashes, 1 the Embercrest, 2 leaderboard prizes, 3 shifts, 4 cash work, 5 streaming.
+	// Out: 0 buy-ins (less refunds), 1 rent, bills and fares, 2 food and deliveries, 3 gear, 4 fines and Marcus.
+	Chips Ins[6] = {0, 0, 0, 0, 0, 0};
+	Chips Outs[5] = {0, 0, 0, 0, 0};
 	for (const life::LedgerEntry& E : L.Ledger)
 	{
-		Poker += E.Kind == 0 && E.Amount > 0 ? E.Amount : 0;
-		Prizes += E.Kind == 4 ? E.Amount : 0;
-		Spent += E.Amount < 0 ? -E.Amount : 0;
-	}
-	const std::pair<std::string, std::pair<Chips, Color>> Bars[5] = {
-		{"Tournament cashes", {Poker, Hex(0x27d3c3)}}, {"Shifts", {L.EarnedJobs, Hex(0xff8a1f)}}, {"Cash work", {L.EarnedHustles, Hex(0x16a34a)}}, {"Leaderboard prizes", {Prizes, Hex(0xf2c14e)}},
-		{"Spent (buy-ins, rent, fines)", {Spent, Hex(0xef4d5a)}}};
-	Chips Top = 1;
-	for (const auto& B : Bars)
-	{
-		Top = std::max(Top, B.second.first);
-	}
-	for (int I = 0; I < 5; ++I)
-	{
-		const float Y = Flow.Y + 80.0f + Nf(I) * 54.0f;
-		UI.Text(Bars[I].first, Flow.X + 32.0f, Y + 16.0f, Ts(15.0f, 600, Gray));
-		const float W = (Flow.W - 380.0f) * Nf(static_cast<double>(Bars[I].second.first) / static_cast<double>(Top)) * In;
-		UI.RRect({Flow.X + 250.0f, Y + 4.0f, Flow.W - 380.0f, 16.0f}, 8.0f, Hex(0xeef2f7));
-		if (W > 1.0f)
+		if (E.Kind == 7 || E.Amount == 0)
 		{
-			UI.RRect({Flow.X + 250.0f, Y + 4.0f, std::max(16.0f, W), 16.0f}, 8.0f, Bars[I].second.second);
+			continue; // transfers (savings from home) are neither earned nor spent
 		}
-		UI.Text(Money(Bars[I].second.first), Flow.X + Flow.W - 32.0f, Y + 18.0f, Ts(15.0f, 800, Dark, Align::Right, Baseline::Alphabetic, true));
+		if (E.Amount > 0)
+		{
+			if (E.Kind == 0 && E.Label.find(": refunded") != std::string::npos)
+			{
+				Outs[0] -= E.Amount; // a refund takes its buy-in back off the spending
+			}
+			else if (E.Kind == 0)
+			{
+				Ins[0] += E.Amount;
+			}
+			else if (E.Kind == 4)
+			{
+				Ins[LiveLine(L, E.Label) ? 1 : 2] += E.Amount;
+			}
+			else if (E.Kind == 1)
+			{
+				Ins[3] += E.Amount;
+			}
+			else if (E.Kind == 2)
+			{
+				Ins[4] += E.Amount;
+			}
+			else if (E.Kind == 6)
+			{
+				Ins[5] += E.Amount;
+			}
+			continue;
+		}
+		const Chips Spent = -E.Amount;
+		if (E.Kind == 8 || E.Label == "Groceries at Dee's")
+		{
+			Outs[2] += Spent; // the corner store, Penny Drop, and the couch's groceries (a bill by kind, food all the same)
+			continue;
+		}
+		switch (E.Kind)
+		{
+		case 0: Outs[0] += Spent; break;
+		case 5: Outs[3] += Spent; break;
+		case 2: Outs[4] += Spent; break;
+		default: Outs[1] += Spent; break; // rent, the storage unit, the bus to the Embercrest
+		}
 	}
+	Outs[0] = std::max<Chips>(0, Outs[0]);
+	struct FlowRow
+	{
+		const char* Label;
+		Chips Amount;
+		uint32_t Col;
+	};
+	const FlowRow InRows[6] = {{"Tournament cashes", Ins[0], 0x27d3c3}, {"The Embercrest", Ins[1], EmberRgb}, {"Leaderboard prizes", Ins[2], 0xf2c14e}, {"Shifts", Ins[3], 0xff8a1f},
+		{"Cash work", Ins[4], 0x16a34a}, {"Streaming", Ins[5], 0x9b5cff}};
+	const FlowRow OutRows[5] = {{"Buy-ins & entry fees", Outs[0], 0x0d9488}, {"Rent, bills & fares", Outs[1], 0xef4d5a}, {"Food & deliveries", Outs[2], 0xe23b4e}, {"Gear", Outs[3], 0xff6b2c},
+		{"Fines & Marcus", Outs[4], 0x7c3aed}};
+	Chips Top = 1;
+	Chips InSum = 0;
+	Chips OutSum = 0;
+	for (const FlowRow& R : InRows)
+	{
+		Top = std::max(Top, R.Amount);
+		InSum += R.Amount;
+	}
+	for (const FlowRow& R : OutRows)
+	{
+		Top = std::max(Top, R.Amount);
+		OutSum += R.Amount;
+	}
+	const Chips Net = InSum - OutSum;
+	UI.Text((Net > 0 ? "Net +" : Net < 0 ? "Net \xE2\x88\x92" : "Net ") + Money(Net < 0 ? -Net : Net), Flow.X + Flow.W - 32.0f, Flow.Y + 44.0f,
+		Ts(17.0f, 900, Net > 0 ? Hex(0x16a34a) : Net < 0 ? Hex(0xdc2626) : Gray, Align::Right, Baseline::Alphabetic, true));
+	auto Column = [&](const FlowRow* Rows, int Count, float X, float W, const char* Title, Chips Sum, const Color& SumInk) {
+		NetSpaced(*C, Title, X, Flow.Y + 100.0f, 11.0f, 900, Gray, 1.8f);
+		UI.Text(Money(Sum), X + W, Flow.Y + 100.0f, Ts(14.0f, 900, SumInk, Align::Right, Baseline::Alphabetic, true));
+		C->FillRect({X, Flow.Y + 110.0f, W, 1.0f}, Hex(0xe2e8f0));
+		for (int I = 0; I < Count; ++I)
+		{
+			const FlowRow& R = Rows[I];
+			const float Y = Flow.Y + 118.0f + Nf(I) * 38.0f;
+			const bool Some = R.Amount > 0;
+			UI.Text(R.Label, X, Y + 14.0f, Ts(13.5f, 600, Some ? Dark : NetA(Gray, 0.7f)));
+			UI.Text(Some ? Money(R.Amount) : std::string("\xE2\x80\x94"), X + W, Y + 14.0f, Ts(13.5f, 800, Some ? Dark : NetA(Gray, 0.6f), Align::Right, Baseline::Alphabetic, true));
+			UI.RRect({X, Y + 21.0f, W, 8.0f}, 4.0f, Hex(0xeef2f7));
+			const float Bw = W * Nf(static_cast<double>(R.Amount) / static_cast<double>(Top)) * In;
+			if (Some && Bw > 0.5f)
+			{
+				UI.RRect({X, Y + 21.0f, std::max(8.0f, Bw), 8.0f}, 4.0f, Hex(R.Col));
+			}
+		}
+	};
+	Column(InRows, 6, Flow.X + 32.0f, 380.0f, "MONEY IN", InSum, Hex(0x16a34a));
+	Column(OutRows, 5, Flow.X + 448.0f, 380.0f, "MONEY OUT", OutSum, Hex(0xdc2626));
 
 	// History.
 	const Rect H{930.0f, 100.0f, 630.0f, 830.0f};
@@ -1090,11 +1243,14 @@ void RiverLine::BankApp(double Now)
 		const float Ri = NetEase((Now - AppAt - 0.03 * static_cast<double>(I)) / 0.4);
 		const float A0 = C->GetAlpha();
 		C->SetAlpha(A0 * Ri);
-		const Color Kc = KindColor(E.Kind);
+		// The Embercrest's lines (buy-in, fee, prize, refund) wear its name and its ember, whatever their kind.
+		const bool Live = LiveLine(L, E.Label);
+		const Color Kc = Live ? Hex(EmberRgb) : KindColor(E.Kind);
+		const std::string Kn = Live ? "Embercrest" : KindName(E.Kind);
 		C->FillCircle(H.X + 46.0f, Y + 24.0f, 17.0f, NetA(Kc, 0.15f));
-		UI.Text(std::string(KindName(E.Kind)).substr(0, 1), H.X + 46.0f, Y + 25.0f, Ts(14.0f, 900, Mix(Kc, Hex(0x000000), 0.2f), Align::Center, Baseline::Middle));
+		UI.Text(Kn.substr(0, 1), H.X + 46.0f, Y + 25.0f, Ts(14.0f, 900, Mix(Kc, Hex(0x000000), 0.2f), Align::Center, Baseline::Middle));
 		UI.Text(E.Label, H.X + 76.0f, Y + 21.0f, Ts(15.0f, 700, Dark, Align::Left, Baseline::Alphabetic, false, 360.0f));
-		UI.Text(std::string(net::WeekdayName(net::DayOf(E.At))) + " " + net::TimeLabel(E.At) + " \xC2\xB7 " + KindName(E.Kind), H.X + 76.0f, Y + 40.0f, Ts(12.5f, 500, Gray));
+		UI.Text(std::string(net::WeekdayName(net::DayOf(E.At))) + " " + net::TimeLabel(E.At) + " \xC2\xB7 " + Kn, H.X + 76.0f, Y + 40.0f, Ts(12.5f, 500, Gray));
 		UI.Text(E.Amount == 0 ? std::string("\xE2\x80\x94") : (E.Amount > 0 ? "+" : "\xE2\x88\x92") + Money(E.Amount > 0 ? E.Amount : -E.Amount), H.X + H.W - 28.0f, Y + 30.0f,
 			Ts(16.0f, 800, E.Amount > 0 ? Hex(0x16a34a) : E.Amount < 0 ? Hex(0xdc2626) : Gray, Align::Right, Baseline::Alphabetic, true));
 		if (I + 1 < L.Ledger.size() && I < 13)

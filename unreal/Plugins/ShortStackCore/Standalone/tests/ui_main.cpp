@@ -20,6 +20,7 @@
 #include "ShortStack/UI/StreamArt.h"
 #include "TestFontMetrics.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <functional>
 #include <map>
@@ -39,6 +40,37 @@ void Expect(bool Condition, const char* What)
 		++Failures;
 		std::printf("FAILED: %s\n", What);
 	}
+}
+
+/** The baseline of the first text run in a frame that contains Needle (whole runs: letter-spaced labels draw a glyph a run), or -1. */
+float TextAt(const ss::ui::DrawList& L, const std::string& Needle)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text.find(Needle) != std::string::npos)
+		{
+			return Cmd.Text.BaselineY;
+		}
+	}
+	return -1.0f;
+}
+
+bool Drew(const ss::ui::DrawList& L, const std::string& Needle)
+{
+	return TextAt(L, Needle) >= 0.0f;
+}
+
+/** A text run that is exactly Text ("+4", not the "+45" on a shelf tag). */
+bool DrewRun(const ss::ui::DrawList& L, const std::string& Text)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Text)
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 /** Text widths from the Chromium metrics table (Roboto, the family Unreal's UI font uses). */
@@ -1260,6 +1292,164 @@ void PennyDropScreens()
 }
 
 /**
+ * Penny Drop's edges: a cart longer than its list (it scrolls, and every line stays reachable), nine of a kind, the
+ * night courier's window on the button, the order note clear of a third tracker, the bag's cells holding still under
+ * the pointer, its pages, and a long "Ate the ..." line shown whole.
+ */
+void PennyDropDetails()
+{
+	QuietHooks H;
+	ss::Session S(H, "ui-drop-details");
+	ss::ui::RiverLine RL(S);
+	TableMeasurer M;
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 50000;
+	S.Life.Pantry.clear();
+	double Now = 1.0;
+	ss::ui::DrawList Last;
+	auto Frame = [&](float X, float Y, bool Down, bool Pressed, bool Released) {
+		RL.UI.Ptr.Active = X >= 0.0f;
+		RL.UI.Ptr.X = X;
+		RL.UI.Ptr.Y = Y;
+		RL.UI.Ptr.Down = Down;
+		RL.UI.Ptr.Pressed = Pressed;
+		RL.UI.Ptr.Released = Released;
+		Last.Clear();
+		ss::ui::Canvas C(Last, M, 1600.0f, 1000.0f, 1.0f);
+		RL.Draw(C, Now);
+		RL.UI.Ptr.EndFrame();
+		Now += 0.05;
+	};
+	auto Click = [&](float X, float Y) {
+		Frame(X, Y, true, true, false);
+		Frame(X, Y, false, false, true);
+	};
+	auto Away = [&]() { Frame(-1.0f, -1.0f, false, false, false); };
+	using App = ss::ui::RiverLine::App;
+	RL.OpenApp(App::PennyDrop, Now);
+	Now += 1.0;
+	Away();
+	// 2:07 AM: one courier on nights, and the button says so.
+	Expect(Drew(Last, "Place order \xC2\xB7 33\xE2\x80\x93" "53 min"), "Penny Drop: the night courier's window on the button");
+
+	// Seven different things: five from the cooler, two snacks. The list shows four and scrolls the rest.
+	const float AddX[3] = {276.0f, 592.0f, 908.0f};
+	for (int K = 0; K < 5; ++K)
+	{
+		Click(AddX[K % 3], K < 3 ? 377.0f : 649.0f);
+	}
+	RL.ShowDropShelf(static_cast<int>(ss::store::Shelf::Snacks));
+	Click(AddX[0], 377.0f);
+	Click(AddX[1], 377.0f);
+	Away();
+	Expect(RL.DropBasket().Lines.size() == 7 && RL.DropBasket().Count() == 7, "Penny Drop: seven lines in the cart");
+	Expect(Drew(Last, "+3 more lines above") && !Drew(Last, "Cascade"), "Penny Drop: the newest line in view, the rest counted");
+	Emit("drop_cart_long", RL, Now);
+	for (int K = 0; K < 3; ++K)
+	{
+		Click(1484.0f, 339.0f); // up
+	}
+	Away();
+	Expect(Drew(Last, "+3 more lines below") && Drew(Last, "Cascade"), "Penny Drop: scrolled back to the first line");
+	RL.UI.Ptr.Wheel = 100.0f;
+	Frame(1200.0f, 220.0f, false, false, false);
+	Away();
+	Expect(Drew(Last, "1 above, 2 below"), "Penny Drop: the wheel scrolls the cart");
+	Click(1520.0f, 339.0f); // down
+	Click(1520.0f, 339.0f);
+	// The last line (the chocolate bar, one of it) is the fourth row now: its minus takes it out of the order.
+	Click(1335.0f, 298.0f);
+	Away();
+	Expect(RL.DropBasket().Lines.size() == 6 && RL.DropBasket().Count() == 6, "Penny Drop: a line past the fold can be taken out");
+	const ss::Chips Shown = ss::store::DeliveryTotal(RL.DropBasket());
+	Expect(Drew(Last, ss::Money(Shown)), "Penny Drop: the total is what's in the cart");
+
+	// Nine of a kind, and the button says so.
+	RL.ShowDropShelf(static_cast<int>(ss::store::Shelf::Drinks));
+	for (int K = 0; K < 10; ++K)
+	{
+		Click(AddX[0], 377.0f);
+	}
+	Away();
+	int Cascades = 0;
+	for (const auto& Ln : RL.DropBasket().Lines)
+	{
+		Cascades += Ln.first == "cascade" ? Ln.second : 0;
+	}
+	Expect(Cascades == 9 && Drew(Last, "9 in cart"), "Penny Drop: nine of a kind, then the Add button says so");
+
+	// Three orders (the last one again, twice): the note sits in the card's header, clear of the third tracker.
+	for (int K = 0; K < 3; ++K)
+	{
+		if (K > 0)
+		{
+			Click(1290.0f, 224.0f); // Same as last time
+		}
+		const double Before = S.WorldMinutes();
+		Click(1290.0f, 512.0f);
+		Expect(S.Life.Deliveries.size() == static_cast<size_t>(K + 1), "Penny Drop: an order placed");
+		const ss::life::State::Delivery& Dv = S.Life.Deliveries.back();
+		Expect(Dv.ArriveAt - Before >= 33.0 && Dv.ArriveAt - Before <= 53.0, "Penny Drop: the order keeps the window the button promised");
+	}
+	Away();
+	const float NoteY = TextAt(Last, "Ordered. Benny's bagging it now.");
+	float LowestStop = 0.0f;
+	for (const ss::ui::DrawCmd& Cmd : Last.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "Your door")
+		{
+			LowestStop = std::max(LowestStop, Cmd.Text.BaselineY);
+		}
+	}
+	Expect(NoteY > 580.0f && NoteY < 642.0f, "Penny Drop: the order note is in the header, above the trackers");
+	Expect(LowestStop > 0.0f && LowestStop < 580.0f + 362.0f - 8.0f, "Penny Drop: the third tracker fits its card");
+	Emit("drop_three_orders", RL, Now);
+
+	// The bag: a cell eaten to the last keeps its place while the pointer is over the bag, and closes up after.
+	S.Life.Hunger = 70.0;
+	S.Life.Thirst = 50.0;
+	S.Life.Energy = 50.0;
+	S.Life.Pantry.clear();
+	S.Life.Pantry["cascade"] = 1;
+	S.Life.Pantry["fizz-cola"] = 2;
+	S.Life.Pantry["trail-mix"] = 1;
+	Away();
+	Expect(RL.DropBagCells().size() == 3 && RL.DropBagCells()[0] == "cascade", "Penny Drop: the bag, shelf by shelf");
+	Frame(580.0f, 798.0f, false, false, false);
+	Frame(580.0f, 798.0f, false, false, false);
+	Click(580.0f, 798.0f);
+	Frame(580.0f, 798.0f, false, false, false);
+	Expect(S.Life.Pantry.count("cascade") == 0 && RL.DropBagCells().size() == 3 && RL.DropBagCells()[0] == "cascade" && RL.DropBagCells()[1] == "fizz-cola",
+		"Penny Drop: the cell under the pointer stays put once it's used up");
+	Away();
+	Expect(RL.DropBagCells().size() == 2 && RL.DropBagCells()[0] == "fizz-cola", "Penny Drop: the bag closes up once the pointer leaves");
+	// The longest line there is, whole in the card's header: the trail mix (third cell now: fizz-cola, then the trail mix).
+	for (int K = 0; K < 40; ++K)
+	{
+		Away(); // the cells slide to their new places
+	}
+	Frame(730.0f, 798.0f, false, false, false);
+	Click(730.0f, 798.0f);
+	Frame(730.0f, 798.0f, false, false, false); // the note fades in from the next frame
+	Expect(S.Life.Pantry.count("trail-mix") == 0 && !S.LastEaten.Line.empty() && Drew(Last, S.LastEaten.Line), "Penny Drop: the line after eating shows whole");
+
+	// Pages: eight kinds don't fit six cells.
+	S.Life.Pantry.clear();
+	const char* Kinds[8] = {"cascade", "fizz-cola", "volt-rush", "night-owl-brew", "sunny-peach", "hilltop-chips", "choco-stack", "trail-mix"};
+	for (const char* Id : Kinds)
+	{
+		S.Life.Pantry[Id] = 1;
+	}
+	Away();
+	Expect(Drew(Last, "1 / 2"), "Penny Drop: the bag pages");
+	Emit("drop_bag_pages", RL, Now);
+	Click(940.0f, 737.0f);
+	Away();
+	// The cell's own name run (the eat note still up says "Ate the Ridgeline trail mix..." too).
+	Expect(RL.DropBagPageShown() == 1 && Drew(Last, "2 / 2") && DrewRun(Last, "Ridgeline"), "Penny Drop: the next page of the bag");
+}
+
+/**
  * Rent past the first month: due again, the final notice, evicted (the Bank's way back, the lobby, Kast locked
  * with the rig in storage, the couch in the sleep menu), and moving back in from the Bank's button.
  */
@@ -1324,6 +1514,20 @@ void RentScreens()
 	RL.OpenApp(App::Bank, Now);
 	Now = Run(S, RL, Now, 1.0);
 	Emit("rent_evicted", RL, Now);
+	{
+		// The money card splits food from the bills, and no button reads "Short $0.00".
+		ss::ui::DrawList Lb;
+		ss::ui::Canvas Cb(Lb, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		RL.Draw(Cb, Now);
+		Expect(Drew(Lb, "Food & deliveries") && Drew(Lb, "Money in, money out") && !Drew(Lb, "Short $0.00"), "rent screens: the Bank's money card");
+		Expect(Drew(Lb, "Pay the unit ahead"), "rent screens: the storage unit can be paid ahead from the Bank");
+	}
+	// A month ahead on the storage unit, from the Bank's card.
+	const double UnitDue = S.Life.StorageDue;
+	const ss::Chips BeforeUnit = S.BankrollCents;
+	Click(820.0f, 337.0f);
+	Expect(UnitDue > 0.0 && S.Life.StorageDue == UnitDue + ss::life::StorageDays * Day && S.BankrollCents == BeforeUnit - ss::life::StorageCents,
+		"rent screens: paying the storage unit ahead");
 	RL.OpenApp(App::Kast, Now);
 	Now = Run(S, RL, Now, 1.0);
 	Emit("rent_kast_storage", RL, Now);
@@ -1598,6 +1802,53 @@ void StreamScreens()
 	Expect(Owed == 0 || (S.Life.Ledger.front().Kind == 6 && S.Life.Ledger.front().Amount == Owed), "the payout is in the ledger");
 	RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
 	Emit("kast_summary", RL, Now + 1.5);
+}
+
+/** The creator's input fixes: the key that opens it types nothing, names are tidied, R/Y and undo, BEGIN over a career asks. */
+void CreatorInputFixes()
+{
+	using Page = ss::ui::FrontEnd::Page;
+	using Step = ss::ui::FrontEnd::CreatorStage;
+	MenuHooks H;
+	ss::ui::FrontEnd Fe(H);
+	double Now = 0.0;
+	Fe.Open(Page::Main, Now);
+	Fe.Key("Space", Now); // NEW GAME (no save); Unreal sends the space as a character too
+	Fe.Char(' ', Now);
+	Expect(Fe.Current() == Page::NewGame && Fe.Draft.FirstName.back() != ' ', "Space opening the creator types nothing into the first name");
+	Fe.Char(' ', Now);
+	Fe.Char(' ', Now);
+	const std::string Typed = Fe.Draft.FirstName;
+	Fe.Key("Enter", Now);
+	Expect(Fe.CreatorStep() == Step::Background && Fe.Draft.FirstName + " " == Typed, "a trailing space is tidied at NEXT, never doubled");
+	Fe.Key("Escape", Now);
+	Fe.Key("Up", Now);
+	Fe.Draft.Country = "ES";
+	Fe.Key("Down", Now);
+	Expect(Fe.Draft.Country == "ES", "Down on the grid's last row stays put");
+	const ss::hero::Character Before = Fe.Draft;
+	Fe.Key("Reset", Now + 0.5);
+	Fe.Key("Undo", Now);
+	Expect(Fe.Draft.FullName() == Before.FullName() && Fe.Draft.Appearance == Before.Appearance, "randomize undoes");
+	Fe.Key("Escape", Now);
+	Fe.Key("Enter", Now);
+	Expect(Fe.Draft.FullName() == Before.FullName(), "backing out keeps the draft");
+	Fe.Key("Enter", Now);
+	Fe.Key("Enter", Now);
+	Fe.Key("Enter", Now);
+	const ss::hero::Character AtReview = Fe.Draft;
+	Fe.Key("R", Now);
+	Fe.Key("Reset", Now);
+	Expect(Fe.CreatorStep() == Step::Review && Fe.Draft.FullName() == AtReview.FullName() && Fe.Draft.Appearance == AtReview.Appearance, "R and Y on the review don't reroll");
+	Fe.Info.HasSave = true;
+	Fe.Key("Enter", Now);
+	Expect(H.NewGameName.empty() && Fe.IsOpen(), "BEGIN over a saved career asks first");
+	Fe.Key("Enter", Now);
+	Expect(H.NewGameName.empty() && Fe.Current() == Page::NewGame, "CANCEL is the default");
+	Fe.Key("Enter", Now);
+	Fe.Key("Left", Now);
+	Fe.Key("Enter", Now);
+	Expect(!H.NewGameName.empty() && !Fe.IsOpen(), "START OVER begins the new career");
 }
 } // namespace ui_test
 
@@ -2168,9 +2419,14 @@ void StreetProps()
 	Place(500.0f, 460.0f, 0.5f, P::StreetSignW, P::StreetSignH, [&] { P::StreetSign(C, "MARKET ST", "200"); });
 	Place(500.0f, 580.0f, 0.75f, P::BuildingNumberW, P::BuildingNumberH, [&] { P::BuildingNumber(C, "1812"); });
 	Place(48.0f, 540.0f, 0.75f, P::DoorDecalW, P::DoorDecalH, [&] { P::DoorDecal(C); });
-	Place(1060.0f, 120.0f, 0.5f, P::PromoW, P::PromoH, [&] { P::Promo(C, "volt-rush", "2 FOR $5"); });
+	Place(1060.0f, 120.0f, 0.5f, P::PromoW, P::PromoH, [&] { P::Promo(C, "volt-rush"); });
 	Place(1330.0f, 120.0f, 0.42f, P::PromoW, P::PromoH, [&] { P::Promo(C, "roller-dog", "$1.99"); });
 	Place(1330.0f, 520.0f, 0.42f, P::PromoW, P::PromoH, [&] { P::Promo(C, "night-owl-brew", "NEW"); });
+	Place(500.0f, 700.0f, 0.3f, P::MenuBoardW, P::MenuBoardH, [&] { P::MenuBoard(C); });
+	// The window prints what the register rings up: the shelf price, and the board's prices are the catalog's.
+	const ss::store::Item* Volt = ss::store::Find("volt-rush");
+	const ss::store::Item* Dog = ss::store::Find("roller-dog");
+	Expect(Volt && Dog && Drew(L, ss::Money(Volt->PriceCents)) && Drew(L, ss::Money(Dog->PriceCents)) && Drew(L, "POWER PICK"), "street props: the poster and the menu board show real prices");
 	SaveSheet("street_props", L);
 }
 
@@ -2244,6 +2500,13 @@ void StoreScreens()
 		Hud.Clock = "2:41 AM";
 		Hud.BankrollCents = 1864;
 		Hud.Life = &S.Life;
+		// A Penny Drop order on its way: the HUD counts down to it.
+		ss::life::State::Delivery Order;
+		Order.Lines = {{"bean-burrito", 1}, {"cascade", 2}};
+		Order.PlacedAt = S.WorldMinutes();
+		Order.ArriveAt = S.WorldMinutes() + 12.5;
+		S.Life.Deliveries.push_back(Order);
+		Hud.World = S.WorldMinutes();
 		Hud.Prompt = "Go into the Lucky Penny";
 		Hud.Toasts.push_back({"Mom", "are you eating? you never answer when I ask if you're eating", 99.0});
 		Hud.Toasts.push_back({"Dee", "Tuesday game's on. Bring cash, not excuses.", 100.5});
@@ -2274,6 +2537,115 @@ void StoreScreens()
 		C.Text(All[I].Name, X, Y + 128.0f, ss::ui::Ts(16.0f, 800, ss::ui::Hex(0xffffff), ss::ui::Align::Center));
 	}
 	SaveSheet("store_products", L);
+}
+
+/**
+ * The counter's edges: the button that opened it still held (its repeats do nothing for a moment), putting one back
+ * with the key and the mouse, nine of a kind, a 4:3 screen with a bag too full for its chips, and a chip eaten to the
+ * last holding its place under the pointer.
+ */
+void CounterDetails()
+{
+	struct NoHooks : ss::SessionHooks
+	{
+	};
+	NoHooks H;
+	ss::Session S(H, "store-ui-details");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 5000;
+	S.Life.Hunger = 60.0;
+	S.Life.Thirst = 60.0;
+	ss::ui::StoreCounter Counter(S);
+	TableMeasurer M;
+	ss::ui::DrawList Last;
+	double Now = 10.0;
+	auto Frame = [&](float Width, float X, float Y, bool Pressed, bool Released) {
+		Counter.Ptr.Active = X >= 0.0f;
+		Counter.Ptr.X = X;
+		Counter.Ptr.Y = Y;
+		Counter.Ptr.Down = Pressed;
+		Counter.Ptr.Pressed = Pressed;
+		Counter.Ptr.Released = Released;
+		Last.Clear();
+		ss::ui::Canvas C(Last, M, Width, ss::ui::StoreCounter::Height, 1.0f);
+		Counter.Draw(C, Now);
+		Now += 0.05;
+	};
+	auto Click = [&](float Width, float X, float Y) {
+		Frame(Width, X, Y, true, false);
+		Frame(Width, X, Y, false, true);
+	};
+	Counter.Open(Now);
+	// E (or the pad's A) opened it and is still down: its repeats land in the grace window and do nothing.
+	Counter.Key("Enter", Now + 0.05);
+	Counter.Key("E", Now + 0.1);
+	Counter.Key("Right", Now + 0.15);
+	Expect(Counter.Basket.Empty() && Counter.Shelf() == 0 && Counter.Selected() == 0, "the counter ignores the opening button's repeats");
+	Now += 1.0;
+	Counter.Key("Enter", Now);
+	Counter.Key("PutBack", Now);
+	Expect(Counter.Basket.Empty(), "the pad's X puts it back");
+	for (int K = 0; K < 10; ++K)
+	{
+		Counter.Key("Enter", Now);
+	}
+	Expect(Counter.Basket.Count() == 9, "nine of a kind at the counter");
+	// The mouse's put-back: the minus beside the receipt's first line (it shows while the pointer is on that line).
+	const float Rx = 1920.0f - 96.0f - 440.0f;
+	Frame(1920.0f, Rx - 22.0f, 223.0f, false, false);
+	Click(1920.0f, Rx - 22.0f, 223.0f);
+	Expect(Counter.Basket.Count() == 8, "the receipt's minus puts one back");
+	Counter.Key("Escape", Now);
+	Counter.TakeLeave();
+
+	// A 4:3 screen and a bag with one of everything: the chips that fit, and a last chip that pages through the rest.
+	S.Life.Pantry.clear();
+	for (const ss::store::Item& I : ss::store::Catalog())
+	{
+		S.Life.Pantry[I.Id] = 1;
+	}
+	Counter.Open(Now);
+	Now += 1.0;
+	Frame(1440.0f, -1.0f, -1.0f, false, false);
+	const int Kinds = static_cast<int>(ss::store::Catalog().size());
+	Expect(DrewRun(Last, "+" + std::to_string(Kinds - 5)), "a 4:3 bag shows five chips and counts the rest");
+	WriteList("store_counter_narrow", Last);
+	std::printf("  %-22s %6zu vertices %4zu commands\n", "store_counter_narrow", Last.Vertices.size(), Last.Cmds.size());
+	// The page chip: the sixth slot (third across, second row). Five more, then the last four and the way back.
+	auto PageChip = [&](int Slot) {
+		Click(1440.0f, 516.0f + static_cast<float>(Slot % 3) * 114.0f + 52.0f, 802.0f + static_cast<float>(Slot / 3) * 98.0f + 44.0f);
+		Frame(1440.0f, -1.0f, -1.0f, false, false);
+	};
+	PageChip(5);
+	Expect(Counter.BagPage() == 5, "the bag's page chip turns the page");
+	PageChip(5);
+	Expect(Counter.BagPage() == 10 && Kinds - 10 <= 5 && DrewRun(Last, "BACK"), "the bag's last page offers the way back");
+	PageChip(Kinds - 10);
+	Expect(Counter.BagPage() == 0 && DrewRun(Last, "+" + std::to_string(Kinds - 5)), "and back to the first page");
+	// The wheel over the bag turns its pages too (positive: down, the next page).
+	Counter.Ptr.Wheel = 100.0f;
+	Frame(1440.0f, 600.0f, 846.0f, false, false);
+	Frame(1440.0f, -1.0f, -1.0f, false, false);
+	Expect(Counter.BagPage() == 5, "the wheel turns the bag's page");
+	Counter.Ptr.Wheel = -100.0f;
+	Frame(1440.0f, 600.0f, 846.0f, false, false);
+	Expect(Counter.BagPage() == 0, "and the wheel turns it back");
+	Counter.Key("Escape", Now);
+	Counter.TakeLeave();
+
+	// A chip eaten to the last keeps its place while the pointer is over the bag.
+	S.Life.Pantry.clear();
+	S.Life.Pantry["cascade"] = 1;
+	S.Life.Pantry["fizz-cola"] = 1;
+	Counter.Open(Now);
+	Now += 1.0;
+	const float Chip0X = 96.0f + 520.0f + 60.0f + 52.0f;
+	Frame(1920.0f, Chip0X, 846.0f, false, false);
+	Click(1920.0f, Chip0X, 846.0f);
+	Frame(1920.0f, Chip0X, 846.0f, false, false);
+	Expect(S.Life.Pantry.count("cascade") == 0 && Counter.BagShown().size() == 2 && Counter.BagShown()[0] == "cascade", "the counter's bag holds an eaten chip's place");
+	Frame(1920.0f, -1.0f, -1.0f, false, false);
+	Expect(Counter.BagShown().size() == 1 && Counter.BagShown()[0] == "fizz-cola", "the counter's bag closes up after");
 }
 
 /** The character creator's portraits: a cast that covers every hairstyle, face, outfit, hat and pair of glasses. */
@@ -2457,15 +2829,18 @@ int main(int Argc, char** Argv)
 	ui_test::TrophyGallery();
 	ui_test::PortraitGallery();
 	ui_test::StoreScreens();
+	ui_test::CounterDetails();
 	ui_test::StreetProps();
 	ui_test::MultiScreens();
 	ui_test::StreamGallery();
 	ui_test::StreamScreens();
 	ui_test::PennyDropScreens();
+	ui_test::PennyDropDetails();
 	ui_test::RentScreens();
 	ui_test::LedScreens();
 	ui_test::FrontEndFlows();
 	ui_test::FrontEndScreens();
+	ui_test::CreatorInputFixes();
 	if (ui_test::Failures == 0)
 	{
 		std::printf("ui tests: all passed\n");

@@ -4,6 +4,10 @@
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/UI/Ui.h"
 
+#include <map>
+#include <string>
+#include <vector>
+
 namespace ss
 {
 namespace ui
@@ -103,6 +107,9 @@ public:
 	/** Penny Drop: the shelf showing, and the cart (for scripts and tests). */
 	void ShowDropShelf(int Shelf) { DropShelf = Shelf; }
 	const store::Basket& DropBasket() const { return DropCart; }
+	/** Penny Drop's bag at home: its cells in order as last drawn (one used up keeps its cell while the pointer is over the bag), and the page. */
+	const std::vector<std::string>& DropBagCells() const { return DropBag; }
+	int DropBagPageShown() const { return DropBagPage; }
 	/** The LED kit's controls (Prism): colours, power, sync with the stream. Opens over GearDrop or Kast. */
 	void ShowRoomLights(bool On, double Now = 0.0) { LightsShown = On; LightsAt = Now; }
 	bool RoomLightsShown() const { return LightsShown; }
@@ -233,11 +240,34 @@ private:
 	void KastApp(double Now);
 	// Penny Drop (RiverLineDrop.cpp).
 	void PennyDropApp(double Now);
+	void DropCartList(const Rect& R, double Now);
+	void DropTracker(const Rect& R, double Now);
+	/** The bag at home, in the At home card (R); returns the id of the item under the pointer ("" for none). */
+	std::string DropBagGrid(const Rect& R, double Now);
+	void DropSay(const std::string& Words, bool Bad, bool Home, double Now);
 	store::Basket DropCart;
+	store::Basket DropLast; // the last order placed (this session): "Same as last time" refills the cart with it
 	int DropShelf = 0;
 	std::string DropNote;
 	bool DropNoteBad = false;
+	bool DropNoteHome = false; // about the bag or the tap (the At home card), not an order
 	double DropNoteAt = -100.0;
+	int DropCartScroll = 0;        // the first cart line showing
+	std::string DropCartFlash;     // the line just added or taken out (it lights up)
+	double DropCartFlashAt = -100.0;
+	/**
+	 * The bag's cells (item ids), in a stable order: something used up keeps its cell, empty, while the pointer is over the
+	 * bag, so the next click lands where it was aimed; the bag closes up once the pointer leaves it.
+	 */
+	std::vector<std::string> DropBag;
+	std::map<std::string, float> DropBagSlide; // where each cell is drawn (eases to its slot as the bag closes up)
+	int DropBagPage = 0;
+	double DropBagPageAt = -100.0;
+	std::map<std::string, int> DropBagSeen;      // the bag as last drawn, to see what arrived
+	std::map<std::string, double> DropBagNewAt; // when something arrived in the bag (it wears a NEW tag for a while)
+	bool DropBagKnown = false;
+	size_t DropOrdersSeen = 0;
+	double DropArrivedAt = -100.0;
 	void KastHeader(double Now);
 	void KastStudio(double Now);
 	void KastCommunity(double Now);

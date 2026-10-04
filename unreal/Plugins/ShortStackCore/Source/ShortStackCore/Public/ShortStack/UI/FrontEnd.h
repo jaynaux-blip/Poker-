@@ -58,6 +58,13 @@ struct FrontEndInfo
 	/** Pause menu: label and value pairs about the session in progress. */
 	std::vector<std::pair<std::string, std::string>> Status;
 	bool InTournament = false;
+	/** The session's clock on the network's calendar (world minutes): 2:07 AM, Tuesday, October 6, for a new career. */
+	double World = 1440.0 + 127.0;
+	/** The rent as it stands (the CONTINUE card says what's owed and by when), and the storage unit's renewal (0: none). */
+	life::Rent RentStage = life::Rent::Due;
+	Chips RentDueCents = 122500;
+	double RentDeadline = 5.0 * 1440.0;
+	double StorageDue = 0.0;
 	/** Display resolutions the host supports, as "2560 x 1440", largest first. */
 	std::vector<std::string> Resolutions;
 	std::string Version = "v0.2";
@@ -65,6 +72,15 @@ struct FrontEndInfo
 
 /** Fills FrontEndInfo from the session (career from the save, status from the tournament in progress). */
 SHORTSTACKCORE_API FrontEndInfo DescribeSession(const Session& S, bool HasSave);
+
+/** Where play is going on when the game pauses: the pause menu's heading and its quit copy follow it. */
+enum class Venue : int
+{
+	Home,     // the rented room, at the desk (Dee's place while the locks are changed)
+	Street,   // out on Fifth: the sidewalk and the Lucky Penny
+	BackRoom, // Dee's game behind the laundromat
+	CardRoom, // the Embercrest's tournament floor
+};
 
 /** How the front end reaches the game. */
 class FrontEndHooks
@@ -88,8 +104,9 @@ public:
  * height is 1080 logical units and whose width follows the viewport's aspect
  * ratio. Input is the pointer (in logical units) plus key names:
  * "Up", "Down", "Left", "Right", "Enter", "Space", "Escape", "Backspace",
- * "Tab", "Q", "E", "R", "TabPrev", "TabNext", "Reset", and "Any" for
- * any other key. Printable characters arrive through Char.
+ * "Tab", "Q", "E", "R", "TabPrev", "TabNext", "Reset", "PutBack" (the
+ * gamepad's X), "Undo" (Ctrl+Z), and "Any" for any other key. Printable
+ * characters arrive through Char, after the key that typed them.
  */
 class FrontEnd
 {
@@ -120,6 +137,17 @@ public:
 	std::string ScreenName = "grinder_3c";
 	/** The person the character creator is making (New Game). */
 	hero::Character Draft;
+	/**
+	 * Mixed into the creator's dice, so the faces it offers differ from one launch to the next (the host sets it once,
+	 * from the wall clock, when it makes the menu). The moment the creator opens is in the mix too.
+	 */
+	std::string CreatorSalt;
+	/**
+	 * Where play is going on: the host sets it as its level starts (Home by default). The pause menu's heading names it
+	 * ("FIFTH STREET \xC2\xB7 TUE \xC2\xB7 2:16 AM", or Label when given) and the quit copy follows it.
+	 */
+	SHORTSTACKCORE_API void SetVenue(Venue Place, const std::string& Label = std::string());
+	Venue CurrentVenue() const { return Where; }
 	/** The creator's steps, in order. */
 	enum class CreatorStage : int
 	{
@@ -142,7 +170,7 @@ public:
 	bool IsPaused() const { return Cur != Page::Hidden && InGame; }
 	/** The title flow frames the room with the establishing shot instead of the seat. */
 	bool WantsEstablishingShot() const { return Cur != Page::Hidden && !InGame; }
-	/** 0..1: how strongly the host should blur the scene behind the menu (the pause menu). */
+	/** 0..1: how strongly the host should blur the scene behind the menu (the pause menu; softly, behind the creator). */
 	SHORTSTACKCORE_API float Backdrop(double Now) const;
 
 	SHORTSTACKCORE_API void Key(const std::string& Name, double Now);
@@ -175,8 +203,11 @@ private:
 		None,
 		QuitGame,
 		QuitToMenu,
+		Overwrite, // BEGIN with a career saved: start over?
 	};
 
+	void HandleKey(const std::string& Name, double Now);
+	void Confirmed(Modal Which, double Now);
 	void Go(Page Target, double Now);
 	std::vector<MenuItem> Items() const;
 	void Activate(int Index, double Now);
@@ -184,6 +215,7 @@ private:
 	std::vector<SettingRow> Rows(int ForTab);
 	void ChangeSetting(int RowIndex, int Delta, bool Wrap);
 	void BeginNewGame(double Now);
+	void StartCareer(double Now);
 	bool NameValid() const;
 
 	// The character creator (FrontEndCreator.cpp): New Game's four steps around a live portrait.
@@ -194,8 +226,14 @@ private:
 	void CreatorKey(const std::string& Name, double Now);
 	void CreatorChar(uint32_t Codepoint, double Now);
 	void CreatorRandomize(bool LookOnly, double Now);
+	void PushUndo();
+	bool CreatorCanUndo() const;
+	void CreatorUndo(double Now);
 	void CreatorChange(int Delta, bool Wrap);
+	void CreatorSuggest(int Delta);
 	void CreatorRefuse(const std::string& Why, double Now);
+	void CreatorTouched() { DraftTouched = true; }
+	void TidyNames();
 	std::string CreatorProblem() const;
 	std::string* FocusedText();
 	int CreatorRows() const;
@@ -216,7 +254,13 @@ private:
 	void MenuList(const std::vector<MenuItem>& List, float X, float Y, double Now);
 	void ContextCard(float X, float Y, float CardW, double Now);
 	float ContextBody(float X, float Y, float CardW);
-	void Hints(const std::vector<std::pair<std::string, std::string>>& Pairs);
+	std::string VenueLabel() const;
+	/** The pause menu's quit cards and dialog: what leaving looks like from here, and what's kept. */
+	std::string LeaveTitle(bool ToMenu) const;
+	std::string SavedLine() const;
+	/** The control hints along the bottom; returns where they end. HintsWidth measures without drawing. */
+	float Hints(const std::vector<std::pair<std::string, std::string>>& Pairs);
+	float HintsWidth(const std::vector<std::pair<std::string, std::string>>& Pairs) const;
 	void Footer();
 	void AttractPage(double Now);
 	void MainPage(double Now);
@@ -262,6 +306,24 @@ private:
 	double RefusalAt = -10.0;
 	int Creations = 0;
 	int Rolls = 0;
+	/** The player changed the draft: backing out to the menu and in again keeps it (a fresh face otherwise). */
+	bool DraftTouched = false;
+	/** Drafts before each randomize (and a typed name a suggestion replaced), newest last: undo. */
+	std::vector<hero::Character> Undo;
+	/**
+	 * The draft as the last roll, suggestion or undo left it. Undo only takes a roll back while the draft still matches
+	 * it: once the player has changed something by hand, one key mustn't wipe that work along with the roll.
+	 */
+	hero::Character Rolled;
+	double UndoAt = -10.0;
+	/** The portrait's rim light eases from the last background's color to the new one. */
+	Color RimFrom = Hex(0x27d3c3);
+	Color RimTo = Hex(0x27d3c3);
+	double RimAt = -10.0;
+	/** The key just handled opened a page: the character it types (a space on NEW GAME) mustn't land there. */
+	bool SwallowChar = false;
+	Venue Where = Venue::Home;
+	std::string WhereLabel;
 	double CreditsOffset = 0.0;
 	double CreditsManualAt = -10.0;
 

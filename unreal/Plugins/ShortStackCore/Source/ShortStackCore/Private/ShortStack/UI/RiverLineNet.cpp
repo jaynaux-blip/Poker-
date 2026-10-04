@@ -757,7 +757,8 @@ void RiverLine::Schedule(const Rect& R, const std::vector<ListRow>& Rows, double
 	const float MaxScroll = std::max(0.0f, Content - Area.H + 6.0f);
 	if (UI.Hover(Area) && UI.Ptr.Wheel != 0.0f)
 	{
-		ListScrollGoal -= UI.Ptr.Wheel * Pitch * 1.5f;
+		// The hosts send the wheel as the web does (positive: down, about 100 a notch): a row and a half a notch.
+		ListScrollGoal += (UI.Ptr.Wheel > 0.0f ? 1.0f : -1.0f) * Pitch * 1.5f;
 	}
 	Listed.clear();
 	int SelectedIndex = -1;
@@ -2071,7 +2072,8 @@ void RiverLine::BoardTable(const Rect& R, const std::vector<net::BoardRow>& Rows
 	const float MaxScroll = std::max(0.0f, Content - Area.H);
 	if (UI.Hover(Area) && UI.Ptr.Wheel != 0.0f)
 	{
-		BoardScrollGoal -= UI.Ptr.Wheel * Pitch * 1.5f;
+		// Positive is down (the hosts send the wheel as the web does): a row and a half a notch.
+		BoardScrollGoal += (UI.Ptr.Wheel > 0.0f ? 1.0f : -1.0f) * Pitch * 1.5f;
 	}
 	BoardScrollGoal = std::min(std::max(BoardScrollGoal, 0.0f), MaxScroll);
 	BoardScroll += (BoardScrollGoal - BoardScroll) * NetFollow(Dt, 14.0);

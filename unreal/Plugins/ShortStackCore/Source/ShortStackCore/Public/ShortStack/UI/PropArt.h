@@ -2,6 +2,9 @@
 
 #include "ShortStack/UI/Canvas.h"
 
+#include <string>
+#include <vector>
+
 namespace ss
 {
 namespace ui
@@ -47,6 +50,9 @@ constexpr float DoorDecalW = 400.0f;
 constexpr float DoorDecalH = 520.0f;
 constexpr float PromoW = 600.0f;
 constexpr float PromoH = 900.0f;
+/** The board behind the counter (a 440 x 180 cm quad): the grill and the coffee bar with their prices, and the lotto. */
+constexpr float MenuBoardW = 1760.0f;
+constexpr float MenuBoardH = 720.0f;
 /** The backlit box sign over the store's windows. */
 SHORTSTACKCORE_API void StoreSign(Canvas& C);
 /** A neon OPEN in the window (transparent background, tint brighter than white for bloom). */
@@ -57,8 +63,13 @@ SHORTSTACKCORE_API void StreetSign(Canvas& C, const std::string& Name, const std
 SHORTSTACKCORE_API void BuildingNumber(Canvas& C, const std::string& Number);
 /** The hours sticker on the store's door. */
 SHORTSTACKCORE_API void DoorDecal(Canvas& C);
-/** A window poster for one of the store's products ("2 for $5"). */
-SHORTSTACKCORE_API void Promo(Canvas& C, const std::string& ItemId, const std::string& Deal);
+/**
+ * A window poster for one of the store's products. Deal is the headline ("NEW"); empty prints the shelf price from
+ * the catalog, so the window never promises what the register won't ring up.
+ */
+SHORTSTACKCORE_API void Promo(Canvas& C, const std::string& ItemId, const std::string& Deal = std::string());
+/** The menu board behind the counter (MenuBoardW x MenuBoardH): the hot food and the coffee bar at the catalog's prices, and the lotto. */
+SHORTSTACKCORE_API void MenuBoard(Canvas& C);
 } // namespace props
 } // namespace ui
 } // namespace ss

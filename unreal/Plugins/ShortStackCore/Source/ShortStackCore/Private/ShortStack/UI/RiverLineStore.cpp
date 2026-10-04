@@ -103,7 +103,7 @@ void RiverLine::GearDropApp(double Now)
 	C->StrokeEllipse(Search.X + 24.0f, Search.Y + 18.0f, 7.0f, 7.0f, StoreGray, 2.0f);
 	C->StrokePolyline({{Search.X + 29.0f, Search.Y + 23.0f}, {Search.X + 34.0f, Search.Y + 28.0f}}, false, StoreGray, 2.0f, true);
 	UI.Text("Search monitors, mics, lights, chairs\xE2\x80\xA6", Search.X + 44.0f, Search.Y + 26.0f, Ts(15.0f, 500, Hex(0x9ca3af)));
-	UI.Text("Deliver to " + S.HeroName + " \xC2\xB7 Apt 4B", NetW - 30.0f, 32.0f, Ts(13.0f, 600, Hex(0xffe4d6), Align::Right));
+	UI.Text("Deliver to " + S.HeroName + " \xC2\xB7 " + S.DeliveryAddress(), NetW - 30.0f, 32.0f, Ts(13.0f, 600, Hex(0xffe4d6), Align::Right));
 	UI.Text("Bank " + Money(S.BankrollCents), NetW - 30.0f, 56.0f, Ts(18.0f, 900, Hex(0xffffff), Align::Right, Baseline::Alphabetic, true));
 
 	// Categories.
@@ -155,7 +155,8 @@ void RiverLine::GearDropApp(double Now)
 	const float MaxScroll = std::max(0.0f, Content - Area.H);
 	if (UI.Hover(Area) && UI.Ptr.Wheel != 0.0f && OrderId.empty())
 	{
-		StoreScrollGoal -= UI.Ptr.Wheel * 120.0f;
+		// The hosts send the wheel as the web does (positive: down, about 100 a notch): one step a notch.
+		StoreScrollGoal += (UI.Ptr.Wheel > 0.0f ? 1.0f : -1.0f) * 120.0f;
 	}
 	StoreScrollGoal = std::max(0.0f, std::min(MaxScroll, StoreScrollGoal));
 	StoreScroll += (StoreScrollGoal - StoreScroll) * NetFollow(Dt, 14.0);
@@ -214,7 +215,7 @@ void RiverLine::StoreCard(const gear::Item& I, const Rect& R0, double Now, int I
 {
 	const bool Owned = S.Owns(I.Id);
 	const std::string Why = S.CanBuy(I.Id);
-	const bool Leds = I.Id == gear::LedKitId && Owned; // the LED kit, owned: the card opens its controls
+	const bool Leds = I.Id == gear::LedKitId && Owned && !S.Evicted(); // the LED kit, owned (and not in storage): the card opens its controls
 	const Ui::ClickState Card = UI.Clickable("storecard" + I.Id, R0, OrderId.empty());
 	const float Lift = Card.Hover && OrderId.empty() ? 4.0f : 0.0f;
 	const Rect R{R0.X, R0.Y - Lift, R0.W, R0.H};
@@ -314,12 +315,14 @@ void RiverLine::SetupPanel(const Rect& R, double Now)
 	{
 		Count += gear::Find(G.first) ? 1 : 0;
 	}
-	UI.Text(Count == 0 ? std::string("Just the laptop") : std::to_string(Count) + (Count == 1 ? " item" : " items"), R.X + R.W - 24.0f, R.Y + 40.0f, Ts(13.0f, 700, StoreGray, Align::Right));
-	const bool HasLeds = S.Owns(gear::LedKitId);
+	const std::string Held = Count == 0 ? std::string("Just the laptop") : std::to_string(Count) + (Count == 1 ? " item" : " items");
+	UI.Text(S.Evicted() && Count > 0 ? std::string("In storage") : Held, R.X + R.W - 24.0f, R.Y + 40.0f, Ts(13.0f, 700, StoreGray, Align::Right));
+	// Locked out, the rig is in a unit on Ninth: the picture is the laptop alone, lights off.
+	const bool HasLeds = S.Owns(gear::LedKitId) && !S.Evicted();
 	const gear::Glow Glow = S.RoomGlow(Now);
 	const Rect Pic{R.X + 16.0f, R.Y + 58.0f, R.W - 32.0f, HasLeds ? 214.0f : 250.0f};
 	C->PushClip(Pic);
-	streamart::Desk(*C, Pic, S.Gear, S.Streaming(), Now, Glow);
+	streamart::Desk(*C, Pic, S.Evicted() ? gear::Owned() : S.Gear, S.Streaming(), Now, Glow);
 	C->PopClip();
 	C->StrokeRoundRect(Pic, 2.0f, StoreLine, 1.0f);
 	float Top = Pic.Y + Pic.H;
@@ -508,7 +511,7 @@ void RiverLine::OrderCard(double Now)
 }
 void RiverLine::RoomLightsCard(double Now)
 {
-	if (!S.Owns(gear::LedKitId))
+	if (!S.Owns(gear::LedKitId) || S.Evicted())
 	{
 		LightsShown = false;
 		return;

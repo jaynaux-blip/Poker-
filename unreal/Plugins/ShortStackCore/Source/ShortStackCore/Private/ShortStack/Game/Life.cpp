@@ -52,7 +52,7 @@ std::vector<Activity> Build()
 	};
 	// ShiftLink: the gig app. Minimum wage, steady, exhausting.
 	Add("quikstop", Kind::Job, "Night cashier", "Lucky Penny #212", 6.0, 7.25, 0.0, 6.0, 30.0, 0.0, 0.0, 21 * 60, 3 * 60, 0xff7a1a,
-		"Graveyard shift at the gas station on Fifth. Scratch tickets, energy drinks, the occasional weirdo.");
+		"Graveyard shift behind the counter at the corner store on Fifth. Scratch tickets, energy drinks, the occasional weirdo.");
 	Add("washfold", Kind::Job, "Attendant", "Wash & Fold", 6.0, 8.00, 0.0, 4.0, 24.0, 0.0, 0.0, 6 * 60, 16 * 60, 0xff2e88,
 		"The laundromat across the street. Folding, mopping, change for the machines. Dee's regulars tip in quarters.");
 	Add("dashdrop", Kind::Job, "Delivery driver", "DashDrop", 4.0, 6.00, 12.0, 48.0, 20.0, 0.0, 0.0, 11 * 60, 23 * 60, 0xe8ff3a,

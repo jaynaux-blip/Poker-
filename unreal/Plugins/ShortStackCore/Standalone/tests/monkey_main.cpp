@@ -399,7 +399,7 @@ int main(int Argc, char** Argv)
 			}
 			{
 				const ss::gear::Glow G = S.RoomGlow(Now);
-				const bool Should = S.Owns(ss::gear::LedKitId) && S.Leds.On;
+				const bool Should = S.Owns(ss::gear::LedKitId) && S.Leds.On && !S.Evicted();
 				if (G.On != Should || G.On != S.GearFx().Leds || (G.On && (G.Level < 0.3 || G.Level > 2.0 || G.Preset != S.Leds.Preset)) || S.Leds.Preset < 0 || S.Leds.Preset >= ss::gear::LedPresetCount)
 				{
 					Fail("the room's LEDs don't match the kit and its settings", Seed, F);

@@ -26,6 +26,23 @@ inline const Color MenuShade = Hex(0x030408);
 inline const Color MenuPanel = Hex(0x080a12);
 inline const float MenuMargin = 132.0f;
 
+/**
+ * The creator's portrait card's width, and its form column's beside it (capped on ultrawide screens). On 4:3 and 5:4
+ * the card gives up some width so the form keeps room for its buttons.
+ */
+inline float CreatorCardWidth(float ViewW)
+{
+	return std::clamp(ViewW * 0.31f, 400.0f, 640.0f);
+}
+
+inline float CreatorFormWidth(float ViewW)
+{
+	return std::min(1060.0f, ViewW - MenuMargin * 2.0f - CreatorCardWidth(ViewW) - 64.0f);
+}
+
+/** A vector icon for each background, drawn in its color (FrontEndCreator.cpp). */
+void BackgroundIcon(Canvas& C, hero::Background B, float Cx, float Cy, float S, const Color& Col);
+
 /** Credits, top to bottom. "#" starts a heading, "*" the title, "~" small print, "" a gap. */
 inline const char* const CreditLines[] = {
 	"*SHORT STACK",
@@ -153,6 +170,17 @@ inline void Arrow(Canvas& Cv, float X, float Y, float Size, int Dir, const Color
 	default: P = {{X + Size, Y}, {X - Size * 0.6f, Y - Size}, {X - Size * 0.6f, Y + Size}}; break;
 	}
 	Cv.FillPolygon(P, Paint(Col));
+}
+
+/** How wide Glyph draws a key or button. */
+inline float GlyphWidth(Canvas& Cv, const std::string& Name)
+{
+	if (Name == "A" || Name == "B" || Name == "X" || Name == "Y" || Name == "DPAD")
+	{
+		return 28.0f;
+	}
+	const bool IsArrow = Name == "UP" || Name == "DOWN" || Name == "LEFT" || Name == "RIGHT";
+	return std::max(28.0f, (IsArrow ? 0.0f : Cv.Measure(Name, 13.0f, 700)) + 18.0f);
 }
 
 /** Keyboard key or gamepad button glyph with its baseline at Y. Returns the width. */

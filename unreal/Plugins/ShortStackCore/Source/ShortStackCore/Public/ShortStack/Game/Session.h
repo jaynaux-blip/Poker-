@@ -366,10 +366,29 @@ public:
 	// The Lucky Penny #212 (the corner store): pay at the counter, then eat and drink from the bag.
 	/** Pays for the basket from the bankroll and puts it in the bag; "" or why not ("Card declined."). */
 	SHORTSTACKCORE_API std::string Checkout(const store::Basket& B);
-	/** Eats or drinks one of an item in the bag; "" or why not. */
+	/** Eats or drinks one of an item in the bag; "" or why not. LastEaten says what it did. */
 	SHORTSTACKCORE_API std::string Consume(const std::string& ItemId);
-	/** What to reach for in the bag: the food when hunger is worse, the drink when thirst is (an id, or ""). */
+	/** The last thing eaten or drunk: the item, what each meter did (hunger and thirst negative: relief), and a line for a toast. */
+	struct Eaten
+	{
+		std::string ItemId;
+		double Hunger = 0.0;
+		double Thirst = 0.0;
+		double Energy = 0.0;
+		std::string Line; // "Drank the Cascade. Thirst -45, energy +2."
+	};
+	Eaten LastEaten;
+	/**
+	 * What to reach for in the bag: what does the most for the worst need without wasting much or making another
+	 * worse (an id). "" when the bag is empty, nothing is worth it now (fed, watered, awake), or all of it would hurt.
+	 */
 	SHORTSTACKCORE_API std::string BagPick() const;
+	/**
+	 * The eat key: BagPick's choice, eaten or drunk (LastEaten.Line for the toast). "" or why not, in a line for the toast:
+	 * an empty bag, "You're not hungry or thirsty." (or just tired), "Nothing in here for that thirst.", "Not hungry enough
+	 * for the Deli Wedge yet.", "The Hilltop chips would only make you thirstier."
+	 */
+	SHORTSTACKCORE_API std::string EatFromBag();
 	/** What the clerk says right now. */
 	SHORTSTACKCORE_API std::string ClerkSays(const store::Basket& B) const;
 	/**
@@ -377,6 +396,8 @@ public:
 	 * arrives 25 to 45 minutes later (the clock brings it, into the bag). "" or why not.
 	 */
 	SHORTSTACKCORE_API std::string PlaceOrder(const store::Basket& B);
+	/** Where Penny Drop brings an order: the apartment, or Dee's place while the locks are changed. */
+	SHORTSTACKCORE_API std::string DeliveryAddress() const;
 	/** A glass of water from the kitchen tap (at home): free, a little at a time, and never past TapFloor. "" or why not. */
 	SHORTSTACKCORE_API std::string DrinkTapWater();
 	static constexpr double TapFloor = 40.0;
@@ -441,8 +462,21 @@ public:
 	SHORTSTACKCORE_API double ClockMinutes() const;
 	/** The clock on the network's calendar (net::DayOf, net::TimeLabel). */
 	SHORTSTACKCORE_API double WorldMinutes() const;
-	/** Back from somewhere the host played out (Dee's game): calendar events since World still happen. */
-	void ResumeCalendarFrom(double World) { CalendarAt = World; }
+	/**
+	 * Back from somewhere the host played out (Dee's game, the Embercrest, the street): calendar events since World
+	 * still happen (the needs climb, the bills come due, orders arrive). Every host keeps the player's energy itself
+	 * while they're there (bEnergyKept), so the hours away aren't charged to it a second time.
+	 */
+	void ResumeCalendarFrom(double World, bool bEnergyKept = true)
+	{
+		CalendarAt = World;
+		EnergyKeptUntil = bEnergyKept ? WorldMinutes() : -1.0;
+	}
+	/**
+	 * A host away from the apartment's door (the street) sets this: Penny Drop orders that come due wait at the door
+	 * (they stay in Life.Deliveries, and are saved) for the first calendar check back home.
+	 */
+	bool DeferDeliveries = false;
 	/** The clock between tournaments: 2:07 AM at first, running in real time, and where the last tournament ended. */
 	double LobbyMinutes = 2.0 * 60.0 + 7.0;
 
@@ -458,6 +492,9 @@ public:
 		double RealSeconds = 3.0;
 		std::string Label;
 		life::Outcome Result;
+		// The bed it began in: the locks changing in the middle of a night's sleep don't make it the couch's.
+		double Rest = 1.0;
+		bool Couch = false;
 	};
 	Skip TimeSkip;
 	bool HasOutcome = false; // the result card is up
@@ -482,6 +519,8 @@ public:
 	bool Evicted() const { return Life.RentStage == life::Rent::Evicted; }
 	/** Evicted: pays the back rent and a month up front (Life.RentDueCents), gets the key and the gear back. "" or why not. */
 	SHORTSTACKCORE_API std::string MoveBackIn();
+	/** Evicted with gear in storage: pays the unit's next month ahead (no more than one month ahead). "" or why not. */
+	SHORTSTACKCORE_API std::string PayStorage();
 	/** What a night's sleep gives back, as a multiple (a better bed and dark curtains add; Dee's couch takes away). */
 	SHORTSTACKCORE_API double RestFactor() const;
 	SHORTSTACKCORE_API bool PayDebt();
@@ -706,6 +745,10 @@ private:
 	bool CheckSatellite();
 	void CheckUnlocks();
 	void CheckCalendar(double From, double To, bool Awake);
+	/** Penny Drop orders due by Until: into the bag, in the order they came, a text each. */
+	void DeliverOrders(double Until);
+	/** How much harder a bad beat lands on an empty stomach (starving or parched). */
+	double NeedsTilt() const;
 	void PayNightShift(double End);
 	void RentDeadline();
 	void SettleRent();
@@ -726,6 +769,10 @@ private:
 	int RegisterCount = 0;
 	double LastTick = -1.0;
 	double CalendarAt = -1.0;
+	/** A host that played the night out kept the energy up to here (ResumeCalendarFrom); the calendar drains it after. */
+	double EnergyKeptUntil = -1.0;
+	/** When the card last said no at the Lucky Penny's counter (world minutes, -1: it hasn't; not saved). */
+	double DeclinedAt = -1.0;
 	Rng R;
 	Rng LifeRng;
 	size_t Cursor = 0;

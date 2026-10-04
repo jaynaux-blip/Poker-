@@ -12,6 +12,7 @@
 #include "ShortStack/Game/Network.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -139,7 +140,8 @@ double OpenThreshold(Position P)
 	}
 }
 /** A save from before the casino was the Embercrest (it was the "Riverside"): its ids, names and labels renamed,
- *  line by line, except the player's own name ("name" line), which is theirs. */
+ *  line by line, except the player's own names (the screen name's "name" line, the character's "hero name" line),
+ *  which are theirs. */
 std::string Rebranded(const std::string& Text)
 {
 	static const std::pair<std::string, std::string> Names[] = {{"riverside", "embercrest"}, {"Riverside", "Embercrest"}, {"RIVERSIDE", "EMBERCREST"}};
@@ -150,7 +152,7 @@ std::string Rebranded(const std::string& Text)
 	{
 		const size_t End = Text.find('\n', Start);
 		std::string Line = Text.substr(Start, End == std::string::npos ? std::string::npos : End - Start);
-		if (Line.rfind("name\t", 0) != 0)
+		if (Line.rfind("name\t", 0) != 0 && Line.rfind("hero\tname\t", 0) != 0)
 		{
 			for (const auto& [From, To] : Names)
 			{
@@ -190,6 +192,10 @@ std::string SaveData::Serialize() const
 	for (const auto& Held : L.Pantry)
 	{
 		Out << "pantry\t" << session_detail::Escape(Held.first) << "\t" << Held.second << "\n";
+	}
+	for (const auto& Had : L.Bought)
+	{
+		Out << "bought\t" << session_detail::Escape(Had.first) << "\t" << Had.second << "\n";
 	}
 	for (const life::State::Delivery& Dv : L.Deliveries)
 	{
@@ -383,6 +389,7 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 	SaveData D;
 	D.History.clear();
 	D.TextsSeen.clear();
+	bool bSawEvicted = false;
 	while (std::getline(In, Line))
 	{
 		if (Line.rfind("world\t", 0) == 0)
@@ -447,6 +454,7 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 			}
 			else if (P[1] == "evicted" && P.size() >= 7)
 			{
+				bSawEvicted = true;
 				L.Evictions = Int(2);
 				L.EvictedAt = Num(3);
 				L.CouchCents = Cents(4);
@@ -580,10 +588,21 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 		}
 		else if (P.size() == 3 && P[0] == "pantry")
 		{
+			// Only what the shelves still sell (an item renamed in a patch would sit in the bag unseen).
 			const int Count = std::atoi(P[2].c_str());
-			if (Count > 0)
+			const std::string Id = session_detail::Unescape(P[1]);
+			if (Count > 0 && store::Find(Id))
 			{
-				D.Life.Pantry[session_detail::Unescape(P[1])] = Count;
+				D.Life.Pantry[Id] = Count;
+			}
+		}
+		else if (P.size() == 3 && P[0] == "bought")
+		{
+			const int Count = std::atoi(P[2].c_str());
+			const std::string Id = session_detail::Unescape(P[1]);
+			if (Count > 0 && store::Find(Id))
+			{
+				D.Life.Bought[Id] = Count;
 			}
 		}
 		else if (P.size() == 3 && P[0] == "ticket")
@@ -765,6 +784,24 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 			}
 			D.History.push_back(H);
 		}
+	}
+	if (D.Life.RentStage == life::Rent::Evicted && !bSawEvicted)
+	{
+		// Evicted before the locks had consequences (no "evicted" line): it happened at the grace deadline, a key now
+		// takes a month up front on top of the back rent, and the gear went into a unit (due a few days out at the
+		// soonest, so its warning still comes).
+		life::State& L = D.Life;
+		L.RentDueCents += life::MonthlyRentCents;
+		L.Evictions = std::max(1, L.Evictions);
+		L.EvictedAt = L.RentDeadline;
+		bool Stored = false;
+		for (const auto& G : D.Gear)
+		{
+			const gear::Item* I = gear::Find(G.first);
+			Stored = Stored || (I && !I->Monthly);
+		}
+		const double World = net::MinutesPerDay * static_cast<double>(net::NightOneDay) + D.ClockMinutes;
+		L.StorageDue = Stored ? std::max(L.EvictedAt + life::StorageDays * net::MinutesPerDay, World + 3.0 * net::MinutesPerDay) : 0.0;
 	}
 	Out = D;
 	return true;
@@ -1078,7 +1115,10 @@ void Session::ResetSave()
 	LobbyMinutes = 2.0 * 60.0 + 7.0;
 	Person = hero::Character();
 	Life = life::State();
+	LastEaten = Eaten();
 	CalendarAt = -1.0;
+	EnergyKeptUntil = -1.0;
+	DeclinedAt = -1.0;
 	if (Stream.Live)
 	{
 		Hooks.OnAir(false);
@@ -1132,13 +1172,16 @@ std::string Session::Checkout(const store::Basket& B)
 	const Chips Total = B.Total();
 	if (Total > BankrollCents)
 	{
+		DeclinedAt = WorldMinutes(); // Benny saw that
 		Sound(SoundId::Fold, 0.5);
 		return "Card declined.";
 	}
 	BankrollCents -= Total;
+	DeclinedAt = -1.0;
 	for (const std::pair<std::string, int>& L : B.Lines)
 	{
 		Life.Pantry[L.first] += L.second;
+		Life.Bought[L.first] += L.second;
 	}
 	Life.Record(WorldMinutes(), "Lucky Penny #212 \xC2\xB7 " + std::to_string(B.Count()) + (B.Count() == 1 ? " item" : " items"), -Total, 8);
 	Sound(SoundId::Cash, 0.6);
@@ -1158,12 +1201,21 @@ std::string Session::Consume(const std::string& ItemId)
 	{
 		Life.Pantry.erase(Have);
 	}
-	// A line cook knows how to make a meal of it.
-	const double Boost = I->Food() ? Life.Perks.MealBoost : 1.0;
-	Life.Hunger = std::clamp(Life.Hunger - I->Hunger * Boost, 0.0, 100.0);
-	Life.Thirst = std::clamp(Life.Thirst - I->Thirst, 0.0, 100.0);
-	Life.Energy = std::clamp(Life.Energy + I->Energy * Boost, 0.0, 100.0);
-	Sound(I->Food() ? SoundId::Check : SoundId::Click, 0.5);
+	// A line cook makes a meal go further, and gets more out of every bite and sip (store::ReliefOf).
+	const store::Relief Got = store::ReliefOf(*I, Life.Perks.MealBoost);
+	const double HungerWas = Life.Hunger;
+	const double ThirstWas = Life.Thirst;
+	const double EnergyWas = Life.Energy;
+	Life.Hunger = std::clamp(Life.Hunger - Got.Hunger, 0.0, 100.0);
+	Life.Thirst = std::clamp(Life.Thirst - Got.Thirst, 0.0, 100.0);
+	Life.Energy = std::clamp(Life.Energy + Got.Energy, 0.0, 100.0);
+	LastEaten = Eaten();
+	LastEaten.ItemId = I->Id;
+	LastEaten.Hunger = Life.Hunger - HungerWas;
+	LastEaten.Thirst = Life.Thirst - ThirstWas;
+	LastEaten.Energy = Life.Energy - EnergyWas;
+	LastEaten.Line = store::UsedLine(*I, LastEaten.Hunger, LastEaten.Thirst, LastEaten.Energy);
+	Sound(I->Drink() ? SoundId::Click : SoundId::Check, 0.5);
 	Save();
 	return "";
 }
@@ -1200,6 +1252,10 @@ std::string Session::PlaceOrder(const store::Basket& B)
 	Dv.ArriveAt = World + 25.0 + Spread + (Hour >= 2.0 && Hour < 6.0 ? 8.0 : 0.0);
 	Life.Deliveries.push_back(Dv);
 	++Life.Orders;
+	for (const std::pair<std::string, int>& L : B.Lines)
+	{
+		Life.Bought[L.first] += L.second; // the same store packs it
+	}
 	Life.Record(World, "Penny Drop \xC2\xB7 " + std::to_string(B.Count()) + (B.Count() == 1 ? " item" : " items"), -Total, 8);
 	Sound(SoundId::Cash, 0.6);
 	Save();
@@ -1231,9 +1287,20 @@ std::string Session::DrinkTapWater()
 
 std::string Session::BagPick() const
 {
-	const bool Hungry = Life.Hunger >= Life.Thirst;
+	// Fed, watered and awake: nothing to reach for (an accidental key press doesn't eat the best thing in the bag).
+	if (Life.Hunger < 20.0 && Life.Thirst < 20.0 && Life.Energy >= 40.0)
+	{
+		return std::string();
+	}
+	// Each need counts by how bad it is (squared: the worst one leads). Relief past empty is wasted and counts a
+	// little against (a sandwich at the first rumble is fine; at none, it's a waste); making a need worse counts double.
+	auto Weight = [](double Level) { return Level / 100.0 * (Level / 100.0); };
+	auto Worth = [](double Gain, double Room, double Need) {
+		return Gain >= 0.0 ? Need * std::min(Gain, Room) - 0.06 * std::max(0.0, Gain - Room) : 2.0 * Need * Gain;
+	};
+	const double Tired = 100.0 - Life.Energy;
 	std::string Best;
-	double BestScore = -1e9;
+	double BestScore = 0.0;
 	for (const auto& Held : Life.Pantry)
 	{
 		const store::Item* I = store::Find(Held.first);
@@ -1241,8 +1308,8 @@ std::string Session::BagPick() const
 		{
 			continue;
 		}
-		// Relief for the worse need first, the other need second, a little for energy.
-		const double Score = (Hungry ? I->Hunger * 2.0 + I->Thirst : I->Thirst * 2.0 + I->Hunger) + I->Energy * 0.5;
+		const store::Relief Rl = store::ReliefOf(*I, Life.Perks.MealBoost);
+		const double Score = Worth(Rl.Hunger, Life.Hunger, Weight(Life.Hunger)) + Worth(Rl.Thirst, Life.Thirst, Weight(Life.Thirst)) + 0.5 * Worth(Rl.Energy, Tired, Weight(Tired));
 		if (Score > BestScore)
 		{
 			BestScore = Score;
@@ -1252,9 +1319,99 @@ std::string Session::BagPick() const
 	return Best;
 }
 
+std::string Session::EatFromBag()
+{
+	bool Any = false;
+	for (const auto& Held : Life.Pantry)
+	{
+		Any = Any || (Held.second > 0 && store::Find(Held.first) != nullptr);
+	}
+	if (!Any)
+	{
+		return "Nothing in it. The Lucky Penny's on the corner.";
+	}
+	const std::string Id = BagPick();
+	if (Id.empty())
+	{
+		if (Life.Hunger < 20.0 && Life.Thirst < 20.0)
+		{
+			// Fed and watered. Tired, maybe, but nothing in the bag is worth eating for that (BagPick weighed the coffee too).
+			return Life.Energy < 40.0 ? "Not hungry, not thirsty. Just tired, and nothing in here fixes that." : "You're not hungry or thirsty.";
+		}
+		// The worse need: nothing in the bag does anything for it, or what does would mostly go to waste yet.
+		const bool Thirsty = Life.Thirst >= Life.Hunger;
+		const store::Item* Closest = nullptr;
+		store::Relief Does;
+		for (const auto& Held : Life.Pantry)
+		{
+			const store::Item* I = store::Find(Held.first);
+			if (!I || Held.second <= 0)
+			{
+				continue;
+			}
+			const store::Relief Rl = store::ReliefOf(*I, Life.Perks.MealBoost);
+			if ((Thirsty ? Rl.Thirst : Rl.Hunger) > (Closest ? (Thirsty ? Does.Thirst : Does.Hunger) : 0.0))
+			{
+				Closest = I;
+				Does = Rl;
+			}
+		}
+		if (!Closest)
+		{
+			return Thirsty ? "Nothing in here for that thirst." : "Nothing in here for that hunger.";
+		}
+		if ((Thirsty ? Does.Hunger : Does.Thirst) < 0.0)
+		{
+			// Salt and vinegar, with a dry mouth.
+			std::string Line = store::Called(*Closest) + (Thirsty ? " would only make you hungrier." : " would only make you thirstier.");
+			Line[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(Line[0])));
+			return Line;
+		}
+		return std::string(Thirsty ? "Not thirsty enough for " : "Not hungry enough for ") + store::Called(*Closest) + " yet.";
+	}
+	return Consume(Id);
+}
+
 std::string Session::ClerkSays(const store::Basket& B) const
 {
-	return store::ClerkLine(WorldMinutes(), B, Life.Shifts, Life.Hunger, Life.Energy);
+	store::ClerkContext Ctx;
+	Ctx.World = WorldMinutes();
+	Ctx.Hunger = Life.Hunger;
+	Ctx.Energy = Life.Energy;
+	// From the ledger (newest first): a night shift behind this counter this week, and the last time the player paid at it.
+	const life::Activity* Shift = life::Find("quikstop");
+	const std::string ShiftLabel = Shift ? Shift->Place + " shift" : std::string();
+	for (const life::LedgerEntry& E : Life.Ledger)
+	{
+		if (E.Kind == 1 && E.Label == ShiftLabel && E.At > Ctx.World - 7.0 * net::MinutesPerDay)
+		{
+			Ctx.OnSchedule = true;
+		}
+		if (Ctx.SinceVisit < 0.0 && E.Kind == 8 && E.Label.rfind("Lucky Penny #212", 0) == 0)
+		{
+			Ctx.SinceVisit = std::max(0.0, Ctx.World - E.At);
+		}
+	}
+	// Dee's news reaches the counter once: the first time in since the locks changed (after that, he's heard).
+	Ctx.Evicted = Evicted() && (Ctx.SinceVisit < 0.0 || Ctx.World - Ctx.SinceVisit < Life.EvictedAt);
+	// A card that said no in the last half hour, and the regular's order (bought at least three times, the most of anything).
+	Ctx.Declined = DeclinedAt >= 0.0 && Ctx.World - DeclinedAt < 30.0;
+	int Most = 2;
+	for (const auto& Had : Life.Bought)
+	{
+		const store::Item* I = store::Find(Had.first);
+		if (I && Had.second > Most)
+		{
+			Most = Had.second;
+			Ctx.Usual = I->Name;
+		}
+	}
+	return store::ClerkLine(Ctx, B);
+}
+
+std::string Session::DeliveryAddress() const
+{
+	return Evicted() ? "Dee's place" : "1812 Fifth St, Apt 3B";
 }
 
 // ------------------------------------------------------------------ story
@@ -1368,7 +1525,8 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	HasBustInfo = false;
 	RivalArrived = false;
 	Sprinting = false;
-	TimeBank = Life.Energy < 20.0 ? 15.0 : 30.0; // exhausted: slower to think
+	// Exhausted: slower to think. Starving or parched: slower still.
+	TimeBank = (Life.Energy < 20.0 ? 15.0 : 30.0) * (NeedsTilt() > 1.0 ? 0.75 : 1.0);
 	TableId = 0;
 	Moving = false;
 	CurHand.reset();
@@ -2336,12 +2494,12 @@ void Session::AfterAward()
 		}
 		if (Lost && HeroVis.HasEquity && HeroVis.Equity >= 0.6)
 		{
-			HeroTilt = Min(1.0, HeroTilt + 0.45 * Life.Perks.TiltGain);
+			HeroTilt = Min(1.0, HeroTilt + 0.45 * Life.Perks.TiltGain * NeedsTilt());
 			SystemLine("Bad beat. You were " + std::to_string(static_cast<int>(JsRound(HeroVis.Equity * 100.0))) + "% to win.");
 		}
 		else if (Lost && BigPot)
 		{
-			HeroTilt = Min(1.0, HeroTilt + 0.2 * Life.Perks.TiltGain);
+			HeroTilt = Min(1.0, HeroTilt + 0.2 * Life.Perks.TiltGain * NeedsTilt());
 		}
 		else if (!Lost)
 		{
@@ -2484,7 +2642,8 @@ void Session::EndHand()
 		CurrentBanner.Sub = Money(Hero.PrizeCents);
 		CurrentBanner.At = Now;
 		CurrentBanner.Color = session_detail::Gold;
-		StoryText("won-" + T->Spec.Id, "Dee", "You did WHAT?! Pay the rent. Then come see me. We need to talk about your future.", false);
+		const char* Then = !Evicted() ? "Pay the rent." : (BankrollCents >= Life.RentDueCents ? "Go get your key back." : "Put it toward your key.");
+		StoryText("won-" + T->Spec.Id, "Dee", std::string("You did WHAT?! ") + Then + " Then come see me. We need to talk about your future.", false);
 		return;
 	}
 	// Hourly can of energy drink.
@@ -3152,6 +3311,12 @@ double Session::Daylight() const
 	return life::Daylight(WorldMinutes());
 }
 
+double Session::NeedsTilt() const
+{
+	// Starving or parched (the meters' last word), a bad beat lands a fifth harder and the time bank is shorter.
+	return Life.Hunger >= 85.0 || Life.Thirst >= 85.0 ? 1.2 : 1.0;
+}
+
 int Session::SeatsInPlay() const
 {
 	if (!T || T->Spec.SeatValueCents <= 0)
@@ -3190,14 +3355,19 @@ std::string Session::GoToGame(const std::string& Id, Chips BuyInCents)
 	{
 		return "Pick a buy-in you can cover.";
 	}
-	// The host takes the player to the table; it settles up in the save when they come home.
+	// The host takes the player to the table (when it can: nothing changes here until then); it settles up in the save
+	// when they come home. The save is written before the host's level changes.
+	if (!Hooks.GoOut(Id, BuyInCents))
+	{
+		return "Can't get there right now.";
+	}
 	if (Stream.Live)
 	{
 		EndStream();
 	}
 	Save();
 	Sound(SoundId::Click, 0.8);
-	return Hooks.GoOut(Id, BuyInCents) ? "" : "Can't get there right now.";
+	return "";
 }
 
 std::string Session::GoToLive(const std::string& OccurrenceId)
@@ -3243,6 +3413,12 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 	if (!Why.empty())
 	{
 		return Why;
+	}
+	// Everything checks out. The host takes the player there, and only then is anything paid: a host that can't go
+	// right now (already on its way out) costs nothing. The save below is written before its level changes.
+	if (!Hooks.GoOut(O.Id, O.T->BuyInCents))
+	{
+		return "Can't get there right now.";
 	}
 	if (!Already)
 	{
@@ -3343,7 +3519,7 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 	}
 	Save();
 	Sound(SoundId::Click, 0.8);
-	return Hooks.GoOut(O.Id, O.T->BuyInCents) ? "" : "Can't get there right now.";
+	return "";
 }
 
 std::string Session::LiveInProgress() const
@@ -3367,12 +3543,17 @@ std::string Session::ResumeLive()
 	{
 		return "Nothing to go back to.";
 	}
+	// As with GoToLive: the host first (a trip that can't happen right now doesn't end the stream), then the stream.
+	const live::Occurrence O = live::FindOccurrence(Id);
+	if (!Hooks.GoOut(Id, O.T->BuyInCents))
+	{
+		return "Can't get there right now.";
+	}
 	if (Stream.Live)
 	{
 		EndStream();
 	}
-	const live::Occurrence O = live::FindOccurrence(Id);
-	return Hooks.GoOut(Id, O.T->BuyInCents) ? "" : "Can't get there right now.";
+	return "";
 }
 
 void Session::ResolveAbandonedLive()
@@ -3455,6 +3636,8 @@ std::string Session::StartActivity(const std::string& Id)
 	TimeSkip.To = TimeSkip.Result.End;
 	TimeSkip.RealStart = Now;
 	TimeSkip.RealSeconds = std::min(5.0, 2.0 + (TimeSkip.To - TimeSkip.From) / 60.0 * 0.22);
+	TimeSkip.Rest = RestFactor();
+	TimeSkip.Couch = Evicted();
 	switch (A->Type)
 	{
 	case life::Kind::Job: TimeSkip.Label = "Working a shift at " + A->Place; break;
@@ -3479,7 +3662,8 @@ void Session::FinishSkip()
 	const life::Activity* A = life::Find(O.ActivityId);
 	const Chips Change = std::max(O.Money, -BankrollCents);
 	BankrollCents += Change;
-	const double EnergyGain = O.Energy > 0.0 ? O.Energy * RestFactor() : O.Energy; // a better bed, darker curtains, or Dee's couch
+	// A better bed, darker curtains, or Dee's couch: whatever the night began in (the locks can change at midnight).
+	const double EnergyGain = O.Energy > 0.0 ? O.Energy * TimeSkip.Rest : O.Energy;
 	Life.Energy = std::min(100.0, std::max(0.0, Life.Energy + EnergyGain));
 	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat + O.Heat));
 	Life.DebtCents += O.Debt;
@@ -3535,9 +3719,16 @@ void Session::FinishSkip()
 	LastOutcome = O;
 	LastOutcome.Money = Change;
 	LastOutcome.Energy = EnergyGain;
-	if (A && A->Type == life::Kind::Sleep && Evicted())
+	if (A && A->Type == life::Kind::Sleep && TimeSkip.Couch)
 	{
 		LastOutcome.Body = A->Hours >= 8.0 ? "Dee's couch. A spring in the small of your back, and her cat on your feet at five." : "Four hours sideways on Dee's couch with the TV on.";
+	}
+	else if (A && A->Type == life::Kind::Sleep && Evicted())
+	{
+		// Went to sleep at home; woke up to the landlord.
+		LastOutcome.Title = "Locked out";
+		LastOutcome.Body = A->Hours >= 8.0 ? "Eight hours, then the landlord's knock. The locks changed overnight: the gear goes to storage, and you go to Dee's couch."
+										   : "Four hours, then a knock: the landlord, with a new lock in his hand. Dee's couch it is.";
 	}
 	HasOutcome = true;
 	Sound(O.Bad ? SoundId::Bust : Change > 0 ? SoundId::Cash : SoundId::Click, 1.0);
@@ -3550,8 +3741,19 @@ void Session::RefreshGear()
 {
 	if (Evicted())
 	{
-		// In a storage unit across town: what's left is the laptop.
-		Fx = gear::Effects();
+		// The rig, the bed and the LED kit are in a storage unit across town: what's left is the laptop, and the
+		// subscriptions that go where the player goes (the gym, the meal kit, the chat bot), still billed and still
+		// working. The internet stays with the apartment (suspended, and not billed: RenewGear).
+		gear::Owned Travelling;
+		for (const auto& G : Gear)
+		{
+			const gear::Item* I = gear::Find(G.first);
+			if (I && I->Monthly && I->Where != gear::Slot::Net)
+			{
+				Travelling.insert(G);
+			}
+		}
+		Fx = gear::Sum(Travelling);
 		return;
 	}
 	Fx = gear::Sum(Gear);
@@ -3563,6 +3765,10 @@ void Session::RefreshGear()
 
 void Session::SetLedPreset(int Preset)
 {
+	if (Evicted())
+	{
+		return; // the kit is in a box in the storage unit
+	}
 	Leds.Preset = std::max(0, std::min(gear::LedPresetCount - 1, Preset));
 	Leds.On = true;
 	RefreshGear();
@@ -3571,6 +3777,10 @@ void Session::SetLedPreset(int Preset)
 
 void Session::SetLedsOn(bool On)
 {
+	if (Evicted())
+	{
+		return;
+	}
 	Leds.On = On;
 	RefreshGear();
 	Save();
@@ -3585,7 +3795,8 @@ void Session::SetLedSync(bool Sync)
 gear::Glow Session::RoomGlow(double At) const
 {
 	gear::Glow G;
-	if (!Owns(gear::LedKitId) || !Leds.On)
+	// Evicted, the kit is in storage with the rest of the rig: the room goes dark (and lights up again on moving back in).
+	if (Evicted() || !Owns(gear::LedKitId) || !Leds.On)
 	{
 		return G;
 	}
@@ -3669,6 +3880,10 @@ std::string Session::CanBuy(const std::string& Id) const
 	if (Evicted() && !I->Monthly)
 	{
 		return "Nowhere to put it. You're on Dee's couch.";
+	}
+	if (Evicted() && I->Where == gear::Slot::Net)
+	{
+		return "No apartment to wire. You're on Dee's couch.";
 	}
 	if (!I->Requires.empty() && !Owns(I->Requires))
 	{
@@ -3755,6 +3970,12 @@ void Session::RenewGear(double From, double To)
 		bool Keep = true;
 		while (I && I->Monthly && It->second > 0.0 && It->second <= To)
 		{
+			if (Evicted() && I->Where == gear::Slot::Net)
+			{
+				// The line is at the apartment: the service is suspended while the player is locked out, and so is the bill.
+				It->second += 30.0 * net::MinutesPerDay;
+				continue;
+			}
 			if (BankrollCents < I->PriceCents)
 			{
 				Hooks.Text(I->Brand, "We couldn't take this month's payment for " + I->Name + ", so your subscription has ended. Resubscribe on GearDrop any time.");
@@ -3943,7 +4164,7 @@ void Session::StreamStep()
 	if (Stream.Missed > MissedBefore)
 	{
 		// A troll gets through after a bad beat: it gets under the skin.
-		HeroTilt = std::min(1.0, HeroTilt + 0.03 * static_cast<double>(Stream.Missed - MissedBefore) * (1.0 - Fx.Calm) * Life.Perks.TiltGain);
+		HeroTilt = std::min(1.0, HeroTilt + 0.03 * static_cast<double>(Stream.Missed - MissedBefore) * (1.0 - Fx.Calm) * Life.Perks.TiltGain * NeedsTilt());
 	}
 	PlayStreamNotices();
 }
@@ -4075,8 +4296,10 @@ void Session::SettleRent()
 	++Life.RentsPaid;
 	Life.RentStage = life::Rent::Paid;
 	Life.RentDueCents = life::MonthlyRentCents;
-	// Next month: October 31 at midnight, then every thirty days.
-	Life.RentDeadline = Life.RentsPaid == 1 ? 27.0 * net::MinutesPerDay : DueAt + 30.0 * net::MinutesPerDay;
+	// Next month: October 31 at midnight, then every thirty days. (A first month that came due after the 31st, the
+	// clock skipped ahead, runs thirty days from its own date: a deadline is never set behind the clock.)
+	const double FirstMonth = 27.0 * net::MinutesPerDay;
+	Life.RentDeadline = Life.RentsPaid == 1 && DueAt < FirstMonth ? FirstMonth : DueAt + 30.0 * net::MinutesPerDay;
 }
 
 std::string Session::MoveBackIn()
@@ -4107,7 +4330,40 @@ std::string Session::MoveBackIn()
 	RefreshGear();
 	Hooks.Text("Landlord", Stored ? "Paid in full. New locks; your key's under the mat. Go get your stuff out of storage." : "Paid in full. New locks; your key's under the mat.");
 	Hooks.Text("Dee", "you're going HOME? the couch will miss you. lou won't. go, before i make you pay for the coffee you drank.");
+	// The line at the apartment comes back on (it was suspended, not billed).
+	for (const auto& G : Gear)
+	{
+		const gear::Item* I = gear::Find(G.first);
+		if (I && I->Monthly && I->Where == gear::Slot::Net)
+		{
+			Hooks.Text(I->Brand, "Welcome back. Service at 1812 Fifth St, Apt 3B is restored, and your " + I->Name + " plan picks up where it left off.");
+		}
+	}
 	Sound(SoundId::Cash, 1.0);
+	Save();
+	return "";
+}
+
+std::string Session::PayStorage()
+{
+	if (!Evicted() || Life.StorageDue <= 0.0)
+	{
+		return "Nothing in storage.";
+	}
+	const double World = WorldMinutes();
+	if (Life.StorageDue - World > life::StorageDays * net::MinutesPerDay)
+	{
+		return "Paid through " + net::DateLabel(net::DayOf(Life.StorageDue - 1.0)) + ".";
+	}
+	if (BankrollCents < life::StorageCents)
+	{
+		return "Short " + Money(life::StorageCents - BankrollCents) + ".";
+	}
+	// A month ahead at the desk (or on the phone): the renewal moves on, so the card on file isn't the unit's last chance.
+	BankrollCents -= life::StorageCents;
+	Life.Record(World, "Ninth St. Storage (paid ahead)", -life::StorageCents, 3);
+	Life.StorageDue += life::StorageDays * net::MinutesPerDay;
+	Sound(SoundId::Cash, 0.7);
 	Save();
 	return "";
 }
@@ -4428,70 +4684,77 @@ void Session::CheckUnlocks()
 
 void Session::CheckCalendar(double From, double To, bool Awake)
 {
+	// A host hands the clock back rounded to the minute, so something right on the hand-off can sit just behind From.
+	// Deadlines catch up with whatever is due by To; one-off texts (keyed, never sent twice) look back a minute.
+	const double Slack = 1.0;
+	auto Crosses = [&](double At) { return At > From - Slack && At <= To; };
 	const double Hours = (To - From) / 60.0;
-	if (Awake)
-	{
-		// A good chair and real coffee slow the drain; being live on stream speeds it up.
-		const double Drain = Fx.Drain > 0.0 || Stream.Live ? 4.0 * (1.0 - Fx.Drain) + (Stream.Live ? 1.0 : 0.0) : 4.0;
-		Life.Energy = std::min(100.0, std::max(0.0, Life.Energy - Hours * Drain));
-	}
-	RenewGear(From, To);
 	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat - Hours * Life.Perks.HeatCool));
-	// Needs climb with the hours (slowly in bed), and past 70 they wear the player down.
+	// Energy and the needs, a quarter of an hour at a time: a night away comes in one go, and needs climbing past 70
+	// during it wear the player down as they climb. The needs climb slowly in bed.
 	const life::Activity* Doing = TimeSkip.Active ? life::Find(TimeSkip.Result.ActivityId) : nullptr;
 	const double Rate = Doing && Doing->Type == life::Kind::Sleep ? life::SleepNeedsRate : 1.0;
+	// A good chair and real coffee slow the drain; being live on stream speeds it up.
+	const double Drain = Fx.Drain > 0.0 || Stream.Live ? 4.0 * (1.0 - Fx.Drain) + (Stream.Live ? 1.0 : 0.0) : 4.0;
 	const bool WasHungry = Life.Hunger >= 75.0;
 	const bool WasThirsty = Life.Thirst >= 75.0;
-	Life.Energy = std::max(0.0, Life.Energy - Hours * life::NeedsDrain(Life));
-	Life.Hunger = std::min(100.0, Life.Hunger + Hours * life::HungerPerHour * Rate);
-	Life.Thirst = std::min(100.0, Life.Thirst + Hours * life::ThirstPerHour * Rate);
-	// Penny Drop orders reach the door.
-	for (auto It = Life.Deliveries.begin(); It != Life.Deliveries.end();)
+	for (double Step = From; Step < To; Step += 15.0)
 	{
-		if (It->ArriveAt > To)
-		{
-			++It;
-			continue;
-		}
-		std::string What;
-		for (const auto& Ln : It->Lines)
-		{
-			Life.Pantry[Ln.first] += Ln.second;
-			if (const store::Item* I = store::Find(Ln.first))
-			{
-				What += (What.empty() ? "" : ", ") + (Ln.second > 1 ? std::to_string(Ln.second) + " " : std::string()) + I->Name;
-			}
-		}
-		StoryText("drop:" + std::to_string(static_cast<long long>(It->ArriveAt * 100.0)), "Penny Drop", "Left at your door: " + What + ". It's in your bag. Thanks for ordering from the Lucky Penny #212!");
-		It = Life.Deliveries.erase(It);
+		const double Until = std::min(To, Step + 15.0);
+		const double StepHours = (Until - Step) / 60.0;
+		// The hours a host played out (ResumeCalendarFrom) already cost the energy they cost there.
+		const double AwakeHours = Awake ? std::max(0.0, Until - std::max(Step, EnergyKeptUntil)) / 60.0 : 0.0;
+		Life.Energy = std::min(100.0, std::max(0.0, Life.Energy - AwakeHours * Drain - StepHours * life::NeedsDrain(Life)));
+		Life.Hunger = std::min(100.0, Life.Hunger + StepHours * life::HungerPerHour * Rate);
+		Life.Thirst = std::min(100.0, Life.Thirst + StepHours * life::ThirstPerHour * Rate);
 	}
+	const int Today = static_cast<int>(std::floor(To / net::MinutesPerDay));
 	if (!WasHungry && Life.Hunger >= 75.0)
 	{
-		const int Day = static_cast<int>(std::floor(To / net::MinutesPerDay));
-		StoryText("needs:hungry:" + std::to_string(Day), "Mom", Day % 2 == 0 ? "are you eating? you never answer when I ask if you're eating" : "call me when you can. and eat something real, not chips");
+		StoryText("needs:hungry:" + std::to_string(Today), "Mom", Today % 2 == 0 ? "are you eating? you never answer when I ask if you're eating" : "call me when you can. and eat something real, not chips");
 	}
-	(void)WasThirsty;
-	// The Night Shift closes at 6 AM.
-	for (double End = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 6.0 * 60.0; End <= To; End += net::MinutesPerDay)
+	if (!WasThirsty && Life.Thirst >= 75.0 && Life.Hunger < 75.0)
 	{
-		if (End > From)
+		// (One worried text at a time: hungry and thirsty both, the hunger one says enough.)
+		StoryText("needs:thirsty:" + std::to_string(Today), "Mom", Today % 2 == 0 ? "you sounded hoarse on the phone. are you drinking water?" : "drink some water. coffee doesn't count");
+	}
+	// The Night Shift closes at 6 AM (paid once a night, so a look back is safe).
+	for (double End = std::floor((From - Slack) / net::MinutesPerDay) * net::MinutesPerDay + 6.0 * 60.0; End <= To; End += net::MinutesPerDay)
+	{
+		if (End > From - Slack)
 		{
 			PayNightShift(End);
 		}
 	}
 	// Rent. A week out, a paid month is due again, and the landlord says so.
-	auto Crosses = [&](double At) { return At > From && At <= To; };
 	if (Life.RentStage == life::Rent::Paid && To >= Life.RentDeadline - life::RentNoticeDays * net::MinutesPerDay)
 	{
 		Life.RentStage = life::Rent::Due;
 		const int DueDay = net::DayOf(Life.RentDeadline - 1.0);
-		StoryText("rent-notice:" + std::to_string(DueDay), "Landlord",
-			"Reminder: rent is " + Money(Life.RentDueCents) + ", due by midnight " + net::WeekdayName(DueDay, true) + ", " + net::DateLabel(DueDay) + ". Have it in your account and I'll collect.");
+		// (Not for a deadline already behind the clock: that one is collected or missed just below.)
+		if (Life.RentDeadline > To)
+		{
+			StoryText("rent-notice:" + std::to_string(DueDay), "Landlord",
+				"Reminder: rent is " + Money(Life.RentDueCents) + ", due by midnight " + net::WeekdayName(DueDay, true) + ", " + net::DateLabel(DueDay) + ". Have it in your account and I'll collect.");
+		}
 	}
-	// (A loop: a long skip can cross the deadline and the grace days both. Each pass moves the deadline on, or evicts.)
-	while (!Evicted() && Crosses(Life.RentDeadline))
+	// Penny Drop orders, the subscriptions and the rent deadlines, in the order they come: an order that lands after
+	// the locks change goes to Dee's (its text after the landlord's), a renewal due after midnight doesn't spend the
+	// rent, and a line suspended at the eviction isn't billed. (A loop: a long stretch can take in the deadline and the
+	// grace days both. Each pass moves the deadline on, or evicts; anything due by To is caught up.)
+	while (!Evicted() && Life.RentDeadline <= To)
 	{
+		RenewGear(From, Life.RentDeadline);
+		if (!DeferDeliveries)
+		{
+			DeliverOrders(Life.RentDeadline);
+		}
 		RentDeadline();
+	}
+	RenewGear(From, To);
+	if (!DeferDeliveries)
+	{
+		DeliverOrders(To);
 	}
 	// The landlord's reminders: 9 AM the day before, and 6 PM on the day. In the grace days, one last warning.
 	if (Life.RentStage == life::Rent::Due || Life.RentStage == life::Rent::FinalNotice)
@@ -4532,17 +4795,7 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	}
 	if (Evicted())
 	{
-		// Dee's couch: a share of the groceries every morning, when there's money for it.
-		for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 10.0 * 60.0; At <= To; At += net::MinutesPerDay)
-		{
-			if (At > From && At > Life.EvictedAt && BankrollCents >= life::CouchChipInCents)
-			{
-				BankrollCents -= life::CouchChipInCents;
-				Life.CouchCents += life::CouchChipInCents;
-				Life.Record(At, "Groceries at Dee's", -life::CouchChipInCents, 3);
-			}
-		}
-		// The storage unit: a warning two days out, then the card on file, or the auction.
+		// The storage unit: a warning two days out, a lien notice the day it's due if the card won't cover it.
 		if (Life.StorageDue > 0.0)
 		{
 			const int DueDay = net::DayOf(Life.StorageDue);
@@ -4551,7 +4804,16 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 				StoryText("storage-warn:" + std::to_string(DueDay), "Ninth St. Storage",
 					"Unit 114: " + Money(life::StorageCents) + " renews in 2 days. If the card on file declines, the contents are sold at lien auction.");
 			}
-			while (Life.StorageDue > 0.0 && Crosses(Life.StorageDue))
+			if (Crosses(Life.StorageDue - 12.0 * 60.0) && BankrollCents < life::StorageCents)
+			{
+				StoryText("storage-lien:" + std::to_string(DueDay), "Ninth St. Storage",
+					"LIEN SALE NOTICE. Unit 114: the card on file is " + Money(life::StorageCents - BankrollCents) + " short of the " + Money(life::StorageCents) +
+						" renewal. Unless it clears by midnight, the contents go to auction.");
+			}
+		}
+		// Then the card on file at each renewal, or the auction (anything due by Until).
+		auto Storage = [&](double Until) {
+			while (Life.StorageDue > 0.0 && Life.StorageDue <= Until)
 			{
 				if (BankrollCents >= life::StorageCents)
 				{
@@ -4565,21 +4827,49 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 				}
 				Save();
 			}
+		};
+		// Dee's couch: a share of the groceries every morning, when there's money for it. Not when it would leave the
+		// storage unit's renewal short: Dee would rather go without than see the player's things auctioned. In the
+		// order they come, with the unit's renewals.
+		for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 10.0 * 60.0; At <= To; At += net::MinutesPerDay)
+		{
+			if (At <= From || At <= Life.EvictedAt)
+			{
+				continue;
+			}
+			Storage(At);
+			if (BankrollCents < life::CouchChipInCents)
+			{
+				continue;
+			}
+			const bool UnitShort = Life.StorageDue > At && Life.StorageDue - At <= 2.0 * net::MinutesPerDay && BankrollCents - life::CouchChipInCents < life::StorageCents;
+			if (UnitShort)
+			{
+				StoryText("couch-skip:" + std::to_string(net::DayOf(Life.StorageDue)), "Dee",
+					"keep your ten this week. the storage unit's due and they WILL sell your stuff. pay that first.");
+				continue;
+			}
+			BankrollCents -= life::CouchChipInCents;
+			Life.CouchCents += life::CouchChipInCents;
+			Life.Record(At, "Groceries at Dee's", -life::CouchChipInCents, 3);
 		}
+		Storage(To);
 	}
-	if (Life.BannedUntil > From && Life.BannedUntil <= To)
+	if (Life.BannedUntil > 0.0 && Crosses(Life.BannedUntil))
 	{
-		Hooks.Text("RiverLine", "Review complete. Your account is active again. Further violations may result in permanent closure.");
+		StoryText("ban-over:" + std::to_string(static_cast<long long>(std::llround(Life.BannedUntil))), "RiverLine",
+			"Review complete. Your account is active again. Further violations may result in permanent closure.");
 	}
-	// Sundays: Dee deals the Embercrest's $150, and says so in the afternoon.
-	for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + 16.0 * 60.0; At <= To; At += net::MinutesPerDay)
+	// Sundays: Dee deals the Embercrest's $150, and says so in the afternoon. (Not once it's started: coming home from a
+	// night out, an invitation to something already over is just noise.)
+	for (double At = std::floor((From - Slack) / net::MinutesPerDay) * net::MinutesPerDay + 16.0 * 60.0; At <= To; At += net::MinutesPerDay)
 	{
 		bool Sunday = false;
 		for (const live::Occurrence& O : live::Occurrences(net::DayOf(At)))
 		{
 			Sunday = Sunday || std::string(O.T->Key) == "sunday";
 		}
-		if (At <= From || !Sunday)
+		if (!Crosses(At) || !Sunday || To >= At + 3.0 * 60.0)
 		{
 			continue;
 		}
@@ -4587,12 +4877,12 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 			Life.LiveEvents == 0 ? "the embercrest runs every day now. i deal the sunday $150, seven o'clock, a hundred people some weeks. deep stacks. you should come."
 								 : "embercrest sunday tonight. seven. i've got the stream table.");
 	}
-	// Game nights at Dee's: a heads-up half an hour before the doors open.
+	// Game nights at Dee's: a heads-up half an hour before the doors open (not after they have).
 	if (const life::Activity* Game = life::Find("dee-game"))
 	{
-		for (double At = std::floor(From / net::MinutesPerDay) * net::MinutesPerDay + Game->Opens - 30.0; At <= To; At += net::MinutesPerDay)
+		for (double At = std::floor((From - Slack) / net::MinutesPerDay) * net::MinutesPerDay + Game->Opens - 30.0; At <= To; At += net::MinutesPerDay)
 		{
-			if (At <= From || !life::InWindow(*Game, At + 31.0))
+			if (!Crosses(At) || !life::InWindow(*Game, At + 31.0) || To >= At + 30.0)
 			{
 				continue;
 			}
@@ -4602,13 +4892,77 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 				"nine o'clock. twitch is wound up, should be a good one.",
 				"tonight, nine. mei's back. watch yourself.",
 			};
+			// On her couch, she doesn't have to text far.
+			static const char* Couch[] = {
+				"game's at nine. you're already sleeping on my couch, so you've got no excuse.",
+				"nine o'clock. you're on dishes after. house rules.",
+				"lou fell asleep on your couch waiting for the game. i'm not waking him. you do it.",
+				"game tonight. the cat's on your pillow, by the way. she's not moving.",
+			};
 			const int Day = net::DayOf(At);
 			StoryText("dee-night-" + std::to_string(Day), "Dee",
-				Evicted() ? "game's at nine. you're already sleeping on my couch, so you've got no excuse."
+				Evicted() ? Couch[Day % 4]
 				: Life.BackRoomNights == 0 ? "game's tonight at nine. back room of the laundromat, across the street. bring forty. open the burner if you're in."
 										   : Nights[Day % 4]);
 		}
 	}
+	// Registered at the Embercrest but never got there (the game closed on the bus): the desk holds the seat until late
+	// registration ends, and says so.
+	if (const life::LiveEntry* Mine = live::ActiveEntry(Life); Mine && Mine->ArrivedAt <= 0.0)
+	{
+		const live::Occurrence O = live::FindOccurrence(Mine->Id);
+		if (O.Valid() && Crosses(O.Start - live::TravelMinutes - 30.0))
+		{
+			StoryText("live-remind:" + O.Id, "Embercrest",
+				std::string("You're registered for ") + (O.T->StartMinute >= 17 * 60 ? "tonight's " : "today's ") + O.T->Short + ". Cards at " + net::TimeLabel(O.Start) +
+					", and the 14 bus takes twenty minutes. Your seat waits until late registration closes at " + net::TimeLabel(O.LateRegEnds) + ".");
+		}
+	}
+}
+
+void Session::DeliverOrders(double Until)
+{
+	// Off the list and into the bag before anything is said: a save written along the way (a text, a deadline) never
+	// has an order both in the bag and still on its way, so a game closed after it can't deliver it twice.
+	std::vector<life::State::Delivery> Arrived;
+	for (auto It = Life.Deliveries.begin(); It != Life.Deliveries.end();)
+	{
+		if (It->ArriveAt <= Until)
+		{
+			Arrived.push_back(*It);
+			It = Life.Deliveries.erase(It);
+		}
+		else
+		{
+			++It;
+		}
+	}
+	if (Arrived.empty())
+	{
+		return;
+	}
+	std::stable_sort(Arrived.begin(), Arrived.end(), [](const life::State::Delivery& A, const life::State::Delivery& B) { return A.ArriveAt < B.ArriveAt; });
+	for (const life::State::Delivery& Dv : Arrived)
+	{
+		for (const std::pair<std::string, int>& Ln : Dv.Lines)
+		{
+			Life.Pantry[Ln.first] += Ln.second;
+		}
+	}
+	for (const life::State::Delivery& Dv : Arrived)
+	{
+		std::string What;
+		for (const std::pair<std::string, int>& Ln : Dv.Lines)
+		{
+			if (const store::Item* I = store::Find(Ln.first))
+			{
+				What += (What.empty() ? "" : ", ") + (Ln.second > 1 ? std::to_string(Ln.second) + " " : std::string()) + I->Name;
+			}
+		}
+		// Locked out, it goes where the player sleeps now.
+		Hooks.Text("Penny Drop", (Evicted() ? "Handed to Dee at the door: " : "Left at your door: ") + What + ". It's in your bag. Thanks for ordering from the Lucky Penny #212!");
+	}
+	Save();
 }
 
 void Session::PayNightShift(double End)
@@ -4682,6 +5036,15 @@ void Session::Evict()
 							   (Stored ? " Your deposit paid the movers and a month at Ninth Street Storage. After that the unit's on you." : ""));
 	Hooks.Text("Dee", Life.Evictions == 1 ? "I heard. My couch is yours as long as you need it. Bring the laptop. Chip in for groceries when you can."
 										  : "again?? ok. couch is made up. you know the rules: groceries, and you do the dishes.");
+	// The internet stays with the apartment: suspended, not billed, until the player is back (RenewGear).
+	for (const auto& G : Gear)
+	{
+		const gear::Item* I = gear::Find(G.first);
+		if (I && I->Monthly && I->Where == gear::Slot::Net)
+		{
+			Hooks.Text(I->Brand, "Service at 1812 Fifth St, Apt 3B is suspended at the property owner's request. Your " + I->Name + " plan is on hold, and so is the bill.");
+		}
+	}
 	Sound(SoundId::Bust, 0.8);
 }
 

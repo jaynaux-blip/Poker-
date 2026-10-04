@@ -152,6 +152,8 @@ struct State
 	double Thirst = 30.0;
 	/** What's in the bag from the corner store (item id -> count). */
 	std::map<std::string, int> Pantry;
+	/** Everything ever bought from the Lucky Penny, at the counter or on the app (item id -> count): Benny's "the usual". */
+	std::map<std::string, int> Bought;
 	/** Penny Drop orders on their way to the door. */
 	struct Delivery
 	{

@@ -61,6 +61,33 @@ void KastLogo(Canvas& Cv, float X, float Y, float Sz)
 	Cv.StrokeArc(X + Sz * 0.32f, Y + Sz * 0.5f, Sz * 0.5f, -0.6f, 0.6f, NetA(Hex(0xffffff), 0.5f), Sz * 0.06f, true);
 }
 
+/**
+ * The locked studio's screen, where the stream preview would be: opaque (the client isn't drawn under it, so nothing
+ * shows through), a dark off-air card with a glow in the lock's colour and slow scanlines.
+ */
+void LockBacking(Canvas& Cv, const Rect& R, const Color& Tint, double Now)
+{
+	Cv.FillRect(R, Paint::Linear({R.X, R.Y}, {R.X, R.Y + R.H}, Hex(0x160f24), Hex(0x09060f)));
+	Cv.PushClip(R);
+	const float Cx = R.X + R.W / 2.0f;
+	const float Gy = R.Y + 160.0f;
+	// A full circle, so the glow fades to nothing at its edge (the frame clips it).
+	Cv.FillCircle(Cx, Gy, 460.0f, Paint::Radial({Cx, Gy}, 0.0f, {Cx, Gy}, 460.0f, NetA(Tint, 0.17f), 0.45f, NetA(Tint, 0.05f), NetA(Tint, 0.0f)));
+	const float Drift = Nf(std::fmod(Now * 10.0, 6.0));
+	for (float Y = R.Y + Drift; Y < R.Y + R.H; Y += 6.0f)
+	{
+		Cv.FillRect({R.X, Y, R.W, 1.0f}, Rgba(255, 255, 255, 0.022f));
+	}
+	Cv.FillRect({R.X, R.Y + R.H - 90.0f, R.W, 90.0f}, Paint::Linear({0.0f, R.Y + R.H - 90.0f}, {0.0f, R.Y + R.H}, Rgba(0, 0, 0, 0.0f), Rgba(0, 0, 0, 0.35f)));
+	Cv.PopClip();
+	Cv.StrokeRoundRect(R, 4.0f, KLine, 2.0f);
+	// The tag the preview wears, saying why it's dark.
+	const float Tw = Cv.Measure("OFF AIR", 12.0f, 900) + 30.0f;
+	Cv.FillRoundRect({R.X + 12.0f, R.Y + 12.0f, Tw, 24.0f}, 6.0f, Hex(0x3a2f55));
+	Cv.FillCircle(R.X + 24.0f, R.Y + 24.0f, 4.0f, NetA(Tint, 0.9f));
+	Cv.Text("OFF AIR", R.X + 32.0f, R.Y + 28.5f, Ts(12.0f, 900, Hex(0xffffff)));
+}
+
 Color AlertColor(kast::AlertKind K)
 {
 	switch (K)
@@ -877,28 +904,56 @@ void RiverLine::KastStudio(double Now)
 	const kast::Channel& Ch = S.Channel;
 	const bool Live = St.Live;
 	const Rect Prev{20.0f, 74.0f, 1008.0f, 567.0f};
-	StreamPreview(Prev, Now);
 	const bool CanStream = S.GearFx().CanStream();
+	if (S.Evicted() || !CanStream)
+	{
+		// Locked: an opaque card in the preview's place (the client isn't drawn behind it, so nothing shows through).
+		LockBacking(*C, Prev, S.Evicted() ? KRed : KViolet, Now);
+	}
+	else
+	{
+		StreamPreview(Prev, Now);
+	}
 	if (S.Evicted())
 	{
-		// Locked out of the apartment: the rig is in a storage unit, and Dee's Wi-Fi won't carry a stream.
-		C->FillRect(Prev, Rgba(10, 6, 20, 0.86f));
-		C->StrokeRoundRect(Prev, 4.0f, KLine, 2.0f);
+		// Locked out of the apartment: the rig is in a storage unit (or gone at auction), and Dee's Wi-Fi won't carry a stream.
 		const float Cx = Prev.X + Prev.W / 2.0f;
 		C->FillCircle(Cx, Prev.Y + 120.0f, 46.0f, NetA(KRed, 0.18f));
 		NetLockIcon(*C, Cx - 26.0f, Prev.Y + 90.0f, 52.0f, KInk);
-		UI.Text("Your rig is in storage", Cx, Prev.Y + 222.0f, Ts(32.0f, 900, KInk, Align::Center));
-		UI.Text("The locks changed. The PC, the camera and the lights are in a unit on Ninth; you're on Dee's couch with the laptop.", Cx, Prev.Y + 256.0f,
-			Ts(15.0f, 500, KMuted, Align::Center));
-		UI.Text("Your channel waits. Move back in and the stream comes back with the gear.", Cx, Prev.Y + 280.0f, Ts(15.0f, 500, KMuted, Align::Center));
+		// What moving back in brings back: the rig from the unit, or (sold, or never stored) only the laptop.
+		const bool Stored = S.Life.StorageDue > 0.0;
+		const bool Streams = gear::Sum(S.Gear).CanStream();
+		std::string Head = "Just the laptop at Dee's";
+		std::string Line1 = "The locks changed and the laptop came with you. Dee's Wi-Fi won't carry a stream.";
+		std::string Line2 = "Your channel waits. Move back in, then upgrade the PC on GearDrop to go live.";
+		if (Stored)
+		{
+			Head = "Your rig is in storage";
+			Line1 = "The locks changed. Your gear is in Unit 114 on Ninth; you're on Dee's couch with the laptop.";
+			Line2 = Streams ? "Your channel waits. Move back in and the stream comes back with the gear."
+							: "Your channel waits. Move back in, then upgrade the PC on GearDrop to go live.";
+		}
+		else if (S.Life.Auctions > 0)
+		{
+			Head = "Your rig went to auction";
+			Line1 = "Unit 114 went to a lien sale with the gear in it. What's left is the laptop on Dee's couch.";
+			Line2 = "Your channel waits. Move back in, then rebuild the rig on GearDrop.";
+		}
+		UI.Text(Head, Cx, Prev.Y + 222.0f, Ts(32.0f, 900, KInk, Align::Center));
+		UI.Text(Line1, Cx, Prev.Y + 256.0f, Ts(15.0f, 500, KMuted, Align::Center, Baseline::Alphabetic, false, Prev.W - 80.0f));
+		UI.Text(Line2, Cx, Prev.Y + 280.0f, Ts(15.0f, 500, KMuted, Align::Center, Baseline::Alphabetic, false, Prev.W - 80.0f));
 		const Rect Card{Cx - 260.0f, Prev.Y + 312.0f, 520.0f, 110.0f};
 		C->FillRoundRect(Card, 16.0f, KPanel2);
 		C->StrokeRoundRect(Card, 16.0f, NetA(KRed, 0.5f), 1.5f);
 		NetSpaced(*C, "TO GET A KEY BACK", Card.X + 28.0f, Card.Y + 36.0f, 10.0f, 900, KLime, 1.4f);
 		UI.Text("Back rent + a month up front", Card.X + 28.0f, Card.Y + 66.0f, Ts(18.0f, 800, KInk));
 		const Chips Short = std::max<Chips>(0, S.Life.RentDueCents - S.BankrollCents);
-		UI.Text(Short > 0 ? Money(Short) + " short" : std::string("You have it"), Card.X + 28.0f, Card.Y + 90.0f, Ts(13.5f, 700, Short > 0 ? KRed : KLime));
+		UI.Text(Short > 0 ? Money(Short) + " short" : std::string("You have it: move back in from the Bank"), Card.X + 28.0f, Card.Y + 90.0f, Ts(13.5f, 700, Short > 0 ? KRed : KLime));
 		UI.Text(Money(S.Life.RentDueCents), Card.X + Card.W - 24.0f, Card.Y + 68.0f, Ts(24.0f, 900, KInk, Align::Right, Baseline::Alphabetic, true));
+		// How close the bankroll is to a key.
+		const float Have = Nf(Clamp01(static_cast<double>(S.BankrollCents) / static_cast<double>(std::max<Chips>(1, S.Life.RentDueCents))));
+		C->FillRoundRect({Card.X + 28.0f, Card.Y + 98.0f, Card.W - 56.0f, 4.0f}, 2.0f, NetA(KInk, 0.1f));
+		C->FillRoundRect({Card.X + 28.0f, Card.Y + 98.0f, std::max(4.0f, (Card.W - 56.0f) * Have), 4.0f}, 2.0f, Short > 0 ? KRed : KLime);
 		if (AppButton("kastbank", {Cx - 160.0f, Prev.Y + 446.0f, 320.0f, 54.0f}, "Open the Bank", KLime, Hex(0x1b1036), true))
 		{
 			OpenApp(App::Bank, Now);
@@ -908,14 +963,13 @@ void RiverLine::KastStudio(double Now)
 	{
 		// Locked: the laptop can't run the client and an encoder at once. The way in is the next PC upgrade.
 		const gear::Item& Up = gear::FirstPcUpgrade();
-		C->FillRect(Prev, Rgba(10, 6, 20, 0.86f));
-		C->StrokeRoundRect(Prev, 4.0f, KLine, 2.0f);
 		const float Cx = Prev.X + Prev.W / 2.0f;
 		C->FillCircle(Cx, Prev.Y + 120.0f, 46.0f, NetA(KViolet, 0.18f));
 		NetLockIcon(*C, Cx - 26.0f, Prev.Y + 90.0f, 52.0f, KInk);
 		UI.Text("Your laptop can't stream", Cx, Prev.Y + 222.0f, Ts(32.0f, 900, KInk, Align::Center));
-		UI.Text("RiverLine and a stream encoder at once is too much for it: the fans scream and the stream drops out.", Cx, Prev.Y + 256.0f, Ts(15.0f, 500, KMuted, Align::Center));
-		UI.Text("Upgrade the PC on GearDrop and Kast opens up: chat, followers, subs, sponsors.", Cx, Prev.Y + 280.0f, Ts(15.0f, 500, KMuted, Align::Center));
+		UI.Text("RiverLine and a stream encoder at once is too much for it: the fans scream and the stream drops out.", Cx, Prev.Y + 256.0f,
+			Ts(15.0f, 500, KMuted, Align::Center, Baseline::Alphabetic, false, Prev.W - 80.0f));
+		UI.Text("Upgrade the PC on GearDrop and Kast opens up: chat, followers, subs, sponsors.", Cx, Prev.Y + 280.0f, Ts(15.0f, 500, KMuted, Align::Center, Baseline::Alphabetic, false, Prev.W - 80.0f));
 		const Rect Card{Cx - 260.0f, Prev.Y + 312.0f, 520.0f, 110.0f};
 		C->FillRoundRect(Card, 16.0f, KPanel2);
 		C->StrokeRoundRect(Card, 16.0f, NetA(Hex(Up.Color), 0.6f), 1.5f);
@@ -965,7 +1019,9 @@ void RiverLine::KastStudio(double Now)
 	{
 		const kast::Inputs In = S.StreamInputs();
 		const int Est = static_cast<int>(std::round(kast::Stream::Expected(Ch, In)));
-		if (AppButton("kastlive", Go, "Go live", KLime, Hex(0x1b1036), CanStream && !S.TimeSkip.Active, CanStream ? "~" + std::to_string(Est) + " viewers to start" : std::string(S.Evicted() ? "the rig is in storage" : "needs a PC upgrade")))
+		const bool Open = CanStream && !S.Evicted();
+		const std::string Locked = !S.Evicted() ? "needs a PC upgrade" : S.Life.StorageDue > 0.0 ? "the rig is in storage" : "no rig at Dee's";
+		if (AppButton("kastlive", Go, "Go live", KLime, Hex(0x1b1036), Open && !S.TimeSkip.Active, Open ? "~" + std::to_string(Est) + " viewers to start" : Locked))
 		{
 			S.GoLive();
 		}
@@ -1046,9 +1102,9 @@ void RiverLine::KastStudio(double Now)
 			UI.Text(Ch.Offers.empty() ? "No sponsors yet: they find you at " + Grouped(kast::Sponsors().front().Followers) + " followers." : "A sponsor offer is waiting on the Channel page.", X, Y + 21.0f,
 				Ts(13.0f, 600, Ch.Offers.empty() ? KDim : KGold));
 		}
-		// The room's LEDs: a chip that opens their controls.
+		// The room's LEDs: a chip that opens their controls (not while the kit is in storage).
 		float Right = 1028.0f;
-		if (S.Owns(gear::LedKitId))
+		if (S.Owns(gear::LedKitId) && !S.Evicted())
 		{
 			const gear::Glow Gl = S.RoomGlow(Now);
 			const std::string Label = Gl.On ? gear::LedPresets()[static_cast<size_t>(S.Leds.Preset)].Name : std::string("Lights off");

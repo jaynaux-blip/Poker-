@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 namespace ss
 {
@@ -280,7 +282,7 @@ void DrawProduct(Canvas& C, const store::Item& I, float X, float Y, float Size)
 
 void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, double Now, const store::Basket* Preview, float Alpha)
 {
-	// What the basket would do if it were all eaten and drunk now.
+	// What the basket would do if it were all eaten and drunk now (store::ReliefOf: the same relief eating applies).
 	double Hunger = L.Hunger;
 	double Thirst = L.Thirst;
 	double Energy = L.Energy;
@@ -290,10 +292,10 @@ void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, 
 		{
 			if (const store::Item* I = store::Find(Ln.first))
 			{
-				const double Boost = I->Food() ? L.Perks.MealBoost : 1.0;
-				Hunger -= I->Hunger * Boost * Ln.second;
-				Thirst -= I->Thirst * Ln.second;
-				Energy += I->Energy * Boost * Ln.second;
+				const store::Relief Rl = store::ReliefOf(*I, L.Perks.MealBoost);
+				Hunger -= Rl.Hunger * Ln.second;
+				Thirst -= Rl.Thirst * Ln.second;
+				Energy += Rl.Energy * Ln.second;
 			}
 		}
 	}
@@ -329,7 +331,17 @@ void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, 
 			C.FillRoundRect({BarX, Ry + 5.0f, Wa, 8.0f}, 4.0f, Paint(Fade(Hex(R.Col), G * Alpha)));
 		}
 		C.FillRoundRect({BarX, Ry + 5.0f, std::max(8.0f, Wn), 8.0f}, 4.0f, Paint(Col));
-		C.Text(R.Word, X + Width, Ry + 15.0f, Ts(13.0f, 700, Fade(Low ? Hex(0xff8a8d) : MenuInk, Alpha * 0.9f), Align::Right));
+		if (Wa < Wn - 0.5f)
+		{
+			// What it would cost (salty chips make the thirst worse): the stretch of the bar it would take, in red, breathing.
+			const float G = 0.5f + 0.25f * static_cast<float>(std::sin(Now * 4.0));
+			C.FillRoundRect({BarX + Wa, Ry + 5.0f, Wn - Wa, 8.0f}, 4.0f, Paint(Fade(Hex(0xff5a5f), G * Alpha)));
+		}
+		// Hunger or thirst past 70 wears the energy down by the hour: the energy row says how fast instead of a word.
+		const double Drain = I == 2 ? life::NeedsDrain(L) : 0.0;
+		const bool Draining = Drain >= 0.1;
+		const std::string Word = Draining ? "\xE2\x88\x92" + Fixed(Drain, 1) + "/hr" : std::string(R.Word);
+		C.Text(Word, X + Width, Ry + 15.0f, Ts(13.0f, 700, Fade(Low || Draining ? Hex(0xff8a8d) : MenuInk, Alpha * (Draining ? 0.7f + 0.25f * Pulse : 0.9f)), Align::Right));
 	}
 }
 
@@ -359,6 +371,9 @@ void StoreCounter::Open(double Now, int Shelf)
 	Basket = store::Basket();
 	PaidAt = -10.0;
 	DeclinedAt = -10.0;
+	LineAt.clear();
+	BagCells.clear();
+	BagFirst = 0;
 	Note = S.ClerkSays(Basket);
 	NoteAt = Now;
 	NoteBad = false;
@@ -395,12 +410,48 @@ void StoreCounter::Pay(double Now)
 	LastPaid = Was;
 	Basket = store::Basket();
 	PaidAt = Now;
+	// The reader's approval code: the moment and the amount, scrambled (the same sale prints the same code).
+	PaidAuth = std::floor(S.WorldMinutes() * 60.0) * 31.0 + static_cast<double>(Was.Total());
 	Say(Was.Count() >= 4 ? "Have a good one. Don't eat it all at once." : "There you go. Stay dry out there.", Now, false);
+}
+
+void StoreCounter::Pick(const std::string& Id, double Now)
+{
+	const int Had = Basket.Count();
+	Basket.Add(Id);
+	if (Basket.Count() == Had)
+	{
+		// Basket::Add stops a line at nine.
+		Say("Nine's the limit on those, man. Ray's rule, not mine.", Now, false);
+		return;
+	}
+	LineAt[Id] = Now;
+	PaidAt = -10.0;
+	DeclinedAt = -10.0;
+	Say(S.ClerkSays(Basket), Now, false);
+}
+
+void StoreCounter::PutBack(const std::string& Id, double Now)
+{
+	const int Had = Basket.Count();
+	Basket.Remove(Id);
+	if (Basket.Count() == Had)
+	{
+		return;
+	}
+	LineAt[Id] = Now;
+	DeclinedAt = -10.0;
 }
 
 void StoreCounter::Key(const std::string& Name, double Now)
 {
 	if (!Shown)
+	{
+		return;
+	}
+	// Just walked up: the button that opened the counter (E, or the pad's A) may still be held down, and its repeats
+	// would drop something in the basket or turn the shelf (a held stick would move the selection). Leaving always works.
+	if (Now - OpenedAt < OpenGrace && Name != "Escape" && Name != "P")
 	{
 		return;
 	}
@@ -411,7 +462,7 @@ void StoreCounter::Key(const std::string& Name, double Now)
 		Left = true;
 		Close(Now);
 	}
-	else if (Name == "Left" || Name == "Right")
+	else if ((Name == "Left" || Name == "Right") && N > 0)
 	{
 		Sel = std::clamp(Sel + (Name == "Left" ? -1 : 1), 0, N - 1);
 		SelAt = Now;
@@ -430,15 +481,11 @@ void StoreCounter::Key(const std::string& Name, double Now)
 	}
 	else if ((Name == "Enter" || Name == "Space") && Sel < N)
 	{
-		Basket.Add(Items[static_cast<size_t>(Sel)]->Id);
-		PaidAt = -10.0;
-		DeclinedAt = -10.0;
-		Say(S.ClerkSays(Basket), Now, false);
+		Pick(Items[static_cast<size_t>(Sel)]->Id, Now);
 	}
-	else if (Name == "Backspace" && Sel < N)
+	else if ((Name == "Backspace" || Name == "Delete" || Name == "PutBack") && Sel < N)
 	{
-		Basket.Remove(Items[static_cast<size_t>(Sel)]->Id);
-		DeclinedAt = -10.0;
+		PutBack(Items[static_cast<size_t>(Sel)]->Id, Now);
 	}
 	else if (Name == "Tab" || Name == "Reset")
 	{
@@ -468,23 +515,41 @@ void StoreCounter::Draw(Canvas& C, double Now)
 	C.FillRect({0.0f, 0.0f, W, H}, Paint::Linear({0.0f, 0.0f}, {W, 0.0f}, Rgba(4, 6, 10, 0.9f), Rgba(4, 6, 10, 0.55f)));
 	C.FillRect({0.0f, H - 240.0f, W, 240.0f}, Paint::Linear({0.0f, H - 240.0f}, {0.0f, H}, Rgba(4, 6, 10, 0.0f), Rgba(4, 6, 10, 0.8f)));
 
-	// The sign.
-	PennyLogo(C, Margin + 34.0f, 112.0f, 34.0f, 1.0f);
-	TrackedText(C, "LUCKY PENNY", Margin + 86.0f, 116.0f, 38.0f, 900, MenuInk, 5.0f);
-	TrackedText(C, "#212 \xC2\xB7 FIFTH & MARKET \xC2\xB7 OPEN 24 HOURS", Margin + 88.0f, 142.0f, 12.0f, 700, Copper, 3.0f);
-
-	// The clerk.
+	// The sign (a size down on narrow screens, where the clerk needs the room).
 	const float GridW = W - Margin * 2.0f - ReceiptW - 48.0f;
-	const Rect Bubble{Margin + GridW * 0.48f, 70.0f, GridW * 0.52f, 96.0f};
+	const bool Narrow = GridW < 1000.0f;
+	PennyLogo(C, Margin + 34.0f, 112.0f, 34.0f, 1.0f);
+	const float SignW = TrackedText(C, "LUCKY PENNY", Margin + 86.0f, 116.0f, Narrow ? 30.0f : 38.0f, 900, MenuInk, Narrow ? 4.0f : 5.0f);
+	const float SubW = TrackedText(C, "#212 \xC2\xB7 FIFTH & MARKET \xC2\xB7 OPEN 24 HOURS", Margin + 88.0f, 142.0f, Narrow ? 11.0f : 12.0f, 700, Copper, Narrow ? 2.2f : 3.0f);
+
+	// The clerk: the rest of the row past the sign (never over it), as tall as what he says.
+	const float BubX = std::max(Margin + GridW * 0.48f, Margin + 88.0f + std::max(SignW, SubW) + 32.0f);
+	const float BubW = std::max(240.0f, Margin + GridW - BubX);
+	const std::string Quote = "\xE2\x80\x9C" + Note + "\xE2\x80\x9D";
+	float Fs = 17.0f;
+	float Lh = 24.0f;
+	std::vector<std::string> Said = WrapText(C, Quote, BubW - 44.0f, Fs, 400);
+	if (Said.size() > 2)
+	{
+		Fs = 15.0f;
+		Lh = 21.0f;
+		Said = WrapText(C, Quote, BubW - 44.0f, Fs, 400);
+	}
+	if (Said.size() > 3)
+	{
+		Said.resize(3);
+		Said[2] += "\xE2\x80\xA6";
+	}
+	const Rect Bubble{BubX, 70.0f, BubW, std::max(96.0f, 46.0f + Cf(static_cast<int>(Said.size())) * Lh)};
 	const float Na = Ease((Now - NoteAt) / 0.3);
 	C.FillRoundRect(Bubble, 14.0f, Paint(Rgba(255, 255, 255, 0.06f * Na)));
 	C.FillPolygon({{Bubble.X + 30.0f, Bubble.Y + Bubble.H}, {Bubble.X + 54.0f, Bubble.Y + Bubble.H}, {Bubble.X + 26.0f, Bubble.Y + Bubble.H + 16.0f}}, Paint(Rgba(255, 255, 255, 0.06f * Na)));
 	TrackedText(C, "BENNY \xC2\xB7 NIGHT CLERK", Bubble.X + 22.0f, Bubble.Y + 28.0f, 11.0f, 800, Fade(NoteBad ? MenuWarn : MenuTeal, Na), 2.6f);
 	float Ny = Bubble.Y + 34.0f;
-	for (const std::string& Ln : WrapText(C, "\xE2\x80\x9C" + Note + "\xE2\x80\x9D", Bubble.W - 44.0f, 17.0f, 400))
+	for (const std::string& Ln : Said)
 	{
-		Ny += 24.0f;
-		C.Text(Ln, Bubble.X + 22.0f, Ny, Ts(17.0f, 400, Fade(MenuInk, 0.92f * Na)));
+		Ny += Lh;
+		C.Text(Ln, Bubble.X + 22.0f, Ny, Ts(Fs, 400, Fade(MenuInk, 0.92f * Na)));
 	}
 
 	// Shelf tabs.
@@ -511,17 +576,20 @@ void StoreCounter::Draw(Canvas& C, double Now)
 	}
 	Glyph(C, Gamepad ? "RB" : "E", Tx - 12.0f, TabY + 3.0f, 1.0f);
 
-	// The shelf.
+	// The shelf. Three across; on a narrow screen (4:3, 5:4, 3:2) each card stacks the words under the product instead.
 	const std::vector<const store::Item*> Items = OnShelf();
 	const float Cw = (GridW - 40.0f) / 3.0f;
 	const float Ch = 236.0f;
+	const bool Stacked = Cw < 320.0f;
 	for (size_t K = 0; K < Items.size(); ++K)
 	{
 		const store::Item& I = *Items[K];
 		const int Idx = static_cast<int>(K);
 		const float Ci = Ease((Now - OpenedAt - 0.04 * static_cast<double>(K)) / 0.35);
-		const Rect R{Margin + Cf(Idx % 3) * (Cw + 20.0f), 268.0f + Cf(Idx / 3) * (Ch + 20.0f) + (1.0f - Ci) * 14.0f, Cw, Ch};
 		const bool Focus = Idx == Sel;
+		// The chosen card lifts off the shelf a little.
+		const float Lift = Focus ? 5.0f * Ease((Now - SelAt) / 0.18) : 0.0f;
+		const Rect R{Margin + Cf(Idx % 3) * (Cw + 20.0f), 268.0f + Cf(Idx / 3) * (Ch + 20.0f) + (1.0f - Ci) * 14.0f - Lift, Cw, Ch};
 		const bool Over = Inside(R, Ptr.X, Ptr.Y);
 		int InBasket = 0;
 		for (const std::pair<std::string, int>& Ln : Basket.Lines)
@@ -532,29 +600,54 @@ void StoreCounter::Draw(Canvas& C, double Now)
 		{
 			C.GlowRoundRect(R, 6.0f, Fade(Copper, 0.25f), 22.0f);
 		}
-		C.FillRoundRect(R, 6.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Rgba(24, 28, 38, 0.95f), Rgba(12, 14, 20, 0.95f)));
+		C.FillRoundRect(R, 6.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Focus ? Rgba(30, 33, 44, 0.96f) : Rgba(24, 28, 38, 0.95f), Rgba(12, 14, 20, 0.95f)));
 		C.StrokeRoundRect({R.X + 0.75f, R.Y + 0.75f, R.W - 1.5f, R.H - 1.5f}, 6.0f, Focus ? Copper : Fade(MenuInk, Over ? 0.22f : 0.08f), Focus ? 2.0f : 1.0f);
-		// The shelf edge under the product.
-		C.FillRect({R.X + 18.0f, R.Y + R.H - 46.0f, 150.0f, 4.0f}, Paint(Rgba(255, 255, 255, 0.08f)));
-		DrawProduct(C, I, R.X + 93.0f, R.Y + R.H * 0.5f - 18.0f, 150.0f);
-		const float Tx0 = R.X + 184.0f;
-		const float Tw = R.W - 184.0f - 18.0f;
-		C.Text(I.Name, Tx0, R.Y + 46.0f, Ts(22.0f, 900, MenuInk, Align::Left, Baseline::Alphabetic, false, Tw));
-		C.Text(I.Kind, Tx0, R.Y + 68.0f, Ts(13.0f, 600, MenuMuted, Align::Left, Baseline::Alphabetic, false, Tw));
-		float By = R.Y + 74.0f;
-		for (const std::string& Ln : WrapText(C, I.Blurb, Tw, 13.0f, 400))
+		float Tx0 = R.X + 184.0f;
+		float Tw = R.W - 184.0f - 18.0f;
+		float Ey = R.Y + 146.0f;
+		Rect Tag{R.X + R.W - 112.0f, R.Y + R.H - 52.0f, 94.0f, 36.0f};
+		// What it does (store::ReliefOf: what eating it applies, the line cook's boost included), as pills. Measured first:
+		// on a card too narrow for them in a row (16:10) they take two rows and the blurb gives up a line, so none goes missing.
+		const store::Relief Rl = store::ReliefOf(I, S.Life.Perks.MealBoost);
+		const std::pair<int, double> Effects[3] = {{0, Rl.Hunger}, {1, Rl.Thirst}, {2, Rl.Energy}};
+		auto PillText = [](double V) { return (V > 0.0 ? "+" : "\xE2\x88\x92") + std::to_string(static_cast<int>(std::lround(std::fabs(V)))); };
+		float PillsW = -6.0f;
+		for (const std::pair<int, double>& E : Effects)
 		{
-			By += 18.0f;
-			if (By > R.Y + 132.0f)
-			{
-				break;
-			}
-			C.Text(Ln, Tx0, By, Ts(13.0f, 400, Fade(MenuInk, 0.6f)));
+			PillsW += std::fabs(E.second) < 0.5 ? 0.0f : C.Measure(PillText(E.second), 13.0f, 800) + 40.0f;
 		}
-		// What it does.
+		const bool TwoRows = !Stacked && Tx0 + PillsW > R.X + R.W - 12.0f;
+		if (Stacked)
+		{
+			// The product on top, then the name, the kind and what it does; the tag in the corner.
+			C.FillRect({R.X + R.W * 0.5f - 60.0f, R.Y + 122.0f, 120.0f, 3.0f}, Paint(Rgba(255, 255, 255, 0.08f)));
+			DrawProduct(C, I, R.X + R.W * 0.5f, R.Y + 70.0f, 104.0f);
+			Tx0 = R.X + 14.0f;
+			Tw = R.W - 28.0f;
+			C.Text(I.Name, Tx0, R.Y + 150.0f, Ts(18.0f, 900, MenuInk, Align::Left, Baseline::Alphabetic, false, Tw));
+			C.Text(I.Kind, Tx0, R.Y + 168.0f, Ts(12.0f, 600, MenuMuted, Align::Left, Baseline::Alphabetic, false, Tw));
+			Ey = R.Y + 176.0f;
+			Tag = {R.X + R.W - 86.0f, R.Y + R.H - 34.0f, 74.0f, 26.0f};
+		}
+		else
+		{
+			// The shelf edge under the product.
+			C.FillRect({R.X + 18.0f, R.Y + R.H - 46.0f, 150.0f, 4.0f}, Paint(Rgba(255, 255, 255, 0.08f)));
+			DrawProduct(C, I, R.X + 93.0f, R.Y + R.H * 0.5f - 18.0f, 150.0f);
+			C.Text(I.Name, Tx0, R.Y + 46.0f, Ts(22.0f, 900, MenuInk, Align::Left, Baseline::Alphabetic, false, Tw));
+			C.Text(I.Kind, Tx0, R.Y + 68.0f, Ts(13.0f, 600, MenuMuted, Align::Left, Baseline::Alphabetic, false, Tw));
+			// The blurb: three lines, or two over a second row of pills; cut short, its last line ends in an ellipsis.
+			const std::vector<std::string> Blurb = WrapText(C, I.Blurb, Tw, 13.0f, 400);
+			const size_t Keep = TwoRows ? 2u : 3u;
+			for (size_t Bi = 0; Bi < Blurb.size() && Bi < Keep; ++Bi)
+			{
+				const std::string Ln = Bi + 1 == Keep && Bi + 1 < Blurb.size() ? Blurb[Bi] + " " + Blurb[Bi + 1] : Blurb[Bi];
+				C.Text(Ln, Tx0, R.Y + 92.0f + Cf(static_cast<int>(Bi)) * 18.0f, Ts(13.0f, 400, Fade(MenuInk, 0.6f), Align::Left, Baseline::Alphabetic, false, Tw));
+			}
+			Ey = TwoRows ? R.Y + 118.0f : Ey;
+		}
 		float Ex = Tx0;
-		const double Boost = I.Food() ? S.Life.Perks.MealBoost : 1.0;
-		const std::pair<int, double> Effects[3] = {{0, I.Hunger * Boost}, {1, I.Thirst}, {2, I.Energy * Boost}};
+		bool Wrapped = false;
 		for (const std::pair<int, double>& E : Effects)
 		{
 			if (std::fabs(E.second) < 0.5)
@@ -563,85 +656,245 @@ void StoreCounter::Draw(Canvas& C, double Now)
 			}
 			const bool Good = E.second > 0.0;
 			const uint32_t Hue = E.first == 0 ? 0xff9f43u : E.first == 1 ? 0x4fb8ffu : 0xf2c14eu;
-			const std::string Txt = (Good ? "+" : "\xE2\x88\x92") + std::to_string(static_cast<int>(std::lround(std::fabs(E.second))));
+			const std::string Txt = PillText(E.second);
 			const float Pw = C.Measure(Txt, 13.0f, 800) + 34.0f;
 			if (Ex + Pw > R.X + R.W - 12.0f)
 			{
-				break;
+				// One wrap, onto the second row (still clear of the price tag), and only when it helps.
+				if (!TwoRows || Wrapped || Ex <= Tx0 + 0.5f)
+				{
+					break;
+				}
+				Wrapped = true;
+				Ex = Tx0;
+				Ey += 28.0f;
 			}
-			C.FillRoundRect({Ex, R.Y + 146.0f, Pw, 24.0f}, 12.0f, Paint(Fade(Good ? Hex(Hue) : MenuWarn, 0.14f)));
-			NeedIcon(C, E.first, Ex + 13.0f, R.Y + 158.0f, 13.0f, Good ? Hex(Hue) : MenuWarn);
-			C.Text(Txt, Ex + 24.0f, R.Y + 163.0f, Ts(13.0f, 800, Good ? Hex(Hue) : MenuWarn));
+			C.FillRoundRect({Ex, Ey, Pw, 24.0f}, 12.0f, Paint(Fade(Good ? Hex(Hue) : MenuWarn, 0.14f)));
+			NeedIcon(C, E.first, Ex + 13.0f, Ey + 12.0f, 13.0f, Good ? Hex(Hue) : MenuWarn);
+			C.Text(Txt, Ex + 24.0f, Ey + 17.0f, Ts(13.0f, 800, Good ? Hex(Hue) : MenuWarn));
 			Ex += Pw + 6.0f;
 		}
 		// The shelf tag.
-		const Rect Tag{R.X + R.W - 112.0f, R.Y + R.H - 52.0f, 94.0f, 36.0f};
 		C.FillRect(Tag, Paint(Hex(0xffd23f)));
 		C.FillRect({Tag.X, Tag.Y, 6.0f, Tag.H}, Paint(Hex(0xe23b4e)));
-		C.Text(Money2(I.PriceCents), Tag.X + Tag.W * 0.5f + 3.0f, Tag.Y + 26.0f, Ts(20.0f, 900, Hex(0x1a1408), Align::Center));
+		C.Text(Money2(I.PriceCents), Tag.X + Tag.W * 0.5f + 3.0f, Tag.Y + Tag.H * 0.5f + (Stacked ? 6.0f : 8.0f), Ts(Stacked ? 16.0f : 20.0f, 900, Hex(0x1a1408), Align::Center));
+		// In the basket: a minus to put one back with the mouse, and how many. Bottom left, on the shelf strip under the
+		// product: up top a long name (16:10) or the product art (5:4) would run under them.
+		const float Qy = Stacked ? Tag.Y : R.Y + R.H - 38.0f;
+		const Rect Minus{R.X + (Stacked ? 14.0f : 18.0f), Qy, 26.0f, 26.0f};
 		if (InBasket > 0)
 		{
-			C.FillRoundRect({R.X + R.W - 66.0f, R.Y + 14.0f, 52.0f, 26.0f}, 13.0f, Paint(Copper));
-			C.Text("\xC3\x97" + std::to_string(InBasket), R.X + R.W - 40.0f, R.Y + 32.0f, Ts(14.0f, 900, Hex(0x1a0e04), Align::Center));
+			const bool MinusOver = Inside(Minus, Ptr.X, Ptr.Y);
+			C.FillCircle(Minus.X + 13.0f, Minus.Y + 13.0f, 13.0f, Paint(MinusOver ? Fade(MenuInk, 0.28f) : Fade(MenuInk, 0.12f)));
+			C.StrokePolyline({{Minus.X + 8.0f, Minus.Y + 13.0f}, {Minus.X + 18.0f, Minus.Y + 13.0f}}, false, MenuInk, 2.2f, true);
+			C.FillRoundRect({Minus.X + 32.0f, Qy, 52.0f, 26.0f}, 13.0f, Paint(Copper));
+			C.Text("\xC3\x97" + std::to_string(InBasket), Minus.X + 58.0f, Qy + 18.0f, Ts(14.0f, 900, Hex(0x1a0e04), Align::Center));
 		}
-		if (Released(R))
+		if ((InBasket > 0 && Released(Minus)) || Released(R))
 		{
+			SelAt = Sel != Idx ? Now : SelAt;
 			Sel = Idx;
-			Basket.Add(I.Id);
-			PaidAt = -10.0;
-			DeclinedAt = -10.0;
-			Say(S.ClerkSays(Basket), Now, false);
+			if (InBasket > 0 && Released(Minus))
+			{
+				PutBack(I.Id, Now);
+			}
+			else
+			{
+				Pick(I.Id, Now);
+			}
 		}
 	}
 
-	// Vitals, and what's in the bag.
+	// Vitals, and what's in the bag (the vitals give up some width on a narrow screen so the bag keeps a few chips).
 	const float Vy = 806.0f;
+	const float VitW = std::clamp(GridW * 0.42f, 360.0f, 520.0f);
 	TrackedText(C, "HOW YOU'RE DOING", Margin, Vy - 18.0f, 11.0f, 800, MenuMuted, 2.6f);
-	DrawVitals(C, S.Life, Margin, Vy, 520.0f, Now, &Basket);
-	const float Bx = Margin + 580.0f;
-	TrackedText(C, "IN YOUR BAG", Bx, Vy - 18.0f, 11.0f, 800, MenuMuted, 2.6f);
-	if (S.Life.Pantry.empty())
+	DrawVitals(C, S.Life, Margin, Vy, VitW, Now, &Basket);
+	const float Bx = Margin + VitW + 60.0f;
+	DrawBag(C, Bx, Vy, Margin + GridW - Bx, Now);
+
+	// The receipt, and paying.
+	DrawReceipt(C, W - Margin - ReceiptW, Now);
+
+	// Hints.
+	float Hx = Margin;
+	const float Hy = H - 62.0f;
+	const std::pair<const char*, const char*> Hints[5] = {{Gamepad ? "DPAD" : "UP", "CHOOSE"}, {Gamepad ? "A" : "ENTER", "ADD"}, {Gamepad ? "X" : "BACKSPACE", "PUT BACK"}, {Gamepad ? "Y" : "TAB", "PAY"},
+		{Gamepad ? "B" : "ESC", "WALK AWAY"}};
+	for (const std::pair<const char*, const char*>& Hp : Hints)
 	{
-		C.Text("Nothing yet.", Bx, Vy + 22.0f, Ts(15.0f, 400, MenuDim));
+		Hx += Glyph(C, Hp.first, Hx, Hy, 1.0f) + 10.0f;
+		Hx += TrackedText(C, Hp.second, Hx, Hy - 2.0f, 13.0f, 700, MenuMuted, 2.6f) + 32.0f;
 	}
-	float Px = Bx;
-	for (const auto& Held : S.Life.Pantry)
+	C.SetAlpha(Al);
+	Ptr.EndFrame();
+}
+
+void StoreCounter::DrawBag(Canvas& C, float X, float Y, float W, double Now)
+{
+	const life::State& L = S.Life;
+	auto Held = [&L](const std::string& Id) {
+		const auto It = L.Pantry.find(Id);
+		return It == L.Pantry.end() ? 0 : It->second;
+	};
+	auto Released = [this](const Rect& R) { return Ptr.Released && Inside(R, Ptr.X, Ptr.Y) && Inside(R, PressX, PressY); };
+	// Two rows of chips, as many across as fit.
+	const float ChipW = 104.0f;
+	const float ChipH = 88.0f;
+	const float Gap = 10.0f;
+	const int PerRow = std::max(1, static_cast<int>((W + Gap) / (ChipW + Gap)));
+	const int Slots = PerRow * 2;
+	const Rect Area{X - 8.0f, Y - 12.0f, Cf(PerRow) * (ChipW + Gap) - Gap + 16.0f, ChipH * 2.0f + Gap + 16.0f};
+	const bool Over = Inside(Area, Ptr.X, Ptr.Y);
+	// The chips, shelf by shelf. While the pointer is over the bag they stay put: one eaten to the last keeps its
+	// place (a ghost) so the next click lands on what it was aimed at; the bag closes up once the pointer leaves.
+	if (!Over)
 	{
-		const store::Item* I = store::Find(Held.first);
-		if (!I || Px > Margin + GridW - 120.0f)
+		BagCells.clear();
+	}
+	for (const store::Item& I : store::Catalog())
+	{
+		if (Held(I.Id) > 0 && std::find(BagCells.begin(), BagCells.end(), I.Id) == BagCells.end())
+		{
+			BagCells.push_back(I.Id);
+		}
+	}
+	int Things = 0;
+	for (const auto& H : L.Pantry)
+	{
+		Things += std::max(0, H.second);
+	}
+	const float Lw = TrackedText(C, "IN YOUR BAG", X, Y - 18.0f, 11.0f, 800, MenuMuted, 2.6f);
+	if (Things > 0)
+	{
+		TrackedText(C, std::to_string(Things), X + Lw + 12.0f, Y - 18.0f, 11.0f, 800, Copper, 2.6f);
+	}
+	if (BagCells.empty())
+	{
+		C.Text("Nothing yet.", X, Y + 22.0f, Ts(15.0f, 400, MenuDim));
+		BagFirst = 0;
+		return;
+	}
+	// More kinds than chips: the last chip turns the page (and comes back around to the first).
+	const int N = static_cast<int>(BagCells.size());
+	const bool Pages = N > Slots;
+	const int Per = Pages ? Slots - 1 : Slots;
+	BagFirst = Pages && BagFirst > 0 && BagFirst < N ? BagFirst - BagFirst % Per : 0;
+	// The wheel over the bag turns the pages too, as Penny Drop's does (positive: down, the next page).
+	if (Pages && Over && Ptr.Wheel != 0.0f)
+	{
+		const int LastPage = (N - 1) / Per * Per;
+		BagFirst = Ptr.Wheel > 0.0f ? std::min(LastPage, BagFirst + Per) : std::max(0, BagFirst - Per);
+	}
+	const int End = std::min(N, BagFirst + Per);
+	auto ChipAt = [&](int Slot) { return Rect{X + Cf(Slot % PerRow) * (ChipW + Gap), Y - 4.0f + Cf(Slot / PerRow) * (ChipH + Gap), ChipW, ChipH}; };
+	std::string Eat;
+	std::string Grab;
+	for (int K = BagFirst; K < End; ++K)
+	{
+		const std::string& Id = BagCells[static_cast<size_t>(K)];
+		const store::Item* I = store::Find(Id);
+		if (!I)
 		{
 			continue;
 		}
-		const Rect Chip{Px, Vy - 4.0f, 118.0f, 100.0f};
-		const bool Over = Inside(Chip, Ptr.X, Ptr.Y);
-		C.FillRoundRect(Chip, 8.0f, Paint(Fade(MenuInk, Over ? 0.1f : 0.05f)));
-		DrawProduct(C, *I, Chip.X + 30.0f, Chip.Y + 44.0f, 62.0f);
-		C.Text("\xC3\x97" + std::to_string(Held.second), Chip.X + Chip.W - 12.0f, Chip.Y + 26.0f, Ts(15.0f, 900, MenuInk, Align::Right));
-		TrackedText(C, I->Food() ? "EAT" : "DRINK", Chip.X + Chip.W - 12.0f, Chip.Y + 86.0f, 11.0f, 800, Over ? Copper : MenuMuted, 2.4f, Align::Right);
-		if (Released(Chip))
+		const Rect Chip = ChipAt(K - BagFirst);
+		const bool Hover = Inside(Chip, Ptr.X, Ptr.Y);
+		const int Have = Held(Id);
+		if (Have > 0)
 		{
-			const std::string Id = I->Id;
-			S.Consume(Id);
-			Say(I->Food() ? "Not in the store, man. Okay, fine. Napkins are by the door." : "Recycling's out front.", Now, false);
-			break; // the bag changed under the loop
+			C.FillRoundRect(Chip, 8.0f, Paint(Fade(MenuInk, Hover ? 0.11f : 0.05f)));
+			if (Hover)
+			{
+				C.StrokeRoundRect(Chip, 8.0f, Fade(Copper, 0.7f), 1.5f);
+			}
+			DrawProduct(C, *I, Chip.X + 28.0f, Chip.Y + 40.0f, 56.0f);
+			C.Text("\xC3\x97" + std::to_string(Have), Chip.X + Chip.W - 10.0f, Chip.Y + 24.0f, Ts(15.0f, 900, MenuInk, Align::Right));
+			TrackedText(C, I->Drink() ? "DRINK" : "EAT", Chip.X + Chip.W - 10.0f, Chip.Y + Chip.H - 12.0f, 11.0f, 800, Hover ? Copper : MenuMuted, 2.4f, Align::Right);
+			if (Released(Chip))
+			{
+				Eat = Id;
+			}
 		}
-		Px += Chip.W + 10.0f;
+		else
+		{
+			// Eaten to the last: a ghost of it, and a click grabs another off the shelf.
+			C.StrokeRoundRect({Chip.X + 0.5f, Chip.Y + 0.5f, Chip.W - 1.0f, Chip.H - 1.0f}, 8.0f, Fade(MenuInk, Hover ? 0.3f : 0.12f), 1.0f);
+			const float A0 = C.GetAlpha();
+			C.SetAlpha(A0 * 0.3f);
+			DrawProduct(C, *I, Chip.X + 28.0f, Chip.Y + 40.0f, 56.0f);
+			C.SetAlpha(A0);
+			TrackedText(C, "ALL GONE", Chip.X + Chip.W - 10.0f, Chip.Y + 24.0f, 10.0f, 800, MenuDim, 1.6f, Align::Right);
+			TrackedText(C, "GRAB ONE", Chip.X + Chip.W - 10.0f, Chip.Y + Chip.H - 12.0f, 11.0f, 800, Hover ? Copper : MenuDim, 2.0f, Align::Right);
+			if (Released(Chip))
+			{
+				Grab = Id;
+			}
+		}
 	}
+	if (Pages)
+	{
+		const Rect More = ChipAt(End - BagFirst);
+		const int Rest = N - End;
+		const bool Hover = Inside(More, Ptr.X, Ptr.Y);
+		C.FillRoundRect(More, 8.0f, Paint(Fade(Copper, Hover ? 0.24f : 0.12f)));
+		C.StrokeRoundRect({More.X + 0.5f, More.Y + 0.5f, More.W - 1.0f, More.H - 1.0f}, 8.0f, Fade(Copper, Hover ? 0.85f : 0.45f), 1.0f);
+		C.Text(Rest > 0 ? "+" + std::to_string(Rest) : std::string("BACK"), More.X + More.W * 0.5f, More.Y + 48.0f, Ts(Rest > 0 ? 28.0f : 18.0f, 900, MenuInk, Align::Center));
+		TrackedText(C, Rest > 0 ? "MORE" : "TO THE TOP", More.X + More.W * 0.5f, More.Y + More.H - 12.0f, 10.0f, 800, Hover ? Copper : MenuMuted, 2.0f, Align::Center);
+		if (Released(More))
+		{
+			BagFirst = Rest > 0 ? End : 0;
+		}
+	}
+	if (!Eat.empty())
+	{
+		const store::Item* I = store::Find(Eat);
+		if (I && S.Consume(Eat).empty())
+		{
+			Say(I->Drink() ? "Recycling's out front." : "Not in the store, man. Okay, fine. Napkins are by the door.", Now, false);
+		}
+	}
+	if (const store::Item* I = Grab.empty() ? nullptr : store::Find(Grab))
+	{
+		// Its shelf comes up with it chosen, and one goes in the basket.
+		ShelfAt = static_cast<int>(I->Where);
+		const std::vector<const store::Item*> Items = OnShelf();
+		for (size_t K = 0; K < Items.size(); ++K)
+		{
+			Sel = Items[K] == I ? static_cast<int>(K) : Sel;
+		}
+		SelAt = Now;
+		Pick(Grab, Now);
+	}
+}
 
-	// The receipt.
-	const float Rx = W - Margin - ReceiptW;
+void StoreCounter::DrawReceipt(Canvas& C, float Rx0, double Now)
+{
+	auto Released = [this](const Rect& R) { return Ptr.Released && Inside(R, Ptr.X, Ptr.Y) && Inside(R, PressX, PressY); };
+	// A declined card shakes the paper: a quick wobble that dies away.
+	const double Dd = Now - DeclinedAt;
+	const float Shake = DeclinedAt > 0.0 && Dd >= 0.0 && Dd < 0.4 ? static_cast<float>(std::sin(Dd * 70.0) * 9.0 * (1.0 - Dd / 0.4)) : 0.0f;
+	const float Rx = Rx0 + Shake;
 	float Ry = 86.0f;
-	std::vector<std::pair<std::string, std::string>> Lines;
-	const store::Basket& Shown2 = PaidAt > 0.0 && Basket.Empty() ? LastPaid : Basket;
+	struct Row
+	{
+		std::string Id;
+		std::string Left;
+		std::string Right;
+	};
+	std::vector<Row> Lines;
+	const bool ShowPaid = PaidAt > 0.0 && Basket.Empty();
+	const store::Basket& Shown2 = ShowPaid ? LastPaid : Basket;
 	for (const std::pair<std::string, int>& Ln : Shown2.Lines)
 	{
 		const store::Item* I = store::Find(Ln.first);
 		std::string Up = I ? I->Name : Ln.first;
 		std::transform(Up.begin(), Up.end(), Up.begin(), [](char Cc) { return static_cast<char>(Cc >= 'a' && Cc <= 'z' ? Cc - 32 : Cc); });
-		Lines.push_back({std::to_string(Ln.second) + " " + Up, Money2((I ? I->PriceCents : 0) * Ln.second)});
+		Lines.push_back({Ln.first, std::to_string(Ln.second) + " " + Up, Money2((I ? I->PriceCents : 0) * Ln.second)});
 	}
 	const float RowH = 26.0f;
-	const float PaperH = 300.0f + Cf(std::max(1, static_cast<int>(Lines.size()))) * RowH;
+	// The header, the lines, the sums, the card, the balance.
+	const float PaperH = 326.0f + Cf(std::max(1, static_cast<int>(Lines.size()))) * RowH;
 	std::vector<Vec2> PaperShape = {{Rx, Ry}, {Rx + ReceiptW, Ry}};
 	for (int K = 0; K <= 22; ++K)
 	{
@@ -649,8 +902,8 @@ void StoreCounter::Draw(Canvas& C, double Now)
 	}
 	C.GlowRoundRect({Rx, Ry + 8.0f, ReceiptW, PaperH}, 4.0f, Rgba(0, 0, 0, 0.5f), 26.0f);
 	C.FillPolygon(PaperShape, Paint::Linear({0.0f, Ry}, {0.0f, Ry + PaperH}, Paper, Shade(Paper, -0.05f)));
-	auto Mono = [&](const std::string& Txt, float Xx, float Yy, Align Al2, float Size = 16.0f, int Weight = 500) {
-		C.Text(Txt, Xx, Yy, Ts(Size, Weight, PaperInk, Al2, Baseline::Alphabetic, true));
+	auto Mono = [&](const std::string& Txt, float Xx, float Yy, Align Al2, float Size = 16.0f, int Weight = 500, float A = 1.0f) {
+		C.Text(Txt, Xx, Yy, Ts(Size, Weight, Fade(PaperInk, A), Al2, Baseline::Alphabetic, true));
 	};
 	Ry += 46.0f;
 	Mono("LUCKY PENNY #212", Rx + ReceiptW * 0.5f, Ry, Align::Center, 20.0f, 700);
@@ -667,11 +920,30 @@ void StoreCounter::Draw(Canvas& C, double Now)
 		Ry += RowH;
 		Mono("Pick something up.", Rx + ReceiptW * 0.5f, Ry, Align::Center, 15.0f);
 	}
-	for (const std::pair<std::string, std::string>& Ln : Lines)
+	std::string Back;
+	for (const Row& Ln : Lines)
 	{
 		Ry += RowH;
-		Mono(Ln.first, Rx + 28.0f, Ry, Align::Left);
-		Mono(Ln.second, Rx + ReceiptW - 28.0f, Ry, Align::Right);
+		// A line that just changed prints out again: it drops in from the line above.
+		const auto At = LineAt.find(Ln.Id);
+		const float P = ShowPaid || At == LineAt.end() ? 1.0f : Ease((Now - At->second) / 0.16);
+		const float Y = Ry - (1.0f - P) * 10.0f;
+		// The mouse's way to put one back: a minus beside the paper on the line under the pointer.
+		const Rect Band{Rx - 40.0f, Ry - RowH + 6.0f, ReceiptW + 40.0f, RowH};
+		if (!ShowPaid && Inside(Band, Ptr.X, Ptr.Y))
+		{
+			C.FillRect({Rx + 16.0f, Band.Y, ReceiptW - 32.0f, RowH}, Paint(Fade(PaperInk, 0.06f)));
+			const Rect Minus{Rx - 33.0f, Band.Y + 2.0f, 22.0f, 22.0f};
+			const bool MinusOver = Inside(Minus, Ptr.X, Ptr.Y);
+			C.FillCircle(Minus.X + 11.0f, Minus.Y + 11.0f, 11.0f, Paint(MinusOver ? Fade(MenuWarn, 0.9f) : Fade(MenuInk, 0.22f)));
+			C.StrokePolyline({{Minus.X + 6.5f, Minus.Y + 11.0f}, {Minus.X + 15.5f, Minus.Y + 11.0f}}, false, MenuInk, 2.0f, true);
+			if (Released(Minus))
+			{
+				Back = Ln.Id;
+			}
+		}
+		Mono(Ln.Left, Rx + 28.0f, Y, Align::Left, 16.0f, 500, P);
+		Mono(Ln.Right, Rx + ReceiptW - 28.0f, Y, Align::Right, 16.0f, 500, P);
 	}
 	Ry += 18.0f;
 	C.StrokePolyline({{Rx + 24.0f, Ry}, {Rx + ReceiptW - 24.0f, Ry}}, false, Fade(PaperInk, 0.35f), 1.0f);
@@ -685,7 +957,16 @@ void StoreCounter::Draw(Canvas& C, double Now)
 	Ry += 32.0f;
 	Mono("TOTAL", Rx + 28.0f, Ry, Align::Left, 20.0f, 700);
 	Mono(Money2(Shown2.Total()), Rx + ReceiptW - 28.0f, Ry, Align::Right, 20.0f, 700);
-	Ry += 30.0f;
+	// The card it goes on (the Bank's checking account), and the reader's approval once it's paid.
+	Ry += 26.0f;
+	Mono("DEBIT \xC2\xB7\xC2\xB7\xC2\xB7\xC2\xB7 4471", Rx + 28.0f, Ry, Align::Left, 13.0f);
+	if (ShowPaid)
+	{
+		char Auth[24];
+		std::snprintf(Auth, sizeof(Auth), "AUTH %06llu", static_cast<unsigned long long>(PaidAuth) * 2654435761ull % 1000000ull);
+		Mono(Auth, Rx + ReceiptW - 28.0f, Ry, Align::Right, 13.0f);
+	}
+	Ry += 28.0f;
 	Mono("CARD BALANCE " + Money2(S.BankrollCents), Rx + ReceiptW * 0.5f, Ry, Align::Center, 13.0f);
 	// Stamps.
 	const bool Paid = PaidAt > 0.0 && Now - PaidAt < 4.0 && Basket.Empty();
@@ -704,8 +985,8 @@ void StoreCounter::Draw(Canvas& C, double Now)
 		TrackedText(C, Word, 0.0f, 12.0f, 40.0f, 900, Fade(StampInk, 0.85f * Sa), 6.0f, Align::Center);
 		C.Restore();
 	}
-	// Pay.
-	const Rect PayR{Rx, 86.0f + PaperH + 36.0f, ReceiptW, 66.0f};
+	// Pay (the button stays put while the paper shakes).
+	const Rect PayR{Rx0, 86.0f + PaperH + 36.0f, ReceiptW, 66.0f};
 	const bool CanPay = !Basket.Empty();
 	const bool Short = Basket.Total() > S.BankrollCents;
 	const bool PayOver = Inside(PayR, Ptr.X, Ptr.Y);
@@ -721,20 +1002,12 @@ void StoreCounter::Draw(Canvas& C, double Now)
 		Pay(Now);
 	}
 	Glyph(C, Gamepad ? "Y" : "TAB", PayR.X + PayR.W - 64.0f, PayR.Y + 43.0f, CanPay ? 0.9f : 0.4f);
-
-	// Hints.
-	float Hx = Margin;
-	const float Hy = H - 62.0f;
-	const std::pair<const char*, const char*> Hints[5] = {{Gamepad ? "DPAD" : "UP", "CHOOSE"}, {Gamepad ? "A" : "ENTER", "ADD"}, {Gamepad ? "X" : "BACKSPACE", "PUT BACK"}, {Gamepad ? "Y" : "TAB", "PAY"},
-		{Gamepad ? "B" : "ESC", "WALK AWAY"}};
-	for (const std::pair<const char*, const char*>& Hp : Hints)
+	if (!Back.empty())
 	{
-		Hx += Glyph(C, Hp.first, Hx, Hy, 1.0f) + 10.0f;
-		Hx += TrackedText(C, Hp.second, Hx, Hy - 2.0f, 13.0f, 700, MenuMuted, 2.6f) + 32.0f;
+		PutBack(Back, Now);
 	}
-	C.SetAlpha(Al);
-	Ptr.EndFrame();
 }
+
 // ------------------------------------------------------------------ the walking HUD
 
 void DrawStreetHud(Canvas& C, const StreetHudInfo& Info, double Now)
@@ -750,6 +1023,23 @@ void DrawStreetHud(Canvas& C, const StreetHudInfo& Info, double Now)
 	if (Info.Life)
 	{
 		DrawVitals(C, *Info.Life, 58.0f, 128.0f, 380.0f, Now, nullptr, 0.95f);
+		// An order on its way (Penny Drop): how long until the soonest one is at the door, so the player knows to head home.
+		if (Info.World >= 0.0 && !Info.Life->Deliveries.empty())
+		{
+			double Soonest = Info.Life->Deliveries.front().ArriveAt;
+			for (const life::State::Delivery& Dv : Info.Life->Deliveries)
+			{
+				Soonest = std::min(Soonest, Dv.ArriveAt);
+			}
+			const int Mins = static_cast<int>(std::ceil(std::max(0.0, Soonest - Info.World)));
+			const std::string Label = "PENNY DROP \xC2\xB7 " + (Mins <= 1 ? std::string("ANY MINUTE") : std::to_string(Mins) + " MIN");
+			const float Lw = TrackedWidth(C, Label, 11.0f, 800, 2.4f);
+			const Rect Chip{58.0f, 238.0f, Lw + 40.0f, 26.0f};
+			C.FillRoundRect(Chip, 13.0f, Paint(Rgba(215, 38, 61, 0.88f)));
+			const float Beat = 0.55f + 0.45f * static_cast<float>(std::sin(Now * 3.0));
+			C.FillCircle(Chip.X + 15.0f, Chip.Y + 13.0f, 4.0f, Paint(Rgba(255, 255, 255, Beat)));
+			TrackedText(C, Label, Chip.X + 28.0f, Chip.Y + 17.5f, 11.0f, 800, Hex(0xffffff), 2.4f);
+		}
 	}
 	// The camera, top right.
 	const std::string Mode = Info.FirstPerson ? "FIRST PERSON" : "THIRD PERSON";

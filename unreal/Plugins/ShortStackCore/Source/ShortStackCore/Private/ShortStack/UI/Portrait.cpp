@@ -551,6 +551,16 @@ void BackHair(Ctx& X)
 	}
 	if (Style == 9)
 	{
+		if (Hat)
+		{
+			// Under a hat the tail is pulled through low at the back, so it falls from under the hat's edge.
+			const Pts Tail = Spline({X.H.Rim(64.0f, 2.0f), {G.CheekW + 16.0f, -50.0f}, {G.CheekW + 28.0f, -6.0f}, {G.CheekW + 27.0f, 54.0f}, {G.CheekW + 18.0f, 130.0f}, {G.CheekW + 4.0f, 80.0f},
+										{G.CheekW + 4.0f, 6.0f}, X.H.Rim(88.0f, -6.0f)},
+				4, true);
+			HairFill(X, Tail);
+			X.C->StrokePolyline(Spline({{G.CheekW + 20.0f, -36.0f}, {G.CheekW + 26.0f, 10.0f}, {G.CheekW + 22.0f, 70.0f}}, 5, false), false, WithA(X.Light.Rim, 0.5f * X.Light.RimStrength), 2.0f, true);
+			return;
+		}
 		// A high ponytail: the tie on the crown, the tail falling behind the right shoulder.
 		const Pts Tail = Spline({X.H.Rim(28.0f, 4.0f), {G.CheekW + 18.0f, -96.0f}, {G.CheekW + 34.0f, -40.0f}, {G.CheekW + 30.0f, 40.0f}, {G.CheekW + 20.0f, 120.0f}, {G.CheekW + 4.0f, 70.0f},
 									{G.CheekW + 6.0f, -20.0f}, X.H.Rim(60.0f, -6.0f)},
@@ -721,8 +731,12 @@ void FrontHair(Ctx& X)
 				1.3f, true);
 		}
 		C.StrokePolyline(X.H.Arc(-55.0f, -20.0f, [](float) { return 5.0f; }), false, WithA(Hex(0xffffff), 0.22f), 3.0f, true);
-		const Vec2 Tie = X.H.Rim(26.0f, 8.0f);
-		C.FillEllipse(Tie.X, Tie.Y, 7.0f, 5.0f, Lum(X.Cloth, -0.2f));
+		if (X.Who->Appearance.Hat == 0)
+		{
+			// The tie on the crown (under a hat it's out of sight, and the tail comes out lower).
+			const Vec2 Tie = X.H.Rim(26.0f, 8.0f);
+			C.FillEllipse(Tie.X, Tie.Y, 7.0f, 5.0f, Lum(X.Cloth, -0.2f));
+		}
 		HairRim(X, [](float) { return 8.0f; });
 		break;
 	}
@@ -1419,6 +1433,29 @@ void Glasses(Ctx& X)
 	C.StrokePolyline(Spline({{-Ex + 16.0f, -1.0f}, {0.0f, -5.0f}, {Ex - 16.0f, -1.0f}}, 4, false), false, Frame, Wd);
 }
 
+/** How far each hairstyle stands off the skull at its fullest (FrontHair's cap, BackHair's panel): a hat sits on that. */
+float HairOuter(int Style)
+{
+	static const float Outer[12] = {0.4f, 2.2f, 7.5f, 16.0f, 17.0f, 16.0f, 23.0f, 6.0f, 13.0f, 8.0f, 13.0f, 14.0f};
+	return Outer[std::clamp(Style, 0, 11)];
+}
+
+/** A half-plane as a big convex quad: the side of the line through A and B that Keep is on. */
+Pts HalfPlane(Vec2 A, Vec2 B, Vec2 Keep)
+{
+	const float Len = std::max(1e-4f, std::sqrt((B.X - A.X) * (B.X - A.X) + (B.Y - A.Y) * (B.Y - A.Y)));
+	const Vec2 D{(B.X - A.X) / Len, (B.Y - A.Y) / Len};
+	Vec2 N{-D.Y, D.X};
+	if ((Keep.X - A.X) * N.X + (Keep.Y - A.Y) * N.Y < 0.0f)
+	{
+		N = {-N.X, -N.Y};
+	}
+	const float Far = 1000.0f;
+	const Vec2 P0{A.X - D.X * Far, A.Y - D.Y * Far};
+	const Vec2 P1{A.X + D.X * Far, A.Y + D.Y * Far};
+	return {P0, P1, {P1.X + N.X * Far, P1.Y + N.Y * Far}, {P0.X + N.X * Far, P0.Y + N.Y * Far}};
+}
+
 void Hat(Ctx& X)
 {
 	const int Kind = X.Who->Appearance.Hat;
@@ -1428,36 +1465,57 @@ void Hat(Ctx& X)
 	}
 	Canvas& C = *X.C;
 	const Geo& G = X.H.G;
-	// The hat goes with the jacket without matching it.
-	static const int Partner[8] = {7, 4, 5, 0, 1, 3, 0, 5};
-	const Color HatTone = Hex(hero::OutfitTone(Partner[std::clamp(X.Who->Appearance.OutfitColor, 0, 7)]));
+	// The hat goes with the jacket without matching it, and stands apart from the hair under it (hero::HatTone; the 3D
+	// character wears the same).
+	const Color HatTone = Hex(hero::HatTone(X.Who->Appearance, X.Who->Age));
 	const Paint Fill = Paint::Linear({-G.TempleW - 20.0f, 0.0f}, {G.TempleW + 20.0f, 0.0f}, Lum(HatTone, 0.12f), Lum(HatTone, -0.45f));
-	const int Style = HairStyle(X);
-	const float Puff = Style == 6 ? 12.0f : Style == 7 ? 6.0f : Style == 3 || Style == 4 || Style == 5 ? 6.0f : 0.0f;
+	// It sits on the hair, not through it: every crown clears the style's fullest point.
+	const float Hair = HairOuter(HairStyle(X)) + 1.5f;
 	switch (Kind)
 	{
 	case 1: // Beanie
 	{
-		Pts Dome = X.H.Arc(-100.0f, 100.0f, [Puff](float A) { return 13.0f + Puff + 6.0f * std::cos(A * Deg); }, 4.0f);
-		Dome.push_back({G.TempleW * 0.62f, -54.0f});
+		auto Thick = [Hair](float A) { return std::max(13.0f + 6.0f * std::cos(A * Deg), Hair + 2.0f * std::cos(A * Deg)); };
+		const Pts Outer = X.H.Arc(-100.0f, 100.0f, Thick, 4.0f);
+		const float Mx = G.TempleW * 0.62f;
+		Pts Dome = Outer;
+		Dome.push_back({Mx, -54.0f});
 		Dome.push_back({0.0f, -56.0f});
-		Dome.push_back({-G.TempleW * 0.62f, -54.0f});
+		Dome.push_back({-Mx, -54.0f});
 		C.FillPolygon(Dome, Fill);
 		const Pts Cuff = ClipConvex(Dome, {{-300.0f, -82.0f}, {300.0f, -82.0f}, {300.0f, 0.0f}, {-300.0f, 0.0f}});
 		if (!Cuff.empty())
 		{
 			C.FillPolygon(Cuff, Paint::Linear({-G.TempleW - 20.0f, 0.0f}, {G.TempleW + 20.0f, 0.0f}, Lum(HatTone, 0.2f), Lum(HatTone, -0.4f)));
-			for (float Rx = -G.TempleW - 14.0f; Rx < G.TempleW + 14.0f; Rx += 6.0f)
+			// The knit ribs. The cuff bends round the brow, so they're cut to its convex pieces (a concave window cuts
+			// them away entirely): the band over the forehead, and a leg down each temple.
+			std::vector<Pts> Pieces;
+			Pieces.push_back(ClipConvex(Outer, {{-Mx, -82.0f}, {Mx, -82.0f}, {Mx, -56.0f}, {-Mx, -56.0f}}));
+			for (int Side = -1; Side <= 1; Side += 2)
 			{
-				const Pts Rib = ClipConvex({{Rx, -84.0f}, {Rx + 1.6f, -84.0f}, {Rx + 1.6f, -40.0f}, {Rx, -40.0f}}, Cuff);
-				if (!Rib.empty())
+				const float S = Fl(Side);
+				const Vec2 Foot = Side > 0 ? Outer.back() : Outer.front();
+				const Pts Leg = ClipConvex(Outer, {{S * Mx, -82.0f}, {S * 400.0f, -82.0f}, {S * 400.0f, 0.0f}, {S * Mx, 0.0f}});
+				Pieces.push_back(ClipConvex(Leg, HalfPlane(Foot, {S * Mx, -54.0f}, {S * (G.TempleW + 8.0f), -76.0f})));
+			}
+			for (const Pts& Piece : Pieces)
+			{
+				if (Piece.empty())
 				{
-					C.FillPolygon(Rib, WithA(Lum(HatTone, -0.5f), 0.45f));
+					continue;
+				}
+				for (float Rx = -G.TempleW - 34.0f; Rx < G.TempleW + 34.0f; Rx += 6.0f)
+				{
+					const Pts Rib = ClipConvex({{Rx, -84.0f}, {Rx + 1.6f, -84.0f}, {Rx + 1.6f, 2.0f}, {Rx, 2.0f}}, Piece);
+					if (!Rib.empty())
+					{
+						C.FillPolygon(Rib, WithA(Lum(HatTone, -0.5f), 0.45f));
+					}
 				}
 			}
 			C.StrokePolyline(Spline({{-G.TempleW - 14.0f, -82.0f}, {0.0f, -84.0f}, {G.TempleW + 14.0f, -82.0f}}, 4, false), false, WithA(Lum(HatTone, -0.6f), 0.6f), 1.6f, true);
 		}
-		C.StrokePolyline(X.H.Arc(20.0f, 96.0f, [Puff](float A) { return 13.0f + Puff + 6.0f * std::cos(A * Deg) - 0.6f; }, 4.0f), false, WithA(X.Light.Rim, 0.55f * X.Light.RimStrength), 2.2f, true);
+		C.StrokePolyline(X.H.Arc(20.0f, 96.0f, [&Thick](float A) { return Thick(A) - 0.6f; }, 4.0f), false, WithA(X.Light.Rim, 0.55f * X.Light.RimStrength), 2.2f, true);
 		X.HatTop = -56.0f;
 		break;
 	}
@@ -1465,12 +1523,13 @@ void Hat(Ctx& X)
 	case 3: // Ball cap, backwards
 	{
 		const bool Back = Kind == 3;
-		Pts Crown = X.H.Arc(-74.0f, 74.0f, [Puff](float A) { return 7.0f + Puff * 0.7f + 4.0f * std::cos(A * Deg); }, 4.0f);
+		auto Thick = [Hair](float A) { return std::max(7.0f + 4.0f * std::cos(A * Deg), Hair); };
+		Pts Crown = X.H.Arc(-74.0f, 74.0f, Thick, 4.0f);
 		Crown.push_back({G.TempleW * 0.7f, -60.0f});
 		Crown.push_back({0.0f, -66.0f});
 		Crown.push_back({-G.TempleW * 0.7f, -60.0f});
 		C.FillPolygon(Crown, Fill);
-		const Vec2 Top = X.H.Rim(0.0f, 11.0f + Puff * 0.7f);
+		const Vec2 Top = X.H.Rim(0.0f, Thick(0.0f));
 		C.StrokePolyline(Spline({Top, {0.0f, -92.0f}, {0.0f, -66.0f}}, 3, false), false, WithA(Lum(HatTone, -0.5f), 0.6f), 1.3f);
 		C.FillEllipse(Top.X, Top.Y + 2.0f, 5.0f, 2.6f, Lum(HatTone, -0.2f));
 		if (Back)
@@ -1502,13 +1561,13 @@ void Hat(Ctx& X)
 			C.StrokePolyline(Spline({{-Bw * 0.8f, -52.0f}, {0.0f, -43.0f}, {Bw * 0.8f, -52.0f}}, 4, false), false, WithA(Lum(HatTone, -0.65f), 0.7f), 1.2f, true);
 			X.HatTop = -40.0f;
 		}
-		C.StrokePolyline(X.H.Arc(20.0f, 72.0f, [Puff](float A) { return 7.0f + Puff * 0.7f + 4.0f * std::cos(A * Deg) - 0.6f; }, 4.0f), false, WithA(X.Light.Rim, 0.55f * X.Light.RimStrength), 2.2f,
-			true);
+		C.StrokePolyline(X.H.Arc(20.0f, 72.0f, [&Thick](float A) { return Thick(A) - 0.6f; }, 4.0f), false, WithA(X.Light.Rim, 0.55f * X.Light.RimStrength), 2.2f, true);
 		break;
 	}
 	default: // Bucket hat
 	{
-		Pts Crown = X.H.Arc(-94.0f, 94.0f, [Puff](float A) { return 12.0f + Puff * 0.6f + 2.0f * std::cos(A * Deg); }, 4.0f);
+		auto Thick = [Hair](float A) { return std::max(12.0f + 2.0f * std::cos(A * Deg), Hair); };
+		Pts Crown = X.H.Arc(-94.0f, 94.0f, Thick, 4.0f);
 		Crown.push_back({0.0f, -58.0f});
 		C.FillPolygon(Crown, Fill);
 		const Pts Shade = ClipConvex({{-200.0f, -60.0f}, {200.0f, -60.0f}, {200.0f, -4.0f}, {-200.0f, -4.0f}}, X.H.Outline);
@@ -1526,8 +1585,7 @@ void Hat(Ctx& X)
 								 false),
 				false, WithA(Lum(HatTone, -0.55f), 0.5f), 1.0f, true);
 		}
-		C.StrokePolyline(X.H.Arc(20.0f, 92.0f, [Puff](float A) { return 12.0f + Puff * 0.6f + 2.0f * std::cos(A * Deg) - 0.6f; }, 4.0f), false, WithA(X.Light.Rim, 0.55f * X.Light.RimStrength), 2.2f,
-			true);
+		C.StrokePolyline(X.H.Arc(20.0f, 92.0f, [&Thick](float A) { return Thick(A) - 0.6f; }, 4.0f), false, WithA(X.Light.Rim, 0.55f * X.Light.RimStrength), 2.2f, true);
 		X.HatTop = -36.0f;
 		break;
 	}
@@ -1553,11 +1611,12 @@ void DrawPortrait(Canvas& C, const hero::Character& Who, float X, float Y, float
 	Cx.SkinShade = Mix(Cx.Skin, Hex(0x3a1d22), 0.36f);
 	Cx.SkinDeep = Mix(Cx.Skin, Hex(0x2a1214), 0.62f);
 	Cx.Blush = Mix(Cx.Skin, Hex(0xd8545c), 0.45f);
-	Color HairBase = Hex(hero::HairTone(L.HairColor));
+	// The hair as it shows at this age (hero::HairToneAt greys it the same way for the hat's color); greying hair
+	// catches a cooler light.
+	const Color HairBase = Hex(hero::HairToneAt(L, Who.Age));
 	const float Grey = L.HairColor >= 6 ? 0.0f : std::clamp((Cx.Age - 44.0f) / 30.0f, 0.0f, 0.65f);
-	HairBase = Mix(HairBase, Hex(0xb8b5ae), Grey);
 	Cx.Hair = HairBase;
-	Cx.HairLight = Mix(HairBase, Hex(0xfff4e6), Luma(HairBase) > 0.5f ? 0.25f : 0.2f);
+	Cx.HairLight = Mix(HairBase, Mix(Hex(0xfff4e6), Hex(0xf2f5fa), Grey / 0.65f), Luma(HairBase) > 0.5f ? 0.25f : 0.2f);
 	Cx.HairDark = Mix(HairBase, Hex(0x050404), 0.45f);
 	Cx.Brow = L.HairColor >= 5 ? Mix(HairBase, Hex(0x6a5848), 0.45f) : Mix(HairBase, Hex(0x000000), 0.25f);
 	Cx.Beard = Mix(HairBase, Hex(0x000000), 0.1f);

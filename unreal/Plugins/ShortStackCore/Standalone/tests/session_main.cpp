@@ -1455,7 +1455,41 @@ void CharacterChecks()
 	// A save from before the creator: no hero lines, a neutral person.
 	ss::SaveData Old;
 	Expect(ss::SaveData::Parse("shortstack.nightone.v1\nbankroll\t500\nname\told_timer\n", Old) && !Old.Person.Created && Old.Person.FirstName == "Jesse", "older saves load without a character");
+	// The casino's rename (a v1 save) leaves the character's own names alone, a sixteen-letter one included.
+	ss::SaveData Named;
+	Expect(ss::SaveData::Parse("shortstack.nightone.v1\nbankroll\t500\nname\tRiversideRat\nhero\tname\tRiverside-Smithy\tRiverside\nhero\tcreated\t1\nledger\t10.00\t0\t-500\tRiverside Sunday: buy-in\n",
+			   Named) &&
+			   Named.Person.FirstName == "Riverside-Smithy" && Named.Person.LastName == "Riverside" && Named.HeroName == "RiversideRat" && !Named.Life.Ledger.empty() &&
+			   Named.Life.Ledger.front().Label == "Embercrest Sunday: buy-in",
+		"a character named Riverside keeps the name through the rename");
 	Expect(hero::Bio(Cook).find("Guadalajara, Mexico") != std::string::npos && hero::Bio(Cook).find("Rosa Delgado, 31") == 0, "the bio reads from the character");
+	hero::Character Newcomer;
+	Newcomer.Story = hero::Background::Newcomer;
+	Expect(hero::Bio(Newcomer).find("$42.37 on RiverLine ($40 of it saved from home).") != std::string::npos, "the fresh start's bio counts the savings in the bankroll");
+	hero::Look Greying;
+	Greying.HairColor = 1;
+	const uint32_t Grey = hero::HairToneAt(Greying, 57);
+	Expect(hero::HairToneAt(Greying, 30) == hero::HairTone(1) && std::abs(static_cast<int>((Grey >> 16) & 0xffu) - static_cast<int>(Grey & 0xffu)) < 14,
+		"dark brown greys to grey, not beige");
+	bool HatsApart = true;
+	for (int J = 0; J < 8; ++J)
+	{
+		for (int Hc = 0; Hc < 8; ++Hc)
+		{
+			hero::Look K;
+			K.OutfitColor = J;
+			K.HairColor = Hc;
+			const uint32_t Hat = hero::HatTone(K, 57);
+			const uint32_t Hr = hero::HairToneAt(K, 57);
+			int Sum = 0;
+			for (int Sh = 0; Sh <= 16; Sh += 8)
+			{
+				Sum += std::abs(static_cast<int>((Hat >> Sh) & 0xffu) - static_cast<int>((Hr >> Sh) & 0xffu));
+			}
+			HatsApart = HatsApart && Sum >= 80 && Hat != hero::OutfitTone(J);
+		}
+	}
+	Expect(HatsApart, "a hat never vanishes into the hair or matches the jacket");
 	// A new career resets the person too.
 	Reloaded.ResetSave();
 	Expect(!Reloaded.Person.Created && Reloaded.Life.Perks.JobPay == 1.0, "starting over clears the character");
@@ -1484,7 +1518,30 @@ void StoreChecks()
 	B.Remove("volt-rush");
 	Expect(B.Count() == 3, "putting one back");
 	Expect(store::Tax(1000) == 73, "7.25% tax");
-	Expect(!store::ClerkLine(130.0, store::Basket(), 0, 30.0, 60.0).empty() && store::ClerkLine(130.0, B, 0, 30.0, 60.0).find("Two of those") == 0, "Benny has something to say");
+	Expect(store::Tax(200) == 15 && store::Tax(3000) == 218 && store::Tax(0) == 0 && store::Tax(1) == 0 && store::Tax(7) == 1, "half a cent rounds up, every time (in whole cents, not a double's 7.25%)");
+	store::ClerkContext Walk;
+	Walk.World = 130.0;
+	Walk.Hunger = 30.0;
+	Walk.Energy = 60.0;
+	Expect(!store::ClerkLine(Walk, store::Basket()).empty() && store::ClerkLine(Walk, B).find("Two of those") == 0, "Benny has something to say");
+	Walk.OnSchedule = true;
+	Expect(store::ClerkLine(Walk, store::Basket()).find("on the schedule") != std::string::npos, "Benny knows who's on the schedule this week");
+	Walk.Hunger = 80.0;
+	Expect(store::ClerkLine(Walk, store::Basket()).find("roller dog") != std::string::npos, "but a hungry face comes first");
+
+	// Drunk or eaten by the shelf it sits on (a cola's sugar doesn't make it a meal); what one does, perks and all.
+	Expect(store::Find("fizz-cola")->Drink() && store::Find("hot-cocoa")->Drink() && store::Find("sunny-peach")->Drink() && store::Find("hilltop-chips")->Food() &&
+			   !store::Find("roller-dog")->Drink(),
+		"a cola, a cocoa and an iced tea are drinks; chips are food");
+	{
+		const store::Relief Volt = store::ReliefOf(*store::Find("volt-rush"), 1.25);
+		const store::Relief Cola = store::ReliefOf(*store::Find("fizz-cola"), 1.25);
+		const store::Relief Dog = store::ReliefOf(*store::Find("roller-dog"), 1.25);
+		Expect(std::fabs(Volt.Energy - 18.0 * 1.25) < 1e-9 && std::fabs(Cola.Energy - 6.0 * 1.25) < 1e-9 && std::fabs(Cola.Hunger - 4.0) < 1e-9 && std::fabs(Dog.Hunger - 30.0 * 1.25) < 1e-9 &&
+				   std::fabs(Dog.Thirst + 2.0) < 1e-9 && std::fabs(Dog.Energy - 3.0 * 1.25) < 1e-9,
+			"a line cook gets more energy out of food and drink, and more out of a meal (not out of a cola)");
+		Expect(store::Called(*store::Find("hilltop-chips")) == "the Hilltop chips" && store::Called(*store::Find("cascade")) == "the Cascade", "the shelf's names in a sentence");
+	}
 
 	// Needs climb with the hours; past 70 they cost energy.
 	Hooks H;
@@ -1518,7 +1575,11 @@ void StoreChecks()
 	Expect(S.Checkout(Snack).empty() && S.BankrollCents == 1000 - Total && S.Life.Pantry["roller-dog"] == 1 && S.Life.Pantry["cascade"] == 1, "checkout pays and bags it");
 	Expect(!S.Life.Ledger.empty() && S.Life.Ledger.front().Kind == 8 && S.Life.Ledger.front().Amount == -Total, "the bank shows the corner store");
 	Expect(S.Consume("roller-dog").empty() && S.Life.Hunger < 95.0 - 25.0 && S.Life.Pantry.count("roller-dog") == 0, "a hot dog takes the edge off");
+	// What it did, said the way it happened (past tense, what each meter actually moved; a real minus sign).
+	Expect(S.LastEaten.ItemId == "roller-dog" && S.LastEaten.Line.find("Ate the Roller Dog. Hunger \xE2\x88\x92" "30") == 0 && S.LastEaten.Line.find("thirst +2") != std::string::npos,
+		"the toast says what eating it did");
 	Expect(S.Consume("cascade").empty() && S.Life.Thirst < 95.0 - 40.0, "water helps");
+	Expect(S.LastEaten.Line.find("Drank the Cascade. Thirst \xE2\x88\x92" "45") == 0 && S.LastEaten.Thirst < -44.0, "and drinking it");
 	Expect(!S.Consume("cascade").empty(), "can't drink what you don't have");
 	store::Basket Big;
 	Big.Add("egg-salad", 9);
@@ -1541,6 +1602,42 @@ void StoreChecks()
 	S.Consume("roller-dog");
 	S.Consume("cascade");
 	Expect(S.BagPick().empty(), "nothing to reach for in an empty bag");
+
+	// The eat key: never the best thing in the bag by accident, never what makes the worse need worse, and it says why not.
+	{
+		Hooks Hb;
+		ss::Session Sb(Hb, "bag");
+		Sb.Life.Pantry.clear();
+		Expect(Sb.EatFromBag() == "Nothing in it. The Lucky Penny's on the corner.", "an empty bag says so");
+		Sb.Life.Pantry["egg-salad"] = 1;
+		Sb.Life.Hunger = 5.0;
+		Sb.Life.Thirst = 3.0;
+		Sb.Life.Energy = 70.0;
+		Expect(Sb.BagPick().empty() && Sb.EatFromBag() == "You're not hungry or thirsty." && Sb.Life.Pantry["egg-salad"] == 1, "fed and watered, a tap of the key doesn't eat the sandwich");
+		Sb.Life.Energy = 30.0;
+		Expect(Sb.BagPick().empty() && Sb.EatFromBag() == "Not hungry, not thirsty. Just tired, and nothing in here fixes that." && Sb.Life.Pantry["egg-salad"] == 1,
+			"tired, but a sandwich isn't worth eating for five energy (and the key says so)");
+		Sb.Life.Pantry.clear();
+		Sb.Life.Pantry["hilltop-chips"] = 1;
+		Sb.Life.Hunger = 20.0;
+		Sb.Life.Thirst = 90.0;
+		Sb.Life.Energy = 70.0;
+		Expect(Sb.BagPick().empty() && Sb.EatFromBag() == "Nothing in here for that thirst." && Sb.Life.Pantry["hilltop-chips"] == 1, "parched: salt and vinegar isn't the answer");
+		Sb.Life.Hunger = 50.0;
+		Sb.Life.Thirst = 49.5;
+		Sb.Life.Energy = 90.0;
+		Expect(Sb.EatFromBag() == "The Hilltop chips would only make you thirstier." && Sb.Life.Pantry["hilltop-chips"] == 1, "nearly as thirsty as hungry: the chips would make it worse");
+		Sb.Life.Pantry.erase("hilltop-chips");
+		Sb.Life.Pantry["egg-salad"] = 1;
+		Sb.Life.Hunger = 21.0;
+		Sb.Life.Thirst = 10.0;
+		Expect(Sb.EatFromBag() == "Not hungry enough for the Deli Wedge yet." && Sb.Life.Pantry["egg-salad"] == 1, "a big sandwich at the first rumble would mostly go to waste");
+		Sb.Life.Hunger = 60.0;
+		Sb.Life.Thirst = 30.0;
+		Sb.Life.Energy = 50.0;
+		Expect(Sb.EatFromBag().empty() && Sb.LastEaten.ItemId == "egg-salad" && Sb.LastEaten.Line == "Ate the Deli Wedge. Hunger \xE2\x88\x92" "42, energy +5." && Sb.Life.Pantry.count("egg-salad") == 0,
+			"hungry: the sandwich, and the line says what it did");
+	}
 
 	// The bag and the needs survive a save.
 	store::Basket Keep;
@@ -1568,6 +1665,57 @@ void StoreChecks()
 		return Sc.Life.Hunger;
 	};
 	Expect(Fed(ss::hero::Background::Kitchen) < Fed(ss::hero::Background::Newcomer) - 5.0, "a line cook's meals go further");
+	// And the perk card's other half: food and drink both restore more energy.
+	auto Buzz = [&](ss::hero::Background Story) {
+		Hooks Hc;
+		ss::Session Sc(Hc, "buzz");
+		ss::hero::Character Who;
+		Who.Story = Story;
+		Sc.NewCareer(Who);
+		Sc.Life.Energy = 30.0;
+		Sc.Life.Pantry["volt-rush"] = 1;
+		Sc.Consume("volt-rush");
+		return Sc.Life.Energy;
+	};
+	Expect(std::fabs(Buzz(ss::hero::Background::Kitchen) - (30.0 + 18.0 * 1.25)) < 1e-9 && std::fabs(Buzz(ss::hero::Background::Newcomer) - 48.0) < 1e-9, "a line cook gets more out of a Volt Rush too");
+
+	// A renamed item left in an old bag doesn't sit there unseen.
+	{
+		ss::SaveData Renamed;
+		Expect(ss::SaveData::Parse("shortstack.nightone.v2\npantry\tcascade\t2\npantry\tgone-snack\t3\nbought\tgone-snack\t5\nbought\tcascade\t4\n", Renamed) && Renamed.Life.Pantry.size() == 1 &&
+				   Renamed.Life.Pantry["cascade"] == 2 && Renamed.Life.Bought.size() == 1 && Renamed.Life.Bought["cascade"] == 4,
+			"only what the shelves still sell loads into the bag");
+	}
+
+	// Benny: the schedule is this week's (the Lucky Penny's own shifts), a declined card, back within the hour, the usual.
+	{
+		Hooks Hk;
+		ss::Session Sk(Hk, "benny");
+		Sk.Life.Hunger = 30.0;
+		Sk.Life.Energy = 60.0;
+		const double World = Sk.WorldMinutes();
+		Sk.Life.Record(World - 8.0 * ss::net::MinutesPerDay, "Lucky Penny #212 shift", 4500, 1);
+		Sk.Life.Record(World - 2.0 * ss::net::MinutesPerDay, "Wash & Fold shift", 4800, 1);
+		Expect(Sk.ClerkSays(store::Basket()).find("schedule") == std::string::npos, "a shift last week, or at the laundromat, isn't this week's schedule");
+		Sk.Life.Record(World - 1.0 * ss::net::MinutesPerDay, "Lucky Penny #212 shift", 4500, 1);
+		Expect(Sk.ClerkSays(store::Basket()).find("on the schedule") != std::string::npos, "a shift behind the counter yesterday is");
+		Sk.Life.Ledger.clear();
+		store::Basket Pricey;
+		Pricey.Add("egg-salad", 9);
+		Sk.BankrollCents = 100;
+		Expect(Sk.Checkout(Pricey) == "Card declined." && Sk.ClerkSays(store::Basket()).find("Card's having a night") == 0, "Benny saw the card say no");
+		Sk.BankrollCents = 10000;
+		store::Basket Noodles;
+		Noodles.Add("oodle-cup", 3);
+		Expect(Sk.Checkout(Noodles).empty() && Sk.ClerkSays(store::Basket()) == "Back already? Forget something?" && Sk.Life.Bought["oodle-cup"] == 3, "paid up: back within the hour");
+		Sk.LobbyMinutes = 6.0 * 60.0 + 10.0; // an even hour, four hours on
+		Expect(Sk.ClerkSays(store::Basket()).find("The usual? Oodle Cup.") == 0, "three of the same makes it the usual");
+		Sk.LobbyMinutes = 7.0 * 60.0 + 10.0;
+		Expect(Sk.ClerkSays(store::Basket()) == "Morning. Coffee's on the left.", "and the rest of the time he just says hello");
+		Sk.Save();
+		ss::SaveData Kept;
+		Expect(ss::SaveData::Parse(Hk.Last.Serialize(), Kept) && Kept.Life.Bought["oodle-cup"] == 3 && Kept.Serialize() == Hk.Last.Serialize(), "what the player buys is in the save");
+	}
 }
 
 /** Penny Drop: the store's delivery app on the laptop, the order arriving with the clock, and the kitchen tap. */
@@ -1613,6 +1761,22 @@ void DeliveryChecks()
 	S.LobbyMinutes += 60.0;
 	S.Update(Now += 0.5);
 	Expect(S.Life.Deliveries.empty() && S.Life.Pantry["bean-burrito"] == 1 && S.Life.Pantry["fizz-cola"] == 2 && H.Texts > Texts, "the order arrives at the door, into the bag, with a text");
+	Expect(H.Got(0, "Penny Drop", "Left at your door: Big Bean, 2 Fizz Cola."), "the text says what came");
+	{
+		// The game closed right after: the save has it in the bag and off the road, so the next load can't bring it twice.
+		bool Keyed = false;
+		for (const std::string& Key : H.Last.TextsSeen)
+		{
+			Keyed = Keyed || Key.rfind("drop:", 0) == 0;
+		}
+		ss::SaveData Kept;
+		Expect(ss::SaveData::Parse(H.Last.Serialize(), Kept) && Kept.Life.Deliveries.empty() && Kept.Life.Pantry["fizz-cola"] == 2 && !Keyed, "the save after it arrives is whole");
+		Hooks H2;
+		ss::Session Again(H2, "drop-again", &Kept);
+		Again.CurrentScreen = ss::Screen::Lobby;
+		Wait(Again, 0.0, 0.3);
+		Expect(Again.Life.Pantry["fizz-cola"] == 2 && Again.Life.Pantry["bean-burrito"] == 1 && !H2.Got(0, "Penny Drop", "Left at your door"), "loaded again, it isn't delivered twice");
+	}
 	Expect(S.Consume("bean-burrito").empty(), "and you can eat it at home");
 
 	// Three on the way at most.
@@ -1632,6 +1796,61 @@ void DeliveryChecks()
 	Expect(S.DrinkTapWater().empty() && std::fabs(S.Life.Thirst - ss::Session::TapFloor) < 0.01, "the tap takes the edge off, no further");
 	S.Life.TapAt = -1.0e9;
 	Expect(S.DrinkTapWater() == "You're not thirsty.", "not when you're not thirsty");
+}
+
+/**
+ * Penny Drop's edges: two orders landing together are never saved half-delivered, and an order that lands after the
+ * locks change goes to Dee's, its text after the landlord's.
+ */
+void DeliveryRules()
+{
+	namespace store = ss::store;
+	const double Day = ss::net::MinutesPerDay;
+	struct DropHooks : Hooks
+	{
+		bool Both = false;
+		void Save(const ss::SaveData& D) override
+		{
+			Hooks::Save(D);
+			const auto Have = D.Life.Pantry.find("cascade");
+			Both = Both || (Have != D.Life.Pantry.end() && Have->second > 0 && !D.Life.Deliveries.empty());
+		}
+	};
+	DropHooks H;
+	ss::Session S(H, "drop-rules");
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	auto At = [&](double World) {
+		S.LobbyMinutes += World - S.WorldMinutes();
+		Now = Wait(S, Now, 0.1);
+	};
+	S.BankrollCents = 100000;
+	store::Basket Water;
+	Water.Add("cascade", 4);
+	Expect(S.DeliveryAddress() == "1812 Fifth St, Apt 3B" && S.PlaceOrder(Water).empty() && S.PlaceOrder(Water).empty(), "two orders to the apartment");
+	S.LobbyMinutes += 60.0;
+	Now = Wait(S, Now, 0.2);
+	Expect(S.Life.Deliveries.empty() && S.Life.Pantry["cascade"] == 8 && !H.Both, "two orders land together, and no save has one in the bag and on the road at once");
+	Expect(H.Got(0, "Penny Drop", "Left at your door: 4 Cascade."), "left at the door");
+
+	// Ten minutes before the locks change, an order: it lands at Dee's, after the landlord's text.
+	At(5.0 * Day + 1.0);
+	Expect(S.Life.RentStage == ss::life::Rent::FinalNotice, "the rent's late");
+	At(8.0 * Day - 10.0);
+	S.Life.Pantry.clear(); // (drunk; the hooks watch the bag for this order's water)
+	Expect(!S.Evicted() && S.PlaceOrder(Water).empty(), "an order at ten to midnight on the last day");
+	const size_t Mark = H.Inbox.size();
+	At(8.0 * Day + 60.0);
+	size_t Locks = std::string::npos;
+	size_t Drop = std::string::npos;
+	for (size_t I = Mark; I < H.Inbox.size(); ++I)
+	{
+		Locks = H.Inbox[I].first == "Landlord" && H.Inbox[I].second.rfind("Locks changed", 0) == 0 ? I : Locks;
+		Drop = H.Inbox[I].first == "Penny Drop" ? I : Drop;
+	}
+	Expect(S.Evicted() && Locks != std::string::npos && Drop != std::string::npos && Drop > Locks && H.Inbox[Drop].second.rfind("Handed to Dee at the door: 4 Cascade.", 0) == 0,
+		"locked out: the order goes to Dee's, and its text comes after the landlord's");
+	Expect(S.Life.Pantry["cascade"] == 4 && S.DeliveryAddress() == "Dee's place" && !H.Both, "it's in the bag all the same");
 }
 
 /**
@@ -1794,7 +2013,17 @@ void RentChecks()
 			"the gear's in storage (still yours): the laptop, two tables, no stream");
 		Expect(S.GoLive() == "No apartment, no internet." && !S.PayRent(), "no stream, and no rent on an apartment you're locked out of");
 		Expect(S.CanBuy("webcam-720").find("Nowhere") == 0 && S.CanBuy("gym").find("Nowhere") == std::string::npos, "nowhere to put new gear (subscriptions still sell)");
+		Expect(S.CanBuy("fiber").find("No apartment") == 0, "but not an internet line for an apartment you're locked out of");
 		Expect(S.MaxTables() == 2, "the laptop still plays two tables");
+		// The block talks: Benny's heard, the first time in since the locks changed (and doesn't say it every time after).
+		S.Life.Hunger = 30.0;
+		S.Life.Energy = 60.0;
+		Expect(S.ClerkSays(ss::store::Basket()).find("on her couch") != std::string::npos, "Benny's heard about the couch");
+		S.BankrollCents = 1000;
+		ss::store::Basket Candy;
+		Candy.Add("choco-stack");
+		Expect(S.Checkout(Candy).empty() && S.ClerkSays(ss::store::Basket()).find("on her couch") == std::string::npos, "and says so once");
+		S.BankrollCents = 0;
 
 		// Dee's couch: worse sleep, and a share of the groceries.
 		S.Life.Energy = 0.0;
@@ -1872,6 +2101,283 @@ void RentChecks()
 		Expect(S.Life.RentStage == Rent::Due && S.Life.RentDeadline > S.WorldMinutes() && S.Life.RentDeadline == 65.0 * Day, "a skipped month's deadline moves past the skip");
 		At(S, Now, 65.0 * Day + 1.0);
 		Expect(S.Life.RentStage == Rent::FinalNotice, "and still comes round");
+		// The first month paid long after October 31: the next one is thirty days from its own date, not behind the clock.
+		S.BankrollCents = 200000;
+		Expect(S.PayRent() && S.Life.RentDeadline == 95.0 * Day && S.Life.RentDeadline > S.WorldMinutes(), "a late first month doesn't set the next deadline in the past");
+	}
+
+	// A host hands the clock back rounded to the minute: a deadline right on the hand-off still comes (rent and storage).
+	{
+		Hooks H;
+		ss::Session S(H, "rent-handoff");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.BankrollCents = 0;
+		At(S, Now, 5.0 * Day - 0.33); // twenty seconds to midnight, out on the street
+		Expect(S.Life.RentStage == Rent::Due, "not yet");
+		S.Save();
+		ss::SaveData D;
+		Expect(ss::SaveData::Parse(H.Last.Serialize(), D), "the street's save");
+		Hooks H2;
+		ss::Session Home(H2, "rent-handoff-home", &D);
+		Home.CurrentScreen = ss::Screen::Lobby;
+		Home.ResumeCalendarFrom(std::round(S.WorldMinutes())); // "From=%.0f": midnight itself
+		Home.LobbyMinutes += 2.0;
+		double T2 = Wait(Home, 0.0, 0.1);
+		Expect(Home.Life.RentStage == Rent::FinalNotice && Home.Life.RentDeadline == 8.0 * Day, "the landlord still comes at midnight");
+		Home.Gear["monitor-24"] = 0.0;
+		Home.LobbyMinutes += 8.0 * Day - 0.2 - Home.WorldMinutes();
+		T2 = Wait(Home, T2, 0.1);
+		Home.ResumeCalendarFrom(8.0 * Day);
+		Home.LobbyMinutes += 1.0;
+		T2 = Wait(Home, T2, 0.1);
+		Expect(Home.Evicted() && Home.Life.StorageDue == 38.0 * Day, "and the locks change at the grace deadline");
+		Home.LobbyMinutes += 38.0 * Day - 0.2 - Home.WorldMinutes();
+		T2 = Wait(Home, T2, 0.1);
+		Home.BankrollCents = ss::life::StorageCents;
+		Home.ResumeCalendarFrom(38.0 * Day);
+		Home.LobbyMinutes += 1.0;
+		T2 = Wait(Home, T2, 0.1);
+		Expect(Home.Life.StorageDue == 68.0 * Day && Home.BankrollCents == 0 && Home.Owns("monitor-24"), "the storage renewal on the hand-off is charged, not skipped");
+	}
+
+	// The LED kit goes into storage with the rest: the room goes dark, its controls do nothing, and it lights up again back home.
+	{
+		Hooks H;
+		ss::Session S(H, "rent-leds");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.BankrollCents = 100000;
+		Expect(S.Buy(ss::gear::LedKitId).empty() && S.RoomGlow(1.0).On, "the kit, lit");
+		S.SetLedPreset(3);
+		S.BankrollCents = 0;
+		At(S, Now, 5.0 * Day + 1.0);
+		At(S, Now, 8.0 * Day + 1.0);
+		Expect(S.Evicted() && !S.RoomGlow(1.0).On && !S.GearFx().Leds && S.Life.StorageDue == 38.0 * Day, "evicted: the LED kit is in storage, and the room is dark");
+		S.SetLedPreset(5);
+		S.SetLedsOn(false);
+		Expect(S.Leds.Preset == 3 && S.Leds.On && !S.RoomGlow(1.0).On, "its controls do nothing from Dee's couch");
+		S.BankrollCents = 245000;
+		Expect(S.MoveBackIn().empty() && S.RoomGlow(1.0).On && S.RoomGlow(1.0).Preset == 3 && S.GearFx().Leds, "home: the lights come back on as they were");
+	}
+
+	// Subscriptions while evicted: the gym goes where the player goes (billed, and still working); the internet stays
+	// with the apartment (suspended, not billed) and comes back with the key.
+	{
+		Hooks H;
+		ss::Session S(H, "rent-subs");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.BankrollCents = 100000;
+		Expect(S.Buy("gym").empty() && S.Buy("fiber").empty() && S.Buy("monitor-24").empty(), "a gym card, fiber and a monitor");
+		const double Calm = S.GearFx().Calm;
+		const double FiberDue = S.Gear["fiber"];
+		S.BankrollCents = 0;
+		At(S, Now, 5.0 * Day + 1.0);
+		size_t Mark = H.Inbox.size();
+		At(S, Now, 8.0 * Day + 1.0);
+		const ss::Chips Gym = ss::gear::Find("gym")->PriceCents;
+		Expect(S.Evicted() && Calm > 0.0 && S.GearFx().Calm == Calm && !S.GearFx().Fiber && S.GearFx().MonthlyCents == Gym && S.GearFx().Tables == 2, "evicted: the gym still works and is all that's billed");
+		Expect(H.Got(Mark, "Northline", "suspended"), "the internet company says the line is on hold");
+		At(S, Now, 31.0 * Day);
+		S.BankrollCents = 10000;
+		At(S, Now, 31.0 * Day + 3.0 * 60.0);
+		Expect(S.BankrollCents == 10000 - Gym && S.Owns("fiber") && S.Gear["fiber"] == FiberDue + 30.0 * Day && S.Life.Ledger.front().Label == "GearDrop: Gym membership (renewal)",
+			"the gym renews; the suspended line doesn't bill");
+		S.BankrollCents = 245000;
+		Mark = H.Inbox.size();
+		Expect(S.MoveBackIn().empty() && S.GearFx().Fiber && H.Got(Mark, "Northline", "restored"), "back home, the line comes back on");
+	}
+
+	// A night out across a deadline, home at three: the bills land in the order they came. The landlord at midnight
+	// comes before the internet at one (a renewal after midnight doesn't spend the rent), and a renewal after the locks
+	// change isn't billed for the apartment.
+	{
+		Hooks H;
+		ss::Session S(H, "rent-bill-order");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		const ss::Chips Fiber = ss::gear::Find("fiber")->PriceCents;
+		auto NightOut = [&](double Leave) {
+			At(S, Now, Leave);
+			const double Left = S.WorldMinutes();
+			S.LobbyMinutes += 8.0 * 60.0;
+			S.ResumeCalendarFrom(Left);
+			Now = Wait(S, Now, 0.1);
+		};
+		S.BankrollCents = 100000;
+		Expect(S.Buy("fiber").empty(), "fiber");
+		S.Gear["fiber"] = 5.0 * Day + 60.0; // renews at 1 AM, an hour after the first month comes due
+		S.BankrollCents = 122500 + Fiber - 1;
+		NightOut(5.0 * Day - 5.0 * 60.0);
+		Expect(S.Life.RentStage == Rent::Paid && S.BankrollCents == Fiber - 1 && !S.Owns("fiber"), "the landlord at midnight first; the internet at one finds the rent gone");
+		S.BankrollCents = 0;
+		At(S, Now, 27.0 * Day + 1.0);
+		Expect(S.Life.RentStage == Rent::FinalNotice, "late on the second month");
+		S.BankrollCents = 100000;
+		Expect(S.Buy("fiber").empty(), "fiber again");
+		S.Gear["fiber"] = 30.0 * Day + 60.0;
+		S.BankrollCents = Fiber + 500;
+		NightOut(30.0 * Day - 5.0 * 60.0);
+		Expect(S.Evicted() && S.BankrollCents == Fiber + 500 && S.Owns("fiber") && S.Gear["fiber"] == 60.0 * Day + 60.0,
+			"locked out at midnight: the line is suspended before its bill at one");
+	}
+
+	// Dee would rather go without than see the unit auctioned: no chip-in that would leave the renewal short.
+	{
+		Hooks H;
+		ss::Session S(H, "rent-couch-unit");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.BankrollCents = 50000;
+		Expect(S.Buy("monitor-24").empty(), "a monitor");
+		S.BankrollCents = 0;
+		At(S, Now, 5.0 * Day + 1.0);
+		At(S, Now, 8.0 * Day + 1.0);
+		At(S, Now, 36.0 * Day + 1.0);
+		S.BankrollCents = 7500;
+		const ss::Chips Couch = S.Life.CouchCents;
+		const size_t Mark = H.Inbox.size();
+		At(S, Now, 38.0 * Day + 1.0);
+		Expect(S.Owns("monitor-24") && S.Life.StorageDue == 68.0 * Day && S.BankrollCents == 500 && S.Life.CouchCents == Couch + ss::life::CouchChipInCents && H.Got(Mark, "Dee", "keep your ten"),
+			"$75 two days out: one chip-in, the second skipped, and the unit renews");
+		// Paying the unit ahead, from the Bank: a month at most.
+		Expect(S.PayStorage().find("Short $55") == 0, "short for the next month");
+		S.BankrollCents = 10000;
+		Expect(S.PayStorage().empty() && S.Life.StorageDue == 98.0 * Day && S.BankrollCents == 4000 && S.Life.Ledger.front().Label == "Ninth St. Storage (paid ahead)", "a month paid ahead");
+		Expect(S.PayStorage().find("Paid through") == 0 && S.BankrollCents == 4000, "and no further");
+	}
+
+	// The locks change in the middle of a night's sleep at home: the night is the bed's, and the morning says what happened.
+	{
+		Hooks H;
+		ss::Session S(H, "rent-asleep");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.BankrollCents = 100000;
+		Expect(S.Buy("mattress").empty(), "a good mattress");
+		S.BankrollCents = 0;
+		At(S, Now, 5.0 * Day + 1.0);
+		At(S, Now, 8.0 * Day - 2.0 * 60.0);
+		S.Life.Energy = 0.0;
+		const double Rest = S.RestFactor();
+		Expect(Rest > 1.0 && S.StartActivity("sleep").empty(), "to bed at home, the night the locks change");
+		Now = Wait(S, Now, 6.0);
+		Expect(S.Evicted() && std::fabs(S.LastOutcome.Energy - 90.0 * Rest) < 0.01 && S.LastOutcome.Title == "Locked out", "a night in the bed, then the landlord's knock");
+	}
+
+	// A save evicted before the locks had consequences: the key costs a month on top, and the gear is in a unit with a clock.
+	{
+		ss::SaveData Old;
+		Expect(ss::SaveData::Parse("shortstack.nightone.v1\nbankroll\t500\nname\tcouch_surfer\nclock\t10000.00\nlife\trent\t3\t137500\t11520.00\t0\ngear\tmonitor-24\t0.00\n", Old) &&
+				   Old.Life.RentStage == Rent::Evicted && Old.Life.RentDueCents == 137500 + ss::life::MonthlyRentCents && Old.Life.Evictions == 1 && Old.Life.EvictedAt == 11520.0 &&
+				   Old.Life.StorageDue == 11520.0 + ss::life::StorageDays * Day,
+			"an old eviction loads with what a key costs now, and the unit's clock");
+		ss::SaveData Bare;
+		Expect(ss::SaveData::Parse("shortstack.nightone.v1\nbankroll\t500\nclock\t10000.00\nlife\trent\t3\t137500\t11520.00\t0\n", Bare) && Bare.Life.StorageDue == 0.0 &&
+				   Bare.Life.RentDueCents == 137500 + ss::life::MonthlyRentCents,
+			"nothing stored, no unit");
+		Hooks H;
+		ss::Session S(H, "rent-old-evicted", &Old);
+		Expect(S.Evicted() && S.MoveBackIn().find("Short $2,445") == 0, "moving back in costs the back rent and a month");
+	}
+}
+
+/**
+ * Coming home from a night the host played out (Dee's game, the Embercrest, the street): its hours aren't charged to
+ * the energy twice, the needs climb (and wear the player down as they climb), and invitations to what's already over
+ * aren't sent. Plus the trip out that can't go, and an empty stomach at the table.
+ */
+void NightOutChecks()
+{
+	const double Day = ss::net::MinutesPerDay;
+	// Eight hours out: the host kept the energy (and saved what it left); home, only the needs catch up.
+	{
+		Hooks H;
+		ss::Session S(H, "night-out");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.Life.Hunger = 20.0;
+		S.Life.Thirst = 20.0;
+		S.Life.Energy = 50.0;
+		double Left = S.WorldMinutes();
+		S.LobbyMinutes += 8.0 * 60.0;
+		S.ResumeCalendarFrom(Left);
+		Now = Wait(S, Now, 0.2);
+		Expect(S.Life.Energy > 49.9 && S.Life.Hunger > 43.0 && S.Life.Thirst > 53.0, "a night out isn't charged to the energy twice; the needs still climb");
+		// Out from 66/66 for nine hours: past 70 the needs drag on the energy as they climb, not from where they started.
+		S.Life.Hunger = 66.0;
+		S.Life.Thirst = 66.0;
+		S.Life.Energy = 80.0;
+		Left = S.WorldMinutes();
+		S.LobbyMinutes += 9.0 * 60.0;
+		S.ResumeCalendarFrom(Left);
+		Now = Wait(S, Now, 0.2);
+		Expect(S.Life.Energy < 70.0 && S.Life.Energy > 50.0 && S.Life.Hunger > 92.0 && S.Life.Thirst == 100.0, "hungry and thirsty through the night wears the player down");
+		// At the desk, the hours are the desk's.
+		S.Life.Hunger = 20.0;
+		S.Life.Thirst = 20.0;
+		S.Life.Energy = 80.0;
+		S.LobbyMinutes += 2.0 * 60.0;
+		Now = Wait(S, Now, 0.2);
+		Expect(S.Life.Energy < 80.0 - 7.0, "awake at home, the hours cost energy as always");
+	}
+
+	// Tuesday: out at seven, home at three. Dee's heads-up for a game that's over isn't sent; nor is Sunday's.
+	{
+		Hooks H;
+		ss::Session S(H, "night-out-texts");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.LobbyMinutes = 19.0 * 60.0;
+		Now = Wait(S, Now, 0.1);
+		size_t Mark = H.Inbox.size();
+		double Left = S.WorldMinutes();
+		S.LobbyMinutes += 8.0 * 60.0;
+		S.ResumeCalendarFrom(Left);
+		Now = Wait(S, Now, 0.2);
+		Expect(!H.Got(Mark, "Dee", "back room of the laundromat"), "no heads-up for a game night that's over");
+		S.LobbyMinutes = 6.0 * Day + 15.0 * 60.0 - Day * ss::net::NightOneDay; // Sunday, 3 PM
+		Now = Wait(S, Now, 0.1);
+		Mark = H.Inbox.size();
+		Left = S.WorldMinutes();
+		S.LobbyMinutes += 8.0 * 60.0;
+		S.ResumeCalendarFrom(Left);
+		Now = Wait(S, Now, 0.2);
+		Expect(!H.Got(Mark, "Dee", "sunday $150"), "nor an invitation to the Sunday at eleven at night");
+		// The same afternoon at the desk: it comes at four.
+		S.LobbyMinutes = 13.0 * Day + 15.0 * 60.0 + 59.0 - Day * ss::net::NightOneDay;
+		Now = Wait(S, Now, 0.1);
+		Mark = H.Inbox.size();
+		S.LobbyMinutes += 2.0;
+		Now = Wait(S, Now, 0.1);
+		Expect(H.Got(Mark, "Dee", "sunday $150"), "Sunday at four, at the desk, Dee says so");
+	}
+
+	// The host can't go right now (already on its way out): nothing paid, nothing registered.
+	{
+		Hooks H; // GoOut says no
+		ss::Session S(H, "embercrest-stuck");
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Wait(S, 0.0, 0.2);
+		S.LobbyMinutes = 9.0 * Day + 17.0 * 60.0 + 30.0 - Day * ss::net::NightOneDay; // Wednesday, the Nightly's desk is open
+		Now = Wait(S, Now, 0.1);
+		S.Life.Energy = 60.0;
+		S.BankrollCents = 50000;
+		const size_t Lines = S.Life.Ledger.size();
+		Expect(S.GoToLive("embercrest-nightly@9") == "Can't get there right now." && S.BankrollCents == 50000 && S.Life.LiveEntries.empty() && S.Life.Ledger.size() == Lines,
+			"a trip that can't happen costs nothing");
+	}
+
+	// Starving at the table: a shorter time bank.
+	{
+		Hooks H;
+		ss::Session S(H, "starving");
+		S.CurrentScreen = ss::Screen::Lobby;
+		S.Life.Energy = 60.0;
+		S.Life.Hunger = 90.0;
+		S.Register(1);
+		Expect(S.T != nullptr && std::fabs(S.TimeBank - 22.5) < 1e-9, "starving, the time bank is three quarters");
 	}
 }
 
@@ -2319,8 +2825,10 @@ int main()
 	session_test::CharacterChecks();
 	session_test::StoreChecks();
 	session_test::DeliveryChecks();
+	session_test::DeliveryRules();
 	session_test::NeedsPacing();
 	session_test::RentChecks();
+	session_test::NightOutChecks();
 	if (session_test::Failures == 0)
 	{
 		std::printf("session tests: all passed\n");

@@ -55,14 +55,36 @@ struct Item
 	double Energy = 0.0; // energy gained
 	uint32_t Color = 0xffffff;  // packaging
 	uint32_t Accent = 0x000000; // label
-	bool Food() const { return Hunger > 0.0; }
+	/** Drunk, not eaten: everything from the cooler and the coffee bar (a cola's sugar doesn't make it a meal). */
+	bool Drink() const { return Where == Shelf::Drinks || Where == Shelf::Coffee; }
+	bool Food() const { return !Drink(); }
 };
 
 /** Everything on the shelves, shelf by shelf. */
 SHORTSTACKCORE_API const std::vector<Item>& Catalog();
 SHORTSTACKCORE_API const Item* Find(const std::string& Id);
 
-/** Sales tax on the receipt (7.25%). */
+/**
+ * What one of an item does, as relief: hunger and thirst go down by it, energy goes up (negative: worse). MealBoost
+ * is the line cook's (hero::Perks): a meal goes further, and food and drink both give more energy. The counter, the
+ * app and the bag all use this, so what's promised is what's applied.
+ */
+struct Relief
+{
+	double Hunger = 0.0;
+	double Thirst = 0.0;
+	double Energy = 0.0;
+};
+SHORTSTACKCORE_API Relief ReliefOf(const Item& I, double MealBoost);
+/** "the Cascade", "the Hilltop chips": the item in a sentence. */
+SHORTSTACKCORE_API std::string Called(const Item& I);
+/**
+ * The line after eating or drinking one, from what the meters actually did (the changes, so relief is negative):
+ * "Drank the Cascade. Thirst -45, energy +2." (with a real minus sign).
+ */
+SHORTSTACKCORE_API std::string UsedLine(const Item& I, double HungerChange, double ThirstChange, double EnergyChange);
+
+/** Sales tax on the receipt (7.25%, half a cent up). */
 SHORTSTACKCORE_API Chips Tax(Chips Subtotal);
 
 /** A basket at the counter: item ids and counts, in the order they were picked up. */
@@ -91,7 +113,19 @@ SHORTSTACKCORE_API Chips AppPrice(const Item& I);
 /** What an order costs in all: the app's prices, the fee, and tax on both. */
 SHORTSTACKCORE_API Chips DeliveryTotal(const Basket& B);
 
-/** What the clerk (Benny, nights) says as the player walks up, by the hour, the basket and their history. */
-SHORTSTACKCORE_API std::string ClerkLine(double World, const Basket& B, int ShiftsWorked, double Hunger, double Energy);
+/** What Benny knows about the player walking up to the counter. */
+struct ClerkContext
+{
+	double World = 0.0; // world minutes
+	double Hunger = 0.0;
+	double Energy = 100.0;
+	bool OnSchedule = false;  // worked a Lucky Penny shift in the last week
+	bool Evicted = false;     // first time in since the locks changed (the block talks)
+	bool Declined = false;    // the card just said no at this counter
+	double SinceVisit = -1.0; // minutes since the player last paid at this counter (-1: never)
+	std::string Usual;        // what the player buys most here ("Oodle Cup"; "" until it's a habit)
+};
+/** What the clerk (Benny, nights) says: how the player looks first, then what he knows about them, then the hour. */
+SHORTSTACKCORE_API std::string ClerkLine(const ClerkContext& Ctx, const Basket& B);
 } // namespace store
 } // namespace ss

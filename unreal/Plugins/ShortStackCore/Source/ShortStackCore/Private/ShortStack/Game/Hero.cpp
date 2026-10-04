@@ -1,6 +1,7 @@
 #include "ShortStack/Game/Hero.h"
 #include "../StrictFloat.h"
 
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Rng.h"
 
 #include <algorithm>
@@ -17,18 +18,18 @@ const BackgroundInfo Backgrounds[BackgroundCount] = {
 	{Background::Kitchen, "kitchen", "Line Cook", "Twelve-hour shifts behind a flat-top.",
 		"You've worked every station in every kitchen that would have you, and the late shift at Rosa's diner pays the minimum. Poker started on the lid of the "
 		"walk-in cooler with the dishwashers after close. You still smell like the fryer.",
-		"Double Shift", "ShiftLink jobs pay 20% more, and food and drink restore 25% more energy.", 0xff8a3d},
+		"Double Shift", "ShiftLink jobs pay 20% more, meals go further, and food and drink restore 25% more energy.", 0xff8a3d},
 	{Background::DealersKid, "dealerskid", "Dealer's Kid", "Grew up under a card room table.",
-		"Your mother dealt the graveyard shift at the Riverside for twenty years, and you did your homework in the break room. You learned to watch hands "
+		"Your mother dealt the graveyard shift at the Embercrest for twenty years, and you did your homework in the break room. You learned to watch hands "
 		"before you could shuffle. Dee dealt next to her once and still asks how she's doing.",
 		"Born Reader", "A tell is learned the first time the cards confirm it, not the second.", 0xf2c14e},
 	{Background::Dropout, "dropout", "Stats Dropout", "Two years of probability, then the online games.",
 		"You were good at statistics and better at the games the statistics were about. The scholarship didn't survive the second year. The student loans "
 		"did. You know exactly how bad your odds are, which is not the same as doing something about them.",
 		"Expected Value", "Bounty tournaments are open on RiverLine from the first night.", 0x60a5fa},
-	{Background::Bouncer, "bouncer", "Casino Bouncer", "Six years on the door at the Riverside.",
+	{Background::Bouncer, "bouncer", "Casino Bouncer", "Six years on the door at the Embercrest.",
 		"You've thrown out drunks, card counters and a man who tried to eat his own chips. You've watched every kind of loser walk out at four in the "
-		"morning, and you know what tilt looks like from the outside. Then the Riverside cut the night staff.",
+		"morning, and you know what tilt looks like from the outside. Then the Embercrest cut the night staff.",
 		"Thick Skin", "Bad beats and coolers put you on tilt 30% less.", 0xff5a5f},
 	{Background::Hustler, "hustler", "Corner Hustler", "Knows Marcus from the old block.",
 		"You ran errands for people like Marcus before you could drive, and you've never been picked up. You know which corners have cameras and which "
@@ -394,11 +395,74 @@ uint32_t OutfitTone(int Index)
 	return hero_detail::Outfits[std::clamp(Index, 0, 7)];
 }
 
+uint32_t HairToneAt(const Look& L, int Age)
+{
+	const uint32_t Base = HairTone(L.HairColor);
+	// Platinum and grey are already there; everyone else greys from 44, at most two thirds of the way by 64.
+	const double Grey = L.HairColor >= 6 ? 0.0 : std::clamp((static_cast<double>(Age) - 44.0) / 30.0, 0.0, 0.65);
+	if (Grey <= 0.0)
+	{
+		return Base;
+	}
+	const double R = static_cast<double>((Base >> 16) & 0xffu);
+	const double G = static_cast<double>((Base >> 8) & 0xffu);
+	const double B = static_cast<double>(Base & 0xffu);
+	// The color drains first (a dark brown at 57 reads grey, not beige), then the silver comes in.
+	const double Lum = 0.299 * R + 0.587 * G + 0.114 * B;
+	const double Drain = std::min(1.0, Grey * 1.6);
+	const double Silver = Grey * 0.75;
+	auto Channel = [&](double V, double Ash, double Shine) {
+		const double Drained = V + (Ash - V) * Drain;
+		return static_cast<uint32_t>(std::clamp(Drained + (Shine - Drained) * Silver + 0.5, 0.0, 255.0));
+	};
+	return (Channel(R, Lum, 169.0) << 16) | (Channel(G, Lum, 171.0) << 8) | Channel(B, Lum * 1.02, 174.0);
+}
+
+uint32_t HatTone(const Look& L, int Age)
+{
+	// The jacket picks a partner (navy with sand, charcoal with mustard). When that would vanish into the hair under
+	// it (a black cap on black hair, a sand cap on greying brown), the next tone round the palette that doesn't, and
+	// never the jacket's own.
+	static const int Partner[8] = {7, 4, 5, 0, 1, 3, 0, 5};
+	const int Jacket = std::clamp(L.OutfitColor, 0, 7);
+	const uint32_t Hair = HairToneAt(L, Age);
+	auto Apart = [Hair](uint32_t Tone) {
+		int Sum = 0;
+		for (int Shift = 0; Shift <= 16; Shift += 8)
+		{
+			Sum += std::abs(static_cast<int>((Tone >> Shift) & 0xffu) - static_cast<int>((Hair >> Shift) & 0xffu));
+		}
+		return Sum >= 80; // of 765
+	};
+	for (int K = 0; K < 8; ++K)
+	{
+		// Steps of three visit all eight tones.
+		const int I = (Partner[Jacket] + K * 3) % 8;
+		if (I != Jacket && Apart(OutfitTone(I)))
+		{
+			return OutfitTone(I);
+		}
+	}
+	return OutfitTone(Partner[Jacket]);
+}
+
 // ------------------------------------------------------------------ character
+
+int NameLength(const std::string& Part)
+{
+	int N = 0;
+	for (const char Ch : Part)
+	{
+		// UTF-8: every byte but a continuation starts a letter.
+		N += (static_cast<unsigned char>(Ch) & 0xC0) != 0x80 ? 1 : 0;
+	}
+	return N;
+}
 
 bool NameValid(const std::string& Part)
 {
-	if (Part.empty() || Part.size() > 16 || !hero_detail::IsLetterByte(static_cast<unsigned char>(Part[0])))
+	// Sixteen letters, accented or not (two bytes each at most in the creator's range).
+	if (Part.empty() || NameLength(Part) > MaxNameLength || Part.size() > 2 * MaxNameLength || !hero_detail::IsLetterByte(static_cast<unsigned char>(Part[0])))
 	{
 		return false;
 	}
@@ -515,6 +579,7 @@ Character Random(Rng& R)
 	Character C;
 	const std::vector<CountryInfo>& All = Countries();
 	C.Country = All[static_cast<size_t>(R.Int(static_cast<int>(All.size())))].Code;
+	int Body = 0;
 	for (const hero_detail::NamePool& P : hero_detail::Pools)
 	{
 		if (C.Country == P.Code)
@@ -525,19 +590,27 @@ Character Random(Rng& R)
 			C.FirstName = Firsts[static_cast<size_t>(Fi)];
 			C.LastName = Lasts[static_cast<size_t>(R.Int(static_cast<int>(Lasts.size())))];
 			// Each pool's first names run A, A, B, B, A, B by body type (a nudge for the dice, never a rule).
-			C.Appearance.Body = Fi == 2 || Fi == 3 || Fi == 5 ? 1 : 0;
+			Body = Fi == 2 || Fi == 3 || Fi == 5 ? 1 : 0;
 		}
 	}
 	// Mostly twenties and thirties, the occasional older grinder.
 	C.Age = R.Next() < 0.8 ? 19 + R.Int(18) : 37 + R.Int(MaxAge - 37 + 1);
 	C.Story = static_cast<Background>(R.Int(BackgroundCount));
-	Look& L = C.Appearance;
+	C.Appearance = RandomLook(R, C.Age, Body);
+	C.Created = true;
+	return C;
+}
+
+Look RandomLook(Rng& R, int Age, int Body)
+{
+	Look L;
+	L.Body = std::clamp(Body, 0, OptionCount(Slot::Body) - 1);
 	L.Face = R.Int(OptionCount(Slot::Face));
 	L.Skin = R.Int(OptionCount(Slot::Skin));
 	L.Eyes = L.Skin >= 6 ? R.Int(2) : R.Int(OptionCount(Slot::Eyes));
 	L.Brows = R.Int(OptionCount(Slot::Brows));
 	L.Hair = R.Int(OptionCount(Slot::Hair));
-	L.HairColor = C.Age >= 50 && R.Next() < 0.6 ? 7 : (L.Skin >= 5 ? R.Int(3) : R.Int(7));
+	L.HairColor = Age >= 50 && R.Next() < 0.6 ? 7 : (L.Skin >= 5 ? R.Int(3) : R.Int(7));
 	L.FacialHair = L.Body == 0 ? R.Int(OptionCount(Slot::FacialHair)) : 0;
 	L.Build = R.Int(OptionCount(Slot::Build));
 	L.Height = L.Body == 0 ? 168 + R.Int(25) : 157 + R.Int(22);
@@ -545,8 +618,22 @@ Character Random(Rng& R)
 	L.OutfitColor = R.Int(OptionCount(Slot::OutfitColor));
 	L.Glasses = R.Next() < 0.3 ? 1 + R.Int(OptionCount(Slot::Glasses) - 1) : 0;
 	L.Hat = R.Next() < 0.35 ? 1 + R.Int(OptionCount(Slot::Hat) - 1) : 0;
-	C.Created = true;
-	return C;
+	return L;
+}
+
+std::vector<std::string> NameSuggestions(const std::string& Country, bool Last)
+{
+	const hero_detail::NamePool* Pick = nullptr;
+	for (const hero_detail::NamePool& P : hero_detail::Pools)
+	{
+		// Unknown codes fall back to the last pool (the United States), as a new career's default does.
+		Pick = &P;
+		if (Country == P.Code)
+		{
+			break;
+		}
+	}
+	return Pick ? hero_detail::SplitBars(Last ? Pick->Last : Pick->First) : std::vector<std::string>();
 }
 
 std::string Bio(const Character& C)
@@ -557,14 +644,17 @@ std::string Bio(const Character& C)
 	switch (C.Story)
 	{
 	case Background::Kitchen: Out += "Cooked on the line until the hours stopped adding up. "; break;
-	case Background::DealersKid: Out += "Raised in the Riverside's break room by a graveyard-shift dealer. "; break;
+	case Background::DealersKid: Out += "Raised in the Embercrest's break room by a graveyard-shift dealer. "; break;
 	case Background::Dropout: Out += "Left a statistics degree for the online games. "; break;
-	case Background::Bouncer: Out += "Worked the door at the Riverside until the night staff was cut. "; break;
+	case Background::Bouncer: Out += "Worked the door at the Embercrest until the night staff was cut. "; break;
 	case Background::Hustler: Out += "Grew up on the same block as Marcus and never got picked up. "; break;
 	default: Out += "Came to the city with one suitcase and a little saved. "; break;
 	}
-	Out += "Now: a rented room, a laptop, rent due Friday, and $2.37 on RiverLine";
-	Out += C.Story == Background::Newcomer ? " (plus $40 in savings)." : ".";
+	// What the account holds on night one: $2.37, and any savings go straight into it (Session::NewCareer).
+	const Chips Saved = PerksOf(C.Story).StartCents;
+	const std::string SavedText = Saved % 100 == 0 ? "$" + std::to_string(Saved / 100) : Money(Saved);
+	Out += "Now: a rented room, a laptop, rent due Friday, and " + Money(237 + Saved) + " on RiverLine";
+	Out += Saved > 0 ? " (" + SavedText + " of it saved from home)." : ".";
 	return Out;
 }
 } // namespace hero

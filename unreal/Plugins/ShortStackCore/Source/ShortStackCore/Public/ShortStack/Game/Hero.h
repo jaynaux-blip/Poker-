@@ -125,6 +125,10 @@ SHORTSTACKCORE_API uint32_t SkinTone(int Index);
 SHORTSTACKCORE_API uint32_t HairTone(int Index);
 SHORTSTACKCORE_API uint32_t EyeTone(int Index);
 SHORTSTACKCORE_API uint32_t OutfitTone(int Index);
+/** The hair as it shows at this age: the color drains and silver comes in from the mid-forties (salt and pepper, not beige). */
+SHORTSTACKCORE_API uint32_t HairToneAt(const Look& L, int Age);
+/** The headwear's color: one that goes with the jacket without matching it, and stands apart from the hair under it (at this age). */
+SHORTSTACKCORE_API uint32_t HatTone(const Look& L, int Age = 0);
 
 constexpr int MinAge = 18;
 constexpr int MaxAge = 65;
@@ -153,8 +157,15 @@ struct Character
 SHORTSTACKCORE_API Perks PerksOf(const Character& C);
 /** A random, plausible person (the creator's RANDOMIZE). */
 SHORTSTACKCORE_API Character Random(Rng& R);
+/** A random look for someone of this age and body type (the creator's RANDOM LOOK): grey comes with the years. */
+SHORTSTACKCORE_API Look RandomLook(Rng& R, int Age, int Body);
+/** Names people from this country often have (first names, or last names), for the creator to suggest. */
+SHORTSTACKCORE_API std::vector<std::string> NameSuggestions(const std::string& Country, bool Last);
 /** The ID card's paragraph: "Jesse Cole, 24. Grew up in Cleveland, ..." */
 SHORTSTACKCORE_API std::string Bio(const Character& C);
+/** Letters in a name part (an accented letter is one, however many bytes it takes). */
+SHORTSTACKCORE_API int NameLength(const std::string& Part);
+constexpr int MaxNameLength = 16;
 /** A name part the creator accepts: 1 to 16 letters, spaces, apostrophes or hyphens, starting with a letter. */
 SHORTSTACKCORE_API bool NameValid(const std::string& Part);
 } // namespace hero

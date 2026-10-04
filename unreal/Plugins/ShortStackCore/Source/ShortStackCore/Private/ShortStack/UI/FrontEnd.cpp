@@ -1,8 +1,11 @@
 #include "ShortStack/UI/FrontEnd.h"
 #include "../StrictFloat.h"
 #include "FrontEndShared.h"
+#include "RiverLineShared.h"
 
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Network.h"
+#include "ShortStack/UI/Portrait.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,8 +15,49 @@ namespace ss
 {
 namespace ui
 {
+namespace menu_detail
+{
+/** "$1,225" for whole dollars, "$2.37" otherwise (the way the landlord writes it). */
+std::string WholeDollars(Chips Cents)
+{
+	return Cents % 100 == 0 ? (Cents < 0 ? "-$" : "$") + Grouped(Cents < 0 ? -Cents / 100 : Cents / 100) : Money(Cents);
+}
+
+std::string UpperCase(std::string S)
+{
+	for (char& Ch : S)
+	{
+		Ch = Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch;
+	}
+	return S;
+}
+
+/** The day a deadline at midnight closes, as the player would say it from World: "tonight", "tomorrow", "Friday", "Oct 31". */
+std::string RentDueDay(double Deadline, double World)
+{
+	const int Day = net::DayOf(Deadline - 1.0);
+	const int Today = net::DayOf(World);
+	if (Day <= Today)
+	{
+		return "tonight";
+	}
+	if (Day == Today + 1)
+	{
+		return "tomorrow";
+	}
+	return Day - Today < 7 ? std::string(net::WeekdayName(Day, true)) : net::DateLabel(Day);
+}
+
+/** "midnight tonight", "midnight tomorrow", "Friday at midnight". */
+std::string RentByMidnight(double Deadline, double World)
+{
+	const std::string Day = RentDueDay(Deadline, World);
+	return Day == "tonight" || Day == "tomorrow" ? "midnight " + Day : Day + " at midnight";
+}
+} // namespace menu_detail
 
 using namespace frontend_detail;
+using namespace menu_detail;
 
 // ------------------------------------------------------------------ settings
 
@@ -128,6 +172,11 @@ FrontEndInfo DescribeSession(const Session& S, bool HasSave)
 		const HistoryEntry& Last = S.History.back();
 		Out.LastResult = Last.Name + " \xC2\xB7 " + Ordinal(Last.Place);
 	}
+	Out.World = S.WorldMinutes();
+	Out.RentStage = S.Life.RentStage;
+	Out.RentDueCents = S.Life.RentDueCents;
+	Out.RentDeadline = S.Life.RentDeadline;
+	Out.StorageDue = S.Life.StorageDue;
 	Out.Status.push_back({"BANKROLL", Money(S.BankrollCents)});
 	Out.Status.push_back({"TIME", ClockString(S.ClockMinutes())});
 	Out.InTournament = S.T && !S.T->bFinished && S.CurrentScreen == Screen::Table && !S.T->Hero().Busted;
@@ -195,11 +244,71 @@ void FrontEnd::Go(Page Target, double Now)
 float FrontEnd::Backdrop(double Now) const
 {
 	const float K = Ease((Now - PageAt) / 0.35);
-	if (Cur != Page::Hidden)
+	if (InGame)
 	{
-		return InGame ? (Prev == Page::Hidden ? K : 1.0f) : 0.0f;
+		if (Cur != Page::Hidden)
+		{
+			return Prev == Page::Hidden ? K : 1.0f;
+		}
+		return Prev != Page::Hidden ? 1.0f - K : 0.0f;
 	}
-	return InGame && Prev != Page::Hidden ? 1.0f - K : 0.0f;
+	// The title flow keeps the room sharp, except behind the creator: a soft focus, so the form reads over it.
+	const float CreatorBlur = 0.45f;
+	if (Cur == Page::NewGame)
+	{
+		return CreatorBlur * (Prev == Page::NewGame ? 1.0f : K);
+	}
+	return Prev == Page::NewGame ? CreatorBlur * (1.0f - K) : 0.0f;
+}
+
+void FrontEnd::SetVenue(Venue Place, const std::string& Label)
+{
+	Where = Place;
+	WhereLabel = Label;
+}
+
+std::string FrontEnd::VenueLabel() const
+{
+	if (!WhereLabel.empty())
+	{
+		return WhereLabel;
+	}
+	switch (Where)
+	{
+	case Venue::Street: return "FIFTH STREET";
+	case Venue::BackRoom: return "THE BACK ROOM";
+	case Venue::CardRoom: return "THE EMBERCREST";
+	default: return Info.RentStage == life::Rent::Evicted ? "DEE'S PLACE" : "APT 3B";
+	}
+}
+
+std::string FrontEnd::LeaveTitle(bool ToMenu) const
+{
+	if (!ToMenu)
+	{
+		return Where == Venue::Street ? "Call it a night" : "Log off for the night";
+	}
+	if (Info.InTournament)
+	{
+		return "Leave the table";
+	}
+	switch (Where)
+	{
+	case Venue::Street: return "Off the street";
+	case Venue::BackRoom: return "Leave Dee's table";
+	case Venue::CardRoom: return "Leave the card room";
+	default: return "Step away from the desk";
+	}
+}
+
+std::string FrontEnd::SavedLine() const
+{
+	if (Where == Venue::Street)
+	{
+		// The street hands back to the desk: Continue starts there.
+		return "Your bankroll, the bag and your career are saved. You'll pick up at the desk.";
+	}
+	return "Your bankroll and career are saved.";
 }
 
 std::vector<FrontEnd::MenuItem> FrontEnd::Items() const
@@ -272,7 +381,11 @@ void FrontEnd::Activate(int Index, double Now)
 		break;
 	case 1:
 		Sound(SoundId::Chip, 0.5);
-		ScreenName = Info.HeroName;
+		if (!DraftTouched)
+		{
+			// A draft the player was working on keeps its screen name too.
+			ScreenName = Info.HeroName;
+		}
 		Go(Page::NewGame, Now);
 		break;
 	case 2:
@@ -312,6 +425,34 @@ bool FrontEnd::NameValid() const
 
 void FrontEnd::Key(const std::string& Name, double Now)
 {
+	// The character a key types arrives right after the key (Unreal sends both). When the key opened a page, that
+	// character belongs to the page it left: Space on NEW GAME must not put a space in the first name.
+	const Page Was = Cur;
+	const CreatorStage WasStage = Stage;
+	SwallowChar = false;
+	HandleKey(Name, Now);
+	SwallowChar = Cur != Was || Stage != WasStage;
+}
+
+void FrontEnd::Confirmed(Modal Which, double Now)
+{
+	switch (Which)
+	{
+	case Modal::QuitGame:
+		Sound(SoundId::Fold, 0.6);
+		Hooks.QuitGame();
+		break;
+	case Modal::QuitToMenu:
+		Sound(SoundId::Fold, 0.6);
+		Hooks.QuitToMenu();
+		break;
+	case Modal::Overwrite: StartCareer(Now); break;
+	default: break;
+	}
+}
+
+void FrontEnd::HandleKey(const std::string& Name, double Now)
+{
 	if (Cur == Page::Hidden)
 	{
 		return;
@@ -331,21 +472,13 @@ void FrontEnd::Key(const std::string& Name, double Now)
 			ConfirmSel = 1 - ConfirmSel;
 			Sound(SoundId::Click, 0.3);
 		}
-		else if (Enter)
+		else if (Enter || (Name == "Space" && Confirm == Modal::Overwrite))
 		{
 			const Modal Which = Confirm;
 			Confirm = Modal::None;
 			if (ConfirmSel == 0)
 			{
-				Sound(SoundId::Fold, 0.6);
-				if (Which == Modal::QuitGame)
-				{
-					Hooks.QuitGame();
-				}
-				else
-				{
-					Hooks.QuitToMenu();
-				}
+				Confirmed(Which, Now);
 			}
 			else
 			{
@@ -450,9 +583,15 @@ void FrontEnd::Key(const std::string& Name, double Now)
 
 void FrontEnd::Char(uint32_t Codepoint, double Now)
 {
+	if (SwallowChar)
+	{
+		SwallowChar = false;
+		return;
+	}
 	if (Cur == Page::Attract)
 	{
 		Key("Any", Now);
+		SwallowChar = false; // this character was the key
 		return;
 	}
 	if (Cur == Page::NewGame && Confirm == Modal::None)
@@ -645,6 +784,21 @@ void FrontEnd::Scrim(Page P)
 	case Page::Attract:
 		C->FillRect({0.0f, 0.0f, ViewW, H}, Paint::Radial({ViewW * 0.5f, H * 0.5f}, H * 0.25f, {ViewW * 0.5f, H * 0.5f}, ViewW * 0.72f, F(MenuShade, 0.0f), 0.55f, F(MenuShade, 0.35f), F(MenuShade, 0.85f)));
 		break;
+	case Page::NewGame:
+	{
+		// The creator's form sits on a dark panel the full height of the screen, so every field reads over the lit room
+		// (the host softens the room behind it too); the panel feathers out under the portrait card, which has its own.
+		const Color Ground = Hex(0x04060c);
+		const float Edge = MenuMargin + CreatorFormWidth(ViewW) + 36.0f;
+		const float Feather = std::max(120.0f, ViewW - MenuMargin - CreatorCardWidth(ViewW) - Edge + 160.0f);
+		C->FillRect({0.0f, 0.0f, ViewW, H}, Paint(F(MenuShade, 0.3f)));
+		C->FillRect({0.0f, 0.0f, Edge, H}, Paint::Linear({0.0f, 0.0f}, {Edge, 0.0f}, F(Ground, 0.9f), F(Ground, 0.84f)));
+		C->FillRect({Edge, 0.0f, Feather, H}, Paint::Linear({Edge, 0.0f}, {Edge + Feather, 0.0f}, F(Ground, 0.84f), F(Ground, 0.0f)));
+		// A faint cool sheen down the panel, like light through frosted glass.
+		C->FillRect({0.0f, 0.0f, Edge, H}, Paint::Radial({Edge * 0.35f, H * 0.18f}, 0.0f, {Edge * 0.35f, H * 0.18f}, H * 0.9f, F(Hex(0x1b2a4a), 0.22f), 0.5f, F(Hex(0x1b2a4a), 0.08f), F(Hex(0x1b2a4a), 0.0f)));
+		C->FillRect({0.0f, H - 200.0f, ViewW, 200.0f}, Paint::Linear({0.0f, H - 200.0f}, {0.0f, H}, F(MenuShade, 0.0f), F(MenuShade, 0.6f)));
+		break;
+	}
 	case Page::Pause:
 	case Page::Settings:
 		if (P == Page::Pause || InGame)
@@ -802,8 +956,9 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 		if (CardPaint)
 		{
 			C->FillRect({X + Pad, Yc + 13.0f, Inner, 1.0f}, Paint(F(MenuInk, 0.07f * A)));
-			TrackedText(*C, Name, X + Pad, Yc, 13.0f, 700, F(MenuMuted, A), 2.4f);
-			C->Text(Value, X + CardW - Pad, Yc, Ts(19.0f, 700, F(ValueCol, A), Align::Right));
+			const float Lw = TrackedText(*C, Name, X + Pad, Yc, 13.0f, 700, F(MenuMuted, A), 2.4f);
+			// The value gives way to its label: a long one ends in an ellipsis instead of running over it.
+			C->Text(Value, X + CardW - Pad, Yc, Ts(19.0f, 700, F(ValueCol, A), Align::Right, Baseline::Alphabetic, false, std::max(60.0f, Inner - Lw - 18.0f)));
 		}
 	};
 	auto Warning = [&](const std::string& S) {
@@ -825,6 +980,80 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 			}
 		}
 	};
+	// The person behind the screen name, like a career mode's player card: a live photo, the screen name over the
+	// real one, where they're from and the life that brought them here.
+	auto Person = [&](const std::string& Heading) {
+		const hero::Character& P = Info.Person;
+		const float Pw = 112.0f;
+		const float Ph = 132.0f;
+		const Rect Photo{X + Pad, Yc - 28.0f, Pw, Ph};
+		if (CardPaint)
+		{
+			const hero::BackgroundInfo& Bi = hero::InfoOf(P.Story);
+			const Color Bc = Hex(Bi.Color);
+			C->FillRoundRect(Photo, 10.0f, Paint::Linear({0.0f, Photo.Y}, {0.0f, Photo.Y + Ph}, F(Hex(0x1f2a46), A), F(Hex(0x090c16), A)));
+			C->PushClip(Photo);
+			C->FillCircle(Photo.X + Pw, Photo.Y + Ph * 0.42f, Pw * 0.7f,
+				Paint::Radial({Photo.X + Pw, Photo.Y + Ph * 0.42f}, 0.0f, {Photo.X + Pw, Photo.Y + Ph * 0.42f}, Pw * 0.7f, F(Bc, 0.22f * A), 0.5f, F(Bc, 0.07f * A), F(Bc, 0.0f)));
+			PortraitLight Light;
+			Light.Rim = Bc;
+			const float A0 = C->GetAlpha();
+			C->SetAlpha(A0 * Fade * A);
+			DrawPortrait(*C, P, Photo.X + Pw * 0.5f, Photo.Y + 64.0f, 0.38f, LastNow, Light);
+			C->SetAlpha(A0);
+			C->PopClip();
+			C->StrokeRoundRect({Photo.X + 0.5f, Photo.Y + 0.5f, Pw - 1.0f, Ph - 1.0f}, 10.0f, F(MenuInk, 0.14f * A), 1.0f);
+			const float Tx = Photo.X + Pw + 22.0f;
+			const float Tw = X + CardW - Pad - Tx;
+			C->Text(Heading, Tx, Photo.Y + 34.0f, Ts(32.0f, 900, F(MenuInk, A), Align::Left, Baseline::Alphabetic, false, Tw));
+			C->Text(P.FullName(), Tx, Photo.Y + 62.0f, Ts(19.0f, 600, F(MenuInk, 0.85f * A), Align::Left, Baseline::Alphabetic, false, Tw));
+			float Fx = Tx;
+			if (const hero::CountryInfo* Ci = hero::FindCountry(P.Country))
+			{
+				const float Fa = C->GetAlpha();
+				C->SetAlpha(Fa * Fade * A);
+				rlnet_detail::NetFlag(*C, Ci->Code, Fx, Photo.Y + 72.0f, 21.0f, 14.0f);
+				C->SetAlpha(Fa);
+				Fx += 30.0f;
+				C->Text(std::to_string(P.Age) + " \xC2\xB7 " + Ci->City + ", " + Ci->Name, Fx, Photo.Y + 84.0f, Ts(14.0f, 600, F(MenuMuted, A), Align::Left, Baseline::Alphabetic, false, Tw - 30.0f));
+			}
+			const std::string Pill = UpperCase(Bi.Name);
+			const float PillW = std::min(Tw, TrackedWidth(*C, Pill, 11.0f, 800, 2.2f) + 46.0f);
+			const Rect Pr{Tx, Photo.Y + Ph - 30.0f, PillW, 28.0f};
+			C->FillRoundRect(Pr, 14.0f, Paint(F(Bc, 0.14f * A)));
+			C->StrokeRoundRect(Pr, 14.0f, F(Bc, 0.7f * A), 1.2f);
+			BackgroundIcon(*C, P.Story, Pr.X + 16.0f, Pr.Y + 14.0f, 20.0f, F(Bc, A));
+			TrackedText(*C, Pill, Pr.X + 31.0f, Pr.Y + 19.0f, 11.0f, 800, F(Bc, A), 2.2f);
+		}
+		Yc = Photo.Y + Ph - 14.0f;
+	};
+	// Where the rent stands, in the landlord's terms: owed, covered, paid, a final notice, or the locks changed.
+	auto RentLine = [&]() {
+		const std::string Day = RentDueDay(Info.RentDeadline, Info.World);
+		switch (Info.RentStage)
+		{
+		case life::Rent::Paid: Row("RENT", "Paid \xC2\xB7 next due " + net::DateLabel(net::DayOf(Info.RentDeadline - 1.0)), MenuTeal); break;
+		case life::Rent::FinalNotice: Warning("Final notice: " + WholeDollars(Info.RentDueCents) + " by " + RentByMidnight(Info.RentDeadline, Info.World) + ", or the locks change."); break;
+		case life::Rent::Evicted:
+			Warning("Locked out. A key back costs " + WholeDollars(Info.RentDueCents) + ": the back rent and a month up front.");
+			if (Info.StorageDue > 0.0)
+			{
+				Row("STORAGE RENEWS", net::DateLabel(net::DayOf(Info.StorageDue)), MenuInk);
+			}
+			break;
+		default:
+			if (Info.BankrollCents >= Info.RentDueCents)
+			{
+				// The landlord collects at the deadline when the money's there.
+				Row("RENT DUE " + UpperCase(Day), WholeDollars(Info.RentDueCents) + " \xC2\xB7 COVERED", MenuTeal);
+			}
+			else
+			{
+				Warning("Rent is due " + Day + ": " + WholeDollars(Info.RentDueCents) + ".");
+			}
+			break;
+		}
+	};
 
 	const bool Pause = Cur == Page::Pause || (Cur == Page::Hidden && Prev == Page::Pause);
 	if (Cur == Page::NewGame)
@@ -842,7 +1071,14 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 		{
 		case 0:
 			Label("TONIGHT", MenuTeal);
-			Title(Info.HeroName);
+			if (Info.Person.Created)
+			{
+				Person(Info.HeroName);
+			}
+			else
+			{
+				Title(Info.HeroName);
+			}
 			for (const std::pair<std::string, std::string>& Kv : Info.Status)
 			{
 				Row(Kv.first, Kv.second, Kv.first == "BANKROLL" ? MenuGold : MenuInk);
@@ -854,9 +1090,10 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 			Para("Changes apply as you make them.", MenuInk);
 			break;
 		default:
+			// What leaving looks like from where the player is (the desk, the street, a table).
 			Label(Sel == 2 ? "MAIN MENU" : "DESKTOP", MenuTeal);
-			Title(Sel == 2 ? "Leave the table" : "Log off for the night");
-			Para("Your bankroll and career are saved.", MenuInk);
+			Title(LeaveTitle(Sel == 2));
+			Para(SavedLine(), MenuInk);
 			if (Info.InTournament)
 			{
 				Warning("You will leave the tournament in progress. The buy-in is not refunded.");
@@ -870,10 +1107,13 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 		{
 		case 0:
 			Label("CONTINUE CAREER", MenuTeal);
-			Title(Info.HeroName);
 			if (Info.Person.Created)
 			{
-				Row("PLAYING AS", Info.Person.FullName() + " \xC2\xB7 " + hero::InfoOf(Info.Person.Story).Name, MenuInk);
+				Person(Info.HeroName);
+			}
+			else
+			{
+				Title(Info.HeroName);
 			}
 			Row("BANKROLL", Money(Info.BankrollCents), MenuGold);
 			Row("TOURNAMENTS PLAYED", std::to_string(Info.Tournaments), MenuInk);
@@ -885,12 +1125,17 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 			{
 				Row("LAST EVENT", Info.LastResult, MenuInk);
 			}
-			Warning("Rent is due Friday: $1,225.");
+			RentLine();
 			break;
 		case 1:
 			Label("NEW CAREER", MenuTeal);
 			Title("Night One");
 			Para("Rain on the window, $2.37 in your RiverLine account and a final notice on the door. Rent is due Friday.", MenuInk);
+			if (DraftTouched && !Draft.FirstName.empty())
+			{
+				// Backed out of the creator: the person they were making is still there.
+				Row("IN THE CREATOR", Draft.FullName(), MenuInk);
+			}
 			if (Info.HasSave)
 			{
 				Warning("Starting over replaces your current career.");
@@ -930,7 +1175,7 @@ void FrontEnd::ContextCard(float X, float Y, float CardW, double Now)
 	ContextBody(X, Y + Dy, CardW);
 }
 
-void FrontEnd::Hints(const std::vector<std::pair<std::string, std::string>>& Pairs)
+float FrontEnd::Hints(const std::vector<std::pair<std::string, std::string>>& Pairs)
 {
 	float X = MenuMargin;
 	const float Y = Height - 62.0f;
@@ -953,6 +1198,30 @@ void FrontEnd::Hints(const std::vector<std::pair<std::string, std::string>>& Pai
 		X += 6.0f;
 		X += TrackedText(*C, P.second, X, Y - 2.0f, 13.0f, 700, F(MenuMuted), 2.6f) + 34.0f;
 	}
+	return X;
+}
+
+float FrontEnd::HintsWidth(const std::vector<std::pair<std::string, std::string>>& Pairs) const
+{
+	float W = 0.0f;
+	for (const std::pair<std::string, std::string>& P : Pairs)
+	{
+		const size_t Slash = P.first.find('/');
+		const std::string Set = Gamepad && Slash != std::string::npos ? P.first.substr(Slash + 1) : P.first.substr(0, Slash);
+		size_t Start = 0;
+		while (Start <= Set.size())
+		{
+			size_t End = Set.find('|', Start);
+			if (End == std::string::npos)
+			{
+				End = Set.size();
+			}
+			W += GlyphWidth(*C, Set.substr(Start, End - Start)) + 6.0f;
+			Start = End + 1;
+		}
+		W += 6.0f + TrackedWidth(*C, P.second, 13.0f, 700, 2.6f) + 34.0f;
+	}
+	return W;
 }
 
 void FrontEnd::Footer()
@@ -1010,13 +1279,19 @@ void FrontEnd::MainPage(double Now)
 void FrontEnd::PausePage(double Now)
 {
 	TrackedText(*C, "PAUSED", MenuMargin, 268.0f, 84.0f, 900, F(MenuInk), 4.0f);
+	// Where and when: "FIFTH STREET \xC2\xB7 TUE \xC2\xB7 2:16 AM" (the venue comes from the host, the clock from the session).
 	std::string Clock;
 	for (const std::pair<std::string, std::string>& Kv : Info.Status)
 	{
 		Clock = Kv.first == "TIME" ? Kv.second : Clock;
 	}
+	if (Clock.empty())
+	{
+		Clock = net::TimeLabel(Info.World);
+	}
+	const std::string Day = UpperCase(net::WeekdayName(net::DayOf(Info.World)));
 	C->FillRect({MenuMargin + 2.0f, 310.0f, 44.0f, 3.0f}, Paint(F(MenuNeon)));
-	TrackedText(*C, "NIGHT ONE" + (Clock.empty() ? std::string() : " \xC2\xB7 " + Clock), MenuMargin + 62.0f, 318.0f, 15.0f, 700, F(MenuMuted), 6.0f);
+	TrackedText(*C, VenueLabel() + " \xC2\xB7 " + Day + " \xC2\xB7 " + Clock, MenuMargin + 62.0f, 318.0f, 15.0f, 700, F(MenuMuted), 6.0f);
 	MenuList(Items(), MenuMargin + 4.0f, 470.0f, Now);
 	const float CardW = 540.0f;
 	ContextCard(ViewW - MenuMargin - CardW, 410.0f, CardW, Now);
@@ -1268,42 +1543,60 @@ void FrontEnd::ModalBox(double Now)
 	const float SavedFade = Fade;
 	Fade = A;
 	C->FillRect({0.0f, 0.0f, ViewW, Height}, Paint(F(MenuShade, 0.7f)));
+	const Modal Which = Confirm;
+	std::string Heading;
+	std::string Body;
+	std::string YesLabel = "QUIT";
+	bool Alarm = Info.InTournament;
+	switch (Which)
+	{
+	case Modal::Overwrite:
+	{
+		// What starting over costs, in the career's own numbers, and who starts instead.
+		Heading = "START OVER?";
+		const int N = Info.Tournaments;
+		Body = "Your career as " + Info.HeroName + " ends here: " + WholeDollars(Info.BankrollCents) + " and " + std::to_string(N) + (N == 1 ? " tournament" : " tournaments") +
+			" since Night One. " + (Draft.FirstName.empty() ? std::string("The new you") : Draft.FullName()) + " starts Night One with " + Money(237 + hero::PerksOf(Draft.Story).StartCents) + ".";
+		YesLabel = "START OVER";
+		Alarm = true;
+		break;
+	}
+	case Modal::QuitToMenu:
+		Heading = "QUIT TO MAIN MENU?";
+		Body = Info.InTournament ? "You will leave the tournament in progress. The buy-in is not refunded." : SavedLine();
+		break;
+	default:
+		Heading = "QUIT GAME?";
+		Body = Info.InTournament ? "You will leave the tournament in progress. The buy-in is not refunded." : SavedLine();
+		break;
+	}
 	const float Mw = 720.0f;
-	const float Mh = 300.0f;
+	const std::vector<std::string> Lines = WrapText(*C, Body, Mw - 88.0f, 20.0f, 300);
+	const float Mh = std::max(300.0f, 236.0f + 30.0f * static_cast<float>(Lines.size()));
 	const float Mx = ViewW * 0.5f - Mw * 0.5f;
 	const float My = Height * 0.5f - Mh * 0.5f + (1.0f - A) * 16.0f;
 	C->FillRect({Mx, My, Mw, Mh}, Paint(F(MenuPanel, 0.96f)));
 	C->StrokeRoundRect({Mx + 0.5f, My + 0.5f, Mw - 1.0f, Mh - 1.0f}, 1.0f, F(MenuInk, 0.1f), 1.0f);
-	C->FillRect({Mx, My, 56.0f, 3.0f}, Paint(F(MenuNeon)));
-	const bool ToMenu = Confirm == Modal::QuitToMenu;
-	TrackedText(*C, ToMenu ? "QUIT TO MAIN MENU?" : "QUIT GAME?", Mx + 44.0f, My + 84.0f, 36.0f, 900, F(MenuInk), 2.0f);
-	const std::string Body = Info.InTournament ? "You will leave the tournament in progress. The buy-in is not refunded." : "Your bankroll and career are saved.";
+	C->FillRect({Mx, My, 56.0f, 3.0f}, Paint(F(Which == Modal::Overwrite ? MenuWarn : MenuNeon)));
+	TrackedText(*C, Heading, Mx + 44.0f, My + 84.0f, 36.0f, 900, F(MenuInk), 2.0f);
 	float Yb = My + 104.0f;
-	for (const std::string& L : WrapText(*C, Body, Mw - 88.0f, 20.0f, 300))
+	for (const std::string& L : Lines)
 	{
 		Yb += 30.0f;
-		C->Text(L, Mx + 44.0f, Yb, Ts(20.0f, 300, F(Info.InTournament ? MenuWarn : MenuInk, 0.9f)));
+		C->Text(L, Mx + 44.0f, Yb, Ts(20.0f, 300, F(Alarm ? MenuWarn : MenuInk, 0.9f)));
 	}
-	const Rect Yes = {Mx + 44.0f, My + Mh - 100.0f, 200.0f, 60.0f};
-	const Rect No = {Mx + 264.0f, My + Mh - 100.0f, 200.0f, 60.0f};
+	const float Yw = std::max(200.0f, TrackedWidth(*C, YesLabel, 20.0f, 900, 3.0f) + 56.0f);
+	const Rect Yes = {Mx + 44.0f, My + Mh - 100.0f, Yw, 60.0f};
+	const Rect No = {Yes.X + Yw + 20.0f, My + Mh - 100.0f, 200.0f, 60.0f};
 	if (Interactive && PtrMoved)
 	{
 		ConfirmSel = Inside(Yes, Ptr.X, Ptr.Y) ? 0 : Inside(No, Ptr.X, Ptr.Y) ? 1 : ConfirmSel;
 	}
 	const bool Saved = Interactive;
-	const Modal Which = Confirm;
-	if (Button(Yes, "QUIT", ConfirmSel == 0, ConfirmSel == 0))
+	if (Button(Yes, YesLabel, ConfirmSel == 0, ConfirmSel == 0))
 	{
 		Confirm = Modal::None;
-		Sound(SoundId::Fold, 0.6);
-		if (Which == Modal::QuitGame)
-		{
-			Hooks.QuitGame();
-		}
-		else
-		{
-			Hooks.QuitToMenu();
-		}
+		Confirmed(Which, Now);
 	}
 	else if (Button(No, "CANCEL", ConfirmSel == 1, ConfirmSel == 1))
 	{
@@ -1359,7 +1652,20 @@ void FrontEnd::Draw(Canvas& Cv, double Now)
 	{
 		const bool FromHidden = Prev == Page::Hidden;
 		Fade = FromHidden ? Ease(Since / 0.6) : 1.0f;
-		Scrim(Cur);
+		if (!FromHidden && Prev != Cur && (Prev == Page::NewGame || Cur == Page::NewGame) && Since < 0.4)
+		{
+			// The creator's panel is darker than the menu's shade: cross-fade the two instead of popping.
+			const float K = Ease(Since / 0.4);
+			Fade = 1.0f - K;
+			Scrim(Prev);
+			Fade = K;
+			Scrim(Cur);
+			Fade = 1.0f;
+		}
+		else
+		{
+			Scrim(Cur);
+		}
 		const Page Drawn = Cur;
 		Interactive = Confirm == Modal::None;
 		Fade = Ease((Since - (FromHidden ? 0.2 : 0.04)) / 0.4);

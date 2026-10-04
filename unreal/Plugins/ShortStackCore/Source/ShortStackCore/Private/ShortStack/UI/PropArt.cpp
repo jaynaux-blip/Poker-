@@ -1,4 +1,6 @@
 #include "ShortStack/UI/PropArt.h"
+#include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/UI/StoreCounter.h"
 #include "../StrictFloat.h"
@@ -7,6 +9,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
+#include <vector>
 
 namespace ss
 {
@@ -32,10 +36,12 @@ void EvictionNotice(Canvas& C)
 	const Color Ink = Hex(0x1a1a1a);
 	C.Text("NOTICE TO PAY RENT", W / 2.0f, 80.0f, Ts(40.0f, 700, Ink, Align::Center));
 	C.Text("OR QUIT", W / 2.0f, 128.0f, Ts(40.0f, 700, Ink, Align::Center));
-	const char* Lines[12] = {
-		"TO THE TENANT IN POSSESSION OF UNIT 3C:", "", "You are hereby notified that rent is past due", "for the premises you occupy, in the amount of",
-		"$1,150.00 plus a late fee of $75.00.", "", "Within FOURTEEN (14) days you must pay the", "amount due in full, or vacate and surrender",
-		"possession of the premises.", "", "Failure to do so will result in legal", "proceedings to recover possession.",
+	// The game's own numbers: the apartment (Session::DeliveryAddress), the month and the fee in it (life::), Friday.
+	const std::string Lines[12] = {
+		"TO THE TENANT IN POSSESSION OF APT 3B,", "1812 FIFTH STREET:", "", "You are hereby notified that rent is past due",
+		"for the premises you occupy, in the amount of", Money(life::MonthlyRentCents) + " plus a late fee of " + Money(life::LateFeeCents) + ".", "",
+		"Pay the amount due IN FULL by midnight FRIDAY,", "or vacate and surrender possession of the", "premises. Failure to do so will result in the",
+		"locks being changed and your property placed", "in storage at your expense.",
 	};
 	for (int I = 0; I < 12; ++I)
 	{
@@ -275,9 +281,114 @@ void Promo(Canvas& C, const std::string& ItemId, const std::string& Deal)
 	}
 	C.FillRect({0.0f, H - 230.0f, W, 230.0f}, Hex(0xffd23f));
 	C.FillRect({0.0f, H - 230.0f, W, 12.0f}, Hex(0xd7263d));
-	C.Text(Deal, W * 0.5f, H - 110.0f, Ts(96.0f, 900, Hex(0x1a1408), Align::Center));
-	C.Text("AT YOUR LUCKY PENNY", W * 0.5f, H - 46.0f, Ts(30.0f, 800, Hex(0xd7263d), Align::Center));
+	// The headline: the deal as given, or the shelf price (what the register rings up). Long ones shrink to fit.
+	const std::string Head = !Deal.empty() ? Deal : I ? Money(I->PriceCents) : std::string();
+	const float Fit = std::min(96.0f, 96.0f * (W - 60.0f) / std::max(1.0f, C.Measure(Head, 96.0f, 900)));
+	C.Text(Head, W * 0.5f, H - 110.0f, Ts(Fit, 900, Hex(0x1a1408), Align::Center));
+	C.Text(Deal.empty() ? "EVERY DAY AT YOUR LUCKY PENNY" : "AT YOUR LUCKY PENNY", W * 0.5f, H - 46.0f, Ts(Deal.empty() ? 26.0f : 30.0f, 800, Hex(0xd7263d), Align::Center));
 	C.PopClip();
+}
+
+void MenuBoard(Canvas& C)
+{
+	const float W = MenuBoardW;
+	const float H = MenuBoardH;
+	const Color Cream = Hex(0xfffaf0);
+	const Color Muted = Hex(0x9aa0aa);
+	const Color PriceInk = Hex(0xffd23f);
+	// The frame, the board, and the store's light falling on it from above.
+	C.FillRect({0.0f, 0.0f, W, H}, Hex(0x0e0f12));
+	C.FillRect({14.0f, 14.0f, W - 28.0f, H - 28.0f}, Paint::Linear({0.0f, 14.0f}, {0.0f, H - 14.0f}, Hex(0x262a31), Hex(0x121418)));
+	C.PushClip({14.0f, 14.0f, W - 28.0f, H - 28.0f});
+	C.FillEllipse(W * 0.32f, 0.0f, 760.0f, 760.0f, Paint::Radial({W * 0.32f, 0.0f}, 0.0f, {W * 0.32f, 0.0f}, 760.0f, Rgba(255, 236, 200, 0.1f), 0.5f, Rgba(255, 236, 200, 0.03f), Rgba(255, 236, 200, 0.0f)));
+	C.PopClip();
+
+	// The menu: a red header band, then the grill and the deli case on the left, the coffee bar beside them, every
+	// price straight from the catalog.
+	const float MenuW = 1104.0f;
+	C.FillRect({14.0f, 14.0f, MenuW, 96.0f}, Paint::Linear({14.0f, 0.0f}, {14.0f + MenuW, 0.0f}, Hex(0xd7263d), Hex(0xa3122a)));
+	propart_street::Penny(C, 72.0f, 62.0f, 32.0f);
+	C.Text("HOT & FRESH", 124.0f, 84.0f, Ts(56.0f, 900, Cream));
+	C.Text("MADE TONIGHT. MOSTLY.", 14.0f + MenuW - 28.0f, 78.0f, Ts(22.0f, 800, Hex(0xffd7dc), Align::Right));
+	auto Column = [&](store::Shelf Which, const char* Title, float X, float Y, float ColW) {
+		C.Text(Title, X, Y, Ts(24.0f, 900, Hex(0xf2c14e)));
+		C.FillRect({X, Y + 12.0f, ColW, 3.0f}, Rgba(242, 193, 78, 0.45f));
+		float Ry = Y + 30.0f;
+		for (const store::Item& I : store::Catalog())
+		{
+			if (I.Where != Which)
+			{
+				continue;
+			}
+			DrawProduct(C, I, X + 44.0f, Ry + 54.0f, 84.0f);
+			std::string Name = I.Name;
+			std::transform(Name.begin(), Name.end(), Name.begin(), [](char Ch) { return static_cast<char>(Ch >= 'a' && Ch <= 'z' ? Ch - 32 : Ch); });
+			C.Text(Name, X + 104.0f, Ry + 54.0f, Ts(30.0f, 900, Cream, Align::Left, Baseline::Alphabetic, false, ColW - 230.0f));
+			C.Text(I.Kind, X + 104.0f, Ry + 82.0f, Ts(19.0f, 500, Muted, Align::Left, Baseline::Alphabetic, false, ColW - 230.0f));
+			const std::string Price = Money(I.PriceCents);
+			C.Text(Price, X + ColW, Ry + 60.0f, Ts(40.0f, 900, PriceInk, Align::Right));
+			// A dotted leader from the name to the price.
+			const float NameEnd = X + 104.0f + std::min(ColW - 230.0f, C.Measure(Name, 30.0f, 900)) + 14.0f;
+			for (float Dx = X + ColW - C.Measure(Price, 40.0f, 900) - 16.0f; Dx > NameEnd; Dx -= 12.0f)
+			{
+				C.FillCircle(Dx, Ry + 50.0f, 1.6f, Rgba(255, 250, 240, 0.25f));
+			}
+			Ry += 114.0f;
+		}
+		return Ry;
+	};
+	Column(store::Shelf::Hot, "THE GRILL & THE DELI CASE", 44.0f, 158.0f, 560.0f);
+	const float After = Column(store::Shelf::Coffee, "THE COFFEE BAR", 652.0f, 158.0f, 440.0f);
+	// The coffee bar's small print (the noodle cup's blurb says so too).
+	C.Text("HOT WATER \xC2\xB7 FREE", 652.0f, After + 40.0f, Ts(26.0f, 900, Cream));
+	C.Text("for your Oodle Cup. Lids by the register.", 652.0f, After + 72.0f, Ts(19.0f, 500, Muted));
+	C.Text("FRESH POT AT MIDNIGHT", 652.0f, After + 130.0f, Ts(22.0f, 800, Hex(0xf2c14e)));
+
+	// The lotto: Benny's forty million, the scratchers, and the sticker every counter has.
+	const Rect Lt{1132.0f, 14.0f, W - 1146.0f, H - 28.0f};
+	C.FillRect(Lt, Paint::Linear({Lt.X, Lt.Y}, {Lt.X, Lt.Y + Lt.H}, Hex(0x22348a), Hex(0x0d1438)));
+	C.FillRect({Lt.X, Lt.Y, 4.0f, Lt.H}, Hex(0x0b0d12));
+	const float Cx = Lt.X + Lt.W * 0.5f;
+	C.Text("POWER PICK", Cx, Lt.Y + 74.0f, Ts(48.0f, 900, Hex(0xffffff), Align::Center));
+	C.Text("ESTIMATED JACKPOT", Cx, Lt.Y + 116.0f, Ts(22.0f, 800, Hex(0xf2c14e), Align::Center));
+	// The jackpot in amber LEDs, with a glow: "$40" and "MILLION" centered as one.
+	const float Jw = C.Measure("$40", 150.0f, 700, true);
+	const float Mw = C.Measure("MILLION", 36.0f, 900);
+	const float Jx = Cx - (Jw + 18.0f + Mw) * 0.5f;
+	for (int K = 0; K < 8; ++K)
+	{
+		const float A = static_cast<float>(K) * 0.785398f;
+		C.Text("$40", Jx + std::cos(A) * 4.0f, Lt.Y + 262.0f + std::sin(A) * 4.0f, Ts(150.0f, 700, Rgba(255, 150, 40, 0.12f), Align::Left, Baseline::Alphabetic, true));
+	}
+	C.Text("$40", Jx, Lt.Y + 262.0f, Ts(150.0f, 700, Hex(0xffb347), Align::Left, Baseline::Alphabetic, true));
+	C.Text("MILLION", Jx + Jw + 18.0f, Lt.Y + 246.0f, Ts(36.0f, 900, Hex(0xffb347)));
+	C.Text("NEXT DRAWING SATURDAY 10:59 PM", Cx, Lt.Y + 310.0f, Ts(19.0f, 700, Hex(0xb9c6f0), Align::Center));
+	// Scratchers in their dispenser.
+	struct Ticket
+	{
+		const char* Name;
+		const char* Price;
+		uint32_t Col;
+	};
+	const Ticket Tickets[4] = {{"LUCKY 7s", "$1", 0x16a34a}, {"CASH CAB", "$2", 0xf2c14e}, {"GOLD RUSH", "$5", 0xd7263d}, {"ALL IN", "$10", 0x7c3aed}};
+	const float Tw = (Lt.W - 60.0f - 3.0f * 14.0f) / 4.0f;
+	for (int K = 0; K < 4; ++K)
+	{
+		const Rect T{Lt.X + 30.0f + static_cast<float>(K) * (Tw + 14.0f), Lt.Y + 352.0f, Tw, 168.0f};
+		C.FillRoundRect({T.X - 4.0f, T.Y - 4.0f, T.W + 8.0f, T.H + 8.0f}, 6.0f, Rgba(255, 255, 255, 0.1f));
+		C.FillRoundRect(T, 4.0f, Paint::Linear({T.X, T.Y}, {T.X + T.W, T.Y + T.H}, Mix(Hex(Tickets[K].Col), Hex(0xffffff), 0.18f), Mix(Hex(Tickets[K].Col), Hex(0x000000), 0.25f)));
+		C.FillRect({T.X + 10.0f, T.Y + 70.0f, T.W - 20.0f, 52.0f}, Rgba(200, 205, 212, 0.85f)); // the silver to scratch
+		C.Text(Tickets[K].Name, T.X + T.W * 0.5f, T.Y + 38.0f, Ts(17.0f, 900, Hex(0xffffff), Align::Center, Baseline::Alphabetic, false, T.W - 12.0f));
+		C.Text(Tickets[K].Price, T.X + T.W * 0.5f, T.Y + T.H - 16.0f, Ts(26.0f, 900, Hex(0xffffff), Align::Center));
+	}
+	// WE CARD.
+	const float Sy = Lt.Y + Lt.H - 82.0f;
+	C.FillCircle(Lt.X + 84.0f, Sy + 30.0f, 48.0f, Hex(0xd7263d));
+	C.StrokeEllipse(Lt.X + 84.0f, Sy + 30.0f, 42.0f, 42.0f, Hex(0xffffff), 3.0f);
+	C.Text("WE", Lt.X + 84.0f, Sy + 24.0f, Ts(22.0f, 900, Hex(0xffffff), Align::Center));
+	C.Text("CARD", Lt.X + 84.0f, Sy + 48.0f, Ts(22.0f, 900, Hex(0xffffff), Align::Center));
+	C.Text("UNDER 21? DON'T EVEN ASK.", Lt.X + 150.0f, Sy + 26.0f, Ts(22.0f, 900, Hex(0xffffff)));
+	C.Text("Play responsibly. The house always knows.", Lt.X + 150.0f, Sy + 54.0f, Ts(17.0f, 500, Hex(0xb9c6f0)));
 }
 
 } // namespace props
