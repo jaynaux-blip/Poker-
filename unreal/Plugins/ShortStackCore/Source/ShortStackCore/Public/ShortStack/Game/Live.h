@@ -13,9 +13,9 @@ namespace ss
 namespace live
 {
 /**
- * The Embercrest Casino's card room: the city's poker room, in the old showroom of a riverboat casino moored for
- * good in 1994. Two or three freezeouts every day for fields of sixty to a hundred and twenty, 6-max and deep
- * (docs/LIVE_TOURNAMENTS.md §4).
+ * The Embercrest Casino's card room: the poker room of the mountain resort casino on the ridge above the city, home
+ * of the Embercrest Poker Series. Two or three freezeouts every day for fields of sixty to a hundred and twenty, 6-max
+ * and deep (docs/LIVE_TOURNAMENTS.md §4).
  *
  * The schedule is data. Each day's events are occurrences with ids that are the same in every save, so the living
  * world plans who plays them (LiveCalendar reads them from here), and the player's entry, the world's result and
@@ -23,11 +23,13 @@ namespace live
  * engine's draw among the room's anonymous regulars. Nobody is moved anywhere but by the engine's balancing.
  */
 constexpr int EmbercrestTableSize = 6;
-/** The 14 bus across town, each way. */
+/** The 14 bus, each way: it climbs from the city up the ridge to the resort in twenty minutes. */
 constexpr Chips BusFareCents = 290;
 constexpr double TravelMinutes = 20.0;
 /** The desk takes registrations from three hours before cards. */
 constexpr double DeskOpensBefore = 180.0;
+/** The floor's last call for registration: this long before late registration closes. */
+constexpr double LastCallMinutes = 15.0;
 
 struct EventTemplate
 {
@@ -69,6 +71,27 @@ SHORTSTACKCORE_API Occurrence FindOccurrence(const std::string& Id);
 SHORTSTACKCORE_API bool IsEmbercrest(const std::string& EventId);
 /** The events the player could still make from World (there before late registration closes), in start order. */
 SHORTSTACKCORE_API std::vector<Occurrence> Reachable(double World, double HoursAhead);
+/**
+ * The next event still open to someone Arrive minutes away (late registration not closed when they get there; 0 for
+ * someone already in the room), starting within a day of World, Except skipped (the one the player is in). Invalid
+ * when there's none.
+ */
+SHORTSTACKCORE_API Occurrence NextOpen(double World, double Arrive = TravelMinutes, const std::string& Except = std::string());
+/** Minutes until late registration closes, from World (0 or less: closed). */
+inline double LateRegLeft(const Occurrence& O, double World)
+{
+	return O.Valid() ? O.LateRegEnds - World : 0.0;
+}
+/** Late registration is still open but closes within the floor's last call. */
+inline bool LastCall(const Occurrence& O, double World)
+{
+	const double Left = LateRegLeft(O, World);
+	return Left > 0.0 && Left <= LastCallMinutes;
+}
+/** About how long a deep run takes with this field: cards to the last hand, breaks included (minutes). */
+SHORTSTACKCORE_API double DeepRunMinutes(const Occurrence& O, int Entrants);
+/** When it is, said from World: "tonight", "today", "tomorrow night", "tomorrow", "last night", "yesterday", "on Saturday". */
+SHORTSTACKCORE_API std::string DayWord(const Occurrence& O, double World);
 
 /** Levels from 100/200, a big-blind ante from level 3. */
 SHORTSTACKCORE_API const std::vector<Level>& DeepstackLevels();
@@ -141,7 +164,7 @@ SHORTSTACKCORE_API std::string Register(Chips& Bankroll, life::State& L, const O
 SHORTSTACKCORE_API bool PayFare(Chips& Bankroll, life::State& L, const std::string& Id, bool Home, double World);
 /** The result, once: the prize to the bankroll and its ledger line. False when already settled (or not registered). */
 SHORTSTACKCORE_API bool Settle(Chips& Bankroll, life::State& L, const std::string& Id, int Place, int Field, Chips Prize, double World);
-/** A cancelled event: the buy-in and fee back, once. */
+/** A cancelled event: the buy-in and the fee back in full, once, as two lines that reverse the registration's. */
 SHORTSTACKCORE_API bool Refund(Chips& Bankroll, life::State& L, const std::string& Id, double World, const std::string& Why);
 
 /** "Table 6, seat 3" style seat labels start at 1. */

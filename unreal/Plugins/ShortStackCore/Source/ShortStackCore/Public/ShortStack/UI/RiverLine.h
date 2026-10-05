@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/UI/Ui.h"
@@ -12,10 +13,16 @@ namespace ss
 {
 namespace ui
 {
+namespace rlnet_detail
+{
+struct LiveCard;
+}
+
 /**
  * RiverLine: the fictional poker site running on the laptop. Draws the boot
- * screen, the network lobby (schedule, series, leaderboards, news, career),
- * the table and results into a canvas each frame and turns pointer and key
+ * screen, the network lobby (schedule, series, leaderboards, news, career, and
+ * the week at the Embercrest's card room), the table and results into a canvas
+ * each frame and turns pointer and key
  * input into session actions. With several tables open (multi-tabling) it shows
  * them as tabs in the top bar, one in front, or tiled side by side. The table and results are a port of
  * web/src/client/riverline.ts; the lobby pages live in RiverLineNet.cpp.
@@ -34,6 +41,7 @@ public:
 		Leaderboards,
 		News,
 		Career,
+		Embercrest, // the city's card room: its events this week (live::Occurrences), each on an honest card
 	};
 	/** Schedule filters (the chips above the list). */
 	enum class Filter : int
@@ -93,6 +101,14 @@ public:
 	SHORTSTACKCORE_API void ShowBoard(net::Board B, double Now);
 	/** Series shown on the Series page (id; empty = the one running now). */
 	SHORTSTACKCORE_API void ShowSeries(const std::string& Id, double Now);
+	/**
+	 * The day the Embercrest page shows (a world day, today to six days out; anything else goes back to the next day
+	 * with an event the player can make) and the event picked on it (an occurrence id, "" for none).
+	 */
+	SHORTSTACKCORE_API void ShowLiveDay(int Day, const std::string& OccurrenceId, double Now);
+	int LiveDayShown() const { return LiveDay; }
+	/** The Embercrest event whose Register button is waiting for its confirm ("" for none). */
+	const std::string& LiveConfirming() const { return LiveConfirm; }
 	SHORTSTACKCORE_API void OpenApp(App A, double Now);
 	App CurrentApp() const { return AppShown; }
 	/** Burner contact shown: 0 Marcus, 1 Sam. */
@@ -185,6 +201,30 @@ private:
 	void SkipOverlay(double Now);
 	void OutcomeCard(double Now);
 	void TryActivity(const std::string& Id, double Now);
+	// The Embercrest: its event cards (RiverLineApps.cpp: the Burner's rows) and its page (RiverLineNet.cpp).
+	/** Who the world has down for one of the room's events, as the player knows them. */
+	struct LivePlan
+	{
+		int Field = 0; // the world's planned field (0: not planned yet; the world plans a day ahead)
+		std::vector<std::pair<std::string, std::string>> Known; // the people in it the player knows, and how
+	};
+	const LivePlan& PlanOf(const live::Occurrence& O);
+	/** The card for O (rlnet_detail::LiveCardOf) with the world's plan for it. */
+	rlnet_detail::LiveCard CardFor(const live::Occurrence& O);
+	/** One of the room's events in Dee's thread on the Burner: the card's facts in four lines, its warning, its button. */
+	void LiveRow(const live::Occurrence& O, const Rect& R, const Color& Tint, const Color& Ink, const Color& Faint, double Now);
+	/** Session::GoToLive: the registration (or the way back to an entry) the Burner and the page share; a refusal shows as a toast. */
+	void GoToLive(const std::string& OccurrenceId, double Now);
+	void EmbercrestPage(double Now);
+	void LiveEventCard(const live::Occurrence& O, const Rect& R, double Now, int Index);
+	void LiveWeek(const Rect& R, double Now);
+	void LiveRoomRules(const Rect& R);
+	std::map<std::string, LivePlan> LivePlans;
+	long long LivePlansKey = -1;
+	int LiveDay = -1;
+	double LiveDayAt = -100.0;
+	std::string LivePick;
+	std::string LiveConfirm;
 	void SeriesPage(double Now);
 	void BoardsPage(double Now);
 	void BoardTable(const Rect& R, const std::vector<net::BoardRow>& Rows, double Now);

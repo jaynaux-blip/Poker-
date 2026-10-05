@@ -1,8 +1,11 @@
-// The GearDrop monitors' pictures: Kast's studio or the life tracker on the 24", study on the 27".
+// The GearDrop monitors' pictures: Kast's studio or the life tracker on the 24", study on the 27". And the
+// Embercrest's wall calendar by the window, drawn from the same career.
 #include "ShortStack/UI/SecondScreen.h"
 #include "../StrictFloat.h"
+#include "RiverLineShared.h"
 
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/UI/StreamArt.h"
 #include "ShortStack/UI/Ui.h"
@@ -171,9 +174,45 @@ void Tracker(Canvas& C, const Session& S, double Now)
 	Stat(C, {60.0f + Tw + 20.0f, Ty, Tw, 140.0f}, "DEE'S GAME", L.BackRoomNights > 0 ? Signed(L.BackRoomNetCents) : std::string("\xE2\x80\x94"),
 	     L.BackRoomNetCents > 0 ? pal::Green : (L.BackRoomNetCents < 0 ? pal::Red : pal::Ink),
 	     L.BackRoomNights > 0 ? std::to_string(L.BackRoomNights) + (L.BackRoomNights == 1 ? " night in the back room" : " nights in the back room") : std::string("Laundromat, back room. Ask Dee."));
-	Stat(C, {60.0f + 2.0f * (Tw + 20.0f), Ty, Tw, 140.0f}, "THE EMBERCREST", L.LiveBestPlace > 0 ? Ordinal(L.LiveBestPlace) : std::string("\xE2\x80\x94"),
-	     L.LiveBestPlace == 1 ? pal::Gold : pal::Ink,
-	     L.LiveEvents > 0 ? std::to_string(L.LiveEvents) + " played \xC2\xB7 " + std::to_string(L.LiveCashes) + " cashed \xC2\xB7 " + Money(L.LiveWonCents) : std::string("Sunday tournament. Bring a buy-in."));
+	// The Embercrest: the player's entry there, else the next event the bus can still make; their record in the corner.
+	{
+		namespace rl = rlnet_detail;
+		const Rect Er{60.0f + 2.0f * (Tw + 20.0f), Ty, Tw, 140.0f};
+		std::string Big = "\xE2\x80\x94";
+		std::string Sub = "6-max freezeouts every day.";
+		Color BigCol = pal::Ink;
+		const life::LiveEntry* Mine = live::ActiveEntry(L);
+		const live::Occurrence Entered = Mine ? live::FindOccurrence(Mine->Id) : live::Occurrence();
+		const std::vector<live::Occurrence> Next = rl::LiveAhead(S, World, 48.0);
+		if (Mine && Entered.Valid())
+		{
+			const rl::LiveCard Card = rl::LiveCardOf(S, Entered, World);
+			Big = "You're in: " + std::string(Entered.T->Short);
+			BigCol = Hex(rl::EcEmberHot);
+			Sub = Card.When + " " + net::TimeLabel(Entered.Start) + " \xC2\xB7 " + rl::NetMoney(Mine->PaidCents) + " paid" + (Mine->ArrivedAt > 0.0 ? " \xC2\xB7 the night's under way" : "");
+		}
+		else if (!Next.empty())
+		{
+			const live::Occurrence& O = Next.front();
+			const rl::LiveCard Card = rl::LiveCardOf(S, O, World);
+			Big = O.T->Short;
+			const std::string Price = rl::NetMoney(O.T->BuyInCents);
+			Sub = Card.Phase == rl::LiveCard::LateReg ? "Late reg till " + net::TimeLabel(O.LateRegEnds) + " \xC2\xB7 " + Price
+				: Card.When + " " + net::TimeLabel(O.Start) + " \xC2\xB7 " + Price + (World < O.DeskOpens ? " \xC2\xB7 desk opens " + net::TimeLabel(O.DeskOpens) : " \xC2\xB7 the desk is open");
+			if (S.BankrollCents < rl::LiveCost(O))
+			{
+				// Out of reach: the bankroll doesn't cover the buy-in and the bus.
+				BigCol = pal::Muted;
+				Sub = Card.When + " " + net::TimeLabel(O.Start) + " \xC2\xB7 " + Price + " \xC2\xB7 " + rl::NetMoney(rl::LiveCost(O) - S.BankrollCents) + " short with the bus";
+			}
+		}
+		Stat(C, Er, "THE EMBERCREST", Big, BigCol, Sub);
+		if (L.LiveEvents > 0)
+		{
+			C.Text(std::to_string(L.LiveEvents) + " played \xC2\xB7 " + std::to_string(L.LiveCashes) + " cashed" + (L.LiveBestPlace > 0 ? " \xC2\xB7 best " + Ordinal(L.LiveBestPlace) : std::string()),
+			       Er.X + Er.W - 22.0f, Er.Y + 36.0f, Ts(14.0f, 600, L.LiveBestPlace == 1 ? pal::Gold : pal::Muted, Align::Right));
+		}
+	}
 
 	// The latest entries.
 	float Y = 776.0f;
@@ -491,5 +530,245 @@ void Draw(Canvas& C, const Session& S, int Which, double Now)
 	}
 }
 } // namespace secondscreen
+
+// ------------------------------------------------------------------ the wall calendar
+
+namespace wallcalendar
+{
+namespace wallcalendar_detail
+{
+namespace rl = rlnet_detail;
+const float W = Width;
+const float H = Height;
+const Color Print = Hex(0x1b2238);  // the calendar's own ink
+const Color Pen = Hex(0x26408f);    // the player's ballpoint (days crossed off)
+const Color Marker = Hex(0xc8231c); // the player's red marker (the rent, their entry)
+const float GridX = 36.0f;
+const float GridW = W - 72.0f;
+const float Cell = GridW / 7.0f;
+
+float F(int V)
+{
+	return static_cast<float>(V);
+}
+
+/** A loose marker ring, a little past closed, the way a hand draws one. */
+void Ring(Canvas& C, float Cx, float Cy, float Rx, float Ry, const Color& Col, float Line)
+{
+	std::vector<Vec2> P;
+	for (int K = 0; K <= 44; ++K)
+	{
+		const float A = -2.3f + F(K) / 44.0f * (2.0f * Pi + 0.45f);
+		const float Wobble = 1.0f + 0.05f * std::sin(A * 3.0f + 0.8f);
+		P.push_back({Cx + std::cos(A) * Rx * Wobble, Cy + std::sin(A) * Ry * Wobble});
+	}
+	C.StrokePolyline(P, false, Col, Line, true);
+}
+
+/** An event the bus can't make any more (late registration closes before it gets there), or one the room called off. */
+bool Gone(const Session& S, const live::Occurrence& O, double World)
+{
+	return O.LateRegEnds < World + live::TravelMinutes || S.Living().CancellationOf(O.Id) != nullptr;
+}
+
+/** The event lines for one day: its time, its name, its price; the player's entry ringed, what's gone by struck out. */
+float DayBlock(Canvas& C, const Session& S, int Day, const std::string& Title, float Y, double World)
+{
+	const life::State& L = S.Life;
+	rl::NetSpaced(C, Title, GridX, Y, 17.0f, 900, Hex(rl::EcEmber), 2.2f);
+	C.FillRect({GridX, Y + 9.0f, GridW, 2.0f}, Hex(rl::EcEmber, 0.6f));
+	Y += 40.0f;
+	for (const live::Occurrence& O : live::Occurrences(Day))
+	{
+		const life::LiveEntry* E = live::EntryFor(L, O.Id);
+		const bool Struck = !E && Gone(S, O, World);
+		const Color Ink = Struck ? Hex(0x8e8a80) : Print;
+		const float Tw = C.Text(rl::LiveTime(O.Start), GridX, Y, Ts(28.0f, 900, Ink));
+		C.Text(O.T->Short, GridX + 150.0f, Y, Ts(28.0f, 700, Ink, Align::Left, Baseline::Alphabetic, false, E ? GridW - 150.0f - 164.0f : GridW - 150.0f - 92.0f));
+		C.Text(rl::NetMoney(O.T->BuyInCents), GridX + GridW, Y, Ts(28.0f, 900, Struck ? Ink : Hex(rl::EcEmberDeep), Align::Right));
+		if (Struck)
+		{
+			C.StrokePolyline({{GridX - 4.0f, Y - 10.0f}, {GridX + GridW + 4.0f, Y - 8.0f}}, false, Rgba(38, 64, 143, 0.7f), 2.5f, true);
+		}
+		if (E)
+		{
+			// The player's: ringed in marker, with how it went once it's played.
+			Ring(C, GridX + Tw * 0.5f, Y - 10.0f, Tw * 0.5f + 14.0f, 21.0f, Marker, 3.5f);
+			const std::string Note = E->State == life::LiveEntry::Registered ? std::string("I'M IN") : E->State == life::LiveEntry::Refunded ? std::string("REFUNDED")
+				: Ordinal(E->Place) + (E->PrizeCents > 0 ? " +" + rl::NetMoney(E->PrizeCents) : std::string());
+			C.Text(Note, GridX + GridW - 82.0f, Y - 7.0f, Ts(15.0f, 900, Marker, Align::Right));
+		}
+		Y += 38.0f;
+	}
+	return Y;
+}
+} // namespace wallcalendar_detail
+
+using namespace wallcalendar_detail;
+
+std::string Key(const Session& S)
+{
+	const double World = S.WorldMinutes();
+	const int Today = net::DayOf(World);
+	const life::State& L = S.Life;
+	std::string K = std::to_string(Today) + "|" + std::to_string(static_cast<int>(L.RentStage)) + "|" + std::to_string(net::DayOf(L.RentDeadline - 1.0)) + "|" + std::to_string(L.RentDueCents);
+	// Today's and tomorrow's events: struck out once the bus can't make late registration any more, or called off.
+	for (int Day = Today; Day <= Today + 1; ++Day)
+	{
+		for (const live::Occurrence& O : live::Occurrences(Day))
+		{
+			K += Gone(S, O, World) ? "x" : "o";
+		}
+	}
+	// The player's entries mark their days.
+	for (const life::LiveEntry& E : L.LiveEntries)
+	{
+		K += "|" + E.Id + ":" + std::to_string(E.State) + ":" + std::to_string(E.Place) + ":" + std::to_string(E.PrizeCents);
+	}
+	return K;
+}
+
+void Draw(Canvas& C, const Session& S)
+{
+	const double World = S.WorldMinutes();
+	const int Today = net::DayOf(World);
+	const life::State& L = S.Life;
+	// The sheet, and the wire binding it hangs from.
+	C.FillRect({0.0f, 0.0f, W, H}, Paint::Linear({0.0f, 0.0f}, {W * 0.25f, H}, Rgba(246, 242, 233, 1.0f), Rgba(232, 226, 212, 1.0f)));
+	C.FillRect({0.0f, H - 10.0f, W, 10.0f}, Paint::Linear({0.0f, H - 10.0f}, {0.0f, H}, Rgba(0, 0, 0, 0.0f), Rgba(0, 0, 0, 0.12f)));
+	// The wire binding: a loop through each punched hole, the hanger bent up in the middle where the nail takes it.
+	const Color Wire = Hex(0x2b2d33);
+	for (float X = 22.0f; X < W - 14.0f; X += 14.0f)
+	{
+		if (std::fabs(X - W * 0.5f) < 22.0f)
+		{
+			continue;
+		}
+		C.FillCircle(X, 17.0f, 2.4f, Rgba(20, 20, 24, 0.85f));
+		C.StrokeArc(X, 11.0f, 3.6f, Pi, 2.0f * Pi, Wire, 1.6f);
+		C.StrokePolyline({{X - 3.6f, 11.0f}, {X - 3.6f, 16.0f}}, false, Wire, 1.6f);
+		C.StrokePolyline({{X + 3.6f, 11.0f}, {X + 3.6f, 16.0f}}, false, Wire, 1.6f);
+	}
+	C.StrokePolyline({{W * 0.5f - 20.0f, 15.0f}, {W * 0.5f - 6.0f, 3.0f}, {W * 0.5f + 6.0f, 3.0f}, {W * 0.5f + 20.0f, 15.0f}}, false, Wire, 2.2f, true);
+
+	// The room's header: the mark over the ranges, its name, what it runs.
+	const Rect Band{0.0f, 24.0f, W, 128.0f};
+	C.FillRect(Band, Paint::Linear({0.0f, Band.Y}, {0.0f, Band.Y + Band.H}, Hex(rl::EcMidnight), Hex(rl::EcNavy)));
+	C.PushClip(Band);
+	C.FillEllipse(84.0f, 80.0f, 120.0f, 80.0f, Paint::Radial({84.0f, 80.0f}, 0.0f, {84.0f, 80.0f}, 120.0f, Hex(rl::EcEmberHot, 0.28f), -1.0f, Color(), Hex(rl::EcEmberHot, 0.0f)));
+	std::vector<Vec2> Ridge;
+	for (float X = 0.0f; X <= W + 20.0f; X += 20.0f)
+	{
+		Ridge.push_back({X, Band.Y + Band.H - 22.0f + 7.0f * std::sin(X * 0.017f) + 4.0f * std::sin(X * 0.051f + 1.1f)});
+	}
+	Ridge.push_back({W + 20.0f, Band.Y + Band.H});
+	Ridge.push_back({0.0f, Band.Y + Band.H});
+	C.FillPolygon(Ridge, Hex(rl::EcSlate, 0.8f));
+	C.PopClip();
+	C.FillRect({0.0f, Band.Y + Band.H - 4.0f, W, 4.0f}, Hex(rl::EcEmberHot));
+	rl::NetEmbercrest(C, 84.0f, 84.0f, 104.0f, Hex(rl::EcMidnight));
+	rl::NetSpaced(C, "THE EMBERCREST", 150.0f, 82.0f, 31.0f, 900, Hex(rl::EcAsh), 2.4f);
+	rl::NetSpaced(C, "CASINO \xC2\xB7 CARD ROOM", 152.0f, 106.0f, 13.0f, 800, Hex(rl::EcEmberHot), 2.6f);
+	C.Text("Poker every day \xC2\xB7 6-max freezeouts \xC2\xB7 deep stacks", 152.0f, 128.0f, Ts(12.5f, 600, Hex(rl::EcIce)));
+
+	// The month, the days gone by crossed off in pen.
+	int Year = 0;
+	int Month = 0;
+	int Date = 0;
+	world::CivilDate(Today, Year, Month, Date);
+	static const char* Months[12] = {"JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"};
+	rl::NetSpaced(C, std::string(Months[(Month + 11) % 12]) + " " + std::to_string(Year), W * 0.5f, 188.0f, 22.0f, 900, Print, 3.0f, Align::Center);
+	static const char* Initials[7] = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"};
+	for (int K = 0; K < 7; ++K)
+	{
+		C.Text(Initials[K], GridX + (F(K) + 0.5f) * Cell, 214.0f, Ts(11.0f, 800, K >= 5 ? Hex(rl::EcEmber) : Hex(0x6b6a66), Align::Center));
+	}
+	const int First = Today - (Date - 1);
+	int Days = 28;
+	for (int D = 28; D <= 31; ++D)
+	{
+		int Y2 = 0;
+		int M2 = 0;
+		int D2 = 0;
+		world::CivilDate(First + D - 1, Y2, M2, D2);
+		Days = M2 == Month ? D : Days;
+	}
+	const int Lead = ((First % 7) + 7) % 7; // day 0 is a Monday
+	const int Rows = (Lead + Days + 6) / 7;
+	const float Top = 224.0f;
+	const float RowH = std::min(40.0f, 200.0f / F(Rows));
+	const bool RentLive = L.RentStage == life::Rent::Due || L.RentStage == life::Rent::FinalNotice;
+	const int RentDay = net::DayOf(L.RentDeadline - 1.0);
+	for (int R = 0; R <= Rows; ++R)
+	{
+		C.FillRect({GridX, Top + F(R) * RowH, GridW, 1.0f}, Rgba(27, 34, 56, 0.18f));
+	}
+	for (int K = 0; K <= 7; ++K)
+	{
+		C.FillRect({GridX + F(K) * Cell, Top, 1.0f, F(Rows) * RowH}, Rgba(27, 34, 56, 0.12f));
+	}
+	for (int D = 0; D < Days; ++D)
+	{
+		const int Day = First + D;
+		const int Slot = Lead + D;
+		const float Cx = GridX + F(Slot % 7) * Cell;
+		const float Cy = Top + F(Slot / 7) * RowH;
+		if (Day == Today)
+		{
+			// Today, gone over with a highlighter.
+			C.FillRect({Cx + 3.0f, Cy + 3.0f, Cell - 6.0f, RowH - 6.0f}, Rgba(255, 222, 70, 0.42f));
+		}
+		C.Text(std::to_string(D + 1), Cx + 7.0f, Cy + 17.0f, Ts(15.0f, Day == Today ? 900 : 700, Day == Today ? Marker : Print));
+		// The room's events that day, a dot each in its colour; the player's night marked IN (or how it went).
+		const std::vector<live::Occurrence> Os = live::Occurrences(Day);
+		for (size_t K = 0; K < Os.size(); ++K)
+		{
+			C.FillCircle(Cx + Cell - 9.0f - F(static_cast<int>(K)) * 9.0f, Cy + RowH - 8.0f, 3.0f, rl::LiveColor(*Os[K].T));
+			if (const life::LiveEntry* E = live::EntryFor(L, Os[K].Id))
+			{
+				const std::string Mark = E->State == life::LiveEntry::Registered ? std::string("IN") : E->State == life::LiveEntry::Refunded ? std::string("OFF") : Ordinal(E->Place);
+				C.Text(Mark, Cx + 7.0f, Cy + RowH - 5.0f, Ts(11.0f, 900, E->State == life::LiveEntry::Registered || E->PrizeCents > 0 ? Marker : rl::NetA(Marker, 0.6f)));
+			}
+		}
+		if (RentLive && Day == RentDay)
+		{
+			C.Text("RENT", Cx + Cell - 6.0f, Cy + 17.0f, Ts(11.0f, 900, Marker, Align::Right));
+			C.StrokeRoundRect({Cx + 2.0f, Cy + 2.0f, Cell - 4.0f, RowH - 4.0f}, 3.0f, Marker, 2.5f);
+		}
+		if (Day < Today)
+		{
+			C.StrokePolyline({{Cx + 6.0f, Cy + RowH - 6.0f}, {Cx + Cell - 6.0f, Cy + 6.0f}}, false, rl::NetA(Pen, 0.55f), 2.0f, true);
+		}
+	}
+
+	// Today and tomorrow, big enough to read from the chair.
+	float Y = Top + F(Rows) * RowH + 34.0f;
+	Y = DayBlock(C, S, Today, "TODAY \xC2\xB7 " + rl::NetUpper(net::WeekdayName(Today)) + " " + std::to_string(Date), Y, World) + 10.0f;
+	int Y3 = 0;
+	int M3 = 0;
+	int Tomorrow = 0;
+	world::CivilDate(Today + 1, Y3, M3, Tomorrow);
+	DayBlock(C, S, Today + 1, "TOMORROW \xC2\xB7 " + rl::NetUpper(net::WeekdayName(Today + 1)) + " " + std::to_string(Tomorrow), Y, World);
+
+	// The rent, in marker along the bottom.
+	std::string Rent;
+	if (L.RentStage == life::Rent::Evicted)
+	{
+		Rent = "LOCKED OUT \xC2\xB7 KEY BACK " + rl::NetMoney(L.RentDueCents);
+	}
+	else if (L.RentStage == life::Rent::Paid)
+	{
+		Rent = "RENT PAID \xC2\xB7 NEXT DUE " + rl::NetUpper(net::DateLabel(RentDay));
+	}
+	else
+	{
+		const int Left = RentDay - Today;
+		Rent = (L.RentStage == life::Rent::FinalNotice ? "LAST CHANCE " : "RENT ") + rl::NetMoney(L.RentDueCents) + " \xC2\xB7 " +
+			(Left <= 0 ? std::string("TONIGHT") : Left == 1 ? std::string("TOMORROW NIGHT") : rl::NetUpper(net::WeekdayName(RentDay, true)) + " " + rl::NetUpper(net::DateLabel(RentDay)));
+	}
+	C.Text(Rent, GridX, H - 26.0f, Ts(19.0f, 900, L.RentStage == life::Rent::Paid ? Pen : Marker, Align::Left, Baseline::Alphabetic, false, GridW));
+	C.FillRect({GridX, H - 19.0f, std::min(GridW, C.Measure(Rent, 19.0f, 900)), 2.5f}, L.RentStage == life::Rent::Paid ? rl::NetA(Pen, 0.6f) : rl::NetA(Marker, 0.7f));
+}
+} // namespace wallcalendar
 } // namespace ui
 } // namespace ss

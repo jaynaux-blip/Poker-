@@ -233,6 +233,10 @@ std::string SaveData::Serialize() const
 			Out << "liveface\t" << session_detail::Escape(E.Id) << "\t" << session_detail::Escape(F.Name) << "\t" << session_detail::Escape(F.Label) << "\t"
 				<< session_detail::Escape(F.Line) << "\n";
 		}
+		for (const life::TableMate& T : E.Table)
+		{
+			Out << "livetable\t" << session_detail::Escape(E.Id) << "\t" << session_detail::Escape(T.Name) << "\t" << T.Seen << "\t" << T.Pot << "\n";
+		}
 		if (E.ArrivedAt > 0.0)
 		{
 			Out << "livecheck\t" << session_detail::Escape(E.Id) << "\t" << Fixed(E.ArrivedAt, 2) << "\t" << Fixed(E.CheckpointAt, 3) << "\t"
@@ -362,6 +366,36 @@ void SaveData::NoteLive(double World, const std::string& EventId, int HeroPlace,
 		Line += "\t" + std::string(1, S.Tag) + "\t" + session_detail::Escape(S.Name) + "\t" + std::to_string(S.Value);
 	}
 	WorldNotes.push_back(Line);
+	// The entry keeps who sat with the player and what passed between them (what they text about in the days after).
+	if (life::LiveEntry* E = live::EntryFor(Life, EventId))
+	{
+		E->Table.clear();
+		for (const LiveSeen& S : Seen)
+		{
+			const int Bit = S.Tag == 'M' ? life::TableMate::SatWith
+				: S.Tag == 'K'          ? life::TableMate::KnockedYouOut
+				: S.Tag == 'H'          ? life::TableMate::YouKnockedOut
+				: S.Tag == 'B'          ? (S.Value >= 0 ? life::TableMate::PotWon : life::TableMate::PotLost)
+										: 0;
+			if (Bit == 0 || S.Name.empty())
+			{
+				continue; // where they went out isn't something that passed between them
+			}
+			auto It = std::find_if(E->Table.begin(), E->Table.end(), [&](const life::TableMate& T) { return T.Name == S.Name; });
+			if (It == E->Table.end())
+			{
+				life::TableMate T;
+				T.Name = S.Name;
+				E->Table.push_back(T);
+				It = E->Table.end() - 1;
+			}
+			It->Seen |= Bit;
+			if (S.Tag == 'B' && std::llabs(S.Value) > std::llabs(It->Pot))
+			{
+				It->Pot = static_cast<Chips>(S.Value);
+			}
+		}
+	}
 }
 
 void SaveData::NoteLivePlaces(double World, const std::string& EventId, const std::vector<LiveSeen>& Places)
@@ -535,6 +569,21 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 				if (E.Id == Id)
 				{
 					E.Faces.push_back({session_detail::Unescape(P[2]), session_detail::Unescape(P[3]), session_detail::Unescape(P[4])});
+				}
+			}
+		}
+		else if (P.size() == 5 && P[0] == "livetable")
+		{
+			const std::string Id = session_detail::Unescape(P[1]);
+			for (life::LiveEntry& E : D.Life.LiveEntries)
+			{
+				if (E.Id == Id)
+				{
+					life::TableMate T;
+					T.Name = session_detail::Unescape(P[2]);
+					T.Seen = std::atoi(P[3].c_str());
+					T.Pot = std::strtoll(P[4].c_str(), nullptr, 10);
+					E.Table.push_back(T);
 				}
 			}
 		}
@@ -906,6 +955,9 @@ void Session::StartWorld(const SaveData* Loaded)
 	net::Shared().Attach(&LivingWorld);
 	net::Shared().SetHero(HeroName, History);
 	WorldNewsAt = LivingWorld.Clock();
+	// Live events called off short of their minimum: settled, and the world told, before it plays on past them (it would
+	// otherwise decide them without the player and crown a winner nobody played against).
+	SettleCancelled();
 	// The night out the host played (Dee's game, the Embercrest), and the time it took.
 	if (Loaded)
 	{
@@ -1020,6 +1072,8 @@ void Session::WorldSkip(int DayCount)
 void Session::WorldStep()
 {
 	LivingWorld.AdvanceTo(WorldMinutes());
+	SettleCancelled();
+	CancelledTexts();
 	if (LivingWorld.Clock() <= WorldNewsAt)
 	{
 		return;
@@ -3392,7 +3446,7 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 		// The next one the player can enter.
 		for (const live::Occurrence& C : live::Reachable(World, 30.0))
 		{
-			if (live::CanRegister(BankrollCents, Life, C, World).empty())
+			if (live::CanRegister(BankrollCents, Life, C, World).empty() && !LivingWorld.CancellationOf(C.Id))
 			{
 				O = C;
 				break;
@@ -3405,6 +3459,10 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 		}
 	}
 	const bool Already = live::EntryFor(Life, O.Id) != nullptr;
+	if (!Already && LivingWorld.CancellationOf(O.Id))
+	{
+		return "That one was cancelled.";
+	}
 	if (!Already && Life.Energy < A->Energy)
 	{
 		return "A tournament is a long night. Sleep first.";
@@ -3564,9 +3622,9 @@ void Session::ResolveAbandonedLive()
 	for (const life::LiveEntry& E : std::vector<life::LiveEntry>(Life.LiveEntries))
 	{
 		const live::Occurrence O = live::FindOccurrence(E.Id);
-		if (E.State != life::LiveEntry::Registered || !O.Valid() || World < O.Start + O.T->Hours * 60.0 + 60.0)
+		if (E.State != life::LiveEntry::Registered || !O.Valid() || World < O.Start + O.T->Hours * 60.0 + 60.0 || live::BelowMinimum(O, E.Entrants))
 		{
-			continue;
+			continue; // (a field short of the minimum never ran: SettleCancelled refunds it)
 		}
 		std::vector<ReservedPlayer> Known;
 		for (const std::pair<std::string, int>& Who : E.Roster)
@@ -3601,6 +3659,542 @@ void Session::ResolveAbandonedLive()
 		}
 		live::Settle(BankrollCents, Life, E.Id, Place, Night->Spec.Entrants, Prize, O.Start + Night->ClockMinutes() - static_cast<double>(O.T->StartMinute));
 		LivingWorld.HeroFinished(E.Id, Place, Prize, world::World::TableReport());
+	}
+}
+
+void Session::SettleCancelled()
+{
+	const double World = WorldMinutes();
+	for (life::LiveEntry& E : Life.LiveEntries)
+	{
+		// (Every frame: only an entry still in play, or a refund of the last week, is looked at.)
+		const bool Open = E.State == life::LiveEntry::Registered;
+		if (!Open && (E.State != life::LiveEntry::Refunded || E.FinishedAt < World - 8.0 * net::MinutesPerDay))
+		{
+			continue;
+		}
+		const live::Occurrence O = live::FindOccurrence(E.Id);
+		if (!O.Valid())
+		{
+			continue;
+		}
+		if (Open)
+		{
+			// Short of the minimum as the entry has the field (or called off by the world): the floor calls it at the start.
+			const world::Cancellation* Called = LivingWorld.CancellationOf(E.Id);
+			if ((!Called && !live::BelowMinimum(O, E.Entrants)) || World < O.Start)
+			{
+				continue;
+			}
+			// In the room, the room calls it and the desk refunds; a night never gone back to is settled here.
+			if (E.ArrivedAt > 0.0 && World < O.Start + O.T->Hours * 60.0 + 60.0)
+			{
+				continue;
+			}
+			LivingWorld.Cancel(E.Id, O.Start, Called ? Called->Field : E.Entrants);
+			live::Refund(BankrollCents, Life, E.Id, World, "not enough players");
+		}
+		else if (live::BelowMinimum(O, E.Entrants) && O.Start >= World - 7.0 * net::MinutesPerDay && !LivingWorld.CancellationOf(E.Id) && !LivingWorld.ResultOf(E.Id))
+		{
+			// The room called it off and refunded the entry (its rule: the entry's field short of the minimum): nobody played
+			// it, in the world either (no winner, nobody paid). Not a refund for leaving the list before the seats: that
+			// night ran without the player. (A week by its start, inside the eight days the world keeps a cancellation.)
+			LivingWorld.Cancel(E.Id, O.Start, E.Entrants);
+		}
+	}
+}
+
+void Session::CancelledTexts()
+{
+	const double World = WorldMinutes();
+	for (const life::LiveEntry& E : Life.LiveEntries)
+	{
+		// The room's own refunds come with the floor's announcement and the bus home: these are the ones the player wasn't
+		// there to hear (registered and never got there, or never went back).
+		if (E.State != life::LiveEntry::Refunded || E.FareHome || E.FinishedAt < World - net::MinutesPerDay)
+		{
+			continue;
+		}
+		const std::string Key = "live-cancelled:" + E.Id;
+		const live::Occurrence O = live::FindOccurrence(E.Id);
+		if (TextsSeen.count(Key) > 0 || !O.Valid())
+		{
+			continue;
+		}
+		// Called off at its start (SettleCancelled), not left before the seats: the desk's other refund is no cancellation.
+		const world::Cancellation* Called = LivingWorld.CancellationOf(E.Id);
+		if ((!Called && !live::BelowMinimum(O, E.Entrants)) || E.FinishedAt < O.Start)
+		{
+			continue;
+		}
+		const int Today = net::DayOf(World);
+		const bool Evening = O.T->StartMinute >= 17 * 60;
+		const std::string Whose = O.Day == Today ? (Evening ? "Tonight's " : "Today's ")
+			: O.Day == Today - 1                  ? (Evening ? "Last night's " : "Yesterday's ")
+												  : std::string(net::WeekdayName(O.Day, true)) + "'s ";
+		const int Came = Called ? Called->Field : E.Entrants;
+		StoryText(Key, "Embercrest",
+			Whose + O.T->Name + " was cancelled: " + std::to_string(Came) + (Came == 1 ? " player" : " players") + " registered, and the room needs " +
+				std::to_string(O.T->MinEntrants) + ". Your " + net::BuyIn(E.PaidCents) + " buy-in, fee included, is back in your account.");
+	}
+}
+
+namespace session_detail
+{
+/** How someone texts: the cast each their own way, everyone else by age and temperament. */
+enum class Voice : int
+{
+	Elder,  // whole sentences, kind and a little formal: Mrs. Park, the room's older regulars
+	Gruff,  // a few words, capital letters: Sal, the quiet old-timers
+	Plain,  // lowercase and easy: Mei, Rick, most people
+	Chatty, // lowercase, warm, exclamation marks: Dre, the young and sociable
+	Loud,   // capitals and noise: Big Lou, Twitch
+	Online, // a grinder's shorthand: the rival, the online regulars
+	Count,
+};
+
+Voice VoiceOf(const world::Npc& N, int Day)
+{
+	if (N.Name == "Mrs. Park")
+	{
+		return Voice::Elder;
+	}
+	if (N.Name == "Sal")
+	{
+		return Voice::Gruff;
+	}
+	if (N.Name == "Mei" || N.Name == "Rick")
+	{
+		return Voice::Plain;
+	}
+	if (N.Name == "Dre")
+	{
+		return Voice::Chatty;
+	}
+	if (N.Name == "Big Lou" || N.Name == "Twitch")
+	{
+		return Voice::Loud;
+	}
+	if (N.Rival)
+	{
+		return Voice::Online;
+	}
+	const int Age = N.Age(Day);
+	const float Social = N.TraitOf(world::Trait::Sociability);
+	if (Age >= 60)
+	{
+		return Social >= 0.4f ? Voice::Elder : Voice::Gruff;
+	}
+	if (N.OnlineShare >= 0.75f && Social < 0.5f)
+	{
+		return Voice::Online;
+	}
+	if (Social >= 0.65f && Age < 45)
+	{
+		return N.TraitOf(world::Trait::Aggro) > 0.7f ? Voice::Loud : Voice::Chatty;
+	}
+	return Age >= 50 && Social < 0.35f ? Voice::Gruff : Voice::Plain;
+}
+
+/** What a text after a night at the Embercrest is about: the biggest thing that passed between them in the open. */
+enum class Topic : int
+{
+	HeadsUpWon,    // the player beat them heads-up for the title
+	HeadsUpLost,   // they beat the player heads-up
+	BustedYou,     // they sent the player home
+	YouBusted,     // the player sent them home, and they took it well
+	YouBustedSore, // ... and they didn't
+	FinalTable,    // both at the final table
+	PotFromThem,   // the player took a big pot off them
+	PotToThem,     // they took one off the player
+	SatTogether,   // a table's worth of small talk
+	Count,
+};
+
+int Weight(Topic T)
+{
+	static const int Weights[static_cast<int>(Topic::Count)] = {9, 9, 8, 7, 7, 6, 5, 5, 2};
+	return Weights[static_cast<int>(T)];
+}
+
+Topic TopicOf(const life::LiveEntry& E, const life::TableMate& M, const world::Bond& B, int TheirPlace)
+{
+	const bool TheyBusted = (M.Seen & life::TableMate::KnockedYouOut) != 0;
+	const bool YouBusted = (M.Seen & life::TableMate::YouKnockedOut) != 0;
+	if (E.Place == 2 && TheyBusted)
+	{
+		return Topic::HeadsUpLost;
+	}
+	if (E.Place == 1 && YouBusted && TheirPlace == 2)
+	{
+		return Topic::HeadsUpWon;
+	}
+	if (TheyBusted)
+	{
+		return Topic::BustedYou;
+	}
+	if (YouBusted)
+	{
+		return B.Resentment >= 0.3f ? Topic::YouBustedSore : Topic::YouBusted;
+	}
+	if (E.Place >= 1 && E.Place <= live::EmbercrestTableSize && TheirPlace >= 1 && TheirPlace <= live::EmbercrestTableSize)
+	{
+		return Topic::FinalTable;
+	}
+	if ((M.Seen & (life::TableMate::PotWon | life::TableMate::PotLost)) != 0)
+	{
+		return M.Pot >= 0 ? Topic::PotFromThem : Topic::PotToThem;
+	}
+	return Topic::SatTogether;
+}
+
+/** The line itself, by topic and voice (two of each). {when}: "last night"; {event}: "the nightly"; {Event}: "the Nightly". */
+const char* MainLine(Topic T, Voice V, uint32_t Salt)
+{
+	static const char* const Lines[static_cast<int>(Topic::Count)][static_cast<int>(Voice::Count)][2] = {
+		// HeadsUpWon
+		{{"Congratulations on {when}. Heads-up with you was the most fun I've had at a table in years.", "You earned that title {when}. I'd like a rematch one day."},
+			{"You earned it {when}. Rematch.", "Heads-up {when}. Good game."},
+			{"congrats on {when}. heads-up rematch whenever you want", "still thinking about that heads-up {when}. you earned it"},
+			{"CONGRATS!! still can't believe that heads-up {when}. so close haha", "you won it {when} and I'm happy for you. mostly. rematch??"},
+			{"CONGRATS CHAMP. I WANT A REMATCH", "heads-up {when} was WAR. you earned it"},
+			{"gg hu {when}. well played", "gg {when}. rematch sometime"}},
+		// HeadsUpLost
+		{{"What a battle {when}. The title was nearly yours, and it will be one day.", "Thank you for a wonderful heads-up {when}. You made me work for every chip."},
+			{"Good battle {when}. Close.", "Tough heads-up {when}. You'll get one."},
+			{"gg heads-up {when}. that could have gone either way", "you made me earn that one {when}. gg"},
+			{"what a heads-up {when}!! honestly could've gone either way. gg!!", "still buzzing from {when}. you were SO tough heads-up"},
+			{"WHAT A HEADS-UP {when}. gg", "you made me WORK for it {when}. gg"},
+			{"gg hu {when}. close one", "gg {when}. flips"}},
+		// BustedYou
+		{{"I'm sorry I was the one to send you home {when}. You'll have your revenge, I'm sure.", "Good game {when}. It never feels nice taking someone's last chips, but that's poker."},
+			{"Nothing personal {when}.", "Had it {when}. You'll get yours."},
+			{"sorry for sending you home {when}. ok, not that sorry", "gg {when}. you'll get me back"},
+			{"sorry I busted you {when}!! you played it fine, I just had it", "no hard feelings about {when}?? you were playing great til you ran into me"},
+			{"had to send you home {when}. NO REGRETS. gg", "you walked RIGHT into me {when} lol. gg"},
+			{"gg {when}. cooler", "unlucky spot {when}. gg"}},
+		// YouBusted
+		{{"You played that last hand beautifully {when}. I'll be watching for you.", "Well played {when}. I know when I've been outplayed."},
+			{"You got me {when}. Fair.", "Good hand {when}."},
+			{"still thinking about that hand {when}. nicely done", "you got me good {when}. well played"},
+			{"ok that hand {when} was so sick. you got me fair and square", "can't believe you busted me {when} haha. respect"},
+			{"still thinking about {when}. ok FINE. nice hand", "you SENT me {when}. respect"},
+			{"nh {when}", "gg. you had it {when}"}},
+		// YouBustedSore
+		{{"I haven't stopped thinking about that hand {when}. Enjoy it while it lasts.", "You had the luck {when}, and I think you know it."},
+			{"That hand {when}. Still sore.", "You owe me one for {when}."},
+			{"that hand {when}. still not over it", "you owe me one for {when}"},
+			{"ugh, {when}. I'm not over it yet. rematch soon??", "you're on my list after {when}, just so you know"},
+			{"THAT HAND {when}. I'm not over it", "you OWE me for {when}. I mean it"},
+			{"ran good {when} lol. ok", "you got there {when}. nice"}},
+		// FinalTable
+		{{"The two of us at the final table {when}. I hope we make a habit of it.", "Wasn't the final table {when} something? Lovely to share it with you."},
+			{"Final table {when}. Good.", "Saw you at the final {when}. Keep it up."},
+			{"final table together {when}. let's do that again", "ft buddy. {when} was fun"},
+			{"final table together {when}!! we should do that every week", "ft buddies!! {when} was the best night"},
+			{"FINAL TABLE {when}. let's GO", "FT BUDDIES. {when} was a party"},
+			{"ft {when}. gg", "nice ft {when}. gl next"}},
+		// PotFromThem
+		{{"You took a big pot from me {when}. I'm still recovering.", "That pot {when}... well played, I suppose."},
+			{"That pot {when}. I want it back.", "You took a big one off me {when}."},
+			{"I want my chips back from {when}", "that pot {when} still hurts"},
+			{"that pot {when} still hurts haha. well played", "I'm getting those chips back next time!!"},
+			{"I WANT MY CHIPS BACK", "that pot {when}. still MAD"},
+			{"nice pot {when}", "you got me in that pot {when}. gg"}},
+		// PotToThem
+		{{"Thank you for the chips {when}. I promise to give some back.", "I felt bad about that pot {when}. Only a little."},
+			{"Thanks for the chips {when}.", "That pot {when}. Mine."},
+			{"thanks for the chips {when}", "that pot {when} though. ty"},
+			{"thank you for the chips {when} haha", "that pot {when} made my night, sorry not sorry"},
+			{"THANKS FOR THE CHIPS", "that pot {when}. BEAUTIFUL"},
+			{"ty for the chips {when}", "nice pot for me {when} lol"}},
+		// SatTogether
+		{{"It was a pleasure sharing a table with you {when}. You play a patient game.", "Lovely to sit with you at {Event} {when}. You were good company."},
+			{"Good table {when}.", "Played with you {when}. Not bad."},
+			{"good sitting with you {when}. fun table", "fun playing with you at {event} {when}"},
+			{"hey!! that table {when} was so fun, glad we sat together", "had a blast at {event} {when}. you were the best part of that table honestly"},
+			{"FUN TABLE {when}. you're alright", "that table {when} was a CIRCUS. loved it"},
+			{"gg {when}", "solid table {when}. gl next time"}},
+	};
+	return Lines[static_cast<int>(T)][static_cast<int>(V)][Salt % 2u];
+}
+
+/** The cast say the big things their own way. */
+const char* CastLine(const std::string& Name, Topic T)
+{
+	struct Said
+	{
+		const char* Name;
+		Topic What;
+		const char* Line;
+	};
+	static const Said Lines[] = {
+		{"Mrs. Park", Topic::BustedYou, "I'm sorry, dear. Somebody had to send you home {when}, and I'd rather it was me than a stranger."},
+		{"Mrs. Park", Topic::YouBusted, "Well played {when}, dear. Thirty years in that room and you still surprised me."},
+		{"Mrs. Park", Topic::SatTogether, "It was nice to sit with you {when}. Eat something before you play next time. I could hear your stomach."},
+		{"Sal", Topic::BustedYou, "I had it {when}. Nothing personal, kid."},
+		{"Sal", Topic::YouBusted, "You got me {when}. Don't get used to it."},
+		{"Sal", Topic::SatTogether, "Decent table {when}. You fold too much."},
+		{"Mei", Topic::BustedYou, "sorry about {when}. coffee's on me at dee's"},
+		{"Mei", Topic::YouBusted, "ok, you got me {when}. I'll remember that one"},
+		{"Mei", Topic::SatTogether, "fun table {when}. you're getting better, it's annoying"},
+		{"Rick", Topic::BustedYou, "told you I'd get you. gg {when}"},
+		{"Rick", Topic::YouBusted, "lucky. {when} doesn't count. rematch"},
+		{"Rick", Topic::SatTogether, "you're alright at a real table. don't let it go to your head"},
+		{"Dre", Topic::BustedYou, "aw man, sorry about {when}! you had me scared all night"},
+		{"Dre", Topic::YouBusted, "you got me {when}!! good hand though, real talk"},
+		{"Dre", Topic::SatTogether, "good times at {event} {when}! we gotta sit together again"},
+		{"Big Lou", Topic::BustedYou, "LOU SENDS HIS REGARDS. gg {when}"},
+		{"Big Lou", Topic::YouBusted, "you busted LOU {when}. nobody busts Lou. respect"},
+		{"Big Lou", Topic::SatTogether, "LOU HAD FUN {when}. you're alright, kid"},
+		{"Twitch", Topic::BustedYou, "SHIPPED YOUR STACK {when} lmaooo gg"},
+		{"Twitch", Topic::YouBusted, "bro you SENT me {when} lmaooo. gg"},
+		{"Twitch", Topic::SatTogether, "that table {when} was UNHINGED lmao"},
+		{RivalName, Topic::BustedYou, "gg {when}. your move."},
+		{RivalName, Topic::YouBusted, "gg. you had it {when}. enjoy it"},
+		{RivalName, Topic::SatTogether, "so this is what live poker looks like. gg {when}"},
+	};
+	for (const Said& S : Lines)
+	{
+		if (S.What == T && Name == S.Name)
+		{
+			return S.Line;
+		}
+	}
+	return nullptr;
+}
+
+/** How people say an event's name in a text ("nightly", "noon game"). */
+std::string Spoken(const live::EventTemplate& T)
+{
+	const std::string Key = T.Key;
+	return Key == "noon" ? "noon game" : Key == "bigstack" ? "big stack" : Key == "warmup" ? "warm-up" : Key == "turbo" ? "turbo" : Key == "sunday" ? "sunday" : "nightly";
+}
+
+std::string Fill(std::string Text, const std::vector<std::pair<std::string, std::string>>& Tokens)
+{
+	for (const std::pair<std::string, std::string>& T : Tokens)
+	{
+		for (size_t At = Text.find(T.first); At != std::string::npos; At = Text.find(T.first, At + T.second.size()))
+		{
+			Text.replace(At, T.first.size(), T.second);
+		}
+	}
+	return Text;
+}
+
+std::string Upper(std::string S)
+{
+	for (char& Ch : S)
+	{
+		Ch = static_cast<char>(std::toupper(static_cast<unsigned char>(Ch)));
+	}
+	return S;
+}
+
+/** Whole dollars, as people write a prize in a text ("$2,215"). */
+std::string Dollars(Chips Cents)
+{
+	return "$" + Grouped(static_cast<int64_t>(std::llround(static_cast<double>(Cents) / 100.0)));
+}
+
+/** A text after a night out together: what passed between them, how it ended for them (or the player), their next night. */
+struct NightTalk
+{
+	Topic What = Topic::SatTogether;
+	live::Occurrence Night;
+	int Today = 0;
+	int TheirPlace = 0; // 0: not known
+	Chips TheirPrize = 0;
+	int YourPlace = 0;
+	Chips YourPrize = 0;
+	live::Occurrence Next; // their next night at the room (invalid: none planned)
+};
+
+std::string BondLine(const world::Npc& N, Voice V, const NightTalk& T, uint32_t Salt)
+{
+	const bool Evening = T.Night.T->StartMinute >= 17 * 60;
+	const std::string When = T.Night.Day >= T.Today - 1 ? (Evening ? "last night" : "yesterday") : Evening ? "the other night" : "the other day";
+	std::vector<std::string> Parts;
+	const char* Own = CastLine(N.Name, T.What == Topic::YouBustedSore ? Topic::Count : T.What);
+	Parts.push_back(Fill(Own ? Own : MainLine(T.What, V, Salt), {{"{when}", When}, {"{event}", "the " + Spoken(*T.Night.T)}, {"{Event}", std::string("the ") + T.Night.T->Short}}));
+	// How it ended: theirs (they'd say), or the player's (they'd heard). A heads-up says it already.
+	static const char* const TheyWon[] = {"I went on to win it, if you can believe it. {prize}.", "Won it. {prize}.", "went on to win the whole thing btw. {prize}",
+		"AND I won it!! {prize}, still in shock", "SHIPPED IT. {prize}.", "shipped it, {prize}"};
+	static const char* const TheyCashed[] = {"I made it to {place} in the end, {prize}.", "Finished {place}. {prize}.", "ended up {place} for {prize}", "made the money too! {place}, {prize}",
+		"CASHED {place}. {prize}!", "{place} for {prize}"};
+	static const char* const YouWon[] = {"And congratulations on the title. Well deserved.", "Congrats on the win.", "and congrats on taking it down", "and CONGRATS on winning the whole thing!!",
+		"AND YOU WON IT. CHAMP.", "congrats on the win"};
+	static const char* const YouCashed[] = {"Congratulations on your cash.", "Nice cash.", "nice cash too", "and nice cash!!", "NICE CASH.", "nice cash"};
+	const int Vi = static_cast<int>(V);
+	if (T.What != Topic::HeadsUpWon && T.What != Topic::HeadsUpLost)
+	{
+		const std::vector<std::pair<std::string, std::string>> Result = {{"{place}", Ordinal(T.TheirPlace)}, {"{prize}", Dollars(T.TheirPrize)}};
+		if (T.TheirPlace == 1)
+		{
+			Parts.push_back(Fill(TheyWon[Vi], Result));
+		}
+		else if (T.TheirPlace > 1 && T.TheirPrize > 0)
+		{
+			Parts.push_back(Fill(TheyCashed[Vi], Result));
+		}
+		else if (T.YourPlace == 1)
+		{
+			Parts.push_back(YouWon[Vi]);
+		}
+		else if (T.YourPrize > 0)
+		{
+			Parts.push_back(YouCashed[Vi]);
+		}
+	}
+	// Their next night at the room, when they've planned one.
+	if (T.Next.Valid())
+	{
+		static const char* const Next[] = {"I'll be at {Next}, if you're coming.", "{NextShort}. You in?", "you playing {next}? I'm in", "see you at {next}?? I'm registered!",
+			"{NEXTSHORT}. BE THERE.", "{nextshort}?"};
+		const bool Late = T.Next.T->StartMinute >= 17 * 60;
+		const std::string Day = T.Next.Day == T.Today ? (Late ? "tonight" : "today") : "tomorrow";
+		const std::string Short = Spoken(*T.Next.T) + " " + Day;
+		std::string Cap = Short;
+		Cap[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(Cap[0])));
+		Parts.push_back(Fill(Next[Vi], {{"{Next}", std::string("the ") + T.Next.T->Short + " " + Day}, {"{NextShort}", Cap}, {"{NEXTSHORT}", Upper(Short)},
+			{"{nextshort}", Short}, {"{next}", "the " + Short}}));
+	}
+	std::string Out;
+	for (const std::string& P : Parts)
+	{
+		if (!Out.empty())
+		{
+			const char End = Out.back();
+			Out += End == '.' || End == '!' || End == '?' ? " " : ". ";
+		}
+		Out += P;
+	}
+	return Out;
+}
+} // namespace session_detail
+
+void Session::BondTexts(double From, double To)
+{
+	if (!LivingWorld.Ready())
+	{
+		return;
+	}
+	using namespace session_detail;
+	const double Slack = 1.0;
+	for (int Day = net::DayOf(From - Slack); Day <= net::DayOf(To); ++Day)
+	{
+		for (int Slot = 0; Slot < 2; ++Slot)
+		{
+			// Two moments a day someone might text, early afternoon and evening (the same minutes in every save): two texts
+			// a day at most.
+			uint32_t Mix = static_cast<uint32_t>(Day * 2 + Slot) * 2654435761u;
+			Mix ^= Mix >> 16;
+			const double At = static_cast<double>(Day) * net::MinutesPerDay + (Slot == 0 ? 12.5 : 18.5) * 60.0 + static_cast<double>(Mix % 151u);
+			if (At <= From - Slack || At > To)
+			{
+				continue;
+			}
+			const std::string SlotKey = "bond-slot:" + std::to_string(Day) + ":" + std::to_string(Slot);
+			if (TextsSeen.count(SlotKey) > 0)
+			{
+				continue;
+			}
+			// Who has the most to say about a night at the Embercrest the day before, or the day before that.
+			struct Pick
+			{
+				const life::LiveEntry* Entry = nullptr;
+				const life::TableMate* Mate = nullptr;
+				live::Occurrence Night;
+				int Npc = -1;
+				Topic What = Topic::SatTogether;
+				int Place = 0;
+				Chips Prize = 0;
+				int Score = -1;
+				uint32_t Tie = 0;
+			};
+			Pick Best;
+			for (const life::LiveEntry& E : Life.LiveEntries)
+			{
+				if (E.State != life::LiveEntry::Finished || E.Table.empty())
+				{
+					continue;
+				}
+				const live::Occurrence O = live::FindOccurrence(E.Id);
+				if (!O.Valid() || O.Day < Day - 2 || O.Day > Day - 1)
+				{
+					continue;
+				}
+				// A night out says two things at most.
+				const std::string NightKey = "bond:" + std::to_string(O.Day) + ":";
+				int Said = 0;
+				for (auto It = TextsSeen.lower_bound(NightKey); It != TextsSeen.end() && It->compare(0, NightKey.size(), NightKey) == 0; ++It)
+				{
+					++Said;
+				}
+				if (Said >= 2)
+				{
+					continue;
+				}
+				for (const life::TableMate& M : E.Table)
+				{
+					const int Npc = LivingWorld.Find(M.Name);
+					const world::Npc* N = LivingWorld.Get(Npc);
+					const world::Bond* B = LivingWorld.BondWith(Npc);
+					if (!N || N->Faded || !B || B->Label().empty())
+					{
+						continue; // never from a stranger
+					}
+					// Once in a couple of days at most, whatever nights they shared.
+					bool Spoke = false;
+					for (int D = O.Day - 1; D <= O.Day + 1 && !Spoke; ++D)
+					{
+						Spoke = TextsSeen.count("bond:" + std::to_string(D) + ":" + M.Name) > 0;
+					}
+					if (Spoke)
+					{
+						continue;
+					}
+					Pick P;
+					P.Entry = &E;
+					P.Mate = &M;
+					P.Night = O;
+					P.Npc = Npc;
+					if (!LivingWorld.FinishIn(E.Id, Npc, P.Place, P.Prize))
+					{
+						P.Place = 0;
+						P.Prize = 0;
+					}
+					P.What = TopicOf(E, M, *B, P.Place);
+					const float Strength = B->Familiarity + B->Respect + B->Rivalry + B->Trust;
+					P.Score = Weight(P.What) * 10 + (P.Place == 1 ? 30 : P.Prize > 0 ? 10 : 0) + static_cast<int>(Strength * 10.0f) + (O.Day == Day - 1 ? 5 : 0);
+					P.Tie = live::FaceHash(E.Id + "/" + M.Name);
+					if (P.Score > Best.Score || (P.Score == Best.Score && P.Tie > Best.Tie))
+					{
+						Best = P;
+					}
+				}
+			}
+			if (!Best.Entry)
+			{
+				continue;
+			}
+			const world::Npc& N = *LivingWorld.Get(Best.Npc);
+			// Said as of when it comes in: a moment crossed while the player was out (home from a night at the room, the
+			// calendar caught up at once) is read now, and "tonight" is no invitation to a night already under way.
+			NightTalk Talk;
+			Talk.What = Best.What;
+			Talk.Night = Best.Night;
+			Talk.Today = net::DayOf(To);
+			Talk.TheirPlace = Best.Place;
+			Talk.TheirPrize = Best.Prize;
+			Talk.YourPlace = Best.Entry->Place;
+			Talk.YourPrize = Best.Entry->PrizeCents;
+			Talk.Next = live::FindOccurrence(LivingWorld.NextEmbercrest(Best.Npc, To));
+			const std::string Body = BondLine(N, VoiceOf(N, Day), Talk, Best.Tie);
+			TextsSeen.insert(SlotKey);
+			StoryText("bond:" + std::to_string(Best.Night.Day) + ":" + Best.Mate->Name, N.Name, Body);
+		}
 	}
 }
 
@@ -4907,17 +5501,19 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 		}
 	}
 	// Registered at the Embercrest but never got there (the game closed on the bus): the desk holds the seat until late
-	// registration ends, and says so.
+	// registration ends, and says so. (Not for a field short of the minimum: that one's called off at the start, and the
+	// desk says that instead.)
 	if (const life::LiveEntry* Mine = live::ActiveEntry(Life); Mine && Mine->ArrivedAt <= 0.0)
 	{
 		const live::Occurrence O = live::FindOccurrence(Mine->Id);
-		if (O.Valid() && Crosses(O.Start - live::TravelMinutes - 30.0))
+		if (O.Valid() && !live::BelowMinimum(O, Mine->Entrants) && Crosses(O.Start - live::TravelMinutes - 30.0))
 		{
 			StoryText("live-remind:" + O.Id, "Embercrest",
 				std::string("You're registered for ") + (O.T->StartMinute >= 17 * 60 ? "tonight's " : "today's ") + O.T->Short + ". Cards at " + net::TimeLabel(O.Start) +
-					", and the 14 bus takes twenty minutes. Your seat waits until late registration closes at " + net::TimeLabel(O.LateRegEnds) + ".");
+					", and the 14 bus up the ridge takes twenty minutes. Your seat waits until late registration closes at " + net::TimeLabel(O.LateRegEnds) + ".");
 		}
 	}
+	BondTexts(From, To);
 }
 
 void Session::DeliverOrders(double Until)

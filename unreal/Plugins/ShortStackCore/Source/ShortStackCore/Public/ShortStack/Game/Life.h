@@ -25,7 +25,7 @@ enum class Kind : int
 	Ghost,  // Burner: playing Sam's RiverLine account; risks the player's own account
 	Sleep,
 	Game, // Burner: Dee's live game in the laundromat's back room (the host takes the player there)
-	Live, // Burner: the Embercrest's Sunday tournament (the host takes the player there)
+	Live, // Burner: the Embercrest's tournaments, up at the resort (the host takes the player there)
 };
 
 /** Dee's game: $1/$2 no-limit, bought into from the bankroll. */
@@ -76,6 +76,22 @@ struct LiveFace
 	std::string Line;  // what they say sitting down with the player ("" for nothing)
 };
 
+/** Someone the world follows who was at the player's table at a live tournament, and what passed between them in the open. */
+struct TableMate
+{
+	enum Saw : int
+	{
+		SatWith = 1,
+		KnockedYouOut = 2,
+		YouKnockedOut = 4,
+		PotWon = 8,   // the player took a big pot off them
+		PotLost = 16, // they took one off the player
+	};
+	std::string Name; // as the field knows them
+	int Seen = 0;     // Saw bits
+	Chips Pot = 0;    // the biggest pot between them in tournament chips, to the player (+) or to them (-)
+};
+
 /**
  * The player's entry in a live tournament (live::Register): one per occurrence, keyed by its id, so paying,
  * refunding and settling each happen once however often they're asked for.
@@ -101,6 +117,8 @@ struct LiveEntry
 	std::vector<std::string> Board;
 	/** The faces in the field: the room's regulars and whoever remembers the player. */
 	std::vector<LiveFace> Faces;
+	/** Who the player sat with that night and what passed between them (the room's report, SaveData::NoteLive). */
+	std::vector<TableMate> Table;
 	bool FareThere = false;
 	bool FareHome = false;
 	int Place = 0;

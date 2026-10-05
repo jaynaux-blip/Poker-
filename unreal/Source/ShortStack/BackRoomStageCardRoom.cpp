@@ -821,7 +821,7 @@ void ABackRoomStage::BuildCardRoom()
 	BarLight->SetCastShadows(false);
 
 	// ---- the terrace doors and the terrace beyond: the ranges at night, the resort's lights on the slopes (in the
-	// old room, a riverboat's doors onto its deck).
+	// old room, glass doors onto a deck).
 	if (bEC)
 	{
 		UMaterialInterface* Frame = Room(TEXT("EC_Mullion"), 4, 0x111215, 0, 0.0f, 0.5f);

@@ -24,6 +24,18 @@ struct FBackRoomLine
 	bool bRead = false;
 };
 
+/**
+ * A hand the hero took to a showdown, as it ended: who was across the pot from them (the tournament id of the opponent
+ * who lost the most to them, or won the most from them), the hero's net, the pot and the big blind then.
+ */
+struct FBackRoomShowdown
+{
+	FString Id;
+	int64 HeroNet = 0;
+	int64 Pot = 0;
+	int64 BigBlind = 0;
+};
+
 /** What the table tells its host (the game mode) between hands. */
 enum class EBackRoomTableNote : uint8
 {
@@ -221,6 +233,17 @@ public:
 	/** No hand dealt or waiting (between hands). */
 	bool IsBetweenHands() const { return !Hand.IsValid() && !PendingHand.IsValid(); }
 	UNightOneAudio* GetAudio() const { return Audio; }
+	/** The last hand's showdown with the hero in it (Id empty when the hero folded or nobody showed), as of HandEnded. */
+	const FBackRoomShowdown& LastShowdown() const { return Showdown; }
+	/**
+	 * After the hero is out of the tournament, the table goes on showing the engine's table TableId as each simulated
+	 * round leaves it (-1: no table plays here any more, and it empties): who sits in which chair (engine seat RefSeat in
+	 * the hero's old chair), their stacks, a reaction from whoever won or lost a real pot. Nothing is dealt or decided
+	 * here; the engine played the round. A player who busted keeps the chair, out of chips, until bSettle (the host
+	 * calls again a moment later, after the goodbye); whoever the balancing moved leaves, or sits down, at once. The
+	 * hero's own place shows what the engine has for them (out: no chips), and is no one's seat in a hand.
+	 */
+	void FollowTable(int32 TableId, int32 RefSeat, bool bSettle);
 
 private:
 	struct FSeat
@@ -346,6 +369,11 @@ private:
 	bool FetchTournamentHand();
 	/** Puts the tournament's players for H in their physical seats (bodies come and go through the host). */
 	void SyncTournamentSeats(const ss::Hand& H);
+	/** A chair at physical TableSeat that isn't the hero's (the hero's old chair too, once they're out), made if need be. */
+	FSeat& EnsureOtherSeat(int32 TableSeat);
+	/** Someone gets up from S (Busted: out of the tournament; else moved to another table): the host takes the body. */
+	void VacateSeat(FSeat& S, bool bBusted);
+	FBackRoomShowdown Showdown;
 	void WireSeat(FSeat& S);
 	/** An opponent facing the hero's bet: do the hands give it away (and do they read it right)? */
 	void ReadHero(const FSeat& Reader, int32& Kind, double& To, double Equity);

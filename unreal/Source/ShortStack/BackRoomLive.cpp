@@ -9,6 +9,11 @@
 // say goodbye and go, the floor runs the night over the PA (levels, breaks, busts near the money, hand for
 // hand, the bubble, the final table), and a table break walks the player to a new seat. Busting, or
 // winning, settles the entry once (ss::live::Settle) and tells the world what the player's tables saw.
+//
+// After that the night goes on in the room. The player's old table keeps playing the engine's rounds while they watch
+// from the rail; the desk can write them into the next event today (the world's field for it, read from the save on a
+// worker), the floor calls its seats when they open, and the room opens again for it with no second bus. Every way out
+// leaves through the resort's entrance (the Embercrest map) when it's been built, and goes home from there.
 
 #include "BackRoomChips.h"
 #include "CareerSave.h"
@@ -17,10 +22,14 @@
 #include "BackRoomStage.h"
 #include "BackRoomTable.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/PackageName.h"
 #include "NightOneAudio.h"
 #include "NightOneSaveGame.h"
+#include "Tasks/Task.h"
 #include "TimerManager.h"
 #include "ShortStack/Audio/Synth.h"
 #include "ShortStack/Game/Chat.h"
@@ -28,7 +37,11 @@
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/World.h"
 #include "ShortStack/Tournament.h"
+
+#include <algorithm>
+#include <atomic>
 
 DEFINE_LOG_CATEGORY_STATIC(LogEmbercrest, Log, All);
 
@@ -71,8 +84,80 @@ const TCHAR* ExtraBodies[12] = {TEXT("ExtraA"), TEXT("ExtraB"), TEXT("ExtraC"), 
 /** The room's bodies by whom they suit (ExtraA, C, E, G, I, K are women's). */
 const TCHAR* WomenBodies[6] = {TEXT("ExtraA"), TEXT("ExtraC"), TEXT("ExtraE"), TEXT("ExtraG"), TEXT("ExtraI"), TEXT("ExtraK")};
 const TCHAR* MenBodies[6] = {TEXT("ExtraB"), TEXT("ExtraD"), TEXT("ExtraF"), TEXT("ExtraH"), TEXT("ExtraJ"), TEXT("ExtraL")};
-/** At each other table: the dealer, and two players facing across. */
-const int32 ExtraSeats[3] = {4, 2, 6};
+/**
+ * The far crowd's seated figures by the body each was baked from (backroom_crowd.py bakes kind K from an extra seated at
+ * a near table: kinds 0-5 and 9-14 are players, 6 a dealer). A body with no figure of its own (the cast's) has none here.
+ */
+const TCHAR* CrowdBodies[ABackRoomStage::CrowdKinds] = {TEXT("ExtraH"), TEXT("ExtraA"), TEXT("ExtraF"), TEXT("ExtraK"), TEXT("ExtraD"), TEXT("ExtraI"), nullptr,
+	nullptr, nullptr, TEXT("ExtraG"), TEXT("ExtraL"), TEXT("ExtraE"), TEXT("ExtraJ"), TEXT("ExtraC"), TEXT("ExtraH")};
+
+/**
+ * The body an entrant's tournament id picks (LIVE_TOURNAMENTS.md section 10: a look is a hash of the id): their own
+ * MetaHuman for the cast, one of the room's that suits a regular of the room's, any of the twelve for anyone else.
+ */
+FString DefaultBody(const FString& Id, const FString& Name)
+{
+	const FString Own = ABackRoomGameMode::CastAssetFor(Name);
+	if (!Own.IsEmpty())
+	{
+		return Own;
+	}
+	const uint32 Hash = FCrc::StrCrc32(*Id);
+	const ss::live::RoomLocal* Local = ss::live::FindRoomLocal(std::string(TCHAR_TO_UTF8(*Name)));
+	return Local ? (Local->Woman ? WomenBodies : MenBodies)[Hash % 6] : ExtraBodies[Hash % 12];
+}
+
+/** The room's body an actor wears ("ExtraC", "Sal"; empty when it has none): the folder its MetaHuman was built in. */
+FString WornBody(const ABackRoomPlayer* P)
+{
+	if (!P)
+	{
+		return FString();
+	}
+	const FString Path = P->MetaHumanClass.ToSoftObjectPath().ToString();
+	const int32 At = Path.Find(TEXT("/MHC_"));
+	if (At == INDEX_NONE)
+	{
+		return FString();
+	}
+	const FString Rest = Path.Mid(At + 5);
+	int32 End = INDEX_NONE;
+	return Rest.FindChar(TEXT('/'), End) ? Rest.Left(End) : Rest;
+}
+
+/** How one of the world's people plays at the table: as the session reads them for its own fields (Session.cpp, StyleOf). */
+ss::Archetype PlayStyle(const ss::world::Npc& N)
+{
+	const float Sk = N.Overall();
+	const float Aggro = N.TraitOf(ss::world::Trait::Aggro);
+	const float Risk = N.TraitOf(ss::world::Trait::Risk);
+	if (Sk >= 0.72f)
+	{
+		return Aggro > 0.6f ? ss::Archetype::Crusher : ss::Archetype::Reg;
+	}
+	if (Sk >= 0.58f)
+	{
+		return Aggro > 0.62f ? ss::Archetype::Lag : Aggro < 0.35f ? ss::Archetype::Tag : ss::Archetype::Reg;
+	}
+	if (Sk >= 0.45f)
+	{
+		return Aggro > 0.8f && Risk > 0.7f ? ss::Archetype::Maniac : Aggro < 0.3f ? ss::Archetype::Nit : ss::Archetype::Tag;
+	}
+	return Aggro > 0.8f ? ss::Archetype::Maniac : Aggro < 0.3f ? ss::Archetype::Station : N.TraitOf(ss::world::Trait::Patience) > 0.7f ? ss::Archetype::Nit : ss::Archetype::Fish;
+}
+
+/** The floor's last call for registration (the core's, so the room, the screens and the phone agree: live::LastCall). */
+double LastCallAt(double LateRegEnds)
+{
+	return LateRegEnds - ss::live::LastCallMinutes;
+}
+/** The next event's seats open this long before its cards (world minutes): the floor calls them then. */
+constexpr double SeatingLead = 10.0;
+/** The desk stops writing players in this close to the end of late registration (there's the walk to the seat). */
+constexpr double DeskClosesBefore = 5.0;
+/** On the rail: a round of the room every few real seconds, and the old table's chairs settling a moment after it. */
+constexpr float RailRoundSeconds = 4.5f;
+constexpr float RailSettleSeconds = 2.2f;
 
 /** What a player says leaving the tournament. */
 FString Goodbye(const FString& Name)
@@ -101,6 +186,193 @@ const TCHAR* WeekdayName(int32 Day)
 	static const TCHAR* Names[7] = {TEXT("Monday"), TEXT("Tuesday"), TEXT("Wednesday"), TEXT("Thursday"), TEXT("Friday"), TEXT("Saturday"), TEXT("Sunday")};
 	return Names[((Day % 7) + 7) % 7];
 }
+} // namespace LiveDetail
+
+/**
+ * The desk writing the player in for an event, the world's part (on a worker: the living world is a few megabytes of
+ * the save's text): the field as the session's own registration takes it (Session::GoToLive), that is the people the
+ * world registered and how they play, the faces among them (the room's regulars, whoever remembers the player) and what
+ * they'll say, and the champions' board; then the world told the player is in, written back as text. The entry itself
+ * (the money) is made on the game thread from this (RegisterFromSignup). Without a world in the save, the room's own crowd.
+ */
+class FLiveDeskSignup
+{
+public:
+	// In.
+	std::string WorldText;
+	std::string HeroName;
+	ss::live::Occurrence O;
+	/** World minutes now: the board shows events that started before it. */
+	double At = 0.0;
+	// Out.
+	bool bWorld = false;
+	int Planned = 0;
+	std::vector<std::pair<std::string, int>> Roster;
+	std::vector<ss::life::LiveFace> Faces;
+	std::vector<std::string> Board;
+	std::string WorldAfter;
+	std::atomic<bool> bDone{false};
+
+	void Run()
+	{
+		ss::world::World W;
+		std::vector<std::string> Fields;
+		for (size_t From = 0; From < WorldText.size();)
+		{
+			const size_t End = FMath::Min(WorldText.find('\n', From), WorldText.size());
+			Fields.clear();
+			for (size_t Cell = From, K = From; K <= End; ++K)
+			{
+				if (K == End || WorldText[K] == '\t')
+				{
+					Fields.emplace_back(WorldText, Cell, K - Cell);
+					Cell = K + 1;
+				}
+			}
+			W.Read(Fields);
+			From = End + 1;
+		}
+		WorldText.clear();
+		WorldText.shrink_to_fit();
+		W.Finish();
+		if (W.Ready() && O.Valid())
+		{
+			bWorld = true;
+			W.HeroName = HeroName;
+			Planned = FMath::Max(1, W.PlannedEntries(O.Id));
+			const std::vector<int> Regulars = W.EmbercrestRegulars();
+			for (int Npc : W.Registered(O.Id))
+			{
+				const ss::world::Npc* N = W.Get(Npc);
+				if (!N || N->Name == HeroName)
+				{
+					continue;
+				}
+				// The room's faces as the Back Room knows them play their own way.
+				int Type = static_cast<int>(LiveDetail::PlayStyle(*N));
+				for (const ss::live::CastMember& Cm : ss::live::EmbercrestCast())
+				{
+					if (N->Name == Cm.Name)
+					{
+						Type = static_cast<int>(Cm.Type);
+					}
+				}
+				Roster.push_back({N->Name, Type});
+				const ss::world::Bond* Bd = W.BondWith(Npc);
+				const bool bRegular = std::find(Regulars.begin(), Regulars.end(), Npc) != Regulars.end();
+				const std::string Known = Bd ? Bd->Label() : std::string();
+				if (!bRegular && Known.empty() && !(Bd && !Bd->Memories.empty()))
+				{
+					continue;
+				}
+				ss::life::LiveFace F;
+				F.Name = N->Name;
+				F.Label = !Known.empty() ? Known : Bd && !Bd->Memories.empty() ? std::string("Has met you") : std::string("Embercrest regular");
+				F.Line = W.SpokenGreeting(Npc, ss::live::FaceHash(O.Id + N->Name));
+				Faces.push_back(F);
+			}
+			// The champions' board by the desk: the room's last winners, newest first.
+			static const char* Days[7] = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"};
+			for (int Day = O.Day; Day >= O.Day - 10 && Board.size() < 8; --Day)
+			{
+				const std::vector<ss::live::Occurrence> Os = ss::live::Occurrences(Day);
+				for (auto It = Os.rbegin(); It != Os.rend() && Board.size() < 8; ++It)
+				{
+					const ss::net::EventResult* Res = It->Start < At ? W.ResultOf(It->Id) : nullptr;
+					if (!Res)
+					{
+						continue;
+					}
+					for (const ss::net::Placing& Pl : Res->FinalTable)
+					{
+						if (Pl.Place != 1)
+						{
+							continue;
+						}
+						const ss::world::Npc* N = Pl.Player >= 0 ? W.Get(Pl.Player) : nullptr;
+						const std::string Who = Pl.Player == -1 ? HeroName : N ? N->Name : Pl.Name;
+						Board.push_back(std::string(Days[((Day % 7) + 7) % 7]) + " " + std::string(TCHAR_TO_UTF8(*FString(It->T->Short).ToUpper())) + "\t" + Who + "\t" +
+							std::to_string(Pl.Prize));
+					}
+				}
+			}
+			// The world waits for the player's result in it (it never decides an event the player is in).
+			W.HeroEntered(O.Id, O.T->Name);
+			W.Write(WorldAfter);
+		}
+		bDone = true;
+	}
+};
+
+namespace LiveDetail
+{
+/**
+ * Registers the player for the signup's event in D: the entry with the world's field (its people and faces, the board),
+ * the buy-in and fee as their ledger lines, and the world told. bInRoom: written in at the desk with the player already
+ * here, where the desk sells the entry and nothing else (the night's bus home is paid: the core's rule counts a bus
+ * there and back). Returns why not ("" when registered).
+ */
+std::string RegisterFromSignup(ss::SaveData& D, const FLiveDeskSignup& S, double World, bool bInRoom)
+{
+	const ss::live::Occurrence& O = S.O;
+	const int Entrants = S.bWorld ? FMath::Max(S.Planned, static_cast<int>(S.Roster.size())) + 1 : O.Field + 1;
+	const ss::Chips Waived = bInRoom ? 2 * ss::live::BusFareCents : 0;
+	ss::Chips Bank = D.BankrollCents + Waived;
+	const std::string Why = ss::live::Register(Bank, D.Life, O, World, Entrants, S.Roster);
+	D.BankrollCents = Bank - Waived;
+	ss::life::LiveEntry* E = Why.empty() ? ss::live::EntryFor(D.Life, O.Id) : nullptr;
+	if (!E)
+	{
+		return Why.empty() ? std::string("There's no such event.") : Why;
+	}
+	E->Faces = S.Faces;
+	E->Board = S.Board;
+	if (S.bWorld)
+	{
+		D.WorldText = S.WorldAfter;
+	}
+	return std::string();
+}
+
+/** A room console command's game mode: the Embercrest's, or nothing (Dee's game, practice, another map). */
+ABackRoomGameMode* LiveMode(UWorld* World)
+{
+	ABackRoomGameMode* GM = World ? World->GetAuthGameMode<ABackRoomGameMode>() : nullptr;
+	return GM && GM->IsLive() ? GM : nullptr;
+}
+
+FAutoConsoleCommandWithWorldAndArgs BustCmd(TEXT("ss.Live.Bust"),
+	TEXT("At the Embercrest: the player busts at the next gap between hands (testing: a one-chip stack, blinded out by the engine)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>&, UWorld* World) {
+		if (ABackRoomGameMode* GM = LiveMode(World))
+		{
+			GM->TestBustNow();
+		}
+	}));
+FAutoConsoleCommandWithWorldAndArgs LastCallCmd(TEXT("ss.Live.LastCall"),
+	TEXT("At the Embercrest: the room plays on (you on autopilot) to just before the floor's last call for registration."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>&, UWorld* World) {
+		if (ABackRoomGameMode* GM = LiveMode(World))
+		{
+			GM->TestLastCall();
+		}
+	}));
+FAutoConsoleCommandWithWorldAndArgs NextCmd(TEXT("ss.Live.Next"),
+	TEXT("ss.Live.Next [occurrence id]: once the player's night is over, the desk writes them into the next event today (or that one), as E twice at the desk does."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (ABackRoomGameMode* GM = LiveMode(World))
+		{
+			GM->TestRegisterNext(Args.Num() > 0 ? Args[0] : FString());
+		}
+	}));
+FAutoConsoleCommandWithWorldAndArgs SeatCmd(TEXT("ss.Live.Seat"),
+	TEXT("At the Embercrest, registered for the next event: the wait passes (as the terrace does) and the floor calls its seats."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>&, UWorld* World) {
+		if (ABackRoomGameMode* GM = LiveMode(World))
+		{
+			GM->TestSeatingNow();
+		}
+	}));
 } // namespace LiveDetail
 
 FString ABackRoomGameMode::Chips(int64 Amount) const
@@ -147,9 +419,15 @@ bool ABackRoomGameMode::LoadLive()
 	ss::life::LiveEntry* Entry = ss::live::EntryFor(D->Life, O.Id);
 	if (!Entry)
 	{
-		// Opened directly (the editor, a test): registered at the desk on arrival, with the room's own crowd.
+		// Opened directly (the editor, a test): registered at the desk on arrival, with the field the world has for it.
 		const double At = FMath::Max(LeftHomeAt + ss::live::TravelMinutes, O.DeskOpens);
-		const std::string Why = ss::live::Register(D->BankrollCents, D->Life, O, At - ss::live::TravelMinutes, O.Field + 1, {});
+		FLiveDeskSignup Field;
+		Field.WorldText = D->WorldText;
+		Field.HeroName = D->HeroName;
+		Field.O = O;
+		Field.At = At;
+		Field.Run();
+		const std::string Why = RegisterFromSignup(*D, Field, At - ss::live::TravelMinutes, false);
 		Entry = Why.empty() ? ss::live::EntryFor(D->Life, O.Id) : nullptr;
 		if (!Entry)
 		{
@@ -171,6 +449,33 @@ bool ABackRoomGameMode::LoadLive()
 	{
 		LeftHomeAt = Entry->ArrivedAt - ss::live::TravelMinutes;
 	}
+	// An event the desk wrote the player into during the night, already in the room (it rides home on the first event's
+	// bus), and the night's own departure, which Night One catches its calendar up from.
+	bDeskEntry = bBackInRoom && Entry->ArrivedAt <= Entry->RegisteredAt + 0.01;
+	NightLeftHomeAt = LeftHomeAt;
+	if (bDeskEntry && Entry->Checkpoint.empty())
+	{
+		// (Before its first checkpoint, the desk's entry keeps that departure itself.)
+		TArray<FString> Lines;
+		Str(Entry->CheckpointHost).ParseIntoArray(Lines, TEXT("\n"), true);
+		for (const FString& Line : Lines)
+		{
+			FString Key, Value;
+			if (Line.Split(TEXT("\t"), &Key, &Value) && Key == TEXT("from"))
+			{
+				NightLeftHomeAt = FMath::Min(NightLeftHomeAt, FCString::Atod(*Value));
+			}
+		}
+	}
+	// Straight on from the night's earlier event in this room (the desk's): no bus and no trip, the clock as the room left it.
+	bHere = bBackInRoom && UGameplayStatics::HasOption(OptionsString, TEXT("Here"));
+	double HereAt = 0.0;
+	if (bHere)
+	{
+		const FString From = UGameplayStatics::ParseOption(OptionsString, TEXT("From"));
+		NightLeftHomeAt = From.IsEmpty() ? NightLeftHomeAt : FMath::Min(NightLeftHomeAt, FCString::Atod(*From));
+		HereAt = FCString::Atod(*UGameplayStatics::ParseOption(OptionsString, TEXT("At")));
+	}
 	Save = D;
 	for (const ss::life::LiveFace& F : Entry->Faces)
 	{
@@ -181,8 +486,13 @@ bool ABackRoomGameMode::LoadLive()
 	LiveShort = Str(O.T->Short);
 	LiveLateRegEnds = O.LateRegEnds;
 	LiveBreakMinutes = O.T->BreakMinutes;
-	// Across town on the 14 bus.
+	// Up the ridge on the 14 bus (or, on from the night's earlier event, already here: its hours count from now).
 	Minutes = LeftHomeAt + ss::live::TravelMinutes;
+	if (bHere)
+	{
+		Minutes = FMath::Max(Minutes, HereAt);
+		LeftHomeAt = Minutes - ss::live::TravelMinutes;
+	}
 	LiveDay = O.Day;
 	LiveDayStart = ss::net::MinutesPerDay * LiveDay;
 	Energy = static_cast<float>(D->Life.Energy);
@@ -245,7 +555,8 @@ bool ABackRoomGameMode::LoadLive()
 		}
 		UE_CLOG(!Faces.IsEmpty(), LogEmbercrest, Log, TEXT("Faces in the field: %s"), *Faces);
 	}
-	UE_CLOG(bBackInRoom, LogEmbercrest, Log, TEXT("Back in the room%s: hand %d, level %d, %d left, stack %lld, %d hands played%s"), bResumed ? TEXT(" from the checkpoint") : TEXT(""),
+	UE_CLOG(bHere, LogEmbercrest, Log, TEXT("On from the night's earlier event: no bus, %s, the night left home at %s"), *ClockLabel(), *Str(ss::net::TimeLabel(NightLeftHomeAt)));
+	UE_CLOG(bBackInRoom && !bHere, LogEmbercrest, Log, TEXT("Back in the room%s: hand %d, level %d, %d left, stack %lld, %d hands played%s"), bResumed ? TEXT(" from the checkpoint") : TEXT(""),
 		Tourney->Tick, Tourney->LevelIndex + 1, Tourney->Remaining, static_cast<int64>(Tourney->Hero().Stack), HandsPlayed, bResumeDealt ? TEXT(", the dealt hand is dead") : TEXT(""));
 	return true;
 }
@@ -270,11 +581,12 @@ void ABackRoomGameMode::SeatLive()
 	const double CardsAt = LiveDayStart + Tourney->Spec.StartClock;
 	Minutes = FMath::Max(Minutes, CardsAt - 8.0);
 	// Late: the field has played the levels you missed. Inside late registration your seat waits with a full stack;
-	// after it (back to an entry you'd left), the seat was dealt in without you, and the blinds took their share.
+	// after it (back to an entry you'd left), the seat was dealt in without you, and the blinds took their share. Written
+	// in at the desk tonight, the seat waits however long the floor's call and the walk took: the registration was in time.
 	const double SitAt = Minutes + 2.0;
 	if (SitAt > CardsAt && !bResumed)
 	{
-		const bool bReturning = SitAt > LiveLateRegEnds;
+		const bool bReturning = SitAt > LiveLateRegEnds && !bDeskEntry;
 		const int32 Missed = FMath::FloorToInt((SitAt - CardsAt) * 60.0 / Tourney->Spec.SecondsPerHand);
 		Tourney->HeroAway = !bReturning;
 		Tourney->HeroSitsOut = bReturning;
@@ -310,6 +622,10 @@ void ABackRoomGameMode::SeatLive()
 		RaiseBanner(FString::Printf(TEXT("LEVEL %d   %s / %s   %d LEFT"), Tourney->LevelIndex + 1, *Num(Tourney->CurrentLevel().Sb), *Num(Tourney->CurrentLevel().Bb), Tourney->Remaining));
 	}
 	ArrivalDayText = FString::Printf(TEXT("%s, %s   %s"), WeekdayName(LiveDay), *FString(UTF8_TO_TCHAR(ss::net::DateLabel(LiveDay).c_str())), *ClockLabel().RightChop(5));
+	// The floor's last call and the close of registration are news only to a room that's here for them.
+	const double SeatedAt = FMath::Max(Minutes, LiveDayStart + Tourney->ClockMinutes());
+	bLastCalled = SeatedAt >= LastCallAt(LiveLateRegEnds);
+	bRegClosed = SeatedAt >= LiveLateRegEnds;
 	// The night as it stands before the first hand here is dealt (so even that hand is never dealt twice).
 	LiveCheckpoint(false);
 	// The first table, seated before you get there; the room placed round it, the rest of the room at theirs.
@@ -385,49 +701,28 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 	}
 	if (!A)
 	{
-		FString Asset = CastAssetFor(Name);
-		if (Asset.IsEmpty())
+		// Their own face (the cast), or the room's body they've worn at another table tonight, or the one their id picks
+		// (the same every night they play), passing over any already sitting at this table and the dealer's.
+		TSet<FString> Worn;
+		for (const TPair<FString, TObjectPtr<ABackRoomPlayer>>& It : CastActors)
 		{
-			// Someone without a face of their own: one of the room's, the same one every night they play (a regular of
-			// the room's, one that fits who they are).
-			// Unless someone at the table already wears that one: then the next of the kind that's free.
-			const uint32 Hash = FCrc::StrCrc32(*Name);
-			const ss::live::RoomLocal* Local = ss::live::FindRoomLocal(std::string(TCHAR_TO_UTF8(*Name)));
-			const TCHAR* const* Bodies = Local ? (Local->Woman ? WomenBodies : MenBodies) : ExtraBodies;
-			const uint32 NumBodies = Local ? 6 : 12;
-			auto Taken = [this](const TCHAR* Body) {
-				const FString Tag = FString::Printf(TEXT("/MHC_%s/"), Body);
-				auto Wears = [&Tag](const ABackRoomPlayer* O) { return O && O->MetaHumanClass.ToSoftObjectPath().ToString().Contains(Tag); };
-				for (const TPair<FString, TObjectPtr<ABackRoomPlayer>>& It : CastActors)
-				{
-					const ABackRoomPlayer* O = It.Value.Get();
-					const bool bSeated = O && (!O->IsHidden() || BlinkSwaps.ContainsByPredicate([O](const TPair<TWeakObjectPtr<ABackRoomPlayer>, bool>& S) {
-						return S.Key.Get() == O && S.Value;
-					}));
-					if (bSeated && Wears(O))
-					{
-						return true;
-					}
-				}
-				return Wears(Dealer.Get());
-			};
-			Asset = Bodies[Hash % NumBodies];
-			for (uint32 K = 0; K < NumBodies; ++K)
+			const ABackRoomPlayer* O = It.Value.Get();
+			const bool bSeated = O && (!O->IsHidden() || BlinkSwaps.ContainsByPredicate([O](const TPair<TWeakObjectPtr<ABackRoomPlayer>, bool>& S) {
+				return S.Key.Get() == O && S.Value;
+			}));
+			if (bSeated)
 			{
-				if (!Taken(Bodies[(Hash + K) % NumBodies]))
-				{
-					Asset = Bodies[(Hash + K) % NumBodies];
-					break;
-				}
+				Worn.Add(WornBody(O));
 			}
 		}
-		A = SpawnPerson(Asset, At, EBackRoomRole::Player, PersonaFor(Name));
+		Worn.Add(WornBody(Dealer.Get()));
+		A = SpawnPerson(LiveBodyFor(Id, Name, Worn), At, EBackRoomRole::Player, PersonaFor(Name));
 		CastActors.Add(Id, A);
 	}
 	A->SetActorTransform(At);
 	// Someone who knows the player (or a regular the dealer knows), sitting down with them for the first time tonight:
-	// a word once they're settled.
-	const TPair<FString, FString>* Face = LiveMet.Contains(Id) ? nullptr : LiveFaces.Find(Name);
+	// a word once they're settled. (Not once the player's night is over: they sit down at the old table without them.)
+	const TPair<FString, FString>* Face = LiveMet.Contains(Id) || bLiveOver ? nullptr : LiveFaces.Find(Name);
 	if (Face)
 	{
 		const FString Line = Face->Value;
@@ -455,10 +750,13 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 			}
 		}), Delay, false);
 	}
-	LiveMet.Add(Id);
-	// In plain sight, a new face takes the chair in a blink rather than appearing in it.
+	if (!bLiveOver)
+	{
+		LiveMet.Add(Id);
+	}
+	// In plain sight (from the chair, or from the rail), a new face takes the chair in a blink rather than appearing in it.
 	BlinkSwaps.RemoveAll([A](const TPair<TWeakObjectPtr<ABackRoomPlayer>, bool>& S) { return S.Key.Get() == A; });
-	if (Phase == EBackRoomPhase::Playing && MoveT < 0.0f && HeroCanSee(At.GetLocation() + FVector(0.0, 0.0, 110.0)))
+	if ((Phase == EBackRoomPhase::Playing || bRailing) && MoveT < 0.0f && HeroCanSee(At.GetLocation() + FVector(0.0, 0.0, 110.0)))
 	{
 		A->SetActorHiddenInGame(true);
 		BlinkSwap(A, true);
@@ -484,7 +782,7 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 		Table->DealerLine(FString::Printf(TEXT("Welcome. Seat %d."), ss::live::SeatLabel(P.Seat)));
 	}
 	// gh0stfold, across a real table for the first time.
-	if (Name == UTF8_TO_TCHAR(ss::RivalName) && !bGhostMet)
+	if (Name == UTF8_TO_TCHAR(ss::RivalName) && !bGhostMet && !bLiveOver)
 	{
 		bGhostMet = true;
 		TWeakObjectPtr<ABackRoomPlayer> Ghost = A;
@@ -507,7 +805,7 @@ void ABackRoomGameMode::UnseatCast(ABackRoomPlayer* Player, const FString& Id, b
 		return;
 	}
 	// Up and gone (the body waits out of sight in case the floor brings them back); in front of the hero, in a blink.
-	if (Phase == EBackRoomPhase::Playing && MoveT < 0.0f && HeroCanSee(Player->GetActorLocation() + FVector(0.0, 0.0, 110.0)))
+	if ((Phase == EBackRoomPhase::Playing || bRailing) && MoveT < 0.0f && HeroCanSee(Player->GetActorLocation() + FVector(0.0, 0.0, 110.0)))
 	{
 		BlinkSwap(Player, false);
 	}
@@ -605,7 +903,8 @@ void ABackRoomGameMode::PlaceExtras()
 	TSet<int32> Open;
 	for (const auto& It : Tourney->Tables)
 	{
-		// The player's table has its own people (still in their chairs after the player is out of it).
+		// The player's table has its own people, and after the player is out of it, it goes on showing the table that
+		// plays there (ABackRoomTable::FollowTable).
 		const int32 Slot = SlotForTable(It.first);
 		if (It.first == HeroTable || Slot == Anchor)
 		{
@@ -620,85 +919,178 @@ void ABackRoomGameMode::PlaceExtras()
 		Stage->SetTableOpen(Slot, Open.Contains(Slot));
 	}
 	Stage->ClearCrowd();
-	int32 Used = 0;
-	auto Seat = [&](const FTransform& Frame, int32 Physical, int32 Index, bool bDealer) {
-		const FTransform Local = ABackRoomStage::SeatTransform(Physical) * Frame;
-		if (!Extras.IsValidIndex(Index))
-		{
-			Extras.SetNum(Index + 1);
-		}
-		TObjectPtr<ABackRoomPlayer>& E = Extras[Index];
-		if (!E)
-		{
-			FBackRoomPersona Persona = PersonaFor(FString::Printf(TEXT("Extra%d"), Index));
-			if (bDealer)
-			{
-				// The house's black, nothing on the head.
-				Persona.Shirt = FLinearColor(FColor(0x14, 0x14, 0x18));
-				Persona.ShirtPrint = 0;
-				Persona.ShirtGraphic = 0;
-				Persona.Headwear = 0;
-			}
-			// Consecutive extras (a table's seats) step through all twelve bodies: 5 shares no factor with 12.
-			E = SpawnPerson(ExtraBodies[(Index * 5 + 2) % 12], Local * RoomWorld, EBackRoomRole::Extra, Persona);
-			if (RoomRoot)
-			{
-				E->AttachToComponent(RoomRoot, FAttachmentTransformRules::KeepWorldTransform);
-			}
-		}
-		E->SetActorRelativeTransform(Local);
-		E->SetActorHiddenInGame(false);
-		// They watch their own table: the pot, the dealer, the others at it.
-		const FTransform World = Frame * RoomWorld;
-		E->TableToWorld = World;
-		E->PotAt = World.TransformPosition(FVector(10.0, 0.0, ABackRoomStage::FeltZ));
-		E->DealerAt = World.TransformPosition(ABackRoomStage::SeatTransform(4).TransformPosition(FVector(-14.0, 0.0, 112.0)));
-		E->HeroEyes = World.TransformPosition(ABackRoomStage::SeatTransform((Physical + 3) % 7).TransformPosition(FVector(-14.0, 0.0, 112.0)));
-		E->OthersAt.Reset();
-		for (int32 J : {0, 2, 5})
-		{
-			if (J != Physical)
-			{
-				E->OthersAt.Add(World.TransformPosition(ABackRoomStage::SeatTransform(J).TransformPosition(FVector(-14.0, 0.0, 112.0))));
-			}
-		}
+	// Who sits where at the near tables: each player in the body they wear in the room (LiveBodyFor: the same as at the
+	// player's own table, so a face follows its person from table to table) and dressed as themselves; each table's
+	// dealer in the house's black, the same face all night, never the player's own dealer's.
+	struct FNearSeat
+	{
+		FTransform Frame;
+		int32 Physical = 0;
+		FString Who;
+		FString Name;
+		FString Body;
+		bool bDealer = false;
 	};
+	TArray<FNearSeat> Near;
+	const FString HouseDealer = WornBody(Dealer.Get());
+	int32 Budget = NearBudget;
 	for (const FRunning& R : Running)
 	{
 		const ss::TTable& T = Tourney->Tables[R.TableId];
 		const FTransform Frame = ABackRoomStage::TableSlotLocal(R.Slot);
-		TArray<int32> Players;
+		TArray<TPair<int32, int32>> Players; // physical seat, player index
 		for (size_t K = 0; K < T.Seats.size() && K < 6; ++K)
 		{
 			if (T.Seats[K] >= 0)
 			{
-				Players.Add(PhysicalSeat[K]);
+				Players.Add(TPair<int32, int32>(PhysicalSeat[K], T.Seats[K]));
 			}
 		}
-		const int32 Need = 1 + Players.Num();
-		if (R.Dist < NearReach && Used + Need <= NearBudget)
+		if (R.Dist < NearReach && 1 + Players.Num() <= Budget)
 		{
-			Seat(Frame, 4, Used++, true);
-			for (int32 P : Players)
+			Budget -= 1 + Players.Num();
+			FNearSeat& D = Near.AddDefaulted_GetRef();
+			D.Frame = Frame;
+			D.Physical = 4;
+			D.Who = FString::Printf(TEXT("dealer:%d"), R.Slot);
+			D.Name = FString::Printf(TEXT("Dealer %d"), R.Slot + 1);
+			D.Body = ExtraBodies[(R.Slot * 7 + 3) % 12];
+			for (int32 K = 1; D.Body == HouseDealer && K < 12; ++K)
 			{
-				Seat(Frame, P, Used++, false);
+				D.Body = ExtraBodies[(R.Slot * 7 + 3 + K) % 12];
+			}
+			D.bDealer = true;
+			TSet<FString> Worn = {D.Body, HouseDealer};
+			for (const TPair<int32, int32>& P : Players)
+			{
+				const ss::TPlayer& Player = Tourney->Players[static_cast<size_t>(P.Value)];
+				FNearSeat& S = Near.AddDefaulted_GetRef();
+				S.Frame = Frame;
+				S.Physical = P.Key;
+				S.Who = Str(Player.Id);
+				S.Name = Str(Player.Name);
+				S.Body = LiveBodyFor(S.Who, S.Name, Worn);
+				Worn.Add(S.Body);
 			}
 			continue;
 		}
 		Stage->AddCrowd(6, ABackRoomStage::SeatTransform(4) * Frame);
-		for (int32 P : Players)
+		for (const TPair<int32, int32>& P : Players)
 		{
-			// Their look is theirs: the same figure each time this player is drawn at this seat.
-			const int32 Idx = T.Seats[static_cast<size_t>(FMath::Max(0, P == 5 ? 4 : P == 6 ? 5 : P))];
-			const uint32 Hash = Idx >= 0 ? FCrc::StrCrc32(*Str(Tourney->Players[static_cast<size_t>(Idx)].Id)) : static_cast<uint32>(P);
-			// One of the twelve seated figures (0-5, 9-14).
-			const int32 Kind = static_cast<int32>(Hash % 12);
-			Stage->AddCrowd(Kind < 6 ? Kind : Kind + 3, ABackRoomStage::SeatTransform(P) * Frame);
+			// Their look is theirs: the figure baked from the body they wear up close.
+			const ss::TPlayer& Player = Tourney->Players[static_cast<size_t>(P.Value)];
+			Stage->AddCrowd(CrowdKindFor(Str(Player.Id), Str(Player.Name)), ABackRoomStage::SeatTransform(P.Key) * Frame);
 		}
 	}
-	for (int32 I = Used; I < Extras.Num(); ++I)
+	// Their bodies: first the extras already sitting for them, then a free extra of that body dressed as them, else a new one.
+	ExtraBody.SetNum(Extras.Num());
+	ExtraWho.SetNum(Extras.Num());
+	TArray<bool> Taken;
+	Taken.Init(false, Extras.Num());
+	TArray<int32> ActorFor;
+	ActorFor.Init(INDEX_NONE, Near.Num());
+	TSet<FString> Needed;
+	for (const FNearSeat& S : Near)
 	{
-		if (Extras[I])
+		Needed.Add(S.Body);
+	}
+	for (int32 N = 0; N < Near.Num(); ++N)
+	{
+		for (int32 I = 0; I < Extras.Num(); ++I)
+		{
+			if (!Taken[I] && Extras[I] && ExtraWho[I] == Near[N].Who && ExtraBody[I] == Near[N].Body)
+			{
+				ActorFor[N] = I;
+				Taken[I] = true;
+				break;
+			}
+		}
+	}
+	for (int32 N = 0; N < Near.Num(); ++N)
+	{
+		if (ActorFor[N] != INDEX_NONE)
+		{
+			continue;
+		}
+		const FNearSeat& S = Near[N];
+		FBackRoomPersona Persona = PersonaFor(S.Name);
+		if (S.bDealer)
+		{
+			// The house's black, nothing on the head.
+			Persona.Shirt = FLinearColor(FColor(0x14, 0x14, 0x18));
+			Persona.ShirtPrint = 0;
+			Persona.ShirtGraphic = 0;
+			Persona.Headwear = 0;
+		}
+		for (int32 I = 0; I < Extras.Num(); ++I)
+		{
+			if (!Taken[I] && Extras[I] && ExtraBody[I] == S.Body)
+			{
+				ActorFor[N] = I;
+				Extras[I]->Persona = Persona;
+				Extras[I]->Redress();
+				break;
+			}
+		}
+		if (ActorFor[N] == INDEX_NONE)
+		{
+			ABackRoomPlayer* E = SpawnPerson(S.Body, ABackRoomStage::SeatTransform(S.Physical) * S.Frame * RoomWorld, EBackRoomRole::Extra, Persona);
+			if (RoomRoot)
+			{
+				E->AttachToComponent(RoomRoot, FAttachmentTransformRules::KeepWorldTransform);
+			}
+			// Past what the near tables seat at once (and a few to spare), one standing by in a body nobody here needs now
+			// makes way for it: the hidden still animate.
+			int32 Spare = INDEX_NONE;
+			for (int32 I = 0; Extras.Num() >= NearBudget + 6 && I < Extras.Num() && Spare == INDEX_NONE; ++I)
+			{
+				Spare = !Taken[I] && (!Extras[I] || !Needed.Contains(ExtraBody[I])) ? I : INDEX_NONE;
+			}
+			if (Spare != INDEX_NONE)
+			{
+				if (Extras[Spare])
+				{
+					Extras[Spare]->Destroy();
+				}
+				Extras[Spare] = E;
+				ExtraBody[Spare] = S.Body;
+				ActorFor[N] = Spare;
+			}
+			else
+			{
+				ActorFor[N] = Extras.Add(E);
+				ExtraBody.Add(S.Body);
+				ExtraWho.Add(FString());
+				Taken.Add(false);
+			}
+		}
+		ExtraWho[ActorFor[N]] = S.Who;
+		Taken[ActorFor[N]] = true;
+	}
+	for (int32 N = 0; N < Near.Num(); ++N)
+	{
+		const FNearSeat& S = Near[N];
+		ABackRoomPlayer* E = Extras[ActorFor[N]];
+		E->SetActorRelativeTransform(ABackRoomStage::SeatTransform(S.Physical) * S.Frame);
+		E->SetActorHiddenInGame(false);
+		// They watch their own table: the pot, the dealer, the others at it.
+		const FTransform World = S.Frame * RoomWorld;
+		E->TableToWorld = World;
+		E->PotAt = World.TransformPosition(FVector(10.0, 0.0, ABackRoomStage::FeltZ));
+		E->DealerAt = World.TransformPosition(ABackRoomStage::SeatTransform(4).TransformPosition(FVector(-14.0, 0.0, 112.0)));
+		E->HeroEyes = World.TransformPosition(ABackRoomStage::SeatTransform((S.Physical + 3) % 7).TransformPosition(FVector(-14.0, 0.0, 112.0)));
+		E->OthersAt.Reset();
+		for (int32 J : {0, 2, 5})
+		{
+			if (J != S.Physical)
+			{
+				E->OthersAt.Add(World.TransformPosition(ABackRoomStage::SeatTransform(J).TransformPosition(FVector(-14.0, 0.0, 112.0))));
+			}
+		}
+	}
+	for (int32 I = 0; I < Extras.Num(); ++I)
+	{
+		if (Extras[I] && !Taken[I])
 		{
 			Extras[I]->SetActorHiddenInGame(true);
 		}
@@ -720,6 +1112,66 @@ void ABackRoomGameMode::PlaceExtras()
 	Table->SetCrowd(static_cast<float>(Running.Num() + 1) / static_cast<float>(FMath::Max(1, (Tourney->Spec.Entrants + Tourney->TableSize - 1) / Tourney->TableSize)));
 }
 
+FString ABackRoomGameMode::LiveBodyFor(const FString& Id, const FString& Name, const TSet<FString>& Worn)
+{
+	if (const FString* Kept = LiveBodies.Find(Id))
+	{
+		return *Kept;
+	}
+	FString Body = DefaultBody(Id, Name);
+	if (CastAssetFor(Name).IsEmpty() && Worn.Contains(Body))
+	{
+		// Someone at this table already wears it: the next of the kind that's free.
+		const uint32 Hash = FCrc::StrCrc32(*Id);
+		const ss::live::RoomLocal* Local = ss::live::FindRoomLocal(std::string(TCHAR_TO_UTF8(*Name)));
+		const TCHAR* const* Bodies = Local ? (Local->Woman ? WomenBodies : MenBodies) : ExtraBodies;
+		const uint32 NumBodies = Local ? 6 : 12;
+		for (uint32 K = 1; K < NumBodies; ++K)
+		{
+			if (!Worn.Contains(Bodies[(Hash + K) % NumBodies]))
+			{
+				Body = Bodies[(Hash + K) % NumBodies];
+				break;
+			}
+		}
+	}
+	LiveBodies.Add(Id, Body);
+	UE_LOG(LogEmbercrest, Log, TEXT("Look: %s (%s) wears %s, far crowd figure %d"), *Name, *Id, *Body, CrowdKindFor(Id, Name));
+	return Body;
+}
+
+int32 ABackRoomGameMode::CrowdKindFor(const FString& Id, const FString& Name) const
+{
+	const FString* Kept = LiveBodies.Find(Id);
+	const FString Body = Kept ? *Kept : DefaultBody(Id, Name);
+	for (int32 Kind = 0; Kind < ABackRoomStage::CrowdKinds; ++Kind)
+	{
+		if (CrowdBodies[Kind] && Body == CrowdBodies[Kind])
+		{
+			return Kind;
+		}
+	}
+	// A body nobody sat for (the cast's own): one of the twelve seated figures (0-5, 9-14), the same for them every time.
+	const int32 Kind = static_cast<int32>(FCrc::StrCrc32(*Id) % 12);
+	return Kind < 6 ? Kind : Kind + 3;
+}
+
+int32 ABackRoomGameMode::AnchorTableId()
+{
+	if (!Stage || !Tourney)
+	{
+		return -1;
+	}
+	for (const auto& It : Tourney->Tables)
+	{
+		if (SlotForTable(It.first) == Stage->GetRoomAnchor())
+		{
+			return It.first;
+		}
+	}
+	return -1;
+}
+
 void ABackRoomGameMode::UpdateRoomBoards()
 {
 	if (!Stage || !Tourney || !Save.IsValid())
@@ -731,9 +1183,19 @@ void ABackRoomGameMode::UpdateRoomBoards()
 	for (const ss::live::Occurrence& O : ss::live::Occurrences(LiveDay))
 	{
 		FString State;
-		if (Str(O.Id) == LiveEntryId)
+		if (Str(O.Id) == LiveEntryId && bLiveOver)
 		{
-			State = bLiveOver ? FString(TEXT("YOUR NIGHT IS OVER")) : FString::Printf(TEXT("PLAYING  \u00b7  %d OF %d LEFT"), Tourney->Remaining, Tourney->Spec.Entrants);
+			State = TEXT("YOUR NIGHT IS OVER");
+		}
+		else if (Str(O.Id) == LiveEntryId)
+		{
+			State = bLastCalled && !bRegClosed ? TEXT("LAST CALL  \u00b7  REG TO ") + Str(ss::net::TimeLabel(LiveLateRegEnds))
+											   : FString::Printf(TEXT("PLAYING  \u00b7  %d OF %d LEFT"), Tourney->Remaining, Tourney->Spec.Entrants);
+		}
+		else if (Str(O.Id) == NextEntryId)
+		{
+			// The event the desk wrote the player into tonight.
+			State = bNextCalled ? FString(TEXT("YOU'RE IN  \u00b7  SEATING NOW")) : TEXT("YOU'RE IN  \u00b7  SEATS ") + Str(ss::net::TimeLabel(NextSeatingAt));
 		}
 		else if (Minutes < O.DeskOpens)
 		{
@@ -745,7 +1207,7 @@ void ABackRoomGameMode::UpdateRoomBoards()
 		}
 		else if (Minutes < O.LateRegEnds)
 		{
-			State = TEXT("LATE REG TO ") + Str(ss::net::TimeLabel(O.LateRegEnds));
+			State = (ss::live::LastCall(O, Minutes) ? TEXT("LAST CALL  \u00b7  REG TO ") : TEXT("LATE REG TO ")) + Str(ss::net::TimeLabel(O.LateRegEnds));
 		}
 		else if (Minutes < O.Start + O.T->Hours * 60.0)
 		{
@@ -952,7 +1414,16 @@ void ABackRoomGameMode::LiveNote(uint8 Note)
 	switch (static_cast<EBackRoomTableNote>(Note))
 	{
 	case EBackRoomTableNote::HandEnded:
+	{
 		++HandsPlayed;
+		// A big pot shown down with one of the world's people (forty big blinds or more): they'll remember it, the biggest
+		// one with each of them tonight (R7: only what was shown).
+		const FBackRoomShowdown& Shown = Table->LastShowdown();
+		if (Shown.Id.StartsWith(TEXT("npc:")) && Shown.Pot >= 40 * FMath::Max<int64>(1, Shown.BigBlind))
+		{
+			int64& Net = LiveBigPots.FindOrAdd(Shown.Id);
+			Net = FMath::Abs(Shown.HeroNet) > FMath::Abs(Net) ? Shown.HeroNet : Net;
+		}
 		// Saved once the room has heard this hand's news (a break, a move): LiveTick, next.
 		bCheckpointDue = true;
 		if (bHandForHand && !Tourney->InTheMoney())
@@ -962,6 +1433,7 @@ void ABackRoomGameMode::LiveNote(uint8 Note)
 			MoveT = -3.5f;
 		}
 		break;
+	}
 	case EBackRoomTableNote::HeroMoved:
 		if (Phase == EBackRoomPhase::Arriving)
 		{
@@ -1037,6 +1509,20 @@ FString ABackRoomGameMode::LiveHostText(bool bDealt) const
 	{
 		Out += TEXT("met\t") + Id + TEXT("\n");
 	}
+	// The night's own departure, for an event entered from the room (Night One catches its calendar up from it).
+	if (NightLeftHomeAt < LeftHomeAt - 0.5)
+	{
+		Out += FString::Printf(TEXT("from\t%.2f\n"), NightLeftHomeAt);
+	}
+	// The big pots shown down, and the faces people have worn tonight (so a night come back to looks the same).
+	for (const TPair<FString, int64>& P : LiveBigPots)
+	{
+		Out += FString::Printf(TEXT("pot\t%s\t%lld\n"), *P.Key, P.Value);
+	}
+	for (const TPair<FString, FString>& L : LiveBodies)
+	{
+		Out += FString::Printf(TEXT("look\t%s\t%s\n"), *L.Key, *L.Value);
+	}
 	if (Table && Save.IsValid())
 	{
 		// The reads that changed tonight (the rest are in the save already).
@@ -1081,6 +1567,18 @@ void ABackRoomGameMode::ReadLiveHost(const FString& Text)
 		else if (F.Num() == 3 && F[0] == TEXT("read"))
 		{
 			ResumeReads.Add(F[1], FCString::Atoi(*F[2]));
+		}
+		else if (F.Num() == 2 && F[0] == TEXT("from"))
+		{
+			NightLeftHomeAt = FMath::Min(NightLeftHomeAt, FCString::Atod(*F[1]));
+		}
+		else if (F.Num() == 3 && F[0] == TEXT("pot"))
+		{
+			LiveBigPots.Add(F[1], FCString::Atoi64(*F[2]));
+		}
+		else if (F.Num() == 3 && F[0] == TEXT("look"))
+		{
+			LiveBodies.Add(F[1], F[2]);
 		}
 	}
 }
@@ -1214,9 +1712,11 @@ void ABackRoomGameMode::LiveOver()
 	BustMinutes = Minutes;
 	if (bHeroUp)
 	{
-		// Out while on foot (blinded off, or heading for the door): already up, so already on the rail.
+		// Out while on foot (blinded off, or heading for the door): already up, so already on the rail, and the old table
+		// catches up with the engine at once (a blind-off plays many hands in one go).
 		bRailing = true;
-		RailT = 0.0f;
+		bRailSeatsDue = true;
+		RailT = RailSettleSeconds;
 	}
 	UE_LOG(LogEmbercrest, Log, TEXT("Over: phase %d, break %d, hero busted %d, finished %d, moving %d"), static_cast<int32>(Phase), bOnBreak ? 1 : 0, Tourney->Hero().Busted ? 1 : 0, Tourney->bFinished ? 1 : 0, MoveT >= 0.0f ? 1 : 0);
 	const int32 Field = Tourney->Spec.Entrants;
@@ -1268,6 +1768,14 @@ void ABackRoomGameMode::LiveOver()
 	Summary.Add(HeroPrizeCents > 0 ? FString::Printf(TEXT("Cashed   %s"), *Dollars(HeroPrizeCents)) : FString::Printf(TEXT("No cash   ·   %d paid"), Tourney->PaidPlaces()));
 	Summary.Add(FString::Printf(TEXT("Net   %s%s"), NetCents >= 0 ? TEXT("+") : TEXT("-"), *Dollars(FMath::Abs(NetCents))));
 	Summary.Append(Learned);
+	// The rest of today at the desk, if there's an event the player could still get into.
+	FString WhyNot;
+	const ss::live::Occurrence Next = ss::live::FindOccurrence(std::string(TCHAR_TO_UTF8(*NextOpenEvent(WhyNot))));
+	if (Next.Valid())
+	{
+		const FString When = Minutes < Next.Start ? TEXT("cards at ") + Str(ss::net::TimeLabel(Next.Start)) : TEXT("late reg to ") + Str(ss::net::TimeLabel(Next.LateRegEnds));
+		Summary.Add(FString::Printf(TEXT("Still open at the desk   %s, %s"), *Str(Next.T->Name), *When));
+	}
 	// The dealer, from the box (Dee on a Sunday; the day's dealer otherwise).
 	const bool bDee = ((LiveDay % 7) + 7) % 7 == 6;
 	FString Line;
@@ -1376,6 +1884,10 @@ void ABackRoomGameMode::LiveStay()
 	{
 		Table->DealerLine(TEXT("Stick around. The cage is open all night."));
 	}
+	// The old table as the engine has it now (whoever went out with the player's last hand gets up).
+	const int32 Here = AnchorTableId();
+	Table->FollowTable(Here, Here == Tourney->Hero().TableId ? Tourney->Hero().Seat : 0, true);
+	PlaceExtras();
 	UE_LOG(LogEmbercrest, Log, TEXT("Staying to watch: %d left"), Tourney->Remaining);
 }
 
@@ -1409,11 +1921,31 @@ FString ABackRoomGameMode::SpotPrompt() const
 	switch (CurrentSpot())
 	{
 	case ECardRoomSpot::Seat: return bLiveOver ? FString() : FString(TEXT("[E] Sit back down"));
-	case ECardRoomSpot::Desk: return TEXT("[E] Tournament desk");
+	case ECardRoomSpot::Desk:
+	{
+		// Out of tonight's event: the desk can write the player into the next one.
+		FString WhyNot;
+		const ss::live::Occurrence Open = bLiveOver && NextEntryId.IsEmpty() && !Signup.IsValid() ? ss::live::FindOccurrence(std::string(TCHAR_TO_UTF8(*NextOpenEvent(WhyNot))))
+																									 : ss::live::Occurrence();
+		if (Open.Valid())
+		{
+			return DeskOffer == Str(Open.Id) && LiveT - DeskAskedAt < 8.0f
+					   ? FString::Printf(TEXT("[E] again: register for the %s (%s)"), *Str(Open.T->Short), *Dollars(Open.T->BuyInCents))
+					   : FString::Printf(TEXT("[E] Tournament desk: the %s is open (%s)"), *Str(Open.T->Short), *Dollars(Open.T->BuyInCents));
+		}
+		return TEXT("[E] Tournament desk");
+	}
 	case ECardRoomSpot::Cage: return bLiveOver && HeroPrizeCents > 0 && !bCollected ? FString(TEXT("[E] Collect your winnings")) : FString(TEXT("[E] Cashier"));
 	case ECardRoomSpot::Bar: return TEXT("[E] The bar");
-	case ECardRoomSpot::Terrace: return TEXT("[E] Step out on the terrace");
+	case ECardRoomSpot::Terrace:
+		return !NextEntryId.IsEmpty() && !bNextCalled && !bWaitingOut ? FString::Printf(TEXT("[E] Step out on the terrace until the %s is called"), *NextName)
+																	  : FString(TEXT("[E] Step out on the terrace"));
 	case ECardRoomSpot::Exit:
+		if (bLiveOver && !NextEntryId.IsEmpty())
+		{
+			return LiveT - ExitAskedAt < 5.0f ? FString::Printf(TEXT("[E] again: off the list for the %s, refunded, and home"), *NextName)
+											  : FString::Printf(TEXT("[E] Go home (the desk refunds the %s)"), *NextName);
+		}
 		return bLiveOver ? FString(TEXT("[E] Go home")) : (LiveT - ExitAskedAt < 5.0f ? FString(TEXT("[E] again: leave the tournament (your stack is blinded off)")) : FString(TEXT("[E] Leave the tournament")));
 	default: return FString();
 	}
@@ -1434,9 +1966,42 @@ void ABackRoomGameMode::LiveInteract()
 		break;
 	case ECardRoomSpot::Desk:
 	{
-		// The floor at the desk: where the night is, and a regular gets a regular's hello.
+		// The floor at the desk: where the night is, and a regular gets a regular's hello. Out of tonight's event, the next
+		// one today: offered on the first press, written in on the second.
 		FString Line;
-		if (bLiveOver)
+		FString WhyNot;
+		const FString Open = bLiveOver && NextEntryId.IsEmpty() && !Signup.IsValid() ? NextOpenEvent(WhyNot) : FString();
+		const ss::live::Occurrence Offer = ss::live::FindOccurrence(std::string(TCHAR_TO_UTF8(*Open)));
+		if (Signup.IsValid())
+		{
+			Line = TEXT("One second, I'm writing you in.");
+		}
+		else if (!NextEntryId.IsEmpty())
+		{
+			Line = bNextCalled ? FString::Printf(TEXT("They're seating the %s now. Go on, find your table."), *NextName)
+							   : FString::Printf(TEXT("You're all set for the %s. Seats open at %s; the floor will call it. The bar's open, the terrace too."), *NextName,
+									 *Str(ss::net::TimeLabel(NextSeatingAt)));
+		}
+		else if (Offer.Valid() && DeskOffer == Open && LiveT - DeskAskedAt < 8.0f)
+		{
+			DeskOffer.Empty();
+			DeskSignup(Open);
+			Line = TEXT("Let me write you in.");
+		}
+		else if (Offer.Valid())
+		{
+			DeskOffer = Open;
+			DeskAskedAt = LiveT;
+			const ss::live::EventTemplate& T = *Offer.T;
+			const FString When = Minutes < Offer.Start ? TEXT("cards at ") + Str(ss::net::TimeLabel(Offer.Start)) : TEXT("late registration till ") + Str(ss::net::TimeLabel(Offer.LateRegEnds));
+			Line = FString::Printf(TEXT("The %s is still open%s. %s: %s to the prize pool, %s to the house. %s in chips, %s. Want in?"), *Str(T.Short), *AddressTo(Save),
+				*Dollars(T.BuyInCents), *Dollars(T.BuyInCents - T.FeeCents), *Dollars(T.FeeCents), *Num(T.StartingStack), *When);
+		}
+		else if (!WhyNot.IsEmpty())
+		{
+			Line = WhyNot;
+		}
+		else if (bLiveOver)
 		{
 			FString Next;
 			for (int32 Day = LiveDay; Day <= LiveDay + 1 && Next.IsEmpty(); ++Day)
@@ -1502,7 +2067,32 @@ void ABackRoomGameMode::LiveInteract()
 		}
 		break;
 	case ECardRoomSpot::Terrace:
-		if (LiveT - LastAir > 420.0f)
+		if (!NextEntryId.IsEmpty() && !bNextCalled && !bWaitingOut)
+		{
+			// Waiting for the next event out in the cold: the wait passes (the room plays on without you) until the floor
+			// calls it.
+			bWaitingOut = true;
+			APlayerController* PC = GetWorld()->GetFirstPlayerController();
+			if (PC && PC->PlayerCameraManager)
+			{
+				PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 0.9f, FLinearColor::Black, true, true);
+			}
+			FTimerHandle Handle;
+			GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this]() {
+				const double Until = NextSeatingAt;
+				RailCatchUp(Until);
+				LastAir = LiveT;
+				Energy = FMath::Min(100.0f, Energy + 6.0f);
+				bWaitingOut = false;
+				if (APlayerController* P = GetWorld()->GetFirstPlayerController(); P && P->PlayerCameraManager)
+				{
+					P->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, 1.4f, FLinearColor::Black, true, false);
+				}
+				Table->Announce(FString(), FString::Printf(TEXT("Out on the terrace until %s: the ridge, the cold, the resort's lights on the slopes. Inside, the floor's on the mic."),
+											   *Str(ss::net::TimeLabel(Until))));
+			}), 1.0f, false);
+		}
+		else if (LiveT - LastAir > 420.0f)
 		{
 			LastAir = LiveT;
 			Energy = FMath::Min(100.0f, Energy + 6.0f);
@@ -1514,7 +2104,25 @@ void ABackRoomGameMode::LiveInteract()
 		}
 		break;
 	case ECardRoomSpot::Exit:
-		if (bLiveOver)
+		if (bLiveOver && !NextEntryId.IsEmpty())
+		{
+			// Registered for the next event: leaving takes the player off its list (refunded: they never sat), then home.
+			if (bOpeningNext)
+			{
+				break;
+			}
+			if (LiveT - ExitAskedAt < 5.0f)
+			{
+				LiveUnregister();
+				bExitNow = true;
+			}
+			else
+			{
+				ExitAskedAt = LiveT;
+				Table->Announce(TEXT("Floor"), FString::Printf(TEXT("You're on the list for the %s. Head out now and the desk takes you off it, money back. Press again to go."), *NextName));
+			}
+		}
+		else if (bLiveOver)
 		{
 			bExitNow = true;
 		}
@@ -1538,28 +2146,93 @@ void ABackRoomGameMode::LiveInteract()
 
 void ABackRoomGameMode::LiveRail(float RealDt)
 {
-	// The room plays on while the player watches: a round every few seconds, the floor on the PA, the boards.
-	if (!Tourney || Tourney->bFinished || Tourney->FinishPending())
+	// The room plays on while the player watches: a round every few seconds, the floor on the PA, the boards, and the
+	// player's old table playing it out in front of them. Its chairs settle a moment after each round (a bust says
+	// goodbye before getting up).
+	if (!Tourney || Tourney->FinishPending())
 	{
 		return;
 	}
 	RailT += RealDt;
-	if (RailT < 4.5f)
+	if (bRailSeatsDue && RailT >= RailSettleSeconds)
 	{
+		bRailSeatsDue = false;
+		const int32 Here = AnchorTableId();
+		Table->FollowTable(Here, Here == Tourney->Hero().TableId ? Tourney->Hero().Seat : 0, true);
+		PlaceExtras();
+	}
+	if (Tourney->bFinished)
+	{
+		// Over: the room empties out and the clock goes on at the rail's pace (someone waiting on the next event).
+		Minutes += RealDt * Tourney->Spec.SecondsPerHand / RailRoundSeconds / 60.0;
 		return;
+	}
+	if (bOnBreak || RailT < RailRoundSeconds)
+	{
+		return; // between rounds, or the room's on its break
 	}
 	RailT = 0.0f;
 	for (const ss::TEvent& E : Tourney->SimulateTick())
 	{
 		LiveEvent(E);
 	}
+	const int32 Here = AnchorTableId();
+	Table->FollowTable(Here, Here == Tourney->Hero().TableId ? Tourney->Hero().Seat : 0, false);
+	bRailSeatsDue = true;
 	PlaceExtras();
 	Minutes = FMath::Max(Minutes, LiveDayStart + Tourney->ClockMinutes());
 }
 
-void ABackRoomGameMode::NoteRailedPlaces()
+void ABackRoomGameMode::RailCatchUp(double Until)
 {
-	if (!bRailing || !Save.IsValid() || bCancelled || !Tourney)
+	if (!Tourney || Tourney->FinishPending())
+	{
+		return;
+	}
+	// Every round played by the engine, as the rail would have seen them. The room's state keeps up with all of it; only
+	// the latest milestone is news when the player is back in the room (the bubble, the final table, a champion): the PA
+	// doesn't replay the hours that passed.
+	ss::TEvent News;
+	bool bNews = false;
+	for (int32 Guard = 0; Guard < 4000 && !Tourney->bFinished && LiveDayStart + Tourney->ClockMinutes() < Until; ++Guard)
+	{
+		for (const ss::TEvent& E : Tourney->SimulateTick())
+		{
+			if (E.Type == ss::TEventType::Bubble || E.Type == ss::TEventType::FinalTable || E.Type == ss::TEventType::Finished)
+			{
+				bHandForHand = bHandForHand && E.Type != ss::TEventType::Bubble;
+				bFinalTable = bFinalTable || E.Type == ss::TEventType::FinalTable;
+				News = E;
+				bNews = true;
+			}
+			else if (E.Type == ss::TEventType::HandForHand)
+			{
+				bHandForHand = true;
+			}
+		}
+	}
+	if (bFinalTable && Stage)
+	{
+		Stage->SetOnAir(true);
+	}
+	if (bNews)
+	{
+		LiveEvent(News);
+	}
+	bOnBreak = false;
+	Minutes = FMath::Max(Minutes, Until);
+	const int32 Here = AnchorTableId();
+	Table->FollowTable(Here, Here == Tourney->Hero().TableId ? Tourney->Hero().Seat : 0, true);
+	bRailSeatsDue = false;
+	RailT = 0.0f;
+	PlaceExtras();
+	UpdateRoomBoards();
+	UE_LOG(LogEmbercrest, Log, TEXT("The wait passes: %s, %d left%s"), *ClockLabel(), Tourney->Remaining, Tourney->bFinished ? TEXT(" (over)") : TEXT(""));
+}
+
+void ABackRoomGameMode::NoteRailed(ss::SaveData& D) const
+{
+	if (!bRailing || bCancelled || !Tourney)
 	{
 		return;
 	}
@@ -1577,11 +2250,21 @@ void ABackRoomGameMode::NoteRailedPlaces()
 		S.Value = P.Place;
 		Places.push_back(S);
 	}
-	ss::SaveData D = *Save;
 	if (!Places.empty())
 	{
 		D.NoteLivePlaces(BustMinutes, std::string(TCHAR_TO_UTF8(*LiveEntryId)), Places);
 	}
+	UE_LOG(LogEmbercrest, Log, TEXT("Railed: %d places seen after %s"), static_cast<int32>(Places.size()), *Ordinal(HeroPlace));
+}
+
+void ABackRoomGameMode::NoteRailedPlaces()
+{
+	if (!bRailing || !Save.IsValid() || bCancelled || !Tourney)
+	{
+		return;
+	}
+	ss::SaveData D = *Save;
+	NoteRailed(D);
 	// The time it took (the walk home starts from the door now).
 	D.ClockMinutes = FMath::Max(D.ClockMinutes, Minutes - ss::net::MinutesPerDay * ss::net::NightOneDay + 25.0);
 	D.Life.Energy = FMath::Clamp(static_cast<double>(Energy), 0.0, 100.0);
@@ -1591,7 +2274,7 @@ void ABackRoomGameMode::NoteRailedPlaces()
 		LiveSaver->Flush();
 	}
 	CareerSave::SaveNow(D.Serialize());
-	UE_LOG(LogEmbercrest, Log, TEXT("Railed: %d places seen after %s, home at %s"), static_cast<int32>(Places.size()), *Ordinal(HeroPlace), *ClockLabel());
+	UE_LOG(LogEmbercrest, Log, TEXT("Home at %s"), *ClockLabel());
 }
 
 void ABackRoomGameMode::LiveSettle()
@@ -1611,8 +2294,16 @@ void ABackRoomGameMode::LiveSettle()
 		// Once: a second call (or a reload after this save) finds the entry settled and changes nothing.
 		ss::live::Settle(D.BankrollCents, D.Life, EntryId, HeroPlace, Tourney->Spec.Entrants, HeroPrizeCents, Minutes);
 	}
-	// The bus home.
-	ss::live::PayFare(D.BankrollCents, D.Life, EntryId, true, Minutes);
+	// The bus home. An event the desk wrote the player into during the night rides home on the night's first ticket,
+	// paid when that one ended: one trip, one fare each way.
+	if (ss::life::LiveEntry* Mine = bDeskEntry ? ss::live::EntryFor(D.Life, EntryId) : nullptr)
+	{
+		Mine->FareHome = true;
+	}
+	else
+	{
+		ss::live::PayFare(D.BankrollCents, D.Life, EntryId, true, Minutes);
+	}
 	D.ClockMinutes = Minutes - ss::net::MinutesPerDay * ss::net::NightOneDay + 25.0;
 	D.Life.Energy = FMath::Clamp(static_cast<double>(Energy), 0.0, 100.0);
 	for (const TPair<FString, int32>& R : Table->Reads)
@@ -1660,8 +2351,17 @@ void ABackRoomGameMode::LiveSettle()
 				S.Tag = 'K';
 				Seen.push_back(S);
 			}
+			// The biggest pot shown down with them tonight (the player's net, in chips): a memory, as at Dee's game.
+			if (const int64* Net = LiveBigPots.Find(Str(P.Id)); Net && *Net != 0)
+			{
+				S.Tag = 'B';
+				S.Value = *Net;
+				Seen.push_back(S);
+			}
 		}
 		D.NoteLive(Minutes, EntryId, HeroPlace, HeroPrizeCents, Tourney->Spec.Entrants, Seen);
+		UE_LOG(LogEmbercrest, Log, TEXT("Told the world: %d things seen, %d big pots"), static_cast<int32>(Seen.size()),
+			static_cast<int32>(std::count_if(Seen.begin(), Seen.end(), [](const ss::LiveSeen& S) { return S.Tag == 'B'; })));
 	}
 	*Save = D;
 	// A checkpoint still being written lands first, so the settled night is the save that stays.
@@ -1674,14 +2374,19 @@ void ABackRoomGameMode::LiveSettle()
 
 void ABackRoomGameMode::LiveGoHome()
 {
-	if (bGoingHome)
+	if (bGoingHome || bOpeningNext)
 	{
-		return;
+		return; // (on the way already: home, or into the next event's room)
+	}
+	// Never home with a seat waiting tonight: the desk takes the player off the next event's list first.
+	if (!NextEntryId.IsEmpty() && !bOpeningNext)
+	{
+		LiveUnregister();
 	}
 	bGoingHome = true;
 	ABackRoomChips::ChipUnit = 1;
 	FString Options = FString::Printf(TEXT("Home?Live=1?Place=%d?Of=%d?Prize=%lld?Net=%lld?Learned=%d?From=%.0f"), HeroPlace, Tourney->Spec.Entrants, HeroPrizeCents, NetCents,
-		Table ? Table->LearnedThisNight : 0, LeftHomeAt);
+		Table ? Table->LearnedThisNight : 0, NightLeftHomeAt);
 	if (bHeroWon)
 	{
 		Options += TEXT("?Won");
@@ -1691,7 +2396,11 @@ void ABackRoomGameMode::LiveGoHome()
 		Options += TEXT("?Cancelled");
 	}
 	Options += TEXT("?Event=") + LiveShort.Replace(TEXT(" "), TEXT("_"));
-	UGameplayStatics::OpenLevel(this, FName(TEXT("NightOne")), true, Options);
+	// Out through the resort's entrance to the bus stop where it's been built (it opens Night One with the rest of these
+	// once the player boards); else straight home.
+	const bool bOutside = FPackageName::DoesPackageExist(TEXT("/Game/Maps/Embercrest"));
+	UE_LOG(LogEmbercrest, Log, TEXT("%s: %s"), bOutside ? TEXT("Out through the entrance (Embercrest)") : TEXT("Home (NightOne)"), *Options);
+	UGameplayStatics::OpenLevel(this, FName(bOutside ? TEXT("Embercrest") : TEXT("NightOne")), true, bOutside ? Options + TEXT("?Leaving") : Options);
 }
 
 void ABackRoomGameMode::UpdateBoard(float RealDt)
@@ -1712,7 +2421,12 @@ void ABackRoomGameMode::UpdateBoard(float RealDt)
 	const ss::Level& N = Tourney->NextLevel();
 	const int32 Secs = FMath::FloorToInt(LevelTimeLeft());
 	const bool bBeforeCards = Phase == EBackRoomPhase::Arriving && !bAnnouncedStart && Tourney->Tick == 0;
-	const FString Title = bFinalTable ? FString(TEXT("FINAL TABLE")) : bOnBreak ? FString(TEXT("BREAK")) : LiveName.ToUpper();
+	// In the last minutes of late registration the title takes turns with the last call.
+	const bool bLastCallUp = bLastCalled && !bRegClosed && !bCancelled && FMath::FloorToInt(LiveT / 3.0f) % 2 == 1;
+	const FString Title = bFinalTable ? FString(TEXT("FINAL TABLE"))
+					  : bOnBreak	  ? FString(TEXT("BREAK"))
+					  : bLastCallUp	  ? TEXT("LAST CALL  ·  REG TO ") + Str(ss::net::TimeLabel(LiveLateRegEnds))
+									  : LiveName.ToUpper();
 	const int32 BreakSecs = FMath::Max(0, FMath::FloorToInt(LiveBreakMinutes * 60.0 * (1.0 - static_cast<double>(BreakT) / BreakRealSeconds)));
 	const FString Clock = bBeforeCards ? TEXT("SOON") : bOnBreak ? FString::Printf(TEXT("%02d:%02d"), BreakSecs / 60, BreakSecs % 60) : FString::Printf(TEXT("%02d:%02d"), Secs / 60, Secs % 60);
 	const FString Blinds = L.Ante > 0 ? FString::Printf(TEXT("%s / %s   ANTE %s"), *Num(L.Sb), *Num(L.Bb), *Num(L.Ante)) : FString::Printf(TEXT("%s / %s"), *Num(L.Sb), *Num(L.Bb));
@@ -1811,6 +2525,34 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			PlaceExtras();
 		}
 	}
+	// (Testing: out at the next gap between hands: one chip left and sitting out, the engine's blinds take it.)
+	if (bTestBust && Phase == EBackRoomPhase::Playing && Table->IsBetweenHands() && !Tourney->FinishPending())
+	{
+		bTestBust = false;
+		Tourney->Players[0].Stack = 1;
+		Tourney->HeroSitsOut = true;
+		for (int32 Guard = 0; Guard < 400 && !Tourney->Hero().Busted && !Tourney->bFinished; ++Guard)
+		{
+			for (const ss::TEvent& E : Tourney->SimulateTick())
+			{
+				LiveEvent(E);
+			}
+		}
+		Tourney->HeroSitsOut = false;
+		Minutes = FMath::Max(Minutes, LiveDayStart + Tourney->ClockMinutes());
+		UE_LOG(LogEmbercrest, Log, TEXT("Test bust: %s of %d"), *Ordinal(Tourney->Hero().Place), Tourney->Spec.Entrants);
+		LiveOver();
+		return;
+	}
+	// The desk's signup, once its worker has read the world's field for the event.
+	if (Signup.IsValid() && Signup->bDone)
+	{
+		FinishSignup();
+	}
+	if (bAnnouncedStart && Phase != EBackRoomPhase::Arriving)
+	{
+		LiveLastCall();
+	}
 	UpdateBoard(RealDt);
 
 	// Walking in from the casino floor.
@@ -1823,7 +2565,13 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			ArrivalBeat = 2;
 			// Dee deals the Sunday; any other day it's whoever's on the stick at the player's table.
 			const bool bSunday = ((LiveDay % 7) + 7) % 7 == 6;
-			if (bBackInRoom && Tourney->Tick > 0)
+			if (bHere)
+			{
+				// On from the night's earlier event.
+				Table->DealerLine(bSunday ? FString(TEXT("Back for another one, kid? You're with me."))
+										  : FString::Printf(TEXT("Back for another one? Table %d, seat %d. Good luck."), Tourney->Hero().TableId, ss::live::SeatLabel(Tourney->Hero().Seat)));
+			}
+			else if (bBackInRoom && Tourney->Tick > 0)
 			{
 				Table->DealerLine(bResumeDealt ? FString(TEXT("Welcome back. Your hand was dead while you were up, you're in the next one."))
 											   : bSunday ? FString(TEXT("There you are. Sit down, kid, your chips didn't go anywhere."))
@@ -1831,7 +2579,7 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			}
 			else
 			{
-				Table->DealerLine(bSunday ? FString(TEXT("Look who made it across town. You're with me tonight, kid."))
+				Table->DealerLine(bSunday ? FString(TEXT("Look who made it up the mountain. You're with me tonight, kid."))
 										  : FString::Printf(TEXT("Evening. Table %d, seat %d, you're all set. Good luck."), Tourney->Hero().TableId, ss::live::SeatLabel(Tourney->Hero().Seat)));
 			}
 		}
@@ -1864,10 +2612,17 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 				Tourney->Spec.Entrants, *Dollars(Tourney->PrizePoolCents)));
 			RaiseBanner(TEXT("SHUFFLE UP AND DEAL"));
 		}
-		else
+		else if (Minutes < LiveLateRegEnds)
 		{
 			Floor(FString::Printf(TEXT("Late registration closes at %s. %d players, %s in the pool."), *Str(ss::net::TimeLabel(LiveLateRegEnds)), Tourney->Spec.Entrants,
 				*Dollars(Tourney->PrizePoolCents)));
+			RaiseBanner(FString::Printf(TEXT("LEVEL %d   %s / %s"), Tourney->LevelIndex + 1, *Num(Tourney->CurrentLevel().Sb), *Num(Tourney->CurrentLevel().Bb)));
+		}
+		else
+		{
+			// (Seated after the close: written in at the desk in time, the floor's call and the walk took the rest.)
+			Floor(FString::Printf(TEXT("Registration is closed. %d players, %s in the pool, the top %d paid."), Tourney->Spec.Entrants, *Dollars(Tourney->PrizePoolCents),
+				Tourney->PaidPlaces()));
 			RaiseBanner(FString::Printf(TEXT("LEVEL %d   %s / %s"), Tourney->LevelIndex + 1, *Num(Tourney->CurrentLevel().Sb), *Num(Tourney->CurrentLevel().Bb)));
 		}
 	}
@@ -1908,8 +2663,9 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			Eyelids = 0.0f;
 		}
 	}
-	// A break: the room stretches its legs while the screens count down, then the floor calls everyone back.
-	if (bOnBreak && Phase == EBackRoomPhase::Playing)
+	// A break: the room stretches its legs while the screens count down, then the floor calls everyone back (the rail
+	// waits it out too: no hands are dealt in the room).
+	if (bOnBreak && (Phase == EBackRoomPhase::Playing || bRailing))
 	{
 		BreakT += RealDt;
 		if (BreakT >= BreakRealSeconds)
@@ -1917,7 +2673,10 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			bOnBreak = false;
 			Floor(TEXT("Players, the break is over. Please take your seats, the cards are in the air."));
 			RaiseBanner(FString::Printf(TEXT("LEVEL %d   %s / %s"), BreakLevel, *Num(Tourney->CurrentLevel().Sb), *Num(Tourney->CurrentLevel().Bb)));
-			Table->Resume(1.5f);
+			if (Phase == EBackRoomPhase::Playing)
+			{
+				Table->Resume(1.5f);
+			}
 		}
 	}
 	// Hand for hand: the table waits for the rest of the room, then the floor calls the next one.
@@ -1952,6 +2711,22 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 		{
 			LiveRail(RealDt);
 		}
+		// The next event tonight: the floor calls its seats when they open, and a moment later the room opens again for it.
+		if (!NextEntryId.IsEmpty() && !bExitNow && !bOpeningNext && !bWaitingOut)
+		{
+			if (!bNextCalled && Minutes >= NextSeatingAt)
+			{
+				LiveCallNext();
+			}
+			else if (bNextCalled && (NextCallT += RealDt) > 7.0f)
+			{
+				LiveOpenNext();
+			}
+		}
+		if (bOpeningNext)
+		{
+			return;
+		}
 		if (bExitNow)
 		{
 			// Out through the entrance on foot: the night ends at the door.
@@ -1961,7 +2736,7 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 				PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 1.2f, FLinearColor::Black, true, true);
 			}
 			ExitT += RealDt;
-			if (ExitT > 1.4f)
+			if (ExitT > 1.4f && !bGoingHome)
 			{
 				NoteRailedPlaces();
 				LiveGoHome();
@@ -2036,4 +2811,344 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 1.5f, FLinearColor::Black, true, true);
 		}
 	}
+}
+
+// ------------------------------------------------------------------ the floor's last call
+
+void ABackRoomGameMode::LiveLastCall()
+{
+	if (bCancelled || !Tourney)
+	{
+		return;
+	}
+	if (!bLastCalled && Minutes >= LastCallAt(LiveLateRegEnds) && Minutes < LiveLateRegEnds)
+	{
+		bLastCalled = true;
+		Floor(FString::Printf(TEXT("Ladies and gentlemen, this is the last call for registration for the Embercrest %s. Late registration closes at %s."), *LiveShort,
+			*Str(ss::net::TimeLabel(LiveLateRegEnds))));
+		RaiseBanner(TEXT("LAST CALL FOR REGISTRATION"));
+		UpdateRoomBoards();
+	}
+	if (!bRegClosed && Minutes >= LiveLateRegEnds)
+	{
+		// (On a level's turn: the level's own banner stays up.)
+		bRegClosed = true;
+		bLastCalled = true;
+		Floor(FString::Printf(TEXT("Registration for the %s is now closed. %d players, a prize pool of %s, and the top %d are paid."), *LiveShort, Tourney->Spec.Entrants,
+			*Dollars(Tourney->PrizePoolCents), Tourney->PaidPlaces()));
+		UpdateRoomBoards();
+	}
+}
+
+// ------------------------------------------------------------------ the next event
+
+FString ABackRoomGameMode::NextOpenEvent(FString& OutWhyNot) const
+{
+	OutWhyNot.Empty();
+	if (!Save.IsValid() || !bLiveOver || bCancelled || ss::live::ActiveEntry(Save->Life))
+	{
+		return FString();
+	}
+	// Today's events the player hasn't played, while the walk to the seat still makes late registration. What the desk
+	// sells is the entry (the night's bus home is paid), and a long night needs the legs for it, as at home.
+	const ss::life::Activity* Trip = ss::life::Find("embercrest");
+	for (const ss::live::Occurrence& O : ss::live::Occurrences(LiveDay))
+	{
+		if (Str(O.Id) == LiveEntryId || ss::live::EntryFor(Save->Life, O.Id) || Minutes >= O.LateRegEnds)
+		{
+			continue;
+		}
+		const FString Short = Str(O.T->Short);
+		if (Minutes + DeskClosesBefore > O.LateRegEnds)
+		{
+			OutWhyNot = OutWhyNot.IsEmpty() ? FString::Printf(TEXT("Registration for the %s is closing. There isn't time to get you to a seat, sorry."), *Short) : OutWhyNot;
+			continue;
+		}
+		if (Minutes < O.DeskOpens)
+		{
+			OutWhyNot = OutWhyNot.IsEmpty() ? FString::Printf(TEXT("Registration for the %s opens at %s. Come see me then."), *Short, *Str(ss::net::TimeLabel(O.DeskOpens))) : OutWhyNot;
+			continue;
+		}
+		if (Save->BankrollCents < O.T->BuyInCents)
+		{
+			OutWhyNot = OutWhyNot.IsEmpty() ? FString::Printf(TEXT("The %s is %s. Come back when you've got it."), *Short, *Dollars(O.T->BuyInCents)) : OutWhyNot;
+			continue;
+		}
+		if (Trip && Energy < Trip->Energy)
+		{
+			OutWhyNot = OutWhyNot.IsEmpty() ? FString(TEXT("A tournament's a long night, hon, and you look done in. Go home and get some sleep.")) : OutWhyNot;
+			continue;
+		}
+		return Str(O.Id);
+	}
+	return FString();
+}
+
+void ABackRoomGameMode::DeskSignup(const FString& OccurrenceId)
+{
+	const ss::live::Occurrence O = ss::live::FindOccurrence(std::string(TCHAR_TO_UTF8(*OccurrenceId)));
+	if (!O.Valid() || !Save.IsValid() || Signup.IsValid() || !NextEntryId.IsEmpty())
+	{
+		return;
+	}
+	// The world's field for it, read on a worker (the save's world is megabytes of text); the entry when it's done.
+	TSharedPtr<FLiveDeskSignup> S = MakeShared<FLiveDeskSignup>();
+	S->WorldText = Save->WorldText;
+	S->HeroName = Save->HeroName;
+	S->O = O;
+	S->At = Minutes;
+	Signup = S;
+	UE::Tasks::Launch(UE_SOURCE_LOCATION, [S]() { S->Run(); });
+	UE_LOG(LogEmbercrest, Log, TEXT("The desk writes the player in for %s (%s)"), *OccurrenceId, *ClockLabel());
+}
+
+void ABackRoomGameMode::FinishSignup()
+{
+	const TSharedPtr<FLiveDeskSignup> S = Signup;
+	Signup.Reset();
+	if (!S.IsValid() || !Save.IsValid() || bGoingHome || bExitNow || bOpeningNext)
+	{
+		return; // on the way out: the desk never wrote it down
+	}
+	const ss::live::Occurrence& O = S->O;
+	ss::SaveData D = *Save;
+	const std::string WorldWas = D.WorldText;
+	// At the desk, here already (the core's check counts the trip there: it's made).
+	const double Booked = Minutes - ss::live::TravelMinutes;
+	const std::string Why = RegisterFromSignup(D, *S, Booked, true);
+	ss::life::LiveEntry* E = Why.empty() ? ss::live::EntryFor(D.Life, O.Id) : nullptr;
+	if (!E)
+	{
+		Table->Announce(TEXT("Desk"), Str(Why));
+		UE_LOG(LogEmbercrest, Warning, TEXT("The desk can't register the player for %s: %s"), *Str(O.Id), *Str(Why));
+		return;
+	}
+	// Registered and arrived both now: no bus there, and none home of its own (the night's ticket covers it). The ledger's
+	// lines carry the desk's own time.
+	E->RegisteredAt = Minutes;
+	E->ArrivedAt = Minutes;
+	E->FareThere = true;
+	// The night's own departure, kept on the entry until its first checkpoint carries it (a game closed while waiting goes
+	// back to this room, and Night One still catches its calendar up from the night's first bus).
+	E->CheckpointHost = std::string(TCHAR_TO_UTF8(*FString::Printf(TEXT("from\t%.2f\n"), NightLeftHomeAt)));
+	for (size_t K = 0; K < D.Life.Ledger.size() && K < 2; ++K)
+	{
+		if (D.Life.Ledger[K].At == Booked)
+		{
+			D.Life.Ledger[K].At = Minutes;
+		}
+	}
+	D.ClockMinutes = Minutes - ss::net::MinutesPerDay * ss::net::NightOneDay;
+	D.Life.Energy = FMath::Clamp(static_cast<double>(Energy), 0.0, 100.0);
+	if (S->bWorld)
+	{
+		WorldBeforeSignup = WorldWas;
+	}
+	*Save = D;
+	if (LiveSaver)
+	{
+		LiveSaver->Flush();
+	}
+	CareerSave::SaveNow(D.Serialize());
+	NextEntryId = Str(O.Id);
+	NextName = Str(O.T->Short);
+	NextSeatingAt = FMath::Max(Minutes, O.Start - SeatingLead);
+	bNextCalled = false;
+	NextCallT = 0.0f;
+	Table->Announce(TEXT("Desk"), Minutes >= NextSeatingAt
+									  ? FString::Printf(TEXT("You're in%s. %s. They're seating it now; the floor will call you over."), *AddressTo(Save), *Str(O.T->Name))
+									  : FString::Printf(TEXT("You're in%s. %s. Seats open at %s; the floor will call it. The bar's open, the terrace too."), *AddressTo(Save),
+											*Str(O.T->Name), *Str(ss::net::TimeLabel(NextSeatingAt))));
+	if (Table->GetAudio())
+	{
+		Table->GetAudio()->Play(ss::SoundId::Cash, 0.5f);
+	}
+	UpdateRoomBoards();
+	UE_LOG(LogEmbercrest, Log, TEXT("Registered at the desk for %s: %d entrants (%d the world follows, %d faces), bankroll %lld; seats at %s"), *NextEntryId, E->Entrants,
+		static_cast<int32>(E->Roster.size()), static_cast<int32>(E->Faces.size()), static_cast<int64>(D.BankrollCents), *Str(ss::net::TimeLabel(NextSeatingAt)));
+}
+
+void ABackRoomGameMode::LiveUnregister()
+{
+	if (NextEntryId.IsEmpty() || !Save.IsValid())
+	{
+		return;
+	}
+	// Off the list before sitting down: the buy-in and fee back (their own ledger lines), and the world as it was before the
+	// desk told it. The entry goes with them: a refunded entry reads as an event the room called off (the desk turns the
+	// player away from it as cancelled, the phone's card says so), and this one wasn't. The player can buy in again from
+	// home while its registration's open.
+	ss::SaveData D = *Save;
+	const std::string Id(TCHAR_TO_UTF8(*NextEntryId));
+	if (ss::live::Refund(D.BankrollCents, D.Life, Id, Minutes, "off the list before sitting down"))
+	{
+		D.Life.LiveEntries.erase(std::remove_if(D.Life.LiveEntries.begin(), D.Life.LiveEntries.end(), [&Id](const ss::life::LiveEntry& E) { return E.Id == Id; }),
+			D.Life.LiveEntries.end());
+		if (!WorldBeforeSignup.empty())
+		{
+			D.WorldText = WorldBeforeSignup;
+		}
+	}
+	*Save = D;
+	if (LiveSaver)
+	{
+		LiveSaver->Flush();
+	}
+	CareerSave::SaveNow(D.Serialize());
+	UE_LOG(LogEmbercrest, Log, TEXT("Off the list for %s, refunded"), *NextEntryId);
+	WorldBeforeSignup.clear();
+	NextEntryId.Empty();
+	NextName.Empty();
+	bNextCalled = false;
+	UpdateRoomBoards();
+}
+
+void ABackRoomGameMode::LiveCallNext()
+{
+	bNextCalled = true;
+	NextCallT = 0.0f;
+	const ss::live::Occurrence O = ss::live::FindOccurrence(std::string(TCHAR_TO_UTF8(*NextEntryId)));
+	if (!O.Valid())
+	{
+		return;
+	}
+	Floor(Minutes >= O.Start
+			  ? FString::Printf(TEXT("Players registered for the %s, your seats are ready. Late registration closes at %s."), *NextName, *Str(ss::net::TimeLabel(O.LateRegEnds)))
+			  : FString::Printf(TEXT("Players registered for the %s, your seats are open. Please find your table and seat; cards go in the air at %s."), *NextName,
+					*Str(ss::net::TimeLabel(O.Start))));
+	RaiseBanner(FString::Printf(TEXT("%s   SEATS OPEN"), *NextName.ToUpper()));
+	UpdateRoomBoards();
+	UE_LOG(LogEmbercrest, Log, TEXT("The floor calls %s (%s)"), *NextEntryId, *ClockLabel());
+}
+
+void ABackRoomGameMode::LiveOpenNext()
+{
+	if (bOpeningNext || bGoingHome || NextEntryId.IsEmpty() || !Save.IsValid())
+	{
+		return;
+	}
+	bOpeningNext = true;
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController(); PC && PC->PlayerCameraManager)
+	{
+		PC->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, 1.2f, FLinearColor::Black, true, true);
+	}
+	FTimerHandle Handle;
+	GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this]() {
+		if (bGoingHome)
+		{
+			return; // quit from the pause menu meanwhile: that travel stands (Continue comes back to the entry)
+		}
+		// What the rail saw, the champion for the next event's board if the room crowned one, and the clock as it stands:
+		// the room opens again for the next event with no bus and no trip, and the night's departure for Night One.
+		ss::SaveData D = *Save;
+		NoteRailed(D);
+		ss::life::LiveEntry* Next = ss::live::EntryFor(D.Life, std::string(TCHAR_TO_UTF8(*NextEntryId)));
+		const ss::TPlayer* Champion = nullptr;
+		for (const ss::TPlayer& P : Tourney->Players)
+		{
+			Champion = Tourney->bFinished && P.Place == 1 ? &P : Champion;
+		}
+		if (Next && Champion)
+		{
+			static const TCHAR* Days[7] = {TEXT("MON"), TEXT("TUE"), TEXT("WED"), TEXT("THU"), TEXT("FRI"), TEXT("SAT"), TEXT("SUN")};
+			const FString Who = Champion->IsHero ? Str(D.HeroName) : Str(Champion->Name);
+			const FString Line = FString::Printf(TEXT("%s %s\t%s\t%lld"), Days[((LiveDay % 7) + 7) % 7], *LiveShort.ToUpper(), *Who, static_cast<int64>(Tourney->PrizeFor(1)));
+			Next->Board.insert(Next->Board.begin(), std::string(TCHAR_TO_UTF8(*Line)));
+			Next->Board.resize(FMath::Min<size_t>(Next->Board.size(), 8));
+		}
+		D.ClockMinutes = Minutes - ss::net::MinutesPerDay * ss::net::NightOneDay;
+		D.Life.Energy = FMath::Clamp(static_cast<double>(Energy), 0.0, 100.0);
+		*Save = D;
+		if (LiveSaver)
+		{
+			LiveSaver->Flush();
+		}
+		CareerSave::SaveNow(D.Serialize());
+		UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
+		const FString Options = FString::Printf(TEXT("Live=%s?Here=1?At=%.2f?From=%.2f"), *NextEntryId, Minutes, NightLeftHomeAt);
+		UE_LOG(LogEmbercrest, Log, TEXT("On to the next event: %s"), *Options);
+		UGameplayStatics::OpenLevel(this, FName(TEXT("BackRoom")), true, Options);
+	}), 1.3f, false);
+}
+
+FString ABackRoomGameMode::GetNextEventNote() const
+{
+	if (NextEntryId.IsEmpty())
+	{
+		return FString();
+	}
+	return bNextCalled ? FString::Printf(TEXT("Registered: %s, seating now"), *NextName)
+					   : FString::Printf(TEXT("Registered: %s, seats at %s"), *NextName, *Str(ss::net::TimeLabel(NextSeatingAt)));
+}
+
+// ------------------------------------------------------------------ test hooks
+
+void ABackRoomGameMode::TestBustNow()
+{
+	if (!bLive || !Tourney || bLiveOver || bCancelled || Tourney->Hero().Busted || Tourney->bFinished)
+	{
+		UE_LOG(LogEmbercrest, Warning, TEXT("Test bust: the player isn't in a tournament here"));
+		return;
+	}
+	bTestBust = true;
+	UE_LOG(LogEmbercrest, Log, TEXT("Test bust: at the next gap between hands"));
+}
+
+void ABackRoomGameMode::TestLastCall()
+{
+	if (!bLive || !Tourney || bCancelled)
+	{
+		return;
+	}
+	const double At = LastCallAt(LiveLateRegEnds);
+	if (Minutes >= LiveLateRegEnds)
+	{
+		UE_LOG(LogEmbercrest, Warning, TEXT("Test last call: registration closed at %s"), *Str(ss::net::TimeLabel(LiveLateRegEnds)));
+		return;
+	}
+	if (Minutes >= At)
+	{
+		bLastCalled = false; // inside the window: the floor calls it again, now
+		return;
+	}
+	if (bLiveOver)
+	{
+		RailCatchUp(At - 0.5);
+		return;
+	}
+	const int32 Hands = FMath::Max(0, FMath::FloorToInt((At - 0.5 - (LiveDayStart + Tourney->ClockMinutes())) * 60.0 / Tourney->Spec.SecondsPerHand));
+	UE_LOG(LogEmbercrest, Log, TEXT("Test last call: %d hands on to %s"), Hands, *Str(ss::net::TimeLabel(At)));
+	TestFastForward(Hands);
+}
+
+void ABackRoomGameMode::TestRegisterNext(const FString& OccurrenceId)
+{
+	if (!bLive || !bLiveOver || bCancelled || !NextEntryId.IsEmpty() || Signup.IsValid())
+	{
+		UE_LOG(LogEmbercrest, Warning, TEXT("Test register: only once the player's night is over, with nothing registered yet"));
+		return;
+	}
+	if (!bRailing)
+	{
+		LiveStay();
+	}
+	FString WhyNot;
+	const FString Id = OccurrenceId.IsEmpty() ? NextOpenEvent(WhyNot) : OccurrenceId;
+	if (Id.IsEmpty())
+	{
+		UE_LOG(LogEmbercrest, Warning, TEXT("Test register: nothing the desk can sell now (%s)"), WhyNot.IsEmpty() ? TEXT("no event left today") : *WhyNot);
+		return;
+	}
+	UE_CLOG(!bRailing, LogEmbercrest, Warning, TEXT("Test register: not on the rail yet (Q stays): leaving takes the player off the list"));
+	DeskSignup(Id);
+}
+
+void ABackRoomGameMode::TestSeatingNow()
+{
+	if (NextEntryId.IsEmpty() || bNextCalled || bOpeningNext)
+	{
+		UE_LOG(LogEmbercrest, Warning, TEXT("Test seating: no next event waiting"));
+		return;
+	}
+	RailCatchUp(NextSeatingAt);
 }

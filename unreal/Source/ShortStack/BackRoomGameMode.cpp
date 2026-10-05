@@ -4,23 +4,34 @@
 #include "BackRoomCard.h"
 #include "BackRoomChips.h"
 #include "BackRoomPlayer.h"
+#include "BackRoomPlayerController.h"
 #include "BackRoomStage.h"
 #include "BackRoomTable.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
+#include "CanvasItem.h"
 #include "Components/PointLightComponent.h"
+#include "Components/PostProcessComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
+#include "Engine/GameViewportClient.h"
 #include "EngineUtils.h"
+#include "Framework/Application/SlateApplication.h"
+#include "GameFramework/GameUserSettings.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/WorldSettings.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Misc/App.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/PackageName.h"
 #include "NightOneAudio.h"
 #include "NightOneSaveGame.h"
+#include "SFrontEndWidget.h"
+#include "Widgets/Layout/SBackgroundBlur.h"
+#include "Widgets/SOverlay.h"
 #include "ShortStack/AI/Profiles.h"
 #include "ShortStack/Audio/Synth.h"
 #include "ShortStack/Game/Hero.h"
@@ -29,6 +40,9 @@
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Tournament.h"
 #include "ShortStack/UI/FrontEnd.h"
+
+#include <algorithm>
+#include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogBackRoom, Log, All);
 
@@ -213,6 +227,126 @@ uint32 HeroPantsTone(int32 OutfitColor)
 	static const uint32 PantsFor[8] = {0x283244, 0x2b2c31, 0x3a3128, 0x1d1d21, 0x283447, 0x3b3d43, 0x2b2c31, 0x1d1d21};
 	return PantsFor[FMath::Clamp(OutfitColor, 0, 7)];
 }
+
+/**
+ * This frame's turn of the head (degrees of yaw and pitch) from the mouse and the right stick, at the player's look
+ * sensitivity and inverted look; Scale is the view's own (Focus slows it). The stick eases in from the middle, so a face
+ * can be held, and turns about 150 degrees a second across and 100 up and down at full tilt.
+ */
+FVector2D LookDelta(const APlayerController* PC, const ABackRoomGameMode* GM, float Scale, float RealDt)
+{
+	float Dx = 0.0f, Dy = 0.0f;
+	PC->GetInputMouseDelta(Dx, Dy);
+	FVector2D Stick(PC->GetInputAnalogKeyState(EKeys::Gamepad_RightX), PC->GetInputAnalogKeyState(EKeys::Gamepad_RightY));
+	const double Tilt = FMath::Min(1.0, Stick.Size());
+	Stick = Tilt > 0.0 ? Stick.GetSafeNormal() * (Tilt * Tilt) : FVector2D::ZeroVector;
+	const float Sens = (GM ? GM->GetLookScale() : 1.0f) * Scale;
+	const float Yaw = (Dx * 0.9f + static_cast<float>(Stick.X) * 150.0f * RealDt) * Sens;
+	const float Pitch = (Dy * 0.9f + static_cast<float>(Stick.Y) * 100.0f * RealDt) * Sens;
+	return FVector2D(Yaw, GM && GM->IsLookInverted() ? -Pitch : Pitch);
+}
+
+/**
+ * A camera's horizontal field of view for the player's Field of View setting (vertical degrees, 50 the default):
+ * DefaultHorizontal at 50, scaled as the setting scales the view (the half-angles' tangents), as the street does.
+ */
+float TableFov(float DefaultHorizontal, int32 VerticalSetting)
+{
+	const double K = FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(VerticalSetting, 30, 110) * 0.5)) / FMath::Tan(FMath::DegreesToRadians(25.0));
+	const double Half = FMath::Atan(FMath::Tan(FMath::DegreesToRadians(DefaultHorizontal * 0.5)) * K);
+	return FMath::Clamp(static_cast<float>(FMath::RadiansToDegrees(Half * 2.0)), 20.0f, 125.0f);
+}
+
+/** "2560 x 1440" to (2560, 1440); (0, 0) when empty or malformed (as the apartment reads it). */
+FIntPoint TableParseResolution(const std::string& Text)
+{
+	FString Left;
+	FString Right;
+	if (!FString(UTF8_TO_TCHAR(Text.c_str())).Split(TEXT("x"), &Left, &Right))
+	{
+		return FIntPoint(0, 0);
+	}
+	const int32 Wd = FCString::Atoi(*Left.TrimStartAndEnd());
+	const int32 Ht = FCString::Atoi(*Right.TrimStartAndEnd());
+	return Wd > 0 && Ht > 0 ? FIntPoint(Wd, Ht) : FIntPoint(0, 0);
+}
+
+/** Fullscreen resolutions the display supports, largest first, as "W x H" (the pause menu's Resolution list). */
+std::vector<std::string> TableResolutions()
+{
+	TArray<FIntPoint> Modes;
+	UKismetSystemLibrary::GetSupportedFullscreenResolutions(Modes);
+	Modes.Sort([](const FIntPoint& L, const FIntPoint& R) { return L.X * L.Y > R.X * R.Y; });
+	std::vector<std::string> Out;
+	for (const FIntPoint& Mode : Modes)
+	{
+		const std::string Label = std::to_string(Mode.X) + " x " + std::to_string(Mode.Y);
+		if (std::find(Out.begin(), Out.end(), Label) == Out.end())
+		{
+			Out.push_back(Label);
+		}
+	}
+	return Out;
+}
+
+void SetTableCvar(const TCHAR* Name, int32 Value)
+{
+	if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(Name))
+	{
+		Var->Set(Value, ECVF_SetByGameSetting);
+	}
+}
+
+/** "$1,234.50" for cents, as the bank writes it. */
+FString CentsText(int64 Cents)
+{
+	const int64 Abs = Cents < 0 ? -Cents : Cents;
+	return FString::Printf(TEXT("%s$%s.%02lld"), Cents < 0 ? TEXT("-") : TEXT(""), *FText::AsNumber(Abs / 100).ToString(), Abs % 100);
+}
+
+/** "1st", "22nd", "113th". */
+FString OrdinalText(int32 N)
+{
+	const int32 Tens = N % 100;
+	const TCHAR* Suffix = (Tens >= 11 && Tens <= 13) ? TEXT("th") : (N % 10 == 1 ? TEXT("st") : (N % 10 == 2 ? TEXT("nd") : (N % 10 == 3 ? TEXT("rd") : TEXT("th"))));
+	return FString::Printf(TEXT("%d%s"), N, Suffix);
+}
+
+std::string ToUtf8(const FString& S)
+{
+	return std::string(TCHAR_TO_UTF8(*S));
+}
+
+/**
+ * The gamepad's buttons for the keys the table's prompts and hints name ("[N]", "{Space}"): A for the main action (check
+ * or call, the next hand, using what's in reach), X fold, Y bet or raise, B held all in; on the d-pad left stands up,
+ * right sets the pace, up shows the reads, down held leaves; the triggers peek and study, the left stick in breathes
+ * (or hurries), View is the view and the right stick in the other shoulder. Several names: drawn side by side.
+ */
+struct FPadKey
+{
+	const TCHAR* Key;
+	const TCHAR* Pad;
+	bool bHold;
+};
+const FPadKey PadKeys[] = {
+	{TEXT("C"), TEXT("A"), false}, {TEXT("N"), TEXT("A"), false}, {TEXT("E"), TEXT("A"), false}, {TEXT("F"), TEXT("X"), false}, {TEXT("R"), TEXT("Y"), false},
+	{TEXT("A"), TEXT("B"), true}, {TEXT("Q"), TEXT("LEFT"), false}, {TEXT("T"), TEXT("RIGHT"), false}, {TEXT("L"), TEXT("DOWN"), true}, {TEXT("Tab"), TEXT("UP"), false},
+	{TEXT("V"), TEXT("VIEW"), false}, {TEXT("B"), TEXT("R3"), false}, {TEXT("Space"), TEXT("LT"), false}, {TEXT("Right mouse"), TEXT("RT"), false},
+	{TEXT("Shift"), TEXT("L3"), false}, {TEXT("WASD"), TEXT("LS"), false}, {TEXT("wheel"), TEXT("LB RB"), false},
+};
+
+const FPadKey* PadKeyFor(const FString& Key)
+{
+	for (const FPadKey& K : PadKeys)
+	{
+		if (Key == K.Key)
+		{
+			return &K;
+		}
+	}
+	return nullptr;
+}
 } // namespace BackRoomGameDetail
 
 using namespace BackRoomGameDetail;
@@ -308,6 +442,7 @@ void ABackRoomPawn::ToggleThirdPerson()
 void ABackRoomPawn::HandleInput(float RealDt)
 {
 	APlayerController* PC = Cast<APlayerController>(GetController());
+	const ABackRoomPlayerController* Pad = Cast<ABackRoomPlayerController>(PC);
 	ABackRoomTable* Table = GetTable();
 	ABackRoomGameMode* GM = GetMode();
 	ABackRoomPlayer* Me = Table ? Table->GetHeroPlayer() : nullptr;
@@ -315,12 +450,13 @@ void ABackRoomPawn::HandleInput(float RealDt)
 	{
 		return;
 	}
-	// V: over the shoulder, or back in your own head. B (or the middle button): the other shoulder.
-	if (Pressed(PC, EKeys::V))
+	// V (the gamepad's View): over the shoulder, or back in your own head. B, the middle button or the right stick pressed
+	// in: the other shoulder.
+	if (Pressed(PC, EKeys::V) || Pressed(PC, EKeys::Gamepad_Special_Left))
 	{
 		ToggleThirdPerson();
 	}
-	if (bThirdPerson && (Pressed(PC, EKeys::B) || Pressed(PC, EKeys::MiddleMouseButton)))
+	if (bThirdPerson && (Pressed(PC, EKeys::B) || Pressed(PC, EKeys::MiddleMouseButton) || Pressed(PC, EKeys::Gamepad_RightThumbstick)))
 	{
 		// Away from the shoulder the camera is on now (even one it moved to by itself while they look across), and kept
 		// there while they go on looking that way.
@@ -330,8 +466,8 @@ void ABackRoomPawn::HandleInput(float RealDt)
 		bShoulderHeld = static_cast<float>(Smoothed.Yaw) * ShoulderSideWant < -18.0f;
 		SaveTableView(TableShoulderKey, ShoulderSideWant < 0.0f);
 	}
-	// Peek: hold to lift the corners.
-	const bool bPeek = bTestPeek || PC->IsInputKeyDown(EKeys::SpaceBar) || PC->IsInputKeyDown(EKeys::LeftMouseButton);
+	// Peek: hold to lift the corners (Space, the left button or the left trigger).
+	const bool bPeek = bTestPeek || Held(PC, EKeys::SpaceBar) || Held(PC, EKeys::LeftMouseButton) || Held(PC, EKeys::Gamepad_LeftTrigger);
 	PeekBlend = Ease(PeekBlend, bPeek ? 1.0f : 0.0f, 6.0f, RealDt);
 	if (Me)
 	{
@@ -343,31 +479,31 @@ void ABackRoomPawn::HandleInput(float RealDt)
 		Table->HeroPeeked();
 	}
 
-	// Steady breathing (Shift): the heart settles. It draws on the same reserve as Focus.
-	bSteadying = (PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift)) && FocusLeft > 0.02f;
+	// Steady breathing (Shift, or the left stick held in): the heart settles. It draws on the same reserve as Focus.
+	bSteadying = (Held(PC, EKeys::LeftShift) || Held(PC, EKeys::RightShift) || Held(PC, EKeys::Gamepad_LeftThumbstick)) && FocusLeft > 0.02f;
 	if (Table)
 	{
 		Table->SetSteadying(bSteadying);
 	}
 
-	// Focus: hold to study a face; it drains, and comes back slowly.
-	const bool bFocusing = (bTestFocus || PC->IsInputKeyDown(EKeys::RightMouseButton)) && FocusLeft > 0.02f && !bPeek;
+	// Focus: hold to study a face (the right button, or the right trigger); it drains, and comes back slowly.
+	const bool bFocusing = (bTestFocus || Held(PC, EKeys::RightMouseButton) || Held(PC, EKeys::Gamepad_RightTrigger)) && FocusLeft > 0.02f && !bPeek;
 	const float Drain = (bFocusing ? 1.0f / 8.0f : 0.0f) + (bSteadying ? 1.0f / 12.0f : 0.0f);
 	FocusLeft = FMath::Clamp(FocusLeft + (Drain > 0.0f ? -Drain * RealDt : RealDt / 14.0f), 0.0f, 1.0f);
 	Focus = Ease(Focus, bFocusing ? 1.0f : 0.0f, 5.0f, RealDt);
 	const bool bFolded = GM && GM->IsLive() && GM->GetPhase() == EBackRoomPhase::Playing && Table && !Table->IsHeroInHand();
-	// P: the table's pace. N, out of the hand: the rest of it at a glance, until you're dealt in again. Neither ever
-	// decides anything of yours.
-	if (GM && GM->IsLive() && Pressed(PC, EKeys::P))
+	// T (right on the d-pad): the table's pace. N, out of the hand (A on a gamepad: nothing else is yours to do then): the
+	// rest of it at a glance, until you're dealt in again. Neither ever decides anything of yours.
+	if (GM && GM->IsLive() && (Pressed(PC, EKeys::T) || Pressed(PC, EKeys::Gamepad_DPad_Right)))
 	{
 		GM->CycleTablePace();
 	}
-	if (bFolded && !bFocusing && Pressed(PC, EKeys::N))
+	if (bFolded && !bFocusing && (Pressed(PC, EKeys::N) || Pressed(PC, EKeys::Gamepad_FaceButton_Bottom)))
 	{
 		bSkipHand = true;
 	}
-	// Q: up from the table, on foot (you're still dealt in).
-	if (GM && GM->IsLive() && Pressed(PC, EKeys::Q))
+	// Q (left on the d-pad): up from the table, on foot (you're still dealt in).
+	if (GM && GM->IsLive() && (Pressed(PC, EKeys::Q) || Pressed(PC, EKeys::Gamepad_DPad_Left)))
 	{
 		GM->LiveStandUp();
 		return;
@@ -404,57 +540,57 @@ void ABackRoomPawn::HandleInput(float RealDt)
 		Studying = nullptr;
 	}
 
-	// Felted: rebuy from the bankroll (the wheel picks how much) or go home.
+	// Sizing (the raise, or the buy-back): the wheel or the arrows; the bumpers, which keep stepping while held.
+	const int32 Size = (Pressed(PC, EKeys::MouseScrollUp) || Pressed(PC, EKeys::Up) ? 1 : 0) - (Pressed(PC, EKeys::MouseScrollDown) || Pressed(PC, EKeys::Down) ? 1 : 0) +
+		(Pressed(PC, EKeys::Gamepad_RightShoulder) ? 1 : 0) - (Pressed(PC, EKeys::Gamepad_LeftShoulder) ? 1 : 0) +
+		(Pad ? Pad->RepeatSteps(EKeys::Gamepad_RightShoulder) - Pad->RepeatSteps(EKeys::Gamepad_LeftShoulder) : 0);
+	// L, or down on the d-pad held: going (a held button, so a stray press can't).
+	const bool bLeave = Pressed(PC, EKeys::L) || (Pad && Pad->HoldCompleted(EKeys::Gamepad_DPad_Down));
+
+	// Felted: rebuy from the bankroll (R or Y; the sizing picks how much) or go home.
 	if (GM && GM->GetPhase() == EBackRoomPhase::Busted)
 	{
-		if (PC->WasInputKeyJustPressed(EKeys::R))
+		if (Pressed(PC, EKeys::R) || Pressed(PC, EKeys::Gamepad_FaceButton_Top))
 		{
 			GM->Reload();
 		}
-		if (PC->WasInputKeyJustPressed(EKeys::MouseScrollUp) || PC->WasInputKeyJustPressed(EKeys::Up))
+		if (Size != 0)
 		{
-			GM->AdjustReload(1);
+			GM->AdjustReload(Size);
 		}
-		if (PC->WasInputKeyJustPressed(EKeys::MouseScrollDown) || PC->WasInputKeyJustPressed(EKeys::Down))
-		{
-			GM->AdjustReload(-1);
-		}
-		if (PC->WasInputKeyJustPressed(EKeys::L))
+		if (bLeave)
 		{
 			GM->RequestLeave();
 		}
 		return;
 	}
 
-	// Actions.
+	// Actions: F or X folds; C or A checks or calls (A only while you're in the hand: folded, it's the next hand); R or Y
+	// bets or raises to the amount shown; A, or B held, goes all in.
 	if (Table)
 	{
-		if (Pressed(PC, EKeys::F))
+		if (Pressed(PC, EKeys::F) || Pressed(PC, EKeys::Gamepad_FaceButton_Left))
 		{
 			Table->HeroFold();
 		}
-		if (Pressed(PC, EKeys::C))
+		if (Pressed(PC, EKeys::C) || (!bFolded && Pressed(PC, EKeys::Gamepad_FaceButton_Bottom)))
 		{
 			Table->HeroCheckCall();
 		}
-		if (PC->WasInputKeyJustPressed(EKeys::R))
+		if (Pressed(PC, EKeys::R) || Pressed(PC, EKeys::Gamepad_FaceButton_Top))
 		{
 			Table->HeroRaise();
 		}
-		if (PC->WasInputKeyJustPressed(EKeys::A))
+		if (Pressed(PC, EKeys::A) || (Pad && Pad->HoldCompleted(EKeys::Gamepad_FaceButton_Right)))
 		{
 			Table->HeroAllIn();
 		}
-		if (PC->WasInputKeyJustPressed(EKeys::MouseScrollUp) || PC->WasInputKeyJustPressed(EKeys::Up))
+		if (Size != 0)
 		{
-			Table->HeroAdjustRaise(1);
-		}
-		if (PC->WasInputKeyJustPressed(EKeys::MouseScrollDown) || PC->WasInputKeyJustPressed(EKeys::Down))
-		{
-			Table->HeroAdjustRaise(-1);
+			Table->HeroAdjustRaise(Size);
 		}
 	}
-	if (GM && Pressed(PC, EKeys::L))
+	if (GM && bLeave)
 	{
 		GM->RequestLeave();
 	}
@@ -544,18 +680,24 @@ void ABackRoomPawn::TickFreeWalk(float RealDt)
 	UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
 	if (PC)
 	{
-		float Dx = 0.0f, Dy = 0.0f;
-		PC->GetInputMouseDelta(Dx, Dy);
-		WalkYaw += Dx * 0.9f;
-		WalkPitch = FMath::Clamp(WalkPitch + Dy * 0.9f, -55.0f, 40.0f);
+		// The mouse or the right stick.
+		const FVector2D Turn = LookDelta(PC, GM, 1.0f, RealDt);
+		WalkYaw += static_cast<float>(Turn.X);
+		WalkPitch = FMath::Clamp(WalkPitch + static_cast<float>(Turn.Y), -55.0f, 40.0f);
 	}
-	// Where the keys say, at a walk (Shift: in a hurry); the room stops you at its tables, counters and walls.
+	// Where the keys (or the left stick, as far as it's pushed) say, at a walk (Shift, the left stick held in or the left
+	// bumper: in a hurry); the room stops you at its tables, counters and walls.
 	double Fwd = 0.0, Right = 0.0;
 	Fwd += Held(PC, EKeys::W) || Held(PC, EKeys::Up) ? 1.0 : 0.0;
 	Fwd -= Held(PC, EKeys::S) || Held(PC, EKeys::Down) ? 1.0 : 0.0;
 	Right += Held(PC, EKeys::D) || Held(PC, EKeys::Right) ? 1.0 : 0.0;
 	Right -= Held(PC, EKeys::A) || Held(PC, EKeys::Left) ? 1.0 : 0.0;
-	const bool bHurry = Held(PC, EKeys::LeftShift) || Held(PC, EKeys::RightShift);
+	if (PC)
+	{
+		Fwd = FMath::Clamp(Fwd + PC->GetInputAnalogKeyState(EKeys::Gamepad_LeftY), -1.0, 1.0);
+		Right = FMath::Clamp(Right + PC->GetInputAnalogKeyState(EKeys::Gamepad_LeftX), -1.0, 1.0);
+	}
+	const bool bHurry = Held(PC, EKeys::LeftShift) || Held(PC, EKeys::RightShift) || Held(PC, EKeys::Gamepad_LeftThumbstick) || Held(PC, EKeys::Gamepad_LeftShoulder);
 	const FVector Ahead = FRotator(0.0f, WalkYaw, 0.0f).Vector();
 	const FVector Side = FRotator(0.0f, WalkYaw + 90.0f, 0.0f).Vector();
 	const FVector Wish = (Ahead * Fwd + Side * Right).GetClampedToMaxSize(1.0) * (bHurry ? 240.0 : 145.0);
@@ -593,19 +735,19 @@ void ABackRoomPawn::TickFreeWalk(float RealDt)
 	Smoothed = FMath::RInterpTo(Smoothed, Look, RealDt, 16.0f);
 	FirstEye = Eye;
 	SetActorLocationAndRotation(Eye, Smoothed);
-	Camera->SetFieldOfView(74.0f);
+	Camera->SetFieldOfView(GM ? GM->SettingFov(74.0f) : 74.0f);
 	FPostProcessSettings& P = Camera->PostProcessSettings;
 	P.DepthOfFieldFocalDistance = 320.0f;
 	P.DepthOfFieldFstop = 5.6f;
 	P.SceneFringeIntensity = 0.0f;
 	PeekLight->SetIntensity(0.0f);
-	// E: whatever's in reach (your chair, the desk, the cage, the bar, the deck, the door). V picks the view for the table
-	// (on foot it's always your own eyes).
-	if (GM && Pressed(PC, EKeys::E))
+	// E (A on a gamepad): whatever's in reach (your chair, the desk, the cage, the bar, the deck, the door). V (View) picks
+	// the view for the table (on foot it's always your own eyes).
+	if (GM && (Pressed(PC, EKeys::E) || Pressed(PC, EKeys::Gamepad_FaceButton_Bottom)))
 	{
 		GM->LiveInteract();
 	}
-	if (Pressed(PC, EKeys::V))
+	if (Pressed(PC, EKeys::V) || Pressed(PC, EKeys::Gamepad_Special_Left))
 	{
 		ToggleThirdPerson();
 	}
@@ -807,7 +949,8 @@ void ABackRoomPawn::TickWalk(float RealDt)
 	Smoothed = FMath::RInterpTo(Smoothed, Look, RealDt, bWalkOut ? 6.0f : 8.0f);
 	FirstEye = At;
 	SetActorLocationAndRotation(At, Smoothed);
-	Camera->SetFieldOfView(72.0f);
+	const ABackRoomGameMode* GM = GetMode();
+	Camera->SetFieldOfView(GM ? GM->SettingFov(72.0f) : 72.0f);
 	FPostProcessSettings& P = Camera->PostProcessSettings;
 	P.DepthOfFieldFocalDistance = 220.0f;
 	P.DepthOfFieldFstop = 5.6f;
@@ -841,10 +984,9 @@ void ABackRoomPawn::TickHold(float RealDt)
 	// Where the walk stopped (the cashier's window, the aisle while the room turns): the head looks about, nothing else.
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
-		float Dx = 0.0f, Dy = 0.0f;
-		PC->GetInputMouseDelta(Dx, Dy);
-		Smoothed.Yaw += Dx * 0.9f;
-		Smoothed.Pitch = FMath::Clamp(Smoothed.Pitch + Dy * 0.9f, -50.0f, 35.0f);
+		const FVector2D Turn = LookDelta(PC, GetMode(), 1.0f, RealDt);
+		Smoothed.Yaw += Turn.X;
+		Smoothed.Pitch = FMath::Clamp(Smoothed.Pitch + Turn.Y, -50.0, 35.0);
 	}
 	Smoothed.Roll = FMath::FInterpTo(Smoothed.Roll, 0.0f, RealDt, 4.0f);
 	SetActorRotation(Smoothed);
@@ -891,6 +1033,32 @@ void ABackRoomPawn::TickHeart(float RealDt, float& PitchKick, float& Intensity)
 void ABackRoomPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	ABackRoomTable* Table = GetTable();
+	ABackRoomGameMode* GM = GetMode();
+	// Paused: the view holds where it is and nothing of yours moves on (the pause menu has the input, and the night
+	// stands still behind it).
+	if (GM && GM->IsPauseMenuUp())
+	{
+		// (The player's brightness and grain still change on it as they set them, behind the menu.)
+		GM->ApplyPlayerLens(Camera);
+		TestPressed.Reset();
+		return;
+	}
+	// On the way out of each frame: the player's own lens (brightness, grain, fringing, motion blur) over the view's.
+	auto EndFrame = [this, GM]() {
+		if (GM)
+		{
+			GM->ApplyPlayerLens(Camera);
+		}
+		TestPressed.Reset();
+	};
+	// A quit playing the hand out behind the fade: on foot, the player stays where they stood (walking puts the room back
+	// at its own pace, and the quit plays it quicker).
+	if (GM && GM->IsQuittingTable() && (bFreeWalk || bHoldWalkEnd))
+	{
+		EndFrame();
+		return;
+	}
 	// Focus slows the world; the head and the meter run on real time.
 	const float RealDt = FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
 	Time += RealDt;
@@ -901,41 +1069,40 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	if (bWalking)
 	{
 		TickWalk(RealDt);
-		TestPressed.Reset();
+		EndFrame();
 		return;
 	}
 	if (bFreeWalk)
 	{
 		TickFreeWalk(RealDt);
-		TestPressed.Reset();
+		EndFrame();
 		return;
 	}
 	if (bHoldWalkEnd)
 	{
 		TickHold(RealDt);
-		TestPressed.Reset();
+		EndFrame();
 		return;
 	}
-	ABackRoomTable* Table = GetTable();
-	ABackRoomGameMode* GM = GetMode();
 	ABackRoomPlayer* Me = Table ? Table->GetHeroPlayer() : nullptr;
-	// Racked up: the hands are off the table; the head still looks around while Dee says goodnight.
+	// Racked up: the hands are off the table; the head still looks around while Dee says goodnight. Quitting from the
+	// pause menu: the hand in play is being folded behind the fade, and nothing more is yours to decide.
 	const bool bDone = GM && GM->GetPhase() == EBackRoomPhase::Leaving;
+	const bool bQuitting = GM && GM->IsQuittingTable();
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
-		float Dx = 0.0f, Dy = 0.0f;
-		PC->GetInputMouseDelta(Dx, Dy);
-		const float Sens = 0.9f * (1.0f - 0.55f * Focus);
-		Yaw = FMath::Clamp(Yaw + Dx * Sens, -MaxYaw, MaxYaw);
-		Pitch = FMath::Clamp(Pitch + Dy * Sens, MinPitch, MaxPitch);
+		// The mouse or the right stick (Focus slows it).
+		const FVector2D Turn = LookDelta(PC, GM, 1.0f - 0.55f * Focus, RealDt);
+		Yaw = FMath::Clamp(Yaw + static_cast<float>(Turn.X), -MaxYaw, MaxYaw);
+		Pitch = FMath::Clamp(Pitch + static_cast<float>(Turn.Y), MinPitch, MaxPitch);
 	}
-	if (!bDone && !bWalkPending)
+	if (!bDone && !bWalkPending && !bQuitting)
 	{
 		HandleInput(RealDt);
 	}
-	else if (bWalkPending)
+	else if (bWalkPending || bQuitting)
 	{
-		// Getting up: the camera on its way back into the head, nothing more to decide at the table.
+		// Getting up (the camera on its way back into the head), or quitting: nothing more to decide at the table.
 		bSteadying = false;
 		Focus = Ease(Focus, 0.0f, 5.0f, RealDt);
 		PeekBlend = Ease(PeekBlend, 0.0f, 6.0f, RealDt);
@@ -943,17 +1110,22 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 		{
 			Me->SetHeroPeek(false);
 		}
-		UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
+		if (!bQuitting)
+		{
+			// (A quit plays the hand out quickly: the game mode sets the pace then.)
+			UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
+		}
 	}
 	else
 	{
-		// Out of it: Q stays to watch the rest (on foot), L heads home now.
+		// Out of it: Q (left on the d-pad) stays to watch the rest (on foot), L (down on the d-pad, held) heads home now.
 		APlayerController* LeavePC = Cast<APlayerController>(GetController());
-		if (GM && GM->IsLive() && Pressed(LeavePC, EKeys::Q))
+		const ABackRoomPlayerController* Pad = Cast<ABackRoomPlayerController>(LeavePC);
+		if (GM && GM->IsLive() && (Pressed(LeavePC, EKeys::Q) || Pressed(LeavePC, EKeys::Gamepad_DPad_Left)))
 		{
 			GM->LiveStay();
 		}
-		else if (GM && GM->IsLive() && Pressed(LeavePC, EKeys::L))
+		else if (GM && GM->IsLive() && (Pressed(LeavePC, EKeys::L) || (Pad && Pad->HoldCompleted(EKeys::Gamepad_DPad_Down))))
 		{
 			GM->LiveLeaveNow();
 		}
@@ -1025,8 +1197,10 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 		FocusAt = Eye + Dir * FMath::Clamp(ToFelt, 40.0, 250.0);
 	}
 
-	// The lens: Focus narrows it and opens the aperture; a racing heart closes in the edges.
-	Camera->SetFieldOfView(FMath::Lerp(FMath::Lerp(72.0f, 42.0f, PeekBlend), 34.0f, Focus) - 4.0f * Racing);
+	// The lens: Focus narrows it and opens the aperture; a racing heart closes in the edges. At rest it's the player's
+	// field of view; the peek and Focus frame what they look at whatever it is.
+	const float RestFov = GM ? GM->SettingFov(72.0f) : 72.0f;
+	Camera->SetFieldOfView(FMath::Lerp(FMath::Lerp(RestFov, 42.0f, PeekBlend), 34.0f, Focus) - 4.0f * Racing);
 	FPostProcessSettings& P = Camera->PostProcessSettings;
 	P.DepthOfFieldFocalDistance = FMath::Max(10.0f, static_cast<float>(FVector::Dist(Eye, FocusAt)));
 	P.DepthOfFieldFstop = FMath::Lerp(FMath::Lerp(4.0f, 8.0f, PeekBlend), 1.4f, Focus);
@@ -1057,10 +1231,10 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 		for (ABackRoomPlayer* O : Table->GetOpponents())
 		{
 			const float C = FVector::DotProduct(ViewFwd, (O->GetEyes() - ViewFrom).GetSafeNormal());
-			O->SetStudied(bDone || bWalkPending ? 0.0f : FMath::Clamp((C - Lo) / (Hi - Lo), 0.0f, 1.0f) * (0.6f + 0.4f * Focus));
+			O->SetStudied(bDone || bWalkPending || bQuitting ? 0.0f : FMath::Clamp((C - Lo) / (Hi - Lo), 0.0f, 1.0f) * (0.6f + 0.4f * Focus));
 		}
 	}
-	TestPressed.Reset();
+	EndFrame();
 }
 
 void ABackRoomPawn::PlaceShoulderCamera(const FVector& Head, const FRotator& Shake, float Racing, float RealDt)
@@ -1160,9 +1334,11 @@ void ABackRoomPawn::PlaceShoulderCamera(const FVector& Head, const FRotator& Sha
 	const FVector FirstAt = GetActorLocation();
 	const FVector Pos = Head + (Shoulder - Head) * static_cast<double>(B) + (FirstAt - Head) * static_cast<double>(FMath::Square(1.0f - B));
 	Camera->SetWorldLocationAndRotation(Pos, FQuat::Slerp(GetActorQuat(), Aim, B));
-	// A slightly longer lens than the eyes', still squeezed by a racing heart; the felt and the faces sharp, your own
-	// head soft in the foreground.
-	Camera->SetFieldOfView(FMath::Lerp(Camera->FieldOfView, CVarShoulderFov.GetValueOnGameThread() - 4.0f * Racing, B));
+	// A slightly longer lens than the eyes' (at the player's field of view), still squeezed by a racing heart; the felt and
+	// the faces sharp, your own head soft in the foreground.
+	const ABackRoomGameMode* GM = GetMode();
+	const float ShoulderFov = GM ? GM->SettingFov(CVarShoulderFov.GetValueOnGameThread()) : CVarShoulderFov.GetValueOnGameThread();
+	Camera->SetFieldOfView(FMath::Lerp(Camera->FieldOfView, ShoulderFov - 4.0f * Racing, B));
 	FPostProcessSettings& P = Camera->PostProcessSettings;
 	P.DepthOfFieldFocalDistance = FMath::Lerp(P.DepthOfFieldFocalDistance, static_cast<float>(FVector::Dist(Pos, LookAt)), B);
 	P.DepthOfFieldFstop = FMath::Lerp(P.DepthOfFieldFstop, 7.0f, B);
@@ -1226,14 +1402,16 @@ float ABackRoomPawn::BoomClearance(const FVector& From, const FVector& To) const
 void ABackRoomHUD::DrawHUD()
 {
 	Super::DrawHUD();
-	const float Dt = FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
-	Clock += Dt;
 	ABackRoomGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ABackRoomGameMode>() : nullptr;
 	ABackRoomTable* Table = GM ? GM->Table.Get() : nullptr;
-	if (!Table || !Canvas)
+	// The pause menu has the screen (or a quit is on its way out behind the fade): nothing of the table's over it, and
+	// nothing of it ages meanwhile (a line said just before is still up when the menu goes).
+	if (!Table || !Canvas || GM->IsPauseMenuUp() || GM->IsQuittingTable())
 	{
 		return;
 	}
+	const float Dt = FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
+	Clock += Dt;
 	const float W = Canvas->ClipX;
 	const float H = Canvas->ClipY;
 	const float S = H / 1080.0f;
@@ -1263,6 +1441,181 @@ void ABackRoomHUD::DrawHUD()
 	auto Fade = [](FLinearColor C, float A) {
 		C.A *= FMath::Clamp(A, 0.0f, 1.0f);
 		return C;
+	};
+
+	// After a gamepad, the prompts and hints show its buttons (the controller keeps which device was used last).
+	const ABackRoomPlayerController* Pad = Cast<ABackRoomPlayerController>(PlayerOwner);
+	const bool bPad = Pad && Pad->IsUsingGamepad();
+	float LetterW = 0.0f, LetterH = 1.0f;
+	GetTextSize(TEXT("A"), LetterW, LetterH, Small, 1.0f);
+	LetterH = FMath::Max(LetterH, 1.0f);
+	// How wide Button draws Name.
+	auto ButtonWidth = [&](const FString& Name, float Size) -> float {
+		if (Name.Len() <= 1 || Name == TEXT("UP") || Name == TEXT("DOWN") || Name == TEXT("LEFT") || Name == TEXT("RIGHT"))
+		{
+			return Size;
+		}
+		float Tw = 0.0f, Th = 0.0f;
+		GetTextSize(Name, Tw, Th, Small, Size * 0.5f / LetterH);
+		return FMath::Max(Size, Tw + Size * 0.55f);
+	};
+	// A gamepad button Size tall, its middle at height Cy: the face buttons round, in their colors; the d-pad a cross with
+	// the pressed arm lit; the bumpers, triggers, sticks and View labelled keys. Returns its width.
+	auto Button = [&](const FString& Name, float X, float Cy, float Size, float Alpha) -> float {
+		const float R = Size * 0.5f;
+		float Tw = 0.0f, Th = 0.0f;
+		if (Name == TEXT("A") || Name == TEXT("B") || Name == TEXT("X") || Name == TEXT("Y"))
+		{
+			const FColor Hue = Name == TEXT("A") ? FColor(0x3e, 0xcf, 0x6e) : (Name == TEXT("B") ? FColor(0xef, 0x4d, 0x5a) : (Name == TEXT("X") ? FColor(0x3b, 0x82, 0xf6) : FColor(0xf2, 0xc1, 0x4e)));
+			FLinearColor Fill = FLinearColor::FromSRGBColor(Hue);
+			Fill.A = 0.92f * Alpha;
+			FCanvasNGonItem Disc(FVector2D(X + R, Cy), FVector2D(R, R), 28, Fill);
+			Disc.BlendMode = SE_BLEND_Translucent;
+			Canvas->DrawItem(Disc);
+			const float Sc = Size * 0.62f / LetterH;
+			GetTextSize(Name, Tw, Th, Small, Sc);
+			DrawText(Name, FLinearColor(0.03f, 0.035f, 0.05f, Alpha), X + R - Tw * 0.5f, Cy - Th * 0.5f, Small, Sc);
+			return Size;
+		}
+		const FLinearColor Line(0.93f, 0.9f, 0.82f, 0.6f * Alpha);
+		if (Name == TEXT("UP") || Name == TEXT("DOWN") || Name == TEXT("LEFT") || Name == TEXT("RIGHT"))
+		{
+			const float Arm = Size * 0.34f;
+			const float Reach = R - Arm * 0.5f;
+			const float Cx = X + R;
+			const FLinearColor Rest(Line.R, Line.G, Line.B, 0.3f * Alpha);
+			const FLinearColor Lit(0.93f, 0.9f, 0.82f, 0.95f * Alpha);
+			DrawRect(Rest, Cx - Arm * 0.5f, Cy - R, Arm, Size);
+			DrawRect(Rest, Cx - R, Cy - Arm * 0.5f, Size, Arm);
+			if (Name == TEXT("UP"))
+			{
+				DrawRect(Lit, Cx - Arm * 0.5f, Cy - R, Arm, Reach);
+			}
+			else if (Name == TEXT("DOWN"))
+			{
+				DrawRect(Lit, Cx - Arm * 0.5f, Cy + Arm * 0.5f, Arm, Reach);
+			}
+			else if (Name == TEXT("LEFT"))
+			{
+				DrawRect(Lit, Cx - R, Cy - Arm * 0.5f, Reach, Arm);
+			}
+			else
+			{
+				DrawRect(Lit, Cx + Arm * 0.5f, Cy - Arm * 0.5f, Reach, Arm);
+			}
+			return Size;
+		}
+		const float Sc = Size * 0.5f / LetterH;
+		GetTextSize(Name, Tw, Th, Small, Sc);
+		const float Bw = ButtonWidth(Name, Size);
+		const float Edge = FMath::Max(1.0f, 1.5f * S);
+		DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.35f * Alpha), X, Cy - R, Bw, Size);
+		DrawRect(Line, X, Cy - R, Bw, Edge);
+		DrawRect(Line, X, Cy + R - Edge, Bw, Edge);
+		DrawRect(Line, X, Cy - R, Edge, Size);
+		DrawRect(Line, X + Bw - Edge, Cy - R, Edge, Size);
+		DrawText(Name, FLinearColor(0.93f, 0.9f, 0.82f, 0.95f * Alpha), X + (Bw - Tw) * 0.5f, Cy - Th * 0.5f, Small, Sc);
+		return Bw;
+	};
+	// A line naming the table's keys, "[N]" (said with its brackets) or "{Space}" (bare): on the keyboard as written; after
+	// a gamepad, its buttons in their place (a held one says so). Align as Text; returns the width.
+	struct FPiece
+	{
+		FString Text;
+		FString Pad;
+		bool bHold = false;
+	};
+	auto Keyed = [&](const FString& Line, const FLinearColor& Color, float X, float Y, UFont* Font, float Scale, int32 Align) -> float {
+		TArray<FPiece> Pieces;
+		FString Run;
+		for (int32 I = 0; I < Line.Len(); ++I)
+		{
+			const TCHAR Ch = Line[I];
+			const int32 End = Ch == TEXT('[') || Ch == TEXT('{') ? Line.Find(Ch == TEXT('[') ? TEXT("]") : TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromStart, I + 1) : INDEX_NONE;
+			if (End == INDEX_NONE)
+			{
+				Run.AppendChar(Ch);
+				continue;
+			}
+			const FString Key = Line.Mid(I + 1, End - I - 1);
+			I = End;
+			const FPadKey* Mapped = bPad ? PadKeyFor(Key) : nullptr;
+			if (!Mapped)
+			{
+				Run += Ch == TEXT('[') ? TEXT("[") + Key + TEXT("]") : Key;
+				continue;
+			}
+			Pieces.Add({Run, FString(), false});
+			Run.Reset();
+			TArray<FString> Names;
+			FString(Mapped->Pad).ParseIntoArray(Names, TEXT(" "));
+			for (int32 N = 0; N < Names.Num(); ++N)
+			{
+				Pieces.Add({FString(), Names[N], Mapped->bHold && N == Names.Num() - 1});
+			}
+		}
+		Pieces.Add({Run, FString(), false});
+		if (Pieces.Num() == 1)
+		{
+			return Text(Pieces[0].Text, Color, X, Y, Font, Scale, Align);
+		}
+		if (Color.A <= 0.005f)
+		{
+			return 0.0f;
+		}
+		// Measured first (the line is placed whole), then drawn: the buttons as tall as the text, centered on it.
+		float LineW = 0.0f, LineH = 0.0f;
+		GetTextSize(TEXT("A"), LineW, LineH, Font, Scale * S);
+		const float Size = LineH * 0.95f;
+		const float Gap = 5.0f * S;
+		const float HoldScale = Scale * S * 0.62f;
+		auto Width = [&](const FPiece& P) {
+			float Tw = 0.0f, Th = 0.0f;
+			if (P.Pad.IsEmpty())
+			{
+				GetTextSize(P.Text, Tw, Th, Font, Scale * S);
+				return Tw;
+			}
+			const float Bw = ButtonWidth(P.Pad, Size);
+			float Hw = 0.0f;
+			if (P.bHold)
+			{
+				GetTextSize(TEXT("HOLD"), Hw, Th, Font, HoldScale);
+				Hw += Gap;
+			}
+			return Gap + Bw + Hw + Gap;
+		};
+		float Total = 0.0f;
+		for (const FPiece& P : Pieces)
+		{
+			Total += Width(P);
+		}
+		float Px = Align == 1 ? X - Total * 0.5f : (Align == 2 ? X - Total : X);
+		const float Cy = Y + LineH * 0.5f;
+		for (const FPiece& P : Pieces)
+		{
+			if (P.Pad.IsEmpty())
+			{
+				if (!P.Text.IsEmpty())
+				{
+					DrawText(P.Text, FLinearColor(0.0f, 0.0f, 0.0f, Color.A * 0.6f), Px + 2.0f * S, Y + 2.0f * S, Font, Scale * S);
+					DrawText(P.Text, Color, Px, Y, Font, Scale * S);
+				}
+				Px += Width(P);
+				continue;
+			}
+			const float Next = Px + Width(P);
+			float Bx = Px + Gap;
+			Bx += Button(P.Pad, Bx, Cy, Size, Color.A);
+			if (P.bHold)
+			{
+				float Hw = 0.0f, Hh = 0.0f;
+				GetTextSize(TEXT("HOLD"), Hw, Hh, Font, HoldScale);
+				DrawText(TEXT("HOLD"), FLinearColor(Color.R, Color.G, Color.B, Color.A * 0.7f), Bx + Gap, Cy - Hh * 0.5f, Font, HoldScale);
+			}
+			Px = Next;
+		}
+		return Total;
 	};
 
 	// Tired: the lids come down from above and below, soft-edged. Over the shoulder they aren't the camera's: the room
@@ -1342,29 +1695,42 @@ void ABackRoomHUD::DrawHUD()
 		}
 		if (Pawn && Pawn->IsFreeWalking())
 		{
+			// (The room's prompts name E as "[E]": a gamepad's A in its place.)
 			const FString Prompt = GM->SpotPrompt();
 			if (!Prompt.IsEmpty())
 			{
-				Text(Prompt, Paper, W * 0.5f, H - 120.0f * S, Small, 1.3f, 1);
+				Keyed(Prompt, Paper, W * 0.5f, H - 120.0f * S, Small, 1.3f, 1);
 			}
 			const ss::Tournament* T = GM->GetTourney();
 			FString State;
 			if (GM->IsRailing())
 			{
-				State = T && T->bFinished ? FString(TEXT("It's over.   [E] at the door to go home"))
-										  : FString::Printf(TEXT("On the rail   \u00b7   %d left   \u00b7   [E] at the door to go home"), T ? T->Remaining : 0);
+				// Registered at the desk for the next event: that's what the night is waiting on now.
+				const FString Next = GM->GetNextEventNote();
+				if (!Next.IsEmpty())
+				{
+					State = T && !T->bFinished ? FString::Printf(TEXT("%s   \u00b7   on the rail, %d left"), *Next, T->Remaining) : Next;
+				}
+				else
+				{
+					State = T && T->bFinished ? FString(TEXT("It's over.   [E] at the door to go home"))
+											  : FString::Printf(TEXT("On the rail   \u00b7   %d left   \u00b7   [E] at the door to go home"), T ? T->Remaining : 0);
+				}
 			}
 			else if (T)
 			{
 				State = FString::Printf(TEXT("Up from table %d   \u00b7   still dealt in: checked when free, mucked when not   \u00b7   [E] at your chair to sit"), T->Hero().TableId);
 			}
-			Text(State, Fade(Dim, 0.9f), W * 0.5f, H - 78.0f * S, Small, 1.0f, 1);
-			Text(TEXT("WASD  walk   \u00b7   Shift  hurry   \u00b7   E  use"), Fade(Dim, 0.6f), W * 0.5f, H - 46.0f * S, Small, 0.9f, 1);
+			Keyed(State, Fade(Dim, 0.9f), W * 0.5f, H - 78.0f * S, Small, 1.0f, 1);
+			if (GM->ShowsHints())
+			{
+				Keyed(TEXT("{WASD}  walk   \u00b7   {Shift}  hurry   \u00b7   {E}  use"), Fade(Dim, 0.6f), W * 0.5f, H - 46.0f * S, Small, 0.9f, 1);
+			}
 		}
 		else if (GM->StayOffer() >= 0.0f)
 		{
 			const float A = FMath::Clamp((GM->StayOffer() - 1.0f) / 0.6f, 0.0f, 1.0f);
-			Text(TEXT("[Q] Stay and watch   \u00b7   [L] Go home now"), Fade(Paper, A), W * 0.5f, H - 70.0f * S, Small, 1.15f, 1);
+			Keyed(TEXT("[Q] Stay and watch   \u00b7   [L] Go home now"), Fade(Paper, A), W * 0.5f, H - 70.0f * S, Small, 1.15f, 1);
 		}
 	};
 	// A big moment, across the room's attention.
@@ -1389,10 +1755,26 @@ void ABackRoomHUD::DrawHUD()
 		const float A = FMath::Clamp((2.4f - Pawn->ViewShownAge()) / 0.5f, 0.0f, 1.0f);
 		const bool bOver = Pawn->IsThirdPerson();
 		Text(bOver ? TEXT("OVER THE SHOULDER") : TEXT("FIRST PERSON"), Fade(Warm, A), W * 0.5f, Vy, Small, 1.2f, 1);
-		Text(bOver ? (Pawn->IsFreeWalking() ? TEXT("back at the table   ·   peeks and Focus are still through your own eyes")
-											: TEXT("B  other shoulder   ·   peeks and Focus are still through your own eyes"))
-				   : TEXT("V  over the shoulder"),
+		Keyed(bOver ? (Pawn->IsFreeWalking() ? TEXT("back at the table   ·   peeks and Focus are still through your own eyes")
+											 : TEXT("{B}  other shoulder   ·   peeks and Focus are still through your own eyes"))
+					: TEXT("{V}  over the shoulder"),
 			Fade(Dim, A), W * 0.5f, Vy + 30.0f * S, Small, 1.0f, 1);
+	};
+	// Down on the d-pad, held: what it's about to do, filling as it's held (seated: on foot it isn't the way out).
+	auto DrawLeaveHold = [&]() {
+		const float Held = bPad && Pad && Pawn && !Pawn->IsFreeWalking() && !Pawn->IsWalking() ? Pad->HoldProgress(EKeys::Gamepad_DPad_Down) : 0.0f;
+		const bool bOut = Phase == EBackRoomPhase::Leaving && GM->StayOffer() >= 0.0f;
+		if (Held <= 0.0f || !GM->IsCareer() || GM->IsLeaveRequested() || !(Phase == EBackRoomPhase::Playing || Phase == EBackRoomPhase::Busted || bOut))
+		{
+			return;
+		}
+		const TCHAR* What = bOut							? TEXT("{L}  go home now")
+							: Phase == EBackRoomPhase::Busted ? TEXT("{L}  go home")
+							: GM->IsLive()					? (GM->IsQuitPending() ? TEXT("{L}  walk away: your stack is blinded off") : TEXT("{L}  walk away"))
+															: TEXT("{L}  rack up after this hand");
+		const float Lw = Keyed(What, Paper, W * 0.5f, H - 236.0f * S, Small, 1.1f, 1);
+		DrawRect(FLinearColor(0.0f, 0.0f, 0.0f, 0.4f), W * 0.5f - Lw * 0.5f, H - 202.0f * S, Lw, 3.0f * S);
+		DrawRect(Warm, W * 0.5f - Lw * 0.5f, H - 202.0f * S, Lw * Held, 3.0f * S);
 	};
 
 	// Racked up: the night, totted up, over the walk out.
@@ -1425,6 +1807,7 @@ void ABackRoomHUD::DrawHUD()
 				Ly += 34.0f * S;
 			}
 		}
+		DrawLeaveHold();
 		DrawOnFoot();
 		DrawBanner();
 		// (On the rail, below where the night's summary stands.)
@@ -1529,6 +1912,12 @@ void ABackRoomHUD::DrawHUD()
 		for (const FRung& R : Rungs)
 		{
 			DrawRect(R.bMain ? FLinearColor(0.05f, 0.08f, 0.15f, 0.84f) : Night, Rx, Ry, Rw, Rh);
+			const FPadKey* PadKey = bPad ? PadKeyFor(R.Key) : nullptr;
+			if (PadKey && PadKey->bHold && Pad)
+			{
+				// Held to go all in: the rung fills as it's held.
+				DrawRect(FLinearColor(Ember.R, Ember.G, Ember.B, 0.32f), Rx, Ry, Rw * Pad->HoldProgress(EKeys::Gamepad_FaceButton_Right), Rh);
+			}
 			if (R.bMain)
 			{
 				DrawRect(Ember, Rx, Ry, Rw, 2.0f * S);
@@ -1536,9 +1925,21 @@ void ABackRoomHUD::DrawHUD()
 				DrawRect(Ember, Rx, Ry, 2.0f * S, Rh);
 				DrawRect(Ember, Rx + Rw - 2.0f * S, Ry, 2.0f * S, Rh);
 			}
-			DrawRect(FLinearColor(0.93f, 0.9f, 0.82f, 0.14f), Rx + 10.0f * S, Ry + 9.0f * S, 28.0f * S, 28.0f * S);
-			Text(R.Key, Paper, Rx + 24.0f * S, Ry + 11.0f * S, Small, 1.05f, 1);
-			Text(R.Label, Paper, Rx + 52.0f * S, Ry + 11.0f * S, Small, 1.15f, 0);
+			float LabelX = Rx + 52.0f * S;
+			if (PadKey)
+			{
+				Button(PadKey->Pad, Rx + 10.0f * S, Ry + Rh * 0.5f, 28.0f * S, 1.0f);
+			}
+			else
+			{
+				DrawRect(FLinearColor(0.93f, 0.9f, 0.82f, 0.14f), Rx + 10.0f * S, Ry + 9.0f * S, 28.0f * S, 28.0f * S);
+				Text(R.Key, Paper, Rx + 24.0f * S, Ry + 11.0f * S, Small, 1.05f, 1);
+			}
+			LabelX += Text(R.Label, Paper, LabelX, Ry + 11.0f * S, Small, 1.15f, 0);
+			if (PadKey && PadKey->bHold)
+			{
+				Text(TEXT("HOLD"), Fade(Paper, 0.6f), LabelX + 10.0f * S, Ry + 16.0f * S, Small, 0.75f, 0);
+			}
 			if (!R.Value.IsEmpty())
 			{
 				Text(R.Value, R.bMain ? Warm : Paper, Rx + Rw - 16.0f * S, Ry + 11.0f * S, Small, 1.15f, 2);
@@ -1547,7 +1948,14 @@ void ABackRoomHUD::DrawHUD()
 		}
 		if (P.bCanRaise)
 		{
-			Text(TEXT("wheel to size the raise"), Dim, Rx + Rw, Ry + 2.0f * S, Small, 0.95f, 2);
+			if (bPad)
+			{
+				Keyed(TEXT("{wheel}  size the raise"), Dim, Rx + Rw, Ry + 2.0f * S, Small, 0.95f, 2);
+			}
+			else
+			{
+				Text(TEXT("wheel to size the raise"), Dim, Rx + Rw, Ry + 2.0f * S, Small, 0.95f, 2);
+			}
 		}
 	}
 
@@ -1556,7 +1964,7 @@ void ABackRoomHUD::DrawHUD()
 	{
 		static const TCHAR* PaceNames[3] = {TEXT("LIVE"), TEXT("BRISK"), TEXT("FAST")};
 		const bool bSkipping = Pawn && Pawn->IsSkippingHand();
-		Text(bSkipping ? FString(TEXT("to the next hand...")) : FString::Printf(TEXT("[N] Next hand     [P] Pace  %s"), PaceNames[FMath::Clamp(GM->GetTablePace(), 0, 2)]),
+		Keyed(bSkipping ? FString(TEXT("to the next hand...")) : FString::Printf(TEXT("[N] Next hand     [T] Pace  %s"), PaceNames[FMath::Clamp(GM->GetTablePace(), 0, 2)]),
 			Fade(Dim, 0.85f), W * 0.5f, H - 66.0f * S, Small, 1.0f, 1);
 	}
 	if (bLive && GM->PaceShownAge() < 2.6f)
@@ -1574,12 +1982,13 @@ void ABackRoomHUD::DrawHUD()
 		Text(TEXT("You're felted."), Warm, W * 0.5f, H * 0.42f, Big, 1.4f, 1);
 		if (GM->CanReload())
 		{
-			Text(FString::Printf(TEXT("[R] Buy back in for $%lld     [L] Go home"), GM->GetReloadChips()), Paper, W * 0.5f, H * 0.42f + 58.0f * S, Small, 1.3f, 1);
-			Text(FString::Printf(TEXT("wheel to change  ·  %s left in the bankroll"), *Dollars(GM->GetBankrollOffTable() / 100)), Dim, W * 0.5f, H * 0.42f + 96.0f * S, Small, 1.05f, 1);
+			Keyed(FString::Printf(TEXT("[R] Buy back in for $%lld     [L] Go home"), GM->GetReloadChips()), Paper, W * 0.5f, H * 0.42f + 58.0f * S, Small, 1.3f, 1);
+			const FString Spare = FString::Printf(TEXT("%s left in the bankroll"), *Dollars(GM->GetBankrollOffTable() / 100));
+			Keyed((bPad ? TEXT("{wheel}  to change  ·  ") : TEXT("wheel to change  ·  ")) + Spare, Dim, W * 0.5f, H * 0.42f + 96.0f * S, Small, 1.05f, 1);
 		}
 		else
 		{
-			Text(TEXT("[L] Go home"), Paper, W * 0.5f, H * 0.42f + 58.0f * S, Small, 1.3f, 1);
+			Keyed(TEXT("[L] Go home"), Paper, W * 0.5f, H * 0.42f + 58.0f * S, Small, 1.3f, 1);
 			Text(FString::Printf(TEXT("%s left. Not enough to sit."), *Dollars(GM->GetBankrollOffTable() / 100)), Dim, W * 0.5f, H * 0.42f + 96.0f * S, Small, 1.05f, 1);
 		}
 	}
@@ -1635,9 +2044,9 @@ void ABackRoomHUD::DrawHUD()
 	}
 	if (GM->IsQuitPending())
 	{
-		Text(TEXT("[L] again to walk away   \u00b7   your stack will be blinded off"), Warm, W * 0.5f, H - 190.0f * S, Small, 1.15f, 1);
+		Keyed(TEXT("[L] again to walk away   \u00b7   your stack will be blinded off"), Warm, W * 0.5f, H - 190.0f * S, Small, 1.15f, 1);
 	}
-
+	DrawLeaveHold();
 	DrawOnFoot();
 
 	// Who you're studying: their name, and who they are to you.
@@ -1665,8 +2074,8 @@ void ABackRoomHUD::DrawHUD()
 		Text(TEXT("FOCUS"), Dim, Bx, By - 26.0f * S, Small, 0.9f, 0);
 	}
 
-	// How to play: early on the first night (or holding Tab).
-	const bool bTab = PlayerOwner && PlayerOwner->IsInputKeyDown(EKeys::Tab);
+	// How to play: early on the first night (with the controls reminder on), or holding Tab (up on the d-pad).
+	const bool bTab = PlayerOwner && (PlayerOwner->IsInputKeyDown(EKeys::Tab) || PlayerOwner->IsInputKeyDown(EKeys::Gamepad_DPad_Up));
 	if (bTab)
 	{
 		// The read book: what you have seen of each of them, and what the cards said it meant.
@@ -1694,33 +2103,871 @@ void ABackRoomHUD::DrawHUD()
 		}
 		if (Shown == 0)
 		{
-			Text(TEXT("Nothing yet. Study a face (right mouse) while the hand plays out,"), Dim, Rx, Ry, Small, 1.0f, 0);
+			Text(bPad ? TEXT("Nothing yet. Study a face (the right trigger) while the hand plays out,") : TEXT("Nothing yet. Study a face (right mouse) while the hand plays out,"), Dim,
+				Rx, Ry, Small, 1.0f, 0);
 			Text(TEXT("then see what they turn over."), Dim, Rx, Ry + 25.0f * S, Small, 1.0f, 0);
 		}
 	}
-	const float HintA = bTab ? 1.0f : (GM->IsFirstVisit() && Table->GetHandNumber() <= 3 ? 0.7f : 0.0f);
+	const float HintA = bTab ? 1.0f : (GM->ShowsHints() && GM->IsFirstVisit() && Table->GetHandNumber() <= 3 ? 0.7f : 0.0f);
 	if (HintA > 0.0f)
 	{
 		const float Hx = W - 48.0f * S;
-		TArray<const TCHAR*> Hints = {TEXT("Space  look at your cards"), TEXT("Right mouse  study a face"), TEXT("Shift  breathe, slow the heart"), TEXT("Tab  your reads"),
-			Pawn && Pawn->IsThirdPerson() ? TEXT("V  your own eyes   ·   B  other shoulder") : TEXT("V  over the shoulder")};
+		TArray<const TCHAR*> Hints = {TEXT("{Space}  look at your cards"), TEXT("{Right mouse}  study a face"), TEXT("{Shift}  breathe, slow the heart"), TEXT("{Tab}  your reads"),
+			Pawn && Pawn->IsThirdPerson() ? TEXT("{V}  your own eyes   ·   {B}  other shoulder") : TEXT("{V}  over the shoulder")};
 		if (GM->IsCareer())
 		{
-			Hints.Add(GM->IsLive() ? TEXT("L  walk away (blinded off)") : TEXT("L  rack up and go home"));
+			Hints.Add(GM->IsLive() ? TEXT("{L}  walk away (blinded off)") : TEXT("{L}  rack up and go home"));
 		}
 		if (GM->IsLive())
 		{
-			Hints.Add(TEXT("N  next hand (once you've folded)"));
-			Hints.Add(TEXT("P  table pace"));
+			Hints.Add(TEXT("{Q}  stand up (still dealt in)"));
+			Hints.Add(TEXT("{N}  next hand (once you've folded)"));
+			Hints.Add(TEXT("{T}  table pace"));
 		}
-		// Above the action ladder when it's up.
-		float Hy = FMath::Min(H - 250.0f * S, LadderTop - 16.0f * S - Hints.Num() * 24.0f * S);
+		// Above the action ladder when it's up (a little more room for the gamepad's buttons).
+		const float RowH = (bPad ? 28.0f : 24.0f) * S;
+		float Hy = FMath::Min(H - 250.0f * S, LadderTop - 16.0f * S - Hints.Num() * RowH);
 		for (const TCHAR* Hint : Hints)
 		{
-			Text(Hint, Fade(Dim, HintA), Hx, Hy, Small, 0.95f, 2);
-			Hy += 24.0f * S;
+			Keyed(Hint, Fade(Dim, HintA), Hx, Hy, Small, 0.95f, 2);
+			Hy += RowH;
 		}
 	}
+}
+
+// ------------------------------------------------------------------ the pause menu
+
+/**
+ * The table's pause menu: ss::ui::FrontEnd's Pause page on a Slate widget, the room blurred behind it, and its hooks. It
+ * keeps the player's settings as the table uses them (applied as they change, saved once they settle), holds the night
+ * still while it's up, and carries a confirmed quit out: R5's fold, the checkpoint or the night settled, then the main
+ * menu or the desktop.
+ *
+ * Holding still: the room's time dilation goes to its floor, so nothing the world's clock drives moves (the table's
+ * hand, the people at it, the timers, a walk's fade), and the mode's own ticks (the night's clock, the tournament's, a
+ * break's countdown) don't run. The heart (which the table runs on real time) is put back as it was on resuming: a
+ * pause is no place to calm down. The menu's clicks play on its own voice, which keeps real time.
+ */
+struct ABackRoomGameMode::FTableMenu final : public ss::ui::FrontEndHooks
+{
+	explicit FTableMenu(ABackRoomGameMode& InMode)
+		: Mode(InMode)
+		, Menu(*this)
+	{
+	}
+
+	ABackRoomGameMode& Mode;
+	ss::ui::FrontEnd Menu;
+	FSlateTextMeasurer Measurer;
+	FDrawListHint Hint;
+	TSharedPtr<SOverlay> Root;
+	TSharedPtr<SBackgroundBlur> Blur;
+	TSharedPtr<SFrontEndWidget> Widget;
+	TWeakObjectPtr<UNightOneAudio> Voice;
+	/** The menu's clock (real seconds since the night began), and when it last closed (it fades out after). */
+	double RealTime = 0.0;
+	double ClosedAt = -100.0;
+	/** Where the pointer last was over the menu (negative: not since it opened). */
+	FVector2D LastPointer = FVector2D(-1.0, -1.0);
+	/** When the settings last changed (written once the player stops changing them), or negative. */
+	double SettingsDirtyAt = -1.0;
+
+	// The night held still behind the menu.
+	bool bFrozen = false;
+	float FrozenDilation = 1.0f;
+	FBackRoomComposure FrozenHeart;
+
+	// The player's settings as the table uses them.
+	float LookScale = 1.0f;
+	bool bInvertLook = false;
+	bool bShowHints = true;
+	int32 FieldOfView = 50;
+	float BrightnessBias = 0.0f;
+	float GrainScale = 1.0f;
+	float FringeScale = 1.0f;
+	bool bMotionBlur = false;
+	/** The room's own exposure and film grain (the stage's lens, read from LensOf): the player's brightness and grain go over them. */
+	float RoomBias = 0.0f;
+	float RoomGrain = 0.2f;
+	TWeakObjectPtr<const ABackRoomStage> LensOf;
+
+	// A confirmed quit.
+	bool bQuitting = false;
+	bool bQuitToDesktop = false;
+	bool bLeft = false;
+	double QuitAt = 0.0;
+	/** The Embercrest's table has dealt the player a hand it hasn't ended yet (from the table's notes: OnTableNote). */
+	bool bHandDealt = false;
+
+	/** The saved settings applied (the mix, the frame budget, the look, the lens, the table's pace), the widget and the voice. */
+	void Begin();
+	void End();
+	void Open();
+	void Tick(float RealDt);
+	void SetGamepad(bool bOn);
+	void Freeze();
+	void Thaw();
+	void ReturnInputToGame();
+	/** The pause page's facts: where, when, how the night stands, and what quitting from here costs and keeps. */
+	void Describe();
+	/** bAll: everything, as when the menu changes it (the display and scalability too, which the apartment already set). */
+	void Apply(const ss::ui::GameSettings& S, bool bAll);
+	void SaveSettings();
+	/**
+	 * A hand dealt to the player that hasn't ended: at Dee's game one on the table, at the Embercrest one its checkpoint
+	 * marked dealt (a hand seated for the next deal, while the player walks in or moves, isn't one yet).
+	 */
+	bool HandInPlay() const;
+	void Quit(bool bToDesktop);
+	/**
+	 * A hand in play (R5): the menu goes, the screen goes black, and the engine plays the hand out quickly with the player
+	 * folding at their next decision (TickQuit), so what they put in stays in the pot and a hand already decided stands.
+	 */
+	void PlayOut();
+	/** The hand played out: Dee's game racks up from the engine's stack; the Embercrest leaves once the room has saved it. */
+	void TickQuit();
+	void Leave();
+
+	// ss::ui::FrontEndHooks
+	virtual void UiSound(ss::SoundId Id, double Volume) override
+	{
+		if (UNightOneAudio* A = Voice.Get())
+		{
+			A->Play(Id, static_cast<float>(Volume));
+		}
+	}
+	virtual void Resume() override
+	{
+		ClosedAt = RealTime;
+		Thaw();
+		ReturnInputToGame();
+	}
+	virtual void QuitToMenu() override { Quit(false); }
+	virtual void QuitGame() override { Quit(true); }
+	virtual void SettingsChanged(const ss::ui::GameSettings& S) override
+	{
+		Apply(S, true);
+		SettingsDirtyAt = RealTime; // written once the player stops changing things
+	}
+};
+
+void ABackRoomGameMode::FTableMenu::Begin()
+{
+	if (UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SettingsSlotName(), 0))
+	{
+		if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SettingsSlotName(), 0)))
+		{
+			ss::ui::GameSettings::Parse(ToUtf8(Obj->Data), Menu.Settings);
+		}
+	}
+	UNightOneAudio* A = NewObject<UNightOneAudio>(&Mode, TEXT("MenuVoice"));
+	A->RegisterComponent();
+	Voice = A;
+	Apply(Menu.Settings, false);
+
+	UGameViewportClient* Viewport = Mode.GetWorld() ? Mode.GetWorld()->GetGameViewport() : nullptr;
+	if (!Viewport || !FSlateApplication::IsInitialized())
+	{
+		return;
+	}
+	TWeakObjectPtr<ABackRoomGameMode> Weak = &Mode;
+	Widget = SNew(SFrontEndWidget);
+	Widget->SetVisibility(EVisibility::Collapsed);
+	Widget->OnMenuKey = [Weak](const FString& KeyName, bool bFromGamepad) {
+		if (Weak.IsValid() && Weak->TableMenu)
+		{
+			FTableMenu& M = *Weak->TableMenu;
+			M.SetGamepad(bFromGamepad);
+			M.Menu.Key(ToUtf8(KeyName), M.RealTime);
+		}
+	};
+	Widget->OnMenuChar = [Weak](uint32 Codepoint) {
+		if (Weak.IsValid() && Weak->TableMenu)
+		{
+			Weak->TableMenu->Menu.Char(Codepoint, Weak->TableMenu->RealTime);
+		}
+	};
+	Widget->OnMenuPointer = [Weak](const FVector2D& Logical, int32 Button, float WheelDelta) {
+		if (!Weak.IsValid() || !Weak->TableMenu)
+		{
+			return;
+		}
+		FTableMenu& M = *Weak->TableMenu;
+		ss::ui::Pointer& P = M.Menu.Ptr;
+		// The mouse in use (a click, the wheel, or really moved: Slate also reports it standing still as the menu appears
+		// under it): the menu, and the table after it, show the keys again.
+		const bool bMoved = M.LastPointer.X >= 0.0 && FVector2D::Distance(M.LastPointer, Logical) > 2.0;
+		M.LastPointer = Logical;
+		if (Button != 0 || WheelDelta != 0.0f || bMoved)
+		{
+			M.SetGamepad(false);
+		}
+		P.Active = true;
+		P.X = static_cast<float>(Logical.X);
+		P.Y = static_cast<float>(Logical.Y);
+		if (Button == 1)
+		{
+			P.Down = true;
+			P.Pressed = true;
+		}
+		else if (Button == 2)
+		{
+			P.Down = false;
+			P.Released = true;
+		}
+		P.Wheel += WheelDelta;
+	};
+	SAssignNew(Root, SOverlay)
+	+ SOverlay::Slot()
+	[
+		SAssignNew(Blur, SBackgroundBlur)
+		.BlurStrength(0.0f)
+		.Visibility(EVisibility::Collapsed)
+	]
+	+ SOverlay::Slot()
+	[
+		Widget.ToSharedRef()
+	];
+	Viewport->AddViewportWidgetContent(Root.ToSharedRef(), 30);
+}
+
+void ABackRoomGameMode::FTableMenu::End()
+{
+	if (SettingsDirtyAt >= 0.0)
+	{
+		SaveSettings();
+	}
+	Thaw();
+	if (Root)
+	{
+		if (UGameViewportClient* Viewport = Mode.GetWorld() ? Mode.GetWorld()->GetGameViewport() : nullptr)
+		{
+			Viewport->RemoveViewportWidgetContent(Root.ToSharedRef());
+		}
+	}
+	Root.Reset();
+	Blur.Reset();
+	Widget.Reset();
+}
+
+void ABackRoomGameMode::FTableMenu::SetGamepad(bool bOn)
+{
+	Menu.Gamepad = bOn;
+	if (ABackRoomPlayerController* PC = Cast<ABackRoomPlayerController>(UGameplayStatics::GetPlayerController(&Mode, 0)))
+	{
+		PC->SetUsingGamepad(bOn);
+	}
+}
+
+void ABackRoomGameMode::FTableMenu::Open()
+{
+	if (!Widget || Menu.IsOpen() || bQuitting || Mode.bGoingHome)
+	{
+		return;
+	}
+	Describe();
+	const ABackRoomPlayerController* PC = Cast<ABackRoomPlayerController>(UGameplayStatics::GetPlayerController(&Mode, 0));
+	Menu.Gamepad = PC && PC->IsUsingGamepad();
+	LastPointer = FVector2D(-1.0, -1.0);
+	Menu.Open(ss::ui::FrontEnd::Page::Pause, RealTime);
+	Freeze();
+	Widget->SetVisibility(EVisibility::Visible);
+	if (APlayerController* Pc = UGameplayStatics::GetPlayerController(&Mode, 0))
+	{
+		FInputModeUIOnly InputMode;
+		InputMode.SetWidgetToFocus(Widget);
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		Pc->SetInputMode(InputMode);
+		Pc->SetShowMouseCursor(true);
+		// What was held going in (a peek, Focus, a bumper) doesn't stay held on the way out.
+		Pc->FlushPressedKeys();
+	}
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetKeyboardFocus(Widget, EFocusCause::SetDirectly);
+	}
+	UE_LOG(LogBackRoom, Log, TEXT("Paused at %s%s"), *Mode.ClockLabel(), Mode.bLive ? TEXT(" (both clocks stopped)") : TEXT(""));
+}
+
+void ABackRoomGameMode::FTableMenu::ReturnInputToGame()
+{
+	if (Widget)
+	{
+		// Still painted while the menu fades out, but no longer takes input.
+		Widget->SetVisibility(EVisibility::HitTestInvisible);
+	}
+	if (APlayerController* Pc = UGameplayStatics::GetPlayerController(&Mode, 0))
+	{
+		Pc->SetInputMode(FInputModeGameOnly());
+		Pc->SetShowMouseCursor(false);
+		// Keys let go while the menu had them would otherwise still read as held (a peek that never comes down).
+		Pc->FlushPressedKeys();
+	}
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+	}
+}
+
+void ABackRoomGameMode::FTableMenu::Freeze()
+{
+	UWorld* World = Mode.GetWorld();
+	AWorldSettings* Ws = World ? World->GetWorldSettings() : nullptr;
+	if (bFrozen || !Ws)
+	{
+		return;
+	}
+	bFrozen = true;
+	FrozenDilation = UGameplayStatics::GetGlobalTimeDilation(&Mode);
+	UGameplayStatics::SetGlobalTimeDilation(&Mode, FMath::Max(Ws->MinGlobalTimeDilation, 0.0001f));
+	// The mode (and the menu's voice on it) keeps real time.
+	Mode.CustomTimeDilation = 1.0f / FMath::Max(Ws->GetEffectiveTimeDilation(), 0.0001f);
+	if (Mode.Table)
+	{
+		FrozenHeart = Mode.Table->Composure;
+	}
+}
+
+void ABackRoomGameMode::FTableMenu::Thaw()
+{
+	if (!bFrozen)
+	{
+		return;
+	}
+	bFrozen = false;
+	UGameplayStatics::SetGlobalTimeDilation(&Mode, FrozenDilation);
+	Mode.CustomTimeDilation = 1.0f;
+	if (Mode.Table)
+	{
+		Mode.Table->Composure = FrozenHeart;
+	}
+}
+
+void ABackRoomGameMode::FTableMenu::Tick(float RealDt)
+{
+	RealTime += RealDt;
+	if (SettingsDirtyAt >= 0.0 && RealTime - SettingsDirtyAt > 0.75)
+	{
+		SaveSettings();
+	}
+	// Drawn while it's up and while it fades out (the room blurred behind it as much as the menu says).
+	if (Widget && (Menu.IsOpen() || Widget->GetVisibility() != EVisibility::Collapsed))
+	{
+		FVector2D ViewSize(1920.0, 1080.0);
+		if (UGameViewportClient* Viewport = Mode.GetWorld() ? Mode.GetWorld()->GetGameViewport() : nullptr)
+		{
+			FVector2D Measured;
+			Viewport->GetViewportSize(Measured);
+			if (Measured.X > 0.0 && Measured.Y > 0.0)
+			{
+				ViewSize = Measured;
+			}
+		}
+		const float LogicalH = ss::ui::FrontEnd::Height;
+		const float LogicalW = LogicalH * static_cast<float>(ViewSize.X / ViewSize.Y);
+		TSharedPtr<ss::ui::DrawList> List = Hint.Make();
+		ss::ui::Canvas Cv(*List, Measurer, LogicalW, LogicalH, static_cast<float>(ViewSize.Y) / LogicalH);
+		Menu.Draw(Cv, RealTime);
+		Hint.Note(*List);
+		Widget->SetDrawList(List);
+		const float Backdrop = Menu.Backdrop(RealTime);
+		if (Blur)
+		{
+			Blur->SetBlurStrength(Backdrop * 14.0f);
+			Blur->SetVisibility(Backdrop > 0.001f ? EVisibility::HitTestInvisible : EVisibility::Collapsed);
+		}
+		if (!Menu.IsOpen() && RealTime - ClosedAt > 0.65)
+		{
+			Widget->SetVisibility(EVisibility::Collapsed);
+		}
+	}
+	if (bQuitting)
+	{
+		TickQuit();
+	}
+}
+
+void ABackRoomGameMode::FTableMenu::Describe()
+{
+	ABackRoomGameMode& M = Mode;
+	ss::ui::FrontEndInfo I;
+	I.Resolutions = TableResolutions();
+	if (M.Save.IsValid())
+	{
+		const ss::SaveData& D = *M.Save;
+		I.HasSave = true;
+		I.HeroName = D.HeroName;
+		I.Person = D.Person;
+		I.RentStage = D.Life.RentStage;
+		I.RentDueCents = D.Life.RentDueCents;
+		I.RentDeadline = D.Life.RentDeadline;
+		I.StorageDue = D.Life.StorageDue;
+	}
+	I.World = M.Minutes;
+	const FBackRoomPrompt P = M.Table ? M.Table->GetPrompt() : FBackRoomPrompt();
+	const bool bInHand = M.Table && M.Table->IsHeroInHand();
+	// What a quit does to the hand in play (R5): folded at the player's next decision; all in, there's nothing to fold
+	// and the engine's hand plays out as dealt.
+	const std::string HandCost = !bInHand ? "" : P.Stack <= 0 ? "You're all in: the hand plays out before you go." : "This hand will be folded.";
+	const FString Clock = Clock12(M.TimeOfDay());
+	auto Row = [&I](const FString& Name, const FString& Value) { I.Status.push_back({ToUtf8(Name), ToUtf8(Value)}); };
+	if (M.bLive)
+	{
+		// The Embercrest: the event by its name on the heading, the tournament as it stands on the card.
+		FString Event = M.LiveName;
+		Event.RemoveFromStart(TEXT("Embercrest "));
+		Menu.SetVenue(ss::ui::Venue::CardRoom, ToUtf8(TEXT("THE EMBERCREST · ") + Event.ToUpper()));
+		Row(TEXT("EVENT"), M.LiveName);
+		if (const ss::Tournament* T = M.Tourney.Get(); T && !M.bLiveOver && !M.bCancelled)
+		{
+			const ss::Level& L = T->CurrentLevel();
+			Row(TEXT("LEVEL"), FString::Printf(TEXT("%d   ·   %s / %s"), T->LevelIndex + 1, *FText::AsNumber(static_cast<int64>(L.Sb)).ToString(), *FText::AsNumber(static_cast<int64>(L.Bb)).ToString()));
+			Row(TEXT("PLAYERS LEFT"), FString::Printf(TEXT("%d of %d"), T->Remaining, T->Spec.Entrants));
+			Row(TEXT("YOUR STACK"), FText::AsNumber(static_cast<int64>(T->Hero().Stack)).ToString());
+			Row(TEXT("YOUR RANK"), OrdinalText(T->HeroRank()));
+			I.PauseNote = "The tournament clock is stopped. Pausing isn't sitting out: nothing is dealt without you.";
+			if (T->Hero().Busted || T->bFinished)
+			{
+				// Out by the engine's count, the table not yet at the deal that notes it: the quit settles it first.
+				I.QuitKept = "Your finish and your bankroll are saved.";
+			}
+			else
+			{
+				I.QuitKept = HandInPlay() ? "The tournament is saved after this hand, and your seat waits: Continue takes you straight back to the table."
+										  : "The tournament is saved after every hand, and your seat waits: Continue takes you straight back to the table.";
+			}
+			I.QuitWarning = HandCost;
+		}
+		else
+		{
+			if (!M.bCancelled && M.HeroPlace > 0)
+			{
+				Row(TEXT("FINISHED"), FString::Printf(TEXT("%s of %d"), *OrdinalText(M.HeroPlace), M.Tourney ? M.Tourney->Spec.Entrants : 0));
+			}
+			if (M.HeroPrizeCents > 0)
+			{
+				Row(TEXT("PRIZE"), CentsText(M.HeroPrizeCents));
+			}
+			I.PauseNote = M.bRailing ? "The room waits while you're paused." : "";
+			I.QuitKept = M.bCancelled ? "Your refund and your bankroll are saved." : "Your finish and your bankroll are saved.";
+			if (!M.NextEntryId.IsEmpty() && !M.bOpeningNext)
+			{
+				// Registered at the desk for the next event: leaving takes the player off its list, as the door does.
+				I.QuitKept += ToUtf8(FString::Printf(TEXT(" The desk takes you off the list for the %s and refunds you."), *M.NextName));
+			}
+			else if (!M.NextEntryId.IsEmpty())
+			{
+				// Its seats called and the room opening for it: the entry stands, and Continue goes back to it.
+				I.QuitKept += ToUtf8(FString::Printf(TEXT(" Your seat in the %s waits: Continue takes you to it."), *M.NextName));
+			}
+		}
+		if (M.Save.IsValid())
+		{
+			Row(TEXT("BANKROLL"), CentsText(M.Save->BankrollCents));
+		}
+		Row(TEXT("TIME"), Clock);
+	}
+	else if (M.IsCareer())
+	{
+		// Dee's game: the money as it stands (the chips in front of you are bankroll money), the night so far.
+		Menu.SetVenue(ss::ui::Venue::BackRoom, "THE BACK ROOM \xC2\xB7 SPIN CYCLE LAUNDROMAT");
+		const int64 Behind = M.Phase == EBackRoomPhase::Leaving ? 0 : P.Stack;
+		const int64 Bankroll = M.Phase == EBackRoomPhase::Leaving ? M.StartBankrollCents : M.BaseCents + Behind * 100;
+		Row(TEXT("BANKROLL"), CentsText(Bankroll));
+		if (M.Phase != EBackRoomPhase::Leaving)
+		{
+			Row(TEXT("ON THE TABLE"), Dollars(Behind));
+		}
+		const int64 Net = M.Phase == EBackRoomPhase::Leaving ? M.NetCents : Bankroll - M.StartBankrollCents;
+		// (Under the card's TONIGHT: the night's net, as the summary says it.)
+		Row(TEXT("NET"), (Net >= 0 ? TEXT("+") : TEXT("-")) + Dollars(Net / 100));
+		Row(TEXT("HANDS"), FString::FromInt(M.HandsPlayed));
+		Row(TEXT("TIME"), Clock);
+		if (M.Phase == EBackRoomPhase::Leaving)
+		{
+			I.QuitKept = "The night is settled and saved.";
+		}
+		else if (M.Phase == EBackRoomPhase::Arriving || (M.HandsPlayed == 0 && M.Table && M.Table->GetHandNumber() == 0))
+		{
+			I.PauseNote = "The night's clock is stopped while you're paused.";
+			I.QuitKept = "Nothing's been played yet: your bankroll and career are saved.";
+		}
+		else
+		{
+			I.PauseNote = "The night's clock is stopped while you're paused.";
+			I.QuitKept = M.Phase == EBackRoomPhase::Busted ? "You're felted: the night is settled and saved on the way out."
+						 : HandInPlay()					   ? "You rack up after this hand: your chips go back in your bankroll, and the night is saved."
+														   : "You rack up on the way out: your chips go back in your bankroll, and the night is saved.";
+			I.QuitWarning = HandCost;
+		}
+	}
+	else
+	{
+		// Practice: the table on its own, no save and no clock.
+		Menu.SetVenue(ss::ui::Venue::BackRoom, "THE BACK ROOM \xC2\xB7 PRACTICE TABLE");
+		I.HeroName = "Practice table";
+		I.Timeless = true;
+		Row(TEXT("STACK"), Dollars(P.Stack));
+		Row(TEXT("HANDS"), FString::FromInt(M.Table ? M.Table->GetHandNumber() : 0));
+		I.QuitKept = "Nothing at the practice table is saved.";
+	}
+	Menu.Info = I;
+}
+
+void ABackRoomGameMode::FTableMenu::Apply(const ss::ui::GameSettings& S, bool bAll)
+{
+	ABackRoomGameMode& M = Mode;
+	if (bAll)
+	{
+		// As the apartment and the street apply them (NightOneGameMode::ApplySettings): scalability, the render scale and the
+		// frame cap, the display, ray-traced Lumen. (Kept from scene to scene, so a level's start leaves them be.)
+		if (UGameUserSettings* User = GEngine ? GEngine->GetGameUserSettings() : nullptr)
+		{
+			User->SetOverallScalabilityLevel(FMath::Clamp(S.Quality, 0, 4));
+			User->SetResolutionScaleValueEx(static_cast<float>(FMath::Min(S.ResolutionScale, 100)));
+			User->SetFrameRateLimit(static_cast<float>(S.FrameRateLimit));
+			User->SetVSyncEnabled(S.VSync);
+			if (GIsEditor)
+			{
+				// Play-In-Editor shares the editor's window: leave its size and mode alone.
+				User->ApplyNonResolutionSettings();
+			}
+			else
+			{
+				const FIntPoint Res = TableParseResolution(S.Resolution);
+				User->SetScreenResolution(Res.X > 0 ? Res : User->GetDesktopResolution());
+				User->SetFullscreenMode(S.WindowMode == 0 ? EWindowMode::Fullscreen : S.WindowMode == 1 ? EWindowMode::WindowedFullscreen : EWindowMode::Windowed);
+				User->ApplySettings(false);
+			}
+		}
+		SetTableCvar(TEXT("r.Lumen.HardwareRayTracing"), S.RayTracing ? 1 : 0);
+		SetTableCvar(TEXT("r.Lumen.HardwareRayTracing.LightingMode"), S.RayTracing && S.Quality >= 4 ? 2 : 0);
+	}
+	// The render scale: fixed, or moving to hold the chosen frame rate (FrameBudget.h).
+	M.FrameBudget.Configure(S.DynamicTarget, S.ResolutionScale);
+	// The mix: the room's and the menu's own voice. The engine mutes a game whose window isn't in front unless told otherwise.
+	for (UNightOneAudio* A : {M.Table ? M.Table->GetAudio() : nullptr, Voice.Get()})
+	{
+		if (A)
+		{
+			A->SetMix(S.MasterVolume / 100.0f, S.EffectsVolume / 100.0f, S.AmbienceVolume / 100.0f);
+		}
+	}
+	FApp::SetUnfocusedVolumeMultiplier(S.BackgroundAudio ? 1.0f : 0.0f);
+	// The look, the controls reminder, the view and the lens (the pawn and the HUD read them each frame).
+	LookScale = static_cast<float>(S.LookSensitivity) / 100.0f;
+	bInvertLook = S.InvertLook;
+	bShowHints = S.ShowHints;
+	FieldOfView = S.FieldOfView;
+	BrightnessBias = static_cast<float>(S.Brightness - 50) / 50.0f * 1.5f;
+	GrainScale = S.FilmGrain == 0 ? 0.0f : S.FilmGrain == 1 ? 1.0f : 2.2f;
+	FringeScale = S.ChromaticAberration ? 1.0f : 0.0f;
+	bMotionBlur = S.MotionBlur;
+	// The live table's pace.
+	const int32 Pace = FMath::Clamp(S.TablePace, 0, 2);
+	if (Pace != M.TablePace || !bAll)
+	{
+		M.TablePace = Pace;
+		M.ApplyTablePace();
+	}
+}
+
+void ABackRoomGameMode::FTableMenu::SaveSettings()
+{
+	SettingsDirtyAt = -1.0;
+	if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::CreateSaveGameObject(UNightOneSaveGame::StaticClass())))
+	{
+		Obj->Data = FString(UTF8_TO_TCHAR(Menu.Settings.Serialize().c_str()));
+		UGameplayStatics::SaveGameToSlot(Obj, UNightOneSaveGame::SettingsSlotName(), 0);
+	}
+}
+
+void ABackRoomGameMode::FTableMenu::Quit(bool bToDesktop)
+{
+	if (bQuitting)
+	{
+		return;
+	}
+	ABackRoomGameMode& M = Mode;
+	bQuitting = true;
+	bQuitToDesktop = bToDesktop;
+	QuitAt = RealTime;
+	SaveSettings();
+	if (M.bLive)
+	{
+		if (M.Tourney && !M.bLiveOver && !M.bCancelled)
+		{
+			// (Out in the last hand by the engine's count, and the table not yet at the deal that notes it: settled first.)
+			const bool bOutUnsettled = M.Tourney->Hero().Busted || M.Tourney->bFinished;
+			if (HandInPlay() || bOutUnsettled)
+			{
+				// Never left dead to be dealt again from the checkpoint before it: that would hand back what the player put
+				// in, and throw away a hand the engine had already decided. Played out, then saved as every hand is.
+				PlayOut();
+				UE_LOG(LogBackRoom, Log, TEXT("Quitting the Embercrest at %s: %s first"), *M.ClockLabel(), bOutUnsettled ? TEXT("the finish settled") : TEXT("the hand folded, played out and saved"));
+				return;
+			}
+			// The last hand's save, if the room hadn't written it yet.
+			if (M.bCheckpointDue && M.Table && M.Table->IsBetweenHands() && !M.Tourney->FinishPending())
+			{
+				M.LiveCheckpoint(false);
+			}
+		}
+		else
+		{
+			// Out (or champion) and watching the rest: what they saw goes to the world, as walking out the door would; and, as
+			// going home does, never with a seat waiting tonight (the desk takes the player off the next event's list).
+			M.NoteRailedPlaces();
+			if (!M.NextEntryId.IsEmpty() && !M.bOpeningNext)
+			{
+				M.LiveUnregister();
+			}
+		}
+		if (M.LiveSaver)
+		{
+			M.LiveSaver->Flush();
+		}
+		UE_LOG(LogBackRoom, Log, TEXT("Quit from the Embercrest at %s"), *M.ClockLabel());
+		Leave();
+		return;
+	}
+	if (!M.IsCareer() || M.Phase == EBackRoomPhase::Leaving || !M.Table)
+	{
+		// Practice keeps nothing; a night racked up is settled already.
+		Leave();
+		return;
+	}
+	if (M.Phase == EBackRoomPhase::Arriving || (M.HandsPlayed == 0 && M.Table->GetHandNumber() == 0))
+	{
+		// Not sat down yet, or not dealt in yet: nothing was played, so there's no night to settle. The bankroll and the
+		// clock as they stand.
+		M.SaveCareer(false);
+		Leave();
+		return;
+	}
+	if (M.Table->IsBetweenHands())
+	{
+		// Racked up on the way out: the night settled (the chips into the bankroll, the ledger, what the regulars saw).
+		M.BeginLeaving();
+		Leave();
+		return;
+	}
+	// A hand in play: the night settles from what's left once it's over (the chips they'd put in are the pot's).
+	PlayOut();
+	UE_LOG(LogBackRoom, Log, TEXT("Quitting Dee's game mid-hand: folding it, then settling the night"));
+}
+
+bool ABackRoomGameMode::FTableMenu::HandInPlay() const
+{
+	return Mode.Table && (Mode.bLive ? bHandDealt : !Mode.Table->IsBetweenHands());
+}
+
+void ABackRoomGameMode::FTableMenu::PlayOut()
+{
+	Menu.Close(RealTime);
+	ClosedAt = RealTime;
+	Thaw();
+	if (APlayerController* Pc = UGameplayStatics::GetPlayerController(&Mode, 0))
+	{
+		// The closed menu keeps the input (still painted while it fades), so nothing reaches the table meanwhile.
+		FInputModeUIOnly InputMode;
+		if (Widget)
+		{
+			Widget->SetVisibility(EVisibility::HitTestInvisible);
+			InputMode.SetWidgetToFocus(Widget);
+		}
+		Pc->SetInputMode(InputMode);
+		Pc->SetShowMouseCursor(false);
+		Pc->FlushPressedKeys();
+	}
+}
+
+void ABackRoomGameMode::FTableMenu::TickQuit()
+{
+	ABackRoomGameMode& M = Mode;
+	if (bLeft || !M.Table)
+	{
+		Leave();
+		return;
+	}
+	// Black, and held there over any fade of the room's own (a blink at a bust, a move), until the level goes.
+	if (APlayerController* Pc = UGameplayStatics::GetPlayerController(&M, 0); Pc && Pc->PlayerCameraManager)
+	{
+		Pc->PlayerCameraManager->SetManualCameraFade(static_cast<float>(FMath::Clamp((RealTime - QuitAt) / 0.35, 0.0, 1.0)), FLinearColor::Black, true);
+	}
+	// Quickly (nobody's watching), the hand's own pace otherwise: the cards and the engine are the same.
+	UGameplayStatics::SetGlobalTimeDilation(&M, 8.0f);
+	if (M.Table->GetPrompt().bYourTurn)
+	{
+		M.Table->HeroFold();
+	}
+	bool bOver = false;
+	if (M.bLive)
+	{
+		// Over once the room has heard the hand's news and written its checkpoint (between hands, as it always does), or
+		// the night is: a bust in it is settled first (the table notes it at its next deal; the engine says so already).
+		const bool bOut = M.Tourney && (M.Tourney->Hero().Busted || M.Tourney->bFinished);
+		bOver = M.bLiveOver || M.bCancelled || (!bHandDealt && !M.bCheckpointDue && !bOut);
+	}
+	else
+	{
+		bOver = M.Phase == EBackRoomPhase::Leaving || M.Table->IsBetweenHands();
+	}
+	if (!bOver && RealTime - QuitAt < 20.0)
+	{
+		return;
+	}
+	if (M.bLive)
+	{
+		// (Unfinished after all that: the checkpoint the deal wrote stands, and the hand is dead when the night comes back.)
+		UE_CLOG(!bOver, LogBackRoom, Warning, TEXT("The hand didn't finish behind the fade (%s): leaving on the dealt checkpoint"), *M.Table->Describe());
+		if (M.LiveSaver)
+		{
+			M.LiveSaver->Flush();
+		}
+	}
+	else
+	{
+		UE_CLOG(!bOver, LogBackRoom, Warning, TEXT("The hand didn't finish behind the fade (%s): settling as it stands"), *M.Table->Describe());
+		if (M.Phase != EBackRoomPhase::Leaving)
+		{
+			M.BeginLeaving();
+		}
+	}
+	Leave();
+}
+
+void ABackRoomGameMode::FTableMenu::Leave()
+{
+	if (bLeft)
+	{
+		return;
+	}
+	bLeft = true;
+	ABackRoomGameMode& M = Mode;
+	// Nothing else takes the player anywhere now (the walk home, the door).
+	M.bGoingHome = true;
+	ABackRoomChips::ChipUnit = 1;
+	if (bQuitToDesktop)
+	{
+		UKismetSystemLibrary::QuitGame(&M, UGameplayStatics::GetPlayerController(&M, 0), EQuitPreference::Quit, false);
+	}
+	else
+	{
+		UGameplayStatics::OpenLevel(&M, FName(TEXT("NightOne")), true, TEXT("Menu"));
+	}
+}
+
+void ABackRoomGameMode::OpenPauseMenu()
+{
+	if (TableMenu)
+	{
+		TableMenu->Open();
+	}
+}
+
+bool ABackRoomGameMode::IsPauseMenuUp() const
+{
+	return TableMenu && TableMenu->Menu.IsOpen();
+}
+
+bool ABackRoomGameMode::IsQuittingTable() const
+{
+	return TableMenu && TableMenu->bQuitting;
+}
+
+float ABackRoomGameMode::GetLookScale() const
+{
+	return TableMenu ? TableMenu->LookScale : 1.0f;
+}
+
+bool ABackRoomGameMode::IsLookInverted() const
+{
+	return TableMenu && TableMenu->bInvertLook;
+}
+
+bool ABackRoomGameMode::ShowsHints() const
+{
+	return !TableMenu || TableMenu->bShowHints;
+}
+
+float ABackRoomGameMode::SettingFov(float DefaultFov) const
+{
+	return TableMenu && TableMenu->FieldOfView != 50 ? TableFov(DefaultFov, TableMenu->FieldOfView) : DefaultFov;
+}
+
+void ABackRoomGameMode::ApplyPlayerLens(UCameraComponent* Camera) const
+{
+	if (!Camera || !TableMenu)
+	{
+		return;
+	}
+	FTableMenu& M = *TableMenu;
+	if (Stage && M.LensOf.Get() != Stage.Get())
+	{
+		// The room's grade is the stage's unbound lens; the camera's settings win over it, so they carry its values on.
+		M.LensOf = Stage.Get();
+		TInlineComponentArray<UPostProcessComponent*> Lenses(Stage.Get());
+		for (const UPostProcessComponent* Lens : Lenses)
+		{
+			if (Lens && Lens->bUnbound)
+			{
+				M.RoomBias = Lens->Settings.AutoExposureBias;
+				M.RoomGrain = Lens->Settings.FilmGrainIntensity;
+				break;
+			}
+		}
+	}
+	FPostProcessSettings& P = Camera->PostProcessSettings;
+	P.bOverride_AutoExposureBias = true;
+	P.AutoExposureBias = M.RoomBias + M.BrightnessBias;
+	P.bOverride_FilmGrainIntensity = true;
+	P.FilmGrainIntensity = M.RoomGrain * M.GrainScale;
+	// (Whatever fringing the heart put on the view this frame; off, none of it.)
+	P.SceneFringeIntensity *= M.FringeScale;
+	P.bOverride_MotionBlurAmount = true;
+	P.MotionBlurAmount = M.bMotionBlur ? 0.3f : 0.0f;
+}
+
+void ABackRoomGameMode::TestPause(bool bOpen)
+{
+	if (!TableMenu)
+	{
+		return;
+	}
+	if (bOpen)
+	{
+		OpenPauseMenu();
+	}
+	else if (TableMenu->Menu.IsOpen())
+	{
+		TableMenu->Menu.Close(TableMenu->RealTime);
+		TableMenu->Resume();
+	}
+}
+
+void ABackRoomGameMode::TestQuit(bool bToDesktop)
+{
+	if (TableMenu)
+	{
+		TableMenu->Describe();
+		TableMenu->Quit(bToDesktop);
+	}
+}
+
+FString ABackRoomGameMode::TestDescribeMenu() const
+{
+	if (!TableMenu)
+	{
+		return TEXT("no menu");
+	}
+	const FTableMenu& M = *TableMenu;
+	TableMenu->Describe();
+	return FString::Printf(TEXT("%s%s%s page %d | dilation %.4f | first row \"%s\" | note \"%s\" | warning \"%s\" | kept \"%s\" | look %.2f%s hints %d fov %d pace %d"),
+		M.Menu.IsOpen() ? TEXT("paused") : TEXT("playing"), M.bFrozen ? TEXT(" frozen") : TEXT(""), M.bQuitting ? TEXT(" quitting") : TEXT(""), static_cast<int32>(M.Menu.Current()),
+		UGameplayStatics::GetGlobalTimeDilation(this), UTF8_TO_TCHAR(M.Menu.Info.Status.empty() ? "" : M.Menu.Info.Status.front().second.c_str()),
+		UTF8_TO_TCHAR(M.Menu.Info.PauseNote.c_str()), UTF8_TO_TCHAR(M.Menu.Info.QuitWarning.c_str()), UTF8_TO_TCHAR(M.Menu.Info.QuitKept.c_str()), M.LookScale,
+		M.bInvertLook ? TEXT(" inverted") : TEXT(""), M.bShowHints ? 1 : 0, M.FieldOfView, TablePace);
 }
 
 // ------------------------------------------------------------------ game mode
@@ -1729,6 +2976,7 @@ ABackRoomGameMode::ABackRoomGameMode()
 {
 	DefaultPawnClass = ABackRoomPawn::StaticClass();
 	HUDClass = ABackRoomHUD::StaticClass();
+	PlayerControllerClass = ABackRoomPlayerController::StaticClass();
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
 }
@@ -1741,6 +2989,11 @@ void ABackRoomGameMode::EndPlay(const EEndPlayReason::Type Reason)
 	if (LiveSaver)
 	{
 		LiveSaver->Flush();
+	}
+	// The settings the player was still changing, and the menu off the screen.
+	if (TableMenu)
+	{
+		TableMenu->End();
 	}
 	Super::EndPlay(Reason);
 }
@@ -1795,25 +3048,10 @@ void ABackRoomGameMode::StartPlay()
 	FindOrSpawnStage();
 	const bool bCareer = bLive || LoadCareer();
 	SeatEveryone();
-	// The player's volumes (and whether to keep playing behind another window), as set in the apartment's menus.
-	{
-		ss::ui::GameSettings Settings;
-		if (UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SettingsSlotName(), 0))
-		{
-			if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SettingsSlotName(), 0)))
-			{
-				ss::ui::GameSettings::Parse(std::string(TCHAR_TO_UTF8(*Obj->Data)), Settings);
-			}
-		}
-		if (UNightOneAudio* A = Table ? Table->GetAudio() : nullptr)
-		{
-			A->SetMix(Settings.MasterVolume / 100.0f, Settings.EffectsVolume / 100.0f, Settings.AmbienceVolume / 100.0f);
-		}
-		FApp::SetUnfocusedVolumeMultiplier(Settings.BackgroundAudio ? 1.0f : 0.0f);
-		FrameBudget.Configure(Settings.DynamicTarget, Settings.ResolutionScale);
-		TablePace = FMath::Clamp(Settings.TablePace, 0, 2);
-		ApplyTablePace();
-	}
+	// The player's settings, as set in the apartment's menus (the mix, whether to keep playing behind another window, the
+	// frame budget, the table's pace, the look and the lens), and the pause menu that changes them here.
+	TableMenu = MakeShared<FTableMenu>(*this);
+	TableMenu->Begin();
 	if (bCareer)
 	{
 		BeginArrival();
@@ -1838,20 +3076,11 @@ void ABackRoomGameMode::CycleTablePace()
 	TablePace = (TablePace + 1) % 3;
 	ApplyTablePace();
 	PaceShownAt = FPlatformTime::Seconds();
-	// Kept with the rest of the player's settings (the apartment's menus show it too).
-	ss::ui::GameSettings Settings;
-	if (UGameplayStatics::DoesSaveGameExist(UNightOneSaveGame::SettingsSlotName(), 0))
+	// Kept with the rest of the player's settings (the pause menu and the apartment's show it too).
+	if (TableMenu)
 	{
-		if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::LoadGameFromSlot(UNightOneSaveGame::SettingsSlotName(), 0)))
-		{
-			ss::ui::GameSettings::Parse(std::string(TCHAR_TO_UTF8(*Obj->Data)), Settings);
-		}
-	}
-	Settings.TablePace = TablePace;
-	if (UNightOneSaveGame* Obj = Cast<UNightOneSaveGame>(UGameplayStatics::CreateSaveGameObject(UNightOneSaveGame::StaticClass())))
-	{
-		Obj->Data = FString(UTF8_TO_TCHAR(Settings.Serialize().c_str()));
-		UGameplayStatics::SaveGameToSlot(Obj, UNightOneSaveGame::SettingsSlotName(), 0);
+		TableMenu->Menu.Settings.TablePace = TablePace;
+		TableMenu->SaveSettings();
 	}
 }
 
@@ -1967,6 +3196,12 @@ void ABackRoomGameMode::OnTableNote(uint8 Note)
 {
 	if (bLive)
 	{
+		if (TableMenu)
+		{
+			// (A quit from the pause menu plays out a hand dealt and not yet ended: see FTableMenu::Quit.)
+			const EBackRoomTableNote N = static_cast<EBackRoomTableNote>(Note);
+			TableMenu->bHandDealt = N == EBackRoomTableNote::HandDealt || (TableMenu->bHandDealt && N != EBackRoomTableNote::HandEnded);
+		}
 		LiveNote(Note);
 		return;
 	}
@@ -2256,6 +3491,16 @@ void ABackRoomGameMode::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	FrameBudget.Tick(DeltaSeconds);
 	const float RealDt = FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
+	// The pause menu drawn (and fading out), the settings kept, a quit under way. While it's up the night stands still:
+	// neither its clock nor the tournament's moves (LIVE_TOURNAMENTS.md, Time: pausing isn't sitting out).
+	if (TableMenu)
+	{
+		TableMenu->Tick(RealDt);
+		if (TableMenu->bFrozen || TableMenu->bLeft)
+		{
+			return;
+		}
+	}
 	if (!IsCareer() || !Table)
 	{
 		return;

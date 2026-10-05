@@ -2,6 +2,7 @@
 #pragma once
 
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/UI/Avatars.h"
@@ -551,6 +552,142 @@ inline const char* NetBoardName(net::Board B)
 	case net::Board::Live: return "Live Player of the Year";
 	}
 	return "";
+}
+
+// ------------------------------------------------------------------ the Embercrest
+
+/** The Embercrest's colours (art/blender/brand.py): midnight navy, ash white and ember copper. */
+const uint32_t EcMidnight = 0x0a1020;
+const uint32_t EcNavy = 0x121c33;
+const uint32_t EcSlate = 0x1d2a47;
+const uint32_t EcIce = 0x8d9ab4;
+const uint32_t EcAsh = 0xebe7df;
+const uint32_t EcEmberDeep = 0x9e2f0c;
+const uint32_t EcEmber = 0xd9531e;
+const uint32_t EcEmberHot = 0xf2832e;
+const uint32_t EcGold = 0xf6b04a;
+const uint32_t EcFlame = 0xffd78a;
+
+/**
+ * The Embercrest's mark (brand.py's mark()): the ember rising behind a faceted three-peak crest, in a Size box centred
+ * on (Cx, Cy). Ground is what it sits on: a rim of it parts the crest from the ember.
+ */
+inline void NetEmbercrest(Canvas& Cv, float Cx, float Cy, float Size, const Color& Ground)
+{
+	const float U = Size / 100.0f;
+	const float Base = Cy + 28.0f * U;
+	auto P = [&](float X, float Y) { return Vec2{Cx + X * U, Base - Y * U}; };
+	// The ember: its glow, then the disc from deep ember at the rim to flame at the heart, hottest low where the light
+	// breaks over the ridge.
+	const Vec2 E = P(0.0f, 42.0f);
+	Cv.FillCircle(E.X, E.Y, 47.0f * U, Paint::Radial(E, 30.0f * U, E, 47.0f * U, Hex(EcEmberHot, 0.32f), -1.0f, Color(), Hex(EcEmberHot, 0.0f)));
+	Cv.FillCircle(E.X, E.Y, 34.0f * U, Paint::Radial({E.X, E.Y + 7.5f * U}, 0.0f, E, 34.0f * U, Hex(EcFlame), 0.5f, Hex(EcEmberHot), Hex(EcEmberDeep)));
+	// The crest: two shoulders and the high middle peak.
+	Cv.FillPolygon({P(-51.0f, -1.5f), P(-26.0f, 37.5f), P(-15.0f, 25.5f), P(0.0f, 64.0f), P(13.0f, 32.5f), P(25.0f, 43.5f), P(51.0f, -1.5f)}, Ground);
+	const Vec2 Lp = P(-26.0f, 34.0f), V1 = P(-15.0f, 22.0f), Top = P(0.0f, 60.0f), V2 = P(13.0f, 29.0f), Rp = P(25.0f, 40.0f), Rb = P(48.0f, 0.0f);
+	Cv.FillPolygon({P(-48.0f, 0.0f), Lp, V1, Top, V2, Rp, Rb}, Hex(EcAsh));
+	// The faces away from the light, one per peak, and snow on the high peak's lit face.
+	Cv.FillPolygon({Lp, V1, P(-13.0f, 0.0f), P(-21.0f, 0.0f)}, Hex(EcIce));
+	Cv.FillPolygon({Top, V2, P(15.0f, 0.0f), P(3.0f, 0.0f)}, Hex(EcIce));
+	Cv.FillPolygon({Rp, Rb, P(31.0f, 0.0f)}, Hex(EcIce));
+	Cv.FillPolygon({Top, P(-8.0f, 43.0f), P(-4.5f, 46.5f), P(-1.5f, 42.0f), P(1.6f, 49.0f)}, Hex(0xffffff));
+	// The ground line, parted under the high peak.
+	Cv.FillRect({Cx - 48.0f * U, Base + 4.1f * U, 45.0f * U, 2.4f * U}, Hex(EcEmberHot));
+	Cv.FillRect({Cx + 3.0f * U, Base + 4.1f * U, 45.0f * U, 2.4f * U}, Hex(EcEmberHot));
+}
+
+/** Each of the room's events in its own colour (the stripe down its card, its dots on the week). */
+inline Color LiveColor(const live::EventTemplate& T)
+{
+	const std::string Key = T.Key;
+	return Key == "nightly" ? Hex(EcEmberHot) : Key == "sunday" ? Hex(EcGold) : Key == "turbo" ? Hex(0xef4d5a) : Key == "bigstack" ? Hex(0xb48cff)
+		: Key == "warmup" ? Hex(0x5fd3b0) : Hex(0x7cc4ff);
+}
+
+/** "8 hours", "4.5 hours", "an hour". */
+inline std::string LiveHours(double Hours)
+{
+	const double Tenths = std::round(Hours * 10.0) / 10.0;
+	if (Tenths == 1.0)
+	{
+		return "an hour";
+	}
+	return (Tenths == std::floor(Tenths) ? std::to_string(static_cast<int>(Tenths)) : Fixed(Tenths, 1)) + " hours";
+}
+
+/** A break's length and how often it comes: "15 min every 2 hours". */
+inline std::string LiveBreaks(const live::EventTemplate& T)
+{
+	const double Every = static_cast<double>(T.BreakEvery) * T.LevelMinutes / 60.0;
+	return std::to_string(static_cast<int>(T.BreakMinutes)) + " min every " + (Every == 1.0 ? std::string("hour") : LiveHours(Every));
+}
+
+/** A start on the hour without its minutes: "7 PM", "10:30 PM". */
+inline std::string LiveTime(double World)
+{
+	std::string Label = net::TimeLabel(World);
+	const size_t At = Label.find(":00 ");
+	return At == std::string::npos ? Label : Label.erase(At, 3);
+}
+
+/** A line on an event card that weighs it against the player's money. */
+struct LiveWarning
+{
+	std::string Text;
+	int Severity = 0; // 0 a note, 1 something to weigh (it costs the rent), 2 it can't be done (the money isn't there)
+};
+
+/**
+ * One of the Embercrest's events as its cards show it (the Burner's rows, RiverLine's Embercrest page, the second
+ * screen, the wall calendar): what the room publishes about it, where it stands at World, and what entering costs
+ * against the bankroll and the rent. It decides nothing: registering is Session::GoToLive's, and Why is the reason it
+ * would give.
+ */
+struct LiveCard
+{
+	/** Where the night stands. */
+	enum Stage : int
+	{
+		Soon,    // the desk isn't open yet
+		Desk,    // the desk is taking entries, cards haven't started
+		LateReg, // cards are in the air and the bus still makes late registration
+		Closed,  // registration has closed (for the player: the bus wouldn't make it)
+		Over,    // played out, or called off
+	};
+	live::Occurrence O;
+	const life::LiveEntry* Entry = nullptr; // the player's, in any state
+	bool Registered = false;                // that entry is live: they're in it
+	int Phase = Soon;
+	std::string When;   // "Today", "Tomorrow", "Thursday"
+	std::string Split;  // "$105 + $15 fee"
+	int StackBb = 0;    // the starting stack in big blinds at level 1
+	double RunMinutes = 0.0; // about how long a deep run takes with the field expected (live::DeepRunMinutes, to the half hour)
+	double Ends = 0.0;       // about when it ends (world minutes)
+	int Field = 0;      // the field: the entry's, the world's plan once it has one, or who came to one called off
+	bool Planned = false; // Field is known (else the card states the room's usual crowd; the world plans a day ahead)
+	bool Cancelled = false; // called off short of its minimum (World::Cancel): nobody played it
+	std::vector<std::pair<std::string, std::string>> Known; // who the player knows in the world's plan, and how ("Sal", "Rival")
+	std::string Status; // "Desk opens 4:00 PM", "Late reg till 8:00 PM", "You're registered", "11th of 97"
+	std::string Why;    // why registering wouldn't go through right now ("" when it would, or the player is in)
+	std::vector<LiveWarning> Warnings; // the most serious first
+};
+/**
+ * The card for O as the player stands at World. PlannedField is the world's planned field for it (World::PlannedEntries;
+ * 0 when it hasn't planned that day yet): RiverLine::CardFor passes it with who the player knows in it.
+ */
+LiveCard LiveCardOf(const Session& S, const live::Occurrence& O, double World, int PlannedField = 0);
+/** The events the bus can still make (live::Reachable), less any the room has called off. */
+std::vector<live::Occurrence> LiveAhead(const Session& S, double World, double HoursAhead);
+/** A deep run in O with Entrants (the player included), to the half hour: its length into the card, and when it ends. */
+inline void LiveRun(LiveCard& Card, int Entrants)
+{
+	Card.RunMinutes = std::round(live::DeepRunMinutes(Card.O, Entrants) / 30.0) * 30.0;
+	Card.Ends = Card.O.Start + Card.RunMinutes;
+}
+/** What it costs to play O: the buy-in and the bus there and back. */
+inline Chips LiveCost(const live::Occurrence& O)
+{
+	return O.Valid() ? O.T->BuyInCents + 2 * live::BusFareCents : 0;
 }
 } // namespace rlnet_detail
 } // namespace ui

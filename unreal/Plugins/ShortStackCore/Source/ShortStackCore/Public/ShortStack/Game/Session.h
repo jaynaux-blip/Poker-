@@ -255,7 +255,10 @@ struct SaveData
 	SHORTSTACKCORE_API void NoteBackRoom(double World, const std::vector<std::string>& Names, Chips NetCents);
 	/** A Embercrest Sunday: where the player and the people with faces finished (saves from before the daily schedule). */
 	SHORTSTACKCORE_API void NoteEmbercrest(double World, int HeroPlace, int Field, const std::vector<std::pair<std::string, int>>& Places);
-	/** A live tournament the host played: the player's finish and what their tables saw, for the world. */
+	/**
+	 * A live tournament the host played: the player's finish and what their tables saw, for the world. The entry keeps
+	 * who sat with the player and what passed between them (life::LiveEntry::Table): what they text about afterwards.
+	 */
 	SHORTSTACKCORE_API void NoteLive(double World, const std::string& EventId, int HeroPlace, Chips Prize, int Field, const std::vector<LiveSeen>& Seen);
 	/**
 	 * What the player saw of the rest of a live tournament after their own finish (railing it): who went out where, the
@@ -742,6 +745,15 @@ private:
 	void NameField();
 	/** Live entries left registered after their event ended (the game closed mid-tournament) are resolved. */
 	void ResolveAbandonedLive();
+	/**
+	 * Live events short of their minimum field (R6): an entry the player isn't in the room for is refunded once the cards
+	 * should have gone in the air, and the world records every such event as called off (one the room refunded too).
+	 */
+	void SettleCancelled();
+	/** The desk's word on an entry the session refunded (the player wasn't there to hear the floor). */
+	void CancelledTexts();
+	/** After a night at the Embercrest, the people the player sat with text over the next day or two (From..To crossed). */
+	void BondTexts(double From, double To);
 	bool CheckSatellite();
 	void CheckUnlocks();
 	void CheckCalendar(double From, double To, bool Awake);

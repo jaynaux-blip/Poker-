@@ -3,6 +3,7 @@
 //   world_test                     the checks (ctest)
 //   world_test years N [seed]      plays N years and prints the world's health every year
 //   world_test npc NAME [days]     plays some days and describes someone
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/World.h"
@@ -286,6 +287,121 @@ void EmbercrestWeeks(const world::World& Base)
 	std::printf("embercrest: %zu regulars, %.1f at a Nightly, %d back three or more times in four weeks, %d still regulars a month on\n", Regulars.size(), PerNightly, Recurring, Stayed);
 }
 
+/** The minimum field (R6): a thin night is called off when its cards should go in the air; nobody plays or pays for it, and it never has a winner. */
+void MinimumField(const world::World& Base)
+{
+	world::World W = Base;
+	const int Tomorrow = net::DayOf(W.Clock()) + 1;
+	W.EnsurePlanned(Tomorrow);
+	const std::vector<live::Occurrence> Day = live::Occurrences(Tomorrow);
+	const live::Occurrence Full = Day.front();
+	const live::Occurrence Thin = Day.back();
+	W.SetPlannedEntries(Thin.Id, 12);
+	const std::vector<int> Coming = W.Registered(Thin.Id);
+	Check(W.PlannedEntries(Thin.Id) == 12 && Coming.size() <= 12, "a thin night: twelve coming");
+	W.AdvanceTo(Thin.Start - 1.0);
+	Check(W.CancellationOf(Thin.Id) == nullptr && W.PlannedEntries(Thin.Id) == 12, "nothing is called off before cards");
+	std::map<int, world::Ledger> Before;
+	for (int Id : Coming)
+	{
+		Before[Id] = W.Get(Id)->Totals[static_cast<size_t>(world::Venue::Live)];
+	}
+	W.AdvanceTo(Thin.Start + 1.0);
+	const world::Cancellation* C = W.CancellationOf(Thin.Id);
+	Check(C && C->Field == 12 && C->At == Thin.Start, "at cards-up a thin night is called off");
+	Check(W.Registered(Thin.Id).empty() && W.PlannedEntries(Thin.Id) == 0, "nobody plays a cancelled event");
+	W.AdvanceTo(Thin.Start + Thin.T->Hours * 60.0 + 120.0);
+	Check(W.ResultOf(Thin.Id) == nullptr && W.ResultOf(Full.Id) != nullptr, "the cancelled night has no winner; the day's full one does");
+	W.Cancel(Full.Id, Full.Start, 5);
+	Check(W.CancellationOf(Full.Id) == nullptr && W.ResultOf(Full.Id) != nullptr, "an event already decided stays decided");
+	// Nobody paid for it or finished in it (nobody plays two live events in a day).
+	bool Untouched = true;
+	for (const auto& It : Before)
+	{
+		const world::Npc* N = W.Get(It.first);
+		const world::Ledger& Now = N->Totals[static_cast<size_t>(world::Venue::Live)];
+		Untouched = Untouched && Now.Events == It.second.Events && Now.Spent == It.second.Spent;
+		for (const world::Finish& F : N->Recent)
+		{
+			Untouched = Untouched && !(F.Event == Thin.T->Name && F.Day == Thin.Day);
+		}
+	}
+	Check(!Before.empty() && Untouched, "nobody paid for the cancelled night or finished in it");
+	// The world remembers it through a save.
+	std::string Saved;
+	W.Write(Saved);
+	world::World Copy;
+	Load(Copy, Saved);
+	std::string Again;
+	Copy.Write(Again);
+	Check(Again == Saved && Copy.CancellationOf(Thin.Id) && Copy.CancellationOf(Thin.Id)->Field == 12, "a cancellation is saved");
+	// A week on, the same event runs as usual.
+	live::Occurrence Later;
+	for (const live::Occurrence& O : live::Occurrences(Tomorrow + 7))
+	{
+		Later = std::string(O.T->Key) == Thin.T->Key ? O : Later;
+	}
+	W.AdvanceTo(Later.Start + 30.0);
+	Check(Later.Valid() && W.CancellationOf(Later.Id) == nullptr && W.PlannedEntries(Later.Id) >= 60, "a week on, the same event runs with its usual crowd");
+	std::printf("minimum field: %s called off with 12 at %s; nobody paid, no winner\n", Thin.Id.c_str(), net::TimeLabel(Thin.Start).c_str());
+}
+
+/** The player's own nights: never called off over their head, where the people around them finished, who's coming back. */
+void PlayerNights(const world::World& Base)
+{
+	world::World W = Base;
+	const int Tomorrow = net::DayOf(W.Clock()) + 1;
+	W.EnsurePlanned(Tomorrow);
+	const std::vector<live::Occurrence> Day = live::Occurrences(Tomorrow);
+	const live::Occurrence Noon = Day.front();
+	const live::Occurrence Night = Day.back();
+	// Someone registered knows it's their next night at the room (as far as the world has planned).
+	const std::vector<int> Coming = W.Registered(Night.Id);
+	Check(!Coming.empty() && W.NextEmbercrest(Coming.front(), Night.Start - 60.0) == Night.Id && W.NextEmbercrest(Coming.front(), Night.Start + 1.0) != Night.Id,
+		"who's coming back to the room, and when");
+	// A thin night the player is in: their room calls it, and the world takes its word.
+	W.HeroEntered(Night.Id, Night.T->Name);
+	W.SetPlannedEntries(Night.Id, 10);
+	// The noon game: the player goes out 40th, after one of the world's people (50th) and before another.
+	W.HeroEntered(Noon.Id, Noon.T->Name);
+	const std::vector<int> AtNoon = W.Registered(Noon.Id);
+	Check(AtNoon.size() >= 2, "the noon game has the world's people in it");
+	if (AtNoon.size() < 2)
+	{
+		return;
+	}
+	W.AdvanceTo(Noon.Start + 180.0);
+	world::World::TableReport Rp;
+	Rp.Places.push_back({AtNoon[0], 50});
+	Rp.StillIn.push_back(AtNoon[1]);
+	Rp.Met = {AtNoon[0], AtNoon[1]};
+	W.HeroFinished(Noon.Id, 40, 0, Rp);
+	W.AdvanceTo(Night.Start + 30.0);
+	Check(W.CancellationOf(Night.Id) == nullptr, "a night the player is in is never called off over their head");
+	W.Cancel(Night.Id, Night.Start, 11);
+	Check(W.CancellationOf(Night.Id) && W.Registered(Night.Id).empty(), "the player's room called it off: the world agrees");
+	W.AdvanceTo(Night.Start + 2.5 * 1440.0);
+	Check(W.ResultOf(Night.Id) == nullptr, "and it never has a winner");
+	int Place = 0;
+	Chips Prize = -1;
+	int Better = 0;
+	Chips BetterPrize = -1;
+	int Nobody = 0;
+	Chips NobodyPrize = 0;
+	const bool Out = W.FinishIn(Noon.Id, AtNoon[0], Place, Prize);
+	const bool Ahead = W.FinishIn(Noon.Id, AtNoon[1], Better, BetterPrize);
+	Check(Out && Place == 50 && Prize == 0 && Ahead && Better >= 1 && Better < 40 && !W.FinishIn(Noon.Id, -5, Nobody, NobodyPrize),
+		"where the people at the player's tables finished: as the room saw it, and ahead of the player for those still in");
+	std::string Saved;
+	W.Write(Saved);
+	world::World Copy;
+	Load(Copy, Saved);
+	int Kept = 0;
+	Chips KeptPrize = -1;
+	Check(Copy.FinishIn(Noon.Id, AtNoon[1], Kept, KeptPrize) && Kept == Better && KeptPrize == BetterPrize, "the places are saved with the result");
+	std::printf("player nights: out 40th at %s; %s went out 50th, %s finished %s\n", Noon.Id.c_str(), W.Get(AtNoon[0])->Name.c_str(), W.Get(AtNoon[1])->Name.c_str(), Ordinal(Better).c_str());
+}
+
 int Checks()
 {
 	Calendar();
@@ -331,6 +447,8 @@ int Checks()
 	std::printf("30 days in %.2fs\n", Month);
 	Invariants(W, "day 30");
 	EmbercrestWeeks(W);
+	MinimumField(W);
+	PlayerNights(W);
 	int Finished = 0;
 	int Anonymous = 0;
 	int Ours = 0;

@@ -70,10 +70,10 @@ std::vector<Activity> Build()
 	Add("dee-game", Kind::Game, "Dee's game", "Spin Cycle Laundromat, the back room", 6.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 21 * 60, 3 * 60, 0xf2a541,
 		"One-two no-limit behind the dryers. $40 to sit, $200 max. Dee deals, the regulars talk, and you can read every one of them.");
 	L.back().Days = (1 << 1) | (1 << 3) | (1 << 5);
-	// The Embercrest's card room: its desk is open from three hours before the noon game to the turbo's last call
-	// (each event's own window is live::CanRegister's).
+	// The Embercrest's card room, up at the resort on the ridge: its desk is open from three hours before the noon game to
+	// the turbo's last call (each event's own window is live::CanRegister's).
 	Add("embercrest", Kind::Live, "The Embercrest", "Embercrest Casino, the card room", 8.0, 0.0, 0.0, 0.0, 25.0, 0.0, 0.0, 9 * 60, 23 * 60 + 10, 0x5fb4ff,
-		"The city's card room: two or three 6-max freezeouts a day, sixty to a hundred and twenty runners, deep stacks. The 14 bus, twenty minutes.");
+		"The resort casino on the ridge: two or three 6-max freezeouts a day, sixty to a hundred and twenty runners, deep stacks. The 14 bus climbs up from the city in twenty minutes.");
 	// Sleep.
 	Add("nap", Kind::Sleep, "Nap", "Bed", 4.0, 0.0, 0.0, 0.0, -45.0, 0.0, 0.0, 0, 1440, 0x8b5cf6, "Four hours. Enough to function.");
 	Add("sleep", Kind::Sleep, "Sleep", "Bed", 8.0, 0.0, 0.0, 0.0, -90.0, 0.0, 0.0, 0, 1440, 0x8b5cf6, "A real night's sleep. The world keeps going without you.");

@@ -472,13 +472,18 @@ void World::Write(std::string& Out) const
 		L << JoinRecords(R);
 		Emit(L);
 	}
+	// The last couple of days' results, and the big ones (older small results aren't needed to carry on).
+	auto Kept = [&](const std::string& Id) {
+		const auto End = ResultEnds.find(Id);
+		const auto Res = Results.find(Id);
+		const bool Recent = End == ResultEnds.end() || End->second >= Now - 3.0 * 1440.0;
+		const bool Big = Res != Results.end() && !Res->second.FinalTable.empty() && Res->second.FinalTable.front().Prize >= 2500000;
+		return Recent || Big;
+	};
 	for (const auto& It : Results)
 	{
 		const auto End = ResultEnds.find(It.first);
-		// The last couple of days, and the big ones (older small results aren't needed to carry on).
-		const bool Recent = End == ResultEnds.end() || End->second >= Now - 3.0 * 1440.0;
-		const bool Big = !It.second.FinalTable.empty() && It.second.FinalTable.front().Prize >= 2500000;
-		if (!Recent && !Big)
+		if (!Kept(It.first))
 		{
 			continue;
 		}
@@ -491,6 +496,27 @@ void World::Write(std::string& Out) const
 		}
 		L << JoinRecords(R);
 		Emit(L);
+	}
+	// Where the people the world follows finished in the player's live events, with those events' results.
+	for (const auto& It : FieldPlaces)
+	{
+		if (Results.count(It.first) == 0 || !Kept(It.first))
+		{
+			continue;
+		}
+		Line L("fieldplaces");
+		L << Esc(It.first);
+		std::vector<std::string> R;
+		for (const Placed& P : It.second)
+		{
+			R.push_back(Rec({I(P.Npc), I(P.Place), I(P.Prize)}));
+		}
+		L << JoinRecords(R);
+		Emit(L);
+	}
+	for (const auto& It : Cancelled)
+	{
+		Emit(Line("cancelled") << Esc(It.first) << D(It.second.At) << I(It.second.Field));
 	}
 	const size_t LogFrom = Log.size() > 2500 ? Log.size() - 2500 : 0;
 	for (size_t K = LogFrom; K < Log.size(); ++K)
@@ -900,6 +926,29 @@ bool World::Read(const std::vector<std::string>& Fields)
 		}
 		Results[Id] = Res;
 		ResultEnds[Id] = End;
+	}
+	else if (Kind == "fieldplaces")
+	{
+		std::vector<Placed>& Out = FieldPlaces[C.Str()];
+		Out.clear();
+		for (const std::string& R : Split(C.At < Fields.size() ? Fields[C.At] : std::string(), '|'))
+		{
+			const std::vector<std::string> V = Split(R, '~');
+			Cursor Rc{V, 0};
+			Placed P;
+			P.Npc = Rc.Small();
+			P.Place = Rc.Small();
+			P.Prize = Rc.Int();
+			Out.push_back(P);
+		}
+	}
+	else if (Kind == "cancelled")
+	{
+		const std::string Id = C.Str();
+		Cancellation Cn;
+		Cn.At = C.Dbl();
+		Cn.Field = C.Small();
+		Cancelled[Id] = Cn;
 	}
 	else if (Kind == "log")
 	{

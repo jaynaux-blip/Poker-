@@ -47,6 +47,7 @@ void RiverLine::OpenPage(Page P, double Now)
 	}
 	PageShown = P;
 	S.ConfirmRegister = false;
+	LiveConfirm.clear();
 	if (P == Page::News)
 	{
 		NewsSeenAt = World;
@@ -104,6 +105,17 @@ void RiverLine::ShowSeries(const std::string& Id, double Now)
 	SeriesId = Id;
 }
 
+void RiverLine::ShowLiveDay(int Day, const std::string& OccurrenceId, double Now)
+{
+	if (Day != LiveDay)
+	{
+		LiveDayAt = Now;
+		LiveConfirm.clear();
+	}
+	LiveDay = Day;
+	LivePick = OccurrenceId;
+}
+
 const std::vector<net::NewsItem>& RiverLine::NewsFeed()
 {
 	const long long Key = static_cast<long long>(std::floor(World)) * 1000 + static_cast<long long>(S.History.size());
@@ -121,7 +133,7 @@ void RiverLine::NavTabs(double Now)
 	const bool InLobby = S.CurrentScreen == Screen::Lobby;
 	// At the tables the pages are a click away; the tables keep playing.
 	const bool Navigable = InLobby || (S.CurrentScreen == Screen::Table && S.T);
-	const char* Names[5] = {"Lobby", "Series", "Leaderboards", "News", "Career"};
+	const char* Names[6] = {"Lobby", "Series", "Leaderboards", "News", "Career", "Embercrest"};
 	float X = 250.0f;
 	float TargetX = NavX;
 	float TargetW = NavW;
@@ -133,7 +145,7 @@ void RiverLine::NavTabs(double Now)
 			Unread += It.At > NewsSeenAt ? 1 : 0;
 		}
 	}
-	for (int I = 0; I < 5; ++I)
+	for (int I = 0; I < 6; ++I)
 	{
 		const float Tw = UI.Measure(Names[I], 17.0f, 700);
 		const Ui::ClickState St = UI.Clickable(std::string("nav") + Names[I], {X - 12.0f, 10.0f, Tw + 24.0f, NetTop - 12.0f}, Navigable);
@@ -171,7 +183,13 @@ void RiverLine::NavTabs(double Now)
 			UI.Text(N, X + Tw + 13.0f, 26.5f, Ts(11.0f, 800, Hex(0xffffff), Align::Center, Baseline::Middle));
 			Extra = 22.0f;
 		}
-		X += Tw + 34.0f + Extra;
+		if (I == 5 && live::ActiveEntry(S.Life))
+		{
+			// Registered at the Embercrest: its ember by the name.
+			C->FillCircle(X + Tw + 10.0f, 26.0f, 4.5f, Hex(EcEmberHot));
+			Extra = 14.0f;
+		}
+		X += Tw + 30.0f + Extra;
 	}
 	if (InLobby && TargetW > 0.0f)
 	{
@@ -1403,6 +1421,7 @@ void RiverLine::LobbyPages(double Now)
 	case Page::Leaderboards: BoardsPage(Now); break;
 	case Page::News: NewsPage(Now); break;
 	case Page::Career: CareerPage(Now); break;
+	case Page::Embercrest: EmbercrestPage(Now); break;
 	}
 	C->Restore();
 	C->SetAlpha(A0);
@@ -1411,6 +1430,510 @@ void RiverLine::LobbyPages(double Now)
 		UI.Ptr = Real;
 		PlayerCard(Now);
 	}
+}
+
+// ------------------------------------------------------------------ the Embercrest
+
+namespace rlnet_detail
+{
+/** An event's name without its price ("Embercrest Nightly"): the card prints the buy-in on its own. */
+std::string LiveTitle(const live::EventTemplate& T)
+{
+	const std::string Name = T.Name;
+	const size_t At = Name.rfind(" $");
+	return At == std::string::npos ? Name : Name.substr(0, At);
+}
+} // namespace rlnet_detail
+
+void RiverLine::EmbercrestPage(double Now)
+{
+	const int Today = net::DayOf(World);
+	const life::State& L = S.Life;
+	const life::LiveEntry* Mine = live::ActiveEntry(L);
+	const live::Occurrence Entered = Mine ? live::FindOccurrence(Mine->Id) : live::Occurrence();
+	const std::vector<live::Occurrence> Next = LiveAhead(S, World, 48.0);
+	// The day shown: the one picked while it's this week, else the entry's day, else the next day with an event the
+	// bus can still make.
+	if (LiveDay < Today || LiveDay > Today + 6)
+	{
+		const int Day = Entered.Valid() ? Entered.Day : !Next.empty() ? Next.front().Day : Today;
+		ShowLiveDay(std::min(std::max(Day, Today), Today + 6), std::string(), Now);
+	}
+	const Color Ember = Hex(EcEmberHot);
+	const float In = NetEase((Now - PageAt) / 0.8);
+
+	// The banner: the mark over the ranges, what the room is, and where the player stands with it.
+	const Rect B{24.0f, 84.0f, 1052.0f, 152.0f};
+	C->GlowRoundRect({B.X, B.Y + 8.0f, B.W, B.H}, 16.0f, Rgba(0, 0, 0, 0.45f), 22.0f);
+	C->FillRoundRect(B, 16.0f, Paint::Linear({B.X, 0.0f}, {B.X + B.W, 0.0f}, Hex(EcMidnight), Mix(Hex(EcNavy), Hex(EcEmberDeep), 0.2f)));
+	C->PushClip(B);
+	for (int K = 0; K < 28; ++K)
+	{
+		// Stars over the ranges, each on its own beat.
+		const uint32_t H = live::FaceHash("star" + std::to_string(K));
+		const float Sx = B.X + 150.0f + Nf(H % 880u);
+		const float Sy = B.Y + 8.0f + Nf((H >> 10) % 90u);
+		C->FillCircle(Sx, Sy, 0.8f + Nf((H >> 20) % 3u) * 0.35f, Rgba(235, 231, 223, 0.18f + 0.14f * Nf(std::sin(Now * 0.9 + K))));
+	}
+	const Vec2 Glow{B.X + 86.0f, B.Y + 64.0f};
+	C->FillEllipse(Glow.X, Glow.Y, 170.0f, 120.0f, Paint::Radial(Glow, 0.0f, Glow, 170.0f, Hex(EcEmberHot, 0.3f), 0.45f, Hex(EcEmber, 0.08f), Hex(EcEmber, 0.0f)));
+	for (int Range = 0; Range < 2; ++Range)
+	{
+		std::vector<Vec2> Ridge;
+		for (float X = B.X; X <= B.X + B.W + 24.0f; X += 24.0f)
+		{
+			const float Phase = Nf(Range) * 2.1f;
+			Ridge.push_back({X, B.Y + B.H - 40.0f + Nf(Range) * 16.0f + 10.0f * std::sin(X * 0.011f + Phase) + 6.0f * std::sin(X * 0.037f + 1.3f + Phase)});
+		}
+		Ridge.push_back({B.X + B.W + 24.0f, B.Y + B.H});
+		Ridge.push_back({B.X, B.Y + B.H});
+		C->FillPolygon(Ridge, Range == 0 ? Hex(EcSlate, 0.55f) : Hex(EcMidnight, 0.85f));
+	}
+	C->PopClip();
+	C->StrokeRoundRect(B, 16.0f, NetA(Ember, 0.35f), 1.0f);
+	NetEmbercrest(*C, B.X + 86.0f, B.Y + 74.0f + (1.0f - In) * 8.0f, 112.0f, Hex(EcMidnight));
+	const float Tx = B.X + 168.0f;
+	NetSpaced(*C, "EMBERCREST CASINO \xC2\xB7 CARD ROOM", Tx, B.Y + 36.0f, 11.0f, 800, Ember, 1.8f);
+	UI.Text("The Embercrest", Tx, B.Y + 76.0f, Ts(36.0f, 900, Hex(EcAsh)));
+	NetParagraph(*C,
+		"Two or three 6-max freezeouts a day, deep stacks, sixty to a hundred and twenty runners. The desk opens three hours before cards and takes entries until late registration closes.",
+		Tx, B.Y + 100.0f, 540.0f, 13.5f, 500, Hex(0xc3cedf), 18.0f, 2);
+	UI.Text("The 14 bus: 20 minutes and " + NetMoney(live::BusFareCents) + " each way", Tx, B.Y + 140.0f, Ts(12.5f, 700, Hex(EcIce)));
+	{
+		const Rect Rb{B.X + B.W - 318.0f, B.Y + 18.0f, 298.0f, B.H - 36.0f};
+		UI.RRect(Rb, 12.0f, Rgba(4, 8, 16, 0.6f), NetA(Ember, 0.4f));
+		std::string Kicker;
+		std::string Big;
+		std::string Sub;
+		if (Mine && Entered.Valid())
+		{
+			const LiveCard Card = LiveCardOf(S, Entered, World);
+			Kicker = "YOU'RE REGISTERED";
+			Big = std::string(Entered.T->Short) + " \xC2\xB7 " + net::TimeLabel(Entered.Start);
+			Sub = Card.When + " \xC2\xB7 paid " + NetMoney(Mine->PaidCents) + (Mine->ArrivedAt > 0.0 ? " \xC2\xB7 the night's under way" : "");
+		}
+		else if (L.LiveEvents > 0)
+		{
+			Kicker = "YOUR NIGHTS HERE";
+			Big = std::to_string(L.LiveEvents) + (L.LiveEvents == 1 ? " night" : " nights") + " \xC2\xB7 " + std::to_string(L.LiveCashes) + (L.LiveCashes == 1 ? " cash" : " cashes");
+			Sub = (L.LiveBestPlace > 0 ? "Best finish " + Ordinal(L.LiveBestPlace) + " \xC2\xB7 " : std::string()) +
+				(L.LiveWonCents > 0 ? "won " + NetMoney(L.LiveWonCents) + " in prizes" : std::string("no cash yet"));
+		}
+		else if (!Next.empty())
+		{
+			const live::Occurrence& O = Next.front();
+			const LiveCard Card = LiveCardOf(S, O, World);
+			Kicker = "NEXT THE BUS CAN MAKE";
+			Big = std::string(O.T->Short) + " \xC2\xB7 " + net::TimeLabel(O.Start);
+			Sub = Card.When + " \xC2\xB7 " + (O.Start > World ? "cards in " + net::Countdown(O.Start - World) : "late reg till " + net::TimeLabel(O.LateRegEnds));
+		}
+		NetSpaced(*C, Kicker, Rb.X + 20.0f, Rb.Y + 30.0f, 10.5f, 800, Ember, 1.6f);
+		UI.Text(Big, Rb.X + 20.0f, Rb.Y + 62.0f, Ts(20.0f, 800, Hex(EcAsh), Align::Left, Baseline::Alphabetic, false, Rb.W - 40.0f));
+		UI.Text(Sub, Rb.X + 20.0f, Rb.Y + 88.0f, Ts(13.0f, 600, Hex(EcIce), Align::Left, Baseline::Alphabetic, false, Rb.W - 40.0f));
+	}
+
+	// The day shown, a step at a time through the week (or straight to a day from the week on the right).
+	const std::vector<live::Occurrence> Day = live::Occurrences(LiveDay);
+	for (int Dir = -1; Dir <= 1; Dir += 2)
+	{
+		const int To = LiveDay + Dir;
+		const bool Can = To >= Today && To <= Today + 6;
+		const Rect Sr{Dir < 0 ? 24.0f : 60.0f, 248.0f, 30.0f, 30.0f};
+		const Ui::ClickState St = UI.Clickable(Dir < 0 ? "lprev" : "lnext", Sr, Can);
+		if (St.Clicked)
+		{
+			ShowLiveDay(To, std::string(), Now);
+		}
+		UI.RRect(Sr, 15.0f, St.Hover ? Hex(0x172a42) : Rgba(255, 255, 255, 0.03f), Can ? pal::Line : Rgba(255, 255, 255, 0.04f));
+		NetChevron(*C, Sr.X + 15.0f, Sr.Y + 15.0f, 11.0f, Dir < 0 ? 1 : 0, Can ? (St.Hover ? pal::Ink : pal::Muted) : pal::Dim);
+	}
+	const std::string DayName = LiveDay == Today ? "Today" : LiveDay == Today + 1 ? "Tomorrow" : std::string(net::WeekdayName(LiveDay, true));
+	const float Dw = UI.Text(DayName, 104.0f, 270.0f, Ts(21.0f, 800, pal::Ink));
+	UI.Text(LiveDay <= Today + 1 ? std::string(net::WeekdayName(LiveDay, true)) + ", " + net::DateLabel(LiveDay) : net::DateLabel(LiveDay), 114.0f + Dw, 270.0f, Ts(15.0f, 600, pal::Muted));
+	const bool RentDay = (L.RentStage == life::Rent::Due || L.RentStage == life::Rent::FinalNotice) && net::DayOf(L.RentDeadline - 1.0) == LiveDay;
+	UI.Text(std::to_string(Day.size()) + " events" + (RentDay ? "  \xC2\xB7  rent due at midnight" : ""), 1076.0f, 270.0f, Ts(13.0f, 600, RentDay ? pal::Red : pal::Muted, Align::Right));
+	const float CardH = 214.0f;
+	for (size_t I = 0; I < Day.size() && I < 3; ++I)
+	{
+		LiveEventCard(Day[I], {24.0f, 282.0f + Nf(I) * (CardH + 12.0f), 1052.0f, CardH}, Now, static_cast<int>(I));
+	}
+	if (Day.size() < 3)
+	{
+		const float Top = 282.0f + Nf(Day.size()) * (CardH + 12.0f);
+		LiveRoomRules({24.0f, Top, 1052.0f, 950.0f - Top});
+	}
+
+	LiveWeek({1092.0f, 84.0f, 484.0f, 866.0f}, Now);
+}
+
+void RiverLine::LiveEventCard(const live::Occurrence& O, const Rect& Slot, double Now, int Index)
+{
+	if (!O.Valid())
+	{
+		return;
+	}
+	const LiveCard Card = CardFor(O);
+	const live::EventTemplate& T = *O.T;
+	const Color Ember = Hex(EcEmberHot);
+	const Color Col = LiveColor(T);
+	const float Ci = NetEase((Now - std::max(PageAt, LiveDayAt) - 0.07 * static_cast<double>(Index)) / 0.45);
+	const Rect R{Slot.X + (1.0f - Ci) * 24.0f, Slot.Y, Slot.W, Slot.H};
+	const float A0 = C->GetAlpha();
+	C->SetAlpha(A0 * Ci);
+	const bool Picked = O.Id == LivePick;
+	const bool Gone = !Card.Registered && Card.Phase >= LiveCard::Closed;
+	C->GlowRoundRect({R.X, R.Y + 6.0f, R.W, R.H}, 14.0f, Rgba(0, 0, 0, 0.35f), 16.0f);
+	if (Picked)
+	{
+		const float Pulse = 0.5f + 0.5f * Nf(std::sin(Now * 3.0));
+		C->GlowRoundRect(R, 14.0f, NetA(Col, 0.12f + 0.1f * Pulse), 14.0f);
+	}
+	UI.RRect(R, 14.0f, Paint::Linear({R.X, 0.0f}, {R.X + R.W, 0.0f}, Mix(Hex(0x101a2b), Col, Card.Registered ? 0.14f : 0.06f), Hex(0x0d1729)),
+		Picked || Card.Registered ? NetA(Col, 0.75f) : pal::Line, Picked ? 1.5f : 1.0f);
+	C->FillRoundRect({R.X + 1.0f, R.Y + 14.0f, 4.0f, R.H - 28.0f}, 2.0f, Gone ? NetA(Col, 0.4f) : Col);
+
+	// When, where it stands, and the field.
+	UI.Text(net::TimeLabel(O.Start), R.X + 26.0f, R.Y + 44.0f, Ts(26.0f, 800, Gone ? pal::Muted : pal::Ink, Align::Left, Baseline::Alphabetic, true));
+	UI.Text(Card.When + " \xC2\xB7 " + net::DateLabel(O.Day), R.X + 26.0f, R.Y + 66.0f, Ts(13.0f, 600, pal::Muted));
+	std::string Pill;
+	Color Pc = pal::Dim;
+	if (Card.Registered)
+	{
+		Pill = "YOU'RE IN";
+		Pc = Ember;
+	}
+	else if (Card.Entry)
+	{
+		Pill = Card.Entry->State == life::LiveEntry::Refunded ? "REFUNDED" : Card.Entry->PrizeCents > 0 ? "CASHED" : "PLAYED";
+		Pc = Card.Entry->PrizeCents > 0 ? pal::Gold : pal::Muted;
+	}
+	else if (Card.Cancelled)
+	{
+		Pill = "CALLED OFF";
+		Pc = NetA(pal::Red, 0.8f);
+	}
+	else
+	{
+		switch (Card.Phase)
+		{
+		case LiveCard::Soon: Pill = "DESK " + NetUpper(LiveTime(O.DeskOpens)); Pc = Hex(0x6b7a93); break;
+		case LiveCard::Desk: Pill = "REGISTERING"; Pc = Hex(0x4f9bff); break;
+		case LiveCard::LateReg: Pill = "LATE REG \xC2\xB7 " + NetHms(O.LateRegEnds - live::TravelMinutes - World) + " LEFT"; Pc = pal::Green; break;
+		case LiveCard::Closed: Pill = "RUNNING"; Pc = Hex(0x9aa7bd); break;
+		default: Pill = "OVER"; Pc = pal::Dim; break;
+		}
+	}
+	NetPill(*C, Pill, R.X + 26.0f, R.Y + 80.0f, Pc, false, 10.0f);
+	const std::string FieldBig = Card.Planned ? (Card.Entry || Card.Cancelled ? Grouped(Card.Field) : "~" + Grouped(Card.Field)) : std::to_string(T.FieldLo) + "\xE2\x80\x93" + std::to_string(T.FieldHi);
+	UI.Text(FieldBig, R.X + 26.0f, R.Y + 140.0f, Ts(24.0f, 800, Gone ? pal::Muted : pal::Ink, Align::Left, Baseline::Alphabetic, true));
+	NetSpaced(*C, Card.Entry && Card.Planned ? "IN THE FIELD" : Card.Cancelled ? "CAME" : !Card.Planned ? "USUAL FIELD" : Card.Phase >= LiveCard::Closed ? "FIELD" : "EXPECTED", R.X + 26.0f,
+		R.Y + 158.0f, 9.5f, 800, pal::Dim, 1.2f);
+
+	// The event and its price.
+	const float Mx = R.X + 196.0f;
+	UI.Text(LiveTitle(T), Mx, R.Y + 42.0f, Ts(22.0f, 900, Gone ? pal::Muted : pal::Ink, Align::Left, Baseline::Alphabetic, false, R.W - 196.0f - 230.0f));
+	NetSpaced(*C, NetUpper(std::string(T.Speed)) + " \xC2\xB7 6-MAX FREEZEOUT \xC2\xB7 BIG-BLIND ANTE FROM LEVEL 3", Mx, R.Y + 64.0f, 10.0f, 800, Col, 1.3f);
+	UI.Text(NetMoney(T.BuyInCents), R.X + R.W - 26.0f, R.Y + 46.0f, Ts(30.0f, 900, Gone ? pal::Muted : pal::Gold, Align::Right, Baseline::Alphabetic, true));
+	UI.Text(Card.Split, R.X + R.W - 26.0f, R.Y + 68.0f, Ts(13.0f, 600, pal::Muted, Align::Right));
+
+	// The room's facts.
+	const float Cw = (R.X + R.W - 26.0f - Mx) / 3.0f;
+	const std::pair<const char*, std::string> Facts[6] = {
+		{"STACK", Grouped(T.StartingStack) + " \xC2\xB7 " + std::to_string(Card.StackBb) + " BB"},
+		{"LEVELS", std::to_string(static_cast<int>(T.LevelMinutes)) + " minutes"},
+		{"BREAKS", LiveBreaks(T)},
+		{"LATE REG", "until " + net::TimeLabel(O.LateRegEnds) + " (" + std::to_string(T.LateRegLevels) + " levels)"},
+		{"MINIMUM", std::to_string(T.MinEntrants) + " \xC2\xB7 else refunded"},
+		{"DEEP RUN", "about " + LiveHours(Card.RunMinutes / 60.0) + ", to " + net::TimeLabel(Card.Ends)},
+	};
+	for (int K = 0; K < 6; ++K)
+	{
+		const float Fx = Mx + Nf(K % 3) * Cw;
+		const float Fy = R.Y + 102.0f + Nf(K / 3) * 24.0f;
+		NetSpaced(*C, Facts[K].first, Fx, Fy, 9.5f, 800, pal::Dim, 1.2f);
+		UI.Text(Facts[K].second, Fx + 72.0f, Fy, Ts(14.0f, 700, Gone ? pal::Muted : pal::Ink, Align::Left, Baseline::Alphabetic, false, Cw - 80.0f));
+	}
+
+	// Getting there, and who's going.
+	const float Lw = R.X + R.W - 26.0f - 230.0f - 20.0f - Mx;
+	std::string Bus = "The 14 bus: " + NetMoney(live::BusFareCents) + " and 20 minutes each way";
+	if (!Card.Entry && Card.Phase <= LiveCard::LateReg)
+	{
+		Bus += Card.Phase == LiveCard::LateReg ? "  \xC2\xB7  leave by " + net::TimeLabel(O.LateRegEnds - live::TravelMinutes) + " for late reg"
+											   : "  \xC2\xB7  leave by " + net::TimeLabel(O.Start - live::TravelMinutes) + " for cards";
+	}
+	UI.Text(Bus, Mx, R.Y + 156.0f, Ts(13.0f, 600, Hex(0xc3cedf), Align::Left, Baseline::Alphabetic, false, Lw));
+	std::string People;
+	if (!Card.Known.empty())
+	{
+		People = "You know " + Card.Known.front().first + " (" + Card.Known.front().second + ")";
+		for (size_t K = 1; K < Card.Known.size() && K < 3; ++K)
+		{
+			People += ", " + Card.Known[K].first + " (" + Card.Known[K].second + ")";
+		}
+		People += Card.Known.size() > 3 ? " +" + std::to_string(Card.Known.size() - 3) : std::string();
+	}
+	else if (Card.Cancelled)
+	{
+		People = "Nobody played it: every entry was refunded.";
+	}
+	else if (!Card.Planned && O.Day > net::DayOf(World) + 1)
+	{
+		People = "Who's going firms up the day before.";
+	}
+	else if (Card.Phase < LiveCard::Over)
+	{
+		People = "Nobody you know is down for it.";
+	}
+	UI.Text(People, Mx, R.Y + 178.0f, Ts(13.0f, 600, Card.Known.empty() ? pal::Muted : Hex(0xe9c79a), Align::Left, Baseline::Alphabetic, false, Lw));
+
+	// The button: registering (Session::GoToLive, the Burner's own path) behind a confirm, or the way back to an entry. A
+	// reason too long for the button's second line goes to the strip along the bottom.
+	const Rect Bb{R.X + R.W - 26.0f - 230.0f, R.Y + 138.0f, 230.0f, 42.0f};
+	const Chips Fare = live::BusFareCents;
+	const float SubSize = 17.0f * 0.72f;
+	const bool WhyFits = Card.Why.empty() || UI.Measure(Card.Why, SubSize, 600, true) <= Bb.W - 16.0f;
+	std::vector<LiveWarning> Strip = Card.Warnings;
+	if (!WhyFits && !Card.Entry && Card.Phase <= LiveCard::LateReg && S.BankrollCents >= LiveCost(O))
+	{
+		Strip.insert(Strip.begin(), LiveWarning{Card.Why, 2});
+	}
+	if (Card.Entry && !Card.Registered)
+	{
+		UI.Text(Card.Status, Bb.X + Bb.W, Bb.Y + 28.0f, Ts(17.0f, 800, Card.Entry->PrizeCents > 0 ? pal::Gold : pal::Muted, Align::Right, Baseline::Alphabetic, false, Bb.W + 60.0f));
+	}
+	else if (Card.Registered)
+	{
+		ButtonOpts B;
+		B.Kind = ButtonKind::Primary;
+		B.Size = 17.0f;
+		B.Enabled = Card.Why.empty();
+		B.Sub = !B.Enabled ? (WhyFits ? Card.Why : std::string()) : "Paid " + NetMoney(Card.Entry->PaidCents);
+		if (UI.Button("lgo" + O.Id, Bb, "Go back", B))
+		{
+			GoToLive(O.Id, Now);
+		}
+	}
+	else if (Card.Phase == LiveCard::Over)
+	{
+		UI.Text(Card.Status, Bb.X + Bb.W, Bb.Y + 28.0f, Ts(15.0f, 700, pal::Muted, Align::Right, Baseline::Alphabetic, false, Bb.W + 60.0f));
+	}
+	else if (Card.Phase == LiveCard::Closed)
+	{
+		ButtonOpts B;
+		B.Kind = ButtonKind::Secondary;
+		B.Size = 17.0f;
+		B.Enabled = false;
+		B.Sub = "cards till about " + net::TimeLabel(Card.Ends);
+		UI.Button("lshut" + O.Id, Bb, "Registration closed", B);
+	}
+	else if (LiveConfirm == O.Id)
+	{
+		// Exactly what leaves the bank now leads the strip, the warnings after it.
+		Strip.insert(Strip.begin(), LiveWarning{"Leaves now: " + NetMoney(T.BuyInCents) + " at the desk and " + NetMoney(Fare) + " for the bus \xC2\xB7 balance after " +
+													 Money(S.BankrollCents - T.BuyInCents - Fare),
+										-1});
+		const float Hw = (Bb.W - 10.0f) / 2.0f;
+		ButtonOpts Ok;
+		Ok.Kind = ButtonKind::Gold;
+		Ok.Size = 17.0f;
+		Ok.Enabled = Card.Why.empty();
+		if (UI.Button("lok" + O.Id, {Bb.X, Bb.Y, Hw, Bb.H}, "Confirm", Ok))
+		{
+			GoToLive(O.Id, Now);
+		}
+		ButtonOpts No;
+		No.Kind = ButtonKind::Ghost;
+		No.Size = 17.0f;
+		if (UI.Button("lno" + O.Id, {Bb.X + Hw + 10.0f, Bb.Y, Hw, Bb.H}, "Cancel", No))
+		{
+			LiveConfirm.clear();
+		}
+	}
+	else
+	{
+		ButtonOpts B;
+		B.Enabled = Card.Why.empty();
+		B.Kind = B.Enabled ? ButtonKind::Primary : ButtonKind::Secondary;
+		B.Size = 17.0f;
+		B.Sub = B.Enabled ? "+ the bus, " + NetMoney(2 * Fare) : WhyFits ? Card.Why : std::string();
+		if (UI.Button("lreg" + O.Id, Bb, "Register \xC2\xB7 " + NetMoney(T.BuyInCents), B))
+		{
+			LiveConfirm = O.Id;
+		}
+	}
+
+	// What it costs against the money (confirming, what leaves the bank now leads it, in gold).
+	const Rect Wr{R.X + 18.0f, R.Y + R.H - 28.0f, R.W - 36.0f, 20.0f};
+	if (!Strip.empty())
+	{
+		const int Lead = Strip.front().Severity;
+		UI.RRect(Wr, 6.0f, Lead < 0 ? Rgba(242, 193, 78, 0.08f) : Lead >= 2 ? Rgba(239, 77, 90, 0.1f) : Lead == 1 ? Rgba(242, 138, 58, 0.09f) : Rgba(255, 255, 255, 0.03f));
+		float X = Wr.X + 10.0f;
+		for (const LiveWarning& Wn : Strip)
+		{
+			const Color Wc = Wn.Severity < 0 ? pal::Gold : Wn.Severity >= 2 ? pal::Red : Wn.Severity == 1 ? pal::Orange : Hex(0x9fb0c8);
+			if (Wn.Severity >= 1)
+			{
+				C->FillCircle(X + 6.0f, Wr.Y + 10.0f, 6.0f, Wc);
+				UI.Text("!", X + 6.0f, Wr.Y + 10.5f, Ts(10.0f, 900, Hex(0x0d1729), Align::Center, Baseline::Middle));
+				X += 18.0f;
+			}
+			else if (Wn.Severity == 0)
+			{
+				NetCheck(*C, X + 6.0f, Wr.Y + 10.0f, 10.0f, Wc);
+				X += 18.0f;
+			}
+			X += UI.Text(Wn.Text, X, Wr.Y + 14.5f, Ts(12.5f, 700, Wc, Align::Left, Baseline::Alphabetic, false, Wr.X + Wr.W - 10.0f - X)) + 22.0f;
+			if (X > Wr.X + Wr.W - 80.0f)
+			{
+				break;
+			}
+		}
+	}
+	C->SetAlpha(A0);
+}
+
+void RiverLine::LiveRoomRules(const Rect& R)
+{
+	if (R.H < 120.0f)
+	{
+		return;
+	}
+	Panel(R, 14.0f);
+	Section("HOW THE ROOM RUNS", R.X + 24.0f, R.Y + 34.0f, Hex(EcEmberHot));
+	const std::string Rules[4] = {
+		"Every event is a 6-max freezeout: one entry, no rebuys. A big-blind ante starts at level 3, and there's a break every six levels.",
+		"The desk opens three hours before cards and takes entries until late registration closes. You can hold one entry at a time.",
+		"An event that doesn't reach its stated minimum is cancelled, and every entry is refunded in full.",
+		"The 14 bus is 20 minutes and " + NetMoney(live::BusFareCents) + " each way. The fare home is paid when you leave the room.",
+	};
+	float Y = R.Y + 64.0f;
+	for (const std::string& Rule : Rules)
+	{
+		if (Y > R.Y + R.H - 14.0f)
+		{
+			break;
+		}
+		C->FillCircle(R.X + 30.0f, Y - 5.0f, 3.0f, Hex(EcEmberHot));
+		Y = NetParagraph(*C, Rule, R.X + 44.0f, Y, R.W - 72.0f, 14.0f, 500, Hex(0xc3cedf), 19.0f, 2) + 9.0f;
+	}
+}
+
+void RiverLine::LiveWeek(const Rect& R, double Now)
+{
+	const int Today = net::DayOf(World);
+	const life::State& L = S.Life;
+	const Color Ember = Hex(EcEmberHot);
+	const double Since = Now - PageAt;
+	Panel(R);
+	Section("THE WEEK", R.X + 24.0f, R.Y + 36.0f, Ember);
+	int Count = 0;
+	for (int D = Today; D <= Today + 6; ++D)
+	{
+		Count += static_cast<int>(live::Occurrences(D).size());
+	}
+	UI.Text(std::to_string(Count) + " events", R.X + R.W - 24.0f, R.Y + 36.0f, Ts(13.0f, 600, pal::Muted, Align::Right));
+	const bool RentLive = L.RentStage == life::Rent::Due || L.RentStage == life::Rent::FinalNotice;
+	const int RentDay = net::DayOf(L.RentDeadline - 1.0);
+	float Y = R.Y + 54.0f;
+	for (int D = Today; D <= Today + 6; ++D)
+	{
+		const std::vector<live::Occurrence> Os = live::Occurrences(D);
+		const float H = 28.0f + 25.0f * Nf(Os.size());
+		const bool On = D == LiveDay;
+		const Rect Dr{R.X + 12.0f, Y, R.W - 24.0f, H};
+		const float Di = NetEase((Since - 0.04 * static_cast<double>(D - Today)) / 0.4);
+		const float A0 = C->GetAlpha();
+		C->SetAlpha(A0 * Di);
+		if (On)
+		{
+			UI.RRect(Dr, 10.0f, NetA(Ember, 0.08f), NetA(Ember, 0.35f));
+		}
+		const Ui::ClickState Ds = UI.Clickable("lday" + std::to_string(D), {Dr.X, Dr.Y, Dr.W, 26.0f});
+		if (Ds.Clicked)
+		{
+			ShowLiveDay(D, std::string(), Now);
+		}
+		const std::string Name = D == Today ? "TODAY" : D == Today + 1 ? "TOMORROW" : NetUpper(net::WeekdayName(D, true));
+		const float Nw = NetSpaced(*C, Name, Dr.X + 12.0f, Y + 19.0f, 10.5f, 800, On || Ds.Hover ? Ember : pal::Muted, 1.4f);
+		UI.Text(net::DateLabel(D), Dr.X + 22.0f + Nw, Y + 19.0f, Ts(11.5f, 600, pal::Dim));
+		if (RentLive && D == RentDay)
+		{
+			const std::string Due = (L.RentStage == life::Rent::FinalNotice ? "LOCKS CHANGE \xC2\xB7 " : "RENT DUE \xC2\xB7 ") + NetMoney(L.RentDueCents);
+			const float Pw = C->Measure(Due, 9.0f, 700) + 9.0f * 1.3f;
+			NetPill(*C, Due, Dr.X + Dr.W - 10.0f - Pw, Y + 6.0f, pal::Red, false, 9.0f);
+		}
+		for (size_t K = 0; K < Os.size(); ++K)
+		{
+			const live::Occurrence& O = Os[K];
+			const Rect Row{Dr.X + 4.0f, Y + 26.0f + Nf(K) * 25.0f, Dr.W - 8.0f, 24.0f};
+			const Ui::ClickState St = UI.Clickable("lev" + O.Id, Row);
+			if (St.Clicked)
+			{
+				ShowLiveDay(D, O.Id, Now);
+			}
+			if (St.Hover || O.Id == LivePick)
+			{
+				UI.RRect(Row, 6.0f, Rgba(255, 255, 255, O.Id == LivePick ? 0.06f : 0.04f));
+			}
+			const life::LiveEntry* E = live::EntryFor(L, O.Id);
+			const bool Off = !E && S.Living().CancellationOf(O.Id) != nullptr;
+			const bool Past = Off || O.LateRegEnds < World + live::TravelMinutes;
+			C->FillCircle(Row.X + 14.0f, Row.Y + 12.0f, 4.0f, Past && !E ? NetA(LiveColor(*O.T), 0.4f) : LiveColor(*O.T));
+			UI.Text(net::TimeLabel(O.Start), Row.X + 28.0f, Row.Y + 17.0f, Ts(12.5f, 700, Past ? pal::Dim : pal::Muted, Align::Left, Baseline::Alphabetic, true));
+			UI.Text(O.T->Short, Row.X + 104.0f, Row.Y + 17.0f, Ts(14.0f, 700, Past && !E ? pal::Muted : pal::Ink, Align::Left, Baseline::Alphabetic, false, 190.0f));
+			UI.Text(NetMoney(O.T->BuyInCents), Row.X + Row.W - 92.0f, Row.Y + 17.0f, Ts(13.0f, 800, Past ? pal::Dim : pal::Gold, Align::Right, Baseline::Alphabetic, true));
+			// The player's entry, or how far along the night is.
+			if (E)
+			{
+				const std::string Mark = E->State == life::LiveEntry::Registered ? std::string("YOU'RE IN") : E->State == life::LiveEntry::Refunded ? std::string("REFUNDED") : Ordinal(E->Place);
+				const Color Mc = E->State == life::LiveEntry::Registered ? Ember : E->PrizeCents > 0 ? pal::Gold : pal::Muted;
+				const float Mw = C->Measure(Mark, 9.0f, 700) + 9.0f * 1.3f;
+				NetPill(*C, Mark, Row.X + Row.W - 8.0f - Mw, Row.Y + 4.5f, Mc, E->State == life::LiveEntry::Registered, 9.0f);
+			}
+			else if (Off)
+			{
+				NetSpaced(*C, "CALLED OFF", Row.X + Row.W - 8.0f, Row.Y + 16.0f, 9.0f, 800, NetA(pal::Red, 0.8f), 1.0f, Align::Right);
+			}
+			else if (!Past && O.Start <= World)
+			{
+				NetSpaced(*C, "LATE REG", Row.X + Row.W - 8.0f, Row.Y + 16.0f, 9.0f, 800, pal::Green, 1.0f, Align::Right);
+			}
+			else if (Past)
+			{
+				NetCheck(*C, Row.X + Row.W - 18.0f, Row.Y + 12.0f, 9.0f, pal::Dim);
+			}
+		}
+		C->SetAlpha(A0);
+		Y += H + 6.0f;
+	}
+
+	// The money: the balance against the rent, as the Career page has it.
+	const Rect Mb{R.X + 12.0f, R.Y + R.H - 128.0f, R.W - 24.0f, 116.0f};
+	if (Mb.Y < Y)
+	{
+		return;
+	}
+	UI.RRect(Mb, 12.0f, Rgba(4, 8, 16, 0.45f), pal::Line);
+	NetSpaced(*C, "BALANCE", Mb.X + 18.0f, Mb.Y + 28.0f, 10.0f, 800, pal::Muted, 1.4f);
+	UI.Text(Money(S.BankrollCents), Mb.X + 18.0f, Mb.Y + 62.0f, Ts(26.0f, 900, pal::Gold, Align::Left, Baseline::Alphabetic, true));
+	const bool Evicted = L.RentStage == life::Rent::Evicted;
+	const std::string Head = Evicted ? "A KEY BACK \xC2\xB7 " + NetMoney(L.RentDueCents)
+		: L.RentStage == life::Rent::FinalNotice ? "FINAL NOTICE \xC2\xB7 " + NetMoney(L.RentDueCents) + " " + NetUpper(net::WeekdayName(RentDay, true))
+		: L.RentStage == life::Rent::Paid ? "RENT PAID \xC2\xB7 NEXT DUE " + NetUpper(net::DateLabel(RentDay))
+										 : "RENT \xC2\xB7 " + NetMoney(L.RentDueCents) + " DUE " + NetUpper(net::WeekdayName(RentDay, true));
+	NetSpaced(*C, Head, Mb.X + Mb.W - 18.0f, Mb.Y + 28.0f, 10.0f, 800, L.RentStage == life::Rent::Paid ? pal::Green : pal::Red, 1.3f, Align::Right);
+	const Chips Rent = std::max<Chips>(1, L.RentDueCents);
+	const float Frac = Nf(Clamp01(static_cast<double>(S.BankrollCents) / static_cast<double>(Rent)));
+	const Rect Bar{Mb.X + 18.0f, Mb.Y + 78.0f, Mb.W - 36.0f, 8.0f};
+	UI.RRect(Bar, 4.0f, Rgba(255, 255, 255, 0.08f));
+	UI.RRect({Bar.X, Bar.Y, std::max(8.0f, Bar.W * Frac * NetEase(Since / 0.9)), Bar.H}, 4.0f, Paint::Linear({Bar.X, 0.0f}, {Bar.X + Bar.W, 0.0f}, pal::Red, pal::Gold));
+	const std::string Note = L.RentStage == life::Rent::Paid ? std::string("Paid up: nothing on the calendar but poker.")
+		: S.BankrollCents >= L.RentDueCents ? (Evicted ? std::string("Enough to move back in: the Bank app.") : std::string("Covered: pay it in the Bank app."))
+											: NetMoney(L.RentDueCents - S.BankrollCents) + (Evicted ? " to go to move back in" : " to go before the landlord comes");
+	UI.Text(Note, Mb.X + 18.0f, Mb.Y + 104.0f, Ts(12.5f, 600, S.BankrollCents >= L.RentDueCents || L.RentStage == life::Rent::Paid ? pal::Green : Hex(0xc3cedf), Align::Left, Baseline::Alphabetic,
+		false, Mb.W - 36.0f));
 }
 
 // ------------------------------------------------------------------ series

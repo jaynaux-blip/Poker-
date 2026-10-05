@@ -5,6 +5,7 @@
 #include "ShortStack/Game/Network.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -15,6 +16,8 @@ namespace live
 namespace
 {
 constexpr int Mon = 1, Tue = 2, Wed = 4, Thu = 8, Fri = 16, Sat = 32, Sun = 64;
+/** Live pace: about two and a half minutes a hand. */
+constexpr double LiveSecondsPerHand = 150.0;
 
 int WeekdayOfDay(int Day)
 {
@@ -121,6 +124,69 @@ std::vector<Occurrence> Reachable(double World, double HoursAhead)
 	return Out;
 }
 
+Occurrence NextOpen(double World, double Arrive, const std::string& Except)
+{
+	const double There = World + std::max(0.0, Arrive);
+	for (int Day = net::DayOf(World) - 1; Day <= net::DayOf(World) + 1; ++Day)
+	{
+		for (const Occurrence& O : Occurrences(Day))
+		{
+			if (O.Id != Except && O.LateRegEnds >= There && O.Start <= World + net::MinutesPerDay)
+			{
+				return O;
+			}
+		}
+	}
+	return Occurrence();
+}
+
+double DeepRunMinutes(const Occurrence& O, int Entrants)
+{
+	if (!O.Valid())
+	{
+		return 0.0;
+	}
+	// The last hand comes at about the big blind that the chips in play cover 3.4 times for every hand of a level (the
+	// more hands a level, the more of the field goes out in each), between two levels by the ratio of their blinds:
+	// measured against the engine's own nights (session_test). The breaks fall on their level boundaries.
+	const EventTemplate& T = *O.T;
+	const double InPlay = static_cast<double>(std::max(2, Entrants)) * static_cast<double>(T.StartingStack);
+	const double Last = InPlay / (3.4 * T.LevelMinutes * 60.0 / LiveSecondsPerHand);
+	const std::vector<Level>& Levels = DeepstackLevels();
+	double Played = static_cast<double>(Levels.size());
+	for (size_t I = 0; I < Levels.size(); ++I)
+	{
+		const double Bb = static_cast<double>(Levels[I].Bb);
+		if (Bb >= Last)
+		{
+			const double Below = I > 0 ? static_cast<double>(Levels[I - 1].Bb) : Bb / 2.0;
+			Played = static_cast<double>(I) - 1.0 + std::log(Last / Below) / std::log(Bb / Below);
+			break;
+		}
+	}
+	Played = std::max(0.5, Played);
+	const double Breaks = T.BreakEvery > 0 ? std::floor(Played / static_cast<double>(T.BreakEvery)) : 0.0;
+	return Played * T.LevelMinutes + Breaks * T.BreakMinutes;
+}
+
+std::string DayWord(const Occurrence& O, double World)
+{
+	if (!O.Valid())
+	{
+		return std::string();
+	}
+	const bool Evening = O.T->StartMinute >= 17 * 60;
+	const int Days = O.Day - net::DayOf(World);
+	switch (Days)
+	{
+	case 0: return Evening ? "tonight" : "today";
+	case 1: return Evening ? "tomorrow night" : "tomorrow";
+	case -1: return Evening ? "last night" : "yesterday";
+	default: break;
+	}
+	return Days > -7 && Days < 7 ? std::string("on ") + net::WeekdayName(O.Day, true) : "on " + net::DateLabel(O.Day);
+}
+
 const std::vector<Level>& DeepstackLevels()
 {
 	static const std::vector<Level> Levels = [] {
@@ -157,8 +223,7 @@ TournamentSpec SpecFor(const Occurrence& O, int Entrants)
 	S.Entrants = Entrants;
 	S.StartingStack = T.StartingStack;
 	S.LevelMinutes = T.LevelMinutes;
-	// Live pace: about two and a half minutes a hand.
-	S.SecondsPerHand = 150.0;
+	S.SecondsPerHand = LiveSecondsPerHand;
 	S.Population = "low";
 	S.Speed = T.Speed;
 	S.StartClock = static_cast<double>(T.StartMinute);
@@ -469,7 +534,7 @@ bool PayFare(Chips& Bankroll, life::State& L, const std::string& Id, bool Home, 
 	}
 	(Home ? E->FareHome : E->FareThere) = true;
 	Bankroll -= BusFareCents;
-	L.Record(World, Home ? "The 14 bus home" : "The 14 bus to the Embercrest", -BusFareCents, 3);
+	L.Record(World, Home ? "The 14 bus home" : "The 14 bus up to the Embercrest", -BusFareCents, 3);
 	return true;
 }
 
@@ -511,7 +576,12 @@ bool Refund(Chips& Bankroll, life::State& L, const std::string& Id, double World
 	E->CheckpointHost.clear();
 	E->FinishedAt = World;
 	Bankroll += E->PaidCents;
-	L.Record(World, E->Name + ": refunded" + (Why.empty() ? std::string() : " (" + Why + ")"), E->PaidCents, 0);
+	// The registration's two lines, reversed (the bank counts ": refunded" lines against the buy-ins).
+	L.Record(World, E->Name + ": refunded buy-in" + (Why.empty() ? std::string() : " (" + Why + ")"), E->PaidCents - E->FeeCents, 0);
+	if (E->FeeCents > 0)
+	{
+		L.Record(World, E->Name + ": refunded entry fee", E->FeeCents, 0);
+	}
 	return true;
 }
 } // namespace live

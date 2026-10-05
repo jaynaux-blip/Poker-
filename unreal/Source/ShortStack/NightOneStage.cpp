@@ -13,7 +13,9 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "NightOneGameMode.h"
 #include "ShortStack/UI/PropArt.h"
+#include "ShortStack/UI/SecondScreen.h"
 #include "SlateDrawList.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -511,6 +513,17 @@ void ANightOneStage::BuildProps()
 		const FVector Up(0.0, -FMath::Sin(NoteRot[I]), FMath::Cos(NoteRot[I]));
 		PropWidgets.Add(AddWidget(Web(NoteX[I], NoteY[I], RoomFront + 0.003), Facing(FVector::BackwardVector, Up), FVector2D(7.6, 7.6), FIntPoint(256, 256), true, false));
 	}
+	// The Embercrest's wall calendar (drawn by ShortStackCore's wallcalendar from the career: today's and tomorrow's
+	// events, the player's entry, the rent's day), on the window wall clear of the curtains and the rod's finial, where
+	// the chair turns to it; it hangs from a nail by its wire binding.
+	{
+		const double CalX = 1.62;
+		const double CalY = 1.52;
+		const FVector2D CalCm(50.0, 70.0);
+		CalendarWidget = AddWidget(Web(CalX, CalY, RoomFront + 0.004), Facing(FVector::BackwardVector, FVector::UpVector), CalCm, CalendarResolution, true, false);
+		AddMesh(CylinderMesh, Surface(TEXT("Nail"), 0x9a9890, 0.35f, 1.0f), Web(CalX, CalY + CalCm.Y / 200.0 + 0.004, RoomFront + 0.006), FVector(0.005, 0.005, 0.012),
+		        FRotator(90.0f, 0.0f, 0.0f));
+	}
 
 	// Desk lamp (off): a dark silhouette against the window. The Blender lamp's cable runs back and
 	// drops off the desk's rear edge, 11 cm behind its base.
@@ -849,6 +862,17 @@ void ANightOneStage::AttachSlate()
 	Single(NeonWidget, Draw(P::NeonW, P::NeonH, [](ss::ui::Canvas& C) { P::NeonSign(C); }));
 	Single(Keyboard, Draw(P::KeyboardW, P::KeyboardH, [](ss::ui::Canvas& C) { P::Keyboard(C); }));
 
+	// The wall calendar, drawn from the career once the game is running (UpdateCalendar).
+	CalendarSlate.Reset();
+	CalendarKey.clear();
+	CalendarCheck = 0.0f;
+	if (CalendarWidget)
+	{
+		CalendarSlate = SNew(SDrawListWidget).DesiredSize(FVector2D(ss::ui::wallcalendar::Width, ss::ui::wallcalendar::Height));
+		CalendarWidget->SetSlateWidget(CalendarSlate);
+		CalendarWidget->SetManuallyRedraw(true);
+	}
+
 	// The GearDrop monitors, drawn by the game (SetMonitorDrawList).
 	MonitorSlates.Reset();
 	for (UWidgetComponent* Panel : MonitorScreens)
@@ -867,6 +891,7 @@ void ANightOneStage::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	const float Dt = FMath::Max(0.0f, DeltaSeconds);
 	Time += Dt;
+	UpdateCalendar(Dt);
 	NextLightning -= Dt;
 	if (NextLightning <= 0.0f)
 	{
@@ -903,6 +928,34 @@ void ANightOneStage::Tick(float DeltaSeconds)
 			M->SetScalarParameterValue(TEXT("Dawn"), Dawn);
 		}
 	}
+}
+
+void ANightOneStage::UpdateCalendar(float DeltaSeconds)
+{
+	CalendarCheck -= DeltaSeconds;
+	if (!CalendarWidget || !CalendarSlate || CalendarCheck > 0.0f)
+	{
+		return;
+	}
+	CalendarCheck = 0.5f;
+	UWorld* Here = GetWorld();
+	const ANightOneGameMode* Mode = Here ? Here->GetAuthGameMode<ANightOneGameMode>() : nullptr;
+	FNightOneGame* Game = Mode ? Mode->GetGame() : nullptr;
+	if (!Game)
+	{
+		return;
+	}
+	std::string Key = ss::ui::wallcalendar::Key(Game->Session);
+	if (Key == CalendarKey)
+	{
+		return;
+	}
+	CalendarKey = MoveTemp(Key);
+	TSharedPtr<ss::ui::DrawList> List = MakeShared<ss::ui::DrawList>();
+	ss::ui::Canvas C(*List, Game->Measurer, ss::ui::wallcalendar::Width, ss::ui::wallcalendar::Height, static_cast<float>(CalendarResolution.X) / ss::ui::wallcalendar::Width);
+	ss::ui::wallcalendar::Draw(C, Game->Session);
+	CalendarSlate->SetDrawList(List);
+	CalendarWidget->RequestRedraw();
 }
 
 void ANightOneStage::Lightning(float Strength)

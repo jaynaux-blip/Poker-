@@ -1,4 +1,4 @@
-"""The Embercrest Casino's card room: a modular kit for the old showroom of a riverboat casino moored for good in 1994.
+"""The card room's original kit, the fallback room when the Embercrest kit (embercrest.py) isn't imported: an old-world showroom.
 
 The game assembles the room from these pieces (BackRoomStageCardRoom.cpp), each modeled once and instanced:
 - SM_CR_Wall: a 4 m bay of wall. Walnut wainscot with raised panels to the chair rail, a brass inlay in the rail,

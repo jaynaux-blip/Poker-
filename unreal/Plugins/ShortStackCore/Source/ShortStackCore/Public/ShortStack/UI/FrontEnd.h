@@ -68,6 +68,17 @@ struct FrontEndInfo
 	/** Display resolutions the host supports, as "2560 x 1440", largest first. */
 	std::vector<std::string> Resolutions;
 	std::string Version = "v0.2";
+	/**
+	 * What quitting from here costs and keeps, when the host knows better than the venue does (a card table mid-hand:
+	 * "This hand will be folded."). QuitWarning is said in the warning color on the pause menu's quit cards and in the
+	 * quit dialog; QuitKept takes the place of the venue's saved line. Both empty: the venue's own copy.
+	 */
+	std::string QuitWarning;
+	std::string QuitKept;
+	/** A line under the pause menu's heading (the Embercrest: the clock is stopped, and pausing isn't sitting out). */
+	std::string PauseNote;
+	/** The pause heading names the venue alone, without the day and the clock (a table that keeps no time: practice). */
+	bool Timeless = false;
 };
 
 /** Fills FrontEndInfo from the session (career from the save, status from the tournament in progress). */

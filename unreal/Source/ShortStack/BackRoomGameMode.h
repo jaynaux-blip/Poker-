@@ -119,7 +119,7 @@ public:
 	bool IsFreeWalking() const { return bFreeWalk; }
 	/** The room moved under a walker (a table move re-anchors it): keep them where they stood in it. */
 	void ShiftWalk(const FVector& Delta) { WalkBase += Delta; }
-	/** Testing: hold a key down (or let it go), or press one once ("W", "E", "Q", "N", "P"...). */
+	/** Testing: hold a key down (or let it go), or press one once ("W", "E", "Q", "N", "T"...). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	void TestHold(const FString& Key, bool bDown);
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
@@ -373,7 +373,7 @@ public:
 	}
 	/** Leaving a tournament early: L asks, L again within a few seconds confirms (your stack is blinded off). */
 	bool IsQuitPending() const { return QuitAskedAt >= 0.0f; }
-	/** The live table's pace (the Table pace setting): 0 Live, 1 Brisk, 2 Fast. P cycles it (and saves it). */
+	/** The live table's pace (the Table pace setting): 0 Live, 1 Brisk, 2 Fast. T cycles it (and saves it). */
 	int32 GetTablePace() const { return TablePace; }
 	void CycleTablePace();
 	/** Real seconds since the pace last changed (for the HUD's note). */
@@ -408,6 +408,89 @@ public:
 	void TestStay() { LiveStay(); }
 	/** The cast's MetaHuman asset name for a player name ("Big Lou" -> "BigLou"), or empty. */
 	static FString CastAssetFor(const FString& Name);
+
+	// ============================================================ rail & room (BackRoomLive.cpp) -- this block's owner: rail & room
+	// The Embercrest after the player's own event: the old table playing on, faces that stay with their people, the next
+	// event from the desk, the floor's last call, and the way out through the resort's entrance.
+	/** The event the desk registered the player for tonight and when it seats ("Registered: Midnight Turbo, seats at 10:20
+	 *  PM"; empty for none), for the on-foot line. */
+	FString GetNextEventNote() const;
+	/** Testing: the player busts at the next gap between hands (a one-chip stack blinded out: the engine's own bust). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestBustNow();
+	/** Testing: the whole room plays on (you on autopilot) to just before the floor's last call for registration. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestLastCall();
+	/** Testing: the desk registers the player for the next event today (or OccurrenceId) as two presses of E there do, from
+	 *  anywhere in the room once their night is over (off the summary and onto the rail first). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestRegisterNext(const FString& OccurrenceId);
+	/** Testing: the wait for the next event passes, as stepping out on the terrace does, up to the floor calling its seats. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestSeatingNow();
+
+private:
+	/** The engine table playing where the player's own table stands (the room's anchor), or -1 (it broke, or went to the stage). */
+	int32 AnchorTableId();
+	/**
+	 * The body an entrant wears in the room: their own MetaHuman (the cast), the one they've worn up close tonight, or the
+	 * one their tournament id picks among the bodies that suit them (a regular of the room's: theirs), passing over any in
+	 * Worn at the table they're sitting down at. Kept for the night, so a face follows its person from table to table.
+	 */
+	FString LiveBodyFor(const FString& Id, const FString& Name, const TSet<FString>& Worn);
+	/** The far crowd's seated figure for an entrant: the one baked from the body they wear up close (their id's, unseen). */
+	int32 CrowdKindFor(const FString& Id, const FString& Name) const;
+	/** The floor's last call for registration a few minutes before late registration closes, and the close. */
+	void LiveLastCall();
+	/** The next event today the desk could register the player for (its occurrence id; empty for none), or why not. */
+	FString NextOpenEvent(FString& OutWhyNot) const;
+	/** The desk writes the player in for OccurrenceId: the world's field read on a worker, then the entry (FinishSignup). */
+	void DeskSignup(const FString& OccurrenceId);
+	void FinishSignup();
+	/** Leaving before the next event's cards: off the list, refunded, and the world told nothing happened. */
+	void LiveUnregister();
+	/** The floor calls the next event's seats; a moment later the room opens again for it (LiveOpenNext). */
+	void LiveCallNext();
+	void LiveOpenNext();
+	/** The rest of the room played on (railing) to world minute Until, quietly: the terrace, or a test, passing the wait. */
+	void RailCatchUp(double Until);
+	/** The world's people and places the player saw from the rail (NoteRailedPlaces), into D. */
+	void NoteRailed(ss::SaveData& D) const;
+	/** Who wears which body tonight (tournament id -> body), once seen up close. */
+	TMap<FString, FString> LiveBodies;
+	/** The near tables' people (Extras, by index): the body each one is, and whom it's sitting for now. */
+	TArray<FString> ExtraBody;
+	TArray<FString> ExtraWho;
+	/** The old table's chairs settle a moment after each railed round (a bust says goodbye before getting up). */
+	bool bRailSeatsDue = false;
+	/** The floor's last call for registration, and the close, once each. */
+	bool bLastCalled = false;
+	bool bRegClosed = false;
+	/** The biggest pot shown down with each of the world's people tonight (tournament id -> the player's net, chips). */
+	TMap<FString, int64> LiveBigPots;
+	/** Testing: bust at the next gap between hands. */
+	bool bTestBust = false;
+	/** The night's departure from home (the first event's bus; ?From for Night One), and an event entered from the room. */
+	double NightLeftHomeAt = 0.0;
+	bool bHere = false;
+	/** This entry was registered at the desk with the player already in the room (its bus home rode on the first's). */
+	bool bDeskEntry = false;
+	/** The desk: the event offered on the first press of E, and when. */
+	FString DeskOffer;
+	float DeskAskedAt = -100.0f;
+	/** The next event tonight: its occurrence id, its name, when its seats open (world minutes), the call, the reopen. */
+	FString NextEntryId;
+	FString NextName;
+	double NextSeatingAt = 0.0;
+	bool bNextCalled = false;
+	float NextCallT = 0.0f;
+	bool bOpeningNext = false;
+	/** Out on the terrace while the wait for the next event passes. */
+	bool bWaitingOut = false;
+	/** The desk's signup on its worker (the world's field for the event), and the world as it was before it. */
+	TSharedPtr<class FLiveDeskSignup> Signup;
+	std::string WorldBeforeSignup;
+	// ============================================================ end of rail & room
 
 private:
 	ABackRoomStage* FindOrSpawnStage();
@@ -601,4 +684,44 @@ private:
 	float DroopT = -1.0f;
 	float DroopLength = 1.0f;
 	float DroopDepth = 0.8f;
+
+	// ============================================================ table input (BackRoomGameMode.cpp) -- this block's owner: table input
+	// The pause menu (Escape, P in Play-In-Editor, Start on a gamepad), quitting from it (R5: a hand in play is folded
+	// first), and the player's settings at the table: look sensitivity and inverted look, the controls reminder, the field
+	// of view and the lens, the mix, the table's pace.
+public:
+	/**
+	 * Opens the pause menu (FrontEnd's Pause page, named for the place). The night stands still behind it: nothing is dealt,
+	 * played or walked, and neither the tournament's clock nor the world's minutes move (LIVE_TOURNAMENTS.md, Time).
+	 */
+	void OpenPauseMenu();
+	/** The pause menu has the screen and the input (the pawn and the HUD hold). */
+	bool IsPauseMenuUp() const;
+	/** A confirmed quit is under way: the hand in play folded and played out behind the fade, then out. */
+	bool IsQuittingTable() const;
+	/** The player's look sensitivity (a multiple of the table's own) and inverted look, from Settings. */
+	float GetLookScale() const;
+	bool IsLookInverted() const;
+	/** Settings > Controls > Control hints: the table's controls reminder. */
+	bool ShowsHints() const;
+	/** One of the table's views at the player's Field of View setting (DefaultFov: its horizontal degrees at the default). */
+	float SettingFov(float DefaultFov) const;
+	/** The player's image settings on the pawn's lens, each frame: brightness over the room's exposure, film grain, color
+	 *  fringing, motion blur. */
+	void ApplyPlayerLens(UCameraComponent* Camera) const;
+	/** Testing: opens the pause menu, or resumes, as Escape and the menu's Resume do. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestPause(bool bOpen);
+	/** Testing: the pause menu's confirmed quit, to the main menu or the desktop (the menu needn't be up). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestQuit(bool bToDesktop);
+	/** Testing: paused or not, the menu's page, a quit under way, and what the quit cards would say now. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestDescribeMenu() const;
+
+private:
+	/** The pause menu and its hooks, the player's settings, the night frozen behind it, a quit under way (BackRoomGameMode.cpp). */
+	struct FTableMenu;
+	TSharedPtr<FTableMenu> TableMenu;
+	// ============================================================ end of table input
 };

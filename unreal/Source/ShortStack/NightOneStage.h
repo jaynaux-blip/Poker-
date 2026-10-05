@@ -5,6 +5,8 @@
 #include "FirstPersonArms.h"
 #include "ShortStack/UI/Canvas.h"
 
+#include <string>
+
 #include "NightOneStage.generated.h"
 
 class SDrawListWidget;
@@ -185,6 +187,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	FIntPoint ScreenResolution = FIntPoint(2400, 1500);
 
+	/** The Embercrest's wall calendar: its sheet's resolution (50 x 70 cm; type sized to read from the desk chair). */
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
+	FIntPoint CalendarResolution = FIntPoint(840, 1176);
+
 private:
 	void BuildSet();
 	void BuildShell();
@@ -196,6 +202,11 @@ private:
 	void BuildLeds();
 	void BuildGear();
 	void AttachSlate();
+	/**
+	 * The wall calendar (ss::ui::wallcalendar) reads the career itself: twice a second it asks the running game what
+	 * the sheet shows, and draws it again when that changed (a new day, an entry, the rent).
+	 */
+	void UpdateCalendar(float DeltaSeconds);
 
 	UMaterialInstanceDynamic* Surface(FName Key, uint32 SrgbHex, float Roughness, float Metallic = 0.0f, float Pattern = 0.0f, float Emissive = 0.0f);
 	UMaterialInstanceDynamic* Special(UMaterialInterface* Parent, FName Key);
@@ -303,6 +314,8 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UWidgetComponent>> PropWidgets; // notice, bill, door notice, poster, 3 notes (in that order)
 	UPROPERTY()
+	TObjectPtr<UWidgetComponent> CalendarWidget; // the Embercrest's wall calendar, on the window wall right of the curtains
+	UPROPERTY()
 	TObjectPtr<URectLightComponent> ScreenLight;
 	UPROPERTY()
 	TObjectPtr<USpotLightComponent> NeonSpot;
@@ -361,6 +374,9 @@ private:
 	TArray<TSharedPtr<SDrawListWidget>> PropSlates;
 	TArray<TSharedPtr<SDrawListWidget>> MonitorSlates;
 	TArray<TSharedPtr<const ss::ui::DrawList>> PropLists;
+	TSharedPtr<SDrawListWidget> CalendarSlate;
+	std::string CalendarKey; // what the sheet shows now (ss::ui::wallcalendar::Key)
+	float CalendarCheck = 0.0f;
 
 	FFirstPersonArms Arms;
 	int32 ArmsInitTries = 0;

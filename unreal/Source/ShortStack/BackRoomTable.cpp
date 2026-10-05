@@ -4,6 +4,7 @@
 #include "BackRoomCard.h"
 #include "BackRoomChips.h"
 #include "BackRoomPlayer.h"
+#include "BackRoomPlayerController.h"
 #include "BackRoomStage.h"
 #include "CardRoomAmbience.h"
 #include "Engine/World.h"
@@ -622,11 +623,19 @@ void ABackRoomTable::StartHand()
 	Sightings.Reset();
 	WhisperedThisHand.Reset();
 
-	// Dee's lessons, a few hands apart (the first night only).
+	// Dee's lessons, a few hands apart (the first night only), naming the controls the player is holding.
+	const ABackRoomPlayerController* Pad = GetWorld() ? Cast<ABackRoomPlayerController>(GetWorld()->GetFirstPlayerController()) : nullptr;
+	const bool bPad = Pad && Pad->IsUsingGamepad();
 	switch (bFirstVisit ? HandNumber : 0)
 	{
-	case 1: DealerSays(TEXT("Tuesday game, kid. One-two, no limit. Hold space to look at your cards. Keep 'em on the felt.")); break;
-	case 2: DealerSays(TEXT("Right mouse, you can study a face. Don't stare too long. They notice.")); break;
+	case 1:
+		DealerSays(bPad ? FString(TEXT("Tuesday game, kid. One-two, no limit. Hold the left trigger to look at your cards. Keep 'em on the felt."))
+						: FString(TEXT("Tuesday game, kid. One-two, no limit. Hold space to look at your cards. Keep 'em on the felt.")));
+		break;
+	case 2:
+		DealerSays(bPad ? FString(TEXT("Right trigger, you can study a face. Don't stare too long. They notice."))
+						: FString(TEXT("Right mouse, you can study a face. Don't stare too long. They notice.")));
+		break;
 	case 4: DealerSays(TEXT("Watch where their eyes go when the flop comes. Not the cards. The eyes.")); break;
 	case 6: DealerSays(TEXT("Some hands shake when they've got it. Adrenaline don't lie.")); break;
 	case 9: DealerSays(TEXT("And a pro acts. Weak means strong, strong means weak. Mostly.")); break;
@@ -1033,6 +1042,31 @@ void ABackRoomTable::EndHand()
 	{
 		PotSize += R.Amount;
 	}
+	// A pot the hero showed down: who was across it (the one who lost the most to them, or took the most from them).
+	Showdown = FBackRoomShowdown();
+	if (const FSeat* H = HeroSeat(); H && bShowdown && H->HandSeat >= 0)
+	{
+		const ss::HandSeat* Mine = Hand->SeatByNumber(H->HandSeat);
+		const int64 Net = Mine ? Mine->Stack - H->StartStack : 0;
+		if (Mine && !Mine->Folded && Net != 0)
+		{
+			int64 Most = 0;
+			for (const FSeat& S : Seats)
+			{
+				const ss::HandSeat* HS = !S.bHero && S.HandSeat >= 0 ? Hand->SeatByNumber(S.HandSeat) : nullptr;
+				const int64 Theirs = HS && !HS->Folded ? HS->Stack - S.StartStack : 0;
+				// Against the hero's result: a loser when the hero won, the winner when they lost.
+				if (Theirs * Net < 0 && FMath::Abs(Theirs) > Most)
+				{
+					Most = FMath::Abs(Theirs);
+					Showdown.Id = S.Id;
+				}
+			}
+			Showdown.HeroNet = Net;
+			Showdown.Pot = PotSize;
+			Showdown.BigBlind = Hand->BigBlind;
+		}
+	}
 	for (FSeat& S : Seats)
 	{
 		const ss::HandSeat* HS = S.HandSeat >= 0 ? Hand->SeatByNumber(S.HandSeat) : nullptr;
@@ -1295,6 +1329,151 @@ void ABackRoomTable::SyncTournamentSeats(const ss::Hand& H)
 		}
 		S.StackPile->SetAmount(S.Stack);
 		S.BetPile->SetAmount(0);
+	}
+}
+
+ABackRoomTable::FSeat& ABackRoomTable::EnsureOtherSeat(int32 TableSeat)
+{
+	if (FSeat* Found = Seats.FindByPredicate([TableSeat](const FSeat& S) { return S.TableSeat == TableSeat && !S.bHero; }))
+	{
+		return *Found;
+	}
+	if (TableSeat != 0)
+	{
+		return EnsureSeat(TableSeat);
+	}
+	// The hero's old chair, for someone the balancing seats there once the hero is out: a seat of its own, its chips
+	// where the hero's were.
+	FSeat& S = Seats.AddDefaulted_GetRef();
+	S.TableSeat = 0;
+	const FTransform T = ABackRoomStage::SeatTransform(0);
+	S.StackPile = NewPile(StackSpot(0), T.Rotator(), 41, static_cast<uint8>(EBackRoomChipStyle::Stack));
+	S.BetPile = NewPile(BetSpot(0), T.Rotator(), 43, static_cast<uint8>(EBackRoomChipStyle::Bet));
+	Seats.Sort([](const FSeat& A, const FSeat& B) { return A.TableSeat < B.TableSeat; });
+	return *Seats.FindByPredicate([](const FSeat& X) { return X.TableSeat == 0 && !X.bHero; });
+}
+
+void ABackRoomTable::VacateSeat(FSeat& S, bool bBusted)
+{
+	if (S.Player)
+	{
+		Opponents.Remove(S.Player);
+		if (OnUnseatPlayer)
+		{
+			OnUnseatPlayer(S.Player, S.Id, bBusted);
+		}
+	}
+	S.Player = nullptr;
+	S.Id.Empty();
+	S.HandSeat = -1;
+	S.Stack = 0;
+	S.StackPile->SetAmount(0);
+	S.BetPile->SetAmount(0);
+}
+
+void ABackRoomTable::FollowTable(int32 TableId, int32 RefSeat, bool bSettle)
+{
+	if (!Tourney || Hand || PendingHand)
+	{
+		return; // a hand of the hero's is still on the felt (never once they're out)
+	}
+	static const int32 Physical[6] = {0, 1, 2, 3, 5, 6};
+	const int32 Size = FMath::Max(1, Tourney->TableSize);
+	// Who the engine has in each chair now: physical seat -> (engine seat, player index).
+	TMap<int32, TPair<int32, int32>> Want;
+	const auto Found = TableId >= 0 ? Tourney->Tables.find(TableId) : Tourney->Tables.end();
+	if (Found != Tourney->Tables.end())
+	{
+		const std::vector<int>& Chairs = Found->second.Seats;
+		for (int32 K = 0; K < static_cast<int32>(Chairs.size()); ++K)
+		{
+			// (The hero, a champion still at the table, is the player's own body: never someone in a chair here.)
+			if (Chairs[static_cast<size_t>(K)] >= 0 && !Tourney->Players[static_cast<size_t>(Chairs[static_cast<size_t>(K)])].IsHero)
+			{
+				const int32 Rel = ((K - RefSeat) % Size + Size) % Size;
+				Want.Add(Physical[FMath::Clamp(Rel, 0, 5)], TPair<int32, int32>(K, Chairs[static_cast<size_t>(K)]));
+			}
+		}
+	}
+	// The player's own place as the engine has it (out: nothing in front of it; a champion's chips stay), and no longer
+	// anyone's seat in a hand: the chair is the table's to fill.
+	if (FSeat* H = HeroSeat())
+	{
+		H->HandSeat = -1;
+		H->Stack = Tourney->Hero().Stack;
+		H->StackPile->SetAmount(H->Stack);
+		H->BetPile->SetAmount(0);
+	}
+	// Up and gone: whoever the balancing moved on goes now; a player who just busted sits a moment longer, out of chips,
+	// unless someone needs the chair.
+	for (FSeat& S : Seats)
+	{
+		if (S.bHero || S.Id.IsEmpty())
+		{
+			continue;
+		}
+		const int32 Idx = Tourney->PlayerIndex(std::string(TCHAR_TO_UTF8(*S.Id)));
+		const TPair<int32, int32>* W = Want.Find(S.TableSeat);
+		if (W && W->Value == Idx)
+		{
+			continue;
+		}
+		const bool bBusted = Idx >= 0 && Tourney->Players[static_cast<size_t>(Idx)].Busted;
+		if (bBusted && !bSettle && !W)
+		{
+			S.Stack = 0;
+			S.StackPile->SetAmount(0);
+			continue;
+		}
+		VacateSeat(S, bBusted);
+	}
+	// Whoever is there now: in their chairs with the engine's stacks, and the round's biggest winner and loser show it
+	// (a real pot: eight big blinds or more).
+	const int64 Real = 8 * FMath::Max<int64>(1, Tourney->CurrentLevel().Bb);
+	ABackRoomPlayer* Winner = nullptr;
+	ABackRoomPlayer* Loser = nullptr;
+	int64 Won = 0;
+	int64 Lost = 0;
+	for (const TPair<int32, TPair<int32, int32>>& It : Want)
+	{
+		const ss::TPlayer& P = Tourney->Players[static_cast<size_t>(It.Value.Value)];
+		const FString Id = UTF8_TO_TCHAR(P.Id.c_str());
+		FSeat& S = EnsureOtherSeat(It.Key);
+		const bool bNew = S.Id != Id;
+		const int64 Delta = bNew ? 0 : static_cast<int64>(P.Stack) - S.Stack;
+		S.HandSeat = It.Value.Key;
+		S.Stack = P.Stack;
+		S.StartStack = P.Stack;
+		if (bNew)
+		{
+			S.Id = Id;
+			S.Player = OnSeatPlayer ? OnSeatPlayer(P, S.TableSeat) : nullptr;
+			WireSeat(S);
+		}
+		S.StackPile->SetAmount(S.Stack);
+		S.BetPile->SetAmount(0);
+		if (Delta >= Real && Delta > Won)
+		{
+			Won = Delta;
+			Winner = S.Player;
+		}
+		if (Delta <= -Real && -Delta > Lost)
+		{
+			Lost = -Delta;
+			Loser = S.Player;
+		}
+	}
+	if (bSettle)
+	{
+		return;
+	}
+	if (Winner)
+	{
+		Winner->OnResult(Won, Won, false);
+	}
+	if (Loser)
+	{
+		Loser->OnResult(-Lost, Won, false);
 	}
 }
 

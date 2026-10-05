@@ -204,7 +204,7 @@ enum Likes : int
 enum class LiveLevel : int
 {
 	None,
-	Local,        // the weekly $150 at the casino
+	Local,        // the Embercrest's card room and rooms like it, $60 to $200
 	Regional,     // a regional series, $550 mains
 	Circuit,      // tour stops, $1,700 to $5,300 mains, rings
 	Championship, // the summer Championship, $10,000 Main Event, bracelets
@@ -674,7 +674,7 @@ struct Profile
 
 enum class LiveKind : int
 {
-	Local,        // the Embercrest's Sunday $150 and rooms like it
+	Local,        // the Embercrest's card room up on the ridge, and rooms like it
 	Underground,  // back-room cash games
 	Regional,
 	Circuit,
@@ -764,6 +764,13 @@ struct Pending
 	std::vector<Entry> Who;
 };
 
+/** An event called off before it was played: a live event short of its stated minimum field (R6). */
+struct Cancellation
+{
+	double At = 0.0; // when the floor called it (world minutes)
+	int Field = 0;   // who had come for it, the player included
+};
+
 class World
 {
 public:
@@ -796,6 +803,22 @@ public:
 	// Events.
 	/** The result of a finished event this world played (nullptr: not one of its events). */
 	SHORTSTACKCORE_API const net::EventResult* ResultOf(const std::string& EventId) const;
+	/** An event's cancellation (nullptr: it wasn't called off, or it's older than the results the world keeps). */
+	SHORTSTACKCORE_API const Cancellation* CancellationOf(const std::string& EventId) const;
+	/**
+	 * Calls an event off: nobody plays it or pays for it, it never has a winner, and the world remembers it was
+	 * cancelled. The room does this itself to a live event short of its minimum when its cards should go in the air;
+	 * the session does it for one the player's own room called off (the entry refunded). An event already decided is
+	 * left as it was.
+	 */
+	SHORTSTACKCORE_API void Cancel(const std::string& EventId, double At, int Entrants);
+	/** Where someone the world follows finished in a live event the player played (false: not decided yet, or not known). */
+	SHORTSTACKCORE_API bool FinishIn(const std::string& EventId, int Npc, int& Place, Chips& Prize) const;
+	/**
+	 * The next of the Embercrest's events someone is registered for, starting after From: its occurrence id, or "" (only
+	 * the days the world has planned, today's and tomorrow's).
+	 */
+	SHORTSTACKCORE_API std::string NextEmbercrest(int Npc, double From) const;
 	/** Who the world has registered for an event (planned for its day). */
 	SHORTSTACKCORE_API std::vector<int> Registered(const std::string& EventId);
 	/** How many will play it, the people the world follows and everyone else (0: not an event it has). */
@@ -863,6 +886,11 @@ public:
 	SHORTSTACKCORE_API void GrantAward(int Npc, bool Ring, bool Main);
 	/** Debug: Count micro- and low-stakes tournaments on the player's stats page (a small winner's luck), to preview it. */
 	SHORTSTACKCORE_API void GrantHeroResults(int Count);
+	/**
+	 * Debug: how many come to an event the world has planned (its day planned first if it can be), the people it follows
+	 * trimmed to fit: a thin night at the Embercrest, to see the minimum field call it off.
+	 */
+	SHORTSTACKCORE_API void SetPlannedEntries(const std::string& EventId, int Entries);
 	/** The player's Player of the Year points this calendar year (online, live). */
 	double HeroSeasonPoints() const { return HeroPoints; }
 	double HeroSeasonLivePoints() const { return HeroLivePoints; }
@@ -914,6 +942,14 @@ private:
 	std::vector<Pending> Queue; // planned events, by end time
 	std::map<std::string, net::EventResult> Results; // the last few days' final tables
 	std::map<std::string, double> ResultEnds;
+	std::map<std::string, Cancellation> Cancelled; // events called off (kept as long as the results)
+	struct Placed
+	{
+		int Npc = -1;
+		int Place = 0;
+		Chips Prize = 0;
+	};
+	std::map<std::string, std::vector<Placed>> FieldPlaces; // the player's live events: where the people the world follows finished
 	std::vector<WorldEvent> Log;  // newest last (capped)
 	std::vector<Honor> Titles;    // forever
 	std::map<int, Bond> HeroBonds;

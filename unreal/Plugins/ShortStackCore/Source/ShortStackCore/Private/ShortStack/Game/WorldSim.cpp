@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <set>
 
 namespace ss
@@ -578,9 +579,9 @@ void Sim::PlanDay(World& W, int Day)
 		std::sort(Online.begin(), Online.end(), [](const Option& A, const Option& B) { return A.P.BuyIn < B.P.BuyIn || (A.P.BuyIn == B.P.BuyIn && A.P.Start < B.P.Start); });
 		for (const LiveEvent& E : LiveCalendar(D))
 		{
-			if (E.Start + E.Duration <= W.Now)
+			if (E.Start + E.Duration <= W.Now || W.Cancelled.count(E.Id) > 0)
 			{
-				continue;
+				continue; // over, or called off
 			}
 			Option O;
 			O.P = LiveEventOf(W, E);
@@ -1411,6 +1412,15 @@ void Sim::Resolve(World& W, Pending& P)
 		if (Pl >= 1 && Pl <= P.FinalSize)
 		{
 			AtPlace[Pl] = E.Npc;
+		}
+		if (HeroIn && !P.Online)
+		{
+			// The player's own live event: where everyone they might have sat with finished (what they text about).
+			World::Placed Got;
+			Got.Npc = E.Npc;
+			Got.Place = Pl;
+			Got.Prize = Prize;
+			W.FieldPlaces[P.Id].push_back(Got);
 		}
 	}
 
@@ -2526,12 +2536,22 @@ void Sim::NewDay(World& W, int Day)
 		if (!Keep)
 		{
 			W.Results.erase(It->first);
+			W.FieldPlaces.erase(It->first);
 			It = W.ResultEnds.erase(It);
 		}
 		else
 		{
 			++It;
 		}
+	}
+	for (auto It = W.FieldPlaces.begin(); It != W.FieldPlaces.end();)
+	{
+		It = W.ResultEnds.count(It->first) > 0 ? std::next(It) : W.FieldPlaces.erase(It);
+	}
+	// And the events that were called off, as long.
+	for (auto It = W.Cancelled.begin(); It != W.Cancelled.end();)
+	{
+		It = Now - It->second.At >= sim::KeepResults ? W.Cancelled.erase(It) : std::next(It);
 	}
 	Ranks(W);
 }

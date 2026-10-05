@@ -10,6 +10,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -590,6 +591,53 @@ void Embercrest()
 	std::printf("  embercrest: %s, %d entrants, %d hands, %d moves, %d breaks, done at %s\n", Nightly.T->Name, T->Spec.Entrants, Ticks, Moves, Breaks,
 		ss::net::TimeLabel(T->ClockMinutes()).c_str());
 
+	// What the screens and the room ask of the schedule: what's still open, the last call, how long a deep run takes.
+	{
+		const live::Occurrence Noon10 = live::FindOccurrence("embercrest-noon@10");
+		Expect(live::NextOpen(Nightly.Start - 120.0).Id == Nightly.Id && live::NextOpen(Nightly.Start + 30.0, 0.0).Id == Nightly.Id &&
+				   live::NextOpen(Nightly.Start + 30.0, 0.0, Nightly.Id).Id == Noon10.Id && live::NextOpen(Nightly.LateRegEnds - 5.0).Id == Noon10.Id,
+			"the next event still open: from home (the bus included), from the room, and past the one the player is in");
+		Expect(live::LateRegLeft(Nightly, Nightly.Start) == 3.0 * Nightly.T->LevelMinutes && live::LastCall(Nightly, Nightly.LateRegEnds - 10.0) &&
+				   !live::LastCall(Nightly, Nightly.LateRegEnds - 30.0) && !live::LastCall(Nightly, Nightly.LateRegEnds + 1.0),
+			"late registration's last call is its last fifteen minutes");
+		Expect(live::DayWord(Nightly, Wednesday + 600.0) == "tonight" && live::DayWord(Nightly, Wednesday - 600.0) == "tomorrow night" &&
+				   live::DayWord(Nightly, Wednesday + 1440.0 + 600.0) == "last night" && live::DayWord(Noon10, Wednesday + 600.0) == "tomorrow" &&
+				   live::DayWord(Nightly, Wednesday - 3.0 * 1440.0) == "on Wednesday",
+			"when an event is, said the way people say it");
+		const double Took = T->ClockMinutes() - T->Spec.StartClock;
+		Expect(std::fabs(live::DeepRunMinutes(Nightly, E->Entrants) - Took) <= 0.15 * Took, "a deep run's length is about what the engine's night takes");
+		// Every event of the week, played to its last hand.
+		std::set<std::string> Keys;
+		std::string Worst;
+		double WorstOff = 0.0;
+		for (int Day = 140; Day < 147; ++Day)
+		{
+			for (const live::Occurrence& O : live::Occurrences(Day))
+			{
+				if (!Keys.insert(O.T->Key).second)
+				{
+					continue;
+				}
+				std::unique_ptr<ss::Tournament> Deep = live::MakeField(O, O.Field + 1, "grinder_3c", O.Id + ":deep", {});
+				for (int K = 0; K < 6000 && !Deep->bFinished; ++K)
+				{
+					std::vector<ss::TEvent> Ev;
+					std::unique_ptr<ss::Hand> Hand = Deep->StartTick(Ev);
+					Deep->FinishTick(Hand.get(), &Auto);
+				}
+				const double Played = Deep->ClockMinutes() - Deep->Spec.StartClock;
+				const double Off = std::fabs(live::DeepRunMinutes(O, O.Field + 1) - Played) / Played;
+				if (Off > WorstOff)
+				{
+					WorstOff = Off;
+					Worst = std::string(O.T->Name) + ": said " + ss::Fixed(live::DeepRunMinutes(O, O.Field + 1) / 60.0, 1) + "h, played " + ss::Fixed(Played / 60.0, 1) + "h";
+				}
+			}
+		}
+		std::printf("  embercrest: deep runs as the card says them, worst %s\n", Worst.c_str());
+		Expect(Keys.size() == live::Schedule().size() && WorstOff <= 0.2, "every event's deep run is about what the engine takes");
+	}
+
 	// Settling: once, however often it's asked for, and the save keeps it.
 	{
 		const ss::Chips Before = S.BankrollCents;
@@ -659,8 +707,13 @@ void Embercrest()
 		Expect(Noon.Valid() && live::Register(B, L, Noon, 10.0 * 1440.0 + 11.0 * 60.0, 12, {}).empty() && B == 50000 - 8000, "registered for Thursday's noon game");
 		Expect(live::BelowMinimum(Noon, 12) && !live::BelowMinimum(Noon, 60), "twelve is below the room's minimum");
 		Expect(live::Refund(B, L, Noon.Id, 10.0 * 1440.0 + 12.0 * 60.0, "not enough players") && !live::Refund(B, L, Noon.Id, 10.0 * 1440.0 + 12.0 * 60.0, "") && B == 50000 &&
-				   L.Ledger.size() == 3 && L.LiveEvents == 0,
+				   L.Ledger.size() == 4 && L.LiveEvents == 0,
 			"a cancelled event refunds once");
+		// The ledger reversed: the buy-in and the fee come back as the two lines they went out as.
+		Expect(L.Ledger[0].Amount == Noon.T->FeeCents && L.Ledger[1].Amount == Noon.T->BuyInCents - Noon.T->FeeCents && L.Ledger[2].Amount == -Noon.T->FeeCents &&
+				   L.Ledger[3].Amount == -(Noon.T->BuyInCents - Noon.T->FeeCents) && L.Ledger[0].Label.find(": refunded") != std::string::npos &&
+				   L.Ledger[1].Label.find(": refunded") != std::string::npos && L.Ledger[1].Label.find("not enough players") != std::string::npos,
+			"a refund reverses the entry and the fee, line for line");
 		Expect(!live::CanRegister(B, L, Noon, 10.0 * 1440.0 + 11.5 * 60.0).empty(), "a cancelled event can't be entered again");
 	}
 
@@ -1020,6 +1073,371 @@ void EmbercrestRail()
 	}
 	Expect(Res && First == S2.Living().Find(Winner) && Runner == S2.Living().Find(Second), "the world's result is the final the player watched from the rail");
 	std::printf("  embercrest: from the rail, %s beat %s heads-up; the world's result agrees\n", Winner.c_str(), Second.c_str());
+}
+
+/** Bond texts and the rest of the phone: who wrote what, and what the world said about the sender's next night when it came. */
+struct PhoneHooks : Hooks
+{
+	ss::Session* S = nullptr;
+	std::vector<std::string> Nexts;
+	bool GoOut(const std::string&, ss::Chips) override { return true; }
+	void Text(const std::string& From, const std::string& Body) override
+	{
+		Hooks::Text(From, Body);
+		const int Npc = S ? S->Living().Find(From) : -1;
+		Nexts.push_back(Npc >= 0 ? S->Living().NextEmbercrest(Npc, S->WorldMinutes()) : std::string());
+	}
+};
+
+/** Walks the session's clock on a minute at a time (the phone's moments are crossed as they come). */
+double Walk(ss::Session& S, double Now, double ToWorld)
+{
+	while (S.WorldMinutes() < ToWorld)
+	{
+		S.LobbyMinutes = std::min(S.LobbyMinutes + 1.0, ToWorld - 1440.0);
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+	}
+	return Now;
+}
+
+std::string Lower(std::string S)
+{
+	for (char& Ch : S)
+	{
+		Ch = static_cast<char>(std::tolower(static_cast<unsigned char>(Ch)));
+	}
+	return S;
+}
+
+/** The minimum field (R6): below it an event is called off, every entry refunded once, and the world records no winner. */
+void EmbercrestMinimum()
+{
+	namespace life = ss::life;
+	namespace live = ss::live;
+	// A save with a world in it, Night One.
+	Hooks H0;
+	ss::Session S0(H0, "minimum");
+	S0.Save();
+	const ss::SaveData Fresh = H0.Last;
+
+	// Registered for Wednesday's noon game with twelve in the field, and never got there (the game closed on the bus).
+	{
+		const live::Occurrence Noon = live::FindOccurrence("embercrest-noon@2");
+		ss::SaveData D = Fresh;
+		D.BankrollCents = 50000;
+		Expect(live::Register(D.BankrollCents, D.Life, Noon, Noon.Start - 90.0, 12, {}).empty() && live::PayFare(D.BankrollCents, D.Life, Noon.Id, false, Noon.Start - 90.0),
+			"registered for a thin noon game, the bus paid");
+		D.ClockMinutes = Noon.Start - 60.0 - 1440.0;
+		PhoneHooks H;
+		ss::Session S(H, "minimum", &D);
+		H.S = &S;
+		S.CurrentScreen = ss::Screen::Lobby;
+		double Now = Walk(S, 0.0, Noon.Start - 1.0);
+		const life::LiveEntry* E = live::EntryFor(S.Life, Noon.Id);
+		Expect(E && E->State == life::LiveEntry::Registered && S.BankrollCents == 50000 - Noon.T->BuyInCents - live::BusFareCents, "nothing's called off before cards");
+		const size_t Inbox = H.Inbox.size();
+		Now = Walk(S, Now, Noon.Start + 5.0);
+		E = live::EntryFor(S.Life, Noon.Id);
+		const ss::world::Cancellation* Called = S.Living().CancellationOf(Noon.Id);
+		Expect(E && E->State == life::LiveEntry::Refunded && S.BankrollCents == 50000 - live::BusFareCents && S.Life.LiveEvents == 0,
+			"at cards-up a short field is called off: the buy-in and fee come back, nothing is played");
+		Expect(H.Got(Inbox, "Embercrest", "was cancelled: 12 players"), "the desk texts the player who wasn't there");
+		Expect(Called && Called->Field == 12 && S.Living().Registered(Noon.Id).empty() && S.Living().PlannedEntries(Noon.Id) == 0, "the world records the cancellation");
+		S.Living().AdvanceTo(Noon.Start + 2.0 * 1440.0);
+		Expect(S.Living().ResultOf(Noon.Id) == nullptr && S.Living().CancellationOf(Noon.Id) != nullptr, "and never a winner");
+		// Reloaded: nothing is refunded or said twice.
+		const ss::Chips Bank = S.BankrollCents;
+		const size_t Lines = S.Life.Ledger.size();
+		PhoneHooks H2;
+		ss::Session Again(H2, "minimum", &H.Last);
+		H2.S = &Again;
+		Again.CurrentScreen = ss::Screen::Lobby;
+		Walk(Again, 0.0, Again.WorldMinutes() + 30.0);
+		Expect(Again.BankrollCents == Bank && Again.Life.Ledger.size() == Lines && !H2.Got(0, "Embercrest", "cancelled") && Again.Living().CancellationOf(Noon.Id) != nullptr,
+			"a reload refunds nothing twice and says nothing twice");
+	}
+
+	// The room called it off with the player there (the desk refunded, the bus home): the world agrees nobody played it.
+	{
+		PhoneHooks H;
+		ss::Session S(H, "minimum-room", &Fresh);
+		H.S = &S;
+		S.CurrentScreen = ss::Screen::Lobby;
+		const live::Occurrence Nightly = live::FindOccurrence("embercrest-nightly@2");
+		double Now = Walk(S, 0.0, Nightly.Start - 100.0);
+		S.Life.Energy = 60.0;
+		S.BankrollCents = 50000;
+		// A slow night: ten people coming (the debug hook thins the world's plan).
+		S.Living().SetPlannedEntries(Nightly.Id, 10);
+		Expect(S.GoToLive(Nightly.Id).empty(), "registered for a thin Nightly");
+		const life::LiveEntry* E = live::EntryFor(S.Life, Nightly.Id);
+		Expect(E && live::BelowMinimum(Nightly, E->Entrants), "the entry has the thin field");
+		// Waiting at home past the start isn't the room's call to make for it: the player's room makes it.
+		ss::SaveData D = H.Last;
+		life::LiveEntry* Mine = live::EntryFor(D.Life, Nightly.Id);
+		Mine->ArrivedAt = Nightly.Start - 10.0;
+		live::Refund(D.BankrollCents, D.Life, Nightly.Id, Nightly.Start + 2.0, "not enough players");
+		live::PayFare(D.BankrollCents, D.Life, Nightly.Id, true, Nightly.Start + 2.0);
+		D.ClockMinutes = Nightly.Start + 27.0 - 1440.0;
+		PhoneHooks H2;
+		ss::Session Home(H2, "minimum-room", &D);
+		H2.S = &Home;
+		Home.CurrentScreen = ss::Screen::Lobby;
+		Now = Walk(Home, Now, Home.WorldMinutes() + 10.0);
+		Expect(Home.Living().CancellationOf(Nightly.Id) != nullptr && !H2.Got(0, "Embercrest", "cancelled"), "the room's refund is the world's cancellation (the floor already said so)");
+		Home.Living().AdvanceTo(Nightly.Start + 2.0 * 1440.0 + 60.0);
+		Expect(Home.Living().ResultOf(Nightly.Id) == nullptr, "a night the room called off has no winner");
+		Expect(Home.BankrollCents == 50000 - 2 * live::BusFareCents, "the player is out only the bus");
+	}
+
+	// The world calls off a thin night nobody it follows could make up, and the desk won't take an entry for it.
+	{
+		PhoneHooks H;
+		ss::Session S(H, "minimum-world", &Fresh);
+		H.S = &S;
+		S.CurrentScreen = ss::Screen::Lobby;
+		const live::Occurrence Noon = live::FindOccurrence("embercrest-noon@2");
+		const live::Occurrence Nightly = live::FindOccurrence("embercrest-nightly@2");
+		double Now = Walk(S, 0.0, Nightly.Start - 300.0);
+		S.Living().SetPlannedEntries(Nightly.Id, 9);
+		Now = Walk(S, Now, Nightly.Start + 5.0);
+		const ss::world::Cancellation* Called = S.Living().CancellationOf(Nightly.Id);
+		Expect(Called && Called->Field == 9 && Called->At == Nightly.Start, "a thin night is called off at its start");
+		S.Life.Energy = 60.0;
+		S.BankrollCents = 50000;
+		Expect(S.GoToLive(Nightly.Id) == "That one was cancelled." && live::EntryFor(S.Life, Nightly.Id) == nullptr, "the desk won't register anyone for it");
+		S.Living().AdvanceTo(Nightly.Start + 12.0 * 60.0);
+		Expect(S.Living().ResultOf(Nightly.Id) == nullptr && S.Living().ResultOf(Noon.Id) != nullptr, "the thin night has no winner; the noon game that ran does");
+		(void)Now;
+	}
+
+	// Never went back to a short night the room was about to call: the next load refunds it (nothing is played out).
+	{
+		const live::Occurrence Sunday = live::FindOccurrence("embercrest@6");
+		ss::SaveData D = Fresh;
+		D.BankrollCents = 50000;
+		Expect(live::Register(D.BankrollCents, D.Life, Sunday, Sunday.Start - 60.0, 14, {}).empty(), "registered for a thin Sunday");
+		live::PayFare(D.BankrollCents, D.Life, Sunday.Id, false, Sunday.Start - 60.0);
+		live::EntryFor(D.Life, Sunday.Id)->ArrivedAt = Sunday.Start - 30.0;
+		D.ClockMinutes = Sunday.Start + 1440.0 - 1440.0;
+		PhoneHooks H;
+		ss::Session S(H, "minimum-gone", &D);
+		H.S = &S;
+		const life::LiveEntry* E = live::EntryFor(S.Life, Sunday.Id);
+		Expect(E && E->State == life::LiveEntry::Refunded && S.Life.LiveEvents == 0 && S.LiveInProgress().empty() && S.BankrollCents == 50000 - live::BusFareCents,
+			"a short night never gone back to is refunded on the next load, never played out");
+		S.CurrentScreen = ss::Screen::Lobby;
+		Walk(S, 0.0, S.WorldMinutes() + 5.0);
+		Expect(H.Got(0, "Embercrest", "was cancelled: 14 players") && S.Living().CancellationOf(Sunday.Id) != nullptr, "and the desk says why");
+	}
+
+	// Written in at the desk for a full Nightly and off the list again before the seats (the room's other refund): no
+	// cancellation. The night runs without the player, nobody texts that it was called off, and it has its winner.
+	{
+		const live::Occurrence Nightly = live::FindOccurrence("embercrest-nightly@2");
+		ss::SaveData D = Fresh;
+		D.BankrollCents = 50000;
+		const double Desk = Nightly.Start - 120.0;
+		Expect(live::Register(D.BankrollCents, D.Life, Nightly, Desk, Nightly.Field + 1, {}).empty(), "written in at the desk for a full Nightly");
+		live::EntryFor(D.Life, Nightly.Id)->ArrivedAt = Desk;
+		Expect(live::Refund(D.BankrollCents, D.Life, Nightly.Id, Desk + 20.0, "off the list before sitting down") && D.BankrollCents == 50000, "and off the list before the seats");
+		D.ClockMinutes = Nightly.Start + 60.0 - 1440.0;
+		PhoneHooks H;
+		ss::Session S(H, "minimum-unlisted", &D);
+		H.S = &S;
+		S.CurrentScreen = ss::Screen::Lobby;
+		Walk(S, 0.0, S.WorldMinutes() + 10.0);
+		Expect(S.Living().CancellationOf(Nightly.Id) == nullptr && !H.Got(0, "Embercrest", "cancelled"), "leaving the list isn't a cancellation, and nobody says it was");
+		S.Living().AdvanceTo(Nightly.Start + Nightly.T->Hours * 60.0 + 120.0);
+		Expect(S.Living().ResultOf(Nightly.Id) != nullptr, "the night ran without the player and has its winner");
+	}
+	std::printf("  embercrest: short fields called off, refunded once, no winners\n");
+}
+
+/** After a night at the Embercrest, people the player sat with text: about what passed between them, a couple at most, never strangers. */
+void EmbercrestAftermath()
+{
+	namespace life = ss::life;
+	namespace live = ss::live;
+	PhoneHooks H;
+	ss::Session S(H, "aftermath");
+	H.S = &S;
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	const double Wednesday = 9.0 * 1440.0;
+	S.LobbyMinutes = Wednesday - 1440.0 + 17.0 * 60.0 + 30.0;
+	Now = Wait(S, Now, 0.2);
+	S.Life.Energy = 60.0;
+	S.BankrollCents = 50000;
+	const live::Occurrence Nightly = live::FindOccurrence("embercrest-nightly@9");
+	Expect(S.GoToLive(Nightly.Id).empty(), "registered for Wednesday's Nightly");
+	const life::LiveEntry* E = live::EntryFor(S.Life, Nightly.Id);
+	if (!E || E->Roster.size() < 5)
+	{
+		Expect(false, "the Nightly has people the world follows");
+		return;
+	}
+	// Five of them at the player's table: one sent the player home, one the player sent home, one took a big pot off them,
+	// one the player knew from Dee's, and one the player had never met.
+	ss::world::World& W = S.Living();
+	const std::string Buster = E->Roster[0].first;
+	const std::string Busted = E->Roster[1].first;
+	const std::string Stranger = E->Roster[2].first;
+	const std::string Friend = E->Roster[3].first;
+	const std::string Potted = E->Roster[4].first;
+	W.Remember(W.Find(Friend), ss::world::MemoryKind::BackRoom, "Dee's game", 0, Wednesday - 4.0 * 1440.0);
+	W.Remember(W.Find(Friend), ss::world::MemoryKind::BackRoom, "Dee's game", 0, Wednesday - 2.0 * 1440.0);
+	S.Save();
+	ss::SaveData D = H.Last;
+	const double Out = Nightly.Start + 170.0;
+	live::Settle(D.BankrollCents, D.Life, Nightly.Id, 30, E->Entrants, 0, Out);
+	auto Saw = [](char Tag, const std::string& Name, long long Value) {
+		ss::LiveSeen L;
+		L.Tag = Tag;
+		L.Name = Name;
+		L.Value = Value;
+		return L;
+	};
+	D.NoteLive(Out, Nightly.Id, 30, 0, E->Entrants,
+		{Saw('S', Buster, 0), Saw('M', Buster, 0), Saw('K', Buster, 0), Saw('P', Busted, 44), Saw('M', Busted, 0), Saw('H', Busted, 0), Saw('S', Stranger, 0),
+			Saw('M', Stranger, 0), Saw('S', Friend, 0), Saw('M', Friend, 0), Saw('S', Potted, 0), Saw('M', Potted, 0), Saw('B', Potted, 9400)});
+	live::PayFare(D.BankrollCents, D.Life, Nightly.Id, true, Out);
+	D.ClockMinutes = Out + 25.0 - 1440.0;
+	{
+		ss::SaveData P;
+		const life::LiveEntry* Kept = ss::SaveData::Parse(D.Serialize(), P) ? live::EntryFor(P.Life, Nightly.Id) : nullptr;
+		bool Table = Kept && Kept->Table.size() == 5;
+		for (const life::TableMate& M : Kept ? Kept->Table : std::vector<life::TableMate>())
+		{
+			Table = Table && (M.Seen & life::TableMate::SatWith) != 0;
+			Table = Table && (M.Name != Buster || (M.Seen & life::TableMate::KnockedYouOut) != 0) && (M.Name != Busted || (M.Seen & life::TableMate::YouKnockedOut) != 0);
+			Table = Table && (M.Name != Potted || ((M.Seen & life::TableMate::PotWon) != 0 && M.Pot == 9400));
+		}
+		Expect(Table, "the entry keeps who sat with the player and what passed between them, through a save");
+	}
+
+	// The next two days, a minute at a time. Who texts, and when.
+	struct Run
+	{
+		std::vector<std::pair<std::string, std::string>> Texts; // the bond texts, in order
+		std::vector<std::string> Nexts;
+		std::vector<double> At;
+		ss::SaveData Last;
+	};
+	auto Play = [&](const std::string& Seed, bool JoinTomorrow) {
+		Run R;
+		PhoneHooks Ph;
+		ss::Session Home(Ph, Seed, &D);
+		Ph.S = &Home;
+		Home.CurrentScreen = ss::Screen::Lobby;
+		if (JoinTomorrow)
+		{
+			// The one who sent the player home is in Thursday's Nightly too.
+			Home.Living().Join("embercrest-nightly@10", Home.Living().Find(Buster));
+		}
+		double T = 0.0;
+		const double Until = Wednesday + 3.0 * 1440.0;
+		size_t Seen = 0;
+		while (Home.WorldMinutes() < Until)
+		{
+			T = Walk(Home, T, std::min(Until, Home.WorldMinutes() + 60.0));
+			for (; Seen < Ph.Inbox.size(); ++Seen)
+			{
+				const std::string& From = Ph.Inbox[Seen].first;
+				if (From == Buster || From == Busted || From == Stranger || From == Friend || From == Potted)
+				{
+					R.Texts.push_back(Ph.Inbox[Seen]);
+					R.Nexts.push_back(Ph.Nexts[Seen]);
+					R.At.push_back(Home.WorldMinutes());
+				}
+			}
+		}
+		R.Last = Ph.Last;
+		return R;
+	};
+	const Run A = Play("aftermath-home", true);
+	bool Tokens = true;
+	bool Mentions = true;
+	for (size_t K = 0; K < A.Texts.size(); ++K)
+	{
+		Tokens = Tokens && !A.Texts[K].second.empty() && A.Texts[K].second.find('{') == std::string::npos;
+		if (!A.Nexts[K].empty())
+		{
+			const live::Occurrence Next = live::FindOccurrence(A.Nexts[K]);
+			const std::string Key = Next.T->Key;
+			const std::string Word = Key == "bigstack" ? "big stack" : Key == "warmup" ? "warm-up" : Key;
+			Mentions = Mentions && Lower(A.Texts[K].second).find(Word) != std::string::npos;
+		}
+	}
+	Expect(A.Texts.size() == 2, "a night out brings two texts, no more");
+	// Who sent the player home has the most to say; then who the player sent home (or someone who went on to win it).
+	Expect(A.Texts.size() == 2 && A.Texts[0].first == Buster && (A.Texts[1].first == Busted || A.Texts[1].first == Potted), "from the ones with the most to say");
+	Expect(A.At.size() == 2 && A.At[0] >= Wednesday + 1440.0 && A.At[1] < Wednesday + 3.0 * 1440.0 && A.At[1] > A.At[0], "over the next day or two");
+	Expect(Tokens, "every text is written out");
+	Expect(!A.Nexts.empty() && A.Nexts[0] == "embercrest-nightly@10" && Lower(A.Texts[0].second).find("nightly") != std::string::npos &&
+			   Lower(A.Texts[0].second).find("tonight") != std::string::npos,
+		"someone with a night planned at the room says so");
+	Expect(Mentions, "whoever has a night planned mentions it");
+	for (size_t K = 0; K < A.Texts.size(); ++K)
+	{
+		std::printf("  embercrest: %s texted: %s\n", A.Texts[K].first.c_str(), A.Texts[K].second.c_str());
+	}
+	// The same save says the same things.
+	const Run B = Play("aftermath-again", true);
+	Expect(B.Texts == A.Texts, "the texts come from the save: the same night, the same words");
+	// The same night without the one planned: the same people, and the plans they really have.
+	const Run C = Play("aftermath-quiet", false);
+	Expect(C.Texts.size() == 2 && C.Texts[0].first == Buster && (C.Nexts[0] == A.Nexts[0]) == (C.Texts[0].second == A.Texts[0].second),
+		"the next night is mentioned only as the world has it planned");
+	// A reload after the texts says nothing twice.
+	{
+		PhoneHooks Ph;
+		ss::Session Later(Ph, "aftermath-later", &A.Last);
+		Ph.S = &Later;
+		Later.CurrentScreen = ss::Screen::Lobby;
+		Walk(Later, 0.0, Later.WorldMinutes() + 1440.0);
+		bool Again = false;
+		for (const auto& T : Ph.Inbox)
+		{
+			Again = Again || T.first == Buster || T.first == Busted || T.first == Stranger || T.first == Friend || T.first == Potted;
+		}
+		Expect(!Again, "a reload says nothing twice");
+	}
+	// Home at ten on Thursday night from a day out that crossed both of Thursday's moments: what comes in then is said as
+	// of then. Thursday's Nightly is under way, so nobody asks the player to it; Friday's they can.
+	{
+		ss::SaveData Late = D;
+		Late.ClockMinutes = Wednesday + 22.0 * 60.0;
+		PhoneHooks Ph;
+		ss::Session Home(Ph, "aftermath-late", &Late);
+		Ph.S = &Home;
+		Home.CurrentScreen = ss::Screen::Lobby;
+		ss::world::World& Lw = Home.Living();
+		Lw.Join("embercrest-nightly@10", Lw.Find(Buster));
+		Lw.Join("embercrest-nightly@11", Lw.Find(Buster));
+		Home.ResumeCalendarFrom(Wednesday + 1440.0 + 11.0 * 60.0);
+		Wait(Home, 0.0, 0.1);
+		std::vector<std::string> Who;
+		bool Stale = false;
+		bool Tomorrow = false;
+		for (size_t K = 0; K < Ph.Inbox.size(); ++K)
+		{
+			const std::string& From = Ph.Inbox[K].first;
+			if (From != Buster && From != Busted && From != Stranger && From != Friend && From != Potted)
+			{
+				continue;
+			}
+			Who.push_back(From);
+			const std::string Said = Lower(Ph.Inbox[K].second);
+			Stale = Stale || Said.find("tonight") != std::string::npos;
+			Tomorrow = Tomorrow || (From == Buster && Said.find("tomorrow") != std::string::npos);
+			std::printf("  embercrest: home late, %s texted: %s\n", From.c_str(), Ph.Inbox[K].second.c_str());
+		}
+		Expect(Who.size() == 2 && Who[0] == Buster, "a day away still brings the night's two texts");
+		Expect(!Stale && Tomorrow, "texts that come in late are said as of when they come: no invitation to a night already under way");
+	}
+	(void)Now;
 }
 
 /** Shifts, hustles, sleep, rent, Night Shift prizes, unlocks, bounties, satellites and tickets. */
@@ -2813,6 +3231,8 @@ int main()
 	session_test::Embercrest();
 	session_test::EmbercrestCheckpoints();
 	session_test::EmbercrestRail();
+	session_test::EmbercrestMinimum();
+	session_test::EmbercrestAftermath();
 	session_test::BountyTournament();
 	session_test::MultiTable();
 	session_test::FullTournament();

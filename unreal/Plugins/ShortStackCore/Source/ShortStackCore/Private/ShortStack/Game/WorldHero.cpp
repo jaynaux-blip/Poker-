@@ -45,6 +45,17 @@ float Add01(float V, double D)
 {
 	return sim::Clampf(static_cast<double>(V) + D, 0.0, 1.0);
 }
+
+/** The fewest an event runs with (the Embercrest's stated minimum; 0 where none is stated). */
+int MinimumField(const std::string& Id)
+{
+	if (!live::IsEmbercrest(Id))
+	{
+		return 0;
+	}
+	const live::Occurrence O = live::FindOccurrence(Id);
+	return O.Valid() ? O.T->MinEntrants : 0;
+}
 } // namespace worldhero_detail
 
 using namespace worldhero_detail;
@@ -69,6 +80,22 @@ void World::AdvanceTo(double To)
 		const double Limit = std::min({To, DayEnd, NextHour});
 		// Tomorrow's registrations are open.
 		Sim::PlanDay(*this, Day + 1);
+		// A live event short of its stated minimum is called off when its cards should go in the air (R6): nobody plays
+		// it or pays for it. One the player is in is their own room's to call (the session tells the world).
+		for (size_t K = 0; K < Queue.size();)
+		{
+			const Pending& P = Queue[K];
+			const int Minimum = !P.Online && P.HeroPlace == 0 && P.Start <= Limit ? MinimumField(P.Id) : 0;
+			const int Came = std::max(P.Entries, static_cast<int>(P.Who.size()));
+			if (Came < Minimum)
+			{
+				const std::string Id = P.Id;
+				Cancel(Id, P.Start, Came);
+				Changed = true;
+				continue;
+			}
+			++K;
+		}
 		// Everything that finishes by then.
 		std::vector<Pending> Later;
 		size_t Done = 0;
@@ -133,6 +160,74 @@ const net::EventResult* World::ResultOf(const std::string& EventId) const
 {
 	const auto It = Results.find(EventId);
 	return It == Results.end() ? nullptr : &It->second;
+}
+
+const Cancellation* World::CancellationOf(const std::string& EventId) const
+{
+	const auto It = Cancelled.find(EventId);
+	return It == Cancelled.end() ? nullptr : &It->second;
+}
+
+void World::Cancel(const std::string& EventId, double At, int Entrants)
+{
+	if (!Created || Results.count(EventId) > 0)
+	{
+		return; // (an event already decided stays decided: its winner was paid)
+	}
+	if (Cancelled.count(EventId) == 0)
+	{
+		Cancellation C;
+		C.At = At;
+		C.Field = Entrants;
+		Cancelled[EventId] = C;
+	}
+	// Buy-ins come out when an event is decided, so the people registered for it simply never pay; nobody wins it.
+	Queue.erase(std::remove_if(Queue.begin(), Queue.end(), [&](const Pending& P) { return P.Id == EventId; }), Queue.end());
+	HeroIn.erase(EventId);
+	++Rev;
+	++HeroRev;
+}
+
+bool World::FinishIn(const std::string& EventId, int Npc, int& Place, Chips& Prize) const
+{
+	const auto It = FieldPlaces.find(EventId);
+	if (It == FieldPlaces.end())
+	{
+		return false;
+	}
+	for (const Placed& P : It->second)
+	{
+		if (P.Npc == Npc)
+		{
+			Place = P.Place;
+			Prize = P.Prize;
+			return true;
+		}
+	}
+	return false;
+}
+
+std::string World::NextEmbercrest(int Npc, double From) const
+{
+	const int Today = sim::DayAt(From);
+	for (int Day = Today; Day <= Today + 1; ++Day)
+	{
+		for (const live::Occurrence& O : live::Occurrences(Day))
+		{
+			if (O.Start <= From)
+			{
+				continue;
+			}
+			for (const Pending& P : Queue)
+			{
+				if (P.Id == O.Id && std::any_of(P.Who.begin(), P.Who.end(), [&](const Entry& E) { return E.Npc == Npc; }))
+				{
+					return O.Id;
+				}
+			}
+		}
+	}
+	return std::string();
 }
 
 void World::EnsurePlanned(int Day)
@@ -234,7 +329,7 @@ std::vector<int> World::Leaders(Rep R, int Count) const
 
 void World::HeroEntered(const std::string& EventId, const std::string& EventName)
 {
-	if (!Created)
+	if (!Created || Cancelled.count(EventId) > 0)
 	{
 		return;
 	}
@@ -277,6 +372,10 @@ void World::HeroEntered(const std::string& EventId, const std::string& EventName
 
 int World::PlannedEntries(const std::string& EventId)
 {
+	if (Cancelled.count(EventId) > 0)
+	{
+		return 0; // called off: nobody plays it
+	}
 	Registered(EventId); // plans its day if it hasn't been
 	if (const Pending* P = FindPending(Queue, EventId))
 	{
@@ -374,6 +473,29 @@ void World::GrantAward(int Npc, bool Ring, bool Main)
 		Refresh(Npc);
 	}
 	++Rev;
+}
+
+void World::SetPlannedEntries(const std::string& EventId, int Entries)
+{
+	if (!Created)
+	{
+		return;
+	}
+	Registered(EventId); // plans its day if it can be
+	Pending* P = FindPending(Queue, EventId);
+	if (!P)
+	{
+		return;
+	}
+	const int Was = std::max(1, P->Entries);
+	P->Entries = std::max(1, Entries);
+	P->Pool = P->Pool * P->Entries / Was;
+	if (static_cast<int>(P->Who.size()) > P->Entries)
+	{
+		P->Who.resize(static_cast<size_t>(P->Entries));
+	}
+	++Rev;
+	++HeroRev; // (saved with the next save, like anything the player's nights depend on)
 }
 
 void World::KnownPlaces(const std::string& EventId, const std::vector<std::pair<int, int>>& Places)

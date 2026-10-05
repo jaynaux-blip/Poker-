@@ -7,6 +7,7 @@
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
+#include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/UI/Avatars.h"
@@ -17,6 +18,7 @@
 #include "ShortStack/UI/Phone.h"
 #include "ShortStack/UI/PropArt.h"
 #include "ShortStack/UI/RiverLine.h"
+#include "ShortStack/UI/SecondScreen.h"
 #include "ShortStack/UI/StreamArt.h"
 #include "TestFontMetrics.h"
 
@@ -818,6 +820,67 @@ void FrontEndScreens()
 	EmitMenu("menu_attract_gamepad", Fe, Now + 3.0);
 }
 
+/** A frame of the menu as it stands (no time passes). */
+ss::ui::DrawList MenuFrame(ss::ui::FrontEnd& Fe, double Now)
+{
+	TableMeasurer M;
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 1920.0f, ss::ui::FrontEnd::Height, 1.0f);
+	Fe.Draw(C, Now);
+	return L;
+}
+
+/** The card table's pause menu: what pausing means there, and R5's fold said before a quit mid-hand (the host's copy). */
+void TablePause()
+{
+	MenuHooks H;
+	ss::ui::FrontEnd Fe(H);
+	Fe.Info.HasSave = true;
+	Fe.Info.HeroName = "grinder_3c";
+	Fe.Info.World = 6.0 * ss::net::MinutesPerDay + 20.0 * 60.0 + 41.0; // Sunday, 8:41 PM
+	Fe.Info.Status = {{"EVENT", "Embercrest Sunday $150"}, {"PLAYERS LEFT", "37 of 90"}, {"YOUR STACK", "21,450"}, {"TIME", "8:41 PM"}};
+	Fe.Info.PauseNote = "The tournament clock is stopped. Pausing isn't sitting out: nothing is dealt without you.";
+	Fe.Info.QuitWarning = "This hand will be folded.";
+	Fe.Info.QuitKept = "The tournament is saved after every hand, and your seat waits: Continue takes you straight back to the table.";
+	Fe.SetVenue(ss::ui::Venue::CardRoom, "THE EMBERCREST \xC2\xB7 SUNDAY $150");
+	double Now = 50.0;
+	Fe.Open(ss::ui::FrontEnd::Page::Pause, Now);
+	Now = Settle(Fe, Now, 1.0);
+	Expect(Drew(MenuFrame(Fe, Now), "Pausing isn't sitting out"), "the table's pause page says pausing isn't sitting out");
+	EmitMenu("menu_pause_table", Fe, Now);
+	Fe.Key("Down", Now);
+	Fe.Key("Down", Now);
+	Now = Settle(Fe, Now, 0.4);
+	Expect(Drew(MenuFrame(Fe, Now), "This hand will be folded."), "the quit card warns the hand in play is folded");
+	Fe.Key("Enter", Now);
+	Now = Settle(Fe, Now, 0.4);
+	const ss::ui::DrawList Dialog = MenuFrame(Fe, Now);
+	Expect(Drew(Dialog, "This hand will be folded.") && Drew(Dialog, "The tournament is saved"), "the quit dialog says the hand is folded, then what's kept");
+	EmitMenu("menu_pause_table_confirm", Fe, Now);
+	Fe.Key("Enter", Now); // Cancel is the default
+	Expect(H.QuitsToMenu == 0 && Fe.Current() == ss::ui::FrontEnd::Page::Pause, "cancel keeps the player at the table");
+	Fe.Key("Enter", Now);
+	Fe.Key("Left", Now);
+	Fe.Key("Enter", Now);
+	Expect(H.QuitsToMenu == 1, "confirming the fold quits to the menu");
+
+	// Between hands nothing is folded: the dialog only says what's kept. A table without a clock names the place alone.
+	Fe.Info.QuitWarning.clear();
+	Fe.Info.Timeless = true;
+	Fe.Info.PauseNote.clear();
+	Fe.Close(Now);
+	Fe.Open(ss::ui::FrontEnd::Page::Pause, Now);
+	Now = Settle(Fe, Now, 1.0);
+	Fe.Key("Up", Now); // QUIT TO DESKTOP
+	Fe.Key("Enter", Now);
+	Now = Settle(Fe, Now, 0.4);
+	const ss::ui::DrawList Plain = MenuFrame(Fe, Now);
+	Expect(!Drew(Plain, "folded") && Drew(Plain, "The tournament is saved"), "between hands the quit dialog has no fold in it");
+	Fe.Key("Left", Now);
+	Fe.Key("Enter", Now);
+	Expect(H.Quits == 1, "and confirming quits to the desktop");
+}
+
 /** Draws frames (and runs the session) for a while, so animations and the lobby clock move on. */
 double Run(ss::Session& S, ss::ui::RiverLine& RL, double Now, double Seconds)
 {
@@ -1548,6 +1611,206 @@ void RentScreens()
 	Expect(S.Life.RentStage == Rent::Paid && S.GearFx().CanStream() && S.BankrollCents == 260000 - (122500 + 107500), "rent screens: moving back in from the Bank");
 	Now = Run(S, RL, Now, 1.0);
 	Emit("rent_home", RL, Now);
+}
+
+/**
+ * The Embercrest's week: RiverLine's page (its honest cards: the room's facts, the bus, the field, the warnings weighed
+ * against the rent), registering from a card through Session::GoToLive behind a confirm, the Burner's rows on the same
+ * path, the second screen's tile and the wall calendar by the window.
+ */
+void EmbercrestScreens()
+{
+	struct GoHooks : QuietHooks
+	{
+		std::string Went;
+		int Trips = 0;
+		bool GoOut(const std::string& Id, ss::Chips) override
+		{
+			Went = Id;
+			++Trips;
+			return true;
+		}
+	};
+	using Page = ss::ui::RiverLine::Page;
+	using App = ss::ui::RiverLine::App;
+	GoHooks H;
+	ss::Session S(H, "ui-embercrest");
+	ss::ui::RiverLine RL(S);
+	TableMeasurer M;
+	S.CurrentScreen = ss::Screen::Lobby;
+	RL.UI.Ptr.Active = false;
+	double Now = Run(S, RL, 1.0, 0.2);
+	const double Day = ss::net::MinutesPerDay;
+	auto At = [&](double World) {
+		S.LobbyMinutes += World - S.WorldMinutes();
+		Now = Run(S, RL, Now, 0.2);
+		S.Life.Hunger = 20.0;
+		S.Life.Thirst = 20.0;
+		S.Life.Energy = 80.0;
+	};
+	auto Frame = [&]() {
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		RL.Draw(C, Now);
+		return L;
+	};
+	auto Click = [&](float X, float Y) {
+		for (int K = 0; K < 2; ++K)
+		{
+			RL.UI.Ptr.Active = true;
+			RL.UI.Ptr.X = X;
+			RL.UI.Ptr.Y = Y;
+			RL.UI.Ptr.Down = K == 0;
+			RL.UI.Ptr.Pressed = K == 0;
+			RL.UI.Ptr.Released = K == 1;
+			Frame();
+			RL.UI.Ptr.EndFrame();
+			Now += 0.05;
+		}
+		RL.UI.Ptr.Active = false;
+	};
+	auto Screen = [&](int Which) {
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::secondscreen::Width, ss::ui::secondscreen::Height, 1.0f);
+		ss::ui::secondscreen::Draw(C, S, Which, Now);
+		return L;
+	};
+	auto Calendar = [&]() {
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::wallcalendar::Width, ss::ui::wallcalendar::Height, 1.4f);
+		ss::ui::wallcalendar::Draw(C, S);
+		return L;
+	};
+
+	// Wednesday, October 7, 2 PM. The first month's rent ($1,225) is due Friday at midnight; $1,300 in the bank.
+	At(2.0 * Day + 14.0 * 60.0);
+	S.BankrollCents = 130000;
+	Expect(S.Life.RentStage == ss::life::Rent::Due && ss::net::DayOf(S.Life.RentDeadline - 1.0) == 4, "embercrest: the first rent is due Friday");
+	{
+		const ss::ui::DrawList Tile = Screen(0);
+		Expect(Drew(Tile, "THE EMBERCREST") && DrewRun(Tile, "Nightly") && Drew(Tile, "Today 7:00 PM \xC2\xB7 $120 \xC2\xB7 desk opens 4:00 PM"),
+			"embercrest: the second screen's tile shows the next event the bus can make");
+		Expect(!Drew(Tile, "Sunday tournament"), "embercrest: the tile no longer says the room only runs on Sundays");
+	}
+	RL.OpenPage(Page::Embercrest, Now);
+	Now = Run(S, RL, Now, 1.2);
+	Expect(RL.CurrentPage() == Page::Embercrest && RL.LiveDayShown() == 2, "embercrest: the page opens on today, the next day the bus can make");
+	{
+		const ss::ui::DrawList L = Frame();
+		// The room's facts, as published: the start, the buy-in and its fee, the stack in big blinds, the levels, the breaks,
+		// late registration, the stated minimum, a deep run, the bus.
+		Expect(Drew(L, "Embercrest Nightly") && Drew(L, "7:00 PM") && Drew(L, "$105 + $15 fee") && Drew(L, "20,000 \xC2\xB7 100 BB") && Drew(L, "20 minutes") &&
+				   Drew(L, "15 min every 2 hours") && Drew(L, "until 8:00 PM (3 levels)") && Drew(L, "18 \xC2\xB7 else refunded") && Drew(L, "about ") &&
+				   Drew(L, "The 14 bus: $2.90 and 20 minutes each way"),
+			"embercrest: the Nightly's card states the room's facts");
+		Expect(Drew(L, "leave by 6:40 PM for cards"), "embercrest: the card says when to catch the bus");
+		// The week: every day's events, Saturday's Big Stack and the weekend's turbo among them.
+		Expect(DrewRun(L, "Big Stack") && DrewRun(L, "Midnight Turbo") && Drew(L, "16 events"), "embercrest: the week lists every event");
+		// Weighed against the money: the Nightly fits the bankroll but not the rent with it.
+		Expect(Drew(L, "Rent is due in 2 days ($1,225). After this you'd be $50.80 short."), "embercrest: the card warns the Nightly costs the rent");
+		Expect(Drew(L, "The desk opens at 4:00 PM.") && DrewRun(L, "DESK 4 PM"), "embercrest: before the desk opens the card says when it does");
+	}
+	Emit("embercrest_week", RL, Now);
+	// Short of the buy-in and the bus: the card says by how much.
+	S.BankrollCents = 10000;
+	Now = Run(S, RL, Now, 0.1);
+	Expect(Drew(Frame(), "You're $25.80 short: the buy-in and the bus are $125.80."), "embercrest: a night the bankroll can't cover says so");
+	S.BankrollCents = 130000;
+	// Saturday on the week: three events, the Big Stack's own structure.
+	RL.ShowLiveDay(5, std::string(), Now);
+	Now = Run(S, RL, Now, 1.0);
+	{
+		const ss::ui::DrawList L = Frame();
+		Expect(Drew(L, "Saturday Big Stack") && Drew(L, "30,000 \xC2\xB7 150 BB") && Drew(L, "15 min every 2.5 hours") && Drew(L, "Who's going firms up the day before."),
+			"embercrest: Saturday's cards (no plan that far out yet)");
+		// Friday's rent comes first: Saturday's nights are paid from what the landlord leaves.
+		Expect(Drew(L, "Rent is due in 2 days ($1,225), before this. That leaves $75, $130.80 short of this.") && Drew(L, "That leaves $75, enough for this."),
+			"embercrest: a night after the rent's deadline is weighed against what the rent leaves");
+		Expect(Drew(L, "Desk opens Saturday, 10 AM."), "embercrest: a card days out says which day its desk opens");
+	}
+	Emit("embercrest_saturday", RL, Now);
+
+	// 5 PM: the desk is open. Register for the Nightly from its card: a confirm, then the session's own registration.
+	At(2.0 * Day + 17.0 * 60.0);
+	RL.ShowLiveDay(2, std::string(), Now);
+	Now = Run(S, RL, Now, 1.2);
+	const float CardY = 282.0f + 214.0f + 12.0f; // the day's second card: the Nightly
+	Click(24.0f + 1052.0f - 26.0f - 115.0f, CardY + 138.0f + 21.0f);
+	Expect(RL.LiveConfirming() == "embercrest-nightly@2" && H.Trips == 0 && S.Life.LiveEntries.empty(), "embercrest: Register asks to confirm first");
+	{
+		const ss::ui::DrawList L = Frame();
+		Expect(Drew(L, "Leaves now: $120 at the desk and $2.90 for the bus \xC2\xB7 balance after $1,177.10"), "embercrest: the confirm says what leaves the bank");
+		Expect(Drew(L, "After this you'd be $50.80 short."), "embercrest: confirming, the rent warning stays in view");
+	}
+	Emit("embercrest_confirm", RL, Now);
+	Click(24.0f + 1052.0f - 26.0f - 230.0f + 50.0f, CardY + 138.0f + 21.0f);
+	const ss::life::LiveEntry* E = ss::live::EntryFor(S.Life, "embercrest-nightly@2");
+	Expect(H.Went == "embercrest-nightly@2" && E && E->State == ss::life::LiveEntry::Registered && S.BankrollCents == 130000 - 12000 - ss::live::BusFareCents,
+		"embercrest: confirming registers through Session::GoToLive, charged once");
+	Now = Run(S, RL, Now, 0.5);
+	{
+		const ss::ui::DrawList L = Frame();
+		Expect(DrewRun(L, "Go back") && DrewRun(L, "Paid $120") && DrewRun(L, "YOU'RE IN"), "embercrest: the card holds the entry");
+		Expect(!Drew(L, "You're registered for the"), "embercrest: a night already under way doesn't nag about the entry held");
+		Expect(Drew(Screen(0), "You're in: Nightly"), "embercrest: the tile shows the player's registration");
+	}
+	Emit("embercrest_registered", RL, Now);
+
+	// The Burner's rows: the same facts, and Go back on the same path (no second charge).
+	RL.OpenApp(App::Burner, Now);
+	RL.ShowContact(2);
+	Now = Run(S, RL, Now, 1.0);
+	{
+		const ss::ui::DrawList L = Frame();
+		Expect(Drew(L, "$105 + $15 fee  \xC2\xB7  20,000 chips (100 BB)  \xC2\xB7  20-min levels") && Drew(L, "Breaks 15 min every 2 hours  \xC2\xB7  late reg to 8:00 PM  \xC2\xB7  runs with 18+") &&
+				   Drew(L, "The 14 bus: $2.90, 20 min each way"),
+			"embercrest: the Burner's rows state the room's facts");
+		Expect(DrewRun(L, "Go back") && Drew(L, "The week on RiverLine"), "embercrest: the Burner holds the entry and links the week");
+	}
+	Emit("app_burner_embercrest", RL, Now);
+	const ss::Chips Before = S.BankrollCents;
+	const float Rx = 380.0f + (1180.0f - 16.0f) * 0.4f + 16.0f;
+	const float Rw = 1180.0f - 16.0f - (1180.0f - 16.0f) * 0.4f;
+	Click(Rx + 20.0f + (Rw - 40.0f) - 4.0f - 94.0f, 962.0f - 330.0f + 24.0f + 70.0f + 31.0f);
+	Expect(H.Trips == 2 && H.Went == "embercrest-nightly@2" && S.BankrollCents == Before && S.Life.LiveEntries.size() == 1, "embercrest: the Burner's Go back takes the same path, charging nothing");
+	Click(Rx + Rw - 20.0f - 60.0f, 962.0f - 330.0f + 24.0f + 30.0f);
+	Expect(RL.CurrentApp() == App::RiverLine && RL.CurrentPage() == Page::Embercrest, "embercrest: the Burner's link opens the week on RiverLine");
+
+	// The wall calendar: today's and tomorrow's events, the entry ringed, the rent's day; its key moves when they do.
+	{
+		const ss::ui::DrawList L = Calendar();
+		Expect(DrewRun(L, "Nightly") && DrewRun(L, "Noon Deepstack") && DrewRun(L, "I'M IN") && Drew(L, "RENT $1,225") && DrewRun(L, "7 PM"),
+			"embercrest: the calendar shows today's and tomorrow's events, the entry and the rent");
+		WriteList("wall_calendar", L);
+		WriteList("second_screen_embercrest", Screen(0));
+	}
+	const std::string Key = ss::ui::wallcalendar::Key(S);
+	At(3.0 * Day + 10.0 * 60.0);
+	Expect(ss::ui::wallcalendar::Key(S) != Key, "embercrest: the calendar redraws when the day changes");
+
+	// Wednesday's night is played out (the card room settles it; this test has no room): 40th, no cash.
+	ss::live::Settle(S.BankrollCents, S.Life, "embercrest-nightly@2", 40, ss::live::EntryFor(S.Life, "embercrest-nightly@2")->Entrants, 0, 3.0 * Day + 2.0 * 60.0);
+	// Thursday's noon game is thin: its card says it would be called off; at cards-up the room calls it, and nothing offers
+	// it any more (Session::GoToLive refuses a cancelled event).
+	const std::string Noon = "embercrest-noon@3";
+	S.Living().SetPlannedEntries(Noon, 9);
+	RL.ShowLiveDay(3, std::string(), Now);
+	Now = Run(S, RL, Now, 1.2);
+	Expect(Drew(Frame(), "Only ~9 are down for it: under 18 it's called off and the buy-in refunded."), "embercrest: a thin field's card warns it may be called off");
+	const std::string Struck = ss::ui::wallcalendar::Key(S);
+	At(3.0 * Day + 12.0 * 60.0 + 5.0);
+	Expect(S.Living().CancellationOf(Noon) != nullptr && !ss::live::ActiveEntry(S.Life), "embercrest: the thin noon game is called off at cards-up");
+	Expect(S.GoToLive(Noon) == "That one was cancelled." && H.Trips == 2, "embercrest: the desk agrees with the card: no entry for a called-off night");
+	RL.ShowLiveDay(3, std::string(), Now);
+	Now = Run(S, RL, Now, 1.2);
+	{
+		const ss::ui::DrawList L = Frame();
+		Expect(Drew(L, "Cancelled: 9 came, 18 needed") && DrewRun(L, "CALLED OFF") && !DrewRun(L, "Register \xC2\xB7 $80"), "embercrest: a called-off night says so and offers no registration");
+		const ss::ui::DrawList Tile = Screen(0);
+		Expect(!Drew(Tile, "Noon Deepstack") && DrewRun(Tile, "Nightly"), "embercrest: the tile skips a called-off night");
+		Expect(ss::ui::wallcalendar::Key(S) != Struck, "embercrest: the calendar strikes out a called-off night");
+	}
+	Emit("embercrest_called_off", RL, Now);
 }
 
 /** GearDrop and Kast: the store, the locked studio on the laptop, the upgrade that unlocks it, a stream from the lobby to a
@@ -2837,9 +3100,11 @@ int main(int Argc, char** Argv)
 	ui_test::PennyDropScreens();
 	ui_test::PennyDropDetails();
 	ui_test::RentScreens();
+	ui_test::EmbercrestScreens();
 	ui_test::LedScreens();
 	ui_test::FrontEndFlows();
 	ui_test::FrontEndScreens();
+	ui_test::TablePause();
 	ui_test::CreatorInputFixes();
 	if (ui_test::Failures == 0)
 	{

@@ -286,7 +286,8 @@ std::string FrontEnd::LeaveTitle(bool ToMenu) const
 {
 	if (!ToMenu)
 	{
-		return Where == Venue::Street ? "Call it a night" : "Log off for the night";
+		// Logging off is the desk's; anywhere else the player calls it a night.
+		return Where == Venue::Home ? "Log off for the night" : "Call it a night";
 	}
 	if (Info.InTournament)
 	{
@@ -303,6 +304,11 @@ std::string FrontEnd::LeaveTitle(bool ToMenu) const
 
 std::string FrontEnd::SavedLine() const
 {
+	if (!Info.QuitKept.empty())
+	{
+		// The host's own words for what's kept (a card table: the night settled, or the tournament's seat waiting).
+		return Info.QuitKept;
+	}
 	if (Where == Venue::Street)
 	{
 		// The street hands back to the desk: Continue starts there.
@@ -715,12 +721,15 @@ std::vector<FrontEnd::SettingRow> FrontEnd::Rows(int ForTab)
 			[&S] { return S.BackgroundAudio ? 1 : 0; }, [&S](int V) { S.BackgroundAudio = V != 0; });
 		break;
 	default:
-		Slider("Look sensitivity", "How far the view turns as you move the mouse while sitting back.", -1, 20, 200, 10, "%", [&S] { return S.LookSensitivity; },
-			[&S](int V) { S.LookSensitivity = V; });
-		Choice("Invert look", "Moving the mouse up looks down.", -1, OffOn, [&S] { return S.InvertLook ? 1 : 0; }, [&S](int V) { S.InvertLook = V != 0; });
-		Choice("Control hints", "Shows the controls reminder after you sit down at the laptop.", -1, OffOn, [&S] { return S.ShowHints ? 1 : 0; }, [&S](int V) { S.ShowHints = V != 0; });
-		Choice("Table pace", "At a live table: how long the other players take to act, and how quickly a hand you've folded plays out. Your own decisions always wait for you. P changes it at the table.", -1,
-			{"LIVE", "BRISK", "FAST"}, [&S] { return S.TablePace; }, [&S](int V) { S.TablePace = V; });
+		Slider("Look sensitivity", "How far the view turns as you move the mouse or the right stick: sitting back at the desk, out on the street, at a card table.", -1, 20, 200, 10,
+			"%", [&S] { return S.LookSensitivity; }, [&S](int V) { S.LookSensitivity = V; });
+		Choice("Invert look", "Moving the mouse or the right stick up looks down.", -1, OffOn, [&S] { return S.InvertLook ? 1 : 0; }, [&S](int V) { S.InvertLook = V != 0; });
+		Choice("Control hints", "Shows the controls reminder after you sit down at the laptop or at a card table, and on the street.", -1, OffOn, [&S] { return S.ShowHints ? 1 : 0; },
+			[&S](int V) { S.ShowHints = V != 0; });
+		Choice("Table pace",
+			std::string("At a live table: how long the other players take to act, and how quickly a hand you've folded plays out. Your own decisions always wait for you. ") +
+				(Gamepad ? "Right on the d-pad changes it at the table." : "T changes it at the table."),
+			-1, {"LIVE", "BRISK", "FAST"}, [&S] { return S.TablePace; }, [&S](int V) { S.TablePace = V; });
 		break;
 	}
 	return Out;
@@ -1093,6 +1102,11 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 			// What leaving looks like from where the player is (the desk, the street, a table).
 			Label(Sel == 2 ? "MAIN MENU" : "DESKTOP", MenuTeal);
 			Title(LeaveTitle(Sel == 2));
+			if (!Info.QuitWarning.empty())
+			{
+				// What it costs first (R5: a hand in play is folded), then what's kept.
+				Warning(Info.QuitWarning);
+			}
 			Para(SavedLine(), MenuInk);
 			if (Info.InTournament)
 			{
@@ -1291,9 +1305,22 @@ void FrontEnd::PausePage(double Now)
 	}
 	const std::string Day = UpperCase(net::WeekdayName(net::DayOf(Info.World)));
 	C->FillRect({MenuMargin + 2.0f, 310.0f, 44.0f, 3.0f}, Paint(F(MenuNeon)));
-	TrackedText(*C, VenueLabel() + " \xC2\xB7 " + Day + " \xC2\xB7 " + Clock, MenuMargin + 62.0f, 318.0f, 15.0f, 700, F(MenuMuted), 6.0f);
-	MenuList(Items(), MenuMargin + 4.0f, 470.0f, Now);
+	TrackedText(*C, Info.Timeless ? VenueLabel() : VenueLabel() + " \xC2\xB7 " + Day + " \xC2\xB7 " + Clock, MenuMargin + 62.0f, 318.0f, 15.0f, 700, F(MenuMuted), 6.0f);
 	const float CardW = 540.0f;
+	if (!Info.PauseNote.empty())
+	{
+		// What pausing means here (at the Embercrest both clocks stop, and it isn't sitting out: LIVE_TOURNAMENTS.md, Time),
+		// under the heading and clear of the context card.
+		const float NoteW = std::max(240.0f, ViewW - MenuMargin - CardW - 48.0f - (MenuMargin + 62.0f));
+		float Ny = 360.0f;
+		const std::vector<std::string> Lines = WrapText(*C, Info.PauseNote, NoteW, 18.0f, 400);
+		for (size_t I = 0; I < Lines.size() && I < 2; ++I)
+		{
+			C->Text(Lines[I], MenuMargin + 62.0f, Ny, Ts(18.0f, 400, F(MenuInk, 0.82f)));
+			Ny += 26.0f;
+		}
+	}
+	MenuList(Items(), MenuMargin + 4.0f, 470.0f, Now);
 	ContextCard(ViewW - MenuMargin - CardW, 410.0f, CardW, Now);
 	Hints({{"UP|DOWN/DPAD", "NAVIGATE"}, {"ENTER/A", "SELECT"}, {"ESC/B", "RESUME"}});
 	Footer();
@@ -1571,7 +1598,15 @@ void FrontEnd::ModalBox(double Now)
 		break;
 	}
 	const float Mw = 720.0f;
-	const std::vector<std::string> Lines = WrapText(*C, Body, Mw - 88.0f, 20.0f, 300);
+	std::vector<std::string> Lines = WrapText(*C, Body, Mw - 88.0f, 20.0f, 300);
+	// A quit that costs something says so first, in the warning color (R5 at a table: "This hand will be folded.").
+	size_t Warned = 0;
+	if (Which != Modal::Overwrite && !Info.QuitWarning.empty())
+	{
+		std::vector<std::string> First = WrapText(*C, Info.QuitWarning, Mw - 88.0f, 20.0f, 300);
+		Warned = First.size();
+		Lines.insert(Lines.begin(), First.begin(), First.end());
+	}
 	const float Mh = std::max(300.0f, 236.0f + 30.0f * static_cast<float>(Lines.size()));
 	const float Mx = ViewW * 0.5f - Mw * 0.5f;
 	const float My = Height * 0.5f - Mh * 0.5f + (1.0f - A) * 16.0f;
@@ -1580,10 +1615,10 @@ void FrontEnd::ModalBox(double Now)
 	C->FillRect({Mx, My, 56.0f, 3.0f}, Paint(F(Which == Modal::Overwrite ? MenuWarn : MenuNeon)));
 	TrackedText(*C, Heading, Mx + 44.0f, My + 84.0f, 36.0f, 900, F(MenuInk), 2.0f);
 	float Yb = My + 104.0f;
-	for (const std::string& L : Lines)
+	for (size_t I = 0; I < Lines.size(); ++I)
 	{
 		Yb += 30.0f;
-		C->Text(L, Mx + 44.0f, Yb, Ts(20.0f, 300, F(Alarm ? MenuWarn : MenuInk, 0.9f)));
+		C->Text(Lines[I], Mx + 44.0f, Yb, Ts(20.0f, I < Warned ? 400 : 300, F(Alarm || I < Warned ? MenuWarn : MenuInk, 0.9f)));
 	}
 	const float Yw = std::max(200.0f, TrackedWidth(*C, YesLabel, 20.0f, 900, 3.0f) + 56.0f);
 	const Rect Yes = {Mx + 44.0f, My + Mh - 100.0f, Yw, 60.0f};
