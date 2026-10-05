@@ -63,7 +63,7 @@ Directives for every venue.
 
 ## 4. The Embercrest Casino card room
 
-**The place.** A mountain resort casino, home of the **Embercrest Poker Series**. The brand is a three-peaked crest with the ember rising behind it, in midnight navy, ash white and ember copper (art/blender/brand.py makes the mark and every screen, sign and banner). The poker room is off the main floor. Inside:
+**The place.** A mountain resort casino on the ridge above the city, home of the **Embercrest Poker Series**. From outside (`/Game/Maps/Embercrest`): the 14 stops at the foot of the drive; the plaza steps up between cascades and fire bowls to a lit larch canopy, the casino's wings, the LED marquee with tonight's event and the hotel tower with its three-peaked crown, under the massif the mark is drawn from, with the city's lights in the valley 900 m below. The brand is a three-peaked crest with the ember rising behind it, in midnight navy, ash white and ember copper (art/blender/brand.py makes the mark and every screen, sign and banner). The poker room is off the main floor. Inside:
 
 - **Walls and ceiling:** navy fabric acoustic panels split by copper reveals, an ember LED cove line round the room, smoked oak slats above; black coffers with lit trays; black glass columns with an ember line down each corner. Printed banners (PLAY / COMPETE / RISE) hang down the walls.
 - **Tables:** navy speed cloth with the Embercrest's mark and a copper betting line, black leather rails, a linear pendant over each, the table number on a hanging LED sign.
@@ -235,7 +235,7 @@ Saturday, 12:10 PM. Rent's paid, $640 in the bank. The calendar has three blue c
 
 ## 15. Milestones for this update
 
-**Status, 2026-10-03.**
+**Status, 2026-10-05.**
 
 - **M1 is built** (254923e). Covered by session_test and world_test, and played in the editor: registered from the Burner app, a Noon Deepstack and Nightlies, one to 11th of 97 and a cash.
 - **M2 is built** (ad45abb):
@@ -249,7 +249,7 @@ Saturday, 12:10 PM. Rent's paid, $640 in the bank. The calendar has three blue c
     - A hand already dealt when the game closed is dead (checked through or mucked), so no deck is seen twice.
     - A night the player never returns to is blinded off from its checkpoint.
     - Tested: session_test reopens a Sunday after any hand, and every forty hands; it plays on event for event and chip for chip. In the editor, the editor process was killed mid-hand and resumed into the same seat.
-  - **Pacing.** A Table pace setting (Live / Brisk / Fast; also P at the table) scales the others' thinking and the folded speed-up. N plays out a folded hand quickly. Neither ever decides anything for the player.
+  - **Pacing.** A Table pace setting (Live / Brisk / Fast; also T at the table, where P, Esc and gamepad Start pause) scales the others' thinking and the folded speed-up. N plays out a folded hand quickly. Neither ever decides anything for the player.
   - **Recurring faces.**
     - The room has 39 regulars of its own in the living world (`live::RoomLocals`, `world::Origin::Local`), added to older saves on load. 64 regulars in all (`World::EmbercrestRegulars`), each with their own nights (`live::RegularHabit`). world_test measures about 8 at a Nightly, and most come back three or more times a month.
     - The entry records the faces in its field: who they are to the player, and what they say on sitting down (`life::LiveFace`, from the world's bonds).
@@ -260,11 +260,19 @@ Saturday, 12:10 PM. Rent's paid, $640 in the bank. The calendar has three blue c
     - The desk and the cage recognize a first-timer, a regular and a past cash. Breaks can be walked.
     - After a bust, the summary waits: Q stays to rail while the room plays on (PA, boards, champion) and L goes home. The door ends the night.
     - What the player watched from the rail goes to the world (`SaveData::NoteLivePlaces`, `World::KnownPlaces`), and the world's result agrees: session_test checks a railed final. Embercrest results are kept, which also fills the champions' board.
+  - **Closed on 2026-10-05** (73101dc, 1fe138e; played in the editor):
+    - The railed table plays on: after a bust the old table follows the engine's table each simulated round (stacks, moves, busts leaving the chair, a broken table emptying).
+    - Faces follow their person: twelve extras (ExtraA-L), each entrant's body picked once per night from their id with the far crowd's hash, pooled by body at the near tables and kept in the checkpoint.
+    - The next event from the desk: after a bust the desk offers the next event still open today, registers it through the Burner's path, the PA calls it and the room reopens for it with no second fare or ride. Leaving while registered refunds it.
+    - Last call on the PA and the screens before late registration closes; showdown pots become 'B' memories; people you sat with text you over the next day or two; a field below the minimum is recorded by the world as a cancellation.
+    - The schedule outside the Burner: RiverLine's Embercrest tab with honest event cards (fee split, stack, breaks, late reg, minimum, a deep run's length, the bus, who's playing, rent warnings), the second screen's tile and a wall calendar.
+    - Pause at the table stops both clocks and says so; quitting mid-hand asks first ("This hand will be folded"); full gamepad play.
+    - The way in and out: the 14 stops at the resort's exterior (`/Game/Maps/Embercrest`), you walk up the drive and through the doors; after the night you come out under the canopy and take the waiting bus home.
   - **Still open:**
-    - The near-table bodies are four extra MetaHumans, so faces repeat (shirts and names differ).
     - Cash tables.
-    - The player's old table freezes while railing (its people don't play on visibly).
-    - Messages from bonds outside the room.
+    - The far crowd's baked figures can't wear a person's clothes, and `backroom_crowd.py` still finds sitters by the old persona names.
+    - The player's table's pendant stays lit after that table breaks.
+    - The hero at the table and the hero outside are built from different MetaHumans (hair and face differ).
 
 **M1, the schedule and the honest field (core, standalone-tested, no new art)**
 1. `live::Venue` and `live::EventTemplate` data: the Embercrest and its weekly schedule.

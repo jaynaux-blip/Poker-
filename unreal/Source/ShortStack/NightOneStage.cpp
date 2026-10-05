@@ -520,7 +520,10 @@ void ANightOneStage::BuildProps()
 		const double CalX = 1.62;
 		const double CalY = 1.52;
 		const FVector2D CalCm(50.0, 70.0);
-		CalendarWidget = AddWidget(Web(CalX, CalY, RoomFront + 0.004), Facing(FVector::BackwardVector, FVector::UpVector), CalCm, CalendarResolution, true, false);
+		// Out of the window's light and the lamp's (off), a lit sheet went black: the paper is drawn as it reads in the
+		// room's dim spill from the street and the laptop, readable from the chair without glowing.
+		CalendarWidget = AddWidget(Web(CalX, CalY, RoomFront + 0.004), Facing(FVector::BackwardVector, FVector::UpVector), CalCm, CalendarResolution, false, false);
+		CalendarWidget->SetTintColorAndOpacity(FLinearColor(0.11f, 0.105f, 0.1f, 1.0f));
 		AddMesh(CylinderMesh, Surface(TEXT("Nail"), 0x9a9890, 0.35f, 1.0f), Web(CalX, CalY + CalCm.Y / 200.0 + 0.004, RoomFront + 0.006), FVector(0.005, 0.005, 0.012),
 		        FRotator(90.0f, 0.0f, 0.0f));
 	}

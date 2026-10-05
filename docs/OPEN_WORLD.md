@@ -101,9 +101,9 @@ The imported glTF materials are tinted by whatever base-color parameter they exp
 
 Each step keeps the walk-around world small, dense and tied to the career. There are no empty streets.
 
-1. **The block.** Evicted, you wake on Dee's couch, and door 1812 is locked to you. The Wash & Fold is enterable, and Dee's Tuesday game moves from a menu into the back room you walk into. It reuses the Back Room stage with the third-person toggle. Pedestrians walk the sidewalks: a handful of MetaHumans on the procedural gait, following waypoint loops. Shift work at the Lucky Penny becomes a playable night behind Benny's counter.
+1. **The block.** Evicted, you wake on Dee's couch, and door 1812 is locked to you. The Wash & Fold is enterable, and Dee's game (Tuesday, Thursday and Saturday) moves from a menu into the back room you walk into. It reuses the Back Room stage with the third-person toggle. Pedestrians walk the sidewalks: a handful of MetaHumans on the procedural gait, following waypoint loops. Shift work at the Lucky Penny becomes a playable night behind Benny's counter.
 2. **Time and weather on the street.** The street follows the session clock: dusk, the dead hours, sunrise. Rain comes and goes (the materials already carry a Wet parameter). The store's stock and Benny's lines follow the hour.
-3. **Getting around.** A bus stop on Market St with a timetable takes you to the Embercrest's card room for live events and to the bank. Each stop is a small, dense scene, not an open map. Later, rideshare costs money and saves time.
+3. **Getting around.** A bus stop on Market St with a timetable takes you to the Embercrest's card room for live events and to the bank. Each stop is a small, dense scene, not an open map. Later, rideshare costs money and saves time. (Built for the Embercrest, 2026-10-05: the 14 drops you at the resort's own stop, `/Game/Maps/Embercrest`, and waits there after the night; the Market St stop is still to come.)
 4. **Clothes and looks that move with the career.** A thrift store and then better shops sell jackets, hats and glasses (more Blender wearables), and the creator's choices become things you own. Fame changes how the street reacts: a double take, someone asking for a photo.
 5. **Live events in third person.** The casino floor is walkable between levels: the cage, the rail, the bathroom break. You walk to your table and sit, and the table switches to the first-person camera with V for third person.
 6. **The apartment tiers outside.** The loft and the penthouse each come with a neighborhood: different shops, a different walk, different neighbors.
@@ -119,5 +119,7 @@ Each step keeps the walk-around world small, dense and tied to the career. There
 - [x] Apartment ↔ street travel with the clock carried over
 - [x] Third person at the Back Room table
 - [x] Blender props: hydrant, litter basket, newsbox, streetlight, sedan, cooler wall, gondola, register, hats and glasses
-- [ ] First play on the desktop: gait, wearable offsets, prop scale and facing, lighting balance
+- [x] First play on the desktop: gait, wearable offsets, prop scale and facing, lighting balance (2026-10-04)
+- [x] The street's own sound (rain, traffic, the store's coolers and ballasts, crossfading at the door) and a dressed store interior
+- [x] The Embercrest from outside: the bus stop, the drive, the canopy and the doors, by day, dusk and night
 - [ ] Step 2 onward, as above
