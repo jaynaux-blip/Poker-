@@ -49,11 +49,15 @@ struct FRoomGear
 };
 
 /**
- * The studio apartment on the third floor, 2 a.m.: room shell, desk and
- * props, the rain-streaked window, the city and the laundromat's neon across
- * the street, lights and the post-process "lens". Built procedurally from
- * engine shapes (port of the files in web/src/scene) so it runs in any level; each
- * piece is a component that Blender assets can replace.
+ * The studio apartment on the third floor of 1812 Fifth Street: room shell, desk and props, the rain-streaked
+ * window, the city and the laundromat's neon across the street, lights and the post-process "lens". The view and
+ * the light keep the hour (SetDawn: Session::Daylight): grey daylight through the window by day, the neon and the
+ * street lamp lit from dusk. Built procedurally from engine shapes (port of the files in web/src/scene) so it runs
+ * in any level; each piece is a component that Blender assets can replace.
+ *
+ * The hub the game mode runs is a stage: this one, or ADeeRoomStage (Dee's front room across the street, while the
+ * player is evicted), which builds its own room on the same anchors (the seat's eye, the laptop and its screen, the
+ * phone, the arms, the lens) through the shared builders below.
  *
  * Coordinates: the prototype's meters (x right, y up, z toward the viewer)
  * map to Unreal centimeters as X = -z, Y = x, Z = y.
@@ -77,6 +81,13 @@ public:
 	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Short Stack")
 	void RebuildSet();
 
+	/**
+	 * Bumped whenever the set's construction changes in a way play depends on (new parts the game drives): a stage
+	 * saved in a level before that (a cooked map not saved again since) is replaced at play by one built now.
+	 */
+	static constexpr int32 SetVersion = 2;
+	bool IsSetCurrent() const { return BuiltSetVersion == SetVersion; }
+
 	// ------------------------------------------------------------ game hooks
 	FVector EyeLocation() const;
 	FVector ScreenCenter() const;
@@ -84,7 +95,12 @@ public:
 	/** Laptop screen size in centimeters. */
 	FVector2D ScreenSize() const { return FVector2D(31.6, 19.75); }
 	/** The title screen's slow camera move at time T (seconds): where the camera is and what it looks at. */
-	void MenuShot(double T, FVector& OutLocation, FVector& OutLookAt) const;
+	virtual void MenuShot(double T, FVector& OutLocation, FVector& OutLookAt) const;
+	/**
+	 * Where the camera lies while the player sleeps here (a night or a nap) at time T, and what it looks at; false where
+	 * sleeping keeps the seat (the apartment: the laptop's clock plays the night out).
+	 */
+	virtual bool SleepShot(double T, FVector& OutLocation, FVector& OutLookAt) const { return false; }
 	/** Ray from the camera onto the laptop screen; returns the point in client space (1600 x 1000). */
 	bool ScreenHit(const FVector& Origin, const FVector& Direction, FVector2D& OutClient) const;
 
@@ -109,12 +125,15 @@ public:
 	/** The monitors' pictures (0: the 24" on the right, 1: the 27" on the left), drawn at MonitorResolution. */
 	void SetMonitorDrawList(int32 Index, const TSharedPtr<const ss::ui::DrawList>& List);
 	bool MonitorShown(int32 Index) const { return Index == 0 ? Gear.bMonitor : Gear.bMonitorWide; }
-	/** 0 = deep night, 1 = first light (from the tournament clock). */
+	/**
+	 * The hour, 0 night .. 1 full day (Session::Daylight): the sky and the city through the window, the daylight in the
+	 * room, the street lamp and the neon (dark by day), the lit windows across the street, and the exposure.
+	 */
 	void SetDawn(float Value);
 	/** Lens treatment: Focus 0..1 (leaned in), Tilt 0..1, Pulse 0..1 (heartbeat). */
 	void SetLens(float Focus, float Tilt, float Pulse);
 	/** Put another empty can on the desk (one per hour of grinding). */
-	void AddCan();
+	virtual void AddCan();
 	void Lightning(float Strength);
 
 	// The player's arms (SK_Arms): the left hand on the laptop, the right on the mouse.
@@ -191,22 +210,68 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	FIntPoint CalendarResolution = FIntPoint(840, 1176);
 
-private:
-	void BuildSet();
+protected:
+	/** Builds the whole set (OnConstruction): this one the apartment; a subclass its own room on the shared builders. */
+	virtual void BuildSet();
+	/** The seat's eye in the stage's own space: the camera sits back from here, and the arms hang from it. */
+	virtual FVector EyeLocal() const;
+	/** The look of the hour (Dawn, and the ss.Room.* tunables): called when either changes. */
+	virtual void ApplyHour();
+	/** The tunables the look of the hour is set by, as a key (ss.Room.*; a subclass adds its own): a change sets it again. */
+	virtual uint32 HourKey() const;
+	/** The screens, papers and signs drawn with ShortStackCore's canvas, once play begins. */
+	virtual void AttachSlate();
+
+	/** The materials and props every stage loads (M_Surface and its kin, the laptop's meshes, the arms, ImportYaw). */
+	void LoadShared();
 	void BuildShell();
 	void BuildWindow();
 	void BuildDesk();
+	/**
+	 * The laptop with its screen, the mouse on its pad and the phone, as on the desk: all in one frame whose middle is
+	 * where the laptop's middle sits (LaptopAt, on the surface it stands on), turned LaptopYaw degrees from facing the
+	 * seat (-X).
+	 */
+	void BuildWorkspace(const FVector& LaptopAt, float LaptopYaw = 0.0f);
+	/** The player's arms (SK_Arms), rooted between the shoulders (UpdateArms keeps them with the head). */
+	void BuildArms();
 	void BuildProps();
 	void BuildOutside();
+	/** The sky dome, the city's skyline (instanced, the procedural windows) and its red beacons, all ahead (+X): the skyline. */
+	UInstancedStaticMeshComponent* BuildSkyline();
+	/** Three sheets of falling rain ahead of a window, the nearest Near ahead (+X) of the stage's origin. */
+	void BuildRainSheets(const FVector& Near, float Width);
 	void BuildLights();
+	/** The laptop screen's light, just in front of the display: the key light at night. */
+	void BuildScreenLight();
+	/** Manual exposure, bloom for the screen and neon, grain, vignette, and the tilt treatment. */
+	void BuildLens();
 	void BuildLeds();
 	void BuildGear();
-	void AttachSlate();
+	/** A kraft carton, taped shut (a red sticker on one side), its base's middle At (cm), Size width/height/depth (cm). */
+	void AddCarton(const FVector& At, const FVector& SizeCm, float Yaw, bool bSticker, USceneComponent* Parent = nullptr);
 	/**
 	 * The wall calendar (ss::ui::wallcalendar) reads the career itself: twice a second it asks the running game what
 	 * the sheet shows, and draws it again when that changed (a new day, an entry, the rent).
 	 */
 	void UpdateCalendar(float DeltaSeconds);
+
+	/** 0 by day .. 1 at night, for what a photocell switches (the lamps over the street, the neon): set by ApplyHour. */
+	float NightLevel() const { return Night; }
+	/** How many stops the exposure is down for the day, leaned in (Focus 1: the eyes on the screen) or sitting back. */
+	float DayStops(float Focus) const;
+	/** The calendar sheet's tint for the hour: the paper as it reads in the room's light at night, or by day. */
+	void ApplyCalendarTint();
+	/**
+	 * An imported building front's own light (its lit rooms and lanterns, baked for the night) at Level times its
+	 * bake: below 1 its glowing slots get transient tints (never saved: a saved one would tie the level to the front's
+	 * own materials), at 1 the bake again.
+	 */
+	static void DimBakedGlow(UStaticMeshComponent* Mesh, float Level);
+	/** A prop imported by the editor setup script (/Game/ShortStack/Meshes/<Name>/<Name>), or null. */
+	static UStaticMesh* LoadProp(const TCHAR* Name);
+	/** The rotation that turns an imported prop's front (Blender -Y) to face Yaw degrees (0 is +X, 180 the seat). */
+	FRotator PropFacing(float Yaw) const { return FRotator(0.0f, ImportYaw + Yaw - 180.0f, 0.0f); }
 
 	UMaterialInstanceDynamic* Surface(FName Key, uint32 SrgbHex, float Roughness, float Metallic = 0.0f, float Pattern = 0.0f, float Emissive = 0.0f);
 	UMaterialInstanceDynamic* Special(UMaterialInterface* Parent, FName Key);
@@ -271,6 +336,9 @@ private:
 	TObjectPtr<USkeletalMesh> ArmsMesh;
 	/** Yaw that turns a Blender prop (front toward -Y, Z up) to face the chair (-X) once imported. */
 	float ImportYaw = 0.0f;
+	/** The construction the set was built by (SetVersion when it was built by this code). */
+	UPROPERTY()
+	int32 BuiltSetVersion = 0;
 
 	// Generated by Content/Python/init_unreal.py; optional (fallbacks keep the game running).
 	// Not transient: Play-In-Editor copies the placed stage, and cans added during play still need them.
@@ -329,6 +397,28 @@ private:
 	TObjectPtr<UPointLightComponent> RoomFill;
 	UPROPERTY()
 	TObjectPtr<UPostProcessComponent> Lens;
+	// The hour (ApplyHour): the daylight through the window (hidden at night), the sodium lamp raking the building
+	// across the street, the city's cold fill on its brick (the overcast sky's by day), the neon's pink on the brick and
+	// its halo, the street lights far below, the building's own baked light.
+	UPROPERTY()
+	TObjectPtr<URectLightComponent> DayWash;
+	UPROPERTY()
+	TObjectPtr<USpotLightComponent> FacadeLamp;
+	UPROPERTY()
+	TObjectPtr<URectLightComponent> FacadeFill;
+	UPROPERTY()
+	TObjectPtr<UPointLightComponent> NeonSpill;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> NeonHalo;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> SodiumMaterial;
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> TenementComp;
+	/** The sky and the skyline (M_StreetSky / M_StreetCity when they're built: a Strength for the day's exposure). */
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> SkyMid;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> CityMid;
 	// The LED kit (hidden until it's bought and on): the desk strip's wash first, then the three cove washes.
 	UPROPERTY()
 	TArray<TObjectPtr<URectLightComponent>> LedWashes;
@@ -397,6 +487,12 @@ private:
 	float NeonLevel = 1.0f;
 	float NeonGlitch = 0.0f;
 	float Dawn = 0.0f;
+	/** The hour and the tunables as ApplyHour last set the look by them (-1: not yet). */
+	float AppliedDawn = -1.0f;
+	uint32 AppliedTunables = 0;
+	float Night = 1.0f;
+	/** The room's fill for the hour (lightning adds to it). */
+	float RoomFillNow = 0.15f;
 	FLinearColor ScreenGlow = FLinearColor(0.72f, 0.84f, 1.0f);
 	float ScreenBrightness = 1.0f;
 };

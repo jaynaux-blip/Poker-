@@ -726,7 +726,7 @@ void RiverLine::BurnerApp(double Now)
 	{
 		// Dee: the game across the street, and what she thinks of how you play in it.
 		Thread = {{false, "it's Dee. heard about the notice on your door."},
-			{false, "the game's still on. back room at the Spin Cycle, across the street. one-two no limit, tuesdays, thursdays, saturdays."},
+			{false, "the game's still on. back room at the Wash & Fold, across the street. one-two no limit, tuesdays, thursdays, saturdays."},
 			{false, "forty to sit, two hundred max. doors at nine, last hand at five."},
 			{false, "and kid. watch their hands, not their faces. faces lie."}};
 		if (L.BackRoomNights >= 1)

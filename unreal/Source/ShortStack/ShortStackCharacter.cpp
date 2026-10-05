@@ -10,6 +10,7 @@
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/SkinnedAsset.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
@@ -438,6 +439,57 @@ bool IsShirtMaterial(const UMaterialInterface* Material)
 		}
 		const UMaterialInstance* Instance = Cast<UMaterialInstance>(At);
 		At = Instance ? Instance->Parent.Get() : nullptr;
+	}
+	return false;
+}
+
+/**
+ * The street hero's real clothes (art/blender/assets/garments.py, imported by garments_setup.py onto the hero bodies'
+ * skeleton), when imported: Kind is Jeans or Jacket. A pair fitted to this very hero (SK_Garment_Jacket_HeroA0) is worn if
+ * there is one, else the pair for the body type (SK_Garment_Jacket_A, fitted to HeroA1 or HeroB1).
+ */
+USkeletalMesh* GarmentMesh(const TCHAR* Kind, const FString& Hero, bool bTypeB)
+{
+	for (const FString& Fit : {Hero, FString(bTypeB ? TEXT("B") : TEXT("A"))})
+	{
+		if (Fit.IsEmpty())
+		{
+			continue;
+		}
+		const FString Name = FString::Printf(TEXT("SK_Garment_%s_%s"), Kind, *Fit);
+		const FString Package = FString::Printf(TEXT("/Game/ShortStack/Garments/%s"), *Name);
+		// Most heroes have no pair of their own: don't try to load what isn't there.
+		if (!FPackageName::DoesPackageExist(Package))
+		{
+			continue;
+		}
+		if (USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, *FString::Printf(TEXT("%s.%s"), *Package, *Name), nullptr, LOAD_NoWarn | LOAD_Quiet))
+		{
+			return Mesh;
+		}
+	}
+	return nullptr;
+}
+
+/** The Creator's one garment, the tee and shorts, as copied onto us from the MetaHuman (its asset, or its materials, say so). */
+bool IsDefaultOutfit(const USkinnedMeshComponent* Skinned)
+{
+	const USkinnedAsset* Asset = Skinned ? Skinned->GetSkinnedAsset() : nullptr;
+	if (!Asset)
+	{
+		return false;
+	}
+	if (Asset->GetName().Contains(TEXT("Outfit")))
+	{
+		return true;
+	}
+	for (int32 Slot = 0; Slot < Skinned->GetNumMaterials(); ++Slot)
+	{
+		const UMaterialInterface* Material = Skinned->GetMaterial(Slot);
+		if (Material && (IsShirtMaterial(Material) || Material->GetName().Contains(TEXT("Short"))))
+		{
+			return true;
+		}
 	}
 	return false;
 }
@@ -1186,6 +1238,55 @@ void AShortStackCharacter::LinkFace()
 	}
 }
 
+void AShortStackCharacter::PutOnGarments(const FStreetOutfit& Outfit, const FString& Hero)
+{
+	// Both pieces or neither: together they cover all the tee and shorts did (the MetaHuman body has no skin under them).
+	const bool bTypeB = LookNow.Body == 1;
+	// Fitted to the hero_cast heroes (HeroA0..HeroB2) only: the Back Room's Hero standing in may be another shape.
+	if (!Hero.StartsWith(bTypeB ? TEXT("HeroB") : TEXT("HeroA")))
+	{
+		return;
+	}
+	USkeletalMesh* Jeans = GarmentMesh(TEXT("Jeans"), Hero, bTypeB);
+	USkeletalMesh* Jacket = GarmentMesh(TEXT("Jacket"), Hero, bTypeB);
+	if (!Jeans || !Jacket)
+	{
+		UE_LOG(LogStreetHero, Log, TEXT("The type %s garments aren't imported (garments_setup.py): the MetaHuman's tee and shorts stay on"),
+			bTypeB ? TEXT("B") : TEXT("A"));
+		return;
+	}
+	for (int32 I = Wearables.Num() - 1; I >= 0; --I)
+	{
+		USkinnedMeshComponent* Skinned = Cast<USkinnedMeshComponent>(Wearables[I]);
+		if (Skinned && IsDefaultOutfit(Skinned))
+		{
+			Skinned->DestroyComponent();
+			Wearables.RemoveAt(I);
+		}
+	}
+	for (USkeletalMesh* Asset : {Jeans, Jacket})
+	{
+		USkeletalMeshComponent* Worn = NewObject<USkeletalMeshComponent>(this, MakeUniqueObjectName(this, USkeletalMeshComponent::StaticClass(), Asset->GetFName()), RF_Transient);
+		Worn->SetupAttachment(GetMesh());
+		Worn->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Worn->SetCanEverAffectNavigation(false);
+		Worn->bCastHiddenShadow = true;
+		Worn->bUseBoundsFromLeaderPoseComponent = true;
+		Worn->SetSkeletalMeshAsset(Asset);
+		// Skinned to the body's own skeleton (same bones, same bind pose): it simply follows the body's pose.
+		Worn->SetLeaderPoseComponent(GetMesh());
+		Worn->RegisterComponent();
+		Wearables.Add(Worn);
+		if (Asset == Jacket)
+		{
+			// The shell bakes light grey and takes the creator's jacket color; the rib knit a darker shade of it. The jeans
+			// keep their own indigo; the brass zip its brass.
+			TintSlot(Worn, BakedSlot(Worn, 0), Outfit.Shirt, 1.5f);
+			TintSlot(Worn, BakedSlot(Worn, 1), Scaled(Outfit.Shirt, 0.55f), 1.5f);
+		}
+	}
+}
+
 void AShortStackCharacter::ApplyLook(const ss::hero::Character& Who)
 {
 	LookNow = Who.Appearance;
@@ -1206,6 +1307,7 @@ void AShortStackCharacter::ApplyLook(const ss::hero::Character& Who)
 	if (Blueprint)
 	{
 		BuildFromMetaHuman(Blueprint, Outfit);
+		PutOnGarments(Outfit, Built);
 	}
 	else
 	{

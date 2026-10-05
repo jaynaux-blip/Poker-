@@ -143,18 +143,166 @@ FStreetAmbience::FStreetAmbience(uint32 Seed)
 	CrackDecay = FMath::Exp(-Dt / 0.0015);
 	// The echo off the fronts across the street and down the block: 0.42 s of the far sounds.
 	Echo.SetNumZeroed(static_cast<int32>(Rate * 0.42));
+	// The laundromat: the water's band in the washers, the blowers' air, the TV's voice (its vowels move the formants).
+	Slosh.BandPass(520.0, 0.7);
+	Blower.LowPass(1400.0, 0.7);
+	Formant1.BandPass(600.0, 4.0);
+	Formant2.BandPass(1700.0, 6.0);
+	Pending.Reserve(64);
 	// The street was going before the door shut behind the player: the compressor partway through a run, the first car
-	// and the first far sound some way off.
+	// and the first far sound some way off, a spin and a buzzer somewhere ahead in the laundromat.
 	NextCompressor = 20.0 + 90.0 * Uniform();
 	NextCar = 4.0 + 10.0 * Uniform();
 	NextFar = 45.0 + 60.0 * Uniform();
 	NextGust = 2.0 + 3.0 * Uniform();
+	NextSpin = 20.0 + 60.0 * Uniform();
+	NextMachineBuzz = 30.0 + 60.0 * Uniform();
 }
 
 void FStreetAmbience::SetInside(float InInside, float InDoorsOpen)
 {
 	InsideTarget = FMath::Clamp(static_cast<double>(InInside), 0.0, 1.0);
 	DoorsTarget = FMath::Clamp(static_cast<double>(InDoorsOpen), 0.0, 1.0);
+}
+
+void FStreetAmbience::SetWash(float InInside, float InDoorOpen, float InNear)
+{
+	WashTarget = FMath::Clamp(static_cast<double>(InInside), 0.0, 1.0);
+	WashDoorTarget = FMath::Clamp(static_cast<double>(InDoorOpen), 0.0, 1.0);
+	WashNearTarget = FMath::Clamp(static_cast<double>(InNear), 0.0, 1.0);
+}
+
+// ------------------------------------------------------------------ the doors
+
+void FStreetAmbience::Strike(double Delay, double Hz, double Seconds, double Amp)
+{
+	if (Pending.Num() >= 96)
+	{
+		return; // (never this many at once; a stuck queue mustn't grow)
+	}
+	FStrike S;
+	S.At = Time + FMath::Max(0.0, Delay);
+	S.Hz = Hz;
+	S.Seconds = Seconds;
+	S.Amp = Amp;
+	// Kept in the order they're due.
+	int32 Index = Pending.Num();
+	while (Index > 0 && Pending[Index - 1].At > S.At)
+	{
+		--Index;
+	}
+	Pending.Insert(S, Index);
+}
+
+double FStreetAmbience::RenderStrikes()
+{
+	while (Pending.Num() > 0 && Pending[0].At <= Time)
+	{
+		const FStrike& S = Pending[0];
+		Voices[NextVoice].Strike(S.Hz, S.Seconds, S.Amp);
+		NextVoice = (NextVoice + 1) % VoiceCount;
+		Pending.RemoveAt(0, 1, EAllowShrinking::No);
+	}
+	double Out = 0.0;
+	for (FRing& Voice : Voices)
+	{
+		Out += Voice.Run();
+	}
+	return Out;
+}
+
+double FStreetAmbience::FBuzzer::Run(double Now)
+{
+	const double T = Now - At;
+	if (T < 0.0 || T >= Length)
+	{
+		return 0.0;
+	}
+	// Its coil's hum and every overtone of it, driven hard: the harsh edge of an old buzzer.
+	StreetAudioDetail::Turn(Phase, Hz);
+	static const double Core[5] = {1.0, 0.6, 0.45, 0.3, 0.2};
+	const double Buzz = std::tanh(2.5 * StreetAudioDetail::Harmonics(Phase, Core, 5)) / 2.5;
+	const double Env = FMath::Min(1.0, T / 0.01) * FMath::Min(1.0, (Length - T) / 0.02);
+	return Buzz * Env * Gain;
+}
+
+void FStreetAmbience::RingBell(float Hard)
+{
+	// Two small brass bells on a strap: each knock rings their partials (inharmonic, the high ones dying first), and the
+	// strap jangles them a few more times, softer, as it settles.
+	static const double Partials[4] = {1.0, 1.59, 2.36, 3.02};
+	static const double Decays[4] = {1.1, 0.7, 0.45, 0.3};
+	static const double Levels[4] = {1.0, 0.55, 0.4, 0.25};
+	const double H = FMath::Clamp(static_cast<double>(Hard), 0.0, 1.0);
+	const int32 Jangles = H > 0.7 ? 5 : 3;
+	double At = 0.0;
+	for (int32 K = 0; K < Jangles; ++K)
+	{
+		const double Amp = 0.055 * H * FMath::Pow(0.62, static_cast<double>(K)) * (0.8 + 0.4 * Uniform());
+		const double Bell = (K % 2 == 0 ? 2050.0 : 2480.0) * (1.0 + 0.01 * Noise());
+		for (int32 P = 0; P < 4; ++P)
+		{
+			Strike(At, Bell * Partials[P], Decays[P], Amp * Levels[P]);
+		}
+		At += 0.07 + 0.09 * Uniform();
+	}
+}
+
+void FStreetAmbience::LockRattle()
+{
+	// The key going in and meeting pins it doesn't know, jiggled; then the knob tried, the door knocking in its frame twice.
+	Strike(0.0, 3400.0, 0.012, 0.05);
+	Strike(0.05, 4100.0, 0.008, 0.035);
+	Strike(0.11, 2900.0, 0.01, 0.04);
+	for (int32 K = 0; K < 5; ++K)
+	{
+		Strike(0.18 + 0.035 * K + 0.015 * Uniform(), 2600.0 + 2200.0 * Uniform(), 0.006 + 0.006 * Uniform(), 0.03 + 0.02 * Uniform());
+	}
+	for (const double At : {0.42, 0.61})
+	{
+		Strike(At, 82.0, 0.09, 0.22);
+		Strike(At, 140.0, 0.06, 0.1);
+		Strike(At + 0.004, 950.0, 0.03, 0.05);
+	}
+}
+
+void FStreetAmbience::TryHandle()
+{
+	// The lever pressed down against the lock, its spring; the steel door pulled twice against its stop (heavier than a
+	// wooden one, and it barely gives).
+	Strike(0.0, 1800.0, 0.02, 0.045);
+	Strike(0.03, 2700.0, 0.01, 0.03);
+	for (const double At : {0.12, 0.3})
+	{
+		Strike(At, 58.0, 0.12, 0.24);
+		Strike(At, 96.0, 0.08, 0.12);
+		Strike(At + 0.003, 760.0, 0.04, 0.05);
+	}
+}
+
+void FStreetAmbience::PressBuzzer()
+{
+	// The button's click, the buzz held a second, the click letting go.
+	Strike(0.0, 2300.0, 0.006, 0.04);
+	DoorBuzzer.At = Time + 0.03;
+	DoorBuzzer.Length = 1.1;
+	DoorBuzzer.Hz = 118.0;
+	DoorBuzzer.Gain = 0.05;
+	DoorBuzzer.Phase = 0.0;
+	Strike(1.14, 1900.0, 0.005, 0.025);
+}
+
+void FStreetAmbience::SteelDoor()
+{
+	// The latch and the push bar; the heavy door swinging, its weight in the frame; its closer pulling it to, and the latch
+	// (rung out before the street's level gives way to the Back Room's, 1.4 s on, a quarter second of it already queued).
+	Strike(0.0, 2200.0, 0.012, 0.07);
+	Strike(0.02, 1350.0, 0.025, 0.05);
+	Strike(0.15, 64.0, 0.35, 0.32);
+	Strike(0.15, 108.0, 0.22, 0.14);
+	Strike(0.17, 420.0, 0.08, 0.05);
+	Strike(0.85, 55.0, 0.28, 0.26);
+	Strike(0.85, 2600.0, 0.008, 0.05);
 }
 
 void FStreetAmbience::SetRain(float InRain, float InWetness)
@@ -218,6 +366,9 @@ void FStreetAmbience::Render(float* Out, int32 N)
 		}
 		Ease(Inside, InsideTarget, ListenK);
 		Ease(Doors, DoorsTarget, ListenK);
+		Ease(WashIn, WashTarget, ListenK);
+		Ease(WashDoor, WashDoorTarget, ListenK);
+		Ease(WashNear, WashNearTarget, ListenK);
 		Ease(Rain, RainTarget, RainK);
 		Ease(Hum, HumTarget, HumK);
 		Fade = Fade < FadeTarget ? FMath::Min(FadeTarget, Fade + FadeStep) : FMath::Max(FadeTarget, Fade - FadeStep);
@@ -225,9 +376,9 @@ void FStreetAmbience::Render(float* Out, int32 N)
 		// The street: its beds, what passes (and its echo down the block), the sign overhead.
 		const double Away = RenderCar() + RenderFar();
 		const double Street = RenderStreet() + Away + EchoOf(Away) + RenderNeon();
-		// Heard through the store's glass it's quieter and the top is gone, from 16 kHz on the sidewalk to 650 Hz with the
-		// doors shut; through the open doors much less so.
-		const double Muffle = Inside * (1.0 - 0.6 * Doors);
+		// Heard through the store's glass (or the laundromat's) it's quieter and the top is gone, from 16 kHz on the
+		// sidewalk to 650 Hz with the door shut; through an open door much less so.
+		const double Muffle = FMath::Max(Inside * (1.0 - 0.6 * Doors), WashIn * (1.0 - 0.6 * WashDoor));
 		if ((I & 31) == 0)
 		{
 			MuffK = Corner(16000.0 * FMath::Pow(650.0 / 16000.0, Muffle));
@@ -253,8 +404,16 @@ void FStreetAmbience::Render(float* Out, int32 N)
 		{
 			S += RenderStore() * Inside;
 		}
+		// The Wash & Fold: all round the listener inside it; out on the sidewalk in front of it faintly through its glass,
+		// more with its door open.
+		const double WashLevel = WashIn + (1.0 - WashIn) * WashNear * (0.06 + 0.3 * WashDoor);
+		if (WashLevel > 0.001)
+		{
+			S += RenderWash() * WashLevel;
+		}
 
-		S *= Fade;
+		// The doors' own sounds ring on as the street falls away behind the player.
+		S = S * Fade + RenderStrikes() + DoorBuzzer.Run(Time);
 		Out[I] = static_cast<float>(std::tanh(S * 1.4) / 1.4);
 	}
 }
@@ -560,5 +719,108 @@ double FStreetAmbience::RenderStore()
 		NextTap = Time + Scatter(28.0 * Rain);
 	}
 	S += Tap.Run();
+	return S;
+}
+
+// ------------------------------------------------------------------ the Wash & Fold
+
+double FStreetAmbience::RenderWash()
+{
+	using namespace StreetAudioDetail;
+	static const double RumbleK = Corner(90.0);
+	static const double SpinK = Corner(800.0);
+	static const double SyllableK = Corner(18.0);
+	// The washers: three drums turning back and forth, the water thrown up and slapped down as each turns (a band of
+	// noise swelling with the cube of the turn), the motors' hum under them.
+	double Throw = 0.0;
+	for (int32 K = 0; K < 3; ++K)
+	{
+		Turn(SloshPhase[K], SloshRate[K]);
+		const double Sv = FMath::Abs(FMath::Sin(SloshPhase[K]));
+		Throw += Sv * Sv * Sv;
+	}
+	double S = Slosh.Run(Noise()) * Throw * 0.06;
+	Turn(MotorPhase, 47.0);
+	static const double Motor[4] = {0.5, 1.0, 0.4, 0.2};
+	S += Harmonics(MotorPhase, Motor, 4) * 0.006;
+	// Now and then one winds up into its spin: a whine climbing to speed and the drum's roar with it, holding, coasting down.
+	if (Clock >= NextSpin)
+	{
+		SpinAt = Time;
+		SpinLength = 25.0 + 20.0 * Uniform();
+		NextSpin = Clock + SpinLength + 40.0 + 80.0 * Uniform();
+	}
+	const double Spun = Time - SpinAt;
+	if (Spun >= 0.0 && Spun < SpinLength)
+	{
+		const double Speed = FMath::SmoothStep(0.0, 8.0, Spun) * (1.0 - FMath::SmoothStep(SpinLength - 6.0, SpinLength, Spun));
+		Turn(SpinPhase, (30.0 + 120.0 * Speed) * 6.0);
+		static const double Whine[3] = {1.0, 0.3, 0.15};
+		SpinLow += (Noise() - SpinLow) * SpinK;
+		S += (Harmonics(SpinPhase, Whine, 3) * 0.012 + SpinLow * 0.06) * Speed;
+	}
+	// The dryers: a low rumble breathing with the drums, the clothes falling as they turn, zips and buttons ticking on the
+	// steel, the blowers' air through the lint screens.
+	RumbleBrown = RumbleBrown * 0.985 + Noise() * 0.15;
+	Rumble1 += (RumbleBrown - Rumble1) * RumbleK;
+	Rumble2 += (Rumble1 - Rumble2) * RumbleK;
+	S += Rumble2 * 0.5 * (0.85 + 0.15 * FMath::Sin(TwoPi * 0.8 * Time));
+	if (Time >= NextTumble)
+	{
+		Tumble.Strike(55.0 + 40.0 * Uniform(), 0.05 + 0.05 * Uniform(), 0.03 + 0.05 * Uniform());
+		NextTumble = Time + 0.18 + 0.5 * Uniform();
+	}
+	S += Tumble.Run();
+	if (Time >= NextClink)
+	{
+		Clink.Strike(2300.0 + 2800.0 * Uniform(), 0.008 + 0.02 * Uniform(), 0.004 + 0.009 * Uniform());
+		NextClink = Time + Scatter(2.2);
+	}
+	S += Clink.Run();
+	S += Blower.Run(Noise()) * 0.03;
+	// A machine done: its buzzer, now and then (one that came due with nobody near enough to hear it is let go).
+	if (Clock >= NextMachineBuzz)
+	{
+		if (Clock - NextMachineBuzz < 2.0)
+		{
+			MachineBuzzer.At = Time;
+			MachineBuzzer.Length = 1.2 + 0.8 * Uniform();
+			MachineBuzzer.Hz = Uniform() < 0.5 ? 120.0 : 150.0;
+			MachineBuzzer.Gain = 0.035;
+			MachineBuzzer.Phase = 0.0;
+		}
+		NextMachineBuzz = Clock + 45.0 + 110.0 * Uniform();
+	}
+	S += MachineBuzzer.Run(Time);
+	// The TV up on the back wall: a voice through its little speaker, syllable by syllable in phrases, its pitch wandering,
+	// each syllable's vowel moving the formants.
+	if (Clock >= NextPhrase)
+	{
+		bTalking = !bTalking;
+		NextPhrase = Clock + (bTalking ? 1.5 + 4.5 * Uniform() : 0.25 + 1.0 * Uniform());
+	}
+	if (Time >= NextSyllable)
+	{
+		SyllableTarget = bTalking ? 0.35 + 0.65 * Uniform() : 0.0;
+		NextSyllable = Time + 0.08 + 0.15 * Uniform();
+		Formant1.BandPass(350.0 + 500.0 * Uniform(), 4.0);
+		Formant2.BandPass(1000.0 + 1300.0 * Uniform(), 6.0);
+		VoiceHz = 110.0 + 70.0 * Uniform();
+	}
+	Syllable += (SyllableTarget - Syllable) * SyllableK;
+	Turn(VoicePhase, VoiceHz);
+	static const double Glottal[8] = {1.0, 0.5, 0.33, 0.25, 0.2, 0.16, 0.14, 0.12};
+	const double Throat = Harmonics(VoicePhase, Glottal, 8) * 0.7 + Noise() * 0.3;
+	S += (Formant1.Run(Throat) + 0.6 * Formant2.Run(Throat)) * Syllable * 0.02;
+	// Its ballasts, and the rain on its window.
+	Turn(WashBallastPhase, 120.0);
+	static const double Ballast[3] = {0.008, 0.005, 0.003};
+	S += Harmonics(WashBallastPhase, Ballast, 3);
+	if (Time >= NextWashTap)
+	{
+		WashTap.Strike(2400.0 + 1800.0 * Uniform(), 0.003 + 0.004 * Uniform(), (0.002 + 0.007 * Uniform()) * FMath::Sqrt(Rain));
+		NextWashTap = Time + Scatter(24.0 * Rain);
+	}
+	S += WashTap.Run();
 	return S;
 }

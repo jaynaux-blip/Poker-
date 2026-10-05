@@ -13,6 +13,7 @@ class UInstancedStaticMeshComponent;
 class ULightComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class UPointLightComponent;
 class UPostProcessComponent;
 class URectLightComponent;
 class USkyLightComponent;
@@ -40,19 +41,57 @@ struct FStreetSpot
 	int32 Shelf = -1;
 };
 
+/** A straight line along a sidewalk, clear to walk from Start to End (world space, on the sidewalk's top). */
+struct FStreetLane
+{
+	FVector Start = FVector::ZeroVector;
+	FVector End = FVector::ZeroVector;
+};
+
+/** One of Fifth's sidewalks as people walk it (AStreetStage::Sidewalk): its clear lanes, what stands on it, its top. */
+struct FStreetWalkway
+{
+	/** 0 the home side (1812, the Lucky Penny, Market's corner), 1 the far side (the tenement, the Wash & Fold). */
+	int32 Side = 0;
+	/** Lines along it, each clear of the stoops, steps and street furniture end to end (the home side's cross Market). */
+	TArray<FStreetLane> Lanes;
+	/** What stands on it, as footprints in world XY (stoops, steps, the hydrant, cans, poles), for anyone off a lane. */
+	TArray<FBox2D> Obstacles;
+	/** The sidewalk's top (world Z). */
+	double Z = 0.0;
+};
+
+/** A door people go in and out of (AStreetStage::Doors, world space). */
+struct FStreetDoor
+{
+	/** "store" (the Lucky Penny), "washfold" (the Wash & Fold), "home" (door 1812), "dee" (the tenement's street door). */
+	FName Id;
+	/** On the sidewalk's top in front of it, facing it. */
+	FTransform Outside;
+	/** The middle of the doorway at its floor. */
+	FVector Threshold = FVector::ZeroVector;
+	/** A room a pedestrian walks on into (the store, the laundromat); the others are homes: people go in and are gone. */
+	bool bRoom = false;
+};
+
 /**
  * Fifth Street at night, from the apartment building's door to the Lucky Penny #212 on the corner of
- * Market: sidewalks and the wet road, the building fronts on both sides, the Wash & Fold's neon across
- * the street (Dee's game is in its back room), streetlights, rain, and the store itself, lit inside, with
- * sliding doors, coolers, aisles, the counter, the roller grill and the coffee bar, its walls and ceiling
- * finished as a corner store's are (a clock on the wall keeps the world's time). Built procedurally
- * from engine shapes with collision, like the apartment; Blender props (street_setup.py imports them)
- * replace the boxes where they exist: the building fronts (1812 itself, the walk-up, the brownstones, the
- * floors over the store, and across the street the laundromat's building as the apartment's window sees
- * it) and the store's stock, row by row on its shelves.
+ * Market: sidewalks and the wet road, the building fronts on both sides, the tenement across the street
+ * with the Wash & Fold at its foot, streetlights, rain, and the store itself, lit inside, with sliding
+ * doors, coolers, aisles, the counter, the roller grill and the coffee bar, its walls and ceiling finished
+ * as a corner store's are (a clock on the wall keeps the world's time). The Wash & Fold is a room too, three
+ * steps up through its door (its bell rings as it swings in): rows of washers, dryers stacked along the back
+ * and side walls (the running ones' drums lit and tumbling), folding tables, chairs at the window, the
+ * change and soap machines, carts, the attendant's counter, a TV up on the back wall, and Dee's steel door
+ * at the back, where her game is. Beside it the tenement's own street door, Dee's, up to her front room.
+ * Built procedurally from engine shapes with collision, like the apartment; Blender props (street_setup.py
+ * imports them) replace the boxes where they exist: the building fronts (1812 itself, the walk-up, the
+ * brownstones, the floors over the store, and across the street the tenement as the apartment's window
+ * sees it), the store's stock, row by row on its shelves, and the laundromat's machines and furniture.
  *
  * Coordinates (cm): the building fronts on the player's side of the street stand on X = 0, the road
- * runs along Y at X 420..1620, up is Z with the sidewalk's top at 0. The store spans Y 3700..4950.
+ * runs along Y at X 420..1620, up is Z with the sidewalk's top at 0. The store spans Y 3700..4950; the
+ * Wash & Fold, across the street, Y 15..1825 and X 2085..3140, its floor at Z 45.
  *
  * Everything the stage uses while playing is a plain UPROPERTY (not transient): a cooked build, and Play
  * started on the Street map, use the components the editor saved instead of running construction again.
@@ -74,21 +113,48 @@ public:
 	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Short Stack")
 	void RebuildSet();
 
-	/** Where the player appears: "home" just out of the building's door, "store" inside the Lucky Penny. */
+	/**
+	 * Where the player appears: "home" just out of 1812's door, "store" inside the Lucky Penny, "washfold" on the sidewalk
+	 * at the foot of the Wash & Fold's steps (out of Dee's game), "wash" just inside its door, "backdoor" at Dee's steel
+	 * door inside it, "dee" out of the tenement's street door (Dee's, while the player sleeps on her couch).
+	 */
 	FTransform StartAt(const FString& From) const;
 	/** Where Benny stands behind the counter, facing the customers (his feet on the store's floor). */
 	FTransform ClerkSpot() const;
+	/** Where the Wash & Fold's attendant folds behind her counter, facing the customers (her feet on its floor). */
+	FTransform AttendantSpot() const;
 	/** The top of the store's floor (world Z). */
 	double StoreFloorZ() const;
+	/** The top of the Wash & Fold's floor (world Z): three steps up from the sidewalk, level with its window's sill. */
+	double WashFloorZ() const;
+	/** The sidewalks' top (world Z). */
+	double SidewalkZ() const;
 	/** The spot within reach of an eye looking along Dir (the nearest it's facing), or null. */
 	const FStreetSpot* SpotFor(const FVector& Eye, const FVector& Dir) const;
-	/** "LUCKY PENNY #212" inside the store, "FIFTH STREET" outside it. */
+	/** "LUCKY PENNY #212" inside the store, "WASH & FOLD" inside the laundromat, "FIFTH STREET" (or the corner) outside. */
 	FString PlaceName(const FVector& At) const;
 	bool IsInsideStore(const FVector& At) const;
+	bool IsInsideWash(const FVector& At) const;
 	/** Somewhere nobody should be: under the street (fell through a gap) or far past its ends. */
 	bool IsOffTheSet(const FVector& At) const;
-	/** The store's doors slide open for someone within reach of them. True the moment they start to open. */
+	/** The store's doors slide open for someone within reach of them (or a walker, NoteWalker). True the moment they start to open. */
 	bool UpdateDoors(const FVector& Someone, float DeltaSeconds);
+	/** A hand on the Wash & Fold's door (the player's E, anyone walking in): it swings in, and its closer shuts it once nobody's in its way. */
+	void OpenWashDoor();
+	/** The Wash & Fold's door each frame (Someone keeps it from shutting on them): 1 the moment it starts to open (its bell), 2 the moment it shuts, else 0. */
+	int32 UpdateWashDoor(const FVector& Someone, float DeltaSeconds);
+	/** How far open the Wash & Fold's door is (0 shut .. 1 open). */
+	float WashDoorOpen() const { return WashDoorAmount; }
+	/** How far inside the Wash & Fold the camera is (0 out on the street .. 1 inside), eased. */
+	float CameraInWash() const { return WashInside; }
+	/** How near Listener stands to the Wash & Fold's front, out on the sidewalk (0 out of earshot .. 1 at its window). */
+	float WashNear(const FVector& Listener) const;
+	/** Someone besides the player walking about (the street's pedestrians, each frame): the doors open for them too. */
+	void NoteWalker(const FVector& At);
+	/** A sidewalk as people walk it (0 the home side, 1 the far side), for the street's pedestrians. */
+	FStreetWalkway Sidewalk(int32 Side) const;
+	/** The doors on the street people go in and out of: the Lucky Penny's, the Wash & Fold's, 1812's, Dee's. */
+	TArray<FStreetDoor> Doors() const;
 	/** 0 night .. 1 full day (Session::Daylight): the sky, the lamps and windows, the exposure. */
 	void SetDaylight(float InDaylight);
 	/** The player's image settings: Brightness in stops, film grain and fringe as multiples, motion blur. */
@@ -127,8 +193,23 @@ private:
 	/** The stand-in's door, buzzer, lamp and number when 1812's own front isn't imported. */
 	void BuildDoor();
 	void BuildAcross();
-	/** The stand-in laundromat across from the door (its room, washers, glass and neon) when the tenement isn't imported. */
-	void BuildWashAndFold();
+	/**
+	 * The tenement's front when SM_Tenement isn't imported: its brick round the same openings (the laundromat's window, the
+	 * tenants' door), the shopfront's mullions and fascia, its floors of windows, so the Wash & Fold stands where it would.
+	 */
+	void BuildTenementStandIn();
+	/** The Wash & Fold's front, both ways: the glass round its door's bay, the door on its hinge with its bell, the steps up. */
+	void BuildWashFront();
+	/** Its room: the floor, walls and pressed-tin ceiling, the fluorescents and their light. */
+	void BuildWashRoom();
+	/** What's in it: the washers, the dryers (some running), the tables, chairs, machines, carts, counter, TV and the back door. */
+	void BuildWashMachines();
+	/** The tenement's own baked laundromat (a shallow lit box behind its window) is hidden: the room built here stands there. */
+	void HideTenementShop();
+	/** At play: the imported running dryers' and the TV's glow slots, made fresh to animate (never saved, see PaintCars). */
+	void PrepareWashGlow();
+	/** The Wash & Fold as it runs: the drums' light tumbling, the TV flickering, the door's bell swinging on its spring. */
+	void AnimateWash(float Dt, const FVector& Camera);
 	void BuildStore();
 	void BuildStoreDressing();
 	/**
@@ -272,9 +353,52 @@ private:
 	TArray<TObjectPtr<ULightComponent>> NightLights;
 	UPROPERTY()
 	TArray<float> NightLightLevels;
-	/** One of the night lights: the laundromat's light through its window onto the sidewalk, which goes with the window's glow. */
+	/** One of the night lights: the laundromat's light through its window onto the sidewalk (ss.Street.LaundromatGlow). */
 	UPROPERTY()
 	TObjectPtr<URectLightComponent> WashSpill;
+	/** The Wash & Fold's fluorescents: shadowed while the camera is near it, as the store's are (PickStreetlights). */
+	UPROPERTY()
+	TArray<TObjectPtr<URectLightComponent>> WashLights;
+	/** Its door: the leaf on its hinge (UpdateWashDoor swings it), and the invisible stop that blocks the doorway while it's shut. */
+	UPROPERTY()
+	TObjectPtr<USceneComponent> WashDoor;
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> WashDoorStop;
+	/** The bell on its spring over the door, inside (it swings once the door has struck it). */
+	UPROPERTY()
+	TObjectPtr<USceneComponent> WashBell;
+	/** The running dryers: each one's light out through its drums' glass, tumbling (AnimateWash). */
+	UPROPERTY()
+	TArray<TObjectPtr<UPointLightComponent>> DrumLights;
+	/** The imported running dryers (their glow slots animated at play, PrepareWashGlow), as many as DrumLights; or none. */
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> DrumStacks;
+	/** The stand-in running dryers' lit drum glass, one material each (none when the dryers are imported). */
+	UPROPERTY()
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> DrumMids;
+	/** The imported idle dryers, every copy one instance: their drums are dark (PrepareWashGlow). */
+	UPROPERTY()
+	TObjectPtr<UInstancedStaticMeshComponent> IdleDryers;
+	/** The TV on the back wall: the imported one (its screen's glow slot animated), or the stand-in's screen; and its light on the room. */
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> WashTv;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> WashTvMid;
+	UPROPERTY()
+	TObjectPtr<URectLightComponent> WashTvLight;
+	/** The glow slots PrepareWashGlow made to animate (the imported dryers' drums, the TV's screen), and what each scales. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> GlowMids;
+	struct FGlowParam
+	{
+		int32 Mid = 0;
+		FName Name;
+		bool bVector = true;
+		FLinearColor Base = FLinearColor::Black;
+		/** The running dryer it lights (DrumLights' index), or -1 for the TV. */
+		int32 Owner = -1;
+	};
+	TArray<FGlowParam> GlowParams;
 	/** The store clock's hands, each turning about its own pivot at the dial's middle (SetClock). */
 	UPROPERTY()
 	TObjectPtr<USceneComponent> ClockHour;
@@ -298,21 +422,19 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> LitFronts;
 	/**
-	 * The tenement, when it stands across the street: its rooms and the laundromat's window were baked for the apartment's
-	 * view (seen through rain from a lit room, a brighter exposure than the street's night), so here they glow less.
+	 * The tenement, when it stands across the street: its rooms were baked for the apartment's view (seen through rain from
+	 * a lit room, a brighter exposure than the street's night), so here they glow less; its own shallow laundromat is
+	 * hidden (HideTenementShop), the Wash & Fold built here stands in it.
 	 */
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> TenementFront;
-	/**
-	 * The laundromat's room seen through its window, where no rain falls, and where the rain catches the neon's pink (the
-	 * stage's own cm): the tenement's, or the stand-in's (these), as BuildAcross built them.
-	 */
+	/** The Wash & Fold's room, where no rain falls, and where the rain catches the neon's pink (the stage's own cm), as BuildAcross built them. */
 	UPROPERTY()
-	FVector WashMin = FVector(2051.0, -700.0, -60.0);
+	FVector WashMin = FVector(2056.0, -5.0, -60.0);
 	UPROPERTY()
-	FVector WashMax = FVector(3340.0, 700.0, 450.0);
+	FVector WashMax = FVector(3160.0, 1845.0, 370.0);
 	UPROPERTY()
-	FVector NeonGlowAt = FVector(1980.0, 0.0, 260.0);
+	FVector NeonGlowAt = FVector(1590.0, 640.0, 700.0);
 	/** While building: 1812's own front stands, so BuildEntrance adds only what it lacks. */
 	bool bHomeFront = false;
 
@@ -320,6 +442,24 @@ private:
 	TArray<TSharedPtr<const ss::ui::DrawList>> SignLists;
 	float DoorOpen = 0.0f;
 	bool bDoorsNear = false;
+	/** The Wash & Fold's door: how far open, whether a hand holds it open, and how long nobody's been in its way. */
+	float WashDoorAmount = 0.0f;
+	bool bWashDoorHeld = false;
+	float WashDoorClear = 0.0f;
+	float WashInside = 0.0f;
+	/** How hard the bell over the door is still swinging (0 at rest), and the laundromat's own clock for what runs in it. */
+	float BellSwing = 0.0f;
+	float WashClock = 0.0f;
+	/** The TV: its picture's level and color as it cuts from shot to shot. */
+	float TvCutIn = 0.0f;
+	float TvLevel = 0.8f;
+	float TvTarget = 0.8f;
+	FLinearColor TvColor = FLinearColor(0.7f, 0.8f, 1.0f);
+	FLinearColor TvColorTarget = FLinearColor(0.7f, 0.8f, 1.0f);
+	FRandomStream TvDice = FRandomStream(1812);
+	/** Pedestrians near the doors (NoteWalker): this frame's, and last frame's (whichever ticked first, none is missed). */
+	TArray<FVector> Walkers;
+	TArray<FVector> WalkersSeen;
 	/** The second of the day the clock's hands were last set to (-1: not yet). */
 	int32 ClockShown = -1;
 	float Daylight = 0.0f;

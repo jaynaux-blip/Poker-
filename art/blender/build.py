@@ -32,7 +32,9 @@ ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chai
           # The Lucky Penny's stock, Fifth Street's buildings, and real shoes for the street's people.
           'stock', 'facades', 'sneakers',
           # The Embercrest from outside: the resort's front, its arrival plaza, the 14 bus, and the mountains and valley.
-          'ecx_building', 'ecx_plaza', 'ecx_bus', 'ecx_landscape']
+          'ecx_building', 'ecx_plaza', 'ecx_bus', 'ecx_landscape',
+          # The Block: the Wash & Fold's interior, Dee's front room (and an umbrella for the street's people).
+          'wash_fold', 'dee_room']
 
 
 def args():

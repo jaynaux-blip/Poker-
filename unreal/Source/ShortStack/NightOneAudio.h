@@ -25,10 +25,17 @@ public:
 	void StartAmbience();
 	/** Streams a different room tone (Source fills N mono samples at ss::audio::SampleRate). */
 	void StartAmbience(TFunction<void(float*, int32)> Source, float Level = 1.0f);
+	/**
+	 * Changes the room tone while it plays (another room became the hub): Source as StartAmbience's, or none for the
+	 * apartment's own. Starts the ambience if it wasn't playing.
+	 */
+	void SetAmbienceSource(TFunction<void(float*, int32)> Source, float Level = 1.0f);
 	void Play(ss::SoundId Id, float Volume = 1.0f);
 	/** A sound from a place in the world, falling off with distance. */
 	void PlayAt(ss::SoundId Id, const FVector& At, float Volume = 1.0f);
 	void PlayEffect(ss::audio::Effect Id, float Volume = 1.0f);
+	/** Samples rendered elsewhere (a room's own sounds: Dee's door), as an effect; At places it in the world. */
+	void PlaySamples(const std::vector<float>& Samples, float Volume, const FVector* At = nullptr);
 	void Thunder(float Delay, float Strength);
 	void SetHeartbeat(bool bOn);
 	void SetMuted(bool bInMuted);

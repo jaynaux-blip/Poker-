@@ -11,6 +11,7 @@
 #include "Components/WidgetComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "NightOneGameMode.h"
@@ -21,6 +22,41 @@
 
 namespace NightOneStageDetail
 {
+// The hour's look, tunable live (Dee's front room keeps the hour by the same ones).
+TAutoConsoleVariable<float> CVarDayLight(TEXT("ss.Room.DayLight"), 30.0f,
+	TEXT("The grey daylight through a room's window at noon (candelas of the window's light into the room)."));
+TAutoConsoleVariable<float> CVarDayStops(TEXT("ss.Room.DayStops"), 1.5f,
+	TEXT("How many stops darker a room's exposure is at noon, sitting back (leaned in to the screen, a quarter of it)."));
+TAutoConsoleVariable<float> CVarDayFacade(TEXT("ss.Room.DayFacade"), 5000.0f,
+	TEXT("The overcast sky's light on the building across the street at noon (candelas)."));
+TAutoConsoleVariable<float> CVarSkyDay(TEXT("ss.Room.SkyDay"), 2.0f,
+	TEXT("How bright the sky and the skyline are through a window at noon, against the night's (with M_StreetSky / M_StreetCity)."));
+TAutoConsoleVariable<float> CVarCalendarDay(TEXT("ss.Room.CalendarDay"), 0.4f,
+	TEXT("The wall calendar's paper at noon, as a tint (0.11 is the night's: the room's dim spill)."));
+
+/** What a photocell switches (the lamps over the street, the neon) by the hour: 1 at night, off by day. */
+float NightFor(float Daylight)
+{
+	return 1.0f - FMath::SmoothStep(0.35f, 0.65f, Daylight);
+}
+
+/** The ss.Room.* tunables as a key: the look of the hour is set again when one changes. */
+uint32 TunablesKey()
+{
+	uint32 Key = GetTypeHash(CVarDayLight.GetValueOnGameThread());
+	for (const float V : {CVarDayStops.GetValueOnGameThread(), CVarDayFacade.GetValueOnGameThread(), CVarSkyDay.GetValueOnGameThread(), CVarCalendarDay.GetValueOnGameThread()})
+	{
+		Key = HashCombine(Key, GetTypeHash(V));
+	}
+	return Key;
+}
+
+// The night's tint of the wall calendar: as the paper reads in the room's dim spill from the street and the laptop.
+const float CalendarNightTint = 0.11f;
+// The overcast sky's grey, and the grey of the light it gives through a window.
+const uint32 DaySkyHex = 0xd5dbe4;
+const uint32 DayLightHex = 0xc9d3e0;
+
 /** Prototype meters (x right, y up, z toward the viewer) to Unreal centimeters. */
 FVector Web(double X, double Y, double Z)
 {
@@ -84,15 +120,14 @@ FVector LaptopKey(double Units, int32 Row, double Nudge = 0.0)
 {
 	return FVector(KeysLeft + Units * KeyUnit, -0.019 - 0.012 - (Row + 0.5) * KeyUnit + Nudge, KeyTop);
 }
-
-/** A prop imported by the editor setup script: /Game/ShortStack/Meshes/<Name>/<Name>. */
-UStaticMesh* LoadProp(const TCHAR* Name)
-{
-	return LoadOptionalMesh(*FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s.%s"), Name, Name, Name));
-}
 } // namespace NightOneStageDetail
 
 using namespace NightOneStageDetail;
+
+UStaticMesh* ANightOneStage::LoadProp(const TCHAR* Name)
+{
+	return LoadOptionalMesh(*FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s.%s"), Name, Name, Name));
+}
 
 ANightOneStage::ANightOneStage()
 {
@@ -238,29 +273,70 @@ void ANightOneStage::RebuildSet()
 
 void ANightOneStage::BuildSet()
 {
+	LoadShared();
+	MugMesh = LoadProp(TEXT("SM_Mug"));
+	ChipsMesh = LoadProp(TEXT("SM_ChipStacks"));
+	LampMesh = LoadProp(TEXT("SM_DeskLamp"));
+	ChairMesh = LoadProp(TEXT("SM_Chair"));
+	DeskMesh = LoadProp(TEXT("SM_Desk"));
+	TenementMesh = LoadProp(TEXT("SM_Tenement"));
+	BuildShell();
+	BuildWindow();
+	BuildDesk();
+	BuildProps();
+	BuildOutside();
+	BuildLights();
+	BuildLeds();
+	BuildGear();
+	BuiltSetVersion = SetVersion;
+	AppliedDawn = -1.0f;
+	ApplyHour();
+}
+
+void ANightOneStage::LoadShared()
+{
 	Materials.Reset();
 	TimedMaterials.Reset();
 	PropWidgets.Reset();
 	Cans.Reset();
+	CalendarWidget = nullptr;
+	NeonWidget = nullptr;
+	NeonSpot = nullptr;
+	BlueNeon = nullptr;
+	CityFill = nullptr;
+	RoomFill = nullptr;
+	DayWash = nullptr;
+	FacadeLamp = nullptr;
+	FacadeFill = nullptr;
+	NeonSpill = nullptr;
+	NeonHalo = nullptr;
+	SodiumMaterial = nullptr;
+	TenementComp = nullptr;
+	SkyMid = nullptr;
+	CityMid = nullptr;
 	SurfaceMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Surface.M_Surface"));
 	EmissiveMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Emissive.M_Emissive"));
 	GlowMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Glow.M_Glow"));
 	GlassMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_RainGlass.M_RainGlass"));
-	CityMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_City.M_City"));
-	SkyMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Sky.M_Sky"));
+	// The street's sky and skyline are the apartment's own times a Strength (street_setup.py): the same at night, and
+	// the day's exposure can be met. Without them, the apartment's.
+	CityMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_StreetCity.M_StreetCity"));
+	if (!CityMaterial)
+	{
+		CityMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_City.M_City"));
+	}
+	SkyMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_StreetSky.M_StreetSky"));
+	if (!SkyMaterial)
+	{
+		SkyMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Sky.M_Sky"));
+	}
 	RainMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_Rain.M_Rain"));
 	WidgetLitMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_WidgetLit.M_WidgetLit"));
 	RainCookieMaterial = LoadOptional(TEXT("/Game/ShortStack/Materials/M_RainCookie.M_RainCookie"));
 	CanMesh = LoadProp(TEXT("SM_EnergyCan"));
-	TenementMesh = LoadProp(TEXT("SM_Tenement"));
 	LaptopBaseMesh = LoadProp(TEXT("SM_Laptop_Base"));
 	LaptopLidMesh = LoadProp(TEXT("SM_Laptop_Lid"));
-	DeskMesh = LoadProp(TEXT("SM_Desk"));
-	MugMesh = LoadProp(TEXT("SM_Mug"));
 	PhoneMesh = LoadProp(TEXT("SM_Phone"));
-	ChipsMesh = LoadProp(TEXT("SM_ChipStacks"));
-	LampMesh = LoadProp(TEXT("SM_DeskLamp"));
-	ChairMesh = LoadProp(TEXT("SM_Chair"));
 	MouseMesh = LoadProp(TEXT("SM_Mouse"));
 	MousePadMesh = LoadProp(TEXT("SM_MousePad"));
 	ArmsMesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/ShortStack/Meshes/SK_Arms/SK_Arms.SK_Arms"), nullptr, LOAD_NoWarn | LOAD_Quiet);
@@ -272,14 +348,6 @@ void ANightOneStage::BuildSet()
 		const FVector Ahead = LaptopBaseMesh->GetBoundingBox().GetCenter() * FVector(1.0, 1.0, 0.0);
 		ImportYaw = 180.0f - static_cast<float>(FMath::RadiansToDegrees(FMath::Atan2(Ahead.Y, Ahead.X)));
 	}
-	BuildShell();
-	BuildWindow();
-	BuildDesk();
-	BuildProps();
-	BuildOutside();
-	BuildLights();
-	BuildLeds();
-	BuildGear();
 }
 
 void ANightOneStage::BuildShell()
@@ -364,11 +432,17 @@ void ANightOneStage::BuildDesk()
 		// The chair the player sits in, turned to the desk (a little off square, as chairs are left).
 		AddMesh(ChairMesh, nullptr, Web(0.02, 0.0, DeskZ + 0.74), FVector(1.0), FRotator(0.0f, ImportYaw + 186.0f, 0.0f));
 	}
+	BuildWorkspace(Web(0.0, DeskTop, DeskZ + 0.04));
+	BuildArms();
+}
 
-	// Laptop, hinged at the back edge with the lid tilted back.
+void ANightOneStage::BuildWorkspace(const FVector& LaptopAt, float LaptopYaw)
+{
+	// Laptop, hinged at the back edge with the lid tilted back. Everything here stands in its frame, so the mouse, its
+	// pad and the phone keep their places by it wherever it's set down.
 	USceneComponent* Laptop = NewPart<USceneComponent>();
 	LaptopFrame = Laptop;
-	Laptop->SetRelativeLocation(Web(0.0, DeskTop, DeskZ + 0.04));
+	Laptop->SetRelativeLocationAndRotation(LaptopAt, FRotator(0.0f, LaptopYaw, 0.0f));
 	const double D = 0.235;
 	const float LidTilt = -18.3f;
 	// Where the display sits on the lid, from the hinge (m): its center's height and how far its face is ahead.
@@ -407,19 +481,19 @@ void ANightOneStage::BuildDesk()
 	Screen->SetTintColorAndOpacity(FLinearColor(0.86f, 0.86f, 0.86f, 1.0f));
 	Screen->SetRedrawTime(1.0f / 30.0f);
 
-	// Mouse and pad. The mouse moves with the pointer (UpdateArms).
+	// Mouse and pad, right of the laptop. The mouse moves with the pointer (UpdateArms).
 	double PadTop = 0.003;
 	if (MousePadMesh)
 	{
-		AddMesh(MousePadMesh, nullptr, Web(0.33, DeskTop, DeskZ + 0.13), FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f));
+		AddMesh(MousePadMesh, nullptr, Web(0.33, 0.0, 0.09), FVector(1.0), FRotator(0.0f, ImportYaw, 0.0f), Laptop);
 		PadTop = 0.004;
 	}
 	else
 	{
-		BoxWeb(Surface(TEXT("MousePad"), 0x131417, 0.95f), FVector(0.33, DeskTop + 0.0015, DeskZ + 0.13), FVector(0.26, 0.003, 0.21));
+		BoxWeb(Surface(TEXT("MousePad"), 0x131417, 0.95f), FVector(0.33, 0.0015, 0.09), FVector(0.26, 0.003, 0.21), 0.0f, Laptop);
 	}
-	MouseRoot = NewPart<USceneComponent>();
-	MouseHome = Web(0.34, DeskTop + PadTop, DeskZ + 0.15);
+	MouseRoot = NewPart<USceneComponent>(Laptop);
+	MouseHome = Web(0.34, PadTop, 0.11);
 	MouseRoot->SetRelativeLocation(MouseHome);
 	if (MouseMesh)
 	{
@@ -432,23 +506,9 @@ void ANightOneStage::BuildDesk()
 		MouseTop = 2.6f;
 	}
 
-	// The player's arms, rooted between the shoulders (UpdateArms keeps them with the head).
-	ArmsRoot = NewPart<USceneComponent>();
-	ArmsComp = nullptr;
-	if (ArmsMesh)
-	{
-		ArmsComp = NewPart<UPoseableMeshComponent>(ArmsRoot);
-		ArmsComp->SetSkinnedAssetAndUpdate(ArmsMesh);
-		ArmsComp->SetRelativeRotation(FRotator(0.0f, ImportYaw, 0.0f));
-		ArmsComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		ArmsComp->SetCastShadow(true);
-		ArmsComp->bCastHiddenShadow = false;
-		ArmsComp->SetVisibility(false);
-	}
-
-	// Phone, face up; its lock screen lights when a text arrives.
-	USceneComponent* Phone = NewPart<USceneComponent>();
-	Phone->SetRelativeLocationAndRotation(Web(0.28, DeskTop, DeskZ - 0.12), FRotator(0.0f, 14.3f, 0.0f));
+	// Phone, face up behind the mouse; its lock screen lights when a text arrives.
+	USceneComponent* Phone = NewPart<USceneComponent>(Laptop);
+	Phone->SetRelativeLocationAndRotation(Web(0.28, 0.0, -0.16), FRotator(0.0f, 14.3f, 0.0f));
 	double GlassHeight = 0.008;
 	if (PhoneMesh)
 	{
@@ -469,6 +529,23 @@ void ANightOneStage::BuildDesk()
 	PhoneLight->SetLightColor(Srgb(0x9fc4ff));
 	PhoneLight->SetAttenuationRadius(80.0f);
 	PhoneLight->SetCastShadows(false);
+}
+
+void ANightOneStage::BuildArms()
+{
+	// The player's arms, rooted between the shoulders (UpdateArms keeps them with the head).
+	ArmsRoot = NewPart<USceneComponent>();
+	ArmsComp = nullptr;
+	if (ArmsMesh)
+	{
+		ArmsComp = NewPart<UPoseableMeshComponent>(ArmsRoot);
+		ArmsComp->SetSkinnedAssetAndUpdate(ArmsMesh);
+		ArmsComp->SetRelativeRotation(FRotator(0.0f, ImportYaw, 0.0f));
+		ArmsComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		ArmsComp->SetCastShadow(true);
+		ArmsComp->bCastHiddenShadow = false;
+		ArmsComp->SetVisibility(false);
+	}
 }
 
 void ANightOneStage::BuildProps()
@@ -584,12 +661,13 @@ void ANightOneStage::AddCan()
 	Cans.Add(Body);
 }
 
-void ANightOneStage::BuildOutside()
+UInstancedStaticMeshComponent* ANightOneStage::BuildSkyline()
 {
 	// Sky dome.
 	if (UMaterialInstanceDynamic* Sky = Special(SkyMaterial, TEXT("Sky")))
 	{
 		TimedMaterials.Add(Sky);
+		SkyMid = Sky;
 		AddMesh(SphereMesh, Sky, FVector::ZeroVector, FVector(1800.0), FRotator::ZeroRotator, nullptr, false);
 	}
 	// Skyline: instanced boxes with a procedural window shader (same generator as the prototype).
@@ -597,6 +675,7 @@ void ANightOneStage::BuildOutside()
 	if (City)
 	{
 		TimedMaterials.Add(City);
+		CityMid = City;
 	}
 	UInstancedStaticMeshComponent* Buildings = NewPart<UInstancedStaticMeshComponent>();
 	Buildings->SetStaticMesh(CubeMesh);
@@ -637,45 +716,66 @@ void ANightOneStage::BuildOutside()
 		}
 		++Placed;
 	}
+	return Buildings;
+}
+
+void ANightOneStage::BuildRainSheets(const FVector& Near, float Width)
+{
+	// Falling rain between the window and the building across the street: three sheets, farther ones wider.
+	if (UMaterialInstanceDynamic* Rain = Special(RainMaterial, TEXT("Rain")))
+	{
+		TimedMaterials.Add(Rain);
+		const double Depths[3] = {0.0, 450.0, 1050.0};
+		for (int32 I = 0; I < 3; ++I)
+		{
+			AddMesh(PlaneMesh, Rain, Near + FVector(Depths[I], 0.0, 0.0), FVector(14.0, Width / 100.0 + I * 4.0, 1.0), FRotator(90.0f, 0.0f, 0.0f), nullptr, false);
+		}
+	}
+}
+
+void ANightOneStage::BuildOutside()
+{
+	UInstancedStaticMeshComponent* Buildings = BuildSkyline();
 	// The building across the street: a brick walk-up over the laundromat, its face 18 m from the window and the
 	// street 12 m below (art/blender/assets/tenement.py). Without the mesh, a block of the skyline stands in.
 	if (TenementMesh)
 	{
-		AddMesh(TenementMesh, nullptr, FVector(1800.0, 600.0, -1200.0), FVector(1.0), FRotator::ZeroRotator, nullptr, true);
+		TenementComp = AddMesh(TenementMesh, nullptr, FVector(1800.0, 600.0, -1200.0), FVector(1.0), FRotator::ZeroRotator, nullptr, true);
 		// A sodium street lamp across the street, raking the brick from the right: the fire escape (left of the
 		// window's middle) throws its stairs and railings across the wall. The city's cold glow fills the shadows
-		// so the ironwork reads against them, and the neon's pink lies on the bricks around the sign.
-		USpotLightComponent* Lamp = NewPart<USpotLightComponent>();
+		// so the ironwork reads against them (by day the overcast sky's grey lights the whole wall), and the neon's
+		// pink lies on the bricks around the sign.
+		FacadeLamp = NewPart<USpotLightComponent>();
 		const FVector LampAt(1250.0, 250.0, -650.0);
-		Lamp->SetRelativeLocationAndRotation(LampAt, (FVector(1800.0, -450.0, 50.0) - LampAt).Rotation());
-		Lamp->SetIntensityUnits(ELightUnits::Candelas);
-		Lamp->SetIntensity(FacadeLampCandela);
-		Lamp->SetLightColor(Srgb(0xffa04a));
-		Lamp->SetOuterConeAngle(62.0f);
-		Lamp->SetInnerConeAngle(22.0f);
-		Lamp->SetSourceRadius(15.0f);
-		Lamp->SetAttenuationRadius(2600.0f);
-		Lamp->SetCastShadows(true);
-		Lamp->SetVolumetricScatteringIntensity(0.0f);
-		URectLightComponent* Glow = NewPart<URectLightComponent>();
-		Glow->SetRelativeLocationAndRotation(FVector(900.0, 300.0, -200.0), FRotator::ZeroRotator);
-		Glow->SetIntensityUnits(ELightUnits::Candelas);
-		Glow->SetIntensity(FacadeGlowCandela);
-		Glow->SetLightColor(FLinearColor(0.38f, 0.46f, 0.75f));
-		Glow->SetSourceWidth(3000.0f);
-		Glow->SetSourceHeight(2400.0f);
-		Glow->SetAttenuationRadius(2600.0f);
-		Glow->SetCastShadows(false);
-		Glow->SetVolumetricScatteringIntensity(0.0f);
-		UPointLightComponent* Spill = NewPart<UPointLightComponent>();
-		Spill->SetRelativeLocation(FVector(1745.0, 320.0, -60.0));
-		Spill->SetIntensityUnits(ELightUnits::Candelas);
-		Spill->SetIntensity(NeonSpillCandela);
-		Spill->SetLightColor(Srgb(0xff2e88));
-		Spill->SetSourceRadius(120.0f);
-		Spill->SetAttenuationRadius(520.0f);
-		Spill->SetCastShadows(false);
-		Spill->SetVolumetricScatteringIntensity(0.0f);
+		FacadeLamp->SetRelativeLocationAndRotation(LampAt, (FVector(1800.0, -450.0, 50.0) - LampAt).Rotation());
+		FacadeLamp->SetIntensityUnits(ELightUnits::Candelas);
+		FacadeLamp->SetIntensity(FacadeLampCandela);
+		FacadeLamp->SetLightColor(Srgb(0xffa04a));
+		FacadeLamp->SetOuterConeAngle(62.0f);
+		FacadeLamp->SetInnerConeAngle(22.0f);
+		FacadeLamp->SetSourceRadius(15.0f);
+		FacadeLamp->SetAttenuationRadius(2600.0f);
+		FacadeLamp->SetCastShadows(true);
+		FacadeLamp->SetVolumetricScatteringIntensity(0.0f);
+		FacadeFill = NewPart<URectLightComponent>();
+		FacadeFill->SetRelativeLocationAndRotation(FVector(900.0, 300.0, -200.0), FRotator::ZeroRotator);
+		FacadeFill->SetIntensityUnits(ELightUnits::Candelas);
+		FacadeFill->SetIntensity(FacadeGlowCandela);
+		FacadeFill->SetLightColor(FLinearColor(0.38f, 0.46f, 0.75f));
+		FacadeFill->SetSourceWidth(3000.0f);
+		FacadeFill->SetSourceHeight(2400.0f);
+		FacadeFill->SetAttenuationRadius(2600.0f);
+		FacadeFill->SetCastShadows(false);
+		FacadeFill->SetVolumetricScatteringIntensity(0.0f);
+		NeonSpill = NewPart<UPointLightComponent>();
+		NeonSpill->SetRelativeLocation(FVector(1745.0, 320.0, -60.0));
+		NeonSpill->SetIntensityUnits(ELightUnits::Candelas);
+		NeonSpill->SetIntensity(NeonSpillCandela);
+		NeonSpill->SetLightColor(Srgb(0xff2e88));
+		NeonSpill->SetSourceRadius(120.0f);
+		NeonSpill->SetAttenuationRadius(520.0f);
+		NeonSpill->SetCastShadows(false);
+		NeonSpill->SetVolumetricScatteringIntensity(0.0f);
 	}
 	else
 	{
@@ -689,27 +789,19 @@ void ANightOneStage::BuildOutside()
 	{
 		Halo->SetVectorParameterValue(TEXT("Color"), Srgb(0xff2e88));
 		Halo->SetScalarParameterValue(TEXT("Strength"), 0.6f);
+		NeonHalo = Halo;
 		AddMesh(PlaneMesh, Halo, Web(3.2, -0.6, -17.95), FVector(7.0, 14.0, 1.0), FRotator(90.0f, 0.0f, 0.0f), nullptr, false);
 	}
 	// Street lights far below.
-	UMaterialInterface* Sodium = Surface(TEXT("Sodium"), 0xffa050, 1.0f, 0.0f, PatternNone, 12.0f);
+	SodiumMaterial = Surface(TEXT("Sodium"), 0xffa050, 1.0f, 0.0f, PatternNone, 12.0f);
 	for (int32 I = 0; I < 6; ++I)
 	{
-		AddMesh(SphereMesh, Sodium, Web(-18.0 + I * 9.0, -6.5, -12.0), FVector(0.5), FRotator::ZeroRotator, nullptr, false);
+		AddMesh(SphereMesh, SodiumMaterial, Web(-18.0 + I * 9.0, -6.5, -12.0), FVector(0.5), FRotator::ZeroRotator, nullptr, false);
 	}
-	// Falling rain between the window and the building across the street.
-	if (UMaterialInstanceDynamic* Rain = Special(RainMaterial, TEXT("Rain")))
-	{
-		TimedMaterials.Add(Rain);
-		const double Depths[3] = {250.0, 700.0, 1300.0};
-		for (int32 I = 0; I < 3; ++I)
-		{
-			AddMesh(PlaneMesh, Rain, FVector(Depths[I], 0.0, 100.0), FVector(14.0, 16.0 + I * 4.0, 1.0), FRotator(90.0f, 0.0f, 0.0f), nullptr, false);
-		}
-	}
+	BuildRainSheets(FVector(250.0, 0.0, 100.0), 1600.0f);
 }
 
-void ANightOneStage::BuildLights()
+void ANightOneStage::BuildScreenLight()
 {
 	// The laptop screen is the key light, just in front of the display.
 	ScreenLight = NewPart<URectLightComponent>(LidPivot);
@@ -722,6 +814,11 @@ void ANightOneStage::BuildLights()
 	ScreenLight->SetAttenuationRadius(400.0f);
 	ScreenLight->SetCastShadows(true);
 	ScreenLight->SetSpecularScale(ScreenLightSpecular);
+}
+
+void ANightOneStage::BuildLights()
+{
+	BuildScreenLight();
 
 	// Neon through the window: shadows of the frame and moving rain on the room.
 	NeonSpot = NewPart<USpotLightComponent>();
@@ -766,6 +863,24 @@ void ANightOneStage::BuildLights()
 	RoomFill->SetAttenuationRadius(600.0f);
 	RoomFill->SetCastShadows(false);
 
+	// The day through the window: the overcast sky's grey, a soft light from the whole pane down into the room (the
+	// frame's shadow on the desk and the floor). Outside, clear of the wall even tipped down. Dark at night (ApplyHour).
+	DayWash = NewPart<URectLightComponent>();
+	DayWash->SetRelativeLocationAndRotation(Web((WinX0 + WinX1) / 2.0, (WinY0 + WinY1) / 2.0, RoomFront - 0.4), FRotator(-10.0f, 180.0f, 0.0f));
+	DayWash->SetIntensityUnits(ELightUnits::Candelas);
+	DayWash->SetIntensity(0.0f);
+	DayWash->SetLightColor(Srgb(DayLightHex));
+	DayWash->SetSourceWidth(static_cast<float>((WinX1 - WinX0) * 100.0));
+	DayWash->SetSourceHeight(static_cast<float>((WinY1 - WinY0) * 100.0));
+	DayWash->SetBarnDoorAngle(80.0f);
+	DayWash->SetAttenuationRadius(900.0f);
+	DayWash->SetCastShadows(true);
+	DayWash->SetVisibility(false);
+	BuildLens();
+}
+
+void ANightOneStage::BuildLens()
+{
 	// Lens: manual exposure, bloom for the screen and neon, grain, vignette, and the tilt treatment.
 	Lens = NewPart<UPostProcessComponent>();
 	Lens->bUnbound = true;
@@ -829,13 +944,17 @@ void ANightOneStage::AttachSlate()
 	};
 	namespace P = ss::ui::props;
 	PropLists.Reset();
-	PropLists.Add(Draw(P::NoticeW, P::NoticeH, [](ss::ui::Canvas& C) { P::EvictionNotice(C); }));
-	PropLists.Add(Draw(P::BillW, P::BillH, [](ss::ui::Canvas& C) { P::PowerBill(C); }));
-	PropLists.Add(Draw(P::NoticeW, P::NoticeH, [](ss::ui::Canvas& C) { P::EvictionNotice(C); }));
-	PropLists.Add(Draw(P::PosterW, P::PosterH, [](ss::ui::Canvas& C) { P::Poster(C); }));
-	PropLists.Add(Draw(P::NoteSize, P::NoteSize, [](ss::ui::Canvas& C) { P::StickyNote(C, {"BR: $2.37", "DON'T", "TILT."}, ss::ui::Hex(0xf6e27a)); }));
-	PropLists.Add(Draw(P::NoteSize, P::NoteSize, [](ss::ui::Canvas& C) { P::StickyNote(C, {"fold the", "trash.", "shove", "the good"}, ss::ui::Hex(0x9fe3b6)); }));
-	PropLists.Add(Draw(P::NoteSize, P::NoteSize, [](ss::ui::Canvas& C) { P::StickyNote(C, {"RENT", "FRIDAY", "$1,225"}, ss::ui::Hex(0xff9cb8)); }));
+	if (PropWidgets.Num() > 0)
+	{
+		// The apartment's papers (another room has its own, or none).
+		PropLists.Add(Draw(P::NoticeW, P::NoticeH, [](ss::ui::Canvas& C) { P::EvictionNotice(C); }));
+		PropLists.Add(Draw(P::BillW, P::BillH, [](ss::ui::Canvas& C) { P::PowerBill(C); }));
+		PropLists.Add(Draw(P::NoticeW, P::NoticeH, [](ss::ui::Canvas& C) { P::EvictionNotice(C); }));
+		PropLists.Add(Draw(P::PosterW, P::PosterH, [](ss::ui::Canvas& C) { P::Poster(C); }));
+		PropLists.Add(Draw(P::NoteSize, P::NoteSize, [](ss::ui::Canvas& C) { P::StickyNote(C, {"BR: $2.37", "DON'T", "TILT."}, ss::ui::Hex(0xf6e27a)); }));
+		PropLists.Add(Draw(P::NoteSize, P::NoteSize, [](ss::ui::Canvas& C) { P::StickyNote(C, {"fold the", "trash.", "shove", "the good"}, ss::ui::Hex(0x9fe3b6)); }));
+		PropLists.Add(Draw(P::NoteSize, P::NoteSize, [](ss::ui::Canvas& C) { P::StickyNote(C, {"RENT", "FRIDAY", "$1,225"}, ss::ui::Hex(0xff9cb8)); }));
+	}
 	PropSlates.Reset();
 	for (int32 I = 0; I < PropWidgets.Num() && I < PropLists.Num(); ++I)
 	{
@@ -895,6 +1014,11 @@ void ANightOneStage::Tick(float DeltaSeconds)
 	const float Dt = FMath::Max(0.0f, DeltaSeconds);
 	Time += Dt;
 	UpdateCalendar(Dt);
+	// The hour (small steps: the sky and the lamps fade through dusk without a visible jump), or a tunable changed.
+	if (FMath::Abs(Dawn - AppliedDawn) > 0.004f || HourKey() != AppliedTunables)
+	{
+		ApplyHour();
+	}
 	NextLightning -= Dt;
 	if (NextLightning <= 0.0f)
 	{
@@ -910,18 +1034,26 @@ void ANightOneStage::Tick(float DeltaSeconds)
 		NeonGlitch = 0.25f + FMath::FRand() * 0.4f;
 	}
 	NeonLevel = NeonGlitch > 0.0f ? (FMath::FRand() < 0.5f ? 0.15f : 1.0f) : 0.92f + 0.08f * FMath::Sin(Time * 120.0f);
+	// By day the sign is off (its photocell, with the street's lamps): no pink in the room, only the lightning.
+	const float Lit = NeonLevel * Night;
 	if (NeonSpot)
 	{
-		NeonSpot->SetIntensity(NeonCandela * NeonLevel + Flicker * 250.0f);
-		NeonSpot->SetLightColor(FMath::Lerp(Srgb(0xff3a8c), FLinearColor(0.85f, 0.9f, 1.0f), FMath::Min(1.0f, Flicker * 1.5f)));
+		NeonSpot->SetIntensity(NeonCandela * Lit + Flicker * 250.0f);
+		NeonSpot->SetLightColor(FMath::Lerp(Srgb(0xff3a8c), FLinearColor(0.85f, 0.9f, 1.0f), FMath::Min(1.0f, Flicker * 1.5f + (1.0f - Night))));
+		// Dark by day (between flashes): hidden, so its shadows and the rain on its cookie cost nothing.
+		const bool bLit = Lit > 0.001f || Flicker > 0.0f;
+		if (NeonSpot->IsVisible() != bLit)
+		{
+			NeonSpot->SetVisibility(bLit);
+		}
 	}
 	if (NeonWidget)
 	{
-		NeonWidget->SetTintColorAndOpacity(FLinearColor(8.0f * NeonLevel, 8.0f * NeonLevel, 8.0f * NeonLevel, 1.0f));
+		NeonWidget->SetTintColorAndOpacity(FLinearColor(8.0f * Lit, 8.0f * Lit, 8.0f * Lit, 1.0f));
 	}
 	if (RoomFill)
 	{
-		RoomFill->SetIntensity(RoomFillCandela + Flicker * 3.0f);
+		RoomFill->SetIntensity(RoomFillNow + Flicker * 3.0f);
 	}
 	for (UMaterialInstanceDynamic* M : TimedMaterials)
 	{
@@ -972,9 +1104,15 @@ void ANightOneStage::Lightning(float Strength)
 
 // ------------------------------------------------------------------ game hooks
 
+FVector ANightOneStage::EyeLocal() const
+{
+	// In the chair, up to the desk.
+	return Web(0.0, 1.17, DeskZ + 0.72);
+}
+
 FVector ANightOneStage::EyeLocation() const
 {
-	return GetActorTransform().TransformPosition(Web(0.0, 1.17, DeskZ + 0.72));
+	return GetActorTransform().TransformPosition(EyeLocal());
 }
 
 FVector ANightOneStage::ScreenCenter() const
@@ -1345,9 +1483,6 @@ void ANightOneStage::BuildGear()
 	// Evicted: what's left of the room packed into kraft cartons, taped shut (a red sticker on one), stacked where the PC
 	// stood beside the desk and against the left wall. The room reads as somebody else's now, the laptop the last thing out.
 	{
-		UMaterialInterface* Kraft = Surface(TEXT("Cardboard"), 0xa77d4f, 0.9f);
-		UMaterialInterface* Tape = Surface(TEXT("PackingTape"), 0xcdb98f, 0.35f);
-		UMaterialInterface* Sticker = Surface(TEXT("CartonSticker"), 0xb3261e, 0.6f);
 		struct FCarton
 		{
 			FVector At;   // web meters: the middle of its base
@@ -1363,23 +1498,36 @@ void ANightOneStage::BuildGear()
 		};
 		for (const FCarton& C : Cartons)
 		{
-			USceneComponent* Carton = NewPart<USceneComponent>(GearGroups[GearEvicted]);
-			Carton->SetRelativeLocationAndRotation(Web(C.At.X, C.At.Y, C.At.Z), FRotator(0.0f, C.Yaw, 0.0f));
-			BoxWeb(Kraft, FVector(0.0, C.Size.Y * 0.5, 0.0), C.Size, 0.0f, Carton);
-			// A strip of tape down the middle of the lid and over its front and back edges.
-			BoxWeb(Tape, FVector(0.0, C.Size.Y + 0.0015, 0.0), FVector(0.05, 0.003, C.Size.Z + 0.004), 0.0f, Carton);
-			BoxWeb(Tape, FVector(0.0, C.Size.Y - 0.05, C.Size.Z * 0.5 + 0.0015), FVector(0.05, 0.1, 0.003), 0.0f, Carton);
-			BoxWeb(Tape, FVector(0.0, C.Size.Y - 0.05, -C.Size.Z * 0.5 - 0.0015), FVector(0.05, 0.1, 0.003), 0.0f, Carton);
-			if (C.bSticker)
-			{
-				// On the side facing the chair.
-				BoxWeb(Sticker, FVector(-C.Size.X * 0.2, C.Size.Y * 0.55, C.Size.Z * 0.5 + 0.002), FVector(0.12, 0.08, 0.002), 0.0f, Carton);
-			}
+			AddCarton(Web(C.At.X, C.At.Y, C.At.Z), FVector(C.Size.Z, C.Size.X, C.Size.Y) * 100.0, C.Yaw, C.bSticker, GearGroups[GearEvicted]);
 		}
 	}
 	for (USceneComponent* Group : GearGroups)
 	{
 		Group->SetVisibility(false, true);
+	}
+}
+
+void ANightOneStage::AddCarton(const FVector& At, const FVector& SizeCm, float Yaw, bool bSticker, USceneComponent* Parent)
+{
+	UMaterialInterface* Kraft = Surface(TEXT("Cardboard"), 0xa77d4f, 0.9f);
+	UMaterialInterface* Tape = Surface(TEXT("PackingTape"), 0xcdb98f, 0.35f);
+	USceneComponent* Carton = NewPart<USceneComponent>(Parent);
+	Carton->SetRelativeLocationAndRotation(At, FRotator(0.0f, Yaw, 0.0f));
+	const double D = SizeCm.X;
+	const double W = SizeCm.Y;
+	const double H = SizeCm.Z;
+	AddMesh(CubeMesh, Kraft, FVector(0.0, 0.0, H * 0.5), SizeCm / 100.0, FRotator::ZeroRotator, Carton);
+	// A strip of tape down the middle of the lid and over its front and back edges.
+	AddMesh(CubeMesh, Tape, FVector(0.0, 0.0, H + 0.15), FVector(D + 0.4, 5.0, 0.3) / 100.0, FRotator::ZeroRotator, Carton);
+	for (const double Side : {-1.0, 1.0})
+	{
+		AddMesh(CubeMesh, Tape, FVector(Side * (D * 0.5 + 0.15), 0.0, H - 5.0), FVector(0.3, 5.0, 10.0) / 100.0, FRotator::ZeroRotator, Carton);
+	}
+	if (bSticker)
+	{
+		// A red sticker on the side facing the seat (-X).
+		AddMesh(CubeMesh, Surface(TEXT("CartonSticker"), 0xb3261e, 0.6f), FVector(-(D * 0.5 + 0.2), -W * 0.2, H * 0.55), FVector(0.2, 12.0, 8.0) / 100.0,
+		        FRotator::ZeroRotator, Carton);
 	}
 }
 
@@ -1476,6 +1624,169 @@ void ANightOneStage::SetDawn(float Value)
 	Dawn = FMath::Clamp(Value, 0.0f, 1.0f);
 }
 
+float ANightOneStage::DayStops(float Focus) const
+{
+	// The eyes take the day in: sitting back the room is lit by it, and the exposure comes down; leaned in to the laptop
+	// they're on the screen, and come back up most of the way (the screen still reads, if dimmer than at night).
+	return FMath::Max(0.0f, CVarDayStops.GetValueOnGameThread()) * Dawn * FMath::Lerp(1.0f, 0.25f, FMath::Clamp(Focus, 0.0f, 1.0f));
+}
+
+void ANightOneStage::ApplyCalendarTint()
+{
+	if (CalendarWidget)
+	{
+		// Unlit (a lit sheet went black out of the lamp's light): drawn as the paper reads in the room's light, the
+		// street's dim spill at night or the daylight, so it reads from the seat at any hour.
+		const float Tint = FMath::Lerp(CalendarNightTint, FMath::Max(CalendarNightTint, CVarCalendarDay.GetValueOnGameThread()), FMath::SmoothStep(0.0f, 1.0f, Dawn));
+		CalendarWidget->SetTintColorAndOpacity(FLinearColor(Tint, Tint * 0.955f, Tint * 0.91f, 1.0f));
+	}
+}
+
+uint32 ANightOneStage::HourKey() const
+{
+	return TunablesKey();
+}
+
+void ANightOneStage::ApplyHour()
+{
+	AppliedDawn = Dawn;
+	AppliedTunables = HourKey();
+	const float D = Dawn;
+	Night = NightFor(D);
+	// What shines by itself out there is set for the night's exposure; by day the sky and the skyline are the grey
+	// of rain cloud, brighter than the night's (the exposure comes down by the day's stops, ApplyLens).
+	const float SkyK = FMath::Lerp(1.0f, FMath::Max(0.0f, CVarSkyDay.GetValueOnGameThread()), D);
+	for (UMaterialInstanceDynamic* M : {SkyMid.Get(), CityMid.Get()})
+	{
+		if (M)
+		{
+			M->SetScalarParameterValue(TEXT("Strength"), SkyK);
+		}
+	}
+	// The daylight through the window, and the city's cold fill turning to the sky's grey.
+	const float DayCandela = FMath::Max(0.0f, CVarDayLight.GetValueOnGameThread()) * D;
+	if (DayWash)
+	{
+		DayWash->SetIntensity(DayCandela);
+		DayWash->SetVisibility(DayCandela > 0.01f);
+	}
+	if (CityFill)
+	{
+		CityFill->SetIntensity(FMath::Lerp(1.7f, 4.0f, D));
+		CityFill->SetLightColor(FMath::Lerp(Srgb(0x5a78c8), Srgb(DayLightHex), D));
+	}
+	if (BlueNeon)
+	{
+		BlueNeon->SetIntensity(0.25f * Night);
+		BlueNeon->SetVisibility(Night > 0.01f);
+	}
+	RoomFillNow = FMath::Lerp(RoomFillCandela, 0.6f, D);
+	if (RoomFill)
+	{
+		RoomFill->SetLightColor(FMath::Lerp(Srgb(0x223047), Srgb(DayLightHex), D));
+	}
+	// Across the street: the sodium lamp's photocell, the neon's pink on the brick, and the cold glow on the wall that
+	// becomes the overcast sky's light by day; the building's own lit rooms out by day, as the street has them.
+	if (FacadeLamp)
+	{
+		const bool bOn = D < 0.47f;
+		if (FacadeLamp->IsVisible() != bOn)
+		{
+			FacadeLamp->SetVisibility(bOn);
+		}
+	}
+	if (FacadeFill)
+	{
+		const float DayFacade = FMath::Max(0.0f, CVarDayFacade.GetValueOnGameThread());
+		FacadeFill->SetIntensity(FMath::Lerp(FacadeGlowCandela, DayFacade, D));
+		FacadeFill->SetLightColor(FMath::Lerp(FLinearColor(0.38f, 0.46f, 0.75f), Srgb(DaySkyHex), D));
+	}
+	if (NeonSpill)
+	{
+		NeonSpill->SetIntensity(NeonSpillCandela * Night);
+		NeonSpill->SetVisibility(Night > 0.01f);
+	}
+	if (NeonHalo)
+	{
+		NeonHalo->SetScalarParameterValue(TEXT("Strength"), 0.6f * Night);
+	}
+	if (SodiumMaterial)
+	{
+		SodiumMaterial->SetScalarParameterValue(TEXT("Emissive"), 12.0f * Night);
+	}
+	DimBakedGlow(TenementComp, Night);
+	ApplyCalendarTint();
+}
+
+void ANightOneStage::DimBakedGlow(UStaticMeshComponent* Mesh, float Level)
+{
+	// As the street dims its fronts (StreetStage.cpp): the glTF importer's materials scale their emissive texture by a
+	// color factor (EmissiveFactor, _RGB in this engine) or a strength; whichever a material lists is scaled, and a slot
+	// that doesn't glow is left alone.
+	const UStaticMesh* Source = Mesh ? Mesh->GetStaticMesh().Get() : nullptr;
+	if (!Source)
+	{
+		return;
+	}
+	auto Key = [](const FName& Name) { return Name.ToString().ToLower().Replace(TEXT("_"), TEXT("")).Replace(TEXT(" "), TEXT("")); };
+	for (int32 Slot = 0; Slot < Source->GetStaticMaterials().Num(); ++Slot)
+	{
+		UMaterialInterface* Baked = Source->GetMaterial(Slot);
+		UMaterialInstanceDynamic* Dim = Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(Slot));
+		if (!Baked || Level > 0.999f)
+		{
+			if (Dim)
+			{
+				Mesh->SetMaterial(Slot, nullptr); // the bake again
+			}
+			continue;
+		}
+		auto Dimmed = [&]() -> UMaterialInstanceDynamic* {
+			if (!Dim || Dim->Parent != Baked)
+			{
+				Dim = UMaterialInstanceDynamic::Create(Baked, Mesh);
+				Dim->SetFlags(RF_Transient);
+				Mesh->SetMaterial(Slot, Dim);
+			}
+			return Dim;
+		};
+		// A slot that lists a color factor glows by it: black (the walls, the glass), it doesn't glow and keeps its bake.
+		bool bFactor = false;
+		TArray<FMaterialParameterInfo> Infos;
+		TArray<FGuid> Ids;
+		Baked->GetAllVectorParameterInfo(Infos, Ids);
+		for (const FMaterialParameterInfo& Info : Infos)
+		{
+			const FString K = Key(Info.Name);
+			FLinearColor Glow;
+			if ((K.StartsWith(TEXT("emissivefactor")) || K == TEXT("emissivecolor")) && Baked->GetVectorParameterValue(FHashedMaterialParameterInfo(Info), Glow))
+			{
+				bFactor = true;
+				if (!Glow.IsAlmostBlack())
+				{
+					Dimmed()->SetVectorParameterValue(Info.Name, FLinearColor(Glow.R * Level, Glow.G * Level, Glow.B * Level, Glow.A));
+				}
+			}
+		}
+		if (bFactor)
+		{
+			continue;
+		}
+		Infos.Reset();
+		Ids.Reset();
+		Baked->GetAllScalarParameterInfo(Infos, Ids);
+		for (const FMaterialParameterInfo& Info : Infos)
+		{
+			const FString K = Key(Info.Name);
+			float Strength = 0.0f;
+			if ((K == TEXT("emissivestrength") || K == TEXT("emissiveintensity")) && Baked->GetScalarParameterValue(FHashedMaterialParameterInfo(Info), Strength) && Strength > 0.0f)
+			{
+				Dimmed()->SetScalarParameterValue(Info.Name, Strength * Level);
+			}
+		}
+	}
+}
+
 void ANightOneStage::SetLens(float Focus, float Tilt, float Pulse)
 {
 	if (!Lens)
@@ -1488,11 +1799,11 @@ void ANightOneStage::SetLens(float Focus, float Tilt, float Pulse)
 	P.FilmGrainIntensity = (0.12f - 0.08f * Focus) * GrainScale;
 	P.MotionBlurAmount = bMotionBlur ? 0.35f : 0.0f;
 	P.VignetteIntensity = 0.5f + Tilt * 0.6f + Pulse * 0.35f;
-	// Tilt: color drains toward a hot red.
-	const float Sat = 1.0f - 0.55f * Tilt;
+	// Tilt: color drains toward a hot red. By day the rain's grey takes a little of the color out of everything.
+	const float Sat = (1.0f - 0.55f * Tilt) * (1.0f - 0.15f * Dawn);
 	P.ColorSaturation = FVector4(Sat, Sat, Sat, 1.0f);
 	P.ColorGain = FVector4(1.0f + 0.2f * Tilt, 1.0f - 0.25f * Tilt, 1.0f - 0.25f * Tilt, 1.0f);
-	P.AutoExposureBias = ExposureBias + BrightnessBias;
+	P.AutoExposureBias = ExposureBias + BrightnessBias - DayStops(Focus);
 }
 
 // ------------------------------------------------------------------ arms
@@ -1548,8 +1859,8 @@ void ANightOneStage::UpdateArms(float DeltaSeconds, const FVector& CameraLocatio
 	// Shoulders 13 cm ahead of and 20 cm below the eye (the player sits up to the laptop); they follow the
 	// head most of the way when it moves, but not into the establishing shot across the room.
 	const FTransform& X = GetActorTransform();
-	const FVector EyeLocal = Web(0.0, 1.17, DeskZ + 0.72);
-	FVector Head = X.InverseTransformPosition(CameraLocation) - EyeLocal;
+	const FVector Eye = EyeLocal();
+	FVector Head = X.InverseTransformPosition(CameraLocation) - Eye;
 	if (Head.Size() > 60.0)
 	{
 		Head = FVector::ZeroVector;
@@ -1560,7 +1871,7 @@ void ANightOneStage::UpdateArms(float DeltaSeconds, const FVector& CameraLocatio
 	const float Turn = FMath::Abs(FMath::Atan2(static_cast<float>(Look.Y), static_cast<float>(FMath::Max(Look.X, 0.01))));
 	const float AwayGoal = FMath::SmoothStep(0.3f, 0.75f, Turn);
 	ArmsAway += (AwayGoal - ArmsAway) * (1.0f - FMath::Exp(-Dt * 6.0f));
-	ArmsRoot->SetRelativeLocation(EyeLocal + Web(0.0, -0.20 - 0.10 * ArmsAway, -0.13 + 0.05 * ArmsAway) + Head * 0.7);
+	ArmsRoot->SetRelativeLocation(Eye + Web(0.0, -0.20 - 0.10 * ArmsAway, -0.13 + 0.05 * ArmsAway) + Head * 0.7);
 	if (!Arms.IsReady())
 	{
 		if (ArmsInitTries++ > 120 || !Arms.Init(ArmsComp))

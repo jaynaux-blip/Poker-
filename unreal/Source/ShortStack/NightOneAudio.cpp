@@ -59,6 +59,27 @@ void UNightOneAudio::StartAmbience(TFunction<void(float*, int32)> Source, float 
 	AmbienceComponent = UGameplayStatics::SpawnSound2D(this, AmbienceWave.Get(), AmbienceLevel(), 1.0f, 0.0f, nullptr, false, false);
 }
 
+void UNightOneAudio::SetAmbienceSource(TFunction<void(float*, int32)> Source, float Level)
+{
+	// The queued quarter second plays out in the old room's tone; what's rendered from here on is the new one's.
+	AmbienceSource = MoveTemp(Source);
+	AmbienceGain = AmbienceSource ? Level : 1.0f;
+	if (!AmbienceSource && !AmbienceGen)
+	{
+		AmbienceGen = MakeUnique<ss::audio::Ambience>(7u);
+	}
+	if (!AmbienceComponent)
+	{
+		AmbienceWave = NightOneAudioDetail::MakeWave(this, 10000.0f);
+		AmbienceComponent = UGameplayStatics::SpawnSound2D(this, AmbienceWave.Get(), AmbienceLevel(), 1.0f, 0.0f, nullptr, false, false);
+	}
+}
+
+void UNightOneAudio::PlaySamples(const std::vector<float>& Samples, float Volume, const FVector* At)
+{
+	PlayPcm(Samples, Volume, false, At);
+}
+
 void UNightOneAudio::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);

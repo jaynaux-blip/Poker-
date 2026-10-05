@@ -5,7 +5,7 @@ Builds the street's materials, all procedural HLSL like M_Surface:
   M_Street        brick, wet asphalt with puddles (rain rings in them), sidewalk slabs, the store's floor tiles,
                   concrete, rolled-down shop gates
   M_StreetWindow  the facades' windows, one instanced mesh: each window's room, curtains or blinds, lit or dark
-  M_StreetRain    rain streaks around the eye, lit by the nearest lamps, never inside the store
+  M_StreetRain    rain streaks around the eye, lit by the nearest lamps, never inside the store or the Wash & Fold
   M_StreetGlass   the store's glass: clean, rain beaded on it
   M_StreetSky     the apartment's night sky and skyline with a strength (the street sets it for the hour)
   M_StreetCity
@@ -24,7 +24,7 @@ MAP_PATH = "/Game/Maps/Street"
 VERSION = "4"
 # Bump when AStreetStage builds the set differently: the saved level (what Play on the map and a cooked build use,
 # since neither runs the stage's construction again) is rebuilt once.
-MAP_VERSION = "7"
+MAP_VERSION = "8"
 VERSION_TAG = "StreetVersion"
 
 STREET = ss.NOISE + """

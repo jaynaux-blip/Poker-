@@ -14,6 +14,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/CollisionProfile.h"
+#include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -22,12 +23,14 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/Parse.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/UI/PropArt.h"
 #include "SlateDrawList.h"
 #include "UObject/ConstructorHelpers.h"
 
 #include <string>
+#include <vector>
 
 namespace StreetStageDetail
 {
@@ -60,15 +63,50 @@ const double DoorTrackX = -23.5;
 const double FrontBack = 365.0;
 const double BrownstoneW = 675.0;
 // The laundromat's building, as the apartment's window sees it: NightOneStage stands its middle 6 m to the right of the
-// window, which is 3.2 m right of door 1812 here (facades.py). 36 m wide.
+// window, which is 3.2 m right of door 1812 here (facades.py). 36 m wide, 24.8 m to its coping.
 const double TenementY = 920.0;
 const double TenementHalf = 1800.0;
-// The neon over the laundromat: on the tenement's bricked-up third floor where the apartment's window sees it, or over the
-// stand-in's windows; and the pawn shop's front between 1812 and the walk-up (its window 1.5 m in from each end).
+const double TenementTop = 2480.0;
+// The neon over the laundromat, on the tenement's bricked-up third floor where the apartment's window sees it; and the
+// pawn shop's front between 1812 and the walk-up (its window 1.5 m in from each end).
 const FVector TenementNeonAt(FarFront - 10.0, TenementY - 280.0, 1140.0);
-const FVector WashNeonAt(FarFront - 2.0, 0.0, 375.0);
 const double PawnY0 = 800.0;
 const double PawnY1 = 2300.0;
+// The Wash & Fold, in the tenement's shop window (tenement.py SHOP_Y: its Blender y runs down the street here): 17.2 m of
+// glass between the brick's reveals, a mullion every 2.15 m, the transom bar across it; the brick wall 45 cm thick. Its
+// room stands where the tenement's shallow baked one did and reaches on back into the block, its floor three steps up
+// from the sidewalk, level with the window's sill (an old storefront's: the sill is its threshold).
+const double ShopY0 = TenementY - 860.0;
+const double ShopY1 = TenementY + 860.0;
+const double ShopBay = (ShopY1 - ShopY0) / 8.0;
+const double ShopSill = 45.0;
+const double ShopTransom = 270.0; // the transom bar's underside: the door's head
+const double ShopHead = 335.0;
+const double WallDepth = 45.0;
+const double WashFloor = ShopSill;
+const double WashY0 = 15.0; // the room's side walls (their faces)
+const double WashY1 = 1825.0;
+const double WashBack = FarFront + 1100.0; // the back wall's face
+const double WashCeiling = 350.0;
+// The front door, in the window's first bay (next to the tenants' door), hung on its left in the glass's plane.
+const double WashDoorY0 = ShopY0 + 10.0;
+const double WashDoorY1 = WashDoorY0 + 100.0;
+const double WashDoorX = FarFront + 17.0;
+// Dee's steel door in the back wall, behind the counter's end; the tenants' street door (tenement.py DOOR_BAY 11), hers.
+const double BackDoorY = 170.0;
+const double DeeDoorY = TenementY - 1375.0;
+// The attendant's counter: along the south wall, its customers' side toward the room.
+const double CounterX0 = FarFront + 560.0;
+const double CounterX1 = FarFront + 760.0;
+const double CounterY0 = 110.0;
+const double CounterY1 = 180.0;
+// The running dryers' drum light (candelas) and their glass's glow (M_Street's Emissive), both at the tumble's mean.
+const float DrumCandela = 9.0f;
+const float DrumGlow = 14.0f;
+// The imported dryers' drums (wash_fold.py's WF_DrumGlow) are baked at emissive 1.5, a dark drum's steel; the game lights
+// a running one: up to the stand-in's glow, warmed to its light.
+const float DrumBakeGlow = 1.5f;
+const uint32 DrumLightHex = 0xffb469;
 
 // Patterns understood by M_Street (Content/Python/street_setup.py); 0 is plain.
 const float PatBrick = 1.0f;
@@ -101,14 +139,17 @@ TAutoConsoleVariable<float> CVarNightRange(TEXT("ss.Street.NightRange"), 1.6f, T
 TAutoConsoleVariable<float> CVarDayEV(TEXT("ss.Street.DayEV"), 10.0f, TEXT("The street's exposure floor by day (EV100)."));
 TAutoConsoleVariable<float> CVarStoreEV(TEXT("ss.Street.StoreEV"), 5.0f, TEXT("The Lucky Penny's exposure floor (EV100)."));
 TAutoConsoleVariable<float> CVarStoreRange(TEXT("ss.Street.StoreRange"), 2.2f, TEXT("How far the store's exposure may rise over its floor."));
+TAutoConsoleVariable<float> CVarWashEV(TEXT("ss.Street.WashEV"), 4.6f, TEXT("The Wash & Fold's exposure floor (EV100); it rises as far as the store's (ss.Street.StoreRange)."));
 TAutoConsoleVariable<float> CVarBias(TEXT("ss.Street.Bias"), 0.0f, TEXT("Extra exposure compensation on the street (stops; + brighter)."));
 TAutoConsoleVariable<float> CVarRain(TEXT("ss.Street.Rain"), 1.0f, TEXT("The rain's strength (0 hides it)."));
 TAutoConsoleVariable<float> CVarTenementGlow(TEXT("ss.Street.TenementGlow"), 0.4f,
 	TEXT("How brightly the tenement's rooms glow from the street, against their bake for the apartment's view."));
-// The laundromat's light on the sidewalk is set for the window at this glow, and goes up and down with it.
+// The laundromat's light on the sidewalk is set for this, and goes up and down with it.
 const float LaundromatGlowSetFor = 0.08f;
 TAutoConsoleVariable<float> CVarLaundromatGlow(TEXT("ss.Street.LaundromatGlow"), LaundromatGlowSetFor,
-	TEXT("How brightly the laundromat's shop window (the tenement's brightest bake) glows from the street, and its light on the sidewalk with it."));
+	TEXT("How brightly the Wash & Fold's light falls through its window onto the sidewalk (0.08 as tuned; the tenement's own baked shop, if it shows, with it)."));
+// The tenement's materials as the glTF importer numbers them (tenement.py's order): its baked laundromat (tenement_store).
+const int32 TenementShopMaterial = 9;
 
 FLinearColor SrgbHex(uint32 Hex)
 {
@@ -127,6 +168,87 @@ UStaticMesh* ImportedMesh(const TCHAR* Name)
 }
 
 /**
+ * What hides one of an imported mesh's material slots: the engine's own masked-out material (Nanite's hidden sections use
+ * it; it is loaded at startup in every build, cooked ones too).
+ */
+UMaterialInterface* HiddenSlotMaterial()
+{
+	return GEngine ? GEngine->NaniteHiddenSectionMaterial.Get() : nullptr;
+}
+
+/**
+ * The slot an imported mesh's Blender material Index landed in, by name only (the slot's, or its baked material's,
+ * "M_SM_Tenement_9"); INDEX_NONE when no name says (unlike ImportedSlot, which then guesses Index itself).
+ */
+int32 NamedSlot(const UStaticMeshComponent* Mesh, int32 Index)
+{
+	const UStaticMesh* Source = Mesh ? Mesh->GetStaticMesh().Get() : nullptr;
+	if (!Source)
+	{
+		return INDEX_NONE;
+	}
+	const FString Suffix = FString::Printf(TEXT("_%d"), Index);
+	const TArray<FStaticMaterial>& Slots = Source->GetStaticMaterials();
+	for (int32 Slot = 0; Slot < Slots.Num(); ++Slot)
+	{
+		const UMaterialInterface* Baked = Source->GetMaterial(Slot);
+		if (Slots[Slot].MaterialSlotName.ToString().EndsWith(Suffix) || (Baked && Baked->GetName().EndsWith(Suffix)))
+		{
+			return Slot;
+		}
+	}
+	return INDEX_NONE;
+}
+
+/**
+ * The parameters an imported material glows by (as DimImportedGlow reads them): its emissive color factors that aren't
+ * black, or, listing none, its emissive strengths over zero. False when it doesn't glow.
+ */
+bool GlowOf(const UMaterialInterface* Baked, TArray<TPair<FName, FLinearColor>>& Colors, TArray<TPair<FName, float>>& Strengths)
+{
+	Colors.Reset();
+	Strengths.Reset();
+	if (!Baked)
+	{
+		return false;
+	}
+	auto Key = [](const FName& Name) { return Name.ToString().ToLower().Replace(TEXT("_"), TEXT("")).Replace(TEXT(" "), TEXT("")); };
+	bool bFactor = false;
+	TArray<FMaterialParameterInfo> Infos;
+	TArray<FGuid> Ids;
+	Baked->GetAllVectorParameterInfo(Infos, Ids);
+	for (const FMaterialParameterInfo& Info : Infos)
+	{
+		const FString K = Key(Info.Name);
+		FLinearColor Glow;
+		if ((K.StartsWith(TEXT("emissivefactor")) || K == TEXT("emissivecolor")) && Baked->GetVectorParameterValue(FHashedMaterialParameterInfo(Info), Glow))
+		{
+			bFactor = true;
+			if (!Glow.IsAlmostBlack())
+			{
+				Colors.Emplace(Info.Name, Glow);
+			}
+		}
+	}
+	if (!bFactor)
+	{
+		Infos.Reset();
+		Ids.Reset();
+		Baked->GetAllScalarParameterInfo(Infos, Ids);
+		for (const FMaterialParameterInfo& Info : Infos)
+		{
+			const FString K = Key(Info.Name);
+			float Strength = 0.0f;
+			if ((K == TEXT("emissivestrength") || K == TEXT("emissiveintensity")) && Baked->GetScalarParameterValue(FHashedMaterialParameterInfo(Info), Strength) && Strength > 0.0f)
+			{
+				Strengths.Emplace(Info.Name, Strength);
+			}
+		}
+	}
+	return Colors.Num() > 0 || Strengths.Num() > 0;
+}
+
+/**
  * An imported front's own light (the rooms behind its lit windows, its lanterns, a lit transom: all baked for the night)
  * at Level times its bake. The dimmed copies are made only while it's day and never saved, like the cars' paint
  * (PaintCars): a saved copy would tie the level to the front's own materials, and the importer then won't refresh them.
@@ -141,8 +263,14 @@ void DimImportedGlow(UStaticMeshComponent* Mesh, float Level)
 		return;
 	}
 	auto Key = [](const FName& Name) { return Name.ToString().ToLower().Replace(TEXT("_"), TEXT("")).Replace(TEXT(" "), TEXT("")); };
+	const UMaterialInterface* Hidden = HiddenSlotMaterial();
 	for (int32 Slot = 0; Slot < Source->GetStaticMaterials().Num(); ++Slot)
 	{
+		// A slot hidden for good (the tenement's own laundromat, HideTenementShop) stays hidden.
+		if (Hidden && Mesh->GetMaterial(Slot) == Hidden)
+		{
+			continue;
+		}
 		UMaterialInterface* Baked = Source->GetMaterial(Slot);
 		UMaterialInstanceDynamic* Dim = Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(Slot));
 		if (!Baked || Level > 0.999f)
@@ -606,6 +734,21 @@ void AStreetStage::BuildSet()
 	LitFronts.Reset();
 	bHomeFront = false;
 	WashSpill = nullptr;
+	WashLights.Reset();
+	WashDoor = nullptr;
+	WashDoorStop = nullptr;
+	WashBell = nullptr;
+	DrumLights.Reset();
+	DrumStacks.Reset();
+	DrumMids.Reset();
+	IdleDryers = nullptr;
+	WashTv = nullptr;
+	WashTvMid = nullptr;
+	WashTvLight = nullptr;
+	GlowMids.Reset();
+	GlowParams.Reset();
+	WashDoorAmount = 0.0f;
+	bWashDoorHeld = false;
 	ClockHour = nullptr;
 	ClockMinute = nullptr;
 	ClockSecond = nullptr;
@@ -1085,57 +1228,824 @@ void AStreetStage::BuildDoor()
 	Sign(TEXT("number:1812"), FVector(1.5, 0.0, 322.0), 0.0f, FVector2D(90.0, 20.0), FIntPoint(400, 90), 1.4f);
 }
 
-void AStreetStage::BuildWashAndFold()
+void AStreetStage::BuildTenementStandIn()
 {
-	UMaterialInterface* Stucco = Mat(TEXT("Stucco"), 0x8a8478, 0.9f, PatConcrete);
-	UMaterialInterface* Fluor = Mat(TEXT("Fluorescent"), 0xe8f4ff, 0.3f, 0.0f, 4.0f);
-	UMaterialInterface* Washer = Mat(TEXT("Washer"), 0xd9dcdf, 0.3f, 0.0f, 0.0f, 0.2f);
-	UMaterialInterface* WasherDoor = Mat(TEXT("WasherDoor"), 0x2a3440, 0.1f, 0.0f, 0.3f, 0.5f);
-	UMaterialInterface* Iron = Mat(TEXT("Iron"), 0x1c1e21, 0.45f, 0.0f, 0.0f, 0.7f);
+	UMaterialInterface* Brick = Mat(TEXT("BrickFar"), 0x5a3a30, 0.85f, PatBrick);
+	UMaterialInterface* Stone = Mat(TEXT("Stone"), 0x8c8579, 0.8f, PatConcrete);
+	UMaterialInterface* Fascia = Mat(TEXT("WFFascia"), 0x163b2c, 0.35f);
+	UMaterialInterface* Wood = Mat(TEXT("TenantsDoor"), 0x2a1a12, 0.5f);
+	UMaterialInstanceDynamic* Transom = Mat(TEXT("TenantsTransom"), 0xffc98a, 0.3f, 0.0f, 1.4f);
+	NightGlowMids.Add(Transom);
+	NightGlowLevels.Add(1.4f);
+	const double Y0 = TenementY - TenementHalf;
+	const double Y1 = TenementY + TenementHalf;
+	const double F0 = FarFront;
+	const double F1 = FarFront + WallDepth;
 
-	// The Wash & Fold: a low storefront lit all night, its glass on the building line and the room behind it (the
-	// washers along the back wall, tubes on the ceiling), the neon over the windows.
-	const double Room = 260.0; // how deep the laundromat's front room is
-	Box(Stucco, FVector(FarFront + Room, -700.0, 0.0), FVector(FarFront + 1300.0, 700.0, 450.0));
-	Box(Stucco, FVector(FarFront, -700.0, 310.0), FVector(FarFront + Room, 700.0, 450.0));
-	Box(Stucco, FVector(FarFront, -700.0, 0.0), FVector(FarFront + Room, -680.0, 310.0));
-	Box(Stucco, FVector(FarFront, 680.0, 0.0), FVector(FarFront + Room, 700.0, 310.0));
-	Box(Stucco, FVector(FarFront, -680.0, 0.0), FVector(FarFront + 12.0, 680.0, 40.0));
-	Box(Mat(TEXT("WashFloor"), 0xc9c4b6, 0.3f, PatTiles), FVector(FarFront, -680.0, -2.0), FVector(FarFront + Room, 680.0, 1.0));
-	Box(Mat(TEXT("WashWall"), 0xd8e2e0, 0.6f), FVector(FarFront + Room - 2.0, -680.0, 0.0), FVector(FarFront + Room, 680.0, 310.0), false);
-	Box(Mat(TEXT("WashCeiling"), 0xeceae4, 0.9f), FVector(FarFront, -680.0, 300.0), FVector(FarFront + Room, 680.0, 310.0), false);
-	for (double Y = -560.0; Y < 600.0; Y += 280.0)
+	// Its brick face round the openings tenement.py cuts: the tenants' door in its recess, the shop window over its sill.
+	const double DeeY0 = DeeDoorY - 65.0;
+	const double DeeY1 = DeeDoorY + 65.0;
+	Box(Brick, FVector(F0, Y0, 0.0), FVector(F1, DeeY0, TenementTop));
+	Box(Brick, FVector(F0, DeeY0, 320.0), FVector(F1, DeeY1, TenementTop));
+	Box(Brick, FVector(F0 + 33.0, DeeY0, 0.0), FVector(F1, DeeY1, 320.0));
+	Box(Brick, FVector(F0, DeeY1, 0.0), FVector(F1, ShopY0, TenementTop));
+	Box(Brick, FVector(F0, ShopY0, 0.0), FVector(F1, ShopY1, ShopSill));
+	Box(Brick, FVector(F0, ShopY0, ShopHead), FVector(F1, ShopY1, TenementTop));
+	Box(Brick, FVector(F0, ShopY1, 0.0), FVector(F1, Y1, TenementTop));
+	// The tenants' door: dark wood in its recess, its lit transom over it, a stone head on the brick.
+	Box(Wood, FVector(F0 + 28.0, DeeDoorY - 55.0, 0.0), FVector(F0 + 33.0, DeeDoorY + 55.0, 245.0));
+	Box(Wood, FVector(F0 + 28.0, DeeDoorY - 55.0, 245.0), FVector(F0 + 33.0, DeeDoorY + 55.0, 255.0), false);
+	Box(Transom, FVector(F0 + 31.0, DeeDoorY - 55.0, 255.0), FVector(F0 + 33.0, DeeDoorY + 55.0, 312.0), false)->SetCastShadow(false);
+	Box(Stone, FVector(F0 - 6.0, DeeDoorY - 80.0, 320.0), FVector(F0 + 5.0, DeeDoorY + 80.0, 345.0), false);
+	// The shopfront: a mullion every bay, the transom bar, the deep green fascia over it with its gold line; the limestone
+	// belt course over the shops and the cornice at the top.
+	for (int32 K = 0; K <= 8; ++K)
 	{
-		Box(Fluor, FVector(FarFront + 60.0, Y, 297.0), FVector(FarFront + 200.0, Y + 14.0, 300.0), false)->SetCastShadow(false);
+		const double Y = ShopY0 + ShopBay * K;
+		Box(Fascia, FVector(F0 + 12.0, Y - 5.0, ShopSill), FVector(F0 + 22.0, Y + 5.0, ShopHead), false);
 	}
-	for (int32 I = 0; I < 7; ++I)
+	Box(Fascia, FVector(F0 + 12.0, ShopY0, ShopTransom), FVector(F0 + 22.0, ShopY1, ShopTransom + 8.0), false);
+	Box(Fascia, FVector(F0 - 18.0, ShopY0 - 40.0, ShopHead), FVector(F0 + 5.0, ShopY1 + 40.0, 420.0), false);
+	Box(Mat(TEXT("FasciaGold"), 0xc9a24d, 0.3f, 0.0f, 0.0f, 0.9f), FVector(F0 - 18.6, ShopY0 - 40.0, 406.0), FVector(F0 - 18.0, ShopY1 + 40.0, 409.0), false)->SetCastShadow(false);
+	Box(Stone, FVector(F0 - 12.0, Y0, 428.0), FVector(F0 + 5.0, Y1, 450.0), false);
+	Box(Stone, FVector(F0 - 34.0, Y0, TenementTop - 52.0), FVector(F0 + 5.0, Y1, TenementTop - 18.0), false);
+	// Six floors of windows over the shops, a third of them lit; none behind the neon (bricked up there, as on the tenement).
+	const double NeonY0 = TenementNeonAt.Y - 340.0;
+	const double NeonY1 = TenementNeonAt.Y + 340.0;
+	const FVector2D Sash(115.0, 175.0);
+	const FVector Along(0.0, 1.0, 0.0);
+	WindowRows(FVector(F0 - 0.5, Y0, 0.0), Along, NeonY0 - Y0, 180.0f, 525.0, TenementTop - 60.0, Sash, 275.0, 320.0, 0.33, 3301);
+	WindowRows(FVector(F0 - 0.5, NeonY0, 0.0), Along, NeonY1 - NeonY0, 180.0f, 525.0, 1061.0, Sash, 275.0, 320.0, 0.33, 3307);
+	WindowRows(FVector(F0 - 0.5, NeonY0, 0.0), Along, NeonY1 - NeonY0, 180.0f, 1485.0, TenementTop - 60.0, Sash, 275.0, 320.0, 0.33, 3313);
+	WindowRows(FVector(F0 - 0.5, NeonY1, 0.0), Along, Y1 - NeonY1, 180.0f, 525.0, TenementTop - 60.0, Sash, 275.0, 320.0, 0.33, 3319);
+}
+
+void AStreetStage::BuildWashFront()
+{
+	UMaterialInterface* Frame = Mat(TEXT("WFFrame"), 0x2a2622, 0.35f, 0.0f, 0.0f, 0.8f);
+	UMaterialInterface* Steel = Mat(TEXT("Steel"), 0xa0a4aa, 0.35f, 0.0f, 0.0f, 0.9f);
+	UMaterialInterface* Step = Mat(TEXT("WFStep"), 0x8f897e, 0.8f, PatConcrete);
+	UMaterialInterface* Nosing = Mat(TEXT("WFNosing"), 0x55575a, 0.45f, 0.0f, 0.0f, 0.7f);
+	UMaterialInterface* Brass = Mat(TEXT("Brass"), 0xc9a24d, 0.3f, 0.0f, 0.0f, 0.9f);
+	UMaterialInterface* Strap = Mat(TEXT("WFStrap"), 0x3a2418, 0.7f);
+
+	// The glass: clean panes with the rain beaded on them (M_StreetGlass), or the apartment's window glass sized to each,
+	// round the door's bay: the transom light over it, the sidelight beside it, the rest of the window. They sort over the
+	// rain beyond them seen from inside, as the store's panes do (FollowCamera).
+	auto PaneGlass = [this](double Wd, double Ht) -> UMaterialInterface* {
+		if (StoreGlassMaterial)
+		{
+			return StoreGlassMaterial;
+		}
+		if (!GlassMaterial)
+		{
+			return nullptr;
+		}
+		UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(GlassMaterial, this);
+		M->SetScalarParameterValue(TEXT("WidthCm"), static_cast<float>(Wd));
+		M->SetScalarParameterValue(TEXT("HeightCm"), static_cast<float>(Ht));
+		M->SetScalarParameterValue(TEXT("Aspect"), static_cast<float>(Wd / FMath::Max(1.0, Ht)));
+		M->SetScalarParameterValue(TEXT("Refraction"), 0.3f);
+		return M;
+	};
+	auto Pane = [&](double Ya, double Yb, double Za, double Zb) {
+		if (UMaterialInterface* G = PaneGlass(Yb - Ya, Zb - Za))
+		{
+			Box(G, FVector(FarFront + 16.5, Ya, Za), FVector(FarFront + 17.5, Yb, Zb), false)->SetTranslucentSortPriority(2);
+		}
+	};
+	const double Bay1 = ShopY0 + ShopBay;
+	Pane(ShopY0, Bay1, ShopTransom + 8.0, ShopHead);
+	Pane(WashDoorY1 + 5.0, Bay1, ShopSill, ShopTransom);
+	Pane(Bay1, ShopY1, ShopSill, ShopHead);
+	// The window blocks out to the brick's face (glass nobody walks through, no ledge to perch on, and the camera keeps to
+	// its side of it); the doorway only while the door is shut (WashDoorStop, UpdateWashDoor).
+	auto Blocker = [this](double Xa, double Ya, double Yb, double Za, double Zb) {
+		UStaticMeshComponent* B = Box(nullptr, FVector(Xa, Ya, Za), FVector(FarFront + 24.0, Yb, Zb));
+		B->SetVisibility(false);
+		return B;
+	};
+	Blocker(FarFront - 6.0, ShopY0, WashDoorY0, ShopSill, ShopHead);
+	Blocker(FarFront - 6.0, WashDoorY1, ShopY1, ShopSill, ShopHead);
+	Blocker(FarFront + 10.0, WashDoorY0, WashDoorY1, ShopTransom - 4.0, ShopHead);
+	WashDoorStop = Blocker(FarFront + 10.0, WashDoorY0, WashDoorY1, ShopSill, ShopTransom - 4.0);
+
+	// Three steps up from the sidewalk: two concrete treads out on it with steel nosings, then the window's sill, its
+	// threshold, an aluminum plate on it.
+	const double StepY0 = WashDoorY0 - 20.0;
+	const double StepY1 = WashDoorY1 + 20.0;
+	Box(Step, FVector(FarFront - 70.0, StepY0, 0.0), FVector(FarFront - 35.0, StepY1, 15.0));
+	Box(Step, FVector(FarFront - 35.0, StepY0, 0.0), FVector(FarFront, StepY1, 30.0));
+	Box(Nosing, FVector(FarFront - 71.0, StepY0, 13.4), FVector(FarFront - 67.0, StepY1, 15.4), false)->SetCastShadow(false);
+	Box(Nosing, FVector(FarFront - 36.0, StepY0, 28.4), FVector(FarFront - 32.0, StepY1, 30.4), false)->SetCastShadow(false);
+	Box(Steel, FVector(FarFront - 1.0, WashDoorY0 - 4.0, ShopSill), FVector(FarFront + WallDepth, WashDoorY1 + 4.0, ShopSill + 1.2), false)->SetCastShadow(false);
+
+	// The door: a bronze aluminum frame in the bay's glass, its head under the transom bar; the leaf hung on its hinge
+	// stile (WashDoor, the pivot UpdateWashDoor swings in toward the room), glass in a narrow-stile frame, a push bar
+	// inside and a pull outside, the hours on a sticker on its glass and a strap of bells hung on its inside.
+	Box(Frame, FVector(FarFront + 10.0, WashDoorY0 - 5.0, ShopSill), FVector(FarFront + 24.0, WashDoorY0, ShopTransom), false);
+	Box(Frame, FVector(FarFront + 10.0, WashDoorY1, ShopSill), FVector(FarFront + 24.0, WashDoorY1 + 5.0, ShopTransom), false);
+	Box(Frame, FVector(FarFront + 10.0, WashDoorY0, ShopTransom - 4.0), FVector(FarFront + 24.0, WashDoorY1, ShopTransom), false);
+	// The hinge is on the leaf's inside face (it swings in clear of the jamb); the leaf's own parts lie about its middle plane.
+	WashDoor = NewPart<USceneComponent>();
+	WashDoor->SetRelativeLocation(FVector(WashDoorX + 2.2, WashDoorY0 + 1.0, ShopSill + 1.5));
+	USceneComponent* Leaf = NewPart<USceneComponent>(WashDoor);
+	Leaf->SetRelativeLocation(FVector(-2.2, 0.0, 0.0));
+	const double LeafW = WashDoorY1 - WashDoorY0 - 2.0;
+	const double LeafH = ShopTransom - 4.0 - (ShopSill + 1.5) - 1.0;
+	UMaterialInterface* LeafGlass = PaneGlass(LeafW - 20.0, LeafH - 36.0);
+	if (!LeafGlass)
 	{
-		const double Y = -540.0 + I * 160.0;
-		Box(Washer, FVector(FarFront + Room - 64.0, Y, 1.0), FVector(FarFront + Room - 4.0, Y + 120.0, 110.0), false);
-		Cyl(WasherDoor, FVector(FarFront + Room - 65.0, Y + 60.0, 52.0), 26.0f, 2.0f, false)->SetRelativeRotation(FRotator(90.0f, 0.0f, 0.0f));
+		LeafGlass = Mat(TEXT("DoorGlassFallback"), 0x9fb7c8, 0.05f);
 	}
-	Box(Mat(TEXT("FoldTable"), 0xd9d6cc, 0.5f), FVector(FarFront + 80.0, -220.0, 74.0), FVector(FarFront + 150.0, 220.0, 78.0), false);
-	if (URectLightComponent* Tubes = NewPart<URectLightComponent>())
+	Box(Frame, FVector(-2.2, 0.0, 0.0), FVector(2.2, 10.0, LeafH), false, Leaf);
+	Box(Frame, FVector(-2.2, LeafW - 10.0, 0.0), FVector(2.2, LeafW, LeafH), false, Leaf);
+	Box(Frame, FVector(-2.2, 10.0, LeafH - 10.0), FVector(2.2, LeafW - 10.0, LeafH), false, Leaf);
+	Box(Frame, FVector(-2.2, 10.0, 0.0), FVector(2.2, LeafW - 10.0, 26.0), false, Leaf);
+	Box(LeafGlass, FVector(-0.6, 10.0, 26.0), FVector(0.6, LeafW - 10.0, LeafH - 10.0), false, Leaf)->SetTranslucentSortPriority(2);
+	Box(Steel, FVector(5.0, 14.0, 100.0), FVector(8.0, LeafW - 14.0, 104.0), false, Leaf);
+	for (const double Y : {16.0, LeafW - 16.0})
 	{
-		Tubes->SetRelativeLocationAndRotation(FVector(FarFront + 130.0, 0.0, 296.0), FRotator(-90.0f, 0.0f, 0.0f));
-		Tubes->SetIntensityUnits(ELightUnits::Lumens);
-		Tubes->SetIntensity(900.0f);
-		Tubes->SetSourceWidth(1200.0f);
-		Tubes->SetSourceHeight(150.0f);
-		Tubes->SetAttenuationRadius(800.0f);
-		Tubes->SetLightColor(SrgbHex(0xe8f4ff));
-		Tubes->SetCastShadows(false);
-		Tubes->SetVolumetricScatteringIntensity(0.0f);
+		Box(Steel, FVector(2.2, Y - 1.5, 100.5), FVector(5.0, Y + 1.5, 103.5), false, Leaf);
 	}
-	// The glass on the building line (it blocks), a door's frame drawn in it.
-	UMaterialInterface* WashGlass = StoreGlassMaterial ? StoreGlassMaterial.Get() : nullptr;
-	Box(WashGlass, FVector(FarFront + 12.0, -680.0, 40.0), FVector(FarFront + 14.0, 680.0, 300.0))->SetVisibility(WashGlass != nullptr);
-	for (const double Y : {380.0, 480.0})
+	Box(Steel, FVector(-8.0, LeafW - 17.0, 78.0), FVector(-5.0, LeafW - 14.0, 138.0), false, Leaf);
+	for (const double Z : {84.0, 132.0})
 	{
-		Box(Iron, FVector(FarFront + 8.0, Y - 3.0, 0.0), FVector(FarFront + 14.0, Y + 3.0, 300.0), false);
+		Box(Steel, FVector(-5.0, LeafW - 17.0, Z - 1.5), FVector(-2.2, LeafW - 14.0, Z + 1.5), false, Leaf);
 	}
-	Box(Iron, FVector(FarFront + 8.0, 380.0, 236.0), FVector(FarFront + 14.0, 480.0, 242.0), false);
-	Sign(TEXT("neon"), WashNeonAt, 180.0f, FVector2D(420.0, 131.0), FIntPoint(1024, 320), 6.0f);
+	Sign(TEXT("note:f6f2e4:OPEN|24 HOURS|$1.60/LB"), FVector(-0.9, LeafW * 0.5, 158.0), 180.0f, FVector2D(24.0, 24.0), FIntPoint(256, 256), 0.0f, false, Leaf);
+	WashBell = NewPart<USceneComponent>(Leaf);
+	WashBell->SetRelativeLocation(FVector(2.4, LeafW - 24.0, LeafH - 11.0));
+	Box(Strap, FVector(0.0, -1.3, -24.0), FVector(0.5, 1.3, 1.0), false, WashBell)->SetCastShadow(false);
+	for (const double Z : {-9.0, -19.0})
+	{
+		UStaticMeshComponent* Bell = NewPart<UStaticMeshComponent>(WashBell);
+		Bell->SetStaticMesh(SphereMesh);
+		Bell->SetMaterial(0, Brass);
+		Bell->SetRelativeLocation(FVector(2.6, 0.0, Z));
+		Bell->SetRelativeScale3D(FVector(0.05, 0.05, 0.045));
+		Bell->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Bell->SetCastShadow(false);
+	}
+
+	// OPEN 24 HOURS hung inside the next bay's glass, its red on the wet sidewalk; the rubber mat inside the door.
+	const double OpenY = ShopY0 + ShopBay * 1.5;
+	Sign(TEXT("open"), FVector(FarFront + 26.0, OpenY, 228.0), 180.0f, FVector2D(110.0, 48.0), FIntPoint(640, 280), 5.0f);
+	if (UPointLightComponent* OpenGlow = NewPart<UPointLightComponent>())
+	{
+		OpenGlow->SetRelativeLocation(FVector(FarFront - 12.0, OpenY, 228.0));
+		OpenGlow->SetIntensityUnits(ELightUnits::Candelas);
+		OpenGlow->SetIntensity(6.0f);
+		OpenGlow->SetLightColor(SrgbHex(0xff3b3b));
+		OpenGlow->SetAttenuationRadius(320.0f);
+		OpenGlow->SetCastShadows(false);
+		NightLights.Add(OpenGlow);
+		NightLightLevels.Add(6.0f);
+	}
+	Box(Mat(TEXT("DoorMat"), 0x1c1d20, 0.95f), FVector(FarFront + WallDepth + 2.0, WashDoorY0 - 30.0, WashFloor), FVector(FarFront + 160.0, WashDoorY1 + 40.0, WashFloor + 0.8), false);
+}
+
+void AStreetStage::BuildWashRoom()
+{
+	const double F = FarFront;
+	const double Zf = WashFloor;
+	UMaterialInterface* Floor = Mat(TEXT("WFFloor"), 0xb7ad98, 0.3f, PatTiles);
+	UMaterialInterface* Paint = Mat(TEXT("WFWall"), 0xe2d29c, 0.8f);
+	UMaterialInterface* Tile = Mat(TEXT("WFTile"), 0xe6e7e1, 0.22f, PatTiles);
+	UMaterialInterface* Stripe = Mat(TEXT("WFStripe"), 0x1d4a3a, 0.4f);
+	UMaterialInterface* Cove = Mat(TEXT("StoreCove"), 0x171819, 0.55f);
+	UMaterialInterface* Tin = Mat(TEXT("WFTin"), 0xe8e2d2, 0.45f, 0.0f, 0.0f, 0.35f);
+	UMaterialInterface* Housing = Mat(TEXT("WFFixture"), 0xeeede8, 0.4f, 0.0f, 0.0f, 0.2f);
+	// The tubes read against the room's exposure (a few stops over the street's), as the store's panels do.
+	UMaterialInterface* Tube = Mat(TEXT("WFTube"), 0xfff3e2, 0.3f, 0.0f, 70.0f);
+
+	// The shell: the floor (its top the window's sill), the side and back walls, the ceiling (it stops the camera, as the
+	// store's does), and the front wall's inside round the window (the tenement's brick has no back face to show).
+	const double Inner = F + WallDepth + 2.0;
+	Box(Floor, FVector(F + WallDepth, WashY0, 0.0), FVector(WashBack, WashY1, Zf));
+	Box(Paint, FVector(F + WallDepth, WashY0 - 20.0, 0.0), FVector(WashBack, WashY0, WashCeiling));
+	Box(Paint, FVector(F + WallDepth, WashY1, 0.0), FVector(WashBack, WashY1 + 20.0, WashCeiling));
+	// The back wall, 20 cm of it, open where Dee's steel door stands in it (its frame wraps the wall, SM_WF_BackDoor; its
+	// clear opening 92 x 212); the opening blocks all the same (the door is never opened here: the Back Room is through it).
+	const double BackDoorHalf = 46.0;
+	Box(Paint, FVector(WashBack, WashY0 - 20.0, 0.0), FVector(WashBack + 20.0, BackDoorY - BackDoorHalf, WashCeiling + 10.0));
+	Box(Paint, FVector(WashBack, BackDoorY + BackDoorHalf, 0.0), FVector(WashBack + 20.0, WashY1 + 20.0, WashCeiling + 10.0));
+	Box(Paint, FVector(WashBack, BackDoorY - BackDoorHalf, Zf + 212.0), FVector(WashBack + 20.0, BackDoorY + BackDoorHalf, WashCeiling + 10.0));
+	Box(Paint, FVector(WashBack, BackDoorY - BackDoorHalf, 0.0), FVector(WashBack + 20.0, BackDoorY + BackDoorHalf, Zf));
+	Box(nullptr, FVector(WashBack, BackDoorY - BackDoorHalf, Zf), FVector(WashBack + 20.0, BackDoorY + BackDoorHalf, Zf + 212.0))->SetVisibility(false);
+	Box(Tin, FVector(F + WallDepth, WashY0, WashCeiling), FVector(WashBack, WashY1, WashCeiling + 10.0));
+	Box(Paint, FVector(F + WallDepth, WashY0, Zf), FVector(Inner, ShopY0, WashCeiling), false);
+	Box(Paint, FVector(F + WallDepth, ShopY1, Zf), FVector(Inner, WashY1, WashCeiling), false);
+	Box(Paint, FVector(F + WallDepth, ShopY0, ShopHead), FVector(Inner, ShopY1, WashCeiling), false);
+
+	// The walls: white tile to the hip, a deep green stripe capping it, a black rubber cove base; butter-yellow paint above
+	// (not behind Dee's steel door, which has its own frame).
+	auto Skirt = [&](const FVector& From, const FVector& To, const FVector& Out) {
+		auto Layer = [&](UMaterialInterface* M, double Proud, double Z0, double Z1) {
+			const FVector B = To + Out * Proud;
+			Box(M, FVector(FMath::Min(From.X, B.X), FMath::Min(From.Y, B.Y), Zf + Z0), FVector(FMath::Max(From.X, B.X), FMath::Max(From.Y, B.Y), Zf + Z1), false)->SetCastShadow(false);
+		};
+		Layer(Tile, 0.8, 0.0, 120.0);
+		Layer(Stripe, 1.2, 120.0, 126.0);
+		Layer(Cove, 1.4, 0.0, 10.0);
+	};
+	Skirt(FVector(Inner, WashY0, 0.0), FVector(WashBack, WashY0, 0.0), FVector(0.0, 1.0, 0.0));
+	Skirt(FVector(Inner, WashY1, 0.0), FVector(WashBack, WashY1, 0.0), FVector(0.0, -1.0, 0.0));
+	Skirt(FVector(WashBack, WashY0, 0.0), FVector(WashBack, BackDoorY - 62.0, 0.0), FVector(-1.0, 0.0, 0.0));
+	Skirt(FVector(WashBack, BackDoorY + 62.0, 0.0), FVector(WashBack, WashY1, 0.0), FVector(-1.0, 0.0, 0.0));
+	Skirt(FVector(Inner, WashY0, 0.0), FVector(Inner, ShopY0, 0.0), FVector(1.0, 0.0, 0.0));
+	Skirt(FVector(Inner, ShopY1, 0.0), FVector(Inner, WashY1, 0.0), FVector(1.0, 0.0, 0.0));
+
+	// The pressed-tin ceiling: the raised borders of its two-foot squares, and a cornice round the walls (instanced, no
+	// shadows: they lie on the ceiling).
+	UInstancedStaticMeshComponent* Grid = NewPart<UInstancedStaticMeshComponent>();
+	Grid->SetStaticMesh(CubeMesh);
+	Grid->SetMaterial(0, Tin);
+	Grid->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Grid->SetCastShadow(false);
+	auto Bar = [Grid](const FVector& Min, const FVector& Max) { Grid->AddInstance(FTransform(FRotator::ZeroRotator, (Min + Max) * 0.5, (Max - Min) / 100.0)); };
+	for (double X = Inner + 30.5; X < WashBack - 10.0; X += 61.0)
+	{
+		Bar(FVector(X - 1.5, WashY0, WashCeiling - 1.4), FVector(X + 1.5, WashY1, WashCeiling));
+	}
+	for (double Y = WashY0 + 30.5; Y < WashY1 - 10.0; Y += 61.0)
+	{
+		Bar(FVector(Inner, Y - 1.5, WashCeiling - 1.4), FVector(WashBack, Y + 1.5, WashCeiling));
+	}
+	Bar(FVector(Inner, WashY0, WashCeiling - 9.0), FVector(WashBack, WashY0 + 6.0, WashCeiling));
+	Bar(FVector(Inner, WashY1 - 6.0, WashCeiling - 9.0), FVector(WashBack, WashY1, WashCeiling));
+	Bar(FVector(WashBack - 6.0, WashY0 + 6.0, WashCeiling - 9.0), FVector(WashBack, WashY1 - 6.0, WashCeiling));
+	Bar(FVector(Inner, WashY0 + 6.0, WashCeiling - 9.0), FVector(Inner + 6.0, WashY1 - 6.0, WashCeiling));
+
+	// The fluorescents: four rows of wraparound fixtures from the window to the dryers, each row lit by one long strip of
+	// light (shadowed while the camera is near, PickStreetlights, so none of it leaks through the walls) that leaves a
+	// little haze in the damp air.
+	for (int32 Row = 0; Row < 4; ++Row)
+	{
+		const double Y = WashY0 + (WashY1 - WashY0) * (Row + 0.5) / 4.0;
+		for (const double U : {170.0, 410.0, 650.0, 890.0})
+		{
+			Box(Housing, FVector(F + U - 61.0, Y - 15.0, WashCeiling - 9.0), FVector(F + U + 61.0, Y + 15.0, WashCeiling), false)->SetCastShadow(false);
+			Box(Tube, FVector(F + U - 59.0, Y - 12.0, WashCeiling - 11.0), FVector(F + U + 59.0, Y + 12.0, WashCeiling - 9.0), false)->SetCastShadow(false);
+		}
+		if (URectLightComponent* L = NewPart<URectLightComponent>())
+		{
+			// Turned to face down, a rect light's height runs along X (the room's depth) and its width along Y.
+			L->SetRelativeLocationAndRotation(FVector(F + 530.0, Y, WashCeiling - 12.0), FRotator(-90.0f, 0.0f, 0.0f));
+			L->SetIntensityUnits(ELightUnits::Lumens);
+			L->SetIntensity(1900.0f);
+			L->SetSourceWidth(26.0f);
+			L->SetSourceHeight(840.0f);
+			L->SetAttenuationRadius(1000.0f);
+			L->SetUseTemperature(true);
+			L->SetTemperature(4000.0f);
+			L->SetCastShadows(true);
+			L->SetVolumetricScatteringIntensity(0.5f);
+			WashLights.Add(L);
+		}
+	}
+}
+
+void AStreetStage::BuildWashMachines()
+{
+	const double F = FarFront;
+	const double Zf = WashFloor;
+	UMaterialInterface* Enamel = Mat(TEXT("WFEnamel"), 0xe9e9e4, 0.28f, 0.0f, 0.0f, 0.1f);
+	UMaterialInterface* Stainless = Mat(TEXT("WFStainless"), 0xb8bcc1, 0.32f, 0.0f, 0.0f, 0.75f);
+	UMaterialInterface* Chrome = Mat(TEXT("WFChrome"), 0xd5d8dc, 0.12f, 0.0f, 0.0f, 1.0f);
+	UMaterialInterface* Console = Mat(TEXT("WFConsole"), 0x2a2d31, 0.4f);
+	UMaterialInterface* Porthole = Mat(TEXT("WFPorthole"), 0x161d22, 0.06f, 0.0f, 0.0f, 0.3f);
+	UMaterialInterface* Led = Mat(TEXT("WFLed"), 0xff5a3a, 0.4f, 0.0f, 20.0f);
+	UMaterialInterface* Laminate = Mat(TEXT("WFLaminate"), 0xdcd6c6, 0.4f);
+	UMaterialInterface* Legs = Mat(TEXT("WFTableFrame"), 0x7c8086, 0.4f, 0.0f, 0.0f, 0.6f);
+	UMaterialInterface* Plastic = Mat(TEXT("WFChairs"), 0xd2692a, 0.45f);
+	UMaterialInterface* Green = Mat(TEXT("WFCounter"), 0x2f5d50, 0.45f);
+	UMaterialInterface* DarkSteel = Mat(TEXT("WFDoorFrameSteel"), 0x34373c, 0.45f, 0.0f, 0.0f, 0.6f);
+	UMaterialInterface* GreySteel = Mat(TEXT("WFDoorSteel"), 0x6b7077, 0.5f, 0.0f, 0.0f, 0.55f);
+	static const uint32 Fabric[6] = {0xf1efe9, 0x6f8fb8, 0xc8505a, 0xe8c66a, 0x5b8a6c, 0x2b2d33};
+	UMaterialInterface* Cloth[6];
+	for (int32 K = 0; K < 6; ++K)
+	{
+		Cloth[K] = Mat(*FString::Printf(TEXT("WFCloth%d"), K), Fabric[K], 0.85f);
+	}
+
+	// An imported kind, every copy one instance that blocks as it stands (nullptr when it isn't imported).
+	auto Kind = [this](const TCHAR* Name) -> UInstancedStaticMeshComponent* {
+		UStaticMesh* Mesh = ImportedMesh(Name);
+		if (!Mesh)
+		{
+			return nullptr;
+		}
+		UInstancedStaticMeshComponent* Set = NewPart<UInstancedStaticMeshComponent>();
+		Set->SetStaticMesh(Mesh);
+		Set->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+		return Set;
+	};
+	auto Place = [](UInstancedStaticMeshComponent* Set, const FVector& At, float Yaw) { Set->AddInstance(FTransform(BlenderFacing(Yaw), At)); };
+	// The stand-ins, instanced a set per material and shape: their parts are boxes and discs in the prop's own frame (its
+	// front along +X, its origin on the floor at its middle) turned to its yaw. Only the bodies block, each an invisible
+	// box of its own (Solid) where the parts don't.
+	TMap<UMaterialInterface*, UInstancedStaticMeshComponent*> Cubes;
+	TMap<UMaterialInterface*, UInstancedStaticMeshComponent*> Rounds;
+	auto SetOf = [this](TMap<UMaterialInterface*, UInstancedStaticMeshComponent*>& Sets, UMaterialInterface* M, UStaticMesh* Shape) {
+		if (UInstancedStaticMeshComponent** Found = Sets.Find(M))
+		{
+			return *Found;
+		}
+		UInstancedStaticMeshComponent* S = NewPart<UInstancedStaticMeshComponent>();
+		S->SetStaticMesh(Shape);
+		S->SetMaterial(0, M);
+		S->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Sets.Add(M, S);
+		return S;
+	};
+	auto Piece = [&](UMaterialInterface* M, const FVector& At, float Yaw, const FVector& Min, const FVector& Max) {
+		const FRotator Turn(0.0f, Yaw, 0.0f);
+		SetOf(Cubes, M, CubeMesh)->AddInstance(FTransform(Turn, At + Turn.RotateVector((Min + Max) * 0.5), (Max - Min) / 100.0));
+	};
+	auto Disc = [&](UMaterialInterface* M, const FVector& At, float Yaw, const FVector& Center, double Radius, double Depth) {
+		// The engine cylinder stands along Z: pitched over, its axis runs out of the prop's front.
+		const FRotator Turn(0.0f, Yaw, 0.0f);
+		SetOf(Rounds, M, CylinderMesh)->AddInstance(FTransform(FRotator(90.0f, Yaw, 0.0f), At + Turn.RotateVector(Center), FVector(Radius / 50.0, Radius / 50.0, Depth / 100.0)));
+	};
+	auto Solid = [this](const FVector& At, float Yaw, const FVector& Min, const FVector& Max) {
+		const FRotator Turn(0.0f, Yaw, 0.0f);
+		UStaticMeshComponent* C = NewPart<UStaticMeshComponent>();
+		C->SetStaticMesh(CubeMesh);
+		C->SetRelativeTransform(FTransform(Turn, At + Turn.RotateVector((Min + Max) * 0.5), (Max - Min) / 100.0));
+		C->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+		C->SetVisibility(false);
+		C->SetCastShadow(false);
+	};
+	// Where an imported prop's top is (its bounds), or the stand-in's: the things set on it rest there.
+	auto TopOf = [](const TCHAR* Name, double StandIn) {
+		const UStaticMesh* Mesh = ImportedMesh(Name);
+		return Mesh ? Mesh->GetBoundingBox().Max.Z : StandIn;
+	};
+
+	// Two islands of front-loaders back to back, running from the window toward the back: eight a side.
+	UInstancedStaticMeshComponent* Washers = Kind(TEXT("SM_WF_Washer"));
+	auto Washer = [&](const FVector& At, float Yaw) {
+		if (Washers)
+		{
+			Place(Washers, At, Yaw);
+			return;
+		}
+		Solid(At, Yaw, FVector(-37.5, -34.5, 0.0), FVector(37.5, 34.5, 110.0));
+		Piece(Enamel, At, Yaw, FVector(-37.5, -34.5, 0.0), FVector(37.5, 34.5, 110.0));
+		Piece(Console, At, Yaw, FVector(37.5, -31.0, 92.0), FVector(38.5, 31.0, 106.0));
+		Piece(Led, At, Yaw, FVector(38.5, 14.0, 97.0), FVector(38.8, 24.0, 101.0));
+		Piece(Chrome, At, Yaw, FVector(38.5, -26.0, 96.0), FVector(39.5, -18.0, 103.0));
+		Piece(Console, At, Yaw, FVector(37.5, -30.0, 2.0), FVector(38.2, 30.0, 12.0));
+		Disc(Chrome, At, Yaw, FVector(39.5, 0.0, 52.0), 23.0, 4.0);
+		Disc(Porthole, At, Yaw, FVector(41.0, 0.0, 52.0), 18.0, 2.0);
+	};
+	for (const double Mid : {635.0, 1180.0})
+	{
+		for (int32 K = 0; K < 8; ++K)
+		{
+			const double X = F + 260.0 + 34.5 + 69.0 * K;
+			Washer(FVector(X, Mid - 37.5, Zf), -90.0f);
+			Washer(FVector(X, Mid + 37.5, Zf), 90.0f);
+		}
+	}
+
+	// Dryers stacked two high along the back wall and the north wall, some running: their light out through the drums'
+	// glass, tumbling (AnimateWash); the rest dark.
+	const bool bStacks = ImportedMesh(TEXT("SM_WF_DryerStack")) != nullptr;
+	if (bStacks)
+	{
+		IdleDryers = Kind(TEXT("SM_WF_DryerStack"));
+	}
+	auto Dryer = [&](const FVector& At, float Yaw, bool bRunning) {
+		const FRotator Turn(0.0f, Yaw, 0.0f);
+		if (bRunning)
+		{
+			if (UPointLightComponent* L = NewPart<UPointLightComponent>())
+			{
+				L->SetRelativeLocation(At + Turn.RotateVector(FVector(62.0, 0.0, 96.0)));
+				L->SetIntensityUnits(ELightUnits::Candelas);
+				L->SetIntensity(DrumCandela);
+				L->SetUseTemperature(true);
+				L->SetTemperature(2700.0f);
+				L->SetAttenuationRadius(190.0f);
+				L->SetSourceRadius(20.0f);
+				L->SetCastShadows(false);
+				L->SetVolumetricScatteringIntensity(0.3f);
+				DrumLights.Add(L);
+			}
+		}
+		if (bStacks)
+		{
+			if (!bRunning)
+			{
+				Place(IdleDryers, At, Yaw);
+			}
+			else if (UStaticMeshComponent* Stack = Prop(TEXT("SM_WF_DryerStack"), At, Yaw))
+			{
+				DrumStacks.Add(Stack);
+			}
+			return;
+		}
+		Solid(At, Yaw, FVector(-40.0, -39.5, 0.0), FVector(40.0, 39.5, 195.0));
+		Piece(Stainless, At, Yaw, FVector(-40.0, -39.5, 0.0), FVector(40.0, 39.5, 195.0));
+		Piece(Console, At, Yaw, FVector(40.0, -36.0, 92.0), FVector(41.0, 36.0, 104.0));
+		Piece(Led, At, Yaw, FVector(41.0, 16.0, 96.0), FVector(41.3, 26.0, 100.0));
+		Piece(Chrome, At, Yaw, FVector(41.0, -28.0, 95.0), FVector(42.0, -20.0, 102.0));
+		Piece(Console, At, Yaw, FVector(40.0, -36.0, 4.0), FVector(40.6, 36.0, 18.0));
+		UMaterialInterface* Glass = Porthole;
+		if (bRunning)
+		{
+			UMaterialInstanceDynamic* Drum = Mat(*FString::Printf(TEXT("WFDrum%d"), DrumMids.Num()), DrumLightHex, 0.15f, 0.0f, DrumGlow);
+			DrumMids.Add(Drum);
+			Glass = Drum;
+		}
+		for (const double Z : {52.0, 140.0})
+		{
+			Disc(Chrome, At, Yaw, FVector(41.5, 0.0, Z), 28.0, 3.0);
+			Disc(Glass, At, Yaw, FVector(43.0, 0.0, Z), 23.0, 2.0);
+		}
+	};
+	const uint32 BackRunning = (1u << 1) | (1u << 4) | (1u << 5) | (1u << 9) | (1u << 13) | (1u << 15);
+	for (int32 K = 0; K < 17; ++K)
+	{
+		Dryer(FVector(WashBack - 41.0, 340.0 + 39.5 + 79.0 * K, Zf), 180.0f, ((BackRunning >> K) & 1u) != 0);
+	}
+	for (int32 K = 0; K < 9; ++K)
+	{
+		Dryer(FVector(F + 300.0 + 39.5 + 79.0 * K, WashY1 - 41.0, Zf), -90.0f, K == 3 || K == 7);
+	}
+
+	// Folding tables down the aisles, laundry folded on them and a basket; molded chairs on their beams at the window,
+	// facing the room; carts with their hanging rails.
+	UInstancedStaticMeshComponent* Tables = Kind(TEXT("SM_WF_FoldTable"));
+	const double TableTop = TopOf(TEXT("SM_WF_FoldTable"), 90.0);
+	int32 Folded = 0;
+	auto Table = [&](const FVector& At, float Yaw) {
+		if (Tables)
+		{
+			Place(Tables, At, Yaw);
+		}
+		else
+		{
+			Solid(At, Yaw, FVector(-45.0, -120.0, 0.0), FVector(45.0, 120.0, 90.0));
+			Piece(Laminate, At, Yaw, FVector(-45.0, -120.0, 86.0), FVector(45.0, 120.0, 90.0));
+			for (const double Sx : {-40.0, 40.0})
+			{
+				for (const double Sy : {-115.0, 115.0})
+				{
+					Piece(Legs, At, Yaw, FVector(Sx - 2.5, Sy - 2.5, 0.0), FVector(Sx + 2.5, Sy + 2.5, 86.0));
+				}
+			}
+			Piece(Legs, At, Yaw, FVector(-42.0, -115.0, 18.0), FVector(42.0, 115.0, 21.0));
+		}
+		// Folded stacks, each a few colors, and a heap of what's still to fold: on the half of the top clear of what the
+		// imported table carries (its lost sock and the back room's chips lie on the other, wash_fold.py's +x).
+		for (int32 Stack = 0; Stack < 2; ++Stack)
+		{
+			const double Sy = 8.0 + Stack * 34.0;
+			double Z = TableTop;
+			for (int32 Layer = 0; Layer < 3 + (Folded + Stack) % 3; ++Layer)
+			{
+				const double H = 3.0 + (Layer % 2);
+				Piece(Cloth[(Folded * 3 + Stack + Layer) % 6], At, Yaw, FVector(-16.0, Sy - 14.0, Z), FVector(16.0, Sy + 14.0, Z + H));
+				Z += H;
+			}
+		}
+		Piece(Cloth[1 + Folded % 4], At, Yaw, FVector(-22.0, 62.0, TableTop), FVector(22.0, 110.0, TableTop + 14.0));
+		Piece(Cloth[(Folded + 3) % 6], At, Yaw, FVector(-17.0, 68.0, TableTop + 14.0), FVector(15.0, 102.0, TableTop + 21.0));
+		++Folded;
+	};
+	Table(FVector(F + 420.0, 907.0, Zf), 90.0f);
+	Table(FVector(F + 760.0, 907.0, Zf), 90.0f);
+	Table(FVector(F + 570.0, 1500.0, Zf), 90.0f);
+	UInstancedStaticMeshComponent* Benches = Kind(TEXT("SM_WF_Chairs"));
+	auto Bench = [&](const FVector& At, float Yaw) {
+		if (Benches)
+		{
+			Place(Benches, At, Yaw);
+			return;
+		}
+		Solid(At, Yaw, FVector(-26.0, -110.0, 0.0), FVector(22.0, 110.0, 46.0));
+		Piece(Legs, At, Yaw, FVector(-4.0, -110.0, 30.0), FVector(4.0, 110.0, 36.0));
+		for (const double Sy : {-90.0, 90.0})
+		{
+			Piece(Legs, At, Yaw, FVector(-22.0, Sy - 2.5, 0.0), FVector(22.0, Sy + 2.5, 4.0));
+			Piece(Legs, At, Yaw, FVector(-2.5, Sy - 2.5, 4.0), FVector(2.5, Sy + 2.5, 30.0));
+		}
+		for (int32 Seat = 0; Seat < 4; ++Seat)
+		{
+			const double Sy = -82.5 + 55.0 * Seat;
+			Piece(Plastic, At, Yaw, FVector(-22.0, Sy - 24.0, 40.0), FVector(22.0, Sy + 24.0, 46.0));
+			Piece(Plastic, At, Yaw, FVector(-26.0, Sy - 23.0, 46.0), FVector(-22.0, Sy + 23.0, 84.0));
+			Piece(Legs, At, Yaw, FVector(-3.0, Sy - 3.0, 36.0), FVector(3.0, Sy + 3.0, 40.0));
+		}
+	};
+	Bench(FVector(F + 95.0, 490.0, Zf), 0.0f);
+	Bench(FVector(F + 95.0, 910.0, Zf), 0.0f);
+	Bench(FVector(F + 95.0, 1460.0, Zf), 0.0f);
+	UInstancedStaticMeshComponent* Carts = Kind(TEXT("SM_WF_Cart"));
+	auto Cart = [&](const FVector& At, float Yaw, int32 Load) {
+		if (Carts)
+		{
+			Place(Carts, At, Yaw);
+			return;
+		}
+		// Its footprint as wash_fold.py's: 77 across, 52 deep.
+		Solid(At, Yaw, FVector(-26.0, -38.5, 0.0), FVector(26.0, 38.5, 84.0));
+		for (const double Sx : {-24.0, 24.0})
+		{
+			for (const double Sy : {-36.0, 36.0})
+			{
+				Piece(Chrome, At, Yaw, FVector(Sx - 1.0, Sy - 1.0, 10.0), FVector(Sx + 1.0, Sy + 1.0, 82.0));
+				Disc(Console, At, Yaw, FVector(Sx, Sy, 5.0), 5.0, 2.5);
+			}
+		}
+		for (const double Z : {42.0, 60.0, 81.0})
+		{
+			Piece(Chrome, At, Yaw, FVector(-25.0, -37.0, Z), FVector(25.0, -35.0, Z + 1.5));
+			Piece(Chrome, At, Yaw, FVector(-25.0, 35.0, Z), FVector(25.0, 37.0, Z + 1.5));
+			Piece(Chrome, At, Yaw, FVector(-25.0, -35.0, Z), FVector(-23.0, 35.0, Z + 1.5));
+			Piece(Chrome, At, Yaw, FVector(23.0, -35.0, Z), FVector(25.0, 35.0, Z + 1.5));
+		}
+		Piece(Chrome, At, Yaw, FVector(-24.0, -35.0, 40.0), FVector(24.0, 35.0, 42.0));
+		// The hanging rail over it, a shirt or two on hangers.
+		for (const double Sy : {-36.0, 36.0})
+		{
+			Piece(Chrome, At, Yaw, FVector(-1.0, Sy - 1.0, 82.0), FVector(1.0, Sy + 1.0, 170.0));
+		}
+		Piece(Chrome, At, Yaw, FVector(-1.0, -37.0, 168.0), FVector(1.0, 37.0, 171.0));
+		Piece(Cloth[Load % 6], At, Yaw, FVector(-21.0, -32.0, 42.0), FVector(21.0, 32.0, 58.0 + 8.0 * (Load % 2)));
+		if (Load % 2 == 0)
+		{
+			Piece(Cloth[(Load + 2) % 6], At, Yaw, FVector(-3.0, -20.0, 118.0), FVector(3.0, 20.0, 166.0));
+		}
+	};
+	Cart(FVector(F + 225.0, 905.0, Zf), 8.0f, 0);
+	Cart(FVector(F + 955.0, 900.0, Zf), -12.0f, 1);
+	Cart(FVector(F + 790.0, 1440.0, Zf), 84.0f, 2);
+
+	// The change machine and the soap vendor against the south wall by the door (past the bulletin board), facing the room.
+	const FVector ChangeAt(F + 300.0, WashY0 + 21.5, Zf);
+	if (!Prop(TEXT("SM_WF_ChangeMachine"), ChangeAt, 90.0f))
+	{
+		Solid(ChangeAt, 90.0f, FVector(-17.5, -22.5, 0.0), FVector(17.5, 22.5, 150.0));
+		Piece(Console, ChangeAt, 90.0f, FVector(-15.0, -18.0, 0.0), FVector(15.0, 18.0, 40.0));
+		Piece(Stainless, ChangeAt, 90.0f, FVector(-17.5, -22.5, 40.0), FVector(17.5, 22.5, 150.0));
+		Piece(Mat(TEXT("WFChangeBand"), 0xf2c014, 0.4f), ChangeAt, 90.0f, FVector(17.5, -22.5, 134.0), FVector(18.2, 22.5, 148.0));
+		Piece(Console, ChangeAt, 90.0f, FVector(17.5, -9.0, 100.0), FVector(19.5, 9.0, 124.0));
+		Piece(Mat(TEXT("WFLedGreen"), 0x48ff7a, 0.4f, 0.0f, 12.0f), ChangeAt, 90.0f, FVector(19.5, -4.0, 118.0), FVector(19.8, 4.0, 121.0));
+		Piece(Chrome, ChangeAt, 90.0f, FVector(17.5, -7.0, 52.0), FVector(25.0, 7.0, 62.0));
+	}
+	const FVector SoapAt(F + 385.0, WashY0 + 23.5, Zf);
+	if (!Prop(TEXT("SM_WF_SoapVend"), SoapAt, 90.0f))
+	{
+		Solid(SoapAt, 90.0f, FVector(-22.5, -35.0, 0.0), FVector(22.5, 35.0, 180.0));
+		Piece(Mat(TEXT("WFSoapCabinet"), 0x24407a, 0.4f), SoapAt, 90.0f, FVector(-22.5, -35.0, 0.0), FVector(22.5, 35.0, 180.0));
+		Piece(Console, SoapAt, 90.0f, FVector(22.5, -31.0, 88.0), FVector(22.8, 31.0, 168.0));
+		static const uint32 Boxes[5] = {0xe8641c, 0x2a6fd8, 0x2e9e5b, 0xf2c014, 0xd7263d};
+		for (int32 Col = 0; Col < 5; ++Col)
+		{
+			UMaterialInterface* Pack = Mat(*FString::Printf(TEXT("WFSoap%d"), Col), Boxes[Col], 0.5f);
+			for (int32 Row = 0; Row < 3; ++Row)
+			{
+				const double Y = -24.0 + 12.0 * Col;
+				Piece(Pack, SoapAt, 90.0f, FVector(22.8, Y - 4.5, 94.0 + 25.0 * Row), FVector(25.5, Y + 4.5, 110.0 + 25.0 * Row));
+			}
+			Disc(Chrome, SoapAt, 90.0f, FVector(24.0, -24.0 + 12.0 * Col, 78.0), 2.5, 3.0);
+		}
+		if (StoreGlassMaterial)
+		{
+			// The window over the boxes: the store's glass, dry indoors.
+			UMaterialInstanceDynamic* Dry = UMaterialInstanceDynamic::Create(StoreGlassMaterial, this);
+			Dry->SetScalarParameterValue(TEXT("Wet"), 0.0f);
+			const FRotator Turn(0.0f, 90.0f, 0.0f);
+			UStaticMeshComponent* Pane = NewPart<UStaticMeshComponent>();
+			Pane->SetStaticMesh(CubeMesh);
+			Pane->SetMaterial(0, Dry);
+			Pane->SetRelativeTransform(FTransform(Turn, SoapAt + Turn.RotateVector(FVector(26.5, 0.0, 128.0)), FVector(0.01, 0.62, 0.8)));
+			Pane->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Pane->SetCastShadow(false);
+		}
+		Piece(Mat(TEXT("WFSoapHeader"), 0xd7263d, 0.45f), SoapAt, 90.0f, FVector(22.5, -35.0, 168.0), FVector(23.2, 35.0, 180.0));
+		Piece(Chrome, SoapAt, 90.0f, FVector(22.5, 26.0, 60.0), FVector(24.0, 32.0, 68.0));
+	}
+
+	// The attendant's counter along the south wall, its customers' side to the room: the register and the bagged
+	// wash-and-fold orders on it (the imported one has its scale and call bell too), a half door at each end so behind
+	// it is hers, and her shelf of finished orders against the wall behind her; on the stand-in, the towels she's folding.
+	const FVector CounterAt((CounterX0 + CounterX1) * 0.5, (CounterY0 + CounterY1) * 0.5, Zf);
+	if (!Prop(TEXT("SM_WF_Counter"), CounterAt, 90.0f))
+	{
+		Piece(Green, CounterAt, 90.0f, FVector(-35.0, -100.0, 10.0), FVector(35.0, 100.0, 96.0));
+		Piece(Console, CounterAt, 90.0f, FVector(-33.0, -98.0, 0.0), FVector(33.0, 98.0, 10.0));
+		Piece(Laminate, CounterAt, 90.0f, FVector(-38.0, -102.0, 96.0), FVector(38.0, 102.0, 100.0));
+		Solid(CounterAt, 90.0f, FVector(-38.0, -102.0, 0.0), FVector(38.0, 102.0, 100.0));
+		Piece(Console, CounterAt, 90.0f, FVector(-30.0, 50.0, 100.0), FVector(-6.0, 80.0, 112.0));
+		Piece(Console, CounterAt, 90.0f, FVector(-24.0, 54.0, 112.0), FVector(-20.0, 76.0, 128.0));
+		Piece(Mat(TEXT("WFBagWhite"), 0xf2f2ee, 0.35f), CounterAt, 90.0f, FVector(-28.0, -96.0, 100.0), FVector(8.0, -70.0, 138.0));
+		Piece(Mat(TEXT("WFBagBlue"), 0x9cc3e6, 0.35f), CounterAt, 90.0f, FVector(-26.0, -66.0, 100.0), FVector(6.0, -42.0, 130.0));
+		for (int32 Layer = 0; Layer < 4; ++Layer)
+		{
+			Piece(Cloth[(Layer * 2 + 1) % 6], CounterAt, 90.0f, FVector(-12.0, -20.0, 100.0 + 3.5 * Layer), FVector(16.0, 14.0, 103.5 + 3.5 * Layer));
+		}
+	}
+	for (const double Gx : {CounterX0 - 5.0, CounterX1})
+	{
+		Box(Green, FVector(Gx, WashY0 + 1.0, Zf), FVector(Gx + 5.0, CounterY0, Zf + 95.0));
+		Box(Laminate, FVector(Gx - 1.0, WashY0 + 1.0, Zf + 95.0), FVector(Gx + 6.0, CounterY0, Zf + 98.0), false);
+	}
+	Box(nullptr, FVector(CounterX0 + 20.0, WashY0 + 1.0, Zf), FVector(CounterX1 - 20.0, WashY0 + 26.0, Zf + 182.0))->SetVisibility(false);
+	for (const double Sx : {CounterX0 + 22.0, CounterX1 - 22.0})
+	{
+		for (const double Sy : {WashY0 + 3.0, WashY0 + 24.0})
+		{
+			Box(Chrome, FVector(Sx - 1.0, Sy - 1.0, Zf), FVector(Sx + 1.0, Sy + 1.0, Zf + 182.0), false);
+		}
+	}
+	for (int32 Level = 0; Level < 4; ++Level)
+	{
+		const double Z = Zf + 20.0 + 52.0 * Level;
+		Box(Chrome, FVector(CounterX0 + 21.0, WashY0 + 2.0, Z), FVector(CounterX1 - 21.0, WashY0 + 25.0, Z + 1.5), false);
+		if (Level < 3)
+		{
+			for (int32 Bag = 0; Bag < 5; ++Bag)
+			{
+				const double X = CounterX0 + 30.0 + Bag * 30.0;
+				const double H = 22.0 + 6.0 * ((Bag + Level) % 3);
+				Box(Bag % 2 ? Mat(TEXT("WFBagBlue"), 0x9cc3e6, 0.35f) : Mat(TEXT("WFBagWhite"), 0xf2f2ee, 0.35f), FVector(X, WashY0 + 4.0, Z + 1.5), FVector(X + 26.0, WashY0 + 23.0, Z + 1.5 + H), false);
+			}
+		}
+	}
+
+	// The TV up on the back wall over the dryers, where the chairs can see it; its light on the room as the picture cuts.
+	// The imported one's origin is on the floor under it on the wall's face, the set itself at 1.88 to 2.36 m: lifted
+	// 12 cm, it clears the dryers' tops (1.95 m).
+	const double TvLift = 12.0;
+	WashTv = Prop(TEXT("SM_WF_TV"), FVector(WashBack, 960.0, Zf + TvLift), 180.0f);
+	if (WashTv)
+	{
+		WashTv->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+	else
+	{
+		Box(Console, FVector(WashBack - 14.0, 923.0, Zf + TvLift + 188.0), FVector(WashBack - 6.0, 997.0, Zf + TvLift + 236.0), false);
+		Box(Mat(TEXT("Steel"), 0xa0a4aa, 0.35f, 0.0f, 0.0f, 0.9f), FVector(WashBack - 6.0, 950.0, Zf + TvLift + 200.0), FVector(WashBack, 970.0, Zf + TvLift + 224.0), false);
+		WashTvMid = Mat(TEXT("WFTvScreen"), 0x9fb4d8, 0.2f, 0.0f, 18.0f);
+		Box(WashTvMid, FVector(WashBack - 14.6, 926.0, Zf + TvLift + 191.0), FVector(WashBack - 14.0, 994.0, Zf + TvLift + 233.0), false)->SetCastShadow(false);
+	}
+	if (URectLightComponent* Glow = NewPart<URectLightComponent>())
+	{
+		// Facing into the room: a rect light's width runs along its Y, its height along Z.
+		Glow->SetRelativeLocationAndRotation(FVector(WashBack - 40.0, 960.0, Zf + TvLift + 212.0), FRotator(-12.0f, 180.0f, 0.0f));
+		Glow->SetIntensityUnits(ELightUnits::Lumens);
+		Glow->SetIntensity(45.0f);
+		Glow->SetSourceWidth(80.0f);
+		Glow->SetSourceHeight(44.0f);
+		Glow->SetAttenuationRadius(650.0f);
+		Glow->SetLightColor(FLinearColor(0.7f, 0.8f, 1.0f));
+		Glow->SetCastShadows(false);
+		Glow->SetVolumetricScatteringIntensity(0.0f);
+		WashTvLight = Glow;
+	}
+
+	// Dee's steel door in the back wall: PRIVATE, STAFF ONLY, and a card with the nights her game runs; a caged bulb over it.
+	// The imported one's frame wraps the wall (its origin on the wall's middle plane); the stand-in stands on its face.
+	const FVector BackAt(WashBack - 5.0, BackDoorY, Zf);
+	if (!Prop(TEXT("SM_WF_BackDoor"), FVector(WashBack + 10.0, BackDoorY, Zf), 180.0f))
+	{
+		const FRotator Turn(0.0f, 180.0f, 0.0f);
+		Piece(DarkSteel, BackAt, 180.0f, FVector(-5.0, -56.0, 0.0), FVector(4.0, -48.0, 218.0));
+		Piece(DarkSteel, BackAt, 180.0f, FVector(-5.0, 48.0, 0.0), FVector(4.0, 56.0, 218.0));
+		Piece(DarkSteel, BackAt, 180.0f, FVector(-5.0, -48.0, 210.0), FVector(4.0, 48.0, 218.0));
+		Piece(GreySteel, BackAt, 180.0f, FVector(-3.0, -48.0, 0.0), FVector(2.0, 48.0, 210.0));
+		Piece(Chrome, BackAt, 180.0f, FVector(2.0, -44.0, 3.0), FVector(2.4, 44.0, 30.0));
+		Piece(Chrome, BackAt, 180.0f, FVector(2.0, 32.0, 90.0), FVector(3.0, 40.0, 112.0));
+		Piece(Chrome, BackAt, 180.0f, FVector(3.0, 26.0, 99.0), FVector(7.0, 40.0, 103.0));
+		Piece(Chrome, BackAt, 180.0f, FVector(2.0, 34.0, 118.0), FVector(3.2, 38.0, 122.0));
+		Sign(TEXT("note:fff4c2:PRIVATE|STAFF|ONLY"), BackAt + Turn.RotateVector(FVector(2.6, 0.0, 168.0)), 180.0f, FVector2D(26.0, 26.0), FIntPoint(256, 256), 0.0f);
+		Sign(TEXT("note:f6e27a:DEE'S|TUE THU|SAT|9 PM"), BackAt + Turn.RotateVector(FVector(2.6, -26.0, 128.0)), 180.0f, FVector2D(16.0, 16.0), FIntPoint(256, 256), 0.0f);
+	}
+	Box(Console, FVector(WashBack - 9.0, BackDoorY - 7.0, Zf + 236.0), FVector(WashBack, BackDoorY + 7.0, Zf + 240.0), false)->SetCastShadow(false);
+	UMaterialInstanceDynamic* Bulb = Mat(TEXT("WFCagedBulb"), 0xffcf8a, 0.3f, 0.0f, 40.0f);
+	Cyl(Bulb, FVector(WashBack - 9.0, BackDoorY, Zf + 226.0), 3.2f, 10.0f, false)->SetCastShadow(false);
+	for (const double Dy : {-4.5, 4.5})
+	{
+		Box(Console, FVector(WashBack - 14.0, BackDoorY + Dy - 0.3, Zf + 222.0), FVector(WashBack - 4.0, BackDoorY + Dy + 0.3, Zf + 238.0), false)->SetCastShadow(false);
+	}
+	if (UPointLightComponent* Cage = NewPart<UPointLightComponent>())
+	{
+		Cage->SetRelativeLocation(FVector(WashBack - 16.0, BackDoorY, Zf + 228.0));
+		Cage->SetIntensityUnits(ELightUnits::Candelas);
+		Cage->SetIntensity(14.0f);
+		Cage->SetUseTemperature(true);
+		Cage->SetTemperature(2500.0f);
+		Cage->SetAttenuationRadius(340.0f);
+		Cage->SetSourceRadius(3.0f);
+		Cage->SetCastShadows(false);
+		Cage->SetVolumetricScatteringIntensity(0.4f);
+	}
+
+	// The bulletin board on the south wall inside the door: flyers, the hours, NO DYEING.
+	const FVector BoardAt(F + 153.0, WashY0 + 1.0, Zf);
+	if (!Prop(TEXT("SM_WF_WallDressing"), BoardAt, 90.0f))
+	{
+		const FRotator Turn(0.0f, 90.0f, 0.0f);
+		Piece(Mat(TEXT("WFCork"), 0x9c7448, 0.9f), BoardAt, 90.0f, FVector(0.0, -60.0, 110.0), FVector(1.6, 60.0, 200.0));
+		UMaterialInterface* Trim = Mat(TEXT("WFBoardTrim"), 0x5a3d26, 0.6f);
+		Piece(Trim, BoardAt, 90.0f, FVector(0.0, -63.0, 107.0), FVector(2.4, 63.0, 110.0));
+		Piece(Trim, BoardAt, 90.0f, FVector(0.0, -63.0, 200.0), FVector(2.4, 63.0, 203.0));
+		Piece(Trim, BoardAt, 90.0f, FVector(0.0, -63.0, 110.0), FVector(2.4, -60.0, 200.0));
+		Piece(Trim, BoardAt, 90.0f, FVector(0.0, 60.0, 110.0), FVector(2.4, 63.0, 200.0));
+		struct FFlyer
+		{
+			const TCHAR* Art;
+			double Y, Z, Size;
+		};
+		const FFlyer Flyers[] = {{TEXT("note:f4f1e8:NO|DYEING|IN THE|MACHINES"), -36.0, 176.0, 24.0}, {TEXT("note:9fe3b6:GUITAR|LESSONS|$20"), -6.0, 150.0, 20.0},
+			{TEXT("note:ff9cb8:LOST CAT|BISCUIT|ORANGE"), 22.0, 178.0, 20.0}, {TEXT("note:a8d8ff:OPEN|24 HOURS|ATTENDANT|ON DUTY"), 44.0, 140.0, 22.0},
+			{TEXT("note:f6e27a:ROOM|4 RENT|ASK INEZ"), -40.0, 128.0, 18.0}};
+		for (const FFlyer& Fl : Flyers)
+		{
+			Sign(Fl.Art, BoardAt + Turn.RotateVector(FVector(2.2, Fl.Y, Fl.Z)), 90.0f, FVector2D(Fl.Size, Fl.Size), FIntPoint(256, 256), 0.0f);
+		}
+	}
+
+	// A wet-floor sign just inside the door, because it's raining.
+	UMaterialInterface* Caution = Mat(TEXT("Caution"), 0xf2c014, 0.4f);
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		UStaticMeshComponent* Leg = Box(Caution, FVector(F + 179.0 + Side * 14.0, 236.0, Zf), FVector(F + 181.0 + Side * 14.0, 266.0, Zf + 62.0), false);
+		Leg->SetRelativeRotation(FRotator(Side == 0 ? -12.0f : 12.0f, 0.0f, 0.0f));
+	}
+}
+
+void AStreetStage::HideTenementShop()
+{
+	UMaterialInterface* Hole = HiddenSlotMaterial();
+	const int32 Slot = NamedSlot(TenementFront, TenementShopMaterial);
+	if (!TenementFront || !Hole || Slot == INDEX_NONE)
+	{
+		if (TenementFront)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("ShortStack: the tenement's own laundromat (its material _%d) can't be hidden: the Wash & Fold stands inside it"), TenementShopMaterial);
+		}
+		return;
+	}
+	if (TenementFront->GetMaterial(Slot) != Hole)
+	{
+		TenementFront->SetMaterial(Slot, Hole);
+	}
+}
+
+void AStreetStage::BuildAcross()
+{
+	UMaterialInterface* Brick = Mat(TEXT("BrickFar"), 0x5a3a30, 0.85f, PatBrick);
+	UMaterialInterface* Shutter = Mat(TEXT("Shutter"), 0x5d6166, 0.5f, PatShutter, 0.0f, 0.6f);
+	UMaterialInterface* Iron = Mat(TEXT("Iron"), 0x1c1e21, 0.45f, 0.0f, 0.0f, 0.7f);
+	UMaterialInterface* Steel = Mat(TEXT("Steel"), 0xa0a4aa, 0.35f, 0.0f, 0.0f, 0.9f);
+	const FVector2D Win(120.0, 170.0);
+	const double Y0 = TenementY - TenementHalf;
+	const double Y1 = TenementY + TenementHalf;
+
+	// The laundromat's building: the brick walk-up the apartment's window looks out on (tenement.py), standing where that
+	// window sees it: its fire escape and the tenants' door (Dee's) across from 1812, the Wash & Fold in its long shop
+	// window to their right and the neon over it on the third floor. Without it, a stand-in of the same front.
+	TenementFront = Facade(TEXT("SM_Tenement"), TenementY, true);
+	if (TenementFront)
+	{
+		// Its face blocks round the shop window (the glass and the door block as BuildWashFront fits them), brick returns
+		// close its ends over its lower neighbors, and its own shallow laundromat makes way for the Wash & Fold's room.
+		auto Blocker = [this](double Ya, double Yb, double Za, double Zb) {
+			Box(nullptr, FVector(FarFront - 6.0, Ya, Za), FVector(FarFront + WallDepth, Yb, Zb))->SetVisibility(false);
+		};
+		Blocker(Y0, ShopY0, 0.0, TenementTop + 15.0);
+		Blocker(ShopY1, Y1, 0.0, TenementTop + 15.0);
+		Blocker(ShopY0, ShopY1, 0.0, ShopSill);
+		Blocker(ShopY0, ShopY1, ShopHead, TenementTop + 15.0);
+		Box(Brick, FVector(FarFront + WallDepth, Y0, 0.0), FVector(FarFront + 390.0, Y0 + 30.0, TenementTop + 5.0));
+		Box(Brick, FVector(FarFront + WallDepth, Y1 - 30.0, 0.0), FVector(FarFront + 390.0, Y1, TenementTop + 5.0));
+		HideTenementShop();
+	}
+	else
+	{
+		BuildTenementStandIn();
+	}
+	// The block behind its face (the tenement's rooms over the shops reach 2 m back), carved round the Wash & Fold's room,
+	// which reaches on 11 m from the street.
+	const double BlockX0 = FarFront + 390.0;
+	const double BlockX1 = FarFront + 1500.0;
+	const double RoomY0 = WashY0 - 20.0;
+	const double RoomY1 = WashY1 + 20.0;
+	Box(Brick, FVector(BlockX0, Y0, 0.0), FVector(BlockX1, RoomY0, TenementTop));
+	Box(Brick, FVector(BlockX0, RoomY1, 0.0), FVector(BlockX1, Y1, TenementTop));
+	Box(Brick, FVector(WashBack + 20.0, RoomY0, 0.0), FVector(BlockX1, RoomY1, TenementTop));
+	Box(Brick, FVector(BlockX0, RoomY0, WashCeiling + 10.0), FVector(WashBack + 20.0, RoomY1, TenementTop));
+
+	// The neon where the apartment's window sees it, on the bricked-up third floor over the laundromat (SIGN_BLANK) and as
+	// big as it is there, its halo on the wet brick.
+	const FVector NeonAt = TenementNeonAt;
+	Sign(TEXT("neon"), NeonAt, 180.0f, FVector2D(640.0, 200.0), FIntPoint(1024, 320), 6.0f);
 	if (GlowMaterial)
 	{
 		UMaterialInstanceDynamic* Halo = UMaterialInstanceDynamic::Create(GlowMaterial, this);
@@ -1147,34 +2057,39 @@ void AStreetStage::BuildWashAndFold()
 		Plane->SetStaticMesh(PlaneMesh);
 		Plane->SetMaterial(0, Halo);
 		// The engine plane faces +Z: pitched up it faces the street (-X), its local X running up the wall.
-		Plane->SetRelativeLocationAndRotation(WashNeonAt - FVector(2.0, 0.0, 0.0), FRotator(90.0f, 0.0f, 0.0f));
-		Plane->SetRelativeScale3D(FVector(4.0, 9.0, 1.0));
+		Plane->SetRelativeLocationAndRotation(NeonAt - FVector(2.0, 0.0, 0.0), FRotator(90.0f, 0.0f, 0.0f));
+		Plane->SetRelativeScale3D(FVector(6.1, 13.7, 1.0));
 		Plane->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Plane->SetCastShadow(false);
 	}
-	// The neon's pink on the wet street: a rect light the sign's size, so the puddles reflect its shape.
+	// Its pink on the wet street: a rect light the sign's size, aimed down across the road from up there (the road gets
+	// about what it got from the low sign; the puddles still reflect its shape).
 	if (URectLightComponent* Pink = NewPart<URectLightComponent>())
 	{
-		Pink->SetRelativeLocationAndRotation(FVector(FarFront - 22.0, 0.0, 372.0), FRotator(-20.0f, 180.0f, 0.0f));
+		Pink->SetRelativeLocationAndRotation(NeonAt + FVector(-20.0, 0.0, -10.0), FRotator(-45.0f, 180.0f, 0.0f));
 		Pink->SetIntensityUnits(ELightUnits::Lumens);
-		Pink->SetIntensity(700.0f);
-		Pink->SetSourceWidth(420.0f);
-		Pink->SetSourceHeight(110.0f);
-		Pink->SetAttenuationRadius(1700.0f);
+		Pink->SetIntensity(600.0f);
+		Pink->SetSourceWidth(640.0f);
+		Pink->SetSourceHeight(170.0f);
+		Pink->SetAttenuationRadius(2600.0f);
 		Pink->SetLightColor(SrgbHex(0xff3a8c));
 		Pink->SetCastShadows(false);
 		Pink->SetVolumetricScatteringIntensity(0.8f);
 		NightLights.Add(Pink);
-		NightLightLevels.Add(700.0f);
+		NightLightLevels.Add(600.0f);
 	}
 	if (URectLightComponent* Spill = NewPart<URectLightComponent>())
 	{
-		// The laundromat's light through its glass onto the wet sidewalk, a pool kept as soft as the tenement's (BuildAcross),
-		// tipped down and set back far enough that its top edge (leaning out toward the street) stays behind the glass.
-		Spill->SetRelativeLocationAndRotation(FVector(FarFront + 66.0, 0.0, 230.0), FRotator(-35.0f, 180.0f, 0.0f));
+		// The laundromat's light through its window onto the wet sidewalk: the room's tubes shining down and out through
+		// the glass, a pool on the slabs that fades toward the curb (ApplyDaylight sets it by ss.Street.LaundromatGlow). The
+		// puddles already mirror the lit window itself, so the light's own reflection is kept faint: at full strength it
+		// drew a second, far brighter copy of the window, blown out on the wet slabs. Tipped down 35 degrees its top edge
+		// leans out toward the street, so it's set back far enough to keep that edge behind the pane (17 cm into the
+		// opening). The room's own fluorescents point down, inside its walls; this is what reaches the street of them.
+		Spill->SetRelativeLocationAndRotation(FVector(FarFront + 70.0, TenementY, 230.0), FRotator(-35.0f, 180.0f, 0.0f));
 		Spill->SetIntensityUnits(ELightUnits::Lumens);
-		Spill->SetIntensity(700.0f);
-		Spill->SetSourceWidth(1200.0f);
+		Spill->SetIntensity(1000.0f);
+		Spill->SetSourceWidth(static_cast<float>(ShopY1 - ShopY0));
 		Spill->SetSourceHeight(180.0f);
 		Spill->SetAttenuationRadius(1000.0f);
 		Spill->SetLightColor(SrgbHex(0xdff0ff));
@@ -1182,139 +2097,79 @@ void AStreetStage::BuildWashAndFold()
 		Spill->SetCastShadows(false);
 		Spill->SetVolumetricScatteringIntensity(0.4f);
 		NightLights.Add(Spill);
-		NightLightLevels.Add(700.0f);
+		NightLightLevels.Add(1000.0f);
 		WashSpill = Spill;
 	}
-	// No rain falls in its room seen through the glass; the rain by its windows catches the neon's pink.
-	WashMin = FVector(FarFront + 11.0, -700.0, -60.0);
-	WashMax = FVector(FarFront + 1300.0, 700.0, 450.0);
-	NeonGlowAt = FVector(FarFront - 60.0, 0.0, 260.0);
-}
 
-void AStreetStage::BuildAcross()
-{
-	UMaterialInterface* Brick = Mat(TEXT("BrickFar"), 0x5a3a30, 0.85f, PatBrick);
-	UMaterialInterface* Shutter = Mat(TEXT("Shutter"), 0x5d6166, 0.5f, PatShutter, 0.0f, 0.6f);
-	UMaterialInterface* Iron = Mat(TEXT("Iron"), 0x1c1e21, 0.45f, 0.0f, 0.0f, 0.7f);
-	const FVector2D Win(120.0, 170.0);
+	// Dee's door, the tenants' street door beside the laundromat: a jelly-jar lamp on the brick beside it (its transom alone
+	// is hard to find in the rain), and the building's buzzer panel on the other side, her name on one of the labels.
+	UMaterialInterface* Fixture = Mat(TEXT("Fixture"), 0x141517, 0.4f, 0.0f, 0.0f, 0.6f);
+	UMaterialInstanceDynamic* Jar = Mat(TEXT("DoorLampGlass"), 0xffd9a0, 0.3f, 0.0f, 9.0f);
+	if (!NightGlowMids.Contains(Jar))
+	{
+		NightGlowMids.Add(Jar);
+		NightGlowLevels.Add(9.0f);
+	}
+	const double LampY = DeeDoorY + 92.0;
+	Box(Fixture, FVector(FarFront - 6.0, LampY - 6.0, 246.0), FVector(FarFront, LampY + 6.0, 262.0), false);
+	Box(Fixture, FVector(FarFront - 16.0, LampY - 2.0, 252.0), FVector(FarFront - 6.0, LampY + 2.0, 256.0), false);
+	Cyl(Jar, FVector(FarFront - 16.0, LampY, 234.0), 6.0f, 16.0f, false)->SetCastShadow(false);
+	Cyl(Fixture, FVector(FarFront - 16.0, LampY, 250.0), 7.0f, 3.0f, false);
+	if (UPointLightComponent* Lamp = NewPart<UPointLightComponent>())
+	{
+		Lamp->SetRelativeLocation(FVector(FarFront - 26.0, LampY, 240.0));
+		Lamp->SetIntensityUnits(ELightUnits::Candelas);
+		Lamp->SetIntensity(12.0f);
+		Lamp->SetUseTemperature(true);
+		Lamp->SetTemperature(2600.0f);
+		Lamp->SetAttenuationRadius(380.0f);
+		Lamp->SetSourceRadius(5.0f);
+		Lamp->SetCastShadows(false);
+		Lamp->SetVolumetricScatteringIntensity(0.4f);
+		NightLights.Add(Lamp);
+		NightLightLevels.Add(12.0f);
+	}
+	const double PanelY = DeeDoorY - 95.0;
+	Box(Steel, FVector(FarFront - 1.6, PanelY - 10.0, 118.0), FVector(FarFront, PanelY + 10.0, 168.0), false)->SetCastShadow(false);
+	UMaterialInterface* Label = Mat(TEXT("BuzzerLabel"), 0xe8e2d0, 0.6f);
+	UMaterialInterface* Button = Mat(TEXT("Brass"), 0xc9a24d, 0.3f, 0.0f, 0.0f, 0.9f);
+	for (int32 Row = 0; Row < 6; ++Row)
+	{
+		const double Z = 160.0 - Row * 7.0;
+		Box(Button, FVector(FarFront - 2.4, PanelY + 4.0, Z - 1.2), FVector(FarFront - 1.6, PanelY + 6.4, Z + 1.2), false)->SetCastShadow(false);
+		Box(Label, FVector(FarFront - 2.0, PanelY - 7.0, Z - 1.6), FVector(FarFront - 1.6, PanelY + 2.5, Z + 1.6), false)->SetCastShadow(false);
+	}
 
-	// The laundromat's building: the brick walk-up the apartment's window looks out on (tenement.py), the Wash & Fold in its
-	// long shop window, standing where that window sees it: its fire escape and the tenants' door across from 1812, the
-	// laundromat to their right and the neon over it on the third floor. Without it, the laundromat on its own, low.
-	TenementFront = Facade(TEXT("SM_Tenement"), TenementY, true);
-	const bool bTenement = TenementFront != nullptr;
-	if (bTenement)
-	{
-		const double Y0 = TenementY - TenementHalf;
-		const double Y1 = TenementY + TenementHalf;
-		// Its shop window (tenement.py SHOP_Y), its Blender y running down the street.
-		const double Shop0 = TenementY - 860.0;
-		const double Shop1 = TenementY + 860.0;
-		// Its block behind it (the laundromat's room reaches 3.9 m back), brick returns closing its ends over its lower
-		// neighbors, and its face blocking.
-		Box(Brick, FVector(FarFront + 390.0, Y0, 0.0), FVector(FarFront + 1500.0, Y1, 2480.0));
-		Box(Brick, FVector(FarFront + 45.0, Y0, 0.0), FVector(FarFront + 390.0, Y0 + 30.0, 2485.0));
-		Box(Brick, FVector(FarFront + 45.0, Y1 - 30.0, 0.0), FVector(FarFront + 390.0, Y1, 2485.0));
-		FrontBox(TenementY, true, -0.06, 0.45, -18.0, 18.0, 0.0, 24.95);
-		// The rain beaded on the laundromat's window: a pane through the middle of its mullions (12-22 cm into the opening).
-		if (StoreGlassMaterial)
-		{
-			Box(StoreGlassMaterial, FVector(FarFront + 16.5, Shop0, 45.0), FVector(FarFront + 17.5, Shop1, 335.0), false);
-		}
-		// The neon where the apartment's window sees it, on the bricked-up third floor over the laundromat (SIGN_BLANK) and
-		// as big as it is there, its halo on the wet brick.
-		const FVector NeonAt = TenementNeonAt;
-		Sign(TEXT("neon"), NeonAt, 180.0f, FVector2D(640.0, 200.0), FIntPoint(1024, 320), 6.0f);
-		if (GlowMaterial)
-		{
-			UMaterialInstanceDynamic* Halo = UMaterialInstanceDynamic::Create(GlowMaterial, this);
-			Halo->SetVectorParameterValue(TEXT("Color"), SrgbHex(0xff2e88));
-			Halo->SetScalarParameterValue(TEXT("Strength"), 0.4f);
-			NightGlowMids.Add(Halo);
-			NightGlowLevels.Add(0.4f);
-			UStaticMeshComponent* Plane = NewPart<UStaticMeshComponent>();
-			Plane->SetStaticMesh(PlaneMesh);
-			Plane->SetMaterial(0, Halo);
-			// The engine plane faces +Z: pitched up it faces the street (-X), its local X running up the wall.
-			Plane->SetRelativeLocationAndRotation(NeonAt - FVector(2.0, 0.0, 0.0), FRotator(90.0f, 0.0f, 0.0f));
-			Plane->SetRelativeScale3D(FVector(6.1, 13.7, 1.0));
-			Plane->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			Plane->SetCastShadow(false);
-		}
-		// Its pink on the wet street: a rect light the sign's size, aimed down across the road from up there (the road gets
-		// about what it got from the low sign; the puddles still reflect its shape).
-		if (URectLightComponent* Pink = NewPart<URectLightComponent>())
-		{
-			Pink->SetRelativeLocationAndRotation(NeonAt + FVector(-20.0, 0.0, -10.0), FRotator(-45.0f, 180.0f, 0.0f));
-			Pink->SetIntensityUnits(ELightUnits::Lumens);
-			Pink->SetIntensity(600.0f);
-			Pink->SetSourceWidth(640.0f);
-			Pink->SetSourceHeight(170.0f);
-			Pink->SetAttenuationRadius(2600.0f);
-			Pink->SetLightColor(SrgbHex(0xff3a8c));
-			Pink->SetCastShadows(false);
-			Pink->SetVolumetricScatteringIntensity(0.8f);
-			NightLights.Add(Pink);
-			NightLightLevels.Add(600.0f);
-		}
-		if (URectLightComponent* Spill = NewPart<URectLightComponent>())
-		{
-			// The laundromat's light through its window onto the wet sidewalk: the room's tubes shining down and out through
-			// the glass, a pool on the slabs that fades toward the curb, no brighter than the dimmed window it comes through
-			// (ApplyDaylight sets it with the window's glow, ss.Street.LaundromatGlow). The puddles already mirror the lit
-			// window itself, so the light's own reflection is kept faint: at full strength it drew a second, far brighter
-			// copy of the window, blown out on the wet slabs. Tipped down 35 degrees its top edge leans out toward the street,
-			// so it's set back far enough to keep that edge behind the pane (17 cm into the opening).
-			Spill->SetRelativeLocationAndRotation(FVector(FarFront + 70.0, TenementY, 230.0), FRotator(-35.0f, 180.0f, 0.0f));
-			Spill->SetIntensityUnits(ELightUnits::Lumens);
-			Spill->SetIntensity(1000.0f);
-			Spill->SetSourceWidth(static_cast<float>(Shop1 - Shop0));
-			Spill->SetSourceHeight(180.0f);
-			Spill->SetAttenuationRadius(1000.0f);
-			Spill->SetLightColor(SrgbHex(0xdff0ff));
-			Spill->SetSpecularScale(0.25f);
-			Spill->SetCastShadows(false);
-			Spill->SetVolumetricScatteringIntensity(0.4f);
-			NightLights.Add(Spill);
-			NightLightLevels.Add(1000.0f);
-			WashSpill = Spill;
-		}
-		// No rain falls in the laundromat seen through its window; the rain catches the neon's pink in its beam.
-		WashMin = FVector(FarFront + 16.0, Shop0 - 10.0, -60.0);
-		WashMax = FVector(FarFront + 400.0, Shop1 + 10.0, 360.0);
-		NeonGlowAt = FVector(FarFront - 450.0, NeonAt.Y, 700.0);
-	}
-	else
-	{
-		BuildWashAndFold();
-	}
+	// The Wash & Fold itself: its front fitted in the window, its room, and everything in it. No rain falls in it; the rain
+	// out front catches the neon's pink in its beam.
+	BuildWashFront();
+	BuildWashRoom();
+	BuildWashMachines();
+	WashMin = FVector(FarFront + 16.0, RoomY0, -60.0);
+	WashMax = FVector(WashBack + 20.0, RoomY1, WashCeiling + 20.0);
+	NeonGlowAt = FVector(FarFront - 450.0, NeonAt.Y, 700.0);
 
 	// Taller buildings either side of it, windows lit at random, their shops gated for the night; up the street, across
 	// from the walk-up and the store, three brownstones (facades.py) where they're imported.
 	int64 Seed = 777;
-	auto Block = [&](double Y0, double Y1, double Height) {
-		Box(Brick, FVector(FarFront, Y0, 0.0), FVector(FarFront + 1500.0, Y1, Height));
-		WindowRows(FVector(FarFront - 0.5, Y0, 0.0), FVector(0.0, 1.0, 0.0), Y1 - Y0, 180.0f, 380.0, Height, Win, 250.0, 330.0, 0.24, (Seed++) * 104729);
-		for (double Y = Y0 + 200.0; Y + 700.0 < Y1; Y += 1100.0)
+	auto Block = [&](double Ya, double Yb, double Height) {
+		Box(Brick, FVector(FarFront, Ya, 0.0), FVector(FarFront + 1500.0, Yb, Height));
+		WindowRows(FVector(FarFront - 0.5, Ya, 0.0), FVector(0.0, 1.0, 0.0), Yb - Ya, 180.0f, 380.0, Height, Win, 250.0, 330.0, 0.24, (Seed++) * 104729);
+		for (double Y = Ya + 200.0; Y + 700.0 < Yb; Y += 1100.0)
 		{
 			Box(Shutter, FVector(FarFront - 4.0, Y, 20.0), FVector(FarFront, Y + 600.0, 290.0), false);
 			Box(Iron, FVector(FarFront - 16.0, Y - 10.0, 290.0), FVector(FarFront, Y + 610.0, 312.0), false);
 		}
 	};
-	const double North = TenementY + TenementHalf;
-	const double RowEnd = North + 3.0 * BrownstoneW;
-	Block(EndY0, bTenement ? TenementY - TenementHalf : -700.0, 1800.0);
-	if (!bTenement)
-	{
-		Block(700.0, ImportedMesh(TEXT("SM_Facade_Brownstone")) ? North : 3000.0, 1400.0);
-	}
-	if (BrownstoneRow(North, RowEnd, true, Brick))
+	const double RowEnd = Y1 + 3.0 * BrownstoneW;
+	Block(EndY0, Y0, 1800.0);
+	if (BrownstoneRow(Y1, RowEnd, true, Brick))
 	{
 		Block(RowEnd, EndY1, 2200.0);
 	}
 	else
 	{
-		Block(bTenement ? North : 3000.0, EndY1, 2200.0);
+		Block(Y1, EndY1, 2200.0);
 	}
 
 	// Parked cars, each with the traffic on its side (the curb on its right): the far curb's facing down the street,
@@ -2308,6 +3163,12 @@ void AStreetStage::BuildSpots()
 	Spot(TEXT("cooler"), FVector(X0 + 160.0, 4500.0, 100.0), 220.0f, TEXT("Open the cooler"), static_cast<int32>(ss::store::Shelf::Drinks));
 	Spot(TEXT("aisle"), FVector(-850.0, 4445.0, 100.0), 230.0f, TEXT("Browse the snacks"), static_cast<int32>(ss::store::Shelf::Snacks));
 	Spot(TEXT("coffee"), FVector(-1100.0, StoreY0 + 140.0, 100.0), 170.0f, TEXT("Pour a coffee"), static_cast<int32>(ss::store::Shelf::Coffee));
+	// Across the street: the Wash & Fold's door (from either side of it), its attendant at her counter, Dee's steel door at
+	// the back, and the tenement's street door. What the last three say depends on the night (the game mode words them).
+	Spot(TEXT("washdoor"), FVector(WashDoorX, (WashDoorY0 + WashDoorY1) * 0.5, WashFloor + 100.0), 120.0f, TEXT("Open the door"), -1);
+	Spot(TEXT("attendant"), FVector((CounterX0 + CounterX1) * 0.5, CounterY1 + 50.0, WashFloor + 100.0), 140.0f, TEXT("Talk to the attendant"), -1);
+	Spot(TEXT("backdoor"), FVector(WashBack - 10.0, BackDoorY, WashFloor + 100.0), 150.0f, TEXT("Try the back door"), -1);
+	Spot(TEXT("dee"), FVector(FarFront - 20.0, DeeDoorY, 100.0), 150.0f, TEXT("Ring Dee's buzzer"), -1);
 }
 
 // ------------------------------------------------------------------ play
@@ -2318,6 +3179,13 @@ void AStreetStage::BeginPlay()
 	BuildSpots();
 	AttachSlate();
 	PaintCars();
+	// The tenement's own laundromat stays hidden (whatever the saved level holds), the Wash & Fold's glow slots are made to
+	// animate, and its door starts shut.
+	HideTenementShop();
+	PrepareWashGlow();
+	WashDoorAmount = 0.0f;
+	bWashDoorHeld = false;
+	BellSwing = 0.0f;
 	// Where the store and the laundromat's room are, for the rain (nothing falls inside them, the sheets crossing them
 	// as they follow the eye), and the two lit fronts the rain catches (the laundromat's as BuildAcross built it).
 	const FTransform& T = GetActorTransform();
@@ -2411,6 +3279,19 @@ void AStreetStage::AttachSlate()
 		{
 			List = Draw(P::StreetSignW, P::StreetSignH, [&A1, &A2](ss::ui::Canvas& C) { P::StreetSign(C, A1, A2); });
 		}
+		else if (Kind == TEXT("note"))
+		{
+			// "note:<paper, rrggbb hex>:<line>|<line>|...": a note or a flyer, handwritten on its paper.
+			const uint32 Paper = static_cast<uint32>(FParse::HexNumber(Parts.Num() > 1 ? *Parts[1] : TEXT("f6e27a")));
+			TArray<FString> Written;
+			(Parts.Num() > 2 ? Parts[2] : FString()).ParseIntoArray(Written, TEXT("|"), true);
+			std::vector<std::string> Lines;
+			for (const FString& Line : Written)
+			{
+				Lines.push_back(std::string(TCHAR_TO_UTF8(*Line)));
+			}
+			List = Draw(P::NoteSize, P::NoteSize, [&Lines, Paper](ss::ui::Canvas& C) { P::StickyNote(C, Lines, ss::ui::Hex(Paper)); });
+		}
 		if (!List)
 		{
 			continue;
@@ -2428,6 +3309,10 @@ void AStreetStage::AttachSlate()
 void AStreetStage::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	// The walkers noted this frame are the doors' next frame (whatever ticks first then, none is missed); the two lists
+	// trade places, so neither is allocated again.
+	Swap(Walkers, WalkersSeen);
+	Walkers.Reset();
 	const UWorld* World = GetWorld();
 	const APlayerController* Pc = World ? World->GetFirstPlayerController() : nullptr;
 	const APlayerCameraManager* Cam = Pc ? Pc->PlayerCameraManager.Get() : nullptr;
@@ -2440,12 +3325,13 @@ void AStreetStage::Tick(float DeltaSeconds)
 	const float Dt = FMath::Min(DeltaSeconds, 0.1f);
 	UpdateLook(At, Dt);
 	FollowCamera(At, Cam->GetCameraRotation(), Cam->GetFOVAngle());
+	AnimateWash(Dt, At);
 }
 
 void AStreetStage::UpdateLook(const FVector& Camera, float Dt)
 {
-	// How far into the store the camera is: across the threshold the exposure's clamps swing from the street's to the
-	// store's (the eye then adapts at the exposure's own speed).
+	// How far into the store (or the Wash & Fold) the camera is: across the threshold the exposure's clamps swing from the
+	// street's to the room's (the eye then adapts at the exposure's own speed).
 	const FVector L = GetActorTransform().InverseTransformPosition(Camera);
 	const bool bInStoreSpan = L.Y > StoreY0 + 5.0 && L.Y < StoreY1 - 5.0 && L.X > -StoreDepth && L.Z < StoreCeiling + 60.0;
 	const float Want = bInStoreSpan ? FMath::Clamp(static_cast<float>((40.0 - L.X) / 160.0), 0.0f, 1.0f) : 0.0f;
@@ -2453,6 +3339,14 @@ void AStreetStage::UpdateLook(const FVector& Camera, float Dt)
 	if (FMath::Abs(Inside - Want) < 0.001f)
 	{
 		Inside = Want;
+	}
+	// The laundromat faces the other way: in through its window from the far sidewalk.
+	const bool bInWashSpan = L.Y > WashY0 + 5.0 && L.Y < WashY1 - 5.0 && L.X < WashBack && L.Z < WashCeiling + 60.0;
+	const float WantWash = bInWashSpan ? FMath::Clamp(static_cast<float>((L.X - (FarFront - 40.0)) / 160.0), 0.0f, 1.0f) : 0.0f;
+	WashInside = FMath::FInterpTo(WashInside, WantWash, Dt, 8.0f);
+	if (FMath::Abs(WashInside - WantWash) < 0.001f)
+	{
+		WashInside = WantWash;
 	}
 	ApplyLens();
 	PickIn -= Dt;
@@ -2473,11 +3367,14 @@ void AStreetStage::ApplyLens()
 	const float NightEV = CVarNightEV.GetValueOnGameThread();
 	const float OutMin = FMath::Lerp(NightEV, CVarDayEV.GetValueOnGameThread(), D);
 	const float OutMax = OutMin + FMath::Lerp(CVarNightRange.GetValueOnGameThread(), 1.5f, D);
-	const float InMin = CVarStoreEV.GetValueOnGameThread() + 1.5f * D; // the day comes in through the windows too
+	// Indoors: the store's clamps, or the laundromat's (whichever the camera is in; they're a block apart).
+	const bool bWash = WashInside > Inside;
+	const float Indoors = FMath::Max(Inside, WashInside);
+	const float InMin = (bWash ? CVarWashEV : CVarStoreEV).GetValueOnGameThread() + 1.5f * D; // the day comes in through the windows too
 	const float InMax = InMin + CVarStoreRange.GetValueOnGameThread();
 	FPostProcessSettings& S = Lens->Settings;
-	S.AutoExposureMinBrightness = FMath::Lerp(OutMin, InMin, Inside);
-	S.AutoExposureMaxBrightness = FMath::Max(S.AutoExposureMinBrightness, FMath::Lerp(OutMax, InMax, Inside));
+	S.AutoExposureMinBrightness = FMath::Lerp(OutMin, InMin, Indoors);
+	S.AutoExposureMaxBrightness = FMath::Max(S.AutoExposureMinBrightness, FMath::Lerp(OutMax, InMax, Indoors));
 	S.AutoExposureBias = ExposureBias + BrightnessBias + CVarBias.GetValueOnGameThread();
 	S.FilmGrainIntensity = 0.1f * GrainScale;
 	S.SceneFringeIntensity = 0.3f * FringeScale;
@@ -2535,7 +3432,7 @@ void AStreetStage::PickStreetlights(const FVector& Camera)
 		}
 	}
 	Near.Sort([](const TPair<double, int32>& A, const TPair<double, int32>& B) { return A.Key < B.Key; });
-	const int32 Budget = Inside > 0.5f ? 0 : FMath::Max(0, ShadowedStreetlights);
+	const int32 Budget = FMath::Max(Inside, WashInside) > 0.5f ? 0 : FMath::Max(0, ShadowedStreetlights);
 	TArray<bool> Shadowed;
 	Shadowed.Init(false, Streetlights.Num());
 	for (int32 Rank = 0; Rank < Near.Num() && Rank < Budget; ++Rank)
@@ -2560,6 +3457,17 @@ void AStreetStage::PickStreetlights(const FVector& Camera)
 		if (L && static_cast<bool>(L->CastShadows) != bStoreShadows)
 		{
 			L->SetCastShadows(bStoreShadows);
+		}
+	}
+	// The Wash & Fold's fluorescents the same, from its own sidewalk or nearer (they point down, inside its walls: from
+	// across the street what little of them would get through the brick doesn't show, and four more shadowed lights do).
+	const FVector WashMiddle = GetActorTransform().TransformPosition(FVector((FarFront + WashBack) * 0.5, (WashY0 + WashY1) * 0.5, WashCeiling * 0.5));
+	const bool bWashShadows = WashInside > 0.0f || FVector::DistSquared(WashMiddle, Camera) < 1800.0 * 1800.0;
+	for (URectLightComponent* L : WashLights)
+	{
+		if (L && static_cast<bool>(L->CastShadows) != bWashShadows)
+		{
+			L->SetCastShadows(bWashShadows);
 		}
 	}
 	// The rain catches the light of the nearest lamps (and glows in their cones).
@@ -2646,7 +3554,7 @@ void AStreetStage::ApplyDaylight()
 			M->SetScalarParameterValue(TEXT("Strength"), NightGlowLevels[I] * Night);
 		}
 	}
-	// The laundromat's light on the sidewalk goes up and down with its window's glow (ss.Street.LaundromatGlow).
+	// The laundromat's light on the sidewalk goes up and down with ss.Street.LaundromatGlow.
 	const float WashGlow = FMath::Max(0.0f, CVarLaundromatGlow.GetValueOnGameThread()) / LaundromatGlowSetFor;
 	for (int32 I = 0; I < NightLights.Num() && I < NightLightLevels.Num(); ++I)
 	{
@@ -2662,20 +3570,14 @@ void AStreetStage::ApplyDaylight()
 	{
 		DimImportedGlow(Lit, Night * (Lit == TenementFront ? CVarTenementGlow.GetValueOnGameThread() : 1.0f));
 	}
-	// The laundromat's shop window is the brightest of the tenement's bakes (tenement_store, the bake's M_SM_Tenement_9):
-	// made to read through the apartment's rainy window, it whites out against the street's night exposure.
-	if (const UStaticMesh* Tenement = TenementFront ? TenementFront->GetStaticMesh().Get() : nullptr)
+	// The tenement's own baked laundromat (tenement_store, its M_SM_Tenement_9) is the brightest of its bakes: made to read
+	// through the apartment's rainy window, it whites out against the street's night exposure. It's hidden behind the Wash
+	// & Fold's room (HideTenementShop); should it show, it's kept to ss.Street.LaundromatGlow.
+	const int32 ShopSlot = NamedSlot(TenementFront, TenementShopMaterial);
+	if (UMaterialInstanceDynamic* Dim = ShopSlot != INDEX_NONE ? Cast<UMaterialInstanceDynamic>(TenementFront->GetMaterial(ShopSlot)) : nullptr)
 	{
-		for (int32 Slot = 0; Slot < Tenement->GetStaticMaterials().Num(); ++Slot)
-		{
-			const UMaterialInterface* Baked = Tenement->GetMaterial(Slot);
-			UMaterialInstanceDynamic* Dim = Cast<UMaterialInstanceDynamic>(TenementFront->GetMaterial(Slot));
-			if (Baked && Dim && Baked->GetName().EndsWith(TEXT("_9")))
-			{
-				const float Level = Night * CVarLaundromatGlow.GetValueOnGameThread();
-				Dim->SetVectorParameterValue(TEXT("EmissiveFactor"), FLinearColor(Level, Level, Level, 1.0f));
-			}
-		}
+		const float Level = Night * CVarLaundromatGlow.GetValueOnGameThread();
+		Dim->SetVectorParameterValue(TEXT("EmissiveFactor"), FLinearColor(Level, Level, Level, 1.0f));
 	}
 	// The streetlights' photocells, each a little apart.
 	for (int32 I = 0; I < Streetlights.Num(); ++I)
@@ -2734,8 +3636,9 @@ void AStreetStage::FollowCamera(const FVector& Location, const FRotator& Rotatio
 	const double HalfW = FMath::Tan(FMath::DegreesToRadians(FMath::Min(80.0, static_cast<double>(Fov) * 0.5 + 15.0 + Pitch * 0.5)));
 	const double HalfH = FMath::Tan(FMath::DegreesToRadians(78.0));
 	const FVector LocalFwd = GetActorTransform().InverseTransformVectorNoScale(Fwd);
-	// Inside, looking away from the windows: no rain to see (the material hides what's in the store anyway).
-	const bool bAny = CVarRain.GetValueOnGameThread() > 0.0f && !(Inside > 0.5f && LocalFwd.X < 0.15);
+	// Inside, looking away from the windows: no rain to see (the material hides what's in the room anyway). The store's
+	// windows look along +X, the laundromat's along -X.
+	const bool bAny = CVarRain.GetValueOnGameThread() > 0.0f && !(Inside > 0.5f && LocalFwd.X < 0.15) && !(WashInside > 0.5f && LocalFwd.X > -0.15);
 	// How wide a pixel is (radians), so each streak stays a pixel or two wide at any distance and resolution.
 	FVector2D View(2560.0, 1440.0);
 	if (UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
@@ -2755,9 +3658,9 @@ void AStreetStage::FollowCamera(const FVector& Location, const FRotator& Rotatio
 		}
 	}
 	// Out on the street the rain that shows is nearer than any shop glass (what falls behind it is masked), so it draws
-	// over the glass; from inside the store it's beyond the windows, and the glass and its beads draw over it (the
-	// windows' panes sort at 2).
-	const int32 Priority = Inside > 0.5f ? 0 : 3;
+	// over the glass; from inside the store or the laundromat it's beyond the windows, and the glass and its beads draw
+	// over it (the windows' panes sort at 2).
+	const int32 Priority = FMath::Max(Inside, WashInside) > 0.5f ? 0 : 3;
 	for (int32 I = 0; I < RainSheets.Num(); ++I)
 	{
 		UStaticMeshComponent* Sheet = RainSheets[I];
@@ -2774,8 +3677,8 @@ void AStreetStage::FollowCamera(const FVector& Location, const FRotator& Rotatio
 		bool bShow = bAny;
 		if (bShow && !bRainMasksStore)
 		{
-			// The apartment's rain can't hide itself inside the store: keep its sheets out of it.
-			bShow = Inside < 0.05f && !IsInsideStore(At);
+			// The apartment's rain can't hide itself indoors: keep its sheets out of the store and the laundromat.
+			bShow = Inside < 0.05f && WashInside < 0.05f && !IsInsideStore(At) && !IsInsideWash(At);
 		}
 		if (Sheet->IsVisible() != bShow)
 		{
@@ -2791,8 +3694,19 @@ void AStreetStage::FollowCamera(const FVector& Location, const FRotator& Rotatio
 
 bool AStreetStage::UpdateDoors(const FVector& Someone, float DeltaSeconds)
 {
-	const FVector Local = GetActorTransform().InverseTransformPosition(Someone);
-	const bool bNear = FMath::Abs(Local.X) < 260.0 && Local.Y > DoorY0 - 220.0 && Local.Y < DoorY1 + 220.0;
+	const FTransform& T = GetActorTransform();
+	auto Near = [&T](const FVector& At) {
+		const FVector Local = T.InverseTransformPosition(At);
+		return FMath::Abs(Local.X) < 260.0 && Local.Y > DoorY0 - 220.0 && Local.Y < DoorY1 + 220.0;
+	};
+	bool bNear = Near(Someone);
+	for (const TArray<FVector>* List : {&Walkers, &WalkersSeen})
+	{
+		for (int32 I = 0; I < List->Num() && !bNear; ++I)
+		{
+			bNear = Near((*List)[I]);
+		}
+	}
 	const bool bOpening = bNear && !bDoorsNear && DoorOpen < 0.2f;
 	bDoorsNear = bNear;
 	const float Was = DoorOpen;
@@ -2815,9 +3729,139 @@ bool AStreetStage::UpdateDoors(const FVector& Someone, float DeltaSeconds)
 	return bOpening;
 }
 
+int32 AStreetStage::UpdateWashDoor(const FVector& Someone, float DeltaSeconds)
+{
+	const FTransform& T = GetActorTransform();
+	// Anyone at the doorway, either side of it, keeps the door from shutting; anyone in its swing pushes it open again.
+	auto AtDoor = [&T](const FVector& At, double Reach) {
+		const FVector L = T.InverseTransformPosition(At);
+		return FMath::Abs(L.X - WashDoorX) < Reach && L.Y > WashDoorY0 - 60.0 && L.Y < WashDoorY1 + 60.0 && L.Z > -100.0 && L.Z < 400.0;
+	};
+	bool bNear = AtDoor(Someone, 190.0);
+	bool bInSwing = AtDoor(Someone, 80.0);
+	for (const TArray<FVector>* List : {&Walkers, &WalkersSeen})
+	{
+		for (const FVector& W : *List)
+		{
+			bNear = bNear || AtDoor(W, 190.0);
+			bInSwing = bInSwing || AtDoor(W, 80.0);
+		}
+	}
+	if (bWashDoorHeld)
+	{
+		// Its closer takes it once nobody's been at it for a moment.
+		WashDoorClear = bNear ? 0.0f : WashDoorClear + DeltaSeconds;
+		if (WashDoorClear > 1.0f)
+		{
+			bWashDoorHeld = false;
+		}
+	}
+	else if (bInSwing && WashDoorAmount > 0.05f)
+	{
+		// Swinging shut on someone still in the doorway: it's pushed open again (no bell: it never shut).
+		bWashDoorHeld = true;
+		WashDoorClear = 0.0f;
+	}
+	// Pushed open briskly; the closer brings it back slower, at an even pace, and latches.
+	const float Was = WashDoorAmount;
+	if (bWashDoorHeld && WashDoorAmount < 1.0f)
+	{
+		WashDoorAmount = FMath::FInterpTo(WashDoorAmount, 1.0f, DeltaSeconds, 5.0f);
+		if (WashDoorAmount > 0.998f)
+		{
+			WashDoorAmount = 1.0f;
+		}
+		WashDoorAmount = FMath::Max(WashDoorAmount, 0.001f);
+	}
+	else if (!bWashDoorHeld && WashDoorAmount > 0.0f)
+	{
+		WashDoorAmount = FMath::FInterpConstantTo(WashDoorAmount, 0.0f, DeltaSeconds, 0.85f);
+	}
+	if (Was == WashDoorAmount)
+	{
+		return 0;
+	}
+	// In toward the room about its hinge; the doorway blocks while the door is near shut (the leaf has no collision of
+	// its own, so it never shoves anyone), and the bells on its strap swing as it goes.
+	if (WashDoor)
+	{
+		WashDoor->SetRelativeRotation(FRotator(0.0f, -96.0f * FMath::InterpEaseInOut(0.0f, 1.0f, WashDoorAmount, 1.6f), 0.0f));
+	}
+	if (WashDoorStop)
+	{
+		const bool bBlock = WashDoorAmount < 0.3f;
+		if ((WashDoorStop->GetCollisionEnabled() != ECollisionEnabled::NoCollision) != bBlock)
+		{
+			WashDoorStop->SetCollisionEnabled(bBlock ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+		}
+	}
+	if (Was <= 0.0f)
+	{
+		BellSwing = 1.0f;
+		return 1;
+	}
+	if (WashDoorAmount <= 0.0f)
+	{
+		BellSwing = FMath::Max(BellSwing, 0.45f);
+		return 2;
+	}
+	return 0;
+}
+
+void AStreetStage::OpenWashDoor()
+{
+	bWashDoorHeld = true;
+	WashDoorClear = 0.0f;
+}
+
+void AStreetStage::NoteWalker(const FVector& At)
+{
+	if (Walkers.Num() < 64)
+	{
+		Walkers.Add(At);
+	}
+}
+
+float AStreetStage::WashNear(const FVector& Listener) const
+{
+	if (IsInsideWash(Listener))
+	{
+		return 0.0f;
+	}
+	// Loudest at its window and door, gone by ten meters out.
+	const FVector L = GetActorTransform().InverseTransformPosition(Listener);
+	const double D = FMath::PointDistToSegment(L, FVector(FarFront, ShopY0, 150.0), FVector(FarFront, ShopY1, 150.0));
+	return static_cast<float>(FMath::Square(FMath::Clamp(1.0 - (D - 100.0) / 900.0, 0.0, 1.0)));
+}
+
 FTransform AStreetStage::StartAt(const FString& From) const
 {
-	const FTransform Local = From == TEXT("store") ? FTransform(FRotator(0.0f, 180.0f, 0.0f), FVector(-200.0, 4700.0, 100.0)) : FTransform(FRotator(0.0f, 65.0f, 0.0f), FVector(150.0, 80.0, 100.0));
+	// 1812's door: out on the step, looking up the street toward the store.
+	FTransform Local(FRotator(0.0f, 65.0f, 0.0f), FVector(150.0, 80.0, 100.0));
+	if (From == TEXT("store"))
+	{
+		Local = FTransform(FRotator(0.0f, 180.0f, 0.0f), FVector(-200.0, 4700.0, 100.0));
+	}
+	else if (From == TEXT("washfold"))
+	{
+		// On the sidewalk at the foot of the laundromat's steps, its door behind, looking across Fifth at 1812.
+		Local = FTransform(FRotator(0.0f, 184.0f, 0.0f), FVector(FarFront - 150.0, (WashDoorY0 + WashDoorY1) * 0.5, 100.0));
+	}
+	else if (From == TEXT("wash"))
+	{
+		// Just in from the door on its mat (past its swing, short of the wet-floor sign), the room ahead.
+		Local = FTransform(FRotator(0.0f, 20.0f, 0.0f), FVector(FarFront + 170.0, (WashDoorY0 + WashDoorY1) * 0.5 + 30.0, WashFloor + 100.0));
+	}
+	else if (From == TEXT("backdoor"))
+	{
+		// At Dee's steel door, facing it.
+		Local = FTransform(FRotator(0.0f, 0.0f, 0.0f), FVector(WashBack - 110.0, BackDoorY + 30.0, WashFloor + 100.0));
+	}
+	else if (From == TEXT("dee"))
+	{
+		// Out of the tenement's street door onto the sidewalk, 1812 across the street.
+		Local = FTransform(FRotator(0.0f, 166.0f, 0.0f), FVector(FarFront - 140.0, DeeDoorY, 100.0));
+	}
 	return Local * GetActorTransform();
 }
 
@@ -2828,15 +3872,130 @@ FTransform AStreetStage::ClerkSpot() const
 	return FTransform(FRotator(0.0f, 90.0f, 0.0f), FVector(-390.0, 3885.0, 1.0 + 87.5)) * GetActorTransform();
 }
 
+FTransform AStreetStage::AttendantSpot() const
+{
+	// Behind her counter, between it and her shelf of orders, at the folded towels; as Benny, her capsule's half height
+	// over the floor (the game mode sets her feet on it once she's dressed).
+	return FTransform(FRotator(0.0f, 90.0f, 0.0f), FVector((CounterX0 + CounterX1) * 0.5 - 8.0, 75.0, WashFloor + 87.5)) * GetActorTransform();
+}
+
 double AStreetStage::StoreFloorZ() const
 {
 	return GetActorTransform().TransformPosition(FVector(-700.0, 4300.0, 1.0)).Z;
+}
+
+double AStreetStage::WashFloorZ() const
+{
+	return GetActorTransform().TransformPosition(FVector(FarFront + 500.0, 400.0, WashFloor)).Z;
+}
+
+double AStreetStage::SidewalkZ() const
+{
+	return GetActorTransform().TransformPosition(FVector(200.0, 0.0, 0.0)).Z;
 }
 
 bool AStreetStage::IsInsideStore(const FVector& At) const
 {
 	const FVector L = GetActorTransform().InverseTransformPosition(At);
 	return L.X < -10.0 && L.X > -StoreDepth && L.Y > StoreY0 && L.Y < StoreY1;
+}
+
+bool AStreetStage::IsInsideWash(const FVector& At) const
+{
+	const FVector L = GetActorTransform().InverseTransformPosition(At);
+	return L.X > FarFront + 18.0 && L.X < WashBack && L.Y > WashY0 && L.Y < WashY1 && L.Z > -100.0 && L.Z < WashCeiling + 100.0;
+}
+
+FStreetWalkway AStreetStage::Sidewalk(int32 Side) const
+{
+	const FTransform& T = GetActorTransform();
+	FStreetWalkway W;
+	W.Side = Side == 0 ? 0 : 1;
+	W.Z = SidewalkZ();
+	auto Lane = [&W, &T](double X, double Y0, double Y1) {
+		FStreetLane L;
+		L.Start = T.TransformPosition(FVector(X, Y0, 0.0));
+		L.End = T.TransformPosition(FVector(X, Y1, 0.0));
+		W.Lanes.Add(L);
+	};
+	auto Obstacle = [&W, &T](double X0, double Y0, double X1, double Y1) {
+		const FVector A = T.TransformPosition(FVector(X0, Y0, 0.0));
+		const FVector B = T.TransformPosition(FVector(X1, Y1, 0.0));
+		W.Obstacles.Add(FBox2D(FVector2D(FMath::Min(A.X, B.X), FMath::Min(A.Y, B.Y)), FVector2D(FMath::Max(A.X, B.X), FMath::Max(A.Y, B.Y))));
+	};
+	const double From = EndY0 + 150.0;
+	const double To = EndY1 - 150.0;
+	const bool bBrownstones = ImportedMesh(TEXT("SM_Facade_Brownstone")) != nullptr;
+	if (W.Side == 0)
+	{
+		// The home side, 4 m from the fronts to the curb, through Market's crosswalk at the corner. Along its middle nothing
+		// stands; nearer the fronts the brownstones' stoops (2 m out) break the line south of 1812.
+		Lane(250.0, From, To);
+		const double StoopY0 = -800.0 - 2.0 * BrownstoneW;
+		if (bBrownstones)
+		{
+			Lane(130.0, From, StoopY0 - 20.0);
+			Lane(130.0, -780.0, To);
+			Obstacle(0.0, StoopY0, 210.0, -800.0);
+		}
+		else
+		{
+			Lane(130.0, From, To);
+		}
+		// 1812's step, the walk-up's granite step, the cans, the hydrant, the newsbox, the lamp posts at the curb.
+		Obstacle(-70.0, -112.0, 45.0, 112.0);
+		Obstacle(0.0, (2300.0 + StoreY0) * 0.5 - 62.0, 40.0, (2300.0 + StoreY0) * 0.5 + 105.0);
+		for (const FVector2D& At : {FVector2D(330.0, -500.0), FVector2D(330.0, 3550.0), FVector2D(360.0, 1300.0), FVector2D(300.0, 3400.0)})
+		{
+			Obstacle(At.X - 30.0, At.Y - 30.0, At.X + 30.0, At.Y + 30.0);
+		}
+		for (const double Y : {-4300.0, -2000.0, 700.0, 2700.0, 4700.0, 7600.0, StoreY1 + 90.0})
+		{
+			Obstacle(360.0, Y - 20.0, 400.0, Y + 20.0);
+		}
+		return W;
+	}
+	// The far side, from the curb to the tenement and its neighbors: the laundromat's steps out on it, the three
+	// brownstones' stoops up the street, the lamp posts and a can by the curb.
+	const double NorthY0 = TenementY + TenementHalf;
+	const double NorthY1 = NorthY0 + 3.0 * BrownstoneW;
+	Lane(RoadX1 + 160.0, From, To);
+	if (bBrownstones)
+	{
+		Lane(FarFront - 130.0, From, NorthY0 - 20.0);
+		Lane(FarFront - 130.0, NorthY1 + 20.0, To);
+		Obstacle(FarFront - 210.0, NorthY0, FarFront, NorthY1);
+	}
+	else
+	{
+		Lane(FarFront - 130.0, From, To);
+	}
+	Obstacle(FarFront - 72.0, WashDoorY0 - 20.0, FarFront, WashDoorY1 + 20.0);
+	Obstacle(1690.0, 2470.0, 1750.0, 2530.0);
+	for (const double Y : {-3200.0, -600.0, 1800.0, 4200.0, 7000.0})
+	{
+		Obstacle(RoadX1 + 20.0, Y - 20.0, RoadX1 + 60.0, Y + 20.0);
+	}
+	return W;
+}
+
+TArray<FStreetDoor> AStreetStage::Doors() const
+{
+	const FTransform& T = GetActorTransform();
+	TArray<FStreetDoor> Out;
+	auto Add = [&Out, &T](const TCHAR* Id, const FVector& Stand, float Yaw, const FVector& Threshold, bool bRoom) {
+		FStreetDoor D;
+		D.Id = Id;
+		D.Outside = FTransform(FRotator(0.0f, Yaw, 0.0f), Stand) * T;
+		D.Threshold = T.TransformPosition(Threshold);
+		D.bRoom = bRoom;
+		Out.Add(D);
+	};
+	Add(TEXT("store"), FVector(150.0, (DoorY0 + DoorY1) * 0.5, 0.0), 180.0f, FVector(DoorTrackX, (DoorY0 + DoorY1) * 0.5, 1.0), true);
+	Add(TEXT("washfold"), FVector(FarFront - 130.0, (WashDoorY0 + WashDoorY1) * 0.5, 0.0), 0.0f, FVector(WashDoorX, (WashDoorY0 + WashDoorY1) * 0.5, WashFloor), true);
+	Add(TEXT("home"), FVector(110.0, 0.0, 0.0), 180.0f, FVector(-66.0, 0.0, 14.0), false);
+	Add(TEXT("dee"), FVector(FarFront - 100.0, DeeDoorY, 0.0), 0.0f, FVector(FarFront + 28.0, DeeDoorY, 0.0), false);
+	return Out;
 }
 
 bool AStreetStage::IsOffTheSet(const FVector& At) const
@@ -2859,14 +4018,177 @@ float AStreetStage::SignHum(const FVector& Listener) const
 		return static_cast<float>(FMath::Square(FMath::Clamp(1.0 - (D - 150.0) / 650.0, 0.0, 1.0)));
 	};
 	// The box sign over the store's windows is lit at every hour; the pawn shop's tube round its window and the neon over
-	// the laundromat (the tenement's, three floors up, or the stand-in's over its windows) only while the lamps are.
+	// the laundromat (three floors up on the tenement) only while the lamps are.
 	const float Night = NightLevel(Daylight);
-	const FVector Neon = TenementFront ? TenementNeonAt : WashNeonAt;
-	const double NeonHalf = TenementFront ? 320.0 : 210.0;
 	float Hum = Near(FVector(4.0, 3940.0, 405.0), FVector(4.0, 4660.0, 405.0));
 	Hum = FMath::Max(Hum, Night * Near(FVector(12.0, PawnY0 + 150.0, 160.0), FVector(12.0, PawnY1 - 150.0, 160.0)));
-	Hum = FMath::Max(Hum, Night * Near(Neon - FVector(0.0, NeonHalf, 0.0), Neon + FVector(0.0, NeonHalf, 0.0)));
+	Hum = FMath::Max(Hum, Night * Near(TenementNeonAt - FVector(0.0, 320.0, 0.0), TenementNeonAt + FVector(0.0, 320.0, 0.0)));
 	return Hum;
+}
+
+// ------------------------------------------------------------------ the Wash & Fold at play
+
+void AStreetStage::PrepareWashGlow()
+{
+	GlowMids.Reset();
+	GlowParams.Reset();
+	TArray<TPair<FName, FLinearColor>> Colors;
+	TArray<TPair<FName, float>> Strengths;
+	// The slot wash_fold.py leaves for the game to drive (named Tag in every mesh: WF_DrumGlow, WF_TVScreen) gets a
+	// material of its own, made here and never saved (as the cars' paint, PaintCars), its glow then scaled from what it
+	// was given: by its dryer's tumble (DrumLights' index), the TV's picture (-1), or held dark (-2: the idle dryers,
+	// once). Should no slot carry the name, every glowing slot is taken (the displays then go with the drum).
+	auto Take = [&](UStaticMeshComponent* Mesh, int32 Driver, const TCHAR* Tag) {
+		const UStaticMesh* Source = Mesh ? Mesh->GetStaticMesh().Get() : nullptr;
+		if (!Source)
+		{
+			return;
+		}
+		const TArray<FStaticMaterial>& Slots = Source->GetStaticMaterials();
+		auto Named = [&Slots, Source, Tag](int32 Slot) {
+			const UMaterialInterface* Baked = Source->GetMaterial(Slot);
+			return Slots[Slot].MaterialSlotName.ToString().Contains(Tag) || (Baked && Baked->GetName().Contains(Tag));
+		};
+		bool bAnyNamed = false;
+		for (int32 Slot = 0; Slot < Slots.Num() && !bAnyNamed; ++Slot)
+		{
+			bAnyNamed = Named(Slot);
+		}
+		// A running dryer's own drum slot is lit (its bake is a dark drum's); anything else glows as it was baked.
+		const bool bLitDrum = Driver >= 0 && bAnyNamed;
+		const float Boost = bLitDrum ? DrumGlow / DrumBakeGlow : 1.0f;
+		const FLinearColor Tint = bLitDrum ? SrgbHex(DrumLightHex) : FLinearColor::White;
+		for (int32 Slot = 0; Slot < Slots.Num(); ++Slot)
+		{
+			UMaterialInterface* Baked = Source->GetMaterial(Slot);
+			if ((bAnyNamed && !Named(Slot)) || !GlowOf(Baked, Colors, Strengths))
+			{
+				continue;
+			}
+			UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Baked, Mesh);
+			Mid->SetFlags(RF_Transient);
+			Mesh->SetMaterial(Slot, Mid);
+			const int32 Index = GlowMids.Add(Mid);
+			for (const TPair<FName, FLinearColor>& C : Colors)
+			{
+				if (Driver == -2)
+				{
+					Mid->SetVectorParameterValue(C.Key, FLinearColor(0.0f, 0.0f, 0.0f, C.Value.A));
+					continue;
+				}
+				FGlowParam P;
+				P.Mid = Index;
+				P.Name = C.Key;
+				P.bVector = true;
+				P.Base = FLinearColor(C.Value.R * Tint.R * Boost, C.Value.G * Tint.G * Boost, C.Value.B * Tint.B * Boost, C.Value.A);
+				P.Owner = Driver;
+				GlowParams.Add(P);
+			}
+			for (const TPair<FName, float>& S : Strengths)
+			{
+				if (Driver == -2)
+				{
+					Mid->SetScalarParameterValue(S.Key, 0.0f);
+					continue;
+				}
+				FGlowParam P;
+				P.Mid = Index;
+				P.Name = S.Key;
+				P.bVector = false;
+				P.Base = FLinearColor(S.Value * Boost, 0.0f, 0.0f, 1.0f);
+				P.Owner = Driver;
+				GlowParams.Add(P);
+			}
+		}
+	};
+	for (int32 I = 0; I < DrumStacks.Num(); ++I)
+	{
+		Take(DrumStacks[I], I, TEXT("DrumGlow"));
+	}
+	Take(WashTv, -1, TEXT("TVScreen"));
+	Take(IdleDryers, -2, TEXT("DrumGlow"));
+}
+
+void AStreetStage::AnimateWash(float Dt, const FVector& Camera)
+{
+	WashClock += Dt;
+	// The bells on their strap, swinging out as the door moved them and settling.
+	if (WashBell && BellSwing > 0.0f)
+	{
+		BellSwing = BellSwing > 0.002f ? BellSwing * FMath::Exp(-2.6f * Dt) : 0.0f;
+		WashBell->SetRelativeRotation(FRotator(24.0f * BellSwing * FMath::Sin(WashClock * UE_TWO_PI * 2.1f), 0.0f, 0.0f));
+	}
+	// What runs in it only moves while it can be seen: from the sidewalk across the street or nearer.
+	const FVector L = GetActorTransform().InverseTransformPosition(Camera);
+	if (L.X < -300.0 || FMath::Abs(L.Y - TenementY) > 3500.0)
+	{
+		return;
+	}
+	// A running dryer's drum turns a little under once a second, the clothes lifted and falling through its light.
+	const float Now = WashClock;
+	auto Tumble = [Now](int32 I) {
+		const float Rate = 0.72f + 0.06f * static_cast<float>(I % 4);
+		const float Phase = 1.7f * static_cast<float>(I);
+		return 0.74f + 0.16f * FMath::Sin(UE_TWO_PI * Rate * Now + Phase) + 0.1f * FMath::Sin(UE_TWO_PI * Rate * 2.7f * Now + 2.3f * Phase);
+	};
+	for (int32 I = 0; I < DrumLights.Num(); ++I)
+	{
+		const float Level = Tumble(I);
+		if (DrumLights[I])
+		{
+			DrumLights[I]->SetIntensity(DrumCandela * Level);
+		}
+		if (DrumMids.IsValidIndex(I) && DrumMids[I])
+		{
+			DrumMids[I]->SetScalarParameterValue(TEXT("Emissive"), DrumGlow * Level);
+		}
+	}
+	// The TV cuts to another shot every few seconds (its light on the room and its color with it), and flickers a little
+	// within one.
+	TvCutIn -= Dt;
+	if (TvCutIn <= 0.0f)
+	{
+		// A late-night poker broadcast: the felt's green, the players' faces under the lights, the graphics' blue, a wide shot.
+		static const FLinearColor Shots[5] = {FLinearColor(0.62f, 0.95f, 0.72f), FLinearColor(1.0f, 0.84f, 0.66f), FLinearColor(0.66f, 0.78f, 1.0f), FLinearColor(0.92f, 0.94f, 1.0f),
+			FLinearColor(0.7f, 0.9f, 0.75f)};
+		TvCutIn = TvDice.FRandRange(1.5f, 6.0f);
+		TvTarget = TvDice.FRandRange(0.45f, 1.0f);
+		TvColorTarget = Shots[TvDice.RandRange(0, 4)];
+	}
+	const float Cut = FMath::Min(1.0f, Dt * 14.0f);
+	TvLevel += (TvTarget - TvLevel) * Cut;
+	TvColor += (TvColorTarget - TvColor) * Cut;
+	const float Screen = TvLevel * (0.92f + 0.08f * FMath::Sin(Now * 23.0f) * FMath::Sin(Now * 7.3f));
+	if (WashTvLight)
+	{
+		WashTvLight->SetIntensity(45.0f * Screen);
+		WashTvLight->SetLightColor(TvColor);
+	}
+	if (WashTvMid)
+	{
+		WashTvMid->SetScalarParameterValue(TEXT("Emissive"), 18.0f * Screen);
+		WashTvMid->SetVectorParameterValue(TEXT("BaseColor"), TvColor * 0.8f);
+		WashTvMid->SetVectorParameterValue(TEXT("Color"), TvColor * 0.8f);
+	}
+	// The imported dryers' drums and the imported TV's screen (its own picture: only its brightness follows the cuts),
+	// scaled from what they were given the same way.
+	for (const FGlowParam& P : GlowParams)
+	{
+		UMaterialInstanceDynamic* Mid = GlowMids.IsValidIndex(P.Mid) ? GlowMids[P.Mid].Get() : nullptr;
+		if (!Mid)
+		{
+			continue;
+		}
+		const float K = P.Owner >= 0 ? Tumble(P.Owner) : Screen;
+		if (P.bVector)
+		{
+			Mid->SetVectorParameterValue(P.Name, FLinearColor(P.Base.R * K, P.Base.G * K, P.Base.B * K, P.Base.A));
+		}
+		else
+		{
+			Mid->SetScalarParameterValue(P.Name, P.Base.R * K);
+		}
+	}
 }
 
 void AStreetStage::SetClock(double WorldMinutes)
@@ -2894,6 +4216,10 @@ FString AStreetStage::PlaceName(const FVector& At) const
 	if (IsInsideStore(At))
 	{
 		return TEXT("LUCKY PENNY #212");
+	}
+	if (IsInsideWash(At))
+	{
+		return TEXT("WASH & FOLD");
 	}
 	const FVector L = GetActorTransform().InverseTransformPosition(At);
 	if (L.X < -100.0 && L.Y > StoreY1 - 50.0 && L.Y < MarketY1 + 50.0)

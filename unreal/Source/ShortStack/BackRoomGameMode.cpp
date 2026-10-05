@@ -3380,16 +3380,19 @@ void ABackRoomGameMode::GoHome()
 		return;
 	}
 	bGoingHome = true;
-	FString Options = FString::Printf(TEXT("Home?Net=%lld?Learned=%d?From=%.0f"), NetCents, Table ? Table->LearnedThisNight : 0, LeftHomeAt);
+	FString Night = FString::Printf(TEXT("Net=%lld?Learned=%d?From=%.0f"), NetCents, Table ? Table->LearnedThisNight : 0, LeftHomeAt);
 	if (bBustedOut)
 	{
-		Options += TEXT("?Busted");
+		Night += TEXT("?Busted");
 	}
 	if (bClosed)
 	{
-		Options += TEXT("?Closed");
+		Night += TEXT("?Closed");
 	}
-	UGameplayStatics::OpenLevel(this, FName(TEXT("NightOne")), true, Options);
+	// Walked in from the street, through the Wash & Fold's back door: back out the same way, onto Fifth at the laundromat
+	// (the street catches up the calendar from From, as the desk does). From the Burner app, home to the desk.
+	const bool bStreet = UGameplayStatics::HasOption(OptionsString, TEXT("FromStreet"));
+	UGameplayStatics::OpenLevel(this, FName(bStreet ? TEXT("Street") : TEXT("NightOne")), true, (bStreet ? TEXT("Start=washfold?Night?") : TEXT("Home?")) + Night);
 }
 
 FString ABackRoomGameMode::ArrivalLine() const

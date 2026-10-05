@@ -67,7 +67,7 @@ std::vector<Activity> Build()
 	Add("sam-ghost", Kind::Ghost, "Play my account", "Sam", 3.0, 0.0, 150.0, 400.0, 18.0, 0.0, 0.10, 18 * 60, 3 * 60, 0xf2c14e,
 		"Sam plays big and badly. He pays you to log in as him and play his session. RiverLine security calls it ghosting.");
 	// Dee's game: Tuesdays, Thursdays and Saturdays, doors at nine, the last hand at five.
-	Add("dee-game", Kind::Game, "Dee's game", "Spin Cycle Laundromat, the back room", 6.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 21 * 60, 3 * 60, 0xf2a541,
+	Add("dee-game", Kind::Game, "Dee's game", "Wash & Fold, the back room", 6.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 21 * 60, 3 * 60, 0xf2a541,
 		"One-two no-limit behind the dryers. $40 to sit, $200 max. Dee deals, the regulars talk, and you can read every one of them.");
 	L.back().Days = (1 << 1) | (1 << 3) | (1 << 5);
 	// The Embercrest's card room, up at the resort on the ridge: its desk is open from three hours before the noon game to

@@ -17,9 +17,10 @@ struct FStreetOutfit;
  * The player on foot: the person from the character creator, walking the street in third person over
  * the shoulder or in first person from behind their own eyes (V switches, easing between the two).
  * The body is the hero MetaHuman nearest the look (hero_cast.py builds them: HeroA0..HeroB2 by body
- * type and skin tone, falling back to the Back Room's Hero, then the archetype body). It wears the
- * jacket color on the shirt (Flannel brings its plaid), shorts in a tone that goes with it, sneakers
- * fitted to its feet, the hair color, facial hair and hat and glasses from the creator, and is scaled to
+ * type and skin tone, falling back to the Back Room's Hero, then the archetype body). It wears jeans and a
+ * bomber in the jacket color (PutOnGarments; until they're imported, the MetaHuman's tee in that color, Flannel
+ * bringing its plaid, and shorts in a tone that goes with it), sneakers fitted to its feet, the hair color,
+ * facial hair and hat and glasses from the creator, and is scaled to
  * the height and build; UStreetBodyAnim walks it. Without a controller (Benny behind the counter) it
  * stands idle and watches the player when they come near.
  */
@@ -98,6 +99,14 @@ public:
 
 private:
 	void BuildFromMetaHuman(UClass* Blueprint, const FStreetOutfit& Outfit);
+	/**
+	 * Real clothes in place of the MetaHuman's tee and shorts, when garments_setup.py has imported them for the body type:
+	 * straight-leg jeans and a bomber (SK_Garment_Jeans_<A|B>, SK_Garment_Jacket_<A|B>, or a pair fitted to Hero itself),
+	 * skinned to the hero bodies' own skeleton and following the body as their leader pose, the jacket in the creator's
+	 * jacket color. Hero is the hero_cast MetaHuman being worn (HeroA1); for any other (the Back Room's Hero standing in), or
+	 * without both pieces, nothing changes.
+	 */
+	void PutOnGarments(const FStreetOutfit& Outfit, const FString& Hero);
 	void UseArchetype();
 	void ClearWearables();
 	void LinkFace();

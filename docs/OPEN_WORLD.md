@@ -114,7 +114,7 @@ Each step keeps the walk-around world small, dense and tied to the career. There
 - [x] Hunger and thirst, the store's catalog, checkout, the bag, Benny
 - [x] Penny Drop on the laptop: delivery, eating at home, the kitchen tap, a week's pacing check
 - [x] Rent with teeth: monthly reminders, a late fee without drift, and eviction to Dee's couch. While you're out the gear is in storage, the desk is empty, and an unpaid unit goes to auction. **Move back in** gets you home (GAME_DESIGN §10)
-- [ ] Dee's couch as a place: wake up in her front room, not the apartment, while evicted. Door 1812's lock refuses your key
+- [x] Dee's couch as a place: while evicted the hub is her front room upstairs over the Wash & Fold (her recliner, TV and lamp; Dee home, asleep or downstairs at her game by the hour). Door 1812's lock refuses your key; her street door takes you up (2026-10-05)
 - [x] The street level, the character, procedural gait, first and third person, the HUD, the counter UI, the pause menu
 - [x] Apartment ↔ street travel with the clock carried over
 - [x] Third person at the Back Room table
@@ -122,4 +122,8 @@ Each step keeps the walk-around world small, dense and tied to the career. There
 - [x] First play on the desktop: gait, wearable offsets, prop scale and facing, lighting balance (2026-10-04)
 - [x] The street's own sound (rain, traffic, the store's coolers and ballasts, crossfading at the door) and a dressed store interior
 - [x] The Embercrest from outside: the bus stop, the drive, the canopy and the doors, by day, dusk and night
+- [x] The Wash & Fold is enterable (washers, the dryer wall, Inez at the counter, its own sound), and its steel back door walks you into Dee's game on Tuesday, Thursday and Saturday nights and back out onto the street
+- [x] Pedestrians on Fifth (up to six of the cast on the procedural gait: umbrellas in the rain, in and out of the store and the laundromat, fewer in the dead hours)
+- [x] The apartment's window and light follow the clock (day, dusk, night), and so does Dee's room
+- [x] A garment prototype: fitted jeans and a jacket skinned to the hero bodies replace the Creator's tee and shorts on the street
 - [ ] Step 2 onward, as above

@@ -3,6 +3,9 @@
 #include "Engine/Engine.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
+#include "DeeRoomCaption.h"
+#include "DeeRoomStage.h"
+#include "DeeRoomTone.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -16,6 +19,7 @@
 #include "Misc/DateTime.h"
 #include "NightOneAudio.h"
 #include "NightOneGame.h"
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/World.h"
@@ -36,6 +40,19 @@
 namespace NightOneModeDetail
 {
 const TCHAR* const SettingsSlot = UNightOneSaveGame::SettingsSlotName();
+
+/**
+ * The test hooks' overrides of the hub (ss.Home.Evicted, ss.Home.Hour): never saved, kept across the hub's own trips out
+ * and back (the street, the Back Room), forgotten when the level starts fresh.
+ */
+int32 GHubEvicted = -1;
+float GHubHour = -1.0f;
+/**
+ * What Dee says only once, kept the same way (never saved: a relaunch may hear it again): the first night's welcome (the
+ * eviction it was said for), and her text that her game's on downstairs (the night it was sent for).
+ */
+double GWelcomedFor = -1.0;
+int64 GGameTextNight = MIN_int64;
 
 FString SanitizeName(const FString& In)
 {
@@ -302,6 +319,53 @@ FAutoConsoleCommandWithWorldAndArgs RentNextCmd(TEXT("ss.Rent.Next"),
 		}
 		LogLines(Head + (Left > 0.0 ? " Less than a minute to " + What + " already.\n" : " Already past " + What + ": it lands on the next update.\n"));
 	}));
+
+// The hub: Dee's front room or 1812, and the hour it shows, for testing (none of it saved).
+ANightOneGameMode* WorldMode(UWorld* World)
+{
+	return World ? World->GetAuthGameMode<ANightOneGameMode>() : nullptr;
+}
+
+FAutoConsoleCommandWithWorldAndArgs HomeEvictedCmd(TEXT("ss.Home.Evicted"),
+	TEXT("ss.Home.Evicted [1|0|-1]: the hub as if evicted (Dee's front room) or not (1812), now; not saved. No argument toggles it, -1 follows the career again."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (ANightOneGameMode* Mode = WorldMode(World))
+		{
+			Mode->TestEvicted(Args.Num() > 0 ? FCString::Atoi(*Args[0]) : (Mode->IsAtDees() ? 0 : 1));
+			UE_LOG(LogNightOne, Display, TEXT("%s"), *Mode->DescribeHub());
+		}
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs HomeHourCmd(TEXT("ss.Home.Hour"),
+	TEXT("ss.Home.Hour <0-24|off>: the hub's light, its window and Dee as at that hour today; the career's clock doesn't move (testing, not saved)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (ANightOneGameMode* Mode = WorldMode(World))
+		{
+			const bool bOff = Args.Num() == 0 || Args[0].Equals(TEXT("off"), ESearchCase::IgnoreCase);
+			Mode->TestHour(bOff ? -1.0f : FCString::Atof(*Args[0]));
+			UE_LOG(LogNightOne, Display, TEXT("%s"), *Mode->DescribeHub());
+		}
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs HomeSkipCmd(TEXT("ss.Home.Skip"),
+	TEXT("ss.Home.Skip <0-24>: the career's clock forward to the next time it's that hour, as if the hours passed (the needs, the bills). Not with tables open."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		ANightOneGameMode* Mode = WorldMode(World);
+		if (!Mode || Args.Num() == 0)
+		{
+			LogLines("ss.Home.Skip <0-24>: the hour to move the clock forward to.\n");
+			return;
+		}
+		UE_LOG(LogNightOne, Display, TEXT("%s"), *Mode->TestSkipTo(FCString::Atof(*Args[0])));
+	}));
+
+FAutoConsoleCommandWithWorld HomeDescribeCmd(TEXT("ss.Home.Describe"), TEXT("Where the hub is, the hour it shows, and where Dee is."),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World) {
+		if (const ANightOneGameMode* Mode = WorldMode(World))
+		{
+			UE_LOG(LogNightOne, Display, TEXT("%s"), *Mode->DescribeHub());
+		}
+	}));
 #endif
 
 void SetConsoleInt(const TCHAR* Name, int32 Value)
@@ -438,24 +502,14 @@ void ANightOneGameMode::StartPlay()
 {
 	Super::StartPlay();
 	UWorld* World = GetWorld();
-	for (TActorIterator<ANightOneStage> It(World); It; ++It)
+	// A fresh start of the level forgets the test hooks' overrides and what Dee has said once (a trip out and back, or
+	// quitting to the menu, keeps them).
+	if (!UGameplayStatics::HasOption(OptionsString, TEXT("Home")) && !UGameplayStatics::HasOption(OptionsString, TEXT("Menu")))
 	{
-		Stage = *It;
-		break;
-	}
-	if (!Stage)
-	{
-		Stage = World->SpawnActor<ANightOneStage>(ANightOneStage::StaticClass(), FTransform::Identity);
-	}
-	if (Stage)
-	{
-		TWeakObjectPtr<UNightOneAudio> WeakAudio = Audio.Get();
-		Stage->OnThunder = [WeakAudio](float Delay, float Strength) {
-			if (WeakAudio.IsValid())
-			{
-				WeakAudio->Thunder(Delay, Strength);
-			}
-		};
+		GHubEvicted = -1;
+		GHubHour = -1.0f;
+		GWelcomedFor = -1.0;
+		GGameTextNight = MIN_int64;
 	}
 
 	// Progress from the last session.
@@ -468,6 +522,10 @@ void ANightOneGameMode::StartPlay()
 	bHasSave = bLoaded;
 	const std::string Seed = std::string(TCHAR_TO_UTF8(*FString::Printf(TEXT("%lld"), FDateTime::Now().GetTicks())));
 	Game = MakeUnique<FNightOneGame>(*this, bLoaded ? &Loaded : nullptr, Seed);
+	// The hub: the apartment, or Dee's front room across the street while the career is evicted (from the title screen
+	// on: it's where the player wakes). Moving back in returns it to 1812 the next time the level opens.
+	UseRoom(HubEvicted());
+	ArrivedWith = OptionsString;
 
 	// Settings from the last session (defaults on the first run).
 	ss::ui::GameSettings SavedSettings;
@@ -506,6 +564,9 @@ void ANightOneGameMode::StartPlay()
 		// written when it's sent, once the hours away have been caught up (the locks may have changed at 3 AM).
 		HomeOptions = OptionsString;
 		HomeTextAt = 4.5;
+		// The hours away are caught up on the first update: if the locks changed while out, the player comes in at Dee's
+		// (the room changes while it's still black).
+		ArrivalSwapUntil = 0.8;
 		// What happened on the calendar while out (a deadline passing at 3 AM) still happens.
 		const FString From = UGameplayStatics::ParseOption(OptionsString, TEXT("From"));
 		if (!From.IsEmpty())
@@ -663,7 +724,431 @@ FString ANightOneGameMode::TestDescribe() const
 	{
 		Out += FString::Printf(TEXT("ledger: %s %s\n"), UTF8_TO_TCHAR(L.Ledger[I].Label.c_str()), *Dollars(L.Ledger[I].Amount));
 	}
-	return Out;
+	return Out + DescribeHub() + TEXT("\n");
+}
+
+void ANightOneGameMode::TestEvicted(int32 Evicted)
+{
+	GHubEvicted = Evicted < 0 ? -1 : (Evicted > 0 ? 1 : 0);
+	const bool bWant = HubEvicted();
+	// On the way out the door, the room stays as it is (the next load has the one wanted).
+	if (!Game || bWant == bAtDees || bLeaving)
+	{
+		return;
+	}
+	UseRoom(bWant);
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	{
+		if (PC->PlayerCameraManager)
+		{
+			PC->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, 0.8f, FLinearColor::Black, true, false);
+		}
+	}
+	if (bStarted && bAtDees)
+	{
+		// In the door as if from the street: she says hello.
+		ArrivedWith.Reset();
+		DeeHelloAt = RealTime + 2.0;
+	}
+}
+
+void ANightOneGameMode::TestHour(float Hour)
+{
+	GHubHour = Hour < 0.0f ? -1.0f : FMath::Clamp(Hour, 0.0f, 24.0f);
+}
+
+FString ANightOneGameMode::TestSkipTo(float Hour)
+{
+	if (!Game)
+	{
+		return TEXT("no game");
+	}
+	ss::Session& S = Game->Session;
+	// As ss.Rent.Next: not under an open table, or in a time skip (it sets the clock every frame from where it began).
+	if (S.T)
+	{
+		return TEXT("Not with a table open: the clock stays.");
+	}
+	if (S.TimeSkip.Active)
+	{
+		return TEXT("Not during a time skip: the clock stays.");
+	}
+	const double Now = S.WorldMinutes();
+	double Ahead = static_cast<double>(FMath::Clamp(Hour, 0.0f, 24.0f)) * 60.0 - FMath::Fmod(Now, 1440.0);
+	if (Ahead < 1.0)
+	{
+		Ahead += 1440.0;
+	}
+	S.LobbyMinutes += Ahead;
+	return FString::Printf(TEXT("The clock moves %.1f hours ahead. %s"), Ahead / 60.0, *DescribeHub());
+}
+
+FString ANightOneGameMode::DescribeHub() const
+{
+	const double World = HubWorldMinutes();
+	const int32 M = FMath::FloorToInt(FMath::Fmod(FMath::Max(0.0, World), 1440.0));
+	const int32 H = M / 60;
+	const bool bCareerEvicted = Game && Game->Session.Evicted();
+	return FString::Printf(TEXT("Hub: %s%s | %d:%02d %s%s, daylight %.2f | the career %s | Dee %s"), bAtDees ? TEXT("Dee's front room") : TEXT("1812, the apartment"),
+		GHubEvicted >= 0 ? TEXT(" (ss.Home.Evicted)") : TEXT(""), H % 12 == 0 ? 12 : H % 12, M % 60, H < 12 ? TEXT("AM") : TEXT("PM"),
+		GHubHour >= 0.0f ? TEXT(" (ss.Home.Hour)") : TEXT(""), ss::life::Daylight(World), bCareerEvicted ? TEXT("evicted") : TEXT("housed"),
+		DeeRoom::WhereName(DeeRoom::WhereAt(World)));
+}
+
+// ------------------------------------------------------------------ the hub's room
+
+bool ANightOneGameMode::HubEvicted() const
+{
+	return GHubEvicted >= 0 ? GHubEvicted == 1 : (Game && Game->Session.Evicted());
+}
+
+double ANightOneGameMode::HubWorldMinutes() const
+{
+	const double World = Game ? Game->Session.WorldMinutes() : 0.0;
+	if (GHubHour < 0.0f)
+	{
+		return World;
+	}
+	return FMath::FloorToDouble(World / 1440.0) * 1440.0 + static_cast<double>(GHubHour) * 60.0;
+}
+
+ADeeRoomStage* ANightOneGameMode::DeeStage() const
+{
+	return bAtDees ? Cast<ADeeRoomStage>(Stage) : nullptr;
+}
+
+void ANightOneGameMode::UseRoom(bool bDees)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	// One room in the level at a time: the one wanted (the apartment placed in the level, or Dee's built now), the other
+	// gone. An apartment saved in the level before its construction last changed (a cooked map not saved since) is built
+	// anew rather than played half-built. Should the wanted room fail to build, the one there is stays.
+	ANightOneStage* Keep = nullptr;
+	TArray<ANightOneStage*> Stages;
+	for (TActorIterator<ANightOneStage> It(World); It; ++It)
+	{
+		ANightOneStage* S = *It;
+		Stages.Add(S);
+		if (!Keep && S->IsA<ADeeRoomStage>() == bDees && S->IsSetCurrent())
+		{
+			Keep = S;
+		}
+	}
+	if (!Keep)
+	{
+		Keep = World->SpawnActor<ANightOneStage>(bDees ? ADeeRoomStage::StaticClass() : ANightOneStage::StaticClass(), FTransform::Identity);
+	}
+	if (!Keep)
+	{
+		UE_LOG(LogNightOne, Warning, TEXT("%s couldn't be built: the hub stays where it is"), bDees ? TEXT("Dee's front room") : TEXT("The apartment"));
+		Keep = IsValid(Stage) ? Stage.Get() : (Stages.Num() > 0 ? Stages[0] : nullptr);
+	}
+	for (ANightOneStage* S : Stages)
+	{
+		if (S != Keep)
+		{
+			S->Destroy();
+		}
+	}
+	Stage = Keep;
+	bAtDees = Keep && Keep->IsA<ADeeRoomStage>();
+	bDeeKnown = false;
+	PendingArrival = DeeRoom::FLine();
+	WokeAt = -1.0;
+	BindStage();
+	UE_LOG(LogNightOne, Log, TEXT("The hub is %s"), bAtDees ? TEXT("Dee's front room") : TEXT("the apartment"));
+}
+
+void ANightOneGameMode::BindStage()
+{
+	if (!Stage)
+	{
+		return;
+	}
+	TWeakObjectPtr<UNightOneAudio> WeakAudio = Audio.Get();
+	Stage->OnThunder = [WeakAudio](float Delay, float Strength) {
+		if (WeakAudio.IsValid())
+		{
+			WeakAudio->Thunder(Delay, Strength);
+		}
+	};
+	if (Game)
+	{
+		ApplyStageSettings(Game->Menu.Settings);
+	}
+	if (ANightOnePawn* Seat = GetSeat())
+	{
+		Seat->Configure(Stage->EyeLocation(), Stage->ScreenCenter(), Stage->ScreenNormal(), Stage->ScreenSize());
+	}
+	// The locks' dressing is the new room's from its first frame; Dee's room has the player's boxes by the couch.
+	EvictedShown = -1;
+	if (ADeeRoomStage* Room = DeeStage())
+	{
+		Room->SetBoxes(true);
+	}
+	// The room's sound: her radiator and her TV over the rain, or the apartment's own hum.
+	if (Audio)
+	{
+		if (bAtDees)
+		{
+			RoomTone = MakeShared<FDeeRoomTone>(11u);
+			TSharedPtr<FDeeRoomTone> Tone = RoomTone;
+			Audio->SetAmbienceSource([Tone](float* Out, int32 Count) { Tone->Render(Out, Count); });
+		}
+		else if (RoomTone)
+		{
+			RoomTone.Reset();
+			Audio->SetAmbienceSource(nullptr);
+		}
+	}
+}
+
+bool ANightOneGameMode::IsSleeping() const
+{
+	if (!Game || !Game->Session.TimeSkip.Active)
+	{
+		return false;
+	}
+	const ss::life::Activity* Doing = ss::life::Find(Game->Session.TimeSkip.Result.ActivityId);
+	return Doing && Doing->Type == ss::life::Kind::Sleep;
+}
+
+void ANightOneGameMode::TickLockedOut()
+{
+	if (!Game)
+	{
+		return;
+	}
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	APlayerCameraManager* Camera = PC ? PC->PlayerCameraManager.Get() : nullptr;
+	// The room has gone dark: Dee's front room comes up.
+	if (MoveSwapAt >= 0.0)
+	{
+		if (bLeaving)
+		{
+			MoveSwapAt = -1.0; // out of the door instead: the next load has the player at hers
+			return;
+		}
+		if (RealTime < MoveSwapAt)
+		{
+			return;
+		}
+		MoveSwapAt = -1.0;
+		if (!bAtDees && HubEvicted())
+		{
+			UseRoom(true);
+			// In the door as from the street, with the laptop under an arm: she says hello once the camera's settled.
+			ArrivedWith.Reset();
+			DeeHelloAt = RealTime + 2.8;
+		}
+		if (Camera)
+		{
+			Camera->StartCameraFade(1.0f, 0.0f, 1.8f, FLinearColor::Black, true, false);
+		}
+		return;
+	}
+	if (MoveToDeesAt < 0.0 || RealTime < MoveToDeesAt)
+	{
+		return;
+	}
+	if (bAtDees || !HubEvicted())
+	{
+		MoveToDeesAt = -1.0;
+		return;
+	}
+	// Not while anything holds the player at the laptop: a table or the results of one, a shift or a night's sleep or its
+	// card, a menu, the eyes still opening.
+	const ss::Session& S = Game->Session;
+	const bool bAtTable = S.T || S.TableCount() > 0 || S.CurrentScreen == ss::Screen::Table || S.CurrentScreen == ss::Screen::Results;
+	if (!bStarted || bLeaving || IsMenuOpen() || bAtTable || S.TimeSkip.Active || S.HasOutcome || SleepFade > 0.0f)
+	{
+		return;
+	}
+	// The coat on, the laptop under an arm, out of 1812 and across the street.
+	MoveToDeesAt = -1.0;
+	MoveSwapAt = RealTime + 1.4;
+	if (Camera)
+	{
+		Camera->StartCameraFade(0.0f, 1.0f, 1.3f, FLinearColor::Black, true, true);
+	}
+	if (Audio)
+	{
+		Audio->PlayEffect(ss::audio::Effect::Scrape, 0.7f);
+	}
+}
+
+void ANightOneGameMode::SayDee(const DeeRoom::FLine& Line)
+{
+	if (Line.IsEmpty() || !Game)
+	{
+		return;
+	}
+	switch (Line.Kind)
+	{
+	case DeeRoom::FLine::Spoken:
+		if (ADeeRoomStage* Room = DeeStage())
+		{
+			Room->DeeSay(Line.Text);
+		}
+		if (Caption)
+		{
+			Caption->Show(TEXT("Dee"), Line.Text);
+		}
+		break;
+	case DeeRoom::FLine::Narration:
+		if (Caption)
+		{
+			Caption->Show(FString(), Line.Text);
+		}
+		break;
+	case DeeRoom::FLine::Texted:
+		Game->Text("Dee", std::string(TCHAR_TO_UTF8(*Line.Text)));
+		break;
+	case DeeRoom::FLine::None:
+		break;
+	}
+}
+
+void ANightOneGameMode::DeeDoor()
+{
+	ADeeRoomStage* Room = DeeStage();
+	if (Room && Audio)
+	{
+		const FVector At = Room->DoorLocation();
+		Audio->PlaySamples(FDeeRoomTone::RenderDoor(DoorSeed++), 0.6f, &At);
+	}
+}
+
+void ANightOneGameMode::TickDeeRoom()
+{
+	ADeeRoomStage* Room = DeeStage();
+	if (!Room || !Game)
+	{
+		return;
+	}
+	ss::Session& S = Game->Session;
+	const double World = HubWorldMinutes();
+	const DeeRoom::EWhere Where = DeeRoom::WhereAt(World);
+	// While the hours race (a shift, a night on the couch) she comes and goes unseen and says nothing.
+	const bool bSkipping = S.TimeSkip.Active;
+	if (!bDeeKnown)
+	{
+		bDeeKnown = true;
+		DeeWhere = Where;
+		Room->SetDee(Where, true);
+		// The note by the laptop says where she is.
+		Room->SetNote(DeeRoom::Note(Where, World));
+	}
+	else if (Where != DeeWhere)
+	{
+		const DeeRoom::EWhere Was = DeeWhere;
+		DeeWhere = Where;
+		Room->SetDee(Where, bSkipping || !bStarted);
+		Room->SetNote(DeeRoom::Note(Where, World));
+		PendingArrival = DeeRoom::FLine();
+		if (bStarted && !bSkipping)
+		{
+			const DeeRoom::FLine Line = DeeRoom::Change(Was, Where, World);
+			if (Where == DeeRoom::EWhere::Home)
+			{
+				PendingArrival = Line; // once she's in her chair
+			}
+			else if (Was != DeeRoom::EWhere::Home || Room->IsDeeHere())
+			{
+				// Said as she gets up to go (she's still in her chair), or as she passes through (up the stairs to bed,
+				// out for the day): her door, then. (Due home but never sat down, the player having had the chair in view
+				// all along, she isn't coming in now and has nothing to say on her way.)
+				SayDee(Line);
+				if (Was != DeeRoom::EWhere::Home)
+				{
+					DeeDoor();
+				}
+			}
+		}
+	}
+	if (Room->ConsumeDeeArrived())
+	{
+		DeeDoor();
+		// To a player asleep on the couch she comes in quietly.
+		if (!bSkipping)
+		{
+			SayDee(PendingArrival);
+		}
+		PendingArrival = DeeRoom::FLine();
+	}
+	if (Room->ConsumeDeeLeft())
+	{
+		DeeDoor();
+	}
+	// The room's sound has her TV, and the radiator's heat for the hour.
+	if (RoomTone)
+	{
+		RoomTone->SetTv(Room->IsTvOn());
+		RoomTone->SetHeat(1.0f - 0.65f * static_cast<float>(ss::life::Daylight(World)));
+	}
+	// As the player comes in (the camera settled): what she says, texts, or the room tells them. Home but not sat down
+	// yet (still loading in), she's given a moment more.
+	const bool bWaitForHer = DeeWhere == DeeRoom::EWhere::Home && !Room->IsDeeHere() && RealTime < DeeHelloAt + 8.0;
+	if (DeeHelloAt >= 0.0 && RealTime >= DeeHelloAt && bSkipping)
+	{
+		// Straight down for a nap or onto a shift before she'd said a word: she lets it go.
+		DeeHelloAt = -1.0;
+		ArrivedWith.Reset();
+	}
+	if (DeeHelloAt >= 0.0 && RealTime >= DeeHelloAt && !bWaitForHer)
+	{
+		DeeHelloAt = -1.0;
+		const DeeRoom::EArrival From = DeeRoom::ArrivalFrom(ArrivedWith);
+		// The first night's welcome is said once (back from the corner store an hour later, the couch isn't made up again).
+		const bool bWelcome = DeeRoom::FirstNight(S, World) && GWelcomedFor != S.Life.EvictedAt;
+		DeeRoom::FLine Hello = DeeRoom::Arrival(DeeWhere, From, ArrivedWith, World, bWelcome);
+		if (DeeWhere == DeeRoom::EWhere::Home && (From == DeeRoom::EArrival::BackRoom || From == DeeRoom::EArrival::Embercrest))
+		{
+			// Sitting right there, she says what she'd have texted about the night (her game's words as they are), to
+			// the player's face, and doesn't text it.
+			const FString Night = From == DeeRoom::EArrival::BackRoom ? HomeTextFromOptions(HomeOptions, S) : FString();
+			if (!Night.IsEmpty())
+			{
+				Hello.Kind = DeeRoom::FLine::Spoken;
+				Hello.Text = Night;
+				Hello.bWelcome = false;
+			}
+			if (Hello.Kind == DeeRoom::FLine::Spoken)
+			{
+				HomeTextAt = -1.0;
+			}
+		}
+		// Her game's on downstairs: she texts it once a night, not each time the player comes back up (the night is the
+		// evening's until her last hand at five).
+		if (DeeWhere == DeeRoom::EWhere::Game && Hello.Kind == DeeRoom::FLine::Texted)
+		{
+			const int64 Tonight = static_cast<int64>(FMath::FloorToDouble((World - 5.0 * 60.0) / 1440.0));
+			if (Tonight == GGameTextNight)
+			{
+				Hello = DeeRoom::FLine();
+			}
+			GGameTextNight = Tonight;
+		}
+		if (Hello.bWelcome && !Hello.IsEmpty())
+		{
+			GWelcomedFor = S.Life.EvictedAt;
+		}
+		SayDee(Hello);
+		ArrivedWith.Reset();
+	}
+	// Up off the couch with her home: a word about it.
+	if (WokeAt >= 0.0 && RealTime >= WokeAt)
+	{
+		WokeAt = -1.0;
+		if (DeeWhere == DeeRoom::EWhere::Home && Room->IsDeeHere())
+		{
+			SayDee(DeeRoom::Woke(World));
+		}
+	}
 }
 
 void ANightOneGameMode::CreateViewportWidgets()
@@ -675,6 +1160,9 @@ void ANightOneGameMode::CreateViewportWidgets()
 	}
 	Overlay = SNew(SNightOneOverlay);
 	Viewport->AddViewportWidgetContent(Overlay.ToSharedRef(), 10);
+	// What's said in the room (Dee, at hers), over the overlay and under the menus.
+	Caption = SNew(SDeeRoomCaption);
+	Viewport->AddViewportWidgetContent(Caption.ToSharedRef(), 15);
 
 	MenuWidget = SNew(SFrontEndWidget);
 	TWeakObjectPtr<ANightOneGameMode> WeakThis = this;
@@ -869,13 +1357,7 @@ void ANightOneGameMode::ApplySettings(const ss::ui::GameSettings& NewSettings, b
 	// Hardware ray-traced Lumen (the project enables ray tracing support); hit lighting for reflections at Cinematic.
 	SetConsoleInt(TEXT("r.Lumen.HardwareRayTracing"), NewSettings.RayTracing ? 1 : 0);
 	SetConsoleInt(TEXT("r.Lumen.HardwareRayTracing.LightingMode"), NewSettings.RayTracing && NewSettings.Quality >= 4 ? 2 : 0);
-	if (Stage)
-	{
-		Stage->BrightnessBias = static_cast<float>(NewSettings.Brightness - 50) / 50.0f * 1.5f;
-		Stage->bMotionBlur = NewSettings.MotionBlur;
-		Stage->GrainScale = NewSettings.FilmGrain == 0 ? 0.0f : NewSettings.FilmGrain == 1 ? 1.0f : 2.2f;
-		Stage->FringeScale = NewSettings.ChromaticAberration ? 1.0f : 0.0f;
-	}
+	ApplyStageSettings(NewSettings);
 	if (ANightOnePawn* Seat = GetSeat())
 	{
 		Seat->VerticalFov = static_cast<float>(NewSettings.FieldOfView);
@@ -892,6 +1374,17 @@ void ANightOneGameMode::ApplySettings(const ss::ui::GameSettings& NewSettings, b
 	if (bSave)
 	{
 		SettingsDirtyAt = RealTime; // written once the player stops changing things
+	}
+}
+
+void ANightOneGameMode::ApplyStageSettings(const ss::ui::GameSettings& NewSettings)
+{
+	if (Stage)
+	{
+		Stage->BrightnessBias = static_cast<float>(NewSettings.Brightness - 50) / 50.0f * 1.5f;
+		Stage->bMotionBlur = NewSettings.MotionBlur;
+		Stage->GrainScale = NewSettings.FilmGrain == 0 ? 0.0f : NewSettings.FilmGrain == 1 ? 1.0f : 2.2f;
+		Stage->FringeScale = NewSettings.ChromaticAberration ? 1.0f : 0.0f;
 	}
 }
 
@@ -930,6 +1423,23 @@ void ANightOneGameMode::Begin(const FString& Name)
 	Game->Session.Save();
 	ReturnInputToGame();
 	UE_LOG(LogNightOne, Log, TEXT("Night One started as %s"), *Clean);
+	// The career the title screen chose decides the room (a new one isn't evicted: back to 1812, as the fly-in starts).
+	if (HubEvicted() != bAtDees)
+	{
+		UseRoom(HubEvicted());
+		if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+		{
+			if (PC->PlayerCameraManager)
+			{
+				PC->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, 1.2f, FLinearColor::Black, true, false);
+			}
+		}
+	}
+	if (bAtDees)
+	{
+		// Coming in at Dee's: she says hello (or texts it, or isn't there), once the camera has settled on the couch.
+		DeeHelloAt = RealTime + 3.4;
+	}
 	// The game closed during a night at the Embercrest: straight back to the seat.
 	if (!Game->Session.LiveInProgress().empty())
 	{
@@ -1025,6 +1535,10 @@ void ANightOneGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			{
 				Viewport->RemoveViewportWidgetContent(Overlay.ToSharedRef());
 			}
+			if (Caption)
+			{
+				Viewport->RemoveViewportWidgetContent(Caption.ToSharedRef());
+			}
 			if (MenuRoot)
 			{
 				Viewport->RemoveViewportWidgetContent(MenuRoot.ToSharedRef());
@@ -1032,9 +1546,11 @@ void ANightOneGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 	}
 	Overlay.Reset();
+	Caption.Reset();
 	MenuRoot.Reset();
 	MenuBlur.Reset();
 	MenuWidget.Reset();
+	RoomTone.Reset();
 	Game.Reset();
 	Super::EndPlay(EndPlayReason);
 }
@@ -1116,7 +1632,10 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		bLeaving = false;
 		if (LeaveFor == TEXT("street"))
 		{
-			UGameplayStatics::OpenLevel(this, FName(TEXT("Street")), true, FString::Printf(TEXT("From=%.0f"), Game->Session.WorldMinutes()));
+			// From Dee's the player comes down her stairs and out of her door across the street (Door=Dee: the street
+			// puts them there while evicted; it says so even when the test hook, not the career, put them at hers).
+			UGameplayStatics::OpenLevel(this, FName(TEXT("Street")), true,
+				FString::Printf(TEXT("From=%.0f%s"), Game->Session.WorldMinutes(), bAtDees ? TEXT("?Door=Dee") : TEXT("")));
 			return;
 		}
 		// The Back Room for Dee's game; the same map turns into the Embercrest's card room for a tournament (the event
@@ -1136,7 +1655,8 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		UGameplayStatics::OpenLevel(this, FName(TEXT("BackRoom")), true, Options);
 		return;
 	}
-	if (HomeTextAt >= 0.0 && RealTime >= HomeTextAt)
+	// At Dee's the text waits for her hello: she may be sitting right there and say it instead.
+	if (HomeTextAt >= 0.0 && RealTime >= HomeTextAt && !(bAtDees && DeeHelloAt >= 0.0))
 	{
 		HomeTextAt = -1.0;
 		const FString HomeText = HomeTextFromOptions(HomeOptions, Game->Session);
@@ -1160,6 +1680,20 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		GameTime += Dt * TimeScale;
 		S.Update(GameTime);
 	}
+	if (ArrivalSwapUntil >= 0.0)
+	{
+		if (RealTime >= ArrivalSwapUntil)
+		{
+			ArrivalSwapUntil = -1.0;
+		}
+		else if (HubEvicted() && !bAtDees)
+		{
+			ArrivalSwapUntil = -1.0;
+			UseRoom(true);
+			DeeHelloAt = RealTime + 3.0;
+		}
+	}
+	TickLockedOut();
 
 	// The client at up to 30 fps, at the resolution of the laptop screen.
 	UiAccum += Dt;
@@ -1181,26 +1715,65 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		}
 	}
 
-	// The title screen frames the room with a slow establishing shot; starting play flies the camera to the seat.
+	// The title screen frames the room with a slow establishing shot; starting play flies the camera to the seat. Asleep
+	// where the room has a bed for it (Dee's couch), the camera lies down there, and gets up again after.
+	const bool bSleeping = IsSleeping();
+	if (bSleeping)
+	{
+		CouchShotUntil = RealTime + 4.0;
+	}
+	else if (bWasSleeping)
+	{
+		WokeAt = RealTime + 2.6;
+	}
+	bWasSleeping = bSleeping;
+	bool bCouchShot = false;
 	if (Seat)
 	{
 		FVector ShotPos;
 		FVector ShotLook;
-		Stage->MenuShot(RealTime, ShotPos, ShotLook);
-		Seat->SetEstablishingShot(ShotPos, ShotLook, Game->Menu.WantsEstablishingShot());
+		bCouchShot = !Game->Menu.WantsEstablishingShot() && RealTime < CouchShotUntil && Stage->SleepShot(RealTime, ShotPos, ShotLook);
+		if (bCouchShot)
+		{
+			Seat->SetEstablishingShot(ShotPos, ShotLook, bSleeping);
+		}
+		else
+		{
+			Stage->MenuShot(RealTime, ShotPos, ShotLook);
+			Seat->SetEstablishingShot(ShotPos, ShotLook, Game->Menu.WantsEstablishingShot());
+		}
+	}
+	// Lying down, the eyes close most of the way: the room's light through them as the hours go by.
+	{
+		const float Want = bCouchShot && bSleeping ? 0.62f : 0.0f;
+		const float Was = SleepFade;
+		SleepFade = FMath::FInterpConstantTo(SleepFade, Want, static_cast<float>(Dt), 0.45f);
+		APlayerController* PC = GetWorld()->GetFirstPlayerController();
+		if (PC && PC->PlayerCameraManager && !bLeaving && (SleepFade > 0.0f || Was > 0.0f))
+		{
+			if (SleepFade > 0.0f)
+			{
+				PC->PlayerCameraManager->SetManualCameraFade(SleepFade, FLinearColor::Black, false);
+			}
+			else
+			{
+				PC->PlayerCameraManager->StopCameraFade();
+			}
+		}
 	}
 
-	// The player's hands follow the head and the pointer; they sit out the establishing shot.
+	// The player's hands follow the head and the pointer; they sit out the establishing shot (and a night on the couch).
 	if (Seat)
 	{
 		Stage->UpdateArms(static_cast<float>(Dt), Seat->GetActorLocation(), Seat->Camera ? Seat->Camera->GetForwardVector() : Seat->GetActorForwardVector(), ArmsPointer,
-		                  bStarted && !Game->Menu.WantsEstablishingShot());
+		                  bStarted && !Game->Menu.WantsEstablishingShot() && !bCouchShot);
 	}
 
 	// The world reacts to the game.
 	const double Clock = S.ClockMinutes();
-	// Daylight from the time of day: dawn after a long night, the afternoon after a day shift, dusk again.
-	Stage->SetDawn(static_cast<float>(S.Daylight()));
+	// Daylight from the time of day (the hub's: ss.Home.Hour can set it): dawn after a long night, the afternoon after a
+	// day shift, dusk again.
+	Stage->SetDawn(static_cast<float>(ss::life::Daylight(HubWorldMinutes())));
 	const float PhoneLevel = static_cast<float>(Game->Phone.Brightness(RealTime));
 	Stage->SetPhoneBrightness(PhoneLevel);
 	PhoneAccum += Dt;
@@ -1226,18 +1799,36 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	}
 	Stage->SetScreenGlow(S.CurrentScreen == ss::Screen::Table ? FLinearColor(0.55f, 0.9f, 0.8f) : FLinearColor(0.72f, 0.84f, 1.0f), 1.0f);
 	// The GearDrop LED kit: the room in the chosen colour, flashing with the stream when synced. Evicted, the kit is in
-	// the storage unit with the rest of the rig: dark.
+	// the storage unit with the rest of the rig: dark. (The hub's eviction: ss.Home.Evicted can stand in for the career's.)
+	// At Dee's none of it is in the room, even once the key's back (it's 1812's again on the next load).
 	{
-		const bool bStored = S.Evicted();
+		const bool bStored = HubEvicted() || bAtDees;
 		const ss::gear::Glow Leds = S.RoomGlow(GameTime);
 		const bool bLedsOn = Leds.On && !bStored;
 		const FLinearColor LedColor = FLinearColor::FromSRGBColor(FColor(static_cast<uint8>((Leds.Rgb >> 16) & 0xff), static_cast<uint8>((Leds.Rgb >> 8) & 0xff), static_cast<uint8>(Leds.Rgb & 0xff)));
 		Stage->SetRoomLights(bLedsOn, LedColor, static_cast<float>(Leds.Level));
 		// The locks changing (or the key back) while the player is in the room: the door, heard; the room changes with it.
-		const int32 EvictedNow = bStored ? 1 : 0;
-		if (EvictedShown >= 0 && EvictedShown != EvictedNow && Audio)
+		// At Dee's, the key back (the Bank's Move back in) is hers to hear about: 1812 is the hub again the next time the
+		// level opens, the desk refilled from storage.
+		const int32 EvictedNow = S.Evicted() ? 1 : 0;
+		if (EvictedShown >= 0 && EvictedShown != EvictedNow)
 		{
-			Audio->PlayEffect(ss::audio::Effect::Scrape, bStored ? 0.9f : 0.6f);
+			if (bAtDees)
+			{
+				if (EvictedNow == 0)
+				{
+					SayDee(DeeRoom::KeyBack(DeeWhere));
+				}
+			}
+			else
+			{
+				if (Audio)
+				{
+					Audio->PlayEffect(ss::audio::Effect::Scrape, EvictedNow ? 0.9f : 0.6f);
+				}
+				// Locked out at the desk: the cartons and the texts first, then over to Dee's couch (TickLockedOut).
+				MoveToDeesAt = EvictedNow ? RealTime + 6.0 : -1.0;
+			}
 		}
 		EvictedShown = EvictedNow;
 		// What the player owns, set up in the room, and what their career has left on the windowsill. The PC's RGB
@@ -1263,6 +1854,11 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		Stage->SetGear(Room);
 		const FLinearColor Rgb = bLedsOn ? LedColor : FLinearColor::MakeFromHSV8(static_cast<uint8>(FMath::Fmod(RealTime * 12.0, 256.0)), 190, 255);
 		Stage->SetGearGlow(Rgb, bLedsOn ? static_cast<float>(Leds.Level) : 1.0f, S.Streaming() && !bStored);
+	}
+	// Dee's front room: Dee, her TV and her radiator, the note by the laptop, what she says.
+	if (bAtDees)
+	{
+		TickDeeRoom();
 	}
 	// The monitors' pictures, ten times a second (ss::ui::secondscreen).
 	MonitorAccum += Dt;
