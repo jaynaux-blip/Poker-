@@ -10,7 +10,7 @@ public class ShortStack : ModuleRules
 		bUseUnity = false;
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
-			"Core", "CoreUObject", "Engine", "InputCore", "RHI", "Slate", "SlateCore", "UMG", "AnimationCore", "RigLogicModule", "HairStrandsCore", "MeshDescription", "StaticMeshDescription", "ShortStackCore",
+			"Core", "CoreUObject", "Engine", "InputCore", "RenderCore", "RHI", "Slate", "SlateCore", "UMG", "AnimationCore", "RigLogicModule", "HairStrandsCore", "MeshDescription", "StaticMeshDescription", "ShortStackCore",
 		});
 	}
 }

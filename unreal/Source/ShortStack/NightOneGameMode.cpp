@@ -1121,8 +1121,18 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		}
 		// The Back Room for Dee's game; the same map turns into the Embercrest's card room for a tournament (the event
 		// the session registered the player for).
-		const FString Options = ss::live::IsEmbercrest(std::string(TCHAR_TO_UTF8(*LeaveFor))) ? FString::Printf(TEXT("Live=%s"), *LeaveFor)
-																							   : FString::Printf(TEXT("BuyIn=%lld"), LeaveBuyInCents);
+		const std::string LeaveId(TCHAR_TO_UTF8(*LeaveFor));
+		const bool bEmbercrest = ss::live::IsEmbercrest(LeaveId);
+		const FString Options = bEmbercrest ? FString::Printf(TEXT("Live=%s"), *LeaveFor) : FString::Printf(TEXT("BuyIn=%lld"), LeaveBuyInCents);
+		// To the Embercrest the 14 brings the player up the ridge to the resort's doors (the exterior, where it's been
+		// built), unless the night is already under way: back after a crash in the room, straight to the seat as before.
+		const ss::life::LiveEntry* Entry = bEmbercrest ? ss::live::EntryFor(Game->Session.Life, LeaveId) : nullptr;
+		const bool bBackInRoom = Entry && Entry->ArrivedAt > 0.0;
+		if (bEmbercrest && !bBackInRoom && FPackageName::DoesPackageExist(TEXT("/Game/Maps/Embercrest")))
+		{
+			UGameplayStatics::OpenLevel(this, FName(TEXT("Embercrest")), true, Options);
+			return;
+		}
 		UGameplayStatics::OpenLevel(this, FName(TEXT("BackRoom")), true, Options);
 		return;
 	}

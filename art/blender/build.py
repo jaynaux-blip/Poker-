@@ -30,7 +30,9 @@ ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chai
           # The street and the Lucky Penny, and what the player wears.
           'hydrant', 'trash_can', 'newsbox', 'streetlight', 'sedan', 'cooler', 'store_shelf', 'register', 'wearables',
           # The Lucky Penny's stock, Fifth Street's buildings, and real shoes for the street's people.
-          'stock', 'facades', 'sneakers']
+          'stock', 'facades', 'sneakers',
+          # The Embercrest from outside: the resort's front, its arrival plaza, the 14 bus, and the mountains and valley.
+          'ecx_building', 'ecx_plaza', 'ecx_bus', 'ecx_landscape']
 
 
 def args():

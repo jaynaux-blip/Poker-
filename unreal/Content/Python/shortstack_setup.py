@@ -752,6 +752,14 @@ def import_meshes(force=False, only=None):
             except Exception as exc:  # the imported glTF material still works, just without subsurface
                 unreal.log_warning(f"ShortStack: skin material for {name} failed: {exc}")
         eal.set_metadata_tag(mesh, "SourceHash", digest)
+        if name.startswith("SM_ECX_") and isinstance(mesh, unreal.StaticMesh):
+            # The Embercrest's exterior: Nanite off for its glass and screens, its own collision (embercrest_setup.fix_mesh,
+            # after the new SourceHash: its stamp carries it, so embercrest_setup.run doesn't fix the mesh a second time).
+            try:
+                import embercrest_setup
+                embercrest_setup.fix_mesh(name, mesh)
+            except Exception as exc:
+                unreal.log_warning(f"ShortStack: the Embercrest's rules for {name} failed: {exc}")
         eal.save_loaded_asset(mesh)
         unreal.log(f"ShortStack: imported {file} as {mesh_path}")
         imported += 1
@@ -954,3 +962,9 @@ def run(force=False):
             street_setup.refresh_map()
         except Exception as exc:
             unreal.log_error(f"ShortStack: rebuilding the Street level failed: {exc}")
+    # The Embercrest's exterior: its materials, its meshes' rules, /Game/Maps/Embercrest (embercrest_setup.py).
+    try:
+        import embercrest_setup
+        embercrest_setup.run(force)
+    except Exception as exc:
+        unreal.log_error(f"ShortStack: the Embercrest's setup failed: {exc}")
