@@ -145,8 +145,8 @@ private:
 	bool bGamepad = false;
 	/** When the settings last changed (written once they've settled), or negative. */
 	double SettingsDirtyAt = -1.0;
-	/** The rain's level in the mix: lower inside the store, behind the glass. */
-	float AmbienceDuck = 1.0f;
+	/** The street's own sound (StreetAudio.h), streamed by Audio: the rain and the traffic outside, the coolers inside. */
+	TSharedPtr<class FStreetAmbience> StreetTone;
 };
 
 /** Keyboard, mouse and gamepad polled each frame for walking (the overlays take their own input). */

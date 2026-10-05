@@ -44,7 +44,8 @@ struct FStreetSpot
  * Fifth Street at night, from the apartment building's door to the Lucky Penny #212 on the corner of
  * Market: sidewalks and the wet road, the building fronts on both sides, the Wash & Fold's neon across
  * the street (Dee's game is in its back room), streetlights, rain, and the store itself, lit inside, with
- * sliding doors, coolers, aisles, the counter, the roller grill and the coffee bar. Built procedurally
+ * sliding doors, coolers, aisles, the counter, the roller grill and the coffee bar, its walls and ceiling
+ * finished as a corner store's are (a clock on the wall keeps the world's time). Built procedurally
  * from engine shapes with collision, like the apartment; Blender props (street_setup.py imports them)
  * replace the boxes where they exist: the building fronts (1812 itself, the walk-up, the brownstones, the
  * floors over the store, and across the street the laundromat's building as the apartment's window sees
@@ -94,6 +95,17 @@ public:
 	void SetLensOptions(float InBrightnessBias, float InGrainScale, float InFringeScale, bool bInMotionBlur);
 	/** How far inside the store the camera is (0 out on the street .. 1 inside), eased. */
 	float CameraInside() const { return Inside; }
+	/** How far open the store's sliding doors are (0 shut .. 1 open). */
+	float DoorsOpen() const { return DoorOpen; }
+	/** The rain's strength as it shows (ss.Street.Rain: 0 none, 1 the night's rain). */
+	float RainStrength() const;
+	/**
+	 * How near Listener is to a buzzing sign (0 out of earshot .. 1 under it): the Lucky Penny's box sign at any hour, the
+	 * pawn shop's blue tube and the laundromat's neon while they're lit.
+	 */
+	float SignHum(const FVector& Listener) const;
+	/** The store's wall clock shows the world's time (minutes, as Session::WorldMinutes). */
+	void SetClock(double WorldMinutes);
 
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	float ExposureBias = 0.0f;
@@ -119,6 +131,11 @@ private:
 	void BuildWashAndFold();
 	void BuildStore();
 	void BuildStoreDressing();
+	/**
+	 * The store's walls and ceiling finished: paint over a tiled wainscot, the slatwall by the door, its own sign and posters,
+	 * the wall clock, the security mirrors, the ceiling's tile grid and the troffers' frames round the light panels.
+	 */
+	void BuildStoreInterior();
 	void BuildStreetlights();
 	void BuildSkyAndWeather();
 	void BuildSpots();
@@ -255,6 +272,16 @@ private:
 	TArray<TObjectPtr<ULightComponent>> NightLights;
 	UPROPERTY()
 	TArray<float> NightLightLevels;
+	/** One of the night lights: the laundromat's light through its window onto the sidewalk, which goes with the window's glow. */
+	UPROPERTY()
+	TObjectPtr<URectLightComponent> WashSpill;
+	/** The store clock's hands, each turning about its own pivot at the dial's middle (SetClock). */
+	UPROPERTY()
+	TObjectPtr<USceneComponent> ClockHour;
+	UPROPERTY()
+	TObjectPtr<USceneComponent> ClockMinute;
+	UPROPERTY()
+	TObjectPtr<USceneComponent> ClockSecond;
 	UPROPERTY()
 	TArray<TObjectPtr<UWidgetComponent>> SignWidgets;
 	UPROPERTY()
@@ -293,8 +320,13 @@ private:
 	TArray<TSharedPtr<const ss::ui::DrawList>> SignLists;
 	float DoorOpen = 0.0f;
 	bool bDoorsNear = false;
+	/** The second of the day the clock's hands were last set to (-1: not yet). */
+	int32 ClockShown = -1;
 	float Daylight = 0.0f;
 	float AppliedDaylight = -1.0f;
+	/** ss.Street.TenementGlow and ss.Street.LaundromatGlow as ApplyDaylight last set the fronts' glow and the spill by them. */
+	float AppliedTenementGlow = -1.0f;
+	float AppliedLaundromatGlow = -1.0f;
 	float CapturedDaylight = -1.0f;
 	float Inside = 0.0f;
 	float PickIn = 0.0f;

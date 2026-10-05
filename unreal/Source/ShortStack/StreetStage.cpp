@@ -46,6 +46,10 @@ const double MarketY1 = 6150.0; // the building line on Market's far side
 const double MarketWest = -3000.0;
 const double StoreDepth = 1400.0;
 const double StoreCeiling = 380.0;
+// The store's first light panel (each 120 x 60, every 300 deep and 420 across): the ceiling's 60 cm tile grid is laid from it.
+const double StorePanelX0 = -StoreDepth + 200.0;
+const double StorePanelY0 = StoreY0 + 200.0;
+const double CeilingTile = 60.0;
 const double DoorY0 = 4650.0;
 const double DoorY1 = 4850.0;
 // The sliding doors run on a track just inside the fixed glass (X -12..-10), clear of its mullions (X -18..-6) and of
@@ -59,6 +63,12 @@ const double BrownstoneW = 675.0;
 // window, which is 3.2 m right of door 1812 here (facades.py). 36 m wide.
 const double TenementY = 920.0;
 const double TenementHalf = 1800.0;
+// The neon over the laundromat: on the tenement's bricked-up third floor where the apartment's window sees it, or over the
+// stand-in's windows; and the pawn shop's front between 1812 and the walk-up (its window 1.5 m in from each end).
+const FVector TenementNeonAt(FarFront - 10.0, TenementY - 280.0, 1140.0);
+const FVector WashNeonAt(FarFront - 2.0, 0.0, 375.0);
+const double PawnY0 = 800.0;
+const double PawnY1 = 2300.0;
 
 // Patterns understood by M_Street (Content/Python/street_setup.py); 0 is plain.
 const float PatBrick = 1.0f;
@@ -95,8 +105,10 @@ TAutoConsoleVariable<float> CVarBias(TEXT("ss.Street.Bias"), 0.0f, TEXT("Extra e
 TAutoConsoleVariable<float> CVarRain(TEXT("ss.Street.Rain"), 1.0f, TEXT("The rain's strength (0 hides it)."));
 TAutoConsoleVariable<float> CVarTenementGlow(TEXT("ss.Street.TenementGlow"), 0.4f,
 	TEXT("How brightly the tenement's rooms glow from the street, against their bake for the apartment's view."));
-TAutoConsoleVariable<float> CVarLaundromatGlow(TEXT("ss.Street.LaundromatGlow"), 0.08f,
-	TEXT("How brightly the laundromat's shop window (the tenement's brightest bake) glows from the street."));
+// The laundromat's light on the sidewalk is set for the window at this glow, and goes up and down with it.
+const float LaundromatGlowSetFor = 0.08f;
+TAutoConsoleVariable<float> CVarLaundromatGlow(TEXT("ss.Street.LaundromatGlow"), LaundromatGlowSetFor,
+	TEXT("How brightly the laundromat's shop window (the tenement's brightest bake) glows from the street, and its light on the sidewalk with it."));
 
 FLinearColor SrgbHex(uint32 Hex)
 {
@@ -593,6 +605,11 @@ void AStreetStage::BuildSet()
 	ParkedPaints.Reset();
 	LitFronts.Reset();
 	bHomeFront = false;
+	WashSpill = nullptr;
+	ClockHour = nullptr;
+	ClockMinute = nullptr;
+	ClockSecond = nullptr;
+	ClockShown = -1;
 	DoorLeft = nullptr;
 	DoorRight = nullptr;
 	DoorDecal = nullptr;
@@ -632,6 +649,7 @@ void AStreetStage::BuildSet()
 	BuildAcross();
 	BuildStore();
 	BuildStoreDressing();
+	BuildStoreInterior();
 	BuildStreetlights();
 	BuildSkyAndWeather();
 	BuildSpots();
@@ -850,7 +868,7 @@ void AStreetStage::BuildHomeBlock()
 		int32 Shop; // 0 a rolled-down gate, 1 the pawn shop, 2 the barber's
 	};
 	// Each stops short of its neighbor's wall: two faces in one plane would flicker (the store's south wall is at 3680..3700).
-	const FFront Fronts[] = {{800.0, 2300.0, 1100.0, false, 1}, {2300.0, StoreY0 - 20.0, 900.0, true, 2}, {Mid, South, 1900.0, true, 0}, {EndY0, Mid, 1300.0, false, 0}};
+	const FFront Fronts[] = {{PawnY0, PawnY1, 1100.0, false, 1}, {PawnY1, StoreY0 - 20.0, 900.0, true, 2}, {Mid, South, 1900.0, true, 0}, {EndY0, Mid, 1300.0, false, 0}};
 	int64 Seed = 101;
 	for (const FFront& Fr : Fronts)
 	{
@@ -1117,7 +1135,7 @@ void AStreetStage::BuildWashAndFold()
 		Box(Iron, FVector(FarFront + 8.0, Y - 3.0, 0.0), FVector(FarFront + 14.0, Y + 3.0, 300.0), false);
 	}
 	Box(Iron, FVector(FarFront + 8.0, 380.0, 236.0), FVector(FarFront + 14.0, 480.0, 242.0), false);
-	Sign(TEXT("neon"), FVector(FarFront - 2.0, 0.0, 375.0), 180.0f, FVector2D(420.0, 131.0), FIntPoint(1024, 320), 6.0f);
+	Sign(TEXT("neon"), WashNeonAt, 180.0f, FVector2D(420.0, 131.0), FIntPoint(1024, 320), 6.0f);
 	if (GlowMaterial)
 	{
 		UMaterialInstanceDynamic* Halo = UMaterialInstanceDynamic::Create(GlowMaterial, this);
@@ -1129,7 +1147,7 @@ void AStreetStage::BuildWashAndFold()
 		Plane->SetStaticMesh(PlaneMesh);
 		Plane->SetMaterial(0, Halo);
 		// The engine plane faces +Z: pitched up it faces the street (-X), its local X running up the wall.
-		Plane->SetRelativeLocationAndRotation(FVector(FarFront - 4.0, 0.0, 375.0), FRotator(90.0f, 0.0f, 0.0f));
+		Plane->SetRelativeLocationAndRotation(WashNeonAt - FVector(2.0, 0.0, 0.0), FRotator(90.0f, 0.0f, 0.0f));
 		Plane->SetRelativeScale3D(FVector(4.0, 9.0, 1.0));
 		Plane->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Plane->SetCastShadow(false);
@@ -1151,15 +1169,21 @@ void AStreetStage::BuildWashAndFold()
 	}
 	if (URectLightComponent* Spill = NewPart<URectLightComponent>())
 	{
-		// The laundromat's light through its glass onto the wet sidewalk.
-		Spill->SetRelativeLocationAndRotation(FVector(FarFront + 20.0, 0.0, 180.0), FRotator(-15.0f, 180.0f, 0.0f));
+		// The laundromat's light through its glass onto the wet sidewalk, a pool kept as soft as the tenement's (BuildAcross),
+		// tipped down and set back far enough that its top edge (leaning out toward the street) stays behind the glass.
+		Spill->SetRelativeLocationAndRotation(FVector(FarFront + 66.0, 0.0, 230.0), FRotator(-35.0f, 180.0f, 0.0f));
 		Spill->SetIntensityUnits(ELightUnits::Lumens);
-		Spill->SetIntensity(1600.0f);
+		Spill->SetIntensity(700.0f);
 		Spill->SetSourceWidth(1200.0f);
-		Spill->SetSourceHeight(240.0f);
-		Spill->SetAttenuationRadius(1400.0f);
+		Spill->SetSourceHeight(180.0f);
+		Spill->SetAttenuationRadius(1000.0f);
 		Spill->SetLightColor(SrgbHex(0xdff0ff));
+		Spill->SetSpecularScale(0.25f);
 		Spill->SetCastShadows(false);
+		Spill->SetVolumetricScatteringIntensity(0.4f);
+		NightLights.Add(Spill);
+		NightLightLevels.Add(700.0f);
+		WashSpill = Spill;
 	}
 	// No rain falls in its room seen through the glass; the rain by its windows catches the neon's pink.
 	WashMin = FVector(FarFront + 11.0, -700.0, -60.0);
@@ -1199,7 +1223,7 @@ void AStreetStage::BuildAcross()
 		}
 		// The neon where the apartment's window sees it, on the bricked-up third floor over the laundromat (SIGN_BLANK) and
 		// as big as it is there, its halo on the wet brick.
-		const FVector NeonAt(FarFront - 10.0, TenementY - 280.0, 1140.0);
+		const FVector NeonAt = TenementNeonAt;
 		Sign(TEXT("neon"), NeonAt, 180.0f, FVector2D(640.0, 200.0), FIntPoint(1024, 320), 6.0f);
 		if (GlowMaterial)
 		{
@@ -1235,15 +1259,25 @@ void AStreetStage::BuildAcross()
 		}
 		if (URectLightComponent* Spill = NewPart<URectLightComponent>())
 		{
-			// The laundromat's light through its window onto the wet sidewalk.
-			Spill->SetRelativeLocationAndRotation(FVector(FarFront + 25.0, TenementY, 180.0), FRotator(-15.0f, 180.0f, 0.0f));
+			// The laundromat's light through its window onto the wet sidewalk: the room's tubes shining down and out through
+			// the glass, a pool on the slabs that fades toward the curb, no brighter than the dimmed window it comes through
+			// (ApplyDaylight sets it with the window's glow, ss.Street.LaundromatGlow). The puddles already mirror the lit
+			// window itself, so the light's own reflection is kept faint: at full strength it drew a second, far brighter
+			// copy of the window, blown out on the wet slabs. Tipped down 35 degrees its top edge leans out toward the street,
+			// so it's set back far enough to keep that edge behind the pane (17 cm into the opening).
+			Spill->SetRelativeLocationAndRotation(FVector(FarFront + 70.0, TenementY, 230.0), FRotator(-35.0f, 180.0f, 0.0f));
 			Spill->SetIntensityUnits(ELightUnits::Lumens);
-			Spill->SetIntensity(2300.0f);
+			Spill->SetIntensity(1000.0f);
 			Spill->SetSourceWidth(static_cast<float>(Shop1 - Shop0));
-			Spill->SetSourceHeight(240.0f);
-			Spill->SetAttenuationRadius(1400.0f);
+			Spill->SetSourceHeight(180.0f);
+			Spill->SetAttenuationRadius(1000.0f);
 			Spill->SetLightColor(SrgbHex(0xdff0ff));
+			Spill->SetSpecularScale(0.25f);
 			Spill->SetCastShadows(false);
+			Spill->SetVolumetricScatteringIntensity(0.4f);
+			NightLights.Add(Spill);
+			NightLightLevels.Add(1000.0f);
+			WashSpill = Spill;
 		}
 		// No rain falls in the laundromat seen through its window; the rain catches the neon's pink in its beam.
 		WashMin = FVector(FarFront + 16.0, Shop0 - 10.0, -60.0);
@@ -1348,10 +1382,12 @@ void AStreetStage::BuildStore()
 	FStreetDice Dice;
 	Dice.S = 212;
 	const double X0 = -StoreDepth;
-	UMaterialInterface* Wall = Mat(TEXT("StoreWall"), 0xe9e4d8, 0.85f);
+	// The walls painted the penny's warm gold over the wainscot (BuildStoreInterior), the ceiling's mineral tiles a shade
+	// off the white of their grid.
+	UMaterialInterface* Wall = Mat(TEXT("StoreWall"), 0xe0cb98, 0.8f);
 	UMaterialInterface* Outside = Mat(TEXT("StoreOutside"), 0x5b5148, 0.85f, PatBrick);
 	UMaterialInterface* Floor = Mat(TEXT("StoreFloor"), 0xd8d2c4, 0.35f, PatTiles);
-	UMaterialInterface* Ceiling = Mat(TEXT("StoreCeiling"), 0xf2f0ea, 0.9f);
+	UMaterialInterface* Ceiling = Mat(TEXT("StoreCeiling"), 0xe4e1d8, 0.92f);
 	// The store's own lights read against its exposure (a few stops over the street's), so they're set brighter.
 	UMaterialInterface* Panel = Mat(TEXT("StoreLightPanel"), 0xf4fbff, 0.3f, 0.0f, 80.0f);
 	UMaterialInterface* Red = Mat(TEXT("PennyRed"), 0xd7263d, 0.5f);
@@ -1454,11 +1490,25 @@ void AStreetStage::BuildStore()
 	Box(Red, FVector(X0 + 2.0, StoreY0 + 2.0, 104.0), FVector(-20.0, StoreY0 + 3.0, 116.0), false)->SetCastShadow(false);
 	Box(Red, FVector(X0 + 2.0, StoreY1 - 3.0, 104.0), FVector(-20.0, StoreY1 - 2.0, 116.0), false)->SetCastShadow(false);
 	Box(Red, FVector(X0 + 2.0, StoreY0 + 2.0, 104.0), FVector(X0 + 3.0, StoreY1 - 2.0, 116.0), false)->SetCastShadow(false);
-	for (double X = X0 + 200.0; X < -100.0; X += 300.0)
+	// Each panel a troffer's lens in the ceiling's grid (two of its tiles, BuildStoreInterior), its white steel frame round
+	// it standing just proud of the lens.
+	UInstancedStaticMeshComponent* Troffers = NewPart<UInstancedStaticMeshComponent>();
+	Troffers->SetStaticMesh(CubeMesh);
+	Troffers->SetMaterial(0, Mat(TEXT("Troffer"), 0xeeede8, 0.4f, 0.0f, 0.0f, 0.2f));
+	Troffers->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Troffers->SetCastShadow(false);
+	auto FrameBar = [Troffers](double Ax, double Ay, double Bx, double By) {
+		Troffers->AddInstance(FTransform(FRotator::ZeroRotator, FVector((Ax + Bx) * 0.5, (Ay + By) * 0.5, StoreCeiling - 1.8), FVector((Bx - Ax) / 100.0, (By - Ay) / 100.0, 0.036)));
+	};
+	for (double X = StorePanelX0; X < -100.0; X += 300.0)
 	{
-		for (double Y = StoreY0 + 200.0; Y < StoreY1 - 100.0; Y += 420.0)
+		for (double Y = StorePanelY0; Y < StoreY1 - 100.0; Y += 420.0)
 		{
 			Box(Panel, FVector(X, Y, StoreCeiling - 3.0), FVector(X + 120.0, Y + 60.0, StoreCeiling), false)->SetCastShadow(false);
+			FrameBar(X - 3.0, Y - 3.0, X, Y + 63.0);
+			FrameBar(X + 120.0, Y - 3.0, X + 123.0, Y + 63.0);
+			FrameBar(X, Y - 3.0, X + 120.0, Y);
+			FrameBar(X, Y + 60.0, X + 120.0, Y + 63.0);
 		}
 	}
 	for (int32 I = 0; I < 3; ++I)
@@ -1839,6 +1889,208 @@ void AStreetStage::BuildStoreDressing()
 	{
 		UStaticMeshComponent* Leg = Box(Caution, FVector(-181.0 + Side * 14.0, DoorY0 - 140.0, 0.0), FVector(-179.0 + Side * 14.0, DoorY0 - 110.0, 62.0), false);
 		Leg->SetRelativeRotation(FRotator(Side == 0 ? -12.0f : 12.0f, 0.0f, 0.0f));
+	}
+}
+
+void AStreetStage::BuildStoreInterior()
+{
+	FStreetDice Dice;
+	Dice.S = 4950;
+	const double Back = -StoreDepth + 2.0; // the back wall's face
+	const double South = StoreY0 + 2.0;    // the side walls' faces
+	const double North = StoreY1 - 2.0;
+	const double Front = -20.0; // where the side walls meet the front's low wall and the header over the windows
+	// The small things are instanced, a set per material: no collision, no shadows (they lie on the walls and ceiling).
+	auto Set = [this](UMaterialInterface* M) {
+		UInstancedStaticMeshComponent* S = NewPart<UInstancedStaticMeshComponent>();
+		S->SetStaticMesh(CubeMesh);
+		S->SetMaterial(0, M);
+		S->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		S->SetCastShadow(false);
+		return S;
+	};
+	auto Add = [](UInstancedStaticMeshComponent* S, const FVector& Min, const FVector& Max) {
+		S->AddInstance(FTransform(FRotator::ZeroRotator, (Min + Max) * 0.5, (Max - Min) / 100.0));
+	};
+
+	// The walls: a wainscot of dark green glazed tile up to the red rail (BuildStore's stripe stands 1 cm proud, the tile
+	// 8 mm, so the rail caps it), a black rubber cove base along the floor, the penny's gold paint above.
+	UMaterialInterface* Tile = Mat(TEXT("StoreWainscot"), 0x2f4a40, 0.3f, PatTiles);
+	UMaterialInterface* Cove = Mat(TEXT("StoreCove"), 0x171819, 0.55f);
+	for (const FBox& Run : {FBox(FVector(Back, South, 1.0), FVector(Front, South + 0.8, 104.0)), FBox(FVector(Back, North - 0.8, 1.0), FVector(Front, North, 104.0)),
+			 FBox(FVector(Back, South + 0.8, 1.0), FVector(Back + 0.8, North - 0.8, 104.0))})
+	{
+		Box(Tile, Run.Min, Run.Max, false)->SetCastShadow(false);
+	}
+	for (const FBox& Run : {FBox(FVector(Back, South, 1.0), FVector(Front, South + 1.4, 11.0)), FBox(FVector(Back, North - 1.4, 1.0), FVector(Front, North, 11.0)),
+			 FBox(FVector(Back, South + 1.4, 1.0), FVector(Back + 1.4, North - 1.4, 11.0))})
+	{
+		Box(Cove, Run.Min, Run.Max, false)->SetCastShadow(false);
+	}
+
+	// The slatwall on the north wall along the aisle, over the rail: a grey panel with aluminum in its slots, capped round
+	// its edges, a peg hook in every column of three rows, each with its stack of blister cards (chargers and cables,
+	// earbuds, batteries, phone cases; a few hooks sold out) and the price label on its end. It blocks as one box, so
+	// nobody walks into the cards.
+	const double SlatX0 = -1110.0;
+	const double SlatX1 = -630.0;
+	const double SlatZ0 = 122.0;
+	const double SlatZ1 = 252.0;
+	const double SlatFace = North - 3.0;
+	UInstancedStaticMeshComponent* Alu = Set(Mat(TEXT("Aluminum"), 0xb4b8bd, 0.3f, 0.0f, 0.0f, 0.9f));
+	Box(Mat(TEXT("Slatwall"), 0x4a4c50, 0.5f), FVector(SlatX0, SlatFace, SlatZ0), FVector(SlatX1, North, SlatZ1), false)->SetCastShadow(false);
+	for (double Z = SlatZ0 + 6.0; Z < SlatZ1 - 6.0; Z += 7.6)
+	{
+		Add(Alu, FVector(SlatX0 + 2.0, SlatFace - 0.4, Z - 0.5), FVector(SlatX1 - 2.0, SlatFace, Z + 0.5));
+	}
+	Add(Alu, FVector(SlatX0 - 2.0, SlatFace - 1.0, SlatZ1 - 1.0), FVector(SlatX1 + 2.0, North, SlatZ1 + 2.0));
+	Add(Alu, FVector(SlatX0 - 2.0, SlatFace - 1.0, SlatZ0 - 2.0), FVector(SlatX1 + 2.0, North, SlatZ0 + 1.0));
+	Add(Alu, FVector(SlatX0 - 2.0, SlatFace - 1.0, SlatZ0 + 1.0), FVector(SlatX0 + 2.0, North, SlatZ1 - 1.0));
+	Add(Alu, FVector(SlatX1 - 2.0, SlatFace - 1.0, SlatZ0 + 1.0), FVector(SlatX1 + 2.0, North, SlatZ1 - 1.0));
+	struct FGoods
+	{
+		uint32 Color;
+		double W, H;
+	};
+	const FGoods Goods[4] = {{0xeeeeec, 10.0, 16.0}, {0xc8202c, 10.0, 13.0}, {0xd2861f, 11.0, 15.0}, {0x2a5db0, 9.0, 14.0}};
+	UInstancedStaticMeshComponent* Cards[4];
+	for (int32 K = 0; K < 4; ++K)
+	{
+		Cards[K] = Set(Mat(*FString::Printf(TEXT("Blister%d"), K), Goods[K].Color, 0.35f));
+	}
+	const int32 Columns = 29;
+	for (int32 Col = 0; Col < Columns; ++Col)
+	{
+		const double X = SlatX0 + 20.0 + Col * 16.0;
+		const FGoods& G = Goods[FMath::Min(3, Col * 4 / Columns)];
+		UInstancedStaticMeshComponent* Stack = Cards[FMath::Min(3, Col * 4 / Columns)];
+		for (const double Hook : {238.0, 200.0, 162.0})
+		{
+			Add(Alu, FVector(X - 0.3, SlatFace - 15.0, Hook - 0.3), FVector(X + 0.3, SlatFace, Hook + 0.3));
+			Add(Cards[0], FVector(X - 1.6, SlatFace - 15.6, Hook - 0.2), FVector(X + 1.6, SlatFace - 15.0, Hook + 2.2));
+			if (Dice.Next() < 0.08)
+			{
+				continue;
+			}
+			// The cards hang by their holes on the hook, ten deep.
+			Add(Stack, FVector(X - G.W * 0.5, SlatFace - 13.0, Hook - 1.0 - G.H), FVector(X + G.W * 0.5, SlatFace - 3.0, Hook + 1.0));
+		}
+	}
+	Box(nullptr, FVector(SlatX0 - 5.0, North - 22.0, 0.0), FVector(SlatX1 + 5.0, North, SlatZ1 + 5.0))->SetVisibility(false);
+
+	// The store's own lightbox over the cooler, lit for the store's exposure (not the street's, as the one out front is).
+	Box(Mat(TEXT("RackCabinet"), 0x1b1d22, 0.5f), FVector(Back, 4318.0, 254.0), FVector(Back + 12.0, 4682.0, 326.0), false)->SetCastShadow(false);
+	Sign(TEXT("storesign"), FVector(Back + 12.6, 4500.0, 290.0), 0.0f, FVector2D(352.0, 66.0), FIntPoint(1600, 300), -30.0f);
+
+	// Posters in aluminum snap frames, printed and lit by the store's light, each at its shelf price (or a headline that
+	// promises no price): At is the middle of the print on the wall's face, Yaw the way the wall faces.
+	auto Poster = [&](const TCHAR* Art, const FVector& At, float Yaw) {
+		const FTransform Wall(FRotator(0.0f, Yaw, 0.0f), At);
+		Sign(Art, Wall.TransformPosition(FVector(0.6, 0.0, 0.0)), Yaw, FVector2D(60.0, 90.0), FIntPoint(600, 900), 0.0f);
+		// The frame's four sides, 2.2 cm wide and 1.2 cm off the wall, lapping the print's edge by a centimeter.
+		for (const FBox& Side : {FBox(FVector(0.0, -31.2, 44.0), FVector(1.2, 31.2, 46.2)), FBox(FVector(0.0, -31.2, -46.2), FVector(1.2, 31.2, -44.0)),
+				 FBox(FVector(0.0, -31.2, -44.0), FVector(1.2, -29.0, 44.0)), FBox(FVector(0.0, 29.0, -44.0), FVector(1.2, 31.2, 44.0))})
+		{
+			Alu->AddInstance(FTransform(FRotator::ZeroRotator, Side.GetCenter(), Side.GetSize() / 100.0) * Wall);
+		}
+	};
+	Poster(TEXT("promo:night-owl-brew:NEW"), FVector(Back, 3830.0, 180.0), 0.0f);
+	Poster(TEXT("promo:oodle-cup"), FVector(Back, 3990.0, 180.0), 0.0f);
+	Poster(TEXT("promo:fizz-cola"), FVector(-500.0, North, 180.0), -90.0f);
+	Poster(TEXT("promo:hilltop-chips"), FVector(-390.0, North, 180.0), -90.0f);
+	Poster(TEXT("promo:hot-cocoa"), FVector(-776.0, South, 180.0), 90.0f);
+
+	// The wall clock over the back wall's posters, its hands on the world's time (SetClock): a white dial in a black
+	// bezel, the hours marked, a red second hand stepping. The dial faces +X; a hand's pivot rolls it round the dial.
+	const FVector Dial(Back, 3910.0, 300.0);
+	UMaterialInterface* Black = Mat(TEXT("ClockBezel"), 0x161719, 0.35f);
+	auto Disc = [this](UMaterialInterface* M, const FVector& At, double Radius, double Depth) {
+		// The engine cylinder stands along Z: pitched over, its axis runs out of the wall.
+		UStaticMeshComponent* D = NewPart<UStaticMeshComponent>();
+		D->SetStaticMesh(CylinderMesh);
+		D->SetMaterial(0, M);
+		D->SetRelativeLocationAndRotation(At, FRotator(90.0f, 0.0f, 0.0f));
+		D->SetRelativeScale3D(FVector(Radius / 50.0, Radius / 50.0, Depth / 100.0));
+		D->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		D->SetCastShadow(false);
+	};
+	Disc(Mat(TEXT("ClockFace"), 0xf3f0e6, 0.5f), Dial + FVector(1.5, 0.0, 0.0), 16.6, 3.0);
+	UInstancedStaticMeshComponent* Rim = Set(Black);
+	for (int32 K = 0; K < 24; ++K)
+	{
+		// The bezel: 24 segments round the dial, standing 1.4 cm proud of it.
+		const FRotator Turn(0.0f, 0.0f, K * 15.0f);
+		Rim->AddInstance(FTransform(Turn, Dial + Turn.RotateVector(FVector(2.2, 0.0, 17.6)), FVector(0.044, 0.05, 0.022)));
+	}
+	for (int32 K = 0; K < 12; ++K)
+	{
+		const bool bQuarter = K % 3 == 0;
+		const FRotator Turn(0.0f, 0.0f, K * 30.0f);
+		Rim->AddInstance(FTransform(Turn, Dial + Turn.RotateVector(FVector(3.1, 0.0, bQuarter ? 13.9 : 14.3)), FVector(0.002, bQuarter ? 0.011 : 0.006, bQuarter ? 0.034 : 0.026)));
+	}
+	auto Hand = [&](UMaterialInterface* M, double Out, double Width, double Tail, double Length) {
+		USceneComponent* Pivot = NewPart<USceneComponent>();
+		Pivot->SetRelativeLocation(Dial + FVector(Out, 0.0, 0.0));
+		Box(M, FVector(-0.12, -Width * 0.5, -Tail), FVector(0.12, Width * 0.5, Length), false, Pivot)->SetCastShadow(false);
+		return Pivot;
+	};
+	ClockHour = Hand(Black, 3.4, 1.1, 2.0, 8.5);
+	ClockMinute = Hand(Black, 3.7, 0.7, 2.5, 12.8);
+	ClockSecond = Hand(Mat(TEXT("ClockSecond"), 0xc8202c, 0.4f), 4.0, 0.25, 3.5, 13.6);
+	Disc(Black, Dial + FVector(4.2, 0.0, 0.0), 0.9, 0.35);
+	ClockShown = -1;
+
+	// Convex security mirrors high in the two corners along the north wall, so the counter sees down the aisle by the
+	// slatwall and round the end of the cooler: a dome of mirror in its black shell, on a bracket to each wall.
+	UMaterialInterface* Mirror = Mat(TEXT("SecurityMirror"), 0xdfe3e8, 0.04f, 0.0f, 0.0f, 1.0f);
+	auto Dome = [&](const FVector& At, const FVector& Facing, double WallX) {
+		const FVector Axis = Facing.GetSafeNormal();
+		const FRotator Turn = FRotationMatrix::MakeFromZ(Axis).Rotator();
+		// The engine sphere flattened along its axis: 46 cm across, bulging 8.5 cm; the shell behind it covers its back half.
+		UStaticMeshComponent* Glass = NewPart<UStaticMeshComponent>();
+		Glass->SetStaticMesh(SphereMesh);
+		Glass->SetMaterial(0, Mirror);
+		Glass->SetRelativeLocationAndRotation(At, Turn);
+		Glass->SetRelativeScale3D(FVector(0.46, 0.46, 0.17));
+		Glass->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Glass->SetCastShadow(false);
+		UStaticMeshComponent* Shell = NewPart<UStaticMeshComponent>();
+		Shell->SetStaticMesh(CylinderMesh);
+		Shell->SetMaterial(0, Black);
+		Shell->SetRelativeLocationAndRotation(At - Axis * 4.5, Turn);
+		Shell->SetRelativeScale3D(FVector(24.5 / 50.0, 24.5 / 50.0, 0.09));
+		Shell->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Shell->SetCastShadow(false);
+		const FVector Hub = At - Axis * 9.0;
+		Add(Rim, FVector(FMath::Min(Hub.X, WallX), Hub.Y - 1.5, Hub.Z - 1.5), FVector(FMath::Max(Hub.X, WallX), Hub.Y + 1.5, Hub.Z + 1.5));
+		Add(Rim, FVector(Hub.X - 1.5, Hub.Y, Hub.Z - 1.5), FVector(Hub.X + 1.5, North, Hub.Z + 1.5));
+	};
+	Dome(FVector(Back + 28.0, North - 28.0, 330.0), FVector(1.0, -1.0, -0.8), Back);
+	Dome(FVector(Front - 26.0, North - 28.0, 350.0), FVector(-1.0, -1.0, -0.7), Front);
+
+	// The ceiling: 60 cm mineral tiles in a white T-bar grid laid from the light panels' corners (each panel two tiles,
+	// BuildStore), an angle round the walls, and a few tiles stained where the roof has let the rain in.
+	UInstancedStaticMeshComponent* Grid = Set(Mat(TEXT("TBar"), 0xeceae4, 0.45f, 0.0f, 0.0f, 0.25f));
+	const double GridZ = StoreCeiling - 1.2;
+	for (double Y = StorePanelY0 - CeilingTile * FMath::FloorToDouble((StorePanelY0 - South) / CeilingTile); Y < North - 2.0; Y += CeilingTile)
+	{
+		Add(Grid, FVector(Back, Y - 1.2, GridZ), FVector(Front, Y + 1.2, StoreCeiling));
+	}
+	for (double X = StorePanelX0 - CeilingTile * FMath::FloorToDouble((StorePanelX0 - Back) / CeilingTile); X < Front - 2.0; X += CeilingTile)
+	{
+		Add(Grid, FVector(X - 1.2, South, GridZ), FVector(X + 1.2, North, StoreCeiling));
+	}
+	Add(Grid, FVector(Back, South, GridZ - 0.2), FVector(Front, South + 2.4, StoreCeiling));
+	Add(Grid, FVector(Back, North - 2.4, GridZ - 0.2), FVector(Front, North, StoreCeiling));
+	Add(Grid, FVector(Back, South + 2.4, GridZ - 0.2), FVector(Back + 2.4, North - 2.4, StoreCeiling));
+	Add(Grid, FVector(Front - 2.4, South + 2.4, GridZ - 0.2), FVector(Front, North - 2.4, StoreCeiling));
+	UInstancedStaticMeshComponent* Stained = Set(Mat(TEXT("CeilingStain"), 0xcfc29c, 0.95f));
+	UInstancedStaticMeshComponent* Blotch = Set(Mat(TEXT("CeilingStainDark"), 0xb3a179, 0.95f));
+	for (const FVector2D& Cell : {FVector2D(-1380.0, 4800.0), FVector2D(-780.0, 4620.0), FVector2D(-480.0, 3780.0)})
+	{
+		// Clear of the panels; the tile within its grid, the water's mark off its middle.
+		Add(Stained, FVector(Cell.X + 1.2, Cell.Y + 1.2, StoreCeiling - 0.5), FVector(Cell.X + CeilingTile - 1.2, Cell.Y + CeilingTile - 1.2, StoreCeiling - 0.1));
+		Add(Blotch, FVector(Cell.X + 14.0, Cell.Y + 10.0, StoreCeiling - 0.6), FVector(Cell.X + 44.0, Cell.Y + 38.0, StoreCeiling - 0.5));
 	}
 }
 
@@ -2341,8 +2593,9 @@ void AStreetStage::SetDaylight(float InDaylight)
 {
 	Daylight = FMath::Clamp(InDaylight, 0.0f, 1.0f);
 	// Small steps: the sky and the lamps are scaled against an exposure nine stops apart, so a step of 0.02 would be
-	// a visible jump in the sky at dusk.
-	if (FMath::Abs(Daylight - AppliedDaylight) > 0.004f)
+	// a visible jump in the sky at dusk. The fronts' glow settings apply as they're changed too (a night holds still).
+	if (FMath::Abs(Daylight - AppliedDaylight) > 0.004f || CVarTenementGlow.GetValueOnGameThread() != AppliedTenementGlow ||
+		CVarLaundromatGlow.GetValueOnGameThread() != AppliedLaundromatGlow)
 	{
 		ApplyDaylight();
 	}
@@ -2351,6 +2604,8 @@ void AStreetStage::SetDaylight(float InDaylight)
 void AStreetStage::ApplyDaylight()
 {
 	AppliedDaylight = Daylight;
+	AppliedTenementGlow = CVarTenementGlow.GetValueOnGameThread();
+	AppliedLaundromatGlow = CVarLaundromatGlow.GetValueOnGameThread();
 	const float D = Daylight;
 	const float Night = NightLevel(D);
 	// Everything that shines by itself is set for the night's exposure; by day the exposure is this many times less.
@@ -2391,11 +2646,13 @@ void AStreetStage::ApplyDaylight()
 			M->SetScalarParameterValue(TEXT("Strength"), NightGlowLevels[I] * Night);
 		}
 	}
+	// The laundromat's light on the sidewalk goes up and down with its window's glow (ss.Street.LaundromatGlow).
+	const float WashGlow = FMath::Max(0.0f, CVarLaundromatGlow.GetValueOnGameThread()) / LaundromatGlowSetFor;
 	for (int32 I = 0; I < NightLights.Num() && I < NightLightLevels.Num(); ++I)
 	{
 		if (ULightComponent* L = NightLights[I])
 		{
-			L->SetIntensity(NightLightLevels[I] * Night);
+			L->SetIntensity(NightLightLevels[I] * Night * (L == WashSpill.Get() ? WashGlow : 1.0f));
 			L->SetVisibility(Night > 0.01f);
 		}
 	}
@@ -2586,6 +2843,50 @@ bool AStreetStage::IsOffTheSet(const FVector& At) const
 {
 	const FVector L = GetActorTransform().InverseTransformPosition(At);
 	return L.Z < -400.0 || L.Y < EndY0 - 600.0 || L.Y > EndY1 + 600.0 || L.X < MarketWest - 900.0 || L.X > FarFront + 1600.0;
+}
+
+float AStreetStage::RainStrength() const
+{
+	return FMath::Max(0.0f, CVarRain.GetValueOnGameThread());
+}
+
+float AStreetStage::SignHum(const FVector& Listener) const
+{
+	const FVector L = GetActorTransform().InverseTransformPosition(Listener);
+	// As loud as it gets within a meter and a half of the tube, gone by eight meters.
+	auto Near = [&L](const FVector& A, const FVector& B) {
+		const double D = FMath::PointDistToSegment(L, A, B);
+		return static_cast<float>(FMath::Square(FMath::Clamp(1.0 - (D - 150.0) / 650.0, 0.0, 1.0)));
+	};
+	// The box sign over the store's windows is lit at every hour; the pawn shop's tube round its window and the neon over
+	// the laundromat (the tenement's, three floors up, or the stand-in's over its windows) only while the lamps are.
+	const float Night = NightLevel(Daylight);
+	const FVector Neon = TenementFront ? TenementNeonAt : WashNeonAt;
+	const double NeonHalf = TenementFront ? 320.0 : 210.0;
+	float Hum = Near(FVector(4.0, 3940.0, 405.0), FVector(4.0, 4660.0, 405.0));
+	Hum = FMath::Max(Hum, Night * Near(FVector(12.0, PawnY0 + 150.0, 160.0), FVector(12.0, PawnY1 - 150.0, 160.0)));
+	Hum = FMath::Max(Hum, Night * Near(Neon - FVector(0.0, NeonHalf, 0.0), Neon + FVector(0.0, NeonHalf, 0.0)));
+	return Hum;
+}
+
+void AStreetStage::SetClock(double WorldMinutes)
+{
+	if (!ClockHour || !ClockMinute || !ClockSecond)
+	{
+		return;
+	}
+	// The hands move when the second of the day changes (a quartz movement: the second hand steps).
+	const double InDay = WorldMinutes - FMath::FloorToDouble(WorldMinutes / 1440.0) * 1440.0;
+	const int32 Second = FMath::Clamp(static_cast<int32>(InDay * 60.0), 0, 86399);
+	if (Second == ClockShown)
+	{
+		return;
+	}
+	ClockShown = Second;
+	// Seen from the store the dial faces +X, so a negative roll turns a hand from 12 toward 3.
+	ClockSecond->SetRelativeRotation(FRotator(0.0f, 0.0f, -6.0f * static_cast<float>(Second % 60)));
+	ClockMinute->SetRelativeRotation(FRotator(0.0f, 0.0f, -6.0f * static_cast<float>(Second % 3600) / 60.0f));
+	ClockHour->SetRelativeRotation(FRotator(0.0f, 0.0f, -30.0f * static_cast<float>(Second % 43200) / 3600.0f));
 }
 
 FString AStreetStage::PlaceName(const FVector& At) const

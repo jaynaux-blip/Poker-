@@ -6,6 +6,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
@@ -24,6 +25,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStackCharacter.h"
+#include "StreetAudio.h"
 #include "StreetStage.h"
 
 #include <algorithm>
@@ -300,7 +302,10 @@ void AStreetGameMode::BeginPlay()
 	ApplySettings(Game->Menu.Settings, false);
 	if (Audio)
 	{
-		Audio->StartAmbience();
+		// The street's own sound, not the apartment's room tone (Tick keeps it told where the camera is, the rain, the hour).
+		StreetTone = MakeShared<FStreetAmbience>(static_cast<uint32>(FDateTime::Now().GetTicks()));
+		TSharedPtr<FStreetAmbience> Tone = StreetTone;
+		Audio->StartAmbience([Tone](float* Out, int32 N) { Tone->Render(Out, N); }, 0.75f);
 		Audio->PlayEffect(ss::audio::Effect::Thump, 0.5f); // the building's door closing behind you
 	}
 	if (APlayerController* Pc = GetWorld()->GetFirstPlayerController())
@@ -558,10 +563,24 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 	}
 	if (Stage)
 	{
-		// The street's hour: the sky, the lamps' photocells, the windows and the exposure follow the clock.
+		// The street's hour: the sky, the lamps' photocells, the windows and the exposure follow the clock (and the store's
+		// clock on the wall shows it).
 		Stage->SetDaylight(static_cast<float>(Game->Session.Daylight()));
+		Stage->SetClock(Game->Session.WorldMinutes());
 	}
 	AShortStackCharacter* Hero = GetHero();
+	if (Stage && StreetTone)
+	{
+		// The street's sound from where the camera is: in or out of the store (its doors open or shut), under a sign or not;
+		// the rain as it shows; the traffic by the hour; nothing new starting on the street while paused.
+		const APlayerController* Pc = GetWorld()->GetFirstPlayerController();
+		const FVector Ear = Pc && Pc->PlayerCameraManager ? Pc->PlayerCameraManager->GetCameraLocation() : Hero ? Hero->EyeLocation() : Stage->StartAt(TEXT("home")).GetLocation();
+		StreetTone->SetInside(Stage->CameraInside(), Stage->DoorsOpen());
+		StreetTone->SetRain(Stage->RainStrength(), Stage->Wetness);
+		StreetTone->SetDaylight(static_cast<float>(Game->Session.Daylight()));
+		StreetTone->SetHum(Stage->SignHum(Ear));
+		StreetTone->SetPaused(Game->Menu.IsPaused());
+	}
 	if (Hero && Stage)
 	{
 		KeepOnTheSet();
@@ -574,14 +593,6 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 		if (Hero->TakeFootstep(Volume) && Audio)
 		{
 			Audio->PlayEffect(ss::audio::Effect::Step, Volume * (Stage->IsInsideStore(Hero->GetActorLocation()) ? 0.7f : 1.0f));
-		}
-		// Behind the store's glass the rain is quieter.
-		const float Duck = FMath::Lerp(1.0f, 0.45f, Stage->CameraInside());
-		if (Audio && FMath::Abs(Duck - AmbienceDuck) > 0.02f)
-		{
-			AmbienceDuck = Duck;
-			const ss::ui::GameSettings& S = Game->Menu.Settings;
-			Audio->SetMix(S.MasterVolume / 100.0f, S.EffectsVolume / 100.0f, S.AmbienceVolume / 100.0f * AmbienceDuck);
 		}
 		// Worn out shows in the walk: from 40 energy down the shoulders drop and the trunk sags.
 		Hero->SetTired(static_cast<float>((40.0 - Game->Session.Life.Energy) / 40.0));
@@ -775,6 +786,10 @@ void AStreetGameMode::GoHome()
 	{
 		Audio->PlayEffect(ss::audio::Effect::Thump, 0.7f);
 	}
+	if (StreetTone)
+	{
+		StreetTone->FadeOut(1.3f); // the street falls away behind the door
+	}
 }
 
 void AStreetGameMode::Toast(const FString& From, const FString& Body)
@@ -830,7 +845,8 @@ void AStreetGameMode::ApplySettings(const ss::ui::GameSettings& Settings, bool b
 	}
 	if (Audio)
 	{
-		Audio->SetMix(Settings.MasterVolume / 100.0f, Settings.EffectsVolume / 100.0f, Settings.AmbienceVolume / 100.0f * AmbienceDuck);
+		// The street's own sound quiets behind the store's glass by itself (StreetAudio.h): the ambience level is the player's.
+		Audio->SetMix(Settings.MasterVolume / 100.0f, Settings.EffectsVolume / 100.0f, Settings.AmbienceVolume / 100.0f);
 	}
 	// The engine mutes a game whose window isn't in front unless told otherwise.
 	FApp::SetUnfocusedVolumeMultiplier(Settings.BackgroundAudio ? 1.0f : 0.0f);
