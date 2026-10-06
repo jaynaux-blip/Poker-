@@ -3,7 +3,9 @@
 #include "BackRoomAnim.h"
 #include "BlenderProps.h"
 #include "Camera/CameraComponent.h"
+#include "CastLooks.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/ShapeComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -20,13 +22,16 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GroomAsset.h"
+#include "GroomBindingAsset.h"
 #include "GroomComponent.h"
 #include "HAL/IConsoleManager.h"
+#include "HeroGrooms.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MeshDescription.h"
 #include "Misc/PackageName.h"
 #include "StaticMeshAttributes.h"
 #include "StreetAnim.h"
+#include "TalkFace.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogStreetHero, Log, All);
 
@@ -214,41 +219,12 @@ int32 BakedSlot(const UMeshComponent* Mesh, int32 Index)
 
 // ------------------------------------------------------------------ hair
 
-enum class EGroomKind : uint8
-{
-	Scalp,
-	Brows,
-	Lashes,
-	Beard,
-	Mustache,
-	Fuzz,
-};
+using HeroGrooms::EGroomKind;
 
 /** Which groom a MetaHuman Blueprint's node holds, by its variable (Hair, Eyebrows, Beard, ...) or its asset (Beard_S_Stubble). */
 EGroomKind GroomKindOf(const FString& Variable, const FString& Asset)
 {
-	auto Is = [&](const TCHAR* Word) { return Variable.Contains(Word) || Asset.StartsWith(Word); };
-	if (Is(TEXT("Eyelash")))
-	{
-		return EGroomKind::Lashes;
-	}
-	if (Is(TEXT("Eyebrow")))
-	{
-		return EGroomKind::Brows;
-	}
-	if (Is(TEXT("Mustache")))
-	{
-		return EGroomKind::Mustache;
-	}
-	if (Is(TEXT("Beard")) || Is(TEXT("Goatee")))
-	{
-		return EGroomKind::Beard;
-	}
-	if (Is(TEXT("Fuzz")) || Is(TEXT("Peachfuzz")))
-	{
-		return EGroomKind::Fuzz;
-	}
-	return EGroomKind::Scalp;
+	return HeroGrooms::KindOf(Variable, Asset);
 }
 
 /** Hair that stays close to the scalp, so a hat sits over it without it coming up through the crown. */
@@ -352,27 +328,29 @@ void ShadeGroom(UGroomComponent* Groom, const FHairShade& Shade, float Darker)
 
 /**
  * The Blueprint's LOD sync drives its grooms from the face; without it a groom falls back to its helmet (a painted-on
- * cap of hair). Builds below the cinematic tier carry cards, not strands: hold them on their nearest cards.
+ * cap of hair). Builds below the cinematic tier carry cards, not strands: hold them on their nearest cards (HeroGrooms.h
+ * holds them by detail tier once one is set).
  */
 void HoldOnCards(UGroomComponent* Groom)
 {
-	if (!Groom || !Groom->GroomAsset)
+	HeroGrooms::HoldOnCards(Groom);
+}
+
+/** A groom component's kind as it was worn (the scalp's, by default: a groom added for the hair). */
+EGroomKind KindIn(const TArray<TPair<TWeakObjectPtr<UGroomComponent>, uint8>>& Kinds, const UGroomComponent* Groom)
+{
+	for (const TPair<TWeakObjectPtr<UGroomComponent>, uint8>& K : Kinds)
 	{
-		return;
-	}
-	int32 CardsLOD = INDEX_NONE;
-	for (const FHairGroupsCardsSourceDescription& Cards : Groom->GroomAsset->GetHairGroupsCards())
-	{
-		if (Cards.ImportedMesh && Cards.LODIndex >= 0)
+		if (K.Key.Get() == Groom)
 		{
-			CardsLOD = CardsLOD == INDEX_NONE ? Cards.LODIndex : FMath::Min(CardsLOD, Cards.LODIndex);
+			return static_cast<EGroomKind>(K.Value);
 		}
 	}
-	if (CardsLOD != INDEX_NONE)
-	{
-		Groom->SetForcedLOD(CardsLOD);
-	}
+	return EGroomKind::Scalp;
 }
+
+// Where the gaze rests at work: the hands' work at a counter, 45 cm ahead of the station's mark and 95 cm up.
+const FVector WorkLookAt(45.0, 0.0, 95.0);
 
 // ------------------------------------------------------------------ clothes
 
@@ -1111,6 +1089,7 @@ void AShortStackCharacter::ClearWearables()
 		}
 	}
 	Wearables.Reset();
+	GroomKinds.Reset();
 }
 
 void AShortStackCharacter::UseArchetype()
@@ -1223,6 +1202,10 @@ void AShortStackCharacter::BuildFromMetaHuman(UClass* Blueprint, const FStreetOu
 		{
 			HoldOnCards(Cast<UGroomComponent>(Copy));
 		}
+		if (UGroomComponent* Worn = Cast<UGroomComponent>(Copy))
+		{
+			GroomKinds.Emplace(Worn, static_cast<uint8>(Kind));
+		}
 		Ours.Add(Node->GetVariableName(), Copy);
 		Wearables.Add(Copy);
 	}
@@ -1293,11 +1276,14 @@ void AShortStackCharacter::ApplyLook(const ss::hero::Character& Who)
 	LookAge = Who.Age;
 	bHasLook = true;
 	bNpc = false;
+	if (bTierApplied)
+	{
+		RestoreTierDefaults();
+	}
 	const ss::hero::Look& L = LookNow;
 	const FStreetOutfit Outfit = HeroOutfit(L);
 	// The hero MetaHuman nearest the look: body type, then skin tone in three bands.
-	const int32 Band = L.Skin <= 2 ? 0 : (L.Skin <= 5 ? 1 : 2);
-	FString Built = FString::Printf(TEXT("Hero%c%d"), L.Body == 1 ? TEXT('B') : TEXT('A'), Band);
+	FString Built = CastLooks::HeroFaceFor(L).ToString();
 	UClass* Blueprint = CastClass(Built);
 	if (!Blueprint)
 	{
@@ -1306,11 +1292,13 @@ void AShortStackCharacter::ApplyLook(const ss::hero::Character& Who)
 	}
 	if (Blueprint)
 	{
+		CastFaceName = FName(*Built);
 		BuildFromMetaHuman(Blueprint, Outfit);
 		PutOnGarments(Outfit, Built);
 	}
 	else
 	{
+		CastFaceName = NAME_None;
 		Built = TEXT("the archetype body");
 		UseArchetype();
 	}
@@ -1320,6 +1308,10 @@ void AShortStackCharacter::ApplyLook(const ss::hero::Character& Who)
 	BuildShoes(Outfit);
 	PutOnHeadwear();
 	RefreshVisibility();
+	if (bTierApplied)
+	{
+		ApplyDetailTier();
+	}
 	UE_LOG(LogStreetHero, Log, TEXT("%s (%d) walks as %s: body %d, skin %d, hair %d in color %d, facial hair %d, build %d, %d cm, jacket %d in color %d, glasses %d, hat %d"),
 		UTF8_TO_TCHAR(Who.FullName().c_str()), Who.Age, *Built, L.Body, L.Skin, L.Hair, L.HairColor, L.FacialHair, L.Build, L.Height, L.Outfit, L.OutfitColor, L.Glasses, L.Hat);
 }
@@ -1330,14 +1322,20 @@ void AShortStackCharacter::ApplyCast(const TCHAR* CastName, const FLinearColor& 
 	bNpc = true;
 	LookNow = ss::hero::Look();
 	LookAge = 0;
+	if (bTierApplied)
+	{
+		RestoreTierDefaults();
+	}
 	const FStreetOutfit Outfit = CastOutfit(Shirt);
 	if (UClass* Blueprint = CastClass(CastName))
 	{
+		CastFaceName = FName(CastName);
 		BuildFromMetaHuman(Blueprint, Outfit);
 	}
 	else
 	{
 		UE_LOG(LogStreetHero, Warning, TEXT("%s isn't built (backroom_cast.py): the archetype body stands in"), CastName);
+		CastFaceName = NAME_None;
 		UseArchetype();
 	}
 	LinkFace();
@@ -1347,6 +1345,10 @@ void AShortStackCharacter::ApplyCast(const TCHAR* CastName, const FLinearColor& 
 	PutOnHeadwear();
 	BecomeNpc();
 	RefreshVisibility();
+	if (bTierApplied)
+	{
+		ApplyDetailTier();
+	}
 }
 
 void AShortStackCharacter::BecomeNpc()
@@ -1629,6 +1631,11 @@ void AShortStackCharacter::RefitWear()
 {
 	PutOnHeadwear();
 	RefreshVisibility();
+	if (bTierApplied)
+	{
+		// A hat or glasses made just now take the tier the rest of them is on.
+		ApplyDetailTier();
+	}
 }
 
 namespace ShortStackCharacterDetail
@@ -1934,12 +1941,27 @@ void AShortStackCharacter::UpdateLook(float Dt)
 	float WantPitch = 0.0f;
 	float Rate = 7.0f;
 	EyeTarget = FVector::ZeroVector;
+	// How far a point is from where the body faces, as the head turns to it (degrees: yaw + to the right, pitch + up).
+	auto Aim = [this, BodyYaw](const FVector& At, float& OutYaw, float& OutPitch) {
+		const FRotator R = (At - EyeLocation()).Rotation();
+		OutYaw = FMath::FindDeltaAngleDegrees(BodyYaw, static_cast<float>(R.Yaw));
+		OutPitch = static_cast<float>(FRotator::NormalizeAxis(R.Pitch));
+	};
 	if (bNpc)
 	{
 		// Benny: the player, once they're a few steps away and in front of him; otherwise the counter, idly.
 		WantYaw = 8.0f * FMath::Sin(Clock * 0.11f) + 4.0f * FMath::Sin(Clock * 0.37f);
 		WantPitch = -6.0f;
 		Rate = 3.0f;
+		if (!WorkBeat.IsNone())
+		{
+			// At work: the eyes on the hands' work, drifting a little (spec 6.6's attention stack, its point of interest).
+			float Yaw = 0.0f;
+			float Pitch = 0.0f;
+			Aim(WorkStation.TransformPosition(WorkLookAt), Yaw, Pitch);
+			WantYaw = FMath::Clamp(Yaw, -60.0f, 60.0f) + 4.0f * FMath::Sin(Clock * 0.23f);
+			WantPitch = FMath::Clamp(Pitch, -45.0f, 10.0f);
+		}
 		const APlayerController* Pc = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
 		const AShortStackCharacter* Player = Pc ? Cast<AShortStackCharacter>(Pc->GetPawn()) : nullptr;
 		if (Player && Player != this)
@@ -1972,6 +1994,22 @@ void AShortStackCharacter::UpdateLook(float Dt)
 		WantPitch *= FMath::Lerp(0.3f, 1.0f, TowardView);
 		EyeTarget = EyeLocation() + FRotator(WantPitch, BodyYaw + WantYaw, 0.0f).Vector() * 800.0;
 	}
+	// Someone or something to look at (the one they're talking to, what the director points them at), over all of the above
+	// by its weight. The neck turns so far; past that people-ue's turn in place turns the body. The player's own head in
+	// first person stays the camera's.
+	if (LookTargetWeight > 0.0f && !(bFirstPerson && !bNpc))
+	{
+		float Yaw = 0.0f;
+		float Pitch = 0.0f;
+		Aim(LookTargetAt, Yaw, Pitch);
+		WantYaw = FMath::Lerp(WantYaw, FMath::Clamp(Yaw, -105.0f, 105.0f), LookTargetWeight);
+		WantPitch = FMath::Lerp(WantPitch, FMath::Clamp(Pitch, -50.0f, 40.0f), LookTargetWeight);
+		if (LookTargetWeight >= 0.5f || EyeTarget.IsZero())
+		{
+			EyeTarget = LookTargetAt;
+		}
+		Rate = FMath::Max(Rate, 5.0f);
+	}
 	// First person: the head is the camera's, at once. Otherwise it eases round, as heads do.
 	const float Alpha = bFirstPerson && !bNpc ? 1.0f : 1.0f - FMath::Exp(-Rate * Dt);
 	LookYawNow = FMath::Lerp(LookYawNow, WantYaw, Alpha);
@@ -1989,16 +2027,24 @@ void AShortStackCharacter::UpdateFace(float Dt)
 	{
 		Anim->Body = GetMesh();
 	}
-	// Your own face in first person is there for its shadow: it follows the head, with nothing for RigLogic to work out.
-	Anim->bExpressionless = bHeadHidden && !bNpc;
+	// Your own face in first person is there for its shadow: it follows the head, with nothing for RigLogic to work out. Past
+	// the Near tier nobody reads an expression either (spec 6.7).
+	Anim->bExpressionless = (bHeadHidden && !bNpc) || (bTierApplied && DetailTierNow >= 1);
 	if (Anim->bExpressionless)
 	{
 		Anim->LookAt = FVector::ZeroVector;
 		return;
 	}
-	// This frame's controls, written over last frame's (the map keeps its storage).
+	// This frame's controls, written over last frame's (the map keeps its storage), each added to what's there.
 	TMap<FName, float>& C = Anim->Curves;
 	C.Reset();
+	auto Add = [&C](FName Control, float Value) {
+		if (Value > 0.0005f)
+		{
+			float& V = C.FindOrAdd(Control);
+			V = FMath::Clamp(V + Value, 0.0f, 1.0f);
+		}
+	};
 	// Blinks: every two to five seconds, now and then a double.
 	NextBlink -= Dt;
 	if (BlinkT < 0.0f && NextBlink <= 0.0f)
@@ -2011,8 +2057,8 @@ void AShortStackCharacter::UpdateFace(float Dt)
 	{
 		BlinkT += Dt / 0.17f;
 		const float Shut = BlinkT < 1.0f ? FMath::Pow(FMath::Sin(BlinkT * PI), 0.6f) : 0.0f;
-		C.Add(CurveBlinkL, Shut);
-		C.Add(CurveBlinkR, Shut);
+		Add(CurveBlinkL, Shut);
+		Add(CurveBlinkR, Shut);
 		if (BlinkT >= 1.0f)
 		{
 			BlinkT = bDoubleBlink ? 0.0f : -1.0f;
@@ -2022,9 +2068,25 @@ void AShortStackCharacter::UpdateFace(float Dt)
 	// The lips just parted, open to breathe after a run, open for the can or the bite as the hand gets there.
 	const float SipT = Clock - SipAt;
 	const float Sipping = SipT >= 0.0f && SipT < 1.8f ? FMath::SmoothStep(0.3f, 0.6f, SipT) * (1.0f - FMath::SmoothStep(1.1f, 1.5f, SipT)) : 0.0f;
-	C.Add(CurveJawOpen, 0.02f + 0.12f * Winded + 0.22f * Sipping);
-	C.Add(CurveRelaxL, 0.1f);
-	C.Add(CurveRelaxR, 0.1f);
+	Add(CurveJawOpen, 0.02f + 0.12f * Winded + 0.22f * Sipping);
+	Add(CurveRelaxL, 0.1f);
+	Add(CurveRelaxR, 0.1f);
+	// Talking (SetTalking): the Back Room's syllables, over the parted lips.
+	const float TalkW = TalkFace::Weight(TalkLeft);
+	if (TalkW > 0.0f)
+	{
+		auto AddControl = [&Add](const TCHAR* Control, float Value) { Add(FName(*FString::Printf(TEXT("CTRL_expressions_%s"), Control)), Value); };
+		auto BothControls = [&AddControl](const TCHAR* Control, float Value) {
+			AddControl(*FString::Printf(TEXT("%sL"), Control), Value);
+			AddControl(*FString::Printf(TEXT("%sR"), Control), Value);
+		};
+		TalkFace::Mouth(Clock, TalkW, TalkLoudness, AddControl, BothControls);
+	}
+	// What the director holds on the face (a double take's brows, a smile).
+	for (const TPair<FName, float>& Held : FaceCurves)
+	{
+		Add(Held.Key, Held.Value);
+	}
 	Anim->LookAt = EyeTarget.IsZero() ? FVector::ZeroVector : Face->GetComponentTransform().InverseTransformPosition(EyeTarget);
 }
 
@@ -2032,6 +2094,12 @@ void AShortStackCharacter::UpdateFace(float Dt)
 
 void AShortStackCharacter::Drive(float Forward, float Right, bool bRun)
 {
+	if (bSeated)
+	{
+		// Seated, the keys move nobody: standing up is the game's (SetSeated(false)).
+		bRunning = false;
+		return;
+	}
 	bRunning = bRun;
 	GetCharacterMovement()->MaxWalkSpeed = bRun ? RunSpeed : WalkSpeed;
 	const FRotator Yaw(0.0f, GetControlRotation().Yaw, 0.0f);
@@ -2076,8 +2144,12 @@ void AShortStackCharacter::Tick(float DeltaSeconds)
 		// Nobody dressed us by the first frame: the creator's default person, so there's someone to walk.
 		ApplyLook(ss::hero::Character());
 	}
-	const float Dt = FMath::Min(DeltaSeconds, 0.05f);
+	// At most a twentieth of a second at a time, or the time between ticks when a detail tier spaces them out (otherwise the
+	// gait would run slow at 10 ticks a second).
+	const float Dt = FMath::Min(DeltaSeconds, FMath::Max(0.05f, PrimaryActorTick.TickInterval + 0.05f));
 	Clock += Dt;
+	TalkLeft = FMath::Max(0.0f, TalkLeft - Dt);
+	SeatBlend = FMath::FInterpConstantTo(SeatBlend, bSeated ? 1.0f : 0.0f, Dt, 1.0f / 0.6f);
 	const float Speed = static_cast<float>(GetVelocity().Size2D());
 	const float Run = FMath::Clamp((Speed - WalkSpeed) / FMath::Max(1.0f, RunSpeed - WalkSpeed), 0.0f, 1.0f);
 	// One gait cycle (two steps) covers about 1.4 m walking and 2.6 m running, longer for taller people.
@@ -2121,7 +2193,8 @@ void AShortStackCharacter::Tick(float DeltaSeconds)
 		P.Time = Clock;
 		P.Mouth = MouthFromHead;
 		P.LookYaw = LookYawNow;
-		P.LookPitch = LookPitchNow;
+		// Talking nods along (TalkFace.h; the pose has no roll for its tilt yet).
+		P.LookPitch = LookPitchNow + TalkFace::Nod(Clock, TalkFace::Weight(TalkLeft));
 		// Up to the mouth, held there a moment, and down again.
 		const float SipT = Clock - SipAt;
 		P.Sip = SipT >= 0.0f && SipT < 1.8f ? FMath::SmoothStep(0.0f, 0.55f, SipT) * (1.0f - FMath::SmoothStep(1.2f, 1.8f, SipT)) : 0.0f;
@@ -2132,3 +2205,743 @@ void AShortStackCharacter::Tick(float DeltaSeconds)
 		UpdateCamera(Dt);
 	}
 }
+
+// ------------------------------------------------------------------ people (spec 7.5.4)
+
+void AShortStackCharacter::SetLookTarget(const FVector& WorldAt, float Weight)
+{
+	LookTargetAt = WorldAt;
+	LookTargetWeight = FMath::Clamp(Weight, 0.0f, 1.0f);
+}
+
+void AShortStackCharacter::SetTalking(float Seconds, float Loudness)
+{
+	TalkLeft = FMath::Max(0.0f, Seconds);
+	TalkLoudness = FMath::Clamp(Loudness, 0.0f, 1.0f);
+}
+
+void AShortStackCharacter::SetFaceCurve(FName Control, float Value)
+{
+	const FName Key(*FString::Printf(TEXT("CTRL_expressions_%s"), *Control.ToString()));
+	if (Value > 0.0f)
+	{
+		FaceCurves.Add(Key, FMath::Min(Value, 1.0f));
+	}
+	else
+	{
+		FaceCurves.Remove(Key);
+	}
+}
+
+UStreetBodyAnim* AShortStackCharacter::StreetBody() const
+{
+	const USkeletalMeshComponent* Body = GetMesh();
+	return Body ? Cast<UStreetBodyAnim>(Body->GetAnimInstance()) : nullptr;
+}
+
+void AShortStackCharacter::SetSeated(bool bSit, float SeatHeight)
+{
+	SeatHeightCm = FMath::Clamp(SeatHeight, 20.0f, 110.0f);
+	if (bSit == bSeated)
+	{
+		return;
+	}
+	bSeated = bSit;
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	if (!Move)
+	{
+		return;
+	}
+	if (bSit)
+	{
+		// Held where they sat: nothing walks them off the seat, gravity included.
+		MoveModeBeforeSeat = static_cast<uint8>(Move->MovementMode.GetValue());
+		Move->StopMovementImmediately();
+		Move->DisableMovement();
+	}
+	else if (MoveModeBeforeSeat != static_cast<uint8>(MOVE_None))
+	{
+		Move->SetMovementMode(static_cast<EMovementMode>(MoveModeBeforeSeat));
+	}
+}
+
+void AShortStackCharacter::SetWork(FName Beat, const FTransform& Station)
+{
+	if (Beat != WorkBeat)
+	{
+		WorkSince = Clock;
+	}
+	WorkBeat = Beat;
+	WorkStation = Station;
+}
+
+void AShortStackCharacter::SetDetailTier(int32 Tier)
+{
+	Tier = FMath::Clamp(Tier, 0, 3);
+	if (bTierApplied && Tier == DetailTierNow)
+	{
+		return;
+	}
+	DetailTierNow = Tier;
+	bTierApplied = true;
+	ApplyDetailTier();
+}
+
+void AShortStackCharacter::ApplyDetailTier()
+{
+	// Spec 6.7, built on The Block's crowd tiers (StreetCrowd.cpp's UpdateCost: forced LODs, slower poses, expressionless
+	// faces, no shadows far off):
+	//   Near  everything: RigLogic and the flap, the hair on its first cards LOD, posed every frame, shadows, ray tracing.
+	//   Mid   no face rig; the hair a cards LOD lower (never the helmet); the actor and the body every 0.05 s with URO; only
+	//         the body throws a shadow; out of ray tracing.
+	//   Far   no face rig; the helmet; every 0.1 s; the body's third LOD and the face's fifth (the crowd's far tier); no
+	//         shadows, no ray tracing.
+	//   Gone  hidden, out of collision, nothing ticking (the pool hides and moves people; it never rebuilds them).
+	// Near puts each part back as it was built (its own shadow, tick interval, URO and LOD, as recorded the first time a tier
+	// saw it), with every groom held on its first cards LOD (a cinematic build's too: spec 6.1's cards on the street).
+	// The face is posed with the body, not every 0.1 s as the spec's table has it at Mid: an expressionless face only copies
+	// the body's neck and head, and one posed less often than its body opens a seam at the neck on anyone walking (the
+	// crowd's reason for posing it every frame).
+	const int32 Tier = DetailTierNow;
+	if (Tier >= 3)
+	{
+		// Gone: hidden, out of collision, nothing ticking. Only what's on now is stopped (and recorded, so leaving Gone starts
+		// only that again); the parts keep the last tier's settings while nobody sees them.
+		if (!IsHidden())
+		{
+			SetActorHiddenInGame(true);
+			bTierHidActor = true;
+		}
+		if (GetActorEnableCollision())
+		{
+			SetActorEnableCollision(false);
+			bTierStoppedCollision = true;
+		}
+		if (IsActorTickEnabled())
+		{
+			SetActorTickEnabled(false);
+			bTierStoppedTick = true;
+		}
+		TInlineComponentArray<UActorComponent*> All(this);
+		for (UActorComponent* C : All)
+		{
+			const bool bPart = C->IsA<USkinnedMeshComponent>() || C->IsA<UGroomComponent>() || C == GetCharacterMovement();
+			if (bPart && C->IsComponentTickEnabled())
+			{
+				C->SetComponentTickEnabled(false);
+				TierStoppedTicks.AddUnique(C);
+			}
+		}
+		return;
+	}
+	UndoGone();
+	if (TierOwnTickInterval < 0.0f)
+	{
+		TierOwnTickInterval = PrimaryActorTick.TickInterval;
+	}
+	const float Interval = Tier == 1 ? 0.05f : 0.1f;
+	SetActorTickInterval(Tier == 0 ? TierOwnTickInterval : Interval);
+	TInlineComponentArray<UPrimitiveComponent*> Parts(this);
+	for (UPrimitiveComponent* P : Parts)
+	{
+		if (!P || P->IsA<UShapeComponent>())
+		{
+			continue;
+		}
+		const USkinnedMeshComponent* SeenSkin = Cast<USkinnedMeshComponent>(P);
+		const UGroomComponent* SeenGroom = Cast<UGroomComponent>(P);
+		FTierPart* Known = TierDefaults.Find(P);
+		if (!Known)
+		{
+			FTierPart Seen;
+			Seen.bShadow = P->CastShadow;
+			Seen.bTraced = P->bVisibleInRayTracing;
+			Seen.bVisible = P->GetVisibleFlag();
+			Seen.bUro = SeenSkin && SeenSkin->bEnableUpdateRateOptimizations;
+			Seen.TickInterval = P->GetComponentTickInterval();
+			Seen.ForcedLod = SeenSkin ? SeenSkin->GetForcedLOD() : (SeenGroom ? SeenGroom->GetForcedLOD() : 0);
+			Known = &TierDefaults.Add(P, Seen);
+		}
+		const FTierPart Own = *Known;
+		const bool bShadow = Own.bShadow && (Tier == 0 || (Tier == 1 && P == GetMesh()));
+		if (static_cast<bool>(P->CastShadow) != bShadow)
+		{
+			P->SetCastShadow(bShadow);
+		}
+		const bool bTraced = Own.bTraced && Tier == 0;
+		if (static_cast<bool>(P->bVisibleInRayTracing) != bTraced)
+		{
+			P->SetVisibleInRayTracing(bTraced);
+		}
+		if (USkinnedMeshComponent* Skin = Cast<USkinnedMeshComponent>(P))
+		{
+			Skin->SetComponentTickInterval(Tier == 0 ? Own.TickInterval : Interval);
+			Skin->bEnableUpdateRateOptimizations = Tier == 0 ? Own.bUro : true;
+			// Forced LODs count from 1 (0 lets the engine choose), and stop at what the mesh has.
+			const int32 Lod = Tier >= 2 ? (Skin == Face.Get() ? 5 : 3) : Own.ForcedLod;
+			if (Skin->GetForcedLOD() != Lod)
+			{
+				Skin->SetForcedLOD(Lod);
+			}
+		}
+		else if (UGroomComponent* Hair = Cast<UGroomComponent>(P))
+		{
+			const bool bHeld = HeroGrooms::HoldForTier(Hair, Tier);
+			// At Far, what has neither cards nor a helmet (lashes, peach fuzz, a strands-only buzz) isn't drawn at all.
+			const bool bShow = Own.bVisible && (Tier < 2 || bHeld);
+			if (Hair->GetVisibleFlag() != bShow)
+			{
+				Hair->SetVisibility(bShow);
+			}
+		}
+	}
+}
+
+void AShortStackCharacter::UndoGone()
+{
+	if (bTierHidActor)
+	{
+		SetActorHiddenInGame(false);
+		bTierHidActor = false;
+	}
+	if (bTierStoppedCollision)
+	{
+		SetActorEnableCollision(true);
+		bTierStoppedCollision = false;
+	}
+	if (bTierStoppedTick)
+	{
+		SetActorTickEnabled(true);
+		bTierStoppedTick = false;
+	}
+	for (const TWeakObjectPtr<UActorComponent>& Stopped : TierStoppedTicks)
+	{
+		if (UActorComponent* C = Stopped.Get())
+		{
+			C->SetComponentTickEnabled(true);
+		}
+	}
+	TierStoppedTicks.Reset();
+}
+
+void AShortStackCharacter::RestoreTierDefaults()
+{
+	UndoGone();
+	for (const TPair<TWeakObjectPtr<UPrimitiveComponent>, FTierPart>& Known : TierDefaults)
+	{
+		UPrimitiveComponent* P = Known.Key.Get();
+		if (!P)
+		{
+			continue;
+		}
+		const FTierPart& Own = Known.Value;
+		if (static_cast<bool>(P->CastShadow) != Own.bShadow)
+		{
+			P->SetCastShadow(Own.bShadow);
+		}
+		if (static_cast<bool>(P->bVisibleInRayTracing) != Own.bTraced)
+		{
+			P->SetVisibleInRayTracing(Own.bTraced);
+		}
+		if (USkinnedMeshComponent* Skin = Cast<USkinnedMeshComponent>(P))
+		{
+			Skin->SetComponentTickInterval(Own.TickInterval);
+			Skin->bEnableUpdateRateOptimizations = Own.bUro;
+			if (Skin->GetForcedLOD() != Own.ForcedLod)
+			{
+				Skin->SetForcedLOD(Own.ForcedLod);
+			}
+		}
+		else if (UGroomComponent* Hair = Cast<UGroomComponent>(P))
+		{
+			if (Hair->GetVisibleFlag() != Own.bVisible)
+			{
+				Hair->SetVisibility(Own.bVisible);
+			}
+			if (Hair->GetForcedLOD() != Own.ForcedLod)
+			{
+				Hair->SetForcedLOD(Own.ForcedLod);
+			}
+		}
+	}
+	TierDefaults.Reset();
+	if (TierOwnTickInterval >= 0.0f)
+	{
+		SetActorTickInterval(TierOwnTickInterval);
+	}
+}
+
+// ------------------------------------------------------------------ grooms
+
+UGroomComponent* AShortStackCharacter::ScalpGroom() const
+{
+	for (const TPair<TWeakObjectPtr<UGroomComponent>, uint8>& Worn : GroomKinds)
+	{
+		if (Worn.Key.IsValid() && static_cast<EGroomKind>(Worn.Value) == EGroomKind::Scalp)
+		{
+			return Worn.Key.Get();
+		}
+	}
+	return nullptr;
+}
+
+TArray<UGroomComponent*> AShortStackCharacter::GetGrooms() const
+{
+	TArray<UGroomComponent*> Out;
+	for (const TPair<TWeakObjectPtr<UGroomComponent>, uint8>& Worn : GroomKinds)
+	{
+		if (UGroomComponent* Groom = Worn.Key.Get())
+		{
+			Out.Add(Groom);
+		}
+	}
+	return Out;
+}
+
+bool AShortStackCharacter::SwapGroom(UGroomComponent* Groom, UGroomAsset* Asset, UGroomBindingAsset* Binding)
+{
+	if (!Groom || !Asset)
+	{
+		return false;
+	}
+	// The last groom's shading was made from its own materials (the cards' textures are each groom's own): let it go first.
+	Groom->EmptyOverrideMaterials();
+	Groom->SetGroomAsset(Asset, Binding);
+	if (!HeroGrooms::HoldForTier(Groom, bTierApplied ? FMath::Min(DetailTierNow, 2) : 0) && Groom->GetForcedLOD() != INDEX_NONE)
+	{
+		// Nothing to hold (a strands-only groom: the buzz cuts, the stubble): its own LODs, as a fresh build leaves it, not
+		// the last groom's index.
+		Groom->SetForcedLOD(INDEX_NONE);
+	}
+	if (FTierPart* Known = TierDefaults.Find(Groom))
+	{
+		// As built is now this groom's own hold (its first cards LOD, or none), not the last groom's.
+		Known->ForcedLod = HeroGrooms::LodForTier(Asset, 0);
+	}
+	const EGroomKind Kind = KindIn(GroomKinds, Groom);
+	if (!bNpc && Kind != EGroomKind::Lashes)
+	{
+		ShadeGroom(Groom, HairShadeOf(LookNow.HairColor, LookAge), Kind == EGroomKind::Brows ? 0.06f : 0.0f);
+	}
+	if (Kind == EGroomKind::Scalp)
+	{
+		bWearsScalpHair = true;
+	}
+	if (bTierApplied)
+	{
+		// Shown or not at this tier as the new groom has it (Far hides what has no helmet and no cards).
+		ApplyDetailTier();
+	}
+	return true;
+}
+
+UGroomComponent* AShortStackCharacter::AddScalpGroom()
+{
+	if (UGroomComponent* Have = ScalpGroom())
+	{
+		return Have;
+	}
+	// As the MetaHuman Blueprints carry their hair: on the face, which its binding follows.
+	UGroomComponent* Hair = NewObject<UGroomComponent>(this, MakeUniqueObjectName(this, UGroomComponent::StaticClass(), TEXT("Hair")), RF_Transient);
+	Hair->SetupAttachment(Face);
+	Hair->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Hair->SetCanEverAffectNavigation(false);
+	Hair->bCastHiddenShadow = true;
+	Hair->RegisterComponent();
+	Wearables.Add(Hair);
+	GroomKinds.Emplace(Hair, static_cast<uint8>(EGroomKind::Scalp));
+	RefreshVisibility();
+	if (bTierApplied)
+	{
+		ApplyDetailTier();
+	}
+	return Hair;
+}
+
+void AShortStackCharacter::DropGroom(UGroomComponent* Groom)
+{
+	if (!Groom)
+	{
+		return;
+	}
+	Wearables.Remove(Groom);
+	GroomKinds.RemoveAll([Groom](const TPair<TWeakObjectPtr<UGroomComponent>, uint8>& Worn) { return !Worn.Key.IsValid() || Worn.Key.Get() == Groom; });
+	TierDefaults.Remove(Groom);
+	Groom->DestroyComponent();
+	bWearsScalpHair = ScalpGroom() != nullptr;
+}
+
+// ------------------------------------------------------------------ tests
+
+FString AShortStackCharacter::TestGroomSpike(const FString& Candidate, const FString& Options)
+{
+	return HeroGrooms::StartSpike(this, Candidate.IsEmpty() ? FString(TEXT("all")) : Candidate, Options);
+}
+
+FString AShortStackCharacter::TestGroomSpikeReport() const
+{
+	return HeroGrooms::SpikeReport();
+}
+
+FString AShortStackCharacter::TestHook(const FString& Command)
+{
+	TArray<FString> A;
+	Command.ParseIntoArrayWS(A);
+	const FString Verb = A.Num() > 0 ? A[0].ToLower() : FString();
+	auto Num = [&A](int32 I, float Default) { return A.IsValidIndex(I) ? FCString::Atof(*A[I]) : Default; };
+	if (Verb == TEXT("tier"))
+	{
+		SetDetailTier(FMath::RoundToInt(Num(1, 0.0f)));
+	}
+	else if (Verb == TEXT("talk"))
+	{
+		SetTalking(Num(1, 3.0f), Num(2, 0.6f));
+	}
+	else if (Verb == TEXT("look"))
+	{
+		SetLookTarget(FVector(Num(1, 0.0f), Num(2, 0.0f), Num(3, 0.0f)), Num(4, 1.0f));
+	}
+	else if (Verb == TEXT("lookhero"))
+	{
+		const APlayerController* Pc = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+		const AShortStackCharacter* Player = Pc ? Cast<AShortStackCharacter>(Pc->GetPawn()) : nullptr;
+		if (Player && Player != this)
+		{
+			SetLookTarget(Player->EyeLocation(), Num(1, 1.0f));
+		}
+	}
+	else if (Verb == TEXT("face") && A.Num() > 1)
+	{
+		SetFaceCurve(FName(*A[1]), Num(2, 0.6f));
+	}
+	else if (Verb == TEXT("sit"))
+	{
+		SetSeated(true, Num(1, 46.0f));
+	}
+	else if (Verb == TEXT("stand"))
+	{
+		SetSeated(false, SeatHeightCm);
+	}
+	else if (Verb == TEXT("work"))
+	{
+		// The station where they stand: the floor under them, facing their way.
+		const FVector Floor = GetActorLocation() - FVector(0.0, 0.0, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+		SetWork(A.IsValidIndex(1) && !A[1].Equals(TEXT("none"), ESearchCase::IgnoreCase) ? FName(*A[1]) : FName(NAME_None), FTransform(GetActorRotation(), Floor));
+	}
+	else if (Verb == TEXT("selftest"))
+	{
+		return SelfTestHooks();
+	}
+	else if (!Verb.IsEmpty() && Verb != TEXT("describe"))
+	{
+		return FString::Printf(TEXT("Unknown hook '%s' (tier, talk, look, lookhero, face, sit, stand, work, describe, selftest)"), *Verb);
+	}
+	return DescribeHooks();
+}
+
+namespace ShortStackCharacterDetail
+{
+/** What the detail tiers touch on one part, for the self-test's before and after. */
+struct FHookPartState
+{
+	TWeakObjectPtr<UPrimitiveComponent> Part;
+	bool bShadow = false;
+	bool bTraced = false;
+	bool bVisible = false;
+	bool bTicking = false;
+	bool bUro = false;
+	float Interval = 0.0f;
+	int32 Lod = 0;
+};
+
+TArray<FHookPartState> SnapParts(AActor* Actor)
+{
+	TArray<FHookPartState> Out;
+	TInlineComponentArray<UPrimitiveComponent*> Parts(Actor);
+	for (UPrimitiveComponent* P : Parts)
+	{
+		FHookPartState& S = Out.AddDefaulted_GetRef();
+		S.Part = P;
+		S.bShadow = P->CastShadow;
+		S.bTraced = P->bVisibleInRayTracing;
+		S.bVisible = P->GetVisibleFlag();
+		S.bTicking = P->IsComponentTickEnabled();
+		S.Interval = P->GetComponentTickInterval();
+		if (const USkinnedMeshComponent* Skin = Cast<USkinnedMeshComponent>(P))
+		{
+			S.bUro = Skin->bEnableUpdateRateOptimizations;
+			S.Lod = Skin->GetForcedLOD();
+		}
+		else if (const UGroomComponent* Groom = Cast<UGroomComponent>(P))
+		{
+			S.Lod = Groom->GetForcedLOD();
+		}
+	}
+	return Out;
+}
+
+/** The parts that aren't as they were (by name and what changed). */
+TArray<FString> PartsChanged(const TArray<FHookPartState>& Before, const TArray<FHookPartState>& After)
+{
+	TArray<FString> Out;
+	for (const FHookPartState& B : Before)
+	{
+		const FHookPartState* A = After.FindByPredicate([&B](const FHookPartState& S) { return S.Part == B.Part; });
+		if (!A || !B.Part.IsValid())
+		{
+			continue;
+		}
+		if (A->bShadow != B.bShadow || A->bTraced != B.bTraced || A->bVisible != B.bVisible || A->bTicking != B.bTicking || A->bUro != B.bUro
+			|| !FMath::IsNearlyEqual(A->Interval, B.Interval) || A->Lod != B.Lod)
+		{
+			Out.Add(FString::Printf(TEXT("%s (shadow %d>%d, traced %d>%d, visible %d>%d, ticking %d>%d, URO %d>%d, interval %.2f>%.2f, LOD %d>%d)"), *GetNameSafe(B.Part.Get()),
+				B.bShadow, A->bShadow, B.bTraced, A->bTraced, B.bVisible, A->bVisible, B.bTicking, A->bTicking, B.bUro, A->bUro, B.Interval, A->Interval, B.Lod, A->Lod));
+		}
+	}
+	return Out;
+}
+} // namespace ShortStackCharacterDetail
+
+FString AShortStackCharacter::SelfTestHooks()
+{
+	TArray<FString> Fails;
+	int32 Checks = 0;
+	auto Check = [&Fails, &Checks](bool bOk, const FString& What) {
+		++Checks;
+		if (!bOk)
+		{
+			Fails.Add(What);
+		}
+	};
+	// As found: put back at the end, and compared with what the tiers leave.
+	const bool bWasApplied = bTierApplied;
+	const int32 WasTier = DetailTierNow;
+	const bool bWasHidden = IsHidden();
+	// Hidden by someone else (the crowd keeping a walker off the street), not by Gone: no tier shows them.
+	const bool bHiddenByOthers = bWasHidden && !bTierHidActor;
+	const bool bWasColliding = GetActorEnableCollision();
+	const bool bWasTicking = IsActorTickEnabled();
+	const bool bMoveWasTicking = GetCharacterMovement() && GetCharacterMovement()->IsComponentTickEnabled();
+	const float WasInterval = PrimaryActorTick.TickInterval;
+	const TArray<FHookPartState> Before = SnapParts(this);
+
+	// The tiers, each checked on every part against its own settings as the tiers recorded them (the first tier set records
+	// them; with none set before this, that's how it was found).
+	for (int32 Tier = 0; Tier <= 3; ++Tier)
+	{
+		SetDetailTier(Tier);
+		Check(GetDetailTier() == Tier, FString::Printf(TEXT("tier %d not taken"), Tier));
+		if (Tier == 3)
+		{
+			Check(IsHidden(), TEXT("Gone: still shown"));
+			Check(!GetActorEnableCollision(), TEXT("Gone: still colliding"));
+			Check(!IsActorTickEnabled(), TEXT("Gone: the actor still ticks"));
+			Check(!GetMesh()->IsComponentTickEnabled(), TEXT("Gone: the body still ticks"));
+			continue;
+		}
+		Check(IsHidden() == bHiddenByOthers, FString::Printf(TEXT("tier %d: hidden %d"), Tier, IsHidden() ? 1 : 0));
+		const float Want = Tier == 0 ? TierOwnTickInterval : (Tier == 1 ? 0.05f : 0.1f);
+		Check(FMath::IsNearlyEqual(PrimaryActorTick.TickInterval, Want), FString::Printf(TEXT("tier %d: the actor ticks every %.2f s, not %.2f"), Tier, PrimaryActorTick.TickInterval, Want));
+		for (const FHookPartState& Was : Before)
+		{
+			UPrimitiveComponent* P = Was.Part.Get();
+			const FTierPart* Own = P ? TierDefaults.Find(P) : nullptr;
+			if (!P || P->IsA<UShapeComponent>())
+			{
+				continue;
+			}
+			const FString Name = P->GetName();
+			if (!Own)
+			{
+				Check(false, FString::Printf(TEXT("tier %d: %s never recorded"), Tier, *Name));
+				continue;
+			}
+			const bool bWantShadow = Own->bShadow && (Tier == 0 || (Tier == 1 && P == GetMesh()));
+			Check(static_cast<bool>(P->CastShadow) == bWantShadow, FString::Printf(TEXT("tier %d: %s shadow %d"), Tier, *Name, P->CastShadow ? 1 : 0));
+			Check(static_cast<bool>(P->bVisibleInRayTracing) == (Own->bTraced && Tier == 0), FString::Printf(TEXT("tier %d: %s in ray tracing %d"), Tier, *Name, P->bVisibleInRayTracing ? 1 : 0));
+			if (const USkinnedMeshComponent* Skin = Cast<USkinnedMeshComponent>(P))
+			{
+				Check(Skin->bEnableUpdateRateOptimizations == (Tier == 0 ? Own->bUro : true), FString::Printf(TEXT("tier %d: %s URO"), Tier, *Name));
+				Check(FMath::IsNearlyEqual(Skin->GetComponentTickInterval(), Tier == 0 ? Own->TickInterval : Want), FString::Printf(TEXT("tier %d: %s ticks every %.2f s"), Tier, *Name, Skin->GetComponentTickInterval()));
+				// A forced LOD is clamped to the LODs the mesh has (none without a mesh).
+				Check(Tier < 2 ? Skin->GetForcedLOD() == Own->ForcedLod : (Skin->GetForcedLOD() >= 1 || Skin->GetNumLODs() == 0),
+					FString::Printf(TEXT("tier %d: %s forced LOD %d"), Tier, *Name, Skin->GetForcedLOD()));
+			}
+			else if (const UGroomComponent* Hair = Cast<UGroomComponent>(P))
+			{
+				const int32 Lod = HeroGrooms::LodForTier(Hair->GroomAsset, Tier);
+				if (Lod != INDEX_NONE)
+				{
+					Check(Hair->GetForcedLOD() == Lod, FString::Printf(TEXT("tier %d: %s on LOD %d, not %d"), Tier, *Name, Hair->GetForcedLOD(), Lod));
+				}
+				if (Tier == 1)
+				{
+					const HeroGrooms::FGroomLods Lods = HeroGrooms::LodsOf(Hair->GroomAsset);
+					Check(Lods.Helmet == INDEX_NONE || Hair->GetForcedLOD() < Lods.Helmet, FString::Printf(TEXT("Mid: %s on its helmet"), *Name));
+				}
+				Check(Hair->GetVisibleFlag() == (Own->bVisible && (Tier < 2 || Lod != INDEX_NONE)), FString::Printf(TEXT("tier %d: %s visible %d"), Tier, *Name, Hair->GetVisibleFlag() ? 1 : 0));
+			}
+		}
+	}
+	// Back as it was: the tier it had, or none at all.
+	if (bWasApplied)
+	{
+		SetDetailTier(WasTier);
+	}
+	else
+	{
+		SetDetailTier(0);
+		RestoreTierDefaults();
+		bTierApplied = false;
+		DetailTierNow = 0;
+	}
+	Check(IsHidden() == bWasHidden && GetActorEnableCollision() == bWasColliding && IsActorTickEnabled() == bWasTicking,
+		TEXT("the actor isn't shown, colliding and ticking as it was"));
+	Check((GetCharacterMovement() && GetCharacterMovement()->IsComponentTickEnabled()) == bMoveWasTicking, TEXT("the movement isn't ticking as it was"));
+	// Gone leaves the parts as the tier before it had them, which for one found at Gone isn't known: only ticks compare there.
+	if (!(bWasApplied && WasTier == 3))
+	{
+		Check(FMath::IsNearlyEqual(PrimaryActorTick.TickInterval, WasInterval), TEXT("the actor's tick interval isn't as it was"));
+		const TArray<FString> Changed = PartsChanged(Before, SnapParts(this));
+		Check(Changed.Num() == 0, FString::Printf(TEXT("not as before: %s"), *FString::Join(Changed, TEXT("; "))));
+	}
+
+	// Talking, the look, the face, the seat and the work: each set, read back and put back.
+	const float WasTalk = TalkLeft;
+	const float WasLoud = TalkLoudness;
+	SetTalking(2.0f, 0.8f);
+	Check(IsTalking() && FMath::IsNearlyEqual(TalkLoudness, 0.8f), TEXT("SetTalking didn't take"));
+	SetTalking(0.0f, 0.6f);
+	Check(!IsTalking(), TEXT("SetTalking(0) still talking"));
+	TalkLeft = WasTalk;
+	TalkLoudness = WasLoud;
+
+	const FVector WasAt = LookTargetAt;
+	const float WasWeight = LookTargetWeight;
+	SetLookTarget(GetActorLocation() + GetActorForwardVector() * 200.0, 1.7f);
+	Check(FMath::IsNearlyEqual(LookTargetWeight, 1.0f), TEXT("SetLookTarget's weight isn't clamped to 1"));
+	LookTargetAt = WasAt;
+	LookTargetWeight = WasWeight;
+
+	const TMap<FName, float> WasCurves = FaceCurves;
+	SetFaceCurve(TEXT("browRaiseInL"), 0.5f);
+	Check(FaceCurves.Contains(TEXT("CTRL_expressions_browRaiseInL")), TEXT("SetFaceCurve didn't hold the control"));
+	SetFaceCurve(TEXT("browRaiseInL"), 0.0f);
+	Check(!FaceCurves.Contains(TEXT("CTRL_expressions_browRaiseInL")) || WasCurves.Contains(TEXT("CTRL_expressions_browRaiseInL")), TEXT("SetFaceCurve(0) didn't let go"));
+	FaceCurves = WasCurves;
+
+	if (!bSeated)
+	{
+		const UCharacterMovementComponent* Move = GetCharacterMovement();
+		const EMovementMode WasMode = Move ? Move->MovementMode.GetValue() : MOVE_None;
+		const float WasSeat = SeatHeightCm;
+		SetSeated(true, 55.0f);
+		Check(IsSeated() && FMath::IsNearlyEqual(GetSeatHeight(), 55.0f), TEXT("SetSeated didn't take"));
+		Check(!Move || Move->MovementMode == MOVE_None, TEXT("seated, still free to move"));
+		SetSeated(false, WasSeat);
+		Check(!IsSeated() && (!Move || Move->MovementMode == WasMode), TEXT("standing, the movement isn't as it was"));
+	}
+
+	const FName WasBeat = WorkBeat;
+	const FTransform WasStation = WorkStation;
+	const float WasSince = WorkSince;
+	SetWork(TEXT("selftest"), GetActorTransform());
+	Check(GetWorkBeat() == FName(TEXT("selftest")) && GetWorkTime() >= 0.0f, TEXT("SetWork didn't take"));
+	SetWork(NAME_None, FTransform::Identity);
+	Check(GetWorkTime() == 0.0f, TEXT("SetWork(None) still working"));
+	WorkBeat = WasBeat;
+	WorkStation = WasStation;
+	WorkSince = WasSince;
+
+	// The grooms: every groom component worn is known, with its kind; the scalp's among them.
+	TInlineComponentArray<UGroomComponent*> Worn(this);
+	Check(GetGrooms().Num() == Worn.Num(), FString::Printf(TEXT("%d grooms worn, %d known"), Worn.Num(), GetGrooms().Num()));
+	Check(!ScalpGroom() || GetGrooms().Contains(ScalpGroom()), TEXT("the scalp groom isn't among the grooms"));
+	Check(StreetBody() != nullptr || !GetMesh()->GetSkeletalMeshAsset(), TEXT("no UStreetBodyAnim on the body"));
+
+	return Fails.Num() == 0 ? FString::Printf(TEXT("%s selftest PASS (%d checks, %d parts, tiers 0-3 and back)"), *GetName(), Checks, Before.Num())
+							: FString::Printf(TEXT("%s selftest FAIL (%d of %d checks): %s"), *GetName(), Fails.Num(), Checks, *FString::Join(Fails, TEXT(" | ")));
+}
+
+FString AShortStackCharacter::TestFaces(const FString& CareerKey)
+{
+	UCastFaceRegistry* Registry = UCastFaceRegistry::Get(this);
+	return Registry ? Registry->Show(GetCastFace(), CareerKey) : FString(TEXT("ss.Look.Faces: no face registry here (it runs in game and PIE worlds)"));
+}
+
+FString AShortStackCharacter::DescribeHooks() const
+{
+	static const TCHAR* const Tiers[4] = {TEXT("Near"), TEXT("Mid"), TEXT("Far"), TEXT("Gone")};
+	const UGroomComponent* Scalp = ScalpGroom();
+	const FString Look = LookTargetWeight > 0.0f ? FString::Printf(TEXT("at (%.0f, %.0f, %.0f) weight %.2f"), LookTargetAt.X, LookTargetAt.Y, LookTargetAt.Z, LookTargetWeight)
+												 : FString(TEXT("default"));
+	const FString Seat = bSeated ? FString::Printf(TEXT("seated at %.0f cm (blend %.2f)"), SeatHeightCm, SeatBlend) : FString(TEXT("standing"));
+	const FString Work = WorkBeat.IsNone() ? FString(TEXT("not working")) : FString::Printf(TEXT("working '%s' for %.1f s"), *WorkBeat.ToString(), GetWorkTime());
+	return FString::Printf(TEXT("%s (%s): tier %s%s | look %s | talking %.1f s more at %.2f | %d face controls held | %s | %s | scalp groom %s on LOD %d"), *GetName(),
+		*CastFaceName.ToString(), Tiers[FMath::Clamp(DetailTierNow, 0, 3)], bTierApplied ? TEXT("") : TEXT(" (none set: as before the hooks)"), *Look, TalkLeft,
+		TalkLoudness, FaceCurves.Num(), *Seat, *Work, Scalp ? *GetNameSafe(Scalp->GroomAsset.Get()) : TEXT("none"), Scalp ? Scalp->GetForcedLOD() : -1);
+}
+
+namespace ShortStackCharacterDetail
+{
+FAutoConsoleCommandWithWorldAndArgs CmdLookHook(TEXT("ss.Look.Hook"),
+	TEXT("ss.Look.Hook <hero|near|all|ExtraB|a name> <tier 0-3 | talk seconds [loudness] | look X Y Z [weight] | lookhero [weight] | face Control value | sit [cm] | stand | work beat|none | describe | selftest>: "
+		 "drives the people hooks (spec 7.5.4) on the hero or the street character nearest them (near: anyone; all: everyone, the hero too; else by face or actor name). "
+		 "'ss.Look.Hook all selftest' checks every hook on everyone and leaves them as they were."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (!World || Args.Num() == 0)
+		{
+			return;
+		}
+		TArray<FString> Rest;
+		for (int32 I = 1; I < Args.Num(); ++I)
+		{
+			Rest.Add(Args[I]);
+		}
+		const FString Command = FString::Join(Rest, TEXT(" "));
+		if (Args[0].Equals(TEXT("all"), ESearchCase::IgnoreCase))
+		{
+			int32 Count = 0;
+			for (TActorIterator<AShortStackCharacter> It(World); It; ++It)
+			{
+				UE_LOG(LogStreetHero, Display, TEXT("%s"), *It->TestHook(Command));
+				++Count;
+			}
+			UE_LOG(LogStreetHero, Display, TEXT("ss.Look.Hook all: %d characters"), Count);
+			return;
+		}
+		APlayerController* Pc = World->GetFirstPlayerController();
+		AShortStackCharacter* Hero = Pc ? Cast<AShortStackCharacter>(Pc->GetPawn()) : nullptr;
+		AShortStackCharacter* Who = nullptr;
+		if (Args[0].Equals(TEXT("hero"), ESearchCase::IgnoreCase))
+		{
+			Who = Hero;
+		}
+		else
+		{
+			double Best = TNumericLimits<double>::Max();
+			for (TActorIterator<AShortStackCharacter> It(World); It; ++It)
+			{
+				AShortStackCharacter* C = *It;
+				const bool bNamed = Args[0].Equals(TEXT("near"), ESearchCase::IgnoreCase) || C->GetCastFace().ToString().Equals(Args[0], ESearchCase::IgnoreCase)
+					|| C->GetName().Contains(Args[0]);
+				if (C == Hero || !bNamed)
+				{
+					continue;
+				}
+				const double Dist = Hero ? FVector::DistSquared(Hero->GetActorLocation(), C->GetActorLocation()) : 0.0;
+				if (Dist < Best)
+				{
+					Best = Dist;
+					Who = C;
+				}
+			}
+		}
+		if (!Who)
+		{
+			UE_LOG(LogStreetHero, Display, TEXT("ss.Look.Hook: nobody here answers to '%s'"), *Args[0]);
+			return;
+		}
+		UE_LOG(LogStreetHero, Display, TEXT("%s"), *Who->TestHook(Command));
+	}));
+} // namespace ShortStackCharacterDetail

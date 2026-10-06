@@ -12,12 +12,16 @@
 
 #include "StreetGameMode.generated.h"
 
+class ACameraActor;
+class AShopStage;
 class AShortStackCharacter;
 class AStreetGameMode;
 class AStreetStage;
 class SFrontEndWidget;
 class UNightOneAudio;
-struct FStreetSpot;
+class UStreetWorld;
+struct FStreetUse;
+struct FStreetZone;
 
 /**
  * The cast members at work on Fifth, behind their counters all night (backroom_cast.py's extras): Benny at the Lucky
@@ -80,8 +84,12 @@ public:
  * career file. The player's settings apply here as at the desk (quality, render scale, the lens, field of view,
  * the mix). Evicted, 1812's key no longer turns: the player comes and goes by Dee's door across the street.
  *
+ * What E does comes from the street's registry (UStreetWorld): the use in reach, dispatched by its verb (OnInteract), so
+ * every stage that registers uses (the street, the shops) is served without this mode knowing which built them. Inside a
+ * zone with a camera profile (the shops: a shorter boom, a wider view) the camera takes it, blended over 0.3 s.
+ *
  * Options: "From=<world minutes>" when the apartment sent the player out ("Door=Dee" from her front room: out
- * of her door); "Start=store" (or "washfold", "wash", "backdoor", "dee") to begin there. Out of Dee's game walked
+ * of her door); "Start=store" (or "washfold", "wash", "backdoor", "dee", or any registry start) to begin there. Out of Dee's game walked
  * into from here, the Back Room opens this level with "Start=washfold?Night?From=<when they left>?Net=<cents>
  * ?Learned=<reads>" (and "?Busted", "?Closed"): the hours at the table are caught up on the calendar, and Dee
  * has a word about the night.
@@ -130,7 +138,8 @@ public:
 	float Sensitivity = 0.11f;
 	bool bInvertLook = false;
 
-	// Automation (scripts and the desktop's checks; the console's ss.Street.*).
+	// Automation (scripts and the desktop's checks; the console's ss.Street.*, StreetCommands.cpp).
+	/** One paragraph: the hour, where the player is, the zone, the use in reach, the needs, the open screen, the budget (ss.Street.Describe). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	FString TestDescribe() const;
 	/** "counter", "attendant", or a StartAt place: "home", "store", "washfold", "wash", "backdoor", "dee". */
@@ -139,6 +148,22 @@ public:
 	/** The clock on to Dee's next game night, just after the doors open (now, if they're open); what the back door says then. */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	FString TestGameNight();
+	/** E where the player stands (ss.Street.Use); what was in reach and what it did. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestUse();
+	/**
+	 * To a registry start, a door (a shop's by its venue), a plot's front (spec 2.3's ids: "H-CASH", "MS3") or The Block's
+	 * places (ss.Street.Go). Refused where today's set doesn't reach: outside every zone, or nowhere to stand (a plot past
+	 * today's end buildings, or behind Market's).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestGo(const FString& Where);
+	/** An acceptance camera (spec 9.1: W1..W8 by their stage cm, I1..I6 from the registry's shots, or a shot's id), or "off" (ss.Street.Shot). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestShot(const FString& Which);
+	/** Draws the registry (zones, uses, stations, starts, doors) for Seconds and lists it (ss.Zone.Show). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestZones(float Seconds);
 
 	/** Dee's game as the street sees it at World (world minutes). */
 	static EDeeGame DeeGameAt(double World);
@@ -159,8 +184,28 @@ private:
 	void KeepOnTheSet();
 	/** The door the player comes and goes by: 1812's ("home"), or Dee's across the street ("dee") while evicted. */
 	FString HomeDoor() const;
-	/** What E does at a spot, worded for now (the night, the eviction, the laundromat's door); empty: nothing to do there. */
-	FString PromptFor(const FStreetSpot& Spot) const;
+	/** The street's registry (null before the world has one). */
+	UStreetWorld* StreetWorld() const;
+	/** What the hero's eye reaches now (the registry's Best), or null. */
+	const FStreetUse* UseInReach() const;
+	/** The zone the hero (or At) is in, or null. */
+	const FStreetZone* ZoneAt(const FVector& At) const;
+	/** Where the player appears for a start id: the registry's, else the stage's own (StartAt). */
+	FTransform StartTransform(const FString& Id) const;
+	/** What E does at a use, worded for now (the night, the eviction, a door open or shut); empty: nothing to do there. */
+	FString PromptFor(const FStreetUse& Use) const;
+	/** E at a Door use: the Wash & Fold's (it swings in), Dee's steel door (her game), or a shop's (open, buzz, or its closed line). */
+	void UseDoor(const FStreetUse& Use);
+	/** E at a Talk use: the Wash & Fold's attendant (her lines); the people's talk card comes with the people. */
+	void TalkTo(const FStreetUse& Use);
+	/** E at a use whose screen hasn't landed yet (a shop's counter, a seat, the shelter, the closet): said so, once a session per use. */
+	void NotYet(const FStreetUse& Use);
+	/** The enterable shop for a venue (the registry's shops: AShopStage), or null. */
+	AShopStage* ShopFor(FName Venue) const;
+	/** The shops each frame: the hour, their doors for the hero (the bell, the buzzer's clack). */
+	void UpdateShops(const FVector& Ear, float Dt);
+	/** The camera inside a zone with a profile (the shops' shorter boom and wider view, or first person), blended over 0.3 s. */
+	void UpdateCameraProfile(float Dt);
 	/** E at 1812's door: home, or (evicted) the new lock refusing the key. */
 	void TryHomeDoor();
 	/** E at the tenement's street door: up to Dee's while evicted; otherwise her buzzer, and nobody comes. */
@@ -225,6 +270,23 @@ private:
 	double SettingsDirtyAt = -1.0;
 	/** The street's own sound (StreetAudio.h), streamed by Audio: the rain and the traffic outside, the coolers inside. */
 	TSharedPtr<class FStreetAmbience> StreetTone;
+	/** The enterable shops in the level (found again every second: the stages spawn them). */
+	TArray<TWeakObjectPtr<AShopStage>> Shops;
+	double ShopsFoundAt = -100.0;
+	/** The uses whose screens haven't landed yet that have said so this session (NotYet). */
+	TSet<FName> NotYetSaid;
+	/** The camera profile: the zone it's from (None on the street), the player's own boom out there, how far the blend has got and from where. */
+	FName ProfileZone;
+	float StreetArm = -1.0f;
+	float ProfileBlend = 1.0f;
+	float BlendFromArm = 300.0f;
+	float BlendFromFov = 72.0f;
+	/** First person was put on by a zone's profile (and comes off again on the way out). */
+	bool bProfileFirstPerson = false;
+	/** An acceptance camera (ss.Street.Shot) while one is up, and its name. */
+	UPROPERTY(Transient)
+	TObjectPtr<ACameraActor> ShotCamera;
+	FString ShotName;
 };
 
 /** Keyboard, mouse and gamepad polled each frame for walking (the overlays take their own input). */

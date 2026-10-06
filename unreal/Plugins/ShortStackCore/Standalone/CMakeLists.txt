@@ -60,3 +60,17 @@ add_test(NAME living_world COMMAND world_test)
 add_executable(audio_test tests/audio_main.cpp)
 target_link_libraries(audio_test PRIVATE ShortStackCore)
 add_test(NAME synthesized_audio COMMAND audio_test)
+
+# Northside (the realism update): the shops, the wardrobe, fitness and the pawn (core-shops); the shop screens
+# (core-ui); the town, talk and the weather (people-core).
+add_executable(shops_test tests/shops_main.cpp)
+target_link_libraries(shops_test PRIVATE ShortStackCore)
+add_test(NAME northside_shops COMMAND shops_test)
+
+add_executable(shops_ui_test tests/shops_ui_main.cpp)
+target_link_libraries(shops_ui_test PRIVATE ShortStackCore)
+add_test(NAME northside_shops_ui COMMAND shops_ui_test)
+
+add_executable(town_test tests/town_main.cpp)
+target_link_libraries(town_test PRIVATE ShortStackCore)
+add_test(NAME northside_town COMMAND town_test)

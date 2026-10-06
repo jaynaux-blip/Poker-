@@ -746,6 +746,10 @@ def import_meshes(force=False, only=None):
             _fresh_looks(folder, path, mesh)
         if name.startswith(WEAR_PREFIXES) and isinstance(mesh, unreal.StaticMesh):
             _without_nanite(mesh)
+        elif isinstance(mesh, unreal.StaticMesh) and not name.startswith("SM_ECX_") and _has_translucency(mesh):
+            # Nanite draws only opaque and masked materials: a mesh with glass or clear plastic in it (the Wash & Fold's
+            # washers and dryers, the soap vendor, the bagged orders) draws on its own triangles.
+            _without_nanite(mesh)
         if isinstance(mesh, unreal.SkeletalMesh):
             try:
                 _skin_material(folder, mesh)
@@ -764,6 +768,7 @@ def import_meshes(force=False, only=None):
         unreal.log(f"ShortStack: imported {file} as {mesh_path}")
         imported += 1
     wear_without_nanite(only)
+    translucent_without_nanite(only)
     return imported
 
 
@@ -803,6 +808,52 @@ def wear_without_nanite(only=None):
         if isinstance(mesh, unreal.StaticMesh) and _without_nanite(mesh):
             eal.save_loaded_asset(mesh)
             unreal.log(f"ShortStack: {name} now draws without Nanite")
+            rebuilt += 1
+    return rebuilt
+
+
+_SEE_THROUGH = None
+
+
+def _has_translucency(mesh):
+    """True when any of the mesh's materials blends (glass, clear plastic, additive glows): Nanite can't draw those."""
+    global _SEE_THROUGH
+    if _SEE_THROUGH is None:
+        _SEE_THROUGH = {getattr(unreal.BlendMode, n) for n in ("BLEND_TRANSLUCENT", "BLEND_ADDITIVE", "BLEND_MODULATE", "BLEND_ALPHA_COMPOSITE",
+                                                                 "BLEND_ALPHA_HOLDOUT", "BLEND_TRANSLUCENT_COLORED_TRANSMITTANCE") if hasattr(unreal.BlendMode, n)}
+    for slot in mesh.get_editor_property("static_materials"):
+        mi = slot.get_editor_property("material_interface")
+        if mi is None:
+            continue
+        try:
+            # The effective mode: the glTF importer's glass is MI_Default_Blend over an opaque base.
+            if mi.get_blend_mode() in _SEE_THROUGH:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def translucent_without_nanite(only=None):
+    """Turns Nanite off on imported meshes that carry glass or another blended material and were imported before the
+    importer checked for it (an unchanged file isn't imported again). The Embercrest's meshes keep their own rules.
+    Returns how many meshes it rebuilt."""
+    import os
+    src_dir = os.path.join(unreal.Paths.project_dir(), "Art", "Meshes")
+    if not os.path.isdir(src_dir):
+        return 0
+    rebuilt = 0
+    for file in sorted(os.listdir(src_dir)):
+        name = os.path.splitext(file)[0]
+        if not file.lower().endswith(".glb") or name.startswith("SM_ECX_") or name.startswith(WEAR_PREFIXES) or (only is not None and name not in only):
+            continue
+        mesh_path = f"{MESH_DIR}/{name}/{name}"
+        if not eal.does_asset_exist(mesh_path):
+            continue
+        mesh = eal.load_asset(mesh_path)
+        if isinstance(mesh, unreal.StaticMesh) and _has_translucency(mesh) and _without_nanite(mesh):
+            eal.save_loaded_asset(mesh)
+            unreal.log(f"ShortStack: {name} has glass: it now draws without Nanite")
             rebuilt += 1
     return rebuilt
 

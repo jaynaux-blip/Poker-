@@ -25,9 +25,11 @@
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Store.h"
+#include "ShopStage.h"
 #include "ShortStackCharacter.h"
 #include "StreetAudio.h"
 #include "StreetStage.h"
+#include "StreetWorld.h"
 
 // The street's pedestrians, once their module file is in (the street plays without them until then).
 #if __has_include("StreetCrowd.h")
@@ -152,64 +154,29 @@ FString NightWordFrom(const FString& Options, bool bEvicted)
 	return Word;
 }
 
-/**
- * How loud one of the stage's doors (AStreetStage::Doors: "store", "washfold") sounds at Ear: full within a few steps of
- * it, gone some 25 m off. The pedestrians open them too, and one going into the store a block away isn't heard.
- */
+/** How loud a door at At sounds at Ear: full within a few steps of it, gone some 25 m off (a pedestrian opening one a block away isn't heard). */
+float HeardFrom(const FVector& Ear, const FVector& At)
+{
+	const double Far = FVector::Dist(Ear, At);
+	return static_cast<float>(FMath::Square(FMath::Clamp(1.0 - (Far - 400.0) / 2100.0, 0.0, 1.0)));
+}
+
+/** How loud one of the stage's doors (AStreetStage::Doors: "store", "washfold") sounds at Ear. */
 float DoorHeard(const AStreetStage& Stage, const FVector& Ear, const TCHAR* Door)
 {
 	for (const FStreetDoor& D : Stage.Doors())
 	{
 		if (D.Id == Door)
 		{
-			const double Far = FVector::Dist(Ear, D.Threshold);
-			return static_cast<float>(FMath::Square(FMath::Clamp(1.0 - (Far - 400.0) / 2100.0, 0.0, 1.0)));
+			return HeardFrom(Ear, D.Threshold);
 		}
 	}
 	return 1.0f;
 }
 
-#if !UE_BUILD_SHIPPING
-AStreetGameMode* StreetModeIn(UWorld* World)
-{
-	return World ? World->GetAuthGameMode<AStreetGameMode>() : nullptr;
-}
-
-FAutoConsoleCommandWithWorldAndArgs StreetTeleportCmd(TEXT("ss.Street.Teleport"),
-	TEXT("ss.Street.Teleport home | store | counter | washfold | wash | attendant | backdoor | dee: puts the player there (testing)."),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
-		if (AStreetGameMode* M = StreetModeIn(World))
-		{
-			M->TestTeleport(Args.Num() > 0 ? Args[0] : FString(TEXT("washfold")));
-		}
-	}));
-
-FAutoConsoleCommandWithWorldAndArgs StreetGameNightCmd(TEXT("ss.Street.GameNight"),
-	TEXT("ss.Street.GameNight: the clock on to Dee's next game night, her doors just open (now, if they are); the calendar runs through the hours skipped (testing)."),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
-		if (AStreetGameMode* M = StreetModeIn(World))
-		{
-			UE_LOG(LogStreet, Display, TEXT("%s"), *M->TestGameNight());
-		}
-	}));
-
-FAutoConsoleCommandWithWorldAndArgs StreetUseCmd(TEXT("ss.Street.Use"),
-	TEXT("ss.Street.Use: what E does where the player stands (testing without a keyboard: doors, the counter, Dee's game)."),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
-		if (AStreetGameMode* M = StreetModeIn(World))
-		{
-			M->OnInteract();
-		}
-	}));
-
-FAutoConsoleCommandWithWorldAndArgs StreetDescribeCmd(TEXT("ss.Street.Describe"), TEXT("The street now: the hour, where the player is, what's in reach, the laundromat, Dee's game."),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
-		if (AStreetGameMode* M = StreetModeIn(World))
-		{
-			UE_LOG(LogStreet, Display, TEXT("%s"), *M->TestDescribe());
-		}
-	}));
-#endif
+/** How long a zone's camera profile takes to blend in or out as the hero crosses its door (spec 7.5.3). */
+constexpr float ProfileBlendSeconds = 0.3f;
+// The console's ss.Street.* hooks and their UFUNCTION twins (TestDescribe, TestGo...) are in StreetCommands.cpp.
 } // namespace StreetGameDetail
 
 using namespace StreetGameDetail;
@@ -359,11 +326,153 @@ void AStreetGameMode::FindOrSpawnStage()
 
 void AStreetGameMode::RestartPlayer(AController* NewPlayer)
 {
+	// The street is built for play first (the player is placed before anything begins play), so its starts are registered.
 	FindOrSpawnStage();
-	const FTransform Start = Stage ? Stage->StartAt(StartFrom) : FTransform(FRotator(0.0f, 65.0f, 0.0f), FVector(150.0, 80.0, 100.0));
+	if (Stage)
+	{
+		Stage->EnsureBuilt();
+	}
+	const FTransform Start = StartTransform(StartFrom);
 	UE_LOG(LogStreet, Log, TEXT("Out onto Fifth at %s"), *StartFrom);
 	RestartPlayerAtTransform(NewPlayer, Start);
 	DressHero();
+}
+
+UStreetWorld* AStreetGameMode::StreetWorld() const
+{
+	return UStreetWorld::Get(this);
+}
+
+FTransform AStreetGameMode::StartTransform(const FString& Id) const
+{
+	FTransform T;
+	if (const UStreetWorld* Registry = StreetWorld(); Registry && Registry->Start(FName(*Id), T))
+	{
+		return T;
+	}
+	return Stage ? Stage->StartAt(Id) : FTransform(FRotator(0.0f, 65.0f, 0.0f), FVector(150.0, 80.0, 100.0));
+}
+
+const FStreetUse* AStreetGameMode::UseInReach() const
+{
+	const AShortStackCharacter* Hero = GetHero();
+	const UStreetWorld* Registry = StreetWorld();
+	return Hero && Registry ? Registry->Best(Hero->EyeLocation(), Hero->LookDirection()) : nullptr;
+}
+
+const FStreetZone* AStreetGameMode::ZoneAt(const FVector& At) const
+{
+	const UStreetWorld* Registry = StreetWorld();
+	return Registry ? Registry->ZoneAt(At) : nullptr;
+}
+
+AShopStage* AStreetGameMode::ShopFor(FName Venue) const
+{
+	for (const TWeakObjectPtr<AShopStage>& S : Shops)
+	{
+		if (S.IsValid() && S->Venue == Venue)
+		{
+			return S.Get();
+		}
+	}
+	return nullptr;
+}
+
+void AStreetGameMode::UpdateShops(const FVector& Ear, float Dt)
+{
+	// Found again every second (the street's and Market's stages spawn them; one may go).
+	if (RealTime - ShopsFoundAt > 1.0)
+	{
+		ShopsFoundAt = RealTime;
+		Shops.Reset();
+		for (TActorIterator<AShopStage> It(GetWorld()); It; ++It)
+		{
+			Shops.Add(*It);
+		}
+	}
+	AShortStackCharacter* Hero = GetHero();
+	for (const TWeakObjectPtr<AShopStage>& S : Shops)
+	{
+		AShopStage* Shop = S.Get();
+		if (!Shop)
+		{
+			continue;
+		}
+		// The hour and the light (whether it's open and staffed comes with core's shop hours; until then as it was set).
+		Shop->SetHour(Game->Session.WorldMinutes(), static_cast<float>(Game->Session.Daylight()), Shop->IsOpen(), Shop->IsStaffed());
+		if (!Hero)
+		{
+			continue;
+		}
+		// Its door: its bell as it swings open, and again, softer, as its closer brings it shut (the buzzer's clack on the pawn's).
+		const int32 Door = Shop->UpdateDoor(Hero->GetActorLocation(), Dt);
+		if (Door != 0 && StreetTone)
+		{
+			const FStreetDoor* D = nullptr;
+			const UStreetWorld* Registry = StreetWorld();
+			const TArray<FStreetDoor> All = Registry ? Registry->Doors() : TArray<FStreetDoor>();
+			for (const FStreetDoor& E : All)
+			{
+				D = E.Id == Shop->Venue ? &E : D;
+			}
+			const float Heard = D ? HeardFrom(Ear, D->Threshold) : 1.0f;
+			if (Heard > 0.01f)
+			{
+				StreetTone->RingBell((Door == 1 ? 1.0f : 0.4f) * Heard);
+			}
+		}
+	}
+}
+
+void AStreetGameMode::UpdateCameraProfile(float Dt)
+{
+	AShortStackCharacter* Hero = GetHero();
+	if (!Hero || !Game)
+	{
+		return;
+	}
+	// Across a door into a zone with a camera profile (a shop's shorter boom and wider view, or first person) and back out:
+	// from wherever the camera is to the zone's (or back to the player's own boom and view), over 0.3 s.
+	const FStreetZone* Zone = ZoneAt(Hero->GetActorLocation());
+	const FStreetZone* Profile = Zone && Zone->HasCameraProfile() ? Zone : nullptr;
+	const FName Want = Profile ? Profile->Id : NAME_None;
+	if (Want != ProfileZone)
+	{
+		if (ProfileZone.IsNone() && (ProfileBlend >= 1.0f || StreetArm <= 0.0f))
+		{
+			// The player's own boom out on the street, put back on the way out. Not while the camera is still easing back
+			// out to it (in and out of a door within 0.3 s): that would keep a boom halfway between as the player's.
+			StreetArm = Hero->ArmLength;
+		}
+		ProfileZone = Want;
+		ProfileBlend = 0.0f;
+		BlendFromArm = Hero->ArmLength;
+		BlendFromFov = Hero->ThirdPersonFov;
+		if (Profile && Profile->bFirstPerson && !Hero->IsFirstPerson())
+		{
+			Hero->SetFirstPerson(true);
+			bProfileFirstPerson = true;
+		}
+		else if ((!Profile || !Profile->bFirstPerson) && bProfileFirstPerson)
+		{
+			if (Hero->IsFirstPerson())
+			{
+				Hero->SetFirstPerson(false);
+			}
+			bProfileFirstPerson = false;
+		}
+	}
+	if (ProfileBlend >= 1.0f)
+	{
+		return;
+	}
+	ProfileBlend = FMath::Min(1.0f, ProfileBlend + Dt / ProfileBlendSeconds);
+	const float A = FMath::SmoothStep(0.0f, 1.0f, ProfileBlend);
+	const int32 FovSetting = Game->Menu.Settings.FieldOfView;
+	const float Arm = Profile && Profile->BoomLength >= 0.0f ? Profile->BoomLength : (StreetArm > 0.0f ? StreetArm : BlendFromArm);
+	const float Fov = Profile && Profile->Fov > 0.0f ? StreetFov(Profile->Fov, FovSetting) : StreetFov(72.0f, FovSetting);
+	Hero->ArmLength = FMath::Lerp(BlendFromArm, Arm, A);
+	Hero->ThirdPersonFov = FMath::Lerp(BlendFromFov, Fov, A);
 }
 
 AShortStackCharacter* AStreetGameMode::GetHero() const
@@ -465,7 +574,13 @@ void AStreetGameMode::SpawnCrowd()
 void AStreetGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	// A test's overrides from the last Play session don't carry into this one (ss.Street.KeepOverrides 1 keeps them).
+	FStreetOverrides::ResetAll();
 	FindOrSpawnStage();
+	if (Stage)
+	{
+		Stage->EnsureBuilt();
+	}
 	DressHero();
 	SpawnClerk();
 	SpawnAttendant();
@@ -689,9 +804,9 @@ void AStreetGameMode::DrawHud()
 	}
 	if (!IsUiOpen() && !bLeaving && Stage)
 	{
-		if (const FStreetSpot* Spot = Stage->SpotFor(Hero->EyeLocation(), Hero->LookDirection()))
+		if (const FStreetUse* Use = UseInReach())
 		{
-			Info.Prompt = FStringToUtf8(PromptFor(*Spot));
+			Info.Prompt = FStringToUtf8(PromptFor(*Use));
 		}
 	}
 	const FVector2D Size = ViewSize();
@@ -785,11 +900,14 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 		float Volume = 0.0f;
 		if (Hero->TakeFootstep(Volume) && Audio)
 		{
-			const FVector At = Hero->GetActorLocation();
-			Audio->PlayEffect(ss::audio::Effect::Step, Volume * (Stage->IsInsideStore(At) || Stage->IsInsideWash(At) ? 0.7f : 1.0f));
+			// Softer indoors (the store, the laundromat, the shops: the registry's rooms).
+			const FStreetZone* Zone = ZoneAt(Hero->GetActorLocation());
+			Audio->PlayEffect(ss::audio::Effect::Step, Volume * (Zone && Zone->bInterior ? 0.7f : 1.0f));
 		}
 		// Worn out shows in the walk: from 40 energy down the shoulders drop and the trunk sags.
 		Hero->SetTired(static_cast<float>((40.0 - Game->Session.Life.Energy) / 40.0));
+		// Inside a shop the camera takes the room's profile.
+		UpdateCameraProfile(static_cast<float>(Dt));
 	}
 	else if (!Hero && !bLeaving && GetWorld())
 	{
@@ -799,10 +917,15 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 			UE_LOG(LogStreet, Warning, TEXT("The hero was lost: back at the door"));
 			bDressed = false;
 			StartFrom = HomeDoor();
+			ProfileZone = NAME_None;
+			ProfileBlend = 1.0f;
+			bProfileFirstPerson = false;
 			RestartPlayer(Pc);
 			ApplySettings(Game->Menu.Settings, false);
 		}
 	}
+	// The enterable shops: the hour, their doors.
+	UpdateShops(Ear, static_cast<float>(Dt));
 #if SHORTSTACK_STREET_CROWD
 	// The pedestrians: started once the hero stands (then told the hour, the rain, and whether the game's paused).
 	if (!bCrowdStarted)
@@ -871,7 +994,7 @@ void AStreetGameMode::KeepOnTheSet()
 		return;
 	}
 	UE_LOG(LogStreet, Warning, TEXT("Off the set at %s: back to the door"), *Hero->GetActorLocation().ToCompactString());
-	const FTransform T = Stage->StartAt(HomeDoor());
+	const FTransform T = StartTransform(HomeDoor());
 	Hero->SetActorLocation(T.GetLocation(), false, nullptr, ETeleportType::TeleportPhysics);
 	if (UCharacterMovementComponent* Move = Hero->GetCharacterMovement())
 	{
@@ -919,27 +1042,42 @@ EDeeGame AStreetGameMode::DeeGameAt(double World)
 	return EDeeGame::Off;
 }
 
-FString AStreetGameMode::PromptFor(const FStreetSpot& Spot) const
+FString AStreetGameMode::PromptFor(const FStreetUse& Use) const
 {
 	const bool bEvicted = Game && Game->Session.Evicted();
-	if (Spot.Id == TEXT("home"))
+	if (Use.Id == TEXT("home"))
 	{
 		return bEvicted ? TEXT("Try your key") : TEXT("Go home");
 	}
-	if (Spot.Id == TEXT("dee"))
+	if (Use.Id == TEXT("dee"))
 	{
 		return bEvicted ? TEXT("Up to Dee's") : TEXT("Ring Dee's buzzer");
 	}
-	if (Spot.Id == TEXT("washdoor"))
+	if (Use.Id == TEXT("washdoor"))
 	{
 		// Open, there's nothing to do but walk through it.
-		return Stage && Stage->WashDoorOpen() > 0.5f ? FString() : Spot.Prompt;
+		return Stage && Stage->WashDoorOpen() > 0.5f ? FString() : Use.Prompt;
 	}
-	if (Spot.Id == TEXT("backdoor") && Game && DeeGameAt(Game->Session.WorldMinutes()) == EDeeGame::Open)
+	if (Use.Id == TEXT("backdoor") && Game && DeeGameAt(Game->Session.WorldMinutes()) == EDeeGame::Open)
 	{
 		return FString::Printf(TEXT("Sit in Dee's game ($%lld)"), static_cast<long long>(ss::life::GameMinBuyInCents / 100));
 	}
-	return Spot.Prompt;
+	if (Use.Verb == EStreetVerb::Door)
+	{
+		// A shop's door, open: walk on through (as the Wash & Fold's). From inside it's a door out, whatever its lock.
+		if (const AShopStage* Shop = ShopFor(Use.Venue))
+		{
+			if (Shop->DoorOpenAmount() > 0.5f)
+			{
+				return FString();
+			}
+			if (const AShortStackCharacter* Hero = GetHero(); Hero && Shop->IsInside(Hero->GetActorLocation()))
+			{
+				return TEXT("Open the door");
+			}
+		}
+	}
+	return UStreetWorld::PromptOf(Use);
 }
 
 // ------------------------------------------------------------------ actions
@@ -973,6 +1111,18 @@ void AStreetGameMode::OnZoom(float Delta)
 {
 	if (AShortStackCharacter* Hero = GetHero(); Hero && !Hero->IsFirstPerson())
 	{
+		// Inside a room with its own boom the room's holds (the player's own is put back on the way out).
+		const FStreetZone* Zone = ZoneAt(Hero->GetActorLocation());
+		if (Zone && Zone->BoomLength >= 0.0f)
+		{
+			return;
+		}
+		if (ProfileZone.IsNone() && ProfileBlend < 1.0f && StreetArm > 0.0f)
+		{
+			// Easing back out of a room: the wheel moves where it's easing to (the blend would undo a change to the boom itself).
+			StreetArm = FMath::Clamp(StreetArm + Delta, 160.0f, 460.0f);
+			return;
+		}
 		Hero->ArmLength = FMath::Clamp(Hero->ArmLength + Delta, 160.0f, 460.0f);
 	}
 }
@@ -991,35 +1141,97 @@ void AStreetGameMode::OnInteract()
 	{
 		return;
 	}
-	const FStreetSpot* Spot = Stage->SpotFor(Hero->EyeLocation(), Hero->LookDirection());
-	if (!Spot || PromptFor(*Spot).IsEmpty())
+	// The registry's use in reach, by its verb (spec 7.5.3). Copied: what it does may change the registry.
+	const FStreetUse* InReach = UseInReach();
+	if (!InReach || PromptFor(*InReach).IsEmpty())
 	{
 		return;
 	}
-	if (Spot->Id == TEXT("home"))
+	const FStreetUse Use = *InReach;
+	switch (Use.Verb)
 	{
-		TryHomeDoor();
+	case EStreetVerb::Home:
+		// 1812's door (home, or the new lock while evicted), or Dee's (up to her front room while evicted, else her buzzer).
+		if (Use.Id == TEXT("dee"))
+		{
+			TryDeeDoor();
+		}
+		else
+		{
+			TryHomeDoor();
+		}
+		break;
+	case EStreetVerb::Counter:
+		OpenCounter(Use.Shelf);
+		break;
+	case EStreetVerb::Door:
+		UseDoor(Use);
+		break;
+	case EStreetVerb::Talk:
+		TalkTo(Use);
+		break;
+	case EStreetVerb::Shop:
+	case EStreetVerb::Sit:
+	case EStreetVerb::Wait:
+	case EStreetVerb::Board:
+	case EStreetVerb::Wardrobe:
+		// The shop screens, the seats, the shelter's wait, the 14 and the closet land with the shops (Phase B).
+		NotYet(Use);
+		break;
 	}
-	else if (Spot->Id == TEXT("dee"))
-	{
-		TryDeeDoor();
-	}
-	else if (Spot->Id == TEXT("washdoor"))
+}
+
+void AStreetGameMode::UseDoor(const FStreetUse& Use)
+{
+	if (Use.Id == TEXT("washdoor"))
 	{
 		// A push, and its bells ring as it swings in (UpdateWashDoor tells Tick).
 		Stage->OpenWashDoor();
+		return;
 	}
-	else if (Spot->Id == TEXT("attendant"))
-	{
-		TalkToAttendant();
-	}
-	else if (Spot->Id == TEXT("backdoor"))
+	if (Use.Id == TEXT("backdoor"))
 	{
 		TryBackDoor();
+		return;
 	}
-	else
+	AShopStage* Shop = ShopFor(Use.Venue);
+	if (!Shop)
 	{
-		OpenCounter(Spot->Shelf);
+		// A door use with no shop stage behind it (yet): said so in the log, once.
+		NotYet(Use);
+		return;
+	}
+	// Open: it swings in (or the keeper buzzes it); shut: the handle tried, and when it opens again. The gym's fob comes
+	// with the shops' session calls (until then the desk buzzes you in while it's staffed).
+	const FString Why = Shop->OpenDoor(false);
+	if (!Why.IsEmpty())
+	{
+		if (StreetTone)
+		{
+			StreetTone->TryHandle();
+		}
+		Toast(Shop->VenueName, Why);
+	}
+}
+
+void AStreetGameMode::TalkTo(const FStreetUse& Use)
+{
+	if (Use.Param == TEXT("attendant"))
+	{
+		TalkToAttendant();
+		return;
+	}
+	// The people's talk card (AStreetNpcs, the TalkCard) comes with them.
+	NotYet(Use);
+}
+
+void AStreetGameMode::NotYet(const FStreetUse& Use)
+{
+	if (!NotYetSaid.Contains(Use.Id))
+	{
+		NotYetSaid.Add(Use.Id);
+		UE_LOG(LogStreet, Warning, TEXT("E at %s (%s, %s): its screen isn't in yet"), *Use.Id.ToString(), *StaticEnum<EStreetVerb>()->GetNameStringByValue(static_cast<int64>(Use.Verb)),
+			*Use.Venue.ToString());
 	}
 }
 
@@ -1181,10 +1393,11 @@ void AStreetGameMode::OnPause()
 	Game->Menu.Info = ss::ui::DescribeSession(Game->Session, true);
 	Game->Menu.Info.Resolutions = StreetResolutions();
 	Game->Menu.Gamepad = bGamepad;
-	// Indoors the heading names the room (the store, the laundromat); out on the street, the street.
+	// Indoors the heading names the room (the store, the laundromat, a shop: the registry's room the hero is in); out on the
+	// street, the street.
 	const AShortStackCharacter* Hero = GetHero();
-	const FVector At = Hero ? Hero->GetActorLocation() : FVector::ZeroVector;
-	const std::string Room = !Stage || !Hero ? std::string() : Stage->IsInsideStore(At) ? std::string("LUCKY PENNY #212") : Stage->IsInsideWash(At) ? std::string("WASH & FOLD") : std::string();
+	const FStreetZone* Zone = Hero ? ZoneAt(Hero->GetActorLocation()) : nullptr;
+	const std::string Room = Zone && Zone->bInterior ? FStringToUtf8(Zone->Place) : std::string();
 	Game->Menu.SetVenue(ss::ui::Venue::Street, Room);
 	Game->Menu.Open(ss::ui::FrontEnd::Page::Pause, RealTime);
 	FocusWidget(MenuWidget.Get());
@@ -1292,8 +1505,17 @@ void AStreetGameMode::ApplySettings(const ss::ui::GameSettings& Settings, bool b
 	if (AShortStackCharacter* Hero = GetHero())
 	{
 		// The game's own views at the default 50, wider or narrower with the setting.
+		const float WasFov = Hero->ThirdPersonFov;
 		Hero->FirstPersonFov = StreetFov(84.0f, Settings.FieldOfView);
 		Hero->ThirdPersonFov = StreetFov(72.0f, Settings.FieldOfView);
+		// Inside a room with a camera profile, its view again on the new setting (UpdateCameraProfile blends there from the old).
+		if (!ProfileZone.IsNone())
+		{
+			Hero->ThirdPersonFov = WasFov;
+			ProfileBlend = 0.0f;
+			BlendFromArm = Hero->ArmLength;
+			BlendFromFov = WasFov;
+		}
 	}
 	if (Audio)
 	{
@@ -1322,83 +1544,6 @@ void AStreetGameMode::SaveSettingsNow()
 		Obj->Data = Utf8ToFString(Game->Menu.Settings.Serialize());
 		UGameplayStatics::SaveGameToSlot(Obj, UNightOneSaveGame::SettingsSlotName(), 0);
 	}
-}
-
-// ------------------------------------------------------------------ automation
-
-FString AStreetGameMode::TestDescribe() const
-{
-	const AShortStackCharacter* Hero = GetHero();
-	if (!Game || !Hero)
-	{
-		return TEXT("no game");
-	}
-	static const TCHAR* const DeeStates[4] = {TEXT("off"), TEXT("tonight"), TEXT("open"), TEXT("last hands")};
-	const ss::life::State& L = Game->Session.Life;
-	const FStreetSpot* Spot = Stage ? Stage->SpotFor(Hero->EyeLocation(), Hero->LookDirection()) : nullptr;
-	return FString::Printf(TEXT("%s at %s %s | %s view | spot %s \"%s\" | hunger %.0f thirst %.0f energy %.0f | $%.2f | bag %d | counter %s | inside %.2f wash %.2f door %.2f | daylight %.2f | %s | dee's game %s"),
-		*Utf8ToFString(ss::net::TimeLabel(Game->Session.WorldMinutes())), *Hero->GetActorLocation().ToCompactString(), Stage ? *Stage->PlaceName(Hero->GetActorLocation()) : TEXT("?"),
-		Hero->IsFirstPerson() ? TEXT("first") : TEXT("third"), Spot ? *Spot->Id.ToString() : TEXT("none"), Spot ? *PromptFor(*Spot) : TEXT(""), L.Hunger, L.Thirst, L.Energy,
-		Game->Session.BankrollCents / 100.0, static_cast<int32>(L.Pantry.size()), Game->Counter.IsOpen() ? TEXT("open") : TEXT("closed"), Stage ? Stage->CameraInside() : 0.0f,
-		Stage ? Stage->CameraInWash() : 0.0f, Stage ? Stage->WashDoorOpen() : 0.0f, Game->Session.Daylight(), Game->Session.Evicted() ? TEXT("evicted") : TEXT("housed"),
-		DeeStates[static_cast<int32>(DeeGameAt(Game->Session.WorldMinutes()))]);
-}
-
-void AStreetGameMode::TestTeleport(const FString& Where)
-{
-	AShortStackCharacter* Hero = GetHero();
-	if (!Hero || !Stage)
-	{
-		return;
-	}
-	FTransform T = Stage->StartAt(Where);
-	if (Where == TEXT("counter"))
-	{
-		T = FTransform(FRotator(0.0f, -90.0f, 0.0f), FVector(-330.0, 4180.0, 100.0)) * Stage->GetActorTransform();
-	}
-	else if (Where == TEXT("attendant"))
-	{
-		// Across her counter from her, facing her.
-		const FTransform Her = Stage->AttendantSpot();
-		T = FTransform(FRotator(0.0f, -90.0f, 0.0f) + Stage->GetActorRotation(), Her.GetLocation() + Stage->GetActorTransform().TransformVector(FVector(8.0, 160.0, 12.5)));
-	}
-	Hero->SetActorLocation(T.GetLocation(), false, nullptr, ETeleportType::TeleportPhysics);
-	if (UCharacterMovementComponent* Move = Hero->GetCharacterMovement())
-	{
-		Move->StopMovementImmediately();
-	}
-	if (AController* C = Hero->GetController())
-	{
-		C->SetControlRotation(T.Rotator());
-	}
-}
-
-FString AStreetGameMode::TestGameNight()
-{
-	if (!Game || !Game->bCareer)
-	{
-		return TEXT("No career on the street.");
-	}
-	const ss::life::Activity* G = ss::life::Find("dee-game");
-	ss::Session& S = Game->Session;
-	if (!G)
-	{
-		return TEXT("No dee-game in the catalog.");
-	}
-	if (S.TimeSkip.Active)
-	{
-		return TEXT("Not during a time skip: the clock stays.");
-	}
-	const double Now = S.WorldMinutes();
-	if (!ss::life::InWindow(*G, Now))
-	{
-		// To five past nine on her next night: the calendar runs through the hours skipped on the next update (texts, the
-		// needs, a deadline), as the apartment's ss.Rent.Next moves its clock.
-		S.LobbyMinutes += ss::life::NextOpen(*G, Now) + 5.0 - Now;
-	}
-	const std::string Why = ss::life::Blocked(*G, S.Life, S.LifeContext());
-	return FString::Printf(TEXT("%s, Dee's game %s. The back door: %s"), *Utf8ToFString(ss::net::TimeLabel(S.WorldMinutes())),
-		DeeGameAt(S.WorldMinutes()) == EDeeGame::Open ? TEXT("open") : TEXT("not open"), Why.empty() ? TEXT("sit in (E at the steel door)") : *Utf8ToFString(Why));
 }
 
 // ------------------------------------------------------------------ the controller

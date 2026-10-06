@@ -5,27 +5,40 @@ Builds the street's materials, all procedural HLSL like M_Surface:
   M_Street        brick, wet asphalt with puddles (rain rings in them), sidewalk slabs, the store's floor tiles,
                   concrete, rolled-down shop gates
   M_StreetWindow  the facades' windows, one instanced mesh: each window's room, curtains or blinds, lit or dark
-  M_StreetRain    rain streaks around the eye, lit by the nearest lamps, never inside the store or the Wash & Fold
+  M_StreetRain    rain streaks around the eye, lit by the nearest lamps, never inside the registry's dry zones (the
+                  store, the Wash & Fold, the shops: up to eight boxes, DryMin0..7 / DryMax0..7)
   M_StreetGlass   the store's glass: clean, rain beaded on it
   M_StreetSky     the apartment's night sky and skyline with a strength (the street sets it for the hour)
   M_StreetCity
 and /Game/Maps/Street with the AStreetStage actor and the AStreetGameMode override. shortstack_setup.run() calls
-this when the editor opens. A material built by an older version of this file is rebuilt (VERSION), and so is the
-saved level when the stage has changed (MAP_VERSION); anything current is left alone.
+this when the editor opens. A material built by an older version of this file is rebuilt (VERSION); anything
+current is left alone.
+
+The street is built when play begins (AStreetStage::EnsureBuilt, design spec 7.5.1): the saved level holds only the
+actors, their settings and the stage's preload list (every asset the street's stages load, resolved in the editor by
+the stage's construction and saved on it, so the level's load streams them in). The level is saved again when the
+stage's format changes (MAP_VERSION) or when that list does (new art imported, a stage loading something new): the
+list's digest is kept on the level (PRELOAD_TAG) and compared with the stages' registered paths that exist now.
 
     import street_setup; street_setup.build_materials(force=True); street_setup.build_map(force=True)
 """
+import hashlib
+
 import unreal
 
 import shortstack_setup as ss
 
 MAP_PATH = "/Game/Maps/Street"
 # Bump when a material's graph changes: each built material carries it (metadata) and is rebuilt when it differs.
-VERSION = "4"
-# Bump when AStreetStage builds the set differently: the saved level (what Play on the map and a cooked build use,
-# since neither runs the stage's construction again) is rebuilt once.
-MAP_VERSION = "8"
+VERSION = "5"
+# Bump when the saved level's format changes (not for new art: the preload list takes care of that). "9": the street
+# is built at play, and the level keeps only its actors and the preload list (the parts built by "8" and older go).
+MAP_VERSION = "9"
 VERSION_TAG = "StreetVersion"
+# The preload list the saved level carries, as a digest of its paths (the stages' registered paths that exist).
+PRELOAD_TAG = "StreetPreload"
+# M_StreetRain's dry boxes (UStreetWorld::DryBoxes gives at most this many).
+DRY_BOXES = 8
 
 STREET = ss.NOISE + """
 // P: world position (cm), N: world normal. Returns base color (rgb) and roughness (a).
@@ -163,7 +176,9 @@ return normalize(n + float3(g * k, 0.0));
 # Rain around the eye. Each sheet is one layer at its own distance (Depth); the streaks are laid out by their angle
 # from the eye, so turning doesn't drag them and walking doesn't strobe them; each column falls at its own speed.
 # The drops catch the nearest lamps' light (brightest in a lamp's cone, and when it's behind them), and the lit
-# fronts of the store and the laundromat; nothing falls inside the store (StoreMin..StoreMax).
+# fronts of the store and the laundromat; nothing falls inside a dry zone (DryMin<k>..DryMax<k>: the store, the
+# laundromat's room, the shops; an empty box masks nothing).
+DRY_TEST = "".join(f"dry = max(dry, (all(P > DryMin{k}) && all(P < DryMax{k})) ? 1.0 : 0.0);\n" for k in range(DRY_BOXES))
 RAIN = ss.NOISE + """
 struct SSRain
 {
@@ -212,10 +227,9 @@ float cover = saturate((hw + 0.5 * fw - abs(u)) / fw) * min(1.0, 2.0 * hw / fw);
 float3 V = normalize(d);
 float3 lit = Ambient + Rain.Lamp(P, V, LampPos0, LampCol0) + Rain.Lamp(P, V, LampPos1, LampCol1) + Rain.Lamp(P, V, LampPos2, LampCol2) + Rain.Lamp(P, V, LampPos3, LampCol3)
     + Rain.Glow(P, V, GlowPos0, GlowCol0) + Rain.Glow(P, V, GlowPos1, GlowCol1);
-// Nothing falls indoors: the store, and the laundromat's room seen through its glass across the street.
-bool inStore = all(P > StoreMin) && all(P < StoreMax);
-bool inWash = all(P > WashMin) && all(P < WashMax);
-float outside = (inStore || inWash) ? 0.0 : 1.0;
+// Nothing falls indoors: the store, the laundromat's room seen through its glass across the street, the shops.
+float dry = 0.0;
+""" + DRY_TEST + """float outside = 1.0 - dry;
 // The sheet thins out toward its own edges: looking far up, or wide, the rain fades rather than stopping on a line.
 float2 edgeUV = min(UV, 1.0 - UV);
 float edge = saturate(min(edgeUV.x, edgeUV.y) * 12.0);
@@ -389,9 +403,10 @@ def build_rain(force):
     mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
     mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
     mat.set_editor_property("two_sided", True)
+    dry = [f"Dry{end}{k}" for k in range(DRY_BOXES) for end in ("Min", "Max")]
     inputs = ["P", "Cam", "T", "Depth", "Spacing", "WidthCm", "LengthCm", "Slant", "Strength", "PixelAngle", "Ambient",
               "LampPos0", "LampCol0", "LampPos1", "LampCol1", "LampPos2", "LampCol2", "LampPos3", "LampCol3",
-              "GlowPos0", "GlowCol0", "GlowPos1", "GlowCol1", "StoreMin", "StoreMax", "WashMin", "WashMax", "FlashIn", "UV"]
+              "GlowPos0", "GlowCol0", "GlowPos1", "GlowCol1"] + dry + ["FlashIn", "UV"]
     c = ss._custom(mat, RAIN, inputs, ss.F3, -450, 0, "Rain around the eye")
     ss._link(ss._world_pos(mat, -900, -600), c, "P")
     # Where on the sheet (the engine plane's 0..1): for the fade at its edges.
@@ -413,11 +428,10 @@ def build_rain(force):
         ss._link(ss._vector(mat, f"GlowPos{k}", (0.0, 0.0, -100000.0), -900, y), c, f"GlowPos{k}")
         ss._link(ss._vector(mat, f"GlowCol{k}", (0.0, 0.0, 0.0), -900, y + 80), c, f"GlowCol{k}")
         y += 160
-    # An empty box masks nothing until the stage says where the store (and the laundromat's room) is.
-    ss._link(ss._vector(mat, "StoreMin", (0.0, 0.0, 0.0), -900, y), c, "StoreMin")
-    ss._link(ss._vector(mat, "StoreMax", (0.0, 0.0, 0.0), -900, y + 80), c, "StoreMax")
-    ss._link(ss._vector(mat, "WashMin", (0.0, 0.0, 0.0), -900, y + 160), c, "WashMin")
-    ss._link(ss._vector(mat, "WashMax", (0.0, 0.0, 0.0), -900, y + 240), c, "WashMax")
+    # An empty box masks nothing until the stage says where the dry zones are (AStreetStage::ApplyDryBoxes).
+    for name in dry:
+        ss._link(ss._vector(mat, name, (0.0, 0.0, 0.0), -900, y), c, name)
+        y += 80
     unreal.MaterialEditingLibrary.connect_material_property(c, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     _finish(mat)
     return 1
@@ -523,33 +537,67 @@ def build_materials(force=False):
     return built
 
 
+def preload_paths():
+    """Every asset the street's stages load that's imported now (AStreetStage.preload_paths: the street's, Market's
+    and every shop's registered paths), sorted; None when the C++ module isn't built."""
+    stage = getattr(unreal, "StreetStage", None)
+    if stage is None or not hasattr(stage, "preload_paths"):
+        return None
+    try:
+        paths = [str(p) for p in stage.preload_paths()]
+    except Exception as exc:
+        unreal.log_warning(f"ShortStack: couldn't list the street's preload paths: {exc}")
+        return None
+    return sorted(p for p in paths if ss.eal.does_asset_exist(p.split(".")[0]))
+
+
+def _preload_digest(paths):
+    """The preload list as the level's tag keeps it: how many, and a hash of the paths."""
+    return f"{len(paths)}:" + hashlib.sha1("\n".join(paths).encode("utf-8")).hexdigest()[:16]
+
+
 def _stamp_open_level():
-    """Marks the open (Street) level as built by this version of the stage, and sets its floor: a pawn that ever
-    gets below the street is removed at 20 m down (the game mode puts the player back at the door long before)."""
+    """Marks the open (Street) level as saved by this version of the stage with this preload list, and sets its
+    floor: a pawn that ever gets below the street is removed at 20 m down (the game mode puts the player back at the
+    door long before)."""
     world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
     if not world:
         return
     _set(world.get_world_settings(), "kill_z", -2000.0)
     try:
         ss.eal.set_metadata_tag(world, VERSION_TAG, MAP_VERSION)
+        paths = preload_paths()
+        if paths is not None:
+            ss.eal.set_metadata_tag(world, PRELOAD_TAG, _preload_digest(paths))
     except Exception as exc:
         unreal.log_warning(f"ShortStack: couldn't mark the Street level's version: {exc}")
 
 
-def _map_current():
+def _map_stale():
+    """Why the saved Street level needs saving again ("" when it's current): an older stage's format, or a preload
+    list that no longer matches what the stages load (new art imported, a stage loading something new)."""
     world = unreal.load_asset(MAP_PATH)
-    return world is not None and ss.eal.get_metadata_tag(world, VERSION_TAG) == MAP_VERSION
+    if world is None:
+        return "it doesn't load"
+    if ss.eal.get_metadata_tag(world, VERSION_TAG) != MAP_VERSION:
+        return "it was saved by an older stage"
+    paths = preload_paths()
+    if paths is not None and ss.eal.get_metadata_tag(world, PRELOAD_TAG) != _preload_digest(paths):
+        return f"its preload list changed ({len(paths)} assets now)"
+    return ""
 
 
 def build_map(force=False):
-    """/Game/Maps/Street: the stage actor and the game mode override (the stage builds everything else). A level
-    saved by an older stage is rebuilt (refresh_map). True when it was created or rebuilt."""
+    """/Game/Maps/Street: the stage actor and the game mode override (the stage builds everything else when play
+    begins). A level saved by an older stage, or with an out-of-date preload list, is saved again (refresh_map). True
+    when it was created or saved again."""
     if ss.eal.does_asset_exist(MAP_PATH) and not force:
         try:
-            if _map_current():
+            why = _map_stale()
+            if not why:
                 return False
-            unreal.log("ShortStack: the Street level was built by an older stage; rebuilding it")
-            return refresh_map()
+            unreal.log(f"ShortStack: the Street level needs saving again: {why}")
+            return refresh_map(force=True)
         except Exception as exc:
             unreal.log_error(f"ShortStack: checking the Street level failed: {exc}")
             return False
@@ -559,7 +607,8 @@ def build_map(force=False):
         return False
     levels = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-    if ss.eal.does_asset_exist(MAP_PATH):
+    existed = ss.eal.does_asset_exist(MAP_PATH)
+    if existed:
         levels.load_level(MAP_PATH)
     else:
         levels.new_level(MAP_PATH)
@@ -569,30 +618,47 @@ def build_map(force=False):
     if mode_class:
         world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
         world.get_world_settings().set_editor_property("default_game_mode", mode_class)
+    # The stage's construction again (an older stage's saved parts go; its preload list is resolved), as refresh_map does.
+    rebuild_stage()
     _stamp_open_level()
     levels.save_current_level()
-    unreal.log(f"ShortStack: created {MAP_PATH}")
+    unreal.log(f"ShortStack: {'saved' if existed else 'created'} {MAP_PATH} (MAP_VERSION {MAP_VERSION})")
     return True
 
 
 def rebuild_stage():
-    """After new props or materials: rebuild the street's stage actor in the open level."""
+    """After new props or materials: rebuild the street's stage actor in the open level (its editor preview, and its
+    preload list resolved again). Returns how many assets the stage's preload list holds (-1: no stage)."""
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     stage_class = unreal.load_class(None, "/Script/ShortStack.StreetStage")
+    held = -1
     for a in actors.get_all_level_actors():
         if stage_class and a.get_class() == stage_class:
             a.rebuild_set()
+            try:
+                held = a.preload_count()
+            except Exception:
+                pass
+    return held
 
 
-def refresh_map():
+def refresh_map(force=False):
     """Rebuilds the street's stage in /Game/Maps/Street and saves it, then goes back to the level that was open.
 
-    The stage builds its props when the level is built in the editor, and Play travels into the saved level,
-    so props imported after the map was saved only show up once it's rebuilt. shortstack_setup.run() calls
-    this when it imported meshes; it does nothing if the open level has unsaved edits (run it by hand then).
+    The street itself is built when play begins, so the saved level only needs its actors, their settings and the
+    stage's preload list (resolved by the stage's construction in the editor). It's saved again only when the stage's
+    format or the preload list changed (_map_stale), unless force: shortstack_setup.run() calls this after any import,
+    and art the street doesn't load shouldn't touch Street.umap. It does nothing if the open level has unsaved edits
+    (run it by hand then). True when it saved the level.
     """
     if not ss.eal.does_asset_exist(MAP_PATH):
         return False
+    if not force:
+        why = _map_stale()
+        if not why:
+            unreal.log(f"ShortStack: the Street level is current (MAP_VERSION {MAP_VERSION}, its preload list unchanged)")
+            return False
+        unreal.log(f"ShortStack: the Street level needs saving again: {why}")
     if unreal.EditorLoadingAndSavingUtils.get_dirty_map_packages():
         unreal.log_warning("ShortStack: the open level has unsaved changes; run street_setup.refresh_map() to rebuild the Street level")
         return False
@@ -600,10 +666,10 @@ def refresh_map():
     world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
     previous = world.get_outermost().get_name() if world else ""
     levels.load_level(MAP_PATH)
-    rebuild_stage()
+    held = rebuild_stage()
     _stamp_open_level()
     levels.save_current_level()
     if previous and previous != MAP_PATH and ss.eal.does_asset_exist(previous):
         levels.load_level(previous)
-    unreal.log("ShortStack: rebuilt the Street level")
+    unreal.log(f"ShortStack: saved the Street level (MAP_VERSION {MAP_VERSION}, {held} preloaded assets)")
     return True

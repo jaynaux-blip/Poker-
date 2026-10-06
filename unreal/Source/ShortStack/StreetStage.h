@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "ShortStack/UI/Canvas.h"
+#include "StreetWorld.h"
 
 #include "StreetStage.generated.h"
 
@@ -41,38 +42,7 @@ struct FStreetSpot
 	int32 Shelf = -1;
 };
 
-/** A straight line along a sidewalk, clear to walk from Start to End (world space, on the sidewalk's top). */
-struct FStreetLane
-{
-	FVector Start = FVector::ZeroVector;
-	FVector End = FVector::ZeroVector;
-};
-
-/** One of Fifth's sidewalks as people walk it (AStreetStage::Sidewalk): its clear lanes, what stands on it, its top. */
-struct FStreetWalkway
-{
-	/** 0 the home side (1812, the Lucky Penny, Market's corner), 1 the far side (the tenement, the Wash & Fold). */
-	int32 Side = 0;
-	/** Lines along it, each clear of the stoops, steps and street furniture end to end (the home side's cross Market). */
-	TArray<FStreetLane> Lanes;
-	/** What stands on it, as footprints in world XY (stoops, steps, the hydrant, cans, poles), for anyone off a lane. */
-	TArray<FBox2D> Obstacles;
-	/** The sidewalk's top (world Z). */
-	double Z = 0.0;
-};
-
-/** A door people go in and out of (AStreetStage::Doors, world space). */
-struct FStreetDoor
-{
-	/** "store" (the Lucky Penny), "washfold" (the Wash & Fold), "home" (door 1812), "dee" (the tenement's street door). */
-	FName Id;
-	/** On the sidewalk's top in front of it, facing it. */
-	FTransform Outside;
-	/** The middle of the doorway at its floor. */
-	FVector Threshold = FVector::ZeroVector;
-	/** A room a pedestrian walks on into (the store, the laundromat); the others are homes: people go in and are gone. */
-	bool bRoom = false;
-};
+// FStreetLane, FStreetWalkway and FStreetDoor live in StreetWorld.h now (the registry hands them out too).
 
 /**
  * Fifth Street at night, from the apartment building's door to the Lucky Penny #212 on the corner of
@@ -93,8 +63,12 @@ struct FStreetDoor
  * runs along Y at X 420..1620, up is Z with the sidewalk's top at 0. The store spans Y 3700..4950; the
  * Wash & Fold, across the street, Y 15..1825 and X 2085..3140, its floor at Z 45.
  *
- * Everything the stage uses while playing is a plain UPROPERTY (not transient): a cooked build, and Play
- * started on the Street map, use the components the editor saved instead of running construction again.
+ * Built when play begins, as the Embercrest is (design spec 0.8 and 7.5.1): in the editor's world construction builds
+ * only a preview (nothing of it is saved: every part is transient), and at play EnsureBuilt (BeginPlay, or the game mode
+ * first when it needs the street sooner) clears whatever of the preview came along and builds the street for play, then
+ * registers what it built with the street's registry (UStreetWorld: its uses, zones, starts, doors, walkways and
+ * stations). Street.umap keeps only the actor, its settings and its preload list: every asset the street's stages load,
+ * resolved in the editor (Preload), so the level's load streams them in and the build at play doesn't stop on them.
  * The look follows the camera each frame after it has moved (TG_PostUpdateWork): the rain sheets, the
  * exposure (the street kept dark, the store's own brighter range inside it) and which streetlights shadow.
  */
@@ -110,8 +84,21 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	/** The editor's preview again (after new meshes or materials), its preload list with it. */
 	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Short Stack")
 	void RebuildSet();
+	/** Builds the street once for play and registers it (BeginPlay does; the game mode calls it first, before the player is placed). */
+	void EnsureBuilt();
+	bool IsBuilt() const { return bBuilt; }
+
+	/** Every asset path the street itself loads (its materials and Blender meshes), for the preload list (FStreetPreload). */
+	static void AppendPreload(TArray<FString>& Paths);
+	/** Every registered stage's paths (the street's, Market's, every shop's): what the editor resolves onto Preload. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack")
+	static TArray<FString> PreloadPaths();
+	/** How many assets the saved preload list holds (street_setup.py logs it). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack")
+	int32 PreloadCount() const { return Preload.Num(); }
 
 	/**
 	 * Where the player appears: "home" just out of 1812's door, "store" inside the Lucky Penny, "washfold" on the sidewalk
@@ -129,13 +116,13 @@ public:
 	double WashFloorZ() const;
 	/** The sidewalks' top (world Z). */
 	double SidewalkZ() const;
-	/** The spot within reach of an eye looking along Dir (the nearest it's facing), or null. */
+	/** The spot within reach of an eye looking along Dir (the nearest it's facing), or null. The game mode asks the registry (UStreetWorld::Best: these spots, as uses, and every other stage's), which scores the same way. */
 	const FStreetSpot* SpotFor(const FVector& Eye, const FVector& Dir) const;
-	/** "LUCKY PENNY #212" inside the store, "WASH & FOLD" inside the laundromat, "FIFTH STREET" (or the corner) outside. */
+	/** The registry's zone's place at At: "LUCKY PENNY #212" inside the store, "WASH & FOLD" inside the laundromat, "FIFTH STREET" (or the corner) outside. */
 	FString PlaceName(const FVector& At) const;
 	bool IsInsideStore(const FVector& At) const;
 	bool IsInsideWash(const FVector& At) const;
-	/** Somewhere nobody should be: under the street (fell through a gap) or far past its ends. */
+	/** Somewhere nobody should be: under the street (fell through a gap) or outside every zone of the registry. */
 	bool IsOffTheSet(const FVector& At) const;
 	/** The store's doors slide open for someone within reach of them (or a walker, NoteWalker). True the moment they start to open. */
 	bool UpdateDoors(const FVector& Someone, float DeltaSeconds);
@@ -183,8 +170,25 @@ public:
 	/** How many streetlights cast shadows at once (the nearest to the camera); the rest light without them. */
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	int32 ShadowedStreetlights = 2;
+	/** The editor's preview of the street (construction builds it; nothing of it is saved). */
+	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
+	bool bEditorPreview = true;
+
+	/**
+	 * Every asset the street's stages load at play (PreloadPaths, plus whatever the editor's preview loaded), resolved in
+	 * the editor and saved with the level: the level's load brings them in, so the build at play finds them loaded. Only
+	 * the editor's construction sets it (street_setup.py saves the level when the list changes).
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Short Stack")
+	TArray<TObjectPtr<UObject>> Preload;
 
 private:
+	/** The paths the editor's preview loaded, onto Preload (with every registered stage's): the editor's world only. */
+	void ResolvePreload(const TSet<FString>& Loaded);
+	/** What it built, into the registry (UStreetWorld): the spots as uses, the zones, the starts, the doors, the walkways, the stations. */
+	void RegisterWithWorld();
+	/** No rain inside the registry's dry zones (M_StreetRain's DryMin0..7, and the older material's store and laundromat boxes). */
+	void ApplyDryBoxes();
 	void BuildSet();
 	void BuildGround();
 	void BuildEnds();
@@ -310,81 +314,81 @@ private:
 	UPROPERTY(Transient)
 	TMap<int32, TObjectPtr<UInstancedStaticMeshComponent>> WindowSets;
 
-	// Used while playing (kept in the saved level, see the class comment).
-	UPROPERTY()
+	// Used while playing: built at play (EnsureBuilt), or for the editor's preview, and never saved.
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> SkyMids;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> WindowMids;
 	/** The street lamps' glass and the neon: dark by day. */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> NightGlowMids;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<float> NightGlowLevels;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMeshComponent>> RainSheets;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> RainMids;
 	/** The rain sheets' material knows where the store is (no rain falls inside); the old one doesn't. */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	bool bRainMasksStore = false;
 	/** The sliding doors: each a scene component holding its glass, frame and push bar (UpdateDoors moves it). */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<USceneComponent> DoorLeft;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<USceneComponent> DoorRight;
 	/** The hours sticker: attached to the left door, so it slides with it. */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<UWidgetComponent> DoorDecal;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<USkyLightComponent> SkyLight;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<UDirectionalLightComponent> Moon;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<UExponentialHeightFogComponent> Fog;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<UPostProcessComponent> Lens;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<USpotLightComponent>> Streetlights;
 	/** The store's ceiling lights: shadowed while the camera is near the store, so none of their light gets through its walls. */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<URectLightComponent>> StoreLights;
 	/** Lights that only shine at night (the door lamp, the neon's glow on the street). */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<ULightComponent>> NightLights;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<float> NightLightLevels;
 	/** One of the night lights: the laundromat's light through its window onto the sidewalk (ss.Street.LaundromatGlow). */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<URectLightComponent> WashSpill;
 	/** The Wash & Fold's fluorescents: shadowed while the camera is near it, as the store's are (PickStreetlights). */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<URectLightComponent>> WashLights;
 	/** Its door: the leaf on its hinge (UpdateWashDoor swings it), and the invisible stop that blocks the doorway while it's shut. */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<USceneComponent> WashDoor;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> WashDoorStop;
 	/** The bell on its spring over the door, inside (it swings once the door has struck it). */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<USceneComponent> WashBell;
 	/** The running dryers: each one's light out through its drums' glass, tumbling (AnimateWash). */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UPointLightComponent>> DrumLights;
 	/** The imported running dryers (their glow slots animated at play, PrepareWashGlow), as many as DrumLights; or none. */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMeshComponent>> DrumStacks;
 	/** The stand-in running dryers' lit drum glass, one material each (none when the dryers are imported). */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> DrumMids;
 	/** The imported idle dryers, every copy one instance: their drums are dark (PrepareWashGlow). */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<UInstancedStaticMeshComponent> IdleDryers;
 	/** The TV on the back wall: the imported one (its screen's glow slot animated), or the stand-in's screen; and its light on the room. */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> WashTv;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> WashTvMid;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<URectLightComponent> WashTvLight;
 	/** The glow slots PrepareWashGlow made to animate (the imported dryers' drums, the TV's screen), and what each scales. */
 	UPROPERTY(Transient)
@@ -400,43 +404,49 @@ private:
 	};
 	TArray<FGlowParam> GlowParams;
 	/** The store clock's hands, each turning about its own pivot at the dial's middle (SetClock). */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<USceneComponent> ClockHour;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<USceneComponent> ClockMinute;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<USceneComponent> ClockSecond;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UWidgetComponent>> SignWidgets;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<FString> SignArt;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<float> SignGlow;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<FStreetSpot> Spots;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMeshComponent>> ParkedCars;
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<FLinearColor> ParkedPaints;
 	/** Blender's building fronts: their lit rooms, lanterns and transoms are baked for the night and dim by day (ApplyDaylight). */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMeshComponent>> LitFronts;
 	/**
 	 * The tenement, when it stands across the street: its rooms were baked for the apartment's view (seen through rain from
 	 * a lit room, a brighter exposure than the street's night), so here they glow less; its own shallow laundromat is
 	 * hidden (HideTenementShop), the Wash & Fold built here stands in it.
 	 */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> TenementFront;
 	/** The Wash & Fold's room, where no rain falls, and where the rain catches the neon's pink (the stage's own cm), as BuildAcross built them. */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	FVector WashMin = FVector(2056.0, -5.0, -60.0);
-	UPROPERTY()
+	UPROPERTY(Transient)
 	FVector WashMax = FVector(3160.0, 1845.0, 370.0);
-	UPROPERTY()
+	UPROPERTY(Transient)
 	FVector NeonGlowAt = FVector(1590.0, 640.0, 700.0);
 	/** While building: 1812's own front stands, so BuildEntrance adds only what it lacks. */
 	bool bHomeFront = false;
+	/** Built for play (EnsureBuilt): until then it neither ticks nor answers for the registry. */
+	bool bBuilt = false;
+	/** The registry's zones as the rain's dry boxes were last set from them (UStreetWorld::ZoneRevision; -1 never). */
+	int32 AppliedZoneRevision = -1;
+	/** The uses it registered (taken back when it's built again). */
+	TArray<int32> UseHandles;
 
 	TArray<TSharedPtr<SDrawListWidget>> SignSlates;
 	TArray<TSharedPtr<const ss::ui::DrawList>> SignLists;

@@ -112,7 +112,8 @@ const char* const HairNames[] = {"Shaved", "Buzz Cut", "Crew Cut", "Textured Cro
 const char* const HairColorNames[] = {"Black", "Dark Brown", "Brown", "Auburn", "Copper", "Blonde", "Platinum", "Grey"};
 const char* const FacialHairNames[] = {"None", "Stubble", "Mustache", "Goatee", "Short Beard", "Full Beard"};
 const char* const BuildNames[] = {"Slim", "Average", "Athletic", "Heavy"};
-const char* const OutfitNames[] = {"Hoodie", "Bomber", "Flannel", "Denim Jacket", "Leather Jacket", "Track Jacket"};
+// Six jackets, then "None" (OutfitNone: the tee alone), appended so saved looks keep their values.
+const char* const OutfitNames[] = {"Hoodie", "Bomber", "Flannel", "Denim Jacket", "Leather Jacket", "Track Jacket", "None"};
 const char* const OutfitColorNames[] = {"Charcoal", "Navy", "Olive", "Burgundy", "Sand", "Black", "Teal", "Mustard"};
 const char* const GlassesNames[] = {"None", "Round", "Square", "Wire Frames", "Shades"};
 const char* const HatNames[] = {"None", "Beanie", "Ball Cap", "Cap, Backwards", "Bucket Hat"};
@@ -614,7 +615,7 @@ Look RandomLook(Rng& R, int Age, int Body)
 	L.FacialHair = L.Body == 0 ? R.Int(OptionCount(Slot::FacialHair)) : 0;
 	L.Build = R.Int(OptionCount(Slot::Build));
 	L.Height = L.Body == 0 ? 168 + R.Int(25) : 157 + R.Int(22);
-	L.Outfit = R.Int(OptionCount(Slot::Outfit));
+	L.Outfit = R.Int(OutfitNone); // one of the jackets (the same draw as before "None" was added)
 	L.OutfitColor = R.Int(OptionCount(Slot::OutfitColor));
 	L.Glasses = R.Next() < 0.3 ? 1 + R.Int(OptionCount(Slot::Glasses) - 1) : 0;
 	L.Hat = R.Next() < 0.35 ? 1 + R.Int(OptionCount(Slot::Hat) - 1) : 0;

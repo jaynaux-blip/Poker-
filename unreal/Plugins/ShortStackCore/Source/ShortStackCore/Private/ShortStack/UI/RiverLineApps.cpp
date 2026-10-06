@@ -66,6 +66,7 @@ Color KindColor(int Kind)
 	case 6: return Hex(0x9b5cff);
 	case 7: return Hex(0x60a5fa);
 	case 8: return Hex(0xe23b4e);
+	case 9: return Hex(0xec4899);
 	default: return Hex(0xf2c14e);
 	}
 }
@@ -82,6 +83,7 @@ const char* KindName(int Kind)
 	case 6: return "Kast";
 	case 7: return "Transfer";
 	case 8: return "Corner store";
+	case 9: return "Northside"; // the shops on the block (the barber, the thrift, the gym, Ruby's, the pawn)
 	default: return "Prizes";
 	}
 }
@@ -1502,10 +1504,12 @@ void RiverLine::BankApp(double Now)
 		Window = L.Ledger.size() >= LedgerKept ? "Your last " + std::to_string(LedgerKept) + " transactions, since " + When : "Everything since " + When;
 	}
 	UI.Text(Window, Flow.X + 32.0f, Flow.Y + 66.0f, Ts(12.5f, 600, Gray));
-	// In: 0 tournament cashes, 1 the Embercrest, 2 leaderboard prizes, 3 shifts, 4 cash work, 5 streaming.
-	// Out: 0 buy-ins (less refunds), 1 rent, bills and fares, 2 food and deliveries, 3 gear, 4 fines and Marcus.
-	Chips Ins[6] = {0, 0, 0, 0, 0, 0};
-	Chips Outs[5] = {0, 0, 0, 0, 0};
+	// In: 0 tournament cashes, 1 the Embercrest, 2 leaderboard prizes, 3 shifts, 4 cash work, 5 streaming, 6 Northside's
+	// sales and refunds (the pawn's cash, a loan).
+	// Out: 0 buy-ins (less refunds), 1 rent, bills and fares, 2 food and deliveries, 3 gear, 4 fines and Marcus, 5 the
+	// shops on the block (cuts, clothes, the gym, Ruby's, the pawn).
+	Chips Ins[7] = {0, 0, 0, 0, 0, 0, 0};
+	Chips Outs[6] = {0, 0, 0, 0, 0, 0};
 	for (const life::LedgerEntry& E : L.Ledger)
 	{
 		if (E.Kind == 7 || E.Amount == 0)
@@ -1538,6 +1542,10 @@ void RiverLine::BankApp(double Now)
 			{
 				Ins[5] += E.Amount;
 			}
+			else if (E.Kind == 9)
+			{
+				Ins[6] += E.Amount;
+			}
 			continue;
 		}
 		const Chips Spent = -E.Amount;
@@ -1551,6 +1559,7 @@ void RiverLine::BankApp(double Now)
 		case 0: Outs[0] += Spent; break;
 		case 5: Outs[3] += Spent; break;
 		case 2: Outs[4] += Spent; break;
+		case 9: Outs[5] += Spent; break; // the shops on the block
 		default: Outs[1] += Spent; break; // rent, the storage unit, the bus to the Embercrest
 		}
 	}
@@ -1561,10 +1570,10 @@ void RiverLine::BankApp(double Now)
 		Chips Amount;
 		uint32_t Col;
 	};
-	const FlowRow InRows[6] = {{"Tournament cashes", Ins[0], 0x27d3c3}, {"The Embercrest", Ins[1], EmberRgb}, {"Leaderboard prizes", Ins[2], 0xf2c14e}, {"Shifts", Ins[3], 0xff8a1f},
-		{"Cash work", Ins[4], 0x16a34a}, {"Streaming", Ins[5], 0x9b5cff}};
-	const FlowRow OutRows[5] = {{"Buy-ins & entry fees", Outs[0], 0x0d9488}, {"Rent, bills & fares", Outs[1], 0xef4d5a}, {"Food & deliveries", Outs[2], 0xe23b4e}, {"Gear", Outs[3], 0xff6b2c},
-		{"Fines & Marcus", Outs[4], 0x7c3aed}};
+	const FlowRow InRows[7] = {{"Tournament cashes", Ins[0], 0x27d3c3}, {"The Embercrest", Ins[1], EmberRgb}, {"Leaderboard prizes", Ins[2], 0xf2c14e}, {"Shifts", Ins[3], 0xff8a1f},
+		{"Cash work", Ins[4], 0x16a34a}, {"Streaming", Ins[5], 0x9b5cff}, {"Sales & refunds", Ins[6], 0xec4899}};
+	const FlowRow OutRows[6] = {{"Buy-ins & entry fees", Outs[0], 0x0d9488}, {"Rent, bills & fares", Outs[1], 0xef4d5a}, {"Food & deliveries", Outs[2], 0xe23b4e}, {"Gear", Outs[3], 0xff6b2c},
+		{"Fines & Marcus", Outs[4], 0x7c3aed}, {"Looks, fitness & food out", Outs[5], 0xdb2777}};
 	Chips Top = 1;
 	Chips InSum = 0;
 	Chips OutSum = 0;
@@ -1588,7 +1597,7 @@ void RiverLine::BankApp(double Now)
 		for (int I = 0; I < Count; ++I)
 		{
 			const FlowRow& R = Rows[I];
-			const float Y = Flow.Y + 118.0f + Nf(I) * 38.0f;
+			const float Y = Flow.Y + 118.0f + Nf(I) * 33.0f; // seven rows in the card (Northside's joined the six)
 			const bool Some = R.Amount > 0;
 			UI.Text(R.Label, X, Y + 14.0f, Ts(13.5f, 600, Some ? Dark : NetA(Gray, 0.7f)));
 			UI.Text(Some ? Money(R.Amount) : std::string("\xE2\x80\x94"), X + W, Y + 14.0f, Ts(13.5f, 800, Some ? Dark : NetA(Gray, 0.6f), Align::Right, Baseline::Alphabetic, true));
@@ -1600,8 +1609,8 @@ void RiverLine::BankApp(double Now)
 			}
 		}
 	};
-	Column(InRows, 6, Flow.X + 32.0f, 380.0f, "MONEY IN", InSum, Hex(0x16a34a));
-	Column(OutRows, 5, Flow.X + 448.0f, 380.0f, "MONEY OUT", OutSum, Hex(0xdc2626));
+	Column(InRows, 7, Flow.X + 32.0f, 380.0f, "MONEY IN", InSum, Hex(0x16a34a));
+	Column(OutRows, 6, Flow.X + 448.0f, 380.0f, "MONEY OUT", OutSum, Hex(0xdc2626));
 
 	// History.
 	const Rect H{930.0f, 100.0f, 630.0f, 830.0f};

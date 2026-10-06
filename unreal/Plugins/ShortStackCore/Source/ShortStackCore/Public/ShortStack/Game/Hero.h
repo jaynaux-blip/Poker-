@@ -91,6 +91,12 @@ enum class Slot : int
 constexpr int SlotCount = static_cast<int>(Slot::Count);
 constexpr int MinHeight = 152;
 constexpr int MaxHeight = 203;
+/**
+ * Outfit's last option, "None": no jacket, the tee alone in the outfit color. Outfit 0..5 are the six jackets in
+ * wardrobe::Cut's order, one past it (Outfit k is Cut k + 1: Hoodie .. Track; Cut 0 is the tee). Appended, so a saved
+ * look keeps its jacket; random looks (RandomLook) still draw one of the six.
+ */
+constexpr int OutfitNone = 6;
 
 struct Look
 {

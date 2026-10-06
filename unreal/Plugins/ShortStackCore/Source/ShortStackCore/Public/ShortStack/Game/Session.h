@@ -18,6 +18,11 @@
 
 namespace ss
 {
+namespace town
+{
+struct Talk; // Talk.h
+}
+
 enum class Pace : int
 {
 	Full,
@@ -543,7 +548,7 @@ public:
 	/** The Kast channel (persists) and the stream (live state). */
 	kast::Channel Channel;
 	kast::Stream Stream;
-	/** What the owned gear adds up to. */
+	/** What the owned gear adds up to, with fitness's drain and calm folded in (body::EffectsOf, RefreshGear). */
 	const gear::Effects& GearFx() const { return Fx; }
 	bool Owns(const std::string& Id) const { return Gear.count(Id) > 0; }
 	/** Why an item can't be bought now ("" when it can). */
@@ -594,6 +599,44 @@ public:
 	SHORTSTACKCORE_API std::string WorldPreview(int DayCount) const;
 	/** Debug: the player sleeps through Days (the clock and the world move on; nothing else happens to the player). */
 	SHORTSTACKCORE_API void WorldSkip(int DayCount);
+
+	// ------------------------------------------------------------ Northside (the realism update's spec, §7.2)
+	// The shops, the pawn and the people on the block. The calls live in SessionShops.cpp and SessionTown.cpp; each
+	// "" or why not, like the rest of the session's. Money goes through the ledger as kind 9.
+	// ---- Northside: shops (SessionShops.cpp) ----
+	struct ShopOrder
+	{
+		std::string Venue;
+		std::vector<std::string> Offers;
+		std::vector<std::string> Garments;
+		int TipPercent = 0;
+	};
+	SHORTSTACKCORE_API bool ShopOpenFor(const std::string& Venue) const;          // open now, or a member at the gym
+	SHORTSTACKCORE_API std::string ShopBlocked(const std::string& OfferId) const; // "" when it can be had now
+	SHORTSTACKCORE_API Chips ShopTotal(const ShopOrder& O) const;                 // tax where it applies, then the tip
+	SHORTSTACKCORE_API std::string ShopPay(const ShopOrder& O);     // goods, passes, the membership, shakes: charged now
+	SHORTSTACKCORE_API std::string ShopService(const ShopOrder& O); // cuts, workouts, meals: charged, then a TimeSkip "shop:<venue>:<ids>"
+	SHORTSTACKCORE_API std::string WaitAt(const std::string& Venue, double UntilWorld); // sit a while, the bench, the shelter
+	SHORTSTACKCORE_API std::string Wear(const std::string& GarmentId);
+	SHORTSTACKCORE_API std::string TakeOff(int WardrobeSlot);
+	SHORTSTACKCORE_API std::string Donate(const std::string& GarmentId);
+	SHORTSTACKCORE_API std::string BoardBus(const std::string& LiveId); // the 14 at Market St (§7.6)
+	SHORTSTACKCORE_API uint64_t WorldSeed() const;
+	SHORTSTACKCORE_API double Fitness() const;
+	SHORTSTACKCORE_API double Sharp() const;
+	// ---- Northside: the pawn (SessionShops.cpp, §5.8) ----
+	SHORTSTACKCORE_API std::vector<shop::Lot> PawnLots() const;        // what the hero could bring Augie now (stored gear while the unit's paid)
+	SHORTSTACKCORE_API std::vector<shop::Lot> PawnShelf() const;       // for sale now: used gear, curios, forfeits, auction lots
+	SHORTSTACKCORE_API std::string PawnSell(const std::string& LotId); // 50% of V, cash now (ledger 9); stored gear: a 60-minute skip first
+	SHORTSTACKCORE_API std::string PawnLoan(const std::string& LotId); // 40% of V now, and a 30-day ticket
+	SHORTSTACKCORE_API std::string PawnRedeem(int Ticket);
+	SHORTSTACKCORE_API std::string PawnRenew(int Ticket);              // P1
+	SHORTSTACKCORE_API std::string PawnBuy(const std::string& LotId);  // taxed; gear while evicted only if it needs no room
+	SHORTSTACKCORE_API bool PawnHolds(const std::string& LotId) const; // in his cage, his case or gone: the apartment hides the cup, the trophy case stamps an award
+	// ---- Northside: people (SessionTown.cpp) ----
+	SHORTSTACKCORE_API void Heard(const std::string& Speaker, const town::Talk& Told); // said keys, familiarity, WorldNotes, MemoryKind::Street (not "T": that's the tournament)
+	SHORTSTACKCORE_API std::string Lend(const std::string& Speaker, Chips Cents);  // Twitch's twenty
+	SHORTSTACKCORE_API void Tipped(const std::string& Speaker, int Percent);
 
 	/** On Team RiverLine (the sponsor deal): the patch on the hero's avatar. */
 	bool TeamRiverLine() const { return Channel.ActiveDeal("riverline", WorldMinutes()) != nullptr; }
@@ -774,6 +817,15 @@ private:
 	void StreamMoment(kast::Moment M, const std::string& Detail = std::string(), double Size = 1.0);
 	void PlayStreamNotices();
 	void PayOut(const std::string& Label);
+	// Northside's hooks in Session.cpp, bodies in SessionShops.cpp (§7.2).
+	void SettleShop();                     // FinishSkip's hook for "shop:" activity ids: the look, the fitness, the meal's relief, the outcome line
+	void ShopStep(double From, double To); // CheckCalendar's hook: fitness decay; the pawn's reminders, forfeits and shelf expiry
+	/** A visit paid for at a venue (the Lucky Penny's counter included): Life.Visits[Venue]'s count, time and spend. */
+	void ShopVisit(const std::string& Venue, Chips SpentCents);
+	/** ClerkSays' hook: what the counter knows of the player from their visits (and, later, the clerk's bond). */
+	void ShopClerk(store::ClerkContext& Ctx) const;
+	/** StreamInputs' hook: the look on camera (Sharp and Style) in the stream's follow and tip multipliers. */
+	void ShopStream(kast::Inputs& In) const;
 
 	SessionHooks& Hooks;
 	std::set<std::string> TextsSeen;
@@ -807,6 +859,9 @@ private:
 	bool SprintBubble = false;
 	bool SprintFinal = false;
 	gear::Effects Fx;
+	/** Fitness's effects (body::EffectsOf, refreshed with the gear): its drain and calm are folded into Fx; its rest bonus
+	 * and exhausted threshold are read where sleep and the tables need them. */
+	body::Effects BodyFx;
 	double StreamWorldAt = -1.0;
 	double StreamRealAt = -1.0;
 	double StreamSoundAt = -100.0;

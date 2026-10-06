@@ -156,16 +156,95 @@ FLinearColor SrgbHex(uint32 Hex)
 	return FLinearColor::FromSRGBColor(FColor(static_cast<uint8>((Hex >> 16) & 0xff), static_cast<uint8>((Hex >> 8) & 0xff), static_cast<uint8>(Hex & 0xff)));
 }
 
+// The street's own materials (street_setup.py, shortstack_setup.py) and the Blender meshes it builds with, by name: its
+// part of the preload list (AStreetStage::AppendPreload). A mesh or material loaded while the editor's preview builds
+// that isn't listed here goes on the list all the same, with a warning to add it (ResolvePreload).
+const TCHAR* const StreetMaterialPaths[] = {
+	TEXT("/Game/ShortStack/Materials/M_Street.M_Street"),
+	TEXT("/Game/ShortStack/Materials/M_Surface.M_Surface"),
+	TEXT("/Game/ShortStack/Materials/M_Glow.M_Glow"),
+	TEXT("/Game/ShortStack/Materials/M_RainGlass.M_RainGlass"),
+	TEXT("/Game/ShortStack/Materials/M_StreetGlass.M_StreetGlass"),
+	TEXT("/Game/ShortStack/Materials/M_StreetWindow.M_StreetWindow"),
+	TEXT("/Game/ShortStack/Materials/M_WidgetLit.M_WidgetLit"),
+	TEXT("/Game/ShortStack/Materials/M_StreetSky.M_StreetSky"),
+	TEXT("/Game/ShortStack/Materials/M_Sky.M_Sky"),
+	TEXT("/Game/ShortStack/Materials/M_StreetCity.M_StreetCity"),
+	TEXT("/Game/ShortStack/Materials/M_City.M_City"),
+	TEXT("/Game/ShortStack/Materials/M_StreetRain.M_StreetRain"),
+	TEXT("/Game/ShortStack/Materials/M_Rain.M_Rain"),
+};
+const TCHAR* const StreetMeshNames[] = {
+	TEXT("SM_Cooler"),
+	TEXT("SM_Facade_1812"),
+	TEXT("SM_Facade_Brownstone"),
+	TEXT("SM_Facade_StoreUpper"),
+	TEXT("SM_Facade_Walkup"),
+	TEXT("SM_Hydrant"),
+	TEXT("SM_Newsbox"),
+	TEXT("SM_Register"),
+	TEXT("SM_Sedan"),
+	TEXT("SM_Shelf"),
+	TEXT("SM_Stock_BackBar"),
+	TEXT("SM_Stock_BackBar_Tobacco"),
+	TEXT("SM_Stock_CoolerRow_Cans"),
+	TEXT("SM_Stock_CoolerRow_Deli"),
+	TEXT("SM_Stock_CoolerRow_Energy"),
+	TEXT("SM_Stock_CoolerRow_Ice"),
+	TEXT("SM_Stock_CoolerRow_Soda"),
+	TEXT("SM_Stock_CoolerRow_Tea"),
+	TEXT("SM_Stock_CoolerRow_Water"),
+	TEXT("SM_Stock_Counter"),
+	TEXT("SM_Stock_ShelfRow_Bulk"),
+	TEXT("SM_Stock_ShelfRow_Candy"),
+	TEXT("SM_Stock_ShelfRow_Chips"),
+	TEXT("SM_Stock_ShelfRow_Grocery"),
+	TEXT("SM_Stock_ShelfRow_Household"),
+	TEXT("SM_Stock_ShelfRow_Trail"),
+	TEXT("SM_Streetlight"),
+	TEXT("SM_Tenement"),
+	TEXT("SM_TrashCan"),
+	TEXT("SM_WF_BackDoor"),
+	TEXT("SM_WF_Cart"),
+	TEXT("SM_WF_Chairs"),
+	TEXT("SM_WF_ChangeMachine"),
+	TEXT("SM_WF_Counter"),
+	TEXT("SM_WF_DryerStack"),
+	TEXT("SM_WF_FoldTable"),
+	TEXT("SM_WF_SoapVend"),
+	TEXT("SM_WF_TV"),
+	TEXT("SM_WF_WallDressing"),
+	TEXT("SM_WF_Washer"),
+};
+
+/** While the editor's preview builds: every asset it loaded (by object path), for the preload list. Null otherwise. */
+TSet<FString>* PreviewLoads = nullptr;
+
+void NoteLoaded(const UObject* Asset)
+{
+	if (PreviewLoads && Asset)
+	{
+		PreviewLoads->Add(Asset->GetPathName());
+	}
+}
+
 UMaterialInterface* OptionalMaterial(const TCHAR* Path)
 {
-	return LoadObject<UMaterialInterface>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+	UMaterialInterface* M = LoadObject<UMaterialInterface>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+	NoteLoaded(M);
+	return M;
 }
 
 /** A mesh from the Blender pipeline (unreal/Art/Meshes, imported when the editor opens), nullptr when it isn't. */
 UStaticMesh* ImportedMesh(const TCHAR* Name)
 {
-	return LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s.%s"), Name, Name, Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *FStreetPreload::MeshPath(Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	NoteLoaded(Mesh);
+	return Mesh;
 }
+
+// ss.Street.Rain is a test override: each Play session starts it at its reset (FStreetOverrides).
+FStreetOverrides::FRegister RainOverride(TEXT("ss.Street.Rain"), TEXT("1"));
 
 /**
  * What hides one of an imported mesh's material slots: the engine's own masked-out material (Nanite's hidden sections use
@@ -373,7 +452,12 @@ AStreetStage::AStreetStage()
 template <typename T>
 T* AStreetStage::NewPart(USceneComponent* Parent)
 {
-	T* Part = NewObject<T>(this);
+	// Transient: built when play begins (or for the editor's preview), never saved with the level. The preview's parts are
+	// not duplicated either: Play-In-Editor copies the level by duplication, which copies transient objects that are still
+	// referenced (BlueprintCreatedComponents is), and the play copy builds its own street at BeginPlay (as the Embercrest).
+	const UWorld* InWorld = GetWorld();
+	const EObjectFlags Flags = InWorld && InWorld->IsGameWorld() ? RF_Transient : EObjectFlags(RF_Transient | RF_DuplicateTransient);
+	T* Part = NewObject<T>(this, NAME_None, Flags);
 	Part->CreationMethod = EComponentCreationMethod::UserConstructionScript;
 	Part->SetupAttachment(Parent ? Parent : Root.Get());
 	BlueprintCreatedComponents.Add(Part);
@@ -702,14 +786,303 @@ void AStreetStage::WindowRows(const FVector& Origin, const FVector& Along, doubl
 void AStreetStage::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
-	BuildSet();
+	UWorld* World = GetWorld();
+	if (World && World->IsGameWorld() && bBuilt)
+	{
+		// Construction run again at play (a property set from the editor's Python during Play: the Embercrest's lesson) has
+		// just cleared the street built for play: built again, rather than left bare.
+		bBuilt = false;
+		EnsureBuilt();
+		return;
+	}
+	if (!World || World->WorldType != EWorldType::Editor)
+	{
+		// In play (spawned by the game mode, or loaded in a cooked game or Play-In-Editor) the street is built at BeginPlay.
+		return;
+	}
+	// The editor's preview, and every asset it loaded (with every registered stage's) resolved onto the saved preload list.
+	TSet<FString> Loaded;
+	if (bEditorPreview)
+	{
+		PreviewLoads = &Loaded;
+		BuildSet();
+		PreviewLoads = nullptr;
+	}
+	ResolvePreload(Loaded);
 }
 
 void AStreetStage::RebuildSet()
 {
+	if (const UWorld* World = GetWorld(); World && World->IsGameWorld())
+	{
+		// At play: the street built again for play (construction would only clear it), and registered again.
+		bBuilt = false;
+		EnsureBuilt();
+		return;
+	}
 #if WITH_EDITOR
 	RerunConstructionScripts();
 #endif
+}
+
+void AStreetStage::AppendPreload(TArray<FString>& Paths)
+{
+	for (const TCHAR* Path : StreetMaterialPaths)
+	{
+		Paths.Add(Path);
+	}
+	for (const TCHAR* Name : StreetMeshNames)
+	{
+		Paths.Add(FStreetPreload::MeshPath(Name));
+	}
+}
+
+SHORTSTACK_STREET_PRELOAD(AStreetStage)
+
+TArray<FString> AStreetStage::PreloadPaths()
+{
+	return FStreetPreload::Collect();
+}
+
+void AStreetStage::ResolvePreload(const TSet<FString>& Loaded)
+{
+	TArray<FString> Paths = FStreetPreload::Collect();
+	for (const FString& Path : Loaded)
+	{
+		if (!Paths.Contains(Path))
+		{
+			// Loaded, so it's preloaded all the same; but the static list should say so (it's what street_setup.py compares).
+			UE_LOG(LogTemp, Warning, TEXT("StreetStage: %s is loaded by the street but not in its AppendPreload list"), *Path);
+			Paths.Add(Path);
+		}
+	}
+	TArray<TObjectPtr<UObject>> Resolved;
+	for (const FString& Path : Paths)
+	{
+		// Only what's imported: an asset that isn't yet (the art lands later) goes on once it is, and the level is saved then.
+		if (UObject* Asset = LoadObject<UObject>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet))
+		{
+			Resolved.AddUnique(Asset);
+		}
+	}
+	if (Resolved != Preload)
+	{
+		Preload = MoveTemp(Resolved);
+		UE_LOG(LogTemp, Log, TEXT("StreetStage: the preload list holds %d assets (of %d paths)"), Preload.Num(), Paths.Num());
+	}
+}
+
+void AStreetStage::EnsureBuilt()
+{
+	if (bBuilt)
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World || !World->IsGameWorld())
+	{
+		return;
+	}
+	const double Started = FPlatformTime::Seconds();
+	// Whatever of the editor's preview came along into play (its parts aren't duplicated, but a level saved before they were
+	// transient, MAP_VERSION 8 and older, brings them all): gone, deepest first, before the street is built for play.
+	TInlineComponentArray<UActorComponent*> Old;
+	GetComponents(Old);
+	Old.RemoveAll([](const UActorComponent* C) { return !C || !C->IsCreatedByConstructionScript(); });
+	auto Depth = [](const UActorComponent& C) {
+		int32 D = 0;
+		for (const USceneComponent* S = Cast<USceneComponent>(&C); S && S->GetAttachParent(); S = S->GetAttachParent())
+		{
+			++D;
+		}
+		return D;
+	};
+	Old.Sort([&Depth](const UActorComponent& A, const UActorComponent& B) { return Depth(A) > Depth(B); });
+	const int32 Cleared = Old.Num();
+	for (UActorComponent* C : Old)
+	{
+		C->DestroyComponent();
+	}
+	BlueprintCreatedComponents.Reset();
+	BuildSet();
+	bBuilt = true;
+	// What the build doesn't do itself: the signs drawn, the cars painted, the tenement's own laundromat hidden, the Wash &
+	// Fold's glow slots made to animate and its door shut.
+	AttachSlate();
+	PaintCars();
+	HideTenementShop();
+	PrepareWashGlow();
+	WashDoorAmount = 0.0f;
+	bWashDoorHeld = false;
+	BellSwing = 0.0f;
+	// What it built, into the registry; then no rain inside the dry zones (the store, the laundromat, and the shops'
+	// as they register), and the two lit fronts the rain catches (the laundromat's as BuildAcross built it).
+	RegisterWithWorld();
+	ApplyDryBoxes();
+	const FTransform& T = GetActorTransform();
+	const FVector StoreGlow = T.TransformPosition(FVector(60.0, (StoreY0 + StoreY1) * 0.5, 200.0));
+	const FVector WashGlow = T.TransformPosition(NeonGlowAt);
+	for (UMaterialInstanceDynamic* M : RainMids)
+	{
+		if (M)
+		{
+			M->SetVectorParameterValue(TEXT("GlowPos0"), FLinearColor(StoreGlow));
+			M->SetVectorParameterValue(TEXT("GlowCol0"), FLinearColor(0.75f, 0.85f, 1.0f));
+			M->SetVectorParameterValue(TEXT("GlowPos1"), FLinearColor(WashGlow));
+			// GlowCol1, the neon's pink, follows the hour (ApplyDaylight, just below).
+		}
+	}
+	AppliedDaylight = -1.0f;
+	ApplyDaylight();
+	PickStreetlights(StartAt(TEXT("home")).GetLocation());
+	if (SkyLight)
+	{
+		SkyLight->RecaptureSky();
+	}
+	// The reference is the Embercrest's build at play (about 80 ms for its 648 parts, in Play-In-Editor).
+	UE_LOG(LogTemp, Log, TEXT("StreetStage: the street built in %.0f ms: %d parts (%d of an older build cleared), %d lights, %d signs, %d preloaded assets"),
+		(FPlatformTime::Seconds() - Started) * 1000.0, BlueprintCreatedComponents.Num(), Cleared, Streetlights.Num() + StoreLights.Num() + NightLights.Num() + WashLights.Num(),
+		SignWidgets.Num(), Preload.Num());
+}
+
+void AStreetStage::RegisterWithWorld()
+{
+	UStreetWorld* Registry = UStreetWorld::Get(this);
+	if (!Registry)
+	{
+		return;
+	}
+	const FTransform& T = GetActorTransform();
+	// Built again (RebuildSet at play): its old uses go first (the rest replaces itself by id).
+	for (const int32 Handle : UseHandles)
+	{
+		Registry->RemoveUse(Handle);
+	}
+	UseHandles.Reset();
+	// The spots, as uses: 1812's door and Dee's (Home), the Lucky Penny's counter and shelves (Counter), the Wash & Fold's
+	// door and Dee's steel door at its back (Door), its attendant at her counter (Talk). They hang off the stage's root, so
+	// they stand where SpotFor found them.
+	for (const FStreetSpot& S : Spots)
+	{
+		FStreetUse U;
+		U.Id = S.Id;
+		U.Prompt = S.Prompt;
+		U.Radius = S.Radius;
+		U.Shelf = S.Shelf;
+		U.Anchor = Root.Get();
+		U.Offset = S.At;
+		if (S.Id == TEXT("home") || S.Id == TEXT("dee"))
+		{
+			U.Verb = EStreetVerb::Home;
+		}
+		else if (S.Id == TEXT("washdoor") || S.Id == TEXT("backdoor"))
+		{
+			U.Verb = EStreetVerb::Door;
+			U.Venue = TEXT("washfold");
+		}
+		else if (S.Id == TEXT("attendant"))
+		{
+			U.Verb = EStreetVerb::Talk;
+			U.Venue = TEXT("washfold");
+			U.Param = TEXT("attendant");
+		}
+		else
+		{
+			U.Verb = EStreetVerb::Counter;
+			U.Venue = TEXT("store");
+		}
+		UseHandles.Add(Registry->AddUse(U));
+	}
+	// The zones, highest first: the two rooms (what IsInsideStore and IsInsideWash take in, and where no rain falls), then
+	// Market's sidewalk off the corner, the corner, and Fifth, which is the whole set (outside it is off the set).
+	TWeakObjectPtr<AStreetStage> Self(this);
+	auto Zone = [&](const TCHAR* Id, const FBox& Local, const TCHAR* Place, int32 Priority, int32 Tone, bool bRoom) {
+		FStreetZone Z;
+		Z.Id = Id;
+		Z.Box = Local.TransformBy(T);
+		Z.Place = Place;
+		Z.Priority = Priority;
+		Z.RoomTone = Tone;
+		Z.bDry = bRoom;
+		Z.bInterior = bRoom;
+		return Z;
+	};
+	const double SetZ0 = -200.0;
+	const double SetZ1 = 100000.0;
+	FStreetZone Store = Zone(TEXT("store"), FBox(FVector(-StoreDepth - 30.0, StoreY0, -60.0), FVector(-6.0, StoreY1, StoreCeiling + 120.0)), TEXT("LUCKY PENNY #212"), 10,
+		StreetRoomTone::Store, true);
+	Store.DoorOpen = [Self]() { return Self.IsValid() ? Self->DoorsOpen() : 0.0f; };
+	Registry->AddZone(Store);
+	const FBox WashRoom = FBox(WashMin, WashMax) + FBox(FVector(FarFront + 18.0, WashY0, -100.0), FVector(WashBack, WashY1, WashCeiling + 100.0));
+	FStreetZone Wash = Zone(TEXT("washfold"), WashRoom, TEXT("WASH & FOLD"), 10, StreetRoomTone::Laundry, true);
+	Wash.DoorOpen = [Self]() { return Self.IsValid() ? Self->WashDoorOpen() : 0.0f; };
+	Registry->AddZone(Wash);
+	Registry->AddZone(Zone(TEXT("market"), FBox(FVector(MarketWest - 900.0, StoreY1 - 50.0, SetZ0), FVector(-100.0, MarketY1 + 50.0, SetZ1)), TEXT("MARKET STREET"), 5,
+		StreetRoomTone::Street, false));
+	Registry->AddZone(Zone(TEXT("corner"), FBox(FVector(MarketWest - 900.0, StoreY1 - 100.0, SetZ0), FVector(FarFront + 1600.0, MarketY1 + 300.0, SetZ1)), TEXT("FIFTH & MARKET"),
+		3, StreetRoomTone::Street, false));
+	Registry->AddZone(Zone(TEXT("fifth"), FBox(FVector(MarketWest - 900.0, EndY0 - 600.0, SetZ0), FVector(FarFront + 1600.0, EndY1 + 600.0, SetZ1)), TEXT("FIFTH STREET"), 0,
+		StreetRoomTone::Street, false));
+	Registry->SetFloorZ(T.TransformPosition(FVector(0.0, 0.0, SetZ0)).Z);
+	// The starts The Block made, and the corner's (the Lucky Penny's, looking north up Fifth).
+	for (const TCHAR* Id : {TEXT("home"), TEXT("store"), TEXT("washfold"), TEXT("wash"), TEXT("backdoor"), TEXT("dee")})
+	{
+		Registry->AddStart(Id, StartAt(Id));
+	}
+	Registry->AddStart(TEXT("corner"), FTransform(FRotator(0.0f, 90.0f, 0.0f), FVector(250.0, StoreY1 + 100.0, 100.0)) * T);
+	// The doors people use, and the two sidewalks of Fifth they walk.
+	for (const FStreetDoor& D : Doors())
+	{
+		Registry->AddDoor(D);
+	}
+	Registry->AddWalkway(Sidewalk(0));
+	Registry->AddWalkway(Sidewalk(1));
+	// Where the Lucky Penny's clerk works (at the register, and stocking the cooler) and the Wash & Fold's attendant folds:
+	// their feet on the floor, facing the way they face.
+	auto Feet = [](const FTransform& Spot, double FloorZ) {
+		FVector At = Spot.GetLocation();
+		At.Z = FloorZ;
+		return FTransform(Spot.GetRotation(), At);
+	};
+	const FName Stand(TEXT("Stand"));
+	Registry->AddStation(TEXT("store-counter"), TEXT("store"), Feet(ClerkSpot(), StoreFloorZ()), Stand, 0.0f, true);
+	Registry->AddStation(TEXT("store-stock"), TEXT("store"), FTransform(FRotator(0.0f, 180.0f, 0.0f), FVector(-StoreDepth + 150.0, 4500.0, 1.0)) * T, Stand, 0.0f, true);
+	Registry->AddStation(TEXT("washfold-counter"), TEXT("washfold"), Feet(AttendantSpot(), WashFloorZ()), Stand, 0.0f, true);
+}
+
+void AStreetStage::ApplyDryBoxes()
+{
+	const UStreetWorld* Registry = UStreetWorld::Get(this);
+	if (!Registry || RainMids.Num() == 0)
+	{
+		return;
+	}
+	AppliedZoneRevision = Registry->ZoneRevision();
+	const TArray<FBox> Dry = Registry->DryBoxes();
+	const FStreetZone* Store = Registry->FindZone(TEXT("store"));
+	const FStreetZone* Wash = Registry->FindZone(TEXT("washfold"));
+	const FBox None(FVector::ZeroVector, FVector::ZeroVector);
+	for (UMaterialInstanceDynamic* M : RainMids)
+	{
+		if (!M)
+		{
+			continue;
+		}
+		// M_StreetRain (VERSION 5): up to eight boxes; an empty one masks nothing.
+		for (int32 K = 0; K < 8; ++K)
+		{
+			const FBox& B = Dry.IsValidIndex(K) ? Dry[K] : None;
+			M->SetVectorParameterValue(*FString::Printf(TEXT("DryMin%d"), K), FLinearColor(B.Min));
+			M->SetVectorParameterValue(*FString::Printf(TEXT("DryMax%d"), K), FLinearColor(B.Max));
+		}
+		// The older material (VERSION 4, until street_setup.py rebuilds it) knows only the store and the laundromat.
+		const FBox StoreBox = Store ? Store->Box : None;
+		const FBox WashBox = Wash ? Wash->Box : None;
+		M->SetVectorParameterValue(TEXT("StoreMin"), FLinearColor(StoreBox.Min));
+		M->SetVectorParameterValue(TEXT("StoreMax"), FLinearColor(StoreBox.Max));
+		M->SetVectorParameterValue(TEXT("WashMin"), FLinearColor(WashBox.Min));
+		M->SetVectorParameterValue(TEXT("WashMax"), FLinearColor(WashBox.Max));
+	}
 }
 
 void AStreetStage::BuildSet()
@@ -3145,7 +3518,7 @@ void AStreetStage::BuildSkyAndWeather()
 
 void AStreetStage::BuildSpots()
 {
-	// What the player can do here (plain data: rebuilt at BeginPlay too, whatever the saved level holds).
+	// What the player can do here (RegisterWithWorld hands them to the registry as uses).
 	Spots.Reset();
 	auto Spot = [this](const TCHAR* Id, const FVector& At, float Radius, const TCHAR* Prompt, int32 ShelfIndex) {
 		FStreetSpot S;
@@ -3176,44 +3549,8 @@ void AStreetStage::BuildSpots()
 void AStreetStage::BeginPlay()
 {
 	Super::BeginPlay();
-	BuildSpots();
-	AttachSlate();
-	PaintCars();
-	// The tenement's own laundromat stays hidden (whatever the saved level holds), the Wash & Fold's glow slots are made to
-	// animate, and its door starts shut.
-	HideTenementShop();
-	PrepareWashGlow();
-	WashDoorAmount = 0.0f;
-	bWashDoorHeld = false;
-	BellSwing = 0.0f;
-	// Where the store and the laundromat's room are, for the rain (nothing falls inside them, the sheets crossing them
-	// as they follow the eye), and the two lit fronts the rain catches (the laundromat's as BuildAcross built it).
-	const FTransform& T = GetActorTransform();
-	const FBox Store = FBox(FVector(-StoreDepth - 30.0, StoreY0, -60.0), FVector(-6.0, StoreY1, StoreCeiling + 120.0)).TransformBy(T);
-	const FBox Wash = FBox(WashMin, WashMax).TransformBy(T);
-	const FVector StoreGlow = T.TransformPosition(FVector(60.0, (StoreY0 + StoreY1) * 0.5, 200.0));
-	const FVector WashGlow = T.TransformPosition(NeonGlowAt);
-	for (UMaterialInstanceDynamic* M : RainMids)
-	{
-		if (M)
-		{
-			M->SetVectorParameterValue(TEXT("StoreMin"), FLinearColor(Store.Min));
-			M->SetVectorParameterValue(TEXT("StoreMax"), FLinearColor(Store.Max));
-			M->SetVectorParameterValue(TEXT("WashMin"), FLinearColor(Wash.Min));
-			M->SetVectorParameterValue(TEXT("WashMax"), FLinearColor(Wash.Max));
-			M->SetVectorParameterValue(TEXT("GlowPos0"), FLinearColor(StoreGlow));
-			M->SetVectorParameterValue(TEXT("GlowCol0"), FLinearColor(0.75f, 0.85f, 1.0f));
-			M->SetVectorParameterValue(TEXT("GlowPos1"), FLinearColor(WashGlow));
-			// GlowCol1, the neon's pink, follows the hour (ApplyDaylight, just below).
-		}
-	}
-	AppliedDaylight = -1.0f;
-	ApplyDaylight();
-	PickStreetlights(StartAt(TEXT("home")).GetLocation());
-	if (SkyLight)
-	{
-		SkyLight->RecaptureSky();
-	}
+	// The street for play (the game mode may have had it built already, before it placed the player).
+	EnsureBuilt();
 }
 
 void AStreetStage::AttachSlate()
@@ -3309,10 +3646,19 @@ void AStreetStage::AttachSlate()
 void AStreetStage::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (!bBuilt)
+	{
+		return;
+	}
 	// The walkers noted this frame are the doors' next frame (whatever ticks first then, none is missed); the two lists
 	// trade places, so neither is allocated again.
 	Swap(Walkers, WalkersSeen);
 	Walkers.Reset();
+	// A shop that registered its room since (or went): no rain in it either.
+	if (const UStreetWorld* Registry = UStreetWorld::Get(this); Registry && Registry->ZoneRevision() != AppliedZoneRevision)
+	{
+		ApplyDryBoxes();
+	}
 	const UWorld* World = GetWorld();
 	const APlayerController* Pc = World ? World->GetFirstPlayerController() : nullptr;
 	const APlayerCameraManager* Cam = Pc ? Pc->PlayerCameraManager.Get() : nullptr;
@@ -3820,6 +4166,11 @@ void AStreetStage::NoteWalker(const FVector& At)
 	{
 		Walkers.Add(At);
 	}
+	// The shops' doors open for them too (AShopStage reads the registry's walkers).
+	if (UStreetWorld* Registry = UStreetWorld::Get(this))
+	{
+		Registry->NoteWalker(At);
+	}
 }
 
 float AStreetStage::WashNear(const FVector& Listener) const
@@ -4000,6 +4351,11 @@ TArray<FStreetDoor> AStreetStage::Doors() const
 
 bool AStreetStage::IsOffTheSet(const FVector& At) const
 {
+	// The registry's zones are the set (they grow with it: Market's, the shops'); below its floor or outside them all is off.
+	if (const UStreetWorld* Registry = UStreetWorld::Get(this); Registry && Registry->AllZones().Num() > 0)
+	{
+		return Registry->IsOffTheSet(At);
+	}
 	const FVector L = GetActorTransform().InverseTransformPosition(At);
 	return L.Z < -400.0 || L.Y < EndY0 - 600.0 || L.Y > EndY1 + 600.0 || L.X < MarketWest - 900.0 || L.X > FarFront + 1600.0;
 }
@@ -4213,6 +4569,12 @@ void AStreetStage::SetClock(double WorldMinutes)
 
 FString AStreetStage::PlaceName(const FVector& At) const
 {
+	// The registry's zone (a shop's own over the street's); with no registry (the editor), the street's plan as it was.
+	if (const UStreetWorld* Registry = UStreetWorld::Get(this); Registry && Registry->AllZones().Num() > 0)
+	{
+		const FStreetZone* Z = Registry->ZoneAt(At);
+		return Z ? Z->Place : FString(TEXT("FIFTH STREET"));
+	}
 	if (IsInsideStore(At))
 	{
 		return TEXT("LUCKY PENNY #212");

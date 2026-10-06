@@ -6,10 +6,14 @@
 #include "ShortStack/Cards.h"
 #include "ShortStack/Equity.h"
 #include "ShortStack/Evaluator.h"
+#include "ShortStack/Game/Body.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/Town.h"
+#include "ShortStack/Game/Wardrobe.h"
 
 #include <algorithm>
 #include <cctype>
@@ -324,6 +328,13 @@ std::string SaveData::Serialize() const
 	{
 		Out << "result\t" << session_detail::Escape(H.Name) << "\t" << H.Place << "\t" << H.Entrants << "\t" << H.Prize << "\t" << Fixed(H.AccuracyPct, 3) << "\t" << H.BuyInCents << "\t"
 			<< session_detail::Escape(H.EventId) << "\n";
+	}
+	{
+		// Northside (§7.3): the closet, fit, groom, visit, pawn and meal lines, then the town's bonds and what was said.
+		std::string Northside;
+		shop::WriteLines(L, Northside);
+		town::WriteLines(L.Town, L.Said, net::DayOf(net::MinutesPerDay * static_cast<double>(net::NightOneDay) + ClockMinutes), Northside);
+		Out << Northside;
 	}
 	for (const std::string& Note : WorldNotes)
 	{
@@ -833,6 +844,14 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 			}
 			D.History.push_back(H);
 		}
+		else if (shop::ReadLine(P, D.Life))
+		{
+			// Northside: closet, fit, groom, visit, pawn, meal (§7.3).
+		}
+		else if (town::ReadLine(P, D.Life.Town, D.Life.Said))
+		{
+			// Northside: town, said.
+		}
 	}
 	if (D.Life.RentStage == life::Rent::Evicted && !bSawEvicted)
 	{
@@ -852,6 +871,9 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 		const double World = net::MinutesPerDay * static_cast<double>(net::NightOneDay) + D.ClockMinutes;
 		L.StorageDue = Stored ? std::max(L.EvictedAt + life::StorageDays * net::MinutesPerDay, World + 3.0 * net::MinutesPerDay) : 0.0;
 	}
+	// Northside's migrations (§7.3): what a save from before the shops didn't have (the closet, fitness, the store's
+	// visits, grooming, the pawn book).
+	shop::AfterParse(D);
 	Out = D;
 	return true;
 }
@@ -1212,6 +1234,8 @@ void Session::NewCareer(const hero::Character& Who)
 	}
 	// What's in the cupboard on night one.
 	Life.Pantry["oodle-cup"] = 2;
+	// And in the closet: the creator's choices become things the player owns (Wardrobe.h).
+	Life.Closet = wardrobe::SeedFrom(Person.Appearance);
 	Save();
 }
 
@@ -1238,6 +1262,7 @@ std::string Session::Checkout(const store::Basket& B)
 		Life.Bought[L.first] += L.second;
 	}
 	Life.Record(WorldMinutes(), "Lucky Penny #212 \xC2\xB7 " + std::to_string(B.Count()) + (B.Count() == 1 ? " item" : " items"), -Total, 8);
+	ShopVisit("store", Total);
 	Sound(SoundId::Cash, 0.6);
 	Save();
 	return "";
@@ -1263,6 +1288,10 @@ std::string Session::Consume(const std::string& ItemId)
 	Life.Hunger = std::clamp(Life.Hunger - Got.Hunger, 0.0, 100.0);
 	Life.Thirst = std::clamp(Life.Thirst - Got.Thirst, 0.0, 100.0);
 	Life.Energy = std::clamp(Life.Energy + Got.Energy, 0.0, 100.0);
+	if (Got.Hunger >= 40.0)
+	{
+		Life.RealMealAt = WorldMinutes(); // a real meal: Mom's "eat something real" waits a day (§5.4)
+	}
 	LastEaten = Eaten();
 	LastEaten.ItemId = I->Id;
 	LastEaten.Hunger = Life.Hunger - HungerWas;
@@ -1446,6 +1475,8 @@ std::string Session::ClerkSays(const store::Basket& B) const
 			Ctx.SinceVisit = std::max(0.0, Ctx.World - E.At);
 		}
 	}
+	// The visits the counter has kept (Life.Visits["store"]) and the clerk's bond (SessionShops.cpp).
+	ShopClerk(Ctx);
 	// Dee's news reaches the counter once: the first time in since the locks changed (after that, he's heard).
 	Ctx.Evicted = Evicted() && (Ctx.SinceVisit < 0.0 || Ctx.World - Ctx.SinceVisit < Life.EvictedAt);
 	// A card that said no in the last half hour, and the regular's order (bought at least three times, the most of anything).
@@ -1579,8 +1610,8 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	HasBustInfo = false;
 	RivalArrived = false;
 	Sprinting = false;
-	// Exhausted: slower to think. Starving or parched: slower still.
-	TimeBank = (Life.Energy < 20.0 ? 15.0 : 30.0) * (NeedsTilt() > 1.0 ? 0.75 : 1.0);
+	// Exhausted (below 20 energy, or 15 when fit): slower to think. Starving or parched: slower still.
+	TimeBank = (Life.Energy < BodyFx.ExhaustedAt ? 15.0 : 30.0) * (NeedsTilt() > 1.0 ? 0.75 : 1.0);
 	TableId = 0;
 	Moving = false;
 	CurHand.reset();
@@ -3099,8 +3130,9 @@ void Session::SwapActive(TableRun& Run)
 
 int Session::MaxTables() const
 {
-	// Screens decide how many tables fit (the laptop alone fits two); being exhausted caps it at two anyway.
-	return std::min(Life.Energy < 20.0 ? 2 : TableLimit, std::max(1, Fx.Tables));
+	// Screens decide how many tables fit (the laptop alone fits two); being exhausted caps it at two anyway (fitness
+	// moves where exhausted starts: body::Effects::ExhaustedAt).
+	return std::min(Life.Energy < BodyFx.ExhaustedAt ? 2 : TableLimit, std::max(1, Fx.Tables));
 }
 
 void Session::FocusTable(int Index)
@@ -4256,8 +4288,10 @@ void Session::FinishSkip()
 	const life::Activity* A = life::Find(O.ActivityId);
 	const Chips Change = std::max(O.Money, -BankrollCents);
 	BankrollCents += Change;
-	// A better bed, darker curtains, or Dee's couch: whatever the night began in (the locks can change at midnight).
-	const double EnergyGain = O.Energy > 0.0 ? O.Energy * TimeSkip.Rest : O.Energy;
+	// A better bed, darker curtains, or Dee's couch: whatever the night began in (the locks can change at midnight). A
+	// shop's service ("shop:<venue>:<offers>") isn't a night's sleep: a meal's energy comes whole, evicted or not.
+	const bool bShopSkip = O.ActivityId.rfind("shop:", 0) == 0;
+	const double EnergyGain = O.Energy > 0.0 ? O.Energy * (bShopSkip ? 1.0 : TimeSkip.Rest) : O.Energy;
 	Life.Energy = std::min(100.0, std::max(0.0, Life.Energy + EnergyGain));
 	Life.Heat = std::min(100.0, std::max(0.0, Life.Heat + O.Heat));
 	Life.DebtCents += O.Debt;
@@ -4324,6 +4358,10 @@ void Session::FinishSkip()
 		LastOutcome.Body = A->Hours >= 8.0 ? "Eight hours, then the landlord's knock. The locks changed overnight: the gear goes to storage, and you go to Dee's couch."
 										   : "Four hours, then a knock: the landlord, with a new lock in his hand. Dee's couch it is.";
 	}
+	if (bShopSkip)
+	{
+		SettleShop(); // the look, the fitness, the meal's relief and the outcome line (SessionShops.cpp)
+	}
 	HasOutcome = true;
 	Sound(O.Bad ? SoundId::Bust : Change > 0 ? SoundId::Cash : SoundId::Click, 1.0);
 	Save();
@@ -4348,13 +4386,24 @@ void Session::RefreshGear()
 			}
 		}
 		Fx = gear::Sum(Travelling);
-		return;
 	}
-	Fx = gear::Sum(Gear);
-	if (Owns(gear::LedKitId) && Leds.On)
+	else
 	{
-		gear::ApplyLeds(Fx, Leds.Preset);
+		Fx = gear::Sum(Gear);
+		if (Owns(gear::LedKitId) && Leds.On)
+		{
+			gear::ApplyLeds(Fx, Leds.Preset);
+		}
 	}
+	// Fitness goes where the player goes (Body.h): it slows the awake drain (folded into Fx.Drain, so the drain and the
+	// Bank's fatigue line read it) and adds to tilt's calm; the gym's membership is its sauna. A change of fitness
+	// refreshes the gear.
+	BodyFx = body::EffectsOf(Life.Fit, Owns("gym"));
+	if (BodyFx.DrainScale != 1.0)
+	{
+		Fx.Drain = 1.0 - (1.0 - Fx.Drain) * BodyFx.DrainScale;
+	}
+	Fx.Calm += BodyFx.Calm;
 }
 
 void Session::SetLedPreset(int Preset)
@@ -4623,6 +4672,8 @@ kast::Inputs Session::StreamInputs() const
 	In.Bankroll = BankrollCents;
 	In.RentDue = Life.RentStage == life::Rent::Paid ? 0 : Life.RentDueCents;
 	In.Gear = Fx;
+	// How the player looks on camera: a fresh cut and a good outfit (SessionShops.cpp).
+	ShopStream(In);
 	return In;
 }
 
@@ -4964,7 +5015,8 @@ std::string Session::PayStorage()
 
 double Session::RestFactor() const
 {
-	return (1.0 + Fx.Rest) * (Evicted() ? life::CouchRest : 1.0);
+	// Fitness sleeps better too (body::Effects::RestBonus).
+	return (1.0 + Fx.Rest + BodyFx.RestBonus) * (Evicted() ? life::CouchRest : 1.0);
 }
 
 bool Session::PayDebt()
@@ -5288,7 +5340,8 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	// during it wear the player down as they climb. The needs climb slowly in bed.
 	const life::Activity* Doing = TimeSkip.Active ? life::Find(TimeSkip.Result.ActivityId) : nullptr;
 	const double Rate = Doing && Doing->Type == life::Kind::Sleep ? life::SleepNeedsRate : 1.0;
-	// A good chair and real coffee slow the drain; being live on stream speeds it up.
+	// A good chair, real coffee and fitness (folded into Fx.Drain by RefreshGear) slow the drain; being live on stream
+	// speeds it up. Ruby's bottomless coffee takes another quarter off while it lasts (Life.CoffeeUntil: 3/h, not 4/h).
 	const double Drain = Fx.Drain > 0.0 || Stream.Live ? 4.0 * (1.0 - Fx.Drain) + (Stream.Live ? 1.0 : 0.0) : 4.0;
 	const bool WasHungry = Life.Hunger >= 75.0;
 	const bool WasThirsty = Life.Thirst >= 75.0;
@@ -5298,12 +5351,14 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 		const double StepHours = (Until - Step) / 60.0;
 		// The hours a host played out (ResumeCalendarFrom) already cost the energy they cost there.
 		const double AwakeHours = Awake ? std::max(0.0, Until - std::max(Step, EnergyKeptUntil)) / 60.0 : 0.0;
-		Life.Energy = std::min(100.0, std::max(0.0, Life.Energy - AwakeHours * Drain - StepHours * life::NeedsDrain(Life)));
+		const double StepDrain = Step < Life.CoffeeUntil ? Drain * 0.75 : Drain;
+		Life.Energy = std::min(100.0, std::max(0.0, Life.Energy - AwakeHours * StepDrain - StepHours * life::NeedsDrain(Life)));
 		Life.Hunger = std::min(100.0, Life.Hunger + StepHours * life::HungerPerHour * Rate);
 		Life.Thirst = std::min(100.0, Life.Thirst + StepHours * life::ThirstPerHour * Rate);
 	}
 	const int Today = static_cast<int>(std::floor(To / net::MinutesPerDay));
-	if (!WasHungry && Life.Hunger >= 75.0)
+	// (Not within a day of a real meal: she'd have heard about it.)
+	if (!WasHungry && Life.Hunger >= 75.0 && To >= Life.RealMealAt + net::MinutesPerDay)
 	{
 		StoryText("needs:hungry:" + std::to_string(Today), "Mom", Today % 2 == 0 ? "are you eating? you never answer when I ask if you're eating" : "call me when you can. and eat something real, not chips");
 	}
@@ -5513,6 +5568,8 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 					", and the 14 bus up the ridge takes twenty minutes. Your seat waits until late registration closes at " + net::TimeLabel(O.LateRegEnds) + ".");
 		}
 	}
+	// Northside: fitness fading without workouts; the pawn's reminders, forfeits and shelf (SessionShops.cpp).
+	ShopStep(From, To);
 	BondTexts(From, To);
 }
 
@@ -5648,6 +5705,7 @@ void Session::Auction()
 {
 	// Nobody paid for the unit: everything in it goes to the highest bidder (the subscriptions were never in it).
 	std::string Lost;
+	std::vector<std::string> LostIds;
 	int Count = 0;
 	for (auto It = Gear.begin(); It != Gear.end();)
 	{
@@ -5658,13 +5716,18 @@ void Session::Auction()
 			continue;
 		}
 		Lost += (Lost.empty() ? "" : ", ") + I->Name;
+		LostIds.push_back(It->first);
 		++Count;
 		Hooks.GearChanged(It->first, false);
 		It = Gear.erase(It);
 	}
+	// The sale was the morning the unit came due (or now, if it never had a date).
+	const double SoldAt = Life.StorageDue > 0.0 ? Life.StorageDue : WorldMinutes();
 	Life.StorageDue = 0.0;
 	++Life.Auctions;
 	RefreshGear();
+	// Some of it turns up at Northside Pawn & Loan a couple of days later (§5.8).
+	shop::Consign(Life.Pawn, LostIds, SoldAt, WorldSeed());
 	Hooks.Text("Ninth St. Storage", "Unit 114 was sold at auction this morning for nonpayment. Contents: " + Lost + ". The lien is satisfied; no further balance is owed.");
 	Hooks.Text("Dee", Count > 2 ? "some guy from the auction is already selling your stuff on the laundromat's corkboard. i'm so sorry."
 								: "they auctioned the unit? i'm sorry. it's just stuff. you've still got the laptop.");

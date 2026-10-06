@@ -1,7 +1,11 @@
 #pragma once
 
 #include "ShortStack/Common.h"
+#include "ShortStack/Game/Body.h"
 #include "ShortStack/Game/Hero.h"
+#include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/Town.h"
+#include "ShortStack/Game/Wardrobe.h"
 
 #include <map>
 #include <set>
@@ -65,7 +69,11 @@ struct LedgerEntry
 	double At = 0.0;
 	std::string Label;
 	Chips Amount = 0;
-	int Kind = 0; // 0 poker, 1 job, 2 hustle, 3 bills, 4 prizes, 5 gear, 6 streaming, 7 transfers, 8 the corner store
+	/**
+	 * 0 poker, 1 job, 2 hustle, 3 bills, 4 prizes, 5 gear, 6 streaming, 7 transfers, 8 the corner store, 9 Northside
+	 * (the shops on the block: the barber, the thrift, the gym, Ruby's and the pawn; labeled with the shop's name).
+	 */
+	int Kind = 0;
 };
 
 /** Someone in a live field the room knows (a regular), or who knows the player, as it stood at registration. */
@@ -216,6 +224,24 @@ struct State
 	int LiveBestPlace = 0; // 0: none yet
 	Chips LiveWonCents = 0; // prizes, before buy-ins
 	std::vector<LiveEntry> LiveEntries; // oldest first (the last sixty)
+	// Northside: the shops and the people on the block (Shop.h, Wardrobe.h, Body.h, Town.h; saved by shop::WriteLines
+	// and town::WriteLines). Copied whole with the rest of the state wherever the career moves.
+	wardrobe::Closet Closet;
+	body::Fitness Fit;
+	body::Grooming Groom;
+	std::map<std::string, shop::Visit> Visits; // by venue id
+	std::map<std::string, town::Bond> Town;    // by town person id
+	std::map<std::string, int> Said;           // rumours and one-time lines told -> the day told (pruned after 90)
+	shop::PawnBook Pawn;                       // tickets, the shelf, what's gone (§5.8)
+	double CoffeeUntil = 0.0;                  // Ruby's coffee: the awake drain x0.75 until then (3/h, not 4/h)
+	double RealMealAt = -1.0e9;                // a meal of >= 40 hunger relief: Mom's "eat something real" waits 24 h
+	/**
+	 * Not saved: which of Northside's lines the save being read had (shop::ReadLine sets a bit per line key, its own
+	 * choice of bits), so shop::AfterParse migrates only what a save from before the shops lacked (§7.3). A value at its
+	 * default can't say that: a new career's untouched fitness would read as "no fit line", and one that joined the gym
+	 * before its first workout would load with the old members' Fitness 60 (shops_test's "migration" checks).
+	 */
+	uint32_t ShopLinesRead = 0;
 	/** The character's background at work (not saved here: the session sets it from the character). */
 	hero::Perks Perks;
 
