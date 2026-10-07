@@ -84,9 +84,9 @@ struct Paint
 	Paint() = default;
 	Paint(const Color& C) : C0(C), C1(C), C2(C) {}
 	static Paint Solid(const Color& C) { return Paint(C); }
-	static Paint Linear(Vec2 From, Vec2 To, const Color& A, const Color& B);
-	static Paint Radial(Vec2 C0Center, float Radius0, Vec2 C1Center, float Radius1, const Color& A, float MidT, const Color& Mid, const Color& B);
-	Color At(Vec2 P) const;
+	SHORTSTACKCORE_API static Paint Linear(Vec2 From, Vec2 To, const Color& A, const Color& B);
+	SHORTSTACKCORE_API static Paint Radial(Vec2 C0Center, float Radius0, Vec2 C1Center, float Radius1, const Color& A, float MidT, const Color& Mid, const Color& B);
+	SHORTSTACKCORE_API Color At(Vec2 P) const;
 };
 
 /** Typefaces of the host's UI font (Roboto in Unreal): weight 900 is Black, 300 and below Light. */
@@ -216,31 +216,31 @@ public:
 	/** PixelScale: output pixels per logical unit (sets the anti-aliasing fringe width). */
 	SHORTSTACKCORE_API Canvas(DrawList& InOut, const TextMeasurer& InMeasurer, float Width, float Height, float PixelScale);
 
-	void Save();
-	void Restore();
-	void Translate(float X, float Y);
-	void Scale(float SX, float SY);
-	void Rotate(float Radians);
+	SHORTSTACKCORE_API void Save();
+	SHORTSTACKCORE_API void Restore();
+	SHORTSTACKCORE_API void Translate(float X, float Y);
+	SHORTSTACKCORE_API void Scale(float SX, float SY);
+	SHORTSTACKCORE_API void Rotate(float Radians);
 	const Affine& Transform() const { return State.Xf; }
 	/** Canvas globalAlpha (absolute, not multiplied). */
 	void SetAlpha(float A) { State.Alpha = A < 0.0f ? 0.0f : A > 1.0f ? 1.0f : A; }
 	float GetAlpha() const { return State.Alpha; }
 
-	void PushClip(const Rect& R);
-	void PopClip();
+	SHORTSTACKCORE_API void PushClip(const Rect& R);
+	SHORTSTACKCORE_API void PopClip();
 
 	// Shapes.
-	void FillRect(const Rect& R, const Paint& P);
-	void FillRoundRect(const Rect& R, float Radius, const Paint& P);
-	void StrokeRoundRect(const Rect& R, float Radius, const Color& C, float LineWidth);
-	void FillEllipse(float CX, float CY, float RX, float RY, const Paint& P);
-	void StrokeEllipse(float CX, float CY, float RX, float RY, const Color& C, float LineWidth, float Dash = 0.0f);
+	SHORTSTACKCORE_API void FillRect(const Rect& R, const Paint& P);
+	SHORTSTACKCORE_API void FillRoundRect(const Rect& R, float Radius, const Paint& P);
+	SHORTSTACKCORE_API void StrokeRoundRect(const Rect& R, float Radius, const Color& C, float LineWidth);
+	SHORTSTACKCORE_API void FillEllipse(float CX, float CY, float RX, float RY, const Paint& P);
+	SHORTSTACKCORE_API void StrokeEllipse(float CX, float CY, float RX, float RY, const Color& C, float LineWidth, float Dash = 0.0f);
 	void FillCircle(float CX, float CY, float R, const Paint& P) { FillEllipse(CX, CY, R, R, P); }
-	void StrokeArc(float CX, float CY, float R, float A0, float A1, const Color& C, float LineWidth, bool RoundCap = false);
-	void FillPolygon(const std::vector<Vec2>& Points, const Paint& P);
-	void StrokePolyline(const std::vector<Vec2>& Points, bool Closed, const Color& C, float LineWidth, bool RoundCap = false);
+	SHORTSTACKCORE_API void StrokeArc(float CX, float CY, float R, float A0, float A1, const Color& C, float LineWidth, bool RoundCap = false);
+	SHORTSTACKCORE_API void FillPolygon(const std::vector<Vec2>& Points, const Paint& P);
+	SHORTSTACKCORE_API void StrokePolyline(const std::vector<Vec2>& Points, bool Closed, const Color& C, float LineWidth, bool RoundCap = false);
 	/** Soft shadow or glow around a rounded rectangle (canvas shadowBlur). */
-	void GlowRoundRect(const Rect& R, float Radius, const Color& C, float Blur);
+	SHORTSTACKCORE_API void GlowRoundRect(const Rect& R, float Radius, const Color& C, float Blur);
 
 	/**
 	 * Draws Paint at (X, Y) through a cache kept by every canvas on this thread: the first time Key is seen at this
@@ -251,8 +251,8 @@ public:
 	SHORTSTACKCORE_API void Cached(uint64_t Key, float X, float Y, const std::function<void(Canvas&)>& Paint);
 
 	// Text.
-	float Text(const std::string& S, float X, float Y, const TextStyle& Style);
-	float Measure(const std::string& S, float Size, int Weight = 500, bool Mono = false) const;
+	SHORTSTACKCORE_API float Text(const std::string& S, float X, float Y, const TextStyle& Style);
+	SHORTSTACKCORE_API float Measure(const std::string& S, float Size, int Weight = 500, bool Mono = false) const;
 	static Font FaceFor(int Weight, bool Mono) { return Mono ? Font::Mono : Weight >= 900 ? Font::Black : Weight >= 600 ? Font::Bold : Weight <= 300 ? Font::Light : Font::Regular; }
 
 	float Width() const { return W; }
@@ -261,9 +261,9 @@ public:
 	DrawList& List() { return Out; }
 
 	// Path helpers (logical coordinates).
-	static std::vector<Vec2> RoundRectPath(const Rect& R, float Radius, int SegmentsPerCorner);
-	static std::vector<Vec2> EllipsePath(float CX, float CY, float RX, float RY, float A0, float A1, int Segments, bool IncludeEnd);
-	int SegmentsFor(float RadiusLogical, float ArcRadians) const;
+	SHORTSTACKCORE_API static std::vector<Vec2> RoundRectPath(const Rect& R, float Radius, int SegmentsPerCorner);
+	SHORTSTACKCORE_API static std::vector<Vec2> EllipsePath(float CX, float CY, float RX, float RY, float A0, float A1, int Segments, bool IncludeEnd);
+	SHORTSTACKCORE_API int SegmentsFor(float RadiusLogical, float ArcRadians) const;
 
 private:
 	struct StateData

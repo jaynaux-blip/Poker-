@@ -6,6 +6,8 @@
 #include "StreetCrowd.generated.h"
 
 class AShortStackCharacter;
+class AShopStage;
+class AStreetNpcs;
 class AStreetStage;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -31,6 +33,35 @@ enum class ECrowdRole : uint8
 	Smoke,
 	/** Waiting under the bus shelter, when the street has one. */
 	Shelter,
+	/** Into an open shop and out (spec 6.8): gone inside unseen, or, with the hero in there, a while on its waiting seats. */
+	Shop,
+	/** To the 14's shelter for a departure (town::BusTimes), then aboard: gone once it's left and nobody sees. */
+	Bus,
+	/** Caught out in the rain without an umbrella: under cover (a shelter, the shed, an awning) until it eases. */
+	Cover,
+};
+
+/**
+ * A world person or one of the staff the people director (AStreetNpcs) lends the crowd to walk somewhere (spec 6.8's Named
+ * role): Dee's regulars to her steel door on her nights and out of it near dawn. The body is the director's; the crowd hands
+ * it back (TakeReturned) once they're through a door or off the set.
+ */
+struct FCrowdNamedPlan
+{
+	/** Player: to Dee's steel door; PlayerOut: out of it and off the set; Stroll: along the block and off it. */
+	ECrowdRole Role = ECrowdRole::Player;
+	/** Where they come onto the street: "Market" (an end on Market St, off the 14), or any end (None). PlayerOut comes out of Dee's door. */
+	FName From;
+	/** First a cigarette by the Wash & Fold's door (seconds; 0: none). */
+	float SmokeFor = 0.0f;
+	/** Their pace against an ordinary walk (Twitch runs in). */
+	float Pace = 1.0f;
+	/** An umbrella in any rain (Mei). */
+	bool bUmbrella = false;
+	/** Their height against the cast's 175 cm. */
+	float Scale = 1.0f;
+	/** The screen is dark: placed where they'd be by now (at the smoke spot if they smoke first), not stepping on at an end. */
+	bool bPlaceNow = false;
 };
 
 /** One step of a pedestrian's plan (FStreetWalker::Plan). */
@@ -46,6 +77,8 @@ enum class ECrowdLeg : uint8
 	Leave,
 	/** Beside a door with a cigarette for a while. */
 	Smoke,
+	/** At the 14's shelter until the next departure (Duration: the world minute it leaves), then aboard, unseen. */
+	Board,
 };
 
 struct FCrowdLeg
@@ -181,10 +214,32 @@ struct FStreetWalker
 	float BumpFor = 0.0f;
 	float ProbeIn = 0.0f;
 
-	/** How much of them is worth drawing and moving (0 near .. 2 far, see AStreetCrowd::UpdateCost), and their shadows. */
+	/** How much of them is worth drawing and moving: the character's detail tier (0 Near .. 3 Gone, spec 6.7), as last set. */
 	int32 Tier = -1;
 	bool bShadows = true;
 	int32 Frame = 0;
+
+	/** One of the director's people walking somewhere (spec 6.8's Named role): their id, and the body's the director's. */
+	FName Named;
+	bool bNamed = false;
+	/** Held by the director for talk: stopped, turned to the hero. */
+	bool bEngaged = false;
+	/** Their pace against their own (the director's Twitch runs). */
+	float PaceScale = 1.0f;
+	bool bForceUmbrella = false;
+	/** Sat on a shop's waiting seat (the seat's height), or not. */
+	bool bSeated = false;
+	/** The shop whose door their route goes through (its door must open for them). */
+	FName DoorVenue;
+	/** For the 14: when it leaves (world minutes), and they with it. */
+	double BoardAt = -1.0;
+	/** Knocked off balance by the hero at a run (1 .. eased to 0), and the left hand up over the brow in the rain (0..1). */
+	float Stumble = 0.0f;
+	float HandUp = 0.0f;
+	bool bHandInRain = false;
+	/** At a crossing: whether this one walks against the light (rarely, at night) and has decided so. */
+	bool bJaywalk = false;
+	bool bJayRolled = false;
 };
 
 /**
@@ -206,6 +261,17 @@ struct FStreetWalker
  *
  * Its own tick runs after theirs (it moves them, then sets their look over the character's own) and before their bodies
  * pose, so the gait and the look it set are the frame's.
+ *
+ * The realism update (spec 6.8) widens it. Its map comes from the street's registry (UStreetWorld): the walkways every stage
+ * registers (Fifth's two from the street stage; Market's, when its stage registers them, in place of today's lines; the cross
+ * streets' near sidewalks out to their walk limits, which become where people come and go), the shops' doors and their
+ * waiting seats, the covered stations (the 14's shelter, the shed, the awnings) and the shelter's own stations; it's laid
+ * again whenever a stage registers more. New roles: Shop (into an open shop and out), Bus (to the shelter for a departure),
+ * Cover (out of the rain), and the director's Named walkers. It shares the MetaHuman budget with the people director
+ * (SetAllowance; the director tiers everyone through the character's one SetDetailTier), keeps reserved faces (the staff's,
+ * the player's) out of its cast, waits for WALK at the Fifth & Market crosswalks (town::Signal; now and then, at night,
+ * someone doesn't), drives each head through the character's SetLookTarget, and reacts to the hero barging through at a run
+ * (a stumble, a look, a word). Without a director it tiers its own people by distance.
  */
 UCLASS()
 class SHORTSTACK_API AStreetCrowd : public AActor
@@ -225,11 +291,27 @@ public:
 
 	/** A pedestrian's word to the hero (a "Sorry." after a near bump), once each: where they said it and what. */
 	bool TakeBark(FVector& OutAt, FString& OutLine);
-	/** How many are out on the street now, and how many the hour wants. */
+	/** How many pedestrians are out on the street now, and how many the hour wants. */
 	int32 NumOut() const;
 	int32 NumWanted() const { return Wanted; }
 	/** One line for the crowd and one per pedestrian (the console's ss.Crowd.Describe, the desktop's checks). */
 	FString Describe() const;
+
+	// ------------------------------------------------------------ the people director's side (spec 6.7, 6.8)
+	/** The director the crowd shares its budget with (it tiers everyone; the crowd stops tiering its own). */
+	void SetDirector(AStreetNpcs* InDirector);
+	/** How many pedestrians may be out at once (the live cap less the director's people); negative: no limit but the hour's. */
+	void SetAllowance(int32 InAllowance) { Allowance = InAllowance; }
+	/** Walks one of the director's people somewhere (spec 6.8's Named role). False when there's nowhere to bring them on. */
+	bool AddNamed(AShortStackCharacter* Body, FName Person, const FCrowdNamedPlan& Plan);
+	/** Whether a Named walker is still out (not yet through their door or off the set). */
+	bool IsNamedOut(FName Person) const;
+	/** The Named walkers done since the last call (through their door, or off the set): their bodies are the director's again. */
+	TArray<FName> TakeReturned();
+	/** Holds a Named walker for talk (stopped, turned to the hero, looking at them) or lets them walk on. */
+	void EngageNamed(FName Person, bool bEngage);
+	/** Each pedestrian out on the street now (the director's budget pass). */
+	void ForEachPedestrian(TFunctionRef<void(AShortStackCharacter*)> Fn) const;
 
 private:
 	// The people.
@@ -289,9 +371,30 @@ private:
 	bool HeroLevelWith(float Floor) const;
 	bool HeroInStore() const;
 	bool HeroInWash() const;
+	/** Whether the hero is in a shop's room (its AShopStage), by venue. */
+	bool HeroInShop(FName Venue) const;
 	float FloorAt(const FVector2D& At, float Fallback) const;
 	AShortStackCharacter* GetHero() const;
 	void DrawDebug() const;
+
+	// The realism update's additions.
+	/** The registry's people's map changed (a stage registered walkways, doors, stations since): lays the map again. */
+	void RemapIfChanged();
+	/** The shop stage for a venue (found again every few seconds: their stages spawn them), or null. */
+	AShopStage* ShopFor(FName Venue) const;
+	/** Whether the light lets someone onto this crossing now (town::Signal; no signal yet, or flashing overnight: yes). */
+	bool CrossingOpen(FStreetWalker& W, uint8 Flags);
+	/** A walker done (put away): a Named one goes back to the director. */
+	void HandBack(FStreetWalker& W);
+	/** A shop's door to go in at: an open shop's (one with the hero in it only if it has a free waiting seat), or INDEX_NONE. */
+	int32 PickShopDoor(FStreetWalker& W) const;
+	/** A waiting seat in a venue nobody else is headed for or sat on, or INDEX_NONE. */
+	int32 FreeSeat(FName Venue) const;
+	/** The next eastbound 14 from Market St (world minutes) if it's 3-12 minutes off, else negative (town::BusTimes). */
+	double NextDeparture() const;
+	/** The face registry's rule: may a pedestrian wear this face here (reserved faces are their people's). */
+	bool FaceAllowed(FName Face) const;
+	void UpdateRain(FStreetWalker& W, float Dt);
 
 	UPROPERTY(Transient)
 	TObjectPtr<AStreetStage> Stage;
@@ -345,4 +448,16 @@ private:
 	TArray<TPair<FVector, FString>> Barks;
 	float BarkQuiet = 0.0f;
 	bool bLoggedNoCast = false;
+
+	/** The people director: the budget's, the Named walkers' (null: the crowd tiers its own, and spawns one at its first hour). */
+	TWeakObjectPtr<AStreetNpcs> Director;
+	bool bDirectorAsked = false;
+	int32 Allowance = -1;
+	TArray<FName> Returned;
+	/** What the registry held when the map was laid (walkways, doors, stations), checked every couple of seconds. */
+	int32 MapSignature = 0;
+	float RemapIn = 0.0f;
+	/** The shops by venue, found again every few seconds. */
+	mutable TMap<FName, TWeakObjectPtr<AShopStage>> Shops;
+	mutable float ShopsFoundAt = -100.0f;
 };

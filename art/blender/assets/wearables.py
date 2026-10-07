@@ -1,11 +1,18 @@
-"""Hats and glasses for the player's character (the creator's Hat and Glasses choices).
+"""Hats and glasses for the street's people (the creator's Hat and Glasses choices, the closet's, the pawn's curios).
 
 - SM_Hat_Beanie: a cuffed rib-knit beanie with a woven label on the cuff.
 - SM_Hat_Cap: a six-panel ball cap: seams, eyelets, the top button, a pre-curved bill, a stitched spade
   on the front panel. The creator's "backwards" cap is this one turned round in the game.
 - SM_Hat_Bucket: a cotton-twill bucket hat, its brim stitched in rings.
+- SM_Hat_Trilby: a felt trilby (the pawn's curio), pinched and dented, a grosgrain band with a bow, its short brim
+  snapped down at the front.
 - SM_Glasses_Round, _Square, _Wire, _Shades: acetate rounds, acetate rectangles, thin gold wire ovals with
   nose pads, and dark wraparound shades.
+- SM_Glasses_Aviators: the pawn's aviators, thin wire teardrops with a double bridge and dark green-grey glass.
+
+These are the street's one set of hats and glasses (the realism spec's 7.5.4: wear.py's and this module's pieces
+merged by id): AShortStackCharacter wears each wardrobe::Cut as its piece here, falling back to wear.py's
+SM_Wear_* (in its own frame) only while one isn't imported.
 
 The hats' fabric and the frames' fronts are light neutral grey: the game tints the first material of each
 to the color the character wears (the hat goes with the jacket; the frames black or gold).
@@ -24,13 +31,15 @@ from artkit import core, parts, street
 from artkit.shade import noise, object_coords, ramp, scaled, image_surface, planar
 from artkit.sheet import Sheet
 
-MESHES = ['SM_Hat_Beanie', 'SM_Hat_Cap', 'SM_Hat_Bucket', 'SM_Glasses_Round', 'SM_Glasses_Square', 'SM_Glasses_Wire', 'SM_Glasses_Shades']
+MESHES = ['SM_Hat_Beanie', 'SM_Hat_Cap', 'SM_Hat_Bucket', 'SM_Hat_Trilby', 'SM_Glasses_Round', 'SM_Glasses_Square', 'SM_Glasses_Wire',
+          'SM_Glasses_Shades', 'SM_Glasses_Aviators']
 DOUBLE_SIDED = True
 TEXTURE_SIZE = 1024
 TEXTURE_SIZES = {'beanie_label': 128, 'cap_under': 512, 'cap_button': 64, 'lens_clear': 128, 'lens_dark': 128, 'hinge_metal': 128,
-                 'pads': 64, 'frame_acetate': 512, 'frame_wire': 512, 'frame_shades': 512}
+                 'pads': 64, 'frame_acetate': 512, 'frame_wire': 512, 'frame_shades': 512, 'trilby_band': 256, 'frame_aviator': 512,
+                 'lens_aviator': 128}
 AO_DISTANCE = 0.006
-REVIEW_VIEWS = [('front', -20, 15, 2.3), ('top', 0, 55, 2.3), ('detail', -25, 12, 0.85, (0.0, 0.12, 0.1))]
+REVIEW_VIEWS = [('front', -20, 15, 4.0), ('top', 0, 55, 4.2), ('detail', -25, 12, 1.6, (0.36, 0.12, 0.12))]
 
 HEAD_W = 0.156  # ear to ear
 HEAD_L = 0.196  # brow to back
@@ -248,6 +257,72 @@ def bucket():
     return parts.finish([crown, brim], 'SM_Hat_Bucket', 50)
 
 
+def felt(name):
+    """Wool felt, light grey (the game tints it): a close, matte nap with a faint brushed direction and a soft sheen."""
+    m = core.Mat(name)
+    tc, sep = object_coords(m)
+    nap = noise(m, scaled(m, sep, 900.0, 900.0, 300.0), detail=3.0)
+    blotch = noise(m, tc.outputs['Object'], scale=40.0, detail=2.0)
+    m.set('Base Color', m.mix(m.math('ADD', m.math('MULTIPLY', nap, 0.15), m.math('MULTIPLY', blotch, 0.15)),
+                              core.hex_linear(0xbcbcbc), core.hex_linear(0xd6d6d6)))
+    m.set('Roughness', 0.9)
+    m.set('Sheen Weight', 0.5)
+    bump = m.node('ShaderNodeBump', Strength=0.25, Distance=0.0005)
+    m.link(nap, bump.inputs['Height'])
+    m.set('Normal', bump.outputs['Normal'])
+    return m
+
+
+def trilby():
+    """A felt trilby, the pawn's curio (the spec's 7.5.4): a tapered crown pinched at the front with a center dent, a
+    grosgrain band (its own color, a bow at the left), a short brim snapped down at the front and up at the back. The crown
+    stands clear of the scalp everywhere (a pinch that touches the head shows the scalp through it)."""
+    felt_m = felt('trilby_felt')
+    band_m = street.shop_plastic('trilby_band', 0x1d1b19, rough=0.75, grime=0.05)
+    base = -0.078
+    top = 0.032
+    r_base = head_r(base, 0.011)
+    prof = [(0.0, top - 0.002), (0.03, top), (0.05, top - 0.004), (0.058, top - 0.016)]
+    for k in range(1, 9):
+        u = k / 8
+        prof.append((0.058 + (r_base - 0.058) * u ** 1.4, top - 0.016 + (base - (top - 0.016)) * u))
+    # Inside: the sweatband up to a headroom over the head.
+    prof += [(r_base - 0.003, base), (head_r(base * 0.6, 0.006), base * 0.6), (head_r(-0.02, 0.008), -0.02), (0.0, 0.008)]
+    crown = core.lathe('trilby', list(reversed(prof)), segments=96)
+    oval(crown)
+    # The center dent down the top, and the two pinches at the front.
+    for v in crown.data.vertices:
+        x, y, z = v.co
+        if z > top - 0.02:
+            v.co.z -= 0.012 * math.exp(-(x / 0.011) ** 2) * (1.0 - min(1.0, abs(y) / 0.09) ** 2) * min(1.0, (z - (top - 0.02)) / 0.02)
+        for s in (-1.0, 1.0):
+            d = math.hypot(x - s * 0.026, y + 0.058)
+            if z > base + 0.02:
+                v.co.x -= s * 0.006 * math.exp(-(d / 0.02) ** 2) * min(1.0, (z - base - 0.02) / 0.04)
+    core.orient_normals(crown)
+    core.assign(crown, felt_m)
+    band = core.lathe('band', [(r_base + 0.0012, base + 0.024), (r_base + 0.0017, base + 0.012), (r_base + 0.0012, base + 0.0005),
+                               (r_base - 0.0005, base + 0.0005), (r_base - 0.0005, base + 0.024)], segments=96)
+    oval(band)
+    core.orient_normals(band)
+    core.assign(band, band_m)
+    bow = parts.rbox('bow', (head_r(base + 0.012, 0.013) * HEAD_W / HEAD_L, 0.012, base + 0.012), (0.004, 0.02, 0.014), 0.0015)
+    core.assign(bow, band_m)
+    brim = core.lathe('brim', [(r_base - 0.001, base + 0.0015), (r_base + 0.02, base - 0.003), (r_base + 0.042, base - 0.0045),
+                               (r_base + 0.046, base - 0.0035), (r_base + 0.046, base - 0.006), (r_base + 0.042, base - 0.0072),
+                               (r_base + 0.02, base - 0.0058), (r_base - 0.001, base - 0.0015)], segments=96)
+    oval(brim)
+    for v in brim.data.vertices:
+        x, y, z = v.co
+        r = math.hypot(x, y)
+        out = max(0.0, (r - r_base * 0.85) / 0.05)
+        # Snapped down at the front (-Y), up at the back.
+        v.co.z += 0.014 * out * (y / max(r, 1e-6))
+    core.orient_normals(brim)
+    core.assign(brim, felt_m)
+    return parts.finish([crown, brim, band, bow], 'SM_Hat_Trilby', 50)
+
+
 # ------------------------------------------------------------------ glasses
 
 LENS_X = 0.032
@@ -302,6 +377,19 @@ def shades_shape(t, w, h):
     return (x, z + 0.004 * c)
 
 
+def aviator_shape(t, w, h):
+    """The aviator's teardrop: a near-straight brow, the lens swelling down to its deepest a little in from the middle."""
+    c, s = math.cos(t), math.sin(t)
+    x = w / 2 * c
+    z = h / 2 * s
+    if s < 0:
+        # Deeper below, the bottom's low point pulled toward the nose side of the lens's middle.
+        z *= 1.0 + 0.18 * (1.0 - abs(c)) + 0.12 * max(0.0, -c)
+    else:
+        z *= 0.78 + 0.12 * abs(c)
+    return (x, z)
+
+
 def glasses(name, shape, w, h, rim, depth, frame_m, lens_m, metal_m, bridge_h=0.0, wire=False, wrap=6.0, pad_m=None):
     out = []
     for side in (-1, 1):
@@ -338,7 +426,7 @@ def glasses(name, shape, w, h, rim, depth, frame_m, lens_m, metal_m, bridge_h=0.
 
 def build():
     core.reset()
-    out = [beanie(), cap(), bucket()]
+    out = [beanie(), cap(), bucket(), trilby()]
     acetate_m = acetate('frame_acetate')
     wire_m = street.bare_metal('frame_wire', 0xd8d8d8, rough=0.22, grime=0.1)
     shades_m = acetate('frame_shades', 0xb0b0b0)
@@ -350,13 +438,19 @@ def build():
     out.append(glasses('SM_Glasses_Square', rect_shape, 0.052, 0.036, 0.0048, 0.005, acetate_m, clear, hinge, bridge_h=0.006))
     out.append(glasses('SM_Glasses_Wire', round_shape, 0.05, 0.04, 0.0012, 0.0016, wire_m, clear, hinge, wire=True, pad_m=pads))
     out.append(glasses('SM_Glasses_Shades', shades_shape, 0.058, 0.044, 0.004, 0.005, shades_m, dark, hinge, bridge_h=0.008, wrap=12.0))
+    # The pawn's aviators: thin gold wire (light here: the game tints the frame gold), a double bridge, pads on arms, dark
+    # green-grey glass in teardrops.
+    aviator_m = street.bare_metal('frame_aviator', 0xdedede, rough=0.2, grime=0.08)
+    aviator_lens = street.glass('lens_aviator', 0x0b120d, rough=0.03)
+    out.append(glasses('SM_Glasses_Aviators', aviator_shape, 0.052, 0.046, 0.0011, 0.0014, aviator_m, aviator_lens, hinge, wire=True, wrap=8.0, pad_m=pads))
     return out
 
 
 def pose_for_review(objs):
     """Hats in a row at the back, the glasses in front of them."""
-    for i, o in enumerate(objs):
-        if o.name.startswith('SM_Hat'):
-            o.location = ((i - 1) * 0.24, 0.12, 0.16)
-        else:
-            o.location = ((i - 4.5) * 0.17, -0.12, 0.05)
+    hats = [o for o in objs if o.name.startswith('SM_Hat')]
+    specs = [o for o in objs if not o.name.startswith('SM_Hat')]
+    for i, o in enumerate(hats):
+        o.location = ((i - (len(hats) - 1) / 2) * 0.24, 0.12, 0.16)
+    for i, o in enumerate(specs):
+        o.location = ((i - (len(specs) - 1) / 2) * 0.17, -0.12, 0.05)

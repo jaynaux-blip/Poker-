@@ -4,6 +4,7 @@
 #include "../StrictFloat.h"
 #include "RiverLineShared.h"
 #include "ShortStack/UI/EventArt.h"
+#include "ShortStack/UI/ShopArt.h"
 #include "ShortStack/Game/World.h"
 
 #include "ShortStack/Game/Chat.h"
@@ -2834,6 +2835,12 @@ void RiverLine::CareerPage(double Now)
 			for (size_t K = 0; K < Shown; ++K)
 			{
 				eventart::Trophy(*C, Won[Won.size() - 1 - K], Cx0 + Nf(K) * 56.0f, P.Y + 102.0f, 54.0f * (0.85f + 0.15f * In), Now + 0.7 * static_cast<double>(K));
+			}
+			// At Northside Pawn & Loan (realism spec §5.8, §7.4 P1): the piece is stamped IN PAWN or SOLD; the title stays.
+			// The stamps go on after every piece is in the case, so a neighbor's sparkle never covers one.
+			for (size_t K = 0; K < Shown; ++K)
+			{
+				shopart::DrawAwardStamp(*C, shopart::AwardStamp(S, Won[Won.size() - 1 - K]), Cx0 + Nf(K) * 56.0f, P.Y + 102.0f, 54.0f);
 			}
 			int Bracelets = 0;
 			for (const world::Award& A : Won)

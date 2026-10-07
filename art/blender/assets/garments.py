@@ -1,12 +1,26 @@
 """Real clothes for the street hero, fitted to the hero MetaHumans' own bodies and skinned to their skeleton.
 
-Not a build.py asset (don't list it in ASSETS): it writes skeletal FBX files, not glb props. Run it with Blender 5.2:
+Run it with Blender 5.2 for the skinned garments (FBX):
 
-    blender -b -P art/blender/assets/garments.py -- [A] [B] [--wardrobe DIR] [--no-bake] [--no-export] [--no-review]
-        [--jeans-only] [--preview | --jacket-preview] [--look]
+    blender -b -P art/blender/assets/garments.py -- [A] [B] [HeroA0 ...] [Name:A ...] [--only jeans,chinos,jacket,hoodie]
+        [--wardrobe DIR] [--no-bake] [--no-export] [--no-review] [--jeans-only] [--preview | --jacket-preview | --hoodie-preview] [--look]
+
+and through build.py for the rack and folded statics (glb, below): blender -b -P art/blender/build.py -- garments
 
 --wardrobe: where the hero bodies exported from Unreal are (default $SHORTSTACK_WARDROBE, else art/build/wardrobe):
 <Hero>_SKM_MHC_<Hero>_BodyMesh.fbx and <Hero>_MHC_<Hero>_Outfits.fbx, as garments_setup.export_sources() writes them.
+
+Who they're fitted to (the realism update's spec, 4.7: "every hero must wear them"; the pick recorded here: a fit pass per
+hero, not one shared body per type). A and B are the body types' garments, fitted to HeroA1's and HeroB1's bodies
+(SK_Garment_<Kind>_A/_B): every hero of the type wears them until its own fit is imported. A hero's name (HeroA0, HeroA2,
+HeroB0, HeroB2) fits that hero's own body (SK_Garment_<Kind>_HeroA0), which the game wears in place of the type's
+(AShortStackCharacter: its own fit first). Any other MetaHuman fits the same way with its body type after a colon
+(Lonnie:A, Bea:B: SK_Garment_<Kind>_Lonnie), so the staff can wear garments once their bodies are exported.
+
+The garments (--only picks; all four by default): the jeans; the chinos (the jeans' pattern in a light twill the game
+tints, slant pockets and welt back pockets painted, no rivets or patch); the bomber (SK_Garment_Jacket_*); the hoodie (the
+bomber's torso and sleeves in heathered fleece the game tints, the hood down over the shoulders, a kangaroo pocket, rib cuffs
+and hem, drawcords with metal tips). The tops are fitted over the jeans as they stand.
 
 For each body type (A: HeroA1's body, B: HeroB1's), written to unreal/Art/Garments (FBX, Textures/, garments.json):
 - SK_Garment_Jeans_<A|B>: straight-leg five-pocket jeans. Waistband with seven belt loops and a shank button, a
@@ -54,13 +68,30 @@ from mathutils.bvhtree import BVHTree
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-from artkit import core, texmaps  # noqa: E402
+from artkit import core, parts, texmaps  # noqa: E402
 
 GARMENT_DIR = os.path.join(core.ROOT, 'unreal', 'Art', 'Garments')
 WARDROBE_DEFAULT = os.environ.get('SHORTSTACK_WARDROBE', os.path.join(core.BUILD_DIR, 'wardrobe'))
 # The hero each body type's garments are fitted to (hero_cast.py: HeroA0..2, HeroB0..2 share a body type).
 HEROES = {'A': 'HeroA1', 'B': 'HeroB1'}
+# Every hero face, each fitted on its own (the per-hero fit pass).
+ALL_HEROES = ('HeroA0', 'HeroA1', 'HeroA2', 'HeroB0', 'HeroB1', 'HeroB2')
 TEXTURE_SIZE = 2048
+
+
+def fit_spec(arg):
+    """(key, body name, body type) for a fit asked for on the command line: 'A'/'B' (the type's, on HeroA1/HeroB1), a
+    hero's name (its own body), or 'Name:A' (any exported MetaHuman, with its body type). None for anything else."""
+    if arg in HEROES:
+        return arg, HEROES[arg], arg
+    if ':' in arg:
+        name, kind = arg.split(':', 1)
+        if name and kind.upper() in ('A', 'B'):
+            return name, name, kind.upper()
+        return None
+    if len(arg) == 6 and arg[:4] == 'Hero' and arg[4] in 'AB' and arg[5] in '012':
+        return arg, arg, arg[4]
+    return None
 
 
 # ------------------------------------------------------------------ source bodies
@@ -68,9 +99,10 @@ TEXTURE_SIZE = 2048
 class Hero:
     """A hero's body, armature and default outfit, in world meters (bind pose)."""
 
-    def __init__(self, key, wardrobe):
+    def __init__(self, key, wardrobe, name=None, body_type=None):
         self.key = key
-        self.name = HEROES[key]
+        self.name = name or HEROES[key]
+        self.type = body_type or key
         body_path = os.path.join(wardrobe, f'{self.name}_SKM_MHC_{self.name}_BodyMesh.fbx')
         outfit_path = os.path.join(wardrobe, f'{self.name}_MHC_{self.name}_Outfits.fbx')
         before = set(bpy.data.objects)
@@ -90,7 +122,7 @@ class Hero:
         self.body.name = f'Body_{key}'
         # The FBX brings no textures: skin for the reviews (the body itself isn't exported).
         skin = core.Mat(f'review_skin_{key}')
-        skin.set('Base Color', core.hex_linear(0x8f6248 if key == 'A' else 0x9a6a4f))
+        skin.set('Base Color', core.hex_linear(0x8f6248 if self.type == 'A' else 0x9a6a4f))
         skin.set('Roughness', 0.5)
         skin.set('Subsurface Weight', 0.25)
         skin.set('Subsurface Radius', (0.9, 0.45, 0.25))
@@ -702,8 +734,11 @@ def fly_ridge(f, P, psi, ztop, pel):
     return 0.0013 * band - 0.0009 * groove
 
 
-def build_jeans(h, shoes):
+def build_jeans(h, shoes, kind='jeans'):
+    """The jeans, or (kind 'chinos') the same pattern cut for chinos: the same fit, the loops and the button, but no patch
+    pockets sewn on the seat (the chinos' welt back pockets are let into the cloth: painted)."""
     f = jeans_fit(h)
+    f.kind = kind
     pel = pelvis_table(h, f)
     leg, hem = leg_table(h, f, shoes)
     M, N, NB = JEANS_M, JEANS_N, JEANS_BRIDGE
@@ -805,9 +840,9 @@ def build_jeans(h, shoes):
     tree = BVHTree.FromPolygons([tuple(p) for p in B.positions()], B.faces)
     f.r_waist = float(pel.radius(f.z_wb_f - 0.02, THS).mean())
     f.loops = belt_loops(B, f)
-    f.pockets = [patch_pocket(B, tree, f, side) for side in (0, 1)]
+    f.pockets = [patch_pocket(B, tree, f, side) for side in (0, 1)] if kind == 'jeans' else []
     f.button = shank_button(B, f)
-    obj = B.build(f'SK_Garment_Jeans_{h.key}')
+    obj = B.build(f'SK_Garment_{"Chinos" if kind == "chinos" else "Jeans"}_{h.key}')
     orient_parts(obj)
     obj.data.shade_smooth()
     return obj, f
@@ -1106,29 +1141,39 @@ def args():
     return a[a.index('--') + 1:] if '--' in a else []
 
 
+KINDS = ('jeans', 'chinos', 'jacket', 'hoodie')
+
+
 def main():
     a = args()
     wardrobe = a[a.index('--wardrobe') + 1] if '--wardrobe' in a else WARDROBE_DEFAULT
-    keys = [k for k in a if k in HEROES] or list(HEROES)
-    for key in keys:
+    # The fits asked for (the values of --wardrobe and --only aren't: a Windows path has a colon in it).
+    skip = {a.index(flag) + 1 for flag in ('--wardrobe', '--only') if flag in a}
+    fits = [s for i, x in enumerate(a) if i not in skip and not x.startswith('--') for s in [fit_spec(x)] if s] or [fit_spec(k) for k in HEROES]
+    only = a[a.index('--only') + 1].split(',') if '--only' in a else list(KINDS)
+    if '--jeans-only' in a:
+        only = ['jeans']
+    bake = '--no-bake' not in a
+    for key, body, body_type in fits:
         t0 = time.time()
         core.reset()
-        h = Hero(key, wardrobe)
+        h = Hero(key, wardrobe, body, body_type)
         shoes = put_on_shoes(h)
         jeans, f = build_jeans(h, shoes)
         print(f'[garments] {key}: jeans {len(jeans.data.vertices)} verts, {len(jeans.data.polygons)} faces, crotch {f.z_crotch:.3f} '
               f'split {f.z_split:.3f} waist {f.z_wb_f:.3f}/{f.z_wb_b:.3f} knee L {f.L_knee:.3f} hem L {f.L_hem:.3f} ({time.time() - t0:.0f}s)')
         h.body.color = (0.75, 0.6, 0.5, 1.0)
         jeans.color = (0.25, 0.35, 0.6, 1.0)
-        if '--jacket-preview' in a:
+        if '--jacket-preview' in a or '--hoodie-preview' in a:
             hide_toes(h)
-            jacket, k = build_jacket(h, f, jeans)
+            kind = 'hoodie' if '--hoodie-preview' in a else 'jacket'
+            jacket, k = build_jacket(h, f, jeans, kind=kind)
             jacket.color = (0.55, 0.42, 0.3, 1.0)
-            print(f'[garments] {key}: jacket {len(jacket.data.vertices)} verts, {len(jacket.data.polygons)} faces; hem {k.z_hem:.3f} '
+            print(f'[garments] {key}: {kind} {len(jacket.data.vertices)} verts, {len(jacket.data.polygons)} faces; hem {k.z_hem:.3f} '
                   f'armpit {k.z_a:.3f} shoulder {k.z_S:.3f} neck {k.z_neck_min:.3f} armholes {k.holes}')
             d = os.path.join(core.BUILD_DIR, 'review', 'garments')
-            preview([h.body, jeans, jacket] + shoes, os.path.join(d, f'jacket_{key}.png'))
-            preview([h.body, jeans, jacket] + shoes, os.path.join(d, f'jacket_{key}_top.png'), center=(0.0, 0.0, 1.2), span=0.8,
+            preview([h.body, jeans, jacket] + shoes, os.path.join(d, f'{kind}_{key}.png'))
+            preview([h.body, jeans, jacket] + shoes, os.path.join(d, f'{kind}_{key}_top.png'), center=(0.0, 0.0, 1.2), span=0.8,
                     views=(('front', 0.0), ('side', 90.0), ('back', 180.0), ('three', -35.0, 25.0)))
             continue
         if '--preview' in a:
@@ -1139,40 +1184,64 @@ def main():
             preview([h.body, jeans] + shoes, os.path.join(core.BUILD_DIR, 'review', 'garments', f'jeans_{key}_waist.png'),
                     center=(0.0, 0.0, f.z_split + 0.09), span=0.5)
             continue
-        finish_jeans(h, jeans, f, bake='--no-bake' not in a)
+        # The jeans are always built: the tops are fitted over them, and their skin is the tops' hem bands' source.
+        if 'jeans' in only:
+            finish_jeans(h, jeans, f, bake=bake)
         hide_toes(h)
-        if '--look' in a:
+        if '--look' in a and 'jeans' in only:
             look(h, [h.body, jeans] + shoes, os.path.join(core.BUILD_DIR, 'review', 'garments', f'look_jeans_{key}.jpg'),
                  [('front', 0, 8, 2.7, (0, 0, 0.62)), ('back', 180, 8, 2.7, (0, 0, 0.62)), ('seat', 160, 10, 1.1, (0, 0.05, 0.86)),
                   ('fly', -20, 12, 1.0, (0, -0.1, 0.88)), ('hem', 30, 18, 1.0, (0.12, -0.05, 0.12)), ('knee', -60, 5, 1.2, (0.1, 0, 0.45))])
-        # The jacket is fitted over the jeans as they stand, before they're bound to the armature.
-        garments = [jeans]
-        k = None
-        if '--jeans-only' not in a:
-            jacket, k = build_jacket(h, f, jeans)
-            print(f'[garments] {key}: jacket {len(jacket.data.vertices)} verts, {len(jacket.data.polygons)} faces ({time.time() - t0:.0f}s)')
-            finish_jacket(h, jacket, k, bake='--no-bake' not in a)
-            garments.append(jacket)
+        bottoms = [(jeans, f)] if 'jeans' in only else []
+        if 'chinos' in only:
+            chinos, fc = build_jeans(h, shoes, kind='chinos')
+            print(f'[garments] {key}: chinos {len(chinos.data.vertices)} verts ({time.time() - t0:.0f}s)')
+            finish_jeans(h, chinos, fc, bake=bake, kind='chinos')
+            bottoms.append((chinos, fc))
+        # The tops are fitted over the jeans as they stand, before they're bound to the armature.
+        tops = []
+        for kind in ('jacket', 'hoodie'):
+            if kind not in only:
+                continue
+            top, k = build_jacket(h, f, jeans, kind=kind)
+            print(f'[garments] {key}: {kind} {len(top.data.vertices)} verts, {len(top.data.polygons)} faces ({time.time() - t0:.0f}s)')
+            finish_jacket(h, top, k, bake=bake)
+            tops.append((top, k))
         skin_jeans(h, jeans, f)
-        if k is not None:
-            skin_jacket(h, jacket, k, jeans)
-        for g in garments:
+        for g, fg in bottoms:
+            if g is not jeans:
+                skin_jeans(h, g, fg)
+        for top, k in tops:
+            skin_jacket(h, top, k, jeans)
+        exported = [(g, fg.uv_scale) for g, fg in bottoms] + [(top, k.uv_scale) for top, k in tops]
+        for g, uv_scale in exported:
             strip_bake_attrs(g)
             print(f'[garments] {g.name}: {len(g.data.polygons)} faces, {count_tris(g)} triangles, skinned to {len(g.vertex_groups)} bones, '
                   f'{len(g.material_slots)} material slots ({time.time() - t0:.0f}s)')
             if '--no-export' not in a:
                 path = export_fbx(h, g, os.path.join(GARMENT_DIR, f'{g.name}.fbx'))
                 print(f'[garments] exported {os.path.relpath(path, core.ROOT)}, textures {copy_textures(g.name, len(g.material_slots))}')
-                write_notes(g.name, f.uv_scale if g is jeans else k.uv_scale)
+                write_notes(g.name, uv_scale)
         if '--no-export' not in a:
             print(f'[garments] weave details {write_details()}')
-        report = validate(h, garments, f, k)
-        if k is not None:
-            review_tint(jacket, OUTFIT_TONES['olive' if key == 'A' else 'burgundy'])
+        report = validate(h, [jeans] + [g for g, _ in bottoms if g is not jeans], f, tops)
+        for top, k in tops:
+            review_tint(top, OUTFIT_TONES[('olive' if h.type == 'A' else 'burgundy') if k.kind == 'jacket' else ('charcoal' if h.type == 'A' else 'teal')])
+        for g, fg in bottoms:
+            if fg.kind == 'chinos':
+                review_tint(g, CHINO_REVIEW, slots=((0, 1.0),))
         if '--no-review' not in a:
-            review_sheet(h, [h.body] + garments + shoes, os.path.join(core.REVIEW_DIR, f'garments_{key}.jpg'))
-            detail_sheet(h, [h.body] + garments + shoes, os.path.join(core.REVIEW_DIR, f'garments_{key}_detail.jpg'), f, k)
-        if '--no-review' not in a:
+            # A sheet per outfit: the jeans under each top, and the chinos on their own.
+            for top, k in tops or [(None, None)]:
+                objs = [h.body, jeans] + ([top] if top is not None else []) + shoes
+                tag = f'{key}' if top is None or k.kind == 'jacket' else f'{key}_hoodie'
+                review_sheet(h, objs, os.path.join(core.REVIEW_DIR, f'garments_{tag}.jpg'))
+                detail_sheet(h, objs, os.path.join(core.REVIEW_DIR, f'garments_{tag}_detail.jpg'), f, k)
+            for g, fg in bottoms:
+                if g is not jeans:
+                    jeans.hide_render = True
+                    review_sheet(h, [h.body, g] + ([t for t, _ in tops[:1]]) + shoes, os.path.join(core.REVIEW_DIR, f'garments_{key}_chinos.jpg'))
+                    jeans.hide_render = False
             compose_overview()
         print(f'[garments] {key}: done ({time.time() - t0:.0f}s) {report}')
 
@@ -1182,12 +1251,11 @@ def count_tris(obj):
     return len(obj.data.loop_triangles)
 
 
-def validate(h, garments, f, k=None):
-    """How much comes through each garment in each review pose: the legs through the jeans, the arms through the
-    sleeves, the jeans through the jacket (vertices, worst depth in mm)."""
-    jeans = garments[0]
-    jacket = garments[1] if len(garments) > 1 else None
+def validate(h, bottoms, f, tops=()):
+    """How much comes through each garment in each review pose: the legs through the jeans (and the chinos), the arms
+    through each top's sleeves, the jeans through each top (vertices, worst depth in mm)."""
     ankle = float(h.bone('foot_l')[2]) + 0.03
+    jeans = bottoms[0]
 
     def legs(R):
         # Above the hem at each vertex's own angle round its leg (the hem's front rides up over the shoe).
@@ -1206,20 +1274,20 @@ def validate(h, garments, f, k=None):
             ok |= (sg * R[:, 0] > 0.12) & (R[:, 2] > 0.85) & ((R - wrist) @ fd < -0.03)
         return ok
 
-    def under_jacket(R):
-        return (R[:, 2] > k.z_hem + 0.012) & (R[:, 2] < k.z_a)
-
     out = {}
     for kind in ('stand', 'walk', 'sit', 'reach'):
         pose(h, kind)
-        n, worst, total = pokes(h, jeans, legs, skip=set(J_INSIDE))
-        line = f'legs/jeans {n}/{total} ({worst * 1000:.1f} mm)'
-        if jacket is not None:
+        parts = []
+        for g in bottoms:
+            n, worst, total = pokes(h, g, legs, skip=set(J_INSIDE))
+            parts.append(f'legs/{g.name.split("_")[2].lower()} {n}/{total} ({worst * 1000:.1f} mm)')
+        for top, k in tops:
             sleeves = {K_SLEEVE_LF, K_SLEEVE_LB, K_SLEEVE_RF, K_SLEEVE_RB, K_CUFF_LF, K_CUFF_LB, K_CUFF_RF, K_CUFF_RB}
-            body_parts = {K_FRONT_L, K_BACK, K_FRONT_R, K_BAND_L, K_BAND_B, K_BAND_R, K_WELT_L, K_WELT_R}
-            n2, w2, t2 = pokes(h, jacket, arms, skip=set(range(32)) - sleeves)
-            n3, w3, t3 = pokes(h, jacket, under_jacket, skip=set(range(32)) - body_parts, source=jeans)
-            line += f', arms/sleeves {n2}/{t2} ({w2 * 1000:.1f} mm), jeans/jacket {n3}/{t3} ({w3 * 1000:.1f} mm)'
+            body_parts = {K_FRONT_L, K_BACK, K_FRONT_R, K_BAND_L, K_BAND_B, K_BAND_R, K_WELT_L, K_WELT_R, K_KANGAROO}
+            n2, w2, t2 = pokes(h, top, arms, skip=set(range(K_COUNT)) - sleeves)
+            n3, w3, t3 = pokes(h, top, lambda R, k=k: (R[:, 2] > k.z_hem + 0.012) & (R[:, 2] < k.z_a), skip=set(range(K_COUNT)) - body_parts, source=jeans)
+            parts.append(f'arms/{k.kind} {n2}/{t2} ({w2 * 1000:.1f} mm), jeans/{k.kind} {n3}/{t3} ({w3 * 1000:.1f} mm)')
+        line = ', '.join(parts)
         out[kind] = line
         print(f'[garments] {h.key} {kind}: {line}')
     pose_reset(h)
@@ -1253,15 +1321,27 @@ def shift(h, name, offset):
     bpy.context.view_layer.update()
 
 
-def finish_jeans(h, jeans, f, bake=True):
-    """UVs, the painted denim and its bake (slot 0), the button's metal (slot 1)."""
+def finish_jeans(h, jeans, f, bake=True, kind='jeans'):
+    """UVs, the painted cloth and its bake (slot 0: the denim, or the chinos' twill), the button (slot 1: the jeans' metal,
+    the chinos' dark horn)."""
     name = jeans.name
-    for m in (core.Mat(f'{name}_denim_placeholder').m, metal_material(f'M_{name}_button', 0x7a6a58, 0.38)):
+    if kind == 'chinos':
+        button = core.Mat(f'M_{name}_button')
+        button.set('Base Color', core.hex_linear(0x2e241c))
+        button.set('Roughness', 0.42)
+        mats = (core.Mat(f'{name}_twill_placeholder').m, button.m)
+    else:
+        mats = (core.Mat(f'{name}_denim_placeholder').m, metal_material(f'M_{name}_button', 0x7a6a58, 0.38))
+    for m in mats:
         jeans.data.materials.append(m)
     unwrap(jeans)
     f.uv_scale = layout_uvs(jeans, {0: TEXTURE_SIZE, 1: 512})
-    paint = jeans_textures(jeans, f, name)
-    jeans.material_slots[0].material = texture_material(f'M_{name}_denim', paint, TEXTURE_SIZE, specular=0.28, sheen=0.0)
+    if kind == 'chinos':
+        paint = chinos_textures(jeans, f, name)
+        jeans.material_slots[0].material = texture_material(f'M_{name}_twill', paint, TEXTURE_SIZE, specular=0.3, sheen=0.12)
+    else:
+        paint = jeans_textures(jeans, f, name)
+        jeans.material_slots[0].material = texture_material(f'M_{name}_denim', paint, TEXTURE_SIZE, specular=0.28, sheen=0.0)
     if bake:
         bake_garment(jeans, name, {jeans.material_slots[1].material.name: 512}, ao_distance=0.025)
 
@@ -1664,7 +1744,7 @@ def jeans_textures(obj, f, name, size=TEXTURE_SIZE):
     set_attr(obj, 'gN', nrm * 0.5 + 0.5)
     set_attr(obj, 'gF', np.stack([fold * 100.0 + 0.5, np.zeros_like(fold), np.zeros_like(fold)], 1))
     _, _, mi, isl, _, _, _ = face_arrays(obj)
-    set_attr(obj, 'gI', corner_values(obj, np.stack([isl / 32.0, mi / 4.0, np.zeros(len(isl))], 1)), 'CORNER')
+    set_attr(obj, 'gI', corner_values(obj, np.stack([isl / ISL_SCALE, mi / 4.0, np.zeros(len(isl))], 1)), 'CORNER')
     maps = bake_attrs(obj, size, ['gP', 'gN', 'gF', 'gI'], slot=0)
     valid = maps['valid']
     iy, ix = np.nonzero(valid)
@@ -1672,7 +1752,7 @@ def jeans_textures(obj, f, name, size=TEXTURE_SIZE):
     N = maps['gN'][iy, ix].astype(np.float64) * 2.0 - 1.0
     N /= np.linalg.norm(N, axis=1, keepdims=True) + 1e-9
     fd = (maps['gF'][iy, ix, 0] - 0.5) / 100.0
-    I = np.rint(maps['gI'][iy, ix, 0] * 32.0).astype(int)
+    I = np.rint(maps['gI'][iy, ix, 0] * ISL_SCALE).astype(int)
     x, y, z = P[:, 0], P[:, 1], P[:, 2]
     n_tex = len(x)
     pel, leg = f.pel, f.leg
@@ -1961,6 +2041,232 @@ def jeans_textures(obj, f, name, size=TEXTURE_SIZE):
     rough += 0.04 * (fine - 0.5) - 0.06 * grime
     print(f'[garments] {name}: denim painted ({n_tex} texels, {time.time() - t0:.0f}s)')
     return {'iy': iy, 'ix': ix, 'P': P, 'valid': valid, 'base': base, 'rough': rough, 'metal': metal, 'height': height}
+
+
+CHINO = 0.58          # the twill's light neutral grey (linear): the game multiplies in the trousers' color
+CHINO_REVIEW = 0x9c8a62  # khaki, the first of the trousers' palette (ShortStackCharacter.cpp's TrouserTones), for the review
+
+
+def chinos_textures(obj, f, name, size=TEXTURE_SIZE):
+    """Paints the chinos' twill (slot 0) per texel, as jeans_textures paints the denim, in a light neutral grey the game
+    tints: plain seams pressed open at the sides and the inseam, a felled seam up the back rise, slant front pockets, welt
+    back pockets with a button under the right one, two back darts instead of a yoke, the fly's J, a blind-stitched hem,
+    stitching in the cloth's own tone. Wear is gentler than denim's: the knees, the seat and the pocket mouths a touch lighter,
+    the hem dirtier."""
+    t0 = time.time()
+    co = get_co(obj)
+    nrm = vertex_normals(obj)
+    fold = np.empty(len(obj.data.vertices), dtype=np.float32)
+    obj.data.attributes['fold'].data.foreach_get('value', fold)
+    set_attr(obj, 'gP', co + 2.0)
+    set_attr(obj, 'gN', nrm * 0.5 + 0.5)
+    set_attr(obj, 'gF', np.stack([fold * 100.0 + 0.5, np.zeros_like(fold), np.zeros_like(fold)], 1))
+    _, _, mi, isl, _, _, _ = face_arrays(obj)
+    set_attr(obj, 'gI', corner_values(obj, np.stack([isl / ISL_SCALE, mi / 4.0, np.zeros(len(isl))], 1)), 'CORNER')
+    maps = bake_attrs(obj, size, ['gP', 'gN', 'gF', 'gI'], slot=0)
+    valid = maps['valid']
+    iy, ix = np.nonzero(valid)
+    P = maps['gP'][iy, ix].astype(np.float64) - 2.0
+    N = maps['gN'][iy, ix].astype(np.float64) * 2.0 - 1.0
+    N /= np.linalg.norm(N, axis=1, keepdims=True) + 1e-9
+    fd = (maps['gF'][iy, ix, 0] - 0.5) / 100.0
+    I = np.rint(maps['gI'][iy, ix, 0] * ISL_SCALE).astype(int)
+    x, y, z = P[:, 0], P[:, 1], P[:, 2]
+    n_tex = len(x)
+    pel, leg = f.pel, f.leg
+    left_isl = np.isin(I, [J_FRONT_L, J_BACK_L, J_HEM_FACING_L, J_HEM_FACING_LB])
+    right_isl = np.isin(I, [J_FRONT_R, J_BACK_R, J_HEM_FACING_R, J_HEM_FACING_RB])
+    sx = np.where(left_isl, 1.0, np.where(right_isl, -1.0, np.where(x >= 0, 1.0, -1.0)))
+    pc = pel.center(z)
+    psi_raw = np.mod(np.arctan2(y - pc[:, 1], x), 2 * math.pi)
+    psim = wrap_pi(np.where(sx > 0, psi_raw, math.pi - psi_raw))
+    Rp = pel.radius(z, psi_raw)
+    lc = leg.center(z)
+    phi = np.arctan2(y - lc[:, 1], sx * x - lc[:, 0])
+    Rl = leg.radius(z, phi)
+    is_pel = z > f.z_split
+    hem_z = np.interp(np.mod(phi, 2 * math.pi), THS, f.hem, period=2 * math.pi)
+    zr = z - hem_z
+    wtop = waist_top(f, psi_raw)
+    dd = (wtop - WAISTBAND[-1]) - z
+    d_out = np.where(is_pel, Rp * psim, Rl * phi)
+    d_in = Rl * wrap_pi(phi - math.pi)
+    panel = np.isin(I, [J_FRONT_L, J_BACK_L, J_FRONT_R, J_BACK_R])
+    front_panel = np.isin(I, [J_FRONT_L, J_FRONT_R])
+    back_panel = np.isin(I, [J_BACK_L, J_BACK_R])
+    inside = np.isin(I, J_INSIDE)
+    lg_mask = (~is_pel) & panel
+
+    light = np.zeros(n_tex)      # lighter (worn, rubbed) + / darker -
+    grime = np.zeros(n_tex)
+    height = np.zeros(n_tex)
+    thread = np.zeros(n_tex)
+    rough = np.full(n_tex, 0.84)
+
+    def add_stitch(mask, d, s, **kw):
+        nonlocal thread, height
+        cov, h_ = stitch_row(d, s, **kw)
+        thread = np.maximum(thread, cov * mask)
+        height += h_ * mask
+
+    def add_seam(mask, d, groove=0.00045, width=0.0011):
+        nonlocal height
+        height -= groove * np.exp(-(d / width) ** 2) * mask
+
+    def raise_band(mask, d0, d1, d, amt, soft=0.0012):
+        nonlocal height
+        height += amt * smoothstep(d0 - soft, d0 + soft, d) * (1.0 - smoothstep(d1 - soft, d1 + soft, d)) * mask
+
+    # The cloth: a fine cotton twill, its wales (the diagonal) in the normal, a little uneven in tone.
+    mott = texmaps.value_noise(P, 0.07, seed=71, octaves=3)
+    fine = texmaps.value_noise(P, 0.003, seed=72, octaves=2)
+    twill = 0.5 + 0.5 * np.cos(2 * math.pi * ((z + 0.5 * np.where(is_pel, Rp * psi_raw, Rl * phi)) / 0.0017))
+    height += 0.00004 * twill + 0.00003 * (fine - 0.5)
+    light += 0.05 * (mott - 0.5) + 0.03 * (fine - 0.5)
+    front_facing = np.clip(-N[:, 1], 0.0, 1.0)
+    back_facing = np.clip(N[:, 1], 0.0, 1.0)
+    # Knees and thighs at the front, the seat at the back: rubbed a touch lighter.
+    light += 0.07 * np.exp(-((z - (f.z_knee + 0.01)) / 0.06) ** 2) * front_facing ** 2 * panel
+    light += 0.05 * np.exp(-((z - (f.z_knee + 0.2)) / 0.12) ** 2) * front_facing ** 1.5 * panel
+    light += 0.06 * np.exp(-((z - (f.z_crotch + 0.07)) / 0.07) ** 2) * back_facing * panel
+    # The folds: ridges catch the light, hollows hold shadow and a little grime.
+    ridge = np.clip(fd / 0.005, -0.5, 1.0)
+    light += 0.06 * ridge
+    grime += 0.06 * np.clip(-ridge, 0.0, 1.0)
+
+    # Side seams and the inseam: plain, pressed open (a groove with a slight swell either side), no topstitch.
+    m = panel & (np.abs(d_out) < 0.015)
+    add_seam(m, d_out)
+    raise_band(m, -0.006, 0.006, d_out, 0.00018)
+    m = lg_mask & (z < f.z_crotch + 0.01) & (np.abs(d_in) < 0.015)
+    add_seam(m, d_in)
+    raise_band(m, -0.006, 0.006, d_in, 0.00018)
+    # The back rise: felled, two rows, toward the wearer's left; the front below the fly a plain seam.
+    xc = sx * x
+    m = back_panel & (np.abs(x) < 0.02) & (z > f.z_crotch - 0.03)
+    add_seam(m, np.abs(x))
+    raise_band(m & (sx > 0), 0.0, 0.009, xc, 0.0005)
+    add_stitch(m & (sx > 0), xc - 0.0025, z, period=0.003)
+    add_stitch(m & (sx > 0), xc - 0.0075, z, period=0.003)
+    add_seam(front_panel & (np.abs(x) < 0.015) & (dd > 0.13), np.abs(x))
+    # The hem: turned up 3.5 cm and blind-stitched (nothing shows), its fold rubbed light and soiled from the street.
+    hm = lg_mask & (zr < 0.04)
+    raise_band(hm, -0.01, 0.034, zr, 0.0004, soft=0.0015)
+    add_seam(hm, zr - 0.035, groove=0.00018, width=0.002)
+    light += 0.10 * np.exp(-(zr / 0.003) ** 2) * lg_mask
+    grime += 0.35 * (1.0 - smoothstep(0.0, 0.05, zr)) * lg_mask * (0.6 + 0.4 * back_facing)
+    grime += 0.2 * (1.0 - smoothstep(0.0, 0.03, zr)) * np.isin(I, J_HEMS)
+
+    # The waistband: stitched along both edges.
+    wb = np.isin(I, J_BANDS)
+    dt = wtop - z
+    add_stitch(wb, dt - 0.0025, Rp * psi_raw, period=0.003)
+    add_stitch(wb, dt - (WAISTBAND[-1] - 0.0025), Rp * psi_raw, period=0.003)
+    light += 0.08 * np.exp(-(dt / 0.0025) ** 2) * wb
+    add_seam(panel & (np.abs(dd) < 0.006), dd, groove=0.0005)
+    m = wb & (np.abs(x + 0.006) < 0.01)
+    add_seam(m, x + 0.006, groove=0.0007, width=0.0009)
+    # The fly: one row in a J, the opening's edge at center front, a bar tack at the bottom.
+    m = front_panel & (sx > 0) & is_pel & (dd > -0.002) & (dd < 0.16)
+    if m.any():
+        a_cf = (Rp * (psim + math.pi / 2))[m]
+        d2 = dd[m]
+        Jr = 0.03
+        jpts = [(Jr, 0.0), (Jr, 0.1)] + [(Jr * math.cos(t), 0.1 + Jr * math.sin(t)) for t in np.linspace(0.0, math.pi / 2, 10)[1:]]
+        dj, sj = texmaps.polyline_distance(np.stack([a_cf, d2], 1), jpts)
+        cov, hh = stitch_row(dj, sj * 0.15, period=0.003)
+        thread[m] = np.maximum(thread[m], cov)
+        height[m] += hh + 0.0009 * (a_cf < Jr - 0.002) * smoothstep(-0.003, 0.004, a_cf)
+        height[m] -= 0.0008 * np.exp(-(a_cf / 0.0012) ** 2) * (d2 < 0.13)
+        tack = (np.abs(a_cf - 0.004) < 0.006) & (np.abs(d2 - 0.133) < 0.002)
+        thread[m] = np.maximum(thread[m], tack * 0.7)
+        height[m] += 0.0003 * tack
+
+    # Slant front pockets: the opening runs from the waistband 4.5 cm in from the side seam down to the side seam 16 cm
+    # below; its edge turned and topstitched 6 mm in, bar-tacked top and bottom; the mouth worn light and handled grey.
+    a_side = -d_out
+    m = front_panel & is_pel & (dd > -0.003) & (dd < 0.2) & (a_side > -0.01) & (a_side < 0.09)
+    if m.any():
+        p0, p1 = np.array([0.045, 0.0]), np.array([0.0, 0.16])
+        q = np.stack([a_side[m], dd[m]], 1)
+        e_dir = (p1 - p0) / np.linalg.norm(p1 - p0)
+        n_dir = np.array([e_dir[1], -e_dir[0]])        # toward the front panel (away from the side seam)
+        rel = q - p0
+        along = rel @ e_dir
+        e = rel @ n_dir                                # + on the panel, - inside the pocket bag's facing
+        on = (along > -0.002) & (along < np.linalg.norm(p1 - p0) + 0.002)
+        height[m] -= 0.0011 * on * np.exp(-(e / 0.0011) ** 2)
+        height[m] += 0.0005 * on * np.exp(-((e - 0.0025) / 0.0018) ** 2)
+        cov, hh = stitch_row(e - 0.006, along, period=0.003)
+        thread[m] = np.maximum(thread[m], cov * on)
+        height[m] += hh * on
+        light[m] += 0.12 * on * np.exp(-((e - 0.0015) / 0.002) ** 2)
+        grime[m] += 0.25 * on * np.exp(-((e + 0.001) / 0.0015) ** 2)
+        for end in (0.002, np.linalg.norm(p1 - p0) - 0.002):
+            tack = on & (np.abs(along - end) < 0.0022) & (np.abs(e - 0.003) < 0.0045)
+            thread[m] = np.maximum(thread[m], tack * 0.75)
+            height[m] += 0.00035 * tack
+
+    # The back: two darts below the waistband (no yoke), a welt pocket each side, a button under the right one's welt.
+    for side in (0, 1):
+        sg = 1.0 if side == 0 else -1.0
+        bs = back_panel & is_pel & ((sx > 0) if side == 0 else (sx < 0))
+        if not bs.any():
+            continue
+        # The dart: 9 cm long, 0.36 rad out from center back, tapering to nothing.
+        psi_d = 0.5 * math.pi - sg * 0.36
+        ad = Rp * wrap_pi(psi_raw - psi_d)
+        dart = bs & (dd > 0.0) & (dd < 0.09) & (np.abs(ad) < 0.01)
+        width = 0.0012 * (1.0 - dd / 0.09)
+        height -= 0.0005 * dart * np.exp(-(ad / np.maximum(width, 0.0003)) ** 2)
+        # The welt: 13 cm wide, 7.5 cm below the waistband's seam; two 5 mm lips either side of the slit.
+        psi_w = 0.5 * math.pi - sg * 0.62
+        aw = Rp * wrap_pi(psi_raw - psi_w)
+        bw = dd - 0.075
+        welt = bs & (np.abs(aw) < 0.066) & (np.abs(bw) < 0.012)
+        lips = welt & (np.abs(aw) < 0.065) & (np.abs(bw) < 0.0055)
+        height += 0.0006 * lips * (1.0 - np.exp(-(bw / 0.0008) ** 2)) - 0.0012 * lips * np.exp(-(bw / 0.0007) ** 2)
+        grime += 0.5 * lips * np.exp(-(bw / 0.0008) ** 2)
+        frame = np.maximum(np.abs(aw) - 0.065, np.abs(bw) - 0.0055)
+        cov, hh = stitch_row(frame - 0.0012, np.where(np.abs(aw) - 0.065 > np.abs(bw) - 0.0055, bw, aw), period=0.003)
+        thread = np.maximum(thread, cov * welt)
+        height += hh * welt
+        light += 0.07 * lips * np.exp(-((np.abs(bw) - 0.005) / 0.0015) ** 2)
+        tack = welt & (np.abs(np.abs(aw) - 0.066) < 0.0015) & (np.abs(bw) < 0.007)
+        thread = np.maximum(thread, tack * 0.75)
+        if side == 1:
+            # A button 1.5 cm under the slit's middle, through a loop: a 1.1 cm disc, four holes, its rim worn pale.
+            r = np.hypot(aw, dd - 0.075 - 0.015)
+            btn = bs & (r < 0.0058)
+            height += btn * (0.0011 * np.sqrt(np.clip(1.0 - (r / 0.0058) ** 2, 0.0, 1.0)))
+            holes = btn & (np.minimum(np.hypot(np.abs(aw) - 0.0014, np.abs(dd - 0.09) - 0.0014), 1.0) < 0.0006)
+            height -= 0.0004 * holes
+            grime += btn * 0.9 + 0.3 * holes
+
+    # Belt loops: stitched down both edges, bar-tacked at the ends.
+    m = I == J_LOOP
+    if m.any():
+        loops = np.array(f.loops)
+        dpsi = wrap_pi(psi_raw[m][:, None] - loops[None, :])
+        kk = np.argmin(np.abs(dpsi), axis=1)
+        lat = Rp[m] * dpsi[np.arange(m.sum()), kk]
+        zz = z[m]
+        cov1, h1 = stitch_row(np.abs(lat) - 0.0035, zz, width=0.0008, period=0.003)
+        bot = wtop[m] - WAISTBAND[-1] - 0.009
+        tack = (zz < bot + 0.006) * (np.abs(lat) < 0.004)
+        thread[m] = np.maximum(thread[m], np.maximum(cov1, tack * 0.7))
+        height[m] += h1 + 0.0003 * tack
+        light[m] += 0.08 * np.exp(-((np.abs(lat) - 0.005) / 0.0012) ** 2)
+
+    tone = CHINO * (1.0 + np.clip(light, -0.3, 0.4))
+    tone = np.where(inside, tone * 0.9 * (0.9 + 0.2 * fine), tone)
+    base = np.repeat(tone[:, None], 3, 1) * np.array([1.0, 0.985, 0.955])
+    base = mix3(base, base * lin(0x6f6455) * 1.6, np.clip(grime, 0.0, 0.8))
+    # The thread is the cloth's own color (tinted with it), a shade deeper and a little glossier.
+    base = mix3(base, base * 0.78, thread)
+    rough = rough * (1 - thread) + 0.7 * thread + 0.03 * (fine - 0.5) - 0.05 * grime
+    print(f'[garments] {name}: twill painted ({n_tex} texels, {time.time() - t0:.0f}s)')
+    return {'iy': iy, 'ix': ix, 'P': P, 'valid': valid, 'base': base, 'rough': rough, 'metal': np.zeros(n_tex), 'height': height}
 
 
 def texture_material(name, maps, size, specular=0.3, sheen=0.0):
@@ -2289,8 +2595,13 @@ BAND = (0.0, 0.004, 0.011, 0.019, 0.027, 0.035, 0.043, 0.051, 0.056)   # hem ban
 SHELL, RIB, HARDWARE = 0, 1, 2
 (K_FRONT_L, K_BACK, K_FRONT_R, K_SLEEVE_LF, K_SLEEVE_LB, K_SLEEVE_RF, K_SLEEVE_RB, K_BAND_L, K_BAND_B, K_BAND_R,
  K_BANDIN_L, K_BANDIN_B, K_BANDIN_R, K_COLLAR_L, K_COLLAR_R, K_COLLARIN_L, K_COLLARIN_R, K_CUFF_LF, K_CUFF_LB, K_CUFF_RF,
- K_CUFF_RB, K_CUFFIN_L, K_CUFFIN_R, K_ZIP, K_WELT_L, K_WELT_R, K_PULL) = range(27)
+ K_CUFF_RB, K_CUFFIN_L, K_CUFFIN_R, K_ZIP, K_WELT_L, K_WELT_R, K_PULL,
+ # The hoodie's own pieces: the kangaroo pocket, the hood's halves (its seam down the middle of the back), the drawcords,
+ # their metal tips and the eyelets they come out of.
+ K_KANGAROO, K_HOOD_L, K_HOOD_R, K_CORD, K_AGLET, K_EYELET, K_COUNT) = range(34)
 K_INSIDE = (K_BANDIN_L, K_BANDIN_B, K_BANDIN_R, K_COLLARIN_L, K_COLLARIN_R, K_CUFFIN_L, K_CUFFIN_R)
+# The island ids ride a color attribute into the texture bake, scaled into 0..1.
+ISL_SCALE = 64.0
 
 
 def tee_parts(h):
@@ -2310,8 +2621,11 @@ def tee_parts(h):
     return left, right, collar, sh & ~left & ~right
 
 
-def jacket_fit(h, jf, jeans):
+def jacket_fit(h, jf, jeans, kind='jacket'):
     k = Fit()
+    k.kind = kind
+    # A fleece hoodie hangs a little roomier than the canvas bomber (cm of ease over it, round the torso and the arms).
+    k.extra_ease = 0.007 if kind == 'hoodie' else 0.0
     left, right, collar, torso = tee_parts(h)
     k.tee_left, k.tee_right, k.tee_collar, k.tee_torso = left, right, collar, torso
     # The sleeve's seam round the armhole: the tee sleeve's inner edge.
@@ -2358,6 +2672,8 @@ def torso_table(h, k, jeans):
     C = np.stack([np.zeros_like(yc), yc], 1)
     ease = np.where(zs < k.z_b, 0.006, 0.006 + 0.016 * smoothstep(k.z_b, k.z_b + 0.025, zs))
     ease = ease + 0.012 * np.exp(-((zs - (k.z_b + 0.04)) / 0.035) ** 2) - 0.012 * smoothstep(k.z_S - 0.02, k.z_neck_min + 0.02, zs)
+    # The hoodie's extra room, over the shell (not the band), fading out toward the neck where the hood sits.
+    ease = ease + getattr(k, 'extra_ease', 0.0) * smoothstep(k.z_b, k.z_b + 0.02, zs) * (1.0 - smoothstep(k.z_S - 0.04, k.z_S, zs))
     R = np.array([radial(H, c, THS) for H, c in zip(hulls, C)])
     R = smooth1d(smooth1d(R, 2, 0), 3, 1, wrap=True) + ease[:, None]
     shell = zs >= k.z_b + 0.01
@@ -2665,6 +2981,7 @@ def build_sleeve(h, k, side, loopP, seam_i, dirs):
     cen = smooth1d(cen, 3, 0)
     Cc = C + e1 * cen[:, :1] + e2 * cen[:, 1:2]
     ease = np.interp(st, [0.0, s_elbow, length - CUFF - 0.12, length - CUFF], [0.027, 0.023, 0.022, 0.03])
+    ease = ease + 0.6 * getattr(k, 'extra_ease', 0.0) * smoothstep(0.05, 0.15, st)
     R = np.array([radial(H - c, (0.0, 0.0), THS) for H, c in zip(hulls, cen)])
     R = np.where(R > 0, R, np.nan)
     for i in range(len(R)):
@@ -2769,8 +3086,10 @@ def sleeve_folds(sv, side):
     return d
 
 
-def build_jacket(h, jf, jeans):
-    k = jacket_fit(h, jf, jeans)
+def build_jacket(h, jf, jeans, kind='jacket'):
+    """The bomber, or (kind 'hoodie') the hoodie on the same torso and sleeves: no zip and no welts, the hood down where
+    the collar stands, a kangaroo pocket, drawcords."""
+    k = jacket_fit(h, jf, jeans, kind)
     tor = torso_table(h, k, jeans)
     M = JK_M
     dps = 2 * math.pi / M
@@ -2788,9 +3107,10 @@ def build_jacket(h, jf, jeans):
     rng = np.random.default_rng(17)
     n = grid_normals(P, lambda z: tor.center(z))
     d = torso_folds(k, P, PSI, rng)
-    # The zip's placket: a little fuller either side of center front.
-    arc = wrap_pi(PSI + 0.5 * math.pi) * tor.radius(P[..., 2], PSI)
-    d += 0.0016 * np.exp(-((np.abs(arc) - 0.011) / 0.006) ** 2) * (Z >= k.z_b)
+    if kind == 'jacket':
+        # The zip's placket: a little fuller either side of center front.
+        arc = wrap_pi(PSI + 0.5 * math.pi) * tor.radius(P[..., 2], PSI)
+        d += 0.0016 * np.exp(-((np.abs(arc) - 0.011) / 0.006) ** 2) * (Z >= k.z_b)
     P = P + n * d[..., None]
     k.tor, k.psi, k.PSI, k.Z, k.ja, k.jS, k.zn, k.holes, k.P = tor, psi, PSI, Z, ja, jS, zn, holes, P
     B = Builder()
@@ -2876,6 +3196,18 @@ def build_jacket(h, jf, jeans):
     band_pieces = lambda c: K_BAND_L if c < kmidL else K_BAND_B if c < kmidR else K_BAND_R  # noqa: E731
     ring_strip(B, [G[0], rA, rB], RIB, band_pieces)
     ring_strip(B, [rB] + list(inner), RIB, lambda c: K_BANDIN_L if c < kmidL else K_BANDIN_B if c < kmidR else K_BANDIN_R)
+    if kind == 'hoodie':
+        # The shell as it stands (torso, sleeves, bands): what the hood lies on, the pocket is sewn to and the cords hang over.
+        tree = BVHTree.FromPolygons([tuple(p) for p in B.positions()], B.faces)
+        k.hood = build_hood(B, k, G[-1], P[-1], tree)
+        k.pocket = kangaroo_pocket(B, tree, k)
+        k.welts = []
+        k.cords = drawcords(B, tree, k)
+        obj = B.build(f'SK_Garment_Hoodie_{h.key}')
+        relax_around(obj, [v for sv in k.sleeves for v in sv['loop']], rings=4, iterations=10)
+        orient_parts(obj)
+        obj.data.shade_smooth()
+        return obj, k
     # The collar: rib, standing round the neck from the neckline, rolled over at the top, its inner layer back down.
     k.collar = build_collar(B, k, G[-1], P[-1], nt[-1])
     # The zip up center front, its slider and pull at the top.
@@ -3004,6 +3336,197 @@ def welt_pocket(B, tree, k, side):
 
 
 
+# ------------------------------------------------------------------ the hoodie's own parts
+
+def onto_shell(tree, p, clearance, axis_y):
+    """The shell's nearest point under p, pushed out along its normal (turned away from the body's axis, or up on top of
+    the shoulders) to clearance. Returns the point and that normal."""
+    loc, nor, _, _ = tree.find_nearest(Vector(tuple(p)))
+    if loc is None:
+        return np.asarray(p, float), np.array([0.0, 0.0, 1.0])
+    loc = np.array(loc)
+    nor = np.array(nor)
+    out = np.array([loc[0], loc[1] - axis_y, 0.0])
+    if nor @ out + 0.35 * nor[2] * np.linalg.norm(out) < 0:
+        nor = -nor
+    return loc + nor * clearance, nor
+
+
+def tube_path(B, path, r, isl, mat, sides=8, caps=True):
+    """A round cord along a path (frames carried along it without twisting), capped at both ends."""
+    path = np.asarray(path, float)
+    T = np.gradient(path, axis=0)
+    T /= np.linalg.norm(T, axis=1, keepdims=True) + 1e-12
+    ref = np.array([0.0, 0.0, 1.0]) if abs(T[0][2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    e1 = np.zeros_like(path)
+    v = ref - T[0] * (ref @ T[0])
+    e1[0] = v / np.linalg.norm(v)
+    for i in range(1, len(path)):
+        v = e1[i - 1] - T[i] * (e1[i - 1] @ T[i])
+        e1[i] = v / (np.linalg.norm(v) + 1e-12)
+    e2 = np.cross(T, e1)
+    ang = np.linspace(0.0, 2 * math.pi, sides, endpoint=False)
+    rings = path[:, None, :] + r * (np.cos(ang)[None, :, None] * e1[:, None, :] + np.sin(ang)[None, :, None] * e2[:, None, :])
+    G = B.verts(rings)
+    B.grid(G, wrap=True, isl=isl, mat=mat)
+    if caps:
+        for end, rev in ((0, True), (len(path) - 1, False)):
+            c = B.verts(path[end][None])[0]
+            for j in range(sides):
+                a_, b_ = G[end, j], G[end, (j + 1) % sides]
+                B.face((a_, c, b_) if rev else (a_, b_, c), mat, isl)
+    return G
+
+
+def build_hood(B, k, base_idx, base_P, tree):
+    """The hood, down. From the neck seam (base_P, round the base of the neck) it stands up round the neck (lowest at the
+    throat, where its two edges cross), folds over outward in a soft roll, and lies down over the shoulders and the back,
+    bunched near the top, wider than the neck and longest at center back (19 cm), a finger's width at the sides, its free
+    edge turned under. Two halves (K_HOOD_L, K_HOOD_R) meeting in a seam down the middle of the back and at the throat."""
+    M = len(base_idx)
+    c0 = np.array([0.0, k.neck_c[1]])
+    rel = base_P[:, :2] - c0
+    ang = np.arctan2(rel[:, 1], rel[:, 0])
+    outv = np.concatenate([rel / (np.linalg.norm(rel, axis=1, keepdims=True) + 1e-9), np.zeros((M, 1))], 1)
+    up = np.array([0.0, 0.0, 1.0])
+    back = np.clip(np.sin(ang), 0.0, 1.0)
+    front = np.clip(-np.sin(ang), 0.0, 1.0)
+    throat = np.exp(-(wrap_pi(ang + 0.5 * math.pi) / 0.28) ** 2)
+    # Standing up the neck, leaning out a little; lower toward the front, down to a V where the edges cross at the throat.
+    h_rise = np.maximum(smooth1d(0.022 + 0.016 * back - 0.010 * front - 0.017 * throat, 2, wrap=True), 0.004)
+    lean = 0.003 + 0.010 * back
+    # The roll over: a half turn outward, fuller at the back where the hood's bulk is.
+    r_roll = smooth1d(0.008 + 0.012 * back, 2, wrap=True)
+    # Lying down: long at the back (the hood's own length, about 25 cm), a finger's width at the sides and the front.
+    L = smooth1d(0.014 + 0.22 * back ** 1.4 + 0.02 * back, 3, wrap=True)
+    rows = [np.asarray(base_P, float)]
+    n_rise, n_roll, n_flap = 5, 6, 12
+    for i in range(1, n_rise + 1):
+        u = i / n_rise
+        rows.append(rows[0] + up * (h_rise * u)[:, None] + outv * (lean * u ** 1.5)[:, None])
+    T = rows[-1]
+    C = T + outv * r_roll[:, None]
+    for i in range(1, n_roll + 1):
+        th = math.pi - math.pi * i / n_roll
+        rows.append(C + r_roll[:, None] * (math.cos(th) * outv + math.sin(th) * up))
+    F0 = rows[-1]
+    normals = []
+    for j in range(1, n_flap + 1):
+        t = j / n_flap
+        guess = F0.copy()
+        # Wider than the neck as it goes down the back (the hood's own width), and down.
+        guess[:, 0] = F0[:, 0] * (1.0 + 1.1 * back * t)
+        guess[:, 2] = F0[:, 2] - L * t
+        clr = 0.005 + 0.013 * back * (1.0 - t) ** 1.5
+        pts, nrs = [], []
+        for i in range(M):
+            p, nr = onto_shell(tree, guess[i], clr[i], c0[1])
+            pts.append(p)
+            nrs.append(nr)
+        rows.append(np.array(pts))
+        normals.append(np.array(nrs))
+    # Even the flap out (the nearest points jump where the shell turns), the roll's last row and the free edge held.
+    first = n_rise + n_roll
+    R = np.array(rows)
+    for _ in range(4):
+        avg = 0.25 * (np.roll(R, 1, 1) + np.roll(R, -1, 1)) + 0.25 * (np.roll(R, 1, 0) + np.roll(R, -1, 0))
+        R[first + 1:-1] = 0.5 * R[first + 1:-1] + 0.5 * avg[first + 1:-1]
+    rows = list(R)
+    halves = lambda c: K_HOOD_L if c < M // 2 else K_HOOD_R  # noqa: E731
+    G = [np.asarray(base_idx)] + [B.verts(r) for r in rows[1:]]
+    ring_strip(B, G, SHELL, halves)
+    # The free edge turns under, toward the shell.
+    last, nl = rows[-1], normals[-1]
+    rA = B.verts(last - up * 0.0015 - nl * 0.0016)
+    rB = B.verts(last - nl * 0.0038 + up * 0.0006)
+    ring_strip(B, [G[-1], rA, rB], SHELL, halves)
+    return {'rows': np.array(rows), 'ang': ang, 'outv': outv, 'G': G, 'L': L, 'h_rise': h_rise, 'first_flap': first}
+
+
+def kangaroo_pocket(B, tree, k):
+    """The kangaroo pocket: a panel sewn over the front from just above the hem band, 16.5 cm deep, 30 cm across at the
+    bottom and 19 at the top, its slanted sides the hand openings, standing 2.8 mm proud, its edges turned under."""
+    tor = k.tor
+    z0, z1 = k.z_b + 0.01, k.z_b + 0.175
+    hw0, hw1 = 0.15, 0.095
+    na, nb = 33, 19
+    U, Vv = np.meshgrid(np.linspace(-1.0, 1.0, na), np.linspace(0.0, 1.0, nb))
+    z = z0 + (z1 - z0) * Vv
+    hw = hw0 + (hw1 - hw0) * Vv
+    psi_c = -0.5 * math.pi
+    R = tor.radius(z, np.full_like(z, psi_c))
+    psi = psi_c + U * hw / R
+    rough = tor.point(z, psi)
+    P = np.zeros_like(rough)
+    n = np.zeros_like(rough)
+    for idx in np.ndindex(U.shape):
+        loc, nor, _, _ = tree.find_nearest(Vector(rough[idx]))
+        nor = np.array(nor)
+        cdir = np.array([loc.x, loc.y - tor.center(loc.z)[1], 0.0])
+        if nor @ cdir < 0:
+            nor = -nor
+        P[idx], n[idx] = np.array(loc), nor
+    n = smooth_grid(n)
+    G = B.verts(P + n * 0.0028)
+    B.grid(G, isl=K_KANGAROO, mat=SHELL)
+    loop = list(G[0, :]) + list(G[1:, -1]) + list(G[-1, -2::-1]) + list(G[-2:0:-1, 0])
+    loopN = np.concatenate([n[0, :], n[1:, -1], n[-1, -2::-1], n[-2:0:-1, 0]])
+    loopP = B.positions()[loop]
+    inner = B.verts(loopP - loopN * 0.0034)
+    for i in range(len(loop)):
+        i1 = (i + 1) % len(loop)
+        B.face((loop[i1], loop[i], inner[i], inner[i1]), SHELL, K_KANGAROO)
+    return {'z0': z0, 'z1': z1, 'hw0': hw0, 'hw1': hw1, 'psi': psi_c}
+
+
+def drawcords(B, tree, k):
+    """The drawcords: out of two metal eyelets low on the hood's rise either side of the throat, hanging down the chest over
+    the shell (the wearer's left a little shorter), round braided cotton with metal tips."""
+    hood = k.hood
+    rows, ang, outv = hood['rows'], hood['ang'], hood['outv']
+    axis_y = k.neck_c[1]
+    down = np.array([0.0, 0.0, -1.0])
+    out = []
+    for side, (da, length) in enumerate(((0.33, 0.215), (-0.33, 0.236))):
+        c = int(np.argmin(np.abs(wrap_pi(ang - (-0.5 * math.pi + da)))))
+        E = rows[2][c] + outv[c] * 0.0022
+        n_out = outv[c]
+        path = [E, E + n_out * 0.004 + down * 0.006]
+        sway = 0.004 * (1.0 if side == 0 else -1.0)
+        ahead = None
+        for t in np.linspace(0.016, length, 24):
+            guess = E + down * t + np.array([sway * t / length, 0.0, 0.0])
+            p, _ = onto_shell(tree, guess, 0.0034, axis_y)
+            if ahead is not None and ahead < p[1]:
+                # Past the chest's fullest point (a bust, a broad chest) the cord hangs straight down in front of the shell
+                # (the front is -Y) instead of following it back in, until the shell comes forward to meet it again.
+                p = np.array([guess[0], ahead, guess[2]])
+            ahead = p[1]
+            path.append(p)
+        path = np.array(path)
+        # Smooth along, ends held.
+        for _ in range(3):
+            path[1:-1] = 0.5 * path[1:-1] + 0.25 * (path[:-2] + path[2:])
+        # Even steps along the cord (the snapped points bunch where the shell turns and jump where it falls away), so its
+        # last 22 mm, the metal tip, is always a run of points of its own.
+        seg = np.linalg.norm(np.diff(path, axis=0), axis=1)
+        cum = np.concatenate([[0.0], np.cumsum(seg)])
+        steps = np.linspace(0.0, cum[-1], max(8, int(cum[-1] / 0.006) + 1))
+        path = np.stack([np.interp(steps, cum, path[:, i]) for i in range(3)], axis=1)
+        cum = steps
+        tip = int(np.clip(np.searchsorted(cum, cum[-1] - 0.022), 1, len(path) - 2))
+        tube_path(B, path[:tip + 1], 0.0025, K_CORD, HARDWARE)
+        tube_path(B, path[tip:], 0.0030, K_AGLET, HARDWARE)
+        # The eyelet: a metal ring round where the cord comes out.
+        e1 = np.cross(n_out, np.array([0.0, 0.0, 1.0]))
+        e1 /= np.linalg.norm(e1) + 1e-9
+        e2 = np.cross(n_out, e1)
+        ring = [E - n_out * 0.0004 + 0.0042 * (math.cos(t) * e1 + math.sin(t) * e2) for t in np.linspace(0.0, 2 * math.pi, 17)]
+        tube_path(B, ring, 0.0011, K_EYELET, HARDWARE, sides=6, caps=False)
+        out.append({'E': E, 'length': length})
+    return out
+
+
 def relax_around(obj, seeds, rings=4, iterations=10):
     """Smooths the surface a few edges either side of a seam (the armholes), strongest on the seam itself."""
     me = obj.data
@@ -3096,8 +3619,10 @@ def jacket_textures(obj, k, name, uv_scale):
     _, _, mi, isl, _, _, _ = face_arrays(obj)
     piece = np.empty(len(obj.data.polygons), dtype=np.int64)
     obj.data.attributes['piece'].data.foreach_get('value', piece)
-    set_attr(obj, 'gI', corner_values(obj, np.stack([isl / 32.0, piece / 256.0, np.zeros(len(isl))], 1)), 'CORNER')
+    set_attr(obj, 'gI', corner_values(obj, np.stack([isl / ISL_SCALE, piece / 256.0, np.zeros(len(isl))], 1)), 'CORNER')
     out = {}
+    hoodie = getattr(k, 'kind', 'jacket') == 'hoodie'
+    painters = {SHELL: paint_fleece, RIB: paint_rib, HARDWARE: paint_cords} if hoodie else {SHELL: paint_shell, RIB: paint_rib, HARDWARE: paint_hardware}
     for slot in (SHELL, RIB, HARDWARE):
         t0 = time.time()
         size = JACKET_SIZES[slot]
@@ -3108,7 +3633,7 @@ def jacket_textures(obj, k, name, uv_scale):
         N = maps['gN'][iy, ix].astype(np.float64) * 2.0 - 1.0
         N /= np.linalg.norm(N, axis=1, keepdims=True) + 1e-9
         fd = (maps['gF'][iy, ix, 0] - 0.5) / 100.0
-        I = np.rint(maps['gI'][iy, ix, 0] * 32.0).astype(int)
+        I = np.rint(maps['gI'][iy, ix, 0] * ISL_SCALE).astype(int)
         pc = np.rint(maps['gI'][iy, ix, 1] * 256.0).astype(int)
         a, b = piece_frames(obj, slot, size, uv_scale[slot], iy, ix, pc)
         px_m = uv_scale[slot] * size                      # texels per meter
@@ -3119,8 +3644,7 @@ def jacket_textures(obj, k, name, uv_scale):
         tx, ty = -gy[iy, ix], gx[iy, ix]
         tn = np.hypot(tx, ty) + 1e-9
         along = (a * tx + b * ty) / tn                    # along the nearest edge
-        fn = {SHELL: paint_shell, RIB: paint_rib, HARDWARE: paint_hardware}[slot]
-        res = fn(k, P, N, fd, I, a, b, de, along)
+        res = painters[slot](k, P, N, fd, I, a, b, de, along)
         res.update({'iy': iy, 'ix': ix, 'P': P, 'valid': valid})
         out[slot] = res
         print(f'[garments] {name}: slot {slot} painted ({len(iy)} texels, {time.time() - t0:.0f}s)')
@@ -3226,19 +3750,102 @@ def paint_hardware(k, P, N, fd, I, a, b, de, along):
     return {'base': base, 'rough': rough, 'metal': metal, 'height': height}
 
 
+FLEECE = 0.6          # the hoodie's heathered fleece, light neutral grey (linear): the game multiplies in its color
+CORD = 0xe4dfd3       # the drawcords' unbleached cotton
+NICKEL = 0xb5b8bb     # the eyelets and the cords' tips
+
+
+def paint_fleece(k, P, N, fd, I, a, b, de, along):
+    """The hoodie's shell: a heathered cotton fleece (the face a fine jersey, flecked lighter and darker fibers), its seams
+    coverstitched (two rows) at the cuffs, the hem band, the pocket and the hood, the hood's seam down the middle of the back,
+    the pocket's slanted openings bound and rubbed light; soft pilling where the arms rub the sides; the folds' hollows
+    darker."""
+    n = len(P)
+    rng_n = texmaps.value_noise
+    z = P[:, 2]
+    pocket = I == K_KANGAROO
+    hood = np.isin(I, [K_HOOD_L, K_HOOD_R])
+    mott = rng_n(P, 0.06, seed=81, octaves=3)
+    fine = rng_n(P, 0.0012, seed=82, octaves=2)
+    heather = rng_n(P, 0.0006, seed=83, octaves=1)
+    fleck = smoothstep(0.62, 0.8, heather) - 0.7 * smoothstep(0.62, 0.8, 1.0 - heather)
+    tone = np.full(n, FLEECE) * (1.0 + 0.035 * (mott - 0.5) + 0.06 * fleck + 0.03 * (fine - 0.5))
+    # The jersey face: tiny columns of V loops (the Detail normal in the game carries the weave; this is its larger swell).
+    knit = 0.5 + 0.5 * np.cos(2 * math.pi * a / 0.0016)
+    height = 0.000035 * knit + 0.00004 * (fine - 0.5)
+    rough = np.full(n, 0.9) + 0.04 * (fine - 0.5)
+    # Seams: a soft groove at every piece's edge; two rows of coverstitch beside the hem band's, the cuffs' and the pocket's
+    # joins, one beside the rest.
+    height -= 0.0004 * np.exp(-(de / 0.001) ** 2)
+    height += 0.00025 * smoothstep(0.0012, 0.0025, de) * (1.0 - smoothstep(0.006, 0.008, de))
+    cov1, h1 = stitch_row(de - 0.0032, along, width=0.0008, period=0.0026)
+    cov2, h2 = stitch_row(de - 0.0064, along, width=0.0008, period=0.0026)
+    twin = pocket | hood
+    thread = np.maximum(cov1, cov2 * twin)
+    height += h1 + h2 * twin
+    tone = tone * (1.0 + 0.06 * np.exp(-((de - 0.002) / 0.0015) ** 2))
+    # The pocket's openings (its slanted sides) bound in a narrow edge, handled lighter and a little grubby.
+    if pocket.any():
+        pz = (z - k.pocket['z0']) / (k.pocket['z1'] - k.pocket['z0'])
+        side_edge = pocket & (pz > 0.08) & (pz < 0.95) & (de < 0.012)
+        tone = np.where(side_edge, tone * (1.0 + 0.08 * np.exp(-(de / 0.004) ** 2)), tone)
+        height += 0.0003 * side_edge * np.exp(-((de - 0.003) / 0.002) ** 2)
+    # Folds: ridges paler, hollows darker; pilling where the inner arms rub the sides and under the arms.
+    tone *= 1.0 + 3.0 * np.clip(fd, -0.004, 0.004)
+    pill = smoothstep(0.7, 0.9, rng_n(P, 0.0025, seed=84, octaves=1)) * np.clip(np.abs(N[:, 0]) - 0.5, 0.0, 1.0) * 2.0
+    height += 0.00018 * pill
+    tone *= 1.0 + 0.05 * pill
+    # Grime low on the front and in the pocket's mouths, round the cuffs.
+    grime = 0.1 * (1.0 - smoothstep(k.z_b, k.z_b + 0.1, z)) * np.clip(-N[:, 1], 0, 1)
+    grime += 0.08 * (mott > 0.65) * (mott - 0.65) * 4.0
+    tone *= (1.0 - grime)
+    base = np.repeat(tone[:, None], 3, 1) * np.array([1.0, 0.99, 0.97])
+    # The thread is the fleece's own color, a shade deeper.
+    base = mix3(base, base * 0.8, thread * 0.8)
+    rough = rough * (1 - thread) + 0.8 * thread
+    return {'base': base, 'rough': rough, 'metal': np.zeros(n), 'height': height}
+
+
+def paint_cords(k, P, N, fd, I, a, b, de, along):
+    """The drawcords (braided cotton, a herringbone of strands along them, grubby toward the tips) and the metal: the tips
+    and the eyelets, nickel, rubbed bright on their edges."""
+    n = len(P)
+    fine = texmaps.value_noise(P, 0.0008, seed=91, octaves=2)
+    cord = I == K_CORD
+    metal_p = np.isin(I, [K_AGLET, K_EYELET])
+    braid = 0.5 + 0.5 * np.cos(2 * math.pi * (a / 0.0028 + np.abs(np.mod(b / 0.0042, 1.0) - 0.5) * 2.0))
+    height = 0.00022 * braid * cord + 0.00003 * (fine - 0.5)
+    tone = (0.84 + 0.16 * braid) * (0.92 + 0.16 * fine)
+    base = np.tile(lin(CORD), (n, 1)) * tone[:, None]
+    # Grubby toward the ends (handled), and where they rub the chest.
+    zz = P[:, 2]
+    low = 1.0 - smoothstep(zz.min() if n else 0.0, (zz.min() if n else 0.0) + 0.06, zz)
+    base = mix3(base, base * lin(0x7a6f60) * 1.5, np.clip(0.35 * low * cord, 0, 0.6))
+    rough = np.full(n, 0.88)
+    metal = np.zeros(n)
+    worn = texmaps.value_noise(P, 0.002, seed=92, octaves=2)
+    mcol = mix3(np.tile(lin(NICKEL), (n, 1)), np.tile(lin(0x5a5c60), (n, 1)), np.clip(0.3 - 0.4 * np.exp(-(de / 0.0012) ** 2) + 0.4 * (worn - 0.5), 0, 1))
+    base = np.where(metal_p[:, None], mcol, base)
+    metal = np.where(metal_p, 1.0, metal)
+    rough = np.where(metal_p, 0.28 + 0.15 * worn, rough)
+    return {'base': base, 'rough': rough, 'metal': metal, 'height': height}
+
+
 def maps_material(name, res, size, specular=0.3):
     return texture_material(name, res, size, specular=specular)
 
 
 def finish_jacket(h, jacket, k, bake=True):
     name = jacket.name
-    for nm in ('shell', 'rib', 'zip'):
+    hoodie = getattr(k, 'kind', 'jacket') == 'hoodie'
+    names = ('shell', 'rib', 'cords') if hoodie else ('shell', 'rib', 'zip')
+    for nm in names:
         jacket.data.materials.append(core.Mat(f'{name}_{nm}_placeholder').m)
     unwrap(jacket)
     k.uv_scale = layout_uvs(jacket, JACKET_SIZES)
     res = jacket_textures(jacket, k, name, k.uv_scale)
-    mats = [texture_material(f'M_{name}_{nm}', res[s], JACKET_SIZES[s], specular=sp)
-            for s, nm, sp in ((SHELL, 'shell', 0.32), (RIB, 'rib', 0.3), (HARDWARE, 'zip', 0.5))]
+    mats = [texture_material(f'M_{name}_{nm}', res[s], JACKET_SIZES[s], specular=sp, sheen=0.2 if hoodie and s == SHELL else 0.0)
+            for s, nm, sp in ((SHELL, names[0], 0.3 if hoodie else 0.32), (RIB, names[1], 0.3), (HARDWARE, names[2], 0.5))]
     for s, m in enumerate(mats):
         jacket.material_slots[s].material = m
     if bake:
@@ -3293,10 +3900,13 @@ OUTFIT_TONES = {'charcoal': 0x34383f, 'navy': 0x1f2d4d, 'olive': 0x4b5638, 'burg
 TINT_LIFT, RIB_SHADE = 1.5, 0.55   # as AShortStackCharacter tints them (TintSlot's lift; the rib a darker shade)
 
 
-def review_tint(jacket, tone):
-    """Multiplies the jacket's baked shell (and, darker, its rib) by an outfit color, as the game's material does."""
+def review_tint(jacket, tone, slots=((SHELL, 1.0), (RIB, RIB_SHADE))):
+    """Multiplies a garment's baked tinted slots (a top's shell and, darker, its rib; the chinos' twill) by a color, as the
+    game's material does."""
     rgb = np.array(core.hex_linear(tone)[:3]) * TINT_LIFT
-    for slot, k in ((SHELL, 1.0), (RIB, RIB_SHADE)):
+    for slot, k in slots:
+        if slot >= len(jacket.material_slots) or jacket.material_slots[slot].material is None:
+            continue
         m = jacket.material_slots[slot].material
         nt = m.node_tree
         bsdf = next(n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED')
@@ -3345,11 +3955,17 @@ def write_details():
     duck_f = 0.5 + 0.5 * np.cos(2 * math.pi * 16 * v)
     over = np.cos(2 * math.pi * 8 * u) * np.cos(2 * math.pi * 8 * v)
     h_duck = 0.00007 * (duck_w * (0.5 + 0.5 * over) + duck_f * (0.5 - 0.5 * over)) + 0.000012 * fib
+    # A single jersey's face for the hoodie's fleece: columns of V-shaped loops (16 wales and 20 courses a centimeter),
+    # each V's two legs leaning out from its column's middle.
+    col = np.mod(u * 16.0, 1.0) - 0.5
+    row = np.mod(v * 20.0 + 0.5 * np.abs(col), 1.0)
+    leg = np.exp(-((np.abs(col) - 0.22) / 0.13) ** 2) * (0.6 + 0.4 * np.sin(np.pi * row))
+    h_jersey = 0.00005 * leg + 0.00001 * fib
     dst = os.path.join(GARMENT_DIR, 'Textures')
     os.makedirs(dst, exist_ok=True)
     import shutil
     out = []
-    for name, hgt in (('T_Garment_Detail_Twill_N', h_twill), ('T_Garment_Detail_Canvas_N', h_duck)):
+    for name, hgt in (('T_Garment_Detail_Twill_N', h_twill), ('T_Garment_Detail_Canvas_N', h_duck), ('T_Garment_Detail_Jersey_N', h_jersey)):
         nm = texmaps.height_to_normal(hgt, P, valid)
         p = texmaps.save(name, nm * 0.5 + 0.5, 'Non-Color')
         shutil.copyfile(p, os.path.join(dst, f'{name}.png'))
@@ -3376,7 +3992,8 @@ def write_notes(name, uv_scale):
 
 
 def compose_overview():
-    """art/review/garments.jpg: both bodies' sheets side by side (A left, B right), once both exist."""
+    """art/review/garments_overview.jpg: both body types' sheets side by side (A left, B right), once both exist. (Not
+    garments.jpg: that's the rack and folded statics' sheet, which build.py names after the asset.)"""
     paths = [os.path.join(core.REVIEW_DIR, f'garments_{k}.jpg') for k in HEROES]
     if not all(os.path.isfile(p) for p in paths):
         return None
@@ -3384,9 +4001,396 @@ def compose_overview():
     hh = min(im.shape[0] for im in imgs)
     gap = np.full((hh, 12, 4), 0.05, dtype=np.float32)
     out = np.concatenate([imgs[0][:hh], gap, imgs[1][:hh]], axis=1)
-    path = os.path.join(core.REVIEW_DIR, 'garments.jpg')
+    path = os.path.join(core.REVIEW_DIR, 'garments_overview.jpg')
     save_rgb(path, out)
     return path
+
+
+# ------------------------------------------------------------------ the thrift's racks: garments on hangers, folded stacks
+#
+# A build.py asset too (blender -b -P art/blender/build.py -- garments): static meshes for Second Chance Thrift's racks and
+# tables (the spec's 4.7), made from the garments above once they're exported (unreal/Art/Garments, the body type A fits)
+# and the MetaHuman's tee (the wardrobe's HeroA1 outfit):
+#   SM_NS_Rack_<Tee|Hoodie|Bomber|Jeans|Chinos>: the garment relaxed onto a hanger (its armature posed arms down or legs
+#     together, flattened front to back as a garment with nobody in it hangs), the hook's inside top (where it rests on the
+#     rail) at the origin; tops on a wire hanger, trousers clipped by the waistband to a clip hanger. The hook lies in the
+#     hanger's plane, so the rail passes through it square to the shoulders.
+#   SM_NS_Folded_<Tee|Jeans|Hoodie>: a stack of three folded, the origin at the stack's bottom middle.
+# PROP frame (the spec's 0.4): front toward Blender -X and each garment's width along Y (ns_thrift's hanger points turn
+# each one onto its rail by their yaw), so the rail runs along X through the hook. Slot 0 is the cloth, baked from the garment's own paint into one atlas (its shell's light grey, which
+# M_NS_ClothTint multiplies by the instance's custom primitive data 0..2; the jeans bake their indigo: tint them white), slot
+# 1 the hanger's steel (the stacks have only slot 0). The flannel, denim, leather and track racks follow those P1 garments.
+
+RACK_KINDS = (('Tee', None), ('Hoodie', 'SK_Garment_Hoodie_A'), ('Bomber', 'SK_Garment_Jacket_A'), ('Jeans', 'SK_Garment_Jeans_A'),
+              ('Chinos', 'SK_Garment_Chinos_A'))
+MESHES = [f'SM_NS_Rack_{k}' for k, _ in RACK_KINDS] + ['SM_NS_Folded_Tee', 'SM_NS_Folded_Jeans', 'SM_NS_Folded_Hoodie']
+DOUBLE_SIDED = True
+AO_DISTANCE = 0.02
+# A garment on a rail is seen from a meter or two: its cloth at 1024, a stack's at 512, the wire at 256.
+TEXTURE_SIZES = {**{f'M_NS_Rack_Wire_{k}': 256 for k, _ in RACK_KINDS}, **{f'M_NS_Rack_{k}_Cloth': 1024 for k, _ in RACK_KINDS},
+                 'M_NS_Folded_Tee': 512, 'M_NS_Folded_Jeans': 512, 'M_NS_Folded_Hoodie': 512}
+REVIEW_VIEWS = [('front', -90, 6, 1.45), ('three', -55, 14, 1.55), ('detail', -70, 8, 0.5, (0.0, -0.62, 1.2))]
+# The review's rail: the hooks' height and the racks' spacing along it, and where the stacks sit in front.
+REVIEW_RAIL_Z = 1.6
+REVIEW_RAIL_STEP = 0.62
+
+
+def _import_fbx(path):
+    """A garment FBX as export_fbx wrote it (Y forward, Z up, so it comes back unturned)."""
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.fbx(filepath=path, axis_forward='Y', axis_up='Z')
+    new = [o for o in bpy.data.objects if o not in before]
+    arm = next((o for o in new if o.type == 'ARMATURE'), None)
+    mesh = next((o for o in new if o.type == 'MESH'), None)
+    return arm, mesh, new
+
+
+def _turn_world(arm, name, axis, deg):
+    """Turns a bone about a world axis through its head (whatever the armature object's own turn and scale)."""
+    pb = arm.pose.bones.get(name)
+    if pb is None:
+        return
+    bpy.context.view_layer.update()
+    a = (arm.matrix_world.to_3x3().inverted() @ Vector(axis)).normalized()
+    M = pb.matrix.copy()
+    head = M.translation.copy()
+    pb.matrix = Matrix.Translation(head) @ Matrix.Rotation(math.radians(deg), 4, a) @ Matrix.Translation(-head) @ M
+    bpy.context.view_layer.update()
+
+
+def _posed_static(mesh, name):
+    """The mesh as its armature poses it now, as a plain object in world space (materials and UVs kept)."""
+    dg = bpy.context.evaluated_depsgraph_get()
+    ev = mesh.evaluated_get(dg)
+    me = bpy.data.meshes.new_from_object(ev, depsgraph=dg)
+    me.transform(mesh.matrix_world)
+    obj = core.link(bpy.data.objects.new(name, me))
+    return obj
+
+
+def _hang_pose(arm, kind):
+    """Arms down along the sides (tops), or the legs together straight down (trousers). World axes, as pose() has them:
+    +Y lowers the left arm (+X), -X swings a limb forward."""
+    for pb in arm.pose.bones:
+        pb.rotation_mode = 'QUATERNION'
+    bpy.context.view_layer.update()
+    if kind in ('Jeans', 'Chinos'):
+        _turn_world(arm, 'thigh_l', Y, 3.5)
+        _turn_world(arm, 'thigh_r', Y, -3.5)
+    else:
+        _turn_world(arm, 'upperarm_l', Y, 52)
+        _turn_world(arm, 'upperarm_r', Y, -52)
+        _turn_world(arm, 'upperarm_l', X, -6)
+        _turn_world(arm, 'upperarm_r', X, -6)
+        _turn_world(arm, 'lowerarm_l', X, -10)
+        _turn_world(arm, 'lowerarm_r', X, -10)
+
+
+def _flatten(obj, depth=0.42):
+    """Collapses the garment front to back about its middle, as one with nobody in it hangs."""
+    P = get_co(obj)
+    yc = 0.5 * (P[:, 1].min() + P[:, 1].max())
+    P[:, 1] = yc + (P[:, 1] - yc) * depth
+    P[:, 1] -= yc
+    set_co(obj, P)
+
+
+def _merged_cloth(name, garment, slots):
+    """One material for a garment's every cloth slot, sampling each slot's painted maps (unreal/Art/Garments/Textures:
+    T_<garment>_<slot>_BaseColor/_ORM/_Normal) on the garment's own UVs ("UVMap"), picked per face by the "src"
+    attribute; baked by build.py into the new atlas (the active UV layer)."""
+    tex_dir = os.path.join(GARMENT_DIR, 'Textures')
+    m = core.Mat(name)
+    nt = m.nt
+    uv = nt.nodes.new('ShaderNodeUVMap')
+    uv.uv_map = 'UVMap'
+    attr = nt.nodes.new('ShaderNodeAttribute')
+    attr.attribute_type = 'GEOMETRY'
+    attr.attribute_name = 'src'
+    chans = {'BaseColor': None, 'ORM': None, 'Normal': None}
+    for i, slot in enumerate(slots):
+        for key in chans:
+            path = os.path.join(tex_dir, f'T_{garment}_{slot}_{key}.png')
+            if not os.path.isfile(path):
+                continue
+            img = m.image(path, non_color=key != 'BaseColor')
+            m.link(uv.outputs['UV'], img.inputs['Vector'])
+            if chans[key] is None:
+                chans[key] = img.outputs['Color']
+                continue
+            gt = nt.nodes.new('ShaderNodeMath')
+            gt.operation = 'GREATER_THAN'
+            gt.inputs[1].default_value = i - 0.5
+            m.link(attr.outputs['Fac'], gt.inputs[0])
+            mix = nt.nodes.new('ShaderNodeMix')
+            mix.data_type = 'RGBA'
+            m.link(gt.outputs['Value'], mix.inputs[0])
+            m.link(chans[key], mix.inputs[6])
+            m.link(img.outputs['Color'], mix.inputs[7])
+            chans[key] = mix.outputs[2]
+    if chans['BaseColor'] is not None:
+        m.link(chans['BaseColor'], m.bsdf.inputs['Base Color'])
+    if chans['ORM'] is not None:
+        sep = m.node('ShaderNodeSeparateColor')
+        m.link(chans['ORM'], sep.inputs['Color'])
+        m.link(sep.outputs['Green'], m.bsdf.inputs['Roughness'])
+        m.link(sep.outputs['Blue'], m.bsdf.inputs['Metallic'])
+    if chans['Normal'] is not None:
+        nm = m.node('ShaderNodeNormalMap')
+        nm.uv_map = 'UVMap'
+        m.link(chans['Normal'], nm.inputs['Color'])
+        m.link(nm.outputs['Normal'], m.bsdf.inputs['Normal'])
+    m.set('Specular IOR Level', 0.3)
+    return m.m
+
+
+def _jersey(name, tone=0.62, scale=900.0, bump=0.25):
+    """A plain knit for what has no paint of its own (the MetaHuman's tee, the folded stacks): light grey for the tint,
+    a fine bump and mottling."""
+    m = core.Mat(name)
+    tc = m.node('ShaderNodeTexCoord')
+    nz = m.node('ShaderNodeTexNoise', Scale=scale, Detail=6.0)
+    m.link(tc.outputs['Object'], nz.inputs['Vector'])
+    big = m.node('ShaderNodeTexNoise', Scale=18.0, Detail=3.0)
+    m.link(tc.outputs['Object'], big.inputs['Vector'])
+    m.set('Base Color', m.mix(big.outputs['Fac'], (tone * 0.95, tone * 0.94, tone * 0.92, 1.0), (tone * 1.04, tone * 1.03, tone, 1.0)))
+    bm = m.node('ShaderNodeBump', Strength=bump, Distance=0.0006)
+    m.link(nz.outputs['Fac'], bm.inputs['Height'])
+    m.link(bm.outputs['Normal'], m.bsdf.inputs['Normal'])
+    m.set('Roughness', 0.9)
+    m.set('Specular IOR Level', 0.3)
+    return m.m
+
+
+def _wire(name):
+    """The hangers' steel: galvanized wire, a little dull."""
+    m = core.Mat(name)
+    m.set('Base Color', core.hex_linear(0x9aa0a6))
+    m.set('Metallic', 1.0)
+    m.set('Roughness', 0.32)
+    return m.m
+
+
+WIRE_R = 0.0016
+# The wire hanger's shoulders (_wire_hanger): from the neck's foot (2 cm out, 6.6 cm under the hook's top) down to the tips
+# (20 cm out, 11.8 cm under).
+WIRE_SHOULDER = ((0.02, -0.066), (0.2, -0.118))
+# How far front and back fall together on the hanger (_flatten's depth), by kind.
+RACK_DEPTH = {'Tee': 0.16, 'Hoodie': 0.26, 'Bomber': 0.26, 'Jeans': 0.18, 'Chinos': 0.18}
+
+
+def _wire_top(x):
+    """The top of the wire hanger's shoulder at a distance x out from its neck."""
+    (x0, z0), (x1, z1) = WIRE_SHOULDER
+    t = min(max((abs(x) - x0) / (x1 - x0), 0.0), 1.0)
+    return z0 + (z1 - z0) * t + WIRE_R
+
+
+def _wire_hanger(mat):
+    """A wire hanger, the hook's top at the origin: the hook, the twisted neck, the sloped shoulders, the bar."""
+    r = WIRE_R
+    # The hook curls over the rail in the hanger's own plane (the rail runs along Y here, along X once turned into the PROP
+    # frame) and comes down into the neck; its inside top rests on the rail at the origin.
+    hook = [(0.012 * math.sin(t), 0.0, r - 0.012 + 0.012 * math.cos(t)) for t in np.linspace(-0.2, math.pi, 10)]
+    neck = [(0.0, 0.0, r - 0.024), (0.0, 0.0, -0.05), (0.0, 0.0, -0.058)]
+    parts_ = [parts.tube('hanger_hook', hook + neck, r, n=8, steps=6)]
+    (sx0, sz0), (sx1, sz1) = WIRE_SHOULDER
+    left = [(0.0, 0.0, -0.058), (sx0, 0.0, sz0), (sx1, 0.0, sz1), (0.208, 0.0, -0.126), (0.2, 0.0, -0.132)]
+    right = [(-x, y, z) for x, y, z in left]
+    parts_.append(parts.tube('hanger_l', left, r, n=8, steps=6))
+    parts_.append(parts.tube('hanger_r', right, r, n=8, steps=6))
+    parts_.append(parts.rod('hanger_bar', (-0.2, 0.0, -0.132), (0.2, 0.0, -0.132), r, n=8))
+    for p in parts_:
+        p.data.materials.append(mat)
+    return parts_
+
+
+def _clip_hanger(mat):
+    """A clip hanger for trousers, the hook's top at the origin: the hook, a flat bar, two spring clips at its ends."""
+    r = 0.0018
+    # As the wire hanger's: the hook in the hanger's plane, its inside top at the origin.
+    hook = [(0.012 * math.sin(t), 0.0, r - 0.012 + 0.012 * math.cos(t)) for t in np.linspace(-0.2, math.pi, 10)] + [(0.0, 0.0, -0.05), (0.0, 0.0, -0.07)]
+    out = [parts.tube('clip_hook', hook, r, n=8, steps=6), parts.rod('clip_bar', (-0.18, 0.0, -0.075), (0.18, 0.0, -0.075), 0.0035, n=10)]
+    for s in (-1.0, 1.0):
+        out.append(parts.rbox(f'clip_{s:+.0f}', (s * 0.16, 0.0, -0.092), (0.028, 0.012, 0.03), r=0.002))
+    for p in out:
+        p.data.materials.append(mat)
+    return out
+
+
+def _rack(kind, garment, wardrobe):
+    """One garment on its hanger (see the section's comment)."""
+    if garment is None:
+        # The MetaHuman's tee, from the wardrobe's HeroA1 outfit: its shirt's faces only.
+        h = Hero('A', wardrobe)
+        _hang_pose(h.arm, kind)
+        obj = _posed_static(h.outfit, f'SM_NS_Rack_{kind}')
+        # Only the shirt (its materials are named for it; the rest is the shorts).
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        names = [mt.name if mt else '' for mt in obj.data.materials]
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if 'Shirt' not in names[f.material_index]], context='FACES')
+        bm.to_mesh(obj.data)
+        bm.free()
+        cloth = _jersey('M_NS_Rack_Tee_Cloth')
+        obj.data.materials.clear()
+        obj.data.materials.append(cloth)
+        obj.data.polygons.foreach_set('material_index', np.zeros(len(obj.data.polygons), dtype=np.int64))
+        for o in [h.body, h.outfit, h.arm]:
+            bpy.data.objects.remove(o)
+    else:
+        path = os.path.join(GARMENT_DIR, f'{garment}.fbx')
+        if not os.path.isfile(path):
+            print(f'[garments] {path} isn\'t built: no SM_NS_Rack_{kind}')
+            return None
+        arm, mesh, new = _import_fbx(path)
+        _hang_pose(arm, kind)
+        obj = _posed_static(mesh, f'SM_NS_Rack_{kind}')
+        nslots = len(obj.data.materials)
+        src = np.empty(len(obj.data.polygons), dtype=np.int64)
+        obj.data.polygons.foreach_get('material_index', src)
+        a = obj.data.attributes.new('src', 'FLOAT', 'FACE')
+        a.data.foreach_set('value', src.astype(np.float32))
+        obj.data.polygons.foreach_set('material_index', np.zeros(len(src), dtype=np.int64))
+        obj.data.materials.clear()
+        obj.data.materials.append(_merged_cloth(f'M_NS_Rack_{kind}_Cloth', garment, list(range(nslots))))
+        for o in new:
+            bpy.data.objects.remove(o)
+    trousers = kind in ('Jeans', 'Chinos')
+    # Nobody inside: front and back fall together, to about what each holds on a rail whose hangers are 6 cm apart
+    # (ns_thrift's hanger points): a tee 4 cm through, the fleece and the bomber about 8, trousers 4 to 5.
+    _flatten(obj, RACK_DEPTH.get(kind, 0.2))
+    P = get_co(obj)
+    P[:, 0] -= 0.5 * (P[:, 0].min() + P[:, 0].max())
+    # On the hanger: trousers by the waistband's top in the clips; tops lowered onto the wire until their shoulders rest on
+    # it (the cloth's top a few millimeters over the wire everywhere along the slope), so the wire is inside them.
+    if trousers:
+        dz = -0.1 - P[:, 2].max()
+    else:
+        # The cloth over the wire is what lies in the hanger's plane (y 0: the shoulders' top, where front and back meet), not
+        # a hood lying on the back over it.
+        ax = np.abs(P[:, 0])
+        plane = np.abs(P[:, 1]) < 0.012
+        need = []
+        for x0 in np.arange(0.05, 0.20, 0.01):
+            m = (ax >= x0) & (ax < x0 + 0.01)
+            if (m & plane).any():
+                m &= plane
+            if m.any():
+                need.append(_wire_top(x0 + 0.005) + 0.005 - P[m, 2].max())
+        dz = max(need) if need else -0.1 - P[:, 2].max()
+    P[:, 2] += dz
+    set_co(obj, P)
+    # The atlas the cloth bakes into (the garment's own UVs stay, as "UVMap", for the bake to read the paint).
+    if not obj.data.uv_layers:
+        obj.data.uv_layers.new(name='UVMap')
+    obj.data.uv_layers[0].name = 'UVMap'
+    atlas = obj.data.uv_layers.new(name='Atlas')
+    obj.data.uv_layers.active = atlas
+    wire = _wire(f'M_NS_Rack_Wire_{kind}')
+    hanger = _clip_hanger(wire) if trousers else _wire_hanger(wire)
+    for p in hanger:
+        p.data.uv_layers.new(name='UVMap')
+        p.data.uv_layers.new(name='Atlas')
+        p.data.uv_layers.active = p.data.uv_layers['Atlas']
+    obj = core.join([obj] + hanger, f'SM_NS_Rack_{kind}')
+    obj.data.uv_layers.active = obj.data.uv_layers['Atlas']
+    core.smart_uv(obj, margin=0.004, angle=60.0)
+    # The PROP frame: front toward -X.
+    obj.data.transform(Matrix.Rotation(-math.pi / 2, 4, 'Z'))
+    obj.data.shade_smooth()
+    return obj
+
+
+def _folded(name, kind, mat, sizes, seed):
+    """A stack of folded garments: rounded slabs, each a little different in size, set a little crooked, the top one's
+    collar (a tee) or its hood's lump (a hoodie) showing; the origin at the bottom middle."""
+    rng = np.random.default_rng(seed)
+    objs = []
+    z = 0.0
+    for i, (w, d, h) in enumerate(sizes):
+        w, d, h = w * rng.uniform(0.97, 1.03), d * rng.uniform(0.97, 1.03), h * rng.uniform(0.9, 1.1)
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(rng.uniform(-0.006, 0.006), rng.uniform(-0.006, 0.006), z + h / 2))
+        o = bpy.context.view_layer.objects.active
+        o.name = f'{name}_{i}'
+        o.scale = (w, d, h)
+        o.rotation_euler = (0.0, 0.0, math.radians(rng.uniform(-2.5, 2.5)))
+        core.apply_transforms(o)
+        bev = o.modifiers.new('bevel', 'BEVEL')
+        bev.width = min(h * 0.45, 0.012)
+        bev.segments = 4
+        sub = o.modifiers.new('sub', 'SUBSURF')
+        sub.levels = 2
+        tex = bpy.data.textures.new(f'{name}_{i}_wrinkle', 'CLOUDS')
+        tex.noise_scale = 0.035
+        disp = o.modifiers.new('wrinkle', 'DISPLACE')
+        disp.texture = tex
+        disp.strength = 0.0025
+        disp.texture_coords = 'OBJECT'
+        core.select_only([o])
+        for md in list(o.modifiers):
+            bpy.ops.object.modifier_apply(modifier=md.name)
+        o.data.materials.append(mat)
+        objs.append(o)
+        z += h * 0.96
+    if kind == 'Tee':
+        # The collar's ribbed curve showing at the back of the top one.
+        pts = [(0.055 * math.cos(t), 0.09 + 0.03 * math.sin(t), z + 0.002) for t in np.linspace(0.15 * math.pi, 0.85 * math.pi, 9)]
+        c = parts.tube(f'{name}_collar', pts, 0.004, n=8, steps=4)
+        c.data.materials.append(mat)
+        objs.append(c)
+    elif kind == 'Hoodie':
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=1.0, location=(0.0, 0.07, z))
+        lump = bpy.context.view_layer.objects.active
+        lump.scale = (0.11, 0.07, 0.02)
+        core.apply_transforms(lump)
+        lump.data.materials.append(mat)
+        objs.append(lump)
+    obj = core.join(objs, name)
+    core.smart_uv(obj, margin=0.01, angle=60.0)
+    obj.data.transform(Matrix.Rotation(-math.pi / 2, 4, 'Z'))
+    obj.data.shade_smooth()
+    return obj
+
+
+def build():
+    """build.py's entry: the rack statics and the folded stacks (see the section's comment)."""
+    core.reset()
+    wardrobe = WARDROBE_DEFAULT
+    out = []
+    for kind, garment in RACK_KINDS:
+        o = _rack(kind, garment, wardrobe)
+        if o is not None:
+            out.append(o)
+    out.append(_folded('SM_NS_Folded_Tee', 'Tee', _jersey('M_NS_Folded_Tee'), [(0.25, 0.3, 0.022)] * 3, 3))
+    denim = _jersey('M_NS_Folded_Jeans', tone=0.0, bump=0.35)
+    bsdf = next(n for n in denim.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+    for link in list(bsdf.inputs['Base Color'].links):
+        denim.node_tree.links.remove(link)
+    bsdf.inputs['Base Color'].default_value = core.hex_linear(0x2a3a5c)
+    out.append(_folded('SM_NS_Folded_Jeans', 'Jeans', denim, [(0.28, 0.36, 0.03)] * 3, 5))
+    out.append(_folded('SM_NS_Folded_Hoodie', 'Hoodie', _jersey('M_NS_Folded_Hoodie', tone=0.6, scale=600.0, bump=0.2), [(0.3, 0.33, 0.045)] * 3, 7))
+    return out
+
+
+def pose_for_review(objs):
+    """For the review only (each mesh exports at its own origin): the racks side by side on one rail, front toward the
+    camera (-X), and the folded stacks on the floor in front of them."""
+    racks = [o for o in objs if o.name.startswith('SM_NS_Rack_')]
+    stacks = [o for o in objs if o.name.startswith('SM_NS_Folded_')]
+    for i, o in enumerate(racks):
+        o.location = (0.0, (i - (len(racks) - 1) / 2) * REVIEW_RAIL_STEP, REVIEW_RAIL_Z)
+    for i, o in enumerate(stacks):
+        o.location = (-0.75, (i - (len(stacks) - 1) / 2) * 0.55, 0.0)
+    bpy.context.view_layer.update()
+
+
+def assemble(objs):
+    """After the bake: only the atlas the cloth was baked into goes out (the glTF's first texture coordinates)."""
+    for o in objs:
+        if 'Atlas' in o.data.uv_layers and 'UVMap' in o.data.uv_layers:
+            o.data.uv_layers.remove(o.data.uv_layers['UVMap'])
+    return objs
 
 
 if __name__ == '__main__':

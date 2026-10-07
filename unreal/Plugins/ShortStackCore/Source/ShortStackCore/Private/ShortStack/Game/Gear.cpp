@@ -208,11 +208,13 @@ std::vector<Item> Build()
 		I.Reviews = 3380;
 	}
 	{
-		Item& I = Add("gym", Category::Subscription, Slot::None, Art::Gym, 0xef4444, "Gym membership", "IronHouse", 34.99, "Tilt fades 25% faster \xC2\xB7 -5% fatigue",
-			"Leave the bad beats on the bench press.");
+		// IronHouse at 246 Market St (the realism update's spec, §5.3): the same plan as the gym's desk sells. Its own
+		// effect is the sauna's; the rest is fitness, built by workouts and fading without them (body::EffectsOf, folded
+		// in by Session::RefreshGear).
+		Item& I = Add("gym", Category::Subscription, Slot::None, Art::Gym, 0xef4444, "Gym membership", "IronHouse", 34.99, "Sauna: tilt fades 10% faster \xC2\xB7 builds Fitness",
+			"24/7 at 246 Market St \xC2\xB7 sauna: tilt fades 10% faster \xC2\xB7 workouts build Fitness");
 		I.Monthly = true;
-		I.Calm = 0.25;
-		I.Drain = 0.05;
+		I.Calm = 0.10;
 		I.Rating = 4.3;
 		I.Reviews = 2140;
 	}

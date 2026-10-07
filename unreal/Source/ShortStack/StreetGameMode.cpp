@@ -21,15 +21,25 @@
 #include "NightOneAudio.h"
 #include "NightOneSaveGame.h"
 #include "SFrontEndWidget.h"
+#include "Camera/CameraActor.h"
+#include "Misc/PackageName.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Shop.h"
 #include "ShortStack/Game/Store.h"
+#include "ShortStack/Game/Town.h"
+#include "ShortStack/Game/Wardrobe.h"
+#include "ShortStack/Game/Weather.h"
+#include "ShortStack/UI/TalkCard.h"
+#include "CastLooks.h"
 #include "ShopStage.h"
 #include "ShortStackCharacter.h"
 #include "StreetAudio.h"
+#include "StreetNpcs.h"
 #include "StreetStage.h"
 #include "StreetWorld.h"
+#include "ThriftStage.h"
 
 // The street's pedestrians, once their module file is in (the street plays without them until then).
 #if __has_include("StreetCrowd.h")
@@ -176,6 +186,63 @@ float DoorHeard(const AStreetStage& Stage, const FVector& Ear, const TCHAR* Door
 
 /** How long a zone's camera profile takes to blend in or out as the hero crosses its door (spec 7.5.3). */
 constexpr float ProfileBlendSeconds = 0.3f;
+/** A screen's camera blends to its shot (spec 7.5.3), and back to the hero as it closes. */
+constexpr float ShotBlendSeconds = 0.4f;
+/** A service's cinematic ends on a fade through black (spec 7.5.3): out, held while the look changes, in. */
+constexpr float CinemaFade = 0.3f;
+/** The thrift's mirror: how far the camera orbits the hero either way (spec 2.10), and how fast the stick turns it. */
+constexpr float OrbitLimit = 35.0f;
+constexpr float OrbitStick = 70.0f;
+/** How often the shops are shown the session (the boards, the pawn's shelf, the thrift's racks). */
+constexpr double ShopSyncEvery = 2.0;
+/** The keeper's word before closing (spec 5.0), and how near the hero must be to hear it (cm). */
+constexpr double ClosingWarn = 10.0;
+constexpr double ClosingHeard = 1500.0;
+
+/** Who keeps a venue when town doesn't say (its people aren't in yet): spec 5.0's keepers. */
+const TCHAR* KeeperFallback(FName Venue, double World)
+{
+	const double Tod = World - FMath::FloorToDouble(World / ss::net::MinutesPerDay) * ss::net::MinutesPerDay;
+	if (Venue == TEXT("barber"))
+	{
+		return TEXT("Lonnie");
+	}
+	if (Venue == TEXT("thrift"))
+	{
+		return TEXT("Bea");
+	}
+	if (Venue == TEXT("gym"))
+	{
+		return TEXT("Rosa");
+	}
+	if (Venue == TEXT("diner"))
+	{
+		return Tod >= 6.0 * 60.0 && Tod < 18.0 * 60.0 ? TEXT("Ruby") : TEXT("Marlene");
+	}
+	if (Venue == TEXT("pawn"))
+	{
+		return TEXT("Augie");
+	}
+	return TEXT("The keeper");
+}
+
+/** What a keeper says at closing when town has no line yet (the spec's voices, 5.1-5.8). */
+const TCHAR* ClosingFallback(FName Venue)
+{
+	if (Venue == TEXT("barber"))
+	{
+		return TEXT("Broom's out. That means you.");
+	}
+	if (Venue == TEXT("pawn"))
+	{
+		return TEXT("Buzzer's off in ten. Ticket or cash, make it quick.");
+	}
+	if (Venue == TEXT("thrift"))
+	{
+		return TEXT("Ten minutes, sweetheart. Bring it to the counter or put it back.");
+	}
+	return TEXT("Closing in ten.");
+}
 // The console's ss.Street.* hooks and their UFUNCTION twins (TestDescribe, TestGo...) are in StreetCommands.cpp.
 } // namespace StreetGameDetail
 
@@ -270,6 +337,9 @@ AStreetGameMode::AStreetGameMode()
 void AStreetGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
 	Super::InitGame(MapName, Options, ErrorMessage);
+	// A test's overrides from the last Play session don't carry into this one (ss.Street.KeepOverrides 1 keeps them). Here,
+	// not in BeginPlay: RestartPlayer builds the street (and reads ss.Street.WideMarket) before BeginPlay runs.
+	FStreetOverrides::ResetAll();
 	StartFrom = UGameplayStatics::HasOption(Options, TEXT("Start")) ? UGameplayStatics::ParseOption(Options, TEXT("Start")) : TEXT("home");
 	ss::SaveData Loaded;
 	std::string CareerText;
@@ -332,6 +402,8 @@ void AStreetGameMode::RestartPlayer(AController* NewPlayer)
 	{
 		Stage->EnsureBuilt();
 	}
+	// The shops too: their starts ("barber", "pawn"...) are theirs to register.
+	SpawnShops();
 	const FTransform Start = StartTransform(StartFrom);
 	UE_LOG(LogStreet, Log, TEXT("Out onto Fifth at %s"), *StartFrom);
 	RestartPlayerAtTransform(NewPlayer, Start);
@@ -391,6 +463,15 @@ void AStreetGameMode::UpdateShops(const FVector& Ear, float Dt)
 		}
 	}
 	AShortStackCharacter* Hero = GetHero();
+	const double World = Game->Session.WorldMinutes();
+	const float Light = static_cast<float>(Game->Session.Daylight());
+	const bool bMember = Game->Session.Owns("gym");
+	// The closed lines once a second (core's hours: "Fifth St. Barbers · Closed · Opens Tue 10 AM").
+	const bool bLines = RealTime - HoursAt > 1.0;
+	if (bLines)
+	{
+		HoursAt = RealTime;
+	}
 	for (const TWeakObjectPtr<AShopStage>& S : Shops)
 	{
 		AShopStage* Shop = S.Get();
@@ -398,27 +479,71 @@ void AStreetGameMode::UpdateShops(const FVector& Ear, float Dt)
 		{
 			continue;
 		}
-		// The hour and the light (whether it's open and staffed comes with core's shop hours; until then as it was set).
-		Shop->SetHour(Game->Session.WorldMinutes(), static_cast<float>(Game->Session.Daylight()), Shop->IsOpen(), Shop->IsStaffed());
+		// The hour and whether it's open and staffed, from core's shop hours (spec 5.0). The gym is open to its members at any
+		// hour (its lights on all night: the 2 AM runner in the window); its fob door locks out everyone else when Rosa's away.
+		// A venue core doesn't know yet stays open and staffed (the flows work before the catalog lands).
+		const ss::shop::Venue* V = ss::shop::FindVenue(FStringToUtf8(Shop->Venue.ToString()));
+		const bool bVenueOpen = V ? ss::shop::IsOpen(*V, World) : true;
+		const bool bOpen = bVenueOpen || (V && V->MembersAnyHour);
+		const bool bStaffed = V ? ss::shop::IsStaffed(*V, World) : true;
+		FString& Line = ClosedLines.FindOrAdd(Shop->Venue);
+		if (bLines && V)
+		{
+			Line = bVenueOpen ? FString() : FString::Printf(TEXT("%s · Closed · %s"), *Utf8ToFString(V->Name), *Utf8ToFString(ss::shop::HoursLine(*V, World)));
+		}
+		Shop->SetMember(bMember);
+		Shop->SetHour(World, Light, bOpen, bStaffed, Line);
 		if (!Hero)
 		{
 			continue;
 		}
-		// Its door: its bell as it swings open, and again, softer, as its closer brings it shut (the buzzer's clack on the pawn's).
+		// Its door: its bell as it swings open, and again, softer, as its closer brings it shut; the pawn's lock clacks as the
+		// buzzer lets it go, and the gym's reader beeps.
+		const bool bWasBuzzing = Shop->IsBuzzing();
 		const int32 Door = Shop->UpdateDoor(Hero->GetActorLocation(), Dt);
-		if (Door != 0 && StreetTone)
+		const float Heard = HeardFrom(Ear, Shop->DoorMiddle());
+		if (Door != 0 && StreetTone && Heard > 0.01f)
 		{
-			const FStreetDoor* D = nullptr;
-			const UStreetWorld* Registry = StreetWorld();
-			const TArray<FStreetDoor> All = Registry ? Registry->Doors() : TArray<FStreetDoor>();
-			for (const FStreetDoor& E : All)
+			if (Shop->Venue == TEXT("pawn") || Shop->Venue == TEXT("gym"))
 			{
-				D = E.Id == Shop->Venue ? &E : D;
+				if (Door == 1 && Audio)
+				{
+					Audio->PlayEffect(ss::audio::Effect::Chime, (Shop->Venue == TEXT("gym") ? 0.12f : 0.2f) * Heard);
+				}
 			}
-			const float Heard = D ? HeardFrom(Ear, D->Threshold) : 1.0f;
-			if (Heard > 0.01f)
+			else
 			{
 				StreetTone->RingBell((Door == 1 ? 1.0f : 0.4f) * Heard);
+			}
+		}
+		if (bWasBuzzing && !Shop->IsBuzzing() && StreetTone && Heard > 0.01f)
+		{
+			StreetTone->TryHandle(); // the strike lets go with a clack
+		}
+	}
+}
+
+void AStreetGameMode::SpawnShops()
+{
+	UWorld* World = GetWorld();
+	if (!World || !Stage)
+	{
+		return;
+	}
+	// Each enterable shop at the street's frame: found if the street's or Market's stage spawned it already, else spawned.
+	for (const FName& Venue : AShopStage::Venues())
+	{
+		// Ruby's Market face is the widened Market's north building line: on The Block's street (ss.Street.WideMarket 0) the
+		// old block still stands across it, so it waits for the wide street, as the street's own stage has it.
+		if (Venue == TEXT("diner") && !Stage->IsWideMarket())
+		{
+			continue;
+		}
+		if (!ShopFor(Venue))
+		{
+			if (AShopStage* Shop = AShopStage::FindOrSpawnVenue(World, Venue, Stage->GetActorTransform()))
+			{
+				Shops.AddUnique(Shop);
 			}
 		}
 	}
@@ -489,7 +614,8 @@ void AStreetGameMode::DressHero()
 		return;
 	}
 	bDressed = true;
-	Hero->ApplyLook(Game->Session.Person);
+	const ss::wardrobe::Closet& Closet = Game->Session.Life.Closet;
+	Hero->ApplyLook(Game->Session.Person, Closet.Seeded || !Closet.Owned.empty() ? &Closet : nullptr);
 }
 
 AShortStackCharacter* AStreetGameMode::SpawnNpc(const FTransform& Spot, double FloorZ, const TCHAR* CastName, const FLinearColor& Shirt)
@@ -563,28 +689,65 @@ void AStreetGameMode::SpawnCrowd()
 		return;
 	}
 	bCrowdStarted = true;
-	if (AStreetCrowd* People = GetWorld()->SpawnActor<AStreetCrowd>())
+	if (AStreetCrowd* Walkers = GetWorld()->SpawnActor<AStreetCrowd>())
 	{
-		People->Begin(Stage, Hero);
-		Crowd = People;
+		Walkers->Begin(Stage, Hero);
+		Crowd = Walkers;
+		if (People)
+		{
+			People->AttachCrowd(Walkers);
+		}
 	}
 #endif
+}
+
+void AStreetGameMode::SpawnPeople()
+{
+	AShortStackCharacter* Hero = GetHero();
+	if (People || !Stage || !Hero || !GetWorld() || !Game)
+	{
+		return;
+	}
+	// One director on the map (the crowd starts one itself when nobody has by its first hour: found, not doubled).
+	People = AStreetNpcs::FindOrSpawn(GetWorld());
+	if (!People)
+	{
+		return;
+	}
+	People->bAutoSpawned = false;
+	AStreetCrowd* Walkers = nullptr;
+#if SHORTSTACK_STREET_CROWD
+	Walkers = Cast<AStreetCrowd>(Crowd);
+#endif
+	People->Begin(Stage, Hero, Walkers);
+	People->SetSession(Game->bCareer ? &Game->Session : nullptr);
+	People->SetHour(Game->Session.WorldMinutes(), static_cast<float>(Game->Session.Daylight()), Stage->RainStrength(), Game->Menu.IsPaused());
 }
 
 void AStreetGameMode::BeginPlay()
 {
 	Super::BeginPlay();
-	// A test's overrides from the last Play session don't carry into this one (ss.Street.KeepOverrides 1 keeps them).
-	FStreetOverrides::ResetAll();
 	FindOrSpawnStage();
 	if (Stage)
 	{
 		Stage->EnsureBuilt();
 	}
+	SpawnShops();
+	if (Stage && Game)
+	{
+		// The weather, the windows' hash and the parked cars follow the career's seed (spec 0.7, 3.3).
+		Stage->SetWorldSeed(Game->Session.WorldSeed());
+	}
+	if (Game && Game->bCareer)
+	{
+		// The console's ss.Closet.* and ss.Fit.Set act on this career while the street plays.
+		CastLooks::BindSession(this, &Game->Session);
+	}
 	DressHero();
 	SpawnClerk();
 	SpawnAttendant();
 	SpawnCrowd();
+	SpawnPeople();
 	CreateWidgets();
 	ReturnInputToGame();
 	// The player's settings, as at the desk (the stage's lens and the hero's field of view are here now).
@@ -621,9 +784,22 @@ void AStreetGameMode::EndPlay(const EEndPlayReason::Type Reason)
 	{
 		SaveSettingsNow();
 	}
+	// A skip's hold on the corner never outlives the street.
+	if (UStreetWorld* Registry = StreetWorld())
+	{
+		Registry->SetHold(false, 0.0);
+	}
+	CastLooks::BindSession(this, nullptr);
+	if (People)
+	{
+		People->SetSession(nullptr); // the career goes with this mode
+	}
+	Card = nullptr;
+	Screen.Reset();
 	if (UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
 	{
-		for (TSharedPtr<SWidget> W : {StaticCastSharedPtr<SWidget>(HudWidget), StaticCastSharedPtr<SWidget>(CounterWidget), StaticCastSharedPtr<SWidget>(MenuWidget)})
+		for (TSharedPtr<SWidget> W : {StaticCastSharedPtr<SWidget>(HudWidget), StaticCastSharedPtr<SWidget>(CounterWidget), StaticCastSharedPtr<SWidget>(ShopWidget),
+				 StaticCastSharedPtr<SWidget>(MenuWidget)})
 		{
 			if (W)
 			{
@@ -687,6 +863,27 @@ void AStreetGameMode::CreateWidgets()
 	};
 	Viewport->AddViewportWidgetContent(CounterWidget.ToSharedRef(), 20);
 
+	// The shops' screens (spec 7.5.3): one at a time, drawn and keyed as the counter is.
+	ShopWidget = SNew(SFrontEndWidget);
+	ShopWidget->SetVisibility(EVisibility::Collapsed);
+	ShopWidget->OnMenuKey = [WeakThis](const FString& KeyName, bool bFromGamepad) {
+		if (WeakThis.IsValid() && WeakThis->Screen && WeakThis->Screen->IsOpen())
+		{
+			WeakThis->bGamepad = bFromGamepad;
+			WeakThis->Screen->Gamepad = bFromGamepad;
+			// Its requests (a service begun, a seat) and whether it was walked away from are taken each frame, in that order
+			// (UpdateShopScreen): closing it here would lose what the key asked for.
+			WeakThis->Screen->Key(FStringToUtf8(KeyName), WeakThis->RealTime);
+		}
+	};
+	ShopWidget->OnMenuPointer = [WeakThis, Pointer](const FVector2D& Logical, int32 Button, float WheelDelta) {
+		if (WeakThis.IsValid() && WeakThis->Screen)
+		{
+			Pointer(WeakThis->Screen->Ptr, Logical, Button, WheelDelta);
+		}
+	};
+	Viewport->AddViewportWidgetContent(ShopWidget.ToSharedRef(), 21);
+
 	MenuWidget = SNew(SFrontEndWidget);
 	MenuWidget->SetVisibility(EVisibility::Collapsed);
 	MenuWidget->OnMenuKey = [WeakThis](const FString& KeyName, bool bFromGamepad) {
@@ -736,6 +933,10 @@ void AStreetGameMode::ReturnInputToGame()
 	{
 		CounterWidget->SetVisibility(EVisibility::Collapsed);
 	}
+	if (ShopWidget && !(Screen && Screen->IsOpen()))
+	{
+		ShopWidget->SetVisibility(EVisibility::Collapsed);
+	}
 	if (MenuWidget && !Game->Menu.IsOpen())
 	{
 		MenuWidget->SetVisibility(EVisibility::Collapsed);
@@ -749,7 +950,8 @@ void AStreetGameMode::ReturnInputToGame()
 
 bool AStreetGameMode::IsUiOpen() const
 {
-	return Game && (Game->Counter.IsOpen() || Game->Menu.IsOpen());
+	// A shop's screen, a service playing out (movement blocked, spec 7.5.3) or a moment under black hold the input too.
+	return Game && (Game->Counter.IsOpen() || Game->Menu.IsOpen() || (Screen && Screen->IsOpen()) || Cinema.bActive || BlackAt >= 0.0);
 }
 
 FVector2D AStreetGameMode::ViewSize() const
@@ -802,18 +1004,66 @@ void AStreetGameMode::DrawHud()
 	{
 		Info.Toasts.push_back(T);
 	}
-	if (!IsUiOpen() && !bLeaving && Stage)
-	{
-		if (const FStreetUse* Use = UseInReach())
-		{
-			Info.Prompt = FStringToUtf8(PromptFor(*Use));
-		}
-	}
 	const FVector2D Size = ViewSize();
 	const float H = ss::ui::StoreCounter::Height;
+	const FStreetUse* Use = !IsUiOpen() && !bLeaving && Stage ? UseInReach() : nullptr;
+	if (Use)
+	{
+		Info.Prompt = FStringToUtf8(PromptFor(*Use));
+	}
+	else if (!IsUiOpen() && !bLeaving && !SeatedAt.IsNone())
+	{
+		Info.Prompt = "Stand up";
+	}
+	// The name over whoever the hero is looking at (a Talk use on a person): their name, and their bond or their job.
+	if (Use && Use->Verb == EStreetVerb::Talk && Use->Anchor.IsValid() && Use->Anchor->GetOwner() && Use->Anchor->GetOwner()->IsA<APawn>())
+	{
+		const FName Id = Use->Param.IsEmpty() ? Use->Id : FName(*Use->Param);
+		const FStreetPerson* P = People ? People->FindPerson(Id) : nullptr;
+		const ss::town::Person* Known = ss::town::FindPerson(FStringToUtf8(Id.ToString()));
+		const FString Name = P && !P->Name.IsEmpty() ? P->Name : Known && !Known->Name.empty() ? Utf8ToFString(Known->Name) : FString();
+		FVector2D OnScreen;
+		APlayerController* Pc = GetWorld()->GetFirstPlayerController();
+		if (!Name.IsEmpty() && Pc && Pc->ProjectWorldLocationToScreen(UStreetWorld::UseLocation(*Use) + FVector(0.0, 0.0, 28.0), OnScreen, true))
+		{
+			const float Scale = static_cast<float>(Size.Y) / H;
+			const std::string Tag = ss::town::Tag(FStringToUtf8(Id.ToString()), Game->Session);
+			Info.NameTag.Text = FStringToUtf8(Name);
+			Info.NameTag.Sub = !Tag.empty() ? Tag : P ? FStringToUtf8(P->Label) : std::string();
+			Info.NameTag.X = static_cast<float>(OnScreen.X) / Scale;
+			Info.NameTag.Y = static_cast<float>(OnScreen.Y) / Scale;
+		}
+	}
+	// A service or a wait playing out: its skip's label, how far along, and the hours it runs between (spec 5.0).
+	if (Cinema.bActive && Cinema.Phase == 0)
+	{
+		const ss::Session::Skip& K = Game->Session.TimeSkip;
+		const FString Where = ShopFor(Cinema.Venue) ? ShopFor(Cinema.Venue)->VenueName : Cinema.Venue.ToString();
+		Info.Skip.Active = true;
+		Info.Skip.Label = K.Active && !K.Label.empty() ? K.Label : FStringToUtf8(FString::Printf(TEXT("At %s"), *Where));
+		Info.Skip.Progress = static_cast<float>(FMath::Clamp((RealTime - Cinema.StartedAt) / FMath::Max(0.1, Cinema.Length), 0.0, 1.0));
+		Info.Skip.From = K.Active ? K.From : Game->Session.WorldMinutes();
+		Info.Skip.To = K.Active ? K.To : Game->Session.WorldMinutes();
+	}
+	// A locked door's line; what people said near the hero (not while the talk card says it); the weather.
+	Info.Closed = FStringToUtf8(ClosedNow);
+	Info.ClosedAt = ClosedNowAt;
+	if (!Card)
+	{
+		for (const ss::ui::StreetHudInfo::Subtitle& Sub : Subtitles)
+		{
+			Info.Subtitles.push_back(Sub);
+		}
+	}
+	if (Stage)
+	{
+		Info.Weather = static_cast<int>(Stage->WeatherNow().State);
+		Info.Rain = Stage->RainStrength();
+	}
 	TSharedPtr<ss::ui::DrawList> List = MakeShared<ss::ui::DrawList>();
 	ss::ui::Canvas Cv(*List, Game->Measurer, H * static_cast<float>(Size.X / Size.Y), H, static_cast<float>(Size.Y) / H);
-	if (!Game->Counter.IsOpen())
+	// Under the counter and the shops' full-screen pages it's hidden; the talk card sits over the street with the HUD.
+	if (!Game->Counter.IsOpen() && (!(Screen && Screen->IsOpen()) || Card))
 	{
 		ss::ui::DrawStreetHud(Cv, Info, RealTime);
 	}
@@ -871,6 +1121,10 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 		// near the laundromat's front or under a sign or not; the rain as it shows; the traffic by the hour; nothing new
 		// starting on the street while paused.
 		StreetTone->SetInside(Stage->CameraInside(), Stage->DoorsOpen());
+		// The shops' room tones by the zone the camera is in (spec 3.7), its door's opening letting the street in.
+		const FStreetZone* Room = ZoneAt(Ear);
+		const bool bShop = Room && Room->RoomTone >= StreetRoomTone::Barber;
+		StreetTone->SetRoom(bShop ? Room->RoomTone : StreetRoomTone::Street, bShop && Room->DoorOpen ? Room->DoorOpen() : 0.0f);
 		StreetTone->SetWash(Stage->CameraInWash(), Stage->WashDoorOpen(), Stage->WashNear(Ear));
 		StreetTone->SetRain(Stage->RainStrength(), Stage->Wetness);
 		StreetTone->SetDaylight(static_cast<float>(Game->Session.Daylight()));
@@ -915,6 +1169,15 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 		if (APlayerController* Pc = GetWorld()->GetFirstPlayerController(); Pc && !Pc->GetPawn())
 		{
 			UE_LOG(LogStreet, Warning, TEXT("The hero was lost: back at the door"));
+			// Whatever the old one was in (a screen, a seat, a shot's mark, a preview) goes with it.
+			if (Screen)
+			{
+				CloseShop(false);
+			}
+			SeatedAt = NAME_None;
+			SeatedVenue = NAME_None;
+			bMarkMoved = false;
+			bPreviewing = false;
 			bDressed = false;
 			StartFrom = HomeDoor();
 			ProfileZone = NAME_None;
@@ -924,25 +1187,82 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 			ApplySettings(Game->Menu.Settings, false);
 		}
 	}
-	// The enterable shops: the hour, their doors.
+	// The enterable shops: the hour, their doors; their screens, a service's cinematic, the moments under black, closing
+	// time, and now and then the session's state on their shelves and boards.
 	UpdateShops(Ear, static_cast<float>(Dt));
+	UpdateShopScreen(static_cast<float>(Dt));
+	// A skip a page began without a service's request (Ruby's "sit a while", the pawn's trip to storage): the same hold and
+	// overlay, the camera as it is.
+	if (Game->Session.TimeSkip.Active && !Cinema.bActive && !bLeaving)
+	{
+		BeginCinematic(!ScreenVenue.IsNone() ? ScreenVenue : SeatedVenue, FString());
+	}
+	UpdateCinematic(static_cast<float>(Dt));
+	UpdateBlack(static_cast<float>(Dt));
+	UpdateClosing();
+	if (RealTime - ShopsSyncedAt > ShopSyncEvery)
+	{
+		SyncShops();
+	}
+	// A skip's outcome (a service, a wait) as a toast: the laptop's result card is the apartment's.
+	if (Game->Session.HasOutcome && !(Cinema.bActive && Cinema.Phase == 0))
+	{
+		Game->Session.HasOutcome = false;
+		const ss::life::Outcome& O = Game->Session.LastOutcome;
+		if (!O.Title.empty() || !O.Body.empty())
+		{
+			Toast(O.Title.empty() ? FString(TEXT("Done")) : Utf8ToFString(O.Title), Utf8ToFString(O.Body));
+		}
+	}
+	// The block's people: begun once the hero stands, told the hour, the rain and the pause each frame; what they say
+	// near the hero to the HUD's subtitles (the talk card says its own).
+	if (!People)
+	{
+		SpawnPeople();
+	}
+	if (People && Stage)
+	{
+		People->SetHour(Game->Session.WorldMinutes(), static_cast<float>(Game->Session.Daylight()), Stage->RainStrength(), Game->Menu.IsPaused());
+		FString Speaker;
+		FString Line;
+		while (People->TakeSubtitle(Speaker, Line))
+		{
+			if (Card)
+			{
+				continue;
+			}
+			ss::ui::StreetHudInfo::Subtitle Sub;
+			Sub.Speaker = FStringToUtf8(Speaker);
+			Sub.Line = FStringToUtf8(Line);
+			Sub.At = RealTime;
+			Subtitles.Add(MoveTemp(Sub));
+		}
+	}
+	Subtitles.RemoveAll([this](const ss::ui::StreetHudInfo::Subtitle& Sub) { return RealTime - Sub.At > 10.0; });
+	while (Subtitles.Num() > 4)
+	{
+		Subtitles.RemoveAt(0);
+	}
 #if SHORTSTACK_STREET_CROWD
 	// The pedestrians: started once the hero stands (then told the hour, the rain, and whether the game's paused).
 	if (!bCrowdStarted)
 	{
 		SpawnCrowd();
 	}
-	if (AStreetCrowd* People = Cast<AStreetCrowd>(Crowd); People && Stage)
+	if (AStreetCrowd* Walkers = Cast<AStreetCrowd>(Crowd); Walkers && Stage)
 	{
-		People->SetHour(static_cast<float>(Game->Session.Daylight()), Game->Session.WorldMinutes(), Stage->RainStrength(), Game->Menu.IsPaused());
-		// A word from someone the player nearly walked into, heard if they're still close.
+		Walkers->SetHour(static_cast<float>(Game->Session.Daylight()), Game->Session.WorldMinutes(), Stage->RainStrength(), Game->Menu.IsPaused());
+		// A word from someone the player nearly walked into, heard if they're still close: a subtitle with no name.
 		FVector BarkAt;
 		FString Bark;
-		while (People->TakeBark(BarkAt, Bark))
+		while (Walkers->TakeBark(BarkAt, Bark))
 		{
-			if (Hero && FVector::DistSquared(BarkAt, Hero->GetActorLocation()) < 700.0 * 700.0)
+			if (Hero && !Card && FVector::DistSquared(BarkAt, Hero->GetActorLocation()) < 700.0 * 700.0)
 			{
-				Toast(TEXT("Passerby"), Bark);
+				ss::ui::StreetHudInfo::Subtitle Sub;
+				Sub.Line = FStringToUtf8(Bark);
+				Sub.At = RealTime;
+				Subtitles.Add(MoveTemp(Sub));
 			}
 		}
 	}
@@ -954,6 +1274,7 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 		Game->Text("Dee", FStringToUtf8(NightWordFrom(NightOptions, Game->Session.Evicted())));
 	}
 	DrawHud();
+	WatchCounterSale();
 	if (Game->Counter.IsOpen())
 	{
 		DrawOverlay(CounterWidget.Get(), [this](ss::ui::Canvas& Cv) { Game->Counter.Draw(Cv, RealTime); });
@@ -975,8 +1296,8 @@ void AStreetGameMode::Tick(float DeltaSeconds)
 		UE_LOG(LogStreet, Log, TEXT("Off the street to %s?%s"), *LeaveLevel.ToString(), *Options);
 		UGameplayStatics::OpenLevel(this, LeaveLevel, true, Options);
 	}
-	// Texts don't age while the counter has the screen (the HUD that shows them is hidden then); otherwise ten seconds.
-	if (Game->Counter.IsOpen())
+	// Texts don't age while the counter or a shop has the screen (the HUD that shows them is hidden then); otherwise ten seconds.
+	if (Game->Counter.IsOpen() || (Screen && Screen->IsOpen()))
 	{
 		for (ss::ui::StreetHudInfo::Toast& T : Toasts)
 		{
@@ -1062,22 +1383,31 @@ FString AStreetGameMode::PromptFor(const FStreetUse& Use) const
 	{
 		return FString::Printf(TEXT("Sit in Dee's game ($%lld)"), static_cast<long long>(ss::life::GameMinBuyInCents / 100));
 	}
+	if (!SeatedAt.IsNone())
+	{
+		// Sitting (the barber's bench, a stool with nothing open): E gets up.
+		return TEXT("Stand up");
+	}
 	if (Use.Verb == EStreetVerb::Door)
 	{
-		// A shop's door, open: walk on through (as the Wash & Fold's). From inside it's a door out, whatever its lock.
+		// A shop's door: open, walk on through (as the Wash & Fold's); from inside, a door out whatever its lock; outside, what
+		// it takes ("Tap your fob", "Buzz in", "Buzz") or its closed line.
 		if (const AShopStage* Shop = ShopFor(Use.Venue))
 		{
-			if (Shop->DoorOpenAmount() > 0.5f)
-			{
-				return FString();
-			}
-			if (const AShortStackCharacter* Hero = GetHero(); Hero && Shop->IsInside(Hero->GetActorLocation()))
-			{
-				return TEXT("Open the door");
-			}
+			return Shop->DoorPromptNow();
 		}
 	}
-	return UStreetWorld::PromptOf(Use);
+	const FString Why = UStreetWorld::PromptOf(Use);
+	if (Why == Use.Prompt && Use.Id == TEXT("barber-chair1") && Game)
+	{
+		// Somebody's ahead in the chair (spec 5.1): the bench first.
+		const int32 Queue = ss::town::BarberQueue(Game->Session.WorldMinutes());
+		if (Queue > 0)
+		{
+			return FString::Printf(TEXT("Wait (about %d min)"), FMath::Max(5, (Queue + 2) / 5 * 5));
+		}
+	}
+	return Why;
 }
 
 // ------------------------------------------------------------------ actions
@@ -1141,6 +1471,12 @@ void AStreetGameMode::OnInteract()
 	{
 		return;
 	}
+	// Sitting with nothing open (the bench, a seat walked away from): E stands up.
+	if (!SeatedAt.IsNone())
+	{
+		StandUp();
+		return;
+	}
 	// The registry's use in reach, by its verb (spec 7.5.3). Copied: what it does may change the registry.
 	const FStreetUse* InReach = UseInReach();
 	if (!InReach || PromptFor(*InReach).IsEmpty())
@@ -1171,13 +1507,39 @@ void AStreetGameMode::OnInteract()
 		TalkTo(Use);
 		break;
 	case EStreetVerb::Shop:
-	case EStreetVerb::Sit:
-	case EStreetVerb::Wait:
-	case EStreetVerb::Board:
-	case EStreetVerb::Wardrobe:
-		// The shop screens, the seats, the shelter's wait, the 14 and the closet land with the shops (Phase B).
-		NotYet(Use);
+	{
+		// A shop's screen on the use's page (a rack, the counter, a machine); shut, its closed line.
+		if (Use.WhyNot && !Use.WhyNot().IsEmpty())
+		{
+			ShowClosed(UStreetWorld::PromptOf(Use));
+			break;
+		}
+		OpenShop(Use.Venue, Use.Param.IsEmpty() ? Use.Id.ToString() : Use.Param);
 		break;
+	}
+	case EStreetVerb::Sit:
+		UseSeat(Use);
+		break;
+	case EStreetVerb::Wait:
+		UseWait(Use);
+		break;
+	case EStreetVerb::Wardrobe:
+		OpenShop(TEXT("wardrobe"), Use.Param.IsEmpty() ? Use.Id.ToString() : Use.Param);
+		break;
+	case EStreetVerb::Board:
+	{
+		// The 14 (spec 7.6, P1): the session says whether a registration lets the player on; the ride itself comes with it.
+		const std::string Why = Game->Session.BoardBus(FStringToUtf8(Use.Param));
+		if (!Why.empty())
+		{
+			Toast(TEXT("The 14"), Utf8ToFString(Why));
+		}
+		else
+		{
+			NotYet(Use);
+		}
+		break;
+	}
 	}
 }
 
@@ -1201,16 +1563,22 @@ void AStreetGameMode::UseDoor(const FStreetUse& Use)
 		NotYet(Use);
 		return;
 	}
-	// Open: it swings in (or the keeper buzzes it); shut: the handle tried, and when it opens again. The gym's fob comes
-	// with the shops' session calls (until then the desk buzzes you in while it's staffed).
-	const FString Why = Shop->OpenDoor(false);
+	// Open: it swings in (or the keeper buzzes it: the buzzer, then the lock's clack as it lets go); the gym's opens to a
+	// member's fob at any hour. Shut, the handle tried (E rattles it), and the line says when it opens again.
+	const bool bWasBuzzing = Shop->IsBuzzing();
+	const FString Why = Shop->OpenDoor(Game->Session.Owns("gym"));
 	if (!Why.IsEmpty())
 	{
 		if (StreetTone)
 		{
 			StreetTone->TryHandle();
 		}
-		Toast(Shop->VenueName, Why);
+		ShowClosed(Why);
+		return;
+	}
+	if (Shop->IsBuzzing() && !bWasBuzzing && StreetTone)
+	{
+		StreetTone->PressBuzzer();
 	}
 }
 
@@ -1221,8 +1589,11 @@ void AStreetGameMode::TalkTo(const FStreetUse& Use)
 		TalkToAttendant();
 		return;
 	}
-	// The people's talk card (AStreetNpcs, the TalkCard) comes with them.
-	NotYet(Use);
+	// Someone with a word (a keeper, one of the world's people, Augie at his guitar wall): the talk card with them.
+	if (!OpenTalk(Use.Param.IsEmpty() ? Use.Id : FName(*Use.Param), Use.Venue))
+	{
+		NotYet(Use);
+	}
 }
 
 void AStreetGameMode::NotYet(const FStreetUse& Use)
@@ -1543,6 +1914,1156 @@ void AStreetGameMode::SaveSettingsNow()
 	{
 		Obj->Data = Utf8ToFString(Game->Menu.Settings.Serialize());
 		UGameplayStatics::SaveGameToSlot(Obj, UNightOneSaveGame::SettingsSlotName(), 0);
+	}
+}
+
+// ------------------------------------------------------------------ the shops (spec 7.5.3)
+
+namespace StreetGameDetail
+{
+/** The venue a registry shot belongs to, by its id ("barber-mirror" is the barber's; spec 2.10's ids lead with the venue). */
+FName ShotVenue(FName Shot)
+{
+	FString Venue;
+	FString Rest;
+	return Shot.ToString().Split(TEXT("-"), &Venue, &Rest) ? FName(*Venue) : NAME_None;
+}
+
+/** What someone says when town has nothing yet (its lines not in): the spec's voices for the keepers (5.1-5.8). */
+FString TalkFallback(FName Person)
+{
+	const FString P = Person.ToString().ToLower();
+	if (P == TEXT("augie"))
+	{
+		return TEXT("Guitars I don't sell to card players. You'd hock it back to me inside a month.");
+	}
+	if (P == TEXT("lonnie"))
+	{
+		return TEXT("Sit down, sit down. Same as last time, or you finally gonna let me fix that?");
+	}
+	if (P == TEXT("bea"))
+	{
+		return TEXT("Booth's on the left. Curtain sticks. Pull, don't yank.");
+	}
+	if (P == TEXT("rosa"))
+	{
+		return TEXT("Towel's free. The shake isn't.");
+	}
+	if (P == TEXT("ruby"))
+	{
+		return TEXT("Sit anywhere that isn't Sal's.");
+	}
+	if (P == TEXT("marlene"))
+	{
+		return TEXT("Coffee, hon? You look like you lost a flip.");
+	}
+	return TEXT("...");
+}
+
+/** Puts a character's feet at Feet (its capsule's half height over it), facing as it faces; the controller looks that way. */
+void PlaceAt(AShortStackCharacter& Hero, const FTransform& Feet, bool bFeetOnFloor)
+{
+	FVector At = Feet.GetLocation();
+	if (bFeetOnFloor)
+	{
+		At.Z += Hero.GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	}
+	Hero.SetActorLocationAndRotation(At, FRotator(0.0f, Feet.Rotator().Yaw, 0.0f), false, nullptr, ETeleportType::TeleportPhysics);
+	if (UCharacterMovementComponent* Move = Hero.GetCharacterMovement())
+	{
+		Move->StopMovementImmediately();
+	}
+	if (AController* C = Hero.GetController())
+	{
+		C->SetControlRotation(FRotator(0.0f, Feet.Rotator().Yaw, 0.0f));
+	}
+}
+} // namespace StreetGameDetail
+
+ss::ui::HostCaps AStreetGameMode::BuildCaps() const
+{
+	using ss::hero::Slot;
+	// looks' answer for the hero's face and body (CastLooks::HostCapsFor: the groom library's styles, beards and brows, the
+	// garments with a mesh on this body, the gear the pawn's shelf can stand up, the 3D preview).
+	const AShortStackCharacter* Hero = GetHero();
+	ss::ui::HostCaps Caps = CastLooks::HostCapsFor(Hero);
+	if (!Hero)
+	{
+		Caps.GarmentKinds = AShopStage::WearableKinds();
+	}
+	// Each indexed list exactly as long as the Look's options for its slot (spec 7.4: past the end counts as missing).
+	Caps.HairStyles.resize(static_cast<size_t>(FMath::Max(0, ss::hero::OptionCount(Slot::Hair))), false);
+	Caps.FacialHair.resize(static_cast<size_t>(FMath::Max(0, ss::hero::OptionCount(Slot::FacialHair))), false);
+	Caps.Brows.resize(static_cast<size_t>(FMath::Max(0, ss::hero::OptionCount(Slot::Brows))), false);
+	if (!Game)
+	{
+		return Caps;
+	}
+	// What the hero wears on their head now renders whatever the library holds (a line-up keeps it; the razor's nothing,
+	// shaved and clean-shaven, needs no groom).
+	const ss::hero::Look& L = Game->Session.Person.Appearance;
+	auto Mark = [](std::vector<bool>& V, int I) {
+		if (I >= 0 && I < static_cast<int>(V.size()))
+		{
+			V[static_cast<size_t>(I)] = true;
+		}
+	};
+	Mark(Caps.HairStyles, L.Hair);
+	Mark(Caps.HairStyles, 0);
+	Mark(Caps.FacialHair, L.FacialHair);
+	Mark(Caps.FacialHair, 0);
+	Mark(Caps.Brows, L.Brows);
+	// What the shops' 3D can stand up: the pawn's shelves (GearKinds).
+	for (const TWeakObjectPtr<AShopStage>& S : Shops)
+	{
+		if (S.IsValid())
+		{
+			S->FillCaps(Caps);
+		}
+	}
+	return Caps;
+}
+
+bool AStreetGameMode::OpenShop(FName Venue, const FString& Page)
+{
+	if (!Game || bLeaving || Venue.IsNone())
+	{
+		return false;
+	}
+	if (Screen && Screen->IsOpen())
+	{
+		CloseShop(false);
+	}
+	std::unique_ptr<ss::ui::ShopScreen> Made = ss::ui::MakeShopScreen(FStringToUtf8(Venue.ToString()), Game->Session);
+	if (!Made)
+	{
+		UE_LOG(LogStreet, Warning, TEXT("No shop screen for %s"), *Venue.ToString());
+		return false;
+	}
+	if (Card)
+	{
+		// A talk card that closed itself and wasn't put away yet: its person let go before its screen is replaced.
+		Card = nullptr;
+		EndTalk();
+	}
+	Screen.Reset(Made.release());
+	++ScreenSerial;
+	ScreenVenue = Venue;
+	ScreenPage = Page;
+	// What it may sell, by what the 3D can show (spec 5.0), before it opens; the thrift's racks stock the same kinds.
+	const ss::ui::HostCaps Caps = BuildCaps();
+	if (AThriftStage* Thrift = Cast<AThriftStage>(ShopFor(TEXT("thrift"))))
+	{
+		Thrift->SetGarmentKinds(Caps.GarmentKinds);
+	}
+	Screen->SetCaps(Caps);
+	Screen->Gamepad = bGamepad;
+	Screen->Open(RealTime, FStringToUtf8(Page));
+	FocusWidget(ShopWidget.Get());
+	UE_LOG(LogStreet, Log, TEXT("The %s screen open on %s"), *Venue.ToString(), *Page);
+	return true;
+}
+
+void AStreetGameMode::CloseShop(bool bStand)
+{
+	const FName Venue = ScreenVenue;
+	if (Screen && Screen->IsOpen())
+	{
+		Screen->Close(RealTime);
+	}
+	Screen.Reset();
+	++ScreenSerial;
+	if (Card)
+	{
+		Card = nullptr;
+		EndTalk();
+	}
+	ScreenVenue = NAME_None;
+	ScreenPage.Reset();
+	// The look as it was, the camera back on the hero, up out of the seat (a service under way keeps its own camera and seat).
+	if (!Cinema.bActive)
+	{
+		if (bPreviewing)
+		{
+			if (AShortStackCharacter* Hero = GetHero())
+			{
+				Hero->EndPreview();
+			}
+			bPreviewing = false;
+		}
+		if (bStand && !SeatedAt.IsNone())
+		{
+			StandUp();
+		}
+		EndShot(ShotBlendSeconds);
+	}
+	// The shop shows what changed (the pawn's shelf after a sale, the racks after a buy).
+	if (AShopStage* Shop = ShopFor(Venue))
+	{
+		Shop->SyncSession(Game->Session);
+	}
+	ReturnInputToGame();
+}
+
+void AStreetGameMode::UpdateShopScreen(float Dt)
+{
+	if (!Screen)
+	{
+		return;
+	}
+	if (Screen->IsOpen())
+	{
+		DrawOverlay(ShopWidget.Get(), [this](ss::ui::Canvas& Cv) { Screen->Draw(Cv, RealTime); });
+	}
+	DrainRequests();
+	// Walked away (a key, or a click on the footer inside Draw); or closed by itself (a service begun).
+	if (Screen && (Screen->TakeLeave() || !Screen->IsOpen()))
+	{
+		CloseShop(!Cinema.bActive);
+		return;
+	}
+	// The thrift's three-way mirror: the camera orbits the hero (the right stick, or the mouse dragged with its right button).
+	if (CameraShot == TEXT("thrift-fitting") && ShopCamera)
+	{
+		float Turn = 0.0f;
+		if (const APlayerController* Pc = GetWorld()->GetFirstPlayerController())
+		{
+			Turn += Pc->GetInputAnalogKeyState(EKeys::Gamepad_RightX) * OrbitStick * Dt;
+		}
+		if (FSlateApplication::IsInitialized())
+		{
+			FSlateApplication& App = FSlateApplication::Get();
+			const FVector2D Cursor = App.GetCursorPos();
+			if (App.GetPressedMouseButtons().Contains(EKeys::RightMouseButton) && OrbitMouse.X >= 0.0)
+			{
+				Turn += static_cast<float>(Cursor.X - OrbitMouse.X) * 0.25f;
+			}
+			OrbitMouse = Cursor;
+		}
+		const float Was = OrbitYaw;
+		OrbitYaw = FMath::Clamp(OrbitYaw + Turn, -OrbitLimit, OrbitLimit);
+		if (OrbitYaw != Was)
+		{
+			const FQuat Around(FVector::UpVector, FMath::DegreesToRadians(OrbitYaw));
+			ShopCamera->SetActorLocationAndRotation(OrbitPivot + Around.RotateVector(CameraBase.GetLocation() - OrbitPivot), Around * CameraBase.GetRotation());
+		}
+	}
+}
+
+void AStreetGameMode::DrainRequests()
+{
+	if (!Screen)
+	{
+		return;
+	}
+	AShortStackCharacter* Hero = GetHero();
+	const int32 From = ScreenSerial;
+	for (const ss::ui::HostRequest& R : Screen->TakeRequests())
+	{
+		switch (R.K)
+		{
+		case ss::ui::HostRequest::PreviewLook:
+			// The draft look on the hero in place (looks' PreviewLook: only what differs changes, grooms async).
+			if (Hero)
+			{
+				Hero->PreviewLook(R.Look, R.Closet);
+				bPreviewing = true;
+			}
+			break;
+		case ss::ui::HostRequest::EndPreview:
+			if (Hero && bPreviewing)
+			{
+				Hero->EndPreview();
+			}
+			bPreviewing = false;
+			break;
+		case ss::ui::HostRequest::Camera:
+			ShowShot(R.Name.empty() ? NAME_None : FName(*Utf8ToFString(R.Name)), ShotBlendSeconds);
+			break;
+		case ss::ui::HostRequest::BeginService:
+			// The page has charged it and started the skip (Session::ShopService): the venue's cinematic plays under it.
+			BeginCinematic(ScreenVenue, Utf8ToFString(R.Name));
+			break;
+		case ss::ui::HostRequest::Redress:
+		{
+			ss::hero::Look L = Game->Session.Person.Appearance;
+			ss::wardrobe::ApplyTo(R.Closet, L);
+			RedressHero(L, R.Closet);
+			break;
+		}
+		case ss::ui::HostRequest::Sit:
+			SitAt(ShopFor(ScreenVenue), R.Name.empty() ? FName(*ScreenPage) : FName(*Utf8ToFString(R.Name)));
+			break;
+		case ss::ui::HostRequest::Stand:
+			StandUp();
+			break;
+		case ss::ui::HostRequest::Talk:
+			AnswerTalk(Utf8ToFString(R.Name));
+			break;
+		case ss::ui::HostRequest::Leave:
+			EndTalk();
+			break;
+		}
+		if (ScreenSerial != From || !Screen)
+		{
+			break; // a request closed it or opened another (a service begun, the talk card's "Get a cut")
+		}
+	}
+}
+
+void AStreetGameMode::ShowShot(FName Shot, float Blend)
+{
+	APlayerController* Pc = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	AShortStackCharacter* Hero = GetHero();
+	const UStreetWorld* Registry = StreetWorld();
+	if (Shot.IsNone())
+	{
+		EndShot(Blend);
+		return;
+	}
+	FTransform View;
+	float Fov = 60.0f;
+	if (!Pc || !Hero || !Registry || !Registry->Shot(Shot, View, Fov))
+	{
+		UE_LOG(LogStreet, Warning, TEXT("No shot %s in the registry"), *Shot.ToString());
+		return;
+	}
+	if (!CameraShot.IsNone() && CameraShot != Shot)
+	{
+		if (AShopStage* Was = ShopFor(ShotVenue(CameraShot)))
+		{
+			Was->OnShot(CameraShot, false);
+		}
+	}
+	AShopStage* Shop = ShopFor(ShotVenue(Shot));
+	// The shot's mark takes the hero there (the thrift's mirror); a shot without one puts them back where they were.
+	FTransform Mark;
+	if (Shop && Shop->ShotMark(Shot, Mark))
+	{
+		if (!bMarkMoved)
+		{
+			BeforeMark = Hero->GetActorTransform();
+			bMarkMoved = true;
+		}
+		PlaceAt(*Hero, Mark, false);
+		OrbitPivot = Mark.GetLocation();
+	}
+	else if (bMarkMoved)
+	{
+		PlaceAt(*Hero, BeforeMark, false);
+		bMarkMoved = false;
+	}
+	if (!ShopCamera)
+	{
+		FActorSpawnParameters Params;
+		Params.ObjectFlags |= RF_Transient;
+		ShopCamera = GetWorld()->SpawnActor<ACameraActor>(ACameraActor::StaticClass(), View, Params);
+	}
+	if (!ShopCamera)
+	{
+		return;
+	}
+	ShopCamera->SetActorTransform(View);
+	if (UCameraComponent* Cam = ShopCamera->GetCameraComponent())
+	{
+		// The shot's view at the player's own field of view setting (as the street's cameras scale with it).
+		Cam->SetFieldOfView(StreetFov(Fov, Game ? Game->Menu.Settings.FieldOfView : 50));
+		Cam->SetConstraintAspectRatio(false);
+	}
+	CameraBase = View;
+	OrbitYaw = 0.0f;
+	OrbitMouse = FVector2D(-1.0, -1.0);
+	const bool bNew = CameraShot != Shot;
+	CameraShot = Shot;
+	Pc->SetViewTargetWithBlend(ShopCamera, Blend);
+	if (Shop && bNew)
+	{
+		Shop->OnShot(Shot, true);
+	}
+}
+
+void AStreetGameMode::EndShot(float Blend)
+{
+	if (!CameraShot.IsNone())
+	{
+		if (AShopStage* Shop = ShopFor(ShotVenue(CameraShot)))
+		{
+			Shop->OnShot(CameraShot, false);
+		}
+	}
+	CameraShot = NAME_None;
+	AShortStackCharacter* Hero = GetHero();
+	if (bMarkMoved && Hero)
+	{
+		PlaceAt(*Hero, BeforeMark, false);
+	}
+	bMarkMoved = false;
+	APlayerController* Pc = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	if (Pc && Hero && Pc->GetViewTarget() != Hero && (!ShotCamera || Pc->GetViewTarget() != ShotCamera))
+	{
+		Pc->SetViewTargetWithBlend(Hero, Blend);
+	}
+}
+
+bool AStreetGameMode::SitAt(AShopStage* Shop, FName Seat)
+{
+	AShortStackCharacter* Hero = GetHero();
+	FTransform Feet;
+	FTransform Stand;
+	float Height = 46.0f;
+	FName SeatShot;
+	if (!Hero || !Shop || !Shop->SeatFor(Seat, Feet, Height, Stand, &SeatShot))
+	{
+		return false;
+	}
+	if (!SeatedAt.IsNone())
+	{
+		Hero->SetSeated(false);
+	}
+	// Their feet at the seat's mark, facing as it faces; the seated pose puts them on it (people-ue's solve, spec 6.6).
+	PlaceAt(*Hero, Feet, true);
+	Hero->SetSeated(true, Height);
+	SeatedAt = Seat;
+	SeatedVenue = Shop->Venue;
+	StandTo = Stand;
+	if (!SeatShot.IsNone())
+	{
+		ShowShot(SeatShot, ShotBlendSeconds);
+	}
+	return true;
+}
+
+void AStreetGameMode::StandUp()
+{
+	AShortStackCharacter* Hero = GetHero();
+	if (SeatedAt.IsNone())
+	{
+		return;
+	}
+	SeatedAt = NAME_None;
+	SeatedVenue = NAME_None;
+	if (Hero)
+	{
+		Hero->SetSeated(false);
+		PlaceAt(*Hero, StandTo, false);
+	}
+	if (!(Screen && Screen->IsOpen()) && !Cinema.bActive)
+	{
+		EndShot(ShotBlendSeconds);
+	}
+}
+
+void AStreetGameMode::UseSeat(const FStreetUse& Use)
+{
+	AShopStage* Shop = ShopFor(Use.Venue);
+	if (!Shop)
+	{
+		NotYet(Use);
+		return;
+	}
+	if (Use.WhyNot)
+	{
+		const FString Why = Use.WhyNot();
+		if (!Why.IsEmpty())
+		{
+			ShowClosed(Why);
+			return;
+		}
+	}
+	// The barber's chair with somebody ahead in it (spec 5.1): the bench and the wait first, then the chair.
+	if (Use.Id == TEXT("barber-chair1") && ss::town::BarberQueue(Game->Session.WorldMinutes()) > 0)
+	{
+		FStreetUse Bench = Use;
+		Bench.Param = TEXT("barber-bench2");
+		UseWait(Bench);
+		return;
+	}
+	const FName Seat = Use.Param.IsEmpty() ? Use.Id : FName(*Use.Param);
+	if (!SitAt(Shop, Seat))
+	{
+		NotYet(Use);
+		return;
+	}
+	// Seated, the venue's screen on its page ("barber-chair1": the Style Book; "diner-stool3": the menu).
+	if (!OpenShop(Use.Venue, Use.Id.ToString()))
+	{
+		// No screen for it: the seat alone (E stands up again).
+		UE_LOG(LogStreet, Log, TEXT("Sat at %s"), *Seat.ToString());
+	}
+}
+
+void AStreetGameMode::UseWait(const FStreetUse& Use)
+{
+	if (Use.WhyNot)
+	{
+		const FString Why = Use.WhyNot();
+		if (!Why.IsEmpty())
+		{
+			ShowClosed(Why);
+			return;
+		}
+	}
+	const double Now = Game->Session.WorldMinutes();
+	AShopStage* Shop = ShopFor(Use.Venue);
+	const FName Seat = Use.Param.IsEmpty() ? NAME_None : FName(*Use.Param);
+	double Until = Now;
+	bool bThenChair = false;
+	if (Use.Venue == TEXT("barber"))
+	{
+		// The bench while somebody's in the chair; with nobody ahead it's only a seat.
+		const int32 Queue = ss::town::BarberQueue(Now);
+		if (Queue <= 0)
+		{
+			if (Shop)
+			{
+				SitAt(Shop, Seat);
+			}
+			return;
+		}
+		Until = Now + Queue;
+		bThenChair = true;
+	}
+	else
+	{
+		// The shelter: until the 14 comes (spec 7.6).
+		const std::vector<double> Next = ss::town::BusTimes("market-east", Now, 1);
+		Until = Next.empty() ? Now + 30.0 : Next.front();
+	}
+	if (Shop && !Seat.IsNone())
+	{
+		SitAt(Shop, Seat);
+	}
+	const std::string Why = Game->Session.WaitAt(FStringToUtf8(Use.Venue.ToString()), Until);
+	if (!Why.empty())
+	{
+		Toast(Shop ? Shop->VenueName : FString(TEXT("Wait")), Utf8ToFString(Why));
+		if (!bThenChair)
+		{
+			StandUp();
+		}
+		return;
+	}
+	BeginCinematic(Use.Venue, FString());
+	Cinema.bThenChair = bThenChair;
+}
+
+void AStreetGameMode::BeginCinematic(FName Venue, const FString& Service, bool bDry, float Seconds)
+{
+	AShortStackCharacter* Hero = GetHero();
+	AShopStage* Shop = ShopFor(Venue);
+	if (!Game || !Hero)
+	{
+		return;
+	}
+	const ss::Session::Skip& K = Game->Session.TimeSkip;
+	if (!bDry && !K.Active)
+	{
+		UE_LOG(LogStreet, Warning, TEXT("A service at %s (%s) with no skip running: played as it would look"), *Venue.ToString(), *Service);
+	}
+	Cinema = FCinema();
+	Cinema.bActive = true;
+	Cinema.bDry = bDry || !K.Active;
+	Cinema.Venue = Venue;
+	Cinema.Service = Service;
+	Cinema.Page = ScreenPage;
+	Cinema.Length = Cinema.bDry ? FMath::Max(1.0, static_cast<double>(Seconds > 0.0f ? Seconds : 4.0f)) : FMath::Max(0.5, K.RealSeconds);
+	Cinema.StartedAt = Cinema.bDry ? RealTime : K.RealStart;
+	// The shop's shots: those under the skip spread over its length, the after-shots (the reveal) as they are. A wait has
+	// none: the camera stays as it is (a seat's shot, the hero's own).
+	const bool bService = Shop && !Service.IsEmpty() && Service != TEXT("wait");
+	if (bService)
+	{
+		double Total = 0.0;
+		for (const TPair<FName, float>& S : Shop->Cinematic(FName(*Service)))
+		{
+			if (S.Value >= 0.0f)
+			{
+				Cinema.During.Add(S);
+				Total += S.Value;
+			}
+			else
+			{
+				Cinema.After.Emplace(S.Key, -S.Value);
+			}
+		}
+		for (TPair<FName, float>& S : Cinema.During)
+		{
+			S.Value = Total > 0.0 ? static_cast<float>(S.Value / Total * Cinema.Length) : static_cast<float>(Cinema.Length / FMath::Max(1, Cinema.During.Num()));
+		}
+	}
+	// The old look through the cut (the new one goes on under black at its end, behind a cut: spec 5.1).
+	if (bPreviewing)
+	{
+		Hero->EndPreview();
+		bPreviewing = false;
+	}
+	// The hero's beat for it (people-ue's names, spec 6.6: "chair" at the barber, "treadmill", "bag" or "weights" at the gym,
+	// "eat" or "coffee" at Ruby's; a wait at Ruby's is a coffee), and the hero to the service's place (a treadmill, the bag,
+	// the bench) where it has one.
+	const FName ServiceBeat = Service.IsEmpty() ? NAME_None
+		: Service == TEXT("wait")				? (Venue == TEXT("diner") ? FName(TEXT("coffee")) : NAME_None)
+												: AStreetNpcs::ServiceBeatFor(Venue, Service);
+	FTransform Feet;
+	float SeatHeight = 0.0f;
+	FName Beat;
+	if (Shop && !Service.IsEmpty() && Service != TEXT("wait") && Shop->ServiceMark(FName(*Service), Feet, SeatHeight, Beat))
+	{
+		Cinema.bMoved = true;
+		Cinema.Before = SeatedAt.IsNone() ? Hero->GetActorTransform() : StandTo;
+		if (!SeatedAt.IsNone())
+		{
+			Hero->SetSeated(false);
+			SeatedAt = NAME_None;
+		}
+		PlaceAt(*Hero, Feet, true);
+		if (SeatHeight > 0.0f)
+		{
+			Hero->SetSeated(true, SeatHeight);
+			Cinema.bSeatedForIt = true;
+		}
+		Hero->SetWork(ServiceBeat.IsNone() ? Beat : ServiceBeat, Feet);
+	}
+	else if (!ServiceBeat.IsNone())
+	{
+		// Where they are (the barber's chair, a stool, a booth): the beat at their own feet.
+		FTransform Here = Hero->GetActorTransform();
+		Here.AddToTranslation(FVector(0.0, 0.0, -Hero->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
+		Hero->SetWork(ServiceBeat, Here);
+	}
+	if (bService)
+	{
+		Shop->OnService(FName(*Service), true);
+	}
+	// The corner holds while the clock races (spec 2.5).
+	if (UStreetWorld* Registry = StreetWorld())
+	{
+		Registry->SetHold(true, K.Active ? K.From : Game->Session.WorldMinutes());
+	}
+	Cinema.Phase = 0;
+	Cinema.PhaseAt = RealTime;
+	if (Cinema.During.Num() > 0)
+	{
+		Cinema.Shot = 0;
+		ShowShot(Cinema.During[0].Key, 0.0f);
+	}
+	UE_LOG(LogStreet, Log, TEXT("A service at %s (%s): %d shots over %.1f s, %d after"), *Venue.ToString(), *Service, Cinema.During.Num(), Cinema.Length, Cinema.After.Num());
+}
+
+void AStreetGameMode::UpdateCinematic(float Dt)
+{
+	if (!Cinema.bActive || !Game)
+	{
+		return;
+	}
+	APlayerController* Pc = GetWorld()->GetFirstPlayerController();
+	APlayerCameraManager* Cam = Pc ? Pc->PlayerCameraManager.Get() : nullptr;
+	AShortStackCharacter* Hero = GetHero();
+	AShopStage* Shop = ShopFor(Cinema.Venue);
+	const double Since = RealTime - Cinema.PhaseAt;
+	switch (Cinema.Phase)
+	{
+	case 0:
+	{
+		// Under the skip: the shots in turn, cut to (the clock in the room racing with it).
+		const double T = RealTime - Cinema.StartedAt;
+		int32 Want = Cinema.During.Num() - 1;
+		double Acc = 0.0;
+		for (int32 I = 0; I < Cinema.During.Num(); ++I)
+		{
+			Acc += Cinema.During[I].Value;
+			if (T < Acc)
+			{
+				Want = I;
+				break;
+			}
+		}
+		if (Want >= 0 && Want != Cinema.Shot)
+		{
+			Cinema.Shot = Want;
+			ShowShot(Cinema.During[Want].Key, 0.0f);
+		}
+		const bool bDone = Cinema.bDry ? T >= Cinema.Length : !Game->Session.TimeSkip.Active;
+		if (bDone)
+		{
+			Cinema.Phase = 1;
+			Cinema.PhaseAt = RealTime;
+			if (Cam)
+			{
+				Cam->StartCameraFade(0.0f, 1.0f, CinemaFade, FLinearColor::Black, false, true);
+			}
+		}
+		break;
+	}
+	case 1:
+		// Black, held until the people the hour now wants are built (spec 6.7: this is one of the blacks they're built under;
+		// never longer than a few seconds).
+		if (Since >= CinemaFade && (!People || People->IsReady() || Since >= CinemaFade + 3.0))
+		{
+			// Under black: the hero off the machine, the corner let go, the look for keeps (the cut and the color landed with
+			// the skip's end: Session::SettleShop), then the reveal or the hero's own camera.
+			if (Shop && !Cinema.Service.IsEmpty() && Cinema.Service != TEXT("wait"))
+			{
+				Shop->OnService(FName(*Cinema.Service), false);
+			}
+			if (UStreetWorld* Registry = StreetWorld())
+			{
+				Registry->SetHold(false, 0.0);
+			}
+			if (Hero)
+			{
+				Hero->SetWork(NAME_None, FTransform::Identity);
+				if (Cinema.bSeatedForIt)
+				{
+					Hero->SetSeated(false);
+				}
+				if (Cinema.bMoved)
+				{
+					PlaceAt(*Hero, Cinema.Before, false);
+				}
+				if (!Cinema.bDry)
+				{
+					// In place: only what the service changed (the cut, the beard, the color) is swapped.
+					Hero->RefreshLook(Game->Session.Person.Appearance, Game->Session.Life.Closet);
+				}
+			}
+			Cinema.Phase = Cinema.After.Num() > 0 ? 2 : 3;
+			Cinema.PhaseAt = RealTime;
+			if (Cinema.Phase == 2)
+			{
+				ShowShot(Cinema.After[0].Key, 0.0f);
+			}
+			else if (Cinema.During.Num() > 0 || Cinema.bMoved)
+			{
+				// Back from the service's cameras (a wait leaves the camera as it was: a seat's shot, the hero's own).
+				EndShot(0.0f);
+			}
+			if (Cam)
+			{
+				Cam->StartCameraFade(1.0f, 0.0f, CinemaFade, FLinearColor::Black, false, false);
+			}
+		}
+		break;
+	case 2:
+		if (Since >= Cinema.After[0].Value + CinemaFade)
+		{
+			Cinema.Phase = 3;
+			Cinema.PhaseAt = RealTime;
+			EndShot(ShotBlendSeconds);
+		}
+		break;
+	default:
+	{
+		if (Since < ShotBlendSeconds)
+		{
+			break;
+		}
+		// Done: into the barber's chair after the wait; the diner's menu again at the seat (another cup, the check); up and
+		// out of the chair after a cut.
+		const FCinema Was = Cinema;
+		Cinema = FCinema();
+		if (Was.bThenChair && Shop)
+		{
+			StandUp();
+			if (SitAt(Shop, TEXT("barber-chair1")))
+			{
+				OpenShop(Was.Venue, TEXT("barber-chair1"));
+			}
+		}
+		else if (Screen && Screen->IsOpen())
+		{
+			// The page stayed up through it (a wait it began): it carries on.
+			FocusWidget(ShopWidget.Get());
+			break;
+		}
+		else if (!SeatedAt.IsNone() && Was.Venue == TEXT("diner") && !Was.bDry && !Was.Service.IsEmpty())
+		{
+			OpenShop(Was.Venue, Was.Page.IsEmpty() ? SeatedAt.ToString() : Was.Page);
+		}
+		else if (!SeatedAt.IsNone() && Was.Venue != TEXT("diner"))
+		{
+			StandUp();
+		}
+		ReturnInputToGame();
+		break;
+	}
+	}
+}
+
+void AStreetGameMode::UnderBlack(TFunction<void()> Action, float Out)
+{
+	if (BlackAt >= 0.0 && BlackAction)
+	{
+		// Already going dark: both run there.
+		TFunction<void()> First = MoveTemp(BlackAction);
+		BlackAction = [First, Action]() {
+			First();
+			Action();
+		};
+		return;
+	}
+	BlackAction = MoveTemp(Action);
+	BlackAt = RealTime + Out + 0.05;
+	if (APlayerController* Pc = GetWorld()->GetFirstPlayerController(); Pc && Pc->PlayerCameraManager)
+	{
+		Pc->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, Out, FLinearColor::Black, false, true);
+	}
+}
+
+void AStreetGameMode::UpdateBlack(float Dt)
+{
+	if (BlackAt < 0.0 || RealTime < BlackAt)
+	{
+		return;
+	}
+	BlackAt = -1.0;
+	TFunction<void()> Action = MoveTemp(BlackAction);
+	BlackAction = nullptr;
+	if (Action)
+	{
+		Action();
+	}
+	if (APlayerController* Pc = GetWorld()->GetFirstPlayerController(); Pc && Pc->PlayerCameraManager)
+	{
+		Pc->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, CinemaFade, FLinearColor::Black, false, false);
+	}
+}
+
+void AStreetGameMode::RedressHero(const ss::hero::Look& Look, const ss::wardrobe::Closet& Closet)
+{
+	AShortStackCharacter* Hero = GetHero();
+	if (!Hero || !Game)
+	{
+		return;
+	}
+	// In place (looks' RefreshLook: only what differs changes: the garments, the tee, the hat and the glasses). The preview
+	// that was up is the look now.
+	bPreviewing = false;
+	Hero->RefreshLook(Look, Closet);
+}
+
+void AStreetGameMode::SyncShops()
+{
+	ShopsSyncedAt = RealTime;
+	if (!Game)
+	{
+		return;
+	}
+	const uint64 Kinds = BuildCaps().GarmentKinds;
+	for (const TWeakObjectPtr<AShopStage>& S : Shops)
+	{
+		AShopStage* Shop = S.Get();
+		if (!Shop)
+		{
+			continue;
+		}
+		if (AThriftStage* Thrift = Cast<AThriftStage>(Shop))
+		{
+			Thrift->SetGarmentKinds(Kinds);
+		}
+		Shop->SyncSession(Game->Session);
+	}
+}
+
+void AStreetGameMode::WatchCounterSale()
+{
+	if (!Game)
+	{
+		return;
+	}
+	if (!Game->Counter.IsOpen())
+	{
+		Game->bCounterTop = false;
+		return;
+	}
+	const std::vector<ss::life::LedgerEntry>& Ledger = Game->Session.Life.Ledger;
+	const ss::life::LedgerEntry Top = Ledger.empty() ? ss::life::LedgerEntry() : Ledger.front();
+	const bool bNew = Game->bCounterTop && !Ledger.empty()
+		&& (Top.At != Game->CounterTop.At || Top.Amount != Game->CounterTop.Amount || Top.Label != Game->CounterTop.Label || Top.Kind != Game->CounterTop.Kind);
+	Game->CounterTop = Top;
+	Game->bCounterTop = true;
+	if (bNew && Top.Kind == 8 && People)
+	{
+		People->PlayBeat(FName(*KeeperAt(TEXT("store"))), TEXT("ring"), 3.0f);
+	}
+}
+
+FString AStreetGameMode::KeeperAt(FName Venue, FString* OutName) const
+{
+	const double World = Game ? Game->Session.WorldMinutes() : 0.0;
+	std::string Id = ss::town::OnShift(FStringToUtf8(Venue.ToString()), World);
+	if (Id.empty())
+	{
+		Id = ss::shop::KeeperOf(FStringToUtf8(Venue.ToString()), World);
+	}
+	if (OutName)
+	{
+		const ss::town::Person* P = Id.empty() ? nullptr : ss::town::FindPerson(Id);
+		*OutName = P && !P->Name.empty() ? Utf8ToFString(P->Name) : FString(KeeperFallback(Venue, World));
+	}
+	return Id.empty() ? FString(KeeperFallback(Venue, World)).ToLower() : Utf8ToFString(Id);
+}
+
+bool AStreetGameMode::OpenTalk(FName Person, FName Venue)
+{
+	if (!Game || Person.IsNone() || bLeaving)
+	{
+		return false;
+	}
+	if (Screen && Screen->IsOpen())
+	{
+		CloseShop(false);
+	}
+	const std::string Id = FStringToUtf8(Person.ToString());
+	ss::town::Talk Line;
+	// The director's person: engaged (they stop, turn and hold the hero's eyes), their opening line said and heard.
+	bTalkByDirector = People && People->OpenTalk(Person, Line);
+	TalkContext.reset();
+	if (!bTalkByDirector)
+	{
+		// Nobody out by that id (the director hasn't built them yet, Augie's guitar wall from across the room): town's
+		// context alone, its line heard all the same.
+		TalkContext = ss::town::ContextFor(Game->Session, Id, FStringToUtf8(Venue.ToString()));
+		if (TalkContext)
+		{
+			Line = ss::town::Open(*TalkContext);
+			if (!Line.Line.empty())
+			{
+				Game->Session.Heard(Id, Line);
+			}
+		}
+		const ss::town::Person* P = ss::town::FindPerson(Id);
+		if (Line.Name.empty())
+		{
+			FString Name = P && !P->Name.empty() ? Utf8ToFString(P->Name) : Person.ToString();
+			if (Name.Len() > 0 && FChar::IsLower(Name[0]))
+			{
+				Name[0] = FChar::ToUpper(Name[0]);
+			}
+			Line.Name = FStringToUtf8(Name);
+		}
+		if (Line.Line.empty())
+		{
+			Line.Line = FStringToUtf8(TalkFallback(Person));
+		}
+	}
+	if (Line.Choices.empty())
+	{
+		Line.Choices.push_back({"bye", "See you."});
+	}
+	// The card (core-ui's TalkCard) is the one ActiveScreen: keyed and drawn as the shops' pages are, over the street.
+	TUniquePtr<ss::ui::TalkCard> Made = MakeUnique<ss::ui::TalkCard>();
+	Card = Made.Get();
+	Card->Gamepad = bGamepad;
+	Card->Open(RealTime, Id);
+	Card->Show(RealTime, Line);
+	Screen = MoveTemp(Made);
+	++ScreenSerial;
+	ScreenVenue = TEXT("talk");
+	ScreenPage = Person.ToString();
+	TalkingTo = Person;
+	TalkingAt = Venue;
+	FocusWidget(ShopWidget.Get());
+	UE_LOG(LogStreet, Log, TEXT("Talking with %s at %s%s"), *Person.ToString(), Venue.IsNone() ? TEXT("the street") : *Venue.ToString(),
+		bTalkByDirector ? TEXT("") : TEXT(" (town's context alone)"));
+	return true;
+}
+
+void AStreetGameMode::AnswerTalk(const FString& Choice)
+{
+	if (!Card || TalkingTo.IsNone() || !Game)
+	{
+		return;
+	}
+	if (Choice == TEXT("service"))
+	{
+		// "Get a cut", "Menu", "Day pass": the card goes and the person's shop opens on its counter, chair or desk.
+		OpenServiceOf(TalkingTo, TalkingAt);
+		return;
+	}
+	const std::string Id = FStringToUtf8(TalkingTo.ToString());
+	ss::town::Talk Line;
+	if (bTalkByDirector && People)
+	{
+		People->AnswerTalk(TalkingTo, Choice, Line);
+	}
+	else if (TalkContext)
+	{
+		Line = ss::town::Answer(*TalkContext, FStringToUtf8(Choice));
+		if (!Line.Line.empty())
+		{
+			Game->Session.Heard(Id, Line);
+		}
+	}
+	const ss::town::Talk& Was = Card->Current();
+	if (Line.Name.empty())
+	{
+		Line.Name = Was.Name;
+	}
+	if (Line.Label.empty())
+	{
+		Line.Label = Was.Label;
+	}
+	if (Line.Line.empty())
+	{
+		Line.Line = "...";
+	}
+	// Their last word (no choices back): only goodbye is left.
+	if (Line.Choices.empty())
+	{
+		Line.Choices.push_back({"bye", "See you."});
+	}
+	Card->Show(RealTime, Line);
+}
+
+void AStreetGameMode::EndTalk()
+{
+	if (People && bTalkByDirector && !TalkingTo.IsNone())
+	{
+		People->Release(TalkingTo);
+	}
+	TalkContext.reset();
+	TalkingTo = NAME_None;
+	TalkingAt = NAME_None;
+	bTalkByDirector = false;
+}
+
+void AStreetGameMode::OpenServiceOf(FName Person, FName Venue)
+{
+	// Their venue: the talk's, else the director's or town's for them.
+	FName Where = Venue;
+	if (Where.IsNone() && People)
+	{
+		if (const FStreetPerson* P = People->FindPerson(Person))
+		{
+			Where = P->Venue;
+		}
+	}
+	if (Where.IsNone())
+	{
+		if (const ss::town::Person* P = ss::town::FindPerson(FStringToUtf8(Person.ToString())))
+		{
+			Where = FName(*Utf8ToFString(P->Venue));
+		}
+	}
+	CloseShop(false);
+	if (Where == TEXT("store"))
+	{
+		OpenCounter(0);
+		return;
+	}
+	if (Where == TEXT("barber"))
+	{
+		// Into the chair (the bench first while somebody's ahead in it).
+		if (const UStreetWorld* Registry = StreetWorld())
+		{
+			if (const FStreetUse* Chair = Registry->FindUse(TEXT("barber-chair1")))
+			{
+				const FStreetUse Use = *Chair;
+				UseSeat(Use);
+				return;
+			}
+		}
+	}
+	static const TPair<const TCHAR*, const TCHAR*> Pages[] = {
+		{TEXT("barber"), TEXT("barber-chair1")}, {TEXT("thrift"), TEXT("thrift-rack-tops")}, {TEXT("gym"), TEXT("gym-desk")},
+		{TEXT("diner"), TEXT("")}, {TEXT("pawn"), TEXT("pawn-counter")},
+	};
+	for (const TPair<const TCHAR*, const TCHAR*>& P : Pages)
+	{
+		if (Where == P.Key)
+		{
+			OpenShop(Where, !SeatedAt.IsNone() && Where == TEXT("diner") ? SeatedAt.ToString() : FString(P.Value));
+			return;
+		}
+	}
+}
+
+void AStreetGameMode::ShowClosed(const FString& Line)
+{
+	ClosedNow = Line;
+	ClosedNowAt = RealTime;
+}
+
+void AStreetGameMode::UpdateClosing()
+{
+	AShortStackCharacter* Hero = GetHero();
+	if (!Game || !Hero)
+	{
+		return;
+	}
+	const double World = Game->Session.WorldMinutes();
+	for (const TWeakObjectPtr<AShopStage>& S : Shops)
+	{
+		AShopStage* Shop = S.Get();
+		const ss::shop::Venue* V = Shop ? ss::shop::FindVenue(FStringToUtf8(Shop->Venue.ToString())) : nullptr;
+		if (!V || V->MembersAnyHour)
+		{
+			continue;
+		}
+		const bool bOpenNow = ss::shop::IsOpen(*V, World);
+		bool& bWas = WasOpen.FindOrAdd(Shop->Venue, bOpenNow);
+		const bool bNear = Shop->IsInside(Hero->GetActorLocation()) || FVector::Dist(Hero->GetActorLocation(), Shop->DoorMiddle()) < ClosingHeard;
+		// Ten minutes out, the keeper says so (once a closing; spec 5.0).
+		if (bOpenNow && bNear)
+		{
+			const double Close = ss::shop::ClosesAt(*V, World);
+			double& Said = ClosingSaid.FindOrAdd(Shop->Venue, -1.0);
+			if (Close > World && Close - World <= ClosingWarn && Said != Close)
+			{
+				Said = Close;
+				FString Name;
+				const FString Keeper = KeeperAt(Shop->Venue, &Name);
+				std::string Line;
+				if (std::shared_ptr<const ss::town::TalkContext> Ctx = ss::town::ContextFor(Game->Session, FStringToUtf8(Keeper), V->Id))
+				{
+					Line = ss::town::KeeperLine(*Ctx, "closing");
+				}
+				const FString Word = Line.empty() ? FString(ClosingFallback(Shop->Venue)) : Utf8ToFString(Line);
+				if (People)
+				{
+					People->Speak(People->FindPerson(FName(*Keeper)) ? FName(*Keeper) : FName(*Name), Word);
+				}
+				else
+				{
+					Toast(Name, Word);
+				}
+			}
+		}
+		// At close: its screen ends, and whoever's still inside is walked out (a fade, then outside the door).
+		if (bWas && !bOpenNow)
+		{
+			if (ScreenVenue == Shop->Venue)
+			{
+				CloseShop(true);
+			}
+			if (Shop->IsInside(Hero->GetActorLocation()) && !Cinema.bActive)
+			{
+				FString Name;
+				const FString Keeper = KeeperAt(Shop->Venue, &Name);
+				const FTransform Out = Shop->OutsideDoor();
+				TWeakObjectPtr<AStreetGameMode> Self(this);
+				UnderBlack([Self, Out]() {
+					if (Self.IsValid())
+					{
+						Self->StandUp();
+						if (AShortStackCharacter* H = Self->GetHero())
+						{
+							PlaceAt(*H, Out, false);
+						}
+					}
+				}, 0.6f);
+				const FString Word = TEXT("That's it, we're closed. Come back tomorrow.");
+				if (People)
+				{
+					People->Speak(People->FindPerson(FName(*Keeper)) ? FName(*Keeper) : FName(*Name), Word);
+				}
+				else
+				{
+					Toast(Name, Word);
+				}
+			}
+		}
+		bWas = bOpenNow;
 	}
 }
 

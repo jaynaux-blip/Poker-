@@ -5,6 +5,8 @@
 
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/Town.h"
 
 #include <algorithm>
 #include <cmath>
@@ -90,6 +92,33 @@ void NeedIcon(Canvas& C, int Which, float X, float Y, float S, const Color& Col)
 		C.FillPolygon({{X + S * 0.1f, Y - S * 0.48f}, {X - S * 0.26f, Y + S * 0.06f}, {X - S * 0.02f, Y + S * 0.06f}, {X - S * 0.1f, Y + S * 0.48f}, {X + S * 0.26f, Y - S * 0.06f}, {X + S * 0.02f, Y - S * 0.06f}},
 			Paint(Col));
 	}
+}
+
+/**
+ * Who's behind the register by the roster (spec 5.5: Ray Molina days, Benny nights): "RAY - OWNER", "BENNY - NIGHT
+ * CLERK". The town keeps the rosters; until it has the store's on its books, it's Benny, as it always was.
+ */
+std::string ClerkId(double World)
+{
+	const std::string Id = town::OnShift("store", World);
+	return Id.empty() ? shop::KeeperOf("store", World) : Id;
+}
+
+std::string ClerkLabel(double World)
+{
+	const std::string Id = ClerkId(World);
+	if (Id == "ray")
+	{
+		return "RAY \xC2\xB7 OWNER";
+	}
+	if (Id.empty() || Id == "benny")
+	{
+		return "BENNY \xC2\xB7 NIGHT CLERK";
+	}
+	const town::Person* P = town::FindPerson(Id);
+	std::string Name = P ? P->Name.substr(0, P->Name.find(' ')) : Id;
+	std::transform(Name.begin(), Name.end(), Name.begin(), [](char Ch) { return static_cast<char>(Ch >= 'a' && Ch <= 'z' ? Ch - 32 : Ch); });
+	return Name + " \xC2\xB7 CLERK";
 }
 
 /** A coin with a clover: the Lucky Penny's sign. */
@@ -283,9 +312,7 @@ void DrawProduct(Canvas& C, const store::Item& I, float X, float Y, float Size)
 void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, double Now, const store::Basket* Preview, float Alpha)
 {
 	// What the basket would do if it were all eaten and drunk now (store::ReliefOf: the same relief eating applies).
-	double Hunger = L.Hunger;
-	double Thirst = L.Thirst;
-	double Energy = L.Energy;
+	NeedsChange Change;
 	if (Preview)
 	{
 		for (const std::pair<std::string, int>& Ln : Preview->Lines)
@@ -293,12 +320,20 @@ void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, 
 			if (const store::Item* I = store::Find(Ln.first))
 			{
 				const store::Relief Rl = store::ReliefOf(*I, L.Perks.MealBoost);
-				Hunger -= Rl.Hunger * Ln.second;
-				Thirst -= Rl.Thirst * Ln.second;
-				Energy += Rl.Energy * Ln.second;
+				Change.Hunger += Rl.Hunger * Ln.second;
+				Change.Thirst += Rl.Thirst * Ln.second;
+				Change.Energy += Rl.Energy * Ln.second;
 			}
 		}
 	}
+	DrawVitals(C, L, X, Y, Width, Now, Change, Alpha);
+}
+
+void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, double Now, const NeedsChange& Change, float Alpha)
+{
+	const double Hunger = L.Hunger - Change.Hunger;
+	const double Thirst = L.Thirst - Change.Thirst;
+	const double Energy = L.Energy + Change.Energy;
 	struct Row
 	{
 		const char* Label;
@@ -421,8 +456,10 @@ void StoreCounter::Pick(const std::string& Id, double Now)
 	Basket.Add(Id);
 	if (Basket.Count() == Had)
 	{
-		// Basket::Add stops a line at nine.
-		Say("Nine's the limit on those, man. Ray's rule, not mine.", Now, false);
+		// Basket::Add stops a line at nine: Ray's rule, said by whoever's on the register (the roster, as the bubble's label).
+		Say(ClerkId(S.WorldMinutes()) == "ray" ? "Nine of one thing, that's the limit. My store, my rule."
+											   : "Nine's the limit on those, man. Ray's rule, not mine.",
+			Now, false);
 		return;
 	}
 	LineAt[Id] = Now;
@@ -544,7 +581,7 @@ void StoreCounter::Draw(Canvas& C, double Now)
 	const float Na = Ease((Now - NoteAt) / 0.3);
 	C.FillRoundRect(Bubble, 14.0f, Paint(Rgba(255, 255, 255, 0.06f * Na)));
 	C.FillPolygon({{Bubble.X + 30.0f, Bubble.Y + Bubble.H}, {Bubble.X + 54.0f, Bubble.Y + Bubble.H}, {Bubble.X + 26.0f, Bubble.Y + Bubble.H + 16.0f}}, Paint(Rgba(255, 255, 255, 0.06f * Na)));
-	TrackedText(C, "BENNY \xC2\xB7 NIGHT CLERK", Bubble.X + 22.0f, Bubble.Y + 28.0f, 11.0f, 800, Fade(NoteBad ? MenuWarn : MenuTeal, Na), 2.6f);
+	TrackedText(C, ClerkLabel(S.WorldMinutes()), Bubble.X + 22.0f, Bubble.Y + 28.0f, 11.0f, 800, Fade(NoteBad ? MenuWarn : MenuTeal, Na), 2.6f);
 	float Ny = Bubble.Y + 34.0f;
 	for (const std::string& Ln : Said)
 	{
@@ -1008,101 +1045,7 @@ void StoreCounter::DrawReceipt(Canvas& C, float Rx0, double Now)
 	}
 }
 
-// ------------------------------------------------------------------ the walking HUD
-
-void DrawStreetHud(Canvas& C, const StreetHudInfo& Info, double Now)
-{
-	const float W = C.Width();
-	const float H = StoreCounter::Height;
-	// Where and when, top left, over a soft shade so it reads on a bright window.
-	C.FillRect({0.0f, 0.0f, 760.0f, 260.0f}, Paint::Radial({0.0f, 0.0f}, 0.0f, {0.0f, 0.0f}, 700.0f, Rgba(0, 0, 0, 0.55f), 0.5f, Rgba(0, 0, 0, 0.25f), Rgba(0, 0, 0, 0.0f)));
-	C.FillRect({58.0f, 52.0f, 34.0f, 3.0f}, Paint(MenuNeon));
-	TrackedText(C, Info.Place, 104.0f, 60.0f, 15.0f, 800, MenuInk, 5.0f);
-	const float Cw = TrackedText(C, Info.Clock, 58.0f, 104.0f, 36.0f, 900, MenuInk, 2.0f);
-	C.Text(Money(Info.BankrollCents), 58.0f + Cw + 22.0f, 102.0f, Ts(20.0f, 800, MenuGold));
-	if (Info.Life)
-	{
-		DrawVitals(C, *Info.Life, 58.0f, 128.0f, 380.0f, Now, nullptr, 0.95f);
-		// An order on its way (Penny Drop): how long until the soonest one is at the door, so the player knows to head home.
-		if (Info.World >= 0.0 && !Info.Life->Deliveries.empty())
-		{
-			double Soonest = Info.Life->Deliveries.front().ArriveAt;
-			for (const life::State::Delivery& Dv : Info.Life->Deliveries)
-			{
-				Soonest = std::min(Soonest, Dv.ArriveAt);
-			}
-			const int Mins = static_cast<int>(std::ceil(std::max(0.0, Soonest - Info.World)));
-			const std::string Label = "PENNY DROP \xC2\xB7 " + (Mins <= 1 ? std::string("ANY MINUTE") : std::to_string(Mins) + " MIN");
-			const float Lw = TrackedWidth(C, Label, 11.0f, 800, 2.4f);
-			const Rect Chip{58.0f, 238.0f, Lw + 40.0f, 26.0f};
-			C.FillRoundRect(Chip, 13.0f, Paint(Rgba(215, 38, 61, 0.88f)));
-			const float Beat = 0.55f + 0.45f * static_cast<float>(std::sin(Now * 3.0));
-			C.FillCircle(Chip.X + 15.0f, Chip.Y + 13.0f, 4.0f, Paint(Rgba(255, 255, 255, Beat)));
-			TrackedText(C, Label, Chip.X + 28.0f, Chip.Y + 17.5f, 11.0f, 800, Hex(0xffffff), 2.4f);
-		}
-	}
-	// The camera, top right.
-	const std::string Mode = Info.FirstPerson ? "FIRST PERSON" : "THIRD PERSON";
-	const float Mw = TrackedWidth(C, Mode, 12.0f, 800, 3.0f);
-	const float Gw = Glyph(C, Info.Gamepad ? "Y" : "V", W - 58.0f - Mw - 46.0f, 66.0f, 0.85f);
-	(void)Gw;
-	TrackedText(C, Mode, W - 58.0f, 62.0f, 12.0f, 800, Fade(MenuInk, 0.8f), 3.0f, Align::Right);
-	// Texts, top right under the camera chip: newest first, each for eight seconds.
-	float Ty = 104.0f;
-	for (auto It = Info.Toasts.rbegin(); It != Info.Toasts.rend(); ++It)
-	{
-		const double Age = Now - It->At;
-		if (Age < 0.0 || Age > 8.0)
-		{
-			continue;
-		}
-		const float A = std::min(Ease(Age / 0.35), Ease((8.0 - Age) / 0.6));
-		const float Tw = 420.0f;
-		const Rect R{W - 58.0f - Tw + (1.0f - A) * 40.0f, Ty, Tw, 0.0f};
-		const std::vector<std::string> Lines = WrapText(C, It->Body, Tw - 40.0f, 16.0f, 400);
-		const float Th = 52.0f + Cf(static_cast<int>(std::min<size_t>(Lines.size(), 3))) * 22.0f;
-		C.FillRoundRect({R.X, R.Y, Tw, Th}, 12.0f, Paint(Rgba(10, 13, 22, 0.86f * A)));
-		C.FillRoundRect({R.X, R.Y, 4.0f, Th}, 2.0f, Paint(Fade(MenuTeal, A)));
-		TrackedText(C, It->From, R.X + 20.0f, R.Y + 28.0f, 12.0f, 800, Fade(MenuTeal, A), 2.4f);
-		float Ly = R.Y + 30.0f;
-		for (size_t I = 0; I < Lines.size() && I < 3; ++I)
-		{
-			Ly += 22.0f;
-			C.Text(Lines[I], R.X + 20.0f, Ly, Ts(16.0f, 400, Fade(MenuInk, 0.92f * A)));
-		}
-		Ty += Th + 10.0f;
-	}
-	// The prompt, bottom center.
-	if (!Info.Prompt.empty())
-	{
-		const float Pw = TrackedWidth(C, Info.Prompt, 15.0f, 800, 2.6f) + 92.0f;
-		const float Px = W * 0.5f - Pw * 0.5f;
-		const float Py = H - 210.0f;
-		C.FillRoundRect({Px, Py, Pw, 52.0f}, 26.0f, Paint(Rgba(8, 10, 16, 0.78f)));
-		C.StrokeRoundRect({Px + 0.5f, Py + 0.5f, Pw - 1.0f, 51.0f}, 26.0f, Fade(MenuInk, 0.18f), 1.0f);
-		Glyph(C, Info.Gamepad ? "A" : Info.PromptKey, Px + 14.0f, Py + 38.0f, 1.0f);
-		TrackedText(C, Info.Prompt, Px + 62.0f, Py + 32.0f, 15.0f, 800, MenuInk, 2.6f);
-	}
-	// The controls, for the first while.
-	const double Since = Now - Info.HintsAt;
-	if (Since >= 0.0 && Since < 14.0)
-	{
-		const float A = std::min(Ease(Since / 0.6), Ease((14.0 - Since) / 1.0));
-		float Hx = 58.0f;
-		const float Hy = H - 62.0f;
-		const std::pair<const char*, const char*> Hints[6] = {{Info.Gamepad ? "LS" : "WASD", "MOVE"}, {Info.Gamepad ? "LB" : "SHIFT", "RUN"}, {Info.Gamepad ? "Y" : "V", "1ST / 3RD PERSON"},
-			{Info.Gamepad ? "A" : "E", "INTERACT"}, {Info.Gamepad ? "X" : "F", "EAT OR DRINK"}, {Info.Gamepad ? "B" : "ESC", "PAUSE"}};
-		for (const std::pair<const char*, const char*>& Hp : Hints)
-		{
-			Hx += Glyph(C, Hp.first, Hx, Hy, A) + 10.0f;
-			Hx += TrackedText(C, Hp.second, Hx, Hy - 2.0f, 13.0f, 700, Fade(MenuMuted, A), 2.6f) + 30.0f;
-		}
-	}
-	if (Info.Fade > 0.0f)
-	{
-		C.FillRect({0.0f, 0.0f, W, H}, Paint(Rgba(0, 0, 0, std::min(1.0f, Info.Fade))));
-	}
-}
+// The walking HUD (DrawStreetHud) is in StreetHud.cpp.
 
 } // namespace ui
 } // namespace ss

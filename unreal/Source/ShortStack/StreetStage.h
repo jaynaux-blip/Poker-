@@ -1,26 +1,38 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "ShortStack/Game/Town.h"
+#include "ShortStack/Game/Weather.h"
 #include "ShortStack/UI/Canvas.h"
+#include "StreetNs.h"
 #include "StreetWorld.h"
 
 #include "StreetStage.generated.h"
 
+class AMarketStage;
+class AStreetTraffic;
+class FStreetAmbience;
 class SDrawListWidget;
+class UDecalComponent;
 class UDirectionalLightComponent;
 class UExponentialHeightFogComponent;
 class UInstancedStaticMeshComponent;
 class ULightComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class UMaterialParameterCollection;
+class UMeshComponent;
 class UPointLightComponent;
 class UPostProcessComponent;
 class URectLightComponent;
+class USkyAtmosphereComponent;
 class USkyLightComponent;
 class USpotLightComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
+class UVolumetricCloudComponent;
 class UWidgetComponent;
 
 /** A place on the street the player can use: walk up, the prompt shows, E does it. */
@@ -45,32 +57,46 @@ struct FStreetSpot
 // FStreetLane, FStreetWalkway and FStreetDoor live in StreetWorld.h now (the registry hands them out too).
 
 /**
- * Fifth Street at night, from the apartment building's door to the Lucky Penny #212 on the corner of
- * Market: sidewalks and the wet road, the building fronts on both sides, the tenement across the street
- * with the Wash & Fold at its foot, streetlights, rain, and the store itself, lit inside, with sliding
- * doors, coolers, aisles, the counter, the roller grill and the coffee bar, its walls and ceiling finished
- * as a corner store's are (a clock on the wall keeps the world's time). The Wash & Fold is a room too, three
- * steps up through its door (its bell rings as it swings in): rows of washers, dryers stacked along the back
- * and side walls (the running ones' drums lit and tumbling), folding tables, chairs at the window, the
- * change and soap machines, carts, the attendant's counter, a TV up on the back wall, and Dee's steel door
- * at the back, where her game is. Beside it the tenement's own street door, Dee's, up to her front room.
- * Built procedurally from engine shapes with collision, like the apartment; Blender props (street_setup.py
- * imports them) replace the boxes where they exist: the building fronts (1812 itself, the walk-up, the
- * brownstones, the floors over the store, and across the street the tenement as the apartment's window
- * sees it), the store's stock, row by row on its shelves, and the laundromat's machines and furniture.
+ * Fifth Street, from Hollis Savings Bank's clock at its south end to the Rialto's marquee at its north, the corner of
+ * Market with the Lucky Penny #212 on it, and the tenement across from door 1812 with the Wash & Fold at its foot
+ * (world realism spec 2-3). Sidewalks, curbs and the crowned road are Northside's modelled ground (ns_ground), puddled
+ * by the weather; the home and far sides' plots are the building kit (ns_fronts: SM_NS_Bldg_<Plot> with its trim, shop
+ * glass, glows and grille), between the fronts kept from before (1812, the walk-up over the barber's, the brownstones,
+ * the store's floors, the tenement); the street's two ends are T intersections, Hollis and Wexler running across them
+ * with cars passing (AStreetTraffic), each closed by a landmark (the bank, the Rialto) and lined by stand-in fronts out
+ * into the haze. Market St east of the corner is AMarketStage's (at its new width, which the crowd walks from the
+ * registry's walkways, spec 6.8; ss.Street.WideMarket 0 keeps The Block's Market for an A/B); this stage spawns the barber's and Ruby's shop
+ * stages on its plots, Market's stage, and the traffic.
  *
- * Coordinates (cm): the building fronts on the player's side of the street stand on X = 0, the road
- * runs along Y at X 420..1620, up is Z with the sidewalk's top at 0. The store spans Y 3700..4950; the
- * Wash & Fold, across the street, Y 15..1825 and X 2085..3140, its floor at Z 45.
+ * The store itself, lit inside, with sliding doors, coolers, aisles, the counter, the roller grill and the coffee bar, its
+ * walls and ceiling finished as a corner store's are (a clock on the wall keeps the world's time). The Wash & Fold is a
+ * room too, three steps up through its door (its bell rings as it swings in): rows of washers, dryers stacked along the
+ * back and side walls (the running ones' drums lit and tumbling), folding tables, chairs at the window, the change and
+ * soap machines, carts, the attendant's counter, a TV up on the back wall, and Dee's steel door at the back, where her
+ * game is. Beside it the tenement's own street door, Dee's, up to her front room.
+ *
+ * The look (StreetStageLook.cpp, spec 3.1-3.3): a SkyAtmosphere with the sun on its October path and the moon, volumetric
+ * cloud as thick as the weather, two height-fog layers, exposure clamps and a grade by the sun's elevation, MegaLights
+ * on every lamp; the weather (core's weather::At from the career's seed, ss.Street.Weather / ss.Street.Rain to force it)
+ * drives the rain (its sheets, its hits on the ground round the camera, the drips off the awnings), the wet, the puddles,
+ * the lightning and MPC_NS, which every M_NS_ material reads (the kit's windows light by the hour from it). Core draws the
+ * [screen] faces (Ns::FScreens: the parked cars' plates, the Rialto's marquee, the awnings' valances), and the plots' shops
+ * keep their real hours (core's shop::Venues). Every imported mesh has an engine-shape stand-in, so the street works before
+ * its art lands. The cross streets run out to where their ground ends in the haze, each end closed by a row of fronts.
+ *
+ * Coordinates (cm, spec 0.3 and StreetNs.h): the building fronts on the player's side of the street stand on X = 0, the
+ * road runs along Y at X 420..1620, up is Z with the sidewalk's top at 0; +X is west, +Y north. The store spans Y
+ * 3700..4950; the Wash & Fold, across the street, Y 15..1825 and X 2085..3140, its floor at Z 45.
  *
  * Built when play begins, as the Embercrest is (design spec 0.8 and 7.5.1): in the editor's world construction builds
  * only a preview (nothing of it is saved: every part is transient), and at play EnsureBuilt (BeginPlay, or the game mode
  * first when it needs the street sooner) clears whatever of the preview came along and builds the street for play, then
  * registers what it built with the street's registry (UStreetWorld: its uses, zones, starts, doors, walkways and
- * stations). Street.umap keeps only the actor, its settings and its preload list: every asset the street's stages load,
- * resolved in the editor (Preload), so the level's load streams them in and the build at play doesn't stop on them.
- * The look follows the camera each frame after it has moved (TG_PostUpdateWork): the rain sheets, the
- * exposure (the street kept dark, the store's own brighter range inside it) and which streetlights shadow.
+ * stations). Street.umap keeps only the actor, its settings, its preload list (every asset the street's stages load,
+ * resolved in the editor, so the level's load streams them in and the build at play doesn't stop on them), the cloud
+ * material and the kit's pivots (Places), resolved in the editor too.
+ * The look follows the camera each frame after it has moved (TG_PostUpdateWork): the rain sheets, the exposure (the
+ * street's by the sun, the store's own brighter range inside it), which lamps scatter shadows into the fog.
  */
 UCLASS()
 class SHORTSTACK_API AStreetStage : public AActor
@@ -82,6 +108,7 @@ public:
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void Tick(float DeltaSeconds) override;
 
 	/** The editor's preview again (after new meshes or materials), its preload list with it. */
@@ -160,16 +187,77 @@ public:
 	/** The store's wall clock shows the world's time (minutes, as Session::WorldMinutes). */
 	void SetClock(double WorldMinutes);
 
+	// ------------------------------------------------------------ the realism pass (spec 3)
+	/** The career's world seed (Session::WorldSeed): the weather, the windows' hash and the parked cars follow it. Until it's set, 0. */
+	void SetWorldSeed(uint64 InSeed);
+	/** The hour the look shows (0..24): the clock's, or ss.Street.Hour's while it's set. */
+	double LookHour() const;
+	/** The weather as it shows now (the career's model, or ss.Street.Weather and ss.Street.Rain while they force it), eased. */
+	const ss::weather::Now& WeatherNow() const { return Weather; }
+	/** Market St at its new width (spec 0.3) and AMarketStage building it, or today's Market (ss.Street.WideMarket 0, for an A/B). */
+	bool IsWideMarket() const { return bWideMarket; }
+	/** Whether Market goes at its new width the next time the street is built: ss.Street.WideMarket (-1, the default: yes; the crowd walks the registry's walkways). */
+	static bool WideMarketWanted();
+	/** The world minutes the look shows (the clock's, or ss.Street.Hour's). */
+	double LookWorld() const { return ShownWorld; }
+	/** The hour's glow levels (Market's stage and the traffic light their glows by them). */
+	const Ns::FGlowLevels& Glows() const { return GlowLevels; }
+	/**
+	 * A skip is running (a service under the TimeSkip): the corner's signals and the cross streets' traffic hold where they
+	 * are (spec 2.5). It's seen from the clock's rate; the game mode may say so too (here, or UStreetWorld::SetHold).
+	 */
+	void SetSkipHold(bool bHold) { bSkipHoldSet = bHold; }
+	bool IsHolding() const;
+	/** The corner of Fifth & Market's signals now (town::Signal, held through a skip). */
+	const ss::town::SignalState& SignalNow() const { return SignalShown; }
+
+	/** ss.Street.Hour: the look's hour (the sky, the lamps, the windows, the shops' lights), -1 back to the clock's. The session's clock is untouched. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestHour(float Hour);
+	/** ss.Street.Weather: clear, overcast, drizzle, rain, storm, or auto (the career's weather). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestWeather(const FString& State);
+	/** ss.Street.Budget: the frame's cost and what's drawing it (lights in range, shadowed and in the fog; MetaHumans by tier; translucency). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestBudget() const;
+	/** One line: the hour, the sun, the weather, the exposure's clamps, Market's width, the kit's plots placed. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestLook() const;
+
+	/** An imported Blender mesh (nullptr when it isn't), noted for the editor's preload list while the preview builds. */
+	static UStaticMesh* NsMesh(const TCHAR* Name);
+	/** A material (or a parameter collection) by object path, noted the same way; nullptr when it isn't there. */
+	static UObject* NsAsset(const TCHAR* Path);
+	/** A decal cell's material (MI_NS_Decal_<Cell>), or nullptr while the decal atlas (T_NS_Decals, art-street's) isn't imported: no grey squares. */
+	static UMaterialInterface* DecalMaterial(int32 Cell);
+	/**
+	 * Drip lines under an edge (an awning's valance, the shed's deck; spec 3.3): one thin upright line every Spacing cm from A
+	 * to B (stage cm, at the edge's height), each falling to the ground at GroundZ, its drops gathering and letting go by the
+	 * rain and the wet (M_NS_RainFx, Mode 1). Set is an instanced cylinder with two custom floats; Frame the stage's.
+	 */
+	static void AddDrips(UInstancedStaticMeshComponent* Set, const FTransform& Frame, const FVector& A, const FVector& B, double GroundZ, double Spacing);
+	/** The ground's height (stage cm) at X, Y: a sidewalk's 0, a road's crown (spec 4.1's RoadZ) on Fifth, Market and the cross streets. */
+	static double GroundZAt(double X, double Y, bool bWideMarket);
+	/** The slot of C's mesh whose imported name (or material's) is Name ("ns_glass"), or INDEX_NONE. */
+	static int32 NsSlot(const UMeshComponent* C, const TCHAR* Name);
+	/**
+	 * For ns_setup.py (the editor only): the sections of Mesh that draw with the slot named Slot in or out of the ray-traced
+	 * scene, casting shadows or not, the mesh rebuilt. The trees' leaves leave ray tracing this way (spec 3.8). False when
+	 * nothing matched (or outside the editor).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Setup")
+	static bool NsSectionFlags(UStaticMesh* Mesh, const FString& Slot, bool bRayTracing, bool bCastShadow);
+
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	float ExposureBias = 0.0f;
-	/** How wet the street is (0 dry .. 1 puddles everywhere). */
+	/** How wet the street is (0 dry .. 1 puddles everywhere): the weather's, set each frame (the street's sound reads it). */
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	float Wetness = 0.85f;
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	float StreetlightCandela = 1400.0f;
-	/** How many streetlights cast shadows at once (the nearest to the camera); the rest light without them. */
+	/** Every lamp casts shadows (MegaLights, spec 3.1); this many of the nearest to the camera cast them into the fog too. */
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
-	int32 ShadowedStreetlights = 2;
+	int32 ShadowedStreetlights = 4;
 	/** The editor's preview of the street (construction builds it; nothing of it is saved). */
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
 	bool bEditorPreview = true;
@@ -181,6 +269,15 @@ public:
 	 */
 	UPROPERTY(VisibleAnywhere, Category = "Short Stack")
 	TArray<TObjectPtr<UObject>> Preload;
+	/** The engine's simple volumetric cloud material, resolved in the editor and saved (nothing loads engine or plugin content by path at play, spec 0.8). */
+	UPROPERTY(VisibleAnywhere, Category = "Short Stack")
+	TObjectPtr<UMaterialInterface> CloudMaterial;
+	/**
+	 * Where the kit's pivoted meshes go (its grilles, the bank's clock hands: ns_fronts.py writes art/build/ns_fronts_places.json
+	 * as it builds them), stage cm by mesh name, resolved in the editor and saved with the level.
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Short Stack")
+	TMap<FName, FVector> Places;
 
 private:
 	/** The paths the editor's preview loaded, onto Preload (with every registered stage's): the editor's world only. */
@@ -190,8 +287,25 @@ private:
 	/** No rain inside the registry's dry zones (M_StreetRain's DryMin0..7, and the older material's store and laundromat boxes). */
 	void ApplyDryBoxes();
 	void BuildSet();
+	/** Fifth's ground (StreetStageGround.cpp): the modelled ground meshes, or engine-shape stand-ins in the same plan, then the castings and decals. */
 	void BuildGround();
+	/** The ground's stand-ins: Fifth's south half and the Hollis T (bSouth), its north half with the corner and the Wexler T (bNorth). */
+	void BuildGroundStandIn(bool bSouth, bool bNorth, bool bVisible = true);
+	/** Market as The Block built it (its ground, its blocks, the building across its end), while the crowd walks its hard-coded lines. */
 	void BuildEnds();
+	/** The street's ends as T intersections (StreetStageFronts.cpp): the cross streets' far sides (the bank, the Rialto, the proxies), the walk limits' closures, the curbs' blocking. */
+	void BuildCrossStreets();
+	/** Fifth's plots (StreetStageFronts.cpp): the building kit where it's imported, else a stand-in of each plot's massing, windows and shop. */
+	void BuildPlots();
+	/** One plot of StreetStageFronts.cpp's table: its kit meshes (or its stand-in), its shop's lit things, its collision. */
+	void BuildPlot(int32 Index);
+	/** The street's furniture (StreetStageFurniture.cpp, spec 2.8): lamps, the corner's signals and blades, signs, hydrants, cans, trees, castings, awnings, parked cars. */
+	void BuildFurniture();
+	void BuildCorner();
+	void BuildTrees();
+	void BuildParkedCars();
+	/** The street's positioned sounds (StreetStageFurniture.cpp, spec 3.7): the signs' hum, the AC units, the downspouts, the shops' open doors. */
+	void BuildEmitters();
 	void BuildHomeBlock();
 	void BuildEntrance();
 	/** The stand-in's door, buzzer, lamp and number when 1812's own front isn't imported. */
@@ -222,7 +336,24 @@ private:
 	 */
 	void BuildStoreInterior();
 	void BuildStreetlights();
+	/** The sky, the sun and the moon, the clouds, the fog, the lens and the rain sheets (StreetStageLook.cpp, spec 3.2). */
 	void BuildSkyAndWeather();
+	/** The rain sheets in front of the camera (their layers: StreetStage.cpp). */
+	void BuildRain();
+	/** At play: the shops on this stage's plots (the barber's, Ruby's), Market's stage, the cross streets' traffic. */
+	void SpawnNeighbors();
+	/** The kit's pivots (art/build/ns_fronts_places.json) onto Places: the editor's world only. */
+	void ResolvePlaces();
+	/** Every asset path the realism pass's builders load (the ground, the plots, the furniture, the look's): AppendPreload's. */
+	static void NsAppendPreload(TArray<FString>& Paths);
+	static void AppendGroundPreload(TArray<FString>& Paths);
+	static void AppendFrontsPreload(TArray<FString>& Paths);
+	static void AppendFurniturePreload(TArray<FString>& Paths);
+	static void AppendLookPreload(TArray<FString>& Paths);
+	/** A decal (M_NS_Decal's cell, MI_NS_Decal_<Cell>) laid on the ground at At (stage cm), Size cm across, turned Yaw; nullptr without the material. */
+	UDecalComponent* GroundDecal(int32 Cell, const FVector& At, float Yaw, const FVector2D& Size);
+	/** The crowd's people kept off Market's roadway while Market is at its new width and the crowd still walks today's lines (hidden there). */
+	void KeepCrowdOffMarket(float Dt);
 	void BuildSpots();
 	void AttachSlate();
 	/** The parked sedans in their paint (again when play begins: the tint isn't saved with the level, see PaintCars). */
@@ -235,6 +366,48 @@ private:
 	void ApplyLens();
 	void PickStreetlights(const FVector& Camera);
 	void ApplyDaylight();
+	/** The hour shown (the clock, or ss.Street.Hour) and whether a skip is running (the clock racing ahead). */
+	void UpdateClock(float Dt);
+	/** The weather to show (the career's, or forced), eased toward; the lightning's flash and its thunder. */
+	void UpdateWeather(float Dt);
+	/** The sun and the moon, the sky's light, the clouds, the fog, the exposure's clamps and the grade, the glows and the lamps (spec 3.2, 3.1). */
+	void ApplyHour();
+	/** MPC_NS (spec 0.7), each frame. */
+	void UpdateMpc();
+	/** Each plot's shop by its hours: its glows, spill and sign lights, lit displays and grille. */
+	void UpdateShops(float Dt);
+	/** The corner's signals and the pedestrians' heads (town::Signal; held through a skip). */
+	void UpdateSignals();
+	/** The stand-in fronts' windows by the hour (the kit's light themselves from MPC_NS). */
+	void UpdateWindowsByHour();
+	/** The bank's clock shows the look's time. */
+	void UpdateBankClock();
+	/** The street's sound: its bed in stereo and the positioned sounds near the camera (StreetAudio.h), the thunder. */
+	void UpdateSound(const FVector& Camera, const FRotator& Rotation, float Dt);
+	/** The rain's hits on the ground (a pool of splashes kept round the camera) and the drips off Fifth's awnings (spec 3.3). */
+	void BuildRainFx();
+	/** The splashes' pool laid round the camera again once it has moved on (on open ground only, never in a room). */
+	void UpdateRainFx(const FVector& Camera);
+	/** The budget's A/B switches (spec 3.8's day-one baseline): MegaLights, the trees (Market's too), as the console sets them. */
+	void ApplyBudgetToggles();
+
+	// ------------------------------------------------------------ the realism pass's helpers (stage cm, stage yaw)
+	/** A SITE mesh (spec 0.4) at the stage's origin turned 180; nullptr when it isn't imported. Collides only if asked (complex as simple). */
+	UStaticMeshComponent* Site(const TCHAR* Name, bool bCollide = false);
+	/** A PROP mesh of the NS kit (front toward Blender -X) at At facing stage yaw Yaw; nullptr when it isn't imported. No collision. */
+	UStaticMeshComponent* NsProp(const TCHAR* Name, const FVector& At, float Yaw, const FVector& Scale = FVector(1.0));
+	/** An invisible blocking box (stage cm). */
+	void Blocker(const FVector& Min, const FVector& Max);
+	/** A glow mesh made to glow by the hour (M_NS_Glow, or its own emissive scaled); Shop -1: lit at night whatever the hours. */
+	int32 AddGlow(UStaticMeshComponent* Mesh, Ns::EGlow Family, uint32 Hex, float Scale, int32 Shop);
+	/** A storefront's light on the sidewalk (spec 3.1): unshadowed, the glass's size, aimed down 35 degrees out of the face; dropped beyond 40 m. */
+	URectLightComponent* Spill(const FVector& At, float Yaw, float Width, float Height, uint32 Hex, float Lumens, int32 Shop);
+	/** A stand-in front down a cross street (SM_NS_Proxy_A..H, or a box of windows): its middle on the building line at At, facing Yaw, Width cm wide. */
+	void Proxy(const FVector& At, float Yaw, double Width, int32 Seed);
+	/** A run of proxies along a building line from A to B (stage cm), facing Yaw, neighbors never alike. */
+	void ProxyRun(const FVector& A, const FVector& B, float Yaw, int32 Seed);
+	/** A massing box of a stand-in plot with its windows on its street faces (+-X faces on Fifth, +-Y on the cross streets). */
+	void StandInBlock(const FVector& Min, const FVector& Max, uint32 Brick, int32 Seed, bool bFacesX, bool bFacesY);
 
 	template <typename T>
 	T* NewPart(USceneComponent* Parent = nullptr);
@@ -487,4 +660,132 @@ private:
 	float GrainScale = 1.0f;
 	float FringeScale = 1.0f;
 	bool bMotionBlur = false;
+
+	// ------------------------------------------------------------ the realism pass's state
+	/** A signal head's glow: 0 Fifth's vehicle heads, 1 Market's, 2 the walk heads across Fifth, 3 across Market's mouth. */
+	struct FNsSignal
+	{
+		TWeakObjectPtr<UMaterialInstanceDynamic> Mid;
+		uint8 Role = 0;
+	};
+	/** A stand-in window (M_StreetWindow's instance): lit by the hour from its seed. */
+	struct FNsWindow
+	{
+		TWeakObjectPtr<UInstancedStaticMeshComponent> Set;
+		int32 Index = 0;
+		float Seed = 0.0f;
+		float Level = 1.0f;
+		uint8 Look = 1;
+		uint8 Room = 0;
+	};
+	/** A positioned sound's place (stage cm) and kind (FStreetEmitter). */
+	struct FNsEmitterSpot
+	{
+		FVector At = FVector::ZeroVector;
+		uint8 Kind = 0;
+		float Level = 1.0f;
+		float Hz = 120.0f;
+		int32 Shop = -1;
+	};
+	/** The plots' shops and every glow mesh, lit by the hour (StreetNs.h). */
+	Ns::FLit Lit;
+	/** The [screen] faces core draws (the parked cars' plates, the Rialto's marquee, the awnings' valances). */
+	Ns::FScreens Screens;
+	/** The hour's glow levels by family (ApplyHour), handed to Market's stage too. */
+	Ns::FGlowLevels GlowLevels;
+	TArray<FNsSignal> NsSignals;
+	TArray<FNsWindow> NsWindows;
+	TArray<FNsEmitterSpot> NsEmitters;
+	/** What stands on each of Fifth's sidewalks (0 home, 1 far; stage cm footprints), for its walkways (Sidewalk): the furniture as BuildFurniture placed it. */
+	TArray<FBox2D> NsFootprints[2];
+	/** The crowd's people this stage hid on Market's roadway (KeepCrowdOffMarket), shown again once they're off it. */
+	TArray<TWeakObjectPtr<AActor>> CrowdHidden;
+	float CrowdCheckIn = 0.0f;
+	/** ss.Street.CrowdOffMarket: the crowd's people kept off Market's roadway (a guard for a crowd on today's lines; off by default, the crowd reads the registry). */
+	bool bCrowdOnOldLines = false;
+	UPROPERTY(Transient)
+	TObjectPtr<UDirectionalLightComponent> Sun;
+	UPROPERTY(Transient)
+	TObjectPtr<USkyAtmosphereComponent> Atmosphere;
+	UPROPERTY(Transient)
+	TObjectPtr<UVolumetricCloudComponent> Clouds;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> CloudMid;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> SkyGlowMid;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialParameterCollection> Mpc;
+	/** The bank's clock hands (each turning about its own pivot, the dial facing north). */
+	UPROPERTY(Transient)
+	TObjectPtr<USceneComponent> BankHour;
+	UPROPERTY(Transient)
+	TObjectPtr<USceneComponent> BankMinute;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UStaticMeshComponent>> Trees;
+	/** The rain's splashes round the camera (M_NS_RainFx, Mode 0) and the drips off the awnings (Mode 1). */
+	UPROPERTY(Transient)
+	TObjectPtr<UInstancedStaticMeshComponent> Splashes;
+	UPROPERTY(Transient)
+	TObjectPtr<UInstancedStaticMeshComponent> Drips;
+	/** Where the splashes' pool was last laid (stage cm, snapped), and when it may be laid again. */
+	FVector2D SplashCenter = FVector2D(1.0e9, 1.0e9);
+	float SplashIn = 0.0f;
+	/** ss.Street.Trees as last applied (-1: not yet). */
+	int8 TreesApplied = -1;
+	/** The awnings' front edges (stage cm, BuildFurniture), where the drips fall from. */
+	TArray<TPair<FVector, FVector>> DripEdges;
+	TWeakObjectPtr<AMarketStage> Market;
+	TWeakObjectPtr<AStreetTraffic> Traffic;
+	/** The street's sound, as the game mode made it (found when it's there, FStreetAmbience::Live). */
+	TSharedPtr<FStreetAmbience> Tone;
+	bool bToneStereo = false;
+	/** Its listener's emitters: the stage's and Market's, sent each frame. */
+	float SoundIn = 0.0f;
+
+	uint64 WorldSeed = 0;
+	/** The clock (SetClock's world minutes; negative: not told yet) and the look's (the override applied). */
+	double ClockWorld = -1.0;
+	double ShownWorld = 22.0 * 60.0 + 1440.0;
+	double RealClock = 0.0;
+	double RateWorld = -1.0;
+	double RateReal = 0.0;
+	bool bSkipSeen = false;
+	bool bSkipHoldSet = false;
+	float SkipQuiet = 0.0f;
+	ss::weather::Now Weather;
+	ss::town::SignalState SignalShown;
+	float SunEl = -30.0f;
+	float SunAz = 270.0f;
+	float EvMin = 0.5f;
+	float EvMax = 3.0f;
+	/** What ApplyHour last applied (the hour, the cloud, the rain), so it runs only when they move. */
+	float AppliedHourKey = -1000.0f;
+	float FlashEnv = 0.0f;
+	double NextFlashAt = 0.0;
+	float LastCoreFlash = 0.0f;
+	float WindowHourApplied = -1000.0f;
+	bool bWideMarket = false;
+	int32 PlotsKit = 0;
+	int32 PlotsStandIn = 0;
+	/** The stand-in windows' instances being laid out (Window() records them for the hour). */
+	bool bRecordWindows = true;
+	/** Console variables the street sets while it runs (Lumen's far field), put back as the level ends. */
+	TArray<TPair<FString, FString>> SavedCvars;
+	void SetCvar(const TCHAR* Name, const TCHAR* Value);
 };
+
+template <typename T>
+T* AStreetStage::NewPart(USceneComponent* Parent)
+{
+	// Transient: built when play begins (or for the editor's preview), never saved with the level. The preview's parts are
+	// not duplicated either: Play-In-Editor copies the level by duplication, which copies transient objects that are still
+	// referenced (BlueprintCreatedComponents is), and the play copy builds its own street at BeginPlay (as the Embercrest).
+	const UWorld* InWorld = GetWorld();
+	const EObjectFlags Flags = InWorld && InWorld->IsGameWorld() ? RF_Transient : EObjectFlags(RF_Transient | RF_DuplicateTransient);
+	T* Part = NewObject<T>(this, NAME_None, Flags);
+	Part->CreationMethod = EComponentCreationMethod::UserConstructionScript;
+	Part->SetupAttachment(Parent ? Parent : Root.Get());
+	BlueprintCreatedComponents.Add(Part);
+	Part->RegisterComponent();
+	return Part;
+}

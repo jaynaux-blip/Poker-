@@ -212,6 +212,67 @@ Chips Basket::Subtotal() const
 	return Sum;
 }
 
+namespace store_detail
+{
+/**
+ * Ray Molina, the owner, on the register 10 AM to 10 PM (the realism update's spec, §5.5): fifties, dry, twenty-two
+ * years behind this counter, and he talks about his night man the way a father does. ClerkLine's order, his own words.
+ */
+std::string RayLine(const ClerkContext& Ctx, const Basket& B, double T, int Energies)
+{
+	const double Day = 1440.0;
+	if (Energies >= 2)
+	{
+		return "Two of those? I sell 'em, I don't drink 'em. Your heart, your business.";
+	}
+	if (!B.Empty())
+	{
+		return B.Count() >= 4 ? "Stocking up? Good. Keeps the lights on." : "That everything? Bag's free.";
+	}
+	if (Ctx.Hunger > 70.0)
+	{
+		return "Roller grill's on. Fresh, not Benny-fresh.";
+	}
+	if (Ctx.Energy < 25.0)
+	{
+		return "You look like Benny at the end of a double. Coffee's on the left.";
+	}
+	if (Ctx.Declined)
+	{
+		return "Card says no? Happens to everybody. That reader's older than Benny.";
+	}
+	if (Ctx.FreshCut)
+	{
+		return "Lonnie got you, I see. He's been cutting mine since I had more of it.";
+	}
+	if (Ctx.NewLook)
+	{
+		return "Something's different. New jacket? Whatever it is, it works.";
+	}
+	if (Ctx.OnSchedule)
+	{
+		return "There's my night cashier. Benny says you're all right. Benny's never said that about anybody.";
+	}
+	if (Ctx.Evicted)
+	{
+		return "Dee says you're on her couch for a while. She'll treat you right. You need more shifts, you ask me first.";
+	}
+	if (Ctx.SinceVisit >= 0.0 && Ctx.SinceVisit < 60.0)
+	{
+		return "Back again? What'd you forget?";
+	}
+	if (Ctx.SinceVisit >= 3.0 * Day)
+	{
+		return "There you are. Thought maybe you found a better store. There isn't one.";
+	}
+	if (!Ctx.Usual.empty() && static_cast<long long>(std::floor(Ctx.World / 60.0)) % 2 == 0)
+	{
+		return "The usual? " + Ctx.Usual + ". Benny told me. Benny tells me everything.";
+	}
+	return T < 12.0 ? "Morning. Benny leave the coffee on? Course he didn't." : T < 18.0 ? "Afternoon. Need anything, holler." : "Evening. Lotto's up to forty million, if you're feeling lucky.";
+}
+} // namespace store_detail
+
 std::string ClerkLine(const ClerkContext& Ctx, const Basket& B)
 {
 	const double Day = 1440.0;
@@ -220,6 +281,10 @@ std::string ClerkLine(const ClerkContext& Ctx, const Basket& B)
 	for (const std::pair<std::string, int>& L : B.Lines)
 	{
 		Energies += L.first == "volt-rush" || L.first == "night-owl-brew" ? L.second : 0;
+	}
+	if (Ctx.Clerk == "ray")
+	{
+		return store_detail::RayLine(Ctx, B, T, Energies);
 	}
 	if (Energies >= 2)
 	{
@@ -241,6 +306,14 @@ std::string ClerkLine(const ClerkContext& Ctx, const Basket& B)
 	if (Ctx.Declined)
 	{
 		return "Card's having a night, huh? Happens. Prices aren't going anywhere.";
+	}
+	if (Ctx.FreshCut)
+	{
+		return "Fresh cut? Lonnie's. Man does the straight razor like it's 1975. Looks good.";
+	}
+	if (Ctx.NewLook)
+	{
+		return "Whoa, new look. New jacket? You dressing for the job you want?";
 	}
 	if (Ctx.OnSchedule)
 	{

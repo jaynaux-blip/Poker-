@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "ShortStack/AI/Profiles.h"
+#include "ShortStack/Game/Body.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Tournament.h"
@@ -176,6 +177,13 @@ public:
 	int32 ReadWeight = 1;
 	/** How hard a painful loss tilts the hero (the Bouncer's thick skin: 0.7, years of drunks and sore losers). */
 	float TiltGain = 1.0f;
+	/**
+	 * The hero's fitness at the table (IronHouse, spec 7.5.4: body::TableOf, set by the game mode as it seats them and at each
+	 * hand's end): the heart's resting rate and how quickly it settles, how far a slow breath steadies it, Focus's refill and
+	 * what a slow breath costs of it (ABackRoomPawn reads those), and the tilt's scale (folded into TiltGain). The defaults
+	 * are today's numbers.
+	 */
+	ss::body::TableEffects Fitness;
 	/** A tell just played across the table (from ABackRoomPlayer); Studied is how hard you were looking. */
 	void OnTellSeen(ABackRoomPlayer* Player, uint8 Tell, uint8 Means, bool bHonest, float Studied);
 	/** "Player/Tell" for the read book. */

@@ -3,14 +3,17 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "ShortStack/Game/Hero.h"
+#include "ShortStack/Game/Wardrobe.h"
 
 #include "ShortStackCharacter.generated.h"
 
+class UBlueprintGeneratedClass;
 class UCameraComponent;
 class UGroomAsset;
 class UGroomBindingAsset;
 class UGroomComponent;
 class USkeletalMesh;
+class USkinnedMeshComponent;
 class USpringArmComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
@@ -18,16 +21,58 @@ class UStreetBodyAnim;
 struct FStreetOutfit;
 
 /**
+ * What someone other than the player wears (CastLooks.h dresses each person, spec 6.1 and 7.5.4): the MetaHuman's tee in
+ * a color with a print or a chest graphic, trousers (its shorts dyed, or trousers fitted to their body), a jacket when one
+ * is fitted to their body, a hat (only over hair that lies close) and glasses from the street's one set, and their shoes.
+ */
+struct FCastWear
+{
+	FLinearColor Shirt = FLinearColor(0.03f, 0.03f, 0.035f);
+	/** A print over the shirt (CastLooks::PrintTexture: 1 stripes .. 7 camo; 0 plain) and a chest graphic (1 ..; 0 none). */
+	int32 Print = 0;
+	int32 Graphic = 0;
+	/** The print's or the graphic's inks (InkC with alpha 0: halfway between A and B). */
+	FLinearColor InkA = FLinearColor(0.85f, 0.85f, 0.82f);
+	FLinearColor InkB = FLinearColor(0.05f, 0.05f, 0.06f);
+	FLinearColor InkC = FLinearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	/** The shorts' (or the trousers') color. */
+	FLinearColor Pants = FLinearColor(0.02f, 0.025f, 0.035f);
+	/** A jacket (wardrobe::Cut Hoodie..Track) and trousers (Jeans, Chinos, WorkPants), worn where one is fitted to their body. Count: none. */
+	ss::wardrobe::Cut Outer = ss::wardrobe::Cut::Count;
+	FLinearColor OuterColor = FLinearColor(0.05f, 0.05f, 0.06f);
+	ss::wardrobe::Cut Bottom = ss::wardrobe::Cut::Count;
+	/** On the head (Beanie..Trilby) and the face (Round..Aviators), the street's set; Count: none. */
+	ss::wardrobe::Cut Hat = ss::wardrobe::Cut::Count;
+	ss::wardrobe::Cut Eyes = ss::wardrobe::Cut::Count;
+	FLinearColor HatColor = FLinearColor(0.03f, 0.04f, 0.06f);
+	FLinearColor FrameColor = FLinearColor(0.01f, 0.01f, 0.012f);
+	/** Black work shoes (baked black: never dyed), or canvas sneakers in ShoeColor. */
+	bool bWorkShoes = true;
+	FLinearColor ShoeColor = FLinearColor(0.7f, 0.68f, 0.62f);
+	/**
+	 * The body's breadth against its height (0.9 slight .. 1.15 heavy; 1 as built): two people built on the same preset body
+	 * (Ruby on Lani's, as Inez is) read as different people by their build as well as their height. Clothes scale with it.
+	 */
+	float Breadth = 1.0f;
+};
+
+/**
  * The player on foot: the person from the character creator, walking the street in third person over
  * the shoulder or in first person from behind their own eyes (V switches, easing between the two).
  * The body is the hero MetaHuman nearest the look (hero_cast.py builds them: HeroA0..HeroB2 by body
- * type and skin tone, falling back to the Back Room's Hero, then the archetype body). It wears jeans and a
- * bomber in the jacket color (PutOnGarments; until they're imported, the MetaHuman's tee in that color, Flannel
- * bringing its plaid, and shorts in a tone that goes with it), sneakers fitted to its feet, the hair color,
- * facial hair and hat and glasses from the creator, and is scaled to
- * the height and build; UStreetBodyAnim walks it. Without a controller (Benny behind the counter) it
+ * type and skin tone, falling back to the Back Room's Hero, then the archetype body). It wears what the closet says
+ * (spec 7.5.4's ApplyWear: the jacket, the trousers and the shoes from garments_setup.py's garment meshes, fitted to
+ * this hero or its body type and tinted by the palette; the MetaHuman's tee in the Top's color, print or graphic, where
+ * no jacket covers it; its shorts where no trousers do), or, with no closet, the creator's jacket in its color over jeans;
+ * sneakers fitted to its feet; the grooms the look asks for from the face's groom library (HeroGrooms::Resolve: the
+ * hairstyle, facial hair and brows, in the hair color); the hat and glasses from the street's one set; and it is scaled
+ * to the height and build. UStreetBodyAnim walks it. Without a controller (Benny behind the counter) it
  * stands idle and watches the player when they come near. The street's director and crowd drive the rest of a person
  * through the people hooks below (where to look, talking, the face, the detail tier, sitting, working).
+ *
+ * Changes in place (PreviewLook, RefreshLook, ApplyWear) swap only what differs: groom assets on the worn grooms, garment
+ * meshes on their components, the tee's and the garments' tints, the hat and glasses. A different body (type, skin band,
+ * build, height) rebuilds.
  */
 UCLASS()
 class SHORTSTACK_API AShortStackCharacter : public ACharacter
@@ -68,10 +113,52 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Camera")
 	float SwitchSeconds = 0.35f;
 
-	/** Dresses the character as the player made them (call once the actor exists; again to change). */
-	void ApplyLook(const ss::hero::Character& Who);
+	/**
+	 * Dresses the character as the player made them, in what Closet says they wear (null: the creator's jacket, hat and
+	 * glasses, as before the closet). A full build: call it once the actor exists, under black (the load fade); later
+	 * changes go through RefreshLook, which rebuilds only for a different body.
+	 */
+	void ApplyLook(const ss::hero::Character& Who, const ss::wardrobe::Closet* Closet = nullptr);
 	/** Dresses a non-player character from a cast member's MetaHuman (Benny: "ExtraB"), set on the floor where it stands. */
 	void ApplyCast(const TCHAR* CastName, const FLinearColor& Shirt);
+	/** As above, in a wardrobe (CastLooks::WearFor, WearOf) at a height (cm, 155-195). */
+	void ApplyCast(const TCHAR* CastName, const FCastWear& Wear, float HeightCm);
+
+	// ------------------------------------------------------------------ the look in place (spec 7.5.4)
+
+	/**
+	 * A moment's look (the barber's draft, the thrift's try-on): changes only what differs from what's on now (groom assets,
+	 * the tee and the garments, the hat and glasses), the hero's own look kept for EndPreview. Grooms not yet in memory load
+	 * asynchronously and go on when they arrive (the barber's stage preloads the face's set as it wakes: PreloadGroomSet), so
+	 * nothing loads synchronously on a key press.
+	 */
+	void PreviewLook(const ss::hero::Look& Look, const ss::wardrobe::Closet& Closet);
+	/** Back to the hero's own look, in place. */
+	void EndPreview();
+	bool IsPreviewing() const { return bPreviewing; }
+	/** The look for keeps (a cut, a closet change, the end of a skip), in place; a different body rebuilds (ApplyLook). */
+	void RefreshLook(const ss::hero::Look& Look, const ss::wardrobe::Closet& Closet);
+	/** What's worn from Closet (Outer, Bottom and Shoes from garment meshes, Top as the tee, Hat and Eyes), in place. */
+	void ApplyWear(const ss::wardrobe::Closet& Closet);
+	/** The closet worn now (empty until one is given) and whether one was. */
+	const ss::wardrobe::Closet& GetCloset() const { return ClosetNow; }
+	bool HasCloset() const { return bHasCloset; }
+	/**
+	 * The Style Book's preload (spec 5.1): this hero face's whole groom set loaded asynchronously and held (bHold), or let go.
+	 * The barber's stage calls it as it wakes and sleeps.
+	 */
+	void PreloadGroomSet(bool bHold);
+	/** A bit per wardrobe::Cut this body can wear from a mesh of its own (garments, shoes, the hats and glasses imported). */
+	uint64 GarmentKindsDrawable() const;
+	/**
+	 * What the hero wears in a look and closet (null: the creator's choices), as a wardrobe for where garments aren't drawn
+	 * (the table: the MetaHuman's tee stands in for the jacket, in its color, a flannel's plaid on it; with no jacket the
+	 * Top's own color, print or graphic). The street's own resolution of the closet, so the table and the resort read it
+	 * the same (spec 7.5.4: HeroPersona).
+	 */
+	static FCastWear HeroWear(const ss::hero::Look& Look, int32 Age, const ss::wardrobe::Closet* Closet);
+	/** What's on, in a line (ss.Look.Describe). */
+	FString DescribeLook() const;
 
 	void SetFirstPerson(bool bFirst);
 	void ToggleView() { SetFirstPerson(!bFirstPerson); }
@@ -185,19 +272,43 @@ public:
 	/** ss.Look.Faces: the face registry (CastLooks.h), configured from this hero when nobody has (or CareerKey given), described. */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	FString TestFaces(const FString& CareerKey);
+	/**
+	 * ss.Look.Preview: "<slot> <value>" previews the look with one choice changed (hair, facialhair, brows, haircolor, hat,
+	 * glasses, outfit, outfitcolor; and body, skin, build, height, which rebuild: the creator's option index), or a closet
+	 * slot (top, outer, bottom, shoes, headwear, eyes) worn as a garment id or a cut name ("outer hoodie", "bottom chinos",
+	 * "headwear trilby", "eyes none": the catalog's of that cut, in the outfit color where it has colors); "end" ends the
+	 * preview, "keep" keeps it (RefreshLook), "redress" dresses again in place, "preload" holds the face's groom set,
+	 * "grooms" describes the library, "caps" the HostCaps, "describe" what's on.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestLookPreview(const FString& Command);
 	/** The hooks' state in a line. */
 	FString DescribeHooks() const;
 
 private:
 	void BuildFromMetaHuman(UClass* Blueprint, const FStreetOutfit& Outfit);
 	/**
-	 * Real clothes in place of the MetaHuman's tee and shorts, when garments_setup.py has imported them for the body type:
-	 * straight-leg jeans and a bomber (SK_Garment_Jeans_<A|B>, SK_Garment_Jacket_<A|B>, or a pair fitted to Hero itself),
-	 * skinned to the hero bodies' own skeleton and following the body as their leader pose, the jacket in the creator's
-	 * jacket color. Hero is the hero_cast MetaHuman being worn (HeroA1); for any other (the Back Room's Hero standing in), or
-	 * without both pieces, nothing changes.
+	 * What's worn below the head (spec 7.5.4's ApplyWear), in place: the jacket and the trousers from garment meshes
+	 * (SK_Garment_<Kind>_<this face>, or the body type's _A/_B for a hero), skinned to the hero bodies' own skeleton and
+	 * following the body as their leader pose, tinted; the MetaHuman's tee and shorts dyed, each shown only where no garment
+	 * covers it (a jacket with no mesh of its own is worn as the bomber, in its color); the shoes; the hat and glasses.
 	 */
-	void PutOnGarments(const FStreetOutfit& Outfit, const FString& Hero);
+	void DressOutfit(const FStreetOutfit& Outfit);
+	void DressGarments(const FStreetOutfit& Outfit);
+	/** What the current look, closet or cast wardrobe puts on (FStreetOutfit). */
+	FStreetOutfit CurrentOutfit() const;
+	/** The look the grooms are chosen by: the closet's headwear counts as the hat. */
+	ss::hero::Look GroomLook() const;
+	/**
+	 * The hero's grooms from the face's library (HeroGrooms::Resolve): the worn ones swapped in place, missing ones added,
+	 * ones the look doesn't wear dropped, all in the hair color. bLoadNow loads what isn't in memory first (a build, under
+	 * black); otherwise it loads asynchronously and goes on when it arrives (the latest request wins).
+	 */
+	void ApplyGrooms(bool bLoadNow);
+	void ChangeLookInPlace(const ss::hero::Look& Look, const ss::wardrobe::Closet* Closet);
+	UGroomComponent* GroomOfKind(uint8 Kind) const;
+	/** A worn groom of a kind made for Asset (from the build's own groom of that kind, as its template, when it has one). */
+	UGroomComponent* AddGroomOfKind(uint8 Kind, UGroomAsset* Asset, UGroomBindingAsset* Binding);
 	void UseArchetype();
 	void ClearWearables();
 	void LinkFace();
@@ -206,7 +317,7 @@ private:
 	void BuildShoes(const FStreetOutfit& Outfit);
 	/** Hides one foot's toes in a shoe (0 left, 1 right), or shows them again. */
 	void HideToes(int32 Side, bool bHide);
-	void PutOnHeadwear();
+	void PutOnHeadwear(const FStreetOutfit& Outfit);
 	/** What carries the hat and glasses: the face, or the body when the face has no head bone (none without either). */
 	USkeletalMeshComponent* HeadCarrier() const;
 	void WearOnHead(UStaticMeshComponent* Piece, const FTransform& InFace);
@@ -232,6 +343,39 @@ private:
 	TObjectPtr<UStaticMeshComponent> HatMesh;
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> GlassesMesh;
+	/** The garments worn over the MetaHuman's own (garments_setup.py's skeletal meshes), when there are any. */
+	UPROPERTY(Transient)
+	TObjectPtr<USkeletalMeshComponent> OuterGarment;
+	UPROPERTY(Transient)
+	TObjectPtr<USkeletalMeshComponent> BottomGarment;
+	/** The MetaHuman's own tee and shorts (one mesh: its shirt and shorts are its material sections). */
+	TWeakObjectPtr<USkinnedMeshComponent> DefaultOutfit;
+	/** The Blueprint the body was built from (its grooms are the templates for grooms added later). */
+	TWeakObjectPtr<UClass> WornBlueprint;
+
+	/** The closet worn now, and whether one was given (without: the creator's jacket, hat and glasses). */
+	ss::wardrobe::Closet ClosetNow;
+	bool bHasCloset = false;
+	/** The hero's own look and closet while a preview is on. */
+	ss::hero::Look OwnLook;
+	ss::wardrobe::Closet OwnCloset;
+	bool bOwnHasCloset = false;
+	bool bPreviewing = false;
+	/** A cast member's wardrobe (ApplyCast). */
+	FCastWear CastWearNow;
+	/** The latest groom set asked for: an async load that arrives after a newer request is dropped. */
+	uint32 GroomRequest = 0;
+	/**
+	 * GarmentKindsDrawable's answer for this body before ss.Look.DenyGarments (the shops ask every couple of seconds; each
+	 * answer is some thirty package lookups): found once per build, forgotten when the body changes or it's dressed again.
+	 */
+	mutable uint64 DrawableKinds = 0;
+	mutable bool bDrawableKnown = false;
+	/**
+	 * The Style Book's preload is wanted (PreloadGroomSet): held for the face worn, and for the new face after a rebuild. Asked
+	 * for before the hero is dressed (the barber wakes as the street is built), it's held once the face is known.
+	 */
+	bool bGroomSetWanted = false;
 	/** The shoes on the foot bones (0 left, 1 right): the modeled pair fitted to this body's feet, or a pair made here to fit. */
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> Shoes[2];

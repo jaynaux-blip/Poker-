@@ -14,6 +14,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/SkinnedAsset.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/StreamableManager.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -35,7 +36,10 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogStreetHero, Log, All);
 
-/** What a body wears below the head: the shirt (it stands in for the jacket), the shorts, a print on the shirt, the shoes. */
+/**
+ * What a body wears: the MetaHuman's tee (its color, a print or a chest graphic) and shorts (their color), a jacket and
+ * trousers drawn from garment meshes where there are any, the shoes, the hat and the glasses.
+ */
 struct FStreetOutfit
 {
 	FLinearColor Shirt = FLinearColor(0.03f, 0.03f, 0.035f);
@@ -46,6 +50,31 @@ struct FStreetOutfit
 	FLinearColor PrintA = FLinearColor::Black;
 	FLinearColor PrintB = FLinearColor::Black;
 	FLinearColor PrintC = FLinearColor::Black;
+	/** The print's and the graphic's numbers (CastLooks::PrintTexture, GraphicTexture; 0: none), for the table's persona. */
+	int32 PrintIndex = 0;
+	int32 GraphicIndex = 0;
+	/** A chest graphic (T_Graphic_*, laid on by its alpha) in up to three inks; none when null. */
+	const TCHAR* Graphic = nullptr;
+	FLinearColor GraphicA = FLinearColor::White;
+	FLinearColor GraphicB = FLinearColor::Black;
+	FLinearColor GraphicC = FLinearColor::Gray;
+	/** A jacket over the tee (wardrobe::Cut Hoodie..Track) in a color; Count: the tee alone. */
+	ss::wardrobe::Cut Outer = ss::wardrobe::Cut::Count;
+	FLinearColor OuterColor = FLinearColor(0.05f, 0.05f, 0.06f);
+	/** Trousers (Jeans, Chinos, WorkPants) in a color (the table's trousers tone); Count or Shorts: the shorts in Pants. */
+	ss::wardrobe::Cut Bottom = ss::wardrobe::Cut::Count;
+	FLinearColor BottomColor = FLinearColor(0.35f, 0.3f, 0.22f);
+	/** The jeans' wash over their baked mid-wash indigo (white: as baked; darker for the dark and black washes). */
+	FLinearColor JeansTint = FLinearColor::White;
+	/** Nothing on the feet (a closet whose Shoes slot is empty, Wardrobe.h): the bare feet show. */
+	bool bBarefoot = false;
+	/** The hat and the glasses (wardrobe::Cut; Count: none), the hat's cloth and the frames' color. */
+	ss::wardrobe::Cut Hat = ss::wardrobe::Cut::Count;
+	FLinearColor HatColor = FLinearColor(0.03f, 0.04f, 0.06f);
+	ss::wardrobe::Cut Eyes = ss::wardrobe::Cut::Count;
+	FLinearColor FrameColor = FLinearColor(0.01f, 0.01f, 0.012f);
+	/** Garments may be the body type's (fitted to HeroA1 or HeroB1), not only this face's own fit. */
+	bool bTypeGarments = false;
 	/**
 	 * The modeled shoes (art/blender/assets/sneakers.py: <ShoePair>_L and _R), when imported. They come in their own
 	 * colors; when bDyeShoes their canvas, accents and laces take ShoeUpper, ShoeAccent and ShoeLaces below (the rubber,
@@ -141,9 +170,111 @@ UStaticMesh* Wearable(const TCHAR* Name)
 	return Name ? LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s.%s"), Name, Name, Name), nullptr, LOAD_NoWarn | LOAD_Quiet) : nullptr;
 }
 
+using ss::wardrobe::Cut;
+
+/**
+ * The street's one set of hats and glasses, by wardrobe::Cut (spec 7.5.4: wear.py's and wearables.py's pieces merged by
+ * id, so a piece looks the same on everyone who wears it): the street's own piece (wearables.py, its frame: a hat's origin
+ * the top of the head inside it, glasses' the bridge, front -Y), else the Back Room's (wear.py, its frame: the midpoint
+ * between the eyes, front +X, made for eyes 6.3 cm apart) until the street's is imported. The pawn's aviators and trilby
+ * are among them.
+ */
+struct FWearPiece
+{
+	Cut Kind;
+	const TCHAR* Street;
+	const TCHAR* BackRoom;
+	/** Worn turned round (the cap backwards). */
+	float Turn;
+	/** Gold wire frames (not acetate). */
+	bool bGold;
+	/** Dark lenses of its own (shades): no clear glass put in. */
+	bool bDark;
+};
+const FWearPiece WearPieces[] = {
+	{Cut::Beanie, TEXT("SM_Hat_Beanie"), TEXT("SM_Wear_Beanie"), 0.0f, false, false},
+	{Cut::BallCap, TEXT("SM_Hat_Cap"), TEXT("SM_Wear_Cap"), 0.0f, false, false},
+	{Cut::CapBack, TEXT("SM_Hat_Cap"), TEXT("SM_Wear_Cap"), 180.0f, false, false},
+	{Cut::Bucket, TEXT("SM_Hat_Bucket"), nullptr, 0.0f, false, false},
+	{Cut::Trilby, TEXT("SM_Hat_Trilby"), TEXT("SM_Wear_Trilby"), 0.0f, false, false},
+	{Cut::Round, TEXT("SM_Glasses_Round"), TEXT("SM_Wear_Glasses"), 0.0f, false, false},
+	{Cut::Square, TEXT("SM_Glasses_Square"), TEXT("SM_Wear_Glasses"), 0.0f, false, false},
+	{Cut::Wire, TEXT("SM_Glasses_Wire"), nullptr, 0.0f, true, false},
+	{Cut::Shades, TEXT("SM_Glasses_Shades"), TEXT("SM_Wear_Shades"), 0.0f, false, true},
+	{Cut::Aviators, TEXT("SM_Glasses_Aviators"), TEXT("SM_Wear_Aviators"), 0.0f, true, true},
+};
+
+const FWearPiece* WearPieceFor(Cut Kind)
+{
+	for (const FWearPiece& P : WearPieces)
+	{
+		if (P.Kind == Kind)
+		{
+			return &P;
+		}
+	}
+	return nullptr;
+}
+
+bool IsHatCut(Cut Kind)
+{
+	return Kind == Cut::Beanie || Kind == Cut::BallCap || Kind == Cut::CapBack || Kind == Cut::Bucket || Kind == Cut::Trilby;
+}
+
+bool IsEyesCut(Cut Kind)
+{
+	return Kind == Cut::Round || Kind == Cut::Square || Kind == Cut::Wire || Kind == Cut::Shades || Kind == Cut::Aviators;
+}
+
+bool IsOuterCut(Cut Kind)
+{
+	return Kind == Cut::Hoodie || Kind == Cut::Bomber || Kind == Cut::Flannel || Kind == Cut::Denim || Kind == Cut::Leather || Kind == Cut::Track;
+}
+
+bool IsTrousersCut(Cut Kind)
+{
+	return Kind == Cut::Jeans || Kind == Cut::Chinos || Kind == Cut::WorkPants;
+}
+
 // The creator's headwear (1 beanie, 2 cap, 3 cap backwards, 4 bucket hat) and glasses (1 round, 2 square, 3 wire, 4 shades).
-const TCHAR* const Hats[5] = {nullptr, TEXT("SM_Hat_Beanie"), TEXT("SM_Hat_Cap"), TEXT("SM_Hat_Cap"), TEXT("SM_Hat_Bucket")};
-const TCHAR* const Specs[5] = {nullptr, TEXT("SM_Glasses_Round"), TEXT("SM_Glasses_Square"), TEXT("SM_Glasses_Wire"), TEXT("SM_Glasses_Shades")};
+const Cut CreatorHats[5] = {Cut::Count, Cut::Beanie, Cut::BallCap, Cut::CapBack, Cut::Bucket};
+const Cut CreatorSpecs[5] = {Cut::Count, Cut::Round, Cut::Square, Cut::Wire, Cut::Shades};
+
+/** The garment mesh family a cut is drawn from (garments.py's SK_Garment_<Family>_<fit>); null for what isn't a garment mesh. */
+const TCHAR* GarmentFamily(Cut Kind)
+{
+	switch (Kind)
+	{
+	case Cut::Hoodie:
+		return TEXT("Hoodie");
+	case Cut::Bomber:
+		return TEXT("Jacket");
+	case Cut::Flannel:
+		return TEXT("Flannel");
+	case Cut::Denim:
+		return TEXT("Denim");
+	case Cut::Leather:
+		return TEXT("Leather");
+	case Cut::Track:
+		return TEXT("Track");
+	case Cut::Jeans:
+		return TEXT("Jeans");
+	case Cut::Chinos:
+		return TEXT("Chinos");
+	case Cut::WorkPants:
+		return TEXT("WorkPants");
+	default:
+		return nullptr;
+	}
+}
+
+// Kinds the 3D won't sell even with a mesh (a garment that clips on some build in the lead's PIE check), a bit per Cut.
+TAutoConsoleVariable<int32> CVarDenyGarments(TEXT("ss.Look.DenyGarments"), 0,
+	TEXT("A bit per wardrobe::Cut kept out of the shops' HostCaps even with a mesh (one that clips on a build). 0: none."));
+// Non-player characters may wear their body type's garments (fitted to HeroA1/HeroB1) when none is fitted to their own face.
+TAutoConsoleVariable<int32> CVarNpcGarments(TEXT("ss.Look.NpcGarments"), 0,
+	TEXT("1: people other than the player wear their body type's garments (fitted to HeroA1/HeroB1) when none is fitted to their face; 0: only their own fit. "
+		 "ss.Look.Redress applies it."));
 
 /** A print mask from art/blender/prints.py (imported by shortstack_setup.import_textures), when imported. */
 UTexture2D* ClothingTexture(const TCHAR* Name)
@@ -227,58 +358,10 @@ EGroomKind GroomKindOf(const FString& Variable, const FString& Asset)
 	return HeroGrooms::KindOf(Variable, Asset);
 }
 
-/** Hair that stays close to the scalp, so a hat sits over it without it coming up through the crown. */
-bool TightHair(const FString& Asset)
+/** The grooms the library swaps (the scalp, the brows, the beard and the mustache); the lashes and the peach fuzz stay as built. */
+bool IsManagedGroom(EGroomKind Kind)
 {
-	static const TCHAR* const Tight[] = {TEXT("BuzzCut"), TEXT("360Waves"), TEXT("BaldingStubble"), TEXT("HairLoss"), TEXT("Cornrows"), TEXT("SlickBack"),
-		TEXT("PulledBack"), TEXT("LowPonytail"), TEXT("RecedeMessy"), TEXT("BrushCut"), TEXT("CurlyFade")};
-	for (const TCHAR* Style : Tight)
-	{
-		if (Asset.Contains(Style))
-		{
-			return true;
-		}
-	}
-	return false;
-}
-
-/** Hair cropped about as short as a buzz cut (a ponytail or cornrows lie close, but aren't one). */
-bool CroppedHair(const FString& Asset)
-{
-	static const TCHAR* const Cropped[] = {TEXT("BuzzCut"), TEXT("360Waves"), TEXT("BaldingStubble"), TEXT("HairLoss"), TEXT("BrushCut"), TEXT("CurlyFade")};
-	for (const TCHAR* Style : Cropped)
-	{
-		if (Asset.Contains(Style))
-		{
-			return true;
-		}
-	}
-	return false;
-}
-
-/**
- * Whether the hero wears one of the MetaHuman's grooms, given the creator's choices. The preset's hairstyle stands in
- * for the one picked (hair can't be swapped at run time), except: shaved is bald, a buzz cut is bald unless the preset's
- * hair is that short, and under a hat only hair that lies close to the head stays. Facial hair: none takes the beard
- * and mustache off, stubble keeps only stubble, a mustache keeps only the mustache.
- */
-bool HeroWearsGroom(const ss::hero::Look& L, EGroomKind Kind, const FString& Asset)
-{
-	switch (Kind)
-	{
-	case EGroomKind::Scalp:
-		if (L.Hair == 0 || (L.Hair == 1 && !CroppedHair(Asset)))
-		{
-			return false;
-		}
-		return L.Hat == 0 || TightHair(Asset);
-	case EGroomKind::Beard:
-		return L.FacialHair >= 3 || (L.FacialHair == 1 && Asset.Contains(TEXT("Stubble")));
-	case EGroomKind::Mustache:
-		return L.FacialHair >= 2 || (L.FacialHair == 1 && Asset.Contains(TEXT("Stubble")));
-	default:
-		return true;
-	}
+	return Kind == EGroomKind::Scalp || Kind == EGroomKind::Brows || Kind == EGroomKind::Beard || Kind == EGroomKind::Mustache;
 }
 
 /** The creator's hair colors in the MetaHuman hair material's terms: melanin, redness and grey. */
@@ -315,7 +398,12 @@ void ShadeGroom(UGroomComponent* Groom, const FHairShade& Shade, float Darker)
 	{
 		if (UMaterialInterface* Material = Groom->GetMaterial(Slot))
 		{
-			UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Material, Groom);
+			// Shaded again in place (a new hair color at the barber): its own instance, made the first time.
+			UMaterialInstanceDynamic* Mid = Cast<UMaterialInstanceDynamic>(Material);
+			if (!Mid || Mid->GetOuter() != Groom)
+			{
+				Mid = UMaterialInstanceDynamic::Create(Mid && Mid->Parent ? Mid->Parent.Get() : Material, Groom);
+			}
 			Mid->SetScalarParameterValue(TEXT("hairMelanin"), Melanin);
 			Mid->SetScalarParameterValue(TEXT("hairRedness"), Shade.Redness);
 			Mid->SetScalarParameterValue(TEXT("WhiteAmount"), Shade.White);
@@ -354,46 +442,110 @@ const FVector WorkLookAt(45.0, 0.0, 95.0);
 
 // ------------------------------------------------------------------ clothes
 
-/** The hero's clothes from the creator: the jacket's color on the shirt, shorts that go with it, the sneakers. */
-FStreetOutfit HeroOutfit(const ss::hero::Look& L)
+/**
+ * A garment's color is core's (wardrobe::Tone: the thrift's swatch, the portrait's and the 3D's tint, so the three agree):
+ * jackets and tees the creator's outfit tones plus a white and a heather tee; trousers, shorts and shoes their slot's own.
+ * Under each jacket color with no trousers named, the shorts' tone (charcoal, navy, olive, burgundy, sand, black, teal,
+ * mustard: denim, charcoal, dark brown, black, denim, grey, charcoal, black).
+ */
+const uint32 PantsFor[8] = {0x283244, 0x2b2c31, 0x3a3128, 0x1d1d21, 0x283447, 0x3b3d43, 0x2b2c31, 0x1d1d21};
+// The jeans bake one mid-wash indigo; the catalog's other washes (Wardrobe.cpp: 0 dark, 1 mid, 2 light, 3 black) are a
+// multiply over it (linear), lifting no faded thread past white.
+const FLinearColor JeansWashes[4] = {FLinearColor(0.6f, 0.62f, 0.68f), FLinearColor::White, FLinearColor(1.38f, 1.34f, 1.28f), FLinearColor(0.27f, 0.26f, 0.27f)};
+// The mid wash, as the table draws trousers it can't model (and the jeans worn with no closet).
+const uint32 MidWashTone = 0x3d5c86;
+
+FLinearColor ToneOf(const ss::wardrobe::Garment& G)
 {
-	FStreetOutfit O;
-	const int32 Color = FMath::Clamp(L.OutfitColor, 0, 7);
-	O.Shirt = SrgbOf(ss::hero::OutfitTone(Color));
-	// Charcoal, navy, olive, burgundy, sand, black, teal, mustard: denim, charcoal, dark brown, black, denim, grey, charcoal, black.
-	static const uint32 PantsFor[8] = {0x283244, 0x2b2c31, 0x3a3128, 0x1d1d21, 0x283447, 0x3b3d43, 0x2b2c31, 0x1d1d21};
-	O.Pants = SrgbOf(PantsFor[Color]);
-	if (L.Outfit == 2)
+	return SrgbOf(ss::wardrobe::Tone(G));
+}
+
+/** A graphic's ink, kept readable on its shirt (the Back Room's rule): too close in lightness, pushed light or dark. */
+FLinearColor LegibleInk(const FLinearColor& Ink, const FLinearColor& Shirt)
+{
+	const float Ground = FMath::Sqrt(Shirt.GetLuminance());
+	if (FMath::Abs(FMath::Sqrt(Ink.GetLuminance()) - Ground) >= 0.3f)
 	{
-		// Flannel: the jacket's color in a plaid (the wide bands darker, a pale thread, darkest where the bands cross).
-		O.Print = TEXT("T_Print_Tartan");
-		O.PrintTiling = 3.0f;
-		O.PrintA = Scaled(O.Shirt, 0.42f);
-		O.PrintB = FMath::Lerp(O.Shirt, SrgbOf(0xd9cfb8), 0.7f);
-		O.PrintC = Scaled(O.Shirt, 0.2f);
+		return Ink;
 	}
-	// Canvas court shoes, off-white with the jacket's color on the heel tab and the stripe (a red one when the jacket is
-	// charcoal or black); black canvas under a light jacket.
-	const bool bLightJacket = Color == 4 || Color == 7;
-	O.ShoeUpper = SrgbOf(bLightJacket ? 0x1d1e22 : 0xd6d0c0);
-	O.ShoeRubber = SrgbOf(bLightJacket ? 0xe4dfd2 : 0xece7db);
-	O.ShoeAccent = Color == 0 || Color == 5 ? SrgbOf(0x8f1d2c) : O.Shirt;
+	return Ground < 0.45f ? FMath::Lerp(Ink, FLinearColor(0.80f, 0.76f, 0.68f), 0.75f) : FMath::Lerp(Ink, FLinearColor(0.012f, 0.012f, 0.016f), 0.8f);
+}
+
+/**
+ * A garment the closet names: the catalog's, or, for an id the catalog doesn't have (yet), read from the id itself
+ * ("outer.denim.navy": the slot, the cut, the outfit color's name last; "top.graphic.sundaymajor" is a tee).
+ */
+bool GarmentOf(const std::string& Id, ss::wardrobe::Garment& Out)
+{
+	if (Id.empty())
+	{
+		return false;
+	}
+	if (const ss::wardrobe::Garment* G = ss::wardrobe::Find(Id))
+	{
+		Out = *G;
+		return true;
+	}
+	TArray<FString> Parts;
+	FString(UTF8_TO_TCHAR(Id.c_str())).ParseIntoArray(Parts, TEXT("."));
+	if (Parts.Num() < 2)
+	{
+		return false;
+	}
+	static const TCHAR* const CutNames[] = {TEXT("tee"), TEXT("hoodie"), TEXT("bomber"), TEXT("flannel"), TEXT("denim"), TEXT("leather"), TEXT("track"), TEXT("shorts"),
+		TEXT("jeans"), TEXT("chinos"), TEXT("workpants"), TEXT("sneakers"), TEXT("workshoes"), TEXT("beanie"), TEXT("ballcap"), TEXT("capback"), TEXT("bucket"),
+		TEXT("trilby"), TEXT("round"), TEXT("square"), TEXT("wire"), TEXT("shades"), TEXT("aviators")};
+	static_assert(UE_ARRAY_COUNT(CutNames) == static_cast<size_t>(Cut::Count), "a name per wardrobe::Cut");
+	int32 Kind = INDEX_NONE;
+	for (int32 I = 0; I < static_cast<int32>(UE_ARRAY_COUNT(CutNames)) && Kind == INDEX_NONE; ++I)
+	{
+		if (Parts[1].Equals(CutNames[I], ESearchCase::IgnoreCase))
+		{
+			Kind = I;
+		}
+	}
+	if (Kind == INDEX_NONE && (Parts[0].Equals(TEXT("top"), ESearchCase::IgnoreCase)))
+	{
+		Kind = static_cast<int32>(Cut::Tee);
+	}
+	if (Kind == INDEX_NONE)
+	{
+		return false;
+	}
+	Out = ss::wardrobe::Garment();
+	Out.Id = Id;
+	Out.Kind = static_cast<Cut>(Kind);
+	Out.Where = ss::wardrobe::SlotOf(Out.Kind);
+	Out.Color = 0;
+	for (int32 C = 0; C < ss::hero::OptionCount(ss::hero::Slot::OutfitColor); ++C)
+	{
+		if (Parts.Last().Equals(UTF8_TO_TCHAR(ss::hero::OptionName(ss::hero::Slot::OutfitColor, C).c_str()), ESearchCase::IgnoreCase))
+		{
+			Out.Color = C;
+		}
+	}
+	return true;
+}
+
+/** Canvas court sneakers in a canvas color: off-white rubber, the accent on the heel tab and the stripe. */
+void DyeSneakers(FStreetOutfit& O, const FLinearColor& Canvas, const FLinearColor& Accent)
+{
+	const bool bDark = Canvas.GetLuminance() < 0.2f;
+	O.ShoeUpper = Canvas;
+	O.ShoeRubber = SrgbOf(bDark ? 0xe4dfd2 : 0xece7db);
+	O.ShoeAccent = Accent;
 	O.ShoeLining = SrgbOf(0x1a1a1d);
-	O.ShoeLaces = SrgbOf(bLightJacket ? 0x2a2b30 : 0xefebe1);
+	O.ShoeLaces = SrgbOf(bDark ? 0x2a2b30 : 0xefebe1);
 	O.ShoeOutsole = SrgbOf(0x3b3029);
 	// The modeled sneaker in the same colors, where its bake takes a tint (the canvas, the stripe, heel tape and pull tab,
 	// the laces); its off-white rubber and gum tread stay as baked.
 	O.ShoePair = TEXT("SM_Sneaker");
 	O.bDyeShoes = true;
-	return O;
 }
 
-/** A cast member at work: their shirt, dark trousers, black shoes (the work shoes, baked black all over: never dyed). */
-FStreetOutfit CastOutfit(const FLinearColor& Shirt)
+/** The work shoes: baked black all over, never dyed. */
+void WorkShoes(FStreetOutfit& O)
 {
-	FStreetOutfit O;
-	O.Shirt = Shirt;
-	O.Pants = SrgbOf(0x2a2b30);
 	O.ShoePair = TEXT("SM_WorkShoe");
 	O.bDyeShoes = false;
 	O.ShoeUpper = SrgbOf(0x161619);
@@ -402,6 +554,182 @@ FStreetOutfit CastOutfit(const FLinearColor& Shirt)
 	O.ShoeLining = SrgbOf(0x111113);
 	O.ShoeLaces = SrgbOf(0x161619);
 	O.ShoeOutsole = SrgbOf(0x101012);
+}
+
+/** A shirt's print (the persona's numbering, 1..7) in tones of the shirt: the wide bands darker, a pale thread, darkest where they cross. */
+void PrintIn(FStreetOutfit& O, int32 Print, const FLinearColor* InkA, const FLinearColor* InkB, const FLinearColor* InkC)
+{
+	O.Print = CastLooks::PrintTexture(Print);
+	O.PrintIndex = O.Print ? Print : 0;
+	O.PrintTiling = CastLooks::PrintTiling(Print);
+	O.PrintA = InkA ? *InkA : Scaled(O.Shirt, 0.42f);
+	O.PrintB = InkB ? *InkB : FMath::Lerp(O.Shirt, SrgbOf(0xd9cfb8), 0.7f);
+	O.PrintC = InkC ? *InkC : Scaled(O.Shirt, 0.2f);
+}
+
+/** A chest graphic (the persona's numbering) in two inks kept readable on the shirt, and a third between ink and shirt. */
+void GraphicIn(FStreetOutfit& O, int32 Graphic, const FLinearColor& InkA, const FLinearColor& InkB)
+{
+	O.Graphic = CastLooks::GraphicTexture(Graphic);
+	O.GraphicIndex = O.Graphic ? Graphic : 0;
+	O.GraphicA = LegibleInk(InkA, O.Shirt);
+	O.GraphicB = LegibleInk(InkB, O.Shirt);
+	O.GraphicC = FMath::Lerp(O.GraphicA, O.Shirt, 0.35f);
+}
+
+/**
+ * The hero's clothes. With a seeded closet, what it says is worn (spec 7.1): the tee in its color with its print or graphic
+ * ("" in Top: the tee in the outfit color), the jacket ("" in Outer: none, the tee alone), the trousers ("" in Bottom: the
+ * shorts), the shoes, the hat and the glasses. Without one (a career before the closet), the creator's choices: the jacket
+ * in its color over jeans (Outfit 6, None: the tee alone in that color), the hat and glasses, white sneakers trimmed in it.
+ */
+FStreetOutfit HeroOutfit(const ss::hero::Look& L, int32 Age, const ss::wardrobe::Closet* Closet)
+{
+	using ss::wardrobe::Slot;
+	FStreetOutfit O;
+	O.bTypeGarments = true;
+	int32 Color = FMath::Clamp(L.OutfitColor, 0, 7);
+	O.Shirt = SrgbOf(ss::hero::OutfitTone(Color));
+	O.OuterColor = O.Shirt;
+	O.Outer = L.Outfit >= 0 && L.Outfit < ss::hero::OutfitNone ? static_cast<Cut>(L.Outfit + 1) : Cut::Count;
+	O.Bottom = Cut::Jeans;
+	O.Hat = CreatorHats[FMath::Clamp(L.Hat, 0, 4)];
+	O.Eyes = CreatorSpecs[FMath::Clamp(L.Glasses, 0, 4)];
+	// Jeans with no closet: the mid wash as baked.
+	O.BottomColor = SrgbOf(MidWashTone);
+	Cut Shoes = Cut::Sneakers;
+	bool bShoesFromCloset = false;
+	FLinearColor Canvas = FLinearColor::White;
+	int32 CanvasIndex = 0;
+	bool bTopFromCloset = false;
+	bool bShortsNamed = false;
+	bool bFramesFromCloset = false;
+	FLinearColor ClosetFrames = FLinearColor::Black;
+	if (Closet && Closet->Seeded)
+	{
+		ss::wardrobe::Garment G;
+		auto Worn = [Closet, &G](Slot S) { return GarmentOf(Closet->Worn[static_cast<int32>(S)], G); };
+		O.Outer = Cut::Count;
+		if (Worn(Slot::Outer) && IsOuterCut(G.Kind))
+		{
+			O.Outer = G.Kind;
+			Color = FMath::Clamp(G.Color, 0, 7);
+			O.OuterColor = ToneOf(G);
+		}
+		O.Shirt = SrgbOf(ss::hero::OutfitTone(Color));
+		if (Worn(Slot::Top) && G.Kind == Cut::Tee)
+		{
+			bTopFromCloset = true;
+			// Core's tone: the creator's eight, and the white and heather tees.
+			O.Shirt = ToneOf(G);
+			if (G.Print >= 0)
+			{
+				PrintIn(O, G.Print + 1, nullptr, nullptr, nullptr);
+			}
+			if (G.Graphic >= 0)
+			{
+				GraphicIn(O, G.Graphic + 1, SrgbOf(0xefe9dc), SrgbOf(0x8f1d2c));
+			}
+		}
+		O.Bottom = Cut::Shorts;
+		if (Worn(Slot::Bottom) && (IsTrousersCut(G.Kind) || G.Kind == Cut::Shorts))
+		{
+			O.Bottom = G.Kind;
+			O.BottomColor = ToneOf(G);
+			bShortsNamed = G.Kind == Cut::Shorts;
+			if (G.Kind == Cut::Jeans)
+			{
+				O.JeansTint = JeansWashes[FMath::Clamp(G.Color, 0, 3)];
+			}
+		}
+		if (Worn(Slot::Shoes) && (G.Kind == Cut::Sneakers || G.Kind == Cut::WorkShoes))
+		{
+			Shoes = G.Kind;
+			bShoesFromCloset = true;
+			Canvas = ToneOf(G);
+			CanvasIndex = G.Color;
+		}
+		else
+		{
+			// "" in Shoes is barefoot (Wardrobe.h): the closet's Take off.
+			O.bBarefoot = true;
+		}
+		O.Hat = Worn(Slot::Hat) && IsHatCut(G.Kind) ? G.Kind : Cut::Count;
+		if (Worn(Slot::Eyes) && IsEyesCut(G.Kind))
+		{
+			O.Eyes = G.Kind;
+			bFramesFromCloset = true;
+			ClosetFrames = ToneOf(G);
+		}
+		else
+		{
+			O.Eyes = Cut::Count;
+		}
+	}
+	// The shorts the closet names (khaki, grey, navy), else the shorts' tone under the jacket.
+	O.Pants = bShortsNamed ? O.BottomColor : SrgbOf(PantsFor[Color]);
+	if (!bTopFromCloset && O.Outer == Cut::Flannel)
+	{
+		// Flannel with no flannel mesh to wear: the tee carries its plaid in the jacket's color (as before the garments).
+		PrintIn(O, 4, nullptr, nullptr, nullptr);
+	}
+	ss::hero::Look ForHat = L;
+	ForHat.OutfitColor = Color;
+	O.HatColor = SrgbOf(ss::hero::HatTone(ForHat, Age));
+	const FWearPiece* Frames = WearPieceFor(O.Eyes);
+	O.FrameColor = bFramesFromCloset ? ClosetFrames : SrgbOf(Frames && Frames->bGold ? 0xc9a24d : 0x161618);
+	if (Shoes == Cut::WorkShoes)
+	{
+		// The modeled work shoe bakes its own black leather (sneakers.py): a brown pair reads black until it bakes light.
+		WorkShoes(O);
+	}
+	else if (bShoesFromCloset)
+	{
+		// The catalog's canvas (white, black, grey): a red heel tab and stripe on the white, off-white on the others.
+		DyeSneakers(O, Canvas, CanvasIndex == 0 ? SrgbOf(0x8f1d2c) : SrgbOf(0xd6d0c0));
+	}
+	else
+	{
+		// Canvas court shoes, off-white with the jacket's color on the heel tab and the stripe (a red one when the jacket is
+		// charcoal or black); black canvas under a light jacket.
+		const bool bLightJacket = Color == 4 || Color == 7;
+		DyeSneakers(O, SrgbOf(bLightJacket ? 0x1d1e22 : 0xd6d0c0), Color == 0 || Color == 5 ? SrgbOf(0x8f1d2c) : SrgbOf(ss::hero::OutfitTone(Color)));
+	}
+	return O;
+}
+
+/** Someone at work or walking past: their wardrobe (CastLooks.h), their shoes. */
+FStreetOutfit CastOutfit(const FCastWear& W)
+{
+	FStreetOutfit O;
+	O.Shirt = W.Shirt;
+	O.Pants = W.Pants;
+	if (W.Print > 0)
+	{
+		const FLinearColor C = W.InkC.A > 0.0f ? W.InkC : FMath::Lerp(W.InkA, W.InkB, 0.5f);
+		PrintIn(O, W.Print, &W.InkA, &W.InkB, &C);
+	}
+	if (W.Graphic > 0)
+	{
+		GraphicIn(O, W.Graphic, W.InkA, W.InkB);
+	}
+	O.Outer = IsOuterCut(W.Outer) ? W.Outer : Cut::Count;
+	O.OuterColor = W.OuterColor;
+	O.Bottom = IsTrousersCut(W.Bottom) ? W.Bottom : Cut::Shorts;
+	O.BottomColor = W.Pants;
+	O.Hat = IsHatCut(W.Hat) ? W.Hat : Cut::Count;
+	O.HatColor = W.HatColor;
+	O.Eyes = IsEyesCut(W.Eyes) ? W.Eyes : Cut::Count;
+	O.FrameColor = W.FrameColor;
+	O.bTypeGarments = CVarNpcGarments.GetValueOnGameThread() != 0;
+	if (W.bWorkShoes)
+	{
+		WorkShoes(O);
+	}
+	else
+	{
+		DyeSneakers(O, W.ShoeColor, W.Shirt);
+	}
 	return O;
 }
 
@@ -422,31 +750,114 @@ bool IsShirtMaterial(const UMaterialInterface* Material)
 }
 
 /**
- * The street hero's real clothes (art/blender/assets/garments.py, imported by garments_setup.py onto the hero bodies'
- * skeleton), when imported: Kind is Jeans or Jacket. A pair fitted to this very hero (SK_Garment_Jacket_HeroA0) is worn if
- * there is one, else the pair for the body type (SK_Garment_Jacket_A, fitted to HeroA1 or HeroB1).
+ * A garment's package (art/blender/assets/garments.py, imported by garments_setup.py onto the hero bodies' skeleton) for a
+ * family ("Jeans", "Jacket", "Hoodie") and a face: the one fitted to this very face (SK_Garment_Jacket_HeroA0, or a staff
+ * member's) if there is one, else, when bTypeDefault, the body type's (SK_Garment_Jacket_A, fitted to HeroA1 or HeroB1).
+ * Empty when neither is imported. No loads.
  */
-USkeletalMesh* GarmentMesh(const TCHAR* Kind, const FString& Hero, bool bTypeB)
+FString GarmentPackage(const TCHAR* Family, const FString& Face, bool bTypeB, bool bTypeDefault)
 {
-	for (const FString& Fit : {Hero, FString(bTypeB ? TEXT("B") : TEXT("A"))})
+	if (!Family)
+	{
+		return FString();
+	}
+	for (const FString& Fit : {Face, bTypeDefault ? FString(bTypeB ? TEXT("B") : TEXT("A")) : FString()})
 	{
 		if (Fit.IsEmpty())
 		{
 			continue;
 		}
-		const FString Name = FString::Printf(TEXT("SK_Garment_%s_%s"), Kind, *Fit);
-		const FString Package = FString::Printf(TEXT("/Game/ShortStack/Garments/%s"), *Name);
-		// Most heroes have no pair of their own: don't try to load what isn't there.
-		if (!FPackageName::DoesPackageExist(Package))
+		const FString Package = FString::Printf(TEXT("/Game/ShortStack/Garments/SK_Garment_%s_%s"), Family, *Fit);
+		// Most faces have no fit of their own: don't try to load what isn't there.
+		if (FPackageName::DoesPackageExist(Package))
 		{
-			continue;
-		}
-		if (USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, *FString::Printf(TEXT("%s.%s"), *Package, *Name), nullptr, LOAD_NoWarn | LOAD_Quiet))
-		{
-			return Mesh;
+			return Package;
 		}
 	}
-	return nullptr;
+	return FString();
+}
+
+USkeletalMesh* GarmentMesh(const TCHAR* Family, const FString& Face, bool bTypeB, bool bTypeDefault)
+{
+	const FString Package = GarmentPackage(Family, Face, bTypeB, bTypeDefault);
+	return Package.IsEmpty() ? nullptr
+							 : LoadObject<USkeletalMesh>(nullptr, *FString::Printf(TEXT("%s.%s"), *Package, *FPackageName::GetShortName(Package)), nullptr, LOAD_NoWarn | LOAD_Quiet);
+}
+
+/** Who may wear the body type's garments: the hero MetaHumans (HeroA0..HeroB2) the type garments are made for. */
+bool IsHeroFace(const FString& Face)
+{
+	return Face.StartsWith(TEXT("HeroA")) || Face.StartsWith(TEXT("HeroB"));
+}
+
+/**
+ * Every garment a hero face can wear, loaded asynchronously and held (one face at a time: the player's), so a try-on at the
+ * thrift or a change at the closet finds its mesh in memory instead of loading it on the key press, as the Style Book's
+ * grooms are preloaded. The street's hats and glasses, the modeled shoes and the tees' prints and graphics come with them
+ * (small, and any of them can be tried on). Asked for as the hero is dressed (under black).
+ */
+void HoldHeroGarments(const FString& Face, bool bTypeB)
+{
+	static FStreamableManager Streams;
+	static TSharedPtr<FStreamableHandle> Held;
+	static FString HeldFace;
+	if (Face == HeldFace && Held.IsValid())
+	{
+		return;
+	}
+	TArray<FSoftObjectPath> Paths;
+	for (const Cut C : {Cut::Hoodie, Cut::Bomber, Cut::Flannel, Cut::Denim, Cut::Leather, Cut::Track, Cut::Jeans, Cut::Chinos, Cut::WorkPants})
+	{
+		const FString Package = GarmentPackage(GarmentFamily(C), Face, bTypeB, IsHeroFace(Face));
+		if (!Package.IsEmpty())
+		{
+			Paths.AddUnique(FSoftObjectPath(FString::Printf(TEXT("%s.%s"), *Package, *FPackageName::GetShortName(Package))));
+		}
+	}
+	// Only what's imported (a missing package would warn on every dress).
+	auto HoldIfThere = [&Paths](const FString& Package) {
+		if (FPackageName::DoesPackageExist(Package))
+		{
+			Paths.AddUnique(FSoftObjectPath(FString::Printf(TEXT("%s.%s"), *Package, *FPackageName::GetShortName(Package))));
+		}
+	};
+	auto MeshPackage = [](const TCHAR* Name) { return FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s"), Name, Name); };
+	for (const FWearPiece& P : WearPieces)
+	{
+		for (const TCHAR* Name : {P.Street, P.BackRoom})
+		{
+			if (Name)
+			{
+				HoldIfThere(MeshPackage(Name));
+			}
+		}
+	}
+	for (const TCHAR* Shoe : {TEXT("SM_Sneaker_L"), TEXT("SM_Sneaker_R"), TEXT("SM_WorkShoe_L"), TEXT("SM_WorkShoe_R")})
+	{
+		HoldIfThere(MeshPackage(Shoe));
+	}
+	for (int32 I = 1; I <= FMath::Max(CastLooks::PrintCount(), CastLooks::GraphicCount()); ++I)
+	{
+		for (const TCHAR* Texture : {CastLooks::PrintTexture(I), CastLooks::GraphicTexture(I)})
+		{
+			if (Texture)
+			{
+				HoldIfThere(FString::Printf(TEXT("/Game/ShortStack/Textures/Clothing/%s"), Texture));
+			}
+		}
+	}
+	// Asked for before the last face's are let go, so what both share never leaves memory.
+	TSharedPtr<FStreamableHandle> Next;
+	if (Paths.Num() > 0)
+	{
+		Next = Streams.RequestAsyncLoad(Paths, FStreamableDelegate(), FStreamableManager::DefaultAsyncLoadPriority, true);
+	}
+	if (Held.IsValid())
+	{
+		Held->ReleaseHandle();
+	}
+	Held = Next;
+	HeldFace = Face;
 }
 
 /** The Creator's one garment, the tee and shorts, as copied onto us from the MetaHuman (its asset, or its materials, say so). */
@@ -492,7 +903,52 @@ void DressGarment(UMaterialInstanceDynamic* Mid, bool bShirt, const FStreetOutfi
 	{
 		Mid->SetScalarParameterValue(TEXT("Print1Strength"), 0.0f);
 	}
-	Mid->SetScalarParameterValue(TEXT("PrintGraphicStrength"), 0.0f);
+	UTexture2D* Graphic = bShirt ? ClothingTexture(O.Graphic) : nullptr;
+	if (Graphic)
+	{
+		// On the chest, where the Back Room puts it (BackRoomPlayer.cpp's DressOutfit: the same tee, the same layout, the same
+		// ss.Wear.Graphic* tunables); laid on by the graphic's alpha.
+		auto Tunable = [](const TCHAR* Name, float Default) {
+			const IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(Name);
+			return Var ? Var->GetFloat() : Default;
+		};
+		Mid->SetTextureParameterValue(TEXT("PrintGraphicMap"), Graphic);
+		Mid->SetScalarParameterValue(TEXT("PrintGraphicStrength"), 1.0f);
+		Mid->SetScalarParameterValue(TEXT("PrintScale"), Tunable(TEXT("ss.Wear.GraphicScale"), 5.0f));
+		Mid->SetScalarParameterValue(TEXT("PrintGraphicOffsetU"), Tunable(TEXT("ss.Wear.GraphicU"), -0.83f));
+		Mid->SetScalarParameterValue(TEXT("PrintGraphicOffsetV"), Tunable(TEXT("ss.Wear.GraphicV"), -2.1f));
+		Mid->SetVectorParameterValue(TEXT("PrintGraphicColorA"), O.GraphicA);
+		Mid->SetVectorParameterValue(TEXT("PrintGraphicColorB"), O.GraphicB);
+		Mid->SetVectorParameterValue(TEXT("PrintGraphicColorC"), O.GraphicC);
+	}
+	else
+	{
+		Mid->SetScalarParameterValue(TEXT("PrintGraphicStrength"), 0.0f);
+	}
+}
+
+/** Dyes the MetaHuman's own garment (the tee and shorts) in place: its dynamic instances made once, then their parameters set. */
+void DyeDefaultOutfit(USkinnedMeshComponent* Skinned, const FStreetOutfit& O)
+{
+	if (!Skinned)
+	{
+		return;
+	}
+	for (int32 Slot = 0; Slot < Skinned->GetNumMaterials(); ++Slot)
+	{
+		UMaterialInterface* Material = Skinned->GetMaterial(Slot);
+		if (!Material)
+		{
+			continue;
+		}
+		UMaterialInstanceDynamic* Mid = Cast<UMaterialInstanceDynamic>(Material);
+		if (!Mid)
+		{
+			Mid = UMaterialInstanceDynamic::Create(Material, Skinned);
+			Skinned->SetMaterial(Slot, Mid);
+		}
+		DressGarment(Mid, IsShirtMaterial(Mid), O);
+	}
 }
 
 /**
@@ -515,6 +971,33 @@ void Conceal(UPrimitiveComponent* Piece)
 		Piece->SetVisibility(false);
 		Piece->SetCastHiddenShadow(false);
 	}
+}
+
+/**
+ * The MetaHuman's own tee and shorts, each shown only where nothing covers it: its material sections whose material is the
+ * shirt's (or isn't), at every LOD, hidden or shown; with neither shown the mesh goes (the body has no skin under them, and
+ * the garments are made to cover where they were).
+ */
+void ShowOutfitParts(USkinnedMeshComponent* Outfit, bool bShirt, bool bShorts)
+{
+	if (!Outfit || !Outfit->GetSkinnedAsset())
+	{
+		return;
+	}
+	if (!bShirt && !bShorts)
+	{
+		Conceal(Outfit);
+		return;
+	}
+	for (int32 Lod = 0; Lod < Outfit->GetNumLODs(); ++Lod)
+	{
+		for (int32 Slot = 0; Slot < Outfit->GetNumMaterials(); ++Slot)
+		{
+			const bool bIsShirt = IsShirtMaterial(Outfit->GetMaterial(Slot));
+			Outfit->ShowMaterialSection(Slot, INDEX_NONE, bIsShirt ? bShirt : bShorts, Lod);
+		}
+	}
+	Reveal(Outfit);
 }
 
 /** A plain lit surface in one color (M_Surface, or the engine's basic shape material before the project's is built). */
@@ -1090,6 +1573,10 @@ void AShortStackCharacter::ClearWearables()
 	}
 	Wearables.Reset();
 	GroomKinds.Reset();
+	// The garments are among the wearables (gone with them).
+	OuterGarment = nullptr;
+	BottomGarment = nullptr;
+	DefaultOutfit.Reset();
 }
 
 void AShortStackCharacter::UseArchetype()
@@ -1137,7 +1624,15 @@ void AShortStackCharacter::BuildFromMetaHuman(UClass* Blueprint, const FStreetOu
 		}
 	}
 	const FString Path = Bp->GetPathName();
-	const bool bCards = Path.Contains(TEXT("/MHC_Extra")) || Path.Contains(TEXT("/MHC_HeroA")) || Path.Contains(TEXT("/MHC_HeroB"));
+	WornBlueprint = Blueprint;
+	DefaultOutfit.Reset();
+	// Every cast build holds its grooms on cards on the street (spec 6.1): the extras and the heroes carry only cards, the
+	// cinematic builds (Sal, Dee, Big Lou...) strands first and cards further down, and HoldOnCards finds those.
+	const bool bCards = Path.Contains(TEXT("/Cast/Built/MHC_"));
+	// A hero face with a groom library wears the library's scalp, brows, beard and mustache (ApplyGrooms, after this); the
+	// build's own of those kinds stay off. Without one, the build's own as far as the look's choices go.
+	const bool bLibrary = !bNpc && HeroGrooms::LibraryFor(CastFaceName) != nullptr;
+	const ss::hero::Look ForGrooms = GroomLook();
 	const FHairShade Shade = HairShadeOf(LookNow.HairColor, LookAge);
 	for (USCS_Node* Node : Nodes)
 	{
@@ -1157,7 +1652,11 @@ void AShortStackCharacter::BuildFromMetaHuman(UClass* Blueprint, const FStreetOu
 			// The creator's hairstyle and facial hair, as far as this MetaHuman's grooms go.
 			const FString Asset = Groom->GroomAsset->GetName();
 			Kind = GroomKindOf(Node->GetVariableName().ToString(), Asset);
-			if (!bNpc && !HeroWearsGroom(LookNow, Kind, Asset))
+			if (bLibrary && IsManagedGroom(Kind))
+			{
+				continue;
+			}
+			if (!bNpc && !bLibrary && !HeroGrooms::WearsBuildGroom(ForGrooms, Kind, Asset))
 			{
 				continue;
 			}
@@ -1177,17 +1676,13 @@ void AShortStackCharacter::BuildFromMetaHuman(UClass* Blueprint, const FStreetOu
 		Copy->bCastHiddenShadow = Template->IsVisible();
 		if (USkinnedMeshComponent* Skinned = Cast<USkinnedMeshComponent>(Copy))
 		{
-			// Clothes ride the body's pose: the shirt in the jacket's color (and print), everything else the shorts' tone.
+			// Clothes ride the body's pose: the shirt in the Top's color (and print or graphic), everything else the shorts' tone.
 			Skinned->SetLeaderPoseComponent(GetMesh());
-			for (int32 Slot = 0; Slot < Skinned->GetNumMaterials(); ++Slot)
+			if (!DefaultOutfit.IsValid() && IsDefaultOutfit(Skinned))
 			{
-				if (UMaterialInterface* Material = Skinned->GetMaterial(Slot))
-				{
-					UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Material, Skinned);
-					DressGarment(Mid, IsShirtMaterial(Material), Outfit);
-					Skinned->SetMaterial(Slot, Mid);
-				}
+				DefaultOutfit = Skinned;
 			}
+			DyeDefaultOutfit(Skinned, Outfit);
 		}
 		else if (UGroomComponent* Hair = Cast<UGroomComponent>(Copy))
 		{
@@ -1221,67 +1716,145 @@ void AShortStackCharacter::LinkFace()
 	}
 }
 
-void AShortStackCharacter::PutOnGarments(const FStreetOutfit& Outfit, const FString& Hero)
+void AShortStackCharacter::DressGarments(const FStreetOutfit& Outfit)
 {
-	// Both pieces or neither: together they cover all the tee and shorts did (the MetaHuman body has no skin under them).
-	const bool bTypeB = LookNow.Body == 1;
-	// Fitted to the hero_cast heroes (HeroA0..HeroB2) only: the Back Room's Hero standing in may be another shape.
-	if (!Hero.StartsWith(bTypeB ? TEXT("HeroB") : TEXT("HeroA")))
+	const FString FaceName = CastFaceName.ToString();
+	const bool bTypeB = bNpc ? CastLooks::IsWomansFace(CastFaceName) : LookNow.Body == 1;
+	// The body type's garments are fitted to the hero_cast heroes (HeroA1, HeroB1; every hero of the type until its own fit is
+	// imported): the Back Room's Hero standing in, or anyone else, wears only a fit made for their own face (garments.py
+	// fits any exported MetaHuman), or the type's with ss.Look.NpcGarments.
+	const bool bTypeDefault = bNpc ? Outfit.bTypeGarments : IsHeroFace(FaceName);
+	// The jacket: its own mesh, else (a kind not modeled yet) the bomber in its color, as the creator's jackets were worn.
+	USkeletalMesh* Outer = nullptr;
+	bool bOwnOuter = false;
+	if (IsOuterCut(Outfit.Outer))
 	{
-		return;
-	}
-	USkeletalMesh* Jeans = GarmentMesh(TEXT("Jeans"), Hero, bTypeB);
-	USkeletalMesh* Jacket = GarmentMesh(TEXT("Jacket"), Hero, bTypeB);
-	if (!Jeans || !Jacket)
-	{
-		UE_LOG(LogStreetHero, Log, TEXT("The type %s garments aren't imported (garments_setup.py): the MetaHuman's tee and shorts stay on"),
-			bTypeB ? TEXT("B") : TEXT("A"));
-		return;
-	}
-	for (int32 I = Wearables.Num() - 1; I >= 0; --I)
-	{
-		USkinnedMeshComponent* Skinned = Cast<USkinnedMeshComponent>(Wearables[I]);
-		if (Skinned && IsDefaultOutfit(Skinned))
+		Outer = GarmentMesh(GarmentFamily(Outfit.Outer), FaceName, bTypeB, bTypeDefault);
+		bOwnOuter = Outer != nullptr;
+		if (!Outer && Outfit.Outer != Cut::Bomber)
 		{
-			Skinned->DestroyComponent();
-			Wearables.RemoveAt(I);
+			Outer = GarmentMesh(GarmentFamily(Cut::Bomber), FaceName, bTypeB, bTypeDefault);
 		}
 	}
-	for (USkeletalMesh* Asset : {Jeans, Jacket})
+	// The trousers: their own mesh, else the jeans (chinos or work pants not modeled yet read as the nearest trousers).
+	USkeletalMesh* Bottom = nullptr;
+	bool bOwnBottom = false;
+	if (IsTrousersCut(Outfit.Bottom))
 	{
-		USkeletalMeshComponent* Worn = NewObject<USkeletalMeshComponent>(this, MakeUniqueObjectName(this, USkeletalMeshComponent::StaticClass(), Asset->GetFName()), RF_Transient);
-		Worn->SetupAttachment(GetMesh());
-		Worn->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Worn->SetCanEverAffectNavigation(false);
-		Worn->bCastHiddenShadow = true;
-		Worn->bUseBoundsFromLeaderPoseComponent = true;
-		Worn->SetSkeletalMeshAsset(Asset);
-		// Skinned to the body's own skeleton (same bones, same bind pose): it simply follows the body's pose.
-		Worn->SetLeaderPoseComponent(GetMesh());
-		Worn->RegisterComponent();
-		Wearables.Add(Worn);
-		if (Asset == Jacket)
+		Bottom = GarmentMesh(GarmentFamily(Outfit.Bottom), FaceName, bTypeB, bTypeDefault);
+		bOwnBottom = Bottom != nullptr;
+		if (!Bottom && Outfit.Bottom != Cut::Jeans)
 		{
-			// The shell bakes light grey and takes the creator's jacket color; the rib knit a darker shade of it. The jeans
-			// keep their own indigo; the brass zip its brass.
-			TintSlot(Worn, BakedSlot(Worn, 0), Outfit.Shirt, 1.5f);
-			TintSlot(Worn, BakedSlot(Worn, 1), Scaled(Outfit.Shirt, 0.55f), 1.5f);
+			Bottom = GarmentMesh(GarmentFamily(Cut::Jeans), FaceName, bTypeB, bTypeDefault);
 		}
 	}
+	// Each on its own component, swapped in place (a garment of the same skeleton): skinned to the body's own skeleton (same
+	// bones, same bind pose), it simply follows the body's pose.
+	auto Wear = [this](TObjectPtr<USkeletalMeshComponent>& Slot, USkeletalMesh* Asset, const TCHAR* What) {
+		if (!Asset)
+		{
+			if (Slot)
+			{
+				TierDefaults.Remove(Slot.Get());
+				Wearables.Remove(Slot.Get());
+				Slot->DestroyComponent();
+				Slot = nullptr;
+			}
+			return;
+		}
+		if (!Slot)
+		{
+			Slot = NewObject<USkeletalMeshComponent>(this, MakeUniqueObjectName(this, USkeletalMeshComponent::StaticClass(), FName(What)), RF_Transient);
+			Slot->SetupAttachment(GetMesh());
+			Slot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Slot->SetCanEverAffectNavigation(false);
+			Slot->bCastHiddenShadow = true;
+			Slot->bUseBoundsFromLeaderPoseComponent = true;
+			Slot->SetSkeletalMeshAsset(Asset);
+			Slot->SetLeaderPoseComponent(GetMesh());
+			Slot->RegisterComponent();
+			Wearables.Add(Slot.Get());
+			return;
+		}
+		if (Slot->GetSkeletalMeshAsset() != Asset)
+		{
+			// The last garment's tints let go first (its materials were its own). The tiers' record of the component stays: its
+			// shadow, ray tracing, ticks and forced LOD are the component's, not the mesh's (forgotten here, a swap at Mid would
+			// record Mid's no-shadow as its own, and Near would never give it back).
+			Slot->EmptyOverrideMaterials();
+			Slot->SetSkeletalMeshAsset(Asset);
+			Slot->SetLeaderPoseComponent(GetMesh());
+		}
+	};
+	Wear(OuterGarment, Outer, TEXT("Jacket"));
+	Wear(BottomGarment, Bottom, TEXT("Trousers"));
+	if (OuterGarment)
+	{
+		// The shell bakes light grey and takes the jacket's color; the rib knit (the bomber's, the hoodie's) a darker shade
+		// of it. The bomber's brass zip and the hoodie's cords keep theirs; a P1 jacket's own slots say what they take.
+		TintSlot(OuterGarment, BakedSlot(OuterGarment, 0), Outfit.OuterColor, 1.5f);
+		const bool bRib = !bOwnOuter || Outfit.Outer == Cut::Bomber || Outfit.Outer == Cut::Hoodie;
+		if (bRib)
+		{
+			TintSlot(OuterGarment, BakedSlot(OuterGarment, 1), Scaled(Outfit.OuterColor, 0.55f), 1.5f);
+		}
+	}
+	if (BottomGarment && bOwnBottom && (Outfit.Bottom == Cut::Chinos || Outfit.Bottom == Cut::WorkPants))
+	{
+		// The twill and the duck bake light and take their color.
+		TintSlot(BottomGarment, BakedSlot(BottomGarment, 0), Outfit.BottomColor, 1.5f);
+	}
+	else if (BottomGarment && (Outfit.Bottom == Cut::Jeans || !bOwnBottom))
+	{
+		// The jeans keep their own indigo, in the wash worn (a multiply: white leaves the mid wash as baked). Set every time,
+		// so a wash worn before on the same mesh doesn't stay on.
+		TintSlot(BottomGarment, BakedSlot(BottomGarment, 0), Outfit.Bottom == Cut::Jeans ? Outfit.JeansTint : FLinearColor::White, 1.0f);
+	}
+	// The MetaHuman's tee where no jacket covers it, its shorts where no trousers do (the garments are made to cover where
+	// they were: the body has no skin under them).
+	ShowOutfitParts(DefaultOutfit.Get(), OuterGarment == nullptr, BottomGarment == nullptr);
 }
 
-void AShortStackCharacter::ApplyLook(const ss::hero::Character& Who)
+void AShortStackCharacter::DressOutfit(const FStreetOutfit& Outfit)
+{
+	DressGarments(Outfit);
+	DyeDefaultOutfit(DefaultOutfit.Get(), Outfit);
+	BuildShoes(Outfit);
+	PutOnHeadwear(Outfit);
+}
+
+FStreetOutfit AShortStackCharacter::CurrentOutfit() const
+{
+	return bNpc ? CastOutfit(CastWearNow) : HeroOutfit(LookNow, LookAge, bHasCloset ? &ClosetNow : nullptr);
+}
+
+ss::hero::Look AShortStackCharacter::GroomLook() const
+{
+	ss::hero::Look L = LookNow;
+	if (!bNpc && bHasCloset)
+	{
+		// The closet's headwear is the hat that takes fuller hair off (Look.Hat is the portrait's collapse of it).
+		L.Hat = IsHatCut(CurrentOutfit().Hat) ? FMath::Max(1, L.Hat) : 0;
+	}
+	return L;
+}
+
+void AShortStackCharacter::ApplyLook(const ss::hero::Character& Who, const ss::wardrobe::Closet* Closet)
 {
 	LookNow = Who.Appearance;
 	LookAge = Who.Age;
 	bHasLook = true;
 	bNpc = false;
+	bPreviewing = false;
+	bDrawableKnown = false;
+	bHasCloset = Closet != nullptr;
+	ClosetNow = Closet ? *Closet : ss::wardrobe::Closet();
 	if (bTierApplied)
 	{
 		RestoreTierDefaults();
 	}
 	const ss::hero::Look& L = LookNow;
-	const FStreetOutfit Outfit = HeroOutfit(L);
+	const FStreetOutfit Outfit = CurrentOutfit();
 	// The hero MetaHuman nearest the look: body type, then skin tone in three bands.
 	FString Built = CastLooks::HeroFaceFor(L).ToString();
 	UClass* Blueprint = CastClass(Built);
@@ -1294,7 +1867,15 @@ void AShortStackCharacter::ApplyLook(const ss::hero::Character& Who)
 	{
 		CastFaceName = FName(*Built);
 		BuildFromMetaHuman(Blueprint, Outfit);
-		PutOnGarments(Outfit, Built);
+		// The library's grooms for the look, loaded now: this is a build, under black.
+		ApplyGrooms(true);
+		// The rest of what this body can wear, on its way into memory for the closet and the thrift's try-ons.
+		HoldHeroGarments(Built, L.Body == 1);
+		if (bGroomSetWanted)
+		{
+			// The Style Book's set, asked for before this face was known (or for the face worn before a rebuild).
+			HeroGrooms::Preload(CastFaceName);
+		}
 	}
 	else
 	{
@@ -1305,28 +1886,44 @@ void AShortStackCharacter::ApplyLook(const ss::hero::Character& Who)
 	LinkFace();
 	FitToHeight(static_cast<float>(L.Height));
 	FitFace();
-	BuildShoes(Outfit);
-	PutOnHeadwear();
+	DressOutfit(Outfit);
 	RefreshVisibility();
 	if (bTierApplied)
 	{
 		ApplyDetailTier();
 	}
-	UE_LOG(LogStreetHero, Log, TEXT("%s (%d) walks as %s: body %d, skin %d, hair %d in color %d, facial hair %d, build %d, %d cm, jacket %d in color %d, glasses %d, hat %d"),
-		UTF8_TO_TCHAR(Who.FullName().c_str()), Who.Age, *Built, L.Body, L.Skin, L.Hair, L.HairColor, L.FacialHair, L.Build, L.Height, L.Outfit, L.OutfitColor, L.Glasses, L.Hat);
+	const UGroomComponent* Scalp = ScalpGroom();
+	UE_LOG(LogStreetHero, Log,
+		TEXT("%s (%d) walks as %s: body %d, skin %d, hair %d (%s) in color %d, facial hair %d, brows %d, build %d, %d cm, jacket %d in color %d, glasses %d, hat %d%s"),
+		UTF8_TO_TCHAR(Who.FullName().c_str()), Who.Age, *Built, L.Body, L.Skin, L.Hair, Scalp ? *GetNameSafe(Scalp->GroomAsset.Get()) : TEXT("none"), L.HairColor,
+		L.FacialHair, L.Brows, L.Build, L.Height, L.Outfit, L.OutfitColor, L.Glasses, L.Hat, bHasCloset ? TEXT(", from the closet") : TEXT(""));
 }
 
 void AShortStackCharacter::ApplyCast(const TCHAR* CastName, const FLinearColor& Shirt)
 {
+	// At work, as before the wardrobes: their shirt, dark trousers (the shorts dyed), black work shoes, 175 cm.
+	FCastWear Wear;
+	Wear.Shirt = Shirt;
+	Wear.Pants = SrgbOf(0x2a2b30);
+	Wear.bWorkShoes = true;
+	ApplyCast(CastName, Wear, 175.0f);
+}
+
+void AShortStackCharacter::ApplyCast(const TCHAR* CastName, const FCastWear& Wear, float HeightCm)
+{
 	bHasLook = true;
 	bNpc = true;
+	bPreviewing = false;
+	bDrawableKnown = false;
+	bHasCloset = false;
 	LookNow = ss::hero::Look();
 	LookAge = 0;
+	CastWearNow = Wear;
 	if (bTierApplied)
 	{
 		RestoreTierDefaults();
 	}
-	const FStreetOutfit Outfit = CastOutfit(Shirt);
+	const FStreetOutfit Outfit = CurrentOutfit();
 	if (UClass* Blueprint = CastClass(CastName))
 	{
 		CastFaceName = FName(CastName);
@@ -1339,16 +1936,327 @@ void AShortStackCharacter::ApplyCast(const TCHAR* CastName, const FLinearColor& 
 		UseArchetype();
 	}
 	LinkFace();
-	FitToHeight(175.0f);
+	FitToHeight(FMath::Clamp(HeightCm, 150.0f, 200.0f));
 	FitFace();
-	BuildShoes(Outfit);
-	PutOnHeadwear();
+	DressOutfit(Outfit);
 	BecomeNpc();
 	RefreshVisibility();
 	if (bTierApplied)
 	{
 		ApplyDetailTier();
 	}
+}
+
+// ------------------------------------------------------------------ the look in place (spec 7.5.4)
+
+void AShortStackCharacter::PreviewLook(const ss::hero::Look& Look, const ss::wardrobe::Closet& Closet)
+{
+	if (bNpc)
+	{
+		return;
+	}
+	if (!bPreviewing)
+	{
+		OwnLook = LookNow;
+		OwnCloset = ClosetNow;
+		bOwnHasCloset = bHasCloset;
+		bPreviewing = true;
+	}
+	ChangeLookInPlace(Look, &Closet);
+}
+
+void AShortStackCharacter::EndPreview()
+{
+	if (!bPreviewing)
+	{
+		return;
+	}
+	bPreviewing = false;
+	const ss::wardrobe::Closet Own = OwnCloset;
+	ChangeLookInPlace(OwnLook, bOwnHasCloset ? &Own : nullptr);
+}
+
+void AShortStackCharacter::RefreshLook(const ss::hero::Look& Look, const ss::wardrobe::Closet& Closet)
+{
+	if (bNpc)
+	{
+		return;
+	}
+	bPreviewing = false;
+	ChangeLookInPlace(Look, &Closet);
+}
+
+void AShortStackCharacter::ApplyWear(const ss::wardrobe::Closet& Closet)
+{
+	if (bNpc)
+	{
+		return;
+	}
+	// For keeps (the closet's Wear, the thrift's "Wear it out"): a preview on now ends in it.
+	const ss::hero::Look Keep = bPreviewing ? OwnLook : LookNow;
+	bPreviewing = false;
+	ChangeLookInPlace(Keep, &Closet);
+}
+
+void AShortStackCharacter::ChangeLookInPlace(const ss::hero::Look& Look, const ss::wardrobe::Closet* Closet)
+{
+	const bool bWasPreviewing = bPreviewing;
+	auto Rebuild = [&]() {
+		ss::hero::Character Who;
+		Who.Appearance = Look;
+		Who.Age = LookAge;
+		ApplyLook(Who, Closet);
+		bPreviewing = bWasPreviewing;
+	};
+	if (!bHasLook || bNpc)
+	{
+		Rebuild();
+		return;
+	}
+	const ss::hero::Look Was = LookNow;
+	// Another body (the type or skin band: another hero face; the build; the height) is a build.
+	if (CastLooks::HeroFaceFor(Look) != CastLooks::HeroFaceFor(Was) || Look.Build != Was.Build || Look.Height != Was.Height)
+	{
+		Rebuild();
+		return;
+	}
+	const ss::hero::Look GroomsWere = GroomLook();
+	LookNow = Look;
+	bHasCloset = Closet != nullptr;
+	ClosetNow = Closet ? *Closet : ss::wardrobe::Closet();
+	const ss::hero::Look GroomsNow = GroomLook();
+	const bool bShapeChanged = GroomsNow.Hair != GroomsWere.Hair || GroomsNow.FacialHair != GroomsWere.FacialHair || GroomsNow.Brows != GroomsWere.Brows
+		|| GroomsNow.Hat != GroomsWere.Hat;
+	const bool bColorChanged = GroomsNow.HairColor != GroomsWere.HairColor;
+	const bool bLibrary = HeroGrooms::LibraryFor(CastFaceName) != nullptr;
+	if (bShapeChanged && !bLibrary)
+	{
+		// No library for this face: the build's own grooms are all there is. What the new look takes off is hidden in place
+		// (the Style Book's "Shaved" or "None" previews, and putting back what a preview hid, cost nothing); a groom of the
+		// build's the look wants that this body was dressed without (dressed bald, say, then "Crew" in the Style Book) goes on
+		// in place from the Blueprint's own asset and binding, in memory with the Blueprint: no build in view (spec 6.7).
+		const UBlueprintGeneratedClass* Bp = Cast<UBlueprintGeneratedClass>(WornBlueprint.Get());
+		const bool bNeedsBuild = !Bp || !Bp->SimpleConstructionScript;
+		if (bNeedsBuild)
+		{
+			Rebuild();
+			return;
+		}
+		TArray<TPair<UGroomComponent*, bool>> Shown;
+		TArray<TPair<EGroomKind, const UGroomComponent*>> PutBack;
+		for (const USCS_Node* Node : Bp->SimpleConstructionScript->GetAllNodes())
+		{
+			const UGroomComponent* Template = Node ? Cast<UGroomComponent>(Node->ComponentTemplate) : nullptr;
+			if (!Template || !Template->GroomAsset)
+			{
+				continue;
+			}
+			const FString Asset = Template->GroomAsset->GetName();
+			const EGroomKind Kind = GroomKindOf(Node->GetVariableName().ToString(), Asset);
+			if (!IsManagedGroom(Kind))
+			{
+				continue;
+			}
+			UGroomComponent* Worn = nullptr;
+			for (const TPair<TWeakObjectPtr<UGroomComponent>, uint8>& W : GroomKinds)
+			{
+				UGroomComponent* G = W.Key.Get();
+				if (G && W.Value == static_cast<uint8>(Kind) && G->GroomAsset == Template->GroomAsset)
+				{
+					Worn = G;
+				}
+			}
+			const bool bWant = HeroGrooms::WearsBuildGroom(GroomsNow, Kind, Asset);
+			if (bWant && !Worn)
+			{
+				PutBack.Emplace(Kind, Template);
+				continue;
+			}
+			if (Worn)
+			{
+				Shown.Emplace(Worn, bWant);
+			}
+		}
+		for (const TPair<UGroomComponent*, bool>& S : Shown)
+		{
+			if (S.Value)
+			{
+				Reveal(S.Key);
+			}
+			else
+			{
+				Conceal(S.Key);
+			}
+			// The tiers keep it as it's worn now (Near shows each groom as recorded).
+			if (FTierPart* Known = TierDefaults.Find(S.Key))
+			{
+				Known->bVisible = S.Value;
+			}
+		}
+		for (const TPair<EGroomKind, const UGroomComponent*>& Back : PutBack)
+		{
+			// Held on cards and shaded in the hair color as it goes on (AddGroomOfKind), the build's own binding with it.
+			AddGroomOfKind(static_cast<uint8>(Back.Key), Back.Value->GroomAsset, Back.Value->BindingAsset);
+		}
+		bWearsScalpHair = PutBack.ContainsByPredicate([](const TPair<EGroomKind, const UGroomComponent*>& B) { return B.Key == EGroomKind::Scalp; });
+		for (const TPair<UGroomComponent*, bool>& S : Shown)
+		{
+			bWearsScalpHair |= S.Value && KindIn(GroomKinds, S.Key) == EGroomKind::Scalp;
+		}
+	}
+	if (bLibrary && (bShapeChanged || bColorChanged))
+	{
+		ApplyGrooms(false);
+	}
+	else if (bColorChanged)
+	{
+		// The color (the barber's COLOR tab) on a face without a library: every worn groom shaded again in place.
+		const FHairShade Shade = HairShadeOf(LookNow.HairColor, LookAge);
+		for (const TPair<TWeakObjectPtr<UGroomComponent>, uint8>& Worn : GroomKinds)
+		{
+			UGroomComponent* Groom = Worn.Key.Get();
+			const EGroomKind Kind = static_cast<EGroomKind>(Worn.Value);
+			if (Groom && Kind != EGroomKind::Lashes)
+			{
+				ShadeGroom(Groom, Shade, Kind == EGroomKind::Brows ? 0.06f : 0.0f);
+			}
+		}
+	}
+	DressOutfit(CurrentOutfit());
+	RefreshVisibility();
+	if (bTierApplied)
+	{
+		ApplyDetailTier();
+	}
+}
+
+void AShortStackCharacter::PreloadGroomSet(bool bHold)
+{
+	bGroomSetWanted = bHold;
+	if (!bHold)
+	{
+		HeroGrooms::ReleasePreload();
+	}
+	else if (!CastFaceName.IsNone() && !bNpc)
+	{
+		HeroGrooms::Preload(CastFaceName);
+	}
+	// Not dressed yet (the barber's stage wakes as the street is built, before DressHero): ApplyLook holds it once the face
+	// is known.
+}
+
+uint64 AShortStackCharacter::GarmentKindsDrawable() const
+{
+	const uint64 Deny = static_cast<uint64>(static_cast<uint32>(CVarDenyGarments.GetValueOnGameThread()));
+	if (bDrawableKnown)
+	{
+		return DrawableKinds & ~Deny;
+	}
+	uint64 Bits = 0;
+	auto Mark = [&Bits](Cut C) { Bits |= uint64(1) << static_cast<uint32>(C); };
+	auto MeshIn = [](const TCHAR* Name) { return Name && FPackageName::DoesPackageExist(FString::Printf(TEXT("/Game/ShortStack/Meshes/%s/%s"), Name, Name)); };
+	// The MetaHuman's own tee and shorts, and shoes (the modeled pair, or a pair made here to fit the feet).
+	Mark(Cut::Tee);
+	Mark(Cut::Shorts);
+	Mark(Cut::Sneakers);
+	Mark(Cut::WorkShoes);
+	const FString FaceName = CastFaceName.ToString();
+	const bool bTypeB = bNpc ? CastLooks::IsWomansFace(CastFaceName) : LookNow.Body == 1;
+	const bool bTypeDefault = !bNpc && IsHeroFace(FaceName);
+	for (const Cut C : {Cut::Hoodie, Cut::Bomber, Cut::Flannel, Cut::Denim, Cut::Leather, Cut::Track, Cut::Jeans, Cut::Chinos, Cut::WorkPants})
+	{
+		if (!GarmentPackage(GarmentFamily(C), FaceName, bTypeB, bTypeDefault).IsEmpty())
+		{
+			Mark(C);
+		}
+	}
+	for (const FWearPiece& P : WearPieces)
+	{
+		if (MeshIn(P.Street) || MeshIn(P.BackRoom))
+		{
+			Mark(P.Kind);
+		}
+	}
+	// Known for this body until it's built or dressed again (no imports land while it plays).
+	DrawableKinds = Bits;
+	bDrawableKnown = bHasLook;
+	return Bits & ~Deny;
+}
+
+FCastWear AShortStackCharacter::HeroWear(const ss::hero::Look& Look, int32 Age, const ss::wardrobe::Closet* Closet)
+{
+	FStreetOutfit O = HeroOutfit(Look, Age, Closet);
+	FCastWear W;
+	if (IsOuterCut(O.Outer))
+	{
+		// The jacket, where only the tee can be drawn: its color on the tee, a flannel's plaid in it.
+		W.Shirt = O.OuterColor;
+		if (O.Outer == Cut::Flannel)
+		{
+			O.Shirt = O.OuterColor;
+			PrintIn(O, 4, nullptr, nullptr, nullptr);
+			W.Print = O.PrintIndex;
+			W.InkA = O.PrintA;
+			W.InkB = O.PrintB;
+			W.InkC = O.PrintC;
+		}
+	}
+	else
+	{
+		W.Shirt = O.Shirt;
+		W.Print = O.PrintIndex;
+		W.Graphic = O.GraphicIndex;
+		W.InkA = O.Graphic ? O.GraphicA : O.PrintA;
+		W.InkB = O.Graphic ? O.GraphicB : O.PrintB;
+		W.InkC = O.Graphic ? O.GraphicC : O.PrintC;
+	}
+	// The trousers' own tone (the jeans' wash, the chinos' color), else the shorts'.
+	W.Pants = IsTrousersCut(O.Bottom) ? O.BottomColor : O.Pants;
+	W.Outer = O.Outer;
+	W.OuterColor = O.OuterColor;
+	W.Bottom = O.Bottom;
+	W.Hat = O.Hat;
+	W.Eyes = O.Eyes;
+	W.HatColor = O.HatColor;
+	W.FrameColor = O.FrameColor;
+	W.bWorkShoes = !O.bDyeShoes;
+	W.ShoeColor = O.ShoeUpper;
+	return W;
+}
+
+FString AShortStackCharacter::DescribeLook() const
+{
+	const FStreetOutfit O = CurrentOutfit();
+	auto CutName = [](Cut C) -> FString {
+		static const TCHAR* const Names[] = {TEXT("tee"), TEXT("hoodie"), TEXT("bomber"), TEXT("flannel"), TEXT("denim"), TEXT("leather"), TEXT("track"), TEXT("shorts"),
+			TEXT("jeans"), TEXT("chinos"), TEXT("work pants"), TEXT("sneakers"), TEXT("work shoes"), TEXT("beanie"), TEXT("ball cap"), TEXT("cap backwards"), TEXT("bucket hat"),
+			TEXT("trilby"), TEXT("round glasses"), TEXT("square glasses"), TEXT("wire frames"), TEXT("shades"), TEXT("aviators")};
+		const int32 I = static_cast<int32>(C);
+		return I >= 0 && I < static_cast<int32>(UE_ARRAY_COUNT(Names)) ? FString(Names[I]) : FString(TEXT("none"));
+	};
+	TArray<FString> Grooms;
+	for (const TPair<TWeakObjectPtr<UGroomComponent>, uint8>& Worn : GroomKinds)
+	{
+		if (const UGroomComponent* G = Worn.Key.Get())
+		{
+			Grooms.Add(FString::Printf(TEXT("%s (LOD %d)"), *GetNameSafe(G->GroomAsset.Get()), G->GetForcedLOD()));
+		}
+	}
+	TArray<FString> Closet;
+	if (bHasCloset)
+	{
+		static const TCHAR* const Slots[ss::wardrobe::SlotCount] = {TEXT("top"), TEXT("outer"), TEXT("bottom"), TEXT("shoes"), TEXT("hat"), TEXT("eyes")};
+		for (int32 S = 0; S < ss::wardrobe::SlotCount; ++S)
+		{
+			Closet.Add(FString::Printf(TEXT("%s=%s"), Slots[S], ClosetNow.Worn[S].empty() ? TEXT("-") : UTF8_TO_TCHAR(ClosetNow.Worn[S].c_str())));
+		}
+	}
+	return FString::Printf(TEXT("%s as %s%s: hair %d color %d, facial %d, brows %d, hat %d | jacket %s (%s), trousers %s (%s), tee %s%s | hat %s, eyes %s, %s | %s | grooms: %s"),
+		*GetName(), *CastFaceName.ToString(), bPreviewing ? TEXT(" (previewing)") : TEXT(""), LookNow.Hair, LookNow.HairColor, LookNow.FacialHair, LookNow.Brows,
+		LookNow.Hat, *CutName(O.Outer), OuterGarment ? *GetNameSafe(OuterGarment->GetSkeletalMeshAsset()) : TEXT("no mesh"), *CutName(O.Bottom),
+		BottomGarment ? *GetNameSafe(BottomGarment->GetSkeletalMeshAsset()) : TEXT("the shorts"), O.Print ? O.Print : TEXT("plain"), O.Graphic ? *FString::Printf(TEXT(" + %s"), O.Graphic) : TEXT(""),
+		*CutName(O.Hat), *CutName(O.Eyes), O.bBarefoot ? TEXT("barefoot") : (O.ShoePair ? O.ShoePair : TEXT("shoes made to fit")),
+		bHasCloset ? *FString::Join(Closet, TEXT(" ")) : TEXT("no closet (the creator's)"), *FString::Join(Grooms, TEXT(", ")));
 }
 
 void AShortStackCharacter::BecomeNpc()
@@ -1412,7 +2320,9 @@ void AShortStackCharacter::FitToHeight(float HeightCm)
 		Crown = 175.0f;
 	}
 	const float K = FMath::Clamp(HeightCm / Crown, 0.85f, 1.18f);
-	const float Width = LookNow.Build == 0 ? 0.95f : LookNow.Build == 2 ? 1.04f : LookNow.Build == 3 ? 1.12f : 1.0f;
+	// The hero's build from the creator; a cast member's breadth from their wardrobe (CastLooks).
+	const float Width = bNpc ? FMath::Clamp(CastWearNow.Breadth, 0.88f, 1.16f)
+							 : (LookNow.Build == 0 ? 0.95f : LookNow.Build == 2 ? 1.04f : LookNow.Build == 3 ? 1.12f : 1.0f);
 	MeshScale = K;
 	const float Half = HeightCm * 0.5f;
 	GetCapsuleComponent()->SetCapsuleSize(30.0f * Width, Half);
@@ -1555,24 +2465,94 @@ void AShortStackCharacter::WearOnHead(UStaticMeshComponent* Piece, const FTransf
 	Reveal(Piece);
 }
 
-void AShortStackCharacter::PutOnHeadwear()
+namespace ShortStackCharacterDetail
 {
-	const ss::hero::Look& L = LookNow;
-	const int32 Hat = bNpc ? 0 : FMath::Clamp(L.Hat, 0, 4);
-	const int32 Glasses = bNpc ? 0 : FMath::Clamp(L.Glasses, 0, 4);
+/**
+ * Where one of the Back Room's pieces (wear.py: made around the midpoint between the eyes, looking down +X with +Z up, for
+ * eyes 6.3 cm apart) sits on a face, in the face mesh's component space in its reference pose, as ABackRoomPlayer::ApplyWear
+ * fits it: a stand-in until the street's own piece is imported.
+ */
+FTransform WearFrameFit(const USkeletalMesh* FaceAsset, float Turn)
+{
+	if (!FaceAsset)
+	{
+		return FTransform::Identity;
+	}
+	const FReferenceSkeleton& Ref = FaceAsset->GetRefSkeleton();
+	const int32 EyeL = Ref.FindBoneIndex(EyeBoneL);
+	const int32 EyeR = Ref.FindBoneIndex(EyeBoneR);
+	if (EyeL == INDEX_NONE || EyeR == INDEX_NONE)
+	{
+		return FTransform::Identity;
+	}
+	const FVector L = RefComponentSpace(Ref, EyeL).GetLocation();
+	const FVector R = RefComponentSpace(Ref, EyeR).GetLocation();
+	const FVector Across = (L - R).GetSafeNormal();
+	const FVector Ahead = (FVector(0.0, 1.0, 0.0) - Across * FVector::DotProduct(FVector(0.0, 1.0, 0.0), Across)).GetSafeNormal();
+	FRotator Facing = FRotationMatrix::MakeFromXZ(Ahead, FVector::UpVector).Rotator();
+	Facing.Yaw += Turn;
+	const double Scale = FMath::Clamp(FVector::Dist(L, R) / 6.3, 0.9, 1.12);
+	return FTransform(Facing, (L + R) * 0.5, FVector(Scale));
+}
+
+/** A Back Room piece's colors, as the Back Room paints them: its "wear_main" in the cloth's color, "wear_frame" in the frames'. */
+void PaintWearPiece(UStaticMeshComponent* C, const FLinearColor& Main, const FLinearColor& Frame)
+{
+	UMaterialInterface* Surface = LoadObject<UMaterialInterface>(nullptr, SurfaceMaterial, nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!C || !Surface)
+	{
+		return;
+	}
+	for (int32 Slot = 0; Slot < C->GetNumMaterials(); ++Slot)
+	{
+		const UMaterialInterface* M = C->GetMaterial(Slot);
+		const FString Name = M ? M->GetName() : FString();
+		const bool bMain = Name.Contains(TEXT("wear_main"));
+		const bool bFrame = Name.Contains(TEXT("wear_frame"));
+		if (bMain || bFrame)
+		{
+			C->SetMaterial(Slot, PlainSurface(Surface, C, bMain ? Main : Frame, bMain ? 0.86f : 0.28f));
+		}
+	}
+}
+} // namespace ShortStackCharacterDetail
+
+void AShortStackCharacter::PutOnHeadwear(const FStreetOutfit& Outfit)
+{
+	Cut HatCut = IsHatCut(Outfit.Hat) ? Outfit.Hat : Cut::Count;
+	if (bNpc && HatCut != Cut::Count)
+	{
+		// As the Back Room has it (HatFits): someone else's hat only over hair that lies close; fuller hair would come up
+		// through the crown. The hero's hat takes fuller hair off instead (the grooms' rule).
+		const UGroomComponent* Scalp = ScalpGroom();
+		if (Scalp && Scalp->GroomAsset && !HeroGrooms::IsTightHair(Scalp->GroomAsset->GetName()))
+		{
+			HatCut = Cut::Count;
+		}
+	}
+	const FWearPiece* HatPiece = WearPieceFor(HatCut);
+	const FWearPiece* EyesPiece = IsEyesCut(Outfit.Eyes) ? WearPieceFor(Outfit.Eyes) : nullptr;
 	// Fitted to the mesh that will carry them (WearOnHead), so a face without a head bone can't put them on the floor.
 	const USkeletalMeshComponent* Carrier = HeadCarrier();
 	const USkeletalMesh* HeadAsset = Carrier ? Carrier->GetSkeletalMeshAsset() : nullptr;
-	auto Ready = [this](TObjectPtr<UStaticMeshComponent>& Slot, const TCHAR* MeshName, const TCHAR* What) -> UStaticMeshComponent* {
-		UStaticMesh* Mesh = Wearable(MeshName);
-		if (MeshName && !Mesh)
+	// The street's own piece, else the Back Room's (bWearFrame: fitted in its frame) until the street's is imported.
+	auto Ready = [this](TObjectPtr<UStaticMeshComponent>& Slot, const FWearPiece* Piece, const TCHAR* What, bool& bWearFrame) -> UStaticMeshComponent* {
+		bWearFrame = false;
+		UStaticMesh* Mesh = Piece ? Wearable(Piece->Street) : nullptr;
+		if (Piece && !Mesh && Piece->BackRoom)
 		{
-			UE_LOG(LogStreetHero, Warning, TEXT("%s %s isn't imported (shortstack_setup.import_meshes)"), What, MeshName);
+			Mesh = Wearable(Piece->BackRoom);
+			bWearFrame = Mesh != nullptr;
+		}
+		if (Piece && !Mesh)
+		{
+			UE_LOG(LogStreetHero, Warning, TEXT("%s %s isn't imported (shortstack_setup.import_meshes)"), What, Piece->Street);
 		}
 		if (!Mesh)
 		{
 			if (Slot)
 			{
+				TierDefaults.Remove(Slot.Get());
 				Slot->DestroyComponent();
 				Slot = nullptr;
 			}
@@ -1592,44 +2572,61 @@ void AShortStackCharacter::PutOnHeadwear()
 		Slot->EmptyOverrideMaterials();
 		return Slot;
 	};
-	if (UStaticMeshComponent* C = Ready(HatMesh, Hats[Hat], TEXT("Hat")))
+	bool bWearFrame = false;
+	if (UStaticMeshComponent* C = Ready(HatMesh, HatPiece, TEXT("Hat"), bWearFrame))
 	{
-		// The fabric in a color that goes with the jacket and stands apart from the hair at this age (as the creator's
-		// portrait has it); the cap's top button is the same cloth, the bill's underside keeps its green.
-		const FLinearColor Tint = SrgbOf(ss::hero::HatTone(L, LookAge));
-		TintSlot(C, BakedSlot(C, 0), Tint, 1.45f);
-		if (Hat == 2 || Hat == 3)
+		if (bWearFrame)
 		{
-			TintSlot(C, BakedSlot(C, 2), Tint, 1.45f);
+			PaintWearPiece(C, Outfit.HatColor, Outfit.FrameColor);
+			WearOnHead(C, WearFrameFit(HeadAsset, HatPiece->Turn));
 		}
-		FTransform Fit = FitHeadWear(HeadAsset, true, Hat == 3 ? 180.0f : 0.0f);
-		if (bWearsScalpHair)
+		else
 		{
-			// Over close-cropped hair (the only kind kept under a hat): a little higher and roomier than on the bare scalp.
-			Fit.AddToTranslation(FVector(0.0, 0.0, 0.8));
-			Fit.SetScale3D(Fit.GetScale3D() * 1.03);
-		}
-		WearOnHead(C, Fit);
-	}
-	if (UStaticMeshComponent* C = Ready(GlassesMesh, Specs[Glasses], TEXT("Glasses")))
-	{
-		// Black acetate, or gold wire. The bake gives every lens a dark mirror: clear ones get a glass you see the eyes
-		// through (Blender's second slot, after the frame), the shades keep theirs.
-		TintSlot(C, BakedSlot(C, 0), SrgbOf(Glasses == 3 ? 0xc9a24d : 0x161618), Glasses == 3 ? 1.4f : 1.0f);
-		if (Glasses != 4 && C->GetNumMaterials() > 1)
-		{
-			if (UMaterialInterface* Lens = LoadObject<UMaterialInterface>(nullptr, LensMaterial, nullptr, LOAD_NoWarn | LOAD_Quiet))
+			// The fabric in a color that goes with the jacket and stands apart from the hair at this age (as the creator's
+			// portrait has it); the cap's top button is the same cloth, the bill's underside keeps its green, the trilby's band
+			// its own.
+			TintSlot(C, BakedSlot(C, 0), Outfit.HatColor, 1.45f);
+			if (HatCut == Cut::BallCap || HatCut == Cut::CapBack)
 			{
-				C->SetMaterial(BakedSlot(C, 1), Lens);
+				TintSlot(C, BakedSlot(C, 2), Outfit.HatColor, 1.45f);
 			}
+			FTransform Fit = FitHeadWear(HeadAsset, true, HatPiece->Turn);
+			if (bWearsScalpHair)
+			{
+				// Over close-cropped hair (the only kind kept under a hat): a little higher and roomier than on the bare scalp.
+				Fit.AddToTranslation(FVector(0.0, 0.0, 0.8));
+				Fit.SetScale3D(Fit.GetScale3D() * 1.03);
+			}
+			WearOnHead(C, Fit);
 		}
-		WearOnHead(C, FitHeadWear(HeadAsset, false));
+	}
+	if (UStaticMeshComponent* C = Ready(GlassesMesh, EyesPiece, TEXT("Glasses"), bWearFrame))
+	{
+		if (bWearFrame)
+		{
+			PaintWearPiece(C, Outfit.HatColor, Outfit.FrameColor);
+			WearOnHead(C, WearFrameFit(HeadAsset, 0.0f));
+		}
+		else
+		{
+			// Black acetate, or gold wire. The bake gives every lens a dark mirror: clear ones get a glass you see the eyes
+			// through (Blender's second slot, after the frame), the shades and the aviators keep theirs.
+			TintSlot(C, BakedSlot(C, 0), Outfit.FrameColor, EyesPiece->bGold ? 1.4f : 1.0f);
+			if (!EyesPiece->bDark && C->GetNumMaterials() > 1)
+			{
+				if (UMaterialInterface* Lens = LoadObject<UMaterialInterface>(nullptr, LensMaterial, nullptr, LOAD_NoWarn | LOAD_Quiet))
+				{
+					C->SetMaterial(BakedSlot(C, 1), Lens);
+				}
+			}
+			WearOnHead(C, FitHeadWear(HeadAsset, false));
+		}
 	}
 }
 
 void AShortStackCharacter::RefitWear()
 {
-	PutOnHeadwear();
+	PutOnHeadwear(CurrentOutfit());
 	RefreshVisibility();
 	if (bTierApplied)
 	{
@@ -1681,6 +2678,16 @@ void AShortStackCharacter::HideToes(int32 Side, bool bHide)
 void AShortStackCharacter::BuildShoes(const FStreetOutfit& Outfit)
 {
 	USkeletalMesh* BodyAsset = GetMesh()->GetSkeletalMeshAsset();
+	if (Outfit.bBarefoot)
+	{
+		// Shoes off (the closet's Take off): the feet as the body has them, toes and all.
+		for (int32 Side = 0; Side < 2; ++Side)
+		{
+			Conceal(Shoes[Side].Get());
+			HideToes(Side, false);
+		}
+		return;
+	}
 	// The modeled pair when both shoes are imported; otherwise a pair made here to fit the feet.
 	UStaticMesh* Pair[2] = {nullptr, nullptr};
 	if (Outfit.ShoePair)
@@ -2075,10 +3082,24 @@ void AShortStackCharacter::UpdateFace(float Dt)
 	const float TalkW = TalkFace::Weight(TalkLeft);
 	if (TalkW > 0.0f)
 	{
-		auto AddControl = [&Add](const TCHAR* Control, float Value) { Add(FName(*FString::Printf(TEXT("CTRL_expressions_%s"), Control)), Value); };
-		auto BothControls = [&AddControl](const TCHAR* Control, float Value) {
-			AddControl(*FString::Printf(TEXT("%sL"), Control), Value);
-			AddControl(*FString::Printf(TEXT("%sR"), Control), Value);
+		// The rig's control names made once per control and side (TalkFace's names are literals: their pointers are stable),
+		// not formatted every frame on everyone talking.
+		auto ControlName = [](const TCHAR* Control, int32 Side) -> FName {
+			// By the literal's address and the side (0 none, 1 L, 2 R): one key each.
+			static TMap<UPTRINT, FName> Names;
+			const UPTRINT Key = reinterpret_cast<UPTRINT>(Control) * 4 + static_cast<UPTRINT>(Side);
+			if (const FName* Have = Names.Find(Key))
+			{
+				return *Have;
+			}
+			const FName Made(*FString::Printf(TEXT("CTRL_expressions_%s%s"), Control, Side == 1 ? TEXT("L") : (Side == 2 ? TEXT("R") : TEXT(""))));
+			Names.Add(Key, Made);
+			return Made;
+		};
+		auto AddControl = [&Add, &ControlName](const TCHAR* Control, float Value) { Add(ControlName(Control, 0), Value); };
+		auto BothControls = [&Add, &ControlName](const TCHAR* Control, float Value) {
+			Add(ControlName(Control, 1), Value);
+			Add(ControlName(Control, 2), Value);
 		};
 		TalkFace::Mouth(Clock, TalkW, TalkLoudness, AddControl, BothControls);
 	}
@@ -2571,6 +3592,142 @@ void AShortStackCharacter::DropGroom(UGroomComponent* Groom)
 	bWearsScalpHair = ScalpGroom() != nullptr;
 }
 
+UGroomComponent* AShortStackCharacter::GroomOfKind(uint8 Kind) const
+{
+	for (const TPair<TWeakObjectPtr<UGroomComponent>, uint8>& Worn : GroomKinds)
+	{
+		if (Worn.Key.IsValid() && Worn.Value == Kind)
+		{
+			return Worn.Key.Get();
+		}
+	}
+	return nullptr;
+}
+
+UGroomComponent* AShortStackCharacter::AddGroomOfKind(uint8 Kind, UGroomAsset* Asset, UGroomBindingAsset* Binding)
+{
+	// The build's own groom of this kind, as the template (its settings, as the Blueprint made it), when it has one.
+	const UGroomComponent* Template = nullptr;
+	if (const UBlueprintGeneratedClass* Bp = Cast<UBlueprintGeneratedClass>(WornBlueprint.Get()); Bp && Bp->SimpleConstructionScript)
+	{
+		for (const USCS_Node* Node : Bp->SimpleConstructionScript->GetAllNodes())
+		{
+			const UGroomComponent* T = Node ? Cast<UGroomComponent>(Node->ComponentTemplate) : nullptr;
+			if (T && T->GroomAsset && static_cast<uint8>(GroomKindOf(Node->GetVariableName().ToString(), T->GroomAsset->GetName())) == Kind)
+			{
+				Template = T;
+				break;
+			}
+		}
+	}
+	static const TCHAR* const Names[6] = {TEXT("Hair"), TEXT("Eyebrows"), TEXT("Eyelashes"), TEXT("Beard"), TEXT("Mustache"), TEXT("Fuzz")};
+	UGroomComponent* Groom = NewObject<UGroomComponent>(this, UGroomComponent::StaticClass(),
+		MakeUniqueObjectName(this, UGroomComponent::StaticClass(), FName(Names[FMath::Min<int32>(Kind, 5)])), RF_Transient, const_cast<UGroomComponent*>(Template));
+	// As the MetaHuman Blueprints carry their grooms: on the face, which the binding follows.
+	Groom->SetupAttachment(Face);
+	Groom->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Groom->SetCanEverAffectNavigation(false);
+	Groom->bCastHiddenShadow = true;
+	// The template's overrides are its own groom's: this one shades its own materials. Set before it registers, so it's
+	// built once, as the new groom.
+	Groom->EmptyOverrideMaterials();
+	Groom->SetGroomAsset(Asset, Binding);
+	Groom->RegisterComponent();
+	Wearables.Add(Groom);
+	GroomKinds.Emplace(Groom, Kind);
+	if (!HeroGrooms::HoldForTier(Groom, bTierApplied ? FMath::Min(DetailTierNow, 2) : 0) && Groom->GetForcedLOD() != INDEX_NONE)
+	{
+		Groom->SetForcedLOD(INDEX_NONE);
+	}
+	if (!bNpc && static_cast<EGroomKind>(Kind) != EGroomKind::Lashes)
+	{
+		ShadeGroom(Groom, HairShadeOf(LookNow.HairColor, LookAge), static_cast<EGroomKind>(Kind) == EGroomKind::Brows ? 0.06f : 0.0f);
+	}
+	if (static_cast<EGroomKind>(Kind) == EGroomKind::Scalp)
+	{
+		bWearsScalpHair = true;
+	}
+	RefreshVisibility();
+	if (bTierApplied)
+	{
+		ApplyDetailTier();
+	}
+	return Groom;
+}
+
+void AShortStackCharacter::ApplyGrooms(bool bLoadNow)
+{
+	if (bNpc || CastFaceName.IsNone())
+	{
+		return;
+	}
+	const HeroGrooms::FGroomSet Set = HeroGrooms::Resolve(GroomLook(), CastFaceName);
+	if (!Set.bLibrary)
+	{
+		// No library for this face: the build's own grooms, as BuildFromMetaHuman picked them.
+		return;
+	}
+	const uint32 Request = ++GroomRequest;
+	if (!HeroGrooms::IsResident(Set))
+	{
+		if (!bLoadNow)
+		{
+			// Not in memory (the Style Book's preload hasn't finished, or a look from elsewhere): on when it arrives, unless a
+			// newer look was asked for meanwhile. Nothing loads synchronously here. Once it has arrived the set is resident, so
+			// the second pass loads nothing; an entry whose asset failed to load (a copy deleted by hand) is tried once and
+			// dropped there, rather than asked for again every frame.
+			TWeakObjectPtr<AShortStackCharacter> Self(this);
+			HeroGrooms::LoadAsync(Set, [Self, Request]() {
+				AShortStackCharacter* Me = Self.Get();
+				if (Me && Me->GroomRequest == Request)
+				{
+					Me->ApplyGrooms(true);
+				}
+			});
+			return;
+		}
+		for (const FSoftObjectPath& Path : HeroGrooms::PathsOf(Set))
+		{
+			Path.TryLoad();
+		}
+	}
+	const FHairShade Shade = HairShadeOf(LookNow.HairColor, LookAge);
+	for (const EGroomKind Kind : {EGroomKind::Scalp, EGroomKind::Brows, EGroomKind::Beard, EGroomKind::Mustache})
+	{
+		const HeroGrooms::FWornGroom& Want = Set.Of(Kind);
+		UGroomAsset* Asset = Want.IsSet() ? Want.Groom.Get() : nullptr;
+		UGroomBindingAsset* Binding = Want.IsSet() ? Want.Binding.Get() : nullptr;
+		UGroomComponent* Have = GroomOfKind(static_cast<uint8>(Kind));
+		if (!Asset)
+		{
+			if (Have)
+			{
+				DropGroom(Have);
+			}
+			continue;
+		}
+		if (!Have)
+		{
+			AddGroomOfKind(static_cast<uint8>(Kind), Asset, Binding);
+		}
+		else if (Have->GroomAsset != Asset || Have->BindingAsset != Binding)
+		{
+			SwapGroom(Have, Asset, Binding);
+		}
+		else
+		{
+			// The same groom: the hair color may be new (the barber's COLOR tab).
+			ShadeGroom(Have, Shade, Kind == EGroomKind::Brows ? 0.06f : 0.0f);
+		}
+	}
+	bWearsScalpHair = ScalpGroom() != nullptr;
+	if (bHasLook && HatMesh)
+	{
+		// The hat sits a little higher over hair than on the bare scalp.
+		PutOnHeadwear(CurrentOutfit());
+	}
+}
+
 // ------------------------------------------------------------------ tests
 
 FString AShortStackCharacter::TestGroomSpike(const FString& Candidate, const FString& Options)
@@ -2869,6 +4026,163 @@ FString AShortStackCharacter::TestFaces(const FString& CareerKey)
 	return Registry ? Registry->Show(GetCastFace(), CareerKey) : FString(TEXT("ss.Look.Faces: no face registry here (it runs in game and PIE worlds)"));
 }
 
+FString AShortStackCharacter::TestLookPreview(const FString& Command)
+{
+	TArray<FString> A;
+	Command.ParseIntoArrayWS(A);
+	const FString Verb = A.Num() > 0 ? A[0].ToLower() : FString(TEXT("describe"));
+	if (Verb == TEXT("end"))
+	{
+		EndPreview();
+		return DescribeLook();
+	}
+	if (Verb == TEXT("keep"))
+	{
+		if (bPreviewing)
+		{
+			RefreshLook(LookNow, ClosetNow);
+		}
+		return DescribeLook();
+	}
+	if (Verb == TEXT("redress"))
+	{
+		// Everything worn put on again in place (after ss.Look.NpcGarments, an import, the ss.Wear.Graphic* tunables), and what it
+		// can wear looked for again.
+		bDrawableKnown = false;
+		DressOutfit(CurrentOutfit());
+		ApplyGrooms(false);
+		RefreshVisibility();
+		if (bTierApplied)
+		{
+			ApplyDetailTier();
+		}
+		return DescribeLook();
+	}
+	if (Verb == TEXT("preload"))
+	{
+		PreloadGroomSet(!(A.IsValidIndex(1) && A[1] == TEXT("0")));
+		return HeroGrooms::Describe(CastFaceName);
+	}
+	if (Verb == TEXT("grooms"))
+	{
+		return HeroGrooms::Describe(CastFaceName);
+	}
+	if (Verb == TEXT("caps"))
+	{
+		const ss::ui::HostCaps Caps = CastLooks::HostCapsFor(this);
+		auto Bits = [](const std::vector<bool>& V) {
+			FString S;
+			for (const bool B : V)
+			{
+				S += B ? TEXT("1") : TEXT("0");
+			}
+			return S;
+		};
+		return FString::Printf(TEXT("HostCaps for %s: hair %s, facial %s, brows %s, garments 0x%llx, gear 0x%llx, curios %u, 3D %d"), *CastFaceName.ToString(), *Bits(Caps.HairStyles),
+			*Bits(Caps.FacialHair), *Bits(Caps.Brows), static_cast<unsigned long long>(Caps.GarmentKinds), static_cast<unsigned long long>(Caps.GearKinds), Caps.Curios,
+			Caps.Preview3D ? 1 : 0);
+	}
+	if (Verb == TEXT("describe") || A.Num() < 2)
+	{
+		return DescribeLook();
+	}
+	if (bNpc)
+	{
+		return TEXT("ss.Look.Preview: the hero's look only");
+	}
+	// One choice changed on what's on now (a preview, as the shops ask for it).
+	ss::hero::Look L = LookNow;
+	ss::wardrobe::Closet C = ClosetNow;
+	const FString& Value = A[1];
+	const bool bNumber = Value.IsNumeric();
+	const int32 N = FCString::Atoi(*Value);
+	// The body's (body type, skin band, build, height: another hero face or another fit) rebuild, as a body change does: the
+	// garments' clip check across every hero and build (spec 10) runs through them.
+	static const TPair<const TCHAR*, ss::hero::Slot> LookSlots[] = {{TEXT("hair"), ss::hero::Slot::Hair}, {TEXT("facialhair"), ss::hero::Slot::FacialHair},
+		{TEXT("brows"), ss::hero::Slot::Brows}, {TEXT("haircolor"), ss::hero::Slot::HairColor}, {TEXT("hat"), ss::hero::Slot::Hat}, {TEXT("glasses"), ss::hero::Slot::Glasses},
+		{TEXT("outfit"), ss::hero::Slot::Outfit}, {TEXT("outfitcolor"), ss::hero::Slot::OutfitColor}, {TEXT("body"), ss::hero::Slot::Body}, {TEXT("skin"), ss::hero::Slot::Skin},
+		{TEXT("build"), ss::hero::Slot::Build}, {TEXT("height"), ss::hero::Slot::Height}};
+	for (const TPair<const TCHAR*, ss::hero::Slot>& S : LookSlots)
+	{
+		if (Verb == S.Key)
+		{
+			if (!bNumber)
+			{
+				return FString::Printf(TEXT("ss.Look.Preview %s takes the creator's option index"), S.Key);
+			}
+			L.Set(S.Value, N);
+			PreviewLook(L, C);
+			return DescribeLook();
+		}
+	}
+	static const TPair<const TCHAR*, ss::wardrobe::Slot> ClosetSlots[] = {{TEXT("top"), ss::wardrobe::Slot::Top}, {TEXT("outer"), ss::wardrobe::Slot::Outer},
+		{TEXT("bottom"), ss::wardrobe::Slot::Bottom}, {TEXT("shoes"), ss::wardrobe::Slot::Shoes}, {TEXT("headwear"), ss::wardrobe::Slot::Hat}, {TEXT("eyes"), ss::wardrobe::Slot::Eyes}};
+	for (const TPair<const TCHAR*, ss::wardrobe::Slot>& S : ClosetSlots)
+	{
+		if (Verb == S.Key)
+		{
+			if (!C.Seeded)
+			{
+				// No closet yet (a career before it): the creator's choices, as worn now (core's seeding, or read off the look
+				// while the catalog isn't in).
+				C = ss::wardrobe::SeedFrom(L);
+				if (!C.Seeded)
+				{
+					auto Name = [](const TCHAR* Slot, int32 CutIndex, int32 Color) {
+						static const TCHAR* const Cuts[] = {TEXT("tee"), TEXT("hoodie"), TEXT("bomber"), TEXT("flannel"), TEXT("denim"), TEXT("leather"), TEXT("track")};
+						return std::string(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s.%s.%s"), Slot, Cuts[FMath::Clamp(CutIndex, 0, 6)],
+							*FString(UTF8_TO_TCHAR(ss::hero::OptionName(ss::hero::Slot::OutfitColor, Color).c_str())).ToLower())));
+					};
+					C.Seeded = true;
+					C.Worn[static_cast<int32>(ss::wardrobe::Slot::Top)] = Name(TEXT("top"), 0, L.OutfitColor);
+					if (L.Outfit >= 0 && L.Outfit < ss::hero::OutfitNone)
+					{
+						C.Worn[static_cast<int32>(ss::wardrobe::Slot::Outer)] = Name(TEXT("outer"), L.Outfit + 1, L.OutfitColor);
+					}
+					C.Worn[static_cast<int32>(ss::wardrobe::Slot::Bottom)] = "bottom.jeans.mid";
+					static const TCHAR* const HatIds[5] = {nullptr, TEXT("hat.beanie"), TEXT("hat.ballcap"), TEXT("hat.capback"), TEXT("hat.bucket")};
+					static const TCHAR* const EyeIds[5] = {nullptr, TEXT("eyes.round"), TEXT("eyes.square"), TEXT("eyes.wire"), TEXT("eyes.shades")};
+					if (const TCHAR* Hat = HatIds[FMath::Clamp(L.Hat, 0, 4)])
+					{
+						C.Worn[static_cast<int32>(ss::wardrobe::Slot::Hat)] = TCHAR_TO_UTF8(Hat);
+					}
+					if (const TCHAR* Eyes = EyeIds[FMath::Clamp(L.Glasses, 0, 4)])
+					{
+						C.Worn[static_cast<int32>(ss::wardrobe::Slot::Eyes)] = TCHAR_TO_UTF8(Eyes);
+					}
+				}
+			}
+			// A garment id, or a cut's name ("hoodie" reads as "outer.hoodie.<color>" in the outfit color), or none.
+			std::string Id = TCHAR_TO_UTF8(*Value);
+			if (Value.Equals(TEXT("none"), ESearchCase::IgnoreCase))
+			{
+				Id.clear();
+			}
+			else if (!Value.Contains(TEXT(".")))
+			{
+				// The catalog's garment of that cut (in the outfit color where it comes in colors), else one read off the id.
+				ss::wardrobe::Garment Want;
+				const bool bCut = GarmentOf(std::string(TCHAR_TO_UTF8(*FString::Printf(TEXT("x.%s"), *Value.ToLower()))), Want);
+				const ss::wardrobe::Garment* Best = nullptr;
+				for (const ss::wardrobe::Garment& G : ss::wardrobe::Catalog())
+				{
+					if (bCut && G.Kind == Want.Kind && G.Condition == 0 && (!Best || (Best->Color != L.OutfitColor && G.Color == L.OutfitColor)))
+					{
+						Best = &G;
+					}
+				}
+				Id = Best ? Best->Id
+						  : std::string(TCHAR_TO_UTF8(*FString::Printf(TEXT("%s.%s.%s"), S.Key, *Value.ToLower(),
+								*FString(UTF8_TO_TCHAR(ss::hero::OptionName(ss::hero::Slot::OutfitColor, L.OutfitColor).c_str())).ToLower())));
+			}
+			C.Worn[static_cast<int32>(S.Value)] = Id;
+			PreviewLook(L, C);
+			return DescribeLook();
+		}
+	}
+	return FString::Printf(TEXT("ss.Look.Preview: no slot '%s' (hair, facialhair, brows, haircolor, hat, glasses, outfit, outfitcolor, body, skin, build, height; top, outer, bottom, shoes, headwear, eyes)"), *Verb);
+}
+
 FString AShortStackCharacter::DescribeHooks() const
 {
 	static const TCHAR* const Tiers[4] = {TEXT("Near"), TEXT("Mid"), TEXT("Far"), TEXT("Gone")};
@@ -2943,5 +4257,57 @@ FAutoConsoleCommandWithWorldAndArgs CmdLookHook(TEXT("ss.Look.Hook"),
 			return;
 		}
 		UE_LOG(LogStreetHero, Display, TEXT("%s"), *Who->TestHook(Command));
+	}));
+
+AShortStackCharacter* PlayerCharacter(UWorld* World)
+{
+	APlayerController* Pc = World ? World->GetFirstPlayerController() : nullptr;
+	return Pc ? Cast<AShortStackCharacter>(Pc->GetPawn()) : nullptr;
+}
+
+FAutoConsoleCommandWithWorldAndArgs CmdLookPreview(TEXT("ss.Look.Preview"),
+	TEXT("ss.Look.Preview <slot> <value> | end | keep | redress | preload [0] | grooms | caps | describe: previews the hero's look with one choice changed "
+		 "(hair, facialhair, brows, haircolor, hat, glasses, outfit, outfitcolor, body, skin, build, height: the creator's option index; top, outer, bottom, shoes, headwear, eyes: a garment id "
+		 "or a cut's name, \"outer hoodie\", \"bottom chinos\", \"headwear trilby\", \"eyes none\"), in place (spec 7.5.4). AShortStackCharacter::TestLookPreview is its twin."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		AShortStackCharacter* Hero = PlayerCharacter(World);
+		if (!Hero)
+		{
+			UE_LOG(LogStreetHero, Display, TEXT("ss.Look.Preview: no hero here"));
+			return;
+		}
+		UE_LOG(LogStreetHero, Display, TEXT("%s"), *Hero->TestLookPreview(FString::Join(Args, TEXT(" "))));
+	}));
+
+FAutoConsoleCommandWithWorld CmdLookRedress(TEXT("ss.Look.Redress"),
+	TEXT("Dresses every street character again in place in what they wear (after ss.Look.NpcGarments, an import of garments or wear, ss.Wear.Graphic*)."),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World) {
+		if (!World)
+		{
+			return;
+		}
+		int32 Count = 0;
+		for (TActorIterator<AShortStackCharacter> It(World); It; ++It)
+		{
+			It->TestLookPreview(TEXT("redress"));
+			++Count;
+		}
+		UE_LOG(LogStreetHero, Display, TEXT("ss.Look.Redress: %d characters"), Count);
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs CmdLookGrooms(TEXT("ss.Look.Grooms"),
+	TEXT("ss.Look.Grooms [HeroA0..HeroB2]: a hero face's groom library (HeroGrooms.h): its styles by kind, what the spec's map asks for that it lacks, whether it's preloaded."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		const AShortStackCharacter* Hero = PlayerCharacter(World);
+		const FName Face = Args.Num() > 0 ? FName(*Args[0]) : (Hero ? Hero->GetCastFace() : FName());
+		if (Face.IsNone())
+		{
+			for (const TCHAR* Each : {TEXT("HeroA0"), TEXT("HeroA1"), TEXT("HeroA2"), TEXT("HeroB0"), TEXT("HeroB1"), TEXT("HeroB2")})
+			{
+				UE_LOG(LogStreetHero, Display, TEXT("%s"), *HeroGrooms::Describe(FName(Each)));
+			}
+			return;
+		}
+		UE_LOG(LogStreetHero, Display, TEXT("%s"), *HeroGrooms::Describe(Face));
 	}));
 } // namespace ShortStackCharacterDetail

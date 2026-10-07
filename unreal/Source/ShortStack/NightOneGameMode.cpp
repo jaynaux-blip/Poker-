@@ -29,13 +29,194 @@
 #include "NightOneStage.h"
 #include "SFrontEndWidget.h"
 #include "SNightOneOverlay.h"
+#include "CastLooks.h"
+#include "ShopStage.h"
 #include "ShortStack.h"
 #include "ShortStack/Cards.h"
 #include "ShortStack/UI/SecondScreen.h"
+#include "ShortStack/UI/ShopScreen.h"
 #include "Widgets/Layout/SBackgroundBlur.h"
 #include "Widgets/SOverlay.h"
 
 #include <algorithm>
+
+namespace NightOneCloset
+{
+/**
+ * The closet over the hub (spec 7.6): core-ui's WardrobeScreen in the apartment and on Dee's couch, on C while leaned back
+ * from the laptop (leaned in, C calls at the table). Keyed and drawn as the menus are, over the room. One hub at a time, so
+ * one closet, kept with the mode that opened it.
+ */
+struct FCloset
+{
+	TWeakObjectPtr<ANightOneGameMode> Owner;
+	TUniquePtr<ss::ui::ShopScreen> Screen;
+	TSharedPtr<SFrontEndWidget> Widget;
+	TWeakObjectPtr<UGameViewportClient> Viewport;
+	double Now = 0.0;
+	bool bLeft = false;
+};
+FCloset GCloset;
+
+bool IsOpen(const ANightOneGameMode* Mode)
+{
+	return GCloset.Owner.Get() == Mode && GCloset.Screen && GCloset.Screen->IsOpen();
+}
+
+/** The closet put away (its widget off the viewport too when bDrop: the level's ending). */
+void Close(bool bDrop)
+{
+	if (GCloset.Screen && GCloset.Screen->IsOpen())
+	{
+		GCloset.Screen->Close(GCloset.Now);
+	}
+	GCloset.Screen.Reset();
+	if (GCloset.Widget)
+	{
+		GCloset.Widget->SetVisibility(EVisibility::Collapsed);
+		if (bDrop)
+		{
+			if (UGameViewportClient* Vp = GCloset.Viewport.Get())
+			{
+				Vp->RemoveViewportWidgetContent(GCloset.Widget.ToSharedRef());
+			}
+			GCloset.Widget.Reset();
+		}
+	}
+	if (bDrop)
+	{
+		GCloset.Owner = nullptr;
+	}
+}
+
+/** Opens the closet over the hub (Page: "apartment" or "dee", where it was opened from). False when core has no closet page. */
+bool Open(ANightOneGameMode* Mode, ss::Session& S, double Now, const FString& Page)
+{
+	UGameViewportClient* Vp = Mode && Mode->GetWorld() ? Mode->GetWorld()->GetGameViewport() : nullptr;
+	if (!Vp || !FSlateApplication::IsInitialized())
+	{
+		return false;
+	}
+	std::unique_ptr<ss::ui::ShopScreen> Made = ss::ui::MakeShopScreen("wardrobe", S);
+	if (!Made)
+	{
+		return false;
+	}
+	if (GCloset.Owner.Get() != Mode)
+	{
+		Close(true);
+	}
+	GCloset.Owner = Mode;
+	GCloset.Viewport = Vp;
+	GCloset.Screen.Reset(Made.release());
+	GCloset.bLeft = false;
+	GCloset.Now = Now;
+	// What the hero can be shown in (the street's 3D: the closet won't put on what can't be drawn there); no 3D preview here,
+	// the hero's in the chair at the desk: the page previews on the portrait.
+	ss::ui::HostCaps Caps;
+	Caps.GarmentKinds = AShopStage::WearableKinds();
+	Caps.Preview3D = false;
+	// The look's lists as long as its options (spec 7.4: past the end reads as missing), what's on the hero's head now marked.
+	using ss::hero::Slot;
+	const ss::hero::Look& Worn = S.Person.Appearance;
+	auto Sized = [](std::vector<bool>& V, Slot Of, int Now) {
+		V.assign(static_cast<size_t>(std::max(0, ss::hero::OptionCount(Of))), false);
+		if (Now >= 0 && Now < static_cast<int>(V.size()))
+		{
+			V[static_cast<size_t>(Now)] = true;
+		}
+	};
+	Sized(Caps.HairStyles, Slot::Hair, Worn.Hair);
+	Sized(Caps.FacialHair, Slot::FacialHair, Worn.FacialHair);
+	Sized(Caps.Brows, Slot::Brows, Worn.Brows);
+	GCloset.Screen->SetCaps(Caps);
+	GCloset.Screen->Open(Now, TCHAR_TO_UTF8(*Page));
+	if (!GCloset.Widget)
+	{
+		GCloset.Widget = SNew(SFrontEndWidget);
+		GCloset.Widget->OnMenuKey = [](const FString& KeyName, bool bFromGamepad) {
+			if (GCloset.Screen && GCloset.Screen->IsOpen())
+			{
+				GCloset.Screen->Gamepad = bFromGamepad;
+				GCloset.Screen->Key(std::string(TCHAR_TO_UTF8(*KeyName)), GCloset.Now);
+				GCloset.bLeft = GCloset.bLeft || GCloset.Screen->TakeLeave();
+			}
+		};
+		GCloset.Widget->OnMenuPointer = [](const FVector2D& Logical, int32 Button, float WheelDelta) {
+			if (!GCloset.Screen)
+			{
+				return;
+			}
+			ss::ui::Pointer& P = GCloset.Screen->Ptr;
+			P.Active = true;
+			P.X = static_cast<float>(Logical.X);
+			P.Y = static_cast<float>(Logical.Y);
+			if (Button == 1)
+			{
+				P.Down = true;
+				P.Pressed = true;
+			}
+			else if (Button == 2)
+			{
+				P.Down = false;
+				P.Released = true;
+			}
+			P.Wheel += WheelDelta;
+		};
+		Vp->AddViewportWidgetContent(GCloset.Widget.ToSharedRef(), 25);
+	}
+	GCloset.Widget->SetVisibility(EVisibility::Visible);
+	if (APlayerController* Pc = UGameplayStatics::GetPlayerController(Mode, 0))
+	{
+		FInputModeUIOnly InputMode;
+		InputMode.SetWidgetToFocus(GCloset.Widget);
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		Pc->SetInputMode(InputMode);
+		Pc->SetShowMouseCursor(true);
+	}
+	FSlateApplication::Get().SetKeyboardFocus(GCloset.Widget, EFocusCause::SetDirectly);
+	return true;
+}
+
+/** The closet each frame: drawn, its requests drained, closed once walked away from (true then: the mode takes the input back). */
+bool Tick(ANightOneGameMode* Mode, const ss::ui::TextMeasurer& Measurer, double Now, TFunctionRef<void(const FString&, const FString&)> Toast)
+{
+	if (GCloset.Owner.Get() != Mode || !GCloset.Screen)
+	{
+		return false;
+	}
+	GCloset.Now = Now;
+	if (GCloset.Screen->IsOpen() && GCloset.Widget)
+	{
+		FVector2D Size(1920.0, 1080.0);
+		if (UGameViewportClient* Vp = GCloset.Viewport.Get())
+		{
+			FVector2D Measured;
+			Vp->GetViewportSize(Measured);
+			Size = Measured.X > 0.0 && Measured.Y > 0.0 ? Measured : Size;
+		}
+		const float H = ss::ui::ShopScreen::Height;
+		TSharedPtr<ss::ui::DrawList> List = MakeShared<ss::ui::DrawList>();
+		ss::ui::Canvas Cv(*List, Measurer, H * static_cast<float>(Size.X / Size.Y), H, static_cast<float>(Size.Y) / H);
+		GCloset.Screen->Draw(Cv, Now);
+		GCloset.Widget->SetDrawList(List);
+	}
+	// The hero isn't on screen in the hub: a change worn is the closet's (the session's); the street dresses it on the way out.
+	for (const ss::ui::HostRequest& R : GCloset.Screen->TakeRequests())
+	{
+		if (R.K == ss::ui::HostRequest::Redress)
+		{
+			Toast(TEXT("Closet"), TEXT("Changed. It's on when you head out."));
+		}
+	}
+	if (GCloset.bLeft || GCloset.Screen->TakeLeave() || !GCloset.Screen->IsOpen())
+	{
+		Close(false);
+		return true;
+	}
+	return false;
+}
+} // namespace NightOneCloset
 
 namespace NightOneModeDetail
 {
@@ -495,7 +676,8 @@ ANightOnePawn* ANightOneGameMode::GetSeat() const
 
 bool ANightOneGameMode::IsMenuOpen() const
 {
-	return Game && Game->Menu.IsOpen();
+	// The closet (spec 7.6) holds the input as a menu does.
+	return (Game && Game->Menu.IsOpen()) || NightOneCloset::IsOpen(this);
 }
 
 void ANightOneGameMode::StartPlay()
@@ -522,6 +704,8 @@ void ANightOneGameMode::StartPlay()
 	bHasSave = bLoaded;
 	const std::string Seed = std::string(TCHAR_TO_UTF8(*FString::Printf(TEXT("%lld"), FDateTime::Now().GetTicks())));
 	Game = MakeUnique<FNightOneGame>(*this, bLoaded ? &Loaded : nullptr, Seed);
+	// The console's ss.Closet.* and ss.Fit.Set act on this career while the hub plays (the closet's tests, spec 7.7).
+	CastLooks::BindSession(this, &Game->Session);
 	// The hub: the apartment, or Dee's front room across the street while the career is evicted (from the title screen
 	// on: it's where the player wakes). Moving back in returns it to 1812 the next time the level opens.
 	UseRoom(HubEvicted());
@@ -1518,6 +1702,12 @@ void ANightOneGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		SaveSettingsNow();
 	}
+	// The closet's widget leaves with the level (its page with it), and the console lets go of the career.
+	if (NightOneCloset::GCloset.Owner.Get() == this || !NightOneCloset::GCloset.Owner.IsValid())
+	{
+		NightOneCloset::Close(true);
+	}
+	CastLooks::BindSession(this, nullptr);
 	// The save being written (and any waiting) lands before the next scene reads it.
 	if (Game)
 	{
@@ -1611,6 +1801,11 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 	}
 
 	DrawMenu();
+	// The closet over the room while it's open; walked away from, the input goes back to the room.
+	if (NightOneCloset::Tick(this, Game->Measurer, RealTime, [this](const FString& From, const FString& Body) { ShowToast(From, Body); }))
+	{
+		ReturnInputToGame();
+	}
 	const bool bPaused = Game->Menu.IsPaused();
 
 	// After Begin: lean in to the laptop and show the controls hint.
@@ -1849,7 +2044,8 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		Room.bPlant = !bStored && S.Owns("plant");
 		Room.bCurtains = !bStored && S.Owns("curtains");
 		Room.bRouter = Fx.Fiber;
-		Room.bTrophy = S.Life.LiveBestPlace == 1;
+		// The Embercrest's Sunday cup on the sill, unless it's in Augie's cage or sold (spec 5.8).
+		Room.bTrophy = S.Life.LiveBestPlace == 1 && !S.PawnHolds("memento:cup");
 		Room.bDeeChip = S.Life.BackRoomNetCents > 0;
 		Stage->SetGear(Room);
 		const FLinearColor Rgb = bLedsOn ? LedColor : FLinearColor::MakeFromHSV8(static_cast<uint8>(FMath::Fmod(RealTime * 12.0, 256.0)), 190, 255);
@@ -2005,6 +2201,14 @@ void ANightOneGameMode::OnKey(const FString& Key)
 	{
 		GoOutside();
 		return;
+	}
+	// The closet (spec 7.6): C while leaned back from the laptop and no hand to act in (leaned in at a table, C calls).
+	if (Key == TEXT("c") && IsLeanedBack() && Game->Session.CurrentScreen != ss::Screen::Table)
+	{
+		if (NightOneCloset::Open(this, Game->Session, RealTime, bAtDees ? TEXT("dee") : TEXT("apartment")))
+		{
+			return;
+		}
 	}
 	Game->Client.Key(std::string(TCHAR_TO_UTF8(*Key)));
 }

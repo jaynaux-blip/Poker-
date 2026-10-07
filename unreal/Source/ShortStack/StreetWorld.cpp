@@ -421,6 +421,15 @@ bool UStreetWorld::WalkersNear(const FVector& At, double Reach, double ZReach) c
 	return false;
 }
 
+void UStreetWorld::SetHold(bool bHold, double World)
+{
+	if (bHold && !bHeld)
+	{
+		HeldAt = World;
+	}
+	bHeld = bHold;
+}
+
 FString UStreetWorld::Describe() const
 {
 	int32 Dry = 0;
@@ -430,8 +439,8 @@ FString UStreetWorld::Describe() const
 		Dry += Z.bDry ? 1 : 0;
 		Profiles += Z.HasCameraProfile() ? 1 : 0;
 	}
-	return FString::Printf(TEXT("registry: %d uses, %d zones (%d dry, %d camera profiles), %d starts, %d shots, %d stations, %d doors, %d walkways"), Uses.Num(), Zones.Num(), Dry,
-		Profiles, Starts.Num(), Shots.Num(), StationMap.Num(), DoorList.Num(), WalkwayList.Num());
+	return FString::Printf(TEXT("registry: %d uses, %d zones (%d dry, %d camera profiles), %d starts, %d shots, %d stations, %d doors, %d walkways%s"), Uses.Num(), Zones.Num(),
+		Dry, Profiles, Starts.Num(), Shots.Num(), StationMap.Num(), DoorList.Num(), WalkwayList.Num(), bHeld ? TEXT(", the corner held (a skip)") : TEXT(""));
 }
 
 void UStreetWorld::DrawDebug(float Seconds) const

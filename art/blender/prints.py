@@ -209,6 +209,26 @@ def g_number(s):
     s.text('NIGHTLY', 50, 80, 9, GREEN, face='Bold', align='CENTER', tracking=2.0)
 
 
+def g_sundaymajor(s):
+    """The thrift's rare find (the realism spec's 5.2): a souvenir tee from the RiverLine Sunday Major of 2019, the online
+    client's own tournament. A spade in a ring of the felt's oval, the event's name stacked under it, the year in a bar."""
+    # The table's oval, a spade standing in it.
+    s.ring(50, 64, 21, 24, GREEN)
+    pts = []
+    for k in range(64):
+        t = 2 * math.pi * k / 64
+        x = 16 * math.sin(t) ** 3
+        y = 13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)
+        pts.append((50 + x * 0.95, 66 - y * 0.95))
+    s.poly(pts, RED)
+    # The stem rises into the lobes' notch, flaring to its foot.
+    s.poly([(50, 63), (48.6, 54), (44.5, 48), (55.5, 48), (51.4, 54)], RED)
+    s.text('RIVERLINE', 50, 33, 10.5, RED, face='Black', align='CENTER', tracking=1.25)
+    s.text('SUNDAY MAJOR', 50, 22, 8.0, GREEN, face='Black', align='CENTER', tracking=1.4)
+    s.rect(30, 8, 40, 9, BLUE)
+    s.text('2019', 50, 10.2, 6.4, 0x000000, face='Black', align='CENTER', tracking=1.6)
+
+
 def main():
     stripes('T_Print_Stripes', 10, 0.5)
     stripes('T_Print_Breton', 16, 0.3)
@@ -218,7 +238,8 @@ def main():
     dots('T_Print_Dots')
     camo('T_Print_Camo')
     for name, draw in (('T_Graphic_Embercrest', g_embercrest), ('T_Graphic_AllIn', g_allin), ('T_Graphic_Chip', g_chip),
-                       ('T_Graphic_BadBeat', g_badbeat), ('T_Graphic_Sunset', g_sunset), ('T_Graphic_Number', g_number)):
+                       ('T_Graphic_BadBeat', g_badbeat), ('T_Graphic_Sunset', g_sunset), ('T_Graphic_Number', g_number),
+                       ('T_Graphic_SundayMajor', g_sundaymajor)):
         graphic(name, draw)
 
 

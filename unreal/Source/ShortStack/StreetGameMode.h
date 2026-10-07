@@ -6,7 +6,9 @@
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Talk.h"
 #include "ShortStack/UI/FrontEnd.h"
+#include "ShortStack/UI/ShopScreen.h"
 #include "ShortStack/UI/StoreCounter.h"
 #include "SlateDrawList.h"
 
@@ -16,12 +18,21 @@ class ACameraActor;
 class AShopStage;
 class AShortStackCharacter;
 class AStreetGameMode;
+class AStreetNpcs;
 class AStreetStage;
 class SFrontEndWidget;
 class UNightOneAudio;
 class UStreetWorld;
 struct FStreetUse;
 struct FStreetZone;
+
+namespace ss
+{
+namespace ui
+{
+class TalkCard;
+}
+} // namespace ss
 
 /**
  * The cast members at work on Fifth, behind their counters all night (backroom_cast.py's extras): Benny at the Lucky
@@ -55,6 +66,9 @@ public:
 	bool bCareer = false;
 	ss::Session Session;
 	ss::ui::StoreCounter Counter;
+	/** The ledger's top line as it stood when the counter last looked (WatchCounterSale); bCounterTop false while it's shut. */
+	ss::life::LedgerEntry CounterTop;
+	bool bCounterTop = false;
 	ss::ui::FrontEnd Menu;
 	FSlateTextMeasurer Measurer;
 
@@ -164,6 +178,33 @@ public:
 	/** Draws the registry (zones, uses, stations, starts, doors) for Seconds and lists it (ss.Zone.Show). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	FString TestZones(float Seconds);
+	/** A shop's screen opened where the player stands ("barber", "thrift", "gym", "diner", "pawn", "wardrobe"), on Page (ss.Shop.Open). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestShopOpen(const FString& Venue, const FString& Page);
+	/** The open screen closed (ss.Shop.Close). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestShopClose();
+	/** A key to the open screen (the counter, a shop's page or the talk card) by StoreCounter's names: "Down", "Enter", "Escape" (ss.Shop.Key). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestShopKey(const FString& Key);
+	/** Every venue's hours now (core's), and each shop stage as it stands (ss.Shop.Hours). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestShopHours() const;
+	/** A shop held awake (1), asleep (0) or left to decide (-1) (ss.Shop.Awake). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestShopAwake(const FString& Venue, int32 Hold);
+	/** A service's cinematic played without its skip or its charge, its shots for a camera check (ss.Shop.Cinematic barber barber/crew). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestCinematic(const FString& Venue, const FString& Service);
+	/** The pawn book: the tickets, the shelf, what's gone, what the hero could bring, and what stands in the shop (ss.Pawn.List). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestPawnList() const;
+	/** Every ticket and shelf lot made Days older (the calendar settles forfeits and expiry on its next step; ss.Pawn.Age). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestPawnAge(float Days);
+	/** Unit 114 comes due now (evicted with a unit): the card pays it if it can, else the lien auction runs (ss.Pawn.Auction). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestPawnAuction();
 
 	/** Dee's game as the street sees it at World (world minutes). */
 	static EDeeGame DeeGameAt(double World);
@@ -180,6 +221,11 @@ private:
 	void SpawnAttendant();
 	/** The street's pedestrians (StreetCrowd.h, once it's in the module), started once the stage and the hero both stand. */
 	void SpawnCrowd();
+	/**
+	 * The block's people (people-ue's AStreetNpcs, spec 7.5.7): found or spawned once the stage and the hero stand, begun with
+	 * them and the crowd, given the career; told the hour each frame (Tick), as the crowd is.
+	 */
+	void SpawnPeople();
 	/** A player who has somehow left the set (fallen through, walked off an end) is put back at the door they live by. */
 	void KeepOnTheSet();
 	/** The door the player comes and goes by: 1812's ("home"), or Dee's across the street ("dee") while evicted. */
@@ -196,10 +242,64 @@ private:
 	FString PromptFor(const FStreetUse& Use) const;
 	/** E at a Door use: the Wash & Fold's (it swings in), Dee's steel door (her game), or a shop's (open, buzz, or its closed line). */
 	void UseDoor(const FStreetUse& Use);
-	/** E at a Talk use: the Wash & Fold's attendant (her lines); the people's talk card comes with the people. */
+	/** E at a Talk use: the Wash & Fold's attendant (her lines), or the talk card with whoever it is (OpenTalk). */
 	void TalkTo(const FStreetUse& Use);
-	/** E at a use whose screen hasn't landed yet (a shop's counter, a seat, the shelter, the closet): said so, once a session per use. */
+	/** A door that wouldn't open: its line on the HUD where the locked door's line goes (spec 7.4), and the handle's sound by the caller. */
+	void ShowClosed(const FString& Line);
+	/** E at a use whose screen hasn't landed yet (the 14's door): said so, once a session per use. */
 	void NotYet(const FStreetUse& Use);
+
+	// ---- the shops' screens, seats and services (spec 7.5.3)
+	/** Opens a venue's screen (core's MakeShopScreen: "barber", "thrift", "gym", "diner", "pawn", "wardrobe") on Page. False when there's none. */
+	bool OpenShop(FName Venue, const FString& Page);
+	/** Closes the open screen: the preview put back, the camera back on the hero, standing up if bStand and seated. */
+	void CloseShop(bool bStand);
+	/** The open screen each frame: drawn, its requests drained (spec 7.5.3), whether the player walked away. */
+	void UpdateShopScreen(float Dt);
+	void DrainRequests();
+	/** What the 3D can show the screens (spec 5.0): looks' answer where it has one, else what's dressed and imported now; the pawn's shelf. */
+	ss::ui::HostCaps BuildCaps() const;
+	/** The camera on a registry shot, blended (and the shop told, its mark taken: the thrift's mirror), or back to the hero. */
+	void ShowShot(FName Shot, float Blend);
+	void EndShot(float Blend);
+	/** The hero sat at a shop's seat (its feet, its height, its camera), or stood up from it. */
+	bool SitAt(AShopStage* Shop, FName Seat);
+	void StandUp();
+	/** E at a Sit, Wait, Shop or Wardrobe use. */
+	void UseSeat(const FStreetUse& Use);
+	void UseWait(const FStreetUse& Use);
+	/**
+	 * A service's cinematic (spec 7.5.3): the shop's shots under the skip the page started (movement blocked, the corner
+	 * held, the HUD's skip overlay), a fade through black as it ends (the new look on there), the after-shot, then the hero
+	 * back. Service is the skip's offer ids; with bDry nothing was charged (ss.Shop.Cinematic) and it runs Seconds.
+	 */
+	void BeginCinematic(FName Venue, const FString& Service, bool bDry = false, float Seconds = 0.0f);
+	void UpdateCinematic(float Dt);
+	/** Something done under black: the screen fades out, Action runs, it fades back in (the builds, the walk-outs). */
+	void UnderBlack(TFunction<void()> Action, float Out = 0.3f);
+	void UpdateBlack(float Dt);
+	/** The hero dressed again for keeps (looks' RefreshLook in place, or the whole look rebuilt under black). */
+	void RedressHero(const ss::hero::Look& Look, const ss::wardrobe::Closet& Closet);
+	/** The shops' session state (the boards, the pawn's shelf, the thrift's racks), every couple of seconds. */
+	void SyncShops();
+	/** Every enterable shop's stage, standing (a stage that owns its plot may spawn it first: they find each other). */
+	void SpawnShops();
+	/** Closing time (spec 5.0): the keeper's word ten minutes out; at close any open screen ends and the hero is walked out. */
+	void UpdateClosing();
+	/**
+	 * The talk card with Person (spec 6.4, 7.5.3): the director engages them (they stop, turn and hold the hero's eyes) and
+	 * says their opening line (town's), shown on core-ui's TalkCard as the one ActiveScreen. Someone the director doesn't have
+	 * out (Augie's guitar wall before his body is built) still talks, from town's context alone. False when nobody answers.
+	 */
+	bool OpenTalk(FName Person, FName Venue);
+	/** A choice on the card (its id): their answer, or their service ("service": the card closes and their shop opens). */
+	void AnswerTalk(const FString& Choice);
+	/** The talk over (walked away, a goodbye, the card closed): the person let go. */
+	void EndTalk();
+	/** Where Person's service is had (their venue's screen on its page, or their chair). */
+	void OpenServiceOf(FName Person, FName Venue);
+	/** The keeper on shift at a venue (town's), and their name. */
+	FString KeeperAt(FName Venue, FString* OutName = nullptr) const;
 	/** The enterable shop for a venue (the registry's shops: AShopStage), or null. */
 	AShopStage* ShopFor(FName Venue) const;
 	/** The shops each frame: the hour, their doors for the hero (the bell, the buzzer's clack). */
@@ -223,6 +323,8 @@ private:
 	void DrawHud();
 	void DrawOverlay(SFrontEndWidget* Widget, TFunctionRef<void(ss::ui::Canvas&)> Paint);
 	void OpenCounter(int32 Shelf);
+	/** The clerk rings a sale up (spec 6.6): a new corner-store line at the top of the ledger while the counter is open. */
+	void WatchCounterSale();
 	void FocusWidget(SFrontEndWidget* Widget);
 	FVector2D ViewSize() const;
 
@@ -237,6 +339,9 @@ private:
 	/** The pedestrians (an AStreetCrowd, when the module has one). */
 	UPROPERTY(Transient)
 	TObjectPtr<AActor> Crowd;
+	/** The block's people (the staff at their stations, the world's people, talk and subtitles). */
+	UPROPERTY(Transient)
+	TObjectPtr<AStreetNpcs> People;
 
 	TUniquePtr<FStreetGame> Game;
 	TSharedPtr<SDrawListWidget> HudWidget;
@@ -287,6 +392,84 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<ACameraActor> ShotCamera;
 	FString ShotName;
+
+	// ---- the shops' screens, seats and services (spec 7.5.3)
+	/** The open shop screen (core-ui's page for the venue), its venue and the page it opened on. */
+	TUniquePtr<ss::ui::ShopScreen> Screen;
+	/** Counts every screen put up or taken down: a request that changes it ends the drain (an address can come back reused). */
+	int32 ScreenSerial = 0;
+	FName ScreenVenue;
+	FString ScreenPage;
+	TSharedPtr<SFrontEndWidget> ShopWidget;
+	/** The screen's camera (a registry shot), its shot, and the thrift mirror's orbit (degrees about the hero's mark). */
+	UPROPERTY(Transient)
+	TObjectPtr<ACameraActor> ShopCamera;
+	FName CameraShot;
+	FTransform CameraBase;
+	FVector OrbitPivot = FVector::ZeroVector;
+	float OrbitYaw = 0.0f;
+	FVector2D OrbitMouse = FVector2D(-1.0, -1.0);
+	/** Where the hero stood before a shot's mark took them (put back as the shot goes). */
+	bool bMarkMoved = false;
+	FTransform BeforeMark;
+	/** A look being previewed on the hero (put back as the screen closes). */
+	bool bPreviewing = false;
+	/** The seat the hero is in (a shop's seat id and its venue), and where they stand up to. */
+	FName SeatedAt;
+	FName SeatedVenue;
+	FTransform StandTo;
+	/**
+	 * The talk under way (the talk card in Screen, Card pointing at it while it's up): who and where, whether the director
+	 * has them (else town's context alone answers), and that context.
+	 */
+	ss::ui::TalkCard* Card = nullptr;
+	FName TalkingTo;
+	FName TalkingAt;
+	bool bTalkByDirector = false;
+	std::shared_ptr<const ss::town::TalkContext> TalkContext;
+	/** What people said near the hero (the director's subtitles), for the HUD (it shows the newest two as they age). */
+	TArray<ss::ui::StreetHudInfo::Subtitle> Subtitles;
+	/** A locked door's line and when it was tried (RealTime). */
+	FString ClosedNow;
+	double ClosedNowAt = -100.0;
+
+	/** A service's cinematic as it plays (BeginCinematic). */
+	struct FCinema
+	{
+		bool bActive = false;
+		bool bDry = false;
+		FName Venue;
+		FString Service;
+		/** The screen's page it began from (a seat's: the diner's menu opens there again after the meal). */
+		FString Page;
+		/** Under the skip, and after it (the reveal), each (shot, real seconds). */
+		TArray<TPair<FName, float>> During;
+		TArray<TPair<FName, float>> After;
+		double StartedAt = 0.0;
+		double Length = 4.0;
+		int32 Shot = -1;
+		/** 0 the skip, 1 fading out at its end, 2 the after-shots, 3 fading back to the hero. */
+		int32 Phase = 0;
+		double PhaseAt = 0.0;
+		/** Where the hero was before the service took them to its mark (a treadmill), and whether it did. */
+		bool bMoved = false;
+		FTransform Before;
+		bool bSeatedForIt = false;
+		/** A wait for the barber's chair: once it's over, into the chair and the Style Book. */
+		bool bThenChair = false;
+	};
+	FCinema Cinema;
+	/** Under black (UnderBlack): the action, when it runs, when the fade back starts. */
+	TFunction<void()> BlackAction;
+	double BlackAt = -1.0;
+	double BlackInAt = -1.0;
+	/** The shops' session state last synced (RealTime), and each shop's closing as said (its close time in world minutes). */
+	double ShopsSyncedAt = -100.0;
+	TMap<FName, double> ClosingSaid;
+	TMap<FName, bool> WasOpen;
+	/** The hours' lines as last built (once a second), by venue. */
+	double HoursAt = -100.0;
+	TMap<FName, FString> ClosedLines;
 };
 
 /** Keyboard, mouse and gamepad polled each frame for walking (the overlays take their own input). */

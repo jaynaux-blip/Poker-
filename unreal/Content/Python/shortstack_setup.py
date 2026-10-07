@@ -986,6 +986,55 @@ def _skin_material(folder, mesh):
         mesh.set_editor_property("materials", materials)
 
 
+# The realism update's setups (world_realism_spec.md 8.2), each its owner's file and each optional: a module that isn't
+# there yet is skipped. ns_setup (ue-world: MPC_NS and the M_NS_* street materials, the import fix-ups and the Nanite-off
+# list) and shops_setup (ue-frame: the shops' M_NS_Mirror, M_NS_BarberPole, M_NS_Belt, M_NS_ClothTint) run with every
+# setup, after the meshes are in. groom_setup (looks: the groom library's assemblies, about five hours) and anim_setup
+# (people-ue: the mocap bake) are long jobs for the lead's editor session: they never run here, only by hand
+# (run_grooms(), run_anim()).
+REALISM_SETUPS = ("ns_setup", "shops_setup", "garments_setup")
+
+
+def _optional(name):
+    """The setup module by its name, or None when it isn't in yet."""
+    try:
+        return __import__(name)
+    except ImportError:
+        return None
+
+
+def run_realism(force=False):
+    """Runs the realism update's per-setup modules that are in (ns_setup, shops_setup): how many assets they changed."""
+    changed = 0
+    for name in REALISM_SETUPS:
+        module = _optional(name)
+        if module is None or not hasattr(module, "run"):
+            continue
+        try:
+            changed += int(module.run(force) or 0)
+        except Exception as exc:  # the game has fallbacks for every one of their materials
+            unreal.log_error(f"ShortStack: {name}.run failed: {exc}")
+    return changed
+
+
+def run_grooms(*args, **kwargs):
+    """looks' groom library (groom_setup.run): the assemblies, by hand in the lead's session only."""
+    module = _optional("groom_setup")
+    if module is None:
+        unreal.log_warning("ShortStack: groom_setup isn't in yet")
+        return None
+    return module.run(*args, **kwargs)
+
+
+def run_anim(*args, **kwargs):
+    """people-ue's mocap bake (anim_setup.run): by hand in the lead's session only."""
+    module = _optional("anim_setup")
+    if module is None:
+        unreal.log_warning("ShortStack: anim_setup isn't in yet")
+        return None
+    return module.run(*args, **kwargs)
+
+
 def run(force=False):
     import backroom_setup
     import street_setup
@@ -1003,6 +1052,8 @@ def run(force=False):
         import_textures(force)
     except Exception as exc:  # the stage falls back to engine shapes
         unreal.log_error(f"ShortStack: importing meshes failed: {exc}")
+    # The street's and the shops' new materials and the new art's fix-ups (after the meshes, which they may touch).
+    changed += run_realism(force)
     if changed:
         rebuild_stages()
     build_map(False)

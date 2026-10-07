@@ -10,6 +10,7 @@
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Shop.h"
 #include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/FrontEnd.h"
@@ -60,6 +61,45 @@ float TextAt(const ss::ui::DrawList& L, const std::string& Needle)
 bool Drew(const ss::ui::DrawList& L, const std::string& Needle)
 {
 	return TextAt(L, Needle) >= 0.0f;
+}
+
+/** A word stamped letter by letter (consecutive one-glyph runs, as a turned stamp draws it): where its first and last
+ *  letters sit. Found is false when no such run of letters spells it. */
+struct Stamped
+{
+	bool Found = false;
+	float X0 = 0.0f, Y0 = 0.0f; // the first letter's origin and baseline
+	float X1 = 0.0f, Y1 = 0.0f; // the last letter's
+};
+
+Stamped StampedWord(const ss::ui::DrawList& L, const std::string& Word)
+{
+	std::vector<const ss::ui::TextItem*> Runs;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+		{
+			Runs.push_back(&Cmd.Text);
+		}
+	}
+	Stamped Out;
+	for (size_t I = 0; I + Word.size() <= Runs.size() && !Out.Found; ++I)
+	{
+		bool Match = true;
+		for (size_t K = 0; K < Word.size() && Match; ++K)
+		{
+			Match = Runs[I + K]->Text == std::string(1, Word[K]);
+		}
+		if (Match)
+		{
+			Out.Found = true;
+			Out.X0 = Runs[I]->X;
+			Out.Y0 = Runs[I]->BaselineY;
+			Out.X1 = Runs[I + Word.size() - 1]->X;
+			Out.Y1 = Runs[I + Word.size() - 1]->BaselineY;
+		}
+	}
+	return Out;
 }
 
 /** A text run that is exactly Text ("+4", not the "+45" on a shelf tag). */
@@ -2447,6 +2487,41 @@ void WorldScreens()
 	RL.OpenPage(Page::Career, Now);
 	Now = Run(S, RL, Now, 1.5);
 	Emit("world_career_trophies", RL, Now);
+	// At Northside Pawn & Loan (§5.8, §7.4): the ring on a ticket is stamped IN PAWN, the bracelet sold on SOLD; the
+	// titles stay in the records. Off the books again, the case is clean.
+	{
+		const ss::world::Award Ring = W.HeroAwards().back();
+		const ss::world::Award Bracelet = W.HeroAwards().front();
+		ss::shop::Ticket Tk;
+		Tk.Number = 412;
+		Tk.Lot = "award:" + std::to_string(Ring.Day) + ":" + Ring.Event;
+		Tk.LoanCents = 36000;
+		Tk.TakenAt = S.WorldMinutes();
+		Tk.DueAt = Tk.TakenAt + 30.0 * ss::net::MinutesPerDay;
+		S.Life.Pawn.Tickets.push_back(Tk);
+		S.Life.Pawn.Away.insert("award:" + std::to_string(Bracelet.Day) + ":" + Bracelet.Event);
+		Now = Run(S, RL, Now, 0.5);
+		TableMeasurer Tm;
+		ss::ui::DrawList Lp;
+		ss::ui::Canvas Cp(Lp, Tm, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		RL.Draw(Cp, Now);
+		const Stamped InPawn = StampedWord(Lp, "IN PAWN");
+		const Stamped Sold = StampedWord(Lp, "SOLD");
+		Expect(Ring.Ring && !Bracelet.Ring && InPawn.Found && Sold.Found, "the trophy case stamps the ring on a ticket IN PAWN and the bracelet sold on SOLD");
+		// Each stamp is turned with its letters (the last one higher than the first), and stays on its own piece: the
+		// pieces sit 56 apart, the newest (the ring) first, so neither word reaches into the other's.
+		Expect(InPawn.Y1 < InPawn.Y0 - 2.0f && Sold.Y1 < Sold.Y0 - 1.0f, "the stamps' letters run along the stamp's tilt");
+		Expect(InPawn.X0 < Sold.X0 && InPawn.X1 - InPawn.X0 < 48.0f && Sold.X1 - Sold.X0 < 48.0f && InPawn.X1 + 10.0f < Sold.X0 + 4.0f,
+			"each stamp stays on its own piece in the case");
+		Expect(W.HeroAwards().size() == 2 && Drew(Lp, "1 bracelet") && Drew(Lp, "1 ring"), "and the titles stay in the records");
+		Emit("world_career_trophies_pawned", RL, Now);
+		S.Life.Pawn.Tickets.clear();
+		S.Life.Pawn.Away.clear();
+		ss::ui::DrawList Lc;
+		ss::ui::Canvas Cc(Lc, Tm, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		RL.Draw(Cc, Now);
+		Expect(!StampedWord(Lc, "IN PAWN").Found && !StampedWord(Lc, "SOLD").Found, "redeemed, the trophy case has no stamps");
+	}
 	// Their own stats, from the Career page.
 	RL.ShowPlayer(ss::ui::RiverLine::HeroCard, Now);
 	Now = Run(S, RL, Now, 1.5);
@@ -2909,6 +2984,43 @@ void CounterDetails()
 	Expect(S.Life.Pantry.count("cascade") == 0 && Counter.BagShown().size() == 2 && Counter.BagShown()[0] == "cascade", "the counter's bag holds an eaten chip's place");
 	Frame(1920.0f, -1.0f, -1.0f, false, false);
 	Expect(Counter.BagShown().size() == 1 && Counter.BagShown()[0] == "fizz-cola", "the counter's bag closes up after");
+	Counter.Key("Escape", Now);
+	Counter.TakeLeave();
+
+	// Nine of one thing is Ray's rule, said by whoever's on the register (the roster: Ray 10:00-22:00, Benny the rest):
+	// Benny passes it on as Ray's, Ray lays it down as his own.
+	auto Spoken = [&]() {
+		std::string All;
+		for (const ss::ui::DrawCmd& Cmd : Last.Cmds)
+		{
+			All += Cmd.Type == ss::ui::DrawCmd::Kind::Text ? Cmd.Text.Text + " " : std::string();
+		}
+		return All;
+	};
+	const double Clock = S.LobbyMinutes;
+	for (const bool Days : {false, true})
+	{
+		S.LobbyMinutes = Days ? 12.0 * 60.0 : 23.0 * 60.0 + 30.0;
+		Expect(ss::shop::KeeperOf("store", S.WorldMinutes()) == (Days ? "ray" : "benny"), Days ? "the register at noon is Ray's" : "the register at half eleven is Benny's");
+		Counter.Open(Now);
+		Now += 1.0;
+		for (int K = 0; K < 10; ++K)
+		{
+			Counter.Key("Enter", Now);
+		}
+		Frame(1920.0f, -1.0f, -1.0f, false, false);
+		Now += 0.5;
+		Frame(1920.0f, -1.0f, -1.0f, false, false);
+		const std::string Said = Spoken();
+		const bool Rays = Said.find("Nine of one thing, that's the limit. My store, my rule.") != std::string::npos;
+		const bool Bennys = Said.find("Nine's the limit on those, man. Ray's rule, not mine.") != std::string::npos;
+		Expect(Counter.Basket.Count() == 9 && Rays == Days && Bennys == !Days,
+			Days ? "nine of a kind by day: Ray's rule in Ray's own words" : "nine of a kind by night: Benny passes on Ray's rule");
+		WriteList(Days ? "store_counter_limit_ray" : "store_counter_limit_benny", Last);
+		Counter.Key("Escape", Now);
+		Counter.TakeLeave();
+	}
+	S.LobbyMinutes = Clock;
 }
 
 /** The character creator's portraits: a cast that covers every hairstyle, face, outfit, hat and pair of glasses. */

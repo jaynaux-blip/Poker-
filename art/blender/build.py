@@ -34,7 +34,11 @@ ASSETS = ['energy_can', 'laptop', 'desk', 'mug', 'phone', 'chips', 'lamp', 'chai
           # The Embercrest from outside: the resort's front, its arrival plaza, the 14 bus, and the mountains and valley.
           'ecx_building', 'ecx_plaza', 'ecx_bus', 'ecx_landscape',
           # The Block: the Wash & Fold's interior, Dee's front room (and an umbrella for the street's people).
-          'wash_fold', 'dee_room']
+          'wash_fold', 'dee_room',
+          # Northside (the realism update): the ground, the street furniture and cars, the building kit and its lit rooms...
+          'ns_ground', 'ns_kit', 'ns_cars', 'ns_fronts', 'ns_rooms',
+          # ...and the shops you walk into: Fifth St. Barbers, Ruby's, the thrift, IronHouse, the pawn, and what people hold.
+          'ns_barber', 'ns_diner', 'ns_thrift', 'ns_gym', 'ns_pawn', 'ns_handprops']
 
 
 def args():

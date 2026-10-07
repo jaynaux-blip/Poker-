@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <iterator>
 #include <set>
 
@@ -172,7 +173,10 @@ int OnlineCount(const Npc& N, int Day, bool SeriesOn, Rng& R)
 	return std::min(N.Professional ? 24 : 14, static_cast<int>(std::lround(Base * M)));
 }
 
-/** Who goes to the room's own weekly, and the back-room games (the people with faces first). */
+/**
+ * Who goes to the room's own weekly, and the back-room games (the people with faces first): Dee's regulars are at the
+ * laundromat on her nights (Tuesday, Thursday and Saturday), unless they're away on a trip for a live series.
+ */
 bool Regular(const Npc& N, const std::string& Id)
 {
 	if (N.From != Origin::Cast && !N.Rival)
@@ -181,7 +185,9 @@ bool Regular(const Npc& N, const std::string& Id)
 	}
 	if (Id.rfind("dees@", 0) == 0)
 	{
-		return N.Name == "Sal" || N.Name == "Big Lou" || N.Name == "Twitch" || N.Name == "Mei";
+		const int Day = std::atoi(Id.c_str() + 5);
+		const bool Away = N.TripUntil >= Day && Day >= N.TripFrom;
+		return !Away && (N.Name == "Sal" || N.Name == "Big Lou" || N.Name == "Twitch" || N.Name == "Mei");
 	}
 	return false;
 }
@@ -628,6 +634,8 @@ void Sim::PlanDay(World& W, int Day)
 			RoomRegular[static_cast<size_t>(Id)] = 1;
 		}
 		std::vector<double> Weight(Online.size(), 0.0);
+		std::vector<Option*> LiveOrder;
+		LiveOrder.reserve(Live.size());
 		for (int Id : Order)
 		{
 			Npc& N = W.Roster[static_cast<size_t>(Id)];
@@ -645,10 +653,28 @@ void Sim::PlanDay(World& W, int Day)
 				Avail -= Cost;
 			};
 
-			// Live: the room's weekly, the back-room games, a festival on a trip, the big ones.
+			// Live: the room's weekly, the back-room games, a festival on a trip, the big ones. A regular's own game is
+			// decided first (Dee's, on her nights): her regulars are at her table, not at another room's event that day.
 			int LiveToday = 0;
+			LiveOrder.clear();
 			for (Option& O : Live)
 			{
+				if (Regular(N, O.P.Id))
+				{
+					LiveOrder.push_back(&O);
+				}
+			}
+			const size_t OwnGames = LiveOrder.size();
+			for (Option& O : Live)
+			{
+				if (OwnGames == 0 || !Regular(N, O.P.Id))
+				{
+					LiveOrder.push_back(&O);
+				}
+			}
+			for (Option* Next : LiveOrder)
+			{
+				Option& O = *Next;
 				if (static_cast<int>(O.P.Who.size()) >= O.Cap || LiveToday >= 1 + (Has(O.P.Kinds, KindSatellite) ? 1 : 0))
 				{
 					continue;

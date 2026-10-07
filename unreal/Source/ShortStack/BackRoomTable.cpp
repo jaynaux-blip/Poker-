@@ -1577,9 +1577,14 @@ void ABackRoomTable::UpdateComposure(float Dt)
 	}
 	Pressure += 20.0f * C.Tilt;
 	Pressure += ExtraPressure * (bIn ? 1.0f : 0.5f);
-	C.Target = FMath::Clamp(66.0f + C.Sensitivity * Pressure - (C.bSteadying ? 16.0f : 0.0f), 56.0f, 168.0f);
+	// The resting rate, the slow breath's pull and the settling are the hero's fitness (Fitness: body::TableOf; at its
+	// defaults 66 bpm, 16 bpm and today's rates).
+	const float Rest = static_cast<float>(FMath::Clamp(Fitness.RestBpm, 48.0, 80.0));
+	const float Steady = static_cast<float>(FMath::Clamp(Fitness.SteadyBpm, 0.0, 30.0));
+	const float Settle = static_cast<float>(FMath::Clamp(Fitness.SettleScale, 0.5, 2.5));
+	C.Target = FMath::Clamp(Rest + C.Sensitivity * Pressure - (C.bSteadying ? Steady : 0.0f), Rest - 10.0f, 168.0f);
 	// The heart jumps fast and settles slowly; steady breathing brings it down quicker.
-	const float Rate = C.Target > C.Bpm ? 0.55f : (C.bSteadying ? 0.32f : 0.12f);
+	const float Rate = C.Target > C.Bpm ? 0.55f : (C.bSteadying ? 0.32f : 0.12f) * Settle;
 	C.Bpm = FMath::Lerp(C.Bpm, C.Target, 1.0f - FMath::Exp(-Rate * Dt));
 	C.Tilt = FMath::Max(0.0f, C.Tilt - Dt / 240.0f);
 	if (ABackRoomPlayer* Me = H ? H->Player.Get() : nullptr)

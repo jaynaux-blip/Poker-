@@ -525,6 +525,7 @@ enum class MemoryKind : int
 	BackRoom,  // a night at Dee's game together
 	Embercrest, // the Sunday tournament together
 	ShowedBluff, // they showed the player a bluff
+	Street,      // talked on the block (Fifth St., Ruby's, the 14's shelter): one memory for a run of them, once a day
 	Count,
 };
 SHORTSTACKCORE_API const char* MemoryText(MemoryKind K);
@@ -821,6 +822,17 @@ public:
 	SHORTSTACKCORE_API std::string NextEmbercrest(int Npc, double From) const;
 	/** Who the world has registered for an event (planned for its day). */
 	SHORTSTACKCORE_API std::vector<int> Registered(const std::string& EventId);
+	/**
+	 * The same, as far as the world has planned it, without planning anything (a const look: the town asks who's at Dee's
+	 * tonight and who's waiting for the 14). Empty for an event already played (resolved) or not planned yet.
+	 */
+	SHORTSTACKCORE_API std::vector<int> RegisteredNow(const std::string& EventId) const;
+	/**
+	 * Who sat down to a live event: its registrations while it's ahead or running and, once this world has played it, who
+	 * played it, for two days after. The block's schedule reads it, so who was at the ridge last night (or at Dee's) doesn't
+	 * change the moment the result comes in. Kept for the session only: a loaded world knows the ones still ahead.
+	 */
+	SHORTSTACKCORE_API std::vector<int> Entered(const std::string& EventId) const;
 	/** How many will play it, the people the world follows and everyone else (0: not an event it has). */
 	SHORTSTACKCORE_API int PlannedEntries(const std::string& EventId);
 	/** Makes sure the events starting on Day have their registrations (the player is looking at tomorrow). */
@@ -852,6 +864,15 @@ public:
 	/** A Embercrest Sunday: who finished where (names as the field knows them), and the player's place. */
 	SHORTSTACKCORE_API void EmbercrestDone(double At, const std::vector<std::pair<std::string, int>>& Places, int HeroPlace, int Field);
 	SHORTSTACKCORE_API void Remember(int Npc, MemoryKind Kind, const std::string& Where, Chips Amount, double At);
+	/** The player lent them money (Twitch's twenty on Fifth): trust, and more of it when it comes back (Repaid). */
+	SHORTSTACKCORE_API void Lent(int Npc, bool Repaid, double At);
+	/**
+	 * The player ran into them on the block at a run (spec §6.5): once is an accident; again within the day, Resentment
+	 * +0.02 each time. A contact within BumpSameSeconds of the last is the same collision (the capsules touch for a few
+	 * frames), not another. Who was bumped when is kept for the session only (it isn't saved). Returns whether it counted.
+	 */
+	static constexpr double BumpSameSeconds = 10.0;
+	SHORTSTACKCORE_API bool Bumped(int Npc, double At);
 	const std::map<int, Bond>& Bonds() const { return HeroBonds; }
 	SHORTSTACKCORE_API const Bond* BondWith(int Npc) const;
 	/** A line for a table chat when the player sits down with someone who remembers them ("" for nothing to say). */
@@ -953,6 +974,8 @@ private:
 	std::vector<WorldEvent> Log;  // newest last (capped)
 	std::vector<Honor> Titles;    // forever
 	std::map<int, Bond> HeroBonds;
+	std::map<int, double> Bumps; // the last time the player ran into each of them on the block (not saved)
+	std::map<std::string, std::pair<double, std::vector<int>>> Played; // live events played this session: their end, who (not saved)
 	std::map<std::string, std::pair<int, Chips>> HeroResults; // event id -> place, prize (the player's finished events)
 	std::vector<Award> HeroTrophies;
 	Tracker HeroBook;

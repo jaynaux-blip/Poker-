@@ -1346,6 +1346,24 @@ void Outfit(Ctx& X)
 		}
 		break;
 	}
+	case hero::OutfitNone: // No jacket: the tee alone, in the outfit color
+	{
+		C.FillPolygon(Torso, Paint::Linear({-G.ShoulderW, 140.0f}, {G.ShoulderW, 220.0f}, Lum(X.Tee, 0.1f), Lum(X.Tee, -0.38f)));
+		// The crew neck's rib, a little stretched, and the shoulder seams where the sleeves start.
+		const Pts Crew = Spline({{-G.NeckW * 1.04f, 126.0f}, {-G.NeckW * 0.55f, 150.0f}, {0.0f, 158.0f}, {G.NeckW * 0.55f, 150.0f}, {G.NeckW * 1.04f, 126.0f}}, 6, false);
+		C.StrokePolyline(Crew, false, Lum(X.Tee, -0.28f), 7.0f, true);
+		C.StrokePolyline(Moved(Crew, 0.0f, 4.5f), false, WithA(Lum(X.Tee, 0.25f), 0.3f), 1.4f, true);
+		const Color TeeSeam = WithA(Lum(X.Tee, -0.5f), 0.5f);
+		for (int Side = -1; Side <= 1; Side += 2)
+		{
+			const float S = Fl(Side);
+			C.StrokePolyline(Spline({{S * (G.ShoulderW * 0.74f), 150.0f}, {S * (G.ShoulderW * 0.82f), 220.0f}, {S * (G.ShoulderW * 0.86f), 300.0f}}, 4, false), false, TeeSeam, 1.3f, true);
+		}
+		// The cotton's soft folds.
+		Soft(C, -G.ShoulderW * 0.32f, 262.0f, 34.0f, 70.0f, Hex(0xffffff), 0.07f);
+		Soft(C, G.ShoulderW * 0.36f, 300.0f, 26.0f, 60.0f, Hex(0x000000), 0.12f);
+		break;
+	}
 	default: // Track jacket
 	{
 		ClothShade(X, Torso);
@@ -1623,7 +1641,9 @@ void DrawPortrait(Canvas& C, const hero::Character& Who, float X, float Y, float
 	Cx.Cloth = Hex(hero::OutfitTone(L.OutfitColor));
 	Cx.ClothLight = Mix(Mix(Cx.Cloth, Light.Key, 0.12f), Hex(0xffffff), 0.06f);
 	Cx.ClothDark = Mix(Cx.Cloth, Hex(0x000000), 0.5f);
-	Cx.Tee = Luma(Cx.Cloth) < 0.33f ? Hex(0xe7e3dc) : Hex(0x26282d);
+	// Under a jacket the tee is white or charcoal against it; with no jacket (OutfitNone) it's the tee alone, in the
+	// outfit color.
+	Cx.Tee = L.Outfit == hero::OutfitNone ? Cx.Cloth : Luma(Cx.Cloth) < 0.33f ? Hex(0xe7e3dc) : Hex(0x26282d);
 
 	// Alive: breathing, a blink every few seconds, the eyes settling.
 	const float T = static_cast<float>(Time);

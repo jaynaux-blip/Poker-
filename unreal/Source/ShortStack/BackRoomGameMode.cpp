@@ -7,6 +7,10 @@
 #include "BackRoomPlayerController.h"
 #include "BackRoomStage.h"
 #include "BackRoomTable.h"
+#include "CastLooks.h"
+#include "HeroGrooms.h"
+#include "ShortStackCharacter.h"
+#include "ShortStack/Game/Body.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CanvasItem.h"
@@ -201,12 +205,6 @@ double SegmentInBox(const FVector& A, const FVector& B, const FBox& Box)
 	return FMath::Clamp(T, 0.0, 1.0);
 }
 
-/** One of the character creator's palette colors (0xRRGGBB, sRGB), linear, as the street dyes with it. */
-FLinearColor CreatorTone(uint32 Hex)
-{
-	return FLinearColor::FromSRGBColor(FColor(static_cast<uint8>((Hex >> 16) & 0xff), static_cast<uint8>((Hex >> 8) & 0xff), static_cast<uint8>(Hex & 0xff)));
-}
-
 /**
  * The hair material's melanin, redness and grey for the creator's hair colors (black, dark brown, brown, auburn, copper,
  * blonde, platinum, grey), as ShortStackCharacter.cpp's HairShadeOf colors the street's: kept in step with it by hand.
@@ -219,13 +217,6 @@ void HeroHairShade(int32 Index, FBackRoomPersona& P)
 	P.HairMelanin = Table[I][0];
 	P.HairRedness = Table[I][1];
 	P.HairWhite = Table[I][2];
-}
-
-/** The street's trousers for each jacket color (ShortStackCharacter.cpp's HeroOutfit): denim, charcoal, dark brown, black... */
-uint32 HeroPantsTone(int32 OutfitColor)
-{
-	static const uint32 PantsFor[8] = {0x283244, 0x2b2c31, 0x3a3128, 0x1d1d21, 0x283447, 0x3b3d43, 0x2b2c31, 0x1d1d21};
-	return PantsFor[FMath::Clamp(OutfitColor, 0, 7)];
 }
 
 /**
@@ -486,10 +477,14 @@ void ABackRoomPawn::HandleInput(float RealDt)
 		Table->SetSteadying(bSteadying);
 	}
 
-	// Focus: hold to study a face (the right button, or the right trigger); it drains, and comes back slowly.
+	// Focus: hold to study a face (the right button, or the right trigger); it drains, and comes back slowly. Fitness
+	// (body::TableOf, on the table) sets how fast it comes back, and Box Breathing (three sessions with Rosa) what a slow
+	// breath costs of it.
 	const bool bFocusing = (bTestFocus || Held(PC, EKeys::RightMouseButton) || Held(PC, EKeys::Gamepad_RightTrigger)) && FocusLeft > 0.02f && !bPeek;
-	const float Drain = (bFocusing ? 1.0f / 8.0f : 0.0f) + (bSteadying ? 1.0f / 12.0f : 0.0f);
-	FocusLeft = FMath::Clamp(FocusLeft + (Drain > 0.0f ? -Drain * RealDt : RealDt / 14.0f), 0.0f, 1.0f);
+	const float BreathCost = Table ? static_cast<float>(FMath::Clamp(Table->Fitness.FocusCostScale, 0.25, 2.0)) : 1.0f;
+	const float Refill = Table ? static_cast<float>(FMath::Clamp(Table->Fitness.FocusRefill, 1.0 / 60.0, 1.0 / 4.0)) : 1.0f / 14.0f;
+	const float Drain = (bFocusing ? 1.0f / 8.0f : 0.0f) + (bSteadying ? BreathCost / 12.0f : 0.0f);
+	FocusLeft = FMath::Clamp(FocusLeft + (Drain > 0.0f ? -Drain * RealDt : RealDt * Refill), 0.0f, 1.0f);
 	Focus = Ease(Focus, bFocusing ? 1.0f : 0.0f, 5.0f, RealDt);
 	const bool bFolded = GM && GM->IsLive() && GM->GetPhase() == EBackRoomPhase::Playing && Table && !Table->IsHeroInHand();
 	// T (right on the d-pad): the table's pace. N, out of the hand (A on a gamepad: nothing else is yours to do then): the
@@ -2995,6 +2990,8 @@ void ABackRoomGameMode::EndPlay(const EEndPlayReason::Type Reason)
 	{
 		TableMenu->End();
 	}
+	// The hero's grooms held for the shoulder camera (SeatEveryone's HoldWorn) don't outlive the table.
+	HeroGrooms::ReleaseWorn();
 	Super::EndPlay(Reason);
 }
 
@@ -3194,6 +3191,17 @@ void ABackRoomGameMode::SaveCareer(bool bFinal)
 
 void ABackRoomGameMode::OnTableNote(uint8 Note)
 {
+	if (Table && Save.IsValid() && static_cast<EBackRoomTableNote>(Note) == EBackRoomTableNote::HandEnded)
+	{
+		// A workout's clear head wears off as the night goes on: the table's fitness, again, at each hand's end, and the tilt
+		// it scaled at the seating (TiltGain carries the perks and the needs too: only the fitness's part changes).
+		const double WasScale = Table->Fitness.TiltGainScale;
+		Table->Fitness = ss::body::TableOf(Save->Life.Fit, Minutes);
+		if (WasScale > 0.01 && !FMath::IsNearlyEqual(WasScale, Table->Fitness.TiltGainScale))
+		{
+			Table->TiltGain = static_cast<float>(FMath::Clamp(Table->TiltGain / WasScale * Table->Fitness.TiltGainScale, 0.0, 2.0));
+		}
+	}
 	if (bLive)
 	{
 		if (TableMenu)
@@ -3644,184 +3652,16 @@ void ABackRoomGameMode::Tick(float DeltaSeconds)
 	}
 }
 
-namespace
-{
-/** A persona with glasses (1), shades (2) or aviators (3) in a frame color. */
-FBackRoomPersona Eyed(FBackRoomPersona P, int32 Eyewear, uint32 FrameSrgb)
-{
-	P.Eyewear = Eyewear;
-	P.FrameColor = FLinearColor(FColor((FrameSrgb >> 16) & 0xff, (FrameSrgb >> 8) & 0xff, FrameSrgb & 0xff));
-	return P;
-}
-} // namespace
-
+// Who wears what, and in which body, is the cast's business, shared with the street and the Embercrest (CastLooks.h): these
+// forward there.
 FBackRoomPersona ABackRoomGameMode::PersonaFor(const FString& Name)
 {
-	using T = EBackRoomTell;
-	using M = EBackRoomTellMeaning;
-	auto Persona = [](const TCHAR* InName, float Nerves, float Expressive, float Restless, float Fidget, float Posture, float Chatter, int32 Seed,
-		TArray<FBackRoomTell> Tells, uint32 ShirtSrgb, float HeroRead) {
-		FBackRoomPersona P;
-		P.Shirt = FLinearColor(FColor((ShirtSrgb >> 16) & 0xff, (ShirtSrgb >> 8) & 0xff, ShirtSrgb & 0xff));
-		P.Name = InName;
-		P.Nervousness = Nerves;
-		P.Expressiveness = Expressive;
-		P.Restlessness = Restless;
-		P.ChipFidget = Fidget;
-		P.Posture = Posture;
-		P.Chatter = Chatter;
-		P.Seed = Seed;
-		P.Tells = MoveTemp(Tells);
-		P.HeroRead = HeroRead;
-		return P;
-	};
-	// The regulars, what gives them away, and how they read you (HeroRead: above 0 they read your shaking
-	// hands right, below 0 they think nerves mean a bluff).
-	if (Name == TEXT("Dee"))
-	{
-		return Persona(TEXT("Dee"), 0.1f, 0.3f, 0.3f, 0.0f, 0.6f, 0.2f, 37, {}, 0x1f2a3d, 0.0f);
-	}
-	if (Name == TEXT("You"))
-	{
-		return Persona(TEXT("You"), 0.3f, 0.5f, 0.5f, 0.3f, 0.5f, 0.0f, 7, {}, 0x3c4a44, 0.0f);
-	}
-	if (Name == TEXT("Sal"))
-	{
-		// Old-timer, plays tight. Honest tells: he glances at his chips when he connects, and a bluff
-		// makes him rub his neck. Forty years of watching hands: he knows a shake.
-		// Reading glasses he pushes up to look at the board.
-		return Eyed(Persona(TEXT("Sal"), 0.2f, 0.35f, 0.4f, 0.6f, 0.3f, 0.35f, 11,
-			{Tell(T::ChipGlance, M::Strong, 0.85f, 0.05f), Tell(T::Recheck, M::Weak, 0.55f, 0.08f), Tell(T::NeckTouch, M::Bluff, 0.75f, 0.08f)}, 0x6b6a4e, 0.6f), 1, 0x3b2314);
-	}
-	if (Name == TEXT("Big Lou"))
-	{
-		// Loud, calls everything. His smile is real when he has it; when he bluffs it's mouth only.
-		// Sees you shake and calls, every time.
-		return Persona(TEXT("Big Lou"), 0.25f, 0.75f, 0.35f, 0.5f, 0.2f, 0.8f, 53,
-			{Tell(T::RealSmile, M::Strong, 0.8f, 0.1f), Tell(T::FalseSmile, M::Bluff, 0.75f, 0.08f), Tell(T::ChipReach, M::Weak, 0.6f, 0.12f)}, 0x1c1c1e, -0.6f);
-	}
-	if (Name == TEXT("Twitch"))
-	{
-		// Wired, bets too much. Shakes when he has it; bluffing, he stares you down and swallows.
-		// Shades indoors, like the streamers he watches.
-		return Eyed(Persona(TEXT("Twitch"), 0.85f, 0.7f, 0.9f, 0.9f, 0.7f, 0.5f, 41,
-			{Tell(T::Tremble, M::Strong, 0.85f, 0.12f), Tell(T::StareDown, M::Bluff, 0.75f, 0.12f), Tell(T::Swallow, M::Bluff, 0.6f, 0.1f),
-				Tell(T::BlinkBurst, M::Bluff, 0.45f, 0.15f)}, 0x8c2a24, -0.5f), 2, 0x101010);
-	}
-	if (Name == TEXT("Mei"))
-	{
-		// Quiet and sharp. She acts: a sigh and a look away mean she's strong. Her pupils don't act. She
-		// reads yours best of all.
-		return Persona(TEXT("Mei"), 0.15f, 0.25f, 0.3f, 0.3f, 0.55f, 0.15f, 23,
-			{Tell(T::Sigh, M::Strong, 0.65f, 0.08f), Tell(T::LookAway, M::Strong, 0.5f, 0.15f), Tell(T::PupilFlare, M::Strong, 0.6f, 0.05f),
-				Tell(T::LipPress, M::Bluff, 0.45f, 0.12f)}, 0x34383d, 0.9f);
-	}
-	// The Embercrest's Sunday faces.
-	if (Name == TEXT("Mrs. Park"))
-	{
-		// Thirty years of the Sunday tournament. Folds and folds; when she finally bluffs she goes
-		// rigid, and a real hand pulls her eyes down to her chips. Nothing gets past her.
-		return Eyed(Persona(TEXT("Mrs. Park"), 0.15f, 0.2f, 0.25f, 0.4f, 0.75f, 0.25f, 61,
-			{Tell(T::Freeze, M::Bluff, 0.85f, 0.05f), Tell(T::ChipGlance, M::Strong, 0.7f, 0.05f), Tell(T::Sigh, M::Weak, 0.5f, 0.1f)}, 0x5a3e57, 0.7f), 1, 0x5a1f2a);
-	}
-	if (Name == TEXT("Rick"))
-	{
-		// Car-dealership money, loud and loose. Bluffing he stares you down and rubs his neck; with a
-		// hand he goes quiet and looks off at the room.
-		// Aviators, gold, from the car showroom's floor.
-		return Eyed(Persona(TEXT("Rick"), 0.35f, 0.7f, 0.6f, 0.7f, 0.25f, 0.75f, 67,
-			{Tell(T::StareDown, M::Bluff, 0.8f, 0.15f), Tell(T::NeckTouch, M::Bluff, 0.55f, 0.1f), Tell(T::LookAway, M::Strong, 0.6f, 0.1f)}, 0x2b4d7a, -0.3f), 3, 0xc9a24a);
-	}
-	if (Name == TEXT("Dre"))
-	{
-		// Talks the whole time. Can't hide a smile with a hand; swallows when he's pushing air, and
-		// reaches for chips when he wants you to check.
-		return Persona(TEXT("Dre"), 0.3f, 0.85f, 0.55f, 0.6f, 0.45f, 0.9f, 71,
-			{Tell(T::RealSmile, M::Strong, 0.75f, 0.15f), Tell(T::Swallow, M::Bluff, 0.6f, 0.1f), Tell(T::ChipReach, M::Weak, 0.55f, 0.1f)}, 0xc28a2e, -0.2f);
-	}
-	if (Name == TEXT("gh0stfold"))
-	{
-		// The rival from RiverLine, in a hoodie. Almost nothing leaks: the pupils, close up, when he has
-		// it, and a burst of blinks after a bluff. Reads you better than anyone.
-		return Persona(TEXT("gh0stfold"), 0.1f, 0.12f, 0.3f, 0.5f, 0.6f, 0.3f, 83,
-			{Tell(T::PupilFlare, M::Strong, 0.45f, 0.02f), Tell(T::BlinkBurst, M::Bluff, 0.35f, 0.05f)}, 0x232326, 1.0f);
-	}
-	// Anyone else: a stranger with a couple of the common tells.
-	const int32 Seed = static_cast<int32>(GetTypeHash(Name) & 0x7fffffff);
-	FRandomStream R(Seed);
-	const T Pool[] = {T::ChipGlance, T::BrowFlash, T::Swallow, T::LipPress, T::LookAway, T::NeckTouch, T::Recheck, T::Sigh, T::ChipReach, T::RealSmile};
-	const M Means[] = {M::Strong, M::Weak, M::Bluff};
-	TArray<FBackRoomTell> Tells;
-	const T A = Pool[R.RandRange(0, 9)];
-	T B = Pool[R.RandRange(0, 9)];
-	B = B == A ? Pool[(static_cast<int32>(A) + 3) % 10] : B;
-	Tells.Add(Tell(A, Means[R.RandRange(0, 2)], 0.6f, 0.12f));
-	Tells.Add(Tell(B, Means[R.RandRange(0, 2)], 0.5f, 0.12f));
-	static const uint32 Shirts[] = {0x2f3b52, 0x6e2b2b, 0x3a5a40, 0x8a7a5a, 0x222222, 0x5a4a6e, 0x9a9a9a, 0x7a4a2a};
-	FBackRoomPersona P = Persona(*Name, R.FRandRange(0.15f, 0.6f), R.FRandRange(0.3f, 0.7f), R.FRandRange(0.3f, 0.7f), R.FRandRange(0.2f, 0.7f), R.FRandRange(0.3f, 0.7f),
-		0.0f, Seed % 997 + 101, MoveTemp(Tells), Shirts[R.RandRange(0, 7)], 0.0f);
-	// What they wear, the same every night: a print or a graphic on about half the shirts, trousers, now and then a
-	// hat (over short hair), glasses or shades.
-	auto C = [](uint32 S) { return FLinearColor(FColor((S >> 16) & 0xff, (S >> 8) & 0xff, S & 0xff)); };
-	static const uint32 Tones[] = {0x1f2a44, 0x2f3b52, 0x6e2b2b, 0x3a5a40, 0x8a7a5a, 0x222222, 0x5a4a6e, 0x9a9a9a, 0x7a4a2a, 0xd8d4c8, 0x7b1e1e,
-		0x1e4d6b, 0xc9a227, 0x4a5d23, 0x30343c, 0xb85c38, 0xe8e6df, 0x2b2b30};
-	constexpr int32 NumTones = UE_ARRAY_COUNT(Tones);
-	P.Shirt = C(Tones[R.RandRange(0, NumTones - 1)]);
-	const float Look = R.FRand();
-	if (Look < 0.36f)
-	{
-		P.ShirtPrint = R.RandRange(1, 7);
-	}
-	else if (Look < 0.56f)
-	{
-		P.ShirtGraphic = R.RandRange(1, 6);
-	}
-	// The print's colors against the shirt: light on dark, dark on light.
-	const bool bDark = P.Shirt.GetLuminance() < 0.25f;
-	static const uint32 Lights[] = {0xf2efe6, 0xe8d9a8, 0xd9e2ea, 0xf0c9a0, 0xc8d8b8};
-	static const uint32 Darks[] = {0x14161c, 0x2a1f1a, 0x1c2a40, 0x3a1414, 0x223322};
-	P.ShirtB = C(bDark ? Lights[R.RandRange(0, 4)] : Darks[R.RandRange(0, 4)]);
-	P.ShirtC = C(Tones[R.RandRange(0, NumTones - 1)]);
-	static const uint32 Trousers[] = {0x2a3a5c, 0x243150, 0x161616, 0x8b7d5b, 0x4a4a4e, 0x1c2236, 0x5a4632};
-	P.Pants = C(Trousers[R.RandRange(0, 6)]);
-	const float Head = R.FRand();
-	P.Headwear = Head < 0.16f ? 1 : Head < 0.23f ? 2 : Head < 0.27f ? 3 : 0;
-	const float Eye = R.FRand();
-	P.Eyewear = Eye < 0.13f ? 1 : Eye < 0.20f ? 2 : Eye < 0.24f ? 3 : 0;
-	// Muted: under the table lamps a hat's crown takes the most light of anything in the room.
-	static const uint32 Hats[] = {0x1c2236, 0x141414, 0x5e1a1a, 0x6b5f45, 0x26392a, 0x2f3338, 0x4a3426, 0x1f3a3d};
-	P.WearColor = C(Hats[R.RandRange(0, 7)]);
-	static const uint32 Frames[] = {0x111111, 0x3b2314, 0x2a2d33, 0x1c2a4a, 0x4a1a22};
-	P.FrameColor = C(Frames[R.RandRange(0, 4)]);
-	return P;
+	return CastLooks::PersonaFor(Name);
 }
 
 FString ABackRoomGameMode::CastAssetFor(const FString& Name)
 {
-	if (Name == TEXT("Big Lou"))
-	{
-		return TEXT("BigLou");
-	}
-	if (Name == TEXT("Mrs. Park"))
-	{
-		return TEXT("MrsPark");
-	}
-	if (Name == TEXT("gh0stfold"))
-	{
-		return TEXT("Ghost");
-	}
-	if (Name == TEXT("You"))
-	{
-		return TEXT("Hero");
-	}
-	for (const TCHAR* Known : {TEXT("Dee"), TEXT("Sal"), TEXT("Twitch"), TEXT("Mei"), TEXT("Rick"), TEXT("Dre")})
-	{
-		if (Name == Known)
-		{
-			return Known;
-		}
-	}
-	return FString();
+	return CastLooks::CastAssetFor(Name);
 }
 
 ABackRoomPlayer* ABackRoomGameMode::SpawnPerson(const FString& CastName, const FTransform& At, EBackRoomRole AtTableAs, const FBackRoomPersona& Persona)
@@ -3858,7 +3698,12 @@ void ABackRoomGameMode::SeatEveryone()
 		// How hard a painful loss tilts you: the Bouncer's thick skin takes some of it, and (as online) starving or parched
 		// a bad beat lands a fifth harder.
 		const double Needs = Save->Life.Hunger >= 85.0 || Save->Life.Thirst >= 85.0 ? 1.2 : 1.0;
-		Table->TiltGain = static_cast<float>(FMath::Clamp(HeroPerks.TiltGain * Needs, 0.0, 2.0));
+		// IronHouse's fitness at the table (spec 7.5.4, body::TableOf): a fitter heart rests lower and settles sooner, steadies
+		// further on a breath for less Focus, refills Focus quicker; a clear head after a workout tilts less.
+		Table->Fitness = ss::body::TableOf(Save->Life.Fit, Minutes);
+		Table->TiltGain = static_cast<float>(FMath::Clamp(HeroPerks.TiltGain * Needs * Table->Fitness.TiltGainScale, 0.0, 2.0));
+		Table->Composure.Bpm = static_cast<float>(Table->Fitness.RestBpm) + 2.0f;
+		Table->Composure.Target = Table->Composure.Bpm;
 		// Each night at the table, the pressure gets to you a little less.
 		Table->Composure.Sensitivity = FMath::Clamp(1.0f - 0.06f * PastNights, 0.65f, 1.0f);
 	}
@@ -3875,7 +3720,8 @@ void ABackRoomGameMode::SeatEveryone()
 	FBackRoomPersona DealerPersona = PersonaFor(TEXT("Dee"));
 	if (bLive && ((LiveDay % 7) + 7) % 7 != 6)
 	{
-		static const TCHAR* Names[6] = {TEXT("Rosa"), TEXT("Hank"), TEXT("Lupe"), TEXT("Vic"), TEXT("June"), TEXT("Tomas")};
+		// Monday's dealer is Nell: the city's one Rosa is IronHouse's trainer (spec 6.1).
+		static const TCHAR* Names[6] = {TEXT("Nell"), TEXT("Hank"), TEXT("Lupe"), TEXT("Vic"), TEXT("June"), TEXT("Tomas")};
 		static const TCHAR* Bodies[6] = {TEXT("ExtraE"), TEXT("ExtraL"), TEXT("ExtraK"), TEXT("ExtraJ"), TEXT("ExtraG"), TEXT("ExtraF")};
 		const int32 Day = ((LiveDay % 7) + 7) % 7;
 		DealerBody = Bodies[Day];
@@ -3889,42 +3735,48 @@ void ABackRoomGameMode::SeatEveryone()
 		DealerPersona.Pants = FLinearColor(FColor(0x12, 0x12, 0x14));
 	}
 	Dealer = SpawnPerson(DealerBody, ABackRoomStage::SeatTransform(4), EBackRoomRole::Dealer, DealerPersona);
-	// The player, as the character creator made them (and as the street dresses them): the hero MetaHuman nearest the look
-	// (body type, then skin tone in three bands; the default one until those are built), the jacket's color on the shirt
-	// (a flannel's plaid in it) over trousers that go with it, the hat and the glasses in theirs, the hairstyle and facial
-	// hair as far as the MetaHuman's grooms go, in the hair's color. Seen over the shoulder; in first person, the hands'
-	// sleeves and the shadows. A career from before the creator sits down as the default.
+	// The player, as the character creator made them and the closet dresses them (as the street does, spec 7.5.4): the hero
+	// MetaHuman nearest the look (body type, then skin tone in three bands; the default one until those are built), the
+	// jacket's color on the shirt (a flannel's plaid in it; with no jacket the Top's own color, print or graphic) over the
+	// trousers' tone, the hat and the glasses in theirs, the hairstyle, facial hair and brows from the face's groom library
+	// (BackRoomPlayerView.cpp; as far as the MetaHuman's own grooms go without one), in the hair's color. Seen over the
+	// shoulder; in first person, the hands' sleeves and the shadows. A career from before the creator sits down as the default.
 	FString HeroBody = TEXT("Hero");
 	FBackRoomPersona HeroPersona = PersonaFor(TEXT("You"));
 	if (Save.IsValid() && Save->Person.Created)
 	{
 		const ss::hero::Look& L = Save->Person.Appearance;
-		const int32 Band = L.Skin <= 2 ? 0 : (L.Skin <= 5 ? 1 : 2);
-		const FString Nearest = FString::Printf(TEXT("Hero%c%d"), L.Body == 1 ? TEXT('B') : TEXT('A'), Band);
+		const FString Nearest = CastLooks::HeroFaceFor(L).ToString();
 		if (!CastBlueprint(*Nearest).IsNull())
 		{
 			HeroBody = Nearest;
 		}
-		HeroPersona.Shirt = CreatorTone(ss::hero::OutfitTone(L.OutfitColor));
-		HeroPersona.Pants = CreatorTone(HeroPantsTone(L.OutfitColor));
-		HeroPersona.ShirtGraphic = 0;
-		HeroPersona.ShirtPrint = 0;
-		if (L.Outfit == 2)
-		{
-			// Flannel: the wide bands darker, a pale thread, darkest where they cross (as the street's).
-			const FLinearColor S = HeroPersona.Shirt;
-			HeroPersona.ShirtPrint = 4;
-			HeroPersona.ShirtB = FLinearColor(S.R * 0.42f, S.G * 0.42f, S.B * 0.42f, 1.0f);
-			HeroPersona.ShirtC = FMath::Lerp(S, CreatorTone(0xd9cfb8), 0.7f);
-			HeroPersona.ShirtD = FLinearColor(S.R * 0.2f, S.G * 0.2f, S.B * 0.2f, 1.0f);
-		}
-		HeroPersona.HeroHat = FMath::Clamp(L.Hat, 0, 4);
-		HeroPersona.HeroGlasses = FMath::Clamp(L.Glasses, 0, 4);
+		const FCastWear W = AShortStackCharacter::HeroWear(L, Save->Person.Age, Save->Life.Closet.Seeded ? &Save->Life.Closet : nullptr);
+		HeroPersona.Shirt = W.Shirt;
+		HeroPersona.Pants = W.Pants;
+		HeroPersona.ShirtPrint = W.Print;
+		HeroPersona.ShirtGraphic = W.Graphic;
+		HeroPersona.ShirtB = W.InkA;
+		HeroPersona.ShirtC = W.InkB;
+		HeroPersona.ShirtD = W.InkC;
+		// The hero's pieces at the table are the street's (ABackRoomPlayer::ApplyWear's creator indices): the beanie, the cap
+		// (forwards, backwards), the bucket hat; round, square, wire, shades (the aviators wear as shades there). The trilby has no
+		// creator index there yet: bare-headed at the table until ApplyWear reads the street's one set.
+		using ss::wardrobe::Cut;
+		HeroPersona.HeroHat = W.Hat == Cut::Beanie ? 1 : W.Hat == Cut::BallCap ? 2 : W.Hat == Cut::CapBack ? 3 : W.Hat == Cut::Bucket ? 4 : 0;
+		HeroPersona.HeroGlasses =
+			W.Eyes == Cut::Round ? 1 : W.Eyes == Cut::Square ? 2 : W.Eyes == Cut::Wire ? 3 : (W.Eyes == Cut::Shades || W.Eyes == Cut::Aviators) ? 4 : 0;
 		HeroPersona.HeroHairStyle = FMath::Max(0, L.Hair);
 		HeroPersona.HeroFacialHair = FMath::Max(0, L.FacialHair);
-		HeroPersona.WearColor = CreatorTone(ss::hero::HatTone(L));
-		HeroPersona.FrameColor = CreatorTone(L.Glasses == 3 ? 0xc9a24d : 0x161618);
+		HeroPersona.WearColor = W.HatColor;
+		HeroPersona.FrameColor = W.FrameColor;
 		HeroHairShade(L.HairColor, HeroPersona);
+		// The look the hero's head reads its grooms from (brows included), with the hat as worn; its grooms start loading now
+		// and are held, so going over the shoulder (V) finds them in memory.
+		ss::hero::Look Worn = L;
+		Worn.Hat = HeroPersona.HeroHat;
+		CastLooks::BindHeroLook(this, Worn);
+		HeroGrooms::HoldWorn(HeroGrooms::Resolve(Worn, FName(*HeroBody)));
 	}
 	Hero = SpawnPerson(HeroBody, ABackRoomStage::SeatTransform(0), EBackRoomRole::Hero, HeroPersona);
 	Table->SetDealer(Dealer);

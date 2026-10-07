@@ -37,16 +37,22 @@ struct HostCaps
 
 /**
  * Something a screen asks the game to do in 3D. The host drains them with TakeRequests every frame (§7.5.3):
- *  - PreviewLook: dress the hero in Look and Closet for a moment (the barber's draft look, the thrift's try-on).
- *  - EndPreview: back to the hero's own look.
- *  - Camera: blend to the registry shot Name ("barber-mirror", "thrift-fitting", "pawn-counter", "pawn-case",
- *    "pawn-cage") and hold it while the screen is open.
- *  - BeginService: a service has started. The page calls Session::ShopService itself, as StoreCounter calls Checkout
- *    (the order, the tip and the DECLINED stamp are the page's), and asks for this only once the charge went through
- *    and the TimeSkip began, so the host must not call ShopService again. Name is the service's offer ids as the
- *    skip's activity id lists them ("barber/crew,barber/beard-short"); the host plays the venue's cinematic for them
- *    (AShopStage::Cinematic) under the skip.
- *  - Redress: the hero now wears Closet for real (the closet's Wear and Take off, the thrift's "Wear it out").
+ *  - PreviewLook: dress the hero in Look and Closet for a moment (the barber's draft look, the thrift's try-on, the
+ *    closet's choice under the cursor).
+ *  - EndPreview: back to the hero's own look (the page closing or walking away with a preview up, a try-on put back).
+ *  - Camera: blend to the registry shot Name ("barber-mirror", "barber-reveal", "thrift-rack", "thrift-fitting",
+ *    "pawn-counter", "pawn-case", "pawn-cage") and hold it while the screen is open.
+ *  - BeginService: a skip has started. The page calls the Session itself (ShopService for cuts, workouts and meals;
+ *    WaitAt for "sit a while"; PawnSell or PawnLoan on stored gear, whose fetch is a skip), as StoreCounter calls
+ *    Checkout (the order, the tip and the DECLINED stamp are the page's), and asks for this only once the charge went
+ *    through and the TimeSkip began, so the host must not call the Session again. Name is the skip's activity id with
+ *    its "shop:<venue>:" prefix removed: the offer ids ("barber/crew,barber/beard-short"), "wait" for a wait, or the
+ *    activity id as the Session gave it for anything else. The host plays the venue's cinematic for it
+ *    (AShopStage::Cinematic) under the skip. A page that asks for it closes itself the same frame (TakeLeave reports
+ *    it), after an EndPreview when a preview was up: the hero sits down to the service in their own look, and the
+ *    host swaps the new one in behind a cut (RefreshLook when the skip settles).
+ *  - Redress: the hero now wears Closet for real (the closet's Wear and Take off, the thrift's "Wear it out", a
+ *    donation off the hero's back).
  *  - Sit, Stand: the hero's seated mode. Name is the seat's use or station id ("barber-chair1"), or empty for where
  *    the hero is.
  *  - Talk: the talk card's choice, Name its id.
@@ -75,8 +81,10 @@ struct HostRequest
  * One shop's screen, drawn full screen over the 3D shop into a canvas 1080 logical units tall (the width follows the
  * viewport). Keys use StoreCounter's names: "Up", "Down", "Left", "Right", "Enter" (or "Space"), "Q" and "E" (or
  * "TabPrev" and "TabNext") for tabs, "Tab" (or "Reset": the pad's Y) to pay or confirm, "Backspace" (or "Delete", or
- * "PutBack": the pad's X) to take one out, and "Escape" (or "P") to walk away. For a moment after opening only Escape
- * gets through (StoreCounter's OpenGrace, 0.3 s), since the key that opened it may still be held down.
+ * "PutBack": the pad's X) to take one out, and "Escape" (or "P") to walk away. One more, "Alt" (or "F", or "RT": the
+ * pad's right trigger), is each page's second action: the barber's look at the back of the head (barber-reveal), the
+ * thrift's TRY ON, the closet's TAKE OFF, the pawn ticket's RENEW. For a moment after opening only Escape gets through
+ * (StoreCounter's OpenGrace, 0.3 s), since the key that opened it may still be held down.
  *
  * Now is the host's clock in real seconds (StoreCounter's RealTime), not world minutes; the world's time comes from the
  * Session. The host polls TakeLeave every frame, after Draw as well as after Key: a click on the footer's WALK AWAY
@@ -94,7 +102,8 @@ public:
 	 * (or "CUT", "BEARD", "COLOR", "BROWS"); "thrift-rack-tops", "thrift-rack-outer", "thrift-rack-pants",
 	 * "thrift-shoes", "thrift-hats", "thrift-booth", "thrift-register" and "thrift-donate"; "gym-desk", or a machine's use
 	 * ("gym-treadmill1".."gym-treadmill5", "gym-bag", "gym-weights", "gym-cooler"); a diner seat ("diner-stool1",
-	 * "diner-booth1", ...); and for the closet, where it was opened from.
+	 * "diner-booth1", ...: the menu), "PAPER" or "SIT"; and for the closet, where it was opened from ("apartment", "dee",
+	 * "thrift-booth", or "thrift" for the thrift's "Wear it out").
 	 */
 	virtual void Open(double Now, const std::string& Page) = 0; // Page: the rack, tab or station that opened it
 	/** The host ends the screen (the shop closing, a skip starting elsewhere). TakeLeave doesn't report it. */

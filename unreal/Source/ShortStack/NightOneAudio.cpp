@@ -7,11 +7,11 @@
 
 namespace NightOneAudioDetail
 {
-USoundWaveProcedural* MakeWave(UObject* Outer, float Seconds)
+USoundWaveProcedural* MakeWave(UObject* Outer, float Seconds, int32 Channels = 1)
 {
 	USoundWaveProcedural* Wave = NewObject<USoundWaveProcedural>(Outer);
 	Wave->SetSampleRate(ss::audio::SampleRate);
-	Wave->NumChannels = 1;
+	Wave->NumChannels = Channels;
 	Wave->Duration = Seconds;
 	Wave->SoundGroup = SOUNDGROUP_Default;
 	Wave->bLooping = false;
@@ -61,7 +61,18 @@ void UNightOneAudio::StartAmbience(TFunction<void(float*, int32)> Source, float 
 
 void UNightOneAudio::SetAmbienceSource(TFunction<void(float*, int32)> Source, float Level)
 {
-	// The queued quarter second plays out in the old room's tone; what's rendered from here on is the new one's.
+	// The queued quarter second plays out in the old room's tone; what's rendered from here on is the new one's. (From a
+	// stereo stream, a mono one again.)
+	if (bStereo)
+	{
+		if (AmbienceComponent)
+		{
+			AmbienceComponent->Stop();
+		}
+		AmbienceComponent = nullptr;
+		AmbienceWave = nullptr;
+		bStereo = false;
+	}
 	AmbienceSource = MoveTemp(Source);
 	AmbienceGain = AmbienceSource ? Level : 1.0f;
 	if (!AmbienceSource && !AmbienceGen)
@@ -75,6 +86,21 @@ void UNightOneAudio::SetAmbienceSource(TFunction<void(float*, int32)> Source, fl
 	}
 }
 
+void UNightOneAudio::SetAmbienceSourceStereo(TFunction<void(float*, int32)> Source, float Level)
+{
+	// A stereo stream in place of the mono one (what's queued of the mono one stops with it).
+	if (AmbienceComponent)
+	{
+		AmbienceComponent->Stop();
+		AmbienceComponent = nullptr;
+	}
+	AmbienceSource = MoveTemp(Source);
+	AmbienceGain = Level;
+	bStereo = true;
+	AmbienceWave = NightOneAudioDetail::MakeWave(this, 10000.0f, 2);
+	AmbienceComponent = UGameplayStatics::SpawnSound2D(this, AmbienceWave.Get(), AmbienceLevel(), 1.0f, 0.0f, nullptr, false, false);
+}
+
 void UNightOneAudio::PlaySamples(const std::vector<float>& Samples, float Volume, const FVector* At)
 {
 	PlayPcm(Samples, Volume, false, At);
@@ -84,7 +110,19 @@ void UNightOneAudio::TickComponent(float DeltaTime, ELevelTick TickType, FActorC
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	// Keep about a quarter second of ambience queued ahead of the audio renderer.
-	if (AmbienceWave && (AmbienceGen || AmbienceSource))
+	if (AmbienceWave && AmbienceSource && bStereo)
+	{
+		// The street's stereo stream: a quarter second of frames queued ahead, two samples a frame.
+		const int32 Target = ss::audio::SampleRate / 4 * 2 * static_cast<int32>(sizeof(int16));
+		int32 Guard = 0;
+		while (AmbienceWave->GetAvailableAudioByteCount() < Target && Guard++ < 16)
+		{
+			float Block[2400];
+			AmbienceSource(Block, 1200);
+			NightOneAudioDetail::Queue(AmbienceWave, Block, 2400, AmbienceGain);
+		}
+	}
+	else if (AmbienceWave && (AmbienceGen || AmbienceSource))
 	{
 		const int32 Target = ss::audio::SampleRate / 4 * static_cast<int32>(sizeof(int16));
 		int32 Guard = 0;

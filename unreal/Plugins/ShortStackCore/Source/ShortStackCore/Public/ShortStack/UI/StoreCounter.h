@@ -21,6 +21,16 @@ SHORTSTACKCORE_API void DrawProduct(Canvas& C, const store::Item& I, float X, fl
  */
 SHORTSTACKCORE_API void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, double Now, const store::Basket* Preview = nullptr, float Alpha = 1.0f);
 
+/** What a meal, a drink or a workout does to the needs, as relief (store::Relief's sense: positive eases a need). */
+struct NeedsChange
+{
+	double Hunger = 0.0;
+	double Thirst = 0.0;
+	double Energy = 0.0;
+};
+/** The same block, ghosting in Change (the shops' previews: Ruby's menu, a workout, an hour sat at the counter). */
+SHORTSTACKCORE_API void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, double Now, const NeedsChange& Change, float Alpha = 1.0f);
+
 /** What the HUD shows while walking around (the Street level fills it each frame). */
 struct StreetHudInfo
 {
@@ -47,9 +57,50 @@ struct StreetHudInfo
 	bool Gamepad = false;
 	/** 0..1: the screen fading to black (leaving, arriving). */
 	float Fade = 0.0f;
+
+	// ---- Northside (the realism update's spec, §7.4)
+	/** What people say near the hero (AStreetNpcs::TakeSubtitle): at most two show, the newest at the bottom. */
+	struct Subtitle
+	{
+		std::string Speaker; // "Sal"; empty for a voice with no name
+		std::string Line;
+		double At = 0.0; // seconds, the HUD's clock
+	};
+	std::vector<Subtitle> Subtitles;
+	/** The name over the person the hero is looking at ("Sal", "Knows you"), at X, Y in the HUD's units (the 1080-tall
+	 *  canvas); empty Text shows none. */
+	struct Tag
+	{
+		std::string Text;
+		std::string Sub;
+		float X = 0.0f;
+		float Y = 0.0f;
+		float Alpha = 1.0f; // the host fades it in and out
+	};
+	Tag NameTag;
+	/** A service or a wait playing out (§5.0): the label, how far along (0..1), and the world minutes it runs between
+	 *  (the corner's clock spins through them). */
+	struct SkipInfo
+	{
+		bool Active = false;
+		std::string Label; // "At Fifth St. Barbers"
+		float Progress = 0.0f;
+		double From = 0.0;
+		double To = 0.0;
+	};
+	SkipInfo Skip;
+	/** A locked door's line ("Fifth St. Barbers, Closed, Opens Tue 10 AM") and when it was tried (the HUD's clock). */
+	std::string Closed;
+	double ClosedAt = -100.0;
+	/** The weather by the clock: weather::Sky as an int (-1 shows none), and the rain's strength 0..1. */
+	int Weather = -1;
+	float Rain = 0.0f;
 };
 
-/** The walking HUD: place and time, vitals, the prompt, texts, the camera mode and the controls. 1080 tall. */
+/**
+ * The walking HUD: place and time, the weather, vitals, the prompt, a locked door's line, texts, subtitles, the name
+ * over whoever the hero is looking at, the camera mode, the controls, and a skip's overlay. 1080 tall.
+ */
 SHORTSTACKCORE_API void DrawStreetHud(Canvas& C, const StreetHudInfo& Info, double Now);
 
 /**

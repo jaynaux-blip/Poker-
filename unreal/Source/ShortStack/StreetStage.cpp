@@ -15,6 +15,7 @@
 #include "Components/WidgetComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -23,10 +24,17 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
+#include "MarketStage.h"
+#include "ShortStack/Game/Life.h"
+#include "ShopStage.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/UI/PropArt.h"
 #include "SlateDrawList.h"
+#include "StreetTraffic.h"
 #include "UObject/ConstructorHelpers.h"
 
 #include <string>
@@ -134,20 +142,25 @@ struct FRainLayer
 const FRainLayer RainLayers[4] = {{220.0, 6.0f, 0.22f, 22.0f, 1.0f}, {520.0, 11.0f, 0.4f, 30.0f, 0.85f}, {1000.0, 18.0f, 0.7f, 40.0f, 0.7f}, {1800.0, 28.0f, 1.1f, 55.0f, 0.55f}};
 
 // The look, tunable live while walking around (the exposure in EV100: higher is darker).
-TAutoConsoleVariable<float> CVarNightEV(TEXT("ss.Street.NightEV"), 1.0f, TEXT("The street's exposure floor at night (EV100): higher keeps the night darker."));
-TAutoConsoleVariable<float> CVarNightRange(TEXT("ss.Street.NightRange"), 1.6f, TEXT("How far the street's exposure may rise over its floor (looking into the store's light)."));
-TAutoConsoleVariable<float> CVarDayEV(TEXT("ss.Street.DayEV"), 10.0f, TEXT("The street's exposure floor by day (EV100)."));
+// The street's own clamps follow the sun (StreetStageLook.cpp, spec 3.2; ss.Street.NightEV and DayEV move them there). What
+// the street's self-lit things (the signs, the glows) were set for: the night's exposure floor they were tuned at.
+const float GlowSetForEV = 1.0f;
 TAutoConsoleVariable<float> CVarStoreEV(TEXT("ss.Street.StoreEV"), 5.0f, TEXT("The Lucky Penny's exposure floor (EV100)."));
 TAutoConsoleVariable<float> CVarStoreRange(TEXT("ss.Street.StoreRange"), 2.2f, TEXT("How far the store's exposure may rise over its floor."));
 TAutoConsoleVariable<float> CVarWashEV(TEXT("ss.Street.WashEV"), 4.6f, TEXT("The Wash & Fold's exposure floor (EV100); it rises as far as the store's (ss.Street.StoreRange)."));
 TAutoConsoleVariable<float> CVarBias(TEXT("ss.Street.Bias"), 0.0f, TEXT("Extra exposure compensation on the street (stops; + brighter)."));
-TAutoConsoleVariable<float> CVarRain(TEXT("ss.Street.Rain"), 1.0f, TEXT("The rain's strength (0 hides it)."));
+// ss.Street.Rain and ss.Street.Weather force the weather (StreetStageLook.cpp).
+TAutoConsoleVariable<int32> CVarWideMarket(TEXT("ss.Street.WideMarket"), -1,
+	TEXT("Market St at its new width with AMarketStage (1), or as The Block built it (0); -1 (default): wide (the crowd walks the registry's walkways, spec 6.8). Rebuilds on the next build of the street."));
 TAutoConsoleVariable<float> CVarTenementGlow(TEXT("ss.Street.TenementGlow"), 0.4f,
 	TEXT("How brightly the tenement's rooms glow from the street, against their bake for the apartment's view."));
 // The laundromat's light on the sidewalk is set for this, and goes up and down with it.
 const float LaundromatGlowSetFor = 0.08f;
 TAutoConsoleVariable<float> CVarLaundromatGlow(TEXT("ss.Street.LaundromatGlow"), LaundromatGlowSetFor,
 	TEXT("How brightly the Wash & Fold's light falls through its window onto the sidewalk (0.08 as tuned; the tenement's own baked shop, if it shows, with it)."));
+// The rain sheets' budget (spec 3.3): measured over 0.8 ms at 2550x1220, the nearest layer goes while the rain is light.
+TAutoConsoleVariable<int32> CVarRainBudget(TEXT("ss.Street.RainBudget"), 0,
+	TEXT("1: the nearest rain sheet is dropped while the rain is under 0.5 (spec 3.3's cut, once the four layers measure over 0.8 ms GPU); 0 (default): all four."));
 // The tenement's materials as the glTF importer numbers them (tenement.py's order): its baked laundromat (tenement_store).
 const int32 TenementShopMaterial = 9;
 
@@ -230,21 +243,38 @@ void NoteLoaded(const UObject* Asset)
 
 UMaterialInterface* OptionalMaterial(const TCHAR* Path)
 {
-	UMaterialInterface* M = LoadObject<UMaterialInterface>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
-	NoteLoaded(M);
-	return M;
+	return Cast<UMaterialInterface>(AStreetStage::NsAsset(Path));
 }
 
 /** A mesh from the Blender pipeline (unreal/Art/Meshes, imported when the editor opens), nullptr when it isn't. */
 UStaticMesh* ImportedMesh(const TCHAR* Name)
 {
-	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *FStreetPreload::MeshPath(Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
-	NoteLoaded(Mesh);
-	return Mesh;
+	return AStreetStage::NsMesh(Name);
 }
 
-// ss.Street.Rain is a test override: each Play session starts it at its reset (FStreetOverrides).
-FStreetOverrides::FRegister RainOverride(TEXT("ss.Street.Rain"), TEXT("1"));
+// ss.Street.WideMarket is a test override too (its reset: auto).
+FStreetOverrides::FRegister WideMarketOverride(TEXT("ss.Street.WideMarket"), TEXT("-1"));
+
+/**
+ * Whether Market goes at its new width (spec 0.3): forced by ss.Street.WideMarket, else yes. The crowd's map is the
+ * registry's (people-ue's StreetCrowd BuildMap reads Market's two sidewalks from the walkways AMarketStage registers, and
+ * keeps today's lines only while nothing has registered them), so the widened Market lands after it, as spec 6.8 asks.
+ */
+bool WantsWideMarket()
+{
+	return AStreetStage::WideMarketWanted();
+}
+} // namespace StreetStageDetail
+
+bool AStreetStage::WideMarketWanted()
+{
+	using namespace StreetStageDetail;
+	const int32 Forced = CVarWideMarket.GetValueOnAnyThread();
+	return Forced < 0 || Forced != 0;
+}
+
+namespace StreetStageDetail
+{
 
 /**
  * What hides one of an imported mesh's material slots: the engine's own masked-out material (Nanite's hidden sections use
@@ -448,22 +478,6 @@ AStreetStage::AStreetStage()
 }
 
 // ------------------------------------------------------------------ building blocks
-
-template <typename T>
-T* AStreetStage::NewPart(USceneComponent* Parent)
-{
-	// Transient: built when play begins (or for the editor's preview), never saved with the level. The preview's parts are
-	// not duplicated either: Play-In-Editor copies the level by duplication, which copies transient objects that are still
-	// referenced (BlueprintCreatedComponents is), and the play copy builds its own street at BeginPlay (as the Embercrest).
-	const UWorld* InWorld = GetWorld();
-	const EObjectFlags Flags = InWorld && InWorld->IsGameWorld() ? RF_Transient : EObjectFlags(RF_Transient | RF_DuplicateTransient);
-	T* Part = NewObject<T>(this, NAME_None, Flags);
-	Part->CreationMethod = EComponentCreationMethod::UserConstructionScript;
-	Part->SetupAttachment(Parent ? Parent : Root.Get());
-	BlueprintCreatedComponents.Add(Part);
-	Part->RegisterComponent();
-	return Part;
-}
 
 UMaterialInstanceDynamic* AStreetStage::Mat(FName Key, uint32 SrgbHexColor, float Roughness, float Pattern, float Emissive, float Metallic)
 {
@@ -760,6 +774,19 @@ void AStreetStage::Window(const FVector& Center, float Yaw, const FVector2D& Siz
 	{
 		const float Data[3] = {static_cast<float>(Look), Seed, Level};
 		Set->SetCustomData(Index, TArrayView<const float>(Data, 3), true);
+		if (bRecordWindows)
+		{
+			// Lit by the hour from here on (UpdateWindowsByHour): its look when lit is the one it was given, or one from its
+			// seed (warm mostly, some cool, some a TV).
+			FNsWindow W;
+			W.Set = Set;
+			W.Index = Index;
+			W.Seed = Seed;
+			W.Level = Level;
+			W.Look = static_cast<uint8>(Look != WinDark ? Look : (Seed < 0.7f ? WinWarm : Seed < 0.86f ? WinCool : WinTv));
+			W.Room = 0;
+			NsWindows.Add(W);
+		}
 	}
 }
 
@@ -800,6 +827,13 @@ void AStreetStage::OnConstruction(const FTransform& Transform)
 		// In play (spawned by the game mode, or loaded in a cooked game or Play-In-Editor) the street is built at BeginPlay.
 		return;
 	}
+	// What outside /Game/ShortStack the street uses (the engine's cloud material) and where the kit's pivoted meshes go,
+	// resolved here and saved with the level (spec 0.8).
+	if (!CloudMaterial)
+	{
+		CloudMaterial = LoadObject<UMaterialInterface>(nullptr, Ns::CloudPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+	}
+	ResolvePlaces();
 	// The editor's preview, and every asset it loaded (with every registered stage's) resolved onto the saved preload list.
 	TSet<FString> Loaded;
 	if (bEditorPreview)
@@ -809,6 +843,48 @@ void AStreetStage::OnConstruction(const FTransform& Transform)
 		PreviewLoads = nullptr;
 	}
 	ResolvePreload(Loaded);
+}
+
+void AStreetStage::ResolvePlaces()
+{
+	// ns_fronts.py's places, Blender meters by mesh name ({"SM_NS_Bldg_HCash_Grille": [x, y, z], ...}): a small parse, no
+	// JSON module needed. Missing (the art not built here): the saved ones stay.
+	const FString File = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT(".."), TEXT("art"), TEXT("build"), TEXT("ns_fronts_places.json")));
+	FString Text;
+	if (!FFileHelper::LoadFileToString(Text, *File))
+	{
+		return;
+	}
+	TMap<FName, FVector> Found;
+	int32 At = 0;
+	while (true)
+	{
+		const int32 Q0 = Text.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, At);
+		if (Q0 == INDEX_NONE)
+		{
+			break;
+		}
+		const int32 Q1 = Text.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Q0 + 1);
+		const int32 B0 = Q1 == INDEX_NONE ? INDEX_NONE : Text.Find(TEXT("["), ESearchCase::CaseSensitive, ESearchDir::FromStart, Q1);
+		const int32 B1 = B0 == INDEX_NONE ? INDEX_NONE : Text.Find(TEXT("]"), ESearchCase::CaseSensitive, ESearchDir::FromStart, B0);
+		if (B1 == INDEX_NONE)
+		{
+			break;
+		}
+		TArray<FString> Parts;
+		Text.Mid(B0 + 1, B1 - B0 - 1).ParseIntoArray(Parts, TEXT(","), true);
+		if (Parts.Num() == 3)
+		{
+			const FVector Blender(FCString::Atod(*Parts[0].TrimStartAndEnd()), FCString::Atod(*Parts[1].TrimStartAndEnd()), FCString::Atod(*Parts[2].TrimStartAndEnd()));
+			Found.Add(FName(*Text.Mid(Q0 + 1, Q1 - Q0 - 1)), Ns::StageOf(Blender));
+		}
+		At = B1 + 1;
+	}
+	if (Found.Num() > 0 && !Found.OrderIndependentCompareEqual(Places))
+	{
+		Places = MoveTemp(Found);
+		UE_LOG(LogTemp, Log, TEXT("StreetStage: %d of the kit's pivots from %s"), Places.Num(), *File);
+	}
 }
 
 void AStreetStage::RebuildSet()
@@ -835,6 +911,97 @@ void AStreetStage::AppendPreload(TArray<FString>& Paths)
 	{
 		Paths.Add(FStreetPreload::MeshPath(Name));
 	}
+	// The realism pass's (StreetStageGround/Fronts/Furniture/Look.cpp): the ground, the plots, the landmarks and proxies,
+	// the furniture and cars, MPC_NS and the M_NS_ materials, the decals.
+	NsAppendPreload(Paths);
+}
+
+UStaticMesh* AStreetStage::NsMesh(const TCHAR* Name)
+{
+	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *FStreetPreload::MeshPath(Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	NoteLoaded(Mesh);
+	return Mesh;
+}
+
+UObject* AStreetStage::NsAsset(const TCHAR* Path)
+{
+	UObject* Asset = LoadObject<UObject>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+	NoteLoaded(Asset);
+	return Asset;
+}
+
+int32 AStreetStage::NsSlot(const UMeshComponent* C, const TCHAR* Name)
+{
+	const UStaticMeshComponent* Smc = Cast<UStaticMeshComponent>(C);
+	const UStaticMesh* Source = Smc ? Smc->GetStaticMesh().Get() : nullptr;
+	if (!Source)
+	{
+		return INDEX_NONE;
+	}
+	const TArray<FStaticMaterial>& Slots = Source->GetStaticMaterials();
+	for (int32 Slot = 0; Slot < Slots.Num(); ++Slot)
+	{
+		const UMaterialInterface* M = Slots[Slot].MaterialInterface;
+		if (Slots[Slot].MaterialSlotName.ToString().Equals(Name, ESearchCase::IgnoreCase) || Slots[Slot].ImportedMaterialSlotName.ToString().Equals(Name, ESearchCase::IgnoreCase) ||
+			(M && M->GetName().Equals(Name, ESearchCase::IgnoreCase)))
+		{
+			return Slot;
+		}
+	}
+	return INDEX_NONE;
+}
+
+bool AStreetStage::NsSectionFlags(UStaticMesh* Mesh, const FString& Slot, bool bRayTracing, bool bCastShadow)
+{
+#if WITH_EDITOR
+	if (!Mesh)
+	{
+		return false;
+	}
+	int32 Wanted = INDEX_NONE;
+	const TArray<FStaticMaterial>& Slots = Mesh->GetStaticMaterials();
+	for (int32 I = 0; I < Slots.Num() && Wanted == INDEX_NONE; ++I)
+	{
+		const UMaterialInterface* M = Slots[I].MaterialInterface;
+		if (Slots[I].MaterialSlotName.ToString().Equals(Slot, ESearchCase::IgnoreCase) || Slots[I].ImportedMaterialSlotName.ToString().Equals(Slot, ESearchCase::IgnoreCase) ||
+			(M && M->GetName().Contains(Slot)))
+		{
+			Wanted = I;
+		}
+	}
+	if (Wanted == INDEX_NONE)
+	{
+		return false;
+	}
+	bool bChanged = false;
+	FMeshSectionInfoMap& Map = Mesh->GetSectionInfoMap();
+	for (int32 Lod = 0; Lod < Mesh->GetNumSourceModels(); ++Lod)
+	{
+		const int32 Sections = Mesh->GetNumSections(Lod);
+		for (int32 Section = 0; Section < Sections; ++Section)
+		{
+			FMeshSectionInfo Info = Map.Get(Lod, Section);
+			if (Info.MaterialIndex != Wanted || (Info.bVisibleInRayTracing == bRayTracing && Info.bCastShadow == bCastShadow))
+			{
+				continue;
+			}
+			Info.bVisibleInRayTracing = bRayTracing;
+			Info.bCastShadow = bCastShadow;
+			Map.Set(Lod, Section, Info);
+			bChanged = true;
+		}
+	}
+	if (bChanged)
+	{
+		Mesh->Modify();
+		Mesh->Build();
+		Mesh->PostEditChange();
+		Mesh->MarkPackageDirty();
+	}
+	return true;
+#else
+	return false;
+#endif
 }
 
 SHORTSTACK_STREET_PRELOAD(AStreetStage)
@@ -932,17 +1099,24 @@ void AStreetStage::EnsureBuilt()
 			// GlowCol1, the neon's pink, follows the hour (ApplyDaylight, just below).
 		}
 	}
+	// Its neighbors at play: the shops on its plots, Market's stage (at its new width), the cross streets' traffic.
+	SpawnNeighbors();
+	// The hour and the weather as they are now (not eased in from a clear night).
+	UpdateClock(0.0f);
+	UpdateWeather(-1.0f);
+	AppliedHourKey = -1000.0f;
+	ApplyHour();
+	UpdateMpc();
 	AppliedDaylight = -1.0f;
 	ApplyDaylight();
+	UpdateShops(0.0f);
+	WindowHourApplied = -1000.0f;
+	UpdateWindowsByHour();
 	PickStreetlights(StartAt(TEXT("home")).GetLocation());
-	if (SkyLight)
-	{
-		SkyLight->RecaptureSky();
-	}
 	// The reference is the Embercrest's build at play (about 80 ms for its 648 parts, in Play-In-Editor).
-	UE_LOG(LogTemp, Log, TEXT("StreetStage: the street built in %.0f ms: %d parts (%d of an older build cleared), %d lights, %d signs, %d preloaded assets"),
+	UE_LOG(LogTemp, Log, TEXT("StreetStage: the street built in %.0f ms: %d parts (%d of an older build cleared), %d lights, %d signs, %d preloaded assets; %d kit plots, %d stand-ins, Market %s"),
 		(FPlatformTime::Seconds() - Started) * 1000.0, BlueprintCreatedComponents.Num(), Cleared, Streetlights.Num() + StoreLights.Num() + NightLights.Num() + WashLights.Num(),
-		SignWidgets.Num(), Preload.Num());
+		SignWidgets.Num(), Preload.Num(), PlotsKit, PlotsStandIn, bWideMarket ? TEXT("at its new width") : TEXT("as The Block built it"));
 }
 
 void AStreetStage::RegisterWithWorld()
@@ -994,7 +1168,8 @@ void AStreetStage::RegisterWithWorld()
 		UseHandles.Add(Registry->AddUse(U));
 	}
 	// The zones, highest first: the two rooms (what IsInsideStore and IsInsideWash take in, and where no rain falls), then
-	// Market's sidewalk off the corner, the corner, and Fifth, which is the whole set (outside it is off the set).
+	// Market's sidewalk off the corner (today's Market: at its new width AMarketStage registers Market and Cardinal), the
+	// corner, Hollis's and Wexler's near sidewalks to their walk limits, and Fifth (outside them all is off the set).
 	TWeakObjectPtr<AStreetStage> Self(this);
 	auto Zone = [&](const TCHAR* Id, const FBox& Local, const TCHAR* Place, int32 Priority, int32 Tone, bool bRoom) {
 		FStreetZone Z;
@@ -1017,12 +1192,26 @@ void AStreetStage::RegisterWithWorld()
 	FStreetZone Wash = Zone(TEXT("washfold"), WashRoom, TEXT("WASH & FOLD"), 10, StreetRoomTone::Laundry, true);
 	Wash.DoorOpen = [Self]() { return Self.IsValid() ? Self->WashDoorOpen() : 0.0f; };
 	Registry->AddZone(Wash);
-	Registry->AddZone(Zone(TEXT("market"), FBox(FVector(MarketWest - 900.0, StoreY1 - 50.0, SetZ0), FVector(-100.0, MarketY1 + 50.0, SetZ1)), TEXT("MARKET STREET"), 5,
+	if (!bWideMarket)
+	{
+		Registry->AddZone(Zone(TEXT("market"), FBox(FVector(MarketWest - 900.0, StoreY1 - 50.0, SetZ0), FVector(-100.0, MarketY1 + 50.0, SetZ1)), TEXT("MARKET STREET"), 5,
+			StreetRoomTone::Street, false));
+		Registry->AddZone(Zone(TEXT("corner"), FBox(FVector(MarketWest - 900.0, StoreY1 - 100.0, SetZ0), FVector(FarFront + 1600.0, MarketY1 + 300.0, SetZ1)), TEXT("FIFTH & MARKET"),
+			3, StreetRoomTone::Street, false));
+	}
+	else
+	{
+		Registry->AddZone(Zone(TEXT("corner"), FBox(FVector(-100.0, StoreY1 - 100.0, SetZ0), FVector(FarFront + 1600.0, Ns::MarketLineN + 100.0, SetZ1)), TEXT("FIFTH & MARKET"), 3,
+			StreetRoomTone::Street, false));
+	}
+	Registry->AddZone(Zone(TEXT("hollis"), FBox(FVector(Ns::HollisWalk0, Ns::HollisRoad0 - 30.0, SetZ0), FVector(Ns::HollisWalk1, Ns::HollisN + 50.0, SetZ1)), TEXT("HOLLIS ST"), 2,
 		StreetRoomTone::Street, false));
-	Registry->AddZone(Zone(TEXT("corner"), FBox(FVector(MarketWest - 900.0, StoreY1 - 100.0, SetZ0), FVector(FarFront + 1600.0, MarketY1 + 300.0, SetZ1)), TEXT("FIFTH & MARKET"),
-		3, StreetRoomTone::Street, false));
-	Registry->AddZone(Zone(TEXT("fifth"), FBox(FVector(MarketWest - 900.0, EndY0 - 600.0, SetZ0), FVector(FarFront + 1600.0, EndY1 + 600.0, SetZ1)), TEXT("FIFTH STREET"), 0,
+	Registry->AddZone(Zone(TEXT("wexler"), FBox(FVector(Ns::WexlerWalk0, Ns::WexlerS - 50.0, SetZ0), FVector(Ns::WexlerWalk1, Ns::WexlerRoad0 + 30.0, SetZ1)), TEXT("WEXLER ST"), 2,
 		StreetRoomTone::Street, false));
+	// Fifth: its sidewalks, its road and the stretch of its building lines, from Hollis's near curb to Wexler's (the hero
+	// stops at the cross streets' curbs, spec 2.9).
+	Registry->AddZone(Zone(TEXT("fifth"), FBox(FVector(FMath::Min(Ns::HollisWalk0, Ns::WexlerWalk0) - 200.0, Ns::HollisRoad0 - 80.0, SetZ0),
+		FVector(Ns::HollisWalk1 + 200.0, Ns::WexlerRoad0 + 80.0, SetZ1)), TEXT("FIFTH STREET"), 0, StreetRoomTone::Street, false));
 	Registry->SetFloorZ(T.TransformPosition(FVector(0.0, 0.0, SetZ0)).Z);
 	// The starts The Block made, and the corner's (the Lucky Penny's, looking north up Fifth).
 	for (const TCHAR* Id : {TEXT("home"), TEXT("store"), TEXT("washfold"), TEXT("wash"), TEXT("backdoor"), TEXT("dee")})
@@ -1030,6 +1219,9 @@ void AStreetStage::RegisterWithWorld()
 		Registry->AddStart(Id, StartAt(Id));
 	}
 	Registry->AddStart(TEXT("corner"), FTransform(FRotator(0.0f, 90.0f, 0.0f), FVector(250.0, StoreY1 + 100.0, 100.0)) * T);
+	// Each T's walk limit (spec 2.10): on the home corner's sidewalk, looking across at its landmark.
+	Registry->AddStart(TEXT("hollis"), FTransform(FRotator(0.0f, -66.0f, 0.0f), FVector(300.0, Ns::HollisN - 250.0, 100.0)) * T);
+	Registry->AddStart(TEXT("wexler"), FTransform(FRotator(0.0f, 66.0f, 0.0f), FVector(300.0, Ns::WexlerS + 250.0, 100.0)) * T);
 	// The doors people use, and the two sidewalks of Fifth they walk.
 	for (const FStreetDoor& D : Doors())
 	{
@@ -1037,6 +1229,20 @@ void AStreetStage::RegisterWithWorld()
 	}
 	Registry->AddWalkway(Sidewalk(0));
 	Registry->AddWalkway(Sidewalk(1));
+	// Hollis's north sidewalk and Wexler's south one, each to its walk limits, across Fifth's mouth at its crosswalk.
+	auto CrossWalk = [&T](FName Street, int32 Side, double Y, double X0, double X1) {
+		FStreetWalkway W;
+		W.Street = Street;
+		W.Side = Side;
+		W.Z = T.TransformPosition(FVector(0.0, Y, 0.0)).Z;
+		FStreetLane L;
+		L.Start = T.TransformPosition(FVector(X0, Y, 0.0));
+		L.End = T.TransformPosition(FVector(X1, Y, 0.0));
+		W.Lanes.Add(L);
+		return W;
+	};
+	Registry->AddWalkway(CrossWalk(TEXT("Hollis"), 1, (Ns::HollisN + Ns::HollisRoad0) * 0.5, Ns::HollisWalk0 + 100.0, Ns::HollisWalk1 - 100.0));
+	Registry->AddWalkway(CrossWalk(TEXT("Wexler"), 0, (Ns::WexlerS + Ns::WexlerRoad0) * 0.5, Ns::WexlerWalk0 + 100.0, Ns::WexlerWalk1 - 100.0));
 	// Where the Lucky Penny's clerk works (at the register, and stocking the cooler) and the Wash & Fold's attendant folds:
 	// their feet on the floor, facing the way they face.
 	auto Feet = [](const FTransform& Spot, double FloorZ) {
@@ -1133,6 +1339,33 @@ void AStreetStage::BuildSet()
 	Moon = nullptr;
 	Fog = nullptr;
 	Lens = nullptr;
+	// The realism pass's.
+	Lit.Reset();
+	Screens.Reset();
+	NsSignals.Reset();
+	NsWindows.Reset();
+	NsEmitters.Reset();
+	NsFootprints[0].Reset();
+	NsFootprints[1].Reset();
+	Sun = nullptr;
+	Atmosphere = nullptr;
+	Clouds = nullptr;
+	CloudMid = nullptr;
+	SkyGlowMid = nullptr;
+	BankHour = nullptr;
+	BankMinute = nullptr;
+	Trees.Reset();
+	Splashes = nullptr;
+	Drips = nullptr;
+	TreesApplied = -1;
+	DripEdges.Reset();
+	SplashCenter = FVector2D(1.0e9, 1.0e9);
+	PlotsKit = 0;
+	PlotsStandIn = 0;
+	AppliedHourKey = -1000.0f;
+	WindowHourApplied = -1000.0f;
+	bWideMarket = WantsWideMarket();
+	Mpc = Cast<UMaterialParameterCollection>(NsAsset(Ns::MpcPath));
 	StreetMaterial = OptionalMaterial(TEXT("/Game/ShortStack/Materials/M_Street.M_Street"));
 	SurfaceMaterial = OptionalMaterial(TEXT("/Game/ShortStack/Materials/M_Surface.M_Surface"));
 	GlowMaterial = OptionalMaterial(TEXT("/Game/ShortStack/Materials/M_Glow.M_Glow"));
@@ -1158,46 +1391,51 @@ void AStreetStage::BuildSet()
 	{
 		RainMaterial = OptionalMaterial(TEXT("/Game/ShortStack/Materials/M_Rain.M_Rain"));
 	}
+	// The ground and the street's two T's (the cross streets, their landmarks and proxies), today's Market while it's kept,
+	// the fronts kept from before (1812, the walk-up, the brownstones, the tenement and the Wash & Fold), the kit's plots,
+	// the store, the furniture, the sky, what E can use, the street's positioned sounds.
 	BuildGround();
-	BuildEnds();
+	BuildCrossStreets();
+	if (!bWideMarket)
+	{
+		BuildEnds();
+	}
 	BuildHomeBlock();
 	BuildEntrance();
 	BuildAcross();
+	BuildPlots();
 	BuildStore();
 	BuildStoreDressing();
 	BuildStoreInterior();
-	BuildStreetlights();
+	BuildFurniture();
 	BuildSkyAndWeather();
 	BuildSpots();
+	BuildEmitters();
+	// The hour and the weather as they are (the editor's preview shows a night of Night One, or ss.Street.Hour's).
+	UpdateClock(0.0f);
+	UpdateWeather(-1.0f);
+	AppliedHourKey = -1000.0f;
+	ApplyHour();
+	Lit.Update(ShownWorld, GlowLevels, 0.0f, true);
 	AppliedDaylight = -1.0f;
 	SignScale = -1.0f;
 	RainScale = -1.0f;
 	RainPixelAngle = -1.0f;
 }
 
-void AStreetStage::BuildGround()
+void AStreetStage::BuildEnds()
 {
+	// Market as The Block built it, while its crowd walks today's lines (ss.Street.WideMarket, spec 6.8): its ground off the
+	// corner (the corner's mouth with it), its two blocks and the building across its end, and the block north of it on
+	// Fifth (Ruby's and the wireless shop's plots stand there at Market's new width).
 	UMaterialInterface* Walk = Mat(TEXT("Sidewalk"), 0x6f6c66, 0.75f, PatSlabs);
 	UMaterialInterface* Road = Mat(TEXT("Asphalt"), 0x26272a, 0.6f, PatAsphalt);
 	UMaterialInterface* Curb = Mat(TEXT("Curb"), 0x8a867e, 0.7f, PatConcrete);
-	// Fifth's sidewalk on the home side (its top at 0) and its curb; at the corner Market's two sidewalks, its road
-	// between them 15 cm down, and Fifth's sidewalk again past it. Nothing overlaps: a shared top would flicker.
-	Box(Walk, FVector(0.0, EndY0, -30.0), FVector(SidewalkW - 20.0, StoreY1, 0.0));
-	Box(Curb, FVector(SidewalkW - 20.0, EndY0, -30.0), FVector(SidewalkW, MarketS - 20.0, 0.0));
 	Box(Walk, FVector(MarketWest, StoreY1, -30.0), FVector(SidewalkW - 20.0, MarketS - 20.0, 0.0));
 	Box(Curb, FVector(MarketWest, MarketS - 20.0, -30.0), FVector(SidewalkW, MarketS, 0.0));
 	Box(Road, FVector(MarketWest, MarketS, -45.0), FVector(RoadX0, MarketN, -15.0));
 	Box(Curb, FVector(MarketWest, MarketN, -30.0), FVector(SidewalkW, MarketN + 20.0, 0.0));
 	Box(Walk, FVector(MarketWest, MarketN + 20.0, -30.0), FVector(SidewalkW - 20.0, MarketY1, 0.0));
-	Box(Walk, FVector(0.0, MarketY1, -30.0), FVector(SidewalkW - 20.0, EndY1, 0.0));
-	Box(Curb, FVector(SidewalkW - 20.0, MarketN + 20.0, -30.0), FVector(SidewalkW, EndY1, 0.0));
-	// The road and the far side.
-	Box(Road, FVector(RoadX0, EndY0, -45.0), FVector(RoadX1, EndY1, -15.0));
-	Box(Curb, FVector(RoadX1, EndY0, -30.0), FVector(RoadX1 + 20.0, EndY1, 0.0));
-	Box(Walk, FVector(RoadX1 + 20.0, EndY0, -30.0), FVector(FarFront, EndY1, 0.0));
-
-	// The paint, a few instanced bars: the double yellow down Fifth (not through the corner), the crosswalks in line
-	// with Market's sidewalks and across its mouth, Market's own center line and stop line.
 	auto PaintSet = [this](UMaterialInterface* M) {
 		UInstancedStaticMeshComponent* Set = NewPart<UInstancedStaticMeshComponent>();
 		Set->SetStaticMesh(CubeMesh);
@@ -1207,21 +1445,10 @@ void AStreetStage::BuildGround()
 		return Set;
 	};
 	auto Bar = [](UInstancedStaticMeshComponent* Set, double X0, double Y0, double X1, double Y1) {
-		// 4 mm of paint on the road's top (Z -15).
 		Set->AddInstance(FTransform(FRotator::ZeroRotator, FVector((X0 + X1) * 0.5, (Y0 + Y1) * 0.5, -14.8), FVector((X1 - X0) / 100.0, (Y1 - Y0) / 100.0, 0.004)));
 	};
-	UInstancedStaticMeshComponent* White = PaintSet(Mat(TEXT("RoadPaint"), 0xd8d4c8, 0.35f));
-	UInstancedStaticMeshComponent* Yellow = PaintSet(Mat(TEXT("RoadYellow"), 0xd9a520, 0.35f));
-	for (const double Line : {1008.0, 1030.0})
-	{
-		Bar(Yellow, Line, EndY0, Line + 12.0, StoreY1 - 200.0);
-		Bar(Yellow, Line, MarketY1 + 200.0, Line + 12.0, EndY1);
-	}
-	for (double X = RoadX0 + 40.0; X + 50.0 < RoadX1 - 30.0; X += 100.0)
-	{
-		Bar(White, X, StoreY1 + 40.0, X + 50.0, MarketS - 40.0);
-		Bar(White, X, MarketN + 40.0, X + 50.0, MarketY1 - 20.0);
-	}
+	UInstancedStaticMeshComponent* White = PaintSet(Mat(TEXT("RoadPaint"), 0xd8d4c8, 0.55f));
+	UInstancedStaticMeshComponent* Yellow = PaintSet(Mat(TEXT("RoadYellow"), 0xd9a520, 0.55f));
 	for (double Y = MarketS + 40.0; Y + 50.0 < MarketN - 30.0; Y += 100.0)
 	{
 		Bar(White, 30.0, Y, 380.0, Y + 50.0);
@@ -1230,66 +1457,11 @@ void AStreetStage::BuildGround()
 	Bar(Yellow, MarketWest, MarketMid - 6.0, -140.0, MarketMid + 6.0);
 	Bar(White, -130.0, MarketS + 20.0, -100.0, MarketMid - 20.0);
 
-	// Storm drains at the curb and a couple of manhole covers, wet steel in the lamplight.
-	UMaterialInterface* Grate = Mat(TEXT("Grate"), 0x1a1b1d, 0.35f, 0.0f, 0.0f, 0.8f);
-	Box(Grate, FVector(SidewalkW + 2.0, 2200.0, -15.0), FVector(SidewalkW + 60.0, 2300.0, -14.6), false)->SetCastShadow(false);
-	Box(Grate, FVector(RoadX1 - 60.0, -1900.0, -15.0), FVector(RoadX1 - 2.0, -1800.0, -14.6), false)->SetCastShadow(false);
-	for (const FVector2D& At : {FVector2D(780.0, -900.0), FVector2D(1260.0, 3300.0), FVector2D(-900.0, MarketMid + 140.0)})
-	{
-		Cyl(Grate, FVector(At.X, At.Y, -15.0), 32.0f, 0.6f, false)->SetCastShadow(false);
-	}
-}
-
-void AStreetStage::BuildEnds()
-{
-	UMaterialInterface* BrickEnd = Mat(TEXT("BrickEnd"), 0x553328, 0.85f, PatBrick);
 	UMaterialInterface* BrickDark = Mat(TEXT("BrickDark"), 0x4a2a24, 0.85f, PatBrick);
 	UMaterialInterface* BrickMarket = Mat(TEXT("BrickMarket"), 0x5e3b2c, 0.85f, PatBrick);
 	UMaterialInterface* Stucco = Mat(TEXT("StuccoEnd"), 0x7c766b, 0.9f, PatConcrete);
 	UMaterialInterface* Shutter = Mat(TEXT("Shutter"), 0x5d6166, 0.5f, PatShutter, 0.0f, 0.6f);
-	UMaterialInterface* Concrete = Mat(TEXT("Barrier"), 0xa8a49a, 0.8f, PatConcrete);
-	UMaterialInterface* Orange = Mat(TEXT("BarrierStripe"), 0xe8641c, 0.45f);
-	UMaterialInterface* Reflect = Mat(TEXT("BarrierWhite"), 0xe8e6e0, 0.4f);
-	UMaterialInstanceDynamic* Flasher = Mat(TEXT("Flasher"), 0xffa21f, 0.3f, 0.0f, 6.0f);
-	NightGlowMids.Add(Flasher);
-	NightGlowLevels.Add(6.0f);
 	const FVector2D Win(120.0, 170.0);
-
-	// Fifth stops at a building across each end, the road at the barriers in front of it (the city goes on past them,
-	// the street just doesn't). The buildings are the set's walls, so nobody walks off it.
-	Box(BrickEnd, FVector(-1500.0, EndY0 - 800.0, 0.0), FVector(FarFront + 1500.0, EndY0, 1500.0));
-	Box(BrickDark, FVector(-1500.0, EndY1, 0.0), FVector(FarFront + 1500.0, EndY1 + 800.0, 1700.0));
-	// Their windows only where the end wall shows between the street's own fronts (X 0..FarFront): none half sunk in a corner.
-	WindowRows(FVector(0.0, EndY0 + 0.5, 0.0), FVector(1.0, 0.0, 0.0), FarFront, 90.0f, 420.0, 1500.0, Win, 260.0, 330.0, 0.25, 515);
-	WindowRows(FVector(0.0, EndY1 - 0.5, 0.0), FVector(1.0, 0.0, 0.0), FarFront, -90.0f, 420.0, 1700.0, Win, 260.0, 330.0, 0.25, 919);
-	for (const double Y : {EndY0, EndY1})
-	{
-		const double Out = Y < 0.0 ? 1.0 : -1.0; // toward the street
-		Box(Shutter, FVector(60.0, FMath::Min(Y, Y + Out * 4.0), 20.0), FVector(360.0, FMath::Max(Y, Y + Out * 4.0), 290.0), false);
-		Box(Shutter, FVector(1680.0, FMath::Min(Y, Y + Out * 4.0), 20.0), FVector(1990.0, FMath::Max(Y, Y + Out * 4.0), 290.0), false);
-		// Jersey barriers across the road, striped, an amber flasher on each.
-		const double By = Y + Out * 140.0;
-		for (double X = RoadX0 + 20.0; X + 280.0 <= RoadX1; X += 300.0)
-		{
-			Box(Concrete, FVector(X, By - 30.0, -15.0), FVector(X + 280.0, By + 30.0, 25.0));
-			Box(Concrete, FVector(X, By - 14.0, 25.0), FVector(X + 280.0, By + 14.0, 80.0));
-			for (int32 K = 0; K < 7; ++K)
-			{
-				const double Sx = X + 10.0 + K * 38.0;
-				const double Face = By + Out * 14.0; // the top's face toward the street
-				Box((K % 2) ? Reflect : Orange, FVector(Sx, FMath::Min(Face, Face + Out), 40.0), FVector(Sx + 36.0, FMath::Max(Face, Face + Out), 70.0), false)->SetCastShadow(false);
-			}
-			UStaticMeshComponent* Lamp = NewPart<UStaticMeshComponent>();
-			Lamp->SetStaticMesh(SphereMesh);
-			Lamp->SetMaterial(0, Flasher);
-			Lamp->SetRelativeLocation(FVector(X + 140.0, By, 88.0));
-			Lamp->SetRelativeScale3D(FVector(0.12));
-			Lamp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			Lamp->SetCastShadow(false);
-		}
-	}
-
-	// Market Street: a block on each side and a building across its far end.
 	Box(BrickMarket, FVector(MarketWest, StoreY0, 0.0), FVector(-1420.0, StoreY1, 1300.0));
 	WindowRows(FVector(MarketWest, StoreY1 + 0.5, 0.0), FVector(1.0, 0.0, 0.0), -1420.0 - MarketWest, 90.0f, 420.0, 1300.0, Win, 250.0, 330.0, 0.3, 4111);
 	Box(Shutter, FVector(MarketWest + 200.0, StoreY1, 20.0), FVector(-1700.0, StoreY1 + 4.0, 290.0), false);
@@ -1302,8 +1474,28 @@ void AStreetStage::BuildEnds()
 	Box(Shutter, FVector(-1300.0, MarketY1 - 4.0, 20.0), FVector(-500.0, MarketY1, 290.0), false);
 	Box(Stucco, FVector(MarketWest - 800.0, StoreY0, 0.0), FVector(MarketWest, EndY1, 1100.0));
 	WindowRows(FVector(MarketWest + 0.5, StoreY1, 0.0), FVector(0.0, 1.0, 0.0), MarketY1 - StoreY1, 0.0f, 380.0, 1100.0, Win, 240.0, 320.0, 0.3, 7001);
+	// The lamp on Market's north sidewalk the crowd steps round (StreetCrowd.cpp's map).
+	if (!Prop(TEXT("SM_Streetlight"), FVector(-1700.0, MarketN + 60.0, 0.0), -90.0f))
+	{
+		Cyl(Mat(TEXT("Pole"), 0x2c3033, 0.5f, 0.0f, 0.0f, 0.7f), FVector(-1700.0, MarketN + 60.0, 0.0), 9.0f, 820.0f);
+	}
+	if (USpotLightComponent* L = NewPart<USpotLightComponent>())
+	{
+		L->SetRelativeLocationAndRotation(FVector(-1700.0, MarketN + 60.0 - 150.0, 790.0), FRotator(-90.0f, 0.0f, 0.0f));
+		L->SetIntensityUnits(ELightUnits::Candelas);
+		L->SetIntensity(StreetlightCandela);
+		L->SetAttenuationRadius(2400.0f);
+		L->SetOuterConeAngle(62.0f);
+		L->SetInnerConeAngle(26.0f);
+		L->SetSourceRadius(12.0f);
+		L->SetUseTemperature(true);
+		L->SetTemperature(2050.0f);
+		L->SetVolumetricScatteringIntensity(0.25f);
+		L->SetCastShadows(true);
+		L->SetCastVolumetricShadow(false);
+		Streetlights.Add(L);
+	}
 }
-
 void AStreetStage::BuildHomeBlock()
 {
 	FStreetDice Dice;
@@ -1353,17 +1545,23 @@ void AStreetStage::BuildHomeBlock()
 		}
 	}
 
-	// Neighbors along Fifth, from Blender where they're imported: the walk-up over the barber's (its pole lit) and the
-	// cleaners', next to the Lucky Penny, and two brownstones next door to the south, their stoops out on the sidewalk.
-	// The pawn shop's lit window stays between 1812 and the walk-up; past the brownstones, brick with its shops gated for
-	// the night. Without them, the barber's shut in a box of its own and the brick runs up to 1812.
+	// The walk-up over the barber's and the cleaners' (facades.py, its barber bay opened for Fifth St. Barbers, spec 2.4), its
+	// block trimmed to X -1400 where Market's first plot (M-S1) begins and cut round the barber's room (X -35..-900, Y
+	// 3125..3610, its ceiling at 330), which BarberStage builds; until that stage stands in the bay its grille is down.
 	const double WalkupY = (2300.0 + StoreY0 - 20.0) * 0.5;
 	const bool bWalkup = Facade(TEXT("SM_Facade_Walkup"), WalkupY, false) != nullptr;
+	const bool bBarber = AShopStage::ClassFor(TEXT("barber")) != nullptr;
 	if (bWalkup)
 	{
-		// Its 13.5 m in the 13.8 m between the pawn shop and the store: the gaps show its party walls.
-		Box(Brick, FVector(-1500.0, 2300.0, 0.0), FVector(-FrontBack, StoreY0 - 20.0, 1745.0));
-		FrontBox(WalkupY, false, -0.06, 0.6, -6.9, 6.9, 0.0, 17.6);
+		const double BackX = -1400.0;
+		Box(Brick, FVector(BackX, 2300.0, 0.0), FVector(-FrontBack, 3110.0, 1745.0));
+		Box(Brick, FVector(BackX, 3110.0, 0.0), FVector(-920.0, StoreY0 - 20.0, 1745.0));
+		Box(Brick, FVector(-920.0, 3110.0, 345.0), FVector(-FrontBack, StoreY0 - 20.0, 1745.0));
+		Box(Brick, FVector(-920.0, 3625.0, 0.0), FVector(-FrontBack, StoreY0 - 20.0, 345.0));
+		// The face blocks round the barber's bay (local y 1.22..6.28 under 3.35 m: its door and glass are the shop's).
+		FrontBox(WalkupY, false, -0.06, 0.6, -6.9, 1.22, 0.0, 17.6);
+		FrontBox(WalkupY, false, -0.06, 0.6, 6.28, 6.9, 0.0, 17.6);
+		FrontBox(WalkupY, false, -0.06, 0.6, 1.22, 6.28, 3.35, 17.6);
 		// What stands out of it at the sidewalk blocks too: the shopfront's cast-iron piers (18 cm), the tenants' granite
 		// step (36 cm out, low enough to step onto) and the standpipe's brass inlets at the knee.
 		for (const FVector2D& Pier : {FVector2D(-6.77, -6.28), FVector2D(-1.22, -0.6), FVector2D(0.6, 1.22), FVector2D(6.28, 6.77)})
@@ -1372,125 +1570,32 @@ void AStreetStage::BuildHomeBlock()
 		}
 		FrontBox(WalkupY, false, -0.36, -0.06, -0.62, 0.62, 0.0, 0.16);
 		FrontBox(WalkupY, false, -0.4, -0.18, -1.05, -0.77, 0.0, 0.65);
+		if (!bBarber)
+		{
+			Box(Shutter, FVector(-4.0, 3112.0, 0.0), FVector(0.0, 3618.0, 335.0));
+		}
 	}
+	else
+	{
+		// No walk-up: its block of brick (the barber's stage carves its room out of it), the cleaners' grille and the barber's
+		// (shut until its stage stands there), each on the block's face, not in its plane (two faces in one plane flicker).
+		StandInBlock(FVector(-1400.0, 2300.0, 0.0), FVector(0.0, StoreY0 - 20.0, 1745.0), 0x4a2a24, 2990, true, false);
+		Box(Shutter, FVector(0.0, 2450.0, 20.0), FVector(4.0, 2950.0, 290.0), false);
+		if (!bBarber)
+		{
+			Box(Shutter, FVector(0.0, 3112.0, 0.0), FVector(4.0, 3618.0, 335.0));
+		}
+		Box(Iron, FVector(0.0, 2440.0, 290.0), FVector(16.0, 3630.0, 312.0), false);
+	}
+	// Two brownstones next door to the south, their stoops out on the sidewalk; without them a brick block.
 	const double RowY0 = -800.0 - 2.0 * BrownstoneW;
-	const bool bBrownstones = BrownstoneRow(RowY0, -800.0, false, BrickDark);
-	const double South = bBrownstones ? RowY0 : -800.0;
-	const double Mid = bBrownstones ? -3600.0 : -2400.0;
-	struct FFront
+	if (!BrownstoneRow(RowY0, -800.0, false, BrickDark))
 	{
-		double Y0, Y1, Height;
-		bool bDark;
-		int32 Shop; // 0 a rolled-down gate, 1 the pawn shop, 2 the barber's
-	};
-	// Each stops short of its neighbor's wall: two faces in one plane would flicker (the store's south wall is at 3680..3700).
-	const FFront Fronts[] = {{PawnY0, PawnY1, 1100.0, false, 1}, {PawnY1, StoreY0 - 20.0, 900.0, true, 2}, {Mid, South, 1900.0, true, 0}, {EndY0, Mid, 1300.0, false, 0}};
-	int64 Seed = 101;
-	for (const FFront& Fr : Fronts)
-	{
-		const int64 FrontSeed = (Seed++) * 7919;
-		if (Fr.Shop == 2 && bWalkup)
-		{
-			continue;
-		}
-		Box(Fr.bDark ? BrickDark : Brick, FVector(-1500.0, Fr.Y0, 0.0), FVector(0.0, Fr.Y1, Fr.Height));
-		Box(Stone, FVector(-2.0, Fr.Y0, 300.0), FVector(5.0, Fr.Y1, 318.0), false);
-		WindowRows(FVector(0.5, Fr.Y0, 0.0), FVector(0.0, 1.0, 0.0), Fr.Y1 - Fr.Y0, 0.0f, 420.0, Fr.Height, Win, 260.0, 330.0, 0.3, FrontSeed);
-		const double S0 = Fr.Y0 + 150.0;
-		const double S1 = Fr.Y1 - 150.0;
-		if (Fr.Shop == 1)
-		{
-			// The pawn shop's window: lit low behind its bars, guitars and TVs in silhouette, a blue tube around it and
-			// the three gold balls over the door.
-			UMaterialInterface* Display = Mat(TEXT("PawnDisplay"), 0xffd9a0, 0.6f, 0.0f, 1.3f);
-			Box(Display, FVector(-1.0, S0, 40.0), FVector(2.0, S1, 280.0), false);
-			UMaterialInterface* Shade = Mat(TEXT("PawnGoods"), 0x15120f, 0.7f);
-			for (int32 K = 0; K < 6; ++K)
-			{
-				const double At = S0 + 90.0 + K * (S1 - S0 - 180.0) / 5.0;
-				const double Ht = K % 3 == 0 ? 120.0 : K % 3 == 1 ? 60.0 : 90.0;
-				Box(Shade, FVector(2.0, At - 22.0, 40.0), FVector(5.0, At + 22.0, 40.0 + Ht), false)->SetCastShadow(false);
-				if (K % 3 == 0)
-				{
-					Box(Shade, FVector(2.0, At - 4.0, 40.0 + Ht), FVector(5.0, At + 4.0, 40.0 + Ht + 70.0), false)->SetCastShadow(false); // a guitar's neck
-				}
-			}
-			UInstancedStaticMeshComponent* Bars = NewPart<UInstancedStaticMeshComponent>();
-			Bars->SetStaticMesh(CubeMesh);
-			Bars->SetMaterial(0, Iron);
-			Bars->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			for (double Y = S0 + 6.0; Y < S1; Y += 12.0)
-			{
-				Bars->AddInstance(FTransform(FRotator::ZeroRotator, FVector(8.0, Y, 160.0), FVector(0.012, 0.012, 2.4)));
-			}
-			UMaterialInstanceDynamic* Tube = Mat(TEXT("NeonBlue"), 0x3aa8ff, 0.3f, 0.0f, 5.0f);
-			NightGlowMids.Add(Tube);
-			NightGlowLevels.Add(5.0f);
-			Box(Tube, FVector(10.0, S0 - 10.0, 286.0), FVector(13.0, S1 + 10.0, 289.0), false)->SetCastShadow(false);
-			Box(Tube, FVector(10.0, S0 - 10.0, 31.0), FVector(13.0, S1 + 10.0, 34.0), false)->SetCastShadow(false);
-			Box(Tube, FVector(10.0, S0 - 10.0, 31.0), FVector(13.0, S0 - 7.0, 289.0), false)->SetCastShadow(false);
-			Box(Tube, FVector(10.0, S1 + 7.0, 31.0), FVector(13.0, S1 + 10.0, 289.0), false)->SetCastShadow(false);
-			UMaterialInstanceDynamic* Gold = Mat(TEXT("PawnGold"), 0xd9a520, 0.25f, 0.0f, 2.2f, 0.9f);
-			NightGlowMids.Add(Gold);
-			NightGlowLevels.Add(2.2f);
-			Box(Iron, FVector(0.0, Fr.Y1 - 112.0, 392.0), FVector(70.0, Fr.Y1 - 108.0, 396.0), false);
-			for (int32 Ball = 0; Ball < 3; ++Ball)
-			{
-				const FVector At(58.0, Fr.Y1 - 110.0 + (Ball - 1) * 16.0, Ball == 1 ? 352.0 : 366.0);
-				UStaticMeshComponent* B = NewPart<UStaticMeshComponent>();
-				B->SetStaticMesh(SphereMesh);
-				B->SetMaterial(0, Gold);
-				B->SetRelativeLocation(At);
-				B->SetRelativeScale3D(FVector(0.15));
-				B->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-				Box(Iron, FVector(At.X - 0.5, At.Y - 0.5, At.Z + 7.0), FVector(At.X + 0.5, At.Y + 0.5, 392.0), false)->SetCastShadow(false);
-			}
-			if (UPointLightComponent* Glow = NewPart<UPointLightComponent>())
-			{
-				Glow->SetRelativeLocation(FVector(40.0, (S0 + S1) * 0.5, 200.0));
-				Glow->SetIntensityUnits(ELightUnits::Candelas);
-				Glow->SetIntensity(30.0f);
-				Glow->SetLightColor(SrgbHex(0x7fbfff));
-				Glow->SetAttenuationRadius(600.0f);
-				Glow->SetCastShadows(false);
-				Glow->SetVolumetricScatteringIntensity(0.5f);
-				NightLights.Add(Glow);
-				NightLightLevels.Add(30.0f);
-			}
-		}
-		else
-		{
-			// A gate rolled down over the shop front, its housing over it.
-			Box(Shutter, FVector(0.0, S0, 20.0), FVector(4.0, S1, 290.0), false);
-			Box(Iron, FVector(0.0, S0 - 10.0, 290.0), FVector(16.0, S1 + 10.0, 312.0), false);
-			if (Fr.Shop == 2)
-			{
-				// The barber's pole, banded red, white and blue under its glass cap.
-				static const uint32 Bands[3] = {0xc8202c, 0xf0ece4, 0x2048a8};
-				for (int32 K = 0; K < 9; ++K)
-				{
-					UMaterialInterface* Band = Mat(*FString::Printf(TEXT("Barber%d"), K % 3), Bands[K % 3], 0.3f, 0.0f, 0.4f);
-					Cyl(Band, FVector(22.0, S0 - 70.0, 150.0 + K * 12.0), 7.0f, 12.0f, false)->SetCastShadow(false);
-				}
-				UMaterialInstanceDynamic* Cap = Mat(TEXT("BarberCap"), 0xfff4e0, 0.2f, 0.0f, 4.0f);
-				NightGlowMids.Add(Cap);
-				NightGlowLevels.Add(4.0f);
-				UStaticMeshComponent* Top = NewPart<UStaticMeshComponent>();
-				Top->SetStaticMesh(SphereMesh);
-				Top->SetMaterial(0, Cap);
-				Top->SetRelativeLocation(FVector(22.0, S0 - 70.0, 264.0));
-				Top->SetRelativeScale3D(FVector(0.16));
-				Top->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-				Box(Iron, FVector(0.0, S0 - 74.0, 200.0), FVector(16.0, S0 - 66.0, 206.0), false);
-			}
-		}
+		StandInBlock(FVector(-1500.0, RowY0, 0.0), FVector(0.0, -800.0, 1200.0), 0x4a2a24, 1701, true, false);
 	}
-	// Street furniture from Blender where it's been imported.
-	Prop(TEXT("SM_Hydrant"), FVector(360.0, 1300.0, 0.0), 0.0f); // the pumper nozzle to the street
-	Prop(TEXT("SM_TrashCan"), FVector(330.0, -500.0, 0.0), 12.0f);
-	Prop(TEXT("SM_TrashCan"), FVector(330.0, 3550.0, 0.0), -8.0f);
-	Prop(TEXT("SM_TrashCan"), FVector(1720.0, 2500.0, 0.0), 170.0f);
-	Prop(TEXT("SM_Newsbox"), FVector(300.0, 3400.0, 0.0), 180.0f); // its window to the sidewalk
+	(void)Dice;
+	(void)Stone;
+	(void)Win;
 }
 
 void AStreetStage::BuildEntrance()
@@ -1507,16 +1612,17 @@ void AStreetStage::BuildEntrance()
 			UPointLightComponent* Lantern = NewPart<UPointLightComponent>();
 			Lantern->SetRelativeLocation(FVector(33.0, Side * 185.0, 222.0));
 			Lantern->SetIntensityUnits(ELightUnits::Candelas);
-			Lantern->SetIntensity(14.0f);
+			// 6 cd at 2600 K: a glow at the door, the limestone within 1.2 stops of the sidewalk's lamp pools (spec 3.1).
+			Lantern->SetIntensity(6.0f);
 			Lantern->SetUseTemperature(true);
 			Lantern->SetTemperature(2600.0f);
 			Lantern->SetAttenuationRadius(380.0f);
 			Lantern->SetSourceRadius(6.0f);
 			// Inside its frosted glass: shadowed, the glass would keep all of it in.
 			Lantern->SetCastShadows(false);
-			Lantern->SetVolumetricScatteringIntensity(0.4f);
+			Lantern->SetVolumetricScatteringIntensity(0.25f);
 			NightLights.Add(Lantern);
-			NightLightLevels.Add(14.0f);
+			NightLightLevels.Add(6.0f);
 		}
 	}
 	else
@@ -1529,17 +1635,17 @@ void AStreetStage::BuildEntrance()
 	{
 		Lamp->SetRelativeLocationAndRotation(bHomeFront ? FVector(24.0, 0.0, 266.0) : FVector(18.0, 0.0, 270.0), FRotator(-72.0f, 0.0f, 0.0f));
 		Lamp->SetIntensityUnits(ELightUnits::Candelas);
-		Lamp->SetIntensity(140.0f);
+		Lamp->SetIntensity(60.0f);
 		Lamp->SetUseTemperature(true);
-		Lamp->SetTemperature(2700.0f);
+		Lamp->SetTemperature(3000.0f);
 		Lamp->SetAttenuationRadius(650.0f);
 		Lamp->SetInnerConeAngle(25.0f);
 		Lamp->SetOuterConeAngle(62.0f);
 		Lamp->SetSourceRadius(6.0f);
 		Lamp->SetCastShadows(true);
-		Lamp->SetVolumetricScatteringIntensity(0.6f);
+		Lamp->SetVolumetricScatteringIntensity(0.25f);
 		NightLights.Add(Lamp);
-		NightLightLevels.Add(140.0f);
+		NightLightLevels.Add(60.0f);
 	}
 }
 
@@ -1873,7 +1979,7 @@ void AStreetStage::BuildWashRoom()
 			L->SetUseTemperature(true);
 			L->SetTemperature(4000.0f);
 			L->SetCastShadows(true);
-			L->SetVolumetricScatteringIntensity(0.5f);
+			L->SetVolumetricScatteringIntensity(0.0f);
 			WashLights.Add(L);
 		}
 	}
@@ -2004,7 +2110,7 @@ void AStreetStage::BuildWashMachines()
 				L->SetAttenuationRadius(190.0f);
 				L->SetSourceRadius(20.0f);
 				L->SetCastShadows(false);
-				L->SetVolumetricScatteringIntensity(0.3f);
+				L->SetVolumetricScatteringIntensity(0.0f); // an interior light: none in the fog (spec 3.1)
 				DrumLights.Add(L);
 			}
 		}
@@ -2316,7 +2422,7 @@ void AStreetStage::BuildWashMachines()
 		Cage->SetAttenuationRadius(340.0f);
 		Cage->SetSourceRadius(3.0f);
 		Cage->SetCastShadows(false);
-		Cage->SetVolumetricScatteringIntensity(0.4f);
+		Cage->SetVolumetricScatteringIntensity(0.0f); // an interior light: none in the fog (spec 3.1)
 	}
 
 	// The bulletin board on the south wall inside the door: flyers, the hours, NO DYEING.
@@ -2447,7 +2553,7 @@ void AStreetStage::BuildAcross()
 		Pink->SetAttenuationRadius(2600.0f);
 		Pink->SetLightColor(SrgbHex(0xff3a8c));
 		Pink->SetCastShadows(false);
-		Pink->SetVolumetricScatteringIntensity(0.8f);
+		Pink->SetVolumetricScatteringIntensity(0.4f);
 		NightLights.Add(Pink);
 		NightLightLevels.Add(600.0f);
 	}
@@ -2468,7 +2574,7 @@ void AStreetStage::BuildAcross()
 		Spill->SetLightColor(SrgbHex(0xdff0ff));
 		Spill->SetSpecularScale(0.25f);
 		Spill->SetCastShadows(false);
-		Spill->SetVolumetricScatteringIntensity(0.4f);
+		Spill->SetVolumetricScatteringIntensity(0.0f);
 		NightLights.Add(Spill);
 		NightLightLevels.Add(1000.0f);
 		WashSpill = Spill;
@@ -2498,7 +2604,7 @@ void AStreetStage::BuildAcross()
 		Lamp->SetAttenuationRadius(380.0f);
 		Lamp->SetSourceRadius(5.0f);
 		Lamp->SetCastShadows(false);
-		Lamp->SetVolumetricScatteringIntensity(0.4f);
+		Lamp->SetVolumetricScatteringIntensity(0.25f);
 		NightLights.Add(Lamp);
 		NightLightLevels.Add(12.0f);
 	}
@@ -2522,56 +2628,16 @@ void AStreetStage::BuildAcross()
 	WashMax = FVector(WashBack + 20.0, RoomY1, WashCeiling + 20.0);
 	NeonGlowAt = FVector(FarFront - 450.0, NeonAt.Y, 700.0);
 
-	// Taller buildings either side of it, windows lit at random, their shops gated for the night; up the street, across
-	// from the walk-up and the store, three brownstones (facades.py) where they're imported.
-	int64 Seed = 777;
-	auto Block = [&](double Ya, double Yb, double Height) {
-		Box(Brick, FVector(FarFront, Ya, 0.0), FVector(FarFront + 1500.0, Yb, Height));
-		WindowRows(FVector(FarFront - 0.5, Ya, 0.0), FVector(0.0, 1.0, 0.0), Yb - Ya, 180.0f, 380.0, Height, Win, 250.0, 330.0, 0.24, (Seed++) * 104729);
-		for (double Y = Ya + 200.0; Y + 700.0 < Yb; Y += 1100.0)
-		{
-			Box(Shutter, FVector(FarFront - 4.0, Y, 20.0), FVector(FarFront, Y + 600.0, 290.0), false);
-			Box(Iron, FVector(FarFront - 16.0, Y - 10.0, 290.0), FVector(FarFront, Y + 610.0, 312.0), false);
-		}
-	};
+	// Up the street, across from the walk-up and the store, three brownstones (facades.py) where they're imported; the
+	// rest of the far side is the kit's plots (BuildPlots), the parked cars the furniture's (BuildParkedCars).
 	const double RowEnd = Y1 + 3.0 * BrownstoneW;
-	Block(EndY0, Y0, 1800.0);
-	if (BrownstoneRow(Y1, RowEnd, true, Brick))
+	if (!BrownstoneRow(Y1, RowEnd, true, Brick))
 	{
-		Block(RowEnd, EndY1, 2200.0);
+		StandInBlock(FVector(FarFront, Y1, 0.0), FVector(FarFront + 1500.0, RowEnd, 1200.0), 0x5a3a30, 2777, true, false);
 	}
-	else
-	{
-		Block(Y1, EndY1, 2200.0);
-	}
-
-	// Parked cars, each with the traffic on its side (the curb on its right): the far curb's facing down the street,
-	// two on this side facing up it. Each its own paint, and the one across from the building's door is oxblood, so
-	// the first car the player sees isn't another grey one.
-	struct FCar
-	{
-		double X, Y;
-		float Yaw;
-		uint32 Paint;
-	};
-	const FCar Cars[] = {{RoadX1 - 120.0, -3570.0, -90.0f, 0x1f3354}, {RoadX1 - 120.0, -1270.0, -90.0f, 0x2a2b2e}, {RoadX1 - 120.0, 1430.0, -90.0f, 0x6e1b24},
-		{RoadX1 - 120.0, 3030.0, -90.0f, 0x7b7f86}, {RoadX0 + 120.0, -2650.0, 90.0f, 0x1f4a3a}, {RoadX0 + 120.0, -4400.0, 90.0f, 0x9a9a96}};
-	UMaterialInterface* CarGlass = Mat(TEXT("CarGlass"), 0x0b0e12, 0.05f, 0.0f, 0.0f, 0.4f);
-	for (const FCar& Car : Cars)
-	{
-		if (UStaticMeshComponent* Mesh = Prop(TEXT("SM_Sedan"), FVector(Car.X, Car.Y, -15.0), Car.Yaw))
-		{
-			ParkedCars.Add(Mesh);
-			ParkedPaints.Add(SrgbHex(Car.Paint));
-		}
-		else
-		{
-			UMaterialInterface* Paint = Mat(*FString::Printf(TEXT("Car%06x"), Car.Paint), Car.Paint, 0.25f, 0.0f, 0.0f, 0.6f);
-			Box(Paint, FVector(Car.X - 90.0, Car.Y - 230.0, -5.0), FVector(Car.X + 90.0, Car.Y + 230.0, 90.0));
-			Box(CarGlass, FVector(Car.X - 75.0, Car.Y - 120.0, 90.0), FVector(Car.X + 75.0, Car.Y + 100.0, 140.0));
-		}
-	}
-	PaintCars();
+	(void)Shutter;
+	(void)Iron;
+	(void)Win;
 }
 
 void AStreetStage::PaintCars()
@@ -2587,7 +2653,14 @@ void AStreetStage::PaintCars()
 		// tint is made fresh and never saved with the level: a saved one would tie the level to the sedan's own materials,
 		// and the importer won't refresh the textures of materials another package uses (a re-baked sedan would keep its
 		// old ones).
+		// (Its plate, drawn by core onto its [screen] slot at play, stays: Screens made it for this build.)
+		const int32 PlateSlot = NsSlot(Mesh, TEXT("ns_plate"));
+		UMaterialInstanceDynamic* Plate = PlateSlot != INDEX_NONE ? Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(PlateSlot)) : nullptr;
 		Mesh->EmptyOverrideMaterials();
+		if (Plate)
+		{
+			Mesh->SetMaterial(PlateSlot, Plate);
+		}
 		const int32 PaintSlot = ImportedSlot(Mesh, 0);
 		const bool bTinted = TintImported(Mesh, PaintSlot, ParkedPaints[I]);
 		UMaterialInterface* Paint = Mesh->GetMaterial(PaintSlot);
@@ -3322,198 +3395,34 @@ void AStreetStage::BuildStoreInterior()
 	}
 }
 
-void AStreetStage::BuildStreetlights()
+void AStreetStage::BuildRain()
 {
-	UMaterialInterface* Pole = Mat(TEXT("Pole"), 0x2c3033, 0.5f, 0.0f, 0.0f, 0.7f);
-	UMaterialInstanceDynamic* Sodium = Mat(TEXT("Sodium"), 0xffb066, 0.3f, 0.0f, 14.0f);
-	NightGlowMids.Add(Sodium);
-	NightGlowLevels.Add(14.0f);
-	struct FPost
-	{
-		double X, Y;
-		float Arm; // the arm's yaw: over the road
-	};
-	const FPost Posts[] = {{380.0, -4300.0, 0.0f}, {380.0, -2000.0, 0.0f}, {380.0, 700.0, 0.0f}, {380.0, 2700.0, 0.0f}, {380.0, 4700.0, 0.0f}, {380.0, 7600.0, 0.0f},
-		{1660.0, -3200.0, 180.0f}, {1660.0, -600.0, 180.0f}, {1660.0, 1800.0, 180.0f}, {1660.0, 4200.0, 180.0f}, {1660.0, 7000.0, 180.0f}, {-1700.0, MarketN + 60.0, -90.0f}};
-	int32 Index = 0;
-	for (const FPost& P : Posts)
-	{
-		const FVector Out = FRotator(0.0f, P.Arm, 0.0f).Vector();
-		const FVector Head = FVector(P.X, P.Y, 0.0) + Out * 150.0;
-		if (!Prop(TEXT("SM_Streetlight"), FVector(P.X, P.Y, 0.0), P.Arm))
-		{
-			Cyl(Pole, FVector(P.X, P.Y, 0.0), 9.0f, 820.0f);
-			const FVector Tip = FVector(P.X, P.Y, 0.0) + Out * 180.0;
-			Box(Pole, FVector(FMath::Min(P.X, Tip.X) - 5.0, FMath::Min(P.Y, Tip.Y) - 5.0, 805.0), FVector(FMath::Max(P.X, Tip.X) + 5.0, FMath::Max(P.Y, Tip.Y) + 5.0, 815.0), false);
-			Box(Sodium, FVector(Head.X - 22.0, Head.Y - 22.0, 795.0), FVector(Head.X + 22.0, Head.Y + 22.0, 805.0), false)->SetCastShadow(false);
-		}
-		if (USpotLightComponent* L = NewPart<USpotLightComponent>())
-		{
-			L->SetRelativeLocationAndRotation(FVector(Head.X, Head.Y, 790.0), FRotator(-90.0f, 0.0f, 0.0f));
-			L->SetIntensityUnits(ELightUnits::Candelas);
-			L->SetIntensity(StreetlightCandela);
-			L->SetAttenuationRadius(2400.0f);
-			// A pool with an edge to it under each, the rain bright in the cone.
-			L->SetOuterConeAngle(62.0f);
-			L->SetInnerConeAngle(26.0f);
-			L->SetSourceRadius(12.0f);
-			L->SetUseTemperature(true);
-			L->SetTemperature(Index % 3 == 2 ? 4000.0f : 2300.0f); // sodium, and the odd newer LED
-			L->SetVolumetricScatteringIntensity(1.2f);
-			// PickStreetlights hands out the shadows (the nearest few to the camera).
-			L->SetCastShadows(false);
-			L->SetCastVolumetricShadow(false);
-			Streetlights.Add(L);
-		}
-		++Index;
-	}
-	// The corner's street blades, crossed on top of their pole (on Market's sidewalk): FIFTH ST runs along Fifth,
-	// MARKET ST along Market sitting on it, each a thin green plate printed on both faces.
-	const FVector Corner(390.0, StoreY1 + 90.0, 0.0);
-	UMaterialInterface* Blade = Mat(TEXT("StreetBlade"), 0x0f6b3a, 0.4f, 0.0f, 0.0f, 0.3f);
-	Cyl(Pole, Corner, 5.0f, 340.0f);
-	Box(Blade, Corner + FVector(-0.4, -54.0, 340.0), Corner + FVector(0.4, 54.0, 364.0), false)->SetCastShadow(false);
-	Box(Blade, Corner + FVector(-54.0, -0.4, 364.0), Corner + FVector(54.0, 0.4, 388.0), false)->SetCastShadow(false);
-	Sign(TEXT("street:FIFTH ST:1800"), Corner + FVector(0.8, 0.0, 352.0), 0.0f, FVector2D(110.0, 24.0), FIntPoint(900, 200), 0.0f);
-	Sign(TEXT("street:FIFTH ST:1800"), Corner + FVector(-0.8, 0.0, 352.0), 180.0f, FVector2D(110.0, 24.0), FIntPoint(900, 200), 0.0f);
-	Sign(TEXT("street:MARKET ST:200"), Corner + FVector(0.0, 0.8, 376.0), 90.0f, FVector2D(110.0, 24.0), FIntPoint(900, 200), 0.0f);
-	Sign(TEXT("street:MARKET ST:200"), Corner + FVector(0.0, -0.8, 376.0), -90.0f, FVector2D(110.0, 24.0), FIntPoint(900, 200), 0.0f);
-}
-
-void AStreetStage::BuildSkyAndWeather()
-{
-	// Sky dome and the skyline beyond the blocks.
-	if (SkyMaterial)
-	{
-		UMaterialInstanceDynamic* Sky = UMaterialInstanceDynamic::Create(SkyMaterial, this);
-		Sky->SetScalarParameterValue(TEXT("Strength"), 0.6f);
-		SkyMids.Add(Sky);
-		UStaticMeshComponent* Dome = NewPart<UStaticMeshComponent>();
-		Dome->SetStaticMesh(SphereMesh);
-		Dome->SetMaterial(0, Sky);
-		Dome->SetRelativeScale3D(FVector(2400.0));
-		Dome->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Dome->SetCastShadow(false);
-		Dome->bAffectDistanceFieldLighting = false;
-	}
-	UInstancedStaticMeshComponent* Skyline = NewPart<UInstancedStaticMeshComponent>();
-	Skyline->SetStaticMesh(CubeMesh);
-	UMaterialInstanceDynamic* City = CityMaterial ? UMaterialInstanceDynamic::Create(CityMaterial, this) : nullptr;
-	if (City)
-	{
-		City->SetScalarParameterValue(TEXT("Strength"), 0.55f);
-		SkyMids.Add(City);
-	}
-	Skyline->SetMaterial(0, City ? static_cast<UMaterialInterface*>(City) : Mat(TEXT("CityFallback"), 0x0a0b0e, 0.9f));
-	Skyline->SetCastShadow(false);
-	Skyline->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Skyline->bAffectDistanceFieldLighting = false;
-	FStreetDice Dice;
-	Dice.S = 4242;
-	for (int32 I = 0; I < 220; ++I)
-	{
-		const double A = Dice.Next() * 2.0 * PI;
-		const double R = 9000.0 + Dice.Next() * 30000.0;
-		const double Hgt = 1500.0 + Dice.Next() * Dice.Next() * 12000.0;
-		const double Wd = 1200.0 + Dice.Next() * 2400.0;
-		Skyline->AddInstance(FTransform(FRotator(0.0f, static_cast<float>(Dice.Next() * 90.0), 0.0f), FVector(R * FMath::Cos(A), 2000.0 + R * FMath::Sin(A), Hgt * 0.5), FVector(Wd / 100.0, Wd / 100.0, Hgt / 100.0)));
-	}
-
 	// The rain: layers at their distances in front of the eye (FollowCamera keeps them there, sized to the view).
-	if (RainMaterial)
+	if (!RainMaterial)
 	{
-		for (const FRainLayer& Layer : RainLayers)
-		{
-			UMaterialInstanceDynamic* Rain = UMaterialInstanceDynamic::Create(RainMaterial, this);
-			Rain->SetScalarParameterValue(TEXT("Depth"), static_cast<float>(Layer.Depth));
-			Rain->SetScalarParameterValue(TEXT("Spacing"), Layer.Spacing);
-			Rain->SetScalarParameterValue(TEXT("WidthCm"), Layer.Width);
-			Rain->SetScalarParameterValue(TEXT("LengthCm"), Layer.Length);
-			Rain->SetScalarParameterValue(TEXT("Strength"), Layer.Strength);
-			UStaticMeshComponent* Sheet = NewPart<UStaticMeshComponent>();
-			Sheet->SetStaticMesh(PlaneMesh);
-			Sheet->SetMaterial(0, Rain);
-			Sheet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			Sheet->SetCastShadow(false);
-			Sheet->bAffectDistanceFieldLighting = false;
-			Sheet->SetVisibleInRayTracing(false);
-			Sheet->SetRelativeScale3D(FVector(Layer.Depth * 3.2 / 100.0, Layer.Depth * 3.0 / 100.0, 1.0));
-			// Placed under the street until the camera moves it (never lying flat across the sidewalk).
-			Sheet->SetRelativeLocation(FVector(0.0, 0.0, -2000.0));
-			RainSheets.Add(Sheet);
-			RainMids.Add(Rain);
-		}
+		return;
 	}
-
-	// Night: the moon through the clouds (the overcast sun by day), the sky's light, wet haze, the lens.
-	Moon = NewPart<UDirectionalLightComponent>();
-	Moon->SetRelativeRotation(FRotator(-38.0f, 35.0f, 0.0f));
-	Moon->SetIntensity(0.5f);
-	Moon->SetLightColor(SrgbHex(0x8fa6d6));
-	Moon->SetCastShadows(false);
-	Moon->SetVolumetricScatteringIntensity(0.5f);
-	SkyLight = NewPart<USkyLightComponent>();
-	SkyLight->SourceType = ESkyLightSourceType::SLS_CapturedScene;
-	// The dome (1.2 km off) is the sky; the skyline's boxes and the street are not.
-	SkyLight->SkyDistanceThreshold = 100000.0f;
-	SkyLight->SetIntensity(1.0f);
-	SkyLight->SetLightColor(SrgbHex(0x9fb0d0));
-	Fog = NewPart<UExponentialHeightFogComponent>();
-	Fog->SetFogDensity(0.012f);
-	Fog->SetFogHeightFalloff(0.2f);
-	Fog->SetFogMaxOpacity(0.9f);
-	// The dome (1.2 km off) stays out of it: its glow of city light over the rooftops shows, the skyline fades into the haze.
-	Fog->SetFogCutoffDistance(100000.0f);
-	Fog->SetFogInscatteringColor(FLinearColor(0.012f, 0.014f, 0.022f));
-	// Volumetric fog thin enough to show only where a light passes through it: cones under the lamps, the neon's halo.
-	Fog->SetVolumetricFog(true);
-	Fog->SetVolumetricFogScatteringDistribution(0.75f);
-	Fog->SetVolumetricFogExtinctionScale(1.0f);
-	Fog->SetVolumetricFogAlbedo(FColor(190, 196, 205));
-	Fog->SetVolumetricFogDistance(4000.0f);
-	Lens = NewPart<UPostProcessComponent>();
-	Lens->bUnbound = true;
-	FPostProcessSettings& S = Lens->Settings;
-	// Auto exposure inside clamps that keep a night a night (ApplyLens moves them between the street's and the store's).
-	S.bOverride_AutoExposureMethod = true;
-	S.AutoExposureMethod = EAutoExposureMethod::AEM_Histogram;
-	S.bOverride_AutoExposureLowPercent = true;
-	S.AutoExposureLowPercent = 10.0f;
-	S.bOverride_AutoExposureHighPercent = true;
-	S.AutoExposureHighPercent = 90.0f;
-	S.bOverride_HistogramLogMin = true;
-	S.HistogramLogMin = -4.0f;
-	S.bOverride_HistogramLogMax = true;
-	S.HistogramLogMax = 14.0f;
-	S.bOverride_AutoExposureMinBrightness = true;
-	S.bOverride_AutoExposureMaxBrightness = true;
-	S.bOverride_AutoExposureBias = true;
-	S.bOverride_AutoExposureSpeedUp = true;
-	S.AutoExposureSpeedUp = 2.5f;
-	S.bOverride_AutoExposureSpeedDown = true;
-	S.AutoExposureSpeedDown = 1.4f;
-	S.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
-	S.AutoExposureApplyPhysicalCameraExposure = 0;
-	// Local exposure keeps the lit store and the signs from clipping against the dark street.
-	S.bOverride_LocalExposureHighlightContrastScale = true;
-	S.LocalExposureHighlightContrastScale = 0.75f;
-	S.bOverride_LocalExposureShadowContrastScale = true;
-	S.LocalExposureShadowContrastScale = 0.95f;
-	S.bOverride_BloomIntensity = true;
-	S.BloomIntensity = 0.7f;
-	S.bOverride_VignetteIntensity = true;
-	S.VignetteIntensity = 0.4f;
-	S.bOverride_FilmGrainIntensity = true;
-	S.bOverride_SceneFringeIntensity = true;
-	S.bOverride_MotionBlurAmount = true;
-	// The night grade: the darks a little cooler and greyer, the lamps and neon keeping their color.
-	S.bOverride_ColorSaturationShadows = true;
-	S.ColorSaturationShadows = FVector4(1.0, 1.0, 1.0, 0.85);
-	S.bOverride_ColorOffsetShadows = true;
-	S.ColorOffsetShadows = FVector4(0.0, 0.002, 0.006, 0.0);
-	S.bOverride_ColorContrast = true;
-	S.ColorContrast = FVector4(1.0, 1.0, 1.0, 1.06);
-	ApplyLens();
+	for (const FRainLayer& Layer : RainLayers)
+	{
+		UMaterialInstanceDynamic* Rain = UMaterialInstanceDynamic::Create(RainMaterial, this);
+		Rain->SetScalarParameterValue(TEXT("Depth"), static_cast<float>(Layer.Depth));
+		Rain->SetScalarParameterValue(TEXT("Spacing"), Layer.Spacing);
+		Rain->SetScalarParameterValue(TEXT("WidthCm"), Layer.Width);
+		Rain->SetScalarParameterValue(TEXT("LengthCm"), Layer.Length);
+		Rain->SetScalarParameterValue(TEXT("Strength"), Layer.Strength);
+		UStaticMeshComponent* Sheet = NewPart<UStaticMeshComponent>();
+		Sheet->SetStaticMesh(PlaneMesh);
+		Sheet->SetMaterial(0, Rain);
+		Sheet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Sheet->SetCastShadow(false);
+		Sheet->bAffectDistanceFieldLighting = false;
+		Sheet->SetVisibleInRayTracing(false);
+		Sheet->SetRelativeScale3D(FVector(Layer.Depth * 3.2 / 100.0, Layer.Depth * 3.0 / 100.0, 1.0));
+		// Placed under the street until the camera moves it (never lying flat across the sidewalk).
+		Sheet->SetRelativeLocation(FVector(0.0, 0.0, -2000.0));
+		RainSheets.Add(Sheet);
+		RainMids.Add(Rain);
+	}
 }
 
 void AStreetStage::BuildSpots()
@@ -3667,11 +3576,24 @@ void AStreetStage::Tick(float DeltaSeconds)
 		return;
 	}
 	// TG_PostUpdateWork: the camera has already moved this frame.
+	RealClock += DeltaSeconds;
 	const FVector At = Cam->GetCameraLocation();
 	const float Dt = FMath::Min(DeltaSeconds, 0.1f);
+	// The hour and the weather first (the look reads them), then the exposure and the rain from where the camera is.
+	UpdateClock(Dt);
+	UpdateWeather(Dt);
+	ApplyHour();
+	UpdateMpc();
+	UpdateShops(Dt);
+	UpdateSignals();
+	UpdateWindowsByHour();
+	UpdateBankClock();
 	UpdateLook(At, Dt);
 	FollowCamera(At, Cam->GetCameraRotation(), Cam->GetFOVAngle());
+	UpdateRainFx(At);
+	ApplyBudgetToggles();
 	AnimateWash(Dt, At);
+	UpdateSound(At, Cam->GetCameraRotation(), Dt);
 }
 
 void AStreetStage::UpdateLook(const FVector& Camera, float Dt)
@@ -3710,9 +3632,9 @@ void AStreetStage::ApplyLens()
 		return;
 	}
 	const float D = Daylight;
-	const float NightEV = CVarNightEV.GetValueOnGameThread();
-	const float OutMin = FMath::Lerp(NightEV, CVarDayEV.GetValueOnGameThread(), D);
-	const float OutMax = OutMin + FMath::Lerp(CVarNightRange.GetValueOnGameThread(), 1.5f, D);
+	// Outside: the clamps the sun's elevation and the cloud set (ApplyHour, spec 3.2).
+	const float OutMin = EvMin;
+	const float OutMax = FMath::Max(EvMin + 0.5f, EvMax);
 	// Indoors: the store's clamps, or the laundromat's (whichever the camera is in; they're a block apart).
 	const bool bWash = WashInside > Inside;
 	const float Indoors = FMath::Max(Inside, WashInside);
@@ -3728,7 +3650,7 @@ void AStreetStage::ApplyLens()
 
 	// What shines by itself out on the street keeps its brightness against the exposure (by day it must shine harder
 	// to show at all); the store's own backlit signs follow the store.
-	const float Scale = FMath::Pow(2.0f, OutMin - NightEV);
+	const float Scale = FMath::Pow(2.0f, OutMin - GlowSetForEV);
 	if (FMath::Abs(Scale - SignScale) > SignScale * 0.01f)
 	{
 		SignScale = Scale;
@@ -3742,7 +3664,7 @@ void AStreetStage::ApplyLens()
 			}
 		}
 	}
-	const float RainK = Scale * FMath::Max(0.0f, CVarRain.GetValueOnGameThread());
+	const float RainK = Scale * RainStrength();
 	if (FMath::Abs(RainK - RainScale) > FMath::Max(RainScale, 0.01f) * 0.01f)
 	{
 		RainScale = RainK;
@@ -3767,53 +3689,67 @@ void AStreetStage::SetLensOptions(float InBrightnessBias, float InGrainScale, fl
 
 void AStreetStage::PickStreetlights(const FVector& Camera)
 {
-	// Shadows (and the fog's) from the few lamps nearest the camera: a far lamp's shadows are too small to see and
-	// cost the most. Inside the store none: their light only comes in through the glass.
-	TArray<TPair<double, int32>> Near;
-	for (int32 I = 0; I < Streetlights.Num(); ++I)
+	// Every lamp casts shadows (MegaLights, spec 3.1); the few nearest the camera cast them into the fog as well (their
+	// cones in the rain), at most ShadowedStreetlights of them and none from inside a room. Market's lamps count too.
+	TArray<USpotLightComponent*> Lamps;
+	for (USpotLightComponent* L : Streetlights)
 	{
-		if (Streetlights[I] && Streetlights[I]->IsVisible())
+		if (L)
 		{
-			Near.Emplace(FVector::DistSquared(Streetlights[I]->GetComponentLocation(), Camera), I);
+			Lamps.Add(L);
+		}
+	}
+	if (const AMarketStage* M = Market.Get())
+	{
+		for (USpotLightComponent* L : M->StreetLamps())
+		{
+			if (L)
+			{
+				Lamps.Add(L);
+			}
+		}
+	}
+	TArray<TPair<double, int32>> Near;
+	for (int32 I = 0; I < Lamps.Num(); ++I)
+	{
+		if (Lamps[I]->IsVisible())
+		{
+			Near.Emplace(FVector::DistSquared(Lamps[I]->GetComponentLocation(), Camera), I);
 		}
 	}
 	Near.Sort([](const TPair<double, int32>& A, const TPair<double, int32>& B) { return A.Key < B.Key; });
-	const int32 Budget = FMath::Max(Inside, WashInside) > 0.5f ? 0 : FMath::Max(0, ShadowedStreetlights);
-	TArray<bool> Shadowed;
-	Shadowed.Init(false, Streetlights.Num());
+	const int32 Budget = FMath::Max(Inside, WashInside) > 0.5f ? 0 : FMath::Clamp(ShadowedStreetlights, 0, 8);
+	TArray<bool> Volumetric;
+	Volumetric.Init(false, Lamps.Num());
 	for (int32 Rank = 0; Rank < Near.Num() && Rank < Budget; ++Rank)
 	{
-		Shadowed[Near[Rank].Value] = Near[Rank].Key < 3000.0 * 3000.0;
+		Volumetric[Near[Rank].Value] = Near[Rank].Key < 3000.0 * 3000.0;
 	}
-	for (int32 I = 0; I < Streetlights.Num(); ++I)
+	for (int32 I = 0; I < Lamps.Num(); ++I)
 	{
-		USpotLightComponent* L = Streetlights[I];
-		if (L && static_cast<bool>(L->CastShadows) != Shadowed[I])
+		USpotLightComponent* L = Lamps[I];
+		if (!L->CastShadows)
 		{
-			L->SetCastShadows(Shadowed[I]);
-			L->SetCastVolumetricShadow(Shadowed[I]);
+			L->SetCastShadows(true);
+		}
+		if (static_cast<bool>(L->bCastVolumetricShadow) != Volumetric[I])
+		{
+			L->SetCastVolumetricShadow(Volumetric[I]);
 		}
 	}
-	// The store's own lights keep their shadows (and so their light inside its walls) while the camera is near enough to
-	// see the store, inside or out; from farther off the difference doesn't show, and their shadows aren't drawn.
-	const FVector StoreMiddle = GetActorTransform().TransformPosition(FVector(-StoreDepth * 0.5, (StoreY0 + StoreY1) * 0.5, StoreCeiling * 0.5));
-	const bool bStoreShadows = Inside > 0.0f || FVector::DistSquared(StoreMiddle, Camera) < 3000.0 * 3000.0;
+	// The rooms' own lights keep their shadows at every distance (so none of their light gets through their walls).
 	for (URectLightComponent* L : StoreLights)
 	{
-		if (L && static_cast<bool>(L->CastShadows) != bStoreShadows)
+		if (L && !L->CastShadows)
 		{
-			L->SetCastShadows(bStoreShadows);
+			L->SetCastShadows(true);
 		}
 	}
-	// The Wash & Fold's fluorescents the same, from its own sidewalk or nearer (they point down, inside its walls: from
-	// across the street what little of them would get through the brick doesn't show, and four more shadowed lights do).
-	const FVector WashMiddle = GetActorTransform().TransformPosition(FVector((FarFront + WashBack) * 0.5, (WashY0 + WashY1) * 0.5, WashCeiling * 0.5));
-	const bool bWashShadows = WashInside > 0.0f || FVector::DistSquared(WashMiddle, Camera) < 1800.0 * 1800.0;
 	for (URectLightComponent* L : WashLights)
 	{
-		if (L && static_cast<bool>(L->CastShadows) != bWashShadows)
+		if (L && !L->CastShadows)
 		{
-			L->SetCastShadows(bWashShadows);
+			L->SetCastShadows(true);
 		}
 	}
 	// The rain catches the light of the nearest lamps (and glows in their cones).
@@ -3827,7 +3763,7 @@ void AStreetStage::PickStreetlights(const FVector& Camera)
 		FLinearColor Col(0.0f, 0.0f, 0.0f);
 		if (K < Near.Num())
 		{
-			const USpotLightComponent* L = Streetlights[Near[K].Value];
+			const USpotLightComponent* L = Lamps[Near[K].Value];
 			Pos = FLinearColor(L->GetComponentLocation());
 			const float Strength = L->Intensity / FMath::Max(1.0f, StreetlightCandela);
 			Col = (L->Temperature < 3000.0f ? FLinearColor(1.0f, 0.55f, 0.24f) : FLinearColor(0.8f, 0.88f, 1.0f)) * Strength;
@@ -3848,6 +3784,11 @@ void AStreetStage::SetDaylight(float InDaylight)
 	Daylight = FMath::Clamp(InDaylight, 0.0f, 1.0f);
 	// Small steps: the sky and the lamps are scaled against an exposure nine stops apart, so a step of 0.02 would be
 	// a visible jump in the sky at dusk. The fronts' glow settings apply as they're changed too (a night holds still).
+	// The look's hour may be forced (ss.Street.Hour): its daylight then, not the clock's.
+	if (ClockWorld >= 0.0 && ShownWorld != ClockWorld)
+	{
+		Daylight = static_cast<float>(ss::life::Daylight(ShownWorld));
+	}
 	if (FMath::Abs(Daylight - AppliedDaylight) > 0.004f || CVarTenementGlow.GetValueOnGameThread() != AppliedTenementGlow ||
 		CVarLaundromatGlow.GetValueOnGameThread() != AppliedLaundromatGlow)
 	{
@@ -3863,7 +3804,7 @@ void AStreetStage::ApplyDaylight()
 	const float D = Daylight;
 	const float Night = NightLevel(D);
 	// Everything that shines by itself is set for the night's exposure; by day the exposure is this many times less.
-	const float Scale = FMath::Pow(2.0f, (CVarDayEV.GetValueOnGameThread() - CVarNightEV.GetValueOnGameThread()) * D);
+	const float Scale = FMath::Pow(2.0f, FMath::Max(0.0f, EvMin - GlowSetForEV));
 	for (UMaterialInstanceDynamic* M : SkyMids)
 	{
 		if (M)
@@ -3912,9 +3853,9 @@ void AStreetStage::ApplyDaylight()
 	}
 	// Blender's fronts glow by themselves too (their lit rooms, lanterns and transoms, baked for the night): out by day
 	// with the lamps.
-	for (UStaticMeshComponent* Lit : LitFronts)
+	for (UStaticMeshComponent* Front : LitFronts)
 	{
-		DimImportedGlow(Lit, Night * (Lit == TenementFront ? CVarTenementGlow.GetValueOnGameThread() : 1.0f));
+		DimImportedGlow(Front, Night * (Front == TenementFront ? CVarTenementGlow.GetValueOnGameThread() : 1.0f));
 	}
 	// The tenement's own baked laundromat (tenement_store, its M_SM_Tenement_9) is the brightest of its bakes: made to read
 	// through the apartment's rainy window, it whites out against the street's night exposure. It's hidden behind the Wash
@@ -3937,28 +3878,12 @@ void AStreetStage::ApplyDaylight()
 			}
 		}
 	}
-	if (Moon)
+	// The street's materials are as wet as the street (M_Street's Wet: the old patterns until the meshes using them go).
+	for (TPair<FName, TObjectPtr<UMaterialInstanceDynamic>>& M : Materials)
 	{
-		// Moonlight through the clouds at night; the overcast sun by day (a soft, high light, with shadows).
-		Moon->SetIntensity(FMath::Exp(FMath::Lerp(FMath::Loge(0.5f), FMath::Loge(3000.0f), D)));
-		Moon->SetLightColor(FMath::Lerp(SrgbHex(0x8fa6d6), SrgbHex(0xd8dde6), D));
-		const bool bShadows = D > 0.25f;
-		if (static_cast<bool>(Moon->CastShadows) != bShadows)
+		if (M.Value)
 		{
-			Moon->SetCastShadows(bShadows);
-		}
-	}
-	if (Fog)
-	{
-		// The haze takes the sky's color at the horizon: near black-blue at night, the grey of rain cloud by day.
-		Fog->SetFogInscatteringColor(FMath::Lerp(FLinearColor(0.012f, 0.014f, 0.022f), FLinearColor(0.3f, 0.32f, 0.36f), D) * (Scale * FMath::Lerp(1.0f, 3.0f, D)));
-	}
-	if (SkyLight && FMath::Abs(D - CapturedDaylight) > 0.08f)
-	{
-		CapturedDaylight = D;
-		if (HasActorBegunPlay())
-		{
-			SkyLight->RecaptureSky();
+			M.Value->SetScalarParameterValue(TEXT("Wet"), Wetness);
 		}
 	}
 	SignScale = -1.0f;
@@ -3984,7 +3909,7 @@ void AStreetStage::FollowCamera(const FVector& Location, const FRotator& Rotatio
 	const FVector LocalFwd = GetActorTransform().InverseTransformVectorNoScale(Fwd);
 	// Inside, looking away from the windows: no rain to see (the material hides what's in the room anyway). The store's
 	// windows look along +X, the laundromat's along -X.
-	const bool bAny = CVarRain.GetValueOnGameThread() > 0.0f && !(Inside > 0.5f && LocalFwd.X < 0.15) && !(WashInside > 0.5f && LocalFwd.X > -0.15);
+	const bool bAny = RainStrength() > 0.01f && !(Inside > 0.5f && LocalFwd.X < 0.15) && !(WashInside > 0.5f && LocalFwd.X > -0.15);
 	// How wide a pixel is (radians), so each streak stays a pixel or two wide at any distance and resolution.
 	FVector2D View(2560.0, 1440.0);
 	if (UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
@@ -4020,7 +3945,7 @@ void AStreetStage::FollowCamera(const FVector& Location, const FRotator& Rotatio
 		}
 		const double Depth = RainLayers[I % 4].Depth;
 		const FVector At = Location + Fwd * Depth;
-		bool bShow = bAny;
+		bool bShow = bAny && !(I % 4 == 0 && CVarRainBudget.GetValueOnGameThread() != 0 && RainStrength() < 0.5f);
 		if (bShow && !bRainMasksStore)
 		{
 			// The apartment's rain can't hide itself indoors: keep its sheets out of the store and the laundromat.
@@ -4293,16 +4218,13 @@ FStreetWalkway AStreetStage::Sidewalk(int32 Side) const
 		{
 			Lane(130.0, From, To);
 		}
-		// 1812's step, the walk-up's granite step, the cans, the hydrant, the newsbox, the lamp posts at the curb.
+		// 1812's step, the walk-up's granite step, and the furniture as BuildFurniture placed it (lamps, signs, cans, the
+		// hydrant, the newsboxes, trees in their pits).
 		Obstacle(-70.0, -112.0, 45.0, 112.0);
 		Obstacle(0.0, (2300.0 + StoreY0) * 0.5 - 62.0, 40.0, (2300.0 + StoreY0) * 0.5 + 105.0);
-		for (const FVector2D& At : {FVector2D(330.0, -500.0), FVector2D(330.0, 3550.0), FVector2D(360.0, 1300.0), FVector2D(300.0, 3400.0)})
+		for (const FBox2D& B : NsFootprints[0])
 		{
-			Obstacle(At.X - 30.0, At.Y - 30.0, At.X + 30.0, At.Y + 30.0);
-		}
-		for (const double Y : {-4300.0, -2000.0, 700.0, 2700.0, 4700.0, 7600.0, StoreY1 + 90.0})
-		{
-			Obstacle(360.0, Y - 20.0, 400.0, Y + 20.0);
+			Obstacle(B.Min.X, B.Min.Y, B.Max.X, B.Max.Y);
 		}
 		return W;
 	}
@@ -4322,10 +4244,9 @@ FStreetWalkway AStreetStage::Sidewalk(int32 Side) const
 		Lane(FarFront - 130.0, From, To);
 	}
 	Obstacle(FarFront - 72.0, WashDoorY0 - 20.0, FarFront, WashDoorY1 + 20.0);
-	Obstacle(1690.0, 2470.0, 1750.0, 2530.0);
-	for (const double Y : {-3200.0, -600.0, 1800.0, 4200.0, 7000.0})
+	for (const FBox2D& B : NsFootprints[1])
 	{
-		Obstacle(RoadX1 + 20.0, Y - 20.0, RoadX1 + 60.0, Y + 20.0);
+		Obstacle(B.Min.X, B.Min.Y, B.Max.X, B.Max.Y);
 	}
 	return W;
 }
@@ -4357,12 +4278,14 @@ bool AStreetStage::IsOffTheSet(const FVector& At) const
 		return Registry->IsOffTheSet(At);
 	}
 	const FVector L = GetActorTransform().InverseTransformPosition(At);
-	return L.Z < -400.0 || L.Y < EndY0 - 600.0 || L.Y > EndY1 + 600.0 || L.X < MarketWest - 900.0 || L.X > FarFront + 1600.0;
+	const double West = bWideMarket ? Ns::CardinalRoad0 - 100.0 : MarketWest - 900.0;
+	return L.Z < -400.0 || L.Y < Ns::HollisRoad0 - 100.0 || L.Y > Ns::WexlerRoad0 + 100.0 || L.X < West || L.X > FarFront + 1900.0;
 }
 
 float AStreetStage::RainStrength() const
 {
-	return FMath::Max(0.0f, CVarRain.GetValueOnGameThread());
+	// The weather's rain as it shows (ss.Street.Rain forces it, UpdateWeather).
+	return FMath::Clamp(static_cast<float>(Weather.Rain), 0.0f, 1.0f);
 }
 
 float AStreetStage::SignHum(const FVector& Listener) const
@@ -4549,6 +4472,20 @@ void AStreetStage::AnimateWash(float Dt, const FVector& Camera)
 
 void AStreetStage::SetClock(double WorldMinutes)
 {
+	// The look's clock too (UpdateClock: the hour shown, a skip seen by its rate). The first time it's told (the street is
+	// built before the game mode's first tick, on a placeholder night), the hour and the weather snap to it: nothing eases in
+	// from the placeholder's weather behind the load's fade, and the jump isn't read as a skip holding the corner.
+	const bool bFirstTold = ClockWorld < 0.0;
+	ClockWorld = WorldMinutes;
+	if (bFirstTold && bBuilt)
+	{
+		RateWorld = -1.0;
+		bSkipSeen = false;
+		UpdateClock(0.0f);
+		UpdateWeather(-1.0f);
+		AppliedHourKey = -1000.0f;
+		WindowHourApplied = -1000.0f;
+	}
 	if (!ClockHour || !ClockMinute || !ClockSecond)
 	{
 		return;

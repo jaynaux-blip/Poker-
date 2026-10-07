@@ -1,33 +1,41 @@
 """
 SHORT STACK: the street hero's real clothes (art/blender/assets/garments.py), imported onto the hero MetaHumans' skeletons.
 
-For each body type (A, B) the Blender build writes unreal/Art/Garments/SK_Garment_Jeans_<A|B>.fbx and
-SK_Garment_Jacket_<A|B>.fbx (skeletal meshes on the hero body's own armature: every bone, its names and bind pose) and their
-baked maps in unreal/Art/Garments/Textures. This imports each as a SkeletalMesh whose Skeleton is that hero body's
-skeleton, so AShortStackCharacter can run it with the body as its leader pose:
+garments.py writes unreal/Art/Garments/SK_Garment_<Kind>_<Fit>.fbx (skeletal meshes on the fitted body's own armature:
+every bone, its names and bind pose) and their baked maps in unreal/Art/Garments/Textures. Kind is Jeans, Chinos, Jacket
+(the bomber) or Hoodie (P1 adds Denim, Leather, Flannel, Track, WorkPants); Fit is A or B (the body type's garments, fitted
+to HeroA1 or HeroB1, worn by every hero of the type without a fit of its own) or a face (HeroA0, a staff member's Lonnie:
+that body's own fit, worn first). This imports each as a SkeletalMesh whose Skeleton is the fitted body's skeleton, so
+AShortStackCharacter can run it with the body as its leader pose:
 
-    /Game/ShortStack/Garments/SK_Garment_Jeans_A          (slots: 0 denim, 1 the button's metal)
-    /Game/ShortStack/Garments/SK_Garment_Jacket_A         (slots: 0 shell, 1 rib knit, 2 zip)
+    /Game/ShortStack/Garments/SK_Garment_<Kind>_<Fit>       (slots: SLOTS below; their Blender names end _0, _1, _2)
     /Game/ShortStack/Garments/Textures/T_SK_Garment_*      BaseColor (sRGB), ORM (linear), Normal (flipped green: Blender's
                                                            maps are OpenGL), and the tiling weave details
     /Game/ShortStack/Garments/Materials/M_Garment          the master: BaseColor x Tint, ORM, Normal + a tiling weave
     /Game/ShortStack/Garments/Materials/MI_<mesh>_<slot>   one instance per slot
 
-The jacket's shell bakes light neutral grey: the game sets Tint on slot 0 to the creator's outfit color (and a darker
-shade of it on the rib). Re-running is cheap: a garment is imported again only when its FBX or one of its maps changed
-(an md5 of them all is kept on the mesh as SourceHash metadata), as shortstack_setup does for the props.
+The shells bake light neutral grey: the game sets Tint on the tinted slots (a jacket's or hoodie's shell, and a darker shade
+on its rib; the chinos' twill) from the closet's colors. Re-running is cheap: a garment is imported again only when its FBX
+or one of its maps changed (an md5 of them all is kept on the mesh as SourceHash metadata), as shortstack_setup does for the
+props.
 
     import garments_setup
     garments_setup.run()                 # what changed
     garments_setup.run(force=True)       # everything again
-    garments_setup.export_sources("C:/somewhere")   # the hero bodies and their default outfits, for the Blender build
+    garments_setup.export_sources("C:/somewhere")                   # every hero's body and default outfit, for garments.py
+    garments_setup.export_sources("C:/somewhere", ("Lonnie",))      # a staff member's, for a fit of their own
 
 The FBX goes through the legacy FBX importer (its options set the target Skeleton); Interchange is switched off for the
-import and restored after. Needs the hero MetaHumans built (hero_cast.py): the skeleton is read from MHC_HeroA1 / MHC_HeroB1.
+import and restored after. Needs the fitted bodies built (hero_cast.py, the staff's builds): the skeleton is read from the
+fit's own body (MHC_<Face>), or for A/B from MHC_HeroA1 / MHC_HeroB1 (another hero of the type if those aren't built).
+
+The thrift's rack and folded statics (SM_NS_Rack_*, SM_NS_Folded_*) are glb props: garments.py builds them through
+art/blender/build.py ("garments") and shortstack_setup's mesh import brings them in like any prop.
 """
 import hashlib
 import json
 import os
+import re
 
 import unreal
 
@@ -40,12 +48,15 @@ MAT_DIR = f"{GARMENT_DIR}/Materials"
 MASTER = f"{MAT_DIR}/M_Garment"
 # The hero each body type's garments were fitted to; the others of that type share its skeleton's bone names.
 HEROES = {"A": ("HeroA1", "HeroA0", "HeroA2"), "B": ("HeroB1", "HeroB0", "HeroB2")}
-GARMENTS = ("Jeans", "Jacket")
+ALL_HEROES = ("HeroA0", "HeroA1", "HeroA2", "HeroB0", "HeroB1", "HeroB2")
 # Slots: (suffix, what it is, which tiling detail, its strength).
 SLOTS = {
     "Jeans": ((0, "denim", "T_Garment_Detail_Twill_N", 0.55), (1, "metal", None, 0.0)),
+    "Chinos": ((0, "twill", "T_Garment_Detail_Twill_N", 0.35), (1, "button", None, 0.0)),
     "Jacket": ((0, "shell", "T_Garment_Detail_Canvas_N", 0.45), (1, "rib", None, 0.0), (2, "zip", None, 0.0)),
+    "Hoodie": ((0, "shell", "T_Garment_Detail_Jersey_N", 0.4), (1, "rib", None, 0.0), (2, "cords", None, 0.0)),
 }
+NAME = re.compile(r"^SK_Garment_([A-Za-z]+)_([A-Za-z0-9]+)$")
 
 
 def _src_dir():
@@ -69,16 +80,26 @@ def _meta():
         return json.load(f)
 
 
-def hero_skeleton(body_type):
-    """The skeleton of the hero body the garments were fitted to (or another hero of the same body type)."""
-    for hero in HEROES[body_type]:
-        path = f"/Game/ShortStack/Cast/Built/MHC_{hero}/Body/SKM_MHC_{hero}_BodyMesh"
+def _body_path(face):
+    return f"/Game/ShortStack/Cast/Built/MHC_{face}/Body/SKM_MHC_{face}_BodyMesh"
+
+
+def fit_skeleton(fit):
+    """The skeleton a fit's garments run on, and the body it came from: A/B the type's hero (HeroA1, HeroB1, or another of
+    the type), a face its own body."""
+    for face in HEROES.get(fit, (fit,)):
+        path = _body_path(face)
         if eal.does_asset_exist(path):
             mesh = eal.load_asset(path)
             skel = mesh.get_editor_property("skeleton") if mesh else None
             if skel:
                 return skel, path
     return None, None
+
+
+def hero_skeleton(body_type):
+    """As before: the skeleton of the hero body a type's garments were fitted to."""
+    return fit_skeleton(body_type)
 
 
 # ---------------------------------------------------------------- textures
@@ -269,8 +290,17 @@ def _interchange_fbx(on):
     return was
 
 
-def import_garment(name, body_type, force=False):
-    """Imports one garment's FBX onto the hero skeleton, its maps, its materials. Returns the mesh, or None."""
+def import_garment(name, fit=None, force=False):
+    """Imports one garment's FBX onto its fit's skeleton, its maps, its materials. Returns the mesh, or None."""
+    m = NAME.match(name)
+    if not m:
+        unreal.log_warning(f"ShortStack: {name} isn't SK_Garment_<Kind>_<Fit>")
+        return None
+    kind, fit_name = m.group(1), m.group(2)
+    fit = fit or fit_name
+    if kind not in SLOTS:
+        unreal.log_warning(f"ShortStack: {name}: no slot list for {kind} (garments_setup.SLOTS)")
+        return None
     src = _src_dir()
     fbx = os.path.join(src, f"{name}.fbx")
     if not os.path.isfile(fbx):
@@ -284,9 +314,9 @@ def import_garment(name, body_type, force=False):
         existing = eal.load_asset(mesh_path)
         if existing and eal.get_metadata_tag(existing, "SourceHash") == digest:
             return existing
-    skeleton, body = hero_skeleton(body_type)
+    skeleton, body = fit_skeleton(fit)
     if skeleton is None:
-        unreal.log_error(f"ShortStack: no hero body of type {body_type} is built (hero_cast.py): can't import {name}")
+        unreal.log_error(f"ShortStack: {name}: the body it was fitted to ({fit}) isn't built: can't import it")
         return None
     task = unreal.AssetImportTask()
     task.filename = fbx
@@ -312,8 +342,7 @@ def import_garment(name, body_type, force=False):
     master = build_master()
     meta = _meta().get(name, {})
     mats = list(mesh.get_editor_property("materials"))
-    garment = "Jacket" if "Jacket" in name else "Jeans"
-    for index, what, detail_name, strength in SLOTS[garment]:
+    for index, what, detail_name, strength in SLOTS[kind]:
         mi = _instance(f"MI_{name}_{what}", master,
                        {"BaseColor": tex.get(f"T_{name}_{index}_BaseColor.png"), "ORM": tex.get(f"T_{name}_{index}_ORM.png"),
                         "Normal": tex.get(f"T_{name}_{index}_Normal.png")},
@@ -342,29 +371,42 @@ def _slot_of(mats, index):
 
 
 def run(force=False):
-    """Imports every garment the Blender build has written. Returns how many came in (or were already current)."""
-    if not os.path.isdir(_src_dir()):
+    """Imports every garment the Blender build has written (every kind, every fit) that changed since it last came in.
+    Returns how many were imported now (0 when all were current), as shortstack_setup's realism setups count changes."""
+    src = _src_dir()
+    if not os.path.isdir(src):
         return 0
     # The master once (rebuilt with force, so a change to its graph reaches every instance).
     build_master(force)
-    done = 0
-    for body_type in HEROES:
-        for g in GARMENTS:
-            if import_garment(f"SK_Garment_{g}_{body_type}", body_type, force):
-                done += 1
-    return done
+    changed = 0
+    current = 0
+    for f in sorted(os.listdir(src)):
+        name, ext = os.path.splitext(f)
+        if ext.lower() != ".fbx" or not NAME.match(name):
+            continue
+        mesh_path = f"{GARMENT_DIR}/{name}"
+        before = eal.get_metadata_tag(eal.load_asset(mesh_path), "SourceHash") if eal.does_asset_exist(mesh_path) else None
+        mesh = import_garment(name, force=force)
+        if mesh is None:
+            continue
+        current += 1
+        if force or eal.get_metadata_tag(mesh, "SourceHash") != before:
+            changed += 1
+    unreal.log(f"ShortStack: garments: {changed} imported, {current} in all")
+    return changed
 
 
 # ---------------------------------------------------------------- sources for the Blender build
 
 
-def export_sources(out_dir, heroes=("HeroA1", "HeroB1")):
-    """Writes each hero's body mesh and default outfit as FBX (<Hero>_SKM_MHC_<Hero>_BodyMesh.fbx, <Hero>_MHC_<Hero>_Outfits.fbx),
-    what garments.py fits the clothes to (its --wardrobe directory)."""
+def export_sources(out_dir, heroes=ALL_HEROES):
+    """Writes each body's mesh and default outfit as FBX (<Hero>_SKM_MHC_<Hero>_BodyMesh.fbx, <Hero>_MHC_<Hero>_Outfits.fbx),
+    what garments.py fits the clothes to (its --wardrobe directory). Every hero by default (the per-hero fit pass); a
+    staff member's build by name."""
     os.makedirs(out_dir, exist_ok=True)
     written = []
     for hero in heroes:
-        for asset, file in ((f"/Game/ShortStack/Cast/Built/MHC_{hero}/Body/SKM_MHC_{hero}_BodyMesh", f"{hero}_SKM_MHC_{hero}_BodyMesh.fbx"),
+        for asset, file in ((_body_path(hero), f"{hero}_SKM_MHC_{hero}_BodyMesh.fbx"),
                             (f"/Game/ShortStack/Cast/Built/MHC_{hero}/Clothing/MHC_{hero}_Outfits", f"{hero}_MHC_{hero}_Outfits.fbx")):
             obj = eal.load_asset(asset)
             if obj is None:

@@ -1,6 +1,36 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/SharedPointer.h"
+
+/** A positioned sound's kind on the street (world realism spec 3.7): what it is decides how it sounds. */
+enum class EStreetEmitter : uint8
+{
+	/** A sign's or a tube's transformer buzzing (Hz: its mains hum). */
+	Hum,
+	/** A window AC unit: its fan's beating whoosh and its compressor (Hz: the compressor's hum). */
+	Ac,
+	/** A downspout running in the rain, splashing at its foot. */
+	Gutter,
+	/** The steam stack's hiss. */
+	Steam,
+	/** A lit shop's open door: its room's tone leaking out, muffled (Hz: which room, 0..6). */
+	RoomLeak,
+	/** Rain drumming on an awning, the shelter's roof, the shed. */
+	RainRoof,
+	/** A passing car: its engine, its tyres, their spray when wet (Hz: its speed, m/s). */
+	Engine,
+};
+
+/** One positioned sound (world space): its kind, how loud at 2 m (0..1), its own pitch or kind, an id that stays with it. */
+struct FStreetEmitter
+{
+	FVector At = FVector::ZeroVector;
+	EStreetEmitter Kind = EStreetEmitter::Hum;
+	float Level = 1.0f;
+	float Hz = 120.0f;
+	uint32 Id = 0;
+};
 
 /**
  * Fifth Street, synthesized like the apartment's room tone and the card room's (no audio assets): out on the street the
@@ -14,14 +44,44 @@
  * the listener crosses its threshold, more of the street coming in while its door stands open. The doors' own sounds
  * ring in it too: the laundromat's bells, a lock that won't turn, a buzzer pressed, the steel back door. Mono, 48 kHz,
  * for UNightOneAudio::StartAmbience; the setters, the one-shots and Render are all called on the game thread.
+ *
+ * In stereo (RenderStereo, the realism update's spec 3.7: the stage moves the street onto UNightOneAudio's stereo stream,
+ * the apartment keeping its own mono one): the same bed, widened by a decorrelated layer of the rain and the wind across
+ * the block, a dog or a train's horn far off now and then, and up to twelve positioned voices near the listener (the
+ * stage's emitters: the signs' hum, AC units, downspouts, awnings in the rain, shops' open doors, the passing cars), each
+ * falling off with distance (inverse from 2 m, gone by 40 m) and panned by where it is from the listener.
+ *
+ * Inside the shops (SetRoom, by the registry's zone): Fifth St. Barbers' radio, clippers and TV; the thrift's tubes, its
+ * church-station radio and hangers on the rails; IronHouse's music, plates and treadmills; Ruby's flat-top, dishes,
+ * chatter and jukebox; the pawn's ball game in the cage, its ceiling fan and its wall of clocks. The street muffles
+ * behind each room's glass as it does behind the store's.
  */
-class FStreetAmbience
+class FStreetAmbience : public TSharedFromThis<FStreetAmbience>
 {
 public:
 	explicit FStreetAmbience(uint32 Seed);
+	~FStreetAmbience();
+
+	/** The street's ambience alive now (the game mode's), or null: the street's stage finds it this way to feed it. */
+	static TSharedPtr<FStreetAmbience> Live();
+	/** Frames of interleaved stereo (L, R) at 48 kHz: the bed, its width, the far sounds and the positioned voices. */
+	void RenderStereo(float* Out, int32 Frames);
+	/** Where the listener is (world) and which way they face (flat forward and right): the voices pan by it. */
+	void SetListener(const FVector& At, const FVector& Forward, const FVector& Right);
+	/** The positioned sounds near the listener now (the nearest twelve are voiced; an id keeps its voice). */
+	void SetEmitters(const TArray<FStreetEmitter>& InEmitters);
+	/** The wind (the weather's, 0..1): its rush across the block, in the stereo bed. */
+	void SetWind(float InWind);
 
 	/** How far inside the store the listener is (AStreetStage::CameraInside, 0..1) and how far open its doors are (0..1). */
 	void SetInside(float InInside, float InDoorsOpen);
+	/**
+	 * The shop the listener is in (spec 3.7's room tones by zone: StreetRoomTone Barber 3, Thrift 4, Gym 5, Diner 6, Pawn 7;
+	 * 0 out on the street), and how far its door stands open (0..1): its room plays all round them, the street muffled
+	 * through its glass (more of it with the door open), crossfaded over a third of a second at the threshold. The store
+	 * and the Wash & Fold keep SetInside and SetWash. The game mode sets it each frame from the registry's zone at the camera.
+	 */
+	void SetRoom(int32 InTone, float InDoorOpen);
 	/**
 	 * How far inside the Wash & Fold the listener is (AStreetStage::CameraInWash, 0..1), how far open its door is (0..1), and
 	 * how near its front they stand out on the sidewalk (AStreetStage::WashNear, 0..1).
@@ -120,6 +180,40 @@ private:
 	double RenderWash();
 	/** Queues a strike Delay seconds from now. */
 	void Strike(double Delay, double Hz, double Seconds, double Amp);
+
+	/** One positioned voice (RenderStereo): its emitter, its gains (eased per block), its own noise and filters. */
+	struct FVoice
+	{
+		uint32 Id = 0;
+		bool bActive = false;
+		EStreetEmitter Kind = EStreetEmitter::Hum;
+		float Level = 0.0f;
+		float Hz = 120.0f;
+		FVector At = FVector::ZeroVector;
+		double GainL = 0.0;
+		double GainR = 0.0;
+		double TargetL = 0.0;
+		double TargetR = 0.0;
+		uint32 Rng = 1;
+		double Phase = 0.0;
+		double Phase2 = 0.0;
+		double Low1 = 0.0;
+		double Low2 = 0.0;
+		double Low3 = 0.0;
+		double Env = 0.0;
+		double Next = 0.0;
+		FBiquad Band;
+		FRing Ring;
+	};
+	/** One sample of a voice (mono, before its gains). */
+	double RenderVoice(FVoice& V);
+	double VoiceNoise(FVoice& V);
+	/** The voices' gains from where they are and where the listener is (each block). */
+	void AimVoices();
+	/** The width: a second, uncorrelated hiss of the rain and the wind, out of phase between the ears. */
+	double RenderSide();
+	/** Far off: a dog, now and then; a train's horn across the river once in a long while (and which ear it favors). */
+	double RenderDistant(double& OutPan);
 	/** The strikes that are due, and every ring still sounding. */
 	double RenderStrikes();
 
@@ -277,4 +371,97 @@ private:
 	FRing Voices[VoiceCount];
 	int32 NextVoice = 0;
 	FBuzzer DoorBuzzer;
+
+	// Stereo (RenderStereo): the listener, the voices, the width, the wind, the far sounds.
+	static constexpr int32 MaxVoices = 12;
+	FVoice Voices12[MaxVoices];
+	TArray<float> Scratch;
+	FVector ListenAt = FVector::ZeroVector;
+	FVector ListenRight = FVector(0.0, 1.0, 0.0);
+	double WindTarget = 0.2;
+	double WindLevel = 0.2;
+	double SideLow = 0.0;
+	double SideHigh = 0.0;
+	double SideGust = 1.0;
+	double WindLow1 = 0.0;
+	double WindLow2 = 0.0;
+	double WindSwell = 0.0;
+	uint32 SideState = 0x9e3779b9u;
+	double NextDog = 40.0;
+	double DogAt = -100.0;
+	int32 DogBarks = 0;
+	double DogPan = 0.0;
+	FBiquad DogFormant;
+	double NextTrain = 240.0;
+	double TrainAt = -100.0;
+	double TrainPan = 0.0;
+	double TrainPhase1 = 0.0;
+	double TrainPhase2 = 0.0;
+	double TrainLow = 0.0;
+
+	// The shops' rooms (SetRoom): which one is heard (it stays while the crossfade runs out), how far in, its door.
+	/** One sample of the room RoomTone names, all round the listener. */
+	double RenderRoom();
+	/** A radio, a jukebox or the gym's speakers: chords over a bass line and a beat at Bpm; Small 1 through a small speaker. */
+	double RenderMusic(double Bpm, double Small);
+	/** A voice from a radio or a TV: syllables in phrases at Pitch through two formants. */
+	double RenderTalk(double Pitch);
+	/** The ballasts of fluorescent tubes: 120 Hz and its harmonics, buzzing a little. */
+	double RenderBallast(double Level);
+	int32 RoomTone = 0;
+	int32 RoomWanted = 0;
+	double RoomTarget = 0.0;
+	double RoomIn = 0.0;
+	double RoomDoorTarget = 0.0;
+	double RoomDoor = 0.0;
+	// Music: the chord's partials, the bass, the kick and the hat, the speaker's band.
+	double MusicPhase[4] = {0.0, 0.0, 0.0, 0.0};
+	double BassPhase = 0.0;
+	double KickPhase = 0.0;
+	double KickEnv = 0.0;
+	double KickHz = 50.0;
+	double HatEnv = 0.0;
+	double HatLow = 0.0;
+	double BeatClock = 0.0;
+	int32 MusicBeat = 0;
+	FBiquad Speaker;
+	FBiquad SpeakerLow;
+	// Talk.
+	double TalkPhase = 0.0;
+	double TalkHz = 120.0;
+	double TalkSyl = 0.0;
+	double TalkSylTarget = 0.0;
+	double TalkNextSyl = 0.0;
+	bool bTalkOn = true;
+	double TalkNextPhrase = 2.0;
+	FBiquad TalkF1;
+	FBiquad TalkF2;
+	double RoomBallastPhase = 0.0;
+	// The barber's clippers in bursts; the gym's plates and the diner's dishes, the thrift's hangers (struck rings); the
+	// diner's flat-top; the gym's treadmills; the pawn's ball game crowd, its ceiling fan and its wall of clocks.
+	double ClipAt = -100.0;
+	double ClipLength = 0.0;
+	double NextClip = 4.0;
+	double ClipPhase = 0.0;
+	FRing RoomRing;
+	FRing RoomRing2;
+	double NextRoomStrike = 1.0;
+	double NextRoomStrike2 = 0.5;
+	FBiquad SizzleBand;
+	double SizzleEnv = 0.0;
+	double NextSizzle = 0.0;
+	double WhirPhase = 0.0;
+	double StepPhase = 0.0;
+	double WhirLow = 0.0;
+	double CrowdLow1 = 0.0;
+	double CrowdLow2 = 0.0;
+	double CrowdSwell = 0.4;
+	double CrowdTarget = 0.4;
+	double NextCrowd = 0.0;
+	double FanPhase = 0.0;
+	double ClockTick = 0.0;
+	FBiquad ChatterBand;
+	double ChatterEnv = 0.0;
+	double ChatterLow = 0.0;
+	double NextChatter = 0.0;
 };

@@ -113,7 +113,7 @@ SHORTSTACKCORE_API Chips AppPrice(const Item& I);
 /** What an order costs in all: the app's prices, the fee, and tax on both. */
 SHORTSTACKCORE_API Chips DeliveryTotal(const Basket& B);
 
-/** What Benny knows about the player walking up to the counter. */
+/** What the clerk behind the register knows about the player walking up to the counter. */
 struct ClerkContext
 {
 	double World = 0.0; // world minutes
@@ -124,8 +124,14 @@ struct ClerkContext
 	bool Declined = false;    // the card just said no at this counter
 	double SinceVisit = -1.0; // minutes since the player last paid at this counter (-1: never)
 	std::string Usual;        // what the player buys most here ("Oodle Cup"; "" until it's a habit)
+	/** Who's on the register by the roster (shop::KeeperOf "store"): "ray", the owner, 10 AM to 10 PM; "benny" nights.
+	 *  "" is Benny. */
+	std::string Clerk;
+	bool FreshCut = false; // a cut in Lonnie's chair in the last three days
+	bool NewLook = false;  // dressed or groomed differently from the last time this clerk rang the player up
 };
-/** What the clerk (Benny, nights) says: how the player looks first, then what he knows about them, then the hour. */
+/** What the clerk on shift says (Benny nights, Ray days, each in his own voice): how the player looks first, then what
+ *  he knows about them, then the hour. */
 SHORTSTACKCORE_API std::string ClerkLine(const ClerkContext& Ctx, const Basket& B);
 } // namespace store
 } // namespace ss

@@ -8,6 +8,7 @@
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CareerSave.h"
+#include "CastLooks.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
@@ -436,8 +437,16 @@ void AEmbercrestGameMode::DressHero()
 		return;
 	}
 	bDressed = true;
-	// The player as the creator made them (a career from before the creator, or none: the default person).
-	Hero->ApplyLook(bCareer ? Save.Person : ss::hero::Character());
+	// The player as the creator made them, in what the closet says they wear, as the street and the table dress them (a career
+	// from before the closet: the creator's jacket, hat and glasses; from before the creator, or none: the default person).
+	if (bCareer)
+	{
+		Hero->ApplyLook(Save.Person, Save.Life.Closet.Seeded ? &Save.Life.Closet : nullptr);
+	}
+	else
+	{
+		Hero->ApplyLook(ss::hero::Character());
+	}
 }
 
 void AEmbercrestGameMode::SpawnPeople()
@@ -461,12 +470,29 @@ void AEmbercrestGameMode::SpawnPeople()
 		{TEXT("ExtraF"), 0x2a2d33, FVector(700.0, -460.0, 0.0), 195.0f, true}};
 	const double Hour = LightHour();
 	const bool bEvening = Hour >= 16.0 || Hour < 0.5;
+	// Faces kept for someone on the block (spec 6.1: Benny's, Augie's, a staff member's borrowed face while their own build is
+	// pending, the player's own) stay off the resort's doors: such a face is worn by a free extra of the same body instead.
+	const AShortStackCharacter* Player = GetHero();
+	const TArray<FName> Reserved = CastLooks::ReservedFaces(Player ? Player->GetCastFace() : FName(), bCareer ? CastLooks::CareerKey(Save.Person) : FString());
+	TArray<FName> AtDoors;
+	for (const FWho& W : Who)
+	{
+		AtDoors.Add(FName(W.Cast));
+	}
 	for (const FWho& W : Who)
 	{
 		if (W.bEvening && !bEvening)
 		{
 			continue;
 		}
+		const FName Wears = CastLooks::FreeFaceLike(FName(W.Cast), Reserved, AtDoors);
+		if (Wears.IsNone())
+		{
+			continue;
+		}
+		// Two reserved faces swapped for the same free one would put one face at the doors twice.
+		AtDoors.AddUnique(Wears);
+		const FString WearsName = Wears.ToString();
 		const FTransform Spot = FTransform(FRotator(0.0f, W.Yaw, 0.0f), W.At + FVector(0.0, 0.0, 100.0)) * Stage->GetActorTransform();
 		AShortStackCharacter* P = GetWorld()->SpawnActorDeferred<AShortStackCharacter>(AShortStackCharacter::StaticClass(), Spot, nullptr, nullptr,
 			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
@@ -475,7 +501,7 @@ void AEmbercrestGameMode::SpawnPeople()
 			continue;
 		}
 		P->AutoPossessAI = EAutoPossessAI::Disabled;
-		P->ApplyCast(W.Cast, Ecx::Srgb(W.Shirt));
+		P->ApplyCast(*WearsName, Ecx::Srgb(W.Shirt));
 		P->FinishSpawning(Spot);
 		// Their feet on the stone (nothing drops them there: with no controller their movement never runs), as the street
 		// stands Benny behind his counter.

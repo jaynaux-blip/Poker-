@@ -41,6 +41,21 @@ void Turn(double& Phase, double Hz)
 }
 
 /** The first Count harmonics of a sine at Phase, weighted (sin nP by the Chebyshev recursion: one sine, one cosine). */
+double Harmonics(double Phase, const double* Weights, int32 Count);
+
+/** Every street ambience alive (game thread only): the stage feeds the game mode's its positioned sounds. */
+TArray<FStreetAmbience*>& LiveAmbiences()
+{
+	static TArray<FStreetAmbience*> List;
+	return List;
+}
+
+/** A voice's distance falloff (spec 3.7): inverse from a 2 m reference, cut to nothing between 32 and 40 m. */
+double Falloff(double Cm)
+{
+	return FMath::Min(1.0, 200.0 / FMath::Max(Cm, 1.0)) * (1.0 - FMath::SmoothStep(3200.0, 4000.0, Cm));
+}
+
 double Harmonics(double Phase, const double* Weights, int32 Count)
 {
 	const double C2 = 2.0 * FMath::Cos(Phase);
@@ -135,6 +150,11 @@ FStreetAmbience::FStreetAmbience(uint32 Seed)
 	: State(Seed | 1u)
 {
 	using namespace StreetAudioDetail;
+	LiveAmbiences().Add(this);
+	SideState = (Seed * 2654435761u) | 1u;
+	DogFormant.BandPass(700.0, 3.0);
+	NextDog = 30.0 + 90.0 * Uniform();
+	NextTrain = 180.0 + 240.0 * Uniform();
 	HissHp.HighPass(450.0, 0.7);
 	HissLp.LowPass(7000.0, 0.6);
 	Gutter.BandPass(GutterHz, 5.0);
@@ -157,12 +177,33 @@ FStreetAmbience::FStreetAmbience(uint32 Seed)
 	NextGust = 2.0 + 3.0 * Uniform();
 	NextSpin = 20.0 + 60.0 * Uniform();
 	NextMachineBuzz = 30.0 + 60.0 * Uniform();
+	// The shops' rooms: a small speaker's band (a radio's, the TV's), a jukebox's warmth, the voices' formants, the flat-top's
+	// fat, the diner's chatter.
+	Speaker.BandPass(1300.0, 0.55);
+	SpeakerLow.LowPass(2400.0, 0.7);
+	TalkF1.BandPass(650.0, 4.0);
+	TalkF2.BandPass(1800.0, 5.0);
+	SizzleBand.BandPass(5200.0, 0.7);
+	ChatterBand.BandPass(720.0, 1.1);
 }
 
 void FStreetAmbience::SetInside(float InInside, float InDoorsOpen)
 {
 	InsideTarget = FMath::Clamp(static_cast<double>(InInside), 0.0, 1.0);
 	DoorsTarget = FMath::Clamp(static_cast<double>(InDoorsOpen), 0.0, 1.0);
+}
+
+void FStreetAmbience::SetRoom(int32 InTone, float InDoorOpen)
+{
+	// A shop's room (3..7); the one being left keeps playing while it fades (Render switches when it's out).
+	const bool bShop = InTone >= 3 && InTone <= 7;
+	RoomWanted = bShop ? InTone : 0;
+	RoomTarget = bShop ? 1.0 : 0.0;
+	RoomDoorTarget = bShop ? FMath::Clamp(static_cast<double>(InDoorOpen), 0.0, 1.0) : RoomDoorTarget;
+	if (bShop && (RoomTone == 0 || RoomIn < 1e-3))
+	{
+		RoomTone = InTone;
+	}
 }
 
 void FStreetAmbience::SetWash(float InInside, float InDoorOpen, float InNear)
@@ -357,6 +398,7 @@ void FStreetAmbience::Render(float* Out, int32 N)
 	static const double HumK = Settle(0.12);
 	static const double CompOnK = Settle(0.4);
 	static const double CompOffK = Settle(0.25);
+	static const double RoomK = Settle(0.12);
 	for (int32 I = 0; I < N; ++I)
 	{
 		Time += Dt;
@@ -369,6 +411,13 @@ void FStreetAmbience::Render(float* Out, int32 N)
 		Ease(WashIn, WashTarget, ListenK);
 		Ease(WashDoor, WashDoorTarget, ListenK);
 		Ease(WashNear, WashNearTarget, ListenK);
+		// A shop's room: in over a third of a second at the door (a different shop's waits for the last one to fade).
+		if (RoomWanted != RoomTone && RoomIn < 1e-3)
+		{
+			RoomTone = RoomWanted;
+		}
+		Ease(RoomIn, RoomWanted == RoomTone ? RoomTarget : 0.0, RoomK);
+		Ease(RoomDoor, RoomDoorTarget, ListenK);
 		Ease(Rain, RainTarget, RainK);
 		Ease(Hum, HumTarget, HumK);
 		Fade = Fade < FadeTarget ? FMath::Min(FadeTarget, Fade + FadeStep) : FMath::Max(FadeTarget, Fade - FadeStep);
@@ -378,7 +427,7 @@ void FStreetAmbience::Render(float* Out, int32 N)
 		const double Street = RenderStreet() + Away + EchoOf(Away) + RenderNeon();
 		// Heard through the store's glass (or the laundromat's) it's quieter and the top is gone, from 16 kHz on the
 		// sidewalk to 650 Hz with the door shut; through an open door much less so.
-		const double Muffle = FMath::Max(Inside * (1.0 - 0.6 * Doors), WashIn * (1.0 - 0.6 * WashDoor));
+		const double Muffle = FMath::Max3(Inside * (1.0 - 0.6 * Doors), WashIn * (1.0 - 0.6 * WashDoor), RoomIn * (1.0 - 0.6 * RoomDoor));
 		if ((I & 31) == 0)
 		{
 			MuffK = Corner(16000.0 * FMath::Pow(650.0 / 16000.0, Muffle));
@@ -410,6 +459,11 @@ void FStreetAmbience::Render(float* Out, int32 N)
 		if (WashLevel > 0.001)
 		{
 			S += RenderWash() * WashLevel;
+		}
+		// A shop's room all round the listener inside it (its open door's leak outside is the stage's positioned voice).
+		if (RoomIn > 0.001 && RoomTone != 0)
+		{
+			S += RenderRoom() * RoomIn;
 		}
 
 		// The doors' own sounds ring on as the street falls away behind the player.
@@ -823,4 +877,581 @@ double FStreetAmbience::RenderWash()
 	}
 	S += WashTap.Run();
 	return S;
+}
+
+// ------------------------------------------------------------------ the shops' rooms (spec 3.7's room tones by zone)
+
+double FStreetAmbience::RenderBallast(double Level)
+{
+	using namespace StreetAudioDetail;
+	// The tubes' ballasts: 120 Hz with its odd-heavy harmonics, a little rasp riding on it.
+	Turn(RoomBallastPhase, 120.0);
+	static const double Weights[5] = {0.5, 0.18, 0.3, 0.08, 0.12};
+	return Harmonics(RoomBallastPhase, Weights, 5) * 0.006 * Level + Sizzle.Run(Noise()) * 0.0015 * Level;
+}
+
+double FStreetAmbience::RenderMusic(double Bpm, double Small)
+{
+	using namespace StreetAudioDetail;
+	// Four chords, a bar each (I vi IV V in C), three notes and a root under them, a kick on the beat and a hat off it.
+	static const double Chords[4][3] = {{261.63, 329.63, 392.0}, {220.0, 261.63, 329.63}, {174.61, 220.0, 261.63}, {196.0, 246.94, 293.66}};
+	static const double Roots[4] = {65.41, 55.0, 43.65, 49.0};
+	const double BeatLength = 60.0 / FMath::Max(40.0, Bpm);
+	const double Before = BeatClock;
+	BeatClock += Dt;
+	if (BeatClock >= BeatLength)
+	{
+		BeatClock -= BeatLength;
+		MusicBeat = (MusicBeat + 1) % 16;
+		KickEnv = 1.0;
+		KickHz = 120.0;
+	}
+	if (BeatClock >= BeatLength * 0.5 && Before < BeatLength * 0.5)
+	{
+		HatEnv = 1.0;
+	}
+	const int32 Chord = (MusicBeat / 4) % 4;
+	double Pad = 0.0;
+	for (int32 K = 0; K < 3; ++K)
+	{
+		Turn(MusicPhase[K], Chords[Chord][K] * (1.0 + 0.0015 * K));
+		Pad += FMath::Sin(MusicPhase[K]) + 0.3 * FMath::Sin(2.0 * MusicPhase[K]);
+	}
+	// The pad swells with each beat a little (a strummed feel), the bass plucked on the beat.
+	const double Strum = 0.55 + 0.45 * FMath::Exp(-BeatClock / (BeatLength * 0.6));
+	Turn(BassPhase, Roots[Chord]);
+	static const double BassW[3] = {0.8, 0.35, 0.15};
+	const double Bass = Harmonics(BassPhase, BassW, 3) * FMath::Exp(-BeatClock / (BeatLength * 0.9));
+	// The kick: a sine dropping from 120 to 50 Hz in a few hundredths of a second.
+	KickHz = 50.0 + (KickHz - 50.0) * 0.9992;
+	Turn(KickPhase, KickHz);
+	KickEnv *= 0.99975;
+	const double Kick = FMath::Sin(KickPhase) * KickEnv * KickEnv;
+	HatEnv *= 0.9985;
+	const double Hiss = Noise();
+	HatLow += (Hiss - HatLow) * 0.35;
+	const double Hat = (Hiss - HatLow) * HatEnv;
+	const double Mix = std::tanh(Pad * 0.06 * Strum) + Bass * 0.05 + Kick * 0.07 + Hat * 0.02;
+	// Through a small speaker (a radio's band, no bottom), or warm and full (a jukebox, the gym's).
+	const double Narrow = Speaker.Run(Mix) * 1.6;
+	const double Warm = SpeakerLow.Run(Mix);
+	return FMath::Lerp(Warm, Narrow, Small);
+}
+
+double FStreetAmbience::RenderTalk(double Pitch)
+{
+	using namespace StreetAudioDetail;
+	// Someone talking on the air: phrases of syllables with pauses, the pitch wandering, the vowels moving the formants.
+	if (Time >= TalkNextPhrase)
+	{
+		bTalkOn = !bTalkOn;
+		TalkNextPhrase = Time + (bTalkOn ? 1.5 + 3.5 * Uniform() : 0.3 + 0.9 * Uniform());
+	}
+	if (Time >= TalkNextSyl)
+	{
+		TalkSylTarget = bTalkOn ? 0.4 + 0.6 * Uniform() : 0.0;
+		TalkNextSyl = Time + 0.09 + 0.14 * Uniform();
+		TalkHz = Pitch * (0.85 + 0.3 * Uniform());
+		TalkF1.BandPass(450.0 + 450.0 * Uniform(), 4.0);
+		TalkF2.BandPass(1200.0 + 1100.0 * Uniform(), 5.0);
+	}
+	static const double SylK = Settle(0.025);
+	Ease(TalkSyl, TalkSylTarget, SylK);
+	Turn(TalkPhase, TalkHz);
+	// A buzzy glottal pulse (a few harmonics) and a little breath, through the two formants.
+	static const double Glottal[6] = {1.0, 0.7, 0.5, 0.35, 0.25, 0.18};
+	const double Source = Harmonics(TalkPhase, Glottal, 6) + Noise() * 0.15;
+	return (TalkF1.Run(Source) + 0.6 * TalkF2.Run(Source)) * TalkSyl * 0.05;
+}
+
+double FStreetAmbience::RenderRoom()
+{
+	using namespace StreetAudioDetail;
+	double S = 0.0;
+	switch (RoomTone)
+	{
+	case 3:
+	{
+		// Fifth St. Barbers: the radio on the backbar (oldies through its little speaker), the clippers in bursts, the TV
+		// up on its bracket talking low, the tube lights.
+		S += RenderMusic(96.0, 1.0) * 0.55;
+		S += RenderTalk(130.0) * 0.35;
+		if (Clock >= NextClip)
+		{
+			ClipAt = Time;
+			ClipLength = 2.0 + 5.0 * Uniform();
+			NextClip = Clock + ClipLength + 3.0 + 9.0 * Uniform();
+		}
+		const double SinceClip = Time - ClipAt;
+		if (SinceClip >= 0.0 && SinceClip < ClipLength)
+		{
+			// The blade's buzz (a saturated 120 Hz with its overtones), up and down at the ends, wavering as it moves on the head.
+			const double Env = FMath::Min(1.0, SinceClip / 0.08) * FMath::Min(1.0, (ClipLength - SinceClip) / 0.12) * (0.8 + 0.2 * FMath::Sin(SinceClip * 7.0));
+			Turn(ClipPhase, 121.0);
+			static const double Blade[6] = {0.6, 0.45, 0.4, 0.3, 0.25, 0.2};
+			S += std::tanh(Harmonics(ClipPhase, Blade, 6) * 2.5) * Env * 0.018;
+		}
+		S += RenderBallast(0.5);
+		break;
+	}
+	case 4:
+	{
+		// Second Chance Thrift: the fluorescents loud over the racks, a church station's choir and preacher on the radio by the
+		// register, hangers knocking on the rails.
+		S += RenderBallast(1.6);
+		S += RenderMusic(72.0, 1.0) * 0.3;
+		S += RenderTalk(110.0) * 0.25;
+		if (Clock >= NextRoomStrike)
+		{
+			RoomRing.Strike(2400.0 + 1800.0 * Uniform(), 0.05, 0.012 + 0.01 * Uniform());
+			NextRoomStrike = Clock + 1.5 + 6.0 * Uniform();
+		}
+		S += RoomRing.Run();
+		break;
+	}
+	case 5:
+	{
+		// IronHouse: the music up (128), plates set down and clanking on the bars, the treadmills' belts and motors whirring
+		// with a runner's footfalls on them.
+		S += RenderMusic(128.0, 0.15) * 0.7;
+		if (Clock >= NextRoomStrike)
+		{
+			RoomRing.Strike(380.0 + 520.0 * Uniform(), 0.35, 0.02 + 0.02 * Uniform());
+			NextRoomStrike = Clock + 2.0 + 7.0 * Uniform();
+		}
+		if (Clock >= NextRoomStrike2)
+		{
+			RoomRing2.Strike(1600.0 + 900.0 * Uniform(), 0.25, 0.008);
+			NextRoomStrike2 = Clock + 0.8 + 4.0 * Uniform();
+		}
+		S += RoomRing.Run() + RoomRing2.Run();
+		Turn(WhirPhase, 186.0);
+		static const double Motor[3] = {0.6, 0.3, 0.2};
+		static const double BeltK = Corner(300.0);
+		WhirLow += (Noise() - WhirLow) * BeltK;
+		Turn(StepPhase, 2.7);
+		const double Step = FMath::Pow(FMath::Max(0.0, FMath::Sin(StepPhase)), 24.0);
+		S += Harmonics(WhirPhase, Motor, 3) * 0.004 + WhirLow * 0.03 + WhirLow * Step * 0.25;
+		S += RenderBallast(0.3);
+		break;
+	}
+	case 6:
+	{
+		// Ruby's: the flat-top sizzling behind the pass, dishes and cups, the low talk at the booths, the jukebox.
+		if (Time >= NextSizzle)
+		{
+			SizzleEnv = 0.4 + 0.6 * Uniform();
+			NextSizzle = Time + Scatter(40.0);
+		}
+		SizzleEnv *= 0.9996;
+		S += SizzleBand.Run(Noise()) * (0.012 + 0.03 * SizzleEnv);
+		if (Clock >= NextRoomStrike)
+		{
+			RoomRing.Strike(2800.0 + 2200.0 * Uniform(), 0.12, 0.01 + 0.012 * Uniform());
+			NextRoomStrike = Clock + 0.6 + 3.5 * Uniform();
+		}
+		S += RoomRing.Run();
+		if (Time >= NextChatter)
+		{
+			ChatterEnv = 0.2 + 0.8 * Uniform();
+			NextChatter = Time + 0.1 + 0.25 * Uniform();
+		}
+		static const double ChatK = Corner(6.0);
+		ChatterLow += (ChatterEnv - ChatterLow) * ChatK;
+		S += ChatterBand.Run(Noise()) * ChatterLow * 0.035;
+		S += RenderMusic(84.0, 0.35) * 0.4;
+		break;
+	}
+	case 7:
+	{
+		// Northside Pawn & Loan: a ball game on the radio in the cage (the announcer over the crowd), the ceiling fan
+		// ticking round, the tubes, the wall of clocks.
+		if (Time >= NextCrowd)
+		{
+			CrowdTarget = Uniform() < 0.12 ? 1.0 : 0.25 + 0.3 * Uniform();
+			NextCrowd = Time + 1.0 + 4.0 * Uniform();
+		}
+		static const double SwellK = Settle(0.6);
+		Ease(CrowdSwell, CrowdTarget, SwellK);
+		static const double CrowdK1 = Corner(2500.0);
+		static const double CrowdK2 = Corner(500.0);
+		const double Air = Noise();
+		CrowdLow1 += (Air - CrowdLow1) * CrowdK1;
+		CrowdLow2 += (CrowdLow1 - CrowdLow2) * CrowdK2;
+		S += Speaker.Run((CrowdLow1 - CrowdLow2) * CrowdSwell * 0.08 + RenderTalk(150.0) * 1.2) * 0.9;
+		// The fan's blades ticking round once a turn, its air a soft whoosh with them.
+		Turn(FanPhase, 1.3);
+		const double Tick = FMath::Pow(FMath::Max(0.0, FMath::Sin(FanPhase)), 60.0);
+		static const double FanAirK = Corner(400.0);
+		WhirLow += (Noise() - WhirLow) * FanAirK;
+		S += Tick * 0.01 * Noise() + WhirLow * (0.008 + 0.006 * FMath::Sin(FanPhase * 3.0));
+		// The clocks on the wall: their ticks never quite together.
+		ClockTick += Dt;
+		if (ClockTick >= 0.5)
+		{
+			ClockTick -= 0.5;
+			RoomRing2.Strike(3200.0 + 1400.0 * Uniform(), 0.012, 0.006 + 0.004 * Uniform());
+		}
+		S += RoomRing2.Run();
+		S += RenderBallast(1.0);
+		break;
+	}
+	default:
+		break;
+	}
+	return S;
+}
+
+// ------------------------------------------------------------------ stereo, and the positioned voices (spec 3.7)
+
+FStreetAmbience::~FStreetAmbience()
+{
+	StreetAudioDetail::LiveAmbiences().Remove(this);
+}
+
+TSharedPtr<FStreetAmbience> FStreetAmbience::Live()
+{
+	TArray<FStreetAmbience*>& List = StreetAudioDetail::LiveAmbiences();
+	// The newest: an old one (the last visit's, still going while its stream winds down) gives way to it.
+	for (int32 I = List.Num() - 1; I >= 0; --I)
+	{
+		if (List[I] && List[I]->DoesSharedInstanceExist())
+		{
+			return List[I]->AsShared();
+		}
+	}
+	return nullptr;
+}
+
+void FStreetAmbience::SetListener(const FVector& At, const FVector& Forward, const FVector& Right)
+{
+	ListenAt = At;
+	ListenRight = Right.GetSafeNormal2D();
+	if (ListenRight.IsNearlyZero())
+	{
+		ListenRight = FVector(0.0, 1.0, 0.0);
+	}
+}
+
+void FStreetAmbience::SetWind(float InWind)
+{
+	WindTarget = FMath::Clamp(static_cast<double>(InWind), 0.0, 1.0);
+}
+
+void FStreetAmbience::SetEmitters(const TArray<FStreetEmitter>& InEmitters)
+{
+	using namespace StreetAudioDetail;
+	// The nearest twelve, by how loud they'd be here.
+	TArray<TPair<double, int32>> Order;
+	for (int32 I = 0; I < InEmitters.Num(); ++I)
+	{
+		const double Heard = Falloff(FVector::Dist(InEmitters[I].At, ListenAt)) * InEmitters[I].Level;
+		if (Heard > 0.002)
+		{
+			Order.Emplace(-Heard, I);
+		}
+	}
+	Order.Sort([](const TPair<double, int32>& A, const TPair<double, int32>& B) { return A.Key < B.Key; });
+	if (Order.Num() > MaxVoices)
+	{
+		Order.SetNum(MaxVoices);
+	}
+	// Each keeps its voice by its id (its noise and filters carry on); the gone go quiet; the new take free voices.
+	bool bKeep[MaxVoices] = {};
+	TArray<int32> Fresh;
+	for (const TPair<double, int32>& O : Order)
+	{
+		const FStreetEmitter& E = InEmitters[O.Value];
+		int32 Found = INDEX_NONE;
+		for (int32 V = 0; V < MaxVoices; ++V)
+		{
+			if (Voices12[V].bActive && Voices12[V].Id == E.Id)
+			{
+				Found = V;
+				break;
+			}
+		}
+		if (Found == INDEX_NONE)
+		{
+			Fresh.Add(O.Value);
+			continue;
+		}
+		FVoice& V = Voices12[Found];
+		V.At = E.At;
+		V.Level = E.Level;
+		V.Hz = E.Hz;
+		bKeep[Found] = true;
+	}
+	for (int32 V = 0; V < MaxVoices; ++V)
+	{
+		if (!bKeep[V])
+		{
+			// Faded out by its gains (they ease to zero), then free.
+			Voices12[V].Level = 0.0f;
+		}
+	}
+	for (const int32 Index : Fresh)
+	{
+		const FStreetEmitter& E = InEmitters[Index];
+		for (int32 V = 0; V < MaxVoices; ++V)
+		{
+			FVoice& Free = Voices12[V];
+			if (bKeep[V] || (Free.bActive && (Free.GainL + Free.GainR) > 1e-4))
+			{
+				continue;
+			}
+			Free = FVoice();
+			Free.bActive = true;
+			Free.Id = E.Id;
+			Free.Kind = E.Kind;
+			Free.At = E.At;
+			Free.Level = E.Level;
+			Free.Hz = E.Hz;
+			Free.Rng = (E.Id * 2654435761u) | 1u;
+			switch (E.Kind)
+			{
+			case EStreetEmitter::Gutter:
+				Free.Band.BandPass(1300.0, 1.2);
+				break;
+			case EStreetEmitter::Steam:
+				Free.Band.HighPass(2600.0, 0.7);
+				break;
+			case EStreetEmitter::RoomLeak:
+				Free.Band.LowPass(700.0, 0.7);
+				break;
+			case EStreetEmitter::Engine:
+				Free.Band.BandPass(1900.0, 0.8);
+				break;
+			default:
+				Free.Band.BandPass(5500.0, 1.5);
+				break;
+			}
+			bKeep[V] = true;
+			break;
+		}
+	}
+}
+
+void FStreetAmbience::AimVoices()
+{
+	// Constant-power pan by where each is across the listener's ears, its fall-off with distance, its kind's own level.
+	for (FVoice& V : Voices12)
+	{
+		if (!V.bActive)
+		{
+			continue;
+		}
+		const FVector To = V.At - ListenAt;
+		const double Dist = To.Size();
+		const double Across = Dist > 1.0 ? FMath::Clamp(FVector::DotProduct(To / Dist, ListenRight), -1.0, 1.0) : 0.0;
+		const double Angle = (Across + 1.0) * UE_DOUBLE_PI * 0.25;
+		const double G = StreetAudioDetail::Falloff(Dist) * V.Level;
+		V.TargetL = G * FMath::Cos(Angle);
+		V.TargetR = G * FMath::Sin(Angle);
+	}
+}
+
+double FStreetAmbience::VoiceNoise(FVoice& V)
+{
+	V.Rng ^= V.Rng << 13;
+	V.Rng ^= V.Rng >> 17;
+	V.Rng ^= V.Rng << 5;
+	return static_cast<double>(V.Rng) / 2147483648.0 - 1.0;
+}
+
+double FStreetAmbience::RenderVoice(FVoice& V)
+{
+	using namespace StreetAudioDetail;
+	switch (V.Kind)
+	{
+	case EStreetEmitter::Hum:
+	{
+		// A transformer's buzz on the mains and its harmonics, a little sizzle over it.
+		Turn(V.Phase, V.Hz);
+		static const double Buzz[4] = {0.6, 0.35, 0.22, 0.12};
+		const double B = Harmonics(V.Phase, Buzz, 4);
+		return std::tanh(B * 2.0) * 0.022 + V.Band.Run(VoiceNoise(V)) * 0.004;
+	}
+	case EStreetEmitter::Ac:
+	{
+		// The fan's air beating at its blades' rate, the compressor's hum under it.
+		static const double FanK = Corner(420.0);
+		V.Low1 += (VoiceNoise(V) - V.Low1) * FanK;
+		Turn(V.Phase2, 9.0);
+		Turn(V.Phase, V.Hz);
+		return V.Low1 * (0.75 + 0.25 * FMath::Sin(V.Phase2)) * 0.09 + FMath::Sin(V.Phase) * 0.01 + FMath::Sin(V.Phase * 2.0) * 0.005;
+	}
+	case EStreetEmitter::Gutter:
+	{
+		// Water down the spout and splashing at its foot: a band of noise, bubbles struck in it.
+		if (Time >= V.Next)
+		{
+			V.Ring.Strike(500.0 + 1100.0 * (0.5 + 0.5 * VoiceNoise(V)), 0.02, 0.04);
+			V.Next = Time + 0.02 + 0.08 * (0.5 + 0.5 * VoiceNoise(V));
+		}
+		return V.Band.Run(VoiceNoise(V)) * 0.06 + V.Ring.Run();
+	}
+	case EStreetEmitter::Steam:
+		return V.Band.Run(VoiceNoise(V)) * 0.05;
+	case EStreetEmitter::RoomLeak:
+	{
+		// A room heard through its open door: its murmur (syllables of voices), a radio's beat in some, all of it muffled.
+		static const double MurK = Corner(5.0);
+		if (Time >= V.Next)
+		{
+			V.Env = 0.3 + 0.7 * (0.5 + 0.5 * VoiceNoise(V));
+			V.Next = Time + 0.12 + 0.2 * (0.5 + 0.5 * VoiceNoise(V));
+		}
+		V.Low2 += (V.Env - V.Low2) * MurK;
+		const int32 Room = static_cast<int32>(V.Hz);
+		Turn(V.Phase, 2.0);
+		const double Pulse = (Room % 3 == 1) ? FMath::Pow(FMath::Max(0.0, FMath::Sin(V.Phase)), 8.0) * 0.6 : 0.0;
+		V.Phase2 += TwoPi * 55.0 * Dt;
+		const double Bass = FMath::Sin(V.Phase2) * Pulse * 0.03;
+		return V.Band.Run(VoiceNoise(V)) * V.Low2 * 0.05 + Bass;
+	}
+	case EStreetEmitter::RainRoof:
+	{
+		// Drops drumming on canvas or sheet metal close by.
+		if (Time >= V.Next)
+		{
+			V.Ring.Strike(900.0 + 1600.0 * (0.5 + 0.5 * VoiceNoise(V)), 0.006 + 0.01 * (0.5 + 0.5 * VoiceNoise(V)), 0.02 + 0.03 * (0.5 + 0.5 * VoiceNoise(V)));
+			V.Next = Time + Scatter(60.0 * V.Level + 10.0);
+		}
+		static const double PatterK = Corner(1800.0);
+		V.Low1 += (VoiceNoise(V) - V.Low1) * PatterK;
+		return V.Ring.Run() + V.Low1 * 0.02;
+	}
+	case EStreetEmitter::Engine:
+	{
+		// The engine (a low pulse, its pitch with its speed), the tyres' roar, their spray when the road is wet (Rain).
+		const double Speed = FMath::Max(1.0, static_cast<double>(V.Hz));
+		Turn(V.Phase, 28.0 + Speed * 1.6);
+		static const double Cyl[3] = {0.5, 0.3, 0.2};
+		const double Engine = Harmonics(V.Phase, Cyl, 3) * 0.02;
+		static const double RoarK = Corner(240.0);
+		V.Low1 += (VoiceNoise(V) - V.Low1) * RoarK;
+		const double Wash = V.Band.Run(VoiceNoise(V)) * 0.05 * Rain;
+		return Engine + V.Low1 * 0.08 + Wash;
+	}
+	default:
+		return 0.0;
+	}
+}
+
+double FStreetAmbience::RenderSide()
+{
+	using namespace StreetAudioDetail;
+	// Another hiss of the rain, uncorrelated with the bed's, and the wind's rush: added to one ear and taken from the other.
+	SideState ^= SideState << 13;
+	SideState ^= SideState >> 17;
+	SideState ^= SideState << 5;
+	const double N = static_cast<double>(SideState) / 2147483648.0 - 1.0;
+	static const double HiK = Corner(6000.0);
+	static const double LoK = Corner(450.0);
+	SideHigh += (N - SideHigh) * HiK;
+	SideLow += (SideHigh - SideLow) * LoK;
+	const double Hiss = (SideHigh - SideLow) * 0.06 * Rain;
+	// The wind: a slow swell of low noise.
+	static const double WindK = Corner(260.0);
+	static const double SwellK = Settle(2.5);
+	Ease(WindLevel, WindTarget, Settle(3.0));
+	WindLow1 += (N - WindLow1) * WindK;
+	WindLow2 += (WindLow1 - WindLow2) * WindK;
+	if ((static_cast<int64>(Time * 4.0) & 1) == 0 && FMath::Frac(Time * 0.37) < 0.0005)
+	{
+		SideGust = 0.6 + 0.8 * Uniform();
+	}
+	Ease(WindSwell, SideGust, SwellK);
+	return Hiss + WindLow2 * (0.02 + 0.09 * WindLevel) * WindSwell;
+}
+
+double FStreetAmbience::RenderDistant(double& OutPan)
+{
+	using namespace StreetAudioDetail;
+	OutPan = 0.0;
+	double S = 0.0;
+	// A dog a few yards over: two to four barks, a formant's bark through the rain.
+	if (Clock >= NextDog)
+	{
+		DogAt = Time;
+		DogBarks = 2 + static_cast<int32>(Uniform() * 3.0);
+		DogPan = Noise() * 0.8;
+		NextDog = Clock + 70.0 + 200.0 * Uniform();
+	}
+	const double SinceDog = Time - DogAt;
+	if (SinceDog >= 0.0 && SinceDog < DogBarks * 0.45)
+	{
+		const double Within = FMath::Fmod(SinceDog, 0.45);
+		const double Env = Within < 0.16 ? FMath::Sin(Within / 0.16 * UE_DOUBLE_PI) : 0.0;
+		S += DogFormant.Run(Noise()) * Env * 0.035;
+		OutPan = DogPan;
+	}
+	// A train's horn across the river: two notes a minor third apart, swelling and dying away, far down and dull.
+	if (Clock >= NextTrain)
+	{
+		TrainAt = Time;
+		TrainPan = 0.6;
+		NextTrain = Clock + 300.0 + 420.0 * Uniform();
+	}
+	const double SinceTrain = Time - TrainAt;
+	if (SinceTrain >= 0.0 && SinceTrain < 4.0)
+	{
+		const double Env = FMath::Sin(FMath::Min(1.0, SinceTrain / 3.6) * UE_DOUBLE_PI) * (SinceTrain < 1.6 || SinceTrain > 2.0 ? 1.0 : 0.4);
+		Turn(TrainPhase1, 311.1);
+		Turn(TrainPhase2, 370.0);
+		const double Horn = std::tanh((FMath::Sin(TrainPhase1) + FMath::Sin(TrainPhase2)) * 1.6);
+		static const double DullK = Corner(700.0);
+		TrainLow += (Horn - TrainLow) * DullK;
+		S += TrainLow * Env * 0.012;
+		OutPan = TrainPan;
+	}
+	return S;
+}
+
+void FStreetAmbience::RenderStereo(float* Out, int32 Frames)
+{
+	using namespace StreetAudioDetail;
+	// The bed, as the mono street makes it (its rooms, its doors, its far sounds), then the width, the far sounds and the
+	// voices: outside only, muffled as the bed is through a room's glass.
+	if (Scratch.Num() < Frames)
+	{
+		Scratch.SetNumUninitialized(Frames);
+	}
+	Render(Scratch.GetData(), Frames);
+	AimVoices();
+	const double Outdoors = 1.0 - FMath::Max3(Inside * (1.0 - 0.6 * Doors), WashIn * (1.0 - 0.6 * WashDoor), RoomIn * (1.0 - 0.6 * RoomDoor));
+	const double Step = Frames > 0 ? 1.0 / Frames : 1.0;
+	for (int32 F = 0; F < Frames; ++F)
+	{
+		double L = Scratch[F];
+		double R = Scratch[F];
+		const double Side = RenderSide() * Outdoors * Fade;
+		L += Side;
+		R -= Side;
+		double Pan = 0.0;
+		const double Distant = RenderDistant(Pan) * Outdoors * Fade;
+		L += Distant * (1.0 - 0.5 * Pan);
+		R += Distant * (1.0 + 0.5 * Pan);
+		for (FVoice& V : Voices12)
+		{
+			if (!V.bActive)
+			{
+				continue;
+			}
+			// The gains glide to their aim across the block (no zipper); a voice faded right out is freed.
+			V.GainL += (V.TargetL - V.GainL) * Step * 4.0;
+			V.GainR += (V.TargetR - V.GainR) * Step * 4.0;
+			if (V.Level <= 0.0f && V.GainL + V.GainR < 1e-5)
+			{
+				V.bActive = false;
+				continue;
+			}
+			const double X = RenderVoice(V) * Outdoors * Fade;
+			L += X * V.GainL;
+			R += X * V.GainR;
+		}
+		Out[2 * F] = static_cast<float>(std::tanh(L * 1.2) / 1.2);
+		Out[2 * F + 1] = static_cast<float>(std::tanh(R * 1.2) / 1.2);
+	}
 }

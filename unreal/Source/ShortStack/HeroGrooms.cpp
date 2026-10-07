@@ -212,6 +212,9 @@ public:
 	bool bRedressed = false;
 	ss::hero::Look OrigLook;
 	int32 OrigAge = 0;
+	/** The closet worn before the redress (put back with the look: the spike's face is dressed without one). */
+	ss::wardrobe::Closet OrigCloset;
+	bool bOrigCloset = false;
 	int32 FirstSettle = 0;
 	FString HeroFace;
 	TArray<FStep> Steps;
@@ -759,7 +762,7 @@ void FSpike::Finish(bool bAborted)
 		ss::hero::Character As;
 		As.Appearance = OrigLook;
 		As.Age = OrigAge;
-		H->ApplyLook(As);
+		H->ApplyLook(As, bOrigCloset ? &OrigCloset : nullptr);
 	}
 	else if (H && G)
 	{
@@ -998,6 +1001,8 @@ FString StartSpike(AShortStackCharacter* Hero, const FString& Candidate, const F
 		As.Age = Hero->GetLookAge();
 		S->OrigLook = As.Appearance;
 		S->OrigAge = As.Age;
+		S->bOrigCloset = Hero->HasCloset();
+		S->OrigCloset = Hero->GetCloset();
 		As.Appearance.Body = FaceOption[4] == TEXT('B') ? 1 : 0;
 		As.Appearance.Skin = FaceOption[5] == TEXT('0') ? 1 : (FaceOption[5] == TEXT('1') ? 4 : 7);
 		// Wearing that face's own hair, bare-headed (the creator's buzz or shaved would take it off, a hat would hide it and
@@ -1010,7 +1015,7 @@ FString StartSpike(AShortStackCharacter* Hero, const FString& Candidate, const F
 		if (FName(*FaceOption) != Hero->GetCastFace())
 		{
 			As.Appearance = S->OrigLook;
-			Hero->ApplyLook(As);
+			Hero->ApplyLook(As, S->bOrigCloset ? &S->OrigCloset : nullptr);
 			return FString::Printf(TEXT("GroomSpike: %s isn't built (hero_cast.py)"), *FaceOption);
 		}
 	}
@@ -1026,7 +1031,7 @@ FString StartSpike(AShortStackCharacter* Hero, const FString& Candidate, const F
 			ss::hero::Character As;
 			As.Appearance = S->OrigLook;
 			As.Age = S->OrigAge;
-			Hero->ApplyLook(As);
+			Hero->ApplyLook(As, S->bOrigCloset ? &S->OrigCloset : nullptr);
 		}
 		return Why;
 	};
@@ -1207,5 +1212,630 @@ FString SpikeReport()
 		return FString::Join(GSpike->Lines, TEXT("\n")) + TEXT("\n(running)");
 	}
 	return GLastReport.IsEmpty() ? FString(TEXT("GroomSpike: not run yet (ss.Look.GroomSpike)")) : GLastReport;
+}
+} // namespace HeroGrooms
+
+// ------------------------------------------------------------------ the library and the resolver (spec 7.5.4)
+
+namespace HeroGroomsLibraryDetail
+{
+const TCHAR* GroomRoot = TEXT("/Game/ShortStack/Cast/Grooms");
+
+/** A hero face's skin band (HeroA2: 2); 1 for any other face. */
+int32 BandOf(FName Face)
+{
+	const FString S = Face.ToString();
+	if (S.Len() == 6 && S.StartsWith(TEXT("Hero")) && S[5] >= TEXT('0') && S[5] <= TEXT('2'))
+	{
+		return S[5] - TEXT('0');
+	}
+	return 1;
+}
+
+/** A type B (women's) hero face. */
+bool IsTypeB(FName Face)
+{
+	return Face.ToString().StartsWith(TEXT("HeroB"));
+}
+
+/** The libraries loaded so far (rooted: small, and worn all game). A face found without one is looked for again next time. */
+TMap<FName, TWeakObjectPtr<UHeroGroomLibrary>>& Libraries()
+{
+	static TMap<FName, TWeakObjectPtr<UHeroGroomLibrary>> Map;
+	return Map;
+}
+
+/** The Style Book's preload: one face's whole set, held. */
+struct FPreload
+{
+	FName Face;
+	TSharedPtr<FStreamableHandle> Handle;
+};
+FPreload& Held()
+{
+	static FPreload P;
+	return P;
+}
+
+/** The set a head will be built in later (HoldWorn), held. */
+TSharedPtr<FStreamableHandle>& WornHandle()
+{
+	static TSharedPtr<FStreamableHandle> Handle;
+	return Handle;
+}
+
+/** A build's own grooms by kind (its binding names, as the assembly gave them), from the asset registry (no loads). */
+TMap<HeroGrooms::EGroomKind, FName> BuildStyles(FName Face)
+{
+	TMap<HeroGrooms::EGroomKind, FName> Out;
+	IAssetRegistry* Registry = IAssetRegistry::Get();
+	if (!Registry || Face.IsNone())
+	{
+		return Out;
+	}
+	FARFilter Filter;
+	Filter.PackagePaths.Add(FName(*FString::Printf(TEXT("/Game/ShortStack/Cast/Built/MHC_%s/Grooms"), *Face.ToString())));
+	Filter.ClassPaths.Add(UGroomBindingAsset::StaticClass()->GetClassPathName());
+	TArray<FAssetData> Assets;
+	Registry->GetAssets(Filter, Assets);
+	for (const FAssetData& Asset : Assets)
+	{
+		FString Name = Asset.AssetName.ToString();
+		Name.RemoveFromEnd(TEXT("_Binding"));
+		if (Name.StartsWith(TEXT("GroomAsset")))
+		{
+			continue;
+		}
+		Out.FindOrAdd(HeroGrooms::KindOf(FString(), Name), FName(*Name));
+	}
+	return Out;
+}
+} // namespace HeroGroomsLibraryDetail
+
+using namespace HeroGroomsLibraryDetail;
+
+FString UHeroGroomLibrary::PackageFor(FName Face)
+{
+	return FString::Printf(TEXT("%s/%s/HGL_%s"), GroomRoot, *Face.ToString(), *Face.ToString());
+}
+
+const FHeroGroomEntry* UHeroGroomLibrary::Find(FName Style) const
+{
+	return Style.IsNone() ? nullptr : Entries.FindByPredicate([Style](const FHeroGroomEntry& E) { return E.Style == Style; });
+}
+
+const FHeroGroomEntry* UHeroGroomLibrary::Own(int32 Kind) const
+{
+	return Entries.FindByPredicate([Kind](const FHeroGroomEntry& E) { return E.bOwn && E.Kind == Kind; });
+}
+
+FString UHeroGroomLibrary::Refresh()
+{
+#if WITH_EDITOR
+	IAssetRegistry* Registry = IAssetRegistry::Get();
+	if (!Registry || Face.IsNone())
+	{
+		return TEXT("HeroGroomLibrary: no asset registry, or no Face set");
+	}
+	const FString Copies = FString::Printf(TEXT("%s/%s"), GroomRoot, *Face.ToString());
+	const FString Build = FString::Printf(TEXT("/Game/ShortStack/Cast/Built/MHC_%s/Grooms"), *Face.ToString());
+	Registry->ScanPathsSynchronous({Copies, Build}, true);
+	Modify();
+	Entries.Reset();
+	int32 Copied = 0;
+	int32 OwnCount = 0;
+	TArray<FString> Broken;
+	for (const FString& Folder : {Copies, Build})
+	{
+		const bool bOwn = Folder == Build;
+		FARFilter Filter;
+		Filter.PackagePaths.Add(FName(*Folder));
+		Filter.bRecursivePaths = !bOwn;
+		Filter.ClassPaths.Add(UGroomBindingAsset::StaticClass()->GetClassPathName());
+		TArray<FAssetData> Assets;
+		Registry->GetAssets(Filter, Assets);
+		Assets.Sort([](const FAssetData& A, const FAssetData& B) { return A.PackageName.LexicalLess(B.PackageName); });
+		for (const FAssetData& Asset : Assets)
+		{
+			const UGroomBindingAsset* Binding = Cast<UGroomBindingAsset>(Asset.GetAsset());
+			UGroomAsset* Groom = Binding ? Binding->GetGroom() : nullptr;
+			if (!Groom)
+			{
+				Broken.Add(Asset.AssetName.ToString());
+				continue;
+			}
+			// The style: the binding's name (the assembly names the groom GroomAsset_N now and then, the binding the style).
+			FString Style = Asset.AssetName.ToString();
+			Style.RemoveFromEnd(TEXT("_Binding"));
+			if (Style.StartsWith(TEXT("GroomAsset")))
+			{
+				Style = Groom->GetName();
+			}
+			const HeroGrooms::EGroomKind Kind = HeroGrooms::KindOf(FString(), Style);
+			if (Kind == HeroGrooms::EGroomKind::Lashes || Kind == HeroGrooms::EGroomKind::Fuzz)
+			{
+				// Not the barber's: the build's own stay as they are.
+				continue;
+			}
+			if (Find(FName(*Style)))
+			{
+				continue;
+			}
+			FHeroGroomEntry& E = Entries.AddDefaulted_GetRef();
+			E.Style = FName(*Style);
+			E.Kind = static_cast<int32>(Kind);
+			E.bOwn = bOwn;
+			E.Groom = Groom;
+			E.Binding = const_cast<UGroomBindingAsset*>(Binding);
+			++(bOwn ? OwnCount : Copied);
+		}
+	}
+	// The build's own brows mark Natural even when a copy of the same style exists.
+	if (!Own(static_cast<int32>(HeroGrooms::EGroomKind::Brows)))
+	{
+		for (const TPair<HeroGrooms::EGroomKind, FName>& B : BuildStyles(Face))
+		{
+			if (B.Key == HeroGrooms::EGroomKind::Brows)
+			{
+				for (FHeroGroomEntry& E : Entries)
+				{
+					if (E.Style == B.Value)
+					{
+						E.bOwn = true;
+					}
+				}
+			}
+		}
+	}
+	Entries.Sort([](const FHeroGroomEntry& A, const FHeroGroomEntry& B) { return A.Kind != B.Kind ? A.Kind < B.Kind : A.Style.LexicalLess(B.Style); });
+	MarkPackageDirty();
+	return FString::Printf(TEXT("HGL_%s: %d styles (%d assembled copies, %d of the build's own)%s%s"), *Face.ToString(), Entries.Num(), Copied, OwnCount,
+		Broken.Num() ? TEXT("; bindings without a groom: ") : TEXT(""), *FString::Join(Broken, TEXT(", ")));
+#else
+	return TEXT("HeroGroomLibrary: Refresh runs in the editor");
+#endif
+}
+
+namespace HeroGrooms
+{
+bool IsTightHair(const FString& Style)
+{
+	static const TCHAR* const Tight[] = {TEXT("BuzzCut"), TEXT("360Waves"), TEXT("BaldingStubble"), TEXT("HairLoss"), TEXT("Cornrows"), TEXT("SlickBack"),
+		TEXT("PulledBack"), TEXT("LowPonytail"), TEXT("RecedeMessy"), TEXT("BrushCut"), TEXT("CurlyFade"), TEXT("CoilBuzzCut"), TEXT("AfroFade")};
+	for (const TCHAR* S : Tight)
+	{
+		if (Style.Contains(S))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool IsCroppedHair(const FString& Style)
+{
+	static const TCHAR* const Cropped[] = {TEXT("BuzzCut"), TEXT("360Waves"), TEXT("BaldingStubble"), TEXT("HairLoss"), TEXT("BrushCut"), TEXT("CurlyFade")};
+	for (const TCHAR* S : Cropped)
+	{
+		if (Style.Contains(S))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+FName ScalpStyle(int32 Hair, FName Face)
+{
+	// [choice][0: bands 0-1, 1: band 2 (the coily textures)]
+	static const TCHAR* const Map[12][2] = {
+		{nullptr, nullptr},
+		{TEXT("Hair_S_BuzzCut"), TEXT("Hair_S_CoilBuzzCut")},
+		{TEXT("Hair_S_BrushCut"), TEXT("Hair_S_BrushCut")},
+		{TEXT("Hair_S_Messy"), TEXT("Hair_S_Messy")},
+		{TEXT("Hair_S_SideSweptFringe"), TEXT("Hair_S_SideSweptFringe")},
+		{TEXT("Hair_S_SweptUp"), TEXT("Hair_S_SweptUp")},
+		{TEXT("Hair_S_CurlyFade"), TEXT("Hair_S_Coil")},
+		{TEXT("Hair_S_AfroFade"), TEXT("Hair_L_AfroCurly")},
+		{TEXT("Hair_L_Straight"), TEXT("Hair_L_Straight")},
+		{TEXT("Hair_S_LowPonytail"), TEXT("Hair_S_LowPonytail")},
+		{TEXT("Hair_M_TwistedBraids"), TEXT("Hair_S_Cornrows")},
+		{TEXT("Hair_M_BobStraight"), TEXT("Hair_M_BobStraight")},
+	};
+	if (Hair < 0 || Hair >= static_cast<int32>(UE_ARRAY_COUNT(Map)))
+	{
+		return NAME_None;
+	}
+	const TCHAR* Style = Map[Hair][BandOf(Face) >= 2 ? 1 : 0];
+	return Style ? FName(Style) : NAME_None;
+}
+
+void FacialStyles(int32 FacialHair, FName& OutBeard, FName& OutMustache)
+{
+	static const TCHAR* const Map[6][2] = {
+		{nullptr, nullptr},
+		{TEXT("Beard_S_Stubble"), TEXT("Mustache_S_Stubble")},
+		{nullptr, TEXT("Mustache_M_Gunslinger")},
+		{TEXT("Goatee_M_Pointed"), TEXT("Mustache_S_Full")},
+		{TEXT("Beard_S_Full"), TEXT("Mustache_S_Full")},
+		{TEXT("Beard_L_Full"), TEXT("Mustache_L_Full")},
+	};
+	OutBeard = NAME_None;
+	OutMustache = NAME_None;
+	if (FacialHair < 0 || FacialHair >= static_cast<int32>(UE_ARRAY_COUNT(Map)))
+	{
+		return;
+	}
+	OutBeard = Map[FacialHair][0] ? FName(Map[FacialHair][0]) : NAME_None;
+	OutMustache = Map[FacialHair][1] ? FName(Map[FacialHair][1]) : NAME_None;
+}
+
+FName BrowStyle(int32 Brows, FName Face, FName OwnBrows)
+{
+	const bool bB = IsTypeB(Face);
+	const FName Thin(bB ? TEXT("Eyebrows_M_Thin") : TEXT("Eyebrows_S_FlatThin"));
+	switch (Brows)
+	{
+	case 0:
+	case 3: // Arched wears Thin's (spec 7.5.4)
+		return Thin;
+	case 2:
+		return FName(bB ? TEXT("Eyebrows_M_Full") : TEXT("Eyebrows_M_Thick"));
+	default:
+		return OwnBrows.IsNone() ? FName(TEXT("Eyebrows_M_Natural")) : OwnBrows;
+	}
+}
+
+const UHeroGroomLibrary* LibraryFor(FName Face)
+{
+	if (Face.IsNone())
+	{
+		return nullptr;
+	}
+	if (const TWeakObjectPtr<UHeroGroomLibrary>* Have = Libraries().Find(Face))
+	{
+		if (Have->IsValid())
+		{
+			return Have->Get();
+		}
+	}
+	const FString Package = UHeroGroomLibrary::PackageFor(Face);
+	if (!FPackageName::DoesPackageExist(Package))
+	{
+		return nullptr;
+	}
+	UHeroGroomLibrary* Lib = LoadObject<UHeroGroomLibrary>(nullptr, *FString::Printf(TEXT("%s.%s"), *Package, *FPackageName::GetShortName(Package)), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (Lib)
+	{
+		Lib->AddToRoot();
+		Libraries().Add(Face, Lib);
+	}
+	return Lib;
+}
+
+const FWornGroom& FGroomSet::Of(EGroomKind Kind) const
+{
+	switch (Kind)
+	{
+	case EGroomKind::Beard:
+		return Beard;
+	case EGroomKind::Mustache:
+		return Mustache;
+	case EGroomKind::Brows:
+		return Brows;
+	default:
+		return Scalp;
+	}
+}
+
+bool WearsBuildGroom(const ss::hero::Look& L, EGroomKind Kind, const FString& Asset)
+{
+	switch (Kind)
+	{
+	case EGroomKind::Scalp:
+		if (L.Hair == 0 || (L.Hair == 1 && !IsCroppedHair(Asset)))
+		{
+			return false;
+		}
+		return L.Hat == 0 || IsTightHair(Asset);
+	case EGroomKind::Beard:
+		return L.FacialHair >= 3 || (L.FacialHair == 1 && Asset.Contains(TEXT("Stubble")));
+	case EGroomKind::Mustache:
+		return L.FacialHair >= 2 || (L.FacialHair == 1 && Asset.Contains(TEXT("Stubble")));
+	default:
+		return true;
+	}
+}
+
+FGroomSet Resolve(const ss::hero::Look& L, FName Face)
+{
+	FGroomSet Set;
+	const UHeroGroomLibrary* Lib = LibraryFor(Face);
+	if (!Lib)
+	{
+		return Set;
+	}
+	Set.bLibrary = true;
+	// A style the library lacks: the build's own of that kind stands in where the old rules would have kept it (as the preset's
+	// hairstyle stood in for every choice before the library), else none.
+	auto Take = [&](FWornGroom& Slot, EGroomKind Kind, FName Style) {
+		if (Style.IsNone())
+		{
+			return;
+		}
+		const FHeroGroomEntry* E = Lib->Find(Style);
+		if (!E)
+		{
+			Set.Missing.Add(Style);
+			E = Lib->Own(static_cast<int32>(Kind));
+			if (E && Kind != EGroomKind::Brows && !WearsBuildGroom(L, Kind, E->Style.ToString()))
+			{
+				E = nullptr;
+			}
+		}
+		if (E)
+		{
+			Slot.Style = E->Style;
+			Slot.Groom = E->Groom;
+			Slot.Binding = E->Binding;
+		}
+	};
+	FName Scalp = ScalpStyle(L.Hair, Face);
+	if (!Scalp.IsNone() && L.Hat != 0 && !IsTightHair(Scalp.ToString()))
+	{
+		// Under a hat only hair that lies close stays (a fuller style would come up through the crown).
+		Scalp = NAME_None;
+	}
+	Take(Set.Scalp, EGroomKind::Scalp, Scalp);
+	FName Beard;
+	FName Mustache;
+	FacialStyles(L.FacialHair, Beard, Mustache);
+	Take(Set.Beard, EGroomKind::Beard, Beard);
+	Take(Set.Mustache, EGroomKind::Mustache, Mustache);
+	const FHeroGroomEntry* OwnBrows = Lib->Own(static_cast<int32>(EGroomKind::Brows));
+	Take(Set.Brows, EGroomKind::Brows, BrowStyle(L.Brows, Face, OwnBrows ? OwnBrows->Style : NAME_None));
+	return Set;
+}
+
+TArray<FSoftObjectPath> PathsOf(const FGroomSet& Set)
+{
+	TArray<FSoftObjectPath> Out;
+	for (const FWornGroom* W : {&Set.Scalp, &Set.Beard, &Set.Mustache, &Set.Brows})
+	{
+		if (!W->IsSet())
+		{
+			continue;
+		}
+		if (!W->Groom.IsNull())
+		{
+			Out.AddUnique(W->Groom.ToSoftObjectPath());
+		}
+		if (!W->Binding.IsNull())
+		{
+			Out.AddUnique(W->Binding.ToSoftObjectPath());
+		}
+	}
+	return Out;
+}
+
+bool IsResident(const FGroomSet& Set)
+{
+	for (const FSoftObjectPath& P : PathsOf(Set))
+	{
+		if (!P.ResolveObject())
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+void LoadAsync(const FGroomSet& Set, TFunction<void()> Done)
+{
+	const TArray<FSoftObjectPath> Paths = PathsOf(Set);
+	if (Paths.Num() == 0 || IsResident(Set))
+	{
+		if (Done)
+		{
+			Done();
+		}
+		return;
+	}
+	HeroGroomsDetail::Streamable().RequestAsyncLoad(Paths, FStreamableDelegate::CreateLambda([Done]() {
+		if (Done)
+		{
+			Done();
+		}
+	}));
+}
+
+void HoldWorn(const FGroomSet& Set)
+{
+	TSharedPtr<FStreamableHandle>& Worn = WornHandle();
+	const TArray<FSoftObjectPath> Paths = PathsOf(Set);
+	TSharedPtr<FStreamableHandle> Next;
+	if (Paths.Num() > 0)
+	{
+		// Requested before the last is let go, so what both sets share never leaves memory.
+		Next = HeroGroomsDetail::Streamable().RequestAsyncLoad(Paths, FStreamableDelegate(), FStreamableManager::DefaultAsyncLoadPriority, true);
+	}
+	if (Worn.IsValid())
+	{
+		Worn->ReleaseHandle();
+	}
+	Worn = Next;
+}
+
+void ReleaseWorn()
+{
+	TSharedPtr<FStreamableHandle>& Worn = WornHandle();
+	if (Worn.IsValid())
+	{
+		Worn->ReleaseHandle();
+	}
+	Worn.Reset();
+}
+
+void Preload(FName Face)
+{
+	FPreload& P = Held();
+	if (P.Face == Face && P.Handle.IsValid())
+	{
+		return;
+	}
+	ReleasePreload();
+	const UHeroGroomLibrary* Lib = LibraryFor(Face);
+	if (!Lib)
+	{
+		return;
+	}
+	TArray<FSoftObjectPath> Paths;
+	for (const FHeroGroomEntry& E : Lib->Entries)
+	{
+		if (!E.Groom.IsNull())
+		{
+			Paths.AddUnique(E.Groom.ToSoftObjectPath());
+		}
+		if (!E.Binding.IsNull())
+		{
+			Paths.AddUnique(E.Binding.ToSoftObjectPath());
+		}
+	}
+	if (Paths.Num() == 0)
+	{
+		return;
+	}
+	P.Face = Face;
+	// Held (bManageActiveHandle) until released: the Style Book's grooms stay in memory while the barber's awake.
+	P.Handle = HeroGroomsDetail::Streamable().RequestAsyncLoad(Paths, FStreamableDelegate(), FStreamableManager::AsyncLoadHighPriority, true);
+	UE_LOG(LogHeroGrooms, Log, TEXT("Preloading %s's groom set: %d assets"), *Face.ToString(), Paths.Num());
+}
+
+void ReleasePreload()
+{
+	FPreload& P = Held();
+	if (P.Handle.IsValid())
+	{
+		P.Handle->ReleaseHandle();
+	}
+	P.Handle.Reset();
+	P.Face = NAME_None;
+}
+
+bool IsPreloaded(FName Face)
+{
+	const FPreload& P = Held();
+	return P.Face == Face && P.Handle.IsValid() && P.Handle->HasLoadCompleted();
+}
+
+void FillCaps(FName Face, std::vector<bool>& OutHair, std::vector<bool>& OutFacial, std::vector<bool>& OutBrows)
+{
+	const int32 Hairs = ss::hero::OptionCount(ss::hero::Slot::Hair);
+	const int32 Facials = ss::hero::OptionCount(ss::hero::Slot::FacialHair);
+	const int32 BrowCount = ss::hero::OptionCount(ss::hero::Slot::Brows);
+	OutHair.assign(static_cast<size_t>(FMath::Max(Hairs, 0)), false);
+	OutFacial.assign(static_cast<size_t>(FMath::Max(Facials, 0)), false);
+	OutBrows.assign(static_cast<size_t>(FMath::Max(BrowCount, 0)), false);
+	if (const UHeroGroomLibrary* Lib = LibraryFor(Face))
+	{
+		for (int32 H = 0; H < Hairs; ++H)
+		{
+			const FName Style = ScalpStyle(H, Face);
+			OutHair[H] = Style.IsNone() ? H == 0 : Lib->Find(Style) != nullptr;
+		}
+		for (int32 F = 0; F < Facials; ++F)
+		{
+			FName Beard;
+			FName Mustache;
+			FacialStyles(F, Beard, Mustache);
+			OutFacial[F] = (Beard.IsNone() || Lib->Find(Beard)) && (Mustache.IsNone() || Lib->Find(Mustache));
+		}
+		const FHeroGroomEntry* Own = Lib->Own(static_cast<int32>(EGroomKind::Brows));
+		for (int32 B = 0; B < BrowCount; ++B)
+		{
+			OutBrows[B] = Lib->Find(BrowStyle(B, Face, Own ? Own->Style : NAME_None)) != nullptr;
+		}
+		return;
+	}
+	// No library yet: only what the build itself wears (its hair as the old rules show it, its stubble, its Natural brows).
+	const TMap<EGroomKind, FName> Build = BuildStyles(Face);
+	if (Hairs > 0)
+	{
+		OutHair[0] = true;
+	}
+	if (const FName* Scalp = Build.Find(EGroomKind::Scalp))
+	{
+		for (int32 H = 1; H < Hairs; ++H)
+		{
+			OutHair[H] = ScalpStyle(H, Face) == *Scalp || (H == 1 && IsCroppedHair(Scalp->ToString()));
+		}
+	}
+	if (Facials > 0)
+	{
+		OutFacial[0] = true;
+	}
+	const FName* OwnBeard = Build.Find(EGroomKind::Beard);
+	const FName* OwnMustache = Build.Find(EGroomKind::Mustache);
+	for (int32 F = 1; F < Facials; ++F)
+	{
+		FName Beard;
+		FName Mustache;
+		FacialStyles(F, Beard, Mustache);
+		OutFacial[F] = (Beard.IsNone() || (OwnBeard && *OwnBeard == Beard)) && (Mustache.IsNone() || (OwnMustache && *OwnMustache == Mustache));
+	}
+	if (BrowCount > 1)
+	{
+		OutBrows[1] = Build.Contains(EGroomKind::Brows);
+	}
+}
+
+FString Describe(FName Face)
+{
+	const UHeroGroomLibrary* Lib = LibraryFor(Face);
+	if (!Lib)
+	{
+		return FString::Printf(TEXT("%s: no groom library (%s): groom_setup.py makes it; the build's own grooms stand in"), *Face.ToString(), *UHeroGroomLibrary::PackageFor(Face));
+	}
+	int32 ByKind[6] = {0, 0, 0, 0, 0, 0};
+	int32 Resident = 0;
+	for (const FHeroGroomEntry& E : Lib->Entries)
+	{
+		++ByKind[FMath::Clamp(E.Kind, 0, 5)];
+		Resident += E.Groom.Get() ? 1 : 0;
+	}
+	TArray<FString> Missing;
+	for (int32 H = 1; H < ss::hero::OptionCount(ss::hero::Slot::Hair); ++H)
+	{
+		const FName Style = ScalpStyle(H, Face);
+		if (!Style.IsNone() && !Lib->Find(Style))
+		{
+			Missing.AddUnique(Style.ToString());
+		}
+	}
+	for (int32 F = 1; F < ss::hero::OptionCount(ss::hero::Slot::FacialHair); ++F)
+	{
+		FName Beard;
+		FName Mustache;
+		FacialStyles(F, Beard, Mustache);
+		for (const FName S : {Beard, Mustache})
+		{
+			if (!S.IsNone() && !Lib->Find(S))
+			{
+				Missing.AddUnique(S.ToString());
+			}
+		}
+	}
+	const FHeroGroomEntry* Own = Lib->Own(static_cast<int32>(EGroomKind::Brows));
+	for (int32 B = 0; B < ss::hero::OptionCount(ss::hero::Slot::Brows); ++B)
+	{
+		const FName S = BrowStyle(B, Face, Own ? Own->Style : NAME_None);
+		if (!Lib->Find(S))
+		{
+			Missing.AddUnique(S.ToString());
+		}
+	}
+	return FString::Printf(TEXT("%s: %d styles (scalp %d, brows %d, beards %d, mustaches %d), %d in memory%s; missing from the map: %s"), *Face.ToString(), Lib->Entries.Num(),
+		ByKind[0], ByKind[1], ByKind[3], ByKind[4], Resident, IsPreloaded(Face) ? TEXT(", the whole set preloaded") : TEXT(""),
+		Missing.Num() ? *FString::Join(Missing, TEXT(", ")) : TEXT("none"));
 }
 } // namespace HeroGrooms

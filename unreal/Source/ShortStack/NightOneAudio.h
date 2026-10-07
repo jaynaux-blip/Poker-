@@ -30,6 +30,13 @@ public:
 	 * apartment's own. Starts the ambience if it wasn't playing.
 	 */
 	void SetAmbienceSource(TFunction<void(float*, int32)> Source, float Level = 1.0f);
+	/**
+	 * Moves the room tone onto a stereo stream (the street's, the realism update's spec 3.7: its bed and its positioned
+	 * sounds): Source fills N frames of interleaved L/R samples at ss::audio::SampleRate. The mono stream stops; the
+	 * apartment never asks for this, so its sound is as it was.
+	 */
+	void SetAmbienceSourceStereo(TFunction<void(float*, int32)> Source, float Level = 1.0f);
+	bool IsAmbienceStereo() const { return bStereo; }
 	void Play(ss::SoundId Id, float Volume = 1.0f);
 	/** A sound from a place in the world, falling off with distance. */
 	void PlayAt(ss::SoundId Id, const FVector& At, float Volume = 1.0f);
@@ -73,6 +80,8 @@ private:
 	TObjectPtr<class USoundAttenuation> Attenuation;
 	float EffectsVolume = 1.0f;
 	float AmbienceVolume = 1.0f;
+	/** The ambience streams two channels (SetAmbienceSourceStereo). */
+	bool bStereo = false;
 	uint32 Seed = 1;
 	bool bMuted = false;
 	bool bHeart = false;

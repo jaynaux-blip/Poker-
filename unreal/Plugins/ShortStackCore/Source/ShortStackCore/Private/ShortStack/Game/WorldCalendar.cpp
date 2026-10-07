@@ -263,6 +263,7 @@ const char* MemoryText(MemoryKind K)
 	case MemoryKind::BackRoom: return "A night at Dee's game";
 	case MemoryKind::Embercrest: return "The Embercrest Sunday";
 	case MemoryKind::ShowedBluff: return "Showed you a bluff";
+	case MemoryKind::Street: return "Talked on the block";
 	default: return "";
 	}
 }
@@ -336,15 +337,17 @@ std::vector<LiveEvent> LiveCalendar(int Day)
 	}
 
 	// The games that aren't on any calendar.
-	auto Game = [&](const std::string& Name, const std::string& City, Region Where, double BigBlind, int Seats, int H) {
-		LiveEvent E = Make(Name, City, "", Where, LiveKind::Underground, LiveLevel::Local, 0.0, Seats, Day, At(H, 0), 7.0);
+	auto Game = [&](const std::string& Name, const std::string& City, Region Where, double BigBlind, int Seats, int H, double Hours = 7.0) {
+		LiveEvent E = Make(Name, City, "", Where, LiveKind::Underground, LiveLevel::Local, 0.0, Seats, Day, At(H, 0), Hours);
 		E.Stakes = static_cast<Chips>(std::llround(BigBlind * 100.0));
 		Out.push_back(E);
 	};
-	if (Wd == 1)
+	if (Wd == 1 || Wd == 3 || Wd == 5)
 	{
-		// Dee's game, in the back room of the laundromat across the street (the player's own).
-		Game("Dee's game", "the laundromat", Region::Americas, 2.0, 9, 21);
+		// Dee's game, in the back room of the laundromat across the street (the player's own): Tuesdays, Thursdays and
+		// Saturdays, doors at nine, the last hand at five, as Life runs it ("dee-game") and her regulars keep it
+		// (live::Habit), so the world registers her regulars on all three nights and the walk-ins on Fifth agree.
+		Game("Dee's game", "the laundromat", Region::Americas, 2.0, 9, 21, 8.0);
 		Out.back().Id = "dees@" + std::to_string(Day);
 	}
 	if (Wd == 3)

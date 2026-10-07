@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
 
 namespace ss
 {
@@ -115,10 +116,25 @@ void World::AdvanceTo(double To)
 				P.HeroPlace = 0;
 				HeroIn.erase(P.Id);
 			}
+			if (!P.Online)
+			{
+				// Who played it, a while longer (Entered): the block's people don't change their night once it's decided.
+				std::vector<int>& Who = Played[P.Id].second;
+				Played[P.Id].first = P.End;
+				Who.clear();
+				for (const Entry& E : P.Who)
+				{
+					Who.push_back(E.Npc);
+				}
+			}
 			Sim::Resolve(*this, P);
 		}
 		Queue.erase(Queue.begin(), Queue.begin() + static_cast<std::ptrdiff_t>(Done));
 		Changed = Changed || Done > 0;
+		for (auto It = Played.begin(); It != Played.end();)
+		{
+			It = It->second.first < Limit - 2.0 * 1440.0 ? Played.erase(It) : std::next(It);
+		}
 		if (!Later.empty())
 		{
 			for (Pending& P : Later)
@@ -237,6 +253,29 @@ void World::EnsurePlanned(int Day)
 	{
 		Sim::PlanDay(*this, Day);
 	}
+}
+
+std::vector<int> World::RegisteredNow(const std::string& EventId) const
+{
+	std::vector<int> Out;
+	for (const Pending& P : Queue)
+	{
+		if (P.Id == EventId)
+		{
+			for (const Entry& E : P.Who)
+			{
+				Out.push_back(E.Npc);
+			}
+			break;
+		}
+	}
+	return Out;
+}
+
+std::vector<int> World::Entered(const std::string& EventId) const
+{
+	const auto It = Played.find(EventId);
+	return It != Played.end() ? It->second.second : RegisteredNow(EventId);
 }
 
 std::vector<int> World::Registered(const std::string& EventId)
@@ -757,6 +796,7 @@ void Sim::Feel(Bond& B, MemoryKind K, float Emotion)
 		break;
 	case MemoryKind::Embercrest: B.Familiarity = Add01(B.Familiarity, 0.06); break;
 	case MemoryKind::ShowedBluff: B.Rivalry = Add01(B.Rivalry, 0.05); break;
+	case MemoryKind::Street: B.Familiarity = Add01(B.Familiarity, 0.03); break;
 	default: break;
 	}
 }
@@ -783,6 +823,31 @@ void World::Remember(int Npc, MemoryKind Kind, const std::string& Where, Chips A
 	Bond& B = HeroBonds[Npc];
 	const int Day = sim::DayAt(At);
 	const bool First = B.Memories.empty();
+	if (Kind == MemoryKind::Street && !First)
+	{
+		// Talk on the block counts once a day, and a run of it is one memory, kept current: chatting with Sal at Ruby's
+		// every morning doesn't push the night he knocked the player out off the end of what he remembers.
+		for (const Memory& Had : B.Memories)
+		{
+			if (Had.Kind == MemoryKind::Street && Had.Day == Day)
+			{
+				return;
+			}
+		}
+		if (B.Memories.size() > 1 && B.Memories.back().Kind == MemoryKind::Street)
+		{
+			if (B.LastDay != Day)
+			{
+				++B.Encounters;
+			}
+			B.LastDay = Day;
+			Sim::Feel(B, Kind, N->SkillOf(Skill::Emotion));
+			B.Memories.back().Day = Day;
+			B.Memories.back().Where = Where;
+			++HeroRev;
+			return;
+		}
+	}
 	if (Kind == MemoryKind::Met && !First)
 	{
 		// They know the player already: it's another encounter, not a first meeting.
@@ -811,6 +876,43 @@ void World::Remember(int Npc, MemoryKind Kind, const std::string& Where, Chips A
 	{
 		B.Memories.erase(B.Memories.begin() + 1); // the first meeting is always kept
 	}
+}
+
+void World::Lent(int Npc, bool Repaid, double At)
+{
+	if (!Get(Npc))
+	{
+		return;
+	}
+	Bond& B = HeroBonds[Npc];
+	B.Trust = Add01(B.Trust, Repaid ? 0.1 : 0.06);
+	B.Familiarity = Add01(B.Familiarity, 0.02);
+	B.LastDay = std::max(B.LastDay, sim::DayAt(At));
+	++Rev;
+	++HeroRev;
+}
+
+bool World::Bumped(int Npc, double At)
+{
+	if (!Get(Npc))
+	{
+		return false;
+	}
+	const auto Last = Bumps.find(Npc);
+	if (Last != Bumps.end() && At >= Last->second && At - Last->second < BumpSameSeconds / 60.0)
+	{
+		return false; // the same collision, still touching
+	}
+	const bool Again = Last != Bumps.end() && At - Last->second < 1440.0;
+	Bumps[Npc] = At;
+	if (!Again)
+	{
+		return false;
+	}
+	Bond& B = HeroBonds[Npc];
+	B.Resentment = Add01(B.Resentment, 0.02);
+	++HeroRev;
+	return true;
 }
 
 const Bond* World::BondWith(int Npc) const
@@ -894,6 +996,10 @@ std::string World::SpokenGreeting(int Npc, uint32_t Salt) const
 	case MemoryKind::BackRoom: return One("How's Dee?", "The laundromat crew, out in daylight.", "I hear you play better at Dee's.");
 	case MemoryKind::BigPotWon: return One("I want my chips back.", "Not you again.", "That pot still hurts.");
 	case MemoryKind::BigPotLost: return One("Thanks for the chips last time.", "Good to see you. Bring chips?", "Evening. Feeling lucky?");
+	case MemoryKind::Street:
+		// Where they last talked: Ruby's, the Wash & Fold's door, the 14's stop, Fifth St.
+		return Last.Where == "Ruby's" ? One("Saw you at Ruby's.", "Hey, it's the neighbor.", "The booth by the window, right? I know you from Ruby's.")
+									  : One("Saw you on Fifth.", "Hey, it's the neighbor.", "Fifth Street, right? I know you from the block.");
 	default: break;
 	}
 	return B->Encounters >= 2 ? One("Hey again.", "Good to see you.", "Evening.") : One("I know you. Good luck.", "Hey, I remember you.", "Good luck again.");
@@ -921,6 +1027,7 @@ std::string World::Greeting(int Npc, uint32_t Salt) const
 	case MemoryKind::BackRoom: return One("Dee says hi", "the laundromat crew online", "you play better at Dee's");
 	case MemoryKind::Embercrest: return One("see you Sunday?", "Embercrest regular in the house", "gl, Sunday was fun");
 	case MemoryKind::BigPotWon: return One("I want my chips back", "gl. not you again", "that pot still hurts");
+	case MemoryKind::Street: return One("saw you on fifth the other day", "hey neighbor, gl", "fifth st in the building");
 	default: break;
 	}
 	return B->Encounters >= 3 ? One("gl", "hey again", "gl all") : "";

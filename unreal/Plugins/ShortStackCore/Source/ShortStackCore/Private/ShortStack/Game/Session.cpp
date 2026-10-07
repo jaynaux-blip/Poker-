@@ -1236,6 +1236,10 @@ void Session::NewCareer(const hero::Character& Who)
 	Life.Pantry["oodle-cup"] = 2;
 	// And in the closet: the creator's choices become things the player owns (Wardrobe.h).
 	Life.Closet = wardrobe::SeedFrom(Person.Appearance);
+	// The hair as they came: cut a week before night one, as an older career's migration has it (Body.h), so it grows
+	// from the start whether or not they ever sit in Lonnie's chair.
+	Life.Groom.CutAt = WorldMinutes() - 7.0 * net::MinutesPerDay;
+	Life.Groom.ShaveAt = Life.Groom.CutAt;
 	Save();
 }
 

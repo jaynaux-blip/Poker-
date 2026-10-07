@@ -21,6 +21,7 @@
 #include "BackRoomPlayer.h"
 #include "BackRoomStage.h"
 #include "BackRoomTable.h"
+#include "CastLooks.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -92,19 +93,14 @@ const TCHAR* CrowdBodies[ABackRoomStage::CrowdKinds] = {TEXT("ExtraH"), TEXT("Ex
 	nullptr, nullptr, TEXT("ExtraG"), TEXT("ExtraL"), TEXT("ExtraE"), TEXT("ExtraJ"), TEXT("ExtraC"), TEXT("ExtraH")};
 
 /**
- * The body an entrant's tournament id picks (LIVE_TOURNAMENTS.md section 10: a look is a hash of the id): their own
- * MetaHuman for the cast, one of the room's that suits a regular of the room's, any of the twelve for anyone else.
+ * The body an entrant's tournament id picks (LIVE_TOURNAMENTS.md section 10: a look is a hash of the id): CastLooks owns it
+ * now (spec 7.5.4), shared with the street and the Embercrest: their own MetaHuman for the cast, the block's face for the
+ * block's people (Lonnie at the Monday Nightly), one of the room's that suits a regular of the room's, any of the twelve
+ * for anyone else (the same pick as before for everyone else).
  */
 FString DefaultBody(const FString& Id, const FString& Name)
 {
-	const FString Own = ABackRoomGameMode::CastAssetFor(Name);
-	if (!Own.IsEmpty())
-	{
-		return Own;
-	}
-	const uint32 Hash = FCrc::StrCrc32(*Id);
-	const ss::live::RoomLocal* Local = ss::live::FindRoomLocal(std::string(TCHAR_TO_UTF8(*Name)));
-	return Local ? (Local->Woman ? WomenBodies : MenBodies)[Hash % 6] : ExtraBodies[Hash % 12];
+	return CastLooks::DefaultBody(Id, Name);
 }
 
 /** The room's body an actor wears ("ExtraC", "Sal"; empty when it has none): the folder its MetaHuman was built in. */

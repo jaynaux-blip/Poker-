@@ -402,6 +402,172 @@ void PlayerNights(const world::World& Base)
 	std::printf("player nights: out 40th at %s; %s went out 50th, %s finished %s\n", Noon.Id.c_str(), W.Get(AtNoon[0])->Name.c_str(), W.Get(AtNoon[1])->Name.c_str(), Ordinal(Better).c_str());
 }
 
+/**
+ * Dee's game is on the world's calendar on her three nights (Tuesday, Thursday, Saturday, doors at nine, the last hand at
+ * five), as Life runs it and her regulars keep it: the world registers them for all three, and nobody plays it otherwise.
+ */
+void DeesNights(const world::World& Base)
+{
+	world::World W = Base;
+	const int First = net::DayOf(W.Clock()) + 1;
+	int Nights = 0;
+	int Seats = 0;
+	for (int D = First; D < First + 28; ++D)
+	{
+		W.EnsurePlanned(D);
+		const int Wd = net::Weekday(D);
+		const bool Hers = Wd == 1 || Wd == 3 || Wd == 5;
+		int Listed = 0;
+		Chips BuyIn = 0;
+		for (const world::LiveEvent& E : world::LiveCalendar(D))
+		{
+			if (E.Id.rfind("dees@", 0) == 0)
+			{
+				++Listed;
+				BuyIn = E.Stakes * 100; // a hundred big blinds, as the world buys into a back-room game
+				Check(E.Id == "dees@" + std::to_string(D) && E.Kind == world::LiveKind::Underground && E.Start == D * 1440.0 + 21.0 * 60.0 && E.Duration == 8.0 * 60.0,
+					"Dee's game: " + E.Id + " opens at nine and deals till five");
+			}
+		}
+		Check(Listed == (Hers ? 1 : 0), "Dee's game is on " + std::string(net::WeekdayName(D, true)) + "s only if it's one of her nights");
+		const std::vector<int> Who = W.Registered("dees@" + std::to_string(D));
+		if (!Hers)
+		{
+			Check(Who.empty(), "nobody is registered for a Dee's game that isn't on");
+			W.Simulate(1);
+			continue;
+		}
+		++Nights;
+		int Regulars = 0;
+		for (const char* Name : {"Sal", "Mei", "Big Lou", "Twitch"})
+		{
+			const int Id = W.Find(Name);
+			const world::Npc* N = W.Get(Id);
+			const bool In = std::find(Who.begin(), Who.end(), Id) != Who.end();
+			Regulars += In ? 1 : 0;
+			const bool Away = N && N->TripUntil >= D && D >= N->TripFrom;
+			// Short: the buy-in is more than they have, and nobody stakes them (Twitch, broke, is at Ruby's instead).
+			const bool Short = N && N->Backer == -1 && N->Bankroll < BuyIn && N->Income * 8 < BuyIn;
+			Check(In || !N || !N->Playing() || Away || Short, std::string(Name) + " is at Dee's on " + net::WeekdayName(D, true) + " (day " + std::to_string(D) + ")");
+			if (In)
+			{
+				// Her game comes first: not at the ridge, nor at another room's game, that day.
+				for (const live::Occurrence& O : live::Occurrences(D))
+				{
+					const std::vector<int> There = W.Registered(O.Id);
+					Check(std::find(There.begin(), There.end(), Id) == There.end(), std::string(Name) + " isn't at the ridge on one of Dee's nights");
+				}
+				for (const world::LiveEvent& E : world::LiveCalendar(D))
+				{
+					const std::vector<int> There = E.Kind == world::LiveKind::Local && !live::IsEmbercrest(E.Id) ? W.Registered(E.Id) : std::vector<int>();
+					Check(std::find(There.begin(), There.end(), Id) == There.end(), std::string(Name) + " isn't at " + E.Name + " on one of Dee's nights");
+				}
+			}
+		}
+		Seats += Regulars;
+		W.Simulate(1);
+	}
+	Check(Nights == 12, "four weeks of Dee's nights: Tuesday, Thursday and Saturday");
+	// Who sat down at Dee's stays known after the night is played (Entered): the block's schedule doesn't lose them at five.
+	{
+		world::World After = Base;
+		int Day = net::DayOf(After.Clock()) + 1;
+		while (net::Weekday(Day) != 1)
+		{
+			++Day;
+		}
+		After.AdvanceTo(Day * 1440.0 + 22.0 * 60.0);
+		const std::string Id = "dees@" + std::to_string(Day);
+		const std::vector<int> During = After.Entered(Id);
+		Check(!During.empty() && During == After.RegisteredNow(Id), "Entered: Dee's table, while it's dealt, is who registered");
+		After.AdvanceTo((Day + 1) * 1440.0 + 6.0 * 60.0);
+		Check(After.RegisteredNow(Id).empty() && After.Entered(Id) == During, "Entered: who played it, once it's played");
+		std::string Saved;
+		After.Write(Saved);
+		world::World Loaded;
+		Load(Loaded, Saved);
+		Check(Loaded.Entered(Id).empty(), "Entered: a loaded world knows only what's ahead");
+		After.AdvanceTo((Day + 3) * 1440.0 + 6.0 * 60.0);
+		Check(After.Entered(Id).empty(), "Entered: forgotten two days on");
+	}
+	Check(Seats >= 2 * Nights, "Dee's regulars fill her seats (" + std::to_string(Seats) + " over " + std::to_string(Nights) + " nights)");
+	std::printf("dee's game: %d nights in 4 weeks, %d of her regulars' seats filled\n", Nights, Seats);
+}
+
+/** Talk on the block (MemoryKind::Street): once a day, one memory for a run of it, saved, in words and in the greetings. */
+void StreetMemory(world::World& W)
+{
+	const int Sal = W.Find("Sal");
+	const int Mei = W.Find("Mei");
+	const double Now = W.Clock();
+	const world::Bond* B0 = W.BondWith(Mei);
+	const size_t Had = B0 ? B0->Memories.size() : 0;
+	W.Remember(Mei, world::MemoryKind::Street, "Ruby's", 0, Now);
+	W.Remember(Mei, world::MemoryKind::Street, "Ruby's", 0, Now + 10.0);
+	const world::Bond* B = W.BondWith(Mei);
+	Check(B && B->Memories.size() == Had + 1 && B->Memories.back().Kind == world::MemoryKind::Street, "street: once a day");
+	W.Remember(Mei, world::MemoryKind::Street, "the 14's stop", 0, Now + 1440.0);
+	W.Remember(Mei, world::MemoryKind::Street, "Ruby's", 0, Now + 2880.0);
+	B = W.BondWith(Mei);
+	const size_t Run = B->Memories.size();
+	W.Remember(Mei, world::MemoryKind::Street, "Fifth St.", 0, Now + 4320.0);
+	B = W.BondWith(Mei);
+	Check(B->Memories.size() == Run && B->Memories.back().Where == "Fifth St." && B->Memories.back().Day == net::DayOf(Now + 4320.0), "street: a run of meetings is one memory, kept current");
+	Check(B->Label() == "Knows you" || B->Familiarity > 0.0f, "street: they know the player");
+	W.Remember(Sal, world::MemoryKind::Street, "the Wash & Fold", 0, Now);
+	Check(std::string(world::MemoryText(world::MemoryKind::Street)) == "Talked on the block", "street: MemoryText covers it");
+	std::set<std::string> Texts;
+	for (int K = 0; K < static_cast<int>(world::MemoryKind::Count); ++K)
+	{
+		const std::string T = world::MemoryText(static_cast<world::MemoryKind>(K));
+		Check(!T.empty() && Texts.insert(T).second, "MemoryText has its own words for every kind (" + std::to_string(K) + ")");
+	}
+	bool Spoken = false;
+	bool Chat = false;
+	for (uint32_t Salt = 0; Salt < 3; ++Salt)
+	{
+		Spoken = Spoken || W.SpokenGreeting(Mei, Salt).find("Fifth") != std::string::npos;
+		Chat = Chat || W.Greeting(Mei, Salt).find("fifth") != std::string::npos;
+	}
+	Check(Spoken && Chat, "street: the greetings learn it (\"" + W.SpokenGreeting(Mei, 0) + "\")");
+	const world::Profile P = W.ProfileOf(Mei);
+	bool Card = false;
+	for (const std::string& M : P.Memories)
+	{
+		Card = Card || M.find("Talked on the block (Fifth St.)") != std::string::npos;
+	}
+	Check(Card, "street: the player card says where");
+	// Saved and loaded as it was.
+	std::string Saved;
+	W.Write(Saved);
+	world::World Copy;
+	Load(Copy, Saved);
+	const world::Bond* C = Copy.BondWith(Mei);
+	Check(C && C->Memories.size() == B->Memories.size() && C->Memories.back().Kind == world::MemoryKind::Street && C->Memories.back().Where == "Fifth St.", "street: MemoryKind::Street round-trips");
+	std::string Again;
+	Copy.Write(Again);
+	Check(Again == Saved, "street: a loaded world writes the same save");
+	// The twenty lent on Fifth: trust, and more when it comes back.
+	const int Twitch = W.Find("Twitch");
+	const float Before = W.BondWith(Twitch) ? W.BondWith(Twitch)->Trust : 0.0f;
+	W.Lent(Twitch, false, Now);
+	const float Lent = W.BondWith(Twitch)->Trust;
+	W.Lent(Twitch, true, Now + 1440.0);
+	Check(Lent > Before && W.BondWith(Twitch)->Trust > Lent, "street: lending moves Trust");
+	// Run into someone once, it's an accident; again the same day, they hold it against you a little.
+	const float Calm = W.BondWith(Sal) ? W.BondWith(Sal)->Resentment : 0.0f;
+	const bool First = W.Bumped(Sal, Now + 100.0);
+	const bool Second = W.Bumped(Sal, Now + 103.0);
+	Check(!First && Second && W.BondWith(Sal)->Resentment > Calm && W.BondWith(Sal)->Resentment <= Calm + 0.0201f, "street: a second bump the same day, Resentment +0.02");
+	// The capsules touch for a few frames: contacts within seconds of each other are the one collision.
+	const float Held = W.BondWith(Sal)->Resentment;
+	const bool Touch = W.Bumped(Sal, Now + 103.0 + 2.0 / 60.0);
+	const bool Touch2 = W.Bumped(Sal, Now + 103.0 + 4.0 / 60.0);
+	Check(!Touch && !Touch2 && W.BondWith(Sal)->Resentment == Held, "street: one collision is one bump, however many frames it touches");
+	Check(W.Bumped(Sal, Now + 103.0 + 0.5) && W.BondWith(Sal)->Resentment > Held, "street: running into him again half a minute on counts");
+	Check(!W.Bumped(Sal, Now + 100.0 + 2.0 * 1440.0), "street: a bump days later is an accident again");
+}
+
 int Checks()
 {
 	Calendar();
@@ -447,6 +613,7 @@ int Checks()
 	std::printf("30 days in %.2fs\n", Month);
 	Invariants(W, "day 30");
 	EmbercrestWeeks(W);
+	DeesNights(W);
 	MinimumField(W);
 	PlayerNights(W);
 	int Finished = 0;
@@ -594,6 +761,7 @@ int Checks()
 		Check(Bd && !Bd->Memories.empty(), "Sal remembers a night at Dee's");
 		Check(!W.Greeting(Sal, 1).empty(), "Sal has something to say");
 	}
+	StreetMemory(W);
 	std::printf("%s", W.Report().c_str());
 	std::printf("%s", W.Describe(W.Find("gh0stfold")).c_str());
 	return Failures;

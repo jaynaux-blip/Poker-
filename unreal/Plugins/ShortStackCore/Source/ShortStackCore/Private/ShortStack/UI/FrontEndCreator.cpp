@@ -1247,7 +1247,9 @@ void FrontEnd::LookStep(double Now)
 			C->FillRect({R.X, R.Y, 3.0f, R.H}, Paint(F(MenuNeon, Ri)));
 		}
 		const int V = Draft.Appearance.Get(S);
-		const float Lw = TrackedText(*C, hero::SlotName(S), R.X + 24.0f, R.Y + (IsColorSlot(S) ? 32.0f : 43.0f), 13.0f, 800, F(Focus ? MenuInk : MenuMuted, Ri), 3.0f);
+		// With no jacket (OutfitNone) the outfit's color is the tee's, and the row says so.
+		const bool TeeOnly = S == hero::Slot::OutfitColor && Draft.Appearance.Outfit == hero::OutfitNone;
+		const float Lw = TrackedText(*C, TeeOnly ? std::string("TEE COLOR") : std::string(hero::SlotName(S)), R.X + 24.0f, R.Y + (IsColorSlot(S) ? 32.0f : 43.0f), 13.0f, 800, F(Focus ? MenuInk : MenuMuted, Ri), 3.0f);
 		if (IsColorSlot(S))
 		{
 			const std::string Value = hero::OptionName(S, V);
@@ -1308,7 +1310,8 @@ void FrontEnd::LookStep(double Now)
 			const float Mid = (Cl + Cr) * 0.5f;
 			Chevron(*C, Cl, R.Y + 34.0f, 9.0f, false, F(MenuInk, (Focus ? 0.95f : 0.55f) * Ri));
 			Chevron(*C, Cr, R.Y + 34.0f, 9.0f, true, F(MenuInk, (Focus ? 0.95f : 0.55f) * Ri));
-			C->Text(hero::OptionName(S, V), Mid, R.Y + 41.0f, Ts(20.0f, 700, F(MenuInk, Ri), Align::Center, Baseline::Alphabetic, false, std::max(60.0f, Cr - Cl - 44.0f)));
+			const std::string Shown = S == hero::Slot::Outfit && V == hero::OutfitNone ? std::string("No Jacket") : hero::OptionName(S, V);
+			C->Text(Shown, Mid, R.Y + 41.0f, Ts(20.0f, 700, F(MenuInk, Ri), Align::Center, Baseline::Alphabetic, false, std::max(60.0f, Cr - Cl - 44.0f)));
 			const int N = hero::OptionCount(S);
 			const float Pip = std::min(10.0f, (Cr - Cl - 44.0f) / Fc(std::max(1, N)));
 			const float P0 = Mid - Fc(N - 1) * Pip * 0.5f;

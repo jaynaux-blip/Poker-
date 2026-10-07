@@ -13,6 +13,16 @@
 //   ss.Zone.Show [seconds]              draws the zones, uses, stations, starts, doors and walkways
 //   ss.Street.Preload                   the preload list: every registered path, and what the stage has saved
 //   ss.Street.KeepOverrides 0|1         (StreetWorld.cpp) whether test overrides survive into the next Play session
+//   ss.Shop.Open <venue> [page]         a shop's screen where the player stands (barber, thrift, gym, diner, pawn, wardrobe)
+//   ss.Shop.Close                       the open screen closed
+//   ss.Shop.Key <name>                  a key to the open screen (Down, Enter, Tab, Escape...: StoreCounter's names)
+//   ss.Shop.Hours                       every venue's hours now (core's), and each shop stage as it stands
+//   ss.Shop.Awake <venue> <1|0|-1>      a shop held awake, asleep, or left to decide (spec 3.8)
+//   ss.Shop.Cinematic <venue> [service] a service's shots played without its skip or its charge (barber barber/crew)
+//   ss.Shop.Mirror 0|1|2                (ShopStage.cpp) the mirrors: Lumen hit lighting, the capture fallback, Lumen plain
+//   ss.Pawn.List                        the pawn book, what the hero could bring Augie, and what stands in his shop
+//   ss.Pawn.Age <days>                  every ticket and shelf lot made older (forfeits and expiry on the calendar's next step)
+//   ss.Pawn.Auction                     Unit 114 due now (evicted with a unit): the card pays it, or the lien auction runs
 
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -25,11 +35,16 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+#include "PawnStage.h"
 #include "ShopStage.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Shop.h"
 #include "ShortStackCharacter.h"
+#include "ShortStack/Game/Town.h"
+#include "ShortStack/Game/Weather.h"
 #include "StreetGameMode.h"
+#include "StreetNpcs.h"
 #include "StreetStage.h"
 #include "StreetWorld.h"
 
@@ -239,6 +254,31 @@ FAutoConsoleCommandWithWorldAndArgs StreetPreloadCmd(TEXT("ss.Street.Preload"), 
 		}
 		UE_LOG(LogStreetHooks, Display, TEXT("%d paths registered; the stage saved %d assets"), Paths.Num(), Saved);
 	}));
+
+/** A hook whose twin answers with a line: the line to the log. */
+#define SS_SHOP_HOOK(Var, Name, Help, Body)                                                                                                                            \
+	FAutoConsoleCommandWithWorldAndArgs Var(TEXT(Name), TEXT(Help), FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) { \
+		if (AStreetGameMode* M = StreetModeIn(World))                                                                                                                   \
+		{                                                                                                                                                              \
+			UE_LOG(LogStreetHooks, Display, TEXT("%s"), *(Body));                                                                                                     \
+		}                                                                                                                                                              \
+	}));
+
+SS_SHOP_HOOK(ShopOpenCmd, "ss.Shop.Open", "ss.Shop.Open <barber|thrift|gym|diner|pawn|wardrobe> [page]: that shop's screen, where the player stands (testing).",
+	M->TestShopOpen(Args.Num() > 0 ? Args[0] : FString(TEXT("barber")), Args.Num() > 1 ? Args[1] : FString()))
+SS_SHOP_HOOK(ShopCloseCmd, "ss.Shop.Close", "ss.Shop.Close: the open shop screen closed.", M->TestShopClose())
+SS_SHOP_HOOK(ShopKeyCmd, "ss.Shop.Key", "ss.Shop.Key <Up|Down|Left|Right|Enter|Tab|Q|E|Alt|Backspace|Escape>: a key to the open screen (the counter, a shop's page, the talk card).",
+	M->TestShopKey(Args.Num() > 0 ? Args[0] : FString(TEXT("Enter"))))
+SS_SHOP_HOOK(ShopHoursCmd, "ss.Shop.Hours", "ss.Shop.Hours: every venue's hours now (core's), and each shop stage as it stands.", M->TestShopHours())
+SS_SHOP_HOOK(ShopAwakeCmd, "ss.Shop.Awake", "ss.Shop.Awake <venue> <1|0|-1>: hold a shop awake or asleep (spec 3.8's sleep), or let it decide.",
+	M->TestShopAwake(Args.Num() > 0 ? Args[0] : FString(TEXT("barber")), Args.Num() > 1 ? FCString::Atoi(*Args[1]) : -1))
+SS_SHOP_HOOK(ShopCinematicCmd, "ss.Shop.Cinematic", "ss.Shop.Cinematic <venue> [service]: a service's shots without its skip or its charge (barber barber/crew, gym gym/bag).",
+	M->TestCinematic(Args.Num() > 0 ? Args[0] : FString(TEXT("barber")), Args.Num() > 1 ? Args[1] : FString()))
+SS_SHOP_HOOK(PawnListCmd, "ss.Pawn.List", "ss.Pawn.List: the pawn book (tickets, shelf, away), what the hero could bring, what stands in the shop.", M->TestPawnList())
+SS_SHOP_HOOK(PawnAgeCmd, "ss.Pawn.Age", "ss.Pawn.Age <days>: every ticket and shelf lot that many days older (the calendar settles forfeits and expiry next).",
+	M->TestPawnAge(Args.Num() > 0 ? FCString::Atof(*Args[0]) : 1.0f))
+SS_SHOP_HOOK(PawnAuctionCmd, "ss.Pawn.Auction", "ss.Pawn.Auction: Unit 114 due now (evicted with a unit): the card pays it, or the lien auction runs.", M->TestPawnAuction())
+#undef SS_SHOP_HOOK
 #endif
 } // namespace StreetCommandsDetail
 
@@ -258,7 +298,10 @@ FString AStreetGameMode::TestDescribe() const
 	const FStreetUse* Use = UseInReach();
 	const FStreetZone* Zone = ZoneAt(Hero->GetActorLocation());
 	const UStreetWorld* Registry = StreetWorld();
-	const TCHAR* Screen = Game->Counter.IsOpen() ? TEXT("counter") : Game->Menu.IsOpen() ? TEXT("menu") : TEXT("none");
+	const FString OpenScreen = Game->Counter.IsOpen() ? FString(TEXT("counter"))
+		: Game->Menu.IsOpen()                         ? FString(TEXT("menu"))
+		: Screen && Screen->IsOpen()                  ? FString::Printf(TEXT("%s on %s"), *ScreenVenue.ToString(), *ScreenPage)
+													  : FString(TEXT("none"));
 	FString ShopLines;
 	for (const TWeakObjectPtr<AShopStage>& S : Shops)
 	{
@@ -266,6 +309,44 @@ FString AStreetGameMode::TestDescribe() const
 		{
 			ShopLines += TEXT(" | ") + S->Describe();
 		}
+	}
+	// The shops' state of play: the shot, the seat, a service under way and its skip.
+	FString ShopState;
+	if (!CameraShot.IsNone())
+	{
+		ShopState += FString::Printf(TEXT(" | shot %s"), *CameraShot.ToString());
+	}
+	if (!SeatedAt.IsNone())
+	{
+		ShopState += FString::Printf(TEXT(" | seated at %s"), *SeatedAt.ToString());
+	}
+	if (Cinema.bActive)
+	{
+		ShopState += FString::Printf(TEXT(" | service at %s (%s) phase %d%s"), *Cinema.Venue.ToString(), *Cinema.Service, Cinema.Phase, Cinema.bDry ? TEXT(" dry") : TEXT(""));
+	}
+	if (Game->Session.TimeSkip.Active)
+	{
+		ShopState += FString::Printf(TEXT(" | skip \"%s\""), *Utf8(Game->Session.TimeSkip.Label));
+	}
+	// The weather as the street shows it; the people out and the one in reach (their bond); the talk under way.
+	if (Stage)
+	{
+		const ss::weather::Now& W = Stage->WeatherNow();
+		ShopState += FString::Printf(TEXT(" | weather %s rain %.2f wet %.2f"), *Utf8(ss::weather::Word(W.State)), W.Rain, W.Wetness);
+	}
+	if (People)
+	{
+		ShopState += FString::Printf(TEXT(" | people %d live%s"), People->NumLive(), People->IsReady() ? TEXT("") : TEXT(" (building)"));
+	}
+	if (Use && Use->Verb == EStreetVerb::Talk)
+	{
+		const FString Id = Use->Param.IsEmpty() ? Use->Id.ToString() : Use->Param;
+		const std::string Tag = ss::town::Tag(std::string(TCHAR_TO_UTF8(*Id)), Game->Session);
+		ShopState += FString::Printf(TEXT(" | person %s%s"), *Id, Tag.empty() ? TEXT("") : *FString::Printf(TEXT(" (%s)"), *Utf8(Tag)));
+	}
+	if (!TalkingTo.IsNone())
+	{
+		ShopState += FString::Printf(TEXT(" | talking with %s%s"), *TalkingTo.ToString(), bTalkByDirector ? TEXT("") : TEXT(" (town's context)"));
 	}
 	// The Block's fields first, as its scripts read them; then the registry's.
 	const FString Block = FString::Printf(
@@ -275,10 +356,189 @@ FString AStreetGameMode::TestDescribe() const
 		Game->Session.BankrollCents / 100.0, static_cast<int32>(L.Pantry.size()), Game->Counter.IsOpen() ? TEXT("open") : TEXT("closed"), Stage ? Stage->CameraInside() : 0.0f,
 		Stage ? Stage->CameraInWash() : 0.0f, Stage ? Stage->WashDoorOpen() : 0.0f, Game->Session.Daylight(), Game->Session.Evicted() ? TEXT("evicted") : TEXT("housed"),
 		DeeStates[static_cast<int32>(DeeGameAt(Game->Session.WorldMinutes()))]);
-	return FString::Printf(TEXT("%s | zone %s%s | verb %s | screen %s | camera boom %.0f fov %.0f%s | %s | %s%s"), *Block, Zone ? *Zone->Id.ToString() : TEXT("none"),
-		Zone && Zone->bInterior ? TEXT(" (room)") : TEXT(""), Use ? *StaticEnum<EStreetVerb>()->GetNameStringByValue(static_cast<int64>(Use->Verb)) : TEXT("none"), Screen,
-		Hero->ArmLength, Hero->ThirdPersonFov, ProfileZone.IsNone() ? TEXT("") : *FString::Printf(TEXT(" (%s's profile)"), *ProfileZone.ToString()), *FrameBudget.Describe(),
-		Registry ? *Registry->Describe() : TEXT("no registry"), *ShopLines);
+	return FString::Printf(TEXT("%s | zone %s%s | verb %s | screen %s | camera boom %.0f fov %.0f%s%s | %s | %s%s"), *Block, Zone ? *Zone->Id.ToString() : TEXT("none"),
+		Zone && Zone->bInterior ? TEXT(" (room)") : TEXT(""), Use ? *StaticEnum<EStreetVerb>()->GetNameStringByValue(static_cast<int64>(Use->Verb)) : TEXT("none"), *OpenScreen,
+		Hero->ArmLength, Hero->ThirdPersonFov, ProfileZone.IsNone() ? TEXT("") : *FString::Printf(TEXT(" (%s's profile)"), *ProfileZone.ToString()), *ShopState,
+		*FrameBudget.Describe(), Registry ? *Registry->Describe() : TEXT("no registry"), *ShopLines);
+}
+
+// ------------------------------------------------------------------ the shops' and the pawn's twins
+
+FString AStreetGameMode::TestShopOpen(const FString& Venue, const FString& Page)
+{
+	if (!Game || !Game->bCareer)
+	{
+		return TEXT("No career on the street.");
+	}
+	if (Cinema.bActive)
+	{
+		return TEXT("Not during a service.");
+	}
+	return OpenShop(FName(*Venue), Page) ? FString::Printf(TEXT("The %s screen open on \"%s\"."), *Venue, *Page)
+										 : FString::Printf(TEXT("No screen for %s (core-ui's MakeShopScreen: barber, thrift, gym, diner, pawn, wardrobe)."), *Venue);
+}
+
+FString AStreetGameMode::TestShopClose()
+{
+	if (!Screen)
+	{
+		return TEXT("No shop screen open.");
+	}
+	const FString Was = ScreenVenue.ToString();
+	CloseShop(true);
+	return FString::Printf(TEXT("The %s screen closed."), *Was);
+}
+
+FString AStreetGameMode::TestShopKey(const FString& Key)
+{
+	if (!Game)
+	{
+		return TEXT("No game.");
+	}
+	// As the widgets pass them (CreateWidgets): the counter's, else the shop's page or the talk card; its requests and a walk
+	// away are taken next frame, in that order, as the player's keys are.
+	if (Game->Counter.IsOpen())
+	{
+		Game->Counter.Key(std::string(TCHAR_TO_UTF8(*Key)), RealTime);
+		if (Game->Counter.TakeLeave())
+		{
+			ReturnInputToGame();
+		}
+		return FString::Printf(TEXT("%s to the counter."), *Key);
+	}
+	if (Screen && Screen->IsOpen())
+	{
+		Screen->Key(std::string(TCHAR_TO_UTF8(*Key)), RealTime);
+		return FString::Printf(TEXT("%s to the %s screen."), *Key, *ScreenVenue.ToString());
+	}
+	return TEXT("No screen open.");
+}
+
+FString AStreetGameMode::TestShopHours() const
+{
+	if (!Game)
+	{
+		return TEXT("No game.");
+	}
+	const double World = Game->Session.WorldMinutes();
+	FString Out = FString::Printf(TEXT("%s:"), *Utf8(ss::net::TimeLabel(World)));
+	const std::vector<ss::shop::Venue>& Venues = ss::shop::Venues();
+	if (Venues.empty())
+	{
+		Out += TEXT(" core has no venues yet (Shop.cpp's stubs): every shop stands open and staffed.");
+	}
+	for (const ss::shop::Venue& V : Venues)
+	{
+		Out += FString::Printf(TEXT("\n  %s%s: %s%s, %s"), *Utf8(V.Name), V.Enterable ? TEXT(" (enterable)") : TEXT(""), ss::shop::IsOpen(V, World) ? TEXT("open") : TEXT("closed"),
+			ss::shop::IsStaffed(V, World) ? TEXT(" and staffed") : TEXT(""), *Utf8(ss::shop::HoursLine(V, World)));
+	}
+	for (const TWeakObjectPtr<AShopStage>& S : Shops)
+	{
+		if (S.IsValid())
+		{
+			Out += TEXT("\n  stage ") + S->Describe();
+		}
+	}
+	return Out;
+}
+
+FString AStreetGameMode::TestShopAwake(const FString& Venue, int32 Hold)
+{
+	AShopStage* Shop = ShopFor(FName(*Venue));
+	if (!Shop)
+	{
+		return FString::Printf(TEXT("No shop %s."), *Venue);
+	}
+	Shop->HoldAwake(FMath::Clamp(Hold, -1, 1));
+	return FString::Printf(TEXT("%s %s."), *Shop->VenueName, Hold < 0 ? TEXT("decides for itself") : Hold > 0 ? TEXT("held awake") : TEXT("held asleep"));
+}
+
+FString AStreetGameMode::TestCinematic(const FString& Venue, const FString& Service)
+{
+	if (!ShopFor(FName(*Venue)))
+	{
+		return FString::Printf(TEXT("No shop %s."), *Venue);
+	}
+	if (Cinema.bActive || (Screen && Screen->IsOpen()))
+	{
+		return TEXT("Not while a screen or a service is up.");
+	}
+	// Without the skip: the shots for their seconds, the after-shots, the fade (nothing charged, the clock untouched).
+	const FString Wanted = Service.IsEmpty() ? FString::Printf(TEXT("%s/%s"), *Venue, Venue == TEXT("gym") ? TEXT("bag") : TEXT("crew")) : Service;
+	BeginCinematic(FName(*Venue), Wanted, true, 6.0f);
+	return FString::Printf(TEXT("%s's cinematic for %s: %d shots, %d after."), *Venue, *Wanted, Cinema.During.Num(), Cinema.After.Num());
+}
+
+FString AStreetGameMode::TestPawnList() const
+{
+	if (!Game)
+	{
+		return TEXT("No game.");
+	}
+	const ss::Session& S = Game->Session;
+	const ss::shop::PawnBook& B = S.Life.Pawn;
+	const double World = S.WorldMinutes();
+	FString Out = FString::Printf(TEXT("The pawn book at %s: next ticket #%d"), *Utf8(ss::net::TimeLabel(World)), B.NextTicket);
+	for (const ss::shop::Ticket& T : B.Tickets)
+	{
+		Out += FString::Printf(TEXT("\n  ticket #%d %s: lent %s, due day %d%s, redeems for %s"), T.Number, *Utf8(T.Lot), *AShopStage::Dollars(T.LoanCents), ss::net::DayOf(T.DueAt),
+			World > T.DueAt ? TEXT(" (in grace)") : TEXT(""), *AShopStage::Dollars(ss::shop::RedeemCents(T, World)));
+	}
+	for (const ss::shop::ShelfLot& L : B.Shelf)
+	{
+		Out += FString::Printf(TEXT("\n  shelf %s at %s, days %d..%d%s"), *Utf8(L.Lot), *AShopStage::Dollars(L.PriceCents), ss::net::DayOf(L.From), ss::net::DayOf(L.Until),
+			L.Auction ? TEXT(" (lot 114)") : TEXT(""));
+	}
+	for (const std::string& A : B.Away)
+	{
+		Out += FString::Printf(TEXT("\n  gone: %s"), *Utf8(A));
+	}
+	for (const ss::shop::Lot& L : S.PawnLots())
+	{
+		Out += FString::Printf(TEXT("\n  could bring %s (V %s: sell %s, pawn %s)%s%s"), *Utf8(L.Id), *AShopStage::Dollars(L.ValueCents), *AShopStage::Dollars(L.SellCents),
+			*AShopStage::Dollars(L.LoanCents), L.Stored ? TEXT(" in storage") : TEXT(""), L.Refused.empty() ? TEXT("") : *FString::Printf(TEXT(" refused: %s"), *Utf8(L.Refused)));
+	}
+	for (const ss::shop::Lot& L : S.PawnShelf())
+	{
+		Out += FString::Printf(TEXT("\n  for sale %s at %s"), *Utf8(L.Id), *AShopStage::Dollars(L.ValueCents));
+	}
+	if (const APawnStage* Pawn = Cast<APawnStage>(ShopFor(TEXT("pawn"))))
+	{
+		Out += TEXT("\n  in the shop: ") + Pawn->DescribeStock();
+	}
+	return Out;
+}
+
+FString AStreetGameMode::TestPawnAge(float Days)
+{
+	if (!Game || !Game->bCareer)
+	{
+		return TEXT("No career on the street.");
+	}
+	// Every ticket taken and due that much earlier, every shelf lot put out and taken down that much earlier: the calendar's
+	// next step (core-shops' ShopStep) sends the reminders, forfeits what's past its grace and clears what's had its 21 days.
+	ss::shop::PawnBook& B = Game->Session.Life.Pawn;
+	ss::shop::Age(B, static_cast<double>(FMath::Max(0.0f, Days)));
+	return FString::Printf(TEXT("%d tickets and %d shelf lots %.1f days older; the calendar settles them on its next step."), static_cast<int32>(B.Tickets.size()),
+		static_cast<int32>(B.Shelf.size()), Days);
+}
+
+FString AStreetGameMode::TestPawnAuction()
+{
+	if (!Game || !Game->bCareer)
+	{
+		return TEXT("No career on the street.");
+	}
+	ss::Session& S = Game->Session;
+	if (!S.Evicted() || S.Life.StorageDue <= 0.0)
+	{
+		return TEXT("Not evicted with a unit in Ninth St. Storage: no auction to run.");
+	}
+	// The unit comes due a moment from now: the calendar's next step charges the card on file, or (short) runs the lien
+	// auction, and some of what was lost turns up at the pawn two days later (shop::Consign).
+	S.Life.StorageDue = S.WorldMinutes() + 0.01;
+	return S.BankrollCents >= ss::life::StorageCents ? TEXT("Unit 114 due now: the card covers the $60, so it renews (spend below $60 first to see the auction).")
+													 : TEXT("Unit 114 due now with the card short: the lien auction runs on the next step.");
 }
 
 void AStreetGameMode::TestTeleport(const FString& Where)
@@ -380,6 +640,34 @@ FString AStreetGameMode::TestGo(const FString& Where)
 				T = FTransform(D.Outside.GetRotation(), D.Outside.GetLocation() + FVector(0.0, 0.0, 100.0));
 				What = TEXT("door");
 			}
+		}
+	}
+	if (What.IsEmpty())
+	{
+		// A use ("barber-chair1", "pawn-counter"): where the hero stands to reach it (a seat's stand-up spot, facing the seat;
+		// anything else a step back from it toward its room's middle), so ss.Street.Use works it.
+		if (const FStreetUse* U = Registry->FindUse(FName(*Where)))
+		{
+			const FVector At = UStreetWorld::UseLocation(*U);
+			FTransform Feet;
+			FTransform Up;
+			float Height = 0.0f;
+			const AShopStage* Shop = ShopFor(U->Venue);
+			const FName Seat = U->Param.IsEmpty() ? U->Id : FName(*U->Param);
+			if (Shop && Shop->SeatFor(Seat, Feet, Height, Up))
+			{
+				const FVector Toward = (Feet.GetLocation() - Up.GetLocation()).GetSafeNormal2D();
+				T = FTransform(Toward.Rotation(), Up.GetLocation());
+			}
+			else
+			{
+				const FBox Room = Shop ? Shop->RoomBounds() : FBox(ForceInit);
+				const FVector Middle = Room.IsValid ? Room.GetCenter() : Hero->GetActorLocation();
+				const FVector Back = FVector(Middle.X - At.X, Middle.Y - At.Y, 0.0).GetSafeNormal();
+				const FVector Stand = FVector(At.X, At.Y, At.Z - 100.0) + Back * 90.0 + FVector(0.0, 0.0, 100.0);
+				T = FTransform((-Back).Rotation(), Stand);
+			}
+			What = TEXT("use");
 		}
 	}
 	if (What.IsEmpty())

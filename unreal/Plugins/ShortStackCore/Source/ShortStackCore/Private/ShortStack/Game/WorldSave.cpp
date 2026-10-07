@@ -606,6 +606,9 @@ bool World::Read(const std::vector<std::string>& Fields)
 		SeriesKey = C.Str();
 		HeroName = C.Str();
 		Created = true;
+		// What only a session keeps (who played what lately, who was bumped) starts over with the world it reads.
+		Played.clear();
+		Bumps.clear();
 	}
 	else if (Kind == "field")
 	{

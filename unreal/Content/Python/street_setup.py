@@ -21,8 +21,14 @@ stage's format changes (MAP_VERSION) or when that list does (new art imported, a
 list's digest is kept on the level (PRELOAD_TAG) and compared with the stages' registered paths that exist now.
 
     import street_setup; street_setup.build_materials(force=True); street_setup.build_map(force=True)
+
+Northside (the world realism update, ue-world): build_map() first runs ns_setup.run() (MPC_NS, the M_NS_ materials,
+the NS textures' formats, the SM_NS_ meshes' rules), and the level also carries Market's stage (AMarketStage, built at
+play at Market's new width only) and the pivots the building kit's moving parts turn about (the stage's Places, read in
+the editor from art/build/ns_fronts_places.json): the level is saved again when that file changes (PLACES_TAG).
 """
 import hashlib
+import os
 
 import unreal
 
@@ -33,10 +39,13 @@ MAP_PATH = "/Game/Maps/Street"
 VERSION = "5"
 # Bump when the saved level's format changes (not for new art: the preload list takes care of that). "9": the street
 # is built at play, and the level keeps only its actors and the preload list (the parts built by "8" and older go).
-MAP_VERSION = "9"
+# "10": Northside's realism pass (Market's stage in the level, the stage's Places saved on it).
+MAP_VERSION = "10"
 VERSION_TAG = "StreetVersion"
 # The preload list the saved level carries, as a digest of its paths (the stages' registered paths that exist).
 PRELOAD_TAG = "StreetPreload"
+# The building kit's pivots (art/build/ns_fronts_places.json, written by the art build) as the saved stage holds them.
+PLACES_TAG = "StreetPlaces"
 # M_StreetRain's dry boxes (UStreetWorld::DryBoxes gives at most this many).
 DRY_BOXES = 8
 
@@ -556,6 +565,58 @@ def _preload_digest(paths):
     return f"{len(paths)}:" + hashlib.sha1("\n".join(paths).encode("utf-8")).hexdigest()[:16]
 
 
+def _places_file():
+    """art/build/ns_fronts_places.json beside the project (the art build's pivots for the kit's grilles, the bank's
+    clock hands), as AStreetStage::ResolvePlaces reads it."""
+    project = unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir())
+    return os.path.normpath(os.path.join(project, "..", "art", "build", "ns_fronts_places.json"))
+
+
+def _places_digest():
+    """The pivots file as the level's tag keeps it: a hash of its bytes ("none" while the art build hasn't written it)."""
+    try:
+        with open(_places_file(), "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()[:16]
+    except OSError:
+        return "none"
+
+
+def run_ns_setup(force=False):
+    """Northside's materials and import fix-ups (ns_setup.run), logged, never failing the street's setup. Returns how
+    many things it changed (-1 when it failed)."""
+    try:
+        import ns_setup
+        changed = ns_setup.run(force)
+        if changed:
+            unreal.log(f"ShortStack: Northside's setup changed {changed} assets")
+        return changed
+    except Exception as exc:
+        unreal.log_error(f"ShortStack: Northside's setup (ns_setup.run) failed: {exc}")
+        return -1
+
+
+def _ensure_market_stage():
+    """Market's stage (AMarketStage) in the open level at the street stage's transform, once (it builds itself at play,
+    and only at Market's new width). Returns it, or None when the class isn't built."""
+    market_class = unreal.load_class(None, "/Script/ShortStack.MarketStage")
+    stage_class = unreal.load_class(None, "/Script/ShortStack.StreetStage")
+    if not market_class:
+        return None
+    actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    level_actors = actors.get_all_level_actors()
+    for a in level_actors:
+        if a.get_class() == market_class:
+            return a
+    at, rot = unreal.Vector(0.0, 0.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0)
+    for a in level_actors:
+        if stage_class and a.get_class() == stage_class:
+            at, rot = a.get_actor_location(), a.get_actor_rotation()
+            break
+    market = actors.spawn_actor_from_class(market_class, at, rot)
+    unreal.log("ShortStack: placed Market's stage (AMarketStage) in the Street level")
+    return market
+
+
 def _stamp_open_level():
     """Marks the open (Street) level as saved by this version of the stage with this preload list, and sets its
     floor: a pawn that ever gets below the street is removed at 20 m down (the game mode puts the player back at the
@@ -569,6 +630,7 @@ def _stamp_open_level():
         paths = preload_paths()
         if paths is not None:
             ss.eal.set_metadata_tag(world, PRELOAD_TAG, _preload_digest(paths))
+        ss.eal.set_metadata_tag(world, PLACES_TAG, _places_digest())
     except Exception as exc:
         unreal.log_warning(f"ShortStack: couldn't mark the Street level's version: {exc}")
 
@@ -584,13 +646,17 @@ def _map_stale():
     paths = preload_paths()
     if paths is not None and ss.eal.get_metadata_tag(world, PRELOAD_TAG) != _preload_digest(paths):
         return f"its preload list changed ({len(paths)} assets now)"
+    if ss.eal.get_metadata_tag(world, PLACES_TAG) != _places_digest():
+        return "the building kit's pivots changed (art/build/ns_fronts_places.json)"
     return ""
 
 
 def build_map(force=False):
     """/Game/Maps/Street: the stage actor and the game mode override (the stage builds everything else when play
     begins). A level saved by an older stage, or with an out-of-date preload list, is saved again (refresh_map). True
-    when it was created or saved again."""
+    when it was created or saved again. Northside's setup (ns_setup.run) runs first: the preload list counts what it
+    builds."""
+    run_ns_setup(force)
     if ss.eal.does_asset_exist(MAP_PATH) and not force:
         try:
             why = _map_stale()
@@ -614,6 +680,7 @@ def build_map(force=False):
         levels.new_level(MAP_PATH)
     if not any(a.get_class() == stage_class for a in actors.get_all_level_actors()):
         actors.spawn_actor_from_class(stage_class, unreal.Vector(0.0, 0.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
+    _ensure_market_stage()
     mode_class = unreal.load_class(None, "/Script/ShortStack.StreetGameMode")
     if mode_class:
         world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
@@ -632,6 +699,11 @@ def rebuild_stage():
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     stage_class = unreal.load_class(None, "/Script/ShortStack.StreetStage")
     held = -1
+    # Market's stage stands in the street's level too (its preview at the new width; it builds itself at play).
+    try:
+        _ensure_market_stage()
+    except Exception as exc:
+        unreal.log_warning(f"ShortStack: couldn't place Market's stage: {exc}")
     for a in actors.get_all_level_actors():
         if stage_class and a.get_class() == stage_class:
             a.rebuild_set()

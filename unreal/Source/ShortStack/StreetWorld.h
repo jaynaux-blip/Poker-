@@ -249,6 +249,16 @@ public:
 	/** Whether anyone noted this frame or the last stands within Reach (cm, across the ground) of At, Z within ZReach. */
 	bool WalkersNear(const FVector& At, double Reach, double ZReach = 250.0) const;
 
+	// ------------------------------------------------------------ the skip's hold (spec 2.5, 7.5.3)
+	/**
+	 * A service's skip is running (the clock racing through a cut or a meal in seconds): the corner's signals, the traffic
+	 * and the bus hold the state they had at World and pick up the clock again when it ends (the game mode sets it).
+	 */
+	void SetHold(bool bHold, double World);
+	bool IsHeld() const { return bHeld; }
+	/** The world minutes the corner's signals, the traffic and the bus run by: Now, or the held moment while a skip runs. */
+	double SignalClock(double Now) const { return bHeld ? HeldAt : Now; }
+
 	/** Every use (handle and use), in the order they were added. */
 	TArray<TPair<int32, const FStreetUse*>> AllUses() const;
 	/** One line: what's registered (ss.Street.Describe). */
@@ -298,6 +308,8 @@ private:
 	mutable TArray<FWalker> WalkerList;
 	double FloorZ = -200.0;
 	int32 Revision = 0;
+	bool bHeld = false;
+	double HeldAt = 0.0;
 };
 
 /**

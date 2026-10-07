@@ -26,8 +26,9 @@ struct Award;
  * sells (cuts, garments, meals, workouts), the visits the player has made, and Northside Pawn & Loan's book (§5.8).
  * Pure data and rules; the Session charges, skips and settles (SessionShops.cpp, §7.2). Money in the ledger is kind 9.
  *
- * Phase A: the contract only. The bodies return defaults (no venues, no offers, nothing open) until core-shops'
- * Phase B fills them; consumers (core-ui, people-core, ue-frame) build against these declarations from day 1.
+ * Hours: §5.0's table for the enterable shops (the user chose real hours) and §2.3's lit hours for the display shops.
+ * Where §2.3 gives a shop's hours without days, the shop keeps them every day, except Northside Dental (Monday to
+ * Friday: a dentist's week). Day 0 of the world clock is a Monday.
  */
 namespace shop
 {
@@ -62,16 +63,27 @@ struct Venue
 	std::vector<Window> Open;
 	std::vector<Window> Staffed; // empty: the same as Open
 	bool MembersAnyHour = false; // the gym's fob
-	uint32_t Color = 0;
+	uint32_t Color = 0;          // the sign's color, 0xRRGGBB
 };
 SHORTSTACKCORE_API const std::vector<Venue>& Venues(); // §5.0's table plus every display shop of §2.3
 SHORTSTACKCORE_API const Venue* FindVenue(const std::string& Id);
 SHORTSTACKCORE_API bool IsOpen(const Venue& V, double World);
 SHORTSTACKCORE_API bool IsStaffed(const Venue& V, double World);
-SHORTSTACKCORE_API double NextOpen(const Venue& V, double World);        // World itself when open
-SHORTSTACKCORE_API double ClosesAt(const Venue& V, double World);        // the end of the current window (World when shut)
-SHORTSTACKCORE_API std::string HoursLine(const Venue& V, double World);  // "Open until 10 PM" / "Opens Tue 10 AM" / "Open 24 hours"
-SHORTSTACKCORE_API std::string HoursSign(const Venue& V);                // the door decal, §4.9
+/** When it next opens (World itself when open now). A venue that never opens: a week from World. */
+SHORTSTACKCORE_API double NextOpen(const Venue& V, double World);
+/**
+ * The end of the current opening (World when shut). Windows that meet (Friday to midnight, a 24-hour day into the next)
+ * run on as one; a venue open around the clock never closes, and says so with World plus a week.
+ */
+SHORTSTACKCORE_API double ClosesAt(const Venue& V, double World);
+SHORTSTACKCORE_API std::string HoursLine(const Venue& V, double World); // "Open until 10 PM" / "Opens Tue 10 AM" / "Opens 4 PM" (today) / "Open 24 hours"
+SHORTSTACKCORE_API std::string HoursSign(const Venue& V);               // the door decal, §4.9: "TUE–SUN 10–10 · FRI–SAT TIL MIDNIGHT · CLOSED MON"
+/**
+ * Who keeps the venue at World, by §5.0's table and §6.1's shifts: "lonnie", "bea", "augie" while open; "rosa" while
+ * the gym is staffed; "ruby" (06:00-18:00) or "marlene" at Ruby's; "ray" (10:00-22:00) or "benny" at the Lucky Penny;
+ * "inez" at the Wash & Fold. "" when nobody is (a shut shop, the gym between Rosa's shifts, a display shop).
+ */
+SHORTSTACKCORE_API std::string KeeperOf(const std::string& Venue, double World);
 
 enum class OfferKind : int
 {
@@ -89,11 +101,17 @@ enum class OfferKind : int
 	Shake,
 };
 
+/**
+ * One thing a venue sells. An offer with Minutes is a service (Session::ShopService: the barber's chair, a workout, a
+ * plate at Ruby's); one without is goods, charged and handed over at once (Session::ShopPay: the cooler, the shake,
+ * the day pass, the membership). Tabs: the barber's "CUT", "BEARD", "COLOR", "BROWS"; the gym's "WORKOUTS", "DESK" and
+ * "COOLER"; Ruby's "MENU" and "DRINKS".
+ */
 struct Offer
 {
 	std::string Id;    // "barber/crew", "diner/short-stack", "gym/treadmill"
 	std::string Venue;
-	std::string Tab;   // "CUT", "BEARD", "COLOR", "BROWS", "MENU", "WORKOUTS", "DESK"
+	std::string Tab;   // "CUT", "BEARD", "COLOR", "BROWS", "MENU", "DRINKS", "WORKOUTS", "DESK", "COOLER"
 	std::string Name;
 	std::string Blurb;
 	OfferKind Type = OfferKind::Meal;
@@ -105,12 +123,16 @@ struct Offer
 	double Hunger = 0.0, Thirst = 0.0, Energy = 0.0; // relief, as store::Item (negative makes it worse: workouts)
 	double FitnessBase = 0.0;
 	bool StaffedOnly = false;
-	bool MembersFree = false;
+	bool MembersFree = false; // a workout: free to members, and to anyone with today's day pass
 };
 SHORTSTACKCORE_API const std::vector<Offer>& Offers(const std::string& Venue);
 SHORTSTACKCORE_API const Offer* FindOffer(const std::string& Id);
 
-/** The player's history with a venue (life::State::Visits, by venue id). */
+/**
+ * The player's history with a venue (life::State::Visits, by venue id): every paid visit, when the last was, what was
+ * spent in all, the main thing ordered last time (an offer id; the Lucky Penny's: the item bought most), and how often
+ * a tip was left or not. "gym/daypass" keeps the day passes the same way (LastAt: when today's was bought).
+ */
 struct Visit
 {
 	int Count = 0;
@@ -139,12 +161,17 @@ struct Lot
 	std::string Id;
 	LotKind Kind = LotKind::Gear;
 	std::string Name;
-	Chips ValueCents = 0; // V, his resale price, whole dollars
+	Chips ValueCents = 0; // V, his resale price, whole dollars (on the shelf: the price before tax)
 	Chips SellCents = 0;  // 50% of V, rounded down to whole dollars
 	Chips LoanCents = 0;  // 40% of V, rounded down to whole dollars
 	bool Stored = false;  // gear in Ninth St. Storage: selling or pawning it adds a 60-minute skip
 	bool Final = false;   // can't be bought again anywhere (an award, the keepsake, the cup): SELL asks twice
-	std::string Refused;  // "" when he'll take it; else his line (Dee's chip)
+	/**
+	 * "" when he'll take it; else his line (Dee's chip). On the shelf (Session::PawnShelf): why the hero can't buy it
+	 * now, money aside ("Owned.", "Needs a room.", "You have better.", "Needs the 24\" monitor first."), "" when they
+	 * can: GearDrop's own rules, since what's bought here is owned exactly as if from GearDrop.
+	 */
+	std::string Refused;
 };
 
 struct Ticket
@@ -157,6 +184,7 @@ struct Ticket
 	int Renewals = 0;
 };
 
+/** For sale From..Until. Auction: one of Unit 114's pieces, tagged "LOT 114 · NINTH ST." on the shelf. */
 struct ShelfLot
 {
 	std::string Lot;
@@ -170,20 +198,63 @@ struct PawnBook
 {
 	std::vector<Ticket> Tickets; // open loans
 	std::vector<ShelfLot> Shelf; // the hero's sold gear, forfeits and storage-auction lots, for sale From..Until
-	std::set<std::string> Away;  // the hero's things gone for good: sold, or forfeited and then sold on
+	std::set<std::string> Away;  // the hero's mementos, awards and keepsakes gone for good: sold, or forfeited and then sold on
 	int NextTicket = 412;
 };
 
 constexpr double PawnTermDays = 30.0, PawnGraceDays = 7.0, PawnShelfDays = 21.0;
+/** Whether Augie takes a GearDrop item (a core list): the electronics, the lights and the chair. Not subscriptions,
+ *  not what he can't hold in his hand (the RAM kit, the overlay pack, the LED strips), and not the mattress, the
+ *  curtains or the plant ("I'm not a furniture store."). */
+SHORTSTACKCORE_API bool Takes(const gear::Item& I);
 SHORTSTACKCORE_API Chips GearValue(const gear::Item& I);    // 55% of GearDrop's price
 SHORTSTACKCORE_API Chips AwardValue(const world::Award& A); // §5.8's bracelet and ring rule
 SHORTSTACKCORE_API Lot KeepsakeOf(hero::Background B);      // §5.8's table
+SHORTSTACKCORE_API Chips SellOf(Chips Value);               // what he pays for it: half of V, down to the dollar
+SHORTSTACKCORE_API Chips LoanOf(Chips Value);               // what he lends on it: 40% of V, down to the dollar
 SHORTSTACKCORE_API Chips RedeemCents(const Ticket& T, double World); // + 20% in term, + 25% in grace, 0 once forfeited
 SHORTSTACKCORE_API Chips RenewCents(const Ticket& T);                // the 20%
+/**
+ * What a renewal costs at World: the interest a redemption would charge that day (the 20% in term, the 25% in the week
+ * of grace), 0 once forfeited. Never less than the ticket owes, so renewing in the grace saves nothing on redeeming.
+ */
+SHORTSTACKCORE_API Chips RenewCents(const Ticket& T, double World);
+/** Whether a renewal buys anything at World: in term or grace, with thirty days from today running at least a day past
+ *  the due date (a ticket written or renewed today has nothing to renew; Session::PawnRenew and the TICKETS page agree). */
+SHORTSTACKCORE_API bool Renewable(const Ticket& T, double World);
+/** "0417": a ticket's number as it's printed and texted. */
+SHORTSTACKCORE_API std::string TicketNumber(int Number);
+/** The week the used gear was put out (Mondays): Monday's week number since day 0. */
+SHORTSTACKCORE_API int UsedWeek(double World);
 /** Monday's used gear (4-8 lots), only gear the host can draw on the shelf (a bit per gear::Catalog index). */
 SHORTSTACKCORE_API std::vector<ShelfLot> UsedStock(int Week, uint64_t Seed, uint64_t GearKinds);
-/** The storage auction's 1-3 lots (seeded among what was lost), on the shelf 2 days later for 21. */
+/** The storage auction's 1-3 lots (seeded among what was lost and he'd take), on the shelf 2 days later for 21. */
 SHORTSTACKCORE_API void Consign(PawnBook& B, const std::vector<std::string>& LostGearIds, double World, uint64_t Seed);
+/**
+ * Unit 114's pieces on his shelf at World as Augie says them, the dearest first: "a 27-inch and a chair", "a desktop, a
+ * ring light and a chair"; "a few pieces out of it" when none of them is (Augie's appraise:lot114, the pawn screen's).
+ */
+SHORTSTACKCORE_API std::string AuctionWords(const PawnBook& B, double World);
+/** Test hook (ss.Pawn.Age): every ticket and shelf lot as if taken or shelved Days earlier. */
+SHORTSTACKCORE_API void Age(PawnBook& B, double Days);
+
+/**
+ * The curio case (§5.8), always stocked. Garment: the wardrobe garment it is (the aviators and the trilby, tier-1
+ * vintage pieces that go in the closet); "" for the two that aren't clothes. Bit: HostCaps::Curios' bit for the two
+ * that need their own mesh on the hero (1 the Lucky Seven chip, 2 the wristwatch); 0 for the garments, which go by
+ * HostCaps::GarmentKinds. The chip and the watch, owned, are "curio:<id>" in life::State::Unlocks.
+ */
+struct Curio
+{
+	std::string Id; // "aviators"
+	std::string Name;
+	std::string Blurb;
+	Chips PriceCents = 0;
+	std::string Garment;
+	uint32_t Bit = 0;
+};
+SHORTSTACKCORE_API const std::vector<Curio>& Curios();
+SHORTSTACKCORE_API const Curio* FindCurio(const std::string& Id);
 
 // ---- Save lines (§7.3) ----
 /**

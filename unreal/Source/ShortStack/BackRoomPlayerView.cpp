@@ -1,111 +1,71 @@
 // The hero's head for the third-person view at the table (kept apart from BackRoomPlayer.cpp).
 #include "BackRoomPlayer.h"
 
+#include "CastLooks.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "GroomAsset.h"
+#include "GroomBindingAsset.h"
 #include "GroomComponent.h"
+#include "HeroGrooms.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
 namespace BackRoomPlayerViewDetail
 {
-/** What one of a MetaHuman's grooms is for, by its variable (Hair, Eyebrows, Beard...) or its asset (Beard_S_Stubble). */
-enum class EHeroGroom : uint8
-{
-	Scalp,
-	Brows,
-	Lashes,
-	Beard,
-	Mustache,
-	Fuzz,
-};
-
-// The hero wears the creator's hair at the table as on the street (ShortStackCharacter.cpp sorts and picks the grooms
-// the same way): kept in step with it by hand.
-EHeroGroom HeroGroomKind(const FString& Variable, const FString& Asset)
-{
-	auto Is = [&](const TCHAR* Word) { return Variable.Contains(Word) || Asset.StartsWith(Word); };
-	if (Is(TEXT("Eyelash")))
-	{
-		return EHeroGroom::Lashes;
-	}
-	if (Is(TEXT("Eyebrow")))
-	{
-		return EHeroGroom::Brows;
-	}
-	if (Is(TEXT("Mustache")))
-	{
-		return EHeroGroom::Mustache;
-	}
-	if (Is(TEXT("Beard")) || Is(TEXT("Goatee")))
-	{
-		return EHeroGroom::Beard;
-	}
-	if (Is(TEXT("Fuzz")) || Is(TEXT("Peachfuzz")))
-	{
-		return EHeroGroom::Fuzz;
-	}
-	return EHeroGroom::Scalp;
-}
-
-/** Hair that lies close to the scalp, so a hat sits over it without it coming up through the crown. */
-bool HairUnderHat(const FString& Asset)
-{
-	static const TCHAR* const Tight[] = {TEXT("BuzzCut"), TEXT("360Waves"), TEXT("BaldingStubble"), TEXT("HairLoss"), TEXT("Cornrows"), TEXT("SlickBack"),
-		TEXT("PulledBack"), TEXT("LowPonytail"), TEXT("RecedeMessy"), TEXT("BrushCut"), TEXT("CurlyFade")};
-	for (const TCHAR* Style : Tight)
-	{
-		if (Asset.Contains(Style))
-		{
-			return true;
-		}
-	}
-	return false;
-}
-
-/** Hair cropped about as short as a buzz cut (a ponytail or cornrows lie close, but aren't one). */
-bool HairCropped(const FString& Asset)
-{
-	static const TCHAR* const Cropped[] = {TEXT("BuzzCut"), TEXT("360Waves"), TEXT("BaldingStubble"), TEXT("HairLoss"), TEXT("BrushCut"), TEXT("CurlyFade")};
-	for (const TCHAR* Style : Cropped)
-	{
-		if (Asset.Contains(Style))
-		{
-			return true;
-		}
-	}
-	return false;
-}
+using HeroGrooms::EGroomKind;
 
 /**
- * Whether the hero wears one of the MetaHuman's grooms, given the creator's choices: shaved is bald, a buzz cut is bald
- * unless this hair is cropped that short, and under a hat only hair that lies close stays; no facial hair takes the beard
- * and mustache off, stubble keeps only stubble, a mustache only the mustache. A career from before the creator wears them all.
+ * Whether the hero wears one of the MetaHuman's own grooms, given the creator's choices, where the face has no groom library
+ * (HeroGrooms::WearsBuildGroom, the street's rule): shaved is bald, a buzz cut is bald unless this hair is cropped that short,
+ * and under a hat only hair that lies close stays; no facial hair takes the beard and mustache off, stubble keeps only
+ * stubble, a mustache only the mustache. A career from before the creator wears them all.
  */
-bool HeroWearsGroom(const FBackRoomPersona& P, EHeroGroom Kind, const FString& Asset)
+bool HeroWearsGroom(const FBackRoomPersona& P, EGroomKind Kind, const FString& Asset)
 {
-	switch (Kind)
+	if ((Kind == EGroomKind::Scalp && P.HeroHairStyle < 0) || ((Kind == EGroomKind::Beard || Kind == EGroomKind::Mustache) && P.HeroFacialHair < 0))
 	{
-	case EHeroGroom::Scalp:
-		if (P.HeroHairStyle < 0)
-		{
-			return true;
-		}
-		if (P.HeroHairStyle == 0 || (P.HeroHairStyle == 1 && !HairCropped(Asset)))
-		{
-			return false;
-		}
-		return P.HeroHat == 0 || HairUnderHat(Asset);
-	case EHeroGroom::Beard:
-		return P.HeroFacialHair < 0 || P.HeroFacialHair >= 3 || (P.HeroFacialHair == 1 && Asset.Contains(TEXT("Stubble")));
-	case EHeroGroom::Mustache:
-		return P.HeroFacialHair < 0 || P.HeroFacialHair >= 2 || (P.HeroFacialHair == 1 && Asset.Contains(TEXT("Stubble")));
-	default:
 		return true;
 	}
+	ss::hero::Look L;
+	L.Hair = P.HeroHairStyle;
+	L.FacialHair = P.HeroFacialHair;
+	L.Hat = P.HeroHat;
+	return HeroGrooms::WearsBuildGroom(L, Kind, Asset);
+}
+
+/** The grooms the library swaps; the lashes and the fuzz stay as built. */
+bool IsManaged(EGroomKind Kind)
+{
+	return Kind == EGroomKind::Scalp || Kind == EGroomKind::Brows || Kind == EGroomKind::Beard || Kind == EGroomKind::Mustache;
+}
+
+/** The hero face a Blueprint was assembled as (".../MHC_HeroA0/BP_MHC_HeroA0" is HeroA0); None for any other. */
+FName HeroFaceOf(const UClass* Blueprint)
+{
+	const FString Path = Blueprint ? Blueprint->GetPathName() : FString();
+	const int32 At = Path.Find(TEXT("/MHC_Hero"));
+	if (At == INDEX_NONE)
+	{
+		return NAME_None;
+	}
+	const FString Rest = Path.Mid(At + 5);
+	int32 End = INDEX_NONE;
+	return FName(*(Rest.FindChar(TEXT('/'), End) ? Rest.Left(End) : Rest));
+}
+
+/** What the library puts on the hero's head at the table (the look the game mode bound as it seated them); unset without either. */
+HeroGrooms::FGroomSet TableSet(const ABackRoomPlayer* Player, const UClass* Blueprint)
+{
+	ss::hero::Look Look;
+	const FName Face = HeroFaceOf(Blueprint);
+	if (Face.IsNone() || !CastLooks::HeroLookOn(Player, Look))
+	{
+		return HeroGrooms::FGroomSet();
+	}
+	return HeroGrooms::Resolve(Look, Face);
 }
 } // namespace BackRoomPlayerViewDetail
 
@@ -118,6 +78,11 @@ bool ABackRoomPlayer::HeroWearsScalpHair() const
 	{
 		return false;
 	}
+	const HeroGrooms::FGroomSet Set = TableSet(this, Bp);
+	if (Set.bLibrary)
+	{
+		return Set.Scalp.IsSet();
+	}
 	for (const USCS_Node* Node : Bp->SimpleConstructionScript->GetAllNodes())
 	{
 		const UGroomComponent* Template = Node ? Cast<UGroomComponent>(Node->ComponentTemplate) : nullptr;
@@ -126,7 +91,7 @@ bool ABackRoomPlayer::HeroWearsScalpHair() const
 			continue;
 		}
 		const FString Asset = Template->GroomAsset->GetName();
-		if (HeroGroomKind(Node->GetVariableName().ToString(), Asset) == EHeroGroom::Scalp && HeroWearsGroom(Persona, EHeroGroom::Scalp, Asset))
+		if (HeroGrooms::KindOf(Node->GetVariableName().ToString(), Asset) == EGroomKind::Scalp && HeroWearsGroom(Persona, EGroomKind::Scalp, Asset))
 		{
 			return true;
 		}
@@ -165,11 +130,36 @@ void ABackRoomPlayer::SetHeroHeadBuilt(bool bBuild)
 	{
 		return;
 	}
-	// The grooms Build skipped for the hero, copied as it copies everything else: the ones the creator's hairstyle, facial
-	// hair and hat leave on, in the creator's hair color. They're made hidden, with the face: the head shows once the
-	// camera is clear of it. The hero builds below the cinematic tier (HeroA*, HeroB*) carry cards, not strands: they're
-	// held on their nearest cards, as the street holds them (without the Blueprint's LOD sync a groom falls to its helmet).
-	const bool bCards = Bp->GetPathName().Contains(TEXT("/MHC_HeroA")) || Bp->GetPathName().Contains(TEXT("/MHC_HeroB"));
+	// The grooms Build skipped for the hero: with the face's groom library, its scalp, brows, beard and mustache as the look
+	// asks (HeroGrooms::Resolve, the street's one resolver; the game mode bound the look and started them loading as it seated
+	// the hero) and the build's own lashes and fuzz; without one, the build's own as far as the creator's hairstyle, facial hair
+	// and hat leave them on. In the creator's hair color. They're made hidden, with the face: the head shows once the camera is
+	// clear of it. Every cast build holds its grooms on their nearest cards, as the street holds them (without the Blueprint's
+	// LOD sync a groom falls to its helmet).
+	const HeroGrooms::FGroomSet Set = TableSet(this, Bp);
+	auto Shade = [this](UGroomComponent* Copy, EGroomKind Kind) {
+		if (Persona.HairMelanin < 0.0f || Kind == EGroomKind::Lashes)
+		{
+			return;
+		}
+		// As the street colors it: the hair materials take hairMelanin, hairRedness and WhiteAmount, the peach fuzz Melanin and
+		// Redness; the brows a shade darker, the lashes left dark.
+		const float Melanin = FMath::Min(1.0f, Persona.HairMelanin + (Kind == EGroomKind::Brows ? 0.06f : 0.0f));
+		for (int32 Slot = 0; Slot < Copy->GetNumMaterials(); ++Slot)
+		{
+			if (UMaterialInterface* Material = Copy->GetMaterial(Slot))
+			{
+				UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Material, Copy);
+				Mid->SetScalarParameterValue(TEXT("hairMelanin"), Melanin);
+				Mid->SetScalarParameterValue(TEXT("hairRedness"), Persona.HairRedness);
+				Mid->SetScalarParameterValue(TEXT("WhiteAmount"), Persona.HairWhite);
+				Mid->SetScalarParameterValue(TEXT("Melanin"), Melanin);
+				Mid->SetScalarParameterValue(TEXT("Redness"), Persona.HairRedness);
+				Copy->SetMaterial(Slot, Mid);
+			}
+		}
+	};
+	TMap<uint8, const UGroomComponent*> Templates;
 	for (USCS_Node* Node : Bp->SimpleConstructionScript->GetAllNodes())
 	{
 		const UGroomComponent* Template = Node ? Cast<UGroomComponent>(Node->ComponentTemplate) : nullptr;
@@ -178,8 +168,12 @@ void ABackRoomPlayer::SetHeroHeadBuilt(bool bBuild)
 			continue;
 		}
 		const FString Asset = Template->GroomAsset->GetName();
-		const EHeroGroom Kind = HeroGroomKind(Node->GetVariableName().ToString(), Asset);
-		if (!HeroWearsGroom(Persona, Kind, Asset))
+		const EGroomKind Kind = HeroGrooms::KindOf(Node->GetVariableName().ToString(), Asset);
+		if (!Templates.Contains(static_cast<uint8>(Kind)))
+		{
+			Templates.Add(static_cast<uint8>(Kind), Template);
+		}
+		if (Set.bLibrary ? IsManaged(Kind) : !HeroWearsGroom(Persona, Kind, Asset))
 		{
 			continue;
 		}
@@ -190,41 +184,42 @@ void ABackRoomPlayer::SetHeroHeadBuilt(bool bBuild)
 		Copy->SetupAttachment(Parent, Node->AttachToName);
 		Copy->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Copy->SetHiddenInGame(true);
-		if (Persona.HairMelanin >= 0.0f && Kind != EHeroGroom::Lashes)
-		{
-			// As the street colors it: the hair materials take hairMelanin, hairRedness and WhiteAmount, the peach fuzz
-			// Melanin and Redness; the brows a shade darker, the lashes left dark.
-			const float Melanin = FMath::Min(1.0f, Persona.HairMelanin + (Kind == EHeroGroom::Brows ? 0.06f : 0.0f));
-			for (int32 Slot = 0; Slot < Copy->GetNumMaterials(); ++Slot)
-			{
-				if (UMaterialInterface* Material = Copy->GetMaterial(Slot))
-				{
-					UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Material, Copy);
-					Mid->SetScalarParameterValue(TEXT("hairMelanin"), Melanin);
-					Mid->SetScalarParameterValue(TEXT("hairRedness"), Persona.HairRedness);
-					Mid->SetScalarParameterValue(TEXT("WhiteAmount"), Persona.HairWhite);
-					Mid->SetScalarParameterValue(TEXT("Melanin"), Melanin);
-					Mid->SetScalarParameterValue(TEXT("Redness"), Persona.HairRedness);
-					Copy->SetMaterial(Slot, Mid);
-				}
-			}
-		}
+		Shade(Copy, Kind);
 		Copy->RegisterComponent();
-		if (bCards)
+		HeroGrooms::HoldOnCards(Copy);
+		HeroHair.Add(Copy);
+	}
+	if (!Set.bLibrary || !Face)
+	{
+		return;
+	}
+	for (const EGroomKind Kind : {EGroomKind::Scalp, EGroomKind::Brows, EGroomKind::Beard, EGroomKind::Mustache})
+	{
+		const HeroGrooms::FWornGroom& Want = Set.Of(Kind);
+		if (!Want.IsSet())
 		{
-			int32 CardsLOD = INDEX_NONE;
-			for (const FHairGroupsCardsSourceDescription& Cards : Copy->GroomAsset->GetHairGroupsCards())
-			{
-				if (Cards.ImportedMesh && Cards.LODIndex >= 0)
-				{
-					CardsLOD = CardsLOD == INDEX_NONE ? Cards.LODIndex : FMath::Min(CardsLOD, Cards.LODIndex);
-				}
-			}
-			if (CardsLOD != INDEX_NONE)
-			{
-				Copy->SetForcedLOD(CardsLOD);
-			}
+			continue;
 		}
+		// In memory already (the seat started the load); if not, it's loaded here, as going over the shoulder builds the head.
+		UGroomAsset* Groom = Want.Groom.LoadSynchronous();
+		UGroomBindingAsset* Binding = Want.Binding.LoadSynchronous();
+		if (!Groom)
+		{
+			continue;
+		}
+		// The build's own groom of this kind is the template (its settings as the Blueprint made them), when it has one.
+		const UGroomComponent* const* Template = Templates.Find(static_cast<uint8>(Kind));
+		UGroomComponent* Copy = NewObject<UGroomComponent>(this, UGroomComponent::StaticClass(), MakeUniqueObjectName(this, UGroomComponent::StaticClass(), Want.Style),
+			RF_Transient, Template ? const_cast<UGroomComponent*>(*Template) : nullptr);
+		Copy->SetupAttachment(Face.Get());
+		Copy->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Copy->SetHiddenInGame(true);
+		// The template's overrides are its own groom's; set before registering, so it's built once, as this groom.
+		Copy->EmptyOverrideMaterials();
+		Copy->SetGroomAsset(Groom, Binding);
+		Shade(Copy, Kind);
+		Copy->RegisterComponent();
+		HeroGrooms::HoldOnCards(Copy);
 		HeroHair.Add(Copy);
 	}
 }

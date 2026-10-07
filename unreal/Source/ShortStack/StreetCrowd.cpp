@@ -1,6 +1,13 @@
 #include "StreetCrowd.h"
 
 #include "BackRoomAnim.h"
+#include "CastLooks.h"
+// Before the street's headers: StreetNs.h's inline helpers hold light components by weak pointer.
+#include "Components/LightComponent.h"
+#include "ShopStage.h"
+#include "ShortStack/Game/Town.h"
+#include "StreetNpcs.h"
+#include "StreetWorld.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CollisionQueryParams.h"
 #include "Components/CapsuleComponent.h"
@@ -49,6 +56,11 @@ struct FStreetCrowdMap
 		Indoors = 8,
 		/** Up the Wash & Fold's steps and through its door: a hand on it, and it must have swung open. */
 		WashDoor = 16,
+		/** A crosswalk over Fifth, or over Market's mouth (which light it waits for: town::Signal). */
+		OverFifth = 32,
+		OverMarket = 64,
+		/** Through a shop's door (an AShopStage's: it opens for walkers while the shop is open). */
+		ShopDoor = 128,
 	};
 	enum class ESpot : uint8
 	{
@@ -60,13 +72,18 @@ struct FStreetCrowdMap
 		Shelter,
 		/** In the Wash & Fold: at a washer, a dryer, a folding table, by the chairs with the TV. */
 		Laundry,
+		/** Out of the rain: a covered station on the street (the shed, an awning). */
+		Cover,
+		/** A shop's waiting seat (the barber's bench, a stool at Ruby's), sat on. */
+		Seat,
 	};
-	/** Which room a spot is in. */
+	/** Which room a spot is in (a shop's: Shop, with the spot's Venue). */
 	enum ERoom : uint8
 	{
 		Street = 0,
 		Store = 1,
 		Wash = 2,
+		Shop = 3,
 	};
 
 	struct FNode
@@ -96,6 +113,9 @@ struct FStreetCrowdMap
 		int32 Door = INDEX_NONE;
 		uint8 Room = Street;
 		const TCHAR* Name = TEXT("");
+		/** A shop's (its door, its seats): the venue; a seat's height (cm). */
+		FName Venue;
+		float SeatHeight = 0.0f;
 	};
 
 	TArray<FNode> Nodes;
@@ -123,6 +143,54 @@ struct FStreetCrowdMap
 	int32 StoreIn = INDEX_NONE;
 	int32 WashOut = INDEX_NONE;
 	int32 WashIn = INDEX_NONE;
+	/** A cigarette by the Wash & Fold's door (Sal, before Dee opens up). */
+	int32 WashSmoke = INDEX_NONE;
+	/** Every shelter spot (the registry's market-shelter stations, or one under a stage mesh named *Shelter*). */
+	TArray<int32> Shelters;
+	/** Into the shops: their doors (a spot inside each, through it), and their waiting seats. */
+	TArray<int32> ShopDoors;
+	TArray<int32> ShopSeats;
+	/** Out of the rain on the street. */
+	TArray<int32> Covers;
+	/** The ends people come on at from the 14's stop (Market's). */
+	TArray<int32> MarketEnds;
+	/** Where the fronts and the curbs are along Market (stage Y), for keeping under the fronts in the rain. */
+	double MarketFrontS = 4950.0;
+	double MarketCurbS = 5250.0;
+	double MarketCurbN = 5850.0;
+	double MarketFrontN = 6150.0;
+	/** The cross streets' sidewalks (stage cm) and which way their fronts are. */
+	struct FBand
+	{
+		FBox2D Box = FBox2D(ForceInit);
+		FVector2D Fronts = FVector2D::ZeroVector;
+	};
+	TArray<FBand> Bands;
+
+	/** Which way the fronts are from a point on a sidewalk (under them in the rain), or zero off the sidewalks. */
+	FVector2D FrontsSide(const FVector2D& At) const
+	{
+		for (const FBand& B : Bands)
+		{
+			if (B.Box.IsInside(At))
+			{
+				return B.Fronts;
+			}
+		}
+		if (At.X > 1620.0)
+		{
+			return FVector2D(1.0, 0.0);
+		}
+		if (At.X < 420.0 && At.Y > MarketFrontS - 10.0 && At.Y < MarketCurbS - 5.0)
+		{
+			return FVector2D(0.0, -1.0); // Market's south sidewalk, along the store's north wall
+		}
+		if (At.X < 420.0 && At.Y > MarketCurbN + 5.0 && At.Y < MarketFrontN + 10.0)
+		{
+			return FVector2D(0.0, 1.0);
+		}
+		return At.X < 420.0 ? FVector2D(-1.0, 0.0) : FVector2D::ZeroVector;
+	}
 
 	int32 AddNode(double X, double Y, bool bEnd = false, bool bIndoors = false)
 	{
@@ -345,29 +413,33 @@ struct FStreetCrowdMap
 
 namespace StreetCrowdDetail
 {
-// The street's plan (stage cm) where the stage has no accessor for it, as StreetStage.cpp lays it out (Fifth's sidewalks and
-// the doors on them come from AStreetStage::Sidewalk and Doors): the home side's fronts stand on X 0, the road on X 420..1620,
-// the far fronts on 2040; the set's ends at Y -6200 and 9200; Market's road on Y 5250..5850, west from the corner, its
-// sidewalks either side of it to the building across its end at X -3000; the Lucky Penny's room behind X 0 on Y 3700..4950.
+// The street's plan (stage cm) where the registry has nothing for it (UStreetWorld's walkways, doors and stations, which every
+// stage registers: Fifth's sidewalks and doors from AStreetStage, Market's from its own stage once it lands): the home side's
+// fronts stand on X 0, the road on X 420..1620, the far fronts on 2040; the set's ends at Y -6200 and 9200 (the walkways' own
+// ends); today's Market (until its stage registers Market's walkways): its road on Y 5250..5850, west from the corner, its
+// sidewalks either side of it to the building across its end at X -3000; the Lucky Penny's room behind X 0 on Y 3700..4950,
+// which is also Market's south building line, wherever its curb ends up.
 const double FarFront = 2040.0;
 const double HomeCurbX = 370.0;
 const double FarCurbX = 1670.0;
 // Where the furniture at each curb begins (the lamp posts' bases): the free band beside a stoop runs from it to the stoop.
 const double HomeCurbFree = 360.0;
 const double FarCurbFree = 1680.0;
-const double EndSouth = -6050.0;
-const double EndNorth = 9050.0;
-const double MarketEndX = -2850.0;
-const double MarketSouthY = 5100.0;
-const double MarketNorthY = 6030.0;
-// The crosswalks over Fifth either side of Market (their paint Y 4990..5210 and 5890..6130; the south one walked north of its
-// middle, clear of the lamp post on the home curb at the corner, Y 5020..5060), how far either side of their lines people
-// walk them, and the curbs of the one over Market's mouth on Fifth's line.
-const double CrossSouthY = 5140.0;
-const double CrossNorthY = 6010.0;
+const double TodayEndSouth = -6050.0;
+const double TodayEndNorth = 9050.0;
+const double TodayMarketEndX = -2850.0;
+const double TodayMarketSouthY = 5100.0;
+const double TodayMarketNorthY = 6030.0;
+const double MarketSouthFront = 4950.0;
+// The crosswalks over Fifth either side of Market (today's paint Y 4990..5210 and 5890..6130; the south one walked north of
+// its middle, clear of the lamp post on the home curb at the corner, Y 5020..5060), how far either side of their lines people
+// walk them, and the curbs of the one over Market's mouth on Fifth's line. With Market's walkways registered, each is the
+// same distance from its sidewalk's line as today's is (BuildMap).
+const double TodayCrossSouthY = 5140.0;
+const double TodayCrossNorthY = 6010.0;
 const float CrossHalf = 80.0f;
-const double MarketCurbSouth = 5205.0;
-const double MarketCurbNorth = 5895.0;
+const double TodayMarketCurbSouth = 5205.0;
+const double TodayMarketCurbNorth = 5895.0;
 // The pawn shop's lit window and the Lucky Penny's posters, on the home side; the Wash & Fold's long window across the street.
 const double PawnWindowY = 1500.0;
 const double StoreWindowY = 4130.0;
@@ -384,7 +456,7 @@ const double WashCounterFront = 180.0;
 const double BackDoorY = 170.0;
 
 /** Where the people are kept off the street (stage cm): under the set at its south end, hidden. */
-const FVector2D Offstage(200.0, EndSouth);
+const FVector2D Offstage(200.0, TodayEndSouth);
 const double OffstageZ = -1500.0;
 
 /** MetaHumans are dear: never more out at once than this (and the cast one more, so who comes next isn't always who left). */
@@ -406,6 +478,8 @@ const FName HeadBone(TEXT("head"));
 // Tuning on the desktop, as the gait's ss.Walk.* (written blind).
 TAutoConsoleVariable<int32> CVarCount(TEXT("ss.Crowd.Count"), -1, TEXT("How many people are out on Fifth (-1: as many as the hour and the rain want, at most 6)."));
 TAutoConsoleVariable<int32> CVarDebug(TEXT("ss.Crowd.Debug"), 0, TEXT("Draws the pedestrians' routes, stops and plans (1)."));
+// Test overrides outlive the PIE session that set them: the street puts them back as it begins (spec 7.7).
+FStreetOverrides::FRegister CountOverride(TEXT("ss.Crowd.Count"), TEXT("-1"));
 TAutoConsoleVariable<float> CVarUmbrellaHold(TEXT("ss.Crowd.UmbrellaHold"), 0.72f, TEXT("How far an umbrella's hand comes up toward the chin (0 hanging .. 1 at the mouth)."));
 TAutoConsoleVariable<float> CVarUmbrellaOver(TEXT("ss.Crowd.UmbrellaOver"), 34.0f, TEXT("How far over the head the umbrella's shaft aims (cm)."));
 
@@ -544,6 +618,22 @@ bool IsBuilt(const TCHAR* Name)
 	return FPackageName::DoesPackageExist(FString::Printf(TEXT("/Game/ShortStack/Cast/Built/MHC_%s/BP_MHC_%s"), Name, Name));
 }
 
+/** Glass and the like (every material on it translucent): it hides nobody standing behind it. */
+bool SeeThrough(const UPrimitiveComponent* C)
+{
+	const int32 N = C ? C->GetNumMaterials() : 0;
+	for (int32 I = 0; I < N; ++I)
+	{
+		const UMaterialInterface* M = C->GetMaterial(I);
+		const EBlendMode Mode = M ? M->GetBlendMode() : BLEND_Opaque;
+		if (Mode == BLEND_Opaque || Mode == BLEND_Masked)
+		{
+			return false;
+		}
+	}
+	return N > 0;
+}
+
 /** A mesh from the Blender pipeline (unreal/Art/Meshes), nullptr until it's imported. */
 UStaticMesh* ImportedMesh(const TCHAR* Name)
 {
@@ -588,13 +678,101 @@ UStaticMeshComponent* AddPart(AActor* Owner, USceneComponent* Parent, FName Sock
 	return C;
 }
 
+/** A registered walkway's line in the stage's frame: where along it it runs (its lanes' middle, across), its extent, its way. */
+struct FWalkLine
+{
+	bool bAlongX = true;
+	double Across = 0.0;
+	double From = 0.0;
+	double To = 0.0;
+	double Half = 100.0;
+};
+
+FWalkLine LineOf(const FStreetWalkway& W, const FTransform& T)
+{
+	FWalkLine L;
+	if (W.Lanes.Num() == 0)
+	{
+		return L;
+	}
+	const FVector A0 = T.InverseTransformPosition(W.Lanes[0].Start);
+	const FVector B0 = T.InverseTransformPosition(W.Lanes[0].End);
+	L.bAlongX = FMath::Abs(B0.X - A0.X) > FMath::Abs(B0.Y - A0.Y);
+	double Lo = TNumericLimits<double>::Max();
+	double Hi = TNumericLimits<double>::Lowest();
+	double Min = TNumericLimits<double>::Max();
+	double Max = TNumericLimits<double>::Lowest();
+	for (const FStreetLane& Lane : W.Lanes)
+	{
+		for (const FVector& P : {T.InverseTransformPosition(Lane.Start), T.InverseTransformPosition(Lane.End)})
+		{
+			const double Along = L.bAlongX ? P.X : P.Y;
+			const double Off = L.bAlongX ? P.Y : P.X;
+			Lo = FMath::Min(Lo, Along);
+			Hi = FMath::Max(Hi, Along);
+			Min = FMath::Min(Min, Off);
+			Max = FMath::Max(Max, Off);
+		}
+	}
+	L.From = Lo;
+	L.To = Hi;
+	L.Across = (Min + Max) * 0.5;
+	L.Half = FMath::Clamp((Max - Min) * 0.5 + 60.0, 70.0, 170.0);
+	return L;
+}
+
+/** A walkway the registry has for Street and Side (the street stage's, Market's stage's, the cross streets'). */
+bool FindWalkway(const UStreetWorld* Registry, FName Street, int32 Side, FStreetWalkway& Out)
+{
+	if (!Registry)
+	{
+		return false;
+	}
+	for (const FStreetWalkway& W : Registry->Walkways())
+	{
+		if (W.Street == Street && W.Side == Side && W.Lanes.Num() > 0)
+		{
+			Out = W;
+			return true;
+		}
+	}
+	return false;
+}
+
+/** A node on the nearest sidewalk's line to At, if that line runs within MaxD of it (else none: nowhere a walker could reach it from). */
+int32 SplitNear(FStreetCrowdMap& M, const FVector2D& At, double MaxD)
+{
+	const int32 Node = M.Split(At);
+	return Node != INDEX_NONE && FVector2D::Distance(M.Nodes[Node].At, At) <= MaxD ? Node : INDEX_NONE;
+}
+
+/** What the registry holds for the people's map (walkways, their lanes, doors, stations): it changes when a stage registers more. */
+int32 MapSignature(const UStreetWorld* Registry)
+{
+	if (!Registry)
+	{
+		return 0;
+	}
+	int32 Sig = 17;
+	for (const FStreetWalkway& W : Registry->Walkways())
+	{
+		Sig = Sig * 31 + static_cast<int32>(GetTypeHash(W.Street)) + W.Side * 7 + W.Lanes.Num();
+	}
+	for (const FStreetDoor& D : Registry->Doors())
+	{
+		Sig = Sig * 31 + static_cast<int32>(GetTypeHash(D.Id));
+	}
+	return Sig * 31 + Registry->Stations(NAME_None).Num();
+}
+
 /**
- * The block for its people: Fifth's two sidewalks end to end as the stage lays them out for walking (their two lanes, the
- * stoops they bend round, what stands on them), Market's two from the corner, the crosswalks; the doors on the street (the
- * Lucky Penny's and the Wash & Fold's into their rooms, 1812's and Dee's to be gone through) and the rooms' aisles; the
- * spots people stop at; a bus shelter, if one stands on the stage.
+ * The block for its people: Fifth's two sidewalks end to end as the registry has them (their two lanes, the stoops they bend
+ * round, what stands on them), Market's two from the corner (the registry's once Market's stage registers them, else today's
+ * lines), the cross streets' near sidewalks out to their walk limits, the crosswalks; the doors on the street (the Lucky Penny's
+ * and the Wash & Fold's into their rooms, 1812's and Dee's to be gone through, the shops' into theirs) and the rooms' aisles; the
+ * spots people stop at; the 14's shelter (its stations, or a stage mesh named *Shelter*), and cover from the rain.
  */
-TSharedPtr<FStreetCrowdMap> BuildMap(const AStreetStage& Stage)
+TSharedPtr<FStreetCrowdMap> BuildMap(const AStreetStage& Stage, const UStreetWorld* Registry)
 {
 	using ESpot = FStreetCrowdMap::ESpot;
 	const uint8 Walkway = FStreetCrowdMap::Sidewalk;
@@ -607,7 +785,7 @@ TSharedPtr<FStreetCrowdMap> BuildMap(const AStreetStage& Stage)
 	FStreetCrowdMap& M = *Out;
 
 	// Each of Fifth's sidewalks: the line between its two lanes (each walker keeps to the one on their right), how far either
-	// side of it there's room, and its stoops; the rest of what stands on it is in the way.
+	// side of it there's room, and its stoops; the rest of what stands on it is in the way. Its ends are the set's.
 	struct FSide
 	{
 		double Line = 0.0;
@@ -615,16 +793,39 @@ TSharedPtr<FStreetCrowdMap> BuildMap(const AStreetStage& Stage)
 		TArray<FBox2D> Stoops;
 	};
 	FSide Sides[2];
+	double EndSouth = TNumericLimits<double>::Max();
+	double EndNorth = TNumericLimits<double>::Lowest();
+	auto AddBlocks = [&M, &Local](const FStreetWalkway& Walk, TArray<FBox2D>* Stoops, int32 Side) {
+		for (const FBox2D& B : Walk.Obstacles)
+		{
+			const FVector2D A = Local(FVector(B.Min, 0.0));
+			const FVector2D C = Local(FVector(B.Max, 0.0));
+			const FBox2D Box(FVector2D(FMath::Min(A.X, C.X), FMath::Min(A.Y, C.Y)), FVector2D(FMath::Max(A.X, C.X), FMath::Max(A.Y, C.Y)));
+			// A stoop: a long run of the sidewalk taken from the fronts out (the line bends round it, out of the way).
+			if (Stoops && Box.GetSize().Y > 400.0 && (Side == 0 ? Box.Min.X < 5.0 : Box.Max.X > FarFront - 5.0))
+			{
+				Stoops->Add(Box);
+			}
+			M.Blocks.Add(Box);
+		}
+	};
 	for (int32 Side = 0; Side < 2; ++Side)
 	{
-		const FStreetWalkway Walk = Stage.Sidewalk(Side);
+		FStreetWalkway Walk;
+		if (!FindWalkway(Registry, TEXT("Fifth"), Side, Walk))
+		{
+			Walk = Stage.Sidewalk(Side);
+		}
 		double X0 = TNumericLimits<double>::Max();
 		double X1 = TNumericLimits<double>::Lowest();
 		for (const FStreetLane& L : Walk.Lanes)
 		{
-			const double X = Local(L.Start).X;
-			X0 = FMath::Min(X0, X);
-			X1 = FMath::Max(X1, X);
+			const FVector2D A = Local(L.Start);
+			const FVector2D B = Local(L.End);
+			X0 = FMath::Min(X0, A.X);
+			X1 = FMath::Max(X1, A.X);
+			EndSouth = FMath::Min(EndSouth, FMath::Min(A.Y, B.Y));
+			EndNorth = FMath::Max(EndNorth, FMath::Max(A.Y, B.Y));
 		}
 		FSide& S = Sides[Side];
 		if (Walk.Lanes.Num() > 0)
@@ -636,27 +837,71 @@ TSharedPtr<FStreetCrowdMap> BuildMap(const AStreetStage& Stage)
 		{
 			S.Line = Side == 0 ? 190.0 : 1845.0;
 		}
-		for (const FBox2D& B : Walk.Obstacles)
-		{
-			const FVector2D A = Local(FVector(B.Min, 0.0));
-			const FVector2D C = Local(FVector(B.Max, 0.0));
-			const FBox2D Box(FVector2D(FMath::Min(A.X, C.X), FMath::Min(A.Y, C.Y)), FVector2D(FMath::Max(A.X, C.X), FMath::Max(A.Y, C.Y)));
-			// A stoop: a long run of the sidewalk taken from the fronts out (the line bends round it, out of the way).
-			if (Box.GetSize().Y > 400.0 && (Side == 0 ? Box.Min.X < 5.0 : Box.Max.X > FarFront - 5.0))
-			{
-				S.Stoops.Add(Box);
-			}
-			M.Blocks.Add(Box);
-		}
+		AddBlocks(Walk, &S.Stoops, Side);
 	}
-	// What else stands in the way: the lamp post on Market's north sidewalk, the wet-floor signs inside the store's door and
-	// the Wash & Fold's.
-	M.Blocks.Add(FBox2D(FVector2D(-1716.0, 5894.0), FVector2D(-1684.0, 5926.0)));
+	if (EndSouth > EndNorth)
+	{
+		EndSouth = TodayEndSouth;
+		EndNorth = TodayEndNorth;
+	}
+
+	// Market's two sidewalks: the registry's (Market's stage, spec 7.5.6), each as far from its line to the crosswalks and the
+	// curbs as today's are from theirs; otherwise today's.
+	double MarketSouthY = TodayMarketSouthY;
+	double MarketNorthY = TodayMarketNorthY;
+	double MarketEndSouthX = TodayMarketEndX;
+	double MarketEndNorthX = TodayMarketEndX;
+	double MarketCurbSouth = TodayMarketCurbSouth;
+	double MarketCurbNorth = TodayMarketCurbNorth;
+	double CrossSouthY = TodayCrossSouthY;
+	double CrossNorthY = TodayCrossNorthY;
+	float MarketHalfS = 110.0f;
+	float MarketHalfN = 110.0f;
+	bool bMarketFromRegistry = false;
+	{
+		FStreetWalkway South;
+		FStreetWalkway North;
+		const bool bSouth = FindWalkway(Registry, TEXT("Market"), 0, South);
+		const bool bNorth = FindWalkway(Registry, TEXT("Market"), 1, North);
+		double HalfWidth = TodayMarketSouthY - MarketSouthFront;
+		if (bSouth)
+		{
+			const FWalkLine L = LineOf(South, T);
+			MarketSouthY = L.Across;
+			MarketEndSouthX = L.From + 150.0;
+			HalfWidth = FMath::Max(80.0, MarketSouthY - MarketSouthFront);
+			MarketCurbSouth = MarketSouthY + HalfWidth - 45.0;
+			CrossSouthY = FMath::Min(MarketSouthY + 40.0, MarketSouthY + HalfWidth - 20.0);
+			MarketHalfS = static_cast<float>(FMath::Clamp(HalfWidth - 40.0, 80.0, 170.0));
+			AddBlocks(South, nullptr, 0);
+			bMarketFromRegistry = true;
+		}
+		if (bNorth)
+		{
+			const FWalkLine L = LineOf(North, T);
+			MarketNorthY = L.Across;
+			MarketEndNorthX = L.From + 150.0;
+			MarketCurbNorth = MarketNorthY - HalfWidth + 15.0;
+			CrossNorthY = MarketNorthY - 20.0;
+			MarketHalfN = static_cast<float>(FMath::Clamp(HalfWidth - 40.0, 80.0, 170.0));
+			AddBlocks(North, nullptr, 1);
+			bMarketFromRegistry = true;
+		}
+		M.MarketCurbS = MarketCurbSouth + 45.0;
+		M.MarketCurbN = MarketCurbNorth - 45.0;
+		M.MarketFrontN = MarketNorthY + HalfWidth;
+	}
+	if (!bMarketFromRegistry)
+	{
+		// Today's Market: the lamp post on its north sidewalk.
+		M.Blocks.Add(FBox2D(FVector2D(-1716.0, 5894.0), FVector2D(-1684.0, 5926.0)));
+	}
+	// The wet-floor signs inside the store's door and the Wash & Fold's.
 	M.Blocks.Add(FBox2D(FVector2D(-185.0, 4505.0), FVector2D(-161.0, 4545.0)));
 	M.Blocks.Add(FBox2D(FVector2D(FarFront + 172.0, 236.0), FVector2D(FarFront + 202.0, 266.0)));
 
-	// The doors on the street, as the stage has them: where one stands before each (its sidewalk's node is level with it), and
-	// its threshold.
+	// The doors on the street, as the registry has them (the stage's when it has none): where one stands before each (its
+	// sidewalk's node is level with it), and its threshold.
 	struct FDoor
 	{
 		FVector2D Out = FVector2D::ZeroVector;
@@ -668,28 +913,19 @@ TSharedPtr<FStreetCrowdMap> BuildMap(const AStreetStage& Stage)
 	FDoor WashDoor;
 	FDoor HomeDoor;
 	FDoor DeeDoor;
-	for (const FStreetDoor& D : Stage.Doors())
+	// The registry's first (where one is registered, it's the one), then the stage's own for any The Block's door the registry
+	// doesn't have yet: the Wash & Fold's, Dee's and the rest keep working whichever registers first.
+	TArray<FStreetDoor> AllDoors = Registry ? Registry->Doors() : TArray<FStreetDoor>();
+	AllDoors.Append(Stage.Doors());
+	for (const FStreetDoor& D : AllDoors)
 	{
 		FDoor* Into = D.Id == TEXT("store") ? &StoreDoor : D.Id == TEXT("washfold") ? &WashDoor : D.Id == TEXT("home") ? &HomeDoor : D.Id == TEXT("dee") ? &DeeDoor : nullptr;
-		if (Into)
+		if (Into && !Into->bFound)
 		{
 			Into->Out = Local(D.Outside.GetLocation());
 			Into->In = Local(D.Threshold);
 			Into->Floor = T.InverseTransformPosition(D.Threshold).Z;
 			Into->bFound = true;
-		}
-	}
-
-	// A bus shelter, if the street has one: waited under, back toward its fronts, facing the road.
-	FBox Shelter(ForceInit);
-	TInlineComponentArray<UStaticMeshComponent*> Meshes(&Stage);
-	for (const UStaticMeshComponent* C : Meshes)
-	{
-		const UStaticMesh* Mesh = C ? C->GetStaticMesh().Get() : nullptr;
-		if (Mesh && Mesh->GetName().Contains(TEXT("Shelter")))
-		{
-			Shelter = C->Bounds.GetBox().TransformBy(T.Inverse());
-			break;
 		}
 	}
 
@@ -774,11 +1010,6 @@ TSharedPtr<FStreetCrowdMap> BuildMap(const AStreetStage& Stage)
 	// Penny's window and doors on it.
 	const FSide& Home = Sides[0];
 	TArray<double> HomeMarks = {HomeDoor.bFound ? HomeDoor.Out.Y : 0.0, PawnWindowY, StoreWindowY, StoreDoor.bFound ? StoreDoor.Out.Y : 4750.0};
-	const bool bShelterHome = Shelter.IsValid && Shelter.GetCenter().X < 420.0 && Shelter.GetCenter().X > -20.0 && Shelter.GetCenter().Y < 4950.0;
-	if (bShelterHome)
-	{
-		HomeMarks.Add(Shelter.GetCenter().Y);
-	}
 	TArray<int32> HomeAt;
 	const TArray<int32> HomeLine = Line(Home, 0, EndSouth, MarketSouthY, true, false, HomeMarks, HomeAt);
 	const int32 CornerSouth = HomeLine.Last();
@@ -786,43 +1017,211 @@ TSharedPtr<FStreetCrowdMap> BuildMap(const AStreetStage& Stage)
 	const int32 MarketCurb0 = M.AddNode(Home.Line, MarketCurbSouth);
 	const int32 MarketCurb1 = M.AddNode(Home.Line, MarketCurbNorth);
 	M.Link(CornerSouth, MarketCurb0, 115.0f, Walkway);
-	M.Link(MarketCurb0, MarketCurb1, 140.0f, FStreetCrowdMap::Crossing);
-	TArray<double> NorthMarks;
-	const bool bShelterNorth = Shelter.IsValid && Shelter.GetCenter().X < 420.0 && Shelter.GetCenter().X > -20.0 && Shelter.GetCenter().Y > 6150.0;
-	if (bShelterNorth)
-	{
-		NorthMarks.Add(Shelter.GetCenter().Y);
-	}
+	M.Link(MarketCurb0, MarketCurb1, 140.0f, FStreetCrowdMap::Crossing | FStreetCrowdMap::OverMarket);
 	TArray<int32> NorthAt;
-	const TArray<int32> NorthLine = Line(Home, 0, CrossNorthY, EndNorth, false, true, NorthMarks, NorthAt);
+	const TArray<int32> NorthLine = Line(Home, 0, CrossNorthY, EndNorth, false, true, TArray<double>(), NorthAt);
 	const int32 CornerNorth = NorthLine[0];
 	M.Link(MarketCurb1, CornerNorth, 115.0f, Walkway);
-	// Market's two sidewalks, west from the corner to the set's end there.
-	M.Chain({CornerSouth, M.AddNode(-1400.0, MarketSouthY), M.AddNode(MarketEndX, MarketSouthY, true)}, 110.0f, Walkway);
-	M.Chain({CornerNorth, M.AddNode(-1400.0, MarketNorthY), M.AddNode(MarketEndX, MarketNorthY, true)}, 110.0f, Walkway);
+	// Market's two sidewalks, east from the corner to the set's end there (past the Lucky Penny's back wall at X -1400).
+	auto MarketLine = [&M, Walkway](int32 Corner, double Y, double EndX, float Half) {
+		TArray<int32> Chain = {Corner};
+		if (EndX < -1700.0)
+		{
+			Chain.Add(M.AddNode(-1400.0, Y));
+		}
+		const int32 End = M.AddNode(EndX, Y, true);
+		Chain.Add(End);
+		M.Chain(Chain, Half, Walkway);
+		M.MarketEnds.Add(End);
+	};
+	MarketLine(CornerSouth, MarketSouthY, MarketEndSouthX, MarketHalfS);
+	MarketLine(CornerNorth, MarketNorthY, MarketEndNorthX, MarketHalfN);
 
 	// The far side end to end: Dee's door, the Wash & Fold's steps and its window, the crosswalks' ends.
 	const FSide& Far = Sides[1];
 	TArray<double> FarMarks = {DeeDoor.bFound ? DeeDoor.Out.Y : -455.0, WashDoor.bFound ? WashDoor.Out.Y : 120.0, WashWindowY, CrossSouthY, CrossNorthY};
-	const bool bShelterFar = Shelter.IsValid && Shelter.GetCenter().X > 1620.0;
-	if (bShelterFar)
-	{
-		FarMarks.Add(Shelter.GetCenter().Y);
-	}
 	TArray<int32> FarAt;
-	Line(Far, 1, EndSouth, EndNorth, true, true, FarMarks, FarAt);
+	const TArray<int32> FarLine = Line(Far, 1, EndSouth, EndNorth, true, true, FarMarks, FarAt);
 
 	// The crosswalks over Fifth, curb to curb.
 	const int32 HomeCurbS = M.AddNode(HomeCurbX, CrossSouthY);
 	const int32 FarCurbS = M.AddNode(FarCurbX, CrossSouthY);
 	M.Link(CornerSouth, HomeCurbS, CrossHalf, Walkway);
-	M.Link(HomeCurbS, FarCurbS, CrossHalf, FStreetCrowdMap::Crossing);
+	M.Link(HomeCurbS, FarCurbS, CrossHalf, FStreetCrowdMap::Crossing | FStreetCrowdMap::OverFifth);
 	M.Link(FarCurbS, FarAt[3], CrossHalf, Walkway);
 	const int32 HomeCurbN = M.AddNode(HomeCurbX, CrossNorthY);
 	const int32 FarCurbN = M.AddNode(FarCurbX, CrossNorthY);
 	M.Link(CornerNorth, HomeCurbN, CrossHalf, Walkway);
-	M.Link(HomeCurbN, FarCurbN, CrossHalf, FStreetCrowdMap::Crossing);
+	M.Link(HomeCurbN, FarCurbN, CrossHalf, FStreetCrowdMap::Crossing | FStreetCrowdMap::OverFifth);
 	M.Link(FarCurbN, FarAt[4], CrossHalf, Walkway);
+
+	// The cross streets' near sidewalks (Hollis, Wexler, Cardinal; spec 2.9), when their stages register them: each one's
+	// line from walk limit to walk limit, the ends of Fifth's and Market's sidewalks turning onto it where they meet it (and
+	// no longer the set's ends), and the stretch of it over a street's mouth (Fifth's at Hollis and Wexler, Market's at
+	// Cardinal) a crossing, curb to curb, with a look each way first (no lights there: the cross streets' traffic stops at
+	// its signs). The walk limits become where people come and go.
+	if (Registry)
+	{
+		struct FLineEnd
+		{
+			int32 Node;
+			FName Street;
+		};
+		TArray<FLineEnd> LineEnds;
+		if (HomeLine.Num() > 0)
+		{
+			LineEnds.Add({HomeLine[0], TEXT("Fifth")});
+		}
+		if (NorthLine.Num() > 0)
+		{
+			LineEnds.Add({NorthLine.Last(), TEXT("Fifth")});
+		}
+		if (FarLine.Num() > 0)
+		{
+			LineEnds.Add({FarLine[0], TEXT("Fifth")});
+			LineEnds.Add({FarLine.Last(), TEXT("Fifth")});
+		}
+		for (const int32 End : M.MarketEnds)
+		{
+			LineEnds.Add({End, TEXT("Market")});
+		}
+		// Where a street's mouth is crossed, its curbs along the cross line (Fifth's run along X, Market's along Y).
+		auto Curbs = [&](FName Street, double& OutA, double& OutB) {
+			if (Street == TEXT("Fifth"))
+			{
+				OutA = HomeCurbX;
+				OutB = FarCurbX;
+				return true;
+			}
+			if (Street == TEXT("Market"))
+			{
+				OutA = MarketCurbSouth;
+				OutB = MarketCurbNorth;
+				return true;
+			}
+			return false;
+		};
+		for (const FStreetWalkway& W : Registry->Walkways())
+		{
+			if (W.Street == TEXT("Fifth") || W.Street == TEXT("Market") || W.Lanes.Num() == 0)
+			{
+				continue;
+			}
+			AddBlocks(W, nullptr, W.Side);
+			const FWalkLine L = LineOf(W, T);
+			auto At = [&L](double Along) { return L.bAlongX ? FVector2D(Along, L.Across) : FVector2D(L.Across, Along); };
+			// The sidewalks' ends that meet this line (within a few meters of it, between its limits), in order along it.
+			struct FMeet
+			{
+				double Along;
+				int32 End;
+				FName Street;
+			};
+			TArray<FMeet> Meets;
+			for (const FLineEnd& E : LineEnds)
+			{
+				if (!M.Nodes[E.Node].bEnd)
+				{
+					continue; // turned onto another line already
+				}
+				const FVector2D P = M.Nodes[E.Node].At;
+				const double Along = L.bAlongX ? P.X : P.Y;
+				const double Off = L.bAlongX ? P.Y : P.X;
+				if (FMath::Abs(Off - L.Across) <= 700.0 && Along >= L.From - 150.0 && Along <= L.To + 150.0)
+				{
+					Meets.Add({FMath::Clamp(Along, L.From + 60.0, L.To - 60.0), E.Node, E.Street});
+				}
+			}
+			Meets.Sort([](const FMeet& A, const FMeet& B) { return A.Along < B.Along; });
+			// Limit, the meeting points, limit: linked in order; between two of one street's ends, its mouth crossed.
+			TArray<int32> Chain;
+			TArray<FName> ChainStreet;
+			Chain.Add(M.AddNode(At(L.From).X, At(L.From).Y, true));
+			ChainStreet.Add(NAME_None);
+			for (const FMeet& Meet : Meets)
+			{
+				const int32 Node = M.AddNode(At(Meet.Along).X, At(Meet.Along).Y);
+				M.Link(Meet.End, Node, 110.0f, Walkway);
+				M.Nodes[Meet.End].bEnd = false;
+				M.Ends.Remove(Meet.End);
+				M.MarketEnds.Remove(Meet.End);
+				Chain.Add(Node);
+				ChainStreet.Add(Meet.Street);
+			}
+			Chain.Add(M.AddNode(At(L.To).X, At(L.To).Y, true));
+			ChainStreet.Add(NAME_None);
+			const float Half = static_cast<float>(L.Half);
+			for (int32 I = 0; I + 1 < Chain.Num(); ++I)
+			{
+				double CurbA = 0.0;
+				double CurbB = 0.0;
+				const bool bMouth = !ChainStreet[I].IsNone() && ChainStreet[I] == ChainStreet[I + 1] && Curbs(ChainStreet[I], CurbA, CurbB);
+				if (!bMouth)
+				{
+					M.Link(Chain[I], Chain[I + 1], Half, Walkway);
+					continue;
+				}
+				// Over the mouth: to its near curb, across the road (a crossing, no light), on from its far curb.
+				const double From = L.bAlongX ? M.Nodes[Chain[I]].At.X : M.Nodes[Chain[I]].At.Y;
+				const double To = L.bAlongX ? M.Nodes[Chain[I + 1]].At.X : M.Nodes[Chain[I + 1]].At.Y;
+				const double Lo = FMath::Min(CurbA, CurbB);
+				const double Hi = FMath::Max(CurbA, CurbB);
+				const double Near = From < To ? Lo : Hi;
+				const double Far2 = From < To ? Hi : Lo;
+				const int32 C0 = M.AddNode(At(Near).X, At(Near).Y);
+				const int32 C1 = M.AddNode(At(Far2).X, At(Far2).Y);
+				M.Link(Chain[I], C0, Half, Walkway);
+				M.Link(C0, C1, CrossHalf, FStreetCrowdMap::Crossing);
+				M.Link(C1, Chain[I + 1], Half, Walkway);
+			}
+			if (Meets.Num() == 0)
+			{
+				// It meets no sidewalk's end: joined at the nearer of its limits to the nearest node, if one's near enough.
+				const int32 A = Chain[0];
+				const int32 B = Chain.Last();
+				auto NearestOther = [&M, &Chain](const FVector2D& P, double& OutD) {
+					int32 Best = INDEX_NONE;
+					OutD = TNumericLimits<double>::Max();
+					for (int32 I = 0; I < M.Nodes.Num(); ++I)
+					{
+						const double D = FVector2D::Distance(M.Nodes[I].At, P);
+						if (!Chain.Contains(I) && !M.Nodes[I].bIndoors && D < OutD)
+						{
+							OutD = D;
+							Best = I;
+						}
+					}
+					return Best;
+				};
+				double DA = 0.0;
+				double DB = 0.0;
+				const int32 NA = NearestOther(M.Nodes[A].At, DA);
+				const int32 NB = NearestOther(M.Nodes[B].At, DB);
+				const int32 Corner = DA <= DB ? A : B;
+				const int32 Join = DA <= DB ? NA : NB;
+				if (Join != INDEX_NONE && FMath::Min(DA, DB) < 900.0)
+				{
+					M.Link(Corner, Join, 110.0f, Walkway);
+					M.Nodes[Corner].bEnd = false;
+					M.Ends.Remove(Corner);
+					if (M.Nodes[Join].bEnd)
+					{
+						M.Nodes[Join].bEnd = false;
+						M.Ends.Remove(Join);
+					}
+				}
+			}
+			// Which way its fronts are (umbrella-less walkers keep under them in the rain): away from its road.
+			FStreetCrowdMap::FBand Band;
+			const double Lo = FMath::Min(L.From, L.To) - 50.0;
+			const double Hi = FMath::Max(L.From, L.To) + 50.0;
+			const double Wide = L.Half + 120.0;
+			Band.Box = L.bAlongX ? FBox2D(FVector2D(Lo, L.Across - Wide), FVector2D(Hi, L.Across + Wide)) : FBox2D(FVector2D(L.Across - Wide, Lo), FVector2D(L.Across + Wide, Hi));
+			// Side 1 is the north or west side of its street (its fronts further north or west), 0 the south or east.
+			Band.Fronts = L.bAlongX ? FVector2D(0.0, W.Side == 1 ? 1.0 : -1.0) : FVector2D(W.Side == 1 ? 1.0 : -1.0, 0.0);
+			M.Bands.Add(Band);
+		}
+	}
 
 	// The Lucky Penny: in at its sliding doors, to the front of the store, the aisle's mouth, before the counter, the coffee
 	// bar's end; its shelves and its counter (Benny's face to look at across it).
@@ -877,6 +1276,9 @@ TSharedPtr<FStreetCrowdMap> BuildMap(const AStreetStage& Stage)
 		M.Keep(M.Machines, M.AddSpot(ESpot::Laundry, Front, {FVector2D(FarFront + 200.0, 700.0)}, 0.0f, FVector(WashBack - 10.0, 960.0, Z + 235.0), TEXT("the chairs"), 50.0f, Wash));
 		M.WashCounter = M.AddSpot(ESpot::Counter, South, {FVector2D(WashCounterX, WashCounterFront + 75.0)}, -90.0f, FVector(WashCounterX - 8.0, 75.0, Z + 160.0), TEXT("the wash counter"), 55.0f, Wash);
 		M.BackDoor = M.AddSpot(ESpot::Door, Back, {FVector2D(WashBack - 60.0, BackDoorY)}, 0.0f, FVector(WashBack, BackDoorY, Z + 150.0), TEXT("Dee's steel door"), 60.0f, Wash);
+		// A cigarette on the sidewalk beside its steps, back to its window, looking out over the street (Sal before nine).
+		M.WashSmoke = M.AddSpot(ESpot::Smoke, FarAt[1], {FVector2D(FarFront - 40.0, WashDoor.Out.Y + 150.0)}, 180.0f, FVector(1300.0, WashDoor.Out.Y + 450.0, 160.0),
+			TEXT("the Wash & Fold's door"));
 	}
 
 	// Shop windows to stop at: the pawn shop's (lit low behind its bars), the Lucky Penny's posters, the Wash & Fold's.
@@ -907,43 +1309,150 @@ TSharedPtr<FStreetCrowdMap> BuildMap(const AStreetStage& Stage)
 		M.Spots[M.SmokeSpot].Door = Dee;
 	}
 
-	// Under the bus shelter: back toward its fronts, facing the road, looking up the street for the bus.
-	const int32 ShelterNode = bShelterHome ? HomeAt.Last() : bShelterNorth ? NorthAt.Last() : bShelterFar ? FarAt.Last() : INDEX_NONE;
-	if (ShelterNode != INDEX_NONE)
+	// The shops (spec 2.4): in at each one's door to a step inside it (gone there once nobody sees), and their waiting seats
+	// (the barber's bench, Ruby's stools and booths: stations with a seat) for when the hero's in there too.
+	if (Registry)
 	{
-		const FVector C = Shelter.GetCenter();
-		const FVector E = Shelter.GetExtent();
-		const bool bFar = C.X > 1620.0;
-		const FVector2D Wait(bFar ? FMath::Clamp(C.X + 0.3 * E.X, 1700.0, 1990.0) : FMath::Clamp(C.X - 0.3 * E.X, 70.0, 340.0), C.Y);
-		const float Facing = bFar ? 180.0f : 0.0f;
-		const FVector2D Outward = Heading(Facing);
-		const FVector2D Along = RightOf(Outward);
-		M.ShelterSpot = M.AddSpot(ESpot::Shelter, ShelterNode, {Wait}, Facing, FVector(Wait.X + Outward.X * 500.0 - Along.X * 1500.0, Wait.Y + Outward.Y * 500.0 - Along.Y * 1500.0, 160.0),
-			TEXT("the bus shelter"), 90.0f);
+		static const TSet<FName> NotShops = {FName(TEXT("store")), FName(TEXT("washfold")), FName(TEXT("home")), FName(TEXT("dee"))};
+		for (const FStreetDoor& D : Registry->Doors())
+		{
+			if (!D.bRoom || NotShops.Contains(D.Id))
+			{
+				continue;
+			}
+			const FVector2D Out2 = Local(D.Outside.GetLocation());
+			const FVector2D In = Local(D.Threshold);
+			const FVector2D Into = (In - Out2).GetSafeNormal();
+			if (Into.IsNearlyZero())
+			{
+				continue;
+			}
+			const int32 Node = SplitNear(M, Out2, 700.0);
+			if (Node == INDEX_NONE)
+			{
+				continue;
+			}
+			const double Floor = T.InverseTransformPosition(D.Threshold).Z;
+			const FVector2D Inside = In + Into * 110.0;
+			const int32 DoorSpot = M.AddSpot(ESpot::Door, Node, {Out2, In - Into * 10.0, Inside}, YawOf(Into), FVector(Inside.X + Into.X * 300.0, Inside.Y + Into.Y * 300.0, Floor + 150.0),
+				TEXT("a shop's door"), 55.0f, FStreetCrowdMap::Shop);
+			if (DoorSpot == INDEX_NONE)
+			{
+				continue;
+			}
+			M.Spots[DoorSpot].Venue = D.Id;
+			M.ShopDoors.Add(DoorSpot);
+			for (const FName Station : Registry->Stations(D.Id))
+			{
+				FTransform At;
+				FName Pose;
+				float Seat = 0.0f;
+				const FString Id = Station.ToString();
+				if (!Registry->Station(Station, At, Pose, Seat) || Seat < 1.0f || !(Id.Contains(TEXT("bench")) || Id.Contains(TEXT("stool")) || Id.Contains(TEXT("booth"))))
+				{
+					continue;
+				}
+				const FTransform L = At.GetRelativeTransform(T);
+				const FVector2D S(L.GetLocation().X, L.GetLocation().Y);
+				const FVector2D Fwd(L.GetRotation().GetForwardVector().X, L.GetRotation().GetForwardVector().Y);
+				const int32 SeatSpot = M.AddSpot(ESpot::Seat, Node, {Out2, In - Into * 10.0, Inside, S + Fwd * 45.0, S}, YawOf(Fwd),
+					FVector(S.X + Fwd.X * 300.0, S.Y + Fwd.Y * 300.0, L.GetLocation().Z + 110.0), TEXT("a shop's seat"), 50.0f, FStreetCrowdMap::Shop);
+				if (SeatSpot != INDEX_NONE)
+				{
+					M.Spots[SeatSpot].Venue = D.Id;
+					M.Spots[SeatSpot].SeatHeight = Seat;
+					M.ShopSeats.Add(SeatSpot);
+				}
+			}
+		}
 	}
 
-	UE_LOG(LogStreetCrowd, Log, TEXT("The block for its people: %d nodes, %d edges, %d spots, %d in the way; lines at X %.0f and %.0f%s%s%s"), M.Nodes.Num(), M.Edges.Num(), M.Spots.Num(),
-		M.Blocks.Num(), Home.Line, Far.Line, Home.Stoops.Num() + Far.Stoops.Num() > 0 ? TEXT(", round the stoops") : TEXT(""), M.WashOut != INDEX_NONE ? TEXT(", the Wash & Fold") : TEXT(""),
-		M.ShelterSpot != INDEX_NONE ? TEXT(", a bus shelter") : TEXT(""));
+	// The 14's shelter (one path: spec 2.6, 6.8): its stations when its stage registers them (market-shelter1..4), else under
+	// any stage mesh named *Shelter*; each waited at facing the road. And cover from the rain on the street: the registry's
+	// covered stations outside every room.
+	auto Facing = [&M](const FVector2D& At) {
+		const FVector2D Fronts = M.FrontsSide(At);
+		return Fronts.IsNearlyZero() ? 0.0f : YawOf(-Fronts);
+	};
+	if (Registry)
+	{
+		for (const FName Station : Registry->Stations(NAME_None))
+		{
+			FTransform At;
+			FName Pose;
+			float Seat = 0.0f;
+			if (!Registry->Station(Station, At, Pose, Seat))
+			{
+				continue;
+			}
+			const FString Id = Station.ToString();
+			const bool bShelter = Id.StartsWith(TEXT("market-shelter"));
+			const FStreetZone* Zone = Registry->ZoneAt(At.GetLocation() + FVector(0.0, 0.0, 50.0));
+			const bool bCover = !bShelter && Registry->IsCovered(Station) && !(Zone && Zone->bInterior) && Seat < 1.0f;
+			if (!bShelter && !bCover)
+			{
+				continue;
+			}
+			const FTransform L = At.GetRelativeTransform(T);
+			const FVector2D S(L.GetLocation().X, L.GetLocation().Y);
+			const int32 Node = SplitNear(M, S, 700.0);
+			if (Node == INDEX_NONE)
+			{
+				continue;
+			}
+			const float Yaw = static_cast<float>(L.Rotator().Yaw);
+			const FVector2D Fwd = Heading(Yaw);
+			const int32 Spot = M.AddSpot(bShelter ? ESpot::Shelter : ESpot::Cover, Node, {S}, Yaw, FVector(S.X + Fwd.X * 600.0, S.Y + Fwd.Y * 600.0, 160.0),
+				bShelter ? TEXT("the 14's shelter") : TEXT("out of the rain"), 70.0f);
+			M.Keep(bShelter ? M.Shelters : M.Covers, Spot);
+		}
+	}
+	if (M.Shelters.Num() == 0)
+	{
+		// A shelter mesh on any of the street's stages (the street's, Market's): waited under, its open side to the road.
+		FBox Shelter(ForceInit);
+		if (const UWorld* World = Stage.GetWorld())
+		{
+			for (TActorIterator<AActor> It(const_cast<UWorld*>(World)); It && !Shelter.IsValid; ++It)
+			{
+				if (!It->GetClass()->GetName().Contains(TEXT("Stage")))
+				{
+					continue;
+				}
+				TInlineComponentArray<UStaticMeshComponent*> Meshes(*It);
+				for (const UStaticMeshComponent* C : Meshes)
+				{
+					const UStaticMesh* Mesh = C ? C->GetStaticMesh().Get() : nullptr;
+					if (Mesh && Mesh->GetName().Contains(TEXT("Shelter")))
+					{
+						Shelter = C->Bounds.GetBox().TransformBy(T.Inverse());
+						break;
+					}
+				}
+			}
+		}
+		if (Shelter.IsValid)
+		{
+			const FVector C = Shelter.GetCenter();
+			const FVector2D Wait(C.X, C.Y);
+			const int32 Node = SplitNear(M, Wait, 900.0);
+			const float Yaw = Facing(Wait);
+			const FVector2D Outward = Heading(Yaw);
+			const FVector2D Along = RightOf(Outward);
+			const int32 Spot = Node != INDEX_NONE ? M.AddSpot(ESpot::Shelter, Node, {Wait}, Yaw,
+															FVector(Wait.X + Outward.X * 500.0 - Along.X * 1500.0, Wait.Y + Outward.Y * 500.0 - Along.Y * 1500.0, 160.0),
+															TEXT("the bus shelter"), 90.0f)
+												  : INDEX_NONE;
+			M.Keep(M.Shelters, Spot);
+		}
+	}
+	M.ShelterSpot = M.Shelters.Num() > 0 ? M.Shelters[0] : INDEX_NONE;
+
+	UE_LOG(LogStreetCrowd, Log, TEXT("The block for its people: %d nodes, %d edges, %d spots, %d in the way; lines at X %.0f and %.0f, Market's at Y %.0f and %.0f%s%s%s%s%s"),
+		M.Nodes.Num(), M.Edges.Num(), M.Spots.Num(), M.Blocks.Num(), Home.Line, Far.Line, MarketSouthY, MarketNorthY, bMarketFromRegistry ? TEXT(" (the registry's)") : TEXT(" (today's)"),
+		Home.Stoops.Num() + Far.Stoops.Num() > 0 ? TEXT(", round the stoops") : TEXT(""), M.WashOut != INDEX_NONE ? TEXT(", the Wash & Fold") : TEXT(""),
+		M.Shelters.Num() > 0 ? TEXT(", a bus shelter") : TEXT(""), M.ShopDoors.Num() > 0 ? *FString::Printf(TEXT(", %d shops (%d seats)"), M.ShopDoors.Num(), M.ShopSeats.Num()) : TEXT(""));
 	return Out;
-}
-
-/** Which way the fronts are from a point on a sidewalk (under them in the rain), or zero off the sidewalks. */
-FVector2D FrontsSide(const FVector2D& At)
-{
-	if (At.X > 1620.0)
-	{
-		return FVector2D(1.0, 0.0);
-	}
-	if (At.X < 420.0 && At.Y > 4940.0 && At.Y < 5245.0)
-	{
-		return FVector2D(0.0, -1.0); // Market's south sidewalk, along the store's north wall
-	}
-	if (At.X < 420.0 && At.Y > 5855.0 && At.Y < 6160.0)
-	{
-		return FVector2D(0.0, 1.0);
-	}
-	return At.X < 420.0 ? FVector2D(-1.0, 0.0) : FVector2D::ZeroVector;
 }
 } // namespace StreetCrowdDetail
 
@@ -976,10 +1485,14 @@ void AStreetCrowd::Begin(AStreetStage* InStage, AShortStackCharacter* InHero)
 	}
 	if (Stage && Stage != InStage)
 	{
-		// Another street: everyone from the last one goes.
+		// Another street: everyone from the last one goes (the director's people go back to it).
 		for (FStreetWalker& W : Walkers)
 		{
-			if (W.Body)
+			if (W.bNamed)
+			{
+				HandBack(W);
+			}
+			else if (W.Body)
 			{
 				W.Body->Destroy();
 			}
@@ -990,7 +1503,9 @@ void AStreetCrowd::Begin(AStreetStage* InStage, AShortStackCharacter* InHero)
 	}
 	Stage = InStage;
 	Hero = InHero;
-	Map = BuildMap(*Stage);
+	const UStreetWorld* Registry = UStreetWorld::Get(this);
+	Map = BuildMap(*Stage, Registry);
+	MapSignature = StreetCrowdDetail::MapSignature(Registry);
 	for (FStreetWalker& W : Walkers)
 	{
 		// Begun again on the same street: whoever's out walks on from where they are, on the map as built now.
@@ -1023,7 +1538,8 @@ void AStreetCrowd::SetHour(float InDaylight, double InWorldMinutes, float InRain
 		Dice.Initialize(static_cast<int32>(FMath::FloorToDouble(WorldMinutes)) * 31 + 977);
 	}
 	// By the hour, fewer in a downpour, a little each way by the twenty minutes (the same each time for the same twenty), and
-	// one more on the way in to Dee's game.
+	// one more on the way in to Dee's game. Core's town says how many the hour wants (town::CrowdLevel, spec 6.2) once it
+	// does; until then (its stub's 1.0) the crowd's own hours stand.
 	const int32 Override = CVarCount.GetValueOnGameThread();
 	if (Override >= 0)
 	{
@@ -1038,13 +1554,73 @@ void AStreetCrowd::SetHour(float InDaylight, double InWorldMinutes, float InRain
 		bool bLeaving = false;
 		DeeGame(WorldMinutes, bArriving, bLeaving);
 		const float RainFactor = 1.0f - 0.3f * FMath::SmoothStep(0.5f, 1.5f, Rain);
-		const float Want = CrowdAt(Hour) * RainFactor + Jitter + (bArriving && Map && Map->BackDoor != INDEX_NONE ? 1.0f : 0.0f);
+		// Core's levels are real once 03:00 and the morning's peak differ (its stub said 1.0 at every hour; a real 1.0 at the
+		// peak is the peak, not the stub).
+		const double Midnight = WorldMinutes - TimeOfDay(WorldMinutes);
+		const bool bCoreLevels = !FMath::IsNearlyEqual(ss::town::CrowdLevel(Midnight + 3.0 * 60.0, 0.0), ss::town::CrowdLevel(Midnight + 8.5 * 60.0, 0.0));
+		const double Level = ss::town::CrowdLevel(WorldMinutes, Rain);
+		const float Base = bCoreLevels ? static_cast<float>(MaxOut * FMath::Clamp(Level, 0.0, 1.0)) : CrowdAt(Hour) * RainFactor;
+		const float Want = Base + Jitter + (bArriving && Map && Map->BackDoor != INDEX_NONE ? 1.0f : 0.0f);
 		Wanted = FMath::Clamp(FMath::RoundToInt(Want), 0, MaxOut);
 	}
 	if (bCastChosen)
 	{
 		Wanted = FMath::Min(Wanted, NumCast);
 	}
+	// The street's MetaHuman budget, shared with the director's people (spec 6.7).
+	if (Allowance >= 0)
+	{
+		Wanted = FMath::Min(Wanted, Allowance);
+	}
+	// No director by the first hour (the game mode didn't spawn one): the crowd starts it, and tells it the hour from then on.
+	if (!bDirectorAsked && Stage && GetWorld())
+	{
+		bDirectorAsked = true;
+		if (!Director.IsValid())
+		{
+			AStreetNpcs* Found = AStreetNpcs::Find(GetWorld());
+			if (!Found)
+			{
+				Found = AStreetNpcs::FindOrSpawn(GetWorld());
+				if (Found)
+				{
+					Found->bAutoSpawned = true;
+					Found->Begin(Stage, Hero.Get(), this);
+				}
+			}
+			else
+			{
+				Found->AttachCrowd(this);
+			}
+		}
+	}
+	if (AStreetNpcs* D = Director.Get(); D && D->bAutoSpawned)
+	{
+		D->SetHour(WorldMinutes, Daylight, Rain, bPaused);
+	}
+}
+
+void AStreetCrowd::SetDirector(AStreetNpcs* InDirector)
+{
+	Director = InDirector;
+	bDirectorAsked = true;
+}
+
+bool AStreetCrowd::FaceAllowed(FName Face) const
+{
+	UCastFaceRegistry* Faces = UCastFaceRegistry::Get(this);
+	if (!Faces)
+	{
+		return true;
+	}
+	if (!Faces->IsConfigured())
+	{
+		// Nobody's said whose face is whose yet (the director does at its Begin): from the hero, so the staff's and the
+		// player's are kept from the start.
+		const AShortStackCharacter* H = Hero.Get();
+		Faces->Configure(H ? H->GetCastFace() : FName(), FString());
+	}
+	return Faces->IsAllowed(Face, NAME_None);
 }
 
 bool AStreetCrowd::TakeBark(FVector& OutAt, FString& OutLine)
@@ -1064,7 +1640,7 @@ int32 AStreetCrowd::NumOut() const
 	int32 N = 0;
 	for (const FStreetWalker& W : Walkers)
 	{
-		N += W.bOut ? 1 : 0;
+		N += W.bOut && !W.bNamed ? 1 : 0;
 	}
 	return N;
 }
@@ -1080,7 +1656,8 @@ void AStreetCrowd::ChooseCast()
 	TArray<const FExtra*> Men;
 	for (const FExtra& E : Extras)
 	{
-		if (!AtWork(E.Name) && IsBuilt(E.Name))
+		// Not the faces at work on the street (Benny's, the attendant's), nor any kept for someone (the staff's, the player's).
+		if (!AtWork(E.Name) && FaceAllowed(FName(E.Name)) && IsBuilt(E.Name))
 		{
 			(E.bWoman ? Women : Men).Add(&E);
 		}
@@ -1118,7 +1695,10 @@ void AStreetCrowd::ChooseCast()
 	{
 		Colors.Swap(I, Pick.RandRange(0, I));
 	}
-	Walkers.SetNum(Chosen.Num());
+	// The pedestrians first; any of the director's walkers already out stay after them.
+	TArray<FStreetWalker> Peds;
+	Peds.SetNum(Chosen.Num());
+	Walkers.Insert(Peds, 0);
 	for (int32 I = 0; I < Chosen.Num(); ++I)
 	{
 		FStreetWalker& W = Walkers[I];
@@ -1126,8 +1706,9 @@ void AStreetCrowd::ChooseCast()
 		W.bWoman = Chosen[I]->bWoman;
 		W.Jacket = Srgb(Colors[I % Colors.Num()]);
 		W.Rng.Initialize(Pick.RandRange(1, 1 << 30));
-		// The cast is built to 175 cm: shorter and taller than that by the actor's scale.
-		const float Height = W.bWoman ? W.Rng.FRandRange(158.0f, 173.0f) : W.Rng.FRandRange(167.0f, 189.0f);
+		// Their height today (spec 6.7: repeats are told apart by wardrobe, hats, glasses and height, never by hairstyle): the
+		// body is fitted to it as it's built; W.Scale spaces them.
+		const float Height = CastLooks::PedestrianHeight(static_cast<uint32>(W.Rng.RandRange(0, MAX_int32)) * 2654435761u, W.bWoman);
 		W.Scale = Height / 175.0f;
 		W.Pace = W.Rng.FRandRange(118.0f, 148.0f);
 		// The sidewalks' lanes stand 60 cm or so either side of their lines (AStreetStage::Sidewalk): each keeps near theirs.
@@ -1154,10 +1735,14 @@ bool AStreetCrowd::BuildBody(FStreetWalker& W)
 	}
 	B->AutoPossessAI = EAutoPossessAI::Disabled;
 	B->SetActorHiddenInGame(true);
-	B->ApplyCast(*W.Cast.ToString(), W.Jacket);
+	// Dressed as a stranger of the day (CastLooks: the same extra wears other clothes, a hat, glasses, another day; the same
+	// all day), fitted to their height.
+	const FString Who = FString::Printf(TEXT("passerby-%s-%d"), *W.Cast.ToString(), ss::net::DayOf(WorldMinutes));
+	const FCastWear Wear = CastLooks::WearFor(FName(*Who));
+	W.Jacket = Wear.Shirt;
+	B->ApplyCast(*W.Cast.ToString(), Wear, 175.0f * W.Scale);
 	B->FinishSpawning(Hidden);
 	W.Body = B;
-	B->SetActorScale3D(FVector(W.Scale));
 	// The crowd moves them: no movement of their own to run, and nothing for the hero's camera to stop at.
 	if (UCharacterMovementComponent* Move = B->GetCharacterMovement())
 	{
@@ -1277,6 +1862,11 @@ void AStreetCrowd::Show(FStreetWalker& W, bool bShow)
 	{
 		return;
 	}
+	if (bShow)
+	{
+		// Out of the detail tier's Gone first (spec 6.7: what it stopped starts again), at a cheap tier until the budget's next pass.
+		B->SetDetailTier(2);
+	}
 	B->SetActorHiddenInGame(!bShow);
 	B->SetActorEnableCollision(bShow);
 	B->SetActorTickEnabled(bShow);
@@ -1315,7 +1905,22 @@ void AStreetCrowd::Show(FStreetWalker& W, bool bShow)
 		W.UmbrellaOpen = 0.0f;
 		W.bWantsDoors = false;
 		W.Hunch = 0.0f;
+		W.Stumble = 0.0f;
+		W.HandUp = 0.0f;
 		B->SetTired(0.0f);
+		B->SetLookTarget(FVector::ZeroVector, 0.0f);
+		if (W.bSeated)
+		{
+			W.bSeated = false;
+			B->SetSeated(false, 46.0f);
+		}
+		if (UStreetBodyAnim* Anim = B->StreetBody())
+		{
+			Anim->Pose.Stumble = 0.0f;
+			Anim->Pose.HandOverHead = 0.0f;
+		}
+		// Gone (spec 6.7): nothing of them drawn or ticking, out of the budget.
+		B->SetDetailTier(3);
 	}
 	W.Tier = -1;
 }
@@ -1341,7 +1946,7 @@ int32 AStreetCrowd::FreeWalker() const
 	for (int32 I = 0; I < Walkers.Num(); ++I)
 	{
 		const FStreetWalker& W = Walkers[I];
-		if (W.Body && !W.bOut && (Best == INDEX_NONE || W.AwaySince < Walkers[Best].AwaySince))
+		if (W.Body && !W.bOut && !W.bNamed && (Best == INDEX_NONE || W.AwaySince < Walkers[Best].AwaySince))
 		{
 			Best = I;
 		}
@@ -1369,27 +1974,32 @@ void AStreetCrowd::UpdateCount(float Dt)
 	int32 Unbuilt = 0;
 	for (const FStreetWalker& W : Walkers)
 	{
+		if (W.bNamed)
+		{
+			continue; // the director's, not the hour's
+		}
 		Out += W.bOut ? 1 : 0;
 		Free += W.Body && !W.bOut ? 1 : 0;
 		Unbuilt += W.Body ? 0 : 1;
 	}
 	// The cast is dressed while the street fades in (two a frame: each is a hitch nobody sees, and the fade waits for them,
-	// so the street comes up from black already peopled); later, only when someone's wanted and nobody's free, and then one
-	// at a time.
-	if (Unbuilt > 0 && (bFading || (Free == 0 && Out < Wanted && BuildIn <= 0.0f)))
+	// so the street comes up from black already peopled); later only under the next black (a service's fade: spec 6.7, every
+	// MetaHuman build hitches wherever the hero is looking). Until then the hour makes do with whoever is built.
+	if (Unbuilt > 0 && (bFading || (bDark && BuildIn <= 0.0f)))
 	{
-		int32 Budget = bFading ? 2 : 1;
+		int32 Budget = 2;
 		int32 Built = 0;
 		for (FStreetWalker& W : Walkers)
 		{
-			if (!W.Body && Budget > 0)
+			if (!W.Body && !W.bNamed && Budget > 0)
 			{
 				--Budget;
 				Built += BuildBody(W) ? 1 : 0;
 			}
 		}
 		Free += Built;
-		BuildIn = 2.5f;
+		// Two more next frame while it's black; a build that failed isn't tried again for a while.
+		BuildIn = Built > 0 ? 0.0f : 2.5f;
 		// Only for someone actually dressed (a spawn that fails is quick, and mustn't keep the screen black).
 		bFadeHeld = bFading && Built > 0;
 	}
@@ -1422,8 +2032,8 @@ void AStreetCrowd::UpdateCount(float Dt)
 		for (FStreetWalker& W : Walkers)
 		{
 			bAlreadySent = bAlreadySent || (W.bOut && W.bSent);
-			const bool bBusy = !W.bOut || W.Role == ECrowdRole::Smoke || W.Role == ECrowdRole::Errand || W.Role == ECrowdRole::Shelter || W.Role == ECrowdRole::Laundry ||
-							   W.Role == ECrowdRole::Player;
+			const bool bBusy = !W.bOut || W.bNamed || W.Role == ECrowdRole::Smoke || W.Role == ECrowdRole::Errand || W.Role == ECrowdRole::Shelter ||
+							   W.Role == ECrowdRole::Laundry || W.Role == ECrowdRole::Player || W.Role == ECrowdRole::Shop || W.Role == ECrowdRole::Bus || W.bSeated;
 			if (!bBusy && (!Pick || (W.Role == ECrowdRole::Stroll && Pick->Role != ECrowdRole::Stroll)))
 			{
 				Pick = &W;
@@ -1483,6 +2093,19 @@ ECrowdRole AStreetCrowd::PickRole(FStreetWalker& W, bool bPlaced) const
 	{
 		Odds.Emplace(ECrowdRole::Shelter, 12.0f);
 	}
+	// The realism update's (spec 6.8): into an open shop, to the 14 for a departure soon, under cover out of a downpour.
+	if (PickShopDoor(W) != INDEX_NONE)
+	{
+		Odds.Emplace(ECrowdRole::Shop, Hour >= 1.0 && Hour < 7.0 ? 4.0f : 14.0f);
+	}
+	if (M.Shelters.Num() > 0 && NextDeparture() > 0.0)
+	{
+		Odds.Emplace(ECrowdRole::Bus, Hour >= 7.0 && Hour < 9.0 ? 26.0f : 9.0f);
+	}
+	if (M.Covers.Num() > 0 && Rain > 0.45f && !bPlaced)
+	{
+		Odds.Emplace(ECrowdRole::Cover, 12.0f);
+	}
 	float Total = 0.0f;
 	for (const TPair<ECrowdRole, float>& O : Odds)
 	{
@@ -1536,7 +2159,11 @@ bool AStreetCrowd::PlaceAtStart(FStreetWalker& W)
 		W.Plan[0].Duration = W.Rng.FRandRange(40.0f, W.Plan[0].Duration);
 		return true;
 	}
-	if (Purpose == ECrowdRole::Shelter && AtSpot(M.ShelterSpot, Purpose))
+	if ((Purpose == ECrowdRole::Shelter || Purpose == ECrowdRole::Bus) && M.Shelters.Num() > 0 && AtSpot(M.Shelters[W.Rng.RandRange(0, M.Shelters.Num() - 1)], Purpose))
+	{
+		return true;
+	}
+	if (Purpose == ECrowdRole::Cover && M.Covers.Num() > 0 && AtSpot(M.Covers[W.Rng.RandRange(0, M.Covers.Num() - 1)], Purpose))
 	{
 		return true;
 	}
@@ -1566,7 +2193,7 @@ bool AStreetCrowd::PlaceAtStart(FStreetWalker& W)
 			return true;
 		}
 	}
-	if (Purpose == ECrowdRole::Smoke || Purpose == ECrowdRole::Shelter || Purpose == ECrowdRole::PlayerOut)
+	if (Purpose == ECrowdRole::Smoke || Purpose == ECrowdRole::Shelter || Purpose == ECrowdRole::PlayerOut || Purpose == ECrowdRole::Bus || Purpose == ECrowdRole::Cover)
 	{
 		Purpose = ECrowdRole::Stroll;
 	}
@@ -1674,6 +2301,18 @@ bool AStreetCrowd::StepOutAtEntry(FStreetWalker& W)
 			}
 		}
 	}
+	if (Purpose != ECrowdRole::Shop)
+	{
+		// Out of an open shop (done in there), not one the hero's in.
+		for (const int32 Door : M.ShopDoors)
+		{
+			const AShopStage* Shop = ShopFor(M.Spots[Door].Venue);
+			if (Shop && Shop->IsOpen() && !HeroInShop(M.Spots[Door].Venue) && Usable(M.SpotAt(Door)))
+			{
+				Ways.Emplace(-2 - Door, 0.25f);
+			}
+		}
+	}
 	if (Ways.Num() == 0)
 	{
 		return false;
@@ -1740,7 +2379,11 @@ void AStreetCrowd::Enter(FStreetWalker& W, ECrowdRole Purpose, const FVector2D& 
 	W.HeroGlanceIn = W.Rng.FRandRange(2.0f, 6.0f);
 	W.Frame = W.Rng.RandRange(0, 7);
 	// The weather they came out in: an umbrella (already up, unless they're only now stepping out of a door) or none.
-	W.bUmbrella = Purpose != ECrowdRole::Smoke && Rain > 0.2f && W.Rng.FRand() < UmbrellaShare(Rain);
+	W.bUmbrella = Purpose != ECrowdRole::Smoke && (W.bForceUmbrella ? Rain > 0.05f : Rain > 0.2f && W.Rng.FRand() < UmbrellaShare(Rain));
+	W.bHandInRain = W.Rng.FRand() < 0.5f;
+	W.Stumble = 0.0f;
+	W.HandUp = 0.0f;
+	W.bJayRolled = false;
 	W.UmbrellaOpen = W.bUmbrella && AtSpot == INDEX_NONE ? 1.0f : 0.0f;
 	W.DryFor = 0.0f;
 	W.bSmoking = Purpose == ECrowdRole::Smoke;
@@ -1766,6 +2409,10 @@ void AStreetCrowd::PutAway(FStreetWalker& W)
 	W.Route.Reset();
 	W.Plan.Reset();
 	Show(W, false);
+	if (W.bNamed)
+	{
+		HandBack(W);
+	}
 }
 
 void AStreetCrowd::SendOff(FStreetWalker& W)
@@ -1874,7 +2521,45 @@ void AStreetCrowd::PlanFor(FStreetWalker& W, ECrowdRole Purpose, int32 From)
 		}
 		return;
 	case ECrowdRole::Shelter:
-		Leg(ECrowdLeg::Visit, M.ShelterSpot, W.Rng.FRandRange(90.0f, 280.0f));
+	case ECrowdRole::Bus:
+	{
+		// The shelter they're at, or one of its spots. For the 14: until it's gone, then aboard (Board); otherwise a while.
+		const bool bAtShelter = M.Spots.IsValidIndex(W.Spot) && M.Spots[W.Spot].Kind == FStreetCrowdMap::ESpot::Shelter;
+		const int32 Spot = bAtShelter ? W.Spot : (M.Shelters.Num() > 0 ? M.Shelters[W.Rng.RandRange(0, M.Shelters.Num() - 1)] : INDEX_NONE);
+		const double Leaves = Purpose == ECrowdRole::Bus ? NextDeparture() : -1.0;
+		if (Leaves > 0.0)
+		{
+			W.BoardAt = Leaves;
+			Leg(ECrowdLeg::Board, Spot, 0.0f);
+			return;
+		}
+		W.Role = ECrowdRole::Shelter;
+		Leg(ECrowdLeg::Visit, Spot, W.Rng.FRandRange(90.0f, 280.0f));
+		break;
+	}
+	case ECrowdRole::Shop:
+	{
+		// Into an open shop: through its door and gone inside, unseen; with the hero in there, a while on a waiting seat first.
+		const int32 Door = PickShopDoor(W);
+		if (Door == INDEX_NONE)
+		{
+			break;
+		}
+		const FName Venue = M.Spots[Door].Venue;
+		if (HeroInShop(Venue))
+		{
+			Leg(ECrowdLeg::Visit, FreeSeat(Venue), W.Rng.FRandRange(60.0f, 150.0f));
+			break;
+		}
+		Leg(ECrowdLeg::Enter, Door, 0.0f);
+		return;
+	}
+	case ECrowdRole::Cover:
+		// Out of the rain under cover (an awning, the shed) until it eases (RunLeg lets them go sooner if it does).
+		if (M.Covers.Num() > 0)
+		{
+			Leg(ECrowdLeg::Visit, M.Covers[W.Rng.RandRange(0, M.Covers.Num() - 1)], W.Rng.FRandRange(60.0f, 180.0f));
+		}
 		break;
 	case ECrowdRole::PlayerOut:
 	default:
@@ -1955,6 +2640,12 @@ void AStreetCrowd::RunLeg(FStreetWalker& W, float Dt)
 	const FStreetCrowdMap& M = *Map;
 	W.bHold = false;
 	W.LookDown = 0.0f;
+	if (W.bEngaged)
+	{
+		// Held for talk by the director: their plan waits.
+		W.bHold = true;
+		return;
+	}
 	if (!W.Plan.IsValidIndex(W.LegAt))
 	{
 		// Done with what they came out for: off the set.
@@ -1972,7 +2663,7 @@ void AStreetCrowd::RunLeg(FStreetWalker& W, float Dt)
 		}
 	}
 	const FCrowdLeg Leg = W.Plan[W.LegAt];
-	const bool bSpotLeg = Leg.Kind == ECrowdLeg::Visit || Leg.Kind == ECrowdLeg::Smoke || Leg.Kind == ECrowdLeg::Enter;
+	const bool bSpotLeg = Leg.Kind == ECrowdLeg::Visit || Leg.Kind == ECrowdLeg::Smoke || Leg.Kind == ECrowdLeg::Enter || Leg.Kind == ECrowdLeg::Board;
 	if (bSpotLeg && !W.bArrived && M.Spots.IsValidIndex(Leg.Target))
 	{
 		// Someone at their spot already: they wait their turn a step off, and give it up after a while.
@@ -2011,10 +2702,47 @@ void AStreetCrowd::RunLeg(FStreetWalker& W, float Dt)
 		{
 			break;
 		}
+		if (M.Spots.IsValidIndex(Leg.Target))
+		{
+			const FStreetCrowdMap::FSpot& S = M.Spots[Leg.Target];
+			// A shop's waiting seat: sat on (the seated mode, spec 6.6) for the while.
+			if (S.Kind == FStreetCrowdMap::ESpot::Seat && !W.bSeated && W.Body)
+			{
+				W.bSeated = true;
+				W.Body->SetSeated(true, S.SeatHeight);
+			}
+			// Under cover from the rain: on again once it's eased.
+			if (S.Kind == FStreetCrowdMap::ESpot::Cover && Rain < 0.25f && W.Stay > 8.0f)
+			{
+				NextLeg(W);
+				break;
+			}
+		}
 		W.Stay += Dt;
 		if (W.Stay >= Leg.Duration)
 		{
 			NextLeg(W);
+		}
+		break;
+	case ECrowdLeg::Board:
+		if (!W.bArrived)
+		{
+			break;
+		}
+		// At the shelter for the 14 (looking up the street for it): gone with it once it's left and nobody sees; missed it
+		// (watched the whole while), they walk off.
+		W.Stay += Dt;
+		if (WorldMinutes >= W.BoardAt)
+		{
+			if (CanVanish(W))
+			{
+				PutAway(W);
+				return;
+			}
+			if (WorldMinutes - W.BoardAt > 3.0)
+			{
+				NextLeg(W);
+			}
 		}
 		break;
 	case ECrowdLeg::Enter:
@@ -2083,6 +2811,12 @@ void AStreetCrowd::NextLeg(FStreetWalker& W)
 		// The last drag: they head in with it.
 		W.NextDrag = Clock + 1000.0f;
 	}
+	if (W.bSeated && W.Body)
+	{
+		// Up off the seat (through the 0.6 s crouch: Walk waits for it).
+		W.bSeated = false;
+		W.Body->SetSeated(false, 46.0f);
+	}
 }
 
 void AStreetCrowd::TurnBack(FStreetWalker& W, int32 RefusedEnd)
@@ -2139,6 +2873,8 @@ void AStreetCrowd::RouteTo(FStreetWalker& W, int32 TargetNode, int32 TargetSpot,
 	};
 	const FStreetCrowdMap::FSpot* From = M.Spots.IsValidIndex(W.Spot) ? &M.Spots[W.Spot] : nullptr;
 	const FStreetCrowdMap::FSpot* To = M.Spots.IsValidIndex(TargetSpot) ? &M.Spots[TargetSpot] : nullptr;
+	// Through a shop's door on the way (in to it or out of it): its door must open for them.
+	W.DoorVenue = To && To->Room == FStreetCrowdMap::Shop ? To->Venue : (From && From->Room == FStreetCrowdMap::Shop ? From->Venue : NAME_None);
 	Add(W.Pos, INDEX_NONE, From ? From->Half : 90.0f, 0);
 	if (To && W.Spot == TargetSpot)
 	{
@@ -2171,7 +2907,7 @@ void AStreetCrowd::RouteTo(FStreetWalker& W, int32 TargetNode, int32 TargetSpot,
 		// Away from the spot the way they came to it.
 		for (int32 I = From->Approach.Num() - 2; I >= 0; --I)
 		{
-			Add(From->Approach[I], INDEX_NONE, From->Half, 0);
+			Add(From->Approach[I], INDEX_NONE, From->Half, static_cast<uint8>(From->Room == FStreetCrowdMap::Shop && I == 1 ? FStreetCrowdMap::ShopDoor : 0));
 		}
 		Start = From->Node;
 	}
@@ -2243,13 +2979,13 @@ void AStreetCrowd::RouteTo(FStreetWalker& W, int32 TargetNode, int32 TargetSpot,
 		}
 		for (const FVector2D& P : To->Approach)
 		{
-			Add(P, INDEX_NONE, To->Half, 0);
+			Add(P, INDEX_NONE, To->Half, static_cast<uint8>(To->Room == FStreetCrowdMap::Shop && &P == &To->Approach[0] ? FStreetCrowdMap::ShopDoor : 0));
 		}
 	}
 	// The first curb or door on the way (not the stretch they're already on).
 	for (int32 I = 1; I < W.Route.Num() - 1; ++I)
 	{
-		if (W.Route[I].Flags & (FStreetCrowdMap::Crossing | FStreetCrowdMap::StoreDoors | FStreetCrowdMap::WashDoor))
+		if (W.Route[I].Flags & (FStreetCrowdMap::Crossing | FStreetCrowdMap::StoreDoors | FStreetCrowdMap::WashDoor | FStreetCrowdMap::ShopDoor))
 		{
 			W.Gate = I;
 			break;
@@ -2288,7 +3024,7 @@ void AStreetCrowd::LayLanes(FStreetWalker& W)
 		}
 		D /= Len;
 		float Room = FMath::Max(0.0f, A.Half - 42.0f);
-		if (A.Flags & (FStreetCrowdMap::StoreDoors | FStreetCrowdMap::WashDoor))
+		if (A.Flags & (FStreetCrowdMap::StoreDoors | FStreetCrowdMap::WashDoor | FStreetCrowdMap::ShopDoor))
 		{
 			Room = 0.0f;
 		}
@@ -2298,7 +3034,7 @@ void AStreetCrowd::LayLanes(FStreetWalker& W)
 		}
 		if (bUnder && (A.Flags & FStreetCrowdMap::Sidewalk))
 		{
-			const FVector2D Side = FrontsSide((A.At + B.At) * 0.5);
+			const FVector2D Side = Map->FrontsSide((A.At + B.At) * 0.5);
 			const FVector2D Across = Side - D * FVector2D::DotProduct(Side, D);
 			if (!Across.IsNearlyZero())
 			{
@@ -2333,7 +3069,7 @@ void AStreetCrowd::Walk(FStreetWalker& W, float Dt)
 {
 	const FStreetCrowdMap& M = *Map;
 	const int32 N = W.Route.Num();
-	const float Hurry = 1.0f + (W.bUmbrella ? 0.1f : 0.24f) * FMath::SmoothStep(0.3f, 1.0f, Rain);
+	const float Hurry = W.PaceScale * (1.0f + (W.bUmbrella ? 0.1f : 0.24f) * FMath::SmoothStep(0.3f, 1.0f, Rain));
 	FVector2D Want = Heading(W.Yaw);
 	float WantSpeed = 0.0f;
 	float FaceYaw = W.Yaw;
@@ -2418,7 +3154,7 @@ void AStreetCrowd::Walk(FStreetWalker& W, float Dt)
 		}
 		// The doors open as they come up to them, and stay so while they're in the doorway (the stage opens them for whoever
 		// it's told of, NoteWalker; the Wash & Fold's wants a hand on it, OpenWashDoor).
-		const uint8 Doors = FStreetCrowdMap::StoreDoors | FStreetCrowdMap::WashDoor;
+		const uint8 Doors = FStreetCrowdMap::StoreDoors | FStreetCrowdMap::WashDoor | FStreetCrowdMap::ShopDoor;
 		const uint8 Here = W.Route[K].Flags;
 		if ((Here & Doors) || (W.Gate != INDEX_NONE && (W.Route[W.Gate].Flags & Doors) && ToLast < 160.0))
 		{
@@ -2435,9 +3171,42 @@ void AStreetCrowd::Walk(FStreetWalker& W, float Dt)
 			bool bClear = false;
 			if (G.Flags & FStreetCrowdMap::Crossing)
 			{
-				// A look each way before stepping off.
+				// A look each way before stepping off, and (at Fifth & Market) the WALK first.
 				W.LookAside = W.GateWait < W.GatePause * 0.5f ? -55.0f : 50.0f;
-				bClear = W.GateWait >= W.GatePause && FMath::Abs(FMath::FindDeltaAngleDegrees(W.Yaw, FaceYaw)) < 25.0f;
+				bClear = W.GateWait >= W.GatePause && FMath::Abs(FMath::FindDeltaAngleDegrees(W.Yaw, FaceYaw)) < 25.0f && CrossingOpen(W, G.Flags);
+			}
+			else if (G.Flags & FStreetCrowdMap::ShopDoor)
+			{
+				// A shop's door: it opens for walkers while the shop's open (UStreetWorld::NoteWalker); going in, they give it up
+				// if it doesn't; coming out, they're through it once nobody's looking.
+				W.bWantsDoors = true;
+				const FCrowdLeg* Now = W.Plan.IsValidIndex(W.LegAt) ? &W.Plan[W.LegAt] : nullptr;
+				const bool bGoingIn = Now && M.Spots.IsValidIndex(Now->Target) && M.Spots[Now->Target].Room == FStreetCrowdMap::Shop && Now->Kind != ECrowdLeg::Leave;
+				const AShopStage* Shop = ShopFor(W.DoorVenue);
+				const float Open = Shop ? Shop->DoorOpenAmount() : 1.0f;
+				if (Open > 0.7f)
+				{
+					bClear = true;
+				}
+				else if (W.GateWait > 3.0f)
+				{
+					if (bGoingIn)
+					{
+						W.bWantsDoors = false;
+						SkipRoom(W, FStreetCrowdMap::Shop);
+						return Settle(W, Dt, true);
+					}
+					const FVector2D Outside = W.Route[W.Gate + 1].At;
+					const float OutsideFloor = FloorAt(Outside, 0.0f);
+					if (CanVanish(W) && !IsSeen(Outside, OutsideFloor, 180.0f * W.Scale))
+					{
+						W.Pos = Outside;
+						W.Floor = OutsideFloor;
+						W.FloorWant = OutsideFloor;
+						W.Shown = FVector::ZeroVector;
+						bClear = true;
+					}
+				}
 			}
 			else
 			{
@@ -2519,6 +3288,22 @@ void AStreetCrowd::Walk(FStreetWalker& W, float Dt)
 		FaceYaw = Map->Spots[W.Plan[W.LegAt].Target].Yaw;
 		bAvoid = false;
 	}
+	if (W.bEngaged && Hero.IsValid())
+	{
+		// Talking with the hero (the director holds them): stopped, turned to them, looking at them.
+		WantSpeed = 0.0f;
+		const FVector2D ToHero = ToStage(HeroAt()) - W.Pos;
+		FaceYaw = ToHero.SizeSquared() > 1.0 ? YawOf(ToHero) : W.Yaw;
+		bAvoid = false;
+		W.LookWho = -2;
+		W.LookUntil = Clock + 0.5f;
+	}
+	if (W.bSeated || (W.Body && W.Body->GetSeatBlend() > 0.05f))
+	{
+		// Sat down, or getting up (through the crouch): nobody walks off mid-way.
+		WantSpeed = 0.0f;
+		bAvoid = false;
+	}
 	if (W.bHold)
 	{
 		WantSpeed = 0.0f;
@@ -2575,7 +3360,39 @@ void AStreetCrowd::Walk(FStreetWalker& W, float Dt)
 		const double Dist = Rel.Size();
 		const FVector2D Closing = Heading(W.Yaw) * W.Speed - HeroVelocity();
 		const bool bBump = Dist < BodyRadius * W.Scale + HeroRadius + 28.0 && FVector2D::DotProduct(Closing, Rel) > 40.0 * Dist;
-		if ((bBump || (W.Blocked > 1.2f && Dist < 170.0)) && W.BarkIn <= 0.0f)
+		// Barged into at a run (spec 6.5): knocked off balance, the head snapping round to whoever did it, a word.
+		const FVector2D HeroV = HeroVelocity();
+		const double HeroSpeed = HeroV.Size();
+		const bool bRunInto = HeroSpeed > 300.0 && Dist < BodyRadius * W.Scale + HeroRadius + 14.0 && FVector2D::DotProduct(HeroV, -Rel) > 0.5 * HeroSpeed * Dist;
+		if (bRunInto && W.Stumble < 0.2f)
+		{
+			W.Stumble = 1.0f;
+			W.Speed *= 0.3f;
+			W.LookWho = -2;
+			W.LookUntil = Clock + W.Rng.FRandRange(1.4f, 2.2f);
+			W.LookYaw = FMath::Clamp(FMath::FindDeltaAngleDegrees(W.Yaw, YawOf(Rel)), -80.0f, 80.0f);
+			W.BarkIn = W.Rng.FRandRange(18.0f, 30.0f);
+			FString Line;
+			if (W.bNamed)
+			{
+				if (const AStreetNpcs* D = Director.Get())
+				{
+					Line = D->BarkFor(W.Named, TEXT("bump"));
+				}
+			}
+			if (Line.IsEmpty())
+			{
+				static const TCHAR* const Watch[] = {TEXT("Watch it."), TEXT("Hey!"), TEXT("Whoa. Easy."), TEXT("Watch where you're going.")};
+				Line = Watch[W.Rng.RandRange(0, static_cast<int32>(UE_ARRAY_COUNT(Watch)) - 1)];
+			}
+			if (Barks.Num() >= 3)
+			{
+				Barks.RemoveAt(0);
+			}
+			Barks.Emplace(W.Body ? W.Body->EyeLocation() : ToWorld(W.Pos, W.Floor + 160.0), Line);
+			BarkQuiet = 8.0f;
+		}
+		else if ((bBump || (W.Blocked > 1.2f && Dist < 170.0)) && W.BarkIn <= 0.0f)
 		{
 			W.LookWho = -2;
 			W.LookUntil = Clock + W.Rng.FRandRange(1.0f, 1.8f);
@@ -2802,12 +3619,13 @@ void AStreetCrowd::Settle(FStreetWalker& W, float Dt, bool bTrace)
 	const FVector At = ToWorld(W.Pos, W.Floor + Half);
 	const FQuat Facing = Stage->GetActorQuat() * FQuat(FVector::UpVector, FMath::DegreesToRadians(W.Yaw));
 	B->SetActorLocationAndRotation(At, Facing, false, nullptr, ETeleportType::None);
-	// The gait reads the ground speed: what they covered, against their size (a shorter body's stride is shorter).
+	// The gait reads the ground speed: what they covered, against the actor's own scale (the body's fitted height the gait and
+	// the clips take from the mesh: a shorter body's stride is shorter).
 	if (UCharacterMovementComponent* Move = B->GetCharacterMovement())
 	{
 		FVector V = Dt > 0.0f && !W.Shown.IsZero() ? (At - W.Shown) / Dt : FVector::ZeroVector;
 		V.Z = 0.0;
-		Move->Velocity = V.GetClampedToMaxSize(450.0) / W.Scale;
+		Move->Velocity = V.GetClampedToMaxSize(450.0) / FMath::Max(0.5, B->GetActorScale3D().Z);
 	}
 	W.Shown = At;
 }
@@ -2823,46 +3641,45 @@ void AStreetCrowd::Present(FStreetWalker& W, float Dt)
 	}
 	if (Dt > 0.0f || W.Tier < 0)
 	{
-		if (W.Tier < 0 || W.Frame % 8 == 0)
+		// The detail tier (spec 6.7): the director's budget sets it when there's a director; otherwise by distance, here.
+		if (!Director.IsValid() && (W.Tier < 0 || W.Frame % 8 == 0))
 		{
 			UpdateCost(W, bHasView ? FVector::Dist(ViewAt, ToWorld(W.Pos, W.Floor + 100.0)) : 0.0);
 		}
+		W.Tier = B->GetDetailTier();
 		UpdateLook(W, Dt);
 		UpdateProps(W, Dt);
+		UpdateRain(W, Dt);
 	}
-	// Over what the character set for this frame (its tick has run, its body hasn't posed): where the head turns, and the
-	// right hand up under an open umbrella.
-	if (UStreetBodyAnim* Anim = Cast<UStreetBodyAnim>(B->GetMesh()->GetAnimInstance()))
+	// Where the head turns, through the character's look (spec 6.6's attention stack: the eyes follow it): someone, a thing, or
+	// the way they're going, off to a side; eased here as heads turn. And over what the character set for this frame (its tick
+	// has run, its body hasn't posed): the right hand up under an open umbrella, a stumble, a hand over the brow in the rain.
+	FVector Target = FVector::ZeroVector;
+	if (W.LookWho == -2 && Hero.IsValid())
 	{
-		Anim->Pose.LookYaw = W.LookYaw;
-		Anim->Pose.LookPitch = W.LookPitch;
+		Target = Hero->EyeLocation();
+	}
+	else if (Walkers.IsValidIndex(W.LookWho) && Walkers[W.LookWho].bOut && Walkers[W.LookWho].Body)
+	{
+		Target = Walkers[W.LookWho].Body->EyeLocation();
+	}
+	else if (!W.LookAt.IsZero())
+	{
+		Target = ToWorld(FVector2D(W.LookAt.X, W.LookAt.Y), W.LookAt.Z);
+	}
+	const FRotator Facing = B->GetActorRotation();
+	const FVector Ahead = B->EyeLocation() + FRotator(W.LookPitch, static_cast<float>(Facing.Yaw) + W.LookYaw, 0.0f).Vector() * 400.0;
+	// Someone or something: the character turns the head there itself (eased as the crowd eases it); nothing: the eased angle.
+	B->SetLookTarget(!Target.IsZero() ? Target : Ahead, 1.0f);
+	if (UStreetBodyAnim* Anim = B->StreetBody())
+	{
 		if (W.UmbrellaOpen > 0.0f)
 		{
 			const float Open = FMath::SmoothStep(0.0f, 1.0f, W.UmbrellaOpen);
 			Anim->Pose.Sip = FMath::Max(Anim->Pose.Sip, FMath::Clamp(CVarUmbrellaHold.GetValueOnGameThread(), 0.0f, 1.0f) * Open);
 		}
-	}
-	if (UBackRoomFaceAnim* Face = B->Face ? Cast<UBackRoomFaceAnim>(B->Face->GetAnimInstance()) : nullptr)
-	{
-		// The face's rig runs only near enough to read an expression; the eyes go where the head does.
-		Face->bExpressionless = W.Tier >= 1;
-		FVector Look = FVector::ZeroVector;
-		if (W.Tier < 1)
-		{
-			if (W.LookWho == -2 && Hero.IsValid())
-			{
-				Look = Hero->EyeLocation();
-			}
-			else if (Walkers.IsValidIndex(W.LookWho) && Walkers[W.LookWho].bOut && Walkers[W.LookWho].Body)
-			{
-				Look = Walkers[W.LookWho].Body->EyeLocation();
-			}
-			else if (!W.LookAt.IsZero())
-			{
-				Look = ToWorld(FVector2D(W.LookAt.X, W.LookAt.Y), W.LookAt.Z);
-			}
-		}
-		Face->LookAt = Look.IsZero() ? FVector::ZeroVector : B->Face->GetComponentTransform().InverseTransformPosition(Look);
+		Anim->Pose.Stumble = FMath::SmoothStep(0.0f, 1.0f, W.Stumble);
+		Anim->Pose.HandOverHead = FMath::SmoothStep(0.0f, 1.0f, W.HandUp);
 	}
 }
 
@@ -2991,7 +3808,9 @@ void AStreetCrowd::UpdateProps(FStreetWalker& W, float Dt)
 	const bool bAtDoor = (Leg && Leg->Kind == ECrowdLeg::Enter && W.bArrived) ||
 						 (W.Route.IsValidIndex(W.Gate) && W.GateWait > 0.0f && (W.Route[W.Gate].Flags & (FStreetCrowdMap::StoreDoors | FStreetCrowdMap::WashDoor)));
 	const FVector Body = ToWorld(W.Pos, W.Floor + 50.0);
-	const bool bIndoors = (Here & (FStreetCrowdMap::Indoors | FStreetCrowdMap::StoreDoors | FStreetCrowdMap::WashDoor)) || (Stage && (Stage->IsInsideStore(Body) || Stage->IsInsideWash(Body)));
+	const bool bIndoors = (Here & (FStreetCrowdMap::Indoors | FStreetCrowdMap::StoreDoors | FStreetCrowdMap::WashDoor | FStreetCrowdMap::ShopDoor)) || W.bSeated ||
+						  (W.Spot != INDEX_NONE && Map->Spots.IsValidIndex(W.Spot) && Map->Spots[W.Spot].Room == FStreetCrowdMap::Shop) ||
+						  (Stage && (Stage->IsInsideStore(Body) || Stage->IsInsideWash(Body)));
 	// Hunched against the rain without an umbrella, straightening once in out of it (or the rain lets up), slowly.
 	const float Hunch = FMath::FInterpConstantTo(W.Hunch, HunchIn(Rain, W.bUmbrella || W.bSmoking || bIndoors), Dt, 0.4f);
 	if (Hunch != W.Hunch)
@@ -3070,60 +3889,18 @@ void AStreetCrowd::UpdateProps(FStreetWalker& W, float Dt)
 
 void AStreetCrowd::UpdateCost(FStreetWalker& W, double Dist)
 {
-	// Near, everything. Past 12 m the face's rig rests (nobody reads an expression that far off); past 25 m lower LODs and the
-	// body posed 20 times a second (the face still follows it every frame, so it never lags the neck); past 30 m no shadows.
-	// Each with a little room either way, so nobody flickers between two.
+	// Without a director: the crowd's own share of spec 6.7's tiers, by the camera's distance, through the character's one
+	// SetDetailTier (Near to 8 m, Mid to 25, Far beyond; nobody out is hidden for distance alone here). Each with a little
+	// room either way, so nobody flickers between two.
 	AShortStackCharacter* B = W.Body;
-	const double Near = 1200.0;
-	const double Far = 2500.0;
+	const double Near = 800.0;
+	const double Mid = 2500.0;
 	const double Room = 150.0;
-	int32 Tier = W.Tier;
-	if (Tier < 0)
-	{
-		Tier = Dist < Near ? 0 : (Dist < Far ? 1 : 2);
-	}
-	else if (Tier == 0 && Dist > Near + Room)
-	{
-		Tier = Dist < Far ? 1 : 2;
-	}
-	else if (Tier == 1)
-	{
-		Tier = Dist < Near - Room ? 0 : (Dist > Far + Room ? 2 : 1);
-	}
-	else if (Tier == 2 && Dist < Far - Room)
-	{
-		Tier = Dist < Near ? 0 : 1;
-	}
-	const bool bShadows = Dist < (W.bShadows ? 3000.0 + Room : 3000.0 - Room);
-	TInlineComponentArray<UPrimitiveComponent*> Parts(B);
-	if (Tier != W.Tier)
-	{
-		W.Tier = Tier;
-		for (UPrimitiveComponent* P : Parts)
-		{
-			if (USkinnedMeshComponent* Skin = Cast<USkinnedMeshComponent>(P))
-			{
-				const bool bFace = Skin == B->Face.Get();
-				// Forced LODs count from 1 (0 lets the engine choose), and stop at what the mesh has.
-				Skin->SetForcedLOD(Tier < 2 ? 0 : (bFace ? 5 : 3));
-				if (Skin == B->GetMesh())
-				{
-					Skin->SetComponentTickInterval(Tier < 2 ? 0.0f : 1.0f / 20.0f);
-				}
-			}
-		}
-	}
-	if (bShadows != W.bShadows)
-	{
-		W.bShadows = bShadows;
-		for (UPrimitiveComponent* P : Parts)
-		{
-			if (P->IsA<USkinnedMeshComponent>() || P->IsA<UGroomComponent>() || (W.Umbrella && P->IsAttachedTo(W.Umbrella)))
-			{
-				P->SetCastShadow(bShadows);
-			}
-		}
-	}
+	const int32 Was = B->GetDetailTier();
+	int32 Tier = Dist < Near + (Was == 0 ? Room : -Room) ? 0 : (Dist < Mid + (Was <= 1 ? Room : -Room) ? 1 : 2);
+	B->SetDetailTier(Tier);
+	W.Tier = Tier;
+	W.bShadows = Tier < 2;
 }
 
 void AStreetCrowd::Bark(FStreetWalker& W, bool bRain)
@@ -3202,8 +3979,8 @@ bool AStreetCrowd::IsSeen(const FVector2D& At, float Floor, float Height) const
 		{
 			continue;
 		}
-		// In the frame: seen, unless something solid and drawn stands between (the invisible blockers, the store's glass among
-		// them, hide nothing).
+		// In the frame: seen, unless something solid and drawn stands between (the invisible blockers hide nothing, and nor
+		// does glass: a shop's window, the shelter's panes).
 		FCollisionQueryParams Query(SCENE_QUERY_STAT(StreetCrowdSight), false);
 		bool bBlocked = false;
 		for (int32 Try = 0; Try < 4; ++Try)
@@ -3214,7 +3991,7 @@ bool AStreetCrowd::IsSeen(const FVector2D& At, float Floor, float Height) const
 				break;
 			}
 			const UPrimitiveComponent* C = Hit.GetComponent();
-			if (C && C->IsVisible())
+			if (C && C->IsVisible() && !SeeThrough(C))
 			{
 				bBlocked = true;
 				break;
@@ -3340,6 +4117,13 @@ void AStreetCrowd::Tick(float DeltaSeconds)
 	{
 		Freeze(bPaused);
 	}
+	// The registry's map grows as the stages register (Market's walkways, the shops' doors and seats): looked at every 2 s.
+	RemapIn -= DeltaSeconds;
+	if (RemapIn <= 0.0f)
+	{
+		RemapIn = 2.0f;
+		RemapIfChanged();
+	}
 	const float Dt = bPaused ? 0.0f : FMath::Min(DeltaSeconds, 0.05f);
 	if (!bPaused && bHourKnown)
 	{
@@ -3392,7 +4176,7 @@ void AStreetCrowd::EndPlay(const EEndPlayReason::Type Reason)
 	{
 		for (FStreetWalker& W : Walkers)
 		{
-			if (W.Body)
+			if (W.Body && !W.bNamed)
 			{
 				W.Body->Destroy();
 			}
@@ -3402,13 +4186,383 @@ void AStreetCrowd::EndPlay(const EEndPlayReason::Type Reason)
 	Super::EndPlay(Reason);
 }
 
+// ------------------------------------------------------------------ the people director's side (spec 6.7, 6.8)
+
+bool AStreetCrowd::AddNamed(AShortStackCharacter* Body, FName Person, const FCrowdNamedPlan& Plan)
+{
+	if (!Body || !Map || !Stage || Person.IsNone() || IsNamedOut(Person))
+	{
+		return false;
+	}
+	const FStreetCrowdMap& M = *Map;
+	// A walker of their own (a spent one reused): the body is the director's, the crowd only walks it.
+	FStreetWalker* Slot = Walkers.FindByPredicate([](const FStreetWalker& W) { return W.bNamed && !W.Body; });
+	FStreetWalker& W = Slot ? *Slot : Walkers.AddDefaulted_GetRef();
+	W = FStreetWalker();
+	W.Body = Body;
+	W.bNamed = true;
+	W.Named = Person;
+	W.Cast = Body->GetCastFace();
+	W.Scale = Plan.Scale;
+	W.PaceScale = FMath::Clamp(Plan.Pace, 0.5f, 2.2f);
+	W.bForceUmbrella = Plan.bUmbrella;
+	W.Rng.Initialize(static_cast<int32>(GetTypeHash(Person)) ^ static_cast<int32>(FMath::FloorToDouble(WorldMinutes)));
+	W.Pace = W.Rng.FRandRange(122.0f, 140.0f);
+	W.Lane = W.Rng.FRandRange(50.0f, 64.0f);
+	W.AwaySince = Clock;
+	// Moved by the crowd from now: after the body's own tick, before it poses; no movement of its own, nothing for the camera.
+	if (UCharacterMovementComponent* Move = Body->GetCharacterMovement())
+	{
+		Move->StopMovementImmediately();
+		Move->DisableMovement();
+		Move->SetComponentTickEnabled(false);
+	}
+	Body->GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	AddTickPrerequisiteActor(Body);
+	Body->GetMesh()->AddTickPrerequisiteActor(this);
+	// The umbrella and the cigarette, made once per body (found again the next time it walks for the director).
+	const FName Dressed(TEXT("CrowdDressed"));
+	TInlineComponentArray<USceneComponent*> Parts(Body);
+	for (USceneComponent* C : Parts)
+	{
+		if (C->ComponentHasTag(Dressed))
+		{
+			W.Umbrella = C;
+		}
+		else if (C->ComponentHasTag(TEXT("CrowdCigarette")))
+		{
+			W.Cigarette = Cast<UStaticMeshComponent>(C);
+		}
+		else if (C->ComponentHasTag(TEXT("CrowdEmber")))
+		{
+			W.Ember = Cast<UStaticMeshComponent>(C);
+			W.EmberGlow = W.Ember ? Cast<UMaterialInstanceDynamic>(W.Ember->GetMaterial(0)) : nullptr;
+		}
+	}
+	if (!W.Umbrella)
+	{
+		DressProps(W);
+		if (W.Umbrella)
+		{
+			W.Umbrella->ComponentTags.Add(Dressed);
+		}
+		if (W.Cigarette)
+		{
+			W.Cigarette->ComponentTags.Add(TEXT("CrowdCigarette"));
+		}
+		if (W.Ember)
+		{
+			W.Ember->ComponentTags.Add(TEXT("CrowdEmber"));
+		}
+	}
+	// The body was fitted to its height as the director built it (ApplyCast): its scale is its own (W.Scale only spaces it).
+	// Where they come on: out of Dee's steel door (on the way home), else off the 14 at its shelter or an end of the set
+	// nobody's watching (Market's, if they came by it); under black, wherever they'd be by now.
+	auto Unseen = [&](const FVector2D& At) { return !IsSeen(At, FloorAt(At, 0.0f), 180.0f * W.Scale); };
+	bool bOn = false;
+	if (Plan.Role == ECrowdRole::PlayerOut)
+	{
+		if (M.BackDoor != INDEX_NONE && (Plan.bPlaceNow || Unseen(M.SpotAt(M.BackDoor))))
+		{
+			const FStreetCrowdMap::FSpot& S = M.Spots[M.BackDoor];
+			Enter(W, ECrowdRole::PlayerOut, S.Approach.Last(), S.Yaw + 180.0f, S.Node, M.BackDoor);
+			bOn = true;
+		}
+	}
+	else if (Plan.bPlaceNow && Plan.SmokeFor > 0.0f && M.WashSmoke != INDEX_NONE)
+	{
+		const FStreetCrowdMap::FSpot& S = M.Spots[M.WashSmoke];
+		Enter(W, Plan.Role, S.Approach.Last(), S.Yaw, S.Node, M.WashSmoke);
+		bOn = true;
+	}
+	else if (Plan.From == TEXT("Market") && M.Shelters.Num() > 0)
+	{
+		// Off the 14 at Market St: out from under its shelter, if nobody's watching it.
+		for (const int32 Spot : M.Shelters)
+		{
+			if (Plan.bPlaceNow || Unseen(M.SpotAt(Spot)))
+			{
+				const FStreetCrowdMap::FSpot& S = M.Spots[Spot];
+				Enter(W, Plan.Role, S.Approach.Last(), S.Yaw + 180.0f, S.Node, INDEX_NONE);
+				W.Speed = W.Pace * 0.5f;
+				bOn = true;
+				break;
+			}
+		}
+	}
+	if (!bOn && Plan.Role != ECrowdRole::PlayerOut)
+	{
+		TArray<int32> Ends = Plan.From == TEXT("Market") && M.MarketEnds.Num() > 0 ? M.MarketEnds : M.Ends;
+		for (int32 I = Ends.Num() - 1; I > 0; --I)
+		{
+			Ends.Swap(I, W.Rng.RandRange(0, I));
+		}
+		for (const int32 End : Ends)
+		{
+			if (M.Links[End].Num() > 0 && (Plan.bPlaceNow || Unseen(M.Nodes[End].At)))
+			{
+				const FStreetCrowdMap::FEdge& E = M.Edges[M.Links[End][0]];
+				const int32 Next = E.A == End ? E.B : E.A;
+				Enter(W, Plan.Role, M.Nodes[End].At, YawOf(M.Nodes[Next].At - M.Nodes[End].At), End, INDEX_NONE);
+				W.Speed = W.Pace * 0.7f;
+				bOn = true;
+				break;
+			}
+		}
+	}
+	if (!bOn)
+	{
+		// Nowhere to come on unseen right now: the director tries again.
+		RemoveTickPrerequisiteActor(Body);
+		W.Body = nullptr;
+		W.Umbrella = nullptr;
+		W.Cigarette = nullptr;
+		W.Ember = nullptr;
+		W.EmberGlow = nullptr;
+		W.Named = NAME_None;
+		return false;
+	}
+	// A cigarette by the Wash & Fold's door first (Sal, until Dee opens up).
+	if (Plan.SmokeFor > 0.0f && M.WashSmoke != INDEX_NONE && Plan.Role == ECrowdRole::Player)
+	{
+		W.Plan.Insert(FCrowdLeg{ECrowdLeg::Smoke, M.WashSmoke, Plan.SmokeFor}, 0);
+		W.LegAt = 0;
+		W.bLegStarted = false;
+		W.bSmoking = true;
+		W.bUmbrella = false;
+		W.UmbrellaOpen = 0.0f;
+		W.NextDrag = Clock + W.Rng.FRandRange(2.0f, 6.0f);
+	}
+	UE_LOG(LogStreetCrowd, Log, TEXT("%s walks for the director (%s)"), *Person.ToString(), Plan.Role == ECrowdRole::PlayerOut ? TEXT("out of Dee's game") : TEXT("to Dee's game"));
+	return true;
+}
+
+bool AStreetCrowd::IsNamedOut(FName Person) const
+{
+	return Walkers.ContainsByPredicate([Person](const FStreetWalker& W) { return W.bNamed && W.Body && W.Named == Person; });
+}
+
+TArray<FName> AStreetCrowd::TakeReturned()
+{
+	TArray<FName> Out = MoveTemp(Returned);
+	Returned.Reset();
+	return Out;
+}
+
+void AStreetCrowd::EngageNamed(FName Person, bool bEngage)
+{
+	for (FStreetWalker& W : Walkers)
+	{
+		if (W.bNamed && W.Body && W.Named == Person)
+		{
+			W.bEngaged = bEngage;
+		}
+	}
+}
+
+void AStreetCrowd::ForEachPedestrian(TFunctionRef<void(AShortStackCharacter*)> Fn) const
+{
+	for (const FStreetWalker& W : Walkers)
+	{
+		if (!W.bNamed && W.bOut && W.Body)
+		{
+			Fn(W.Body);
+		}
+	}
+}
+
+void AStreetCrowd::HandBack(FStreetWalker& W)
+{
+	if (!W.bNamed || !W.Body)
+	{
+		return;
+	}
+	if (W.bSeated)
+	{
+		W.Body->SetSeated(false, 46.0f);
+		W.bSeated = false;
+	}
+	W.Body->SetLookTarget(FVector::ZeroVector, 0.0f);
+	RemoveTickPrerequisiteActor(W.Body);
+	Returned.AddUnique(W.Named);
+	W.Body = nullptr;
+	W.Umbrella = nullptr;
+	W.Cigarette = nullptr;
+	W.Ember = nullptr;
+	W.EmberGlow = nullptr;
+	W.bOut = false;
+	W.bEngaged = false;
+	W.Named = NAME_None;
+}
+
+AShopStage* AStreetCrowd::ShopFor(FName Venue) const
+{
+	if (Venue.IsNone() || !GetWorld())
+	{
+		return nullptr;
+	}
+	if (Clock - ShopsFoundAt > 3.0f || ShopsFoundAt < -50.0f)
+	{
+		ShopsFoundAt = Clock;
+		Shops.Reset();
+		for (TActorIterator<AShopStage> It(GetWorld()); It; ++It)
+		{
+			Shops.Add(It->Venue, *It);
+		}
+	}
+	const TWeakObjectPtr<AShopStage>* Found = Shops.Find(Venue);
+	return Found ? Found->Get() : nullptr;
+}
+
+bool AStreetCrowd::HeroInShop(FName Venue) const
+{
+	const AShopStage* Shop = ShopFor(Venue);
+	return Shop && Hero.IsValid() && Shop->IsInside(HeroAt());
+}
+
+int32 AStreetCrowd::FreeSeat(FName Venue) const
+{
+	const FStreetCrowdMap& M = *Map;
+	for (const int32 Seat : M.ShopSeats)
+	{
+		if (M.Spots[Seat].Venue != Venue)
+		{
+			continue;
+		}
+		bool bTaken = false;
+		for (const FStreetWalker& O : Walkers)
+		{
+			bTaken = bTaken || (O.bOut && O.Plan.ContainsByPredicate([Seat](const FCrowdLeg& L) { return L.Target == Seat && L.Kind == ECrowdLeg::Visit; }));
+		}
+		if (!bTaken)
+		{
+			return Seat;
+		}
+	}
+	return INDEX_NONE;
+}
+
+int32 AStreetCrowd::PickShopDoor(FStreetWalker& W) const
+{
+	const FStreetCrowdMap& M = *Map;
+	TArray<int32, TInlineAllocator<8>> Open;
+	for (const int32 Door : M.ShopDoors)
+	{
+		const FName Venue = M.Spots[Door].Venue;
+		const AShopStage* Shop = ShopFor(Venue);
+		if (Shop && Shop->IsOpen() && (!HeroInShop(Venue) || FreeSeat(Venue) != INDEX_NONE))
+		{
+			Open.Add(Door);
+		}
+	}
+	return Open.Num() > 0 ? Open[W.Rng.RandRange(0, Open.Num() - 1)] : INDEX_NONE;
+}
+
+double AStreetCrowd::NextDeparture() const
+{
+	const std::vector<double> Times = ss::town::BusTimes("market-east", WorldMinutes, 1);
+	if (Times.empty())
+	{
+		return -1.0;
+	}
+	const double In = Times[0] - WorldMinutes;
+	return In >= 3.0 && In <= 12.0 ? Times[0] : -1.0;
+}
+
+bool AStreetCrowd::CrossingOpen(FStreetWalker& W, uint8 Flags)
+{
+	// Fifth & Market's lights (town::Signal): WALK over Fifth, or over Market's mouth. No signal from core yet (the stub's
+	// all-zero state), or flashing overnight (the ped heads dark): cross after the look. Now and then at night someone goes on
+	// the red, and nobody waits forever.
+	if (!(Flags & (FStreetCrowdMap::OverFifth | FStreetCrowdMap::OverMarket)))
+	{
+		return true;
+	}
+	// The corner's clock (held where a service's skip started it, spec 2.5: the lights don't strobe through a skip).
+	const UStreetWorld* Registry = UStreetWorld::Get(this);
+	const ss::town::SignalState S = ss::town::Signal(Registry ? Registry->SignalClock(WorldMinutes) : WorldMinutes);
+	const bool bKnown = S.Phase != 0 || S.Left > 0.0 || S.FifthGo || S.MarketGo || S.WalkFifth || S.WalkMarket || S.Flashing;
+	if (!bKnown || S.Flashing)
+	{
+		return true;
+	}
+	if (!W.bJayRolled)
+	{
+		W.bJayRolled = true;
+		const double Hour = TimeOfDay(WorldMinutes) / 60.0;
+		W.bJaywalk = (Hour >= 22.0 || Hour < 5.0) && W.Rng.FRand() < 0.06f;
+	}
+	const bool bWalk = (Flags & FStreetCrowdMap::OverFifth) ? S.WalkFifth : S.WalkMarket;
+	if (bWalk || W.bJaywalk || W.GateWait > 75.0f)
+	{
+		W.bJayRolled = false;
+		return true;
+	}
+	return false;
+}
+
+void AStreetCrowd::UpdateRain(FStreetWalker& W, float Dt)
+{
+	// The stumble eases out over a second; a hand over the brow for some caught out in a downpour with no umbrella, walking.
+	W.Stumble = FMath::Max(0.0f, W.Stumble - Dt * 1.1f);
+	const uint8 Here = W.Route.IsValidIndex(W.RouteAt) ? W.Route[W.RouteAt].Flags : 0;
+	const bool bIndoors = (Here & (FStreetCrowdMap::Indoors | FStreetCrowdMap::StoreDoors | FStreetCrowdMap::WashDoor | FStreetCrowdMap::ShopDoor)) != 0 || W.bSeated;
+	const bool bWant = W.bHandInRain && !W.bUmbrella && !W.bSmoking && Rain > 0.55f && !bIndoors && W.Speed > 40.0f;
+	W.HandUp = FMath::FInterpConstantTo(W.HandUp, bWant ? 1.0f : 0.0f, Dt, 2.5f);
+}
+
+void AStreetCrowd::RemapIfChanged()
+{
+	const UStreetWorld* Registry = UStreetWorld::Get(this);
+	const int32 Sig = StreetCrowdDetail::MapSignature(Registry);
+	if (Sig == MapSignature || !Stage)
+	{
+		return;
+	}
+	// A stage registered more of the street (Market's sidewalks, a shop's door and seats, the shelter): the map again, and
+	// whoever's out walks on from where they are on it, off the set (or, the director's, on with their errand).
+	MapSignature = Sig;
+	Map = BuildMap(*Stage, Registry);
+	for (FStreetWalker& W : Walkers)
+	{
+		if (!W.bOut)
+		{
+			continue;
+		}
+		if (W.bSeated && W.Body)
+		{
+			W.bSeated = false;
+			W.Body->SetSeated(false, 46.0f);
+		}
+		W.Route.Reset();
+		W.Spot = INDEX_NONE;
+		const FVector Here = ToWorld(W.Pos, W.Floor + 50.0);
+		W.Node = Map->Nearest(W.Pos, Stage->IsInsideStore(Here) || Stage->IsInsideWash(Here));
+		W.NextNode = INDEX_NONE;
+		W.Gate = INDEX_NONE;
+		W.Plan.Reset();
+		if (W.bNamed && W.Role == ECrowdRole::Player && Map->BackDoor != INDEX_NONE)
+		{
+			W.Plan.Add(FCrowdLeg{ECrowdLeg::Enter, Map->BackDoor, 0.0f});
+		}
+		else
+		{
+			W.Plan.Add(FCrowdLeg{ECrowdLeg::Leave, PickEnd(W, INDEX_NONE), 0.0f});
+		}
+		W.LegAt = 0;
+		W.bLegStarted = false;
+	}
+}
+
 // ------------------------------------------------------------------ checks
 
 FString AStreetCrowd::Describe() const
 {
-	static const TCHAR* const Roles[] = {TEXT("stroll"), TEXT("errand"), TEXT("home"), TEXT("laundry"), TEXT("Dee's game"), TEXT("out of Dee's game"), TEXT("smoke"), TEXT("bus")};
-	static const TCHAR* const Legs[] = {TEXT("go"), TEXT("visit"), TEXT("enter"), TEXT("leave"), TEXT("smoke")};
-	FString Out = FString::Printf(TEXT("Crowd: %d out of %d wanted (%d of the cast), %s, rain %.2f, daylight %.2f%s"), NumOut(), Wanted, NumCast,
+	static const TCHAR* const Roles[] = {TEXT("stroll"), TEXT("errand"), TEXT("home"), TEXT("laundry"), TEXT("Dee's game"), TEXT("out of Dee's game"), TEXT("smoke"), TEXT("shelter"),
+		TEXT("shop"), TEXT("the 14"), TEXT("out of the rain")};
+	static const TCHAR* const Legs[] = {TEXT("go"), TEXT("visit"), TEXT("enter"), TEXT("leave"), TEXT("smoke"), TEXT("board")};
+	FString Out = FString::Printf(TEXT("Crowd: %d out of %d wanted (%d of the cast; allowance %d%s), %s, rain %.2f, daylight %.2f%s"), NumOut(), Wanted, NumCast, Allowance,
+		Director.IsValid() ? TEXT(", with the people director") : TEXT(", no director"),
 		UTF8_TO_TCHAR(ss::net::TimeLabel(WorldMinutes).c_str()), Rain, Daylight, bPaused ? TEXT(", paused") : TEXT(""));
 	for (const FStreetWalker& W : Walkers)
 	{
@@ -3422,9 +4576,10 @@ FString AStreetCrowd::Describe() const
 		{
 			Where = Map->Spots[Leg->Target].Name;
 		}
-		Out += FString::Printf(TEXT("\n  %s (%s): %s %d/%d %s%s at (%.0f, %.0f) %.0f cm/s, tier %d%s%s%s"), *W.Cast.ToString(), Roles[static_cast<int32>(W.Role)],
+		Out += FString::Printf(TEXT("\n  %s (%s): %s %d/%d %s%s at (%.0f, %.0f) %.0f cm/s, tier %d%s%s%s%s"), *W.Cast.ToString(), Roles[static_cast<int32>(W.Role)],
 			Leg ? Legs[static_cast<int32>(Leg->Kind)] : TEXT("-"), W.LegAt + 1, W.Plan.Num(), Where, W.bArrived ? TEXT(" (there)") : TEXT(""), W.Pos.X, W.Pos.Y, W.Speed, W.Tier,
-			W.bUmbrella ? TEXT(", umbrella") : TEXT(""), W.bSmoking ? TEXT(", smoking") : TEXT(""), W.bSent ? TEXT(", sent off") : TEXT(""));
+			W.bUmbrella ? TEXT(", umbrella") : TEXT(""), W.bSmoking ? TEXT(", smoking") : TEXT(""), W.bSent ? TEXT(", sent off") : TEXT(""),
+			W.bNamed ? *FString::Printf(TEXT(", %s for the director%s"), *W.Named.ToString(), W.bEngaged ? TEXT(", talking") : TEXT("")) : TEXT(""));
 	}
 	return Out;
 }

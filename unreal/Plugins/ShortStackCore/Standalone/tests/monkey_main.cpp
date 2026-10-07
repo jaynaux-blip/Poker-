@@ -7,6 +7,7 @@
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/UI/RiverLine.h"
+#include "ShortStack/UI/ShopScreen.h"
 
 #include <chrono>
 #include <cstdio>
@@ -138,6 +139,9 @@ int main(int Argc, char** Argv)
 		ss::ui::RiverLine RL(S);
 		ss::Rng R("monkey-rng-" + std::to_string(Seed));
 		ss::Rng Dr(std::string("monkey-drop-") + std::to_string(Seed)); // Penny Drop's own draws, so the rest of the run is as before
+		ss::Rng Sr(std::string("monkey-shops-") + std::to_string(Seed)); // Northside's shop screens: their own draws too
+		std::unique_ptr<ss::ui::ShopScreen> Shop;
+		double ShopUntil = 0.0;
 		if (Seed % 3 == 1)
 		{
 			S.BankrollCents = 5000;
@@ -429,6 +433,64 @@ int main(int Argc, char** Argv)
 			if (R.Chance(0.0005))
 			{
 				S.CashOut();
+			}
+			// The shops on the block (Northside's screens): now and then one opens on the session's clock as it is, takes
+			// random keys and clicks for a few seconds, and is walked away from. What they charge goes through the ledger
+			// like everything else, which the invariants below check.
+			if (!Shop && S.CurrentScreen != ss::Screen::Boot && Sr.Chance(0.004))
+			{
+				static const char* const Venues[] = {"barber", "thrift", "gym", "diner", "pawn", "wardrobe"};
+				static const char* const Opens[] = {"barber-chair1", "thrift-rack-outer", "gym-desk", "diner-stool2", "pawn-counter", "apartment"};
+				const int V = Sr.Int(6);
+				Shop = ss::ui::MakeShopScreen(Venues[V], S);
+				ss::ui::HostCaps Caps;
+				Caps.HairStyles.assign(12, true);
+				Caps.FacialHair.assign(6, true);
+				Caps.Brows.assign(4, true);
+				Caps.GarmentKinds = ~0ull;
+				Caps.GearKinds = ~0ull;
+				Caps.Curios = Sr.Chance(0.5) ? 3u : 0u;
+				Caps.Preview3D = Sr.Chance(0.5);
+				Shop->SetCaps(Caps);
+				Shop->Open(Now, Opens[V]);
+				ShopUntil = Now + 2.0 + Sr.Next() * 6.0;
+				++Reached[std::string("shop:") + Venues[V]];
+			}
+			if (Shop)
+			{
+				static const char* const ShopKeys[] = {"Up", "Down", "Left", "Right", "Enter", "Enter", "Tab", "Q", "E", "PutBack", "Alt"};
+				if (Sr.Chance(0.2))
+				{
+					Shop->Key(ShopKeys[Sr.Int(11)], Now);
+				}
+				ss::ui::Pointer& Sp = Shop->Ptr;
+				Sp.Pressed = Sr.Chance(0.02);
+				Sp.Released = !Sp.Pressed && Sp.Down;
+				Sp.Down = Sp.Pressed;
+				Sp.Active = true;
+				if (Sp.Pressed)
+				{
+					Sp.X = static_cast<float>(Sr.Next() * 1920.0);
+					Sp.Y = static_cast<float>(Sr.Next() * 1080.0);
+				}
+				ss::ui::DrawList Ls;
+				ss::ui::Canvas Cs(Ls, M, 1920.0f, ss::ui::ShopScreen::Height, 1.0f);
+				Shop->Draw(Cs, Now);
+				for (const ss::ui::HostRequest& Q : Shop->TakeRequests())
+				{
+					Reached["shop-service"] += Q.K == ss::ui::HostRequest::BeginService ? 1 : 0;
+				}
+				if (Shop->IsOpen() && Now > ShopUntil)
+				{
+					Shop->Key("Escape", Now);
+					Shop->Key("Escape", Now);
+					Shop->Key("Escape", Now);
+				}
+				if (!Shop->IsOpen())
+				{
+					Shop->TakeLeave();
+					Shop.reset();
+				}
 			}
 			// A frame.
 			Now += 1.0 / 30.0;
