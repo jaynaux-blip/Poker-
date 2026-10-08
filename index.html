@@ -1,9 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Road to 100K</title>
+<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">\n<title>Road to 100K</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
 <style>
@@ -88,11 +83,15 @@ a{color:var(--accent)}
 .tile .v{font-family:var(--display);font-size:1.75rem;font-weight:700;line-height:1.1}
 .tile .v.up{color:var(--gain)} .tile .v.down{color:var(--loss)}
 .tile .l{font-size:.8rem;color:var(--muted)}
-.tile.stakes{grid-column:1/-1;display:grid;grid-template-columns:1fr auto;gap:4px 16px;align-items:center}
-.tile.stakes .v{font-size:1.4rem}
-.tile.stakes .l{grid-column:1}
-.tile.stakes .rule{grid-column:2;grid-row:1/3;font-size:.8rem;color:var(--muted);max-width:34ch;text-align:right}
-@media (max-width:560px){.tile.stakes{grid-template-columns:1fr}.tile.stakes .rule{grid-column:1;grid-row:auto;text-align:left}}
+.tiles.suggest{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.tile.stakes{gap:4px;border-top:3px solid var(--accent)}
+.tile.stakes .v{font-size:1.5rem}
+.tile.stakes .rule{font-size:.82rem;color:var(--fg);font-weight:600;margin-top:4px}
+table.ladder{min-width:560px}
+table.ladder tr.done td{color:var(--muted)}
+table.ladder tr.cur td{background:var(--accent-soft);font-weight:600}
+table.ladder tr.cur td:first-child{border-left:3px solid var(--accent)}
+table.ladder .muted{color:var(--muted);font-weight:400}
 
 /* panel */
 .panel{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;display:grid;gap:14px;min-width:0}
@@ -163,10 +162,7 @@ details.settings summary::after{content:"+"}
 details.settings[open] summary::after{content:"–"}
 details.settings .form{padding-bottom:18px}
 .foot{font-size:.8rem;color:var(--muted);text-align:center}
-</style>
-</head>
-<body>
-
+</style>\n</head>\n<body>\n
 
 <div class="wrap">
   <header class="top">
@@ -205,7 +201,21 @@ details.settings .form{padding-bottom:18px}
     </div>
   </section>
 
+  <section class="tiles suggest" id="suggest" aria-label="Suggested stakes"></section>
   <section class="tiles" id="tiles" aria-label="Statistics"></section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Stakes ladder</h2>
+      <span class="hint">Where the bankroll lets you play at each milestone. Cash uses 25 max buy-ins, tournaments 100 average buy-ins.</span>
+    </div>
+    <div class="tablebox">
+      <table class="ladder">
+        <thead><tr><th>Bankroll</th><th>Cash game</th><th>Cash buy-ins</th><th>Tournament ABI</th><th>MTT buy-ins</th></tr></thead>
+        <tbody id="ladder"></tbody>
+      </table>
+    </div>
+  </section>
 
   <section class="panel">
     <div class="panel-head">
@@ -297,6 +307,7 @@ const CASH_STAKES = [
   {name:"NL200 ($1/$2)",bi:200},{name:"NL300 ($1/$3)",bi:300},{name:"NL500 ($2/$5)",bi:500},
   {name:"NL1000 ($5/$10)",bi:1000},{name:"NL2000 ($10/$20)",bi:2000},{name:"NL5000 ($25/$50)",bi:5000}
 ];
+const MTT_BUYINS = [1,2,3,5,7,10,15,20,25,30,50,75,100,150,200,300,500,1000,1500,2500,5000];
 const LS_S = "r2h.sessions", LS_C = "r2h.config";
 
 let cfg = Object.assign({}, DEFAULT_CFG);
@@ -313,7 +324,7 @@ const el = {
   submit:$("#submit"), cancelEdit:$("#cancel-edit"), preview:$("#preview"), formmsg:$("#formmsg"),
   readonlyHint:$("#readonly-hint"), tbody:$("#tbody"), count:$("#count"), csv:$("#csv"),
   sharetext:$("#sharetext"), copy:$("#copy"), copymsg:$("#copymsg"), settings:$("#settings"),
-  cfgform:$("#cfgform"), cfgmsg:$("#cfgmsg"), logpanel:$("#logpanel")
+  cfgform:$("#cfgform"), cfgmsg:$("#cfgmsg"), logpanel:$("#logpanel"), ladder:$("#ladder"), suggest:$("#suggest")
 };
 const f = {
   date:$("#f-date"), type:$("#f-type"), stakes:$("#f-stakes"), venue:$("#f-venue"), buyin:$("#f-buyin"),
@@ -367,14 +378,17 @@ function compute(){
   const next = MILESTONES.concat([cfg.goal]).filter(m=>m>cfg.start && m<=cfg.goal).sort((a,b)=>a-b).find(m=>m>bank) || null;
   const stake = cashStakeFor(bank);
   const stakeNext = CASH_STAKES.find(s=>s.bi*25>bank) || null;
+  const abi = abiFor(bank);
+  const abiNext = MTT_BUYINS.find(b=>b*100>bank) || null;
   const startD = parseDate(cfg.startDate) || new Date();
   const day = Math.max(1, Math.floor((new Date().setHours(0,0,0,0) - startD.setHours(0,0,0,0))/864e5)+1);
   const lastEp = rows.reduce((m,r)=> r.episode!=null && r.episode!=="" ? Math.max(m, num(r.episode)) : m, 0);
   return { rows, curve, bank, profit, hours, playProfit, hourly: hours>0 ? playProfit/hours : null, wins, losses, plays,
     winRate: plays? wins/plays : null, best, worst, streak, streakSign, next, stake, stakeNext, day, lastEp,
-    mttMax: bank/100 };
+    mttMax: bank/100, abi, abiNext };
 }
 function cashStakeFor(bank){ let best=null; for(const s of CASH_STAKES){ if(s.bi*25<=bank) best=s; } return best; }
+function abiFor(bank){ let best=null; for(const b of MTT_BUYINS){ if(b*100<=bank) best=b; } return best; }
 
 /* ---------- render ---------- */
 function render(){
@@ -428,10 +442,29 @@ function renderTiles(k){
   t.push(tile(k.streak?k.streak+(k.streakSign>0?"W":"L"):"—", "Current streak", k.streak?(k.streakSign>0?"up":"down"):""));
   t.push(tile(k.plays&&k.day?money(k.profit/k.day,true):"—", "Profit per day · day "+k.day, k.profit>0?"up":k.profit<0?"down":""));
   const stakeName = k.stake ? k.stake.name : "Micro stakes only";
-  const mtt = k.mttMax>=1 ? "$"+Math.floor(k.mttMax)+" and under" : "freerolls";
   const moveUp = k.stakeNext ? "Move up to "+k.stakeNext.name.split(" ")[0]+" at "+money(k.stakeNext.bi*25)+"." : "";
-  t.push('<div class="tile stakes"><div class="v">'+esc(stakeName)+'</div><div class="l">Bankroll supports this cash game'+(k.stake?" ("+Math.floor(k.bank/k.stake.bi)+" buy-ins)":"")+' · tournaments '+esc(mtt)+'</div><div class="rule">'+esc(moveUp)+'</div></div>');
   el.tiles.innerHTML = t.join("");
+  const g=[];
+  g.push('<div class="tile stakes"><div class="eyebrow">Suggested cash game</div><div class="v">'+esc(stakeName)+'</div><div class="l">'+(k.stake?Math.floor(k.bank/k.stake.bi)+" buy-ins at the max buy-in · 25 buy-in rule":"Needs "+money(50)+" for NL2")+'</div><div class="rule">'+esc(moveUp)+'</div></div>');
+  const abiText = k.abi ? money(k.abi)+" ABI" : "Freerolls";
+  const abiUp = k.abiNext ? "Move up to "+money(k.abiNext)+" ABI at "+money(k.abiNext*100)+"." : "";
+  g.push('<div class="tile stakes"><div class="eyebrow">Suggested tournament ABI</div><div class="v">'+esc(abiText)+'</div><div class="l">'+(k.abi?Math.floor(k.bank/k.abi)+" buy-ins · 100 buy-in rule · max single buy-in "+money(Math.floor(k.mttMax)):"Needs "+money(100)+" for $1 tournaments")+'</div><div class="rule">'+esc(abiUp)+'</div></div>');
+  el.suggest.innerHTML = g.join("");
+  renderLadder(k);
+}
+function renderLadder(k){
+  const ms = [cfg.start].concat(MILESTONES.filter(m=>m>cfg.start && m<cfg.goal), [cfg.goal]);
+  const cur = ms.filter(m=>m<=k.bank).pop();
+  el.ladder.innerHTML = ms.map(m=>{
+    const cs = cashStakeFor(m); const abi = abiFor(m);
+    const cls = m===cur ? "cur" : m<=k.bank ? "done" : "";
+    const parts = cs ? cs.name.match(/^(\S+)\s+\((.*)\)$/) : null;
+    return '<tr class="'+cls+'"><td class="num">'+esc(money(m))+(m===cur?' <span class="chip cash">you are here</span>':'')+'</td>'+
+      '<td>'+(cs?esc(parts?parts[1]:cs.name)+' <span class="muted">'+esc(parts?parts[2]:"")+'</span>':'<span class="muted">below NL2</span>')+'</td>'+
+      '<td class="num">'+(cs?Math.floor(m/cs.bi)+" buy-ins":"")+'</td>'+
+      '<td class="num">'+(abi?esc(money(abi)):'<span class="muted">freerolls</span>')+'</td>'+
+      '<td class="num">'+(abi?Math.floor(m/abi)+" buy-ins":"")+'</td></tr>';
+  }).join("");
 }
 
 /* ---------- chart ---------- */
@@ -713,6 +746,4 @@ render();
 })();
 })();
 </script>
-
-</body>
-</html>
+\n</body>\n</html>\n
