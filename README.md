@@ -10,7 +10,7 @@ A single-file bankroll tracker for the $500 → $100,000 poker bankroll challeng
 - **Suggested stakes**: the cash game (25 max buy-ins) and tournament average buy-in (100 buy-ins) the bankroll supports, plus a stakes ladder showing both at every milestone from $500 to $100k
 - **Bankroll curve** by session, with the next milestone drawn as a target line
 - **Session book** with buy-in, cash-out, hours, episode number, venue, and notes; edit or delete any row
-- **Episode stat card**: a copy-ready summary for video descriptions
+- **Episode stat card** and **YouTube tags**: copy-ready blocks for video descriptions; the tags fill in the stakes, site and episode number from the latest session and stay under the 500-character limit
 - **CSV export** of the whole session book
 
 ## Running it

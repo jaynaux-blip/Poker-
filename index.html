@@ -280,6 +280,12 @@ details.settings .form{padding-bottom:18px}
     </div>
     <pre id="sharetext"></pre>
     <div class="row"><button class="btn small" type="button" id="copy">Copy stat card</button><span class="msg" id="copymsg"></span></div>
+    <div class="panel-head">
+      <h2>YouTube tags</h2>
+      <span class="hint num" id="tagcount"></span>
+    </div>
+    <pre id="tagtext"></pre>
+    <div class="row"><button class="btn small" type="button" id="copytags">Copy tags</button><span class="msg" id="copytagsmsg"></span><span class="hint">Title and thumbnail carry most of the weight. Put the first three hashtags in the description.</span></div>
   </section>
 
   <details class="settings" id="settings">
@@ -323,7 +329,7 @@ const el = {
   chart:$("#chart"), chartwrap:$("#chartwrap"), tip:$("#tip"), form:$("#form"), formtitle:$("#formtitle"),
   submit:$("#submit"), cancelEdit:$("#cancel-edit"), preview:$("#preview"), formmsg:$("#formmsg"),
   readonlyHint:$("#readonly-hint"), tbody:$("#tbody"), count:$("#count"), csv:$("#csv"),
-  sharetext:$("#sharetext"), copy:$("#copy"), copymsg:$("#copymsg"), settings:$("#settings"),
+  sharetext:$("#sharetext"), copy:$("#copy"), copymsg:$("#copymsg"), tagtext:$("#tagtext"), tagcount:$("#tagcount"), copytags:$("#copytags"), copytagsmsg:$("#copytagsmsg"), settings:$("#settings"),
   cfgform:$("#cfgform"), cfgmsg:$("#cfgmsg"), logpanel:$("#logpanel"), ladder:$("#ladder"), suggest:$("#suggest")
 };
 const f = {
@@ -587,7 +593,33 @@ function renderShare(k){
     k.next ? "Next milestone: "+money(k.next)+" ("+money(k.next-k.bank)+" away)" : "Goal reached."
   ];
   el.sharetext.textContent = lines.join("\n");
+  renderTags(k);
 }
+const CORE_TAGS = ["poker","poker bankroll challenge","bankroll challenge","poker vlog","poker journey","poker challenge","micro stakes poker","low stakes poker","poker session","poker highlights","bankroll management","poker strategy","how to build a poker bankroll","poker grind","texas holdem","no limit holdem","poker hands"];
+function renderTags(k){
+  const last = k.rows.slice().reverse().find(r=>r.type!=="adjustment");
+  const startK = cfg.start>=1000 ? "$"+(cfg.start/1000)+"k" : "$"+cfg.start;
+  const goalK = cfg.goal>=1000 ? "$"+(cfg.goal/1000)+"k" : "$"+cfg.goal;
+  const dyn = [startK+" to "+goalK, (startK+" to "+goalK+" poker").replace(/\$/g,""), "poker road to "+goalK.replace("$","")];
+  if(last){
+    dyn.push(last.type==="cash" ? "cash game poker" : "poker tournament");
+    if(last.stakes) dyn.push(last.stakes.toLowerCase()+" poker");
+    if(last.venue){ const v=last.venue.toLowerCase(); dyn.push(/online|stars|ggpoker|gg |ignition|acr|bovada|wsop|888|partypoker|\.com/.test(v) ? "online poker" : "live poker"); if(!/online|home/.test(v)) dyn.push(v); }
+    if(last.episode) dyn.push("poker episode "+last.episode);
+  } else { dyn.push("online poker","cash game poker"); }
+  const seen = new Set(); const tags = [];
+  for(const t of dyn.concat(CORE_TAGS)){ const x=t.trim(); if(!x||seen.has(x)) continue; seen.add(x); tags.push(x); }
+  let out = []; let len = 0;
+  for(const t of tags){ const add = t.length + (out.length?2:0); if(len+add>500) break; out.push(t); len+=add; }
+  el.tagtext.textContent = out.join(", ");
+  el.tagcount.textContent = len+" / 500 characters";
+}
+el.copytags.addEventListener("click", ()=>{
+  const text = el.tagtext.textContent;
+  const done = ()=>{ el.copytagsmsg.textContent="Copied."; setTimeout(()=>el.copytagsmsg.textContent="",2000); };
+  const fallback = ()=>{ const r=document.createRange(); r.selectNodeContents(el.tagtext); const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(r); el.copytagsmsg.textContent="Text selected. Press copy."; };
+  try{ navigator.clipboard.writeText(text).then(done, fallback); }catch(e){ fallback(); }
+});
 el.copy.addEventListener("click", ()=>{
   const text = el.sharetext.textContent;
   const done = ()=>{ el.copymsg.textContent="Copied."; setTimeout(()=>el.copymsg.textContent="",2000); };
