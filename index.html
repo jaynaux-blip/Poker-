@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Road to 100K</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: a single-column ledger. Hero bankroll figure and a log-scale milestone rail on top,
+   a strip of stat tiles, one bankroll curve, then the session book (form + table). */
+:root{
+  --bg:#f1f4f1; --surface:#ffffff; --surface-2:#e7ece8; --fg:#13201a; --muted:#5b685f; --line:#d3dbd5;
+  --accent:#1b7a4e; --accent-ink:#ffffff; --accent-soft:#dcefe3;
+  --gain:#17773a; --loss:#bf3737; --gold:#9c6f0a; --gold-soft:#f6ebc6;
+  --grid:#e2e8e3; --axis:#b6c0b8; --series:#1b7a4e; --series-fill:rgba(27,122,78,.14);
+  --display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --radius:10px; --shadow:0 1px 2px rgba(19,32,26,.06), 0 6px 18px rgba(19,32,26,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1411; --surface:#171f1a; --surface-2:#1f2a23; --fg:#edf2ee; --muted:#9aa89f; --line:#2b362f;
+    --accent:#3bb577; --accent-ink:#071a10; --accent-soft:#1a3426;
+    --gain:#4fcf84; --loss:#f07070; --gold:#e2b64f; --gold-soft:#3a2f12;
+    --grid:#242e27; --axis:#3d4a41; --series:#3bb577; --series-fill:rgba(59,181,119,.16);
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1411; --surface:#171f1a; --surface-2:#1f2a23; --fg:#edf2ee; --muted:#9aa89f; --line:#2b362f;
+  --accent:#3bb577; --accent-ink:#071a10; --accent-soft:#1a3426;
+  --gain:#4fcf84; --loss:#f07070; --gold:#e2b64f; --gold-soft:#3a2f12;
+  --grid:#242e27; --axis:#3d4a41; --series:#3bb577; --series-fill:rgba(59,181,119,.16);
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.45}
+.wrap{max-width:1040px;margin:0 auto;padding-inline:16px;padding-block:20px 56px;display:grid;gap:22px}
+h1,h2,h3{margin:0;font-family:var(--display);font-weight:700;letter-spacing:.01em;text-wrap:balance}
+h2{font-size:1.25rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.eyebrow{font-size:.74rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+button{font:inherit;cursor:pointer}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hidden{display:none !important}
+
+/* header */
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px 20px;border-bottom:2px solid var(--fg);padding-bottom:12px}
+.top h1{font-size:2.3rem;line-height:1}
+.top .sub{color:var(--muted);font-size:.95rem}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:.8rem;font-weight:600}
+.badge.live::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--loss)}
+.badge.local::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--gold)}
+
+/* hero */
+.hero{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:22px 22px 20px;display:grid;gap:18px}
+.hero-row{display:flex;flex-wrap:wrap;gap:16px 40px;align-items:flex-end}
+.bank{font-family:var(--display);font-size:clamp(3.4rem,10vw,5.6rem);line-height:.95;font-weight:700;letter-spacing:-.01em}
+.delta{font-family:var(--display);font-size:1.5rem;font-weight:600}
+.delta.up{color:var(--gain)} .delta.down{color:var(--loss)}
+.delta small{font-family:var(--body);font-size:.9rem;color:var(--muted);font-weight:500;margin-left:8px}
+.goalcol{display:grid;gap:4px;min-width:0}
+.goalcol .big{font-family:var(--display);font-size:2rem;font-weight:700;line-height:1}
+.goalcol .big span{font-size:1rem;color:var(--muted);font-family:var(--body);font-weight:500}
+
+/* milestone rail (log scale) */
+.rail{display:grid;gap:8px}
+.rail-track{position:relative;height:14px;border-radius:7px;background:var(--surface-2);overflow:visible}
+.rail-fill{position:absolute;left:0;top:0;bottom:0;border-radius:7px;background:linear-gradient(90deg,var(--accent),var(--gold));min-width:0;transition:width .5s ease}
+.rail-marker{position:absolute;top:-4px;width:4px;height:22px;margin-left:-2px;background:var(--fg);border-radius:2px}
+.rail-ticks{position:relative;height:38px;font-size:.78rem}
+.rail-tick{position:absolute;top:0;transform:translateX(-50%);display:grid;justify-items:center;gap:2px;color:var(--muted);white-space:nowrap}
+.rail-tick::before{content:"";width:1px;height:8px;background:var(--axis)}
+.rail-tick.done{color:var(--accent);font-weight:600}
+.rail-tick.next{color:var(--fg);font-weight:600}
+.rail-tick:first-child{transform:translateX(0);justify-items:start}
+.rail-tick:last-child{transform:translateX(-100%);justify-items:end}
+.rail-note{font-size:.82rem;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.rail-fill{transition:none}}
+
+/* stat tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.tile{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:12px 14px;display:grid;gap:2px;min-width:0}
+.tile .v{font-family:var(--display);font-size:1.75rem;font-weight:700;line-height:1.1}
+.tile .v.up{color:var(--gain)} .tile .v.down{color:var(--loss)}
+.tile .l{font-size:.8rem;color:var(--muted)}
+.tile.stakes{grid-column:1/-1;display:grid;grid-template-columns:1fr auto;gap:4px 16px;align-items:center}
+.tile.stakes .v{font-size:1.4rem}
+.tile.stakes .l{grid-column:1}
+.tile.stakes .rule{grid-column:2;grid-row:1/3;font-size:.8rem;color:var(--muted);max-width:34ch;text-align:right}
+@media (max-width:560px){.tile.stakes{grid-template-columns:1fr}.tile.stakes .rule{grid-column:1;grid-row:auto;text-align:left}}
+
+/* panel */
+.panel{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;display:grid;gap:14px;min-width:0}
+.panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px}
+.panel-head .hint{font-size:.85rem;color:var(--muted)}
+
+/* chart */
+.chart-wrap{position:relative;min-width:0}
+.chart{display:block;width:100%;height:auto;overflow:visible}
+.chart text{font-family:var(--body);font-size:12px;fill:var(--muted)}
+.chart .grid line{stroke:var(--grid);stroke-width:1}
+.chart .axis{stroke:var(--axis);stroke-width:1}
+.chart .area{fill:var(--series-fill)}
+.chart .line{fill:none;stroke:var(--series);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.chart .start-line{stroke:var(--axis);stroke-dasharray:3 4;stroke-width:1}
+.chart .goal-line{stroke:var(--gold);stroke-dasharray:5 4;stroke-width:1.5}
+.chart .goal-label{fill:var(--gold);font-weight:600}
+.chart .dot{fill:var(--series);stroke:var(--surface);stroke-width:2}
+.chart .end{fill:var(--series);stroke:var(--surface);stroke-width:2}
+.chart .cross{stroke:var(--fg);stroke-width:1;stroke-dasharray:2 3;opacity:.6}
+.chart .hit{fill:transparent}
+.tip{position:absolute;pointer-events:none;background:var(--fg);color:var(--bg);padding:8px 10px;border-radius:8px;font-size:.8rem;line-height:1.35;box-shadow:var(--shadow);max-width:230px;transform:translate(-50%,calc(-100% - 12px));white-space:nowrap}
+.tip b{font-size:.9rem}
+.tip .r{font-weight:600}
+
+/* form */
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px 12px}
+.field{display:grid;gap:4px;min-width:0}
+.field label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.field input,.field select,.field textarea{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);min-width:0;width:100%}
+.field.wide{grid-column:1/-1}
+.form-actions{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.btn{padding:9px 16px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);font-weight:600}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.small{padding:5px 10px;font-size:.82rem}
+.btn.danger{color:var(--loss)}
+.btn:disabled{opacity:.55;cursor:default}
+.msg{font-size:.88rem;color:var(--muted)}
+.msg.err{color:var(--loss)}
+.preview{font-size:.9rem;color:var(--muted)}
+.preview b.up{color:var(--gain)} .preview b.down{color:var(--loss)}
+
+/* table */
+.tablebox{overflow-x:auto;margin-inline:-20px;padding-inline:20px}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:.9rem}
+th{font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;text-align:left;padding:8px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 8px;border-bottom:1px solid var(--grid);vertical-align:top;white-space:nowrap}
+td.r,th.r{text-align:right}
+td.res{font-weight:600}
+td.res.up{color:var(--gain)} td.res.down{color:var(--loss)}
+td.notes{max-width:260px;color:var(--muted);white-space:normal}
+td.act{white-space:nowrap}
+tr.adj td{color:var(--muted);font-style:italic}
+.chip{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--surface-2);font-size:.76rem;font-weight:600;color:var(--muted)}
+.chip.cash{background:var(--accent-soft);color:var(--accent)}
+.chip.tourney{background:var(--gold-soft);color:var(--gold)}
+.empty{padding:28px 10px;text-align:center;color:var(--muted);display:grid;gap:6px}
+.empty b{color:var(--fg);font-family:var(--display);font-size:1.3rem}
+
+/* share */
+.share pre{margin:0;white-space:pre-wrap;font:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:.92rem}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+
+/* settings */
+details.settings{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:0 20px}
+details.settings summary{cursor:pointer;padding:14px 0;font-family:var(--display);font-weight:700;font-size:1.1rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);list-style:none;display:flex;justify-content:space-between}
+details.settings summary::after{content:"+"}
+details.settings[open] summary::after{content:"–"}
+details.settings .form{padding-bottom:18px}
+.foot{font-size:.8rem;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="eyebrow">Poker bankroll challenge</div>
+      <h1 id="title">Road to 100K</h1>
+      <div class="sub" id="subline">Started with $500. Goal $100,000.</div>
+    </div>
+    <div class="row">
+      <span class="badge" id="modebadge">Connecting…</span>
+    </div>
+  </header>
+
+  <section class="hero" aria-label="Bankroll">
+    <div class="hero-row">
+      <div>
+        <div class="eyebrow">Current bankroll</div>
+        <div class="bank num" id="bank">$500</div>
+        <div class="delta num" id="delta">$0 <small>since day one</small></div>
+      </div>
+      <div class="goalcol">
+        <div class="eyebrow">Progress to goal</div>
+        <div class="big num" id="pct">0.5% <span>of $100,000</span></div>
+        <div class="msg num" id="togo">$99,500 to go</div>
+      </div>
+      <div class="goalcol">
+        <div class="eyebrow">Next milestone</div>
+        <div class="big num" id="nextms">$1,000</div>
+        <div class="msg num" id="nextms-togo">$500 away</div>
+      </div>
+    </div>
+    <div class="rail" aria-label="Milestones">
+      <div class="rail-track"><div class="rail-fill" id="railfill" style="width:0%"></div><div class="rail-marker" id="railmark" style="left:0%"></div></div>
+      <div class="rail-ticks" id="railticks"></div>
+      <div class="rail-note">Each step on this rail is a doubling or more. Every milestone takes about as much growth as all the ones before it.</div>
+    </div>
+  </section>
+
+  <section class="tiles" id="tiles" aria-label="Statistics"></section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Bankroll by session</h2>
+      <span class="hint" id="chart-hint">Hover or tap a point for the session.</span>
+    </div>
+    <div class="chart-wrap" id="chartwrap">
+      <svg class="chart" id="chart" role="img" aria-label="Bankroll after each session"></svg>
+      <div class="tip hidden" id="tip"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="logpanel">
+    <div class="panel-head">
+      <h2 id="formtitle">Log a session</h2>
+      <span class="hint" id="readonly-hint"></span>
+    </div>
+    <form class="form" id="form" autocomplete="off">
+      <div class="field"><label for="f-date">Date</label><input id="f-date" type="date" required></div>
+      <div class="field"><label for="f-type">Type</label>
+        <select id="f-type"><option value="cash">Cash game</option><option value="tournament">Tournament</option><option value="adjustment">Adjustment</option></select></div>
+      <div class="field" id="w-stakes"><label for="f-stakes">Stakes</label><input id="f-stakes" placeholder="$1/$2 or $22 MTT"></div>
+      <div class="field"><label for="f-venue" id="l-venue">Venue / site</label><input id="f-venue" placeholder="Casino, home game, site"></div>
+      <div class="field" id="w-buyin"><label for="f-buyin">Buy-in ($)</label><input id="f-buyin" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0"></div>
+      <div class="field" id="w-cashout"><label for="f-cashout" id="l-cashout">Cash-out ($)</label><input id="f-cashout" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0"></div>
+      <div class="field hidden" id="w-amount"><label for="f-amount">Amount ($, negative for withdrawal)</label><input id="f-amount" type="number" step="0.01" inputmode="decimal" placeholder="0"></div>
+      <div class="field" id="w-hours"><label for="f-hours">Hours</label><input id="f-hours" type="number" step="0.25" min="0" inputmode="decimal" placeholder="0"></div>
+      <div class="field"><label for="f-episode">Episode #</label><input id="f-episode" type="number" min="0" step="1" inputmode="numeric" placeholder="optional"></div>
+      <div class="field wide"><label for="f-notes">Notes</label><textarea id="f-notes" rows="2" placeholder="Key hands, mindset, what to cover in the video"></textarea></div>
+      <div class="form-actions">
+        <button class="btn primary" type="submit" id="submit">Add session</button>
+        <button class="btn hidden" type="button" id="cancel-edit">Cancel</button>
+        <span class="preview num" id="preview"></span>
+        <span class="msg" id="formmsg"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Session book</h2>
+      <div class="row">
+        <span class="hint num" id="count"></span>
+        <button class="btn small" type="button" id="csv">Export CSV</button>
+      </div>
+    </div>
+    <div class="tablebox">
+      <table id="table">
+        <thead><tr>
+          <th>#</th><th>Date</th><th>Ep.</th><th>Type</th><th>Stakes</th><th>Venue</th>
+          <th class="r">Buy-in</th><th class="r">Cash-out</th><th class="r">Result</th><th class="r">Hours</th><th class="r">$/hr</th><th class="r">Bankroll</th><th>Notes</th><th></th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel share">
+    <div class="panel-head">
+      <h2>Episode stat card</h2>
+      <span class="hint">Paste into a video description or read it on camera.</span>
+    </div>
+    <pre id="sharetext"></pre>
+    <div class="row"><button class="btn small" type="button" id="copy">Copy stat card</button><span class="msg" id="copymsg"></span></div>
+  </section>
+
+  <details class="settings" id="settings">
+    <summary>Challenge settings</summary>
+    <form class="form" id="cfgform">
+      <div class="field"><label for="c-name">Challenge name</label><input id="c-name"></div>
+      <div class="field"><label for="c-start">Starting bankroll ($)</label><input id="c-start" type="number" min="1" step="1" inputmode="numeric"></div>
+      <div class="field"><label for="c-goal">Goal ($)</label><input id="c-goal" type="number" min="2" step="1" inputmode="numeric"></div>
+      <div class="field"><label for="c-date">Start date</label><input id="c-date" type="date"></div>
+      <div class="form-actions"><button class="btn" type="submit">Save settings</button><span class="msg" id="cfgmsg"></span></div>
+    </form>
+  </details>
+
+  <p class="foot">Stakes guidance uses a 25 buy-in rule for cash games and 100 buy-ins for tournaments. Adjust to your own risk tolerance.</p>
+</div>
+
+<script>
+(function(){
+"use strict";
+const DEFAULT_CFG = { name:"Road to 100K", start:500, goal:100000, startDate:todayStr() };
+const MILESTONES = [500,1000,2500,5000,10000,25000,50000,100000,250000,500000,1000000];
+const CASH_STAKES = [
+  {name:"NL2 ($0.01/$0.02)",bi:2},{name:"NL5 ($0.02/$0.05)",bi:5},{name:"NL10 ($0.05/$0.10)",bi:10},
+  {name:"NL25 ($0.10/$0.25)",bi:25},{name:"NL50 ($0.25/$0.50)",bi:50},{name:"NL100 ($0.50/$1)",bi:100},
+  {name:"NL200 ($1/$2)",bi:200},{name:"NL300 ($1/$3)",bi:300},{name:"NL500 ($2/$5)",bi:500},
+  {name:"NL1000 ($5/$10)",bi:1000},{name:"NL2000 ($10/$20)",bi:2000},{name:"NL5000 ($25/$50)",bi:5000}
+];
+const LS_S = "r2h.sessions", LS_C = "r2h.config";
+
+let cfg = Object.assign({}, DEFAULT_CFG);
+let sessions = [];
+let db = null, dl = null, mode = "loading", canWrite = true, editingId = null, pendingDelete = null;
+let computed = null;
+
+const $ = s => document.querySelector(s);
+const el = {
+  title:$("#title"), subline:$("#subline"), badge:$("#modebadge"), bank:$("#bank"), delta:$("#delta"),
+  pct:$("#pct"), togo:$("#togo"), nextms:$("#nextms"), nextmsTogo:$("#nextms-togo"),
+  railfill:$("#railfill"), railmark:$("#railmark"), railticks:$("#railticks"), tiles:$("#tiles"),
+  chart:$("#chart"), chartwrap:$("#chartwrap"), tip:$("#tip"), form:$("#form"), formtitle:$("#formtitle"),
+  submit:$("#submit"), cancelEdit:$("#cancel-edit"), preview:$("#preview"), formmsg:$("#formmsg"),
+  readonlyHint:$("#readonly-hint"), tbody:$("#tbody"), count:$("#count"), csv:$("#csv"),
+  sharetext:$("#sharetext"), copy:$("#copy"), copymsg:$("#copymsg"), settings:$("#settings"),
+  cfgform:$("#cfgform"), cfgmsg:$("#cfgmsg"), logpanel:$("#logpanel")
+};
+const f = {
+  date:$("#f-date"), type:$("#f-type"), stakes:$("#f-stakes"), venue:$("#f-venue"), buyin:$("#f-buyin"),
+  cashout:$("#f-cashout"), amount:$("#f-amount"), hours:$("#f-hours"), episode:$("#f-episode"), notes:$("#f-notes")
+};
+const w = { stakes:$("#w-stakes"), buyin:$("#w-buyin"), cashout:$("#w-cashout"), amount:$("#w-amount"), hours:$("#w-hours") };
+const c = { name:$("#c-name"), start:$("#c-start"), goal:$("#c-goal"), date:$("#c-date") };
+
+/* ---------- helpers ---------- */
+function pad(n){ return (n<10?"0":"")+n; }
+function todayStr(){ const d=new Date(); return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
+function parseDate(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||""); return m? new Date(+m[1],+m[2]-1,+m[3]) : null; }
+function fmtDate(s, long){ const d=parseDate(s); if(!d) return s||""; return d.toLocaleDateString("en-US", long?{month:"short",day:"numeric",year:"numeric"}:{month:"short",day:"numeric"}); }
+function money(n, signed){
+  const abs=Math.abs(n);
+  const frac = Math.abs(abs-Math.round(abs))>0.004 ? 2 : 0;
+  const s="$"+abs.toLocaleString("en-US",{minimumFractionDigits:frac,maximumFractionDigits:frac});
+  if(n<0) return "−"+s;
+  return (signed && n>0 ? "+" : "")+s;
+}
+function num(v){ const n=parseFloat(v); return isFinite(n)?n:0; }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch])); }
+function uid(){ return "s_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function clamp(x,a,b){ return Math.max(a,Math.min(b,x)); }
+function niceStep(range, n){ const raw=range/n; const p=Math.pow(10,Math.floor(Math.log10(raw))); const r=raw/p; const s = r<=1?1: r<=2?2: r<=2.5?2.5: r<=5?5:10; return s*p; }
+function lsGet(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
+
+/* ---------- compute ---------- */
+function compute(){
+  const sorted = sessions.slice().sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1 : (a.createdAt||0)-(b.createdAt||0));
+  let bank = cfg.start;
+  const curve = [{ v:cfg.start, date:cfg.startDate, start:true }];
+  const rows = [];
+  let hours=0, playProfit=0, wins=0, losses=0, best=null, worst=null, plays=0;
+  for(const s of sorted){
+    const r = num(s.result);
+    bank += r;
+    rows.push(Object.assign({}, s, { result:r, bank:bank }));
+    if(s.type!=="adjustment"){
+      plays++; hours+=num(s.hours); playProfit+=r;
+      if(r>0) wins++; else if(r<0) losses++;
+      if(best===null || r>best.result) best={result:r,s:s};
+      if(worst===null || r<worst.result) worst={result:r,s:s};
+    }
+    curve.push({ v:bank, date:s.date, s:s, n:rows.length });
+  }
+  let streak=0, streakSign=0;
+  for(let i=rows.length-1;i>=0;i--){ const r=rows[i]; if(r.type==="adjustment") continue; const sg=Math.sign(r.result); if(sg===0) break; if(streakSign===0) streakSign=sg; if(sg!==streakSign) break; streak++; }
+  const profit = bank - cfg.start;
+  const next = MILESTONES.concat([cfg.goal]).filter(m=>m>cfg.start && m<=cfg.goal).sort((a,b)=>a-b).find(m=>m>bank) || null;
+  const stake = cashStakeFor(bank);
+  const stakeNext = CASH_STAKES.find(s=>s.bi*25>bank) || null;
+  const startD = parseDate(cfg.startDate) || new Date();
+  const day = Math.max(1, Math.floor((new Date().setHours(0,0,0,0) - startD.setHours(0,0,0,0))/864e5)+1);
+  const lastEp = rows.reduce((m,r)=> r.episode!=null && r.episode!=="" ? Math.max(m, num(r.episode)) : m, 0);
+  return { rows, curve, bank, profit, hours, playProfit, hourly: hours>0 ? playProfit/hours : null, wins, losses, plays,
+    winRate: plays? wins/plays : null, best, worst, streak, streakSign, next, stake, stakeNext, day, lastEp,
+    mttMax: bank/100 };
+}
+function cashStakeFor(bank){ let best=null; for(const s of CASH_STAKES){ if(s.bi*25<=bank) best=s; } return best; }
+
+/* ---------- render ---------- */
+function render(){
+  computed = compute();
+  const k = computed;
+  el.title.textContent = cfg.name || "Road to 100K";
+  document.title = cfg.name || "Road to 100K";
+  el.subline.textContent = "Started "+fmtDate(cfg.startDate,true)+" with "+money(cfg.start)+". Goal "+money(cfg.goal)+". Day "+k.day+".";
+  el.bank.textContent = money(k.bank);
+  const pctChange = cfg.start>0 ? (k.profit/cfg.start*100) : 0;
+  el.delta.className = "delta num "+(k.profit>0?"up":k.profit<0?"down":"");
+  el.delta.innerHTML = esc(money(k.profit,true))+" <small>"+(k.profit===0?"since day one":(pctChange>0?"+":"")+pctChange.toFixed(1)+"% since day one")+"</small>";
+  const pct = clamp(k.bank/cfg.goal*100,0,100);
+  el.pct.innerHTML = esc(pct<10?pct.toFixed(2):pct.toFixed(1))+"% <span>of "+esc(money(cfg.goal))+"</span>";
+  el.togo.textContent = k.bank>=cfg.goal ? "Goal reached." : money(cfg.goal-k.bank)+" to go";
+  if(k.next){ el.nextms.textContent=money(k.next); el.nextmsTogo.textContent=money(k.next-k.bank)+" away"; }
+  else { el.nextms.textContent=money(cfg.goal); el.nextmsTogo.textContent="You made it."; }
+  renderRail(k);
+  renderTiles(k);
+  renderChart(k);
+  renderTable(k);
+  renderShare(k);
+  el.count.textContent = k.plays+" session"+(k.plays===1?"":"s")+(k.rows.length>k.plays? " · "+(k.rows.length-k.plays)+" adjustment"+(k.rows.length-k.plays===1?"":"s"):"");
+  if(!el.settings.open){ c.name.value = cfg.name||""; c.start.value = cfg.start; c.goal.value = cfg.goal; c.date.value = cfg.startDate||""; }
+}
+
+function railPos(v){ const lo=Math.log(cfg.start), hi=Math.log(cfg.goal); if(hi<=lo) return 0; return clamp((Math.log(Math.max(v,1))-lo)/(hi-lo),0,1)*100; }
+function renderRail(k){
+  let ms = [cfg.start].concat(MILESTONES.filter(m=>m>cfg.start && m<cfg.goal), [cfg.goal]);
+  const narrow = (el.railticks.clientWidth||600) < 560;
+  if(narrow) ms = ms.filter(m=> m===cfg.start || m===cfg.goal || m===k.next);
+  const p = railPos(k.bank);
+  el.railfill.style.width = p+"%";
+  el.railmark.style.left = p+"%";
+  el.railticks.innerHTML = ms.map(m=>{
+    const cls = m<=k.bank ? (m===cfg.start?"":"done") : (m===k.next?"next":"");
+    const label = m>=1000 ? "$"+(m/1000).toLocaleString("en-US",{maximumFractionDigits:1})+"k" : "$"+m;
+    return '<div class="rail-tick '+cls+'" style="left:'+railPos(m).toFixed(2)+'%"><span class="num">'+esc(label)+'</span></div>';
+  }).join("");
+}
+
+function renderTiles(k){
+  const t=[];
+  const tile=(v,l,cls)=>'<div class="tile"><div class="v num '+(cls||"")+'">'+v+'</div><div class="l">'+l+'</div></div>';
+  t.push(tile(String(k.plays), "Sessions played"));
+  t.push(tile(k.hours.toLocaleString("en-US",{maximumFractionDigits:1})+"h", "Hours at the table"));
+  t.push(tile(k.hourly===null?"—":money(k.hourly,true)+"/hr", "Hourly rate", k.hourly>0?"up":k.hourly<0?"down":""));
+  t.push(tile(k.winRate===null?"—":Math.round(k.winRate*100)+"%", "Winning sessions"+(k.plays?" ("+k.wins+" of "+k.plays+")":"")));
+  t.push(tile(k.best?money(k.best.result,true):"—", "Best session"+(k.best?" · "+fmtDate(k.best.s.date):""), k.best&&k.best.result>0?"up":""));
+  t.push(tile(k.worst?money(k.worst.result,true):"—", "Worst session"+(k.worst?" · "+fmtDate(k.worst.s.date):""), k.worst&&k.worst.result<0?"down":""));
+  t.push(tile(k.streak?k.streak+(k.streakSign>0?"W":"L"):"—", "Current streak", k.streak?(k.streakSign>0?"up":"down"):""));
+  t.push(tile(k.plays&&k.day?money(k.profit/k.day,true):"—", "Profit per day · day "+k.day, k.profit>0?"up":k.profit<0?"down":""));
+  const stakeName = k.stake ? k.stake.name : "Micro stakes only";
+  const mtt = k.mttMax>=1 ? "$"+Math.floor(k.mttMax)+" and under" : "freerolls";
+  const moveUp = k.stakeNext ? "Move up to "+k.stakeNext.name.split(" ")[0]+" at "+money(k.stakeNext.bi*25)+"." : "";
+  t.push('<div class="tile stakes"><div class="v">'+esc(stakeName)+'</div><div class="l">Bankroll supports this cash game'+(k.stake?" ("+Math.floor(k.bank/k.stake.bi)+" buy-ins)":"")+' · tournaments '+esc(mtt)+'</div><div class="rule">'+esc(moveUp)+'</div></div>');
+  el.tiles.innerHTML = t.join("");
+}
+
+/* ---------- chart ---------- */
+let chartPts = [];
+function renderChart(k){
+  const svg = el.chart;
+  const W = Math.max(320, el.chartwrap.clientWidth || 720);
+  const H = Math.round(clamp(W*0.42, 220, 340));
+  const m = {t:18, r:18, b:34, l:56};
+  const iw = W-m.l-m.r, ih = H-m.t-m.b;
+  const pts = k.curve;
+  const n = pts.length;
+  const vals = pts.map(p=>p.v);
+  let lo = Math.min.apply(null, vals.concat([cfg.start]));
+  let hi = Math.max.apply(null, vals.concat([cfg.start]));
+  const goalLine = k.next;
+  if(goalLine) hi = Math.max(hi, goalLine);
+  const padV = Math.max((hi-lo)*0.12, 1);
+  lo = Math.max(0, lo-padV); hi = hi+padV;
+  const step = niceStep(hi-lo, 5);
+  lo = Math.floor(lo/step)*step; hi = Math.ceil(hi/step)*step;
+  const X = i => m.l + (n>1 ? i/(n-1)*iw : iw/2);
+  const Y = v => m.t + ih - (v-lo)/(hi-lo)*ih;
+  chartPts = pts.map((p,i)=>({x:X(i), y:Y(p.v), p:p, i:i}));
+  let s = '';
+  s += '<g class="grid">';
+  for(let v=lo; v<=hi+1e-9; v+=step){ s += '<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+Y(v).toFixed(1)+'" y2="'+Y(v).toFixed(1)+'"/><text x="'+(m.l-8)+'" y="'+(Y(v)+4).toFixed(1)+'" text-anchor="end" class="num">'+esc(axisMoney(v))+'</text>'; }
+  s += '</g>';
+  const xt = Math.min(n-1, 6);
+  for(let j=0;j<=xt;j++){ const i = xt? Math.round(j*(n-1)/xt) : 0; s += '<text x="'+X(i).toFixed(1)+'" y="'+(H-m.b+18)+'" text-anchor="middle" class="num">'+(i===0?"Start":i)+'</text>'; }
+  s += '<text x="'+(W-m.r)+'" y="'+(H-4)+'" text-anchor="end">session</text>';
+  s += '<line class="axis" x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+(m.t+ih)+'" y2="'+(m.t+ih)+'"/>';
+  s += '<line class="start-line" x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+Y(cfg.start).toFixed(1)+'" y2="'+Y(cfg.start).toFixed(1)+'"/>';
+  if(goalLine){ s += '<line class="goal-line" x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+Y(goalLine).toFixed(1)+'" y2="'+Y(goalLine).toFixed(1)+'"/><text class="goal-label num" x="'+(W-m.r)+'" y="'+(Y(goalLine)-5).toFixed(1)+'" text-anchor="end">next milestone '+esc(money(goalLine))+'</text>'; }
+  if(n>1){
+    const path = chartPts.map((q,i)=>(i?"L":"M")+q.x.toFixed(1)+" "+q.y.toFixed(1)).join(" ");
+    const base = (m.t+ih).toFixed(1);
+    s += '<path class="area" d="'+path+' L'+chartPts[n-1].x.toFixed(1)+' '+base+' L'+chartPts[0].x.toFixed(1)+' '+base+' Z"/>';
+    s += '<path class="line" d="'+path+'"/>';
+    if(n<=40) chartPts.forEach((q,i)=>{ if(i && i<n-1) s += '<circle class="dot" r="3.5" cx="'+q.x.toFixed(1)+'" cy="'+q.y.toFixed(1)+'"/>'; });
+  }
+  const last = chartPts[n-1];
+  s += '<circle class="end" r="5" cx="'+last.x.toFixed(1)+'" cy="'+last.y.toFixed(1)+'"/>';
+  s += '<g id="cross"></g>';
+  s += '<rect class="hit" x="'+m.l+'" y="'+m.t+'" width="'+iw+'" height="'+ih+'"/>';
+  svg.setAttribute("viewBox","0 0 "+W+" "+H);
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  svg.innerHTML = s;
+  svg._geom = {m:m, ih:ih, H:H};
+}
+function axisMoney(v){ if(Math.abs(v)>=1000) return "$"+(v/1000).toLocaleString("en-US",{maximumFractionDigits:1})+"k"; return "$"+Math.round(v); }
+function chartHover(ev){
+  if(!chartPts.length) return;
+  const rect = el.chart.getBoundingClientRect();
+  const x = (ev.clientX-rect.left) * (el.chart.viewBox.baseVal.width/rect.width);
+  let best = chartPts[0]; for(const q of chartPts){ if(Math.abs(q.x-x)<Math.abs(best.x-x)) best=q; }
+  const g = el.chart.querySelector("#cross"); const gm = el.chart._geom;
+  g.innerHTML = '<line class="cross" x1="'+best.x.toFixed(1)+'" x2="'+best.x.toFixed(1)+'" y1="'+gm.m.t+'" y2="'+(gm.m.t+gm.ih)+'"/><circle class="end" r="5" cx="'+best.x.toFixed(1)+'" cy="'+best.y.toFixed(1)+'"/>';
+  const p = best.p; let html;
+  if(p.start){ html = '<b>Day one</b><br>'+esc(fmtDate(p.date,true))+'<br>Starting bankroll '+esc(money(p.v)); }
+  else { const s=p.s; const r=num(s.result); html = '<b>Session '+best.i+'</b> · '+esc(fmtDate(s.date))+(s.episode?' · Ep. '+esc(s.episode):'')+'<br>'+esc(typeLabel(s))+(s.stakes?' · '+esc(s.stakes):'')+'<br><span class="r">'+esc(money(r,true))+'</span> → bankroll '+esc(money(p.v)); }
+  el.tip.innerHTML = html;
+  el.tip.classList.remove("hidden");
+  const sx = best.x*(rect.width/el.chart.viewBox.baseVal.width), sy = best.y*(rect.height/el.chart.viewBox.baseVal.height);
+  const tw = el.tip.offsetWidth;
+  el.tip.style.left = clamp(sx, tw/2+4, rect.width-tw/2-4)+"px";
+  el.tip.style.top = Math.max(sy, 70)+"px";
+}
+function chartLeave(){ el.tip.classList.add("hidden"); const g=el.chart.querySelector("#cross"); if(g) g.innerHTML=""; }
+el.chart.addEventListener("pointermove", chartHover);
+el.chart.addEventListener("pointerdown", chartHover);
+el.chart.addEventListener("pointerleave", chartLeave);
+let rsT=null; window.addEventListener("resize", ()=>{ clearTimeout(rsT); rsT=setTimeout(()=>{ if(computed){ renderChart(computed); renderRail(computed); } }, 120); });
+
+/* ---------- table ---------- */
+function typeLabel(s){ return s.type==="cash"?"Cash game": s.type==="tournament"?"Tournament":"Adjustment"; }
+function renderTable(k){
+  if(!k.rows.length){
+    el.tbody.innerHTML = '<tr><td colspan="14"><div class="empty"><b>No sessions yet.</b><span>Your bankroll starts at '+esc(money(cfg.start))+'. Log your first session above and the curve starts here.</span></div></td></tr>';
+    return;
+  }
+  const rows = k.rows.slice().reverse();
+  el.tbody.innerHTML = rows.map(r=>{
+    const idx = k.rows.indexOf(r)+1;
+    const adj = r.type==="adjustment";
+    const hrs = num(r.hours);
+    const hourly = (!adj && hrs>0) ? money(r.result/hrs,true) : "";
+    const cls = r.result>0?"up":r.result<0?"down":"";
+    const chip = adj?'<span class="chip">Adj.</span>': r.type==="cash"?'<span class="chip cash">Cash</span>':'<span class="chip tourney">MTT</span>';
+    let act = "";
+    if(canWrite){
+      if(pendingDelete===r.id) act = '<button class="btn small danger" data-act="confirm" data-id="'+esc(r.id)+'">Confirm delete</button> <button class="btn small" data-act="cancel" data-id="'+esc(r.id)+'">Keep</button>';
+      else act = '<button class="btn small" data-act="edit" data-id="'+esc(r.id)+'">Edit</button> <button class="btn small danger" data-act="delete" data-id="'+esc(r.id)+'">Delete</button>';
+    }
+    return '<tr class="'+(adj?"adj":"")+'">'+
+      '<td class="num">'+idx+'</td><td class="num">'+esc(fmtDate(r.date))+'</td><td class="num">'+esc(r.episode||"")+'</td><td>'+chip+'</td>'+
+      '<td>'+esc(r.stakes||"")+'</td><td>'+esc(r.venue||"")+'</td>'+
+      '<td class="r num">'+(adj?"":esc(money(num(r.buyin))))+'</td><td class="r num">'+(adj?"":esc(money(num(r.cashout))))+'</td>'+
+      '<td class="r num res '+cls+'">'+esc(money(r.result,true))+'</td><td class="r num">'+(adj?"":hrs?hrs.toLocaleString("en-US",{maximumFractionDigits:2}):"")+'</td>'+
+      '<td class="r num">'+esc(hourly)+'</td><td class="r num">'+esc(money(r.bank))+'</td><td class="notes">'+esc(r.notes||"")+'</td><td class="act">'+act+'</td></tr>';
+  }).join("");
+}
+el.tbody.addEventListener("click", async ev=>{
+  const b = ev.target.closest("button[data-act]"); if(!b) return;
+  const id=b.dataset.id, act=b.dataset.act;
+  if(act==="delete"){ pendingDelete=id; renderTable(computed); }
+  else if(act==="cancel"){ pendingDelete=null; renderTable(computed); }
+  else if(act==="confirm"){ pendingDelete=null; await deleteSession(id); }
+  else if(act==="edit"){ startEdit(id); }
+});
+
+/* ---------- share ---------- */
+function renderShare(k){
+  const pct = clamp(k.bank/cfg.goal*100,0,100);
+  const lines = [
+    (cfg.name||"Road to 100K").toUpperCase()+" · Day "+k.day+(k.lastEp?" · Episode "+k.lastEp:""),
+    "Bankroll: "+money(k.bank)+" ("+money(k.profit,true)+" from "+money(cfg.start)+")",
+    "Progress to "+money(cfg.goal)+": "+(pct<10?pct.toFixed(2):pct.toFixed(1))+"%",
+    "Sessions: "+k.plays+" · Hours: "+k.hours.toLocaleString("en-US",{maximumFractionDigits:1})+(k.hourly!==null?" · "+money(k.hourly,true)+"/hr":""),
+    k.next ? "Next milestone: "+money(k.next)+" ("+money(k.next-k.bank)+" away)" : "Goal reached."
+  ];
+  el.sharetext.textContent = lines.join("\n");
+}
+el.copy.addEventListener("click", ()=>{
+  const text = el.sharetext.textContent;
+  const done = ()=>{ el.copymsg.textContent="Copied."; setTimeout(()=>el.copymsg.textContent="",2000); };
+  const fallback = ()=>{ const r=document.createRange(); r.selectNodeContents(el.sharetext); const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(r); el.copymsg.textContent="Text selected. Press copy."; };
+  try{ navigator.clipboard.writeText(text).then(done, fallback); }catch(e){ fallback(); }
+});
+
+/* ---------- CSV ---------- */
+function csvText(){
+  const k = computed || compute();
+  const q = v => '"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+  const head = ["#","date","episode","type","stakes","venue","buy_in","cash_out","result","hours","bankroll_after","notes"];
+  const lines=[head.join(",")];
+  k.rows.forEach((r,i)=> lines.push([i+1,r.date,r.episode||"",r.type,r.stakes||"",r.venue||"",r.type==="adjustment"?"":num(r.buyin),r.type==="adjustment"?"":num(r.cashout),r.result,r.type==="adjustment"?"":num(r.hours),r.bank,r.notes||""].map(q).join(",")));
+  return lines.join("\n");
+}
+el.csv.addEventListener("click", async ()=>{
+  const name = "bankroll-"+todayStr()+".csv";
+  if(dl){ try{ await dl.save({filename:name, data:csvText()}); }catch(e){} return; }
+  if(window.claude && window.claude.use){ return; }
+  const a=document.createElement("a"); a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csvText()); a.download=name; document.body.appendChild(a); a.click(); a.remove();
+});
+
+/* ---------- form ---------- */
+function syncTypeFields(){
+  const t = f.type.value; const adj = t==="adjustment";
+  w.stakes.classList.toggle("hidden", adj); w.buyin.classList.toggle("hidden", adj); w.cashout.classList.toggle("hidden", adj); w.hours.classList.toggle("hidden", adj);
+  w.amount.classList.toggle("hidden", !adj);
+  $("#l-cashout").textContent = t==="tournament" ? "Payout ($)" : "Cash-out ($)";
+  $("#l-venue").textContent = adj ? "Reason" : "Venue / site";
+  f.venue.placeholder = adj ? "Withdrawal, bonus, expense" : "Casino, home game, site";
+  updatePreview();
+}
+function formResult(){ return f.type.value==="adjustment" ? num(f.amount.value) : num(f.cashout.value)-num(f.buyin.value); }
+function updatePreview(){
+  const r = formResult(); const hrs=num(f.hours.value);
+  if(f.type.value!=="adjustment" && f.buyin.value==="" && f.cashout.value===""){ el.preview.textContent=""; return; }
+  el.preview.innerHTML = 'Result <b class="'+(r>0?"up":r<0?"down":"")+'">'+esc(money(r,true))+'</b>'+(f.type.value!=="adjustment"&&hrs>0?' · '+esc(money(r/hrs,true))+'/hr':'');
+}
+f.type.addEventListener("change", syncTypeFields);
+["buyin","cashout","amount","hours"].forEach(k=> f[k].addEventListener("input", updatePreview));
+function resetForm(){ el.form.reset(); f.date.value=todayStr(); editingId=null; el.formtitle.textContent="Log a session"; el.submit.textContent="Add session"; el.cancelEdit.classList.add("hidden"); syncTypeFields(); el.formmsg.textContent=""; el.formmsg.className="msg"; }
+function startEdit(id){
+  const s = sessions.find(x=>x.id===id); if(!s) return;
+  editingId=id; f.date.value=s.date||todayStr(); f.type.value=s.type||"cash"; f.stakes.value=s.stakes||""; f.venue.value=s.venue||"";
+  f.buyin.value=s.type==="adjustment"?"":num(s.buyin); f.cashout.value=s.type==="adjustment"?"":num(s.cashout); f.amount.value=s.type==="adjustment"?num(s.result):"";
+  f.hours.value=s.hours!=null&&s.hours!==""?s.hours:""; f.episode.value=s.episode||""; f.notes.value=s.notes||"";
+  el.formtitle.textContent="Edit session"; el.submit.textContent="Save changes"; el.cancelEdit.classList.remove("hidden");
+  syncTypeFields(); el.logpanel.scrollIntoView({behavior:"smooth",block:"start"});
+}
+el.cancelEdit.addEventListener("click", resetForm);
+el.form.addEventListener("submit", async ev=>{
+  ev.preventDefault();
+  if(!canWrite) return;
+  const type=f.type.value; const adj=type==="adjustment";
+  if(!parseDate(f.date.value)){ return formError("Pick a date."); }
+  if(!adj && (num(f.buyin.value)<0 || num(f.cashout.value)<0)){ return formError("Buy-in and cash-out can't be negative."); }
+  if(!adj && f.buyin.value==="" && f.cashout.value===""){ return formError("Enter the buy-in and cash-out."); }
+  if(adj && f.amount.value===""){ return formError("Enter the adjustment amount."); }
+  const existing = editingId ? sessions.find(x=>x.id===editingId) : null;
+  const data = {
+    date:f.date.value, type:type, stakes:adj?"":f.stakes.value.trim(), venue:f.venue.value.trim(),
+    buyin: adj?0:num(f.buyin.value), cashout: adj?0:num(f.cashout.value), hours: adj?0:num(f.hours.value),
+    episode: f.episode.value===""?"":String(parseInt(f.episode.value,10)), notes:f.notes.value.trim(),
+    result: formResult(), createdAt: existing&&existing.createdAt ? existing.createdAt : Date.now(), updatedAt: Date.now()
+  };
+  const id = editingId || uid();
+  el.submit.disabled=true; el.formmsg.textContent = editingId?"Saving…":"Adding…"; el.formmsg.className="msg";
+  try{
+    await saveSession(id, data);
+    const wasEdit = !!editingId;
+    resetForm();
+    el.formmsg.textContent = wasEdit ? "Session updated." : "Session added. "+money(data.result,true)+".";
+    setTimeout(()=>{ if(el.formmsg.textContent.indexOf("Session")===0) el.formmsg.textContent=""; }, 3500);
+  }catch(e){ handleWriteError(e, "Couldn't save the session."); }
+  el.submit.disabled=false;
+});
+function formError(msg){ el.formmsg.textContent=msg; el.formmsg.className="msg err"; }
+function handleWriteError(e, fallbackMsg){
+  const code = e && e.code;
+  if(code==="invalid_argument" && db){ setReadOnly(); formError("This account can't write to the tracker."); return; }
+  if(code==="quota_exceeded"){ formError("Storage is full. Delete old sessions or export to CSV first."); return; }
+  formError(fallbackMsg+(e&&e.message?" "+e.message:""));
+}
+
+el.cfgform.addEventListener("submit", async ev=>{
+  ev.preventDefault();
+  if(!canWrite) return;
+  const start=num(c.start.value), goal=num(c.goal.value);
+  if(start<=0 || goal<=start){ el.cfgmsg.textContent="Goal has to be larger than the starting bankroll."; el.cfgmsg.className="msg err"; return; }
+  if(!parseDate(c.date.value)){ el.cfgmsg.textContent="Pick a start date."; el.cfgmsg.className="msg err"; return; }
+  const next = { name:c.name.value.trim()||"Road to 100K", start:start, goal:goal, startDate:c.date.value };
+  el.cfgmsg.textContent="Saving…"; el.cfgmsg.className="msg";
+  try{ await saveConfig(next); el.cfgmsg.textContent="Saved."; setTimeout(()=>el.cfgmsg.textContent="",2000); }
+  catch(e){ el.cfgmsg.textContent="Couldn't save settings."+(e&&e.message?" "+e.message:""); el.cfgmsg.className="msg err"; }
+});
+
+/* ---------- storage ---------- */
+async function saveSession(id, data){
+  if(db){ await db.collection("sessions").doc(id).set(data); return; }
+  const i = sessions.findIndex(s=>s.id===id);
+  const row = Object.assign({id:id}, data);
+  if(i>=0) sessions[i]=row; else sessions.push(row);
+  if(!lsSet(LS_S, sessions)) throw new Error("This browser blocked local storage.");
+  render();
+}
+async function deleteSession(id){
+  try{
+    if(db){ await db.collection("sessions").doc(id).delete(); return; }
+    sessions = sessions.filter(s=>s.id!==id); lsSet(LS_S, sessions); render();
+  }catch(e){ handleWriteError(e, "Couldn't delete the session."); }
+}
+async function saveConfig(next){
+  if(db){ await db.doc("config/challenge").set(next); return; }
+  cfg = Object.assign({}, DEFAULT_CFG, next); lsSet(LS_C, cfg); render();
+}
+function setReadOnly(){
+  canWrite=false; mode="readonly";
+  el.badge.textContent="Live view"; el.badge.className="badge live";
+  el.form.classList.add("hidden"); el.settings.classList.add("hidden");
+  el.formtitle.textContent="Session log"; el.readonlyHint.textContent="Only the channel owner can add sessions.";
+  if(computed) renderTable(computed);
+}
+function enterLocal(){
+  mode="local"; db=null;
+  const savedC = lsGet(LS_C); if(savedC && typeof savedC==="object") cfg = Object.assign({}, DEFAULT_CFG, savedC);
+  const savedS = lsGet(LS_S); if(Array.isArray(savedS)) sessions = savedS;
+  el.badge.textContent="Saved in this browser"; el.badge.className="badge local";
+  render();
+}
+function subscribe(){
+  el.badge.textContent="Live"; el.badge.className="badge live";
+  db.doc("config/challenge").onSnapshot(snap=>{
+    if(snap.exists){ const d=snap.data(); cfg = Object.assign({}, DEFAULT_CFG, { name:d.name||DEFAULT_CFG.name, start:num(d.start)||DEFAULT_CFG.start, goal:num(d.goal)||DEFAULT_CFG.goal, startDate:d.startDate||DEFAULT_CFG.startDate }); }
+    render();
+  }, err=>{ el.badge.textContent="Connection lost"; });
+  db.collection("sessions").onSnapshot(snap=>{
+    sessions = snap.docs.filter(d=>d.exists).map(d=>Object.assign({id:d.id}, d.data()));
+    render();
+  }, err=>{ el.badge.textContent="Connection lost"; });
+}
+
+/* ---------- boot ---------- */
+resetForm();
+render();
+(async function boot(){
+  if(!(window.claude && typeof window.claude.use==="function")){ enterLocal(); return; }
+  let d=null, u=null, dlc=null;
+  try{ [d,u,dlc] = await Promise.all([window.claude.use("db"), window.claude.use("user"), window.claude.use("downloads")]); }catch(e){}
+  dl = dlc || null;
+  if(!dl) el.csv.classList.add("hidden");
+  if(!d){ enterLocal(); return; }
+  db = d; mode="db";
+  if(u){ try{ const cw = await u.can("data.write"); if(cw===false) setReadOnly(); }catch(e){} }
+  subscribe();
+})();
+})();
+</script>
+
+</body>
+</html>
