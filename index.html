@@ -207,11 +207,11 @@ details.settings .form{padding-bottom:18px}
   <section class="panel">
     <div class="panel-head">
       <h2>Stakes ladder</h2>
-      <span class="hint">Where the bankroll lets you play at each milestone. Cash uses 25 max buy-ins, tournaments 100 average buy-ins.</span>
+      <span class="hint">Where the bankroll lets you play at each milestone. Tournaments use 100 average buy-ins and cap a single entry at 2 percent; cash uses 25 max buy-ins.</span>
     </div>
     <div class="tablebox">
       <table class="ladder">
-        <thead><tr><th>Bankroll</th><th>Cash game</th><th>Cash buy-ins</th><th>Tournament ABI</th><th>MTT buy-ins</th></tr></thead>
+        <thead><tr><th>Bankroll</th><th>Tournament ABI</th><th>MTT buy-ins</th><th>Max single buy-in</th><th>Cash game</th><th>Cash buy-ins</th></tr></thead>
         <tbody id="ladder"></tbody>
       </table>
     </div>
@@ -236,7 +236,7 @@ details.settings .form{padding-bottom:18px}
     <form class="form" id="form" autocomplete="off">
       <div class="field"><label for="f-date">Date</label><input id="f-date" type="date" required></div>
       <div class="field"><label for="f-type">Type</label>
-        <select id="f-type"><option value="cash">Cash game</option><option value="tournament">Tournament</option><option value="adjustment">Adjustment</option></select></div>
+        <select id="f-type"><option value="tournament">Tournament</option><option value="cash">Cash game</option><option value="adjustment">Adjustment</option></select></div>
       <div class="field" id="w-stakes"><label for="f-stakes">Stakes</label><input id="f-stakes" placeholder="$1/$2 or $22 MTT"></div>
       <div class="field"><label for="f-venue" id="l-venue">Venue / site</label><input id="f-venue" placeholder="Casino, home game, site"></div>
       <div class="field" id="w-buyin"><label for="f-buyin">Buy-in ($)</label><input id="f-buyin" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0"></div>
@@ -299,7 +299,7 @@ details.settings .form{padding-bottom:18px}
     </form>
   </details>
 
-  <p class="foot">Stakes guidance uses a 25 buy-in rule for cash games and 100 buy-ins for tournaments. Adjust to your own risk tolerance.</p>
+  <p class="foot">Stakes guidance uses 100 average buy-ins for tournaments with no single entry above 2 percent, and a 25 buy-in rule for cash games. Adjust to your own risk tolerance.</p>
 </div>
 
 <script>
@@ -454,8 +454,8 @@ function renderTiles(k){
   g.push('<div class="tile stakes"><div class="eyebrow">Suggested cash game</div><div class="v">'+esc(stakeName)+'</div><div class="l">'+(k.stake?Math.floor(k.bank/k.stake.bi)+" buy-ins at the max buy-in · 25 buy-in rule":"Needs "+money(50)+" for NL2")+'</div><div class="rule">'+esc(moveUp)+'</div></div>');
   const abiText = k.abi ? money(k.abi)+" ABI" : "Freerolls";
   const abiUp = k.abiNext ? "Move up to "+money(k.abiNext)+" ABI at "+money(k.abiNext*100)+"." : "";
-  g.push('<div class="tile stakes"><div class="eyebrow">Suggested tournament ABI</div><div class="v">'+esc(abiText)+'</div><div class="l">'+(k.abi?Math.floor(k.bank/k.abi)+" buy-ins · 100 buy-in rule · max single buy-in "+money(Math.floor(k.mttMax)):"Needs "+money(100)+" for $1 tournaments")+'</div><div class="rule">'+esc(abiUp)+'</div></div>');
-  el.suggest.innerHTML = g.join("");
+  g.push('<div class="tile stakes"><div class="eyebrow">Suggested tournament ABI</div><div class="v">'+esc(abiText)+'</div><div class="l">'+(k.abi?Math.floor(k.bank/k.abi)+" buy-ins · 100 buy-in rule · single entry cap "+money(Math.floor(k.bank/50))+" (2%)":"Needs "+money(100)+" for $1 tournaments")+'</div><div class="rule">'+esc(abiUp)+'</div></div>');
+  el.suggest.innerHTML = g.reverse().join("");
   renderLadder(k);
 }
 function renderLadder(k){
@@ -465,11 +465,12 @@ function renderLadder(k){
     const cs = cashStakeFor(m); const abi = abiFor(m);
     const cls = m===cur ? "cur" : m<=k.bank ? "done" : "";
     const parts = cs ? cs.name.match(/^(\S+)\s+\((.*)\)$/) : null;
-    return '<tr class="'+cls+'"><td class="num">'+esc(money(m))+(m===cur?' <span class="chip cash">you are here</span>':'')+'</td>'+
-      '<td>'+(cs?esc(parts?parts[1]:cs.name)+' <span class="muted">'+esc(parts?parts[2]:"")+'</span>':'<span class="muted">below NL2</span>')+'</td>'+
-      '<td class="num">'+(cs?Math.floor(m/cs.bi)+" buy-ins":"")+'</td>'+
+    return '<tr class="'+cls+'"><td class="num">'+esc(money(m))+(m===cur?' <span class="chip tourney">you are here</span>':'')+'</td>'+
       '<td class="num">'+(abi?esc(money(abi)):'<span class="muted">freerolls</span>')+'</td>'+
-      '<td class="num">'+(abi?Math.floor(m/abi)+" buy-ins":"")+'</td></tr>';
+      '<td class="num">'+(abi?Math.floor(m/abi)+" buy-ins":"")+'</td>'+
+      '<td class="num">'+esc(money(Math.floor(m/50)))+'</td>'+
+      '<td>'+(cs?esc(parts?parts[1]:cs.name)+' <span class="muted">'+esc(parts?parts[2]:"")+'</span>':'<span class="muted">below NL2</span>')+'</td>'+
+      '<td class="num">'+(cs?Math.floor(m/cs.bi)+" buy-ins":"")+'</td></tr>';
   }).join("");
 }
 
@@ -602,11 +603,11 @@ function renderTags(k){
   const goalK = cfg.goal>=1000 ? "$"+(cfg.goal/1000)+"k" : "$"+cfg.goal;
   const dyn = [startK+" to "+goalK, (startK+" to "+goalK+" poker").replace(/\$/g,""), "poker road to "+goalK.replace("$","")];
   if(last){
-    dyn.push(last.type==="cash" ? "cash game poker" : "poker tournament");
+    if(last.type==="cash") dyn.push("cash game poker"); else dyn.push("poker tournament","mtt poker","online poker tournaments");
     if(last.stakes) dyn.push(last.stakes.toLowerCase()+" poker");
     if(last.venue){ const v=last.venue.toLowerCase(); dyn.push(/online|stars|ggpoker|gg |ignition|acr|bovada|wsop|888|partypoker|\.com/.test(v) ? "online poker" : "live poker"); if(!/online|home/.test(v)) dyn.push(v); }
     if(last.episode) dyn.push("poker episode "+last.episode);
-  } else { dyn.push("online poker","cash game poker"); }
+  } else { dyn.push("poker tournament","mtt poker","online poker tournaments"); }
   const seen = new Set(); const tags = [];
   for(const t of dyn.concat(CORE_TAGS)){ const x=t.trim(); if(!x||seen.has(x)) continue; seen.add(x); tags.push(x); }
   let out = []; let len = 0;
