@@ -26,3 +26,13 @@ The same page is also published as a private claude.ai artifact with shared clou
 - **Adjustment**: a signed amount for anything that is not a session (withdrawal, bonus, expense). Adjustments change the bankroll but are left out of session stats.
 
 Settings (challenge name, starting bankroll, goal, start date) are under **Challenge settings** at the bottom of the page.
+
+## Range builder
+
+`ranges.html` is a preflop range builder for tournaments. Pick the table size, spot (RFI, vs RFI, vs 3-bet), hero and villain positions, effective stack and model (Chip EV or three ICM presets), and the 13×13 grid fills with a default range. Paint cells with the raise, call, shove or fold brush at 100, 75, 50 or 25 percent, save the edit for that spot, copy the range string, or paste one in.
+
+The defaults are not solver output. They come from two standard hand orderings (deep-stack playability and push-fold equity) and percentage targets per position and depth. The ICM presets shift the Chip EV baseline: calls tighten, and aggression widens when hero covers the villain and narrows when covered. Treat the grids as a starting point and edit them.
+
+## Schedule and game plan
+
+`SCHEDULE.md` / `schedule.pdf` hold the weekly session and study schedule. `MTT-GAME-PLAN.md` / `mtt-game-plan.pdf` hold the tournament game plan: selection, stage-by-stage strategy, exploits, stack-depth rules, ICM, block rules and the timeline.

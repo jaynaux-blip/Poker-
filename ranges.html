@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Range Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: controls strip on top, the 13x13 grid as the centrepiece with a legend and stats beside it,
+   then the range string, the import box, and the editing tools. Same tokens as the tracker. */
+:root{
+  --bg:#f1f4f1; --surface:#ffffff; --surface-2:#e7ece8; --fg:#13201a; --muted:#5b685f; --line:#d3dbd5;
+  --accent:#1b7a4e; --accent-ink:#ffffff; --accent-soft:#dcefe3;
+  --raise:#d9532b; --call:#2f9e5f; --shove:#7b2cbf; --fold:#dfe4df; --fold-ink:#7a857d;
+  --display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --radius:10px; --shadow:0 1px 2px rgba(19,32,26,.06), 0 6px 18px rgba(19,32,26,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1411; --surface:#171f1a; --surface-2:#1f2a23; --fg:#edf2ee; --muted:#9aa89f; --line:#2b362f;
+    --accent:#3bb577; --accent-ink:#071a10; --accent-soft:#1a3426;
+    --raise:#f0683f; --call:#43c27a; --shove:#a76ff0; --fold:#242d27; --fold-ink:#6d7a71;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1411; --surface:#171f1a; --surface-2:#1f2a23; --fg:#edf2ee; --muted:#9aa89f; --line:#2b362f;
+  --accent:#3bb577; --accent-ink:#071a10; --accent-soft:#1a3426;
+  --raise:#f0683f; --call:#43c27a; --shove:#a76ff0; --fold:#242d27; --fold-ink:#6d7a71;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.45}
+.wrap{max-width:1040px;margin:0 auto;padding-inline:16px;padding-block:20px 56px;display:grid;gap:18px}
+h1,h2{margin:0;font-family:var(--display);font-weight:700;letter-spacing:.01em;text-wrap:balance}
+h2{font-size:1.2rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.eyebrow{font-size:.74rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px 20px;border-bottom:2px solid var(--fg);padding-bottom:12px}
+.top h1{font-size:2.1rem;line-height:1}
+.top .sub{color:var(--muted);font-size:.95rem;max-width:60ch}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:.8rem;font-weight:600}
+.badge.live::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--raise)}
+.panel{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px;display:grid;gap:12px;min-width:0}
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px 12px}
+.field{display:grid;gap:4px;min-width:0}
+.field label{font-size:.74rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.field select,.field input,.field textarea{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);min-width:0;width:100%}
+.hidden{display:none !important}
+.seg{display:flex;flex-wrap:wrap;gap:4px}
+.seg button{padding:6px 10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;font-weight:600;font-size:.85rem}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.toggle{display:flex;align-items:center;gap:8px;font-size:.9rem;padding-top:22px}
+.toggle input{width:auto}
+
+.main{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:18px;align-items:start}
+@media (max-width:760px){.main{grid-template-columns:1fr}}
+.gridwrap{min-width:0}
+.grid{display:grid;grid-template-columns:repeat(13,1fr);gap:2px;user-select:none;touch-action:none;width:100%;max-width:560px;aspect-ratio:1}
+.cell{position:relative;display:flex;align-items:center;justify-content:center;font-size:clamp(.55rem,1.6vw,.8rem);font-weight:600;border-radius:3px;background:var(--fold);color:var(--fold-ink);overflow:hidden;cursor:crosshair;min-width:0}
+.cell span{position:relative;z-index:1}
+.cell .fill{position:absolute;inset:0}
+.cell.pair{outline:1px solid rgba(0,0,0,.08)}
+.cell[data-a="raise"]{color:#fff} .cell[data-a="call"]{color:#fff} .cell[data-a="shove"]{color:#fff}
+.cell[data-f="50"],.cell[data-f="25"],.cell[data-f="75"]{color:var(--fg)}
+.legend{display:grid;gap:8px}
+.lg{display:flex;align-items:center;gap:8px;font-size:.88rem}
+.sw{width:16px;height:16px;border-radius:4px;flex:none}
+.sw.raise{background:var(--raise)} .sw.call{background:var(--call)} .sw.shove{background:var(--shove)} .sw.fold{background:var(--fold);border:1px solid var(--line)}
+.stat{display:grid;gap:2px}
+.stat .v{font-family:var(--display);font-size:1.8rem;font-weight:700;line-height:1.1}
+.stat .l{font-size:.8rem;color:var(--muted)}
+.side{display:grid;gap:14px}
+.brushes{display:grid;gap:6px}
+.brushes .seg button{display:inline-flex;align-items:center;gap:6px}
+.brushes .sw{width:12px;height:12px}
+.hint{font-size:.84rem;color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);font-weight:600}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.small{padding:5px 10px;font-size:.82rem}
+.btn:disabled{opacity:.55;cursor:default}
+.msg{font-size:.86rem;color:var(--muted)}
+.msg.err{color:var(--raise)}
+pre.range{margin:0;white-space:pre-wrap;word-break:break-word;font:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:.9rem;min-height:2.6em}
+.note{font-size:.84rem;color:var(--muted);border-left:3px solid var(--accent);padding-left:10px}
+.chip{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--surface-2);font-size:.76rem;font-weight:600;color:var(--muted)}
+.chip.custom{background:var(--accent-soft);color:var(--accent)}
+.foot{font-size:.8rem;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="eyebrow">Road to 100K</div>
+      <h1>Range Builder</h1>
+      <div class="sub">Preflop ranges for tournament play by position, stack depth and spot. Paint to edit; your edits are saved per spot.</div>
+    </div>
+    <span class="badge" id="modebadge">Connecting…</span>
+  </header>
+
+  <section class="panel">
+    <div class="controls">
+      <div class="field"><label>Table</label><div class="seg" id="table"><button type="button" data-v="9" aria-pressed="true">9-max</button><button type="button" data-v="6" aria-pressed="false">6-max</button></div></div>
+      <div class="field"><label for="scenario">Spot</label>
+        <select id="scenario">
+          <option value="rfi">RFI (first in)</option>
+          <option value="vsrfi">Vs RFI (facing an open)</option>
+          <option value="vs3b">Vs 3-bet (after opening)</option>
+        </select></div>
+      <div class="field"><label for="hero">Hero</label><select id="hero"></select></div>
+      <div class="field" id="w-villain"><label for="villain" id="l-villain">Opener</label><select id="villain"></select></div>
+      <div class="field"><label for="depth">Effective stack</label>
+        <select id="depth"><option>10</option><option>12</option><option>15</option><option>20</option><option selected>25</option><option>30</option><option>40</option><option>60</option><option>100</option></select></div>
+      <div class="field"><label for="model">Model</label>
+        <select id="model">
+          <option value="chip">Chip EV</option>
+          <option value="icm1">ICM: in the money, mild</option>
+          <option value="icm2">ICM: bubble</option>
+          <option value="icm3">ICM: final table</option>
+        </select></div>
+      <div class="field" id="w-covers"><label>Stacks</label><label class="toggle" style="padding-top:4px"><input type="checkbox" id="covers" checked> Hero covers villain</label></div>
+    </div>
+    <div class="row"><span class="chip" id="srcchip">Default</span><span class="msg" id="spotmsg"></span></div>
+  </section>
+
+  <section class="main">
+    <div class="panel gridwrap">
+      <div class="grid" id="grid" role="grid" aria-label="Hand range grid"></div>
+      <div class="hint">Suited hands above the diagonal, offsuit below. Click or drag to paint with the selected brush. Tap a cell twice for a 50 percent mix.</div>
+    </div>
+    <div class="side">
+      <div class="panel">
+        <h2>This range</h2>
+        <div class="stat"><div class="v num" id="pct">0%</div><div class="l">of hands, <span id="combos" class="num">0</span> of 1,326 combos</div></div>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="panel brushes">
+        <h2>Brush</h2>
+        <div class="seg" id="brush">
+          <button type="button" data-v="raise" aria-pressed="true"><span class="sw raise"></span><span id="b-raise">Raise</span></button>
+          <button type="button" data-v="call" aria-pressed="false"><span class="sw call"></span>Call</button>
+          <button type="button" data-v="shove" aria-pressed="false"><span class="sw shove"></span>Shove</button>
+          <button type="button" data-v="fold" aria-pressed="false"><span class="sw fold"></span>Fold</button>
+        </div>
+        <div class="seg" id="freq">
+          <button type="button" data-v="100" aria-pressed="true">100%</button>
+          <button type="button" data-v="75" aria-pressed="false">75%</button>
+          <button type="button" data-v="50" aria-pressed="false">50%</button>
+          <button type="button" data-v="25" aria-pressed="false">25%</button>
+        </div>
+        <div class="row">
+          <button class="btn small" type="button" id="save">Save edits</button>
+          <button class="btn small" type="button" id="reset">Reset to default</button>
+        </div>
+        <span class="msg" id="savemsg"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Range string</h2>
+    <pre class="range num" id="rangestr"></pre>
+    <div class="row">
+      <button class="btn small" type="button" id="copy">Copy</button>
+      <span class="msg" id="copymsg"></span>
+    </div>
+    <div class="field"><label for="import">Paste a range string to paint it with the current brush</label><textarea id="import" rows="2" placeholder="22+, A2s+, KTs+, QJs, ATo+, KQo"></textarea></div>
+    <div class="row">
+      <button class="btn small" type="button" id="doimport">Apply to grid</button>
+      <button class="btn small" type="button" id="clear">Clear grid</button>
+      <button class="btn small" type="button" id="export">Export custom ranges</button>
+      <span class="msg" id="importmsg"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>How the defaults are built</h2>
+    <p class="note">The default ranges are not solver output. They come from two standard hand orderings (one for deep-stack playability, one for push-fold equity) and percentage targets per position and stack depth that follow common tournament charts. Vs RFI and vs 3-bet ranges are scaled from the opener's range. The ICM models shift the Chip EV baseline: calls tighten, and aggression widens when you cover the villain and narrows when you are covered, with the bubble shift the largest. Treat every grid as a starting point to check against your own study, then paint it and save.</p>
+  </section>
+  <p class="foot">Percentages count combos out of 1,326. Pairs are 6 combos, suited hands 4, offsuit 12.</p>
+</div>
+
+<script>
+(function(){
+"use strict";
+const RANKS = "AKQJT98765432".split("");
+const POS9 = ["UTG","UTG+1","UTG+2","LJ","HJ","CO","BTN","SB","BB"];
+const POS6 = ["LJ","HJ","CO","BTN","SB","BB"];
+const DEEP_ORDER = ("AA KK QQ AKs JJ AKo AQs TT AJs KQs AQo 99 ATs KJs AJo QJs KTs 88 A9s JTs KQo QTs ATo A8s 77 KJo A5s J9s K9s A7s T9s QJo A4s A6s Q9s 66 A3s KTo QTo JTo A2s K8s 98s T8s J8s 55 A9o K7s Q8s 87s 44 K6s 97s A8o T7s 33 K5s 76s J7s Q7s 86s 22 K4s A7o 65s T6s K9o Q9o J9o T9o K3s 96s Q6s 54s 75s A5o K2s A6o J6s 85s Q5s A4o 64s T8o 98o A3o Q4s J5s 74s 53s 95s A2o K8o Q8o J8o Q3s J4s 43s 63s T5s 87o 84s K7o Q2s J3s T4s 97o 73s 52s K6o 76o T7o J2s 94s 62s 42s T3s K5o Q7o 86o J7o 65o 32s 83s T2s 93s K4o 54o 75o 92s 72s 82s K3o Q6o 96o T6o K2o Q5o J6o 64o 85o Q4o J5o 74o 53o 95o Q3o T5o J4o 43o 63o 84o Q2o J3o T4o 73o 52o J2o 94o 62o 42o T3o 32o 83o T2o 93o 92o 72o 82o").split(" ");
+const SHOVE_ORDER = ("AA KK QQ JJ TT 99 AKs AKo AQs 88 AQo AJs ATs AJo 77 KQs ATo A9s KJs A8s 66 KQo A9o A7s KTs QJs A5s A6s A8o KJo 55 A4s K9s A7o QTs A3s KTo A2s JTs A6o Q9s A5o 44 K8s QJo A4o K7s A3o J9s QTo 33 K6s A2o Q8s K9o T9s K5s J8s 22 K4s JTo Q9o K3s Q7s T8s K2s J9o K8o Q6s 98s T9o J7s Q5s K7o Q8o T7s Q4s J8o K6o 97s Q3s J6s 87s T8o K5o Q2s T6s J5s K4o 98o J4s 96s Q7o 86s K3o T7o 76s J3s T5s K2o J7o Q6o 95s J2s 97o T4s 85s Q5o 87o 65s T3s 75s J6o Q4o T6o 94s T2s 86o 54s Q3o J5o 96o 84s 93s 64s 76o Q2o J4o 74s T5o 92s 95o 53s J3o 85o 63s T4o 65o 83s 75o J2o 43s 82s T3o 73s 94o 54o 84o 52s 72s T2o 64o 62s 93o 42s 74o 92o 53o 32s 63o 83o 43o 73o 82o 52o 72o 62o 42o 32o").split(" ");
+const BLUFF3B = ["A5s","A4s","A3s","A2s","K9s","K8s","Q9s","J9s","T9s","98s","87s","76s","65s","K7s","Q8s","J8s","T8s","A9o","KJo","QJo"];
+const ALL = []; for(let i=0;i<13;i++) for(let j=0;j<13;j++){ ALL.push(handAt(i,j)); }
+function handAt(i,j){ if(i===j) return RANKS[i]+RANKS[i]; return i<j ? RANKS[i]+RANKS[j]+"s" : RANKS[j]+RANKS[i]+"o"; }
+function combos(h){ return h.length===2?6: h[2]==="s"?4:12; }
+function clamp(x,a,b){ return Math.max(a,Math.min(b,x)); }
+const DB_KEY = "r2h.ranges";
+const $ = s=>document.querySelector(s);
+const el = { table:$("#table"), scenario:$("#scenario"), hero:$("#hero"), villain:$("#villain"), wvillain:$("#w-villain"), lvillain:$("#l-villain"),
+  depth:$("#depth"), model:$("#model"), covers:$("#covers"), wcovers:$("#w-covers"), grid:$("#grid"), pct:$("#pct"), combos:$("#combos"), legend:$("#legend"),
+  brush:$("#brush"), freq:$("#freq"), braise:$("#b-raise"), save:$("#save"), reset:$("#reset"), savemsg:$("#savemsg"), rangestr:$("#rangestr"), copy:$("#copy"),
+  copymsg:$("#copymsg"), imp:$("#import"), doimport:$("#doimport"), clear:$("#clear"), exp:$("#export"), importmsg:$("#importmsg"), badge:$("#modebadge"),
+  srcchip:$("#srcchip"), spotmsg:$("#spotmsg") };
+
+let table="9", brush="raise", freq=100, range={}, isCustom=false, dirty=false, db=null, dl=null, canWrite=true, customCache={};
+
+/* ---------- validate orderings once ---------- */
+(function(){ for(const ord of [DEEP_ORDER, SHOVE_ORDER]){ const seen=new Set(ord); for(const h of ALL){ if(!seen.has(h)) ord.push(h); } } })();
+
+/* ---------- default range generation ---------- */
+function positions(){ return table==="9"?POS9:POS6; }
+function rfiPct(pos, depth){
+  const base = {UTG:11,"UTG+1":12,"UTG+2":14,LJ:16,HJ:20,CO:27,BTN:44,SB:42};
+  const shove15 = {UTG:9,"UTG+1":10,"UTG+2":12,LJ:14,HJ:17,CO:22,BTN:32,SB:45};
+  if(pos==="BB") return 0;
+  if(depth<=10) return clamp(shove15[pos]*1.35,0,62);
+  if(depth<=12) return clamp(shove15[pos]*1.15,0,55);
+  if(depth<=15) return shove15[pos];
+  if(depth<=25) return base[pos]*(pos==="SB"?0.85:0.9);
+  if(depth>=100) return base[pos]*1.05;
+  return base[pos];
+}
+function order(depth){ return depth<=20 ? SHOVE_ORDER : DEEP_ORDER; }
+function takePct(ord, pct, exclude){
+  const target = pct/100*1326; const out=[]; let c=0;
+  for(const h of ord){ if(exclude && exclude.has(h)) continue; if(c>=target) break; out.push(h); c+=combos(h); }
+  return out;
+}
+function emptyRange(){ const r={}; for(const h of ALL) r[h]={a:"fold",f:100}; return r; }
+function setHands(r, hands, a, f){ for(const h of hands) r[h]={a:a,f:f||100}; }
+function laterThan(a,b){ const p=positions(); return p.indexOf(a)>p.indexOf(b); }
+function isBlind(p){ return p==="SB"||p==="BB"; }
+
+function buildDefault(sc, hero, villain, depth, model, covers){
+  const r = emptyRange(); const ord = order(depth); const pres = {chip:0, icm1:0.4, icm2:1, icm3:0.75}[model]||0;
+  if(sc==="rfi"){
+    if(hero==="BB") return r;
+    let pct = rfiPct(hero, depth);
+    const act = depth<=15 ? "shove" : "raise";
+    pct = icmAgg(pct, pres, covers, act==="shove");
+    setHands(r, takePct(ord, pct), act);
+    if(act==="raise" && depth>=20 && depth<=25 && hero!=="SB"){ /* a few open-shoves from late position at 20-25bb: none by default */ }
+    return r;
+  }
+  const vOpen = rfiPct(villain, depth);
+  if(sc==="vsrfi"){
+    const heroIP = !isBlind(hero) && laterThan(hero, villain);
+    const jam = depth<=25;
+    let v3 = clamp(0.22*vOpen, 2.5, 11);
+    if(jam) v3 = clamp(0.3*vOpen, 3, 14);
+    let call;
+    if(hero==="BB") call = jam ? clamp(0.5*vOpen, 8, 30) : clamp(0.9*vOpen, 15, 45);
+    else if(hero==="SB") call = jam ? 0 : clamp(0.1*vOpen, 1, 4);
+    else if(heroIP) call = jam ? clamp(0.12*vOpen, 1, 5) : clamp(0.35*vOpen, 4, 16);
+    else call = jam ? clamp(0.08*vOpen, 0.5, 3) : clamp(0.2*vOpen, 2, 8);
+    if(depth<=15){ call = hero==="BB" ? clamp(0.35*vOpen, 5, 20) : 0; }
+    v3 = icmAgg(v3, pres, covers, true);
+    call = icmCall(call, pres, covers);
+    const aggAct = jam ? "shove" : "raise";
+    const vHands = takePct(ord, v3); setHands(r, vHands, aggAct);
+    const ex = new Set(vHands);
+    const cHands = takePct(ord, call, ex); setHands(r, cHands, "call"); cHands.forEach(h=>ex.add(h));
+    if(!jam && depth>=30 && !(pres>0.5 && !covers)){
+      const bluffTarget = Math.round(0.35*v3/100*1326); let c=0;
+      for(const h of BLUFF3B){ if(ex.has(h)) continue; if(c>=bluffTarget) break; r[h]={a:"raise",f:50}; c+=combos(h); }
+    }
+    return r;
+  }
+  if(sc==="vs3b"){
+    const hOpen = rfiPct(hero, depth); if(hOpen===0 || depth<=15) return r;
+    const heroIP = isBlind(villain) || !laterThan(villain, hero);
+    const jam = depth<=50;
+    let v4 = depth<=25 ? clamp(0.25*hOpen, 3, 8) : clamp(0.18*hOpen, 2, 6);
+    let call;
+    if(depth<=15) call = 0;
+    else if(depth<=25) call = clamp(0.1*hOpen, 1, 4);
+    else call = heroIP ? clamp(0.35*hOpen, 5, 15) : clamp(0.2*hOpen, 3, 9);
+    v4 = icmAgg(v4, pres, covers, true); call = icmCall(call, pres, covers);
+    const vHands = takePct(ord, v4); setHands(r, vHands, jam?"shove":"raise");
+    const ex = new Set(vHands);
+    setHands(r, takePct(ord, call, ex), "call");
+    const openHands = new Set(takePct(ord, hOpen));
+    for(const h of ALL){ if(!openHands.has(h)) r[h]={a:"fold",f:100}; }
+    return r;
+  }
+  return r;
+}
+function icmAgg(pct, p, covers, allin){ if(!p) return pct; const k = allin ? (covers?0.2:-0.25) : (covers?0.15:-0.15); return clamp(pct*(1+k*p), 0, 100); }
+function icmCall(pct, p, covers){ if(!p) return pct; return clamp(pct*(1-(covers?0.15:0.35)*p), 0, 100); }
+
+/* ---------- UI state ---------- */
+function fillSelect(sel, opts, keep){ const prev=keep?sel.value:null; sel.innerHTML = opts.map(o=>'<option value="'+o+'">'+o+'</option>').join(""); if(prev && opts.includes(prev)) sel.value=prev; }
+function syncControls(){
+  const sc = el.scenario.value; const pos = positions();
+  fillSelect(el.hero, sc==="rfi"? pos.filter(p=>p!=="BB") : sc==="vsrfi" ? pos.filter(p=>p!==pos[0]) : pos.filter(p=>p!=="BB"), true);
+  const hero = el.hero.value;
+  if(sc==="rfi"){ el.wvillain.classList.add("hidden"); }
+  else {
+    el.wvillain.classList.remove("hidden");
+    el.lvillain.textContent = sc==="vsrfi" ? "Opener" : "3-bettor";
+    const opts = sc==="vsrfi" ? pos.filter(p=>!isBlind(p) && !laterThan(p,hero) && p!==hero) : pos.filter(p=>laterThan(p,hero));
+    fillSelect(el.villain, opts, true);
+  }
+  el.wcovers.style.visibility = el.model.value==="chip" ? "hidden" : "visible";
+  el.braise.textContent = sc==="vsrfi" ? "3-bet" : sc==="vs3b" ? "4-bet" : "Raise";
+}
+function spotKey(){ return [table, el.scenario.value, el.hero.value, el.scenario.value==="rfi"?"-":el.villain.value, el.depth.value, el.model.value, el.model.value==="chip"?"-":(el.covers.checked?"covers":"covered")].join("|"); }
+function docId(){ return spotKey().replace(/[^A-Za-z0-9_\-.~:@+]/g, "_"); }
+function spotLabel(){
+  const sc=el.scenario.value, h=el.hero.value, v=el.villain.value, d=el.depth.value;
+  const m = {chip:"Chip EV", icm1:"ICM mild", icm2:"ICM bubble", icm3:"ICM final table"}[el.model.value];
+  const base = sc==="rfi" ? h+" opens first in" : sc==="vsrfi" ? h+" facing an open from "+v : h+" opened, facing a 3-bet from "+v;
+  const note = (sc==="vs3b" && +d<=15) ? " · at 15 bb and under the open is a shove, so there is no vs 3-bet spot" : "";
+  return base+" · "+d+" bb · "+m+(el.model.value!=="chip" ? (el.covers.checked?" · hero covers":" · hero covered"):"")+note;
+}
+function loadSpot(){
+  syncControls();
+  const id = docId();
+  const custom = customCache[id];
+  if(custom && custom.range){ range = normalize(custom.range); isCustom=true; }
+  else { range = buildDefault(el.scenario.value, el.hero.value, el.villain.value, +el.depth.value, el.model.value, el.covers.checked); isCustom=false; }
+  dirty=false; renderAll();
+}
+function normalize(obj){ const r=emptyRange(); for(const h of ALL){ const c=obj[h]; if(c && ["raise","call","shove","fold"].includes(c.a)) r[h]={a:c.a, f:[25,50,75,100].includes(+c.f)?+c.f:100}; } return r; }
+
+/* ---------- render ---------- */
+function renderGrid(){
+  if(!el.grid.children.length){
+    el.grid.innerHTML = ALL.map((h,i)=>'<div class="cell'+(h.length===2?" pair":"")+'" data-h="'+h+'" role="gridcell"><div class="fill"></div><span>'+h+'</span></div>').join("");
+  }
+  for(const c of el.grid.children){
+    const h=c.dataset.h, v=range[h];
+    c.dataset.a=v.a; c.dataset.f=v.f;
+    const fill=c.firstElementChild;
+    if(v.a==="fold" || v.f===100){ fill.style.background = v.a==="fold" ? "transparent" : "var(--"+v.a+")"; }
+    else fill.style.background = "linear-gradient(135deg, var(--"+v.a+") "+v.f+"%, var(--fold) "+v.f+"%)";
+  }
+}
+function stats(){
+  const t={raise:0,call:0,shove:0,fold:0}; let inR=0;
+  for(const h of ALL){ const v=range[h]; const c=combos(h)*v.f/100; if(v.a!=="fold"){ t[v.a]+=c; inR+=c; } }
+  t.fold = 1326-inR; return {t:t, inR:inR};
+}
+function renderStats(){
+  const s=stats();
+  el.pct.textContent = (s.inR/1326*100).toFixed(1)+"%";
+  el.combos.textContent = Math.round(s.inR).toLocaleString("en-US");
+  const names = {raise: el.braise.textContent, call:"Call", shove:"Shove (all-in)", fold:"Fold"};
+  el.legend.innerHTML = ["raise","call","shove","fold"].map(a=>'<div class="lg"><span class="sw '+a+'"></span><span>'+names[a]+'</span><span class="num" style="margin-left:auto;color:var(--muted)">'+(s.t[a]/1326*100).toFixed(1)+'%</span></div>').join("");
+}
+function renderAll(){
+  renderGrid(); renderStats();
+  el.rangestr.textContent = rangeString(range) || "(empty)";
+  el.srcchip.textContent = isCustom ? "Custom (saved)" : "Default";
+  el.srcchip.className = "chip"+(isCustom?" custom":"");
+  el.spotmsg.textContent = spotLabel();
+  el.savemsg.textContent = dirty ? "Unsaved edits." : "";
+}
+
+/* ---------- range string ---------- */
+function rangeString(r){
+  const groups = {raise:[], call:[], shove:[]};
+  const inAct = (h,a)=> r[h].a===a;
+  for(const a of ["raise","call","shove"]){
+    const parts=[];
+    const pairs = RANKS.map((x,i)=>({h:x+x, idx:i, on:inAct(x+x,a)}));
+    parts.push(...runs(pairs, (lo,hi)=> lo.h===hi.h ? lo.h : hi.idx===0 ? lo.h+"+" : lo.h+"-"+hi.h));
+    for(let i=0;i<13;i++){
+      for(const suf of ["s","o"]){
+        const ks = []; for(let j=i+1;j<13;j++) ks.push({h:RANKS[i]+RANKS[j]+suf, idx:j, on:inAct(RANKS[i]+RANKS[j]+suf,a)});
+        parts.push(...runs(ks, (lo,hi)=> lo.h===hi.h ? lo.h : hi.idx===i+1 ? lo.h+"+" : lo.h+"-"+hi.h));
+      }
+    }
+    const mixed = ALL.filter(h=>r[h].a===a && r[h].f<100);
+    groups[a] = parts;
+    if(mixed.length) groups[a].push("(mixed: "+mixed.map(h=>h+"@"+r[h].f).join(" ")+")");
+  }
+  const names = {raise: el.braise.textContent, call:"Call", shove:"Shove"};
+  return ["raise","shove","call"].filter(a=>groups[a].length).map(a=> names[a]+": "+groups[a].join(", ")).join("\n");
+}
+function runs(items, fmt){
+  /* items are ordered high to low by idx; a run is consecutive idx values all on */
+  const out=[]; let run=null;
+  for(const it of items){
+    if(it.on){ if(run && it.idx===run.last.idx+1){ run.last=it; } else { if(run) out.push(fmt(run.last, run.first)); run={first:it,last:it}; } }
+  }
+  if(run) out.push(fmt(run.last, run.first));
+  return out;
+}
+function parseRange(str){
+  const hands = new Set(); const errs=[];
+  for(let tok of str.split(/[,\s]+/)){ tok=tok.trim(); if(!tok) continue;
+    const m = /^([AKQJT2-9])([AKQJT2-9])([so])?(\+)?(?:-([AKQJT2-9])([AKQJT2-9])([so])?)?$/i.exec(tok);
+    if(!m){ errs.push(tok); continue; }
+    const a=m[1].toUpperCase(), b=m[2].toUpperCase(), suf=(m[3]||"").toLowerCase(), plus=!!m[4];
+    const ia=RANKS.indexOf(a), ib=RANKS.indexOf(b);
+    if(a===b){ const lo = m[5] ? RANKS.indexOf(m[5].toUpperCase()) : ia; const from = plus?0:Math.min(ia,lo); const to=Math.max(ia,lo); for(let i=from;i<=to;i++) hands.add(RANKS[i]+RANKS[i]); continue; }
+    const hi=Math.min(ia,ib), lo=Math.max(ia,ib);
+    const sufs = suf ? [suf] : ["s","o"];
+    let lo2 = lo; if(m[5]){ const x=RANKS.indexOf(m[5].toUpperCase()), y=RANKS.indexOf(m[6].toUpperCase()); lo2=Math.max(x,y); }
+    const from = plus ? hi+1 : Math.min(lo,lo2), to = Math.max(lo,lo2);
+    for(let j=from;j<=to;j++) for(const s of sufs) hands.add(RANKS[hi]+RANKS[j]+s);
+  }
+  return {hands:hands, errs:errs};
+}
+
+/* ---------- painting ---------- */
+let painting=false, lastTap={h:null,t:0};
+function paint(h){ range[h] = brush==="fold" ? {a:"fold",f:100} : {a:brush, f:freq}; dirty=true; }
+el.grid.addEventListener("pointerdown", ev=>{ const c=ev.target.closest(".cell"); if(!c||!canWrite) return; ev.preventDefault(); painting=true; el.grid.setPointerCapture(ev.pointerId);
+  const h=c.dataset.h; const now=Date.now();
+  if(lastTap.h===h && now-lastTap.t<400 && brush!=="fold"){ range[h]={a:brush,f:50}; dirty=true; lastTap={h:null,t:0}; }
+  else { paint(h); lastTap={h:h,t:now}; }
+  renderAll(); });
+el.grid.addEventListener("pointermove", ev=>{ if(!painting) return; const t=document.elementFromPoint(ev.clientX, ev.clientY); const c=t && t.closest(".cell"); if(!c) return; const h=c.dataset.h; if(range[h].a!==brush || range[h].f!==freq){ paint(h); renderAll(); } });
+window.addEventListener("pointerup", ()=>{ painting=false; });
+el.brush.addEventListener("click", ev=>{ const b=ev.target.closest("button"); if(!b) return; brush=b.dataset.v; for(const x of el.brush.children) x.setAttribute("aria-pressed", x===b); });
+el.freq.addEventListener("click", ev=>{ const b=ev.target.closest("button"); if(!b) return; freq=+b.dataset.v; for(const x of el.freq.children) x.setAttribute("aria-pressed", x===b); });
+el.table.addEventListener("click", ev=>{ const b=ev.target.closest("button"); if(!b) return; table=b.dataset.v; for(const x of el.table.children) x.setAttribute("aria-pressed", x===b); loadSpot(); });
+["scenario","hero","villain","depth","model","covers"].forEach(k=> el[k].addEventListener("change", ()=>{ if(k==="scenario"||k==="hero") syncControls(); loadSpot(); }));
+
+/* ---------- import / export / copy ---------- */
+el.doimport.addEventListener("click", ()=>{ const p=parseRange(el.imp.value); if(!p.hands.size && p.errs.length){ el.importmsg.textContent="Couldn't read: "+p.errs.slice(0,5).join(", "); el.importmsg.className="msg err"; return; }
+  for(const h of p.hands) paint(h); renderAll(); el.importmsg.className="msg"; el.importmsg.textContent = p.hands.size+" hands painted"+(p.errs.length?" · skipped "+p.errs.join(", "):"."); });
+el.clear.addEventListener("click", ()=>{ range=emptyRange(); dirty=true; renderAll(); });
+el.copy.addEventListener("click", ()=>{ const text=el.rangestr.textContent; const done=()=>{ el.copymsg.textContent="Copied."; setTimeout(()=>el.copymsg.textContent="",2000); };
+  const fb=()=>{ const r=document.createRange(); r.selectNodeContents(el.rangestr); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); el.copymsg.textContent="Text selected. Press copy."; };
+  try{ navigator.clipboard.writeText(text).then(done, fb); }catch(e){ fb(); } });
+el.exp.addEventListener("click", async ()=>{
+  const data = JSON.stringify({exported: new Date().toISOString(), ranges: customCache}, null, 1);
+  const name = "ranges-"+new Date().toISOString().slice(0,10)+".json";
+  if(dl){ try{ await dl.save({filename:name, data:data}); }catch(e){} return; }
+  if(window.claude && window.claude.use) return;
+  const a=document.createElement("a"); a.href="data:application/json;charset=utf-8,"+encodeURIComponent(data); a.download=name; document.body.appendChild(a); a.click(); a.remove();
+});
+
+/* ---------- storage ---------- */
+function lsGet(){ try{ const v=localStorage.getItem(DB_KEY); return v?JSON.parse(v):{}; }catch(e){ return {}; } }
+function lsSet(v){ try{ localStorage.setItem(DB_KEY, JSON.stringify(v)); return true; }catch(e){ return false; } }
+el.save.addEventListener("click", async ()=>{
+  if(!canWrite) return;
+  const id=docId(); const doc={ key:spotKey(), label:spotLabel(), range:range, updatedAt:Date.now() };
+  el.save.disabled=true; el.savemsg.textContent="Saving…";
+  try{
+    if(db) await db.collection("ranges").doc(id).set(doc);
+    else { if(!lsSet(Object.assign({}, customCache, {[id]:doc}))) throw new Error("This browser blocked local storage."); }
+    customCache[id]=doc; isCustom=true; dirty=false; renderAll();
+    el.savemsg.textContent="Saved.";
+  }catch(e){ el.savemsg.textContent="Couldn't save."+(e&&e.message?" "+e.message:""); if(e&&e.code==="invalid_argument"&&db) setReadOnly(); }
+  el.save.disabled=false;
+});
+el.reset.addEventListener("click", async ()=>{
+  const id=docId(); dirty=false;
+  try{ if(db) await db.collection("ranges").doc(id).delete(); else { delete customCache[id]; lsSet(customCache); } }catch(e){}
+  delete customCache[id]; loadSpot();
+});
+function setReadOnly(){ canWrite=false; el.badge.textContent="Live view"; el.badge.className="badge live"; el.save.disabled=true; el.reset.disabled=true; el.doimport.disabled=true; el.clear.disabled=true; }
+function enterLocal(){ db=null; customCache=lsGet(); el.badge.textContent="Saved in this browser"; el.badge.className="badge"; loadSpot(); }
+function subscribe(){
+  el.badge.textContent="Live"; el.badge.className="badge live";
+  db.collection("ranges").onSnapshot(snap=>{
+    customCache={}; snap.docs.forEach(d=>{ if(d.exists) customCache[d.id]=d.data(); });
+    if(!dirty) loadSpot(); else { el.srcchip.textContent = customCache[docId()] ? "Custom (saved)" : "Default"; }
+  }, err=>{ el.badge.textContent="Connection lost"; });
+}
+
+/* ---------- boot ---------- */
+syncControls(); loadSpot();
+(async function boot(){
+  if(!(window.claude && typeof window.claude.use==="function")){ enterLocal(); return; }
+  let d=null,u=null,dlc=null;
+  try{ [d,u,dlc] = await Promise.all([window.claude.use("db"), window.claude.use("user"), window.claude.use("downloads")]); }catch(e){}
+  dl=dlc||null; if(!dl) el.exp.classList.add("hidden");
+  if(!d){ enterLocal(); return; }
+  db=d;
+  if(u){ try{ const cw=await u.can("data.write"); if(cw===false) setReadOnly(); }catch(e){} }
+  subscribe();
+})();
+})();
+</script>
+
+</body>
+</html>
