@@ -60,7 +60,14 @@ button{font:inherit;cursor:pointer}
 .toggle input{width:auto}
 
 .main{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:18px;align-items:start}
-@media (max-width:760px){.main{grid-template-columns:1fr}}
+@media (max-width:760px){
+  .main{grid-template-columns:1fr}
+  .side{display:contents}
+  .side > .panel:first-child{order:2}
+  .panel.brushes{order:1;position:sticky;bottom:0;z-index:5;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));box-shadow:0 -4px 18px rgba(0,0,0,.12)}
+  .grid{max-width:none}
+  .cell{font-size:.62rem}
+}
 .gridwrap{min-width:0}
 .grid{display:grid;grid-template-columns:repeat(13,1fr);gap:2px;user-select:none;touch-action:none;width:100%;max-width:560px;aspect-ratio:1}
 .cell{position:relative;display:flex;align-items:center;justify-content:center;font-size:clamp(.55rem,1.6vw,.8rem);font-weight:600;border-radius:3px;background:var(--fold);color:var(--fold-ink);overflow:hidden;cursor:crosshair;min-width:0}
@@ -307,7 +314,7 @@ function syncControls(){
   else {
     el.wvillain.classList.remove("hidden");
     el.lvillain.textContent = sc==="vsrfi" ? "Opener" : "3-bettor";
-    const opts = sc==="vsrfi" ? pos.filter(p=>!isBlind(p) && !laterThan(p,hero) && p!==hero) : pos.filter(p=>laterThan(p,hero));
+    const opts = sc==="vsrfi" ? pos.filter(p=>p!=="BB" && !laterThan(p,hero) && p!==hero) : pos.filter(p=>laterThan(p,hero));
     fillSelect(el.villain, opts, true);
   }
   el.wcovers.style.visibility = el.model.value==="chip" ? "hidden" : "visible";
