@@ -12,6 +12,18 @@ A six-storey brick walk-up over a row of shops:
 
 Coordinates (meters): origin at street level on the facade's face, Z up, the facade facing -X (toward the
 apartment), Y along the street. The stage places it 18 m from the apartment window, the street 12 m below.
+
+Two meshes, both in that frame (place them with the same transform):
+- SM_Tenement: the building. Its slots, in order: 0 brick, 1 sash, 2 glass, 3 stone, 4 room_blinds, 5 room_warm, 6 ac,
+  7 iron, 8 room_tv, 9 store (a stub: one 4 cm quad 3.4 m behind the face, facing away from the street, so slot 9 keeps
+  the index the street's HideTenementShop names; hiding it hides nothing), 10 fascia, 11 door.
+- SM_Tenement_Shop: the laundromat's room behind the shop window (the fluorescent-lit box with the dryers' fronts),
+  split out so the street can leave it out where The Block's Wash & Fold stands in its place; the apartment's view
+  (NightOneStage) places it with SM_Tenement. One slot: 0 store (baked emissive).
+
+Room ids (world realism spec 3.4): COLOR_0.R on the lit rooms' faces (slots 4, 5 and 8; the laundromat's slot 0) is a
+per-room id, 0.02..1; G and B are 1 and every other face is white (facades.write_room_ids). ue-world's
+M_NS_LitRoomBaked lights each room by the hour from it; the apartment's view keeps the imported material.
 """
 import math
 import random
@@ -23,14 +35,16 @@ from mathutils import Matrix, Vector
 from artkit import core, parts
 from artkit.shade import noise, object_coords, ramp, scaled, vec
 
-MESHES = ['SM_Tenement']
+MESHES = ['SM_Tenement', 'SM_Tenement_Shop']
+# SM_Tenement's slot order, pinned (the street addresses slot 9 by index).
+ORDER = ['brick', 'sash', 'glass', 'stone', 'blinds', 'warm', 'ac', 'iron', 'tv', 'stub', 'fascia', 'door']
 DOUBLE_SIDED = False
 TEXTURE_SIZE = 1024
 TEXTURE_SIZES = {'tenement_brick': 4096, 'tenement_stone': 2048, 'tenement_sash': 1024, 'tenement_glass': 256, 'tenement_iron': 1024,
-                 'tenement_ac': 512, 'tenement_room_warm': 2048, 'tenement_room_tv': 1024, 'tenement_room_blinds': 2048, 'tenement_store': 2048,
+                 'tenement_ac': 512, 'tenement_room_warm': 2048, 'tenement_room_tv': 1024, 'tenement_room_blinds': 2048, 'tenement_store': 2048, 'tenement_store_stub': 32,
                  'tenement_fascia': 512, 'tenement_door': 512}
 AO_DISTANCE = 0.6
-REVIEW_VIEWS = [('front', -90, 4, 34.0, (0.0, 0.0, 12.5)), ('angle', -60, 12, 30.0, (0.0, 0.0, 12.5)), ('detail', -75, 6, 9.0, (0.0, -8.0, 12.0))]
+REVIEW_VIEWS = [('front', -90, 4, 1.9, (0.0, 0.0, 12.5)), ('angle', -60, 12, 1.7, (0.0, 0.0, 12.5)), ('detail', -75, 6, 0.42, (0.0, -8.0, 4.0))]
 REVIEW_SCREEN_LIGHT = False
 
 W = 36.0            # facade width (Y)
@@ -257,10 +271,18 @@ def store_material():
     return m
 
 
+def stub_material():
+    """Slot 9's stand-in on SM_Tenement once the laundromat is a mesh of its own (see the module docstring)."""
+    m = core.Mat('tenement_store_stub')
+    m.set('Base Color', core.hex_linear(0x101112))
+    m.set('Roughness', 0.9)
+    return m
+
+
 def materials():
     return {'brick': brick_material(), 'stone': stone_material(), 'sash': paint_material('tenement_sash', 0xd2c9b2, 0.45),
             'glass': glass_material(), 'iron': iron_material(), 'ac': paint_material('tenement_ac', 0xbdb6a6, 0.4, chips_hex=0x6b5340),
-            'warm': room_material('warm'), 'tv': room_material('tv'), 'blinds': room_material('blinds'), 'store': store_material(),
+            'warm': room_material('warm'), 'tv': room_material('tv'), 'blinds': room_material('blinds'), 'store': store_material(), 'stub': stub_material(),
             'fascia': paint_material('tenement_fascia', 0x163b2c, 0.35, chips_hex=0x0d1f18), 'door': paint_material('tenement_door', 0x2a1a12, 0.5)}
 
 
@@ -353,15 +375,28 @@ def trim(mats):
     return out
 
 
-def shopfront(mats):
-    """The laundromat: its window and the room behind it, mullions, the fascia; the tenants' door."""
-    out = []
+def shop_room(mats):
+    """SM_Tenement_Shop: the laundromat inside, fluorescent white, the dryers along the back wall."""
     y0, y1 = SHOP_Y
-    # The shop inside: fluorescent white, the dryers along the back wall.
     st = mats['store']
-    out += [box('shop', y0 - 0.5, y1 + 0.5, 0.0, 3.6, DEPTH + 3.4, DEPTH + 3.42, st),
+    return [box('shop', y0 - 0.5, y1 + 0.5, 0.0, 3.6, DEPTH + 3.4, DEPTH + 3.42, st),
             box('shop', y0 - 0.5, y1 + 0.5, 3.55, 3.6, DEPTH, DEPTH + 3.4, st), box('shop', y0 - 0.5, y1 + 0.5, 0.0, 0.05, DEPTH, DEPTH + 3.4, st),
             box('shop', y0 - 0.52, y0 - 0.5, 0.0, 3.6, DEPTH, DEPTH + 3.4, st), box('shop', y1 + 0.5, y1 + 0.52, 0.0, 3.6, DEPTH, DEPTH + 3.4, st)]
+
+
+def shopfront(mats):
+    """The laundromat's window (its room is SM_Tenement_Shop), mullions, the fascia; the tenants' door; slot 9's stub."""
+    out = []
+    y0, y1 = SHOP_Y
+    # The stub: 4 cm square, behind the shop's back wall and over its ceiling, facing away from the street.
+    q = box('stub', y0 + 0.3, y0 + 0.34, 3.8, 3.84, DEPTH + 3.0, DEPTH + 3.01, mats["stub"])
+    bm = bmesh.new()
+    bm.from_mesh(q.data)
+    bm.normal_update()
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.x < 0.9], context='FACES')
+    bm.to_mesh(q.data)
+    bm.free()
+    out.append(q)
     # Mullions every 2.15 m, a transom bar, the stall riser under the glass.
     fr = mats['fascia']
     n = 8
@@ -444,6 +479,14 @@ def build():
     objs += trim(mats)
     objs += shopfront(mats)
     objs += fire_escape(mats)
+    # Every part carries all twelve materials in ORDER (its faces on its own), so the join keeps that order.
+    order = [mats[k].m for k in ORDER]
+    for o in objs:
+        mi = order.index(o.data.materials[0]) if o.data.materials else ORDER.index('iron')
+        o.data.materials.clear()
+        for mt in order:
+            o.data.materials.append(mt)
+        o.data.polygons.foreach_set('material_index', [mi] * len(o.data.polygons))
     obj = core.join(objs, 'SM_Tenement')
     obj.name = obj.data.name = 'SM_Tenement'
     core.finish_hard_surface(obj, 30.0)
@@ -455,4 +498,23 @@ def build():
     groups += [(core.material_is(obj, s.material.name), 'box', None, (0.0, 0.0, 1.0, 1.0)) for s in obj.material_slots if s.material.name != 'tenement_brick']
     groups.append((lambda f: True, 'box', None, (0.0, 0.0, 1.0, 1.0)))
     core.uv_layout(obj, groups)
-    return [obj]
+    print('[tenement] SM_Tenement slots ' + ', '.join(f'{i} {s.material.name}' for i, s in enumerate(obj.material_slots)))
+    assert obj.material_slots[9].material.name == 'tenement_store_stub'
+    shop = core.join(shop_room(mats), 'SM_Tenement_Shop')
+    shop.name = shop.data.name = 'SM_Tenement_Shop'
+    core.finish_hard_surface(shop, 30.0)
+    core.uv_layout(shop, [(lambda f: True, 'box', None, (0.0, 0.0, 1.0, 1.0))])
+    # The lit rooms (and the laundromat's room), for the room ids written after the bake.
+    obj['lit_slots'] = [ORDER.index(k) for k in ('blinds', 'warm', 'tv')]
+    shop['lit_slots'] = [0]
+    return [obj, shop]
+
+
+def assemble(objs):
+    """After the bake: each lit room's id in COLOR_0.R (facades.write_room_ids, spec 3.4), so ue-world's
+    M_NS_LitRoomBaked can light the rooms by the hour. The laundromat's room is one room of its own."""
+    from assets import facades as fac
+    for o in objs:
+        if 'lit_slots' in o:
+            fac.write_room_ids(o, list(o['lit_slots']), seed=sum(map(ord, o.name)))
+    return objs

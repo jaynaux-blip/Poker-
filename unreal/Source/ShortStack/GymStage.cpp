@@ -40,7 +40,7 @@ const TCHAR* const Meshes[] = {
 	TEXT("SM_NS_Gym_SquatRack"), TEXT("SM_NS_Gym_Barbell"), TEXT("SM_NS_Gym_Dumbbell"), TEXT("SM_NS_Gym_DumbbellRack"), TEXT("SM_NS_Gym_PlateTree"),
 	TEXT("SM_NS_Gym_HeavyBag"), TEXT("SM_NS_Gym_Desk"), TEXT("SM_NS_Gym_Cooler"), TEXT("SM_NS_Gym_SpeedBag"), TEXT("SM_NS_Gym_CableStation"),
 	TEXT("SM_NS_Gym_Mats"), TEXT("SM_NS_Gym_Lockers"), TEXT("SM_NS_Gym_Whiteboard"), TEXT("SM_NS_Gym_Fan"), TEXT("SM_NS_Gym_Fan_Blades"),
-	TEXT("SM_Stock_CoolerRow_Water"), TEXT("SM_Stock_CoolerRow_Energy"),
+	TEXT("SM_NS_Gym_Banners"), TEXT("SM_Stock_CoolerRow_Water"), TEXT("SM_Stock_CoolerRow_Energy"),
 };
 
 /** Which workout a service is, by its offer ids ("gym/treadmill", "gym/bag", "gym/weights", "gym/trainer"). */
@@ -112,6 +112,12 @@ void AGymStage::BuildInterior()
 	const bool bShell = Site(TEXT("SM_NS_Gym_Shell")) != nullptr;
 	const bool bFront = Site(TEXT("SM_NS_Gym_Front")) != nullptr;
 	Site(TEXT("SM_NS_Gym_Front_Glass"));
+	if (bShell)
+	{
+		// The back wall's dressing over the mirrors (the club banner, Rosa's 1999 championship, the fight posters): it reads
+		// from the street through the glass. A site piece on the shell's own wall, so only with the shell.
+		Site(TEXT("SM_NS_Gym_Banners"));
+	}
 	UMaterialInterface* Rubber = Mat(TEXT("GymRubber"), 0x1d1e20, 0.9f, 4.0f);
 	UMaterialInterface* Brick = Mat(TEXT("GymBrick"), 0xe8e6e0, 0.8f, 1.0f);
 	UMaterialInterface* Charcoal = Mat(TEXT("GymCharcoal"), 0x2a2b2e, 0.8f, 1.0f);

@@ -1,4 +1,18 @@
-"""SM_Sedan: the parked cars along Fifth Street's curbs (one mesh; the game paints each a color).
+"""SM_Sedan: the parked cars along Fifth Street's curbs; with SM_Sedan_Wheel and SM_Sedan_GlowLamps so it can drive (world
+realism spec §4.3: the wheel, the lamp glows and the plate split out).
+
+The meshes:
+- SM_Sedan (baked): the car without its wheels (the brake calipers stay on it). Slots, in order: 0 paint (tinted by the
+  game), 1 trim, 2 glass, 3 chrome, 4 headlamp, 5 amber, 6 red, 7 ns_plate [screen] (unbaked: each plate's face UV 0..1 as
+  seen from outside, (0, 0) bottom left; front and rear share it; a default plate is embedded), 8 brake (the calipers).
+- SM_Sedan_Wheel (baked): one wheel, origin at its hub, the outer face toward +X. Slots: tire, rim, brake (the disc). The
+  game places four, at (+-0.785, -1.42 / 1.38, 0.326); on the -X side turned 180 deg about Z (a turn, not a mirror: the
+  sidewall's lettering keeps reading clockwise from outside).
+- SM_Sedan_GlowLamps (unbaked, one slot): the lamps' glow faces as islands in the Signal grid (4 x 2 cells, as the car kit:
+  0 head-low, 1 head-high, 2 tail, 3 brake, 4 reverse, 5 turn-L, 6 turn-R (the car's left is +X), 7 dome (a film on the side
+  glass and windshield)). Built with ns_cars.py's glow_lamps.
+
+The car itself:
 
 A late-2000s mid-size four-door, 4.85 m long, 1.83 wide, 1.45 tall on a 2.80 m wheelbase:
 - The body is lofted from feature-aligned sections (rocker, a lower character line, door side, a crisp
@@ -25,13 +39,12 @@ A late-2000s mid-size four-door, 4.85 m long, 1.83 wide, 1.45 tall on a 2.80 m w
   BaseColorFactor).
 - The plates carry their bolts and a registration sticker.
 
-Coordinates (meters), front toward -Y, Z up: origin on the road under the middle of the car.
-Material slots, in order: paint (tinted by the game), trim, glass, chrome, headlamp, amber, red, plate,
-tire, rim, brake.
+Coordinates (meters), front toward -Y, Z up: origin on the road under the middle of the car (the wheel: at its hub).
 """
 import bisect
 import math
 import os
+import sys
 
 import bpy  # noqa: F401,I001
 import bmesh
@@ -43,7 +56,7 @@ from artkit import core, parts, street
 from artkit.shade import image_surface, mix_float, noise, object_coords, ramp, scaled, smooth_less, vec
 from artkit.sheet import Sheet
 
-MESHES = ['SM_Sedan']
+MESHES = ['SM_Sedan', 'SM_Sedan_Wheel', 'SM_Sedan_GlowLamps']
 DOUBLE_SIDED = False
 TEXTURE_SIZE = 1024
 # The lamps' lenses are each unwrapped whole (lamp_uvs) into wide strips: 0.7-0.9 mm a texel, enough for their optics.
@@ -445,8 +458,10 @@ def spoke_face(r):
     return 0.056 + 0.03 * t + 0.004 * math.sin(math.pi * t)
 
 
-def wheel(cx, cy, mats):
+def wheel(cx, cy, mats, body=None):
+    """One wheel's parts at (cx, cy); body: a list that takes the caliper (it stays on the car when the wheel turns)."""
     side = 1 if cx > 0 else -1
+    lug_mat = mats['rim'] if body is not None else mats['chrome']
     axle = Matrix.Translation((cx, cy, WZ)) @ Matrix.Rotation(math.radians(90 * side), 4, 'Y')
 
     def at(r, ang, w):
@@ -470,7 +485,7 @@ def wheel(cx, cy, mats):
     out.append((closed_lathe('cap', [(0.0, 0.069), (0.022, 0.0685), (0.031, 0.065), (0.034, 0.058), (0.034, 0.05), (0.0, 0.05)], axle, 32), mats['rim']))
     for k in range(5):
         a = 2 * math.pi * k / 5 + math.pi / 10
-        out.append((parts.rod('lug', at(0.0572, a, 0.048), at(0.0572, a, 0.064), 0.0105, 6), mats['chrome']))
+        out.append((parts.rod('lug', at(0.0572, a, 0.048), at(0.0572, a, 0.064), 0.0105, 6), lug_mat))
     # Five twin spokes, each pair a V closing toward the hub.
     for k in range(5):
         base = 2 * math.pi * k / 5 + math.pi / 2
@@ -495,7 +510,7 @@ def wheel(cx, cy, mats):
     cal = parts.rbox('caliper', (0, 0, 0), (0.05, 0.11, 0.055), 0.014)
     rot = Matrix.Rotation(ca, 4, 'X')
     cal.data.transform(Matrix.Translation(at(0.135, ca, 0.004)) @ rot)
-    out.append((cal, mats['brake']))
+    (body if body is not None else out).append((cal, mats['brake']))
     return out
 
 
@@ -718,14 +733,16 @@ def front_end(bvh0, mats):
     # Front plate on its bracket.
     y = surface_y(0.0, PLATE_F[1])
     out.append((parts.rbox('plate_bracket', (0, y - 0.003, PLATE_F[1]), (0.33, 0.008, 0.17), 0.004), mats['trim']))
-    out.append((parts.rbox('plate_f', (0, y - 0.009, PLATE_F[1]), (0.30, 0.006, 0.15), 0.003), mats['plate']))
+    out.append((parts.rbox('plate_f', (0, y - 0.008, PLATE_F[1]), (0.30, 0.004, 0.15), 0.002), mats['chrome']))
+    out.append((plate_face('plate_f_face', (0, y - 0.0105, PLATE_F[1]), -1, mats['plate']), None))
     return out
 
 
 def rear_end(bvh, mats):
     """The plate in its recess with its lamps, the trunk lid's chrome garnish and emblem, the exhaust."""
     out = []
-    out.append((parts.rbox('plate_r', (0, Y_R - 0.012, PLATE_R[1]), (0.30, 0.006, 0.15), 0.003), mats['plate']))
+    out.append((parts.rbox('plate_r', (0, Y_R - 0.012, PLATE_R[1]), (0.30, 0.004, 0.15), 0.002), mats['chrome']))
+    out.append((plate_face('plate_r_face', (0, Y_R - 0.0095, PLATE_R[1]), 1, mats['plate']), None))
     for sx in (-1, 1):
         out.append((parts.rbox('plate_lamp', (sx * 0.075, Y_R - 0.012, PLATE_R[1] + 0.082), (0.04, 0.012, 0.008), 0.003), mats['head']))
     # Garnish across the trunk lid between the tail lamps.
@@ -1045,13 +1062,35 @@ def bake_cabin(obj, mats):
 
 # ------------------------------------------------------------------ prints
 
+def plate_face(name, center, facing, mat):
+    """A plate's face for the [screen] slot: UV 0..1 as seen from outside (facing -1: the front, seen from -Y; +1: the rear)."""
+    cx, cy, cz = center
+    w, h = 0.30, 0.15
+    if facing < 0:
+        pts = [(cx - w / 2, cy, cz - h / 2), (cx + w / 2, cy, cz - h / 2), (cx + w / 2, cy, cz + h / 2), (cx - w / 2, cy, cz + h / 2)]
+    else:
+        pts = [(cx + w / 2, cy, cz - h / 2), (cx - w / 2, cy, cz - h / 2), (cx - w / 2, cy, cz + h / 2), (cx + w / 2, cy, cz + h / 2)]
+    bm = bmesh.new()
+    uvl = bm.loops.layers.uv.new('UVMap')
+    f = bm.faces.new([bm.verts.new(p) for p in pts])
+    for lp, t in zip(f.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
+        lp[uvl].uv = t
+    o = core.mesh_object(name, bm)
+    core.orient_normals(o, (0, facing, 0))
+    core.assign(o, mat)
+    me = o.data
+    a = me.attributes.new('plate_uv', 'FLOAT', 'FACE')
+    a.data.foreach_set('value', [1.0] * len(me.polygons))
+    return o
+
+
 def plate_sheet():
     s = Sheet(300, 150)
     s.rect(0, 0, 300, 150, 0xf2f1ec, rough=0.3)
     s.rect(4, 4, 292, 142, 0x1e3a6e, rough=0.3)
     s.rect(8, 8, 284, 134, 0xf2f1ec, rough=0.3)
     s.text('NORTHSIDE', 150, 118, 22, 0xb5262f, face='Black', align='CENTER', tracking=1.3, rough=0.3)
-    s.text('7FTH 212', 150, 40, 62, 0x1e3a6e, face='Black', align='CENTER', rough=0.3)
+    s.text('NSD 0412', 150, 40, 62, 0x1e3a6e, face='Black', align='CENTER', rough=0.3)
     # Not "the river city": River City is the town down the line where the Classic is played.
     s.text('OPEN ALL NIGHT', 150, 14, 13, 0x1e3a6e, face='Bold', align='CENTER', tracking=1.3, rough=0.3)
     # The two bolts that hold it, a little rust bled round them; the registration sticker in the corner.
@@ -1501,6 +1540,22 @@ def taillamp_shading(m, bvh):
     bumped(m, h)
 
 
+def plate_slot():
+    """The [screen] plate slot (unbaked, shared by name with the car kit): its default plate embedded."""
+    m = bpy.data.materials.get('ns_plate')
+    if m is not None:
+        return m
+    color, _ = plate_sheet()
+    mm = core.Mat('ns_plate')
+    uvn = mm.node('ShaderNodeUVMap')
+    uvn.uv_map = 'UVMap'
+    img = mm.image(color, vector=uvn.outputs['UV'], extension='EXTEND')
+    mm.link(img.outputs['Color'], mm.bsdf.inputs['Base Color'])
+    mm.set('Roughness', 0.35)
+    mm.set('Metallic', 0.3)
+    return mm
+
+
 def plate_material(img):
     m = core.Mat('car_plate')
     tc, sep = object_coords(m)
@@ -1604,7 +1659,7 @@ def materials():
     head = core.Mat('car_head')
     amber = street.lens('car_amber', 0xd98a24, rough=0.08)
     red = core.Mat('car_red')
-    plate = plate_material(plate_sheet())
+    plate = plate_slot()
     tire = tire_material(tire_sheet())
     rim = rim_material()
     brake = brake_material()
@@ -1653,7 +1708,14 @@ def finish(objs, mats):
         return f.material_index == tire_i and abs(c.x) > TRACK + 0.05 and f.normal.x * c.x > 0 and abs(f.normal.x) > 0.5
 
     # The tires' outer walls (lettered) get most of the tire texture.
-    groups = [(outer_wall, 'box', None, (0.0, 0.36, 1.0, 1.0)), (lambda f: f.material_index == tire_i, 'box', None, (0.0, 0.0, 1.0, 0.35))]
+    pa = obj.data.attributes.get('plate_uv')
+    plates = set()
+    if pa is not None:
+        vals = np.zeros(len(obj.data.polygons), dtype=np.float32)
+        pa.data.foreach_get('value', vals)
+        plates = set(np.nonzero(vals > 0.5)[0].tolist())
+    groups = [(lambda f: f.index in plates, 'keep', None, (0.0, 0.0, 1.0, 1.0))] if plates else []
+    groups += [(outer_wall, 'box', None, (0.0, 0.36, 1.0, 1.0)), (lambda f: f.material_index == tire_i, 'box', None, (0.0, 0.0, 1.0, 0.35))]
     # The head and tail lamps' lenses are unwrapped after (lamp_uvs); the fog, plate and marker lamps share a band below.
     groups += [(lamp_lens(mats), 'keep', None, (0.0, 0.0, 0.01, 0.01)),
                (lambda f: f.material_index in (mats['index']['car_head'], mats['index']['car_red']), 'box', None, (0.0, 0.0, 1.0, LAMP_REST))]
@@ -1743,16 +1805,169 @@ def build():
     out += side_details(bvh, gh_bvh, mats)
     out += window_trim(gh_bvh, bvh, drip, stations, mats)
     out += cowl_and_wipers(bvh, gh_bvh, mats)
+    # The wheels: the calipers stay on the car; one wheel (the front one at +X) is built where it sits so its materials
+    # (measured round the axles) bake right, then moved to its hub in assemble().
+    calipers = []
+    wheel_parts = []
     for ay in AXLES:
         for sx in (-1, 1):
-            out += wheel(sx * TRACK, ay, mats)
-    for o, m in out:
+            w = wheel(sx * TRACK, ay, mats, body=calipers)
+            if ay == AXLES[0] and sx > 0:
+                wheel_parts = w
+            else:
+                for o, _ in w:
+                    bpy.data.objects.remove(o)
+    out += calipers
+    # The lamps' glows (the car kit's builder, with this car's own numbers: ns_cars.Spec's defaults are SM_Sedan's).
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import ns_cars
+    glow_obj = ns_cars.glow_lamps(ns_cars.Spec, bvh, gh, [])
+    glow_obj.name = glow_obj.data.name = 'SM_Sedan_GlowLamps'
+    if glow_obj.data.materials and glow_obj.data.materials[0] is not None:
+        glow_obj.data.materials[0].name = 'glow_sedan_glowlamps'      # (parts.glow_object's naming for this mesh)
+    for o, m in out + wheel_parts:
         if m is not None:
             core.assign(o, m)
     obj = finish([o for o, _ in out], mats)
     show_cabin(mats['glass'], bake_cabin(obj, mats))
     # The faces' bookkeeping (section spans, greenhouse bands) stays here: the export carries only the car.
-    for name in ('span', 'band', 'station'):
+    for name in ('span', 'band', 'station', 'plate_uv'):
         if name in obj.data.attributes:
             obj.data.attributes.remove(obj.data.attributes[name])
-    return [obj]
+    wheel_obj = finish_wheel([o for o, _ in wheel_parts], mats)
+    return [obj, wheel_obj, glow_obj]
+
+
+def finish_wheel(objs, mats):
+    obj = core.join(objs, 'SM_Sedan_Wheel')
+    obj.name = obj.data.name = 'SM_Sedan_Wheel'
+    core.finish_hard_surface(obj, 38.0)
+    ti = next(i for i, sl in enumerate(obj.material_slots) if sl.material == mats['tire'].m)
+
+    def outer_wall(f):
+        c = f.calc_center_median()
+        return f.material_index == ti and c.x > TRACK + 0.05 and f.normal.x > 0.5
+
+    groups = [(outer_wall, 'box', None, (0.0, 0.36, 1.0, 1.0)), (lambda f: f.material_index == ti, 'box', None, (0.0, 0.0, 1.0, 0.35))]
+    groups += [(lambda f, i=i: f.material_index == i, 'box', None, (0.0, 0.0, 1.0, 1.0)) for i in range(len(obj.material_slots))]
+    core.uv_layout(obj, groups)
+    order = [mats['tire'].m, mats['rim'].m, mats['brake'].m]
+    me = obj.data
+    old = [sl.material for sl in obj.material_slots]
+    fi = np.zeros(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get('material_index', fi)
+    remap = np.array([order.index(m) for m in old], dtype=np.int32)
+    me.materials.clear()
+    for m in order:
+        me.materials.append(m)
+    me.polygons.foreach_set('material_index', remap[fi])
+    return obj
+
+
+# ------------------------------------------------------------------ baking: the plate's slot stays unbaked; the wheel goes to its hub
+
+_SPLIT = {}
+
+
+def _keep_faces(obj, test):
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if not test(f)], context='FACES')
+    bm.to_mesh(obj.data)
+    bm.free()
+
+
+def _prune(obj):
+    me = obj.data
+    fi = np.zeros(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get('material_index', fi)
+    used = sorted(set(fi.tolist()))
+    mats = [obj.material_slots[i].material for i in used]
+    remap = {o: n for n, o in enumerate(used)}
+    me.materials.clear()
+    for m in mats:
+        me.materials.append(m)
+    if len(fi):
+        me.polygons.foreach_set('material_index', np.array([remap[i] for i in fi], dtype=np.int32))
+
+
+def bake_parts(objs):
+    _SPLIT.clear()
+    bake = []
+    for o in objs:
+        if '_Glow' in o.name:
+            o.hide_render = True
+            continue
+        if o.name == 'SM_Sedan':
+            pi = [i for i, sl in enumerate(o.material_slots) if sl.material and sl.material.name == 'ns_plate']
+            dup = o.copy()
+            dup.data = o.data.copy()
+            core.link(dup)
+            dup.name = 'SM_Sedan__plates'
+            _keep_faces(o, lambda f: f.material_index not in pi)
+            _keep_faces(dup, lambda f: f.material_index in pi)
+            _prune(o)
+            _prune(dup)
+            dup.hide_render = True
+            _SPLIT[o.name] = dup
+        bake.append(o)
+    return bake
+
+
+def assemble(objs):
+    out = []
+    for o in objs:
+        if o.name == 'SM_Sedan':
+            dup = _SPLIT.get('SM_Sedan')
+            baked = [sl.material for sl in o.material_slots]
+            if dup is not None:
+                dup.hide_render = False
+                o = core.join([o, dup], 'SM_Sedan')
+                o.name = o.data.name = 'SM_Sedan'
+            # paint, trim, glass, chrome, head, amber, red, ns_plate, brake
+            plate = next(sl.material for sl in o.material_slots if sl.material.name == 'ns_plate')
+            want = baked[:7] + [plate] + baked[7:]
+            me = o.data
+            old = [sl.material for sl in o.material_slots]
+            fi = np.zeros(len(me.polygons), dtype=np.int32)
+            me.polygons.foreach_get('material_index', fi)
+            remap = np.array([want.index(m) for m in old], dtype=np.int32)
+            me.materials.clear()
+            for m in want:
+                me.materials.append(m)
+            me.polygons.foreach_set('material_index', remap[fi])
+            for i, sl in enumerate(o.material_slots):
+                if sl.material.name != 'ns_plate':
+                    sl.material.name = f'M_SM_Sedan_{i}'
+            print('[sedan] SM_Sedan slots:', [sl.material.name for sl in o.material_slots])
+        elif o.name == 'SM_Sedan_Wheel':
+            o.data.transform(Matrix.Translation((-TRACK, -AXLES[0], -WZ)))
+        out.append(o)
+    for ob in list(bpy.data.objects):
+        if ob.name == 'SM_Sedan_GlowLamps':
+            ob.hide_render = False
+            out.append(ob)
+    return out
+
+
+def pose_for_review(objs):
+    """The standard sheet shows the car on its four wheels (three copies of the wheel, set at the hubs), its glows dark."""
+    by = {o.name: o for o in objs}
+    w = by.get('SM_Sedan_Wheel')
+    if w is None:
+        return
+    first = True
+    for ay in AXLES:
+        for sx in (-1, 1):
+            inst = w if first else w.copy()
+            if not first:
+                bpy.context.scene.collection.objects.link(inst)
+            first = False
+            inst.location = (sx * TRACK, ay, WZ)
+            inst.rotation_mode = 'XYZ'          # (a glb-imported wheel comes in quaternion mode)
+            inst.rotation_euler = (0.0, 0.0, 0.0 if sx > 0 else math.pi)
+    g = by.get('SM_Sedan_GlowLamps')
+    if g is not None:
+        g.hide_render = True
+    # (the sheet's floor goes at the objects' lowest point: their matrices must see the wheel at its hub, not at the origin)
+    bpy.context.view_layer.update()

@@ -2609,14 +2609,18 @@ def tee_parts(h):
     sh = h.o_shirt
     isl = h.oIsl
     left, right, collar = np.zeros(len(sh), bool), np.zeros(len(sh), bool), np.zeros(len(sh), bool)
+    # The collar band is the ring at the tee's top: measured from the tee's own top, not a fixed height, so a short body
+    # (Inez, 157 cm: her collar sits under 1.38 m) still finds it; the side limits scale with the body too.
+    top = float(h.oV[np.unique(h.oF[sh]), 2].max())
+    s = top / 1.50
     for i in np.unique(isl[sh]):
         m = sh & (isl == i)
         V = h.oV[np.unique(h.oF[m])]
-        if V[:, 0].min() > 0.12:
+        if V[:, 0].min() > 0.12 * s:
             left |= m
-        elif V[:, 0].max() < -0.12:
+        elif V[:, 0].max() < -0.12 * s:
             right |= m
-        elif V[:, 2].min() > 1.38 and np.abs(V[:, 0]).max() < 0.14:
+        elif V[:, 2].min() > top - 0.12 and np.abs(V[:, 0]).max() < 0.14 * s:
             collar |= m
     return left, right, collar, sh & ~left & ~right
 

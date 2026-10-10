@@ -43,7 +43,9 @@ TAutoConsoleVariable<int32> CVarMocap(TEXT("ss.Anim.Mocap"), 1,
 	TEXT("1 (default): the Game Animation Sample's baked clips drive the street's bodies where they're baked (anim_setup.py); 0: the old procedural gait, for side-by-side checks."));
 TAutoConsoleVariable<int32> CVarBreaks(TEXT("ss.Anim.Breaks"), 1, TEXT("1: someone standing idle shifts their weight, looks about, stretches now and then (the idle's breaks); 0: never."));
 TAutoConsoleVariable<int32> CVarTurns(TEXT("ss.Anim.Turns"), 1, TEXT("1: turning on the spot steps round with the turn clips; 0: the body turns with the actor (feet slide)."));
-TAutoConsoleVariable<float> CVarHeavyDepth(TEXT("ss.Anim.HeavyDepth"), 0.225f,
+// Off by default (1.0): every built body measures 0.255-0.281 by its bounds, slim or not, so the split can't be made this way
+// yet (anim_setup.py bakes the standard set only).
+TAutoConsoleVariable<float> CVarHeavyDepth(TEXT("ss.Anim.HeavyDepth"), 1.0f,
 	TEXT("A body this deep (front to back) for its height or deeper takes the heavy build's clips (_Ovw, retargeted with RTG_UEFN_to_Metahuman_ovw)."));
 // Test overrides outlive the PIE session that set them: the street puts them back as it begins (spec 7.7).
 FStreetOverrides::FRegister MocapOverride(TEXT("ss.Anim.Mocap"), TEXT("1"));

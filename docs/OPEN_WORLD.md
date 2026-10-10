@@ -97,6 +97,26 @@ Props face the way the stage intends through `BlenderFacing()` (`BlenderProps.h`
 
 The imported glTF materials are tinted by whatever base-color parameter they expose (`TintImported`). This covers the parked cars' paint, the hats and the frames. If the hats or cars come out light grey, the importer named that parameter something else. Clear lenses use M_Lens (built by shortstack_setup); hats and glasses import without Nanite.
 
+## Northside: the realism update (2026-10-05 to 10-07)
+
+The block became a neighborhood. Fifth St. runs from Hollis to Wexler, with the T closed by Hollis Savings Bank and its clock, the Rialto at the far end. Market St. is widened, with the 14's bus shelter and bus lane, and the Northside Branch Library closes its view. The design spec is `world_realism_spec.md` (v2).
+
+- **The look.** The ground is real sidewalk flags, asphalt with patches, curbs, gutters, castings and thermoplastic markings worn by the wheels. It has puddle masks that follow the weather. Building fronts come from a Blender kit (`ns_fronts`, `ns_rooms`: interior-mapped lit windows that follow the hour). The street has furniture (signals with countdowns, the shelter, meters, tree pits) and parked cars from `ns_cars` (plates differ car to car). There is traffic on the cross streets, a sky with sun, moon and clouds, `MPC_NS`, and weather from the career's seed (`ss.Street.Weather` forces it). The street builds at runtime in about 0.3 s: `StreetStage*`, `MarketStage`, `StreetTraffic`, with the art set up by `ns_setup.py`.
+- **Five shops you walk into, on real hours.** Each is an `AShopStage` with its keeper, doors (locked doors give a line), zones and camera profiles, and a screen (`MakeShopScreen`):
+  - **Fifth St. Barbers** (Lonnie): the style book with in-place previews, the cut in the chair.
+  - **Second Chance Thrift** (Bea): racks, try-on, the register, the closet.
+  - **IronHouse Gym** (Rosa): desk, workouts and membership, which feed fitness at the table.
+  - **Ruby's**, 24 hours (Ruby by day, Marlene by night): the menu, the paper, sit a while, Big Lou's check.
+  - **Northside Pawn & Loan** (Augie): sell, buy, loans and tickets, with no-profit rules and IN PAWN / SOLD stamps on the trophy case.
+  - The closet is at home and on Dee's couch (lean back, then C).
+- **People.** `AStreetNpcs` puts the block's people where core's schedule says (`town::Who`). Staff work shifts with their own work beats: the clerk rings sales up, the barber cuts, the waitress walks the counter and pours. Dee's regulars come off the 14 on her nights. Ruby's regulars take their stools. Talk runs through the talk card with subtitles and name tags. The crowd uses the registry's walkways, waits for WALK, and gets bumped if you run. The six staff (Ray, Lonnie, Bea, Rosa, Ruby, Marlene) are MetaHumans blended from the Creator's presets (`staff_cast.py`). Motion is 25 Game Animation Sample clips baked onto the MetaHuman body (`anim_setup.py`), with the procedural gait as the fallback.
+- **Looks.** Each hero has a groom library (`groom_setup.py`, `HGL_<Hero>`). Garments are fitted per body (`garments.py`, `garments_setup.py`). `CastLooks` sets wardrobes and heights.
+- **Test hooks.**
+  - `ss.Street.Go <start|door|plot>`, `ss.Street.Clock <hour>` (the career's clock), `ss.Street.Hour` (the look only), `ss.Street.Shot <W1..W9|I1..I6>`, `ss.Street.Describe`.
+  - `ss.Shop.Open/Close/Key/Hours/Awake/Cinematic/Mirror`, `ss.Pawn.List/Age/Auction`.
+  - `ss.Npc.List/Talk/Beat/Budget/Hour/Debug`, `ss.Anim.Mocap/Describe`, `ss.Look.Preview/Faces/Grooms`, `ss.Closet`, `ss.Fit.Set`.
+  - The lead scripts are in the session scratchpad (`shops.sh`, `views.sh`, `looks.sh`).
+
 ## What comes next
 
 Each step keeps the walk-around world small, dense and tied to the career. There are no empty streets.
@@ -126,4 +146,8 @@ Each step keeps the walk-around world small, dense and tied to the career. There
 - [x] Pedestrians on Fifth (up to six of the cast on the procedural gait: umbrellas in the rain, in and out of the store and the laundromat, fewer in the dead hours)
 - [x] The apartment's window and light follow the clock (day, dusk, night), and so does Dee's room
 - [x] A garment prototype: fitted jeans and a jacket skinned to the hero bodies replace the Creator's tee and shorts on the street
+- [x] Northside's realism pass: the Blender ground, the building kit and the landmarks, the furniture and cars, Market widened, traffic, weather and windows by the hour (2026-10-07)
+- [x] Five shops you walk into, on real hours, with their keepers and screens: the barber, the thrift, the gym, Ruby's and the pawn shop (2026-10-07)
+- [x] The people director: staff on core's schedule with work beats, talk with subtitles, the regulars, a crowd on the walkways; baked mocap; six new staff MetaHumans (2026-10-07)
+- [ ] Hero groom libraries and per-body garment fits for every hero, extra and staff member (building)
 - [ ] Step 2 onward, as above

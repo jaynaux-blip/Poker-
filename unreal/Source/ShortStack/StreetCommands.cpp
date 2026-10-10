@@ -9,6 +9,7 @@
 //   ss.Street.Describe                  one paragraph: the hour, the place and zone, the use in reach, the needs, the open
 //                                       screen, the frame budget, the registry, the shops
 //   ss.Street.GameNight                 the clock on to Dee's next game night
+//   ss.Street.Clock <hour>              the career's clock on to the next <hour> o'clock (shops, schedule and look follow)
 //   ss.Street.Shot <W1..W9|I1..I6|shot id|off>   spec 9's cameras (I1..I6 once the shops register their shots)
 //   ss.Zone.Show [seconds]              draws the zones, uses, stations, starts, doors and walkways
 //   ss.Street.Preload                   the preload list: every registered path, and what the stage has saved
@@ -160,7 +161,8 @@ const FAcceptanceShot WideShots[] = {
 	{TEXT("W3"), FVector(-300.0, 5200.0, 170.0), FVector(-11440.0, 5950.0, 600.0), 60.0f},
 	{TEXT("W4"), FVector(-2900.0, 5300.0, 160.0), FVector(-1700.0, 5600.0, 200.0), 65.0f},
 	{TEXT("W5"), FVector(300.0, -2000.0, 170.0), FVector(1020.0, -8040.0, 800.0), 55.0f},
-	{TEXT("W6"), FVector(1800.0, 5400.0, 170.0), FVector(1020.0, 11040.0, 900.0), 55.0f},
+	// North of the far-side tree pit at Y 5500 (from inside its canopy, the shot was all trunk and leaves).
+	{TEXT("W6"), FVector(1900.0, 6100.0, 170.0), FVector(1020.0, 11040.0, 900.0), 55.0f},
 	{TEXT("W7"), FVector(700.0, 2100.0, 30.0), FVector(420.0, 2400.0, -10.0), 50.0f},
 	{TEXT("W8"), FVector(-6900.0, 6700.0, 170.0), FVector(-4500.0, 4950.0, 250.0), 60.0f},
 	{TEXT("W9"), FVector(-9900.0, 6200.0, 170.0), FVector(-7800.0, 4950.0, 250.0), 60.0f},
@@ -193,6 +195,15 @@ FAutoConsoleCommandWithWorldAndArgs StreetGameNightCmd(TEXT("ss.Street.GameNight
 		if (AStreetGameMode* M = StreetModeIn(World))
 		{
 			UE_LOG(LogStreetHooks, Display, TEXT("%s"), *M->TestGameNight());
+		}
+	}));
+
+FAutoConsoleCommandWithWorldAndArgs StreetClockCmd(TEXT("ss.Street.Clock"),
+	TEXT("ss.Street.Clock <hour>: the career's clock on to the next <hour> o'clock (0-24); the calendar runs through the hours skipped (testing)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		if (AStreetGameMode* M = StreetModeIn(World))
+		{
+			UE_LOG(LogStreetHooks, Display, TEXT("%s"), *M->TestClock(Args.Num() > 0 ? FCString::Atof(*Args[0]) : 12.0f));
 		}
 	}));
 
@@ -596,6 +607,30 @@ FString AStreetGameMode::TestGameNight()
 	const std::string Why = ss::life::Blocked(*G, S.Life, S.LifeContext());
 	return FString::Printf(TEXT("%s, Dee's game %s. The back door: %s"), *Utf8(ss::net::TimeLabel(S.WorldMinutes())),
 		DeeGameAt(S.WorldMinutes()) == EDeeGame::Open ? TEXT("open") : TEXT("not open"), Why.empty() ? TEXT("sit in (E at the steel door)") : *Utf8(Why));
+}
+
+FString AStreetGameMode::TestClock(float Hour)
+{
+	if (!Game || !Game->bCareer)
+	{
+		return TEXT("No career on the street.");
+	}
+	ss::Session& S = Game->Session;
+	if (S.TimeSkip.Active)
+	{
+		return TEXT("Not during a time skip: the clock stays.");
+	}
+	const double Now = S.WorldMinutes();
+	const double Want = FMath::Clamp(static_cast<double>(Hour), 0.0, 24.0) * 60.0;
+	const double Into = FMath::Fmod(Now, 1440.0);
+	double Ahead = Want - Into;
+	if (Ahead < 0.0)
+	{
+		Ahead += 1440.0;
+	}
+	// As ss.Street.GameNight: forward only; the calendar runs through the hours skipped on the next update.
+	S.LobbyMinutes += Ahead;
+	return FString::Printf(TEXT("The clock on %.0f min to %s."), Ahead, *Utf8(ss::net::TimeLabel(S.WorldMinutes())));
 }
 
 FString AStreetGameMode::TestUse()

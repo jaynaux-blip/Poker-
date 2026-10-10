@@ -91,7 +91,8 @@ def run(name, do_review=True):
     if hasattr(mod, 'assemble'):
         objs = mod.assemble(bake_objs)
     for o in objs:
-        path = core.export_glb([o], o.name)
+        # A module's own exporter settings (GLTF_OPTIONS), e.g. ns_ground's vertex colors with their alpha.
+        path = core.export_glb([o], o.name, getattr(mod, 'GLTF_OPTIONS', None))
         print(f'[{name}] exported {os.path.relpath(path, core.ROOT)}')
     if do_review:
         finish_review(mod, name, objs)

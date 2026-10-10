@@ -83,7 +83,9 @@ CLIPS = [
 # the game keeps each body's own bone lengths).
 STANDARD_TARGETS = ("HeroA1", "HeroA0", "HeroA2", "ExtraD", "ExtraB", "Hero")
 # A body this deep (front to back) for its height or deeper is the heavy build's (StreetAnim.cpp's ss.Anim.HeavyDepth).
-HEAVY_DEPTH = 0.225
+# Off (1.0) for now: measured on the built bodies (2026-10-07) every one reads 0.255-0.281, Big Lou and the slim heroes
+# alike, so the bounds can't tell an overweight body; the heavy set waits for a real body-type test.
+HEAVY_DEPTH = 1.0
 # The nominal turns, for verify().
 TURNS = {"Turn045L": -45, "Turn045R": 45, "Turn090L": -90, "Turn090R": 90, "Turn135L": -135, "Turn135R": 135, "Turn180L": -180, "Turn180R": 180}
 

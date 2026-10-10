@@ -162,6 +162,10 @@ public:
 	/** The clock on to Dee's next game night, just after the doors open (now, if they're open); what the back door says then. */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	FString TestGameNight();
+	/** The career's clock on to the next Hour (0..24) o'clock, as ss.Street.GameNight moves it (the calendar runs through the
+	 *  hours skipped): the shops' real hours, the schedule and the look follow, unlike ss.Street.Hour's look alone. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestClock(float Hour);
 	/** E where the player stands (ss.Street.Use); what was in reach and what it did. */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	FString TestUse();

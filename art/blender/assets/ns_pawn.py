@@ -51,12 +51,16 @@ MESHES (tris from the build log; slot order as exported, Unreal names them M_<Me
   SITE  SM_NS_Pawn_Counter       480 x 72 x 132  ~70k  baked: body (glass_case frame, satin black 0x1a1b1d), jewel, print;
                                  [glass] (case fronts, tops, the staff side's sliding panes): Nanite off (§0.5)
   SITE  SM_NS_Pawn_Counter_GlowCool LED strips under the cases' rails  96  [glow:Cool]
-  SITE  SM_NS_Pawn_Cage          362 x 730 x 360  ~44k  baked: body, goods, print; [glass] (the window): Nanite off
+  SITE  SM_NS_Pawn_Cage          362 x 730 x 360  ~71k  baked: body (4096 x 2048: its own bands for the loan window's
+                                 steel, ledge and tray, the diamond plate round it and the desk top, the welded mesh laid
+                                 flat), goods (the pledges: goods in knotted milky and clear bags and zip bags, showing
+                                 through the film, kraft sacks and cartons, a ticket stapled to each), print; [glass]
+                                 (the window): Nanite off
   SITE  SM_NS_Pawn_Cage_GlowWarm the desk lamp's lens  92  [glow:Warm]
   PROP  SM_NS_Pawn_SafeDoor      origin on its hinge axis at the floor, its front toward -X (the window); L (-3892.6,
                                  4209.2, 0); opens by +yaw up to ~100  4.9k  baked: body, print
   SITE  SM_NS_Pawn_GuitarWall    101 x 424 x 334  ~85k  baked: body (4096), print
-  SITE  SM_NS_Pawn_Shelves       61 x 1086 x 249  ~36k  baked: body (4096), print; [screen] ns_screen_pawn_tv (the
+  SITE  SM_NS_Pawn_Shelves       61 x 1086 x 249  ~38k  baked: body (4096), print; [screen] ns_screen_pawn_tv (the
                                  demo TV, UV 0..1 across the picture)
   SITE  SM_NS_Pawn_Tickets       the ticket book on the counter, the spike of pink carbons on Augie's desk  0.8k  baked
   PROP  SM_NS_Pawn_Ticket        the loose ticket for the hero's hand: origin at the grip, +X along the slip, face up
@@ -103,11 +107,16 @@ import bmesh
 import bpy  # noqa: F401
 import numpy as np
 from mathutils import Matrix, Vector
+from mathutils.bvhtree import BVHTree
 
 from artkit import core, parts, review, texmaps
 from artkit.shade import convex_edges, mix_float, noise, object_coords, ramp, scaled, smooth_less, vec
 from artkit.sheet import Sheet
 
+# BUILD SWITCHES: PAWN_ONLY=key,key (NAMES' keys) builds only those; PAWN_MESHES=name,name then bakes and exports only
+# those of its meshes; PAWN_REVIEW=detail,room,street, PAWN_TAG=_x (names the detail sheets), PAWN_NO_SHEET=1 (skips
+# build.py's whole-asset sheet) for partial reviews; PAWN_TEXSCALE, PAWN_CPU; PAWN_TRIS=1, PAWN_UVSTAT=1 (texel density
+# per UV group), PAWN_SEEDEBUG=1 (the bags' see-through bake) report.
 if os.environ.get('PAWN_CPU'):
     # A build machine whose GPU is shared by many Blender processes can stall Cycles for many minutes on each render
     # and bake: PAWN_CPU=1 renders and bakes this asset on the CPU instead.
@@ -206,6 +215,10 @@ NAMES = {
 _ONLY = [s.strip() for s in os.environ.get('PAWN_ONLY', '').split(',') if s.strip()]
 WHICH = [k for k in NAMES if not _ONLY or k in _ONLY]
 MESHES = [n for k in WHICH for n in NAMES[k]]
+# PAWN_MESHES=a,b: of what PAWN_ONLY builds, bake and export only these meshes (a builder's other meshes, unchanged, stay
+# as they are on disk: PAWN_ONLY=cage PAWN_MESHES=SM_NS_Pawn_Cage leaves the safe's door and the lamp's glow alone)
+if os.environ.get('PAWN_MESHES'):
+    MESHES = [n for n in MESHES if n in {s_.strip() for s_ in os.environ['PAWN_MESHES'].split(',')}]
 DOUBLE_SIDED = False
 TEXTURE_SIZE = 1024
 TEXTURE_SIZES = {
@@ -216,7 +229,7 @@ TEXTURE_SIZES = {
     'pws_floor': (2048, 4096), 'pws_wall': 4096, 'pws_ceil': (2048, 4096), 'pws_print': 2048,
     'pwfb_body': 512,
     'pwc_body': 2048, 'pwc_jewel': 2048, 'pwc_print': 2048,
-    'pwk_body': 2048, 'pwk_goods': 2048, 'pwk_print': 2048,
+    'pwk_body': (4096, 2048), 'pwk_goods': 2048, 'pwk_print': 2048,
     'pwsd_body': 1024, 'pwsd_print': 1024,
     'pwg_body': 4096, 'pwg_print': 1024,
     'pwe_body': 4096, 'pwe_print': 2048,
@@ -493,8 +506,17 @@ class Kit:
         self.rings = []             # (x, y, r, hex): cup rings on a laminate top
         self.images = {}            # name -> (path, (x0, y0, x1, y1) planar extent in object XY): control maps for finishes
         self.tri_by = []            # (part name, triangles) for PAWN_TRIS=1
+        # Texel density where it's looked at: parts added with uvg=<id> go to their own rectangle of their slot's atlas
+        # (uv_group), the rest of the slot to uv_rest's rectangle. Rectangles are in square-texel units: a slot baked
+        # w x h (TEXTURE_SIZES) spans u 0..w/h, and finish() scales u back into 0..1.
+        self.uv_plan = []           # (gid, slot, rect, mode, arg, facing): facing (normal, min dot) in the SITE frame
+        self.uv_rest = {}           # slot -> rect
+        # What's inside the pledge bags: shapes and colors that show through the film (see_bake), never exported.
+        self.see_src = []
+        self.see_img = None
+        self.uvg_default = 0        # the UV group of parts added without one (set round a run of parts)
 
-    def add(self, obj, fin, col=0xffffff, slot=None, aux=(0.0, 0.0, 0.0), aux_point=None, aux2=(0.0, 0.0, 0.0)):
+    def add(self, obj, fin, col=0xffffff, slot=None, aux=(0.0, 0.0, 0.0), aux_point=None, aux2=(0.0, 0.0, 0.0), uvg=None):
         """aux_point: a point in the part's own frame that moves with it (a guitar's sunburst center): finish() writes
         where it ends up into pw_aux, so a finish can measure from it whatever way the part was turned."""
         slot = slot or self.default
@@ -503,6 +525,7 @@ class Kit:
         set_attr(obj, 'pw_aux', tuple(float(a) for a in aux))
         set_attr(obj, 'pw_aux2', tuple(float(a) for a in aux2))
         set_attr(obj, 'pw_lock', 0.0)
+        set_attr(obj, 'pw_uvg', float(self.uvg_default if uvg is None else uvg))
         if aux_point is not None:
             obj['pw_auxpt'] = tuple(float(a) for a in aux_point)
         obj['pw_slot'] = slot
@@ -513,11 +536,13 @@ class Kit:
 
     def mark(self):
         """Where the parts (and the grime spots) made from here on start: place() moves them together."""
-        return (len(self.objs), len(self.grime), len(self.polish))
+        return (len(self.objs), len(self.grime), len(self.polish), len(self.see_src))
 
     def place(self, mk, matrix):
         """Moves everything made since mark() by matrix (an item built in its own frame, then set in the room)."""
-        i0, g0, p0 = mk
+        i0, g0, p0, s0 = mk
+        for o in self.see_src[s0:]:
+            o.data.transform(matrix)
         for o in self.objs[i0:]:
             o.data.transform(matrix)
             if 'pw_auxpt' in o:
@@ -531,6 +556,7 @@ class Kit:
         set_attr(obj, 'pw_aux', (0.0, 0.0, 0.0))
         set_attr(obj, 'pw_aux2', (0.0, 0.0, 0.0))
         set_attr(obj, 'pw_lock', 1.0 if locked else 0.0)
+        set_attr(obj, 'pw_uvg', 0.0)
         obj['pw_slot'] = mat_name
         self.objs.append(obj)
         return obj
@@ -599,6 +625,7 @@ class Kit:
         set_attr(obj, 'pw_aux', (0.0, 0.0, 0.0))
         set_attr(obj, 'pw_aux2', (0.0, 0.0, 0.0))
         set_attr(obj, 'pw_lock', 1.0)
+        set_attr(obj, 'pw_uvg', 0.0)
         obj['pw_slot'] = 'print'
         self.objs.append(obj)
         return obj
@@ -623,13 +650,34 @@ class Kit:
         set_attr(obj, 'pw_aux', (0.0, 0.0, 0.0))
         set_attr(obj, 'pw_aux2', (0.0, 0.0, 0.0))
         set_attr(obj, 'pw_lock', 1.0)
+        set_attr(obj, 'pw_uvg', 0.0)
         obj['pw_slot'] = 'print'
         self.objs.append(obj)
         return obj
 
+    def uv_group(self, gid, slot, rect, mode='box', arg=None, facing=None):
+        """Faces of parts added with uvg=gid in `slot` go to rect (mode and arg as core.uv_layout's), if they face one of
+        `facing` ((normal, min dot), ...: SITE frame); the others go with the rest of the slot."""
+        if facing is not None and not isinstance(facing[0][0], (tuple, list)):
+            facing = [facing]
+        self.uv_plan.append((gid, slot, rect, mode, arg, facing))
+
+    def see_image(self, size=2048):
+        """The image the bag finish reads what's inside the bags from (see_bake fills it after the UV layout): RGB the
+        goods' color under the film, A the film-to-goods distance over SEE_MAX (1: nothing there)."""
+        if self.see_img is None:
+            img = bpy.data.images.new(f'{self.prefix}_see', size, size, alpha=True, float_buffer=True)
+            img.colorspace_settings.name = 'Non-Color'
+            img.alpha_mode = 'CHANNEL_PACKED'
+            img.pixels.foreach_set(np.tile(np.array([0.05, 0.05, 0.05, 1.0], np.float32), size * size))
+            self.see_img = img
+        return self.see_img
+
     def finish(self, angle=35.0, name=None):
         name = name or self.name
         if self.site:
+            for o in self.see_src:
+                o.data.transform(SITE_M)
             # into the SITE frame: the parts, the grime spots and the moving aux points
             for o in self.objs:
                 o.data.transform(SITE_M)
@@ -666,10 +714,32 @@ class Kit:
         lock.data.foreach_get('value', vals)
         locked = set(np.nonzero(vals > 0.5)[0].tolist())
         groups = [(lambda f: f.index in locked, 'keep', None, (0.0, 0.0, 1.0, 1.0))]
+        uvg = np.zeros(len(obj.data.polygons), dtype=np.float32)
+        if obj.data.attributes.get('pw_uvg') is not None:
+            obj.data.attributes['pw_uvg'].data.foreach_get('value', uvg)
+        slot_index = {s.material.name: i for i, s in enumerate(obj.material_slots)}
+        for gid, slot, rect, mode, arg, facing in self.uv_plan:
+            si = slot_index.get(f'{self.prefix}_{slot}', -1)
+
+            def test(f, gid=gid, si=si, facing=facing):
+                if f.material_index != si or abs(uvg[f.index] - gid) > 0.5:
+                    return False
+                return facing is None or any(f.normal.dot(Vector(n_)) > d_ for n_, d_ in facing)
+            groups.append((test, mode, arg, rect))
         for s in obj.material_slots:
-            groups.append((core.material_is(obj, s.material.name), 'box', None, (0.0, 0.0, 1.0, 1.0)))
+            slot = s.material.name[len(self.prefix) + 1:] if s.material.name.startswith(self.prefix + '_') else None
+            groups.append((core.material_is(obj, s.material.name), 'box', None, self.uv_rest.get(slot, (0.0, 0.0, 1.0, 1.0))))
         groups.append((lambda f: True, 'box', None, (0.0, 0.0, 1.0, 1.0)))
         core.uv_layout(obj, groups, margin=0.004)
+        # slots baked wider than tall were laid out in square-texel units: back into 0..1
+        for s in obj.material_slots:
+            size = TEXTURE_SIZES.get(s.material.name)
+            if isinstance(size, tuple) and size[0] != size[1] and s.material.name[len(self.prefix) + 1:] in self.uv_rest:
+                _squeeze_u(obj, slot_index[s.material.name], size[0] / size[1])
+        if os.environ.get('PAWN_UVSTAT'):
+            _uv_stats(self, obj, groups)
+        if self.see_src:
+            see_bake(self, obj)
         print(f'[ns_pawn] {name}: {tri_count(obj)} triangles, slots {[s.material.name for s in obj.material_slots]}')
         if os.environ.get("PAWN_TRIS"):
             agg = {}
@@ -1144,6 +1214,16 @@ def isolines(m, vector, scale, width, detail=1.0):
     """Thin wandering lines (scratches, creases): where a noise crosses its middle."""
     n = noise(m, vector, scale=scale, detail=detail)
     return ramp(m, m.math('ABSOLUTE', m.math('SUBTRACT', n, 0.5)), width, 0.0)
+
+
+def voronoi_edge(m, vector, scale):
+    """The distance to the nearest edge of a Voronoi cell (in cells, 0 .. ~0.5): straight lines meeting at angles."""
+    n = m.node('ShaderNodeTexVoronoi')
+    n.voronoi_dimensions = '3D'
+    n.feature = 'DISTANCE_TO_EDGE'
+    n.inputs['Scale'].default_value = scale
+    m.link(vector, n.inputs['Vector'])
+    return n.outputs['Distance']
 
 
 def white(m, vector):
@@ -1745,6 +1825,7 @@ FINISH = {'paint': f_paint, 'enamel': f_enamel, 'steel': f_steel, 'chrome': f_ch
           'particle': f_particle, 'kick': f_kick, 'galv': f_galv, 'nickel': f_nickel, 'black_metal': f_black_metal, 'cast': f_cast,
           'mat': f_mat, 'foam': f_foam, 'pearl': f_pearl}
 NO_DUST = {'gold', 'gem', 'pearl', 'screen', 'vct', 'acoustic', 'wallpaint', 'terrazzo', 'mat', 'chrome'}
+NO_CAVITY = set()     # finishes the slot's crevice grime passes by
 
 
 def f_brickpaint(c):
@@ -1827,34 +1908,63 @@ def f_tin(c):
 
 
 def f_diamond(c):
-    """Diamond plate (the cage's base, the safe's surround): raised lugs on a 30 mm pitch at alternating angles, worn bright
-    on top, dirt in the field."""
+    """Diamond (tread) plate, the cage's base, the loan window's bay and the safe's pad: aluminium, raised lens-shaped
+    lugs about 32 x 7 mm on a 28 mm pitch, every other one turned 90 degrees (the herringbone). The lugs are the plate's
+    own metal: they read by their shape (a domed section ~1.3 mm high whose flanks the normal map carries, BUMP_MM) and
+    by a rubbed, smoother crest, not by a paler paint; dirt keeps to the field round their feet, a dull oxide mottles the
+    mill finish between. pw_aux.x softens the lugs (0 crisp .. 1): plate that bakes at a lower texel density keeps its
+    lugs as low soft bumps instead of aliasing into blobs. Faces looking SITE -y or -x (the cage side of the front's and
+    the east face's plate, only Augie sees them, baked at the cage's general density) are fully soft."""
     m = c.m
+    inner = m.math('MAXIMUM', ramp(m, mul(m, c.ny, -1.0), 0.3, 0.7), ramp(m, mul(m, c.nx, -1.0), 0.3, 0.7))
+    ax = m.math('MAXIMUM', c.ax, inner)
     u, v = face_uv(m, c)
-    p = 0.03
-    a = add(m, u, v)
-    b = sub(m, u, v)
-    ga = m.math('FRACT', m.math('DIVIDE', a, p * 1.414))
-    gb = m.math('FRACT', m.math('DIVIDE', b, p * 1.414))
-    ia = m.math('FLOOR', m.math('DIVIDE', a, p * 1.414))
-    ib = m.math('FLOOR', m.math('DIVIDE', b, p * 1.414))
-    alt = m.math('FRACT', mul(m, add(m, ia, ib), 0.5))
-    da = m.math('ABSOLUTE', sub(m, ga, 0.5))
-    db = m.math('ABSOLUTE', sub(m, gb, 0.5))
-    lug1 = mul(m, ramp(m, da, 0.36, 0.30), ramp(m, db, 0.10, 0.05))
-    lug2 = mul(m, ramp(m, db, 0.36, 0.30), ramp(m, da, 0.10, 0.05))
-    lug = mix_float(m, m.math('GREATER_THAN', alt, 0.25), lug1, lug2)
-    dirt = ramp(m, noise(m, c.P, scale=8.0, detail=4.0), 0.35, 0.75)
-    col = m.mix(mul(m, dirt, 0.5), H(0x7a7e84), H(0x4a4c4e))
-    col = m.mix(lug, col, H(0xb8bcc0))
-    rough = mix_float(m, lug, add(m, 0.45, mul(m, dirt, 0.25)), 0.25)
-    return col, rough, mix_float(m, dirt, 1.0, 0.6), mul(m, lug, 0.0025)
+    cell = 0.028 * 1.4142
+    a = m.math('DIVIDE', add(m, u, v), cell)
+    b = m.math('DIVIDE', sub(m, u, v), cell)
+    ga = sub(m, m.math('FRACT', a), 0.5)
+    gb = sub(m, m.math('FRACT', b), 0.5)
+    alt = m.math('GREATER_THAN', m.math('FRACT', mul(m, add(m, m.math('FLOOR', a), m.math('FLOOR', b)), 0.5)), 0.25)
+    t = mix_float(m, alt, ga, gb)
+    sx = m.math('ABSOLUTE', mix_float(m, alt, gb, ga))
+    tt = m.math('DIVIDE', t, 0.40)
+    q = sub(m, 1.0, mul(m, tt, tt))
+    qp = m.math('MAXIMUM', q, 0.0)
+    # the lug's half-width (cell units: 0.088 ~ 3.5 mm) tapering to its tips, widened a little where it's softened
+    half = add(m, mul(m, m.math('SQRT', qp), 0.088), mul(m, ax, 0.03))
+    r = m.math('DIVIDE', sx, m.math('MAXIMUM', half, 0.006))
+    prof = m.math('MAXIMUM', sub(m, 1.0, mul(m, r, r)), 0.0)          # a parabolic section: flanks ~35 degrees
+    tip = ramp(m, q, -0.02, 0.18)
+    dome = mul(m, prof, tip)                                          # 0 .. 1, the lug's height
+    # The color and finish passes bake at one sample a texel (~2.3 mm here, the lug ~3 texels across): everything they
+    # carry is as smooth as the dome itself (no thin crest line or hard footprint to alias into beads).
+    lug = mul(m, m.math('SQRT', prof), tip)                           # its footprint, soft-edged
+    crest = mul(m, mul(m, prof, prof), mul(m, tip, sub(m, 1.0, mul(m, ax, 0.7))))
+    # the field round each lug's foot (where grit packs in) and the plate's own mottle
+    foot = mul(m, mul(m, ramp(m, r, 0.85, 1.35), ramp(m, r, 2.4, 1.5)), tip)
+    dirt = ramp(m, noise(m, c.P, scale=9.0, detail=4.0), 0.4, 0.8)
+    oxide = ramp(m, noise(m, c.P, scale=26.0, detail=3.0), 0.45, 0.8)
+    roll = noise(m, scaled(m, c.sep, 3.0, 3.0, 160.0), detail=2.0)     # faint mill streaks along the rolling direction
+    field = m.mix(mul(m, roll, 0.25), H(0x9da1a4), H(0xa9adb0))
+    field = m.mix(mul(m, oxide, 0.45), field, H(0x8d8e8b))
+    field = m.mix(mul(m, dirt, 0.3), field, H(0x6c6b66))
+    col = m.mix(mul(m, mul(m, foot, add(m, 0.25, mul(m, dirt, 0.4))), sub(m, 1.0, mul(m, ax, 0.5))), field, H(0x5a5852))
+    col = m.mix(mul(m, lug, 0.5), col, H(0xa3a7aa))                  # the lugs' flanks: clean mill finish
+    col = m.mix(mul(m, crest, 0.6), col, H(0xc2c6c9))                # their crests: rubbed bright
+    rough = add(m, 0.46, mul(m, oxide, 0.12), mul(m, dirt, 0.12), mul(m, foot, 0.12))
+    rough = mix_float(m, lug, rough, 0.36)
+    rough = mix_float(m, crest, rough, 0.22)
+    metal = mix_float(m, add(m, mul(m, dirt, 0.35), mul(m, foot, 0.4)), 1.0, 0.6)
+    return col, rough, metal, mul(m, dome, mul(m, sub(m, 1.0, mul(m, ax, 0.75)), 1.3 * BUMP_MM))
 
 
 for _n, _f in (('brickpaint', f_brickpaint), ('tin', f_tin), ('diamond', f_diamond)):
     FIN[_n] = len(FIN) + 1
     FINISH[_n] = _f
 NO_DUST |= {'brickpaint', 'tin'}
+
+
+BUMP_MM = 1.0   # body_material's bump (Distance 0.001): a finish's height of 1.0 is 1 mm
 
 
 def body_material(kit, slot):
@@ -1891,6 +2001,8 @@ def body_material(kit, slot):
         ao.only_local = True
         ao.samples = 8
         cav = ramp(m, ao.outputs['AO'], 0.85, 0.4)
+        for k in kit.kinds[slot] & NO_CAVITY:
+            cav = mul(m, cav, m.math('SUBTRACT', 1.0, is_k(m, c.fin, FIN[k])))
         col = m.mix(mul(m, cav, kit.cavity[slot]), col, H(0x2e2a24))
         rough = add(m, rough, mul(m, cav, 0.08))
     if kit.low[slot] > 0.0:
@@ -3348,21 +3460,101 @@ def phone(k, M, col=0x141414, slot=None):
 
 
 def f_bag(c):
-    """A milky plastic bag round a pledge: what's inside shows faintly through it, crinkles."""
+    """A pledge's poly bag: milky (frosted) or clear film, its goods showing through (the kit's see image: their color
+    where a ray in from the film meets them, and how far in): a milky film shows them plainly only where they press
+    against it and as a soft pale shape a few cm behind it; a clear one shows them through the air inside, dimmer with
+    depth. Thin stress-whitened folds (mostly hanging, gathered toward the neck), a crinkle, a soft plastic sheen; whiter
+    where it's bunched at the neck, opaque white in the knot and its ears.
+    pw_aux2: x the film (0 milky, 1 clear, 2 a clear zip bag), z 1 for the knot; pw_aux: the neck (aux_point)."""
     m = c.m
-    vor = m.node('ShaderNodeTexVoronoi', Scale=45.0)
-    vor.feature = 'DISTANCE_TO_EDGE'
-    m.link(c.P, vor.inputs['Vector'])
-    crease = ramp(m, vor.outputs['Distance'], 0.04, 0.0)
-    band = noise(m, scaled(m, c.sep, 3.0, 3.0, 8.0), detail=2.0)
-    inside = m.mix(ramp(m, band, 0.35, 0.65), c.col, darken(m, c.col, 0.4))
-    col = m.mix(0.45, H(0xd8dde2), inside)
-    col = m.mix(mul(m, crease, 0.4), col, H(0xf2f4f6))
-    return col, add(m, 0.22, mul(m, crease, -0.08), mul(m, band, 0.1)), 0.0, add(m, mul(m, crease, 0.25), mul(m, band, 0.3))
+    milky = is_k(m, c.bx, 0)
+    zipb = is_k(m, c.bx, 2)
+    knot = m.math('GREATER_THAN', c.bz, 0.5)
+    if c.kit.see_img is not None:
+        uvn = m.node('ShaderNodeUVMap')
+        uvn.uv_map = 'UVMap'
+        t = m.node('ShaderNodeTexImage')
+        t.image = c.kit.see_img
+        t.extension = 'EXTEND'
+        t.interpolation = 'Linear'
+        m.link(uvn.outputs['UV'], t.inputs['Vector'])
+        goods, depth = t.outputs['Color'], t.outputs['Alpha']
+    else:
+        goods, depth = c.col, 0.4
+    d = mul(m, depth, SEE_MAX)
+    live = sub(m, 1.0, knot)
+    touch = mul(m, m.math('EXPONENT', mul(m, d, -1.0 / 0.012)), live)
+    near = mul(m, m.math('EXPONENT', mul(m, d, -1.0 / 0.05)), live)
+    # milky: a translucent white over the dim inside, the goods' color soft and pale a few cm in, plain where they touch
+    air_m = m.mix(0.12, H(0xb2b6b9), c.col)
+    milk = m.mix(mul(m, near, 0.85), air_m, m.mix(0.3, goods, H(0xc4c8cb)))
+    milk = m.mix(mul(m, touch, 0.9), milk, m.mix(0.18, goods, H(0xe4e7e9)))
+    # clear: the goods through the film, a faint haze over them; the dim inside of the bag where there's nothing near
+    air_c = m.mix(0.30, H(0x4a4c50), c.col)
+    clr = m.mix(mul(m, near, 0.92), air_c, m.mix(0.07, goods, H(0xffffff)))
+    col = m.mix(milky, clr, milk)
+    # bunched at the neck: more layers of film, whiter
+    dx, dy, dz = sub(m, c.x, c.ax), sub(m, c.y, c.ay), sub(m, c.z, c.az)
+    dn = m.math('SQRT', add(m, mul(m, dx, dx), mul(m, dy, dy), mul(m, dz, dz)))
+    bunch = mul(m, mul(m, ramp(m, dn, 0.09, 0.0), sub(m, 1.0, zipb)), add(m, 0.3, mul(m, milky, 0.35)))
+    col = m.mix(bunch, col, H(0xdfe2e4))
+    col = m.mix(knot, col, m.mix(milky, H(0xb4b8bc), H(0xe8eaec)))
+    # crumpled film: straight crease lines meeting at angles (a Voronoi cell's edges), between them facets sloping up to
+    # smooth taut plateaus (the distance to the nearest crease, capped), at two sizes, the cells drawn out down the bag
+    # (it hangs); tight film over the goods crumples less. The relief is real (BUMP_MM): the facets turn the sheen into the
+    # broken highlights film shows. Creases a few mm wide, stress-whitened, so they bake clean at the goods' ~3 mm texel.
+    Pw = m.node('ShaderNodeVectorMath')
+    Pw.operation = 'ADD'
+    m.link(scaled(m, c.sep, 1.0, 1.0, 0.6), Pw.inputs[0])
+    m.link(vec(m, mul(m, sub(m, noise(m, c.P, scale=9.0, detail=1.0), 0.5), 0.02), 0.0, 0.0), Pw.inputs[1])
+    Pw = Pw.outputs[0]
+    e1 = voronoi_edge(m, Pw, 15.0)
+    e2 = voronoi_edge(m, add_vec(m, Pw, (3.1, 7.7, 1.3)), 38.0)
+    # where it's crumpled hard and where it lies smoother; only some creases stress-whiten (a fold that has been opened)
+    crumple = add(m, 0.3, mul(m, ramp(m, noise(m, c.P, scale=5.0, detail=2.0), 0.3, 0.7), 0.7))
+    taut = mul(m, sub(m, 1.0, mul(m, touch, 0.6)), crumple)
+    relief = add(m, mul(m, m.math('MINIMUM', e1, 0.2), 2.6 / 0.2 * BUMP_MM), mul(m, m.math('MINIMUM', e2, 0.18), 0.8 / 0.18 * BUMP_MM))
+    opened = ramp(m, noise(m, c.P, scale=14.0, detail=2.0), 0.5, 0.68)
+    crease = mul(m, m.math('MAXIMUM', ramp(m, e1, 0.06, 0.0), mul(m, ramp(m, e2, 0.07, 0.0), 0.4)), mul(m, taut, opened))
+    col = m.mix(mul(m, crease, add(m, 0.07, mul(m, milky, 0.08))), col, H(0xf2f4f5))
+    wipe = ramp(m, noise(m, c.P, scale=4.0, detail=3.0), 0.4, 0.75)
+    # a light film of dust on what faces up (the kit's own dust passes the film by: it would matte the sheen right off)
+    dust = mul(m, mul(m, ramp(m, c.nz, 0.55, 0.95), ramp(m, noise(m, c.P, scale=30.0, detail=4.0), 0.35, 0.8)), sub(m, 1.0, wipe))
+    col = m.mix(mul(m, dust, 0.22), col, H(0xa8a399))
+    rough = add(m, mix_float(m, milky, 0.10, 0.24), mul(m, crease, 0.06), mul(m, wipe, -0.03), mul(m, knot, 0.1), mul(m, dust, 0.3))
+    h = mul(m, relief, mul(m, taut, sub(m, 1.0, mul(m, knot, 0.6))))
+    return col, rough, 0.0, h
 
 
 FIN['bag'] = len(FIN) + 1
 FINISH['bag'] = f_bag
+NO_DUST.add('bag')
+NO_CAVITY.add('bag')
+
+
+SPEAK_Z = 1.52
+# (r, z) about the window's normal, z toward the customer: the inside face, the bezel rolled over to the glass, the outside
+SPEAK_PROFILE = [(0.0, -0.0045), (0.050, -0.0045), (0.053, -0.0062), (0.058, -0.0088), (0.064, -0.0085), (0.0685, -0.0055), (0.0705, -0.002),
+                 (0.0705, 0.002), (0.0685, 0.0055), (0.064, 0.0085), (0.058, 0.0088), (0.053, 0.0062), (0.050, 0.0045), (0.0, 0.0045)]
+
+
+def draw_speak(s, w, h):
+    """The speak-through's face (100 mm across): brushed stainless turned in faint rings, six rings of 3 mm perforations
+    (dark: the baffle behind them), a domed center cap."""
+    cx, cy, R = w / 2, h / 2, w / 2
+    s.circle(cx, cy, R, 0xaeb2b5, metal=1.0, rough=0.34, n=96)
+    rnd = random.Random(5)
+    for i in range(3, 50, 2):
+        s.ring(cx, cy, i - 0.25, i + 0.25, rnd.choice((0xa4a8ab, 0xb8bcbf)), metal=1.0, rough=rnd.uniform(0.3, 0.4), n=96)
+    for ri, rr in enumerate((13.0, 19.0, 25.0, 31.0, 37.0, 43.0)):
+        n = int(2 * math.pi * rr / 6.2)
+        for j in range(n):
+            a = 2 * math.pi * (j + 0.5 * (ri % 2)) / n
+            x, y = cx + rr * math.cos(a), cy + rr * math.sin(a)
+            s.circle(x, y, 1.75, 0x8c9093, metal=1.0, rough=0.45, n=14)      # the hole's chamfer
+            s.circle(x, y, 1.45, 0x0b0b0b, rough=0.85, n=14)
+    s.ring(cx, cy, 7.4, 8.4, 0x74787a, metal=1.0, rough=0.45, n=64)
+    s.circle(cx, cy, 7.4, 0xc4c8ca, metal=1.0, rough=0.24, n=64)
 
 
 def draw_cctv(s, w, h):
@@ -3391,7 +3583,7 @@ def p_box_label(text, seed):
     return draw
 
 
-def mesh_panel(k, plane, a0, a1, z0, z1, fixed, pitch=0.05, r=0.0022, col=0x1a1a1a, slot=None):
+def mesh_panel(k, plane, a0, a1, z0, z1, fixed, pitch=0.05, r=0.0022, col=0x1a1a1a, slot=None, uvg=0):
     """A welded wire mesh panel in a plane x = fixed (plane 'x', spanning y a0..a1) or y = fixed (plane 'y', spanning x)."""
     n_a = max(int((a1 - a0) / pitch), 1)
     n_z = max(int((z1 - z0) / pitch), 1)
@@ -3406,7 +3598,7 @@ def mesh_panel(k, plane, a0, a1, z0, z1, fixed, pitch=0.05, r=0.0022, col=0x1a1a
         p, q = ((fixed - off, a0, z), (fixed - off, a1, z)) if plane == 'x' else ((a0, fixed - off, z), (a1, fixed - off, z))
         objs.append((p, q))
     o = wires('mesh', objs, r)
-    k.add(o, 'wire', col, slot=slot)
+    k.add(o, 'wire', col, slot=slot, uvg=uvg)
     return o
 
 
@@ -3479,24 +3671,641 @@ def paper_sack(k, center, size, seed, tag=None, slot=None, facing='-x'):
                     w=0.035, h=0.06)
 
 
-def pledge_bag(k, center, size, seed, inside=0x3a3a3a, tag=None, slot=None, facing='-x', subdiv=3):
-    """A pledge in a knotted bag with its ticket stapled to the front (the face toward `facing`); about a third of them
-    in kraft paper sacks instead."""
-    if facing in ('-x', '+y') and random.Random(seed * 31 + 11).random() < 0.36:
-        return paper_sack(k, center, size, seed, tag=tag, slot=slot, facing=facing)
-    cx, cy, cz = center
-    W, D, Hh = size
-    hz = (Hh + 0.003) / 1.69            # its half height: the flattened bottom on the shelf, the gathered neck at Hh
-    o = blob('bag', (cx, cy, cz - 0.003 + 0.45 * hz), (W, D, 2 * hz), seed=seed, detail=0.16, subdiv=subdiv, flatten=0.55, smooth=1, pinch=0.8)
-    k.add(o, 'bag', inside, slot=slot)
-    k.add(blob('knot', (cx, cy, cz + Hh + 0.015), (0.04, 0.035, 0.035), seed=seed + 1, detail=0.25, subdiv=1), 'bag', 0xd8dde2, slot=slot)
-    if tag:
-        if facing == '-x':
-            k.decal(tag, (cx - W / 2 - 0.002, cy, cz + max(0.04, Hh * 0.27)), u=(0, -1, 0), v=(0, 0, 1), lift=0.0, w=0.035, h=0.06)
-        elif facing == '+y':
-            k.decal(tag, (cx, cy + D / 2 + 0.002, cz + max(0.04, Hh * 0.27)), u=(-1, 0, 0), v=(0, 0, 1), lift=0.0, w=0.035, h=0.06)
+# ------------------------------------------------------------------ pledges: the goods in the bags, the bags round them
+#
+# A pledge on the back shelves is a real thing in a real bag. Its goods (a drill, a console, pedals, ring boxes...) are
+# built first, in the item's own frame (front toward -x, y along the shelf, z up, origin on the shelf under its middle),
+# only to shape the film round them and to show through it: they're never exported. The film is a cube shrunk onto
+# them and relaxed like cloth, gathered to a knotted neck (or a flat zip bag stood on its edge), creased and crumpled;
+# see_bake then bakes, from inside each film, the goods' color and how far behind the film they lie, and f_bag shows
+# them through (sharply where they press against a clear film, as a pale shape through a milky one).
+
+SEE_MAX = 0.10        # the see image's depth range (m)
+
+
+class Goods:
+    """A pledge's contents: boxes and cylinders, each with its color (the pw_ccol face attribute the see bake reads)."""
+
+    def __init__(self, rnd):
+        self.rnd = rnd
+        self.parts = []
+        self.main = 0x3a3a3a      # the color that shows most (the bag's tint over air)
+
+    def _keep(self, o, col):
+        set_attr(o, 'pw_ccol', lin3(col))
+        self.parts.append(o)
+        return o
+
+    def box(self, x0, x1, y0, y1, z0, z1, col, r=0.004):
+        return self._keep(bx('goods', x0, x1, y0, y1, z0, z1, r, 1), col)
+
+    def obox(self, center, size, col, rz=0.0, rx=0.0, ry=0.0, r=0.004):
+        return self._keep(obox('goods', center, size, rz, rx, ry, r, 1), col)
+
+    def cyl(self, a, b, r, col, n=12):
+        return self._keep(parts.rod('goods', a, b, r, n), col)
+
+    def bounds(self):
+        P = np.concatenate([np.array([v.co[:] for v in o.data.vertices]) for o in self.parts])
+        return Vector(P.min(0)), Vector(P.max(0))
+
+    def bvh(self):
+        verts, polys = [], []
+        for o in self.parts:
+            base = len(verts)
+            verts += [v.co.copy() for v in o.data.vertices]
+            polys += [[base + i for i in p.vertices] for p in o.data.polygons]
+        return BVHTree.FromPolygons(verts, polys)
+
+
+TOOL_COLS = [(0xe8b012, 0x1c1c1c), (0x14848a, 0x1c1c1c), (0xb3141c, 0x1c1c1c), (0xe8661a, 0x3a3a3a), (0x2a5ab0, 0x1c1c1c)]
+
+
+def g_drill(g, room):
+    """A cordless drill: on its battery, upright (the motor across the top, the chuck out to one side), or on its side."""
+    body, black = g.rnd.choice(TOOL_COLS)
+    g.main = body
+    s = g.rnd.choice((-1.0, 1.0))
+    if room[2] > 0.27 and g.rnd.random() < 0.6:
+        g.box(-0.045, 0.045, -0.06, 0.06, 0.0, 0.075, black, 0.012)
+        g.obox((0.0, -0.01 * s, 0.135), (0.048, 0.052, 0.12), body, rx=10.0 * s, r=0.012)
+        g.cyl((0.0, -0.075 * s, 0.215), (0.0, 0.075 * s, 0.215), 0.04, body)
+        g.cyl((0.0, 0.075 * s, 0.215), (0.0, 0.13 * s, 0.215), 0.024, black)
+    else:
+        # lying on its side, with a spare battery
+        g.box(-0.06, 0.06, -0.10, -0.01, 0.0, 0.05, black, 0.012)
+        g.obox((0.0, 0.02, 0.025), (0.12, 0.05, 0.05), body, rz=12.0 * s, r=0.012)
+        g.cyl((-0.10 * s, 0.07, 0.03), (0.08 * s, 0.07, 0.03), 0.032, body)
+        g.cyl((0.08 * s, 0.07, 0.03), (0.13 * s, 0.07, 0.03), 0.02, black)
+        g.box(-0.04, 0.04, 0.11, 0.17, 0.0, 0.07, black, 0.01)
+
+
+def g_saw(g, room):
+    body, black = g.rnd.choice(TOOL_COLS)
+    g.main = body
+    g.box(-0.11, 0.11, -0.13, 0.13, 0.0, 0.01, 0x8a8e92, 0.002)                       # the shoe
+    g.cyl((0.0, -0.04, 0.10), (0.0, 0.03, 0.10), 0.095, body, 20)                    # the blade guard
+    g.cyl((0.0, 0.03, 0.09), (0.0, 0.12, 0.09), 0.042, black)                         # the motor
+    g.obox((0.02, 0.02, 0.18), (0.16, 0.045, 0.05), black, ry=-12.0, r=0.015)        # the handle
+
+
+def g_sander(g, room):
+    body, black = g.rnd.choice(TOOL_COLS)
+    g.main = body
+    g.box(-0.07, 0.07, -0.065, 0.065, 0.0, 0.03, black, 0.01)
+    g.box(-0.06, 0.05, -0.05, 0.05, 0.03, 0.11, body, 0.02)
+    g.cyl((-0.05, 0.0, 0.13), (0.04, 0.0, 0.13), 0.028, black)
+    g.cyl((0.05, 0.0, 0.07), (0.11, 0.0, 0.07), 0.018, 0x2a2a2a)
+
+
+def g_console(g, room):
+    col = g.rnd.choice((0x161618, 0xe8e8e4, 0x1c1c22))
+    g.main = col
+    w, d = g.rnd.uniform(0.24, 0.30), g.rnd.uniform(0.20, 0.26)
+    g.box(-d / 2, d / 2, -w / 2, w / 2, 0.0, 0.055, col, 0.008)
+    # the controller and its cable on top
+    cc = g.rnd.choice((0x161618, 0xe8e8e4, 0xb3141c, 0x2a5ab0))
+    g.obox((0.01, g.rnd.uniform(-0.05, 0.05), 0.08), (0.10, 0.155, 0.05), cc, rz=g.rnd.uniform(-25, 25), r=0.02)
+    g.cyl((-d / 2 + 0.03, -w / 2 + 0.02, 0.062), (-d / 2 + 0.03, w / 2 - 0.04, 0.062), 0.008, 0x111111, 6)
+
+
+def g_games(g, room):
+    """A stack of game cases and a controller."""
+    g.main = 0x1c3a8a
+    n = g.rnd.randint(3, 6)
+    for i in range(n):
+        col = g.rnd.choice((0x1c3a8a, 0x111111, 0x2a7a3a, 0xb3141c, 0xe8e8e4))
+        a = g.rnd.uniform(-8, 8)
+        g.obox((g.rnd.uniform(-0.01, 0.01), 0.0, 0.007 + i * 0.0145), (0.17, 0.135, 0.014), col, rz=a, r=0.002)
+    g.obox((0.0, 0.0, n * 0.0145 + 0.025), (0.10, 0.15, 0.05), 0x161618, rz=g.rnd.uniform(-30, 30), r=0.02)
+
+
+def g_laptop(g, room):
+    col = g.rnd.choice((0xa8abb0, 0x2a2c30, 0x161618))
+    g.main = col
+    g.box(-0.115, 0.115, -0.165, 0.165, 0.0, 0.022, col, 0.006)
+    g.box(-0.04, 0.04, -0.06, 0.06, 0.022, 0.05, 0x1a1a1a, 0.008)     # the charger brick
+    g.cyl((-0.08, -0.05, 0.03), (-0.08, 0.12, 0.03), 0.006, 0x111111, 6)
+
+
+def g_player(g, room):
+    col = g.rnd.choice((0x1a1a1a, 0x8a8e92))
+    g.main = col
+    g.box(-0.11, 0.11, -0.17, 0.17, 0.0, 0.05, col, 0.004)
+    g.obox((0.0, g.rnd.uniform(-0.08, 0.08), 0.06), (0.045, 0.16, 0.02), 0x111111, rz=g.rnd.uniform(-30, 30), r=0.006)
+
+
+def g_drone(g, room):
+    col = g.rnd.choice((0xe8e8e8, 0x6a6e72, 0x2a2a2a))
+    g.main = col
+    g.box(-0.06, 0.06, -0.08, 0.08, 0.0, 0.06, col, 0.02)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            g.obox((sx * 0.07, sy * 0.08, 0.04), (0.10, 0.02, 0.015), col, rz=sx * sy * 40.0, r=0.005)
+            g.cyl((sx * 0.105, sy * 0.115, 0.03), (sx * 0.105, sy * 0.115, 0.05), 0.05, 0x3a3a3a, 14)
+    g.cyl((-0.07, 0.0, 0.03), (-0.09, 0.0, 0.03), 0.022, 0x111111)
+
+
+def g_camera(g, room):
+    g.main = 0x161618
+    g.box(-0.035, 0.035, -0.065, 0.065, 0.0, 0.09, 0x161618, 0.012)
+    g.cyl((-0.035, 0.0, 0.045), (-0.12, 0.0, 0.045), 0.034, 0x1c1c1c, 16)
+    g.cyl((-0.12, 0.0, 0.045), (-0.125, 0.0, 0.045), 0.03, 0x8a8e92, 16)
+    if g.rnd.random() < 0.6:
+        g.cyl((0.0, 0.08, 0.02), (0.0, 0.16, 0.02), 0.03, 0x1c1c1c, 12)        # a second lens
+
+
+def g_lens(g, room):
+    g.main = 0x1c1c1c
+    for i in range(g.rnd.randint(1, 3)):
+        y = -0.06 + i * 0.07
+        r = g.rnd.uniform(0.028, 0.036)
+        g.cyl((0.0, y, 0.0), (0.0, y, g.rnd.uniform(0.07, 0.13)), r, g.rnd.choice((0x1c1c1c, 0x1c1c1c, 0xe8e8e4)), 14)
+
+
+def g_speaker(g, room):
+    col = g.rnd.choice((0x161618, 0x1c3a8a, 0xb3141c, 0x2a2a2a, 0x2a7a3a))
+    g.main = col
+    if room[2] > 0.27 and g.rnd.random() < 0.5:
+        g.box(-0.08, 0.08, -0.075, 0.075, 0.0, 0.24, 0x1a1a1a, 0.006)            # a bookshelf speaker
+        g.cyl((-0.08, 0.0, 0.08), (-0.085, 0.0, 0.08), 0.055, 0x3a3a3a, 16)
+        g.main = 0x1a1a1a
+    else:
+        g.cyl((0.0, -0.09, 0.042), (0.0, 0.09, 0.042), 0.042, col, 16)           # a round one on its side
+        g.cyl((0.0, -0.095, 0.042), (0.0, -0.09, 0.042), 0.034, 0x111111, 12)
+
+
+def g_mic(g, room):
+    g.main = 0x161618
+    g.box(-0.05, 0.05, -0.12, 0.12, 0.0, 0.06, 0x161618, 0.004)              # its case
+    g.cyl((0.0, -0.10, 0.075), (0.0, 0.06, 0.075), 0.014, 0x2a2a2a, 10)          # the mic on it
+    g.cyl((0.0, 0.06, 0.075), (0.0, 0.11, 0.075), 0.026, 0x8a8e92, 12)
+    g.cyl((0.03, -0.08, 0.07), (0.03, 0.08, 0.07), 0.009, 0x111111, 6)          # a coiled cable
+
+
+def g_flute(g, room):
+    g.main = 0x161618
+    g.box(-0.05, 0.05, -0.18, 0.18, 0.0, 0.065, 0x161618, 0.012)
+    g.box(-0.02, 0.02, -0.04, 0.04, 0.065, 0.075, 0xc8b070, 0.003)
+
+
+def g_pedal(g, room):
+    """One to three guitar pedals, side by side, their knobs and footswitches up."""
+    n = g.rnd.randint(1, 3) if room[0] > 0.22 else 1
+    cols = g.rnd.sample([0xe8661a, 0x2a8a3a, 0x1a4aa0, 0xe8c21a, 0x6a2a8a, 0xb3141c, 0xd8d8d0], n)
+    g.main = cols[0]
+    y0 = -(n * 0.08) / 2
+    for i, col in enumerate(cols):
+        y = y0 + 0.04 + i * 0.08
+        g.box(-0.062, 0.062, y - 0.036, y + 0.036, 0.0, 0.052, col, 0.005)
+        for kx in (-0.035, 0.0):
+            for ky in (-0.018, 0.018):
+                g.cyl((kx, y + ky, 0.052), (kx, y + ky, 0.066), 0.007, 0x111111, 8)
+        g.cyl((0.035, y, 0.052), (0.035, y, 0.07), 0.009, 0xc8c8c8, 8)
+
+
+def g_jewel(g, room):
+    """Ring and chain boxes: velvet or card, two or three, stacked or side by side."""
+    n = g.rnd.randint(1, 3)
+    g.main = 0x6a1418
+    for i in range(n):
+        col = g.rnd.choice((0x6a1418, 0x141414, 0x1a2a5a, 0xe8e4dc, 0x2a4a2a))
+        s = g.rnd.uniform(0.05, 0.075) if g.rnd.random() < 0.7 else 0.0
+        if s:
+            g.box(-s / 2, s / 2, -0.07 + i * 0.07 - s / 2, -0.07 + i * 0.07 + s / 2, 0.0, s * 0.85, col, 0.01)
         else:
-            k.decal(tag, (cx, cy - D / 2 - 0.002, cz + max(0.04, Hh * 0.27)), u=(1, 0, 0), v=(0, 0, 1), lift=0.0, w=0.035, h=0.06)
+            g.box(-0.035, 0.035, -0.07 + i * 0.07 - 0.06, -0.07 + i * 0.07 + 0.06, 0.0, 0.03, col, 0.004)   # a chain's long box
+        if i == 0:
+            g.main = col
+
+
+def g_watchbox(g, room):
+    col = g.rnd.choice((0x141414, 0x2a1a10, 0x1a2a5a, 0xd8d0c0))
+    g.main = col
+    g.box(-0.055, 0.055, -0.055, 0.055, 0.0, 0.085, col, 0.008)
+    g.box(-0.04, 0.04, 0.06, 0.12, 0.0, 0.03, 0xe8e4dc, 0.003)                  # its papers
+
+
+def g_phone(g, room):
+    g.main = 0x111111
+    g.box(-0.004, 0.004, -0.038, 0.038, 0.0, 0.155, g.rnd.choice((0x111111, 0xe8e8e4, 0x2a3a5a)), 0.006)
+    g.box(-0.012, 0.012, 0.045, 0.075, 0.0, 0.045, 0xe8e8e4, 0.004)            # the charger
+
+
+def g_tablet(g, room):
+    col = g.rnd.choice((0x161618, 0xa8abb0))
+    g.main = col
+    g.box(-0.005, 0.005, -0.09, 0.09, 0.0, 0.245, col, 0.008)
+    g.box(-0.012, 0.012, 0.095, 0.125, 0.0, 0.05, 0xe8e8e4, 0.004)
+
+
+GOODS = {'drill': g_drill, 'saw': g_saw, 'sander': g_sander, 'console': g_console, 'game': g_games, 'laptop': g_laptop, 'player': g_player,
+         'drone': g_drone, 'camera': g_camera, 'lens': g_lens, 'speaker': g_speaker, 'mic': g_mic, 'flute': g_flute, 'pedal': g_pedal,
+         'ring 14k': g_jewel, 'ring': g_jewel, 'chain': g_jewel, 'watch': g_watchbox, 'phone': g_phone, 'tablet': g_tablet}
+ZIP_GOODS = {'ring 14k', 'ring', 'chain', 'watch', 'phone', 'tablet', 'lens', 'game'}      # small and flat: in a zip bag, stood on edge
+
+
+def _smooth01(e0, e1, x):
+    t = min(1.0, max(0.0, (x - e0) / (e1 - e0)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def film_mesh(name, g, rnd, n, slack, tight, gap, neck=None, r_neck=0.012, folds=0.004, floor=0.0, iters=7):
+    """A bag's film round goods g (their frame): a cube of n x n quads a face, set round the goods' bounds with slack,
+    shrunk onto them and relaxed like cloth (pushed out of them, settled on the shelf at z = floor), its top face
+    gathered to the neck point (None: a closed pillow, a zip bag's), then folded (radial folds rising to the neck) and
+    crumpled. Returns the object and its BVH (for placing the ticket on it)."""
+    bvh = g.bvh()
+    lo, hi = g.bounds()
+    c = (lo + hi) * 0.5
+    e = (hi - lo) * 0.5 + Vector((slack, slack, slack))
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=2.0)
+    bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=n - 1, use_grid_fill=True)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-6)
+    bm.verts.ensure_lookup_table()
+    cube = [v.co.copy() for v in bm.verts]
+    nbr = [[e_.other_vert(v).index for e_ in v.link_edges] for v in bm.verts]
+    pos = []
+    for p in cube:
+        q = p.lerp(p.normalized() * 1.3, 0.45)
+        pos.append(Vector((c.x + q.x * e.x, c.y + q.y * e.y, c.z + q.z * e.z)))
+    gw = [_smooth01(-0.2, 1.0, p.z) for p in cube]
+    pinned = [neck is not None and p.z > 0.999 for p in cube]
+    if neck is not None:
+        N = Vector(neck)
+        for i, p in enumerate(cube):
+            if pinned[i]:
+                pos[i] = N + Vector((p.x * r_neck, p.y * r_neck, 0.0))
+
+    def collide(v, keep=gap):
+        loc, nrm, _i, _d = bvh.find_nearest(v)
+        if loc is None:
+            return v
+        out = v - loc
+        if out.length < 1e-7 or out.dot(nrm) < 0.0:
+            return loc + nrm * keep
+        if out.length < keep:
+            return loc + out.normalized() * keep
+        return v
+
+    for it in range(iters):
+        new = []
+        for i, v in enumerate(pos):
+            if pinned[i]:
+                new.append(v)
+                continue
+            # shrink: toward the goods (less so on the way up to the neck: the film hangs from it)
+            loc, nrm, _i, _d = bvh.find_nearest(v)
+            w = tight * (1.0 - 0.6 * gw[i]) if neck is not None else tight
+            if loc is not None:
+                v = v.lerp(loc + (v - loc).normalized() * gap if (v - loc).length > 1e-7 else loc + nrm * gap, w * 0.45)
+            # relax toward the neighbors' middle (the film's tension)
+            mid = sum((pos[j] for j in nbr[i]), Vector()) / len(nbr[i])
+            v = v.lerp(mid, 0.35)
+            v = collide(v)
+            if v.z < floor + 0.0015:
+                v = Vector((v.x + (v.x - c.x) * 0.015, v.y + (v.y - c.y) * 0.015, floor + 0.0015))
+            new.append(v)
+        pos = new
+    # folds and crumples along the normals
+    for v, p in zip(bm.verts, pos):
+        v.co = p
+    bm.normal_update()
+    ph = rnd.uniform(0, 6.28)
+    kf = rnd.randint(6, 10)
+    P = np.array([p[:] for p in pos])
+    lump = texmaps.value_noise(P * 1.0 + rnd.uniform(0, 50), 0.05, seed=rnd.randint(0, 999), octaves=2) - 0.5
+    crum = texmaps.value_noise(P * 1.0 + rnd.uniform(0, 50), 0.018, seed=rnd.randint(0, 999), octaves=2) - 0.5
+    axis = Vector(neck) if neck is not None else c
+    for i, v in enumerate(bm.verts):
+        if pinned[i]:
+            continue
+        th = math.atan2(v.co.y - axis.y, v.co.x - axis.x)
+        fold = math.sin(th * kf + ph + 4.0 * lump[i])
+        a = folds * (0.35 + 1.5 * gw[i] ** 2) if neck is not None else folds * 0.6
+        if v.co.z < floor + 0.004:
+            a *= 0.2
+        d = v.normal * (a * fold + 0.006 * lump[i] + 0.003 * crum[i])
+        p = collide(v.co + d, gap * 0.6)
+        if p.z < floor + 0.0015:
+            p.z = floor + 0.0015
+        v.co = p
+    o = core.mesh_object(name, bm)
+    core.orient_normals(o)
+    o.data.shade_smooth()
+    fb = BVHTree.FromPolygons([v.co.copy() for v in o.data.vertices], [list(p.vertices) for p in o.data.polygons])
+    return o, fb
+
+
+def ear(name, base, yaw, pitch, length, width, roll=0.0, seed=0):
+    """One of the tails of film left over a knot: twisted tight where it leaves the knot, flaring to a ragged cut end,
+    channelled (the film folds along it) and crumpled, sagging a little under its own weight; from base, out along yaw,
+    up by pitch. A strip 5 x 2 quads, 1.4 mm thick (~68 triangles)."""
+    rnd = random.Random(seed)
+    nl, nw = 5, 2
+    d = Vector((math.cos(yaw) * math.cos(pitch), math.sin(yaw) * math.cos(pitch), math.sin(pitch)))
+    hp = Vector((-math.sin(yaw), math.cos(yaw), 0.0))
+    up = d.cross(hp).normalized()
+    sag = length * rnd.uniform(0.08, 0.3)
+    twist = rnd.uniform(-1.0, 1.0)
+    ph = [rnd.uniform(0, 6.28) for _ in range(4)]
+    chan = rnd.uniform(0.25, 0.6) * width
+    bm = bmesh.new()
+    grid = []
+    for i in range(nl + 1):
+        t = i / nl
+        w = width * (0.22 + 0.78 * t ** 0.8)
+        ang = roll + twist * (1.0 - t) * 1.2
+        across = (hp * math.cos(ang) + up * math.sin(ang)).normalized()
+        nrm = d.cross(across).normalized()
+        row = []
+        for j in range(nw + 1):
+            sj = j / nw * 2.0 - 1.0
+            tt = t + (rnd.uniform(-0.12, 0.1) if i == nl else 0.0)       # the cut end is ragged
+            c_ = Vector(base) + d * (tt * length) - Vector((0.0, 0.0, sag * tt * tt))
+            off = (chan * t * (abs(sj) ** 1.5 - 0.35)
+                   + width * 0.12 * t * (math.sin(9.0 * t + ph[0] + 2.0 * sj) * 0.7 + math.sin(17.0 * t * (1.0 + 0.3 * sj) + ph[1]) * 0.3))
+            row.append(bm.verts.new(c_ + across * (sj * w * 0.5) + nrm * off))
+        grid.append(row)
+    for i in range(nl):
+        for j in range(nw):
+            bm.faces.new((grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=0.0014)
+    o = core.mesh_object(name, bm)
+    weld(o)
+    core.orient_normals(o)
+    return o
+
+
+def stapled_tag(k, fb, key, x_front, yc, zt, facing_vec=(-1.0, 0.0, 0.0), slot=None, tilt=0.0, origin=None):
+    """A ticket stapled flat to a bag's film where a ray from the front (along -facing_vec, from (x_front, yc, zt), or from
+    0.5 m out from origin) meets it (the film's BVH in the item's frame)."""
+    F = Vector(facing_vec).normalized()
+    start = Vector(origin) + F * 0.5 if origin is not None else Vector((x_front, yc, zt))
+    hit = fb.ray_cast(start, -F)
+    if hit[0] is None:
+        return
+    p, n = hit[0], hit[1]
+    if n.dot(F) < 0.0:
+        n = -n
+    n = n.lerp(F, 0.4).normalized()
+    up = Vector((0.0, 0.0, 1.0))
+    V = (up - n * n.dot(up)).normalized()
+    U = V.cross(n).normalized()
+    a = math.radians(tilt)
+    U, V = (U * math.cos(a) + V * math.sin(a)).normalized(), (V * math.cos(a) - U * math.sin(a)).normalized()
+    o = p + n * 0.0012
+    k.decal(key, tuple(o), u=tuple(U), v=tuple(V), lift=0.0, w=0.035, h=0.06)
+    s = o + V * 0.024 + n * 0.0006
+    st = obox('staple', (0.0, 0.0, 0.0), (0.012, 0.0012, 0.0008))
+    st.data.transform(Matrix.Translation(s) @ Matrix((U, V, n)).transposed().to_4x4())
+    k.add(st, 'steel', slot=slot)
+
+
+def facing_rot(facing):
+    return {'-x': 0.0, '+y': -90.0, '-y': 90.0, '+x': 180.0}[facing]
+
+
+def pledge(k, at, room, seed, tag=None, desc=None, slot=None, facing='-x', fine=True, kind=None, run=None):
+    """One pledge on a shelf, its spot starting at `at` (on the shelf, halfway back) and running along the shelf (the
+    item's +y: +y for a '-x' front, +x for '+y', -x for '-y', or `run`); room (along the shelf, deep, high) the space it may take;
+    its front toward `facing`. kind: 'sack' (kraft paper, its ticket stapled on), 'zip' (a clear zip bag) or None: the
+    goods `desc` (GOODS' keys) in a knotted milky or clear bag, or in a zip bag if they're small and flat (ZIP_GOODS).
+    Returns the width it took along the shelf."""
+    rnd = random.Random(seed * 7919 + 17)
+    along, deep, high = room
+    R = RZ(facing_rot(facing))
+    run = Vector(run) if run is not None else R.to_3x3() @ Vector((0.0, 1.0, 0.0))
+    if kind == 'sack':
+        w = min(along, rnd.uniform(0.18, 0.30))
+        sz = (rnd.uniform(0.20, min(0.32, deep - 0.06)), w, min(high - 0.03, rnd.uniform(0.18, 0.32)))
+        if facing in ('+y', '-y'):
+            sz = (w, sz[0], sz[2])
+        paper_sack(k, tuple(Vector(at) + run * (w / 2)), sz, seed, tag=tag, slot=slot, facing=facing if facing != '-y' else '+y')
+        return w
+    mk = k.mark()
+    g = Goods(rnd)
+    GOODS[desc](g, room)
+    lo, hi = g.bounds()
+    zipb = kind == 'zip' or (kind is None and desc in ZIP_GOODS)
+    M = Matrix()
+    if zipb:
+        # a clear zip bag: flat goods (a phone, a tablet) stood on edge and leaning back on what's behind them, the zip
+        # along the top; boxes lying in it on the shelf, the ticket on top
+        n = 4 if not fine else 5
+        standing = (hi.x - lo.x) < 0.045
+        film, fb = film_mesh('zipbag', g, rnd, n, 0.016, 0.8, 0.004, None, folds=0.0025)
+        lo2, hi2 = Vector(film.bound_box[0]), Vector(film.bound_box[6])
+        mid = (lo2 + hi2) * 0.5
+        k.add(film, 'bag', g.main, slot=slot, aux_point=tuple(mid), aux2=(2.0, 0.0, 0.0))
+        zcol = rnd.choice((0x2a5ab0, 0xb3141c, 0xe8e8e4))
+        if standing:
+            zc = hi2.z - 0.012
+            f0 = fb.ray_cast(Vector((lo2.x - 0.2, mid.y, zc)), Vector((1.0, 0.0, 0.0)))[0]
+            f1 = fb.ray_cast(Vector((hi2.x + 0.2, mid.y, zc)), Vector((-1.0, 0.0, 0.0)))[0]
+            xa, xb = (f0.x - 0.0008, f1.x + 0.0008) if f0 is not None and f1 is not None else (lo2.x, hi2.x)
+            k.add(bx('zip', xa, xb, lo2.y + 0.012, hi2.y - 0.012, zc - 0.0035, zc + 0.0035, 0.0012, 1), 'plastic', zcol, slot=slot)
+            if tag:
+                stapled_tag(k, fb, tag, lo2.x - 0.5, mid.y + rnd.uniform(-0.03, 0.03), hi2.z - 0.055, slot=slot, tilt=rnd.uniform(-10, 10))
+            M = RY(rnd.uniform(8.0, 20.0))
+            M = T(0.0, 0.0, -min((M @ Vector(v)).z for v in film.bound_box)) @ M
+        elif tag:
+            F = Vector((-0.6, 0.0, 1.0)).normalized()
+            stapled_tag(k, fb, tag, 0.0, 0.0, 0.0, facing_vec=tuple(F), slot=slot, tilt=rnd.uniform(-15, 15),
+                        origin=(mid.x, mid.y + rnd.uniform(-0.03, 0.03), mid.z))
+        ya, yb = lo2.y, hi2.y
+        yaw = rnd.uniform(-8, 8) if standing else rnd.uniform(-15, 15)
+    else:
+        clear = 0 if rnd.random() < 0.45 else 1
+        nk = (int((hi - lo).length / 0.05) + 3) if fine else (int((hi - lo).length / 0.075) + 2)
+        nk = max(4, min(8 if fine else 5, nk))
+        neck_h = max(0.025, min(rnd.uniform(0.035, 0.07), high - hi.z - 0.075))
+        cc = (lo + hi) * 0.5
+        neck = (cc.x + rnd.uniform(-0.25, 0.25) * (hi.x - lo.x) * 0.5, cc.y + rnd.uniform(-0.3, 0.3) * (hi.y - lo.y) * 0.5, hi.z + neck_h)
+        film, fb = film_mesh('bag', g, rnd, nk, rnd.uniform(0.015, 0.035), rnd.uniform(0.7, 0.95), 0.005, neck, folds=rnd.uniform(0.004, 0.008))
+        lo2, hi2 = Vector(film.bound_box[0]), Vector(film.bound_box[6])
+        k.add(film, 'bag', g.main, slot=slot, aux_point=neck, aux2=(clear, 0.0, 0.0))
+        N = Vector(neck)
+        knot = blob('knot', tuple(N + Vector((0.0, 0.0, 0.008))), (0.029, 0.023, 0.027), seed=seed, detail=0.34, subdiv=2 if fine else 1)
+        kz, kyaw = N.z + 0.008, rnd.uniform(0, 6.28)
+        for kv in knot.data.vertices:              # twisted, the way film wrung round itself sits
+            rel = kv.co - Vector((N.x, N.y, kz))
+            ang = kyaw + 1.6 * rel.z / 0.0135
+            kv.co = Vector((N.x + rel.x * math.cos(ang) - rel.y * math.sin(ang), N.y + rel.x * math.sin(ang) + rel.y * math.cos(ang), kv.co.z))
+        k.add(knot, 'bag', g.main, slot=slot, aux_point=neck, aux2=(clear, 0.0, 1.0))
+        yaw0 = rnd.uniform(0, 6.28)
+        for j in range(2 if rnd.random() < 0.8 else 1):
+            ln = rnd.uniform(0.04, 0.075)
+            up = max(0.0, high - (N.z + 0.02))            # the ears stay under the shelf above
+            pitch = min(math.radians(rnd.uniform(15, 65)), math.asin(min(1.0, up / ln)))
+            k.add(ear('ear', tuple(N + Vector((0.0, 0.0, 0.012))), yaw0 + j * math.pi + rnd.uniform(-0.6, 0.6), pitch, ln, rnd.uniform(0.022, 0.036),
+                      rnd.uniform(-0.8, 0.8), seed=seed * 3 + j), 'bag', g.main, slot=slot, aux_point=neck, aux2=(clear, 0.0, 1.0))
+        if tag:
+            stapled_tag(k, fb, tag, lo2.x - 0.5, cc.y + rnd.uniform(-0.3, 0.3) * (hi.y - lo.y) * 0.5, lo.z + (hi.z - lo.z) * rnd.uniform(0.45, 0.7),
+                        slot=slot, tilt=rnd.uniform(-12, 12))
+        ya, yb = lo2.y, hi2.y
+        yaw = rnd.uniform(-10, 10)
+    width = yb - ya + 0.01
+    k.see_src += g.parts
+    k.see_image()
+    k.place(mk, T(*(Vector(at) + run * (width / 2))) @ R @ RZ(yaw) @ T(0.0, -(ya + yb) / 2, 0.0) @ M)
+    return width
+
+
+def goods_fits(desc, room):
+    """Whether goods `desc` (at their largest) fit the room (along, deep, high) in their bag."""
+    big = {'drill': (0.30, 0.24, 0.27), 'saw': (0.32, 0.26, 0.25), 'sander': (0.20, 0.24, 0.17), 'console': (0.34, 0.30, 0.13),
+           'game': (0.22, 0.22, 0.14), 'laptop': (0.38, 0.28, 0.07), 'player': (0.38, 0.26, 0.09), 'drone': (0.34, 0.30, 0.09),
+           'camera': (0.30, 0.20, 0.11), 'lens': (0.24, 0.10, 0.15), 'speaker': (0.22, 0.20, 0.26), 'mic': (0.28, 0.14, 0.12),
+           'flute': (0.40, 0.14, 0.09), 'pedal': (0.28, 0.17, 0.09), 'ring 14k': (0.26, 0.12, 0.08), 'ring': (0.26, 0.12, 0.08),
+           'chain': (0.26, 0.12, 0.08), 'watch': (0.22, 0.14, 0.11), 'phone': (0.16, 0.08, 0.20), 'tablet': (0.26, 0.08, 0.29)}[desc]
+    return big[0] + 0.06 <= room[0] and big[1] + 0.04 <= room[1] and big[2] + 0.10 <= room[2]
+
+
+def see_bake(kit, obj):
+    """Bakes what each bag's goods look like from its film into the kit's see image (in the film's UVs): their color
+    (selected-to-active from the goods, rays in from the film), and the distance to them (the goods' position at the
+    hit less the film's own). The goods are then thrown away."""
+    sc = bpy.context.scene
+    goods = core.join(kit.see_src, f'{kit.name}_goods') if len(kit.see_src) > 1 else kit.see_src[0]
+    film = obj.copy()
+    film.data = obj.data.copy()
+    core.link(film)
+    film.name = f'{kit.name}_film'
+    fin = np.zeros(len(film.data.polygons), dtype=np.float32)
+    film.data.attributes['pw_fin'].data.foreach_get('value', fin)
+    keep = np.abs(fin - FIN['bag']) < 0.5
+    _delete_faces(film, lambda f: not keep[f.index])
+    film.data.materials.clear()
+    film.data.polygons.foreach_set('material_index', np.zeros(len(film.data.polygons), dtype=np.int32))
+    size = kit.see_img.size[0]
+    imgs = {}
+    for key in ('pos', 'col', 'hit'):
+        im = bpy.data.images.new(f'{kit.prefix}_see_{key}', size, size, alpha=True, float_buffer=True)
+        im.colorspace_settings.name = 'Non-Color'
+        imgs[key] = im
+
+    def emitter(name, src):
+        mt = core.Mat(name)
+        em = mt.node('ShaderNodeEmission')
+        mt.link(src(mt), em.inputs['Color'])
+        mt.link(em.outputs['Emission'], mt.out.inputs['Surface'])
+        tgt = mt.node('ShaderNodeTexImage')
+        mt.nt.nodes.active = tgt
+        return mt, tgt
+
+    def position(mt):
+        return mt.node('ShaderNodeNewGeometry').outputs['Position']
+
+    def lifted(mt):
+        n = mt.node('ShaderNodeVectorMath')
+        n.operation = 'ADD'
+        mt.link(position(mt), n.inputs[0])
+        n.inputs[1].default_value = (0.0, 0.0, 1000.0)
+        return n.outputs[0]
+
+    fm, ftgt = emitter(f'{kit.prefix}_see_film', position)
+    film.data.materials.append(fm.m)
+    gcol, _ = emitter(f'{kit.prefix}_see_gcol', lambda mt: attr(mt, 'pw_ccol', 'Color'))
+    gpos, _ = emitter(f'{kit.prefix}_see_gpos', lifted)
+    hidden = [o for o in sc.objects if o not in (film, goods) and not o.hide_render]
+    for o in hidden:
+        o.hide_render = True
+    film.hide_render = goods.hide_render = False
+    sc.cycles.samples = 1
+    try:
+        core.select_only([film])
+        ftgt.image = imgs['pos']
+        bpy.ops.object.bake(type='EMIT', use_selected_to_active=False, margin=6, use_clear=True)
+        for key, mt in (('col', gcol), ('hit', gpos)):
+            goods.data.materials.clear()
+            goods.data.materials.append(mt.m)
+            core.select_only([goods, film], film)
+            ftgt.image = imgs[key]
+            bpy.ops.object.bake(type='EMIT', use_selected_to_active=True, cage_extrusion=0.0, max_ray_distance=SEE_MAX, margin=6, use_clear=True)
+    finally:
+        for o in hidden:
+            o.hide_render = False
+
+    def px(im):
+        a = np.empty(size * size * 4, dtype=np.float32)
+        im.pixels.foreach_get(a)
+        return a.reshape(size, size, 4)
+    pos, col, hit = px(imgs['pos']), px(imgs['col']), px(imgs['hit'])
+    valid = hit[:, :, 2] > 500.0
+    hit[:, :, 2] -= 1000.0
+    dist = np.linalg.norm(hit[:, :, :3] - pos[:, :, :3], axis=2)
+    depth = np.where(valid, np.clip(dist / SEE_MAX, 0.0, 1.0), 1.0)
+    rgb = np.where(valid[:, :, None], np.clip(col[:, :, :3], 0.0, 1.0), 0.05)
+    out = np.concatenate([rgb, depth[:, :, None]], axis=2).astype(np.float32)
+    kit.see_img.pixels.foreach_set(out.ravel())
+    kit.see_img.update()
+    path = os.path.join(core.BUILD_DIR, 'textures', f'{kit.prefix}_see.exr')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    kit.see_img.filepath_raw = path
+    kit.see_img.file_format = 'OPEN_EXR'
+    kit.see_img.save()
+    film_px = np.abs(pos[:, :, :3]).sum(axis=2) > 1e-6
+    print(f'[ns_pawn] {kit.name}: see-through baked for {int(keep.sum())} film faces: {int(film_px.sum())} film texels, '
+          f'{int((valid & film_px).sum())} see goods (median {float(np.median(dist[valid & film_px])) * 100 if valid.any() else 0:.1f} cm in)')
+    if os.environ.get('PAWN_SEEDEBUG'):
+        print('[ns_pawn] see depth hist (cm):', np.histogram(dist[valid & film_px] * 100, bins=[0, 0.5, 1, 2, 3, 5, 7, 10, 100])[0].tolist())
+        print('[ns_pawn] see col alpha on film:', np.histogram(col[film_px, 3], bins=4, range=(0, 1))[0].tolist(),
+              'hit z on film:', np.histogram(hit[film_px, 2], bins=[-2000, -1, 0.001, 5, 500, 2000])[0].tolist())
+    for o in (film, goods):
+        bpy.data.objects.remove(o)
+    for im in imgs.values():
+        bpy.data.images.remove(im)
+    kit.see_src = []
+
+
+def _squeeze_u(obj, si, aspect):
+    """Scales u by 1 / aspect on the faces of material slot si (laid out in square-texel units on a wide texture)."""
+    me = obj.data
+    uv = me.uv_layers['UVMap']
+    fi = np.zeros(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get('material_index', fi)
+    ls = np.zeros(len(me.polygons), dtype=np.int32)
+    lt = np.zeros(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get('loop_start', ls)
+    me.polygons.foreach_get('loop_total', lt)
+    mask = np.zeros(len(me.loops), dtype=bool)
+    for s, t in zip(ls[fi == si], lt[fi == si]):
+        mask[s:s + t] = True
+    a = np.zeros(len(me.loops) * 2, dtype=np.float32)
+    uv.data.foreach_get('uv', a)
+    a = a.reshape(-1, 2)
+    a[mask, 0] /= aspect
+    uv.data.foreach_set('uv', a.ravel())
+
+
+def _uv_stats(kit, obj, groups):
+    """PAWN_UVSTAT=1: the surface each UV group (as laid out) took, and the texel density it got (px per meter)."""
+    me = obj.data
+    uv = me.uv_layers['UVMap']
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.faces.ensure_lookup_table()
+    rows = {}
+    for f in bm.faces:
+        gi = next((i for i, g in enumerate(groups) if g[0](f)), -1)
+        p = me.polygons[f.index]
+        pts = [uv.data[li].uv for li in p.loop_indices]
+        ua = 0.0
+        for i in range(1, len(pts) - 1):
+            a, b = pts[i] - pts[0], pts[i + 1] - pts[0]
+            ua += abs(a.x * b.y - a.y * b.x) / 2
+        r = rows.setdefault((obj.material_slots[p.material_index].material.name, gi), [0.0, 0.0])
+        r[0] += p.area
+        r[1] += ua
+    bm.free()
+    for (mat, gi), (area, ua) in sorted(rows.items()):
+        size = TEXTURE_SIZES.get(mat, TEXTURE_SIZE)
+        w, h = size if isinstance(size, tuple) else (size, size)
+        dens = math.sqrt(ua * w * h / area) if area > 0 else 0.0
+        print(f'[ns_pawn] uvstat {kit.name} {mat} group {gi}: {area:.2f} m2, {ua * 100:.1f}% of its texture, {dens:.0f} px/m')
 
 
 # ================================================================== SM_NS_Pawn_GuitarWall: guitars on the slatwall, amps under them
@@ -4684,6 +5493,13 @@ def counter_glow():
 # ================================================================== SM_NS_Pawn_Cage (+ _Glass, _GlowWarm, SM_NS_Pawn_SafeDoor)
 
 CAGE_RAIL = 1.07               # the diamond-plate base's top; the mesh above
+CK_NEAR, CK_PLATE, CK_PLATE_E, CK_WIRE_X, CK_WIRE_Y, CK_MID = 1, 2, 3, 4, 5, 6      # the cage body's UV groups (cage())
+# Their rectangles on the 4096 x 2048 body, in square-texel units (u 0..2): full-width bands, so the long pieces (the
+# ledge, the desk top, the plate's runs) lie along them. About 900 px/m on the window's steel, ledge and tray, 500 on
+# the plate round it and the desk top, 300 on the desk's things and the safe's front, 200 on the east face's plate.
+CK_RECTS = {CK_NEAR: (0.0, 0.0, 2.0, 0.26), CK_PLATE: (0.0, 0.265, 2.0, 0.515), CK_PLATE_E: (0.0, 0.52, 0.62, 0.635),
+            CK_MID: (0.63, 0.52, 1.25, 0.635), CK_WIRE_X: (1.26, 0.52, 1.56, 0.635), CK_WIRE_Y: (1.57, 0.52, 2.0, 0.635),
+            0: (0.0, 0.64, 2.0, 1.0)}
 DESK = (6.56, 7.24, 37.45, 39.66)        # Augie's desk inside the loan window (x0, x1, y0, y1)
 PLEDGE_SHELF = (8.55, 9.05, 37.50, 40.80)   # the pledge shelves behind the safe (facing the window)
 SAFE_W, SAFE_D, SAFE_H = 0.78, 0.70, 1.32
@@ -4822,6 +5638,7 @@ def cage():
         k.panel(f'led{i}', 0.04, 0.30, p_spine(t, c, year=yr), density=1.2)
     k.panel('license', 0.28, 0.36, draw_license, density=1.8)
     k.panel('cctv', 0.40, 0.25, draw_cctv, glow=1.5, density=1.6)
+    k.panel('speak', 0.10, 0.10, draw_speak, density=1.6)
     BAG_TAGS = [('ring 14k', 401), ('drill', 402), ('console', 403), ('laptop', 404), ('watch', 405), ('camera', 406), ('chain', 407), ('tablet', 408),
                 ('speaker', 409), ('saw', 410), ('phone', 411), ('lens', 412), ('ring', 413), ('drone', 414), ('game', 415), ('mic', 416),
                 ('sander', 417), ('player', 418), ('flute', 419), ('pedal', 420)]
@@ -4831,6 +5648,18 @@ def cage():
     for t, sd in BOXES:
         k.panel(f'bx{sd}', 0.20, 0.10, p_box_label(t, sd), density=1.6)
     k.atlas.render()
+    # Texel density where the customer looks (the body bakes 4096 x 2048; rects in square-texel units, u 0..2): the loan
+    # window's steel, ledge, tray and Augie's desk top (NEAR), the diamond plate round the window and along the front
+    # (PLATE), the east face's plate (PLATE_E), the welded mesh laid flat in its own planes (WIRE_X, WIRE_Y: every wire on
+    # a panel shares the panel's projection, so thousands of thin wires don't each eat an island and its gutter).
+    seen = [((0.0, 1.0, 0.0), 0.3), ((0.0, 0.0, 1.0), 0.5), ((1.0, 0.0, 0.0), 0.5), ((-1.0, 0.0, 0.0), 0.5)]
+    k.uv_group(CK_NEAR, 'body', CK_RECTS[CK_NEAR], facing=seen)
+    k.uv_group(CK_PLATE, 'body', CK_RECTS[CK_PLATE], facing=seen)
+    k.uv_group(CK_PLATE_E, 'body', CK_RECTS[CK_PLATE_E], facing=[((1.0, 0.0, 0.0), 0.5), ((0.0, 0.0, 1.0), 0.5)])
+    k.uv_group(CK_MID, 'body', CK_RECTS[CK_MID], facing=((0.0, 1.0, 0.0), 0.7))
+    k.uv_group(CK_WIRE_X, 'body', CK_RECTS[CK_WIRE_X], 'planar', ('x', 'z', RY0, CAGE_Y1, 0.0, CEIL))
+    k.uv_group(CK_WIRE_Y, 'body', CK_RECTS[CK_WIRE_Y], 'planar', ('y', 'z', FRONT_Y - RX1, FRONT_Y - CAGE_X, 0.0, CEIL))
+    k.uv_rest['body'] = CK_RECTS[0]
     G = 'goods'
     FRAME = 0x2e3236
     cx = CAGE_X
@@ -4848,11 +5677,12 @@ def cage():
         k.add(bx('rail', cx, RX1, CAGE_Y1 - 0.045, CAGE_Y1 - 0.005, z0_, z1_, 0.003), 'paint', FRAME)
     # the diamond-plate base and the mesh above it
     for (ya, yb) in ((RY0 + 0.05, wa - 0.025), (wb + 0.025, ga - 0.055), (gb + 0.055, CAGE_Y1 - 0.05)):
-        k.add(bx('base', cx - 0.008, cx + 0.008, ya, yb, 0.05, CAGE_RAIL - 0.05, 0.002), 'diamond', 0x8c9096)
-        mesh_panel(k, 'x', ya, yb, CAGE_RAIL, CEIL - 0.05, cx)
+        k.add(bx('base', cx - 0.008, cx + 0.008, ya, yb, 0.05, CAGE_RAIL - 0.05, 0.002), 'diamond', 0x8c9096, uvg=CK_PLATE)
+        mesh_panel(k, 'x', ya, yb, CAGE_RAIL, CEIL - 0.05, cx, uvg=CK_WIRE_X)
     for (xa, xb) in ((cx + 0.05, ea - 0.055), (eb + 0.055, PARTITION_X - 0.085), (PARTITION_X - 0.035, 11.175), (11.225, RX1 - 0.05)):
-        k.add(bx('base_e', xa, xb, CAGE_Y1 - 0.033, CAGE_Y1 - 0.017, 0.05, CAGE_RAIL - 0.05, 0.002), 'diamond', 0x8c9096)
-        mesh_panel(k, 'y', xa, xb, CAGE_RAIL, CEIL - 0.05, CAGE_Y1 - 0.025)
+        k.add(bx('base_e', xa, xb, CAGE_Y1 - 0.033, CAGE_Y1 - 0.017, 0.05, CAGE_RAIL - 0.05, 0.002), 'diamond', 0x8c9096, aux=(0.6, 0, 0),
+              uvg=CK_PLATE_E)
+        mesh_panel(k, 'y', xa, xb, CAGE_RAIL, CEIL - 0.05, CAGE_Y1 - 0.025, uvg=CK_WIRE_Y)
     # the gates: behind the counter's flap, and in the east face to the space behind the counter (both shut, locked)
     def gate(plane, a0, a1, fixed):
         for (p0, p1, z0, z1) in ((a0, a0 + 0.035, 0.03, 2.10), (a1 - 0.035, a1, 0.03, 2.10), (a0, a1, 0.03, 0.065), (a0, a1, 2.065, 2.10),
@@ -4861,8 +5691,9 @@ def cage():
                 k.add(bx('gate', fixed - 0.017, fixed + 0.017, p0, p1, z0, z1, 0.003), 'paint', FRAME)
             else:
                 k.add(bx('gate', p0, p1, fixed - 0.017, fixed + 0.017, z0, z1, 0.003), 'paint', FRAME)
-        mesh_panel(k, plane, a0 + 0.035, a1 - 0.035, 0.065, 2.065, fixed, pitch=0.05)
-        mesh_panel(k, plane, a0, a1, 2.15, CEIL - 0.05, fixed)
+        wg = CK_WIRE_X if plane == 'x' else CK_WIRE_Y
+        mesh_panel(k, plane, a0 + 0.035, a1 - 0.035, 0.065, 2.065, fixed, pitch=0.05, uvg=wg)
+        mesh_panel(k, plane, a0, a1, 2.15, CEIL - 0.05, fixed, uvg=wg)
         if plane == 'x':
             k.add(bx('gate_head', fixed - 0.02, fixed + 0.02, a0, a1, 2.10, 2.15, 0.0), 'paint', FRAME)
             k.add(bx('lockbox', fixed + 0.017, fixed + 0.05, a1 - 0.16, a1 - 0.04, 0.98, 1.12, 0.004), 'paint', 0x1a1c1e)
@@ -4875,19 +5706,21 @@ def cage():
     # ledge under it, the steel header to the tin; the customer's ledge outside on its brackets
     ba, bb = BANDIT_Y
     for (a0, a1) in ((wa + 0.025, ba), (bb, wb - 0.025)):
-        k.add(bx('bay_side', cx - 0.03, cx + 0.03, a0, a1, 0.05, 2.12, 0.004), 'diamond', 0x8c9096)
-    k.add(bx('bay_low', cx - 0.03, cx + 0.03, ba, bb, 0.05, 1.00, 0.004), 'diamond', 0x8c9096)
+        k.add(bx('bay_side', cx - 0.03, cx + 0.03, a0, a1, 0.05, 2.12, 0.004), 'diamond', 0x8c9096, uvg=CK_PLATE)
+    k.add(bx('bay_low', cx - 0.03, cx + 0.03, ba, bb, 0.05, 1.00, 0.004), 'diamond', 0x8c9096, uvg=CK_PLATE)
     k.add(bx('bay_hdr', cx - 0.03, cx + 0.03, wa + 0.025, wb - 0.025, 2.12, CEIL - 0.05, 0.004), 'paint', 0x2a2c2e)
     gz0, gz1 = 1.10, 2.08
     for (a0, a1, b0, b1) in ((ba, bb, 1.00, gz0), (ba, bb, gz1, 2.12), (ba, ba + 0.05, gz0, gz1), (bb - 0.05, bb, gz0, gz1)):
-        k.add(bx('win_frame', cx - 0.045, cx + 0.045, a0, a1, b0, b1, 0.004), 'steel')
+        k.add(bx('win_frame', cx - 0.045, cx + 0.045, a0, a1, b0, b1, 0.004), 'steel', uvg=CK_NEAR)
     wm = (ba + bb) / 2
-    k.add(parts.rod('speak', (cx - 0.012, wm, 1.52), (cx + 0.012, wm, 1.52), 0.065, 32), 'steel')
-    for rr in (0.02, 0.035, 0.05):
-        k.add(torus('speak_ring', (cx - 0.013, wm, 1.52), rr, 0.0035, 'x', 28, 4), 'rubber', 0x111111)
-    k.add(bx('ledge', cx - 0.30, cx + 0.0, wa + 0.05, wb - 0.05, 1.00, 1.035, 0.008, 3), 'laminate', 0xc8c0b0)
-    k.add(bx('tray', cx - 0.20, cx + 0.20, wm - 0.22, wm + 0.22, 0.975, 1.0, 0.004), 'steel')
-    k.add(bx('tray_well', cx - 0.19, cx + 0.19, wm - 0.21, wm + 0.21, 0.99, 1.036, 0.0), 'steel')
+    # the speak-through: a stainless spool set through the glass, a rolled bezel round a perforated face on each side
+    k.add(lathe_axis('speak', SPEAK_PROFILE, T(cx, wm, SPEAK_Z) @ RY(-90), 40), 'steel', uvg=CK_NEAR)
+    disc = [(0.5 + 0.5 * math.cos(2 * math.pi * i / 24), 0.5 + 0.5 * math.sin(2 * math.pi * i / 24)) for i in range(24)]
+    for side, fx in (('-x', cx - 0.0048), ('+x', cx + 0.0048)):
+        k.fdecal('speak', (fx, wm, SPEAK_Z), side, w=0.100, h=0.100, lift=0.0, outline=disc)
+    k.add(bx('ledge', cx - 0.30, cx + 0.0, wa + 0.05, wb - 0.05, 1.00, 1.035, 0.008, 3), 'laminate', 0xc8c0b0, uvg=CK_NEAR)
+    k.add(bx('tray', cx - 0.20, cx + 0.20, wm - 0.22, wm + 0.22, 0.975, 1.0, 0.004), 'steel', uvg=CK_NEAR)
+    k.add(bx('tray_well', cx - 0.19, cx + 0.19, wm - 0.21, wm + 0.21, 0.99, 1.036, 0.0), 'steel', uvg=CK_NEAR)
     for sy in (-1, 1):
         k.add(tube('ledge_bracket', bend([(cx - 0.03, wm + sy * 0.7, 0.78), (cx - 0.03, wm + sy * 0.7, 0.995), (cx - 0.26, wm + sy * 0.7, 0.995)], 0.02),
                    0.012, 8), 'paint', FRAME)
@@ -4897,12 +5730,13 @@ def cage():
     k.add(lathe_axis('cam_base', [(0.0, 0.0), (0.06, 0.0), (0.06, 0.012), (0.0, 0.013)], T(cx - 0.03, wm, 2.95) @ RY(-90), 24), 'plastic', 0xeeebe4)
     # ---- inside the window: Augie's desk (the ticket printer, a radio, his lamp, the CCTV monitor), his stool
     dx0, dx1, dy0, dy1 = DESK
-    k.add(bx('desk_top', dx0, dx1, dy0, dy1, 0.95, 0.985, 0.006), 'laminate', 0xb8ae98)
+    k.add(bx('desk_top', dx0, dx1, dy0, dy1, 0.95, 0.985, 0.006), 'laminate', 0xb8ae98, uvg=CK_PLATE)
     k.add(bx('desk_body', dx0 + 0.02, dx1 - 0.02, dy0 + 0.02, dy1 - 0.02, 0.0, 0.95, 0.004), 'paint', 0x5a5e62)
     for i in range(3):
         k.add(bx('drawer_front', dx1 - 0.02, dx1 - 0.015, dy1 - 0.50, dy1 - 0.04, 0.10 + i * 0.27, 0.34 + i * 0.27, 0.003), 'paint', 0x6a6e72)
         k.add(bx('drawer_pull', dx1 - 0.015, dx1 - 0.005, dy1 - 0.33, dy1 - 0.21, 0.28 + i * 0.27, 0.295 + i * 0.27, 0.002), 'chrome')
     zt = 0.985
+    k.uvg_default = CK_MID          # what's on the desk, seen through the glass
     k.add(bx('printer', dx0 + 0.08, dx0 + 0.30, ba - 0.42, ba - 0.16, zt, zt + 0.11, 0.01, 2), 'plastic', 0x2a2c30)
     k.add(bx('printer_slot', dx0 + 0.075, dx0 + 0.085, ba - 0.38, ba - 0.20, zt + 0.07, zt + 0.08), 'rubber', 0x050505)
     # a transistor radio, its dial and speaker grille
@@ -4925,6 +5759,7 @@ def cage():
     k.add(crt, 'plastic', 0x2a2a2c)
     k.decal('cctv', tuple(Mc @ Vector((0.0, -0.0205, 0.16))), u=tuple(Mc.to_3x3() @ Vector((1, 0, 0))), v=(0, 0, 1), lift=0.0, w=0.34, h=0.22)
     k.add(bx('mug', dx0 + 0.45, dx0 + 0.53, dy0 + 0.15, dy0 + 0.23, zt, zt + 0.10, 0.03, 3), 'gloss', 0xe8e4d8)
+    k.uvg_default = 0
     sxp, syp = dx1 + 0.35, wm
     k.add(parts.rod('stool_post', (sxp, syp, 0.05), (sxp, syp, 0.66), 0.02, 12), 'chrome')
     k.add(lathe_axis('stool_seat', [(0.0, 0.0), (0.17, 0.0), (0.18, 0.03), (0.17, 0.07), (0.0, 0.075)], T(sxp, syp, 0.66), 32), 'leather', 0x1a1a1a)
@@ -4932,17 +5767,20 @@ def cage():
         a = 2 * math.pi * i / 5
         k.add(parts.rod('stool_leg', (sxp, syp, 0.06), (sxp + 0.27 * math.cos(a), syp + 0.27 * math.sin(a), 0.02), 0.012, 8), 'black_metal')
     k.add(torus('stool_ring', (sxp, syp, 0.34), 0.18, 0.008, 'z', 28, 6), 'chrome')
-    # ---- the safe at his back (its door is SM_NS_Pawn_SafeDoor)
+    # ---- the safe at his back (its door is SM_NS_Pawn_SafeDoor): its front toward the window
+    k.uvg_default = CK_MID
     safe_body(k)
-    k.add(bx('safe_pad', SAFE_AT[0] - 0.50, SAFE_AT[0] + 0.50, SAFE_AT[1] - 0.55, SAFE_AT[1] + 0.55, 0.0, 0.006, 0.002), 'diamond', 0x8c9096)
+    k.uvg_default = 0
+    k.add(bx('safe_pad', SAFE_AT[0] - 0.50, SAFE_AT[0] + 0.50, SAFE_AT[1] - 0.55, SAFE_AT[1] + 0.55, 0.0, 0.006, 0.002), 'diamond', 0x8c9096,
+          aux=(0.8, 0, 0))
     # ---- the pledges: steel shelving behind the safe, bagged pledges with their tickets and labeled boxes; more down the
     # west wall; the license on the cage's back
     bx0, bx1, by0, by1 = PLEDGE_SHELF
     levels = [0.10, 0.52, 0.94, 1.36, 1.78, 2.20]
 
-    def shelving(x0_, x1_, y0_, y1_, facing, seed):
-        """Steel shelving of pledges: uprights, shelves, bagged pledges with their tickets and labeled boxes, the
-        labels toward `facing` ('-x' or '+y')."""
+    def shelving(x0_, x1_, y0_, y1_, facing, seed, fine):
+        """Steel shelving of pledges, their fronts toward `facing` ('-x' or '+y'): uprights, shelves, and on them goods in
+        knotted milky and clear bags and zip bags, kraft sacks and labeled cartons, a ticket stapled to each."""
         rnd = random.Random(seed)
         along_y = facing == '-x'
         a0, a1 = (y0_, y1_) if along_y else (x0_, x1_)
@@ -4954,47 +5792,66 @@ def cage():
                     k.add(bx('upright', t, t + 0.035, d, d + 0.035, 0.0, 2.24, 0.002), 'galv')
         for zl in levels:
             k.add(bx('shelf', x0_, x1_, y0_, y1_, zl - 0.03, zl, 0.002), 'galv')
-        ti = seed
-        for zl in levels[:-1]:
-            a = a0 + 0.06
+        deep = (x1_ - x0_) if along_y else (y1_ - y0_)
+        R = RZ(facing_rot(facing))
+        order = [d for d, _ in BAG_TAGS]
+        rnd.shuffle(order)
+        oi = 0
+        for li, zl in enumerate(levels[:-1]):
+            high = levels[li + 1] - zl - 0.05
+            a = a0 + 0.045
             while a < a1 - 0.12:
-                box_ = rnd.random() < 0.25
-                w = rnd.uniform(0.30, 0.40) if box_ else rnd.uniform(0.18, 0.34)
-                bh = rnd.uniform(0.14, 0.30)
-                if box_:
-                    key = f'bx{BOXES[rnd.randrange(len(BOXES))][1]}'
-                    col = rnd.choice([0xb08a5a, 0xa8845a])
-                    if along_y:
-                        k.add(bx('box', x0_ + 0.04, x0_ + 0.42, a, a + w, zl, zl + bh, 0.004), 'cardboard', col, slot=G)
-                        k.decal(key, (x0_ + 0.039, a + w / 2, zl + bh * 0.55), u=(0, -1, 0), v=(0, 0, 1), lift=0.0, w=min(0.18, w - 0.04), h=0.09)
-                    else:
-                        k.add(bx('box', a, a + w, y1_ - 0.42, y1_ - 0.04, zl, zl + bh, 0.004), 'cardboard', col, slot=G)
-                        k.decal(key, (a + w / 2, y1_ - 0.039, zl + bh * 0.55), u=(-1, 0, 0), v=(0, 0, 1), lift=0.0, w=min(0.18, w - 0.04), h=0.09)
+                left = a1 - 0.03 - a
+                at = (x0_ + deep / 2, a, zl) if along_y else (a, y1_ - deep / 2, zl)
+                r = rnd.random()
+                sd = seed * 100 + li * 20 + int((a - a0) * 30)
+                if r < 0.22 and left > 0.30:
+                    # a carton: its label, tape across the top, sometimes its ticket stapled on
+                    w = rnd.uniform(0.28, min(0.40, left))
+                    dd = rnd.uniform(0.30, min(0.40, deep - 0.06))
+                    bh = rnd.uniform(0.13, min(0.30, high))
+                    mk = k.mark()
+                    k.add(bx('box', -dd / 2, dd / 2, 0.0, w, 0.0, bh, 0.004), 'cardboard', rnd.choice([0xb08a5a, 0xa8845a, 0x9c7a50]), slot=G)
+                    k.add(bx('tape', -dd / 2 - 0.0008, dd / 2 + 0.0008, w / 2 - 0.024, w / 2 + 0.024, bh - 0.0004, bh + 0.0006), 'gloss',
+                          rnd.choice([0xc8a060, 0xd8c8a0, 0xb8b8b0]), slot=G)
+                    k.decal(f'bx{BOXES[rnd.randrange(len(BOXES))][1]}', (-dd / 2 - 0.0008, w * rnd.uniform(0.42, 0.5), bh * 0.45), u=(0, -1, 0),
+                            v=(0, 0, 1), lift=0.0, w=min(0.18, w - 0.10), h=0.09)
+                    if rnd.random() < 0.45:
+                        ky = w - 0.028
+                        k.decal(f'bt{BAG_TAGS[rnd.randrange(len(BAG_TAGS))][1]}', (-dd / 2 - 0.0012, ky, min(bh - 0.035, bh * 0.62)), u=(0, -1, 0),
+                                v=(0, 0, 1), lift=0.0, w=0.035, h=0.06)
+                        k.add(bx('staple', -dd / 2 - 0.0018, -dd / 2 - 0.001, ky - 0.006, ky + 0.006, min(bh - 0.035, bh * 0.62) + 0.022,
+                                 min(bh - 0.035, bh * 0.62) + 0.023), 'steel', slot=G)
+                    k.place(mk, T(*at) @ R)
+                elif r < 0.38 and left > 0.20:
+                    w = pledge(k, at, (left, deep - 0.04, high), sd, tag=f'bt{BAG_TAGS[rnd.randrange(len(BAG_TAGS))][1]}', slot=G, facing=facing,
+                               kind='sack')
                 else:
-                    tag = f'bt{BAG_TAGS[ti % len(BAG_TAGS)][1]}'
-                    ti += 1
-                    if along_y:
-                        pledge_bag(k, (x0_ + 0.22, a + w / 2, zl), (rnd.uniform(0.24, 0.36), w, bh), seed=ti * 7, inside=rnd.choice(INSIDE_COLS),
-                                   tag=tag, slot=G)
-                    else:
-                        pledge_bag(k, (a + w / 2, y1_ - 0.24, zl), (w, rnd.uniform(0.24, 0.32), bh), seed=ti * 7, inside=rnd.choice(INSIDE_COLS),
-                                   tag=tag, slot=G, facing='+y', subdiv=2)
-                a += w + 0.015
-    shelving(bx0, bx1, by0, by1, '-x', 401)
-    shelving(9.45, 13.25, RY0 + 0.05, RY0 + 0.50, '+y', 431)
+                    pick = None
+                    for j in range(len(order)):
+                        d_ = order[(oi + j) % len(order)]
+                        if goods_fits(d_, (min(left, 0.46), deep - 0.04, high)):
+                            pick, oi = d_, (oi + j + 1) % len(order)
+                            break
+                    if pick is None:
+                        a += 0.04
+                        continue
+                    w = pledge(k, at, (left, deep - 0.04, high), sd, tag=f'bt{dict(BAG_TAGS)[pick]}', desc=pick, slot=G, facing=facing, fine=fine)
+                a += w + rnd.uniform(0.008, 0.03)
+    shelving(bx0, bx1, by0, by1, '-x', 401, True)
+    shelving(9.45, 13.25, RY0 + 0.05, RY0 + 0.50, '+y', 431, False)
     k.add(bx('license_frame', RX1 - 0.02, RX1, 39.20, 39.52, 1.42, 1.82, 0.004), 'wood', 0x2a1a10, aux=(2, 0, 0))
     k.fdecal('license', (RX1 - 0.0205, 39.36, 1.62), '-x', w=0.28, h=0.36, lift=0.0)
     # a guitar case and a boxed TV waiting their turn on the floor in the cage
     k.add(bx('gcase', 9.6, 10.0, 39.5, 39.62, 0.0, 1.05, 0.04, 3), 'tolex', 0x141414, slot=G)
     k.add(bx('tvbox', 10.3, 11.2, 39.3, 39.45, 0.0, 0.62, 0.004), 'cardboard', 0xd8d0c0, slot=G)
-    k.grime = [((cx - 0.15, wm, 1.04), 0.4, 0.6), ((cx, gb - 0.10, 1.0), 0.2, 0.8), ((dx0 + 0.2, wm, 0.99), 0.4, 0.4)]
+    k.grime = [((cx - 0.24, wm, 1.035), 0.3, 0.45), ((cx, gb - 0.10, 1.0), 0.2, 0.8), ((dx0 + 0.2, wm, 0.99), 0.4, 0.4)]
     k.polish = [((cx - 0.15, wm, 1.04), 0.35, 0.6)]
     for g in cage_glass():
         k.special(g, 'ns_glass')
     return [k.finish(35.0), safe_door()]
 
 
-INSIDE_COLS = [0x2a2a2a, 0x8a2a1a, 0xc8a050, 0x1c3a6e, 0x3a3a3a, 0x6a6a66, 0x1a1a1a, 0xe8661a]
 
 
 def cage_lamp_at():
@@ -5361,8 +6218,9 @@ def shelves():
                         k.decal(key, (xx + min(w, b - 0.05 - xx) / 2, y0 + 0.079, zl + h * 0.5), u=(1, 0, 0), v=(0, 0, 1), lift=0.0, w=min(0.18, w - 0.04),
                                 h=0.09)
                 else:
-                    pledge_bag(k, (xx + w / 2, (y0 + y1) / 2, zl), (w, 0.36, h), seed=int(xx * 100) + int(zl * 10), inside=rnd.choice(INSIDE_COLS),
-                               tag=None)
+                    d_ = rnd.choice([d for d in GOODS if goods_fits(d, (b - 0.05 - xx, 0.36, 0.44))] or ['pedal'])
+                    w = pledge(k, (xx, (y0 + y1) / 2, zl), (b - 0.05 - xx, 0.36, 0.44), int(xx * 100) + int(zl * 10), desc=d_, facing='-y',
+                               fine=False, run=(1.0, 0.0, 0.0))
                 xx += w + 0.02
     k.grime = [((3.5, y0, 0.0), 2.0, 0.3)]
     for i, p in enumerate(GEAR_SOCKETS):
@@ -6421,12 +7279,16 @@ DETAIL_SHOP = {
                            ((5.15, 43.1, 1.45), (5.95, 43.0, 0.6), 30.0), ((5.15, 44.1, 1.45), (5.95, 44.0, 0.6), 30.0),
                            ((5.2, 42.6, 1.5), (6.2, 43.6, 1.05), 30.0), ((7.0, 40.2, 1.4), (6.0, 40.4, 0.8), 30.0)],
     'SM_NS_Pawn_Cage': [((5.8, 38.6, 1.6), (6.5, 38.6, 1.5), 28.0), ((5.4, 40.6, 1.8), (8.5, 39.0, 1.2), 24.0), ((7.4, 40.4, 1.7), (8.8, 38.2, 1.1), 26.0),
-                        ((7.6, 39.9, 1.5), (6.9, 38.8, 1.0), 30.0)],
+                        ((7.6, 39.9, 1.5), (6.9, 38.8, 1.0), 30.0),
+                        # close: the window's steel band and tray, the plate beside it, the pledges from the window and in the cage
+                        ((5.92, 38.55, 1.26), (6.5, 38.6, 1.05), 40.0), ((5.9, 38.0, 1.45), (6.48, 37.85, 1.05), 40.0),
+                        ((6.05, 38.85, 1.62), (8.6, 39.4, 1.25), 45.0), ((7.75, 40.35, 1.3), (8.6, 40.0, 0.95), 30.0),
+                        ((10.6, 39.6, 1.5), (11.2, 37.6, 1.0), 26.0)],
     'SM_NS_Pawn_SafeDoor': [((6.9, 38.0, 1.1), (7.43, 38.6, 0.7), 32.0)],
     'SM_NS_Pawn_GuitarWall': [((3.4, 40.8, 1.7), (3.4, 37.4, 1.9), 26.0), ((2.2, 39.2, 2.6), (2.0, 37.5, 2.6), 32.0), ((4.6, 39.1, 1.4), (4.8, 37.5, 1.3), 32.0),
                               ((3.0, 39.0, 0.9), (3.2, 37.5, 0.35), 32.0)],
     'SM_NS_Pawn_Shelves': [((2.0, 42.3, 1.6), (2.0, 44.6, 1.2), 30.0), ((3.5, 42.3, 1.6), (3.5, 44.6, 1.0), 30.0), ((5.0, 42.3, 1.6), (5.0, 44.6, 1.1), 30.0),
-                           ((9.4, 41.6, 1.6), (11.0, 44.3, 1.2), 26.0)],
+                           ((9.4, 41.6, 1.6), (11.0, 44.3, 1.2), 26.0), ((10.2, 42.6, 1.3), (10.9, 44.3, 1.0), 30.0)],
     'SM_NS_Pawn_Tickets': [((6.3, 38.4, 1.3), (6.85, 38.3, 1.0), 40.0), ((6.4, 39.6, 1.3), (6.75, 39.36, 1.05), 45.0)],
     'SM_NS_Pawn_Ticket': [((6.15, 38.5, 1.25), (6.30, 38.55, 1.04), 50.0)],
     'SM_NS_Pawn_Loupe': [((5.80, 42.15, 1.15), (5.96, 42.28, 0.99), 55.0)],

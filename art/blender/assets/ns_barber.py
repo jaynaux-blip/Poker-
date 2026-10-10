@@ -833,6 +833,91 @@ def f_cloth(c):
     return col, 0.9, 0.0, add(m, mul(m, weave, 0.06), mul(m, heather, 0.03))
 
 
+def sheet_coords(m):
+    """The point attribute ns_sheet a soft part carries (soft goods' own coordinates, set where the part is built):
+    its x, y and z sockets."""
+    sp = m.node('ShaderNodeSeparateXYZ')
+    m.link(attr(m, 'ns_sheet', 'Vector'), sp.inputs['Vector'])
+    return sp.outputs['X'], sp.outputs['Y'], sp.outputs['Z']
+
+
+@finish_kind('crepe')
+def f_crepe(c):
+    """Crepe tissue (the headrest sheets): crinkles running across the strip about 3.2 mm apart, wandering, merging and
+    dying out as crepe's do, laid out in the sheet's own coordinates (ns_sheet: x = meters along the drape from the
+    front's middle, y = meters across, z = millimeters the sheet stands off the pad) so they follow it over the pad;
+    the crinkle deeper and shallower in streaks across the strip a centimeter or two wide (what crepe reads as from a
+    few meters, where the crinkles themselves are too fine to see); their folds in shade; a few soft creases and a
+    crumple network from handling; the crepe pressed flatter where the last head lay; matte. The tissue is thin: where
+    it lies on the oxblood pad the pad shows faintly through it (a touch greyer and warmer), where it stands off the pad
+    (the ripples over the crown, the hanging ends, the sides past the pad's round) it is its own off-white. The tint
+    sits below the room's white tile and porcelain under the same light. Wants a fine texel (the chair gives the
+    sheet's face its own 0.5 mm corner of the bake)."""
+    m = c.m
+    s, t, lift = sheet_coords(m)
+    st = vec(m, s, t, 0.0)
+    wob = noise(m, vec(m, mul(m, s, 30.0), mul(m, t, 9.0), 2.3), detail=2.0)
+    wob2 = noise(m, vec(m, mul(m, s, 110.0), mul(m, t, 32.0), 5.7), detail=1.0)
+    ph = add(m, mul(m, s, 1.0 / 0.0032), mul(m, wob, 2.4), mul(m, wob2, 0.7))
+    tri = mul(m, m.math('ABSOLUTE', sub(m, m.math('FRACT', ph), 0.5)), 2.0)           # 1 in a fold, 0 on a crest
+    crest = sub(m, 1.0, mul(m, tri, tri))                                                # round crests, sharp folds
+    life = ramp(m, noise(m, vec(m, mul(m, s, 150.0), mul(m, t, 40.0), 7.1), detail=2.0), 0.3, 0.6)
+    # crepe's streaks: the crinkle bunched deep or drawn out shallow in bands across the strip
+    band = ramp(m, noise(m, vec(m, mul(m, s, 48.0), mul(m, t, 5.0), 8.8), detail=3.0), 0.3, 0.72)
+    du, dv = mul(m, s, 1.0 / 0.045), mul(m, t, 1.0 / 0.075)
+    press = smooth_less(m, m.math('SQRT', add(m, mul(m, du, du), mul(m, dv, dv))), 0.9, 0.35)
+    amp = mul(m, mul(m, add(m, 0.3, mul(m, band, 0.7)), add(m, 0.35, mul(m, life, 0.65))), sub(m, 1.0, mul(m, press, 0.45)))
+    shade = mul(m, mul(m, tri, mul(m, tri, tri)), amp)                                  # the fold's shaded line
+    fold = mul(m, isolines(m, mul_vec(m, st, 7.0), 1.0, 0.018, 2.0), ramp(m, noise(m, mul_vec(m, st, 4.0), detail=2.0), 0.45, 0.6))
+    crumple = mul(m, ramp(m, voronoi(m, mul_vec(m, st, 13.0), 1.0, 'DISTANCE_TO_EDGE'), 0.05, 0.0),
+                  ramp(m, noise(m, vec(m, mul(m, s, 9.0), mul(m, t, 9.0), 4.4), detail=2.0), 0.5, 0.62))
+    fib = noise(m, c.P, scale=1400.0, detail=2.0)
+    on_pad = smooth_less(m, lift, 0.45, 0.4)
+    col = m.mix(mul(m, shade, 0.55), c.col, darken(m, c.col, 0.8))
+    col = m.mix(mul(m, band, 0.4), col, darken(m, col, 0.9))
+    col = m.mix(mul(m, fib, 0.12), col, darken(m, col, 0.92))
+    col = m.mix(mul(m, add(m, fold, crumple), 0.22), col, darken(m, col, 0.86))
+    col = m.mix(mul(m, on_pad, 0.4), col, m.mix(1.0, col, (0.88, 0.84, 0.83, 1.0), blend='MULTIPLY'))
+    rough = add(m, 0.85, mul(m, crest, 0.05), mul(m, press, -0.07), mul(m, fib, 0.03))
+    soft = noise(m, vec(m, mul(m, s, 70.0), mul(m, t, 55.0), 9.2), detail=3.0)
+    h = add(m, mul(m, mul(m, crest, amp), 0.34), mul(m, soft, 0.12), mul(m, fold, -0.14), mul(m, crumple, -0.1), mul(m, fib, 0.01))
+    return col, rough, 0.0, h
+
+
+@finish_kind('terry')
+def f_terry(c):
+    """Cotton terry (the shop's towels): the looped pile as a fine soft speckle with its own shade, clumped a little,
+    matte; the folded layers seen on the sides as shadowed seams; on the top layer a flat-woven band near one end with
+    two thin slate stripes. ns_sheet: x = meters from the banded end, z = the layer count up from the towel's foot;
+    aux = the towel's layers."""
+    m = c.m
+    u, _, lay = sheet_coords(m)
+    # the pile as fine as the station's 2.2 mm texel holds (finer aliases into grey specks that read as dirt)
+    pile = noise(m, c.P, scale=280.0, detail=2.0, roughness=0.55)
+    # the loops lean together in tufts a few millimeters across, with shade between them
+    tuft = ramp(m, voronoi(m, c.P, 150.0, 'F1', 'Distance', randomness=0.9), 0.62, 0.08)
+    pile = add(m, mul(m, pile, 0.55), mul(m, tuft, 0.45))
+    clump = noise(m, c.P, scale=110.0, detail=3.0)
+    side = ramp(m, m.math('ABSOLUTE', c.nz), 0.75, 0.45)
+    fr = m.math('ABSOLUTE', sub(m, lay, m.math('ROUND', lay)))
+    inner = mul(m, m.math('GREATER_THAN', lay, 0.5), m.math('LESS_THAN', lay, sub(m, c.aux, 0.5)))
+    # the shade between two folds: a soft band about 3.5 mm wide (as thin as a towel's real seam, a millimeter, it is
+    # narrower than the station's 2.2 mm texel and bakes as a dotted line of grey specks)
+    seam = mul(m, mul(m, smooth_less(m, fr, 0.26, 0.2), inner), side)
+    top = m.math('GREATER_THAN', lay, sub(m, c.aux, 1.0))
+    band = mul(m, smooth_less(m, m.math('ABSOLUTE', sub(m, u, 0.042)), 0.012, 0.0015), top)
+    stripe = mul(m, m.math('MAXIMUM', smooth_less(m, m.math('ABSOLUTE', sub(m, u, 0.035)), 0.0011, 0.0004),
+                           smooth_less(m, m.math('ABSOLUTE', sub(m, u, 0.049)), 0.0011, 0.0004)), top)
+    col = m.mix(mul(m, sub(m, 1.0, pile), 0.32), c.col, darken(m, c.col, 0.84))
+    col = m.mix(mul(m, clump, 0.3), col, lighten(m, c.col, 0.06))
+    col = m.mix(mul(m, band, 0.5), col, lighten(m, c.col, 0.04))
+    col = m.mix(mul(m, stripe, 0.85), col, H(0x6f7f96))
+    col = m.mix(mul(m, seam, 0.55), col, darken(m, c.col, 0.55))
+    rough = add(m, 0.94, mul(m, band, -0.1), mul(m, pile, -0.04))
+    h = add(m, mul(m, mix_float(m, band, pile, mul(m, pile, 0.3)), 0.35), mul(m, clump, 0.2), mul(m, seam, -0.8))
+    return col, rough, 0.0, h
+
+
 @finish_kind('nylon')
 def f_nylon(c):
     """A barber's cape: woven nylon with a sheen, hairs caught in it."""
@@ -925,10 +1010,17 @@ def body_material(kit, slot):
         rough = mix_float(m, mk, rough, fr)
         metal = mix_float(m, mk, metal, fm)
         h = mix_float(m, mk, h, fh)
+    # Fresh linens and paper (a towel, a headrest sheet) are changed every day: no shine where hands rub, no dust, no
+    # grime. Nor the traced cavity: the color bakes at one sample, so it speckles where a soft part half-shades itself
+    # (under every fold of a towel stack, read as dirt); their own folds and seams shade them instead.
+    fresh = [k for k in ('crepe', 'terry') if k in kit.kinds[slot]]
+    keep = sub(m, 1.0, add(m, *[is_k(m, c.fin, FIN[k]) for k in fresh])) if fresh else None
     ao = m.node('ShaderNodeAmbientOcclusion', Distance=kit.cavity)
     ao.only_local = True
     ao.samples = 8
     cav = ramp(m, ao.outputs['AO'], 0.85, 0.35)
+    if keep is not None:
+        cav = mul(m, cav, keep)
     col = m.mix(mul(m, cav, 0.35), col, H(0x2e2a24))
     rough = add(m, rough, mul(m, cav, 0.08))
     if kit.low > 0.0:
@@ -941,18 +1033,24 @@ def body_material(kit, slot):
         dx, dy, dz = sub(m, c.x, cx), sub(m, c.y, cy), sub(m, c.z, cz)
         d = m.math('SQRT', add(m, mul(m, dx, dx), mul(m, dy, dy), mul(m, dz, dz)))
         g = mul(m, mul(m, smooth_less(m, d, rad * 0.6, rad * 0.4), ramp(m, noise(m, c.P, scale=35.0, detail=3.0), 0.3, 0.7)), amt)
+        if keep is not None:
+            g = mul(m, g, keep)
         col = m.mix(mul(m, g, 0.6), col, H(0x332d24))
         rough = mix_float(m, g, rough, 0.6)
     for (cx, cy, cz), rad, amt in kit.polish:
         dx, dy, dz = sub(m, c.x, cx), sub(m, c.y, cy), sub(m, c.z, cz)
         d = m.math('SQRT', add(m, mul(m, dx, dx), mul(m, dy, dy), mul(m, dz, dz)))
         g = mul(m, mul(m, smooth_less(m, d, rad * 0.55, rad * 0.45), ramp(m, noise(m, c.P, scale=18.0, detail=3.0), 0.25, 0.65)), amt)
+        if keep is not None:
+            g = mul(m, g, keep)
         col = m.mix(mul(m, g, 0.12), col, darken(m, col, 0.85))
         rough = mix_float(m, g, rough, 0.22)
     if kit.dust > 0.0:
         up = mul(m, ramp(m, c.nz, 0.6, 0.95), mul(m, ramp(m, noise(m, c.P, scale=60.0, detail=5.0), 0.35, 0.9), kit.dust * 0.7))
         if not isinstance(metal, (int, float)):
             up = mul(m, up, sub(m, 1.0, mul(m, metal, 0.6)))
+        if keep is not None:
+            up = mul(m, up, keep)
         col = m.mix(up, col, H(0x9a958b))
         rough = mix_float(m, up, rough, 0.9)
         metal = mix_float(m, up, metal, 0.0)
@@ -1312,6 +1410,9 @@ class Kit:
         self.log = log
         self.tiled = {}
         self.emit = {}
+        # {slot: (u0, v0, u1, v1)}: where a slot's box-packed faces go (default the whole texture), so faces that come
+        # with their own UVs (ns_lock) can have the rest of it to themselves at a finer texel (the chair's headrest sheet)
+        self.box_rect = {}
         self.tin_origin = (0.0, 0.0)
         self.default = next((s for s in self.slots if s != 'print' and not s.startswith('ns_')), 'body')
 
@@ -1485,8 +1586,8 @@ class Kit:
                 PROXIES.append(self._proxy(obj, slot, si, spec, first))
         obj['ns_tiled'] = {str(k): v for k, v in tiled_idx.items()}
         groups = [(lambda f: f.index in locked, 'keep', None, (0.0, 0.0, 1.0, 1.0))]
-        for s in obj.material_slots:
-            groups.append((core.material_is(obj, s.material.name), 'box', None, (0.0, 0.0, 1.0, 1.0)))
+        for sname, s in zip(order, obj.material_slots):
+            groups.append((core.material_is(obj, s.material.name), 'box', None, self.box_rect.get(sname, (0.0, 0.0, 1.0, 1.0))))
         groups.append((lambda f: True, 'box', None, (0.0, 0.0, 1.0, 1.0)))
         core.uv_layout(obj, groups)
         obj['ns_anchor'] = list(self.anchor)
@@ -2689,6 +2790,8 @@ def pole():
 
 OXBLOOD = 0x4f1618
 PORCELAIN = 0xece6d6
+CREPE = 0xdcdad3      # the headrest's crepe: a bleached off-white, below the floor's white tile (0xe9e5da..0xddd6c4) and the porcelain
+TOWEL = 0xdbd8cf      # laundered terry
 SEAT_H = 0.55
 HEAD = (0.19, 0.0, 1.27)
 
@@ -2723,6 +2826,248 @@ def tufted(name, half, r, M, buttons, depth=0.014, spread=0.024, crown=0.012, fa
         o.data.transform(M)
         bts.append(o)
     return obj, bts
+
+
+def waves(seed, n, la, lb):
+    """A smooth random field f(a, b) in about -1..1: n plane waves, wavelengths la (along a) and lb (along b) meters."""
+    r = random.Random(seed)
+    W = [(r.uniform(0.5, 1.0), 2 * math.pi / r.uniform(*la) * r.choice((-1, 1)), 2 * math.pi / r.uniform(*lb) * r.choice((-1, 1)),
+          r.uniform(0.0, 2 * math.pi)) for _ in range(n)]
+    k = 1.0 / math.sqrt(sum(w[0] ** 2 for w in W) / 2.0)
+
+    def f(a, b):
+        return max(-1.0, min(1.0, k * 0.6 * sum(w * math.sin(ka * a + kb * b + ph) for w, ka, kb, ph in W)))
+    return f
+
+
+def set_sheet(obj, coords):
+    """The point attribute ns_sheet (soft goods' own coordinates, read by the crepe and terry finishes)."""
+    a = obj.data.attributes.new('ns_sheet', 'FLOAT_VECTOR', 'POINT')
+    a.data.foreach_set('vector', [float(x) for c in coords for x in c])
+
+
+def head_sheet(pad, PM, W=0.244, flat=0.10, th_a=-44.0, th_c=-18.0, th_b=158.0, nu=52, nv=44, lift=0.0016, thick=0.00045, seed=11,
+               uv_px=0, chunks=4):
+    """The crepe sheet over the headrest. `pad` is the headrest pad, placed by PM (its own frame: the face the head
+    rests on toward -x, the top +z, the pad 0.30 wide along y). The sheet is laid in that frame: rays cast from the
+    pad's middle line find its section every quarter degree from the front's foot (th_a) over the top to the back
+    (th_b); the sheet runs evenly along it, hanging straight below th_c (it doesn't follow the pad's foot round) and
+    straight out past |y| = flat (it doesn't follow the pad's side round either), is smoothed so the pad's facets don't
+    print through, then lifted: soft ripples where it can't follow the crown (fewer on the front, which heads press
+    flat), its torn ends curling up and ragged, its long edges a little wavy. A shell `thick` thick with its rim (the
+    paper's edge), never closer than a millimeter to the pad. ns_sheet: (meters along the drape from the front's
+    middle, meters across, millimeters it stands off the pad past its resting gap). The outer face comes first (faces
+    0 .. obj['ns_outer'] - 1); with uv_px (the slot's texture size) it carries its own UVs in a strip along the
+    texture's top, obj['ns_uv_reserve'] of its height (lock those faces and pack the rest of the slot below)."""
+    from mathutils.bvhtree import BVHTree
+    Minv = PM.inverted()
+    V = [Minv @ v.co for v in pad.data.vertices]
+    bvh = BVHTree.FromPolygons(V, [tuple(p.vertices) for p in pad.data.polygons])
+    rnd = random.Random(seed)
+    step = 0.25
+    th0 = th_a - 15.0
+    n_th = int(round((th_b + 15.0 - th0) / step)) + 1
+    k_of = lambda th: int(round((th - th0) / step))
+    sections = {}
+
+    def section(y):
+        if y in sections:
+            return sections[y]
+        P, N = [], []
+        for k in range(n_th):
+            th = math.radians(th0 + k * step)
+            d = Vector((-math.cos(th), 0.0, math.sin(th)))
+            hit, n, _, _ = bvh.ray_cast(Vector((0.0, y, 0.0)), d)
+            P.append(hit.copy())
+            N.append((n if n.dot(d) > 0 else -n).normalized())
+        S = [0.0]
+        for a, b in zip(P, P[1:]):
+            S.append(S[-1] + (b - a).length)
+        s0 = S[k_of(0.0)]
+        S = [x - s0 for x in S]
+        sections[y] = (P, N, S)
+        return sections[y]
+
+    def at(sec, s):
+        P, N, S = sec
+        kc = k_of(th_c)
+        if s < S[kc]:   # hanging straight on from th_c
+            T = (P[kc + 1] - P[kc - 1]).normalized()
+            return P[kc] + T * (s - S[kc]), N[kc]
+        lo, hi = 0, len(S) - 1
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if S[mid] <= s:
+                lo = mid
+            else:
+                hi = mid
+        f = (s - S[lo]) / max(S[hi] - S[lo], 1e-9)
+        return P[lo].lerp(P[hi], f), N[lo].lerp(N[hi], f).normalized()
+
+    edge_a = waves(seed + 1, 4, (0.05, 0.12), (1.0, 2.0))
+    edge_b = waves(seed + 2, 4, (0.05, 0.12), (1.0, 2.0))
+    side_w = waves(seed + 3, 4, (0.04, 0.09), (1.0, 2.0))
+    ripple = waves(seed + 4, 4, (0.10, 0.20), (0.022, 0.036))
+    frill = waves(seed + 6, 3, (0.016, 0.026), (1.0, 2.0))
+    curl_w = waves(seed + 5, 3, (0.06, 0.14), (1.0, 2.0))
+    ts = [-W / 2 + W * j / nu for j in range(nu + 1)]
+    B = np.zeros((nv + 1, nu + 1, 3))
+    Nn = np.zeros((nv + 1, nu + 1, 3))
+    SS = np.zeros((nv + 1, nu + 1))
+    ends = []
+    for j, t in enumerate(ts):
+        sec = section(round(max(-flat, min(flat, t)), 6))
+        S = sec[2]
+        sa = S[k_of(th_a)] + 0.0012 * edge_a(t, 0.0)
+        sb = S[k_of(th_b)] + 0.0012 * edge_b(t, 0.0)
+        ends.append((sa, sb))
+        for i in range(nv + 1):
+            s = sa + (sb - sa) * i / nv
+            p, n = at(sec, s)
+            B[i, j] = (p.x + n.x * lift, t, p.z + n.z * lift)
+            Nn[i, j] = (n.x, 0.0, n.z)
+            SS[i, j] = s
+
+    def laplace(X):
+        L = np.zeros_like(X)
+        cnt = np.zeros(X.shape[:2] + (1,))
+        L[1:] += X[:-1]
+        cnt[1:] += 1
+        L[:-1] += X[1:]
+        cnt[:-1] += 1
+        L[:, 1:] += X[:, :-1]
+        cnt[:, 1:] += 1
+        L[:, :-1] += X[:, 1:]
+        cnt[:, :-1] += 1
+        return L / cnt - X
+
+    for _ in range(10):   # Taubin: smooths without shrinking the sheet onto the pad
+        B = B + 0.5 * laplace(B)
+        B = B - 0.53 * laplace(B)
+    # normals of the smoothed sheet, outward (away from the pad's middle line)
+    dS = np.zeros_like(B)
+    dS[1:-1] = B[2:] - B[:-2]
+    dS[0], dS[-1] = B[1] - B[0], B[-1] - B[-2]
+    dT = np.zeros_like(B)
+    dT[:, 1:-1] = B[:, 2:] - B[:, :-2]
+    dT[:, 0], dT[:, -1] = B[:, 1] - B[:, 0], B[:, -1] - B[:, -2]
+    Nm = np.cross(dS, dT)
+    Nm /= np.linalg.norm(Nm, axis=2, keepdims=True)
+    flip = np.sum(Nm * Nn, axis=2) < 0.0
+    Nm[flip] *= -1.0
+    O = np.zeros_like(B)
+    half = W / 2
+    for i in range(nv + 1):
+        for j, t in enumerate(ts):
+            s = SS[i, j]
+            sa, sb = ends[j]
+            front = 0.4 + 0.6 * smoothstep01((s - 0.015) / 0.045)
+            sides = 0.35 + 0.65 * smoothstep01((abs(t) / half - 0.3) / 0.7)
+            d = 0.0012 * max(0.0, ripple(s, t)) ** 1.5 * front * sides
+            de = s - sa
+            if de < 0.013:
+                d += 0.0024 * (1.0 - de / 0.013) ** 2 * (0.65 + 0.35 * curl_w(t, 0.0))
+            de = sb - s
+            if de < 0.011:
+                d += 0.0016 * (1.0 - de / 0.011) ** 2 * (0.65 + 0.35 * curl_w(t, 1.7))
+            de = half - abs(t)
+            if de < 0.010:
+                d += (0.0007 + 0.0009 * max(0.0, frill(s, 1.3 * (t > 0)))) * (1.0 - de / 0.010) ** 2   # crepe edges ruffle
+            O[i, j] = B[i, j] + Nm[i, j] * d
+        for j in (0, 1, nu - 1, nu):
+            w = 1.0 if j in (0, nu) else 0.45
+            O[i, j, 1] += w * 0.0012 * side_w(SS[i, j], 0.3 * j)
+    # the torn ends: the perforation's little tabs and bites, along the sheet past its end rows
+    for i, i2 in ((0, 1), (nv, nv - 1)):
+        for j in range(nu + 1):
+            out_ = O[i, j] - O[i2, j]
+            out_ /= max(np.linalg.norm(out_), 1e-9)
+            jit = rnd.uniform(-0.0007, 0.0007)
+            O[i, j] += out_ * jit
+            O[i2, j] += out_ * jit * 0.3
+    keep_off = thick + 0.001
+    G = np.zeros((nv + 1, nu + 1, 1))
+    for i in range(nv + 1):
+        for j in range(nu + 1):
+            p = Vector(O[i, j])
+            q, n, _, dist = bvh.find_nearest(p)
+            if q is not None and (dist < keep_off or (p - q).dot(n) < 0.0):
+                O[i, j] = q + n.normalized() * keep_off
+                dist = keep_off
+            G[i, j, 0] = max(0.0, (dist - lift) * 1000.0)
+    # how far the sheet stands off the pad past its resting gap (mm; the crepe's show-through), smoothed so the pad's
+    # facets don't print in it
+    for _ in range(8):
+        G = G + 0.5 * laplace(G)
+    I = O - Nm * thick
+    bm = bmesh.new()
+    vo = [[bm.verts.new(tuple(O[i, j])) for j in range(nu + 1)] for i in range(nv + 1)]
+    vi = [[bm.verts.new(tuple(I[i, j])) for j in range(nu + 1)] for i in range(nv + 1)]
+    coords = [(SS[i, j], ts[j], max(0.0, G[i, j, 0])) for i in range(nv + 1) for j in range(nu + 1)] * 2
+
+    def face(vs, outward):
+        f = bm.faces.new(vs)
+        f.normal_update()
+        if f.normal.dot(Vector(outward)) < 0.0:
+            f.normal_flip()
+        return f
+
+    # the outer face first (faces 0 .. nv * nu - 1: the ones with their own UVs), then the inner, then the rim
+    outer = []
+    for i in range(nv):
+        for j in range(nu):
+            outer.append((face((vo[i][j], vo[i][j + 1], vo[i + 1][j + 1], vo[i + 1][j]), Vector(Nm[i, j])), i))
+    for i in range(nv):
+        for j in range(nu):
+            face((vi[i][j], vi[i + 1][j], vi[i + 1][j + 1], vi[i][j + 1]), -Vector(Nm[i, j]))
+    for j in range(nu):
+        face((vo[0][j], vo[0][j + 1], vi[0][j + 1], vi[0][j]), Vector(O[0, j] - O[1, j]))
+        face((vo[nv][j], vo[nv][j + 1], vi[nv][j + 1], vi[nv][j]), Vector(O[nv, j] - O[nv - 1, j]))
+    for i in range(nv):
+        face((vo[i][0], vo[i + 1][0], vi[i + 1][0], vi[i][0]), Vector(O[i, 0] - O[i, 1]))
+        face((vo[i][nu], vo[i + 1][nu], vi[i + 1][nu], vi[i][nu]), Vector(O[i, nu] - O[i, nu - 1]))
+    reserve = 0.0
+    if uv_px:
+        # The outer face unwrapped by the sheet's own coordinates (no stretch over the crown), cut across the drape into
+        # `chunks` bands (the cuts run with the crinkles, where they don't show) laid side by side along the top of the
+        # texture: about 0.5 mm a texel in a 2048 bake. `reserve` is the strip's share of the texture's height.
+        mg, gp = 6.0 / uv_px, 10.0 / uv_px
+        kk = (1.0 - 2.0 * mg - (chunks - 1) * gp) / (chunks * W)        # uv units per meter
+        rows = nv // chunks
+        idx = {vo[i][j]: (i, j) for i in range(nv + 1) for j in range(nu + 1)}
+        s0 = [float(SS[c * rows].min()) for c in range(chunks)]
+        hs = [(float(SS[nv if c == chunks - 1 else (c + 1) * rows].max()) - s0[c]) * kk for c in range(chunks)]
+        top = 1.0 - mg - max(hs)
+        reserve = mg + max(hs) + gp
+        uvl = bm.loops.layers.uv.new('UVMap')
+
+        def place(sign):
+            area = 0.0
+            for f, i in outer:
+                ch = min(i // rows, chunks - 1)
+                u0 = mg + ch * (W * kk + gp)
+                pts = []
+                for lp in f.loops:
+                    ii, jj = idx[lp.vert]
+                    uv = (u0 + (W / 2 + sign * ts[jj]) * kk, top + (SS[ii, jj] - s0[ch]) * kk)
+                    lp[uvl].uv = uv
+                    pts.append(uv)
+                area += 0.5 * sum(pts[k][0] * pts[(k + 1) % len(pts)][1] - pts[(k + 1) % len(pts)][0] * pts[k][1] for k in range(len(pts)))
+            return area
+
+        if place(1.0) < 0.0:   # never mirrored
+            place(-1.0)
+    obj = core.mesh_object('head_paper', bm)
+    set_sheet(obj, coords)
+    obj.data.transform(PM)
+    obj['ns_outer'] = nv * nu
+    obj['ns_uv_reserve'] = reserve
+    return obj
+
+
+def smoothstep01(x):
+    x = max(0.0, min(1.0, x))
+    return x * x * (3.0 - 2.0 * x)
 
 
 def diamond(nx, ny, sx, sy):
@@ -2802,12 +3147,16 @@ def chair():
     pad_c = Vector((0.335, 0.0, 1.25))
     C(tube('head_bar', [tuple(top), tuple(pad_c + Vector((0.03, 0.0, -0.03)))], 0.011, 12))
     C(bx('head_clamp', top.x - 0.025, top.x + 0.025, -0.03, 0.03, top.z - 0.02, top.z + 0.03, 0.008, 2))
-    hp = cushion('head_pad', -0.045, 0.045, -0.15, 0.15, -0.055, 0.055, 0.045, crown=0.008, sub=2,
-                 matrix=Matrix.Translation(pad_c) @ Matrix.Rotation(math.radians(8.0), 4, 'Y'))
+    PM = Matrix.Translation(pad_c) @ Matrix.Rotation(math.radians(8.0), 4, 'Y')
+    hp = cushion('head_pad', -0.045, 0.045, -0.15, 0.15, -0.055, 0.055, 0.045, crown=0.008, sub=2, matrix=PM)
     V(hp)
-    paper = bx('head_paper', -0.0495, -0.0465, -0.13, 0.13, -0.045, 0.045)
-    paper.data.transform(Matrix.Translation(pad_c) @ Matrix.Rotation(math.radians(8.0), 4, 'Y'))
-    k.add(paper, 'paper', 0xf4f2ec)
+    # a fresh crepe sheet drawn over the headrest from the roll, front to back. Its face gets its own strip of the bake
+    # at about 0.5 mm a texel (the rest of the chair stays near 1.7 mm): it is where the barber's camera looks, and crepe
+    # needs the texel. Its UVs are locked and the rest of the body packs below the strip.
+    sheet = head_sheet(hp, PM, uv_px=TEXTURE_SIZES['nsbc_body'])
+    k.add(sheet, 'crepe', CREPE)
+    sheet.data.attributes['ns_lock'].data.foreach_set('value', [1.0 if i < sheet['ns_outer'] else 0.0 for i in range(len(sheet.data.polygons))])
+    k.box_rect['body'] = (0.0, 0.0, 1.0, 1.0 - sheet['ns_uv_reserve'])
     # the levers: recline (right, at the back) and the hydraulic pump pedal
     C(tube('recline', bend([(0.16, -0.235, 0.42), (0.20, -0.33, 0.50), (0.17, -0.37, 0.64)], 0.04, 4), 0.008, 10))
     k.add(lathe_solid('recline_knob', [(0.0, -0.022), (0.016, -0.018), (0.022, 0.0), (0.016, 0.018), (0.0, 0.022)],
@@ -2890,7 +3239,7 @@ def draw_book(s, w, h):
 
 
 def draw_strip(s, w, h):
-    s.rect(0, 0, w, h, 0xf4f1ea, rough=0.5)
+    s.rect(0, 0, w, h, 0xe2ded3, rough=0.5)
     s.mid('NECK STRIPS', w / 2, h * 0.6, h * 0.22, w * 0.86, 0x1f3b6a, 'Black')
     s.mid('5 ROLLS · 360 STRIPS', w / 2, h * 0.28, h * 0.12, w * 0.8, 0x444444, 'Bold')
 
@@ -2959,6 +3308,65 @@ def coil_cord(k, a, b, coil_r=0.008, pitch=0.009, wire=0.0022, sag=0.06):
         ang = 2 * math.pi * turns * t
         pts.append(tuple(c + u * coil_r * math.cos(ang) + w * coil_r * math.sin(ang)))
     k.add(tube('cord', pts, wire, 6), 'rubber', 0x151515)
+
+
+def soft_slab(name, x0, x1, y0, y1, z0, h, r_plan=0.012, nx=10, ny=7):
+    """A slab rolled half-round at every edge (a folded towel's edges), its corners rounded in plan, its top and bottom
+    gridded nx x ny so they can be pushed about."""
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    bmesh.ops.scale(bm, vec=Vector((x1 - x0, y1 - y0, h)), verts=bm.verts)
+    bmesh.ops.translate(bm, vec=Vector(((x0 + x1) / 2, (y0 + y1) / 2, z0 + h / 2)), verts=bm.verts)
+
+    def along(e, axis):
+        d = e.verts[1].co - e.verts[0].co
+        return abs(d[axis]) > 0.5 * d.length
+
+    def crease(e):
+        bm.normal_update()
+        return len(e.link_faces) == 2 and e.link_faces[0].normal.dot(e.link_faces[1].normal) < 0.5
+
+    bmesh.ops.subdivide_edges(bm, edges=[e for e in bm.edges if along(e, 0)], cuts=nx, use_grid_fill=True)
+    bmesh.ops.subdivide_edges(bm, edges=[e for e in bm.edges if along(e, 1)], cuts=ny, use_grid_fill=True)
+    bm.normal_update()
+    corners = [e for e in bm.edges if along(e, 2) and crease(e)]
+    bmesh.ops.bevel(bm, geom=corners, offset=r_plan, segments=3, profile=0.5, affect='EDGES', clamp_overlap=True)
+    bm.normal_update()
+    rim = []
+    for e in bm.edges:
+        if len(e.link_faces) != 2:
+            continue
+        a, b = abs(e.link_faces[0].normal.z), abs(e.link_faces[1].normal.z)
+        if max(a, b) > 0.9 and min(a, b) < 0.1:
+            rim.append(e)
+    bmesh.ops.bevel(bm, geom=rim, offset=h * 0.49, segments=4, profile=0.5, affect='EDGES', clamp_overlap=True)
+    return core.mesh_object(name, bm)
+
+
+def folded_towel(k, x0, x1, y0, y1, z0, h, layers, seed, band=('x', 0), col=TOWEL, nx=10, ny=7):
+    """A folded terry towel lying flat (x0..x1, y0..y1, h thick from z0, in `layers` folds): a soft slab rolled at every
+    edge, its outline wavering and its top puffed a little (never a box). The band (terry finish) runs near one end:
+    band = (axis, which end: 0 the low one, 1 the high one). ns_sheet: (meters from that end, 0, layers counted up from
+    z0); aux = layers."""
+    o = soft_slab('towel', x0, x1, y0, y1, z0, h, nx=nx, ny=ny)
+    wx = waves(seed, 4, (0.08, 0.2), (0.5, 1.0))
+    wy = waves(seed + 1, 4, (0.08, 0.2), (0.5, 1.0))
+    puff = waves(seed + 2, 5, (0.07, 0.16), (0.07, 0.16))
+    ax, end = band
+    coords = []
+    for v in o.data.vertices:
+        x, y, z = v.co
+        e = (x - x0 if end == 0 else x1 - x) if ax == 'x' else (y - y0 if end == 0 else y1 - y)
+        f = min(max((z - z0) / h, 0.0), 1.0)
+        coords.append((e, 0.0, f * layers))
+        v.co.x += 0.0022 * wx(y, z * 10.0)
+        v.co.y += 0.0022 * wy(x, z * 10.0)
+        inset = min(x - x0, x1 - x, y - y0, y1 - y)
+        if f > 0.98 and inset > h * 0.45:
+            v.co.z += 0.0012 * (puff(x, y) + 0.25) * min(1.0, (inset - h * 0.45) / 0.02)
+    set_sheet(o, coords)
+    o.data.shade_smooth()
+    return k.add(o, 'terry', col, aux=float(layers), soft=True)
 
 
 def station():
@@ -3054,11 +3462,11 @@ def station():
     fan = lathe_solid('duster', [(0.0, -0.002), (0.02, 0.0), (0.045, -0.04), (0.05, -0.08), (0.03, -0.10), (0.0, -0.102)], dm, 24)
     fan.data.transform(dm @ Matrix.Scale(0.45, 4, (0, 1, 0)) @ dm.inverted())
     k.add(fan, 'felt', 0xe8dcc6)
-    k.add(bx('towel', 2.68, 3.12, 1.98, 2.24, TOP_Z, TOP_Z + 0.012, 0.004), 'cloth', 0xf2f0ea)
+    folded_towel(k, 2.68, 3.12, 1.98, 2.24, TOP_Z, 0.016, 3, 31, band=('x', 1))
     for i in range(3):
-        comb(k, Matrix.Translation((2.72 + i * 0.012, 2.04 + i * 0.05, TOP_Z + 0.012 + 0.003 * i)) @ Matrix.Rotation(math.radians(4 - 3 * i), 4, 'Z'),
+        comb(k, Matrix.Translation((2.72 + i * 0.012, 2.04 + i * 0.05, TOP_Z + 0.0162)) @ Matrix.Rotation(math.radians(4 - 3 * i), 4, 'Z'),
              0.18, (0x111111, 0x2a2a2a, 0x5a1612)[i])
-    rm = Matrix.Translation((2.95, 2.16, TOP_Z + 0.013)) @ Matrix.Rotation(math.radians(-20), 4, 'Z')
+    rm = Matrix.Translation((2.95, 2.16, TOP_Z + 0.0175)) @ Matrix.Rotation(math.radians(-20), 4, 'Z')
     for o, f, c in ((bx('razor_blade', -0.07, 0.0, -0.011, 0.011, 0.0, 0.004, 0.001), 'chrome', 0xffffff),
                     (bx('razor_handle', 0.002, 0.12, -0.009, 0.009, 0.0, 0.012, 0.004), 'plastic', 0x0e0e0e),
                     (parts.rod('razor_pin', (0.002, 0.0, -0.001), (0.002, 0.0, 0.014), 0.003, 10), 'brass', 0xffffff)):
@@ -3069,8 +3477,8 @@ def station():
         k.add(tube('hook', bend([(hx_, 2.31, 1.08), (hx_, 2.28, 1.08), (hx_, 2.28, 1.07)], 0.008, 3), 0.003, 8), 'chrome')
         clipper(k, Matrix.Translation((hx_, 2.28, 0.889)), col, 'logo' if i == 0 else None)
         coil_cord(k, (hx_, 2.28, 1.079), (3.47, 2.42, 0.93), sag=0.05)
-    k.add(bx('strip', 3.42, 3.56, 2.405, 2.43, 0.90, 0.95, 0.006), 'plastic', 0xefece4)
-    k.add(bx('strips_box', 3.26, 3.36, 2.24, 2.36, TOP_Z, TOP_Z + 0.06, 0.004), 'paper', 0xf4f1ea)
+    k.add(bx('strip', 3.42, 3.56, 2.405, 2.43, 0.90, 0.95, 0.006), 'plastic', 0xe6e2d8)
+    k.add(bx('strips_box', 3.26, 3.36, 2.24, 2.36, TOP_Z, TOP_Z + 0.06, 0.004), 'paper', 0xe2ded3)
     k.decal('strip', (3.31, 2.2395, TOP_Z + 0.03), lift=0.0003, w=0.095, h=0.048)
     # the strop hanging on the cabinet's west end
     strop = bx('strop', x0 - 0.012, x0 - 0.006, 2.17, 2.23, 0.40, 0.84, 0.002)
@@ -3092,11 +3500,11 @@ def station():
     k.add(bx('steri_handle', 3.86, 3.96, 2.115, 2.135, TOP_Z + 0.115, TOP_Z + 0.125, 0.004), 'chrome')
     for i in range(4):
         z = TOP_Z + i * 0.026
-        tw = cushion('towel', 4.26 + 0.01 * (i % 2), 4.56 - 0.006 * i, 2.12, 2.40, z, z + 0.026, 0.02, crown=0.003, sub=2)
-        k.add(tw, 'cloth', 0xf2f0ea if i != 2 else 0xe9e4da)
+        folded_towel(k, 4.26 + 0.01 * (i % 2), 4.56 - 0.006 * i, 2.12 + 0.004 * (i % 2), 2.40, z, 0.026, 4, 40 + 7 * i, band=('y', 0), nx=8, ny=8,
+                     col=TOWEL if i != 2 else 0xd6d0c2)
     bm_ = Matrix.Translation((4.88, 2.13, TOP_Z)) @ Matrix.Rotation(math.radians(-7), 4, 'Z')
     for o, f, c in ((bx('book', -0.13, 0.13, -0.155, 0.155, 0.003, 0.042, 0.004), 'vinyl', 0x141414),
-                    (bx('book_pages', -0.122, 0.128, -0.15, 0.15, 0.006, 0.039, 0.001), 'paper', 0xefe9da)):
+                    (bx('book_pages', -0.122, 0.128, -0.15, 0.15, 0.006, 0.039, 0.001), 'paper', 0xddd5c3)):
         o.data.transform(bm_)
         k.add(o, f, c)
     k.decal('book', tuple(bm_ @ Vector((0.0, 0.0, 0.0425))), u=tuple(bm_.to_3x3() @ Vector((1, 0, 0))), v=tuple(bm_.to_3x3() @ Vector((0, 1, 0))),
@@ -3104,7 +3512,7 @@ def station():
     k.add(tube('hook2', bend([(5.02, 2.31, 1.08), (5.02, 2.28, 1.08), (5.02, 2.28, 1.07)], 0.008, 3), 0.003, 8), 'chrome')
     clipper(k, Matrix.Translation((5.02, 2.28, 0.889)), 0x2a2a2e)
     coil_cord(k, (5.02, 2.28, 1.079), (5.42, 2.42, 0.93), sag=0.04)
-    k.add(bx('strip2', 5.36, 5.50, 2.405, 2.43, 0.90, 0.95, 0.006), 'plastic', 0xefece4)
+    k.add(bx('strip2', 5.36, 5.50, 2.405, 2.43, 0.90, 0.95, 0.006), 'plastic', 0xe6e2d8)
     hx0, hx1 = 5.18, 5.56
     k.add(bx('hot_body', hx0, hx1, 2.10, 2.43, TOP_Z, TOP_Z + 0.36, 0.012, 2), 'stainless', aux=2)
     k.add(bx('hot_door', hx0 + 0.02, hx1 - 0.02, 2.09, 2.10, TOP_Z + 0.03, TOP_Z + 0.33, 0.006), 'stainless', aux=1)
@@ -3940,6 +4348,9 @@ SHEETS = {
         ('ceiling', L(3.0, -1.6, 1.5), L(6.0, 1.2, 3.3), 20, 'night'),
         ('transom', L(-2.2, 0.9, 1.75), L(0.1, 0.4, 2.75), 30, 'night'),
         ('transom_day', L(-2.4, -0.4, 1.75), L(0.1, 0.4, 2.75), 30, 'day'),
+        # chair 2's headrest sheet from the mirror (chair 1 wears the cape), and the towels by the sterilizer
+        ('headrest', L(4.85, 1.6, 1.6), L(4.6, 0.63, 1.2), 40, 'night'),
+        ('towels', L(3.95, 1.25, 1.45), L(4.35, 2.25, 0.95), 35, 'night'),
     ],
 }
 

@@ -6,12 +6,18 @@ masonry with real reveals, double-hung sashes, stone sills and lintels, a room b
 lamp lighting it, ironwork, cornices and signage. Four meshes, one building front each:
 
 - SM_Facade_Walkup: a five-storey red-brick walk-up (common bond, a pressed-metal cornice) over a cast-iron
-  shopfront: Fifth St. Barbers on the left, shut for the night behind its roll-down grille with the night light on
-  and the pole lit; the tenants' door in the middle, in a marble-lined recess; Northside Tailor & Cleaners on the
-  right, its gate down, tagged and wheat-pasted. A fire escape down the right two bays with a FOR RENT banner.
+  shopfront: Fifth St. Barbers' bay on the left, open (world realism spec 4.4: the cast-iron piers and the sign band
+  stay; the barber's front, door, grille, pole and room are ns_barber's, in local y 1.22..6.28, z 0..3.35, with no
+  back wall in that bay); the tenants' door in the middle, in a marble-lined recess; Northside Tailor & Cleaners on
+  the right, its gate down, tagged and wheat-pasted. A fire escape down the right two bays with a FOR RENT banner.
 - SM_Facade_Brownstone: a brownstone row house: a stoop with cast-iron rails up to the parlor floor's double doors,
   a three-sided bay from the ground to the cornice, carved hoods over the windows, an iron-fenced areaway, a
   bracketed wood cornice. Two side by side are one walk-up wide.
+- SM_Facade_Brownstone_B and _C (world realism spec 4.4, P2): the same house varied so no two neighbors match and none
+  is a mirrored copy (their prints would read backwards): B with deep green doors, eared architraves with keystones,
+  a low brownstone areaway wall and gate, a flower box, a cream sash, a lighter cornice; C with oxblood doors, flat
+  lintels with keystones, galvanized pipe rails on the stoop, a taller iron fence, a slate cornice, an air conditioner
+  in the bay. Each has its own window treatments and stained-glass colors. Same frame, size and slot order as A.
 - SM_Facade_1812: the player's building. Buff brick on a rusticated limestone base; the entrance recessed in a
   stone surround: door 1812 with the hall light through its glass and the brass mailboxes inside, the buzzer panel
   on the recess wall, the number in brass on the frieze and in gold leaf on the lit transom, a carriage lamp each
@@ -36,6 +42,11 @@ iron, brass, tile... chosen per face by an attribute and baked into one texture 
 emissive where a sign is lit or backlit). A baked texture that comes out one flat value (the lit slot's base color,
 ORM and normal; the prints' and some glass's normal) is exported as a 4x4 (assemble()).
 
+Room ids (world realism spec 3.4): COLOR_0.R on slot 3's faces is a per-room id, 0.02..1 (each room box behind a lit
+window, and each shop, its own value); G and B are 1 there and every other face is white, so a material that ignores
+it changes nothing. ue-world's M_NS_LitRoomBaked lights each room by Occupancy(hour, id). The lit slot's exported
+material multiplies its (near black) base color by COLOR_0, which is what makes the glTF carry it.
+
 Faces of separate parts never lie in one plane facing the same way (it z-fights in the game): stone heads and jambs
 reach 3 mm into their openings, gratings sit under their frames, party-wall returns start behind the trim's ends.
 
@@ -58,8 +69,9 @@ from artkit.sheet import Sheet
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import brand  # noqa: E402
 
-MESH = {'walkup': 'SM_Facade_Walkup', 'brownstone': 'SM_Facade_Brownstone', '1812': 'SM_Facade_1812', 'storeupper': 'SM_Facade_StoreUpper'}
-PREFIX = {'walkup': 'wu', 'brownstone': 'bs', '1812': 'ft', 'storeupper': 'su'}
+MESH = {'walkup': 'SM_Facade_Walkup', 'brownstone': 'SM_Facade_Brownstone', '1812': 'SM_Facade_1812', 'storeupper': 'SM_Facade_StoreUpper',
+        'brownstone_b': 'SM_Facade_Brownstone_B', 'brownstone_c': 'SM_Facade_Brownstone_C'}
+PREFIX = {'walkup': 'wu', 'brownstone': 'bs', '1812': 'ft', 'storeupper': 'su', 'brownstone_b': 'bsb', 'brownstone_c': 'bsc'}
 _ONLY = [s.strip() for s in os.environ.get('FACADE_ONLY', '').split(',') if s.strip()]
 WHICH = [k for k in MESH if not _ONLY or k in _ONLY]
 MESHES = [MESH[k] for k in WHICH]
@@ -68,7 +80,8 @@ TEXTURE_SIZE = 1024
 TEXTURE_SIZES = {}
 for _p in PREFIX.values():
     TEXTURE_SIZES.update({f'{_p}_wall': 2048, f'{_p}_trim': 2048, f'{_p}_glass': 512, f'{_p}_lit': 2048, f'{_p}_print': 1024})
-TEXTURE_SIZES.update({'bs_lit': 1024, 'bs_print': 512, 'ft_wall': (4096, 2048), 'su_wall': (4096, 2048), 'su_lit': 1024, 'su_print': 512})
+TEXTURE_SIZES.update({'bs_lit': 1024, 'bs_print': 512, 'ft_wall': (4096, 2048), 'su_wall': (4096, 2048), 'su_lit': 1024, 'su_print': 512,
+                      'bsb_lit': 1024, 'bsb_print': 512, 'bsc_lit': 1024, 'bsc_print': 512})
 AO_DISTANCE = 0.45
 REVIEW_SCREEN_LIGHT = False
 REVIEW_VIEWS = None  # set by pose_for_review, once the fronts' bounds are known
@@ -1133,10 +1146,13 @@ class Front:
         bm.free()
         print(f'[facades] {self.name}: culled {len(kill)} of {n} faces no camera sees')
 
-    def back_plate(self, z0, z1, x=ROOM_BACK):
-        """Closes the front's back (seen only in reviews: massing hides it in the game) with one plain wall quad."""
+    def back_plate(self, z0, z1, x=ROOM_BACK, y0=None, y1=None):
+        """Closes the front's back (seen only in reviews: massing hides it in the game) with one plain wall quad, across
+        the whole front or from y0 to y1."""
         hw = self.W / 2
-        self.add(self.wall_part(quad_obj('back', [(x, -hw, z0), (x, hw, z0), (x, hw, z1), (x, -hw, z1)], (1, 0, 0))))
+        y0 = -hw if y0 is None else y0
+        y1 = hw if y1 is None else y1
+        self.add(self.wall_part(quad_obj('back', [(x, y0, z0), (x, y1, z0), (x, y1, z1), (x, y0, z1)], (1, 0, 0))))
         self.collapse.append(lambda f, x=x: f.normal.x > 0.9 and f.calc_center_median().x > x - 0.01)
 
     def layout_wall(self, flats, px=(2048, 2048), region=(0.0, 0.0, 0.86, 1.0), hw=None, rest=None):
@@ -1662,7 +1678,10 @@ def walkup():
     F.add(wall)
     F.layout_wall([(lambda f: f.normal.x < -0.9, ('-y', 'z', -hw, hw, SHOP, WALL_TOP), W, WALL_TOP - SHOP)], hw=hw)
     F.add(F.blk(0.05, ROOM_BACK, -hw + 0.01, hw - 0.01, WALL_TOP - 0.06, WALL_TOP - 0.02, 'tar'))
-    F.back_plate(0.0, WALL_TOP)
+    # The back, open behind the barber's bay (its room runs on to stage X -900, spec 2.4).
+    F.back_plate(0.0, WALL_TOP, y1=BARB[0])
+    F.back_plate(0.0, WALL_TOP, y0=BARB[1])
+    F.back_plate(SHOP, WALL_TOP, y0=BARB[0], y1=BARB[1])
 
     # The cornice, and the brick frieze's stone band under it.
     F.add(cornice(F, [(0.0, -hw), (0.0, hw)], TOP, CH, 0.72))
@@ -1706,7 +1725,7 @@ def walkup():
         s.rect(26, 26, Wm - 52, Hm - 52, 0x0d0f0e, rough=0.35)
         outlined(s, 'FIFTH ST. BARBERS', Wm / 2, Hm * 0.36, 250, 0xd6ac58, 0x2a1a08, face='Black', tracking=1.12, metal=1.0, rough=0.25,
                  shadow=(0x000000, 10, -10))
-        s.text('HAIRCUTS  ·  HOT TOWEL SHAVES  ·  SINCE 1961', Wm / 2, Hm * 0.12, 54, 0xcfc6b0, face='Bold', align='CENTER', tracking=1.35, rough=0.4)
+        s.text('HAIRCUTS  ·  HOT TOWEL SHAVES  ·  EST. 1995', Wm / 2, Hm * 0.12, 54, 0xcfc6b0, face='Bold', align='CENTER', tracking=1.35, rough=0.4)
         worn(s, Wm, Hm, 120, 0x3a3a36, 0.35, 11)
 
     def cleaners_board(s, Wm, Hm):
@@ -1728,104 +1747,13 @@ def walkup():
     F.add(F.sign('cleaners', 4.7, 0.52, cleaners_board, (-0.1, (GATE[0] + GATE[1]) / 2, SHOP + 0.3)))
     F.add(F.sign('cordelia', 1.1, 0.3, name_panel, (-0.09, 0.0, SHOP + 0.32)))
 
-    # Fifth St. Barbers, shut: the night light on over the chairs, the grille down.
-    lamp, rm = (2.9, 4.6, 2.95), (6, 0.31, 1.05)
-    sx0, sx1, sy0, sy1, sz1 = 0.3, 3.5, BARB[0] + 0.04, BARB[1] - 0.04, 3.2
-    q = F.lquad
-    F.add(q([(sx0, sy0, 0.02), (sx1, sy0, 0.02), (sx1, sy1, 0.02), (sx0, sy1, 0.02)], (0, 0, 1), 'checker', lamp, rm),
-          q([(sx0, sy0, sz1), (sx1, sy0, sz1), (sx1, sy1, sz1), (sx0, sy1, sz1)], (0, 0, -1), 'ceil', lamp, rm),
-          q([(sx1, sy0, 0.02), (sx1, sy1, 0.02), (sx1, sy1, sz1), (sx1, sy0, sz1)], (-1, 0, 0), 'subway', lamp, rm),
-          q([(sx0, sy0, 0.02), (sx1, sy0, 0.02), (sx1, sy0, sz1), (sx0, sy0, sz1)], (0, 1, 0), 'subway', lamp, rm),
-          q([(sx0, sy1, 0.02), (sx1, sy1, 0.02), (sx1, sy1, sz1), (sx0, sy1, sz1)], (0, -1, 0), 'subway', lamp, rm))
-    for i in range(3):
-        cy = sy0 + 1.0 + i * 1.45
-        F.add(F.lblk(sx1 - 0.03, sx1, cy - 0.55, cy + 0.55, 1.05, 2.15, 'mirror', lamp, rm))
-        F.add(F.lblk(sx1 - 0.5, sx1, cy - 0.65, cy + 0.65, 0.82, 0.88, 'counter', lamp, rm))
-        F.add(F.lblk(sx1 - 0.5, sx1 - 0.02, cy - 0.65, cy + 0.65, 0.02, 0.82, 'furn', lamp, rm))
-        F.add(F.lit_tag(parts.lathe_at('jar', [(0.0, 0.0), (0.05, 0.0), (0.05, 0.22), (0.035, 0.24), (0.0, 0.24)], Matrix.Translation((sx1 - 0.28, cy + 0.4, 0.88)), 12), 'jar', lamp, rm))
-        # The chair: a chrome pedestal, red seat, back and headrest, arms, the footrest.
-        cx = sx1 - 1.35
-        F.add(F.lit_tag(parts.lathe_at('base', [(0.0, 0.02), (0.28, 0.02), (0.26, 0.08), (0.07, 0.12), (0.07, 0.42), (0.0, 0.42)], Matrix.Translation((cx, cy, 0.0)), 20), 'chrome', lamp, rm))
-        F.add(F.lblk(cx - 0.3, cx + 0.3, cy - 0.3, cy + 0.3, 0.42, 0.6, 'vinyl', lamp, rm, 0.04))
-        back = parts.rbox('back', (0, 0, 0), (0.12, 0.56, 0.62), 0.04, 2)
-        back.data.transform(Matrix.Translation((cx - 0.32, cy, 0.92)) @ Matrix.Rotation(math.radians(12), 4, 'Y'))
-        F.add(F.lit_tag(back, 'vinyl', lamp, rm))
-        F.add(F.lblk(cx - 0.48, cx - 0.38, cy - 0.15, cy + 0.15, 1.28, 1.48, 'vinyl', lamp, rm, 0.03))
-        for s in (-1, 1):
-            F.add(F.lblk(cx - 0.25, cx + 0.28, cy + s * 0.34 - 0.04, cy + s * 0.34 + 0.04, 0.72, 0.78, 'chrome', lamp, rm, 0.015))
-            F.add(F.lit_tag(parts.rod('armpost', (cx + 0.22, cy + s * 0.34, 0.6), (cx + 0.22, cy + s * 0.34, 0.72), 0.015, 8), 'chrome', lamp, rm))
-        F.add(F.lblk(cx + 0.42, cx + 0.62, cy - 0.22, cy + 0.22, 0.18, 0.22, 'chrome', lamp, rm))
-    # Waiting chairs down the left wall, a hairstyle chart over them, the fluorescent fittings (one on).
-    for i in range(3):
-        wy = sy1 - 0.3
-        wx = 0.9 + i * 0.6
-        F.add(F.lblk(wx - 0.24, wx + 0.24, wy - 0.24, wy + 0.2, 0.42, 0.5, 'vinyl', lamp, rm, 0.02))
-        F.add(F.lblk(wx - 0.24, wx + 0.24, wy + 0.12, wy + 0.22, 0.5, 0.95, 'vinyl', lamp, rm, 0.02))
-        F.add(F.lblk(wx - 0.22, wx + 0.22, wy - 0.2, wy + 0.18, 0.02, 0.42, 'chrome', lamp, rm))
-    def styles(s, Wm, Hm):
-        s.rect(0, 0, Wm, Hm, 0xe9e1cc, rough=0.7)
-        s.text('STYLES', Wm / 2, Hm - 95, 70, 0x8a1c1c, face='Black', align='CENTER', tracking=1.3, rough=0.7)
-        r = random.Random(4)
-        for i in range(6):
-            cx, cy = 150 + (i % 3) * 300, Hm - 330 - (i // 3) * 300
-            s.circle(cx, cy, 95, 0xd8c6a8, rough=0.7)
-            s.circle(cx, cy + 40, 100, [0x2a1a10, 0x4a3018, 0x111111, 0x6a4a28, 0x1c1410, 0x3a2a1c][i], rough=0.7)
-            s.circle(cx, cy - 20, 80, 0xd8b898, rough=0.7)
-            s.rect(cx - 60, cy - 165, 120, 22, 0x8a1c1c, rough=0.7)
-            s.text(['THE IVY', 'FLAT TOP', 'FADE', 'POMP', 'CREW', 'SIDE PART'][i], cx, cy - 210, 30, 0x222222, face='Bold', align='CENTER', rough=0.7)
-
-    F.add(F.sign('styles', 0.95, 1.2, styles, (1.6, sy1 - 0.02, 1.85), normal=(0.0, -1.0, 0.0), depth=0.01, glow=0.9, px=512))
-    for i, fx in enumerate((1.1, 2.2, 3.1)):
-        F.add(F.lblk(fx - 0.55, fx + 0.55, 4.45, 4.75, sz1 - 0.06, sz1, 'fixture' if i == 2 else 'counter', lamp, rm))
-    # The storefront: tiled bulkhead, the display window's frame and transom, the door.
-    F.add(F.blk(0.14, 0.34, BARB[0], 5.0, 0.0, 0.52, 'tile'))
-    F.add(F.blk(0.09, 0.34, BARB[0], 5.0, 0.52, 0.58, 'front', 0.008))
-    for y in (BARB[0] + 0.04, 3.1, 4.96, BARB[1] - 0.04):
-        F.add(F.blk(0.18, 0.3, y - 0.045, y + 0.045, 0.0 if y > 4.9 else 0.58, SHOP, 'front', 0.006))
-    F.add(F.blk(0.16, 0.3, BARB[0], BARB[1], 2.6, 2.7, 'front', 0.006))
-    win = (3.75, 2.7, 5.0, 0.6)
-    for a, b in ((BARB[0] + 0.09, 3.055), (3.145, 4.915), (5.005, BARB[1] - 0.09)):
-        F.add(F.pane(0.24, a, b, 2.7, SHOP - 0.02, win, 'paper' if a > 5 else 'dark', 0.4))
-    # The door (its glass left out: the shop shows through), a CLOSED card hung inside it.
-    dy0, dy1 = 5.01, BARB[1] - 0.09
-    F.add(F.blk(0.22, 0.27, dy0, dy0 + 0.1, 0.0, 2.6, 'front', 0.005), F.blk(0.22, 0.27, dy1 - 0.1, dy1, 0.0, 2.6, 'front', 0.005),
-          F.blk(0.22, 0.27, dy0 + 0.1, dy1 - 0.1, 0.0, 0.42, 'front', 0.005), F.blk(0.22, 0.27, dy0 + 0.1, dy1 - 0.1, 2.45, 2.6, 'front', 0.005),
-          F.blk(0.2, 0.22, dy0 + 0.14, dy0 + 0.17, 0.95, 1.25, 'brass'))
-
-    def closed_card(s, Wm, Hm):
-        s.rect(0, 0, Wm, Hm, 0xf1ece0, rough=0.7)
-        s.rect(8, 8, Wm - 16, Hm - 16, 0xb5241f, rough=0.6)
-        s.text('CLOSED', Wm / 2, Hm * 0.3, 92, 0xf1ece0, face='Black', align='CENTER', rough=0.6)
-
-    F.add(F.sign('closed', 0.34, 0.17, closed_card, (0.3, (dy0 + dy1) / 2, 1.75), depth=0.004, px=512))
-    F.add(F.rod((0.3, (dy0 + dy1) / 2 - 0.12, 1.83), (0.3, (dy0 + dy1) / 2, 2.0), 0.002, 'black', 4),
-          F.rod((0.3, (dy0 + dy1) / 2 + 0.12, 1.83), (0.3, (dy0 + dy1) / 2, 2.0), 0.002, 'black', 4))
-    # The roll-down grille: horizontal rods on vertical links, its guides and its box.
-    gx = -0.045
-    zz = 0.12
-    while zz < 3.0:
-        F.add(F.rod((gx, BARB[0] + 0.06, zz), (gx, BARB[1] - 0.06, zz), 0.0055, 'galv', 6))
-        zz += 0.085
-    yy = BARB[0] + 0.2
-    while yy < BARB[1] - 0.1:
-        F.add(F.blk(gx - 0.003, gx + 0.012, yy - 0.008, yy + 0.008, 0.07, 3.03, 'galv'))
-        yy += 0.27
-    F.add(F.blk(gx - 0.025, gx + 0.025, BARB[0] + 0.06, BARB[1] - 0.06, 0.0, 0.07, 'galv', 0.008))
-    for y in (BARB[0] + 0.03, BARB[1] - 0.03):
-        F.add(F.blk(-0.08, 0.0, y - 0.035, y + 0.035, 0.0, 3.05, 'galv', 0.006))
-    F.add(F.blk(-0.3, 0.0, BARB[0], BARB[1], 3.03, 3.33, 'galv', 0.012))
-    # The pole on its bracket, lit.
-    py, px = 6.52, -0.36
-    for z in (1.82, 2.48):
-        F.add(F.blk(px, -0.14, py - 0.02, py + 0.02, z - 0.015, z + 0.015, 'steel'))
-    F.add(F.blk(-0.16, -0.14, py - 0.07, py + 0.07, 1.75, 2.55, 'steel'))
-    pole_rm = (6, 0.5, 1.0)
-    F.add(F.lit_tag(parts.lathe_at('pole', [(0.0, 1.87), (0.07, 1.87), (0.07, 2.43), (0.0, 2.43)], Matrix.Translation((px, py, 0.0)), 24), 'pole', (px, py, 0.0), pole_rm))
-    F.add(F.tag(parts.lathe_at('cap', [(0.0, 1.78), (0.06, 1.78), (0.09, 1.82), (0.09, 1.87), (0.0, 1.87)], Matrix.Translation((px, py, 0.0)), 24), 'steel'))
-    F.add(F.tag(parts.lathe_at('cap', [(0.0, 2.43), (0.09, 2.43), (0.09, 2.48), (0.06, 2.52), (0.0, 2.52)], Matrix.Translation((px, py, 0.0)), 24), 'steel'))
-    F.add(F.lit_tag(parts.lathe_at('globe', [(0.0, 2.52), (0.05, 2.53), (0.085, 2.6), (0.07, 2.67), (0.0, 2.69)], Matrix.Translation((px, py, 0.0)), 20), 'lantern', (px, py, 2.6), pole_rm))
+    # Fifth St. Barbers' bay is open (world realism spec 4.4): the barber's own front, door, grille and pole and its room
+    # (ns_barber, art-shops-a) fill local y 1.22..6.28, z 0..3.35 and the room behind it, so nothing of this front stands
+    # in that box. The opening's head is closed by a soffit under the fascia, out to the wall's back.
+    F.add(F.blk(0.0, F.wall_t, BARB[0], BARB[1], SHOP, SHOP + 0.012, 'front'))
 
     # The tenants' door, in a marble-lined recess, the hall beyond lit.
+    q = F.lquad
     ey = 0.62
     F.add(F.blk(-0.36, 0.95, -ey, ey, 0.0, 0.16, 'granite', 0.012))
     for s in (-1, 1):
@@ -2212,9 +2140,32 @@ def picket_fence(F, a, b, z0=0.0, h=1.05, pitch=0.11, posts=1.5):
     return out
 
 
-def brownstone():
-    """A brownstone row house of the 1880s: high stoop, full-height three-sided bay, hooded windows, wood cornice."""
-    F = Front('brownstone', 6.75, wall_t=0.36, seed=1887)
+# The brownstone's variants (world realism spec 4.4, P2): no two neighbors alike, none a mirrored copy (their prints would
+# read backwards). A: varnished oak doors, console hoods, an iron picket areaway, a dog sign. B: deep green doors, eared
+# architraves with keystones, a low brownstone areaway wall with its gate, a flower box, a cream sash, a lighter
+# cornice. C: oxblood doors, flat lintels with keystones, galvanized pipe rails on the stoop, a taller iron fence, a
+# slate cornice, an air conditioner in the second floor's bay.
+BROWNSTONES = {
+    'brownstone': dict(seed=1887, door=None, hood='hood', rail='iron', fence='picket', cornice=0x2e251f, sash=0x2b1e16, dog=True, flowers=False,
+                       ac=False, wall_seed=0, stained=(0xe8c070, 0x8a2a2a, 0x2c5a7a, 0xd8d0b0, 0x3e6a3a),
+                       looks={(0, 'front'): 'blinds', (1, 'front'): 'drawn', (1, 'left'): 'drawn', (1, 'right'): 'drawn', (2, 'front'): 'shade',
+                              (2, 'left'): 'shade', (2, 'right'): 'shade', (3, 'front'): 'blinds', (3, 'left'): 'blinds', (3, 'right'): 'blinds'}),
+    'brownstone_b': dict(seed=1889, door=0x1f3a2a, hood='eared', rail='iron', fence='wall', cornice=0x4a3c30, sash=0xd2c8b0, dog=False, flowers=True,
+                         ac=False, wall_seed=31, stained=(0xd8c890, 0x2c5a3a, 0x8a5a2a, 0xe0d8c0, 0x5a2a3a),
+                         looks={(0, 'front'): 'shade', (1, 'front'): 'warm', (1, 'left'): 'sheer', (1, 'right'): 'sheer', (2, 'front'): 'tv',
+                                (2, 'left'): 'dark', (2, 'right'): 'shade', (3, 'front'): 'dark', (3, 'left'): 'vblind', (3, 'right'): 'dark'}),
+    'brownstone_c': dict(seed=1891, door=0x5e1a14, hood='key', rail='pipe', fence='tall', cornice=0x262a2e, sash=0x1d2a20, dog=False, flowers=False,
+                         ac=True, wall_seed=57, stained=(0xe0a050, 0x3a3a8a, 0xd8d0b0, 0x8a2a2a, 0x2a6a5a),
+                         looks={(0, 'front'): 'dark', (1, 'front'): 'blinds', (1, 'left'): 'drawn', (1, 'right'): 'drawn', (2, 'front'): 'dark',
+                                (2, 'left'): 'shade', (2, 'right'): 'shade', (3, 'front'): 'warm', (3, 'left'): 'foil', (3, 'right'): 'blinds'}),
+}
+
+
+def brownstone(key='brownstone'):
+    """A brownstone row house of the 1880s: high stoop, full-height three-sided bay, hooded windows, wood cornice. key picks
+    the variant (BROWNSTONES)."""
+    V = BROWNSTONES[key]
+    F = Front(key, 6.75, wall_t=0.36, seed=V['seed'])
     W, hw = F.W, F.W / 2
     PARLOR = 1.4
     TOP, CH = 11.1, 0.9
@@ -2223,18 +2174,19 @@ def brownstone():
     DOOR = (1.55, 2.85)
     DY = (DOOR[0] + DOOR[1]) / 2
     LEVELS = {0: (0.0, PARLOR - 0.15, 0.38, 0.85), 1: (PARLOR, 4.9 - 0.3, 1.85, 2.3), 2: (4.9, 8.1 - 0.3, 5.55, 2.0), 3: (8.1, TOP - 0.3, 8.7, 1.75)}
-    palette = dict(brown=dict(type='brown'), sash=dict(type='paint', hex=0x2b1e16, under=0x6b4a30, chips=0.55), wood=dict(type='wood', hex=0x4a2c18),
-                   cornice=dict(type='paint', hex=0x2e251f, under=0x6a5440, chips=0.6, soot=0.7), iron=dict(type='iron'), brass=dict(type='brass'),
-                   black=dict(type='black'), galv=dict(type='galv'), tar=dict(type='tar'), concrete=dict(type='concrete', hex=0x5d5c59), ac=dict(type='plastic', hex=0xc4bdad))
-    F.setup(brownstone_material('bs_wall'), palette, lit_strength=5.0)
+    palette = dict(brown=dict(type='brown'), sash=dict(type='paint', hex=V['sash'], under=0x6b4a30, chips=0.55),
+                   wood=dict(type='wood', hex=0x4a2c18) if V['door'] is None else dict(type='paint', hex=V['door'], under=0x4a2c18, chips=0.6, soot=0.4),
+                   cornice=dict(type='paint', hex=V['cornice'], under=0x6a5440, chips=0.6, soot=0.7), iron=dict(type='iron'), brass=dict(type='brass'),
+                   black=dict(type='black'), galv=dict(type='galv'), tar=dict(type='tar'), concrete=dict(type='concrete', hex=0x5d5c59), ac=dict(type='plastic', hex=0xc4bdad),
+                   pot=dict(type='paint', hex=0x6a4a30, under=0x3a2a1a, chips=0.4), leaf=dict(type='leaf'))
+    F.setup(brownstone_material(f'{F.p}_wall'), palette, lit_strength=5.0)
 
     # The bay: three faces, each a slab of its own with its windows (front: one wide window a floor; sides: narrow).
     faces = [('right', (-PROJ / 2, YC - (HALF_W + HALF_F) / 2, 0.0), (-0.70710678, -0.70710678, 0.0), PROJ * math.sqrt(2)),
              ('front', (-PROJ, YC, 0.0), (-1.0, 0.0, 0.0), 2 * HALF_F),
              ('left', (-PROJ / 2, YC + (HALF_W + HALF_F) / 2, 0.0), (-0.70710678, 0.70710678, 0.0), PROJ * math.sqrt(2))]
-    looks = {(0, 'front'): 'blinds', (1, 'front'): 'drawn', (1, 'left'): 'drawn', (1, 'right'): 'drawn', (2, 'front'): 'shade', (2, 'left'): 'shade', (2, 'right'): 'shade',
-             (3, 'front'): 'blinds', (3, 'left'): 'blinds', (3, 'right'): 'blinds'}
-    seeds = {1: 0.21, 2: 0.62, 3: 0.45}
+    looks = V['looks']
+    seeds = {1: 0.21, 2: 0.62, 3: 0.45} if key == 'brownstone' else {1: F.rnd.random(), 2: F.rnd.random(), 3: F.rnd.random()}
     for name, c, n, L in faces:
         M = frame_matrix(c, n)
         opens = []
@@ -2244,8 +2196,15 @@ def brownstone():
             w = 1.1 if name == 'front' and lv == 0 else (1.2 if name == 'front' else 0.6)
             opens.append((-w / 2, w / 2, z0, z0 + h))
             look = looks[(lv, name)]
-            F.add(window(F, 0.0, z0, w, h, look, seeds.get(lv, F.rnd.random()), fl, cl, room_w=2.0, panes=(1, 1), lintel='hood' if name == 'front' and lv > 0 else ('flat' if lv > 0 else 'none'),
-                         sill='none', guard=lv == 0, M=M, depth=0.3, stone='brown'))
+            F.add(window(F, 0.0, z0, w, h, look, seeds.get(lv, F.rnd.random()), fl, cl, room_w=2.0, panes=(1, 1),
+                         lintel=V['hood'] if name == 'front' and lv > 0 else ('flat' if lv > 0 else 'none'),
+                         sill='none', guard=lv == 0, M=M, depth=0.3, stone='brown', ac=V['ac'] and lv == 2 and name == 'front'))
+            if V['flowers'] and lv == 1 and name == 'front':
+                box = [F.blk(-0.32, -0.02, -0.62, 0.62, z0 - 0.25, z0 - 0.02, 'pot', 0.01)]
+                for i in range(7):
+                    yy = -0.55 + i * 0.18
+                    box.append(F.tag(parts.rbox('leaf', (-0.17, yy, z0 + 0.08), (0.2, 0.2, 0.22), 0.06, 2), 'leaf'))
+                F.add(xform(box, M))
         slab = wall_mesh('bay_' + name, -L / 2, L / 2, 0.0, WALL_TOP, opens, 0.3, ends=0)
         slab.data.transform(M)
         F.add(F.wall_part(slab))
@@ -2258,7 +2217,7 @@ def brownstone():
     for lv in (2, 3):
         fl, cl, z0, h = LEVELS[lv]
         openings.append((DY - 0.5, DY + 0.5, z0, z0 + h))
-        F.add(window(F, DY, z0, 1.0, h, 'warm' if lv == 2 else 'dark', F.rnd.random(), fl, cl, room_w=1.9, panes=(1, 1), lintel='hood', sill='none', stone='brown'))
+        F.add(window(F, DY, z0, 1.0, h, 'warm' if lv == 2 else 'dark', F.rnd.random(), fl, cl, room_w=1.9, panes=(1, 1), lintel=V['hood'], sill='none', stone='brown'))
     F.add(F.wall_part(wall_mesh('wall', -hw, hw, 0.0, WALL_TOP, openings, F.wall_t, ends=ROOM_BACK)))
     F.layout_wall([(lambda f: f.normal.x < -0.9, ('-y', 'z', -hw, hw, 0.0, WALL_TOP), W, WALL_TOP)], hw=hw)
     F.add(F.blk(0.05, ROOM_BACK, -hw + 0.01, hw - 0.01, WALL_TOP - 0.06, WALL_TOP - 0.02, 'tar'))
@@ -2298,7 +2257,7 @@ def brownstone():
 
     def stained(s, Wm, Hm):
         s.rect(0, 0, Wm, Hm, 0x2a2016, rough=0.4)
-        cols = [0xe8c070, 0x8a2a2a, 0x2c5a7a, 0xd8d0b0, 0x3e6a3a]
+        cols = list(V['stained'])
         r = random.Random(9)
         nx = 9
         for i in range(nx):
@@ -2342,19 +2301,43 @@ def brownstone():
         F.add(F.prism([(0.0, 0.0), (0.0, PARLOR + 0.24), (-0.3, PARLOR + 0.24), (-1.95, PARLOR + 0.24 - 1.65 * slope), (-2.05, PARLOR + 0.24 - 1.65 * slope), (-2.05, 0.0)], ya, yb, 'brown'))
         yc = (ya + yb) / 2
         rail0, rail1 = (-0.25, PARLOR + 1.12), (-1.88, PARLOR + 1.12 - 1.63 * slope)
-        F.add(F.rod((0.0, yc, rail0[1]), (rail0[0], yc, rail0[1]), 0.022, 'iron', 8), F.rod((rail0[0], yc, rail0[1]), (rail1[0], yc, rail1[1]), 0.022, 'iron', 8))
-        bx = -0.08
-        while bx > -1.82:
-            zb = PARLOR + 0.24 - max(0.0, (-0.3 - bx)) * slope
-            zt = rail0[1] - max(0.0, (rail0[0] - bx)) * slope
-            F.add(F.blk(bx - 0.008, bx + 0.008, yc - 0.008, yc + 0.008, zb, zt, 'iron'))
-            bx -= 0.12
-        newel = [(0.0, 0.0), (0.07, 0.0), (0.07, 0.06), (0.045, 0.1), (0.04, 0.55), (0.065, 0.62), (0.075, 0.7), (0.05, 0.76), (0.06, 0.82), (0.0, 0.9)]
-        F.add(F.tag(parts.lathe_at('newel', newel, Matrix.Translation((-1.98, yc, PARLOR + 0.24 - 1.65 * slope)), 12), 'iron'))
+        if V['rail'] == 'pipe':
+            # Galvanized pipe rails (a later repair): a top and a mid rail on three posts.
+            for dz in (0.0, -0.45):
+                F.add(F.rod((0.0, yc, rail0[1] + dz), (rail0[0], yc, rail0[1] + dz), 0.021, 'galv', 10),
+                      F.rod((rail0[0], yc, rail0[1] + dz), (rail1[0], yc, rail1[1] + dz), 0.021, 'galv', 10))
+            for bx in (-0.2, -1.0, -1.85):
+                zb = PARLOR + 0.24 - max(0.0, (-0.3 - bx)) * slope
+                zt = rail0[1] - max(0.0, (rail0[0] - bx)) * slope
+                F.add(F.rod((bx, yc, zb), (bx, yc, zt + 0.03), 0.024, 'galv', 10))
+        else:
+            F.add(F.rod((0.0, yc, rail0[1]), (rail0[0], yc, rail0[1]), 0.022, 'iron', 8), F.rod((rail0[0], yc, rail0[1]), (rail1[0], yc, rail1[1]), 0.022, 'iron', 8))
+            bx = -0.08
+            pitch = 0.12 if key == 'brownstone' else 0.17
+            while bx > -1.82:
+                zb = PARLOR + 0.24 - max(0.0, (-0.3 - bx)) * slope
+                zt = rail0[1] - max(0.0, (rail0[0] - bx)) * slope
+                F.add(F.blk(bx - 0.008, bx + 0.008, yc - 0.008, yc + 0.008, zb, zt, 'iron'))
+                bx -= pitch
+            if key != 'brownstone':
+                F.add(F.rod((0.0, yc, PARLOR + 0.62), (-0.3, yc, PARLOR + 0.62), 0.012, 'iron', 6),
+                      F.rod((-0.3, yc, PARLOR + 0.62), (rail1[0], yc, rail1[1] - 0.5), 0.012, 'iron', 6))
+            newel = [(0.0, 0.0), (0.07, 0.0), (0.07, 0.06), (0.045, 0.1), (0.04, 0.55), (0.065, 0.62), (0.075, 0.7), (0.05, 0.76), (0.06, 0.82), (0.0, 0.9)]
+            if key != 'brownstone':
+                newel = [(0.0, 0.0), (0.06, 0.0), (0.06, 0.7), (0.08, 0.72), (0.08, 0.78), (0.05, 0.8), (0.06, 0.86), (0.04, 0.92), (0.0, 0.95)]
+            F.add(F.tag(parts.lathe_at('newel', newel, Matrix.Translation((-1.98, yc, PARLOR + 0.24 - 1.65 * slope)), 12), 'iron'))
     # The areaway: an iron fence on a curb round the garden window, a gate by the stoop, bluestone inside.
     fx = -1.85
-    F.add(picket_fence(F, (fx, -hw + 0.06), (fx, DOOR[0] - 0.3)))
-    F.add(picket_fence(F, (0.0, -hw + 0.06), (fx, -hw + 0.06)))
+    if V['fence'] == 'wall':
+        # A low brownstone wall with a coping, an iron gate in it by the stoop.
+        F.add(F.blk(fx - 0.12, fx + 0.12, -hw + 0.06, DOOR[0] - 0.95, 0.0, 0.62, 'brown', 0.01),
+              F.blk(fx - 0.15, fx + 0.15, -hw + 0.03, DOOR[0] - 0.92, 0.62, 0.7, 'brown', 0.01),
+              F.blk(fx, 0.0, -hw + 0.06, -hw + 0.3, 0.0, 0.62, 'brown', 0.01))
+        F.add(picket_fence(F, (fx, DOOR[0] - 0.92), (fx, DOOR[0] - 0.3), h=0.95, pitch=0.1, posts=0.6))
+    else:
+        tall = V['fence'] == 'tall'
+        F.add(picket_fence(F, (fx, -hw + 0.06), (fx, DOOR[0] - 0.3), h=1.35 if tall else 1.05, pitch=0.09 if tall else 0.11))
+        F.add(picket_fence(F, (0.0, -hw + 0.06), (fx, -hw + 0.06), h=1.35 if tall else 1.05, pitch=0.09 if tall else 0.11))
     F.add(F.blk(fx + 0.1, 0.0, -hw + 0.06, DOOR[0] - 0.22, 0.0, 0.02, 'concrete'))
 
     def dog(s, Wm, Hm):
@@ -2363,7 +2346,8 @@ def brownstone():
         s.rect(10, 10, Wm - 20, Hm - 20, 0xd8b23a, rough=0.5)
         s.text('BEWARE OF DOG', Wm / 2, Hm * 0.32, 30, 0x151515, face='Black', align='CENTER', tracking=1.1, rough=0.5)
 
-    F.add(F.sign('dog', 0.26, 0.11, dog, (fx - 0.025, 0.6, 0.75), depth=0.004, px=512))
+    if V['dog']:
+        F.add(F.sign('dog', 0.26, 0.11, dog, (fx - 0.025, 0.6, 0.75), depth=0.004, px=512))
     F.add(downspout(F, -hw + 0.12, TOP - 0.5, x_off=-0.15))
     return F.finish()
 
@@ -2553,12 +2537,111 @@ def store_upper():
 
 # ------------------------------------------------------------------ build
 
-BUILDERS = {'walkup': walkup, 'brownstone': brownstone, '1812': f1812, 'storeupper': store_upper}
+BUILDERS = {'walkup': walkup, 'brownstone': brownstone, '1812': f1812, 'storeupper': store_upper,
+            'brownstone_b': lambda: brownstone('brownstone_b'), 'brownstone_c': lambda: brownstone('brownstone_c')}
 
 
 def build():
     core.reset()
-    return [BUILDERS[k]() for k in WHICH if k in BUILDERS]
+    objs = [BUILDERS[k]() for k in WHICH if k in BUILDERS]
+    for o in objs:
+        # The lit slot, remembered for the room ids written after the bake (assemble).
+        o['lit_slots'] = [i for i, sl in enumerate(o.material_slots) if sl.material.name.endswith('_lit')]
+    return objs
+
+
+def write_room_ids(o, slots, seed=0):
+    """COLOR_0 for the lit rooms by the hour (spec 3.4): R is a room id (0.02..1) on the lit slots' faces, each connected
+    piece of them (a window's room box: faces meeting at a corner within 1 mm) its own room, spread by the golden ratio
+    so neighbours differ; G and B are 1, and every other face is white. Each lit slot's baked material multiplies its
+    base color (near black: the light is all emission) by the attribute, so the exporter writes COLOR_0 on those
+    primitives. Called after the bake, on SM_Facade_* (assemble) and SM_Tenement (tenement.assemble)."""
+    import numpy as np
+    me = o.data
+    n_p = len(me.polygons)
+    mi = np.empty(n_p, np.int32)
+    me.polygons.foreach_get('material_index', mi)
+    lit = set(int(i) for i in np.nonzero(np.isin(mi, list(slots)))[0])
+    co = np.empty(len(me.vertices) * 3, np.float32)
+    me.vertices.foreach_get('co', co)
+    key = [tuple(k) for k in np.round(co.reshape(-1, 3) * 1000.0).astype(np.int64)]
+    parent = {}
+
+    def find(a):
+        while parent.setdefault(a, a) != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+    for pi in lit:
+        vs = me.polygons[pi].vertices
+        r0 = find(key[vs[0]])
+        for v in vs[1:]:
+            r1 = find(key[v])
+            if r1 != r0:
+                parent[r1] = r0
+    comps = {}
+    for pi in sorted(lit):
+        comps.setdefault(find(key[me.polygons[pi].vertices[0]]), []).append(pi)
+    # A room is more than one connected piece: its furniture, lamps and curtains stand in its box without touching it.
+    # In the front's plane (y along the street, z up; x is depth) each piece joins the biggest piece whose extent
+    # holds its middle (the room's back wall or its box), so a room and everything in it light together.
+    cv = co.reshape(-1, 3)
+    ext = {}
+    for r, fs in comps.items():
+        vs = np.unique(np.concatenate([np.asarray(me.polygons[f].vertices) for f in fs]))
+        p = cv[vs]
+        ext[r] = (p.min(axis=0), p.max(axis=0))
+    order = sorted(comps, key=lambda r: -float((ext[r][1][1] - ext[r][0][1]) * (ext[r][1][2] - ext[r][0][2])))
+    host = {}
+    for i, r in enumerate(order):
+        lo, hi = ext[r]
+        cy, cz = (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2
+        host[r] = r
+        for j in order[:i]:
+            if host[j] != j:
+                continue
+            jl, jh = ext[j]
+            if jl[1] + 0.01 < cy < jh[1] - 0.01 and jl[2] + 0.01 < cz < jh[2] - 0.01:
+                host[r] = j
+                break
+    rooms = {}
+    face_room = {}
+    for r in order:
+        h = host[r]
+        if h not in rooms:
+            rooms[h] = len(rooms)
+        for pi in comps[r]:
+            face_room[pi] = rooms[h]
+    ca = me.color_attributes.get('Color') or me.color_attributes.new('Color', 'FLOAT_COLOR', 'CORNER')
+    cols = np.ones((len(me.loops), 4), np.float32)
+    ls = np.empty(n_p, np.int32)
+    lt = np.empty(n_p, np.int32)
+    me.polygons.foreach_get('loop_start', ls)
+    me.polygons.foreach_get('loop_total', lt)
+    for pi, k in face_room.items():
+        cols[ls[pi]:ls[pi] + lt[pi], 0] = 0.02 + 0.98 * ((k * 0.6180339887 + seed * 0.1372) % 1.0)
+    ca.data.foreach_set('color', cols.ravel())
+    me.color_attributes.active_color = ca
+    me.color_attributes.render_color_index = me.color_attributes.find('Color')
+    for i in slots:
+        m = o.material_slots[i].material
+        nt = m.node_tree
+        bsdf = next(n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED')
+        sock = bsdf.inputs['Base Color']
+        va = nt.nodes.new('ShaderNodeVertexColor')
+        va.layer_name = 'Color'
+        mx = nt.nodes.new('ShaderNodeMix')
+        mx.data_type = 'RGBA'
+        mx.blend_type = 'MULTIPLY'
+        mx.inputs[0].default_value = 1.0
+        if sock.is_linked:
+            nt.links.new(sock.links[0].from_socket, mx.inputs[6])
+        else:
+            mx.inputs[6].default_value = sock.default_value
+        nt.links.new(va.outputs['Color'], mx.inputs[7])
+        nt.links.new(mx.outputs[2], sock)
+    print(f'[facades] {o.name}: room ids on slots {list(slots)}: {len(rooms)} rooms in COLOR_0.R')
+    return len(rooms)
 
 
 def _stem(img):
@@ -2569,7 +2652,11 @@ def assemble(objs):
     """After the bake: a texture that came out one flat value over everything its UVs cover (the lit interiors' base
     color and normal, the prints' normal, which no bump touches) is exported as a 4x4 of that value instead of a
     1-2k image of it. The lit interiors' ORM goes the same way: under their emission the occlusion and roughness of a
-    near-black base color change nothing. Saves about 11 MB of GPU memory per 2k lit slot, and the .glb's size."""
+    near-black base color change nothing. Saves about 11 MB of GPU memory per 2k lit slot, and the .glb's size.
+    The fronts' lit rooms get their ids in COLOR_0 (write_room_ids)."""
+    for o in objs:
+        if o.name.startswith('SM_Facade_') and 'lit_slots' in o:
+            write_room_ids(o, list(o['lit_slots']), seed=sum(map(ord, o.name)))
     for o in objs:
         for slot in o.material_slots:
             nodes = [n for n in slot.material.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image is not None]
