@@ -374,8 +374,9 @@ struct FHairShade
 
 FHairShade HairShadeOf(int32 Index, int32 Age)
 {
-	// Black, dark brown, brown, auburn, copper, blonde, platinum, grey.
-	static const FHairShade Table[8] = {{0.95f, 0.08f, 0.0f}, {0.75f, 0.2f, 0.0f}, {0.55f, 0.28f, 0.0f}, {0.45f, 0.7f, 0.0f}, {0.3f, 0.95f, 0.0f},
+	// Black, dark brown, brown, auburn, copper, blonde, platinum, grey. The hair shader's melanin isn't linear: under the shops'
+	// warm overheads 0.75 read as light orange-brown (2026-10-10 sweep), so the browns sit higher than they look on paper.
+	static const FHairShade Table[8] = {{0.97f, 0.06f, 0.0f}, {0.86f, 0.12f, 0.0f}, {0.68f, 0.22f, 0.0f}, {0.45f, 0.7f, 0.0f}, {0.3f, 0.95f, 0.0f},
 		{0.13f, 0.3f, 0.0f}, {0.04f, 0.05f, 0.3f}, {0.35f, 0.05f, 0.85f}};
 	const int32 I = FMath::Clamp(Index, 0, 7);
 	FHairShade Shade = Table[I];
