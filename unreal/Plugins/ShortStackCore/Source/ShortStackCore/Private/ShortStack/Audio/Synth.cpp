@@ -293,6 +293,8 @@ std::vector<float> Render(SoundId Id, float Volume, uint32_t Seed)
 			Clack(B, R, 0.15 + I * 0.03, 0.12 * V);
 		}
 		break;
+	case SoundId::Mail:
+		break; // a letter in the Mail app: audio-synth's (next_segment_spec §8.3); silent until it lands
 	}
 	return Finish(B);
 }
@@ -383,6 +385,8 @@ std::vector<float> Render(Effect Id, uint32_t Seed)
 		}
 		break;
 	}
+	case Effect::CardPrint:
+		break; // the club card coming out of the desk's printer: audio-synth's (next_segment_spec §8.3); silent until it lands
 	}
 	return Finish(B);
 }

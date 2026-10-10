@@ -1,8 +1,10 @@
 #pragma once
 
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/UI/Canvas.h"
 
 #include <string>
+#include <vector>
 
 namespace ss
 {
@@ -10,6 +12,18 @@ class Session;
 
 namespace ui
 {
+/**
+ * The dates the screens below show beside the session's own facts (next_segment_spec §1.3): chop days and payments due,
+ * sponsor period ends, appearance windows and renewals, the 1st's badge review. Every feature's marks, merged in time
+ * order (Session::Marks); the second screen and the wall calendar draw the one list (ui-laptop, SecondScreen.cpp).
+ */
+struct Agenda
+{
+	std::vector<life::Mark> Marks;
+};
+/** The agenda for the Days days from World. */
+SHORTSTACKCORE_API Agenda AgendaOf(const Session& S, double World, double Days);
+
 /**
  * The monitors GearDrop sells, as the apartment shows them beside the laptop: pictures, drawn without input.
  * - Which 0, the 24" on the right: Kast's studio while the player is live (the stream as it goes out, the chat,

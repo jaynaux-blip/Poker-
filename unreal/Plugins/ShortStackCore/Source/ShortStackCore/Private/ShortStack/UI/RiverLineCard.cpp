@@ -548,5 +548,17 @@ void RiverLine::CardJourney(const world::Profile& P, float X, float Y, float W, 
 		C->SetAlpha(A0);
 	}
 }
+
+// ------------------------------------------------------------------ the next segment's badges (next_segment_spec §5.6)
+// Phase A stubs that keep today's behavior (ui-laptop's, with core-badges): the card's HONORS panel and a badge's hover
+// line draw nothing until the badges land; the bodies are here so the card and the boards can call them.
+
+void RiverLine::HonorsPanel(const Rect& /*R*/, double /*Now*/)
+{
+}
+
+void RiverLine::BadgeTip(const badge::Badge& /*B*/, float /*X*/, float /*Y*/, double /*Now*/)
+{
+}
 } // namespace ui
 } // namespace ss

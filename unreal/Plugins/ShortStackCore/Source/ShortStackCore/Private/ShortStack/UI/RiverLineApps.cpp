@@ -243,6 +243,8 @@ void RiverLine::AppIcon(App A, float X, float Y, float Sz)
 		C->StrokeEllipse(Cx + Sz * 0.1f, Cy, Sz * 0.21f, Sz * 0.21f, Hex(0x9a5b22), Sz * 0.05f);
 		C->FillCircle(Cx + Sz * 0.1f, Cy, Sz * 0.08f, Hex(0x9a5b22));
 		break;
+	case App::Mail:
+		break; // the Mail app's icon lands with the app (core-sponsor; the taskbar is ui-laptop's)
 	}
 }
 

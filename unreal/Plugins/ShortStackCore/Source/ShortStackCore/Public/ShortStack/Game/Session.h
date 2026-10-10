@@ -1,11 +1,13 @@
 #pragma once
 
 #include "ShortStack/AI/Grading.h"
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Gear.h"
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
+#include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
@@ -64,6 +66,7 @@ enum class SoundId : int
 	AllIn,
 	Bubble,
 	Cash,
+	Mail, // a letter in the Mail app (next_segment_spec §3.9; audio-synth renders it)
 };
 
 /** What the viewer sees at one seat of the hero's table. */
@@ -94,6 +97,8 @@ struct SeatVis
 	bool Winner = false;
 	std::string HandLabel;
 	double DealtAt = 0.0;
+	/** The one badge the seat shows on the network (§5, rule C1): badge::Top in its Network scope; K == Count for none. */
+	badge::Badge Top;
 };
 
 /** Where an animated chip stack or card flies from or to. */
@@ -638,8 +643,50 @@ public:
 	SHORTSTACKCORE_API std::string Lend(const std::string& Speaker, Chips Cents);  // Twitch's twenty
 	SHORTSTACKCORE_API void Tipped(const std::string& Speaker, int Percent);
 
-	/** On Team RiverLine (the sponsor deal): the patch on the hero's avatar. */
-	bool TeamRiverLine() const { return Channel.ActiveDeal("riverline", WorldMinutes()) != nullptr; }
+	// ------------------------------------------------------------ the next segment (next_segment_spec §7.2)
+	// Backing, sponsors and badges. Declared in Phase A; the bodies are the feature tracks' (SessionStake.cpp,
+	// SessionSponsor.cpp, SessionBadges.cpp, the precedent SessionShops.cpp), stubs that keep today's behavior until they
+	// land. Each "" or why not, like the rest of the session's.
+	/** The public record (§1.1): rep::Of on the life, the channel and the world, now. */
+	SHORTSTACKCORE_API rep::Public Record() const;
+	// ---- Backing (§2: SessionStake.cpp)
+	SHORTSTACKCORE_API std::string AcceptStake(const std::string& OfferId);
+	SHORTSTACKCORE_API std::string CounterStake(const std::string& OfferId, int Lever);
+	/** Pieces of an event for sale: EventId is the occurrence or the online event, never the entry (§1.2). */
+	SHORTSTACKCORE_API std::string ListAction(const std::string& EventId, int Permille, int MarkupPermille);
+	SHORTSTACKCORE_API std::string CancelListing(const std::string& EventId);
+	SHORTSTACKCORE_API std::string ProposeSwap(const std::string& EntryId, const std::string& Partner, int Permille);
+	SHORTSTACKCORE_API std::string PayOwed(const std::string& OwedId);
+	SHORTSTACKCORE_API std::string RequestChop(const std::string& DealId);
+	SHORTSTACKCORE_API std::string WalkAway(const std::string& DealId);
+	SHORTSTACKCORE_API std::string BookCoach(const std::string& ActivityId);
+	/** Who could pay for an event (an occurrence or an online event id): each option, and why not ("" when it can). */
+	SHORTSTACKCORE_API std::vector<std::pair<life::Funding, std::string>> FundingOptions(const std::string& EventOrOccurrenceId) const;
+	// ---- Sponsors (§3: SessionSponsor.cpp). AcceptDeal and DeclineDeal (Kast's offers, above) forward here.
+	SHORTSTACKCORE_API std::string SignDeal(const std::string& ContractId);
+	SHORTSTACKCORE_API std::string CounterDeal(const std::string& ContractId, int Lever);
+	// (DeclineDeal(ContractId) is the one declared with Kast's offers above.)
+	SHORTSTACKCORE_API std::string GiveNotice(const std::string& ContractId);
+	SHORTSTACKCORE_API std::string AskForRaise(const std::string& ContractId);
+	SHORTSTACKCORE_API std::string SewPatch(int Spot, const std::string& BrandId);
+	SHORTSTACKCORE_API std::string Appear(const std::string& Venue);
+	SHORTSTACKCORE_API int SponsorTier() const;
+	/** On Team RiverLine: the patch on the hero's avatar. It was the Kast deal (Session.h:642 at c09bc31); now the book's. */
+	SHORTSTACKCORE_API bool TeamRiverLine() const;
+	// ---- Badges (§5: SessionBadges.cpp)
+	SHORTSTACKCORE_API const badge::Set& HeroBadges() const;
+	/** Badges earned that the player hasn't been shown yet (each once: text\tbadge:<kind>:<tier>:<count>). */
+	SHORTSTACKCORE_API std::vector<badge::Badge> Unseen();
+	SHORTSTACKCORE_API std::vector<badge::Progress> BadgeProgress(int Max) const;
+	// ---- The calendar's steps (CheckCalendar runs them in this order, beside ShopStep) and debug (game/SegmentCommands.cpp)
+	SHORTSTACKCORE_API void SponsorStep(double From, double To);
+	SHORTSTACKCORE_API void StakeStep(double From, double To);
+	SHORTSTACKCORE_API void BadgeStep(double From, double To);
+	SHORTSTACKCORE_API std::string DebugStake(const std::string& Args);
+	SHORTSTACKCORE_API std::string DebugSponsor(const std::string& Args);
+	SHORTSTACKCORE_API std::string DebugBadge(const std::string& Args);
+	/** The dates the second screen and the wall calendar show (§1.3): every feature's marks from From to To, merged in time order. */
+	SHORTSTACKCORE_API std::vector<life::Mark> Marks(double From, double To) const;
 
 	// Who is who in the tournament being played (player id -> country; regulars from the network).
 	std::map<std::string, std::string> FieldCountry;
@@ -826,6 +873,26 @@ private:
 	void ShopClerk(store::ClerkContext& Ctx) const;
 	/** StreamInputs' hook: the look on camera (Sharp and Style) in the stream's follow and tip multipliers. */
 	void ShopStream(kast::Inputs& In) const;
+	// The next segment's seams in Session.cpp (Phase A, §7.2), where a hook site needs more than a core call: the bodies
+	// are the tracks' (stubs that keep today's behavior until they land).
+	/** RegisterEvent's hook, after the buy-in (none when a package's roll paid): the roll's line, the online fund, a listing's pieces (SessionStake.cpp). */
+	void StakeEntered(const std::string& EventId, Chips BuyInCents, const life::Funding& F);
+	/** WorldStep's hook: the book's flows to the world (World::HeroMoney), swaps settled through World::FinishIn (SessionStake.cpp). */
+	void StakeWorld();
+	/** Conduct's hook: what the stake record keeps of a pickup or a restriction (SessionStake.cpp). */
+	void StakeConduct(sponsor::Breach Why);
+	/** FinishSkip's hook: a coaching session (life::Kind::Study, paid coaching: P2) ends (SessionStake.cpp). */
+	void StudyDone(const life::Activity& A, const life::Outcome& O);
+	/** StreamInputs' hook: the deals Kast works on (sponsor::StreamView) (SessionSponsor.cpp). */
+	void SponsorStream(kast::Inputs& In) const;
+	/** After Kast's step, a read, the offline turnover and the stream's end: what it did with the deals (sponsor::AbsorbStream) (SessionSponsor.cpp). */
+	void SponsorStreamDone();
+	/** RenewGear's hook: a subscription the sponsor pays for this period (its renewal is skipped) (SessionSponsor.cpp). */
+	bool SponsorCovers(const std::string& GearId) const;
+	/** A pickup (++Life.Busts) or a restriction (++Life.Bans): sponsor::Conduct, then the stake record (Session.cpp). */
+	void Conduct(sponsor::Breach Why, double World);
+	/** The player's badges (HeroBadges; SessionBadges.cpp keeps them). */
+	badge::Set HeroSet;
 
 	SessionHooks& Hooks;
 	std::set<std::string> TextsSeen;

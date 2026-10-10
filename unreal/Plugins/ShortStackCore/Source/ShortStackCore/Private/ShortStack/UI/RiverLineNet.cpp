@@ -227,11 +227,11 @@ std::string RiverLine::PlacingName(const net::Placing& P) const
 	return P.Player == -1 ? S.HeroName : P.Player == -2 ? P.Name : net::Shared().Players()[static_cast<size_t>(P.Player)].Name;
 }
 
-void RiverLine::PlayerName(const net::Placing& P, float X, float Y, float Size, float MaxW, bool Badges)
+void RiverLine::PlayerName(const net::Placing& P, float X, float Y, float Size, float MaxW, bool Badges, uint8_t Frame)
 {
 	if (P.Player != -2)
 	{
-		PlayerName(P.Player, X, Y, Size, MaxW, Badges);
+		PlayerName(P.Player, X, Y, Size, MaxW, Badges, Frame);
 		return;
 	}
 	// Someone nobody follows: just a name and a flag.
@@ -239,7 +239,7 @@ void RiverLine::PlayerName(const net::Placing& P, float X, float Y, float Size, 
 	UI.Text(P.Name, X + Size * 1.2f + 8.0f, Y, Ts(Size, 600, Hex(0xc3cedf), Align::Left, Baseline::Alphabetic, false, MaxW - Size * 1.2f - 8.0f));
 }
 
-void RiverLine::PlayerName(int Index, float X, float Y, float Size, float MaxW, bool Badges)
+void RiverLine::PlayerName(int Index, float X, float Y, float Size, float MaxW, bool Badges, uint8_t /*Frame: ui-laptop draws it (§5.4)*/)
 {
 	const net::Network& Net = net::Shared();
 	if (Index < 0)
@@ -1423,6 +1423,7 @@ void RiverLine::LobbyPages(double Now)
 	case Page::News: NewsPage(Now); break;
 	case Page::Career: CareerPage(Now); break;
 	case Page::Embercrest: EmbercrestPage(Now); break;
+	case Page::Backing: break; // nothing opens it until the Backing tab lands (ui-laptop, with core-stake's BackingPage)
 	}
 	C->Restore();
 	C->SetAlpha(A0);

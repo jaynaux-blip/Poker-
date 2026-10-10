@@ -90,6 +90,16 @@ std::string GameSettings::Serialize() const
 	Put("invert", InvertLook ? 1 : 0);
 	Put("hints", ShowHints ? 1 : 0);
 	Put("tablepace", TablePace);
+	Put("voices", VoicesVolume);
+	Put("captions", Captions);
+	Put("captionsize", CaptionSize);
+	Put("captionbg", CaptionBackdrop);
+	Put("speakernames", SpeakerNames ? 1 : 0);
+	Put("tabletalk", TableTalk);
+	Put("stackreadout", StackReadout);
+	Put("stackunits", StackUnits);
+	Put("turncue", TurnCue);
+	Put("hudscale", HudScale);
 	Out += "resolution=" + Resolution + "\n";
 	return Out;
 }
@@ -139,6 +149,16 @@ bool GameSettings::Parse(const std::string& Text, GameSettings& Out)
 		else if (Name == "invert") S.InvertLook = N != 0;
 		else if (Name == "hints") S.ShowHints = N != 0;
 		else if (Name == "tablepace") S.TablePace = std::clamp(N, 0, 2);
+		else if (Name == "voices") S.VoicesVolume = std::clamp(N, 0, 100);
+		else if (Name == "captions") S.Captions = std::clamp(N, 0, 2);
+		else if (Name == "captionsize") S.CaptionSize = std::clamp(N, 100, 150);
+		else if (Name == "captionbg") S.CaptionBackdrop = std::clamp(N, 0, 100);
+		else if (Name == "speakernames") S.SpeakerNames = N != 0;
+		else if (Name == "tabletalk") S.TableTalk = std::clamp(N, 0, 2);
+		else if (Name == "stackreadout") S.StackReadout = std::clamp(N, 0, 2);
+		else if (Name == "stackunits") S.StackUnits = std::clamp(N, 0, 1);
+		else if (Name == "turncue") S.TurnCue = std::clamp(N, 0, 2);
+		else if (Name == "hudscale") S.HudScale = std::clamp(N, 80, 130);
 		else if (Name == "resolution") S.Resolution = Value;
 	}
 	Out = S;

@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdlib>
 
 namespace ss
 {
@@ -169,11 +171,12 @@ std::string Blocked(const Activity& A, const State& L, const Context& Ctx)
 	}
 	if (A.Type == Kind::Live)
 	{
-		// The first of the coming events the player could enter now, or why the soonest one is out of reach.
+		// The first of the coming events the player could enter now, or why the soonest one is out of reach (paid for the
+		// way GoToLive would pay for it: Ctx.LiveFunding, or the player's own money).
 		std::string Why = "Nothing on at the Embercrest.";
 		for (const live::Occurrence& O : live::Reachable(Ctx.World, 30.0))
 		{
-			const std::string Not = live::CanRegister(Ctx.Bankroll, L, O, Ctx.World);
+			const std::string Not = live::CanRegister(Ctx.Bankroll, L, O, Ctx.World, Ctx.LiveFunding ? Ctx.LiveFunding(O.Id) : Funding());
 			if (Not.empty())
 			{
 				return L.Energy < A.Energy ? "A tournament is a long night. Sleep first." : "";
@@ -223,6 +226,12 @@ std::string Blocked(const Activity& A, const State& L, const Context& Ctx)
 	if (A.Type == Kind::Ghost && Ctx.World < L.BannedUntil)
 	{
 		return "Your RiverLine account is under review.";
+	}
+	if (A.CostCents > 0 && A.CostCents > Ctx.Bankroll)
+	{
+		// What it costs up front (a coaching session, next_segment_spec §2.11): nothing else in the catalog has a price, so
+		// nothing else is refused here, whatever the bankroll.
+		return A.Title + " is " + Money(A.CostCents) + ".";
 	}
 	if (L.Energy < A.Energy * 0.6)
 	{
@@ -326,6 +335,13 @@ Outcome Resolve(const Activity& A, const State& L, double Start, Rng& R, Chips B
 	case Kind::Live:
 		// Played out at the table by the host, never resolved here.
 		break;
+	case Kind::Study:
+		// A session with a coach (paid coaching, next_segment_spec §2.11, P2): its price and the hours; what it teaches is
+		// the session's (Session::StudyDone, core-stake).
+		O.Money = -A.CostCents;
+		O.Title = "Session done";
+		O.Body = std::to_string(static_cast<int>(A.Hours)) + " hours with " + A.Place + ".";
+		break;
 	}
 	return O;
 }
@@ -369,6 +385,121 @@ double Daylight(double World)
 		return T * T * (3.0 - 2.0 * T);
 	};
 	return H < 12.0 ? Smooth(4.6, 6.3, H) : 1.0 - Smooth(18.5, 20.0, H);
+}
+
+// ------------------------------------------------------------------ the Mail app's inbox (next_segment_spec §7.4)
+
+namespace life_mail_detail
+{
+/** Tabs, newlines and backslashes escaped, as Session.cpp's lines are (Escape there is private to that file). */
+std::string MailEscape(const std::string& In)
+{
+	std::string Out;
+	Out.reserve(In.size());
+	for (const char Ch : In)
+	{
+		if (Ch == '\\')
+		{
+			Out += "\\\\";
+		}
+		else if (Ch == '\n')
+		{
+			Out += "\\n";
+		}
+		else if (Ch == '\t')
+		{
+			Out += "\\t";
+		}
+		else
+		{
+			Out.push_back(Ch);
+		}
+	}
+	return Out;
+}
+
+std::string MailUnescape(const std::string& In)
+{
+	std::string Out;
+	Out.reserve(In.size());
+	for (size_t I = 0; I < In.size(); ++I)
+	{
+		if (In[I] == '\\' && I + 1 < In.size())
+		{
+			const char N = In[++I];
+			Out.push_back(N == 'n' ? '\n' : N == 't' ? '\t' : N);
+		}
+		else
+		{
+			Out.push_back(In[I]);
+		}
+	}
+	return Out;
+}
+
+/** The first Max characters of a UTF-8 string (counted in code points, never splitting one). */
+std::string MailCut(const std::string& In, size_t Max)
+{
+	size_t Points = 0;
+	for (size_t I = 0; I < In.size(); ++I)
+	{
+		if ((static_cast<unsigned char>(In[I]) & 0xC0u) != 0x80u)
+		{
+			if (Points == Max)
+			{
+				return In.substr(0, I);
+			}
+			++Points;
+		}
+	}
+	return In;
+}
+} // namespace life_mail_detail
+
+void Post(State& L, const Letter& Mail)
+{
+	Letter Kept = Mail;
+	Kept.Body = life_mail_detail::MailCut(Mail.Body, LetterBodyMax);
+	L.Inbox.push_back(Kept);
+	if (L.Inbox.size() > InboxKeep)
+	{
+		L.Inbox.erase(L.Inbox.begin(), L.Inbox.begin() + static_cast<std::ptrdiff_t>(L.Inbox.size() - InboxKeep));
+	}
+}
+
+void WriteMail(const State& L, std::string& Out)
+{
+	using life_mail_detail::MailEscape;
+	for (const Letter& M : L.Inbox)
+	{
+		Out += "mail\t" + Fixed(M.At, 2) + "\t" + MailEscape(M.Thread) + "\t" + MailEscape(M.Source) + "\t" + std::to_string(M.Kind) + "\t" + (M.Read ? "1" : "0") + "\t" +
+			MailEscape(M.From) + "\t" + MailEscape(M.Subject) + "\t" + MailEscape(M.Body) + "\n";
+	}
+}
+
+bool ReadMail(const std::vector<std::string>& Fields, State& L)
+{
+	if (Fields.size() < 9 || Fields[0] != "mail")
+	{
+		return false;
+	}
+	using life_mail_detail::MailUnescape;
+	Letter M;
+	M.At = std::atof(Fields[1].c_str());
+	M.Thread = MailUnescape(Fields[2]);
+	M.Source = MailUnescape(Fields[3]);
+	M.Kind = std::atoi(Fields[4].c_str());
+	M.Read = Fields[5] == "1";
+	M.From = MailUnescape(Fields[6]);
+	M.Subject = MailUnescape(Fields[7]);
+	M.Body = MailUnescape(Fields[8]);
+	L.Inbox.push_back(M);
+	if (L.Inbox.size() > InboxKeep)
+	{
+		L.Inbox.erase(L.Inbox.begin());
+	}
+	L.SegmentLinesRead |= SegMail;
+	return true;
 }
 } // namespace life
 } // namespace ss

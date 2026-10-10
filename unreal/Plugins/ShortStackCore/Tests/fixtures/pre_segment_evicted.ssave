@@ -1,0 +1,59 @@
+shortstack.nightone.v2
+bankroll	4000
+name	grinder_3c
+hero	name	Jesse	Cole
+hero	age	24
+hero	country	US
+hero	background	dealerskid
+hero	look	body	0	face	0	skin	3	eyes	1	brows	1	hair	3	haircolor	1	facialhair	1	build	1	height	178	outfit	0	outfitcolor	0	glasses	0	hat	0
+hero	created	1
+clock	10681.00
+life	energy	0.00
+life	heat	0.00
+life	needs	100.00	100.00
+pantry	oodle-cup	2
+life	drop	0	-1000000000.00
+life	rent	3	245000	11520.00	0
+life	evicted	1	11520.00	1000	54720.00	0
+life	debt	0
+life	ban	0.00
+life	count	0	0	0	0	0
+life	earned	0	0
+life	backroom	0	0
+life	live	0	0	0	0
+night	1
+night	2
+night	3
+night	4
+night	5
+night	6
+night	7
+night	8
+ledger	1567.00	5	-14900	GearDrop: 24" 144 Hz monitor
+ledger	1567.00	5	-44900	GearDrop: Memory foam mattress
+ledger	12120.00	3	-1000	Groceries at Dee's
+text	gear-monitor
+text	marcus-intro
+text	needs:hungry:5
+text	world:10080:1602:3
+text	world:10080:1605:3
+text	world:10080:1606:3
+gear	mattress	0.00
+gear	monitor-24	0.00
+leds	0	1	1
+kast	ch	0	0	0.0000	0.00	0.0	0	0	0	0	0	12121.00	0	0
+kast	earn	0	0	0	0	0	0	0
+kast	growth	0	1260	0.0	0	0	1	0	0.0	0	0	0	8	0
+closet	seeded
+closet	own	bottom.jeans.mid
+closet	own	bottom.shorts.khaki
+closet	own	outer.hoodie.charcoal
+closet	own	shoes.sneakers.white
+closet	own	top.tee.white
+closet	wear	1	outer.hoodie.charcoal
+closet	wear	2	bottom.jeans.mid
+closet	wear	3	shoes.sneakers.white
+fit	0.0000	-1000000000.00	0	0	0.00	12121.00
+groom	-8513.00	-8513.00	0
+pawn	next	412
+meal	0.00	-1000000000.00

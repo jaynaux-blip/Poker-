@@ -23,6 +23,7 @@ enum class Effect : int
 	Breath,   // a slow breath out
 	Chime,    // the PA's two-note chime before an announcement
 	Applause, // a room clapping
+	CardPrint, // the Players Club card coming out of the desk's printer (next_segment_spec §5.6)
 };
 
 /** Renders a game sound (volume 0..1 as the session requests it). */

@@ -1,0 +1,2 @@
+# The save fixtures are byte-exact LF text (next_segment_spec §7.5): never convert their line endings.
+* -text

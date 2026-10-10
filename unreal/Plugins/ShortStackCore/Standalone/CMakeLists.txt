@@ -41,12 +41,21 @@ add_executable(unit_test tests/unit_main.cpp)
 target_link_libraries(unit_test PRIVATE ShortStackCore)
 add_test(NAME engine_invariants COMMAND unit_test)
 
-add_executable(session_test tests/session_main.cpp)
+# Where the goldens and the fixtures live; the next segment's suites and per-track files read them by this path.
+set(SS_TESTS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../Tests)
+
+# night_one_session and riverline_ui also compile the next segment's per-track files (next_segment_spec §7.6): each
+# track adds its checks in its own file, called from the suite's main.
+add_executable(session_test tests/session_main.cpp tests/session_seams.cpp
+  tests/session_seg_stake.cpp tests/session_seg_sponsor.cpp tests/session_seg_tableui.cpp)
 target_link_libraries(session_test PRIVATE ShortStackCore)
+target_compile_definitions(session_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 add_test(NAME night_one_session COMMAND session_test)
 
-add_executable(ui_test tests/ui_main.cpp)
+add_executable(ui_test tests/ui_main.cpp
+  tests/ui_seg_stake.cpp tests/ui_seg_sponsor.cpp tests/ui_seg_tableui.cpp tests/ui_seg_badges.cpp tests/ui_seg_laptop.cpp)
 target_link_libraries(ui_test PRIVATE ShortStackCore)
+target_compile_definitions(ui_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 add_test(NAME riverline_ui COMMAND ui_test)
 
 add_executable(monkey_test tests/monkey_main.cpp)
@@ -74,3 +83,31 @@ add_test(NAME northside_shops_ui COMMAND shops_ui_test)
 add_executable(town_test tests/town_main.cpp)
 target_link_libraries(town_test PRIVATE ShortStackCore)
 add_test(NAME northside_town COMMAND town_test)
+
+# The next segment (next_segment_spec §7.6): backing (core-stake), sponsors (core-sponsor), the room's voice (core-room)
+# and pro badges (core-badges). Every suite also runs the copy lint (tests/CopyLint.h) over its inventories.
+add_executable(stake_test tests/staking_main.cpp)
+target_link_libraries(stake_test PRIVATE ShortStackCore)
+target_compile_definitions(stake_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME staking_backing COMMAND stake_test)
+
+add_executable(sponsor_test tests/sponsor_main.cpp)
+target_link_libraries(sponsor_test PRIVATE ShortStackCore)
+target_compile_definitions(sponsor_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME sponsor_deals COMMAND sponsor_test)
+
+# RoomField (tests/room_field.cpp) is the lead's: live::DescribeField against both old copies of the field code.
+add_executable(room_test tests/room_main.cpp tests/room_field.cpp)
+target_link_libraries(room_test PRIVATE ShortStackCore)
+target_compile_definitions(room_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME card_room COMMAND room_test)
+
+add_executable(badges_test tests/badges_main.cpp)
+target_link_libraries(badges_test PRIVATE ShortStackCore)
+target_compile_definitions(badges_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME pro_badges COMMAND badges_test)
+
+# Not a suite: the tool that wrote Tests/fixtures/ from c09bc31's code (next_segment_spec §7.5), and the transcript that
+# compares a build's sessions with that code's. It uses only what the session had then, so it builds against either.
+add_executable(fixture_tool tests/fixture_tool.cpp)
+target_link_libraries(fixture_tool PRIVATE ShortStackCore)

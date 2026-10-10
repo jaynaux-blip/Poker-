@@ -38,6 +38,17 @@ struct GameSettings
 	bool ShowHints = true;
 	// Gameplay
 	int TablePace = 0;           // a live table: 0 Live (the room's own time), 1 Brisk, 2 Fast; never plays a hand for you
+	// The card room's voices, captions and table (next_segment_spec §4.9, §6.7; the rows are core-tableui's)
+	int VoicesVolume = 100;      // the room's speech and the PA, 0..100
+	int Captions = 1;            // 0 Off, 1 Dialogue (today's always-on subtitles), 2 Everything
+	int CaptionSize = 100;       // percent: 100, 125, 150
+	int CaptionBackdrop = 72;    // the caption box's opacity, 0..100
+	bool SpeakerNames = true;
+	int TableTalk = 1;           // 0 Quiet, 1 Normal, 2 Lively (0.5x, 1x, 1.5x)
+	int StackReadout = 2;        // 0 Your eyes, 1 The room's way, 2 Shown (ui::StackReadout)
+	int StackUnits = 0;          // 0 big blinds, 1 chips (ui::StackUnits)
+	int TurnCue = 2;             // 0 Off, 1 Dealer, 2 Dealer and sound
+	int HudScale = 100;          // percent, 80..130
 
 	/** "key=value" lines, safe to store in any save system. Unknown keys are ignored when parsing. */
 	SHORTSTACKCORE_API std::string Serialize() const;

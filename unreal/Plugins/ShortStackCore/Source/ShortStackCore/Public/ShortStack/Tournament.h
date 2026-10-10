@@ -101,6 +101,21 @@ struct ReservedPlayer
 	Archetype Type = Archetype::Crusher;
 };
 
+/**
+ * One table's hand in the tick just finished (C++ only, the live rooms: the card room's director reads the other tables'
+ * all-ins and busts from these, next_segment_spec §4). Read from the hand once it was applied; nothing is drawn for it.
+ */
+struct TableRound
+{
+	int TableId = 0;
+	Chips Pot = 0; // everything the hand's pots awarded
+	Chips BigBlind = 0;
+	bool AllIn = false;    // someone went all in
+	bool Called = false;   // a player all in was still in it at a showdown: all in and a call
+	bool Showdown = false; // the hand went to a showdown
+	std::vector<std::string> Out; // the ids of the players the hand left with no chips
+};
+
 extern SHORTSTACKCORE_API const char* const HeroId; // "hero"
 
 /**
@@ -170,6 +185,13 @@ public:
 	 */
 	SHORTSTACKCORE_API bool Restore(const std::string& Text);
 
+	/**
+	 * The tick just finished, table by table (C++ only): a round for each hand played, the hero's table's included, noted
+	 * after the hand is applied (BeginFinish, FinishSome) and cleared when the next tick's finish begins (BeginFinish:
+	 * FinishTick and SimulateTick go through it). Reading it draws nothing and changes nothing; it isn't in the checkpoint.
+	 */
+	const std::vector<TableRound>& Rounds() const { return LastRounds; }
+
 	TournamentSpec Spec;
 	Rng R;
 	std::vector<TPlayer> Players; // insertion order: hero, reserved, then the field
@@ -209,5 +231,8 @@ private:
 	bool FinishWithHero = false;
 	int FinishHeroTable = -1;
 	int FinishNextTable = 0; // the first table id not played yet
+	// The tick's hands, table by table (Rounds).
+	std::vector<TableRound> LastRounds;
+	void NoteRound(int TableId, const Hand& H);
 };
 } // namespace ss

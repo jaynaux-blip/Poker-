@@ -42,6 +42,7 @@ public:
 		News,
 		Career,
 		Embercrest, // the city's card room: its events this week (live::Occurrences), each on an honest card
+		Backing,    // stakes, pieces, swaps and packages (next_segment_spec §2.12; drawn by RiverLineBacking.cpp)
 	};
 	/** Schedule filters (the chips above the list). */
 	enum class Filter : int
@@ -68,6 +69,7 @@ public:
 		GearDrop,  // the store: screens, the rig, stream gear, the apartment
 		Kast,      // streaming: the studio, the channel, the directory
 		PennyDrop, // the Lucky Penny's delivery app: order food, eat and drink at home
+		Mail,      // the companies' letters: sponsors, Lantern Row, Finch School (next_segment_spec §3.9; RiverLineMail.cpp)
 	};
 	/** Kast's pages. */
 	enum class KastPage : int
@@ -231,8 +233,9 @@ private:
 	void NewsPage(double Now);
 	void CareerPage(double Now);
 	std::string BoardValue(net::Board B, double V) const;
-	void PlayerName(int Index, float X, float Y, float Size, float MaxW, bool Badges);
-	void PlayerName(const net::Placing& P, float X, float Y, float Size, float MaxW, bool Badges);
+	/** Frame: the name's badge frame (badge::Frame: none, champion, gold; next_segment_spec §5.4), drawn by ui-laptop. */
+	void PlayerName(int Index, float X, float Y, float Size, float MaxW, bool Badges, uint8_t Frame = 0);
+	void PlayerName(const net::Placing& P, float X, float Y, float Size, float MaxW, bool Badges, uint8_t Frame = 0);
 	std::string PlacingName(const net::Placing& P) const;
 	void Panel(const Rect& R, float Radius = 14.0f);
 	float Section(const std::string& Title, float X, float Y, const Color& Col);
@@ -322,6 +325,13 @@ private:
 	void LivePill(float X, float Y, double Now);
 	void StreamSide(const Rect& R, double Now);
 	float EmoteText(const std::string& Text, float X, float Y, float Size, int Weight, const Color& Col, float MaxW, bool Draw);
+	// The next segment (next_segment_spec §7.3; declared in Phase A). The Backing page (RiverLineBacking.cpp, core-stake),
+	// the Mail app (RiverLineMail.cpp, core-sponsor), the HONORS panel and a badge's hover line (ui-laptop, with core-badges).
+	void BackingPage(double Now);
+	void MailApp(double Now);
+	void HonorsPanel(const Rect& R, double Now);
+	void BadgeTip(const badge::Badge& B, float X, float Y, double Now);
+	bool HonorsShown = false;
 	// Multi-tabling (RiverLineTables.cpp).
 	void TableStrip(float X, double Now);
 	void Tiles(double Now);

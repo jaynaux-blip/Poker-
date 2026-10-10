@@ -2,11 +2,15 @@
 
 #include "ShortStack/Common.h"
 #include "ShortStack/Game/Body.h"
+#include "ShortStack/Game/Coach.h"
 #include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/Game/Wardrobe.h"
 
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -30,6 +34,7 @@ enum class Kind : int
 	Sleep,
 	Game, // Burner: Dee's live game in the laundromat's back room (the host takes the player there)
 	Live, // Burner: the Embercrest's tournaments, up at the resort (the host takes the player there)
+	Study, // coaching: a session with a coach (next_segment_spec §2.11; the catalog has none until paid coaching, P2)
 };
 
 /** Dee's game: $1/$2 no-limit, bought into from the bankroll. */
@@ -54,6 +59,7 @@ struct Activity
 	int Closes = 1440;
 	int Days = 0x7f;     // weekdays it runs (bit 0 Monday .. bit 6 Sunday), by the day its window opens
 	uint32_t Color = 0x27d3c3;
+	Chips CostCents = 0; // what it costs up front (a coaching session); 0 for everything that pays
 };
 
 /** Everything on offer, in app order: ShiftLink jobs, then the Burner contacts, then sleep. */
@@ -71,9 +77,135 @@ struct LedgerEntry
 	Chips Amount = 0;
 	/**
 	 * 0 poker, 1 job, 2 hustle, 3 bills, 4 prizes, 5 gear, 6 streaming, 7 transfers, 8 the corner store, 9 Northside
-	 * (the shops on the block: the barber, the thrift, the gym, Ruby's and the pawn; labeled with the shop's name).
+	 * (the shops on the block: the barber, the thrift, the gym, Ruby's and the pawn; labeled with the shop's name),
+	 * 10 backing (stakes, pieces, swaps, a package; next_segment_spec §1.2), 11 sponsors (covers, cuts, bonuses,
+	 * stipends), 12 coaching.
 	 */
 	int Kind = 0;
+};
+/** The segment's ledger kinds (§1.2, §1.9 #1). */
+constexpr int LedgerBacking = 10;
+constexpr int LedgerSponsors = 11;
+constexpr int LedgerCoaching = 12;
+
+// ------------------------------------------------------------------ the next segment's types (next_segment_spec §7.2)
+// The data the segment's features keep on the player's life. Saved by their own lines: livefund, livevoice, liveroom,
+// livebadge, liveleader and livepatch after each liveentry (live::WriteEntryLines), life\tliveday, life\tshift and
+// life\tlive's 7th and 8th fields (Session.cpp), mail (WriteMail, below), and the features' own (stake::WriteLines,
+// sponsor::WriteLines, badge::WriteLines). A save from before the segment parses and writes back byte for byte: these
+// lines appear only once a feature has something to keep (§7.5).
+
+/** Who pays for a live entry (§1.2): one source per entry. */
+enum class Paid : int
+{
+	Own,
+	Backer,  // a person holding the whole entry (Big Lou's stake)
+	Package, // a package's roll (Lantern Row)
+	Sponsor, // a covered entry
+	Ticket,
+};
+
+/**
+ * The money behind an entry (§1.2), kept on the entry and saved as livefund. Own: the player's money, as today (an entry
+ * without a livefund line). Cents is what the source put in: a backer's or a package's buy-in, a sponsor's cover, or,
+ * on the player's own entry, what the pieces they sold brought in at registration (Permille: the share sold).
+ */
+struct Funding
+{
+	Paid From = Paid::Own;
+	std::string Ref; // the deal or contract id
+	std::string Who; // "Big Lou", "Team Embercrest"
+	int Permille = 0; // the backer's share of the action
+	Chips Cents = 0;
+	int CutPct = 0;     // a sponsor's cut of the prize
+	bool Fares = false; // the bus fares are covered too
+};
+/** The player's own money, nothing sold: what an entry without a livefund line was paid with. */
+inline bool IsOwnMoney(const Funding& F)
+{
+	return F.From == Paid::Own && F.Ref.empty() && F.Who.empty() && F.Permille == 0 && F.Cents == 0 && F.CutPct == 0 && !F.Fares;
+}
+
+/** How one of the field sounds and what they can honestly talk about (§4), fixed at registration. */
+struct LiveVoice
+{
+	std::string Name;
+	int Style = 0; // an ss::Archetype
+	float Social = 0.3f;
+	float Aggro = 0.5f;
+	float Grit = 0.5f;
+	int Mood = 0;
+	int Is = 0;
+	int Age = 40;
+	bool Pro = false;
+	bool Staked = false;
+	float Rivalry = 0.0f; // toward the player
+	float Familiarity = 0.0f;
+	float Respect = 0.0f;
+	std::string Story; // what they can claim (their own world records); empty: nothing
+	std::vector<std::pair<std::string, int>> Ties; // name, tie kind
+};
+
+/** A row of the month's room leaders (§5) as it stood at registration. */
+struct RoomLeader
+{
+	int Rank = 0;
+	std::string Name;
+	double Points = 0.0;
+	std::string Badge; // badge::Pack
+};
+
+/** A date the wall calendar and the second screen show (§1.3): a chop day, a payment due, a review. */
+struct Mark
+{
+	double At = 0.0; // world minutes
+	int Kind = 0;
+	std::string Label;
+	std::string Where;
+};
+
+/** One letter in the Mail app's shared inbox (§1.9 #27): brands (sponsor) and staking outfits (stake) post to it. */
+struct Letter
+{
+	double At = 0.0;
+	std::string Thread; // the contract or deal id
+	std::string Source; // "sponsor" | "stake"
+	std::string From;
+	std::string Subject;
+	std::string Body; // at most 600 characters
+	int Kind = 0;
+	bool Read = false;
+};
+/** The inbox keeps the last 80 letters; a body is at most 600 characters (the contract card is drawn from the terms). */
+constexpr size_t InboxKeep = 80;
+constexpr size_t LetterBodyMax = 600;
+
+/** One day of live play (the record the sixty kept entries can't hold: Live.cpp:515-524), kept for 400 days. */
+struct LiveDay
+{
+	int Day = 0;
+	int Events = 0;
+	int Cashes = 0;
+	int Embercrest = 0;
+	int EmbercrestCashes = 0;
+	Chips SpentCents = 0;
+	Chips WonCents = 0;
+};
+constexpr int LiveDaysKept = 400;
+
+/**
+ * Bits of State::SegmentLinesRead (§7.5): which of the segment's life lines the state carries, read from the save or
+ * kept since by the segment's code. Migrations key on them, never on a value at its default (the ShopLinesRead
+ * precedent), and Serialize writes a record only once its bit is set, so a save from before the segment writes back
+ * byte for byte.
+ */
+enum SegmentLine : uint32_t
+{
+	SegLiveWins = 1u << 0,   // life\tlive's 7th field (LiveWins)
+	SegLiveRecord = 1u << 1, // life\tlive's 8th field (LiveSpentCents), and with it the life\tliveday lines
+	SegShift = 1u << 2,      // life\tshift (LastShiftAt)
+	SegMail = 1u << 3,       // mail lines were read
+	SegLiveLines = 1u << 4,  // any of livefund, livevoice, liveroom, livebadge, liveleader, livepatch were read
 };
 
 /** Someone in a live field the room knows (a regular), or who knows the player, as it stood at registration. */
@@ -141,6 +273,24 @@ struct LiveEntry
 	std::string Checkpoint;
 	double CheckpointAt = 0.0;
 	std::string CheckpointHost;
+
+	// ---- the next segment (§1.2, §1.8, §7.4): each on its own line after the entry's (live::WriteEntryLines)
+	/** Who paid (livefund; kept). No line: the player's own money. */
+	Funding Fund;
+	/** The field's voices as they stood at registration (livevoice; only while Registered: cleared at settle and refund). */
+	std::vector<LiveVoice> Voices;
+	/** The room director's state (room::Director::Write), saved with the checkpoint (liveroom; written and cleared with it). */
+	std::string Room;
+	/** The field's badges, name -> badge::Pack (livebadge; only while Registered). */
+	std::vector<std::pair<std::string, std::string>> Badges;
+	/** The month's room leaders at registration, at most 10 (liveleader; only while Registered). */
+	std::vector<RoomLeader> Leaders;
+	/**
+	 * Who wore which brand, name -> brand id (livepatch): the world's sponsored people (live::DescribeField) only while
+	 * Registered; the player's own rows (sponsor::NoteWorn: anyone not in the Roster) stay on a finished entry, since
+	 * the sponsor's asks count them.
+	 */
+	std::vector<std::pair<std::string, std::string>> Patches;
 };
 
 /**
@@ -245,9 +395,34 @@ struct State
 	/** The character's background at work (not saved here: the session sets it from the character). */
 	hero::Perks Perks;
 
+	// ---- the next segment (next_segment_spec §7.2)
+	stake::Book Stakes;      // backing: deals, pieces, swaps, what's owed (stake\t... lines, core-stake)
+	coach::Notes Study;      // coaching: graded spots, the last review, composure (coach\t... lines, core-stake)
+	sponsor::Book Sponsors;  // contracts, the store credit (sponsor\t... lines, core-sponsor)
+	/** The Mail app's shared inbox (Post, WriteMail): oldest first, the last InboxKeep. */
+	std::vector<Letter> Inbox;
+	/** The live record the kept entries can't hold (live::Settle keeps it; rep::Of reads it). */
+	int LiveWins = 0;            // titles: finished first, lifetime
+	Chips LiveSpentCents = 0;    // lifetime buy-ins and fees of the entries played (a refund was never played)
+	std::vector<LiveDay> LiveDays; // oldest first, the last LiveDaysKept days with live play
+	/** When the last ShiftLink shift ended (world minutes; -1e9: none known). */
+	double LastShiftAt = -1.0e9;
+	/** The badges' monthly review (badge\treview, core-badges): the month key it last ran, and Verified held then. */
+	int BadgeMonth = -1;
+	bool VerifiedHeld = false;
+	/** Not saved: SegmentLine bits, which of this segment's life lines the state carries (§7.5). */
+	uint32_t SegmentLinesRead = 0;
+
 	SHORTSTACKCORE_API void Record(double At, const std::string& Label, Chips Amount, int Kind);
 	int TicketsFor(const std::string& TemplateId) const;
 };
+
+/** Posts a letter to the shared inbox (the body cut to LetterBodyMax), keeping the last InboxKeep. */
+SHORTSTACKCORE_API void Post(State& L, const Letter& Mail);
+/** The inbox as save lines: "mail\tat\tthread\tsource\tkind\tread\tfrom\tsubject\tbody", oldest first (strings escaped). */
+SHORTSTACKCORE_API void WriteMail(const State& L, std::string& Out);
+/** Reads one mail line split on tabs (at least 9 fields); false when it isn't one. */
+SHORTSTACKCORE_API bool ReadMail(const std::vector<std::string>& Fields, State& L);
 
 /** Hours of being awake (or asleep) added to hunger and thirst. */
 constexpr double HungerPerHour = 3.0;
@@ -266,6 +441,12 @@ struct Context
 	bool InTournament = false;
 	Chips Bankroll = 0;
 	int Cashes = 0;
+	/**
+	 * Who would pay for an Embercrest occurrence, for the Burner's Embercrest row (next_segment_spec §1.2: a backer's
+	 * stake, a covered entry, a package, or the player's own money). Session::LifeContext gives GoToLive's own choice
+	 * (the first of FundingOptions that can); empty: the player's own money.
+	 */
+	std::function<Funding(const std::string& OccurrenceId)> LiveFunding;
 };
 
 /** Why an activity can't start now ("" when it can). */

@@ -22,6 +22,7 @@
 #include "ShortStack/UI/SecondScreen.h"
 #include "ShortStack/UI/StreamArt.h"
 #include "TestFontMetrics.h"
+#include "UiSeg.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -115,70 +116,7 @@ bool DrewRun(const ss::ui::DrawList& L, const std::string& Text)
 	return false;
 }
 
-/** Text widths from the Chromium metrics table (Roboto, the family Unreal's UI font uses). */
-struct TableMeasurer : ss::ui::TextMeasurer
-{
-	static const float* Ascii(ss::ui::Font F)
-	{
-		switch (F)
-		{
-		case ss::ui::Font::Bold: return test_font::BoldAscii;
-		case ss::ui::Font::Mono: return test_font::MonoAscii;
-		case ss::ui::Font::Black: return test_font::BlackAscii;
-		case ss::ui::Font::Light: return test_font::LightAscii;
-		default: return test_font::RegularAscii;
-		}
-	}
-	static const float* Special(ss::ui::Font F)
-	{
-		switch (F)
-		{
-		case ss::ui::Font::Bold: return test_font::BoldSpecial;
-		case ss::ui::Font::Mono: return test_font::MonoSpecial;
-		case ss::ui::Font::Black: return test_font::BlackSpecial;
-		case ss::ui::Font::Light: return test_font::LightSpecial;
-		default: return test_font::RegularSpecial;
-		}
-	}
-	float Width(const std::string& Text, ss::ui::Font Face, float SizePx) const override
-	{
-		float Sum = 0.0f;
-		for (size_t I = 0; I < Text.size();)
-		{
-			const unsigned char C0 = static_cast<unsigned char>(Text[I]);
-			uint32_t Cp = C0;
-			size_t Len = 1;
-			if (C0 >= 0xF0) { Len = 4; Cp = C0 & 0x07u; }
-			else if (C0 >= 0xE0) { Len = 3; Cp = C0 & 0x0Fu; }
-			else if (C0 >= 0xC0) { Len = 2; Cp = C0 & 0x1Fu; }
-			for (size_t K = 1; K < Len && I + K < Text.size(); ++K)
-			{
-				Cp = (Cp << 6) | (static_cast<unsigned char>(Text[I + K]) & 0x3Fu);
-			}
-			I += Len;
-			float Wd = 55.0f;
-			if (Cp >= 32 && Cp < 127) { Wd = Ascii(Face)[Cp - 32]; }
-			else if (Cp == 0xB7) { Wd = Special(Face)[0]; }
-			else if (Cp == 0x2014) { Wd = Special(Face)[1]; }
-			else if (Cp == 0x2013) { Wd = Special(Face)[2]; }
-			else if (Cp == 0x2026) { Wd = Special(Face)[3]; }
-			else if (Cp == 0xE9) { Wd = Special(Face)[4]; }
-			Sum += Wd;
-		}
-		return Sum * SizePx / 100.0f;
-	}
-	float Ascent(ss::ui::Font Face, float SizePx) const override
-	{
-		const float A = Face == ss::ui::Font::Bold ? test_font::BoldAscent : Face == ss::ui::Font::Mono ? test_font::MonoAscent : Face == ss::ui::Font::Black ? test_font::BlackAscent : Face == ss::ui::Font::Light ? test_font::LightAscent : test_font::RegularAscent;
-		return A * SizePx / 100.0f;
-	}
-};
-
-struct QuietHooks : ss::SessionHooks
-{
-	std::vector<std::pair<std::string, std::string>> Texts;
-	void Text(const std::string& From, const std::string& Body) override { Texts.push_back({From, Body}); }
-};
+// TableMeasurer and QuietHooks live in UiSeg.h, which the segment's per-track files share.
 
 void Emit(const std::string& Name, ss::ui::RiverLine& RL, double Now)
 {
@@ -3218,6 +3156,12 @@ int main(int Argc, char** Argv)
 	ui_test::FrontEndScreens();
 	ui_test::TablePause();
 	ui_test::CreatorInputFixes();
+	// The next segment's per-track additions (next_segment_spec §7.6; tests/ui_seg_<track>.cpp).
+	ui_test::SegStake();
+	ui_test::SegSponsor();
+	ui_test::SegTableUi();
+	ui_test::SegBadges();
+	ui_test::SegLaptop();
 	if (ui_test::Failures == 0)
 	{
 		std::printf("ui tests: all passed\n");

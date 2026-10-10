@@ -1,10 +1,17 @@
 #include "ShortStack/Game/Live.h"
 
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Room.h"
+#include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Stake.h"
+#include "ShortStack/Game/World.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -52,6 +59,173 @@ std::string Fixed2(double V)
 	return Buf;
 }
 } // namespace
+
+// The next segment's save lines and the live record (next_segment_spec §7.4, §7.5). Named, not anonymous: Unreal's
+// unity builds put several .cpp files in one translation unit.
+namespace live_save_detail
+{
+/** Tabs, newlines and backslashes escaped, as Session.cpp's lines are (its Escape is private to that file). */
+std::string Esc(const std::string& In)
+{
+	std::string Out;
+	Out.reserve(In.size());
+	for (const char Ch : In)
+	{
+		if (Ch == '\\')
+		{
+			Out += "\\\\";
+		}
+		else if (Ch == '\n')
+		{
+			Out += "\\n";
+		}
+		else if (Ch == '\t')
+		{
+			Out += "\\t";
+		}
+		else
+		{
+			Out.push_back(Ch);
+		}
+	}
+	return Out;
+}
+
+std::string Unesc(const std::string& In)
+{
+	std::string Out;
+	Out.reserve(In.size());
+	for (size_t I = 0; I < In.size(); ++I)
+	{
+		if (In[I] == '\\' && I + 1 < In.size())
+		{
+			const char N = In[++I];
+			Out.push_back(N == 'n' ? '\n' : N == 't' ? '\t' : N);
+		}
+		else
+		{
+			Out.push_back(In[I]);
+		}
+	}
+	return Out;
+}
+
+/** A voice's ties as one field, "name:kind;name:kind" (a backslash keeps a ':', a ';' or a backslash in a name). */
+std::string TiesText(const std::vector<std::pair<std::string, int>>& Ties)
+{
+	std::string Out;
+	for (const std::pair<std::string, int>& T : Ties)
+	{
+		if (!Out.empty())
+		{
+			Out.push_back(';');
+		}
+		for (const char Ch : T.first)
+		{
+			if (Ch == ':' || Ch == ';' || Ch == '\\')
+			{
+				Out.push_back('\\');
+			}
+			Out.push_back(Ch);
+		}
+		Out += ":" + std::to_string(T.second);
+	}
+	return Out;
+}
+
+std::vector<std::pair<std::string, int>> ReadTies(const std::string& Text)
+{
+	std::vector<std::pair<std::string, int>> Out;
+	std::string Name;
+	std::string Kind;
+	bool InKind = false;
+	auto Flush = [&]() {
+		if (!Name.empty() || !Kind.empty())
+		{
+			Out.push_back({Name, std::atoi(Kind.c_str())});
+		}
+		Name.clear();
+		Kind.clear();
+		InKind = false;
+	};
+	for (size_t I = 0; I < Text.size(); ++I)
+	{
+		const char Ch = Text[I];
+		if (Ch == '\\' && I + 1 < Text.size())
+		{
+			(InKind ? Kind : Name).push_back(Text[++I]);
+		}
+		else if (Ch == ':' && !InKind)
+		{
+			InKind = true;
+		}
+		else if (Ch == ';')
+		{
+			Flush();
+		}
+		else
+		{
+			(InKind ? Kind : Name).push_back(Ch);
+		}
+	}
+	Flush();
+	return Out;
+}
+
+std::string Num3(float V)
+{
+	return Fixed(static_cast<double>(V), 3);
+}
+
+/** A finished entry's day in the live record: its occurrence's (the finish's, for an id the schedule doesn't know). */
+void AddDay(std::vector<life::LiveDay>& Days, const life::LiveEntry& E)
+{
+	const Occurrence O = FindOccurrence(E.Id);
+	const int Day = O.Valid() ? O.Day : net::DayOf(E.FinishedAt);
+	auto It = std::lower_bound(Days.begin(), Days.end(), Day, [](const life::LiveDay& D, int Want) { return D.Day < Want; });
+	if (It == Days.end() || It->Day != Day)
+	{
+		life::LiveDay Fresh;
+		Fresh.Day = Day;
+		It = Days.insert(It, Fresh);
+	}
+	const bool Cashed = E.PrizeCents > 0;
+	It->Events += 1;
+	It->Cashes += Cashed ? 1 : 0;
+	if (IsEmbercrest(E.Id))
+	{
+		It->Embercrest += 1;
+		It->EmbercrestCashes += Cashed ? 1 : 0;
+	}
+	It->SpentCents += E.PaidCents;
+	It->WonCents += E.PrizeCents;
+	// The last LiveDaysKept days with play, counted back from the newest.
+	const int From = Days.back().Day - life::LiveDaysKept;
+	Days.erase(Days.begin(), std::find_if(Days.begin(), Days.end(), [From](const life::LiveDay& D) { return D.Day > From; }));
+}
+
+/** What the record keeps of a settled entry (live::Settle): a title, what it cost, its day. */
+void Keep(life::State& L, const life::LiveEntry& E)
+{
+	L.LiveWins += E.Place == 1 ? 1 : 0;
+	L.LiveSpentCents += E.PaidCents;
+	AddDay(L.LiveDays, E);
+}
+
+/** The night's snapshot goes with the checkpoint at settle and refund (§1.8); the player's own patch rows stay. */
+void ClearNight(life::LiveEntry& E)
+{
+	E.Voices.clear();
+	E.Room.clear();
+	E.Badges.clear();
+	E.Leaders.clear();
+	E.Patches.erase(std::remove_if(E.Patches.begin(), E.Patches.end(),
+						[&E](const std::pair<std::string, std::string>& P) {
+							return std::any_of(E.Roster.begin(), E.Roster.end(), [&P](const std::pair<std::string, int>& R) { return R.first == P.first; });
+						}),
+		E.Patches.end());
+}
+} // namespace live_save_detail
 
 const std::vector<EventTemplate>& Schedule()
 {
@@ -453,7 +627,7 @@ const life::LiveEntry* ActiveEntry(const life::State& L)
 	return nullptr;
 }
 
-std::string CanRegister(Chips Bankroll, const life::State& L, const Occurrence& O, double World)
+std::string CanRegister(Chips Bankroll, const life::State& L, const Occurrence& O, double World, const life::Funding& F)
 {
 	if (!O.Valid())
 	{
@@ -479,18 +653,21 @@ std::string CanRegister(Chips Bankroll, const life::State& L, const Occurrence& 
 	{
 		return "The desk opens at " + net::TimeLabel(O.DeskOpens) + ".";
 	}
-	// The buy-in, and the bus there and back.
-	const Chips Need = O.T->BuyInCents + 2 * BusFareCents;
+	// The buy-in and the bus there and back. The player's own money pays the buy-in (less what pieces sold brought in);
+	// anyone else's pays it for them; a sponsor covering the fares pays the bus too (§1.2).
+	const bool Own = F.From == life::Paid::Own;
+	const Chips Need = (Own ? std::max<Chips>(0, O.T->BuyInCents - F.Cents) : 0) + (F.Fares ? 0 : 2 * BusFareCents);
 	if (Bankroll < Need)
 	{
-		return std::string("The ") + O.T->Short + " is " + Money(O.T->BuyInCents) + " and the bus.";
+		return Own ? std::string("The ") + O.T->Short + " is " + Money(O.T->BuyInCents) + " and the bus." : "The bus up the ridge and back is " + Money(2 * BusFareCents) + ".";
 	}
 	return "";
 }
 
-std::string Register(Chips& Bankroll, life::State& L, const Occurrence& O, double World, int Entrants, const std::vector<std::pair<std::string, int>>& Roster)
+std::string Register(Chips& Bankroll, life::State& L, const Occurrence& O, double World, int Entrants, const std::vector<std::pair<std::string, int>>& Roster,
+	const life::Funding& F)
 {
-	const std::string Why = CanRegister(Bankroll, L, O, World);
+	const std::string Why = CanRegister(Bankroll, L, O, World, F);
 	if (!Why.empty())
 	{
 		return Why;
@@ -500,9 +677,6 @@ std::string Register(Chips& Bankroll, life::State& L, const Occurrence& O, doubl
 		return ""; // already registered
 	}
 	const EventTemplate& T = *O.T;
-	Bankroll -= T.BuyInCents;
-	L.Record(World, std::string(T.Name) + ": buy-in", -(T.BuyInCents - T.FeeCents), 0);
-	L.Record(World, std::string(T.Name) + ": entry fee", -T.FeeCents, 0);
 	life::LiveEntry E;
 	E.Id = O.Id;
 	E.Name = T.Name;
@@ -511,7 +685,28 @@ std::string Register(Chips& Bankroll, life::State& L, const Occurrence& O, doubl
 	E.RegisteredAt = World;
 	E.Entrants = std::max(2, Entrants);
 	E.Roster = Roster;
+	E.Fund = F;
 	L.LiveEntries.push_back(E);
+	// Someone else's money first, one line before the buy-in (§1.2): a sponsor's cover, a backer's stake, or the one line
+	// for the pieces a listing on this event sold. Each feature writes its own line once, keyed by the entry, and nothing
+	// when it has nothing on it (the stubs write nothing). They get the entry as registered (E: a copy, so what they're
+	// handed can't move under them).
+	sponsor::OnRegister(L.Sponsors, L, Bankroll, E, World);
+	stake::OnRegister(L.Stakes, Bankroll, L, E, World);
+	if (F.From == life::Paid::Package)
+	{
+		// The package's roll pays (stake::OnRegister took it): nothing in the player's ledger.
+	}
+	else if (F.From == life::Paid::Ticket)
+	{
+		L.Record(World, std::string(T.Name) + ": ticket", 0, 0);
+	}
+	else
+	{
+		Bankroll -= T.BuyInCents;
+		L.Record(World, std::string(T.Name) + ": buy-in", -(T.BuyInCents - T.FeeCents), 0);
+		L.Record(World, std::string(T.Name) + ": entry fee", -T.FeeCents, 0);
+	}
 	// The last sixty are kept (an entry still in play always is).
 	while (L.LiveEntries.size() > 60)
 	{
@@ -522,6 +717,8 @@ std::string Register(Chips& Bankroll, life::State& L, const Occurrence& O, doubl
 		}
 		L.LiveEntries.erase(Old);
 	}
+	// From here on the live record is kept (an older save's was worked out from the kept entries, which this may thin).
+	L.SegmentLinesRead |= life::SegLiveWins | life::SegLiveRecord;
 	return "";
 }
 
@@ -535,6 +732,12 @@ bool PayFare(Chips& Bankroll, life::State& L, const std::string& Id, bool Home, 
 	(Home ? E->FareHome : E->FareThere) = true;
 	Bankroll -= BusFareCents;
 	L.Record(World, Home ? "The 14 bus home" : "The 14 bus up to the Embercrest", -BusFareCents, 3);
+	if (E->Fund.Fares)
+	{
+		// A sponsor covering the bus: the fare and its cover, two lines that net to nothing (R4's travel lines survive).
+		Bankroll += BusFareCents;
+		L.Record(World, (E->Fund.Who.empty() ? std::string("Your sponsor") : E->Fund.Who) + ": covered the bus", BusFareCents, life::LedgerSponsors);
+	}
 	return true;
 }
 
@@ -557,10 +760,22 @@ bool Settle(Chips& Bankroll, life::State& L, const std::string& Id, int Place, i
 		Bankroll += E->PrizeCents;
 		L.Record(World, E->Name + ": " + Ordinal(Place) + " of " + std::to_string(E->Entrants), E->PrizeCents, 4);
 	}
+	// Then the sponsor (the contract is senior: a backer buys action on what the player keeps), then the backer (§1.2).
+	// Each settles once, keyed by the entry; they get it as settled (a copy: what they're handed can't move under them).
+	const life::LiveEntry Settled = *E;
+	sponsor::Settled(L.Sponsors, L, Bankroll, Settled);
+	stake::OnSettle(L.Stakes, Bankroll, L, Settled, Settled.PrizeCents, World);
+	// Then the record: the room's counters, the titles, what the entries cost and the day.
 	L.LiveEvents += 1;
-	L.LiveCashes += E->PrizeCents > 0 ? 1 : 0;
+	L.LiveCashes += Settled.PrizeCents > 0 ? 1 : 0;
 	L.LiveBestPlace = L.LiveBestPlace <= 0 ? Place : std::min(L.LiveBestPlace, Place);
-	L.LiveWonCents += E->PrizeCents;
+	L.LiveWonCents += Settled.PrizeCents;
+	live_save_detail::Keep(L, Settled);
+	L.SegmentLinesRead |= life::SegLiveWins | life::SegLiveRecord;
+	if (life::LiveEntry* Done = EntryFor(L, Id))
+	{
+		live_save_detail::ClearNight(*Done);
+	}
 	return true;
 }
 
@@ -575,14 +790,353 @@ bool Refund(Chips& Bankroll, life::State& L, const std::string& Id, double World
 	E->Checkpoint.clear();
 	E->CheckpointHost.clear();
 	E->FinishedAt = World;
-	Bankroll += E->PaidCents;
-	// The registration's two lines, reversed (the bank counts ": refunded" lines against the buy-ins).
-	L.Record(World, E->Name + ": refunded buy-in" + (Why.empty() ? std::string() : " (" + Why + ")"), E->PaidCents - E->FeeCents, 0);
-	if (E->FeeCents > 0)
+	// The registration's two lines, reversed (the bank counts ": refunded" lines against the buy-ins); a package's roll
+	// and a ticket wrote none in the player's ledger.
+	if (E->Fund.From != life::Paid::Package && E->Fund.From != life::Paid::Ticket)
 	{
-		L.Record(World, E->Name + ": refunded entry fee", E->FeeCents, 0);
+		Bankroll += E->PaidCents;
+		L.Record(World, E->Name + ": refunded buy-in" + (Why.empty() ? std::string() : " (" + Why + ")"), E->PaidCents - E->FeeCents, 0);
+		if (E->FeeCents > 0)
+		{
+			L.Record(World, E->Name + ": refunded entry fee", E->FeeCents, 0);
+		}
+	}
+	// Then the funding's lines, reversed: the backer and the pieces' buyers repaid (markup included), a swap called off,
+	// the cover returned (and not counted as used). Each once, keyed by the entry.
+	const life::LiveEntry Refunded = *E;
+	stake::OnRefund(L.Stakes, Bankroll, L, Refunded, World);
+	sponsor::OnRefund(L.Sponsors, L, Bankroll, Refunded, World);
+	if (life::LiveEntry* Done = EntryFor(L, Id))
+	{
+		live_save_detail::ClearNight(*Done);
 	}
 	return true;
+}
+
+// ------------------------------------------------------------------ the field (§1.8)
+
+Archetype PlayStyle(const world::Npc& N)
+{
+	const float Sk = N.Overall();
+	const float Aggro = N.TraitOf(world::Trait::Aggro);
+	const float Risk = N.TraitOf(world::Trait::Risk);
+	if (Sk >= 0.72f)
+	{
+		return Aggro > 0.6f ? Archetype::Crusher : Archetype::Reg;
+	}
+	if (Sk >= 0.58f)
+	{
+		return Aggro > 0.62f ? Archetype::Lag : Aggro < 0.35f ? Archetype::Tag : Archetype::Reg;
+	}
+	if (Sk >= 0.45f)
+	{
+		return Aggro > 0.8f && Risk > 0.7f ? Archetype::Maniac : Aggro < 0.3f ? Archetype::Nit : Archetype::Tag;
+	}
+	return Aggro > 0.8f ? Archetype::Maniac : Aggro < 0.3f ? Archetype::Station : N.TraitOf(world::Trait::Patience) > 0.7f ? Archetype::Nit : Archetype::Fish;
+}
+
+FieldNotes DescribeField(world::World& W, const Occurrence& O, const std::string& HeroName, const life::State& Hero, double World)
+{
+	(void)Hero; // the player's own patches are sponsor::NoteWorn's, after registration
+	FieldNotes N;
+	N.Planned = O.Field;
+	if (!O.Valid())
+	{
+		return N;
+	}
+	// The field as the world has it: the people it registered (the room's faces as the Back Room knows them play their
+	// own way), and everyone else the room expects. Among them, the faces: the room's regulars, and whoever remembers
+	// the player (what they'll say sitting down).
+	if (W.Ready())
+	{
+		N.Planned = std::max(1, W.PlannedEntries(O.Id));
+		const std::vector<int> Regulars = W.EmbercrestRegulars();
+		std::vector<int> Field;
+		for (int Npc : W.Registered(O.Id))
+		{
+			const world::Npc* P = W.Get(Npc);
+			if (!P || P->Name == HeroName)
+			{
+				continue;
+			}
+			int Type = static_cast<int>(PlayStyle(*P));
+			for (const CastMember& Cm : EmbercrestCast())
+			{
+				if (P->Name == Cm.Name)
+				{
+					Type = static_cast<int>(Cm.Type);
+				}
+			}
+			N.Roster.push_back({P->Name, Type});
+			Field.push_back(Npc);
+			// How they sound and what they can honestly talk about (§4): only once core-room makes voices.
+			life::LiveVoice V = room::VoiceOf(W, Npc, HeroName);
+			if (!V.Name.empty())
+			{
+				N.Voices.push_back(std::move(V));
+			}
+			// The world's sponsored people wear their brand's patch (§3; Npc::Sponsor holds the brand's name).
+			if (!P->Sponsor.empty())
+			{
+				if (const sponsor::Brand* B = sponsor::FindBrandByName(P->Sponsor))
+				{
+					N.Patches.push_back({P->Name, B->Id});
+				}
+			}
+			const world::Bond* Bd = W.BondWith(Npc);
+			const bool Regular = std::find(Regulars.begin(), Regulars.end(), Npc) != Regulars.end();
+			const std::string Known = Bd ? Bd->Label() : std::string();
+			if (!Regular && Known.empty() && !(Bd && !Bd->Memories.empty()))
+			{
+				continue;
+			}
+			life::LiveFace F;
+			F.Name = P->Name;
+			F.Label = !Known.empty() ? Known : Bd && !Bd->Memories.empty() ? std::string("Has met you") : std::string("Embercrest regular");
+			F.Line = W.SpokenGreeting(Npc, FaceHash(O.Id + P->Name));
+			N.Faces.push_back(F);
+		}
+		// Their badges and the month's room leaders (§5).
+		const int Day = net::DayOf(World);
+		N.Badges = badge::FieldBadges(W, Field, Day);
+		N.Leaders = badge::FieldLeaders(W, Day);
+	}
+	// The champions' board by the desk: the room's last winners, newest first, from the world's results.
+	static const char* Days[7] = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"};
+	for (int Day = O.Day; Day >= O.Day - 10 && N.Board.size() < 8; --Day)
+	{
+		const std::vector<Occurrence> Os = Occurrences(Day);
+		for (auto It = Os.rbegin(); It != Os.rend() && N.Board.size() < 8; ++It)
+		{
+			const net::EventResult* Res = It->Start < World ? W.ResultOf(It->Id) : nullptr;
+			if (!Res)
+			{
+				continue;
+			}
+			for (const net::Placing& Pl : Res->FinalTable)
+			{
+				if (Pl.Place != 1)
+				{
+					continue;
+				}
+				const world::Npc* P = Pl.Player >= 0 ? W.Get(Pl.Player) : nullptr;
+				const std::string Who = Pl.Player == -1 ? HeroName : P ? P->Name : Pl.Name;
+				std::string Short = It->T->Short;
+				for (char& Ch : Short)
+				{
+					Ch = static_cast<char>(std::toupper(static_cast<unsigned char>(Ch)));
+				}
+				N.Board.push_back(std::string(Days[((Day % 7) + 7) % 7]) + " " + Short + "\t" + Who + "\t" + std::to_string(Pl.Prize));
+			}
+		}
+	}
+	return N;
+}
+
+void Apply(const FieldNotes& N, life::LiveEntry& E)
+{
+	E.Faces = N.Faces;
+	E.Board = N.Board;
+	E.Voices = N.Voices;
+	E.Badges = N.Badges;
+	E.Leaders = N.Leaders;
+	E.Patches.insert(E.Patches.end(), N.Patches.begin(), N.Patches.end());
+}
+
+std::string FundingLine(const life::Funding& F, const std::string& EventShort)
+{
+	const std::string Event = EventShort.empty() ? std::string("event") : EventShort;
+	switch (F.From)
+	{
+	case life::Paid::Own:
+	{
+		if (F.Permille <= 0)
+		{
+			return std::string();
+		}
+		const std::string Share = F.Permille % 10 == 0 ? std::to_string(F.Permille / 10) : std::to_string(F.Permille / 10) + "." + std::to_string(F.Permille % 10);
+		return "You've sold " + Share + "% of your " + Event + ".";
+	}
+	case life::Paid::Backer: return (F.Who.empty() ? std::string("Your backer") : F.Who) + " is putting you in the " + Event + ".";
+	case life::Paid::Package: return (F.Who.empty() ? std::string("The package") : F.Who) + " pays for the " + Event + " from the roll.";
+	case life::Paid::Sponsor: return (F.Who.empty() ? std::string("Your sponsor") : F.Who) + " covers the " + Event + (F.Fares ? ", and the bus." : ".");
+	case life::Paid::Ticket: return "A ticket pays for the " + Event + ".";
+	}
+	return std::string();
+}
+
+// ------------------------------------------------------------------ the save (§7.4, §7.5)
+
+void WriteEntryLines(const life::LiveEntry& E, std::string& Out)
+{
+	using live_save_detail::Esc;
+	using live_save_detail::Num3;
+	const std::string Id = Esc(E.Id);
+	if (!E.Room.empty())
+	{
+		Out += "liveroom\t" + Id + "\t" + Esc(E.Room) + "\n";
+	}
+	if (!life::IsOwnMoney(E.Fund))
+	{
+		const life::Funding& F = E.Fund;
+		Out += "livefund\t" + Id + "\t" + std::to_string(static_cast<int>(F.From)) + "\t" + Esc(F.Ref) + "\t" + Esc(F.Who) + "\t" + std::to_string(F.Permille) + "\t" +
+			std::to_string(F.Cents) + "\t" + std::to_string(F.CutPct) + "\t" + (F.Fares ? "1" : "0") + "\n";
+	}
+	for (const life::LiveVoice& V : E.Voices)
+	{
+		Out += "livevoice\t" + Id + "\t" + Esc(V.Name) + "\t" + std::to_string(V.Style) + "\t" + Num3(V.Social) + "\t" + Num3(V.Aggro) + "\t" + Num3(V.Grit) + "\t" +
+			std::to_string(V.Mood) + "\t" + std::to_string(V.Is) + "\t" + std::to_string(V.Age) + "\t" + (V.Pro ? "1" : "0") + "\t" + (V.Staked ? "1" : "0") + "\t" +
+			Num3(V.Rivalry) + "\t" + Num3(V.Familiarity) + "\t" + Num3(V.Respect) + "\t" + Esc(V.Story) + "\t" + Esc(live_save_detail::TiesText(V.Ties)) + "\n";
+	}
+	for (const std::pair<std::string, std::string>& B : E.Badges)
+	{
+		Out += "livebadge\t" + Id + "\t" + Esc(B.first) + "\t" + Esc(B.second) + "\n";
+	}
+	for (const life::RoomLeader& Ld : E.Leaders)
+	{
+		Out += "liveleader\t" + Id + "\t" + std::to_string(Ld.Rank) + "\t" + Esc(Ld.Name) + "\t" + Fixed(Ld.Points, 2) + "\t" + Esc(Ld.Badge) + "\n";
+	}
+	for (const std::pair<std::string, std::string>& P : E.Patches)
+	{
+		Out += "livepatch\t" + Id + "\t" + Esc(P.first) + "\t" + Esc(P.second) + "\n";
+	}
+}
+
+bool ReadEntryLine(const std::vector<std::string>& P, life::State& L)
+{
+	if (P.empty())
+	{
+		return false;
+	}
+	const std::string& Key = P[0];
+	const bool Ours = Key == "liveroom" || Key == "livefund" || Key == "livevoice" || Key == "livebadge" || Key == "liveleader" || Key == "livepatch";
+	if (!Ours)
+	{
+		return false;
+	}
+	using live_save_detail::Unesc;
+	L.SegmentLinesRead |= life::SegLiveLines;
+	life::LiveEntry* E = P.size() >= 2 ? EntryFor(L, Unesc(P[1])) : nullptr;
+	if (!E)
+	{
+		return true; // its entry wasn't kept: the line goes with it
+	}
+	// Every line parses with at least its fields, so later fields can be appended (N6).
+	auto Num = [&P](size_t I) { return I < P.size() ? std::atof(P[I].c_str()) : 0.0; };
+	auto Int = [&P](size_t I) { return I < P.size() ? std::atoi(P[I].c_str()) : 0; };
+	auto Flt = [&P](size_t I) { return I < P.size() ? static_cast<float>(std::atof(P[I].c_str())) : 0.0f; };
+	if (Key == "liveroom" && P.size() >= 3)
+	{
+		E->Room = Unesc(P[2]);
+	}
+	else if (Key == "livefund" && P.size() >= 9)
+	{
+		life::Funding F;
+		F.From = static_cast<life::Paid>(std::clamp(Int(2), 0, static_cast<int>(life::Paid::Ticket)));
+		F.Ref = Unesc(P[3]);
+		F.Who = Unesc(P[4]);
+		F.Permille = Int(5);
+		F.Cents = static_cast<Chips>(std::strtoll(P[6].c_str(), nullptr, 10));
+		F.CutPct = Int(7);
+		F.Fares = P[8] == "1";
+		E->Fund = F;
+	}
+	else if (Key == "livevoice" && P.size() >= 17)
+	{
+		life::LiveVoice V;
+		V.Name = Unesc(P[2]);
+		V.Style = Int(3);
+		V.Social = Flt(4);
+		V.Aggro = Flt(5);
+		V.Grit = Flt(6);
+		V.Mood = Int(7);
+		V.Is = Int(8);
+		V.Age = Int(9);
+		V.Pro = P[10] == "1";
+		V.Staked = P[11] == "1";
+		V.Rivalry = Flt(12);
+		V.Familiarity = Flt(13);
+		V.Respect = Flt(14);
+		V.Story = Unesc(P[15]);
+		V.Ties = live_save_detail::ReadTies(Unesc(P[16]));
+		E->Voices.push_back(V);
+	}
+	else if (Key == "livebadge" && P.size() >= 4)
+	{
+		E->Badges.push_back({Unesc(P[2]), Unesc(P[3])});
+	}
+	else if (Key == "liveleader" && P.size() >= 6)
+	{
+		life::RoomLeader Ld;
+		Ld.Rank = Int(2);
+		Ld.Name = Unesc(P[3]);
+		Ld.Points = Num(4);
+		Ld.Badge = Unesc(P[5]);
+		E->Leaders.push_back(Ld);
+	}
+	else if (Key == "livepatch" && P.size() >= 4)
+	{
+		E->Patches.push_back({Unesc(P[2]), Unesc(P[3])});
+	}
+	return true;
+}
+
+void AfterParse(SaveData& D)
+{
+	life::State& L = D.Life;
+	// Titles: the finished entries won (a win older than the sixty kept still counts once, from the best place).
+	if ((L.SegmentLinesRead & life::SegLiveWins) == 0)
+	{
+		int Wins = 0;
+		for (const life::LiveEntry& E : L.LiveEntries)
+		{
+			Wins += E.State == life::LiveEntry::Finished && E.Place == 1 ? 1 : 0;
+		}
+		L.LiveWins = Wins == 0 && L.LiveBestPlace == 1 ? 1 : Wins;
+	}
+	if ((L.SegmentLinesRead & life::SegLiveRecord) == 0)
+	{
+		// What the entries cost: the kept ones' buy-ins, and their average for the events the sixty kept don't cover (an
+		// estimate, the only one an older save allows). The days come from the kept entries only: older days are unknown.
+		Chips Kept = 0;
+		int Played = 0;
+		L.LiveDays.clear();
+		for (const life::LiveEntry& E : L.LiveEntries)
+		{
+			if (E.State == life::LiveEntry::Finished)
+			{
+				Kept += E.PaidCents;
+				++Played;
+				live_save_detail::AddDay(L.LiveDays, E);
+			}
+		}
+		const int Missing = std::max(0, L.LiveEvents - Played);
+		L.LiveSpentCents = Kept + (Played > 0 ? Kept * static_cast<Chips>(Missing) / static_cast<Chips>(Played) : 0);
+	}
+	if ((L.SegmentLinesRead & life::SegShift) == 0)
+	{
+		// The last shift: the newest shift line in the ledger (newest first); failing that, with shifts on the record, the
+		// oldest line the ledger kept (sixty lines: the shift was before it).
+		L.LastShiftAt = -1.0e9;
+		const auto Shift = std::find_if(L.Ledger.begin(), L.Ledger.end(), [](const life::LedgerEntry& X) { return X.Kind == 1; });
+		if (Shift != L.Ledger.end())
+		{
+			L.LastShiftAt = Shift->At;
+		}
+		else if (L.Shifts > 0 && !L.Ledger.empty())
+		{
+			L.LastShiftAt = L.Ledger.back().At;
+		}
+	}
+	// An entry still in play from before the room kept voices: the roster's, the cast's own and the faces' (no story, so
+	// nobody claims a result). Finished entries are never touched; no livefund was the player's own money, which is right.
+	for (life::LiveEntry& E : L.LiveEntries)
+	{
+		if (E.State == life::LiveEntry::Registered && E.Voices.empty())
+		{
+			E.Voices = room::VoicesFor(E);
+		}
+	}
 }
 } // namespace live
 } // namespace ss

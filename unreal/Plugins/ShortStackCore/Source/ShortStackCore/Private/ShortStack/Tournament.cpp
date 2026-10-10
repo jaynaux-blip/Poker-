@@ -408,6 +408,7 @@ void Tournament::BeginFinish(Hand* HeroHand, const Profile* HeroAuto)
 	FinishWithHero = HeroHand != nullptr;
 	FinishNextTable = INT_MIN;
 	bFinishing = true;
+	LastRounds.clear();
 	if (HeroHand)
 	{
 		if (!HeroHand->bComplete)
@@ -415,7 +416,35 @@ void Tournament::BeginFinish(Hand* HeroHand, const Profile* HeroAuto)
 			PlayInstant(*HeroHand, false, HeroAuto);
 		}
 		ApplyHand(*HeroHand);
+		NoteRound(FinishHeroTable, *HeroHand);
 	}
+}
+
+void Tournament::NoteRound(int TableId, const Hand& H)
+{
+	// Read only: what the applied hand shows (no draw, nothing changed), so the night plays the same read or not.
+	TableRound Round;
+	Round.TableId = TableId;
+	Round.BigBlind = H.BigBlind;
+	for (const PotResult& Pot : H.PotResults)
+	{
+		Round.Pot += Pot.Amount;
+	}
+	Round.Showdown = H.CurrentStreet == Street::Showdown;
+	for (const ActionRecord& A : H.History)
+	{
+		Round.AllIn = Round.AllIn || A.AllIn; // a shove everyone folded to too (its chips came back)
+	}
+	for (const HandSeat& S : H.Seats)
+	{
+		Round.AllIn = Round.AllIn || S.AllIn;
+		Round.Called = Round.Called || (S.AllIn && !S.Folded && Round.Showdown);
+		if (S.Stack <= 0)
+		{
+			Round.Out.push_back(S.Id);
+		}
+	}
+	LastRounds.push_back(std::move(Round));
 }
 
 bool Tournament::FinishSome(int Count)
@@ -444,6 +473,7 @@ bool Tournament::FinishSome(int Count)
 		}
 		PlayInstant(*H, true, nullptr);
 		ApplyHand(*H);
+		NoteRound(Table.Id, *H);
 		--Count;
 	}
 	FinishNextTable = INT_MAX;

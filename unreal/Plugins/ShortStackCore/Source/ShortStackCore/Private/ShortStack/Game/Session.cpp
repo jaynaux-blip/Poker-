@@ -6,12 +6,18 @@
 #include "ShortStack/Cards.h"
 #include "ShortStack/Equity.h"
 #include "ShortStack/Evaluator.h"
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Body.h"
+#include "ShortStack/Game/Coach.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/Game/Wardrobe.h"
 
@@ -107,6 +113,12 @@ std::string CardsText(const std::vector<Card>& Cards)
 		Out += CardToString(Cards[I]);
 	}
 	return Out;
+}
+
+/** A receipt's ledger line when a sponsor's store credit paid part of it (next_segment_spec §3.6): "" when it paid none. */
+std::string CreditNote(Chips CreditCents)
+{
+	return CreditCents > 0 ? " (" + Money(CreditCents) + " store credit)" : std::string();
 }
 
 /**
@@ -216,9 +228,29 @@ std::string SaveData::Serialize() const
 	Out << "life\tdebt\t" << L.DebtCents << "\n";
 	Out << "life\tban\t" << Fixed(L.BannedUntil, 2) << "\n";
 	Out << "life\tcount\t" << L.Shifts << "\t" << L.Runs << "\t" << L.Busts << "\t" << L.Ghosts << "\t" << L.Bans << "\n";
+	if ((L.SegmentLinesRead & life::SegShift) != 0)
+	{
+		// When the last shift ended (next_segment_spec §7.4), once the session has kept it (an older save's is worked out).
+		Out << "life\tshift\t" << Fixed(L.LastShiftAt, 2) << "\n";
+	}
 	Out << "life\tearned\t" << L.EarnedJobs << "\t" << L.EarnedHustles << "\n";
 	Out << "life\tbackroom\t" << L.BackRoomNights << "\t" << L.BackRoomNetCents << "\n";
-	Out << "life\tlive\t" << L.LiveEvents << "\t" << L.LiveCashes << "\t" << L.LiveBestPlace << "\t" << L.LiveWonCents << "\n";
+	Out << "life\tlive\t" << L.LiveEvents << "\t" << L.LiveCashes << "\t" << L.LiveBestPlace << "\t" << L.LiveWonCents;
+	if ((L.SegmentLinesRead & (life::SegLiveWins | life::SegLiveRecord)) != 0)
+	{
+		// The live record (§7.4): the titles and what the entries cost, as the 7th and 8th fields (older readers need 6),
+		// and its days; once the segment keeps them (an older save's are worked out from the entries it kept).
+		Out << "\t" << L.LiveWins << "\t" << L.LiveSpentCents;
+	}
+	Out << "\n";
+	if ((L.SegmentLinesRead & (life::SegLiveWins | life::SegLiveRecord)) != 0)
+	{
+		for (const life::LiveDay& Dy : L.LiveDays)
+		{
+			Out << "life\tliveday\t" << Dy.Day << "\t" << Dy.Events << "\t" << Dy.Cashes << "\t" << Dy.Embercrest << "\t" << Dy.EmbercrestCashes << "\t" << Dy.SpentCents << "\t"
+				<< Dy.WonCents << "\n";
+		}
+	}
 	for (const life::LiveEntry& E : L.LiveEntries)
 	{
 		Out << "liveentry\t" << session_detail::Escape(E.Id) << "\t" << E.State << "\t" << E.PaidCents << "\t" << E.FeeCents << "\t" << Fixed(E.RegisteredAt, 2) << "\t" << E.Entrants
@@ -246,6 +278,11 @@ std::string SaveData::Serialize() const
 			Out << "livecheck\t" << session_detail::Escape(E.Id) << "\t" << Fixed(E.ArrivedAt, 2) << "\t" << Fixed(E.CheckpointAt, 3) << "\t"
 				<< session_detail::Escape(E.Checkpoint) << "\t" << session_detail::Escape(E.CheckpointHost) << "\n";
 		}
+		// The segment's lines for the entry (§7.4): liveroom with the checkpoint, then who paid, the field's voices, badges,
+		// leaders and patches, each only when the entry has one.
+		std::string EntryLines;
+		live::WriteEntryLines(E, EntryLines);
+		Out << EntryLines;
 	}
 	for (const auto& Rd : L.Reads)
 	{
@@ -335,6 +372,17 @@ std::string SaveData::Serialize() const
 		shop::WriteLines(L, Northside);
 		town::WriteLines(L.Town, L.Said, net::DayOf(net::MinutesPerDay * static_cast<double>(net::NightOneDay) + ClockMinutes), Northside);
 		Out << Northside;
+	}
+	{
+		// The next segment (§7.4): backing and coaching, sponsors, badges, then the shared Mail inbox, before the world's
+		// own lines. Each writes only what it keeps (pure const: Serialize can run off the game thread), so a save from
+		// before the segment writes back as it was read.
+		std::string Segment;
+		stake::WriteLines(L, Segment);
+		sponsor::WriteLines(L, Segment);
+		badge::WriteLines(L, Segment);
+		life::WriteMail(L, Segment);
+		Out << Segment;
 	}
 	for (const std::string& Note : WorldNotes)
 	{
@@ -533,6 +581,34 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 				L.LiveCashes = Int(3);
 				L.LiveBestPlace = Int(4);
 				L.LiveWonCents = Cents(5);
+				// The live record's fields (next_segment_spec §7.4); without them live::AfterParse works them out.
+				if (P.size() >= 7)
+				{
+					L.LiveWins = Int(6);
+					L.SegmentLinesRead |= life::SegLiveWins;
+				}
+				if (P.size() >= 8)
+				{
+					L.LiveSpentCents = Cents(7);
+					L.SegmentLinesRead |= life::SegLiveRecord;
+				}
+			}
+			else if (P[1] == "liveday" && P.size() >= 9)
+			{
+				life::LiveDay Dy;
+				Dy.Day = Int(2);
+				Dy.Events = Int(3);
+				Dy.Cashes = Int(4);
+				Dy.Embercrest = Int(5);
+				Dy.EmbercrestCashes = Int(6);
+				Dy.SpentCents = Cents(7);
+				Dy.WonCents = Cents(8);
+				L.LiveDays.push_back(Dy);
+			}
+			else if (P[1] == "shift" && P.size() >= 3)
+			{
+				L.LastShiftAt = Num(2);
+				L.SegmentLinesRead |= life::SegShift;
 			}
 			else if (P[1] == "backroom" && P.size() >= 4)
 			{
@@ -844,6 +920,18 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 			}
 			D.History.push_back(H);
 		}
+		else if (live::ReadEntryLine(P, D.Life))
+		{
+			// The next segment (§7.4): livefund, livevoice, liveroom, livebadge, liveleader, livepatch, after their entry.
+		}
+		else if (life::ReadMail(P, D.Life))
+		{
+			// The shared Mail inbox.
+		}
+		else if (stake::ReadLine(P, D.Life) || sponsor::ReadLine(P, D.Life) || badge::ReadLine(P, D.Life))
+		{
+			// Backing and coaching, sponsors, badges: their own lines.
+		}
 		else if (shop::ReadLine(P, D.Life))
 		{
 			// Northside: closet, fit, groom, visit, pawn, meal (§7.3).
@@ -874,13 +962,19 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 	// Northside's migrations (§7.3): what a save from before the shops didn't have (the closet, fitness, the store's
 	// visits, grooming, the pawn book).
 	shop::AfterParse(D);
+	// The next segment's (next_segment_spec §7.5), in order, each only for what the save lacked (by its lines-read bits):
+	// the live record, the last shift and the voices of an entry still in play; Kast's legacy deals as contracts; the
+	// stake book's conduct, seeded once. (The badges' monthly review runs when the session loads: BadgeStep.)
+	live::AfterParse(D);
+	sponsor::AfterParse(D);
+	stake::AfterParse(D);
 	Out = D;
 	return true;
 }
 
 const char* SoundName(SoundId Id)
 {
-	static const char* const Names[] = {"chip", "chips", "card", "flip", "check", "fold", "turn", "win", "level", "bust", "click", "alert", "move", "allin", "bubble", "cash"};
+	static const char* const Names[] = {"chip", "chips", "card", "flip", "check", "fold", "turn", "win", "level", "bust", "click", "alert", "move", "allin", "bubble", "cash", "mail"};
 	return Names[static_cast<int>(Id)];
 }
 
@@ -898,6 +992,9 @@ Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData*
 		LobbyMinutes = Loaded->ClockMinutes;
 		Life = Loaded->Life;
 		Life.Perks = hero::PerksOf(Person);
+		// A coach's composure and reads (next_segment_spec §2.11) on top of the background's.
+		Life.Perks.TiltGain = coach::TiltGainNow(Life.Study, Life.Perks.TiltGain, WorldMinutes());
+		Life.Perks.ReadWeight = coach::ReadWeightNow(Life.Study, Life.Perks.ReadWeight, WorldMinutes());
 		Gear = Loaded->Gear;
 		Leds = Loaded->Leds;
 		Channel = Loaded->Channel;
@@ -906,31 +1003,34 @@ Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData*
 	RefreshGear();
 	StartWorld(Loaded);
 	ResolveAbandonedLive();
+	// The badges' review runs at once on load (§7.5): the calendar's step with nothing crossed yet.
+	BadgeStep(WorldMinutes(), WorldMinutes());
 	// While the game loads: simulate the network's past results now, so the first leaderboard or page doesn't stall.
 	net::Shared().Prewarm(WorldMinutes());
 }
 
 namespace session_detail
 {
-/** The engine's bot closest to how someone in the world plays. */
+/** The engine's bot closest to how someone in the world plays (live::PlayStyle: the field's and the desk's too). */
 Archetype StyleOf(const world::Npc& N)
 {
-	const float Sk = N.Overall();
-	const float Aggro = N.TraitOf(world::Trait::Aggro);
-	const float Risk = N.TraitOf(world::Trait::Risk);
-	if (Sk >= 0.72f)
+	return live::PlayStyle(N);
+}
+
+/**
+ * Who pays for an entry the session registers (GoToLive): the first way FundingOptions says can (a backer's stake, a
+ * covered entry, a package, then the player's own money), the player's own when none does.
+ */
+life::Funding ChosenFunding(const Session& S, const std::string& EventId)
+{
+	for (const std::pair<life::Funding, std::string>& Option : S.FundingOptions(EventId))
 	{
-		return Aggro > 0.6f ? Archetype::Crusher : Archetype::Reg;
+		if (Option.second.empty())
+		{
+			return Option.first;
+		}
 	}
-	if (Sk >= 0.58f)
-	{
-		return Aggro > 0.62f ? Archetype::Lag : Aggro < 0.35f ? Archetype::Tag : Archetype::Reg;
-	}
-	if (Sk >= 0.45f)
-	{
-		return Aggro > 0.8f && Risk > 0.7f ? Archetype::Maniac : Aggro < 0.3f ? Archetype::Nit : Archetype::Tag;
-	}
-	return Aggro > 0.8f ? Archetype::Maniac : Aggro < 0.3f ? Archetype::Station : N.TraitOf(world::Trait::Patience) > 0.7f ? Archetype::Nit : Archetype::Fish;
+	return life::Funding();
 }
 
 /** The worlds of the sessions alive now, newest last: the network shows the newest. */
@@ -1094,6 +1194,8 @@ void Session::WorldSkip(int DayCount)
 void Session::WorldStep()
 {
 	LivingWorld.AdvanceTo(WorldMinutes());
+	// The stake book's money and memories to the world, each once (next_segment_spec §1.3).
+	StakeWorld();
 	SettleCancelled();
 	CancelledTexts();
 	if (LivingWorld.Clock() <= WorldNewsAt)
@@ -1223,6 +1325,8 @@ void Session::NewCareer(const hero::Character& Who)
 	Person = Who;
 	Person.Created = true;
 	Life.Perks = hero::PerksOf(Person);
+	Life.Perks.TiltGain = coach::TiltGainNow(Life.Study, Life.Perks.TiltGain, WorldMinutes());
+	Life.Perks.ReadWeight = coach::ReadWeightNow(Life.Study, Life.Perks.ReadWeight, WorldMinutes());
 	if (Life.Perks.StartCents > 0)
 	{
 		BankrollCents += Life.Perks.StartCents;
@@ -1252,20 +1356,24 @@ std::string Session::Checkout(const store::Basket& B)
 		return "Nothing in the basket.";
 	}
 	const Chips Total = B.Total();
-	if (Total > BankrollCents)
+	// A sponsor's store credit pays first (next_segment_spec §3.6), then the card: what the card still owes.
+	sponsor::Book Credit = Life.Sponsors;
+	const Chips Owes = sponsor::SpendCredit(Credit, Total);
+	if (Owes > BankrollCents)
 	{
 		DeclinedAt = WorldMinutes(); // Benny saw that
 		Sound(SoundId::Fold, 0.5);
 		return "Card declined.";
 	}
-	BankrollCents -= Total;
+	Life.Sponsors = std::move(Credit);
+	BankrollCents -= Owes;
 	DeclinedAt = -1.0;
 	for (const std::pair<std::string, int>& L : B.Lines)
 	{
 		Life.Pantry[L.first] += L.second;
 		Life.Bought[L.first] += L.second;
 	}
-	Life.Record(WorldMinutes(), "Lucky Penny #212 \xC2\xB7 " + std::to_string(B.Count()) + (B.Count() == 1 ? " item" : " items"), -Total, 8);
+	Life.Record(WorldMinutes(), "Lucky Penny #212 \xC2\xB7 " + std::to_string(B.Count()) + (B.Count() == 1 ? " item" : " items") + session_detail::CreditNote(Total - Owes), -Owes, 8);
 	ShopVisit("store", Total);
 	Sound(SoundId::Cash, 0.6);
 	Save();
@@ -1322,13 +1430,17 @@ std::string Session::PlaceOrder(const store::Basket& B)
 		return "Three orders are already on the way.";
 	}
 	const Chips Total = store::DeliveryTotal(B);
-	if (Total > BankrollCents)
+	// The store credit first (§3.6), then the card.
+	sponsor::Book Credit = Life.Sponsors;
+	const Chips Owes = sponsor::SpendCredit(Credit, Total);
+	if (Owes > BankrollCents)
 	{
 		Sound(SoundId::Fold, 0.5);
 		return "Card declined.";
 	}
+	Life.Sponsors = std::move(Credit);
 	const double World = WorldMinutes();
-	BankrollCents -= Total;
+	BankrollCents -= Owes;
 	life::State::Delivery Dv;
 	Dv.Lines = B.Lines;
 	Dv.PaidCents = Total;
@@ -1343,7 +1455,7 @@ std::string Session::PlaceOrder(const store::Basket& B)
 	{
 		Life.Bought[L.first] += L.second; // the same store packs it
 	}
-	Life.Record(World, "Penny Drop \xC2\xB7 " + std::to_string(B.Count()) + (B.Count() == 1 ? " item" : " items"), -Total, 8);
+	Life.Record(World, "Penny Drop \xC2\xB7 " + std::to_string(B.Count()) + (B.Count() == 1 ? " item" : " items") + session_detail::CreditNote(Total - Owes), -Owes, 8);
 	Sound(SoundId::Cash, 0.6);
 	Save();
 	return "";
@@ -1587,11 +1699,17 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	}
 	else
 	{
-		BankrollCents -= Ev.BuyInCents;
-		if (Ev.BuyInCents > 0)
+		// Who pays (next_segment_spec §1.2): a package's roll (its own ledger takes the buy-in), otherwise the player.
+		const life::Funding Fund = stake::FundFor(Life.Stakes, Ev.Spec.Id, Ev.BuyInCents, false, WorldMinutes());
+		if (Fund.From != life::Paid::Package)
 		{
-			Life.Record(WorldMinutes(), "Buy-in: " + Ev.Spec.Name, -Ev.BuyInCents, 0);
+			BankrollCents -= Ev.BuyInCents;
+			if (Ev.BuyInCents > 0)
+			{
+				Life.Record(WorldMinutes(), "Buy-in: " + Ev.Spec.Name, -Ev.BuyInCents, 0);
+			}
 		}
+		StakeEntered(Ev.Spec.Id, Ev.BuyInCents, Fund);
 	}
 	Save();
 	Event = &Joined;
@@ -1739,6 +1857,15 @@ void Session::BuildSeats()
 		V.Country = Country == FieldCountry.end() ? std::string() : Country->second;
 		V.Regular = FieldRegulars.count(P.Id) > 0;
 		V.Pro = FieldPros.count(P.Id) > 0 || (P.IsHero && TeamRiverLine());
+		// One badge on the seat, the network's (next_segment_spec §5, rule C1): the world's people from the index, the
+		// player's own from the session.
+		const badge::Badge* Top = P.IsHero ? badge::Top(HeroBadges(), badge::Network, badge::FrameNone)
+			: Npc != FieldNpc.end()      ? badge::Top(badge::Shared().Of(LivingWorld, Npc->second, net::DayOf(WorldMinutes())), badge::Network, badge::FrameNone)
+										 : nullptr;
+		if (Top)
+		{
+			V.Top = *Top;
+		}
 		V.Stack = P.Stack;
 	}
 }
@@ -2242,6 +2369,8 @@ void Session::HeroAct(const PlayerAction& Action, bool TimedOut)
 	GradeBadge Badge;
 	Badge.G = GradeDecision(Prompt.Analysis, A);
 	Badge.At = Now;
+	// Coaching (next_segment_spec §2.11): the decision tallied by its spot, for a coach's leak review.
+	coach::Add(Life.Study, coach::SpotOf(Prompt.Analysis.View, Badge.G, T && T->HandForHand(), T && T->Spec.BountyCents > 0), Badge.G);
 	Grades.push_back(Badge.G);
 	Badges.push_back(Badge);
 	if (Badge.G.Result == Grade::Blunder || (Badge.G.Result == Grade::Best && Prompt.Pot >= Prompt.BigBlind * 12))
@@ -2947,6 +3076,8 @@ void Session::ShowResults()
 	{
 		Life.Record(WorldMinutes(), (BountyWon > 0 && BustPrize == 0 ? "Bounties: " : "Prize: ") + T->Spec.Name, BustPrize + BountyWon, 0);
 	}
+	// A backer's share, a package's prize into its roll (next_segment_spec §2), once per event.
+	stake::OnlineSettle(Life.Stakes, BankrollCents, Life, T->Spec.Id, BustPrize + BountyWon, WorldMinutes());
 	LastResults.SessionEvents = SessionEvents;
 	LastResults.SessionNetCents = BankrollCents - SessionStartBankroll;
 	if (OthersPlaying)
@@ -3388,6 +3519,9 @@ life::Context Session::LifeContext() const
 	{
 		Ctx.Cashes += H.Prize > 0 ? 1 : 0;
 	}
+	// Who'd pay for an Embercrest event the Burner's row looks at: GoToLive's own choice (next_segment_spec §1.2), so the
+	// row never says the player can't afford a night a backer or a sponsor would pay for.
+	Ctx.LiveFunding = [this](const std::string& Id) { return session_detail::ChosenFunding(*this, Id); };
 	return Ctx;
 }
 
@@ -3482,7 +3616,7 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 		// The next one the player can enter.
 		for (const live::Occurrence& C : live::Reachable(World, 30.0))
 		{
-			if (live::CanRegister(BankrollCents, Life, C, World).empty() && !LivingWorld.CancellationOf(C.Id))
+			if (live::CanRegister(BankrollCents, Life, C, World, session_detail::ChosenFunding(*this, C.Id)).empty() && !LivingWorld.CancellationOf(C.Id))
 			{
 				O = C;
 				break;
@@ -3503,7 +3637,9 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 	{
 		return "A tournament is a long night. Sleep first.";
 	}
-	const std::string Why = live::CanRegister(BankrollCents, Life, O, World);
+	// Who pays (next_segment_spec §1.2): a backer's stake, a covered entry, a package, or the player's own money.
+	const life::Funding Fund = Already ? life::Funding() : session_detail::ChosenFunding(*this, O.Id);
+	const std::string Why = live::CanRegister(BankrollCents, Life, O, World, Fund);
 	if (!Why.empty())
 	{
 		return Why;
@@ -3516,94 +3652,21 @@ std::string Session::GoToLive(const std::string& OccurrenceId)
 	}
 	if (!Already)
 	{
-		// The field as the world has it: the people it registered (the room's faces as the Back Room knows them play
-		// their own way), and everyone else the room expects.
-		std::vector<std::pair<std::string, int>> Roster;
-		int Planned = O.Field;
-		if (LivingWorld.Ready())
-		{
-			Planned = std::max(1, LivingWorld.PlannedEntries(O.Id));
-			for (int Npc : LivingWorld.Registered(O.Id))
-			{
-				const world::Npc* N = LivingWorld.Get(Npc);
-				if (!N || N->Name == HeroName)
-				{
-					continue;
-				}
-				int Type = static_cast<int>(session_detail::StyleOf(*N));
-				for (const live::CastMember& Cm : live::EmbercrestCast())
-				{
-					if (N->Name == Cm.Name)
-					{
-						Type = static_cast<int>(Cm.Type);
-					}
-				}
-				Roster.push_back({N->Name, Type});
-			}
-		}
-		const int Entrants = std::max(Planned, static_cast<int>(Roster.size())) + 1;
-		const std::string Not = live::Register(BankrollCents, Life, O, World, Entrants, Roster);
+		// The field as the world has it (live::DescribeField, the desk's worker's too): the people it registered, the
+		// faces among them and what they'll say, the champions' board, and their voices, badges and patches.
+		const live::FieldNotes Notes = live::DescribeField(LivingWorld, O, HeroName, Life, World);
+		const int Entrants = std::max(Notes.Planned, static_cast<int>(Notes.Roster.size())) + 1;
+		const std::string Not = live::Register(BankrollCents, Life, O, World, Entrants, Notes.Roster, Fund);
 		if (!Not.empty())
 		{
 			return Not;
 		}
 		LivingWorld.HeroEntered(O.Id, O.T->Name);
-		// The faces in the field: the room's regulars, and whoever remembers the player (what they'll say sitting down).
-		if (life::LiveEntry* Mine = live::EntryFor(Life, O.Id); Mine && LivingWorld.Ready())
-		{
-			const std::vector<int> Regulars = LivingWorld.EmbercrestRegulars();
-			for (int Npc : LivingWorld.Registered(O.Id))
-			{
-				const world::Npc* N = LivingWorld.Get(Npc);
-				if (!N || N->Name == HeroName)
-				{
-					continue;
-				}
-				const world::Bond* Bd = LivingWorld.BondWith(Npc);
-				const bool Regular = std::find(Regulars.begin(), Regulars.end(), Npc) != Regulars.end();
-				const std::string Known = Bd ? Bd->Label() : std::string();
-				if (!Regular && Known.empty() && !(Bd && !Bd->Memories.empty()))
-				{
-					continue;
-				}
-				life::LiveFace F;
-				F.Name = N->Name;
-				F.Label = !Known.empty() ? Known : Bd && !Bd->Memories.empty() ? std::string("Has met you") : std::string("Embercrest regular");
-				F.Line = LivingWorld.SpokenGreeting(Npc, live::FaceHash(O.Id + N->Name));
-				Mine->Faces.push_back(F);
-			}
-		}
-		// The champions' board by the desk: the room's last winners, newest first, from the world's results.
 		if (life::LiveEntry* Mine = live::EntryFor(Life, O.Id))
 		{
-			static const char* Days[7] = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"};
-			for (int Day = O.Day; Day >= O.Day - 10 && Mine->Board.size() < 8; --Day)
-			{
-				const std::vector<live::Occurrence> Os = live::Occurrences(Day);
-				for (auto It = Os.rbegin(); It != Os.rend() && Mine->Board.size() < 8; ++It)
-				{
-					const net::EventResult* Res = It->Start < World ? LivingWorld.ResultOf(It->Id) : nullptr;
-					if (!Res)
-					{
-						continue;
-					}
-					for (const net::Placing& Pl : Res->FinalTable)
-					{
-						if (Pl.Place != 1)
-						{
-							continue;
-						}
-						const world::Npc* N = Pl.Player >= 0 ? LivingWorld.Get(Pl.Player) : nullptr;
-						const std::string Who = Pl.Player == -1 ? HeroName : N ? N->Name : Pl.Name;
-						std::string Short = It->T->Short;
-						for (char& Ch : Short)
-						{
-							Ch = static_cast<char>(std::toupper(static_cast<unsigned char>(Ch)));
-						}
-						Mine->Board.push_back(std::string(Days[((Day % 7) + 7) % 7]) + " " + Short + "\t" + Who + "\t" + std::to_string(Pl.Prize));
-					}
-				}
-			}
+			live::Apply(Notes, *Mine);
+			// The patches the player wears in tonight (§3: the sponsor's asks count them).
+			sponsor::NoteWorn(*Mine, HeroName, Life.Closet, Life.Sponsors, World);
 		}
 	}
 	live::PayFare(BankrollCents, Life, O.Id, false, World);
@@ -3639,6 +3702,12 @@ std::string Session::ResumeLive()
 	}
 	// As with GoToLive: the host first (a trip that can't happen right now doesn't end the stream), then the stream.
 	const live::Occurrence O = live::FindOccurrence(Id);
+	// An entry registered before the room kept voices goes back with the ones its roster gives (next_segment_spec §7.5;
+	// live::AfterParse does the same for a save that's read). Its funding is on the entry.
+	if (life::LiveEntry* E = live::EntryFor(Life, Id); E && E->Voices.empty())
+	{
+		E->Voices = room::VoicesFor(*E);
+	}
 	if (!Hooks.GoOut(Id, O.T->BuyInCents))
 	{
 		return "Can't get there right now.";
@@ -4274,6 +4343,7 @@ std::string Session::StartActivity(const std::string& Id)
 	case life::Kind::Hustle: TimeSkip.Label = A->Id == "marcus-run" ? "On the long run for Marcus" : "On a drop-off for Marcus"; break;
 	case life::Kind::Ghost: TimeSkip.Label = "Playing as whale_sam"; break;
 	case life::Kind::Sleep: TimeSkip.Label = A->Hours >= 8.0 ? "Sleeping" : "Napping"; break;
+	case life::Kind::Study: TimeSkip.Label = "A session with " + A->Place; break;
 	case life::Kind::Game:
 	case life::Kind::Live: break;
 	}
@@ -4306,6 +4376,9 @@ void Session::FinishSkip()
 		{
 		case life::Kind::Job:
 			++Life.Shifts;
+			// When the last shift ended (next_segment_spec §7.4; the badges read it, §5), kept from now on.
+			Life.LastShiftAt = O.End;
+			Life.SegmentLinesRead |= life::SegShift;
 			Life.EarnedJobs += Change;
 			Life.Record(O.End, A->Place + " shift", Change, 1);
 			StoryText("first-shift", "Dee", "Saw you through the window at " + A->Place + ". Honest money. Don't let it eat your nights.");
@@ -4317,6 +4390,7 @@ void Session::FinishSkip()
 				Life.Record(O.End, "Fine (picked up)", Change, 2);
 				StoryText("first-bust", "Dee", "Heard you got picked up last night. What are you doing? Call me.");
 				Hooks.Text("Marcus", "you lost my bag. that's " + Money(O.Debt) + ". pay up before you get more work.");
+				Conduct(sponsor::Breach::PickedUp, O.End);
 			}
 			else
 			{
@@ -4335,12 +4409,16 @@ void Session::FinishSkip()
 			{
 				++Life.Bans;
 				Hooks.Text("RiverLine", "Security notice: your account is restricted for 24 hours while we review activity linked to another account.");
+				Conduct(sponsor::Breach::AccountRestricted, O.End);
 			}
 			else
 			{
 				Life.EarnedHustles += Change;
 				Life.Record(O.End, "Sam: account session", Change, 2);
 			}
+			break;
+		case life::Kind::Study:
+			StudyDone(*A, O); // a coaching session (paid coaching, P2: SessionStake.cpp)
 			break;
 		case life::Kind::Sleep:
 		case life::Kind::Game:
@@ -4365,6 +4443,9 @@ void Session::FinishSkip()
 	if (bShopSkip)
 	{
 		SettleShop(); // the look, the fitness, the meal's relief and the outcome line (SessionShops.cpp)
+		// Time at a venue counts toward a sponsor's appearance there (next_segment_spec §3: "shop:<venue>:...").
+		const size_t VenueEnd = O.ActivityId.find(':', 5);
+		(void)sponsor::Appear(Life.Sponsors, O.ActivityId.substr(5, VenueEnd == std::string::npos ? std::string::npos : VenueEnd - 5), O.End);
 	}
 	HasOutcome = true;
 	Sound(O.Bad ? SoundId::Bust : Change > 0 ? SoundId::Cash : SoundId::Click, 1.0);
@@ -4623,6 +4704,12 @@ void Session::RenewGear(double From, double To)
 				It->second += 30.0 * net::MinutesPerDay;
 				continue;
 			}
+			if (SponsorCovers(It->first))
+			{
+				// A sponsor pays this one for the period (next_segment_spec §3: the gym on a training deal): no bill.
+				It->second += 30.0 * net::MinutesPerDay;
+				continue;
+			}
 			if (BankrollCents < I->PriceCents)
 			{
 				Hooks.Text(I->Brand, "We couldn't take this month's payment for " + I->Name + ", so your subscription has ended. Resubscribe on GearDrop any time.");
@@ -4678,6 +4765,8 @@ kast::Inputs Session::StreamInputs() const
 	In.Gear = Fx;
 	// How the player looks on camera: a fresh cut and a good outfit (SessionShops.cpp).
 	ShopStream(In);
+	// The sponsors' deals the stream works on (next_segment_spec §3.8: a view of the book; SessionSponsor.cpp).
+	SponsorStream(In);
 	return In;
 }
 
@@ -4703,6 +4792,7 @@ std::string Session::GoLive()
 	StreamWorldAt = WorldMinutes();
 	StreamRealAt = Now;
 	Stream.Start(Channel, StreamInputs());
+	SponsorStreamDone();
 	Hooks.OnAir(true);
 	Sound(SoundId::Alert, 0.7);
 	PlayStreamNotices();
@@ -4734,6 +4824,7 @@ void Session::EndStream(const std::string& Raid)
 		return;
 	}
 	Stream.Stop(Channel, StreamInputs(), Raid);
+	SponsorStreamDone();
 	PlayStreamNotices();
 	PayOut("Kast payout");
 	StreamCard = true;
@@ -4801,6 +4892,7 @@ void Session::StreamStep()
 		{
 			OfflineAt = World;
 			kast::Offline(Channel, World, KastRng);
+			SponsorStreamDone();
 		}
 		return;
 	}
@@ -4810,6 +4902,7 @@ void Session::StreamStep()
 	StreamRealAt = Now;
 	const int MissedBefore = Stream.Missed;
 	Stream.Tick(Channel, StreamInputs(), DWorld, DReal);
+	SponsorStreamDone();
 	if (Stream.Missed > MissedBefore)
 	{
 		// A troll gets through after a bad beat: it gets under the skin.
@@ -4863,6 +4956,7 @@ bool Session::StreamDemote(const std::string& Name)
 Chips Session::StreamRead(const std::string& SponsorId)
 {
 	const Chips Paid = Stream.SponsorRead(Channel, StreamInputs(), SponsorId);
+	SponsorStreamDone();
 	if (Paid > 0)
 	{
 		Sound(SoundId::Cash, 0.5);
@@ -4885,40 +4979,34 @@ void Session::StreamTitle(int Title)
 
 std::string Session::AcceptDeal(const std::string& Id)
 {
-	const kast::Sponsor* S = kast::FindSponsor(Id);
-	if (!S || !Channel.Offers.count(Id))
-	{
-		return "No offer.";
-	}
-	const double World = WorldMinutes();
-	int Active2 = 0;
-	for (const kast::Deal& D : Channel.Deals)
-	{
-		Active2 += D.Until > World ? 1 : 0;
-	}
-	if (Active2 >= kast::MaxDeals)
-	{
-		return "Both sponsor slots are taken.";
-	}
-	kast::Deal D;
-	D.Id = Id;
-	D.Since = World;
-	D.Until = World + static_cast<double>(S->Days) * net::MinutesPerDay;
-	Channel.Deals.push_back(D);
-	Channel.Offers.erase(Id);
-	Hooks.Text(S->Brand, "Welcome aboard! The deal runs " + std::to_string(S->Days) + " days. We pay " + Money(S->PerHourCents) + " for every hour you're live" + (S->ReadCents > 0 ? ", plus " + Money(S->ReadCents) + " a read." : "."));
-	Sound(SoundId::Cash, 0.8);
-	Save();
-	return "";
+	// Kast's offers are the sponsor book's contracts now (next_segment_spec §3.8): signing is SessionSponsor.cpp's, and so
+	// is DeclineDeal.
+	return SignDeal(Id);
 }
 
-void Session::DeclineDeal(const std::string& Id)
+// ------------------------------------------------------------------ the next segment (next_segment_spec §7.2)
+
+rep::Public Session::Record() const
 {
-	if (Channel.Offers.erase(Id))
-	{
-		Channel.Declined.insert(Id);
-		Save();
-	}
+	return rep::Of(Life, Channel, &LivingWorld, WorldMinutes());
+}
+
+std::vector<life::Mark> Session::Marks(double From, double To) const
+{
+	// Each feature's dates (§1.3): the backers' chop days and payments due, the sponsors' period ends, appearance windows
+	// and renewals; one list, in time order (a tie keeps the features' order).
+	std::vector<life::Mark> Out = stake::Marks(Life.Stakes, From, To);
+	const std::vector<life::Mark> Sponsors = sponsor::Marks(Life.Sponsors, From, To);
+	Out.insert(Out.end(), Sponsors.begin(), Sponsors.end());
+	std::stable_sort(Out.begin(), Out.end(), [](const life::Mark& A, const life::Mark& B) { return A.At < B.At; });
+	return Out;
+}
+
+void Session::Conduct(sponsor::Breach Why, double World)
+{
+	// The contract's conduct clause first (a strike, or the end of the deal), then what the backers' record keeps.
+	sponsor::Conduct(Life.Sponsors, Life, BankrollCents, Why, World);
+	StakeConduct(Why);
 }
 
 bool Session::PayRent()
@@ -5574,6 +5662,12 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	}
 	// Northside: fitness fading without workouts; the pawn's reminders, forfeits and shelf (SessionShops.cpp).
 	ShopStep(From, To);
+	// The next segment's steps, in this order (next_segment_spec §1.3): the sponsors' reviews and their stipends, paid in
+	// arrears (income first, so the backers' rent reserve sees it); the backers' due dates and auto-pay; the badges'
+	// monthly review.
+	SponsorStep(From, To);
+	StakeStep(From, To);
+	BadgeStep(From, To);
 	BondTexts(From, To);
 }
 

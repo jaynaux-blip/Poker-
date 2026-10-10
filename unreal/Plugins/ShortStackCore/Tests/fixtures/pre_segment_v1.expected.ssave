@@ -1,0 +1,192 @@
+shortstack.nightone.v2
+bankroll	290477
+name	grinder_3c
+hero	name	Jesse	Cole
+hero	age	24
+hero	country	US
+hero	background	dealerskid
+hero	look	body	0	face	0	skin	3	eyes	1	brows	1	hair	3	haircolor	1	facialhair	1	build	1	height	178	outfit	0	outfitcolor	0	glasses	0	hat	0
+hero	created	1
+clock	12760.00
+life	energy	90.00
+life	heat	0.00
+life	needs	10.00	10.00
+pantry	oodle-cup	2
+pantry	roller-dog	1
+pantry	volt-rush	5
+bought	roller-dog	1
+bought	volt-rush	5
+life	drop	1	-1000000000.00
+life	rent	1	107500	38880.00	1
+life	evicted	0	0.00	0	0.00	0
+life	debt	0
+life	ban	0.00
+life	count	1	0	0	0	0
+life	earned	5177	0
+life	backroom	0	0
+life	live	2	1	1	228052
+liveentry	embercrest-nightly@3	1	12000	1500	5320.00	82	1	1	35	0	5670.00	Embercrest Nightly $120
+liveroster	embercrest-nightly@3	Moe	3
+liveroster	embercrest-nightly@3	Connie	0
+liveroster	embercrest-nightly@3	Lin	3
+liveroster	embercrest-nightly@3	RecklessRocket	6
+liveroster	embercrest-nightly@3	KingsOrBust	3
+liveroster	embercrest-nightly@3	Boots	0
+liveroster	embercrest-nightly@3	Kevin	3
+liveboard	embercrest-nightly@3	WED NIGHTLY\tKucera7\t298352
+liveboard	embercrest-nightly@3	WED NOON DEEPSTACK\tEarl\t151521
+liveboard	embercrest-nightly@3	TUE NIGHTLY\thannah_pichler\t237537
+liveboard	embercrest-nightly@3	TUE NOON DEEPSTACK\tbouchard101\t146718
+liveboard	embercrest-nightly@3	MON NIGHTLY\tColdGrinder\t301838
+liveface	embercrest-nightly@3	Moe	Embercrest regular	
+liveface	embercrest-nightly@3	Connie	Embercrest regular	
+liveface	embercrest-nightly@3	Lin	Embercrest regular	
+liveface	embercrest-nightly@3	RecklessRocket	Embercrest regular	
+liveface	embercrest-nightly@3	KingsOrBust	Embercrest regular	
+liveface	embercrest-nightly@3	Boots	Embercrest regular	
+liveface	embercrest-nightly@3	Kevin	Embercrest regular	
+livetable	embercrest-nightly@3	Moe	17	-24000
+livetable	embercrest-nightly@3	Connie	1	0
+livetable	embercrest-nightly@3	Lin	1	0
+livetable	embercrest-nightly@3	RecklessRocket	1	0
+livecheck	embercrest-nightly@3	5445.00	0.000		
+liveentry	embercrest-nightly@5	1	12000	1500	8200.00	79	1	1	1	228052	8520.00	Embercrest Nightly $120
+liveroster	embercrest-nightly@5	Arturo	3
+liveroster	embercrest-nightly@5	Gloria	0
+liveroster	embercrest-nightly@5	Boots	0
+liveroster	embercrest-nightly@5	BluffSquadTV	4
+liveroster	embercrest-nightly@5	Moe	3
+liveroster	embercrest-nightly@5	Carla	2
+liveroster	embercrest-nightly@5	Lin	3
+liveroster	embercrest-nightly@5	Omar	3
+liveroster	embercrest-nightly@5	Kevin	3
+liveroster	embercrest-nightly@5	CMiller	0
+liveroster	embercrest-nightly@5	Patty	1
+liveroster	embercrest-nightly@5	KingsOrBust	3
+liveroster	embercrest-nightly@5	dusty_muck5	4
+liveroster	embercrest-nightly@5	Priya	3
+liveboard	embercrest-nightly@5	FRI MIDNIGHT TURBO\tiryna.k\t113641
+liveboard	embercrest-nightly@5	FRI NIGHTLY\tSchmidt5\t295550
+liveboard	embercrest-nightly@5	FRI NOON DEEPSTACK\tcian_kelly\t139792
+liveboard	embercrest-nightly@5	THU NIGHTLY\tMelnyk5\t240506
+liveboard	embercrest-nightly@5	THU NOON DEEPSTACK\tChristensen3\t156379
+liveboard	embercrest-nightly@5	WED NIGHTLY\tKucera7\t298352
+liveboard	embercrest-nightly@5	WED NOON DEEPSTACK\tEarl\t151521
+liveboard	embercrest-nightly@5	TUE NIGHTLY\thannah_pichler\t237537
+liveface	embercrest-nightly@5	Arturo	Embercrest regular	
+liveface	embercrest-nightly@5	Gloria	Embercrest regular	
+liveface	embercrest-nightly@5	Boots	Embercrest regular	
+liveface	embercrest-nightly@5	BluffSquadTV	Embercrest regular	
+liveface	embercrest-nightly@5	Moe	Knows you	Thanks for the chips last time.
+liveface	embercrest-nightly@5	Carla	Embercrest regular	
+liveface	embercrest-nightly@5	Lin	Has met you	Good luck again.
+liveface	embercrest-nightly@5	Omar	Embercrest regular	
+liveface	embercrest-nightly@5	Kevin	Embercrest regular	
+liveface	embercrest-nightly@5	CMiller	Embercrest regular	
+liveface	embercrest-nightly@5	Patty	Embercrest regular	
+liveface	embercrest-nightly@5	KingsOrBust	Embercrest regular	
+liveface	embercrest-nightly@5	dusty_muck5	Embercrest regular	
+liveface	embercrest-nightly@5	Priya	Embercrest regular	
+livetable	embercrest-nightly@5	Arturo	17	-24000
+livetable	embercrest-nightly@5	Gloria	1	0
+livetable	embercrest-nightly@5	Boots	1	0
+livetable	embercrest-nightly@5	BluffSquadTV	1	0
+livecheck	embercrest-nightly@5	8325.00	0.000		
+liveentry	embercrest-warmup@6	2	8000	1000	9220.00	77	1	1	0	0	9362.00	Sunday Warm-Up $80
+liveroster	embercrest-warmup@6	OneMoreTable	4
+liveboard	embercrest-warmup@6	SAT MIDNIGHT TURBO\tlorenzorusso\t101516
+liveboard	embercrest-warmup@6	SAT NIGHTLY\tgrinder_3c\t228052
+liveboard	embercrest-warmup@6	SAT BIG STACK\tstoic_kicker\t547269
+liveboard	embercrest-warmup@6	FRI MIDNIGHT TURBO\tiryna.k\t113641
+liveboard	embercrest-warmup@6	FRI NIGHTLY\tSchmidt5\t295550
+liveboard	embercrest-warmup@6	FRI NOON DEEPSTACK\tcian_kelly\t139792
+liveboard	embercrest-warmup@6	THU NIGHTLY\tMelnyk5\t240506
+liveboard	embercrest-warmup@6	THU NOON DEEPSTACK\tChristensen3\t156379
+liveface	embercrest-warmup@6	OneMoreTable	Embercrest regular	
+livecheck	embercrest-warmup@6	9345.00	0.000		
+liveentry	embercrest-nightly@9	0	12000	1500	13980.00	85	1	0	0	0	0.00	Embercrest Nightly $120
+liveroster	embercrest-nightly@9	IronQueen	3
+liveroster	embercrest-nightly@9	Maria G.	3
+liveroster	embercrest-nightly@9	Moe	3
+liveroster	embercrest-nightly@9	Yolanda	1
+liveroster	embercrest-nightly@9	kayla84	3
+liveroster	embercrest-nightly@9	Gus	1
+liveroster	embercrest-nightly@9	Omar	3
+liveboard	embercrest-nightly@9	TUE NIGHTLY\tPetrov5\t307580
+liveboard	embercrest-nightly@9	TUE NOON DEEPSTACK\tlizhang\t140339
+liveboard	embercrest-nightly@9	MON NIGHTLY\tsofiiam\t234568
+liveboard	embercrest-nightly@9	MON NOON DEEPSTACK\tsneaky_river3\t154399
+liveboard	embercrest-nightly@9	SUN SUNDAY\ttiagosantos\t372940
+liveboard	embercrest-nightly@9	SUN WARM-UP\tlouismaes\t155616
+liveboard	embercrest-nightly@9	SAT MIDNIGHT TURBO\tlorenzorusso\t101516
+liveboard	embercrest-nightly@9	SAT NIGHTLY\tgrinder_3c\t228052
+liveface	embercrest-nightly@9	IronQueen	Embercrest regular	
+liveface	embercrest-nightly@9	Maria G.	Embercrest regular	
+liveface	embercrest-nightly@9	Moe	Knows you	Evening. Feeling lucky?
+liveface	embercrest-nightly@9	Yolanda	Embercrest regular	
+liveface	embercrest-nightly@9	kayla84	Embercrest regular	
+liveface	embercrest-nightly@9	Gus	Embercrest regular	
+liveface	embercrest-nightly@9	Omar	Embercrest regular	
+livecheck	embercrest-nightly@9	14080.00	14200.000	ck1 91aad8090c60faee 85 12;r 5a21dcc5 8aadeb6a 479d7918 7fb63e0f;c 40 5 70 0 0 0 0 0 0 0;p 26426 10 3 0 0 0 0 40 6 4 -1 26426;p 16341 9 5 0 0 0 0 40 5 4 -1 14352;p 13421 2 2 0 0 0 0 40 7 2 -1 13421;p 21490 11 0 0 0 0 0 40 6 5 -1 21490;p 27842 11 3 0 0 0 0 40 11 2 -1 34924;p 17394 5 0 0 0 0 3fb0f9dadd0df7b0 40 10 7 -1 17394;p 17118 10 4 0 0 0 0 40 18 8 -1 17118;p 0 4 2 1 75 0 0 31 5 3 49 17745;p 0 9 1 1 72 0 3fa2c6ae0d7f5fa7 38 15 14 21 8955;p 12910 3 5 0 0 0 0 40 8 3 -1 12910;p 20123 5 3 0 0 0 0 40 5 5 -1 21323;p 12458 10 5 0 0 0 0 40 6 3 -1 12458;p 15951 4 2 0 0 0 0 40 3 3 -1 14451;p 15364 11 1 0 0 0 0 40 16 4 -1 7082;p 12147 3 0 0 0 0 0 40 3 3 -1 12147;p 10372 13 4 0 0 0 3fc1d2508b14da82 40 18 8 -1 10372;p 22930 7 0 0 0 0 0 40 7 3 -1 22930;p 0 11 5 1 80 0 3fc52eee068a0dc6 19 7 5 4 2225;p 0 14 4 1 74 0 3fb6732345afe46d 33 15 13 27 9992;p 47061 7 1 0 0 0 0 40 12 10 -1 47361;p 40279 13 2 0 0 0 0 40 10 7 -1 41479;p 19544 9 3 0 0 0 0 40 5 2 -1 19544;p 19056 6 4 0 0 0 0 40 8 4 -1 19056;p 0 1 2 1 82 0 3fd6131faab435f6 11 5 3 41 3996;p 0 5 5 1 83 0 0 10 7 7 39 20228;p 50502 3 2 0 0 0 0 40 7 7 -1 50202;p 5753 2 5 0 0 0 0 40 16 4 -1 6953;p 65206 8 2 0 0 0 0 40 12 9 -1 65206;p 0 7 4 1 73 0 0 33 9 7 19 13417;p 32880 13 1 0 0 0 0 40 20 2 -1 31680;p 18196 3 4 0 0 0 0 40 7 2 -1 18196;p 28282 2 1 0 0 0 0 40 19 6 -1 28282;p 0 1 5 1 81 0 3fd1ff8855e6f277 12 6 5 40 5328;p 21331 7 2 0 0 0 0 40 4 3 -1 23478;p 29395 11 2 0 0 0 0 40 23 14 -1 29395;p 17403 6 2 0 0 0 0 40 20 7 -1 17403;p 0 12 5 1 76 0 3f936ec4710c19be 25 10 10 68 7768;p 11194 6 1 0 0 0 0 40 12 3 -1 11194;p 0 7 0 1 84 0 0 10 5 3 71 18077;p 36686 5 4 0 0 0 0 40 18 5 -1 35186;p 0 1 0 1 79 0 3fca0d66abac24a6 21 10 4 20 5005;p 0 11 5 1 71 0 3fa82e8013d0df9e 39 9 5 34 9763;p 34825 8 4 0 0 0 0 40 15 7 -1 33325;p 28897 6 5 0 0 0 0 40 20 5 -1 29197;p 56099 12 1 0 0 0 0 40 5 3 -1 56099;p 21949 4 5 0 0 0 0 40 11 7 -1 22249;p 28471 3 3 0 0 0 0 40 12 10 -1 28471;p 8366 10 0 0 0 0 0 40 19 7 -1 8366;p 8729 13 3 0 0 0 3fa683a67203af0f 40 8 7 -1 8729;p 37352 4 4 0 0 0 0 40 7 5 -1 37352;p 21108 5 5 0 0 0 0 40 7 3 -1 21108;p 24269 4 1 0 0 0 0 40 9 8 -1 24269;p 14798 3 1 0 0 0 3fa8480a20694436 40 9 4 -1 15098;p 43618 11 4 0 0 0 0 40 12 6 -1 44818;p 31479 6 0 0 0 0 0 40 11 7 -1 31179;p 25762 8 5 0 0 0 0 40 11 6 -1 25762;p 11609 4 0 0 0 0 0 40 6 3 -1 12809;p 30297 12 0 0 0 0 0 40 13 8 -1 30297;p 26530 10 1 0 0 0 0 40 4 2 -1 24723;p 18779 8 3 0 0 0 0 40 17 8 -1 19079;p 14425 8 1 0 0 0 0 40 13 10 -1 15625;p 0 8 2 1 78 0 3f990b3b2d5c371b 23 5 3 42 4704;p 21831 5 2 0 0 0 0 40 14 10 -1 22131;p 22328 5 1 0 0 0 0 40 8 5 -1 22328;p 19601 13 5 0 0 0 0 40 12 9 -1 19601;p 11971 6 3 0 0 0 0 40 10 4 -1 11971;p 32294 9 2 0 0 0 0 40 17 14 -1 33983;p 29102 10 2 0 0 0 0 40 9 3 -1 30909;p 23458 12 2 0 0 0 0 40 12 4 -1 23758;p 4108 9 0 0 0 0 3faec80d2b0cca30 40 11 7 -1 4108;p 13272 7 3 0 0 0 3fbf063fb16ddd9f 40 9 7 -1 13272;p 36091 7 5 0 0 0 0 40 5 4 -1 36091;p 12349 2 3 0 0 0 0 40 16 6 -1 13549;p 16771 12 5 0 0 0 0 40 10 6 -1 16771;p 21509 12 4 0 0 0 0 40 5 4 -1 25232;p 35306 7 4 0 0 0 0 40 24 4 -1 32859;p 27964 12 3 0 0 0 0 40 11 6 -1 23941;p 47713 9 4 0 0 0 0 40 12 2 -1 48013;p 0 3 5 1 85 0 3fbd777ec160c114 10 4 4 52 906;p 11854 13 0 0 0 0 0 40 2 2 -1 11854;p 22138 2 4 0 0 0 0 40 12 6 -1 19738;p 21821 4 3 0 0 0 0 40 7 7 -1 21821;p 27709 8 0 0 0 0 0 40 12 4 -1 27709;p 48393 2 0 0 0 0 0 40 8 6 -1 48393;p 0 2 5 1 77 0 0 24 5 3 83 21986;t 2 3 83 31 2 72 80 26;t 3 0 14 52 25 46 30 9;t 4 4 56 51 12 81 49 45;t 5 1 5 63 62 10 39 50;t 6 4 54 37 35 65 22 43;t 7 0 16 19 33 70 75 71;t 8 2 82 60 27 59 42 55;t 9 3 69 -1 66 21 77 1;t 10 0 47 58 67 0 6 11;t 11 2 3 13 34 4 53 -1;t 12 1 57 44 68 76 74 73;t 13 0 79 29 20 48 15 64	hands=40\tmet=npc:Mei,npc:Big Lou\nbreak=0
+night	1
+night	2
+night	3
+night	4
+night	5
+night	6
+night	7
+night	8
+night	9
+ledger	3660.00	1	5177	Wash & Fold shift
+ledger	3660.05	8	-534	Lucky Penny #212 · 2 items
+ledger	3660.05	8	-1925	Penny Drop · 4 items
+ledger	3660.08	3	-122500	Rent
+ledger	5320.00	0	-10500	Embercrest Nightly $120: buy-in
+ledger	5320.00	0	-1500	Embercrest Nightly $120: entry fee
+ledger	5320.00	3	-290	The 14 bus up to the Embercrest
+ledger	5675.00	3	-290	The 14 bus home
+ledger	8200.00	0	-10500	Embercrest Nightly $120: buy-in
+ledger	8200.00	0	-1500	Embercrest Nightly $120: entry fee
+ledger	8200.00	3	-290	The 14 bus up to the Embercrest
+ledger	8520.00	4	228052	Embercrest Nightly $120: 1st of 79
+ledger	8525.00	3	-290	The 14 bus home
+ledger	9220.00	0	-7000	Sunday Warm-Up $80: buy-in
+ledger	9220.00	0	-1000	Sunday Warm-Up $80: entry fee
+ledger	9220.00	3	-290	The 14 bus up to the Embercrest
+ledger	9362.00	0	7000	Sunday Warm-Up $80: refunded buy-in (not enough players)
+ledger	9362.00	0	1000	Sunday Warm-Up $80: refunded entry fee
+ledger	9365.00	3	-290	The 14 bus home
+ledger	13980.00	0	-10500	Embercrest Nightly $120: buy-in
+ledger	13980.00	0	-1500	Embercrest Nightly $120: entry fee
+ledger	13980.00	3	-290	The 14 bus up to the Embercrest
+text	bond-slot:4:0
+text	bond-slot:6:0
+text	bond:3:Moe
+text	bond:5:Arturo
+text	first-shift
+text	marcus-intro
+text	needs:hungry:2
+text	needs:hungry:3
+text	needs:hungry:5
+text	needs:hungry:9
+text	rent-paid
+text	world:10080:1602:3
+leds	0	1	1
+kast	ch	0	0	0.0000	0.00	0.0	0	0	0	0	0	13980.00	0	0
+kast	earn	0	0	0	0	0	0	0
+kast	growth	0	1260	0.0	0	0	1	0	0.0	0	0	0	9	0
+closet	seeded
+closet	own	bottom.jeans.mid
+closet	own	bottom.shorts.khaki
+closet	own	outer.hoodie.charcoal
+closet	own	shoes.sneakers.white
+closet	own	top.tee.white
+closet	wear	1	outer.hoodie.charcoal
+closet	wear	2	bottom.jeans.mid
+closet	wear	3	shoes.sneakers.white
+fit	0.0000	-1000000000.00	0	0	0.00	13980.00
+groom	-8513.00	-8513.00	0
+visit	store	1	3660.05	534	roller-dog	0	0
+pawn	next	412
+meal	0.00	-1000000000.00
+town	ray	1	1	2	1357136364	0

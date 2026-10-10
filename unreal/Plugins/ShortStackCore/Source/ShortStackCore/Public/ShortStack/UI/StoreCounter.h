@@ -95,6 +95,17 @@ struct StreetHudInfo
 	/** The weather by the clock: weather::Sky as an int (-1 shows none), and the rain's strength 0..1. */
 	int Weather = -1;
 	float Rain = 0.0f;
+
+	// ---- the next segment (next_segment_spec §7.3)
+	/** A sponsor's duty the hero is due at (an appearance window, sponsor::Window): the chip under the clock (StreetHud.cpp,
+	 *  core-tableui). An empty Label shows none; From and To are world minutes. */
+	struct Duty
+	{
+		std::string Label; // "Lucky Penny: an hour behind the counter"
+		double From = 0.0;
+		double To = 0.0;
+	};
+	Duty Due;
 };
 
 /**

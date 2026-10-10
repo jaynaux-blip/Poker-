@@ -795,17 +795,18 @@ int BarberQueue(double World)
 
 double Renown(const Session& S)
 {
-	const double Followers = std::min(1.0, std::log10(1.0 + static_cast<double>(std::max(0, S.Channel.Followers))) / 5.0);
-	const double Fans = std::min(1.0, static_cast<double>(S.Channel.Superfans()) / 40.0);
-	const double Cashes = std::min(1.0, static_cast<double>(S.Life.LiveCashes) / 15.0);
+	// The public record's formula (next_segment_spec §1.1), so the town and talk keep their behavior: the titles on the
+	// wall are the wins among the entries kept (the last sixty), as the town has always counted them. rep::Public::Titles
+	// counts them for life (Life.LiveWins), which differs once a career passes sixty live entries; moving the town onto
+	// that is a behavior change, not a Phase A seam.
+	rep::Public P = S.Record();
 	int Wall = 0;
 	for (const life::LiveEntry& E : S.Life.LiveEntries)
 	{
 		Wall += E.State == life::LiveEntry::Finished && E.Place == 1 ? 1 : 0;
 	}
-	const double Wins = std::min(1.0, static_cast<double>(Wall) / 4.0);
-	const double Awards = std::min(1.0, static_cast<double>(S.Living().HeroAwards().size()) / 2.0);
-	return std::min(1.0, 0.35 * Followers + 0.15 * Fans + 0.15 * Cashes + 0.15 * Wins + 0.2 * Awards);
+	P.Titles = Wall;
+	return rep::RenownOf(P);
 }
 
 uint32_t LookHash(const hero::Look& L, const wardrobe::Closet& C)
