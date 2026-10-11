@@ -5,7 +5,9 @@
 
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/UI/BadgeArt.h"
 #include "ShortStack/UI/Portrait.h"
+#include "ShortStack/UI/TableHud.h"
 
 #include <algorithm>
 #include <cmath>
@@ -189,8 +191,17 @@ FrontEndInfo DescribeSession(const Session& S, bool HasSave)
 	}
 	if (!S.History.empty())
 	{
-		const HistoryEntry& Last = S.History.back();
+		const HistoryEntry& Last = S.History.front(); // the newest (Session keeps History newest first)
 		Out.LastResult = Last.Name + " \xC2\xB7 " + Ordinal(Last.Place);
+	}
+	// The marks the career has earned in public (§5.6): the club crest and the network's one badge.
+	if (const badge::Badge* Club = S.HeroBadges().Find(badge::Kind::Club))
+	{
+		Out.ClubTier = Club->Tier;
+	}
+	if (const badge::Badge* Top = badge::Top(S.HeroBadges(), badge::Network, badge::FrameNone))
+	{
+		Out.TopBadge = *Top;
 	}
 	Out.World = S.WorldMinutes();
 	Out.RentStage = S.Life.RentStage;
@@ -570,7 +581,7 @@ void FrontEnd::HandleKey(const std::string& Name, double Now)
 		}
 		else if (Name == "Q" || Name == "TabPrev" || Name == "E" || Name == "Tab" || Name == "TabNext")
 		{
-			SelTab = (SelTab + (Name == "Q" || Name == "TabPrev" ? 3 : 1)) % 4;
+			SelTab = (SelTab + (Name == "Q" || Name == "TabPrev" ? 4 : 1)) % 5;
 			SelRow = 0;
 			SelAt = Now;
 			Sound(SoundId::Click, 0.4);
@@ -737,19 +748,37 @@ std::vector<FrontEnd::SettingRow> FrontEnd::Rows(int ForTab)
 		Slider("Master volume", "Everything you hear.", -1, 0, 100, 5, "", [&S] { return S.MasterVolume; }, [&S](int V) { S.MasterVolume = V; });
 		Slider("Effects", "Chips, cards, the laptop and the phone.", -1, 0, 100, 5, "", [&S] { return S.EffectsVolume; }, [&S](int V) { S.EffectsVolume = V; });
 		Slider("Ambience", "Rain on the window, thunder and the city at night.", -1, 0, 100, 5, "", [&S] { return S.AmbienceVolume; }, [&S](int V) { S.AmbienceVolume = V; });
+		// The card room's voices and captions (next_segment_spec §4.9).
+		Slider("Voices", TableSettingHelp("voices", Gamepad), -1, 0, 100, 5, "", [&S] { return S.VoicesVolume; }, [&S](int V) { S.VoicesVolume = V; });
 		Choice("Sound in background", "Keeps playing when another window is in front: a second screen, a stream, a chat.", -1, OffOn,
 			[&S] { return S.BackgroundAudio ? 1 : 0; }, [&S](int V) { S.BackgroundAudio = V != 0; });
+		Choice("Captions", TableSettingHelp("captions", Gamepad), -1, {"OFF", "DIALOGUE", "EVERYTHING"}, [&S] { return std::clamp(S.Captions, 0, 2); },
+			[&S](int V) { S.Captions = V; });
+		{
+			static const int Sizes[] = {100, 125, 150};
+			Choice("Caption size", TableSettingHelp("captionsize", Gamepad), -1, {"100%", "125%", "150%"},
+				[&S] { return S.CaptionSize >= 150 ? 2 : S.CaptionSize >= 125 ? 1 : 0; }, [&S](int V) { S.CaptionSize = Sizes[std::clamp(V, 0, 2)]; });
+		}
+		Slider("Caption background", TableSettingHelp("captionbg", Gamepad), -1, 0, 100, 4, "%", [&S] { return S.CaptionBackdrop; }, [&S](int V) { S.CaptionBackdrop = V; });
+		Choice("Speaker names", TableSettingHelp("speakernames", Gamepad), -1, OffOn, [&S] { return S.SpeakerNames ? 1 : 0; }, [&S](int V) { S.SpeakerNames = V != 0; });
 		break;
-	default:
+	case 3:
 		Slider("Look sensitivity", "How far the view turns as you move the mouse or the right stick: sitting back at the desk, out on the street, at a card table.", -1, 20, 200, 10,
 			"%", [&S] { return S.LookSensitivity; }, [&S](int V) { S.LookSensitivity = V; });
 		Choice("Invert look", "Moving the mouse or the right stick up looks down.", -1, OffOn, [&S] { return S.InvertLook ? 1 : 0; }, [&S](int V) { S.InvertLook = V != 0; });
 		Choice("Control hints", "Shows the controls reminder after you sit down at the laptop or at a card table, and on the street.", -1, OffOn, [&S] { return S.ShowHints ? 1 : 0; },
 			[&S](int V) { S.ShowHints = V != 0; });
-		Choice("Table pace",
-			std::string("At a live table: how long the other players take to act, and how quickly a hand you've folded plays out. Your own decisions always wait for you. ") +
-				(Gamepad ? "Right on the d-pad changes it at the table." : "T changes it at the table."),
-			-1, {"LIVE", "BRISK", "FAST"}, [&S] { return S.TablePace; }, [&S](int V) { S.TablePace = V; });
+		break;
+	default:
+		// The live table (next_segment_spec §6.7): the pace, the talk, what a stack tells you, and the HUD.
+		Choice("Table pace", TableSettingHelp("tablepace", Gamepad), -1, {"LIVE", "BRISK", "FAST"}, [&S] { return S.TablePace; }, [&S](int V) { S.TablePace = V; });
+		Choice("Table talk", TableSettingHelp("tabletalk", Gamepad), -1, {"QUIET", "NORMAL", "LIVELY"}, [&S] { return std::clamp(S.TableTalk, 0, 2); }, [&S](int V) { S.TableTalk = V; });
+		// SHOWN first: the default, and the most a seat can tell you.
+		Choice("Stack sizes", TableSettingHelp("stackreadout", Gamepad), -1, {"SHOWN", "THE ROOM'S WAY", "YOUR EYES"}, [&S] { return 2 - std::clamp(S.StackReadout, 0, 2); },
+			[&S](int V) { S.StackReadout = 2 - V; });
+		Choice("Stack units", TableSettingHelp("stackunits", Gamepad), -1, {"BIG BLINDS", "CHIPS"}, [&S] { return std::clamp(S.StackUnits, 0, 1); }, [&S](int V) { S.StackUnits = V; });
+		Choice("Turn cue", TableSettingHelp("turncue", Gamepad), -1, {"OFF", "DEALER", "DEALER AND SOUND"}, [&S] { return std::clamp(S.TurnCue, 0, 2); }, [&S](int V) { S.TurnCue = V; });
+		Slider("HUD size", TableSettingHelp("hudscale", Gamepad), -1, 80, 130, 5, "%", [&S] { return S.HudScale; }, [&S](int V) { S.HudScale = V; });
 		break;
 	}
 	return Out;
@@ -1150,6 +1179,39 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 				Title(Info.HeroName);
 			}
 			Row("BANKROLL", Money(Info.BankrollCents), MenuGold);
+			if (Info.ClubTier > 0 || Info.TopBadge.K != badge::Kind::Count)
+			{
+				// The career's marks (§5.6): the Embercrest club crest and the network's one badge, at 24, with their words.
+				Yc += 40.0f;
+				if (CardPaint)
+				{
+					C->FillRect({X + Pad, Yc + 13.0f, Inner, 1.0f}, Paint(F(MenuInk, 0.07f * A)));
+					TrackedText(*C, "EARNED", X + Pad, Yc, 13.0f, 700, F(MenuMuted, A), 2.4f);
+					float Rx = X + CardW - Pad;
+					auto Mark = [&](const badge::Badge& B) {
+						const std::string Word = badge::Label(B);
+						Rx -= C->Measure(Word, 15.0f, 700);
+						C->Text(Word, Rx, Yc, Ts(15.0f, 700, F(MenuInk, A)));
+						Rx -= 30.0f;
+						const float Ga = C->GetAlpha();
+						C->SetAlpha(Ga * A);
+						badgeart::Draw(*C, B, Rx + 12.0f, Yc - 6.0f, 24.0f, LastNow);
+						C->SetAlpha(Ga);
+						Rx -= 22.0f;
+					};
+					if (Info.TopBadge.K != badge::Kind::Count && Info.TopBadge.K != badge::Kind::Club)
+					{
+						Mark(Info.TopBadge);
+					}
+					if (Info.ClubTier > 0)
+					{
+						badge::Badge Club;
+						Club.K = badge::Kind::Club;
+						Club.Tier = Info.ClubTier;
+						Mark(Club);
+					}
+				}
+			}
 			Row("TOURNAMENTS PLAYED", std::to_string(Info.Tournaments), MenuInk);
 			if (!Info.BestFinish.empty())
 			{
@@ -1352,11 +1414,11 @@ void FrontEnd::SettingsPage(double Now)
 	TrackedText(*C, "SETTINGS", X, 200.0f, 84.0f, 900, F(MenuInk), 4.0f);
 
 	// Tabs.
-	static const char* const Tabs[] = {"GRAPHICS", "DISPLAY", "AUDIO", "CONTROLS"};
+	static const char* const Tabs[] = {"GRAPHICS", "DISPLAY", "AUDIO", "CONTROLS", "GAMEPLAY"};
 	float Tx = X;
 	const float TabY = 280.0f;
 	Tx += Glyph(*C, Gamepad ? "LB" : "Q", Tx, TabY + 3.0f, Fade) + 26.0f;
-	for (int I = 0; I < 4; ++I)
+	for (int I = 0; I < 5; ++I)
 	{
 		const float Tw = TrackedWidth(*C, Tabs[I], 18.0f, 900, 3.4f);
 		const Rect Hit = {Tx - 12.0f, TabY - 30.0f, Tw + 24.0f, 46.0f};

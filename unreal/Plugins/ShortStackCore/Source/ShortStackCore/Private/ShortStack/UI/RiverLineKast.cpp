@@ -6,7 +6,11 @@
 #include "RiverLineShared.h"
 
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Badges.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/UI/Avatars.h"
+#include "ShortStack/UI/BadgeArt.h"
+#include "ShortStack/UI/SponsorArt.h"
 #include "ShortStack/UI/StreamArt.h"
 
 #include <algorithm>
@@ -249,6 +253,23 @@ std::string GoalText(const kast::Goal& G)
 Color LoyaltyColor(double L)
 {
 	return L >= kast::SuperfanLoyalty ? Hex(0xa3e635) : L >= kast::RegularLoyalty ? Hex(0xa78bfa) : Hex(0x6b6385);
+}
+
+/** The facecam dressed from the closet (next_segment_spec §3.9): the jacket's colour (else the tee's), the chest patch. */
+void DressCam(const Session& S, streamart::Cam& Look, double World)
+{
+	const wardrobe::Closet& Cl = S.Life.Closet;
+	const std::string& Chest = Cl.Patches[0];
+	if (!Chest.empty() && sponsor::Active(S.Life.Sponsors, Chest, World))
+	{
+		Look.Patch = Chest;
+	}
+	const wardrobe::Garment* G = wardrobe::Find(Cl.Worn[static_cast<size_t>(wardrobe::Slot::Outer)]);
+	G = G ? G : wardrobe::Find(Cl.Worn[static_cast<size_t>(wardrobe::Slot::Top)]);
+	if (G)
+	{
+		Look.Hoodie = wardrobe::Tone(*G);
+	}
 }
 } // namespace rlkast_detail
 
@@ -681,6 +702,7 @@ void RiverLine::StreamOverlay(const Rect& R, float Scale, double Now)
 	Look.Time = Now;
 	Look.Live = St.Live;
 	Look.Leds = S.RoomGlow(Now);
+	rlkast_detail::DressCam(S, Look, World);
 	const float CamW = (Fx.GreenScreen ? 330.0f : 300.0f) * Scale;
 	const float CamH = CamW * 9.0f / 16.0f * (Fx.GreenScreen ? 1.15f : 1.0f);
 	const Rect Cam{R.X + R.W - CamW - 14.0f * Scale, R.Y + R.H - CamH - 14.0f * Scale, CamW, CamH};
@@ -691,9 +713,16 @@ void RiverLine::StreamOverlay(const Rect& R, float Scale, double Now)
 	streamart::Facecam(*C, Cam, Look);
 	if (Fx.Overlay && !Fx.GreenScreen)
 	{
+		// The name plate, and the player's one badge for the stream (next_segment_spec §5.4: one glyph, Stream scope).
+		const badge::Badge* Top = badge::Top(S.HeroBadges(), badge::Stream, badge::FrameNone);
+		const float PlateW = (Top ? 164.0f : 140.0f) * Scale;
 		C->StrokeRoundRect(Cam, 6.0f * Scale, KViolet, 3.0f * Scale);
-		C->FillRoundRect({Cam.X, Cam.Y - 24.0f * Scale, 140.0f * Scale, 22.0f * Scale}, 6.0f * Scale, KViolet);
+		C->FillRoundRect({Cam.X, Cam.Y - 24.0f * Scale, PlateW, 22.0f * Scale}, 6.0f * Scale, KViolet);
 		UI.Text(S.HeroName, Cam.X + 10.0f * Scale, Cam.Y - 8.0f * Scale, Ts(13.0f * Scale, 900, Hex(0xffffff), Align::Left, Baseline::Alphabetic, false, 124.0f * Scale));
+		if (Top)
+		{
+			badgeart::Draw(*C, *Top, Cam.X + PlateW - 13.0f * Scale, Cam.Y - 13.0f * Scale, 16.0f * Scale, Now);
+		}
 	}
 	// The overlay pack: a rent goal and the latest supporters along the bottom.
 	if (Fx.Overlay)
@@ -722,19 +751,20 @@ void RiverLine::StreamOverlay(const Rect& R, float Scale, double Now)
 			UI.Text(Latest, Goal.X + Goal.W + 20.0f * Scale, Goal.Y + 21.0f * Scale, Ts(13.0f * Scale, 700, KInk));
 		}
 	}
-	// Sponsors in the corner.
+	// Sponsors in the corner: each overlay slot's brand, its mark and its name (the sponsor book's deals, §3.9).
 	float Sx = R.X + R.W - 14.0f * Scale;
-	for (const kast::Deal& D : S.Channel.Deals)
+	for (const kast::Deal& D : sponsor::StreamView(S.Life.Sponsors, World))
 	{
-		const kast::Sponsor* Sp = D.Until > World ? kast::FindSponsor(D.Id) : nullptr;
+		const kast::Sponsor* Sp = D.Overlay ? kast::FindSponsor(D.Id) : nullptr;
 		if (!Sp)
 		{
 			continue;
 		}
-		const float W = UI.Measure(Sp->Brand, 13.0f * Scale, 900) + 24.0f * Scale;
+		const float W = UI.Measure(Sp->Brand, 13.0f * Scale, 900) + 50.0f * Scale;
 		Sx -= W;
 		C->FillRoundRect({Sx, R.Y + 46.0f * Scale, W, 26.0f * Scale}, 8.0f * Scale, NetA(Hex(Sp->Color), 0.9f));
-		UI.Text(Sp->Brand, Sx + W / 2.0f, R.Y + 64.0f * Scale, Ts(13.0f * Scale, 900, Hex(0x0b0716), Align::Center));
+		sponsorart::Mark(*C, D.Id, {Sx + 4.0f * Scale, R.Y + 48.0f * Scale, 22.0f * Scale, 22.0f * Scale});
+		UI.Text(Sp->Brand, Sx + 30.0f * Scale, R.Y + 64.0f * Scale, Ts(13.0f * Scale, 900, Hex(0x0b0716)));
 		Sx -= 8.0f * Scale;
 	}
 	// Ad break.
@@ -1076,16 +1106,16 @@ void RiverLine::KastStudio(double Now)
 		float X = Live ? 252.0f : 20.0f;
 		const float Y = Cy + 78.0f;
 		bool Any = false;
-		for (const kast::Deal& D : Ch.Deals)
+		for (const kast::Deal& D : sponsor::StreamView(S.Life.Sponsors, World))
 		{
-			const kast::Sponsor* Sp = D.Until > World ? kast::FindSponsor(D.Id) : nullptr;
+			const kast::Sponsor* Sp = D.ReadCents > 0 ? kast::FindSponsor(D.Id) : nullptr;
 			if (!Sp)
 			{
 				continue;
 			}
 			Any = true;
 			const bool Can = Live && D.ReadAt < St.StartWorld;
-			const std::string Label = Can ? "Read for " + Sp->Brand + "  +" + Money(Sp->ReadCents) : Sp->Brand + (Live ? ": read done" : ": read when live");
+			const std::string Label = Can ? "Read for " + Sp->Brand + "  +" + Money(D.ReadCents) : Sp->Brand + (Live ? ": read done" : ": read when live");
 			const float W = UI.Measure(Label, 13.0f, 800) + 30.0f;
 			const Rect B{X, Y, W, 32.0f};
 			const Ui::ClickState Cs = UI.Clickable("kastread" + D.Id, B, Can);
@@ -1099,8 +1129,12 @@ void RiverLine::KastStudio(double Now)
 		}
 		if (!Any)
 		{
-			UI.Text(Ch.Offers.empty() ? "No sponsors yet: they find you at " + Grouped(kast::Sponsors().front().Followers) + " followers." : "A sponsor offer is waiting on the Channel page.", X, Y + 21.0f,
-				Ts(13.0f, 600, Ch.Offers.empty() ? KDim : KGold));
+			bool Offer = false;
+			for (const sponsor::Contract& K : S.Life.Sponsors.Contracts)
+			{
+				Offer = Offer || ((K.St == sponsor::State::Offered || K.St == sponsor::State::Countered) && K.ExpiresAt > World);
+			}
+			UI.Text(Offer ? "A sponsor's offer is waiting in Mail." : "No sponsors reading yet. Brands write by Mail when they've seen enough.", X, Y + 21.0f, Ts(13.0f, 600, Offer ? KGold : KDim));
 		}
 		// The room's LEDs: a chip that opens their controls (not while the kit is in storage).
 		float Right = 1028.0f;
@@ -1640,64 +1674,59 @@ void RiverLine::KastChannel(double Now)
 		C->FillRoundRect(R, 16.0f, KPanel);
 		UI.Text("Sponsors", R.X + 20.0f, R.Y + 34.0f, Ts(18.0f, 900, KInk));
 		UI.Text(std::to_string(kast::MaxDeals) + " slots on the overlay", R.X + R.W - 20.0f, R.Y + 34.0f, Ts(13.0f, 600, KMuted, Align::Right));
+		// The stream-side deals (the sponsor book's, §3.9): this period's hours and reads against what the brand asks.
+		// Offers come by Mail now; this panel only points there.
 		float Sy = R.Y + 54.0f;
 		bool Any = false;
-		for (const kast::Deal& D : Ch.Deals)
+		for (const sponsor::Contract& K : S.Life.Sponsors.Contracts)
 		{
-			const kast::Sponsor* Sp = D.Until > World ? kast::FindSponsor(D.Id) : nullptr;
-			if (!Sp || Sy > R.Y + R.H - 60.0f)
+			const kast::Sponsor* Sp = (K.T.PerLiveHourCents > 0 || K.T.PerReadCents > 0) && sponsor::Running(S.Life.Sponsors, K.Brand, World) == &K ? kast::FindSponsor(K.Brand) : nullptr;
+			if (!Sp || Sy > R.Y + R.H - 76.0f)
 			{
 				continue;
 			}
 			Any = true;
-			const Rect Row{R.X + 14.0f, Sy, R.W - 28.0f, 60.0f};
+			const Rect Row{R.X + 14.0f, Sy, R.W - 28.0f, 78.0f};
 			C->FillRoundRect(Row, 12.0f, KPanel2);
 			C->FillRoundRect({Row.X, Row.Y, 6.0f, Row.H}, 3.0f, Hex(Sp->Color));
-			UI.Text(Sp->Brand, Row.X + 20.0f, Row.Y + 25.0f, Ts(15.0f, 900, Hex(Sp->Color)));
-			UI.Text(Sp->Product, Row.X + 20.0f, Row.Y + 45.0f, Ts(12.0f, 600, KMuted));
-			UI.Text(Money(D.EarnedCents) + " earned", Row.X + Row.W - 16.0f, Row.Y + 25.0f, Ts(14.0f, 800, KLime, Align::Right, Baseline::Alphabetic, true));
-			UI.Text(std::to_string(static_cast<int>(std::ceil((D.Until - World) / net::MinutesPerDay))) + " days left", Row.X + Row.W - 16.0f, Row.Y + 45.0f, Ts(12.0f, 600, KMuted, Align::Right));
-			Sy += 68.0f;
-		}
-		for (const std::string& Id : Ch.Offers)
-		{
-			const kast::Sponsor* Sp = kast::FindSponsor(Id);
-			if (!Sp || Sy > R.Y + R.H - 80.0f)
+			sponsorart::Mark(*C, K.Brand, {Row.X + 16.0f, Row.Y + 12.0f, 30.0f, 30.0f});
+			UI.Text(Sp->Brand, Row.X + 54.0f, Row.Y + 25.0f, Ts(15.0f, 900, Hex(Sp->Color)));
+			UI.Text(Money(K.PaidCents) + " earned", Row.X + Row.W - 16.0f, Row.Y + 25.0f, Ts(14.0f, 800, KLime, Align::Right, Baseline::Alphabetic, true));
+			UI.Text(std::to_string(static_cast<int>(std::ceil((K.Until - World) / net::MinutesPerDay))) + " days left", Row.X + Row.W - 16.0f, Row.Y + 44.0f, Ts(12.0f, 600, KMuted, Align::Right));
+			// Hours and reads this period, as the brand counts them.
+			const sponsor::Tally T = sponsor::Measure(K, S.Life, Ch, World, S.Stream.Live ? S.Stream.StartWorld : -1.0);
+			const int P = std::max(1, std::min(K.Period + 1, sponsor::Periods(K)));
+			float Kx = Row.X + 54.0f;
+			for (const sponsor::Ask A : {sponsor::Ask::LiveHours, sponsor::Ask::Reads})
 			{
-				continue;
-			}
-			Any = true;
-			const Rect Row{R.X + 14.0f, Sy, R.W - 28.0f, 118.0f};
-			C->FillRoundRect(Row, 12.0f, NetA(Hex(Sp->Color), 0.1f));
-			C->StrokeRoundRect(Row, 12.0f, NetA(Hex(Sp->Color), 0.5f), 1.5f);
-			NetPill(*C, "OFFER", Row.X + 14.0f, Row.Y + 12.0f, KGold, true, 10.0f);
-			UI.Text(Sp->Brand, Row.X + 76.0f, Row.Y + 27.0f, Ts(16.0f, 900, Hex(Sp->Color)));
-			UI.Text(Money(Sp->PerHourCents) + "/hour live \xC2\xB7 " + Money(Sp->ReadCents) + " a read", Row.X + Row.W - 14.0f, Row.Y + 27.0f, Ts(13.0f, 800, KInk, Align::Right));
-			NetParagraph(*C, Sp->Pitch, Row.X + 14.0f, Row.Y + 52.0f, Row.W - 28.0f, 12.5f, 500, KMuted, 17.0f, 2);
-			if (AppButton("kastaccept" + Id, {Row.X + 14.0f, Row.Y + 80.0f, 140.0f, 30.0f}, "Accept", KLime, Hex(0x1b1036), true))
-			{
-				const std::string Why = S.AcceptDeal(Id);
-				if (!Why.empty())
+				const double Need = sponsor::Need(K, A, P);
+				if (Need <= 0.0)
 				{
-					Toast = Why;
-					ToastAt = Now;
+					continue;
 				}
-				break;
+				const double Have = sponsor::Have(T, A);
+				const std::string Label = A == sponsor::Ask::LiveHours ? Fixed(Have, 1) + " / " + Fixed(Need, 0) + " h" : std::to_string(static_cast<int>(Have)) + " / " + std::to_string(static_cast<int>(std::ceil(Need))) + " reads";
+				const float Bw = 150.0f;
+				C->FillRoundRect({Kx, Row.Y + 54.0f, Bw, 6.0f}, 3.0f, Hex(0x2a2238));
+				C->FillRoundRect({Kx, Row.Y + 54.0f, std::max(6.0f, Bw * Nf(std::clamp(Have / Need, 0.0, 1.0))), 6.0f}, 3.0f, Have >= Need * 0.8 ? KLime : Hex(Sp->Color));
+				UI.Text(Label, Kx + Bw + 8.0f, Row.Y + 61.0f, Ts(11.5f, 700, KMuted));
+				Kx += Bw + 96.0f;
 			}
-			const Rect No{Row.X + 164.0f, Row.Y + 80.0f, 100.0f, 30.0f};
-			const Ui::ClickState Cs = UI.Clickable("kastdecline" + Id, No);
-			C->FillRoundRect(No, 10.0f, Cs.Hover ? KPanel2 : Hex(0x1a1426));
-			UI.Text("Decline", No.X + No.W / 2.0f, No.Y + 20.0f, Ts(13.0f, 700, KMuted, Align::Center));
-			if (Cs.Clicked)
+			if (K.Legacy)
 			{
-				S.DeclineDeal(Id);
-				break;
+				UI.Text("Old Kast terms: nothing asked", Kx, Row.Y + 61.0f, Ts(11.5f, 600, KDim));
 			}
-			Sy += 128.0f;
+			Sy += 86.0f;
 		}
+		bool Offer = false;
+		for (const sponsor::Contract& K : S.Life.Sponsors.Contracts)
+		{
+			Offer = Offer || ((K.St == sponsor::State::Offered || K.St == sponsor::State::Countered) && K.ExpiresAt > World);
+		}
+		const std::string Note = Offer ? "An offer is waiting in Mail." : Any ? "Offers are in Mail." : "Offers are in Mail. Brands write when the channel has the numbers they want; the big ones want a Partner.";
+		Sy = NetParagraph(*C, Note, R.X + 20.0f, Sy + 22.0f, R.W - 40.0f, 14.0f, Offer ? 800 : 500, Offer ? KGold : KMuted, 20.0f, 3);
 		if (!Any)
 		{
-			Sy = NetParagraph(*C, "Brands watch the follower count. The first offers come at " + Grouped(kast::Sponsors().front().Followers) + " followers; the big ones want a Partner.", R.X + 20.0f, Sy + 20.0f, R.W - 40.0f, 14.0f, 500, KMuted, 20.0f, 3);
 			for (const kast::Sponsor& Sp : kast::Sponsors())
 			{
 				if (Sy > R.Y + R.H - 24.0f)
@@ -1755,6 +1784,7 @@ void RiverLine::KastBrowse(double Now)
 		uint32_t Color = 0;
 		bool You = false;
 		bool Rival = false;
+		bool Partner = false; // the violet check by the name (next_segment_spec §5: KastPartner)
 	};
 	std::vector<Card> Live;
 	std::vector<const kast::Streamer*> Off;
@@ -1763,7 +1793,7 @@ void RiverLine::KastBrowse(double Now)
 		const int V = kast::ViewersNow(St, World);
 		if (V > 0)
 		{
-			Live.push_back({St.Name, St.Title, St.Tag, V, St.Color, false, St.Rival});
+			Live.push_back({St.Name, St.Title, St.Tag, V, St.Color, false, St.Rival, St.Followers >= badge::KastPartnerFollowers});
 		}
 		else
 		{
@@ -1773,7 +1803,7 @@ void RiverLine::KastBrowse(double Now)
 	if (S.Streaming())
 	{
 		const kast::TitleSpec& T = kast::Titles()[static_cast<size_t>(std::max(0, std::min(static_cast<int>(kast::Titles().size()) - 1, S.Channel.Title)))];
-		Live.push_back({S.HeroName, T.Text, "That's you.", static_cast<int>(std::round(S.Stream.Viewers)), kast::Lime, true, false});
+		Live.push_back({S.HeroName, T.Text, "That's you.", static_cast<int>(std::round(S.Stream.Viewers)), kast::Lime, true, false, S.Channel.Partner});
 	}
 	std::stable_sort(Live.begin(), Live.end(), [](const Card& A, const Card& B) { return A.Viewers > B.Viewers; });
 	long long Total = 0;
@@ -1819,6 +1849,7 @@ void RiverLine::KastBrowse(double Now)
 			Look.FaceAge = Now - S.Stream.FaceAt;
 			Look.Time = Now;
 			Look.Leds = S.RoomGlow(Now);
+			rlkast_detail::DressCam(S, Look, World);
 			streamart::Facecam(*C, {Th.X + Th.W - 140.0f, Th.Y + Th.H - 84.0f, 132.0f, 76.0f}, Look);
 		}
 		else
@@ -1847,7 +1878,12 @@ void RiverLine::KastBrowse(double Now)
 		}
 		DrawAvatar(*C, R.X + 20.0f, R.Y + 230.0f, 18.0f, Av);
 		UI.Text(Cd.Title, R.X + 48.0f, R.Y + 226.0f, Ts(14.5f, 800, KInk, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
-		UI.Text(Cd.Name, R.X + 48.0f, R.Y + 246.0f, Ts(13.0f, 700, Cd.You ? KLime : KMuted));
+		const float Nw = UI.Text(Cd.Name, R.X + 48.0f, R.Y + 246.0f, Ts(13.0f, 700, Cd.You ? KLime : KMuted));
+		if (Cd.Partner)
+		{
+			C->FillCircle(R.X + 56.0f + Nw, R.Y + 241.5f, 7.0f, KViolet);
+			NetCheck(*C, R.X + 56.0f + Nw, R.Y + 241.5f, 7.5f, Hex(0xffffff));
+		}
 		UI.Text(Cd.Tag, R.X + 48.0f, R.Y + 264.0f, Ts(11.5f, 500, KDim, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
 	}
 	// The small channels: where a new streamer actually lives (and who raids whom).

@@ -3,6 +3,7 @@
 // their lifetime numbers, with a random walk of their own (seeded by their name, so the world's dice never move).
 #include "ShortStack/Game/World.h"
 
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Rng.h"
 #include "WorldSim.h"
 
@@ -13,6 +14,22 @@ namespace ss
 {
 namespace world
 {
+bool VerifiedRecord(const Tracker& Stats, bool Professional, int DaysSincePlayed)
+{
+	const int Paid = Stats.PaidEvents();
+	if (!Professional || Paid < badge::VerifiedEvents || DaysSincePlayed > VerifiedActiveDays || Stats.BuyIns <= 0)
+	{
+		return false;
+	}
+	// The ROI and the profit in buy-ins, both on the tournaments that cost something, in integer cents (ROI ≥ 15% is
+	// profit × 100 ≥ 15 × buy-ins; profit ≥ 150 ABI is profit × events ≥ 150 × buy-ins): no rounding at the edges.
+	const Chips Profit = Stats.PaidProfit();
+	const Chips RoiPct = static_cast<Chips>(std::llround(badge::VerifiedRoi * 100.0));
+	const bool Roi = Profit * 100 >= RoiPct * Stats.BuyIns;
+	const bool Up = Profit * static_cast<Chips>(Paid) >= static_cast<Chips>(badge::VerifiedBuyIns) * Stats.BuyIns;
+	return Roi && Up;
+}
+
 void Tracker::Add(Chips BuyIn, Chips Prize, int Place, int Field, int FinalSize, TrackStake Stake, TrackFormat Format)
 {
 	const bool Cash = Prize > 0;
@@ -23,6 +40,12 @@ void Tracker::Add(Chips BuyIn, Chips Prize, int Place, int Field, int FinalSize,
 	FinalTables += Place >= 1 && Place <= FinalSize ? 1 : 0;
 	Podiums += Place == 2 || Place == 3 ? 1 : 0;
 	Wins += Place == 1 ? 1 : 0;
+	if (BuyIn <= 0)
+	{
+		// A freeroll: on the page, never in an ROI (S9).
+		++Freerolls;
+		FreerollPrizes += Prize;
+	}
 	for (TrackLine* L : {&ByStake[static_cast<size_t>(Stake)], &ByFormat[static_cast<size_t>(Format)]})
 	{
 		++L->Events;

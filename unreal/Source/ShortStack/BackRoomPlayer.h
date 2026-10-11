@@ -13,6 +13,14 @@ class UInstancedStaticMeshComponent;
 class USkeletalMeshComponent;
 class UStaticMeshComponent;
 
+namespace ss
+{
+namespace audio
+{
+struct SpeechPlan;
+}
+}
+
 /** What a person at the table is doing there. */
 UENUM()
 enum class EBackRoomRole : uint8
@@ -362,6 +370,12 @@ public:
 	void OnResult(int64 Delta, int64 PotSize, bool bShowdown);
 	/** Says a line (subtitled by the HUD); the jaw moves for its length. */
 	void Say(const FString& Line);
+	/**
+	 * Says a line with its speech (next_segment_spec 4.11, ue-room): Plan drives the jaw (ss::audio::MouthAt) and the line
+	 * is one engine voice at the head that ducks the room. Null: as Say(Line). Declared by the lead in Phase A; ue-room
+	 * fills it (BackRoomPlayerTells.cpp).
+	 */
+	void Say(const FString& Line, const ss::audio::SpeechPlan* Plan);
 	/** Lines said since the last call, for the HUD. */
 	TArray<FString> TakeLines();
 
@@ -695,6 +709,13 @@ private:
 	TArray<FString> Lines;
 	float TalkLeft = 0.0f;
 	float NextChat = 20.0f;
+	/**
+	 * The line being said with its speech (next_segment_spec 4.11, ue-room; declared with the Say(Line, Plan) overload in
+	 * Phase A, used in BackRoomPlayerTells.cpp): the plan the jaw follows (ss::audio::MouthAt at SpeechT seconds into it).
+	 * Null: the jaw moves on TalkLeft, as ever.
+	 */
+	TSharedPtr<ss::audio::SpeechPlan> SpeechNow;
+	float SpeechT = 0.0f;
 	// Being studied by the hero.
 	float Studied = 0.0f;
 	float ExternalTremble = 0.0f;

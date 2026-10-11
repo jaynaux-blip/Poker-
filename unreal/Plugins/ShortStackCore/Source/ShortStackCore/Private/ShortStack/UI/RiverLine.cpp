@@ -3,9 +3,13 @@
 
 #include "ShortStack/Cards.h"
 #include "ShortStack/Evaluator.h"
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Sizing.h"
+#include "ShortStack/Game/Stake.h"
 #include "ShortStack/Structure.h"
 #include "ShortStack/UI/Avatars.h"
+#include "ShortStack/UI/BadgeArt.h"
 #include "RiverLineShared.h"
 
 #include <algorithm>
@@ -84,6 +88,63 @@ Color NetChipFill(const Color& Cl)
 {
 	return {Cl.R, Cl.G, Cl.B, 0.12f};
 }
+
+/**
+ * Who else's money a result was (next_segment_spec §2.12), for the results screen: a package's roll took the prize
+ * ("Prize $410 went into Lantern Row Staking's roll."), or the buyers took their pieces ("Prize $410 · buyers' share
+ * −$123.00 · yours $287.00"). "" when it was all the player's.
+ */
+std::string ResultSplit(const Session& S, const Results& R)
+{
+	if (R.PrizeCents <= 0 || S.History.empty() || S.History.front().Name != R.EventName)
+	{
+		return std::string();
+	}
+	const std::string& Id = S.History.front().EventId;
+	const stake::Book& B = S.Life.Stakes;
+	for (const stake::Fund& Fd : B.Funds)
+	{
+		if (Fd.EventId == Id && Fd.Settled)
+		{
+			for (const stake::Deal& D : B.Deals)
+			{
+				if (D.Id == Fd.DealId)
+				{
+					return "Prize " + Money(R.PrizeCents) + " went into " + stake::BackerName(D) + "'s roll. Your cut comes at the chop.";
+				}
+			}
+		}
+	}
+	Chips Theirs = 0;
+	for (const stake::Piece& P : B.Pieces)
+	{
+		Theirs += P.EntryId == Id && P.Settled ? P.Share : 0;
+	}
+	if (Theirs <= 0)
+	{
+		return std::string();
+	}
+	return "Prize " + Money(R.PrizeCents) + " \xC2\xB7 buyers' share \xE2\x88\x92" + Money(Theirs) + " \xC2\xB7 yours " + Money(R.PrizeCents - Theirs);
+}
+
+/** The player's sizing spot in the hand being played (core's sizing, as the card room's); online sizes aren't rounded. */
+sizing::Spot OnlineSpot(const Session& S)
+{
+	sizing::Spot Spot;
+	if (S.CurHand)
+	{
+		for (const HandSeat& Hs : S.CurHand->Seats)
+		{
+			if (Hs.Id == HeroId)
+			{
+				Spot = sizing::SpotOf(*S.CurHand, Hs.Seat);
+				break;
+			}
+		}
+	}
+	Spot.Unit = 1;
+	return Spot;
+}
 } // namespace riverline_detail
 
 using namespace riverline_detail;
@@ -95,6 +156,7 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	C = &Cv;
 	UI.Begin(Cv, Now);
 	NetFrame(Now);
+	rlnet_detail::NetTipOf(this).Up = false;
 	C->Save();
 	C->FillRect({0.0f, 0.0f, RlW, RlH}, Paint::Linear({0.0f, 0.0f}, {0.0f, RlH}, pal::Bg2, pal::Bg));
 	// While the clock races (a shift, a run, sleep) or a result is up, the screen underneath takes no input.
@@ -165,6 +227,10 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	{
 		PennyDropApp(Now);
 	}
+	else if (AppShown == App::Mail)
+	{
+		MailApp(Now);
+	}
 	else
 	{
 		BankApp(Now);
@@ -187,6 +253,12 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 		{
 			OutcomeCard(Now);
 		}
+	}
+	// A badge under the pointer: what it is, over everything else (next_segment_spec §5.6).
+	if (rlnet_detail::NetTipOf(this).Up && !Modal)
+	{
+		const rlnet_detail::NetTip Tip = rlnet_detail::NetTipOf(this);
+		BadgeTip(Tip.B, Tip.X, Tip.Y, Now);
 	}
 	DrawCursor();
 	C->Restore();
@@ -762,6 +834,43 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 	}
 	// Someone the world knows: their name opens their card.
 	const auto Known = IsHero ? S.FieldNpc.end() : S.FieldNpc.find(Seat.Id);
+	// One badge pinned at the avatar's top right (next_segment_spec §5.6), clear of the flag below it and the bounty tag
+	// at the plate's corner; what the avatar's frame already says is left out (C2).
+	{
+		const int Npc = IsHero ? -1 : Known != S.FieldNpc.end() ? Known->second : -2;
+		const uint8_t Frame = rlnet_detail::NetBadgeFrame(Pic);
+		badge::Badge Pin;
+		if (Npc >= -1)
+		{
+			if (const badge::Badge* B = badge::Top(rlnet_detail::NetBadgesOf(S, Npc), badge::Network, Frame))
+			{
+				Pin = *B;
+			}
+		}
+		else if (Seat.Top.K != badge::Kind::Count)
+		{
+			// The session's pick for someone the world doesn't follow (it can't know the frame): the frame wins.
+			const bool Said = (Frame == badge::FrameGold && Seat.Top.K == badge::Kind::TeamRiverLine) ||
+				(Frame == badge::FrameChampion && (Seat.Top.K == badge::Kind::Bracelet || Seat.Top.K == badge::Kind::Ring));
+			Pin = Said ? badge::Badge() : Seat.Top;
+		}
+		if (Pin.K != badge::Kind::Count)
+		{
+			const float Gx = Plate.X + 46.0f;
+			const float Gy = P.Y - 16.0f;
+			C->FillCircle(Gx, Gy, 9.0f, Hex(0x0b1220));
+			badgeart::Draw(*C, Pin, Gx, Gy, 13.0f, Now);
+			if (Npc >= -1 && UI.Hover({Gx - 8.0f, Gy - 8.0f, 16.0f, 16.0f}))
+			{
+				rlnet_detail::NetTip& Tip = rlnet_detail::NetTipOf(this);
+				Tip.Up = true;
+				Tip.B = Pin;
+				Tip.Npc = Npc;
+				Tip.X = Gx;
+				Tip.Y = Gy + 8.0f;
+			}
+		}
+	}
 	bool NameHover = false;
 	if (Known != S.FieldNpc.end())
 	{
@@ -973,13 +1082,11 @@ void RiverLine::Key(const std::string& K)
 	{
 		S.HeroAct(PlayerAction::RaiseTo(static_cast<double>(P.MaxRaise)));
 	}
-	else if (K == "ArrowUp")
+	else if (K == "ArrowUp" || K == "ArrowDown")
 	{
-		P.RaiseTo = MinChips(P.MaxRaise, P.RaiseTo + P.BigBlind);
-	}
-	else if (K == "ArrowDown")
-	{
-		P.RaiseTo = MaxChips(P.MinRaise, P.RaiseTo - P.BigBlind);
+		// Fine steps as the card room has them (sizing::Step: a big blind under 20 BB, five above).
+		const Chips To = sizing::Step(OnlineSpot(S), P.RaiseTo, K == "ArrowUp" ? 1 : -1);
+		P.RaiseTo = MaxChips(P.MinRaise, MinChips(P.MaxRaise, To));
 	}
 }
 
@@ -1068,35 +1175,38 @@ void RiverLine::Controls(double Now)
 	}
 	HeroPrompt& P = S.Prompt;
 
-	// Bet sizing.
+	// Bet sizing: the presets for this spot from core's sizing (next_segment_spec §6.2 D), the same rule the card room
+	// uses: MIN 2.2x 2.5x 3x POT ALL IN unopened with an ante, 1/3 to POT on an unbet street, and so on. Online chips
+	// aren't rounded to a chip colour.
 	if (P.CanRaise)
 	{
-		const double Cur = S.CurHand ? static_cast<double>(S.CurHand->CurrentBet) : static_cast<double>(P.BigBlind);
-		std::vector<std::pair<std::string, double>> Presets;
-		if (P.OnStreet == Street::Preflop)
-		{
-			Presets = {{"Min", static_cast<double>(P.MinRaise)}, {"2.5x", JsRound(Cur * 2.5)}, {"3x", JsRound(Cur * 3.0)}, {"Pot", PotRaise(P)}, {"All-in", static_cast<double>(P.MaxRaise)}};
-		}
-		else
-		{
-			Presets = {{"1/3", PotFrac(P, 1.0 / 3.0)}, {"1/2", PotFrac(P, 0.5)}, {"3/4", PotFrac(P, 0.75)}, {"Pot", PotRaise(P)}, {"All-in", static_cast<double>(P.MaxRaise)}};
-		}
+		const sizing::Spot Spot = OnlineSpot(S);
+		const std::vector<sizing::Preset> Presets = sizing::Presets(Spot);
+		// Up to six buttons in the 370 units left of the amount box.
+		const float Pitch = Presets.size() > 5 ? 62.0f : 72.0f;
 		for (size_t I = 0; I < Presets.size(); ++I)
 		{
-			const Rect R{Ax + static_cast<float>(I) * 72.0f, 786.0f, 66.0f, 34.0f};
-			const Chips Val = static_cast<Chips>(std::max(static_cast<double>(P.MinRaise), std::min(static_cast<double>(P.MaxRaise), Presets[I].second)));
+			const Rect R{Ax + static_cast<float>(I) * Pitch, 786.0f, Pitch - 6.0f, 34.0f};
+			const Chips Val = std::max(P.MinRaise, std::min(P.MaxRaise, Presets[I].To));
 			ButtonOpts O;
 			O.Kind = P.RaiseTo == Val ? ButtonKind::Primary : ButtonKind::Secondary;
-			O.Size = 15.0f;
-			if (UI.Button("pre" + std::to_string(I), R, Presets[I].first, O))
+			O.Size = Presets.size() > 5 ? 13.5f : 15.0f;
+			if (UI.Button("pre" + std::to_string(I), R, Presets[I].Label, O))
 			{
 				P.RaiseTo = Val;
 			}
 		}
-		const Rect Box{Ax + 370.0f, 786.0f, Aw - 370.0f, 34.0f};
+		const Rect Box{Ax + 376.0f, 786.0f, Aw - 376.0f, 34.0f};
 		UI.RRect(Box, 8.0f, Hex(0x0b1422), pal::Line);
 		UI.Text(ChipsText(static_cast<double>(P.RaiseTo)), Box.X + Box.W - 12.0f, Box.Y + 24.0f, Ts(18.0f, 700, pal::Ink, Align::Right, Baseline::Alphabetic, true));
-		UI.Text(Fixed(static_cast<double>(P.RaiseTo) / static_cast<double>(P.BigBlind), 1) + " BB", Box.X + 10.0f, Box.Y + 23.0f, Ts(13.0f, 500, pal::Muted));
+		// The size as a player reads it: "2.2x", "67% POT", or big blinds. When "2.5x · 23.3 BB" won't clear the
+		// amount, the first half says it.
+		std::string Detail = sizing::Detail(Spot, P.RaiseTo);
+		Detail = Detail.empty() ? Fixed(static_cast<double>(P.RaiseTo) / static_cast<double>(P.BigBlind), 1) + " BB" : Detail;
+		const float DetailW = Box.W - 34.0f - UI.Measure(ChipsText(static_cast<double>(P.RaiseTo)), 18.0f, 700, true);
+		const size_t Half = Detail.find(" \xC2\xB7 ");
+		Detail = Half != std::string::npos && UI.Measure(Detail, 12.5f, 600) > DetailW ? Detail.substr(0, Half) : Detail;
+		UI.Text(Detail, Box.X + 10.0f, Box.Y + 23.0f, Ts(12.5f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, false, DetailW));
 		const double Step = std::max(1.0, JsRound(static_cast<double>(P.BigBlind) / 4.0));
 		P.RaiseTo = static_cast<Chips>(UI.Slider("raise", {Ax + 10.0f, 826.0f, Aw - 20.0f, 26.0f}, static_cast<double>(P.RaiseTo), static_cast<double>(P.MinRaise), static_cast<double>(P.MaxRaise), Step));
 	}
@@ -1405,14 +1515,21 @@ void RiverLine::ResultsScreen(double Now)
 	{
 		UI.Text("No cash this time", 60.0f, RlTop + 250.0f, Ts(40.0f, 800, pal::Muted));
 	}
-	UI.Text("Buy-in " + (R.BuyInCents ? Money(R.BuyInCents) : std::string("free")) + " \xC2\xB7 " + std::to_string(R.Hands) + " hands \xC2\xB7 biggest pot won " + ChipsText(static_cast<double>(R.BiggestPot)), 60.0f, RlTop + 292.0f, Ts(17.0f, 500, pal::Muted));
-	const float BalW = UI.Text("Balance now " + Money(S.BankrollCents), 60.0f, RlTop + 330.0f, Ts(20.0f, 700, pal::Ink));
+	// Whose money it was (next_segment_spec §2.12): a package's roll takes the prize; buyers take their pieces of it.
+	const std::string Split = ResultSplit(S, R);
+	const float Shift = Split.empty() ? 0.0f : 30.0f;
+	if (!Split.empty())
+	{
+		UI.Text(Split, 60.0f, RlTop + 290.0f, Ts(17.0f, 700, Hex(0xf2a93b), Align::Left, Baseline::Alphabetic, false, 1060.0f));
+	}
+	UI.Text("Buy-in " + (R.BuyInCents ? Money(R.BuyInCents) : std::string("free")) + " \xC2\xB7 " + std::to_string(R.Hands) + " hands \xC2\xB7 biggest pot won " + ChipsText(static_cast<double>(R.BiggestPot)), 60.0f, RlTop + 292.0f + Shift, Ts(17.0f, 500, pal::Muted));
+	const float BalW = UI.Text("Balance now " + Money(S.BankrollCents), 60.0f, RlTop + 330.0f + Shift, Ts(20.0f, 700, pal::Ink));
 	if (R.SessionEvents > 1)
 	{
 		// Multi-tabling: the whole sitting, every buy-in against every prize.
 		const std::string Net = (R.SessionNetCents >= 0 ? "+" : "") + Money(R.SessionNetCents);
-		const float Lw = UI.Text("This sitting: " + std::to_string(R.SessionEvents) + " tournaments \xC2\xB7 net ", 84.0f + BalW, RlTop + 330.0f, Ts(17.0f, 600, pal::Muted));
-		UI.Text(Net, 84.0f + BalW + Lw, RlTop + 330.0f, Ts(17.0f, 800, R.SessionNetCents >= 0 ? pal::Green : pal::Red, Align::Left, Baseline::Alphabetic, true));
+		const float Lw = UI.Text("This sitting: " + std::to_string(R.SessionEvents) + " tournaments \xC2\xB7 net ", 84.0f + BalW, RlTop + 330.0f + Shift, Ts(17.0f, 600, pal::Muted));
+		UI.Text(Net, 84.0f + BalW + Lw, RlTop + 330.0f + Shift, Ts(17.0f, 800, R.SessionNetCents >= 0 ? pal::Green : pal::Red, Align::Left, Baseline::Alphabetic, true));
 	}
 
 	// Accuracy gauge.

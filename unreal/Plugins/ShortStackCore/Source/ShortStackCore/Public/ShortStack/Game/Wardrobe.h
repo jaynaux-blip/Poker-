@@ -107,6 +107,11 @@ struct Closet
 	std::set<std::string> Owned;
 	std::array<std::string, SlotCount> Worn; // "" in Top: the tee in the outfit color; "" in Bottom: shorts; "" in Shoes: barefoot; "" elsewhere: none
 	bool Seeded = false;
+	/**
+	 * Sponsor patches sewn on (next_segment_spec §3.9): a brand id per spot, Chest, Sleeve and Cap (sponsor::Spot), "" for
+	 * none. A patch shows on whatever is worn there (PatchFits); saved as sponsor\tpatch lines (sponsor::WriteLines).
+	 */
+	std::array<std::string, 3> Patches;
 };
 /** The creator's jacket (none for Outfit 6), hat and glasses, plus a white tee, mid-wash jeans, white sneakers, shorts. */
 SHORTSTACKCORE_API Closet SeedFrom(const hero::Look& L);
@@ -123,5 +128,8 @@ SHORTSTACKCORE_API int ThriftWeek(double World);
 /** This week's racks at the thrift (restocked Thursdays), only of kinds the host can draw (a bit per Cut). */
 SHORTSTACKCORE_API std::vector<std::string> ThriftStock(int Week, uint64_t Seed, uint64_t KindsAvailable);
 SHORTSTACKCORE_API Chips ThriftPrice(const Garment& G, double World); // condition and Saturday's yellow tags
+/** Whether a patch on Spot (sponsor::Spot: 0 chest, 1 sleeve, 2 cap) shows on what's worn: the chest and the sleeve always
+ *  (a jacket, else the tee); the cap only on a ball cap, a backwards cap or a beanie, not the trilby or the bucket hat. */
+SHORTSTACKCORE_API bool PatchFits(const Closet& C, int Spot);
 } // namespace wardrobe
 } // namespace ss

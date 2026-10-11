@@ -4,12 +4,15 @@
 #include "../StrictFloat.h"
 #include "RiverLineShared.h"
 
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/UI/BadgeArt.h"
 #include "ShortStack/UI/EventArt.h"
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 
 namespace ss
 {
@@ -29,6 +32,150 @@ Color RepColor(int K)
 	return Hex(Cols[std::max(0, std::min(world::RepCount - 1, K))]);
 }
 } // namespace rlcard_detail
+
+// The badges' shared pieces (RiverLineShared.h): the card's rails here, the hero's stats card and Career's too.
+namespace rlnet_detail
+{
+std::vector<badge::Badge> NetCardBadges(const badge::Set& Held, int Max)
+{
+	std::vector<badge::Badge> Row = NetBadgeRow(Held, badge::Card, badge::FrameNone, Max);
+	for (size_t K = 0; Row.empty() && K < Held.Held.size() && static_cast<int>(K) < Max; ++K)
+	{
+		if (Held.Held[K].K != badge::Kind::Count)
+		{
+			Row.push_back(Held.Held[K]);
+		}
+	}
+	return Row;
+}
+
+float NetBadgeRail(Canvas& Cv, Ui& UI, const RiverLine* RL, const std::vector<badge::Badge>& Row, int Npc, float X, float Cy, float Size, int Labelled, float MaxW, double Now,
+	int* Drawn)
+{
+	int Count = 0;
+	const float LabelSize = Size * 0.5f;
+	auto WidthWith = [&](int Labels) {
+		float W = 0.0f;
+		for (size_t K = 0; K < Row.size(); ++K)
+		{
+			W += Size + (K + 1 < Row.size() ? 8.0f : 0.0f);
+			const std::string L = static_cast<int>(K) < Labels ? badge::Label(Row[K]) : std::string();
+			W += L.empty() ? 0.0f : Cv.Measure(L, LabelSize, 800) + 1.2f * Nf(L.size()) + 6.0f;
+		}
+		return W;
+	};
+	int Labels = Labelled;
+	while (Labels > 0 && WidthWith(Labels) > MaxW)
+	{
+		--Labels;
+	}
+	float Xx = X;
+	for (size_t K = 0; K < Row.size(); ++K)
+	{
+		if (Xx + Size > X + MaxW)
+		{
+			break;
+		}
+		badgeart::Draw(Cv, Row[K], Xx + Size / 2.0f, Cy, Size, Now);
+		++Count;
+		if (UI.Hover({Xx - 2.0f, Cy - Size / 2.0f - 2.0f, Size + 4.0f, Size + 4.0f}))
+		{
+			NetTip& Tip = NetTipOf(RL);
+			Tip.Up = true;
+			Tip.B = Row[K];
+			Tip.Npc = Npc;
+			Tip.X = Xx + Size / 2.0f;
+			Tip.Y = Cy + Size / 2.0f;
+		}
+		Xx += Size;
+		const std::string L = static_cast<int>(K) < Labels ? badge::Label(Row[K]) : std::string();
+		if (!L.empty())
+		{
+			Xx += 6.0f + NetSpaced(Cv, L, Xx + 6.0f, Cy + LabelSize * 0.36f, LabelSize, 800, rlcard_detail::CardSoft, 1.2f);
+		}
+		Xx += 8.0f;
+	}
+	if (Drawn)
+	{
+		*Drawn = Count;
+	}
+	return Count == 0 ? 0.0f : Xx - 8.0f - X;
+}
+
+badge::Holder NetHolderOf(const Session& S, int Npc)
+{
+	if (Npc == -1)
+	{
+		return badge::OfHero(S);
+	}
+	return Npc >= 0 && S.Living().Get(Npc) ? badge::Of(S.Living(), Npc, net::DayOf(S.WorldMinutes())) : badge::Holder();
+}
+} // namespace rlnet_detail
+
+namespace rlcard_detail
+{
+/** The trophies' share of the TROPHIES & BADGES tab when there are badges under them: one row of the tighter grid. */
+const float CardTrophyRowH = 196.0f;
+
+/**
+ * TROPHIES & BADGES (§5.6): under the trophies, a tile for every badge held: the glyph at 64, its title, how it was
+ * earned, and the year when it has one. Two columns, as many rows as fit; the rest counted.
+ */
+void CardBadgeTiles(Canvas& Cv, Ui& UI, const Session& S, int Npc, const badge::Set& Held, float X, float Y, float W, float H, bool HasAwards, double TabAt, double Now)
+{
+	const std::vector<badge::Badge> All = NetCardBadges(Held, 32);
+	if (All.empty())
+	{
+		return;
+	}
+	const float Top = HasAwards ? Y + CardTrophyRowH + 20.0f : Y + 66.0f;
+	NetSpaced(Cv, "BADGES", X, Top, 11.0f, 800, pal::Muted, 1.6f);
+	const badge::Holder Who = NetHolderOf(S, Npc);
+	const float Gap = 10.0f;
+	const float Tw = (W - Gap) / 2.0f;
+	const float Th = 92.0f;
+	const int Rows = std::max(1, static_cast<int>((Y + H - (Top + 14.0f) + Gap) / (Th + Gap)));
+	const size_t Fit = static_cast<size_t>(Rows * 2);
+	const size_t Shown = All.size() > Fit ? Fit - 1 : All.size();
+	for (size_t K = 0; K < Shown; ++K)
+	{
+		const badge::Badge& B = All[K];
+		const float Ri = NetEase((Now - TabAt - 0.05 * static_cast<double>(K)) / 0.35);
+		const float A0 = Cv.GetAlpha();
+		Cv.SetAlpha(A0 * Ri);
+		const Rect T{X + Nf(K % 2) * (Tw + Gap), Top + 14.0f + Nf(K / 2) * (Th + Gap) + (1.0f - Ri) * 8.0f, Tw, Th};
+		Cv.FillRoundRect(T, 12.0f, Hex(0x0f1b2e));
+		Cv.StrokeRoundRect(T, 12.0f, CardRule, 1.0f);
+		badgeart::Draw(Cv, B, T.X + 44.0f, T.Y + T.H / 2.0f, 64.0f, Now);
+		const std::string Title = badge::Title(B);
+		const float Yw = B.Year > 0 ? UI.Text(std::to_string(B.Year), T.X + T.W - 14.0f, T.Y + 26.0f, Ts(12.0f, 700, pal::Muted, Align::Right, Baseline::Alphabetic, true)) + 10.0f : 0.0f;
+		UI.Text(Title.empty() ? badge::Label(B) : Title, T.X + 86.0f, T.Y + 26.0f, Ts(15.0f, 800, CardInk, Align::Left, Baseline::Alphabetic, false, T.W - 100.0f - Yw));
+		NetParagraph(Cv, badge::HowEarned(B, Who), T.X + 86.0f, T.Y + 46.0f, T.W - 100.0f, 12.5f, 500, CardSoft, 16.0f, 3);
+		Cv.SetAlpha(A0);
+	}
+	if (All.size() > Shown)
+	{
+		const Rect T{X + Nf(Shown % 2) * (Tw + Gap), Top + 14.0f + Nf(Shown / 2) * (Th + Gap), Tw, Th};
+		Cv.StrokeRoundRect(T, 12.0f, CardRule, 1.0f);
+		UI.Text("+" + std::to_string(All.size() - Shown) + " more", T.X + T.W / 2.0f, T.Y + T.H / 2.0f + 1.0f, Ts(15.0f, 800, CardSoft, Align::Center, Baseline::Middle));
+	}
+}
+} // namespace rlcard_detail
+
+namespace rlnet_detail
+{
+NetTip& NetTipOf(const RiverLine* RL)
+{
+	static std::map<const RiverLine*, NetTip> Tips;
+	return Tips[RL];
+}
+
+NetChoices& NetChoicesOf(const RiverLine* RL)
+{
+	static std::map<const RiverLine*, NetChoices> Choices;
+	return Choices[RL];
+}
+} // namespace rlnet_detail
 
 using namespace rlcard_detail;
 
@@ -73,25 +220,49 @@ void RiverLine::PlayerCard(double Now)
 	NetFlag(*C, P.Country, R.X + 140.0f, R.Y + 44.0f, 30.0f, 20.0f);
 	float Nx = R.X + 180.0f;
 	Nx += UI.Text(P.Name, Nx, R.Y + 64.0f, Ts(34.0f, 900, P.Rival ? Hex(0xd5b8ff) : CardInk, Align::Left, Baseline::Alphabetic, false, 520.0f)) + 14.0f;
+	// RIVAL, then the badge rail (§5.6): 22 units, the top three labelled, "+N" past six (it opens TROPHIES & BADGES).
+	// The status pill and the close button keep the right end.
 	if (P.Rival)
 	{
 		Nx += NetPill(*C, "RIVAL", Nx, R.Y + 40.0f, Hex(0xb36bff), true, 10.0f) + 8.0f;
 	}
-	if (P.Pro)
+	const badge::Set& Held = NetBadgesOf(S, CardShown);
+	const std::vector<badge::Badge> Rail = NetCardBadges(Held, 6);
+	const float RailEnd = R.X + R.W - 186.0f;
+	int OnRail = 0;
+	const float RailW = NetBadgeRail(*C, UI, this, Rail, CardShown, Nx, R.Y + 50.0f, 22.0f, 3, RailEnd - Nx - 40.0f, Now, &OnRail);
+	Nx += RailW > 0.0f ? RailW + 10.0f : 0.0f;
+	// "+N": everything held that the rail didn't show (past six, or squeezed out by a long name).
+	const size_t Total = std::max(Held.Held.size(), Rail.size());
+	if (OnRail > 0 && Total > static_cast<size_t>(OnRail))
 	{
-		Nx += NetPill(*C, "TEAM RIVERLINE", Nx, R.Y + 40.0f, pal::Gold, false, 10.0f) + 8.0f;
+		const std::string More = "+" + std::to_string(Total - static_cast<size_t>(OnRail));
+		const float Mw = UI.Measure(More, 13.0f, 800) + 14.0f;
+		const Ui::ClickState Mc = UI.Clickable("cardmorebadges", {Nx, R.Y + 38.0f, Mw, 24.0f});
+		UI.RRect({Nx, R.Y + 38.0f, Mw, 24.0f}, 12.0f, Mc.Hover ? Hex(0x223352) : Hex(0x162540), CardRule);
+		UI.Text(More, Nx + Mw / 2.0f, R.Y + 51.0f, Ts(13.0f, 800, CardSoft, Align::Center, Baseline::Middle));
+		if (Mc.Clicked && CardTab != 2)
+		{
+			CardTab = 2;
+			CardTabAt = Now;
+		}
+		Nx += Mw + 8.0f;
 	}
-	else if (!P.Sponsor.empty())
+	if (Rail.empty())
 	{
-		Nx += NetPill(*C, NetUpper(P.Sponsor), Nx, R.Y + 40.0f, pal::Gold, false, 10.0f) + 8.0f;
-	}
-	if (P.Streams)
-	{
-		Nx += NetPill(*C, "KAST \xC2\xB7 " + Grouped(P.Followers), Nx, R.Y + 40.0f, Hex(0xa855f7), true, 10.0f) + 8.0f;
-	}
-	if (P.New)
-	{
-		NetPill(*C, "NEW FACE", Nx, R.Y + 40.0f, pal::Accent, true, 10.0f);
+		// No badges to show (none held, or the rules not in yet): what the world says about them, as before.
+		if (P.Pro)
+		{
+			Nx += NetPill(*C, "TEAM RIVERLINE", Nx, R.Y + 40.0f, pal::Gold, false, 10.0f) + 8.0f;
+		}
+		else if (!P.Sponsor.empty())
+		{
+			Nx += NetPill(*C, NetUpper(P.Sponsor), Nx, R.Y + 40.0f, pal::Gold, false, 10.0f) + 8.0f;
+		}
+		if (P.New)
+		{
+			NetPill(*C, "NEW FACE", Nx, R.Y + 40.0f, pal::Accent, true, 10.0f);
+		}
 	}
 	// Their bracelets and rings on a shelf, the latest first (the TROPHIES tab has them all).
 	if (!P.Awards.empty())
@@ -118,7 +289,8 @@ void RiverLine::PlayerCard(double Now)
 											 : "on the scene since " + std::to_string(P.Since);
 	UI.Text(P.Known + "  \xC2\xB7  " + std::to_string(P.Age) + "  \xC2\xB7  " + Since, R.X + 142.0f, R.Y + 98.0f,
 		Ts(16.0f, 600, CardSoft, Align::Left, Baseline::Alphabetic, false, 640.0f));
-	UI.Text(P.Stakes + "  \xC2\xB7  " + P.Live + "  \xC2\xB7  " + P.Style, R.X + 142.0f, R.Y + 124.0f, Ts(14.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, false, 700.0f));
+	UI.Text(P.Stakes + "  \xC2\xB7  " + P.Live + "  \xC2\xB7  " + P.Style + (P.Streams ? "  \xC2\xB7  Kast, " + Grouped(P.Followers) + " followers" : std::string()), R.X + 142.0f, R.Y + 124.0f,
+		Ts(14.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, false, 700.0f));
 	// Status and the close button.
 	{
 		const Color Sc = P.Status == "Active" ? pal::Green : P.Status == "Retired" ? pal::Muted : pal::Orange;
@@ -245,7 +417,8 @@ void RiverLine::PlayerCard(double Now)
 	const float Mx = R.X + 392.0f;
 	const float Mw = R.X + R.W - 26.0f - Mx;
 	{
-		const std::string Tabs[4] = {"OVERVIEW", "JOURNEY", P.Awards.empty() ? std::string("TROPHIES") : "TROPHIES \xC2\xB7 " + std::to_string(P.Awards.size()), "STATS"};
+		const size_t Earned = P.Awards.size() + Held.Held.size();
+		const std::string Tabs[4] = {"OVERVIEW", "JOURNEY", Earned == 0 ? std::string("TROPHIES & BADGES") : "TROPHIES & BADGES \xC2\xB7 " + std::to_string(Earned), "STATS"};
 		float Tx = Mx + Mw;
 		for (int K = 3; K >= 0; --K)
 		{
@@ -277,6 +450,7 @@ void RiverLine::PlayerCard(double Now)
 		else
 		{
 			CardTrophies(P, Mx, R.Y + 292.0f, Mw, R.Y + R.H - 20.0f - (R.Y + 292.0f), Now);
+			CardBadgeTiles(*C, UI, S, CardShown, Held, Mx, R.Y + 292.0f, Mw, R.Y + R.H - 20.0f - (R.Y + 292.0f), !P.Awards.empty(), CardTabAt, Now);
 		}
 		C->SetAlpha(A0);
 		if (Outside.Clicked && !Inside.Hover)
@@ -363,18 +537,27 @@ void RiverLine::PlayerCard(double Now)
 void RiverLine::CardTrophies(const world::Profile& P, float X, float Y, float W, float H, double Now)
 {
 	const float In = NetEase((Now - CardTabAt) / 0.4);
+	// With badges to show under them (CardBadgeTiles), the trophies take one row of the tighter grid.
+	const bool Badges = !NetBadgesOf(S, CardShown).Held.empty();
+	if (Badges)
+	{
+		H = std::min(H, CardTrophyRowH);
+	}
 	NetSpaced(*C, "BRACELETS AND RINGS", X, Y, 11.0f, 800, pal::Muted, 1.6f);
 	if (P.Awards.empty())
 	{
 		float Ty = NetParagraph(*C, "No bracelets or rings. Yet.", X, Y + 30.0f, W, 17.0f, 600, CardInk, 23.0f, 1);
-		NetParagraph(*C,
-			"Bracelets are won at The Championship (Las Vegas, every summer) and The Championship Online in June. Rings are won on the Grand Circuit, a stop every six "
-			"to eight weeks, and at Ring Rush in March.",
-			X, Ty + 22.0f, W, 13.5f, 500, pal::Muted, 20.0f, 4);
+		if (!Badges)
+		{
+			NetParagraph(*C,
+				"Bracelets are won at The Championship (Las Vegas, every summer) and The Championship Online in June. Rings are won on the Grand Circuit, a stop every six "
+				"to eight weeks, and at Ring Rush in March.",
+				X, Ty + 22.0f, W, 13.5f, 500, pal::Muted, 20.0f, 4);
+		}
 		return;
 	}
-	// The newest first: big cards for a few, a tighter grid for a collection.
-	const bool Big = P.Awards.size() <= 6;
+	// The newest first: big cards for a few, a tighter grid for a collection (or above the badges).
+	const bool Big = P.Awards.size() <= 6 && !Badges;
 	const int Cols = Big ? 3 : 4;
 	const float Gap = 12.0f;
 	const float Cw = (W - Gap * Nf(Cols - 1)) / Nf(Cols);
@@ -527,7 +710,8 @@ void RiverLine::CardJourney(const world::Profile& P, float X, float Y, float W, 
 		case world::StepKind::FirstSeries:
 		case world::StepKind::Major:
 		case world::StepKind::BigScore:
-		case world::StepKind::PlayerOfYear: Col = pal::Gold; break;
+		case world::StepKind::PlayerOfYear:
+		case world::StepKind::HallOfFame: Col = pal::Gold; break;
 		case world::StepKind::Bracelet:
 		case world::StepKind::Ring: Col = Hex(0xf28a3a); break;
 		case world::StepKind::MovedUp:
@@ -550,15 +734,259 @@ void RiverLine::CardJourney(const world::Profile& P, float X, float Y, float W, 
 }
 
 // ------------------------------------------------------------------ the next segment's badges (next_segment_spec §5.6)
-// Phase A stubs that keep today's behavior (ui-laptop's, with core-badges): the card's HONORS panel and a badge's hover
-// line draw nothing until the badges land; the bodies are here so the card and the boards can call them.
+// The Leaderboards page's HONORS mode, and a badge's hover card (drawn last in RiverLine::Draw, over everything). The
+// rules and the art are core-badges' (Badges.h, BadgeArt.h); the pages are ui-laptop's.
 
-void RiverLine::HonorsPanel(const Rect& /*R*/, double /*Now*/)
+void RiverLine::HonorsPanel(const Rect& R, double Now)
 {
+	// HONORS (§5.6): the Leaderboards page's own mode. Left, the Hall of Fame by class; middle, the Players of the Year by
+	// season, online and live; right, what the honors are. Everything here is public and kept for good.
+	const world::World& W = S.Living();
+	const double Since = Now - BoardAt;
+	std::vector<const world::Honor*> Hall;
+	std::map<int, std::pair<const world::Honor*, const world::Honor*>> Poy; // year -> online, live
+	for (const world::Honor& Hn : W.Honors())
+	{
+		if (Hn.Title == world::HallOfFameTitle)
+		{
+			Hall.push_back(&Hn);
+		}
+		else if (Hn.Title == "Player of the Year")
+		{
+			Poy[Hn.Year].first = &Hn;
+		}
+		else if (Hn.Title == "Live Player of the Year")
+		{
+			Poy[Hn.Year].second = &Hn;
+		}
+	}
+	std::stable_sort(Hall.begin(), Hall.end(), [](const world::Honor* A, const world::Honor* B) { return A->Year > B->Year; });
+	const float Cw = (R.W - 16.0f) / 2.0f;
+	auto Name = [&](const world::Honor& Hn, float X, float Y, float MaxW) {
+		const bool Hero = Hn.Npc == -1;
+		const std::string& Nm = Hero ? S.HeroName : Hn.Name;
+		const AvatarSpec Pic = NetAvatar(*C, X + 15.0f, Y - 5.0f, 14.0f, Nm, Color{0.0f, 0.0f, 0.0f, 0.0f}, Hero);
+		if (Hero || W.Get(Hn.Npc))
+		{
+			PlayerName(Hn.Npc, X + 38.0f, Y, 15.0f, MaxW - 38.0f, true, NetBadgeFrame(Pic));
+		}
+		else
+		{
+			UI.Text(Nm, X + 38.0f, Y, Ts(15.0f, 700, CardSoft, Align::Left, Baseline::Alphabetic, false, MaxW - 38.0f));
+		}
+	};
+
+	// The Hall of Fame.
+	{
+		const Rect P{R.X, R.Y, Cw, R.H};
+		Panel(P);
+		badge::Badge Medal;
+		Medal.K = badge::Kind::HallOfFame;
+		badgeart::Draw(*C, Medal, P.X + 40.0f, P.Y + 40.0f, 32.0f, Now);
+		UI.Text("Hall of Fame", P.X + 66.0f, P.Y + 48.0f, Ts(24.0f, 900, CardInk));
+		float Y = P.Y + 92.0f;
+		if (Hall.empty())
+		{
+			Y = NetParagraph(*C,
+					"Nobody's in yet. Each July 15 the eligible are weighed: forty or older, ten years on the scene, high stakes played, and a record of bracelets, rings, majors "
+					"and Player of the Year titles that holds up. Two at most a year.",
+					P.X + 26.0f, Y, P.W - 52.0f, 14.0f, 500, pal::Muted, 21.0f, 6) + 24.0f;
+			// The ballot as it stands: who's eligible next July 15, the best records first, against the bar.
+			const int Today = net::DayOf(S.WorldMinutes());
+			int Year = world::YearOf(Today);
+			Year += Today > world::DayOn(Year, 7, 15) ? 1 : 0;
+			// Weighed once a day and world revision (§10: the roster's walk never runs per frame).
+			static const world::World* BallotOf = nullptr;
+			static int BallotDay = -1;
+			static int BallotRev = -1;
+			static uint32_t BallotSeed = 0;
+			static std::vector<std::pair<int, double>> Ballot;
+			if (BallotOf != &W || BallotDay != Today || BallotRev != W.Revision() || BallotSeed != W.Seed())
+			{
+				BallotOf = &W;
+				BallotDay = Today;
+				BallotRev = W.Revision();
+				BallotSeed = W.Seed();
+				Ballot.clear();
+				for (const world::Npc& N : W.People())
+				{
+					if (W.HallEligible(N.Id, Year))
+					{
+						Ballot.push_back({N.Id, W.HallScore(N.Id, Year)});
+					}
+				}
+				std::stable_sort(Ballot.begin(), Ballot.end(), [](const std::pair<int, double>& A, const std::pair<int, double>& B) { return A.second > B.second; });
+			}
+			NetSpaced(*C, "ON THE BALLOT \xC2\xB7 JULY 15, " + std::to_string(Year), P.X + 26.0f, Y, 10.5f, 800, pal::Gold, 1.6f);
+			Y += 32.0f;
+			if (Ballot.empty())
+			{
+				NetParagraph(*C, "Nobody's eligible yet.", P.X + 26.0f, Y, P.W - 52.0f, 14.0f, 500, pal::Dim, 21.0f, 3);
+			}
+			for (size_t K = 0; K < Ballot.size() && K < 8 && Y < P.Y + P.H - 40.0f; ++K)
+			{
+				const world::Npc* N = W.Get(Ballot[K].first);
+				world::Honor Row;
+				Row.Npc = N ? N->Id : -2;
+				Row.Name = N ? N->Name : std::string();
+				Name(Row, P.X + 22.0f, Y, P.W - 190.0f);
+				const bool Over = Ballot[K].second >= badge::HallBar;
+				UI.Text(Fixed(Ballot[K].second, 1) + (Over ? " \xC2\xB7 over the bar" : " of " + Fixed(badge::HallBar, 0)), P.X + P.W - 26.0f, Y,
+					Ts(13.0f, 700, Over ? pal::Gold : pal::Muted, Align::Right, Baseline::Alphabetic, true));
+				Y += 40.0f;
+			}
+		}
+		int Shown = 0;
+		for (size_t K = 0; K < Hall.size() && Y < P.Y + P.H - 40.0f; ++K)
+		{
+			const world::Honor& Hn = *Hall[K];
+			if (K == 0 || Hall[K - 1]->Year != Hn.Year)
+			{
+				NetSpaced(*C, "CLASS OF " + std::to_string(Hn.Year), P.X + 26.0f, Y, 10.5f, 800, pal::Gold, 1.6f);
+				Y += 30.0f;
+			}
+			const float Ri = NetEase((Since - 0.05 * static_cast<double>(Shown++)) / 0.4);
+			const float A0 = C->GetAlpha();
+			C->SetAlpha(A0 * Ri);
+			Name(Hn, P.X + 22.0f, Y, P.W - 150.0f);
+			UI.Text(Hn.Prize > 0 ? net::MoneyShort(Hn.Prize) + " career" : std::string(), P.X + P.W - 26.0f, Y, Ts(13.0f, 700, pal::Muted, Align::Right, Baseline::Alphabetic, true));
+			C->SetAlpha(A0);
+			Y += 40.0f;
+		}
+	}
+
+	// The Players of the Year.
+	{
+		const Rect P{R.X + Cw + 16.0f, R.Y, Cw, R.H};
+		Panel(P);
+		badge::Badge Medal;
+		Medal.K = badge::Kind::PlayerOfYear;
+		badgeart::Draw(*C, Medal, P.X + 40.0f, P.Y + 40.0f, 32.0f, Now);
+		UI.Text("Players of the Year", P.X + 66.0f, P.Y + 48.0f, Ts(24.0f, 900, CardInk));
+		float Y = P.Y + 92.0f;
+		if (Poy.empty())
+		{
+			Y = NetParagraph(*C,
+					"The first are crowned on New Year's Day: the most points on RiverLine all year, and live, from the regional festivals up to the Championship.",
+					P.X + 26.0f, Y, P.W - 52.0f, 14.0f, 500, pal::Muted, 21.0f, 5) + 24.0f;
+			// The race as it stands: the Season board's top three, and the Live board's.
+			const net::Network& Net = net::Shared();
+			const std::pair<net::Board, const char*> Races[2] = {{net::Board::Season, "THIS YEAR ONLINE"}, {net::Board::Live, "THIS YEAR LIVE"}};
+			for (const auto& Race : Races)
+			{
+				NetSpaced(*C, Race.second, P.X + 26.0f, Y, 10.5f, 800, pal::Gold, 1.6f);
+				Y += 32.0f;
+				const std::vector<net::BoardRow> Top = Net.Leaderboard(Race.first, World, You, 3, nullptr);
+				if (Top.empty())
+				{
+					UI.Text("Nobody's scored yet.", P.X + 26.0f, Y, Ts(13.5f, 500, pal::Dim));
+					Y += 34.0f;
+				}
+				for (const net::BoardRow& Rw : Top)
+				{
+					world::Honor Row;
+					Row.Npc = Rw.Player;
+					Row.Name = Rw.Player < 0 ? S.HeroName : Net.Players()[static_cast<size_t>(Rw.Player)].Name;
+					UI.Text(std::to_string(Rw.Rank), P.X + 34.0f, Y, Ts(14.0f, 900, Rw.Rank == 1 ? pal::Gold : pal::Muted, Align::Right, Baseline::Alphabetic, true));
+					Name(Row, P.X + 42.0f, Y, P.W - 190.0f);
+					UI.Text(Grouped(static_cast<int64_t>(std::llround(Rw.Value))) + " pts", P.X + P.W - 26.0f, Y, Ts(13.0f, 700, pal::Muted, Align::Right, Baseline::Alphabetic, true));
+					Y += 38.0f;
+				}
+				Y += 14.0f;
+			}
+		}
+		int Shown = 0;
+		for (auto It = Poy.rbegin(); It != Poy.rend() && Y < P.Y + P.H - 90.0f; ++It)
+		{
+			const float Ri = NetEase((Since - 0.06 * static_cast<double>(Shown++)) / 0.4);
+			const float A0 = C->GetAlpha();
+			C->SetAlpha(A0 * Ri);
+			NetSpaced(*C, std::to_string(It->first), P.X + 26.0f, Y, 10.5f, 800, pal::Gold, 1.6f);
+			Y += 30.0f;
+			const std::pair<const world::Honor*, const char*> Lines[2] = {{It->second.first, "ONLINE"}, {It->second.second, "LIVE"}};
+			for (const auto& Ln : Lines)
+			{
+				NetSpaced(*C, Ln.second, P.X + 26.0f, Y, 9.0f, 800, pal::Dim, 1.2f);
+				if (Ln.first)
+				{
+					Name(*Ln.first, P.X + 80.0f, Y, P.W - 200.0f);
+					UI.Text(Grouped(Ln.first->Entries) + " pts", P.X + P.W - 26.0f, Y, Ts(13.0f, 700, pal::Muted, Align::Right, Baseline::Alphabetic, true));
+				}
+				else
+				{
+					UI.Text("not awarded", P.X + 118.0f, Y, Ts(13.0f, 500, pal::Dim));
+				}
+				Y += 34.0f;
+			}
+			C->SetAlpha(A0);
+			Y += 6.0f;
+		}
+	}
+
+	// About the honors (the board's right panel, as the boards have it).
+	{
+		const Rect Rt{R.X + R.W + 16.0f, 84.0f, 484.0f, 866.0f};
+		Panel(Rt);
+		UI.Text("Honors", Rt.X + 26.0f, Rt.Y + 54.0f, Ts(28.0f, 900, CardInk));
+		float Y = NetParagraph(*C,
+			"The titles that stay with a name. The Hall of Fame takes its class each July 15; the Players of the Year are crowned when the year turns, one online and one "
+			"live. They show on every card and every board.",
+			Rt.X + 26.0f, Rt.Y + 90.0f, Rt.W - 52.0f, 15.0f, 500, CardSoft, 22.0f, 6) + 18.0f;
+		C->FillRect({Rt.X + 26.0f, Y, Rt.W - 52.0f, 1.0f}, pal::Line);
+		Y += 36.0f;
+		// The player's own: theirs if they hold any, else the honest distance.
+		NetSpaced(*C, "YOURS", Rt.X + 26.0f, Y, 11.0f, 800, pal::Muted, 1.6f);
+		const badge::Set& Mine = S.HeroBadges();
+		const badge::Badge* MyHall = Mine.Find(badge::Kind::HallOfFame);
+		const badge::Badge* MyPoy = Mine.Find(badge::Kind::PlayerOfYear);
+		const badge::Badge* MyLive = Mine.Find(badge::Kind::LivePlayerOfYear);
+		int Titles = 0;
+		for (const auto& Yr : Poy)
+		{
+			Titles += (Yr.second.first && Yr.second.first->Npc == -1 ? 1 : 0) + (Yr.second.second && Yr.second.second->Npc == -1 ? 1 : 0);
+		}
+		const std::string Own = MyHall ? "In the Hall of Fame, class of " + std::to_string(MyHall->Year) + "."
+			: Titles > 0 || MyPoy || MyLive ? std::to_string(std::max(Titles, 1)) + (Titles > 1 ? " Player of the Year titles." : " Player of the Year title.")
+											: std::string("None yet. The Season board is this year's race.");
+		NetParagraph(*C, Own, Rt.X + 26.0f, Y + 28.0f, Rt.W - 52.0f, 15.0f, 600, MyHall || Titles > 0 ? pal::Gold : CardSoft, 21.0f, 3);
+	}
 }
 
-void RiverLine::BadgeTip(const badge::Badge& /*B*/, float /*X*/, float /*Y*/, double /*Now*/)
+void RiverLine::BadgeTip(const badge::Badge& B, float X, float Y, double Now)
 {
+	// The hover card (§5.6): the glyph at 32, the title, how it was earned, from the holder's public facts. Under the
+	// glyph, kept on screen (above it near the taskbar).
+	const std::string Title = badge::Title(B);
+	if (Title.empty())
+	{
+		return;
+	}
+	const std::string How = badge::HowEarned(B, NetHolderOf(S, NetTipOf(this).Npc));
+	const float W = 320.0f;
+	const float TextW = W - 70.0f - 14.0f;
+	const std::vector<std::string> Lines = NetWrap(*C, How, TextW, 12.5f, 500);
+	const size_t Shown = std::min<size_t>(Lines.size(), 4);
+	const float H = std::max(88.0f, 46.0f + 17.0f * Nf(Shown) + 10.0f);
+	Rect R{std::min(std::max(8.0f, X - 30.0f), NetW - W - 8.0f), Y + 8.0f, W, H};
+	if (R.Y + R.H > RiverLine::Height - 46.0f)
+	{
+		R.Y = Y - 30.0f - H;
+	}
+	C->GlowRoundRect({R.X, R.Y + 6.0f, R.W, R.H}, 12.0f, Rgba(0, 0, 0, 0.55f), 18.0f);
+	UI.RRect(R, 12.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x172a44), Hex(0x0e1a2c)), Hex(0x2a3f60));
+	badgeart::Draw(*C, B, R.X + 36.0f, R.Y + 44.0f, 32.0f, Now);
+	UI.Text(Title, R.X + 70.0f, R.Y + 30.0f, Ts(14.5f, 800, CardInk, Align::Left, Baseline::Alphabetic, false, TextW));
+	float Ly = R.Y + 50.0f;
+	for (size_t K = 0; K < Shown; ++K)
+	{
+		std::string L = Lines[K];
+		if (K + 1 == Shown && Lines.size() > Shown)
+		{
+			L += " " + Lines[K + 1];
+		}
+		UI.Text(L, R.X + 70.0f, Ly, Ts(12.5f, 500, CardSoft, Align::Left, Baseline::Alphabetic, false, TextW));
+		Ly += 17.0f;
+	}
 }
 } // namespace ui
 } // namespace ss

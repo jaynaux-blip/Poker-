@@ -66,6 +66,12 @@ struct FrontEndInfo
 	int Tournaments = 0;
 	std::string BestFinish; // "12th of 180"
 	std::string LastResult; // "Night Owl Turbo \xC2\xB7 45th of 1,000"
+	/**
+	 * The CONTINUE card's marks (next_segment_spec §5.6): the Embercrest Players Club tier (0: no card yet; 1 Regular,
+	 * 2 Ember, 3 Crest) and the one badge the network shows by the career's name (K == Count: none yet).
+	 */
+	int ClubTier = 0;
+	badge::Badge TopBadge;
 	/** Pause menu: label and value pairs about the session in progress. */
 	std::vector<std::pair<std::string, std::string>> Status;
 	bool InTournament = false;

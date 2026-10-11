@@ -10,12 +10,16 @@
 #include "Engine/World.h"
 #include "Misc/App.h"
 #include "NightOneAudio.h"
+#include "ReplayHooks.h"
 #include "TimerManager.h"
 
 #include "ShortStack/AI/Bot.h"
 #include "ShortStack/AI/View.h"
 #include "ShortStack/Cards.h"
 #include "ShortStack/Equity.h"
+#include "ShortStack/Game/Room.h"
+
+#include <algorithm>
 
 namespace BackRoomTableDetail
 {
@@ -134,6 +138,14 @@ void ABackRoomTable::AddPlayer(ABackRoomPlayer* Player, int32 TableSeat, ss::Arc
 	{
 		Rng = MakeUnique<ss::Rng>(TCHAR_TO_UTF8(*FString::Printf(TEXT("backroom-%lld"), FDateTime::Now().GetTicks())));
 		Fx.Initialize(static_cast<int32>(FDateTime::Now().GetTicks() & 0x7fffffff));
+		// (A scripted replay deals from its seed instead: ReplayHooks.h.)
+		if (const uint32 ReplaySeed = ReplayHooks::Seed())
+		{
+			Rng = MakeUnique<ss::Rng>(TCHAR_TO_UTF8(*FString::Printf(TEXT("backroom-replay-%u"), ReplaySeed)));
+			Fx.Initialize(static_cast<int32>(ReplaySeed & 0x7fffffff));
+			FMath::RandInit(static_cast<int32>(ReplaySeed));
+			FMath::SRandInit(static_cast<int32>(ReplaySeed));
+		}
 	}
 	FSeat& S = Seats.AddDefaulted_GetRef();
 	S.TableSeat = TableSeat;
@@ -192,6 +204,16 @@ void ABackRoomTable::Begin(float Delay)
 
 void ABackRoomTable::StartRoomTone()
 {
+	if (Audio && bCardRoomTone && AmbienceSource)
+	{
+		// The card room's own sound (ue-room's), once.
+		if (!bAmbienceInjected)
+		{
+			bAmbienceInjected = true;
+			AmbienceSource(*Audio);
+		}
+		return;
+	}
 	if (Audio && bCardRoomTone && !CardTone)
 	{
 		CardTone = MakeShared<FCardRoomAmbience>(0xcafeu);
@@ -353,12 +375,20 @@ void ABackRoomTable::DealerSays(const FString& Line)
 		Dealer->Say(Line);
 		Dealer->TakeLines();
 	}
+	if (OnDealerLine)
+	{
+		OnDealerLine(Line);
+	}
 }
 
 TArray<FBackRoomLine> ABackRoomTable::TakeLines()
 {
 	TArray<FBackRoomLine> Out = MoveTemp(Lines);
 	Lines.Reset();
+	for (const FBackRoomLine& L : Out)
+	{
+		ReplayHooks::Caption(L.Speaker, L.Text, L.bRead);
+	}
 	return Out;
 }
 
@@ -460,6 +490,14 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 		if (bHeroAggressedThisStreet && View.ToCall > 0)
 		{
 			ReadHero(*S, BotKind, BotTo, D.Equity);
+		}
+		if (bTestShove && IsHeroInHand())
+		{
+			// (Testing, ss.Live.Shove: this one moves all in.)
+			bTestShove = false;
+			const ss::LegalActions L = Hand->GetLegalActions();
+			BotKind = static_cast<int32>(L.CanRaise ? ss::PlayerAction::Kind::Raise : (L.CanCheck ? ss::PlayerAction::Kind::Check : ss::PlayerAction::Kind::Call));
+			BotTo = L.CanRaise ? static_cast<double>(L.MaxRaiseTo) : 0.0;
 		}
 		// How long they sit with it: the engine's timing tell, slowed to a live table's pace.
 		BotAt = Time + FMath::Clamp(static_cast<float>(D.ThinkMs) / 1000.0f * 0.6f * ThinkScale, FMath::Max(0.4f, 0.9f * ThinkScale), 6.5f * ThinkScale);
@@ -1067,6 +1105,7 @@ void ABackRoomTable::EndHand()
 			Showdown.BigBlind = Hand->BigBlind;
 		}
 	}
+	NoteHand(bShowdown, PotSize);
 	for (FSeat& S : Seats)
 	{
 		const ss::HandSeat* HS = S.HandSeat >= 0 ? Hand->SeatByNumber(S.HandSeat) : nullptr;
@@ -1148,6 +1187,13 @@ void ABackRoomTable::EndHand()
 		{
 			Events.Add(E);
 		}
+		// Every table's round, for whoever listens (TakeRounds); a night's worth at most if nobody does.
+		const std::vector<ss::TableRound>& Round = Tourney->Rounds();
+		Rounds.insert(Rounds.end(), Round.begin(), Round.end());
+		if (Rounds.size() > 1024)
+		{
+			Rounds.erase(Rounds.begin(), Rounds.begin() + static_cast<std::ptrdiff_t>(Rounds.size() - 1024));
+		}
 		HandStartedAt = Time;
 	}
 	Hand.Reset();
@@ -1172,6 +1218,112 @@ TArray<ss::TEvent> ABackRoomTable::TakeEvents()
 	TArray<ss::TEvent> Out = MoveTemp(Events);
 	Events.Reset();
 	return Out;
+}
+
+std::vector<ss::TableRound> ABackRoomTable::TakeRounds()
+{
+	std::vector<ss::TableRound> Out;
+	Out.swap(Rounds);
+	return Out;
+}
+
+bool ABackRoomTable::TakeHandNote(ss::room::HandNote& Out)
+{
+	if (!HandNoteReady.IsValid())
+	{
+		return false;
+	}
+	Out = MoveTemp(*HandNoteReady);
+	HandNoteReady.Reset();
+	return true;
+}
+
+std::string ABackRoomTable::NameOfSeat(const ss::HandSeat& HS) const
+{
+	if (HS.Id == ss::HeroId)
+	{
+		return HS.Id;
+	}
+	if (Tourney)
+	{
+		const int32 Idx = Tourney->PlayerIndex(HS.Id);
+		if (Idx >= 0)
+		{
+			return Tourney->Players[static_cast<size_t>(Idx)].Name;
+		}
+	}
+	return HS.Id;
+}
+
+void ABackRoomTable::NoteHand(bool bShowdown, int64 PotSize)
+{
+	if (!Hand)
+	{
+		return;
+	}
+	TSharedPtr<ss::room::HandNote> N = MakeShared<ss::room::HandNote>();
+	N->Hand = HandNumber;
+	N->Pot = PotSize;
+	N->Board = Hand->Board;
+	const FSeat* H = HeroSeat();
+	const ss::HandSeat* Mine = H && H->HandSeat >= 0 ? Hand->SeatByNumber(H->HandSeat) : nullptr;
+	for (const ss::HandSeat& HS : Hand->Seats)
+	{
+		(HS.Folded ? N->Folded : N->InHand).push_back(NameOfSeat(HS));
+		if (HS.StartStack > 0 && HS.Stack <= 0)
+		{
+			N->Busted.push_back(NameOfSeat(HS));
+		}
+	}
+	N->HeroStack = Mine ? Mine->Stack : 0;
+	N->HeroThink = HeroThink;
+	if (Hand->LastAggressor >= 0 && Hand->LastAggressor < static_cast<int>(Hand->Seats.size()))
+	{
+		N->Aggressor = NameOfSeat(Hand->Seats[static_cast<size_t>(Hand->LastAggressor)]);
+	}
+	// The first all-in: the board as it stood then (a bad beat is judged from there).
+	for (const ss::ActionRecord& A : Hand->History)
+	{
+		if (A.AllIn && !N->AllIn)
+		{
+			N->AllIn = true;
+			const size_t Seen = A.OnStreet == ss::Street::Preflop ? 0 : A.OnStreet == ss::Street::Flop ? 3 : A.OnStreet == ss::Street::Turn ? 4 : 5;
+			N->BoardAtAllIn.assign(Hand->Board.begin(), Hand->Board.begin() + static_cast<std::ptrdiff_t>(FMath::Min(Seen, Hand->Board.size())));
+		}
+		// Folded facing a bet or a raise (preflop: more than the big blind).
+		if (Mine && A.Seat == Mine->Seat && A.Type == ss::ActionType::Fold && A.Facing > 0 && (A.OnStreet != ss::Street::Preflop || A.Facing + A.To > Hand->BigBlind))
+		{
+			N->HeroFoldedToRaise = true;
+		}
+	}
+	for (const ss::HandEvent& Ev : Hand->Events)
+	{
+		if (Ev.Type == ss::EventType::Showdown)
+		{
+			for (const ss::ShowdownHand& SH : Ev.Hands)
+			{
+				const ss::HandSeat* HS = Hand->SeatByNumber(SH.Seat);
+				N->Shown.push_back({HS ? NameOfSeat(*HS) : std::to_string(SH.Seat), SH.Hole});
+			}
+		}
+	}
+	N->Called = N->AllIn && bShowdown && N->Shown.size() >= 2;
+	for (const ss::PotResult& R : Hand->PotResults)
+	{
+		for (int W : R.Winners)
+		{
+			const ss::HandSeat* HS = Hand->SeatByNumber(W);
+			const std::string Who = HS ? NameOfSeat(*HS) : std::to_string(W);
+			if (std::find(N->Winners.begin(), N->Winners.end(), Who) == N->Winners.end())
+			{
+				N->Winners.push_back(Who);
+			}
+		}
+	}
+	// Showed a bluff, as the room sees one: the hero bet last, was called down, and lost.
+	const bool bHeroWon = std::find(N->Winners.begin(), N->Winners.end(), std::string(ss::HeroId)) != N->Winners.end();
+	N->HeroShowedBluff = Mine && bShowdown && !Mine->Folded && N->Aggressor == ss::HeroId && !bHeroWon;
+	HandNoteReady = N;
 }
 
 int64 ABackRoomTable::BigBlindNow() const
@@ -1725,6 +1877,7 @@ void ABackRoomTable::ConfirmSightings(const ABackRoomPlayer* Shown)
 void ABackRoomTable::OpenHeroTurn()
 {
 	bHeroTurn = true;
+	HeroTurnAt = Time;
 	const ss::LegalActions L = Hand->GetLegalActions();
 	const int64 Bb = BigBlindNow();
 	int64 Want = L.MinRaiseTo;
@@ -1804,6 +1957,7 @@ void ABackRoomTable::HeroAct(int32 Kind, double To)
 	if (Hand->Act(A))
 	{
 		bHeroTurn = false;
+		HeroThink = Time - HeroTurnAt;
 	}
 }
 

@@ -352,17 +352,37 @@ FAutoConsoleCommandWithWorldAndArgs LiveDescribeCmd(TEXT("ss.Live.Describe"),
 			"), bankroll " + UsdText(S->BankrollCents) + ", energy " + std::to_string(static_cast<int>(S->Life.Energy)) + "\n";
 		for (const ss::live::Occurrence& O : ss::live::Reachable(Now, 30.0))
 		{
-			const std::string Why = ss::live::CanRegister(S->BankrollCents, S->Life, O, Now);
+			// Who'd pay, as GoToLive chooses (next_segment_spec 1.2): the first of the session's funding options that can, else
+			// the player's own money; the event is open or not on that funding.
+			const std::vector<std::pair<ss::life::Funding, std::string>> Options = S->FundingOptions(O.Id);
+			ss::life::Funding Fund;
+			for (const std::pair<ss::life::Funding, std::string>& Option : Options)
+			{
+				if (Option.second.empty())
+				{
+					Fund = Option.first;
+					break;
+				}
+			}
+			const std::string Why = ss::live::CanRegister(S->BankrollCents, S->Life, O, Now, Fund);
+			const std::string Paid = ss::live::FundingLine(Fund, O.T->Short);
 			Out += "  " + O.Id + "  " + O.T->Name + "  cards " + ss::net::DateLabel(O.Day) + " " + ss::net::TimeLabel(O.Start) + ", desk " + ss::net::TimeLabel(O.DeskOpens) +
 				", late reg " + ss::net::TimeLabel(O.LateRegEnds) + ", field " + std::to_string(S->Living().PlannedEntries(O.Id)) + ", the world's people " +
-				std::to_string(S->Living().Registered(O.Id).size()) + "  -> " + (Why.empty() ? std::string("open") : Why) + "\n";
+				std::to_string(S->Living().Registered(O.Id).size()) + "  -> " + (Why.empty() ? std::string("open") : Why) + (Paid.empty() ? std::string() : " (" + Paid + ")") + "\n";
+			// Every way it could be paid for, once there's more than the player's own money.
+			for (size_t K = 0; Options.size() > 1 && K < Options.size(); ++K)
+			{
+				const std::string Line = ss::live::FundingLine(Options[K].first, O.T->Short);
+				Out += "      pay: " + (Line.empty() ? std::string("your own money") : Line) + "  -> " + (Options[K].second.empty() ? std::string("can") : Options[K].second) + "\n";
+			}
 		}
 		for (const ss::life::LiveEntry& E : S->Life.LiveEntries)
 		{
 			static const char* States[3] = {"registered", "finished", "refunded"};
 			Out += "  entry " + E.Id + " (" + E.Name + "): " + States[FMath::Clamp(E.State, 0, 2)] + ", paid " + UsdText(E.PaidCents) + ", field " + std::to_string(E.Entrants) +
 				" (" + std::to_string(E.Roster.size()) + " followed), bus " + (E.FareThere ? "there" : "-") + "/" + (E.FareHome ? "home" : "-") +
-				(E.State == ss::life::LiveEntry::Finished ? ", place " + std::to_string(E.Place) + " for " + UsdText(E.PrizeCents) : std::string()) + "\n";
+				(E.State == ss::life::LiveEntry::Finished ? ", place " + std::to_string(E.Place) + " for " + UsdText(E.PrizeCents) : std::string()) +
+				(ss::life::IsOwnMoney(E.Fund) ? std::string() : ", " + ss::live::FundingLine(E.Fund, E.Name)) + "\n";
 		}
 		for (size_t K = 0; K < S->Life.Ledger.size() && K < 8; ++K)
 		{

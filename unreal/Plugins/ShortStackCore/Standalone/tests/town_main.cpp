@@ -8,6 +8,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Talk.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/Game/Weather.h"
@@ -23,6 +24,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "CopyLint.h"
 
 namespace town_test
 {
@@ -357,6 +360,33 @@ void Schedules()
 				E.FinishedAt = T - 2.0 * Day;
 				S.Life.LiveEntries.push_back(E);
 				Expect(town::PaysYourCheck(S, T) == "big-lou", "check: Big Lou picks it up");
+				// His standing offer to put the player in, said over the check (core-stake's line at Ruby's), the day as it
+				// is tonight; and only while it stands.
+				{
+					const std::string Plain = town::Open(*town::ContextFor(S, "big-lou", "diner")).Line;
+					live::Occurrence N;
+					for (int Ahead = D; Ahead < D + 8 && !N.Valid(); ++Ahead)
+					{
+						const live::Occurrence X = live::FindOccurrence("embercrest-nightly@" + std::to_string(Ahead));
+						N = X.Valid() && X.LateRegEnds > T ? X : N;
+					}
+					stake::Offer Of;
+					Of.Id = "lou:" + N.Id;
+					Of.K = stake::Kind::Event;
+					Of.Backer = "Big Lou";
+					Of.EntryId = N.Id;
+					Of.Expires = N.Valid() ? N.LateRegEnds : 0.0;
+					Of.BuyIn = N.Valid() ? N.T->BuyInCents : 0;
+					S.Life.Stakes.Offers.push_back(Of);
+					const std::string Said = town::Open(*town::ContextFor(S, "big-lou", "diner")).Line;
+					S.Life.Stakes.Offers.back().State = stake::OfferTaken;
+					const std::string Taken = town::Open(*town::ContextFor(S, "big-lou", "diner")).Line;
+					S.Life.Stakes.Offers.pop_back();
+					Expect(N.Valid() && !Plain.empty() && Said.rfind(Plain + " ", 0) == 0 && Said.find("putting you in") != std::string::npos &&
+							   Said.find(live::DayWord(N, T)) != std::string::npos && Taken == Plain,
+						"check: Lou's standing offer, said over the check (" + Said + ")");
+					Expect(copylint::Check(Said, copylint::Pa, copylint::Samples()).empty(), "check: and the two lines together pass the copy lint (" + Said + ")");
+				}
 				const std::string Key = town::CheckKey(S, T);
 				Expect(Key == "check:big-lou:" + std::to_string(net::DayOf(Lou.Since)), "check: the night's key (" + Key + ")");
 				S.Life.Said[Key] = net::DayOf(T);
@@ -1325,6 +1355,72 @@ void Renown()
 }
 } // namespace town_test
 
+namespace town_test
+{
+/**
+ * Sponsors on the block (next_segment_spec §3.1, core-sponsor's additions): Ray's offer only when the owner's made one
+ * and only while Ray's on the register, said once, with "Hear him out" on the card; the terms across the counter, signed
+ * on the slip; the patch remarked on, once a person.
+ */
+void Sponsors()
+{
+	Hooks H;
+	Session S(H, "town-sponsor");
+	S.NewCareer(Someone());
+	S.BankrollCents = 100000;
+	S.Life.Hunger = 20.0;
+	S.Life.Thirst = 20.0;
+	S.Life.Energy = 90.0;
+	auto Offers = [](const town::Talk& T) {
+		return std::any_of(T.Choices.begin(), T.Choices.end(), [](const town::Choice& C) { return C.Id == "sponsor"; });
+	};
+	// No offer, no pitch.
+	const double Noon = DryHour(S, 20, 10, 21);
+	Clock(S, Noon);
+	{
+		const town::Talk T = town::Open(*town::ContextFor(S, "ray", "store"));
+		Expect(T.Topic != "sponsor:luckypenny" && !Offers(T), "sponsor talk: no offer, no pitch");
+	}
+	// The owner's offer: Benny on nights doesn't make it; Ray on days does.
+	const std::string Id = sponsor::MakeOffer(S.Life.Sponsors, S.Life, S.Record(), "luckypenny", Noon, "town", true);
+	Expect(!Id.empty(), "sponsor talk: an offer on the table");
+	Clock(S, At(20, 23, 30));
+	{
+		const town::Talk Benny = town::Open(*town::ContextFor(S, "benny", "store"));
+		Expect(Benny.Topic != "sponsor:luckypenny" && !Offers(Benny), "sponsor talk: Benny doesn't make Ray's offer");
+	}
+	Clock(S, Noon + 30.0);
+	const town::Talk T = town::Open(*town::ContextFor(S, "ray", "store"));
+	Expect(T.Topic == "sponsor:luckypenny" && Offers(T), "sponsor talk: Ray makes it on his shift (" + T.Topic + ": " + T.Line + ")");
+	Expect(copylint::Check(T.Line, copylint::Pa, copylint::Samples()).empty(), "sponsor talk: the pitch passes the copy lint");
+	S.Heard("ray", T);
+	const town::Talk Twice = town::Open(*town::ContextFor(S, "ray", "store"));
+	Expect(Twice.Topic != "sponsor:luckypenny" && Offers(Twice), "sponsor talk: said once; the card still has Hear him out");
+	const town::Talk Terms = town::Answer(*town::ContextFor(S, "ray", "store"), "sponsor");
+	Expect(Terms.Line.find("Twenty-five a week") == 0 && copylint::Check(Terms.Line, copylint::Pa, copylint::Samples()).empty(), "sponsor talk: the terms across the counter");
+	S.Heard("ray", Terms);
+	const town::Talk Signed = town::Answer(*town::ContextFor(S, "ray", "store"), "sponsor-sign");
+	S.Heard("ray", Signed);
+	Expect(sponsor::Active(S.Life.Sponsors, "luckypenny", S.WorldMinutes()), "sponsor talk: signed on the counter slip");
+	Expect(!Offers(town::Open(*town::ContextFor(S, "ray", "store"))), "sponsor talk: signed, no more offer");
+	// The penny on the chest: Lonnie notices, once.
+	Expect(S.SewPatch(0, "luckypenny").empty(), "sponsor talk: the penny sewn on");
+	// A dry hour on a later day (a soaked player is remarked on first, rightly).
+	double Dry = DryHour(S, 21, 10, 21);
+	for (int D = 21; D < 40 && (weather::At(Dry, S.WorldSeed()).Rain >= 0.2 || weather::At(Dry - 15.0, S.WorldSeed()).Rain >= 0.2); ++D)
+	{
+		Dry = DryHour(S, D, 10, 21);
+	}
+	Clock(S, Dry);
+	const town::Talk Lonnie = town::Open(*town::ContextFor(S, "lonnie", "barber"));
+	Expect(Lonnie.Topic == "look:patch:luckypenny" && Lonnie.Line.find("penny") != std::string::npos, "sponsor talk: Lonnie notices the penny (" + Lonnie.Topic + ": " + Lonnie.Line + ")");
+	S.Heard("lonnie", Lonnie);
+	Expect(town::Open(*town::ContextFor(S, "lonnie", "barber")).Topic != "look:patch:luckypenny", "sponsor talk: once a person");
+	const town::Talk Ray = town::Open(*town::ContextFor(S, "ray", "store"));
+	Expect(Ray.Topic == "look:patch:luckypenny" && Ray.Line.find("Owner") != std::string::npos, "sponsor talk: Ray has his own line for it (" + Ray.Line + ")");
+}
+} // namespace town_test
+
 int main()
 {
 	using namespace town_test;
@@ -1339,6 +1435,7 @@ int main()
 	Rumours();
 	Schedules();
 	Crowding();
+	Sponsors();
 	std::printf("town_test: %d checks, %d failed (%.1f s)\n", Checks, Failures, std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 	return Failures == 0 ? 0 : 1;
 }

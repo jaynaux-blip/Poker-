@@ -7,6 +7,7 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/UI/StreamArt.h"
 #include "ShortStack/UI/Ui.h"
 
@@ -19,6 +20,55 @@ namespace ss
 {
 namespace ui
 {
+namespace agenda_detail
+{
+/**
+ * The dates the screens show (next_segment_spec §1.3): every feature's marks from From to To (Session::Marks, through
+ * AgendaOf), less the sponsors' appearance windows (an open window is the street's duty chip; daily ones would fill
+ * every square).
+ */
+std::vector<life::Mark> Dates(const Session& S, double From, double To)
+{
+	std::vector<life::Mark> Out = AgendaOf(S, From, std::max(0.0, To - From) / net::MinutesPerDay).Marks;
+	Out.erase(std::remove_if(Out.begin(), Out.end(), [](const life::Mark& M) { return M.Kind == sponsor::MarkAppearance; }), Out.end());
+	return Out;
+}
+
+/** A date in a word, for a calendar square, and how much it matters (lower first): what's owed comes first. */
+std::pair<int, std::string> Word(const life::Mark& M)
+{
+	if (M.Kind == life::LedgerBacking)
+	{
+		// The book's dates (stake::Marks): payments due, owed to the player, chop days, staked events, listings.
+		if (M.Label.rfind("Chop day", 0) == 0)
+		{
+			return {2, "CHOP"};
+		}
+		if (M.Label.find(" owes you ") != std::string::npos)
+		{
+			return {6, "OWED"};
+		}
+		if (M.Label.rfind("Pieces sold", 0) == 0)
+		{
+			return {8, "SOLD"};
+		}
+		if (M.Label.find("putting you in") != std::string::npos)
+		{
+			return {7, "BACKED"};
+		}
+		return {0, "PAY"};
+	}
+	switch (M.Kind)
+	{
+	case sponsor::MarkCure: return {1, "CURE"};
+	case sponsor::MarkReview: return {3, "REVIEW"};
+	case sponsor::MarkRenewal: return {4, "RENEW"};
+	case sponsor::MarkOfferEnds: return {5, "OFFER"};
+	default: return {9, std::string()};
+	}
+}
+} // namespace agenda_detail
+
 namespace secondscreen
 {
 namespace secondscreen_detail
@@ -199,11 +249,11 @@ void Tracker(Canvas& C, const Session& S, double Now)
 			const std::string Price = rl::NetMoney(O.T->BuyInCents);
 			Sub = Card.Phase == rl::LiveCard::LateReg ? "Late reg till " + net::TimeLabel(O.LateRegEnds) + " \xC2\xB7 " + Price
 				: Card.When + " " + net::TimeLabel(O.Start) + " \xC2\xB7 " + Price + (World < O.DeskOpens ? " \xC2\xB7 desk opens " + net::TimeLabel(O.DeskOpens) : " \xC2\xB7 the desk is open");
-			if (S.BankrollCents < rl::LiveCost(O))
+			if (S.BankrollCents < Card.Cost)
 			{
 				// Out of reach: the bankroll doesn't cover the buy-in and the bus.
 				BigCol = pal::Muted;
-				Sub = Card.When + " " + net::TimeLabel(O.Start) + " \xC2\xB7 " + Price + " \xC2\xB7 " + rl::NetMoney(rl::LiveCost(O) - S.BankrollCents) + " short with the bus";
+				Sub = Card.When + " " + net::TimeLabel(O.Start) + " \xC2\xB7 " + Price + " \xC2\xB7 " + rl::NetMoney(Card.Cost - S.BankrollCents) + " short with the bus";
 			}
 		}
 		Stat(C, Er, "THE EMBERCREST", Big, BigCol, Sub);
@@ -214,15 +264,32 @@ void Tracker(Canvas& C, const Session& S, double Now)
 		}
 	}
 
-	// The latest entries.
+	// The latest entries, and what's coming up beside them (§1.3: chop days, payments due, a sponsor's review).
+	const std::vector<life::Mark> Coming = agenda_detail::Dates(S, World, World + 14.0 * net::MinutesPerDay);
+	const float Right = Coming.empty() ? W - 60.0f : W * 0.5f - 30.0f;
 	float Y = 776.0f;
 	C.Text("LATELY", 60.0f, Y, Ts(15.0f, 800, pal::Muted));
 	for (size_t I = 0; I < std::min<size_t>(L.Ledger.size(), 3); ++I)
 	{
 		const life::LedgerEntry& E = L.Ledger[I];
 		const float Ly = Y + 34.0f + static_cast<float>(I) * 30.0f;
-		C.Text(E.Label, 60.0f, Ly, Ts(18.0f, 500, pal::Ink, Align::Left, Baseline::Alphabetic, false, W - 400.0f));
-		C.Text(Signed(E.Amount), W - 60.0f, Ly, Ts(18.0f, 700, E.Amount >= 0 ? pal::Green : pal::Red, Align::Right));
+		const float Aw = C.Text(Signed(E.Amount), Right, Ly, Ts(18.0f, 700, E.Amount >= 0 ? pal::Green : pal::Red, Align::Right));
+		C.Text(E.Label, 60.0f, Ly, Ts(18.0f, 500, pal::Ink, Align::Left, Baseline::Alphabetic, false, Right - 60.0f - Aw - 24.0f));
+	}
+	if (!Coming.empty())
+	{
+		const float Cx = W * 0.5f + 30.0f;
+		C.Text("COMING UP", Cx, Y, Ts(15.0f, 800, pal::Muted));
+		for (size_t I = 0; I < std::min<size_t>(Coming.size(), 3); ++I)
+		{
+			const life::Mark& M = Coming[I];
+			const float Ly = Y + 34.0f + static_cast<float>(I) * 30.0f;
+			const int On = net::DayOf(M.At);
+			const int Today = net::DayOf(World);
+			const std::string When = On == Today ? std::string("Today") : On == Today + 1 ? std::string("Tomorrow") : std::string(net::WeekdayName(On, true));
+			const float Ww = C.Text(When, Cx, Ly, Ts(18.0f, 700, agenda_detail::Word(M).first <= 1 ? pal::Orange : pal::Accent));
+			C.Text(M.Label, Cx + std::max(Ww, 110.0f) + 14.0f, Ly, Ts(18.0f, 500, pal::Ink, Align::Left, Baseline::Alphabetic, false, W - 60.0f - (Cx + std::max(Ww, 110.0f) + 14.0f)));
+		}
 	}
 	(void)Now;
 }
@@ -565,6 +632,33 @@ void Ring(Canvas& C, float Cx, float Cy, float Rx, float Ry, const Color& Col, f
 	C.StrokePolyline(P, false, Col, Line, true);
 }
 
+/** The month's squares with something written in them: one word a day in the player's ballpoint, the one that matters most. */
+std::map<int, std::string> MonthMarks(const Session& S, int Today)
+{
+	int Year = 0;
+	int Month = 0;
+	int Date = 0;
+	world::CivilDate(Today, Year, Month, Date);
+	const int First = Today - (Date - 1);
+	std::map<int, std::pair<int, std::string>> Best;
+	for (const life::Mark& M : agenda_detail::Dates(S, static_cast<double>(First) * net::MinutesPerDay, static_cast<double>(First + 32) * net::MinutesPerDay))
+	{
+		const std::pair<int, std::string> Said = agenda_detail::Word(M);
+		const int D = net::DayOf(M.At);
+		const auto It = Best.find(D);
+		if (!Said.second.empty() && (It == Best.end() || Said.first < It->second.first))
+		{
+			Best[D] = Said;
+		}
+	}
+	std::map<int, std::string> Out;
+	for (const auto& B : Best)
+	{
+		Out[B.first] = B.second.second;
+	}
+	return Out;
+}
+
 /** An event the bus can't make any more (late registration closes before it gets there), or one the room called off. */
 bool Gone(const Session& S, const live::Occurrence& O, double World)
 {
@@ -624,6 +718,11 @@ std::string Key(const Session& S)
 	for (const life::LiveEntry& E : L.LiveEntries)
 	{
 		K += "|" + E.Id + ":" + std::to_string(E.State) + ":" + std::to_string(E.Place) + ":" + std::to_string(E.PrizeCents);
+	}
+	// What else is written on the month: chop days, payments due, a sponsor's review (§1.3).
+	for (const auto& Mark : MonthMarks(S, Today))
+	{
+		K += "|m" + std::to_string(Mark.first) + Mark.second;
 	}
 	return K;
 }
@@ -699,6 +798,7 @@ void Draw(Canvas& C, const Session& S)
 	const float RowH = std::min(40.0f, 200.0f / F(Rows));
 	const bool RentLive = L.RentStage == life::Rent::Due || L.RentStage == life::Rent::FinalNotice;
 	const int RentDay = net::DayOf(L.RentDeadline - 1.0);
+	const std::map<int, std::string> Written = MonthMarks(S, Today);
 	for (int R = 0; R <= Rows; ++R)
 	{
 		C.FillRect({GridX, Top + F(R) * RowH, GridW, 1.0f}, Rgba(27, 34, 56, 0.18f));
@@ -734,6 +834,11 @@ void Draw(Canvas& C, const Session& S)
 		{
 			C.Text("RENT", Cx + Cell - 6.0f, Cy + 17.0f, Ts(11.0f, 900, Marker, Align::Right));
 			C.StrokeRoundRect({Cx + 2.0f, Cy + 2.0f, Cell - 4.0f, RowH - 4.0f}, 3.0f, Marker, 2.5f);
+		}
+		else if (const auto Mk = Written.find(Day); Mk != Written.end())
+		{
+			// What else is due that day, in ballpoint: a payment, a chop, a sponsor's review.
+			C.Text(Mk->second, Cx + Cell - 6.0f, Cy + 16.0f, Ts(10.0f, 900, Pen, Align::Right));
 		}
 		if (Day < Today)
 		{

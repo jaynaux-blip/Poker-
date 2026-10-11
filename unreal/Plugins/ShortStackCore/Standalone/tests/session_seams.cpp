@@ -9,16 +9,21 @@
 //   - EntryLines: livefund, livevoice, liveroom, livebadge, liveleader, livepatch and mail survive a save, escapes and all;
 //     settle and refund clear the night's snapshot and keep the player's own patches;
 //   - Funding: who pays changes what registration needs and writes (CanRegister, PayFare's covered bus), FundingLine;
+//     anyone else's money only as the books offer it now (a stale or made-up funding is refused, nothing moves);
 //   - Rounds: Tournament::Rounds reads the tick and draws nothing;
 //   - Settings: the ten new settings default, clamp and round-trip; today's string reads to the defaults;
-//   - SessionSeams: the Session.h block's stubs keep today's behavior (Record's renown is town::Renown's).
+//   - SessionSeams: the Session.h block's stubs keep today's behavior (Record's renown is town::Renown's);
+//   - Wave1a: the lead's fixes after wave 1a (the world knows the player's birth year; a package's roll affords online).
 // Phase C's MigrationAll (§7.5) builds on SaveFixtures. A feature whose migration writes lines on load (§7.5 steps 2 to 4)
 // keeps SaveFixtures green: only the segment's own lines (and Kast's legacy deal lines) may change, and that's reported.
 #include "CopyLint.h"
 #include "SessionSeg.h"
 
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/Room.h"
+#include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/UI/FrontEnd.h"
 
@@ -172,9 +177,21 @@ void SaveFixtures()
 		std::string World = Fixture("world_v1.txt");
 		D.WorldText = World;
 		const life::LiveEntry* Tonight = live::EntryFor(D.Life, "embercrest-nightly@9");
+		// Its voices are the ones its roster gives (live::AfterParse fills an entry kept before voices were with
+		// room::VoicesFor, core-room's: empty while that was a stub), and the room's state starts empty.
+		bool RosterVoices = Tonight != nullptr;
+		if (Tonight)
+		{
+			const std::vector<life::LiveVoice> Given = ss::room::VoicesFor(*Tonight);
+			RosterVoices = Given.size() == Tonight->Voices.size();
+			for (size_t K = 0; RosterVoices && K < Given.size(); ++K)
+			{
+				RosterVoices = Given[K].Name == Tonight->Voices[K].Name && Given[K].Style == Tonight->Voices[K].Style;
+			}
+		}
 		Expect(Parsed && Tonight && Tonight->State == life::LiveEntry::Registered && !Tonight->Checkpoint.empty() && Tonight->ArrivedAt > 0.0 && life::IsOwnMoney(Tonight->Fund) &&
-				   Tonight->Voices.empty() && Tonight->Room.empty(),
-			"fixtures: tonight's entry, checkpointed, the player's own money, no voices yet (VoicesFor is core-room's), no room");
+				   RosterVoices && Tonight->Room.empty(),
+			"fixtures: tonight's entry, checkpointed, the player's own money, the voices its roster gives, no room");
 		int Wins = 0;
 		ss::Chips Spent = 0;
 		int Finished = 0;
@@ -211,13 +228,16 @@ void SaveFixtures()
 		const double Old = std::min(1.0, 0.35 * Followers + 0.15 * Fans + 0.15 * Cashes + 0.15 * Wins2 + 0.2 * Awards);
 		Expect(ss::town::Renown(S) == Old, "fixtures: town::Renown is c09bc31's on this career, to the bit");
 	}
-	// Kast's deals as they were: Team RiverLine on the riverline deal, the offer and the declined one kept.
+	// Kast's deals moved into the sponsor book (core-sponsor, next_segment_spec §3.8): Team RiverLine kept, TunnelRat's offer
+	// in the book (and in Mail), Sitwell's no a 60-day cooldown, and Kast's own lists cleared.
 	{
 		ss::SaveData D;
 		const bool Parsed = ss::SaveData::Parse(Fixture("pre_segment_team_riverline.ssave"), D);
 		Hooks H;
 		ss::Session S(H, "fixture-kast", &D);
-		Expect(Parsed && S.TeamRiverLine() && S.Channel.Offers.count("tunnelrat") == 1 && S.Channel.Declined.count("sitwell") == 1, "fixtures: Team RiverLine, TunnelRat's offer, Sitwell declined");
+		Expect(Parsed && S.TeamRiverLine() && !ss::sponsor::OpenOfferFor(S.Life.Sponsors, "tunnelrat", S.WorldMinutes()).empty() && S.Life.Sponsors.Cooldown.count("sitwell") == 1 &&
+				   S.Channel.Offers.empty() && S.Channel.Declined.empty() && S.Channel.Deals.empty(),
+			"fixtures: Team RiverLine kept, TunnelRat's offer in the book, Sitwell's no a 60-day cooldown");
 	}
 	// Evicted: the locks changed, the gear in storage.
 	{
@@ -225,10 +245,9 @@ void SaveFixtures()
 		Expect(ss::SaveData::Parse(Fixture("pre_segment_evicted.ssave"), D) && D.Life.RentStage == life::Rent::Evicted && D.Life.StorageDue > 0.0 && D.Life.Evictions == 1,
 			"fixtures: the evicted career is still evicted, its gear in storage");
 	}
-	// The world's own lines read and write back as they were (core-world's version 2 migrates from here).
-	{
-		const std::string Text = Fixture("world_v1.txt");
-		ss::world::World W;
+	// The world's own lines: a version 1 world reads, migrates once to version 2 (core-world, next_segment_spec §7.5 step 5),
+	// and the migrated world writes back byte for byte (a second load migrates nothing).
+	auto ReadWorld = [](const std::string& Text, ss::world::World& W) {
 		size_t Start = 0;
 		while (Start < Text.size())
 		{
@@ -250,9 +269,19 @@ void SaveFixtures()
 			Start = End + 1;
 		}
 		W.Finish();
+	};
+	{
+		const std::string Text = Fixture("world_v1.txt");
+		ss::world::World W;
+		ReadWorld(Text, W);
 		std::string Again;
 		W.Write(Again);
-		Expect(W.Ready() && !Text.empty() && Again == Text, "fixtures: world_v1.txt reads and writes back byte for byte");
+		ss::world::World Second;
+		ReadWorld(Again, Second);
+		std::string Third;
+		Second.Write(Third);
+		Expect(W.Ready() && !Text.empty() && Text.rfind("world\thead\t1\t", 0) == 0 && Again.rfind("world\thead\t2\t", 0) == 0 && Third == Again,
+			"fixtures: world_v1.txt reads, migrates once to version 2, and writes back byte for byte");
 	}
 }
 
@@ -436,33 +465,103 @@ void Funding()
 	life::State L;
 	const live::Occurrence O = live::FindOccurrence("embercrest-nightly@9");
 	const double At = O.DeskOpens + 10.0;
+	// Someone else's money is what the books offer now (stake::FundingOptions): Big Lou's standing offer for the Nightly,
+	// Team Embercrest's covered entries with the bus, and a package whose roll takes a $120 event.
+	ss::stake::Offer Standing;
+	Standing.Id = "lou:" + O.Id;
+	Standing.K = ss::stake::Kind::Event;
+	Standing.Backer = "Big Lou";
+	Standing.EntryId = O.Id;
+	Standing.Expires = O.LateRegEnds;
+	Standing.At = O.DeskOpens;
+	Standing.BuyIn = O.T->BuyInCents;
+	L.Stakes.Offers.push_back(Standing);
+	ss::sponsor::Contract Team;
+	Team.Id = "c:embercrest:seams";
+	Team.Brand = "embercrest";
+	Team.St = ss::sponsor::State::Active;
+	Team.Since = At - Day;
+	Team.Until = At + 30.0 * Day;
+	Team.T.CoveredEntries = 2;
+	Team.T.CoveredCapCents = O.T->BuyInCents;
+	Team.T.CoversFares = true;
+	L.Sponsors.Contracts.push_back(Team);
+	ss::stake::Deal Sam;
+	Sam.Id = "deal:sam:seams";
+	Sam.K = ss::stake::Kind::Package;
+	Sam.By = ss::stake::Outfit::Sam;
+	Sam.Backer = "Sam";
+	Sam.T.CutPermille = 350;
+	Sam.T.CapLive = O.T->BuyInCents;
+	Sam.T.Roll = 150000;
+	Sam.RollNow = Sam.T.Roll;
+	Sam.Funded = Sam.T.Roll;
+	Sam.Since = At - Day;
+	Sam.NextChop = At + 29.0 * Day;
+	L.Stakes.Deals.push_back(Sam);
 	life::Funding Lou;
-	Lou.From = life::Paid::Backer;
-	Lou.Who = "Big Lou";
-	Lou.Permille = 1000;
-	Lou.Cents = O.T->BuyInCents;
+	life::Funding Cover;
+	life::Funding Roll;
+	for (const std::pair<life::Funding, std::string>& Option : ss::stake::FundingOptions(L, O, At))
+	{
+		if (!Option.second.empty())
+		{
+			continue;
+		}
+		switch (Option.first.From)
+		{
+		case life::Paid::Backer: Lou = Option.first; break;
+		case life::Paid::Sponsor: Cover = Option.first; break;
+		case life::Paid::Package: Roll = Option.first; break;
+		default: break;
+		}
+	}
+	Expect(Lou.Ref == Standing.Id && Lou.Who == "Big Lou" && Cover.Ref == Team.Id && Cover.Fares && Roll.Ref == Sam.Id, "funding: the books offer Lou's stake, the cover and the roll");
 	Expect(live::CanRegister(1000, L, O, At) == "The Nightly is $120.00 and the bus." && live::CanRegister(1000, L, O, At, Lou).empty() &&
 			   live::CanRegister(400, L, O, At, Lou) == "The bus up the ridge and back is $5.80.",
 		"funding: backed, the player needs only the bus");
-	life::Funding Cover;
-	Cover.From = life::Paid::Sponsor;
-	Cover.Who = "Team Embercrest";
-	Cover.Fares = true;
 	Expect(live::CanRegister(0, L, O, At, Cover).empty(), "funding: covered with the fares, nothing");
+	// A funding the books don't offer as it stands (a stale screen's, or made up) is refused with the clerk's line, and
+	// registering on it moves nothing: a stake that's off, a cover used up or with different terms, a roll that isn't one.
+	{
+		life::Funding Gone = Lou;
+		Gone.Ref = "lou:somewhere-else";
+		life::Funding Richer = Lou;
+		Richer.Cents = 10 * O.T->BuyInCents;
+		life::State Used = L;
+		Used.Sponsors.Contracts[0].Now.CoveredUsed = 2;
+		life::Funding NoCut = Cover;
+		NoCut.Fares = false;
+		life::Funding Made = Roll;
+		Made.Ref = "deal:nobody";
+		life::Funding Ticket;
+		Ticket.From = life::Paid::Ticket;
+		ss::Chips Bank = 1000000;
+		Expect(live::CanRegister(Bank, L, O, At, Gone) == "That stake's off. It's your own money tonight." && live::CanRegister(Bank, L, O, At, Richer) == live::CanRegister(Bank, L, O, At, Gone) &&
+				   live::CanRegister(Bank, Used, O, At, Cover) == "Team Embercrest's covered entries are used this month." &&
+				   live::CanRegister(Bank, L, O, At, NoCut) == "That cover's off. It's your own money tonight." &&
+				   live::CanRegister(Bank, L, O, At, Made) == "The roll isn't paying for this one. It's your own money tonight." && !live::CanRegister(Bank, L, O, At, Ticket).empty(),
+			"funding: what the books don't offer now is refused at the desk");
+		life::State Stale = L;
+		Expect(!live::Register(Bank, Stale, O, At, 80, {}, Gone).empty() && Bank == 1000000 && Stale.LiveEntries.empty() && Stale.Ledger.empty(), "funding: and registering on it moves nothing");
+		life::Funding Fares;
+		Fares.Fares = true; // the player's own money never covers the bus
+		Expect(live::CanRegister(O.T->BuyInCents, L, O, At, Fares) == "The Nightly is $120.00 and the bus.", "funding: only a sponsor's cover pays the bus");
+	}
 	life::Funding Pieces;
 	Pieces.Permille = 350;
 	Pieces.Cents = 4400;
-	Expect(live::CanRegister(O.T->BuyInCents - 4400 + 2 * live::BusFareCents, L, O, At, Pieces).empty() &&
-			   !live::CanRegister(O.T->BuyInCents - 4401 + 2 * live::BusFareCents, L, O, At, Pieces).empty(),
-		"funding: pieces sold pay for part of the buy-in");
+	{
+		// The pieces' money counts as the book has it: a listing on the Nightly filled for $44.
+		life::State Sold;
+		Expect(live::CanRegister(O.T->BuyInCents + 2 * live::BusFareCents - 1, Sold, O, At, Pieces) == "The Nightly is $120.00 and the bus.", "funding: pieces nobody bought pay for nothing");
+	}
 	// A package's roll pays: nothing in the player's ledger; a covered bus: two lines that net to nothing.
-	life::Funding Roll;
-	Roll.From = life::Paid::Package;
-	Roll.Who = "Lantern Row Staking";
 	ss::Chips Bank = 1000;
 	Expect(live::Register(Bank, L, O, At, 80, {}, Roll).empty() && Bank == 1000 && L.Ledger.empty(), "funding: the package's roll pays, the player's ledger untouched");
 	Expect(live::Refund(Bank, L, O.Id, O.Start, "not enough players") && Bank == 1000 && L.Ledger.empty(), "funding: and its refund too");
 	life::State L2;
+	L2.Sponsors.Contracts.push_back(Team);
 	ss::Chips Bank2 = 0;
 	Expect(live::Register(Bank2, L2, O, At, 80, {}, Cover).empty(), "funding: covered");
 	const size_t Lines = L2.Ledger.size();
@@ -481,6 +580,21 @@ void Funding()
 	Ticket.From = life::Paid::Ticket;
 	Copy.push_back({"ticket", live::FundingLine(Ticket, "Big Stack")});
 	Expect(Copy[0].second == "Big Lou is putting you in the Nightly." && Copy[3].second == "You've sold 35% of your Sunday.", "funding: the lines");
+	// The clerk's refusals of someone else's money the books don't offer now: linted with the rest.
+	{
+		life::State Nothing;
+		size_t Refusals = 0;
+		for (const life::Paid From : {life::Paid::Backer, life::Paid::Sponsor, life::Paid::Package, life::Paid::Ticket})
+		{
+			life::Funding Off;
+			Off.From = From;
+			Off.Ref = "nobody";
+			const std::string Said = live::CanRegister(1000000, Nothing, O, At, Off);
+			Refusals += Said.empty() ? 0u : 1u;
+			Copy.push_back({"refused", Said});
+		}
+		Expect(Refusals == 4, "funding: each kind of money not on offer is refused in words");
+	}
 	Failures += copylint::Run("funding", Copy, copylint::Pa);
 }
 
@@ -627,6 +741,98 @@ void RenownKept()
 	Expect(Parsed && Wall == 0 && R.Titles == 1 && ss::town::Renown(S) == Before && R.Renown > Before,
 		"renown: past sixty entries the town's is c09bc31's (the wall on the kept entries); the public record keeps the title");
 }
+void Wave1a()
+{
+	// The player's birth year reaches the world (World::HeroBorn, not saved): the Hall of Fame's age rule needs it. Set when
+	// the world is made, when the creator names a new career's age, and when a save is read.
+	{
+		Hooks H;
+		ss::Session S(H, "born");
+		const int Began = ss::world::YearOf(ss::net::DayOf(S.Living().StartedAt()));
+		const bool Fresh = S.Living().HeroBorn == Began - S.Person.Age;
+		ss::hero::Character Who;
+		Who.FirstName = "Ada";
+		Who.LastName = "Reyes";
+		Who.Age = 45;
+		S.NewCareer(Who);
+		const int Born = S.Living().HeroBorn;
+		ss::SaveData D;
+		const bool Parsed = ss::SaveData::Parse(H.Last.Serialize(), D);
+		Hooks H2;
+		ss::Session Back(H2, "born", &D);
+		Expect(Fresh && Born == ss::world::YearOf(ss::net::DayOf(S.Living().StartedAt())) - 45 && Parsed && Back.Living().HeroBorn == Born,
+			"wave 1a: the world knows the player's birth year (new, created, loaded)");
+	}
+	// An online event the package's roll pays for can be joined on a short bankroll (Session::CanAfford): the roll pays it.
+	{
+		Hooks H;
+		ss::Session S(H, "roll-affords");
+		S.CurrentScreen = ss::Screen::Lobby;
+		const ss::stake::Terms Tier1 = ss::stake::LanternRowTerms(1);
+		const ss::LobbyEvent* Ev = nullptr;
+		for (const ss::LobbyEvent& X : ss::Lobby())
+		{
+			Ev = !Ev && X.Joinable && X.BuyInCents > 0 && X.BuyInCents <= Tier1.CapOnline ? &X : Ev;
+		}
+		S.BankrollCents = 0;
+		const bool Broke = Ev && !S.CanAfford(*Ev);
+		ss::stake::Deal Roll;
+		Roll.Id = "deal:lanternrow:seams";
+		Roll.K = ss::stake::Kind::Package;
+		Roll.By = ss::stake::Outfit::LanternRow;
+		Roll.Backer = "Lantern Row Staking";
+		Roll.T = Tier1;
+		Roll.Tier = 1;
+		Roll.Since = S.WorldMinutes();
+		Roll.NextChop = S.WorldMinutes() + 30.0 * Day;
+		Roll.RollNow = Tier1.Roll;
+		Roll.Funded = Tier1.Roll;
+		S.Life.Stakes.Deals.push_back(Roll);
+		Expect(Ev && Broke && S.CanAfford(*Ev), "wave 1a: the package's roll lets a broke player into an event in its range");
+	}
+	// A freeroll is on the player's stats page and nowhere in the public record (S9): the count, the ROI and the ABI that
+	// backers price pieces on are the paid events'. One network freeroll cashed for $50, one $11 event cashed for $33.
+	{
+		Hooks H;
+		ss::Session S(H, "freeroll-record");
+		const double Now = S.WorldMinutes();
+		const ss::net::Network& Net = ss::net::Shared();
+		std::string Free;
+		std::string Paid;
+		ss::Chips PaidBuyIn = 0;
+		for (const ss::net::EventInstance& E : Net.Window(Now - 12.0 * 60.0, Now + 24.0 * 60.0))
+		{
+			const ss::Chips BuyIn = Net.TemplateOf(E).BuyInCents;
+			Free = Free.empty() && BuyIn == 0 ? E.Id : Free;
+			if (Paid.empty() && BuyIn >= 500 && BuyIn <= 1100)
+			{
+				Paid = E.Id;
+				PaidBuyIn = BuyIn;
+			}
+		}
+		ss::world::World& W = S.Living();
+		for (const std::string& Id : {Free, Paid})
+		{
+			W.HeroEntered(Id, std::string());
+			W.HeroFinished(Id, Id == Free ? 40 : 12, Id == Free ? 5000 : 3300, ss::world::World::TableReport());
+		}
+		const ss::world::Tracker& Page = W.HeroStats();
+		const ss::rep::Public Rec = S.Record();
+		Expect(!Free.empty() && !Paid.empty() && Page.Events == 2 && Page.Freerolls == 1 && Rec.OnlineEvents == 1 && Rec.Abi == PaidBuyIn && Page.PaidAbi() == PaidBuyIn &&
+				   std::fabs(Rec.OnlineRoi - Page.PaidRoi()) < 1e-9 && std::fabs(Page.Roi() - Page.PaidRoi()) > 0.1,
+			"wave 1a: a freeroll stays out of the public record's count, ROI and ABI");
+	}
+	// The CONTINUE card's marks are the career's (FrontEnd's DescribeSession, ui-laptop's patch, §5.6): nothing on a new
+	// career, the club's tier once the room's visits earn it.
+	{
+		Hooks H;
+		ss::Session S(H, "continue-marks");
+		const ss::ui::FrontEndInfo Before = ss::ui::DescribeSession(S, true);
+		S.DebugBadge("grant club 2");
+		const ss::ui::FrontEndInfo After = ss::ui::DescribeSession(S, true);
+		Expect(Before.ClubTier == 0 && Before.TopBadge.K == ss::badge::Kind::Count && After.ClubTier == 2, "wave 1a: the CONTINUE card's club tier is the career's");
+	}
+}
 } // namespace seams
 
 void SegLead()
@@ -639,5 +845,6 @@ void SegLead()
 	seams::Settings();
 	seams::SessionSeams();
 	seams::RenownKept();
+	seams::Wave1a();
 }
 } // namespace session_test

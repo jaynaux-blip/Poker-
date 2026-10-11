@@ -8,6 +8,7 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Weather.h"
+#include "ShortStack/UI/Captions.h"
 
 #include <algorithm>
 #include <cmath>
@@ -161,6 +162,44 @@ void DrawStreetHud(Canvas& C, const StreetHudInfo& Info, double Now)
 			TrackedText(C, Label, Chip.X + 28.0f, Chip.Y + 17.5f, 11.0f, 800, Hex(0xffffff), 2.4f);
 		}
 	}
+	// A sponsor's duty the hero is due at (an appearance window): the chip under the clock, counting down to it, then
+	// what's left of it. Gone once the window has closed.
+	if (!Skipping && !Info.Due.Label.empty() && Info.World >= 0.0 && Info.World < Info.Due.To)
+	{
+		const bool On = Info.World >= Info.Due.From;
+		const int Mins = static_cast<int>(std::ceil(std::max(0.0, (On ? Info.Due.To : Info.Due.From) - Info.World)));
+		std::string When;
+		if (On)
+		{
+			When = "NOW \xC2\xB7 " + (Mins >= 60 ? std::to_string(Mins / 60) + " HR " + std::to_string(Mins % 60) + " MIN LEFT" : std::to_string(Mins) + " MIN LEFT");
+		}
+		else
+		{
+			When = Mins < 60 ? "IN " + std::to_string(std::max(1, Mins)) + " MIN" : "AT " + net::TimeLabel(Info.Due.From);
+		}
+		std::string Up = Info.Due.Label;
+		std::transform(Up.begin(), Up.end(), Up.begin(), [](char Ch) { return static_cast<char>(Ch >= 'a' && Ch <= 'z' ? Ch - 32 : Ch); });
+		const std::string Label = Up + " \xC2\xB7 " + When;
+		const float MaxW = std::min(620.0f, W * 0.5f);
+		const float Lw = std::min(MaxW, TrackedWidth(C, Label, 13.0f, 800, 1.8f));
+		const bool Penny = Info.Life && !Info.Life->Deliveries.empty();
+		const Rect Chip{58.0f, Penny ? 272.0f : 238.0f, Lw + 40.0f, 28.0f};
+		C.FillRoundRect(Chip, 14.0f, Paint(On ? Hex(0xf6b04a, 0.92f) : Rgba(8, 10, 16, 0.82f)));
+		if (!On)
+		{
+			C.StrokeRoundRect({Chip.X + 0.5f, Chip.Y + 0.5f, Chip.W - 1.0f, Chip.H - 1.0f}, 14.0f, Hex(0xf6b04a, 0.7f), 1.0f);
+		}
+		const Color Ink = On ? Hex(0x1a1206) : Hex(0xf6b04a);
+		C.FillCircle(Chip.X + 15.0f, Chip.Y + 14.0f, 4.0f, Paint(Ink));
+		if (TrackedWidth(C, Label, 13.0f, 800, 1.8f) <= MaxW)
+		{
+			TrackedText(C, Label, Chip.X + 28.0f, Chip.Y + 19.0f, 13.0f, 800, Ink, 1.8f);
+		}
+		else
+		{
+			C.Text(Label, Chip.X + 28.0f, Chip.Y + 19.0f, Ts(13.0f, 800, Ink, Align::Left, Baseline::Alphabetic, false, Lw));
+		}
+	}
 	// The camera, top right.
 	const std::string Mode = Info.FirstPerson ? "FIRST PERSON" : "THIRD PERSON";
 	const float ModeW = TrackedWidth(C, Mode, 12.0f, 800, 3.0f);
@@ -218,63 +257,24 @@ void DrawStreetHud(Canvas& C, const StreetHudInfo& Info, double Now)
 	const double ClosedAge = Now - Info.ClosedAt;
 	const bool ClosedShown = !Skipping && !Info.Closed.empty() && ClosedAge >= 0.0 && ClosedAge < 4.5;
 	const float ClosedY = Info.Prompt.empty() ? H - 210.0f : H - 278.0f;
-	// What people say: the two newest lines, the newest at the bottom, over the prompt (and the door's line).
+	// What people say: the two newest lines, the newest at the bottom, over the prompt (and the door's line), drawn the
+	// way the card room's captions are (ui::DrawCaptions, with the player's caption settings; the street keeps its
+	// two-box cap). Captions off: none.
+	if (Info.CaptionLook.Mode > 0)
 	{
-		struct Shown
-		{
-			const StreetHudInfo::Subtitle* Sub;
-			float A;
-		};
-		std::vector<Shown> List;
+		std::vector<Caption> Lines;
 		for (const StreetHudInfo::Subtitle& Sb : Info.Subtitles)
 		{
-			const double Age = Now - Sb.At;
-			const double Hold = std::min(8.0, 2.6 + 0.06 * static_cast<double>(Sb.Line.size()));
-			if (Age >= 0.0 && Age <= Hold)
-			{
-				List.push_back({&Sb, std::min(Ease(Age / 0.2), Ease((Hold - Age) / 0.4))});
-			}
+			Caption Cp;
+			Cp.Speaker = Sb.Speaker;
+			Cp.Line = Sb.Line;
+			Cp.At = Sb.At;
+			Lines.push_back(Cp);
 		}
-		std::stable_sort(List.begin(), List.end(), [](const Shown& A, const Shown& B) { return A.Sub->At < B.Sub->At; });
-		if (List.size() > 2)
-		{
-			List.erase(List.begin(), List.end() - 2);
-		}
-		float By = Skipping ? H - 140.0f : ClosedShown ? ClosedY - 14.0f : !Info.Prompt.empty() ? H - 236.0f : H - 140.0f;
-		for (auto It = List.rbegin(); It != List.rend(); ++It)
-		{
-			const StreetHudInfo::Subtitle& Sb = *It->Sub;
-			const float Mx = std::min(980.0f, W - 160.0f);
-			const std::string Who = Sb.Speaker.empty() ? std::string() : Sb.Speaker;
-			const float Lw = Who.empty() ? 0.0f : TrackedWidth(C, Who, 13.0f, 800, 2.4f) + 14.0f;
-			std::vector<std::string> Lines = WrapText(C, Sb.Line, Mx - Lw - 40.0f, 21.0f, 500);
-			if (Lines.size() > 2)
-			{
-				Lines.resize(2);
-				Lines[1] += "\xE2\x80\xA6";
-			}
-			float Widest = 0.0f;
-			for (const std::string& Ln : Lines)
-			{
-				Widest = std::max(Widest, C.Measure(Ln, 21.0f, 500));
-			}
-			const float Bw = Lw + Widest + 40.0f;
-			const float Bh = 16.0f + Fl(static_cast<int>(Lines.size())) * 28.0f;
-			const float Bx = W * 0.5f - Bw * 0.5f;
-			By -= Bh;
-			C.FillRoundRect({Bx, By, Bw, Bh}, 10.0f, Paint(Rgba(4, 6, 10, 0.72f * It->A)));
-			if (!Who.empty())
-			{
-				TrackedText(C, Who, Bx + 20.0f, By + 33.0f, 13.0f, 800, Dim(MenuTeal, It->A), 2.4f);
-			}
-			float Ly = By + 8.0f;
-			for (const std::string& Ln : Lines)
-			{
-				Ly += 28.0f;
-				C.Text(Ln, Bx + 20.0f + Lw, Ly - 1.0f, Ts(21.0f, 500, Dim(MenuInk, 0.95f * It->A)));
-			}
-			By -= 8.0f;
-		}
+		CaptionStyle Look = Info.CaptionLook;
+		Look.MaxShown = 2;
+		const float By = Skipping ? H - 140.0f : ClosedShown ? ClosedY - 14.0f : !Info.Prompt.empty() ? H - 236.0f : H - 140.0f;
+		DrawCaptions(C, Lines, Look, By, std::min(980.0f, W - 160.0f), Now);
 	}
 	// The locked door's line.
 	if (ClosedShown)

@@ -667,6 +667,12 @@ void ABackRoomPlayer::Say(const FString& Line)
 	TalkLeft = 0.5f + 0.055f * Line.Len();
 }
 
+void ABackRoomPlayer::Say(const FString& Line, const ss::audio::SpeechPlan* /*Plan*/)
+{
+	// ue-room (next_segment_spec 4.11): the jaw from MouthAt, one engine voice at the head. Until then, the line as ever.
+	Say(Line);
+}
+
 TArray<FString> ABackRoomPlayer::TakeLines()
 {
 	TArray<FString> Out = MoveTemp(Lines);

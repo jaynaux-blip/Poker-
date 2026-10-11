@@ -4,9 +4,13 @@
 //   world_test years N [seed]      plays N years and prints the world's health every year
 //   world_test npc NAME [days]     plays some days and describes someone
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/World.h"
+
+#include "CopyLint.h"
 
 #include <algorithm>
 #include <array>
@@ -124,6 +128,24 @@ void Invariants(const world::World& W, const std::string& When)
 	}
 	Check(Active > 1000, When + ": the world emptied out (" + std::to_string(Active) + " active)");
 	Check(W.View().size() == W.People().size(), When + ": the network view is out of step");
+	// The badges' world data (next_segment_spec §5.3).
+	for (const world::Npc& N : W.People())
+	{
+		const world::RoomRecord& R = N.Room;
+		bool Ordered = true;
+		for (size_t K = 1; K < R.Days.size(); ++K)
+		{
+			Ordered = Ordered && R.Days[K] > R.Days[K - 1];
+		}
+		Ordered = Ordered && (R.Days.empty() || R.Days.back() - R.Days.front() < world::RoomDaysKept);
+		Check(Ordered && R.Wins <= R.Events && R.Cashes <= R.Events && R.FinalTables <= R.Events && static_cast<int>(R.Days.size()) <= R.Events,
+			When + ": " + N.Name + "'s room record is consistent (a visit a day, kept " + std::to_string(world::RoomDaysKept) + " days)");
+		Check(N.CardBest >= world::CardNone && N.CardBest <= world::CardBlack && N.CardLast >= world::CardNone && N.CardLast <= world::CardBlack, When + ": " + N.Name + "'s cards");
+		// Live Player of the Year and the circuit count the same events (Regional and up): the same points all season.
+		Check(N.ThisSeason.LivePoints == N.CircuitPoints, When + ": " + N.Name + "'s live points are the circuit's");
+		Check(N.Pro == (N.Sponsor == "Team RiverLine") && N.Sponsor != "RiverLine", When + ": " + N.Name + " wears the site's patch only as one of its ten");
+	}
+	Check(W.HeroSeasonLivePoints() == W.HeroCircuitPoints(), When + ": the player's live points are the circuit's");
 }
 
 /** RiverLine's online calendar: a series in every season of every year, each name used once. */
@@ -568,14 +590,638 @@ void StreetMemory(world::World& W)
 	Check(!W.Bumped(Sal, Now + 100.0 + 2.0 * 1440.0), "street: a bump days later is an accident again");
 }
 
+std::string FixturePath(const char* Name)
+{
+	// tests/ -> Standalone/ -> the plugin's Tests/fixtures/ (world_test has no SS_TESTS_DIR of its own).
+	std::string Here = __FILE__;
+	for (char& C : Here)
+	{
+		C = C == '\\' ? '/' : C;
+	}
+	const size_t Cut = Here.rfind("/Standalone/");
+	return (Cut == std::string::npos ? std::string("..") : Here.substr(0, Cut)) + "/Tests/fixtures/" + Name;
+}
+
+std::string ReadText(const std::string& Path)
+{
+	std::string Out;
+	if (FILE* F = std::fopen(Path.c_str(), "rb"))
+	{
+		char Buf[65536];
+		size_t N = 0;
+		while ((N = std::fread(Buf, 1, sizeof(Buf), F)) > 0)
+		{
+			Out.append(Buf, N);
+		}
+		std::fclose(F);
+	}
+	// (A checkout that converted the line endings still reads as written.)
+	Out.erase(std::remove(Out.begin(), Out.end(), '\r'), Out.end());
+	return Out;
+}
+
+double MeanVisits(const world::World& W, int Day)
+{
+	const std::vector<int> Regulars = W.EmbercrestRegulars();
+	int Sum = 0;
+	for (int Id : Regulars)
+	{
+		Sum += W.Get(Id)->Room.VisitsIn(Day);
+	}
+	return Regulars.empty() ? 0.0 : static_cast<double>(Sum) / static_cast<double>(Regulars.size());
+}
+
+/** The calendar's badge helpers: months, season weeks, the circuit's events, the Verified rule at its edges, freerolls. */
+void BadgeRules()
+{
+	Check(world::SeasonWeek(world::DayOn(2027, 1, 1)) == 1 && world::SeasonWeek(world::DayOn(2027, 1, 7)) == 1 && world::SeasonWeek(world::DayOn(2027, 1, 8)) == 2,
+		"season weeks start on January 1");
+	Check(world::SeasonWeek(world::DayOn(2027, 3, 26)) == 13 && world::SeasonWeek(world::DayOn(2027, 3, 25)) == 12, "week 13 starts on March 26 (the standings' first)");
+	Check(world::MonthStart(world::DayOn(2027, 2, 28)) == world::DayOn(2027, 2, 1) && world::MonthStart(world::DayOn(2027, 3, 1)) == world::DayOn(2027, 3, 1), "a month's first day");
+	Check(world::MonthKeyOf(world::DayOn(2027, 1, 31)) == 2027 * 12 && world::MonthKeyOf(world::DayOn(2027, 2, 1)) == 2027 * 12 + 1, "month keys");
+	Check(!world::CircuitEvent(world::LiveKind::Local, false) && !world::CircuitEvent(world::LiveKind::Underground, false) && world::CircuitEvent(world::LiveKind::Regional, false) &&
+			  world::CircuitEvent(world::LiveKind::Summit, false) && !world::CircuitEvent(world::LiveKind::Regional, true),
+		"circuit points: Regional and up, never a satellite, never the room's weeklies");
+	// A room record's visits, and the month's start the tier can't drop below.
+	{
+		world::RoomRecord R;
+		const int First = world::DayOn(2027, 3, 1);
+		for (int D = First - 95; D < First + 10; D += 5)
+		{
+			R.Days.push_back(D);
+		}
+		Check(R.VisitsIn(First - 1) == 18 && R.VisitsAtMonthStart(First + 9) == 18 && R.VisitsIn(First + 9) == 18, "visits in 90 days, and at the month's start");
+		Check(R.VisitsIn(First - 1, 1) == 0 && R.VisitsIn(First + 5, 1) == 1, "a window counts the days in it");
+	}
+	// Verified Pro's record (§5.3): 1,000 paid tournaments, +15%, played in 30 days, a professional. Freerolls count for nothing.
+	{
+		auto Page = [](int Events, int Freerolls, double Roi) {
+			world::Tracker T;
+			const Chips BuyIn = 1100;
+			const Chips Profit = static_cast<Chips>(std::llround(Roi * static_cast<double>(BuyIn) * Events));
+			for (int K = 0; K < Events; ++K)
+			{
+				T.Add(BuyIn, K == 0 ? BuyIn * Events + Profit : 0, K == 0 ? 1 : 50, 100, 9, world::TrackStake::Low, world::TrackFormat::Regular);
+			}
+			for (int K = 0; K < Freerolls; ++K)
+			{
+				T.Add(0, 50000, 1, 300, 9, world::TrackStake::Micro, world::TrackFormat::Regular);
+			}
+			return T;
+		};
+		const world::Tracker Ok = Page(1000, 0, 0.15);
+		Check(world::VerifiedRecord(Ok, true, 30) && !world::VerifiedRecord(Ok, true, 31) && !world::VerifiedRecord(Ok, false, 0), "Verified: 1,000 at +15%, played in 30 days, a professional");
+		Check(!world::VerifiedRecord(Page(999, 0, 0.15), true, 0) && !world::VerifiedRecord(Page(1000, 0, 0.149), true, 0), "Verified: not at 999, not at +14.9%");
+		const world::Tracker Free = Page(999, 40, 0.10);
+		Check(Free.Events == 1039 && Free.PaidEvents() == 999 && Free.Freerolls == 40 && Free.PaidRoi() < 0.1001 && Free.Roi() > Free.PaidRoi() && !world::VerifiedRecord(Free, true, 0),
+			"freerolls make neither the count nor the ROI");
+		Check(Free.PaidAbi() == 1100 && Free.PaidProfit() == Free.PaidPrizes() - Free.BuyIns, "the paid numbers: ABI and profit without the freerolls");
+	}
+}
+
+/** The badges' world data on day one: the titles before the story began, the room's months, the first review. */
+void DayOne(const world::World& W)
+{
+	int Founding = 0;
+	int Holders = 0;
+	int Bracelets = 0;
+	int Rings = 0;
+	bool Before = true;
+	bool Travel = true;
+	bool Booked = true;
+	for (const world::Npc& N : W.People())
+	{
+		Founding += N.From == world::Origin::Founding ? 1 : 0;
+		if (N.Awards.empty())
+		{
+			continue;
+		}
+		++Holders;
+		Bracelets += N.Bracelets > 0 ? 1 : 0;
+		Rings += N.Rings > 0 ? 1 : 0;
+		Chips Sum = 0;
+		Chips Top = 0;
+		for (const world::Award& A : N.Awards)
+		{
+			Before = Before && world::YearOf(A.Day) < 2026 && !A.Online && !A.Series.empty() && A.Event.rfind(A.Series + ": ", 0) == 0 && A.Prize > 0 && A.Entries > 0;
+			Before = Before && (A.Ring ? A.Series.rfind("Grand Circuit ", 0) == 0 : A.Series.rfind("The Championship ", 0) == 0);
+			Sum += A.Prize;
+			Top = std::max(Top, A.Prize);
+		}
+		Travel = Travel && N.From == world::Origin::Founding && N.Live >= world::LiveLevel::Regional;
+		// The trophy and the career agree: the live record holds every title's money and its win.
+		const world::Ledger& Lv = N.Totals[static_cast<size_t>(world::Venue::Live)];
+		Booked = Booked && Lv.Won >= Sum && Lv.Best >= Top && Lv.Wins >= static_cast<int>(N.Awards.size()) && Lv.Cashes >= Lv.Wins && Lv.Events >= Lv.Cashes &&
+			N.Bracelets + N.Rings == static_cast<int>(N.Awards.size()) && N.CareerWon() >= Sum;
+	}
+	Check(Before && Travel, "the titles before the story began: live, before 2026, won by regulars who travel");
+	Check(Booked, "the titles before the story began are in their live records: the wins, the money, the best cash");
+	Check(Holders * 45 >= Founding && Holders * 20 <= Founding, "about one regular in thirty holds a bracelet or a ring on the first night (" + std::to_string(Holders) + ")");
+	// The room's last months, from habits: about 21 visits in 90 days for a regular; nobody on the wall without a win.
+	const int Today = net::DayOf(W.Clock());
+	const double Mean = MeanVisits(W, Today);
+	int Walled = 0;
+	for (const world::Npc& N : W.People())
+	{
+		Walled += N.Room.Wins;
+	}
+	Check(Mean >= 15.0 && Mean <= 28.0 && Walled == 0, "the room's regulars have their months (" + Fixed(Mean, 1) + " visits in 90 days), and nobody is on the wall yet");
+	// The first review: Verified is the record's (and a believable share of the professionals).
+	int Verified = 0;
+	bool Honest = true;
+	for (const world::Npc& N : W.People())
+	{
+		Verified += N.Verified ? 1 : 0;
+		Honest = Honest && N.Verified == world::VerifiedRecord(N.Stats, N.Professional, Today - N.LastDay);
+	}
+	Check(Honest && Verified >= 30 && Verified <= 220, "the first Verified review (" + std::to_string(Verified) + ")");
+	// Team RiverLine is paid what its terms pay (the flat $1,500 until the catalog lands).
+	const Chips Weekly = sponsor::NpcWeekly("riverline") > 0 ? sponsor::NpcWeekly("riverline") : 150000;
+	int Pros = 0;
+	bool Paid = true;
+	for (const world::Npc& N : W.People())
+	{
+		Pros += N.Pro ? 1 : 0;
+		Paid = Paid && (!N.Pro || N.Income == Weekly);
+	}
+	Check(Pros == 10 && Paid, "Team RiverLine's ten are paid NpcWeekly(riverline) a week");
+	std::printf("day one: %d of %d regulars hold titles (%d bracelets, %d rings), %.1f room visits in 90 days, %d Verified\n", Holders, Founding, Bracelets, Rings, Mean, Verified);
+}
+
+/** The player's money with the world's people (HeroMoney): bankrolls, memories, regard, privacy, the save. */
+void HeroMoney(world::World& W)
+{
+	const int Lou = W.Find("Big Lou");
+	const int Park = W.Find("Mrs. Park");
+	const double Now = W.Clock();
+	const Chips Roll = W.Get(Lou)->Bankroll;
+	const size_t Logged = W.Events().size();
+	W.HeroMoney(Lou, -12000, world::MemoryKind::Staked, "Embercrest Nightly $120", Now);
+	Check(W.Get(Lou)->Bankroll == Roll - 12000 && W.BondWith(Lou) && W.BondWith(Lou)->Memories.back().Kind == world::MemoryKind::Staked && W.BondWith(Lou)->Memories.back().Amount == 12000,
+		"a stake comes out of Lou's roll, and he remembers it");
+	const float Trust = W.BondWith(Lou)->Trust;
+	W.HeroMoney(Lou, 17800, world::MemoryKind::PaidUp, "Embercrest Nightly $120", Now + 600.0, true);
+	Check(W.Get(Lou)->Bankroll == Roll + 5800 && W.BondWith(Lou)->Trust > Trust + 0.059f && W.BondWith(Lou)->Respect >= 0.02f, "paid early: his share back, Trust +0.06, Respect +0.02");
+	// A welch: the regard falls apart, the label says so, and nothing said out loud mentions money (N3).
+	for (int K = 0; K < 3; ++K)
+	{
+		W.Remember(Park, world::MemoryKind::Met, "the Embercrest", 0, Now - 3000.0 + K);
+	}
+	W.HeroMoney(Park, -1580, world::MemoryKind::BoughtPiece, "Embercrest Sunday $150", Now);
+	W.HeroMoney(Park, 0, world::MemoryKind::PaidLate, "Embercrest Sunday $150", Now + 4320.0);
+	W.HeroMoney(Park, 0, world::MemoryKind::Welched, "Embercrest Sunday $150", Now + 14400.0);
+	const world::Bond* B = W.BondWith(Park);
+	Check(B && B->Label() == "Holds a grudge" && B->Resentment >= 0.4f && B->Trust == 0.0f, "a welch: Mrs. Park holds a grudge");
+	bool Quiet = true;
+	for (uint32_t Salt = 0; Salt < 3; ++Salt)
+	{
+		for (const std::string& Line : {W.SpokenGreeting(Park, Salt), W.Greeting(Park, Salt), W.SpokenGreeting(Lou, Salt), W.Greeting(Lou, Salt)})
+		{
+			Quiet = Quiet && !Line.empty() && Line.find('$') == std::string::npos && Line.find("owe") == std::string::npos && Line.find("money") == std::string::npos &&
+				Line.find("stake") == std::string::npos && Line.find("piece") == std::string::npos;
+		}
+	}
+	Check(Quiet, "greetings after money change their tone, never mention it");
+	// Every line a money memory puts in someone's mouth at the table passes the copy lint as table talk.
+	{
+		world::World Scratch = W;
+		const int Dre = Scratch.Find("Dre");
+		std::vector<std::pair<std::string, std::string>> Lines;
+		double At = Now + 40000.0;
+		for (world::MemoryKind M : {world::MemoryKind::Staked, world::MemoryKind::BoughtPiece, world::MemoryKind::Swapped, world::MemoryKind::PaidUp, world::MemoryKind::PaidLate,
+				 world::MemoryKind::Welched, world::MemoryKind::WalkedOut})
+		{
+			Scratch.HeroMoney(Dre, 0, M, "Embercrest Nightly $120", At);
+			At += 1440.0;
+			Check(Scratch.BondWith(Dre) && Scratch.BondWith(Dre)->Memories.back().Kind == M && std::strlen(world::MemoryText(M)) > 0, std::string("a money memory is kept and named: ") + world::MemoryText(M));
+			for (uint32_t Salt = 0; Salt < 3; ++Salt)
+			{
+				Lines.push_back({world::MemoryText(M), Scratch.SpokenGreeting(Dre, Salt)});
+			}
+		}
+		Check(copylint::Run("world", Lines, copylint::TableTalk) == 0, "the money memories' greetings pass the copy lint");
+	}
+	// A late debt is one memory and one knock to their trust (§2.9): the mark at the due time, then the money settles it.
+	// And money their way to the player under "paid up" is a swap settling, never the player paying them.
+	{
+		world::World Scratch = W;
+		const int Rick = Scratch.Find("Rick");
+		for (int K = 0; K < 4; ++K)
+		{
+			Scratch.HeroMoney(Rick, 100, world::MemoryKind::PaidUp, "Embercrest Nightly $120", Now + 100.0 * K);
+		}
+		const float Trusted = Scratch.BondWith(Rick)->Trust;
+		const size_t Had = Scratch.BondWith(Rick)->Memories.size();
+		const Chips RickRoll = Scratch.Get(Rick)->Bankroll;
+		Scratch.HeroMoney(Rick, 0, world::MemoryKind::PaidLate, "Embercrest Sunday $150", Now + 4320.0);
+		Scratch.HeroMoney(Rick, 4200, world::MemoryKind::PaidLate, "Embercrest Sunday $150", Now + 6000.0);
+		const world::Bond* Late = Scratch.BondWith(Rick);
+		Check(Trusted >= 0.15f && Late->Memories.size() == Had + 1 && Late->Memories.back().Kind == world::MemoryKind::PaidLate && Late->Memories.back().Amount == 4200 &&
+				  std::fabs((Trusted - Late->Trust) - 0.10f) < 1e-4f && Scratch.Get(Rick)->Bankroll == RickRoll + 4200,
+			"a late debt: one memory, Trust -0.10 once, the money when it's paid");
+		Scratch.HeroMoney(Rick, -900, world::MemoryKind::PaidUp, "Embercrest Big Stack", Now + 9000.0);
+		Check(Scratch.BondWith(Rick)->Memories.back().Kind == world::MemoryKind::Swapped && Scratch.Get(Rick)->Bankroll == RickRoll + 3300,
+			"money from them under \"paid up\" is remembered as the swap settling");
+	}
+	// Nobody's roll goes below zero, whatever the player is owed.
+	W.HeroMoney(Park, -(1LL << 40), world::MemoryKind::Swapped, "Embercrest Big Stack", Now + 20000.0);
+	Check(W.Get(Park)->Bankroll == 0, "a roll never goes below zero");
+	// Never public: no headline, nothing on the card but the player's own memories of them.
+	const world::Profile P = W.ProfileOf(Park);
+	bool Told = false;
+	for (const std::string& M : P.Memories)
+	{
+		Told = Told || M.find("You never paid them") != std::string::npos;
+	}
+	Check(Told && W.Events().size() == Logged, "the player's card of her remembers it (theirs to know), and nothing of it makes the news");
+	Invariants(W, "after the player's money");
+	// Every money memory round-trips.
+	for (world::MemoryKind K : {world::MemoryKind::Swapped, world::MemoryKind::WalkedOut})
+	{
+		W.HeroMoney(Lou, 100, K, "Embercrest Nightly $120", Now + 30000.0 + static_cast<double>(K));
+	}
+	std::string Saved;
+	W.Write(Saved);
+	world::World Copy;
+	Load(Copy, Saved);
+	bool Same = true;
+	for (int Id : {Lou, Park})
+	{
+		const world::Bond* A = W.BondWith(Id);
+		const world::Bond* C = Copy.BondWith(Id);
+		Same = Same && A && C && A->Memories.size() == C->Memories.size() && A->Trust == C->Trust && A->Resentment == C->Resentment;
+		for (size_t K = 0; Same && K < A->Memories.size(); ++K)
+		{
+			Same = A->Memories[K].Kind == C->Memories[K].Kind && A->Memories[K].Amount == C->Memories[K].Amount;
+		}
+	}
+	std::string Again;
+	Copy.Write(Again);
+	Check(Same && Again == Saved, "money memories round-trip");
+	std::printf("player's money: Lou %s (%s), Mrs. Park %s\n", W.BondWith(Lou)->Label().c_str(), W.SpokenGreeting(Lou, 0).c_str(), W.BondWith(Park)->Label().c_str());
+}
+
+/** Backers (§2.5): people who respect or trust the player, with the roll for it and room for another horse. */
+void WorldBackers(world::World& W)
+{
+	Check(W.Backers(5).empty() || W.HeroStats().PaidEvents() > 0, "nobody backs a player with no paid results");
+	if (W.HeroStats().PaidEvents() == 0)
+	{
+		W.GrantHeroResults(60);
+	}
+	const int Hana = W.Find("HighRollerHana");
+	for (int K = 0; K < 7; ++K)
+	{
+		W.Remember(Hana, world::MemoryKind::FinalTable, "the Embercrest", 0, W.Clock() + K);
+	}
+	const std::vector<int> Who = W.Backers(5);
+	const bool Respected = W.BondWith(Hana) && W.BondWith(Hana)->Label() == "Respects you";
+	Check(Respected && std::find(Who.begin(), Who.end(), Hana) != Who.end() && Who.size() <= 5, "a high roller who respects the player would back them");
+	bool Fit = true;
+	for (int Id : Who)
+	{
+		const world::Npc* N = W.Get(Id);
+		const std::string L = W.BondWith(Id) ? W.BondWith(Id)->Label() : std::string();
+		Fit = Fit && N && N->Playing() && (L == "Respects you" || L == "Trusts you") && N->Bankroll >= W.HeroStats().PaidAbi() * 400;
+	}
+	const int Park = W.Find("Mrs. Park");
+	Check(Fit && std::find(Who.begin(), Who.end(), Park) == Who.end(), "backers: the regard, the roll; a welch's victim isn't one");
+}
+
+/** The player's live results: the room's record and leaders from the Embercrest, the circuit (and Live POY) from Regional up. */
+void HeroRoomAndCircuit(world::World& W)
+{
+	const int Today = net::DayOf(W.Clock()) + 1;
+	W.EnsurePlanned(Today);
+	const live::Occurrence Night = live::Occurrences(Today).back();
+	const double LiveBefore = W.HeroSeasonLivePoints();
+	const int RoomBefore = W.HeroRoom().Events;
+	W.HeroEntered(Night.Id, Night.T->Name);
+	W.AdvanceTo(Night.Start + 120.0);
+	W.HeroFinished(Night.Id, 1, 300000, world::World::TableReport());
+	W.HeroFinished(Night.Id, 1, 300000, world::World::TableReport()); // told twice: still one result
+	const world::RoomRecord& R = W.HeroRoom();
+	Check(R.Events == RoomBefore + 1 && R.Wins >= 1 && R.LastWin == Night.Day && !R.Days.empty() && R.Days.back() == Night.Day && R.MonthPoints > 0.0,
+		"an Embercrest win goes on the player's room record, once");
+	Check(W.HeroSeasonLivePoints() == LiveBefore && W.HeroCircuitPoints() == LiveBefore, "the room's weeklies score no circuit or Live Player of the Year points");
+	const std::vector<std::pair<int, double>> Board = W.RoomLeaders("embercrest", world::MonthKeyOf(Night.Day), 1000);
+	bool Listed = false;
+	bool Sorted = true;
+	for (size_t K = 0; K < Board.size(); ++K)
+	{
+		Listed = Listed || Board[K].first == -1;
+		Sorted = Sorted && Board[K].second > 0.0 && (K == 0 || Board[K - 1].second >= Board[K].second);
+	}
+	const std::vector<std::pair<int, double>> Top = W.RoomLeaders("embercrest", world::MonthKeyOf(Night.Day), 10);
+	Check(Listed && Sorted && Top.size() == std::min<size_t>(10, Board.size()) && std::equal(Top.begin(), Top.end(), Board.begin()) &&
+			  W.RoomLeaders("embercrest", world::MonthKeyOf(Night.Day) + 1, 10).empty(),
+		"the month's room leaders: the top ten of the board, the player on it");
+	// A regional Main Event: the circuit's points and the live race.
+	int Day = Today;
+	world::LiveEvent Main;
+	for (; Day < Today + 60 && Main.Id.empty(); ++Day)
+	{
+		for (const world::LiveEvent& E : world::LiveCalendar(Day))
+		{
+			Main = Main.Id.empty() && E.Kind == world::LiveKind::Regional && E.Main ? E : Main;
+		}
+	}
+	Check(!Main.Id.empty(), "a regional Main Event within two months");
+	W.AdvanceTo(Main.Start - 600.0);
+	W.HeroEntered(Main.Id, Main.Name);
+	W.AdvanceTo(Main.Start + 600.0);
+	W.HeroFinished(Main.Id, 3, 2000000, world::World::TableReport());
+	Check(W.HeroCircuitPoints() > LiveBefore && W.HeroSeasonLivePoints() == W.HeroCircuitPoints() && W.CircuitRank(-1) >= 1, "a regional final table scores the circuit and the live race");
+	std::printf("player's live: Embercrest month %.0f pts, circuit %.0f pts (rank %d)\n", R.MonthPoints, W.HeroCircuitPoints(), W.CircuitRank(-1));
+}
+
+/** Who plays where earns what: room records only from the Embercrest, circuit points only from Regional events up. */
+void WhereItCounts(const world::World& Base)
+{
+	world::World W = Base;
+	std::map<int, int> Room;
+	std::map<int, double> Circuit;
+	for (const world::Npc& N : W.People())
+	{
+		Room[N.Id] = N.Room.Events;
+		Circuit[N.Id] = N.CircuitPoints;
+	}
+	std::set<int> AtRoom;
+	std::set<int> AtCircuit;
+	// Who's registered for each day's live events, read early that day (before any of them is played): yesterday's and
+	// today's now, then each day's as the world reaches it.
+	auto Capture = [&](int D) {
+		W.EnsurePlanned(D);
+		for (const world::LiveEvent& E : world::LiveCalendar(D))
+		{
+			const bool Counts = world::CircuitEvent(E.Kind, !E.Ticket.empty());
+			for (int Id : W.Registered(E.Id))
+			{
+				if (live::IsEmbercrest(E.Id))
+				{
+					AtRoom.insert(Id);
+				}
+				if (Counts)
+				{
+					AtCircuit.insert(Id);
+				}
+			}
+		}
+	};
+	const int Today = net::DayOf(W.Clock());
+	Capture(Today - 1);
+	Capture(Today);
+	for (int K = 1; K <= 14; ++K)
+	{
+		W.Simulate(1);
+		Capture(Today + K);
+	}
+	bool RoomOk = true;
+	bool CircuitOk = true;
+	int RoomGrew = 0;
+	for (const world::Npc& N : W.People())
+	{
+		const int Grew = N.Room.Events - (Room.count(N.Id) ? Room[N.Id] : 0);
+		RoomGrew += Grew > 0 ? 1 : 0;
+		const bool RoomFine = Grew == 0 || AtRoom.count(N.Id) > 0;
+		const bool CircuitFine = N.CircuitPoints == (Circuit.count(N.Id) ? Circuit[N.Id] : 0.0) || AtCircuit.count(N.Id) > 0;
+		if (!RoomFine || !CircuitFine)
+		{
+			std::printf("  %s: room +%d (registered %d), circuit %.0f -> %.0f (registered %d)\n", N.Name.c_str(), Grew, static_cast<int>(AtRoom.count(N.Id)),
+				Circuit.count(N.Id) ? Circuit[N.Id] : 0.0, N.CircuitPoints, static_cast<int>(AtCircuit.count(N.Id)));
+		}
+		RoomOk = RoomOk && RoomFine;
+		CircuitOk = CircuitOk && CircuitFine;
+	}
+	Check(RoomOk && RoomGrew > 30, "room records grow only from the Embercrest's events (" + std::to_string(RoomGrew) + " people in two weeks)");
+	Check(CircuitOk, "circuit points come only from Regional events and up");
+}
+
+/** A season and a half: the standings, the rollover, Live Player of the Year, the reviews, the Hall of Fame's first July. */
+void Seasons()
+{
+	world::World W;
+	W.Create(7u, NightOne);
+	// Into the money at the River City Classic's Main in October: the player on the circuit's board.
+	world::LiveEvent Main;
+	for (int Day = net::DayOf(W.Clock()); Day < net::DayOf(W.Clock()) + 40 && Main.Id.empty(); ++Day)
+	{
+		for (const world::LiveEvent& E : world::LiveCalendar(Day))
+		{
+			Main = Main.Id.empty() && E.Kind == world::LiveKind::Regional && E.Main && E.Where == world::Region::Americas ? E : Main;
+		}
+	}
+	W.AdvanceTo(Main.Start - 300.0);
+	W.HeroEntered(Main.Id, Main.Name);
+	W.AdvanceTo(Main.Start + 300.0);
+	W.HeroFinished(Main.Id, 2, 3500000, world::World::TableReport());
+	const double Mine = W.HeroCircuitPoints();
+	// The standings on Mondays: the ranks now are the ranks they posted (nothing has finished since midnight).
+	int Monday = net::DayOf(W.Clock()) + 1;
+	while (net::Weekday(Monday) != 0)
+	{
+		++Monday;
+	}
+	auto Posted = [&](const char* When) {
+		std::vector<std::pair<double, int>> Board;
+		for (const world::Npc& N : W.People())
+		{
+			if (!N.Faded && N.CircuitPoints > 0.0)
+			{
+				Board.push_back({N.CircuitPoints, N.Id});
+			}
+		}
+		if (W.HeroCircuitPoints() > 0.0)
+		{
+			Board.push_back({W.HeroCircuitPoints(), -1});
+		}
+		std::sort(Board.begin(), Board.end(), [](const std::pair<double, int>& A, const std::pair<double, int>& B) { return A.first > B.first || (A.first == B.first && A.second < B.second); });
+		bool Ok = true;
+		for (size_t K = 0; K < Board.size(); ++K)
+		{
+			const int Want = K < 10 ? world::CardBlack : K < 50 ? world::CardGold : K < 200 ? world::CardRegular : world::CardNone;
+			const int Has = Board[K].second < 0 ? W.HeroCardBest() : W.Get(Board[K].second)->CardBest;
+			const int Rank = Board[K].second < 0 ? W.CircuitRank(-1) : W.CircuitRank(Board[K].second);
+			Ok = Ok && Has >= Want && Rank == static_cast<int>(K) + 1;
+		}
+		Check(Ok && !Board.empty(), std::string(When) + ": the circuit's standings: Black for the top 10, Gold to 50, the Card to 200, each rank as posted");
+		const double Cut = W.CardCutLine(world::CardBlack);
+		Check(Board.size() < 10 ? Cut == 0.0 : Cut == Board[9].first, std::string(When) + ": the Black Card's cut line is the 10th best");
+		return Board.size();
+	};
+	W.AdvanceTo(static_cast<double>(Monday) * 1440.0);
+	Posted("October");
+	Check(W.HeroCardBest() >= world::CardRegular && Mine > 0.0, "the player's first card");
+	// The 1st's review: Verified is exactly the record's that morning.
+	const int Feb = world::DayOn(2027, 2, 1);
+	W.AdvanceTo(static_cast<double>(world::DayOn(2027, 1, 1)) * 1440.0);
+	// New Year: last season's card is good through this one; the race starts again; Live POY from Regional points only.
+	{
+		bool Rolled = W.HeroCardLast() >= world::CardRegular && W.HeroCardBest() == world::CardNone && W.HeroCircuitPoints() == 0.0 && W.HeroSeasonLivePoints() == 0.0;
+		int Carded = 0;
+		for (const world::Npc& N : W.People())
+		{
+			Rolled = Rolled && N.CircuitPoints == 0.0 && N.ThisSeason.LivePoints == 0.0 && (N.CardBest == world::CardNone || !N.Awards.empty());
+			Carded += N.CardLast > world::CardNone ? 1 : 0;
+		}
+		Check(Rolled && Carded > 0, "New Year: cards roll over to last season's, the points to zero (" + std::to_string(Carded) + " with a 2026 card)");
+		bool Crowned = false;
+		for (const world::Honor& H : W.Honors())
+		{
+			Crowned = Crowned || (H.Year == 2026 && H.Title == "Live Player of the Year");
+		}
+		Check(Crowned, "a Live Player of the Year for 2026, from Regional events and up");
+	}
+	W.AdvanceTo(static_cast<double>(Feb) * 1440.0);
+	{
+		bool Honest = true;
+		int Verified = 0;
+		for (const world::Npc& N : W.People())
+		{
+			Honest = Honest && N.Verified == (!N.Faded && world::VerifiedRecord(N.Stats, N.Professional, Feb - N.LastDay)) && (!N.Verified || N.ReviewMonth == world::MonthKeyOf(Feb));
+			Verified += N.Verified ? 1 : 0;
+		}
+		Check(Honest && Verified >= 30 && Verified <= 220, "the 1st's review: Verified Pro is the record's (" + std::to_string(Verified) + ")");
+	}
+	// Week 13's Monday: the first standings of 2027.
+	Monday = world::DayOn(2027, 3, 26);
+	while (net::Weekday(Monday) != 0)
+	{
+		++Monday;
+	}
+	W.AdvanceTo(static_cast<double>(Monday - 7) * 1440.0 + 60.0);
+	int Early = 0;
+	for (const world::Npc& N : W.People())
+	{
+		const bool Titled = std::any_of(N.Awards.begin(), N.Awards.end(), [](const world::Award& A) { return world::YearOf(A.Day) == 2027; });
+		Early += N.CardBest > world::CardNone && !Titled ? 1 : 0;
+	}
+	Check(Early == 0, "no card from the standings before week 13 (only a title this season grants one)");
+	W.AdvanceTo(static_cast<double>(Monday) * 1440.0);
+	const size_t Holders = Posted("week 13");
+	// The room's own months by now (nothing seeded left in the window): the habits' history matches how they play.
+	const double Played = MeanVisits(W, Monday);
+	Check(Played >= 15.0 && Played <= 34.0, "the room's regulars, played out: " + Fixed(Played, 1) + " visits in 90 days");
+	// July 15: the Hall of Fame's class (at most two, each eligible and over the bar), and the news.
+	W.AdvanceTo(static_cast<double>(world::DayOn(2027, 7, 16)) * 1440.0);
+	int Inducted = 0;
+	bool Fair = true;
+	for (const world::Honor& H : W.Honors())
+	{
+		if (H.Title == world::HallOfFameTitle)
+		{
+			++Inducted;
+			const world::Npc* N = W.Get(H.Npc);
+			Fair = Fair && H.Year == 2027 && N && N->Age(world::DayOn(2027, 7, 15)) >= 40 && 2027 - world::YearOf(N->Joined) >= 10 && H.Entries >= 12 && W.HallClass(H.Npc) == 2027 &&
+				!W.HallEligible(H.Npc, 2028);
+			bool Told = false;
+			for (const world::WorldEvent& E : W.Events())
+			{
+				std::string Title;
+				std::string Body;
+				std::string Tag;
+				Told = Told || (E.Kind == world::EventKind::HallOfFame && E.Npc == H.Npc && W.Headline(E, Title, Body, Tag) && Title.find("Hall of Fame") != std::string::npos &&
+								   Tag == "HALL OF FAME" && Body.rfind("Class of 2027: ", 0) == 0);
+			}
+			Fair = Fair && Told;
+		}
+	}
+	Check(Inducted <= 2 && Fair, "the Hall of Fame's first July: at most two, each eligible and over the bar, in the news (" + std::to_string(Inducted) + ")");
+	// The player's own case: never while the world doesn't know their age (HeroBorn), the real rule once it does (§11 Q25).
+	{
+		const bool Unknown = W.HallEligible(-1, 2040);
+		W.HeroBorn = 2000;
+		const bool Forty = W.HallEligible(-1, 2040);
+		const bool TooSoon = W.HallEligible(-1, 2035);
+		W.HeroBorn = 2001;
+		const bool ThirtyNine = W.HallEligible(-1, 2040);
+		W.HeroBorn = 0;
+		Check(!Unknown && Forty && !TooSoon && !ThirtyNine, "the player's Hall of Fame: forty and ten years on the scene, once the world knows their age");
+	}
+	Invariants(W, "a season and a half");
+	std::printf("seasons: %zu on the circuit's board at week 13, %.1f room visits in 90 days; %d into the Hall of Fame in 2027\n%s", Holders, Played, Inducted, W.Report().c_str());
+}
+
+/** A version 1 world (Tests/fixtures/world_v1.txt): migrated once, as version 2 from then on. */
+void Migration()
+{
+	const std::string Text = ReadText(FixturePath("world_v1.txt"));
+	Check(Text.rfind("world\thead\t1\t", 0) == 0, "the version 1 world is there (" + FixturePath("world_v1.txt") + ")");
+	if (Text.empty())
+	{
+		return;
+	}
+	world::World W;
+	Load(W, Text);
+	std::string Saved;
+	W.Write(Saved);
+	Check(W.Ready() && Saved.rfind("world\thead\t2\t", 0) == 0 && Saved != Text, "a version 1 world loads and writes as version 2");
+	world::World Again;
+	Load(Again, Saved);
+	std::string Twice;
+	Again.Write(Twice);
+	Check(Twice == Saved, "the migrated world round-trips: migrated once, never twice");
+	const int Today = net::DayOf(W.Clock());
+	const double Mean = MeanVisits(W, Today);
+	int Walled = 0;
+	int Seeded = 0;
+	bool Clean = true;
+	bool Raced = W.HeroSeasonLivePoints() == 0.0;
+	for (const world::Npc& N : W.People())
+	{
+		Walled += N.Room.Wins;
+		Seeded += N.Room.Events > 0 ? 1 : 0;
+		Clean = Clean && (N.Pro || N.Sponsor != "RiverLine");
+		Raced = Raced && N.ThisSeason.LivePoints == 0.0;
+	}
+	Check(Mean >= 15.0 && Mean <= 28.0 && Walled == 0 && Seeded >= 64, "migration: the room's regulars get their months from habits (" + Fixed(Mean, 1) + " visits), nobody on the wall");
+	Check(Clean, "migration: the site's patch comes off anyone who isn't one of its ten");
+	Check(Raced, "migration: the live race starts again under the Regional-and-up rule");
+	int Holders = 0;
+	for (const world::Npc& N : W.People())
+	{
+		Holders += N.Awards.empty() ? 0 : 1;
+	}
+	Check(Holders >= 30, "migration: the titles before the story began (" + std::to_string(Holders) + " holders)");
+	// Team RiverLine's older pros give back what signing added over the terms (§3.7: $1,500 a week then, NpcWeekly now), so
+	// one who leaves later takes off exactly what's left; nobody else's income moves.
+	{
+		world::World Raw; // the version 1 lines as read, before Finish migrates them
+		std::istringstream In(Text);
+		std::string Line;
+		while (std::getline(In, Line))
+		{
+			Raw.Read(Tabs(Line));
+		}
+		const Chips Weekly = sponsor::NpcWeekly("riverline") > 0 ? sponsor::NpcWeekly("riverline") : 150000;
+		const Chips Less = 150000 - Weekly;
+		bool Paid = true;
+		int Pros = 0;
+		for (size_t K = 0; K < Raw.People().size() && K < W.People().size(); ++K)
+		{
+			const world::Npc& Was = Raw.People()[K];
+			const world::Npc& Now = W.People()[K];
+			Pros += Was.Pro ? 1 : 0;
+			Paid = Paid && Now.Income == (Was.Pro && Less > 0 ? std::max<Chips>(0, Was.Income - Less) : Was.Income);
+		}
+		Check(Paid && Pros == 10, "migration: Team RiverLine's pros are paid the terms' weekly, everyone else as they were");
+	}
+	Invariants(W, "a migrated world");
+	W.Simulate(3);
+	Invariants(W, "a migrated world, three days on");
+	std::printf("migration: v1 day %d -> v2, %d room records, %.1f visits in 90 days, %d title holders\n", Today, Seeded, Mean, Holders);
+}
+
 int Checks()
 {
 	Calendar();
+	BadgeRules();
 	const auto T0 = std::chrono::steady_clock::now();
 	world::World W;
 	W.Create(1234u, NightOne);
 	std::printf("created %zu people in %.2fs\n", W.People().size(), Seconds(T0));
 	Invariants(W, "day one");
+	DayOne(W);
 	// The cast and the rival are in it.
 	for (const char* Name : {"Sal", "Mrs. Park", "Rick", "Mei", "Dre", "Big Lou", "Twitch", "gh0stfold", "VikingVolta", "MissFinch"})
 	{
@@ -612,6 +1258,7 @@ int Checks()
 	const double Month = Seconds(T1);
 	std::printf("30 days in %.2fs\n", Month);
 	Invariants(W, "day 30");
+	WhereItCounts(W);
 	EmbercrestWeeks(W);
 	DeesNights(W);
 	MinimumField(W);
@@ -762,8 +1409,54 @@ int Checks()
 		Check(!W.Greeting(Sal, 1).empty(), "Sal has something to say");
 	}
 	StreetMemory(W);
+	HeroMoney(W);
+	WorldBackers(W);
+	HeroRoomAndCircuit(W);
+	// The news has a name for every kind of world event, the Hall of Fame's included.
+	{
+		std::set<std::string> Names;
+		for (int K = 0; K < static_cast<int>(world::EventKind::Count); ++K)
+		{
+			const std::string Name = world::EventKindName(static_cast<world::EventKind>(K));
+			Check(!Name.empty() && Names.insert(Name).second, "EventKindName names every kind (" + std::to_string(K) + ")");
+		}
+		Check(std::string(world::EventKindName(world::EventKind::Count)).empty() && std::string(world::EventKindName(world::EventKind::HallOfFame)) == "NPCHallOfFame",
+			"EventKindName covers Count");
+		world::WorldEvent E;
+		E.Kind = world::EventKind::HallOfFame;
+		E.Npc = W.Find("Mei");
+		E.Amount = 420000000;
+		E.Value = 2031;
+		std::string Title;
+		std::string Body;
+		std::string Tag;
+		Check(W.Headline(E, Title, Body, Tag) && Title == "Mei enters the Hall of Fame" && Body.rfind("Class of 2031: ", 0) == 0 && Body.back() == '.' && Tag == "HALL OF FAME",
+			"a Hall of Fame class makes a headline (" + Body + ")");
+		Check(copylint::Run("world", {{"Hall of Fame", Body}}, copylint::Pa) == 0, "the Hall of Fame's headline passes the copy lint");
+	}
+	// The world's sponsored: brands from the catalog (or Kast's, before it lands), never the site's or a card room's.
+	{
+		bool Fit = true;
+		for (const world::Npc& N : W.People())
+		{
+			if (N.Pro || N.Sponsor.empty())
+			{
+				continue;
+			}
+			const sponsor::Brand* Brand = sponsor::FindBrandByName(N.Sponsor);
+			bool Kast = false;
+			for (const kast::Sponsor& S : kast::Sponsors())
+			{
+				Kast = Kast || (S.Brand == N.Sponsor && S.Id != "riverline");
+			}
+			Fit = Fit && (Brand ? Brand->Cat != sponsor::Category::Site && Brand->Cat != sponsor::Category::CardRoom && Brand->Cat != sponsor::Category::Local : Kast);
+		}
+		Check(Fit, "the world's sponsored wear the catalog's brands, never a poker site's, a card room's or the block's");
+	}
 	std::printf("%s", W.Report().c_str());
 	std::printf("%s", W.Describe(W.Find("gh0stfold")).c_str());
+	Seasons();
+	Migration();
 	return Failures;
 }
 
@@ -844,6 +1537,25 @@ int Years(int Count, uint32_t Seed)
 				}
 				Check(Crowned, E.Name + " has a champion");
 			}
+		}
+	}
+	// The Hall of Fame (§5.3): classes of at most two a year, every member eligible on their July 15 and over the bar.
+	{
+		std::map<int, int> Classes;
+		for (const world::Honor& H : W.Honors())
+		{
+			if (H.Title != world::HallOfFameTitle)
+			{
+				continue;
+			}
+			++Classes[H.Year];
+			const world::Npc* N = W.Get(H.Npc);
+			Check(N && N->Age(world::DayOn(H.Year, 7, 15)) >= 40 && H.Year - world::YearOf(N->Joined) >= 10 && H.Entries >= 12, "the Hall of Fame's " + std::to_string(H.Year) + " class: " + H.Name);
+			std::printf("  Hall of Fame %d: %s (score %d, %s)\n", H.Year, H.Name.c_str(), H.Entries, N ? world::IdentityName(N->Is) : "?");
+		}
+		for (const auto& It : Classes)
+		{
+			Check(It.second <= 2, "at most two into the Hall of Fame in " + std::to_string(It.first));
 		}
 	}
 	for (const char* Name : {"gh0stfold", "Mei", "Big Lou", "VikingVolta"})

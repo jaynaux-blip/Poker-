@@ -23,7 +23,6 @@
 #include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "EmbercrestPaint.h"
-#include "Slate/WidgetRenderer.h"
 #include "SlateDrawList.h"
 
 #include <string>
@@ -717,32 +716,12 @@ void AEmbercrestStage::UpdateSteam(const FVector& Camera, float Dt)
 
 UTextureRenderTarget2D* AEmbercrestStage::MakeTarget(int32 Width, int32 Height)
 {
-	if (!FApp::CanEverRender())
-	{
-		return nullptr;
-	}
-	// As the widget component makes its own: the canvas draws into it through Slate.
-	UTextureRenderTarget2D* T = NewObject<UTextureRenderTarget2D>(this, NAME_None, RF_Transient);
-	T->ClearColor = FLinearColor::Transparent;
-	T->InitCustomFormat(FMath::Max(Width, 8), FMath::Max(Height, 8), PF_B8G8R8A8, false);
-	T->UpdateResourceImmediate(true);
-	return T;
+	return FCoreCanvasTarget::MakeTarget(this, Width, Height);
 }
 
 void AEmbercrestStage::RenderToTarget(UTextureRenderTarget2D* Target, const TSharedPtr<const ss::ui::DrawList>& List)
 {
-	if (!Target || !List.IsValid() || !FSlateApplication::IsInitialized() || !FApp::CanEverRender())
-	{
-		return;
-	}
-	if (!Renderer)
-	{
-		Renderer = new FWidgetRenderer(false, true);
-	}
-	const FVector2D Size(Target->SizeX, Target->SizeY);
-	TSharedRef<SDrawListWidget> Widget = SNew(SDrawListWidget).DesiredSize(Size);
-	Widget->SetDrawList(List);
-	Renderer->DrawWidget(Target, Widget, Size, 0.0f);
+	Painter.Render(Target, List);
 }
 
 void AEmbercrestStage::BuildScreens()

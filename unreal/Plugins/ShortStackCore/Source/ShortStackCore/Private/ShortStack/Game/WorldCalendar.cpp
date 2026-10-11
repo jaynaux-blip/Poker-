@@ -145,6 +145,34 @@ int MonthDay(int Day)
 	CivilFrom(Epoch() + Day, Y, M, D);
 	return D;
 }
+
+std::vector<LiveEvent> TitleEvents(int Year)
+{
+	std::vector<LiveEvent> Out;
+	const int First = YearStart(Year);
+	auto Scan = [&](int Doy) {
+		for (LiveEvent& E : LiveCalendar(First + Doy))
+		{
+			if (E.Ring || (E.Bracelet && E.Kind != LiveKind::ChampionshipMain))
+			{
+				Out.push_back(std::move(E));
+			}
+		}
+	};
+	for (const Stop& S : CircuitStops)
+	{
+		for (int K = 0; K <= 5; ++K)
+		{
+			Scan(S.Doy + K);
+		}
+	}
+	for (int K = 0; K < ChampionshipDays; ++K)
+	{
+		Scan(ChampionshipFirstDoy + K);
+	}
+	std::stable_sort(Out.begin(), Out.end(), [](const LiveEvent& A, const LiveEvent& B) { return A.Start < B.Start; });
+	return Out;
+}
 } // namespace sim
 
 int YearOf(int Day)
@@ -169,6 +197,43 @@ void CivilDate(int Day, int& Year, int& Month, int& DayOfMonth)
 int DayOn(int Year, int Month, int DayOfMonth)
 {
 	return CivilDays(Year, Month, DayOfMonth) - Epoch();
+}
+
+int MonthKeyOf(int Day)
+{
+	return sim::MonthKey(Day);
+}
+
+int RoomRecord::VisitsIn(int Day, int Window) const
+{
+	int Count = 0;
+	for (int D : Days)
+	{
+		Count += D > Day - Window && D <= Day ? 1 : 0;
+	}
+	return Count;
+}
+
+int RoomRecord::VisitsAtMonthStart(int Day) const
+{
+	return VisitsIn(MonthStart(Day) - 1, 90);
+}
+
+int MonthStart(int Day)
+{
+	return Day - (sim::MonthDay(Day) - 1);
+}
+
+int SeasonWeek(int Day)
+{
+	return sim::DayOfYear(Day) / 7 + 1;
+}
+
+bool CircuitEvent(LiveKind Kind, bool Satellite)
+{
+	// The room's own weeklies (the Embercrest has its own board) and the back-room games don't count; a satellite wins a
+	// seat, not a result.
+	return !Satellite && Kind != LiveKind::Local && Kind != LiveKind::Underground;
 }
 
 const char* SkillName(Skill S)
@@ -264,6 +329,13 @@ const char* MemoryText(MemoryKind K)
 	case MemoryKind::Embercrest: return "The Embercrest Sunday";
 	case MemoryKind::ShowedBluff: return "Showed you a bluff";
 	case MemoryKind::Street: return "Talked on the block";
+	case MemoryKind::Staked: return "Put you in an event";
+	case MemoryKind::BoughtPiece: return "Bought a piece of your action";
+	case MemoryKind::Swapped: return "Swapped action with you";
+	case MemoryKind::PaidUp: return "You paid what you owed";
+	case MemoryKind::PaidLate: return "You were late paying them";
+	case MemoryKind::Welched: return "You never paid them";
+	case MemoryKind::WalkedOut: return "You walked out on a deal";
 	default: return "";
 	}
 }
@@ -272,7 +344,7 @@ const char* EventKindName(EventKind K)
 {
 	static const char* const Names[static_cast<int>(EventKind::Count)] = {"NPCWonTournament", "NPCReachedFinalTable", "NPCWentBroke", "NPCMovedUpStakes", "NPCMovedDownStakes",
 		"NPCRetired", "NPCReturned", "NPCBreakout", "NPCQualifiedForMajor", "NPCEarnedSponsorship", "NPCReachedCareerMilestone", "NPCStartedStreaming", "NPCStreamMilestone",
-		"NPCDebut", "NPCDiscovered", "NPCBacked", "NPCRivalry", "NPCChampion", "NPCPlayerOfTheYear", "NPCTookBreak"};
+		"NPCDebut", "NPCDiscovered", "NPCBacked", "NPCRivalry", "NPCChampion", "NPCPlayerOfTheYear", "NPCTookBreak", "NPCHallOfFame"};
 	const int I = static_cast<int>(K);
 	return I >= 0 && I < static_cast<int>(EventKind::Count) ? Names[I] : "";
 }

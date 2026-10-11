@@ -37,6 +37,8 @@ public:
 	 */
 	void SetAmbienceSourceStereo(TFunction<void(float*, int32)> Source, float Level = 1.0f);
 	bool IsAmbienceStereo() const { return bStereo; }
+	/** The room tone queued ahead of the audio renderer (bytes of 16-bit PCM; 0: it ran dry), for the probes' underrun count. */
+	int32 GetAmbienceQueuedBytes() const;
 	void Play(ss::SoundId Id, float Volume = 1.0f);
 	/** A sound from a place in the world, falling off with distance. */
 	void PlayAt(ss::SoundId Id, const FVector& At, float Volume = 1.0f);

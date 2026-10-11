@@ -1,11 +1,15 @@
 #include "ShortStack/Game/Talk.h"
 #include "../StrictFloat.h"
 
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Town.h"
+#include "ShortStack/Game/Wardrobe.h"
 #include "ShortStack/Game/Weather.h"
 #include "ShortStack/Game/World.h"
 
@@ -86,9 +90,22 @@ struct TalkContext
 	bool Repays = false;
 	bool CanAsk = false;
 	bool PaysCheck = false;
+	// Big Lou's standing offer to put the player in an event (core-stake, next_segment_spec §2.5), said over the check at
+	// Ruby's: "" for none.
+	std::string LouStake;
 	// What they could tell.
 	std::vector<Item> News;
 	std::vector<Item> Games;
+	// Sponsors (next_segment_spec §3): the offer this keeper makes for their shop, its deal, an appearance window open
+	// with them now, the patches the player wears where they show, and a deal signed lately (the word on the block).
+	std::string SponsorBrand;  // the brand this person makes offers for ("luckypenny" for Ray), "" for none
+	std::string SponsorOffer;  // its open offer (a contract id) while they're at work, "" for none
+	bool SponsorSignable = false;
+	bool SponsorActive = false;
+	std::string SponsorAppear; // the venue of an appearance window open with them now ("store"), "" for none
+	std::vector<std::string> Patches;
+	std::string NewSponsor;    // a deal signed in the last three weeks: the brand's short name
+	std::string NewSponsorKey;
 	std::set<std::string> Told;
 	std::map<std::string, std::string> Vars;
 	uint32_t Salt = 0;
@@ -450,6 +467,39 @@ const Table& Lines()
 		{"mrs-park|look:hungry", {"Eat something, dear. You can't think on an empty stomach."}},
 		{"mrs-park|games:own", {"The Sunday Warm-Up. Noon, eighty dollars. Thirty years I've played it. Thirty-one, next month."}},
 		{"mrs-park|bye", {"Bus is at eleven thirty-five. I'm going to go stand there for ten minutes, like a sensible person."}},
+
+		// ---------------------------------------------------------------- sponsors (next_segment_spec §3): the keepers'
+		// offers in person, the deals running, the patches people notice, and the word on the block
+		{"ray|sponsor:pitch:luckypenny", {"Owner's been watching you come in at all hours for a month. He wants your picture on the corkboard. Got a minute?"}},
+		{"ray|sponsor:terms:luckypenny", {"Twenty-five a week on the book, one Noon Deepstack on us a month, and you wear the penny when you play. I've got the slip right here."}},
+		{"ray|sponsor:signed:luckypenny", {"Hold still. Say penny. There. That's going up right by the lotto board."}},
+		{"ray|sponsor:appear:store", {"Stand by the lotto board. Don't blink. There. Owner's going to love that one."}},
+		{"ray|sponsor:luckypenny", {"Your picture's getting looks. Guy asked me if you won the lotto.", "Owner says the corkboard never looked better. His words, not mine."}},
+		{"lonnie|sponsor:pitch:barber", {"You sit in my chair more than my own nephew. How about you wear my name at those tournaments, and I keep you sharp for free?"}},
+		{"lonnie|sponsor:terms:barber", {"A cut or a line-up every two weeks, on me. You wear the patch at two tournaments a month, and one Saturday you sit in the window chair."}},
+		{"lonnie|sponsor:signed:barber", {"Good. First one's on me whenever you want it. Sit in the window some Saturday, let the street see the work."}},
+		{"lonnie|sponsor:appear:barber", {"Window chair's yours. Sit up straight. People slow down when there's somebody in it."}},
+		{"lonnie|sponsor:barber", {"Two guys came in asking who does your hair. That's the patch working.", "Keep that patch where people can see it. That's the whole deal."}},
+		{"rosa|sponsor:pitch:ironhouse", {"Owner asked me who works hardest in here. I said you. He wants our patch on you at a tournament. We cover the membership."}},
+		{"rosa|sponsor:terms:ironhouse", {"Membership's on us. Eight workouts a month and the patch at one tournament. I count, so don't make me chase you."}},
+		{"rosa|sponsor:signed:ironhouse", {"Good. Now go put in the work. I'll be counting."}},
+		{"rosa|sponsor:ironhouse", {"Eight a month. I'm counting.", "You've been coming in. Good. Keep that patch on at the tables."}},
+		{"*|sponsor:later", {"Offer's good for the week."}},
+		{"*|look:patch:luckypenny", {"Is that a penny patch? The corner store sponsors you now?"}},
+		{"ray|look:patch:luckypenny", {"There's the penny. Owner's going to want a picture of you wearing it."}},
+		{"*|look:patch:barber", {"Fifth St. Barbers on your sleeve. Lonnie's got you advertising."}},
+		{"lonnie|look:patch:barber", {"My name on your sleeve. Don't get it dirty."}},
+		{"*|look:patch:ironhouse", {"IronHouse patch, huh? Rosa's got you on the team."}},
+		{"rosa|look:patch:ironhouse", {"Looks good on you. Now earn it."}},
+		{"*|look:patch:voltrush", {"Volt Rush on the cap. They at least give you the drinks free?"}},
+		{"*|look:patch:embercrest", {"That's the Embercrest's crest. You're on their team now?"}},
+		{"*|look:patch:stacked", {"Stacked? Those hoodies cost more than my rent."}},
+		{"*|look:patch:rangewise", {"Rangewise patch. So you're a teacher now."}},
+		{"*|look:patch:riverline", {"Team RiverLine on your chest. Look at you."}},
+		{"*|look:patch:turnstone", {"Turnstone Poker. Never heard of them. They pay?"}},
+		{"*|rumour:sponsor-you", {"Heard {brand} is sponsoring you now. Look at you.", "Word is {brand} signed you. Don't forget the little people."}},
+		{"big-lou|rumour:sponsor-you", {"{brand} sponsors you? Huh. Respect."}},
+		{"sal|rumour:sponsor-you", {"{brand}, huh. Back in my day you paid for your own hat."}},
 	};
 	return T;
 }
@@ -769,6 +819,11 @@ void Gather(const Session& S, TalkContext& C)
 			Item(C.News, "result:" + Id, "news", Say(C, Topic, V));
 		}
 	}
+	// A deal signed lately: the word on the block (once, by whoever tells it first).
+	if (Knows && !C.NewSponsor.empty())
+	{
+		Item(C.News, C.NewSponsorKey, "rumour:sponsor-you", Say(C, "rumour:sponsor-you", {{"brand", C.NewSponsor}}));
+	}
 	if (!W.Ready())
 	{
 		return;
@@ -1031,6 +1086,15 @@ std::vector<Choice> Choices(const TalkContext& C)
 	{
 		Out.push_back({"lend", "What do you need?"});
 	}
+	// A keeper with an offer for their shop (§3.1: Ray's "Hear him out"), and an appearance window open with them now.
+	if (!C.SponsorOffer.empty())
+	{
+		Out.push_back({"sponsor", C.Who && C.Who->Woman ? "Hear her out" : "Hear him out"});
+	}
+	if (!C.SponsorAppear.empty())
+	{
+		Out.push_back({"sponsor-appear", C.SponsorAppear == "store" ? "Take the picture" : "Sit in the window"});
+	}
 	Out.push_back({"bye", "See you."});
 	return Out;
 }
@@ -1129,6 +1193,9 @@ void Opener(const TalkContext& C, Talk& T, bool Keeper)
 	};
 	const std::string Sp = C.Speaker;
 	const bool Inside = C.AtWork || C.Venue == "diner"; // come in out of it
+	// 0. A keeper with an offer for their shop says it first, once (§3.1); the talk card then has "Hear him out".
+	const std::string SponsorTopic = "sponsor:" + C.SponsorBrand;
+	Try(!Keeper && !C.SponsorOffer.empty(), "sponsor:pitch:" + C.SponsorBrand, "sponsor:pitch:" + C.SponsorOffer, SponsorTopic.c_str());
 	// 1. How the player looks.
 	Try(C.Hunger >= 70.0, "look:hungry");
 	Try(C.Energy < 25.0, "look:tired");
@@ -1138,6 +1205,11 @@ void Opener(const TalkContext& C, Talk& T, bool Keeper)
 	{
 		Try(C.FreshCut && C.Met, "look:cut", "cut:" + Sp + ":" + std::to_string(C.CutDay));
 		Try(C.NewLook, "look:new");
+		// A sponsor's patch where it shows: each person remarks on each brand once.
+		for (const std::string& Patch : C.Patches)
+		{
+			Try(true, "look:patch:" + Patch, "patch:" + Sp + ":" + Patch);
+		}
 		Try(C.Famous && C.Role != Job::Cook, "look:famous", "famous:" + Sp);
 	}
 	Try(Sp == "rosa" && C.Fitness >= 50.0 && C.Met, "look:fit", Keeper ? std::string() : "fit:rosa:" + std::to_string(C.Day / 30));
@@ -1158,6 +1230,8 @@ void Opener(const TalkContext& C, Talk& T, bool Keeper)
 		}
 	}
 	Try(Sp == "bea" && (C.Town.Flags & Donor) != 0, "bond:donor");
+	// The keeper of a shop with a deal running: a word about it now and then (a week apart).
+	Try(!Keeper && C.SponsorActive && C.AtWork, SponsorTopic, SponsorTopic + ":" + std::to_string(C.Day / 7));
 	Try((C.Town.Flags & Tipper) != 0, "bond:tipper");
 	Try(C.Town.Visits >= 5, "bond:regular");
 	if (Keeper)
@@ -1366,6 +1440,71 @@ std::shared_ptr<const TalkContext> ContextFor(const Session& S, const std::strin
 		C->CanAsk = !C->Owes && Broke;
 	}
 	C->PaysCheck = PaysYourCheck(S, C->World) == Speaker;
+	if (C->PaysCheck && Speaker == "big-lou")
+	{
+		// His offer, in person: the same words as his text, the day said as it is tonight ("tomorrow night", not the
+		// "on Friday" of when he texted).
+		for (const stake::Offer& O : S.Life.Stakes.Offers)
+		{
+			if (O.Backer != "Big Lou" || O.K != stake::Kind::Event || O.State != stake::OfferStanding || O.Expires <= C->World)
+			{
+				continue;
+			}
+			const live::Occurrence Ev = live::FindOccurrence(O.EntryId);
+			if (Ev.Valid())
+			{
+				C->LouStake = stake::Speak("Big Lou", "offer", Fnv1a(O.Id),
+					{{"Short", Ev.T->Short}, {"Event", Ev.T->Name}, {"Amount", Money(Ev.T->BuyInCents)}, {"Day", live::DayWord(Ev, C->World)}});
+				break;
+			}
+		}
+	}
+	// Sponsors (next_segment_spec §3): the offer and the deal of the brand this person keeps shop for, an appearance window
+	// open with them, the patches that show on the player, and the newest deal (three weeks of word on the block).
+	{
+		const sponsor::Book& Book = S.Life.Sponsors;
+		for (const sponsor::Brand& Br : sponsor::Brands())
+		{
+			if (Br.Keeper.empty() || Br.Keeper != Speaker)
+			{
+				continue;
+			}
+			C->SponsorBrand = Br.Id;
+			C->SponsorOffer = C->AtWork ? sponsor::OpenOfferFor(Book, Br.Id, C->World) : std::string();
+			C->SponsorSignable = !C->SponsorOffer.empty() && sponsor::CanSign(Book, S.Life, C->SponsorOffer, C->World).empty();
+			C->SponsorActive = sponsor::Active(Book, Br.Id, C->World);
+			if (C->AtWork && C->SponsorActive)
+			{
+				for (const sponsor::Window& W2 : sponsor::Appearances(Book, C->World, C->World + 1.0))
+				{
+					if (W2.Venue == Br.Venue && !W2.Done && C->World >= W2.From && C->World < W2.To)
+					{
+						C->SponsorAppear = W2.Venue;
+					}
+				}
+			}
+		}
+		for (int I = 0; I < sponsor::PatchSpots; ++I)
+		{
+			const std::string& Patch = S.Life.Closet.Patches[static_cast<size_t>(I)];
+			if (!Patch.empty() && sponsor::Active(Book, Patch, C->World) && wardrobe::PatchFits(S.Life.Closet, I) &&
+				std::find(C->Patches.begin(), C->Patches.end(), Patch) == C->Patches.end())
+			{
+				C->Patches.push_back(Patch);
+			}
+		}
+		double Newest = -1.0;
+		for (const sponsor::Contract& K : Book.Contracts)
+		{
+			const sponsor::Brand* Br = sponsor::FindBrand(K.Brand);
+			if (Br && sponsor::Active(Book, K.Brand, C->World) && K.Renews.empty() && !K.Legacy && K.Since <= C->World && C->World - K.Since < 21.0 * 1440.0 && K.Since > Newest)
+			{
+				Newest = K.Since;
+				C->NewSponsor = Br->Short;
+				C->NewSponsorKey = "rumour:sponsor-you:" + K.Id;
+			}
+		}
+	}
 	for (const auto& It : S.Life.Said)
 	{
 		if (SaidFresh(It.second, C->Day))
@@ -1395,6 +1534,10 @@ Talk Open(const TalkContext& C)
 	{
 		T.Line = Say(C, "check");
 		T.Topic = "bond:check";
+		if (!C.LouStake.empty())
+		{
+			T.Line += " " + C.LouStake;
+		}
 	}
 	if (T.Line.empty())
 	{
@@ -1472,6 +1615,41 @@ Talk Answer(const TalkContext& C, const std::string& ChoiceId)
 		T.Line = Say(C, ChoiceId);
 		T.Familiarity = ChoiceId == "lend-yes" ? 2 : 0;
 		T.Choices = {{"news", "What's new?"}, {"games", "Any games around?"}, {"bye", "See you."}};
+	}
+	else if (ChoiceId == "sponsor" && !C.SponsorOffer.empty())
+	{
+		// The terms across the counter; Heard puts them in writing in Mail ("sponsor:heard:<contract>").
+		T.Line = Say(C, "sponsor:terms:" + C.SponsorBrand);
+		T.Topic = "sponsor:" + C.SponsorBrand;
+		T.SaidKey = "sponsor:heard:" + C.SponsorOffer;
+		if (C.SponsorSignable)
+		{
+			T.Choices.push_back({"sponsor-sign", "Deal."});
+		}
+		T.Choices.push_back({"sponsor-later", "Let me think on it."});
+	}
+	else if (ChoiceId == "sponsor-sign" && C.SponsorSignable)
+	{
+		// Signed on the counter slip: Heard signs it ("sponsor:sign:<contract>").
+		T.Line = Say(C, "sponsor:signed:" + C.SponsorBrand);
+		T.Topic = "sponsor:" + C.SponsorBrand;
+		T.SaidKey = "sponsor:sign:" + C.SponsorOffer;
+		T.Familiarity = 2;
+		T.Choices = {{"news", "What's new?"}, {"bye", "See you."}};
+	}
+	else if (ChoiceId == "sponsor-later" && !C.SponsorOffer.empty())
+	{
+		T.Line = Say(C, "sponsor:later");
+		T.Topic = "sponsor:" + C.SponsorBrand;
+		T.Choices = Choices(C);
+	}
+	else if (ChoiceId == "sponsor-appear" && !C.SponsorAppear.empty())
+	{
+		// The photo with Ray, Lonnie's window chair: Heard counts the appearance ("sponsor:appear:<venue>:<day>").
+		T.Line = Say(C, "sponsor:appear:" + C.SponsorAppear);
+		T.Topic = "sponsor:" + C.SponsorBrand;
+		T.SaidKey = "sponsor:appear:" + C.SponsorAppear + ":" + std::to_string(C.Day);
+		T.Choices = {{"news", "What's new?"}, {"bye", "See you."}};
 	}
 	else if (ChoiceId == "bye")
 	{

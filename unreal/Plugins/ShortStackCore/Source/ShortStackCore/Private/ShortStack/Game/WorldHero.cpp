@@ -2,6 +2,7 @@
 // the people in it remember about the player.
 #include "ShortStack/Game/World.h"
 
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
 #include "WorldSim.h"
@@ -620,12 +621,25 @@ void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, con
 		const Pending& Ev = *P;
 		const bool Online = Ev.Online;
 		const double Pts = Ev.BuyIn > 0 ? net::Points(Place, Ev.Entries, Ev.BuyIn) : 0.0;
-		(Online ? HeroPoints : HeroLivePoints) += Pts;
+		if (Online && !Again)
+		{
+			HeroPoints += Pts; // (once: a result told twice isn't two results)
+		}
+		else if (!Online && !Again && CircuitEvent(static_cast<LiveKind>(Ev.Kind), (Ev.Kinds & KindSatellite) != 0))
+		{
+			// Live: Regional events and up (§11 Q3), the same points for the circuit's cards.
+			HeroLivePoints += Pts;
+			HeroCircuit += Pts;
+		}
 		// The player's stats page (a satellite seat at its value).
 		if (!Again)
 		{
 			const bool Seat = (Ev.Kinds & KindSatellite) != 0 && Place >= 1 && Place <= Ev.Seats;
 			HeroBook.Add(Ev.BuyIn, Prize + (Seat ? Ev.SeatValue : 0), Place, Ev.Entries, Ev.FinalSize, Sim::StakeOf(Ev), Sim::FormatOf(Ev));
+			if (!Online && live::IsEmbercrest(EventId))
+			{
+				Sim::NoteRoom(HeroRoomRec, sim::DayAt(Ev.Start), Place, Ev.FinalSize, Prize, Pts);
+			}
 		}
 		// A bracelet or a ring for the player: into the trophy case (once).
 		if (Place == 1 && (Ev.Bracelet || Ev.Ring))
@@ -747,6 +761,14 @@ void World::EmbercrestDone(double At, const std::vector<std::pair<std::string, i
 			Remember(Npc, MemoryKind::FinalTable, "the Embercrest Sunday", 0, At);
 		}
 	}
+	if (HeroResults.count(Id) == 0 && HeroPlace >= 1)
+	{
+		// The room's record (an older save's note: the place, not the prize).
+		const live::Occurrence O = live::FindOccurrence(Id);
+		const Chips BuyIn = P ? P->BuyIn : O.Valid() ? O.T->BuyInCents : 0;
+		const double Points = BuyIn > 0 ? net::Points(HeroPlace, std::max(FieldSize, P ? P->Entries : 0), BuyIn) : 0.0;
+		Sim::NoteRoom(HeroRoomRec, Day, HeroPlace, live::EmbercrestTableSize, 0, Points);
+	}
 	HeroResults[Id] = {HeroPlace, 0};
 	++Rev;
 	++HeroRev;
@@ -797,6 +819,23 @@ void Sim::Feel(Bond& B, MemoryKind K, float Emotion)
 	case MemoryKind::Embercrest: B.Familiarity = Add01(B.Familiarity, 0.06); break;
 	case MemoryKind::ShowedBluff: B.Rivalry = Add01(B.Rivalry, 0.05); break;
 	case MemoryKind::Street: B.Familiarity = Add01(B.Familiarity, 0.03); break;
+	// Money (next_segment_spec §2.9): a stake or a piece is a bet on the player; how the player settles up is what stays.
+	case MemoryKind::Staked: B.Familiarity = Add01(B.Familiarity, 0.04); break;
+	case MemoryKind::BoughtPiece: B.Familiarity = Add01(B.Familiarity, 0.03); break;
+	case MemoryKind::Swapped:
+		B.Familiarity = Add01(B.Familiarity, 0.03);
+		B.Respect = Add01(B.Respect, 0.02);
+		break;
+	case MemoryKind::PaidUp: B.Trust = Add01(B.Trust, 0.04); break;
+	case MemoryKind::PaidLate: B.Trust = Add01(B.Trust, -0.10); break;
+	case MemoryKind::Welched:
+		B.Trust = Add01(B.Trust, -0.40);
+		B.Resentment = Add01(B.Resentment, 0.40);
+		break;
+	case MemoryKind::WalkedOut:
+		B.Trust = Add01(B.Trust, -0.30);
+		B.Resentment = Add01(B.Resentment, 0.25);
+		break;
 	default: break;
 	}
 }
@@ -950,6 +989,251 @@ std::string Bond::Label() const
 	return "";
 }
 
+// ------------------------------------------------------------------ the badges' world data (next_segment_spec §5.3)
+
+std::vector<std::pair<int, double>> World::RoomLeaders(const std::string& Venue, int MonthKey, int Count) const
+{
+	std::vector<std::pair<int, double>> Out;
+	if (!Created || Count <= 0)
+	{
+		return Out;
+	}
+	auto Consider = [&](int Id, const RoomRecord& R) {
+		const double Points = R.Venue == Venue ? R.PointsIn(MonthKey) : 0.0;
+		if (Points > 0.0)
+		{
+			Out.push_back({Id, Points});
+		}
+	};
+	Consider(-1, HeroRoomRec);
+	for (const Npc& N : Roster)
+	{
+		if (!N.Faded)
+		{
+			Consider(N.Id, N.Room);
+		}
+	}
+	std::stable_sort(Out.begin(), Out.end(), [](const std::pair<int, double>& A, const std::pair<int, double>& B) {
+		return A.second > B.second || (A.second == B.second && A.first < B.first);
+	});
+	if (static_cast<int>(Out.size()) > Count)
+	{
+		Out.resize(static_cast<size_t>(Count));
+	}
+	return Out;
+}
+
+int World::CircuitRank(int Npc) const
+{
+	const world::Npc* N = Npc >= 0 ? Get(Npc) : nullptr;
+	if (Npc >= 0 && (!N || N->Faded))
+	{
+		return 0;
+	}
+	const double Mine = Npc < 0 ? HeroCircuit : N->CircuitPoints;
+	if (!Created || Mine <= 0.0)
+	{
+		return 0;
+	}
+	// Ahead: more points, or as many and an earlier id (the player's -1 is ahead of everyone on a tie).
+	int Rank = 1;
+	Rank += Npc >= 0 && HeroCircuit >= Mine ? 1 : 0;
+	for (const world::Npc& O : Roster)
+	{
+		if (O.Id != Npc && !O.Faded && O.CircuitPoints > 0.0 && (O.CircuitPoints > Mine || (O.CircuitPoints == Mine && O.Id < Npc)))
+		{
+			++Rank;
+		}
+	}
+	return Rank;
+}
+
+double World::CardCutLine(int Tier) const
+{
+	if (!Created || Tier < CardRegular || Tier > CardBlack)
+	{
+		return 0.0;
+	}
+	const size_t Cut = static_cast<size_t>(badge::CardTop[Tier - 1]);
+	std::vector<double> All;
+	All.reserve(Roster.size() + 1);
+	if (HeroCircuit > 0.0)
+	{
+		All.push_back(HeroCircuit);
+	}
+	for (const Npc& N : Roster)
+	{
+		if (!N.Faded && N.CircuitPoints > 0.0)
+		{
+			All.push_back(N.CircuitPoints);
+		}
+	}
+	if (All.size() < Cut)
+	{
+		return 0.0;
+	}
+	std::nth_element(All.begin(), All.begin() + static_cast<std::ptrdiff_t>(Cut - 1), All.end(), [](double A, double B) { return A > B; });
+	return All[Cut - 1];
+}
+
+int World::PlayerOfYearTitles(int Npc) const
+{
+	int Count = 0;
+	for (const Honor& H : Titles)
+	{
+		Count += H.Npc == Npc && (H.Title == "Player of the Year" || H.Title == "Live Player of the Year") ? 1 : 0;
+	}
+	return Count;
+}
+
+int World::HallClass(int Npc) const
+{
+	for (const Honor& H : Titles)
+	{
+		if (H.Npc == Npc && H.Title == HallOfFameTitle)
+		{
+			return H.Year;
+		}
+	}
+	return 0;
+}
+
+double World::HallScore(int Npc, int Year) const
+{
+	(void)Year; // the record as it stands on the day (the year names the class)
+	int Bracelets = 0;
+	int Rings = 0;
+	int Majors = 0;
+	double Career = 0.0;
+	double Overall = 0.0;
+	if (Npc < 0)
+	{
+		for (const Award& A : HeroTrophies)
+		{
+			(A.Ring ? Rings : Bracelets) += 1;
+		}
+		for (const Honor& H : Titles)
+		{
+			// The player's majors are the titles history keeps for them (Resolve's Npc -1 honors), not the year-end ones.
+			Majors += H.Npc == -1 && H.Title != "Player of the Year" && H.Title != "Live Player of the Year" && H.Title != HallOfFameTitle ? 1 : 0;
+		}
+		Career = sim::Dollars(HeroBook.Prizes);
+		// (The world keeps no reputation for the player: that part of the score is the record's alone.)
+	}
+	else
+	{
+		const world::Npc* N = Get(Npc);
+		if (!N)
+		{
+			return 0.0;
+		}
+		Bracelets = N->Bracelets;
+		Rings = N->Rings;
+		Majors = N->Majors;
+		Career = sim::Dollars(N->CareerWon());
+		Overall = static_cast<double>(N->RepOf(Rep::Overall));
+	}
+	return 3.0 * Bracelets + Rings + 3.0 * Majors + 4.0 * PlayerOfYearTitles(Npc) + 2.0 * std::log10(std::max(1.0, Career) / 100000.0) + Overall / 20.0;
+}
+
+bool World::HallEligible(int Npc, int Year) const
+{
+	if (!Created)
+	{
+		return false;
+	}
+	const int Day = DayOn(Year, 7, 15);
+	if (Npc < 0)
+	{
+		// The player: the real rule (§11 Q25), once the session has told the world their age.
+		const bool HighStakes = HeroBook.ByStake[static_cast<size_t>(TrackStake::High)].Events > 0 || HeroCardTop >= CardRegular || HeroCardPrev >= CardRegular ||
+			std::any_of(HeroTrophies.begin(), HeroTrophies.end(), [](const Award& A) { return !A.Online; });
+		return HeroBorn > 0 && Year - HeroBorn >= badge::HallAge && Year - YearOf(sim::DayAt(Origin)) >= badge::HallYears && HighStakes && HallClass(-1) == 0;
+	}
+	const world::Npc* N = Get(Npc);
+	if (!N || N->Faded)
+	{
+		return false;
+	}
+	const bool HighStakes = N->Live >= LiveLevel::Circuit || N->Tier >= static_cast<int>(net::Tier::High) ||
+		N->Stats.ByStake[static_cast<size_t>(TrackStake::High)].Events > 0 || N->RepOf(Rep::HighStakes) >= 20.0f;
+	// (The history books last: most of the world is ruled out by age, years or stakes first.)
+	return N->Age(Day) >= badge::HallAge && Year - YearOf(N->Joined) >= badge::HallYears && HighStakes && HallClass(Npc) == 0;
+}
+
+void World::HeroMoney(int Npc, Chips Cents, MemoryKind Kind, const std::string& Where, double At, bool Early)
+{
+	world::Npc* N = Created && Npc >= 0 && Npc < static_cast<int>(Roster.size()) ? &Roster[static_cast<size_t>(Npc)] : nullptr;
+	if (!N || N->Faded)
+	{
+		return;
+	}
+	// Their money (private): what they can't cover simply isn't there to lose.
+	N->Bankroll = std::max<Chips>(0, N->Bankroll + Cents);
+	N->PeakRoll = std::max(N->PeakRoll, N->Bankroll);
+	++Rev;
+	++HeroRev;
+	if (Kind == MemoryKind::PaidLate && Cents != 0)
+	{
+		// The money for a debt that already went late: the late mark they remember (its own Cents 0, at the due time) is
+		// the one memory and the one knock to their trust (§2.9); paying it now just settles it.
+		const auto Known = HeroBonds.find(Npc);
+		if (Known != HeroBonds.end())
+		{
+			for (auto It = Known->second.Memories.rbegin(); It != Known->second.Memories.rend(); ++It)
+			{
+				if (It->Kind == MemoryKind::PaidLate && It->Where == Where && It->Amount == 0)
+				{
+					It->Amount = Cents >= 0 ? Cents : -Cents;
+					return;
+				}
+			}
+		}
+	}
+	// "Paid up" is the player paying them; money their way to the player (a swap they lost) is the swap settling.
+	const MemoryKind Kept = Kind == MemoryKind::PaidUp && Cents < 0 ? MemoryKind::Swapped : Kind;
+	Remember(Npc, Kept, Where, Cents >= 0 ? Cents : -Cents, At);
+	if (Kept == MemoryKind::PaidUp && Early)
+	{
+		// Paid within a day of the result: the kind of thing a backer remembers.
+		Bond& B = HeroBonds[Npc];
+		B.Trust = Add01(B.Trust, 0.02);
+		B.Respect = Add01(B.Respect, 0.02);
+	}
+}
+
+std::vector<int> World::Backers(int Max) const
+{
+	std::vector<int> Out;
+	const Chips Abi = HeroBook.PaidAbi();
+	if (!Created || Max <= 0 || Abi <= 0)
+	{
+		return Out;
+	}
+	std::vector<std::pair<double, int>> Pool;
+	for (const auto& It : HeroBonds)
+	{
+		const world::Npc* N = Get(It.first);
+		const std::string Label = It.second.Label();
+		if (!N || N->Faded || !N->Playing() || N->Backer != -1 || (Label != "Respects you" && Label != "Trusts you") || N->Bankroll < Abi * 400)
+		{
+			continue;
+		}
+		const std::ptrdiff_t Horses = std::count_if(N->Ties.begin(), N->Ties.end(), [](const Tie& T) { return T.Kind == TieKind::Backer; });
+		if (Horses >= 3)
+		{
+			continue;
+		}
+		Pool.push_back({static_cast<double>(It.second.Trust) + static_cast<double>(It.second.Respect), It.first});
+	}
+	std::stable_sort(Pool.begin(), Pool.end(), [](const std::pair<double, int>& A, const std::pair<double, int>& B) { return A.first > B.first || (A.first == B.first && A.second < B.second); });
+	for (size_t K = 0; K < Pool.size() && static_cast<int>(K) < Max; ++K)
+	{
+		Out.push_back(Pool[K].second);
+	}
+	return Out;
+}
+
 std::vector<int> World::EmbercrestRegulars() const
 {
 	// Not who's playing this week (a break or a broke spell doesn't change who the room's regulars are). The room's
@@ -1000,6 +1284,14 @@ std::string World::SpokenGreeting(int Npc, uint32_t Salt) const
 		// Where they last talked: Ruby's, the Wash & Fold's door, the 14's stop, Fifth St.
 		return Last.Where == "Ruby's" ? One("Saw you at Ruby's.", "Hey, it's the neighbor.", "The booth by the window, right? I know you from Ruby's.")
 									  : One("Saw you on Fifth.", "Hey, it's the neighbor.", "Fifth Street, right? I know you from the block.");
+	// Money between them stays between them (N3): out loud it's only ever warm, cool or cold.
+	case MemoryKind::Staked:
+	case MemoryKind::BoughtPiece:
+	case MemoryKind::Swapped:
+	case MemoryKind::PaidUp: return One("There you are. Make it a good one.", "Good to see you. Play well tonight.", "Evening. Go get 'em.");
+	case MemoryKind::PaidLate: return One("Evening.", "Oh. You. Good luck.", "Hey. Play well.");
+	case MemoryKind::Welched:
+	case MemoryKind::WalkedOut: return One("Hm. You.", "Let's just play cards.", "Funny seeing you here.");
 	default: break;
 	}
 	return B->Encounters >= 2 ? One("Hey again.", "Good to see you.", "Evening.") : One("I know you. Good luck.", "Hey, I remember you.", "Good luck again.");
@@ -1028,6 +1320,13 @@ std::string World::Greeting(int Npc, uint32_t Salt) const
 	case MemoryKind::Embercrest: return One("see you Sunday?", "Embercrest regular in the house", "gl, Sunday was fun");
 	case MemoryKind::BigPotWon: return One("I want my chips back", "gl. not you again", "that pot still hurts");
 	case MemoryKind::Street: return One("saw you on fifth the other day", "hey neighbor, gl", "fifth st in the building");
+	case MemoryKind::Staked:
+	case MemoryKind::BoughtPiece:
+	case MemoryKind::Swapped:
+	case MemoryKind::PaidUp: return One("there you are. gl", "gl tonight, make it count", "good to see you. gl");
+	case MemoryKind::PaidLate: return One("oh. you. gl", "hm. gl", "evening");
+	case MemoryKind::Welched:
+	case MemoryKind::WalkedOut: return One("not you", "just play cards", "hm");
 	default: break;
 	}
 	return B->Encounters >= 3 ? One("gl", "hey again", "gl all") : "";

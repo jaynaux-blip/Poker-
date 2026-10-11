@@ -40,16 +40,16 @@ Public Of(const life::State& L, const kast::Channel& C, const world::World* W, d
 	Public P;
 	const int Today = net::DayOf(World);
 
-	// Online: the player's stats page, the live events it also counts taken out. (Freerolls are in its totals: the
-	// tracker keeps no count of them yet. A $0 buy-in adds a prize and no cost, so until core-world's tracker separates
-	// them the ROI here is the page's own.)
+	// Online: the player's stats page, the live events it also counts taken out, and the freerolls too (S9): a result that
+	// cost nothing has no ROI, so the count, the ROI and the ABI are the paid events' (Tracker::Paid*). Every freeroll is
+	// online (the Embercrest has none), so the live line comes off the paid totals whole.
 	if (W)
 	{
 		const world::Tracker& T = W->HeroStats();
 		const world::TrackLine& Live = T.ByStake[static_cast<size_t>(world::TrackStake::Live)];
-		P.OnlineEvents = std::max(0, T.Events - Live.Events);
+		P.OnlineEvents = std::max(0, T.PaidEvents() - Live.Events);
 		const Chips BuyIns = T.BuyIns - Live.BuyIns;
-		const Chips Prizes = T.Prizes - Live.Prizes;
+		const Chips Prizes = T.PaidPrizes() - Live.Prizes;
 		P.OnlineRoi = BuyIns > 0 ? static_cast<double>(Prizes - BuyIns) / static_cast<double>(BuyIns) : 0.0;
 		P.Abi = P.OnlineEvents > 0 ? BuyIns / P.OnlineEvents : 0;
 		P.ProfitAbi = P.Abi > 0 ? static_cast<double>(Prizes - BuyIns) / static_cast<double>(P.Abi) : 0.0;

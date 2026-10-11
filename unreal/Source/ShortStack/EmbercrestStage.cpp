@@ -19,7 +19,6 @@
 #include "Materials/MaterialInterface.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "RenderingThread.h"
-#include "Slate/WidgetRenderer.h"
 #include "UObject/ConstructorHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogEmbercrestStage, Log, All);
@@ -208,22 +207,14 @@ void AEmbercrestStage::RestoreCvars()
 void AEmbercrestStage::EndPlay(const EEndPlayReason::Type Reason)
 {
 	RestoreCvars();
-	if (Renderer)
-	{
-		BeginCleanup(Renderer);
-		Renderer = nullptr;
-	}
+	Painter.Release();
 	Super::EndPlay(Reason);
 }
 
 void AEmbercrestStage::BeginDestroy()
 {
 	// The editor's preview draws its signs too, and an editor world never ends play.
-	if (Renderer)
-	{
-		BeginCleanup(Renderer);
-		Renderer = nullptr;
-	}
+	Painter.Release();
 	Super::BeginDestroy();
 }
 

@@ -1,13 +1,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CoreCanvasTarget.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "ShortStack/UI/Canvas.h"
 
 #include "EmbercrestStage.generated.h"
 
-class FWidgetRenderer;
 class SDrawListWidget;
 class UCameraComponent;
 class UDirectionalLightComponent;
@@ -518,7 +518,8 @@ private:
 	float TickerScroll = 0.0f;
 	float TickerSpan = 1.0f;
 	bool bTickerDirty = false;
-	FWidgetRenderer* Renderer = nullptr;
+	/** What paints the screens' draw lists into their targets (CoreCanvasTarget.h). */
+	FCoreCanvasTarget Painter;
 
 	// The 14.
 	UPROPERTY(Transient)

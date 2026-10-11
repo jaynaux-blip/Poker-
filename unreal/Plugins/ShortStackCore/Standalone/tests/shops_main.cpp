@@ -2558,6 +2558,93 @@ void Run(const char* Name, void (*Fn)())
 }
 } // namespace shops_test
 
+namespace shops_test
+{
+/**
+ * The sponsors at the shops (next_segment_spec §3.6, core-sponsor's additions): the receipt's credit line; Fifth St.
+ * Barbers' cut rung up at $0 "on the house" once a fortnight; IronHouse paying the membership (its renewal skipped); the
+ * pawn refusing a brand's gear; the closet's patches round-tripping as sponsor\tpatch lines.
+ */
+void Sponsors()
+{
+	// The Lucky Penny's credit pays first, and the receipt says so.
+	{
+		Hooks H;
+		ss::Session S(H, "shops-sponsor-credit");
+		Place(S, When(3, 11.0), 50000);
+		double Now = 0.0;
+		Jump(S, Now, When(3, 11.0));
+		S.DebugSponsor("sign luckypenny");
+		S.Life.Sponsors.StoreCreditCents = 200;
+		ss::store::Basket B;
+		B.Add("volt-rush");
+		const ss::Chips Bank = S.BankrollCents;
+		Expect(S.Checkout(B).empty(), "sponsors: checkout with credit");
+		Expect(S.BankrollCents == Bank - (B.Total() - 200) && S.Life.Sponsors.StoreCreditCents == 0, "sponsors: the credit first, the card the rest");
+		Expect(S.Life.Ledger.front().Label.find("($2.00 store credit)") != std::string::npos && S.Life.Ledger.front().Amount == -(B.Total() - 200), "sponsors: the receipt's credit line");
+	}
+	// A cut on the house every fourteen days; the tip is still the player's.
+	{
+		Hooks H;
+		ss::Session S(H, "shops-sponsor-cut");
+		Place(S, When(3, 11.0), 50000);
+		double Now = 0.0;
+		Jump(S, Now, When(3, 11.0));
+		S.DebugSponsor("sign barber");
+		const ss::Chips Bank = S.BankrollCents;
+		Expect(S.ShopTotal(Order("barber", {"barber/lineup"}, 20)) == 240, "sponsors: a covered line-up costs only the tip");
+		Expect(S.ShopService(Order("barber", {"barber/lineup"}, 20)).empty(), "sponsors: the line-up, covered");
+		Finish(S, Now);
+		Expect(S.BankrollCents == Bank - 240, "sponsors: $0 for the cut, the tip paid");
+		bool House = false;
+		for (const ss::life::LedgerEntry& E : S.Life.Ledger)
+		{
+			House = House || (E.Label.find("(cut on the house)") != std::string::npos && E.Amount == -240);
+		}
+		Expect(House, "sponsors: rung up \"on the house\"");
+		Expect(S.ShopTotal(Order("barber", {"barber/lineup"})) == 1200, "sponsors: the next one in the fortnight is paid");
+		Jump(S, Now, When(18, 11.0));
+		Expect(S.ShopTotal(Order("barber", {"barber/lineup"})) == 0, "sponsors: a new fortnight, a new cut on the house");
+	}
+	// IronHouse pays the membership: its renewal is skipped while the deal runs.
+	{
+		Hooks H;
+		ss::Session S(H, "shops-sponsor-gym");
+		Place(S, When(3, 11.0), 50000);
+		double Now = 0.0;
+		Jump(S, Now, When(3, 11.0));
+		S.DebugSponsor("sign ironhouse");
+		Expect(S.Owns("gym"), "sponsors: the membership comes with the deal");
+		const ss::Chips Bank = S.BankrollCents;
+		Jump(S, Now, When(34, 12.0));
+		bool Billed = false;
+		for (const ss::life::LedgerEntry& E : S.Life.Ledger)
+		{
+			Billed = Billed || (E.Kind == 5 && E.Amount == -3499);
+		}
+		Expect(!Billed && S.Owns("gym") && S.BankrollCents >= Bank - 1000, "sponsors: the gym renewal skipped");
+	}
+	// The closet's patches round-trip.
+	{
+		Hooks H;
+		ss::Session S(H, "shops-sponsor-patch");
+		Place(S, When(3, 11.0), 50000);
+		double Now = 0.0;
+		Jump(S, Now, When(3, 11.0));
+		S.DebugSponsor("sign luckypenny");
+		S.DebugSponsor("sign barber");
+		Expect(S.SewPatch(2, "luckypenny").empty() && S.SewPatch(1, "barber").empty(), "sponsors: patches sewn");
+		S.Save();
+		const std::string Text = H.Last.Serialize();
+		Expect(Text.find("sponsor\tpatch\t1\tbarber\n") != std::string::npos && Text.find("sponsor\tpatch\t2\tluckypenny\n") != std::string::npos, "sponsors: sponsor\\tpatch lines");
+		ss::SaveData D;
+		Expect(ss::SaveData::Parse(Text, D) && D.Life.Closet.Patches[1] == "barber" && D.Life.Closet.Patches[2] == "luckypenny" && D.Life.Closet.Patches[0].empty() &&
+				   D.Serialize() == Text,
+			"sponsors: the patches round-trip");
+	}
+}
+} // namespace shops_test
+
 int main(int Argc, char** Argv)
 {
 	using namespace shops_test;
@@ -2603,6 +2690,7 @@ int main(int Argc, char** Argv)
 	Run("MigrationFixtures", MigrationFixtures);
 	Run("Bus", Bus);
 	Run("PacingSim", PacingSim);
+	Run("Sponsors", Sponsors);
 	std::printf("shops_test: %d checks, %d failed\n", Checks, Failures);
 	return Failures == 0 ? 0 : 1;
 }

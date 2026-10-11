@@ -1033,6 +1033,16 @@ life::Funding ChosenFunding(const Session& S, const std::string& EventId)
 	return life::Funding();
 }
 
+/**
+ * The player's birth year, for the Hall of Fame's age rule (§5.3, §11 Q25): the age they gave the creator was their age
+ * when the story began, the day the world started. Not saved (World::HeroBorn): set whenever the world is made or read,
+ * and again when the creator names a new career's age.
+ */
+void TellBirthYear(world::World& W, const hero::Character& Person)
+{
+	W.HeroBorn = world::YearOf(net::DayOf(W.StartedAt())) - Person.Age;
+}
+
 /** The worlds of the sessions alive now, newest last: the network shows the newest. */
 std::vector<const world::World*>& LiveWorlds()
 {
@@ -1069,6 +1079,7 @@ void Session::StartWorld(const SaveData* Loaded)
 		LivingWorld.Create(Fnv1a(SeedBase + ":world:" + HeroName), WorldMinutes());
 	}
 	LivingWorld.HeroName = HeroName;
+	session_detail::TellBirthYear(LivingWorld, Person);
 	std::vector<const world::World*>& Worlds = session_detail::LiveWorlds();
 	if (std::find(Worlds.begin(), Worlds.end(), &LivingWorld) == Worlds.end())
 	{
@@ -1324,6 +1335,7 @@ void Session::NewCareer(const hero::Character& Who)
 	ResetSave();
 	Person = Who;
 	Person.Created = true;
+	session_detail::TellBirthYear(LivingWorld, Person);
 	Life.Perks = hero::PerksOf(Person);
 	Life.Perks.TiltGain = coach::TiltGainNow(Life.Study, Life.Perks.TiltGain, WorldMinutes());
 	Life.Perks.ReadWeight = coach::ReadWeightNow(Life.Study, Life.Perks.ReadWeight, WorldMinutes());
@@ -1637,7 +1649,9 @@ void Session::OnBoot()
 
 bool Session::CanAfford(const LobbyEvent& Ev) const
 {
-	return Ev.Joinable && !Restricted() && !TimeSkip.Active && (BankrollCents >= Ev.BuyInCents || TicketsFor(Ev) > 0);
+	// The player's money, a ticket, or a package's roll (it pays every event in its range, short bankroll or not: §2.7).
+	return Ev.Joinable && !Restricted() && !TimeSkip.Active &&
+		(BankrollCents >= Ev.BuyInCents || TicketsFor(Ev) > 0 || stake::FundFor(Life.Stakes, Ev.Spec.Id, Ev.BuyInCents, false, WorldMinutes()).From == life::Paid::Package);
 }
 
 int Session::TicketsFor(const LobbyEvent& Ev) const

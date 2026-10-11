@@ -5,16 +5,25 @@
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/HUD.h"
 #include "GameFramework/Pawn.h"
+// The next segment's types, whole (next_segment_spec 8.2: this header carries every Unreal track's members and froze
+// after Phase A): the field's badges, the room's director and its cues, the table HUD's captions, plates, toasts, the
+// last hands and the desk screen.
+#include "ShortStack/Game/Badges.h"
+#include "ShortStack/Game/Room.h"
+#include "ShortStack/UI/TableHud.h"
 
 #include <string>
+#include <vector>
 
 #include "BackRoomGameMode.generated.h"
 
 class ABackRoomPlayer;
 class ABackRoomStage;
 class ABackRoomTable;
+class SDrawListWidget;
 class UCameraComponent;
 class UPointLightComponent;
+class UTextureRenderTarget2D;
 
 namespace ss
 {
@@ -27,6 +36,22 @@ struct FBackRoomPersona;
 class FCareerSaver;
 enum class ECardRoomSpot : uint8;
 enum class EBackRoomRole : uint8;
+
+// The next segment's host classes, each defined in its track's own files (next_segment_spec 8.3): the card room's stereo
+// sound and its clip seam (ue-room, CardRoomSound.h), the badge atlas (ue-venue, BadgeAtlas.h), and core draw lists into
+// render targets (CoreCanvasTarget.h). All classes.
+class FCardRoomSound;
+class FVoiceBank;
+class FBadgeAtlas;
+class FCoreCanvasTarget;
+// Each Unreal track's own state on the game mode and the HUD, defined in that track's files: anything a track needs past
+// the members declared here goes in its host, so this header never needs a fifth owner. All structs. Made with MakeShared
+// where the struct is complete; a UObject one makes is kept alive in that track's *Objects array below.
+struct FRoomHost;     // ue-room
+struct FTableHost;    // ue-table (the game mode's side of the HUD and the table input)
+struct FTableHudHost; // ue-table (the HUD's side: the draw-list hint, the measurer, the projection's state)
+struct FVenueHost;    // ue-venue
+struct FWearHost;     // ue-wear
 
 /**
  * You, at the Back Room's table: a camera in your own head.
@@ -137,6 +162,15 @@ public:
 	 */
 	FVector GetEye() const;
 
+	// ------------------------------------------------------------ the next segment: one control map (ue-table, spec 6.4)
+	/** The table card (hold Tab or d-pad up; modal: the decision waits): up, on which page (READS, HANDS, PAYOUTS, FIELD,
+	 *  NIGHT), and the real time it last closed (the table's actions stay locked 0.25 s after). */
+	bool IsTableCardUp() const { return bTableCard; }
+	int32 GetTableCardPage() const { return TableCardPage; }
+	double GetTableCardClosedAt() const { return TableCardClosedAt; }
+	/** 0..1: the ALL IN rung's fill while all in is held (Y on a pad past 0.35 s, A on the keyboard), for the ladder. */
+	float GetAllInHold() const { return AllInHold; }
+
 private:
 	void HandleInput(float RealDt);
 	void TickWalk(float RealDt);
@@ -228,6 +262,15 @@ private:
 	float Kick = 0.0f;
 	float Steady = 0.0f;
 	float BreathT = 0.0f;
+
+	// The next segment's table input (ue-table, spec 6.4): the table card, and Y's tap (raise, on release under 0.35 s) or
+	// hold (the ALL IN rung's fill from 0.35 s, complete at 0.95 s; let go between: nothing).
+	bool bTableCard = false;
+	int32 TableCardPage = 0;
+	double TableCardClosedAt = -100.0;
+	/** Real seconds Y (or A on the keyboard) has been held this press, or -1 when it's up. */
+	float RaiseHeld = -1.0f;
+	float AllInHold = 0.0f;
 };
 
 /** Prompts, stacks, Focus, the heart, the clock, reads and the table talk, drawn over the view. */
@@ -237,9 +280,23 @@ class SHORTSTACK_API ABackRoomHUD : public AHUD
 	GENERATED_BODY()
 
 public:
+	/** BackRoomHud.cpp (ue-table's after Phase A). */
 	virtual void DrawHUD() override;
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
 private:
+	// ------------------------------------------------------------ the next segment: the core HUD (ue-table, spec 6.3)
+	/**
+	 * The core table HUD (ss::ui::DrawTableHud) hosted through an SDrawListWidget over the view, from the game mode's
+	 * FillTableHud; the legacy canvas HUD below stays for one milestone (ss.Table.LegacyHud 1).
+	 */
+	void DrawCoreHud();
+	/** P0a: the AI stack plates (the game mode's GetPlates, projected) drawn on the legacy canvas HUD. */
+	void DrawLegacyPlates(float W, float H, float S);
+	TSharedPtr<SDrawListWidget> HudWidget;
+	TSharedPtr<FTableHudHost> HudHost;
+
 	struct FShown
 	{
 		FString Speaker;
@@ -384,6 +441,10 @@ public:
 	static FBackRoomPersona PersonaFor(const FString& Name);
 	/** Who someone in tonight's field is to the player ("Embercrest regular", "Knows you", ...; empty for a stranger). */
 	FString FaceNote(const FString& Name) const;
+	/** Their badges, from the entry's livebadge lines (LiveBadges; none for anyone without): ue-wear fills them in BackRoomLiveCast.cpp, ue-table draws them. */
+	ss::badge::Set FaceBadges(const FString& Name) const;
+	/** The brand someone in tonight's field wears on their chest (the entry's livepatch lines: LivePatches), or empty (ue-wear). */
+	FString FacePatch(const FString& Name) const;
 
 	// ------------------------------------------------------------ the Embercrest on foot (BackRoomLive.cpp)
 	/** Q at the table: up and walking (still dealt in: the dealer checks the hand when it's free and mucks it when not). */
@@ -428,6 +489,149 @@ public:
 	/** Testing: the wait for the next event passes, as stepping out on the terrace does, up to the floor calling its seats. */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	void TestSeatingNow();
+
+	// ============================================================ the next segment (next_segment_spec 8.2, 8.3)
+	// Declared by the lead in Phase A for the four Unreal tracks; this header froze after it. Each body sits in the file of
+	// the track that fills it (empty, or forwarding, until it does).
+
+	// ---- shared fast-forwards (the lead; BackRoomLiveCommands.cpp: ss.Live.Bubble, ss.Live.Final, ss.Live.Break, ss.Live.Shove)
+	/** Testing: the whole room plays on at once (you on autopilot) until Moment: "bubble" (hand for hand), "final" (the final
+	 *  table) or "break" (the next break). A table move on the way is walked, then it goes on. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestFastForwardTo(const FString& Moment);
+	/** Testing: the next opponent to act at your table while you're still in the hand moves all in (facing an all-in). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestShove();
+
+	// ---- ue-room: the director's host, the card room's sound, captions (BackRoomLiveRoom.cpp, BackRoomLiveCommands.cpp)
+	/** The director's cue played: the chime (PlayEffect), the speech (through PaChain for the PA), the caption to the HUD
+	 *  queue. Floor() becomes this (spec 4.11). */
+	void PlayCue(const ss::room::Cue& Cue);
+	/** A line for the HUD's caption zone and the night log (the table card's NIGHT page). */
+	void PushCaption(const ss::ui::Caption& Caption);
+	const std::vector<ss::ui::Caption>& GetCaptions() const { return Captions; }
+	const std::vector<ss::ui::Caption>& GetNightLog() const { return NightLog; }
+	/** The card room's stereo sound (null at Dee's game and until ue-room builds it). */
+	FCardRoomSound* GetRoomSound() const { return RoomSound.Get(); }
+	/** ss.Live.Room: the mood, each layer's dB, the voices in use, synth ms (average and peak), engine voices, the last 10 cues. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString DescribeRoom() const;
+	/** ss.Live.Cue <moment> [seat]: the director says that moment now (a talk::Moment's name), from Seat at your table or anyone. */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	void TestCue(const FString& Moment, int32 Seat);
+
+	// ---- ue-table: the HUD info fill, plates, presets, the table card, toasts (BackRoomHud.cpp)
+	/** Everything the core table HUD draws this frame (ss::ui::DrawTableHud), in its 1,080-tall canvas CanvasWidth wide. */
+	void FillTableHud(ss::ui::TableHudInfo& Out, float CanvasWidth) const;
+	/** The table card's page (ss::ui::DrawTableCard). */
+	void FillTableCard(ss::ui::TableCardInfo& Out) const;
+	/** The AI stack plates as of this frame (GetSeatViews projected into the HUD's canvas; spec 6.3), the hero's included. */
+	const std::vector<ss::ui::SeatPlate>& GetPlates() const { return Plates; }
+	/** Each frame: the plates from the table's seats (projection, fades, 2 s after a seat acts), then the audit. */
+	void UpdatePlates(float RealDt);
+	/** ss.Table.PlateAudit 1: every plate against the engine's stack for its seat; a mismatch that outlasts the chips' landing is logged. */
+	void PlateAudit(float RealDt);
+	/** The settings the table runs on (the pause menu's: captions, stack readout and units, turn cue, the mix), or null before Begin. */
+	const ss::ui::GameSettings* GetSettings() const;
+	/** U (or Y with the table card up): big blinds and chips swap places on the plates and the hero block. */
+	void FlipStackUnits();
+	/** The toast lane (a text, a sponsor bonus, the sit-down patch line), held while it's the player's decision (spec 1.6). */
+	void PushToast(const FString& From, const FString& Line, uint32 Accent = 0);
+	const std::vector<ss::ui::Toast>& GetToasts() const { return Toasts; }
+	/** The last hands the player played (recall::Of at EndHand), newest last, at most 10: HANDS and the last-hand card. */
+	const std::vector<ss::recall::Record>& GetRecentHands() const { return RecentHands; }
+	/** The raise presets on the ladder for the hero's decision now (ss::sizing::Presets) and the one selected (-1: none):
+	 *  keys 1-6 and the bumpers step them (the table's HeroPreset and HeroSnap carry them out; spec 6.2 D, 6.4). */
+	const std::vector<ss::sizing::Preset>& GetPresets() const { return Presets; }
+	int32 GetPresetIndex() const { return PresetIndex; }
+	/** The rail's stage view: the stream table from a fixed camera with the ON AIR lower third (spec 6.5). */
+	bool IsWatchingFeature() const { return bFeatureView; }
+	void WatchFeature(bool bOn);
+
+	// ---- ue-venue: the desk screen, the room's clocks, the seat marker, the badge atlas (BackRoomLiveVenue.cpp)
+	/** The desk or the cage (ss::ui::DeskScreen, modal), Window "desk" or "cage"; its requests go through DeskSignup,
+	 *  FinishSignup and LiveUnregister. */
+	void OpenDesk(const FString& Window);
+	void CloseDesk();
+	bool IsDeskOpen() const { return bDeskUp; }
+	/** Where the seat marker points on foot (the hero's chair, world space; spec 6.5). */
+	FVector SeatMarkerTarget() const;
+	/** The badge glyphs, one render at map start (null until ue-venue builds it). */
+	const FBadgeAtlas* GetBadgeAtlas() const { return BadgeAtlas.Get(); }
+	/** Testing: the desk or the cage opened (as E there does), and a key pressed on it ("Up", "Enter", "Escape"...). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestDeskOpen(const FString& Window);
+	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
+	FString TestDeskKey(const FString& Key);
+
+private:
+	// ---- the lead: the shared fast-forwards' stop (0 none, 1 hand for hand, 2 the final table, 3 a break)
+	uint8 FastForwardStop = 0;
+	bool FastForwardReached() const;
+
+	// ---- ue-room
+	/** Built once the field is loaded, Resume'd from the entry's liveroom and the checkpoint (spec 4.11). */
+	TSharedPtr<ss::room::Director> RoomDirector;
+	TSharedPtr<FCardRoomSound> RoomSound;
+	/** The VoiceBank seam (spec 4.10): a clip by cue Key and speaker over the murmur; empty this segment. */
+	TSharedPtr<FVoiceBank> VoiceBank;
+	TSharedPtr<FRoomHost> RoomHost;
+	/** Lines up now (the HUD's caption zone) and the night's (the NIGHT page). */
+	std::vector<ss::ui::Caption> Captions;
+	std::vector<ss::ui::Caption> NightLog;
+	/** The last cues played, newest last (ss.Live.Room shows 10). */
+	std::vector<ss::room::Cue> RecentCues;
+	/** The director built (after LoadLive, from the entry), fed each frame (events, rounds, the hand, the clock), its cues played. */
+	void BuildDirector();
+	void TickRoom(float RealDt);
+	/** The rail's backers (stake::RailFor): at most two, at the bar line or the stage edge (spec 2.13). */
+	void PlaceBackers();
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<ABackRoomPlayer>> RailBackers;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UObject>> RoomObjects;
+
+	// ---- ue-wear: the field's badges and patches, by name (filled beside FaceNote's LiveFaces, BackRoomLiveCast.cpp)
+	TMap<FString, ss::badge::Set> LiveBadges;
+	TMap<FString, FString> LivePatches;
+	TSharedPtr<FWearHost> WearHost;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UObject>> WearObjects;
+
+	// ---- ue-table
+	std::vector<ss::ui::SeatPlate> Plates;
+	std::vector<ss::sizing::Preset> Presets;
+	int32 PresetIndex = -1;
+	std::vector<ss::ui::Toast> Toasts;
+	std::vector<ss::recall::Record> RecentHands;
+	/** ss.Table.PlateAudit: how long each seat's plate has disagreed with the engine (seconds, by table seat). */
+	TMap<int32, float> PlateMismatchFor;
+	bool bFeatureView = false;
+	TSharedPtr<FTableHost> TableHost;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UObject>> TableObjects;
+
+	// ---- ue-venue
+	ss::ui::DeskScreen Desk;
+	FString DeskWindow;
+	bool bDeskUp = false;
+	TSharedPtr<SDrawListWidget> DeskWidget;
+	TSharedPtr<FBadgeAtlas> BadgeAtlas;
+	/** The room's clock screens (ss::ui::DrawRoomClock at about 2 Hz; pages CLOCK, PAYOUTS, TODAY, LEADERS) and their painter. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTextureRenderTarget2D>> RoomClockTargets;
+	TSharedPtr<FCoreCanvasTarget> RoomClockCanvas;
+	int32 RoomClockPage = 0;
+	float RoomClockT = 0.0f;
+	void UpdateRoomClocks(float RealDt);
+	/** What the desk screen shows now (ss::ui::DeskInfo; the card room has a SaveData, not a Session). */
+	void FillDeskInfo(ss::ui::DeskInfo& Out) const;
+	/** Each frame while it's up: the requests it made carried out. */
+	void TickDesk(float RealDt);
+	TSharedPtr<FVenueHost> VenueHost;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UObject>> VenueObjects;
+	// ============================================================ end of the next segment
 
 private:
 	/** The engine table playing where the player's own table stands (the room's anchor), or -1 (it broke, or went to the stage). */

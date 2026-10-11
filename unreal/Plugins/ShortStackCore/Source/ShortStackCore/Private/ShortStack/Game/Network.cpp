@@ -1771,7 +1771,8 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 				continue;
 			}
 			const bool Win = It->Kind == world::EventKind::Won || It->Kind == world::EventKind::Champion || It->Kind == world::EventKind::Discovered || It->Kind == world::EventKind::Breakout;
-			const NewsKind K = Win ? NewsKind::BigWin : It->Kind == world::EventKind::PlayerOfYear || It->Kind == world::EventKind::Milestone ? NewsKind::Record : NewsKind::People;
+			const bool Record = It->Kind == world::EventKind::PlayerOfYear || It->Kind == world::EventKind::HallOfFame || It->Kind == world::EventKind::Milestone;
+			const NewsKind K = Win ? NewsKind::BigWin : Record ? NewsKind::Record : NewsKind::People;
 			Post(It->At, K, Title, Body, Tag, It->Amount, It->Npc);
 		}
 	}

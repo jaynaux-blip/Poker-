@@ -2,6 +2,7 @@
 #include "../StrictFloat.h"
 
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Talk.h"
 #include "ShortStack/Game/Town.h"
 
@@ -122,6 +123,28 @@ void Session::Heard(const std::string& Speaker, const town::Talk& Told) // (not 
 		if (Key == "rumour:basement" && Life.Unlocks.insert(Key).second)
 		{
 			StoryText(Key, "Calendar", "Added: The Basement \xC2\xB7 Saturdays, 11 PM \xC2\xB7 downtown \xC2\xB7 $10/$20 no-limit. (Heard it from " + Name + ".)");
+		}
+		// Sponsors across the counter (next_segment_spec §3.1): the terms heard (Mail puts them in writing), the slip signed
+		// (Ray takes the Polaroid on the spot: the period's photo), an appearance made with the keeper.
+		if (Key.rfind("sponsor:heard:", 0) == 0)
+		{
+			sponsor::HeardOffer(Life.Sponsors, Life, Key.substr(14), World);
+			Life.Sponsors.NextAt = 0.0;
+		}
+		else if (Key.rfind("sponsor:sign:", 0) == 0)
+		{
+			const std::string Id = Key.substr(13);
+			const sponsor::Contract* Offer = sponsor::Find(Life.Sponsors, Id);
+			const std::string Brand = Offer ? Offer->Brand : std::string();
+			if (SignDeal(Id).empty() && Brand == "luckypenny")
+			{
+				(void)sponsor::Appear(Life.Sponsors, "store", World);
+			}
+		}
+		else if (Key.rfind("sponsor:appear:", 0) == 0)
+		{
+			const std::string Venue = Key.substr(15, Key.find(':', 15) == std::string::npos ? std::string::npos : Key.find(':', 15) - 15);
+			(void)sponsor::Appear(Life.Sponsors, Venue, World);
 		}
 	}
 

@@ -398,7 +398,7 @@ void Sim::Found(World& W, double Start)
 		{
 			N.Sponsor = "Team RiverLine";
 			N.Professional = true;
-			N.Income = sim::Cents(1500.0);
+			N.Income = TeamWeekly();
 		}
 		N.Joined = Today - 365 * std::max(0, std::min(Age - 19, 1 + R.Int(10)));
 		{
@@ -826,6 +826,11 @@ void World::Create(uint32_t InSeed, double StartWorld)
 	Month = YearOf(Today) * 12; // refined on the first month change
 	Sim::Found(*this, StartWorld);
 	Sim::RoomLocals(*this, Today);
+	// History the badges read on the first night (next_segment_spec §5, §11 Q23): the titles won before the story began,
+	// the room's last few months, and the month's Verified review.
+	Sim::SeedChampions(*this);
+	Sim::SeedRoomHistory(*this, Today);
+	Sim::Review(*this, Today);
 	Target = static_cast<int>(Roster.size());
 	// The fields each tier plays against start where the network's regulars are.
 	std::array<double, 5> Sum{};

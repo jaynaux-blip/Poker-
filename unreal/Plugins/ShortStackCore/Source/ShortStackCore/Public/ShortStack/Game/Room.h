@@ -2,8 +2,11 @@
 
 #include "ShortStack/Audio/Voice.h"
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/TableTalk.h"
 #include "ShortStack/Tournament.h"
 
+#include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -26,7 +29,21 @@ class World;
  * rate limits count in engine ticks, never frames or real seconds, so the cue log is a pure function of the
  * tournament, the seed and the player's inputs. Write/Read keep what's been said across a checkpoint (liveroom).
  *
- * Bodies: core-room (Room.cpp). Phase A, day 1: stubs that compile and say nothing.
+ * Feeding it, once per tick, in this order (the order is part of the cue log):
+ *   1. Events(T, E) with StartTick's events (Balance: tables breaking, moves, the final table), then Take() and play
+ *      them as the hand starts (the floor calls the final table before its first hand, not after it);
+ *   2. optionally, mid-hand: AllInCalled(T, 0, HeroIn) when the action closes on an all-in and a call at the player's
+ *      table, before the board runs out (the rail leans in while the cards turn), then Take();
+ *   3. once the tick is finished: Hand(T, Note) when the hero's table (or the feature table, Note.TableId) played a hand
+ *      the host saw, then Rounds(T, T.Rounds()), then Events(T, E) with FinishTick's (or EndFinish's) events, then Take();
+ *   4. Clock(T, World, BreakLeft) every frame (the desk, last call, the break's clock), and Take() after it.
+ * Take() hands over the cues in the order to play them (Delay is seconds after Take). How often the host takes them
+ * changes only the delays, never what's said. Engine time is the tick at a nominal 45 s a hand, whatever the table's
+ * pace: the same night at Live, Brisk or Fast says the same lines in the same hands. The clock's thresholds during play
+ * (last call, registration closing) are read from the tournament's own clock at each tick, not the frame's minutes,
+ * for the same reason.
+ *
+ * Bodies: core-room (Room.cpp).
  */
 namespace room
 {
@@ -45,8 +62,15 @@ enum class Mood : int
 	Champion,
 	After,
 };
+SHORTSTACKCORE_API const char* MoodName(Mood M);
+/** The engine's mood (§4.3) for T: Burst and Champion are the director's (they follow an event), never this. */
 SHORTSTACKCORE_API Mood MoodOf(const Tournament& T, bool OnBreak, bool Dealt);
-/** Levels in dB for audio::CardRoom::SetMix. */
+/**
+ * Levels in dB for audio::CardRoom::SetMix (0 dB is the bed at today's send, about -30 dBFS). Talk already carries the
+ * crowd, 10 log10(OpenShare), and the Lombard lift (talkers raise 0.5 dB for every dB the room rises, relative to a full
+ * room Running): don't apply Crowd as a gain again. Crowd is the share of the room's tables running (0..1), for how many
+ * walla talkers to voice. Rail -60 is off; Calls -60 is no calls.
+ */
 struct Mix
 {
 	float Bed = 0.0f;
@@ -59,11 +83,11 @@ struct Mix
 SHORTSTACKCORE_API Mix MixFor(Mood M, float OpenShare);
 enum class Kind : int
 {
-	Line,
-	Call,
-	Pa,
-	Vocal,
-	Phone,
+	Line,  // a person: a seat at a table, the rail, the bar
+	Call,  // a dealer
+	Pa,    // the floor on the PA (the chime first when Chime)
+	Vocal, // the crowd's non-word sounds: Noise, Voices of them (Sound is its caption, "[The rail groans.]")
+	Phone, // a text to the player (the toast lane, held during the player's decision)
 };
 enum class From : int
 {
@@ -75,6 +99,14 @@ enum class From : int
 	Desk,
 	Pa,
 };
+/**
+ * One thing to hear. Who is the tournament player's id at a table ("npc:Mei", "p12": the host finds the body by it) or a
+ * backer's name at the rail; Speaker is what the caption calls them (talk::CaptionName; "Dealer", "Floor", "Dee").
+ * TableId is the engine's table (0 for none); Seat the seat at it (0-based, -1 none). Key is the template (the VoiceBank's
+ * key with Speaker); Topic what the line claims or spends ("story:...", "noticed:luckypenny"), for the honesty checks.
+ * Calls with Effort 0.85 or more are shouted and carry across the room; quieter ones are heard within about 12 m.
+ * A line to the player with a Key starting "field.needle" is a needle (the host's Tilt +0.04, §11 Q18).
+ */
 struct Cue
 {
 	Kind What = Kind::Line;
@@ -93,8 +125,18 @@ struct Cue
 	bool ToHero = false;
 	bool Chime = false;
 	float Effort = 0.6f;
+	std::string Topic;
+	int Tick = 0; // the engine tick it belongs to
+	/**
+	 * A long announcement comes as consecutive Pa cues, a sentence or two each, so every caption fits its box in two
+	 * rows at any caption size: Part 0 carries the chime, 1, 2... follow it. The VoiceBank's key is Key with Part.
+	 */
+	int Part = 0;
 };
-/** What the host saw of a hand at the hero's table. */
+/**
+ * What the host saw of a hand at the hero's table (or, with TableId, the feature table it's watching). Names are the
+ * tournament's names or ids (either works; the player is "hero"). InHand: still in at the end; Shown: hands tabled.
+ */
 struct HandNote
 {
 	int Hand = 0;
@@ -113,6 +155,8 @@ struct HandNote
 	std::vector<std::string> Busted;
 	Chips Pot = 0;
 	Chips HeroStack = 0;
+	/** The engine table it was played at (0: the hero's). */
+	int TableId = 0;
 };
 struct RailBacker
 {
@@ -124,26 +168,142 @@ class Director
 public:
 	/** Seed: live::SeedFor(E, hero) + ":room". Voices: E.Voices, or VoicesFor(E). */
 	SHORTSTACKCORE_API Director(const life::LiveEntry& E, const live::Occurrence& O, const std::string& Seed, const std::string& HeroFirstName);
-	/** Nothing said twice. */
+	/** Nothing said twice: State is the entry's liveroom (Write); empty or unreadable, what was said is worked out from T
+	 *  and World (§7.5 step 6: levels, money close, hand for hand, the bubble, two tables, the final table, heads-up, last
+	 *  call and registration). */
 	SHORTSTACKCORE_API void Resume(const Tournament& T, const std::string& State, double World);
 	/** stake::RailFor, from the host. */
 	SHORTSTACKCORE_API void SetRail(const std::vector<RailBacker>& Backers);
 	SHORTSTACKCORE_API void Events(const Tournament& T, const std::vector<TEvent>& E, double World);
 	SHORTSTACKCORE_API void Rounds(const Tournament& T, const std::vector<TableRound>& R);
 	SHORTSTACKCORE_API void Hand(const Tournament& T, const HandNote& H);
+	/**
+	 * Mid-hand (optional): the action has closed with an all-in and a call at the player's table (TableId 0) or the
+	 * feature table, and the board is about to run out. Where someone's watching (the final table, or near the money)
+	 * the rail leans in ("ooh"), and with the player in it at the final table, their backer at the rail (or someone out
+	 * tonight who knows them) calls their name: "Hold, Jesse! Hold!". Hand then doesn't say those again. Without this
+	 * call the rail's ooh comes with the hand's end, and a name only when the player won it.
+	 */
+	SHORTSTACKCORE_API void AllInCalled(const Tournament& T, int TableId, bool HeroIn);
+	/** BreakLeft: real seconds left on the host's break (0 when there's none). */
 	SHORTSTACKCORE_API void Clock(const Tournament& T, double World, double BreakLeft);
 	SHORTSTACKCORE_API std::vector<Cue> Take();
 	Mood Now() const { return Current; }
 	float TalkScale = 1.0f;
+	/** The name the floor calls for the player (the registration's: Person.FullName()); the first name if never set. */
+	std::string HeroFullName;
+	/** The host's break in real seconds (BackRoomLive.cpp's 24): the five-minute call comes at its share. */
+	double BreakSeconds = 24.0;
+	/** The player is up from their seat (on foot): a move is called on the PA; seated, their dealer tells them. */
+	bool HeroUp = false;
 	SHORTSTACKCORE_API std::string Write() const;
 	SHORTSTACKCORE_API bool Read(const std::string& Text);
+	/** Tables whose hands the director ran equity for, in order (RoomEquityScope: only the hero's and the feature table). */
+	const std::vector<int>& EquityTables() const { return EquityLog; }
+	/** The Sunday or the Saturday Big Stack: seat-by-seat final-table introductions (§11 Q20). */
+	SHORTSTACKCORE_API bool Flagship() const;
+	/**
+	 * ss.Live.Cue <moment> [seat]: someone at the player's table (Seat, 0-based; -1 the first who has something) says that
+	 * moment now, past the rates and the caps but never the honesty gates (no tabled cards, no bad beat). Rail asks the
+	 * backers at the rail. Nothing the night keeps changes; the cue comes out of Take. False when nobody would say it.
+	 */
+	SHORTSTACKCORE_API bool Prompt(const Tournament& T, talk::Moment M, int Seat);
 
 private:
+	struct Seen
+	{
+		std::string Id, Name, Caption;
+		int Table = 0, Seat = -1;
+		bool Hero = false;
+	};
+	// Fixed at construction.
+	std::string EntryId, SeedText, HeroFirst, EventShort, EventName, TemplateKey;
+	uint32_t SeedHash = 0;
+	live::Occurrence Occ;
+	std::map<std::string, life::LiveVoice> Voices;
+	std::map<std::string, std::string> FaceLabel, FaceLine, BadgePack;
+	std::string HeroBadges; // the player's own row of E.Badges (the one name not in the roster): badge::Pack
+	std::vector<std::pair<std::string, std::string>> HeroPatches, FieldPatches;
+	std::set<std::string> RosterNames;
+	std::vector<RailBacker> Rail;
+	// The night so far (Write/Read).
 	Mood Current = Mood::Arrival;
+	uint32_t SaidBits = 0;
+	int LevelSaid = 0, BreakSaid = 0, FiveSaid = 0, OverSaid = 0, BreakLevel = 0, BreakTick = -1;
+	bool OnBreak = false, BreakCounting = false, Greet = true;
+	int GreetTable = -1;
+	int BurstTick = -1, ChampionTick = -1, LastTick = 0, Engine = 0, PaFree = 0, H4HHands = 0, RailRead = 0, HandsSeen = 0;
+	int AskTick = -100; // the last hand the player's table asked the dealer something
+	double ChampionUntil = -1.0;
+	double WorldNow = 0.0;
+	int HeroOutTick = -1;
+	std::vector<int> TableLines;
+	std::map<std::string, int> SpokeAt, SmallAt, NeedleAt, Acc;
+	std::set<std::string> Told;
+	std::vector<std::pair<std::string, std::string>> Beats; // name -> "Mine|Theirs|Street", retold at the break
+	// Rebuilt from the tournament, never saved.
+	std::map<std::string, Chips> Stacks;
+	int StacksTable = -1;
+	std::vector<Cue> Out;
+	std::vector<int> EquityLog;
+	double PaCursor = 0.0, TalkCursor = 0.0;
+	int TableClock = 0;
+	// Within one call: who at the rail has spoken (nobody says two things at once). Within one tick: the all-in the rail
+	// already leaned in on (AllInCalled). Within one Take: when the hand's own reactions are done (the floor waits).
+	std::set<std::string> RailSpoke;
+	int LeanTick = -1, LeanTable = -1;
+	double ReactionEnd = 0.0;
+
+	// Room.cpp's helpers.
+	uint32_t Hash(const std::string& What) const;
+	double Unit(const std::string& What) const;
+	bool Has(int Bit) const { return (SaidBits & (1u << Bit)) != 0; }
+	void Mark(int Bit) { SaidBits |= 1u << Bit; }
+	void Sync(const Tournament& T);
+	void UpdateMood(const Tournament& T, double World);
+	void Snapshot(const Tournament& T);
+	double TickWorld(const Tournament& T) const;
+	Seen Find(const Tournament& T, const std::string& IdOrName) const;
+	const life::LiveVoice& VoiceFor(const Tournament& T, const Seen& P) const;
+	mutable std::map<std::string, life::LiveVoice> Strangers; // voices made up for the anonymous field, as they sit down
+	std::vector<Seen> AtTable(const Tournament& T, int TableId) const;
+	int HeroTable(const Tournament& T) const;
+	/** The player's table, still theirs on the tick that put them out (lines and calls there are "at your table"). */
+	int SeatedTable(const Tournament& T) const;
+	bool Sunday() const;
+	std::string Spoken(const Seen& P) const;
+	std::map<std::string, std::string> RoomVars(const Tournament& T) const;
+	void Pa(const Tournament& T, const std::string& Name, std::map<std::string, std::string> Vars, int Priority, bool Chime, const std::string& Speaker = "Floor",
+		bool Routine = true);
+	void Call(const Tournament& T, const std::string& Name, std::map<std::string, std::string> Vars, int TableId, float Effort, const std::string& Speaker = "Dealer",
+		bool AtHero = false);
+	/** Who calls the player's name from the rail: a backer there, or someone out tonight who knows them (false: nobody). */
+	bool Shouter(const Tournament& T, std::string& Who, std::string& WhoId) const;
+	void Shout(const Tournament& T, const std::string& Topic, int TableId, double Delay);
+	bool Say(const Tournament& T, const Seen& P, talk::Moment M, std::map<std::string, std::string> Vars, bool Small, bool ToHero, const life::LiveVoice* To = nullptr,
+		bool Reaction = false);
+	void Vocal(audio::Vocal V, From Where, int TableId, int Count, const std::string& Sound, double Delay);
+	void RailSay(const Tournament& T, int Moment, const std::string& Text = std::string(), const std::string& Key = std::string());
+	void Milestones(const Tournament& T, double World);
+	void Showdown(const Tournament& T, const HandNote& H, const std::vector<Seen>& Table, int TableId);
+	void Chatter(const Tournament& T, const HandNote& H, const std::vector<Seen>& Table);
+	void Greetings(const Tournament& T);
+	void FinalTableCalls(const Tournament& T);
+	void BreakOver(const Tournament& T);
+	void Bust(const Tournament& T, const TEvent& E);
 };
+/**
+ * An announcement in caption-sized parts: whole sentences, as many as fit in 96 characters (a caption box's two rows at
+ * 150%, at 16:9 and at 2550x1220). The director's Pa cues come this way already; the host uses it for a floor line it
+ * says itself (talk::Floor("cancelled", ...)), one caption a part.
+ */
+SHORTSTACKCORE_API std::vector<std::string> Announcement(const std::string& Text);
 /** Voices for an entry registered before they were kept: from its roster, the cast and the faces' labels; no story. */
 SHORTSTACKCORE_API std::vector<life::LiveVoice> VoicesFor(const life::LiveEntry& E);
-/** For live::DescribeField. */
+/** For live::DescribeField: how one of the world's people sounds and what they can honestly say (their own results,
+ *  their mood and who they are, their ties, and their bond with the player), fixed at registration. */
 SHORTSTACKCORE_API life::LiveVoice VoiceOf(const world::World& W, int Npc, const std::string& Hero);
+/** A voice for someone the save knows nothing about (the anonymous field): how they play and a hash of their name. */
+SHORTSTACKCORE_API life::LiveVoice VoiceForStranger(const std::string& Name, int Style);
 } // namespace room
 } // namespace ss

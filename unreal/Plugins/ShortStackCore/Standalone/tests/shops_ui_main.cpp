@@ -20,6 +20,7 @@
 #include "ShortStack/UI/ShopScreen.h"
 #include "ShortStack/UI/StoreCounter.h"
 #include "ShortStack/UI/TalkCard.h"
+#include "ShortStack/UI/Captions.h"
 #include "TestFontMetrics.h"
 
 #include <algorithm>
@@ -2041,6 +2042,89 @@ void Review()
 		Expect(Drew(L, "2 hr 15 min to go"), "hud: a long skip counts down in hours and minutes");
 	}
 }
+// ------------------------------------------------------------------ captions (core-tableui, next_segment_spec §4.9)
+
+/** DrawCaptions in its three modes at the three widths at 100% and 150%, and the night log with 40 lines. */
+void Captions()
+{
+	using ss::ui::Caption;
+	std::vector<Caption> Lines;
+	auto Add = [&](int Style, const char* Who, const char* Line, double At, bool Room, int Side) {
+		Caption C;
+		C.Style = Style;
+		C.Speaker = Who;
+		C.Line = Line;
+		C.At = At;
+		C.Room = Room;
+		C.Side = Side;
+		Lines.push_back(C);
+	};
+	Add(1, "", "Ladies and gentlemen, we are on the bubble of the Embercrest Nightly. We're going hand for hand.", 97.0, false, 0);
+	Add(0, "Rick", "Hand for hand. Here we go.", 98.0, false, 0);
+	Add(0, "Corinne Vasquez", "All in and a call over here!", 98.5, true, 1);
+	Add(2, "", "[The rail groans.]", 99.0, true, 2);
+	Add(3, "Mrs. Park", "You going to make me wait all night, or are we playing cards?", 99.5, false, -1);
+	for (const float W : Widths)
+	{
+		for (int Mode = 0; Mode < 3; ++Mode)
+		{
+			for (const int Size : {100, 150})
+			{
+				ss::ui::CaptionStyle Look;
+				Look.Mode = Mode;
+				Look.Size = Size;
+				ss::ui::DrawList L;
+				ss::ui::Canvas C(L, Measurer, W, 1080.0f, 1.0f);
+				ss::ui::DrawCaptions(C, Lines, Look, 904.0f, std::min(980.0f, W - 840.0f), 100.0);
+				const std::string What = "captions mode " + std::to_string(Mode) + " at " + std::to_string(Size) + "% at " + std::to_string(static_cast<int>(W));
+				if (Mode == 0)
+				{
+					Expect(L.Cmds.empty(), What + ": off draws nothing");
+				}
+				else
+				{
+					Expect(Says(L, "FLOOR") && Says(L, "on the bubble"), What + ": the floor is never dropped");
+					Expect(Mode == 2 || !Says(L, "[The rail groans.]"), What + ": sounds only in Everything");
+				}
+				Fits(L, W, What);
+				if (W == Widths[0] && Mode == 1 && Size == 100)
+				{
+					Write("captions_dialogue", L);
+				}
+				if (W == Widths[0] && Mode == 2 && Size == 150)
+				{
+					Write("captions_everything_150", L);
+				}
+			}
+		}
+	}
+	// The night log: forty lines, the clock in mono, the newest at the bottom.
+	std::vector<Caption> Night;
+	for (int K = 0; K < 40; ++K)
+	{
+		Caption C;
+		C.Style = K % 6 == 0 ? 1 : K % 9 == 4 ? 2 : 0;
+		C.Speaker = K % 2 == 0 ? "Mrs. Park" : "Big Lou";
+		C.Line = C.Style == 1 ? "Players, the blinds are now 500 and 1,000, with a big blind ante of 1,000. Good luck, everyone." : C.Style == 2 ? "[Applause.]" : "Seat four, it's on you.";
+		C.Clock = ss::ClockString(19.0 * 60.0 + static_cast<double>(K) * 3.0);
+		Night.push_back(C);
+	}
+	Night.back().Line = "That's the last one tonight.";
+	for (const float W : Widths)
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, Measurer, W, 1080.0f, 1.0f);
+		const ss::ui::Rect R{80.0f, 140.0f, std::min(1300.0f, W - 160.0f), 760.0f};
+		ss::ui::DrawNightLog(C, Night, "The night \xC2\xB7 Embercrest Nightly", R, 100.0);
+		const std::string What = "night log at " + std::to_string(static_cast<int>(W));
+		Expect(Says(L, "THE NIGHT \xC2\xB7 EMBERCREST NIGHTLY") && Drew(L, "That's the last one tonight.") && Drew(L, "8:57 PM"), What + ": the title and the newest line");
+		Fits(L, W, What);
+		if (W == Widths[0])
+		{
+			Write("night_log", L);
+		}
+	}
+}
 } // namespace shops_ui
 
 int main(int Argc, char** Argv)
@@ -2061,6 +2145,7 @@ int main(int Argc, char** Argv)
 	shops_ui::Faces();
 	shops_ui::OutfitNone();
 	shops_ui::Review();
+	shops_ui::Captions();
 	std::printf("shops_ui_test: %d checks, %d failed\n", shops_ui::Checks, shops_ui::Failures);
 	return shops_ui::Failures == 0 ? 0 : 1;
 }

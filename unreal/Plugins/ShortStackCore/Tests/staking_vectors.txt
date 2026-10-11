@@ -1,0 +1,21 @@
+# Staking golden vectors (next_segment_spec §2.8). Money in cents; shares in permille. Read by tests/staking_main.cpp.
+# event <occurrence> <prize> <backer's share> <player's share>
+event	embercrest-nightly@9	23600	17800	5800
+event	embercrest-nightly@9	41000	26500	14500
+event	embercrest-nightly@9	10000	10000	0
+event	embercrest-nightly@9	0	0	0
+event	embercrest-nightly@9	12000	12000	0
+event	embercrest-nightly@9	12001	12000	1
+# pieces <occurrence> <markup> <permille sold> <collected at registration> <prize> <buyers' shares>
+pieces	embercrest@6	1050	350	5530	119000	41650
+pieces	embercrest@6	1000	100	1500	119000	11900
+pieces	embercrest-nightly@9	1100	50	660	23600	1180
+pieces	embercrest@6	1050	350	5530	0	0
+# swap <permille> <player's prize> <partner's prize> <net to the player: + they owe, - the player owes>
+swap	100	38000	0	-3800
+swap	100	38000	90000	5200
+swap	50	0	47500	2375
+swap	100	12345	12345	0
+# package <roll> <makeup before> <buy-in> <prize> <cut permille> <period net> <player's chop> <roll after the chop>
+package	220000	68000	2200	390000	450	319800	143910	220000
+package	110000	0	1100	0	350	-1100	0	108900

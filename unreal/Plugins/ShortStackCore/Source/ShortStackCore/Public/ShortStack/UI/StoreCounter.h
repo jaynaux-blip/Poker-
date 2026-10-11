@@ -2,6 +2,7 @@
 
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Store.h"
+#include "ShortStack/UI/Captions.h"
 #include "ShortStack/UI/Ui.h"
 
 #include <map>
@@ -106,6 +107,10 @@ struct StreetHudInfo
 		double To = 0.0;
 	};
 	Duty Due;
+	/** The player's caption settings (GameSettings: Captions, CaptionSize, CaptionBackdrop, SpeakerNames), as the table's
+	 *  TableHudInfo::CaptionLook: the subtitles above draw with them, two at most; with captions off none show. The
+	 *  default is today's look (Dialogue, 100%). */
+	CaptionStyle CaptionLook;
 };
 
 /**

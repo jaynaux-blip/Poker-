@@ -76,7 +76,12 @@ struct Sponsor
 	Chips ReadCents = 0;     // a sponsor read (once a stream)
 	int Days = 30;
 };
+/**
+ * The five brands Kast has carried from the start (sponsor::Brands()' legacy ids, in their order: Overclock, TunnelRat,
+ * Stacked, RiverLine, Sitwell), as the stream sees them. The world's streamers draw their sponsors from these.
+ */
 SHORTSTACKCORE_API const std::vector<Sponsor>& Sponsors();
+/** Any brand that pays on stream (the sponsor catalog's: Halo too), by id; nullptr for a brand that never reads. */
 SHORTSTACKCORE_API const Sponsor* FindSponsor(const std::string& Id);
 
 /** Stream titles: each one shapes the show a little. */
@@ -156,11 +161,16 @@ struct StreamLog
 
 struct Deal
 {
-	std::string Id;
+	std::string Id; // the brand (sponsor::Brand::Id)
 	double Since = 0.0;
 	double Until = 0.0;
 	double ReadAt = -1e9; // last read (world minutes)
 	Chips EarnedCents = 0;
+	// The view's terms (sponsor::StreamView, next_segment_spec §3.8): what Kast pays for this deal. A deal is the sponsor
+	// book's contract seen from the stream; nothing here is saved (Channel::Deals is read only to migrate an old save).
+	Chips PerHourCents = 0;
+	Chips ReadCents = 0;
+	bool Overlay = true; // holds one of the overlay's two slots (its mark in the corner)
 };
 
 /** Kast's rules, over the last 30 days (Affiliate also needs 50 followers). */
@@ -187,6 +197,8 @@ struct Channel
 	std::vector<Clip> Clips;      // newest first, at most 16
 	std::vector<StreamLog> Log;   // newest first, at most 60
 	std::vector<Member> Members;  // the community
+	// Kast's own deals from before the sponsor book (next_segment_spec §3.8): read from an old save, moved into the book
+	// by sponsor::AfterParse, and never written again. The stream works on Inputs::Deals.
 	std::vector<Deal> Deals;
 	std::set<std::string> Offers;   // sponsor ids waiting for an answer
 	std::set<std::string> Declined;
@@ -451,6 +463,8 @@ struct Inputs
 	Chips Bankroll = 0;
 	Chips RentDue = 0;
 	gear::Effects Gear;
+	/** The sponsor book's deals Kast works on (Session::SponsorStream: sponsor::StreamView). */
+	std::vector<Deal> Deals;
 };
 
 /** How a stream went (the card when it ends). */
@@ -515,6 +529,9 @@ public:
 	Summary Tonight;
 	Summary Last; // the stream that just ended (the card)
 	Prediction Pred;
+	/** The deals as Kast left them after its last call (Tick, SponsorRead): the session hands them back to the sponsor book
+	 *  (sponsor::AbsorbStream) and clears them. Not saved. */
+	std::vector<Deal> Deals;
 	Mood Face = Mood::Focus;
 	double FaceAt = 0.0;
 	double AdUntil = -1.0; // real seconds

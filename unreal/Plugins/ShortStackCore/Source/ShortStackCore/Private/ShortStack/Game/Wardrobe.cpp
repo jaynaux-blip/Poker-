@@ -608,5 +608,20 @@ Chips ThriftPrice(const Garment& G, double World)
 	}
 	return Price;
 }
+
+bool PatchFits(const Closet& C, int Spot)
+{
+	// The chest and the sleeve are always there (a jacket, else the tee); a cap patch needs a cap to sit on.
+	if (Spot == 0 || Spot == 1)
+	{
+		return true;
+	}
+	if (Spot != 2)
+	{
+		return false;
+	}
+	const Garment* Hat = wardrobe_detail::Worn(C, Slot::Hat);
+	return Hat && (Hat->Kind == Cut::BallCap || Hat->Kind == Cut::CapBack || Hat->Kind == Cut::Beanie);
+}
 } // namespace wardrobe
 } // namespace ss

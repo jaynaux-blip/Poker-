@@ -6,11 +6,13 @@
 // they take a shot or step away. Tilt and burnout cost them focus at the table, never luck.
 #include "ShortStack/Game/World.h"
 
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Structure.h"
 #include "WorldSim.h"
 
@@ -203,6 +205,46 @@ void AddFame(Npc& N, Rep R, double Amount)
 	N.Fame[static_cast<size_t>(R)] = static_cast<float>(static_cast<double>(N.Fame[static_cast<size_t>(R)]) + Amount);
 }
 
+/** A channel's sponsor tier by its size alone (the stream road of next_segment_spec §3.3: the world keeps no viewer counts). */
+int StreamTier(int Followers)
+{
+	return Followers >= 25000 ? 5 : Followers >= 5000 ? 4 : Followers >= 2500 ? 3 : Followers >= 500 ? 2 : Followers >= 150 ? 1 : 0;
+}
+
+/**
+ * A brand for one of the world's channels (§3.7): from the catalog, by tier (a bigger brand is likelier the higher its
+ * tier), never a poker site, a card room or a shop on the block. Nothing (and no draw) when the catalog has none that fits.
+ */
+const sponsor::Brand* NpcBrand(int Followers, Rng& R)
+{
+	const int Tier = StreamTier(Followers);
+	std::vector<const sponsor::Brand*> Fit;
+	double Total = 0.0;
+	for (const sponsor::Brand& B : sponsor::Brands())
+	{
+		if (B.Cat == sponsor::Category::Site || B.Cat == sponsor::Category::CardRoom || B.Cat == sponsor::Category::Local || B.Tier < 1 || B.Tier > Tier)
+		{
+			continue;
+		}
+		Fit.push_back(&B);
+		Total += static_cast<double>(B.Tier);
+	}
+	if (Fit.empty())
+	{
+		return nullptr;
+	}
+	double X = R.Next() * Total;
+	for (const sponsor::Brand* B : Fit)
+	{
+		X -= static_cast<double>(B->Tier);
+		if (X < 0.0)
+		{
+			return B;
+		}
+	}
+	return Fit.back();
+}
+
 void Milestones(World& W, Npc& N, Chips Before, Chips After, double At)
 {
 	static const double Marks[] = {100000.0, 1000000.0, 5000000.0, 10000000.0, 25000000.0};
@@ -326,6 +368,7 @@ void Sim::Post(World& W, double At, EventKind K, int Who, const std::string& Wha
 	case EventKind::Sponsored: Mark(N, Day, StepKind::Sponsored, What); break;
 	case EventKind::StartedStreaming: Mark(N, Day, StepKind::StartedStreaming, What, Value); break;
 	case EventKind::PlayerOfYear: Mark(N, Day, StepKind::PlayerOfYear, What, Value); break;
+	case EventKind::HallOfFame: Mark(N, Day, StepKind::HallOfFame, What, Value); break;
 	case EventKind::Milestone:
 		if (What == "turned-pro")
 		{
@@ -1112,8 +1155,18 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 	}
 	else
 	{
-		N.ThisSeason.LivePoints += Points;
+		// Live Player of the Year and the circuit's points: Regional events and up (§11 Q3; the Embercrest has its own
+		// monthly board, below).
+		if (CircuitEvent(static_cast<LiveKind>(P.Kind), Has(P.Kinds, KindSatellite)))
+		{
+			N.ThisSeason.LivePoints += Points;
+			N.CircuitPoints += Points;
+		}
 		N.ThisSeason.LiveWon += Prize;
+		if (live::IsEmbercrest(P.Id))
+		{
+			NoteRoom(N.Room, sim::DayAt(P.Start), Place, P.FinalSize, Prize, Points);
+		}
 	}
 	Year& Y = Sim::YearRow(N, Day);
 	(P.Online ? Y.Online : Y.Live) += Prize;
@@ -1790,10 +1843,7 @@ void Sim::Finances(World& W, Npc& N, int Day, Rng& R)
 	{
 		In += static_cast<Chips>(static_cast<double>(N.Followers) * 1.5); // subs, ads, a brand deal or two
 	}
-	if (N.Pro)
-	{
-		In += sim::Cents(1500.0);
-	}
+	// (Team RiverLine's money is in Income, Sim::TeamWeekly a week from the day they sign: it isn't paid twice.)
 	N.Bankroll += In;
 	W.Flow[2] += sim::Dollars(In);
 	N.PeakRoll = std::max(N.PeakRoll, N.Bankroll);
@@ -2013,14 +2063,32 @@ void Sim::Broadcast(World& W, Npc& N, int Day, Rng& R)
 			Sim::Post(W, At, EventKind::StreamMilestone, N.Id, "followers", 0, M);
 		}
 	}
-	// Brands find the bigger channels.
+	// Brands find the bigger channels: one from the sponsors' catalog the channel's size reaches (§3.7), never a poker
+	// site (the site signs its ten through Team RiverLine), a card room or a corner shop, paying what the brand pays.
 	if (N.Sponsor.empty() && N.Followers >= 25000 && R.Chance(0.04))
 	{
-		const std::vector<kast::Sponsor>& Brands = kast::Sponsors();
-		if (!Brands.empty())
+		if (const sponsor::Brand* B = NpcBrand(N.Followers, R))
 		{
-			N.Sponsor = Brands[static_cast<size_t>(R.Int(static_cast<int>(Brands.size())))].Brand;
+			N.Sponsor = B->Name;
+			N.Income += sponsor::NpcWeekly(B->Id);
 			Sim::Post(W, At, EventKind::Sponsored, N.Id, N.Sponsor, 0, N.Followers);
+		}
+		else
+		{
+			// No catalog yet: Kast's stream sponsors, the site's own deal aside (§1.9 #21).
+			std::vector<const kast::Sponsor*> Brands;
+			for (const kast::Sponsor& S : kast::Sponsors())
+			{
+				if (S.Id != "riverline")
+				{
+					Brands.push_back(&S);
+				}
+			}
+			if (!Brands.empty())
+			{
+				N.Sponsor = Brands[static_cast<size_t>(R.Int(static_cast<int>(Brands.size())))]->Brand;
+				Sim::Post(W, At, EventKind::Sponsored, N.Id, N.Sponsor, 0, N.Followers);
+			}
 		}
 	}
 	// Some stop: no growth, bad results, burnout.
@@ -2343,9 +2411,10 @@ void Sim::TeamRiverLine(World& W, int Day)
 		{
 			if (!N.Playing())
 			{
+				// What signing added comes off again, exactly (the v2 migration lowered the older pros' to match).
 				N.Pro = false;
 				N.Sponsor.clear();
-				N.Income = std::max<Chips>(0, N.Income - sim::Cents(1500.0));
+				N.Income = std::max<Chips>(0, N.Income - TeamWeekly());
 			}
 		}
 		Pros += N.Pro ? 1 : 0;
@@ -2369,7 +2438,7 @@ void Sim::TeamRiverLine(World& W, int Day)
 		Npc& N = W.Roster[static_cast<size_t>(Best)];
 		N.Pro = true;
 		N.Sponsor = "Team RiverLine";
-		N.Income += sim::Cents(1500.0);
+		N.Income += TeamWeekly();
 		++Pros;
 		Sim::Post(W, static_cast<double>(Day) * 1440.0, EventKind::Sponsored, N.Id, "Team RiverLine", 0, 0);
 		W.Refresh(N.Id);
@@ -2498,7 +2567,7 @@ void Sim::TurnPro(World& W, Npc& N, int Day, Rng& R)
 		return;
 	}
 	N.Professional = true;
-	N.Income = N.Pro ? sim::Cents(1500.0) : 0;
+	N.Income = N.Pro ? TeamWeekly() : 0;
 	N.Living = sim::Cents(sim::Living[Tier] * R.Range(0.8, 1.3));
 	Post(W, static_cast<double>(Day) * 1440.0, EventKind::Milestone, N.Id, "turned-pro", N.Bankroll, Tier);
 }
@@ -2511,7 +2580,8 @@ void Sim::NewDay(World& W, int Day)
 		NewYear(W, Yr, Day);
 	}
 	const int Month = sim::MonthKey(Day);
-	if (Month != W.Month)
+	const bool Turned = Month != W.Month;
+	if (Turned)
 	{
 		W.Month = Month;
 		NewMonth(W, Day);
@@ -2520,6 +2590,21 @@ void Sim::NewDay(World& W, int Day)
 	{
 		W.Week = Day;
 		NewWeek(W, Day);
+	}
+	if (Turned)
+	{
+		// The 1st's Verified review, on the month's first morning (after a Monday's turn of the week).
+		Review(W, Day);
+	}
+	{
+		int Y = 0;
+		int M = 0;
+		int D = 0;
+		CivilDate(Day, Y, M, D);
+		if (M == 7 && D == 15)
+		{
+			HallOfFame(W, Day);
+		}
 	}
 	for (Npc& N : W.Roster)
 	{
@@ -2624,6 +2709,8 @@ void Sim::NewWeek(World& W, int Day)
 	Newcomers(W, Day, R);
 	RefreshField(W);
 	W.DiscoveredThisWeek = 0;
+	// The circuit's standings post on Mondays.
+	Standings(W, YearOf(Day), SeasonWeek(Day) >= badge::CardFromWeek);
 	W.RefreshAll();
 }
 
@@ -2698,6 +2785,8 @@ void Sim::NewYear(World& W, int Calendar, int Day)
 {
 	const int Last = Calendar - 1;
 	const double At = static_cast<double>(Day) * 1440.0 - 1.0;
+	// The circuit's final standings for the season just ended (its last week counts too).
+	Standings(W, Last, true);
 	// Players of the Year: the most points online and live (the player included).
 	int Best = -2;
 	double Top = 0.0;
@@ -2751,6 +2840,10 @@ void Sim::NewYear(World& W, int Calendar, int Day)
 	{
 		N.ThisSeason = Season();
 		N.ThisSeason.Year = Calendar;
+		// The card earned last season is good through this one; the new season's race starts at zero.
+		N.CardLast = N.CardBest;
+		N.CardBest = CardNone;
+		N.CircuitPoints = 0.0;
 		// Long retired, nothing much to remember them by: keep the name and the record, let the rest go.
 		const bool Remembered = N.Anchored || W.HeroBonds.count(N.Id) > 0 || N.CareerWon() >= sim::Cents(250000.0) || N.Bracelets + N.Rings + N.Majors + N.Titles > 0;
 		if (N.St == Status::Retired && !N.Faded && Day - N.Left > 365 && !Remembered)
@@ -2761,6 +2854,310 @@ void Sim::NewYear(World& W, int Calendar, int Day)
 	}
 	W.HeroPoints = 0.0;
 	W.HeroLivePoints = 0.0;
+	W.HeroCardPrev = W.HeroCardTop;
+	W.HeroCardTop = CardNone;
+	W.HeroCircuit = 0.0;
+}
+
+// ------------------------------------------------------------------ the badges' calendar (next_segment_spec §5.3)
+
+Chips Sim::TeamWeekly()
+{
+	const Chips Weekly = sponsor::NpcWeekly("riverline");
+	return Weekly > 0 ? Weekly : sim::Cents(1500.0);
+}
+
+void Sim::NoteRoom(RoomRecord& R, int Day, int Place, int FinalSize, Chips Prize, double Points)
+{
+	++R.Events;
+	R.Cashes += Prize > 0 ? 1 : 0;
+	R.FinalTables += Place >= 1 && Place <= FinalSize ? 1 : 0;
+	if (Place == 1)
+	{
+		++R.Wins;
+		R.LastWin = std::max(R.LastWin, Day);
+	}
+	// A visit is a day (a second event the same day isn't another), kept in order.
+	const auto At = std::lower_bound(R.Days.begin(), R.Days.end(), Day);
+	if (At == R.Days.end() || *At != Day)
+	{
+		R.Days.insert(At, Day);
+	}
+	const int Newest = R.Days.back();
+	R.Days.erase(R.Days.begin(), std::lower_bound(R.Days.begin(), R.Days.end(), Newest - RoomDaysKept + 1));
+	// The month's points (a result from last month, told late, goes to last month's).
+	const int Key = sim::MonthKey(Day);
+	if (Key > R.MonthKey)
+	{
+		R.LastMonthPoints = R.MonthKey == Key - 1 ? R.MonthPoints : 0.0;
+		R.MonthPoints = 0.0;
+		R.MonthKey = Key;
+	}
+	if (Key == R.MonthKey)
+	{
+		R.MonthPoints += Points;
+	}
+	else if (Key == R.MonthKey - 1)
+	{
+		R.LastMonthPoints += Points;
+	}
+}
+
+void Sim::Standings(World& W, int Year, bool Ranked)
+{
+	auto Tier = [](size_t Rank) { // 0-based
+		return Rank < static_cast<size_t>(badge::CardTop[2]) ? CardBlack : Rank < static_cast<size_t>(badge::CardTop[1]) ? CardGold : Rank < static_cast<size_t>(badge::CardTop[0]) ? CardRegular : CardNone;
+	};
+	if (Ranked)
+	{
+		std::vector<std::pair<double, int>> Board;
+		if (W.HeroCircuit > 0.0)
+		{
+			Board.push_back({W.HeroCircuit, -1});
+		}
+		for (const Npc& N : W.Roster)
+		{
+			if (!N.Faded && N.CircuitPoints > 0.0)
+			{
+				Board.push_back({N.CircuitPoints, N.Id});
+			}
+		}
+		std::sort(Board.begin(), Board.end(), [](const std::pair<double, int>& A, const std::pair<double, int>& B) { return A.first > B.first || (A.first == B.first && A.second < B.second); });
+		for (size_t K = 0; K < Board.size() && Tier(K) != CardNone; ++K)
+		{
+			int& Best = Board[K].second < 0 ? W.HeroCardTop : W.Roster[static_cast<size_t>(Board[K].second)].CardBest;
+			Best = std::max(Best, static_cast<int>(Tier(K)));
+		}
+	}
+	// A ring or a bracelet this season is worth at least a card (Gold for a Main Event's).
+	auto Titled = [&](const std::vector<Award>& Awards, int& Best) {
+		for (const Award& A : Awards)
+		{
+			if (YearOf(A.Day) == Year)
+			{
+				Best = std::max(Best, static_cast<int>(A.Main ? CardGold : CardRegular));
+			}
+		}
+	};
+	Titled(W.HeroTrophies, W.HeroCardTop);
+	for (Npc& N : W.Roster)
+	{
+		if (!N.Faded)
+		{
+			Titled(N.Awards, N.CardBest);
+		}
+	}
+}
+
+void Sim::Review(World& W, int Day)
+{
+	const int Key = sim::MonthKey(Day);
+	for (Npc& N : W.Roster)
+	{
+		N.Verified = !N.Faded && VerifiedRecord(N.Stats, N.Professional, Day - N.LastDay);
+		if (N.Verified)
+		{
+			N.ReviewMonth = Key;
+		}
+	}
+}
+
+void Sim::HallOfFame(World& W, int Day)
+{
+	const int Year = YearOf(Day);
+	std::vector<std::pair<double, int>> Class;
+	for (const Npc& N : W.Roster)
+	{
+		if (W.HallEligible(N.Id, Year))
+		{
+			const double Score = W.HallScore(N.Id, Year);
+			if (Score >= badge::HallBar)
+			{
+				Class.push_back({Score, N.Id});
+			}
+		}
+	}
+	if (W.HallEligible(-1, Year))
+	{
+		const double Score = W.HallScore(-1, Year);
+		if (Score >= badge::HallBar)
+		{
+			Class.push_back({Score, -1});
+		}
+	}
+	// The top two (ties by id: the player first).
+	std::sort(Class.begin(), Class.end(), [](const std::pair<double, int>& A, const std::pair<double, int>& B) { return A.first > B.first || (A.first == B.first && A.second < B.second); });
+	if (Class.size() > static_cast<size_t>(badge::HallClass))
+	{
+		Class.resize(static_cast<size_t>(badge::HallClass));
+	}
+	const double At = static_cast<double>(Day) * 1440.0; // (the day's turn, like the year's honors: the log stays in order)
+	for (const std::pair<double, int>& In : Class)
+	{
+		world::Honor H;
+		H.Year = Year;
+		H.Title = HallOfFameTitle;
+		H.Npc = In.second;
+		H.Name = In.second >= 0 ? W.Roster[static_cast<size_t>(In.second)].Name : W.HeroName;
+		H.Prize = In.second >= 0 ? W.Roster[static_cast<size_t>(In.second)].CareerWon() : W.HeroBook.Prizes;
+		H.Entries = static_cast<int>(std::lround(In.first));
+		H.At = At;
+		W.Titles.push_back(H);
+		if (In.second >= 0)
+		{
+			Npc& N = W.Roster[static_cast<size_t>(In.second)];
+			Post(W, At, EventKind::HallOfFame, N.Id, HallOfFameTitle, H.Prize, Year);
+			// The whole poker world hears about it.
+			AddFame(N, Rep::Live, 6.0);
+			Reputation(N);
+		}
+		else
+		{
+			++W.HeroRev;
+		}
+	}
+	if (!Class.empty())
+	{
+		++W.Rev;
+	}
+}
+
+void Sim::SeedRoomHistory(World& W, int Today)
+{
+	// The room's regulars and locals by their nights (live::RegularHabit), the cast and the rival by theirs (live::Habit):
+	// their own game seven nights in ten, a sometimes game about one in eight, by the name's own hash: about 21 visits in
+	// 90 days for a regular, what the world's own nights give them (§7.5 step 5's calibration; its one-in-four for a
+	// sometimes game gave 29, since a Nightly regular's off nights are all sometimes nights). Dee's regulars are at her
+	// table on her nights. Nights without results: nobody is on the wall for them (Wins stay 0; the wall only ever shows
+	// what was played).
+	std::vector<int> Who = W.EmbercrestRegulars();
+	for (const Npc& N : W.Roster)
+	{
+		if (N.From == Origin::Local || N.From == Origin::Cast || N.Rival)
+		{
+			Who.push_back(N.Id);
+		}
+	}
+	std::sort(Who.begin(), Who.end());
+	Who.erase(std::unique(Who.begin(), Who.end()), Who.end());
+	Who.erase(std::remove_if(Who.begin(), Who.end(), [&](int Id) { const Npc& N = W.Roster[static_cast<size_t>(Id)]; return N.Faded || N.Room.Events > 0; }), Who.end());
+	const int Walk = 120;
+	for (int D = Today - Walk; D < Today; ++D)
+	{
+		const std::vector<live::Occurrence> Day = live::Occurrences(D);
+		const int Wd = net::Weekday(D);
+		const std::string Dees = "dees@" + std::to_string(D);
+		for (int Id : Who)
+		{
+			Npc& N = W.Roster[static_cast<size_t>(Id)];
+			const bool Habits = N.From == Origin::Cast || N.Rival;
+			if (Habits && (Wd == 1 || Wd == 3 || Wd == 5) && Regular(N, Dees))
+			{
+				continue;
+			}
+			for (const live::Occurrence& O : Day)
+			{
+				const int H = Habits ? live::Habit(N.Name, O) : live::RegularHabit(N.Name, O);
+				const uint32_t Roll = live::FaceHash(N.Name + O.Id) % 100u;
+				if ((H >= 2 && Roll < 70u) || (H == 1 && Roll < 12u))
+				{
+					++N.Room.Events;
+					N.Room.Days.push_back(D);
+					break; // one of the room's events a day
+				}
+			}
+		}
+	}
+}
+
+void Sim::SeedChampions(World& W)
+{
+	// The founding regulars who travel won their share of the calendar's titles before the story began (2014 to 2025):
+	// rings on the Grand Circuit, bracelets at the Championship (never its Main Event). Their own odds by how far they
+	// travel and how well they play, from their own dice (the world's never move), so the frames and the badges read on
+	// the first night: about one in thirty of the regulars holds one, as the world does years on.
+	const int StartYear = YearOf(sim::DayAt(W.StartedAt()));
+	std::map<int, std::vector<LiveEvent>> Years;
+	auto EventsOf = [&](int Year) -> const std::vector<LiveEvent>& {
+		auto It = Years.find(Year);
+		if (It == Years.end())
+		{
+			It = Years.emplace(Year, sim::TitleEvents(Year)).first;
+		}
+		return It->second;
+	};
+	for (Npc& N : W.Roster)
+	{
+		Ledger& Lv = N.Totals[static_cast<size_t>(Venue::Live)];
+		if (N.From != Origin::Founding || N.Rival || N.Faded || N.Live < LiveLevel::Regional || Lv.Events < 10 ||
+			std::any_of(N.Awards.begin(), N.Awards.end(), [&](const Award& A) { return YearOf(A.Day) < StartYear; }))
+		{
+			continue;
+		}
+		Rng R("world/" + std::to_string(W.Seed()) + "/titles/" + N.Name);
+		const double Form = sim::Clamp(std::exp((static_cast<double>(N.Overall()) - 0.55) * 7.0), 0.25, 4.0);
+		const bool Travels = N.Live >= LiveLevel::Circuit;
+		const double Odds[2] = {(Travels ? 0.03 : 0.007) * Form, (Travels ? 0.018 : 0.004) * Form}; // a ring, a bracelet, a year
+		const LiveLevel Reach = N.Live >= LiveLevel::HighRoller ? LiveLevel::HighRoller : LiveLevel::Championship;
+		Chips BestBefore = std::max({N.Totals[0].Best, N.Totals[1].Best, N.Totals[2].Best});
+		bool Titled = false;
+		for (int Year = std::max(StartYear - 12, YearOf(N.Joined)); Year < StartYear; ++Year)
+		{
+			for (int Kind = 0; Kind < 2; ++Kind)
+			{
+				if (!R.Chance(Odds[Kind]))
+				{
+					continue;
+				}
+				std::vector<const LiveEvent*> Pool;
+				for (const LiveEvent& E : EventsOf(Year))
+				{
+					// (On the scene by then; never a satellite.)
+					if ((Kind == 0 ? E.Ring : E.Bracelet) && E.Level <= Reach && E.Ticket.empty() && sim::DayAt(E.Start) >= N.Joined)
+					{
+						Pool.push_back(&E);
+					}
+				}
+				if (Pool.empty())
+				{
+					continue;
+				}
+				// The event as the world plays it (its crowd, its pool, whether it's a major) and the winner's share of it,
+				// the way Resolve pays one.
+				const Pending P = LiveEventOf(W, *Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))]);
+				const Chips PrizePool = Has(P.Kinds, KindBounty) ? P.Pool / 2 : P.Pool;
+				const std::vector<Chips> Pay = PayoutTable(PrizePool, P.Entries, std::max<Chips>(1, P.BuyIn * 3 / 2));
+				const Chips Prize = Pay.empty() ? PrizePool / 5 : Pay.front();
+				const Award A = AwardOf(P, sim::DayAt(P.Start), Prize);
+				N.Awards.push_back(A);
+				(A.Ring ? N.Rings : N.Bracelets) += 1;
+				N.Majors += P.Major ? 1 : 0;
+				// The live record holds the win and its money, so the trophy and the career agree.
+				++Lv.Events;
+				++Lv.Wins;
+				++Lv.FinalTables;
+				++Lv.Cashes;
+				Lv.Spent += P.BuyIn;
+				Lv.Won += Prize;
+				Lv.Best = std::max(Lv.Best, Prize);
+				if (Prize > BestBefore)
+				{
+					BestBefore = Prize;
+					N.BestEvent = A.Event;
+					N.BestDay = A.Day;
+				}
+				Titled = true;
+			}
+		}
+		if (Titled)
+		{
+			std::stable_sort(N.Awards.begin(), N.Awards.end(), [](const Award& A, const Award& B) { return A.Day < B.Day; });
+			// Their stats page, drawn again from the lifetime numbers that now hold the titles (as a save from before the
+			// stats pages draws it): the page, the record and the trophy case tell one story.
+			N.Stats = Tracker();
+			SeedStats(N);
+		}
+	}
 }
 } // namespace world
 } // namespace ss

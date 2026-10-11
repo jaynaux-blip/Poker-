@@ -1,4 +1,5 @@
 #include "ShortStack/UI/StreamArt.h"
+#include "ShortStack/UI/SponsorArt.h"
 
 #include <algorithm>
 #include <cmath>
@@ -971,6 +972,14 @@ void Facecam(Canvas& C, const Rect& R, const Cam& L)
 	// Shoulders.
 	C.FillEllipse(Cx, R.Y + H * 1.05f + Breath, R.W * 0.3f, H * 0.36f, Paint::Linear({Cx, R.Y + H * 0.7f}, {Cx, R.Y + H}, Mix(Hoodie, Hex(0xffffff), 0.08f), Hoodie));
 	C.FillPolygon({{Cx - R.W * 0.05f, R.Y + H * 0.7f}, {Cx + R.W * 0.05f, R.Y + H * 0.7f}, {Cx, R.Y + H * 0.82f}}, Mix(Hoodie, Hex(0x000000), 0.3f));
+	// A sponsor's chest patch, on the left of the chest (the viewer's right), in the room's light.
+	if (!L.Patch.empty())
+	{
+		const Rect P{Cx + R.W * 0.085f, R.Y + H * 0.84f + Breath, R.W * 0.07f, H * 0.085f};
+		C.FillRoundRect({P.X - P.W * 0.12f, P.Y - P.H * 0.12f, P.W * 1.24f, P.H * 1.24f}, P.H * 0.3f, Mix(Hoodie, Hex(0x000000), 0.35f));
+		ui::sponsorart::Mark(C, L.Patch, P);
+		C.FillRoundRect({P.X - P.W * 0.12f, P.Y - P.H * 0.12f, P.W * 1.24f, P.H * 1.24f}, P.H * 0.3f, Rgba(0, 0, 0, (1.0f - Light) * 0.45f));
+	}
 	// Arms up: the celebration, the hands on the head.
 	const bool Arms = (L.Face == kast::Mood::Hyped && L.FaceAge < 3.0) || (L.Face == kast::Mood::Shocked && L.FaceAge < 2.5);
 	const float HeadY = R.Y + H * 0.45f + Breath + Lift;

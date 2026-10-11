@@ -325,11 +325,20 @@ int Run()
 				Expect(Same(Session, Desk), "room field: the session's and the desk's old paths agree for " + O.Id);
 				Expect(Same(Session, Core), "room field: DescribeField gives the session's notes for " + O.Id);
 				Expect(Same(Desk, Core), "room field: DescribeField gives the desk's notes for " + O.Id);
-				// And Apply puts them on an entry as the session did.
+				// And Apply puts them on an entry as the session did, with the features' notes exactly as DescribeField gave
+				// them (voices, badges, patches, the month's leaders: empty while those were stubs).
 				life::LiveEntry E;
 				live::Apply(Core, E);
-				Expect(SameFaces(E.Faces, Session.Faces) && E.Board == Session.Board && E.Voices.empty() && E.Badges.empty() && E.Patches.empty() && E.Leaders.empty(),
-					"room field: Apply writes the faces and the board (and, with no feature's notes yet, nothing else) for " + O.Id);
+				bool Copied = E.Voices.size() == Core.Voices.size() && E.Badges == Core.Badges && E.Patches == Core.Patches && E.Leaders.size() == Core.Leaders.size();
+				for (size_t K = 0; Copied && K < E.Voices.size(); ++K)
+				{
+					Copied = E.Voices[K].Name == Core.Voices[K].Name && E.Voices[K].Style == Core.Voices[K].Style;
+				}
+				for (size_t K = 0; Copied && K < E.Leaders.size(); ++K)
+				{
+					Copied = E.Leaders[K].Rank == Core.Leaders[K].Rank && E.Leaders[K].Name == Core.Leaders[K].Name && E.Leaders[K].Badge == Core.Leaders[K].Badge;
+				}
+				Expect(SameFaces(E.Faces, Session.Faces) && E.Board == Session.Board && Copied, "room field: Apply writes the faces, the board and the features' notes for " + O.Id);
 				++Events;
 				Faces += static_cast<int>(Core.Faces.size());
 				Rows += static_cast<int>(Core.Board.size());

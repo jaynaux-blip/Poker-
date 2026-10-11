@@ -16,6 +16,14 @@ class ABackRoomPlayer;
 class FBackRoomAmbience;
 class UNightOneAudio;
 
+namespace ss
+{
+namespace room
+{
+struct HandNote;
+}
+}
+
 /** One line of table talk, for the subtitles (or a read: what your eye caught, whispered). */
 struct FBackRoomLine
 {
@@ -207,6 +215,24 @@ public:
 	ss::Tournament* GetTournament() const { return Tourney.Get(); }
 	/** The tournament's events since the last call (busts, levels, moves, the bubble, the final table). */
 	TArray<ss::TEvent> TakeEvents();
+	/**
+	 * The engine's rounds at every table since the last call (ss::Tournament::Rounds, after each hand here is finished
+	 * with the room's): pots, all-ins and calls, who went out. The room's director hears the other tables from them
+	 * (next_segment_spec 4.11). Reading them changes nothing.
+	 */
+	std::vector<ss::TableRound> TakeRounds();
+	/** What the host saw of the hand that just ended at this table (ss::room::HandNote), once; false when there's none new. */
+	bool TakeHandNote(ss::room::HandNote& Out);
+	/** The dealer says Line (it's captioned already): the host renders the speech without editing the table (ue-room). */
+	TFunction<void(const FString& Line)> OnDealerLine;
+	/**
+	 * The card room's own sound in place of the table's mono bed (ue-room's FCardRoomSound): StartRoomTone calls it once,
+	 * with the table's audio, instead of starting FCardRoomAmbience. Set before Begin; unset, the room sounds as it does.
+	 * Dee's game keeps its own (FBackRoomAmbience) either way.
+	 */
+	TFunction<void(UNightOneAudio& Audio)> AmbienceSource;
+	/** Testing (ss.Live.Shove): the next opponent to act while the hero is still in the hand moves all in. */
+	void TestShoveNext() { bTestShove = true; }
 	/** The host's cast: a body for a tournament player taking physical seat TableSeat at the hero's table. */
 	TFunction<ABackRoomPlayer*(const ss::TPlayer&, int32)> OnSeatPlayer;
 	/** A player leaves the hero's table (Busted: out of the tournament; else moved to another table). */
@@ -403,4 +429,17 @@ private:
 	TArray<FSighting> Sightings;
 	void ConfirmSightings(const ABackRoomPlayer* Shown);
 	void Whisper(const FString& Text);
+
+	// The next segment's hooks (next_segment_spec 4.11).
+	std::vector<ss::TableRound> Rounds;
+	TSharedPtr<ss::room::HandNote> HandNoteReady;
+	/** The hand ending now, as the room saw it, for TakeHandNote. */
+	void NoteHand(bool bShowdown, int64 PotSize);
+	/** The room's name for a hand seat's player (the tournament's name; Dee's game: the seat's id; the hero: ss::HeroId). */
+	std::string NameOfSeat(const ss::HandSeat& HS) const;
+	/** When the hero's turn last opened, and how long their last decision took (seconds, the table's clock). */
+	float HeroTurnAt = 0.0f;
+	float HeroThink = 0.0f;
+	bool bAmbienceInjected = false;
+	bool bTestShove = false;
 };

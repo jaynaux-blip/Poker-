@@ -2,6 +2,8 @@
 
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "SponsorCopy.h"
 
 #include <algorithm>
 #include <cmath>
@@ -417,41 +419,48 @@ int ViewersNow(const Streamer& S, double World)
 	return 0;
 }
 
+namespace kast_sponsor_detail
+{
+/** The stream's view of a sponsor catalog brand: its name on the overlay, its read, its gate, its rates. */
+Sponsor ViewOf(const sponsor::Brand& B)
+{
+	Sponsor S;
+	S.Id = B.Id;
+	S.Brand = B.Kast.empty() ? B.Short : B.Kast;
+	S.Product = B.Product;
+	// The offer letter's first wording, without the line about why they're calling (offers come by Mail now).
+	std::string Pitch = sponsor::sponsor_copy::Text(sponsor::sponsor_copy::Body, B.Pitch.empty() ? std::string() : B.Pitch.front());
+	const size_t Why = Pitch.find("{Why} ");
+	if (Why != std::string::npos)
+	{
+		Pitch.erase(Why, 6);
+	}
+	S.Pitch = Pitch;
+	S.ReadLine = B.ReadLine;
+	S.Color = B.Color;
+	S.Followers = B.Needs.Followers;
+	S.AvgViewers = B.Needs.AvgViewers;
+	S.NeedsPartner = B.Needs.Partner;
+	S.PerHourCents = B.Offer.PerLiveHourCents;
+	S.ReadCents = B.Offer.PerReadCents;
+	S.Days = B.Offer.Days;
+	return S;
+}
+} // namespace kast_sponsor_detail
+
 const std::vector<Sponsor>& Sponsors()
 {
+	// The five Kast has carried from the start, filtered from the sponsor catalog in its order (§3.8: the ids are in old
+	// saves, and the world's streamers draw from exactly these until the world reads the catalog by tier).
 	static const std::vector<Sponsor> L = [] {
 		std::vector<Sponsor> V;
-		auto Add = [&](const char* Id, const char* Brand, const char* Product, const char* Pitch, const char* Read, uint32_t Color, int Followers, int Avg, bool Partner, double PerHour, double ReadPay, int Days) {
-			Sponsor S;
-			S.Id = Id;
-			S.Brand = Brand;
-			S.Product = Product;
-			S.Pitch = Pitch;
-			S.ReadLine = Read;
-			S.Color = Color;
-			S.Followers = Followers;
-			S.AvgViewers = Avg;
-			S.NeedsPartner = Partner;
-			S.PerHourCents = static_cast<Chips>(PerHour * 100.0 + 0.5);
-			S.ReadCents = static_cast<Chips>(ReadPay * 100.0 + 0.5);
-			S.Days = Days;
-			V.push_back(S);
-		};
-		Add("overclock", "Overclock", "Overclock Energy, zero sugar",
-			"Hey! We love the late-night grind energy. $3 for every hour you're live with a can on the desk, plus $10 a read. 30 days.",
-			"This hand is brought to you by Overclock Energy. Zero sugar, all-night focus. Code GRIND in the panels.", 0x84cc16, 300, 15, false, 3.0, 10.0, 30);
-		Add("tunnelrat", "TunnelRat VPN", "TunnelRat VPN",
-			"Your chat trusts you. $6 an hour live and $25 a read to tell them about TunnelRat. 30 days.",
-			"Quick one: TunnelRat VPN keeps your connection private wherever you play. Link below, first month free.", 0x38bdf8, 1000, 30, false, 6.0, 25.0, 30);
-		Add("stacked", "Stacked Apparel", "Stacked hoodies and caps",
-			"We'd love to see you grind in Stacked. $10 an hour live, $40 a read, and a box of merch. 30 days.",
-			"Hoodie's from Stacked Apparel. Built for twelve-hour sessions. Code in the panels for 20% off.", 0xf59e0b, 2500, 60, false, 10.0, 40.0, 30);
-		Add("riverline", "RiverLine", "Team RiverLine streamer contract",
-			"You've built something. RiverLine would like you on Team RiverLine: $25 an hour streaming RiverLine, $60 a read, and the Team patch on your avatar. 30 days.",
-			"Everything you see tonight is on RiverLine. New players: the welcome freeroll is in my panels. Team RiverLine!", 0x27d3c3, 2500, 75, true, 25.0, 60.0, 30);
-		Add("sitwell", "Sitwell", "Sitwell Pro gaming chair",
-			"Ten thousand followers sit with you every night. Sitwell would like to be the chair. $35 an hour, $90 a read. 30 days.",
-			"Twelve hours in and my back is fine. That's the Sitwell Pro. Link's below.", 0xfb923c, 10000, 300, true, 35.0, 90.0, 30);
+		for (const sponsor::Brand& B : sponsor::Brands())
+		{
+			if (B.Legacy)
+			{
+				V.push_back(kast_sponsor_detail::ViewOf(B));
+			}
+		}
 		return V;
 	}();
 	return L;
@@ -459,7 +468,19 @@ const std::vector<Sponsor>& Sponsors()
 
 const Sponsor* FindSponsor(const std::string& Id)
 {
-	for (const Sponsor& S : Sponsors())
+	// Any brand that pays on stream (the legacy five, Halo, and whatever the catalog adds).
+	static const std::vector<Sponsor> All = [] {
+		std::vector<Sponsor> V;
+		for (const sponsor::Brand& B : sponsor::Brands())
+		{
+			if (B.Offer.PerLiveHourCents > 0 || B.Offer.PerReadCents > 0)
+			{
+				V.push_back(kast_sponsor_detail::ViewOf(B));
+			}
+		}
+		return V;
+	}();
+	for (const Sponsor& S : All)
 	{
 		if (S.Id == Id)
 		{
@@ -969,8 +990,7 @@ void Offline(Channel& Ch, double World, Rng& R)
 			}
 		}
 	}
-	// Deals run out.
-	Ch.Deals.erase(std::remove_if(Ch.Deals.begin(), Ch.Deals.end(), [&](const Deal& D) { return D.Until <= World; }), Ch.Deals.end());
+	// (Deals run out in the sponsor book now: Kast works on its view, next_segment_spec §3.8.)
 }
 
 // ------------------------------------------------------------------ stream
@@ -1538,26 +1558,7 @@ void Stream::CheckGrowth(Channel& Ch, const Inputs& In)
 			}
 		}
 	}
-	for (const Sponsor& S : Sponsors())
-	{
-		if (Ch.Followers >= S.Followers && Avg >= static_cast<double>(S.AvgViewers) && (!S.NeedsPartner || Ch.Partner) && !Ch.Offers.count(S.Id) && !Ch.Declined.count(S.Id) && !Ch.ActiveDeal(S.Id, In.World))
-		{
-			bool Had = false;
-			for (const Deal& D : Ch.Deals)
-			{
-				Had = Had || D.Id == S.Id;
-			}
-			if (!Had)
-			{
-				Ch.Offers.insert(S.Id);
-				Notice N;
-				N.Type = Notice::Kind::Text;
-				N.From = S.Brand;
-				N.Body = S.Pitch + " (Kast > Channel to answer)";
-				Notices.push_back(N);
-			}
-		}
-	}
+	// (Sponsors find the channel through the sponsor book's weekly looks, and their offers come by Mail: §3.7, §3.9.)
 }
 
 void Stream::Start(Channel& Ch, const Inputs& In)
@@ -1914,13 +1915,15 @@ bool Stream::RunAd(Channel& Ch, const Inputs& In, int Seconds)
 
 Chips Stream::SponsorRead(Channel& Ch, const Inputs& In, const std::string& Id)
 {
+	// The deals are the sponsor book's (Inputs::Deals, its view): Kast works on its own copy, which the session hands back.
+	Deals = In.Deals;
 	if (!Live)
 	{
 		return 0;
 	}
-	for (Deal& D : Ch.Deals)
+	for (Deal& D : Deals)
 	{
-		if (D.Id == Id && D.Until > In.World && D.ReadAt < StartWorld)
+		if (D.Id == Id && D.Until > In.World && D.ReadAt < StartWorld && D.ReadCents > 0)
 		{
 			const Sponsor* S = FindSponsor(Id);
 			if (!S)
@@ -1928,8 +1931,8 @@ Chips Stream::SponsorRead(Channel& Ch, const Inputs& In, const std::string& Id)
 				return 0;
 			}
 			D.ReadAt = In.World;
-			D.EarnedCents += S->ReadCents;
-			Earn(Ch, S->ReadCents, 4);
+			D.EarnedCents += D.ReadCents;
+			Earn(Ch, D.ReadCents, 4);
 			Say(In, In.Hero, S->ReadLine, LineKind::Streamer, BadgeStreamer | (Ch.Partner ? BadgeVerified : 0), 0xc6f432);
 			static const std::vector<std::string> Reacts = {"ad read kastLUL", "sellout kastLUL", "get that bag", "rent money", "{brand}!!", "the read was smooth"};
 			for (int K = 0; K < std::min(3, 1 + static_cast<int>(Viewers / 3.0)); ++K)
@@ -1941,7 +1944,7 @@ Chips Stream::SponsorRead(Channel& Ch, const Inputs& In, const std::string& Id)
 				Chat.back().At = In.Real + 0.6 + static_cast<double>(K) * 0.6;
 			}
 			Health = std::max(0.0, Health - 0.01);
-			return S->ReadCents;
+			return D.ReadCents;
 		}
 	}
 	return 0;
@@ -2430,12 +2433,13 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 	SponsorDebt += DWorld / 60.0;
 	if (SponsorDebt >= 0.1)
 	{
-		for (Deal& D : Ch.Deals)
+		// Hourly pay on the sponsor book's deals (Inputs::Deals), on Kast's own copy (the session hands it back).
+		Deals = In.Deals;
+		for (Deal& D : Deals)
 		{
-			const Sponsor* S = D.Until > In.World ? FindSponsor(D.Id) : nullptr;
-			if (S)
+			if (D.Until > In.World && D.PerHourCents > 0)
 			{
-				const Chips Cents2 = static_cast<Chips>(std::round(static_cast<double>(S->PerHourCents) * SponsorDebt));
+				const Chips Cents2 = static_cast<Chips>(std::round(static_cast<double>(D.PerHourCents) * SponsorDebt));
 				D.EarnedCents += Cents2;
 				Earn(Ch, Cents2, 4);
 			}

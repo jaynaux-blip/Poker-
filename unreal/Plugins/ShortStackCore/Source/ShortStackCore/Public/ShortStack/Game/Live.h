@@ -168,6 +168,9 @@ SHORTSTACKCORE_API const life::LiveEntry* ActiveEntry(const life::State& L);
  * Why the player can't register for O at World ("" when they can, or when they already have). F: who pays (§1.2). The
  * player's own money needs the buy-in and the bus there and back (less what pieces sold brought in, F.Cents); a backer,
  * a package or a sponsor pays the buy-in, so only the bus is needed, and nothing when the sponsor covers the fares too.
+ * Anyone else's money has to be on offer as F says now (stake::FundingOptions: same From, Ref and money terms, no why),
+ * or the clerk refuses it ("That stake's off. It's your own money tonight."): pass an option as it stands, not a copy
+ * kept from an earlier frame.
  */
 SHORTSTACKCORE_API std::string CanRegister(Chips Bankroll, const life::State& L, const Occurrence& O, double World, const life::Funding& F = {});
 /**

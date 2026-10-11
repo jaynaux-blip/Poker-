@@ -627,6 +627,54 @@ const life::LiveEntry* ActiveEntry(const life::State& L)
 	return nullptr;
 }
 
+namespace live_register_detail
+{
+/**
+ * Why F won't pay for O now ("" when it will). Someone else's money has to be one of the funding policy's options as
+ * they stand (stake::FundingOptions: the backer's stake, the sponsors' covers, the package's roll), the same source with
+ * the same money terms and nothing against it. The player's own money with pieces sold counts what the pieces bring in
+ * now, never more than the caller says (Sold).
+ */
+std::string NotOnOffer(const life::State& L, const Occurrence& O, double World, const life::Funding& F, Chips& Sold)
+{
+	const std::vector<std::pair<life::Funding, std::string>> Options = stake::FundingOptions(L, O, World);
+	if (F.From == life::Paid::Own)
+	{
+		// The last option is always the player's own money, with what the pieces sold on it bring in.
+		Sold = Options.empty() ? 0 : std::min(F.Cents, Options.back().first.Cents);
+		return std::string();
+	}
+	for (const std::pair<life::Funding, std::string>& Option : Options)
+	{
+		const life::Funding& X = Option.first;
+		if (X.From != F.From || X.Ref != F.Ref)
+		{
+			continue;
+		}
+		const bool Same = X.Cents == F.Cents && X.CutPct == F.CutPct && X.Fares == F.Fares;
+		if (Same && Option.second.empty())
+		{
+			return std::string();
+		}
+		// A cover's or a roll's reason is the desk's to give ("Team Embercrest's covered entries are used this month.");
+		// a backer's is said in his own voice, so the clerk only says the stake's off.
+		if (Same && F.From != life::Paid::Backer)
+		{
+			return Option.second;
+		}
+		break;
+	}
+	switch (F.From)
+	{
+	case life::Paid::Backer: return "That stake's off. It's your own money tonight.";
+	case life::Paid::Sponsor: return "That cover's off. It's your own money tonight.";
+	case life::Paid::Package: return "The roll isn't paying for this one. It's your own money tonight.";
+	default: break;
+	}
+	return "The desk doesn't take that ticket. It's your own money tonight.";
+}
+} // namespace live_register_detail
+
 std::string CanRegister(Chips Bankroll, const life::State& L, const Occurrence& O, double World, const life::Funding& F)
 {
 	if (!O.Valid())
@@ -653,10 +701,22 @@ std::string CanRegister(Chips Bankroll, const life::State& L, const Occurrence& 
 	{
 		return "The desk opens at " + net::TimeLabel(O.DeskOpens) + ".";
 	}
-	// The buy-in and the bus there and back. The player's own money pays the buy-in (less what pieces sold brought in);
-	// anyone else's pays it for them; a sponsor covering the fares pays the bus too (§1.2).
+	// Someone else's money only as it's on offer now (§1.2): a funding handed in from a screen drawn earlier (a stake
+	// called off, a cover used up, a roll that won't take this one, terms that moved) is refused at the desk with the
+	// clerk's line. Register would otherwise take the buy-in from a bankroll that can't cover it, or take a cover twice.
 	const bool Own = F.From == life::Paid::Own;
-	const Chips Need = (Own ? std::max<Chips>(0, O.T->BuyInCents - F.Cents) : 0) + (F.Fares ? 0 : 2 * BusFareCents);
+	Chips Sold = 0;
+	if (!Own || F.Cents > 0)
+	{
+		const std::string Gone = live_register_detail::NotOnOffer(L, O, World, F, Sold);
+		if (!Gone.empty())
+		{
+			return Gone;
+		}
+	}
+	// The buy-in and the bus there and back. The player's own money pays the buy-in (less what the pieces sold on it
+	// bring in, as the book has them now); anyone else's pays it for them; a sponsor covering the fares pays the bus too.
+	const Chips Need = (Own ? std::max<Chips>(0, O.T->BuyInCents - Sold) : 0) + (F.Fares && F.From == life::Paid::Sponsor ? 0 : 2 * BusFareCents);
 	if (Bankroll < Need)
 	{
 		return Own ? std::string("The ") + O.T->Short + " is " + Money(O.T->BuyInCents) + " and the bus." : "The bus up the ridge and back is " + Money(2 * BusFareCents) + ".";
@@ -686,6 +746,7 @@ std::string Register(Chips& Bankroll, life::State& L, const Occurrence& O, doubl
 	E.Entrants = std::max(2, Entrants);
 	E.Roster = Roster;
 	E.Fund = F;
+	E.Fund.Fares = F.Fares && F.From == life::Paid::Sponsor; // only a sponsor's cover pays the bus (PayFare reads it)
 	L.LiveEntries.push_back(E);
 	// Someone else's money first, one line before the buy-in (§1.2): a sponsor's cover, a backer's stake, or the one line
 	// for the pieces a listing on this event sold. Each feature writes its own line once, keyed by the entry, and nothing
@@ -1130,9 +1191,13 @@ void AfterParse(SaveData& D)
 	}
 	// An entry still in play from before the room kept voices: the roster's, the cast's own and the faces' (no story, so
 	// nobody claims a result). Finished entries are never touched; no livefund was the player's own money, which is right.
+	// Only a save from before the segment (no life\tlive record fields read): a later save's entry without voices was
+	// registered without any (no world at the desk) and writes back as it was; the room's director gives it
+	// VoicesFor's when it seats it.
+	const bool Before = (L.SegmentLinesRead & (life::SegLiveWins | life::SegLiveRecord | life::SegLiveLines)) == 0;
 	for (life::LiveEntry& E : L.LiveEntries)
 	{
-		if (E.State == life::LiveEntry::Registered && E.Voices.empty())
+		if (Before && E.State == life::LiveEntry::Registered && E.Voices.empty())
 		{
 			E.Voices = room::VoicesFor(E);
 		}

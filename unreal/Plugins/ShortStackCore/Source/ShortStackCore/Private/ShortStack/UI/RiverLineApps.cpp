@@ -8,6 +8,9 @@
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Stake.h"
+#include "ShortStack/UI/BadgeArt.h"
 
 #include <algorithm>
 #include <cmath>
@@ -39,6 +42,7 @@ AppBrand BrandOf(RiverLine::App A)
 	case RiverLine::App::GearDrop: return {"GearDrop", 0xff6b2c, 0xf43f5e};
 	case RiverLine::App::Kast: return {"Kast", 0xb07cff, 0x6d28d9};
 	case RiverLine::App::PennyDrop: return {"Penny Drop", 0xe23a4f, 0xa3122a};
+	case RiverLine::App::Mail: return {"Mail", 0x2f5d9e, 0x1f2a3a};
 	default: return {"RiverLine", 0x27d3c3, 0x1a8fd8};
 	}
 }
@@ -67,10 +71,14 @@ Color KindColor(int Kind)
 	case 7: return Hex(0x60a5fa);
 	case 8: return Hex(0xe23b4e);
 	case 9: return Hex(0xec4899);
+	case life::LedgerBacking: return Hex(0xf2a93b);  // Lantern Row's lantern
+	case life::LedgerSponsors: return Hex(0x2f5d9e); // Mail's navy: the brands write there
+	case life::LedgerCoaching: return Hex(0x0891b2);
 	default: return Hex(0xf2c14e);
 	}
 }
 
+/** The ledger's kinds as the Bank names them (life::LedgerEntry::Kind; next_segment_spec §1.2): each one, so none reads "Prizes". */
 const char* KindName(int Kind)
 {
 	switch (Kind)
@@ -84,6 +92,9 @@ const char* KindName(int Kind)
 	case 7: return "Transfer";
 	case 8: return "Corner store";
 	case 9: return "Northside"; // the shops on the block (the barber, the thrift, the gym, Ruby's, the pawn)
+	case life::LedgerBacking: return "Backing";   // stakes, pieces, swaps and their shares
+	case life::LedgerSponsors: return "Sponsors"; // covers, stipends, cuts and bonuses
+	case life::LedgerCoaching: return "Coaching";
 	default: return "Prizes";
 	}
 }
@@ -92,6 +103,9 @@ const char* KindName(int Kind)
 const size_t LedgerKept = 60;
 /** The Embercrest's ember, for its lines in the Bank. */
 const uint32_t EmberRgb = 0xff6a24;
+/** The Bank's money in / money out rows: the first row's top in the card, and the pitch (nine In rows fit its 360). */
+const float BankRowTop = 118.0f;
+const float BankRowPitch = 26.0f;
 
 /** A ledger line from the Embercrest (a live buy-in, fee, prize or refund): its label starts with the event's name. */
 bool LiveLine(const life::State& L, const std::string& Label)
@@ -104,6 +118,136 @@ bool LiveLine(const life::State& L, const std::string& Label)
 		}
 	}
 	return false;
+}
+
+/** Letters in the shared inbox the player hasn't opened (the Mail app marks a thread's letters read when it opens it). */
+int UnreadLetters(const life::State& L)
+{
+	int N = 0;
+	for (const life::Letter& Lt : L.Inbox)
+	{
+		N += Lt.Read ? 0 : 1;
+	}
+	return N;
+}
+
+/** A brand waiting on an answer: an offer (or a countered one) still standing at World. */
+bool SponsorWaiting(const sponsor::Book& B, double World)
+{
+	for (const sponsor::Contract& K : B.Contracts)
+	{
+		if ((K.St == sponsor::State::Offered || K.St == sponsor::State::Countered) && K.ExpiresAt > World)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** Sam's side of the book, as the Burner shows it: his standing offer, his package while it runs, the debt a quit left. */
+struct SamBook
+{
+	const stake::Offer* Offer = nullptr;
+	const stake::Deal* Deal = nullptr;
+	Chips Debt = 0;
+};
+
+SamBook SamOf(const stake::Book& B, double World)
+{
+	SamBook Out;
+	for (const stake::Offer& O : B.Offers)
+	{
+		if (O.By == stake::Outfit::Sam && O.State == stake::OfferStanding && O.Expires > World)
+		{
+			Out.Offer = &O;
+		}
+	}
+	for (const stake::Deal& D : B.Deals)
+	{
+		if (D.By != stake::Outfit::Sam)
+		{
+			continue;
+		}
+		if (D.K == stake::Kind::Package && D.State == stake::DealOpen)
+		{
+			Out.Deal = &D;
+		}
+		Out.Debt += std::max<Chips>(0, D.Debt);
+	}
+	return Out;
+}
+
+/** The sponsor's store credit as the Bank's card shows it: its own pot, spent only at the counter and on Penny Drop. */
+struct BankCredit
+{
+	bool Shown = false; // credit on the books, or a running deal that grants it
+	Chips Cents = 0;
+	std::string From; // "Lucky Penny #212"
+	std::string Sub;  // "+$25 every week"
+};
+
+BankCredit CreditOf(const sponsor::Book& B, double World)
+{
+	BankCredit Out;
+	Out.Cents = B.StoreCreditCents;
+	for (const sponsor::Contract& K : B.Contracts)
+	{
+		if (!sponsor::Active(B, K.Brand, World))
+		{
+			continue;
+		}
+		for (const sponsor::Perk& P : K.T.Perks)
+		{
+			if (P.Kind == sponsor::Gift::StoreCredit && P.Cents > 0)
+			{
+				const sponsor::Brand* Br = sponsor::FindBrand(K.Brand);
+				Out.From = Br ? Br->Name : K.Brand;
+				Out.Sub = "+" + NetMoney(P.Cents) + (P.EveryDays == 7 ? std::string(" every week") : " every " + std::to_string(P.EveryDays) + " days") +
+					(K.CompsHalved ? " \xC2\xB7 half held for the cure" : std::string());
+			}
+		}
+	}
+	Out.Shown = Out.Cents > 0 || !Out.From.empty();
+	if (Out.From.empty())
+	{
+		// Credit left on the books after the deal: still good where it was given.
+		const sponsor::Brand* Penny = sponsor::FindBrand("luckypenny");
+		Out.From = Penny ? Penny->Name : std::string("The corner store");
+		Out.Sub = "Left on the books";
+	}
+	return Out;
+}
+
+/**
+ * One of the pots beside the balance (the staked roll, the store credit): white, with its colour down the side. Short
+ * (two stacked, 84 tall): the kicker and whose, the amount, a line. Tall (alone): the foot line too.
+ */
+void BankPot(Canvas& Cv, Ui& UI, const Rect& R, const std::string& Kicker, const std::string& From, const std::string& Big, const std::string& Sub, const Color& SubInk,
+	const Color& Accent, const std::string& Foot)
+{
+	const Color Dark = Hex(0x0f1d33);
+	const Color Gray = Hex(0x6b7a90);
+	const bool Tall = R.H >= 140.0f;
+	Cv.GlowRoundRect({R.X, R.Y + 6.0f, R.W, R.H}, 16.0f, Rgba(13, 37, 71, 0.1f), 14.0f);
+	UI.RRect(R, 16.0f, Hex(0xffffff), Hex(0xe2e8f0));
+	Cv.FillRoundRect({R.X, R.Y + 10.0f, 5.0f, R.H - 20.0f}, 2.5f, Accent);
+	const float X = R.X + 22.0f;
+	const float W = R.W - 40.0f;
+	const float Kw = NetSpaced(Cv, Kicker, X, R.Y + (Tall ? 34.0f : 24.0f), 10.5f, 900, Mix(Accent, Dark, 0.35f), 1.6f);
+	if (Tall)
+	{
+		UI.Text(From, X, R.Y + 58.0f, Ts(13.0f, 700, Dark, Align::Left, Baseline::Alphabetic, false, W));
+	}
+	else
+	{
+		UI.Text(From, X + W, R.Y + 24.0f, Ts(12.0f, 700, Gray, Align::Right, Baseline::Alphabetic, false, W - Kw - 14.0f));
+	}
+	UI.Text(Big, X, R.Y + (Tall ? 104.0f : 54.0f), Ts(Tall ? 34.0f : 24.0f, 900, Dark, Align::Left, Baseline::Alphabetic, true, W));
+	UI.Text(Sub, X, R.Y + (Tall ? 130.0f : 74.0f), Ts(12.5f, 700, SubInk, Align::Left, Baseline::Alphabetic, false, W));
+	if (Tall)
+	{
+		UI.Text(Foot, X, R.Y + R.H - 22.0f, Ts(12.0f, 500, Gray, Align::Left, Baseline::Alphabetic, false, W));
+	}
 }
 
 /** "LP" for Lucky Penny #212: the first letters of the first two words. */
@@ -244,7 +388,10 @@ void RiverLine::AppIcon(App A, float X, float Y, float Sz)
 		C->FillCircle(Cx + Sz * 0.1f, Cy, Sz * 0.08f, Hex(0x9a5b22));
 		break;
 	case App::Mail:
-		break; // the Mail app's icon lands with the app (core-sponsor; the taskbar is ui-laptop's)
+		// An envelope: the sheet and its flap.
+		C->FillRoundRect({Cx - Sz * 0.26f, Cy - Sz * 0.17f, Sz * 0.52f, Sz * 0.34f}, Sz * 0.04f, W);
+		C->StrokePolyline({{Cx - Sz * 0.24f, Cy - Sz * 0.14f}, {Cx, Cy + Sz * 0.04f}, {Cx + Sz * 0.24f, Cy - Sz * 0.14f}}, false, Hex(B.Col), Sz * 0.05f, true);
+		break;
 	}
 }
 
@@ -285,7 +432,7 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 	C->FillRect(R, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x0c1422), Hex(0x060a12)));
 	C->FillRect({R.X, R.Y, R.W, 1.0f}, Rgba(255, 255, 255, 0.08f));
 	const life::Context Ctx = S.LifeContext();
-	const App Apps[7] = {App::RiverLine, App::ShiftLink, App::Burner, App::Bank, App::GearDrop, App::Kast, App::PennyDrop};
+	const App Apps[8] = {App::RiverLine, App::ShiftLink, App::Burner, App::Bank, App::GearDrop, App::Kast, App::PennyDrop, App::Mail};
 	float X = R.X + 8.0f;
 	for (const App A : Apps)
 	{
@@ -361,12 +508,13 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 		}
 		if (A == App::Kast)
 		{
-			// Live: a pulsing red dot. A sponsor waiting: gold. Locked until the PC can stream: no dot, a padlock.
+			// Live: a pulsing red dot. A sponsor waiting on an answer (the offer's in Mail): gold. Locked until the PC can
+			// stream: no dot, a padlock.
 			if (S.Streaming())
 			{
 				Dot = NetA(pal::Red, 0.6f + 0.4f * Nf(std::sin(Now * 4.0)));
 			}
-			else if (!S.Channel.Offers.empty())
+			else if (SponsorWaiting(S.Life.Sponsors, World))
 			{
 				Dot = pal::Gold;
 			}
@@ -374,6 +522,11 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 			{
 				NetLockIcon(*C, Btn.X + 24.0f, Btn.Y - 1.0f, 10.0f, Hex(0xd8ccff));
 			}
+		}
+		if (A == App::Mail && UnreadLetters(S.Life) > 0)
+		{
+			// Unread mail: the envelope's own blue, brightened to read on the dark bar.
+			Dot = Hex(0x6fa8ff);
 		}
 		if (Dot.A > 0.0f)
 		{
@@ -627,17 +780,25 @@ void RiverLine::BurnerApp(double Now)
 	// Contacts.
 	C->FillRect({0.0f, 65.0f, 340.0f, AppH - 65.0f}, Hex(0x0a100c));
 	C->FillRect({340.0f, 65.0f, 1.0f, AppH - 65.0f}, Hex(0x1a2a1f));
-	const bool SamKnown = Ctx.Cashes > 0;
+	// Sam's package lives on the Burner (he never texts the phone, next_segment_spec §1.4): his lines, his standing offer,
+	// the deal while it runs, and the debt if the player quit in makeup.
+	const SamBook Sam = SamOf(L.Stakes, Ctx.World);
+	const bool SamKnown = Ctx.Cashes > 0 || !L.Stakes.Burner.empty();
 	struct Contact
 	{
 		const char* Name;
-		const char* Preview;
+		std::string Preview;
 		uint32_t Col;
 		bool Known;
 	};
+	const std::string SamPreview = !SamKnown ? std::string("No messages yet")
+		: Sam.Debt > 0                      ? "debt's " + NetMoney(Sam.Debt) + ". 25% til its paid"
+		: !L.Stakes.Burner.empty()          ? L.Stakes.Burner.back().second
+		: L.Bans > 0                        ? std::string("lay low for a day")
+											: std::string("i pay ppl to play my account");
 	const Contact Contacts[3] = {
 		{"Marcus", L.DebtCents > 0 ? "pay up before you get more work." : L.Runs >= 2 ? "got a bigger one when you're ready." : "I got work if you're not scared.", 0x2fd27a, true},
-		{"Sam", SamKnown ? (L.Bans > 0 ? "lay low for a day" : "i pay ppl to play my account") : "No messages yet", 0xf2c14e, SamKnown},
+		{"Sam", SamPreview, 0xf2c14e, SamKnown},
 		{"Dee", L.BackRoomNights == 0 ? "game's tonight. bring forty." : L.BackRoomNetCents > 0 ? "my regulars are talking about you." : "come back with a plan.", 0xf2a541, true},
 	};
 	for (int I = 0; I < 3; ++I)
@@ -661,7 +822,7 @@ void RiverLine::BurnerApp(double Now)
 		C->StrokeEllipse(R.X + 44.0f, R.Y + 42.0f, 22.0f, 22.0f, Contacts[I].Known ? Cc : Dim, 1.5f);
 		UI.Text(std::string(1, Contacts[I].Name[0]), R.X + 44.0f, R.Y + 43.0f, Ts(18.0f, 900, Contacts[I].Known ? Cc : Dim, Align::Center, Baseline::Middle));
 		UI.Text(Contacts[I].Name, R.X + 80.0f, R.Y + 36.0f, Ts(17.0f, 800, Contacts[I].Known ? Text : Dim));
-		UI.Text(Contacts[I].Preview, R.X + 80.0f, R.Y + 58.0f, Ts(13.0f, 500, Dim, Align::Left, Baseline::Alphabetic, false, 240.0f));
+		UI.Text(Contacts[I].Preview, R.X + 80.0f, R.Y + 58.0f, Ts(13.0f, 500, I == 1 && Sam.Debt > 0 ? Hex(0xff9aa5) : Dim, Align::Left, Baseline::Alphabetic, false, 240.0f));
 		if (!Contacts[I].Known)
 		{
 			NetLockIcon(*C, R.X + R.W - 34.0f, R.Y + 32.0f, 16.0f, Dim);
@@ -724,6 +885,11 @@ void RiverLine::BurnerApp(double Now)
 		{
 			Thread.push_back({false, "dude they flagged BOTH accounts"});
 			Thread.push_back({false, "lay low for a day"});
+		}
+		// His package: what he's said about it since, in order (the book keeps his last twenty lines).
+		for (const std::pair<double, std::string>& Line : L.Stakes.Burner)
+		{
+			Thread.push_back({false, Line.second});
 		}
 	}
 	else
@@ -944,6 +1110,61 @@ void RiverLine::BurnerApp(double Now)
 			TryActivity(A.Id, Now);
 		}
 	}
+	// Sam's package (next_segment_spec §2.7) beside his account work: the offer with its strings spelled out before you
+	// sign, the deal while it runs, or the debt a quit in makeup left. The Backing page has the same offer with a counter.
+	if (BurnerContact == 1 && (Sam.Offer || Sam.Deal || Sam.Debt > 0))
+	{
+		const Rect R{380.0f + Nf(Offers.size()) * 600.0f, OffersTop + 24.0f, 580.0f, 214.0f};
+		const Color Gold = Hex(0xf2c14e);
+		const bool Owing = !Sam.Offer && !Sam.Deal;
+		UI.RRect(R, 16.0f, Owing ? Hex(0x1f0c10) : Hex(0x15110a), Owing ? NetA(pal::Red, 0.6f) : NetA(Gold, 0.45f));
+		if (const stake::Offer* O = Sam.Offer)
+		{
+			UI.Text("His package", R.X + 26.0f, R.Y + 40.0f, Ts(20.0f, 800, Text));
+			UI.Text("stands " + net::Countdown(std::max(0.0, O->Expires - Ctx.World)), R.X + R.W - 26.0f, R.Y + 38.0f, Ts(12.5f, 600, Dim, Align::Right));
+			const float Ty = NetParagraph(*C, stake::TermsLine(*O), R.X + 26.0f, R.Y + 66.0f, R.W - 52.0f, 12.5f, 600, Text, 17.0f, 3);
+			// The string that matters, on its own line before he gets a yes (§2.7: spelled out before you sign).
+			NetParagraph(*C, "Quit in makeup and it's a debt: 25% of every cash and shift until it's paid.", R.X + 26.0f, Ty + 4.0f, R.W - 52.0f, 12.5f, 800, pal::Orange, 17.0f, 1);
+			const float Btn = R.Y + R.H - 62.0f;
+			// The id by value: answering changes the book's offers, and O points into them.
+			const std::string OfferId = O->Id;
+			if (AppButton("sam-accept", {R.X + 26.0f, Btn, 250.0f, 46.0f}, "Take it", Gold, Hex(0x1d1204), true))
+			{
+				const std::string Not = S.AcceptStake(OfferId);
+				Toast = Not;
+				ToastAt = Not.empty() ? -100.0 : Now;
+			}
+			else if (AppButton("sam-pass", {R.X + 290.0f, Btn, 264.0f, 46.0f}, "Leave him on read", Hex(0x2a2416), Text, true))
+			{
+				const std::string Not = stake::Decline(S.Life.Stakes, OfferId, Ctx.World);
+				S.Save();
+				Toast = Not;
+				ToastAt = Not.empty() ? -100.0 : Now;
+			}
+		}
+		else if (const stake::Deal* D = Sam.Deal)
+		{
+			const Chips Makeup = std::max<Chips>(0, D->Funded - D->RollNow);
+			UI.Text("His package", R.X + 26.0f, R.Y + 40.0f, Ts(20.0f, 800, Text));
+			UI.Text("Roll " + NetMoney(D->RollNow), R.X + R.W - 26.0f, R.Y + 42.0f, Ts(20.0f, 900, Gold, Align::Right, Baseline::Alphabetic, true));
+			UI.Text(stake::DealLine(*D), R.X + 26.0f, R.Y + 66.0f, Ts(13.0f, 600, Dim, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
+			// Makeup carries its sign (never colour alone).
+			UI.Text(Makeup > 0 ? "\xE2\x88\x92" + NetMoney(Makeup) + " makeup" : std::string("No makeup"), R.X + 26.0f, R.Y + 104.0f,
+				Ts(18.0f, 800, Makeup > 0 ? pal::Red : BurnerGreen, Align::Left, Baseline::Alphabetic, true));
+			UI.Text(Makeup > 0 ? std::string("Quit now and it's a debt: 25% of every cash and every shift until it's paid.") : std::string("Quit now and you owe him nothing."), R.X + 26.0f,
+				R.Y + 130.0f, Ts(12.5f, 700, Makeup > 0 ? pal::Orange : Dim, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
+			UI.Text("Chop " + net::DateLabel(net::DayOf(D->NextChop)) + " \xC2\xB7 no chops on request \xC2\xB7 the deal's on RiverLine's Backing page", R.X + 26.0f, R.Y + 186.0f,
+				Ts(12.0f, 600, Dim, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
+		}
+		else
+		{
+			// Quit in makeup: the debt, garnished from every cash and shift.
+			UI.Text("You owe Sam", R.X + 32.0f, R.Y + 50.0f, Ts(16.0f, 700, Hex(0xff9aa5)));
+			UI.Text(Money(Sam.Debt), R.X + 32.0f, R.Y + 104.0f, Ts(46.0f, 900, Hex(0xffffff), Align::Left, Baseline::Alphabetic, true));
+			NetParagraph(*C, "He takes 25% of every cash and every shift until it's paid. You walked out in makeup, and that was the deal.", R.X + 32.0f, R.Y + 140.0f, R.W - 64.0f,
+				13.5f, 500, Hex(0xff9aa5), 19.0f, 2);
+		}
+	}
 }
 
 // ------------------------------------------------------------------ the Embercrest's event cards
@@ -955,6 +1176,37 @@ std::vector<live::Occurrence> LiveAhead(const Session& S, double World, double H
 	std::vector<live::Occurrence> Out = live::Reachable(World, HoursAhead);
 	Out.erase(std::remove_if(Out.begin(), Out.end(), [&S](const live::Occurrence& O) { return S.Living().CancellationOf(O.Id) != nullptr; }), Out.end());
 	return Out;
+}
+
+bool LiveForSale(const Session& S, const std::string& OccurrenceId, double World)
+{
+	// The same walk as the Backing page's picks (RiverLineBacking.cpp), so the page opens on the event it was asked for.
+	int Picked = 0;
+	for (const live::Occurrence& O : live::Reachable(World, 6.0 * 24.0))
+	{
+		if (Picked >= 6)
+		{
+			break;
+		}
+		if (live::EntryFor(S.Life, O.Id) != nullptr)
+		{
+			continue;
+		}
+		// Someone else pays for it the way GoToLive would register it now (the first option that can): not the player's to
+		// sell. A deal listed with why it won't pay (a cover for other events, one used up) doesn't count, wherever it's listed.
+		const std::vector<std::pair<life::Funding, std::string>> Pay = stake::FundingOptions(S.Life, O, World);
+		const auto Payer = std::find_if(Pay.begin(), Pay.end(), [](const std::pair<life::Funding, std::string>& X) { return X.second.empty(); });
+		if (Payer != Pay.end() && Payer->first.From != life::Paid::Own)
+		{
+			continue;
+		}
+		if (O.Id == OccurrenceId)
+		{
+			return true;
+		}
+		++Picked;
+	}
+	return false;
 }
 
 LiveCard LiveCardOf(const Session& S, const live::Occurrence& O, double World, int PlannedField)
@@ -1044,6 +1296,43 @@ LiveCard LiveCardOf(const Session& S, const live::Occurrence& O, double World, i
 								: std::string("You're registered");
 	}
 
+	// Who pays (next_segment_spec §1.2): the entry's funding once it's registered; before then, the way GoToLive would
+	// register it right now (the first of Session::FundingOptions that can), and what that leaves the bankroll to find.
+	if (Card.Entry)
+	{
+		Card.Fund = Card.Entry->Fund;
+	}
+	else if (!Card.Cancelled && Card.Phase <= LiveCard::LateReg)
+	{
+		for (const std::pair<life::Funding, std::string>& Option : S.FundingOptions(O.Id))
+		{
+			if (Option.second.empty())
+			{
+				Card.Fund = Option.first;
+				break;
+			}
+		}
+		// The pieces on it, and whether more can go up for sale (the Backing page's own picks: the player's money, the
+		// next events the bus can make).
+		Card.Asked = stake::AskedOn(L.Stakes, O.Id);
+		Card.Filled = stake::FilledOn(L.Stakes, O.Id, World);
+		Card.Sellable = Card.Fund.From == life::Paid::Own && LiveForSale(S, O.Id, World);
+		// A sponsor's cover that takes it (it pays only if GoToLive picks it: a backer's stake comes first).
+		for (const std::pair<life::Funding, std::string>& Option : sponsor::CoverOptions(L.Sponsors, O, World))
+		{
+			const sponsor::Contract* K = Option.second.empty() ? sponsor::Find(L.Sponsors, Option.first.Ref) : nullptr;
+			if (K && Card.Cover.empty())
+			{
+				const sponsor::Brand* Br = sponsor::FindBrand(K->Brand);
+				const int Allowed = K->CompsHalved ? K->T.CoveredEntries / 2 : K->T.CoveredEntries;
+				Card.Cover = "Covered by " + (Br ? (Br->Short.empty() ? Br->Name : Br->Short) : K->Brand) + " \xC2\xB7 " + std::to_string(std::max(0, Allowed - K->Now.CoveredUsed)) + " of " +
+					std::to_string(Allowed) + " left";
+			}
+		}
+	}
+	Card.FundLine = live::FundingLine(Card.Fund, T.Short);
+	Card.Cost = LiveCostWith(O, Card.Fund);
+
 	// Why Session::GoToLive would turn it down right now (the same checks).
 	if (S.TimeSkip.Active)
 	{
@@ -1067,7 +1356,7 @@ LiveCard LiveCardOf(const Session& S, const live::Occurrence& O, double World, i
 	}
 	else if (!Card.Registered)
 	{
-		Card.Why = live::CanRegister(S.BankrollCents, L, O, World);
+		Card.Why = live::CanRegister(S.BankrollCents, L, O, World, Card.Fund);
 		const life::Activity* A = life::Find("embercrest");
 		if (Card.Why.empty() && A && L.Energy < A->Energy)
 		{
@@ -1097,11 +1386,13 @@ LiveCard LiveCardOf(const Session& S, const live::Occurrence& O, double World, i
 		return Card;
 	}
 	const Chips Have = S.BankrollCents;
-	const Chips Cost = LiveCost(O);
+	const Chips Cost = Card.Cost;
 	const Chips After = Have - Cost;
 	if (Have < Cost)
 	{
-		Warn("You're " + NetMoney(Cost - Have) + " short: the buy-in and the bus are " + NetMoney(Cost) + ".", 2);
+		const bool Own = Card.Fund.From == life::Paid::Own;
+		const std::string What = !Own ? "the bus is " : Card.Fund.Cents > 0 ? "your end of the buy-in and the bus are " : "the buy-in and the bus are ";
+		Warn("You're " + NetMoney(Cost - Have) + " short: " + What + NetMoney(Cost) + ".", 2);
 	}
 	// The landlord collects at the deadline if the money is there: a night before then spends the rent's money, and a
 	// night after it is paid from what the rent leaves.
@@ -1242,26 +1533,6 @@ std::string LiveFieldText(const LiveCard& Card)
 	return "usually " + std::to_string(Card.O.T->FieldLo) + " to " + std::to_string(Card.O.T->FieldHi);
 }
 
-/** "you know Sal and Rick", "you know Sal, Rick +3" ("" for nobody). */
-std::string LiveKnownText(const LiveCard& Card, size_t Names)
-{
-	if (Card.Known.empty())
-	{
-		return std::string();
-	}
-	std::string Out = "you know " + Card.Known.front().first;
-	const size_t Shown = std::min(Names, Card.Known.size());
-	for (size_t K = 1; K < Shown; ++K)
-	{
-		Out += (K + 1 == Card.Known.size() ? " and " : ", ") + Card.Known[K].first;
-	}
-	if (Card.Known.size() > Shown)
-	{
-		Out += " +" + std::to_string(Card.Known.size() - Shown);
-	}
-	return Out;
-}
-
 Color LiveWarningColor(int Severity, const Color& Note)
 {
 	return Severity >= 2 ? pal::Red : Severity == 1 ? pal::Orange : Note;
@@ -1295,11 +1566,45 @@ void RiverLine::LiveRow(const live::Occurrence& O, const Rect& R, const Color& T
 	UI.Text("Breaks " + LiveBreaks(T) + "  \xC2\xB7  late reg to " + net::TimeLabel(O.LateRegEnds) + "  \xC2\xB7  runs with " + std::to_string(T.MinEntrants) + "+  \xC2\xB7  deep run ~" +
 			LiveHours(Card.RunMinutes / 60.0),
 		Mx, R.Y + 61.0f, Ts(12.0f, 500, Faint, Align::Left, Baseline::Alphabetic, false, Full));
-	const std::string Known = LiveKnownText(Card, 2);
-	UI.Text("The 14 bus: " + NetMoney(live::BusFareCents) + ", 20 min each way  \xC2\xB7  " + LiveFieldText(Card) + (Known.empty() ? std::string() : "  \xC2\xB7  " + Known), Mx, R.Y + 78.0f,
-		Ts(12.0f, 600, Mix(Faint, Ink, 0.45f), Align::Left, Baseline::Alphabetic, false, Full));
-	// The most serious warning, or why it can't be entered right now.
-	if (!Card.Warnings.empty())
+	{
+		// The bus, the field, and the regulars down for it ("you know Sal and Rick +3"), each name with the one glyph the
+		// room would show by it (next_segment_spec §5.6: Room scope, 12 units).
+		const Color LineInk = Mix(Faint, Ink, 0.45f);
+		const TextStyle Style = Ts(12.0f, 600, LineInk);
+		const float End = Mx + Full;
+		float Lx = Mx + UI.Text("The 14 bus: " + NetMoney(live::BusFareCents) + ", 20 min each way  \xC2\xB7  " + LiveFieldText(Card), Mx, R.Y + 78.0f,
+			Ts(12.0f, 600, LineInk, Align::Left, Baseline::Alphabetic, false, Full));
+		if (!Card.Known.empty() && Lx + 120.0f < End)
+		{
+			Lx += UI.Text("  \xC2\xB7  you know ", Lx, R.Y + 78.0f, Style);
+			const world::World& W = S.Living();
+			const size_t Names = std::min<size_t>(2, Card.Known.size());
+			size_t Said = 0;
+			for (; Said < Names; ++Said)
+			{
+				const std::string Name = (Said == 0 ? std::string() : Said + 1 == Card.Known.size() ? std::string(" and ") : std::string(", ")) + Card.Known[Said].first;
+				const int Who = W.Find(Card.Known[Said].first);
+				const badge::Badge* B = Who >= 0 ? badge::Top(NetBadgesOf(S, Who), badge::Room, badge::FrameNone) : nullptr;
+				if (Said > 0 && Lx + UI.Measure(Name, 12.0f, 600) + (B ? 16.0f : 0.0f) > End - 28.0f)
+				{
+					break;
+				}
+				Lx += UI.Text(Name, Lx, R.Y + 78.0f, Ts(12.0f, 600, LineInk, Align::Left, Baseline::Alphabetic, false, std::max(10.0f, End - Lx)));
+				if (B && Lx + 16.0f <= End)
+				{
+					badgeart::Draw(*C, *B, Lx + 8.0f, R.Y + 73.5f, 12.0f, Now);
+					Lx += 16.0f;
+				}
+			}
+			if (Said < Card.Known.size() && Lx + 20.0f <= End)
+			{
+				UI.Text(" +" + std::to_string(Card.Known.size() - Said), Lx, R.Y + 78.0f, Style);
+			}
+		}
+	}
+	// The most serious warning, or why it can't be entered right now, or who's paying for it.
+	const std::string Paying = Card.Registered || (!Card.Entry && Card.Phase <= LiveCard::LateReg) ? LivePaying(Card) : std::string();
+	if (!Card.Warnings.empty() && (Card.Warnings.front().Severity >= 1 || Paying.empty()))
 	{
 		const LiveWarning& Wn = Card.Warnings.front();
 		UI.Text(Wn.Text, Mx, R.Y + 95.0f, Ts(12.0f, 700, LiveWarningColor(Wn.Severity, Mix(Faint, Ink, 0.45f)), Align::Left, Baseline::Alphabetic, false, Full));
@@ -1308,6 +1613,10 @@ void RiverLine::LiveRow(const live::Occurrence& O, const Rect& R, const Color& T
 	{
 		UI.Text(Card.Why, Mx, R.Y + 95.0f, Ts(12.0f, 600, Faint, Align::Left, Baseline::Alphabetic, false, Full));
 	}
+	else if (!Paying.empty())
+	{
+		UI.Text(Paying, Mx, R.Y + 95.0f, Ts(12.0f, 700, Tint, Align::Left, Baseline::Alphabetic, false, Full));
+	}
 	// Registering is the session's (the same as RiverLine's Embercrest page); an entry already played shows how it went.
 	if (Card.Entry && !Card.Registered)
 	{
@@ -1315,7 +1624,8 @@ void RiverLine::LiveRow(const live::Occurrence& O, const Rect& R, const Color& T
 		return;
 	}
 	const bool Ok = Card.Why.empty();
-	if (AppButton("live:" + O.Id, {Bx, R.Y + 8.0f, Bw, 38.0f}, Card.Registered ? std::string("Go back") : "Register " + NetMoney(T.BuyInCents), Tint, Hex(0x06101a), Ok, Ok ? std::string() : Card.Why))
+	const std::string Label = Card.Registered ? std::string("Go back") : Card.Fund.From == life::Paid::Own ? "Register " + NetMoney(T.BuyInCents) : LiveRegisterLabelOf(Card, live::BusFareCents).Text;
+	if (AppButton("live:" + O.Id, {Bx, R.Y + 8.0f, Bw, 38.0f}, Label, Tint, Hex(0x06101a), Ok, Ok ? std::string() : Card.Why))
 	{
 		GoToLive(O.Id, Now);
 	}
@@ -1348,8 +1658,16 @@ void RiverLine::BankApp(double Now)
 	UI.Text("Signed in as " + S.HeroName, NetW - 28.0f, 44.0f, Ts(14.0f, 600, Hex(0xc9d7ea), Align::Right));
 	const float In = NetEase((Now - AppAt) / 0.6);
 
+	// The pots that aren't the balance (next_segment_spec §1.2: never in the bankroll, never in Net, never the rent): a
+	// package's staked roll and a sponsor's store credit, each on its own small card beside the balance.
+	const stake::Deal* Package = stake::ActivePackage(L.Stakes);
+	const BankCredit Credit = CreditOf(L.Sponsors, World);
+	const int Pots = (Package ? 1 : 0) + (Credit.Shown ? 1 : 0);
+	const float PotW = 304.0f;
+	const float PotGap = 16.0f;
+
 	// Balance.
-	const Rect Bal{40.0f, 100.0f, 860.0f, 180.0f};
+	const Rect Bal{40.0f, 100.0f, Pots > 0 ? 860.0f - PotW - PotGap : 860.0f, 180.0f};
 	C->GlowRoundRect({Bal.X, Bal.Y + 8.0f, Bal.W, Bal.H}, 18.0f, Rgba(13, 37, 71, 0.25f), 20.0f);
 	C->FillRoundRect(Bal, 18.0f, Paint::Linear({Bal.X, Bal.Y}, {Bal.X + Bal.W, Bal.Y + Bal.H}, Hex(0x1d4ed8), Navy));
 	C->PushClip(Bal);
@@ -1358,6 +1676,26 @@ void RiverLine::BankApp(double Now)
 	NetSpaced(*C, "CHECKING \xC2\xB7\xC2\xB7\xC2\xB7 4471", Bal.X + 32.0f, Bal.Y + 42.0f, 12.0f, 800, Hex(0xbcd0f0), 2.0f);
 	UI.Text(Money(static_cast<Chips>(static_cast<double>(S.BankrollCents) * static_cast<double>(In))), Bal.X + 32.0f, Bal.Y + 112.0f, Ts(58.0f, 900, Hex(0xffffff), Align::Left, Baseline::Alphabetic, true));
 	UI.Text("Available balance \xC2\xB7 linked to RiverLine", Bal.X + 32.0f, Bal.Y + 146.0f, Ts(14.0f, 600, Hex(0xbcd0f0)));
+	if (Pots > 0)
+	{
+		const float PotH = Pots == 2 ? (Bal.H - 12.0f) / 2.0f : Bal.H;
+		float Py = Bal.Y;
+		if (Package)
+		{
+			const stake::Deal& D = *Package;
+			const Chips Makeup = stake::MakeupOf(L.Stakes);
+			// Makeup carries its sign (never colour alone): "−$680 makeup".
+			const std::string Sub = Makeup > 0 ? "\xE2\x88\x92" + NetMoney(Makeup) + " makeup \xC2\xB7 not a debt" : "No makeup \xC2\xB7 chop " + net::DateLabel(net::DayOf(D.NextChop));
+			BankPot(*C, UI, {Bal.X + Bal.W + PotGap, Py, PotW, PotH}, "STAKED ROLL", stake::BackerName(D), Money(D.RollNow), Sub, Makeup > 0 ? Hex(0xdc2626) : Gray, Hex(0xf2a93b),
+				"Theirs: it never pays the rent.");
+			Py += PotH + 12.0f;
+		}
+		if (Credit.Shown)
+		{
+			BankPot(*C, UI, {Bal.X + Bal.W + PotGap, Py, PotW, PotH}, "STORE CREDIT", Credit.From, Money(Credit.Cents), Credit.Sub, Gray, Hex(0x2f5d9e),
+				"At the counter and on Penny Drop. Never the rent.");
+		}
+	}
 
 	// Rent.
 	const Rect Rr{40.0f, 300.0f, 860.0f, 250.0f};
@@ -1506,21 +1844,36 @@ void RiverLine::BankApp(double Now)
 		Window = L.Ledger.size() >= LedgerKept ? "Your last " + std::to_string(LedgerKept) + " transactions, since " + When : "Everything since " + When;
 	}
 	UI.Text(Window, Flow.X + 32.0f, Flow.Y + 66.0f, Ts(12.5f, 600, Gray));
-	// In: 0 tournament cashes, 1 the Embercrest, 2 leaderboard prizes, 3 shifts, 4 cash work, 5 streaming, 6 Northside's
-	// sales and refunds (the pawn's cash, a loan).
+	// In: 0 tournament cashes, 1 the Embercrest, 2 leaderboard prizes, 3 shifts, 4 cash work, 5 streaming, 6 sponsors
+	// (covers, stipends and bonuses, less a cut or a clawback), 7 backers and buyers (a stake, the pieces sold), 8
+	// Northside's sales and refunds (the pawn's cash, a loan).
 	// Out: 0 buy-ins (less refunds), 1 rent, bills and fares, 2 food and deliveries, 3 gear, 4 fines and Marcus, 5 the
-	// shops on the block (cuts, clothes, the gym, Ruby's, the pawn).
-	Chips Ins[7] = {0, 0, 0, 0, 0, 0, 0};
-	Chips Outs[6] = {0, 0, 0, 0, 0, 0};
+	// shops on the block (cuts, clothes, the gym, Ruby's, the pawn), 6 backers' shares and swaps, 7 coaching.
+	Chips Ins[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+	Chips Outs[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 	for (const life::LedgerEntry& E : L.Ledger)
 	{
 		if (E.Kind == 7 || E.Amount == 0)
 		{
 			continue; // transfers (savings from home) are neither earned nor spent
 		}
+		if (E.Kind == life::LedgerSponsors)
+		{
+			Ins[6] += E.Amount; // netted: a cut or a clawback comes off what they paid (floored below)
+			continue;
+		}
+		if (E.Kind == life::LedgerCoaching)
+		{
+			Outs[7] -= E.Amount; // netted the same way: a refund comes off what it cost
+			continue;
+		}
 		if (E.Amount > 0)
 		{
-			if (E.Kind == 0 && E.Label.find(": refunded") != std::string::npos)
+			if (E.Kind == life::LedgerBacking)
+			{
+				Ins[7] += E.Amount;
+			}
+			else if (E.Kind == 0 && E.Label.find(": refunded") != std::string::npos)
 			{
 				Outs[0] -= E.Amount; // a refund takes its buy-in back off the spending
 			}
@@ -1546,7 +1899,7 @@ void RiverLine::BankApp(double Now)
 			}
 			else if (E.Kind == 9)
 			{
-				Ins[6] += E.Amount;
+				Ins[8] += E.Amount;
 			}
 			continue;
 		}
@@ -1562,20 +1915,23 @@ void RiverLine::BankApp(double Now)
 		case 5: Outs[3] += Spent; break;
 		case 2: Outs[4] += Spent; break;
 		case 9: Outs[5] += Spent; break; // the shops on the block
+		case life::LedgerBacking: Outs[6] += Spent; break; // a backer's share, a buyer's piece, a swap, a stake handed back
 		default: Outs[1] += Spent; break; // rent, the storage unit, the bus to the Embercrest
 		}
 	}
 	Outs[0] = std::max<Chips>(0, Outs[0]);
+	Ins[6] = std::max<Chips>(0, Ins[6]);
+	Outs[7] = std::max<Chips>(0, Outs[7]);
 	struct FlowRow
 	{
 		const char* Label;
 		Chips Amount;
 		uint32_t Col;
 	};
-	const FlowRow InRows[7] = {{"Tournament cashes", Ins[0], 0x27d3c3}, {"The Embercrest", Ins[1], EmberRgb}, {"Leaderboard prizes", Ins[2], 0xf2c14e}, {"Shifts", Ins[3], 0xff8a1f},
-		{"Cash work", Ins[4], 0x16a34a}, {"Streaming", Ins[5], 0x9b5cff}, {"Sales & refunds", Ins[6], 0xec4899}};
-	const FlowRow OutRows[6] = {{"Buy-ins & entry fees", Outs[0], 0x0d9488}, {"Rent, bills & fares", Outs[1], 0xef4d5a}, {"Food & deliveries", Outs[2], 0xe23b4e}, {"Gear", Outs[3], 0xff6b2c},
-		{"Fines & Marcus", Outs[4], 0x7c3aed}, {"Looks, fitness & food out", Outs[5], 0xdb2777}};
+	const FlowRow InRows[9] = {{"Tournament cashes", Ins[0], 0x27d3c3}, {"The Embercrest", Ins[1], EmberRgb}, {"Leaderboard prizes", Ins[2], 0xf2c14e}, {"Shifts", Ins[3], 0xff8a1f},
+		{"Cash work", Ins[4], 0x16a34a}, {"Streaming", Ins[5], 0x9b5cff}, {"Sponsors", Ins[6], 0x2f5d9e}, {"Backers & buyers", Ins[7], 0xf2a93b}, {"Sales & refunds", Ins[8], 0xec4899}};
+	const FlowRow OutRows[8] = {{"Buy-ins & entry fees", Outs[0], 0x0d9488}, {"Rent, bills & fares", Outs[1], 0xef4d5a}, {"Food & deliveries", Outs[2], 0xe23b4e}, {"Gear", Outs[3], 0xff6b2c},
+		{"Fines & Marcus", Outs[4], 0x7c3aed}, {"Looks, fitness & food out", Outs[5], 0xdb2777}, {"Backers' shares & swaps", Outs[6], 0xd97706}, {"Coaching", Outs[7], 0x0891b2}};
 	Chips Top = 1;
 	Chips InSum = 0;
 	Chips OutSum = 0;
@@ -1598,21 +1954,22 @@ void RiverLine::BankApp(double Now)
 		C->FillRect({X, Flow.Y + 110.0f, W, 1.0f}, Hex(0xe2e8f0));
 		for (int I = 0; I < Count; ++I)
 		{
+			// Nine rows in the card at a 26-unit pitch (next_segment_spec §1.9 #23: 118 + 8 x 26 + 25 stays inside its 360).
 			const FlowRow& R = Rows[I];
-			const float Y = Flow.Y + 118.0f + Nf(I) * 33.0f; // seven rows in the card (Northside's joined the six)
+			const float Y = Flow.Y + BankRowTop + Nf(I) * BankRowPitch;
 			const bool Some = R.Amount > 0;
-			UI.Text(R.Label, X, Y + 14.0f, Ts(13.5f, 600, Some ? Dark : NetA(Gray, 0.7f)));
-			UI.Text(Some ? Money(R.Amount) : std::string("\xE2\x80\x94"), X + W, Y + 14.0f, Ts(13.5f, 800, Some ? Dark : NetA(Gray, 0.6f), Align::Right, Baseline::Alphabetic, true));
-			UI.RRect({X, Y + 21.0f, W, 8.0f}, 4.0f, Hex(0xeef2f7));
+			UI.Text(R.Label, X, Y + 13.0f, Ts(13.0f, 600, Some ? Dark : NetA(Gray, 0.7f)));
+			UI.Text(Some ? Money(R.Amount) : std::string("\xE2\x80\x94"), X + W, Y + 13.0f, Ts(13.0f, 800, Some ? Dark : NetA(Gray, 0.6f), Align::Right, Baseline::Alphabetic, true));
+			UI.RRect({X, Y + 18.0f, W, 6.0f}, 3.0f, Hex(0xeef2f7));
 			const float Bw = W * Nf(static_cast<double>(R.Amount) / static_cast<double>(Top)) * In;
 			if (Some && Bw > 0.5f)
 			{
-				UI.RRect({X, Y + 21.0f, std::max(8.0f, Bw), 8.0f}, 4.0f, Hex(R.Col));
+				UI.RRect({X, Y + 18.0f, std::max(6.0f, Bw), 6.0f}, 3.0f, Hex(R.Col));
 			}
 		}
 	};
-	Column(InRows, 7, Flow.X + 32.0f, 380.0f, "MONEY IN", InSum, Hex(0x16a34a));
-	Column(OutRows, 6, Flow.X + 448.0f, 380.0f, "MONEY OUT", OutSum, Hex(0xdc2626));
+	Column(InRows, 9, Flow.X + 32.0f, 380.0f, "MONEY IN", InSum, Hex(0x16a34a));
+	Column(OutRows, 8, Flow.X + 448.0f, 380.0f, "MONEY OUT", OutSum, Hex(0xdc2626));
 
 	// History.
 	const Rect H{930.0f, 100.0f, 630.0f, 830.0f};

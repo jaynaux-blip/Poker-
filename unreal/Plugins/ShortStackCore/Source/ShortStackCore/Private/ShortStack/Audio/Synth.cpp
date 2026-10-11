@@ -3,6 +3,11 @@
 
 #include <cmath>
 
+#include "VoiceEngine.h"
+
+// The voice engine keeps its own copy of the rate (it doesn't pull in Session.h); the two must agree.
+static_assert(static_cast<int>(ss::audio::vox::OutRate) == ss::audio::SampleRate, "VoiceEngine.h OutRate must equal Synth.h SampleRate");
+
 namespace ss
 {
 namespace audio
@@ -211,10 +216,9 @@ std::vector<float> Finish(Buffer& B)
 }
 } // namespace synth_detail
 
-using namespace synth_detail;
-
 std::vector<float> Render(SoundId Id, float Volume, uint32_t Seed)
 {
+	using namespace synth_detail;
 	Buffer B;
 	Noise R(Seed);
 	const double V = Volume;
@@ -294,13 +298,22 @@ std::vector<float> Render(SoundId Id, float Volume, uint32_t Seed)
 		}
 		break;
 	case SoundId::Mail:
-		break; // a letter in the Mail app: audio-synth's (next_segment_spec §8.3); silent until it lands
+		// A letter in the Mail app: paper sliding through a slot, landing, and a soft two-note bell (E6, B5), warmer
+		// than the table's alerts and quieter than a text.
+		Burst(B, R, 0.0, 1800.0, 0.9, 0.16, 0.06 * V, FilterType::BandPass, 3600.0);
+		Burst(B, R, 0.15, 900.0, 0.8, 0.05, 0.08 * V, FilterType::LowPass);
+		Tone(B, 1318.5, 0.5, 0.055 * V, 0.22);
+		Tone(B, 2637.0, 0.18, 0.008 * V, 0.22);
+		Tone(B, 987.77, 0.7, 0.05 * V, 0.36);
+		Tone(B, 1975.5, 0.22, 0.007 * V, 0.36);
+		break;
 	}
 	return Finish(B);
 }
 
 std::vector<float> Render(Effect Id, uint32_t Seed)
 {
+	using namespace synth_detail;
 	Buffer B;
 	Noise R(Seed);
 	switch (Id)
@@ -386,13 +399,31 @@ std::vector<float> Render(Effect Id, uint32_t Seed)
 		break;
 	}
 	case Effect::CardPrint:
-		break; // the club card coming out of the desk's printer: audio-synth's (next_segment_spec §8.3); silent until it lands
+	{
+		// The Players Club card coming out of the desk's printer: the relay, the motor and its stepper ticking the card
+		// past the head, the card sliding out, and the clack as it drops into the tray. About 1.8 s.
+		Burst(B, R, 0.0, 2600.0, 5.0, 0.008, 0.05);
+		Tone(B, 95.0, 0.25, 0.03, 0.02, Wave::Triangle, 150.0);
+		Tone(B, 150.0, 1.0, 0.028, 0.22, Wave::Triangle);
+		Tone(B, 300.0, 1.0, 0.007, 0.22);
+		for (double At = 0.25; At < 1.2; At += 0.0055 * (0.9 + 0.2 * Rand(R)))
+		{
+			const double Pass = std::sin(SynthPi * (At - 0.25) / 0.95);
+			Burst(B, R, At, 1900.0 + 400.0 * Rand(R), 4.0, 0.004, 0.012 + 0.012 * Pass);
+		}
+		Burst(B, R, 1.22, 2400.0, 1.5, 0.3, 0.06, FilterType::BandPass, 4600.0);
+		Burst(B, R, 1.58, 600.0, 0.9, 0.035, 0.09, FilterType::LowPass);
+		Burst(B, R, 1.58, 3600.0, 6.0, 0.012, 0.07);
+		Burst(B, R, 1.64, 3000.0, 6.0, 0.008, 0.025);
+		break;
+	}
 	}
 	return Finish(B);
 }
 
 std::vector<float> RenderThunder(float Strength, uint32_t Seed)
 {
+	using namespace synth_detail;
 	Buffer B;
 	B.Ensure(5.2);
 	Noise R(Seed);
@@ -458,6 +489,7 @@ void Configure(T& F, FilterType Type, double Freq, double Q)
 Ambience::Ambience(uint32_t Seed)
 	: State(Seed * 2654435761u + 7u)
 {
+	using namespace synth_detail;
 	Configure(HissBp, FilterType::BandPass, 2400.0, 0.5);
 	Configure(HissLp, FilterType::LowPass, 5200.0, 1.0);
 	Configure(BodyLp, FilterType::LowPass, 700.0, 1.0);
@@ -475,6 +507,7 @@ double Ambience::NextNoise()
 
 void Ambience::Render(float* Out, int N)
 {
+	using namespace synth_detail;
 	const double Dt = 1.0 / SynthRate;
 	for (int I = 0; I < N; ++I)
 	{

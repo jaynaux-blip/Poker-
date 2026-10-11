@@ -1,6 +1,7 @@
 // The living world in words, for the debug tools: one person inside out, and the world's health at a glance.
 #include "ShortStack/Game/World.h"
 
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Format.h"
 #include "WorldSim.h"
 
@@ -200,6 +201,7 @@ std::string StepText(const Step& S)
 	case StepKind::Returned: return S.What == "broke" ? "Rebuilt a bankroll and came back." : S.What == "retired" ? "Came out of retirement." : "Back from a break.";
 	case StepKind::Retired: return "Retired.";
 	case StepKind::PlayerOfYear: return "Named " + S.What + " for " + std::to_string(YearOf(S.Day - 1)) + ".";
+	case StepKind::HallOfFame: return "Inducted into the Hall of Fame, class of " + std::to_string(S.Place > 0 ? S.Place : YearOf(S.Day)) + ".";
 	case StepKind::Count: break;
 	}
 	return "";
@@ -480,6 +482,33 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		Body = Grouped(E.Value) + " points.";
 		Tag = "PLAYER OF THE YEAR";
 		return true;
+	case EventKind::HallOfFame:
+	{
+		// "Class of 2031: two bracelets, three rings, a Player of the Year title and $4.2M in winnings."
+		std::vector<std::string> Held;
+		if (N->Bracelets > 0)
+		{
+			Held.push_back(N->Bracelets == 1 ? std::string("a bracelet") : Count(N->Bracelets) + " bracelets");
+		}
+		if (N->Rings > 0)
+		{
+			Held.push_back(N->Rings == 1 ? std::string("a ring") : Count(N->Rings) + " rings");
+		}
+		if (const int Poy = PlayerOfYearTitles(N->Id))
+		{
+			Held.push_back(Poy == 1 ? std::string("a Player of the Year title") : Count(Poy) + " Player of the Year titles");
+		}
+		Held.push_back(Short(E.Amount) + " in winnings");
+		std::string List;
+		for (size_t K = 0; K < Held.size(); ++K)
+		{
+			List += (K == 0 ? "" : K + 1 == Held.size() ? " and " : ", ") + Held[K];
+		}
+		Title = Who + " enters the Hall of Fame";
+		Body = "Class of " + std::to_string(E.Value) + ": " + List + ".";
+		Tag = "HALL OF FAME";
+		return true;
+	}
 	default: return false; // going broke, taking a stake: nobody's business
 	}
 }
@@ -510,7 +539,8 @@ std::string World::Describe(int Id) const
 	}
 	if (N.Backer != -1)
 	{
-		O << "  backed by " << (N.Backer >= 0 ? Roster[static_cast<size_t>(N.Backer)].Name : std::string("a staking stable")) << " (makeup " << Money(N.Makeup) << ")";
+		// -2 is the stable: Lantern Row Staking, FoldEquityFred's (next_segment_spec §2.5).
+		O << "  backed by " << (N.Backer >= 0 ? Roster[static_cast<size_t>(N.Backer)].Name : std::string("Lantern Row Staking")) << " (makeup " << Money(N.Makeup) << ")";
 	}
 	O << "\n  stakes " << net::TierName(static_cast<net::Tier>(sim::TierIndex(N.Tier))) << " (comfortable at " << Money(Sim::Comfort(N)) << ")  live " << LiveName(N.Live)
 	  << "  plays " << PlanName(N.Schedule) << ", " << Pct(static_cast<double>(N.OnlineShare)) << " online";
@@ -573,6 +603,18 @@ std::string World::Describe(int Id) const
 	}
 	O << "  season " << N.ThisSeason.Year << ": " << Fixed(N.ThisSeason.Points, 0) << " pts, " << Money(N.ThisSeason.Won) << ", " << N.ThisSeason.Wins << " wins, live "
 	  << Fixed(N.ThisSeason.LivePoints, 0) << " pts\n";
+	{
+		static const char* const Cards[4] = {"none", "card", "gold", "black"};
+		const RoomRecord& R = N.Room;
+		O << "  badges: circuit " << Fixed(N.CircuitPoints, 0) << " pts (rank " << CircuitRank(N.Id) << "), card " << Cards[std::max(0, std::min(3, N.CardBest))] << ", last season "
+		  << Cards[std::max(0, std::min(3, N.CardLast))] << ", verified " << (N.Verified ? "yes" : "no");
+		if (const int Class = HallClass(N.Id))
+		{
+			O << ", Hall of Fame " << Class;
+		}
+		O << "\n  embercrest: " << R.Events << " events, " << R.Cashes << " cashes, " << R.FinalTables << " final tables, " << R.Wins << " on the wall, " << R.Days.size()
+		  << " days kept, month " << Fixed(R.MonthPoints, 0) << " pts (last " << Fixed(R.LastMonthPoints, 0) << ")\n";
+	}
 	for (const Year& Y : N.Years)
 	{
 		O << "    " << Y.Number << ": online " << Money(Y.Online) << ", live " << Money(Y.Live) << ", net " << Money(Y.Net) << ", " << Y.Wins << " wins in " << Y.Events << "\n";
@@ -747,6 +789,43 @@ std::string World::Report() const
 		O << " " << N.Name << " " << static_cast<int>(std::lround(static_cast<double>(N.RepOf(Rep::Overall))));
 	}
 	O << "\n  events logged " << Log.size() << ", honors " << Titles.size() << ", results kept " << Results.size() << ", queued " << Queue.size() << "\n";
+	{
+		// The badges' world data (next_segment_spec §5.3).
+		int Verified = 0;
+		int Cards[4] = {0, 0, 0, 0};
+		int Last[4] = {0, 0, 0, 0};
+		int Club[4] = {0, 0, 0, 0};
+		int Wall = 0;
+		int Bracelets = 0;
+		int Rings = 0;
+		int Branded = 0;
+		int Team = 0;
+		for (const Npc& N : Roster)
+		{
+			if (N.Faded)
+			{
+				continue;
+			}
+			Verified += N.Verified ? 1 : 0;
+			++Cards[std::max(0, std::min(3, N.CardBest))];
+			++Last[std::max(0, std::min(3, N.CardLast))];
+			const int Visits = N.Room.VisitsIn(Day);
+			++Club[Visits >= badge::ClubCrest ? 3 : Visits >= badge::ClubEmber ? 2 : Visits >= badge::ClubRegular ? 1 : 0];
+			Wall += N.Room.Wins > 0 ? 1 : 0;
+			Bracelets += N.Bracelets > 0 ? 1 : 0;
+			Rings += N.Rings > 0 ? 1 : 0;
+			Team += N.Pro ? 1 : 0;
+			Branded += !N.Pro && !N.Sponsor.empty() ? 1 : 0;
+		}
+		int Hall = 0;
+		for (const Honor& H : Titles)
+		{
+			Hall += H.Title == HallOfFameTitle ? 1 : 0;
+		}
+		O << "  badges: verified " << Verified << ", cards " << Cards[1] << "/" << Cards[2] << "/" << Cards[3] << " (last season " << Last[1] << "/" << Last[2] << "/" << Last[3]
+		  << "), club " << Club[1] << "/" << Club[2] << "/" << Club[3] << ", on the wall " << Wall << ", bracelet holders " << Bracelets << ", ring holders " << Rings
+		  << ", Team RiverLine " << Team << ", brand-sponsored " << Branded << ", Hall of Fame " << Hall << "\n";
+	}
 	return O.str();
 }
 } // namespace world

@@ -242,6 +242,11 @@ void WriteTracker(Line& L, const Tracker& T)
 		return Out;
 	};
 	L << Steps(T.Curve) << Steps(T.Spend);
+	if (T.Freerolls > 0)
+	{
+		// (Only a page with freerolls carries them: the world's people never play one, so their lines stay as they were.)
+		L << I(T.Freerolls) << I(T.FreerollPrizes);
+	}
 }
 
 void ReadTracker(Cursor& C, Tracker& T)
@@ -292,6 +297,11 @@ void ReadTracker(Cursor& C, Tracker& T)
 	};
 	Steps(T.Curve);
 	Steps(T.Spend);
+	if (C.At < C.V.size())
+	{
+		T.Freerolls = C.Small();
+		T.FreerollPrizes = C.Int();
+	}
 	if (T.Spend.size() != T.Curve.size())
 	{
 		// Pages saved before the ABI graph: their buy-ins spread evenly.
@@ -301,6 +311,40 @@ void ReadTracker(Cursor& C, Tracker& T)
 			T.Spend.push_back(T.Events > 0 ? T.BuyIns * static_cast<Chips>((K + 1) * static_cast<size_t>(T.Stride)) / T.Events : 0);
 		}
 	}
+}
+
+/** world\troom: npc (-1: the player), venue, events, cashes, final tables, wins, the last win, the month, its points,
+ *  the month before's, the days (pipe-separated). */
+Line RoomLine(int Id, const RoomRecord& R)
+{
+	Line L("room");
+	L << I(Id) << Esc(R.Venue) << I(R.Events) << I(R.Cashes) << I(R.FinalTables) << I(R.Wins) << I(R.LastWin) << I(R.MonthKey) << D(R.MonthPoints) << D(R.LastMonthPoints);
+	std::string Days;
+	for (size_t K = 0; K < R.Days.size(); ++K)
+	{
+		Days += (K > 0 ? "|" : "") + I(R.Days[K]);
+	}
+	L << Days;
+	return L;
+}
+
+void ReadRoom(Cursor& C, RoomRecord& R)
+{
+	R = RoomRecord();
+	R.Venue = C.Str();
+	R.Events = C.Small();
+	R.Cashes = C.Small();
+	R.FinalTables = C.Small();
+	R.Wins = C.Small();
+	R.LastWin = C.Small();
+	R.MonthKey = C.Small();
+	R.MonthPoints = C.Dbl();
+	R.LastMonthPoints = C.Dbl();
+	for (const std::string& Day : Split(C.At < C.V.size() ? C.V[C.At] : std::string(), '|'))
+	{
+		R.Days.push_back(static_cast<int>(std::strtol(Day.c_str(), nullptr, 10)));
+	}
+	++C.At;
 }
 } // namespace worldsave_detail
 
@@ -320,6 +364,7 @@ void World::Write(std::string& Out) const
 		Line L("head");
 		L << I(Version) << I(WorldSeed) << D(Now) << D(Origin) << I(Planned) << I(Rev) << I(Founding) << I(Week) << I(Month) << I(DiscoveredThisWeek) << I(NextAnon)
 		  << I(Target) << D(HeroPoints) << D(HeroLivePoints) << D(NightKey) << D(NightHour) << Esc(SeriesKey) << Esc(HeroName);
+		L << D(HeroCircuit) << I(HeroCardTop) << I(HeroCardPrev); // version 2
 		Emit(L);
 	}
 	{
@@ -447,6 +492,15 @@ void World::Write(std::string& Out) const
 			WriteTracker(Tl, N.Stats);
 			Emit(Tl);
 		}
+		// Version 2: the room, the circuit, the review (only the people with something to keep).
+		if (N.Room.Events > 0)
+		{
+			Emit(RoomLine(N.Id, N.Room));
+		}
+		if (N.CircuitPoints != 0.0 || N.CardBest != CardNone || N.CardLast != CardNone || N.Verified || N.ReviewMonth != -1)
+		{
+			Emit(Line("badge") << I(N.Id) << D(N.CircuitPoints) << I(N.CardBest) << I(N.CardLast) << I(N.Verified) << I(N.ReviewMonth));
+		}
 	}
 	if (!HeroTrophies.empty())
 	{
@@ -457,6 +511,10 @@ void World::Write(std::string& Out) const
 		Line Hl("herotrack");
 		WriteTracker(Hl, HeroBook);
 		Emit(Hl);
+	}
+	if (HeroRoomRec.Events > 0)
+	{
+		Emit(RoomLine(-1, HeroRoomRec));
 	}
 	for (const Pending& P : Queue)
 	{
@@ -586,8 +644,7 @@ bool World::Read(const std::vector<std::string>& Fields)
 	auto Person = [&](long long Id) -> Npc* { return Id >= 0 && static_cast<size_t>(Id) < Roster.size() ? &Roster[static_cast<size_t>(Id)] : nullptr; };
 	if (Kind == "head")
 	{
-		const int Saved = C.Small();
-		(void)Saved; // version 1: nothing to migrate yet
+		LoadedVersion = C.Small(); // an older world migrates in Finish (Sim::Migrate)
 		WorldSeed = static_cast<uint32_t>(C.Int());
 		Now = C.Dbl();
 		Origin = C.Dbl();
@@ -605,6 +662,10 @@ bool World::Read(const std::vector<std::string>& Fields)
 		NightHour = C.Dbl();
 		SeriesKey = C.Str();
 		HeroName = C.Str();
+		// Version 2 (a version 1 head has none of these: the cursor gives 0).
+		HeroCircuit = C.Dbl();
+		HeroCardTop = C.Small();
+		HeroCardPrev = C.Small();
 		Created = true;
 		// What only a session keeps (who played what lately, who was bumped) starts over with the world it reads.
 		Played.clear();
@@ -789,6 +850,29 @@ bool World::Read(const std::vector<std::string>& Fields)
 	else if (Kind == "herotrack")
 	{
 		ReadTracker(C, HeroBook);
+	}
+	else if (Kind == "room")
+	{
+		const long long Id = C.Int();
+		if (Id == -1)
+		{
+			ReadRoom(C, HeroRoomRec);
+		}
+		else if (Npc* N = Person(Id))
+		{
+			ReadRoom(C, N->Room);
+		}
+	}
+	else if (Kind == "badge")
+	{
+		if (Npc* N = Person(C.Int()))
+		{
+			N->CircuitPoints = C.Dbl();
+			N->CardBest = C.Small();
+			N->CardLast = C.Small();
+			N->Verified = C.Bool();
+			N->ReviewMonth = C.Small();
+		}
 	}
 	else if (Kind == "heroawards")
 	{
@@ -1124,9 +1208,50 @@ void World::Finish()
 	}
 	// Saves from before the Embercrest had regulars of its own: they join (once; the same people as in a new world).
 	Sim::RoomLocals(*this, sim::DayAt(Now));
+	// An older version: brought up to this one, once (it writes as this version from now on).
+	if (LoadedVersion < Version)
+	{
+		Sim::Migrate(*this, LoadedVersion);
+		LoadedVersion = Version;
+	}
 	std::stable_sort(Queue.begin(), Queue.end(), [](const Pending& A, const Pending& B) { return A.End < B.End; });
 	RefreshAll();
 	Sim::Ranks(*this);
+}
+
+void Sim::Migrate(World& W, int From)
+{
+	const int Today = sim::DayAt(W.Now);
+	if (From < 2)
+	{
+		// Version 2 (next_segment_spec §7.5 step 5).
+		// The room's records: its regulars', locals' and cast's last months from their habits (no results: the wall only
+		// ever shows what was played). Cards appear at the first standings after load ("Standings post Monday.").
+		SeedRoomHistory(W, Today);
+		// The titles won before the story began (§11 Q23), as a new world has them.
+		SeedChampions(W);
+		for (Npc& N : W.Roster)
+		{
+			// The site's own deal only ever belongs to its ten (§1.9 #21; Kast's catalog could hand it to anyone).
+			if (!N.Pro && N.Sponsor == "RiverLine")
+			{
+				N.Sponsor.clear();
+			}
+			// Team RiverLine pays what its terms say now: signing added $1,500 a week, and leaving takes off TeamWeekly, so
+			// the pros signed before take the difference off now (or one who leaves would keep the rest for ever).
+			const Chips Less = sim::Cents(1500.0) - TeamWeekly();
+			if (N.Pro && Less > 0)
+			{
+				N.Income = std::max<Chips>(0, N.Income - Less);
+			}
+			// Live Player of the Year counts Regional events and up (§11 Q3): this season's points held the room's own
+			// weeklies too, and which were which wasn't kept, so the live race starts again from here.
+			N.ThisSeason.LivePoints = 0.0;
+		}
+		W.HeroLivePoints = 0.0;
+		// The month's Verified review, at once.
+		Review(W, Today);
+	}
 }
 } // namespace world
 } // namespace ss

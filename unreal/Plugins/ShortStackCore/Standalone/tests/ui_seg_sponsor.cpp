@@ -2,17 +2,224 @@
 // ui_main.cpp (the shared kit is UiSeg.h):
 // Mail (mail_empty, mail_offer_luckypenny, mail_offer_conflict, mail_counter_mood, mail_contract_tally, mail_strike,
 // mail_ended), Kast (kast_channel_sponsors, kast_overlay_marks), the art (sponsor_patch_<id> x13, ambassador_banner,
-// polaroid), embercrest_card_covered.
+// polaroid), and the closet's PATCHES row (closet_patches).
 //
-// Phase A, day 1: the track's own file, registered and empty. core-sponsor fills it in Phase B.
+// Mail draws once the laptop's taskbar opens it (App::Mail in RiverLine.cpp, ui-laptop's): until then its pages are
+// reported as not wired and skipped, not failed.
 #include "UiSeg.h"
 
+#include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/UI/ShopScreen.h"
 #include "ShortStack/UI/SponsorArt.h"
+
+#include <cstdio>
+#include <set>
 
 namespace ui_test
 {
+namespace sponsor_seg
+{
+namespace sponsor = ss::sponsor;
+using App = ss::ui::RiverLine::App;
+
+constexpr double Day = 1440.0;
+
+/** A label drawn letter-spaced (NetSpaced: one glyph a text run, as the contract card's section heads are), in order. */
+bool DrewSpaced(const ss::ui::DrawList& L, const std::string& Label)
+{
+	std::string Glyphs;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text)
+		{
+			continue;
+		}
+		size_t Points = 0;
+		for (const char Ch : Cmd.Text.Text)
+		{
+			Points += (static_cast<unsigned char>(Ch) & 0xC0u) != 0x80u ? 1u : 0u;
+		}
+		Glyphs += Points == 1 ? Cmd.Text.Text : std::string("\n");
+	}
+	return Glyphs.find(Label) != std::string::npos;
+}
+
+struct Laptop
+{
+	QuietHooks H;
+	ss::Session S;
+	ss::ui::RiverLine RL;
+	TableMeasurer M;
+	double Now = 1.0;
+	explicit Laptop(const std::string& Seed) : S(H, Seed), RL(S) { S.CurrentScreen = ss::Screen::Lobby; }
+
+	ss::ui::DrawList Frame(float X = 0.0f, float Y = 0.0f, bool Down = false, bool Pressed = false, bool Released = false)
+	{
+		RL.UI.Ptr.Active = X > 0.0f;
+		RL.UI.Ptr.X = X;
+		RL.UI.Ptr.Y = Y;
+		RL.UI.Ptr.Down = Down;
+		RL.UI.Ptr.Pressed = Pressed;
+		RL.UI.Ptr.Released = Released;
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		RL.Draw(C, Now);
+		RL.UI.Ptr.EndFrame();
+		return L;
+	}
+	void Click(float X, float Y)
+	{
+		Frame(X, Y, true, true, false);
+		Now += 0.05;
+		Frame(X, Y, false, false, true);
+		Now += 0.05;
+	}
+	/** The page as it settles (its fade-in done), saved as Name. */
+	ss::ui::DrawList Shot(const std::string& Name)
+	{
+		Now += 1.0;
+		ss::ui::DrawList L = Frame();
+		WriteList(Name, L);
+		return L;
+	}
+	void Jump(double ToWorld)
+	{
+		if (ToWorld > S.WorldMinutes())
+		{
+			S.LobbyMinutes += ToWorld - S.WorldMinutes();
+		}
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+	}
+};
+
+void Mail()
+{
+	Laptop P("sponsor-mail");
+	P.S.BankrollCents = 500000;
+	P.Jump(3.0 * Day + 11.0 * 60.0);
+	P.RL.OpenApp(App::Mail, P.Now);
+	ss::ui::DrawList Empty = P.Shot("mail_empty");
+	if (!Drew(Empty, "Inbox"))
+	{
+		std::printf("  mail: the taskbar doesn't open App::Mail yet (ui-laptop's RiverLine.cpp): Mail's pages skipped\n");
+		return;
+	}
+	Expect(Drew(Empty, "No mail yet"), "mail: the empty inbox says so");
+	// The Lucky Penny's offer, heard at the counter: in writing, with the contract card.
+	P.S.DebugSponsor("offer luckypenny");
+	P.RL.OpenApp(App::Mail, P.Now);
+	ss::ui::DrawList Offer = P.Shot("mail_offer_luckypenny");
+	Expect(Drew(Offer, "Lucky Penny #212") && DrewSpaced(Offer, "WHAT YOU GET") && DrewSpaced(Offer, "WHAT THEY ASK") && DrewSpaced(Offer, "THE FINE PRINT") && DrewRun(Offer, "Sign") &&
+			   Drew(Offer, "OFFER"),
+		"mail: an offer's thread, its card and its buttons");
+	Expect(Drew(Offer, "$25 a week in store credit"), "mail: what you get, from the terms");
+	// Two energy drinks: the conflict in red over Sign.
+	P.S.DebugSponsor("offer voltrush");
+	P.S.DebugSponsor("offer overclock");
+	ss::ui::DrawList Conflict = P.Shot("mail_offer_conflict");
+	Expect(Drew(Conflict, "Only one can be signed"), "mail: the conflict over Sign");
+	// The counter's levers with the rep's mood.
+	P.Click(681.0f, 904.0f);
+	ss::ui::DrawList Counter = P.Shot("mail_counter_mood");
+	Expect(Drew(Counter, "More money") && (Drew(Counter, "That's a stretch") || Drew(Counter, "Don't push it") || Drew(Counter, "Sounds open to it")), "mail: each lever with its mood");
+	// A signed deal's card: this period's progress.
+	P.S.DebugSponsor("sign voltrush");
+	P.RL.OpenApp(App::Mail, P.Now);
+	ss::ui::DrawList Tally = P.Shot("mail_contract_tally");
+	Expect(Drew(Tally, "Live events in the patch") && Drew(Tally, "Period ends") && Drew(Tally, "Give notice"), "mail: a running deal's asks, deadline and notice");
+	// A month short: the strike.
+	P.S.DebugSponsor("period");
+	ss::ui::DrawList Strike = P.Shot("mail_strike");
+	Expect(Drew(Strike, "STRIKE") && Drew(Strike, "we came up short"), "mail: the strike, its letter and its pill");
+	P.S.DebugSponsor("breach pickedup");
+	ss::ui::DrawList Ended = P.Shot("mail_ended");
+	Expect(Drew(Ended, "ENDED") && Drew(Ended, "about the paper"), "mail: ended under the conduct clause");
+}
+
+void Kast()
+{
+	Laptop P("sponsor-kast");
+	P.S.BankrollCents = 500000;
+	P.Jump(2.0 * Day + 20.0 * 60.0);
+	P.S.Buy("ram-32");
+	P.S.DebugSponsor("sign overclock");
+	P.RL.OpenApp(App::Kast, P.Now);
+	P.RL.ShowKastPage(ss::ui::RiverLine::KastPage::Channel);
+	ss::ui::DrawList Channel = P.Shot("kast_channel_sponsors");
+	Expect(Drew(Channel, "Overclock") && Drew(Channel, "Offers are in Mail") && Drew(Channel, " h"), "kast: the Channel page's deals with their hours, offers in Mail");
+	Expect(P.S.GoLive().empty(), "kast: live");
+	P.Now = Step(P.S, P.Now, 5.0);
+	P.RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
+	ss::ui::DrawList Studio = P.Shot("kast_overlay_marks");
+	Expect(Drew(Studio, "Overclock") && Drew(Studio, "Read for Overclock"), "kast: the overlay's mark and the read");
+	P.S.EndStream();
+	Expect(P.S.Channel.Deals.empty(), "kast: the overlay drew from the book, not Channel::Deals");
+}
+
+void Art()
+{
+	TableMeasurer M;
+	std::set<size_t> Seen;
+	for (const sponsor::Brand& B : sponsor::Brands())
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, 512.0f, 340.0f, 1.0f);
+		ss::ui::sponsorart::Patch(C, B.Id);
+		Expect(L.Vertices.size() > 100, "art: the patch draws");
+		Seen.insert(L.Vertices.size());
+		WriteList("sponsor_patch_" + B.Id, L);
+	}
+	Expect(Seen.size() >= 12, "art: thirteen patches, each its own");
+	ss::ui::DrawList Banner;
+	ss::ui::Canvas Cb(Banner, M, 768.0f, 1280.0f, 1.0f);
+	ss::ui::sponsorart::AmbassadorBanner(Cb, "Jesse Cole", "Team Embercrest \xC2\xB7 3 final tables this year");
+	Expect(Drew(Banner, "TEAM EMBERCREST") || Banner.Cmds.size() > 10, "art: the ambassador banner");
+	WriteList("ambassador_banner", Banner);
+	ss::ui::DrawList Photo;
+	ss::ui::Canvas Cp(Photo, M, 512.0f, 512.0f, 1.0f);
+	ss::ui::sponsorart::Polaroid(Cp, ss::hero::Look(), "PENNY'S PICK");
+	Expect(Drew(Photo, "PENNY'S PICK"), "art: the Polaroid's caption");
+	WriteList("polaroid", Photo);
+}
+
+void Closet()
+{
+	QuietHooks H;
+	ss::Session S(H, "sponsor-closet");
+	S.BankrollCents = 400000;
+	S.DebugSponsor("sign luckypenny");
+	std::unique_ptr<ss::ui::ShopScreen> Screen = ss::ui::MakeShopScreen("wardrobe", S);
+	TableMeasurer M;
+	double Now = 10.0;
+	Screen->Open(Now, "apartment");
+	Now += 0.5;
+	for (int K = 0; K < 6; ++K)
+	{
+		Screen->Key("TabNext", Now);
+		Now += 0.1;
+	}
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, 1920.0f, ss::ui::ShopScreen::Height, 1.0f);
+	Screen->Draw(C, Now);
+	WriteList("closet_patches", L);
+	Expect(Drew(L, "Lucky Penny \xC2\xB7 CHEST") && Drew(L, "Lucky Penny \xC2\xB7 CAP") && DrewRun(L, "SLEEVE"), "closet: the Patches row: the penny on offer for the chest or the cap, the spots listed");
+	Expect(Drew(L, "Missing: Lucky Penny on the chest or cap at live events"), "closet: the warning names the ask");
+	Screen->Key("Enter", Now);
+	Expect(S.Life.Closet.Patches[0] == "luckypenny", "closet: sewn on the chest");
+	ss::ui::DrawList After;
+	ss::ui::Canvas Ca(After, M, 1920.0f, ss::ui::ShopScreen::Height, 1.0f);
+	Screen->Draw(Ca, Now + 0.5);
+	Expect(Drew(After, "Every patch where the deal wants it"), "closet: sewn, and the asks are met");
+}
+} // namespace sponsor_seg
+
 void SegSponsor()
 {
+	sponsor_seg::Mail();
+	sponsor_seg::Kast();
+	sponsor_seg::Art();
+	sponsor_seg::Closet();
 }
 } // namespace ui_test

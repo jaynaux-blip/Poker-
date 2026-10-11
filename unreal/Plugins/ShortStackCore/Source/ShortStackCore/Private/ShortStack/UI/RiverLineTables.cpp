@@ -7,6 +7,7 @@
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Stake.h"
 #include "ShortStack/UI/Avatars.h"
 
 #include <algorithm>
@@ -50,6 +51,28 @@ std::string SecondsLabel(double Seconds)
 std::string BbLabel(double Bb)
 {
 	return Fixed(Bb, Bb < 10.0 ? 1 : 0) + " BB";
+}
+
+/**
+ * A small tag on a table someone else has a stake in (next_segment_spec §2.12): "ROLL" for a package's bullet, "SOLD
+ * 12%" for pieces sold of it; "" when it's all the player's.
+ */
+std::string BackerTag(const Session& S, const std::string& EventId)
+{
+	const stake::Book& B = S.Life.Stakes;
+	for (const stake::Fund& Fd : B.Funds)
+	{
+		if (Fd.EventId == EventId && !Fd.Settled)
+		{
+			return "ROLL";
+		}
+	}
+	int Sold = 0;
+	for (const stake::Piece& P : B.Pieces)
+	{
+		Sold += P.EntryId == EventId && !P.Settled ? P.Permille : 0;
+	}
+	return Sold > 0 ? "SOLD " + rlnet_detail::NetPermille(Sold) : std::string();
 }
 } // namespace rltables_detail
 
@@ -128,7 +151,14 @@ void RiverLine::TableStrip(float X, double Now)
 					C->StrokeEllipse(Cx, Cy, 7.0f + 2.0f * Pulse(Now + Nf(I), 2.0), 7.0f + 2.0f * Pulse(Now + Nf(I), 2.0), NetA(Dot, 0.35f), 1.0f);
 				}
 			}
-			UI.Text(NetShortName(G.Name), R.X + 33.0f, R.Y + 17.0f, Ts(12.5f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, R.W - 40.0f));
+			// Someone else's money in it: a small tag at the corner (the name gives way).
+			const std::string Tag = BackerTag(S, G.EventId);
+			const float TagW = Tag.empty() ? 0.0f : C->Measure(Tag, 8.0f, 800) + 8.0f * 1.3f + 4.0f;
+			if (!Tag.empty())
+			{
+				NetPill(*C, Tag, R.X + R.W - TagW - 6.0f, R.Y + 5.0f, Hex(0xf2a93b), false, 8.0f);
+			}
+			UI.Text(NetShortName(G.Name), R.X + 33.0f, R.Y + 17.0f, Ts(12.5f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, R.W - 40.0f - (Tag.empty() ? 0.0f : TagW + 4.0f)));
 			std::string Line;
 			Color LineCol = pal::Muted;
 			if (G.YourTurn)
@@ -288,10 +318,19 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 	const float NameW = UI.Text(NetShortName(Tn.Spec.Name), R.X + 14.0f, Hy, Ts(14.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, false, R.W * 0.42f));
 	const float LvW = UI.Text("Lvl " + std::to_string(Tn.LevelIndex + 1) + " \xC2\xB7 " + ChipsText(static_cast<double>(Lv.Sb)) + "/" + ChipsText(static_cast<double>(Lv.Bb)), R.X + 26.0f + NameW, Hy,
 		Ts(12.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, true));
+	float Px = R.X + 38.0f + NameW + LvW;
+	{
+		// Someone else's money in it (a package's roll, pieces sold): a small tag after the blinds.
+		const std::string Tag = BackerTag(S, Tn.Spec.Id);
+		if (!Tag.empty())
+		{
+			Px += NetPill(*C, Tag, Px, Hy - 13.0f, Hex(0xf2a93b), false, 9.0f) + 8.0f;
+		}
+	}
 	if (Front)
 	{
 		// The keyboard's table: F, C and R act here.
-		NetPill(*C, "KEYS F \xC2\xB7 C \xC2\xB7 R", R.X + 38.0f + NameW + LvW, Hy - 13.0f, pal::Accent, false, 9.0f);
+		NetPill(*C, "KEYS F \xC2\xB7 C \xC2\xB7 R", Px, Hy - 13.0f, pal::Accent, false, 9.0f);
 	}
 	float Rx = R.X + R.W - 14.0f;
 	if (S.TimeBank >= 1.0)

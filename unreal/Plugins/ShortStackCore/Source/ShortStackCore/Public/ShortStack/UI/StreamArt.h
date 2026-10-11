@@ -33,6 +33,8 @@ struct Cam
 	uint32_t Hoodie = 0x9b5cff;
 	bool Live = true;
 	gear::Glow Leds; // the room's LEDs: a coloured wall behind, a rim of light around the streamer
+	/** A sponsor's chest patch (a brand id, sponsor::Brands()), drawn on the left of the chest; "" for none (next_segment_spec §3.9). */
+	std::string Patch;
 };
 /** The facecam: the streamer at the desk. With a green screen the background is left out (it sits over the game). */
 SHORTSTACKCORE_API void Facecam(Canvas& C, const Rect& R, const Cam& Look);

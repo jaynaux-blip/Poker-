@@ -72,6 +72,9 @@ inline int TierIndex(int T)
 int MonthKey(int Day);
 int DayOfYear(int Day);
 int MonthDay(int Day);
+/** A calendar year's title events, as LiveCalendar has them: the Grand Circuit's ring events and the Championship's
+ *  bracelet events (its Main Event aside), in date order. */
+std::vector<LiveEvent> TitleEvents(int Year);
 
 /** The world day of a time. */
 inline int DayAt(double Minutes)
@@ -145,6 +148,25 @@ struct Sim
 	static void Feel(Bond& B, MemoryKind K, float Emotion);
 	static void Fade(World& W);
 	static void Fade(World& W, Npc& N);
+
+	// ---- the badges' calendar (WorldSim.cpp; next_segment_spec §5.3)
+	/** A finished entry at the room (its start day): the counts, the visit (once a day) and the month's points. */
+	static void NoteRoom(RoomRecord& R, int Day, int Place, int FinalSize, Chips Prize, double Points);
+	/** The circuit's standings for a season (Mondays from week badge::CardFromWeek, and the season's last), plus the
+	 *  card a ring or bracelet won that season grants. Ranked: whether the week is one the standings post on. */
+	static void Standings(World& W, int Year, bool Ranked);
+	/** The Verified review on the 1st (VerifiedRecord). */
+	static void Review(World& W, int Day);
+	/** July 15: the Hall of Fame's class (at most badge::HallClass, scoring badge::HallBar or more). */
+	static void HallOfFame(World& W, int Day);
+	/** The room's last RoomDaysKept days for its regulars, locals and cast, from their habits (a new world, a version 1 one). */
+	static void SeedRoomHistory(World& W, int Today);
+	/** Bracelets and rings won before the story began, by the founding regulars who travel (§11 Q23). */
+	static void SeedChampions(World& W);
+	/** What Team RiverLine pays one of its ten a week (sponsor::NpcWeekly("riverline"); $1,500 until the catalog lands). */
+	static Chips TeamWeekly();
+	/** A world saved at an older version, brought up to this one (WorldSave.cpp; once, in Finish). */
+	static void Migrate(World& W, int From);
 };
 } // namespace world
 } // namespace ss

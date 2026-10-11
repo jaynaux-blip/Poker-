@@ -6,6 +6,7 @@
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/Game/Wardrobe.h"
@@ -174,6 +175,7 @@ struct Priced
 	Chips Tip = 0;
 	Chips Total = 0;      // what the card is charged
 	Chips Covered = 0;    // Big Lou's share: the food and its tax, when he's picked up the check
+	Chips House = 0;      // a sponsor's service on the house (Fifth St. Barbers' cut every 14 days, next_segment_spec §3.6)
 	int Minutes = 0;
 	bool AnyService = false;
 	bool HasPass = false; // a day pass bought with the workout
@@ -257,7 +259,19 @@ Priced Price(const Session& S, const Session::ShopOrder& O, bool Payer = true)
 		const Chips Base = std::max<Chips>(0, P.Goods + P.Services - P.Discount);
 		P.Tip = (Base * std::min(100, O.TipPercent) + 50) / 100;
 	}
-	P.Total = P.Goods + P.Services - P.Discount + P.Tax + P.Tip;
+	// A sponsor's service on the house (§3.6): the cut rings up at $0. The tip on what it would have cost is still the
+	// player's to leave.
+	if (O.Venue == "barber" && sponsor::ServiceCovered(S.Life.Sponsors, "barber", World))
+	{
+		for (const shop::Offer* Of : P.Offers)
+		{
+			if (Of->Type == shop::OfferKind::Cut && P.House == 0)
+			{
+				P.House = std::min<Chips>(Of->PriceCents, 3000);
+			}
+		}
+	}
+	P.Total = P.Goods + P.Services - P.Discount - P.House + P.Tax + P.Tip;
 	// Big Lou on his Friday night, the player cashed lately (§6.3): the food and its tax go on his tab, once a night. The
 	// tip is still the player's to leave, worked out on the check as it would have been.
 	if (Payer && O.Venue == "diner" && town::PaysYourCheck(S, World) == "big-lou")
@@ -429,11 +443,12 @@ std::string Receipt(const Priced& P)
 	{
 		Names.push_back(G->Name);
 	}
+	const std::string House = P.House > 0 ? " (cut on the house)" : "";
 	if (Names.size() > 2)
 	{
-		return P.V->Name + Dot + std::to_string(Names.size()) + " items";
+		return P.V->Name + Dot + std::to_string(Names.size()) + " items" + House;
 	}
-	return P.V->Name + Dot + JoinNames(Names);
+	return P.V->Name + Dot + JoinNames(Names) + House;
 }
 
 /**
@@ -458,9 +473,9 @@ void Charge(Session& S, const Priced& P, double World)
 		}
 		return;
 	}
-	if (P.Total > 0)
+	if (P.Total > 0 || P.House > 0)
 	{
-		S.Life.Record(World, Receipt(P), -P.Total, 9);
+		S.Life.Record(World, Receipt(P), -P.Total, 9); // a cut on the house rings up at $0, "on the house"
 	}
 }
 
@@ -934,6 +949,10 @@ std::string Session::ShopService(const ShopOrder& O)
 	}
 	const double World = WorldMinutes();
 	Charge(*this, P, World);
+	if (P.House > 0)
+	{
+		sponsor::UseService(Life.Sponsors, O.Venue, World); // the sponsor's cut for this fortnight is used
+	}
 	ShopVisit(O.Venue, P.Total);
 	Remember(*this, P, O);
 	std::string Ids;
@@ -1294,6 +1313,14 @@ std::vector<shop::Lot> Session::PawnLots() const
 	if (Life.BackRoomNetCents > 0 && LotFor(*this, "memento:deechip", L))
 	{
 		Out.push_back(L);
+	}
+	// A sponsor's gear or kit is the brand's while the deal runs (next_segment_spec §3.6): he won't buy it or lend on it.
+	for (shop::Lot& Each : Out)
+	{
+		if (sponsor::IsProperty(Life.Sponsors, Each.Id, World))
+		{
+			Each.Refused = "That's got a brand's sticker on it. I don't buy loaners.";
+		}
 	}
 	return Out;
 }
@@ -1718,6 +1745,15 @@ void Session::SettleShop()
 	const double End = O.End;
 	const shop::Venue* V = shop::FindVenue(Venue);
 
+	// A sponsor's appearance (Session::Appear): time with the keeper, counted by FinishSkip (sponsor::Appear) as it ends.
+	if (Rest == "appear")
+	{
+		LastOutcome.Title = Venue == "store" ? "Penny's Pick" : "The window chair";
+		LastOutcome.Body = Venue == "store" ? "Ray holds the Polaroid up to the light until it comes in. It goes on the corkboard behind the register, by the lotto board."
+											: "Thirty minutes in Lonnie's window chair. Two people slow down to look. One comes in.";
+		return;
+	}
+
 	// The pawn, back from Ninth St. with the thing under an arm.
 	if (Venue == "pawn")
 	{
@@ -2021,6 +2057,8 @@ void Session::ShopVisit(const std::string& Venue, Chips SpentCents)
 	++V.Count;
 	V.LastAt = World;
 	V.SpentCents += SpentCents;
+	// The block road counts the days a shop saw the player, not the purchases (next_segment_spec §3.3).
+	sponsor::NoteVisit(Life.Sponsors, Venue, World);
 	if (Venue == "store")
 	{
 		// The Lucky Penny's usual: what's been bought there most.

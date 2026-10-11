@@ -101,6 +101,11 @@ void UNightOneAudio::SetAmbienceSourceStereo(TFunction<void(float*, int32)> Sour
 	AmbienceComponent = UGameplayStatics::SpawnSound2D(this, AmbienceWave.Get(), AmbienceLevel(), 1.0f, 0.0f, nullptr, false, false);
 }
 
+int32 UNightOneAudio::GetAmbienceQueuedBytes() const
+{
+	return AmbienceWave ? AmbienceWave->GetAvailableAudioByteCount() : 0;
+}
+
 void UNightOneAudio::PlaySamples(const std::vector<float>& Samples, float Volume, const FVector* At)
 {
 	PlayPcm(Samples, Volume, false, At);

@@ -1,6 +1,7 @@
 // Drawing helpers shared by the RiverLine lobby pages and the laptop apps (private to the UI sources).
 #pragma once
 
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
@@ -12,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -348,8 +350,9 @@ inline void NetChampion(AvatarSpec& A, const std::string& Name, bool Hero)
 /**
  * A RiverLine profile picture: the icon the name picked, Team RiverLine pros framed in gold, the player in neon.
  * A visible Ring (medals, the rival's purple) replaces the frame; a champion's bracelet or ring frame replaces that.
+ * Returns what it drew (its frame says a badge, so the name beside it can leave that one out: NetBadgeFrame).
  */
-inline void NetAvatar(Canvas& Cv, float Cx, float Cy, float R, const std::string& Name, const Color& Ring, bool Hero = false)
+inline AvatarSpec NetAvatar(Canvas& Cv, float Cx, float Cy, float R, const std::string& Name, const Color& Ring, bool Hero = false)
 {
 	AvatarSpec A = AvatarFor(Name);
 	const int Id = net::Shared().FindPlayer(Name);
@@ -369,7 +372,84 @@ inline void NetAvatar(Canvas& Cv, float Cx, float Cy, float R, const std::string
 	}
 	NetChampion(A, Name, Hero);
 	DrawAvatar(Cv, Cx, Cy, R, A);
+	return A;
 }
+
+// ------------------------------------------------------------------ badges (next_segment_spec §5.4 to §5.6)
+
+/** The badge an avatar's frame already says (rule C2): a champion's bracelet or ring frame, Team RiverLine's gold. */
+inline uint8_t NetBadgeFrame(const AvatarSpec& A)
+{
+	return A.Frame == AvatarFrame::Bracelet || A.Frame == AvatarFrame::Gem ? badge::FrameChampion : A.Frame == AvatarFrame::Gold ? badge::FrameGold : badge::FrameNone;
+}
+
+/**
+ * Someone's badges: the world's people from the shared index (built once per world revision and day), the player's
+ * (-1) from the session. Anyone else (a name the world doesn't follow): none.
+ */
+inline const badge::Set& NetBadgesOf(const Session& S, int Npc)
+{
+	static const badge::Set None{};
+	if (Npc == -1)
+	{
+		return S.HeroBadges();
+	}
+	if (Npc < 0 || !S.Living().Get(Npc))
+	{
+		return None;
+	}
+	return badge::Shared().Of(S.Living(), Npc, net::DayOf(S.WorldMinutes()));
+}
+
+/** Up to Max badges in a context's order (badge::Top, then the next of what's left), the frame's own left out (C2). */
+inline std::vector<badge::Badge> NetBadgeRow(const badge::Set& Held, uint8_t Context, uint8_t Frame, int Max)
+{
+	std::vector<badge::Badge> Out;
+	badge::Set Left = Held;
+	while (static_cast<int>(Out.size()) < Max)
+	{
+		const badge::Badge* B = badge::Top(Left, Context, Frame);
+		if (!B)
+		{
+			break;
+		}
+		const badge::Badge Got = *B;
+		Out.push_back(Got);
+		Left.Held.erase(std::remove_if(Left.Held.begin(), Left.Held.end(), [&Got](const badge::Badge& X) { return X.K == Got.K; }), Left.Held.end());
+	}
+	return Out;
+}
+
+/** A badge under the pointer this frame: RiverLine::Draw draws its tooltip over everything once the frame is done. */
+struct NetTip
+{
+	bool Up = false;
+	badge::Badge B;
+	int Npc = -2; // whose (-1: the player; -2: nobody the world follows)
+	float X = 0.0f;
+	float Y = 0.0f; // the glyph's bottom edge: the tip opens under it
+};
+/** The tooltip state of one RiverLine (RiverLineCard.cpp keeps it, by RiverLine: its header is Phase A's). */
+NetTip& NetTipOf(const RiverLine* RL);
+/** The lobby's own small choices that RiverLine.h has no room for (kept beside NetTipOf, by RiverLine). */
+struct NetChoices
+{
+	int WeekTab = 0;                  // the Embercrest page's right panel: 0 the week, 1 the month's leaders
+	double WeekTabAt = -100.0;
+	std::map<std::string, int> Flip; // an Embercrest event card's middle: 0 the facts, 1 the structure, 2 the payouts
+};
+NetChoices& NetChoicesOf(const RiverLine* RL);
+/** Everything someone holds, for a card (§5.4: the network's order, up to Max); the set's own order if the rules give none. */
+std::vector<badge::Badge> NetCardBadges(const badge::Set& Held, int Max);
+/**
+ * A badge rail (§5.6): glyphs at Size from X, centred on Cy, the first Labelled of them with their labels, in at most
+ * MaxW (labels give way first, then glyphs). Hovering one sets the frame's tooltip (Npc: whose). Returns the width drawn;
+ * Drawn (when given) gets how many glyphs made it, so a "+N" counts the ones that didn't.
+ */
+float NetBadgeRail(Canvas& Cv, Ui& UI, const RiverLine* RL, const std::vector<badge::Badge>& Row, int Npc, float X, float Cy, float Size, int Labelled, float MaxW, double Now,
+	int* Drawn = nullptr);
+/** The public facts a badge's line reads about someone (-1: the player; anyone the world doesn't follow: none). */
+badge::Holder NetHolderOf(const Session& S, int Npc);
 
 inline void NetSpark(Canvas& Cv, const Rect& R, const std::array<float, 8>& V, const Color& Col)
 {
@@ -670,6 +750,16 @@ struct LiveCard
 	std::string Status; // "Desk opens 4:00 PM", "Late reg till 8:00 PM", "You're registered", "11th of 97"
 	std::string Why;    // why registering wouldn't go through right now ("" when it would, or the player is in)
 	std::vector<LiveWarning> Warnings; // the most serious first
+	// Who pays (next_segment_spec §1.2): the entry's funding once registered, else the way Session::GoToLive would
+	// register it now (Session::FundingOptions' first that can: a backer's stake, a cover, a package, then the player's
+	// own money with any pieces sold).
+	life::Funding Fund;
+	std::string FundLine; // live::FundingLine: "Big Lou is putting you in the Nightly." ("" for the player's own money, nothing sold)
+	std::string Cover;    // a sponsor's cover that takes it: "Covered by Team Embercrest · 1 of 2 left" ("" for none)
+	Chips Cost = 0;       // what leaves the bankroll to play it: the buy-in (less the pieces' money) and the bus, unless someone else pays
+	bool Sellable = false; // pieces of it can go up for sale on the Backing page (the player's own money, not registered yet)
+	int Asked = 0;         // pieces listed on it (permille), and filled so far
+	int Filled = 0;
 };
 /**
  * The card for O as the player stands at World. PlannedField is the world's planned field for it (World::PlannedEntries;
@@ -678,6 +768,12 @@ struct LiveCard
 LiveCard LiveCardOf(const Session& S, const live::Occurrence& O, double World, int PlannedField = 0);
 /** The events the bus can still make (live::Reachable), less any the room has called off. */
 std::vector<live::Occurrence> LiveAhead(const Session& S, double World, double HoursAhead);
+/**
+ * Whether pieces of the occurrence can go up for sale now, as the Backing page's sell panel picks its events (the next
+ * six the bus can make within six days that the player hasn't registered for and would pay for with their own money):
+ * the event card's Sell action opens the page on it (backing_detail::Preselect).
+ */
+bool LiveForSale(const Session& S, const std::string& OccurrenceId, double World);
 /** A deep run in O with Entrants (the player included), to the half hour: its length into the card, and when it ends. */
 inline void LiveRun(LiveCard& Card, int Entrants)
 {
@@ -688,6 +784,86 @@ inline void LiveRun(LiveCard& Card, int Entrants)
 inline Chips LiveCost(const live::Occurrence& O)
 {
 	return O.Valid() ? O.T->BuyInCents + 2 * live::BusFareCents : 0;
+}
+/**
+ * What leaves the bankroll to play O paid for by F (live::CanRegister's sums): a backer, a package or a ticket pays the
+ * buy-in and the bus is the player's; a sponsor's cover may take the bus too; the player's own money is the buy-in less
+ * what the pieces sold on it bring in at the desk, and the bus.
+ */
+inline Chips LiveCostWith(const live::Occurrence& O, const life::Funding& F)
+{
+	if (!O.Valid())
+	{
+		return 0;
+	}
+	const Chips Bus = 2 * live::BusFareCents;
+	switch (F.From)
+	{
+	case life::Paid::Own: return std::max<Chips>(0, O.T->BuyInCents - std::max<Chips>(0, F.Cents)) + Bus;
+	case life::Paid::Sponsor: return F.Fares ? 0 : Bus;
+	default: return Bus;
+	}
+}
+
+/** A share in permille as people say it: "35%", "12.5%". */
+inline std::string NetPermille(int P)
+{
+	return std::to_string(P / 10) + (P % 10 == 0 ? std::string() : "." + std::to_string(P % 10)) + "%";
+}
+
+/** What leaves the bank when the player confirms a night, paid the way the card says (the bus up is one fare now). */
+inline std::string LiveLeavesNow(const LiveCard& Card, Chips Bankroll)
+{
+	const Chips Fare = live::BusFareCents;
+	const Chips BuyIn = Card.O.Valid() ? Card.O.T->BuyInCents : 0;
+	const std::string Who = Card.Fund.Who.empty() ? std::string("Your backer") : Card.Fund.Who;
+	switch (Card.Fund.From)
+	{
+	case life::Paid::Own:
+	{
+		const Chips Desk = std::max<Chips>(0, BuyIn - std::max<Chips>(0, Card.Fund.Cents));
+		return "Leaves now: " + NetMoney(Desk) + " at the desk" + (Card.Fund.Cents > 0 ? " (your buyers put in " + NetMoney(Card.Fund.Cents) + ")" : std::string()) + " and " +
+			NetMoney(Fare) + " for the bus \xC2\xB7 balance after " + Money(Bankroll - Desk - Fare);
+	}
+	case life::Paid::Sponsor:
+		return Card.Fund.Fares ? "Leaves now: nothing. " + Who + " covers the " + NetMoney(BuyIn) + " and the bus \xC2\xB7 balance stays " + Money(Bankroll)
+							   : "Leaves now: " + NetMoney(Fare) + " for the bus. " + Who + " covers the " + NetMoney(BuyIn) + " \xC2\xB7 balance after " + Money(Bankroll - Fare);
+	case life::Paid::Package:
+		return "Leaves now: " + NetMoney(Fare) + " for the bus. " + Who + "'s roll pays the " + NetMoney(BuyIn) + " \xC2\xB7 balance after " + Money(Bankroll - Fare);
+	default:
+		return "Leaves now: " + NetMoney(Fare) + " for the bus. " + Who + " pays the " + NetMoney(BuyIn) + " \xC2\xB7 balance after " + Money(Bankroll - Fare);
+	}
+}
+
+/** The register button as the funding has it: "Register · $120", "Register · covered" (§3.9), and its second line. */
+struct LiveRegisterLabel
+{
+	std::string Text;
+	std::string Sub;
+};
+
+inline LiveRegisterLabel LiveRegisterLabelOf(const LiveCard& Card, Chips Fare)
+{
+	const Chips BuyIn = Card.O.Valid() ? Card.O.T->BuyInCents : 0;
+	const std::string Bus = "+ the bus, " + NetMoney(2 * Fare);
+	switch (Card.Fund.From)
+	{
+	case life::Paid::Backer: return {"Register \xC2\xB7 backed", (Card.Fund.Who.empty() ? std::string("Your backer") : Card.Fund.Who) + " pays the " + NetMoney(BuyIn)};
+	case life::Paid::Sponsor: return {"Register \xC2\xB7 covered", Card.Fund.Fares ? std::string("the buy-in and the bus") : Bus};
+	case life::Paid::Package: return {"Register \xC2\xB7 the roll", Bus};
+	case life::Paid::Ticket: return {"Register \xC2\xB7 ticket", Bus};
+	default: return {"Register \xC2\xB7 " + NetMoney(BuyIn), Card.Fund.Cents > 0 ? Bus + " \xC2\xB7 buyers " + NetMoney(Card.Fund.Cents) : Bus};
+	}
+}
+
+/** The line a card leads its notes with about who pays: a cover's count (with the bus), else live::FundingLine. */
+inline std::string LivePaying(const LiveCard& Card)
+{
+	if (Card.Fund.From == life::Paid::Sponsor && !Card.Cover.empty())
+	{
+		return Card.Cover + (Card.Fund.Fares ? " \xC2\xB7 the bus too" : "");
+	}
+	return Card.FundLine;
 }
 } // namespace rlnet_detail
 } // namespace ui

@@ -34,7 +34,11 @@ namespace ss
  */
 namespace world
 {
-constexpr int Version = 1;
+/**
+ * 2: the room records, circuit points and cards, the Verified review, the Hall of Fame, the freeroll count, the money
+ * memories (next_segment_spec §5, §7.3). A version 1 world migrates once in Finish (§7.5 step 5).
+ */
+constexpr int Version = 2;
 
 // ------------------------------------------------------------------ who they are
 
@@ -307,6 +311,7 @@ enum class StepKind : int
 	Returned,
 	Retired,
 	PlayerOfYear,
+	HallOfFame, // inducted (July 15)
 	Count,
 };
 
@@ -388,9 +393,19 @@ struct Tracker
 	int LongestDry = 0; // the longest run without one
 	double FinishSum = 0.0; // place / field, summed (lower is better)
 	int Finished = 0;
+	// Freerolls ($0 buy-ins) among Events, and what they paid (seats at their value): a result that cost nothing has
+	// no ROI, so the public record and the badges read the Paid* numbers (S9, next_segment_spec §2.3).
+	int Freerolls = 0;
+	Chips FreerollPrizes = 0;
 
 	/** One tournament: what it cost (all bullets), what it paid (a seat at its value), where they finished. */
 	SHORTSTACKCORE_API void Add(Chips BuyIn, Chips Prize, int Place, int Field, int FinalSize, TrackStake Stake, TrackFormat Format);
+	/** The tournaments that cost something, what they paid, and the ROI and profit on them (freerolls left out). */
+	int PaidEvents() const { return Events - Freerolls; }
+	Chips PaidPrizes() const { return Prizes - FreerollPrizes; }
+	Chips PaidProfit() const { return PaidPrizes() - BuyIns; }
+	double PaidRoi() const { return BuyIns > 0 ? static_cast<double>(PaidProfit()) / static_cast<double>(BuyIns) : 0.0; }
+	Chips PaidAbi() const { return PaidEvents() > 0 ? BuyIns / PaidEvents() : 0; }
 	double Roi() const { return BuyIns > 0 ? static_cast<double>(Prizes - BuyIns) / static_cast<double>(BuyIns) : 0.0; }
 	double Itm() const { return Events > 0 ? static_cast<double>(Cashes) / static_cast<double>(Events) : 0.0; }
 	/** The average finish as a share of the field (0.25: the top quarter). */
@@ -412,6 +427,47 @@ struct Award
 	Chips Prize = 0;
 	int Entries = 0;
 	int Tourney = 0;     // their tournament count when they won it (where it sits on their profit graph; 0: unknown)
+};
+
+/**
+ * Someone's record at one card room (the Embercrest's, next_segment_spec §5.3): what the Players Club card, the winners'
+ * wall and the room's monthly leaders read. Only finished entries count (a cancelled night was never played), and a
+ * day counts once however many of the room's events they played on it.
+ */
+struct RoomRecord
+{
+	std::string Venue = "embercrest";
+	int Events = 0;
+	int Cashes = 0;
+	int FinalTables = 0;
+	int Wins = 0; // on the wall
+	int LastWin = -1; // day
+	/** The days with a finished entry, oldest first, at most one each: the last RoomDaysKept (90-day club windows, and the
+	 *  window at the start of a month the tier can't drop below until the next one). */
+	std::vector<int> Days;
+	int MonthKey = -1;         // MonthKeyOf the month MonthPoints is for
+	double MonthPoints = 0.0;  // net::Points from the room's events that month
+	double LastMonthPoints = 0.0; // the month before MonthKey's
+	/** Points for a calendar month (MonthKeyOf): this month's, last month's, or none. */
+	double PointsIn(int Month) const { return Month == MonthKey ? MonthPoints : Month == MonthKey - 1 ? LastMonthPoints : 0.0; }
+	/** Visits in the Window days up to and including Day (Day - Window < visit <= Day). */
+	SHORTSTACKCORE_API int VisitsIn(int Day, int Window = 90) const;
+	/**
+	 * Visits in the 90 days before Day's month began (the club's monthly review: a tier never drops before the 1st, so
+	 * the tier is the better of now's and this; next_segment_spec §5.3).
+	 */
+	SHORTSTACKCORE_API int VisitsAtMonthStart(int Day) const;
+};
+/** How many days of room visits a record keeps (a 90-day window, from as far back as the start of the month). */
+constexpr int RoomDaysKept = 125;
+
+/** The circuit card tiers (next_segment_spec §5.3): Card is the top 200 in circuit points, Gold the top 50, Black the top 10. */
+enum CardTier : int
+{
+	CardNone = 0,
+	CardRegular = 1,
+	CardGold = 2,
+	CardBlack = 3,
 };
 
 struct Npc
@@ -500,6 +556,13 @@ struct Npc
 	Tracker Stats;             // the stats page
 	std::vector<Tie> Ties;
 	std::map<std::string, int> Tickets; // event template id -> seats won
+	// What the badges read (next_segment_spec §5): public facts, worked out by the world's own calendar.
+	RoomRecord Room;           // the Embercrest
+	double CircuitPoints = 0.0; // this season: net::Points from live events Regional and up (satellites aside)
+	int CardBest = CardNone;   // the best circuit card this season (CardTier)
+	int CardLast = CardNone;   // last season's, good through this one
+	bool Verified = false;     // Verified Pro at the last monthly review (the 1st; VerifiedRecord)
+	int ReviewMonth = -1;      // MonthKeyOf the last review that found them Verified (-1: never)
 
 	float SkillOf(world::Skill S) const { return Skills[static_cast<size_t>(S)]; }
 	float TraitOf(world::Trait T) const { return Traits[static_cast<size_t>(T)]; }
@@ -526,6 +589,14 @@ enum class MemoryKind : int
 	Embercrest, // the Sunday tournament together
 	ShowedBluff, // they showed the player a bluff
 	Street,      // talked on the block (Fifth St., Ruby's, the 14's shelter): one memory for a run of them, once a day
+	// Money between them and the player (World::HeroMoney; next_segment_spec §2.9). Private: they know, nobody else does.
+	Staked,      // they put the player in an event (their money, the whole buy-in)
+	BoughtPiece, // they bought a piece of the player's action
+	Swapped,     // they swapped a share of action with the player
+	PaidUp,      // the player paid them what was owed, on time (or early)
+	PaidLate,    // the player was late paying them (the mark at the due time; the payment settles it)
+	Welched,     // the player never paid (a week past due; Lou's two)
+	WalkedOut,   // the player walked away from a deal still in makeup
 	Count,
 };
 SHORTSTACKCORE_API const char* MemoryText(MemoryKind K);
@@ -577,6 +648,7 @@ enum class EventKind : int
 	Champion,     // a major title (also in Honors)
 	PlayerOfYear,
 	Break,        // stepped away
+	HallOfFame,   // inducted on July 15 (Value: the class year)
 	Count,
 };
 SHORTSTACKCORE_API const char* EventKindName(EventKind K);
@@ -604,6 +676,9 @@ enum EventFlag : int
 	FlagLive = 16,     // a live event
 	FlagUnknown = 32,  // the world hadn't been following them
 };
+
+/** A Hall of Fame class's Honor title (Entries: the score it was inducted with, rounded; Prize: career winnings). */
+constexpr const char HallOfFameTitle[] = "Hall of Fame";
 
 /** A title that stays in history. */
 struct Honor
@@ -719,6 +794,23 @@ SHORTSTACKCORE_API int YearStart(int Year);
 SHORTSTACKCORE_API void CivilDate(int Day, int& Year, int& Month, int& DayOfMonth);
 /** The world day of a calendar date. */
 SHORTSTACKCORE_API int DayOn(int Year, int Month, int DayOfMonth);
+/** A calendar month as one number, Year * 12 + Month - 1: the room's monthly leaders and the badges' review key. */
+SHORTSTACKCORE_API int MonthKeyOf(int Day);
+/** The first day of Day's calendar month. */
+SHORTSTACKCORE_API int MonthStart(int Day);
+/** The week of the circuit's season (the calendar year) a day is in, from 1 (January 1 to 7). */
+SHORTSTACKCORE_API int SeasonWeek(int Day);
+/** The live events circuit points and the Live Player of the Year count (§11 Q3): Regional and up, satellites aside. */
+SHORTSTACKCORE_API bool CircuitEvent(LiveKind Kind, bool Satellite);
+/**
+ * Verified Pro's record test (next_segment_spec §5.3): a professional (for the player: no ShiftLink shift in 30 days,
+ * which the caller decides), at least badge::VerifiedEvents tournaments that cost something, an ROI of at least
+ * badge::VerifiedRoi and badge::VerifiedBuyIns buy-ins of profit on them, and a tournament within the last
+ * VerifiedActiveDays. Freerolls count toward none of it (S9). badge::VerifiedNow and the world's monthly review both ask
+ * this, so the rule lives in one place.
+ */
+constexpr int VerifiedActiveDays = 30;
+SHORTSTACKCORE_API bool VerifiedRecord(const Tracker& Stats, bool Professional, int DaysSincePlayed);
 
 /** Someone entered in an event. */
 struct Entry
@@ -912,9 +1004,58 @@ public:
 	 * trimmed to fit: a thin night at the Embercrest, to see the minimum field call it off.
 	 */
 	SHORTSTACKCORE_API void SetPlannedEntries(const std::string& EventId, int Entries);
-	/** The player's Player of the Year points this calendar year (online, live). */
+	/** The player's Player of the Year points this calendar year (online, live: Regional events and up, §11 Q3). */
 	double HeroSeasonPoints() const { return HeroPoints; }
 	double HeroSeasonLivePoints() const { return HeroLivePoints; }
+
+	// The badges' world data (next_segment_spec §5.3, §7.3): public facts only.
+	/** The player's circuit points this season, their best circuit card this season, and last season's (CardTier). */
+	double HeroCircuitPoints() const { return HeroCircuit; }
+	int HeroCardBest() const { return HeroCardTop; }
+	int HeroCardLast() const { return HeroCardPrev; }
+	/** The player's record at the Embercrest as the world knows it (their finished entries, from HeroFinished). */
+	const RoomRecord& HeroRoom() const { return HeroRoomRec; }
+	/**
+	 * A room's leaders for a calendar month (MonthKeyOf): who (-1: the player) and their points, most first (ties by id,
+	 * the player first), only people with points, at most Count. The room's side screens and RiverLine's Embercrest page.
+	 */
+	SHORTSTACKCORE_API std::vector<std::pair<int, double>> RoomLeaders(const std::string& Venue, int MonthKey, int Count) const;
+	/** Where someone (-1: the player) stands in circuit points this season, from 1 (0: no points yet). */
+	SHORTSTACKCORE_API int CircuitRank(int Npc) const;
+	/** The points held right now by the last one inside a card's cut (CardRegular: the 200th), 0 when fewer have points. */
+	SHORTSTACKCORE_API double CardCutLine(int Tier) const;
+	/** The Player of the Year titles someone (-1: the player) holds, online and live. */
+	SHORTSTACKCORE_API int PlayerOfYearTitles(int Npc) const;
+	/**
+	 * The Hall of Fame (§5.3), scored each July 15: 3 per bracelet, 1 per ring, 3 per major, 4 per Player of the Year,
+	 * 2·log10(career winnings ÷ $100,000) and the Overall reputation ÷ 20. Eligible: 40 or older, 10 years on the scene,
+	 * high stakes played (live at the Circuit level or above, online High, or a HighStakes reputation of 20), not in yet.
+	 * Npc -1 is the player (eligible only once HeroBorn is known).
+	 */
+	SHORTSTACKCORE_API double HallScore(int Npc, int Year) const;
+	SHORTSTACKCORE_API bool HallEligible(int Npc, int Year) const;
+	/** Whether someone (-1: the player) is in the Hall of Fame, and the class year (0: not in). */
+	SHORTSTACKCORE_API int HallClass(int Npc) const;
+	/** The player's birth year, for the Hall's age rule (0: unknown, never eligible). The session sets it; not saved. */
+	int HeroBorn = 0;
+
+	// Money between the player and the world's people (next_segment_spec §2, applied once by the stake book's flows).
+	/**
+	 * Cents > 0 goes to them (a share paid, a swap settled their way), < 0 comes from them (a stake, a piece bought).
+	 * Their bankroll moves (it never goes below zero), they remember it, and their regard follows §2.9: paid on time
+	 * Trust +0.04 (Early, within a day of the result: +0.06 and Respect +0.02), late Trust −0.10, welched Trust −0.40 and
+	 * Resentment +0.40, walked out Trust −0.30 and Resentment +0.25. Nothing about it is public.
+	 * A late debt is one memory: the mark at the due time (PaidLate, Cents 0) takes the −0.10, and its payment later
+	 * (PaidLate, the same Where) only settles it. PaidUp with Cents < 0 (them paying the player) is a swap settling.
+	 */
+	SHORTSTACKCORE_API void HeroMoney(int Npc, Chips Cents, MemoryKind Kind, const std::string& Where, double At, bool Early = false);
+	/**
+	 * The world's regulars who would back the player online (§2.5): they respect or trust the player ("Respects you",
+	 * "Trusts you"), are playing, have a roll of at least 400 of the player's average buy-ins (freerolls aside) and fewer
+	 * than three horses (the rule at WorldSim.cpp's stakes). Most regard first, ties by id; at most Max. Empty until the
+	 * player has paid for a tournament.
+	 */
+	SHORTSTACKCORE_API std::vector<int> Backers(int Max) const;
 
 	// History.
 	const std::vector<WorldEvent>& Events() const { return Log; }
@@ -1000,6 +1141,12 @@ private:
 	std::array<double, 6> Flow{};     // diagnostics only (not saved)
 	std::map<std::string, std::array<double, 3>> FlowBy;
 	double HeroLivePoints = 0.0;
+	// Version 2 (§7.3, §7.4).
+	int LoadedVersion = Version;      // the version a read world was saved at (Finish migrates an older one, once)
+	double HeroCircuit = 0.0;         // the player's circuit points this season
+	int HeroCardTop = CardNone;       // their best card this season
+	int HeroCardPrev = CardNone;      // last season's
+	RoomRecord HeroRoomRec;           // the player at the Embercrest
 
 	void Refresh(int Id);
 	void RefreshAll();
