@@ -992,7 +992,7 @@ def _skin_material(folder, mesh):
 # setup, after the meshes are in. groom_setup (looks: the groom library's assemblies, about five hours) and anim_setup
 # (people-ue: the mocap bake) are long jobs for the lead's editor session: they never run here, only by hand
 # (run_grooms(), run_anim()).
-REALISM_SETUPS = ("ns_setup", "shops_setup", "garments_setup")
+REALISM_SETUPS = ("ns_setup", "shops_setup", "garments_setup", "segment_art_setup")
 
 
 def _optional(name):

@@ -1,15 +1,26 @@
-"""SM_EnergyCan: an opened 12 oz can of GRIND energy drink, the grinder's fuel.
+"""SM_EnergyCan: an opened 12 oz can of GRIND energy drink, the grinder's fuel; and the sponsors' cans
+(next_segment_spec 3.10): SM_EnergyCan_VoltRush (blue and lime, the bolt) and SM_EnergyCan_Overclock (lime and ink, the
+tachometer), which ANightOneStage::AddCan puts on the desk while that energy deal runs. Their marks are the game's own
+(sponsorart::Mark, through art/blender/sponsors.py).
 
 Standard 211/202 can proportions (66.2 mm body, 122 mm tall). The label is laid out flat,
-rendered, and wrapped around the body; the lid, rim and base are bare aluminum.
+rendered, and wrapped around the body; the lid, rim and base are bare aluminum. The label's front (the mark) faces -Y.
 """
 import math
+import os
+import random
+import sys
 
 from artkit import core
 from artkit.sheet import Sheet
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import sponsors  # noqa: E402
+
 NAME = 'SM_EnergyCan'
-MESHES = [NAME]
+VARIANTS = [NAME, NAME + '_VoltRush', NAME + '_Overclock']
+MESHES = list(VARIANTS)
+REVIEW_VIEWS = [('front', -4, 10, 3.6, (0.0, 0.0, 0.06)), ('back', 176, 10, 3.6, (0.0, 0.0, 0.06)), ('detail', -12, 12, 1.0, (0.08, 0.0, 0.062))]
 BODY_R = 0.0331
 LABEL_Z0 = 0.0135
 LABEL_Z1 = 0.1058
@@ -112,11 +123,8 @@ def aluminum(m, rough=0.2):
     return r
 
 
-def build():
-    core.reset()
-    color_path, surface_path = label()
-    core.reset()
-
+def make_can(name, color_path, surface_path):
+    """One can, its label printed from the rendered sheet (color_path, surface_path)."""
     body = core.lathe('can_body', profile(), segments=144)
     # The opening, punched through the lid in front of the rivet (+X), is a pocket into the dark can.
     opening = core.rounded_profile(
@@ -194,5 +202,140 @@ def build():
     small = core.join([tab, rivet], 'can_tab_parts')
     core.smart_uv(small, margin=0.03)
 
-    obj = core.join([body, small], NAME)
-    return [obj]
+    obj = core.join([body, small], name)
+    return obj
+
+
+# ------------------------------------------------------------------ the sponsors' cans (Volt Rush, Overclock)
+
+LABEL_W = 2 * math.pi * BODY_R * 1000
+LABEL_H = (LABEL_Z1 - LABEL_Z0) * 1000
+
+
+def _bands(s, lo, hi, steps=32, metal=0.25, rough=0.3):
+    """The field, from lo at the foot to hi at the shoulder (bands stand in for a gradient under the varnish)."""
+    for k in range(steps):
+        t = k / (steps - 1)
+        s.rect(0, LABEL_H * k / steps, LABEL_W, LABEL_H / steps + 0.05, sponsors.mix(lo, hi, t), metal=metal, rough=rough)
+
+
+def _mark(s, brand_id, cx, cy, d, metal=0.2, rough=0.3):
+    """The brand's mark (sponsorart::Mark) in a d-wide box centred on (cx, cy), millimetres."""
+    p = sponsors.Pen(s, cx - d / 2, cy + d / 2, d / 100.0, metal=metal, rough=rough)
+    sponsors.mark(p, sponsors.BY_ID[brand_id], 50.0, 50.0, 100.0)
+
+
+def _back_panel(s, claims, seed, small_ink):
+    """The nutrition panel and the barcode on the back, as GRIND's: claims are (name, value) rows."""
+    px, py, pw, ph = 138.0, 12.0, 40.0, 68.0
+    s.rect(px, py, pw, ph, 0xe9ede4, metal=0.0, rough=0.42)
+    s.text('Nutrition Facts', px + 2, py + ph - 7, 4.6, 0x0b0b0b, face='Black')
+    s.rect(px + 2, py + ph - 9.5, pw - 4, 0.9, 0x0b0b0b)
+    y = py + ph - 14
+    for name, val in claims:
+        s.text(name, px + 2, y, 2.6, 0x151515, face='Bold' if name in ('Calories', 'Total Carb.') else 'Regular')
+        s.text(val, px + pw - 2, y, 2.6, 0x151515, face='Bold', align='RIGHT')
+        s.rect(px + 2, y - 1.2, pw - 4, 0.25, 0x333333)
+        y -= 4.3
+    s.text('Not for children, pregnant women or people', px + 2, py + 6.5, 1.55, 0x333333, face='Regular')
+    s.text('sensitive to caffeine. Do not exceed 2 cans a day.', px + 2, py + 4.3, 1.55, 0x333333, face='Regular')
+    bx = 184.0
+    s.rect(bx, 20, 18, 12, 0xf4f4f0)
+    rnd = random.Random(seed)
+    x = bx + 1.5
+    while x < bx + 16.5:
+        bw = rnd.choice((0.25, 0.25, 0.5, 0.75))
+        s.rect(x, 23, bw, 8, 0x080808)
+        x += bw + rnd.choice((0.25, 0.5, 0.5))
+    digits = '0 {:05d} {:05d} {:d}'.format(rnd.randrange(100000), rnd.randrange(100000), rnd.randrange(10))
+    s.text(digits, bx + 9, 20.8, 1.7, 0x080808, face='Regular', align='CENTER')
+    s.text('CA CASH REFUND  ME HI VT 5\xa2  MI 10\xa2', bx + 9, 44, 1.6, small_ink, face='Bold', align='CENTER')
+    s.text('RECYCLE ME', bx + 9, 48, 2.2, small_ink, face='Black', align='CENTER', tracking=1.3)
+
+
+def label_voltrush():
+    """Volt Rush: electric blue, the bolt in its black disc on the front, VOLT RUSH in lime under it, a can-black
+    shoulder band (the cans by the laptop are blue and lime now)."""
+    lime, black = 0xb6ff2e, 0x16181d
+    w, h = LABEL_W, LABEL_H
+    s = Sheet(w, h)
+    _bands(s, 0x0a2a86, 0x2163e8)
+    # Speed lines across the sides and the back, off the front.
+    for x0, y0, L, t in ((88, 70, 34, 1.1), (96, 64, 22, 0.6), (110, 30, 30, 0.9), (186, 64, 26, 0.8), (178, 12, 24, 0.6), (8, 28, 20, 0.7)):
+        s.poly([(x0, y0), (x0 + L, y0 + L * 0.42), (x0 + L, y0 + L * 0.42 + t), (x0, y0 + t)], 0x5b95ff, metal=0.35, rough=0.25)
+    s.rect(0, h - 11.4, w, 11.4, black, metal=0.15, rough=0.3)
+    s.rect(0, h - 12.2, w, 0.8, lime, metal=0.3, rough=0.28)
+    s.rect(0, 1.2, w, 1.6, lime, metal=0.3, rough=0.28)
+    for x in (52.0, 156.0):
+        s.text('ENERGY DRINK', x, h - 7.4, 3.6, lime, face='Black', align='CENTER', tracking=1.6, metal=0.3, rough=0.28)
+    # The front: the mark, the name.
+    cx = 52.0
+    _mark(s, 'voltrush', cx, 57.0, 40.0)
+    s.text('VOLT', cx, 23.5, 13.0, lime, face='Black', align='CENTER', tracking=1.04, metal=0.35, rough=0.25)
+    s.text('RUSH', cx, 9.0, 13.0, lime, face='Black', align='CENTER', tracking=1.04, metal=0.35, rough=0.25)
+    # The flavour and the claims on the side.
+    sx = 104.0
+    s.rect(sx - 15, 61, 30, 9, lime, metal=0.3, rough=0.28)
+    s.text('BLUE CHARGE', sx, 64, 3.6, black, face='Black', align='CENTER', tracking=1.15)
+    s.text('ORIGINAL', sx, 49, 7.2, 0xf2f5ff, face='Black', align='CENTER', tracking=1.05)
+    s.text('200 MG CAFFEINE', sx, 31, 3.2, 0xb9d0ff, face='Bold', align='CENTER', tracking=1.3)
+    s.text('12 FL OZ (355 mL)', sx, 16, 3.4, 0xf2f5ff, face='Bold', align='CENTER', tracking=1.2)
+    # By the seam: the bolt again, and the line.
+    _mark(s, 'voltrush', 11.0, 58.0, 17.0)
+    s.text('STAY CHARGED', 11.0, 45.0, 2.4, lime, face='Black', align='CENTER', tracking=1.3)
+    _back_panel(s, [('Serving size', '1 can'), ('Calories', '110'), ('Total Fat', '0g'), ('Sodium', '180mg'), ('Total Carb.', '28g'),
+                    ('Total Sugars', '27g'), ('Protein', '0g'), ('Niacin', '100%'), ('Vitamin B6', '200%'), ('Vitamin B12', '300%')], 21, 0xb9d0ff)
+    return s.render('can_label_voltrush', 2048)
+
+
+def label_overclock():
+    """Overclock: lime with its ink, the tachometer pinned past the red on the front, OVERCLOCK under it, rev-counter
+    ticks round the shoulder; zero sugar (the stream reads say so)."""
+    ink, red = 0x0b0716, 0xe23b3b
+    w, h = LABEL_W, LABEL_H
+    s = Sheet(w, h)
+    _bands(s, 0x6aa611, 0x9adf24)
+    # The shoulder: an ink band with a rev counter's ticks along it, every fifth long, the last few red.
+    s.rect(0, h - 11.4, w, 11.4, ink, metal=0.15, rough=0.3)
+    for k in range(int(w / 2.6)):
+        x = 1.3 + k * 2.6
+        tall = k % 5 == 0
+        s.rect(x - 0.3, h - 11.4 + 1.4, 0.6, 4.2 if tall else 2.4, red if (k % 40) >= 34 else 0xa3e635, metal=0.3, rough=0.28)
+    s.rect(0, 0, w, 6.5, ink, metal=0.15, rough=0.3)
+    for x in (52.0, 156.0):
+        s.text('ZERO SUGAR', x, 2.1, 3.0, 0xa3e635, face='Black', align='CENTER', tracking=1.5, metal=0.3, rough=0.28)
+    # The front: the gauge on an ink disc with its red zone, the name, ENERGY.
+    cx = 52.0
+    s.circle(cx, 57.0, 21.0, ink, n=160, metal=0.15, rough=0.3)
+    s.ring(cx, 57.0, 19.1, 20.5, red, n=96, a0=-0.15, a1=0.75, metal=0.3, rough=0.28)
+    _mark(s, 'overclock', cx, 57.0, 36.0)
+    s.text('OVERCLOCK', cx, 25.0, 8.4, ink, face='Black', align='CENTER', tracking=1.0, metal=0.1, rough=0.3)
+    s.text('ENERGY', cx, 15.5, 4.4, ink, face='Bold', align='CENTER', tracking=2.1, metal=0.1, rough=0.3)
+    # The flavour and the claims on the side.
+    sx = 104.0
+    s.rect(sx - 14, 61, 28, 9, red, metal=0.2, rough=0.3)
+    s.text('REDLINE', sx, 64, 4.0, 0xffffff, face='Black', align='CENTER', tracking=1.2)
+    s.text('CHERRY', sx, 49, 7.0, ink, face='Black', align='CENTER', tracking=1.05)
+    s.text('LIME', sx, 40, 7.0, ink, face='Black', align='CENTER', tracking=1.05)
+    s.text('150 MG CAFFEINE', sx, 29, 3.2, ink, face='Bold', align='CENTER', tracking=1.3)
+    s.text('12 FL OZ (355 mL)', sx, 14, 3.4, ink, face='Bold', align='CENTER', tracking=1.2)
+    # By the seam: the gauge again, and a line for the grinders.
+    _mark(s, 'overclock', 11.0, 58.0, 17.0)
+    s.text('FUEL THE GRIND', 11.0, 45.0, 2.2, ink, face='Black', align='CENTER', tracking=1.2)
+    _back_panel(s, [('Serving size', '1 can'), ('Calories', '10'), ('Total Fat', '0g'), ('Sodium', '170mg'), ('Total Carb.', '2g'),
+                    ('Total Sugars', '0g'), ('Protein', '0g'), ('Niacin', '120%'), ('Vitamin B6', '250%'), ('Vitamin B12', '250%')], 33, 0x2b3a12)
+    return s.render('can_label_overclock', 2048)
+
+
+def build():
+    core.reset()
+    labels = {NAME: label(), NAME + '_VoltRush': label_voltrush(), NAME + '_Overclock': label_overclock()}
+    core.reset()
+    return [make_can(name, *labels[name]) for name in VARIANTS]
+
+
+def pose_for_review(objs):
+    """GRIND, Volt Rush and Overclock in a row, their fronts to the camera."""
+    for o in objs:
+        if o.name in VARIANTS:
+            o.location = ((VARIANTS.index(o.name) - 1) * 0.08, 0.0, 0.0)
