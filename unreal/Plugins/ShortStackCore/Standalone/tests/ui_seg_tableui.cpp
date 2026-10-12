@@ -1423,6 +1423,21 @@ void DeskAndCage()
 		DeskFrame(Ms, Dm, 1920.0f, Now + 1.1);
 		Ms.Key("X", Now + 1.1);
 		Expect(Ms.TakeRequests().empty(), "desk: no appearance offered, none answered");
+		// Another sponsor's appearance open now (the Lucky Penny's photo at Ray's counter) isn't the desk's, even listed first.
+		sponsor::Window Photo;
+		Photo.Venue = "store";
+		Photo.Label = "Lucky Penny photo";
+		Photo.From = D.World - 60.0;
+		Photo.To = D.World + 120.0;
+		Dm.Duties = {Photo};
+		const ui::DrawList Lp = DeskFrame(Ms, Dm, 1920.0f, Now + 1.5);
+		Ms.Key("F", Now + 1.5);
+		Expect(!Says(Lp, "Lucky Penny photo") && Ms.TakeRequests().empty(), "desk: another sponsor's appearance isn't offered at the desk");
+		Dm.Duties = {Photo, Meet};
+		DeskFrame(Ms, Dm, 1920.0f, Now + 1.9);
+		Ms.Key("F", Now + 1.9);
+		Rm = Ms.TakeRequests();
+		Expect(Rm.size() == 1 && Rm[0].Id == "embercrest", "desk: F answers the Embercrest's own appearance, not the first open one");
 	}
 	S.Key("Escape", Now + 2.2);
 	R = S.TakeRequests();

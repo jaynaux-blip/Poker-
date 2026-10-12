@@ -1221,6 +1221,13 @@ void LadderAt(Canvas& C, const TableHudInfo& I, float Ax, float Ay, bool Wide)
 	const float Gap = 8.0f;
 	float Ry = Ay - Fl(static_cast<int>(Rungs.size())) * (Rh + Gap) + Gap;
 	const float RungsTop = Ry;
+	// A soft midnight backing under the whole ladder, its header and presets too (the plates draw first): a plate the layout
+	// couldn't keep off it (the spots beside it were over a face, which costs more) doesn't read through what the player is
+	// about to press. (At the Nightly's first decision a plate read across "EFFECTIVE 100 BB" and the preset keys.)
+	{
+		const float Top0 = I.CanRaise && !I.Presets.empty() ? RungsTop - 12.0f - (Wide ? 42.0f : 30.0f) - (Pad ? 0.0f : 16.0f) : RungsTop;
+		C.GlowRoundRect({X - 16.0f, Top0 - 64.0f, LadderW + 32.0f, Ay - Top0 + 80.0f}, 18.0f, Fa(Midnight, 0.8f), 22.0f);
+	}
 	for (const Rung& R : Rungs)
 	{
 		const Control* K = FindControl(ControlContext::Table, R.Id);

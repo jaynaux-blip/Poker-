@@ -140,12 +140,13 @@ bool Registered(const DeskInfo& I, const std::string& Id)
 	return I.Entry && I.Entry->Id == Id && I.Entry->State == life::LiveEntry::Registered;
 }
 
-/** The appearance the desk offers: the first whose window is open at the desk's clock and that isn't done yet. */
+/** The appearance the desk offers: the first of the Embercrest's own (Meet the regulars) whose window is open at the desk's
+ *  clock and that isn't done yet. Another sponsor's (the Lucky Penny's photo at Ray's counter) is made where it's due. */
 const sponsor::Window* OpenDuty(const DeskInfo& I)
 {
 	for (const sponsor::Window& Wd : I.Duties)
 	{
-		if (I.World >= Wd.From && I.World <= Wd.To && !Wd.Done)
+		if (Wd.Venue == "embercrest" && I.World >= Wd.From && I.World <= Wd.To && !Wd.Done)
 		{
 			return &Wd;
 		}
