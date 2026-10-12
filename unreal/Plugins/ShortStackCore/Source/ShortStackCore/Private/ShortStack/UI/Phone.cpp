@@ -2,6 +2,7 @@
 #include "../StrictFloat.h"
 
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Network.h"
 #include "ShortStack/UI/Ui.h"
 
 namespace ss
@@ -33,7 +34,7 @@ double PhoneScreen::Brightness(double Now) const
 	return Level > 0.15 ? Level : 0.15;
 }
 
-void PhoneScreen::Draw(Canvas& C, double ClockMinutes) const
+void PhoneScreen::Draw(Canvas& C, double ClockMinutes, double WorldMinutes) const
 {
 	const float W = Width;
 	const float H = Height;
@@ -41,7 +42,9 @@ void PhoneScreen::Draw(Canvas& C, double ClockMinutes) const
 	std::string Time = ClockString(ClockMinutes);
 	Time = Time.substr(0, Time.find(' '));
 	C.Text(Time, W / 2.0f, 170.0f, Ts(96.0f, 300, Hex(0xffffff), Align::Center));
-	C.Text("Wednesday", W / 2.0f, 210.0f, Ts(22.0f, 500, Rgba(255, 255, 255, 0.75f), Align::Center));
+	// The world's day, as the laptop's top bar shows it.
+	const int Day = net::DayOf(WorldMinutes);
+	C.Text(std::string(net::WeekdayName(Day, true)) + ", " + net::DateLabel(Day), W / 2.0f, 210.0f, Ts(22.0f, 500, Rgba(255, 255, 255, 0.75f), Align::Center));
 	float Y = 260.0f;
 	for (const Message& M : Messages)
 	{

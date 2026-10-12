@@ -17,7 +17,8 @@ public:
 	SHORTSTACKCORE_API void Notify(const std::string& From, const std::string& Body, double Now);
 	/** Screen brightness 0..1 at Now (0 when dark). */
 	SHORTSTACKCORE_API double Brightness(double Now) const;
-	SHORTSTACKCORE_API void Draw(Canvas& C, double ClockMinutes) const;
+	/** ClockMinutes is the clock shown; WorldMinutes gives the date under it ("Saturday, Oct 10"). */
+	SHORTSTACKCORE_API void Draw(Canvas& C, double ClockMinutes, double WorldMinutes) const;
 
 private:
 	struct Message

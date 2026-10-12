@@ -322,7 +322,7 @@ void Results()
 	TableMeasurer M;
 	ss::ui::DrawList L;
 	ss::ui::Canvas C(L, M, ss::ui::PhoneScreen::Width, ss::ui::PhoneScreen::Height, 1.0f);
-	Phone.Draw(C, 127.0);
+	Phone.Draw(C, 127.0, ss::net::NightOneDay * ss::net::MinutesPerDay + 127.0);
 	Expect(Phone.Brightness(Now + 1.0) > 0.9 && Phone.Brightness(Now + 20.0) == 0.0, "phone lights up then sleeps");
 	std::printf("  %-14s %6zu vertices\n", "phone", L.Vertices.size());
 	if (!OutDir.empty())

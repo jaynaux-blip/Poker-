@@ -2030,7 +2030,7 @@ void ANightOneGameMode::Tick(float DeltaSeconds)
 		PhoneAccum = 0.0;
 		TSharedPtr<ss::ui::DrawList> List = PhoneHint.Make();
 		ss::ui::Canvas Cv(*List, Game->Measurer, ss::ui::PhoneScreen::Width, ss::ui::PhoneScreen::Height, 1.0f);
-		Game->Phone.Draw(Cv, Clock);
+		Game->Phone.Draw(Cv, Clock, S.WorldMinutes());
 		PhoneHint.Note(*List);
 		Stage->SetPhoneDrawList(List);
 	}
