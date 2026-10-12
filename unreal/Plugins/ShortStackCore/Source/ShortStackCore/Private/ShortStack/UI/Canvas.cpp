@@ -1184,22 +1184,34 @@ void Canvas::Replay(const Fragment& F, float Dx, float Dy)
 			{
 				break;
 			}
+			// Copied in whole, then moved into place (the Leaderboards replay a few dozen glyphs a frame: §10).
 			const uint32_t Base = Out.BeginTriangles(Cmd.VertexCount);
 			const size_t V0 = Out.Vertices.size();
-			Out.Vertices.resize(V0 + Cmd.VertexCount);
-			for (uint32_t K = 0; K < Cmd.VertexCount; ++K)
+			Out.Vertices.insert(Out.Vertices.end(), F.Vertices.begin() + Cmd.VertexStart, F.Vertices.begin() + Cmd.VertexStart + Cmd.VertexCount);
+			Vertex* Dst = Out.Vertices.data() + V0;
+			if (Alpha == 1.0f)
 			{
-				Vertex V = F.Vertices[Cmd.VertexStart + K];
-				V.X += Dx;
-				V.Y += Dy;
-				V.Col.A *= Alpha;
-				Out.Vertices[V0 + K] = V;
+				for (uint32_t K = 0; K < Cmd.VertexCount; ++K)
+				{
+					Dst[K].X += Dx;
+					Dst[K].Y += Dy;
+				}
+			}
+			else
+			{
+				for (uint32_t K = 0; K < Cmd.VertexCount; ++K)
+				{
+					Dst[K].X += Dx;
+					Dst[K].Y += Dy;
+					Dst[K].Col.A *= Alpha;
+				}
 			}
 			const size_t I0 = Out.Indices.size();
-			Out.Indices.resize(I0 + Cmd.IndexCount);
+			Out.Indices.insert(Out.Indices.end(), F.Indices.begin() + Cmd.IndexStart, F.Indices.begin() + Cmd.IndexStart + Cmd.IndexCount);
+			uint32_t* Idx = Out.Indices.data() + I0;
 			for (uint32_t K = 0; K < Cmd.IndexCount; ++K)
 			{
-				Out.Indices[I0 + K] = F.Indices[Cmd.IndexStart + K] + Base;
+				Idx[K] += Base;
 			}
 			Out.Cmds.back().VertexCount += Cmd.VertexCount;
 			Out.Cmds.back().IndexCount += Cmd.IndexCount;

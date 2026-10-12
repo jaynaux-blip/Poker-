@@ -28,15 +28,17 @@ constexpr int IdentityRows = 5; // first name, last name, screen name, age, coun
 constexpr size_t UndoDepth = 12;
 
 // The Embercrest's brand (art/blender/brand.py): midnight navy grounds, ash-white peaks and type, ember and gold light.
-const uint32_t EcMidnight = 0x0a1020;
-const uint32_t EcSlate = 0x1d2a47;
-const uint32_t EcIce = 0x8d9ab4;
-const uint32_t EcAsh = 0xebe7df;
-const uint32_t EcEmberDeep = 0x9e2f0c;
-const uint32_t EcEmber = 0xff6a24;
-const uint32_t EcEmberHot = 0xf2832e;
-const uint32_t EcGold = 0xf6b04a;
-const uint32_t EcFlame = 0xffd78a;
+// (Named Brand*, not Ec* like RiverLineShared.h's: both files' detail namespaces are used at namespace scope, so in
+// a unity blob one spelling would make the other ambiguous; the creator's ember is its own, brighter one.)
+const uint32_t BrandMidnight = 0x0a1020;
+const uint32_t BrandSlate = 0x1d2a47;
+const uint32_t BrandIce = 0x8d9ab4;
+const uint32_t BrandAsh = 0xebe7df;
+const uint32_t BrandEmberDeep = 0x9e2f0c;
+const uint32_t BrandEmber = 0xff6a24;
+const uint32_t BrandEmberHot = 0xf2832e;
+const uint32_t BrandGold = 0xf6b04a;
+const uint32_t BrandFlame = 0xffd78a;
 
 float Fc(int V)
 {
@@ -239,19 +241,19 @@ void EmbercrestMark(Canvas& C, float Cx, float Cy, float Size, const Color& Grou
 	auto P = [&](float Px, float Py) { return Vec2{Cx + Px * U, Base - Py * U}; };
 	// The ember: a glow, then the disc from deep ember at its rim to gold low down, where it breaks over the ridge.
 	const Vec2 E = P(0.0f, 42.0f);
-	C.FillCircle(E.X, E.Y, 50.0f * U, Paint::Radial(E, 0.0f, E, 50.0f * U, Hex(EcEmberHot, 0.3f), 0.55f, Hex(EcEmberHot, 0.1f), Hex(EcEmberHot, 0.0f)));
-	C.FillCircle(E.X, E.Y, 34.0f * U, Paint::Radial({E.X, E.Y + 9.0f * U}, 0.0f, E, 34.0f * U, Hex(EcFlame), 0.45f, Hex(EcEmberHot), Hex(EcEmberDeep)));
+	C.FillCircle(E.X, E.Y, 50.0f * U, Paint::Radial(E, 0.0f, E, 50.0f * U, Hex(BrandEmberHot, 0.3f), 0.55f, Hex(BrandEmberHot, 0.1f), Hex(BrandEmberHot, 0.0f)));
+	C.FillCircle(E.X, E.Y, 34.0f * U, Paint::Radial({E.X, E.Y + 9.0f * U}, 0.0f, E, 34.0f * U, Hex(BrandFlame), 0.45f, Hex(BrandEmberHot), Hex(BrandEmberDeep)));
 	// The crest in front of it.
 	C.FillPolygon({P(-51.0f, -1.5f), P(-26.0f, 37.5f), P(-15.0f, 25.5f), P(0.0f, 64.0f), P(13.0f, 32.5f), P(25.0f, 43.5f), P(51.0f, -1.5f)}, Paint(Ground));
-	C.FillPolygon({P(-48.0f, 0.0f), P(-26.0f, 34.0f), P(-15.0f, 22.0f), P(0.0f, 60.0f), P(13.0f, 29.0f), P(25.0f, 40.0f), P(48.0f, 0.0f)}, Paint(Hex(EcAsh)));
+	C.FillPolygon({P(-48.0f, 0.0f), P(-26.0f, 34.0f), P(-15.0f, 22.0f), P(0.0f, 60.0f), P(13.0f, 29.0f), P(25.0f, 40.0f), P(48.0f, 0.0f)}, Paint(Hex(BrandAsh)));
 	// The faces away from the light, one per peak, and snow on the high one's lit face.
-	C.FillPolygon({P(-26.0f, 34.0f), P(-15.0f, 22.0f), P(-13.0f, 0.0f), P(-21.0f, 0.0f)}, Paint(Hex(EcIce)));
-	C.FillPolygon({P(0.0f, 60.0f), P(13.0f, 29.0f), P(15.0f, 0.0f), P(3.0f, 0.0f)}, Paint(Hex(EcIce)));
-	C.FillPolygon({P(25.0f, 40.0f), P(48.0f, 0.0f), P(31.0f, 0.0f)}, Paint(Hex(EcIce)));
+	C.FillPolygon({P(-26.0f, 34.0f), P(-15.0f, 22.0f), P(-13.0f, 0.0f), P(-21.0f, 0.0f)}, Paint(Hex(BrandIce)));
+	C.FillPolygon({P(0.0f, 60.0f), P(13.0f, 29.0f), P(15.0f, 0.0f), P(3.0f, 0.0f)}, Paint(Hex(BrandIce)));
+	C.FillPolygon({P(25.0f, 40.0f), P(48.0f, 0.0f), P(31.0f, 0.0f)}, Paint(Hex(BrandIce)));
 	C.FillPolygon({P(0.0f, 60.0f), P(-8.0f, 43.0f), P(-4.5f, 46.5f), P(-1.5f, 42.0f), P(1.6f, 49.0f)}, Paint(Hex(0xffffff)));
 	// The ground line, parted under the high peak.
-	C.FillRect({Cx - 48.0f * U, Base + 4.1f * U, 45.0f * U, 2.4f * U}, Paint(Hex(EcEmberHot)));
-	C.FillRect({Cx + 3.0f * U, Base + 4.1f * U, 45.0f * U, 2.4f * U}, Paint(Hex(EcEmberHot)));
+	C.FillRect({Cx - 48.0f * U, Base + 4.1f * U, 45.0f * U, 2.4f * U}, Paint(Hex(BrandEmberHot)));
+	C.FillRect({Cx + 3.0f * U, Base + 4.1f * U, 45.0f * U, 2.4f * U}, Paint(Hex(BrandEmberHot)));
 }
 
 /** A die, for the randomize button when its label won't fit. */
@@ -1370,33 +1372,33 @@ void FrontEnd::PlayersCard(const Rect& R, double Now)
 {
 	const hero::BackgroundInfo& Bi = hero::InfoOf(Draft.Story);
 	const float In = Ease((Now - StageAt) / 0.5);
-	const Color Gold = Hex(EcGold);
-	const Color Ash = Hex(EcAsh);
-	const Color Ice = Hex(EcIce);
+	const Color Gold = Hex(BrandGold);
+	const Color Ash = Hex(BrandAsh);
+	const Color Ice = Hex(BrandIce);
 	// The Embercrest's card: midnight navy, the ember warming its corner, a gold edge and a foil sweep.
 	C->GlowRoundRect({R.X, R.Y + 10.0f, R.W, R.H}, 22.0f, F(Hex(0x000000), 0.6f * In), 36.0f);
-	C->FillRoundRect(R, 22.0f, Paint::Linear({R.X, R.Y}, {R.X + R.W, R.Y + R.H}, F(Hex(EcSlate)), F(Hex(EcMidnight))));
+	C->FillRoundRect(R, 22.0f, Paint::Linear({R.X, R.Y}, {R.X + R.W, R.Y + R.H}, F(Hex(BrandSlate)), F(Hex(BrandMidnight))));
 	C->PushClip({R.X + 12.0f, R.Y + 12.0f, R.W - 24.0f, R.H - 24.0f});
 	C->FillCircle(R.X + 46.0f, R.Y + 48.0f, 220.0f,
-		Paint::Radial({R.X + 46.0f, R.Y + 48.0f}, 0.0f, {R.X + 46.0f, R.Y + 48.0f}, 220.0f, F(Hex(EcEmber), 0.16f), 0.45f, F(Hex(EcEmber), 0.04f), F(Hex(EcEmber), 0.0f)));
+		Paint::Radial({R.X + 46.0f, R.Y + 48.0f}, 0.0f, {R.X + 46.0f, R.Y + 48.0f}, 220.0f, F(Hex(BrandEmber), 0.16f), 0.45f, F(Hex(BrandEmber), 0.04f), F(Hex(BrandEmber), 0.0f)));
 	{
 		// The crest again, large and faint, low on the right: a watermark.
 		const float A0 = C->GetAlpha();
 		C->SetAlpha(A0 * Fade * 0.05f);
-		EmbercrestMark(*C, R.X + R.W - 96.0f, R.Y + R.H - 150.0f, 240.0f, Hex(EcMidnight));
+		EmbercrestMark(*C, R.X + R.W - 96.0f, R.Y + R.H - 150.0f, 240.0f, Hex(BrandMidnight));
 		C->SetAlpha(A0);
 	}
 	const float Sweep = static_cast<float>(std::fmod(Now * 0.25, 1.6)) - 0.3f;
 	const float Bx = R.X + Sweep * R.W;
 	C->FillPolygon({{Bx, R.Y}, {Bx + 120.0f, R.Y}, {Bx - 60.0f, R.Y + R.H}, {Bx - 180.0f, R.Y + R.H}},
-		Paint::Linear({Bx - 180.0f, 0.0f}, {Bx + 120.0f, 0.0f}, F(Hex(EcEmber), 0.0f), F(Gold, 0.1f)));
+		Paint::Linear({Bx - 180.0f, 0.0f}, {Bx + 120.0f, 0.0f}, F(Hex(BrandEmber), 0.0f), F(Gold, 0.1f)));
 	C->PopClip();
 	C->StrokeRoundRect({R.X + 0.75f, R.Y + 0.75f, R.W - 1.5f, R.H - 1.5f}, 22.0f, F(Gold, 0.4f), 1.5f);
 	// Header: the mark, the wordmark and the club.
 	{
 		const float A0 = C->GetAlpha();
 		C->SetAlpha(A0 * Fade);
-		EmbercrestMark(*C, R.X + 48.0f, R.Y + 50.0f, 52.0f, Hex(EcSlate));
+		EmbercrestMark(*C, R.X + 48.0f, R.Y + 50.0f, 52.0f, Hex(BrandSlate));
 		C->SetAlpha(A0);
 	}
 	TrackedText(*C, "EMBERCREST", R.X + 86.0f, R.Y + 46.0f, 20.0f, 900, F(Ash), 5.0f);
@@ -1405,7 +1407,7 @@ void FrontEnd::PlayersCard(const Rect& R, double Now)
 	C->FillRoundRect({R.X + R.W - 28.0f - Pw, R.Y + 30.0f, Pw, 26.0f}, 13.0f, Paint(F(Gold, 0.16f)));
 	C->StrokeRoundRect({R.X + R.W - 28.0f - Pw, R.Y + 30.0f, Pw, 26.0f}, 13.0f, F(Gold, 0.45f), 1.0f);
 	TrackedText(*C, "NEW MEMBER", R.X + R.W - 28.0f - Pw * 0.5f, R.Y + 48.0f, 11.0f, 800, F(Gold), 2.4f, Align::Center);
-	C->FillRect({R.X + 28.0f, R.Y + 76.0f, R.W - 56.0f, 1.0f}, Paint::Linear({R.X + 28.0f, 0.0f}, {R.X + R.W - 28.0f, 0.0f}, F(Hex(EcEmber), 0.5f), F(Gold, 0.0f)));
+	C->FillRect({R.X + 28.0f, R.Y + 76.0f, R.W - 56.0f, 1.0f}, Paint::Linear({R.X + 28.0f, 0.0f}, {R.X + R.W - 28.0f, 0.0f}, F(Hex(BrandEmber), 0.5f), F(Gold, 0.0f)));
 	// Photo, with a flash as the card is printed.
 	const Rect Ph{R.X + 28.0f, R.Y + 90.0f, 196.0f, 218.0f};
 	C->FillRoundRect(Ph, 12.0f, Paint::Linear({0.0f, Ph.Y}, {0.0f, Ph.Y + Ph.H}, F(Hex(0x24304d)), F(Hex(0x0c1222))));

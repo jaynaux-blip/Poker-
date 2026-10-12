@@ -255,6 +255,16 @@ protected:
 	 * the sheet shows, and draws it again when that changed (a new day, an entry, the rent).
 	 */
 	void UpdateCalendar(float DeltaSeconds);
+	/**
+	 * The sponsors at home (next_segment_spec 3.10, ue-wear), twice a second from the running career: the desk's cans are the
+	 * energy deal's while it runs (Volt Rush's, Overclock's: SM_EnergyCan_<Brand>), and a taped box sits by the door for a
+	 * day after a delivery lands (a product case on its Monday, the gear or the kit a deal sends when it's signed).
+	 */
+	void UpdateSponsorProps(float DeltaSeconds);
+	/** The can the desk's empties wear for a brand ("" or a brand with no can of its own: the GRIND can). */
+	UStaticMesh* CanMeshFor(const FString& Brand);
+	/** The kit box for a brand (a product case, else a kit's carton) by the door, or none for an empty Brand. */
+	void ShowKitBox(const FString& Brand, bool bCase);
 
 	/** 0 by day .. 1 at night, for what a photocell switches (the lamps over the street, the neon): set by ApplyHour. */
 	float NightLevel() const { return Night; }
@@ -431,6 +441,22 @@ protected:
 	bool bLedsShown = false;
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> Cans;
+	// The sponsors at home (UpdateSponsorProps): the brands' cans, the kit box and its shipping label.
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> BrandCanMeshes[2];
+	bool bBrandCansLooked = false;
+	UPROPERTY(Transient)
+	TObjectPtr<USceneComponent> KitBox;
+	/** The product case and the kit's carton (one shown), and the shipping label on the lid. */
+	UPROPERTY(Transient)
+	TObjectPtr<USceneComponent> KitParts[2];
+	UPROPERTY(Transient)
+	TObjectPtr<UWidgetComponent> KitLabel;
+	TSharedPtr<SDrawListWidget> KitSlate;
+	/** The brand the desk's cans wear ("" the GRIND can), and what's by the door ("<brand>|case" or "<brand>|kit"; "" none). */
+	FString CanBrand;
+	FString KitShown;
+	float SponsorCheck = 0.0f;
 
 	// GearDrop's gear and the career's mementos (BuildGear): one group per piece, hidden unless owned.
 	UPROPERTY()

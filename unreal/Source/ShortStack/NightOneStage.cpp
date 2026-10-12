@@ -14,9 +14,13 @@
 #include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "DeeRoomStage.h"
 #include "NightOneGameMode.h"
+#include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/UI/PropArt.h"
 #include "ShortStack/UI/SecondScreen.h"
+#include "ShortStack/UI/SponsorArt.h"
 #include "SlateDrawList.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -56,6 +60,62 @@ const float CalendarNightTint = 0.11f;
 // The overcast sky's grey, and the grey of the light it gives through a window.
 const uint32 DaySkyHex = 0xd5dbe4;
 const uint32 DayLightHex = 0xc9d3e0;
+
+// ------------------------------------------------------------------ the sponsors at home (ue-wear, spec 3.10)
+// Testing (ss.Wear.Kit, ss.Wear.Cans): what the door and the desk show whatever the career says ("" as it says).
+FString TestKit;
+FString TestCans;
+
+/**
+ * The latest delivery a sponsor made to the door in the day before World: its brand, and whether it's a product case
+ * (Volt Rush's 12-pack, Mondays at 11:20, once the book has delivered it) or the carton a deal's gear or kit comes in (sent
+ * when it's signed: Halo's camera, Sitwell's chair, Stacked's kit; not a gym membership).
+ */
+bool LatestDelivery(const ss::sponsor::Book& B, double World, FString& OutBrand, bool& bOutCase)
+{
+	using namespace ss::sponsor;
+	double Best = -1.0;
+	for (const Contract& C : B.Contracts)
+	{
+		if ((C.St != State::Active && C.St != State::Notice) || C.Since > World)
+		{
+			continue;
+		}
+		for (const Perk& Pk : C.T.Perks)
+		{
+			double At = -1.0;
+			bool bCase = false;
+			if (Pk.Kind == Gift::Product)
+			{
+				const int Day = ss::net::DayOf(World);
+				for (int D = Day; D >= Day - 7; --D)
+				{
+					const double T = static_cast<double>(D) * ss::net::MinutesPerDay + 11.0 * 60.0 + 20.0;
+					if (ss::net::Weekday(D) == 0 && T <= World)
+					{
+						if (T > C.Since && B.PaidKeys.count("product|" + C.Id + "|" + std::to_string(D)) > 0)
+						{
+							At = T;
+							bCase = true;
+						}
+						break;
+					}
+				}
+			}
+			else if ((Pk.Kind == Gift::Gear && Pk.Id != "gym") || Pk.Kind == Gift::Garment)
+			{
+				At = C.Since;
+			}
+			if (At >= 0.0 && World - At < ss::net::MinutesPerDay && At > Best)
+			{
+				Best = At;
+				OutBrand = UTF8_TO_TCHAR(C.Brand.c_str());
+				bOutCase = bCase;
+			}
+		}
+	}
+	return Best >= 0.0;
+}
 
 /** Prototype meters (x right, y up, z toward the viewer) to Unreal centimeters. */
 FVector Web(double X, double Y, double Z)
@@ -651,8 +711,9 @@ void ANightOneStage::AddCan()
 	const FVector Base(Spots[N][0], DeskTop, DeskZ + Spots[N][1]);
 	if (CanMesh)
 	{
-		// The Blender can, with its own baked materials; each one turned a different way.
-		Cans.Add(AddMesh(CanMesh, nullptr, Web(Base.X, Base.Y, Base.Z), FVector(1.0), FRotator(0.0, FMath::RadiansToDegrees(Spots[N][2]), 0.0)));
+		// The Blender can, with its own baked materials; each one turned a different way. The energy deal's own can while it
+		// runs (UpdateSponsorProps keeps the ones already there in step).
+		Cans.Add(AddMesh(CanMeshFor(CanBrand), nullptr, Web(Base.X, Base.Y, Base.Z), FVector(1.0), FRotator(0.0, FMath::RadiansToDegrees(Spots[N][2]), 0.0)));
 		return;
 	}
 	UStaticMeshComponent* Body = CylinderWeb(Surface(TEXT("Can"), 0x0f1a12, 0.28f, 0.75f), Base, 0.0332f, 0.1235f);
@@ -1019,6 +1080,7 @@ void ANightOneStage::Tick(float DeltaSeconds)
 	{
 		ApplyHour();
 	}
+	UpdateSponsorProps(Dt);
 	NextLightning -= Dt;
 	if (NextLightning <= 0.0f)
 	{
@@ -1091,6 +1153,170 @@ void ANightOneStage::UpdateCalendar(float DeltaSeconds)
 	ss::ui::wallcalendar::Draw(C, Game->Session);
 	CalendarSlate->SetDrawList(List);
 	CalendarWidget->RequestRedraw();
+}
+
+UStaticMesh* ANightOneStage::CanMeshFor(const FString& Brand)
+{
+	if (Brand.IsEmpty())
+	{
+		// No energy deal: the GRIND can, and nothing else loaded for it.
+		return CanMesh.Get();
+	}
+	if (!bBrandCansLooked)
+	{
+		// energy_can.py's brand variants (the generic GRIND can until they're imported).
+		bBrandCansLooked = true;
+		BrandCanMeshes[0] = LoadProp(TEXT("SM_EnergyCan_VoltRush"));
+		BrandCanMeshes[1] = LoadProp(TEXT("SM_EnergyCan_Overclock"));
+	}
+	UStaticMesh* Own = Brand == TEXT("voltrush") ? BrandCanMeshes[0].Get() : Brand == TEXT("overclock") ? BrandCanMeshes[1].Get() : nullptr;
+	return Own ? Own : CanMesh.Get();
+}
+
+void ANightOneStage::UpdateSponsorProps(float DeltaSeconds)
+{
+	SponsorCheck -= DeltaSeconds;
+	UWorld* Here = GetWorld();
+	if (SponsorCheck > 0.0f || !Here || !Here->IsGameWorld())
+	{
+		return;
+	}
+	SponsorCheck = 0.5f;
+	const ANightOneGameMode* Mode = Here->GetAuthGameMode<ANightOneGameMode>();
+	FNightOneGame* Game = Mode ? Mode->GetGame() : nullptr;
+	if (!Game)
+	{
+		return;
+	}
+	const ss::Session& S = Game->Session;
+	const double World = S.WorldMinutes();
+	const ss::sponsor::Book& B = S.Life.Sponsors;
+	// The desk's cans: the energy deal's own while it runs (the category is exclusive: one at a time).
+	FString Brand;
+	for (const char* Id : {"voltrush", "overclock"})
+	{
+		if (ss::sponsor::Running(B, Id, World))
+		{
+			Brand = UTF8_TO_TCHAR(Id);
+			break;
+		}
+	}
+	if (!TestCans.IsEmpty())
+	{
+		Brand = TestCans == TEXT("grind") ? FString() : TestCans;
+	}
+	if (Brand != CanBrand && CanMesh)
+	{
+		CanBrand = Brand;
+		UStaticMesh* Mesh = CanMeshFor(Brand);
+		int32 Changed = 0;
+		for (UStaticMeshComponent* C : Cans)
+		{
+			const UStaticMesh* Was = C ? C->GetStaticMesh() : nullptr;
+			if (Was && Was != Mesh && (Was == CanMesh || Was == BrandCanMeshes[0] || Was == BrandCanMeshes[1]))
+			{
+				C->SetStaticMesh(Mesh);
+				C->EmptyOverrideMaterials();
+				++Changed;
+			}
+		}
+		UE_LOG(LogTemp, Log, TEXT("The desk's cans: %s (%d changed)"), Brand.IsEmpty() ? TEXT("GRIND") : *Brand, Changed);
+	}
+	CanBrand = Brand;
+	// The kit box by the door, for a day after a delivery (the apartment's door: Dee's front room keeps its own boxes).
+	if (IsA<ADeeRoomStage>())
+	{
+		return;
+	}
+	FString Kit;
+	bool bCase = false;
+	LatestDelivery(B, World, Kit, bCase);
+	if (!TestKit.IsEmpty())
+	{
+		FString TestBrand, Kind;
+		if (!TestKit.Split(TEXT("|"), &TestBrand, &Kind))
+		{
+			TestBrand = TestKit;
+		}
+		Kit = TestKit == TEXT("off") ? FString() : TestBrand;
+		bCase = Kind == TEXT("case");
+	}
+	const FString Key = Kit.IsEmpty() ? FString() : Kit + (bCase ? TEXT("|case") : TEXT("|kit"));
+	if (Key != KitShown)
+	{
+		KitShown = Key;
+		ShowKitBox(Kit, bCase);
+	}
+}
+
+void ANightOneStage::ShowKitBox(const FString& Brand, bool bCase)
+{
+	if (Brand.IsEmpty())
+	{
+		if (KitBox)
+		{
+			KitBox->SetVisibility(false, true);
+		}
+		return;
+	}
+	// The case (a 12-pack: 30 x 21 x 15 cm) or the kit's carton (46 x 36 x 28), on the floor left of the door, taped shut.
+	const FVector2D CaseSize(21.0, 30.0);
+	const FVector2D KitSize(36.0, 46.0);
+	const double CaseH = 15.0;
+	const double KitH = 28.0;
+	if (!KitBox)
+	{
+		KitBox = NewPart<USceneComponent>();
+		KitBox->SetRelativeLocationAndRotation(Web(0.6, 0.0, RoomBack - 0.32), FRotator(0.0f, -8.0f, 0.0f));
+		for (int32 K = 0; K < 2; ++K)
+		{
+			KitParts[K] = NewPart<USceneComponent>(KitBox);
+			const FVector2D Size = K == 0 ? CaseSize : KitSize;
+			AddCarton(FVector::ZeroVector, FVector(Size.X, Size.Y, K == 0 ? CaseH : KitH), 0.0f, K == 1, KitParts[K]);
+		}
+		// The shipping label on the lid beside the tape, read from the room (its top toward the door).
+		KitLabel = AddWidget(FVector::ZeroVector, Facing(FVector::UpVector, FVector(-1.0, 0.0, 0.0)), FVector2D(12.0, 8.0), FIntPoint(360, 240), true, false, KitBox);
+	}
+	KitBox->SetVisibility(true, true);
+	KitParts[0]->SetVisibility(bCase, true);
+	KitParts[1]->SetVisibility(!bCase, true);
+	if (KitLabel)
+	{
+		const FVector2D Size = bCase ? CaseSize : KitSize;
+		KitLabel->SetRelativeLocation(FVector(0.0, -Size.Y * 0.27, (bCase ? CaseH : KitH) + 0.08));
+		KitLabel->SetVisibility(true);
+		const ss::sponsor::Brand* B = ss::sponsor::FindBrand(std::string(TCHAR_TO_UTF8(*Brand)));
+		if (B && FSlateTextMeasurer::IsAvailable())
+		{
+			// The brand's mark and name on a white label, a barcode under the name.
+			FSlateTextMeasurer Measurer;
+			TSharedPtr<ss::ui::DrawList> List = MakeShared<ss::ui::DrawList>();
+			ss::ui::Canvas C(*List, Measurer, 360.0f, 240.0f, 1.0f);
+			C.FillRect({0.0f, 0.0f, 360.0f, 240.0f}, ss::ui::Hex(0xf4f1ea));
+			C.StrokeRoundRect({8.0f, 8.0f, 344.0f, 224.0f}, 4.0f, ss::ui::Hex(0x1b1b1f, 0.35f), 2.0f);
+			ss::ui::sponsorart::Mark(C, B->Id, {22.0f, 56.0f, 118.0f, 118.0f});
+			ss::ui::TextStyle T;
+			T.Size = 30.0f;
+			T.Weight = 800;
+			T.Col = ss::ui::Hex(0x1b1b1f);
+			T.MaxWidth = 186.0f;
+			C.Text(std::string(TCHAR_TO_UTF8(*FString(UTF8_TO_TCHAR(B->Short.c_str())).ToUpper())), 156.0f, 100.0f, T);
+			for (int32 I = 0; I < 30; ++I)
+			{
+				const float W = (I % 3 == 0) ? 4.0f : (I % 5 == 0 ? 3.0f : 1.5f);
+				C.FillRect({156.0f + I * 6.0f, 128.0f, W, 52.0f}, ss::ui::Hex(0x1b1b1f));
+			}
+			if (!KitSlate.IsValid())
+			{
+				KitSlate = SNew(SDrawListWidget).DesiredSize(FVector2D(360.0, 240.0));
+				KitLabel->SetSlateWidget(KitSlate);
+				KitLabel->SetManuallyRedraw(true);
+			}
+			KitSlate->SetDrawList(List);
+			KitLabel->RequestRedraw();
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("A %s from %s by the door"), bCase ? TEXT("case") : TEXT("kit box"), *Brand);
 }
 
 void ANightOneStage::Lightning(float Strength)
@@ -1894,3 +2120,21 @@ void ANightOneStage::UpdateArms(float DeltaSeconds, const FVector& CameraLocatio
 	T.Mouse = MouseRoot ? MouseRoot->GetComponentLocation() + T.Up * MouseTop : X.TransformPosition(MouseHome);
 	Arms.Update(Dt, T);
 }
+
+namespace NightOneStageDetail
+{
+FAutoConsoleCommandWithWorldAndArgs CmdKit(TEXT("ss.Wear.Kit"),
+	TEXT("ss.Wear.Kit <brand> [case|kit] | off | auto: the sponsor's box by the apartment's door whatever the career says (testing); auto goes back to the career's."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		const FString What = Args.Num() > 0 ? Args[0].ToLower() : FString(TEXT("auto"));
+		TestKit = What == TEXT("auto") ? FString() : What == TEXT("off") ? What : What + TEXT("|") + (Args.Num() > 1 ? Args[1].ToLower() : FString(TEXT("kit")));
+		UE_LOG(LogTemp, Display, TEXT("ss.Wear.Kit: %s"), TestKit.IsEmpty() ? TEXT("the career's") : *TestKit);
+	}));
+FAutoConsoleCommandWithWorldAndArgs CmdCans(TEXT("ss.Wear.Cans"),
+	TEXT("ss.Wear.Cans <voltrush|overclock|grind|auto>: the desk's cans whatever the energy deal says (testing); auto goes back to the career's."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World) {
+		const FString What = Args.Num() > 0 ? Args[0].ToLower() : FString(TEXT("auto"));
+		TestCans = What == TEXT("auto") ? FString() : What;
+		UE_LOG(LogTemp, Display, TEXT("ss.Wear.Cans: %s"), TestCans.IsEmpty() ? TEXT("the career's") : *TestCans);
+	}));
+} // namespace NightOneStageDetail

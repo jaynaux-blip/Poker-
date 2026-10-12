@@ -2,6 +2,7 @@
 
 #include "BackRoomGameMode.h"
 #include "Engine/World.h"
+#include "HAL/PlatformTime.h"
 #include "InputCoreTypes.h"
 #include "Misc/App.h"
 
@@ -23,8 +24,8 @@ using namespace BackRoomControllerDetail;
 ABackRoomPlayerController::ABackRoomPlayerController()
 {
 	bShowMouseCursor = false;
-	Holds[0].Key = EKeys::Gamepad_FaceButton_Right;
-	Holds[1].Key = EKeys::Gamepad_DPad_Down;
+	// (B held went all in before the one control map; Y held does now, in the pawn: next_segment_spec 6.4.)
+	Holds[0].Key = EKeys::Gamepad_DPad_Down;
 	Repeats[0].Key = EKeys::Gamepad_RightShoulder;
 	Repeats[1].Key = EKeys::Gamepad_LeftShoulder;
 }
@@ -127,7 +128,8 @@ void ABackRoomPlayerController::PlayerTick(float DeltaTime)
 	static const FKey PadAxes[] = {EKeys::Gamepad_LeftX, EKeys::Gamepad_LeftY, EKeys::Gamepad_RightX, EKeys::Gamepad_RightY, EKeys::Gamepad_LeftTriggerAxis, EKeys::Gamepad_RightTriggerAxis};
 	static const FKey DeskKeys[] = {EKeys::W, EKeys::A, EKeys::S, EKeys::D, EKeys::E, EKeys::F, EKeys::C, EKeys::R, EKeys::L, EKeys::N, EKeys::Q, EKeys::T, EKeys::V, EKeys::B,
 		EKeys::P, EKeys::Tab, EKeys::SpaceBar, EKeys::Escape, EKeys::LeftShift, EKeys::RightShift, EKeys::Up, EKeys::Down, EKeys::Left, EKeys::Right, EKeys::LeftMouseButton,
-		EKeys::RightMouseButton, EKeys::MiddleMouseButton, EKeys::MouseScrollUp, EKeys::MouseScrollDown};
+		EKeys::RightMouseButton, EKeys::MiddleMouseButton, EKeys::MouseScrollUp, EKeys::MouseScrollDown, EKeys::U, EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four,
+		EKeys::Five, EKeys::Six, EKeys::BackSpace};
 	bool bPad = false;
 	for (const FKey& Key : PadButtons)
 	{
@@ -154,8 +156,11 @@ void ABackRoomPlayerController::PlayerTick(float DeltaTime)
 		bGamepad = false;
 	}
 
-	// Pause. In Play-In-Editor, Escape stops the session before the game sees it, so P works too; on a gamepad, Start.
-	if (Mode && (WasInputKeyJustPressed(EKeys::Escape) || WasInputKeyJustPressed(EKeys::P) || WasInputKeyJustPressed(EKeys::Gamepad_Special_Right)))
+	// Pause. In Play-In-Editor, Escape stops the session before the game sees it, so P works too; on a gamepad, Start. With
+	// the table card up (or just put down by this very press), Escape is the card's: back, not pause.
+	const ABackRoomPawn* Seated = Cast<ABackRoomPawn>(GetPawn());
+	const bool bCardsEscape = Seated && (Seated->IsTableCardUp() || FPlatformTime::Seconds() - Seated->GetTableCardClosedAt() < 0.1);
+	if (Mode && ((WasInputKeyJustPressed(EKeys::Escape) && !bCardsEscape) || WasInputKeyJustPressed(EKeys::P) || WasInputKeyJustPressed(EKeys::Gamepad_Special_Right)))
 	{
 		Mode->OpenPauseMenu();
 	}

@@ -27,6 +27,7 @@
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/Game/Wardrobe.h"
@@ -1003,6 +1004,24 @@ void AStreetGameMode::DrawHud()
 	for (const ss::ui::StreetHudInfo::Toast& T : Toasts)
 	{
 		Info.Toasts.push_back(T);
+	}
+	// The player's caption settings (next_segment_spec 4.9): off, the size, the box, the names (StreetHud draws two at most).
+	const ss::ui::GameSettings& Cs = Game->Menu.Settings;
+	Info.CaptionLook.Mode = FMath::Clamp(Cs.Captions, 0, 2);
+	Info.CaptionLook.Size = FMath::Clamp(Cs.CaptionSize, 80, 200);
+	Info.CaptionLook.Backdrop = FMath::Clamp(Cs.CaptionBackdrop, 0, 100);
+	Info.CaptionLook.Names = Cs.SpeakerNames;
+	// A sponsor's appearance the player owes in the next day (spec 3.1): the chip under the clock, the first window not
+	// yet made (one going on now counts).
+	for (const ss::sponsor::Window& Wd : ss::sponsor::Appearances(Game->Session.Life.Sponsors, Info.World, Info.World + ss::net::MinutesPerDay))
+	{
+		if (!Wd.Done)
+		{
+			Info.Due.Label = Wd.Label;
+			Info.Due.From = Wd.From;
+			Info.Due.To = Wd.To;
+			break;
+		}
 	}
 	const FVector2D Size = ViewSize();
 	const float H = ss::ui::StoreCounter::Height;

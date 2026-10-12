@@ -18,6 +18,8 @@
 #include "GroomComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ShortStackCharacter.h"
+#include "SponsorWear.h"
+#include "Animation/AnimSequence.h"
 #include "UObject/ConstructorHelpers.h"
 
 using namespace BackRoomPlayerDetail;
@@ -458,9 +460,13 @@ void ABackRoomPlayer::ApplyWear()
 		}
 	}
 	Worn.Reset();
+	// (The cap's patch was among them.)
+	HatWorn = nullptr;
+	CapPatch = nullptr;
 	USkeletalMesh* FaceAsset = Face ? Face->GetSkeletalMeshAsset() : nullptr;
 	if (!FaceAsset)
 	{
+		ApplyPatches();
 		return;
 	}
 	const FReferenceSkeleton& Ref = FaceAsset->GetRefSkeleton();
@@ -469,6 +475,7 @@ void ABackRoomPlayer::ApplyWear()
 	const int32 EyeR = Ref.FindBoneIndex(TEXT("FACIAL_R_Eye"));
 	if (HeadBone == INDEX_NONE || EyeL == INDEX_NONE || EyeR == INDEX_NONE)
 	{
+		ApplyPatches();
 		return;
 	}
 	// The pieces are made around the midpoint between the eyes, looking down +X with +Z up, for eyes 6.3 cm apart;
@@ -521,6 +528,7 @@ void ABackRoomPlayer::ApplyWear()
 				TintStreetWear(C, StreetWearSlot(C, 2), Persona.WearColor, 1.45f);
 			}
 			C->RegisterComponent();
+			HatWorn = C;
 		}
 		if (UStaticMeshComponent* C = Glasses > 0 ? PutStreet(StreetSpecs[Glasses], AShortStackCharacter::FitHeadWear(FaceAsset, false)) : nullptr)
 		{
@@ -535,6 +543,8 @@ void ABackRoomPlayer::ApplyWear()
 			}
 			C->RegisterComponent();
 		}
+		// The patches before the head's state: the cap's is one of the head's pieces, shown and hidden with the hat.
+		ApplyPatches();
 		ApplyHeroHeadState();
 		return;
 	}
@@ -575,12 +585,152 @@ void ABackRoomPlayer::ApplyWear()
 	};
 	if (Persona.Headwear > 0 && HatFits(BlueprintPath) && SeatRole != EBackRoomRole::Dealer)
 	{
+		const int32 Before = Worn.Num();
 		Put(WearMesh(Heads[FMath::Clamp(Persona.Headwear, 0, 3)]));
+		HatWorn = Worn.Num() > Before ? Worn.Last().Get() : nullptr;
 	}
 	if (Persona.Eyewear > 0)
 	{
 		Put(WearMesh(Eyes[FMath::Clamp(Persona.Eyewear, 0, 3)]));
 	}
+	ApplyPatches();
+}
+
+void ABackRoomPlayer::ApplyPatches()
+{
+	using namespace SponsorWear;
+	PatchTestSeen = TestRevision();
+	FShown Shown;
+	if (SeatRole != EBackRoomRole::Dealer)
+	{
+		// The house dresses its dealers: plain.
+		Shown.Brand[Chest] = Persona.PatchChest;
+		Shown.Brand[Sleeve] = Persona.PatchSleeve;
+		Shown.Brand[Cap] = Persona.PatchCap;
+		ApplyTest(Shown);
+	}
+	// Everyone at a table wears the MetaHuman's tee (the player's jacket is drawn as the tee in its colour): the patches lie on it.
+	const FName BodyName = BodyNameOf(MetaHumanClass.ToSoftObjectPath().ToString());
+	const bool bWoman = IsWomansBody(BodyName);
+	const USkeletalMesh* Asset = Body ? Body->GetSkeletalMeshAsset() : nullptr;
+	TArray<FString> Notes;
+	for (const int32 Spot : {Chest, Sleeve})
+	{
+		FFit Fit;
+		TObjectPtr<UStaticMeshComponent>& Slot = PatchParts[Spot];
+		const bool bFitted = !Shown.Brand[Spot].IsEmpty() && (Spot == Chest ? FitChest(Asset, BodyName, bWoman, ELayer::Tee, Fit) : FitSleeve(Asset, BodyName, bWoman, ELayer::Tee, Fit));
+		if (!bFitted || !Dress(this, Slot, Spot, Shown.Brand[Spot]))
+		{
+			if (Slot)
+			{
+				Slot->SetVisibility(false);
+			}
+			continue;
+		}
+		// Carried by the bone (spine_05, upperarm_l): it leans, breathes and reaches with them.
+		Carry(Slot, Body, Fit.Bone, Fit.InComponent);
+		Notes.Add(Note(Spot, Shown.Brand[Spot], ELayer::Tee, BodyName, Fit));
+	}
+	// The cap's: on the front panel of the hat worn (a cap or a beanie), at the size it was made, among the head's pieces.
+	if (UStaticMeshComponent* Old = CapPatch.Get())
+	{
+		Worn.Remove(Old);
+		Old->DestroyComponent();
+	}
+	CapPatch = nullptr;
+	UStaticMeshComponent* Hat = HatWorn.Get();
+	const EHat Kind = Hat ? HatOf(Hat->GetStaticMesh()) : EHat::None;
+	FTransform InHat;
+	if (Kind != EHat::None && !Shown.Brand[Cap].IsEmpty() && FitCap(Kind, InHat))
+	{
+		TObjectPtr<UStaticMeshComponent> Piece = nullptr;
+		if (Dress(this, Piece, Cap, Shown.Brand[Cap]))
+		{
+			Piece->AttachToComponent(Hat, FAttachmentTransformRules::KeepRelativeTransform);
+			InHat.SetScale3D(FVector(1.0 / FMath::Max(Hat->GetRelativeScale3D().X, 0.01)));
+			Piece->SetRelativeTransform(InHat);
+			Piece->SetHiddenInGame(Hat->bHiddenInGame);
+			Worn.Add(Piece);
+			CapPatch = Piece.Get();
+			Notes.Add(Note(Cap, Shown.Brand[Cap], ELayer::Tee, BodyName, FFit()));
+		}
+	}
+	const FString Was = PatchNote;
+	PatchNote = FString::Join(Notes, TEXT("; "));
+	UE_CLOG((PatchNote != Was && !PatchNote.IsEmpty()) || ShouldLog(), LogTemp, Log, TEXT("%s (%s) wears %s"), *Persona.Name, *GetName(), PatchNote.IsEmpty() ? TEXT("no patches") : *PatchNote);
+}
+
+void ABackRoomPlayer::WearPatches(const FString& Chest, const FString& Sleeve, const FString& Cap)
+{
+	if (Persona.PatchChest == Chest && Persona.PatchSleeve == Sleeve && Persona.PatchCap == Cap && PatchTestSeen == SponsorWear::TestRevision())
+	{
+		return;
+	}
+	Persona.PatchChest = Chest;
+	Persona.PatchSleeve = Sleeve;
+	Persona.PatchCap = Cap;
+	ApplyPatches();
+}
+
+FString ABackRoomPlayer::DescribePatches() const
+{
+	return PatchNote;
+}
+
+bool ABackRoomPlayer::CanWearCapPatch() const
+{
+	const UStaticMeshComponent* Hat = HatWorn.Get();
+	return Hat && SponsorWear::HatOf(Hat->GetStaticMesh()) != SponsorWear::EHat::None;
+}
+
+bool ABackRoomPlayer::SetStanding(bool bStand)
+{
+	if (!Body)
+	{
+		return false;
+	}
+	if (!bStand)
+	{
+		if (bStanding)
+		{
+			bStanding = false;
+			Body->SetRelativeLocationAndRotation(FVector(-SeatDepth, 0.0, 0.0), FRotator(0.0f, -90.0f, 0.0f));
+			Body->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+			Body->SetAnimInstanceClass(UBackRoomBodyAnim::StaticClass());
+			ChairSeat->SetVisibility(true);
+			ChairBack->SetVisibility(true);
+		}
+		return false;
+	}
+	if (bStanding)
+	{
+		// Already up (the rail placed again after a move): the loop goes on where it is, no restart and no pop.
+		return true;
+	}
+	// The street's baked standing idle, on this body's skeleton (the standard set, else the heavy build's): that one clip,
+	// in memory since the field was seated (SponsorWear::PrewarmStanding), never the street's whole library mid-night.
+	const USkeleton* Skeleton = Body->GetSkeletalMeshAsset() ? Body->GetSkeletalMeshAsset()->GetSkeleton() : nullptr;
+	UAnimSequence* Idle = SponsorWear::StandingIdle(Skeleton);
+	if (!Idle)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s can't stand: no standing idle is baked for their body (the street's mocap); they keep their chair"), *Persona.Name);
+		return false;
+	}
+	bStanding = true;
+	ChairSeat->SetVisibility(false);
+	ChairBack->SetVisibility(false);
+	// On their feet where the actor stands, facing its +X.
+	Body->SetRelativeLocationAndRotation(FVector::ZeroVector, FRotator(0.0f, -90.0f, 0.0f));
+	Body->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	Body->PlayAnimation(Idle, true);
+	// Two at the rail never breathe in step: each starts somewhere else in the loop, at their own pace, from who they are
+	// (an integer hash: the same every night, and apart even for two with the same rhythm seed).
+	const uint32 Key = HashCombine(GetTypeHash(Persona.Name), static_cast<uint32>(Persona.Seed) * 2654435761u);
+	const float Length = Idle->GetPlayLength();
+	const float Start = static_cast<float>(Key & 0xffffu) / 65536.0f;
+	Body->SetPosition(Start * Length, false);
+	Body->SetPlayRate(0.94f + 0.12f * static_cast<float>((Key >> 16) & 0xffffu) / 65536.0f);
+	return true;
 }
 
 void ABackRoomPlayer::Redress()
@@ -671,10 +821,20 @@ void ABackRoomPlayer::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	const float Dt = FMath::Min(DeltaSeconds, 0.1f);
 	Time += Dt;
+	if (PatchTestSeen != SponsorWear::TestRevision())
+	{
+		// ss.Wear.PatchTest: the patches as the test says.
+		ApplyPatches();
+	}
 	UpdateMood(Dt);
 	UpdateTells(Dt);
-	UpdateHands(Dt);
-	UpdateBody(Dt);
+	if (!bStanding)
+	{
+		// (On their feet at the rail the body plays the street's idle: no hands at a felt to pose, or to audit, and no seated
+		// body to drive. The face, the speech and the patches go on as seated.)
+		UpdateHands(Dt);
+		UpdateBody(Dt);
+	}
 	UpdateFace(Dt);
 }
 

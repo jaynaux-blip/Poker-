@@ -8,6 +8,11 @@
  * chips riffled and stacked at the other tables, a dealer's shuffle now and then, the slot floor's
  * chimes through the doorway, and the building's air handling under it all. Busier while the room is
  * full (SetCrowd). Mono, 48 kHz, for UNightOneAudio::StartAmbience.
+ *
+ * Retired from the live room (next_segment_spec 4.11): the Embercrest now streams the stereo room (FCardRoomSound,
+ * CardRoomSound.h; the fallback the user chose at the listening gate, spec 11). Kept only as the A/B reference (ss.Live.Bed 1,
+ * and today's bed beside every ss.Live.Listen recording) and for a card-room table with no room host (ABackRoomTable's
+ * StartRoomTone when nobody gives it an AmbienceSource).
  */
 class FCardRoomAmbience
 {

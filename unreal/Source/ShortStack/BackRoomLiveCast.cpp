@@ -9,12 +9,14 @@
 #include "BackRoomStage.h"
 #include "BackRoomTable.h"
 #include "Camera/PlayerCameraManager.h"
+#include "SponsorWear.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Tournament.h"
 
 namespace LiveDetail
@@ -48,18 +50,62 @@ FString ABackRoomGameMode::FaceNote(const FString& Name) const
 	return Face ? Face->Key : FString();
 }
 
+namespace LiveDetail
+{
+/** The night's entry in the save (the field's snapshot), before SeatCast has read it into LiveBadges and LivePatches. */
+const ss::life::LiveEntry* NightEntry(const TSharedPtr<ss::SaveData>& Save, const FString& EntryId)
+{
+	return Save.IsValid() && !EntryId.IsEmpty() ? ss::live::EntryFor(static_cast<const ss::life::State&>(Save->Life), std::string(TCHAR_TO_UTF8(*EntryId))) : nullptr;
+}
+} // namespace LiveDetail
+
 ss::badge::Set ABackRoomGameMode::FaceBadges(const FString& Name) const
 {
-	// (ue-wear fills LiveBadges from the entry's livebadge lines, next_segment_spec 5.7.)
-	const ss::badge::Set* Held = LiveBadges.Find(Name);
-	return Held ? *Held : ss::badge::Set();
+	// The entry's livebadge lines (next_segment_spec 5.7), read with the field as the first chair is taken (SeatCast); asked
+	// before that, straight from the entry.
+	if (const ss::badge::Set* Held = LiveBadges.Find(Name))
+	{
+		return *Held;
+	}
+	if (!WearHost.IsValid() || WearHost->FilledFor != LiveEntryId)
+	{
+		if (const ss::life::LiveEntry* E = NightEntry(Save, LiveEntryId))
+		{
+			const std::string Key(TCHAR_TO_UTF8(*Name));
+			for (const std::pair<std::string, std::string>& B : E->Badges)
+			{
+				if (B.first == Key)
+				{
+					return ss::badge::Unpack(B.second);
+				}
+			}
+		}
+	}
+	return ss::badge::Set();
 }
 
 FString ABackRoomGameMode::FacePatch(const FString& Name) const
 {
-	// (ue-wear fills LivePatches from the entry's livepatch lines, next_segment_spec 3.10.)
-	const FString* Brand = LivePatches.Find(Name);
-	return Brand ? *Brand : FString();
+	// The entry's livepatch lines (next_segment_spec 3.10): the world's sponsored people, and the player (the chest's brand).
+	if (const FString* Brand = LivePatches.Find(Name))
+	{
+		return *Brand;
+	}
+	if (!WearHost.IsValid() || WearHost->FilledFor != LiveEntryId)
+	{
+		if (const ss::life::LiveEntry* E = NightEntry(Save, LiveEntryId))
+		{
+			const std::string Key(TCHAR_TO_UTF8(*Name));
+			for (const std::pair<std::string, std::string>& P : E->Patches)
+			{
+				if (P.first == Key)
+				{
+					return Str(P.second);
+				}
+			}
+		}
+	}
+	return FString();
 }
 
 ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSeat)
@@ -67,6 +113,56 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 	const FString Id = Str(P.Id);
 	const FString Name = Str(P.Name);
 	const FTransform At = ABackRoomStage::SeatTransform(TableSeat);
+	// The night's field as the entry has it, read as the first chair is taken (and kept: the snapshot goes at settle, and
+	// the room plays on after): everyone's badges and sponsors' patches by name (live::DescribeField's livebadge and
+	// livepatch lines). The player's own patch rows are the closet's at registration; the player wears the closet's now
+	// (the same, unless a deal has ended since), filtered at the night's clock.
+	if (!WearHost.IsValid())
+	{
+		WearHost = MakeShared<FWearHost>();
+	}
+	if (WearHost->FilledFor != LiveEntryId && Save.IsValid())
+	{
+		WearHost->FilledFor = LiveEntryId;
+		// A second event in the same visit: the player is dressed again at its clock (a deal may have ended in between).
+		WearHost->bHeroDressed = false;
+		LiveBadges.Reset();
+		LivePatches.Reset();
+		// The rail's backers stand on the street's idle (ABackRoomPlayer::SetStanding): its one clip loaded now, in the
+		// background while the room fills, and kept, so nobody's standing up costs a load in the middle of the night.
+		SponsorWear::PrewarmStanding([Weak = TWeakObjectPtr<ABackRoomGameMode>(this)](UObject* Loaded) {
+			if (ABackRoomGameMode* Mode = Weak.Get())
+			{
+				Mode->WearObjects.AddUnique(Loaded);
+			}
+		});
+		if (const ss::life::LiveEntry* E = ss::live::EntryFor(static_cast<const ss::life::State&>(Save->Life), std::string(TCHAR_TO_UTF8(*LiveEntryId))))
+		{
+			for (const std::pair<std::string, std::string>& B : E->Badges)
+			{
+				LiveBadges.Add(Str(B.first), ss::badge::Unpack(B.second));
+			}
+			for (const std::pair<std::string, std::string>& Row : E->Patches)
+			{
+				// One brand a person (the world's sponsored wear one; the player's rows come in the closet's order of spots).
+				if (!LivePatches.Contains(Str(Row.first)))
+				{
+					LivePatches.Add(Str(Row.first), Str(Row.second));
+				}
+			}
+		}
+		UE_LOG(LogEmbercrest, Log, TEXT("The field's badges: %d people; sponsors' patches: %d people"), LiveBadges.Num(), LivePatches.Num());
+	}
+	if (!WearHost->bHeroDressed && Hero && Save.IsValid())
+	{
+		WearHost->bHeroDressed = true;
+		WearHost->HeroShown = SponsorWear::FromCloset(Save->Life.Closet, &Save->Life.Sponsors, Minutes);
+		Hero->WearPatches(WearHost->HeroShown.Brand[SponsorWear::Chest], WearHost->HeroShown.Brand[SponsorWear::Sleeve], WearHost->HeroShown.Brand[SponsorWear::Cap]);
+		if (!WearHost->HeroShown.Brand[SponsorWear::Chest].IsEmpty())
+		{
+			LivePatches.Add(Str(Save->HeroName), WearHost->HeroShown.Brand[SponsorWear::Chest]);
+		}
+	}
 	ABackRoomPlayer* A = nullptr;
 	if (TObjectPtr<ABackRoomPlayer>* Found = CastActors.Find(Id))
 	{
@@ -93,9 +189,18 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 		CastActors.Add(Id, A);
 	}
 	A->SetActorTransform(At);
+	// Their sponsor's patch, on the spot the brand's patch takes that shows on them (Team RiverLine's pros the gold one on
+	// the chest; an energy drink's on a cap, else the sleeve); nothing for a brand that's only an overlay on a stream.
+	{
+		const FString* Brand = LivePatches.Find(Name);
+		const SponsorWear::FShown Theirs = Brand ? SponsorWear::ForWorldPerson(*Brand, A->CanWearCapPatch()) : SponsorWear::FShown();
+		A->WearPatches(Theirs.Brand[SponsorWear::Chest], Theirs.Brand[SponsorWear::Sleeve], Theirs.Brand[SponsorWear::Cap]);
+	}
 	// Someone who knows the player (or a regular the dealer knows), sitting down with them for the first time tonight:
 	// a word once they're settled. (Not once the player's night is over: they sit down at the old table without them.)
 	const TPair<FString, FString>* Face = LiveMet.Contains(Id) || bLiveOver ? nullptr : LiveFaces.Find(Name);
+	// (At the Embercrest the room's director says a face's hello itself, at the sit-down and for a move in: one voice, spec 1.5.)
+	const bool bRoomGreets = RoomDirector.IsValid();
 	if (Face)
 	{
 		const FString Line = Face->Value;
@@ -105,7 +210,7 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 		TWeakObjectPtr<ABackRoomTable> Tb = Table.Get();
 		const int32 Pick = static_cast<int32>(FCrc::StrCrc32(*(Name + LiveEntryId)) % 3);
 		FTimerHandle Handle;
-		GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [Who, Tb, Line, bRegular, Name, Pick]() {
+		GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [Who, Tb, Line, bRegular, Name, Pick, bRoomGreets]() {
 			ABackRoomPlayer* P = Who.Get();
 			if (!P || P->IsHidden())
 			{
@@ -113,7 +218,10 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 			}
 			if (!Line.IsEmpty())
 			{
-				P->Say(Line);
+				if (!bRoomGreets)
+				{
+					P->Say(Line);
+				}
 			}
 			else if (bRegular && Tb.IsValid())
 			{
@@ -150,7 +258,8 @@ ABackRoomPlayer* ABackRoomGameMode::SeatCast(const ss::TPlayer& P, int32 TableSe
 			A->OthersAt.Add(ABackRoomStage::SeatTransform(S).TransformPosition(FVector(-14.0, 0.0, 112.0)));
 		}
 	}
-	if (!Face && Phase == EBackRoomPhase::Playing && bAnnouncedStart && Dealer && FMath::FRand() < 0.6f)
+	// (The dealer's "Welcome. Seat N." for a mover is the director's now, hash-gated; a host without one keeps the old gate.)
+	if (!bRoomGreets && !Face && Phase == EBackRoomPhase::Playing && bAnnouncedStart && Dealer && FMath::FRand() < 0.6f)
 	{
 		Table->DealerLine(FString::Printf(TEXT("Welcome. Seat %d."), ss::live::SeatLabel(P.Seat)));
 	}

@@ -130,6 +130,17 @@ std::string Upper(std::string S)
 	}
 	return S;
 }
+
+/**
+ * The PA's tag (style 1): FLOOR for the floor (no speaker, or "Floor"), otherwise whoever has the mic, as the host names
+ * them: on a Sunday Dee's "Dee · PA" reads DEE · PA (spec 4.7). Shown whether or not speaker names are on: it
+ * says where the voice comes from, as FLOOR always has.
+ */
+std::string PaTag(const Caption& Cp)
+{
+	const std::string Up = Upper(Cp.Speaker);
+	return Up.empty() || Up == "FLOOR" ? std::string("FLOOR") : Up;
+}
 } // namespace captions_detail
 
 float CaptionHold(const std::string& Line, float SpeechSeconds)
@@ -205,7 +216,7 @@ void DrawCaptions(Canvas& C, const std::vector<Caption>& Lines, const CaptionSty
 		const bool Sound = Cp.Style == 2;
 		const bool ToYou = Cp.Style == 3;
 		const Color TagCol = Floor ? Amber : ToYou ? Warm : Teal;
-		const std::string Tag = Floor ? std::string("FLOOR") : Sound || !S.Names ? std::string() : Cp.Speaker;
+		const std::string Tag = Floor ? PaTag(Cp) : Sound || !S.Names ? std::string() : Cp.Speaker;
 		const bool Mark = S.Mode >= 2 && Cp.Side != 0 && !Floor;
 		// The tag's width: the side mark, the speaker glyph (the floor), the name.
 		float TagW = 0.0f;
@@ -316,7 +327,7 @@ void DrawNightLog(Canvas& C, const std::vector<Caption>& Lines, const std::strin
 		const Color TagCol = Floor ? Amber : Cp.Style == 3 ? Warm : Teal;
 		const float Base = Y + 17.0f;
 		C.Text(Cp.Clock, R.X, Base, Ts(13.0f, 500, A(Ink, 0.5f), Align::Left, Baseline::Alphabetic, true));
-		const std::string Tag = Floor ? std::string("FLOOR") : Sound ? std::string() : Upper(Cp.Speaker);
+		const std::string Tag = Floor ? PaTag(Cp) : Sound ? std::string() : Upper(Cp.Speaker);
 		if (!Tag.empty())
 		{
 			C.Text(Tag, R.X + ClockW, Base, Ts(13.0f, 800, TagCol, Align::Left, Baseline::Alphabetic, false, TagW - 12.0f));

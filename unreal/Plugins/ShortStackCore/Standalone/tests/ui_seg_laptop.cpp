@@ -31,6 +31,7 @@
 #include <cmath>
 #include <cstdio>
 #include <iterator>
+#include <new>
 #include <set>
 
 namespace ui_test
@@ -920,6 +921,88 @@ void Badges()
 
 // ------------------------------------------------------------------ the second screen and the wall calendar
 
+void CircuitPerWorld()
+{
+	// CIRCUIT CARDS works out its holders and cut lines once per world state (§10, the Leaderboards' draw time). A second
+	// career's laptop made where the first one's was, its world at the same revisions and day, shows its own numbers.
+	alignas(Laptop) static unsigned char Room[sizeof(Laptop)];
+	std::string Want[2];
+	bool Shows[2] = {false, false};
+	int Rev[2] = {0, 0};
+	int HeroRev[2] = {0, 0};
+	int Today[2] = {0, 0};
+	uint32_t Seed[2] = {0, 0};
+	for (int K = 0; K < 2; ++K)
+	{
+		Laptop* P = new (Room) Laptop(K == 0 ? "laptop-circuit-a" : "laptop-circuit-b");
+		P->At(P->S.WorldMinutes() + 150.0 * Day); // into the season: circuit points, cut lines
+		const ss::world::World& W = P->S.Living();
+		P->RL.ShowBoard(ss::net::Board::Live, P->Now);
+		P->RL.OpenPage(Page::Leaderboards, P->Now);
+		const DrawList L = P->Settled();
+		Rev[K] = W.Revision();
+		HeroRev[K] = W.HeroRevision();
+		Today[K] = ss::net::DayOf(P->S.WorldMinutes());
+		Seed[K] = W.Seed();
+		const double Cut = W.CardCutLine(1);
+		int Holders = W.HeroCardBest() >= 1 ? 1 : 0;
+		for (const ss::world::Npc& N : W.People())
+		{
+			Holders += N.CardBest >= 1 ? 1 : 0;
+		}
+		Want[K] = (Cut > 0.0 ? "cut " + ss::Grouped(static_cast<int64_t>(std::llround(Cut))) : std::string("cut \xE2\x80\x94")) + " / " + std::to_string(Holders);
+		Shows[K] = Drew(L, Cut > 0.0 ? "cut " + ss::Grouped(static_cast<int64_t>(std::llround(Cut))) : std::string("cut \xE2\x80\x94")) &&
+			Drew(L, std::to_string(Holders) + (Holders == 1 ? " holds it" : " hold it"));
+		P->~Laptop();
+	}
+	std::printf("  circuit cards: worlds %08x/%08x at rev %d/%d, hero rev %d/%d, day %d/%d: %s and %s\n", Seed[0], Seed[1], Rev[0], Rev[1], HeroRev[0], HeroRev[1], Today[0],
+		Today[1], Want[0].c_str(), Want[1].c_str());
+	Expect(Shows[0] && Shows[1], "boards: CIRCUIT CARDS shows each world's own cut line and holders, a second career's laptop where the first's was");
+}
+
+void RingWinnerCard()
+{
+	// §9.1: a ring winner's card (ss.World.Award): the champion's frame on the face, the rest of what they hold on the rail,
+	// and no second ring there (C2: the frame is the badge). The player's own card, then a champion's from the world.
+	Laptop P("laptop-ring-card");
+	ss::Session& S = P.S;
+	S.Living().GrantAward(-1, true, false);
+	const ss::badge::Badge* Ring = S.HeroBadges().Find(ss::badge::Kind::Ring);
+	Expect(Ring != nullptr, "ring card: the award is a ring the player holds");
+	if (!Ring)
+	{
+		return;
+	}
+	const std::string RingLabel = ss::badge::Label(*Ring);
+	P.RL.ShowPlayer(ss::ui::RiverLine::HeroCard, P.Now);
+	const DrawList Mine = P.Settled();
+	WriteList("badges_card_ring_hero", Mine);
+	Expect(!RingLabel.empty() && Drew(Mine, "Your tournaments on RiverLine since Night One") && !Spelled(Mine, RingLabel),
+		("ring card: the player's card shows the ring in its frame, not again on the rail (" + RingLabel + ")").c_str());
+	P.RL.ShowPlayer(-1, P.Now);
+	// Someone the world has crowned: their bracelets and rings are their frame, not rail glyphs.
+	const ss::world::World& W = S.Living();
+	int Champ = -1;
+	for (const ss::world::Npc& N : W.People())
+	{
+		if (Champ < 0 && !N.Awards.empty() && N.Rings > 0 && N.Bracelets == 0)
+		{
+			Champ = N.Id;
+		}
+	}
+	if (Champ < 0)
+	{
+		std::printf("  ring card: nobody in this world has only rings: their card skipped\n");
+		return;
+	}
+	const ss::badge::Set& Held = ss::badge::Shared().Of(W, Champ, ss::net::DayOf(S.WorldMinutes()));
+	const ss::badge::Badge* Theirs = Held.Find(ss::badge::Kind::Ring);
+	P.RL.ShowPlayer(Champ, P.Now);
+	const DrawList Card = P.Settled();
+	WriteList("badges_card_ring_npc", Card);
+	Expect(Theirs != nullptr && Drew(Card, W.Get(Champ)->Name) && !Spelled(Card, ss::badge::Label(*Theirs)), "ring card: a ring winner's player card has no second ring on its rail");
+}
+
 void Dates()
 {
 	Laptop P("laptop-dates");
@@ -1099,6 +1182,8 @@ void SegLaptop()
 	laptop_seg::BurnerRegulars();
 	laptop_seg::Sam();
 	laptop_seg::Badges();
+	laptop_seg::CircuitPerWorld();
+	laptop_seg::RingWinnerCard();
 	laptop_seg::Dates();
 	laptop_seg::Results();
 	laptop_seg::ContinueCard();

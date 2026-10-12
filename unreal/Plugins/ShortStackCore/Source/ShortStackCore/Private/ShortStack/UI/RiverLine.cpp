@@ -145,9 +145,83 @@ sizing::Spot OnlineSpot(const Session& S)
 	Spot.Unit = 1;
 	return Spot;
 }
+
+/** A badge being celebrated on a laptop (C10: Session::Unseen, taken once a frame) and when its toast came up. */
+struct BadgeCheer
+{
+	badge::Badge B;
+	double At = 0.0;
+};
+constexpr double BadgeToastSeconds = 6.0;
+
+std::map<const RiverLine*, std::vector<BadgeCheer>>& BadgeCheers()
+{
+	static std::map<const RiverLine*, std::vector<BadgeCheer>> ByLaptop;
+	return ByLaptop;
+}
+
+/**
+ * The badge toasts (§5.4 C10, §5.7): top right under the closed tables' toasts, a glyph at 32, BADGE EARNED and the
+ * badge's title, six seconds each, at most three at once.
+ */
+void BadgeToasts(Ui& UI, Canvas& C, const Session& S, std::vector<BadgeCheer>& List, bool Lobby, double Now)
+{
+	List.erase(std::remove_if(List.begin(), List.end(), [Now](const BadgeCheer& Ch) { return Now - Ch.At > BadgeToastSeconds; }), List.end());
+	// Below FinishedToasts' lane (RiverLine's own app only), as far down as it reaches this frame.
+	float Y = 72.0f;
+	for (const FinishedTable& F : S.Finished)
+	{
+		const double Age = Now - F.At;
+		if (Lobby && Age >= 0.0 && Age <= 9.0)
+		{
+			Y += (78.0f + 10.0f) * static_cast<float>(Clamp01((9.0 - Age) / 0.6));
+		}
+	}
+	for (size_t I = 0; I < List.size() && I < 3; ++I)
+	{
+		const double Age = Now - List[I].At;
+		if (Age < 0.0)
+		{
+			continue;
+		}
+		const float In = rlnet_detail::NetEase(Age / 0.35);
+		const float Out = static_cast<float>(Clamp01((BadgeToastSeconds - Age) / 0.6));
+		const float W = 384.0f;
+		const float H = 64.0f;
+		const Rect R{RlW - W - 16.0f + (1.0f - In) * 60.0f, Y, W, H};
+		const Color Col = pal::Gold;
+		const float A0 = C.GetAlpha();
+		C.SetAlpha(A0 * In * Out);
+		C.GlowRoundRect({R.X, R.Y + 6.0f, R.W, R.H}, 12.0f, Rgba(0, 0, 0, 0.5f), 16.0f);
+		UI.RRect(R, 12.0f, Paint::Linear({R.X, 0.0f}, {R.X + R.W, 0.0f}, Mix(Hex(0x0f1a2b), Col, 0.12f), Hex(0x0d1626)), rlnet_detail::NetA(Col, 0.55f));
+		UI.RRect({R.X, R.Y, 5.0f, R.H}, 2.5f, Col);
+		badgeart::Draw(C, List[I].B, R.X + 38.0f, R.Y + H / 2.0f, 32.0f, Now);
+		rlnet_detail::NetSpaced(C, "BADGE EARNED", R.X + 68.0f, R.Y + 24.0f, 10.0f, 800, pal::Muted, 1.2f);
+		UI.Text(badge::Title(List[I].B), R.X + 68.0f, R.Y + 47.0f, Ts(17.0f, 800, Col, Align::Left, Baseline::Alphabetic, false, R.W - 86.0f));
+		C.SetAlpha(A0);
+		Y += (H + 10.0f) * Out;
+	}
+}
 } // namespace riverline_detail
 
 using namespace riverline_detail;
+
+namespace rlmail_detail
+{
+void ForgetMail(const RiverLine* Who);
+}
+namespace backing_detail
+{
+void Forget(const Ui& UI);
+}
+
+RiverLine::~RiverLine()
+{
+	rlnet_detail::ForgetNet(this);
+	rlmail_detail::ForgetMail(this);
+	backing_detail::Forget(UI);
+	BadgeCheers().erase(this);
+}
 
 // ------------------------------------------------------------------ frame
 
@@ -235,6 +309,20 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	{
 		BankApp(Now);
 	}
+	// Badges earned since the laptop last looked (C10): taken once a frame, never under a time skip or a result card; each
+	// gets its toast (the session plays the sound and tells Kast's chat). Nor before the player logs in: the host draws the laptop
+	// behind the title screen too (the save loaded, nobody at the desk), where the toasts and their alert would go unseen.
+	std::vector<BadgeCheer>& Cheering = BadgeCheers()[this];
+	if (!Modal && (S.CurrentScreen != Screen::Boot || AppShown != App::RiverLine))
+	{
+		// Three at a time, half a second apart; more (an old save's first look) wait their turn in waves.
+		for (const badge::Badge& B : S.Unseen())
+		{
+			const size_t K = Cheering.size();
+			Cheering.push_back({B, Now + static_cast<double>(K / 3) * (BadgeToastSeconds + 0.2) + static_cast<double>(K % 3) * 0.5});
+		}
+	}
+	BadgeToasts(UI, *C, S, Cheering, AppShown == App::RiverLine, Now);
 	Taskbar({0.0f, RlH - 38.0f, RlW, 38.0f}, Now);
 	if (SleepOpen)
 	{

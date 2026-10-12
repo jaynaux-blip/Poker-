@@ -1169,6 +1169,12 @@ void RiverLine::BurnerApp(double Now)
 
 // ------------------------------------------------------------------ the Embercrest's event cards
 
+namespace backing_detail
+{
+// RiverLineBacking.cpp: whether the sell panel takes a live event (and keeps it among its picks when preselected).
+bool LiveSellable(const Session& S, const std::string& OccurrenceId, double World);
+} // namespace backing_detail
+
 namespace rlnet_detail
 {
 std::vector<live::Occurrence> LiveAhead(const Session& S, double World, double HoursAhead)
@@ -1180,33 +1186,9 @@ std::vector<live::Occurrence> LiveAhead(const Session& S, double World, double H
 
 bool LiveForSale(const Session& S, const std::string& OccurrenceId, double World)
 {
-	// The same walk as the Backing page's picks (RiverLineBacking.cpp), so the page opens on the event it was asked for.
-	int Picked = 0;
-	for (const live::Occurrence& O : live::Reachable(World, 6.0 * 24.0))
-	{
-		if (Picked >= 6)
-		{
-			break;
-		}
-		if (live::EntryFor(S.Life, O.Id) != nullptr)
-		{
-			continue;
-		}
-		// Someone else pays for it the way GoToLive would register it now (the first option that can): not the player's to
-		// sell. A deal listed with why it won't pay (a cover for other events, one used up) doesn't count, wherever it's listed.
-		const std::vector<std::pair<life::Funding, std::string>> Pay = stake::FundingOptions(S.Life, O, World);
-		const auto Payer = std::find_if(Pay.begin(), Pay.end(), [](const std::pair<life::Funding, std::string>& X) { return X.second.empty(); });
-		if (Payer != Pay.end() && Payer->first.From != life::Paid::Own)
-		{
-			continue;
-		}
-		if (O.Id == OccurrenceId)
-		{
-			return true;
-		}
-		++Picked;
-	}
-	return false;
+	// The Backing page's own rule (RiverLineBacking.cpp): reachable this week, not entered, nobody else paying. The page keeps
+	// a preselected event among its picks, so the link always lands on it, however far down the week it is.
+	return backing_detail::LiveSellable(S, OccurrenceId, World);
 }
 
 LiveCard LiveCardOf(const Session& S, const live::Occurrence& O, double World, int PlannedField)

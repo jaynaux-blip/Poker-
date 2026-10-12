@@ -20,8 +20,11 @@ namespace ui
 {
 namespace backing_detail
 {
-// RiverLineBacking.cpp: the page RiverLine::BackingPage draws.
+// RiverLineBacking.cpp: the page RiverLine::BackingPage draws, the "Sell action" link's preselect, and whether the panel
+// takes a live event.
 void DrawPage(Ui& UI, Canvas& C, Session& S, double Now, bool Interactive);
+void Preselect(const Ui& UI, const std::string& EventId);
+bool LiveSellable(const Session& S, const std::string& OccurrenceId, double World);
 } // namespace backing_detail
 } // namespace ui
 } // namespace ss
@@ -240,6 +243,42 @@ void PicksCovered()
 	const bool NoNightly = std::none_of(Both.begin(), Both.end(), [](const std::string& X) { return X.rfind("Nightly", 0) == 0; });
 	Expect(!Alone.empty() && Both == Alone && NoNightly, "backing: a covered event isn't for sale, whichever deal the book lists first");
 }
+
+void PicksKeepPreselected()
+{
+	// The Embercrest card's "Sell action" on an event past the panel's first six (later in the week): the panel opens on
+	// it, in the sixth place, and the card's link and the panel agree on what can be sold.
+	QuietHooks H;
+	ss::Session S(H, "ui-backing-far");
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Step(S, 0.0, 0.2);
+	S.LobbyMinutes = 9.0 * Day - Day + 14.0 * 60.0;
+	Now = Step(S, Now, 0.2);
+	const double World = S.WorldMinutes();
+	const std::vector<live::Occurrence> Week = live::Reachable(World, 6.0 * 24.0);
+	const live::Occurrence* Far = Week.size() > 7 ? &Week[7] : nullptr;
+	Expect(Far != nullptr, "backing: the bus can make more than seven events this week");
+	if (!Far)
+	{
+		return;
+	}
+	const std::string Label = std::string(Far->T->Short) + " \xC2\xB7 " + (Far->Day == ss::net::DayOf(World) ? std::string("Today") : std::string(ss::net::WeekdayName(Far->Day)));
+	Ui UI;
+	DrawList L;
+	ss::ui::backing_detail::Preselect(UI, Far->Id);
+	Frame(UI, S, L, Now);
+	const std::vector<std::string> Picks = PickLabels(L);
+	Expect(Picks.size() == 6 && Picks.back() == Label && ss::ui::backing_detail::LiveSellable(S, Far->Id, World),
+		("backing: a preselected event later in the week joins the picks, last, and the panel opens on it (" + Label + ")").c_str());
+	// The first six stay as they were in front of it.
+	Ui Plain;
+	DrawList P;
+	Frame(Plain, S, P, Now);
+	const std::vector<std::string> First = PickLabels(P);
+	Expect(First.size() == 6 && std::equal(First.begin(), First.begin() + 5, Picks.begin()) && First.back() != Label, "backing: without it, the week's first six");
+	// An event the bus can't make this week isn't for sale, from the card or the panel.
+	Expect(!ss::ui::backing_detail::LiveSellable(S, "embercrest-nowhere@1", World), "backing: an event that isn't on this week's bus isn't for sale");
+}
 } // namespace stake_seg
 
 void SegStake()
@@ -247,5 +286,6 @@ void SegStake()
 	stake_seg::Page();
 	stake_seg::EmbercrestCard();
 	stake_seg::PicksCovered();
+	stake_seg::PicksKeepPreselected();
 }
 } // namespace ui_test

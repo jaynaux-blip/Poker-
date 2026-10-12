@@ -8,6 +8,7 @@
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Stake.h"
 #include "ShortStack/UI/StreamArt.h"
 #include "ShortStack/UI/Ui.h"
 
@@ -37,29 +38,15 @@ std::vector<life::Mark> Dates(const Session& S, double From, double To)
 /** A date in a word, for a calendar square, and how much it matters (lower first): what's owed comes first. */
 std::pair<int, std::string> Word(const life::Mark& M)
 {
-	if (M.Kind == life::LedgerBacking)
-	{
-		// The book's dates (stake::Marks): payments due, owed to the player, chop days, staked events, listings.
-		if (M.Label.rfind("Chop day", 0) == 0)
-		{
-			return {2, "CHOP"};
-		}
-		if (M.Label.find(" owes you ") != std::string::npos)
-		{
-			return {6, "OWED"};
-		}
-		if (M.Label.rfind("Pieces sold", 0) == 0)
-		{
-			return {8, "SOLD"};
-		}
-		if (M.Label.find("putting you in") != std::string::npos)
-		{
-			return {7, "BACKED"};
-		}
-		return {0, "PAY"};
-	}
 	switch (M.Kind)
 	{
+	// The book's dates (stake::Marks, by stake::DateKind): payments due, owed to the player, chop days, staked events,
+	// listings.
+	case stake::DatePay: return {0, "PAY"};
+	case stake::DateChop: return {2, "CHOP"};
+	case stake::DateOwed: return {6, "OWED"};
+	case stake::DateBacked: return {7, "BACKED"};
+	case stake::DateSold: return {8, "SOLD"};
 	case sponsor::MarkCure: return {1, "CURE"};
 	case sponsor::MarkReview: return {3, "REVIEW"};
 	case sponsor::MarkRenewal: return {4, "RENEW"};

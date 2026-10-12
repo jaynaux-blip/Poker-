@@ -8,6 +8,7 @@
 #include "BackRoomPlayerController.h"
 #include "BackRoomStage.h"
 #include "BackRoomTable.h"
+#include "BackRoomTableHost.h"
 #include "CastLooks.h"
 #include "HeroGrooms.h"
 #include "ShortStackCharacter.h"
@@ -39,6 +40,8 @@
 #include "Widgets/SOverlay.h"
 #include "ShortStack/AI/Profiles.h"
 #include "ShortStack/Audio/Synth.h"
+#include "ShortStack/Game/ChipSet.h"
+#include "ShortStack/Game/Coach.h"
 #include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
@@ -279,6 +282,64 @@ std::string ToUtf8(const FString& S)
 	return std::string(TCHAR_TO_UTF8(*S));
 }
 
+/**
+ * The mix on an audio component: the room's voices (the card room's speech and the PA, next_segment_spec 4.9) as their own
+ * level where the audio has a Voices bus (ue-room's UNightOneAudio::SetMix with four levels), and today's three where it
+ * hasn't yet.
+ */
+template <typename TAudio>
+void ApplyMix(TAudio& Audio, float Master, float Effects, float Ambience, float Voices)
+{
+	if constexpr (requires { Audio.SetMix(Master, Effects, Ambience, Voices); })
+	{
+		Audio.SetMix(Master, Effects, Ambience, Voices);
+	}
+	else
+	{
+		(void)Voices;
+		Audio.SetMix(Master, Effects, Ambience);
+	}
+}
+// The Voices bus is there now (ue-room's): keep the four-level SetMix, or the Voices slider would quietly stop working.
+static_assert(requires(UNightOneAudio& A, float F) { A.SetMix(F, F, F, F); }, "UNightOneAudio::SetMix(Master, Effects, Ambience, Voices) is what the menu's Voices slider drives");
+
+/**
+ * The table's buttons that act on how long they're held (next_segment_spec 6.4): Y on a pad raises when let go under
+ * 0.35 s, fills ALL IN past it and goes all in at 0.95 s (let go between: nothing); A on the keyboard is all in held for
+ * 0.6 s. And the table card dismissed while its button is still down (Esc or B): it stays down until let go. The pawn's
+ * own (one player), kept off the frozen header.
+ */
+struct FPawnTableInput
+{
+	ss::ui::HoldButton PadY;
+	ss::ui::HoldButton KeyA;
+	bool bPadYDown = false;
+	bool bKeyADown = false;
+	bool bCardDismissed = false;
+	/** When the held button went down (the pawn's own clock, HoldNow), or -1. */
+	double DownAt = -1.0;
+	/** The engine frame the seated input last ran (GFrameCounter): after a gap (paused, walking, on foot, quitting),
+	 *  whatever is already down is an old press, never the start of a hold. */
+	uint64 LastFrame = 0;
+};
+
+TMap<const ABackRoomPawn*, FPawnTableInput>& TableInputs()
+{
+	static TMap<const ABackRoomPawn*, FPawnTableInput> Inputs;
+	return Inputs;
+}
+
+FPawnTableInput& InputFor(const ABackRoomPawn* Pawn)
+{
+	FPawnTableInput& In = TableInputs().FindOrAdd(Pawn);
+	In.PadY.CanTap = true;
+	In.KeyA.CanTap = false;
+	return In;
+}
+
+/** Real seconds the table's actions stay locked after the table card closes. */
+constexpr double CardLockSeconds = 0.25;
+
 } // namespace BackRoomGameDetail
 
 using namespace BackRoomGameDetail;
@@ -336,6 +397,7 @@ void ABackRoomPawn::BeginPlay()
 void ABackRoomPawn::EndPlay(const EEndPlayReason::Type Reason)
 {
 	UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
+	TableInputs().Remove(this);
 	Super::EndPlay(Reason);
 }
 
@@ -428,18 +490,59 @@ void ABackRoomPawn::HandleInput(float RealDt)
 	FocusLeft = FMath::Clamp(FocusLeft + (Drain > 0.0f ? -Drain * RealDt : RealDt * Refill), 0.0f, 1.0f);
 	Focus = Ease(Focus, bFocusing ? 1.0f : 0.0f, 5.0f, RealDt);
 	const bool bFolded = GM && GM->IsLive() && GM->GetPhase() == EBackRoomPhase::Playing && Table && !Table->IsHeroInHand();
+	// The table card (next_segment_spec 6.3): held up with Tab or up on the d-pad, modal (the decision waits). Q and E or
+	// the bumpers turn its pages, U (or Y while it's up) swaps big blinds and chips, Esc or B puts it down until the button
+	// is let go. The table's actions stay locked a moment after it goes.
+	FPawnTableInput& In = InputFor(this);
+	const double RealNow = FPlatformTime::Seconds();
+	const bool bCardKey = Held(PC, EKeys::Tab) || Held(PC, EKeys::Gamepad_DPad_Up);
+	In.bCardDismissed = In.bCardDismissed && bCardKey;
+	const bool bCardWas = bTableCard;
+	bTableCard = bCardKey && !In.bCardDismissed;
+	if (bTableCard)
+	{
+		const int32 Pages = static_cast<int32>(ss::ui::TableCardPages().size());
+		if (Pressed(PC, EKeys::Q) || Pressed(PC, EKeys::Gamepad_LeftShoulder))
+		{
+			TableCardPage = (TableCardPage + Pages - 1) % Pages;
+		}
+		if (Pressed(PC, EKeys::E) || Pressed(PC, EKeys::Gamepad_RightShoulder))
+		{
+			TableCardPage = (TableCardPage + 1) % Pages;
+		}
+		if (GM && (Pressed(PC, EKeys::U) || Pressed(PC, EKeys::Gamepad_FaceButton_Top)))
+		{
+			GM->FlipStackUnits();
+		}
+		if (Pressed(PC, EKeys::Escape) || Pressed(PC, EKeys::Gamepad_FaceButton_Right))
+		{
+			In.bCardDismissed = true;
+			bTableCard = false;
+		}
+	}
+	if (bCardWas && !bTableCard)
+	{
+		TableCardClosedAt = RealNow;
+	}
+	// Up, or just put down: nothing at the table is yours to do (a held button starts over).
+	const bool bCardLock = bTableCard || RealNow - TableCardClosedAt < CardLockSeconds;
+	if (bCardLock)
+	{
+		In.PadY.Reset();
+		In.KeyA.Reset();
+	}
 	// T (right on the d-pad): the table's pace. N, out of the hand (A on a gamepad: nothing else is yours to do then): the
 	// rest of it at a glance, until you're dealt in again. Neither ever decides anything of yours.
-	if (GM && GM->IsLive() && (Pressed(PC, EKeys::T) || Pressed(PC, EKeys::Gamepad_DPad_Right)))
+	if (!bCardLock && GM && GM->IsLive() && (Pressed(PC, EKeys::T) || Pressed(PC, EKeys::Gamepad_DPad_Right)))
 	{
 		GM->CycleTablePace();
 	}
-	if (bFolded && !bFocusing && (Pressed(PC, EKeys::N) || Pressed(PC, EKeys::Gamepad_FaceButton_Bottom)))
+	if (!bCardLock && bFolded && !bFocusing && (Pressed(PC, EKeys::N) || Pressed(PC, EKeys::Gamepad_FaceButton_Bottom)))
 	{
 		bSkipHand = true;
 	}
 	// Q (left on the d-pad): up from the table, on foot (you're still dealt in).
-	if (GM && GM->IsLive() && (Pressed(PC, EKeys::Q) || Pressed(PC, EKeys::Gamepad_DPad_Left)))
+	if (!bCardLock && GM && GM->IsLive() && (Pressed(PC, EKeys::Q) || Pressed(PC, EKeys::Gamepad_DPad_Left)))
 	{
 		GM->LiveStandUp();
 		return;
@@ -476,23 +579,50 @@ void ABackRoomPawn::HandleInput(float RealDt)
 		Studying = nullptr;
 	}
 
-	// Sizing (the raise, or the buy-back): the wheel or the arrows; the bumpers, which keep stepping while held.
-	const int32 Size = (Pressed(PC, EKeys::MouseScrollUp) || Pressed(PC, EKeys::Up) ? 1 : 0) - (Pressed(PC, EKeys::MouseScrollDown) || Pressed(PC, EKeys::Down) ? 1 : 0) +
-		(Pressed(PC, EKeys::Gamepad_RightShoulder) ? 1 : 0) - (Pressed(PC, EKeys::Gamepad_LeftShoulder) ? 1 : 0) +
+	// Sizing (next_segment_spec 6.2 D, 6.4): the fine steps on the wheel or the arrows, and on a bumper held (it keeps
+	// stepping); a bumper tapped goes to the next preset; keys 1 to 6 pick one.
+	const int32 Fine = (Pressed(PC, EKeys::MouseScrollUp) || Pressed(PC, EKeys::Up) ? 1 : 0) - (Pressed(PC, EKeys::MouseScrollDown) || Pressed(PC, EKeys::Down) ? 1 : 0) +
 		(Pad ? Pad->RepeatSteps(EKeys::Gamepad_RightShoulder) - Pad->RepeatSteps(EKeys::Gamepad_LeftShoulder) : 0);
+	const int32 Snap = (Pressed(PC, EKeys::Gamepad_RightShoulder) ? 1 : 0) - (Pressed(PC, EKeys::Gamepad_LeftShoulder) ? 1 : 0);
 	// L, or down on the d-pad held: going (a held button, so a stray press can't).
-	const bool bLeave = Pressed(PC, EKeys::L) || (Pad && Pad->HoldCompleted(EKeys::Gamepad_DPad_Down));
+	const bool bLeave = !bCardLock && (Pressed(PC, EKeys::L) || (Pad && Pad->HoldCompleted(EKeys::Gamepad_DPad_Down)));
+	const bool bYDown = Held(PC, EKeys::Gamepad_FaceButton_Top);
+	const bool bADown = Held(PC, EKeys::A);
+	// The hold clock: the pawn's own real time, which stands still while the game is paused and moves at most 0.1 s a
+	// frame, so neither a pause nor a hitch can turn a tap of Y into a hold (HoldButton reads the time between the press and
+	// the release). A hold starts only on a press seen here, at the table: after any frame this didn't run (paused, a walk,
+	// on foot, a quit), a button already down is an old one (A held to walk to the chair never arms the keyboard's all in).
+	const double HoldNow = static_cast<double>(Time);
+	if (In.LastFrame + 1 != GFrameCounter)
+	{
+		In.PadY.Reset();
+		In.KeyA.Reset();
+		In.bPadYDown = bYDown;
+		In.bKeyADown = bADown;
+		In.DownAt = -1.0;
+	}
+	In.LastFrame = GFrameCounter;
 
 	// Felted: rebuy from the bankroll (R or Y; the sizing picks how much) or go home.
 	if (GM && GM->GetPhase() == EBackRoomPhase::Busted)
 	{
+		In.PadY.Reset();
+		In.KeyA.Reset();
+		In.bPadYDown = bYDown;
+		In.bKeyADown = bADown;
+		RaiseHeld = -1.0f;
+		AllInHold = 0.0f;
+		if (bCardLock)
+		{
+			return;
+		}
 		if (Pressed(PC, EKeys::R) || Pressed(PC, EKeys::Gamepad_FaceButton_Top))
 		{
 			GM->Reload();
 		}
-		if (Size != 0)
+		if (Fine + Snap != 0)
 		{
-			GM->AdjustReload(Size);
+			GM->AdjustReload(Fine + Snap);
 		}
 		if (bLeave)
 		{
@@ -501,9 +631,11 @@ void ABackRoomPawn::HandleInput(float RealDt)
 		return;
 	}
 
-	// Actions: F or X folds; C or A checks or calls (A only while you're in the hand: folded, it's the next hand); R or Y
-	// bets or raises to the amount shown; A, or B held, goes all in.
-	if (Table)
+	// Actions, one control map (ss::ui::Controls; next_segment_spec 6.4): F or X folds; C or A checks or calls (A only
+	// while you're in the hand: folded, it's the next hand); R bets or raises to the amount shown, and so does Y let go
+	// within 0.35 s; held past that, Y fills ALL IN and goes all in at 0.95 s (let go between: nothing, and a hold never
+	// raises first). On the keyboard all in is A held. B backs out (the table card) and does nothing to the hand.
+	if (Table && !bCardLock)
 	{
 		if (Pressed(PC, EKeys::F) || Pressed(PC, EKeys::Gamepad_FaceButton_Left))
 		{
@@ -513,19 +645,86 @@ void ABackRoomPawn::HandleInput(float RealDt)
 		{
 			Table->HeroCheckCall();
 		}
-		if (Pressed(PC, EKeys::R) || Pressed(PC, EKeys::Gamepad_FaceButton_Top))
+		if (Pressed(PC, EKeys::R))
 		{
 			Table->HeroRaise();
 		}
-		if (Pressed(PC, EKeys::A) || (Pad && Pad->HoldCompleted(EKeys::Gamepad_FaceButton_Right)))
+		using EOut = ss::ui::HoldButton::Out;
+		// Y: a tap raises on release, a hold goes all in.
+		if (bYDown && !In.bPadYDown)
+		{
+			In.PadY.Press(HoldNow);
+		}
+		if (bYDown)
+		{
+			if (In.PadY.Tick(HoldNow) == EOut::Hold)
+			{
+				UE_LOG(LogBackRoom, Log, TEXT("Table input: Y held %.2f s: all in"), HoldNow - In.DownAt);
+				Table->HeroAllIn();
+			}
+		}
+		else if (In.bPadYDown && In.PadY.IsDown())
+		{
+			const EOut Let = In.PadY.Release(HoldNow);
+			UE_LOG(LogBackRoom, Log, TEXT("Table input: Y let go after %.2f s: %s"), HoldNow - In.DownAt, Let == EOut::Tap ? TEXT("raise") : Let == EOut::Hold ? TEXT("all in") : TEXT("nothing"));
+			if (Let == EOut::Tap)
+			{
+				Table->HeroRaise();
+			}
+			else if (Let == EOut::Hold)
+			{
+				Table->HeroAllIn();
+			}
+		}
+		// A on the keyboard: all in, held.
+		if (bADown && !In.bKeyADown)
+		{
+			In.KeyA.Press(HoldNow);
+		}
+		if (bADown)
+		{
+			if (In.KeyA.Tick(HoldNow) == EOut::Hold)
+			{
+				UE_LOG(LogBackRoom, Log, TEXT("Table input: A held %.2f s: all in"), HoldNow - In.DownAt);
+				Table->HeroAllIn();
+			}
+		}
+		else if (In.bKeyADown && In.KeyA.Release(HoldNow) == EOut::Hold)
 		{
 			Table->HeroAllIn();
 		}
-		if (Size != 0)
+		// The presets (keys 1 to 6, the bumpers tapped) and the fine steps.
+		static const FKey PresetKeys[6] = {EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six};
+		for (int32 K = 0; K < 6; ++K)
 		{
-			Table->HeroAdjustRaise(Size);
+			if (Pressed(PC, PresetKeys[K]))
+			{
+				Table->HeroPreset(K);
+			}
+		}
+		if (Snap != 0)
+		{
+			Table->HeroSnap(Snap);
+		}
+		if (Fine != 0)
+		{
+			Table->HeroAdjustRaise(Fine);
+		}
+		if (GM && Pressed(PC, EKeys::U))
+		{
+			GM->FlipStackUnits();
 		}
 	}
+	// The ladder's fill, and how long the button's been down (for the HUD).
+	if ((bYDown && !In.bPadYDown) || (bADown && !In.bKeyADown))
+	{
+		In.DownAt = HoldNow;
+	}
+	In.bPadYDown = bYDown;
+	In.bKeyADown = bADown;
+	const bool bHolding = In.PadY.IsDown() || In.KeyA.IsDown();
+	AllInHold = FMath::Max(In.PadY.Progress(HoldNow), In.KeyA.Progress(HoldNow));
+	RaiseHeld = bHolding && In.DownAt >= 0.0 ? static_cast<float>(HoldNow - In.DownAt) : -1.0f;
 	if (GM && bLeave)
 	{
 		GM->RequestLeave();
@@ -614,6 +813,64 @@ void ABackRoomPawn::TickFreeWalk(float RealDt)
 	ABackRoomGameMode* GM = GetMode();
 	ABackRoomStage* Stage = GM ? GM->Stage.Get() : nullptr;
 	UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
+	// The stage rail's view of the feature table (spec 6.5): a fixed camera, the ON AIR lower third; E, A or B steps back.
+	// (The press that steps back is spent on it: it doesn't also use the rail again, which would put the view straight
+	// back up, or pause.)
+	bool bSteppedBack = false;
+	if (GM && GM->IsWatchingFeature())
+	{
+		if (Pressed(PC, EKeys::E) || Pressed(PC, EKeys::Gamepad_FaceButton_Bottom) || Pressed(PC, EKeys::Gamepad_FaceButton_Right) || Pressed(PC, EKeys::BackSpace))
+		{
+			GM->WatchFeature(false);
+			bSteppedBack = true;
+		}
+		else
+		{
+			Camera->SetWorldLocationAndRotation(ExtPos, (ExtAt - ExtPos).Rotation());
+			Camera->SetFieldOfView(ExtFov);
+			Camera->PostProcessSettings.DepthOfFieldFocalDistance = static_cast<float>(FVector::Dist(ExtPos, ExtAt));
+			Camera->PostProcessSettings.DepthOfFieldFstop = 8.0f;
+			float PitchKick = 0.0f, Racing = 0.0f;
+			TickHeart(RealDt, PitchKick, Racing);
+			return;
+		}
+	}
+	// The table card on foot too (held up: Tab or up on the d-pad), its pages and units; Esc or B puts it down.
+	{
+		FPawnTableInput& In = InputFor(this);
+		const bool bCardKey = Held(PC, EKeys::Tab) || Held(PC, EKeys::Gamepad_DPad_Up);
+		In.bCardDismissed = In.bCardDismissed && bCardKey;
+		const bool bWas = bTableCard;
+		// (Not over the desk's screen: up on the d-pad is its own there.)
+		bTableCard = bCardKey && !In.bCardDismissed && GM && GM->IsLive() && !GM->IsDeskOpen();
+		if (bTableCard)
+		{
+			const int32 Pages = static_cast<int32>(ss::ui::TableCardPages().size());
+			if (Pressed(PC, EKeys::Q) || Pressed(PC, EKeys::Gamepad_LeftShoulder))
+			{
+				TableCardPage = (TableCardPage + Pages - 1) % Pages;
+			}
+			if (Pressed(PC, EKeys::E) || Pressed(PC, EKeys::Gamepad_RightShoulder))
+			{
+				TableCardPage = (TableCardPage + 1) % Pages;
+			}
+			if (Pressed(PC, EKeys::U) || Pressed(PC, EKeys::Gamepad_FaceButton_Top))
+			{
+				GM->FlipStackUnits();
+			}
+			if (Pressed(PC, EKeys::Escape) || Pressed(PC, EKeys::Gamepad_FaceButton_Right))
+			{
+				In.bCardDismissed = true;
+				bTableCard = false;
+			}
+		}
+		if (bWas && !bTableCard)
+		{
+			TableCardClosedAt = FPlatformTime::Seconds();
+		}
+	}
+	// (The desk's screen has the keys while it's up: ue-venue's.)
+	const bool bCardLock = bSteppedBack || bTableCard || FPlatformTime::Seconds() - TableCardClosedAt < CardLockSeconds || (GM && GM->IsDeskOpen());
 	if (PC)
 	{
 		// The mouse or the right stick.
@@ -632,6 +889,11 @@ void ABackRoomPawn::TickFreeWalk(float RealDt)
 	{
 		Fwd = FMath::Clamp(Fwd + PC->GetInputAnalogKeyState(EKeys::Gamepad_LeftY), -1.0, 1.0);
 		Right = FMath::Clamp(Right + PC->GetInputAnalogKeyState(EKeys::Gamepad_LeftX), -1.0, 1.0);
+	}
+	if (GM && GM->IsDeskOpen())
+	{
+		Fwd = 0.0;
+		Right = 0.0;
 	}
 	const bool bHurry = Held(PC, EKeys::LeftShift) || Held(PC, EKeys::RightShift) || Held(PC, EKeys::Gamepad_LeftThumbstick) || Held(PC, EKeys::Gamepad_LeftShoulder);
 	const FVector Ahead = FRotator(0.0f, WalkYaw, 0.0f).Vector();
@@ -677,15 +939,20 @@ void ABackRoomPawn::TickFreeWalk(float RealDt)
 	P.DepthOfFieldFstop = 5.6f;
 	P.SceneFringeIntensity = 0.0f;
 	PeekLight->SetIntensity(0.0f);
-	// E (A on a gamepad): whatever's in reach (your chair, the desk, the cage, the bar, the deck, the door). V (View) picks
-	// the view for the table (on foot it's always your own eyes).
-	if (GM && (Pressed(PC, EKeys::E) || Pressed(PC, EKeys::Gamepad_FaceButton_Bottom)))
+	// The street's controls on foot (spec 6.4): E (A on a gamepad) uses whatever's in reach (your chair, the desk, the cage,
+	// the bar, the deck, the door); V (Y, or View) picks the view for the table (on foot it's always your own eyes); B
+	// pauses, as it does outside.
+	if (!bCardLock && GM && (Pressed(PC, EKeys::E) || Pressed(PC, EKeys::Gamepad_FaceButton_Bottom)))
 	{
 		GM->LiveInteract();
 	}
-	if (Pressed(PC, EKeys::V) || Pressed(PC, EKeys::Gamepad_Special_Left))
+	if (!bCardLock && (Pressed(PC, EKeys::V) || Pressed(PC, EKeys::Gamepad_Special_Left) || Pressed(PC, EKeys::Gamepad_FaceButton_Top)))
 	{
 		ToggleThirdPerson();
+	}
+	if (!bCardLock && GM && Pressed(PC, EKeys::Gamepad_FaceButton_Right) && !GM->IsDeskOpen())
+	{
+		GM->OpenPauseMenu();
 	}
 	float PitchKick = 0.0f, Racing = 0.0f;
 	TickHeart(RealDt, PitchKick, Racing);
@@ -998,6 +1265,12 @@ void ABackRoomPawn::Tick(float DeltaSeconds)
 	// Focus slows the world; the head and the meter run on real time.
 	const float RealDt = FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
 	Time += RealDt;
+	// Walked somewhere (or the night's over at the table): the table card goes down with the table.
+	if (bTableCard && !bFreeWalk && (bWalking || bHoldWalkEnd || bWalkPending || (GM && (GM->GetPhase() == EBackRoomPhase::Leaving || GM->IsQuittingTable()))))
+	{
+		bTableCard = false;
+		TableCardClosedAt = FPlatformTime::Seconds();
+	}
 	if (bWalkPending && ThirdBlend <= 0.02f)
 	{
 		StartPendingWalk();
@@ -1718,10 +1991,22 @@ void ABackRoomGameMode::FTableMenu::Describe()
 		Row(TEXT("EVENT"), M.LiveName);
 		if (const ss::Tournament* T = M.Tourney.Get(); T && !M.bLiveOver && !M.bCancelled)
 		{
+			// The clock's own facts (live::Clock: the same numbers as the clock card and the room's screens; spec 6.7).
 			const ss::Level& L = T->CurrentLevel();
-			Row(TEXT("LEVEL"), FString::Printf(TEXT("%d   ·   %s / %s"), T->LevelIndex + 1, *FText::AsNumber(static_cast<int64>(L.Sb)).ToString(), *FText::AsNumber(static_cast<int64>(L.Bb)).ToString()));
+			auto N = [](int64 V) { return FText::AsNumber(V).ToString(); };
+			const int64 Stack = T->Hero().Stack;
+			const FString Bbs = UTF8_TO_TCHAR(ss::chipset::InBb(Stack, L.Bb).c_str());
+			Row(TEXT("YOUR STACK"), Bbs.IsEmpty() ? N(Stack) : FString::Printf(TEXT("%s   ·   %s"), *N(Stack), *Bbs));
+			Row(TEXT("LEVEL"), L.Ante > 0 ? FString::Printf(TEXT("%d   ·   %s / %s   ·   ANTE %s"), T->LevelIndex + 1, *N(L.Sb), *N(L.Bb), *N(L.Ante))
+										  : FString::Printf(TEXT("%d   ·   %s / %s"), T->LevelIndex + 1, *N(L.Sb), *N(L.Bb)));
+			const FTableHost* Host = M.TableHost.Get();
+			if (Host && Host->bHasClock && Host->Clock.BreakBeforeLevel > 0)
+			{
+				Row(TEXT("NEXT BREAK"), FString::Printf(TEXT("BEFORE LEVEL %d"), Host->Clock.BreakBeforeLevel));
+			}
 			Row(TEXT("PLAYERS LEFT"), FString::Printf(TEXT("%d of %d"), T->Remaining, T->Spec.Entrants));
-			Row(TEXT("YOUR STACK"), FText::AsNumber(static_cast<int64>(T->Hero().Stack)).ToString());
+			const int32 Paid = T->PaidPlaces();
+			Row(TEXT("PAID"), T->InTheMoney() ? FString::Printf(TEXT("%d   ·   IN THE MONEY"), Paid) : FString::Printf(TEXT("%d   ·   %d TO GO"), Paid, FMath::Max(0, T->Remaining - Paid)));
 			Row(TEXT("YOUR RANK"), OrdinalText(T->HeroRank()));
 			I.PauseNote = "The tournament clock is stopped. Pausing isn't sitting out: nothing is dealt without you.";
 			if (T->Hero().Busted || T->bFinished)
@@ -1768,7 +2053,7 @@ void ABackRoomGameMode::FTableMenu::Describe()
 	else if (M.IsCareer())
 	{
 		// Dee's game: the money as it stands (the chips in front of you are bankroll money), the night so far.
-		Menu.SetVenue(ss::ui::Venue::BackRoom, "THE BACK ROOM \xC2\xB7 SPIN CYCLE LAUNDROMAT");
+		Menu.SetVenue(ss::ui::Venue::BackRoom, "THE BACK ROOM \xC2\xB7 WASH & FOLD");
 		const int64 Behind = M.Phase == EBackRoomPhase::Leaving ? 0 : P.Stack;
 		const int64 Bankroll = M.Phase == EBackRoomPhase::Leaving ? M.StartBankrollCents : M.BaseCents + Behind * 100;
 		Row(TEXT("BANKROLL"), CentsText(Bankroll));
@@ -1843,13 +2128,19 @@ void ABackRoomGameMode::FTableMenu::Apply(const ss::ui::GameSettings& S, bool bA
 	}
 	// The render scale: fixed, or moving to hold the chosen frame rate (FrameBudget.h).
 	M.FrameBudget.Configure(S.DynamicTarget, S.ResolutionScale);
-	// The mix: the room's and the menu's own voice. The engine mutes a game whose window isn't in front unless told otherwise.
+	// The mix: the room's and the menu's own voice, with the room's voices (its speech and the PA) at their own level (spec
+	// 4.9). The engine mutes a game whose window isn't in front unless told otherwise.
 	for (UNightOneAudio* A : {M.Table ? M.Table->GetAudio() : nullptr, Voice.Get()})
 	{
 		if (A)
 		{
-			A->SetMix(S.MasterVolume / 100.0f, S.EffectsVolume / 100.0f, S.AmbienceVolume / 100.0f);
+			ApplyMix(*A, S.MasterVolume / 100.0f, S.EffectsVolume / 100.0f, S.AmbienceVolume / 100.0f, FMath::Clamp(S.VoicesVolume, 0, 100) / 100.0f);
 		}
+	}
+	// The table's own: the turn cue as the player set it.
+	if (M.Table)
+	{
+		M.Table->TurnCue = FMath::Clamp(S.TurnCue, 0, 2);
 	}
 	FApp::SetUnfocusedVolumeMultiplier(S.BackgroundAudio ? 1.0f : 0.0f);
 	// The look, the controls reminder, the view and the lens (the pawn and the HUD read them each frame).
@@ -2094,6 +2385,19 @@ const ss::ui::GameSettings* ABackRoomGameMode::GetSettings() const
 	return TableMenu ? &TableMenu->Menu.Settings : nullptr;
 }
 
+void ABackRoomGameMode::FlipStackUnits()
+{
+	// U (or Y with the table card up): big blinds and chips swap places on the plates, the hero block and the card; kept
+	// with the rest of the player's settings (the Stack units row), written once they stop changing things.
+	if (!TableMenu)
+	{
+		return;
+	}
+	ss::ui::GameSettings& S = TableMenu->Menu.Settings;
+	S.StackUnits = S.StackUnits == 0 ? 1 : 0;
+	TableMenu->SettingsDirtyAt = TableMenu->RealTime;
+}
+
 float ABackRoomGameMode::SettingFov(float DefaultFov) const
 {
 	return TableMenu && TableMenu->FieldOfView != 50 ? TableFov(DefaultFov, TableMenu->FieldOfView) : DefaultFov;
@@ -2200,6 +2504,8 @@ void ABackRoomGameMode::EndPlay(const EEndPlayReason::Type Reason)
 	}
 	// The hero's grooms held for the shoulder camera (SeatEveryone's HoldWorn) don't outlive the table.
 	HeroGrooms::ReleaseWorn();
+	// (The next table starts from the club's chips; it sets its own.)
+	ABackRoomChips::UseChips(false, {});
 	Super::EndPlay(Reason);
 }
 
@@ -2252,6 +2558,16 @@ void ABackRoomGameMode::StartPlay()
 	bLive = LoadLive();
 	FindOrSpawnStage();
 	const bool bCareer = bLive || LoadCareer();
+	// The room's chips (next_segment_spec 6.2 B): the Embercrest's tournament set, with what's in play at the level, or the
+	// Wash & Fold's clay.
+	if (bLive && Tourney)
+	{
+		ABackRoomChips::UseChips(true, ss::chipset::InPlay(ss::chipset::Room::Embercrest, Tourney->Levels, Tourney->LevelIndex, Tourney->Spec.BreakEvery));
+	}
+	else
+	{
+		ABackRoomChips::UseChips(false, {});
+	}
 	SeatEveryone();
 	// The player's settings, as set in the apartment's menus (the mix, whether to keep playing behind another window, the
 	// frame budget, the table's pace, the look and the lens), and the pause menu that changes them here.
@@ -2399,6 +2715,35 @@ void ABackRoomGameMode::SaveCareer(bool bFinal)
 
 void ABackRoomGameMode::OnTableNote(uint8 Note)
 {
+	// The hand the player was dealt into, as they saw it (ss::recall): the table card's HANDS page, and for a hand they
+	// played (chips in past the blinds, or a showdown), the last-hand card over the hero block for 6 s.
+	ss::recall::Record Played;
+	if (Table && static_cast<EBackRoomTableNote>(Note) == EBackRoomTableNote::HandEnded && Table->TakeRecall(Played))
+	{
+		// Played: chips put in by choice (a call, a bet, a raise, all in), or still in it at the end (a showdown, or the
+		// blinds walked to them). A hand folded, by the player or for them while they were up, isn't one they played, even
+		// when the others showed down.
+		bool bChipsIn = false;
+		bool bFoldedOut = false;
+		for (const ss::recall::Line& L : Played.Lines)
+		{
+			if (L.Who == "You")
+			{
+				bFoldedOut = bFoldedOut || L.What == "folds";
+				bChipsIn = bChipsIn || (L.What != "folds" && L.What != "checks");
+			}
+		}
+		const bool bPlayed = bChipsIn || (!bFoldedOut && (Played.HeroNet != 0 || !Played.Shown.empty()));
+		RecentHands.push_back(MoveTemp(Played));
+		if (RecentHands.size() > 10)
+		{
+			RecentHands.erase(RecentHands.begin(), RecentHands.begin() + static_cast<std::ptrdiff_t>(RecentHands.size() - 10));
+		}
+		if (bPlayed && TableHost)
+		{
+			TableHost->LastHandAt = FPlatformTime::Seconds();
+		}
+	}
 	if (Table && Save.IsValid() && static_cast<EBackRoomTableNote>(Note) == EBackRoomTableNote::HandEnded)
 	{
 		// A workout's clear head wears off as the night goes on: the table's fitness, again, at each hand's end, and the tilt
@@ -2902,14 +3247,18 @@ void ABackRoomGameMode::SeatEveryone()
 			Table->Reads.Add(FString(UTF8_TO_TCHAR(R.first.c_str())), R.second);
 		}
 		const ss::hero::Perks HeroPerks = ss::hero::PerksOf(Save->Person);
-		Table->ReadWeight = FMath::Max(1, static_cast<int32>(HeroPerks.ReadWeight));
+		// A coach's part (next_segment_spec 2.11): information and composure, never decisions. What the save's coaching
+		// notes make of the background's read weight (Dee's morning-after: one more for a week) and tilt factor (Finch's
+		// sessions), the same as online.
+		Table->ReadWeight = FMath::Max(1, static_cast<int32>(ss::coach::ReadWeightNow(Save->Life.Study, HeroPerks.ReadWeight, Minutes)));
+		const double CoachedTilt = ss::coach::TiltGainNow(Save->Life.Study, HeroPerks.TiltGain, Minutes);
 		// How hard a painful loss tilts you: the Bouncer's thick skin takes some of it, and (as online) starving or parched
 		// a bad beat lands a fifth harder.
 		const double Needs = Save->Life.Hunger >= 85.0 || Save->Life.Thirst >= 85.0 ? 1.2 : 1.0;
 		// IronHouse's fitness at the table (spec 7.5.4, body::TableOf): a fitter heart rests lower and settles sooner, steadies
 		// further on a breath for less Focus, refills Focus quicker; a clear head after a workout tilts less.
 		Table->Fitness = ss::body::TableOf(Save->Life.Fit, Minutes);
-		Table->TiltGain = static_cast<float>(FMath::Clamp(HeroPerks.TiltGain * Needs * Table->Fitness.TiltGainScale, 0.0, 2.0));
+		Table->TiltGain = static_cast<float>(FMath::Clamp(CoachedTilt * Needs * Table->Fitness.TiltGainScale, 0.0, 2.0));
 		Table->Composure.Bpm = static_cast<float>(Table->Fitness.RestBpm) + 2.0f;
 		Table->Composure.Target = Table->Composure.Bpm;
 		// Each night at the table, the pressure gets to you a little less.
@@ -2978,6 +3327,11 @@ void ABackRoomGameMode::SeatEveryone()
 		HeroPersona.HeroFacialHair = FMath::Max(0, L.FacialHair);
 		HeroPersona.WearColor = W.HatColor;
 		HeroPersona.FrameColor = W.FrameColor;
+		// The sponsors' patches the closet sewed on, as the street shows them (next_segment_spec 3.10; ue-wear's ApplyWear
+		// puts them on): chest, sleeve, cap.
+		HeroPersona.PatchChest = W.Patches[0];
+		HeroPersona.PatchSleeve = W.Patches[1];
+		HeroPersona.PatchCap = W.Patches[2];
 		HeroHairShade(L.HairColor, HeroPersona);
 		// The look the hero's head reads its grooms from (brows included), with the hat as worn; its grooms start loading now
 		// and are held, so going over the shoulder (V) finds them in memory.

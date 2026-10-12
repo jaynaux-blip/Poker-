@@ -2104,7 +2104,7 @@ void Captions()
 	{
 		Caption C;
 		C.Style = K % 6 == 0 ? 1 : K % 9 == 4 ? 2 : 0;
-		C.Speaker = K % 2 == 0 ? "Mrs. Park" : "Big Lou";
+		C.Speaker = C.Style == 1 ? "Floor" : K % 2 == 0 ? "Mrs. Park" : "Big Lou";
 		C.Line = C.Style == 1 ? "Players, the blinds are now 500 and 1,000, with a big blind ante of 1,000. Good luck, everyone." : C.Style == 2 ? "[Applause.]" : "Seat four, it's on you.";
 		C.Clock = ss::ClockString(19.0 * 60.0 + static_cast<double>(K) * 3.0);
 		Night.push_back(C);

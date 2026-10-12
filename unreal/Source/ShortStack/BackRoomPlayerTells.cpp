@@ -6,8 +6,18 @@
 // isn't (noise; and a pro's "tell" that means the opposite is just a tell whose Means is reversed).
 
 #include "BackRoomChips.h"
+#include "BackRoomGameMode.h"
 #include "BackRoomPlayer.h"
 #include "BackRoomPlayerShared.h"
+#include "Engine/World.h"
+#include "HAL/PlatformTime.h"
+#include "Misc/App.h"
+#include "ShortStack/Audio/Voice.h"
+#include "ShortStack/Game/Room.h"
+#include "ShortStack/Game/TableTalk.h"
+#include "ShortStack/UI/Captions.h"
+
+#include <string>
 
 using namespace BackRoomPlayerDetail;
 
@@ -15,72 +25,67 @@ DEFINE_LOG_CATEGORY_STATIC(LogBackRoomTells, Log, All);
 
 namespace BackRoomTellsDetail
 {
+/** A regular's lines for Dee's game: their chat, win, lose and noticed-staring lines, in their order. */
 struct FLines
 {
-	const TCHAR* Name;
-	TArray<const TCHAR*> Chat;
-	TArray<const TCHAR*> Win;
-	TArray<const TCHAR*> Lose;
-	TArray<const TCHAR*> Noticed;
+	TArray<FString> Chat;
+	TArray<FString> Win;
+	TArray<FString> Lose;
+	TArray<FString> Noticed;
 };
 
+/**
+ * The Back Room's eight, word for word (next_segment_spec 4.11): their lines live in core's talk::Cast now, frozen by
+ * room_test, and Dee's game reads them from there in the same order, so its timers and its draws pick exactly what they
+ * always picked. Anyone else has none. (Names match in any case, as they always did.)
+ */
 const FLines& LinesFor(const FString& Name)
 {
-	static const TArray<FLines> All = {
-		{TEXT("Sal"),
-			{TEXT("Forty years I been playing this game."), TEXT("In my day we played for matchsticks."), TEXT("Dee, this coffee's older than me."), TEXT("Patience. That's the whole game, kid.")},
-			{TEXT("Thank you kindly."), TEXT("Slow and steady.")},
-			{TEXT("Eh. Cards are cards."), TEXT("Shoulda stayed home tonight.")},
-			{TEXT("Something on my face, kid?"), TEXT("Take a picture, it lasts longer.")}},
-		{TEXT("Big Lou"),
-			{TEXT("Who's ordering wings?"), TEXT("Lou don't fold. Lou never folds!"), TEXT("That dryer's louder than my ex."), TEXT("Deal 'em, Dee, I'm feeling it tonight!")},
-			{TEXT("That's what I'm talking about!"), TEXT("Ship it! Come to papa.")},
-			{TEXT("Unbelievable. Un-be-lievable."), TEXT("Every time. Every single time!")},
-			{TEXT("You lookin' at me? You lookin' at my chips?"), TEXT("Eyes on your own cards, kid.")}},
-		{TEXT("Twitch"),
-			{TEXT("Can we go faster? Come on."), TEXT("Bet you I hit this one."), TEXT("Anybody got a lighter?"), TEXT("Come on come on come on.")},
-			{TEXT("Yeah! Yeah! Pay me!"), TEXT("Too easy, man.")},
-			{TEXT("This deck is rigged."), TEXT("Are you kidding me right now?")},
-			{TEXT("What? What're you looking at?"), TEXT("Quit staring, man. Seriously.")}},
-		{TEXT("Mei"),
-			{TEXT("Mm."), TEXT("Your deal, Dee."), TEXT("Interesting.")},
-			{TEXT("Thank you."), TEXT("Nice try.")},
-			{TEXT("Good call."), TEXT("Well played.")},
-			{TEXT("See something you like?"), TEXT("Careful. I look back.")}},
-		// The Embercrest's Sunday faces.
-		{TEXT("Mrs. Park"),
-			{TEXT("My grandson plays on the computer. He is not good."), TEXT("Fold, fold, fold. Then I win."), TEXT("Thirty years I play this tournament."),
-				TEXT("Dealer, slower please. My eyes.")},
-			{TEXT("Thank you, dear."), TEXT("Patience.")},
-			{TEXT("Hm."), TEXT("Next time.")},
-			{TEXT("You want to marry me? Stop looking."), TEXT("Eyes on your cards, young man.")}},
-		{TEXT("Rick"),
-			{TEXT("I sell more cars by noon than this whole table wins tonight."), TEXT("Raise it up, let's play some poker!"), TEXT("Who's buying drinks? I'm buying drinks."),
-				TEXT("Dee, you're my good luck charm. Don't go anywhere.")},
-			{TEXT("That's how it's done!"), TEXT("Stack 'em up, sweetheart.")},
-			{TEXT("Rigged. Un-be-lievable."), TEXT("Whatever. I'm rebuying next week.")},
-			{TEXT("Like what you see, champ?"), TEXT("Take a picture.")}},
-		{TEXT("Dre"),
-			{TEXT("Y'all see the game today? Brutal."), TEXT("I'm just here for the vibes, man."), TEXT("Dee! My favorite dealer in the building!"),
-				TEXT("If I bust, somebody tell my wife I won.")},
-			{TEXT("Let's gooo!"), TEXT("Chip up, chip up.")},
-			{TEXT("All good, all good."), TEXT("That's poker, baby.")},
-			{TEXT("You reading me? Ain't nothing to read."), TEXT("My face is an open book, man. A boring one.")}},
-		{TEXT("gh0stfold"),
-			{TEXT("Same rake, worse coffee."), TEXT("Live is so slow."), TEXT("You play online?")},
-			{TEXT("gg."), TEXT("ty.")},
-			{TEXT("nh."), TEXT("variance.")},
-			{TEXT("Staring won't help. I've seen your stats."), TEXT("Look at the board, not me.")}},
-	};
-	static const FLines Nobody = {TEXT(""), {}, {}, {}, {}};
-	for (const FLines& L : All)
+	static TMap<FString, TUniquePtr<FLines>> Cache;
+	const FString Key = Name.ToLower();
+	if (const TUniquePtr<FLines>* Found = Cache.Find(Key))
 	{
-		if (Name.Equals(L.Name, ESearchCase::IgnoreCase))
+		return **Found;
+	}
+	TUniquePtr<FLines> L = MakeUnique<FLines>();
+	const std::string Who(TCHAR_TO_UTF8(*Name));
+	auto Fill = [&Who](ss::talk::Moment M, TArray<FString>& Out) {
+		for (const std::string& Line : ss::talk::CastLines(Who, M))
 		{
-			return L;
+			Out.Add(FString(UTF8_TO_TCHAR(Line.c_str())));
+		}
+	};
+	Fill(ss::talk::Moment::Small, L->Chat);
+	Fill(ss::talk::Moment::Win, L->Win);
+	Fill(ss::talk::Moment::Lose, L->Lose);
+	Fill(ss::talk::Moment::Noticed, L->Noticed);
+	const FLines& Out = *L;
+	Cache.Add(Key, MoveTemp(L));
+	return Out;
+}
+
+/** The Embercrest's room has its one voice (the director, next_segment_spec 1.5): this person's own chatter stays quiet there. */
+ABackRoomGameMode* LiveRoomOf(const AActor* A)
+{
+	const UWorld* World = A ? A->GetWorld() : nullptr;
+	ABackRoomGameMode* GM = World ? World->GetAuthGameMode<ABackRoomGameMode>() : nullptr;
+	return GM && GM->IsLive() && GM->GetRoomSound() ? GM : nullptr;
+}
+
+/** What vowel the mouth is on at T into a plan: its rounding (back vowels, low F2) and its spread (front, high F2). */
+void VowelAt(const ss::audio::SpeechPlan& P, float T, float& OutRound, float& OutSpread)
+{
+	OutRound = 0.0f;
+	OutSpread = 0.0f;
+	for (const ss::audio::Syllable& S : P.Syllables)
+	{
+		if (T >= S.Start && T < S.Start + S.Length)
+		{
+			OutRound = FMath::Clamp((1250.0f - S.F2) / 450.0f, 0.0f, 1.0f);
+			OutSpread = FMath::Clamp((S.F2 - 1800.0f) / 600.0f, 0.0f, 1.0f);
+			return;
 		}
 	}
-	return Nobody;
 }
 
 /** A tell's length and the delay before it shows (a reaction is never instant). */
@@ -208,7 +213,12 @@ void ABackRoomPlayer::UpdateTells(float Dt)
 					const FLines& L = LinesFor(Persona.Name);
 					if (L.Chat.Num() > 0)
 					{
-						Say(L.Chat[Rng.RandRange(0, L.Chat.Num() - 1)]);
+						// (The same draw either way; at the Embercrest the director decides who talks.)
+						const int32 Pick = Rng.RandRange(0, L.Chat.Num() - 1);
+						if (!LiveRoomOf(this))
+						{
+							Say(L.Chat[Pick]);
+						}
 					}
 				}
 				break;
@@ -304,6 +314,15 @@ void ABackRoomPlayer::UpdateTells(float Dt)
 
 	// Talking, and idle chatter between hands.
 	TalkLeft = FMath::Max(0.0f, TalkLeft - Dt);
+	if (SpeechNow.IsValid())
+	{
+		// A line's speech runs in real time (the room's sound isn't slowed by Focus), and the jaw with it.
+		SpeechT += FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
+		if (SpeechT > SpeechNow->Seconds + 0.25f)
+		{
+			SpeechNow.Reset();
+		}
+	}
 	NoticeCooldown -= Dt;
 	NextChat -= Dt;
 	const UWorld* World = GetWorld();
@@ -315,7 +334,12 @@ void ABackRoomPlayer::UpdateTells(float Dt)
 			const FLines& L = LinesFor(Persona.Name);
 			if (!bThinking && !bBluffing && L.Chat.Num() > 0 && Rng.FRand() < 0.4f + 0.6f * Persona.Chatter)
 			{
-				Say(L.Chat[Rng.RandRange(0, L.Chat.Num() - 1)]);
+				// (The same draws either way: at the Embercrest the director decides who speaks, and this timer is quiet.)
+				const int32 Pick = Rng.RandRange(0, L.Chat.Num() - 1);
+				if (!LiveRoomOf(this))
+				{
+					Say(L.Chat[Pick]);
+				}
 			}
 		}
 		// Stare too long and they notice.
@@ -465,8 +489,25 @@ void ABackRoomPlayer::TellFace(TFunctionRef<void(const TCHAR*, float)> Add, TFun
 		Add(TEXT("mouthCornerPullR"), 0.2f * E);
 	}
 
-	// Talking: syllables in the jaw and lips.
-	if (TalkLeft > 0.0f)
+	// Talking: syllables in the jaw and lips. With the line's speech (the card room's), the jaw opens with each syllable's
+	// vowel as the voice says it (ss::audio::MouthAt: it tracks F1), the lips round for the back vowels and spread for the
+	// front ones; closed between syllables.
+	if (SpeechNow.IsValid())
+	{
+		const float Open = ss::audio::MouthAt(*SpeechNow, SpeechT);
+		float Round = 0.0f;
+		float Spread = 0.0f;
+		VowelAt(*SpeechNow, SpeechT, Round, Spread);
+		const float Fade = FMath::Clamp((SpeechNow->Seconds + 0.25f - SpeechT) / 0.25f, 0.0f, 1.0f);
+		Add(TEXT("jawOpen"), Fade * (0.03f + 0.3f * Open));
+		Add(TEXT("mouthFunnelUL"), Fade * 0.32f * Round * (0.4f + 0.6f * Open));
+		Add(TEXT("mouthFunnelUR"), Fade * 0.32f * Round * (0.4f + 0.6f * Open));
+		Add(TEXT("mouthFunnelDL"), Fade * 0.32f * Round * (0.4f + 0.6f * Open));
+		Add(TEXT("mouthFunnelDR"), Fade * 0.32f * Round * (0.4f + 0.6f * Open));
+		Both(TEXT("mouthStretch"), Fade * 0.16f * Spread * Open);
+		Both(TEXT("mouthUpperLipRaise"), Fade * 0.1f * Open);
+	}
+	else if (TalkLeft > 0.0f)
 	{
 		const float W = FMath::Clamp(TalkLeft / 0.2f, 0.0f, 1.0f);
 		const float Syl = 0.5f + 0.5f * FMath::Sin(Time * 15.0f + 2.0f * FMath::Sin(Time * 3.3f));
@@ -646,7 +687,12 @@ void ABackRoomPlayer::OnResult(int64 Delta, int64 PotSize, bool bShowdown)
 			PlayTell(EBackRoomTell::RealSmile, 1.0f);
 			if (L.Win.Num() > 0 && Rng.FRand() < 0.35f + 0.5f * Persona.Chatter)
 			{
-				Say(L.Win[Rng.RandRange(0, L.Win.Num() - 1)]);
+				// (At the Embercrest a win's line is the director's: the same draw, nothing said here.)
+				const int32 Pick = Rng.RandRange(0, L.Win.Num() - 1);
+				if (!LiveRoomOf(this))
+				{
+					Say(L.Win[Pick]);
+				}
 			}
 		}
 	}
@@ -656,21 +702,71 @@ void ABackRoomPlayer::OnResult(int64 Delta, int64 PotSize, bool bShowdown)
 		ThrillGoal = 0.0f;
 		if (SeatRole == EBackRoomRole::Player && bShowdown && L.Lose.Num() > 0 && Rng.FRand() < 0.3f + 0.6f * Persona.Chatter)
 		{
-			Say(L.Lose[Rng.RandRange(0, L.Lose.Num() - 1)]);
+			const int32 Pick = Rng.RandRange(0, L.Lose.Num() - 1);
+			if (!LiveRoomOf(this))
+			{
+				Say(L.Lose[Pick]);
+			}
 		}
 	}
 }
 
 void ABackRoomPlayer::Say(const FString& Line)
 {
+	if (Line.IsEmpty())
+	{
+		return;
+	}
+	ABackRoomGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ABackRoomGameMode>() : nullptr;
+	if (GM && GM->IsLive() && GM->GetRoomSound() && SeatRole != EBackRoomRole::Hero)
+	{
+		// The Embercrest has one voice (next_segment_spec 1.5): a line of the host's own (a greeting, the dealer's host
+		// lines, a read of the player's shaking hands) goes to the room, which says it with this person's voice from
+		// where they are, moves the jaw on its syllables and captions it with its sound (ABackRoomGameMode::PlayCue).
+		ss::room::Cue C;
+		C.What = SeatRole == EBackRoomRole::Dealer ? ss::room::Kind::Call : ss::room::Kind::Line;
+		C.Where = SeatRole == EBackRoomRole::Extra ? ss::room::From::Table : ss::room::From::HeroTable;
+		C.Who = "actor:" + std::to_string(GetUniqueID());
+		C.Speaker = std::string(TCHAR_TO_UTF8(*Persona.Name)); // (the room names them properly once it finds them)
+		C.Key = SeatRole == EBackRoomRole::Dealer ? "host.dealer" : "host.line";
+		C.Text = std::string(TCHAR_TO_UTF8(*Line));
+		C.Effort = 0.6f;
+		GM->PlayCue(C);
+		return;
+	}
 	Lines.Add(Line);
 	TalkLeft = 0.5f + 0.055f * Line.Len();
+	// The core HUD's caption zone and the night log (GetCaptions): every line said at the table, Dee's game too. (Dee's
+	// own lines are captioned here as hers; the legacy HUD reads the table's lines as it always did.)
+	if (GM && SeatRole != EBackRoomRole::Hero)
+	{
+		ss::ui::Caption Cap;
+		Cap.Speaker = std::string(TCHAR_TO_UTF8(*Persona.Name));
+		Cap.Line = std::string(TCHAR_TO_UTF8(*Line));
+		Cap.At = FPlatformTime::Seconds();
+		Cap.Hold = ss::ui::CaptionHold(Cap.Line, 0.0f);
+		Cap.Clock = std::string(TCHAR_TO_UTF8(*GM->ClockLabel().RightChop(5).TrimStart()));
+		GM->PushCaption(Cap);
+	}
 }
 
-void ABackRoomPlayer::Say(const FString& Line, const ss::audio::SpeechPlan* /*Plan*/)
+void ABackRoomPlayer::Say(const FString& Line, const ss::audio::SpeechPlan* Plan)
 {
-	// ue-room (next_segment_spec 4.11): the jaw from MouthAt, one engine voice at the head. Until then, the line as ever.
-	Say(Line);
+	// The room's own path (next_segment_spec 4.11): the line is heard now, from this person; the jaw follows the plan's
+	// syllables (ss::audio::MouthAt). Its sound is the host's (one engine voice at the head, or the room's stream), so is its
+	// caption. Null: the jaw flaps for the line's length, as ever. Never routed back to the room (it came from there).
+	Lines.Add(Line);
+	if (Plan && !Plan->Syllables.empty())
+	{
+		SpeechNow = MakeShared<ss::audio::SpeechPlan>(*Plan);
+		SpeechT = 0.0f;
+		TalkLeft = Plan->Seconds + 0.15f;
+	}
+	else
+	{
+		SpeechNow.Reset();
+		TalkLeft = 0.5f + 0.055f * Line.Len();
+	}
 }
 
 TArray<FString> ABackRoomPlayer::TakeLines()

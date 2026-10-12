@@ -942,7 +942,7 @@ struct CardRoom::Impl
 	vox::Biquad MuffleL, MuffleR;
 	float AppliedHz = -1.0f;
 	float Pace = 1.0f;
-	int Budget = 6;
+	int Budget = 0; // the fallback by default (next_segment_spec 11, the listening gate): talkers only when a host asks
 
 	// Clocks: output samples (real time) and the room's event clock (dilated by Pace).
 	long long Frame = 0;
@@ -959,6 +959,7 @@ struct CardRoom::Impl
 	float PaDelay[128];
 	int PaPos = 0;
 	float PaTail = 0.0f;
+	float PaGain = 1.0f, PaGainTarget = 1.0f; // SetPaLevel: the PA as heard (the host's Voices setting), ramped over a block
 	vox::Clapper Hands[room_audio::MaxHands];
 	room_audio::HandSpot HandAt[room_audio::MaxHands];
 	int HandCount = 0;
@@ -2256,9 +2257,14 @@ void CardRoom::Impl::RenderVoices()
 		const int Delay = 96;
 		float Pw = 0.0f;
 		Pa.Process(PaBus, Bus);
+		// Its level (SetPaLevel), ramped across the block from the last one's: no click when the Voices slider moves. At
+		// the default (0 dB) the gain is exactly 1, sample for sample.
+		const float G0 = PaGain;
+		const float Step = (PaGainTarget - PaGain) / static_cast<float>(Bus);
+		PaGain = PaGainTarget;
 		for (int I = 0; I < Bus; ++I)
 		{
-			const float Y = PaBus[I];
+			const float Y = PaBus[I] * (G0 + Step * static_cast<float>(I + 1));
 			PaDelay[PaPos] = Y;
 			const float Other = PaDelay[(PaPos + 128 - Delay) & 127];
 			PaPos = (PaPos + 1) & 127;
@@ -2268,6 +2274,10 @@ void CardRoom::Impl::RenderVoices()
 			Pw += Y * Y * 0.36f;
 		}
 		Power[LPa] += Pw * Inv;
+	}
+	else
+	{
+		PaGain = PaGainTarget; // nothing on the PA: the next announcement starts at the level set
 	}
 	// The rail's bank.
 	for (RailSlot& S : Rail)
@@ -2807,7 +2817,12 @@ void CardRoom::Say(const SpeechPlan& Plan, const Timbre& T, Spot Where, int Id, 
 	const float Hold = std::max(0.2f, Seconds - 0.1f);
 	if (L.Pa)
 	{
-		// The PA ducks the room's talk: a milestone deeper and longer (spec §4.9).
+		// The PA ducks the room's talk: a milestone deeper and longer (spec §4.9). Not a silenced PA (SetPaLevel -120,
+		// the host's Voices slider at 0): the room doesn't step back for a voice nobody hears.
+		if (P->PaGainTarget <= 0.0f)
+		{
+			return;
+		}
 		if (E >= 0.8f)
 		{
 			P->AddDuck(0.1f, Hold, 1.2f, 0.0f, 6.0f, 3.0f);
@@ -2915,6 +2930,16 @@ void CardRoom::Crowd(Vocal V, int Voices, Spot Where, int Id, float Level)
 		}
 		S.Voice.Start(S.Plan, S.Count, Who, true, Effort, vox::Mix32(P->Seed, 0xcafe0000u + ++P->Shouts), room_audio::Rate8);
 	}
+}
+
+void CardRoom::SetPaLevel(float Db)
+{
+	if (!std::isfinite(Db))
+	{
+		return; // keep the level it had
+	}
+	const float D = room_audio::Clamp(Db, -120.0f, 12.0f);
+	P->PaGainTarget = D <= -119.0f ? 0.0f : vox::DbToGain(D);
 }
 
 void CardRoom::SetVoiceBudget(int Talkers)

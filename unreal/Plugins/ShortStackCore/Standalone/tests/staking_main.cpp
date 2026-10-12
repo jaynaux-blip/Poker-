@@ -1705,8 +1705,17 @@ void Policy()
 	M.Owes.push_back(W);
 	M.Deals.push_back(PackageDeal(2, 0.0));
 	const std::vector<ss::life::Mark> Marks = stake::Marks(M, 0.0, 40.0 * Day);
-	Expect(Marks.size() == 2 && Marks[0].Label == "$119.00 to Mrs. Park" && Marks[1].Label == "Chop day: Lantern Row Staking" && Marks[0].Kind == life::LedgerBacking,
-		"marks: what's due and the chop day, in order");
+	Expect(Marks.size() == 2 && Marks[0].Label == "$119.00 to Mrs. Park" && Marks[1].Label == "Chop day: Lantern Row Staking" && Marks[0].Kind == stake::DatePay &&
+			   Marks[1].Kind == stake::DateChop,
+		"marks: what's due and the chop day, in order, each by its kind (the calendar never reads their words)");
+	// Money owed to the player: its own kind too.
+	stake::Owed Y = W;
+	Y.Id = "owe:y";
+	Y.ToYou = true;
+	M.Owes.push_back(Y);
+	const std::vector<ss::life::Mark> More = stake::Marks(M, 0.0, 40.0 * Day);
+	Expect(std::count_if(More.begin(), More.end(), [](const ss::life::Mark& K) { return K.Kind == stake::DateOwed && K.Label.find(" owes you ") != std::string::npos; }) == 1,
+		"marks: money owed to the player is its own kind");
 }
 
 void Offers()

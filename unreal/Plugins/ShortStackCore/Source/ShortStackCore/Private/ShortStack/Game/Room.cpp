@@ -1054,10 +1054,60 @@ void Director::RailSay(const Tournament& T, int Moment, const std::string& Text,
 		{
 			continue;
 		}
-		const std::string Line = !Text.empty() ? Text : stake::RailLine(NoBook, EntryId, B.Name, Moment, Hash("railline:" + B.Name + ":" + std::to_string(T.Tick) + ":" + std::to_string(Moment)));
+		std::string Line = Text;
+		// A backer's pool for a moment ("Well played. Now breathe." on every double-up): what they've said from it tonight
+		// is in Told (across checkpoints) under Pool, and the last of it under Last.
+		const std::string Pool = "rail:" + B.Name + ":" + std::to_string(Moment) + ":";
+		const std::string Last = "raillast:" + B.Name + ":" + std::to_string(Moment) + ":";
+		auto KeyOf = [this](const std::string& L) { return std::to_string(Hash("said:" + L) % 1000000u); };
+		bool Dealt = false;
+		if (Line.empty())
+		{
+			// The pool's lines in turn from the night's pick, for one not said tonight. Said through, the pool is dealt
+			// fresh, never with the line said last coming up first.
+			const uint32_t Salt = Hash("railline:" + B.Name + ":" + std::to_string(T.Tick) + ":" + std::to_string(Moment));
+			const auto LastIt = Told.lower_bound(Last);
+			const std::string LastKey = LastIt != Told.end() && LastIt->rfind(Last, 0) == 0 ? LastIt->substr(Last.size()) : std::string();
+			std::string First;
+			std::string NotLast;
+			for (uint32_t Try = 0; Try < 8u; ++Try)
+			{
+				const std::string Drawn = stake::RailLine(NoBook, EntryId, B.Name, Moment, Salt + Try);
+				if (Drawn.empty())
+				{
+					break;
+				}
+				First = First.empty() ? Drawn : First;
+				if (!Told.count(Pool + KeyOf(Drawn)))
+				{
+					Line = Drawn;
+					break;
+				}
+				NotLast = NotLast.empty() && KeyOf(Drawn) != LastKey ? Drawn : NotLast;
+			}
+			Dealt = Line.empty();
+			Line = !Line.empty() ? Line : !NotLast.empty() ? NotLast : First;
+		}
 		if (Line.empty() || Characters(Line) > static_cast<size_t>(MaxShown))
 		{
 			continue;
+		}
+		if (Text.empty())
+		{
+			auto Erase = [this](const std::string& Prefix) {
+				auto It = Told.lower_bound(Prefix);
+				while (It != Told.end() && It->rfind(Prefix, 0) == 0)
+				{
+					It = Told.erase(It);
+				}
+			};
+			if (Dealt)
+			{
+				Erase(Pool);
+			}
+			Erase(Last);
+			Told.insert(Pool + KeyOf(Line));
+			Told.insert(Last + KeyOf(Line));
 		}
 		RailSpoke.insert(B.Name);
 		Cue C;

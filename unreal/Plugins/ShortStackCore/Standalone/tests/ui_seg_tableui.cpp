@@ -719,7 +719,7 @@ void CardPages()
 	{
 		ss::ui::Caption Ln;
 		Ln.Style = K % 5 == 0 ? 1 : K % 7 == 0 ? 2 : 0;
-		Ln.Speaker = K % 2 == 0 ? "Mrs. Park" : "Rick";
+		Ln.Speaker = Ln.Style == 1 ? "Floor" : K % 2 == 0 ? "Mrs. Park" : "Rick";
 		Ln.Line = Ln.Style == 1 ? "Players, the blinds are now 500 and 1,000, with a big blind ante of 1,000." : Ln.Style == 2 ? "[Applause.]" : "Seat four, it's on you. Take your time, we've got all night.";
 		Ln.Clock = ss::ClockString(19.0 * 60.0 + static_cast<double>(K) * 4.0);
 		C.Night.push_back(Ln);
@@ -1050,6 +1050,39 @@ void CaptionRules()
 		ss::ui::Canvas C(L, Measure, 1920.0f, 1080.0f, 1.0f);
 		ss::ui::DrawCaptions(C, Lines, Look, 904.0f, 980.0f, Now);
 		Expect(!Says(L, "Rick") && Says(L, "FLOOR"), "captions: speaker names off");
+	}
+	// The PA's tag (spec 4.7): FLOOR for the floor, whoever has the mic otherwise; Dee on a Sunday reads DEE · PA, in
+	// the captions (names on or off) and in the night log.
+	{
+		std::vector<Caption> Pa;
+		Caption Floor;
+		Floor.Style = 1;
+		Floor.Speaker = "Floor";
+		Floor.Line = "Players, the blinds are now 800 and 1,600.";
+		Floor.At = Now - 2.0;
+		Floor.Clock = "9:40 PM";
+		Caption Dee = Floor;
+		Dee.Speaker = "Dee \xC2\xB7 PA";
+		Dee.Line = "Ladies and gentlemen, your Embercrest Sunday champion... Corinne Vasquez!";
+		Dee.At = Now - 1.0;
+		Dee.Clock = "9:42 PM";
+		Pa.push_back(Floor);
+		Pa.push_back(Dee);
+		for (const bool Names : {true, false})
+		{
+			ss::ui::CaptionStyle Look;
+			Look.Names = Names;
+			ss::ui::DrawList L;
+			ss::ui::Canvas C(L, Measure, 1920.0f, 1080.0f, 1.0f);
+			ss::ui::DrawCaptions(C, Pa, Look, 904.0f, 980.0f, Now);
+			Expect(Says(L, "FLOOR") && Says(L, "DEE \xC2\xB7 PA") && Says(L, "your Embercrest Sunday champion"),
+				Names ? "captions: the PA's tag, FLOOR or DEE \xC2\xB7 PA" : "captions: the PA's tag with speaker names off");
+			Fits(L, 1920.0f, "captions: the PA's tags");
+		}
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, Measure, 1920.0f, 1080.0f, 1.0f);
+		ss::ui::DrawNightLog(C, Pa, "THE NIGHT \xC2\xB7 EMBERCREST SUNDAY", {200.0f, 200.0f, 900.0f, 500.0f}, Now);
+		Expect(Says(L, "FLOOR") && Says(L, "DEE \xC2\xB7 PA"), "night log: the PA's tag, FLOOR or DEE \xC2\xB7 PA");
 	}
 	// Everything mode shows where an off-screen speaker is.
 	{

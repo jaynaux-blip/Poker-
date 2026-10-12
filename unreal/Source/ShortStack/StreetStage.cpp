@@ -34,6 +34,7 @@
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/UI/PropArt.h"
 #include "SlateDrawList.h"
+#include "SponsorWear.h"
 #include "StreetTraffic.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -3163,6 +3164,14 @@ void AStreetStage::BuildStoreDressing()
 	const double BoardZ = StoreCeiling - 6.0 - BoardH * 0.5;
 	Box(Cabinet, FVector(-410.0 - BoardW * 0.5 - 4.0, StoreY0 + 2.0, BoardZ - BoardH * 0.5 - 4.0), FVector(-410.0 + BoardW * 0.5 + 4.0, StoreY0 + 4.0, StoreCeiling), false);
 	Sign(TEXT("menu"), FVector(-410.0, StoreY0 + 4.6, BoardZ), 90.0f, FVector2D(BoardW, BoardH), FIntPoint(1760, 720), -60.0f);
+	// Penny's pick (ue-wear, next_segment_spec 3.1, 3.10): the player's Polaroid pinned to the wall behind the register, beside
+	// the lotto dispenser at the back bar's end, at eye level from the counter, a little crooked; up while the Lucky Penny's
+	// deal runs (the flash goes off from where Ray stands when it's signed, and for the month's photo).
+	if (UPennyPolaroid* Pick = NewPart<UPennyPolaroid>())
+	{
+		Pick->SetRelativeLocationAndRotation(FVector(-166.0, StoreY0 + 2.6, 168.0), FRotator(0.0f, 90.0f, 2.5f));
+		Pick->Setup(WidgetLitMaterial, SphereMesh, Mat(TEXT("PolaroidPin"), 0xc8202c, 0.35f));
+	}
 
 	// The coffee bar along the same wall: brewers with their pots on the warmers, cups stacked, a sign over it.
 	Box(Mat(TEXT("CoffeeBar"), 0x3b2a20, 0.4f), FVector(X0 + 100.0, StoreY0, 0.0), FVector(-900.0, StoreY0 + 70.0, 95.0));

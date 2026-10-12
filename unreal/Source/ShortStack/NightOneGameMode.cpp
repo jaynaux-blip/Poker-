@@ -17,6 +17,8 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Misc/App.h"
 #include "Misc/DateTime.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "NightOneAudio.h"
 #include "NightOneGame.h"
 #include "ShortStack/Game/Life.h"
@@ -719,6 +721,37 @@ void ANightOneGameMode::StartPlay()
 	bool bLoaded = false;
 	{
 		std::string Text;
+#if !UE_BUILD_SHIPPING
+		// PIE acceptance (next_segment_spec 9.1 step 1): "open NightOne?Import=pre_segment_team_riverline" starts from a
+		// plain-text save, a Tests/fixtures/<name>.ssave by name or any text save by its full path, packed over the career
+		// file once it parses (the level opening reads it after the last one's EndPlay has saved, so it wins). The career
+		// it replaces is kept beside it first (Saved/SaveGames/NightOne.ssave.before-import-<time>); if that copy can't be
+		// made, nothing is imported.
+		const FString Import = UGameplayStatics::ParseOption(OptionsString, TEXT("Import"));
+		if (!Import.IsEmpty())
+		{
+			const FString Path = Import.Contains(TEXT("/")) || Import.Contains(TEXT("\\"))
+				? Import
+				: FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("ShortStackCore/Tests/fixtures"), Import.EndsWith(TEXT(".ssave")) ? Import : Import + TEXT(".ssave"));
+			TArray<uint8> Bytes;
+			ss::SaveData Probe;
+			const bool bRead = FFileHelper::LoadFileToArray(Bytes, *Path, FILEREAD_Silent);
+			const std::string Raw = bRead ? std::string(reinterpret_cast<const char*>(Bytes.GetData()), static_cast<size_t>(Bytes.Num())) : std::string();
+			const bool bParsed = bRead && ss::SaveData::Parse(Raw, Probe);
+			FString Kept;
+			const bool bKept = bParsed && CareerSave::KeepCopy(TEXT("before-import-") + FDateTime::Now().ToString(TEXT("%Y%m%d-%H%M%S")), Kept);
+			if (bKept && CareerSave::SaveNow(Raw, false))
+			{
+				UE_LOG(LogNightOne, Display, TEXT("Import: %s is the career save now (%d KB)%s%s"), *Path, Bytes.Num() / 1024, Kept.IsEmpty() ? TEXT("") : TEXT("; the one it replaced is "),
+					*Kept);
+			}
+			else
+			{
+				UE_LOG(LogNightOne, Warning, TEXT("Import: %s %s; the career save is untouched"), *Path,
+					!bRead ? TEXT("can't be read") : !bParsed ? TEXT("isn't a save this build reads") : !bKept ? TEXT("wasn't imported (the career file couldn't be kept aside)") : TEXT("couldn't be written"));
+			}
+		}
+#endif
 		bLoaded = CareerSave::LoadText(Text) && ss::SaveData::Parse(Text, Loaded);
 	}
 	bHasSave = bLoaded;

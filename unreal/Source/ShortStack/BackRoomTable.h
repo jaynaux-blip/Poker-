@@ -4,9 +4,15 @@
 #include "GameFramework/Actor.h"
 #include "ShortStack/AI/Profiles.h"
 #include "ShortStack/Game/Body.h"
+#include "ShortStack/Game/Recall.h"
+#include "ShortStack/Game/Sizing.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Tournament.h"
+
+#include <map>
+#include <string>
+#include <vector>
 
 #include "BackRoomTable.generated.h"
 
@@ -84,6 +90,65 @@ struct FBackRoomComposure
 	float Shake() const { return FMath::Clamp((Bpm - 95.0f) / 55.0f, 0.0f, 1.0f); }
 };
 
+/**
+ * A seat at the table as the HUD reads it (ABackRoomTable::GetSeatViews; next_segment_spec 6.3: the AI stack sizes). Read
+ * only: nothing the HUD does with it changes the table. Stack is what lies on the felt in front of the seat (its stack
+ * pile, which the engine's events move as each gesture lands), so a plate never runs ahead of the chips (R9); EngineStack
+ * is the engine's number for the seat as of the hand's events played out so far, the truth the plate audit holds the felt
+ * to once the chips have landed.
+ */
+struct FBackRoomSeatView
+{
+	/** The chair (ABackRoomStage::SeatTransform) and the engine's seat this hand (-1: nobody's in a hand). */
+	int32 TableSeat = 0;
+	int32 HandSeat = -1;
+	/** The tournament id ("npc:Rick", "p37"; the regular's name at Dee's game) and the name the room calls them by. */
+	FString Id;
+	FString Name;
+	ABackRoomPlayer* Player = nullptr;
+	bool bHero = false;
+	/** The chips behind and in front, as they lie on the felt. */
+	int64 Stack = 0;
+	int64 Bet = 0;
+	/** The engine's stack as of the events played out (between hands, its stack), and its own number right now. */
+	int64 EngineStack = 0;
+	int64 EngineNow = 0;
+	bool bInHand = false;
+	bool bFolded = false;
+	bool bAllIn = false;
+	/** The action is on them: a bot thinking, or the player's decision. */
+	bool bActing = false;
+	bool bButton = false;
+	/** Up from the table (the player, dealt in while away). */
+	bool bAway = false;
+	/** Cards in front of them (dealt and not mucked). */
+	bool bHasCards = false;
+	/** Chips still on their way (a pile sliding, a hand carrying a bet): the felt catches up when they land. */
+	bool bChipsMoving = false;
+	/** The dealer counted this stack aloud (facing an all-in), as of the stack it is now. */
+	bool bCounted = false;
+	/** The last thing they did this street ("RAISE", "CALL", "CHECK", "BET", "ALL IN", "FOLD"; empty when the street's bets
+	 *  went in), the total it made, and when (FPlatformTime seconds: the HUD's clock). */
+	FString LastAction;
+	int64 LastTo = 0;
+	double ActedAt = -100.0;
+	/** Where their chips and cards are on the felt (world), and the piles themselves (for their bounds). */
+	FVector StackAt = FVector::ZeroVector;
+	FVector CardsAt = FVector::ZeroVector;
+	const ABackRoomChips* StackPile = nullptr;
+	const ABackRoomChips* BetPile = nullptr;
+};
+
+/** A pile the hand's end put right because the felt and the engine disagreed (a plate that would have lied), for the audit. */
+struct FBackRoomPileFix
+{
+	int32 TableSeat = 0;
+	FString Id;
+	int64 Felt = 0;
+	int64 Engine = 0;
+	int32 HandNumber = 0;
+};
+
 /** What the hero can do now (for the HUD). */
 struct FBackRoomPrompt
 {
@@ -104,7 +169,7 @@ struct FBackRoomPrompt
 };
 
 /**
- * The Tuesday game at the Spin Cycle Club: $1/$2 No-Limit Hold'em, Dee dealing.
+ * The Tuesday game in the back room of the Wash & Fold: $1/$2 No-Limit Hold'em, Dee dealing.
  *
  * Plays real hands with the SHORT STACK engine (ss::Hand: blinds, betting rules, side pots,
  * showdowns) and the engine's bots (ss::Decide, each opponent with an archetype's profile), and acts
@@ -142,9 +207,20 @@ public:
 	void HeroRaise();
 	UFUNCTION(BlueprintCallable, Category = "Short Stack")
 	void HeroAllIn();
-	/** Moves the raise amount by Steps (big blinds early, then bigger jumps). */
+	/** Moves the raise amount by Steps (the fine steps: a big blind under 20 BB, five above; ss::sizing::Step). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack")
 	void HeroAdjustRaise(int32 Steps);
+	/** The bumpers: the raise amount to the next bigger (Dir 1) or smaller (-1) sizing preset (ss::sizing::Snap). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack")
+	void HeroSnap(int32 Dir);
+	/** Keys 1 to 6: the raise amount to that preset (ss::sizing::Presets; the last is ALL IN). */
+	UFUNCTION(BlueprintCallable, Category = "Short Stack")
+	void HeroPreset(int32 Index);
+	/**
+	 * The player's decision as sizing reads it (next_segment_spec 6.2 D): the spot, its presets, and the preset the amount
+	 * shown is on (-1: between them). False when the decision isn't theirs.
+	 */
+	bool GetHeroSizing(ss::sizing::Spot& OutSpot, std::vector<ss::sizing::Preset>& OutPresets, int32& OutPreset) const;
 	/** Hand number, street, who acts, pot and stacks (for logs and tests). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack")
 	FString Describe() const;
@@ -156,6 +232,32 @@ public:
 	/** Everyone seated, for the camera's study of faces. */
 	const TArray<ABackRoomPlayer*>& GetOpponents() const { return Opponents; }
 	ABackRoomPlayer* GetHeroPlayer() const;
+
+	// ------------------------------------------------------------ what the HUD reads (next_segment_spec 6.3)
+	/** Every chair with someone in it, as the felt shows it (the AI stack sizes' data): read-only. */
+	void GetSeatViews(TArray<FBackRoomSeatView>& Out) const;
+	/** The middle of the pot on the felt (world), and its pile. */
+	FVector GetPotSpot() const { return PotSpot(); }
+	const ABackRoomChips* GetPotPile() const { return Pot; }
+	/** The hero's cards on the felt (for what the HUD keeps clear). */
+	void GetHeroCards(TArray<const ABackRoomCard*>& Out) const;
+	/** Adds the board's cards on the felt to Out (what the HUD keeps clear, with the hero's). */
+	void GetBoardCards(TArray<const ABackRoomCard*>& Out) const;
+	/** Who deals here (the HUD keeps the dealer's face clear), or null. */
+	const ABackRoomPlayer* GetDealer() const { return Dealer; }
+	/** Piles a hand's end had to put right since the last call: the felt and the engine disagreed (the plate audit's). */
+	TArray<FBackRoomPileFix> TakePileFixes();
+	/** The hand that just ended as the player saw it (ss::recall::Of), once; false when there's none new. */
+	bool TakeRecall(ss::recall::Record& Out);
+	/** The Turn cue setting: 0 off, 1 the dealer (turns to you; after 20 s "Seat four, it's on you."), 2 and a soft tap. */
+	int32 TurnCue = 2;
+	/** Real seconds the player's decision has been open, or -1 when it isn't theirs. */
+	float HeroTurnAge() const;
+	/**
+	 * An all-in and a call at this table, as the cards are turned up (the TDA's rule; the dealer says "Turn them up,
+	 * please."): the host's director leans the rail in (ue-room: Director::AllInCalled). bHeroIn: the player is in it.
+	 */
+	TFunction<void(bool bHeroIn)> OnAllInCalled;
 
 	// ------------------------------------------------------------ the night (ABackRoomGameMode)
 	/** Called between hands and when the hero busts or leaves. */
@@ -297,6 +399,14 @@ private:
 		TArray<TObjectPtr<ABackRoomCard>> Hole;
 		bool bDealt = false;
 		bool bShown = false;
+		/** The engine's stack as of the hand's events played out so far (what the felt should show once the chips land). */
+		int64 Shown = 0;
+		/** The street's last action, for the plate's tag, and when (FPlatformTime seconds). */
+		FString LastAction;
+		int64 LastTo = 0;
+		double ActedAt = -100.0;
+		/** The stack the dealer counted aloud (facing an all-in), or -1. */
+		int64 CountedAt = -1;
 	};
 
 	/** The seat playing engine seat HandSeat this hand. */
@@ -442,4 +552,27 @@ private:
 	float HeroThink = 0.0f;
 	bool bAmbienceInjected = false;
 	bool bTestShove = false;
+
+	// The next segment's table (ue-table, next_segment_spec 6.3, 6.4, 6.8).
+	/** The dealer's call (talk::Dealer) with Vars, said at this table: the day's dealer's voice ("Dee" on her nights). */
+	void DealerCall(const char* Call, std::map<std::string, std::string> Vars);
+	/** The room's name for a hand seat's player as a caption says it (talk::CaptionName: no engine id ever read aloud). */
+	std::string SpokenName(const ss::HandSeat& HS) const;
+	/** The turn cue each frame: the dealer turns to the player, the felt's tap, and after 20 s the dealer's line. */
+	void TickTurnCue();
+	/** Real seconds the player's decision has been open (-1: none; a pause doesn't count), and whether its line was said. */
+	float HeroTurnReal = -1.0f;
+	bool bTurnLineSaid = false;
+	/** The hand whose piles its end put right: a sweep or a returned bet that lands after that adds nothing more. */
+	int32 PilesSyncedHand = 0;
+	/** This hand's chips still on their way to a stack (the pot pushed, a bet returned): a pile short by them isn't wrong. */
+	int32 LandingsDue = 0;
+	/** "Turn them up" said this hand (once). */
+	bool bTurnUpSaid = false;
+	/** The engine seat of the last hand's button (the plates keep the disc between hands). */
+	int32 LastButtonSeat = -1;
+	TSharedPtr<ss::recall::Record> RecallReady;
+	TArray<FBackRoomPileFix> PileFixes;
+	/** The chips a seat's gesture takes out of (or puts back on) the felt: moved by hand when nobody's there to do it. */
+	void MoveChipsByHand(FSeat& S, int64 Added);
 };

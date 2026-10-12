@@ -13,6 +13,8 @@
 #include "ShortStack/UI/ShopScreen.h"
 #include "ShortStack/UI/SponsorArt.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <set>
 
@@ -168,6 +170,25 @@ void Art()
 		ss::ui::Canvas C(L, M, 512.0f, 340.0f, 1.0f);
 		ss::ui::sponsorart::Patch(C, B.Id);
 		Expect(L.Vertices.size() > 100, "art: the patch draws");
+		// The thread (the edge and the word mark) reads on the patch's ground, as the art's atlas stitches it: never
+		// IronHouse's grey or Volt Rush's near-black on the dark twill.
+		{
+			auto Lum = [](const ss::ui::Color& K) {
+				auto Lin = [](float V) { return V <= 0.04045f ? V / 12.92f : std::pow((V + 0.055f) / 1.055f, 2.4f); };
+				return 0.2126f * Lin(K.R) + 0.7152f * Lin(K.G) + 0.0722f * Lin(K.B);
+			};
+			std::string Word = B.Short;
+			std::transform(Word.begin(), Word.end(), Word.begin(), [](char Ch) { return static_cast<char>(Ch >= 'a' && Ch <= 'z' ? Ch - 32 : Ch); });
+			const ss::ui::DrawCmd* Mark = nullptr;
+			for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+			{
+				Mark = Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Word ? &Cmd : Mark;
+			}
+			const float Lg = Lum(L.Vertices.front().Col);
+			const float Lw = Mark ? Lum(Mark->Text.Col) : Lg;
+			const float Ratio = (std::max(Lg, Lw) + 0.05f) / (std::min(Lg, Lw) + 0.05f);
+			Expect(Mark && Ratio >= 2.0f, ("art: " + B.Id + "'s thread reads on its patch").c_str());
+		}
 		Seen.insert(L.Vertices.size());
 		WriteList("sponsor_patch_" + B.Id, L);
 	}

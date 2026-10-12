@@ -312,11 +312,16 @@ const Copy Lines[] = {
 	{"Big Lou", "rail.bubble", "Fold your way in, kid. I didn't come up here for the view."},
 	{"Big Lou", "rail.money", "That's the money. Now go get the rest of it."},
 	{"Big Lou", "rail.doubleup", "There it is! Stack 'em up, kid!"},
+	{"Big Lou", "rail.doubleup", "Look at that! Don't give it back, kid."},
+	{"Big Lou", "rail.doubleup", "Now that's a stack. Keep it, kid."},
 	{"Big Lou", "rail.final", "Final table! I'm calling Sal. I'm calling everybody."},
 	{"Big Lou", "rail.bust", "Hey. Head up. Ruby's opens at six."},
 	{"Big Lou", "rail.win", "That's my horse! That's my horse!"},
 	{"Big Lou", "rail.beat", "Unbelievable. Shake it off, kid. Shake it off."},
+	{"Big Lou", "rail.beat", "That river's a crook. Shake it off, kid."},
+	{"Big Lou", "rail.beat", "Nothing you could do about that one, kid."},
 	{"Big Lou", "rail.idle", "Don't look at me. Look at the cards."},
+	{"Big Lou", "rail.idle", "Easy, kid. One hand at a time."},
 	{"Big Lou", "break", "how many chips. dont round up."},
 	{"Big Lou", "break", "break. eat something. you look like a ghost."},
 	// Mrs. Park: to the cent, never 100%, one late payment and she stops for 90 days.
@@ -333,12 +338,18 @@ const Copy Lines[] = {
 	{"Mrs. Park", "rail.bubble", "Patience. Nobody is paying you to be brave."},
 	{"Mrs. Park", "rail.money", "Good. Now the real tournament starts."},
 	{"Mrs. Park", "rail.doubleup", "Well played. Now breathe."},
+	{"Mrs. Park", "rail.doubleup", "Good. Now protect it."},
+	{"Mrs. Park", "rail.doubleup", "Nicely played. Don't celebrate yet."},
 	{"Mrs. Park", "rail.final", "Sit up straight. They read slouching."},
 	{"Mrs. Park", "rail.bust", "It happens. Write the hand down tonight."},
 	{"Mrs. Park", "rail.win", "Champion. I'll expect you at the noon game."},
 	{"Mrs. Park", "rail.beat", "That's the game. Next hand."},
+	{"Mrs. Park", "rail.beat", "Unlucky. Play the next one the same way."},
+	{"Mrs. Park", "rail.beat", "No mistake there. Keep your focus."},
 	{"Mrs. Park", "rail.idle", "I'm watching. That's all."},
+	{"Mrs. Park", "rail.idle", "Steady. No hurry."},
 	{"Mrs. Park", "break", "How many chips? Exactly, please."},
+	{"Mrs. Park", "break", "Your count, please. To the chip."},
 	// Sal: a nit. Five percent at par, or nothing.
 	{"Sal", "piece.buy", "Five at par. Not a penny of markup, kid."},
 	{"Sal", "piece.pass", "Markup? I'll buy at par or I'll buy nothing, kid."},
@@ -352,12 +363,18 @@ const Copy Lines[] = {
 	{"Sal", "rail.bubble", "Fold. Fold. Then fold some more."},
 	{"Sal", "rail.money", "A min-cash is a cash. Now tighten up."},
 	{"Sal", "rail.doubleup", "Don't get cute with it."},
+	{"Sal", "rail.doubleup", "Good. Now fold for an hour."},
+	{"Sal", "rail.doubleup", "Okay. Don't give it back, kid."},
 	{"Sal", "rail.final", "Nine-high is not a hand, kid. Remember that."},
 	{"Sal", "rail.bust", "Told you. Didn't I tell you?"},
 	{"Sal", "rail.win", "Huh. Okay. Okay, kid."},
 	{"Sal", "rail.beat", "That's why I fold."},
+	{"Sal", "rail.beat", "Cards don't care. Fold more."},
+	{"Sal", "rail.beat", "See? Every time."},
 	{"Sal", "rail.idle", "Fold more."},
+	{"Sal", "rail.idle", "Tighter, kid."},
 	{"Sal", "break", "chips?"},
+	{"Sal", "break", "how many. exact."},
 	// Dre: small roll, big heart.
 	{"Dre", "piece.buy", "Got five on you for the {Short}. Run it up."},
 	{"Dre", "piece.owed", "My five came in! {Amount}. Whenever, bro."},
@@ -370,12 +387,18 @@ const Copy Lines[] = {
 	{"Dre", "rail.bubble", "Don't do nothing crazy. Just get in."},
 	{"Dre", "rail.money", "We in the money! Let's go!"},
 	{"Dre", "rail.doubleup", "Let's go! Let's go!"},
+	{"Dre", "rail.doubleup", "That's what I'm talking about!"},
+	{"Dre", "rail.doubleup", "Double up! Run it up, bro!"},
 	{"Dre", "rail.final", "Final table, baby! I'm filming this."},
 	{"Dre", "rail.bust", "Unlucky, bro. You played it right."},
 	{"Dre", "rail.win", "No way. No way! Champion!"},
 	{"Dre", "rail.beat", "That river is a crime."},
+	{"Dre", "rail.beat", "Nah, that's cold. Stay up, bro."},
+	{"Dre", "rail.beat", "Robbed. Straight robbed. Next hand."},
 	{"Dre", "rail.idle", "I'm right here, bro."},
+	{"Dre", "rail.idle", "Let's get it, bro."},
 	{"Dre", "break", "you still in?? how deep."},
+	{"Dre", "break", "u good? how many chips."},
 	// Mei: ambitious, quick, pays inside a day.
 	{"Mei", "offer", "Swap {Pct} in the {Short}? I'm playing it either way."},
 	{"Mei", "swap.yes", "Deal. {Pct} each. Don't make me regret it."},
@@ -393,12 +416,18 @@ const Copy Lines[] = {
 	{"Mei", "rail.bubble", "Breathe. You're not as short as you feel."},
 	{"Mei", "rail.money", "Money! Now play like it's yours."},
 	{"Mei", "rail.doubleup", "Yes! That's how you do it."},
+	{"Mei", "rail.doubleup", "Nice. Don't get greedy."},
+	{"Mei", "rail.doubleup", "There it is. Keep the pressure on."},
 	{"Mei", "rail.final", "Final table. I'll hate you a little if you win this."},
 	{"Mei", "rail.bust", "Out on that? Okay. Next week."},
 	{"Mei", "rail.win", "Fine. You win. Drinks are on you."},
 	{"Mei", "rail.beat", "Disgusting river. Reset."},
+	{"Mei", "rail.beat", "Gross. Forget it. Next hand."},
+	{"Mei", "rail.beat", "Ugh. Shake it off. You played it fine."},
 	{"Mei", "rail.idle", "Go. Go."},
+	{"Mei", "rail.idle", "Focus."},
 	{"Mei", "break", "how deep are you. real number."},
+	{"Mei", "break", "chip count. no rounding up."},
 	// Rick: turbos, risk, good for it Friday.
 	{"Rick", "offer", "{Pct} swap in the {Short} tonight? I'm good for it, swear on my mother's car."},
 	{"Rick", "swap.yes", "Done. This is the one, I can feel it."},
@@ -416,12 +445,18 @@ const Copy Lines[] = {
 	{"Rick", "rail.bubble", "Shove it! No. Don't listen to me."},
 	{"Rick", "rail.money", "Money! I had a parlay on you!"},
 	{"Rick", "rail.doubleup", "Ship it! Ship it!"},
+	{"Rick", "rail.doubleup", "Double up! The parlay lives!"},
+	{"Rick", "rail.doubleup", "Yes! That's the spot! That's the spot!"},
 	{"Rick", "rail.final", "Final table! I'm buying a lottery ticket."},
 	{"Rick", "rail.bust", "Variance, man. Pure variance."},
 	{"Rick", "rail.win", "My swap partner! My swap partner!"},
 	{"Rick", "rail.beat", "Rigged. Totally rigged. Keep going."},
+	{"Rick", "rail.beat", "Unreal. The deck hates us both."},
+	{"Rick", "rail.beat", "Of course it's the river. Keep firing."},
 	{"Rick", "rail.idle", "Come on, come on."},
+	{"Rick", "rail.idle", "Let's go, let's go."},
 	{"Rick", "break", "chips? i got a parlay riding on you lol."},
+	{"Rick", "break", "still alive?? how many chips."},
 	// Dee: deals the Sunday, doesn't back people she likes, buys the piece anyway.
 	{"Dee", "offer", "Put me down for ten percent of your first Sunday. At par. For the lessons. I don't back people I like. Ruins both."},
 	{"Dee", "taken", "Good. Now I have to watch."},
@@ -434,7 +469,9 @@ const Copy Lines[] = {
 	{"Dee", "paid", "Thank you. Now forget I'm in it."},
 	{"Dee", "paid.early", "Paid before I asked. I'll pretend I'm not proud."},
 	{"Dee", "rail.idle", "Don't look at me. I'm working."},
+	{"Dee", "rail.idle", "Eyes on your own cards, kid."},
 	{"Dee", "break", "Saw your table from the box. Sit still. You're fine."},
+	{"Dee", "break", "Drink some water. Sit still. Back in five."},
 	// Sam: the Burner. The fine print is spelled out before you sign.
 	{"Sam", "offer", "lantern row got u on a leash? i do 100%. u keep 35. makeup's makeup. read the fine print lol."},
 	{"Sam", "offer", "rent's coming. i do 100%. u keep 35. makeup's makeup. read the fine print lol."},
@@ -481,12 +518,18 @@ const Copy Lines[] = {
 	{"*", "rail.bubble", "Easy now. Just get in."},
 	{"*", "rail.money", "That's a cash. Keep going."},
 	{"*", "rail.doubleup", "Yes! Stack it."},
+	{"*", "rail.doubleup", "Nice! Keep it going."},
+	{"*", "rail.doubleup", "There you go! Stack it up."},
 	{"*", "rail.final", "Final table. Take a breath."},
 	{"*", "rail.bust", "Tough one. You'll get it next time."},
 	{"*", "rail.win", "Champion! Unbelievable!"},
 	{"*", "rail.beat", "Brutal. Keep your head."},
+	{"*", "rail.beat", "Ouch. Shake it off."},
+	{"*", "rail.beat", "Rough one. Next hand."},
 	{"*", "rail.idle", "Come on."},
+	{"*", "rail.idle", "You've got this."},
 	{"*", "break", "how are you doing in there."},
+	{"*", "break", "still in? how many chips."},
 };
 
 struct Letter
@@ -3493,12 +3536,12 @@ std::string RailLine(const Book& B, const std::string& EntryId, const std::strin
 std::vector<life::Mark> Marks(const Book& B, double From, double To)
 {
 	std::vector<life::Mark> Out;
-	auto Add = [&Out, From, To](double At, const std::string& Label, const std::string& Where) {
+	auto Add = [&Out, From, To](double At, int Date, const std::string& Label, const std::string& Where) {
 		if (At >= From && At <= To)
 		{
 			life::Mark M;
 			M.At = At;
-			M.Kind = life::LedgerBacking;
+			M.Kind = Date;
 			M.Label = Label;
 			M.Where = Where;
 			Out.push_back(M);
@@ -3508,21 +3551,21 @@ std::vector<life::Mark> Marks(const Book& B, double From, double To)
 	{
 		if (O.State == OwedOpen || O.State == OwedLate)
 		{
-			Add(O.Due, O.ToYou ? O.Who + " owes you " + Money(O.Cents) : Money(O.Cents) + " to " + O.Who, "Backing");
+			Add(O.Due, O.ToYou ? DateOwed : DatePay, O.ToYou ? O.Who + " owes you " + Money(O.Cents) : Money(O.Cents) + " to " + O.Who, "Backing");
 		}
 	}
 	for (const Deal& D : B.Deals)
 	{
 		if (D.K == Kind::Package && D.State == DealOpen)
 		{
-			Add(D.NextChop, "Chop day: " + BackerName(D), "Backing");
+			Add(D.NextChop, DateChop, "Chop day: " + BackerName(D), "Backing");
 		}
 		else if (D.K == Kind::Event && D.State == DealOpen)
 		{
 			const live::Occurrence O = live::FindOccurrence(D.EventId);
 			if (O.Valid())
 			{
-				Add(O.Start, D.Backer + "'s putting you in: " + O.T->Short, "The Embercrest");
+				Add(O.Start, DateBacked, D.Backer + "'s putting you in: " + O.T->Short, "The Embercrest");
 			}
 		}
 	}
@@ -3531,7 +3574,7 @@ std::vector<life::Mark> Marks(const Book& B, double From, double To)
 		if (!Ls.Collected)
 		{
 			const EventFacts F = FactsOf(Ls.EventId);
-			Add(F.Valid ? F.Start : Ls.Closes, "Pieces sold: " + (F.Valid ? F.Short : std::string("an event")), F.Live ? "The Embercrest" : "RiverLine");
+			Add(F.Valid ? F.Start : Ls.Closes, DateSold, "Pieces sold: " + (F.Valid ? F.Short : std::string("an event")), F.Live ? "The Embercrest" : "RiverLine");
 		}
 	}
 	std::stable_sort(Out.begin(), Out.end(), [](const life::Mark& A, const life::Mark& Bx) { return A.At < Bx.At; });

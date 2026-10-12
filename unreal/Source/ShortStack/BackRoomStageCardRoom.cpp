@@ -28,6 +28,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 
@@ -235,6 +236,177 @@ void ABackRoomStage::SetCashList(const TArray<FString>& Lines)
 void ABackRoomStage::SetOnAir(bool bOn)
 {
 	bOnAir = bOn;
+}
+
+// ------------------------------------------------------------------ the room's screens and the ambassador (ue-venue)
+
+namespace CardRoomDetail
+{
+/** Where the ambassador's banner hangs: off the near wall between the desk and the champions' board (room space). */
+const FVector BannerAt(RX0 + 46.0, -610.0, 0.0);
+const double BannerW = 90.0, BannerH = 180.0, BannerTop = 372.0;
+/** The crest beside a champion's line: its size (cm), and its gap from the line's first letter. */
+const double CrestSize = 12.0, CrestGap = 4.0;
+} // namespace CardRoomDetail
+
+UMaterialInstanceDynamic* ABackRoomStage::TargetScreen(FName Key, UTexture* Tex, UTexture* Under, float Glow, float Cells)
+{
+	UMaterialInstanceDynamic* M = nullptr;
+	bool bOwn = false;
+	if (TObjectPtr<UMaterialInstanceDynamic>* Found = Materials.Find(Key))
+	{
+		M = *Found;
+		bOwn = M && M->Parent && M->Parent->GetName() == TEXT("M_ECX_Screen");
+	}
+	if (!M)
+	{
+		// The exterior's screen material reads a stand-in box from its own side (local UVs) and lays a render target's
+		// premultiplied text over an image; the room's M_ScreenImage (the box's own UVs) stands in where it isn't imported.
+		UMaterialInterface* Screen = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/ShortStack/Materials/M_ECX_Screen.M_ECX_Screen"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		bOwn = Screen != nullptr;
+		UMaterialInterface* Parent = Screen ? Screen : (ScreenImageMaterial ? ScreenImageMaterial.Get() : (SurfaceMaterial ? SurfaceMaterial.Get() : FallbackMaterial.Get()));
+		M = UMaterialInstanceDynamic::Create(Parent, this);
+		if (bOwn)
+		{
+			M->SetScalarParameterValue(TEXT("LocalUV"), 1.0f);
+			M->SetScalarParameterValue(TEXT("Mix"), 0.0f);
+			M->SetScalarParameterValue(TEXT("CellAspect"), 0.5625f);
+		}
+		Materials.Add(Key, M);
+	}
+	if (bOwn)
+	{
+		M->SetTextureParameterValue(TEXT("TextA"), Tex);
+		if (Under)
+		{
+			M->SetTextureParameterValue(TEXT("ImageA"), Under);
+		}
+		M->SetScalarParameterValue(TEXT("HasImageA"), Under ? 1.0f : 0.0f);
+	}
+	else
+	{
+		M->SetTextureParameterValue(TEXT("Image"), Tex);
+	}
+	M->SetScalarParameterValue(TEXT("Strength"), Glow);
+	M->SetScalarParameterValue(TEXT("Cells"), Cells);
+	M->SetScalarParameterValue(TEXT("Grid"), Cells > 0.5f ? 0.18f : 0.0f);
+	return M;
+}
+
+void ABackRoomStage::SetClockScreens(UTexture* StageClock, UTexture* SideClock, float Glow)
+{
+	if (!StageClock || !SideClock || ClockFaces.Num() == 0)
+	{
+		return;
+	}
+	// The LED wall's own background under the page (the page's navy lets a little of it through).
+	UTexture* Bg = LoadObject<UTexture>(nullptr, TEXT("/Game/ShortStack/Textures/Brand/T_EC_ScreenBg.T_EC_ScreenBg"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	UMaterialInstanceDynamic* OnStage = TargetScreen(TEXT("Venue_StageClock"), StageClock, Bg, Glow, 320.0f);
+	UMaterialInstanceDynamic* OnSide = TargetScreen(TEXT("Venue_SideClock"), SideClock, Bg, Glow, 320.0f);
+	for (int32 I = 0; I < ClockFaces.Num(); ++I)
+	{
+		if (ClockFaces[I])
+		{
+			ClockFaces[I]->SetMaterial(0, ClockOnStage.IsValidIndex(I) && ClockOnStage[I] ? OnStage : OnSide);
+		}
+	}
+	if (!bClockScreens)
+	{
+		// The pages carry everything the six text lines did.
+		for (UTextRenderComponent* L : BoardLines)
+		{
+			if (L)
+			{
+				L->SetVisibility(false);
+			}
+		}
+	}
+	bClockScreens = true;
+}
+
+void ABackRoomStage::SetAmbassadorBanner(UTexture* Print, float Glow)
+{
+	if (!Print || !RoomRoot)
+	{
+		if (AmbassadorRoot)
+		{
+			AmbassadorRoot->SetVisibility(false, true);
+		}
+		bAmbassadorShown = false;
+		return;
+	}
+	if (!AmbassadorRoot)
+	{
+		// A printed banner like the kit's down the side walls, hung off the near wall between the desk and the champions'
+		// board: the sheet between a top and a bottom rod, on two cables from the ceiling.
+		AmbassadorRoot = NewPart<USceneComponent>(RoomRoot);
+		AmbassadorRoot->SetRelativeLocation(BannerAt);
+		UMaterialInterface* Rod = Room(TEXT("Venue_BannerRod"), 4, 0x17171b, 0, 0.0f, 0.6f);
+		AmbassadorPrint = AddMesh(CubeMesh, nullptr, FVector(0.0, 0.0, BannerTop - BannerH * 0.5), FVector(0.01, BannerW / 100.0, BannerH / 100.0), FRotator::ZeroRotator,
+			AmbassadorRoot, false);
+		for (const double Z : {BannerTop + 1.6, BannerTop - BannerH - 1.6})
+		{
+			AddMesh(CylinderMesh, Rod, FVector(0.0, 0.0, Z), FVector(0.032, 0.032, (BannerW + 8.0) / 100.0), FRotator(0.0f, 0.0f, 90.0f), AmbassadorRoot, false);
+		}
+		for (const double Y : {-BannerW * 0.5 + 6.0, BannerW * 0.5 - 6.0})
+		{
+			AddMesh(CylinderMesh, Rod, FVector(0.0, Y, (BannerTop + RCeil) * 0.5), FVector(0.004, 0.004, (RCeil - BannerTop) / 100.0), FRotator::ZeroRotator, AmbassadorRoot, false);
+		}
+	}
+	if (AmbassadorPrint)
+	{
+		AmbassadorPrint->SetMaterial(0, TargetScreen(TEXT("Venue_Ambassador"), Print, nullptr, Glow, 0.0f));
+	}
+	AmbassadorRoot->SetVisibility(true, true);
+	bAmbassadorShown = true;
+}
+
+void ABackRoomStage::SetChampionCrest(UTexture* Crest, const TArray<FString>& Names, float Glow)
+{
+	CrestShown = 0;
+	UMaterialInstanceDynamic* M = Crest ? TargetScreen(TEXT("Venue_Crest"), Crest, nullptr, Glow, 0.0f) : nullptr;
+	for (int32 I = 0; I < ChampionLines.Num(); ++I)
+	{
+		UTextRenderComponent* L = ChampionLines[I];
+		bool bMark = false;
+		if (M && L)
+		{
+			// "SAT NIGHTLY     MEI     $2,873": the name is the middle field.
+			TArray<FString> Parts;
+			L->Text.ToString().ParseIntoArray(Parts, TEXT("     "), true);
+			const FString Who = Parts.Num() >= 2 ? Parts[1].TrimStartAndEnd() : FString();
+			for (const FString& Name : Names)
+			{
+				bMark = bMark || (!Who.IsEmpty() && !Name.IsEmpty() && Who.Equals(Name, ESearchCase::IgnoreCase));
+			}
+		}
+		if (!CrestQuads.IsValidIndex(I))
+		{
+			CrestQuads.SetNum(I + 1);
+		}
+		if (bMark && !CrestQuads[I])
+		{
+			CrestQuads[I] = AddMesh(CubeMesh, M, FVector::ZeroVector, FVector(0.004, CrestSize / 100.0, CrestSize / 100.0), FRotator::ZeroRotator, RoomRoot, false);
+		}
+		if (UStaticMeshComponent* Q = CrestQuads[I])
+		{
+			if (bMark)
+			{
+				// Centered text runs from +Y (its first letter, on the reader's left) to -Y: the crest just before it.
+				const FVector Size = L->GetTextLocalSize();
+				Q->SetRelativeLocation(L->GetRelativeLocation() + FVector(0.6, Size.Y * 0.5 + CrestGap + CrestSize * 0.5, 0.0));
+				Q->SetMaterial(0, M);
+			}
+			Q->SetVisibility(bMark);
+		}
+		CrestShown += bMark ? 1 : 0;
+	}
+}
+
+FVector ABackRoomStage::HeroSeatMarker() const
+{
+	// The middle of the player's chair (20 cm behind its front edge), a metre up: over the chair back, clear of the table.
+	return GetActorTransform().TransformPosition(SeatTransform(0).TransformPosition(FVector(-20.0, 0.0, 105.0)));
 }
 
 void ABackRoomStage::ClearCrowd()
@@ -556,6 +728,14 @@ void ABackRoomStage::BuildCardRoom()
 	ScheduleLines.Reset();
 	ChampionLines.Reset();
 	CashLines.Reset();
+	ClockFaces.Reset();
+	ClockOnStage.Reset();
+	CrestQuads.Reset();
+	AmbassadorRoot = nullptr;
+	AmbassadorPrint = nullptr;
+	bClockScreens = false;
+	bAmbassadorShown = false;
+	CrestShown = 0;
 	USceneComponent* R = RoomRoot;
 	auto RBox = [&](UMaterialInterface* M, const FVector& Min, const FVector& Max, bool bShadows) {
 		return AddMesh(CubeMesh, M, (Min + Max) * 0.5, (Max - Min) / 100.0, FRotator::ZeroRotator, R, bShadows);
@@ -891,11 +1071,13 @@ void ABackRoomStage::BuildCardRoom()
 			ScheduleLines.Add(AddText(TEXT(""), At + FVector(0.0, 3.0, 44.0 - I * 26.0), FRotator(0.0f, 90.0f, 0.0f), 13.0f, Srgb(I == 0 ? 0xffffff : 0xcfd6e0), R));
 		}
 	}
-	auto Clock = [&](const FVector& At, const FRotator& Facing, double Scale) {
+	auto Clock = [&](const FVector& At, const FRotator& Facing, double Scale, bool bOnStage) {
 		const FVector Fwd = Facing.Vector();
 		AddMesh(CubeMesh, Room(TEXT("ScreenBezel"), 4, 0x0a0a0b, 0, 0.0f, 0.2f), At - Fwd * 4.0, FVector(0.06, 3.9 * Scale, 2.3 * Scale), Facing, R, false);
 		UMaterialInterface* Face = bEC ? ScreenImage(TEXT("EC_ScreenBg"), TEXT("T_EC_ScreenBg"), 1.9f) : Glow(TEXT("ScreenGlass"), Srgb(0x081428), 3.0f);
-		AddMesh(CubeMesh, Face, At - Fwd * 0.5, FVector(0.02, 3.7 * Scale, 2.1 * Scale), Facing, R, false);
+		// (The face is 1.76:1, the clock pages' 1,024 x 576: SetClockScreens puts them on it.)
+		ClockFaces.Add(AddMesh(CubeMesh, Face, At - Fwd * 0.5, FVector(0.02, 3.7 * Scale, 2.1 * Scale), Facing, R, false));
+		ClockOnStage.Add(bOnStage);
 		// The clock's lines, top to bottom: the event, the level, the time, the blinds, the next level, the field (at
 		// the Embercrest, between the screen's header and its foot).
 		const double Old[6][2] = {{86.0, 15.0}, {54.0, 20.0}, {8.0, 52.0}, {-40.0, 22.0}, {-66.0, 13.0}, {-90.0, 13.0}};
@@ -910,15 +1092,15 @@ void ABackRoomStage::BuildCardRoom()
 	if (bEC)
 	{
 		// Two big clocks on the far wall either side of the stage.
-		Clock(FVector(RX1 - 8.0 - Standoff, -1180.0, 262.0), FRotator(0.0f, 180.0f, 0.0f), 1.2);
-		Clock(FVector(RX1 - 8.0 - Standoff, 1180.0, 262.0), FRotator(0.0f, 180.0f, 0.0f), 1.2);
+		Clock(FVector(RX1 - 8.0 - Standoff, -1180.0, 262.0), FRotator(0.0f, 180.0f, 0.0f), 1.2, true);
+		Clock(FVector(RX1 - 8.0 - Standoff, 1180.0, 262.0), FRotator(0.0f, 180.0f, 0.0f), 1.2, true);
 	}
 	else
 	{
-		Clock(FVector(RX1 - 8.0, 0.0, 255.0), FRotator(0.0f, 180.0f, 0.0f), 1.0);
+		Clock(FVector(RX1 - 8.0, 0.0, 255.0), FRotator(0.0f, 180.0f, 0.0f), 1.0, true);
 	}
-	Clock(FVector(450.0, RY0 + 8.0 + Standoff, 270.0), FRotator(0.0f, 90.0f, 0.0f), bEC ? 0.85 : 0.75);
-	Clock(FVector(1000.0, RY1 - 8.0 - Standoff, 270.0), FRotator(0.0f, -90.0f, 0.0f), bEC ? 0.85 : 0.75);
+	Clock(FVector(450.0, RY0 + 8.0 + Standoff, 270.0), FRotator(0.0f, 90.0f, 0.0f), bEC ? 0.85 : 0.75, false);
+	Clock(FVector(1000.0, RY1 - 8.0 - Standoff, 270.0), FRotator(0.0f, -90.0f, 0.0f), bEC ? 0.85 : 0.75, false);
 	SetBoard(TEXT("EMBERCREST"), TEXT("LEVEL 1"), TEXT("20:00"), TEXT("100 / 200"), TEXT("NEXT  200 / 300"), TEXT("SHUFFLE UP AND DEAL"));
 
 	// ---- the banners: down the side walls, up out of everyone's way, and flanking the stage on the far wall.

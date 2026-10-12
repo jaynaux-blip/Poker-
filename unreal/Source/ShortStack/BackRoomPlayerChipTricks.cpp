@@ -49,8 +49,10 @@ using namespace BackRoomChipTricksDetail;
 
 bool ABackRoomPlayer::HasPlayChips() const
 {
+	// Twenty or more of the smallest chip in play (next_segment_spec 8.3: the room's own chips, $1 at Dee's game, the black
+	// 100 at the Embercrest until it races off): a stack with chips to spare for the fingers.
 	return SeatRole == EBackRoomRole::Player && Persona.ChipFidget >= 0.45f && StackPile
-		&& StackPile->GetAmount() >= 30 * FMath::Max<int64>(ABackRoomChips::ChipUnit, 1);
+		&& StackPile->GetAmount() >= 20 * FMath::Max<int64>(ABackRoomChips::SmallestChip(), 1);
 }
 
 FVector ABackRoomPlayer::PlayChipsBase() const
@@ -161,17 +163,41 @@ void ABackRoomPlayer::UpdatePlayChips(float Dt, bool bHandOnChips)
 			PlayChips.Add(Ism);
 		}
 	}
-	if (PlayChipsSeed != Persona.Seed)
+	// Which chips: the seat's own pick at Dee's game, the room's two smallest in play at the Embercrest (new ones after a
+	// colour-up), so the key holds both.
+	const int64 Smallest = ABackRoomChips::SmallestChip();
+	const int32 ChipsKey = Persona.Seed ^ static_cast<int32>(ABackRoomChips::IsTournamentSet() ? (Smallest * 7919) & 0x3fffffff : 0);
+	if (PlayChipsSeed != ChipsKey)
 	{
-		// Two neighbors from the rack: red and white, green and red, or black and green.
-		PlayChipsSeed = Persona.Seed;
-		static const TCHAR* Names[4] = {TEXT("100"), TEXT("25"), TEXT("5"), TEXT("1")};
-		const int32 Pair = FMath::Abs(Persona.Seed) % 3;
-		for (int32 C = 0; C < 2; ++C)
+		PlayChipsSeed = ChipsKey;
+		const std::vector<ss::chipset::Denom>& InPlay = ABackRoomChips::ChipsInPlay();
+		if (ABackRoomChips::IsTournamentSet() && !InPlay.empty())
 		{
-			const TCHAR* Name = Names[2 - Pair + C];
-			const FString Path = FString::Printf(TEXT("/Game/ShortStack/Meshes/SM_Chip_%s/SM_Chip_%s.SM_Chip_%s"), Name, Name, Name);
-			PlayChips[C]->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet));
+			// The two smallest chips in play, four each (the art's, or the block-out in their colours).
+			for (int32 C = 0; C < 2; ++C)
+			{
+				const ss::chipset::Denom& D = InPlay[static_cast<size_t>(FMath::Min(C, static_cast<int32>(InPlay.size()) - 1))];
+				bool bBlockout = false;
+				PlayChips[C]->EmptyOverrideMaterials();
+				PlayChips[C]->SetStaticMesh(ABackRoomChips::MeshFor(D, bBlockout));
+				if (bBlockout)
+				{
+					ABackRoomChips::TintBlockout(PlayChips[C], D.Body);
+				}
+			}
+		}
+		else
+		{
+			// Two neighbors from the rack: red and white, green and red, or black and green.
+			static const TCHAR* Names[4] = {TEXT("100"), TEXT("25"), TEXT("5"), TEXT("1")};
+			const int32 Pair = FMath::Abs(Persona.Seed) % 3;
+			for (int32 C = 0; C < 2; ++C)
+			{
+				const TCHAR* Name = Names[2 - Pair + C];
+				const FString Path = FString::Printf(TEXT("/Game/ShortStack/Meshes/SM_Chip_%s/SM_Chip_%s.SM_Chip_%s"), Name, Name, Name);
+				PlayChips[C]->EmptyOverrideMaterials();
+				PlayChips[C]->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet));
+			}
 		}
 		FRandomStream R(Persona.Seed * 31 + 5);
 		for (int32 I = 0; I < 8; ++I)

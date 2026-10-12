@@ -898,7 +898,8 @@ Archetype PlayStyle(const world::Npc& N)
 
 FieldNotes DescribeField(world::World& W, const Occurrence& O, const std::string& HeroName, const life::State& Hero, double World)
 {
-	(void)Hero; // the player's own patches are sponsor::NoteWorn's, after registration
+	// Hero: the save's live record and deals, for the player's own badge row (their patches are sponsor::NoteWorn's,
+	// after registration).
 	FieldNotes N;
 	N.Planned = O.Field;
 	if (!O.Valid())
@@ -911,7 +912,7 @@ FieldNotes DescribeField(world::World& W, const Occurrence& O, const std::string
 	if (W.Ready())
 	{
 		N.Planned = std::max(1, W.PlannedEntries(O.Id));
-		const std::vector<int> Regulars = W.EmbercrestRegulars();
+		const int Day = net::DayOf(World);
 		std::vector<int> Field;
 		for (int Npc : W.Registered(O.Id))
 		{
@@ -945,7 +946,9 @@ FieldNotes DescribeField(world::World& W, const Occurrence& O, const std::string
 				}
 			}
 			const world::Bond* Bd = W.BondWith(Npc);
-			const bool Regular = std::find(Regulars.begin(), Regulars.end(), Npc) != Regulars.end();
+			// An Embercrest regular is a Players Club member (§1.9 #22, rule C4): tier 1 or better from the room record, the
+			// card the desk prints, not the habit list the world walks people to the room by.
+			const bool Regular = P->Room.Venue == "embercrest" && badge::ClubTier(P->Room.VisitsIn(Day), P->Room.VisitsAtMonthStart(Day)) >= 1;
 			const std::string Known = Bd ? Bd->Label() : std::string();
 			if (!Regular && Known.empty() && !(Bd && !Bd->Memories.empty()))
 			{
@@ -958,9 +961,23 @@ FieldNotes DescribeField(world::World& W, const Occurrence& O, const std::string
 			N.Faces.push_back(F);
 		}
 		// Their badges and the month's room leaders (§5).
-		const int Day = net::DayOf(World);
 		N.Badges = badge::FieldBadges(W, Field, Day);
 		N.Leaders = badge::FieldLeaders(W, Day);
+		// The player's own row, under their name (not in the roster: the director reads it for their intro, "two-time
+		// Embercrest champion, ..."), from the world and the save as the session's own badges are: the club nights, the
+		// wall, the running deals' patches, the last review's Verified. Their leaders row shows the same badge.
+		const std::string Mine = badge::HeroFieldPack(W, Hero, World);
+		if (!Mine.empty())
+		{
+			N.Badges.push_back({HeroName, Mine});
+		}
+		for (life::RoomLeader& L : N.Leaders)
+		{
+			if (!W.HeroName.empty() && L.Name == W.HeroName)
+			{
+				L.Badge = Mine;
+			}
+		}
 	}
 	// The champions' board by the desk: the room's last winners, newest first, from the world's results.
 	static const char* Days[7] = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"};

@@ -138,12 +138,14 @@ void PennyLogo(Canvas& C, float X, float Y, float R, float A)
 } // namespace counter_detail
 
 using namespace frontend_detail;
-using namespace counter_detail;
+// (counter_detail is named inside each function below, never at namespace scope: a file-scope using-directive leaks into
+// every file after this one in a unity blob, where counter_detail::Margin made TableHud.cpp's Margin ambiguous.)
 
 // ------------------------------------------------------------------ product art
 
 void DrawProduct(Canvas& C, const store::Item& I, float X, float Y, float Size)
 {
+	using namespace counter_detail;
 	const Color Body = Hex(I.Color);
 	const Color Label = Hex(I.Accent);
 	const float A = C.GetAlpha();
@@ -311,6 +313,7 @@ void DrawProduct(Canvas& C, const store::Item& I, float X, float Y, float Size)
 
 void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, double Now, const store::Basket* Preview, float Alpha)
 {
+	using namespace counter_detail;
 	// What the basket would do if it were all eaten and drunk now (store::ReliefOf: the same relief eating applies).
 	NeedsChange Change;
 	if (Preview)
@@ -331,6 +334,7 @@ void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, 
 
 void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, double Now, const NeedsChange& Change, float Alpha)
 {
+	using namespace counter_detail;
 	const double Hunger = L.Hunger - Change.Hunger;
 	const double Thirst = L.Thirst - Change.Thirst;
 	const double Energy = L.Energy + Change.Energy;
@@ -384,6 +388,7 @@ void DrawVitals(Canvas& C, const life::State& L, float X, float Y, float Width, 
 
 std::vector<const store::Item*> StoreCounter::OnShelf() const
 {
+	using namespace counter_detail;
 	std::vector<const store::Item*> Out;
 	for (const store::Item& I : store::Catalog())
 	{
@@ -397,6 +402,7 @@ std::vector<const store::Item*> StoreCounter::OnShelf() const
 
 void StoreCounter::Open(double Now, int Shelf)
 {
+	using namespace counter_detail;
 	Shown = true;
 	ShelfAt = std::clamp(Shelf, 0, store::ShelfCount - 1);
 	Sel = 0;
@@ -416,12 +422,14 @@ void StoreCounter::Open(double Now, int Shelf)
 
 void StoreCounter::Close(double Now)
 {
+	using namespace counter_detail;
 	Shown = false;
 	OpenedAt = Now;
 }
 
 void StoreCounter::Say(const std::string& Words, double Now, bool Bad)
 {
+	using namespace counter_detail;
 	Note = Words;
 	NoteAt = Now;
 	NoteBad = Bad;
@@ -429,6 +437,7 @@ void StoreCounter::Say(const std::string& Words, double Now, bool Bad)
 
 void StoreCounter::Pay(double Now)
 {
+	using namespace counter_detail;
 	if (Basket.Empty())
 	{
 		Say("You gotta pick something up first.", Now, false);
@@ -452,6 +461,7 @@ void StoreCounter::Pay(double Now)
 
 void StoreCounter::Pick(const std::string& Id, double Now)
 {
+	using namespace counter_detail;
 	const int Had = Basket.Count();
 	Basket.Add(Id);
 	if (Basket.Count() == Had)
@@ -470,6 +480,7 @@ void StoreCounter::Pick(const std::string& Id, double Now)
 
 void StoreCounter::PutBack(const std::string& Id, double Now)
 {
+	using namespace counter_detail;
 	const int Had = Basket.Count();
 	Basket.Remove(Id);
 	if (Basket.Count() == Had)
@@ -482,6 +493,7 @@ void StoreCounter::PutBack(const std::string& Id, double Now)
 
 void StoreCounter::Key(const std::string& Name, double Now)
 {
+	using namespace counter_detail;
 	if (!Shown)
 	{
 		return;
@@ -532,6 +544,7 @@ void StoreCounter::Key(const std::string& Name, double Now)
 
 void StoreCounter::Draw(Canvas& C, double Now)
 {
+	using namespace counter_detail;
 	if (!Shown)
 	{
 		Ptr.EndFrame();
@@ -769,6 +782,7 @@ void StoreCounter::Draw(Canvas& C, double Now)
 
 void StoreCounter::DrawBag(Canvas& C, float X, float Y, float W, double Now)
 {
+	using namespace counter_detail;
 	const life::State& L = S.Life;
 	auto Held = [&L](const std::string& Id) {
 		const auto It = L.Pantry.find(Id);
@@ -907,6 +921,7 @@ void StoreCounter::DrawBag(Canvas& C, float X, float Y, float W, double Now)
 
 void StoreCounter::DrawReceipt(Canvas& C, float Rx0, double Now)
 {
+	using namespace counter_detail;
 	auto Released = [this](const Rect& R) { return Ptr.Released && Inside(R, Ptr.X, Ptr.Y) && Inside(R, PressX, PressY); };
 	// A declined card shakes the paper: a quick wobble that dies away.
 	const double Dd = Now - DeclinedAt;

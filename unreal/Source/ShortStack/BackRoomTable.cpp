@@ -13,11 +13,16 @@
 #include "ReplayHooks.h"
 #include "TimerManager.h"
 
+#include "HAL/PlatformTime.h"
 #include "ShortStack/AI/Bot.h"
 #include "ShortStack/AI/View.h"
 #include "ShortStack/Cards.h"
 #include "ShortStack/Equity.h"
+#include "ShortStack/Game/ChipSet.h"
+#include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Room.h"
+#include "ShortStack/Game/TableTalk.h"
+#include "GameFramework/WorldSettings.h"
 
 #include <algorithm>
 
@@ -71,6 +76,39 @@ FString ShakeLine(const FString& Name, bool bReadsWeak, FRandomStream& Fx)
 	}
 	return Fx.FRand() < 0.5f ? TEXT("You're nervous, man. I call.") : TEXT("Shaky shaky. Call.");
 }
+
+/** The plate's tag for an action (next_segment_spec 6.3): "RAISE", "CALL", "CHECK", "BET", "ALL IN", "FOLD". */
+const TCHAR* ActionTag(const ss::ActionRecord& A)
+{
+	if (A.AllIn && A.Type != ss::ActionType::Fold && A.Type != ss::ActionType::Check)
+	{
+		return TEXT("ALL IN");
+	}
+	switch (A.Type)
+	{
+	case ss::ActionType::Fold: return TEXT("FOLD");
+	case ss::ActionType::Check: return TEXT("CHECK");
+	case ss::ActionType::Call: return TEXT("CALL");
+	case ss::ActionType::Bet: return TEXT("BET");
+	case ss::ActionType::Raise: return TEXT("RAISE");
+	}
+	return TEXT("");
+}
+
+/** A salt for a line's variant, from what it's about (the same hand and call always say the same words). */
+uint32 SaltOf(int32 HandNumber, const char* Call, int32 Seat)
+{
+	uint32 H = 2166136261u;
+	for (const char* P = Call; P && *P; ++P)
+	{
+		H = (H ^ static_cast<uint8>(*P)) * 16777619u;
+	}
+	H = (H ^ static_cast<uint32>(HandNumber)) * 16777619u;
+	return (H ^ static_cast<uint32>(Seat + 1)) * 16777619u;
+}
+
+/** Real seconds the dealer waits on the player before the line (next_segment_spec 6.4; no clock ever runs). */
+constexpr float TurnLineSeconds = 20.0f;
 
 } // namespace BackRoomTableDetail
 
@@ -153,7 +191,7 @@ void ABackRoomTable::AddPlayer(ABackRoomPlayer* Player, int32 TableSeat, ss::Arc
 	S.Player = Player;
 	S.bHero = Player && Player->SeatRole == EBackRoomRole::Hero;
 	S.Id = Player ? Player->Persona.Name : FString::Printf(TEXT("Seat%d"), TableSeat);
-	S.Stack = S.BuyIn = S.StartStack = BuyIn;
+	S.Stack = S.BuyIn = S.StartStack = S.Shown = BuyIn;
 	S.Profile = ss::MakeProfile(Archetype, *Rng);
 	const FTransform T = ABackRoomStage::SeatTransform(TableSeat);
 	S.StackPile = NewPile(StackSpot(TableSeat), T.Rotator(), TableSeat * 17 + 3, static_cast<uint8>(EBackRoomChipStyle::Stack));
@@ -400,6 +438,7 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 	Time += DeltaSeconds;
 	// The heart runs on real time (Focus slows the room, not you).
 	UpdateComposure(FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f));
+	TickTurnCue();
 	for (const FSeat& S : Seats)
 	{
 		if (S.Player)
@@ -579,6 +618,10 @@ void ABackRoomTable::StartHand()
 			S.bDealt = false;
 			S.bShown = false;
 			S.Hole.Reset();
+			S.LastAction.Reset();
+			// The felt starts where the engine did, before the blinds and the ante: their gestures take them out.
+			const ss::HandSeat* HS = S.HandSeat >= 0 ? Hand->SeatByNumber(S.HandSeat) : nullptr;
+			S.Shown = HS ? HS->StartStack : S.Stack;
 			if (S.Player && S.HandSeat >= 0)
 			{
 				S.Player->Hole.Reset();
@@ -594,6 +637,7 @@ void ABackRoomTable::StartHand()
 		if (S.Stack <= 0)
 		{
 			S.Stack = S.BuyIn;
+			S.Shown = S.Stack;
 			S.StackPile->SetAmount(S.Stack);
 			DealerSays(S.bHero ? FString::Printf(TEXT("You're back in for %lld. Easy, kid."), S.BuyIn) : FString::Printf(TEXT("%s's back in for %lld."), *S.Id, S.BuyIn));
 		}
@@ -619,9 +663,11 @@ void ABackRoomTable::StartHand()
 		In.Stack = S.Stack;
 		Config.Players.push_back(In);
 		S.StartStack = S.Stack;
+		S.Shown = S.Stack;
 		S.bDealt = false;
 		S.bShown = false;
 		S.Hole.Reset();
+		S.LastAction.Reset();
 		if (S.Player)
 		{
 			S.Player->Hole.Reset();
@@ -644,6 +690,10 @@ void ABackRoomTable::StartHand()
 	bHeroTurn = false;
 	bHeroPeeked = false;
 	bBotPending = false;
+	bTurnUpSaid = false;
+	HeroTurnReal = -1.0f;
+	LandingsDue = 0;
+	LastButtonSeat = Hand->ButtonSeat;
 	Board.Reset();
 	++HandNumber;
 	if (!Tourney || HandNumber == 1)
@@ -687,12 +737,52 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 	{
 	case ss::EventType::Blind:
 	{
+		// Out of the stack and onto the felt as the engine posted it.
 		FSeat* S = SeatAt(Ev.Seat);
-		if (S && S->Player)
+		if (S)
 		{
-			S->Player->GestureChips(Ev.Amount, false, false);
+			S->Shown -= Ev.Amount;
+			if (S->Player)
+			{
+				S->Player->GestureChips(Ev.Amount, false, false);
+			}
+			else
+			{
+				MoveChipsByHand(*S, Ev.Amount);
+			}
 		}
 		return 0.45f;
+	}
+	case ss::EventType::Ante:
+	{
+		// The big blind's ante is dead money: off their stack and straight into the middle (the dealer pulls it in before
+		// the deal), never part of their bet in front.
+		FSeat* S = SeatAt(Ev.Seat);
+		if (S && S->StackPile && Pot)
+		{
+			S->Shown -= Ev.Amount;
+			ABackRoomChips* Stack = S->StackPile;
+			const int64 Amount = FMath::Min<int64>(Ev.Amount, Stack->GetAmount());
+			Stack->SetAmount(Stack->GetAmount() - Amount);
+			ABackRoomChips* Moving = NewPile(Stack->GetTop(), Stack->GetActorRotation(), 13 + S->TableSeat, static_cast<uint8>(EBackRoomChipStyle::Bet));
+			Moving->SetAmount(Amount);
+			Moving->SlideTo(PotSpot(), 0.55f, 2.0f);
+			const TWeakObjectPtr<ABackRoomChips> PotPile = Pot.Get();
+			const TWeakObjectPtr<ABackRoomChips> WeakMoving = Moving;
+			const int32 N = HandNumber;
+			FTimerHandle Handle;
+			GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this, WeakMoving, PotPile, Amount, N]() {
+				if (PilesSyncedHand < N && PotPile.IsValid())
+				{
+					PotPile->SetAmount(PotPile->GetAmount() + Amount);
+				}
+				if (WeakMoving.IsValid())
+				{
+					WeakMoving->Destroy();
+				}
+			}), 0.6f, false);
+		}
+		return 0.3f;
 	}
 	case ss::EventType::Deal:
 	{
@@ -707,8 +797,18 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 	{
 		const ss::ActionRecord& A = Ev.Action;
 		FSeat* S = SeatAt(A.Seat);
-		if (!S || !S->Player)
+		if (!S)
 		{
+			return 0.3f;
+		}
+		// What the seat's plate says until the street's bets go in, and its stack as the engine has it once these chips land.
+		S->Shown -= A.Added;
+		S->LastAction = ActionTag(A);
+		S->LastTo = A.Type == ss::ActionType::Fold || A.Type == ss::ActionType::Check ? 0 : A.To;
+		S->ActedAt = FPlatformTime::Seconds();
+		if (!S->Player)
+		{
+			MoveChipsByHand(*S, A.Added);
 			return 0.3f;
 		}
 		ABackRoomPlayer* P = S->Player;
@@ -762,13 +862,45 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 		}
 		if (A.AllIn && bAggressive)
 		{
-			DealerSays(S->bHero ? TEXT("All in.") : FString::Printf(TEXT("%s is all in."), *S->Id));
+			// The dealer calls it as the room says it (talk::Dealer; next_segment_spec 6.8 bug 1: never the engine's id): the
+			// player's own "All in.", the count when it's the player who has to answer it (and the plate turns exact), else
+			// the name of someone the room knows, else the seat.
+			const FSeat* H = HeroSeat();
+			const ss::HandSeat* Mine = H && H->HandSeat >= 0 ? Hand->SeatByNumber(H->HandSeat) : nullptr;
+			const ss::HandSeat* Them = Hand->SeatByNumber(A.Seat);
+			if (S->bHero)
+			{
+				DealerCall("allin", {});
+			}
+			else if (Tourney && Mine && !Mine->Folded && !Mine->AllIn && !bHeroAway)
+			{
+				DealerCall("allin.count", {{"Spoken", ss::chipset::Spoken(A.To)}});
+				S->CountedAt = S->Shown;
+			}
+			else if (!Tourney)
+			{
+				// Dee's game: the regulars by their own names, word for word as she always called it.
+				DealerCall("allin.named", {{"Name", std::string(TCHAR_TO_UTF8(*S->Id))}});
+			}
+			else if (const std::string Name = Them ? SpokenName(*Them) : std::string(); !Name.empty() && ss::talk::KnownByName(Name))
+			{
+				DealerCall("allin.named", {{"Name", Name}});
+			}
+			else
+			{
+				DealerCall("allin.seat", {{"Seat", ss::talk::NumberWords(ss::live::SeatLabel(A.Seat))}});
+			}
 		}
 		return Took * 0.85f;
 	}
 	case ss::EventType::Street:
 	{
 		bHeroAggressedThisStreet = false;
+		// The street's bets go in: the plates' tags go with them.
+		for (FSeat& Seat : Seats)
+		{
+			Seat.LastAction.Reset();
+		}
 		TArray<int32> New;
 		for (int C : Ev.Cards)
 		{
@@ -785,24 +917,47 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 		FSeat* S = SeatAt(Ev.Seat);
 		if (S && S->BetPile)
 		{
+			S->Shown += Ev.Amount;
 			ABackRoomChips* Bet = S->BetPile;
 			const int64 Amount = Ev.Amount;
 			ABackRoomChips* Back = NewPile(Bet->GetActorLocation(), Bet->GetActorRotation(), 7, static_cast<uint8>(EBackRoomChipStyle::Bet));
 			Back->SetAmount(Amount);
 			Bet->SetAmount(FMath::Max<int64>(0, Bet->GetAmount() - Amount));
 			Back->SlideTo(StackSpot(S->TableSeat), 0.5f);
-			ABackRoomChips* Stack = S->StackPile;
+			const TWeakObjectPtr<ABackRoomChips> WeakBack = Back;
+			const TWeakObjectPtr<ABackRoomChips> Stack = S->StackPile.Get();
+			const int32 N = HandNumber;
+			++LandingsDue;
 			FTimerHandle Handle;
-			GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [Back, Stack, Amount]() {
-				Stack->SetAmount(Stack->GetAmount() + Amount);
-				Back->Destroy();
+			GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this, WeakBack, Stack, Amount, N]() {
+				// (Once the hand's end has put the piles right, a late landing adds nothing more.)
+				if (PilesSyncedHand < N && Stack.IsValid())
+				{
+					Stack->SetAmount(Stack->GetAmount() + Amount);
+				}
+				LandingsDue -= N == HandNumber && LandingsDue > 0 ? 1 : 0;
+				if (WeakBack.IsValid())
+				{
+					WeakBack->Destroy();
+				}
 			}), 0.55f, false);
 		}
 		return 0.6f;
 	}
 	case ss::EventType::Reveal:
 	{
+		// All in and the action's complete: everyone's cards go face up (the TDA's rule), and the dealer says so.
 		float T = 0.0f;
+		if (!bTurnUpSaid && Tourney)
+		{
+			bTurnUpSaid = true;
+			DealerCall("turnup", {});
+			T = 0.6f;
+			if (OnAllInCalled)
+			{
+				OnAllInCalled(IsHeroInHand());
+			}
+		}
 		for (int Seat : Ev.Seats)
 		{
 			FSeat* S = SeatAt(Seat);
@@ -826,6 +981,23 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 	case ss::EventType::Showdown:
 	{
 		float T = 0.0f;
+		// An all-in called on the river: the same rule, at the showdown.
+		bool bAllIn = false;
+		for (const ss::ShowdownHand& H : Ev.Hands)
+		{
+			const ss::HandSeat* HS = Hand->SeatByNumber(H.Seat);
+			bAllIn = bAllIn || (HS && HS->AllIn);
+		}
+		if (Tourney && bAllIn && !bTurnUpSaid && Ev.Hands.size() >= 2)
+		{
+			bTurnUpSaid = true;
+			DealerCall("turnup", {});
+			T = 0.6f;
+			if (OnAllInCalled)
+			{
+				OnAllInCalled(IsHeroInHand());
+			}
+		}
 		for (const ss::ShowdownHand& H : Ev.Hands)
 		{
 			FSeat* S = SeatAt(H.Seat);
@@ -866,13 +1038,29 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 				continue;
 			}
 			const int64 Share = R.Shares[W];
+			S->Shown += Share;
 			ABackRoomChips* Push = NewPile(Pot->GetActorLocation(), FRotator::ZeroRotator, 31 + static_cast<int32>(W), static_cast<uint8>(EBackRoomChipStyle::Pot));
 			Push->SetAmount(Share);
 			Pot->SetAmount(FMath::Max<int64>(0, Pot->GetAmount() - Share));
-			ABackRoomChips* Stack = S->StackPile;
-			auto Land = [Push, Stack, Share]() {
-				Stack->SetAmount(Stack->GetAmount() + Share);
-				Push->Destroy();
+			const TWeakObjectPtr<ABackRoomChips> Stack = S->StackPile.Get();
+			const TWeakObjectPtr<ABackRoomChips> WeakPush = Push;
+			const TWeakObjectPtr<ABackRoomTable> Self = this;
+			const int32 N = HandNumber;
+			++LandingsDue;
+			auto Land = [Self, WeakPush, Stack, Share, N]() {
+				// (Once the hand's end has put the piles right, a late landing adds nothing more.)
+				if (Self.IsValid() && Self->PilesSyncedHand < N && Stack.IsValid())
+				{
+					Stack->SetAmount(Stack->GetAmount() + Share);
+				}
+				if (Self.IsValid() && N == Self->HandNumber && Self->LandingsDue > 0)
+				{
+					--Self->LandingsDue;
+				}
+				if (WeakPush.IsValid())
+				{
+					WeakPush->Destroy();
+				}
 			};
 			if (Dealer)
 			{
@@ -952,11 +1140,21 @@ float ABackRoomTable::GatherBets()
 			continue;
 		}
 		const FVector Home = BetSpot(S.TableSeat);
-		ABackRoomChips* PotPile = Pot;
-		auto Merge = [Bet, PotPile, Home]() {
-			PotPile->SetAmount(PotPile->GetAmount() + Bet->GetAmount());
-			Bet->SetAmount(0);
-			Bet->SetActorLocation(Home);
+		// (Weak: the sweep finishes on the dealer's hand, which can outlive the piles at the night's end.)
+		const TWeakObjectPtr<ABackRoomChips> WeakBet = Bet;
+		const TWeakObjectPtr<ABackRoomChips> PotPile = Pot.Get();
+		auto Merge = [WeakBet, PotPile, Home]() {
+			ABackRoomChips* B = WeakBet.Get();
+			if (!B)
+			{
+				return;
+			}
+			if (ABackRoomChips* P = PotPile.Get())
+			{
+				P->SetAmount(P->GetAmount() + B->GetAmount());
+			}
+			B->SetAmount(0);
+			B->SetActorLocation(Home);
 		};
 		if (Dealer)
 		{
@@ -1106,6 +1304,36 @@ void ABackRoomTable::EndHand()
 		}
 	}
 	NoteHand(bShowdown, PotSize);
+	// The hand as the player saw it (ss::recall: their cards, the board, every action, what was shown down), for the table
+	// card's HANDS page and the last-hand card: only a hand they were dealt into.
+	if (const FSeat* H = HeroSeat(); H && H->HandSeat >= 0 && Hand->SeatByNumber(H->HandSeat))
+	{
+		std::vector<std::string> Names;
+		std::vector<int> ShownSeats;
+		for (const ss::HandSeat& HS : Hand->Seats)
+		{
+			if (HS.Seat >= static_cast<int>(Names.size()))
+			{
+				Names.resize(static_cast<size_t>(HS.Seat) + 1);
+			}
+			Names[static_cast<size_t>(HS.Seat)] = HS.Seat == H->HandSeat ? std::string("You") : SpokenName(HS);
+		}
+		for (const ss::HandEvent& Ev : Hand->Events)
+		{
+			if (Ev.Type == ss::EventType::Showdown)
+			{
+				for (const ss::ShowdownHand& SH : Ev.Hands)
+				{
+					ShownSeats.push_back(SH.Seat);
+				}
+			}
+			else if (Ev.Type == ss::EventType::Reveal)
+			{
+				ShownSeats.insert(ShownSeats.end(), Ev.Seats.begin(), Ev.Seats.end());
+			}
+		}
+		RecallReady = MakeShared<ss::recall::Record>(ss::recall::Of(*Hand, H->HandSeat, Names, ShownSeats, HandNumber, Tourney ? Tourney->LevelIndex + 1 : 0));
+	}
 	for (FSeat& S : Seats)
 	{
 		const ss::HandSeat* HS = S.HandSeat >= 0 ? Hand->SeatByNumber(S.HandSeat) : nullptr;
@@ -1118,9 +1346,27 @@ void ABackRoomTable::EndHand()
 		{
 			S.Player->OnResult(S.Stack - S.StartStack, PotSize, bShowdown && !HS->Folded);
 		}
-		// Make sure the piles say what the engine says.
+		// Make sure the piles say what the engine says (the plate audit hears of any it had to put right: chips still on
+		// their way are no lie, a pile that disagrees with nothing in the air is).
+		if (S.StackPile->GetAmount() != S.Stack && LandingsDue == 0)
+		{
+			FBackRoomPileFix& Fix = PileFixes.AddDefaulted_GetRef();
+			Fix.TableSeat = S.TableSeat;
+			Fix.Id = S.Id;
+			Fix.Felt = S.StackPile->GetAmount();
+			Fix.Engine = S.Stack;
+			Fix.HandNumber = HandNumber;
+		}
 		S.StackPile->SetAmount(S.Stack);
 		S.BetPile->SetAmount(0);
+		S.Shown = S.Stack;
+		S.LastAction.Reset();
+	}
+	// From here a sweep or a returned bet of this hand that lands late adds nothing more.
+	PilesSyncedHand = HandNumber;
+	if (PileFixes.Num() > 64)
+	{
+		PileFixes.RemoveAt(0, PileFixes.Num() - 64);
 	}
 	if (Pot)
 	{
@@ -1477,10 +1723,15 @@ void ABackRoomTable::SyncTournamentSeats(const ss::Hand& H)
 			const int32 Idx = Tourney->PlayerIndex(HS.Id);
 			S.Id = Id;
 			S.Player = Idx >= 0 && OnSeatPlayer ? OnSeatPlayer(Tourney->Players[static_cast<size_t>(Idx)], S.TableSeat) : nullptr;
+			S.CountedAt = -1;
 			WireSeat(S);
 		}
-		S.StackPile->SetAmount(S.Stack);
+		// The engine dealt this hand with the blinds and the ante already posted: the felt shows the stack from before them,
+		// and the blinds' and the ante's own gestures take them out as the hand plays (never twice).
+		S.Shown = HS.StartStack;
+		S.StackPile->SetAmount(HS.StartStack);
 		S.BetPile->SetAmount(0);
+		S.LastAction.Reset();
 	}
 }
 
@@ -1878,26 +2129,265 @@ void ABackRoomTable::OpenHeroTurn()
 {
 	bHeroTurn = true;
 	HeroTurnAt = Time;
+	HeroTurnReal = 0.0f;
+	bTurnLineSaid = false;
 	const ss::LegalActions L = Hand->GetLegalActions();
-	const int64 Bb = BigBlindNow();
+	// The amount shown starts at the spot's default size (next_segment_spec 6.2 D: a 2.2x open, 3x in position and 4x out
+	// facing a raise, two thirds of the pot, 3x a bet), on the room's chips.
+	const FSeat* H = HeroSeat();
 	int64 Want = L.MinRaiseTo;
-	if (Hand->CurrentStreet == ss::Street::Preflop)
+	if (H && H->HandSeat >= 0)
 	{
-		Want = FMath::Max<int64>(L.MinRaiseTo, Hand->CurrentBet * 3);
-	}
-	else if (L.IsBet)
-	{
-		Want = FMath::Max<int64>(L.MinRaiseTo, (Hand->Pot() * 2 / 3 / Bb) * Bb);
-	}
-	else
-	{
-		Want = FMath::Max<int64>(L.MinRaiseTo, Hand->CurrentBet * 3);
+		const ss::sizing::Spot Sp = ss::sizing::SpotOf(*Hand, H->HandSeat);
+		Want = Sp.CanRaise() ? static_cast<int64>(ss::sizing::Default(Sp)) : L.MinRaiseTo;
 	}
 	HeroRaiseTo = FMath::Clamp<int64>(Want, L.MinRaiseTo, FMath::Max(L.MinRaiseTo, L.MaxRaiseTo));
 	for (ABackRoomPlayer* O : Opponents)
 	{
 		O->OnHeroThinking(true, L.CallAmount);
 	}
+	// The turn cue (the Turn cue setting): the dealer turns to the player, and with the sound on, a soft tap of the felt.
+	// No clock ever runs.
+	if (Tourney && TurnCue >= 1 && !bHeroAway && H)
+	{
+		if (Dealer && H->Player)
+		{
+			Dealer->OnOtherAction(H->Player->GetEyes(), 0.5f, true);
+		}
+		if (TurnCue >= 2 && Audio)
+		{
+			Audio->PlayAt(ss::SoundId::Turn, CardSpot(H->TableSeat, 0).GetLocation(), 0.4f);
+		}
+	}
+}
+
+void ABackRoomTable::TickTurnCue()
+{
+	if (!bHeroTurn || !Hand || Hand->bComplete)
+	{
+		HeroTurnReal = -1.0f;
+		return;
+	}
+	// Real seconds (Focus slows the room, not the wait), and none while the game is paused (the room's time stopped).
+	const AWorldSettings* Ws = GetWorld() ? GetWorld()->GetWorldSettings() : nullptr;
+	if (Ws && Ws->GetEffectiveTimeDilation() < 0.01f)
+	{
+		return;
+	}
+	HeroTurnReal = FMath::Max(0.0f, HeroTurnReal) + FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
+	const FSeat* H = HeroSeat();
+	if (Tourney && !bTurnLineSaid && TurnCue >= 1 && !bHeroAway && H && H->HandSeat >= 0 && HeroTurnReal >= TurnLineSeconds)
+	{
+		// "Seat four, it's on you." (Dee: "Kid. It's on you."): once a decision, never a clock.
+		bTurnLineSaid = true;
+		DealerCall("turn", {{"Seat", ss::talk::NumberWords(ss::live::SeatLabel(H->HandSeat))}});
+	}
+}
+
+float ABackRoomTable::HeroTurnAge() const
+{
+	return bHeroTurn ? HeroTurnReal : -1.0f;
+}
+
+void ABackRoomTable::DealerCall(const char* Call, std::map<std::string, std::string> Vars)
+{
+	ss::talk::Context C;
+	C.Vars = MoveTemp(Vars);
+	// The day's dealer: Dee on her nights (her own lines), the room's other dealers in the house voice.
+	if (Dealer && Dealer->Persona.Name == TEXT("Dee"))
+	{
+		C.Vars["Dealer"] = "Dee";
+	}
+	if (Tourney)
+	{
+		C.Vars["Venue"] = "embercrest";
+	}
+	const int32 Seat = Hand && Hand->ToAct >= 0 && Hand->ToAct < static_cast<int32>(Hand->Seats.size()) ? Hand->Seats[static_cast<size_t>(Hand->ToAct)].Seat : 0;
+	C.Salt = SaltOf(HandNumber, Call, Seat);
+	const ss::talk::Said Said = ss::talk::Dealer(Call, C);
+	if (!Said.Text.empty())
+	{
+		DealerSays(UTF8_TO_TCHAR(Said.Text.c_str()));
+	}
+}
+
+std::string ABackRoomTable::SpokenName(const ss::HandSeat& HS) const
+{
+	if (HS.Id == ss::HeroId)
+	{
+		return "You";
+	}
+	if (Tourney)
+	{
+		// The room's people by name, a stranger by the first name in their handle or their seat: never the engine's id.
+		const int32 Idx = Tourney->PlayerIndex(HS.Id);
+		const std::string Name = Idx >= 0 ? Tourney->Players[static_cast<size_t>(Idx)].Name : std::string();
+		return ss::talk::CaptionName(HS.Id, Name, HS.Seat);
+	}
+	// Dee's game: the regulars' own names.
+	return HS.Id;
+}
+
+void ABackRoomTable::MoveChipsByHand(FSeat& S, int64 Added)
+{
+	if (Added <= 0 || !S.StackPile || !S.BetPile)
+	{
+		return;
+	}
+	S.StackPile->SetAmount(FMath::Max<int64>(0, S.StackPile->GetAmount() - Added));
+	S.BetPile->SetAmount(S.BetPile->GetAmount() + Added);
+}
+
+// ------------------------------------------------------------------ what the HUD reads
+
+void ABackRoomTable::GetSeatViews(TArray<FBackRoomSeatView>& Out) const
+{
+	Out.Reset();
+	const bool bLive = Hand.IsValid();
+	const int32 ActingSeat = bLive && !Hand->bComplete && Hand->ToAct >= 0 && Hand->ToAct < static_cast<int32>(Hand->Seats.size()) ? Hand->Seats[static_cast<size_t>(Hand->ToAct)].Seat : -1;
+	const int32 ButtonSeat = bLive ? Hand->ButtonSeat : PendingHand ? PendingHand->ButtonSeat : LastButtonSeat;
+	for (const FSeat& S : Seats)
+	{
+		if (!S.Player && S.Id.IsEmpty())
+		{
+			continue; // an empty chair
+		}
+		FBackRoomSeatView& V = Out.AddDefaulted_GetRef();
+		V.TableSeat = S.TableSeat;
+		V.HandSeat = S.HandSeat;
+		V.Id = S.Id;
+		V.Player = S.Player;
+		V.bHero = S.bHero;
+		if (S.bHero)
+		{
+			V.Name = TEXT("You");
+		}
+		else if (Tourney)
+		{
+			const int32 Idx = Tourney->PlayerIndex(std::string(TCHAR_TO_UTF8(*S.Id)));
+			const std::string Name = Idx >= 0 ? Tourney->Players[static_cast<size_t>(Idx)].Name : std::string();
+			V.Name = UTF8_TO_TCHAR(ss::talk::CaptionName(TCHAR_TO_UTF8(*S.Id), Name, S.HandSeat >= 0 ? S.HandSeat : S.TableSeat).c_str());
+		}
+		else
+		{
+			V.Name = S.Player ? S.Player->Persona.Name : S.Id;
+		}
+		V.Stack = S.StackPile ? S.StackPile->GetAmount() : S.Stack;
+		V.Bet = S.BetPile ? S.BetPile->GetAmount() : 0;
+		const ss::HandSeat* HS = bLive && S.HandSeat >= 0 ? Hand->SeatByNumber(S.HandSeat) : nullptr;
+		const bool bPending = !bLive && PendingHand && S.HandSeat >= 0 && PendingHand->SeatByNumber(S.HandSeat);
+		V.EngineStack = HS || bPending ? S.Shown : S.Stack;
+		V.EngineNow = HS ? static_cast<int64>(HS->Stack) : S.Stack;
+		V.bInHand = HS != nullptr;
+		V.bFolded = HS && HS->Folded;
+		V.bAllIn = HS && HS->AllIn;
+		V.bActing = HS && HS->Seat == ActingSeat && (S.bHero ? bHeroTurn : bBotPending);
+		V.bButton = S.HandSeat >= 0 && S.HandSeat == ButtonSeat;
+		V.bAway = S.bHero && bHeroAway;
+		V.bHasCards = !V.bFolded && S.Hole.Num() > 0;
+		V.bChipsMoving = (S.StackPile && S.StackPile->IsMoving()) || (S.BetPile && S.BetPile->IsMoving()) || (LandingsDue > 0 && HS);
+		V.bCounted = S.CountedAt >= 0 && S.CountedAt == V.Stack;
+		V.LastAction = S.LastAction;
+		V.LastTo = S.LastTo;
+		V.ActedAt = S.ActedAt;
+		V.StackAt = S.StackPile ? S.StackPile->GetActorLocation() : StackSpot(S.TableSeat);
+		V.CardsAt = CardSpot(S.TableSeat, 0).GetLocation();
+		V.StackPile = S.StackPile;
+		V.BetPile = S.BetPile;
+	}
+}
+
+void ABackRoomTable::GetHeroCards(TArray<const ABackRoomCard*>& Out) const
+{
+	Out.Reset();
+	if (const FSeat* H = HeroSeat())
+	{
+		for (const TObjectPtr<ABackRoomCard>& C : H->Hole)
+		{
+			if (C)
+			{
+				Out.Add(C);
+			}
+		}
+	}
+}
+
+void ABackRoomTable::GetBoardCards(TArray<const ABackRoomCard*>& Out) const
+{
+	for (const TObjectPtr<ABackRoomCard>& C : Board)
+	{
+		if (C)
+		{
+			Out.Add(C);
+		}
+	}
+}
+
+TArray<FBackRoomPileFix> ABackRoomTable::TakePileFixes()
+{
+	TArray<FBackRoomPileFix> Out = MoveTemp(PileFixes);
+	PileFixes.Reset();
+	return Out;
+}
+
+bool ABackRoomTable::TakeRecall(ss::recall::Record& Out)
+{
+	if (!RecallReady.IsValid())
+	{
+		return false;
+	}
+	Out = MoveTemp(*RecallReady);
+	RecallReady.Reset();
+	return true;
+}
+
+bool ABackRoomTable::GetHeroSizing(ss::sizing::Spot& OutSpot, std::vector<ss::sizing::Preset>& OutPresets, int32& OutPreset) const
+{
+	OutPresets.clear();
+	OutPreset = -1;
+	const FSeat* H = HeroSeat();
+	if (!bHeroTurn || !Hand || Hand->bComplete || !H || H->HandSeat < 0)
+	{
+		return false;
+	}
+	OutSpot = ss::sizing::SpotOf(*Hand, H->HandSeat);
+	OutPresets = ss::sizing::Presets(OutSpot);
+	for (int32 I = 0; I < static_cast<int32>(OutPresets.size()); ++I)
+	{
+		if (OutPresets[static_cast<size_t>(I)].To == HeroRaiseTo)
+		{
+			OutPreset = I;
+		}
+	}
+	return true;
+}
+
+void ABackRoomTable::HeroSnap(int32 Dir)
+{
+	ss::sizing::Spot Sp;
+	std::vector<ss::sizing::Preset> Ps;
+	int32 Now = -1;
+	if (!GetHeroSizing(Sp, Ps, Now) || !Sp.CanRaise() || Ps.empty())
+	{
+		return;
+	}
+	const int32 To = ss::sizing::Snap(Sp, HeroRaiseTo, FMath::Clamp(Dir, -1, 1));
+	if (To >= 0 && To < static_cast<int32>(Ps.size()))
+	{
+		HeroRaiseTo = FMath::Clamp<int64>(Ps[static_cast<size_t>(To)].To, Sp.MinTo, FMath::Max(Sp.MinTo, Sp.MaxTo));
+	}
+}
+
+void ABackRoomTable::HeroPreset(int32 Index)
+{
+	ss::sizing::Spot Sp;
+	std::vector<ss::sizing::Preset> Ps;
+	int32 Now = -1;
+	if (!GetHeroSizing(Sp, Ps, Now) || !Sp.CanRaise() || Index < 0 || Index >= static_cast<int32>(Ps.size()))
+	{
+		return;
+	}
+	HeroRaiseTo = FMath::Clamp<int64>(Ps[static_cast<size_t>(Index)].To, Sp.MinTo, FMath::Max(Sp.MinTo, Sp.MaxTo));
 }
 
 FBackRoomPrompt ABackRoomTable::GetPrompt() const
@@ -2009,9 +2499,13 @@ void ABackRoomTable::HeroAdjustRaise(int32 Steps)
 		return;
 	}
 	const ss::LegalActions L = Hand->GetLegalActions();
-	const int64 Bb = BigBlindNow();
-	const int64 Step = HeroRaiseTo < 20 * Bb ? Bb : 5 * Bb;
-	HeroRaiseTo = FMath::Clamp<int64>(HeroRaiseTo + Steps * Step, L.MinRaiseTo, FMath::Max(L.MinRaiseTo, L.MaxRaiseTo));
+	ss::sizing::Spot Sp;
+	std::vector<ss::sizing::Preset> Ps;
+	int32 Preset = -1;
+	// The fine steps as the card room always had them (a big blind under 20 BB, five above), on the room's chips.
+	const int64 To = GetHeroSizing(Sp, Ps, Preset) ? static_cast<int64>(ss::sizing::Step(Sp, HeroRaiseTo, Steps))
+												   : HeroRaiseTo + Steps * (HeroRaiseTo < 20 * BigBlindNow() ? BigBlindNow() : 5 * BigBlindNow());
+	HeroRaiseTo = FMath::Clamp<int64>(To, L.MinRaiseTo, FMath::Max(L.MinRaiseTo, L.MaxRaiseTo));
 }
 
 void ABackRoomTable::HeroPeeked()

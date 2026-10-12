@@ -1,6 +1,7 @@
 #include "ShortStackCharacter.h"
 
 #include "BackRoomAnim.h"
+#include "BackRoomPlayer.h"
 #include "BlenderProps.h"
 #include "Camera/CameraComponent.h"
 #include "CastLooks.h"
@@ -27,6 +28,9 @@
 #include "GroomComponent.h"
 #include "HAL/IConsoleManager.h"
 #include "HeroGrooms.h"
+#include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "SponsorWear.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MeshDescription.h"
 #include "Misc/PackageName.h"
@@ -89,6 +93,8 @@ struct FStreetOutfit
 	FLinearColor ShoeLining = FLinearColor(0.01f, 0.01f, 0.012f);
 	FLinearColor ShoeLaces = FLinearColor(0.85f, 0.83f, 0.78f);
 	FLinearColor ShoeOutsole = FLinearColor(0.04f, 0.03f, 0.025f);
+	/** The sponsors' patches the closet shows (brand ids: chest, sleeve, cap; spec 3.10), the player's only. */
+	FString Patches[3];
 };
 
 namespace ShortStackCharacterDetail
@@ -695,6 +701,15 @@ FStreetOutfit HeroOutfit(const ss::hero::Look& L, int32 Age, const ss::wardrobe:
 		// charcoal or black); black canvas under a light jacket.
 		const bool bLightJacket = Color == 4 || Color == 7;
 		DyeSneakers(O, SrgbOf(bLightJacket ? 0x1d1e22 : 0xd6d0c0), Color == 0 || Color == 5 ? SrgbOf(0x8f1d2c) : SrgbOf(ss::hero::OutfitTone(Color)));
+	}
+	if (Closet)
+	{
+		// The sponsors' patches sewn on, where what's worn shows them (whether their deals still run is the wearer's check).
+		const SponsorWear::FShown Sewn = SponsorWear::FromCloset(*Closet, nullptr, 0.0);
+		for (int32 I = 0; I < SponsorWear::Spots; ++I)
+		{
+			O.Patches[I] = Sewn.Brand[I];
+		}
 	}
 	return O;
 }
@@ -1822,6 +1837,8 @@ void AShortStackCharacter::DressOutfit(const FStreetOutfit& Outfit)
 	DyeDefaultOutfit(DefaultOutfit.Get(), Outfit);
 	BuildShoes(Outfit);
 	PutOnHeadwear(Outfit);
+	// After the garments (the patch lies on the outermost one drawn) and the hat (the cap's patch rides it).
+	PutOnPatches(Outfit);
 }
 
 FStreetOutfit AShortStackCharacter::CurrentOutfit() const
@@ -2222,6 +2239,10 @@ FCastWear AShortStackCharacter::HeroWear(const ss::hero::Look& Look, int32 Age, 
 	W.FrameColor = O.FrameColor;
 	W.bWorkShoes = !O.bDyeShoes;
 	W.ShoeColor = O.ShoeUpper;
+	for (int32 I = 0; I < SponsorWear::Spots; ++I)
+	{
+		W.Patches[I] = O.Patches[I];
+	}
 	return W;
 }
 
@@ -2252,12 +2273,12 @@ FString AShortStackCharacter::DescribeLook() const
 			Closet.Add(FString::Printf(TEXT("%s=%s"), Slots[S], ClosetNow.Worn[S].empty() ? TEXT("-") : UTF8_TO_TCHAR(ClosetNow.Worn[S].c_str())));
 		}
 	}
-	return FString::Printf(TEXT("%s as %s%s: hair %d color %d, facial %d, brows %d, hat %d | jacket %s (%s), trousers %s (%s), tee %s%s | hat %s, eyes %s, %s | %s | grooms: %s"),
+	return FString::Printf(TEXT("%s as %s%s: hair %d color %d, facial %d, brows %d, hat %d | jacket %s (%s), trousers %s (%s), tee %s%s | hat %s, eyes %s, %s | %s | grooms: %s | patches: %s"),
 		*GetName(), *CastFaceName.ToString(), bPreviewing ? TEXT(" (previewing)") : TEXT(""), LookNow.Hair, LookNow.HairColor, LookNow.FacialHair, LookNow.Brows,
 		LookNow.Hat, *CutName(O.Outer), OuterGarment ? *GetNameSafe(OuterGarment->GetSkeletalMeshAsset()) : TEXT("no mesh"), *CutName(O.Bottom),
 		BottomGarment ? *GetNameSafe(BottomGarment->GetSkeletalMeshAsset()) : TEXT("the shorts"), O.Print ? O.Print : TEXT("plain"), O.Graphic ? *FString::Printf(TEXT(" + %s"), O.Graphic) : TEXT(""),
 		*CutName(O.Hat), *CutName(O.Eyes), O.bBarefoot ? TEXT("barefoot") : (O.ShoePair ? O.ShoePair : TEXT("shoes made to fit")),
-		bHasCloset ? *FString::Join(Closet, TEXT(" ")) : TEXT("no closet (the creator's)"), *FString::Join(Grooms, TEXT(", ")));
+		bHasCloset ? *FString::Join(Closet, TEXT(" ")) : TEXT("no closet (the creator's)"), *FString::Join(Grooms, TEXT(", ")), *DescribePatches());
 }
 
 void AShortStackCharacter::BecomeNpc()
@@ -2627,7 +2648,9 @@ void AShortStackCharacter::PutOnHeadwear(const FStreetOutfit& Outfit)
 
 void AShortStackCharacter::RefitWear()
 {
-	PutOnHeadwear(CurrentOutfit());
+	const FStreetOutfit Outfit = CurrentOutfit();
+	PutOnHeadwear(Outfit);
+	PutOnPatches(Outfit);
 	RefreshVisibility();
 	if (bTierApplied)
 	{
@@ -2636,9 +2659,176 @@ void AShortStackCharacter::RefitWear()
 	}
 }
 
+// ------------------------------------------------------------------ the sponsors' patches (next_segment_spec 3.10)
+
+void AShortStackCharacter::WearOnChest(UStaticMeshComponent* Piece, const FTransform& InBody)
+{
+	// Carried by spine_05 (the upper chest), so it rides the chest through the walk, the run and the turn.
+	SponsorWear::Carry(Piece, GetMesh(), TEXT("spine_05"), InBody);
+}
+
+void AShortStackCharacter::WearOnSleeve(UStaticMeshComponent* Piece, const FTransform& InBody)
+{
+	// Carried by the upper arm, so it swings with it.
+	SponsorWear::Carry(Piece, GetMesh(), TEXT("upperarm_l"), InBody);
+}
+
+void AShortStackCharacter::PutOnPatches(const FStreetOutfit& Outfit)
+{
+	using namespace SponsorWear;
+	FShown Shown;
+	if (!bNpc)
+	{
+		for (int32 I = 0; I < Spots; ++I)
+		{
+			Shown.Brand[I] = Outfit.Patches[I];
+		}
+		// A deal that's over takes its patch with it at once (core unpicks it from the closet as the deal ends; this covers a
+		// closet copy given before that). A preview (the closet's PATCHES tab) shows what it shows.
+		if (const ss::Session* S = !bPreviewing ? CastLooks::BoundSession(this) : nullptr)
+		{
+			for (int32 I = 0; I < Spots; ++I)
+			{
+				if (!Shown.Brand[I].IsEmpty() && !ss::sponsor::Running(S->Life.Sponsors, std::string(TCHAR_TO_UTF8(*Shown.Brand[I])), S->WorldMinutes()))
+				{
+					Shown.Brand[I].Reset();
+				}
+			}
+		}
+		ApplyTest(Shown);
+	}
+	PatchTestSeen = TestRevision();
+	for (int32 I = 0; I < Spots; ++I)
+	{
+		PatchWanted[I] = Shown.Brand[I];
+	}
+	// What the chest and the sleeve lie on: the jacket drawn (the hoodie on its own mesh; every other jacket on the bomber's,
+	// standing off it as its own cloth does), else the tee.
+	ELayer Layer = ELayer::Tee;
+	if (OuterGarment && OuterGarment->GetSkeletalMeshAsset() && OuterGarment->IsVisible())
+	{
+		const bool bHoodieMesh = OuterGarment->GetSkeletalMeshAsset()->GetName().Contains(TEXT("Hoodie"));
+		Layer = bHoodieMesh ? ELayer::Hoodie : LayerOf(Outfit.Outer);
+		if (Layer == ELayer::Tee || (Layer == ELayer::Hoodie && !bHoodieMesh))
+		{
+			Layer = ELayer::Jacket;
+		}
+	}
+	PatchLayer = static_cast<uint8>(Layer);
+	const USkeletalMesh* Body = GetMesh()->GetSkeletalMeshAsset();
+	const bool bWoman = bNpc ? CastLooks::IsWomansFace(CastFaceName) : LookNow.Body == 1;
+	TArray<FString> Notes;
+	for (const int32 Spot : {Chest, Sleeve})
+	{
+		FFit Fit;
+		const bool bFitted = !Shown.Brand[Spot].IsEmpty() && (Spot == Chest ? FitChest(Body, CastFaceName, bWoman, Layer, Fit) : FitSleeve(Body, CastFaceName, bWoman, Layer, Fit));
+		if (!bFitted || !Dress(this, PatchMeshes[Spot], Spot, Shown.Brand[Spot]))
+		{
+			if (PatchMeshes[Spot])
+			{
+				PatchMeshes[Spot]->SetVisibility(false);
+			}
+			Shown.Brand[Spot].Reset();
+			continue;
+		}
+		if (Spot == Chest)
+		{
+			WearOnChest(PatchMeshes[Spot], Fit.InComponent);
+		}
+		else
+		{
+			WearOnSleeve(PatchMeshes[Spot], Fit.InComponent);
+		}
+		Notes.Add(Note(Spot, Shown.Brand[Spot], Layer, CastFaceName, Fit));
+	}
+	// The cap's, on the hat's front panel (a ball cap, a backwards one, a beanie: the closet's PatchFits), at the size it was
+	// made: the hat's fitted to the head, the patch isn't.
+	{
+		const EHat Hat = HatMesh && HatMesh->IsVisible() ? HatOf(HatMesh->GetStaticMesh()) : EHat::None;
+		FTransform InHat;
+		if (Hat == EHat::None || Shown.Brand[Cap].IsEmpty() || !FitCap(Hat, InHat) || !Dress(this, PatchMeshes[Cap], Cap, Shown.Brand[Cap]))
+		{
+			if (PatchMeshes[Cap])
+			{
+				PatchMeshes[Cap]->SetVisibility(false);
+			}
+			Shown.Brand[Cap].Reset();
+		}
+		else
+		{
+			UStaticMeshComponent* Piece = PatchMeshes[Cap];
+			if (Piece->GetAttachParent() != HatMesh)
+			{
+				Piece->AttachToComponent(HatMesh, FAttachmentTransformRules::KeepRelativeTransform);
+			}
+			InHat.SetScale3D(FVector(1.0 / FMath::Max(HatMesh->GetRelativeScale3D().X, 0.01)));
+			Piece->SetRelativeTransform(InHat);
+			Notes.Add(Note(Cap, Shown.Brand[Cap], Layer, CastFaceName, FFit()));
+		}
+	}
+	bool bChanged = false;
+	for (int32 I = 0; I < Spots; ++I)
+	{
+		bChanged |= PatchBrands[I] != Shown.Brand[I];
+		PatchBrands[I] = Shown.Brand[I];
+	}
+	PatchFitNote = FString::Join(Notes, TEXT("; "));
+	UE_CLOG(bChanged || ShouldLog(), LogStreetHero, Log, TEXT("%s's patches: %s"), *GetName(), PatchFitNote.IsEmpty() ? TEXT("none") : *PatchFitNote);
+}
+
+void AShortStackCharacter::CheckPatches(float Dt)
+{
+	if (bNpc || !bHasLook)
+	{
+		return;
+	}
+	PatchCheckIn -= Dt;
+	if (PatchCheckIn > 0.0f)
+	{
+		return;
+	}
+	PatchCheckIn = 0.5f;
+	bool bAgain = PatchTestSeen != SponsorWear::TestRevision();
+	const ss::Session* S = CastLooks::BoundSession(this);
+	if (S && bHasCloset && !bPreviewing)
+	{
+		// The patches as the session has them now: sewn on or unpicked since the look was last given (ss.Sponsor.Patch, a
+		// deal's end), and a deal that's over (its patch comes off with it).
+		for (int32 I = 0; I < SponsorWear::Spots; ++I)
+		{
+			if (ClosetNow.Patches[I] != S->Life.Closet.Patches[I])
+			{
+				ClosetNow.Patches[I] = S->Life.Closet.Patches[I];
+				bAgain = true;
+			}
+		}
+		SponsorWear::FShown Want = SponsorWear::FromCloset(ClosetNow, &S->Life.Sponsors, S->WorldMinutes());
+		SponsorWear::ApplyTest(Want);
+		for (int32 I = 0; I < SponsorWear::Spots; ++I)
+		{
+			bAgain |= Want.Brand[I] != PatchWanted[I];
+		}
+	}
+	if (bAgain)
+	{
+		PutOnPatches(CurrentOutfit());
+		RefreshVisibility();
+		if (bTierApplied)
+		{
+			ApplyDetailTier();
+		}
+	}
+}
+
+FString AShortStackCharacter::DescribePatches() const
+{
+	return PatchFitNote.IsEmpty() ? FString(TEXT("no patches")) : PatchFitNote;
+}
+
 namespace ShortStackCharacterDetail
 {
-FAutoConsoleCommandWithWorld CmdWearRefit(TEXT("ss.Wear.Refit"), TEXT("Puts the street characters' hats and glasses on again (after setting ss.Wear.*)."),
+FAutoConsoleCommandWithWorld CmdWearRefit(TEXT("ss.Wear.Refit"),
+	TEXT("Puts the hats, the glasses and the sponsors' patches on again (after setting ss.Wear.*): the street's people and everyone at the table."),
 	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World) {
 		if (!World)
 		{
@@ -2647,6 +2837,29 @@ FAutoConsoleCommandWithWorld CmdWearRefit(TEXT("ss.Wear.Refit"), TEXT("Puts the 
 		for (TActorIterator<AShortStackCharacter> It(World); It; ++It)
 		{
 			It->RefitWear();
+		}
+		for (TActorIterator<ABackRoomPlayer> It(World); It; ++It)
+		{
+			It->Redress();
+		}
+	}));
+FAutoConsoleCommandWithWorld CmdWearDescribe(TEXT("ss.Wear.Describe"), TEXT("The sponsors' patches worn on this map: who, which brand, where, on what, and how it was fitted."),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World) {
+		if (!World)
+		{
+			return;
+		}
+		for (TActorIterator<AShortStackCharacter> It(World); It; ++It)
+		{
+			UE_LOG(LogStreetHero, Display, TEXT("%s (%s): %s"), *It->GetName(), *It->GetCastFace().ToString(), *It->DescribePatches());
+		}
+		for (TActorIterator<ABackRoomPlayer> It(World); It; ++It)
+		{
+			const FString Line = It->DescribePatches();
+			if (!Line.IsEmpty())
+			{
+				UE_LOG(LogStreetHero, Display, TEXT("%s (%s): %s"), *It->GetName(), *It->Persona.Name, *Line);
+			}
 		}
 	}));
 } // namespace ShortStackCharacterDetail
@@ -2845,6 +3058,14 @@ void AShortStackCharacter::RefreshVisibility()
 		if (S)
 		{
 			S->SetOwnerNoSee(bBodyHidden);
+		}
+	}
+	// The patches: the chest's and the sleeve's with the body, the cap's with the head.
+	for (int32 I = 0; I < SponsorWear::Spots; ++I)
+	{
+		if (PatchMeshes[I])
+		{
+			PatchMeshes[I]->SetOwnerNoSee(I == SponsorWear::Cap ? bHideHead : bBodyHidden);
 		}
 	}
 }
@@ -3202,6 +3423,7 @@ void AShortStackCharacter::Tick(float DeltaSeconds)
 	// Out of breath for a while after a run.
 	Winded = FMath::FInterpTo(Winded, Run, Dt, Run > Winded ? 0.6f : 0.2f);
 	UpdateLook(Dt);
+	CheckPatches(Dt);
 
 	if (UStreetBodyAnim* Anim = Cast<UStreetBodyAnim>(GetMesh()->GetAnimInstance()))
 	{

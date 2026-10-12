@@ -68,7 +68,7 @@
 25	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.1	
 25	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.1	
 25	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.1	Seat open on nine!	p0	d3.1	
-26	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Well played. Now breathe.	p0	d0.4	to-you 
+26	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Good. Now protect it.	p0	d0.4	to-you 
 26	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
 26	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
 26	CALL	table	t6	s-1	Dealer	dealer.table.seatopen.1	Seat open on six!	p0	d2.7	
@@ -234,13 +234,13 @@
 65	CALL	table	t13	s-1	Dealer	dealer.table.seatopen.1	Seat open on thirteen!	p0	d1.6	
 65	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.8	
 65	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
-66	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Well played. Now breathe.	p0	d0.4	to-you 
+66	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Nicely played. Don't celebrate yet.	p0	d0.4	to-you 
 66	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
 66	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.0	Seat open, nine!	p0	d1.5	
 66	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
 66	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.4	
-66	LINE	here	t12	s5	Seat 6	field.small.room.open.0	They turn the heat up in here, or is it me?	p0	d3.6	
-66	LINE	here	t12	s0	Priya	field.small.room.reply.5	Keeps you awake, at least.	p0	d8.1	
+66	LINE	here	t12	s5	Seat 6	field.small.room.open.0	They turn the heat up in here, or is it me?	p0	d4.2	
+66	LINE	here	t12	s0	Priya	field.small.room.reply.5	Keeps you awake, at least.	p0	d8.8	
 67	LINE	here	t12	s4	Seat 5	field.small.room.open.2	This chair's been here since the eighties.	p0	d0.6	
 67	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
 67	CALL	table	t10	s-1	Dealer	dealer.table.seatopen.0	Seat open, ten!	p0	d1.6	
@@ -357,7 +357,7 @@
 96	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
 96	PA	pa	t0	s-1	Floor	pa.break.next.ante.0	When we come back, the blinds will be 2,000 and 4,000 with a 4,000 big blind ante.	p3	d8.5	
 96	CALL	here	t4	s-1	Dealer	dealer.break.0	Break, folks. Stretch your legs.	p0	d8.5	
-96	PHONE	rail	t0	s-1	Mrs. Park	stake.break	How many chips? Exactly, please.	p0	d12.0	to-you 
+96	PHONE	rail	t0	s-1	Mrs. Park	stake.break	Your count, please. To the chip.	p0	d12.0	to-you 
 96	PA	pa	t0	s-1	Floor	pa.colorup.0	We're coloring up the black hundreds on this break.	p3	d15.4	
 96	PA	pa	t0	s-1	Floor	pa.colorup.0	Your dealer will make the change at your seat.	p3	d19.6	
 96	PA	pa	t0	s-1	Floor	pa.five.minutes.0	Five minutes, players. Five minutes left on the break.	p1	d23.9	
@@ -560,7 +560,7 @@
 192	PA	pa	t0	s-1	Floor	pa.break.next.ante.0	When we come back, the blinds will be 40,000 and 80,000 with a 80,000 big blind ante.	p3	d8.5	
 192	CALL	here	t3	s-1	Dealer	dealer.break.0	Break, folks. Stretch your legs.	p0	d8.5	
 192	LINE	here	t3	s4	Maria G.	field.break.5	Anybody want anything from the bar?	p0	d11.6	
-192	PHONE	rail	t0	s-1	Mrs. Park	stake.break	How many chips? Exactly, please.	p0	d15.4	to-you 
+192	PHONE	rail	t0	s-1	Mrs. Park	stake.break	Your count, please. To the chip.	p0	d15.4	to-you 
 192	PA	pa	t0	s-1	Floor	pa.colorup.0	We're coloring up the yellow thousands on this break.	p3	d15.6	
 192	PA	pa	t0	s-1	Floor	pa.colorup.0	Your dealer will make the change at your seat.	p3	d20.0	
 192	PA	pa	t0	s-1	Floor	pa.five.minutes.0	Five minutes, players. Five minutes left on the break.	p1	d24.3	

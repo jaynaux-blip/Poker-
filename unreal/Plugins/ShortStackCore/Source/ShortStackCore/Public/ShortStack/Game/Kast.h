@@ -553,6 +553,11 @@ public:
 	SHORTSTACKCORE_API Summary Stop(Channel& Ch, const Inputs& In, const std::string& Raid = std::string());
 	SHORTSTACKCORE_API void Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal);
 	SHORTSTACKCORE_API void OnMoment(Channel& Ch, const Inputs& In, Moment M, const std::string& Detail = std::string(), double Size = 1.0);
+	/**
+	 * Chat reacts once to a badge the player earned live (next_segment_spec §5.6; Line is badge::ChatReaction's): one
+	 * chatter watching says it, and the room warms a little. Nothing while offline or with nobody watching.
+	 */
+	SHORTSTACKCORE_API void Celebrate(Channel& Ch, const Inputs& In, const std::string& Line);
 	/** An ad break (60, 90 or 180 seconds); false when not affiliate or too soon. */
 	SHORTSTACKCORE_API bool RunAd(Channel& Ch, const Inputs& In, int Seconds);
 	/** A sponsor read; returns the cents earned (0 when not due). */

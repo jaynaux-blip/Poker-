@@ -29,6 +29,8 @@
 #include "BackRoomPlayer.h"
 #include "BackRoomStage.h"
 #include "BackRoomTable.h"
+#include "BackRoomTableHost.h"
+#include "CardRoomSound.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -42,7 +44,9 @@
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/TableTalk.h"
 #include "ShortStack/Tournament.h"
 
 #include <algorithm>
@@ -285,6 +289,9 @@ void ABackRoomGameMode::SeatLive()
 		UE_LOG(LogEmbercrest, Log, TEXT("%s: %d hands played without you, level %d, %d left"), bReturning ? TEXT("Back after leaving") : TEXT("Late registration"), Missed,
 			Tourney->LevelIndex + 1, Tourney->Remaining);
 	}
+	// The room's one voice (next_segment_spec 4.11): the director, with the field as it stands now (a night come back to
+	// resumes from its checkpoint's liveroom), and the stereo room the table will stream in place of the old bed.
+	BuildDirector();
 	// The hand that was dealt when the game closed is dead: the player's cards go in the muck (checked through when it's
 	// free), the room plays it out, and the night goes on from the next hand. Nobody sees the same deck twice.
 	std::vector<ss::TEvent> DeadHand;
@@ -294,6 +301,10 @@ void ABackRoomGameMode::SeatLive()
 		DeadHand = Tourney->SimulateTick();
 		Tourney->HeroSitsOut = false;
 		Minutes = FMath::Max(Minutes, LiveDayStart + Tourney->ClockMinutes());
+		if (RoomHost.IsValid() && RoomDirector.IsValid())
+		{
+			RoomFeed::Simulated(*RoomHost, *RoomDirector, RoomSound.Get(), *Tourney, DeadHand, Minutes);
+		}
 	}
 	if (bResumed)
 	{
@@ -432,9 +443,15 @@ void ABackRoomGameMode::LiveCheckpoint(bool bDealt)
 	{
 		return;
 	}
+	// The room's own memory (liveroom: what the director has said) goes with the tournament's and the host's, in one
+	// assignment, so a save never holds one without the others (next_segment_spec 4.11).
 	E->Checkpoint = LastCheckpoint;
 	E->CheckpointAt = LastCheckpointAt;
 	E->CheckpointHost = std::string(TCHAR_TO_UTF8(*LiveHostText(bDealt)));
+	if (RoomDirector.IsValid())
+	{
+		E->Room = RoomDirector->Write();
+	}
 	D.ClockMinutes = LastCheckpointAt - ss::net::MinutesPerDay * ss::net::NightOneDay;
 	D.Life.Energy = FMath::Clamp(static_cast<double>(Energy), 0.0, 100.0);
 	LiveSaver->Submit(D);
@@ -485,6 +502,9 @@ FString ABackRoomGameMode::LiveHostText(bool bDealt) const
 			}
 		}
 	}
+	// The last hands the player played (ss::recall: the table card's HANDS page when the night comes back; ue-table's
+	// helpers, BackRoomTableHost.h).
+	Out += TableRecall::HostLines(RecentHands);
 	return Out;
 }
 
@@ -496,6 +516,10 @@ void ABackRoomGameMode::ReadLiveHost(const FString& Text)
 	{
 		TArray<FString> F;
 		Line.ParseIntoArray(F, TEXT("\t"), false);
+		if (TableRecall::ReadHostLine(F, RecentHands))
+		{
+			continue;
+		}
 		if (F.Num() == 2 && F[0] == TEXT("hands"))
 		{
 			HandsPlayed = FCString::Atoi(*F[1]);
@@ -537,24 +561,49 @@ void ABackRoomGameMode::LiveMove()
 {
 	ABackRoomPawn* Pawn = Cast<ABackRoomPawn>(UGameplayStatics::GetPlayerPawn(this, 0));
 	const ss::TPlayer& H = Tourney->Hero();
+	// The table the player was moved from, by its engine id (Bug 2, next_segment_spec 6.8): the room's host keeps the last
+	// one it saw, and the engine's Moved event names it; the room's anchor is a slot (the final table's is the stage's),
+	// and by now it may already be the new table's.
+	int32 FromTable = -1;
+	if (RoomHost.IsValid())
+	{
+		// The Moved event's own From when it came this engine tick (LiveEvent, or the test move), else the table the room
+		// last saw the player at (the table's note can come before the event's frame).
+		const int32 Moved = RoomHost->MovedTick == Tourney->Tick ? RoomHost->MovedFrom : -1;
+		FromTable = Moved > 0 && Moved != H.TableId ? Moved : (RoomHost->HeroTable > 0 && RoomHost->HeroTable != H.TableId ? RoomHost->HeroTable : -1);
+		RoomHost->MovedFrom = -1;
+	}
 	if (bHeroUp && Pawn && Pawn->IsFreeWalking() && Stage)
 	{
-		// Away from the table when it broke: the floor carries the chips over, the player finds the new seat.
+		// Away from the table when it broke: the floor carries the chips over, the player finds the new seat. The floor says
+		// so (the director's "moved" call, from the engine's own Moved event; a host without one says it here).
 		const FVector Before = Stage->RoomToWorld(FVector::ZeroVector);
 		Stage->SetRoomAnchor(SlotForTable(H.TableId));
 		Pawn->ShiftWalk(Stage->RoomToWorld(FVector::ZeroVector) - Before);
 		Table->PrepareNext();
 		PlaceExtras();
 		Table->Resume(1.0f);
-		Floor(FString::Printf(TEXT("Player from table %d, you've been moved: table %d, seat %d. Your chips are there."), Stage->GetRoomAnchor() + 1, H.TableId, ss::live::SeatLabel(H.Seat)), false);
+		if (!RoomDirector.IsValid())
+		{
+			Floor(FromTable > 0 ? FString::Printf(TEXT("Player from table %d, you've been moved: table %d, seat %d. Your chips are there."), FromTable, H.TableId, ss::live::SeatLabel(H.Seat))
+								: FString::Printf(TEXT("Player, you've been moved: table %d, seat %d. Your chips are there."), H.TableId, ss::live::SeatLabel(H.Seat)),
+				false);
+		}
 		RaiseBanner(FString::Printf(TEXT("TABLE %d   SEAT %d"), H.TableId, ss::live::SeatLabel(H.Seat)));
+		UE_LOG(LogEmbercrest, Log, TEXT("Moved while up: from table %d to table %d, seat %d"), FromTable, H.TableId, ss::live::SeatLabel(H.Seat));
 		return;
 	}
 	Phase = EBackRoomPhase::Moving;
 	MoveT = 0.0f;
-	const bool bDee = ((LiveDay % 7) + 7) % 7 == 6;
-	Table->DealerLine(FString::Printf(TEXT("You're moving%s. Table %d, seat %d. Grab your chips."), bDee ? TEXT(", kid") : TEXT(""), H.TableId, ss::live::SeatLabel(H.Seat)));
+	// (Seated, the player's dealer tells them: the director's "move" call at the old table, Dee's "kid" on a Sunday; at the
+	// final table the floor's call carries everyone. A host without a director says it as it always did.)
+	if (!RoomDirector.IsValid())
+	{
+		const bool bDee = ((LiveDay % 7) + 7) % 7 == 6;
+		Table->DealerLine(FString::Printf(TEXT("You're moving%s. Table %d, seat %d. Grab your chips."), bDee ? TEXT(", kid") : TEXT(""), H.TableId, ss::live::SeatLabel(H.Seat)));
+	}
 	RaiseBanner(FString::Printf(TEXT("TABLE %d   SEAT %d"), H.TableId, ss::live::SeatLabel(H.Seat)));
+	UE_LOG(LogEmbercrest, Log, TEXT("Moved: from table %d to table %d, seat %d"), FromTable, H.TableId, ss::live::SeatLabel(H.Seat));
 	if (!Pawn)
 	{
 		Table->PrepareNext();
@@ -632,9 +681,20 @@ void ABackRoomGameMode::LiveRequestLeave()
 	bLeaveWhenFree = false;
 	QuitAskedAt = -1.0f;
 	Tourney->HeroSitsOut = true;
+	// (The director keeps up with the blind-off; only its last round is news.)
+	const bool bHeard = RoomHost.IsValid() && RoomDirector.IsValid();
+	if (bHeard)
+	{
+		RoomFeed::BeginCatchUp(*RoomHost);
+	}
 	for (int32 Guard = 0; Guard < 4000 && !Tourney->Hero().Busted && !Tourney->bFinished; ++Guard)
 	{
-		for (const ss::TEvent& E : Tourney->SimulateTick())
+		const std::vector<ss::TEvent> Round = Tourney->SimulateTick();
+		if (bHeard)
+		{
+			RoomFeed::Simulated(*RoomHost, *RoomDirector, RoomSound.Get(), *Tourney, Round, LiveDayStart + Tourney->ClockMinutes());
+		}
+		for (const ss::TEvent& E : Round)
 		{
 			if (E.Type == ss::TEventType::Bust && E.IsHero)
 			{
@@ -642,6 +702,10 @@ void ABackRoomGameMode::LiveRequestLeave()
 				HeroPrizeCents = E.PrizeCents;
 			}
 		}
+	}
+	if (bHeard)
+	{
+		RoomFeed::EndCatchUp(*RoomHost);
 	}
 	if (!Tourney->Hero().Busted)
 	{
@@ -793,9 +857,21 @@ void ABackRoomGameMode::LiveSitDown()
 		{
 			GM->bHeroUp = false;
 			GM->Table->bHeroAway = false;
-			if (!GM->bOnBreak && FMath::FRand() < 0.6f)
+			// The dealer says it most times (a hash of the hand, not a dice roll: next_segment_spec N5), in the room's copy.
+			const uint32 Gate = FCrc::StrCrc32(*FString::Printf(TEXT("back:%s:%d"), *GM->LiveEntryId, GM->Table->GetHandNumber()));
+			if (!GM->bOnBreak && Gate % 10u < 6u)
 			{
-				GM->Table->DealerLine(TEXT("Welcome back."));
+				ss::talk::Context C;
+				C.Salt = Gate;
+				if (((GM->LiveDay % 7) + 7) % 7 == 6)
+				{
+					C.Vars["Dealer"] = "Dee";
+				}
+				const ss::talk::Said Back = ss::talk::Dealer("back", C);
+				if (!Back.Text.empty())
+				{
+					GM->Table->DealerLine(Str(Back.Text));
+				}
 			}
 		}
 	});
@@ -994,10 +1070,18 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 	APlayerController* PC = GetWorld()->GetFirstPlayerController();
 	TWeakObjectPtr<ABackRoomGameMode> Self = this;
 
-	for (const ss::TEvent& E : Table->TakeEvents())
+	const TArray<ss::TEvent> TableNews = Table->TakeEvents();
+	for (const ss::TEvent& E : TableNews)
 	{
 		LiveEvent(E);
 	}
+	// The room hears the same news (with the hand that finished and every table's round), says what it says, and sounds
+	// like itself from where the player is (BackRoomLiveRoom.cpp).
+	if (RoomHost.IsValid())
+	{
+		RoomHost->TableEvents.insert(RoomHost->TableEvents.end(), TableNews.GetData(), TableNews.GetData() + TableNews.Num());
+	}
+	TickRoom(RealDt);
 	// The hand's news heard: save the night where it stands (before the next hand is dealt).
 	if (LiveSaver)
 	{
@@ -1033,7 +1117,22 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			{
 				if (It.first != Tourney->Hero().TableId)
 				{
-					Tourney->MoveToTable(ss::HeroId, It.first);
+					// (The move is news like any balance: the host's part now, the room's next frame. Bug 2's check: on foot,
+					// the floor names the table the player left.)
+					const std::vector<ss::TEvent> Moves = Tourney->MoveToTable(ss::HeroId, It.first);
+					for (const ss::TEvent& E : Moves)
+					{
+						if (E.Type == ss::TEventType::Moved && E.IsHero && RoomHost.IsValid())
+						{
+							RoomHost->HeroTable = E.From;
+							RoomHost->MovedFrom = E.From;
+							RoomHost->MovedTick = Tourney->Tick;
+						}
+					}
+					if (RoomHost.IsValid())
+					{
+						RoomHost->TableEvents.insert(RoomHost->TableEvents.end(), Moves.begin(), Moves.end());
+					}
 					Table->Hold();
 					LiveMove();
 					break;
@@ -1048,14 +1147,31 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 		ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, Tourney->R);
 		bool bMoved = false;
 		bool bThere = false;
+		// The director keeps up with every hand played (nothing it's said is said again), and the room hears only the last
+		// one's news, as at the rail's catch-up.
+		const bool bHeard = RoomHost.IsValid() && RoomDirector.IsValid();
+		if (bHeard)
+		{
+			RoomDirector->HeroUp = bHeroUp;
+			RoomFeed::BeginCatchUp(*RoomHost);
+		}
 		for (; FastForwardLeft > 0 && !Tourney->Hero().Busted && !Tourney->bFinished && !bMoved && !bThere; --FastForwardLeft)
 		{
-			for (const ss::TEvent& E : Tourney->SimulateTick(&Auto))
+			const std::vector<ss::TEvent> Round = Tourney->SimulateTick(&Auto);
+			if (bHeard)
+			{
+				RoomFeed::Simulated(*RoomHost, *RoomDirector, RoomSound.Get(), *Tourney, Round, LiveDayStart + Tourney->ClockMinutes());
+			}
+			for (const ss::TEvent& E : Round)
 			{
 				bMoved = bMoved || (E.Type == ss::TEventType::Moved && E.IsHero);
 				LiveEvent(E);
 			}
 			bThere = FastForwardStop != 0 && FastForwardReached();
+		}
+		if (bHeard)
+		{
+			RoomFeed::EndCatchUp(*RoomHost);
 		}
 		// A count ends here, moved or not; a fast-forward to a moment (ss.Live.Bubble, Final, Break) goes on after the walk.
 		FastForwardLeft = FastForwardStop != 0 && bMoved && !bThere ? FastForwardLeft : 0;
@@ -1085,12 +1201,26 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 		bTestBust = false;
 		Tourney->Players[0].Stack = 1;
 		Tourney->HeroSitsOut = true;
+		const bool bHeard = RoomHost.IsValid() && RoomDirector.IsValid();
+		if (bHeard)
+		{
+			RoomFeed::BeginCatchUp(*RoomHost);
+		}
 		for (int32 Guard = 0; Guard < 400 && !Tourney->Hero().Busted && !Tourney->bFinished; ++Guard)
 		{
-			for (const ss::TEvent& E : Tourney->SimulateTick())
+			const std::vector<ss::TEvent> Round = Tourney->SimulateTick();
+			if (bHeard)
+			{
+				RoomFeed::Simulated(*RoomHost, *RoomDirector, RoomSound.Get(), *Tourney, Round, LiveDayStart + Tourney->ClockMinutes());
+			}
+			for (const ss::TEvent& E : Round)
 			{
 				LiveEvent(E);
 			}
+		}
+		if (bHeard)
+		{
+			RoomFeed::EndCatchUp(*RoomHost);
 		}
 		Tourney->HeroSitsOut = false;
 		Minutes = FMath::Max(Minutes, LiveDayStart + Tourney->ClockMinutes());
@@ -1150,34 +1280,39 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 	// Too few players: the floor cancels the event and the desk refunds everyone.
 	if (bCancelled && Phase == EBackRoomPhase::Playing && !bLiveOver)
 	{
-		Floor(FString::Printf(TEXT("Ladies and gentlemen, with %d players tonight's %s is cancelled. Please see the desk for your refund."), Tourney->Spec.Entrants, *LiveShort));
+		// The director never learns of a cancellation: the floor's copy (talk::Floor), said by the host in its parts.
+		std::map<std::string, std::string> Vars;
+		Vars["Players"] = std::to_string(Tourney->Spec.Entrants);
+		Vars["Short"] = std::string(TCHAR_TO_UTF8(*LiveShort));
+		const ss::talk::Said Cancelled = ss::talk::Floor("cancelled", Vars, 0u);
+		Floor(Cancelled.Text.empty() ? FString::Printf(TEXT("Ladies and gentlemen, with %d players tonight's %s is cancelled. Please see the desk for your refund."),
+										   Tourney->Spec.Entrants, *LiveShort)
+									 : Str(Cancelled.Text));
 		HeroPlace = 0;
 		HeroPrizeCents = 0;
 		LiveOver();
 		return;
 	}
-	// Seated: the floor starts the night (or welcomes a late one).
+	// Seated: the night starts (or a late seat is welcomed). The floor's words are the director's (its Clock says the start,
+	// the late welcome or the closed one, from where registration stands); the banners are the host's.
 	if (Phase == EBackRoomPhase::Playing && !bAnnouncedStart)
 	{
 		bAnnouncedStart = true;
 		if (Tourney->Tick == 0)
 		{
-			Floor(FString::Printf(TEXT("Ladies and gentlemen, welcome to the Embercrest %s. %d players, a prize pool of %s. Dealers, shuffle up and deal!"), *LiveShort,
-				Tourney->Spec.Entrants, *Dollars(Tourney->PrizePoolCents)));
 			RaiseBanner(TEXT("SHUFFLE UP AND DEAL"));
-		}
-		else if (Minutes < LiveLateRegEnds)
-		{
-			Floor(FString::Printf(TEXT("Late registration closes at %s. %d players, %s in the pool."), *Str(ss::net::TimeLabel(LiveLateRegEnds)), Tourney->Spec.Entrants,
-				*Dollars(Tourney->PrizePoolCents)));
-			RaiseBanner(FString::Printf(TEXT("LEVEL %d   %s / %s"), Tourney->LevelIndex + 1, *Num(Tourney->CurrentLevel().Sb), *Num(Tourney->CurrentLevel().Bb)));
 		}
 		else
 		{
-			// (Seated after the close: written in at the desk in time, the floor's call and the walk took the rest.)
-			Floor(FString::Printf(TEXT("Registration is closed. %d players, %s in the pool, the top %d paid."), Tourney->Spec.Entrants, *Dollars(Tourney->PrizePoolCents),
-				Tourney->PaidPlaces()));
 			RaiseBanner(FString::Printf(TEXT("LEVEL %d   %s / %s"), Tourney->LevelIndex + 1, *Num(Tourney->CurrentLevel().Sb), *Num(Tourney->CurrentLevel().Bb)));
+		}
+		if (!RoomDirector.IsValid())
+		{
+			// (A host without a director: the floor as it always started the night.)
+			Floor(Tourney->Tick == 0 ? FString::Printf(TEXT("Ladies and gentlemen, welcome to the Embercrest %s. %d players, a prize pool of %s. Dealers, shuffle up and deal!"),
+										   *LiveShort, Tourney->Spec.Entrants, *Dollars(Tourney->PrizePoolCents))
+									 : FString::Printf(TEXT("Late registration closes at %s. %d players, %s in the pool."), *Str(ss::net::TimeLabel(LiveLateRegEnds)),
+										   Tourney->Spec.Entrants, *Dollars(Tourney->PrizePoolCents)));
 		}
 	}
 
@@ -1224,8 +1359,8 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 		BreakT += RealDt;
 		if (BreakT >= BreakRealSeconds)
 		{
+			// (The floor's "break is over" is the director's, when its clock sees the break end.)
 			bOnBreak = false;
-			Floor(TEXT("Players, the break is over. Please take your seats, the cards are in the air."));
 			RaiseBanner(FString::Printf(TEXT("LEVEL %d   %s / %s"), BreakLevel, *Num(Tourney->CurrentLevel().Sb), *Num(Tourney->CurrentLevel().Bb)));
 			if (Phase == EBackRoomPhase::Playing)
 			{
@@ -1240,10 +1375,8 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 		if (MoveT >= 0.0f)
 		{
 			MoveT = -1000.0f;
-			if (FMath::FRand() < 0.4f)
-			{
-				Floor(TEXT("All tables complete. Dealers, next hand."), false);
-			}
+			// (The floor sends the room on, "All tables complete", after any hand with an all-in and every third hand
+			// otherwise: the director's deterministic gate, not a dice roll.)
 			Table->Resume(0.5f);
 		}
 	}
@@ -1318,16 +1451,26 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 					{
 						return;
 					}
-					GM->Table->Announce(TEXT("Cashier"), FString::Printf(TEXT("Congratulations%s. %s, cash. Count it with me... there you go."), *AddressTo(GM->Save),
-						*Dollars(GM->HeroPrizeCents)));
-					if (GM->Table->GetAudio())
+					// The cashier, at the cage's window, through the room (captioned in the core HUD; the old announcement
+					// when there's no room host).
+					ss::room::Cue Cash;
+					Cash.What = ss::room::Kind::Line;
+					Cash.Where = ss::room::From::Desk;
+					Cash.Speaker = "Cashier";
+					Cash.Key = "host.cage";
+					Cash.Text = TCHAR_TO_UTF8(*FString::Printf(TEXT("Congratulations%s. %s, cash. Count it with me... there you go."), *AddressTo(GM->Save), *Dollars(GM->HeroPrizeCents)));
+					Cash.ToHero = true;
+					Cash.Priority = 2;
+					Cash.Tick = GM->Tourney ? GM->Tourney->Tick : 0;
+					GM->PlayCue(Cash);
+					if (GM->Table && GM->Table->GetAudio())
 					{
 						GM->Table->GetAudio()->Play(ss::SoundId::Cash, 0.8f);
 					}
 					FTimerHandle Handle;
 					GM->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(GM, [GM, Room]() {
 						ABackRoomPawn* P = Cast<ABackRoomPawn>(UGameplayStatics::GetPlayerPawn(GM, 0));
-						if (!P)
+						if (!P || !GM->Stage)
 						{
 							GM->LiveGoHome();
 							return;

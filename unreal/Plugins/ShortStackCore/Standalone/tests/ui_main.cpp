@@ -32,10 +32,43 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#include <intrin.h>
+// The two kernel32 calls the bench needs, declared here rather than through windows.h (its macros would rename the UI's).
+extern "C" __declspec(dllimport) int __stdcall QueryThreadCycleTime(void* Thread, unsigned long long* Cycles);
+extern "C" __declspec(dllimport) void* __stdcall GetCurrentThread();
+#else
+#include <time.h>
+#endif
+
 namespace ui_test
 {
 int Failures = 0;
 std::string OutDir;
+
+/** The bench's clock: this thread's own CPU time in ms (a busy machine's other work doesn't count against a page). */
+double ThreadMs()
+{
+#if defined(_WIN32)
+	static const double TscPerMs = []() {
+		const unsigned long long C0 = __rdtsc();
+		const auto T0 = std::chrono::steady_clock::now();
+		while (std::chrono::steady_clock::now() - T0 < std::chrono::milliseconds(40))
+		{
+		}
+		const unsigned long long C1 = __rdtsc();
+		const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
+		return static_cast<double>(C1 - C0) / Ms;
+	}();
+	unsigned long long Cycles = 0;
+	QueryThreadCycleTime(GetCurrentThread(), &Cycles);
+	return static_cast<double>(Cycles) / TscPerMs;
+#else
+	timespec T;
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &T);
+	return static_cast<double>(T.tv_sec) * 1000.0 + static_cast<double>(T.tv_nsec) / 1.0e6;
+#endif
+}
 
 void Expect(bool Condition, const char* What)
 {
@@ -125,7 +158,9 @@ void Emit(const std::string& Name, ss::ui::RiverLine& RL, double Now)
 	static const bool Bench = std::getenv("SS_UI_BENCH") != nullptr;
 	if (Bench)
 	{
+		// Wall time, and the thread's own CPU time (the one to compare on a machine that's busy with other work).
 		const auto T0 = std::chrono::steady_clock::now();
+		const double Cpu0 = ThreadMs();
 		size_t Verts = 0;
 		for (int K = 0; K < 100; ++K)
 		{
@@ -134,7 +169,8 @@ void Emit(const std::string& Name, ss::ui::RiverLine& RL, double Now)
 			RL.Draw(Cb, Now);
 			Verts = Lb.Vertices.size();
 		}
-		std::printf("UI BENCH %-28s %6.2f ms/draw  %6zu vertices\n", Name.c_str(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count() / 100.0, Verts);
+		const double Cpu = (ThreadMs() - Cpu0) / 100.0;
+		std::printf("UI BENCH %-28s %6.2f ms/draw  %6.3f cpu  %6zu vertices\n", Name.c_str(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count() / 100.0, Cpu, Verts);
 	}
 	ss::ui::DrawList L;
 	ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);

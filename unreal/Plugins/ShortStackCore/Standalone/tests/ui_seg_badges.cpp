@@ -448,6 +448,90 @@ void Fits()
 			   M.Width(badge::Caption(S, badge::Room), ss::ui::Font::Regular, 15.0f) < 600.0f,
 		"fits: the studying caption's honorific and line");
 }
+/** The laptop at Now: its draw list. */
+ss::ui::DrawList Laptop(ss::ui::RiverLine& RL, double Now)
+{
+	TableMeasurer M;
+	ss::ui::DrawList L;
+	ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+	RL.Draw(C, Now);
+	return L;
+}
+
+void Celebrations()
+{
+	// C10 on the laptop (§5.4, §5.6, §5.7): a badge earned since it last looked is toasted once (BADGE EARNED, the glyph,
+	// the title) with one alert; the toast goes after six seconds and the badge is never toasted again. On air, Kast's
+	// chat says its one reaction to it (badge::ChatReaction's lines).
+	struct Counting : QuietHooks
+	{
+		int Alerts = 0;
+		void Sound(ss::SoundId Id, double /*Volume*/) override { Alerts += Id == ss::SoundId::Alert ? 1 : 0; }
+	};
+	Counting H;
+	ss::Session S(H, "ui-badge-cheer");
+	ss::ui::RiverLine RL(S);
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Step(S, 0.0, 0.2);
+	S.BankrollCents = 100000;
+	Check(S.Buy("ram-32").empty() && S.Buy("monitor-24").empty() && S.GoLive().empty() && S.Streaming(), "cheer: on air");
+	S.Stream.Viewers = std::max(S.Stream.Viewers, 25.0); // somebody watching to react
+	Now += 1.0;
+	Laptop(RL, Now);
+	const size_t ChatBefore = S.Stream.Chat.size();
+	const int AlertsBefore = H.Alerts;
+	S.DebugBadge("grant club 2");
+	Now += 1.0;
+	Laptop(RL, Now);
+	const ss::ui::DrawList First = Laptop(RL, Now + 0.6); // it slides in from nothing
+	Check(Drew(First, "Players Club: Ember"), "cheer: the Ember card is toasted when the laptop looks");
+	Check(H.Alerts == AlertsBefore + 1, "cheer: with one alert (" + std::to_string(H.Alerts - AlertsBefore) + ")");
+	std::set<std::string> Club;
+	for (const auto& Line : badge::Inventory())
+	{
+		if (Line.first.rfind("chat.club.", 0) == 0)
+		{
+			Club.insert(Line.second);
+		}
+	}
+	int Said = 0;
+	for (size_t K = ChatBefore; K < S.Stream.Chat.size(); ++K)
+	{
+		Said += Club.count(S.Stream.Chat[K].Text) ? 1 : 0;
+	}
+	Check(Club.size() == 3 && Said == 1, "cheer: on air, chat reacts to the card once");
+	const ss::ui::DrawList Still = Laptop(RL, Now + 3.0);
+	Check(Drew(Still, "Players Club: Ember") && S.Unseen().empty() && H.Alerts == AlertsBefore + 1, "cheer: the toast stays a while; the laptop took the badge, so nothing's left unseen");
+	const ss::ui::DrawList Gone = Laptop(RL, Now + 7.0);
+	Check(!Drew(Gone, "Players Club: Ember") && H.Alerts == AlertsBefore + 1, "cheer: gone after six seconds, and never toasted again");
+	WriteList("badges_toast", First);
+}
+
+void CelebrationsWaitForLogin()
+{
+	// Night One draws the laptop from the level's start, behind the title screen too (the save loaded, nobody at the
+	// desk). A badge waiting then is toasted, with its alert, once the player has logged in: never to an empty room.
+	struct Counting : QuietHooks
+	{
+		int Alerts = 0;
+		void Sound(ss::SoundId Id, double /*Volume*/) override { Alerts += Id == ss::SoundId::Alert ? 1 : 0; }
+	};
+	Counting H;
+	ss::Session S(H, "ui-badge-login");
+	ss::ui::RiverLine RL(S);
+	double Now = Step(S, 0.0, 0.2);
+	S.DebugBadge("grant club 2");
+	Laptop(RL, Now);
+	const ss::ui::DrawList Title = Laptop(RL, Now + 0.6);
+	Check(S.CurrentScreen == ss::Screen::Boot && !Drew(Title, "Players Club: Ember") && H.Alerts == 0,
+		"cheer: behind the title screen (the laptop not logged in), the badge isn't taken, toasted or chimed");
+	Now += 8.0; // a while on the title screen: longer than a toast lasts
+	Laptop(RL, Now);
+	S.CurrentScreen = ss::Screen::Lobby; // "Log in"
+	Laptop(RL, Now);
+	const ss::ui::DrawList In = Laptop(RL, Now + 0.6);
+	Check(Drew(In, "Players Club: Ember") && H.Alerts == 1, "cheer: it waited, and is toasted with its alert once the player logs in");
+}
 } // namespace badges_seg
 
 void SegBadges()
@@ -458,5 +542,7 @@ void SegBadges()
 	badges_seg::CardFromSave();
 	badges_seg::Rail();
 	badges_seg::Fits();
+	badges_seg::Celebrations();
+	badges_seg::CelebrationsWaitForLogin();
 }
 } // namespace ui_test

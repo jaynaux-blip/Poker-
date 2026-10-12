@@ -46,10 +46,15 @@ struct PageState
 	std::map<std::string, int> Lever; // the lever each offer's counter will pull
 };
 
+std::map<const Ui*, PageState>& PageStates()
+{
+	static std::map<const Ui*, PageState> ByLaptop;
+	return ByLaptop;
+}
+
 PageState& StateFor(const Ui& UI)
 {
-	static std::map<const Ui*, PageState> States;
-	return States[&UI];
+	return PageStates()[&UI];
 }
 
 void Say(PageState& St, const std::string& Line, bool Bad, double Now)
@@ -365,28 +370,44 @@ struct EventPick
 	bool Live = true;
 };
 
-std::vector<EventPick> Picks(const Session& S, double World)
+/** A live event whose pieces are the player's to sell now. */
+bool ForSale(const Session& S, const live::Occurrence& O, double World)
+{
+	if (live::EntryFor(S.Life, O.Id) != nullptr)
+	{
+		return false; // registered: its pieces sold (or didn't) at the desk
+	}
+	// Someone else pays for it the way GoToLive would register it now (the first option that can: a stake, a cover, a
+	// package): it isn't the player's to sell. A deal listed with why it won't pay (a cover for other events, one used
+	// up, an offer on hold) doesn't count, wherever the book lists it.
+	const std::vector<std::pair<life::Funding, std::string>> Pay = stk::FundingOptions(S.Life, O, World);
+	const auto Payer = std::find_if(Pay.begin(), Pay.end(), [](const std::pair<life::Funding, std::string>& X) { return X.second.empty(); });
+	return Payer == Pay.end() || Payer->first.From == life::Paid::Own;
+}
+
+/**
+ * The live events the panel offers: the first six for sale the bus can make this week. Keep (a live event the Embercrest
+ * card's "Sell action" opened the page on) stays among them when it's for sale further out, in the last place.
+ */
+std::vector<EventPick> Picks(const Session& S, double World, const std::string& Keep = std::string())
 {
 	std::vector<EventPick> Out;
+	bool Kept = Keep.empty();
 	for (const live::Occurrence& O : live::Reachable(World, 6.0 * 24.0))
 	{
-		if (Out.size() >= 6)
+		if (Out.size() >= 6 && (Kept || O.Id != Keep))
 		{
-			break;
+			if (Kept)
+			{
+				break;
+			}
+			continue;
 		}
-		if (live::EntryFor(S.Life, O.Id) != nullptr)
-		{
-			continue; // registered: its pieces sold (or didn't) at the desk
-		}
-		// Someone else pays for it the way GoToLive would register it now (the first option that can: a stake, a cover, a
-		// package): it isn't the player's to sell. A deal listed with why it won't pay (a cover for other events, one used
-		// up, an offer on hold) doesn't count, wherever the book lists it.
-		const std::vector<std::pair<life::Funding, std::string>> Pay = stk::FundingOptions(S.Life, O, World);
-		const auto Payer = std::find_if(Pay.begin(), Pay.end(), [](const std::pair<life::Funding, std::string>& X) { return X.second.empty(); });
-		if (Payer != Pay.end() && Payer->first.From != life::Paid::Own)
+		if (!ForSale(S, O, World))
 		{
 			continue;
 		}
+		Kept = Kept || O.Id == Keep;
 		EventPick P;
 		P.Id = O.Id;
 		P.Label = std::string(O.T->Short) + Dot + (O.Day == net::DayOf(World) ? std::string("Today") : std::string(net::WeekdayName(O.Day)));
@@ -395,6 +416,10 @@ std::vector<EventPick> Picks(const Session& S, double World)
 		P.Start = O.Start;
 		Out.push_back(P);
 	}
+	if (Out.size() > 6)
+	{
+		Out.erase(Out.begin() + 5); // the kept event, found past the six, takes the sixth place
+	}
 	return Out;
 }
 
@@ -402,7 +427,7 @@ void Sell(Ui& UI, Canvas& C, Session& S, PageState& St, double World, double Now
 {
 	const stk::Book& B = S.Life.Stakes;
 	SectionAt(C, "SELL ACTION", 540.0f, 210.0f, pal::Accent);
-	std::vector<EventPick> Events = Picks(S, World);
+	std::vector<EventPick> Events = Picks(S, World, live::FindOccurrence(St.Event).Valid() ? St.Event : std::string());
 	// An online event opened from its register block (Preselect): it joins the picks, sold in whole percents.
 	net::EventInstance Online;
 	if (!St.Event.empty() && std::none_of(Events.begin(), Events.end(), [&St](const EventPick& P) { return P.Id == St.Event; }) &&
@@ -776,6 +801,28 @@ void Preselect(const Ui& UI, const std::string& EventId)
 	St.Event = EventId;
 	St.Percent = 0;
 	St.Markup = 0;
+}
+
+/** A laptop going (~RiverLine): the page's state (an open walk-away card, a pick) goes with it. */
+void Forget(const Ui& UI)
+{
+	PageStates().erase(&UI);
+}
+
+/**
+ * Whether the sell panel takes a live event (the Embercrest card's "Sell action", ui-laptop's): one the bus can make this
+ * week whose pieces are the player's to sell. Preselected, it stays among the panel's picks, so the link lands on it.
+ */
+bool LiveSellable(const Session& S, const std::string& OccurrenceId, double World)
+{
+	for (const live::Occurrence& O : live::Reachable(World, 6.0 * 24.0))
+	{
+		if (O.Id == OccurrenceId)
+		{
+			return ForSale(S, O, World);
+		}
+	}
+	return false;
 }
 
 /** The page, drawn by RiverLine::BackingPage (and the tests) between UI.Begin and UI.End. Interactive: false in the stream's preview. */

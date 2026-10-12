@@ -212,6 +212,21 @@ void Turnstile(Canvas& C, const Box& B, const Color& Slate, const Color& Gold)
 	C.FillCircle(B.Cx, B.Cy, B.L(0.09f), Gold);
 }
 
+/** WCAG contrast between two 0xRRGGBB colours (1: the same, 21: black on white). */
+float Contrast(uint32_t A, uint32_t B)
+{
+	auto Lum = [](uint32_t Rgb) {
+		auto Lin = [](uint32_t Ch) {
+			const float V = static_cast<float>(Ch & 0xffu) / 255.0f;
+			return V <= 0.04045f ? V / 12.92f : std::pow((V + 0.055f) / 1.055f, 2.4f);
+		};
+		return 0.2126f * Lin(Rgb >> 16) + 0.7152f * Lin(Rgb >> 8) + 0.0722f * Lin(Rgb);
+	};
+	const float La = Lum(A);
+	const float Lb = Lum(B);
+	return (std::max(La, Lb) + 0.05f) / (std::min(La, Lb) + 0.05f);
+}
+
 /** A brand's word mark in its own weight ("LUCKY PENNY"), fitted to MaxW. */
 float WordMark(Canvas& C, const std::string& Words, float X, float Y, float Size, const Color& Ink, float MaxW, Align A)
 {
@@ -263,6 +278,30 @@ void Mark(Canvas& C, const std::string& BrandId, const Rect& R)
 	}
 }
 
+bool PatchColors(const std::string& BrandId, uint32_t& Ground, uint32_t& Thread)
+{
+	using namespace sponsorart_detail;
+	const sponsor::Brand* Br = sponsor::FindBrand(BrandId);
+	if (!Br)
+	{
+		return false;
+	}
+	// Six brands' patches are twill in a colour of their own (the Lucky Penny's green, the barber's cream, Team
+	// Embercrest's, Stacked's, Team RiverLine's and Turnstone's brand colour); the rest sit on near-black twill.
+	const bool Dark = Br->Mark == 0 || Br->Mark == 1 || Br->Mark == 5 || Br->Mark == 8 || Br->Mark == 10 || Br->Mark == 12;
+	Ground = Br->Mark == 0 ? 0x1f5c3au : Br->Mark == 1 ? 0xf4f1eau : Dark ? Br->Color : 0x16181du;
+	Thread = Br->Mark == 1 ? Br->Color : Br->Mark == 0 ? Br->Ink : Dark ? Br->Ink : Br->Color;
+	// The thread has to read on the twill, as the art's atlas stitches it (art/blender/sponsors.py): where the usual pick
+	// is lost on the ground (IronHouse's dark grey, Volt Rush's near-black, both on the dark patch) it's the brand's other
+	// colour.
+	const uint32_t Other = Thread == Br->Color ? Br->Ink : Br->Color;
+	if (Contrast(Thread, Ground) < 2.0f && Contrast(Other, Ground) > Contrast(Thread, Ground))
+	{
+		Thread = Other;
+	}
+	return true;
+}
+
 void Patch(Canvas& C, const std::string& BrandId)
 {
 	using namespace sponsorart_detail;
@@ -275,9 +314,11 @@ void Patch(Canvas& C, const std::string& BrandId)
 	// A 512 x 340 sheet: the twill in the brand's ground, a merrowed edge in thread, the mark and the word mark.
 	const float W = 512.0f;
 	const float H = 340.0f;
-	const bool Dark = Br->Mark == 0 || Br->Mark == 1 || Br->Mark == 5 || Br->Mark == 8 || Br->Mark == 10 || Br->Mark == 12;
-	const Color Ground = Br->Mark == 0 ? Hex(0x1f5c3a) : Br->Mark == 1 ? Hex(0xf4f1ea) : Dark ? Hex(Br->Color) : Hex(0x16181d);
-	const Color Thread = Br->Mark == 1 ? Hex(Br->Color) : Br->Mark == 0 ? Hex(Br->Ink) : Dark ? Hex(Br->Ink) : Hex(Br->Color);
+	uint32_t GroundRgb = 0;
+	uint32_t ThreadRgb = 0;
+	PatchColors(BrandId, GroundRgb, ThreadRgb);
+	const Color Ground = Hex(GroundRgb);
+	const Color Thread = Hex(ThreadRgb);
 	C.FillRoundRect({0.0f, 0.0f, W, H}, 46.0f, Ground);
 	// The twill's diagonal weave.
 	C.PushClip({0.0f, 0.0f, W, H});

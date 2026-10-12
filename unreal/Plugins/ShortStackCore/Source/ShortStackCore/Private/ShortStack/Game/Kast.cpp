@@ -1421,6 +1421,21 @@ void Stream::React(Channel& Ch, const Inputs& In, Moment M, int Count)
 	}
 }
 
+void Stream::Celebrate(Channel& Ch, const Inputs& In, const std::string& Line)
+{
+	// A badge earned live (next_segment_spec §5.6): one chatter watching says the reaction, once. Nobody watching, no line.
+	if (!Live || Line.empty() || (Present <= 0 && Viewers < 1.0))
+	{
+		return;
+	}
+	LastReal = In.Real;
+	int Badges = 0;
+	uint32_t Color = 0;
+	const std::string Who = Chatter(Ch, In, Badges, Color);
+	Say(In, Who, Line, LineKind::Chat, Badges, Color);
+	Hype = std::min(100.0, Hype + 6.0);
+}
+
 void Stream::MakeClip(Channel& Ch, const Inputs& In, Moment M, const std::string& Detail, double Size)
 {
 	// Somebody has to be watching to clip it; a clip reaches about as far as the channel does.

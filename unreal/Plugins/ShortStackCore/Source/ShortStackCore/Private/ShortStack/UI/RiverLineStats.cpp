@@ -841,10 +841,11 @@ void RiverLine::HeroStatsCard(double Now)
 	C->GlowRoundRect({R.X, R.Y + 8.0f, R.W, R.H}, 22.0f, Rgba(0, 0, 0, 0.5f), 36.0f);
 	UI.RRect(R, 22.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x13223a), Hex(0x0c1626)), StEdge);
 	C->FillRoundRect({R.X, R.Y, R.W, 6.0f}, 3.0f, pal::Accent);
-	NetAvatar(*C, R.X + 76.0f, R.Y + 84.0f, 46.0f, S.HeroName, pal::Accent, true);
+	const AvatarSpec Pic = NetAvatar(*C, R.X + 76.0f, R.Y + 84.0f, 46.0f, S.HeroName, pal::Accent, true);
 	const float Nw = UI.Text(S.HeroName, R.X + 142.0f, R.Y + 70.0f, Ts(34.0f, 900, StInk, Align::Left, Baseline::Alphabetic, false, 460.0f));
-	// The player's badges beside the name (next_segment_spec §5.6): 22 units, the top three labelled, before the close button.
-	NetBadgeRail(*C, UI, this, NetCardBadges(S.HeroBadges(), 6), -1, R.X + 156.0f + Nw, R.Y + 58.0f, 22.0f, 3, R.X + R.W - 80.0f - (R.X + 156.0f + Nw), Now);
+	// The player's badges beside the name (next_segment_spec §5.6): 22 units, the top three labelled, before the close button;
+	// not what the avatar's frame already says (C2: a ring winner's card has no second bracelet, §9.1).
+	NetBadgeRail(*C, UI, this, NetCardBadges(S.HeroBadges(), 6, NetBadgeFrame(Pic)), -1, R.X + 156.0f + Nw, R.Y + 58.0f, 22.0f, 3, R.X + R.W - 80.0f - (R.X + 156.0f + Nw), Now);
 	UI.Text("Your tournaments on RiverLine since Night One", R.X + 142.0f, R.Y + 102.0f, Ts(16.0f, 600, StSoft));
 	{
 		const Rect X{R.X + R.W - 56.0f, R.Y + 22.0f, 36.0f, 36.0f};

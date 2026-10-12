@@ -20,7 +20,7 @@ namespace ui
 namespace menu_detail
 {
 /** "$1,225" for whole dollars, "$2.37" otherwise (the way the landlord writes it). */
-std::string WholeDollars(Chips Cents)
+std::string DollarsOrCents(Chips Cents)
 {
 	return Cents % 100 == 0 ? (Cents < 0 ? "-$" : "$") + Grouped(Cents < 0 ? -Cents / 100 : Cents / 100) : Money(Cents);
 }
@@ -1091,9 +1091,9 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 		switch (Info.RentStage)
 		{
 		case life::Rent::Paid: Row("RENT", "Paid \xC2\xB7 next due " + net::DateLabel(net::DayOf(Info.RentDeadline - 1.0)), MenuTeal); break;
-		case life::Rent::FinalNotice: Warning("Final notice: " + WholeDollars(Info.RentDueCents) + " by " + RentByMidnight(Info.RentDeadline, Info.World) + ", or the locks change."); break;
+		case life::Rent::FinalNotice: Warning("Final notice: " + DollarsOrCents(Info.RentDueCents) + " by " + RentByMidnight(Info.RentDeadline, Info.World) + ", or the locks change."); break;
 		case life::Rent::Evicted:
-			Warning("Locked out. A key back costs " + WholeDollars(Info.RentDueCents) + ": the back rent and a month up front.");
+			Warning("Locked out. A key back costs " + DollarsOrCents(Info.RentDueCents) + ": the back rent and a month up front.");
 			if (Info.StorageDue > 0.0)
 			{
 				Row("STORAGE RENEWS", net::DateLabel(net::DayOf(Info.StorageDue)), MenuInk);
@@ -1103,11 +1103,11 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 			if (Info.BankrollCents >= Info.RentDueCents)
 			{
 				// The landlord collects at the deadline when the money's there.
-				Row("RENT DUE " + UpperCase(Day), WholeDollars(Info.RentDueCents) + " \xC2\xB7 COVERED", MenuTeal);
+				Row("RENT DUE " + UpperCase(Day), DollarsOrCents(Info.RentDueCents) + " \xC2\xB7 COVERED", MenuTeal);
 			}
 			else
 			{
-				Warning("Rent is due " + Day + ": " + WholeDollars(Info.RentDueCents) + ".");
+				Warning("Rent is due " + Day + ": " + DollarsOrCents(Info.RentDueCents) + ".");
 			}
 			break;
 		}
@@ -1664,7 +1664,7 @@ void FrontEnd::ModalBox(double Now)
 		// What starting over costs, in the career's own numbers, and who starts instead.
 		Heading = "START OVER?";
 		const int N = Info.Tournaments;
-		Body = "Your career as " + Info.HeroName + " ends here: " + WholeDollars(Info.BankrollCents) + " and " + std::to_string(N) + (N == 1 ? " tournament" : " tournaments") +
+		Body = "Your career as " + Info.HeroName + " ends here: " + DollarsOrCents(Info.BankrollCents) + " and " + std::to_string(N) + (N == 1 ? " tournament" : " tournaments") +
 			" since Night One. " + (Draft.FirstName.empty() ? std::string("The new you") : Draft.FullName()) + " starts Night One with " + Money(237 + hero::PerksOf(Draft.Story).StartCents) + ".";
 		YesLabel = "START OVER";
 		Alarm = true;

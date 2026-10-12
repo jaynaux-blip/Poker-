@@ -16,6 +16,7 @@ class USpotLightComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class UTexture;
 
 /** What the player can walk up to in the card room. */
 enum class ECardRoomSpot : uint8
@@ -31,7 +32,7 @@ enum class ECardRoomSpot : uint8
 };
 
 /**
- * The Back Room: the Spin Cycle Club's game behind the 24-hour laundromat, Tuesday, 1 a.m.
+ * The Back Room: Dee's game behind the Wash & Fold, the 24-hour laundromat, Tuesday, 1 a.m.
  *
  * A cinderblock room with a drop ceiling and a concrete floor. The oval table sits under one
  * green-enamel poker lamp, the only warm light; a fluorescent strip buzzes and flickers over the
@@ -142,6 +143,25 @@ public:
 	/** Room space to world and back (the room moves so the player's table sits at the origin). */
 	FVector RoomToWorld(const FVector& RoomAt) const;
 	FVector WorldToRoom(const FVector& WorldAt) const;
+
+	// ------------------------------------------------------------ the room's screens and the ambassador (next_segment_spec 6.5, 3.10)
+	/**
+	 * The clock screens show render targets from now on (ss::ui::DrawRoomClock, painted by the host about twice a second):
+	 * StageClock on the clocks either side of the stage, SideClock on the side walls' screens (one target each, shared by
+	 * the screens that show it), over the room's T_EC_ScreenBg. Their six text lines go (they stay while either is null).
+	 * Glow: the screens' brightness (M_ECX_Screen's Strength).
+	 */
+	void SetClockScreens(UTexture* StageClock, UTexture* SideClock, float Glow);
+	bool HasClockScreens() const { return bClockScreens; }
+	/** Team Embercrest's ambassador banner by the desk (sponsorart::AmbassadorBanner's print, 1:2), or none for null. */
+	void SetAmbassadorBanner(UTexture* Print, float Glow);
+	bool HasAmbassadorBanner() const { return bAmbassadorShown; }
+	/** The crest (sponsorart::Mark "embercrest") beside every champions' board line that names one of Names; none for a null crest. */
+	void SetChampionCrest(UTexture* Crest, const TArray<FString>& Names, float Glow);
+	/** How many champions' board lines carry the crest now. */
+	int32 CrestedLines() const { return CrestShown; }
+	/** Over the player's own chair at the origin's table (world): where the on-foot seat marker points. */
+	FVector HeroSeatMarker() const;
 
 	// ------------------------------------------------------------ tuning
 	UPROPERTY(EditAnywhere, Category = "Short Stack|Look")
@@ -278,6 +298,24 @@ private:
 	UInstancedStaticMeshComponent* Instances(UStaticMesh* Mesh, UMaterialInterface* Override, USceneComponent* Parent, bool bShadows);
 	int32 AnchorSlot = 0;
 	bool bOnAir = false;
+
+	// The room's screens and the ambassador (ue-venue).
+	/** Each clock screen's face, and whether it's one of the stage's (else a side wall's). */
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> ClockFaces;
+	UPROPERTY()
+	TArray<bool> ClockOnStage;
+	UPROPERTY()
+	TObjectPtr<USceneComponent> AmbassadorRoot;
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> AmbassadorPrint;
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> CrestQuads;
+	/** A render target on a stand-in box, read from its own side (M_ECX_Screen with local UVs; M_ScreenImage without it). */
+	UMaterialInstanceDynamic* TargetScreen(FName Key, UTexture* Tex, UTexture* Under, float Glow, float Cells);
+	bool bClockScreens = false;
+	bool bAmbassadorShown = false;
+	int32 CrestShown = 0;
 };
 
 template <typename T>

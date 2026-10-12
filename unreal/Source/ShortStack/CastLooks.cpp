@@ -1,6 +1,7 @@
 #include "CastLooks.h"
 
 #include "BackRoomPlayer.h"
+#include "CardRoomSound.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -461,6 +462,13 @@ FBackRoomPersona PersonaFor(const FString& Name)
 	static const uint32 Shirts[] = {0x2f3b52, 0x6e2b2b, 0x3a5a40, 0x8a7a5a, 0x222222, 0x5a4a6e, 0x9a9a9a, 0x7a4a2a};
 	FBackRoomPersona P = Persona(*Name, R.FRandRange(0.15f, 0.6f), R.FRandRange(0.3f, 0.7f), R.FRandRange(0.3f, 0.7f), R.FRandRange(0.2f, 0.7f), R.FRandRange(0.3f, 0.7f),
 		0.0f, Seed % 997 + 101, MoveTemp(Tells), Shirts[R.RandRange(0, 7)], 0.0f);
+	// Someone in tonight's card-room field talks as much as their voice says (next_segment_spec 4.11: LiveVoice.Social,
+	// fixed at registration); anywhere else a stranger keeps to themselves, as before. (After every draw: the look is the same.)
+	float Social = 0.0f;
+	if (::RoomVoices::SocialOf(Name, Social))
+	{
+		P.Chatter = FMath::Clamp(Social, 0.0f, 1.0f);
+	}
 	// What they wear, the same every night: a print or a graphic on about half the shirts, trousers, now and then a
 	// hat (over short hair), glasses or shades.
 	static const uint32 Tones[] = {0x1f2a44, 0x2f3b52, 0x6e2b2b, 0x3a5a40, 0x8a7a5a, 0x222222, 0x5a4a6e, 0x9a9a9a, 0x7a4a2a, 0xd8d4c8, 0x7b1e1e,

@@ -503,6 +503,18 @@ SHORTSTACKCORE_API std::vector<std::pair<std::string, int>> RailFor(const Book& 
  * nothing. Works without the book (the director has only names): the backer's stake picks the line when it's there.
  */
 SHORTSTACKCORE_API std::string RailLine(const Book& B, const std::string& EntryId, const std::string& Who, int Moment, uint32_t Salt);
+/**
+ * The life::Mark kinds of the book's dates (Marks), so the calendar tells them apart by kind, never by their words.
+ * Sponsors' dates are sponsor::MarkKind (20 to 24).
+ */
+enum DateKind : int
+{
+	DatePay = 30,    // a payment the player owes ("$119.00 to Mrs. Park")
+	DateOwed = 31,   // money owed to the player ("Mei owes you $40.00")
+	DateChop = 32,   // a package's chop day
+	DateBacked = 33, // an event a backer is putting the player in
+	DateSold = 34,   // an event the player sold pieces of
+};
 /** The dates for the wall calendar and the second screen: payments due, owed to the player, chop days, staked events. */
 SHORTSTACKCORE_API std::vector<life::Mark> Marks(const Book& B, double From, double To);
 

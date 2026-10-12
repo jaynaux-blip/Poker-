@@ -439,8 +439,17 @@ struct NetChoices
 	std::map<std::string, int> Flip; // an Embercrest event card's middle: 0 the facts, 1 the structure, 2 the payouts
 };
 NetChoices& NetChoicesOf(const RiverLine* RL);
-/** Everything someone holds, for a card (§5.4: the network's order, up to Max); the set's own order if the rules give none. */
-std::vector<badge::Badge> NetCardBadges(const badge::Set& Held, int Max);
+/**
+ * Drops a laptop's tip and choices when it goes (~RiverLine, with the Mail app's, the Backing page's and the badge
+ * toasts'): a new laptop made at the same address never inherits an old one's open cards.
+ */
+void ForgetNet(const RiverLine* RL);
+/**
+ * Everything someone holds, for a card (§5.4: the network's order, up to Max); the set's own order if the rules give none.
+ * Frame: what the card's avatar already says (NetBadgeFrame, rule C2): a champion's frame is the bracelet or the ring, so
+ * the rail and the tiles never show a second one (§9.1, "no second bracelet").
+ */
+std::vector<badge::Badge> NetCardBadges(const badge::Set& Held, int Max, uint8_t Frame = badge::FrameNone);
 /**
  * A badge rail (§5.6): glyphs at Size from X, centred on Cy, the first Labelled of them with their labels, in at most
  * MaxW (labels give way first, then glyphs). Hovering one sets the frame's tooltip (Npc: whose). Returns the width drawn;

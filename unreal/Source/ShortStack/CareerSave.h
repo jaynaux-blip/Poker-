@@ -27,6 +27,12 @@ bool Exists();
  * thread as a scene ends: a few milliseconds instead of tens).
  */
 bool SaveNow(const std::string& Text, bool bQuick = true);
+/**
+ * Before something replaces the career wholesale (a dev build's ?Import): the career file copied beside itself as
+ * NightOne.ssave.<Suffix> (OutPath; empty when there was no file). False only when there is a file and it couldn't be
+ * copied: then nothing may overwrite it.
+ */
+bool KeepCopy(const FString& Suffix, FString& OutPath);
 /** Serializes a save, writing a frozen world's text into it first when it came without one. */
 std::string Serialize(ss::SaveData& Data);
 } // namespace CareerSave

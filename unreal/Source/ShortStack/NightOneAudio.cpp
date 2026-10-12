@@ -111,6 +111,11 @@ void UNightOneAudio::PlaySamples(const std::vector<float>& Samples, float Volume
 	PlayPcm(Samples, Volume, false, At);
 }
 
+void UNightOneAudio::PlayVoice(const std::vector<float>& Samples, float Volume, const FVector* At)
+{
+	PlayPcm(Samples, Volume, false, At, true);
+}
+
 void UNightOneAudio::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -198,7 +203,7 @@ void UNightOneAudio::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience, const FVector* At)
+void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience, const FVector* At, bool bVoice)
 {
 	if (bMuted || Samples.empty())
 	{
@@ -207,7 +212,7 @@ void UNightOneAudio::PlayPcm(const std::vector<float>& Samples, float Volume, bo
 	const float Seconds = static_cast<float>(Samples.size()) / static_cast<float>(ss::audio::SampleRate);
 	USoundWaveProcedural* Wave = NightOneAudioDetail::MakeWave(this, Seconds);
 	NightOneAudioDetail::Queue(Wave, Samples.data(), static_cast<int32>(Samples.size()), 1.0f);
-	const float Level = Volume * MasterVolume * (bAmbience ? AmbienceVolume : EffectsVolume);
+	const float Level = Volume * MasterVolume * (bVoice ? VoicesVolume : (bAmbience ? AmbienceVolume : EffectsVolume));
 	UAudioComponent* Shot = nullptr;
 	if (At)
 	{
@@ -285,9 +290,16 @@ void UNightOneAudio::SetMuted(bool bInMuted)
 
 void UNightOneAudio::SetMix(float Master, float Effects, float Ambience)
 {
+	// (The hosts without a Voices row: speech follows the effects, as every one-shot did.)
+	SetMix(Master, Effects, Ambience, Effects);
+}
+
+void UNightOneAudio::SetMix(float Master, float Effects, float Ambience, float Voices)
+{
 	MasterVolume = FMath::Clamp(Master, 0.0f, 4.0f);
 	EffectsVolume = FMath::Clamp(Effects, 0.0f, 1.0f);
 	AmbienceVolume = FMath::Clamp(Ambience, 0.0f, 1.0f);
+	VoicesVolume = FMath::Clamp(Voices, 0.0f, 1.0f);
 	if (AmbienceComponent)
 	{
 		AmbienceComponent->SetVolumeMultiplier(AmbienceLevel());

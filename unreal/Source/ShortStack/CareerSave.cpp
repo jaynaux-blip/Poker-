@@ -135,6 +135,24 @@ bool CareerSave::SaveNow(const std::string& Text, bool bQuick)
 	return true;
 }
 
+bool CareerSave::KeepCopy(const FString& Suffix, FString& OutPath)
+{
+	OutPath.Reset();
+	const FString From = FilePath();
+	if (!IFileManager::Get().FileExists(*From))
+	{
+		return true; // nothing to lose
+	}
+	const FString To = From + TEXT(".") + Suffix;
+	if (IFileManager::Get().Copy(*To, *From, true, true) != COPY_OK)
+	{
+		UE_LOG(LogCareerSave, Error, TEXT("Couldn't copy %s to %s."), *From, *To);
+		return false;
+	}
+	OutPath = To;
+	return true;
+}
+
 std::string CareerSave::Serialize(ss::SaveData& Data)
 {
 	if (Data.WorldSnapshot && Data.WorldText.empty())

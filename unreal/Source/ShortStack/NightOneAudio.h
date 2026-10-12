@@ -45,11 +45,22 @@ public:
 	void PlayEffect(ss::audio::Effect Id, float Volume = 1.0f);
 	/** Samples rendered elsewhere (a room's own sounds: Dee's door), as an effect; At places it in the world. */
 	void PlaySamples(const std::vector<float>& Samples, float Volume, const FVector* At = nullptr);
+	/**
+	 * Speech rendered elsewhere (next_segment_spec 4.11: a line at the player's table, one engine voice at the speaker's
+	 * head), on the Voices bus: Master x Voices instead of Effects. At places it in the world (null: everywhere).
+	 */
+	void PlayVoice(const std::vector<float>& Samples, float Volume, const FVector* At = nullptr);
 	void Thunder(float Delay, float Strength);
 	void SetHeartbeat(bool bOn);
 	void SetMuted(bool bInMuted);
-	/** Master, effects and ambience (rain, thunder) levels, 0..1. */
+	/** Master, effects and ambience (rain, thunder) levels, 0..1; the Voices bus follows Effects. */
 	void SetMix(float Master, float Effects, float Ambience);
+	/** The same, with the Voices bus (the room's speech, next_segment_spec 4.11, GameSettings::VoicesVolume) its own. */
+	void SetMix(float Master, float Effects, float Ambience, float Voices);
+	float GetVoicesVolume() const { return VoicesVolume; }
+	float GetAmbienceVolume() const { return AmbienceVolume; }
+	/** One-shots still playing (ss.Live.Room's engine voices besides the stream and the heartbeat). */
+	int32 NumOneShots() const { return OneShots.Num(); }
 	bool IsMuted() const { return bMuted; }
 	/** True for the frame a heartbeat thumps (drives the visual pulse). */
 	bool ConsumeBeat();
@@ -61,7 +72,7 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	void PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience = false, const FVector* At = nullptr);
+	void PlayPcm(const std::vector<float>& Samples, float Volume, bool bAmbience = false, const FVector* At = nullptr, bool bVoice = false);
 	float AmbienceLevel() const { return bMuted ? 0.0f : MasterVolume * AmbienceVolume; }
 
 	UPROPERTY(Transient)
@@ -82,6 +93,8 @@ private:
 	TObjectPtr<class USoundAttenuation> Attenuation;
 	float EffectsVolume = 1.0f;
 	float AmbienceVolume = 1.0f;
+	/** The Voices bus (speech one-shots): Effects' level until a host sets its own. */
+	float VoicesVolume = 1.0f;
 	/** The ambience streams two channels (SetAmbienceSourceStereo). */
 	bool bStereo = false;
 	uint32 Seed = 1;

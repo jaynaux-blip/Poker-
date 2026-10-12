@@ -579,8 +579,8 @@ void Draw(Canvas& C, const badge::Badge& B, float Cx, float Cy, float Size, doub
 	{
 		return;
 	}
-	const badge::Badge Copy = B;
-	C.Cached(KeyOf(B, Size, Size), Cx, Cy, [Copy, Size](Canvas& Cc) { Art(Cc, Copy, 0.0f, 0.0f, Size, Size); });
+	// Paint runs inside Cached (only the first time), so it can hold B by reference: no copy, no allocation a frame.
+	C.Cached(KeyOf(B, Size, Size), Cx, Cy, [&B, Size](Canvas& Cc) { Art(Cc, B, 0.0f, 0.0f, Size, Size); });
 	if (Glint)
 	{
 		// The one glint the first time a badge is seen (P2): a spark at the corner that blooms and goes.

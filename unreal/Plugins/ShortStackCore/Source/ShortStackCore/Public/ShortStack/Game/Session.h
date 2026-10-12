@@ -675,7 +675,11 @@ public:
 	SHORTSTACKCORE_API bool TeamRiverLine() const;
 	// ---- Badges (§5: SessionBadges.cpp)
 	SHORTSTACKCORE_API const badge::Set& HeroBadges() const;
-	/** Badges earned that the player hasn't been shown yet (each once: text\tbadge:<kind>:<tier>:<count>). */
+	/**
+	 * Badges earned that the player hasn't been shown yet (each once: text\tbadge:<kind>:<tier>:<count>). It consumes: one
+	 * caller (RiverLine, once a frame) toasts them; the call plays the toast's SoundId::Alert and, on air, gives Kast's chat
+	 * its one reaction to each (badge::ChatReaction).
+	 */
 	SHORTSTACKCORE_API std::vector<badge::Badge> Unseen();
 	SHORTSTACKCORE_API std::vector<badge::Progress> BadgeProgress(int Max) const;
 	// ---- The calendar's steps (CheckCalendar runs them in this order, beside ShopStep) and debug (game/SegmentCommands.cpp)

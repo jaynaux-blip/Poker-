@@ -22,12 +22,12 @@ namespace audio
  * the reverb) runs at 8 kHz, clear lines and the PA at 16 kHz, chips, cards and claps at 48 kHz; the slow buses are
  * lifted to 48 kHz by polyphase filters. Any render size gives the same samples. Every random draw comes from the seed
  * and the calls made, so the same calls give the same stream (N5). About 0.04 ms of a 60 fps frame on average; state
- * about 62 KB with 6 talkers.
+ * under 64 KB (about 62 KB with a dev host's 6 talkers; less in the fallback that ships).
  *
  * Layers (each a SetMix level): Bed = the air handling, the slot floor, the bar, the desk and the cage; Talk = the
  * walla, the room's own talkers, murmured lines and vocals away from the rail; Chips = the tables' chips and cards;
  * Calls = clear lines (dealers); Rail = vocals and claps at the rail or the bar, and lines said there; the PA has its
- * own level and ducks the room by itself.
+ * own level (SetPaLevel) and ducks the room by itself.
  *
  * Bodies: audio-synth (CardRoom.cpp).
  */
@@ -100,7 +100,15 @@ public:
 	 * or the bar it's the Rail layer, at a table the Talk layer; Spot::Pa means the whole room, all around the listener.
 	 */
 	SHORTSTACKCORE_API void Crowd(Vocal V, int Voices, Spot Where, int Id, float Level);
-	/** The room's own talkers (6 by default, at most 12). 0 is the fallback: walla noise and non-word vocals only. */
+	/**
+	 * The PA as heard, in dB (0, the default: as mixed): the host's Voices setting against the stream's own level, so the
+	 * Voices slider moves the floor's announcements as it moves the dealers' calls. -120 is silent; ramped over a block.
+	 */
+	SHORTSTACKCORE_API void SetPaLevel(float Db);
+	/**
+	 * The room's own formant talkers, at most 12. 0, the default, is the fallback that ships (next_segment_spec 11, the
+	 * listening gate): walla noise and non-word vocals only. Above 0 only for a host's dev comparison.
+	 */
 	SHORTSTACKCORE_API void SetVoiceBudget(int Talkers);
 	/** Fills Frames stereo frames, interleaved left and right. */
 	SHORTSTACKCORE_API void RenderStereo(float* Out, int Frames);

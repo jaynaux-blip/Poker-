@@ -176,8 +176,10 @@ void ABackRoomPlayer::AuditContacts(float Dt)
 	if (ContactLogT > 1.0f)
 	{
 		ContactLogT = 0.0f;
+		// (A body on a single-node anim, a standing rail backer's idle, has no seated anim instance: nothing resolved to report.)
+		UBackRoomBodyAnim* Anim = Body ? Cast<UBackRoomBodyAnim>(Body->GetAnimInstance()) : nullptr;
 		UE_LOG(LogTemp, Display, TEXT("CONTACT %s [mode %d steps %d/%d]: deepest sink %.2f cm at %s, frames sunk over 1 cm %d and over 2 cm %d of %d | hands moved off the table L %.1f R %.1f cm | the pose's last pass still found L %.2f R %.2f"), *Persona.Name, HandMode, Steps[0].Num(), Steps[1].Num(), ContactWorst, *ContactWorstName, ContactBad1, ContactBad2, ContactFrames,
-			ContactShift(0).Size(), ContactShift(1).Size(), Cast<UBackRoomBodyAnim>(Body->GetAnimInstance())->GetResolvedWorst(0), Cast<UBackRoomBodyAnim>(Body->GetAnimInstance())->GetResolvedWorst(1));
+			ContactShift(0).Size(), ContactShift(1).Size(), Anim ? Anim->GetResolvedWorst(0) : 0.0f, Anim ? Anim->GetResolvedWorst(1) : 0.0f);
 		ContactWorst = 0.0f;
 		ContactWorstName.Reset();
 		ContactFrames = ContactBad1 = ContactBad2 = 0;

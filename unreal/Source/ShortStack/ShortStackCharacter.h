@@ -54,6 +54,12 @@ struct FCastWear
 	 * (Ruby on Lani's, as Inez is) read as different people by their build as well as their height. Clothes scale with it.
 	 */
 	float Breadth = 1.0f;
+	/**
+	 * The sponsors' patches the closet shows (next_segment_spec 3.10): a brand id per spot (0 chest, 1 sleeve, 2 cap; empty for
+	 * none), sewn on and showing on what's worn (wardrobe::PatchFits). HeroWear fills them; the table wears them as
+	 * FBackRoomPersona::PatchChest, PatchSleeve and PatchCap.
+	 */
+	FString Patches[3];
 };
 
 /**
@@ -178,8 +184,10 @@ public:
 	FVector LookDirection() const;
 	/** True once for each footfall (and how hard: walking soft, running heavy). */
 	bool TakeFootstep(float& OutVolume);
-	/** Puts the hat and glasses on again, after a change to the ss.Wear.* tunables (the console's ss.Wear.Refit). */
+	/** Puts the hat, the glasses and the sponsors' patches on again, after a change to the ss.Wear.* tunables (the console's ss.Wear.Refit). */
 	void RefitWear();
+	/** The sponsors' patches worn now and where (ss.Wear.Describe, the look's line): "chest luckypenny on the jacket (HeroA1, measured), ...". */
+	FString DescribePatches() const;
 
 	/**
 	 * Where one of the street's hats (bHat) or pairs of glasses sits on a MetaHuman face, in the face mesh's component
@@ -321,6 +329,17 @@ private:
 	/** What carries the hat and glasses: the face, or the body when the face has no head bone (none without either). */
 	USkeletalMeshComponent* HeadCarrier() const;
 	void WearOnHead(UStaticMeshComponent* Piece, const FTransform& InFace);
+	/**
+	 * The sponsors' patches (next_segment_spec 3.10): the chest's carried by spine_05 and the sleeve's by upperarm_l, each
+	 * placed (InBody: the body mesh's component space in its reference pose) where it was measured on this body over the
+	 * outermost garment drawn, standing off it as that garment's ss.Wear.Standoff says; the cap's on the hat's front panel.
+	 */
+	void WearOnChest(UStaticMeshComponent* Piece, const FTransform& InBody);
+	void WearOnSleeve(UStaticMeshComponent* Piece, const FTransform& InBody);
+	/** The closet's patches put on (or taken off) for the outfit worn: only the player's, only while the deal runs. */
+	void PutOnPatches(const FStreetOutfit& Outfit);
+	/** Every half second: the session's closet and contracts (a deal that ends takes its patch off), and ss.Wear.PatchTest. */
+	void CheckPatches(float Dt);
 	void BecomeNpc();
 	void UpdateLook(float Dt);
 	void UpdateFace(float Dt);
@@ -343,6 +362,17 @@ private:
 	TObjectPtr<UStaticMeshComponent> HatMesh;
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> GlassesMesh;
+	/** The sponsors' patches: chest, sleeve, cap (SponsorWear.h), made the first time one is worn and hidden while none is. */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> PatchMeshes[3];
+	/** What they show (brand ids by spot) and what they lie on (SponsorWear::ELayer), and how each was fitted (for the log). */
+	FString PatchBrands[3];
+	/** What the closet and ss.Wear.PatchTest asked for last time (before a spot with nothing to carry it dropped out). */
+	FString PatchWanted[3];
+	uint8 PatchLayer = 0;
+	FString PatchFitNote;
+	float PatchCheckIn = 0.0f;
+	uint32 PatchTestSeen = 0;
 	/** The garments worn over the MetaHuman's own (garments_setup.py's skeletal meshes), when there are any. */
 	UPROPERTY(Transient)
 	TObjectPtr<USkeletalMeshComponent> OuterGarment;

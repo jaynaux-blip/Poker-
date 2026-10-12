@@ -36,10 +36,11 @@ Color RepColor(int K)
 // The badges' shared pieces (RiverLineShared.h): the card's rails here, the hero's stats card and Career's too.
 namespace rlnet_detail
 {
-std::vector<badge::Badge> NetCardBadges(const badge::Set& Held, int Max)
+std::vector<badge::Badge> NetCardBadges(const badge::Set& Held, int Max, uint8_t Frame)
 {
-	std::vector<badge::Badge> Row = NetBadgeRow(Held, badge::Card, badge::FrameNone, Max);
-	for (size_t K = 0; Row.empty() && K < Held.Held.size() && static_cast<int>(K) < Max; ++K)
+	std::vector<badge::Badge> Row = NetBadgeRow(Held, badge::Card, Frame, Max);
+	// The card's order covers every kind, so an empty row under a frame means the frame says it all: nothing to add back.
+	for (size_t K = 0; Row.empty() && Frame == badge::FrameNone && K < Held.Held.size() && static_cast<int>(K) < Max; ++K)
 	{
 		if (Held.Held[K].K != badge::Kind::Count)
 		{
@@ -121,9 +122,11 @@ const float CardTrophyRowH = 196.0f;
  * TROPHIES & BADGES (§5.6): under the trophies, a tile for every badge held: the glyph at 64, its title, how it was
  * earned, and the year when it has one. Two columns, as many rows as fit; the rest counted.
  */
-void CardBadgeTiles(Canvas& Cv, Ui& UI, const Session& S, int Npc, const badge::Set& Held, float X, float Y, float W, float H, bool HasAwards, double TabAt, double Now)
+void CardBadgeTiles(Canvas& Cv, Ui& UI, const Session& S, int Npc, const badge::Set& Held, uint8_t Frame, float X, float Y, float W, float H, bool HasAwards, double TabAt,
+	double Now)
 {
-	const std::vector<badge::Badge> All = NetCardBadges(Held, 32);
+	// Not what the avatar's frame already says (the trophies above show the bracelets and rings).
+	const std::vector<badge::Badge> All = NetCardBadges(Held, 32, Frame);
 	if (All.empty())
 	{
 		return;
@@ -164,16 +167,32 @@ void CardBadgeTiles(Canvas& Cv, Ui& UI, const Session& S, int Npc, const badge::
 
 namespace rlnet_detail
 {
+std::map<const RiverLine*, NetTip>& TipMap()
+{
+	static std::map<const RiverLine*, NetTip> ByLaptop;
+	return ByLaptop;
+}
+
+std::map<const RiverLine*, NetChoices>& ChoiceMap()
+{
+	static std::map<const RiverLine*, NetChoices> ByLaptop;
+	return ByLaptop;
+}
+
 NetTip& NetTipOf(const RiverLine* RL)
 {
-	static std::map<const RiverLine*, NetTip> Tips;
-	return Tips[RL];
+	return TipMap()[RL];
 }
 
 NetChoices& NetChoicesOf(const RiverLine* RL)
 {
-	static std::map<const RiverLine*, NetChoices> Choices;
-	return Choices[RL];
+	return ChoiceMap()[RL];
+}
+
+void ForgetNet(const RiverLine* RL)
+{
+	TipMap().erase(RL);
+	ChoiceMap().erase(RL);
 }
 } // namespace rlnet_detail
 
@@ -216,7 +235,9 @@ void RiverLine::PlayerCard(double Now)
 	C->FillRoundRect({R.X, R.Y, R.W, 6.0f}, 3.0f, Ring);
 
 	// Who: the face, the name, what the world calls them.
-	NetAvatar(*C, R.X + 76.0f, R.Y + 84.0f, 46.0f, P.Name, Ring);
+	const AvatarSpec Pic = NetAvatar(*C, R.X + 76.0f, R.Y + 84.0f, 46.0f, P.Name, Ring);
+	// A champion's frame is their bracelet or ring (C2): the rail and the tiles leave it out (§9.1, no second bracelet).
+	const uint8_t Frame = NetBadgeFrame(Pic);
 	NetFlag(*C, P.Country, R.X + 140.0f, R.Y + 44.0f, 30.0f, 20.0f);
 	float Nx = R.X + 180.0f;
 	Nx += UI.Text(P.Name, Nx, R.Y + 64.0f, Ts(34.0f, 900, P.Rival ? Hex(0xd5b8ff) : CardInk, Align::Left, Baseline::Alphabetic, false, 520.0f)) + 14.0f;
@@ -227,13 +248,14 @@ void RiverLine::PlayerCard(double Now)
 		Nx += NetPill(*C, "RIVAL", Nx, R.Y + 40.0f, Hex(0xb36bff), true, 10.0f) + 8.0f;
 	}
 	const badge::Set& Held = NetBadgesOf(S, CardShown);
-	const std::vector<badge::Badge> Rail = NetCardBadges(Held, 6);
+	const std::vector<badge::Badge> Shows = NetCardBadges(Held, 32, Frame);
+	const std::vector<badge::Badge> Rail(Shows.begin(), Shows.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(Shows.size(), 6)));
 	const float RailEnd = R.X + R.W - 186.0f;
 	int OnRail = 0;
 	const float RailW = NetBadgeRail(*C, UI, this, Rail, CardShown, Nx, R.Y + 50.0f, 22.0f, 3, RailEnd - Nx - 40.0f, Now, &OnRail);
 	Nx += RailW > 0.0f ? RailW + 10.0f : 0.0f;
-	// "+N": everything held that the rail didn't show (past six, or squeezed out by a long name).
-	const size_t Total = std::max(Held.Held.size(), Rail.size());
+	// "+N": everything held that the rail didn't show (past six, or squeezed out by a long name); the frame shows its own.
+	const size_t Total = Shows.size();
 	if (OnRail > 0 && Total > static_cast<size_t>(OnRail))
 	{
 		const std::string More = "+" + std::to_string(Total - static_cast<size_t>(OnRail));
@@ -450,7 +472,7 @@ void RiverLine::PlayerCard(double Now)
 		else
 		{
 			CardTrophies(P, Mx, R.Y + 292.0f, Mw, R.Y + R.H - 20.0f - (R.Y + 292.0f), Now);
-			CardBadgeTiles(*C, UI, S, CardShown, Held, Mx, R.Y + 292.0f, Mw, R.Y + R.H - 20.0f - (R.Y + 292.0f), !P.Awards.empty(), CardTabAt, Now);
+			CardBadgeTiles(*C, UI, S, CardShown, Held, Frame, Mx, R.Y + 292.0f, Mw, R.Y + R.H - 20.0f - (R.Y + 292.0f), !P.Awards.empty(), CardTabAt, Now);
 		}
 		C->SetAlpha(A0);
 		if (Outside.Clicked && !Inside.Hover)

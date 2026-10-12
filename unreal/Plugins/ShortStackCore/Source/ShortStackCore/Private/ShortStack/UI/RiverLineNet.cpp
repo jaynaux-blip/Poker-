@@ -3093,74 +3093,107 @@ void RiverLine::BoardsPage(double Now)
 			int Tier;
 			const char* Name;
 		};
-		const CardRow Cards[3] = {{3, "Black Card"}, {2, "Gold Card"}, {1, "Circuit Card"}};
-		int Holders[4] = {0, 0, 0, 0};
-		for (const world::Npc& N : W.People())
+		static const CardRow Cards[3] = {{3, "Black Card"}, {2, "Gold Card"}, {1, "Circuit Card"}};
+		// Everything under the heading moves only when the world does (a day, the player's results): the holders, the cut
+		// lines, the player's road and the next festival are worked out then, and the rows and the paragraph are drawn once
+		// into a fragment that's replayed every other frame (§10, the Leaderboards' draw time). Keyed by the seed too, as
+		// HONORS is: another career's world at the same address can stand at the same revisions and day.
+		static const world::World* CardsFor = nullptr;
+		static uint32_t CardsSeed = 0;
+		static int CardsRev = -1;
+		static int CardsHeroRev = -1;
+		static int CardsDay = -1;
+		static int Holders[4] = {0, 0, 0, 0};
+		static double Cuts[4] = {0.0, 0.0, 0.0, 0.0};
+		static std::string Road;
+		static float Bottom = 0.0f;
+		static uint64_t Art = 0;
+		const int Today = net::DayOf(World);
+		if (CardsFor != &W || CardsSeed != W.Seed() || CardsRev != W.Revision() || CardsHeroRev != W.HeroRevision() || CardsDay != Today)
 		{
+			CardsFor = &W;
+			CardsSeed = W.Seed();
+			CardsRev = W.Revision();
+			CardsHeroRev = W.HeroRevision();
+			CardsDay = Today;
+			for (int Tr = 0; Tr <= 3; ++Tr)
+			{
+				Holders[Tr] = 0;
+				Cuts[Tr] = Tr >= 1 ? W.CardCutLine(Tr) : 0.0;
+			}
+			for (const world::Npc& N : W.People())
+			{
+				for (int Tr = 1; Tr <= 3; ++Tr)
+				{
+					Holders[Tr] += N.CardBest >= Tr ? 1 : 0;
+				}
+			}
 			for (int Tr = 1; Tr <= 3; ++Tr)
 			{
-				Holders[Tr] += N.CardBest >= Tr ? 1 : 0;
+				Holders[Tr] += W.HeroCardBest() >= Tr ? 1 : 0;
 			}
-		}
-		for (int Tr = 1; Tr <= 3; ++Tr)
-		{
-			Holders[Tr] += W.HeroCardBest() >= Tr ? 1 : 0;
-		}
-		for (int I = 0; I < 3; ++I)
-		{
-			const float Ry = Y + 30.0f + Nf(I) * 28.0f;
-			badge::Badge B;
-			B.K = badge::Kind::CircuitCard;
-			B.Tier = Cards[I].Tier;
-			B.Year = Year;
-			badgeart::Draw(*C, B, Rt.X + 36.0f, Ry - 5.0f, 18.0f, Now);
-			UI.Text(Cards[I].Name, Rt.X + 54.0f, Ry, Ts(14.0f, 700, pal::Ink));
-			UI.Text("Top " + std::to_string(badge::CardTop[Cards[I].Tier - 1]), Rt.X + 170.0f, Ry, Ts(13.0f, 600, pal::Muted));
-			const double Cut = W.CardCutLine(Cards[I].Tier);
-			UI.Text(Cut > 0.0 ? "cut " + Grouped(static_cast<int64_t>(std::llround(Cut))) : std::string("cut \xE2\x80\x94"), Rt.X + 250.0f, Ry, Ts(13.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, true));
-			UI.Text(std::to_string(Holders[Cards[I].Tier]) + (Holders[Cards[I].Tier] == 1 ? " holds it" : " hold it"), Rt.X + Rt.W - 26.0f, Ry, Ts(13.0f, 700, Holders[Cards[I].Tier] > 0 ? pal::Ink : pal::Dim, Align::Right));
-		}
-		// The player's road to a card.
-		const int Today = net::DayOf(World);
-		const double Points = W.HeroCircuitPoints();
-		const int Rank = W.CircuitRank(-1);
-		std::string Road;
-		if (W.HeroCardBest() >= 1)
-		{
-			Road = "You hold the " + std::string(Cards[3 - std::min(3, W.HeroCardBest())].Name) + " this season.";
-		}
-		else if (Points <= 0.0)
-		{
-			Road = "No circuit points yet. They come from cashes at a regional festival or bigger.";
-		}
-		else
-		{
-			const double Cut = W.CardCutLine(1);
-			const int Short = Cut > 0.0 ? static_cast<int>(std::ceil(std::max(0.0, Cut - Points + 1.0))) : 0;
-			Road = Short > 0 ? Grouped(Short) + " circuit pts to your Card." : "#" + Grouped(Rank) + " in circuit points: inside the Card's cut.";
-			if (world::SeasonWeek(Today) < badge::CardFromWeek)
+			// The player's road to a card.
+			const double Points = W.HeroCircuitPoints();
+			if (W.HeroCardBest() >= 1)
 			{
-				Road += " Standings post on Mondays from week " + std::to_string(badge::CardFromWeek) + ".";
+				Road = "You hold the " + std::string(Cards[3 - std::min(3, W.HeroCardBest())].Name) + " this season.";
 			}
-		}
-		// The next festival that counts.
-		static int FestDay = -1;
-		static std::string FestLine;
-		if (FestDay != Today)
-		{
-			FestDay = Today;
-			FestLine.clear();
+			else if (Points <= 0.0)
+			{
+				Road = "No circuit points yet. They come from cashes at a regional festival or bigger.";
+			}
+			else
+			{
+				const double Cut = Cuts[1];
+				const int Short = Cut > 0.0 ? static_cast<int>(std::ceil(std::max(0.0, Cut - Points + 1.0))) : 0;
+				Road = Short > 0 ? Grouped(Short) + " circuit pts to your Card." : "#" + Grouped(W.CircuitRank(-1)) + " in circuit points: inside the Card's cut.";
+				if (world::SeasonWeek(Today) < badge::CardFromWeek)
+				{
+					Road += " Standings post on Mondays from week " + std::to_string(badge::CardFromWeek) + ".";
+				}
+			}
+			// The next festival that counts.
 			for (const world::LiveEvent& E : world::LiveFestivals(Today, 120))
 			{
 				if (world::CircuitEvent(E.Kind, false) && E.Start >= World)
 				{
 					const int In = net::DayOf(E.Start) - Today;
-					FestLine = (E.City.empty() ? E.Name : E.City) + (In <= 0 ? " is today." : In == 1 ? " is tomorrow." : " is in " + std::to_string(In) + " days.");
+					Road += " " + (E.City.empty() ? E.Name : E.City) + (In <= 0 ? " is today." : In == 1 ? " is tomorrow." : " is in " + std::to_string(In) + " days.");
 					break;
 				}
 			}
+			// Where the paragraph ends (it's measured here, not in the replay): the three rows, then up to three lines.
+			const size_t Lines = NetWrap(*C, Road, Rt.W - 52.0f, 13.0f, 600).size();
+			Bottom = 30.0f + 3.0f * 28.0f + 4.0f + 18.0f * static_cast<float>(std::min<size_t>(Lines, 3));
+			// The fragment for these numbers, named by the state they come from (a laptop going back and forth between two
+			// worlds reuses each one's rather than piling up new ones).
+			Art = 0x43495243554954ull; // "CIRCUIT"
+			for (const uint64_t Part : {static_cast<uint64_t>(CardsSeed), static_cast<uint64_t>(static_cast<uint32_t>(CardsRev)), static_cast<uint64_t>(static_cast<uint32_t>(CardsHeroRev)), static_cast<uint64_t>(static_cast<uint32_t>(Today))})
+			{
+				Art = (Art ^ Part) * 0x100000001b3ull;
+				Art ^= Art >> 29;
+			}
 		}
-		Y = NetParagraph(*C, Road + (FestLine.empty() ? std::string() : " " + FestLine), Rt.X + 26.0f, Y + 30.0f + 3.0f * 28.0f + 4.0f, Rt.W - 52.0f, 13.0f, 600, Hex(0xc3cedf), 18.0f, 3);
+		const float Wide = Rt.W;
+		C->Cached(Art, Rt.X, Y, [Year, Wide](Canvas& Cc) {
+			for (int I = 0; I < 3; ++I)
+			{
+				const float Ry = 30.0f + Nf(I) * 28.0f;
+				badge::Badge B;
+				B.K = badge::Kind::CircuitCard;
+				B.Tier = Cards[I].Tier;
+				B.Year = Year;
+				badgeart::Draw(Cc, B, 36.0f, Ry - 5.0f, 18.0f, 0.0);
+				Cc.Text(Cards[I].Name, 54.0f, Ry, Ts(14.0f, 700, pal::Ink));
+				Cc.Text("Top " + std::to_string(badge::CardTop[Cards[I].Tier - 1]), 170.0f, Ry, Ts(13.0f, 600, pal::Muted));
+				const double Cut = Cuts[Cards[I].Tier];
+				Cc.Text(Cut > 0.0 ? "cut " + Grouped(static_cast<int64_t>(std::llround(Cut))) : std::string("cut \xE2\x80\x94"), 250.0f, Ry, Ts(13.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, true));
+				const int Held = Holders[Cards[I].Tier];
+				Cc.Text(std::to_string(Held) + (Held == 1 ? " holds it" : " hold it"), Wide - 26.0f, Ry, Ts(13.0f, 700, Held > 0 ? pal::Ink : pal::Dim, Align::Right));
+			}
+			NetParagraph(Cc, Road, 26.0f, 30.0f + 3.0f * 28.0f + 4.0f, Wide - 52.0f, 13.0f, 600, Hex(0xc3cedf), 18.0f, 3);
+		});
+		Y += Bottom;
 	}
 	// Your standings everywhere.
 	Section("YOUR STANDINGS", Rt.X + 26.0f, std::max(Y, Rt.Y + Rt.H - 300.0f), pal::Accent);

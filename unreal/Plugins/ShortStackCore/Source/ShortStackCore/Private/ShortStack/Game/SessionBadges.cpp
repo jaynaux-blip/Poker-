@@ -241,6 +241,16 @@ std::vector<badge::Badge> Session::Unseen()
 	}
 	if (!Out.empty())
 	{
+		// The one caller (the laptop, once a frame) toasts each; the session gives the toast its sound (§5.7: SoundId::Alert)
+		// and, on air, Kast's chat its one reaction to each (§5.6).
+		Sound(SoundId::Alert, 0.8);
+		if (Stream.Live)
+		{
+			for (const badge::Badge& B : Out)
+			{
+				Stream.Celebrate(Channel, StreamInputs(), badge::ChatReaction(B, static_cast<uint32_t>(session_badges_detail::MixText(0xcbf29ce484222325ull, badge::SeenKey(B)))));
+			}
+		}
 		Save();
 	}
 	return Out;

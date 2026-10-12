@@ -11,7 +11,7 @@
 //            | .List <event id> <percent> [markup] | .Pay
 //   ss.Sponsor.Describe | .Standing <0-5> | .Offer <brand> | .Sign <brand> | .Period | .Breach <pickedup|restricted>
 //              | .Patch <chest|sleeve|cap> [brand] | .Appear <venue>
-//   ss.Badge.Grant <kind> [tier|count] | .Describe <name|me> | .Atlas | .Review
+//   ss.Badge.Grant <kind> [tier|count] | .Clear | .Describe <name|me> | .Atlas | .Review | .Next | .Unseen
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
@@ -100,4 +100,8 @@ FSegmentCommand BadgeGrant(EFeature::Badge, TEXT("ss.Badge.Grant"), TEXT("Grant"
 FSegmentCommand BadgeDescribe(EFeature::Badge, TEXT("ss.Badge.Describe"), TEXT("Describe"), TEXT("ss.Badge.Describe <name|me>: someone's badges and how they were earned."));
 FSegmentCommand BadgeAtlas(EFeature::Badge, TEXT("ss.Badge.Atlas"), TEXT("Atlas"), TEXT("The badge atlas: its cells and glyphs."));
 FSegmentCommand BadgeReview(EFeature::Badge, TEXT("ss.Badge.Review"), TEXT("Review"), TEXT("The month's badge review now: Verified, the club, the room's leaders (testing)."));
+FSegmentCommand BadgeClear(EFeature::Badge, TEXT("ss.Badge.Clear"), TEXT("Clear"), TEXT("Drops the debug grants (testing)."));
+FSegmentCommand BadgeNext(EFeature::Badge, TEXT("ss.Badge.Next"), TEXT("Next"), TEXT("The Career page's progress cards: the badges in reach and how far along."));
+FSegmentCommand BadgeUnseen(EFeature::Badge, TEXT("ss.Badge.Unseen"), TEXT("Unseen"),
+	TEXT("Which badges are still to be celebrated (read only: the laptop takes them once it's logged in)."));
 } // namespace SegmentDetail

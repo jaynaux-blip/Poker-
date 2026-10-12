@@ -81,6 +81,8 @@ public:
 	};
 
 	explicit RiverLine(Session& InSession) : S(InSession) {}
+	/** Drops the per-laptop state the apps keep beside the class (Mail, Backing, tips, badge toasts). */
+	SHORTSTACKCORE_API ~RiverLine();
 
 	Ui UI;
 	/** Set when the player clicks "Lean back"; the host clears it after handling. */

@@ -55,10 +55,21 @@ struct MailState
 };
 
 /** The app's state, by laptop (RiverLine's header is Phase A's, so it lives here). */
+std::map<const RiverLine*, MailState>& MailStates()
+{
+	static std::map<const RiverLine*, MailState> ByLaptop;
+	return ByLaptop;
+}
+
 MailState& StateOf(const RiverLine* Who)
 {
-	static std::map<const RiverLine*, MailState> States;
-	return States[Who];
+	return MailStates()[Who];
+}
+
+/** A laptop going (~RiverLine): its Mail state goes with it. */
+void ForgetMail(const RiverLine* Who)
+{
+	MailStates().erase(Who);
 }
 
 struct Thread

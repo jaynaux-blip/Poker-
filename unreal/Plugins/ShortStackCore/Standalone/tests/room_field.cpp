@@ -6,6 +6,13 @@
 // ported from FString to std::string), each run on its own copy of one world, at the moment of registration, for every
 // event of a week and a half. The three must agree on the planned field, the roster (names and how they play), the
 // faces (name, label, line) and the champions' board.
+//
+// One deliberate difference (the segment's ruling, next_segment_spec §1.9 #22 and rule C4): the old paths took
+// "Embercrest regular" from the world's habit list (EmbercrestRegulars); DescribeField takes it from the Players Club
+// tier, 1 or better from the room record. So the faces are compared with the old paths' faces under that ruling
+// (RuledFaces): whoever knows the player keeps their face word for word, and the rest of the field shows as a regular
+// exactly when they hold a club card.
+#include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/World.h"
@@ -256,6 +263,61 @@ bool Same(const Notes& A, const live::FieldNotes& B)
 	return A.Planned == B.Planned && A.Roster == B.Roster && SameFaces(A.Faces, B.Faces) && A.Board == B.Board;
 }
 
+/** Everything but the faces: the planned field, the roster and the board. */
+bool SameField(const Notes& A, const live::FieldNotes& B)
+{
+	return A.Planned == B.Planned && A.Roster == B.Roster && A.Board == B.Board;
+}
+
+/** A Players Club member on Day (tier 1 or better, the room record's upgrade-at-once, drop-on-the-1st rule). */
+bool Member(const world::Npc& N, int Day)
+{
+	return N.Room.Venue == "embercrest" && ss::badge::ClubTier(N.Room.VisitsIn(Day), N.Room.VisitsAtMonthStart(Day)) >= 1;
+}
+
+/**
+ * An old path's faces under §1.9 #22, read from W as it stood at registration: in the field's order, everyone who knows
+ * the player keeps the face the old path gave them (label and line), and the rest show as "Embercrest regular", with the
+ * same spoken greeting, exactly when they hold a club card. Dropped and Added count the faces the ruling took from the
+ * habit list's regulars and gave to club members off it.
+ */
+std::vector<life::LiveFace> RuledFaces(world::World W, const live::Occurrence& O, const std::string& HeroName, const std::vector<life::LiveFace>& Old, double At, int& Dropped,
+	int& Added)
+{
+	const int Day = net::DayOf(At);
+	const std::vector<int> Habit = W.EmbercrestRegulars();
+	std::vector<life::LiveFace> Out;
+	for (int Npc : W.Registered(O.Id))
+	{
+		const world::Npc* N = W.Get(Npc);
+		if (!N || N->Name == HeroName)
+		{
+			continue;
+		}
+		const auto Was = std::find_if(Old.begin(), Old.end(), [N](const life::LiveFace& F) { return F.Name == N->Name; });
+		if (Was != Old.end() && Was->Label != "Embercrest regular")
+		{
+			Out.push_back(*Was);
+			continue;
+		}
+		const bool OnHabit = std::find(Habit.begin(), Habit.end(), Npc) != Habit.end();
+		if (Member(*N, Day))
+		{
+			Added += OnHabit ? 0 : 1;
+			life::LiveFace F;
+			F.Name = N->Name;
+			F.Label = "Embercrest regular";
+			F.Line = W.SpokenGreeting(Npc, live::FaceHash(O.Id + N->Name));
+			Out.push_back(F);
+		}
+		else
+		{
+			Dropped += Was != Old.end() ? 1 : 0;
+		}
+	}
+	return Out;
+}
+
 bool Same(const Notes& A, const Notes& B)
 {
 	return A.Planned == B.Planned && A.Roster == B.Roster && SameFaces(A.Faces, B.Faces) && A.Board == B.Board;
@@ -278,6 +340,9 @@ int Run()
 	int Known = 0;
 	int Rows = 0;
 	int Named = 0;
+	int Dropped = 0; // habit-list regulars without a club card: no longer faces
+	int Added = 0;   // club members off the habit list: now faces
+	int HeroRows = 0;
 	for (const uint32_t Seed : {0x5eed0001u, 0x5eed0002u})
 	{
 		world::World W;
@@ -319,14 +384,42 @@ int Run()
 				world::World ForCore = W;
 				const Notes Session = OldSession(ForSession, O, Hero, At);
 				const Notes Desk = OldDesk(ForDesk, O, Hero, At);
+				// The player's save: six Embercrest nights in the last month, a club card (Regular), so they have a badge row.
 				life::State Player;
+				for (int Back = 6; Back >= 1; --Back)
+				{
+					life::LiveDay Ld;
+					Ld.Day = net::DayOf(At) - 4 * Back;
+					Ld.Events = 1;
+					Ld.Embercrest = 1;
+					Player.LiveDays.push_back(Ld);
+				}
 				const live::FieldNotes Core = live::DescribeField(ForCore, O, Hero, Player, At);
 				ForCore.HeroEntered(O.Id, O.T->Name);
+				int D0 = 0;
+				int A0 = 0;
+				const std::vector<life::LiveFace> SessionRuled = RuledFaces(W, O, Hero, Session.Faces, At, Dropped, Added);
+				const std::vector<life::LiveFace> DeskRuled = RuledFaces(W, O, Hero, Desk.Faces, At, D0, A0);
 				Expect(Same(Session, Desk), "room field: the session's and the desk's old paths agree for " + O.Id);
-				Expect(Same(Session, Core), "room field: DescribeField gives the session's notes for " + O.Id);
-				Expect(Same(Desk, Core), "room field: DescribeField gives the desk's notes for " + O.Id);
+				Expect(SameField(Session, Core) && SameFaces(SessionRuled, Core.Faces),
+					"room field: DescribeField gives the session's notes for " + O.Id + " (its regulars from the club tier, §1.9 #22)");
+				Expect(SameField(Desk, Core) && SameFaces(DeskRuled, Core.Faces), "room field: DescribeField gives the desk's notes for " + O.Id + " (its regulars from the club tier)");
+				// The player's own badge row: last, under their name (not in the roster), their club card from the save; their
+				// row on the month's leaders, if they're on it, shows the same.
+				const std::string Mine = ss::badge::HeroFieldPack(W, Player, At);
+				const ss::badge::Set MineSet = ss::badge::Unpack(Mine);
+				const ss::badge::Badge* Club = MineSet.Find(ss::badge::Kind::Club);
+				bool LeadersMine = true;
+				for (const life::RoomLeader& L : Core.Leaders)
+				{
+					LeadersMine = LeadersMine && (L.Name != Hero || L.Badge == Mine);
+				}
+				Expect(!Core.Badges.empty() && Core.Badges.back().first == Hero && Core.Badges.back().second == Mine && Club && Club->Tier == 1 &&
+						   std::none_of(Core.Roster.begin(), Core.Roster.end(), [&Hero](const std::pair<std::string, int>& R) { return R.first == Hero; }) && LeadersMine,
+					"room field: the player's own badge row (their club card from the save) under their name, and on the leaders, for " + O.Id);
+				HeroRows += std::any_of(Core.Leaders.begin(), Core.Leaders.end(), [&Hero](const life::RoomLeader& L) { return L.Name == Hero; }) ? 1 : 0;
 				// And Apply puts them on an entry as the session did, with the features' notes exactly as DescribeField gave
-				// them (voices, badges, patches, the month's leaders: empty while those were stubs).
+				// them (voices, badges, patches, the month's leaders).
 				life::LiveEntry E;
 				live::Apply(Core, E);
 				bool Copied = E.Voices.size() == Core.Voices.size() && E.Badges == Core.Badges && E.Patches == Core.Patches && E.Leaders.size() == Core.Leaders.size();
@@ -338,7 +431,7 @@ int Run()
 				{
 					Copied = E.Leaders[K].Rank == Core.Leaders[K].Rank && E.Leaders[K].Name == Core.Leaders[K].Name && E.Leaders[K].Badge == Core.Leaders[K].Badge;
 				}
-				Expect(SameFaces(E.Faces, Session.Faces) && E.Board == Session.Board && Copied, "room field: Apply writes the faces, the board and the features' notes for " + O.Id);
+				Expect(SameFaces(E.Faces, SessionRuled) && E.Board == Session.Board && Copied, "room field: Apply writes the faces, the board and the features' notes for " + O.Id);
 				++Events;
 				Faces += static_cast<int>(Core.Faces.size());
 				Rows += static_cast<int>(Core.Board.size());
@@ -363,8 +456,11 @@ int Run()
 		}
 	}
 	Expect(Events >= 40 && Faces > 0 && Known > 0 && Rows > 0 && Named > 0, "room field: the check saw fields, faces (some who know the player) and boards");
-	std::printf("room field: %d events, %d named entrants, %d faces (%d who know the player), %d board rows: the session's, the desk's and DescribeField's notes %s\n",
-		Events, Named, Faces, Known, Rows, Failures == 0 ? "agree" : "DIFFER");
+	// The ruling must have mattered somewhere, or the face check couldn't tell the club tier from the habit list.
+	Expect(Dropped + Added > 0, "room field: the club tier and the habit list disagree on someone, so the regulars' check means something");
+	std::printf("room field: %d events, %d named entrants, %d faces (%d who know the player), %d board rows, %d leader rows for the player; by the club tier %d regulars added, %d dropped: "
+				"the session's, the desk's and DescribeField's notes %s\n",
+		Events, Named, Faces, Known, Rows, HeroRows, Added, Dropped, Failures == 0 ? "agree" : "DIFFER");
 	return Failures;
 }
 } // namespace room_field

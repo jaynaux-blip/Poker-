@@ -205,6 +205,18 @@ struct FBackRoomPersona
 	float HairRedness = 0.0f;
 	UPROPERTY(EditAnywhere, Category = "Persona")
 	float HairWhite = 0.0f;
+	/**
+	 * The sponsors' patches worn (next_segment_spec 3.10): a brand id (sponsor::Brand::Id) on the chest, the sleeve and the
+	 * cap, or empty. The player's come from the closet (AShortStackCharacter::HeroWear's Patches); the world's sponsored
+	 * people's from tonight's field (the entry's livepatch lines, SponsorWear::ForWorldPerson). Dealers wear none. The cap's
+	 * shows only on a cap or a beanie.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	FString PatchChest;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	FString PatchSleeve;
+	UPROPERTY(EditAnywhere, Category = "Persona")
+	FString PatchCap;
 
 	/** What their body gives away (2 to 4 each; pros have reverse tells). */
 	UPROPERTY(EditAnywhere, Category = "Persona")
@@ -401,14 +413,33 @@ public:
 	/** Dresses them again from the persona (after it or the ss.Wear.* tunables change). */
 	void Redress();
 	bool IsBusy() const;
+	/**
+	 * The sponsors' patches (the persona's three spots) put on or taken off in place, nothing else dressed again (ue-wear,
+	 * next_segment_spec 3.10): the chest's on spine_05 and the sleeve's on upperarm_l where they were measured on this body
+	 * over its tee, the cap's on the hat's front panel. A no-op when they're already the ones worn.
+	 */
+	void WearPatches(const FString& Chest, const FString& Sleeve, const FString& Cap);
+	/** The patches worn and where ("chest riverline on the tee (ExtraC, measured, 7.6 cm before spine_05)"); empty for none. */
+	FString DescribePatches() const;
+	/** Whether a cap patch would show on them: a cap or a beanie on their head (the trilby and the bucket hat have no front panel). */
+	bool CanWearCapPatch() const;
+	/**
+	 * Up on their feet (the rail's backers, next_segment_spec 2.13, placed by ue-room's PlaceBackers): no chair, the body on the
+	 * street's baked standing idle (UStreetMocap's StandIdle), the face and the patches as seated. False sits them back down
+	 * on their chair. Returns whether they stand (false: no idle is baked for this body, and they stay on their chair).
+	 */
+	bool SetStanding(bool bStand);
+	bool IsStanding() const { return bStanding; }
 
 private:
 	void Build();
 	void BuildFromMetaHuman();
 	/** The persona's print or graphic and colors on a shirt material; their trousers' color on the rest. */
 	void DressOutfit(UMaterialInstanceDynamic* Mid, bool bShirt) const;
-	/** The persona's hat and eyewear, fitted to the face (the eyes' midpoint and spacing in the reference pose). */
+	/** The persona's hat and eyewear, fitted to the face (the eyes' midpoint and spacing in the reference pose); then the patches. */
 	void ApplyWear();
+	/** The persona's sponsor patches (SponsorWear.h): the chest's and the sleeve's on the body, the cap's on the hat worn (HatWorn). */
+	void ApplyPatches();
 	/** Hero: the face, the hair and what's worn on the head hidden or drawn as the head's state says (first person: shadows only). */
 	void ApplyHeroHeadState();
 	/** Hero: whether the creator's hairstyle (and hat) keep any of the MetaHuman's scalp hair (a hat then sits over it). */
@@ -443,9 +474,18 @@ private:
 	/** The Blueprint they were copied from. */
 	UPROPERTY()
 	TObjectPtr<UClass> WornClass;
-	/** Hats and glasses (ApplyWear). */
+	/** Hats and glasses (ApplyWear), and the cap's patch on the hat (ApplyPatches): the head's pieces. */
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> Worn;
+	/** The sponsors' patches on the body: the chest's and the sleeve's (made the first time, hidden while none is worn). */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> PatchParts[2];
+	/** The hat ApplyWear put on (the cap's patch rides it), and the cap's patch (among Worn). */
+	TWeakObjectPtr<UStaticMeshComponent> HatWorn;
+	TWeakObjectPtr<UStaticMeshComponent> CapPatch;
+	FString PatchNote;
+	uint32 PatchTestSeen = 0;
+	bool bStanding = false;
 	/** Hero: the hair copied for the third-person view (none until the shoulder camera is first used). */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<USceneComponent>> HeroHair;

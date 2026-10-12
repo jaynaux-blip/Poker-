@@ -606,6 +606,30 @@ void Measuring()
 	Expect(sponsor::Appear(P.L.Sponsors, "store", Night) != "" && sponsor::Appear(P.L.Sponsors, "barber", Noon) != "", "measure: no appearance outside the window or the shop");
 	Expect(sponsor::Appear(P.L.Sponsors, "store", Noon).empty() && P.Of("luckypenny")->Now.Appearances == 1, "measure: the photo with Ray, ten to ten");
 	Expect(sponsor::Appear(P.L.Sponsors, "store", Noon + 60.0) == "You've done that one this month.", "measure: one photo a month");
+	// Team Embercrest's meet: a Sunday from a quarter to six through the first level (cards at seven), so the player off the
+	// bus (seated at ten to seven) can still make it from the chair; not after.
+	for (const double At : {19.0 * 60.0 + 5.0, 19.0 * 60.0 + 25.0})
+	{
+		World Em;
+		Em.Signed("embercrest", T0);
+		int Sunday = ss::net::DayOf(T0) + 1;
+		while (ss::net::Weekday(Sunday) != 6)
+		{
+			++Sunday;
+		}
+		const double Base = static_cast<double>(Sunday) * Day;
+		const std::vector<sponsor::Window> Ws = sponsor::Appearances(Em.L.Sponsors, Base, Base + Day);
+		const bool Listed = Ws.size() == 1 && Ws[0].Venue == "embercrest" && std::fabs(Ws[0].From - (Base + 17.0 * 60.0 + 45.0)) < 1e-6 && std::fabs(Ws[0].To - (Base + 19.0 * 60.0 + 20.0)) < 1e-6;
+		const std::string Why = sponsor::Appear(Em.L.Sponsors, "embercrest", Base + At);
+		if (At < 19.0 * 60.0 + 20.0)
+		{
+			Expect(Listed && Why.empty() && Em.Of("embercrest")->Now.Appearances == 1, "measure: Meet the regulars from the chair in the Sunday's first level");
+		}
+		else
+		{
+			Expect(Listed && !Why.empty() && Em.Of("embercrest")->Now.Appearances == 0, "measure: no meet once the first level is over");
+		}
+	}
 }
 
 // ------------------------------------------------------------------ 7. strikes and cures

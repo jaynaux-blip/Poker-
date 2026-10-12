@@ -988,6 +988,34 @@ void Space()
 		Expect(Band >= 0.85, "the PA in the room stays in its band", Fmt("%.1f%%", 100.0 * Band));
 		Expect(Room.Measure().PaDb > -60.0f, "the PA meters");
 	}
+	// The PA's level (SetPaLevel, the Voices slider): -12 dB is about 12 dB quieter as heard; 0 dB is the room as mixed,
+	// sample for sample; -120 is silent.
+	{
+		const Timbre Pa = PaTimbre(2u);
+		const SpeechPlan Line = PlanSpeech("We're down to our last two tables. Sixteen players left.", Pa, 0.8f, 6u);
+		std::vector<float> Heard[4];
+		const float PaLevels[4] = {0.0f, 0.0f, -12.0f, -120.0f};
+		for (int K = 0; K < 4; ++K)
+		{
+			CardRoom Room(49u);
+			Room.SetEmitters(Nightly(14, 12));
+			Room.SetListener(1310.0f, -525.0f, 0.0f);
+			Room.SetMix(-120.0f, -120.0f, -120.0f, -120.0f, -120.0f, 0.7f);
+			Play(Room, 1.0);
+			if (K > 0)
+			{
+				Room.SetPaLevel(PaLevels[K]);
+			}
+			Room.Say(Line, Pa, CardRoom::Spot::Pa, 0, 0.8f, false);
+			Heard[K] = Play(Room, 4.5);
+		}
+		const double Base = Db(StereoPower(Heard[0], 2, 0, Heard[0].size()));
+		const double Down = Db(StereoPower(Heard[2], 2, 0, Heard[2].size())) - Base;
+		const double Off = Db(StereoPower(Heard[3], 2, 0, Heard[3].size())) - Base;
+		Expect(Heard[1] == Heard[0], "the PA at 0 dB is the room as mixed, sample for sample");
+		Expect(Down <= -10.5 && Down >= -13.5, "the PA's level moves the PA as heard", Fmt("%.1f dB at -12", Down));
+		Expect(Off <= -40.0, "the PA's level at -120 silences it", Fmt("%.1f dB", Off));
+	}
 }
 
 void Ducks()
@@ -1034,6 +1062,32 @@ void Ducks()
 		Expect(Ratio(0.07, 0.09) <= -4.5, "Duck(-6) takes the talk down within 80 ms", Fmt("%.2f dB at 70-90 ms", Ratio(0.07, 0.09)));
 		Expect(Ratio(0.2, 1.0) <= -5.5, "and holds it", Fmt("%.2f dB", Ratio(0.2, 1.0)));
 		Expect(std::fabs(Ratio(2.0, 2.5)) < 0.5, "and lets it go", Fmt("%.2f dB", Ratio(2.0, 2.5)));
+	}
+	// The PA ducks the room's talk while it's heard at all (a quiet PA, the Voices slider down, still does); a silenced PA
+	// (SetPaLevel -120, Voices at 0) leaves the room as it was.
+	{
+		const Timbre Pa = PaTimbre(2u);
+		const SpeechPlan Call = PlanSpeech("Players, we are on the bubble. We're now hand for hand.", Pa, 0.85f, 7u);
+		double Under[2] = {0.0, 0.0};
+		const float PaLevels[2] = {-60.0f, -120.0f};
+		for (int K = 0; K < 2; ++K)
+		{
+			CardRoom A(57u), B(57u);
+			for (CardRoom* R : {&A, &B})
+			{
+				R->SetEmitters(Nightly(14, 12));
+				R->SetListener(1310.0f, -525.0f, 0.0f);
+				R->SetMix(-120.0f, 0.0f, -120.0f, -120.0f, -120.0f, 0.7f);
+				R->SetPaLevel(PaLevels[K]);
+				Play(*R, 2.0);
+			}
+			A.Say(Call, Pa, CardRoom::Spot::Pa, 0, 0.85f, false);
+			const std::vector<float> Sa = Play(A, 2.0), Sb = Play(B, 2.0);
+			const size_t F = static_cast<size_t>(0.3 * SampleRate), T = static_cast<size_t>(1.5 * SampleRate);
+			Under[K] = Db(StereoPower(Sa, 2, F, T)) - Db(StereoPower(Sb, 2, F, T));
+		}
+		Expect(Under[0] <= -3.0, "a quiet PA still ducks the room's talk", Fmt("%.2f dB at -60", Under[0]));
+		Expect(std::fabs(Under[1]) < 0.5, "a silenced PA leaves the room's talk alone", Fmt("%.2f dB at -120", Under[1]));
 	}
 	// A murmured line at your table ducks the room's talk, never itself: from the table (which ducks) it's as loud as the
 	// same line from the bar's spot in the same place (which doesn't). Each line is heard alone: the room with it, less
@@ -1175,6 +1229,7 @@ void Controls()
 	// Memory and voices.
 	{
 		CardRoom Room(67u);
+		Room.SetVoiceBudget(6); // the dev flag's talkers: more state than the fallback that ships (budget 0) ever holds
 		SeatAtTwelve(Room);
 		SetMood(Room, Break);
 		std::vector<float> Buf(2400);

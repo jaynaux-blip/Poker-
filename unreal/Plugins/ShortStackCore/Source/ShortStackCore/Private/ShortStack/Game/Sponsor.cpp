@@ -2835,10 +2835,13 @@ bool WindowOn(const std::string& BrandId, int Day, Window& W)
 	}
 	if (BrandId == "embercrest" && Wd == 6)
 	{
+		// From a quarter to six, through the Sunday's first level (cards at seven, 20-minute levels): someone in the room
+		// since the Warm-Up does it before cards; someone off the bus (the room seats them at ten to seven) stands up from
+		// the chair for a lap with Denise before the blinds go up.
 		W.Venue = "embercrest";
 		W.Label = "Meet the regulars";
 		W.From = Base + 17.0 * 60.0 + 45.0;
-		W.To = Base + 18.0 * 60.0 + 45.0;
+		W.To = Base + 19.0 * 60.0 + 20.0;
 		return true;
 	}
 	return false;

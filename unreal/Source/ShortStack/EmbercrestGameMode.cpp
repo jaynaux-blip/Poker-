@@ -28,6 +28,8 @@
 #include "NightOneSaveGame.h"
 #include "SFrontEndWidget.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/UI/Canvas.h"
 #include "ShortStackCharacter.h"
 
 #include <algorithm>
@@ -102,6 +104,41 @@ FString DayWordOf(const ss::live::Occurrence& O, double World)
 		return bEvening ? TEXT("TOMORROW NIGHT") : TEXT("TOMORROW");
 	}
 	return Str(ss::net::WeekdayName(O.Day, true)).ToUpper();
+}
+
+/**
+ * The arrival's skip on offer (the letterbox's foot): the button's glyph as every prompt in the game draws it (core's
+ * frontend glyph: A on a pad, a keyboard key's outlined cap), then SKIP, right-aligned at Right, centred on Mid.
+ */
+void SkipPrompt(ss::ui::Canvas& C, bool bGamepad, float Right, float Mid, float Alpha)
+{
+	using namespace ss::ui;
+	const float Size = 30.0f;
+	const float LabelW = C.Measure("SKIP", 22.0f, 800);
+	C.Text("SKIP", Right, Mid, TextStyle{22.0f, 800, Hex(0xebe7df, Alpha), Align::Right, Baseline::Middle});
+	const float X = Right - LabelW - 12.0f - Size;
+	const float R = Size * 0.5f;
+	if (bGamepad)
+	{
+		C.FillCircle(X + R, Mid, R, Paint(Hex(0x3ecf6e, 0.92f * Alpha)));
+		C.Text("A", X + R, Mid, TextStyle{15.0f, 900, Hex(0x07090d, Alpha), Align::Center, Baseline::Middle});
+	}
+	else
+	{
+		C.StrokeRoundRect({X + 0.75f, Mid - R + 0.75f, Size - 1.5f, Size - 1.5f}, 5.0f, Rgba(238, 241, 246, 0.55f * Alpha), 1.5f);
+		C.Text("E", X + R, Mid, TextStyle{14.0f, 700, Rgba(238, 241, 246, 0.95f * Alpha), Align::Center, Baseline::Middle});
+	}
+}
+
+/** Team Embercrest's ambassador on the marquee: "TWO-TIME EMBERCREST CHAMPION  ·  14 CASHES". */
+FString AmbassadorLine(const ss::life::State& L)
+{
+	static const TCHAR* Words[] = {TEXT("TWO"), TEXT("THREE"), TEXT("FOUR"), TEXT("FIVE"), TEXT("SIX"), TEXT("SEVEN"), TEXT("EIGHT"), TEXT("NINE")};
+	const FString Title = L.LiveWins >= 10 ? FString::Printf(TEXT("%d-TIME EMBERCREST CHAMPION"), L.LiveWins)
+						: L.LiveWins >= 2  ? FString::Printf(TEXT("%s-TIME EMBERCREST CHAMPION"), Words[L.LiveWins - 2])
+						: L.LiveWins == 1  ? FString(TEXT("EMBERCREST CHAMPION"))
+										   : FString(TEXT("THE ROOM'S AMBASSADOR"));
+	return L.LiveCashes > 0 ? FString::Printf(TEXT("%s  \xB7  %d CASH%s"), *Title, L.LiveCashes, L.LiveCashes == 1 ? TEXT("") : TEXT("ES")) : Title;
 }
 
 /** The next event still taking players at World (late registration open), within two days; invalid when there's none. */
@@ -740,6 +777,16 @@ void AEmbercrestGameMode::BuildSlides()
 		{
 			Ticker = TEXT("EMBERCREST RESORT  \xB7  CASINO  \xB7  POKER SERIES");
 		}
+	}
+	// Team Embercrest's ambassador: their name under the crest, second in the turn (next_segment_spec 3.1, 3.10; shot X1).
+	if (bCareer && ss::sponsor::Active(Save.Life.Sponsors, "embercrest", BaseMinutes))
+	{
+		FEcxSlide Team;
+		Team.Kicker = TEXT("TEAM EMBERCREST");
+		Team.Title = Hero.ToUpper();
+		Team.Detail = AmbassadorLine(Save.Life);
+		Slides.Insert(Team, FMath::Min(1, Slides.Num()));
+		Ticker += TEXT("  \xB7  TEAM EMBERCREST  \xB7  ") + Hero.ToUpper();
 	}
 	Stage->SetMarquee(Slides);
 	Stage->SetTicker(Ticker);
@@ -1434,7 +1481,9 @@ void AEmbercrestGameMode::DrawHud()
 		P.Rect(0.0f, H - Bar, W, Bar, FEcxPaint::Ink(0x000000));
 		if (RealTime - FlowAt > 0.5 && Flow == EEcxFlow::Cinematic)
 		{
-			P.Text(bGamepad ? FString(TEXT("SKIP  (A)")) : FString(TEXT("SKIP  [E]")), W - 48.0f, H - Bar * 0.5f, 24.0f, 700, FEcxPaint::Ink(0xebe7df, 0.8f), 2);
+			// The button's glyph, not "(A)" in text (next_segment_spec 6.2): it fades in as the bars settle.
+			ss::ui::Canvas Cv(*List, Game->Measurer, W, H, static_cast<float>(Size.Y) / H);
+			EcxModeDetail::SkipPrompt(Cv, bGamepad, W - 48.0f, H - FMath::Max(Bar * 0.5f, 34.0f), 0.85f * FMath::Clamp(static_cast<float>((RealTime - FlowAt - 0.5) / 0.4), 0.0f, 1.0f));
 		}
 		HudWidget->SetDrawList(List);
 		return;
@@ -1457,6 +1506,26 @@ void AEmbercrestGameMode::DrawHud()
 	for (const ss::ui::StreetHudInfo::Toast& T : Toasts)
 	{
 		Info.Toasts.push_back(T);
+	}
+	// The player's caption settings (next_segment_spec 4.9), as the street and the card room fill them.
+	const ss::ui::GameSettings& Cs = Game->Menu.Settings;
+	Info.CaptionLook.Mode = FMath::Clamp(Cs.Captions, 0, 2);
+	Info.CaptionLook.Size = FMath::Clamp(Cs.CaptionSize, 80, 200);
+	Info.CaptionLook.Backdrop = FMath::Clamp(Cs.CaptionBackdrop, 0, 100);
+	Info.CaptionLook.Names = Cs.SpeakerNames;
+	// A sponsor's appearance owed in the next day (Team Embercrest's Meet the regulars is here): the chip under the clock.
+	if (bCareer)
+	{
+		for (const ss::sponsor::Window& Wd : ss::sponsor::Appearances(Save.Life.Sponsors, Info.World, Info.World + ss::net::MinutesPerDay))
+		{
+			if (!Wd.Done)
+			{
+				Info.Due.Label = Wd.Label;
+				Info.Due.From = Wd.From;
+				Info.Due.To = Wd.To;
+				break;
+			}
+		}
 	}
 	if (!IsUiOpen() && Flow == EEcxFlow::Playing && Stage)
 	{

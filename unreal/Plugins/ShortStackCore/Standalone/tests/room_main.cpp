@@ -700,6 +700,8 @@ void RoomShape(const Night& N)
 	std::map<std::string, std::string> LastOfPool;
 	std::vector<std::string> Repeats;
 	std::map<std::pair<int, std::string>, std::vector<double>> RailAt;
+	// What each backer at the rail has said tonight, by key (stake.rail, stake.break), in order.
+	std::map<std::pair<std::string, std::string>, std::vector<std::string>> RailSaid;
 	for (size_t I = 0; I < N.Cues.size(); ++I)
 	{
 		const int Tick = N.Cues[I].first;
@@ -732,6 +734,10 @@ void RoomShape(const Night& N)
 				OneVoice = OneVoice && std::fabs(At - C.Delay) >= 1.0;
 			}
 			RailAt[{Tick, C.Who}].push_back(C.Delay);
+		}
+		if (C.Where == room::From::Rail && (C.Key == "stake.rail" || C.Key == "stake.break"))
+		{
+			RailSaid[{C.Who, C.Key}].push_back(C.Text);
 		}
 		if (Starts(C.Key, "dealer.table.") && F != N.Facts.end())
 		{
@@ -774,6 +780,24 @@ void RoomShape(const Night& N)
 		std::printf("room shape: said twice running: %s\n", R.c_str());
 	}
 	Expect(Repeats.empty(), "room shape: no line twice running from one pool");
+	// A backer's lines (stake::RailLine's pools, three a moment for what comes up more than once a night): nothing twice
+	// running, and the double-ups and bad beats all different.
+	bool RailFresh = true;
+	int RailLines = 0;
+	for (const auto& Said : RailSaid)
+	{
+		RailLines += static_cast<int>(Said.second.size());
+		for (size_t K = 1; K < Said.second.size(); ++K)
+		{
+			RailFresh = RailFresh && Said.second[K] != Said.second[K - 1];
+		}
+		if (Said.first.second == "stake.rail")
+		{
+			std::set<std::string> Distinct(Said.second.begin(), Said.second.end());
+			RailFresh = RailFresh && Distinct.size() == Said.second.size();
+		}
+	}
+	Expect(RailLines >= 6 && RailFresh, "room shape: a backer at the rail never says a line twice running, nor a rail line twice in a night (" + std::to_string(RailLines) + " lines)");
 }
 
 // ------------------------------------------------------------------ RoomCaptionFit

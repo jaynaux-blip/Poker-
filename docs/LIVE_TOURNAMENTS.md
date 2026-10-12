@@ -190,7 +190,7 @@ The flow is always: the world asks → the owner validates → the owner commits
 
 ## 11. Drama without a script
 
-The floor already announces levels, busts near the money, hand-for-hand, the bubble and the final table. Add last call for registration, "Table 7 is breaking, players to the new seats on your tickets," and the room's light pulling in as tables close. Scale reactions to the event: a Nightly win is Dee's voice on the PA and your name on the wall, not confetti. Tells stay noisy. A presentation setting (Cinematic / Standard / Fast) comes later, and Fast loses nothing that matters.
+The floor already announces levels, busts near the money, hand-for-hand, the bubble and the final table. Add last call for registration, "Table 7 is breaking, players to the new seats on your tickets," and the room's light pulling in as tables close. Scale reactions to the event: a Sunday win is Dee's voice on the PA (she's in the box on Sundays; the caption reads DEE · PA) and your name on the wall, not confetti. Tells stay noisy. A presentation setting (Cinematic / Standard / Fast) comes later, and Fast loses nothing that matters.
 
 ## 12. Budgets (measured and target)
 
@@ -213,13 +213,14 @@ Targets for this update (to verify, not promises):
 |---|---|---|
 | The Embercrest's daily schedule (§4), fields of 60 to 120, 6-max freezeouts | Bounty, re-entry and satellite events at the Embercrest | Real-money or networked play |
 | One field (R1), honest attendance (R2), draw and balancing (R3) | A second local room | A drivable city |
-| Player entry, idempotent money, separate ledger lines (R4) | River City Classic: travel, hotel, multi-event plans | Staking, sponsorship negotiation |
+| Player entry, idempotent money, separate ledger lines (R4) | River City Classic: travel, hotel, multi-event plans | |
 | Per-hand checkpoints, crash resume (R5), minimum field (R6) | Multi-day events: bags, redraws, overnight counts | Full broadcast production |
 | Breaks in the engine and the room | Feature-table seating rules, venue streaming | Crowd simulation beyond the tiers |
 | The bigger room: 20 numbered tables, stream table, cash tables, desk, cage, winners' wall, terrace; walk mode | Bond-driven conversations; staff recognition | |
 | Staying after a bust; going home | Grand Circuit, Championship, Summit | |
 | Calendar and RiverLine **Live** tab | | |
 | `ss.Live.Describe` debug | | |
+| Since then (next_segment_spec): backing (stakes, pieces, swaps, packages, coaches who back you) and sponsors (contracts, negotiation, patches, Team Embercrest) | The player backing others | |
 
 ## 14. A Saturday at the Embercrest
 
