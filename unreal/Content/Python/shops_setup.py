@@ -100,6 +100,7 @@ def build_mirror(force):
     mat = _material("M_NS_Mirror", force)
     if not mat:
         return 0
+    mat.set_editor_property("used_with_nanite", True)
     edge = _texture(mat, "EdgeMask", WHITE, -1000, -300)
     # The capture: its picture at the pixel's place on the screen, flipped.
     screen = ss._expr(mat, unreal.MaterialExpressionScreenPosition, -1300, 150)

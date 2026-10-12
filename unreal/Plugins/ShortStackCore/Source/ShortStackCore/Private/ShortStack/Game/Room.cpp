@@ -393,6 +393,33 @@ bool IsHeroName(const std::string& S)
 {
 	return S == HeroId;
 }
+
+/** Levels to the next break (1: it comes after this one); 99 with no breaks. */
+int LevelsToBreak(const Tournament& T)
+{
+	const int Every = std::max(1, T.Spec.BreakEvery);
+	return T.Spec.BreakEvery > 0 ? (T.LevelIndex / Every + 1) * Every - T.LevelIndex : 99;
+}
+
+/**
+ * The dealer's answer to a table's question (Moment::Ask's Topic: "average", "left" or "break"): the call, with what it
+ * says added to Vars (the room's).
+ */
+std::string AskAnswer(const Tournament& T, const std::string& Topic, std::map<std::string, std::string>& Vars)
+{
+	if (Topic == "average")
+	{
+		Vars["Average"] = talk::Count(static_cast<long long>(std::lround(T.AverageStack() / 1000.0)) * 1000);
+		return "average";
+	}
+	if (Topic == "left")
+	{
+		return T.InTheMoney() ? "left.itm" : "left";
+	}
+	const int ToBreak = LevelsToBreak(T);
+	Vars["LevelsCap"] = talk::Capitalized(talk::NumberWords(ToBreak));
+	return ToBreak <= 1 ? "break.next" : "break.levels";
+}
 } // namespace room_detail
 
 using namespace room_detail;
@@ -1251,6 +1278,17 @@ bool Director::Prompt(const Tournament& T, talk::Moment M, int Seat)
 	{
 		return false;
 	}
+	// A question to the dealer is asked about what the night would ask it (Chatter: the average or the count near the money,
+	// the break when it's close), else the average; the dealer answers it, as at the table.
+	std::string Topic;
+	if (M == talk::Moment::Ask && (Current == Mood::MoneyClose || Current == Mood::LastTables))
+	{
+		Topic = Unit("asktopic:" + std::to_string(T.Tick)) < 0.5 ? "average" : "left";
+	}
+	else if (M == talk::Moment::Ask)
+	{
+		Topic = LevelsToBreak(T) <= 2 ? "break" : "average";
+	}
 	for (const Seen& P : AtTable(T, Here))
 	{
 		if (P.Hero || (Seat >= 0 && P.Seat != Seat))
@@ -1263,6 +1301,10 @@ bool Director::Prompt(const Tournament& T, talk::Moment M, int Seat)
 		C.Vars["Venue"] = "embercrest";
 		C.Vars["Hero"] = HeroFirst;
 		C.Vars["Day"] = std::to_string(Occ.Day);
+		if (!Topic.empty())
+		{
+			C.Vars["Topic"] = Topic;
+		}
 		if (!HeroPatches.empty() && M == talk::Moment::Noticed)
 		{
 			C.Vars["Topic"] = HeroPatches.front().second;
@@ -1291,6 +1333,14 @@ bool Director::Prompt(const Tournament& T, talk::Moment M, int Seat)
 		Line.ToHero = M == talk::Moment::Needle || M == talk::Moment::Tank || M == talk::Moment::ShowedBluff || M == talk::Moment::Noticed;
 		Line.Tick = LastTick;
 		Out.push_back(Line);
+		if (M == talk::Moment::Ask)
+		{
+			// The dealer's answer once the question's been asked (spaced as Say spaces a line from the next).
+			TalkCursor = std::max(TalkCursor, Line.Delay + SpeechSeconds(S.Text, 15.0) + 0.7);
+			std::map<std::string, std::string> D = RoomVars(T);
+			const std::string Answer = AskAnswer(T, Topic, D);
+			Call(T, Answer, D, Here, 0.6f);
+		}
 		return true;
 	}
 	return false;
@@ -2357,8 +2407,8 @@ void Director::Chatter(const Tournament& T, const HandNote& H, const std::vector
 		}
 		const life::LiveVoice& V = *VoiceOfSeat[P.Name];
 		const auto Spend = [this, &P]() { Acc[P.Name] -= UrgeLine; };
-		// Noticed: someone who knows the player sees the patch (once a night a brand).
-		if (!HeroPatches.empty())
+		// Noticed: someone who knows the player sees the patch (once a night a brand), said to them in their seat.
+		if (!HeroPatches.empty() && !HeroUp)
 		{
 			const auto Face = FaceLabel.find(P.Name);
 			const bool Knows = V.Familiarity >= 0.12f || (Face != FaceLabel.end() && Face->second != "Embercrest regular");
@@ -2386,8 +2436,7 @@ void Director::Chatter(const Tournament& T, const HandNote& H, const std::vector
 		// once in six hands: the dealer's just said it).
 		if (!Asked && T.Tick - AskTick >= 6)
 		{
-			const int Every = std::max(1, T.Spec.BreakEvery);
-			const int ToBreak = T.Spec.BreakEvery > 0 ? (T.LevelIndex / Every + 1) * Every - T.LevelIndex : 99;
+			const int ToBreak = LevelsToBreak(T);
 			std::string Ask;
 			if ((Current == Mood::MoneyClose || Current == Mood::LastTables) && Unit("ask:" + P.Name + ":" + Tick) < 0.35)
 			{
@@ -2407,21 +2456,8 @@ void Director::Chatter(const Tournament& T, const HandNote& H, const std::vector
 					Asked = true;
 					AskTick = T.Tick;
 					std::map<std::string, std::string> D = RoomVars(T);
-					const int Here2 = HeroTable(T);
-					if (Ask == "average")
-					{
-						D["Average"] = talk::Count(static_cast<long long>(std::lround(T.AverageStack() / 1000.0)) * 1000);
-						Call(T, "average", D, Here2, 0.6f);
-					}
-					else if (Ask == "left")
-					{
-						Call(T, T.InTheMoney() ? "left.itm" : "left", D, Here2, 0.6f);
-					}
-					else
-					{
-						D["LevelsCap"] = talk::Capitalized(talk::NumberWords(ToBreak));
-						Call(T, ToBreak <= 1 ? "break.next" : "break.levels", D, Here2, 0.6f);
-					}
+					const std::string Answer = AskAnswer(T, Ask, D);
+					Call(T, Answer, D, HeroTable(T), 0.6f);
 					continue;
 				}
 			}
@@ -2664,7 +2700,8 @@ void Director::Hand(const Tournament& T, const HandNote& H)
 		}
 		else
 		{
-			// Needles: after the player folds to their bet, shows a bluff, or tanks (once per needler per 4 hands).
+			// Needles: after the player folds to their bet, shows a bluff, or tanks (once per needler per 4 hands); none at a
+			// player up from their seat (the dealer mucked their hand for them, and they aren't there to hear it).
 			const Seen Aggressor = H.Aggressor.empty() ? Seen() : Find(T, H.Aggressor);
 			auto CanNeedle = [this, &T, &Gone](const Seen& P) {
 				if (P.Id.empty() || P.Hero || Gone.count(P.Name) || Gone.count(P.Id))
@@ -2675,7 +2712,7 @@ void Director::Hand(const Tournament& T, const HandNote& H)
 				return Last == NeedleAt.end() || T.Tick - Last->second >= NeedleTicks;
 			};
 			bool Needled = false;
-			if (H.HeroFoldedToRaise && CanNeedle(Aggressor) && Aggressor.Table == Here)
+			if (!HeroUp && H.HeroFoldedToRaise && CanNeedle(Aggressor) && Aggressor.Table == Here)
 			{
 				const life::LiveVoice& V = VoiceFor(T, Aggressor);
 				if (Unit("needle:" + Tick) < 0.35 + 0.4 * V.Aggro && Say(T, Aggressor, talk::Moment::Needle, {}, false, true))
@@ -2684,7 +2721,7 @@ void Director::Hand(const Tournament& T, const HandNote& H)
 					Needled = true;
 				}
 			}
-			if (!Needled && H.HeroShowedBluff)
+			if (!Needled && !HeroUp && H.HeroShowedBluff)
 			{
 				for (const Seen& P : Table)
 				{
@@ -2696,7 +2733,7 @@ void Director::Hand(const Tournament& T, const HandNote& H)
 					}
 				}
 			}
-			if (!Needled && H.HeroThink > 25.0)
+			if (!Needled && !HeroUp && H.HeroThink > 25.0)
 			{
 				for (const Seen& P : Table)
 				{

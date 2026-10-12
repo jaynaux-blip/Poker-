@@ -396,6 +396,7 @@ def build_invisible(force):
         return False
     mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
     mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    mat.set_editor_property("used_with_nanite", True)
     zero = ss._expr(mat, unreal.MaterialExpressionConstant, -400, 0)
     mel.connect_material_property(zero, "", unreal.MaterialProperty.MP_OPACITY_MASK)
     return ss._finish(mat)
@@ -660,3 +661,31 @@ def fix_meshes():
     card.set_editor_property("nanite_settings", settings)
     eal.save_loaded_asset(card)
     return 1
+
+
+# Materials that Nanite meshes draw with (the baked crowd's skin, teeth, eyes and hidden sections; the shops' mirrors): the
+# editor turns the usage on by itself each launch, a cooked game doesn't (it draws the default material instead).
+NANITE_MATERIALS = (
+    "/Game/ShortStack/Cast/Common/Lookdev_UHM/Skin/Materials/M_skin_unified_baked",
+    "/Game/ShortStack/Cast/Common/Lookdev_UHM/Teeth/Materials/M_teeth_unified",
+    "/Game/ShortStack/Cast/Common/Lookdev_UHM/Eye/Materials/M_eye_eyeball_unified",
+    "/Game/ShortStack/Materials/M_Invisible",
+    "/Game/ShortStack/Materials/M_NS_Mirror",
+)
+
+
+def fix_material_usage():
+    """Sets the Nanite usage on NANITE_MATERIALS that lack it (and saves them): how many changed."""
+    changed = 0
+    for path in NANITE_MATERIALS:
+        if not eal.does_asset_exist(path):
+            continue
+        mat = eal.load_asset(path)
+        if not isinstance(mat, unreal.Material) or mat.get_editor_property("used_with_nanite"):
+            continue
+        mat.set_editor_property("used_with_nanite", True)
+        mel.recompile_material(mat)
+        eal.save_loaded_asset(mat)
+        unreal.log(f"ShortStack: {path} now used with Nanite")
+        changed += 1
+    return changed

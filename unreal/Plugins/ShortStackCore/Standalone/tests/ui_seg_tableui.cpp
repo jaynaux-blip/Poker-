@@ -4,7 +4,8 @@
 //   table_hud_itm, table_hud_onfoot_marker, table_hud_rail_onair, table_hud_dees) at 1920, 2257 (2550x1220) and 1440,
 //   each with its text inside the canvas and none of it under 13 units, at HUD sizes 80% and 130% too;
 // - the plates (the AI stack sizes): on every live seat, always, faded off the player's turn, never over the faces,
-//   cards and chips the host marks or each other, edge plates for seats off screen, the same layout every frame;
+//   cards and chips the host marks or each other, edge plates for seats off screen (apart when several share an edge,
+//   off a face at the edge, at the stack's x on the bottom edge for a stack below the screen), the same layout every frame;
 // - the table card's five pages (table_card_reads ... table_card_night), the room's clock screens, the desk and the cage
 //   (desk_register_funding, cage_receipt_split);
 // - ControlParity (no table action on B; all in is a hold on both devices; Y held 0.2 s raises, 0.5 s does nothing,
@@ -655,6 +656,131 @@ void Plates()
 		}
 		Expect(Apart, "plates: five stacks bunched together still get five clear plates");
 	}
+	auto Hits = [](const ss::ui::Rect& R, const ss::ui::Rect& Q) { return R.X < Q.X + Q.W && Q.X < R.X + R.W && R.Y < Q.Y + Q.H && Q.Y < R.Y + R.H; };
+	auto Find = [](const std::vector<ss::ui::PlacedPlate>& P, int Index) {
+		for (const ss::ui::PlacedPlate& Pl : P)
+		{
+			if (Pl.Index == Index)
+			{
+				return Pl;
+			}
+		}
+		return ss::ui::PlacedPlate();
+	};
+	// Two seats behind the camera on one side (the host puts both at x W, y 540) and a third off that edge just above,
+	// with a stack's chips down the edge: every plate apart (they used to bounce between their neighbours and land on each
+	// other), the same layout every frame, and a camera's sway of a unit moves none of them more than that.
+	for (const float Width : Widths)
+	{
+		Scene S;
+		TurnOpen(S, Width);
+		S.I.YourTurn = false;
+		S.I.KeepClear = {{Width - 260.0f, 640.0f, 200.0f, 120.0f}};
+		const float Xs[3] = {Width, Width, Width + 60.0f};
+		const float Ys[3] = {540.0f, 540.0f, 470.0f};
+		for (size_t K = 2; K < 5; ++K)
+		{
+			S.I.Plates[K].X = Xs[K - 2];
+			S.I.Plates[K].Y = Ys[K - 2];
+			S.I.Plates[K].OnScreen = false;
+		}
+		const std::vector<ss::ui::PlacedPlate> P = ss::ui::LayoutPlates(S.I, Width, Now);
+		bool Apart = P.size() == 5;
+		bool Edges = true;
+		for (size_t A = 0; A < P.size(); ++A)
+		{
+			Edges = Edges && (P[A].Index < 2 || (P[A].Edge && P[A].Toward == 1 && P[A].TowardY == 0));
+			for (size_t B = A + 1; B < P.size(); ++B)
+			{
+				Apart = Apart && !Hits(P[A].Footprint, P[B].Footprint);
+			}
+			Apart = Apart && !Hits(P[A].Footprint, S.I.KeepClear[0]);
+		}
+		Expect(Apart, ("plates: seats off one edge (two behind the camera) get plates apart, off the chips, at " + W(Width)).c_str());
+		Expect(Edges, ("plates: and each points right, at " + W(Width)).c_str());
+		const std::vector<ss::ui::PlacedPlate> Again = ss::ui::LayoutPlates(S.I, Width, Now + 0.5);
+		for (ss::ui::SeatPlate& Sp : S.I.Plates)
+		{
+			Sp.Y += 1.0f;
+		}
+		const std::vector<ss::ui::PlacedPlate> Swayed = ss::ui::LayoutPlates(S.I, Width, Now);
+		bool Same = Again.size() == P.size() && Swayed.size() == P.size();
+		bool Steady = Same;
+		for (size_t K = 0; K < P.size() && Same; ++K)
+		{
+			Same = P[K].Box.X == Again[K].Box.X && P[K].Box.Y == Again[K].Box.Y;
+			Steady = Steady && std::fabs(P[K].Box.X - Swayed[K].Box.X) <= 1.01f && std::fabs(P[K].Box.Y - Swayed[K].Box.Y) <= 1.01f;
+		}
+		Expect(Same, ("plates: edge plates lay out the same every frame at " + W(Width)).c_str());
+		Expect(Steady, ("plates: a unit's sway moves edge plates a unit at most at " + W(Width)).c_str());
+	}
+	// Over the shoulder the near seat's stack is off the right edge and his face fills the edge: the edge plate keeps off
+	// the face too (it used to clamp straight onto it).
+	for (const float Width : Widths)
+	{
+		Scene S;
+		TurnOpen(S, Width);
+		const ss::ui::Rect Face = {Width - 270.0f, 560.0f, 270.0f, 440.0f};
+		S.I.KeepClear = {Face};
+		S.I.Plates[4].X = Width + 120.0f;
+		S.I.Plates[4].Y = 740.0f;
+		S.I.Plates[4].OnScreen = false;
+		const ss::ui::PlacedPlate Pl = Find(ss::ui::LayoutPlates(S.I, Width, Now), 4);
+		Expect(Pl.Edge && Pl.Toward == 1 && !Hits(Pl.Footprint, Face), ("plates: an edge plate keeps off the face at the edge at " + W(Width)).c_str());
+	}
+	// Studying a face under the zoomed lens: his stack projects far below the screen, left of the middle, while his face
+	// fills the right half. The plate stays at the stack's x on the bottom edge pointing down, not on the far side.
+	for (const float Width : Widths)
+	{
+		Scene S;
+		TurnOpen(S, Width);
+		const ss::ui::Rect Face = {Width * 0.5f, 120.0f, Width * 0.5f - 58.0f, 900.0f};
+		S.I.KeepClear = {Face};
+		ss::ui::SeatPlate& Leo = S.I.Plates[3];
+		Leo.X = Width * 0.42f;
+		Leo.Y = 1638.0f;
+		Leo.OnScreen = false;
+		Leo.Looked = true;
+		const ss::ui::PlacedPlate Pl = Find(ss::ui::LayoutPlates(S.I, Width, Now), 3);
+		const float Cx = Pl.Box.X + Pl.Box.W * 0.5f;
+		Expect(Pl.Edge && Pl.TowardY == 1 && Pl.Toward == 0, ("plates: a stack below the screen gets a plate pointing down at " + W(Width)).c_str());
+		Expect(std::fabs(Cx - Leo.X) < 188.0f && !Hits(Pl.Footprint, Face), ("plates: at the stack's x, off the face at " + W(Width)).c_str());
+		const ss::ui::DrawList L = Frame(S.I, Width, Now);
+		Fits(L, Width, "plates: a stack below the screen at " + W(Width));
+		// Studying him puts his name up in the middle (the studying caption): the plate, pushed up off the captions' room,
+		// keeps off it too (with its chevron), and off his face.
+		S.I.Study.Name = "Leo";
+		S.I.Study.Label = "Regular";
+		S.I.Study.Honorific = "a Crest member";
+		S.I.Study.Alpha = 1.0f;
+		const ss::ui::Rect Said = {Width * 0.5f - 120.0f, 1080.0f * 0.6f - 26.0f, 240.0f, 126.0f};
+		for (const float At : {0.42f, 0.47f})
+		{
+			Leo.X = Width * At;
+			const ss::ui::PlacedPlate Sc = Find(ss::ui::LayoutPlates(S.I, Width, Now), 3);
+			const ss::ui::Rect Marked = {Sc.Box.X, Sc.Box.Y, Sc.Box.W + 24.0f, Sc.Footprint.H};
+			Expect(Sc.TowardY == 1 && !Hits(Marked, Said) && !Hits(Sc.Footprint, Face), ("plates: a studied stack's plate keeps off the studying caption at " + W(Width)).c_str());
+		}
+	}
+	// Under the table card the clock card steps aside (the card says the level and its clock instead).
+	{
+		Scene S;
+		TurnOpen(S, 1920.0f);
+		Expect(Says(Frame(S.I, 1920.0f, Now), "PRIZE POOL"), "table HUD: the clock card");
+		S.I.CardUp = true;
+		const ss::ui::DrawList L = Frame(S.I, 1920.0f, Now);
+		Expect(!Says(L, "PRIZE POOL") && !Says(L, "14:32") && Says(L, "YOUR STACK"), "table HUD: the clock card steps aside under the table card");
+	}
+	// On foot the room's HUD shades the street's block itself, once: the street's own shade steps aside whatever the host
+	// set (two would stack).
+	{
+		Scene S;
+		OnFootMarker(S, 1920.0f);
+		S.I.OnFoot.Shaded = false;
+		const size_t Unset = Frame(S.I, 1920.0f, Now).Vertices.size();
+		S.I.OnFoot.Shaded = true;
+		Expect(Frame(S.I, 1920.0f, Now).Vertices.size() == Unset, "table HUD: on foot the street's block is shaded once");
+	}
 	// The badge glyph's place for the host's atlas cell, and the studying caption's row.
 	{
 		Scene S;
@@ -713,7 +839,8 @@ void CardPages()
 		C.Pay.push_back({From[K], To[K], Pay[K], false});
 	}
 	C.HeroPlace = 15;
-	C.Field = {{"Rick", "Knows you", 7, 52300, false}, {"Mei", "", 3, 88100, false}, {"Mrs. Park", "Regular", 12, 21000, true}, {"Sal", "Regular", 9, -1, false}};
+	C.Field = {{"Rick", "Knows you", 7, 52300, false}, {"Mei", "", 3, 88100, false}, {"Mrs. Park", "Regular", 12, 21000, true}, {"Sal", "Regular", 9, -1, false},
+		{"Maria G.", "Embercrest regular", 11, -1, false}};
 	C.CountsAt = "9:00";
 	for (int K = 0; K < 40; ++K)
 	{
@@ -730,7 +857,7 @@ void CardPages()
 		{"READS", "a long look at his chips means strength"},
 		{"#212", "L15 \xC2\xB7 3,000/6,000", "Rick showed down.", "-3.1 BB"},
 		{"14 PAID \xC2\xB7 PRIZE POOL $9,870 \xC2\xB7 POSTED", "13\xE2\x80\x93" "14", "$243", "$2,873", "1st", "YOU \xC2\xB7 15TH IF YOU WENT OUT NOW \xC2\xB7 1 FROM THE MONEY"},
-		{"15 OF 94 LEFT", "COUNTS AT THE 9:00 BREAK", "TABLE 7", "52,300 \xC2\xB7 8.7 BB", "YOUR TABLE", "NOT COUNTED YET"},
+		{"15 OF 94 LEFT", "COUNTS AT THE 9:00 BREAK", "TABLE 7", "52,300 \xC2\xB7 8.7 BB", "YOUR TABLE", "NOT COUNTED YET", "EMBERCREST REGULAR"}, // (a label uncut when it fits before TABLE)
 		{"THE NIGHT \xC2\xB7 EMBERCREST NIGHTLY", "FLOOR", "Players, the blinds are now 500 and 1,000", "[Applause.]"},
 	};
 	for (int Page = 0; Page < 5; ++Page)
@@ -748,6 +875,7 @@ void CardPages()
 				Expect(Says(L, N), (What + ": says \"" + N + "\"").c_str());
 			}
 			Expect(Says(L, "READS") && Says(L, "NIGHT") && Says(L, "SHOWING BIG BLINDS"), (What + ": the tabs and the units").c_str());
+			Expect(Says(L, "14:32") && Says(L, "LEVEL 15 \xC2\xB7 3,000 / 6,000 \xC2\xB7 ANTE 6,000"), (What + ": the level and its clock in the header (the clock card steps aside)").c_str());
 			Fits(L, Width, What);
 			Readable(L, 13.0f, What);
 			if (Width == Widths[0])
@@ -1523,6 +1651,13 @@ void Bench()
 	Part = S.I;
 	Part.Trace.clear();
 	Time("  without the heart's trace", Part);
+	Part = S.I;
+	for (size_t K = 2; K < Part.Plates.size(); ++K)
+	{
+		Part.Plates[K].X = 1920.0f + 40.0f * static_cast<float>(K);
+		Part.Plates[K].OnScreen = false;
+	}
+	Time("  three seats off the edge", Part);
 }
 
 void SegTableUi()

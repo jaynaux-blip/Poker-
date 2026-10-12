@@ -36,14 +36,15 @@ namespace SponsorWearDetail
 {
 // ------------------------------------------------------------------ tunables (spec 3.10; ss.Wear.Refit puts them on)
 // Offsets from the measured spots (0: as measured), and how far each layer's patch stands off its surface. The standoff
-// keeps the cloth under a rigid patch from coming through it as the body moves; the jackets' and the hoodie's are larger
-// because their cloth moves further off the bone that carries the patch.
+// keeps the cloth under a rigid patch from coming through it as the body moves; the heavy jackets' and the hoodie's are
+// larger because their cloth moves further off the bone that carries the patch. The tee's is 0.8: seated and leaning in
+// at the table, its folds came through the patch at 0.3 (acceptance F14; 0.8 clean over time, no float seen from the side).
 TAutoConsoleVariable<float> CVarPatchUp(TEXT("ss.Wear.PatchUp"), 0.0f, TEXT("The chest patch: cm higher than the measured spot (ss.Wear.Refit puts it on)."));
 TAutoConsoleVariable<float> CVarPatchSide(TEXT("ss.Wear.PatchSide"), 0.0f, TEXT("The chest patch: cm further to the wearer's left than the measured spot."));
 TAutoConsoleVariable<float> CVarPatchOut(TEXT("ss.Wear.PatchOut"), 0.0f, TEXT("Every patch: cm further out than its standoff (negative: in)."));
 TAutoConsoleVariable<float> CVarSleeveDown(TEXT("ss.Wear.SleeveDown"), 0.0f, TEXT("The sleeve patch: cm further down the upper arm than the measured spot."));
 TAutoConsoleVariable<float> CVarSleeveTurn(TEXT("ss.Wear.SleeveTurn"), 15.0f, TEXT("The sleeve patch: degrees forward from the arm's outside."));
-TAutoConsoleVariable<float> CVarStandoffTee(TEXT("ss.Wear.Standoff.Tee"), 0.3f, TEXT("cm the patch stands off a tee (and every body at the table)."));
+TAutoConsoleVariable<float> CVarStandoffTee(TEXT("ss.Wear.Standoff.Tee"), 0.8f, TEXT("cm the patch stands off a tee (and every body at the table)."));
 TAutoConsoleVariable<float> CVarStandoffTrack(TEXT("ss.Wear.Standoff.Track"), 0.6f, TEXT("cm the patch stands off a track jacket."));
 TAutoConsoleVariable<float> CVarStandoffFlannel(TEXT("ss.Wear.Standoff.Flannel"), 0.7f, TEXT("cm the patch stands off a flannel."));
 TAutoConsoleVariable<float> CVarStandoffJacket(TEXT("ss.Wear.Standoff.Jacket"), 0.9f, TEXT("cm the patch stands off a bomber, a denim or a leather jacket."));

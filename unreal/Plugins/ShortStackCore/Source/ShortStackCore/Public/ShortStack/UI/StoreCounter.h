@@ -53,6 +53,8 @@ struct StreetHudInfo
 	};
 	std::vector<Toast> Toasts;
 	bool FirstPerson = false;
+	/** The host shades the top-left block itself (the card room's on-foot HUD): the street's own shade isn't drawn. */
+	bool Shaded = false;
 	/** When the controls hint first showed (it fades after a while); negative hides it. */
 	double HintsAt = -100.0;
 	bool Gamepad = false;

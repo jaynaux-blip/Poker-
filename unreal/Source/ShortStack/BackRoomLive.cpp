@@ -60,6 +60,146 @@ const TCHAR* WeekdayName(int32 Day)
 	static const TCHAR* Names[7] = {TEXT("Monday"), TEXT("Tuesday"), TEXT("Wednesday"), TEXT("Thursday"), TEXT("Friday"), TEXT("Saturday"), TEXT("Sunday")};
 	return Names[((Day % 7) + 7) % 7];
 }
+
+/** What the player owes on their packages (stake::Deal::Debt, Sam's): a settle that pays some of it down spends no money of the night's. */
+int64 LiveDebtCents(const ss::stake::Book& B)
+{
+	int64 Debt = 0;
+	for (const ss::stake::Deal& D : B.Deals)
+	{
+		Debt += D.Debt;
+	}
+	return Debt;
+}
+
+/** The backer's event stake on an entry (stake::BackerDeal's match: the funding's deal by its id, for this event), or null. */
+const ss::stake::Deal* LiveBackerDeal(const ss::stake::Book& B, const ss::life::LiveEntry& E)
+{
+	for (const ss::stake::Deal& D : B.Deals)
+	{
+		if (D.K == ss::stake::Kind::Event && D.EventId == E.Id && (D.Id == E.Fund.Ref || D.Id == "deal:" + E.Fund.Ref))
+		{
+			return &D;
+		}
+	}
+	return nullptr;
+}
+
+/**
+ * The rest of the player's own net on a settled entry, beside what the settle itself moved in the bankroll (LiveSettle
+ * measures that): at registration, the buy-in less what someone else put in for it (a backer's stake; a sponsor's cover
+ * and a package's roll pay all of it, a ticket is no money) or plus what the pieces sold on it brought in; and what the
+ * result left owed either way (the pieces' shares, a settled swap's difference). All as the core's registration and
+ * settle left the book (live::Register, stake::OnRegister and OnSettle, sponsor::OnRegister): no money rule of its own.
+ * The buses aside.
+ */
+int64 LiveFundedCents(const ss::life::State& L, const ss::life::LiveEntry& E)
+{
+	switch (E.Fund.From)
+	{
+	case ss::life::Paid::Backer:
+	{
+		// (A stake that never went in, the deal gone by the desk, left the player's own money paying.)
+		const ss::stake::Deal* D = LiveBackerDeal(L.Stakes, E);
+		return (D && D->State == ss::stake::DealSettled ? D->Stake : 0) - E.PaidCents;
+	}
+	case ss::life::Paid::Sponsor:
+	case ss::life::Paid::Package:
+	case ss::life::Paid::Ticket:
+		return 0;
+	default:
+		break;
+	}
+	int64 Cents = -E.PaidCents;
+	for (const ss::stake::Piece& P : L.Stakes.Pieces)
+	{
+		if (P.EntryId == E.Id)
+		{
+			Cents += P.Paid - P.Share;
+		}
+	}
+	for (const ss::stake::Swap& S : L.Stakes.Swaps)
+	{
+		if (S.EntryId == E.Id && S.State == ss::stake::SwapSettled)
+		{
+			Cents += S.Net;
+		}
+	}
+	return Cents;
+}
+
+/** Whose money it was, for the night's summary under the net (none for the player's own money with nothing sold). */
+TArray<FString> LiveFundingLines(const ss::life::State& L, const ss::life::LiveEntry& E)
+{
+	TArray<FString> Out;
+	const FString Who = Str(E.Fund.Who);
+	switch (E.Fund.From)
+	{
+	case ss::life::Paid::Backer:
+	{
+		const ss::stake::Deal* D = LiveBackerDeal(L.Stakes, E);
+		if (D && D->State == ss::stake::DealSettled)
+		{
+			const FString Backer = Str(D->Backer);
+			Out.Add(D->TheirShare > 0 ? FString::Printf(TEXT("Backed by %s   ·   %s's share %s"), *Backer, *Backer, *Dollars(D->TheirShare))
+									  : FString::Printf(TEXT("Backed by %s   ·   the %s was %s's"), *Backer, *Dollars(D->Stake), *Backer));
+		}
+		break;
+	}
+	case ss::life::Paid::Sponsor:
+		Out.Add(FString::Printf(TEXT("Covered by %s"), Who.IsEmpty() ? TEXT("your sponsor") : *Who) +
+			(E.Fund.CutPct > 0 && E.PrizeCents > E.PaidCents ? FString::Printf(TEXT("   ·   their cut %d%%"), E.Fund.CutPct) : FString()));
+		break;
+	case ss::life::Paid::Package:
+		Out.Add((Who.IsEmpty() ? FString(TEXT("Paid from the package's roll")) : FString::Printf(TEXT("Paid from %s's roll"), *Who)) +
+			(E.PrizeCents > 0 ? FString(TEXT("   ·   the cash goes to the roll")) : FString()));
+		break;
+	case ss::life::Paid::Ticket:
+		Out.Add(TEXT("Paid with a ticket"));
+		break;
+	default:
+	{
+		int32 Sold = 0;
+		int64 Brought = 0;
+		int64 Shares = 0;
+		for (const ss::stake::Piece& P : L.Stakes.Pieces)
+		{
+			if (P.EntryId == E.Id)
+			{
+				Sold += P.Permille;
+				Brought += P.Paid;
+				Shares += P.Share;
+			}
+		}
+		if (Sold > 0)
+		{
+			const FString Pct = Sold % 10 == 0 ? FString::Printf(TEXT("%d%%"), Sold / 10) : FString::Printf(TEXT("%d.%d%%"), Sold / 10, Sold % 10);
+			Out.Add(FString::Printf(TEXT("Pieces sold   %s for %s"), *Pct, *Dollars(Brought)) +
+				(Shares > 0 ? FString::Printf(TEXT("   ·   their share %s"), *Dollars(Shares)) : FString()));
+		}
+		for (const ss::stake::Swap& S : L.Stakes.Swaps)
+		{
+			if (S.EntryId != E.Id || (S.State != ss::stake::SwapSettled && S.State != ss::stake::SwapLive))
+			{
+				continue;
+			}
+			const FString Partner = Str(S.Partner);
+			FString Owed = TEXT("even");
+			if (S.State == ss::stake::SwapLive)
+			{
+				Owed = FString::Printf(TEXT("settles when %s's done"), *Partner); // (their result isn't in yet)
+			}
+			else if (S.Net != 0)
+			{
+				Owed = S.Net > 0 ? FString::Printf(TEXT("%s owes you %s"), *Partner, *Dollars(S.Net)) : FString::Printf(TEXT("you owe %s %s"), *Partner, *Dollars(-S.Net));
+			}
+			Out.Add(FString::Printf(TEXT("Swap with %s   ·   %s"), *Partner, *Owed));
+		}
+		break;
+	}
+	}
+	return Out;
+}
 } // namespace LiveDetail
 
 using namespace LiveDetail;
@@ -756,6 +896,8 @@ void ABackRoomGameMode::LiveOver()
 		HeroPlace = Tourney->Hero().Place > 0 ? Tourney->Hero().Place : Tourney->HeroRank();
 		HeroPrizeCents = Tourney->PrizeFor(HeroPlace);
 	}
+	// (The prize less the buy-in until LiveSettle has the player's own net from the settle: a staked or covered entry wasn't
+	// their money.)
 	NetCents = HeroPrizeCents - BoughtInCents;
 	bBustedOut = HeroPrizeCents <= 0;
 	// Which reads became yours tonight.
@@ -780,7 +922,12 @@ void ABackRoomGameMode::LiveOver()
 	const int32 Sat = FMath::Max(0, FMath::FloorToInt(Minutes - LeftHomeAt - 20.0));
 	Summary.Add(FString::Printf(TEXT("%s of %d   ·   %d hands   ·   %dh %02dm"), *Ordinal(HeroPlace), Field, HandsPlayed, Sat / 60, Sat % 60));
 	Summary.Add(HeroPrizeCents > 0 ? FString::Printf(TEXT("Cashed   %s"), *Dollars(HeroPrizeCents)) : FString::Printf(TEXT("No cash   ·   %d paid"), Tourney->PaidPlaces()));
-	Summary.Add(FString::Printf(TEXT("Net   %s%s"), NetCents >= 0 ? TEXT("+") : TEXT("-"), *Dollars(FMath::Abs(NetCents))));
+	Summary.Add(FString::Printf(TEXT("Net   %s%s"), NetCents > 0 ? TEXT("+") : (NetCents < 0 ? TEXT("-") : TEXT("")), *Dollars(FMath::Abs(NetCents))));
+	// Whose money it was: a backer's stake and their share, a sponsor's cover, a package's roll, the pieces sold, a swap.
+	if (const ss::life::LiveEntry* Mine = Save.IsValid() ? ss::live::EntryFor(Save->Life, std::string(TCHAR_TO_UTF8(*LiveEntryId))) : nullptr)
+	{
+		Summary.Append(LiveFundingLines(Save->Life, *Mine));
+	}
 	Summary.Append(Learned);
 	// The rest of today at the desk, if there's an event the player could still get into.
 	FString WhyNot;
@@ -950,8 +1097,19 @@ void ABackRoomGameMode::LiveSettle()
 	}
 	else
 	{
-		// Once: a second call (or a reload after this save) finds the entry settled and changes nothing.
-		ss::live::Settle(D.BankrollCents, D.Life, EntryId, HeroPlace, Tourney->Spec.Entrants, HeroPrizeCents, Minutes);
+		// Once: a second call (or a reload after this save) finds the entry settled and changes nothing. The night's net is
+		// the player's own money (next_segment_spec 1.2), not the prize less the buy-in: what the settle moved in the
+		// bankroll (the prize, a sponsor's cut or bonus, a backer's share; a debt it paid down is still theirs), and what the
+		// entry's funding put in or left owed (LiveFundedCents).
+		const int64 Before = D.BankrollCents;
+		const int64 DebtBefore = LiveDebtCents(D.Life.Stakes);
+		if (ss::live::Settle(D.BankrollCents, D.Life, EntryId, HeroPlace, Tourney->Spec.Entrants, HeroPrizeCents, Minutes))
+		{
+			if (const ss::life::LiveEntry* Settled = ss::live::EntryFor(D.Life, EntryId))
+			{
+				NetCents = D.BankrollCents - Before + (DebtBefore - LiveDebtCents(D.Life.Stakes)) + LiveFundedCents(D.Life, *Settled);
+			}
+		}
 	}
 	// The bus home. An event the desk wrote the player into during the night rides home on the night's first ticket,
 	// paid when that one ended: one trip, one fare each way.
@@ -1368,8 +1526,9 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			}
 		}
 	}
-	// Hand for hand: the table waits for the rest of the room, then the floor calls the next one.
-	if (!bOnBreak && MoveT < 0.0f && Phase == EBackRoomPhase::Playing && Table->IsHolding())
+	// Hand for hand: the table waits for the rest of the room, then the floor calls the next one. (Out in a hand a break
+	// started with: no break to sit through, as LiveEvent's Break has it; the next deal finds no hand and the night ends.)
+	if ((!bOnBreak || Tourney->Hero().Busted) && MoveT < 0.0f && Phase == EBackRoomPhase::Playing && Table->IsHolding())
 	{
 		MoveT += RealDt;
 		if (MoveT >= 0.0f)

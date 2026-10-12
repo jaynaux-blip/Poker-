@@ -1049,6 +1049,7 @@ def run(force=False):
         imported = import_meshes(force)
         changed += imported
         changed += backroom_setup.fix_meshes()
+        backroom_setup.fix_material_usage()
         import_textures(force)
     except Exception as exc:  # the stage falls back to engine shapes
         unreal.log_error(f"ShortStack: importing meshes failed: {exc}")

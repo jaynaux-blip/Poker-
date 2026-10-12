@@ -949,12 +949,15 @@ void ABackRoomHUD::DrawCoreHud()
 		// (Until the room says anything itself: the table's own lines.)
 		I.Captions = Host.Fallback;
 	}
+	// The table card, held up (Tab, or up on the d-pad): modal over the HUD; the decision waits. (The clock card steps aside
+	// under it: the card says the level and its clock.)
+	const ABackRoomPawn* Pawn = Cast<ABackRoomPawn>(GetOwningPawn());
+	const bool bCardUp = Pawn && Pawn->IsTableCardUp();
+	I.CardUp = bCardUp;
 	TSharedPtr<ss::ui::DrawList> List = Host.Hint.Make();
 	ss::ui::Canvas C(*List, Host.Measurer, W, H, Scale);
 	ss::ui::DrawTableHud(C, I, Now);
-	// The table card, held up (Tab, or up on the d-pad): modal over the HUD; the decision waits.
-	const ABackRoomPawn* Pawn = Cast<ABackRoomPawn>(GetOwningPawn());
-	if (Pawn && Pawn->IsTableCardUp())
+	if (bCardUp)
 	{
 		ss::ui::TableCardInfo Card;
 		GM->FillTableCard(Card);
@@ -1081,8 +1084,8 @@ void ABackRoomHUD::DrawLegacyPlates(float W, float H, float S)
 			DrawRect(Fa(Col, A), Tx, Y + Bh + 5.0f * S, Tw + 16.0f * S, 22.0f * S);
 			DrawText(Tag, Fa(FLinearColor::White, A), Tx + 8.0f * S, Y + Bh + 7.0f * S, Font, 0.75f * S);
 		}
-		// An edge plate points at its seat.
-		if (Pl.Edge)
+		// An edge plate points at its seat (one on the bottom or top edge, TowardY, has no side to point to here).
+		if (Pl.Edge && Pl.Toward != 0)
 		{
 			Line(Pl.Toward < 0 ? TEXT("‹") : TEXT("›"), Fa(Ash, A), Pl.Toward < 0 ? X - 14.0f * S : X + Bw + 4.0f * S, Y + Bh * 0.5f - 10.0f * S, 1.2f, false);
 		}
@@ -1363,10 +1366,11 @@ void ABackRoomGameMode::UpdatePlates(float RealDt)
 		P.OnScreen = bFront && OnCanvas(H, At);
 		if (!bFront)
 		{
-			// Behind the camera: an edge plate on the side the seat is on.
+			// Behind the camera: an edge plate on the side the seat is on, at the canvas's middle (the canvas is 1,080 units
+			// tall at every window size, as Project's points are; the layout spreads plates that share it).
 			const double Side = FVector::DotProduct(V.StackAt - H.CameraAt, H.CameraRight);
 			At.X = Side < 0.0 ? 0.0f : H.CanvasW;
-			At.Y = 540.0f;
+			At.Y = 0.5f * 1080.0f;
 		}
 		P.X = At.X;
 		P.Y = At.Y;
@@ -1675,7 +1679,7 @@ void ABackRoomGameMode::FillTableHud(ss::ui::TableHudInfo& Out, float CanvasWidt
 		{
 			const double Side = FVector::DotProduct(Target - H.CameraAt, H.CameraRight);
 			At.X = Side < 0.0 ? 0.0f : H.CanvasW;
-			At.Y = 540.0f;
+			At.Y = 0.5f * 1080.0f; // the canvas's middle (1,080 units tall at every window size)
 		}
 		Out.SeatMarker.X = At.X;
 		Out.SeatMarker.Y = At.Y;

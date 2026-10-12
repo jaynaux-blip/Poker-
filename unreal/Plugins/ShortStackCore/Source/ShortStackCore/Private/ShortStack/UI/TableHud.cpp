@@ -156,11 +156,6 @@ struct Scaled
 	Scaled& operator=(const Scaled&) = delete;
 };
 
-bool Overlap(const Rect& A, const Rect& B)
-{
-	return A.X < B.X + B.W && B.X < A.X + A.W && A.Y < B.Y + B.H && B.Y < A.Y + A.H;
-}
-
 float OverlapArea(const Rect& A, const Rect& B)
 {
 	const float W = std::min(A.X + A.W, B.X + B.W) - std::max(A.X, B.X);
@@ -462,6 +457,13 @@ std::vector<PlacedPlate> LayoutPlates(const TableHudInfo& I, float Width, double
 	{
 		Panel.push_back(Said);
 	}
+	// The studying caption while it shows (StudyCaption: the name at 0.6 of the height, the note, the badge row, the
+	// honorific): a studied face's stack under the zoomed lens gets a bottom-edge plate, which the captions' room pushes up
+	// toward it.
+	if (I.Study.Alpha > 0.01f && !I.Study.Name.empty())
+	{
+		Panel.push_back({W * 0.5f - 200.0f, Tall * 0.6f - 30.0f, 400.0f, 134.0f});
+	}
 	const float X0 = Margin;
 	const float X1 = std::max(Margin, W - Margin - Pw);
 	const float Y0 = 330.0f;
@@ -490,6 +492,31 @@ std::vector<PlacedPlate> LayoutPlates(const TableHudInfo& I, float Width, double
 		return Pa.Y != Pb.Y ? Pa.Y > Pb.Y : Pa.X < Pb.X;
 	});
 	std::vector<PlacedPlate> Out;
+	// What a spot covers: a face, the cards or the chips (KeepClear), the plates already down, the panels.
+	auto Covers = [&I](const Rect& R) {
+		float A = 0.0f;
+		for (const Rect& Kc : I.KeepClear)
+		{
+			A += OverlapArea(R, Kc);
+		}
+		return A;
+	};
+	auto Crowds = [&Out](const Rect& R) {
+		float A = 0.0f;
+		for (const PlacedPlate& Done : Out)
+		{
+			A += OverlapArea(R, Done.Footprint);
+		}
+		return A;
+	};
+	auto Blocks = [&Panel](const Rect& R) {
+		float A = 0.0f;
+		for (const Rect& Pr : Panel)
+		{
+			A += OverlapArea(R, Pr);
+		}
+		return A;
+	};
 	for (const size_t K : Order)
 	{
 		const SeatPlate& Sp = I.Plates[K];
@@ -498,22 +525,55 @@ std::vector<PlacedPlate> LayoutPlates(const TableHudInfo& I, float Width, double
 		PlacedPlate Pl;
 		Pl.Index = static_cast<int>(K);
 		Pl.Alpha = PlateAlpha(I, Sp, Now);
-		Rect Best;
+		// The spots to try, the first preferred on a tie, and the point the plate wants to be by (its distance from there is
+		// a cost too: drifting far from the stack reads as another seat's plate).
+		std::vector<Rect> Cand;
+		Vec2 Want = {Sp.X, Sp.Y};
+		size_t PerStepIn = 0; // a side edge's candidates per step in from it: a step in costs more than sliding along
 		if (!Sp.OnScreen)
 		{
+			// An edge plate: on the side the stack is off (behind the camera the host puts it at x 0 or W), or at the stack's
+			// x on the bottom or top edge when it's further off below or above (a studied face's stack under the zoomed lens):
+			// never the far side for a stack just under the screen. Slid along the edge, then in from it, off the faces.
 			Pl.Edge = true;
-			Pl.Toward = Sp.X < W * 0.5f ? -1 : 1;
-			Best = Clamp({Pl.Toward < 0 ? X0 : X1, Sp.Y - Fh * 0.5f, Pw, Fh});
+			const float OffX = Sp.X < 0.0f ? -Sp.X : Sp.X > W ? Sp.X - W : 0.0f;
+			const float OffY = Sp.Y < 0.0f ? -Sp.Y : Sp.Y > Tall ? Sp.Y - Tall : 0.0f;
+			const bool Ends = OffY > OffX;
+			Rect At;
+			if (Ends)
+			{
+				Pl.TowardY = Sp.Y > Tall ? 1 : -1;
+				At = Clamp({Sp.X - Pw * 0.5f, Pl.TowardY > 0 ? Y1 : Y0, Pw, Fh});
+			}
+			else
+			{
+				Pl.Toward = Sp.X < W * 0.5f ? -1 : 1;
+				At = Clamp({Pl.Toward < 0 ? X0 : X1, Sp.Y - Fh * 0.5f, Pw, Fh});
+			}
+			Want = {At.X + Pw * 0.5f, At.Y + Fh * 0.5f};
+			const float Along = Ends ? Pw * 0.5f + 4.0f * S : Fh * 0.5f + 3.0f * S;
+			const float In = Ends ? Fh * 0.5f + 3.0f * S : Pw + 30.0f * S;
+			const int Steps = Ends ? 12 : 16;
+			PerStepIn = Ends ? 0 : static_cast<size_t>(Steps + 1);
+			for (int Ring = 0; Ring < (Ends ? 4 : 3); ++Ring)
+			{
+				for (int Step = 0; Step <= Steps; ++Step)
+				{
+					// 0, +1, -1, +2, -2, ... steps along the edge.
+					const float D = Fl((Step + 1) / 2) * (Step % 2 == 1 ? 1.0f : -1.0f) * Along;
+					const float Back = Fl(Ring) * In;
+					Cand.push_back(Ends ? Rect{At.X + D, At.Y - Back * Fl(Pl.TowardY), Pw, Fh} : Rect{At.X - Back * Fl(Pl.Toward), At.Y + D, Pw, Fh});
+				}
+			}
 		}
 		else
 		{
 			// By the stack: below it (toward the player), above it, beside it, each slid half a plate along, and a step
-			// further out. The spot that covers least wins: a face, the cards or the chips cost the most, then another
-			// plate, then a panel (the ladder's area is only drawn on the player's turn), then the distance from the stack.
+			// further out.
 			const float Gap = 18.0f * S;
 			const float Side = 26.0f * S;
 			const float Far = 64.0f * S;
-			std::vector<Rect> Cand = {
+			Cand = {
 				{Sp.X - Pw * 0.5f, Sp.Y + Gap, Pw, Fh},
 				{Sp.X - Pw * 0.5f, Sp.Y - Gap - Fh, Pw, Fh},
 				{Sp.X + Side, Sp.Y - Fh * 0.5f, Pw, Fh},
@@ -528,81 +588,64 @@ std::vector<PlacedPlate> LayoutPlates(const TableHudInfo& I, float Width, double
 			}
 			Cand.push_back({Sp.X - Pw * 0.5f, Sp.Y + Far, Pw, Fh});
 			Cand.push_back({Sp.X - Pw * 0.5f, Sp.Y - Far - Fh, Pw, Fh});
-			float BestScore = 1.0e30f;
-			for (size_t C = 0; C < Cand.size(); ++C)
+		}
+		// The spot that covers least wins: a face, the cards or the chips cost the most, then another plate, then a panel
+		// (the ladder's area is only drawn on the player's turn), then the distance (and, by the stack, the order tried; off
+		// a side edge, each step in from it: edge plates stack along their edge before one comes in).
+		Rect Best;
+		float BestScore = 1.0e30f;
+		for (size_t C = 0; C < Cand.size(); ++C)
+		{
+			const Rect R = Clamp(Cand[C]);
+			float Score = Sp.OnScreen ? Fl(C) * 6.0f : PerStepIn > 0 ? Fl(C / PerStepIn) * 60.0f : 0.0f;
+			Score += Covers(R) * 100.0f + Crowds(R) * 40.0f + Blocks(R) * 3.0f;
+			const float Dx = (R.X + Pw * 0.5f) - Want.X;
+			const float Dy = (R.Y + Fh * 0.5f) - Want.Y;
+			Score += std::sqrt(Dx * Dx + Dy * Dy) * 0.5f;
+			if (Score < BestScore)
 			{
-				const Rect R = Clamp(Cand[C]);
-				float Score = Fl(C) * 6.0f;
-				for (const Rect& Kc : I.KeepClear)
-				{
-					Score += OverlapArea(R, Kc) * 100.0f;
-				}
-				for (const PlacedPlate& Done : Out)
-				{
-					Score += OverlapArea(R, Done.Footprint) * 40.0f;
-				}
-				for (const Rect& Pr : Panel)
-				{
-					Score += OverlapArea(R, Pr) * 3.0f;
-				}
-				// Drifting far from the stack (a clamp) reads as another seat's plate.
-				const float Dx = (R.X + Pw * 0.5f) - Sp.X;
-				const float Dy = (R.Y + Fh * 0.5f) - Sp.Y;
-				Score += std::sqrt(Dx * Dx + Dy * Dy) * 0.5f;
-				if (Score < BestScore)
-				{
-					BestScore = Score;
-					Best = R;
-				}
+				BestScore = Score;
+				Best = R;
 			}
 		}
-		// Overlaps left with the plates already down: nudged down, else up, else across; never onto a face or the cards.
-		auto Covers = [&I](const Rect& R) {
-			float A = 0.0f;
-			for (const Rect& Kc : I.KeepClear)
-			{
-				A += OverlapArea(R, Kc);
-			}
-			return A;
-		};
-		for (int Pass = 0; Pass < 8; ++Pass)
+		// Overlaps left with the plates already down: the nearest free spot beside one of them (under it, over it, either
+		// side; in line with this plate's spot or with that plate), another plate costing more than a face. A search, not a
+		// nudge off the first plate hit: that bounced between two neighbours and could end where it began, two plates over
+		// each other on one edge. Beside a plate leaves room for an edge plate's chevron.
+		const float GapX = 30.0f * S;
+		for (int Round = 0; Round < 3 && Crowds(Best) > 0.0f; ++Round)
 		{
-			const PlacedPlate* Hit = nullptr;
+			const Rect From = Best;
+			float Least = Crowds(From) * 1000.0f + Covers(From) * 100.0f + Blocks(From) * 3.0f;
 			for (const PlacedPlate& Done : Out)
 			{
-				if (Overlap(Best, Done.Footprint))
+				const Rect& F = Done.Footprint;
+				const Rect Slots[8] = {
+					{From.X, F.Y + F.H + 6.0f, Pw, Fh},
+					{From.X, F.Y - Fh - 6.0f, Pw, Fh},
+					{F.X + F.W + GapX, From.Y, Pw, Fh},
+					{F.X - Pw - GapX, From.Y, Pw, Fh},
+					{F.X, F.Y + F.H + 6.0f, Pw, Fh},
+					{F.X, F.Y - Fh - 6.0f, Pw, Fh},
+					{F.X + F.W + GapX, F.Y, Pw, Fh},
+					{F.X - Pw - GapX, F.Y, Pw, Fh},
+				};
+				for (const Rect& Slot : Slots)
 				{
-					Hit = &Done;
-					break;
+					const Rect R = Clamp(Slot);
+					const float Dx = R.X - From.X;
+					const float Dy = R.Y - From.Y;
+					const float Cost = Crowds(R) * 1000.0f + Covers(R) * 100.0f + Blocks(R) * 3.0f + std::sqrt(Dx * Dx + Dy * Dy) * 0.5f;
+					if (Cost < Least)
+					{
+						Least = Cost;
+						Best = R;
+					}
 				}
 			}
-			if (!Hit)
+			if (Best.X == From.X && Best.Y == From.Y)
 			{
-				break;
-			}
-			const float Now0 = Covers(Best);
-			Rect Down = Best;
-			Down.Y += Hit->Footprint.Y + Hit->Footprint.H + 6.0f - Best.Y;
-			Rect UpTo = Best;
-			UpTo.Y -= Best.Y + Best.H + 6.0f - Hit->Footprint.Y;
-			Rect Across = Best;
-			Across.X = Hit->Footprint.X + Hit->Footprint.W + 8.0f <= X1 ? Hit->Footprint.X + Hit->Footprint.W + 8.0f : Hit->Footprint.X - Pw - 8.0f;
-			Across = Clamp(Across);
-			if (Down.Y <= Y1 && Covers(Down) <= Now0)
-			{
-				Best = Down;
-			}
-			else if (UpTo.Y >= Y0 && Covers(UpTo) <= Now0)
-			{
-				Best = UpTo;
-			}
-			else if (Covers(Across) <= Now0)
-			{
-				Best = Across;
-			}
-			else
-			{
-				Best = Down.Y <= Y1 ? Down : UpTo.Y >= Y0 ? UpTo : Across;
+				break; // nowhere better
 			}
 		}
 		Pl.Footprint = Best;
@@ -798,8 +841,16 @@ void DrawPlate(Canvas& C, const TableHudInfo& I, const SeatPlate& Sp, const Plac
 		C.FillRoundRect({R.X + R.W * 0.5f - Tw * 0.5f, Ty, Tw, 22.0f}, 11.0f, Paint(Fa(Col, 0.92f * A * (Sp.ActedAt < -50.0 ? 1.0f : In))));
 		C.Text(Tag, R.X + R.W * 0.5f, Ty + 16.0f, Ts(13.0f, 800, Fa(Hex(0xffffff), A), Align::Center, Baseline::Alphabetic, false, R.W - 16.0f));
 	}
-	// An edge plate points at its seat.
-	if (Pl.Edge)
+	// An edge plate points at its seat: beside it, toward the side the seat is off, or down (up) at a stack off the bottom
+	// (top) of the screen.
+	if (Pl.Edge && Pl.TowardY != 0)
+	{
+		const float Cx = R.X + R.W + 14.0f;
+		const float Cy = R.Y + R.H * 0.5f;
+		const float D = Pl.TowardY > 0 ? 1.0f : -1.0f;
+		C.StrokePolyline({{Cx - 9.0f, Cy - D * 3.6f}, {Cx, Cy + D * 4.5f}, {Cx + 9.0f, Cy - D * 3.6f}}, false, Fa(Ash, 0.9f * A), 2.2f, true);
+	}
+	else if (Pl.Edge)
 	{
 		const float Cx = Pl.Toward < 0 ? R.X - 12.0f : R.X + R.W + 12.0f;
 		Chevron(C, Cx, R.Y + R.H * 0.5f, 9.0f, Pl.Toward > 0, Fa(Ash, 0.9f * A));
@@ -1021,6 +1072,15 @@ void HeroBlock(Canvas& C, const TableHudInfo& I, double Now)
 	const std::string Big = BbBig ? Bbs : Count;
 	const std::string Small = BbBig ? Count : Bbs;
 	const Color Col = Dollars(Where) ? Ash : Depth(I.HeroStack, Bb);
+	// A soft midnight shade under the block, so it reads over a lit sleeve or a bright felt (the clock card's ink, feathered
+	// out; over the dark felt it hardly shows): as wide as the stack's row, the heart's or the Focus bar, whichever is widest.
+	{
+		float Row = C.Measure(Big, 40.0f, 900) + 18.0f + (Small.empty() ? 0.0f : C.Measure(Small, 20.0f, 700) + 16.0f) + Fl(std::min<size_t>(2, I.HeroCards.size())) * 36.0f;
+		Row = std::max(Row, 226.0f + C.Measure(std::to_string(static_cast<int>(std::lround(I.Bpm))), 26.0f, 800, true));
+		Row = std::max(Row, I.Focus < 0.995f || I.Studying ? 450.0f : 0.0f);
+		const float Top = B - 120.0f - (I.Steadying ? 24.0f : 6.0f);
+		C.GlowRoundRect({X - 32.0f, Top - 18.0f, Row + 50.0f, B - Top + 36.0f}, 24.0f, Fa(Midnight, 0.55f), 40.0f);
+	}
 	TrackedText(C, "YOUR STACK", X, B - 58.0f, 13.0f, 800, Fa(Ice, 0.9f), 2.4f);
 	C.FillRoundRect({X - 14.0f, B - 52.0f, 6.0f, 46.0f}, 3.0f, Paint(Fa(Col, 0.9f)));
 	const float Bw = C.Text(Big, X, B - 10.0f, Ts(40.0f, 900, Col));
@@ -1587,29 +1647,42 @@ void Summary(Canvas& C, const TableHudInfo& I)
 void OnFoot(Canvas& C, const TableHudInfo& I, double Now)
 {
 	const float W = C.Width();
-	StreetHudInfo Foot = I.OnFoot;
-	Foot.Subtitles.clear(); // the room's captions are drawn below, with the player's settings
-	Foot.HintsAt = -100.0;  // the card room's own controls row
-	DrawStreetHud(C, Foot, Now);
-	// The clock in a line under the street's block.
+	// The clock in a line under the street's block: under its vitals, and below them a Penny Drop chip and a sponsor's duty
+	// chip when they show.
+	const StreetHudInfo& Ft = I.OnFoot;
+	const bool Penny = Ft.Life && Ft.World >= 0.0 && !Ft.Life->Deliveries.empty();
+	const bool Duty = !Ft.Due.Label.empty() && Ft.World >= 0.0 && Ft.World < Ft.Due.To;
+	const float PillY = !Ft.Life ? 140.0f : Duty && Penny ? 312.0f : 278.0f;
+	std::string Pill;
 	if (I.Clock)
 	{
 		const live::ClockFacts& F = *I.Clock;
-		std::string Pill = F.OnBreak ? "BREAK " + Timer(F.BreakSecondsLeft) + " \xC2\xB7 LEVEL " + std::to_string(F.Level) + " " + Grouped(F.Now.Sb) + "/" + Grouped(F.Now.Bb)
-									 : "LEVEL " + std::to_string(F.Level) + " \xC2\xB7 " + Timer(F.LevelSecondsLeft) + " \xC2\xB7 " + Grouped(F.Now.Sb) + "/" + Grouped(F.Now.Bb);
+		Pill = F.OnBreak ? "BREAK " + Timer(F.BreakSecondsLeft) + " \xC2\xB7 LEVEL " + std::to_string(F.Level) + " " + Grouped(F.Now.Sb) + "/" + Grouped(F.Now.Bb)
+						 : "LEVEL " + std::to_string(F.Level) + " \xC2\xB7 " + Timer(F.LevelSecondsLeft) + " \xC2\xB7 " + Grouped(F.Now.Sb) + "/" + Grouped(F.Now.Bb);
 		if (F.HandForHand)
 		{
 			Pill += " \xC2\xB7 HAND FOR HAND";
 		}
-		// Under the street's block: its vitals, and below them a Penny Drop chip and a sponsor's duty chip when they show.
-		const StreetHudInfo& Ft = I.OnFoot;
-		const bool Penny = Ft.Life && Ft.World >= 0.0 && !Ft.Life->Deliveries.empty();
-		const bool Duty = !Ft.Due.Label.empty() && Ft.World >= 0.0 && Ft.World < Ft.Due.To;
-		const float Y = !Ft.Life ? 140.0f : Duty && Penny ? 312.0f : 278.0f;
-		const float Pw = TrackedWidth(C, Pill, 13.0f, 800, 1.6f) + 40.0f;
-		C.FillRoundRect({Margin, Y, Pw, 28.0f}, 14.0f, Paint(Fa(Midnight, 0.82f)));
-		C.FillCircle(Margin + 15.0f, Y + 14.0f, 4.0f, Paint(F.OnBreak ? Gold : F.HandForHand ? Hot : Teal));
-		TrackedText(C, Pill, Margin + 28.0f, Y + 19.0f, 13.0f, 800, Ash, 1.6f);
+	}
+	const float PillW = Pill.empty() ? 0.0f : TrackedWidth(C, Pill, 13.0f, 800, 1.6f) + 40.0f;
+	// A soft midnight shade under the whole block (in place of the street's own, which stops above the clock's line), so the
+	// needs and their words read over a face at the rail or a lit wall: the clock card's ink, feathered out.
+	{
+		const float Bottom = !Pill.empty() ? PillY + 28.0f : !Ft.Life ? 112.0f : Duty && Penny ? 300.0f : Duty || Penny ? 266.0f : 216.0f;
+		const float Right = std::max({446.0f, 104.0f + TrackedWidth(C, Ft.Place, 15.0f, 800, 5.0f), Margin + PillW});
+		C.GlowRoundRect({26.0f, 30.0f, Right + 18.0f - 26.0f, Bottom + 12.0f - 30.0f}, 24.0f, Fa(Midnight, 0.55f), 40.0f);
+	}
+	StreetHudInfo Foot = I.OnFoot;
+	Foot.Subtitles.clear(); // the room's captions are drawn below, with the player's settings
+	Foot.HintsAt = -100.0;  // the card room's own controls row
+	Foot.Shaded = true;     // the shade above is the block's (two would stack)
+	DrawStreetHud(C, Foot, Now);
+	if (I.Clock)
+	{
+		const live::ClockFacts& F = *I.Clock;
+		C.FillRoundRect({Margin, PillY, PillW, 28.0f}, 14.0f, Paint(Fa(Midnight, 0.82f)));
+		C.FillCircle(Margin + 15.0f, PillY + 14.0f, 4.0f, Paint(F.OnBreak ? Gold : F.HandForHand ? Hot : Teal));
+		TrackedText(C, Pill, Margin + 28.0f, PillY + 19.0f, 13.0f, 800, Ash, 1.6f);
 	}
 	// Where the player's seat is.
 	const TableHudInfo::Marker& M = I.SeatMarker;
@@ -1791,7 +1864,9 @@ void DrawTableHud(Canvas& C, const TableHudInfo& I, double Now)
 	{
 		PotTag(C, I);
 	}
-	if (I.Clock)
+	// (Under the table card the clock card steps aside: the card covers its right column at 16:9 and 4:3, and says the
+	// level and its clock in its own header.)
+	if (I.Clock && !I.CardUp)
 	{
 		ClockCard(C, I, Now);
 	}
@@ -2123,10 +2198,6 @@ void FieldPage(Canvas& C, const TableCardInfo& I, const Rect& R)
 		const float X = R.X + (K >= PerCol ? Cw + 40.0f : 0.0f);
 		const float Ry = Y + Fl(K % PerCol) * RowH + 22.0f;
 		const float Nw = C.Text(Fr.Name, X, Ry, Ts(17.0f, 700, Ash, Align::Left, Baseline::Alphabetic, false, Cw * 0.4f));
-		if (!Fr.Label.empty())
-		{
-			C.Text(Up(Fr.Label), X + Nw + 10.0f, Ry, Ts(13.0f, 800, Teal, Align::Left, Baseline::Alphabetic, false, Cw * 0.6f - Nw - 200.0f > 40.0f ? Cw * 0.6f - Nw - 200.0f : 40.0f));
-		}
 		std::string Where;
 		if (Fr.Here)
 		{
@@ -2146,10 +2217,17 @@ void FieldPage(Canvas& C, const TableCardInfo& I, const Rect& R)
 			Count = "NOT COUNTED YET";
 		}
 		C.Text(Count, X + Cw, Ry, Ts(15.0f, 700, Fr.Count >= 0 ? Ash : Ice, Align::Right, Baseline::Alphabetic, Fr.Count >= 0));
+		const float Cwid = Count.empty() ? 0.0f : C.Measure(Count, 15.0f, 700, Fr.Count >= 0);
 		if (!Where.empty())
 		{
-			const float Cwid = Count.empty() ? 0.0f : C.Measure(Count, 15.0f, 700, Fr.Count >= 0);
 			C.Text(Where, X + Cw - Cwid - 18.0f, Ry, Ts(13.0f, 800, Fr.Here ? Gold : Ice, Align::Right));
+		}
+		// The label takes the room up to the TABLE column (cut short only when it truly doesn't fit there).
+		if (!Fr.Label.empty())
+		{
+			const float Lx = X + Nw + 10.0f;
+			const float Column = !Where.empty() ? X + Cw - Cwid - 18.0f - C.Measure(Where, 13.0f, 800) - 18.0f : X + Cw - Cwid - (Count.empty() ? 0.0f : 18.0f);
+			C.Text(Up(Fr.Label), Lx, Ry, Ts(13.0f, 800, Teal, Align::Left, Baseline::Alphabetic, false, std::max(40.0f, Column - Lx)));
 		}
 	}
 }
@@ -2185,6 +2263,20 @@ void DrawTableCard(Canvas& C, const TableCardInfo& I, double Now)
 		Tx += Tw + 36.0f;
 	}
 	Key1(C, PageGlyphs.back(), I.Gamepad, Tx - 16.0f, TabY + 4.0f, 0.9f);
+	// The level and its clock, right of the tabs: the clock card steps aside while the card is up (TableHudInfo::CardUp).
+	if (I.Clock)
+	{
+		const live::ClockFacts& F = *I.Clock;
+		const std::string Ticking = Timer(F.OnBreak ? F.BreakSecondsLeft : F.LevelSecondsLeft);
+		const std::string Level = F.OnBreak ? std::string("BREAK") : "LEVEL " + std::to_string(F.Level) + " \xC2\xB7 " + Blinds(F.Now);
+		const float Right = X + Cw - 30.0f;
+		const float Tw = C.Measure(Ticking, 24.0f, 700, true);
+		C.Text(Ticking, Right, TabY + 2.0f, Ts(24.0f, 700, F.OnBreak ? Gold : Ash, Align::Right, Baseline::Alphabetic, true));
+		if (TrackedWidth(C, Level, 13.0f, 800, 1.6f) <= Right - Tw - 16.0f - (Tx + 40.0f))
+		{
+			TrackedText(C, Level, Right - Tw - 16.0f, TabY, 13.0f, 800, Fa(Ice, 0.9f), 1.6f, Align::Right);
+		}
+	}
 	C.FillRect({X + 30.0f, TabY + 16.0f, Cw - 60.0f, 1.0f}, Paint(Fa(Ash, 0.1f)));
 	const Rect Body = {X + 40.0f, TabY + 40.0f, Cw - 80.0f, Ch - (TabY + 40.0f - Y) - 70.0f};
 	switch (Page)

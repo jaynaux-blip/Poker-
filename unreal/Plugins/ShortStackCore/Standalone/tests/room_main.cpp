@@ -4,6 +4,8 @@
 //                    TableRound{N, Called} that tick; every "seat open, N" has a bust at N; every named card was tabled;
 //                    every claimed result is in the speaker's Story; no talk from folded players; no needle at a bust).
 //   RoomRates        lines an hour per Sociability band at 0.5x, 1x and 1.5x.
+//   RoomAsk          ss.Live.Cue Ask: the dealer answers the question after it (the average, the break).
+//   RoomNeedleUp     no needle at a player up from their seat; a seated one gets them.
 //   RoomCheckpoints  resumes after hands 0, 1, 7, N/3, N/2, 4N/5 and N-1 say the same rest of the night; a resume with
 //                    no kept state repeats no milestone; Write and Read round-trip.
 //   RoomPace         the same night at Live, Brisk and Fast pace says the same lines in the same hands.
@@ -1394,6 +1396,109 @@ void RoomNoticed()
 	}
 }
 
+// ------------------------------------------------------------------ RoomAsk and RoomNeedleUp
+
+/** One table of six, the player and five of the room's regulars (Aggro: how hard they needle). */
+struct SmallTable
+{
+	live::Occurrence O;
+	ss::TournamentSpec Spec;
+	life::LiveEntry E;
+	std::vector<ss::ReservedPlayer> Known;
+};
+
+SmallTable MakeSmallTable(int BreakEvery, float Aggro)
+{
+	SmallTable S;
+	S.O = live::FindOccurrence("embercrest-nightly@15");
+	S.Spec = live::SpecFor(S.O, 6);
+	S.Spec.BreakEvery = BreakEvery;
+	S.E.Id = S.O.Id;
+	for (const char* Name : {"Boots", "T.J.", "Lin", "Omar", "Duke"})
+	{
+		S.E.Voices.push_back(MakeVoice(Name, ss::Archetype::Lag, 0.5f, Aggro, world::Identity::Recreational, 50));
+		S.E.Roster.push_back({Name, static_cast<int>(ss::Archetype::Lag)});
+		S.Known.push_back({Name, ss::Archetype::Lag});
+	}
+	return S;
+}
+
+/**
+ * ss.Live.Cue Ask (acceptance F1): someone at the player's table asks the dealer, and the dealer answers after them, as the
+ * table's own questions are answered (the average; the break when it's close), and nothing the night keeps changes.
+ */
+void RoomAsk()
+{
+	struct Case
+	{
+		int BreakEvery;
+		int Level;
+		const char* Asked;
+		const char* Answer;
+	};
+	for (const Case& K : {Case{0, 2, "field.ask.average", "dealer.average"}, Case{4, 3, "field.ask.break", "dealer.break.next"}})
+	{
+		const SmallTable S = MakeSmallTable(K.BreakEvery, 0.3f);
+		ss::Tournament T(S.Spec, "Jesse", "ask", S.Known);
+		T.LevelIndex = K.Level;
+		T.Tick = 12;
+		room::Director D(S.E, S.O, "ask:room", "Jesse");
+		D.Clock(T, S.O.Start, 0.0);
+		D.Take();
+		const std::string Kept = D.Write();
+		const bool Asked = D.Prompt(T, talk::Moment::Ask, -1);
+		const std::vector<room::Cue> Said = D.Take();
+		const std::string Average = "Average is about " + talk::Count(static_cast<long long>(std::lround(T.AverageStack() / 1000.0)) * 1000) + ".";
+		const bool Right = Asked && Said.size() == 2 && Said[0].What == room::Kind::Line && Starts(Said[0].Key, K.Asked) && Said[1].What == room::Kind::Call &&
+			Starts(Said[1].Key, std::string(K.Answer) + ".") && Said[1].Where == room::From::HeroTable && Said[1].TableId == T.Hero().TableId && Said[1].Delay > Said[0].Delay + 0.5 &&
+			Said[1].Text == (K.BreakEvery == 0 ? Average : std::string("Break after this level.")) && D.Write() == Kept;
+		Expect(Right, std::string("room ask: ss.Live.Cue Ask gets the dealer's answer after the question (") + K.Answer + ": " +
+						  (Said.size() > 1 ? Said[0].Text + " / " + Said[1].Text : std::to_string(Said.size()) + " cues") + ")");
+	}
+}
+
+/**
+ * The player folds to the same raiser hand after hand (acceptance F16): seated, the raiser needles them now and then; up
+ * from their seat, where the dealer mucks for them, nobody does.
+ */
+void RoomNeedleUp()
+{
+	for (const bool Up : {false, true})
+	{
+		const SmallTable S = MakeSmallTable(0, 0.95f);
+		ss::Tournament T(S.Spec, "Jesse", "needle", S.Known);
+		room::Director D(S.E, S.O, "needle:room", "Jesse");
+		D.Clock(T, S.O.Start, 0.0);
+		D.Take();
+		D.HeroUp = Up;
+		std::string Raiser;
+		for (const ss::TPlayer& P : T.Players)
+		{
+			Raiser = Raiser.empty() && !P.IsHero && P.TableId == T.Hero().TableId ? P.Name : Raiser;
+		}
+		int Needles = 0;
+		for (int H = 1; H <= 80; ++H)
+		{
+			T.Tick = H;
+			room::HandNote N;
+			N.Hand = H;
+			N.Aggressor = Raiser;
+			N.HeroFoldedToRaise = true;
+			for (const ss::TPlayer& P : T.Players)
+			{
+				(P.IsHero ? N.Folded : N.InHand).push_back(P.IsHero ? std::string(ss::HeroId) : P.Name);
+			}
+			D.Hand(T, N);
+			for (const room::Cue& C : D.Take())
+			{
+				Needles += C.ToHero && Starts(C.Key, "field.needle") ? 1 : 0;
+			}
+		}
+		Expect(Up ? Needles == 0 : Needles > 0, std::string("room needles: ") + (Up ? "none at a player up from their seat" : "a raiser needles the seated player") + " (" +
+													 std::to_string(Needles) + ")");
+	}
+}
+
 // ------------------------------------------------------------------ RoomMoves and RoomHeroHonor
 
 std::vector<room::Cue> Keyed(const std::vector<room::Cue>& Cues, const std::string& Head)
@@ -1968,6 +2073,8 @@ int main(int argc, char** argv)
 	room_test::RoomVoices();
 	room_test::RoomRates();
 	room_test::RoomNoticed();
+	room_test::RoomAsk();
+	room_test::RoomNeedleUp();
 	room_test::RoomMoves();
 	room_test::RoomOrder();
 	room_test::RoomHeroHonor();

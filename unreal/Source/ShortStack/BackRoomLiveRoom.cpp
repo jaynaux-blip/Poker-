@@ -569,7 +569,11 @@ void ABackRoomGameMode::LiveEvent(const ss::TEvent& E)
 		BreakT = 0.0f;
 		BreakLevel = E.LevelNumber;
 		RaiseBanner(FString::Printf(TEXT("BREAK   %d MINUTES"), FMath::RoundToInt(LiveBreakMinutes)));
-		Table->Hold();
+		if (Phase != EBackRoomPhase::Playing || !Tourney->Hero().Busted)
+		{
+			// (Out in the hand before it: no break to sit through. The table's next deal finds no hand and the night ends.)
+			Table->Hold();
+		}
 		break;
 	}
 	case ss::TEventType::HandForHand:
@@ -1511,6 +1515,31 @@ void ABackRoomGameMode::TickRoom(float RealDt)
 	const float NearDb = CVarRoomNearDb.GetValueOnGameThread();
 	const float DealerDb = CVarRoomDealerDb.GetValueOnGameThread();
 	const bool bAtStage = Stage && Stage->GetRoomAnchor() == ABackRoomStage::StreamSlot();
+	// Moved (a table broken, the balance, a move while up): what the old table's people still had to say isn't said at the
+	// player's table any more. Their lines go out in the room from that table, and what was said to the player (a needle,
+	// a remark on the patch) isn't said at all: they've gone (acceptance F16). The old dealer's "you're moving" is a call,
+	// said there on purpose.
+	if (Mine > 0)
+	{
+		for (std::vector<FRoomQueued>* List : {&H.Incoming, &H.Queue})
+		{
+			for (size_t I = List->size(); I-- > 0;)
+			{
+				FRoomQueued& Q = (*List)[I];
+				if (Q.Cue.What != ss::room::Kind::Line || Q.Cue.Where != ss::room::From::HeroTable || Q.Cue.TableId <= 0 || Q.Cue.TableId == Mine)
+				{
+					continue;
+				}
+				if (Q.Cue.ToHero)
+				{
+					List->erase(List->begin() + static_cast<std::ptrdiff_t>(I));
+					continue;
+				}
+				Q.Cue.Where = ss::room::From::Table;
+				Q.bNear = false;
+			}
+		}
+	}
 	for (FRoomQueued& Q : H.Incoming)
 	{
 		const ss::room::Cue& C = Q.Cue;

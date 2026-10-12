@@ -152,6 +152,7 @@ struct TableHudInfo
 	bool Gamepad = false;
 	double HintsAt = -100.0;
 	bool OnAir = false; // the feature table on the stream: the lower third
+	bool CardUp = false; // the table card is up (modal, over the HUD): the clock card steps aside, its level and clock on the card
 	float Scale = 1.0f; // the HUD size setting (0.8 to 1.3): panels scale about their anchors
 
 	// ---- what the legacy HUD drew, so the core HUD replaces it whole (BackRoomGameMode.cpp:1397-2131)
@@ -199,15 +200,19 @@ struct PlacedPlate
 	Rect Box;       // the plate
 	Rect Footprint; // the plate and the room its action tag takes under it
 	bool Edge = false;
-	int Toward = 0; // an edge plate's chevron: -1 left, 1 right
+	int Toward = 0;  // an edge plate's chevron: -1 left, 1 right (0: on the bottom or top edge)
+	int TowardY = 0; // a bottom or top edge plate's (a stack off below or above the screen): 1 down, -1 up
 	float Alpha = 1.0f;
 	Vec2 Glyph;     // the badge glyph's centre (16 units)
 };
 /**
  * The plates' layout on a canvas Width wide (1,080 tall): each by its stack (below it, else above, else beside), clamped
  * to x 58..W−58−188 and y 330..760 (at Scale 1), never over KeepClear, the HUD's panels (the clock card, the hero block,
- * the ladder's area, the toast lane), the pot tag or another plate when there's room for it; overlaps left over are
- * nudged vertically. Pure: the same info gives the same layout, so plates never jump while nothing moves.
+ * the ladder's area, the toast lane), the pot tag or another plate when there's room for it. A stack off screen gets an
+ * edge plate: on the side it's off (behind the camera, the side the host put it), or at its x on the bottom or top edge
+ * when it's off below or above; slid along that edge (or in from it) off the faces, the cards and the other plates.
+ * Overlaps left over move to the nearest free spot beside a plate already down. Pure: the same info gives the same
+ * layout, so plates never jump while nothing moves.
  */
 SHORTSTACKCORE_API std::vector<PlacedPlate> LayoutPlates(const TableHudInfo& I, float Width, double Now);
 /** A badge glyph the host draws from the atlas (an atlas cell) at a centre and size, over the HUD. */

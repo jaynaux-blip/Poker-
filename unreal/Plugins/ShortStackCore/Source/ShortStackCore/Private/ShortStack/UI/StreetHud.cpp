@@ -125,8 +125,22 @@ void DrawStreetHud(Canvas& C, const StreetHudInfo& Info, double Now)
 		C.FillRect({0.0f, 0.0f, W, 92.0f}, Paint(Rgba(0, 0, 0, 0.88f)));
 		C.FillRect({0.0f, H - 112.0f, W, 112.0f}, Paint(Rgba(0, 0, 0, 0.88f)));
 	}
-	// Where and when, top left, over a soft shade so it reads on a bright window.
-	C.FillRect({0.0f, 0.0f, 760.0f, 260.0f}, Paint::Radial({0.0f, 0.0f}, 0.0f, {0.0f, 0.0f}, 700.0f, Rgba(0, 0, 0, 0.55f), 0.5f, Rgba(0, 0, 0, 0.25f), Rgba(0, 0, 0, 0.0f)));
+	// Where and when, top left, over a soft midnight shade so it reads on a bright window, a lit bus roof or the Embercrest's
+	// stone: feathered, so no seam on bright ground (a gradient fill is shaded per vertex). The chips under it carry their own
+	// fills. A host that shades the block itself (the card room's on-foot HUD) says so.
+	if (!Info.Shaded)
+	{
+		float Right = std::max(446.0f, 104.0f + TrackedWidth(C, Info.Place, 15.0f, 800, 5.0f));
+		if (Info.Weather >= 0)
+		{
+			const float Clock = TrackedWidth(C, Info.Clock, 36.0f, 900, 2.0f);
+			const float Bank = C.Measure(Money(Info.BankrollCents), 20.0f, 800);
+			const char* Word = weather::Word(static_cast<weather::Sky>(std::clamp(Info.Weather, 0, 4)));
+			Right = std::max(Right, 58.0f + Clock + 22.0f + Bank + 30.0f + 22.0f + C.Measure(Word, 15.0f, 700));
+		}
+		const float Bottom = Info.Life ? 216.0f : 112.0f;
+		C.GlowRoundRect({26.0f, 30.0f, Right + 18.0f - 26.0f, Bottom + 12.0f - 30.0f}, 24.0f, Hex(0x0a1020, 0.55f), 40.0f);
+	}
 	C.FillRect({58.0f, 52.0f, 34.0f, 3.0f}, Paint(MenuNeon));
 	TrackedText(C, Info.Place, 104.0f, 60.0f, 15.0f, 800, MenuInk, 5.0f);
 	const float Cw = TrackedText(C, Info.Clock, 58.0f, 104.0f, 36.0f, 900, MenuInk, 2.0f);

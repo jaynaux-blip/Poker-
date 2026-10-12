@@ -582,9 +582,10 @@ void ABackRoomTable::StartHand()
 		}
 		return;
 	}
-	if (const FSeat* H = HeroSeat(); H && H->Stack <= 0 && !bHeroAutoReload)
+	if (const FSeat* H = HeroSeat(); H && H->Stack <= 0 && !bHeroAutoReload && !Tourney)
 	{
-		// Felted: the host decides (reload from the bankroll, or go home).
+		// Felted at Dee's game: the host decides (reload from the bankroll, or go home). A tournament's engine decides its
+		// own busts: FetchTournamentHand finds no hand for a hero who's out and notes TournamentOver.
 		bHolding = true;
 		if (!bBustNoted)
 		{
@@ -2266,7 +2267,10 @@ void ABackRoomTable::GetSeatViews(TArray<FBackRoomSeatView>& Out) const
 		{
 			const int32 Idx = Tourney->PlayerIndex(std::string(TCHAR_TO_UTF8(*S.Id)));
 			const std::string Name = Idx >= 0 ? Tourney->Players[static_cast<size_t>(Idx)].Name : std::string();
-			V.Name = UTF8_TO_TCHAR(ss::talk::CaptionName(TCHAR_TO_UTF8(*S.Id), Name, S.HandSeat >= 0 ? S.HandSeat : S.TableSeat).c_str());
+			// "Seat N" by the engine's seat, as the dealer calls it: the felt's TableSeat numbers the chairs another way
+			// (0-3, 5, 6), so a fallback to it could name two plates alike.
+			const int32 EngineSeat = Idx >= 0 ? Tourney->Players[static_cast<size_t>(Idx)].Seat : S.HandSeat;
+			V.Name = UTF8_TO_TCHAR(ss::talk::CaptionName(TCHAR_TO_UTF8(*S.Id), Name, EngineSeat >= 0 ? EngineSeat : S.TableSeat).c_str());
 		}
 		else
 		{
