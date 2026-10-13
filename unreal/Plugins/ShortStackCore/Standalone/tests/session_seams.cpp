@@ -68,11 +68,13 @@ std::string Fixture(const char* Name)
 }
 
 /** The save without the segment's own lines (and Kast's legacy deal lines, which core-sponsor's migration moves into the
- *  book), life\tlive back to its six fields: what must survive any build of the segment byte for byte. */
+ *  book), life\tlive back to its six fields: what must survive any build of the segment byte for byte. Update 2's lines
+ *  (autoplay, video, site; update 2 SPEC §6.5) are allowed the same way, and kast\tclip goes back to its eight fields (the
+ *  9th is the Rerun candidate's id). */
 std::string Segmentless(const std::string& Text, int* Dropped = nullptr)
 {
 	static const char* Ours[] = {"livefund\t", "livevoice\t", "liveroom\t", "livebadge\t", "liveleader\t", "livepatch\t", "mail\t", "stake\t", "coach\t",
-		"sponsor\t", "badge\t", "life\tshift\t", "life\tliveday\t", "kast\tdeal\t", "kast\toffer\t", "kast\tdeclined\t"};
+		"sponsor\t", "badge\t", "life\tshift\t", "life\tliveday\t", "kast\tdeal\t", "kast\toffer\t", "kast\tdeclined\t", "autoplay\t", "video\t", "site\t"};
 	std::string Out;
 	int Count = 0;
 	size_t Start = 0;
@@ -92,12 +94,14 @@ std::string Segmentless(const std::string& Text, int* Dropped = nullptr)
 			++Count;
 			continue;
 		}
-		if (Line.rfind("life\tlive\t", 0) == 0)
+		const bool LiveLine = Line.rfind("life\tlive\t", 0) == 0;
+		if (LiveLine || Line.rfind("kast\tclip\t", 0) == 0)
 		{
+			const size_t Keep = LiveLine ? 6 : 8;
 			size_t Tabs = 0;
 			for (size_t K = 0; K < Line.size(); ++K)
 			{
-				if (Line[K] == '\t' && ++Tabs == 6)
+				if (Line[K] == '\t' && ++Tabs == Keep)
 				{
 					Line = Line.substr(0, K) + "\n";
 					break;

@@ -90,6 +90,11 @@ struct Sim
 	static void Found(World& W, double Start);
 	/** The Embercrest's own regulars (live::RoomLocals), whoever of them a world doesn't have yet. */
 	static void RoomLocals(World& W, int Today);
+	/**
+	 * A fresh start (update 2 §3.4): every record wiped from a world built as an established one, the people kept as they
+	 * are (U6). Phase A: a stub, so a Blank world plays as an Established one until core-world lands it.
+	 */
+	static void Wipe(World& W);
 	static int Add(World& W, Npc&& N);
 	static std::string UniqueName(World& W, Rng& R, const std::string& Country, bool Pro);
 	static void MakeSkills(Npc& N, Rng& R, double Base);

@@ -227,7 +227,10 @@ void Catalog()
 	// The trademark screen: none of the catalog's words is a real poker site, drink, VPN, chair, camera or training site.
 	const char* Real[] = {"pokerstars", "ggpoker", "partypoker", "888", "wsop", "world series", "wpt", "run it once", "upswing", "red bull", "redbull", "monster",
 		"rockstar", "celsius", "g fuel", "gfuel", "bang energy", "prime hydration", "ghost energy", "nordvpn", "expressvpn", "surfshark", "secretlab", "dxracer",
-		"logitech", "elgato", "razer", "nike", "adidas", "bodog", "ignition", "americas cardroom", "natural8", "bovada", "pokerbros", "global poker", "acr poker"};
+		"logitech", "elgato", "razer", "nike", "adidas", "bodog", "ignition", "americas cardroom", "natural8", "bovada", "pokerbros", "global poker", "acr poker",
+		// Update 2 (update 2 SPEC §1.8): video platforms, payment wallets and more real poker sites, for Rerun and the rival sites.
+		"youtube", "twitch", "kick", "tiktok", "rumble", "vimeo", "dailymotion", "skrill", "neteller", "paypal", "venmo", "ecopayz", "muchbetter", "888poker", "acr ",
+		"betonline", "wpt global", "coinpoker", "winamax", "unibet"};
 	bool Clean = true;
 	for (const sponsor::Brand& B : All)
 	{

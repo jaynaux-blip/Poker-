@@ -1,13 +1,16 @@
 #pragma once
 
 #include "ShortStack/Common.h"
+#include "ShortStack/Game/Autoplay.h"
 #include "ShortStack/Game/Body.h"
 #include "ShortStack/Game/Coach.h"
 #include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/SiteData.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Town.h"
+#include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/Wardrobe.h"
 
 #include <functional>
@@ -79,7 +82,8 @@ struct LedgerEntry
 	 * 0 poker, 1 job, 2 hustle, 3 bills, 4 prizes, 5 gear, 6 streaming, 7 transfers, 8 the corner store, 9 Northside
 	 * (the shops on the block: the barber, the thrift, the gym, Ruby's and the pawn; labeled with the shop's name),
 	 * 10 backing (stakes, pieces, swaps, a package; next_segment_spec §1.2), 11 sponsors (covers, cuts, bonuses,
-	 * stipends), 12 coaching.
+	 * stipends), 12 coaching, 13 video (Rerun's monthly payout; update 2 §1.2), 14 poker sites (the rival sites' cashier
+	 * fees; deposits and withdrawals themselves are kind 7, moving the player's own money).
 	 */
 	int Kind = 0;
 };
@@ -87,6 +91,9 @@ struct LedgerEntry
 constexpr int LedgerBacking = 10;
 constexpr int LedgerSponsors = 11;
 constexpr int LedgerCoaching = 12;
+/** Update 2's ledger kinds (§1.2): RiverLine Rewards pays as kind 4 (prizes), like the Night Shift. */
+constexpr int LedgerVideo = 13;
+constexpr int LedgerSites = 14;
 
 // ------------------------------------------------------------------ the next segment's types (next_segment_spec §7.2)
 // The data the segment's features keep on the player's life. Saved by their own lines: livefund, livevoice, liveroom,
@@ -413,12 +420,45 @@ struct State
 	/** Not saved: SegmentLine bits, which of this segment's life lines the state carries (§7.5). */
 	uint32_t SegmentLinesRead = 0;
 
+	// ---- update 2 (update 2 SPEC §6.2): each feature's data, saved by its own lines (autoplay::, video::, site::
+	// WriteLines, after the segment's block) once its Update2LinesRead bit is set, so an untouched old save writes back as
+	// it was read.
+	autoplay::Book Auto; // autoplay\t... lines: the defaults, Form, what each event's plan played, the notes on regulars
+	video::Channel Video; // video\t... lines: Rerun
+	site::Book Sites;     // site\t... lines: the rival sites' accounts, transfers, invitations, RiverLine Rewards
+	/**
+	 * Not saved: Update2Line bits. A bit is set when the save had the line, or once this update's code has state to keep
+	 * for it: a graded decision of the player's own (autoplay::NoteOwnDecision), opening the panel and any autoplay use set
+	 * U2AutoPref; NewCareer sets every bit (the SegShift precedent).
+	 */
+	uint32_t Update2LinesRead = 0;
+
 	SHORTSTACKCORE_API void Record(double At, const std::string& Label, Chips Amount, int Kind);
 	int TicketsFor(const std::string& TemplateId) const;
 };
 
-/** Posts a letter to the shared inbox (the body cut to LetterBodyMax), keeping the last InboxKeep. */
+/**
+ * Bits of State::Update2LinesRead (update 2 §6.2, §6.5): which of the update's lines the state carries. Migrations key
+ * on them, never on a value at its default, and each feature writes its lines only once its bit is set.
+ */
+enum Update2Line : uint32_t
+{
+	U2AutoPref = 1,   // autoplay\tpref
+	U2AutoPlayed = 2, // autoplay\tplayed
+	U2Video = 4,      // video\t...
+	U2Sites = 8,      // site\t... (accounts, transfers, invitations)
+	U2Rewards = 16,   // site\trewards
+	U2Notes = 32,     // autoplay\tnote
+};
+
+/**
+ * Posts a letter to the shared inbox (the body cut to LetterBodyMax), keeping the last InboxKeep. Over the keep, the
+ * oldest letter that's read or wants no answer goes first; an unread offer or invitation (WantsAnswer) goes only when all
+ * of them are (update 2 §1.7).
+ */
 SHORTSTACKCORE_API void Post(State& L, const Letter& Mail);
+/** A letter that wants an answer: a sponsor's offer or renewal, a staking outfit's package, a site's invitation or offer. */
+SHORTSTACKCORE_API bool WantsAnswer(const Letter& Mail);
 /** The inbox as save lines: "mail\tat\tthread\tsource\tkind\tread\tfrom\tsubject\tbody", oldest first (strings escaped). */
 SHORTSTACKCORE_API void WriteMail(const State& L, std::string& Out);
 /** Reads one mail line split on tabs (at least 9 fields); false when it isn't one. */

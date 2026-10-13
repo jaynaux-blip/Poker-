@@ -9,6 +9,7 @@
 #include "BackRoomGameShared.h"
 #include "BackRoomTableHost.h"
 
+#include "BackRoomAuto.h"
 #include "BackRoomCard.h"
 #include "BackRoomChips.h"
 #include "BackRoomLiveShared.h"
@@ -646,7 +647,7 @@ void ABackRoomHUD::DrawHUD()
 	// Where the ladder starts and the tournament panel ends, for what else shares the screen's sides.
 	float LadderTop = H;
 	float PanelBottom = 0.0f;
-	if (P.bYourTurn && Phase != EBackRoomPhase::Busted && Phase != EBackRoomPhase::Moving && !GM->IsHeroUp())
+	if (P.bYourTurn && Phase != EBackRoomPhase::Busted && Phase != EBackRoomPhase::Moving && !GM->IsHeroUp() && !GM->IsAutoPlaying())
 	{
 		// The one control map's keys (ss::ui::Controls): X fold, A check or call, Y raise (on release), Y or A held all in.
 		struct FRung
@@ -745,6 +746,15 @@ void ABackRoomHUD::DrawHUD()
 	else if (GM->IsLeaveRequested())
 	{
 		Text(TEXT("Racking up after this hand"), Dim, W * 0.5f, H - 190.0f * S, Small, 1.1f, 1);
+	}
+	else if (const FAutoHost* Auto = FAutoHost::Of(GM))
+	{
+		// Update 2 (§2.11 P0a): the plan's status line, the one the core HUD gets through FillTableHud (ue-auto's).
+		const FString AutoLine = Auto->StatusLine();
+		if (!AutoLine.IsEmpty())
+		{
+			KeyLine(AutoLine, Paper, W * 0.5f, H - 190.0f * S, Small, 1.1f, 1);
+		}
 	}
 
 	// The clock, and how tired you are; at a tournament, its panel at the top left: the event, the level and its
@@ -1219,9 +1229,10 @@ void ABackRoomGameMode::UpdatePlates(float RealDt)
 		}
 	}
 
-	// The toast lane (spec 1.6): what arrived while the decision was the player's waits for it to be made.
+	// The toast lane (spec 1.6): what arrived while the decision was the player's waits for it to be made. (Update 2: the
+	// plan's decisions aren't the player's; nothing waits on them.)
 	const FBackRoomPrompt Prompt = Table->GetPrompt();
-	const bool bDeciding = Prompt.bYourTurn && !bHeroUp;
+	const bool bDeciding = Prompt.bYourTurn && !bHeroUp && !IsAutoPlaying();
 	for (ss::ui::Toast& T : Toasts)
 	{
 		if (T.At < 0.0 && !bDeciding)
@@ -1564,8 +1575,10 @@ void ABackRoomGameMode::FillTableHud(ss::ui::TableHudInfo& Out, float CanvasWidt
 	Out.Bb = P.BigBlind;
 	Out.PotAt = H.PotAt;
 	Out.PotOnScreen = H.bPotOnScreen && P.Pot > 0 && !bWalking;
-	// The decision: the ladder and its presets (keys 1-6, the bumpers), the all-in hold's fill.
-	const bool bDecide = P.bYourTurn && Phase != EBackRoomPhase::Busted && Phase != EBackRoomPhase::Moving && !bHeroUp && !bWalking && !(Pawn && Pawn->IsTableCardUp());
+	// The decision: the ladder and its presets (keys 1-6, the bumpers), the all-in hold's fill. Never while the plan holds
+	// the seat (update 2, §2.11): its turn isn't the player's, so the ladder stays down and the toasts aren't held.
+	const bool bDecide = P.bYourTurn && Phase != EBackRoomPhase::Busted && Phase != EBackRoomPhase::Moving && !bHeroUp && !bWalking && !(Pawn && Pawn->IsTableCardUp()) &&
+		!IsAutoPlaying();
 	Out.YourTurn = bDecide;
 	Out.CanCheck = P.bCanCheck;
 	Out.CanRaise = P.bCanRaise;
@@ -1813,6 +1826,11 @@ void ABackRoomGameMode::FillTableHud(ss::ui::TableHudInfo& Out, float CanvasWidt
 	{
 		Out.NextOutCents = Tourney->PrizeFor(Tourney->Remaining);
 	}
+	// Update 2 (§2.11): the plan's fields and its P0a lines over all of the above (ue-auto's FAutoHost::FillHud).
+	if (AutoHost)
+	{
+		AutoHost->FillHud(Out, P);
+	}
 }
 
 void ABackRoomGameMode::FillTableCard(ss::ui::TableCardInfo& Out) const
@@ -1868,6 +1886,11 @@ void ABackRoomGameMode::FillTableCard(ss::ui::TableCardInfo& Out) const
 	// NIGHT: everything the room said tonight (the director's log, ue-room's).
 	Out.Night = GetNightLog();
 	Out.NightTitle = bLive ? "THE NIGHT \xC2\xB7 " + Utf8(LiveName.ToUpper()) : std::string("THE NIGHT \xC2\xB7 THE BACK ROOM");
+	// PLAY (update 2, §2.6.2): the styles, the plan, Sharpness and Form, the skip's targets (ue-auto's FAutoHost::FillCard).
+	if (AutoHost)
+	{
+		AutoHost->FillCard(Out);
+	}
 }
 
 void ABackRoomGameMode::PushToast(const FString& From, const FString& Line, uint32 Accent)

@@ -134,6 +134,12 @@ struct Terms
 	bool Exclusive = false;
 	bool ConductClause = true;
 	int CureDays = 14;
+	// Update 2 (§5.7; core-deals). Written as key=value only when set (never a new Ask: ask= is positional).
+	std::string Only;       // only=<site>: plays, streams and posts only on that site
+	std::string OnlyStream; // onlystream=<site>: streams only on that site (P1, Flopjoy Squad)
+	std::string OnSite;     // onsite=<site>: live hours count only with that site's table in front (P1)
+	Chips VideoIntCents = 0; // vi=: a video integration's fee (P1)
+	int VideoInts = 0;       // via=: integrations a period (P1)
 };
 struct Gate
 {
@@ -167,6 +173,7 @@ struct Brand
 	Terms Offer;
 	std::vector<std::string> Pitch; // the offer letter's wordings (one is picked by the seed)
 	bool Legacy = false;            // one of Kast's five (its id is in old saves)
+	int Site = -1;                  // update 2: a Site-category brand's net::SiteId ("riverline", "turnstone", "flopjoy"); -1 for the rest
 };
 /** The catalog: 13 brands (§3.4; the site is turnstone, not lantern). */
 SHORTSTACKCORE_API const std::vector<Brand>& Brands();
@@ -406,6 +413,12 @@ enum class Breach : int
 	AccountRestricted,
 };
 SHORTSTACKCORE_API void Conduct(Book& B, life::State& L, Chips& Bankroll, Breach Why, double World);
+// Update 2 (§5.7; core-deals fills them): a contract's "plays only on" clause. Conduct(AccountRestricted) ends only the
+// contracts whose brand's Site is RiverLine (§5.5).
+/** Whether playing (or streaming, or posting a video) on Site would be a strike under a running clause: the warning first. */
+SHORTSTACKCORE_API bool WouldStrike(const Book& B, int Site, bool Streaming, bool Video);
+/** The player played (streamed, posted) on Site: a strike under a running "only" clause. */
+SHORTSTACKCORE_API void NoteSitePlay(Book& B, life::State& L, int Site, double World, bool Streaming, bool Video);
 SHORTSTACKCORE_API bool Active(const Book& B, const std::string& BrandId, double World);
 /** The contract running for Brand at World (Active or under notice, inside its term), or nullptr. */
 SHORTSTACKCORE_API const Contract* Running(const Book& B, const std::string& BrandId, double World);

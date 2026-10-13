@@ -858,13 +858,13 @@ FString ANightOneGameMode::TestStream(bool bLive)
 	return UTF8_TO_TCHAR(Game->Session.GoLive().c_str());
 }
 
-void ANightOneGameMode::TestNewCareer(const FString& ScreenName)
+void ANightOneGameMode::TestNewCareer(const FString& ScreenName, bool bBlank)
 {
 	if (Game && !bStarted)
 	{
-		// As the title screen does: the menu closes, then the career starts.
+		// As the title screen does: the menu closes, then the career starts (in the world THE WORLD step would pick).
 		Game->Menu.Close(RealTime);
-		StartNewCareer(ScreenName, &Game->Menu.Draft);
+		StartNewCareer(ScreenName, &Game->Menu.Draft, bBlank ? ss::world::Start::Blank : ss::world::Start::Established);
 	}
 }
 
@@ -1504,7 +1504,7 @@ void ANightOneGameMode::ContinueCareer()
 	}
 }
 
-void ANightOneGameMode::StartNewCareer(const FString& ScreenName, const ss::hero::Character* Who)
+void ANightOneGameMode::StartNewCareer(const FString& ScreenName, const ss::hero::Character* Who, ss::world::Start WorldStart)
 {
 	if (Game)
 	{
@@ -1517,12 +1517,12 @@ void ANightOneGameMode::StartNewCareer(const FString& ScreenName, const ss::hero
 		}
 		if (Who)
 		{
-			// A fresh save, then what the character's background starts them with.
-			Game->Session.NewCareer(*Who);
+			// A fresh save in the world the creator picked, then what the character's background starts them with.
+			Game->Session.NewCareer(*Who, WorldStart);
 		}
 		else
 		{
-			Game->Session.ResetSave();
+			Game->Session.ResetSave(WorldStart);
 		}
 		Begin(ScreenName);
 	}

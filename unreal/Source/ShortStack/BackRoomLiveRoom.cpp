@@ -11,6 +11,7 @@
 
 #include "BackRoomLiveShared.h"
 
+#include "BackRoomAuto.h"
 #include "BackRoomGameMode.h"
 #include "BackRoomPlayer.h"
 #include "BackRoomStage.h"
@@ -1537,6 +1538,18 @@ void ABackRoomGameMode::TickRoom(float RealDt)
 				}
 				Q.Cue.Where = ss::room::From::Table;
 				Q.bNear = false;
+			}
+		}
+	}
+	// Update 2 (§2.12): watching the plan at speed, the talk thins before any of it is voiced (ue-auto's TalkGate: at 4x and
+	// up the dealers and the PA, at 8x the PA only), so the captions keep up with the hands. Everything passes until then.
+	if (AutoHost)
+	{
+		for (size_t I = H.Incoming.size(); I-- > 0;)
+		{
+			if (!AutoHost->TalkGate(H.Incoming[I].Cue))
+			{
+				H.Incoming.erase(H.Incoming.begin() + static_cast<std::ptrdiff_t>(I));
 			}
 		}
 	}

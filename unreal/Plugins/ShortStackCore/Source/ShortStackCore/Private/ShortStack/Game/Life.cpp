@@ -456,14 +456,34 @@ std::string MailCut(const std::string& In, size_t Max)
 }
 } // namespace life_mail_detail
 
+bool WantsAnswer(const Letter& Mail)
+{
+	if (Mail.Source == "sponsor")
+	{
+		return Mail.Kind == sponsor::LetterOffer || Mail.Kind == sponsor::LetterRenewal;
+	}
+	if (Mail.Source == "stake")
+	{
+		return Mail.Kind == stake::LetterOffer;
+	}
+	if (Mail.Source == "site")
+	{
+		return Mail.Kind == site::LetterInvite || Mail.Kind == site::LetterOffer;
+	}
+	return false;
+}
+
 void Post(State& L, const Letter& Mail)
 {
 	Letter Kept = Mail;
 	Kept.Body = life_mail_detail::MailCut(Mail.Body, LetterBodyMax);
 	L.Inbox.push_back(Kept);
-	if (L.Inbox.size() > InboxKeep)
+	// Over the keep, the oldest letter that's read or wants no answer goes first: an offer or an invitation still unread
+	// goes only when every letter kept is one (update 2 §1.7).
+	while (L.Inbox.size() > InboxKeep)
 	{
-		L.Inbox.erase(L.Inbox.begin(), L.Inbox.begin() + static_cast<std::ptrdiff_t>(L.Inbox.size() - InboxKeep));
+		const auto Spare = std::find_if(L.Inbox.begin(), L.Inbox.end(), [](const Letter& M) { return M.Read || !WantsAnswer(M); });
+		L.Inbox.erase(Spare != L.Inbox.end() ? Spare : L.Inbox.begin());
 	}
 }
 

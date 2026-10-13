@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/SiteData.h"
 
 #include <array>
 #include <map>
@@ -37,8 +38,30 @@ namespace world
 /**
  * 2: the room records, circuit points and cards, the Verified review, the Hall of Fame, the freeroll count, the money
  * memories (next_segment_spec §5, §7.3). A version 1 world migrates once in Finish (§7.5 step 5).
+ * Update 2 keeps 2 through Phase A; core-world bumps it to 3 at G1 (the head's Start) and to 4 at G3 (the NPCs' Sites),
+ * each in one commit with its complete migration and the pinned asserts (update 2 §6.5).
  */
 constexpr int Version = 2;
+
+/**
+ * How a world began (update 2 §3): Established is today's (the network's history, the founders' records); Blank is the
+ * fresh start: the same people with the same skills, bankrolls and habits, built exactly as an established world and then
+ * wiped of every record (Sim::Wipe), so the boards, the badges and the wall fill in as the world plays.
+ */
+enum class Start : uint8_t
+{
+	Established,
+	Blank,
+};
+
+/** Someone's record on one site (update 2 §5.9, G3): the rivals' sparse maps; RiverLine's is the NPC's own. */
+struct SiteRecord
+{
+	double Points = 0;
+	Chips Won = 0;
+	int Wins = 0, FinalTables = 0, Events = 0;
+	Chips Lifetime = 0;
+};
 
 // ------------------------------------------------------------------ who they are
 
@@ -563,6 +586,8 @@ struct Npc
 	int CardLast = CardNone;   // last season's, good through this one
 	bool Verified = false;     // Verified Pro at the last monthly review (the 1st; VerifiedRecord)
 	int ReviewMonth = -1;      // MonthKeyOf the last review that found them Verified (-1: never)
+	/** The sites they play (update 2 §5.9): a bit per net::SiteId, RiverLine's always. On the npc line from version 4. */
+	uint8_t Sites = 1;
 
 	float SkillOf(world::Skill S) const { return Skills[static_cast<size_t>(S)]; }
 	float TraitOf(world::Trait T) const { return Traits[static_cast<size_t>(T)]; }
@@ -649,6 +674,13 @@ enum class EventKind : int
 	PlayerOfYear,
 	Break,        // stepped away
 	HallOfFame,   // inducted on July 15 (Value: the class year)
+	// Update 2 (appended; the log keeps them by number).
+	BoardReport,    // a fresh world's first weeks: the Season leader and the biggest riser (§3.3 F9)
+	FirstWinner,    // a fresh world's first result in an event family's record books
+	JoinedSite,     // a regular opened an account on a rival site (G3)
+	SignedSiteTeam, // a rival site signed a team pro (G3)
+	SiteLaunched,   // a rival site opened its lobby (G3)
+	SiteOverlay,    // a rival's guarantee wasn't met (G3)
 	Count,
 };
 SHORTSTACKCORE_API const char* EventKindName(EventKind K);
@@ -869,8 +901,13 @@ class World
 public:
 	SHORTSTACKCORE_API World();
 
-	/** A new world: the network's regulars, the people you can meet, and this save's hidden traits. */
-	SHORTSTACKCORE_API void Create(uint32_t Seed, double StartWorld);
+	/**
+	 * A new world: the network's regulars, the people you can meet, and this save's hidden traits. S = Blank (the fresh
+	 * start) builds the same people the same way and then wipes their records (Sim::Wipe, update 2 §3.3 F2).
+	 */
+	SHORTSTACKCORE_API void Create(uint32_t Seed, double StartWorld, Start S = Start::Established);
+	/** How this world began. */
+	Start Began() const { return Mode; }
 	bool Ready() const { return Created; }
 	/** Changes when something involving the player happens (the session saves the world then, not every frame). */
 	int HeroRevision() const { return HeroRev; }
@@ -932,6 +969,13 @@ public:
 	/** Board value for a person (the network's leaderboards, live data), and their rank a day (an hour) ago. */
 	SHORTSTACKCORE_API double BoardValue(net::Board B, int Npc, double At) const;
 	SHORTSTACKCORE_API int RankBefore(net::Board B, int Npc) const;
+	// The rival sites (update 2 §5.8, §5.9; core-world's bodies at G3).
+	/** A board's value on one site: RiverLine's is today's value less the rivals'. */
+	SHORTSTACKCORE_API double BoardValue(net::SiteId Site, net::Board B, int Npc, double At) const;
+	/** Someone's record on a site (null: none, or RiverLine, whose record is the NPC's own). */
+	SHORTSTACKCORE_API const SiteRecord* SiteRecordOf(net::SiteId Site, int Npc) const;
+	/** When a site opened its lobby (world minutes), or -1. */
+	SHORTSTACKCORE_API double SiteLaunched(net::SiteId Site) const;
 
 	// The player.
 	/** Someone takes a seat in an event (the player's tables seat a regular the world hadn't planned there). */
@@ -1147,6 +1191,15 @@ private:
 	int HeroCardTop = CardNone;       // their best card this season
 	int HeroCardPrev = CardNone;      // last season's
 	RoomRecord HeroRoomRec;           // the player at the Embercrest
+	// Update 2 (§3): how the world began (saved in the head from version 3).
+	Start Mode = Start::Established;
+	// Update 2, G3 (§5.9; core-world's, empty until then): the rival sites' sparse maps, only the NPCs who played there
+	// (RiverLine never has a row: its record is the NPC's own). Saved from version 4 (world\tsite, world\tsiteseries,
+	// world\tsitelaunch); an older world reads them empty, so RiverLine's boards read exactly as they did.
+	std::map<net::SiteId, std::map<int, SiteRecord>> SiteRecords;                     // SiteSeason and SiteMoney, by npc
+	std::map<net::SiteId, std::pair<std::string, std::map<int, double>>> SiteSeries; // the running series' key, npc -> points
+	std::map<net::SiteId, double> SiteLaunches;                                       // the world minute each rival launched
+	std::map<std::pair<net::SiteId, net::Board>, std::vector<int>> SiteRanksYesterday; // a rival board's ranks a day ago
 
 	void Refresh(int Id);
 	void RefreshAll();

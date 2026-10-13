@@ -1,14 +1,19 @@
 // Engine invariants that hold independently of the TypeScript build, plus a benchmark.
 #include "ShortStack/AI/Profiles.h"
+#include "ShortStack/AI/Style.h"
 #include "ShortStack/Cards.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Tournament.h"
 #include "ShortStack/Game/ChipSet.h"
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/Session.h"
 
+#include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -308,12 +313,208 @@ void ChipSetLayout()
 }
 } // namespace
 
+// ------------------------------------------------------------------ update 2's engine seams (update 2 SPEC §1.3, §2.8, §6.7)
+
+ss::TournamentSpec U2Spec()
+{
+	// The parity tests' field (§6.7): a 180-runner hyper, its first 150 ticks.
+	ss::TournamentSpec Spec;
+	Spec.Id = "u2-hyper";
+	Spec.Name = "Hyper Sprint";
+	Spec.BuyInCents = 330;
+	Spec.FeeCents = 30;
+	Spec.Entrants = 180;
+	Spec.LevelMinutes = 3;
+	Spec.SecondsPerHand = 42;
+	Spec.Speed = "Hyper";
+	return Spec;
+}
+
+std::unique_ptr<ss::Tournament> U2Field(const char* Seed)
+{
+	return std::unique_ptr<ss::Tournament>(new ss::Tournament(U2Spec(), "Hero", Seed, {{"gh0stfold", ss::Archetype::Crusher}}));
+}
+
+bool U2SameAction(const ss::ActionRecord& A, const ss::ActionRecord& B)
+{
+	return A.OnStreet == B.OnStreet && A.Seat == B.Seat && A.Type == B.Type && A.Added == B.Added && A.To == B.To && A.AllIn == B.AllIn;
+}
+
+std::string U2ReadFile(const std::string& Path)
+{
+	std::string Out;
+	if (FILE* F = std::fopen(Path.c_str(), "rb"))
+	{
+		char Buf[65536];
+		size_t N = 0;
+		while ((N = std::fread(Buf, 1, sizeof(Buf), F)) > 0)
+		{
+			Out.append(Buf, N);
+		}
+		std::fclose(F);
+	}
+	Out.erase(std::remove(Out.begin(), Out.end(), '\r'), Out.end());
+	return Out;
+}
+
+void Update2Engine()
+{
+	const ss::style::HeroBrain Brain; // Autopilot: the stub style::Decide forwards to ss::Decide with ProfileOf(Autopilot)
+	const ss::Profile Auto = ss::style::ProfileOf(ss::style::Style::Autopilot);
+	// Autopilot's profile is today's Sprint autopilot, number for number.
+	{
+		const ss::Profile Sprint = ss::SprintProfile();
+		Expect(Auto.Label == "Autopilot" && Auto.CallWidth == 1.35 && Auto.Stickiness == 0.35 && Auto.Aggression == 0.6 && Auto.Bluff == 0.12 && Auto.PushFold == 0.65 &&
+				   Auto.IcmAware == 0.45 && Auto.OpenWidth == Sprint.OpenWidth && Auto.LimpRate == Sprint.LimpRate && Auto.ThreeBet == Sprint.ThreeBet && Auto.Cbet == Sprint.Cbet &&
+				   Auto.Sizing == Sprint.Sizing && Auto.TiltProne == Sprint.TiltProne && Auto.ThinkBase == 0.0 && Auto.ThinkVar == 0.0 && Auto.Timing == ss::TimingStyle::Balanced,
+			"update 2: style::ProfileOf(Autopilot) is the Sprint autopilot's numbers");
+	}
+	// 1. The plan's skip path with Autopilot is SimulateTick with Autopilot's profile, checkpoint for checkpoint.
+	{
+		std::unique_ptr<ss::Tournament> A = U2Field("u2-parity");
+		std::unique_ptr<ss::Tournament> B = U2Field("u2-parity");
+		bool Same = true;
+		int Ticks = 0;
+		for (; Ticks < 150 && !A->bFinished; ++Ticks)
+		{
+			A->SimulateTick(&Auto);
+			const ss::Tournament::TickResult R = B->SimulateTickWith(Brain);
+			Same = Same && !R.Paused && A->Checkpoint() == B->Checkpoint();
+		}
+		Expect(Same && Ticks > 100 && (Ticks == 150 || A->bFinished), "update 2: SimulateTickWith(Autopilot) plays SimulateTick(Autopilot)'s ticks, checkpoint for checkpoint");
+	}
+	// 2. LastHeroHand is the tick's hand at the hero's table, owned by the tournament: its seats and its history go on from a
+	//    copy a stop rule took at the hero's last decision. A stop that never stops, and reading it, draw nothing.
+	{
+		std::unique_ptr<ss::Tournament> C = U2Field("u2-last");
+		std::unique_ptr<ss::Tournament> D = U2Field("u2-last");
+		std::unique_ptr<ss::Hand> Probe;
+		const ss::Tournament::HeroStop Copy = [&Probe](const ss::Hand& H, const ss::BotDecision&) {
+			Probe.reset(new ss::Hand(H));
+			return false;
+		};
+		bool Owns = true;
+		bool Same = true;
+		int Hands = 0;
+		for (int Tick = 0; Tick < 150 && !C->bFinished; ++Tick)
+		{
+			Probe.reset();
+			C->SimulateTickWith(Brain, Copy);
+			D->SimulateTickWith(Brain);
+			const ss::Hand* Last = C->LastHeroHand();
+			if (Probe)
+			{
+				++Hands;
+				bool Seats = Last && Last->Seats.size() == Probe->Seats.size() && Last->History.size() >= Probe->History.size() && Last->bComplete;
+				for (size_t K = 0; Seats && K < Probe->Seats.size(); ++K)
+				{
+					Seats = Last->Seats[K].Id == Probe->Seats[K].Id && Last->Seats[K].StartStack == Probe->Seats[K].StartStack;
+				}
+				Owns = Owns && Seats && std::equal(Probe->History.begin(), Probe->History.end(), Last->History.begin(), U2SameAction);
+			}
+			Same = Same && C->Checkpoint() == D->Checkpoint() && (C->LastHeroHand() != nullptr) == (D->LastHeroHand() != nullptr);
+		}
+		Expect(Hands > 20 && Owns, "update 2: LastHeroHand is the tick's hand (its seats, its history from the hero's last decision on)");
+		Expect(Same, "update 2: a stop rule that never stops, and reading LastHeroHand, draw nothing");
+	}
+	// 3. A hand paused by a stop rule and finished the watch path's way (the decision the plan drew, then the plan, then
+	//    BeginFinish, FinishSome, EndFinish) is the tick the skip path plays straight through.
+	{
+		std::unique_ptr<ss::Tournament> E = U2Field("u2-pause");
+		std::unique_ptr<ss::Tournament> F = U2Field("u2-pause");
+		ss::BotDecision Planned;
+		const ss::Tournament::HeroStop Every = [&Planned](const ss::Hand&, const ss::BotDecision& D) {
+			Planned = D;
+			return true;
+		};
+		bool Same = true;
+		int Paused = 0;
+		for (int Tick = 0; Tick < 150 && !E->bFinished; ++Tick)
+		{
+			ss::Tournament::TickResult R = E->SimulateTickWith(Brain, Tick % 3 == 0 ? Every : ss::Tournament::HeroStop());
+			if (R.Paused)
+			{
+				++Paused;
+				Same = Same && E->Checkpoint() != F->Checkpoint(); // mid-tick: not the same state as a finished one
+				R.Paused->Act(Planned.Action);
+				E->PlayHeroHand(*R.Paused, Brain, ss::Tournament::HeroStop());
+				E->BeginFinish(R.Paused.get());
+				E->FinishSome(INT_MAX);
+				E->EndFinish();
+			}
+			F->SimulateTickWith(Brain);
+			Same = Same && E->Checkpoint() == F->Checkpoint();
+		}
+		Expect(Paused > 10 && Same, "update 2: a paused hand finished the watch path's way is the skip path's tick");
+	}
+	// 4. The caller's hand finished by the plan (StartTick, then FinishTickWith) is SimulateTickWith's tick.
+	{
+		std::unique_ptr<ss::Tournament> G = U2Field("u2-finish");
+		std::unique_ptr<ss::Tournament> K = U2Field("u2-finish");
+		bool Same = true;
+		for (int Tick = 0; Tick < 150 && !G->bFinished; ++Tick)
+		{
+			std::vector<ss::TEvent> Events;
+			std::unique_ptr<ss::Hand> H = G->StartTick(Events);
+			G->FinishTickWith(H.get(), Brain);
+			Same = Same && (!H || H->bComplete);
+			K->SimulateTickWith(Brain);
+			Same = Same && G->Checkpoint() == K->Checkpoint();
+		}
+		Expect(Same, "update 2: FinishTickWith finishes the caller's hand as SimulateTickWith would");
+	}
+	// 5. HeroReadHook: applied to the bots at the hero's table only, on both paths; null (every check above) changes nothing.
+	{
+		std::unique_ptr<ss::Tournament> T = U2Field("u2-read");
+		int Calls = 0;
+		bool HeroTable = true;
+		T->HeroReadHook = [&Calls, &HeroTable](const ss::Hand& H, int Seat, ss::BotDecision& D) {
+			(void)D;
+			++Calls;
+			bool Hero = false;
+			for (const ss::HandSeat& S : H.Seats)
+			{
+				Hero = Hero || S.Id == ss::HeroId;
+			}
+			HeroTable = HeroTable && Hero && H.Seats[static_cast<size_t>(Seat)].Id != ss::HeroId;
+		};
+		for (int Tick = 0; Tick < 40 && !T->bFinished; ++Tick)
+		{
+			T->SimulateTickWith(Brain);
+		}
+		Expect(Calls > 0 && HeroTable, "update 2: HeroReadHook reads the bots at the hero's table, and only them");
+	}
+	// 6. A ck1 checkpoint written by bda07f3 (the day-0 staked fixture's Nightly, forty hands in) restores and writes back.
+	{
+		ss::SaveData D;
+		const bool Parsed = ss::SaveData::Parse(U2ReadFile(std::string(SS_TESTS_DIR) + "/fixtures/pre_update2_staked_mid_nightly.ssave"), D);
+		const ss::life::LiveEntry* E = Parsed ? ss::live::EntryFor(D.Life, "embercrest-nightly@9") : nullptr;
+		bool Restored = false;
+		std::unique_ptr<ss::Tournament> T;
+		if (E)
+		{
+			std::vector<ss::ReservedPlayer> Known;
+			for (const std::pair<std::string, int>& R : E->Roster)
+			{
+				ss::ReservedPlayer P;
+				P.Name = R.first;
+				P.Type = static_cast<ss::Archetype>(R.second);
+				Known.push_back(P);
+			}
+			T = ss::live::ResumeField(ss::live::FindOccurrence(E->Id), *E, E->Entrants, D.HeroName, Known, true, Restored);
+		}
+		Expect(E && !E->Checkpoint.empty() && E->Checkpoint.rfind("ck1 ", 0) == 0 && Restored && T && T->Checkpoint() == E->Checkpoint,
+			"update 2: bda07f3's ck1 checkpoint restores and writes back as it was");
+	}
+}
+
 int main()
 {
 	ChipConservationFuzz();
 	IllegalActionsRejected();
 	TournamentRunsToCompletion();
 	ChipSetLayout();
+	Update2Engine();
 	std::printf("unit tests: %s\n", Failures == 0 ? "all passed" : "FAILED");
 	return Failures == 0 ? 0 : 1;
 }

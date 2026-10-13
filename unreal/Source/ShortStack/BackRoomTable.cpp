@@ -501,6 +501,12 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 			OpenHeroTurn();
 			AwayActAt = Time + 1.3f;
 		}
+		// Update 2 (§2.12): the plan in the seat decides once, thinks and acts through HeroAct, as a bot below does
+		// (BackRoomTableAuto.cpp, ue-auto's). It never holds an empty chair: the away rule has that.
+		if (TickHeroAuto(Idx))
+		{
+			return;
+		}
 		if (bHeroAway && Time >= AwayActAt)
 		{
 			// An empty seat: checked when it's free, mucked when it isn't.
@@ -526,7 +532,8 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 		BotKind = static_cast<int32>(D.Action.Type);
 		BotTo = D.Action.To;
 		bBotBluff = D.Action.Type == ss::PlayerAction::Kind::Raise && D.Equity < 0.42;
-		if (bHeroAggressedThisStreet && View.ToCall > 0)
+		// (Update 2, §2.8: while the plan holds the seat the engine's HeroReadHook reads its bets, the same on the skip path.)
+		if (bHeroAggressedThisStreet && View.ToCall > 0 && !HeroAutoHolds())
 		{
 			ReadHero(*S, BotKind, BotTo, D.Equity);
 		}
@@ -691,6 +698,9 @@ void ABackRoomTable::StartHand()
 	bHeroTurn = false;
 	bHeroPeeked = false;
 	bBotPending = false;
+	// (Update 2: a take-over is this hand's; the plan's held decision was the last hand's.)
+	bHeroTakenOver = false;
+	bHeroAutoPending = false;
 	bTurnUpSaid = false;
 	HeroTurnReal = -1.0f;
 	LandingsDue = 0;
@@ -1429,8 +1439,9 @@ void ABackRoomTable::EndHand()
 	}
 	if (Tourney)
 	{
-		// The rest of the room plays its hand; eliminations, the clock and the levels follow.
-		for (const ss::TEvent& E : Tourney->FinishTick(Hand.Get()))
+		// The rest of the room plays its hand; eliminations, the clock and the levels follow. (Update 2, §2.8: with the plan
+		// in the seat, the plan's entry point, as the skip path finishes its ticks.)
+		for (const ss::TEvent& E : HeroBrain ? Tourney->FinishTickWith(Hand.Get(), *HeroBrain) : Tourney->FinishTick(Hand.Get()))
 		{
 			Events.Add(E);
 		}
@@ -1443,7 +1454,8 @@ void ABackRoomTable::EndHand()
 		}
 		HandStartedAt = Time;
 	}
-	Hand.Reset();
+	// (Kept until the next hand ends, for HeroHandForAuto: update 2's host counts what it saw of it.)
+	EndedHand = MoveTemp(Hand);
 	bHeroTurn = false;
 	Wait = T + 2.2f;
 	if (OnNote)
@@ -2148,8 +2160,8 @@ void ABackRoomTable::OpenHeroTurn()
 		O->OnHeroThinking(true, L.CallAmount);
 	}
 	// The turn cue (the Turn cue setting): the dealer turns to the player, and with the sound on, a soft tap of the felt.
-	// No clock ever runs.
-	if (Tourney && TurnCue >= 1 && !bHeroAway && H)
+	// No clock ever runs. (Nor a cue while the plan holds the seat: update 2, §2.12.)
+	if (Tourney && TurnCue >= 1 && !bHeroAway && !HeroAutoHolds() && H)
 	{
 		if (Dealer && H->Player)
 		{
@@ -2177,7 +2189,7 @@ void ABackRoomTable::TickTurnCue()
 	}
 	HeroTurnReal = FMath::Max(0.0f, HeroTurnReal) + FMath::Min(static_cast<float>(FApp::GetDeltaTime()), 0.1f);
 	const FSeat* H = HeroSeat();
-	if (Tourney && !bTurnLineSaid && TurnCue >= 1 && !bHeroAway && H && H->HandSeat >= 0 && HeroTurnReal >= TurnLineSeconds)
+	if (Tourney && !bTurnLineSaid && TurnCue >= 1 && !bHeroAway && !HeroAutoHolds() && H && H->HandSeat >= 0 && HeroTurnReal >= TurnLineSeconds)
 	{
 		// "Seat four, it's on you." (Dee: "Kid. It's on you."): once a decision, never a clock.
 		bTurnLineSaid = true;
@@ -2403,7 +2415,8 @@ FBackRoomPrompt ABackRoomTable::GetPrompt() const
 	if (Hero)
 	{
 		P.Stack = Hero->StackPile ? Hero->StackPile->GetAmount() : Hero->Stack;
-		if (bHeroPeeked && Hand)
+		// (Update 2, §2.12: known without a peek while the plan holds the seat, when the host says so.)
+		if ((bHeroPeeked || bHeroCardsKnownAuto) && Hand)
 		{
 			if (const ss::HandSeat* HS = Hand->SeatByNumber(Hero->HandSeat))
 			{

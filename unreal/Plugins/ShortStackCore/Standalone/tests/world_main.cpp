@@ -11,6 +11,7 @@
 #include "ShortStack/Game/World.h"
 
 #include "CopyLint.h"
+#include "WorldSeg.h"
 
 #include <algorithm>
 #include <array>
@@ -1580,7 +1581,8 @@ int main(int Argc, char** Argv)
 		std::printf("%s", W.Describe(W.Find(Argv[2])).c_str());
 		return 0;
 	}
-	const int F = Checks();
+	// The suite's own checks, then update 2's per-track files (update 2 SPEC §6.7; tests/world_seg_<track>.cpp).
+	const int F = Checks() + world_test::SegFresh() + world_test::SegSites();
 	std::printf(F == 0 ? "world: all checks passed\n" : "world: %d checks failed\n", F);
 	return F == 0 ? 0 : 1;
 }

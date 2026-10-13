@@ -64,9 +64,12 @@ void ANightOnePlayerController::PlayerTick(float DeltaTime)
 		FKey Key;
 		const TCHAR* Name;
 	};
+	// (Update 2, §2.6.1: autoplay's keys for the client, K (autoplay on or off, the panel closed, the wheel taken) and
+	// Backspace (the panel closed, a skip stopped).)
 	const FHotkey Hotkeys[] = {
 		{EKeys::SpaceBar, TEXT(" ")}, {EKeys::F, TEXT("f")}, {EKeys::C, TEXT("c")}, {EKeys::X, TEXT("x")}, {EKeys::R, TEXT("r")}, {EKeys::B, TEXT("b")},
 		{EKeys::A, TEXT("a")}, {EKeys::M, TEXT("m")}, {EKeys::G, TEXT("g")}, {EKeys::Up, TEXT("ArrowUp")}, {EKeys::Down, TEXT("ArrowDown")},
+		{EKeys::K, TEXT("k")}, {EKeys::BackSpace, TEXT("Backspace")},
 	};
 	for (const FHotkey& H : Hotkeys)
 	{

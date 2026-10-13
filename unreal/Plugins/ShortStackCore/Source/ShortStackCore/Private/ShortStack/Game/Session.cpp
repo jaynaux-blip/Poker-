@@ -2,6 +2,7 @@
 #include "../StrictFloat.h"
 
 #include "ShortStack/AI/Bot.h"
+#include "ShortStack/AI/Style.h"
 #include "ShortStack/AI/View.h"
 #include "ShortStack/Cards.h"
 #include "ShortStack/Equity.h"
@@ -16,9 +17,11 @@
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Shop.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Town.h"
+#include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/Wardrobe.h"
 
 #include <algorithm>
@@ -124,19 +127,12 @@ std::string CreditNote(Chips CreditCents)
 /**
  * The game playing the player's hands (Sprint): safe on paper and a step behind good play. It calls too wide and too
  * long, rarely bluffs, shoves short stacks by feel and half-ignores the bubble, so it finishes like an average player
- * while playing well finishes clearly ahead. The engine's SprintProfile stays as it is (TypeScript parity).
+ * while playing well finishes clearly ahead. The engine's SprintProfile stays as it is (TypeScript parity). Update 2:
+ * autoplay's Autopilot style, the same numbers (style::ProfileOf).
  */
 Profile Autopilot()
 {
-	Profile P = SprintProfile();
-	P.Label = "Autopilot";
-	P.CallWidth = 1.35;
-	P.Stickiness = 0.35;
-	P.Aggression = 0.6;
-	P.Bluff = 0.12;
-	P.PushFold = 0.65;
-	P.IcmAware = 0.45;
-	return P;
+	return style::ProfileOf(style::Style::Autopilot);
 }
 
 double OpenThreshold(Position P)
@@ -327,7 +323,9 @@ std::string SaveData::Serialize() const
 	}
 	for (const kast::Clip& Cl : K.Clips)
 	{
-		Out << "kast\tclip\t" << Fixed(Cl.At, 2) << "\t" << Fixed(Cl.Views, 1) << "\t" << Fixed(Cl.Reach, 1) << "\t" << Cl.Kind << "\t" << session_detail::Escape(Cl.By) << "\t" << session_detail::Escape(Cl.Title) << "\n";
+		// Update 2: the Rerun candidate cut from it, as a 9th field, only when there is one (§6.4).
+		Out << "kast\tclip\t" << Fixed(Cl.At, 2) << "\t" << Fixed(Cl.Views, 1) << "\t" << Fixed(Cl.Reach, 1) << "\t" << Cl.Kind << "\t" << session_detail::Escape(Cl.By) << "\t" << session_detail::Escape(Cl.Title)
+			<< (Cl.Candidate.empty() ? std::string() : "\t" + session_detail::Escape(Cl.Candidate)) << "\n";
 	}
 	for (auto It = K.Log.rbegin(); It != K.Log.rend(); ++It)
 	{
@@ -383,6 +381,16 @@ std::string SaveData::Serialize() const
 		badge::WriteLines(L, Segment);
 		life::WriteMail(L, Segment);
 		Out << Segment;
+	}
+	{
+		// Update 2 (§6.4): autoplay, Rerun, the rival sites, before the world's own lines. Each writes only once its
+		// Update2LinesRead bit is set (pure const: Serialize can run off the game thread), so an untouched old save writes
+		// back as it was read.
+		std::string Update2;
+		autoplay::WriteLines(L, Update2);
+		video::WriteLines(L, Update2);
+		site::WriteLines(L, Update2);
+		Out << Update2;
 	}
 	for (const std::string& Note : WorldNotes)
 	{
@@ -829,6 +837,7 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 				Cl.Kind = Int(5);
 				Cl.By = Str(6);
 				Cl.Title = Str(7);
+				Cl.Candidate = P.size() >= 9 ? Str(8) : std::string();
 				K.Clips.push_back(Cl);
 			}
 			else if (Key == "log" && P.size() >= 10)
@@ -932,6 +941,10 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 		{
 			// Backing and coaching, sponsors, badges: their own lines.
 		}
+		else if (autoplay::ReadLine(P, D.Life) || video::ReadLine(P, D.Life) || site::ReadLine(P, D.Life))
+		{
+			// Update 2 (§6.4): autoplay, Rerun, the rival sites: their own lines (each sets its Update2LinesRead bit).
+		}
 		else if (shop::ReadLine(P, D.Life))
 		{
 			// Northside: closet, fit, groom, visit, pawn, meal (§7.3).
@@ -968,6 +981,11 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 	live::AfterParse(D);
 	sponsor::AfterParse(D);
 	stake::AfterParse(D);
+	// Update 2's (§6.5), in order, each only for what the save lacked (by Update2LinesRead's bits): autoplay's defaults and
+	// Form, an empty channel, an empty site book.
+	autoplay::AfterParse(D);
+	video::AfterParse(D);
+	site::AfterParse(D);
 	Out = D;
 	return true;
 }
@@ -1061,7 +1079,7 @@ Session::~Session()
 	}
 }
 
-void Session::StartWorld(const SaveData* Loaded)
+void Session::StartWorld(const SaveData* Loaded, world::Start S)
 {
 	if (Loaded && !Loaded->WorldText.empty())
 	{
@@ -1075,8 +1093,9 @@ void Session::StartWorld(const SaveData* Loaded)
 	}
 	if (!LivingWorld.Ready())
 	{
-		// A new world for a new career (or a save from before there was one): everyone starts from tonight.
-		LivingWorld.Create(Fnv1a(SeedBase + ":world:" + HeroName), WorldMinutes());
+		// A new world for a new career (or a save from before there was one): everyone starts from tonight, in the world the
+		// career began in (update 2 §3.7: Blank, the fresh start).
+		LivingWorld.Create(Fnv1a(SeedBase + ":world:" + HeroName), WorldMinutes(), S);
 	}
 	LivingWorld.HeroName = HeroName;
 	session_detail::TellBirthYear(LivingWorld, Person);
@@ -1296,7 +1315,7 @@ void Session::Save()
 	Hooks.Save(D);
 }
 
-void Session::ResetSave()
+void Session::ResetSave(world::Start S)
 {
 	BankrollCents = 237;
 	History.clear();
@@ -1326,13 +1345,15 @@ void Session::ResetSave()
 	LivingWorld = world::World();
 	WorldSaved.clear();
 	WorldSnap.reset();
-	StartWorld(nullptr);
+	StartWorld(nullptr, S);
 	Save();
 }
 
-void Session::NewCareer(const hero::Character& Who)
+void Session::NewCareer(const hero::Character& Who, world::Start S)
 {
-	ResetSave();
+	ResetSave(S);
+	// Update 2 (§6.2): a new career keeps every one of the update's lines from the start (the SegShift precedent).
+	Life.Update2LinesRead = life::U2AutoPref | life::U2AutoPlayed | life::U2Video | life::U2Sites | life::U2Rewards | life::U2Notes;
 	Person = Who;
 	Person.Created = true;
 	session_detail::TellBirthYear(LivingWorld, Person);
@@ -1650,8 +1671,20 @@ void Session::OnBoot()
 bool Session::CanAfford(const LobbyEvent& Ev) const
 {
 	// The player's money, a ticket, or a package's roll (it pays every event in its range, short bankroll or not: §2.7).
-	return Ev.Joinable && !Restricted() && !TimeSkip.Active &&
-		(BankrollCents >= Ev.BuyInCents || TicketsFor(Ev) > 0 || stake::FundFor(Life.Stakes, Ev.Spec.Id, Ev.BuyInCents, false, WorldMinutes()).From == life::Paid::Package);
+	// Update 2 (§5.5): the money on the event's own site (RiverLine's is the bankroll; every event is RiverLine's until
+	// G3), and that site's restriction alone.
+	const net::SiteId Site = net::SiteOf(Ev.Spec.Id);
+	Chips Have = BankrollCents;
+	if (Site != net::SiteId::RiverLine)
+	{
+		Have = 0;
+		for (const site::Account& A : Life.Sites.Accounts)
+		{
+			Have = A.Site == Site ? A.Cents : Have;
+		}
+	}
+	return Ev.Joinable && !Restricted(Site) && !TimeSkip.Active &&
+		(Have >= Ev.BuyInCents || TicketsFor(Ev) > 0 || stake::FundFor(Life.Stakes, Ev.Spec.Id, Ev.BuyInCents, false, WorldMinutes()).From == life::Paid::Package);
 }
 
 int Session::TicketsFor(const LobbyEvent& Ev) const
@@ -1713,18 +1746,30 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	}
 	else
 	{
-		// Who pays (next_segment_spec §1.2): a package's roll (its own ledger takes the buy-in), otherwise the player.
+		// Who pays (next_segment_spec §1.2): a package's roll (its own ledger takes the buy-in), otherwise the player, from
+		// the event's site's pot (update 2 §1.2: RiverLine's is the bankroll and the bank's line; a rival's is its wallet,
+		// whose line site::OnBuyIn writes). OnBuyIn also takes the rake into RiverLine Rewards or the site's VIP month.
 		const life::Funding Fund = stake::FundFor(Life.Stakes, Ev.Spec.Id, Ev.BuyInCents, false, WorldMinutes());
+		const net::SiteId Site = net::SiteOf(Ev.Spec.Id);
 		if (Fund.From != life::Paid::Package)
 		{
-			BankrollCents -= Ev.BuyInCents;
-			if (Ev.BuyInCents > 0)
+			stake::Pot Pot = PotFor(Site);
+			if (!Pot.Cents)
+			{
+				Pot = stake::Pot{&BankrollCents, 0};
+			}
+			*Pot.Cents -= Ev.BuyInCents;
+			if (Ev.BuyInCents > 0 && Pot.Site == 0)
 			{
 				Life.Record(WorldMinutes(), "Buy-in: " + Ev.Spec.Name, -Ev.BuyInCents, 0);
 			}
 		}
+		site::OnBuyIn(Life.Sites, Site, Ev.BuyInCents, Ev.Spec.FeeCents, "Buy-in: " + Ev.Spec.Name, WorldMinutes());
 		StakeEntered(Ev.Spec.Id, Ev.BuyInCents, Fund);
 	}
+	// Update 2 (§5.7, §7.4; core-deals' body at G3): a table opened on a site (and streamed, if the stream's live) is a
+	// strike under a running deal that plays only on another one. The register button warned first.
+	sponsor::NoteSitePlay(Life.Sponsors, Life, static_cast<int>(net::SiteOf(Ev.Spec.Id)), WorldMinutes(), Stream.Live, false);
 	Save();
 	Event = &Joined;
 	StreamMoment(kast::Moment::Register, Ev.Spec.Name);
@@ -1738,6 +1783,9 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	Chat.clear();
 	HandsPlayed = 0;
 	BiggestPot = 0;
+	// Update 2: a new table starts with the player in the seat (autoplay off) and a fresh run.
+	Auto = autoplay::TableAuto();
+	AutoRun = autoplay::Run();
 	if (First)
 	{
 		HeroTilt = 0.0; // a fresh sitting; another table doesn't calm you down
@@ -1890,23 +1938,17 @@ void Session::StartNextHand()
 	{
 		return;
 	}
-	const int PrevTable = TableId;
-
-	// Story: seat the rival at the hero's table once things get serious.
-	if (!RivalArrived && HandsPlayed >= 14 && !T->InTheMoney())
-	{
-		const TPlayer* Rival = PlayerById(RivalId());
-		if (Rival && !Rival->Busted)
-		{
-			T->MoveToTable(RivalId(), T->Hero().TableId);
-			RivalArrived = true;
-			StreamMoment(kast::Moment::Rival);
-		}
-	}
-
+	BeforeTick();
 	std::vector<TEvent> Events;
 	std::unique_ptr<Hand> H = T->StartTick(Events);
-	HandleTourneyEvents(Events);
+	BeginHand(std::move(H), Events);
+}
+
+void Session::BeginHand(std::unique_ptr<Hand> H, const std::vector<TEvent>& StartEvents)
+{
+	// StartNextHand's bookkeeping for a hand already dealt (update 2: AdoptHand's too, for a skip's paused hand).
+	const int PrevTable = TableId;
+	HandleTourneyEvents(StartEvents);
 	if (!H)
 	{
 		return;
@@ -1971,18 +2013,49 @@ void Session::StartNextHand()
 	DealerLine("Hand #" + Grouped(T->Tick + 1) + " \xC2\xB7 Blinds " + ChipsText(static_cast<double>(L.Sb)) + "/" + ChipsText(static_cast<double>(L.Bb)));
 }
 
+void Session::BeforeTick()
+{
+	// Before a tick (update 2 §2.8; StartNextHand calls it, and the skip path will too): seat the rival at the hero's table
+	// once things get serious.
+	if (!T || T->bFinished || T->Hero().Busted)
+	{
+		return;
+	}
+	if (!RivalArrived && HandsPlayed >= 14 && !T->InTheMoney())
+	{
+		const TPlayer* Rival = PlayerById(RivalId());
+		if (Rival && !Rival->Busted)
+		{
+			T->MoveToTable(RivalId(), T->Hero().TableId);
+			RivalArrived = true;
+			StreamMoment(kast::Moment::Rival);
+		}
+	}
+}
+
 double Session::Speed() const
 {
+	// Update 2 (§2.6.1): watching the plan at 2x, 4x or 8x plays the table that much faster.
 	if (CurrentPace == Pace::Full)
 	{
-		return 1.0;
+		return 1.0 / WatchFactor();
 	}
 	bool HeroIn = false;
 	for (const SeatVis& S : Seats)
 	{
 		HeroIn = HeroIn || (S.Present && S.IsHero && S.HasCards && !S.Folded);
 	}
-	return HeroFolded || !HeroIn ? 0.22 : 1.0;
+	return (HeroFolded || !HeroIn ? 0.22 : 1.0) / WatchFactor();
+}
+
+double Session::WatchFactor() const
+{
+	return Auto.M == autoplay::Mode::Watch ? static_cast<double>(std::max(1, Auto.Speed)) : 1.0;
+}
+
+bool Session::AutoHolds() const
+{
+	return Auto.M == autoplay::Mode::Watch && !AutoRun.TakenOver;
 }
 
 int Session::HeroSeatIdx() const
@@ -2207,8 +2280,52 @@ void Session::TableStep()
 			{
 				return;
 			}
-			OpenHeroTurn();
-			return;
+			if (!AutoHolds())
+			{
+				// The player's turn, as today (a take-over during the plan's think drops its pending action).
+				if (BotPending && BotSeatIdx == Idx)
+				{
+					BotPending = false;
+					Vis.Acting = false;
+				}
+				OpenHeroTurn();
+				return;
+			}
+			// Update 2 (§2.8): the plan holds the seat. Its decision is drawn once, from T->R as a bot's would be, the stop
+			// rules see it, and it acts after its think (AutoAct: no grading). A stop hands the hand to the player.
+			if (!BotPending)
+			{
+				const style::HeroBrain Brain = autoplay::BrainFor(Auto, AutoRun, Life.Perks.TiltGain, 0, &Life.Auto.Notes, nullptr);
+				const BotDecision D = T->HeroDecisionFor(H, Brain);
+				if (autoplay::ShouldStop(Auto, H, D, Idx, T.get()))
+				{
+					AutoRun.TakenOver = true;
+					OpenHeroTurn();
+					return;
+				}
+				style::HeroContext Ctx;
+				Ctx.View = MakeView(H, Idx);
+				Ctx.T = T.get();
+				Ctx.HeroIdx = Idx;
+				Ctx.MixSeed = T->SeedHash;
+				Ctx.Tick = T->Tick;
+				const double Think = style::ThinkSeconds(Brain, Ctx, Auto.Speed);
+				BotPending = true;
+				BotAction = D.Action;
+				BotAt = Now + Think;
+				BotSeatIdx = Idx;
+				Vis.Acting = true;
+				Vis.ActStart = Now;
+				Vis.ActEnd = Now + Think;
+				NextAt = Now + Think;
+				continue;
+			}
+			Vis.Acting = false;
+			BotPending = false;
+			BotDecision Planned;
+			Planned.Action = BotAction;
+			AutoAct(Planned);
+			continue;
 		}
 		if (!BotPending)
 		{
@@ -2217,7 +2334,8 @@ void Session::TableStep()
 				return;
 			}
 			const BotDecision D = T->BotDecisionFor(H, false);
-			const double Think = (D.ThinkMs / 1000.0) * (Speed() < 1.0 ? 0.12 : 0.55);
+			// Watching the plan at 2x to 8x (update 2 §2.6.1), the bots think that much faster too.
+			const double Think = (D.ThinkMs / 1000.0) * (Speed() * WatchFactor() < 1.0 ? 0.12 : 0.55) / WatchFactor();
 			BotPending = true;
 			BotAction = D.Action;
 			BotAt = Now + Think;
@@ -2242,9 +2360,9 @@ bool Session::ShouldAutoFold()
 	{
 		return true;
 	}
-	if (CurrentPace == Pace::Full)
+	if (CurrentPace == Pace::Full || AutoHolds())
 	{
-		return false;
+		return false; // Full; or the plan holds the seat (update 2 §2.6.1: it decides junk hands too)
 	}
 	const Hand& H = *CurHand;
 	const int Idx = HeroSeatIdx();
@@ -2385,6 +2503,9 @@ void Session::HeroAct(const PlayerAction& Action, bool TimedOut)
 	Badge.At = Now;
 	// Coaching (next_segment_spec §2.11): the decision tallied by its spot, for a coach's leak review.
 	coach::Add(Life.Study, coach::SpotOf(Prompt.Analysis.View, Badge.G, T && T->HandForHand(), T && T->Spec.BountyCents > 0), Badge.G);
+	// Update 2 (§2.5, §2.9): the player's own decision moves their Form (not in a hand taken over mid-think) and counts as theirs.
+	autoplay::NoteOwnDecision(Life.Auto, Life, static_cast<int>(GradeScore(Badge.G.Result)), WorldMinutes(), AutoRun.TakenMidThink);
+	++AutoRun.OwnDecisions;
 	Grades.push_back(Badge.G);
 	Badges.push_back(Badge);
 	if (Badge.G.Result == Grade::Blunder || (Badge.G.Result == Grade::Best && Prompt.Pot >= Prompt.BigBlind * 12))
@@ -2791,6 +2912,27 @@ void Session::AfterAward()
 			}
 		}
 	}
+	// Update 2 (§1.3): the shared post-hand hook, the watch path's call (draws nothing).
+	HandFacts F;
+	F.ByPlan = Auto.M != autoplay::Mode::Off && !AutoRun.TakenOver;
+	F.Skipped = false;
+	F.EquityAtAllIn = HeroSeat && HeroAllInReveal && Seats[static_cast<size_t>(HeroSeat->Seat)].HasEquity ? Seats[static_cast<size_t>(HeroSeat->Seat)].Equity : -1.0;
+	F.PotBefore = PotBeforeAward;
+	F.Table = Active;
+	HeroHandDone(H, F);
+}
+
+void Session::HeroHandDone(const Hand& H, const HandFacts& F)
+{
+	// One call per feature, in this order (§1.3), on both paths: autoplay's tilt, counters and observed stats; the big
+	// pots the world hears about; Rerun's candidate; the stream moments a skip would otherwise drop (skip only).
+	AutoAfterHand(H, F);
+	FieldPotsFill(H, F);
+	VideoNoteHand(H, F);
+	if (F.Skipped)
+	{
+		SkipMoments(H, F);
+	}
 }
 
 void Session::BustBanner(const TPlayer& Hero, const char* NoCashSub)
@@ -2985,67 +3127,8 @@ void Session::StopSprint(const std::string& Reason)
 
 void Session::SprintStep()
 {
-	const Profile Autopilot = session_detail::Autopilot();
-	const auto T0 = std::chrono::steady_clock::now();
-	auto ElapsedMs = [&]() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count(); };
-	do
-	{
-		const std::vector<TEvent> Events = T->SimulateTick(&Autopilot);
-		++HandsPlayed;
-		HandleTourneyEvents(Events);
-		// Sprinting still sits the player with people (who'll remember them).
-		if (!FieldNpc.empty() && !T->Hero().Busted)
-		{
-			const auto Table = T->Tables.find(T->Hero().TableId);
-			if (Table != T->Tables.end())
-			{
-				for (const int Idx : Table->second.Seats)
-				{
-					const auto Npc = Idx >= 0 ? FieldNpc.find(T->Players[static_cast<size_t>(Idx)].Id) : FieldNpc.end();
-					if (Npc != FieldNpc.end())
-					{
-						FieldMet.insert(Npc->second);
-					}
-				}
-			}
-		}
-		if (CheckSatellite())
-		{
-			return;
-		}
-		const TPlayer& Hero = T->Hero();
-		if (Hero.Busted)
-		{
-			Sprinting = false;
-			HasBustInfo = true;
-			BustPlace = Hero.Place;
-			BustPrize = Hero.PrizeCents;
-			BustAt = Now + 2.5;
-			Sound(SoundId::Bust, 1.0);
-			BustBanner(Hero, "Busted while sprinting");
-			return;
-		}
-		if (T->bFinished)
-		{
-			Sprinting = false;
-			HasBustInfo = true;
-			BustPlace = 1;
-			BustPrize = Hero.PrizeCents;
-			BustAt = Now + 3.0;
-			Hooks.Celebrate();
-			return;
-		}
-		if (!SprintBubble && T->Remaining <= T->PaidPlaces() + 15)
-		{
-			StopSprint("approaching the bubble");
-			return;
-		}
-		if (!SprintFinal && T->Tables.size() == 1)
-		{
-			StopSprint("final table");
-			return;
-		}
-	} while (ElapsedMs() < SprintBudgetMs / static_cast<double>(std::max(1, TableCount())));
+	// Update 2 (§2.8): the skip path, today's Sprint until core-autoplay generalises it (SessionAuto.cpp).
+	SkipStep();
 }
 
 // ------------------------------------------------------------------ results
@@ -3056,7 +3139,14 @@ void Session::ShowResults()
 	{
 		BountyWon += Bounties[HeroId]; // the winner keeps their own head
 	}
-	BankrollCents += BustPrize + BountyWon;
+	// Update 2 (§1.2): the prize lands in its site's pot. RiverLine's is the bankroll, with the bank's line below; a rival's
+	// is its wallet, whose line SiteSettle writes (every event is RiverLine's until G3).
+	stake::Pot Pot = PotFor(net::SiteOf(T->Spec.Id));
+	if (!Pot.Cents)
+	{
+		Pot = stake::Pot{&BankrollCents, 0};
+	}
+	*Pot.Cents += BustPrize + BountyWon;
 	const double Acc = Grades.empty() ? 0.0 : Accuracy(Grades);
 	// Another table still playing (one closing this same frame doesn't count): this one closes with a toast.
 	bool OthersPlaying = false;
@@ -3086,14 +3176,15 @@ void Session::ShowResults()
 		Life.Record(WorldMinutes(), "Seat won: " + T->Spec.Name, 0, 4);
 		StoryText("seat-" + T->Spec.SeatTicket, "Dee", T->Spec.SeatTicket == "rcop-main" ? "You WON A SEAT TO THE MAIN EVENT?? $5,250 for nothing. Twenty-five million guaranteed. Kid." : "A ticket up the ladder. Keep climbing.");
 	}
-	if (BustPrize + BountyWon > 0)
+	if (BustPrize + BountyWon > 0 && Pot.Site == 0)
 	{
 		Life.Record(WorldMinutes(), (BountyWon > 0 && BustPrize == 0 ? "Bounties: " : "Prize: ") + T->Spec.Name, BustPrize + BountyWon, 0);
 	}
-	// A backer's share, a package's prize into its roll (next_segment_spec §2), once per event.
-	stake::OnlineSettle(Life.Stakes, BankrollCents, Life, T->Spec.Id, BustPrize + BountyWon, WorldMinutes());
+	// A backer's share, a package's prize into its roll (next_segment_spec §2), once per event, off the pot it landed in.
+	stake::OnlineSettle(Life.Stakes, Pot, Life, T->Spec.Id, BustPrize + BountyWon, WorldMinutes());
 	LastResults.SessionEvents = SessionEvents;
 	LastResults.SessionNetCents = BankrollCents - SessionStartBankroll;
+	const ss::Results ThisEvent = LastResults; // for update 2's hooks below (LastResults may go back to the screen's)
 	if (OthersPlaying)
 	{
 		// The other tables keep going: this one closes with a toast, and the results screen waits for the last.
@@ -3120,6 +3211,11 @@ void Session::ShowResults()
 	{
 		History.resize(100);
 	}
+	// Update 2 (§1.3): the event's end, one call per feature, in this order: what the plan played (the played line), the
+	// money by site, Rerun's recap candidates.
+	AutoRecord(ThisEvent);
+	SiteSettle(ThisEvent);
+	VideoRecap(ThisEvent);
 	HasBustInfo = false;
 	CurHand.reset();
 	if (!OthersPlaying)
@@ -3275,6 +3371,9 @@ void Session::SwapActive(TableRun& Run)
 	swap(SprintBubble, Run.SprintBubble);
 	swap(SprintFinal, Run.SprintFinal);
 	swap(Closing, Run.Closing);
+	// Update 2: each table's plan and its run (§2.6.1: up to four tables, each with its own setting).
+	swap(Auto, Run.Auto);
+	swap(AutoRun, Run.AutoRun);
 }
 
 int Session::MaxTables() const
@@ -4461,6 +4560,11 @@ void Session::FinishSkip()
 		const size_t VenueEnd = O.ActivityId.find(':', 5);
 		(void)sponsor::Appear(Life.Sponsors, O.ActivityId.substr(5, VenueEnd == std::string::npos ? std::string::npos : VenueEnd - 5), O.End);
 	}
+	else if (O.ActivityId.rfind("video:", 0) == 0)
+	{
+		// Update 2 (§4.5): an edit ("video:<id>") lands as an upload, the outcome line its own (SessionVideo.cpp).
+		(void)SettleEdit(O.ActivityId);
+	}
 	HasOutcome = true;
 	Sound(O.Bad ? SoundId::Bust : Change > 0 ? SoundId::Cash : SoundId::Click, 1.0);
 	Save();
@@ -4781,6 +4885,11 @@ kast::Inputs Session::StreamInputs() const
 	ShopStream(In);
 	// The sponsors' deals the stream works on (next_segment_spec §3.8: a view of the book; SessionSponsor.cpp).
 	SponsorStream(In);
+	// Update 2 (§1.5, §4.7): the front table's watch speed (8x counts as Sprinting, as a skip does) and Rerun's views over
+	// the last 28 days (core-econ reads both).
+	In.WatchSpeed = Auto.M == autoplay::Mode::Watch ? std::max(1, Auto.Speed) : 1;
+	In.Sprinting = In.Sprinting || In.WatchSpeed >= 8;
+	In.VideoBuzz = video::View(Life.Video, In.World).Views28;
 	return In;
 }
 
@@ -4806,6 +4915,12 @@ std::string Session::GoLive()
 	StreamWorldAt = WorldMinutes();
 	StreamRealAt = Now;
 	Stream.Start(Channel, StreamInputs());
+	// Update 2 (§5.7, §7.4; core-deals' body at G3): streaming a site's table is a strike under a running deal that plays
+	// only on another one.
+	if (TableCount() > 0 && T)
+	{
+		sponsor::NoteSitePlay(Life.Sponsors, Life, static_cast<int>(net::SiteOf(T->Spec.Id)), WorldMinutes(), true, false);
+	}
 	SponsorStreamDone();
 	Hooks.OnAir(true);
 	Sound(SoundId::Alert, 0.7);
@@ -5012,6 +5127,11 @@ std::vector<life::Mark> Session::Marks(double From, double To) const
 	std::vector<life::Mark> Out = stake::Marks(Life.Stakes, From, To);
 	const std::vector<life::Mark> Sponsors = sponsor::Marks(Life.Sponsors, From, To);
 	Out.insert(Out.end(), Sponsors.begin(), Sponsors.end());
+	// Update 2 (§1.6): Rerun's payout day, the sites' transfers, launches and Rewards.
+	const std::vector<life::Mark> Videos = video::Marks(Life.Video, From, To);
+	Out.insert(Out.end(), Videos.begin(), Videos.end());
+	const std::vector<life::Mark> Sites = site::Marks(Life.Sites, From, To);
+	Out.insert(Out.end(), Sites.begin(), Sites.end());
 	std::stable_sort(Out.begin(), Out.end(), [](const life::Mark& A, const life::Mark& B) { return A.At < B.At; });
 	return Out;
 }
@@ -5680,6 +5800,10 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	// arrears (income first, so the backers' rent reserve sees it); the backers' due dates and auto-pay; the badges'
 	// monthly review.
 	SponsorStep(From, To);
+	// Update 2 (§1.6): Rerun's views and its payout, then the sites (launches, invitations, arrivals, Rewards), both income
+	// before the backers' rent reserve reads the bankroll.
+	VideoStep(From, To);
+	SiteStep(From, To);
 	StakeStep(From, To);
 	BadgeStep(From, To);
 	BondTexts(From, To);

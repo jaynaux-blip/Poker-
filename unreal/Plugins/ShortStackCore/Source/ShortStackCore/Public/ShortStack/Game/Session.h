@@ -375,7 +375,8 @@ public:
 	double SprintBudgetMs = 10.0;
 
 	SHORTSTACKCORE_API void Save();
-	SHORTSTACKCORE_API void ResetSave();
+	/** A fresh save (a new career's), its world beginning as S (update 2 §3.7). */
+	SHORTSTACKCORE_API void ResetSave(world::Start S = world::Start::Established);
 	// The Lucky Penny #212 (the corner store): pay at the counter, then eat and drink from the bag.
 	/** Pays for the basket from the bankroll and puts it in the bag; "" or why not ("Card declined."). */
 	SHORTSTACKCORE_API std::string Checkout(const store::Basket& B);
@@ -416,8 +417,11 @@ public:
 	static constexpr double TapFloor = 40.0;
 	/** Minutes until the tap is worth another glass (0: now). */
 	SHORTSTACKCORE_API double TapWait() const;
-	/** A new career for this character: a fresh save, then what their background starts them with. */
-	SHORTSTACKCORE_API void NewCareer(const hero::Character& Who);
+	/**
+	 * A new career for this character: a fresh save in a world that begins as S (update 2 §3.7: Blank, the fresh start,
+	 * every record at zero), then what their background starts them with. Every Update2LinesRead bit is set.
+	 */
+	SHORTSTACKCORE_API void NewCareer(const hero::Character& Who, world::Start S = world::Start::Established);
 	void OnBoot();
 
 	bool CanAfford(const LobbyEvent& Ev) const;
@@ -692,6 +696,75 @@ public:
 	/** The dates the second screen and the wall calendar show (§1.3): every feature's marks from From to To, merged in time order. */
 	SHORTSTACKCORE_API std::vector<life::Mark> Marks(double From, double To) const;
 
+	// ------------------------------------------------------------ update 2 (update 2 SPEC §6.2)
+	// Autoplay, the fresh start, Rerun and the rival sites. Declared in Phase A; the bodies are the feature tracks' (in
+	// SessionAuto.cpp, SessionVideo.cpp, SessionSites.cpp and SessionWorld.cpp, the SessionStake.cpp precedent), stubs
+	// that keep today's behavior until they land. Each "" or why not, like the rest of the session's.
+	// ---- Autoplay (§2: SessionAuto.cpp, core-autoplay)
+	SHORTSTACKCORE_API std::string SetAutoplay(int Table, const autoplay::TableAuto& A);
+	SHORTSTACKCORE_API const autoplay::TableAuto& Autoplay(int Table) const;
+	/** This hand; again inside the next hand's 3 s window: autoplay off. */
+	SHORTSTACKCORE_API std::string TakeOver(int Table);
+	/** Not "Skip": the session has a struct Skip (TimeSkip's). */
+	SHORTSTACKCORE_API std::string SkipAhead(int Table, autoplay::Target To, int Hands = 0);
+	SHORTSTACKCORE_API std::string StopSkip(int Table);
+	SHORTSTACKCORE_API double Sharpness(int Table) const;
+	/** Everything the panel draws for a table. */
+	SHORTSTACKCORE_API autoplay::Panel AutoPanel(int Table) const;
+	/** The plan acts at the table in front: HeroAct's bookkeeping without the grading (§2.9). */
+	SHORTSTACKCORE_API void AutoAct(const BotDecision& D);
+	/** A skip's paused hand to the watch path: StartNextHand's bookkeeping without StartTick, then the hand replayed. */
+	SHORTSTACKCORE_API void AdoptHand(std::unique_ptr<Hand> H, const std::vector<TEvent>& StartEvents);
+	/** Before a tick, on both paths (§2.8): the rival's move to the player's table. */
+	SHORTSTACKCORE_API void BeforeTick();
+	/** The skip path (SprintStep forwards here). */
+	SHORTSTACKCORE_API void SkipStep();
+	/** What the post-hand hook knows about the hand. */
+	struct HandFacts
+	{
+		bool ByPlan = false, Skipped = false;
+		double EquityAtAllIn = -1;
+		Chips PotBefore = 0;
+		int Table = 0;
+	};
+	/** After every hand the player was dealt, on both paths (§1.3): these calls, in this order. Draws nothing. */
+	SHORTSTACKCORE_API void HeroHandDone(const Hand& H, const HandFacts& F);
+	void AutoAfterHand(const Hand& H, const HandFacts& F); // SessionAuto.cpp (core-autoplay)
+	void FieldPotsFill(const Hand& H, const HandFacts& F); // SessionAuto.cpp
+	void VideoNoteHand(const Hand& H, const HandFacts& F); // SessionVideo.cpp (core-video)
+	void SkipMoments(const Hand& H, const HandFacts& F);   // SessionAuto.cpp
+	// ShowResults calls, in order:
+	void AutoRecord(const Results& Res); // SessionAuto.cpp
+	void SiteSettle(const Results& Res); // SessionSites.cpp (core-sites; RiverLine only until G3)
+	void VideoRecap(const Results& Res); // SessionVideo.cpp
+	// ---- Fresh start (§3: NewCareer above takes the world's start; SessionWorld.cpp, core-world)
+	/** How this career's world began: Established, or Blank (the fresh start). */
+	SHORTSTACKCORE_API world::Start WorldStart() const;
+	// ---- Rerun (§4: SessionVideo.cpp, core-video)
+	SHORTSTACKCORE_API std::vector<video::Candidate> VideoCandidates() const;
+	/** Starts the edit's TimeSkip ("video:<id>"). */
+	SHORTSTACKCORE_API std::string Publish(const video::Choice& C);
+	/** FinishSkip's "video:" branch: the upload lands; the calendar runs. */
+	SHORTSTACKCORE_API std::string SettleEdit(const std::string& ActivityId);
+	SHORTSTACKCORE_API std::string DeleteVideo(const std::string& VideoId);
+	SHORTSTACKCORE_API video::ChannelView VideoView() const;
+	// ---- Rival sites (§5: SessionSites.cpp, core-sites; dormant until G3: every id routes to RiverLine)
+	SHORTSTACKCORE_API std::string AnswerInvite(net::SiteId S, bool Accept);
+	SHORTSTACKCORE_API std::string Deposit(net::SiteId S, Chips Cents, const std::string& Method);
+	SHORTSTACKCORE_API std::string Withdraw(net::SiteId S, Chips Cents, const std::string& Method);
+	SHORTSTACKCORE_API std::string ReverseWithdrawal(const std::string& TransferId); // P1
+	/** RiverLine: the account's restriction (Life.BannedUntil); every rival: false. */
+	SHORTSTACKCORE_API bool Restricted(net::SiteId S) const;
+	/** Where a site's money lives for the stake book: RiverLine, the bankroll. */
+	SHORTSTACKCORE_API stake::Pot PotFor(net::SiteId S);
+	// ---- The calendar's steps (CheckCalendar: Sponsor, Video, Site, Stake, Badge) and debug (game/Update2Commands.cpp)
+	SHORTSTACKCORE_API void VideoStep(double From, double To);
+	SHORTSTACKCORE_API void SiteStep(double From, double To);
+	SHORTSTACKCORE_API std::string DebugAuto(const std::string& Args);
+	SHORTSTACKCORE_API std::string DebugVideo(const std::string& Args);
+	SHORTSTACKCORE_API std::string DebugSite(const std::string& Args);
+	SHORTSTACKCORE_API std::string DebugWorld(const std::string& Args); // SessionWorld.cpp (core-world)
+
 	// Who is who in the tournament being played (player id -> country; regulars from the network).
 	std::map<std::string, std::string> FieldCountry;
 	std::set<std::string> FieldRegulars;
@@ -787,6 +860,9 @@ private:
 		bool SprintBubble = false;
 		bool SprintFinal = false;
 		bool Closing = false;
+		// Update 2: the table's plan and its run (§6.2).
+		autoplay::TableAuto Auto;
+		autoplay::Run AutoRun;
 	};
 	/** Trades the front table's fields with Run's: checks the front table in, or Run's out. */
 	void SwapActive(TableRun& Run);
@@ -817,7 +893,7 @@ private:
 	std::shared_ptr<const world::World> WorldSnap; // the same, frozen, for a host that saves in the background
 	double WorldSavedAt = -1.0e9;
 	int WorldSavedRev = -1;
-	void StartWorld(const SaveData* Loaded);
+	void StartWorld(const SaveData* Loaded, world::Start S = world::Start::Established);
 	void WorldStep();
 	void WorldNote(const std::vector<std::string>& Fields);
 	void ReportToWorld();
@@ -929,6 +1005,15 @@ private:
 	int CansShown = 1;
 	bool SprintBubble = false;
 	bool SprintFinal = false;
+	/** Update 2: the front table's plan and its run (TableRun's while another table is in front: SwapActive). */
+	autoplay::TableAuto Auto;
+	autoplay::Run AutoRun;
+	/** The plan holds the front table's seat (watching, not taken over this hand). */
+	bool AutoHolds() const;
+	/** The front table's watch speed while the plan holds the seat (1 otherwise): Speed() and the bots' think divide by it. */
+	double WatchFactor() const;
+	/** StartNextHand's bookkeeping for a hand already dealt (the tick's start events first): AdoptHand's too. */
+	void BeginHand(std::unique_ptr<Hand> H, const std::vector<TEvent>& StartEvents);
 	gear::Effects Fx;
 	/** Fitness's effects (body::EffectsOf, refreshed with the gear): its drain and calm are folded into Fx; its rest bonus
 	 * and exhausted threshold are read where sleep and the tables need them. */

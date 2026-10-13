@@ -7,6 +7,11 @@
 
 namespace ss
 {
+namespace world
+{
+enum class Start : uint8_t; // World.h: how a new career's world begins (update 2 §3.7)
+}
+
 namespace ui
 {
 /** Everything the player can change under Settings. The host applies it (in Unreal: scalability, ray tracing, the mix). */
@@ -49,6 +54,8 @@ struct GameSettings
 	int StackUnits = 0;          // 0 big blinds, 1 chips (ui::StackUnits)
 	int TurnCue = 2;             // 0 Off, 1 Dealer, 2 Dealer and sound
 	int HudScale = 100;          // percent, 80..130
+	// Update 2 (ui-front's rows): autoplay's default watch speed at a live table (key autospeed: 1, 2, 4 or 8)
+	int AutoSpeed = 1;
 
 	/** "key=value" lines, safe to store in any save system. Unknown keys are ignored when parsing. */
 	SHORTSTACKCORE_API std::string Serialize() const;
@@ -72,6 +79,8 @@ struct FrontEndInfo
 	 */
 	int ClubTier = 0;
 	badge::Badge TopBadge;
+	/** The career's world began as a fresh start (update 2 §3.1): the FRESH START pill on the player card. */
+	bool Blank = false;
 	/** Pause menu: label and value pairs about the session in progress. */
 	std::vector<std::pair<std::string, std::string>> Status;
 	bool InTournament = false;
@@ -120,6 +129,11 @@ public:
 	virtual void NewGame(const std::string& /*ScreenName*/) {}
 	/** A new career for the character the creator made. Hosts from before the creator get NewGame. */
 	virtual void NewCareer(const std::string& ScreenName, const hero::Character& /*Who*/) { NewGame(ScreenName); }
+	/**
+	 * The same in a world that begins as S (update 2 §3.7: THE WORLD step). A name of its own, not an overload, so the
+	 * hosts' two-argument NewCareer overrides aren't hidden; hosts from before update 2 get NewCareer.
+	 */
+	virtual void NewCareerIn(const std::string& ScreenName, const hero::Character& Who, world::Start /*S*/) { NewCareer(ScreenName, Who); }
 	virtual void Resume() {}
 	virtual void QuitToMenu() {}
 	virtual void QuitGame() {}
@@ -163,6 +177,8 @@ public:
 	bool Gamepad = false;
 	/** The screen name typed on the New Game page. */
 	std::string ScreenName = "grinder_3c";
+	/** The world the new career begins in (THE WORLD step, update 2 §3.1): Established until the player picks. */
+	world::Start WorldStart = world::Start::Established;
 	/** The person the character creator is making (New Game). */
 	hero::Character Draft;
 	/**
@@ -182,6 +198,7 @@ public:
 		Identity,
 		Background,
 		Look,
+		World, // update 2: Established world or Fresh start (ui-front's step; skipped until it lands)
 		Review,
 	};
 	CreatorStage CreatorStep() const { return Stage; }

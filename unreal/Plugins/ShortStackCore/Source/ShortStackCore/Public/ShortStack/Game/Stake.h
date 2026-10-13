@@ -465,6 +465,17 @@ SHORTSTACKCORE_API void OnRefund(Book& B, Chips& Bankroll, life::State& L, const
 SHORTSTACKCORE_API void OnlineEntered(Book& B, Chips& Bankroll, life::State& L, const std::string& EventId, const std::string& Name, Chips BuyIn,
 	const life::Funding& F, Chips BankrollBefore, double Tilt, double World);
 SHORTSTACKCORE_API void OnlineSettle(Book& B, Chips& Bankroll, life::State& L, const std::string& EventId, Chips Prize, double World);
+/**
+ * Where a stake's money moves (update 2 §1.2): RiverLine's pot is the bankroll, with life::Record's lines as today; a
+ * rival's is that site's wallet, with site::AddLine's lines and never a bank line (core-deals, G3). Site: a net::SiteId.
+ */
+struct Pot
+{
+	Chips* Cents = nullptr;
+	int Site = 0;
+};
+/** OnlineSettle on a site's pot: RiverLine's forwards to the bankroll path above. */
+SHORTSTACKCORE_API void OnlineSettle(Book& B, const Pot& P, life::State& L, const std::string& EventId, Chips Prize, double World);
 /** Ask + swapped <= MaxSoldPermille. "" when listed (Projection says what's expected to fill). */
 SHORTSTACKCORE_API std::string List(Book& B, const View& V, const std::string& EventId, int Ask, int Markup, double Opens, double Closes);
 /** Cancels the listings on an event that haven't been collected: nobody has paid, so nothing moves. */

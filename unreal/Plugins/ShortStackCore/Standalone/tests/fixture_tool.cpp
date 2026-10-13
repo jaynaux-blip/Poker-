@@ -12,18 +12,35 @@
 //   - pre_segment_v1: the mid-month save as a v1 ("riverside") save; and world_v1.txt, the mid-month save's world.
 // It uses only what the session had at c09bc31, so the same file builds against that tree and this one.
 //
+// Update 2's day-0 fixtures (update2 SPEC §6.5, §7.2), the first committed saves holding the last segment's lines. Built
+// the same way, with only what the session had at bda07f3 (so the file builds against bda07f3's tree and Phase A's):
+//   - pre_update2_fresh: a new career, saved;
+//   - pre_update2_staked_mid_nightly: a shift, the store, rent paid, a night at the Embercrest played out, then tonight's
+//     Nightly on Big Lou's money (livefund), the player in the room forty hands in, checkpointed with the field's voices,
+//     badges and leaders and the room director's state (liveroom);
+//   - pre_update2_sponsored_streamer: a streamer with a sponsor's book (a contract signed, an offer open, Mail), a patch
+//     sewn, Kast's clips and stream log, and the coach's notes from a hyper played on stream;
+//   - pre_update2_evicted: locked out, on Dee's couch, the gear in storage;
+//   - pre_update2_veteran: 300 and more results online, live days, titles on the wall and badges;
+//   - world_v2.txt: the staked save's world (version 2).
+//
 //   fixture_tool write <dir>   writes the fixtures (the saves without their world lines, which go in world_v1.txt;
 //                              <name>.expected.ssave is what loading and saving the v1 save gives)
+//   fixture_tool write2 <dir>  writes update 2's day-0 fixtures (the saves without their world lines; world_v2.txt)
 //   fixture_tool transcript    prints every save as the careers are built and as each fixture is loaded and played on
-//                              (texts, ledgers, the whole save but the world, whose size and hash are printed); a build
-//                              whose transcript matches c09bc31's behaves the same
+//                              (texts, ledgers, the whole save but the world, whose size and hash are printed), the
+//                              c09bc31 careers first, then update 2's; a build whose transcript matches the code the
+//                              fixtures came from behaves the same
 // Writes and reads in binary: the saves are LF, whatever the platform.
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Store.h"
 
 #include <algorithm>
@@ -428,6 +445,324 @@ std::string AsV1(const std::string& V2)
 	return Out;
 }
 
+// ---------------------------------------------------------------- update 2's day-0 fixtures (write2)
+
+/** One live night the host plays: settle on the save, note the night, load the save again (MidNightly's loop, one night). */
+double HostNight(std::unique_ptr<ss::Session>& S, Hooks& H, double Now, const char* Seed, const char* Id, bool Won)
+{
+	const live::Occurrence O = live::FindOccurrence(Id);
+	Now = At(*S, Now, O.DeskOpens + 40.0);
+	Fed(*S);
+	const std::string Why = S->GoToLive(O.Id);
+	if (!Why.empty())
+	{
+		std::printf("fixture: %s: %s\n", Id, Why.c_str());
+		return Now;
+	}
+	ss::SaveData D = HostSave(H, *S);
+	life::LiveEntry* E = live::EntryFor(D.Life, O.Id);
+	E->ArrivedAt = O.Start - 15.0;
+	bool Restored = false;
+	std::unique_ptr<ss::Tournament> T = live::ResumeField(O, *E, E->Entrants, D.HeroName, Known(*E), false, Restored);
+	int Place = 0;
+	ss::Chips Prize = 0;
+	double End = O.Start + 180.0;
+	if (Won)
+	{
+		Place = 1;
+		Prize = T->PrizeFor(1);
+	}
+	else
+	{
+		ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, T->R);
+		for (int Guard = 0; Guard < 6000 && !T->Hero().Busted && !T->bFinished; ++Guard)
+		{
+			for (const ss::TEvent& Ev : T->SimulateTick(&Auto))
+			{
+				if (Ev.Type == ss::TEventType::Bust && Ev.IsHero)
+				{
+					Place = Ev.Place;
+					Prize = Ev.PrizeCents;
+				}
+			}
+		}
+		if (Place <= 0)
+		{
+			Place = T->Hero().Place > 0 ? T->Hero().Place : T->HeroRank();
+			Prize = T->PrizeFor(Place);
+		}
+		End = O.Start + T->ClockMinutes() - static_cast<double>(O.T->StartMinute);
+	}
+	const std::vector<ss::LiveSeen> Table = Seen(*E);
+	live::Settle(D.BankrollCents, D.Life, O.Id, Place, T->Spec.Entrants, Prize, End);
+	live::PayFare(D.BankrollCents, D.Life, O.Id, true, End + 5.0);
+	D.NoteLive(End, O.Id, Place, Prize, T->Spec.Entrants, Table);
+	D.ClockMinutes = End + 30.0 - Day;
+	Dump(Id, D);
+	S.reset();
+	S.reset(new ss::Session(H, Seed, &D));
+	S->CurrentScreen = ss::Screen::Lobby;
+	S->ResumeCalendarFrom(End + 30.0);
+	return Wait(*S, Now, 0.2);
+}
+
+/** The hero's turn, if it's open: the grader's best option (DeepRuns' hero). */
+void ActBest(ss::Session& S, double Now)
+{
+	if (!S.HasPrompt || Now - S.Prompt.OpenedAt <= 0.3)
+	{
+		return;
+	}
+	const std::vector<ss::OptionEV>& Opts = S.Prompt.Analysis.Options;
+	size_t Best = 0;
+	for (size_t K = 1; K < Opts.size(); ++K)
+	{
+		Best = Opts[K].Ev > Opts[Best].Ev ? K : Best;
+	}
+	S.HeroAct(Opts.empty() ? ss::PlayerAction::Fold() : Opts[Best].Action);
+}
+
+/** A network event from its start to the result and back to the lobby: sprinted, the player taking the hands Sprint
+ *  hands back (the first, the bubble, the final table) with the grader's best option and sprinting on after each. False
+ *  when it didn't open. */
+bool Sprinted(ss::Session& S, double& Now, const ss::net::EventInstance& I)
+{
+	const ss::net::Network& Net = ss::net::Shared();
+	if (S.WorldMinutes() < I.Start)
+	{
+		Now = At(S, Now, I.Start);
+	}
+	Fed(S);
+	S.RegisterEvent(Net.Listing(I));
+	if (S.CurrentScreen != ss::Screen::Table)
+	{
+		return false;
+	}
+	for (int Frames = 0; S.CurrentScreen == ss::Screen::Table && Frames < 4000000; ++Frames)
+	{
+		S.CurrentPace = ss::Pace::Sprint;
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		ActBest(S, Now);
+	}
+	S.LeaveResults();
+	return true;
+}
+
+ss::SaveData Fresh2()
+{
+	Hooks H;
+	ss::Session S(H, "fixture2-fresh");
+	S.NewCareer(Someone());
+	S.Save();
+	Dump("update2: fresh", H.Last);
+	return H.Last;
+}
+
+ss::SaveData StakedMidNightly()
+{
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "fixture2-staked"));
+	S->NewCareer(Someone());
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.2);
+	// Wednesday, October 7: a shift at the laundromat, the corner store, an order from Penny Drop; the rent paid.
+	Now = At(*S, Now, 2.0 * Day + 7.0 * 60.0);
+	Fed(*S);
+	S->BankrollCents += 20000;
+	if (!S->StartActivity("washfold").empty())
+	{
+		std::printf("fixture: the shift didn't start\n");
+	}
+	Now = Wait(*S, Now, 6.0);
+	ss::store::Basket Snack;
+	Snack.Add("roller-dog");
+	Snack.Add("volt-rush");
+	S->Checkout(Snack);
+	ss::store::Basket Order;
+	Order.Add("volt-rush", 4);
+	S->PlaceOrder(Order);
+	Now = Wait(*S, Now, 2.0);
+	S->BankrollCents += 200000;
+	S->PayRent();
+	Dump("update2: staked: a shift, the store, an order, the rent", H.Last);
+	// Thursday's Nightly, played out by the engine on the player's own money.
+	Now = HostNight(S, H, Now, "fixture2-staked", "embercrest-nightly@3", false);
+	// Tonight, Wednesday October 14: Big Lou's offer at the desk, taken; the player in the room on his money.
+	const live::Occurrence O = live::FindOccurrence("embercrest-nightly@9");
+	Now = At(*S, Now, O.DeskOpens + 30.0);
+	Fed(*S);
+	const std::string Made = S->DebugStake("offer lou");
+	std::string Lou;
+	for (const ss::stake::Offer& Of : S->Life.Stakes.Offers)
+	{
+		Lou = Of.Backer == "Big Lou" ? Of.Id : Lou;
+	}
+	const std::string Took = Lou.empty() ? std::string("no offer: ") + Made : S->AcceptStake(Lou);
+	if (!Took.empty())
+	{
+		std::printf("fixture: Lou's stake: %s\n", Took.c_str());
+	}
+	const std::string Why = S->GoToLive(O.Id);
+	if (!Why.empty())
+	{
+		std::printf("fixture: tonight: %s\n", Why.c_str());
+	}
+	ss::SaveData D = HostSave(H, *S);
+	life::LiveEntry* E = live::EntryFor(D.Life, O.Id);
+	if (E)
+	{
+		// Forty hands in when the game closed: the engine's checkpoint, the director's state and the host's own text.
+		E->ArrivedAt = O.Start - 20.0;
+		bool Restored = false;
+		std::unique_ptr<ss::Tournament> T = live::ResumeField(O, *E, E->Entrants, D.HeroName, Known(*E), false, Restored);
+		ss::room::Director Room(*E, O, live::SeedFor(*E, D.HeroName) + ":room", D.Person.FirstName);
+		ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, T->R);
+		for (int Hand = 0; Hand < 40 && !T->Hero().Busted && !T->bFinished; ++Hand)
+		{
+			const std::vector<ss::TEvent> Events = T->SimulateTick(&Auto);
+			const double World = O.Start + T->ClockMinutes() - static_cast<double>(O.T->StartMinute);
+			Room.Events(*T, Events, World);
+			Room.Rounds(*T, T->Rounds());
+			Room.Clock(*T, World, 0.0);
+			Room.Take();
+		}
+		E->Checkpoint = T->Checkpoint();
+		E->CheckpointAt = O.Start + T->ClockMinutes() - static_cast<double>(O.T->StartMinute);
+		E->CheckpointHost = "hands=40\tmet=npc:Mei,npc:Big Lou\nbreak=0";
+		E->Room = Room.Write();
+		D.ClockMinutes = E->CheckpointAt - Day;
+	}
+	Dump("update2: staked, tonight, checkpointed", D);
+	return D;
+}
+
+ss::SaveData SponsoredStreamer()
+{
+	Hooks H;
+	ss::Session S(H, "fixture2-streamer");
+	S.NewCareer(Someone());
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	Now = At(S, Now, 2.0 * Day + 20.0 * 60.0);
+	Fed(S);
+	S.BankrollCents += 150000;
+	S.Buy("ram-32");
+	S.Buy("webcam-720");
+	S.Channel.Followers = std::max(S.Channel.Followers, 2400);
+	// A sponsor's book: Volt Rush signed (its letters in Mail), the patch sewn on the chest, Halo's offer still open.
+	const std::string Signed = S.DebugSponsor("sign voltrush");
+	const std::string Sewn = S.DebugSponsor("patch cap voltrush");
+	const std::string Offered = S.DebugSponsor("offer halo");
+	if (Transcript)
+	{
+		std::printf("  [sponsor] %s / %s / %s\n", Signed.c_str(), Sewn.c_str(), Offered.c_str());
+	}
+	// On air for hypers played by hand (the grader's best move each time) until chat has clipped one, three at most:
+	// the coach's notes, Kast's log and clips.
+	S.GoLive();
+	Now = Wait(S, Now, 2.0);
+	const ss::net::Network& Net = ss::net::Shared();
+	for (int Hyper = 0; Hyper < 3 && S.Channel.Clips.empty(); ++Hyper)
+	{
+		ss::net::EventInstance I;
+		if (!Net.Next("hyper-sprint", S.WorldMinutes() + 1.0, I))
+		{
+			break;
+		}
+		Now = At(S, Now, I.Start);
+		Fed(S);
+		S.RegisterEvent(Net.Listing(I));
+		for (int Frames = 0; S.CurrentScreen == ss::Screen::Table && Frames < 6000000; ++Frames)
+		{
+			Now += 1.0 / 30.0;
+			S.Update(Now);
+			ActBest(S, Now);
+		}
+		S.LeaveResults();
+	}
+	if (S.Channel.Clips.empty())
+	{
+		// Nobody in chat clipped a hand: the regular who clips every cash cut the min-cash.
+		ss::kast::Clip C;
+		C.Title = "three big blinds to a min-cash. we take those";
+		C.By = "dee_spincycle";
+		C.At = S.WorldMinutes() - 60.0;
+		C.Reach = 48.0;
+		C.Kind = static_cast<int>(ss::kast::Moment::Cashed);
+		S.Channel.Clips.insert(S.Channel.Clips.begin(), C);
+	}
+	Now = Wait(S, Now, 1.0);
+	S.EndStream();
+	Now = Wait(S, Now, 0.5);
+	// The next afternoon, fed.
+	Now = At(S, Now, S.WorldMinutes() + 12.0 * 60.0);
+	Fed(S);
+	Now = Wait(S, Now, 0.2);
+	S.Save();
+	Dump("update2: sponsored streamer", H.Last);
+	return H.Last;
+}
+
+ss::SaveData Evicted2()
+{
+	Hooks H;
+	ss::Session S(H, "fixture2-evicted");
+	S.NewCareer(Someone());
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	S.BankrollCents = 100000;
+	S.Buy("monitor-24");
+	S.Buy("mattress");
+	S.BankrollCents = 0;
+	Now = At(S, Now, 5.0 * Day + 1.0);
+	Now = At(S, Now, 8.0 * Day + 1.0);
+	S.BankrollCents = 5000;
+	Now = At(S, Now, 8.0 * Day + 10.0 * 60.0 + 1.0);
+	S.Save();
+	Dump("update2: evicted", H.Last);
+	return H.Last;
+}
+
+ss::SaveData Veteran()
+{
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "fixture2-veteran"));
+	S->NewCareer(Someone());
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.2);
+	S->BankrollCents += 2000000;
+	// A night at the Embercrest won and one played out: the wall, the live record, the live days.
+	Now = HostNight(S, H, Now, "fixture2-veteran", "embercrest-nightly@1", true);
+	Now = HostNight(S, H, Now, "fixture2-veteran", "embercrest-nightly@2", false);
+	// Three hundred and ten hypers, back to back, sprinted. Sprint's batch is wall-clock (10 ms an update): a whole stretch
+	// to its stop in one update keeps the frames, and so the session's own draws, the same on any machine.
+	S->SprintBudgetMs = 1.0e9;
+	const ss::net::Network& Net = ss::net::Shared();
+	int Played = 0;
+	for (int Guard = 0; Played < 310 && Guard < 400; ++Guard)
+	{
+		ss::net::EventInstance I;
+		if (!Net.Next("hyper-sprint", S->WorldMinutes() + 1.0, I))
+		{
+			break;
+		}
+		Played += Sprinted(*S, Now, I) ? 1 : 0;
+	}
+	// The badges the calendar would take months to give: the club's top tier, a ring, Verified.
+	const std::string Club = S->DebugBadge("grant club 3");
+	const std::string Ring = S->DebugBadge("grant ring 1");
+	const std::string Verified = S->DebugBadge("grant verified");
+	if (Transcript)
+	{
+		std::printf("  [veteran] %d hypers; %s / %s / %s\n", Played, Club.c_str(), Ring.c_str(), Verified.c_str());
+	}
+	Now = Wait(*S, Now, 0.5);
+	S->Save();
+	Dump("update2: veteran", H.Last);
+	return H.Last;
+}
+
 bool WriteFile(const std::string& Path, const std::string& Text)
 {
 	FILE* F = std::fopen(Path.c_str(), "wb");
@@ -468,12 +803,30 @@ int main(int Argc, char** Argv)
 {
 	using namespace fixture_tool;
 	const std::string Mode = Argc > 1 ? Argv[1] : "";
-	if (Mode != "write" && Mode != "transcript")
+	if (Mode != "write" && Mode != "write2" && Mode != "transcript")
 	{
-		std::printf("usage: fixture_tool write <dir> | fixture_tool transcript\n");
+		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool transcript\n");
 		return 2;
 	}
 	Transcript = Mode == "transcript";
+	if (Mode == "write2")
+	{
+		if (Argc < 3)
+		{
+			std::printf("usage: fixture_tool write2 <dir>\n");
+			return 2;
+		}
+		const std::string Dir = std::string(Argv[2]) + "/";
+		std::string World2;
+		const std::string Staked = WithoutWorld(StakedMidNightly().Serialize(), &World2);
+		bool Ok = WriteFile(Dir + "pre_update2_fresh.ssave", WithoutWorld(Fresh2().Serialize()));
+		Ok = WriteFile(Dir + "pre_update2_staked_mid_nightly.ssave", Staked) && Ok;
+		Ok = WriteFile(Dir + "pre_update2_sponsored_streamer.ssave", WithoutWorld(SponsoredStreamer().Serialize())) && Ok;
+		Ok = WriteFile(Dir + "pre_update2_evicted.ssave", WithoutWorld(Evicted2().Serialize())) && Ok;
+		Ok = WriteFile(Dir + "pre_update2_veteran.ssave", WithoutWorld(Veteran().Serialize())) && Ok;
+		Ok = WriteFile(Dir + "world_v2.txt", World2) && Ok;
+		return Ok ? 0 : 1;
+	}
 	const ss::SaveData FreshSave = Fresh();
 	const ss::SaveData Mid = MidNightly();
 	const ss::SaveData Kast = TeamRiverLine();
@@ -503,6 +856,17 @@ int main(int Argc, char** Argv)
 			D.ClockMinutes = End + 30.0 - Day;
 			PlayOn("mid_nightly settled", D);
 		}
+		// Update 2's day-0 careers (write2), built and played on the same way.
+		const ss::SaveData Fresh2Save = Fresh2();
+		const ss::SaveData Staked = StakedMidNightly();
+		const ss::SaveData Streamer = SponsoredStreamer();
+		const ss::SaveData Locked2 = Evicted2();
+		const ss::SaveData Vet = Veteran();
+		PlayOn("update2_fresh", Fresh2Save);
+		PlayOn("update2_staked_mid_nightly", Staked);
+		PlayOn("update2_sponsored_streamer", Streamer);
+		PlayOn("update2_evicted", Locked2);
+		PlayOn("update2_veteran", Vet);
 		return 0;
 	}
 	if (Argc < 3)

@@ -664,6 +664,24 @@ void Move(Chips& Bankroll, life::State& L, double At, const std::string& Label, 
 	L.Record(At, Label, Amount, life::LedgerBacking);
 }
 
+/**
+ * The same on a site's pot (update 2 §1.2): RiverLine's is the bankroll and the bank's line, as above; a rival's wallet
+ * moves with no bank line (its own site line, through site::AddLine, is core-deals' at G3).
+ */
+void Move(const Pot& P, life::State& L, double At, const std::string& Label, Chips Amount)
+{
+	if (!P.Cents || Amount == 0)
+	{
+		return;
+	}
+	if (P.Site == 0)
+	{
+		Move(*P.Cents, L, At, Label, Amount);
+		return;
+	}
+	*P.Cents += Amount;
+}
+
 void FlowTo(Book& B, const std::string& Id, const std::string& Who, const std::string& Where, Chips Cents, Memory M, double At)
 {
 	if (!WorldPerson(Who) || !Once(B, "flow:" + Id, At))
@@ -2077,6 +2095,15 @@ void Garnish(Book& B, Chips& Bankroll, life::State& L, Chips Income, const std::
 	}
 }
 
+/** Sam's quarter on a site's pot (update 2 §1.2): RiverLine's forwards to the bankroll's; a rival's is core-deals' (G3). */
+void Garnish(Book& B, const Pot& P, life::State& L, Chips Income, const std::string& What, double World)
+{
+	if (P.Cents && P.Site == 0)
+	{
+		Garnish(B, *P.Cents, L, Income, What, World);
+	}
+}
+
 /** Swaps settle once both results are in: each side's share of the other's prize, and the difference owed once. */
 void FinishSwap(Book& B, Swap& S, double World)
 {
@@ -2446,6 +2473,16 @@ void OnlineSettle(Book& B, Chips& Bankroll, life::State& L, const std::string& E
 	{
 		const EventFacts Fc = FactsOf(EventId);
 		Garnish(B, Bankroll, L, Prize, "the " + (Fc.Valid ? Title(Fc.Name) : std::string("tournament")) + " cash", World);
+	}
+}
+
+void OnlineSettle(Book& B, const Pot& P, life::State& L, const std::string& EventId, Chips Prize, double World)
+{
+	// RiverLine's pot is the bankroll: today's path. A rival's (core-deals, G3) settles on its wallet with site lines only;
+	// until then every event routes to RiverLine, so nothing reaches it.
+	if (P.Cents && P.Site == 0)
+	{
+		OnlineSettle(B, *P.Cents, L, EventId, Prize, World);
 	}
 }
 

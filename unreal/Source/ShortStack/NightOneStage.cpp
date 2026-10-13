@@ -2046,6 +2046,8 @@ FVector ANightOneStage::KeyWorld(const FString& Name) const
 	else if (Name == TEXT(" ")) K = LaptopKey(7.375, 4);
 	else if (Name == TEXT("ArrowUp")) K = LaptopKey(13.5, 4, 0.0042);
 	else if (Name == TEXT("ArrowDown")) K = LaptopKey(13.5, 4, -0.0042);
+	else if (Name == TEXT("k")) K = LaptopKey(9.25, 2);
+	else if (Name == TEXT("Backspace")) K = LaptopKey(14.0, 0);
 	// Laptop base coordinates (origin under the hinge, front toward -y) into the laptop's frame on the desk.
 	const FVector Local = Web(K.X, K.Z, -LaptopDepth / 2.0 - K.Y);
 	return LaptopFrame ? LaptopFrame->GetComponentTransform().TransformPosition(Local) : GetActorTransform().TransformPosition(Local);

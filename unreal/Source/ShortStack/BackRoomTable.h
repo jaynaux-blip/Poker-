@@ -28,6 +28,10 @@ namespace room
 {
 struct HandNote;
 }
+namespace style
+{
+struct HeroBrain; // AI/Style.h (update 2: the plan in the hero's seat)
+}
 }
 
 /** One line of table talk, for the subtitles (or a read: what your eye caught, whispered). */
@@ -381,6 +385,28 @@ public:
 	 */
 	void FollowTable(int32 TableId, int32 RefSeat, bool bSettle);
 
+	// ------------------------------------------------------------ update 2: the plan in the hero's seat (update 2 SPEC §2.12)
+	// Declared by the lead in Phase A; the bodies are ue-auto's (BackRoomTableAuto.cpp). Only the host's FAutoHost sets
+	// HeroBrain, so until it does the hero's seat is the player's, as it always was.
+	/** The plan playing the hero's seat (owned by the host's FAutoHost), or null: the player decides. */
+	const ss::style::HeroBrain* HeroBrain = nullptr;
+	/** The player took the wheel this hand (a take-over): the plan sits out until the next deal. */
+	bool bHeroTakenOver = false;
+	/** Takes the wheel: the plan's pending action is dropped, and the decision (now, or the next one this hand) is the player's. */
+	void HeroTakeOver();
+	/** The plan is thinking over the hero's decision now (its move is never shown before it's played). */
+	bool IsHeroAutoDeciding() const;
+	/** Seconds left of the plan's think (presentation), or 0. */
+	float HeroAutoActsIn() const;
+	/** The plan's last action as played ("CALLED 3,200"), or empty. */
+	FString HeroAutoLastAction() const;
+	/** The hero's cards are known to the HUD without a peek (the host sets it while the plan holds the seat). */
+	bool bHeroCardsKnownAuto = false;
+	/** The hand being played (read only), or between hands the one that just ended; null before the first. */
+	const ss::Hand* HeroHandForAuto() const;
+	/** The room's note of the hand that just ended, without taking it (the director's TakeHandNote does), or null. */
+	const ss::room::HandNote* PeekHandNote() const;
+
 private:
 	struct FSeat
 	{
@@ -575,4 +601,25 @@ private:
 	TArray<FBackRoomPileFix> PileFixes;
 	/** The chips a seat's gesture takes out of (or puts back on) the felt: moved by hand when nobody's there to do it. */
 	void MoveChipsByHand(FSeat& S, int64 Added);
+
+	// Update 2: the plan in the hero's seat (update 2 SPEC §2.12; bodies in BackRoomTableAuto.cpp, ue-auto's).
+	/**
+	 * The plan holds the seat now: a brain, not taken over this hand, the player in the chair. While it does, the turn cue
+	 * and the actor's ReadHero stand aside (the engine's HeroReadHook reads the plan's bets instead, on both paths: §2.8).
+	 */
+	bool HeroAutoHolds() const;
+	/**
+	 * The hero branch under the plan (Tick, at the hero's turn, after OpenHeroTurn): decides once (the tournament's
+	 * HeroDecisionFor, or style::DecideCash with Rng at Dee's), checks the stop rules, thinks, acts through HeroAct. True
+	 * while the plan has the turn (the player's input and the away rule wait).
+	 */
+	bool TickHeroAuto(int32 Idx);
+	/** The plan's decision held through its think: the action, when it acts (the table's clock), and the last one played. */
+	bool bHeroAutoPending = false;
+	float HeroAutoAt = 0.0f;
+	int32 HeroAutoKind = 0;
+	double HeroAutoTo = 0.0;
+	FString HeroAutoLast;
+	/** The hand EndHand finished (HeroHandForAuto between hands: what the host's OnHandEnded counts from it). */
+	TUniquePtr<ss::Hand> EndedHand;
 };

@@ -77,4 +77,10 @@ void SegLead();    // the lead: tests/session_seams.cpp
 void SegStake();   // core-stake: tests/session_seg_stake.cpp
 void SegSponsor(); // core-sponsor: tests/session_seg_sponsor.cpp
 void SegTableUi(); // core-tableui: tests/session_seg_tableui.cpp
+// Update 2's (update 2 SPEC §6.7), after the segment's: the lead's carried checks first (session_main.cpp: EconomyPacing,
+// MigrationAll), then the tracks'.
+void SegAuto();  // core-autoplay: tests/session_seg_auto.cpp
+void SegVideo(); // core-video: tests/session_seg_video.cpp
+void SegSites(); // core-sites: tests/session_seg_sites.cpp
+void SegEcon();  // core-econ: tests/session_seg_econ.cpp
 } // namespace session_test

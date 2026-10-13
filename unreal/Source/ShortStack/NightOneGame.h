@@ -41,6 +41,8 @@ public:
 	virtual void Continue() override;
 	virtual void NewGame(const std::string& ScreenName) override;
 	virtual void NewCareer(const std::string& ScreenName, const ss::hero::Character& Who) override;
+	/** The creator's THE WORLD step (update 2 §3.7): the same, in a world that begins as S. */
+	virtual void NewCareerIn(const std::string& ScreenName, const ss::hero::Character& Who, ss::world::Start S) override;
 	virtual void Resume() override;
 	virtual void QuitToMenu() override;
 	virtual void QuitGame() override;

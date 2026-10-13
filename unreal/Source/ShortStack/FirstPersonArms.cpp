@@ -131,6 +131,12 @@ void FFirstPersonArms::Key(const FString& Name, const FVector& KeyWorld)
 		S = &Right;
 		Finger = Name == TEXT("m") ? Index : Middle;
 	}
+	else if (Name == TEXT("k") || Name == TEXT("Backspace"))
+	{
+		// (Update 2's autoplay keys: the right hand's home-row middle finger, and its little finger up to Backspace.)
+		S = &Right;
+		Finger = Name == TEXT("k") ? Middle : Pinky;
+	}
 	S->TapFinger = Finger;
 	S->TapTime = 0.0f;
 	S->KeyWorld = KeyWorld;

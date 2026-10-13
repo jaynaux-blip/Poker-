@@ -5,6 +5,7 @@
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Structure.h"
@@ -1077,8 +1078,10 @@ const EventResult& Network::Result(const EventInstance& E) const
 		{
 			return *R;
 		}
-		// Before the world began, the network's own past; after, an event nobody the world follows played.
-		return E.Start + E.Duration <= Living->StartedAt() ? Deterministic(E) : Unknowns(E);
+		// Before the world began, the network's own past; after, an event nobody the world follows played. A fresh start
+		// (update 2 §3.3 F7) has no past: its events before the record books opened went to handles the world doesn't know.
+		const bool Past = E.Start + E.Duration <= Living->StartedAt();
+		return Past && Living->Began() != world::Start::Blank ? Deterministic(E) : Unknowns(E);
 	}
 	return Deterministic(E);
 }
@@ -1181,7 +1184,11 @@ const EventResult& Network::Deterministic(const EventInstance& E) const
 
 void Network::Prewarm(double Now) const
 {
-	// With a living world, only the network's own past needs working out.
+	// With a living world, only the network's own past needs working out; a fresh start (update 2 §3.3 F7) has none.
+	if (Living && Living->Began() == world::Start::Blank)
+	{
+		return;
+	}
 	const double To = Living ? std::min(Now, Living->StartedAt()) : Now;
 	for (const EventInstance& E : Finished(static_cast<double>(SimFirstDay) * MinutesPerDay, To))
 	{
@@ -1635,7 +1642,8 @@ std::vector<BoardRow> Network::Leaderboard(Board B, double Now, const HeroStats&
 				break;
 			}
 		}
-		if (V[I] <= 0.0 && B != Board::Earnings)
+		// Every board stops at nothing (update 2 bug 5: Earnings listed $0 rows; an established world's never reach one).
+		if (V[I] <= 0.0)
 		{
 			break;
 		}
@@ -1717,8 +1725,19 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 		}
 	};
 	auto DayAt = [](int Day, int H, int M) { return static_cast<double>(Day) * MinutesPerDay + static_cast<double>(H * 60 + M); };
-	Post(DayAt(-30, 23, 40), NewsKind::Series, std::string(RivalName) + " wins Summer Slam #41",
-		"The night-shift regular takes down the $22 Six-Max for $18,406, his biggest score to date. \"The micros are a job. I clock in.\"", "SUMMER SLAM", Cents(18406.0), Rival);
+	// A fresh start (update 2 §3.3 F7, §3.6) tells no history it doesn't have: no title before the record books opened,
+	// and the team that hasn't been signed yet.
+	const bool Blank = Living && Living->Began() == world::Start::Blank;
+	if (!Blank)
+	{
+		Post(DayAt(-30, 23, 40), NewsKind::Series, std::string(RivalName) + " wins Summer Slam #41",
+			"The night-shift regular takes down the $22 Six-Max for $18,406, his biggest score to date. \"The micros are a job. I clock in.\"", "SUMMER SLAM", Cents(18406.0), Rival);
+	}
+	else
+	{
+		Post(DayAt(0, 9, 0), NewsKind::Schedule, "RiverLine signs its first team pros on Nov 1",
+			"Team RiverLine starts from nothing. An online final table on record or a top-100 Season rank gets you a look.", "TEAM RIVERLINE");
+	}
 	Post(DayAt(-7, 12, 0), NewsKind::Schedule, "Mystery Madness goes nightly",
 		"Every night at 10:00 PM: $10.80 to enter, $40,000 guaranteed, mystery bounties up to $10,000 in the envelopes.", "SCHEDULE");
 	Post(DayAt(-6, 10, 0), NewsKind::Series, "RCOP 2026: the schedule",
@@ -1798,6 +1817,37 @@ Network& Shared()
 {
 	static Network N;
 	return N;
+}
+
+// ------------------------------------------------------------------ the sites (update 2 §5.8)
+// Phase A: the routing is dormant. Every site is RiverLine's network and every id is RiverLine's, so nothing moves; the
+// lead's A3 builds the rivals' networks (the registry holds them) and routes their prefixed ids to them.
+
+Network& Site(SiteId S)
+{
+	(void)S;
+	return Shared();
+}
+
+SiteId SiteOf(const std::string& Id)
+{
+	(void)Id;
+	return SiteId::RiverLine;
+}
+
+Network& ForEvent(const std::string& Id)
+{
+	return Site(SiteOf(Id));
+}
+
+void AttachAll(world::World* W)
+{
+	Shared().Attach(W);
+}
+
+void SetHeroAll(const std::string& Name, const std::vector<HistoryEntry>& History)
+{
+	Shared().SetHero(Name, History);
 }
 } // namespace net
 } // namespace ss

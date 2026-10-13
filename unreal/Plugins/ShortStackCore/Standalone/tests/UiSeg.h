@@ -107,4 +107,10 @@ void SegSponsor(); // core-sponsor: tests/ui_seg_sponsor.cpp
 void SegTableUi(); // core-tableui: tests/ui_seg_tableui.cpp
 void SegBadges();  // core-badges: tests/ui_seg_badges.cpp
 void SegLaptop();  // ui-laptop: tests/ui_seg_laptop.cpp
+// Update 2's (update 2 SPEC §6.7), after the segment's.
+void SegAuto();      // ui-laptop: tests/ui_seg_auto.cpp
+void SegVideo();     // ui-video: tests/ui_seg_video.cpp
+void SegSites();     // ui-laptop: tests/ui_seg_sites.cpp
+void SegCreator();   // ui-front: tests/ui_seg_creator.cpp
+void SegTableAuto(); // core-tableui: tests/ui_seg_tableauto.cpp
 } // namespace ui_test

@@ -2063,6 +2063,11 @@ namespace room_field
 /** RoomField (the lead's, Phase A): tests/room_field.cpp. The failures it found. */
 int Run();
 }
+namespace room_seg_auto
+{
+/** Update 2 (update 2 SPEC §6.7): core-autoplay's LiveSkipSliceEqualsTicks and RoomPace under the plan, tests/room_seg_auto.cpp. */
+int Run();
+}
 
 int main(int argc, char** argv)
 {
@@ -2081,6 +2086,7 @@ int main(int argc, char** argv)
 	room_test::RoomNightly(Write);
 	room_test::RoomFinalTable();
 	room_test::Failures += room_field::Run();
+	room_test::Failures += room_seg_auto::Run();
 	const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count();
 	std::printf("room tests: %.0f ms\n", Ms);
 	if (room_test::Failures == 0)

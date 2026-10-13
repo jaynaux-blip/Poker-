@@ -11,6 +11,8 @@
 #include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Room.h"
 #include "ShortStack/UI/TableHud.h"
+// Update 2 (update 2 SPEC §2.12): autoplay's table plan, for the six functions the header carries for ue-auto.
+#include "ShortStack/Game/Autoplay.h"
 
 #include <string>
 #include <vector>
@@ -52,6 +54,9 @@ struct FTableHost;    // ue-table (the game mode's side of the HUD and the table
 struct FTableHudHost; // ue-table (the HUD's side: the draw-list hint, the measurer, the projection's state)
 struct FVenueHost;    // ue-venue
 struct FWearHost;     // ue-wear
+// Update 2 (update 2 SPEC §2.12): the plan in the hero's seat (BackRoomAuto.h), a friend of the game mode and the pawn, so its
+// bodies reach the night's own state without this header changing again.
+struct FAutoHost;     // ue-auto
 
 /**
  * You, at the Back Room's table: a camera in your own head.
@@ -271,6 +276,10 @@ private:
 	/** Real seconds Y (or A on the keyboard) has been held this press, or -1 when it's up. */
 	float RaiseHeld = -1.0f;
 	float AllInHold = 0.0f;
+
+	// Update 2 (update 2 SPEC §2.6.2, §2.12): the plan's keys at the table (K, T under the plan, the PLAY page, the take-over
+	// press) are ue-auto's FAutoHost::PawnKeys, which reads them here (Held, Pressed, the table card).
+	friend struct FAutoHost;
 };
 
 /** Prompts, stacks, Focus, the heart, the clock, reads and the table talk, drawn over the view. */
@@ -632,6 +641,30 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UObject>> VenueObjects;
 	// ============================================================ end of the next segment
+
+	// ============================================================ update 2: autoplay (update 2 SPEC §2.12)
+	// Declared by the lead in Phase A for ue-auto, once; the header froze again after it. The bodies are ue-auto's
+	// (BackRoomAuto.cpp, forwarding to FAutoHost in BackRoomAuto.h), and the hot files call FAutoHost's hooks from the sites
+	// that header lists. Until ue-auto fills them nothing turns autoplay on: the seat is the player's.
+public:
+	/** The plan holds the hero's seat now: autoplay on, this hand not taken over, the player in the chair. */
+	bool IsAutoPlaying() const;
+	/** The watch speed (1, 2, 4 or 8) while the plan holds the seat, the pawn's pace target for the whole hand; 1 otherwise. */
+	float AutoWatchSpeed() const;
+	/** The table's plan from the next decision on (K, the PLAY page, ss.Auto.*): the style, watching or skipping, the speed,
+	 *  the skip's target and its stops. Off hands the seat back at the next decision. */
+	void SetAuto(const ss::autoplay::TableAuto& Plan);
+	/** Takes the wheel: this hand is the player's (pressed again in the next hand's first 3 s: autoplay off). */
+	void AutoTakeOver();
+	/** Skips ahead to To (Hands of them for Target::Hands), between hands only (§2.6.4). */
+	void AutoSkip(ss::autoplay::Target To, int32 Hands = 0);
+	/** ss.Auto.Describe: the style, mode, speed, Sharpness and its causes, Form, tilt, the counts, tonight's reads. */
+	FString DescribeAuto() const;
+
+private:
+	friend struct FAutoHost;
+	TSharedPtr<FAutoHost> AutoHost;
+	// ============================================================ end of update 2
 
 private:
 	/** The engine table playing where the player's own table stands (the room's anchor), or -1 (it broke, or went to the stage). */

@@ -23,6 +23,7 @@
 
 #include "BackRoomLiveShared.h"
 
+#include "BackRoomAuto.h"
 #include "BackRoomChips.h"
 #include "CareerSave.h"
 #include "BackRoomGameMode.h"
@@ -40,6 +41,7 @@
 #include "NightOneSaveGame.h"
 #include "TimerManager.h"
 #include "ShortStack/AI/Profiles.h"
+#include "ShortStack/AI/Style.h"
 #include "ShortStack/Audio/Synth.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
@@ -642,6 +644,12 @@ FString ABackRoomGameMode::LiveHostText(bool bDealt) const
 			}
 		}
 	}
+	// The plan in the seat, if it played tonight (update 2 §2.12: its run, the stats it observed, the read book it seated
+	// with; ue-auto's FAutoHost, "" until then).
+	if (AutoHost)
+	{
+		Out += AutoHost->HostLines();
+	}
 	// The last hands the player played (ss::recall: the table card's HANDS page when the night comes back; ue-table's
 	// helpers, BackRoomTableHost.h).
 	Out += TableRecall::HostLines(RecentHands);
@@ -657,6 +665,10 @@ void ABackRoomGameMode::ReadLiveHost(const FString& Text)
 		TArray<FString> F;
 		Line.ParseIntoArray(F, TEXT("\t"), false);
 		if (TableRecall::ReadHostLine(F, RecentHands))
+		{
+			continue;
+		}
+		if (AutoHost && AutoHost->ReadHostLine(F))
 		{
 			continue;
 		}
@@ -973,6 +985,11 @@ void ABackRoomGameMode::LiveStandUp()
 	}
 	bHeroUp = true;
 	Table->bHeroAway = true;
+	// (Update 2, §2.6.2: standing up pauses the plan; the away rule has the empty chair.)
+	if (AutoHost)
+	{
+		AutoHost->OnStand(true);
+	}
 	if (!bAwayExplained && !bOnBreak)
 	{
 		bAwayExplained = true;
@@ -1004,6 +1021,11 @@ void ABackRoomGameMode::LiveSitDown()
 		{
 			GM->bHeroUp = false;
 			GM->Table->bHeroAway = false;
+			// (Update 2: back in the chair, a paused plan takes the seat again.)
+			if (GM->AutoHost)
+			{
+				GM->AutoHost->OnStand(false);
+			}
 			// The dealer says it most times (a hash of the hand, not a dice roll: next_segment_spec N5), in the room's copy.
 			const uint32 Gate = FCrc::StrCrc32(*FString::Printf(TEXT("back:%s:%d"), *GM->LiveEntryId, GM->Table->GetHandNumber()));
 			if (!GM->bOnBreak && Gate % 10u < 6u)
@@ -1176,6 +1198,11 @@ void ABackRoomGameMode::LiveSettle()
 				Seen.push_back(S);
 			}
 		}
+		// Update 2 (§1.3): who played the night (the played line) and its recap candidates, settled with it (ue-auto's).
+		if (AutoHost)
+		{
+			AutoHost->OnSettle(D, EntryId);
+		}
 		D.NoteLive(Minutes, EntryId, HeroPlace, HeroPrizeCents, Tourney->Spec.Entrants, Seen);
 		UE_LOG(LogEmbercrest, Log, TEXT("Told the world: %d things seen, %d big pots"), static_cast<int32>(Seen.size()),
 			static_cast<int32>(std::count_if(Seen.begin(), Seen.end(), [](const ss::LiveSeen& S) { return S.Tag == 'B'; })));
@@ -1298,11 +1325,19 @@ void ABackRoomGameMode::LiveTick(float RealDt)
 			}
 		}
 	}
+	// Update 2 (§2.12): the plan's skip, a budgeted slice a frame through live::SkipSlice, only ever between hands
+	// (ue-auto's FAutoHost::TickSkip). It ends the night's tick here when the skip ended the night.
+	if (AutoHost && AutoHost->TickSkip(RealDt))
+	{
+		return;
+	}
 	// (Testing: the whole room plays on at once, you on autopilot, between hands and once the last round's tables
-	// have all finished: nothing may touch the tournament while a round is being finished over several frames.)
+	// have all finished: nothing may touch the tournament while a round is being finished over several frames. The
+	// autopilot is the TAG style's own profile, built without a draw: update 2's bug 4, when it was rolled from the
+	// tournament's RNG on every call.)
 	if (FastForwardLeft > 0 && Phase == EBackRoomPhase::Playing && Table->IsBetweenHands() && !Tourney->FinishPending())
 	{
-		ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, Tourney->R);
+		const ss::Profile Auto = ss::style::ProfileOf(ss::style::Style::Tag);
 		bool bMoved = false;
 		bool bThere = false;
 		// The director keeps up with every hand played (nothing it's said is said again), and the room hears only the last

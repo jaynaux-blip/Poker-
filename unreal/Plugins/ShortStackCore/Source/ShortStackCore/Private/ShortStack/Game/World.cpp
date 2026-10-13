@@ -814,13 +814,14 @@ Npc Sim::Discover(World& W, const std::string& Name, const std::string& Country,
 
 World::World() = default;
 
-void World::Create(uint32_t InSeed, double StartWorld)
+void World::Create(uint32_t InSeed, double StartWorld, Start S)
 {
 	*this = World();
 	Created = true;
 	WorldSeed = InSeed;
 	Now = StartWorld;
 	Origin = StartWorld;
+	Mode = S;
 	const int Today = sim::DayAt(StartWorld);
 	Week = Today - net::Weekday(Today);
 	Month = YearOf(Today) * 12; // refined on the first month change
@@ -831,6 +832,11 @@ void World::Create(uint32_t InSeed, double StartWorld)
 	Sim::SeedChampions(*this);
 	Sim::SeedRoomHistory(*this, Today);
 	Sim::Review(*this, Today);
+	// A fresh start: the same people, their records wiped (update 2 §3.3 F2; core-world's).
+	if (Mode == Start::Blank)
+	{
+		Sim::Wipe(*this);
+	}
 	Target = static_cast<int>(Roster.size());
 	// The fields each tier plays against start where the network's regulars are.
 	std::array<double, 5> Sum{};
@@ -876,6 +882,33 @@ void World::Create(uint32_t InSeed, double StartWorld)
 	Sim::PlanDay(*this, Today + 1);
 	Sim::Ranks(*this);
 	++Rev;
+}
+
+void Sim::Wipe(World& W)
+{
+	// Phase A's stub (core-world fills it, update 2 §3.4): nothing is wiped yet, so a Blank world plays as an Established one.
+	(void)W;
+}
+
+double World::BoardValue(net::SiteId Site, net::Board B, int Npc, double At) const
+{
+	// Phase A's stub (core-world, G3): RiverLine is the only site, so its board is today's.
+	return Site == net::SiteId::RiverLine ? BoardValue(B, Npc, At) : 0.0;
+}
+
+const SiteRecord* World::SiteRecordOf(net::SiteId Site, int Npc) const
+{
+	// Phase A's stub (core-world, G3): nobody has a record on a rival yet.
+	(void)Site;
+	(void)Npc;
+	return nullptr;
+}
+
+double World::SiteLaunched(net::SiteId Site) const
+{
+	// Phase A's stub (core-world, G3): no rival has launched.
+	(void)Site;
+	return -1.0;
 }
 
 int World::Find(const std::string& Name) const

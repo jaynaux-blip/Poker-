@@ -875,6 +875,27 @@ const Contract* Running(const Book& B, const std::string& BrandId, double World)
 	return nullptr;
 }
 
+bool WouldStrike(const Book& B, int Site, bool Streaming, bool Video)
+{
+	// Phase A's stub (core-deals, G3): no contract carries a "plays only on" clause yet.
+	(void)B;
+	(void)Site;
+	(void)Streaming;
+	(void)Video;
+	return false;
+}
+
+void NoteSitePlay(Book& B, life::State& L, int Site, double World, bool Streaming, bool Video)
+{
+	// Phase A's stub (core-deals, G3): nothing to strike yet.
+	(void)B;
+	(void)L;
+	(void)Site;
+	(void)World;
+	(void)Streaming;
+	(void)Video;
+}
+
 bool Active(const Book& B, const std::string& BrandId, double World)
 {
 	return Running(B, BrandId, World) != nullptr;

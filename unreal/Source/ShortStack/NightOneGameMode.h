@@ -53,8 +53,9 @@ public:
 
 	// From the menus (FNightOneGame's front-end hooks).
 	void ContinueCareer();
-	/** A new career; Who is the person the character creator made (none: the defaults). */
-	void StartNewCareer(const FString& ScreenName, const ss::hero::Character* Who = nullptr);
+	/** A new career; Who is the person the character creator made (none: the defaults), in a world that begins as WorldStart
+	 *  (the creator's THE WORLD step, update 2 §3.7: Blank is the fresh start). */
+	void StartNewCareer(const FString& ScreenName, const ss::hero::Character* Who = nullptr, ss::world::Start WorldStart = ss::world::Start::Established);
 	void ResumePlay();
 	void QuitToMainMenu();
 	void QuitToDesktop();
@@ -84,9 +85,10 @@ public:
 	/** Goes live on Kast, or ends the stream; returns why not when it can't. */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
 	FString TestStream(bool bLive);
-	/** Starts a new career with this screen name (the title screen's New career). */
+	/** Starts a new career with this screen name (the title screen's New career), in a fresh start's world when bBlank (the
+	 *  creator's THE WORLD step, update 2 §3.7; ss.Career.New). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")
-	void TestNewCareer(const FString& ScreenName);
+	void TestNewCareer(const FString& ScreenName, bool bBlank = false);
 	/** A click on the laptop's screen at client coordinates (1600 x 1000): pressed now, released a moment later. From
 	 *  then on the real mouse no longer moves the screen's pointer (a script is playing). */
 	UFUNCTION(BlueprintCallable, Category = "Short Stack|Test")

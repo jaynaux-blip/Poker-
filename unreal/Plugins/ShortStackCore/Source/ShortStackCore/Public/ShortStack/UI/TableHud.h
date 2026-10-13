@@ -190,6 +190,19 @@ struct TableHudInfo
 	Chips Net = 0;
 	/** The feature table's lower third (OnAir): the next place out pays this. */
 	Chips NextOutCents = 0;
+
+	// ---- update 2: autoplay at the table (§2.11; core-tableui draws them, ue-auto fills them). While the plan holds the
+	// seat YourTurn stays false; the plan's move is never shown before it's played (AutoLastAction is the last one played).
+	bool AutoOn = false;
+	std::string AutoStyle;     // "GTO"
+	double AutoSharp = 0.0;    // 0.50..1.00
+	bool AutoDeciding = false; // the plan's think is running
+	std::string AutoLastAction; // "CALLED 3,200"
+	float AutoActsIn = 0.0f;   // seconds left of the think (presentation)
+	int AutoSpeed = 1;         // the watch speed: 1, 2, 4, 8
+	bool SkipOn = false;
+	std::string SkipLine;      // "Level 9 · 31 left of 88 · you 42 BB"
+	float AutoResumeWindow = 0.0f; // seconds left of the next hand's take-over window (0: none)
 };
 SHORTSTACKCORE_API void DrawTableHud(Canvas& C, const TableHudInfo& I, double Now);
 
@@ -265,6 +278,18 @@ struct TableCardInfo
 	Chips HeroStack = 0;
 	Venue Where = Venue::CardRoom;
 	std::string HeroName = "You";
+	/**
+	 * Update 2: the PLAY page ("PLAY", appended to TableCardPages(); core-tableui draws it, ue-auto fills it): the styles
+	 * and why any is greyed, the table's plan, Sharpness and Form (Panel), the skip targets' labels, and a whole-page
+	 * refusal (Dee's first night) when Locked isn't empty.
+	 */
+	struct PlayPage
+	{
+		autoplay::Panel Panel;
+		std::vector<std::string> Targets;
+		int Target = 0;
+		std::string Locked;
+	} Play;
 };
 SHORTSTACKCORE_API void DrawTableCard(Canvas& C, const TableCardInfo& I, double Now);
 /** The table card's page names, in order. */

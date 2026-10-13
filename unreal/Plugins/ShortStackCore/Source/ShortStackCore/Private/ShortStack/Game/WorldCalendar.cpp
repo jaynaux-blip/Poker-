@@ -344,7 +344,8 @@ const char* EventKindName(EventKind K)
 {
 	static const char* const Names[static_cast<int>(EventKind::Count)] = {"NPCWonTournament", "NPCReachedFinalTable", "NPCWentBroke", "NPCMovedUpStakes", "NPCMovedDownStakes",
 		"NPCRetired", "NPCReturned", "NPCBreakout", "NPCQualifiedForMajor", "NPCEarnedSponsorship", "NPCReachedCareerMilestone", "NPCStartedStreaming", "NPCStreamMilestone",
-		"NPCDebut", "NPCDiscovered", "NPCBacked", "NPCRivalry", "NPCChampion", "NPCPlayerOfTheYear", "NPCTookBreak", "NPCHallOfFame"};
+		"NPCDebut", "NPCDiscovered", "NPCBacked", "NPCRivalry", "NPCChampion", "NPCPlayerOfTheYear", "NPCTookBreak", "NPCHallOfFame", "WorldBoardReport", "WorldFirstWinner",
+		"NPCJoinedSite", "NPCSignedSiteTeam", "SiteLaunched", "SiteOverlay"};
 	const int I = static_cast<int>(K);
 	return I >= 0 && I < static_cast<int>(EventKind::Count) ? Names[I] : "";
 }

@@ -7,9 +7,15 @@
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Stake.h"
+#include "ShortStack/Game/World.h"
 #include "SessionSeg.h"
 
+#include <array>
 #include <cmath>
+#include <memory>
+#include <string>
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -3183,8 +3189,595 @@ void LivingWorld()
 
 } // namespace session_test
 
-int main()
+// ------------------------------------------------------------------ update 2's carried checks (update 2 SPEC §7.2, day 5)
+
+namespace session_test
 {
+namespace seams
+{
+std::string Fixture(const char* Name); // session_seams.cpp
+} // namespace seams
+
+namespace pacing
+{
+namespace life = ss::life;
+namespace live = ss::live;
+const double Day = 1440.0;
+
+/** A career that goes out and keeps quiet: the phone counts, the bus always comes. */
+struct PaceHooks : Hooks
+{
+	int Phone = 0;
+	void Text(const std::string&, const std::string&) override { ++Phone; }
+	bool GoOut(const std::string&, ss::Chips) override { return true; }
+};
+
+/** The career's ledger as it grows (Life keeps the last sixty lines): every line once, as it's written. */
+struct LedgerTally
+{
+	life::LedgerEntry Newest;
+	bool Any = false;
+	std::vector<life::LedgerEntry> All;
+	void Take(const life::State& L)
+	{
+		size_t Fresh = 0;
+		while (Fresh < L.Ledger.size())
+		{
+			const life::LedgerEntry& E = L.Ledger[Fresh];
+			if (Any && E.At == Newest.At && E.Amount == Newest.Amount && E.Kind == Newest.Kind && E.Label == Newest.Label)
+			{
+				break;
+			}
+			++Fresh;
+		}
+		for (size_t K = Fresh; K-- > 0;)
+		{
+			All.push_back(L.Ledger[K]);
+		}
+		if (!L.Ledger.empty())
+		{
+			Newest = L.Ledger.front();
+			Any = true;
+		}
+	}
+};
+
+/** One of EconomyPacing's careers and what it measured. Kind: 0 live-only, 1 streaming, 2 mixed. */
+struct Career
+{
+	std::string Seed;
+	int Kind = 2;
+	bool Deals = true;
+	int Days = 180;
+	LedgerTally Ledger;
+	std::vector<double> LouAt;     // when Big Lou's stakes were taken
+	int Lantern = 0;               // Lantern Row's package offers seen
+	bool LanternOffTier = false;   // one whose terms aren't its tier's (staking_backing proves the tiers positive-EV)
+	bool RollPaidRent = false;     // a package's roll moved across a rent deadline
+	int RentChecks = 0;
+	std::vector<int> TierByDay;    // SponsorTier() each day
+	std::array<ss::Chips, 4> Bank{}; // the bankroll on days 30, 60, 90 and the last
+	int Online = 0, Live = 0, Streams = 0, Signed = 0;
+};
+
+ss::Chips RollSum(const ss::Session& S)
+{
+	ss::Chips Sum = 0;
+	for (const ss::stake::Deal& D : S.Life.Stakes.Deals)
+	{
+		Sum += D.K == ss::stake::Kind::Package ? D.RollNow : 0;
+	}
+	return Sum;
+}
+
+/** Fed and rested enough to play (the careers don't model the meals: EconomyPacing is about the deals and the rent). */
+void Fed(ss::Session& S)
+{
+	S.Life.Hunger = 10.0;
+	S.Life.Thirst = 10.0;
+	S.Life.Energy = 90.0;
+}
+
+/** The clock to World (the calendar runs over the gap), checking that no package roll moves at a rent deadline. */
+double Hop(ss::Session& S, Career& C, double Now, double World)
+{
+	if (World <= S.WorldMinutes())
+	{
+		return Now;
+	}
+	const double Deadline = S.Life.RentDeadline;
+	if (Deadline > S.WorldMinutes() + 1.0 && Deadline < World - 1.0)
+	{
+		S.LobbyMinutes += Deadline - 1.0 - S.WorldMinutes();
+		Now = Wait(S, Now, 0.05);
+		const ss::Chips Before = RollSum(S);
+		S.LobbyMinutes += Deadline + 1.0 - S.WorldMinutes();
+		Now = Wait(S, Now, 0.05);
+		C.RollPaidRent = C.RollPaidRent || RollSum(S) != Before;
+		++C.RentChecks;
+		C.Ledger.Take(S.Life);
+	}
+	S.LobbyMinutes += World - S.WorldMinutes();
+	Now = Wait(S, Now, 0.05);
+	C.Ledger.Take(S.Life);
+	return Now;
+}
+
+/** The deals on the table taken (backing and sponsors on): every stake offered, every sponsor's offer signed. */
+void TakeDeals(ss::Session& S, Career& C)
+{
+	const double World = S.WorldMinutes();
+	for (const ss::stake::Offer& O : std::vector<ss::stake::Offer>(S.Life.Stakes.Offers))
+	{
+		if (O.State != ss::stake::OfferStanding || O.Expires < World)
+		{
+			continue;
+		}
+		if (O.By == ss::stake::Outfit::LanternRow)
+		{
+			++C.Lantern;
+			const ss::stake::Terms Tier = ss::stake::LanternRowTerms(O.Tier);
+			C.LanternOffTier = C.LanternOffTier || O.Tier < 1 || O.T.CutPermille != Tier.CutPermille || O.T.Roll != Tier.Roll || O.T.CapOnline != Tier.CapOnline;
+		}
+		if (C.Deals && S.AcceptStake(O.Id).empty() && O.Backer == "Big Lou")
+		{
+			C.LouAt.push_back(World);
+		}
+	}
+	if (!C.Deals)
+	{
+		return;
+	}
+	for (const ss::sponsor::Brand& B : ss::sponsor::Brands())
+	{
+		const std::string Id = ss::sponsor::OpenOfferFor(S.Life.Sponsors, B.Id, World);
+		if (!Id.empty())
+		{
+			ss::sponsor::HeardOffer(S.Life.Sponsors, S.Life, Id, World);
+			C.Signed += S.SignDeal(Id).empty() ? 1 : 0;
+		}
+	}
+	C.Ledger.Take(S.Life);
+}
+
+/** A hyper from its start to the result: sprinted, the hands Sprint hands back played with the grader's best option. */
+double Online(ss::Session& S, Career& C, double Now)
+{
+	ss::net::EventInstance I;
+	if (S.BankrollCents < 500 || !ss::net::Shared().Next("hyper-sprint", S.WorldMinutes() + 1.0, I))
+	{
+		return Now;
+	}
+	Now = Hop(S, C, Now, I.Start);
+	Fed(S);
+	S.RegisterEvent(ss::net::Shared().Listing(I));
+	if (S.CurrentScreen != ss::Screen::Table)
+	{
+		return Now;
+	}
+	++C.Online;
+	S.SprintBudgetMs = 1.0e9; // a stretch to its stop in one update: the same frames on any machine
+	for (int Frames = 0; S.CurrentScreen == ss::Screen::Table && Frames < 4000000; ++Frames)
+	{
+		S.CurrentPace = ss::Pace::Sprint;
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		if (S.HasPrompt && Now - S.Prompt.OpenedAt > 0.3)
+		{
+			const std::vector<ss::OptionEV>& Opts = S.Prompt.Analysis.Options;
+			size_t Best = 0;
+			for (size_t K = 1; K < Opts.size(); ++K)
+			{
+				Best = Opts[K].Ev > Opts[Best].Ev ? K : Best;
+			}
+			S.HeroAct(Opts.empty() ? ss::PlayerAction::Fold() : Opts[Best].Action);
+		}
+	}
+	S.LeaveResults();
+	C.Ledger.Take(S.Life);
+	return Now;
+}
+
+/** A Nightly at the Embercrest, the host's side (EmbercrestRail's): settle on the save, note the night, load it again. */
+double LiveNight(std::unique_ptr<ss::Session>& S, PaceHooks& H, Career& C, double Now, int DayNo)
+{
+	live::Occurrence O;
+	for (const live::Occurrence& X : live::Occurrences(DayNo))
+	{
+		O = std::string(X.T->Key) == "nightly" ? X : O;
+	}
+	if (!O.Valid() || S->WorldMinutes() > O.DeskOpens + 60.0)
+	{
+		return Now;
+	}
+	Now = Hop(*S, C, Now, O.DeskOpens + 30.0);
+	Fed(*S);
+	TakeDeals(*S, C);
+	const std::vector<std::pair<life::Funding, std::string>> Options = S->FundingOptions(O.Id);
+	const bool Backed = !Options.empty() && Options[0].second.empty() && Options[0].first.From != life::Paid::Own;
+	if (!Backed && S->BankrollCents < 40000)
+	{
+		return Now; // the rent comes first
+	}
+	if (!S->GoToLive(O.Id).empty())
+	{
+		return Now;
+	}
+	++C.Live;
+	ss::SaveData D = H.Last;
+	D.Life = S->Life;
+	D.BankrollCents = S->BankrollCents;
+	if (D.WorldText.empty() && D.WorldSnapshot)
+	{
+		D.WorldSnapshot->Write(D.WorldText);
+	}
+	life::LiveEntry* E = live::EntryFor(D.Life, O.Id);
+	if (!E)
+	{
+		return Now;
+	}
+	E->ArrivedAt = O.Start - 15.0;
+	std::vector<ss::ReservedPlayer> Known;
+	for (const std::pair<std::string, int>& R : E->Roster)
+	{
+		ss::ReservedPlayer P;
+		P.Name = R.first;
+		P.Type = static_cast<ss::Archetype>(R.second);
+		Known.push_back(P);
+	}
+	bool Restored = false;
+	std::unique_ptr<ss::Tournament> T = live::ResumeField(O, *E, E->Entrants, D.HeroName, Known, false, Restored);
+	const ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, T->R);
+	int Place = 0;
+	ss::Chips Prize = 0;
+	for (int Guard = 0; Guard < 6000 && !T->Hero().Busted && !T->bFinished; ++Guard)
+	{
+		for (const ss::TEvent& Ev : T->SimulateTick(&Auto))
+		{
+			if (Ev.Type == ss::TEventType::Bust && Ev.IsHero)
+			{
+				Place = Ev.Place;
+				Prize = Ev.PrizeCents;
+			}
+		}
+	}
+	if (Place <= 0)
+	{
+		Place = T->Hero().Place > 0 ? T->Hero().Place : T->HeroRank();
+		Prize = T->PrizeFor(Place);
+	}
+	const double End = O.Start + T->ClockMinutes() - static_cast<double>(O.T->StartMinute);
+	live::Settle(D.BankrollCents, D.Life, O.Id, Place, T->Spec.Entrants, Prize, End);
+	live::PayFare(D.BankrollCents, D.Life, O.Id, true, End + 5.0);
+	D.NoteLive(End, O.Id, Place, Prize, T->Spec.Entrants, {});
+	D.ClockMinutes = End + 30.0 - Day;
+	S.reset();
+	S.reset(new ss::Session(H, C.Seed, &D));
+	S->CurrentScreen = ss::Screen::Lobby;
+	S->ResumeCalendarFrom(End + 30.0);
+	Now = Wait(*S, Now, 0.1);
+	C.Ledger.Take(S->Life);
+	return Now;
+}
+
+/** A shift at the Wash & Fold (6 AM to 4 PM starts), played out: the job that keeps a broke grinder in the game. */
+double Shift(ss::Session& S, Career& C, double Now)
+{
+	if (!S.StartActivity("washfold").empty())
+	{
+		return Now;
+	}
+	for (int Guard = 0; S.TimeSkip.Active && Guard < 200; ++Guard)
+	{
+		Now = Wait(S, Now, 0.5);
+	}
+	C.Ledger.Take(S.Life);
+	return Now;
+}
+
+/**
+ * A career of Days days, from Night One's $2.37: a shift each morning until there's a cushion over the rent, a hyper online
+ * every other afternoon (streamed, for the streamer, once the rig can), the Saturday Nightly on its own money or a backer's
+ * (live-only, mixed), and every deal on the table taken when Deals is on. (The suite's budget sets the pace: about 25 s a
+ * career.)
+ */
+void Run(Career& C)
+{
+	PaceHooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, C.Seed));
+	ss::hero::Character Who;
+	Who.FirstName = "Jesse";
+	Who.LastName = "Cole";
+	Who.Story = ss::hero::Background::DealersKid;
+	Who.Created = true;
+	S->NewCareer(Who);
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.1);
+	C.Ledger.Take(S->Life);
+	const double Start = S->WorldMinutes();
+	const int FirstDay = ss::net::DayOf(Start);
+	for (int K = 0; K < C.Days; ++K)
+	{
+		const int DayNo = FirstDay + K;
+		Now = Hop(*S, C, Now, static_cast<double>(DayNo) * Day + 7.0 * 60.0);
+		Fed(*S);
+		// Locked out (Night One's $1,225 by Friday is out of reach for most): the storage unit kept up, and back in as soon
+		// as the back rent and a month up front are there.
+		if (S->Evicted() && S->Life.StorageDue > 0.0 && S->Life.StorageDue < S->WorldMinutes() + 2.0 * Day)
+		{
+			S->PayStorage();
+		}
+		if (S->Evicted() && S->BankrollCents >= S->Life.RentDueCents + 20000)
+		{
+			S->MoveBackIn();
+		}
+		C.Ledger.Take(S->Life);
+		TakeDeals(*S, C);
+		if (S->BankrollCents < (S->Evicted() ? S->Life.RentDueCents : ss::life::MonthlyRentCents) + 40000)
+		{
+			Now = Shift(*S, C, Now);
+		}
+		Now = Hop(*S, C, Now, static_cast<double>(DayNo) * Day + 14.0 * 60.0);
+		Fed(*S);
+		if (C.Kind != 0 && K % 2 == 0)
+		{
+			if (C.Kind == 1 && !S->Owns("ram-32") && S->BankrollCents >= 30000)
+			{
+				S->Buy("ram-32");
+				C.Ledger.Take(S->Life);
+			}
+			const bool OnAir = C.Kind == 1 && S->GoLive().empty();
+			C.Streams += OnAir ? 1 : 0;
+			Now = Online(*S, C, Now);
+			if (OnAir)
+			{
+				Now = Wait(*S, Now, 0.5);
+				S->EndStream();
+			}
+		}
+		if (C.Kind != 1 && ss::net::Weekday(DayNo) == 5)
+		{
+			Now = LiveNight(S, H, C, Now, DayNo);
+		}
+		C.TierByDay.push_back(S->SponsorTier());
+		const int Done = K + 1;
+		if (Done == 30 || Done == 60 || Done == 90 || Done == C.Days)
+		{
+			C.Bank[Done == 30 ? 0 : Done == 60 ? 1 : Done == 90 ? 2 : 3] = S->BankrollCents;
+		}
+	}
+	(void)Start;
+}
+
+/** The last segment's first five checks on one career (its deals-off twin printed beside it; the sixth reads the medians). */
+void Checks(const Career& On, const Career& Off)
+{
+	const char* Name = On.Kind == 0 ? "live-only" : On.Kind == 1 ? "streaming" : "mixed";
+	const double Start = On.Ledger.All.empty() ? 0.0 : On.Ledger.All.front().At;
+	// 1. Sponsor cash under 20% of income for the first 60 days.
+	ss::Chips Sponsor60 = 0;
+	ss::Chips Income60 = 0;
+	for (const life::LedgerEntry& E : On.Ledger.All)
+	{
+		const bool Income = E.Amount > 0 && (E.Kind == 0 || E.Kind == 1 || E.Kind == 2 || E.Kind == 4 || E.Kind == 6 || E.Kind == life::LedgerSponsors);
+		if (E.At < Start + 60.0 * Day && Income)
+		{
+			Income60 += E.Amount;
+			Sponsor60 += E.Kind == life::LedgerSponsors ? E.Amount : 0;
+		}
+	}
+	// 2. No month's rent covered by sponsorship alone (in-kind at face: every sponsor line in) before tier 3.
+	ss::Chips WorstMonth = 0;
+	for (size_t D = 0; D < On.TierByDay.size(); ++D)
+	{
+		if (On.TierByDay[D] >= 3)
+		{
+			break;
+		}
+		const double To = Start + static_cast<double>(D + 1) * Day;
+		ss::Chips Month = 0;
+		for (const life::LedgerEntry& E : On.Ledger.All)
+		{
+			Month += E.Kind == life::LedgerSponsors && E.Amount > 0 && E.At > To - 30.0 * Day && E.At <= To ? E.Amount : 0;
+		}
+		WorstMonth = std::max(WorstMonth, Month);
+	}
+	// 5. Big Lou: at most LouMonthCap stakes in any 30 days (each worth $40 to $70 to the player: staking_backing).
+	int LouMax = 0;
+	for (size_t I = 0; I < On.LouAt.size(); ++I)
+	{
+		int In = 0;
+		for (size_t J = I; J < On.LouAt.size() && On.LouAt[J] < On.LouAt[I] + 30.0 * Day; ++J)
+		{
+			++In;
+		}
+		LouMax = std::max(LouMax, In);
+	}
+	std::printf("  pacing %s (%d days): %d online, %d live, %d streams, %d deals signed; sponsor cash $%.2f of $%.2f income in 60 days; the worst month's "
+				"sponsorship before tier 3 $%.2f; Lou %zu stakes (at most %d in 30 days); Lantern Row %d offers; %d rent deadlines checked; bankroll on/off day 30 "
+				"$%.2f/$%.2f, day 60 $%.2f/$%.2f, day 90 $%.2f/$%.2f, last $%.2f\n",
+		Name, On.Days, On.Online, On.Live, On.Streams, On.Signed, static_cast<double>(Sponsor60) / 100.0, static_cast<double>(Income60) / 100.0,
+		static_cast<double>(WorstMonth) / 100.0, On.LouAt.size(), LouMax, On.Lantern, On.RentChecks, static_cast<double>(On.Bank[0]) / 100.0,
+		static_cast<double>(Off.Bank[0]) / 100.0, static_cast<double>(On.Bank[1]) / 100.0, static_cast<double>(Off.Bank[1]) / 100.0, static_cast<double>(On.Bank[2]) / 100.0,
+		static_cast<double>(Off.Bank[2]) / 100.0, static_cast<double>(On.Bank[3]) / 100.0);
+	const std::string Tag = std::string("pacing (") + Name + "): ";
+	Expect(Income60 <= 0 || Sponsor60 * 5 < Income60, (Tag + "sponsor cash stays under 20% of income for the first 60 days").c_str());
+	Expect(WorstMonth < ss::life::MonthlyRentCents, (Tag + "no month's rent is covered by sponsorship alone before tier 3").c_str());
+	// 3. The staked roll never pays rent (enforced in core): no package roll moves at a rent deadline.
+	Expect(!On.RollPaidRent, (Tag + "the staked roll never pays rent").c_str());
+	// 4. Lantern Row's offers are its tiers' terms, which staking_backing's Monte Carlo proves positive for the backer.
+	Expect(!On.LanternOffTier, (Tag + "Lantern Row's offers are never negative-EV for the backer (each a tier's terms)").c_str());
+	Expect(LouMax <= ss::stake::LouMonthCap, (Tag + "Lou's stakes move at most $300 of EV in any 30 days (at most four)").c_str());
+}
+
+/** The median of the careers' bankrolls on day 30 (K 0), 60 (1) or 90 (2). */
+ss::Chips Median(const std::vector<Career>& Runs, size_t K)
+{
+	std::vector<ss::Chips> V;
+	for (const Career& C : Runs)
+	{
+		V.push_back(C.Bank[K]);
+	}
+	std::sort(V.begin(), V.end());
+	return V.empty() ? 0 : V[V.size() / 2];
+}
+} // namespace pacing
+
+/**
+ * EconomyPacing (update 2 SPEC §1.11, carried from next_segment_spec §1.11): seeded 180-day careers (live-only, streaming,
+ * mixed) with every feature on, each against its own seed with backing and sponsors off for the bankroll check. The default
+ * run plays the mixed career; "session_test long" plays all three. The checks are the last segment's six; each gate adds a
+ * career of its own (G1 autoplay, G2 creator, G3 multi-site).
+ */
+void EconomyPacing(bool Long)
+{
+	const int Kinds[3] = {2, 0, 1};
+	std::vector<pacing::Career> Ons;
+	std::vector<pacing::Career> Offs;
+	for (int K = 0; K < (Long ? 3 : 1); ++K)
+	{
+		pacing::Career On;
+		On.Seed = "pacing-" + std::to_string(Kinds[K]);
+		On.Kind = Kinds[K];
+		pacing::Career Off = On;
+		Off.Deals = false;
+		Off.Days = 90; // the sixth check reads days 30, 60 and 90
+		pacing::Run(On);
+		pacing::Run(Off);
+		pacing::Checks(On, Off);
+		Ons.push_back(On);
+		Offs.push_back(Off);
+	}
+	// 6. On days 30, 60 and 90, the median bankroll with backing and sponsors on is within +15% of the same seeds' with them off.
+	for (size_t K = 0; K < 3; ++K)
+	{
+		const ss::Chips A = pacing::Median(Ons, K);
+		const ss::Chips B = pacing::Median(Offs, K);
+		std::printf("  pacing: day %zu, the median bankroll $%.2f with the deals on, $%.2f off\n", 30 * (K + 1), static_cast<double>(A) / 100.0, static_cast<double>(B) / 100.0);
+		Expect(A * 100 <= std::max<ss::Chips>(B, 1) * 115, ("pacing: the median bankroll with deals on stays within +15% of the same seeds with them off (day " + std::to_string(30 * (K + 1)) + ")").c_str());
+	}
+}
+
+/**
+ * MigrationAll (update 2 SPEC §6.5, §7.2 day 5) over the day-0 fixtures (fixture_tool write2, from bda07f3): every one
+ * parses, writes back byte for byte (§6.4: no update 2 line is written before its Update2LinesRead bit is set, and loading
+ * sets none, so an untouched old save comes back as it was, at every gate), loads a second time the same, loads into a
+ * session, and keeps its facts: the staked entry's funding and checkpoint, the sponsor book, Mail and the clip, the
+ * veteran's results and badges, the eviction. The world's own text reads and writes back too.
+ */
+void MigrationAll()
+{
+	namespace life = ss::life;
+	const char* Names[] = {"pre_update2_fresh.ssave", "pre_update2_staked_mid_nightly.ssave", "pre_update2_sponsored_streamer.ssave", "pre_update2_evicted.ssave",
+		"pre_update2_veteran.ssave"};
+	for (const char* Name : Names)
+	{
+		const std::string Saved = seams::Fixture(Name);
+		ss::SaveData D;
+		const bool Parsed = Saved.rfind("shortstack.nightone.v2\n", 0) == 0 && ss::SaveData::Parse(Saved, D);
+		Expect(Parsed, (std::string("migration: ") + Name + " is there and parses").c_str());
+		const std::string Again = D.Serialize();
+		const bool Exact = Again == Saved;
+		Expect(Exact, (std::string("migration: ") + Name + " writes back byte for byte (an untouched old save gains no update 2 line)").c_str());
+		ss::SaveData Second;
+		Expect(ss::SaveData::Parse(Again, Second) && Second.Serialize() == Again, (std::string("migration: ") + Name + " loads a second time the same").c_str());
+		Hooks H;
+		ss::Session S(H, std::string("migration-") + Name, &D);
+		S.Save();
+		Expect(H.Saves > 0 && H.Last.BankrollCents == D.BankrollCents && H.Last.History.size() == D.History.size(), (std::string("migration: ") + Name + " loads into a session").c_str());
+		std::printf("  migration: %s: %s (%zu bytes)\n", Name, Exact ? "written back byte for byte" : "NOT written back byte for byte", Again.size());
+	}
+	// The facts each one keeps.
+	{
+		ss::SaveData D;
+		ss::SaveData::Parse(seams::Fixture("pre_update2_fresh.ssave"), D);
+		Expect(D.BankrollCents == 237 + ss::hero::PerksOf(D.Person).StartCents && D.Life.RentDueCents == 122500 && D.History.empty(), "migration: the fresh career");
+	}
+	{
+		ss::SaveData D;
+		ss::SaveData::Parse(seams::Fixture("pre_update2_staked_mid_nightly.ssave"), D);
+		const life::LiveEntry* E = ss::live::EntryFor(D.Life, "embercrest-nightly@9");
+		Expect(E && E->State == life::LiveEntry::Registered && E->Fund.From == life::Paid::Backer && E->Fund.Who == "Big Lou" && E->Fund.Permille == 1000 && E->Fund.Cents == 12000 &&
+				   E->Checkpoint.rfind("ck1 ", 0) == 0 && !E->Voices.empty() && !E->Room.empty() && !E->Badges.empty() && !E->Leaders.empty(),
+			"migration: tonight's Nightly on Big Lou's money, checkpointed, with its voices, room, badges and leaders");
+		Hooks H;
+		ss::Session S(H, "migration-staked", &D);
+		const life::LiveEntry* Kept = ss::live::EntryFor(S.Life, "embercrest-nightly@9");
+		Expect(S.LiveInProgress() == "embercrest-nightly@9" && Kept && Kept->Fund.Who == "Big Lou" && Kept->Checkpoint == E->Checkpoint && S.Life.Stakes.Deals.size() == 1,
+			"migration: the session goes back to the night on Lou's stake");
+	}
+	{
+		ss::SaveData D;
+		ss::SaveData::Parse(seams::Fixture("pre_update2_sponsored_streamer.ssave"), D);
+		Hooks H;
+		ss::Session S(H, "migration-streamer", &D);
+		const double World = S.WorldMinutes();
+		Expect(ss::sponsor::Active(S.Life.Sponsors, "voltrush", World) && !ss::sponsor::OpenOfferFor(S.Life.Sponsors, "halo", World).empty() && S.Life.Inbox.size() == 3 &&
+				   S.Life.Closet.Patches[2] == "voltrush",
+			"migration: Volt Rush signed and on the cap, Halo's offer open, three letters");
+		Expect(!S.Channel.Clips.empty() && !S.Channel.Log.empty() && S.Channel.Followers >= 2400 && D.History.size() == 3, "migration: Kast's clip and log, the hypers played on stream");
+		int Graded = 0;
+		for (const ss::coach::Tally& T : S.Life.Study.All)
+		{
+			Graded += T.Decisions;
+		}
+		Expect(Graded > 0, "migration: the coach's notes");
+	}
+	{
+		ss::SaveData D;
+		ss::SaveData::Parse(seams::Fixture("pre_update2_evicted.ssave"), D);
+		Expect(D.Life.RentStage == life::Rent::Evicted && D.Life.StorageDue > 0.0 && D.Life.Evictions == 1, "migration: still evicted, the gear in storage");
+	}
+	{
+		ss::SaveData D;
+		ss::SaveData::Parse(seams::Fixture("pre_update2_veteran.ssave"), D);
+		Hooks H;
+		ss::Session S(H, "migration-veteran", &D);
+		const ss::badge::Badge* Club = S.HeroBadges().Find(ss::badge::Kind::Club);
+		const ss::badge::Badge* Verified = S.HeroBadges().Find(ss::badge::Kind::VerifiedPro);
+		Expect(D.History.size() == 100 && D.Life.LiveWins >= 1 && !D.Life.LiveDays.empty() && D.Life.VerifiedHeld && Club && Verified,
+			"migration: the veteran's hundred results, a title on the wall, the live days, the club card and Verified");
+	}
+	// The world's own lines (version 2): read, written back byte for byte, a second read the same.
+	{
+		const std::string Text = seams::Fixture("world_v2.txt");
+		auto ReadWorld = [](const std::string& T, ss::world::World& W) {
+			size_t Start = 0;
+			while (Start < T.size())
+			{
+				size_t End = T.find('\n', Start);
+				End = End == std::string::npos ? T.size() : End;
+				std::vector<std::string> Fields(1);
+				for (size_t K = Start; K < End; ++K)
+				{
+					if (T[K] == '\t')
+					{
+						Fields.emplace_back();
+					}
+					else
+					{
+						Fields.back().push_back(T[K]);
+					}
+				}
+				W.Read(Fields);
+				Start = End + 1;
+			}
+			W.Finish();
+		};
+		ss::world::World W;
+		ReadWorld(Text, W);
+		std::string Again;
+		W.Write(Again);
+		Expect(W.Ready() && Text.rfind("world\thead\t2\t", 0) == 0 && Again == Text && W.Began() == ss::world::Start::Established,
+			"migration: world_v2.txt reads and writes back byte for byte, an established world");
+	}
+}
+} // namespace session_test
+
+int main(int Argc, char** Argv)
+{
+	// "session_test long": the long careers (EconomyPacing's beyond the first; update 2 SPEC §6.7).
+	const bool Long = Argc > 1 && std::string(Argv[1]) == "long";
 	session_test::Formatting();
 	session_test::NetworkChecks();
 	session_test::ScheduledTournament();
@@ -3214,9 +3807,17 @@ int main()
 	// The next segment: the lead's Phase A checks (tests/session_seams.cpp), then the per-track additions
 	// (next_segment_spec §7.6; tests/session_seg_<track>.cpp).
 	session_test::SegLead();
+	// Update 2: the lead's carried checks (update 2 SPEC §7.2, day 5), before the tracks'.
+	session_test::EconomyPacing(Long);
+	session_test::MigrationAll();
 	session_test::SegStake();
 	session_test::SegSponsor();
 	session_test::SegTableUi();
+	// Update 2 (update 2 SPEC §6.7): the per-track additions (tests/session_seg_<track>.cpp).
+	session_test::SegAuto();
+	session_test::SegVideo();
+	session_test::SegSites();
+	session_test::SegEcon();
 	if (session_test::Failures == 0)
 	{
 		std::printf("session tests: all passed\n");

@@ -278,9 +278,7 @@ void Screens()
 	Emit("table_banner", RL, Now + 1.0);
 	S.CurrentBanner.Active = false;
 	S.Tab = ss::RightTab::Payouts;
-	S.Sprinting = true;
-	Emit("table_sprint", RL, Now + 1.5);
-	S.Sprinting = false;
+	// (table_sprint is emitted from ui_seg_auto.cpp: update 2 §2.11, ui-laptop's table_skip replaces it.)
 	S.Tab = ss::RightTab::Chat;
 }
 
@@ -3198,6 +3196,12 @@ int main(int Argc, char** Argv)
 	ui_test::SegTableUi();
 	ui_test::SegBadges();
 	ui_test::SegLaptop();
+	// Update 2's per-track additions (update 2 SPEC §6.7; tests/ui_seg_<track>.cpp).
+	ui_test::SegAuto();
+	ui_test::SegVideo();
+	ui_test::SegSites();
+	ui_test::SegCreator();
+	ui_test::SegTableAuto();
 	if (ui_test::Failures == 0)
 	{
 		std::printf("ui tests: all passed\n");

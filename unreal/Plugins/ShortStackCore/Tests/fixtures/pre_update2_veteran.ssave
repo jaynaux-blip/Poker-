@@ -1,0 +1,364 @@
+shortstack.nightone.v2
+bankroll	2084803
+name	grinder_3c
+hero	name	Jesse	Cole
+hero	age	24
+hero	country	US
+hero	background	dealerskid
+hero	look	body	0	face	0	skin	3	eyes	1	brows	1	hair	3	haircolor	1	facialhair	1	build	1	height	178	outfit	0	outfitcolor	0	glasses	0	hat	0
+hero	created	1
+clock	18873.01
+life	energy	85.80
+life	heat	0.00
+life	needs	13.15	14.41
+pantry	oodle-cup	2
+life	drop	0	-1000000000.00
+life	rent	1	107500	38880.00	1
+life	evicted	0	0.00	0	0.00	0
+life	debt	0
+life	ban	0.00
+life	count	0	0	0	0	0
+life	earned	0	0
+life	backroom	0	0
+life	live	2	1	1	233825	1	24000
+life	liveday	-21	1	0	1	0	0	0
+life	liveday	-20	1	0	1	0	0	0
+life	liveday	-19	1	0	1	0	0	0
+life	liveday	-18	1	0	1	0	0	0
+life	liveday	-17	1	0	1	0	0	0
+life	liveday	-16	1	0	1	0	0	0
+life	liveday	-15	1	0	1	0	0	0
+life	liveday	-14	1	0	1	0	0	0
+life	liveday	-13	1	0	1	0	0	0
+life	liveday	-12	1	0	1	0	0	0
+life	liveday	-11	1	0	1	0	0	0
+life	liveday	-10	1	0	1	0	0	0
+life	liveday	-9	1	0	1	0	0	0
+life	liveday	-8	1	0	1	0	0	0
+life	liveday	-7	1	0	1	0	0	0
+life	liveday	-6	1	0	1	0	0	0
+life	liveday	-5	1	0	1	0	0	0
+life	liveday	-4	1	0	1	0	0	0
+life	liveday	-3	1	0	1	0	0	0
+life	liveday	-2	1	0	1	0	0	0
+life	liveday	-1	1	0	1	0	0	0
+life	liveday	0	1	0	1	0	0	0
+life	liveday	1	1	1	1	1	12000	233825
+life	liveday	2	1	0	1	0	12000	0
+life	liveday	3	1	0	1	0	0	0
+life	liveday	4	1	0	1	0	0	0
+life	liveday	5	1	0	1	0	0	0
+life	liveday	6	1	0	1	0	0	0
+life	liveday	7	1	0	1	0	0	0
+life	liveday	8	1	0	1	0	0	0
+life	liveday	9	1	0	1	0	0	0
+life	liveday	10	1	0	1	0	0	0
+life	liveday	11	1	0	1	0	0	0
+life	liveday	12	1	0	1	0	0	0
+life	liveday	13	1	0	1	0	0	0
+life	liveday	14	1	0	1	0	0	0
+liveentry	embercrest-nightly@1	1	12000	1500	2440.00	81	1	1	1	233825	2760.00	Embercrest Nightly $120
+liveroster	embercrest-nightly@1	Tyler_Brooklyn	3
+liveroster	embercrest-nightly@1	Jimmy Two	0
+liveroster	embercrest-nightly@1	megan.w	3
+liveroster	embercrest-nightly@1	Big Sam	0
+liveroster	embercrest-nightly@1	Tammy	0
+liveroster	embercrest-nightly@1	anderson01	0
+liveroster	embercrest-nightly@1	Gus	1
+liveroster	embercrest-nightly@1	Moe	3
+liveroster	embercrest-nightly@1	Kevin	3
+liveroster	embercrest-nightly@1	CodyJackson	6
+liveboard	embercrest-nightly@1	MON NIGHTLY\tlouismoreau\t301838
+liveface	embercrest-nightly@1	Tyler_Brooklyn	Embercrest regular	
+liveface	embercrest-nightly@1	Jimmy Two	Embercrest regular	
+liveface	embercrest-nightly@1	megan.w	Embercrest regular	
+liveface	embercrest-nightly@1	Big Sam	Embercrest regular	
+liveface	embercrest-nightly@1	Tammy	Embercrest regular	
+liveface	embercrest-nightly@1	anderson01	Embercrest regular	
+liveface	embercrest-nightly@1	Gus	Embercrest regular	
+liveface	embercrest-nightly@1	Moe	Embercrest regular	
+liveface	embercrest-nightly@1	Kevin	Embercrest regular	
+liveface	embercrest-nightly@1	CodyJackson	Embercrest regular	
+livetable	embercrest-nightly@1	Tyler_Brooklyn	17	-24000
+livetable	embercrest-nightly@1	Jimmy Two	1	0
+livetable	embercrest-nightly@1	megan.w	1	0
+livetable	embercrest-nightly@1	Big Sam	1	0
+livecheck	embercrest-nightly@1	2565.00	0.000		
+liveentry	embercrest-nightly@2	1	12000	1500	3880.00	98	1	1	27	0	4270.00	Embercrest Nightly $120
+liveroster	embercrest-nightly@2	Connie	0
+liveroster	embercrest-nightly@2	Gus	1
+liveroster	embercrest-nightly@2	Patty	1
+liveroster	embercrest-nightly@2	Big Lou	1
+liveroster	embercrest-nightly@2	Kevin	3
+liveroster	embercrest-nightly@2	T.J.	2
+liveroster	embercrest-nightly@2	Yolanda	1
+liveroster	embercrest-nightly@2	BluffSquadTV	4
+liveroster	embercrest-nightly@2	Rosie	0
+liveroster	embercrest-nightly@2	dusty_muck5	6
+liveroster	embercrest-nightly@2	Sal	2
+liveroster	embercrest-nightly@2	Jimmy Two	0
+liveroster	embercrest-nightly@2	MellowRocket	3
+liveboard	embercrest-nightly@2	TUE NIGHTLY\tgrinder_3c\t233825
+liveboard	embercrest-nightly@2	TUE NOON DEEPSTACK\tPFernandez\t146718
+liveboard	embercrest-nightly@2	MON NIGHTLY\tlouismoreau\t301838
+liveface	embercrest-nightly@2	Connie	Embercrest regular	
+liveface	embercrest-nightly@2	Gus	Embercrest regular	
+liveface	embercrest-nightly@2	Patty	Embercrest regular	
+liveface	embercrest-nightly@2	Big Lou	Embercrest regular	
+liveface	embercrest-nightly@2	Kevin	Embercrest regular	
+liveface	embercrest-nightly@2	T.J.	Embercrest regular	
+liveface	embercrest-nightly@2	Yolanda	Embercrest regular	
+liveface	embercrest-nightly@2	BluffSquadTV	Embercrest regular	
+liveface	embercrest-nightly@2	Rosie	Embercrest regular	
+liveface	embercrest-nightly@2	dusty_muck5	Embercrest regular	
+liveface	embercrest-nightly@2	Sal	Embercrest regular	
+liveface	embercrest-nightly@2	Jimmy Two	Has met you	Hey, I remember you.
+liveface	embercrest-nightly@2	MellowRocket	Embercrest regular	
+livetable	embercrest-nightly@2	Connie	17	-24000
+livetable	embercrest-nightly@2	Gus	1	0
+livetable	embercrest-nightly@2	Patty	1	0
+livetable	embercrest-nightly@2	Big Lou	1	0
+livecheck	embercrest-nightly@2	4005.00	0.000		
+unlock	bounty
+unlock	satellite
+unlock	sixmax
+night	1
+night	2
+night	3
+night	4
+night	5
+night	6
+night	7
+night	8
+night	9
+night	10
+night	11
+night	12
+night	13
+ledger	17700.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	17730.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	17790.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	17850.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	17880.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	17940.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	17998.80	0	67	Prize: $0.25 Hyper Sprint
+ledger	18000.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18058.10	0	50	Prize: $0.25 Hyper Sprint
+ledger	18060.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18120.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18180.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18210.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18270.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18300.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18330.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18360.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18390.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18454.40	0	82	Prize: $0.25 Hyper Sprint
+ledger	18480.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18540.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18600.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18630.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18690.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18720.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18780.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18840.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18870.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18900.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	18960.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19020.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19080.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19110.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19165.30	0	67	Prize: $0.25 Hyper Sprint
+ledger	19170.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19200.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19230.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19290.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19320.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19380.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19440.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19500.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19560.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19590.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19620.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19684.40	0	82	Prize: $0.25 Hyper Sprint
+ledger	19710.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19770.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19800.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19860.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	19933.50	0	157	Prize: $0.25 Hyper Sprint
+ledger	19950.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	20010.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	20073.70	0	82	Prize: $0.25 Hyper Sprint
+ledger	20100.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	20130.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	20190.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	20248.80	0	67	Prize: $0.25 Hyper Sprint
+ledger	20250.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	20313.00	0	82	Prize: $0.25 Hyper Sprint
+text	bond-slot:2:0
+text	bond-slot:3:0
+text	bond-slot:3:1
+text	bond:1:Big Sam
+text	bond:1:Tyler_Brooklyn
+text	bond:2:Connie
+text	dee-bubble
+text	dee-embercrest-13
+text	dee-embercrest-6
+text	dee-ft
+text	dee-itm
+text	dee-night-10
+text	dee-night-12
+text	dee-night-3
+text	dee-night-5
+text	dee-night-8
+text	first-cash
+text	marcus-intro
+text	needs:hungry:1
+text	needs:thirsty:2
+text	rent-friday
+text	rent-thursday
+text	sam-intro
+text	world:20160:1602:3
+leds	0	1	1
+kast	ch	0	0	0.0000	0.00	0.0	0	0	0	0	0	20313.00	0	0
+kast	earn	0	0	0	0	0	0	0
+kast	growth	0	1260	0.0	0	0	2	0	0.0	0	0	0	14	0
+result	$0.25 Hyper Sprint	14	180	82	0.000	25	hyper-sprint@20250
+result	$0.25 Hyper Sprint	17	180	67	100.000	25	hyper-sprint@20190
+result	$0.25 Hyper Sprint	75	180	0	100.000	25	hyper-sprint@20130
+result	$0.25 Hyper Sprint	160	180	0	100.000	25	hyper-sprint@20100
+result	$0.25 Hyper Sprint	14	180	82	100.000	25	hyper-sprint@20010
+result	$0.25 Hyper Sprint	37	180	0	0.000	25	hyper-sprint@19950
+result	$0.25 Hyper Sprint	7	180	157	100.000	25	hyper-sprint@19860
+result	$0.25 Hyper Sprint	95	180	0	100.000	25	hyper-sprint@19800
+result	$0.25 Hyper Sprint	146	180	0	0.000	25	hyper-sprint@19770
+result	$0.25 Hyper Sprint	110	180	0	100.000	25	hyper-sprint@19710
+result	$0.25 Hyper Sprint	14	180	82	0.000	25	hyper-sprint@19620
+result	$0.25 Hyper Sprint	180	180	0	100.000	25	hyper-sprint@19590
+result	$0.25 Hyper Sprint	171	180	0	100.000	25	hyper-sprint@19560
+result	$0.25 Hyper Sprint	38	180	0	100.000	25	hyper-sprint@19500
+result	$0.25 Hyper Sprint	58	180	0	100.000	25	hyper-sprint@19440
+result	$0.25 Hyper Sprint	92	180	0	0.000	25	hyper-sprint@19380
+result	$0.25 Hyper Sprint	31	180	0	100.000	25	hyper-sprint@19320
+result	$0.25 Hyper Sprint	169	180	0	0.000	25	hyper-sprint@19290
+result	$0.25 Hyper Sprint	37	180	0	0.000	25	hyper-sprint@19230
+result	$0.25 Hyper Sprint	160	180	0	0.000	25	hyper-sprint@19200
+result	$0.25 Hyper Sprint	135	180	0	0.000	25	hyper-sprint@19170
+result	$0.25 Hyper Sprint	18	180	67	100.000	25	hyper-sprint@19110
+result	$0.25 Hyper Sprint	176	180	0	0.000	25	hyper-sprint@19080
+result	$0.25 Hyper Sprint	38	180	0	0.000	25	hyper-sprint@19020
+result	$0.25 Hyper Sprint	46	180	0	100.000	25	hyper-sprint@18960
+result	$0.25 Hyper Sprint	36	180	0	100.000	25	hyper-sprint@18900
+result	$0.25 Hyper Sprint	148	180	0	100.000	25	hyper-sprint@18870
+result	$0.25 Hyper Sprint	178	180	0	100.000	25	hyper-sprint@18840
+result	$0.25 Hyper Sprint	104	180	0	100.000	25	hyper-sprint@18780
+result	$0.25 Hyper Sprint	62	180	0	0.000	25	hyper-sprint@18720
+result	$0.25 Hyper Sprint	154	180	0	0.000	25	hyper-sprint@18690
+result	$0.25 Hyper Sprint	67	180	0	100.000	25	hyper-sprint@18630
+result	$0.25 Hyper Sprint	131	180	0	100.000	25	hyper-sprint@18600
+result	$0.25 Hyper Sprint	44	180	0	0.000	25	hyper-sprint@18540
+result	$0.25 Hyper Sprint	49	180	0	100.000	25	hyper-sprint@18480
+result	$0.25 Hyper Sprint	14	180	82	100.000	25	hyper-sprint@18390
+result	$0.25 Hyper Sprint	174	180	0	100.000	25	hyper-sprint@18360
+result	$0.25 Hyper Sprint	128	180	0	0.000	25	hyper-sprint@18330
+result	$0.25 Hyper Sprint	124	180	0	0.000	25	hyper-sprint@18300
+result	$0.25 Hyper Sprint	180	180	0	100.000	25	hyper-sprint@18270
+result	$0.25 Hyper Sprint	40	180	0	100.000	25	hyper-sprint@18210
+result	$0.25 Hyper Sprint	156	180	0	100.000	25	hyper-sprint@18180
+result	$0.25 Hyper Sprint	62	180	0	0.000	25	hyper-sprint@18120
+result	$0.25 Hyper Sprint	41	180	0	0.000	25	hyper-sprint@18060
+result	$0.25 Hyper Sprint	22	180	50	100.000	25	hyper-sprint@18000
+result	$0.25 Hyper Sprint	17	180	67	100.000	25	hyper-sprint@17940
+result	$0.25 Hyper Sprint	76	180	0	100.000	25	hyper-sprint@17880
+result	$0.25 Hyper Sprint	152	180	0	0.000	25	hyper-sprint@17850
+result	$0.25 Hyper Sprint	118	180	0	0.000	25	hyper-sprint@17790
+result	$0.25 Hyper Sprint	56	180	0	0.000	25	hyper-sprint@17730
+result	$0.25 Hyper Sprint	156	180	0	0.000	25	hyper-sprint@17700
+result	$0.25 Hyper Sprint	134	180	0	0.000	25	hyper-sprint@17670
+result	$0.25 Hyper Sprint	58	180	0	100.000	25	hyper-sprint@17610
+result	$0.25 Hyper Sprint	141	180	0	100.000	25	hyper-sprint@17580
+result	$0.25 Hyper Sprint	180	180	0	100.000	25	hyper-sprint@17550
+result	$0.25 Hyper Sprint	59	180	0	0.000	25	hyper-sprint@17490
+result	$0.25 Hyper Sprint	159	180	0	100.000	25	hyper-sprint@17460
+result	$0.25 Hyper Sprint	35	180	0	0.000	25	hyper-sprint@17400
+result	$0.25 Hyper Sprint	55	180	0	0.000	25	hyper-sprint@17340
+result	$0.25 Hyper Sprint	84	180	0	100.000	25	hyper-sprint@17280
+result	$0.25 Hyper Sprint	161	180	0	0.000	25	hyper-sprint@17250
+result	$0.25 Hyper Sprint	56	180	0	0.000	25	hyper-sprint@17190
+result	$0.25 Hyper Sprint	149	180	0	100.000	25	hyper-sprint@17160
+result	$0.25 Hyper Sprint	153	180	0	100.000	25	hyper-sprint@17130
+result	$0.25 Hyper Sprint	75	180	0	0.000	25	hyper-sprint@17070
+result	$0.25 Hyper Sprint	160	180	0	0.000	25	hyper-sprint@17040
+result	$0.25 Hyper Sprint	2	180	513	100.000	25	hyper-sprint@16920
+result	$0.25 Hyper Sprint	163	180	0	100.000	25	hyper-sprint@16890
+result	$0.25 Hyper Sprint	16	180	68	100.000	25	hyper-sprint@16800
+result	$0.25 Hyper Sprint	146	180	0	100.000	25	hyper-sprint@16770
+result	$0.25 Hyper Sprint	160	180	0	100.000	25	hyper-sprint@16740
+result	$0.25 Hyper Sprint	70	180	0	0.000	25	hyper-sprint@16680
+result	$0.25 Hyper Sprint	169	180	0	0.000	25	hyper-sprint@16650
+result	$0.25 Hyper Sprint	96	180	0	0.000	25	hyper-sprint@16590
+result	$0.25 Hyper Sprint	171	180	0	100.000	25	hyper-sprint@16560
+result	$0.25 Hyper Sprint	105	180	0	0.000	25	hyper-sprint@16500
+result	$0.25 Hyper Sprint	49	180	0	100.000	25	hyper-sprint@16440
+result	$0.25 Hyper Sprint	9	180	123	100.000	25	hyper-sprint@16350
+result	$0.25 Hyper Sprint	11	180	103	100.000	25	hyper-sprint@16260
+result	$0.25 Hyper Sprint	114	180	0	100.000	25	hyper-sprint@16230
+result	$0.25 Hyper Sprint	137	180	0	0.000	25	hyper-sprint@16200
+result	$0.25 Hyper Sprint	25	180	50	100.000	25	hyper-sprint@16140
+result	$0.25 Hyper Sprint	5	180	215	100.000	25	hyper-sprint@16050
+result	$0.25 Hyper Sprint	20	180	50	100.000	25	hyper-sprint@15990
+result	$0.25 Hyper Sprint	28	180	0	0.000	25	hyper-sprint@15930
+result	$0.25 Hyper Sprint	104	180	0	0.000	25	hyper-sprint@15870
+result	$0.25 Hyper Sprint	81	180	0	100.000	25	hyper-sprint@15810
+result	$0.25 Hyper Sprint	53	180	0	100.000	25	hyper-sprint@15750
+result	$0.25 Hyper Sprint	180	180	0	100.000	25	hyper-sprint@15720
+result	$0.25 Hyper Sprint	135	180	0	100.000	25	hyper-sprint@15690
+result	$0.25 Hyper Sprint	30	180	0	100.000	25	hyper-sprint@15630
+result	$0.25 Hyper Sprint	57	180	0	0.000	25	hyper-sprint@15570
+result	$0.25 Hyper Sprint	72	180	0	0.000	25	hyper-sprint@15510
+result	$0.25 Hyper Sprint	169	180	0	100.000	25	hyper-sprint@15480
+result	$0.25 Hyper Sprint	76	180	0	0.000	25	hyper-sprint@15420
+result	$0.25 Hyper Sprint	14	180	82	100.000	25	hyper-sprint@15330
+result	$0.25 Hyper Sprint	139	180	0	0.000	25	hyper-sprint@15300
+result	$0.25 Hyper Sprint	153	180	0	100.000	25	hyper-sprint@15270
+result	$0.25 Hyper Sprint	108	180	0	0.000	25	hyper-sprint@15240
+result	$0.25 Hyper Sprint	108	180	0	0.000	25	hyper-sprint@15180
+closet	seeded
+closet	own	bottom.jeans.mid
+closet	own	bottom.shorts.khaki
+closet	own	outer.hoodie.charcoal
+closet	own	shoes.sneakers.white
+closet	own	top.tee.white
+closet	wear	1	outer.hoodie.charcoal
+closet	wear	2	bottom.jeans.mid
+closet	wear	3	shoes.sneakers.white
+fit	0.0000	-1000000000.00	0	0	0.00	20313.01
+groom	-8513.00	-8513.00	0
+pawn	next	412
+meal	0.00	-1000000000.00
+stake	done	dee-piece	9795.50
+stake	done	offer:dee:embercrest@6	9795.50
+stake	done	reg:embercrest-nightly@1	2440.00
+stake	done	reg:embercrest-nightly@2	3880.00
+stake	done	said:dee:embercrest@6	5460.00
+stake	done	settle:embercrest-nightly@1	2760.00
+stake	done	settle:embercrest-nightly@2	4270.00
+coach	tally	0	88	0	0	88	0	0
+coach	tally	1	42	0	0	42	0	0
+coach	tally	2	5	0	0	5	0	0
+coach	tally	3	14	0	0	14	0	0
+coach	tally	4	9	0	0	9	0	0
+coach	tally	5	40	0	0	40	0	0
+coach	tally	6	9	0	0	9	0	0
+coach	tally	7	29	0	0	29	0	0
+coach	tally	8	18	0	0	18	0	0
+coach	tally	9	3	0	0	3	0	0
+sponsor	book	16753.30	0	0
+sponsor	deal	embercrest@3	embercrest	4	3	5313.00	15393.00	0.00	0.00	0	0	0	0.00	0	0	3	-1000000000.00	0	0	0.00	0	0	0.00	-1	0		0	0	
+sponsor	terms	embercrest@3	days=90	sign=0	mo=0	hr=0	rd=0	ft=0	ti=25000	ce=2	cc=12000	fa=1	cut=0	ex=1	cond=1	cure=14	pt=0	tc=0	ask=0,0,0,0,8,0,1,0	wants=0	ev=noon.warmup.nightly.turbo
+sponsor	deal	stacked@8	stacked	0	0	12599.00	22679.00	0.00	0.00	0	0	0	0.00	0	0	3	-1000000000.00	0	0	0.00	0	0	0.00	-1	0		0	0	
+sponsor	terms	stacked@8	days=30	sign=0	mo=0	hr=1000	rd=4000	ft=0	ti=0	ce=0	cc=0	fa=0	cut=0	ex=1	cond=1	cure=14	pt=0	tc=0	ask=25,8,0,4,0,0,0,0	wants=0.2	ev=
+sponsor	cool	embercrest	45633.00
+badge	review	24321	1
+mail	5313.00	embercrest@3	sponsor	1	0	Denise Ochoa	Team Embercrest wants you.	You made a final table at the Embercrest. The room has noticed, and so have I. Team Embercrest is a handful of regulars who wear the crest and make the place feel like home. We cover some entries and the bus up the ridge. You show up, play, and say hello to the new faces. Terms below.
+mail	12599.00	stacked@8	sponsor	1	0	Theo Marsh	Stacked wants to dress you.	You won the Embercrest Nightly $120, and people noticed. We'd like to dress you. Stacked at your live events, a read on stream now and then, hourly pay through Kast. If the first month works, we go longer. Terms below.

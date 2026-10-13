@@ -1,6 +1,7 @@
 #include "ShortStack/Tournament.h"
 #include "StrictFloat.h"
 
+#include "ShortStack/AI/Style.h"
 #include "ShortStack/AI/View.h"
 #include "ShortStack/Names.h"
 
@@ -18,6 +19,12 @@ const char* const HeroId = "hero";
 Tournament::Tournament(const TournamentSpec& InSpec, const std::string& HeroName, const std::string& Seed, const std::vector<ReservedPlayer>& Reserved)
 	: Spec(InSpec), R(Seed)
 {
+	// Autoplay's mix key (style::Mix): the seed text hashed, nothing drawn.
+	SeedHash = 14695981039346656037ull;
+	for (const char Ch : Seed)
+	{
+		SeedHash = (SeedHash ^ static_cast<unsigned char>(Ch)) * 1099511628211ull;
+	}
 	Levels = Spec.Levels.empty() ? StandardLevels() : Spec.Levels;
 	TableSize = Spec.TableSize > 0 ? Spec.TableSize : 9;
 	Remaining = Spec.Entrants;
@@ -293,7 +300,79 @@ BotDecision Tournament::BotDecisionFor(const Hand& H, bool Fast, const Profile* 
 	Ctx.IcmPressure = PressureFor(P);
 	Ctx.Fast = Fast;
 	Ctx.R = &R;
-	return Decide(MakeView(H, Idx), Ctx);
+	BotDecision D = Decide(MakeView(H, Idx), Ctx);
+	if (HeroReadHook && P.Id != HeroId && AtHeroTable(H))
+	{
+		HeroReadHook(H, Idx, D);
+	}
+	return D;
+}
+
+bool Tournament::AtHeroTable(const Hand& H) const
+{
+	for (const HandSeat& S : H.Seats)
+	{
+		if (S.Id == HeroId)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+BotDecision Tournament::HeroDecisionFor(const Hand& H, const style::HeroBrain& B)
+{
+	// The hero's seat decided the way BotDecisionFor decides a bot's: the same view, the same pressure, the same R.
+	const int Idx = H.ToAct;
+	const TPlayer& P = Players[static_cast<size_t>(PlayerIndex(H.Seats[static_cast<size_t>(Idx)].Id))];
+	style::HeroContext C;
+	C.Pressure = PressureFor(P);
+	C.View = MakeView(H, Idx);
+	C.T = this;
+	C.HeroIdx = Idx;
+	C.MixSeed = SeedHash;
+	C.Tick = Tick;
+	return style::Decide(C, B, R);
+}
+
+bool Tournament::PlayHeroHand(Hand& H, const style::HeroBrain& B, const HeroStop& Stop)
+{
+	// PlayInstant's order: the hero by the plan (and the stop rules on what it drew), everyone else as bots.
+	int Guard = 0;
+	while (!H.bComplete)
+	{
+		const std::string& Id = H.Seats[static_cast<size_t>(H.ToAct)].Id;
+		if (Id == HeroId && HeroSitsOut)
+		{
+			const LegalActions L = H.GetLegalActions();
+			const bool Folded = H.Act(L.CanCheck ? PlayerAction::Check() : PlayerAction::Fold());
+			SS_ASSERT(Folded);
+			(void)Folded;
+		}
+		else if (Id == HeroId)
+		{
+			const BotDecision D = HeroDecisionFor(H, B);
+			if (Stop && Stop(H, D))
+			{
+				return false;
+			}
+			const bool Ok = H.Act(D.Action);
+			SS_ASSERT(Ok);
+			(void)Ok;
+		}
+		else
+		{
+			const BotDecision D = BotDecisionFor(H, FastField);
+			const bool Ok = H.Act(D.Action);
+			SS_ASSERT(Ok);
+			(void)Ok;
+		}
+		if (++Guard > 1000)
+		{
+			break;
+		}
+	}
+	return true;
 }
 
 void Tournament::PlayInstant(Hand& H, bool Fast, const Profile* HeroAuto)
@@ -386,6 +465,7 @@ void Tournament::ApplyHand(const Hand& H)
 
 std::unique_ptr<Hand> Tournament::StartTick(std::vector<TEvent>& OutEvents)
 {
+	LastHero.reset();
 	OutEvents = Balance();
 	const TPlayer& H = Hero();
 	if (!H.Busted && !bFinished && !HeroAway)
@@ -404,6 +484,24 @@ std::vector<TEvent> Tournament::FinishTick(Hand* HeroHand, const Profile* HeroAu
 
 void Tournament::BeginFinish(Hand* HeroHand, const Profile* HeroAuto)
 {
+	BeginFinishHand(HeroHand, HeroAuto, nullptr);
+	if (HeroHand)
+	{
+		LastHero.reset(new Hand(*HeroHand));
+	}
+}
+
+void Tournament::BeginFinishWith(Hand* HeroHand, const style::HeroBrain& B)
+{
+	BeginFinishHand(HeroHand, nullptr, &B);
+	if (HeroHand)
+	{
+		LastHero.reset(new Hand(*HeroHand));
+	}
+}
+
+void Tournament::BeginFinishHand(Hand* HeroHand, const Profile* HeroAuto, const style::HeroBrain* Brain)
+{
 	FinishHeroTable = Hero().Busted ? -1 : Hero().TableId;
 	FinishWithHero = HeroHand != nullptr;
 	FinishNextTable = INT_MIN;
@@ -413,11 +511,43 @@ void Tournament::BeginFinish(Hand* HeroHand, const Profile* HeroAuto)
 	{
 		if (!HeroHand->bComplete)
 		{
-			PlayInstant(*HeroHand, false, HeroAuto);
+			if (Brain)
+			{
+				PlayHeroHand(*HeroHand, *Brain, HeroStop());
+			}
+			else
+			{
+				PlayInstant(*HeroHand, false, HeroAuto);
+			}
 		}
 		ApplyHand(*HeroHand);
 		NoteRound(FinishHeroTable, *HeroHand);
 	}
+}
+
+std::vector<TEvent> Tournament::FinishTickWith(Hand* HeroHand, const style::HeroBrain& B)
+{
+	BeginFinishWith(HeroHand, B);
+	FinishSome(INT_MAX);
+	return EndFinish();
+}
+
+Tournament::TickResult Tournament::SimulateTickWith(const style::HeroBrain& B, const HeroStop& Stop)
+{
+	// SimulateTick's order with the plan in the hero's seat: the hero's table hand by hand, then the other tables.
+	TickResult Out;
+	std::unique_ptr<Hand> H = StartTick(Out.Events);
+	if (H && !H->bComplete && !PlayHeroHand(*H, B, Stop))
+	{
+		Out.Paused = std::move(H);
+		return Out;
+	}
+	BeginFinishHand(H.get(), nullptr, &B);
+	FinishSome(INT_MAX);
+	const std::vector<TEvent> More = EndFinish();
+	Out.Events.insert(Out.Events.end(), More.begin(), More.end());
+	LastHero = std::move(H);
+	return Out;
 }
 
 void Tournament::NoteRound(int TableId, const Hand& H)

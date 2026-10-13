@@ -6,6 +6,8 @@
 #include "ShortStack/Rng.h"
 #include "ShortStack/Structure.h"
 
+#include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
@@ -13,6 +15,11 @@
 
 namespace ss
 {
+namespace style
+{
+struct HeroBrain; // AI/Style.h
+}
+
 struct TournamentSpec
 {
 	std::string Id;
@@ -172,6 +179,48 @@ public:
 	/** Scripted move (story beats), e.g. seating the rival at the hero's table. */
 	SHORTSTACKCORE_API std::vector<TEvent> MoveToTable(const std::string& Id, int TableId);
 
+	// ---------------------------------------------------------------- autoplay (C++ only, update 2 §1.3, §2.8)
+	// The plan playing the hero's seat, on the watch and the skip paths alike: separately named entry points that take a
+	// style::HeroBrain where the Profile* ones take a profile. The Profile* paths above don't change (golden_vectors), and
+	// with HeroReadHook null and FastField false nothing here moves a bot.
+	/** The harness only (§2.10): the bots at the hero's table decide Fast, like the rest of the field. */
+	bool FastField = false;
+	/**
+	 * The hero's read on a bot at the hero's table (§2.8): null keeps today's behaviour, byte for byte. Set only under live
+	 * autoplay (FAutoHost); applied to the decisions of seats at the hero's table in BotDecisionFor and PlayHeroHand, on
+	 * both paths. Seat: the deciding seat's index in H.Seats.
+	 */
+	std::function<void(const Hand&, int Seat, BotDecision&)> HeroReadHook;
+	/** The tournament's seed as a number (FNV-1a of the seed text): style::Mix's key. Drawn from nothing. */
+	uint64_t SeedHash = 0;
+	/** The plan's decision at the hero's turn in H: draws from R exactly as BotDecisionFor would for that seat. */
+	SHORTSTACKCORE_API BotDecision HeroDecisionFor(const Hand& H, const style::HeroBrain& B);
+	/** Checked after HeroDecisionFor on both paths: true drops the plan's action and hands the decision to the player. */
+	using HeroStop = std::function<bool(const Hand&, const BotDecision& Planned)>;
+	/** PlayInstant's order with a brain for the hero; false if it stopped at a hero decision (the hand stays live). */
+	SHORTSTACKCORE_API bool PlayHeroHand(Hand& H, const style::HeroBrain& B, const HeroStop& Stop);
+	/** A tick's events, and the hero's hand when a stop rule paused it mid-hand (online only, §2.6.4). */
+	struct TickResult
+	{
+		std::vector<TEvent> Events;
+		std::unique_ptr<Hand> Paused;
+	};
+	/**
+	 * SimulateTick with the plan in the hero's seat (named, not overloaded: SimulateTick(nullptr) stays unambiguous).
+	 * Paused: the hero's hand, stopped at a decision by Stop; the tick is then unfinished (the other tables not played),
+	 * and the caller finishes it the watch path's way (BeginFinish, FinishSome, EndFinish).
+	 */
+	SHORTSTACKCORE_API TickResult SimulateTickWith(const style::HeroBrain& B, const HeroStop& Stop = {});
+	/** FinishTick with the plan finishing the hero's hand. Stores nothing: the caller owns its hand. */
+	SHORTSTACKCORE_API std::vector<TEvent> FinishTickWith(Hand* HeroHand, const style::HeroBrain& B);
+	SHORTSTACKCORE_API void BeginFinishWith(Hand* HeroHand, const style::HeroBrain& B);
+	/**
+	 * The hero's hand of the last tick (null before one, or when the hero wasn't dealt in): moved in by SimulateTickWith,
+	 * copied by BeginFinish and BeginFinishWith, reset by StartTick. Reading it draws nothing; it isn't in the checkpoint
+	 * (the Rounds() contract).
+	 */
+	const Hand* LastHeroHand() const { return LastHero.get(); }
+
 	// ---------------------------------------------------------------- checkpoints (C++ only, the live rooms)
 	/**
 	 * The tournament between ticks as one line of text: everything play changes (stacks, seats, buttons, the clock,
@@ -234,5 +283,10 @@ private:
 	// The tick's hands, table by table (Rounds).
 	std::vector<TableRound> LastRounds;
 	void NoteRound(int TableId, const Hand& H);
+	// Autoplay (LastHeroHand): the hero's hand of the last tick, and the seat-at-the-hero's-table test HeroReadHook uses.
+	std::unique_ptr<Hand> LastHero;
+	bool AtHeroTable(const Hand& H) const;
+	/** BeginFinish's body: the hero's hand finished by HeroAuto (a profile) or by Brain (the plan), then applied. */
+	void BeginFinishHand(Hand* HeroHand, const Profile* HeroAuto, const style::HeroBrain* Brain);
 };
 } // namespace ss

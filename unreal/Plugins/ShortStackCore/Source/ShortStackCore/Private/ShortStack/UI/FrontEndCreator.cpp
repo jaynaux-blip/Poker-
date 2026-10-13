@@ -465,7 +465,8 @@ void FrontEnd::CreatorNext(double Now)
 		// The card's photo is taken.
 		Sound(SoundId::Flip, 0.45);
 	}
-	CreatorGo(static_cast<CreatorStage>(static_cast<int>(Stage) + 1), Now);
+	// THE WORLD (update 2 §3.1) is ui-front's step: until it lands, Look goes straight to Review.
+	CreatorGo(Stage == CreatorStage::Look ? CreatorStage::Review : static_cast<CreatorStage>(static_cast<int>(Stage) + 1), Now);
 }
 
 void FrontEnd::CreatorBack(double Now)
@@ -477,7 +478,7 @@ void FrontEnd::CreatorBack(double Now)
 		Sel = 1;
 		return;
 	}
-	CreatorGo(static_cast<CreatorStage>(static_cast<int>(Stage) - 1), Now);
+	CreatorGo(Stage == CreatorStage::Review ? CreatorStage::Look : static_cast<CreatorStage>(static_cast<int>(Stage) - 1), Now);
 }
 
 void FrontEnd::BeginNewGame(double Now)
@@ -510,7 +511,7 @@ void FrontEnd::StartCareer(double Now)
 	DraftTouched = false;
 	Undo.clear();
 	Close(Now);
-	Hooks.NewCareer(ScreenName, Draft);
+	Hooks.NewCareerIn(ScreenName, Draft, WorldStart);
 }
 
 void FrontEnd::PushUndo()
@@ -898,7 +899,8 @@ void FrontEnd::CreatorHeader(double Now)
 	const float X = MenuMargin;
 	const float In = Ease(PageTime / 0.45);
 	const float Dx = (1.0f - In) * -30.0f;
-	const int S = static_cast<int>(Stage);
+	// The step's place in the stepper (THE WORLD has none until ui-front's step lands: Review stays the fourth).
+	const int S = static_cast<int>(Stage) - (Stage == CreatorStage::Review ? 1 : 0);
 	C->FillRect({X + Dx + 2.0f, 143.0f, 44.0f, 3.0f}, Paint(F(MenuNeon, In)));
 	TrackedText(*C, "NEW CAREER \xC2\xB7 STEP " + std::to_string(S + 1) + " OF 4", X + Dx + 62.0f, 151.0f, 15.0f, 700, F(MenuNeon, In), 6.0f);
 	const float Ti = Ease((Now - StageAt) / 0.35);

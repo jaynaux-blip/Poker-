@@ -71,6 +71,13 @@ struct Public
 	bool Late90 = false;
 	/** 0..1, today's formula (Town.cpp:796-809) computed from the fields above. */
 	double Renown = 0.0;
+	// Update 2 (§4.7, §5.4; core-econ fills them in Rep.cpp): Rerun, and the rival sites' invitation gates (from History).
+	// Restricted180 keeps its meaning: RiverLine's account.
+	int VideoSubs = 0, Views30 = 0;
+	bool VideoPartner = false;
+	int SiteAccounts = 0;
+	Chips Abi100 = 0; // the average buy-in of the last hundred tracked events
+	int OnlineSeriesTitles = 0;
 };
 
 SHORTSTACKCORE_API Public Of(const life::State& L, const kast::Channel& C, const world::World* W, double World);

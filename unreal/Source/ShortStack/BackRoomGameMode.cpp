@@ -2,6 +2,7 @@
 #include "CareerSave.h"
 #include "BackRoomGameShared.h"
 
+#include "BackRoomAuto.h"
 #include "BackRoomCard.h"
 #include "BackRoomChips.h"
 #include "BackRoomPlayer.h"
@@ -526,14 +527,19 @@ void ABackRoomPawn::HandleInput(float RealDt)
 	}
 	// Up, or just put down: nothing at the table is yours to do (a held button starts over).
 	const bool bCardLock = bTableCard || RealNow - TableCardClosedAt < CardLockSeconds;
-	if (bCardLock)
+	// Update 2 (§2.6.2): the plan's own keys (ue-auto's FAutoHost::PawnKeys): K, T while it holds the seat, the PLAY page,
+	// and the first action press during its think, which only takes the wheel. While they're the plan's, the table's pace
+	// and the actions below don't run on them.
+	FAutoHost* Auto = FAutoHost::Of(GM);
+	const bool bAutoKeys = Auto && Auto->PawnKeys(*this, PC, bCardLock);
+	if (bCardLock || bAutoKeys)
 	{
 		In.PadY.Reset();
 		In.KeyA.Reset();
 	}
 	// T (right on the d-pad): the table's pace. N, out of the hand (A on a gamepad: nothing else is yours to do then): the
-	// rest of it at a glance, until you're dealt in again. Neither ever decides anything of yours.
-	if (!bCardLock && GM && GM->IsLive() && (Pressed(PC, EKeys::T) || Pressed(PC, EKeys::Gamepad_DPad_Right)))
+	// rest of it at a glance, until you're dealt in again. Neither ever decides anything of yours; autoplay is separate.
+	if (!bCardLock && !bAutoKeys && GM && GM->IsLive() && (Pressed(PC, EKeys::T) || Pressed(PC, EKeys::Gamepad_DPad_Right)))
 	{
 		GM->CycleTablePace();
 	}
@@ -553,7 +559,10 @@ void ABackRoomPawn::HandleInput(float RealDt)
 		Pace = 1.0f;
 	}
 	const float Out = GM ? GM->FoldedPace() : 1.9f;
-	Pace = bSkipHand ? 6.0f : Ease(Pace, bFolded && !bFocusing ? Out : 1.0f, 2.0f, RealDt);
+	// (Update 2, §2.12: while the plan holds the seat its watch speed is the target for the whole hand, never slower than a
+	// folded hand's; 1 when it doesn't.)
+	const float Want = FMath::Max(bFolded && !bFocusing ? Out : 1.0f, GM ? GM->AutoWatchSpeed() : 1.0f);
+	Pace = bSkipHand ? 6.0f : Ease(Pace, Want, 2.0f, RealDt);
 	UGameplayStatics::SetGlobalTimeDilation(this, FMath::Lerp(Pace, 0.45f, Focus));
 	if (bFocusing && Table)
 	{
@@ -635,7 +644,7 @@ void ABackRoomPawn::HandleInput(float RealDt)
 	// while you're in the hand: folded, it's the next hand); R bets or raises to the amount shown, and so does Y let go
 	// within 0.35 s; held past that, Y fills ALL IN and goes all in at 0.95 s (let go between: nothing, and a hold never
 	// raises first). On the keyboard all in is A held. B backs out (the table card) and does nothing to the hand.
-	if (Table && !bCardLock)
+	if (Table && !bCardLock && !bAutoKeys)
 	{
 		if (Pressed(PC, EKeys::F) || Pressed(PC, EKeys::Gamepad_FaceButton_Left))
 		{
@@ -760,10 +769,43 @@ void ABackRoomPawn::TestPress(const FString& Key)
 
 void ABackRoomPawn::TestWalker(float RoomX, float RoomY, float InYaw, float InPitch)
 {
-	const ABackRoomGameMode* GM = GetMode();
+	ABackRoomGameMode* GM = GetMode();
 	if (!GM || !GM->Stage)
 	{
 		return;
+	}
+	// Seated at a live table, or still walking in to the seat: up through the stand-up path first, as Q does (the away rule
+	// has the chair: checked when it's free, mucked when it isn't), and then on foot here at once. A walker put down past it
+	// left the table waiting on the player's decision with nobody in the chair (acceptance F29).
+	if (GM->IsLive() && !GM->IsHeroUp() && !bFreeWalk)
+	{
+		if (bWalking && !bWalkOut)
+		{
+			// Into the chair now: the walk in's own end (the night starts there).
+			bWalking = false;
+			TFunction<void()> Done = MoveTemp(WalkDone);
+			WalkDone = nullptr;
+			if (Done)
+			{
+				Done();
+			}
+		}
+		GM->LiveStandUp();
+		if (GM->IsHeroUp())
+		{
+			// ...and straight out of it, without the walk out: the body leaves the chair with the walker.
+			bWalking = false;
+			bWalkPending = false;
+			bHoldWalkEnd = false;
+			WalkDone = nullptr;
+			if (ABackRoomTable* T = GetTable())
+			{
+				if (ABackRoomPlayer* Me = T->GetHeroPlayer())
+				{
+					Me->SetActorHiddenInGame(true);
+				}
+			}
+		}
 	}
 	if (!bFreeWalk)
 	{
@@ -2555,6 +2597,8 @@ void ABackRoomGameMode::StartPlay()
 {
 	Super::StartPlay();
 	ABackRoomChips::ChipUnit = 1;
+	// Update 2 (§2.12): the plan's host (ue-auto's, BackRoomAuto.h), before LoadLive reads a checkpoint's host text into it.
+	AutoHost = MakeShared<FAutoHost>(*this);
 	bLive = LoadLive();
 	FindOrSpawnStage();
 	const bool bCareer = bLive || LoadCareer();
@@ -2734,6 +2778,12 @@ void ABackRoomGameMode::OnTableNote(uint8 Note)
 			}
 		}
 		const bool bPlayed = bChipsIn || (!bFoldedOut && (Played.HeroNet != 0 || !Played.Shown.empty()));
+		// Update 2 (§1.3): the hand's end for the plan's books, both rooms (ue-auto's FAutoHost::OnHandEnded: the observed
+		// stats, the plan's tilt and counts, a highlight candidate), with the room's note the director hasn't taken yet.
+		if (AutoHost)
+		{
+			AutoHost->OnHandEnded(Played, Table->PeekHandNote());
+		}
 		RecentHands.push_back(MoveTemp(Played));
 		if (RecentHands.size() > 10)
 		{
@@ -2776,6 +2826,11 @@ void ABackRoomGameMode::OnTableNote(uint8 Note)
 		}
 		break;
 	case EBackRoomTableNote::HeroBusted:
+		// (Update 2, §2.6.3: felted, the plan stops; the reload is the player's money.)
+		if (AutoHost)
+		{
+			AutoHost->OnHeroBusted();
+		}
 		if (!IsCareer() || Phase == EBackRoomPhase::Leaving)
 		{
 			break;
@@ -3069,6 +3124,12 @@ void ABackRoomGameMode::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	// Update 2 (§2.12): the plan's own frame, in both rooms (ue-auto's FAutoHost::Tick); the pause menu above freezes it with
+	// the night.
+	if (AutoHost)
+	{
+		AutoHost->Tick(RealDt);
+	}
 	if (bLive)
 	{
 		LiveTick(RealDt);
@@ -3121,10 +3182,13 @@ void ABackRoomGameMode::Tick(float DeltaSeconds)
 		Watch(RealDt);
 	}
 
-	// The night goes on: the clock, and what it takes out of you.
+	// The night goes on: the clock, and what it takes out of you. (Update 2, §1.1: while the plan holds the seat the night
+	// moves by the hand, never by real time, so watching it quicker never packs more hands into a night: ue-auto's
+	// FAutoHost::DeeMinutes, which hands back the real-time minutes whenever the player decides.)
 	if (Phase == EBackRoomPhase::Playing || Phase == EBackRoomPhase::Busted)
 	{
-		const double Elapsed = RealDt * ClockRate / 60.0;
+		const double RealMinutes = RealDt * ClockRate / 60.0;
+		const double Elapsed = AutoHost ? AutoHost->DeeMinutes(RealMinutes) : RealMinutes;
 		Minutes += Elapsed;
 		Energy = FMath::Max(0.0f, Energy - static_cast<float>(Elapsed / 60.0) * EnergyPerHour);
 		const double Tod = TimeOfDay();

@@ -43,6 +43,9 @@ public:
 		Career,
 		Embercrest, // the city's card room: its events this week (live::Occurrences), each on an honest card
 		Backing,    // stakes, pieces, swaps and packages (next_segment_spec §2.12; drawn by RiverLineBacking.cpp)
+		// Update 2 (G3, ui-laptop's): a rival site's money and offers (RiverLineSites.cpp).
+		Promotions,
+		Cashier,
 	};
 	/** Schedule filters (the chips above the list). */
 	enum class Filter : int
@@ -70,6 +73,7 @@ public:
 		Kast,      // streaming: the studio, the channel, the directory
 		PennyDrop, // the Lucky Penny's delivery app: order food, eat and drink at home
 		Mail,      // the companies' letters: sponsors, Lantern Row, Finch School (next_segment_spec §3.9; RiverLineMail.cpp)
+		Video,     // update 2 (G2): Rerun, the video site (RiverLineVideo.cpp, ui-video's)
 	};
 	/** Kast's pages. */
 	enum class KastPage : int
@@ -147,6 +151,8 @@ public:
 	/** The event panel's tab: 0 overview, 1 payouts, 2 players (or the final table). */
 	void ShowEventTab(int Tab) { DetailTab = Tab; }
 	KastPage CurrentKastPage() const { return KastShown; }
+	/** Update 2 (G3): the poker site the lobby shows (RiverLine until the rivals open). */
+	net::SiteId SiteShown = net::SiteId::RiverLine;
 
 private:
 	void Logo(float X, float Y, float Scale);
@@ -340,6 +346,17 @@ private:
 	void Tile(int Index, const Rect& R, bool Front, double Now);
 	void FinishedToasts(double Now);
 	int TileClicked = -1;
+	// Update 2 (declared in Phase A; side state beside the class, as Mail's). Rerun (RiverLineVideo.cpp, ui-video);
+	// autoplay's panel, the watch strip and the skip card (RiverLineAuto.cpp, ui-laptop); the rival sites' Promotions and
+	// Cashier pages, the poker button and Career's Rewards card (RiverLineSites.cpp, ui-laptop).
+	void VideoApp(double Now);
+	void AutoPanel(const Rect& R, double Now);
+	void AutoStrip(const Rect& R, double Now);
+	void SkipCard(const Rect& R, double Now);
+	void SitePromotions(double Now);
+	void SiteCashier(double Now);
+	void PokerButton(const Rect& R, double Now);
+	void RewardsCard(const Rect& R, double Now);
 
 	float GradeLabel(Grade G, const std::string& Rest, float X, float Y, const TextStyle& Style, bool Draw = true);
 	float ArrowText(const std::string& Left, const std::string& Right, float X, float Y, const TextStyle& Style);

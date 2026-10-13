@@ -1,0 +1,91 @@
+shortstack.nightone.v2
+bankroll	137912
+name	grinder_3c
+hero	name	Jesse	Cole
+hero	age	24
+hero	country	US
+hero	background	dealerskid
+hero	look	body	0	face	0	skin	3	eyes	1	brows	1	hair	3	haircolor	1	facialhair	1	build	1	height	178	outfit	0	outfitcolor	0	glasses	0	hat	0
+hero	created	1
+clock	3512.13
+life	energy	90.00
+life	heat	0.00
+life	needs	10.00	10.00
+pantry	oodle-cup	2
+life	drop	0	-1000000000.00
+life	rent	0	122500	7200.00	0
+life	evicted	0	0.00	0	0.00	0
+life	debt	0
+life	ban	0.00
+life	count	0	0	0	0	0
+life	earned	0	0
+life	backroom	0	0
+life	live	0	0	0	0
+unlock	bounty
+night	1
+night	2
+night	3
+ledger	4080.00	5	-8900	GearDrop: 32 GB RAM kit
+ledger	4080.00	5	-3900	GearDrop: 720p webcam
+ledger	4110.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	4170.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	4226.70	0	50	Prize: $0.25 Hyper Sprint
+ledger	4230.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	4232.12	6	500	Kast payout
+text	dee-bubble
+text	dee-itm
+text	first-cash
+text	gear-can-stream
+text	gear-first-stream
+text	kast-first
+text	marcus-intro
+text	needs:hungry:2
+text	rent-thursday
+text	sam-intro
+gear	ram-32	0.00
+gear	webcam-720	0.00
+leds	0	1	1
+kast	ch	0	2402	0.0291	152.12	2931.4	20	1	0	0	1000	4952.13	0	0
+kast	earn	0	0	500	0	0	0	500
+kast	clip	4172.10	14.5	48.0	12	dee_spincycle	three big blinds to a min-cash. we take those
+kast	log	4080.00	152.12	19	20	0	0	500	Grinding the micros to make rent · !rent	0	0
+kast	mem	dee_spincycle	0.8742	0.9500	4080.00	4232.12	1	128.9	196	3	0
+kast	mem	mei_ng	0.6972	0.8500	4080.00	4080.00	0	0.0	0	3	0
+kast	growth	0	1260	185.5	0	0	0	1	152.1	0	0	0	3	0
+kast	day	2
+result	$0.25 Hyper Sprint	178	180	0	100.000	25	hyper-sprint@4230
+result	$0.25 Hyper Sprint	23	180	50	100.000	25	hyper-sprint@4170
+result	$0.25 Hyper Sprint	66	180	0	100.000	25	hyper-sprint@4110
+closet	seeded
+closet	own	bottom.jeans.mid
+closet	own	bottom.shorts.khaki
+closet	own	outer.hoodie.charcoal
+closet	own	shoes.sneakers.white
+closet	own	top.tee.white
+closet	wear	1	outer.hoodie.charcoal
+closet	wear	2	bottom.jeans.mid
+closet	wear	3	shoes.sneakers.white
+fit	0.0000	-1000000000.00	0	0	0.00	4952.13
+groom	-8513.00	-8513.00	0
+pawn	next	412
+meal	0.00	-1000000000.00
+coach	tally	0	29	0	0	29	0	0
+coach	tally	1	7	0	0	7	0	0
+coach	tally	3	18	0	0	18	0	0
+coach	tally	4	6	0	0	6	0	0
+coach	tally	5	12	0	0	12	0	0
+coach	tally	6	1	0	0	1	0	0
+coach	tally	7	8	0	0	8	0	0
+coach	tally	8	8	0	0	8	0	0
+coach	tally	9	1	0	0	1	0	0
+coach	tally	10	1	0	0	1	0	0
+sponsor	book	4080.00	0	0
+sponsor	deal	voltrush@2	voltrush	2	0	4080.00	14160.00	4080.00	133680.00	0	0	0	0.00	0	0	1	-1000000000.00	0	0	0.00	0	0	0.00	-1	0		0	0	
+sponsor	terms	voltrush@2	days=90	sign=0	mo=15000	hr=0	rd=0	ft=5000	ti=0	ce=0	cc=0	fa=0	cut=0	ex=1	cond=1	cure=14	pt=0	tc=0	ask=0,0,0,3,0,0,0,0	wants=2	ev=	perk=1.volt-rush.12.0.7
+sponsor	deal	halo@2	halo	0	0	4080.00	14160.00	0.00	0.00	0	0	0	0.00	0	0	1	-1000000000.00	0	0	0.00	0	0	0.00	-1	0		0	0	
+sponsor	terms	halo@2	days=60	sign=0	mo=0	hr=200	rd=0	ft=0	ti=0	ce=0	cc=0	fa=0	cut=0	ex=0	cond=1	cure=14	pt=0	tc=0	ask=15,0,0,0,0,0,0,0	wants=3	ev=	perk=3.camera.1.0.0
+sponsor	patch	2	voltrush
+badge	review	24321	0
+mail	4080.00	voltrush@2	sponsor	1	0	Dana Kell	Volt Rush wants your cap.	People in the room know your name now. We keep an eye on who's grinding at three in the morning, and you keep showing up. Volt Rush wants its cap on you at the live tables: a monthly check, a case every Monday, and a bonus for every final table you make in it. Details are below. Take a look and tell me what you think.
+mail	4080.00	voltrush@2	sponsor	2	0	Dana Kell	Volt Rush: welcome aboard.	Welcome to Volt Rush. Your first case lands Monday. Sew the patch on your cap before your next live event. We pay at the end of each month, for the month you just did.
+mail	4080.00	halo@2	sponsor	1	0	Halo Creators	A camera, on us.	Your channel's up to 2,400 followers, and they stay. Halo builds cameras for people who stream from a desk at two in the morning. We'd like to send you the next one up, put our mark on your overlay, and pay a little for every hour you're live with it. Sixty days. Details below.

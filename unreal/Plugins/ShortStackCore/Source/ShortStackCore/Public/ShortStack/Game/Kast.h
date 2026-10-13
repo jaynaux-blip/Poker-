@@ -143,6 +143,8 @@ struct Clip
 	double Views = 0.0;
 	double Reach = 0.0; // the views it will settle at
 	int Kind = 0;       // the Moment it caught
+	/** Update 2: the Rerun candidate cut from this clip's moment (kast\tclip's 9th field, written only when set). */
+	std::string Candidate;
 };
 
 struct StreamLog
@@ -465,6 +467,26 @@ struct Inputs
 	gear::Effects Gear;
 	/** The sponsor book's deals Kast works on (Session::SponsorStream: sponsor::StreamView). */
 	std::vector<Deal> Deals;
+	/** Update 2 (core-econ): Rerun's recent views raising the stream's strangers (§4.7), and the watch speed (§1.5: 4x
+	 *  thins the strangers; 8x and a skip count as Sprinting). */
+	double VideoBuzz = 0;
+	int WatchSpeed = 1;
+};
+
+/**
+ * One moment of a stream as it happened (update 2 §4.4): what Rerun's candidates keep of the stream around a hand (the
+ * viewers, the hype after it, the face, a few chat lines, the clip if someone made one). Kept on the Stream, not saved.
+ */
+struct MomentNote
+{
+	Moment Kind = Moment::Register;
+	double World = 0, Real = 0;
+	int Viewers = 0;
+	double HypeAfter = 0;
+	Mood Face = Mood::Focus;
+	std::vector<std::string> Chat;
+	std::string Candidate;
+	double ClipAt = -1;
 };
 
 /** How a stream went (the card when it ends). */
@@ -532,6 +554,11 @@ public:
 	/** The deals as Kast left them after its last call (Tick, SponsorRead): the session hands them back to the sponsor book
 	 *  (sponsor::AbsorbStream) and clears them. Not saved. */
 	std::vector<Deal> Deals;
+	/**
+	 * Update 2 (§4.4; core-econ keeps it): tonight's moments as they happened, at most 60, for Rerun's candidates. Not
+	 * saved. (Named Moments: Tonight is the summary's.)
+	 */
+	std::vector<MomentNote> Moments;
 	Mood Face = Mood::Focus;
 	double FaceAt = 0.0;
 	double AdUntil = -1.0; // real seconds

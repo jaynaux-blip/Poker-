@@ -7,6 +7,7 @@
 //   badges_test            the checks (ctest)
 //   badges_test quick      everything but the 2-year distribution runs
 // Goldens and fixtures are read from SS_TESTS_DIR (unreal/Plugins/ShortStackCore/Tests, set by CMakeLists.txt).
+#include "BadgesSeg.h"
 #include "CopyLint.h"
 #include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Format.h"
@@ -1262,6 +1263,8 @@ int main(int Argc, char** Argv)
 	FreshCareer();
 	OldSaves();
 	Distribution(Quick);
+	// Update 2's per-track additions (update 2 SPEC §6.7; tests/badges_seg_<track>.cpp).
+	SegFresh(Quick);
 	std::printf("badges tests: %.1f s\n", Seconds(Start));
 	if (Failures == 0)
 	{
