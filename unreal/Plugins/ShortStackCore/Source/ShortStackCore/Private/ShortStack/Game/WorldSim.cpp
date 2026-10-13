@@ -1233,6 +1233,7 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 		N.Majors += P.Major ? 1 : 0;
 	}
 	// Their journey: the firsts, and the titles that last.
+	int OnRecord = 0; // every event in their books (a fresh world's breakouts need some, update 2 §3.3 F9)
 	{
 		int Events = 0;
 		int Cashes = 0;
@@ -1245,6 +1246,7 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 			Fts += G.FinalTables;
 			Wins += G.Wins;
 		}
+		OnRecord = Events;
 		const int LiveEvents = N.Totals[static_cast<size_t>(Venue::Live)].Events + N.Totals[static_cast<size_t>(Venue::Underground)].Events;
 		if (Events == 1)
 		{
@@ -1310,9 +1312,13 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 		N.BestEvent = P.Name;
 		N.BestDay = Day;
 	}
-	// Moments: a breakout score, a title.
+	// Moments: a breakout score, a title. A fresh world's books are too thin at first to call anything a breakout or a
+	// first title: a breakout needs 30 events on record, and a first title in the first 60 days needs a major (F9).
+	const bool Blank = W.Began() == Start::Blank;
+	const bool Thin = Blank && OnRecord < 30;
+	const bool Early = Blank && Day - BooksOpened(W) < 60;
 	const Chips Abi = std::max<Chips>(25, Sim::Comfort(N));
-	if (Prize >= 500000 && Prize >= Abi * 150 && Prize >= BestBefore * 3)
+	if (!Thin && Prize >= 500000 && Prize >= Abi * 150 && Prize >= BestBefore * 3)
 	{
 		Sim::SetMood(N, Momentum::Breakout, Day);
 		N.Confidence = sim::Clampf(static_cast<double>(N.Confidence) + 0.4, -1.0, 1.0);
@@ -1323,7 +1329,7 @@ void Sim::Apply(World& W, Npc& N, const Pending& P, const Entry& E, int Place, C
 		Sim::SetMood(N, Momentum::Confident, Day);
 		N.Confidence = sim::Clampf(static_cast<double>(N.Confidence) + 0.25, -1.0, 1.0);
 	}
-	if (Win && L.Wins == 1 && (P.Major || Prize >= 1000000))
+	if (Win && L.Wins == 1 && (P.Major || (Prize >= 1000000 && !Early)))
 	{
 		Sim::Post(W, P.End, EventKind::Milestone, N.Id, "first-title", Prize, Place);
 	}
@@ -1624,6 +1630,11 @@ void Sim::Resolve(World& W, Pending& P)
 		H.At = P.End;
 		W.Titles.push_back(H);
 	}
+	// A fresh world's first weeks: the first title of each event family in the new books (update 2 §3.3 F9).
+	if (W.Began() == Start::Blank && !Res.FinalTable.empty())
+	{
+		FirstWinner(W, P, Winner, Winner == -1 ? P.HeroPrize : Res.FinalTable.front().Prize);
+	}
 	if (P.Major)
 	{
 		for (const net::Placing& Pc : Res.FinalTable)
@@ -1671,29 +1682,36 @@ void Sim::RefreshField(World& W)
 	}
 }
 
+std::vector<int> Sim::BoardRanks(const World& W, net::Board B, double At)
+{
+	const size_t N = W.Roster.size();
+	std::vector<double> V(N, 0.0);
+	for (size_t I = 0; I < N; ++I)
+	{
+		V[I] = W.BoardValue(B, static_cast<int>(I), At);
+	}
+	std::vector<int> Order(N);
+	for (size_t I = 0; I < N; ++I)
+	{
+		Order[I] = static_cast<int>(I);
+	}
+	std::stable_sort(Order.begin(), Order.end(), [&](int A, int C) { return V[static_cast<size_t>(A)] > V[static_cast<size_t>(C)]; });
+	std::vector<int> Rk(N, 0);
+	for (size_t K = 0; K < N; ++K)
+	{
+		// Nothing on the board is no rank at all (update 2 §3.6): a row that gets on it tomorrow reads NEW, not "+1,499".
+		const size_t I = static_cast<size_t>(Order[K]);
+		Rk[I] = V[I] > 0.0 ? static_cast<int>(K) + 1 : 0;
+	}
+	return Rk;
+}
+
 void Sim::Ranks(World& W)
 {
 	static const net::Board Boards[] = {net::Board::Earnings, net::Board::Season, net::Board::Wins, net::Board::FinalTables, net::Board::Series, net::Board::Live};
-	const size_t N = W.Roster.size();
 	for (net::Board B : Boards)
 	{
-		std::vector<double> V(N, 0.0);
-		for (size_t I = 0; I < N; ++I)
-		{
-			V[I] = W.BoardValue(B, static_cast<int>(I), W.Now);
-		}
-		std::vector<int> Order(N);
-		for (size_t I = 0; I < N; ++I)
-		{
-			Order[I] = static_cast<int>(I);
-		}
-		std::stable_sort(Order.begin(), Order.end(), [&](int A, int C) { return V[static_cast<size_t>(A)] > V[static_cast<size_t>(C)]; });
-		std::vector<int>& Rk = W.RanksYesterday[static_cast<size_t>(B)];
-		Rk.assign(N, 0);
-		for (size_t K = 0; K < N; ++K)
-		{
-			Rk[static_cast<size_t>(Order[K])] = static_cast<int>(K) + 1;
-		}
+		W.RanksYesterday[static_cast<size_t>(B)] = BoardRanks(W, B, W.Now);
 	}
 }
 
@@ -2419,13 +2437,29 @@ void Sim::TeamRiverLine(World& W, int Day)
 		}
 		Pros += N.Pro ? 1 : 0;
 	}
+	// A fresh world's team starts empty and signs its first class on the 1st after the world's first month (Nov 1 for a
+	// career begun on Night One; the next 1st when nobody has results yet), and only players with results: fame alone
+	// (a big Kast audience) doesn't sign anyone (update 2 §3.3 F3).
+	const bool Blank = W.Began() == Start::Blank;
+	if (Blank && sim::MonthKey(Day) <= sim::MonthKey(BooksOpened(W)))
+	{
+		return;
+	}
+	// (A fresh world's first class is the first time the team signs anyone, on Nov 1 or Dec 1: the headlines say so. Looked
+	// for in the first four months only, while the log a save keeps still holds the day.)
+	const double At = static_cast<double>(Day) * 1440.0;
+	const bool FirstClass = Blank && Day - BooksOpened(W) < 120 && std::none_of(W.Log.begin(), W.Log.end(), [&](const WorldEvent& E) {
+		return E.Kind == EventKind::Sponsored && E.What == "Team RiverLine" && E.At < At;
+	});
+	// (Where everyone stands on the Season board as the 1st begins: from what's saved, so a loaded world signs the same.)
+	const std::vector<int> SeasonRank = Blank ? BoardRanks(W, net::Board::Season, At) : std::vector<int>();
 	// The site signs the best-known professional it doesn't already have.
 	while (Pros < 10)
 	{
 		int Best = -1;
 		for (const Npc& N : W.Roster)
 		{
-			if (!N.Pro && N.Playing() && N.Professional && N.Sponsor.empty() && N.RepOf(Rep::Overall) >= 35.0f &&
+			if (!N.Pro && N.Playing() && N.Professional && N.Sponsor.empty() && N.RepOf(Rep::Overall) >= 35.0f && (!Blank || SignsOnResults(N, SeasonRank)) &&
 				(Best < 0 || N.RepOf(Rep::Overall) > W.Roster[static_cast<size_t>(Best)].RepOf(Rep::Overall)))
 			{
 				Best = N.Id;
@@ -2440,9 +2474,28 @@ void Sim::TeamRiverLine(World& W, int Day)
 		N.Sponsor = "Team RiverLine";
 		N.Income += TeamWeekly();
 		++Pros;
-		Sim::Post(W, static_cast<double>(Day) * 1440.0, EventKind::Sponsored, N.Id, "Team RiverLine", 0, 0);
+		Sim::Post(W, At, EventKind::Sponsored, N.Id, "Team RiverLine", 0, 0);
+		if (Blank)
+		{
+			// What they signed on (the headline says so): final tables on record, and where they stood on the Season board
+			// (packed in Value: the news reads Amount as money).
+			const int Rank = static_cast<size_t>(N.Id) < SeasonRank.size() ? SeasonRank[static_cast<size_t>(N.Id)] : 0;
+			const int Fts = std::min(N.Totals[static_cast<size_t>(Venue::Online)].FinalTables, 1000000);
+			W.Log.back().Value = (Rank >= 1 && Rank <= 100 ? Rank : 0) + SigningFinalTables * Fts;
+			W.Log.back().Flags |= FirstClass ? FlagFirst : 0;
+		}
 		W.Refresh(N.Id);
 	}
+}
+
+bool Sim::SignsOnResults(const Npc& N, const std::vector<int>& SeasonRank)
+{
+	if (N.Totals[static_cast<size_t>(Venue::Online)].FinalTables >= 1)
+	{
+		return true;
+	}
+	const int Rank = static_cast<size_t>(N.Id) < SeasonRank.size() ? SeasonRank[static_cast<size_t>(N.Id)] : 0;
+	return Rank >= 1 && Rank <= 100;
 }
 
 namespace worldsim_detail
@@ -2664,6 +2717,8 @@ void Sim::NewDay(World& W, int Day)
 	{
 		It = Now - It->second.At >= sim::KeepResults ? W.Cancelled.erase(It) : std::next(It);
 	}
+	// A fresh world's board report reads yesterday's ranks against today's, so it goes before they move.
+	BoardReport(W, Day);
 	Ranks(W);
 }
 
@@ -3158,6 +3213,124 @@ void Sim::SeedChampions(World& W)
 			SeedStats(N);
 		}
 	}
+}
+
+// ------------------------------------------------------------------ a fresh world's first weeks (update 2 §3.3 F9)
+
+namespace worldsim_detail
+{
+/**
+ * An event's family in the record books ("" for none): an online series by its name, a recurring online event by its
+ * name whatever the buy-in ("Night Owl Turbo"), a live festival by its name, the Embercrest's own events by theirs.
+ * Satellites (a seat isn't a title), the back rooms and other towns' weeklies have none.
+ */
+std::string BooksFamily(const Pending& P)
+{
+	if (Has(P.Kinds, KindUnderground) || Has(P.Kinds, KindSatellite))
+	{
+		return "";
+	}
+	if (P.Online)
+	{
+		const net::Network& Net = net::Shared();
+		if (P.Template < 0 || static_cast<size_t>(P.Template) >= Net.Templates().size())
+		{
+			return "";
+		}
+		const net::EventTemplate& T = Net.Templates()[static_cast<size_t>(P.Template)];
+		if (T.Fmt == net::Format::Satellite)
+		{
+			return "";
+		}
+		if (!T.Series.empty())
+		{
+			const net::SeriesInfo* Sr = Net.FindSeries(T.Series);
+			return Sr ? Sr->Name : std::string();
+		}
+		return T.Name;
+	}
+	if (!P.Series.empty())
+	{
+		return P.Series;
+	}
+	if (!live::IsEmbercrest(P.Id))
+	{
+		return "";
+	}
+	// "Embercrest Nightly $120" -> "Embercrest Nightly"; "Midnight Turbo $60" -> "Embercrest Midnight Turbo".
+	const size_t Price = P.Name.rfind(" $");
+	const std::string Name = Price == std::string::npos ? P.Name : P.Name.substr(0, Price);
+	return Name.find("Embercrest") == std::string::npos ? "Embercrest " + Name : Name;
+}
+} // namespace worldsim_detail
+
+void Sim::FirstWinner(World& W, const Pending& P, int Winner, Chips Prize)
+{
+	if (W.Began() != Start::Blank || sim::DayAt(P.End) - BooksOpened(W) >= FirstWinnerDays)
+	{
+		return;
+	}
+	const std::string Family = BooksFamily(P);
+	if (Family.empty() || std::any_of(W.Log.begin(), W.Log.end(), [&](const WorldEvent& E) { return E.Kind == EventKind::FirstWinner && E.What == Family; }))
+	{
+		return;
+	}
+	// A name the world doesn't follow is kept as -2: the family has had its first, and no headline names a stranger.
+	const int Who = Winner >= -1 ? Winner : -2;
+	Post(W, P.End, EventKind::FirstWinner, Who, Family, Prize, P.Entries);
+	W.Log.back().Flags |= (P.Online ? 0 : FlagLive) | (Who == -1 ? FlagHero : 0) | (Who == -2 ? FlagUnknown : 0);
+}
+
+void Sim::BoardReport(World& W, int Day)
+{
+	// The first seven mornings, then the Mondays to the end of week four.
+	const int K = Day - BooksOpened(W);
+	if (W.Began() != Start::Blank || K < 1 || K > 28 || (K > 7 && net::Weekday(Day) != 0))
+	{
+		return;
+	}
+	const double At = static_cast<double>(Day) * 1440.0;
+	const std::vector<int> Now = BoardRanks(W, net::Board::Season, At);
+	// The leader (the player too, when they're on top).
+	int Leader = -2;
+	double Top = 0.0;
+	for (size_t I = 0; I < Now.size(); ++I)
+	{
+		if (Now[I] == 1)
+		{
+			Leader = static_cast<int>(I);
+			Top = W.BoardValue(net::Board::Season, Leader, At);
+		}
+	}
+	if (W.HeroPoints > Top && W.HeroPoints > 0.0)
+	{
+		Leader = -1;
+		Top = W.HeroPoints;
+	}
+	if (Leader == -2 || Top <= 0.0)
+	{
+		return;
+	}
+	// The biggest riser since yesterday's ranks: places climbed by someone who was on the board then (a first night has
+	// none: everyone on it is new) and is on the rows the board shows now (BoardReportRows: a reader can find them there).
+	const std::vector<int>& Before = W.RanksYesterday[static_cast<size_t>(net::Board::Season)];
+	int Riser = -1;
+	int Climb = 0;
+	int Rank = 0;
+	for (size_t I = 0; I < Now.size() && I < Before.size(); ++I)
+	{
+		const int Up = Before[I] > 0 && Now[I] > 0 && Now[I] <= BoardReportRows ? Before[I] - Now[I] : 0;
+		if (static_cast<int>(I) != Leader && Up > 0 && (Up > Climb || (Up == Climb && Now[I] < Rank)))
+		{
+			Riser = static_cast<int>(I);
+			Climb = Up;
+			Rank = Now[I];
+		}
+	}
+	// What: "day,rank,climb" (the report's day from the books' first, the riser's rank now and the places climbed); Value
+	// the leader's points. Amount stays 0: the news and the ticker read it as money.
+	Post(W, At, EventKind::BoardReport, Leader, std::to_string(K) + "," + std::to_string(Rank) + "," + std::to_string(Climb), 0, static_cast<int>(std::lround(Top)), Riser);
+	W.Log.back().Flags |= Leader == -1 ? FlagHero : 0;
 }
 } // namespace world
 } // namespace ss

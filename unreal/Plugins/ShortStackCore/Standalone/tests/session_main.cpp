@@ -3738,7 +3738,9 @@ void MigrationAll()
 		Expect(D.History.size() == 100 && D.Life.LiveWins >= 1 && !D.Life.LiveDays.empty() && D.Life.VerifiedHeld && Club && Verified,
 			"migration: the veteran's hundred results, a title on the wall, the live days, the club card and Verified");
 	}
-	// The world's own lines (version 2): read, written back byte for byte, a second read the same.
+	// The world's own lines (version 2): read and written back, a second read the same. At version 2 byte for byte; from
+	// version 3 (update 2 G1, §6.5) the same text but the head, which moves to the new version and gains Start (0,
+	// Established) after HeroCardPrev: nothing else in an old world changes.
 	{
 		const std::string Text = seams::Fixture("world_v2.txt");
 		auto ReadWorld = [](const std::string& T, ss::world::World& W) {
@@ -3764,12 +3766,24 @@ void MigrationAll()
 			}
 			W.Finish();
 		};
+		std::string Expected = Text;
+		const size_t HeadEnd = Text.find('\n');
+		const std::string V2 = "world\thead\t2";
+		if (ss::world::Version >= 3 && HeadEnd != std::string::npos && Text.rfind(V2 + "\t", 0) == 0)
+		{
+			Expected = "world\thead\t" + std::to_string(ss::world::Version) + Text.substr(V2.size(), HeadEnd - V2.size()) + "\t0" + Text.substr(HeadEnd);
+		}
 		ss::world::World W;
 		ReadWorld(Text, W);
 		std::string Again;
 		W.Write(Again);
-		Expect(W.Ready() && Text.rfind("world\thead\t2\t", 0) == 0 && Again == Text && W.Began() == ss::world::Start::Established,
-			"migration: world_v2.txt reads and writes back byte for byte, an established world");
+		ss::world::World Second;
+		ReadWorld(Again, Second);
+		std::string Third;
+		Second.Write(Third);
+		Expect(W.Ready() && Text.rfind(V2 + "\t", 0) == 0 && Again == Expected && Third == Again && W.Began() == ss::world::Start::Established &&
+				   Second.Began() == ss::world::Start::Established,
+			"migration: world_v2.txt reads and writes back as it was (from version 3, but the head's version and Start), an established world");
 	}
 }
 } // namespace session_test

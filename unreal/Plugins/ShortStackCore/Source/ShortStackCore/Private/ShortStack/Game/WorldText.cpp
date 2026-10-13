@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <sstream>
 
@@ -301,15 +302,23 @@ Profile World::ProfileOf(int Id) const
 	{
 		Profile::Moment Start;
 		Start.Day = N.Joined;
+		// A fresh start's books opened on its first night (update 2 §3.3 F4): nobody's card claims years it has no record of.
+		const bool Fresh = Mode == world::Start::Blank;
 		switch (N.From)
 		{
 		case Origin::Cast: Pr.Came = "One of the faces at the Embercrest and Dee's Tuesday game."; break;
-		case Origin::Local: Pr.Came = "A regular in the Embercrest's card room since " + std::to_string(Pr.Since) + "."; break;
-		case Origin::Directory: Pr.Came = "Streaming poker on Kast since " + std::to_string(Pr.Since) + "."; break;
+		case Origin::Local:
+			Pr.Came = Fresh ? std::string("One of the Embercrest card room's regulars since the first night.") : "A regular in the Embercrest's card room since " + std::to_string(Pr.Since) + ".";
+			break;
+		case Origin::Directory:
+			Pr.Came = Fresh ? std::string("A name on Kast long before RiverLine's record books opened.") : "Streaming poker on Kast since " + std::to_string(Pr.Since) + ".";
+			break;
 		case Origin::Discovered: Pr.Came = "Nobody was following them until " + (N.BestEvent.empty() ? std::string("one big night") : "the " + N.BestEvent) + "."; break;
-		default: Pr.Came = "On the scene since " + std::to_string(Pr.Since) + ": one of RiverLine's regulars."; break;
+		default:
+			Pr.Came = Fresh ? std::string("One of RiverLine's regulars since the first night.") : "On the scene since " + std::to_string(Pr.Since) + ": one of RiverLine's regulars.";
+			break;
 		}
-		Start.Text = "Playing since " + std::to_string(Pr.Since) + ".";
+		Start.Text = Fresh ? std::string("On the books since the first night.") : "Playing since " + std::to_string(Pr.Since) + ".";
 		Pr.Journey.push_back(Start);
 	}
 	for (const Step& S : N.Path)
@@ -325,6 +334,41 @@ Profile World::ProfileOf(int Id) const
 
 bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body, std::string& Tag) const
 {
+	// A fresh start's books (update 2 §3.3 F9): every line names a result that happened in this world, and nothing older.
+	const bool Fresh = Mode == Start::Blank;
+	const std::string Opened = net::DateLabel(Sim::BooksOpened(*this));
+	if (E.Kind == EventKind::FirstWinner || E.Kind == EventKind::BoardReport)
+	{
+		// Someone the world follows, or the player; a stranger's first stays in the books without a headline.
+		const Npc* P = Get(E.Npc);
+		const std::string Name = P ? P->Name : E.Npc == -1 ? HeroName : std::string();
+		if (Name.empty())
+		{
+			return false;
+		}
+		if (E.Kind == EventKind::FirstWinner)
+		{
+			Title = "The first " + E.What + " title in the record books goes to " + Name;
+			Body = Grouped(E.Value) + " entries \xC2\xB7 " + Money(E.Amount) + " to the winner. The books opened on " + Opened + ".";
+			Tag = "FIRST WINNER";
+			return true;
+		}
+		// The board report: What is "day,rank,climb" (the report's day from the books' first, the riser's rank now and the
+		// places climbed; never in Amount, which the news reads as money).
+		const size_t Comma = E.What.find(',');
+		const size_t Comma2 = Comma == std::string::npos ? std::string::npos : E.What.find(',', Comma + 1);
+		const int Since = std::atoi(E.What.c_str());
+		const int Rank = Comma == std::string::npos ? 0 : std::atoi(E.What.c_str() + Comma + 1);
+		const int Climb = Comma2 == std::string::npos ? 0 : std::atoi(E.What.c_str() + Comma2 + 1);
+		const std::string When = Since >= 1 && Since < 7 ? "Night " + Count(Since) : "Week " + Count(std::max(1, (Since + 6) / 7));
+		Title = When + " on the books: " + Name + " tops the Season board with " + Grouped(E.Value) + (E.Value == 1 ? " point" : " points");
+		const Npc* Riser = Get(E.Other);
+		Body = Riser && Climb > 0 && Rank > 0
+			? Riser->Name + " climbs " + Grouped(Climb) + (Climb == 1 ? " place" : " places") + " to No. " + Grouped(Rank) + "."
+			: "The record books opened on " + Opened + ". Every final table since counts toward Player of the Year.";
+		Tag = "BOARD REPORT";
+		return true;
+	}
 	const Npc* N = Get(E.Npc);
 	if (!N)
 	{
@@ -353,7 +397,7 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		}
 		if ((E.Flags & FlagFirst) != 0)
 		{
-			Body += " A first title.";
+			Body += Fresh ? " Their first title in the record books." : " A first title.";
 		}
 		Tag = E.Kind == EventKind::Champion ? "CHAMPION" : Live ? "LIVE" : "BIG WIN";
 		return true;
@@ -371,7 +415,7 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		return true;
 	case EventKind::Breakout:
 		Title = Who + "'s breakout";
-		Body = Money(E.Amount) + " for " + Ordinal(E.Value) + " in " + E.What + ": the score of a career so far.";
+		Body = Money(E.Amount) + " for " + Ordinal(E.Value) + " in " + E.What + (Fresh ? ": the biggest score in their books so far." : ": the score of a career so far.");
 		Tag = "BREAKOUT";
 		return true;
 	case EventKind::Qualified:
@@ -403,7 +447,8 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		return true;
 	case EventKind::Retired:
 		Title = Who + " retires";
-		Body = "After " + std::to_string(std::max(1, (Day - N->Joined) / 365)) + " years and " + Short(E.Amount) + " in winnings, " + Who + " steps away from the game.";
+		Body = Fresh ? (E.Amount > 0 ? Who + " steps away from the game with " + Short(E.Amount) + " in winnings since the record books opened." : Who + " steps away from the game.")
+					 : "After " + std::to_string(std::max(1, (Day - N->Joined) / 365)) + " years and " + Short(E.Amount) + " in winnings, " + Who + " steps away from the game.";
 		Tag = "RETIRED";
 		return true;
 	case EventKind::Returned:
@@ -425,17 +470,34 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 	case EventKind::Sponsored:
 		Title = Who + " joins " + E.What;
 		Body = E.What == "Team RiverLine" ? "The site's newest sponsored pro." : "A sponsorship deal for the Kast channel.";
+		if (Fresh && E.What == "Team RiverLine")
+		{
+			// A fresh world's team signs on results (update 2 §3.3 F3), and its first class is news of its own.
+			// (Value packs the Season rank and the final tables at the signing: Sim::SigningFinalTables.)
+			const int Fts = E.Value / Sim::SigningFinalTables;
+			const int Rank = E.Value % Sim::SigningFinalTables;
+			std::string Why;
+			if (Fts > 0)
+			{
+				Why = Fts == 1 ? std::string("a final table on record") : Grouped(Fts) + " final tables on record";
+			}
+			if (Rank >= 1 && Rank <= 100)
+			{
+				Why += (Why.empty() ? "" : " and ") + std::string("No. ") + Grouped(Rank) + " on the Season board";
+			}
+			Body = std::string((E.Flags & FlagFirst) != 0 ? "One of the site's first team pros" : "The site's newest sponsored pro") + (Why.empty() ? "." : ", signed on results: " + Why + ".");
+		}
 		Tag = "SPONSOR";
 		return true;
 	case EventKind::Milestone:
 		if (E.What == "career-won")
 		{
-			Title = Who + " passes " + Short(E.Amount) + " in career winnings";
-			Body = "A milestone few reach.";
+			Title = Fresh ? Who + " passes " + Short(E.Amount) + " in winnings on the books" : Who + " passes " + Short(E.Amount) + " in career winnings";
+			Body = Fresh ? "Since the record books opened on " + Opened + ". A milestone few reach." : "A milestone few reach.";
 		}
 		else if (E.What == "first-title")
 		{
-			Title = Who + " wins a first major title";
+			Title = Fresh ? Who + " wins a first major title in the new record books" : Who + " wins a first major title";
 			Body = Money(E.Amount) + ".";
 		}
 		else if (E.What == "turned-pro")
@@ -479,7 +541,8 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		return true;
 	case EventKind::PlayerOfYear:
 		Title = Who + " is " + E.What + " " + std::to_string(YearOf(Day));
-		Body = Grouped(E.Value) + " points.";
+		// (A fresh world's first season began with its books: "2026 · from Oct 6", F6.)
+		Body = Fresh && YearOf(Day) == YearOf(Sim::BooksOpened(*this)) ? Grouped(E.Value) + " points since the record books opened on " + Opened + "." : Grouped(E.Value) + " points.";
 		Tag = "PLAYER OF THE YEAR";
 		return true;
 	case EventKind::HallOfFame:

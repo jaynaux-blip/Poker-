@@ -1,15 +1,18 @@
 #include "ShortStack/AI/Style.h"
+#include "../StrictFloat.h"
 
-#include "ModelDetail.h"
+#include "StyleDetail.h"
 
+#include "ShortStack/Equity.h"
 #include "ShortStack/Rng.h"
+#include "ShortStack/Tournament.h"
 
 #include <algorithm>
 
-// Autoplay's styles (update 2 §2.3, §2.4). Phase A, day 1 (the lead): the catalog and its copy, the profiles (§2.4.1),
-// Mix and ThinkSeconds as specified, and Decide as a stub that plays every style's profile through the engine's own
-// decision (Autopilot: today's Sprint exactly). core-styles owns this file from here: the slip, GTO, Exploitative, Push/Fold
-// and ICM Shark land in it and its siblings (StyleGto.cpp, StyleExploit.cpp, StylePushFold.cpp).
+// Autoplay's styles (update 2 §2.3 to §2.5): the catalog and its copy, each style's profile (§2.4.1), Mix, the plan's
+// think time, and Decide: the slip (§2.5), the tilt the style feels, and the dispatch to the modules (StyleGto.cpp,
+// StyleExploit.cpp, StylePushFold.cpp, IcmPlay.cpp). Autopilot is today's Sprint exactly: no slips, tilt 0, the bots'
+// pressure, the same draws (U3: it's the bar). core-styles.
 
 namespace ss
 {
@@ -17,7 +20,7 @@ namespace style
 {
 namespace style_detail
 {
-/** The profile a style is built on, before its own numbers (§2.4.1). */
+/** The archetype a style is built on (§2.4.1). */
 Archetype StyleBase(Style S)
 {
 	switch (S)
@@ -43,6 +46,71 @@ uint64_t StyleSplitMix(uint64_t X)
 
 /** "think" as a Mix salt. */
 constexpr uint32_t StyleThinkSalt = 0x7468696eu;
+
+BotDecision StyleDecideProfile(const HeroContext& C, const Profile& P, double Tilt, Rng& R)
+{
+	BotContext Ctx;
+	Ctx.Prof = &P;
+	Ctx.Tilt = Tilt;
+	Ctx.IcmPressure = C.Pressure;
+	Ctx.Fast = false;
+	Ctx.R = &R;
+	return ss::Decide(C.View, Ctx);
+}
+
+double StyleTiltSeen(const HeroBrain& B, const Profile& P)
+{
+	const double T = B.Tilt * P.TiltProne / 0.35;
+	return T <= 0.0 ? 0.0 : T >= 1.0 ? 1.0 : T;
+}
+
+double StyleTiltWide(double Tilt)
+{
+	return 1.0 + 0.8 * Max(0.0, Tilt);
+}
+
+BotDecision StyleChoice(const PlayerView& V, const PlayerAction& A, double Equity)
+{
+	return bot_detail::MakeChoice(bot_detail::Legalize(V, A), 0.0, Equity);
+}
+
+/**
+ * A decision worth a slip (§2.5): facing a raise or a bet, any decision after the flop, or a pot over 10 big blinds. An
+ * unopened junk fold isn't: the plan never slips there, so the slip rate lands where it costs.
+ */
+bool StyleNonTrivial(const PlayerView& V)
+{
+	if (V.CurrentStreet != Street::Preflop)
+	{
+		return true;
+	}
+	const double Bb = bot_detail::BbOf(V);
+	if (static_cast<double>(V.Pot) > 10.0 * Bb)
+	{
+		return true;
+	}
+	if (PreflopSummary(V).Raises > 0)
+	{
+		return true;
+	}
+	// Unopened: a hand the plan would play (the top half), or a stack short enough that the shove is the decision.
+	const PublicSeat& Me = V.Seats[static_cast<size_t>(V.Me)];
+	const double StackBb = static_cast<double>(Me.Stack + Me.StreetBet) / Bb;
+	return V.Hole.size() == 2 && (HandPercentile(V.Hole[0], V.Hole[1]) <= 0.5 || StackBb <= 15.0);
+}
+
+/** The slip's profile: pushed toward the losing station direction (§2.5). Every style gets worse, the Nit included. */
+Profile StyleSlipped(const Profile& P)
+{
+	Profile S = P;
+	S.Aggression = P.Aggression * 0.5;
+	S.Stickiness = Min(0.95, P.Stickiness + 0.30);
+	S.CallWidth = P.CallWidth * 1.4;
+	S.Bluff = P.Bluff * 0.5;
+	S.PushFold = P.PushFold * 0.5;
+	S.IcmAware = P.IcmAware * 0.3;
+	return S;
+}
 } // namespace style_detail
 
 const std::vector<Info>& Catalog()
@@ -136,31 +204,46 @@ Profile ProfileOf(Style S)
 
 BotDecision Decide(const HeroContext& C, const HeroBrain& B, Rng& R)
 {
-	// Phase A's stub: the style's profile through the engine's own decision, as a bot plays it (no slips, no tilt, no
-	// modules yet). Autopilot is today's Sprint exactly: the same profile, tilt 0, the bots' pressure, the same draws.
+	using namespace style_detail;
+	if (B.S == Style::Autopilot)
+	{
+		// Today's Sprint, exactly: the same profile, tilt 0 (the hero never had one), the bots' pressure, the same draws.
+		const Profile P = ProfileOf(Style::Autopilot);
+		return StyleDecideProfile(C, P, 0.0, R);
+	}
 	const Profile P = ProfileOf(B.S);
-	BotContext Ctx;
-	Ctx.Prof = &P;
-	Ctx.Tilt = 0.0;
-	Ctx.IcmPressure = C.Pressure;
-	Ctx.Fast = false;
-	Ctx.R = &R;
-	return ss::Decide(C.View, Ctx);
+	const double Tilt = StyleTiltSeen(B, P);
+	// The slip (§2.5): drawn with Mix, so the watch and skip paths slip at the same decisions.
+	const double SlipChance = SlipK * (1.0 - Max(0.0, Min(1.0, B.Sharp)));
+	if (SlipChance > 0.0 && StyleNonTrivial(C.View) &&
+		Mix(C.MixSeed, C.Tick, C.HeroIdx, static_cast<int>(C.View.History.size()), SaltSlip) < SlipChance)
+	{
+		return StyleDecideProfile(C, StyleSlipped(P), Tilt, R);
+	}
+	switch (B.S)
+	{
+	case Style::Gto: return StyleGtoDecide(C, B, P, Tilt, R);
+	case Style::Exploit: return StyleExploitDecide(C, B, P, Tilt, R);
+	case Style::PushFold: return StylePushFoldDecide(C, B, P, Tilt, R);
+	case Style::IcmShark: return StyleIcmDecide(C, B, P, Tilt, R);
+	default: return StyleDecideProfile(C, P, Tilt, R); // TAG, LAG, Nit, Maniac, Balanced Reg; Bounty Hunter's profile (P1)
+	}
 }
 
 BotDecision DecideCash(const PlayerView& V, const HeroBrain& B, Rng& R, uint64_t MixSeed, int HandNo)
 {
-	// Phase A's stub: what the style plays as at a cash table, through the engine's own decision.
-	(void)MixSeed;
-	(void)HandNo;
-	const Profile P = ProfileOf(InfoOf(B.S).AtCash);
-	BotContext Ctx;
-	Ctx.Prof = &P;
-	Ctx.Tilt = 0.0;
-	Ctx.IcmPressure = 0.0;
-	Ctx.Fast = false;
-	Ctx.R = &R;
-	return ss::Decide(V, Ctx);
+	// What the style plays as at a cash table (§2.3: Push/Fold as TAG, ICM Shark as Balanced Reg), with no tournament: no
+	// bubble pressure, no payouts. The table's Rng plays the engine's draws; MixSeed and HandNo key the style's own.
+	HeroBrain Cash = B;
+	Cash.S = InfoOf(B.S).AtCash;
+	HeroContext C;
+	C.View = V;
+	C.Pressure = 0.0;
+	C.T = nullptr;
+	C.HeroIdx = V.Me;
+	C.MixSeed = MixSeed;
+	C.Tick = HandNo;
+	return Decide(C, Cash, R);
 }
 
 double Mix(uint64_t Seed, int Tick, int Seat, int Action, uint32_t Salt)
@@ -195,7 +278,48 @@ std::vector<std::string> Inventory()
 		Out.push_back(I.Edge);
 		Out.push_back(I.BestIn);
 	}
+	for (int V = 0; V <= static_cast<int>(Swing::Wild); ++V)
+	{
+		Out.push_back(SwingName(static_cast<Swing>(V)));
+	}
+	for (const Info& I : Catalog())
+	{
+		for (int Where = 0; Where <= 2; ++Where)
+		{
+			const std::string Why = Unavailable(I.S, Where, false);
+			if (!Why.empty() && std::find(Out.begin(), Out.end(), Why) == Out.end())
+			{
+				Out.push_back(Why);
+			}
+		}
+	}
 	return Out;
+}
+
+const char* SwingName(Swing V)
+{
+	switch (V)
+	{
+	case Swing::Steady: return "STEADY";
+	case Swing::Swingy: return "SWINGY";
+	case Swing::Wild: return "WILD";
+	default: return "EVEN";
+	}
+}
+
+std::string Unavailable(Style S, int Where, bool Knockout)
+{
+	// Dee's game: no payouts and a hundred big blinds deep, so the tournament styles play as their cash style (§2.6.3).
+	const Info& I = InfoOf(S);
+	if (I.TourneyOnly && Where == 2)
+	{
+		return std::string("Plays as ") + InfoOf(I.AtCash).Name + " here";
+	}
+	if (I.BountyOnly && !Knockout)
+	{
+		return "Knockout events only";
+	}
+	return std::string();
 }
 } // namespace style
 } // namespace ss

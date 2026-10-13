@@ -1,0 +1,77 @@
+# GTO's preflop charts (update 2 SPEC §2.4.2). Authored by core-styles; tools/chartgen compiles them into
+# Source/ShortStackCore/Private/ShortStack/AI/ChartTables.cpp. Shares are percent of the 1,326 combos, taken from the top
+# of the engine's preflop ranking (PreflopRanking.cpp); a class within 2 points of a boundary mixes both actions.
+# Bands: short (25 BB and under: Push/Fold's Nash charts play first-in jams to 15 BB, so only the 2.0x opens and the
+# re-shove's opener ranges come from here), mid (25 to 40 BB), deep (over 40 BB). Later lines win over earlier ones.
+#
+#   rfi    <pos> <band> <raise%>                                  raise first in, or fold (no limps)
+#   bbvs   <opener> <band> <continue%> <3bet%>                     the big blind against one open
+#   ipvs   <me> <opener> <band> <flat%> <value%> [bluff <range>]  in position against one open: a polarized 3-bet
+#   vs3bet <ip|oop> <band> <value range> <call%> [bluff <range>]  my open was 3-bet: 4-bet to 2.3x, call or fold
+#   vs4bet <band> <jam range> [mix <range> <percent>]             my 3-bet was 4-bet: jam, mix or fold
+
+# Raise first in. Over 40 BB; 25 to 40 is a point tighter in early position; 25 and under (2.0x) a point tighter again.
+rfi UTG deep 14
+rfi UTG1 deep 15.5
+rfi MP deep 18
+rfi LJ deep 21
+rfi HJ deep 26
+rfi CO deep 33
+rfi BTN deep 47
+rfi SB deep 42
+rfi UTG mid 13
+rfi UTG1 mid 14.5
+rfi MP mid 17
+rfi LJ mid 20
+rfi HJ mid 25
+rfi CO mid 33
+rfi BTN mid 47
+rfi SB mid 42
+rfi UTG short 12
+rfi UTG1 short 13.5
+rfi MP short 16
+rfi LJ short 19
+rfi HJ short 24
+rfi CO short 31
+rfi BTN short 44
+rfi SB short 40
+
+# The big blind against one open: wide, as a big-blind-ante structure prices it.
+bbvs UTG * 38 5
+bbvs UTG1 * 40 5
+bbvs MP * 44 6
+bbvs LJ * 47 7
+bbvs HJ * 51 8
+bbvs CO * 56 10
+bbvs BTN * 70 13
+bbvs SB * 66 15
+
+# In position against one open: value 3-bets from the top, bluffs from the suited wheel aces and suited kings; flats below.
+# 3x in position, 3.8x from the small blind, which 3-bets or folds.
+ipvs * * * 6 3 bluff A5s-A2s,K9s-K6s
+ipvs HJ * * 6.5 3 bluff A5s-A2s,K9s-K6s
+ipvs CO UTG * 7 3 bluff A5s-A2s,K9s-K6s
+ipvs CO UTG1 * 7 3 bluff A5s-A2s,K9s-K6s
+ipvs CO MP * 7.5 3 bluff A5s-A2s,K9s-K6s
+ipvs CO LJ * 8 3 bluff A5s-A2s,K9s-K6s
+ipvs CO HJ * 8.5 3 bluff A5s-A2s,K9s-K6s
+ipvs BTN UTG * 9 3 bluff A5s-A2s,K9s-K6s
+ipvs BTN UTG1 * 9 3 bluff A5s-A2s,K9s-K6s
+ipvs BTN MP * 10 3 bluff A5s-A2s,K9s-K6s
+ipvs BTN LJ * 10 3 bluff A5s-A2s,K9s-K6s
+ipvs BTN HJ * 11 3 bluff A5s-A2s,K9s-K6s
+ipvs BTN CO * 12 3 bluff A5s-A2s,K9s-K6s
+ipvs SB UTG * 0 9 bluff A5s-A4s
+ipvs SB UTG1 * 0 9 bluff A5s-A4s
+ipvs SB MP * 0 9.5 bluff A5s-A4s
+ipvs SB LJ * 0 10 bluff A5s-A3s
+ipvs SB HJ * 0 10.5 bluff A5s-A3s
+ipvs SB CO * 0 11 bluff A5s-A2s,K9s-K8s
+ipvs SB BTN * 0 12 bluff A5s-A2s,K9s-K6s
+
+# My open was 3-bet: 4-bet QQ+ and AK for value, A5s and A4s as bluffs; call 8% in position, 4% out of it.
+vs3bet ip * QQ+,AK 8 bluff A5s-A4s
+vs3bet oop * QQ+,AK 4 bluff A5s-A4s
+
+# My 3-bet was 4-bet: jam QQ+ and AK, JJ half the time, fold the rest.
+vs4bet * QQ+,AK mix JJ 50

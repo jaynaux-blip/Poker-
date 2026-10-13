@@ -341,10 +341,12 @@ int World::RankBefore(net::Board B, int Npc) const
 		{
 			Rank += It.second > V ? 1 : 0;
 		}
-		return V > 0.0 ? Rank : static_cast<int>(Roster.size());
+		// Nothing an hour ago is no rank at all (update 2 §3.6): the row reads NEW.
+		return V > 0.0 ? Rank : 0;
 	}
+	// 0: nothing on the board a day ago (Sim::Ranks), or someone who wasn't in the world yet.
 	const std::vector<int>& Rk = RanksYesterday[static_cast<size_t>(B)];
-	return Npc >= 0 && static_cast<size_t>(Npc) < Rk.size() ? Rk[static_cast<size_t>(Npc)] : static_cast<int>(Roster.size());
+	return Npc >= 0 && static_cast<size_t>(Npc) < Rk.size() ? Rk[static_cast<size_t>(Npc)] : 0;
 }
 
 std::vector<int> World::Leaders(Rep R, int Count) const

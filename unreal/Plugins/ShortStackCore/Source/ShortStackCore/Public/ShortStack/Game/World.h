@@ -38,10 +38,11 @@ namespace world
 /**
  * 2: the room records, circuit points and cards, the Verified review, the Hall of Fame, the freeroll count, the money
  * memories (next_segment_spec §5, §7.3). A version 1 world migrates once in Finish (§7.5 step 5).
- * Update 2 keeps 2 through Phase A; core-world bumps it to 3 at G1 (the head's Start) and to 4 at G3 (the NPCs' Sites),
- * each in one commit with its complete migration and the pinned asserts (update 2 §6.5).
+ * 3 (update 2 G1): the head's Start after HeroCardPrev, how the world began (§3.8). A version 2 world has none and reads as
+ * Established; it writes back as version 3 with Start 0 and nothing else changed (Sim::Migrate's From < 3 step).
+ * Update 2 bumps it to 4 at G3 (the NPCs' Sites), in one commit with its complete migration and the pinned asserts (§6.5).
  */
-constexpr int Version = 2;
+constexpr int Version = 3;
 
 /**
  * How a world began (update 2 §3): Established is today's (the network's history, the founders' records); Blank is the
@@ -1029,11 +1030,15 @@ public:
 	const std::vector<Award>& HeroAwards() const { return HeroTrophies; }
 	/** The player's own stats page (their RiverLine tournaments since Night One). */
 	const Tracker& HeroStats() const { return HeroBook; }
-	/** Where a stats page's ROI ranks among the regulars with at least Min tournaments (0..1: the share it beats). */
+	/**
+	 * Where a stats page's ROI ranks among the regulars with at least Min tournaments (0..1: the share it beats), or -1,
+	 * unknown, when fewer than 20 regulars qualify (a fresh world's first months; update 2 bug 6): the readers treat it as
+	 * neutral, never "beats 0%".
+	 */
 	SHORTSTACKCORE_API double RoiRank(double Roi, int Min = 200) const;
 	/**
 	 * Where an ROI places among everyone with Min tournaments (the regulars and the player): 1 + how many have a
-	 * better one. bHero: the player's own page (they aren't counted against themselves).
+	 * better one. bHero: the player's own page (they aren't counted against themselves). -1, unknown, as RoiRank.
 	 */
 	SHORTSTACKCORE_API int RoiPlace(double Roi, bool bHero, int Min = 200) const;
 	/**

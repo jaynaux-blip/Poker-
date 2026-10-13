@@ -1343,6 +1343,9 @@ void ABackRoomTable::EndHand()
 				ShownSeats.insert(ShownSeats.end(), Ev.Seats.begin(), Ev.Seats.end());
 			}
 		}
+		// A hand turned up at the all-in (Reveal) is turned up again at the showdown: one hand shown.
+		std::sort(ShownSeats.begin(), ShownSeats.end());
+		ShownSeats.erase(std::unique(ShownSeats.begin(), ShownSeats.end()), ShownSeats.end());
 		RecallReady = MakeShared<ss::recall::Record>(ss::recall::Of(*Hand, H->HandSeat, Names, ShownSeats, HandNumber, Tourney ? Tourney->LevelIndex + 1 : 0));
 	}
 	for (FSeat& S : Seats)

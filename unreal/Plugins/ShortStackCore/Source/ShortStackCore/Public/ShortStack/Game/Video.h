@@ -233,5 +233,56 @@ SHORTSTACKCORE_API std::vector<std::string> Inventory();
 SHORTSTACKCORE_API void WriteLines(const life::State& L, std::string& Out);
 SHORTSTACKCORE_API bool ReadLine(const std::vector<std::string>& P, life::State& L);
 SHORTSTACKCORE_API void AfterParse(SaveData& D);
+
+// ------------------------------------------------------------------ core-video's additions (G2; append-only, §6.1)
+// What Studio, the Channel page, the card room's host and Kast read beyond the day-1 contract. No struct above changed.
+//
+// Conventions the bodies keep (for ui-video, ue-auto and core-econ):
+//   - A candidate's Rec names the player "You" (the live recall's own convention, BackRoomTable.cpp), so the online
+//     records match the live ones. Storytime records (Dee's) name nobody else: "Seat 1", "Seat 2" by first appearance.
+//   - Candidate::Source: 0 online, 1 the Embercrest, 2 Dee's (storytime), 3 an online hand the plan played while
+//     skipping, 4 a life story (NoteStory). Rival: gh0stfold, or a name the room knows (Rep Overall >= 35).
+//   - DeepRun, FinalTable and Win candidates are the event, not a hand: Rec.Pot is the prize in cents, Rec.HeroNet the
+//     prize less the buy-in, Rec.Mine and Rec.Lines empty.
+//   - Thumb::Mood: a kast::Mood (0..5) for the facecam; 10 + mood for the portrait (live, where nobody films: §4.4).
+//     Thumb::Cards: the player's cards, then '/', the opponent's if they were shown, then '/', the board ("AsAd/7c7h/Kd8s2c").
+
+/** Letters Rerun mails (life::Letter::Kind, Source "video"). */
+enum LetterKind : int
+{
+	LetterReview = 1,    // "Your channel's under review."
+	LetterWelcome = 2,   // the Partner Program welcome
+	LetterStatement = 3, // the monthly statement (paid, or rolled over under $100)
+};
+/** Marks (life::Mark::Kind) Rerun adds to the wall calendar and the second screen. */
+enum MarkKind : int
+{
+	MarkPayout = 40, // "Rerun payout Apr 21"
+	MarkReview = 41, // the review's answer
+};
+/** Studio's PUBLISH: "" when the choice can go up, else why not (a line for the button's tooltip). */
+SHORTSTACKCORE_API std::string CanUpload(const Choice& Ch, const std::vector<Candidate>& Open);
+/** The thumbnail the choice will get (Studio's preview; Upload stores the same). */
+SHORTSTACKCORE_API Thumb ThumbFor(const Choice& Ch, const std::vector<Candidate>& Open);
+/** The candidates a choice names, in the choice's order (the lead first for a Recap). */
+SHORTSTACKCORE_API std::vector<Candidate> Picked(const Choice& Ch, const std::vector<Candidate>& Open);
+/** The edit: world minutes and energy (§4.5's table). */
+SHORTSTACKCORE_API double EditMinutes(Format F);
+SHORTSTACKCORE_API double EditEnergy(Format F);
+/** The kind's topic weight (§4.4), and its label in Studio ("BAD BEAT"). */
+SHORTSTACKCORE_API double KindWeight(Kind K);
+SHORTSTACKCORE_API const char* KindLabel(Kind K);
+SHORTSTACKCORE_API const char* FormatName(Format F);
+SHORTSTACKCORE_API const char* TitleStyleName(TitleStyle T);
+SHORTSTACKCORE_API const char* FrameName(Frame F);
+/** Studio's right-hand column: a line on what each choice does, never a promised number. */
+SHORTSTACKCORE_API std::vector<std::string> Advice(const Choice& Ch, const std::vector<Candidate>& Open);
+/** The channel at World in closed form (the saved numbers are as of the last day stepped). */
+SHORTSTACKCORE_API double SubsAt(const Channel& C, double World);
+SHORTSTACKCORE_API double TotalViews(const Channel& C, double World);
+/** Views in the 48 hours to World: kast::Inputs::VideoBuzz (§4.7). */
+SHORTSTACKCORE_API double Buzz(const Channel& C, double World);
+/** The card room's settle (FAutoHost::OnSettle): a DeepRun, FinalTable or Win candidate for the night, when it was one. */
+SHORTSTACKCORE_API void NoteLiveRecap(life::State& L, const LiveContext& Ctx, int Place, Chips PrizeCents);
 } // namespace video
 } // namespace ss

@@ -249,7 +249,7 @@ void SaveFixtures()
 		Expect(ss::SaveData::Parse(Fixture("pre_segment_evicted.ssave"), D) && D.Life.RentStage == life::Rent::Evicted && D.Life.StorageDue > 0.0 && D.Life.Evictions == 1,
 			"fixtures: the evicted career is still evicted, its gear in storage");
 	}
-	// The world's own lines: a version 1 world reads, migrates once to version 2 (core-world, next_segment_spec §7.5 step 5),
+	// The world's own lines: a version 1 world reads, migrates once to the current version (core-world: 2 at next_segment_spec §7.5 step 5, 3 at update 2 G1),
 	// and the migrated world writes back byte for byte (a second load migrates nothing).
 	auto ReadWorld = [](const std::string& Text, ss::world::World& W) {
 		size_t Start = 0;
@@ -284,8 +284,10 @@ void SaveFixtures()
 		ReadWorld(Again, Second);
 		std::string Third;
 		Second.Write(Third);
-		Expect(W.Ready() && !Text.empty() && Text.rfind("world\thead\t1\t", 0) == 0 && Again.rfind("world\thead\t2\t", 0) == 0 && Third == Again,
-			"fixtures: world_v1.txt reads, migrates once to version 2, and writes back byte for byte");
+		// (Pinned to world::Version: 2 until update 2's G1, 3 from it, update 2 §6.5.)
+		Expect(W.Ready() && !Text.empty() && Text.rfind("world\thead\t1\t", 0) == 0 && Again.rfind("world\thead\t" + std::to_string(ss::world::Version) + "\t", 0) == 0 &&
+				   Third == Again && W.Began() == ss::world::Start::Established,
+			("fixtures: world_v1.txt reads, migrates once to version " + std::to_string(ss::world::Version) + ", and writes back byte for byte").c_str());
 	}
 }
 

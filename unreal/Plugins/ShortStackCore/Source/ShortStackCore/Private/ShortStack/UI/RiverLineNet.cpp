@@ -3267,7 +3267,12 @@ void RiverLine::BoardTable(const Rect& R, const std::vector<net::BoardRow>& Rows
 		UI.RRect(Rr, 8.0f, Hero ? NetA(pal::Accent, 0.14f) : (I % 2 == 0 ? Hex(0x101a2b) : Hex(0x0e1726)), Hero ? NetA(pal::Accent, 0.6f) : Rgba(255, 255, 255, 0.02f));
 		const float Ty = Rr.Y + 25.0f;
 		UI.Text(Grouped(Rw.Rank), Rr.X + 56.0f, Ty, Ts(15.0f, 800, pal::Ink, Align::Right, Baseline::Alphabetic, true));
-		if (Rw.Move != 0 && !Hero)
+		if (Rw.Move == -Rw.Rank && !Hero)
+		{
+			// Nothing on this board at the day's turn (World::RankBefore 0; Move = 0 - Rank): NEW, never "+1,499" (update 2 §3.6).
+			UI.Text("NEW", Rr.X + 74.0f, Ty, Ts(10.5f, 800, pal::Accent, Align::Left, Baseline::Alphabetic, true));
+		}
+		else if (Rw.Move != 0 && !Hero)
 		{
 			const bool Up = Rw.Move > 0;
 			NetTriangle(*C, Rr.X + 80.0f, Ty - 5.0f, 9.0f, Up, Up ? pal::Green : pal::Red);

@@ -1,0 +1,30 @@
+upload	1	v17580	P=367.7	c=0.0057184	r=0.3825	rpm=2.25	E=0	class=0	title=THE CRUELEST RIVER I'VE EVER SEEN	big=81%
+views	1	1	141.537311
+views	1	7	313.809352
+views	1	30	360.154336
+views	1	365	367.7
+upload	2	v17580	P=273.62	c=0.012	r=0.5625	rpm=3	E=0	class=0	title=How to handle a 64 big blind bad beat without tilting	big=81%
+views	2	1	105.323468
+views	2	7	233.517854
+views	2	30	268.004975
+views	2	365	273.62
+upload	3	v17580	P=45.57	c=0.0082225	r=0.45	rpm=2.5	E=0	class=0	title=Is this the worst river in poker?	big=81%
+views	3	1	17.5410804
+views	3	7	38.8911943
+views	3	30	44.6348466
+views	3	365	45.57
+upload	4	v17580	P=842.03	c=0.0116278	r=0.7	rpm=0.075	E=0	class=2	title=$5.50 Night Owl Turbo: AA vs 77, 64 big blind pot	big=81%
+views	4	1	491.964726
+views	4	7	815.117866
+views	4	30	841.462645
+views	4	365	842.03
+upload	5	v17580	P=243.66	c=0.0094559	r=0.495	rpm=2.5	E=0	class=0	title=81% to win, and then a seven on the river	big=81%
+views	5	1	93.7910831
+views	5	7	207.948835
+views	5	30	238.659792
+views	5	365	243.66
+creator	30	subs=25.0105596	views=2312.82363	review=-1	partner=-1	balance=0	paid=0
+creator	90	subs=222.430566	views=21663.3802	review=-1	partner=-1	balance=0	paid=0
+creator	180	subs=2721.49208	views=244232.444	review=218880	partner=228960	balance=5817	paid=0
+creator	365	subs=8260.25024	views=790960.293	review=218880	partner=228960	balance=7227	paid=109775
+creator	400	subs=10270.101	views=988178.961	review=218880	partner=228960	balance=10755	paid=143235

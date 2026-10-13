@@ -365,6 +365,17 @@ void World::Write(std::string& Out) const
 		L << I(Version) << I(WorldSeed) << D(Now) << D(Origin) << I(Planned) << I(Rev) << I(Founding) << I(Week) << I(Month) << I(DiscoveredThisWeek) << I(NextAnon)
 		  << I(Target) << D(HeroPoints) << D(HeroLivePoints) << D(NightKey) << D(NightHour) << Esc(SeriesKey) << Esc(HeroName);
 		L << D(HeroCircuit) << I(HeroCardTop) << I(HeroCardPrev); // version 2
+		// Version 3 (update 2 §3.8): how the world began. Until the version moves to 3, only a fresh start writes it (an
+		// established world's text stays exactly what it was; a head without it reads Established).
+		bool WithStart = Mode != Start::Established;
+		if constexpr (Version >= 3)
+		{
+			WithStart = true;
+		}
+		if (WithStart)
+		{
+			L << I(static_cast<int>(Mode));
+		}
 		Emit(L);
 	}
 	{
@@ -631,6 +642,23 @@ void World::Write(std::string& Out) const
 		}
 		Emit(Line("pairs") << JoinRecords(R));
 	}
+	// A fresh world's first four weeks (update 2 §3.3 F9): the Season board's ranks at the day's turn, which the board report
+	// reads its biggest riser against, so a world loaded in the middle of a day reports the same morning as one that wasn't.
+	const std::vector<int>& Season = RanksYesterday[static_cast<size_t>(net::Board::Season)];
+	if (Mode == Start::Blank && sim::DayAt(Now) - Sim::BooksOpened(*this) <= 28)
+	{
+		std::vector<std::string> R;
+		for (size_t K = 0; K < Season.size(); ++K)
+		{
+			if (Season[K] > 0)
+			{
+				R.push_back(Rec({I(static_cast<long long>(K)), I(Season[K])}));
+			}
+		}
+		// (Written even when nobody had points at the last turn, night one: a world loaded then must not measure the
+		// morning's riser from the minute it was loaded.)
+		Emit(Line("seasonranks") << JoinRecords(R));
+	}
 }
 
 bool World::Read(const std::vector<std::string>& Fields)
@@ -666,10 +694,17 @@ bool World::Read(const std::vector<std::string>& Fields)
 		HeroCircuit = C.Dbl();
 		HeroCardTop = C.Small();
 		HeroCardPrev = C.Small();
+		// Version 3: how the world began (an older head has none: the cursor gives 0, Established; so does anything unknown).
+		Mode = C.Small() == static_cast<int>(Start::Blank) ? Start::Blank : Start::Established;
 		Created = true;
-		// What only a session keeps (who played what lately, who was bumped) starts over with the world it reads.
+		// What only a session keeps (who played what lately, who was bumped) starts over with the world it reads, and so do
+		// the boards' ranks a day ago (Finish works them out; a fresh world's first weeks read the Season's back).
 		Played.clear();
 		Bumps.clear();
+		for (std::vector<int>& Rk : RanksYesterday)
+		{
+			Rk.clear();
+		}
 	}
 	else if (Kind == "field")
 	{
@@ -1113,6 +1148,28 @@ bool World::Read(const std::vector<std::string>& Fields)
 			M[A] = Rc.Dbl();
 		}
 	}
+	else if (Kind == "seasonranks")
+	{
+		// (Finish keeps them for a fresh world's board report: the ranks at the last day's turn, not at the load. Everyone
+		// unlisted had nothing on the board then: rank 0, even when nobody is listed.)
+		std::vector<int>& Season = RanksYesterday[static_cast<size_t>(net::Board::Season)];
+		Season.assign(std::max<size_t>(Roster.size(), 1), 0);
+		for (const std::string& R : Split(C.At < Fields.size() ? Fields[C.At] : std::string(), '|'))
+		{
+			const std::vector<std::string> V = Split(R, '~');
+			Cursor Rc{V, 0};
+			const int Id = Rc.Small();
+			const int Rank = Rc.Small();
+			if (Id >= 0 && Id < 1000000)
+			{
+				if (Season.size() <= static_cast<size_t>(Id))
+				{
+					Season.resize(static_cast<size_t>(Id) + 1, 0);
+				}
+				Season[static_cast<size_t>(Id)] = Rank;
+			}
+		}
+	}
 	return true;
 }
 
@@ -1206,8 +1263,17 @@ void World::Finish()
 		}
 		std::stable_sort(N.Awards.begin(), N.Awards.end(), [](const Award& A, const Award& B) { return A.Day < B.Day; });
 	}
-	// Saves from before the Embercrest had regulars of its own: they join (once; the same people as in a new world).
+	// Saves from before the Embercrest had regulars of its own: they join (once; the same people as in a new world). A fresh
+	// start's books opened without them, so they join it with nothing on record (update 2 §3.7: no history on load).
+	const size_t Known = Roster.size();
 	Sim::RoomLocals(*this, sim::DayAt(Now));
+	if (Mode == Start::Blank)
+	{
+		for (size_t K = Known; K < Roster.size(); ++K)
+		{
+			Sim::WipeRecord(Roster[K], Sim::BooksOpened(*this));
+		}
+	}
 	// An older version: brought up to this one, once (it writes as this version from now on).
 	if (LoadedVersion < Version)
 	{
@@ -1216,20 +1282,35 @@ void World::Finish()
 	}
 	std::stable_sort(Queue.begin(), Queue.end(), [](const Pending& A, const Pending& B) { return A.End < B.End; });
 	RefreshAll();
+	// The boards' ranks a day ago; a fresh world's first weeks keep the Season's from the save (its board report reads them).
+	const std::vector<int> Season = RanksYesterday[static_cast<size_t>(net::Board::Season)];
 	Sim::Ranks(*this);
+	if (Mode == Start::Blank && !Season.empty())
+	{
+		std::vector<int>& Rk = RanksYesterday[static_cast<size_t>(net::Board::Season)];
+		for (size_t K = 0; K < Rk.size(); ++K)
+		{
+			Rk[K] = K < Season.size() ? Season[K] : 0;
+		}
+	}
 }
 
 void Sim::Migrate(World& W, int From)
 {
 	const int Today = sim::DayAt(W.Now);
+	// (Every step that seeds history asks how the world began first: a fresh start has none to seed, update 2 §3.7.)
+	const bool Seeds = W.Began() != Start::Blank;
 	if (From < 2)
 	{
 		// Version 2 (next_segment_spec §7.5 step 5).
 		// The room's records: its regulars', locals' and cast's last months from their habits (no results: the wall only
 		// ever shows what was played). Cards appear at the first standings after load ("Standings post Monday.").
-		SeedRoomHistory(W, Today);
-		// The titles won before the story began (§11 Q23), as a new world has them.
-		SeedChampions(W);
+		if (Seeds)
+		{
+			SeedRoomHistory(W, Today);
+			// The titles won before the story began (§11 Q23), as a new world has them.
+			SeedChampions(W);
+		}
 		for (Npc& N : W.Roster)
 		{
 			// The site's own deal only ever belongs to its ten (§1.9 #21; Kast's catalog could hand it to anyone).
@@ -1252,6 +1333,9 @@ void Sim::Migrate(World& W, int From)
 		// The month's Verified review, at once.
 		Review(W, Today);
 	}
+	// Version 3 (update 2 §6.5): a world from before the fresh start began as every world did then, Established. Its head
+	// has no Start, and the head's read gives a missing one Established, so the step has nothing left to set (a fresh start
+	// written before the version moved carries its Start and keeps it). Nothing else in a version 2 world changes.
 }
 } // namespace world
 } // namespace ss

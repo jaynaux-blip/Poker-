@@ -2360,9 +2360,11 @@ bool Session::ShouldAutoFold()
 	{
 		return true;
 	}
-	if (CurrentPace == Pace::Full || AutoHolds())
+	// Full; the plan holds the seat (update 2 §2.6.1: it decides junk hands too); or a hand under autoplay the player took
+	// back (K, or a stop rule handing them the decision, §2.6.4-§2.6.5): they asked to decide it, so it isn't folded for them.
+	if (CurrentPace == Pace::Full || AutoHolds() || (Auto.M != autoplay::Mode::Off && AutoRun.TakenOver))
 	{
-		return false; // Full; or the plan holds the seat (update 2 §2.6.1: it decides junk hands too)
+		return false;
 	}
 	const Hand& H = *CurHand;
 	const int Idx = HeroSeatIdx();
@@ -2916,7 +2918,9 @@ void Session::AfterAward()
 	HandFacts F;
 	F.ByPlan = Auto.M != autoplay::Mode::Off && !AutoRun.TakenOver;
 	F.Skipped = false;
-	F.EquityAtAllIn = HeroSeat && HeroAllInReveal && Seats[static_cast<size_t>(HeroSeat->Seat)].HasEquity ? Seats[static_cast<size_t>(HeroSeat->Seat)].Equity : -1.0;
+	// The all-in's equity on the reveal's board (the seats' display equities have followed the run-out to the river's 1 or 0
+	// by now); autoplay's stateless helper, the skip path's own, draws nothing from R.
+	F.EquityAtAllIn = HeroSeat && HeroAllInReveal ? autoplay::AllInEquity(H, static_cast<int>(HeroSeat - H.Seats.data())) : -1.0;
 	F.PotBefore = PotBeforeAward;
 	F.Table = Active;
 	HeroHandDone(H, F);
@@ -4886,10 +4890,10 @@ kast::Inputs Session::StreamInputs() const
 	// The sponsors' deals the stream works on (next_segment_spec §3.8: a view of the book; SessionSponsor.cpp).
 	SponsorStream(In);
 	// Update 2 (§1.5, §4.7): the front table's watch speed (8x counts as Sprinting, as a skip does) and Rerun's views over
-	// the last 28 days (core-econ reads both).
+	// the last 48 hours (core-econ reads both).
 	In.WatchSpeed = Auto.M == autoplay::Mode::Watch ? std::max(1, Auto.Speed) : 1;
 	In.Sprinting = In.Sprinting || In.WatchSpeed >= 8;
-	In.VideoBuzz = video::View(Life.Video, In.World).Views28;
+	In.VideoBuzz = video::Buzz(Life.Video, In.World);
 	return In;
 }
 

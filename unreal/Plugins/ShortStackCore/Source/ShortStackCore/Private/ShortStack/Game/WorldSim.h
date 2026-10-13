@@ -47,6 +47,8 @@ constexpr int FoundingPopulation = 1618;
 constexpr double KeepResults = 8.0 * 1440.0;
 constexpr double KeepMajors = 400.0 * 1440.0;
 constexpr size_t MaxLog = 6000;
+/** World::RoiRank and RoiPlace rank nobody against fewer qualifying regulars than this: unknown (-1; update 2 bug 6). */
+constexpr int RoiRankMinimum = 20;
 
 inline double Clamp(double V, double Lo, double Hi)
 {
@@ -92,9 +94,35 @@ struct Sim
 	static void RoomLocals(World& W, int Today);
 	/**
 	 * A fresh start (update 2 §3.4): every record wiped from a world built as an established one, the people kept as they
-	 * are (U6). Phase A: a stub, so a Blank world plays as an Established one until core-world lands it.
+	 * are (U6): skills, traits, habits, bankrolls and Kast audiences. The world's own books (honors, news, the series and
+	 * Night Shift standings) go too.
 	 */
 	static void Wipe(World& W);
+	/** One person's records, wiped (Wipe; a local a fresh world gains on load). Today: the day the books opened. */
+	static void WipeRecord(Npc& N, int Today);
+	/** The day a world's record books opened (its first day). */
+	static int BooksOpened(const World& W) { return sim::DayAt(W.StartedAt()); }
+	/**
+	 * A fresh world's first weeks (update 2 §3.3 F9): an event family's first result in the new books, once a family, in
+	 * its first FirstWinnerDays. Winner: an npc, -1 the player, -2 a name the world doesn't follow (kept, so the family's
+	 * first stays its first, but never a headline).
+	 */
+	static void FirstWinner(World& W, const Pending& P, int Winner, Chips Prize);
+	static constexpr int FirstWinnerDays = 60;
+	/** A fresh world's board report: the Season leader and the biggest riser, the first seven mornings and the Mondays to
+	 *  week four (F9). Called at the day's turn, before the ranks move. */
+	static void BoardReport(World& W, int Day);
+	/** The board report's riser is someone on the rows RiverLine's boards list (its top 60), never a climb to No. 800. */
+	static constexpr int BoardReportRows = 60;
+	/** A fresh world's team signs only players with results (F3): an online final table on record or a top-100 Season rank
+	 *  (SeasonRank: BoardRanks' Season ranks at the signing). */
+	static bool SignsOnResults(const Npc& N, const std::vector<int>& SeasonRank);
+	/** A fresh world's Team RiverLine signing keeps what it signed on in its Value: the Season rank at the signing (1 to
+	 *  100, else 0) plus SigningFinalTables times the online final tables on record. Never in Amount: the news and the
+	 *  ticker read a world event's Amount as money. (The board report keeps its numbers in What for the same reason.) */
+	static constexpr int SigningFinalTables = 1000;
+	/** Where everyone stands on a board at a time, from 1 (0: nothing on it), ties by id: the arrows' ranks (Ranks). */
+	static std::vector<int> BoardRanks(const World& W, net::Board B, double At);
 	static int Add(World& W, Npc&& N);
 	static std::string UniqueName(World& W, Rng& R, const std::string& Country, bool Pro);
 	static void MakeSkills(Npc& N, Rng& R, double Base);

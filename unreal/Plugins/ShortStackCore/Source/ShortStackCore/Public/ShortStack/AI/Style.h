@@ -105,5 +105,29 @@ SHORTSTACKCORE_API double Mix(uint64_t Seed, int Tick, int Seat, int Action, uin
 SHORTSTACKCORE_API double ThinkSeconds(const HeroBrain& B, const HeroContext& C, int Speed);
 /** Every player-facing string the styles have (names, edge lines, best-in lines), for the copy lint. */
 SHORTSTACKCORE_API std::vector<std::string> Inventory();
+
+// ---------------------------------------------------------------------------------------------------------- appended by
+// core-styles in G1 (append-only from here)
+
+/** The swing chip's word: "STEADY", "EVEN", "SWINGY", "WILD" (never colour alone). */
+SHORTSTACKCORE_API const char* SwingName(Swing V);
+/**
+ * Why a tile is greyed where the plan would play (§2.3, §2.6.3), or "" when it can be picked there. Where: 0 online,
+ * 1 the Embercrest, 2 a cash game (Dee's). Knockout: the event pays bounties. A hidden style (the ship rule) is never
+ * shown at all, so it has no reason.
+ */
+SHORTSTACKCORE_API std::string Unavailable(Style S, int Where, bool Knockout);
+/**
+ * GTO's balance over its own range at a river decision (the harness's assertion 14, §2.10): of the range, the share that
+ * bets each size and the share of those bets that are bluffs (q outside the value region), or, facing a bet of Faced x
+ * pot, the share that continues. Valid is false when the spot isn't a heads-up river decision GTO plays from its range.
+ */
+struct RangeAudit
+{
+	bool Valid = false;
+	double Bet75 = 0, Bluff75 = 0, Bet100 = 0, Bluff100 = 0;
+	double Faced = 0, Continue = 0;
+};
+SHORTSTACKCORE_API RangeAudit AuditGtoRiver(const HeroContext& C);
 } // namespace style
 } // namespace ss

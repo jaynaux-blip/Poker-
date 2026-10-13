@@ -286,7 +286,19 @@ void Sim::Found(World& W, double Start)
 	std::vector<Chips> Money;
 	std::vector<int> Wins;
 	std::vector<int> Fts;
-	Net.FoundingTally(Start, Pts, Money, Wins, Fts);
+	if (W.Mode != world::Start::Blank)
+	{
+		Net.FoundingTally(Start, Pts, Money, Wins, Fts);
+	}
+	else
+	{
+		// A fresh start (update 2 §3.3 F2): the days before the world began add only numbers the wipe takes away again, and
+		// the tally draws nothing, so skipping it changes no one.
+		Pts.assign(F.size(), 0.0);
+		Money.assign(F.size(), 0);
+		Wins.assign(F.size(), 0);
+		Fts.assign(F.size(), 0);
+	}
 	const int Today = sim::DayAt(Start);
 	const int Year0 = YearOf(Today);
 	Rng Root("world/" + std::to_string(W.WorldSeed) + "/founding");
@@ -827,16 +839,22 @@ void World::Create(uint32_t InSeed, double StartWorld, Start S)
 	Month = YearOf(Today) * 12; // refined on the first month change
 	Sim::Found(*this, StartWorld);
 	Sim::RoomLocals(*this, Today);
-	// History the badges read on the first night (next_segment_spec §5, §11 Q23): the titles won before the story began,
-	// the room's last few months, and the month's Verified review.
-	Sim::SeedChampions(*this);
-	Sim::SeedRoomHistory(*this, Today);
-	Sim::Review(*this, Today);
-	// A fresh start: the same people, their records wiped (update 2 §3.3 F2; core-world's).
 	if (Mode == Start::Blank)
 	{
+		// A fresh start (update 2 §3.3 F2): the same people, built exactly as an established world builds them, then every
+		// record wiped. The seeders that write nothing but records (the titles before the story began, the room's months)
+		// don't run: they draw from dice of their own, so skipping them changes no one.
 		Sim::Wipe(*this);
 	}
+	else
+	{
+		// History the badges read on the first night (next_segment_spec §5, §11 Q23): the titles won before the story
+		// began and the room's last few months.
+		Sim::SeedChampions(*this);
+		Sim::SeedRoomHistory(*this, Today);
+	}
+	// The month's Verified review (a fresh world's finds nobody).
+	Sim::Review(*this, Today);
 	Target = static_cast<int>(Roster.size());
 	// The fields each tier plays against start where the network's regulars are.
 	std::array<double, 5> Sum{};
@@ -859,8 +877,9 @@ void World::Create(uint32_t InSeed, double StartWorld, Start S)
 	FieldRef[0] = People > 0 ? All / static_cast<double>(People) : 0.5;
 	Sim::RefreshField(*this);
 	// A series already under way: the standings from its days so far (the network's results for those days, by the
-	// same regulars), so its leaderboard isn't empty on day six.
-	if (const net::SeriesInfo* Sr = net::Shared().CurrentSeries(StartWorld))
+	// same regulars), so its leaderboard isn't empty on day six. A fresh start's series board starts at Night One (F8).
+	const net::SeriesInfo* Running = Mode == Start::Blank ? nullptr : net::Shared().CurrentSeries(StartWorld);
+	if (const net::SeriesInfo* Sr = Running)
 	{
 		if (static_cast<double>(Sr->FirstDay) * net::MinutesPerDay < StartWorld)
 		{
@@ -884,10 +903,77 @@ void World::Create(uint32_t InSeed, double StartWorld, Start S)
 	++Rev;
 }
 
+void Sim::WipeRecord(Npc& N, int Today)
+{
+	// What a results tracker, a trophy case and a card room's books know of them goes (§3.4); who they are, their money and
+	// their habits stay (F1, U6). Their audiences on Kast stay too (F5): that's another platform's number.
+	const int Year0 = YearOf(Today);
+	N.Totals = {};
+	N.ThisSeason = Season();
+	N.ThisSeason.Year = Year0;
+	N.Years.clear();
+	Year Y;
+	Y.Number = Year0;
+	N.Years.push_back(Y);
+	N.Recent.clear();
+	N.Weekly = {};
+	N.WeekPoints = 0.0f;
+	N.BestEvent.clear();
+	N.BestDay = 0;
+	N.Bracelets = 0;
+	N.Rings = 0;
+	N.Titles = 0;
+	N.Majors = 0;
+	N.Awards.clear();
+	N.Stats = Tracker();
+	N.Room = RoomRecord();
+	N.CircuitPoints = 0.0;
+	N.CardBest = CardNone;
+	N.CardLast = CardNone;
+	N.Verified = false;
+	N.ReviewMonth = -1;
+	N.WeekEvents = 0;
+	N.WeekKinds = {};
+	N.WeekNet = 0;
+	N.MonthNet = 0;
+	// Team RiverLine starts empty and signs on results (F3): leaving it takes its pay back out, as it always does.
+	if (N.Pro || N.Sponsor == "Team RiverLine")
+	{
+		N.Pro = false;
+		N.Sponsor.clear();
+		N.Income = std::max<Chips>(0, N.Income - TeamWeekly());
+	}
+	// On the scene since the first night (F4): the Hall's ten years and the veterans' eight start counting with the books.
+	// A newcomer's arrival is their own story and stays.
+	if (N.Came == Arrival::None)
+	{
+		N.Joined = Today;
+		N.TierSince = Today;
+		N.Path.clear();
+	}
+	// Fame came from the record: none of it is left but what Kast's audiences give.
+	N.Fame = {};
+	Reputation(N);
+}
+
 void Sim::Wipe(World& W)
 {
-	// Phase A's stub (core-world fills it, update 2 §3.4): nothing is wiped yet, so a Blank world plays as an Established one.
-	(void)W;
+	// A fresh start (update 2 §3.4): the people as an established world built them, every record gone. The world's own
+	// books go too: no honors, no news, no series standings, no Night Shift.
+	const int Today = sim::DayAt(W.Origin);
+	for (Npc& N : W.Roster)
+	{
+		WipeRecord(N, Today);
+	}
+	W.Titles.clear();
+	W.Log.clear();
+	W.SeriesKey.clear();
+	W.SeriesPoints.clear();
+	W.NightKey = -1.0;
+	W.NightPoints.clear();
+	W.NightPointsHourAgo.clear();
+	W.WeekPairs.clear();
+	W.RefreshAll();
 }
 
 double World::BoardValue(net::SiteId Site, net::Board B, int Npc, double At) const

@@ -214,11 +214,15 @@ void RiverLine::StatsKpis(const world::Tracker& T, const Rect& R, double Now)
 	};
 	const double Rank = Wd && T.Events >= 200 ? Wd->RoiRank(Roi) : -1.0;
 	const int Place = Wd && T.Events >= 200 ? Wd->RoiPlace(Roi, &T == &Wd->HeroStats()) : 0;
+	// A big enough sample, but too few regulars on record to rank it against (RoiRank -1, a fresh world's first months).
+	const bool Unranked = Wd && T.Events >= 200 && Rank < 0.0;
 	const int Own = static_cast<int>(std::max_element(T.ByStake.begin(), T.ByStake.end(), [](const world::TrackLine& A, const world::TrackLine& B) { return A.Events < B.Events; }) - T.ByStake.begin());
 	const Kpi Tiles[6] = {
 		{"PROFIT", StSigned(static_cast<Chips>(static_cast<double>(T.Net) * In)), "Prizes " + StAmount(T.Prizes) + "  \xC2\xB7  buy-ins " + StAmount(T.BuyIns), T.Net > 0 ? 1 : T.Net < 0 ? -1 : 0},
 		{"ROI", StSignedPct(Roi * In, std::fabs(Roi) >= 1.0 ? 0 : 1),
-			Place >= 1 && Place <= 10 ? "No. " + std::to_string(Place) + " on RiverLine" : Rank >= 0.0 ? "Beats " + Fixed(std::min(Rank * 100.0, 99.0), 0) + "% of regulars" : Grouped(T.Events) + " tournaments in",
+			Place >= 1 && Place <= 10 ? "No. " + std::to_string(Place) + " on RiverLine" : Rank >= 0.0 ? "Beats " + Fixed(std::min(Rank * 100.0, 99.0), 0) + "% of regulars"
+			: Unranked ? std::string(&T == &Wd->HeroStats() ? "Not enough regulars on record yet to rank you." : "Not enough regulars on record yet to rank them.")
+					   : Grouped(T.Events) + " tournaments in",
 			Roi > 0.0005 ? 1 : Roi < -0.0005 ? -1 : 0},
 		{"ITM", StPct(T.Itm() * In), Grouped(T.Cashes) + (T.Cashes == 1 ? " cash" : " cashes"), 0},
 		{"TOURNAMENTS", Grouped(static_cast<int>(std::lround(static_cast<double>(T.Events) * static_cast<double>(In)))), Grouped(T.Wins) + (T.Wins == 1 ? " win" : " wins") + "  \xC2\xB7  " + Grouped(T.FinalTables) + " FTs", 0},

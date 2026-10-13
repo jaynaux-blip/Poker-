@@ -363,19 +363,27 @@ double World::RoiRank(double Roi, int Min) const
 		++Count;
 		Below += N.Stats.Roi() < Roi ? 1 : 0;
 	}
-	return Count > 0 ? static_cast<double>(Below) / static_cast<double>(Count) : 0.0;
+	// Too few regulars on record to rank anyone against (a fresh world's first months): unknown, never "beats 0%"
+	// (update 2 bug 6). The readers treat it as neutral.
+	return Count >= sim::RoiRankMinimum ? static_cast<double>(Below) / static_cast<double>(Count) : -1.0;
 }
 
 int World::RoiPlace(double Roi, bool bHero, int Min) const
 {
 	int Above = 0;
+	int Count = 0;
 	for (const Npc& N : Roster)
 	{
 		if (N.Faded || N.Stats.Events < Min || N.Stats.BuyIns <= 0)
 		{
 			continue;
 		}
+		++Count;
 		Above += N.Stats.Roi() > Roi ? 1 : 0;
+	}
+	if (Count < sim::RoiRankMinimum)
+	{
+		return -1; // unknown, as RoiRank
 	}
 	if (!bHero && HeroBook.Events >= Min && HeroBook.BuyIns > 0 && HeroBook.Roi() > Roi)
 	{

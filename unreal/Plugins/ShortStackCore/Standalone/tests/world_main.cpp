@@ -1156,7 +1156,9 @@ void Migration()
 	Load(W, Text);
 	std::string Saved;
 	W.Write(Saved);
-	Check(W.Ready() && Saved.rfind("world\thead\t2\t", 0) == 0 && Saved != Text, "a version 1 world loads and writes as version 2");
+	// (Pinned to world::Version: version 2 then, 3 from update 2's G1, each bump with its migration, update 2 §6.5.)
+	Check(W.Ready() && Saved.rfind("world\thead\t" + std::to_string(world::Version) + "\t", 0) == 0 && Saved != Text && W.Began() == world::Start::Established,
+		"a version 1 world loads and writes as version " + std::to_string(world::Version) + ", an established world");
 	world::World Again;
 	Load(Again, Saved);
 	std::string Twice;
@@ -1567,8 +1569,22 @@ int Years(int Count, uint32_t Seed)
 }
 } // namespace
 
+namespace world_test
+{
+// For the per-track files (WorldSeg.h's kit): "world_test long", and the suite's invariants with their failures counted.
+bool LongRun = false;
+int CheckInvariants(const world::World& W, const std::string& When)
+{
+	const int Before = Failures;
+	Invariants(W, When);
+	return Failures - Before;
+}
+} // namespace world_test
+
 int main(int Argc, char** Argv)
 {
+	// "world_test long": the long runs (update 2 SPEC §6.7: FreshEmerges' 365 days over three seeds).
+	world_test::LongRun = Argc >= 2 && std::strcmp(Argv[1], "long") == 0;
 	if (Argc >= 3 && std::strcmp(Argv[1], "years") == 0)
 	{
 		return Years(std::atoi(Argv[2]), Argc >= 4 ? static_cast<uint32_t>(std::strtoul(Argv[3], nullptr, 10)) : 7u) > 0 ? 1 : 0;
@@ -1582,7 +1598,11 @@ int main(int Argc, char** Argv)
 		return 0;
 	}
 	// The suite's own checks, then update 2's per-track files (update 2 SPEC §6.7; tests/world_seg_<track>.cpp).
-	const int F = Checks() + world_test::SegFresh() + world_test::SegSites();
+	// (In order: the per-track files count their own failures, the suite's invariants included, after Checks has returned.)
+	const int Own = Checks();
+	const int Fresh = world_test::SegFresh();
+	const int Sites = world_test::SegSites();
+	const int F = Own + Fresh + Sites;
 	std::printf(F == 0 ? "world: all checks passed\n" : "world: %d checks failed\n", F);
 	return F == 0 ? 0 : 1;
 }

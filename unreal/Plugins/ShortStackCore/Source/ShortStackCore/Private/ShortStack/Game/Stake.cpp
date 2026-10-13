@@ -2595,7 +2595,11 @@ std::string List(Book& B, const View& V, const std::string& EventId, int Ask, in
 			{
 				continue;
 			}
-			if (Who == Park && ((!V.Rec || V.Rec->LiveEvents < 20) && V.RoiRank < 0.5))
+			// Mrs. Park wants a record: twenty live events, or an online ROI in the regulars' top half. Too few regulars on
+			// record to rank against (RoiRank -1, a fresh world's first months; update 2 bug 6) is no verdict either way: she
+			// reads the sample itself instead (200 paid events in profit).
+			const bool OnlineOk = V.RoiRank >= 0.0 ? V.RoiRank >= 0.5 : V.Rec && V.Rec->OnlineEvents >= 200 && V.Rec->OnlineRoi > 0.0;
+			if (Who == Park && ((!V.Rec || V.Rec->LiveEvents < 20) && !OnlineOk))
 			{
 				continue;
 			}
