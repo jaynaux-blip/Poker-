@@ -724,7 +724,7 @@ void ABackRoomHUD::DrawHUD()
 			TEXT("TABLE PACE   FAST   ·   the room acts at once")};
 		const float A = FMath::Clamp((2.6f - GM->PaceShownAge()) / 0.5f, 0.0f, 1.0f);
 		Text(PaceNotes[FMath::Clamp(GM->GetTablePace(), 0, 2)], Fade(Warm, A), W * 0.5f, H * 0.3f, Small, 1.2f, 1);
-		Text(TEXT("your own decisions always wait for you"), Fade(Dim, A), W * 0.5f, H * 0.3f + 30.0f * S, Small, 1.0f, 1);
+		Text(TEXT("your own decisions wait for you, unless you've handed the seat to autoplay"), Fade(Dim, A), W * 0.5f, H * 0.3f + 30.0f * S, Small, 1.0f, 1);
 	}
 
 	// Felted.
@@ -1757,8 +1757,9 @@ void ABackRoomGameMode::FillTableHud(ss::ui::TableHudInfo& Out, float CanvasWidt
 	else if (bLive && PaceShownAge() < 2.6f)
 	{
 		static const char* const Paces[3] = {"TABLE PACE \xC2\xB7 LIVE", "TABLE PACE \xC2\xB7 BRISK", "TABLE PACE \xC2\xB7 FAST"};
-		static const char* const Subs[3] = {"The room's own time. Your own decisions always wait for you.", "Quicker decisions around you. Yours always wait for you.",
-			"The room acts at once. Your own decisions always wait for you."};
+		static const char* const Subs[3] = {"The room's own time. Your own decisions wait for you, unless you've handed the seat to autoplay.",
+			"Quicker decisions around you. Yours wait for you, unless you've handed the seat to autoplay.",
+			"The room acts at once. Your own decisions wait for you, unless you've handed the seat to autoplay."};
 		const int32 Pace = FMath::Clamp(TablePace, 0, 2);
 		Out.Note = Paces[Pace];
 		Out.NoteSub = Subs[Pace];

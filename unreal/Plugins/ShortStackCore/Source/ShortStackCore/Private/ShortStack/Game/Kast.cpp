@@ -51,6 +51,28 @@ double Competition(double World)
 	return H >= 22.0 || H < 6.0 ? 1.15 : 1.0;
 }
 
+/**
+ * How fast the hands go by on stream (update 2 §1.5). At 1x and 2x it looks like poker and nothing changes. At 4x a
+ * stranger flicking through the directory sees cards blur past, and one in ten moves on. At 8x, and on a skip, it's
+ * today's Sprinting: a fifth of the strangers move on and the ones who stay follow 40% less often. The session flags a
+ * skip and 8x as Sprinting (Session::StreamInputs); 8x counts here on its own too, so an input that only carries the
+ * speed reads the same.
+ */
+bool KastSprinting(const Inputs& In)
+{
+	return In.Sprinting || In.WatchSpeed >= 8;
+}
+
+double KastPaceStrangers(const Inputs& In)
+{
+	return KastSprinting(In) ? 0.8 : In.WatchSpeed >= 4 ? 0.9 : 1.0;
+}
+
+double KastPaceFollows(const Inputs& In)
+{
+	return KastSprinting(In) ? 0.6 : 1.0;
+}
+
 std::string Fill(std::string Text, const std::string& Key, const std::string& Value)
 {
 	for (size_t At = Text.find(Key); At != std::string::npos; At = Text.find(Key, At + Value.size()))
@@ -1023,7 +1045,7 @@ double Stream::StrangerRate(const Channel& Ch, const Inputs& In) const
 	A *= 1.0 + 0.45 * std::log2(1.0 + Viewers / 4.0); // the directory sorts by viewers
 	A *= 1.0 + 0.08 * static_cast<double>(std::min(3, std::max(0, In.Tables - 1)));
 	A *= In.AtTable ? 1.0 : In.Results ? 0.8 : 0.5;
-	A *= In.Sprinting ? 0.8 : 1.0;
+	A *= kast_detail::KastPaceStrangers(In); // 4x x0.9; 8x and a skip x0.8 (today's Sprinting)
 	A *= AdRunning(In.Real) ? 0.6 : 1.0;
 	A *= 0.6 + 0.4 * Health;
 	return A;
@@ -2288,7 +2310,7 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 		ArriveDebt -= static_cast<double>(Whole);
 		Tonight.NewFaces += Whole;
 	}
-	const double FollowChance = (0.027 + 0.025 * Q) * (1.0 + In.Gear.Follow) * T.Follow * (0.6 + 0.4 * Health) * (1.0 + 0.6 * Warm) * (1.0 + 0.8 * Engage) * (In.Sprinting ? 0.6 : 1.0);
+	const double FollowChance = (0.027 + 0.025 * Q) * (1.0 + In.Gear.Follow) * T.Follow * (0.6 + 0.4 * Health) * (1.0 + 0.6 * Warm) * (1.0 + 0.8 * Engage) * kast_detail::KastPaceFollows(In);
 	FollowDebt += Arrivals * DWorld / 60.0 * FollowChance;
 	// Regulars bring friends (twice as often once the community is a real one).
 	double Bring = 0.0;

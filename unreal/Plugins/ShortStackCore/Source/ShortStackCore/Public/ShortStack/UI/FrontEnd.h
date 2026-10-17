@@ -42,7 +42,8 @@ struct GameSettings
 	bool InvertLook = false;
 	bool ShowHints = true;
 	// Gameplay
-	int TablePace = 0;           // a live table: 0 Live (the room's own time), 1 Brisk, 2 Fast; never plays a hand for you
+	int TablePace = 0;           // a live table: 0 Live (the room's own time), 1 Brisk, 2 Fast; never plays a hand for you;
+	                             // only autoplay does, when you turn it on
 	// The card room's voices, captions and table (next_segment_spec §4.9, §6.7; the rows are core-tableui's)
 	int VoicesVolume = 100;      // the room's speech and the PA, 0..100
 	int Captions = 1;            // 0 Off, 1 Dialogue (today's always-on subtitles), 2 Everything

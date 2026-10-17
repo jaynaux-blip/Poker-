@@ -1,16 +1,23 @@
 // night_one_session: core-stake's additions (next_segment_spec §7.6, §8.3), compiled into session_test and called
 // from main() in session_main.cpp (the shared kit is SessionSeg.h): Lou's stake through GoToLive shows the exact three
 // lines; a cancelled event returns Lou's money; online buy-ins route to the roll; ResumeLive keeps the funding; the
-// calendar's step texts and mails what it should once; the debug commands; the save keeps it all.
+// calendar's step texts and mails what it should once; the debug commands; the save keeps it all. Update 2 (core-deals,
+// G1): Mrs. Park's gate in a fresh world, where the online rank is unknown.
 #include "SessionSeg.h"
 
 #include "ShortStack/Game/Coach.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Stake.h"
+#include "ShortStack/Game/World.h"
 
 #include <algorithm>
 #include <cstdio>
+#include <string>
+#include <tuple>
+#include <vector>
 
 namespace session_test
 {
@@ -243,6 +250,86 @@ void Seams()
 		"stake: a fresh career can't sell 30% at 1.05, and says why");
 	Expect(S.ListAction("embercrest-nightly@9", 30, 1000) == "Pieces at the Embercrest go in fives: 5%, 10%, 15%.", "stake: live pieces in fives");
 }
+
+/** Mrs. Park's share of 10% of an event listed at par through the session's own view of the player; the listing is taken down again. */
+int ParkShare(ss::Session& S, const std::string& EventId, std::string& Said)
+{
+	Said = S.ListAction(EventId, 100, 1000);
+	int Pct = 0;
+	for (const stake::Listing& Ls : S.Life.Stakes.Listings)
+	{
+		for (const std::tuple<double, std::string, int>& Pl : Ls.EventId == EventId ? Ls.Plan : std::vector<std::tuple<double, std::string, int>>())
+		{
+			Pct += std::get<1>(Pl) == "Mrs. Park" ? std::get<2>(Pl) : 0;
+		}
+	}
+	S.CancelListing(EventId);
+	return Pct;
+}
+
+void ParkReadsTheSample()
+{
+	// Update 2 bug 6 (SPEC §3.6), end to end. On a fresh world's first night nobody has 200 events on record, so
+	// World::RoiRank is unknown (-1): Mrs. Park's gate reads the player's own sample instead (200 paid online events in
+	// profit) rather than refusing as if they sat at the bottom. An established world ranks the player as it always has.
+	ss::hero::Character Who;
+	const live::Occurrence N = live::FindOccurrence("embercrest-nightly@1");
+	for (const ss::world::Start Start : {ss::world::Start::Blank, ss::world::Start::Established})
+	{
+		const bool Fresh = Start == ss::world::Start::Blank;
+		const std::string Tag = std::string("stake: Mrs. Park, ") + (Fresh ? "a fresh world" : "an established world");
+		Hooks H;
+		ss::Session S(H, Fresh ? "stake-park-fresh" : "stake-park-established");
+		S.NewCareer(Who, Start);
+		S.CurrentScreen = ss::Screen::Lobby;
+		Wait(S, 0.0, 0.2);
+		ss::world::World& W = S.Living();
+		const int Park = W.Find("Mrs. Park");
+		for (int K = 0; K < 4; ++K)
+		{
+			W.Lent(Park, true, S.WorldMinutes()); // she trusts the player (0.4): a friend buys at par, whatever the price model
+		}
+		const ss::world::Bond* Bd = W.BondWith(Park);
+		Expect(N.Valid() && Park >= 0 && Bd && Bd->Label() == "Trusts you", (Tag + ": she trusts the player").c_str());
+		// No record yet: no live events, no online sample, and nobody else in the view who'd buy.
+		std::string Said;
+		Expect(ParkShare(S, N.Id, Said) == 0 && Said == "Nobody's buying a piece of you yet. Backers read results. Go get some." && S.Life.Stakes.Listings.empty(),
+			(Tag + ": with no record she passes, and the listing says why").c_str());
+		// Two samples (World::GrantHeroResults is seeded by the player's event count alone, so both are the same in either
+		// world): 240 paid online events at a loss, then more, ten at a time, until the whole sample turns a profit.
+		for (int Step = 0; Step < 2; ++Step)
+		{
+			if (Step == 0)
+			{
+				W.GrantHeroResults(240);
+			}
+			while (Step == 1 && W.HeroStats().Roi() <= 0.0 && W.HeroStats().Events < 2000)
+			{
+				W.GrantHeroResults(10);
+			}
+			const ss::rep::Public Rec = S.Record();
+			const double Rank = W.RoiRank(Rec.OnlineRoi);
+			const int Share = ParkShare(S, N.Id, Said);
+			const bool Profit = Rec.OnlineRoi > 0.0;
+			std::printf("  stake: Mrs. Park, %s: %d paid online events at %s%%, rank %s, her share %d permille\n", Fresh ? "fresh" : "established", Rec.OnlineEvents,
+				ss::Fixed(100.0 * Rec.OnlineRoi, 1).c_str(), ss::Fixed(Rank, 3).c_str(), Share);
+			Expect(Rec.OnlineEvents >= 200 && Profit == (Step == 1), (Tag + (Step == 0 ? ": 200+ paid online events at a loss" : ": then in profit")).c_str());
+			if (Fresh)
+			{
+				// Nobody else has 200 events on night one: the rank is unknown, and she goes by the sample alone.
+				Expect(Rank == -1.0, (Tag + ": too few regulars on record to rank the player (-1)").c_str());
+				Expect(Profit ? Said.empty() && Share == 100 : Share == 0 && S.Life.Stakes.Listings.empty(),
+					(Tag + (Profit ? ": the rank is unknown, so she reads the sample, a profit, and takes her 10%" : ": the rank is unknown and the sample's a loss: no piece"))
+						.c_str());
+			}
+			else
+			{
+				// 1,600 regulars to rank against: the rank decides, as it always has (both samples sit in the bottom half here).
+				Expect(Rank >= 0.0 && Rank < 0.5 && Share == 0, (Tag + ": a bottom-half rank, so no piece, profit or not").c_str());
+			}
+		}
+	}
+}
 } // namespace stake_seg
 
 void SegStake()
@@ -252,5 +339,6 @@ void SegStake()
 	stake_seg::OnlineRoll();
 	stake_seg::Calendar();
 	stake_seg::Seams();
+	stake_seg::ParkReadsTheSample();
 }
 } // namespace session_test

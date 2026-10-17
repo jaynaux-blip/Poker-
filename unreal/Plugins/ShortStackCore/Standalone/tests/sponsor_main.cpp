@@ -274,6 +274,22 @@ void Catalog()
 	Problems += copylint::Run("sponsor lines", sponsor::Inventory(2), copylint::Pa, Vars);
 	Expect(Problems == 0, "catalog: every letter, subject and line passes the copy lint");
 	Expect(sponsor::Inventory(0).size() >= 60 && sponsor::Inventory(1).size() >= 25, "catalog: the inventory has the letters");
+	// A fresh world's Team RiverLine starts empty and signs on results (update 2 SPEC §3.3 F3), and the book can't see the
+	// world: no letter counts the team's roster (U5: no copy claims what didn't happen in this world).
+	bool NoHeadcount = true;
+	for (const std::pair<std::string, std::string>& L : sponsor::Inventory(0))
+	{
+		const std::string Body = Lower(L.second);
+		for (const char* Count : {"ten players", "ten pros", "team riverline is ten", "ten-player"})
+		{
+			if (Body.find(Count) != std::string::npos)
+			{
+				NoHeadcount = false;
+				std::printf("  '%s' in %s\n", Count, L.first.c_str());
+			}
+		}
+	}
+	Expect(NoHeadcount, "catalog: no letter counts Team RiverLine's roster (a fresh world's team starts empty)");
 }
 
 // ------------------------------------------------------------------ 2. standing

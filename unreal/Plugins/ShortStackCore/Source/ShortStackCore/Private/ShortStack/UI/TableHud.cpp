@@ -13,6 +13,7 @@
 #include <vector>
 
 // The table HUD, the table card and the room's clock screens (next_segment_spec §1.6, §6.3, §6.5). core-tableui.
+// Update 2 (SPEC §2.6.2, §2.11): the table card's PLAY page, the plan's lines on the HUD (P0a), the live skip's card.
 //
 // One logical canvas 1,080 tall; every panel anchors to an edge 58 units in and scales about that anchor with the HUD
 // size setting. The room's palette is the Embercrest's (midnight navy, ash, ember); colour is never the only signal (a
@@ -281,6 +282,13 @@ float ControlGlyphs(Canvas& C, const Control& K, bool Pad, float X, float Y, flo
 	return W;
 }
 
+/** The control has a glyph on this device (autoplay's "auto" is the keyboard's alone, "autohold" the pad's). */
+bool HasKeys(const Control& K, bool Pad)
+{
+	const char* Keys = Pad ? K.Pad : K.Key;
+	return Keys && *Keys;
+}
+
 /** A row of controls (glyphs and labels), left to right from X, baseline Y. Returns the width. */
 float ControlRow(Canvas& C, ControlContext Ctx, const std::vector<std::string>& Ids, bool Pad, float X, float Y, float Alpha, bool DrawIt = true)
 {
@@ -288,7 +296,7 @@ float ControlRow(Canvas& C, ControlContext Ctx, const std::vector<std::string>& 
 	for (const std::string& Id : Ids)
 	{
 		const Control* K = FindControl(Ctx, Id);
-		if (!K)
+		if (!K || !HasKeys(*K, Pad))
 		{
 			continue;
 		}
@@ -661,7 +669,8 @@ std::vector<GlyphSpot> HudGlyphs(const TableHudInfo& I, float Width, double Now)
 	using namespace tablehud_detail;
 	std::vector<GlyphSpot> Out;
 	const float S = Scale(I);
-	for (const PlacedPlate& Pl : LayoutPlates(I, Width, Now))
+	// (A live skip draws no plates: DrawTableHud keeps the felt clear behind the skip card.)
+	for (const PlacedPlate& Pl : I.SkipOn && !I.Walking ? std::vector<PlacedPlate>() : LayoutPlates(I, Width, Now))
 	{
 		const SeatPlate& Sp = I.Plates[static_cast<size_t>(Pl.Index)];
 		if (Sp.BadgeCell >= 0 && Sp.Glyph.K == badge::Kind::Count)
@@ -669,7 +678,7 @@ std::vector<GlyphSpot> HudGlyphs(const TableHudInfo& I, float Width, double Now)
 			Out.push_back({Sp.BadgeCell, Pl.Glyph.X, Pl.Glyph.Y, 16.0f * S, Pl.Alpha});
 		}
 	}
-	if (I.Study.Alpha > 0.01f && I.Study.Badges.empty() && !I.Study.BadgeCells.empty())
+	if (I.Study.Alpha > 0.01f && I.Study.Badges.empty() && !I.Study.BadgeCells.empty() && !(I.SkipOn && !I.Walking))
 	{
 		const size_t N = std::min<size_t>(3, I.Study.BadgeCells.size());
 		const float Y = Tall * 0.6f + 62.0f;
@@ -1529,34 +1538,68 @@ void Arrival(Canvas& C, const TableHudInfo& I, double Now)
 	}
 }
 
+/** A choice's control: from the map, else the choice names a key itself ("R"). */
+Control ChoiceKey(const Choice& Ch, ControlContext Ctx)
+{
+	Control K;
+	const Control* Found = FindControl(Ctx, Ch.Control);
+	if (Found)
+	{
+		K = *Found;
+	}
+	else
+	{
+		K.Key = Ch.Control.c_str();
+		K.Pad = Ch.Control.c_str();
+	}
+	return K;
+}
+
+/**
+ * A line centred on Cx, baseline Y: Lead in its own size, weight and colour (none when empty), then each choice's glyphs
+ * and label ("AUTOPLAY · GTO · Sharpness 93%   [K] Take over"). A choice whose control has no glyph on this device isn't
+ * that device's and isn't drawn. Fits inside MaxW (the lead gives way first). Returns the width.
+ */
+float KeyedLine(Canvas& C, const std::string& Lead, float LeadSize, int LeadWeight, const Color& LeadCol, const std::vector<Choice>& Choices, ControlContext Ctx, bool Pad,
+	float Cx, float Y, float LabelSize, float A, float MaxW, bool DrawIt = true)
+{
+	std::vector<const Choice*> Shown;
+	for (const Choice& Ch : Choices)
+	{
+		if (HasKeys(ChoiceKey(Ch, Ctx), Pad))
+		{
+			Shown.push_back(&Ch);
+		}
+	}
+	float Keys = 0.0f;
+	for (const Choice* Ch : Shown)
+	{
+		Keys += 36.0f + ControlGlyphs(C, ChoiceKey(*Ch, Ctx), Pad, 0.0f, Y, A, false) + 10.0f + C.Measure(Ch->Label, LabelSize, 600);
+	}
+	const float LeadW = Lead.empty() ? 0.0f : std::min(C.Measure(Lead, LeadSize, LeadWeight), std::max(80.0f, MaxW - Keys));
+	const float Total = LeadW + (Lead.empty() && Keys > 0.0f ? Keys - 36.0f : Keys);
+	if (!DrawIt)
+	{
+		return Total;
+	}
+	float X = Cx - Total * 0.5f;
+	if (!Lead.empty())
+	{
+		C.Text(Lead, X, Y, Ts(LeadSize, LeadWeight, Fa(LeadCol, A), Align::Left, Baseline::Alphabetic, false, LeadW + 0.5f));
+		X += LeadW + 36.0f;
+	}
+	for (const Choice* Ch : Shown)
+	{
+		X += ControlGlyphs(C, ChoiceKey(*Ch, Ctx), Pad, X, Y + 4.0f, A) + 10.0f;
+		X += C.Text(Ch->Label, X, Y, Ts(LabelSize, 600, Fa(Ash, A))) + 36.0f;
+	}
+	return Total;
+}
+
 /** Choices in a row, centred on X, baseline Y: "[Q] Stay and watch   [L] Go home now". */
 void ChoiceRow(Canvas& C, const std::vector<Choice>& Choices, ControlContext Ctx, bool Pad, float Cx, float Y, float A)
 {
-	auto KeyFor = [&](const Choice& Ch) {
-		Control K;
-		const Control* Found = FindControl(Ctx, Ch.Control);
-		if (Found)
-		{
-			K = *Found;
-		}
-		else
-		{
-			K.Key = Ch.Control.c_str();
-			K.Pad = Ch.Control.c_str();
-		}
-		return K;
-	};
-	float Total = 0.0f;
-	for (const Choice& Ch : Choices)
-	{
-		Total += ControlGlyphs(C, KeyFor(Ch), Pad, 0.0f, Y, A, false) + 10.0f + C.Measure(Ch.Label, 18.0f, 600) + 36.0f;
-	}
-	float X = Cx - (Total - 36.0f) * 0.5f;
-	for (const Choice& Ch : Choices)
-	{
-		X += ControlGlyphs(C, KeyFor(Ch), Pad, X, Y + 4.0f, A) + 10.0f;
-		X += C.Text(Ch.Label, X, Y, Ts(18.0f, 600, Fa(Ash, A))) + 36.0f;
-	}
+	KeyedLine(C, std::string(), 18.0f, 600, Ash, Choices, Ctx, Pad, Cx, Y, 18.0f, A, C.Width() - 2.0f * Margin);
 }
 
 void NoteAndChoices(Canvas& C, const TableHudInfo& I, double Now)
@@ -1597,8 +1640,18 @@ void StatusLines(Canvas& C, const TableHudInfo& I)
 		C.FillRect({W * 0.5f - Lw * 0.5f, Tall - 222.0f, Lw, 3.0f}, Paint(Rgba(0, 0, 0, 0.45f)));
 		C.FillRect({W * 0.5f - Lw * 0.5f, Tall - 222.0f, Lw * std::clamp(I.HoldProgress, 0.0f, 1.0f), 3.0f}, Paint(Hot));
 	}
-	// Out of the hand at a live table: the pace and the next hand.
-	if (I.Pace >= 0 && !I.YourTurn && !I.InHand)
+	// Out of the hand at a live table: the pace and the next hand. While the plan holds the seat T steps its watch speed
+	// instead (the table's own pace is untouched), and the plan plays on to the next hand by itself.
+	if (I.Pace >= 0 && !I.YourTurn && !I.InHand && I.AutoOn && !I.SkipOn)
+	{
+		const std::string Speed = std::to_string(std::max(1, I.AutoSpeed)) + "x";
+		const float Row = ControlRow(C, ControlContext::Table, {"watch"}, I.Gamepad, 0.0f, 0.0f, 1.0f, false);
+		const float Sw = TrackedWidth(C, Speed, 13.0f, 800, 2.6f) + 12.0f;
+		const float X = W * 0.5f - (Row + Sw) * 0.5f;
+		ControlRow(C, ControlContext::Table, {"watch"}, I.Gamepad, X, Tall - 62.0f, 0.85f);
+		TrackedText(C, Speed, X + Row + 12.0f, Tall - 64.0f, 13.0f, 800, Gold, 2.6f);
+	}
+	else if (I.Pace >= 0 && !I.YourTurn && !I.InHand && !I.SkipOn)
 	{
 		static const char* const Paces[3] = {"LIVE", "BRISK", "FAST"};
 		if (I.Skipping)
@@ -1614,6 +1667,140 @@ void StatusLines(Canvas& C, const TableHudInfo& I)
 			ControlRow(C, ControlContext::Table, {"next", "pace"}, I.Gamepad, X, Tall - 62.0f, 0.85f);
 			TrackedText(C, Pace, X + Row + 12.0f, Tall - 64.0f, 13.0f, 800, Gold, 2.6f);
 		}
+	}
+}
+
+// ------------------------------------------------------------------ autoplay at the table (update 2 §2.11, P0a)
+//
+// The plan's facts on the HUD's own lines, drawn from TableHudInfo's Auto fields (ue-auto fills them; AutoOn means the
+// plan holds the seat now): the status over the bottom ("AUTOPLAY · GTO · Sharpness 93%" with [K] Take over), the think
+// in the prompt's place ("GTO is thinking…" with the keys that take the wheel) and, once played, the plan's last action;
+// the next hand's take-over window ("AUTO RESUMES"); and the skip card over the dimmed table. The plan's move is never on
+// screen before it's played (U1): the think line names no move. The host's own Status and Prompt win their places.
+
+/** "GTO is thinking…" for the style the host named (by its name or id). */
+std::string AutoThinkLine(const std::string& Name)
+{
+	for (const style::Info& Inf : style::Catalog())
+	{
+		if (Name == Inf.Name || Name == Inf.Id)
+		{
+			return autoplay::ThinkingLine(Inf.S);
+		}
+	}
+	return (Name.empty() ? std::string("Your plan") : Name) + " is thinking\xE2\x80\xA6";
+}
+
+/** "AUTOPLAY · GTO · Sharpness 93%", the speed beside the style when it's above 1x ("GTO 4x"). */
+std::string AutoStatusText(const TableHudInfo& I)
+{
+	const std::string Style = I.AutoStyle.empty() ? std::string("YOUR PLAN") : I.AutoStyle;
+	const std::string Speed = I.AutoSpeed > 1 ? " " + std::to_string(I.AutoSpeed) + "x" : std::string();
+	const int Sharp = static_cast<int>(std::lround(std::clamp(I.AutoSharp, 0.0, 1.0) * 100.0));
+	return "AUTOPLAY \xC2\xB7 " + Style + Speed + " \xC2\xB7 Sharpness " + std::to_string(Sharp) + "%";
+}
+
+/** The Status line's room: the HUD's own width rule for it. */
+float StatusWidth(float W)
+{
+	return W - 2.0f * Margin - 900.0f > 400.0f ? W - 900.0f : 520.0f;
+}
+
+/** The live skip's card over the dimmed table: the style, how far it's got, and how to stop it. */
+void LiveSkipCard(Canvas& C, const TableHudInfo& I, double Now)
+{
+	const float W = C.Width();
+	const float Cw = std::min(720.0f, W - 2.0f * Margin);
+	const float Ch = 176.0f;
+	const float X = W * 0.5f - Cw * 0.5f;
+	const float Y = Tall * 0.4f;
+	C.FillRoundRect({X, Y, Cw, Ch}, 16.0f, Paint(Fa(Midnight, 0.94f)));
+	C.StrokeRoundRect({X + 0.5f, Y + 0.5f, Cw - 1.0f, Ch - 1.0f}, 16.0f, Fa(Ash, 0.14f), 1.0f);
+	C.FillRect({X + 20.0f, Y, 60.0f, 3.0f}, Paint(Hot));
+	const std::string Head = "SKIPPING \xC2\xB7 " + Up(I.AutoStyle.empty() ? std::string("YOUR PLAN") : I.AutoStyle);
+	const float Hw = std::min(Cw - 40.0f, TrackedWidth(C, Head, 24.0f, 900, 4.0f));
+	const float Fit = Hw / std::max(1.0f, TrackedWidth(C, Head, 24.0f, 900, 4.0f));
+	TrackedText(C, Head, W * 0.5f, Y + 54.0f, 24.0f * Fit, 900, Ash, 4.0f * Fit, Align::Center);
+	// A sweep under the header: it's working (the hands go by off screen, between the frames).
+	const float Track = Cw - 120.0f;
+	const float At = static_cast<float>(std::fmod(std::max(0.0, Now) * 0.45, 1.0));
+	C.FillRect({X + 60.0f, Y + 70.0f, Track, 2.0f}, Paint(Fa(Ash, 0.12f)));
+	C.FillRect({X + 60.0f + Track * At * 0.8f, Y + 70.0f, Track * 0.2f, 2.0f}, Paint(Fa(Hot, 0.85f)));
+	if (!I.SkipLine.empty())
+	{
+		C.Text(I.SkipLine, W * 0.5f, Y + 106.0f, Ts(18.0f, 600, Ice, Align::Center, Baseline::Alphabetic, false, Cw - 40.0f));
+	}
+	KeyedLine(C, std::string(), 17.0f, 600, Ash, {{"stopskip", "Stop the skip"}}, ControlContext::Table, I.Gamepad, W * 0.5f, Y + 148.0f, 17.0f, 1.0f, Cw - 40.0f);
+}
+
+void AutoLines(Canvas& C, const TableHudInfo& I, double Now)
+{
+	if (I.SkipOn)
+	{
+		LiveSkipCard(C, I, Now);
+		return;
+	}
+	if (!I.AutoOn || I.YourTurn || I.OnAir)
+	{
+		// The decision's the player's (a stop rule, a take-over): the ladder says so. On the broadcast's view the lower
+		// third has the bottom of the screen, and the stream shows nothing of the plan (U1).
+		return;
+	}
+	const float W = C.Width();
+	const bool Pad = I.Gamepad;
+	const ControlContext Ctx = ControlContext::Table;
+	// The status: the hand after a take-over has the plan back unless K keeps the seat the player's (§2.6.5).
+	const bool Window = I.AutoResumeWindow > 0.0f;
+	const bool Status = I.Status.empty();
+	const std::string Lead = Window ? std::string("AUTO RESUMES") : AutoStatusText(I);
+	const std::vector<Choice> LeadKeys = {{"auto", Window ? "Keep playing" : "Take over"}};
+	// The think in the prompt's place (whose, never what: any action key now takes the wheel and does nothing else), or
+	// the plan's last action once it's played.
+	const bool Think = I.Prompt.empty() && I.AutoDeciding;
+	const std::string Last = I.Prompt.empty() && !I.AutoDeciding && !I.AutoLastAction.empty()
+		? Up(I.AutoStyle.empty() ? std::string("YOUR PLAN") : I.AutoStyle) + " \xC2\xB7 " + I.AutoLastAction
+		: std::string();
+	const std::string Thinking = Think ? AutoThinkLine(I.AutoStyle) : std::string();
+	const std::vector<Choice> ThinkKeys = {{"wheel", "Take the wheel"}};
+	// A soft midnight shade under the lines, as under the hero block, so they read over a bright felt.
+	float Wide = 0.0f;
+	float Top = Tall;
+	float Bottom = 0.0f;
+	if (Status)
+	{
+		Wide = std::max(Wide, KeyedLine(C, Lead, 17.0f, Window ? 800 : 600, Gold, LeadKeys, Ctx, Pad, W * 0.5f, Tall - 190.0f, 17.0f, 1.0f, StatusWidth(W), false));
+		Top = Tall - 214.0f;
+		Bottom = Tall - 174.0f;
+	}
+	if (Think || !Last.empty())
+	{
+		Wide = std::max(Wide, Think ? KeyedLine(C, Thinking, 18.0f, 700, Ash, ThinkKeys, Ctx, Pad, W * 0.5f, Tall - 120.0f, 16.0f, 1.0f, W - 2.0f * Margin, false)
+									: std::min(W - 2.0f * Margin, TrackedWidth(C, Last, 15.0f, 800, 1.8f)));
+		Top = std::min(Top, Tall - 146.0f);
+		Bottom = Tall - 106.0f;
+	}
+	if (Wide > 0.0f)
+	{
+		C.GlowRoundRect({W * 0.5f - Wide * 0.5f - 28.0f, Top - 8.0f, Wide + 56.0f, Bottom - Top + 16.0f}, 18.0f, Fa(Midnight, 0.55f), 30.0f);
+	}
+	if (Status)
+	{
+		const float Lw = KeyedLine(C, Lead, 17.0f, Window ? 800 : 600, Gold, LeadKeys, Ctx, Pad, W * 0.5f, Tall - 190.0f, 17.0f, 1.0f, StatusWidth(W));
+		if (Window)
+		{
+			const float Left = std::clamp(I.AutoResumeWindow / static_cast<float>(autoplay::ResumeWindowSeconds), 0.0f, 1.0f);
+			C.FillRect({W * 0.5f - Lw * 0.5f, Tall - 178.0f, Lw, 3.0f}, Paint(Rgba(0, 0, 0, 0.45f)));
+			C.FillRect({W * 0.5f - Lw * 0.5f, Tall - 178.0f, Lw * Left, 3.0f}, Paint(Gold));
+		}
+	}
+	if (Think)
+	{
+		KeyedLine(C, Thinking, 18.0f, 700, Ash, ThinkKeys, Ctx, Pad, W * 0.5f, Tall - 120.0f, 16.0f, 1.0f, W - 2.0f * Margin);
+	}
+	else if (!Last.empty())
+	{
+		const float Lw = std::min(W - 2.0f * Margin, TrackedWidth(C, Last, 15.0f, 800, 1.8f));
+		TrackedText(C, Last, W * 0.5f - Lw * 0.5f, Tall - 120.0f, 15.0f, 800, Fa(Ice, 0.95f), 1.8f);
 	}
 }
 
@@ -1810,14 +1997,15 @@ void Hints(Canvas& C, const TableHudInfo& I, double Now)
 		return;
 	}
 	const float A = std::min(Ease(Since / 0.6), Ease((14.0 - Since) / 1.0)) * 0.9f;
-	const std::vector<std::string> Ids = {"peek", "study", "breathe", "card", "view", "stand", "pace", "leave"};
+	// (While the plan holds the seat T steps its watch speed, not the table's pace.)
+	const std::vector<std::string> Ids = {"peek", "study", "breathe", "card", "view", "stand", I.AutoOn ? "watch" : "pace", "leave"};
 	const float Right = C.Width() - Margin;
 	const float RowH = I.Gamepad ? 34.0f : 32.0f;
 	float Y = 360.0f;
 	for (const std::string& Id : Ids)
 	{
 		const Control* K = FindControl(ControlContext::Table, Id);
-		if (!K)
+		if (!K || !HasKeys(*K, I.Gamepad))
 		{
 			continue;
 		}
@@ -1862,12 +2050,22 @@ void DrawTableHud(Canvas& C, const TableHudInfo& I, double Now)
 		Arrival(C, I, Now);
 		return;
 	}
-	// In the world first: the plates and the pot, under the panels.
-	for (const PlacedPlate& Pl : LayoutPlates(I, W, Now))
+	// A live skip (update 2): the table dims behind the skip card, and what's on the felt stays off it (the hands go by off
+	// screen, so the plates and the pot would be stale). The clock card, the time and the player's stack keep counting.
+	const bool Skip = I.SkipOn;
+	if (Skip)
 	{
-		DrawPlate(C, I, I.Plates[static_cast<size_t>(Pl.Index)], Pl, Now);
+		C.FillRect({0.0f, 0.0f, W, Tall}, Paint(Rgba(0, 0, 0, 0.5f)));
 	}
-	if (I.PotOnScreen && I.Pot > 0)
+	// In the world first: the plates and the pot, under the panels.
+	if (!Skip)
+	{
+		for (const PlacedPlate& Pl : LayoutPlates(I, W, Now))
+		{
+			DrawPlate(C, I, I.Plates[static_cast<size_t>(Pl.Index)], Pl, Now);
+		}
+	}
+	if (I.PotOnScreen && I.Pot > 0 && !Skip)
 	{
 		PotTag(C, I);
 	}
@@ -1884,7 +2082,10 @@ void DrawTableHud(Canvas& C, const TableHudInfo& I, double Now)
 	}
 	Banner(C, I, Now);
 	Whispers(C, I, Now);
-	StudyCaption(C, I, Now);
+	if (!Skip)
+	{
+		StudyCaption(C, I, Now);
+	}
 	if (I.OnAir)
 	{
 		LowerThird(C, I, Now);
@@ -1892,11 +2093,11 @@ void DrawTableHud(Canvas& C, const TableHudInfo& I, double Now)
 	else
 	{
 		HeroBlock(C, I, Now);
-		if (I.LastHand)
+		if (I.LastHand && !Skip)
 		{
 			LastHandCard(C, I, Now);
 		}
-		if (I.YourTurn)
+		if (I.YourTurn && !Skip)
 		{
 			Ladder(C, I, Now);
 		}
@@ -1909,9 +2110,10 @@ void DrawTableHud(Canvas& C, const TableHudInfo& I, double Now)
 		C.Text(I.Prompt, W * 0.5f, Tall - 120.0f, Ts(18.0f, 700, Ash, Align::Center, Baseline::Alphabetic, false, W - 2.0f * Margin));
 	}
 	StatusLines(C, I);
+	AutoLines(C, I, Now);
 	Summary(C, I);
 	NoteAndChoices(C, I, Now);
-	if (!I.YourTurn)
+	if (!I.YourTurn && !Skip)
 	{
 		Hints(C, I, Now);
 	}
@@ -1967,7 +2169,8 @@ std::vector<FieldRow> FieldCounts(const Tournament& T, const std::vector<std::pa
 
 const std::vector<std::string>& TableCardPages()
 {
-	static const std::vector<std::string> Pages = {"READS", "HANDS", "PAYOUTS", "FIELD", "NIGHT"};
+	// Update 2 (§2.6.2): PLAY, the sixth, appended (the hosts index the pages by number and count them from here).
+	static const std::vector<std::string> Pages = {"READS", "HANDS", "PAYOUTS", "FIELD", "NIGHT", "PLAY"};
 	return Pages;
 }
 
@@ -2238,6 +2441,261 @@ void FieldPage(Canvas& C, const TableCardInfo& I, const Rect& R)
 		}
 	}
 }
+
+// ------------------------------------------------------------------ the PLAY page (update 2 §2.6.2)
+//
+// AI AUTOPLAY at the table: the styles (the one the page shows in full: its edge, its swing, where it's best, and why it
+// can't be picked here when it can't), the plan's Sharpness and why, the watch speed, the skip's targets and the stops.
+// The table card is only up while d-pad up is held, so the page answers to what's free under that hold (the footer says
+// which): the arrows or A pick the style, K or A held turns the plan on with it or off, 1 to 5 or X pick the target, and
+// Enter or X held skips. On Dee's first night the page is her line and nothing else. ue-auto fills TableCardInfo::Play.
+
+/** When the plan's Sharpness was read: "Set when your plan took the seat, at 9:47 PM." (in TableUiCopy). */
+std::string PlaySetLine(double World)
+{
+	return "Set when your plan took the seat, at " + ClockString(World) + ".";
+}
+
+/**
+ * The warning under a sloppy plan's number (autoplay::SharpWarning's own words, under 70%), its causes read back off the
+ * panel's SharpWhy, which says them in autoplay's words ("on tilt", "tired", "running on empty").
+ */
+std::string PlayWarning(const autoplay::Panel& P)
+{
+	const bool Tilted = P.SharpWhy.find("on tilt") != std::string::npos;
+	const bool Tired = P.SharpWhy.find("tired") != std::string::npos;
+	const bool Empty = P.SharpWhy.find("running on empty") != std::string::npos;
+	return autoplay::SharpWarning(P.Sharp, P.Form, Tilted ? 1.0 : 0.0, Tired, Empty);
+}
+
+/** A word in a pill (a style, a speed, a target): filled when it's the one picked, faded when it can't be. The width. */
+float PlayPill(Canvas& C, const std::string& Word, float X, float Y, float H, float Size, bool On, bool Dim)
+{
+	const float W = C.Measure(Word, Size, 800) + 26.0f;
+	if (On)
+	{
+		C.FillRoundRect({X, Y, W, H}, H * 0.5f, Paint(Fa(Hot, Dim ? 0.45f : 0.92f)));
+	}
+	else
+	{
+		C.FillRoundRect({X, Y, W, H}, H * 0.5f, Paint(Fa(Midnight, 0.85f)));
+		C.StrokeRoundRect({X + 0.5f, Y + 0.5f, W - 1.0f, H - 1.0f}, H * 0.5f, Fa(Ash, Dim ? 0.08f : 0.22f), 1.0f);
+	}
+	const Color Ink = On ? (Dim ? Fa(Ash, 0.85f) : Hex(0x14070a)) : Fa(Ash, Dim ? 0.42f : 0.95f);
+	C.Text(Word, X + W * 0.5f, Y + H * 0.5f, Ts(Size, 800, Ink, Align::Center, Baseline::Middle));
+	return W;
+}
+
+/** How the page's style gets the seat and how to take it back, in each device's keys (in TableUiCopy). */
+std::string PlayHowLine(bool Pad)
+{
+	return Pad ? "Hold A and your plan takes the seat in the style shown; hold it again to take the seat back. While it thinks, X, A or Y takes the wheel "
+				 "for the hand. It never shows a move before it makes it."
+			   : "Press K and your plan takes the seat in the style shown; press it again to take the seat back. While it thinks, any action key takes the "
+				 "wheel for the hand. It never shows a move before it makes it.";
+}
+
+/** Pills in rows inside [X, X + W) from the top Y, the On one filled; Digits puts the keyboard's 1 to 5 over the first
+ *  five. Returns the bottom. */
+float PlayPills(Canvas& C, const std::vector<std::string>& Words, int On, const std::vector<bool>& Dim, float X, float Y, float W, float H, float Size, bool Digits)
+{
+	const float Over = Digits ? 18.0f : 0.0f;
+	float Px = X;
+	float Py = Y + Over;
+	for (size_t K = 0; K < Words.size(); ++K)
+	{
+		const float Pw = C.Measure(Words[K], Size, 800) + 26.0f;
+		if (Px > X && Px + Pw > X + W)
+		{
+			Px = X;
+			Py += H + 10.0f + Over;
+		}
+		if (Digits && K < 5)
+		{
+			C.Text(std::to_string(K + 1), Px + Pw * 0.5f, Py - 6.0f, Ts(13.0f, 700, Fa(Ice, 0.75f), Align::Center));
+		}
+		PlayPill(C, Words[K], Px, Py, H, Size, static_cast<int>(K) == On, K < Dim.size() && Dim[K]);
+		Px += Pw + 8.0f;
+	}
+	return Py + H;
+}
+
+void PlayPage(Canvas& C, const TableCardInfo& I, const Rect& R)
+{
+	const TableCardInfo::PlayPage& P = I.Play;
+	const autoplay::Panel& Pn = P.Panel;
+	const bool Dees = I.Where == Venue::BackRoom;
+	const float Y = R.Y + 18.0f;
+	// The header (system UI may say "AI autoplay", U1), and the plan's state at the right.
+	TrackedText(C, autoplay::Text(autoplay::Words::PanelTitle), R.X, Y, 15.0f, 800, Ash, 2.0f);
+	const bool On = Pn.On || Pn.Now.M != autoplay::Mode::Off;
+	const std::string State = !On ? std::string("OFF") : Pn.Now.M == autoplay::Mode::Skip ? std::string("SKIPPING") : "WATCHING \xC2\xB7 " + autoplay::SpeedName(Pn.Now.Speed);
+	PlayPill(C, State, R.X + R.W - (C.Measure(State, 13.0f, 800) + 26.0f), Y - 20.0f, 28.0f, 13.0f, On, false);
+	if (!P.Locked.empty())
+	{
+		// Dee's first night: her line, and nothing starts.
+		float Ly = Y + 84.0f;
+		for (const std::string& L : WrapText(C, P.Locked, std::min(R.W, 860.0f), 24.0f, 500))
+		{
+			C.Text(L, R.X, Ly, Ts(24.0f, 500, Ash));
+			Ly += 36.0f;
+		}
+		return;
+	}
+	const float Lw = std::floor(R.W * 0.58f);
+	const float Rx = R.X + Lw + 40.0f;
+	const float Rw = R.X + R.W - Rx;
+	// ---- the styles: every one on the menu, the one shown in full
+	const std::vector<style::Info>& All = Pn.Styles.empty() ? style::Catalog() : Pn.Styles;
+	std::vector<std::string> Names;
+	std::vector<bool> Grey;
+	int Pick = -1;
+	const style::Info* Shown = nullptr;
+	std::string ShownWhy;
+	for (const style::Info& Inf : All)
+	{
+		if (Inf.Hidden)
+		{
+			continue; // the ship rule (§2.5): not on the menu
+		}
+		const size_t Ix = static_cast<size_t>(Inf.S);
+		const std::string Why = Ix < Pn.Greyed.size() ? Pn.Greyed[Ix] : autoplay::CantPick(Inf.S, Dees ? 2 : 1, false);
+		if (Inf.S == Pn.Now.S)
+		{
+			Pick = static_cast<int>(Names.size());
+			Shown = &Inf;
+			ShownWhy = Why;
+		}
+		Names.push_back(Inf.Name);
+		Grey.push_back(!Why.empty());
+	}
+	if (!Shown)
+	{
+		// The plan's own style is off the menu (a save from before the ship rule hid it): still shown in full, with why.
+		Shown = &style::InfoOf(Pn.Now.S);
+		const size_t Ix = static_cast<size_t>(Pn.Now.S);
+		ShownWhy = Ix < Pn.Greyed.size() && !Pn.Greyed[Ix].empty() ? Pn.Greyed[Ix] : autoplay::CantPick(Pn.Now.S, Dees ? 2 : 1, false);
+	}
+	float Ly = Y + 46.0f;
+	TrackedText(C, "STYLE", R.X, Ly, 13.0f, 800, Gold, 2.0f);
+	Ly = PlayPills(C, Names, Pick, Grey, R.X, Ly + 14.0f, Lw, 32.0f, 14.0f, false) + 16.0f;
+	if (Shown)
+	{
+		const float Dh = std::max(120.0f, std::min(214.0f, R.Y + R.H - Ly));
+		C.FillRoundRect({R.X, Ly, Lw, Dh}, 14.0f, Paint(Fa(Navy, 0.7f)));
+		C.StrokeRoundRect({R.X + 0.5f, Ly + 0.5f, Lw - 1.0f, Dh - 1.0f}, 14.0f, Fa(Ash, 0.12f), 1.0f);
+		const float Dx = R.X + 22.0f;
+		const float Nw = C.Text(Shown->Name, Dx, Ly + 46.0f, Ts(28.0f, 900, ShownWhy.empty() ? Ash : Fa(Ash, 0.6f)));
+		// The swing, in its word (never colour alone).
+		const std::string Swing = style::SwingName(Shown->Var);
+		const Color SwingCol = Shown->Var == style::Swing::Steady ? Teal : Shown->Var == style::Swing::Swingy ? Gold : Shown->Var == style::Swing::Wild ? Hot : Ice;
+		const float Sw = TrackedWidth(C, Swing, 13.0f, 800, 2.0f) + 24.0f;
+		C.StrokeRoundRect({Dx + Nw + 20.0f, Ly + 24.0f, Sw, 26.0f}, 13.0f, Fa(SwingCol, 0.8f), 1.5f);
+		TrackedText(C, Swing, Dx + Nw + 32.0f, Ly + 42.0f, 13.0f, 800, SwingCol, 2.0f);
+		float Ey = Ly + 82.0f;
+		const std::vector<std::string> Edge = WrapText(C, Shown->Edge ? Shown->Edge : "", Lw - 44.0f, 17.0f, 400);
+		for (size_t K = 0; K < Edge.size() && K < 3 && Ey < Ly + Dh - 60.0f; ++K)
+		{
+			C.Text(Edge[K], Dx, Ey, Ts(17.0f, 400, Fa(Ash, 0.92f), Align::Left, Baseline::Alphabetic, false, Lw - 44.0f));
+			Ey += 26.0f;
+		}
+		if (!ShownWhy.empty())
+		{
+			C.Text(ShownWhy, Dx, Ly + Dh - 52.0f, Ts(16.0f, 700, Flame, Align::Left, Baseline::Alphabetic, false, Lw - 44.0f));
+		}
+		const float Bw = TrackedText(C, "BEST IN", Dx, Ly + Dh - 22.0f, 13.0f, 800, Ice, 2.0f);
+		C.Text(Shown->BestIn ? Shown->BestIn : "", Dx + Bw + 12.0f, Ly + Dh - 22.0f, Ts(16.0f, 600, Ash, Align::Left, Baseline::Alphabetic, false, Lw - 44.0f - Bw - 12.0f));
+		// How it takes the seat and gives it back, under the style (where there's room).
+		float Hy = Ly + Dh + 40.0f;
+		for (const std::string& L : WrapText(C, PlayHowLine(I.Gamepad), Lw, 16.0f, 400))
+		{
+			if (Hy > R.Y + R.H)
+			{
+				break;
+			}
+			C.Text(L, R.X, Hy, Ts(16.0f, 400, Fa(Ice, 0.9f), Align::Left, Baseline::Alphabetic, false, Lw));
+			Hy += 24.0f;
+		}
+	}
+	// ---- Sharpness: the number, why, when it was read, and a warning when the plan will be sloppy
+	float Ry = Y + 46.0f;
+	TrackedText(C, "SHARPNESS", Rx, Ry, 13.0f, 800, Gold, 2.0f);
+	const std::string Warn = PlayWarning(Pn);
+	const int Sharp = static_cast<int>(std::lround(std::clamp(Pn.Sharp, 0.0, 1.0) * 100.0));
+	const float Nw = C.Text(std::to_string(Sharp) + "%", Rx, Ry + 50.0f, Ts(40.0f, 900, Warn.empty() ? Ash : Flame, Align::Left, Baseline::Alphabetic, true));
+	{
+		const std::vector<std::string> Why = WrapText(C, Pn.SharpWhy, std::max(60.0f, Rw - Nw - 18.0f), 16.0f, 500);
+		float Wy = Ry + (Why.size() > 1 ? 28.0f : 42.0f);
+		for (size_t K = 0; K < Why.size() && K < 2; ++K)
+		{
+			C.Text(Why[K], Rx + Nw + 18.0f, Wy, Ts(16.0f, 500, Fa(Ash, 0.9f), Align::Left, Baseline::Alphabetic, false, Rw - Nw - 18.0f));
+			Wy += 22.0f;
+		}
+	}
+	Ry += 82.0f;
+	if (On && Pn.SharpSetAt > 0.0)
+	{
+		C.Text(PlaySetLine(Pn.SharpSetAt), Rx, Ry, Ts(14.0f, 400, Fa(Ice, 0.95f), Align::Left, Baseline::Alphabetic, false, Rw));
+		Ry += 24.0f;
+	}
+	if (!Warn.empty())
+	{
+		const std::vector<std::string> Lines = WrapText(C, Warn, Rw, 15.0f, 600);
+		for (size_t K = 0; K < Lines.size() && K < 3; ++K)
+		{
+			C.Text(Lines[K], Rx, Ry, Ts(15.0f, 600, Flame, Align::Left, Baseline::Alphabetic, false, Rw));
+			Ry += 22.0f;
+		}
+	}
+	Ry += 22.0f;
+	// ---- the watch speed (T at the table, or right on the d-pad; no 8x at Dee's: a room of people you know)
+	TrackedText(C, "WATCH SPEED", Rx, Ry, 13.0f, 800, Gold, 2.0f);
+	if (const Control* Watch = FindControl(ControlContext::Table, "watch"))
+	{
+		const std::string Where = "AT THE TABLE";
+		const float Tw = TrackedWidth(C, Where, 13.0f, 700, 2.0f);
+		const float Gw = ControlGlyphs(C, *Watch, I.Gamepad, 0.0f, 0.0f, 0.9f, false);
+		ControlGlyphs(C, *Watch, I.Gamepad, Rx + Rw - Tw - 10.0f - Gw, Ry + 4.0f, 0.9f);
+		TrackedText(C, Where, Rx + Rw, Ry, 13.0f, 700, Fa(Ice, 0.8f), 2.0f, Align::Right);
+	}
+	std::vector<std::string> Speeds = {"1x", "2x", "4x"};
+	if (!Dees)
+	{
+		Speeds.push_back("8x");
+	}
+	int SpeedOn = -1;
+	for (size_t K = 0; K < Speeds.size(); ++K)
+	{
+		SpeedOn = Speeds[K] == autoplay::SpeedName(Pn.Now.Speed) ? static_cast<int>(K) : SpeedOn;
+	}
+	Ry = PlayPills(C, Speeds, SpeedOn, {}, Rx, Ry + 16.0f, Rw, 30.0f, 14.0f, false) + 36.0f;
+	// ---- the skip: where it runs to (none at Dee's yet: a cash game has no result to skip to)
+	if (!P.Targets.empty())
+	{
+		TrackedText(C, "SKIP TO", Rx, Ry, 13.0f, 800, Gold, 2.0f);
+		Ry = PlayPills(C, P.Targets, P.Target, {}, Rx, Ry + 14.0f, Rw, 30.0f, 14.0f, !I.Gamepad) + 36.0f;
+	}
+	// ---- the stops (§2.6.4): a live skip always stops at the final table
+	if (!Dees)
+	{
+		std::string Stops;
+		for (const uint32_t Bit : {autoplay::StopFinalTable, autoplay::StopBubble, autoplay::StopMyAllIn, autoplay::StopBigPot, autoplay::StopPremium})
+		{
+			if ((Pn.Now.Stops & Bit) != 0 || Bit == autoplay::StopFinalTable)
+			{
+				Stops += (Stops.empty() ? "" : " \xC2\xB7 ") + std::string(autoplay::StopName(Bit));
+			}
+		}
+		TrackedText(C, "STOPS", Rx, Ry, 13.0f, 800, Gold, 2.0f);
+		Ry += 26.0f;
+		const std::vector<std::string> Lines = WrapText(C, Stops, Rw, 15.0f, 600);
+		for (size_t K = 0; K < Lines.size() && K < 2 && Ry < R.Y + R.H + 4.0f; ++K)
+		{
+			C.Text(Lines[K], Rx, Ry, Ts(15.0f, 600, Fa(Ash, 0.92f), Align::Left, Baseline::Alphabetic, false, Rw));
+			Ry += 22.0f;
+		}
+	}
+}
 } // namespace tablehud_detail
 
 void DrawTableCard(Canvas& C, const TableCardInfo& I, double Now)
@@ -2292,9 +2750,8 @@ void DrawTableCard(Canvas& C, const TableCardInfo& I, double Now)
 	case 1: HandsPage(C, I, Body); break;
 	case 2: PayoutsPage(C, I, Body); break;
 	case 3: FieldPage(C, I, Body); break;
-	default:
-		DrawNightLog(C, I.Night, I.NightTitle.empty() ? std::string("THE NIGHT") : I.NightTitle, Body, Now);
-		break;
+	case 4: DrawNightLog(C, I.Night, I.NightTitle.empty() ? std::string("THE NIGHT") : I.NightTitle, Body, Now); break;
+	default: PlayPage(C, I, Body); break;
 	}
 	// The footer: the units, and how to close it.
 	const float Fy = Y + Ch - 26.0f;
@@ -2307,7 +2764,27 @@ void DrawTableCard(Canvas& C, const TableCardInfo& I, double Now)
 	Let.Hold = false;
 	Fx += ControlGlyphs(C, Let, I.Gamepad, Fx, Fy, 0.9f) + 10.0f;
 	TrackedText(C, Close->Label, Fx, Fy - 2.0f, 13.0f, 700, Fa(Ice, 0.9f), 2.4f);
-	TrackedText(C, "YOUR DECISIONS WAIT", X + Cw - 30.0f, Fy - 2.0f, 13.0f, 700, Fa(Ice, 0.6f), 2.4f, Align::Right);
+	if (Pages[static_cast<size_t>(Page)] == "PLAY")
+	{
+		// The PLAY page's own keys, right (none on Dee's first night: nothing starts).
+		if (I.Play.Locked.empty())
+		{
+			std::vector<std::string> Ids = {"style", "auto", "autohold"};
+			if (!I.Play.Targets.empty())
+			{
+				Ids.push_back("target");
+				Ids.push_back("skip");
+			}
+			const float Kw = ControlRow(C, ControlContext::TableCard, Ids, I.Gamepad, 0.0f, 0.0f, 0.9f, false);
+			ControlRow(C, ControlContext::TableCard, Ids, I.Gamepad, X + Cw - 30.0f - Kw, Fy, 0.9f);
+		}
+	}
+	else
+	{
+		// While the card is up the player's decisions wait; a plan holding the seat doesn't (update 2: the qualifier).
+		const bool Plan = I.Play.Panel.On && !I.Play.Panel.TakenOver;
+		TrackedText(C, Plan ? "YOUR PLAN KEEPS PLAYING" : "YOUR DECISIONS WAIT", X + Cw - 30.0f, Fy - 2.0f, 13.0f, 700, Fa(Ice, 0.6f), 2.4f, Align::Right);
+	}
 }
 
 // ------------------------------------------------------------------ the room's clock screens
@@ -2486,7 +2963,9 @@ std::string TableSettingHelp(const std::string& Key, bool Gamepad)
 	}
 	if (Key == "tablepace")
 	{
-		return std::string("At a live table: how long the other players take to act, and how quickly a hand you've folded plays out. Your own decisions always wait for you. ") +
+		// (Update 2: the qualifier, landing with the copy lint's rule that "always wait for you" says "autoplay", §2.11.)
+		return std::string("At a live table: how long the other players take to act, and how quickly a hand you've folded plays out. Your own decisions wait for you, "
+						   "unless you've handed the seat to autoplay. ") +
 			(Gamepad ? "Right on the d-pad changes it at the table." : "T changes it at the table.");
 	}
 	if (Key == "stackreadout")
@@ -2531,6 +3010,10 @@ std::vector<std::pair<std::string, std::string>> TableUiCopy()
 		{"payouts.short", "3 more out and everyone left is paid. A min-cash is $243."},
 		{"hands.folded", "Folded around."},
 		{"hands.showed", "Rick showed down."},
+		// Update 2: the PLAY page's own sentence (its other lines are autoplay's and the styles', in their inventories).
+		{"play.sharpset", tablehud_detail::PlaySetLine(21.0 * 60.0 + 47.0)},
+		{"play.how.pad", tablehud_detail::PlayHowLine(true)},
+		{"play.how.keys", tablehud_detail::PlayHowLine(false)},
 	};
 	Out.insert(Out.end(), Lines.begin(), Lines.end());
 	const std::vector<std::pair<std::string, std::string>> Desk = desk_detail::DeskCopy();

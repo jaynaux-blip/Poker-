@@ -6,7 +6,8 @@
 // - the plates (the AI stack sizes): on every live seat, always, faded off the player's turn, never over the faces,
 //   cards and chips the host marks or each other, edge plates for seats off screen (apart when several share an edge,
 //   off a face at the edge, at the stack's x on the bottom edge for a stack below the screen), the same layout every frame;
-// - the table card's five pages (table_card_reads ... table_card_night), the room's clock screens, the desk and the cage
+// - the table card's first five pages (table_card_reads ... table_card_night; update 2's sixth, PLAY, and the plan's HUD
+//   lines are in ui_seg_tableauto.cpp), the room's clock screens, the desk and the cage
 //   (desk_register_funding, cage_receipt_split);
 // - ControlParity (no table action on B; all in is a hold on both devices; Y held 0.2 s raises, 0.5 s does nothing,
 //   1.1 s goes all in, and a held Y never raises first), SettingsMigration (the AUDIO and GAMEPLAY rows), the caption
@@ -946,14 +947,15 @@ void RoomClocks()
 void ControlParity()
 {
 	using ss::ui::ControlContext;
-	// No table action on B but backing out; all in is a hold on both devices.
+	// No table action on B but backing out (update 2: stopping a skip backs out of it too); all in is a hold on both
+	// devices.
 	bool OnlyBack = true;
 	for (const ss::ui::Control& K : ss::ui::Controls(ControlContext::Table))
 	{
 		for (const std::string& Pad : {std::string(K.Pad)})
 		{
 			const bool B = Pad == "B" || Pad.rfind("B ", 0) == 0 || Pad.find(" B") != std::string::npos;
-			OnlyBack = OnlyBack && (!B || std::string(K.Id) == "back");
+			OnlyBack = OnlyBack && (!B || std::string(K.Id) == "back" || std::string(K.Id) == "stopskip");
 		}
 	}
 	Expect(OnlyBack, "ControlParity: nothing at the table is on B but backing out");

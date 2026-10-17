@@ -378,7 +378,9 @@ struct View
 	double RentDeadline = 0.0;
 	int Day = 0;
 	double World = 0.0;
-	double RoiRank = 0.0;                                     // the online ROI's rank among the regulars (0..1)
+	// The online ROI's rank among the regulars (0..1); 0 under 200 paid online events; -1 unknown, too few regulars on
+	// record to rank against (World::RoiRank: a fresh world's first week or two). Mrs. Park reads the sample then (stake::List).
+	double RoiRank = 0.0;
 	std::map<std::string, Chips> Rolls;                       // the backers' bankrolls
 	std::map<std::string, std::vector<std::string>> Playing; // event id -> the people the world has in it
 	std::vector<Patron> Patrons;

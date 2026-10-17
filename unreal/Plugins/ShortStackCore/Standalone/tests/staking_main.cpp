@@ -1,6 +1,7 @@
 // staking_backing (next_segment_spec §7.6, suite 11): core-stake's tests.
 //   1 event-stake vectors (Tests/staking_vectors.txt) and Lou's stake through register and settle;
 //   2 pieces: rounding, deterministic fill plans, the one line at registration, refund with markup, owed created once;
+//     2b Mrs. Park's gate with the online rank unknown (update 2 bug 6: she reads the sample);
 //   3 swaps both ways, NPC payment timing;
 //   4 a scripted 40-event package: makeup carried, top-ups, the chop, the 90-day cut-loose, Sam's garnish;
 //   5 conservation to the cent; 6 idempotence with a save round trip between repeats;
@@ -21,6 +22,7 @@
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/TableTalk.h"
+#include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 
 #include <algorithm>
@@ -467,6 +469,97 @@ void Pieces()
 			SalSaid = SalSaid || (T.first == "Sal" && T.second.find("par") != std::string::npos);
 		}
 		Expect(Tx.size() == 4 && Again.empty() && SalSaid, "pieces: Lou, Mrs. Park and Dre text as they buy, Sal says why he won't, once each");
+	}
+}
+
+// ------------------------------------------------------------------ 2b. Mrs. Park's gate (update 2 bug 6)
+
+/**
+ * Whether Mrs. Park takes 10% of the Sunday at par from a player she trusts (Trust 0.4: a friend buys at par whatever the
+ * price model believes), given the public record P (null: no record at all) and the online ROI's rank among the
+ * regulars (-1: unknown, too few regulars on record to rank against). Nobody else is in the view, and with no live
+ * sample the strangers expect a loss, so the plan holds her 10% or nothing.
+ */
+bool ParkBuys(const ss::rep::Public* P, double RoiRank)
+{
+	const live::Occurrence O = live::FindOccurrence("embercrest@6");
+	const double At = O.Start - 2.0 * Day;
+	stake::View V;
+	V.Rec = P;
+	V.World = At;
+	V.Day = ss::net::DayOf(At);
+	V.Bankroll = 100000;
+	V.RoiRank = RoiRank;
+	V.Regards["Mrs. Park"] = Knows(0.4f);
+	V.Rolls["Mrs. Park"] = 900000;
+	stake::Book B;
+	if (!stake::List(B, V, O.Id, 100, 1000, At, 0.0).empty() || B.Listings.size() != 1)
+	{
+		return false;
+	}
+	int Pct = 0;
+	for (const auto& Pl : B.Listings[0].Plan)
+	{
+		Pct += std::get<1>(Pl) == "Mrs. Park" ? std::get<2>(Pl) : 0;
+	}
+	return Pct == 100;
+}
+
+void ParkGate()
+{
+	// Mrs. Park wants a record (next_segment_spec §2.5): twenty live events, or an online ROI in the regulars' top half.
+	// World::RoiRank says -1 when fewer than 20 regulars have 200 events on record (a fresh world's first months). That's
+	// no verdict either way (update 2 SPEC §3.6): she reads the sample itself, 200 paid online events in profit.
+	const ss::rep::Public Profit = Record(220, 0.06, 550, 0, 0.0, 0.0);
+	const ss::rep::Public Loss = Record(220, -0.04, 550, 0, 0.0, 0.0);
+	const ss::rep::Public Even = Record(220, 0.0, 550, 0, 0.0, 0.0);
+	const ss::rep::Public Short = Record(199, 0.40, 550, 0, 0.0, 0.0);
+	const ss::rep::Public Exactly = Record(200, 0.001, 550, 0, 0.0, 0.0);
+	const ss::rep::Public Nothing = Record(0, 0.0, 0, 0, 0.0, 0.0);
+	const ss::rep::Public Live20 = Record(0, 0.0, 0, 20, 0.0, 0.0);
+	const ss::rep::Public Live19 = Record(220, -0.04, 550, 19, 0.0, 0.0);
+	// Unknown rank: the sample decides.
+	Expect(ParkBuys(&Profit, -1.0), "park: unknown rank, 220 paid events at +6%: she reads the sample and buys");
+	Expect(ParkBuys(&Exactly, -1.0), "park: unknown rank, exactly 200 paid events just in profit: she buys");
+	Expect(!ParkBuys(&Loss, -1.0), "park: unknown rank, 220 paid events at -4%: no piece");
+	Expect(!ParkBuys(&Even, -1.0), "park: unknown rank, 220 paid events at break-even: no piece (in profit means in profit)");
+	Expect(!ParkBuys(&Short, -1.0), "park: unknown rank, 199 paid events at +40%: the sample's too small");
+	Expect(!ParkBuys(&Nothing, -1.0) && !ParkBuys(nullptr, -1.0), "park: unknown rank and no record: no piece");
+	// A known rank decides as it always has: the sample never overrides it, either way.
+	Expect(ParkBuys(&Loss, 0.62) && ParkBuys(&Loss, 0.5), "park: a top-half rank (the median included) at -4%: she buys");
+	Expect(!ParkBuys(&Profit, 0.49) && !ParkBuys(&Profit, 0.0), "park: a bottom-half rank at +6%: no piece");
+	Expect(!ParkBuys(&Short, 0.0), "park: under 200 online events (the session passes 0): no piece");
+	// Twenty live events need no online record at all, ranked or not; nineteen leave it to the online record.
+	Expect(ParkBuys(&Live20, -1.0) && ParkBuys(&Live20, 0.0), "park: twenty live events: she buys whatever the online rank");
+	Expect(!ParkBuys(&Live19, -1.0) && ParkBuys(&Live19, 0.7), "park: nineteen live events: the online record decides");
+	// The 90-day pause after a late payment holds whatever the record says.
+	{
+		const live::Occurrence O = live::FindOccurrence("embercrest@6");
+		const double At = O.Start - 2.0 * Day;
+		stake::View V = ViewFor(Profit, At);
+		V.RoiRank = -1.0;
+		V.Regards["Mrs. Park"] = Knows(0.4f);
+		V.Rolls["Mrs. Park"] = 900000;
+		stake::Book B;
+		B.PausedUntil["Mrs. Park"] = At + 30.0 * Day;
+		Expect(!stake::List(B, V, O.Id, 100, 1000, At, 0.0).empty() && B.Listings.empty(), "park: unknown rank, a good sample, but she's paused: no piece");
+	}
+	// Why break-even. A fresh world ranks again once 20 regulars have 200 events on record (its second week, seed 7: day
+	// 12). Then the regulars' median sits near break-even, so the gate doesn't jump when the rank takes over from the
+	// sample. (Later the field's losers reach 200 events too and the median falls well below it; an established world's
+	// 1,600 regulars, survivors all, have a median near +5%, but an established world always has the regulars to rank.)
+	{
+		ss::world::World W;
+		W.Create(7u, 1440.0 + 127.0, ss::world::Start::Blank);
+		int Today = 1;
+		while (W.RoiRank(0.0) < 0.0 && Today < 60)
+		{
+			++Today;
+			W.AdvanceTo(static_cast<double>(Today) * Day + 600.0);
+		}
+		const double Breakeven = W.RoiRank(1e-9);
+		std::printf("  park: a fresh world ranks the regulars again on day %d; break-even then beats %s of them\n", Today, ss::Fixed(Breakeven, 3).c_str());
+		Expect(Today >= 3 && Today < 60 && Breakeven >= 0.3 && Breakeven <= 0.7, "park: when a fresh world ranks again, break-even sits near the regulars' median");
 	}
 }
 
@@ -1895,6 +1988,7 @@ int main()
 	Failures += copylint::SelfCheck();
 	EventStakes();
 	Pieces();
+	ParkGate();
 	Swaps();
 	Packages();
 	Conservation();

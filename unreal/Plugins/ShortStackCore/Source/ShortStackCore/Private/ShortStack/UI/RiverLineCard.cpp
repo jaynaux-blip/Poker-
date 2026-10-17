@@ -843,7 +843,9 @@ void RiverLine::HonorsPanel(const Rect& R, double Now)
 			Y += 32.0f;
 			if (Ballot.empty())
 			{
-				NetParagraph(*C, "Nobody's eligible yet.", P.X + 26.0f, Y, P.W - 52.0f, 14.0f, 500, pal::Dim, 21.0f, 3);
+				// A fresh start (update 2 §3.6, F4): everyone's ten years on the scene began on the first night.
+				NetParagraph(*C, S.WorldStart() == world::Start::Blank ? "Nobody's eligible yet. The Hall wants ten years on the scene." : "Nobody's eligible yet.", P.X + 26.0f, Y,
+					P.W - 52.0f, 14.0f, 500, pal::Dim, 21.0f, 3);
 			}
 			for (size_t K = 0; K < Ballot.size() && K < 8 && Y < P.Y + P.H - 40.0f; ++K)
 			{
@@ -923,7 +925,9 @@ void RiverLine::HonorsPanel(const Rect& R, double Now)
 			const float Ri = NetEase((Since - 0.06 * static_cast<double>(Shown++)) / 0.4);
 			const float A0 = C->GetAlpha();
 			C->SetAlpha(A0 * Ri);
-			NetSpaced(*C, std::to_string(It->first), P.X + 26.0f, Y, 10.5f, 800, pal::Gold, 1.6f);
+			// A fresh start's first season ran from Night One (update 2 §3.6, F6): "2026 · FROM OCT 6".
+			const bool Short = S.WorldStart() == world::Start::Blank && It->first == world::YearOf(net::NightOneDay);
+			NetSpaced(*C, std::to_string(It->first) + (Short ? " \xC2\xB7 FROM " + NetUpper(net::DateLabel(net::NightOneDay)) : std::string()), P.X + 26.0f, Y, 10.5f, 800, pal::Gold, 1.6f);
 			Y += 30.0f;
 			const std::pair<const world::Honor*, const char*> Lines[2] = {{It->second.first, "ONLINE"}, {It->second.second, "LIVE"}};
 			for (const auto& Ln : Lines)

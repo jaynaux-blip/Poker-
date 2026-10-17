@@ -8,6 +8,7 @@
 #include "ShortStack/Game/Shop.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
+#include "ShortStack/Game/TableTalk.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/Game/Wardrobe.h"
 #include "ShortStack/Game/Weather.h"
@@ -500,6 +501,47 @@ const Table& Lines()
 		{"*|rumour:sponsor-you", {"Heard {brand} is sponsoring you now. Look at you.", "Word is {brand} signed you. Don't forget the little people."}},
 		{"big-lou|rumour:sponsor-you", {"{brand} sponsors you? Huh. Respect."}},
 		{"sal|rumour:sponsor-you", {"{brand}, huh. Back in my day you paid for your own hat."}},
+
+		// ---------------------------------------------------------------- a fresh start's first month (update 2 §3.3 F9,
+		// core-econ): the books opened the night the player got to town, so the talk is about the firsts. Each is said
+		// only while it's true (TalkFreshGather): nobody claims a result this world didn't play (U5).
+		{"*|fresh:books", {"New books, everybody starting from nothing. Same night you got to town.",
+							  "Books opened the night you got here. Nobody's got a record yet. Not even the regulars."}},
+		{"*|fresh:wall-blank", {"Board up at the Embercrest's still blank. Somebody's name goes up first.",
+								   "Nobody's won a thing up the hill yet. First name on that board is anybody's."}},
+		{"*|fresh:first-nightly", {"Who takes the first Nightly? It's {when}. Everybody up the hill wants to be first.",
+									  "First Nightly in the books is {when}. Somebody's name goes up first. Could be yours."}},
+		{"*|fresh:first", {"{who} took the first {event} in the books {when}. {money}.", "First {event} in the new books went to {who} {when}. {money}."}},
+		{"*|fresh:first-wall", {"{who} won the {event} {when}. First name up on the Embercrest's board. {money}.",
+								   "{who}'s the first name on the board up the hill. Took the {event} {when}. {money}."}},
+		{"*|fresh:first-you", {"You took the first {event} in the books? They'll be telling that one a while."}},
+		{"*|fresh:first-wall-you", {"First name on the Embercrest's board, and it's yours. Don't let it go to your head."}},
+		{"*|fresh:twice", {"{who}'s got {count} wins up the hill already, and the books aren't a month old."}},
+		{"*|fresh:twice-you", {"{count} wins up the hill already, and the books aren't a month old. Easy now."}},
+		{"*|fresh:no-repeat", {"Nobody's won twice up the hill yet. Somebody will."}},
+		{"*|fresh:leader", {"{who}'s top of the points up at the Embercrest this month. Books aren't a month old."}},
+		{"*|fresh:leader-you", {"You're top of the points up at the Embercrest this month. Books are young. Enjoy it."}},
+		{"*|fresh:hill", {"You haven't played up the hill yet? First month of the new books. Good time to get your name on that board."}},
+		{"*|fresh:season", {"{leader}'s on top of the Season board since the books opened. Plenty of time to catch up."}},
+		{"*|fresh:season-you", {"You're on top of the Season board. Books are young. Don't get comfortable."}},
+		{"*|fresh:nightshift", {"{leader}'s on top of the first Night Shift board in the books."}},
+		{"mei|fresh:nightshift", {"{leader}'s leading the first Night Shift board in the books. I don't want to talk about it."}},
+		{"benny|fresh:nightshift", {"{leader}'s on top of the first Night Shift board in the books. I watch it on my phone. Don't tell Ray."}},
+		{"*|fresh:nightshift-new", {"{leader}'s on top of the Night Shift board."}},
+		{"mei|fresh:nightshift-new", {"{leader}'s leading the Night Shift board. I don't want to talk about it."}},
+		{"benny|fresh:nightshift-new", {"{leader}'s on top of the Night Shift board. I watch it on my phone. Don't tell Ray."}},
+		{"twitch|fresh:nightshift-new", {"{leader}'s winning the Night Shift. Good for them. I mean it. Mostly."}},
+		{"sal|fresh:hill", {"You been up to the Embercrest yet? New books. Get your name on that board before the regulars figure it out."}},
+		{"lonnie|fresh:wall-blank", {"Board up the hill's as bare as my chair on a Monday. Somebody's going up first."}},
+		{"lonnie|fresh:first-nightly", {"First Nightly in the books is {when}. Somebody's name goes up first. Why not a barber's?"}},
+		{"sal|fresh:books", {"New books. Everybody's even. Lasts about a week, then the good ones pull away."}},
+		{"sal|fresh:wall-blank", {"Board up at the Embercrest's empty. First name on it, people remember."}},
+		{"mei|fresh:season", {"{leader}'s top of the Season board. It's only been open since the sixth. I'm not worried. I'm a little worried."}},
+		{"mei|fresh:season-you", {"You're top of the Season board. It's early. I'm coming for you."}},
+		{"twitch|fresh:first-nightly", {"First Nightly in the books is {when}. I've got a feeling. I always have a feeling."}},
+		{"mrs-park|fresh:books", {"Thirty years of Warm-Ups, and the new books say I've played none. Fine. I'll start again."}},
+		{"big-lou|fresh:first", {"{who} took the first {event} in the books {when}. {money}. Somebody buy that table a round."}},
+		{"benny|fresh:season", {"{leader}'s top of the Season board. I check it more than the lotto numbers. Don't tell Ray."}},
 	};
 	return T;
 }
@@ -776,6 +818,241 @@ std::string EventLine(const TalkContext& C, const world::World& W, const world::
 	return Say(C, Topic, V);
 }
 
+// ------------------------------------------------------------------ a fresh start's first month (update 2 §3.3 F9)
+
+/** How long a fresh world's talk is about its firsts: the books' first thirty days. */
+constexpr int TalkFreshDays = 30;
+
+/** Days since a fresh world's books opened (0 on Night One), or -1: an established world, or past its first month. */
+int TalkFreshDay(const world::World& W, double Now)
+{
+	if (!W.Ready() || W.Began() != world::Start::Blank)
+	{
+		return -1;
+	}
+	const int Day = net::DayOf(Now) - net::DayOf(W.StartedAt());
+	return Day >= 0 && Day < TalkFreshDays ? Day : -1;
+}
+
+/** When one of the room's events is over (about: the schedule's hours, as the rumours read it). */
+double TalkFreshEnds(const live::Occurrence& O)
+{
+	return O.Start + O.T->Hours * 60.0;
+}
+
+enum class TalkFreshWon
+{
+	No,      // not over yet, or called off
+	Yes,     // the world has its winner
+	Unknown, // over, and the world no longer keeps (or never kept) its result: nothing is claimed about it
+};
+
+/** Whether one of the room's events was won by Now (its result has a first place). */
+TalkFreshWon TalkFreshWinnerOf(const world::World& W, const live::Occurrence& O, double Now)
+{
+	if (TalkFreshEnds(O) > Now || W.CancellationOf(O.Id))
+	{
+		return TalkFreshWon::No;
+	}
+	const net::EventResult* R = W.ResultOf(O.Id);
+	if (!R)
+	{
+		return TalkFreshWon::Unknown;
+	}
+	for (const net::Placing& P : R->FinalTable)
+	{
+		if (P.Place == 1)
+		{
+			return TalkFreshWon::Yes;
+		}
+	}
+	return TalkFreshWon::Unknown;
+}
+
+/**
+ * Whether anything the room played in this world's books (the events over after the books opened) was won before Ends,
+ * of the template Key only when it's given: false only when the world can show nobody was (every one of them called off,
+ * or not over by then). One it no longer keeps counts as won, so a first is never claimed that can't be checked.
+ */
+bool TalkFreshWonBefore(const world::World& W, double Ends, double Now, const char* Key, const std::string& Except)
+{
+	const double Opened = W.StartedAt();
+	for (int D = net::DayOf(Opened) - 1; D <= net::DayOf(Ends); ++D)
+	{
+		for (const live::Occurrence& O : live::Occurrences(D))
+		{
+			if (O.Id == Except || TalkFreshEnds(O) <= Opened || TalkFreshEnds(O) > Ends || (Key && std::string(O.T->Key) != Key))
+			{
+				continue;
+			}
+			if (TalkFreshWinnerOf(W, O, Now) != TalkFreshWon::No)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * How the block says one of the room's people in a first-month line, as the room's captions do (talk::CaptionName): by
+ * name when the room knows them by it or it's a whole name, else the first name in their handle ("brandon.m" is
+ * "Brandon"), else the handle as it is.
+ */
+std::string TalkFreshName(const std::string& Name)
+{
+	if (talk::KnownByName(Name) || Name.find(' ') != std::string::npos)
+	{
+		return Name;
+	}
+	const std::string First = talk::FirstNameIn(Name);
+	return First.empty() ? Name : First;
+}
+
+/** One of the room's events as a first-month line says it: its short name, but "Embercrest Sunday" ("the first Sunday in
+ *  the books" would be a day). */
+std::string TalkFreshEvent(const live::Occurrence& O)
+{
+	return std::string(O.T->Key) == "sunday" ? std::string(O.T->Name).substr(0, std::string(O.T->Name).find(" $")) : std::string(O.T->Short);
+}
+
+/**
+ * The winner rumour's words for one of the room's events in a fresh world's first month (Topic, or "" for the usual
+ * rumour:winner): the first of its kind in the books ("fresh:first"), and the first anyone won up the hill at all
+ * ("fresh:first-wall"); "-you" when it was the player.
+ */
+std::string TalkFreshFirst(const world::World& W, const live::Occurrence& O, double Now, bool You)
+{
+	if (TalkFreshDay(W, Now) < 0 || TalkFreshEnds(O) <= W.StartedAt())
+	{
+		return "";
+	}
+	if (!TalkFreshWonBefore(W, TalkFreshEnds(O), Now, nullptr, O.Id))
+	{
+		return You ? "fresh:first-wall-you" : "fresh:first-wall";
+	}
+	if (!TalkFreshWonBefore(W, TalkFreshEnds(O), Now, O.T->Key, O.Id))
+	{
+		return You ? "fresh:first-you" : "fresh:first";
+	}
+	return "";
+}
+
+/**
+ * The rest of a fresh world's first month on the block (update 2 §3.3 F9, §3.5), about the room up the hill and the
+ * boards since the books opened: the board by the Embercrest's desk still blank, the first Nightly still to come, nobody
+ * with two wins yet (once three have won) or somebody with two already, the room's points leader this month, the player
+ * not up the hill yet (once a week), the Season board's leader, and in the first week the books themselves. Each only
+ * while it's true, from what this world has played; each a one-time key (the day's, the week's, the person's, the
+ * count's). Nothing here is said in an established world, or about who played whose hands (U1).
+ */
+void TalkFreshGather(const Session& S, TalkContext& C)
+{
+	const world::World& W = S.Living();
+	const double Now = C.World;
+	const int Fresh = TalkFreshDay(W, Now);
+	if (Fresh < 0)
+	{
+		return;
+	}
+	const std::string Today = std::to_string(C.Day);
+	// Wins up the hill: the player's, and the most any of the world's people has (the first by id on a tie).
+	const int HeroWins = W.HeroRoom().Wins;
+	int Wins = HeroWins;
+	const world::Npc* Most = nullptr;
+	for (const world::Npc& N : W.People())
+	{
+		Wins += N.Room.Wins;
+		Most = N.Room.Wins > 0 && (!Most || N.Room.Wins > Most->Room.Wins) ? &N : Most;
+	}
+	// Nobody's name on the board by the desk yet (nothing the room played since the books opened was won).
+	if (Wins == 0 && !TalkFreshWonBefore(W, Now, Now, nullptr, std::string()))
+	{
+		Item(C.News, "fresh:wall-blank:" + Today, "rumour", Say(C, "fresh:wall-blank"));
+	}
+	// The first Nightly, still to come: the next one, the one being dealt now (from last night) or a day or two out.
+	if (!TalkFreshWonBefore(W, Now, Now, "nightly", std::string()))
+	{
+		for (int D = C.Day - 1; D <= C.Day + 2; ++D)
+		{
+			bool Found = false;
+			for (const live::Occurrence& O : live::Occurrences(D))
+			{
+				if (std::string(O.T->Key) != "nightly" || TalkFreshEnds(O) <= Now || W.CancellationOf(O.Id))
+				{
+					continue;
+				}
+				std::map<std::string, std::string> V;
+				V["when"] = O.Start <= Now ? std::string("on right now") : D == C.Day ? std::string("tonight") : D == C.Day + 1 ? std::string("tomorrow night")
+					: std::string(net::WeekdayName(D, true));
+				Item(C.News, "fresh:first-nightly:" + O.Id, "rumour", Say(C, "fresh:first-nightly", V));
+				Found = true;
+				break;
+			}
+			if (Found)
+			{
+				break;
+			}
+		}
+	}
+	// Two wins or more up the hill already (the player, and the world's person with the most), or nobody with two yet.
+	if (HeroWins >= 2)
+	{
+		Item(C.News, "fresh:twice:you:" + std::to_string(HeroWins), "rumour", Say(C, "fresh:twice-you", {{"count", Capital(Under100(std::min(HeroWins, 99)))}}));
+	}
+	if (Most && Most->Room.Wins >= 2 && Most->Name != C.Name)
+	{
+		Item(C.News, "fresh:twice:" + std::to_string(Most->Id) + ":" + std::to_string(Most->Room.Wins), "rumour",
+			Say(C, "fresh:twice", {{"who", TalkFreshName(Most->Name)}, {"count", Under100(std::min(Most->Room.Wins, 99))}}));
+	}
+	if (Wins >= 3 && HeroWins <= 1 && (!Most || Most->Room.Wins <= 1))
+	{
+		Item(C.News, "fresh:no-repeat:" + Today, "rumour", Say(C, "fresh:no-repeat"));
+	}
+	// The room's points leader this month (the month the books opened in, or the next).
+	const std::vector<std::pair<int, double>> Leaders = W.RoomLeaders("embercrest", world::MonthKeyOf(C.Day), 1);
+	if (!Leaders.empty() && Leaders.front().second > 0.0)
+	{
+		const world::Npc* Top = W.Get(Leaders.front().first);
+		if (Leaders.front().first == -1)
+		{
+			Item(C.News, "fresh:leader:" + Today, "rumour", Say(C, "fresh:leader-you"));
+		}
+		else if (Top && Top->Name != C.Name)
+		{
+			Item(C.News, "fresh:leader:" + Today, "rumour", Say(C, "fresh:leader", {{"who", TalkFreshName(Top->Name)}}));
+		}
+	}
+	// The player hasn't played up the hill yet: someone on the block says so once a week, from the first morning.
+	if (Fresh >= 1 && W.HeroRoom().Events == 0)
+	{
+		Item(C.News, "fresh:hill:" + std::to_string(Fresh / 7), "rumour", Say(C, "fresh:hill"));
+	}
+	// The Season board's leader since the books opened (nobody's, before the first final table is over).
+	{
+		const net::HeroStats Hero = net::StatsFrom(S.HeroName, S.History, Now);
+		const std::vector<net::BoardRow> Board = net::Shared().Leaderboard(net::Board::Season, Now, Hero, 1, nullptr);
+		if (!Board.empty() && Board.front().Value > 0.0)
+		{
+			const net::BoardRow& Top = Board.front();
+			const std::vector<net::Player>& Rows = net::Shared().Players();
+			if (Top.Player == -1)
+			{
+				Item(C.News, "fresh:season:" + Today, "rumour", Say(C, "fresh:season-you"));
+			}
+			else if (Top.Player >= 0 && Top.Player < static_cast<int>(Rows.size()) && Rows[static_cast<size_t>(Top.Player)].Name != C.Name)
+			{
+				Item(C.News, "fresh:season:" + Today, "rumour", Say(C, "fresh:season", {{"leader", Rows[static_cast<size_t>(Top.Player)].Name}}));
+			}
+		}
+	}
+	// The first week: the books themselves, once from each person.
+	if (Fresh < 7)
+	{
+		Item(C.News, "fresh:books:" + C.Speaker, "rumour", Say(C, "fresh:books"));
+	}
+}
+
 /** Builds what this speaker could tell: news (the world and the player), rumours, and games. */
 void Gather(const Session& S, TalkContext& C)
 {
@@ -881,17 +1158,25 @@ void Gather(const Session& S, TalkContext& C)
 				// When it was played: the Warm-Up isn't "last night".
 				const bool Evening = O.T->StartMinute >= 17 * 60;
 				V["when"] = O.Day == C.Day ? (Evening ? "tonight" : "today") : (Evening ? "last night" : "yesterday");
+				// A fresh world's first month: the first of its kind in the books, or the first name up the hill at all.
+				const std::string First = TalkFreshFirst(W, O, Now, P.Player == -1);
+				if (!First.empty())
+				{
+					V["event"] = TalkFreshEvent(O);
+				}
 				if (P.Player == -1)
 				{
-					Item(C.News, "rumour:winner:" + O.Id, "rumour", Say(C, "rumour:winner-you", V));
+					Item(C.News, "rumour:winner:" + O.Id, "rumour", Say(C, First.empty() ? std::string("rumour:winner-you") : First, V));
 					continue;
 				}
 				const world::Npc* N = W.Get(P.Player);
-				V["who"] = N ? N->Name : P.Name;
+				V["who"] = First.empty() ? (N ? N->Name : P.Name) : TalkFreshName(N ? N->Name : P.Name);
 				V["money"] = P.Prize > 0 ? Capital(SpokenMoney(P.Prize)) : std::string("Good money");
-				Item(C.News, "rumour:winner:" + O.Id, "rumour", Say(C, "rumour:winner", V));
+				Item(C.News, "rumour:winner:" + O.Id, "rumour", Say(C, First.empty() ? std::string("rumour:winner") : First, V));
 			}
 		}
+		// A fresh world's first month: the board up the hill, the first Nightly, the Season board, the books.
+		TalkFreshGather(S, C);
 		// Tonight's Nightly: the faces the player would know.
 		for (const live::Occurrence& O : live::Occurrences(C.Day))
 		{
@@ -936,7 +1221,17 @@ void Gather(const Session& S, TalkContext& C)
 			{
 				std::map<std::string, std::string> V;
 				V["leader"] = Rows[static_cast<size_t>(Top.Player)].Name;
-				Item(C.News, "rumour:nightshift:" + std::to_string(C.Day), "rumour", Say(C, "rumour:nightshift", V));
+				// A fresh world's first month says "again" only when it's so (U5): the shift the books opened in had no board
+				// before it, and after that the last shift's leader has to be the same person.
+				std::string Topic = "rumour:nightshift";
+				if (TalkFreshDay(W, Now) >= 0)
+				{
+					const double Shift = life::NightShiftStart(Now);
+					const std::vector<net::BoardRow> Last = Shift <= W.StartedAt() ? std::vector<net::BoardRow>()
+						: net::Shared().Leaderboard(net::Board::NightShift, Shift - 1.0, net::StatsFrom(S.HeroName, S.History, Shift - 1.0), 1, nullptr);
+					Topic = Shift <= W.StartedAt() ? "fresh:nightshift" : Last.empty() || Last.front().Player != Top.Player || C.Speaker == "twitch" ? "fresh:nightshift-new" : Topic;
+				}
+				Item(C.News, "rumour:nightshift:" + std::to_string(C.Day), "rumour", Say(C, Topic, V));
 			}
 			if (C.Speaker == "mei")
 			{

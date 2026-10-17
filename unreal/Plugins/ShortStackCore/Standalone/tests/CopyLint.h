@@ -151,6 +151,12 @@ inline std::string Check(const std::string& Template, size_t MaxChars, const std
 			return std::string("holds \"") + Banned + "\"";
 		}
 	}
+	// Update 2 (SPEC §2.11, §6.7): autoplay is the one thing that ever acts for the player, so a line that promises their
+	// decisions "always wait for you" says "autoplay" too (it landed with core-tableui's TableSettingHelp qualifier).
+	if (Low.find("always wait for you") != std::string::npos && Low.find("autoplay") == std::string::npos)
+	{
+		return "promises \"always wait for you\" without \"autoplay\"";
+	}
 	return std::string();
 }
 
@@ -211,6 +217,9 @@ inline int SelfCheck()
 	Expect("A Placeholder line.", Pa, false);
 	Expect("This is a table talk line that runs on and on, well past the eighty-four character limit.", TableTalk, false);
 	Expect("This is a table talk line that runs on and on, well past the eighty-four character limit.", Pa, true);
+	Expect("The room's own time. Your own decisions always wait for you.", LetterBody, false);
+	Expect("Your own decisions wait for you, unless you've handed the seat to autoplay.", LetterBody, true);
+	Expect("Yours always wait for you, unless autoplay has the seat.", LetterBody, true);
 	return Wrong;
 }
 } // namespace copylint

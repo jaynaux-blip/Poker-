@@ -118,6 +118,8 @@ void RiverLine::TableStrip(float X, double Now)
 		for (int I = 0; I < Count; ++I)
 		{
 			const TableGlance G = S.Glance(I);
+			// Update 2 (§2.11): a table the plan holds or skips says so ("AUTO · GTO 2x", "SKIP · 31 to the bubble").
+			const autoplay::Panel Plan = Previewing ? autoplay::Panel() : S.AutoPanel(I); // never on a stream (U1)
 			const Rect R{Px, 12.0f, TabW, 40.0f};
 			const Ui::ClickState St = UI.Clickable("tab" + std::to_string(I), R);
 			if (St.Clicked)
@@ -144,7 +146,7 @@ void RiverLine::TableStrip(float X, double Now)
 			}
 			else
 			{
-				const Color Dot = G.Busted ? pal::Dim : G.Sprinting ? pal::Accent2 : G.AllIn ? pal::Gold : pal::Green;
+				const Color Dot = G.Busted ? pal::Dim : G.Sprinting || Plan.On ? pal::Accent2 : G.AllIn ? pal::Gold : pal::Green;
 				C->FillCircle(Cx, Cy, 4.5f, Dot);
 				if (!G.Busted)
 				{
@@ -170,9 +172,9 @@ void RiverLine::TableStrip(float X, double Now)
 			{
 				Line = "Finishing\xE2\x80\xA6";
 			}
-			else if (G.Sprinting)
+			else if ((G.Sprinting && !Previewing) || Plan.On)
 			{
-				Line = "Sprinting \xC2\xB7 " + BbLabel(G.StackBb);
+				Line = Plan.Status.empty() ? "SKIP \xC2\xB7 " + BbLabel(G.StackBb) : Plan.Status;
 				LineCol = pal::Accent2;
 			}
 			else
@@ -546,6 +548,13 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		C->SetAlpha(A0);
 	}
 
+	// A skip (update 2 §2.6.1): the felt dims under the skip card's short form.
+	const autoplay::Panel Plan = Previewing ? autoplay::Panel() : S.AutoPanel(Index); // never on a stream (U1)
+	if (S.Sprinting && !Previewing)
+	{
+		SkipCard({R.X + 1.0f, Top + 1.0f, R.W - 2.0f, Bottom - Top}, Now);
+	}
+
 	// Footer: the player's buttons when it's their turn, else what the table is doing.
 	const float Fy = R.Y + R.H - 50.0f;
 	if (Turn)
@@ -615,9 +624,10 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		{
 			Status = Me.PrizeCents > 0 ? "Finished " + Ordinal(Me.Busted ? Me.Place : 1) + " \xC2\xB7 " + Money(Me.PrizeCents) : "Eliminated \xC2\xB7 the table closes in a moment";
 		}
-		else if (S.Sprinting)
+		else if (!Previewing && (S.Sprinting || Plan.On))
 		{
-			Status = "Sprinting \xC2\xB7 the game plays your hands to the next milestone";
+			// The tile's one line (§2.11): "SKIPPING · PUSH/FOLD · hand 214 · level 11 · 31 to the bubble", "AUTO · GTO 2x".
+			Status = rlauto_detail::AutoTileLine(Plan);
 		}
 		else if (S.SittingOutThisHand)
 		{
@@ -637,20 +647,37 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		{
 			Status = "Shuffling up";
 		}
-		UI.Text(Status, R.X + 16.0f, Fy + 25.0f, Ts(13.0f, 600, pal::Dim, Align::Left, Baseline::Alphabetic, false, R.W - 270.0f));
-		// Pace for this table.
-		const std::pair<Pace, const char*> Paces[3] = {{Pace::Full, "Full"}, {Pace::Smart, "Smart"}, {Pace::Sprint, "Sprint"}};
+		UI.Text(Status, R.X + 16.0f, Fy + 25.0f, Ts(13.0f, 600, Plan.On || S.Sprinting ? pal::Accent2 : pal::Dim, Align::Left, Baseline::Alphabetic, false, R.W - 270.0f));
+		// Pace for this table: FULL · SMART · AUTO (update 2 §2.6.1). AUTO brings the table forward with the autoplay panel
+		// over it; FULL or SMART hands the seat back.
+		const std::pair<Pace, const char*> Paces[2] = {{Pace::Full, "Full"}, {Pace::Smart, "Smart"}};
 		for (int K = 0; K < 3; ++K)
 		{
+			const bool IsAuto = K == 2;
+			const std::string Label = IsAuto ? std::string("AUTO") : std::string(Paces[K].second);
 			const Rect Pr{R.X + R.W - 12.0f - Nf(3 - K) * 76.0f, Fy + 6.0f, 72.0f, 28.0f};
-			const Ui::ClickState St = UI.Clickable(Id + "pace" + Paces[K].second, Pr, !S.Finishing());
-			const bool Lit = S.CurrentPace == Paces[K].first;
+			const Ui::ClickState St = UI.Clickable(Id + "pace" + Label, Pr, !S.Finishing());
+			const bool Lit = IsAuto ? Plan.On : !Plan.On && S.CurrentPace == Paces[K].first;
 			UI.RRect(Pr, 8.0f, Lit ? Hex(0x1f4d63) : St.Hover ? Hex(0x172a42) : pal::Panel, Lit ? pal::Accent : pal::Line);
-			UI.Text(Paces[K].second, Pr.X + Pr.W / 2.0f, Pr.Y + 19.0f, Ts(12.5f, 700, Lit ? pal::Ink : pal::Muted, Align::Center));
-			if (St.Clicked && !Lit)
+			UI.Text(Label, Pr.X + Pr.W / 2.0f, Pr.Y + 19.0f, Ts(12.5f, IsAuto ? 800 : 700, Lit ? pal::Ink : pal::Muted, Align::Center));
+			if (!St.Clicked)
 			{
+				continue;
+			}
+			TileClicked = Index;
+			if (IsAuto)
+			{
+				rlauto_detail::AutoOpenPanel(this, S, Index, Now);
+			}
+			else if (!Lit)
+			{
+				if (Plan.On)
+				{
+					autoplay::TableAuto Off = Plan.Now;
+					Off.M = autoplay::Mode::Off;
+					S.SetAutoplay(Index, Off);
+				}
 				S.CurrentPace = Paces[K].first;
-				TileClicked = Index;
 			}
 		}
 	}
@@ -688,7 +715,11 @@ void RiverLine::FinishedToasts(double Now)
 		UI.Text(Res.EventName, R.X + 20.0f, R.Y + 66.0f, Ts(12.5f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, false, R.W - 150.0f));
 		UI.Text(Won > 0 ? "+" + Money(Won) : Seat ? Money(Res.SeatValueCents) : std::string("No cash"), R.X + R.W - 18.0f, R.Y + 46.0f,
 			Ts(18.0f, 800, Won > 0 || Seat ? pal::Gold : pal::Dim, Align::Right, Baseline::Alphabetic, true));
-		UI.Text(Res.Grades.empty() ? std::string("no decisions") : Fixed(Res.AccuracyPct, 1) + " accuracy", R.X + R.W - 18.0f, R.Y + 66.0f, Ts(12.0f, 600, pal::Muted, Align::Right));
+		// Update 2 (§2.9): a table the plan played says so where "no decisions" was.
+		const std::string Acc = !Res.Grades.empty() ? Fixed(Res.AccuracyPct, 1) + " accuracy"
+			: rlauto_detail::AutoPlayedFor(S, Res) ? std::string(rlauto_detail::AutoPlayedToast)
+												  : std::string("no decisions");
+		UI.Text(Acc, R.X + R.W - 18.0f, R.Y + 66.0f, Ts(12.0f, 600, pal::Muted, Align::Right));
 		C->SetAlpha(A0);
 		Y += (H + 10.0f) * Out;
 	}

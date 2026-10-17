@@ -2950,7 +2950,9 @@ void RiverLine::BoardsPage(double Now)
 	}
 	if (Rows.empty())
 	{
-		UI.Text("No scores yet tonight.", Mid, 260.0f, Ts(20.0f, 700, pal::Muted, Align::Center));
+		// Update 2 (§3.6): an empty board says so honestly, in both modes (the boards stop at <= 0, bug 5).
+		const char* Empty = BoardShown == net::Board::NightShift ? "No scores yet tonight." : BoardShown == net::Board::Earnings ? "Nobody's cashed on RiverLine yet." : "Nobody's scored yet.";
+		UI.Text(Empty, Mid, 260.0f, Ts(20.0f, 700, pal::Muted, Align::Center));
 	}
 	BoardTable({24.0f, 414.0f, 1052.0f, 456.0f}, Rows, Now);
 
@@ -2992,6 +2994,10 @@ void RiverLine::BoardsPage(double Now)
 	const int Year = world::YearOf(net::DayOf(World));
 	const std::string Yr = std::to_string(Year);
 	const double YearEnds = static_cast<double>(world::YearStart(Year + 1)) * net::MinutesPerDay;
+	// A fresh start's record books opened on Night One (update 2 §3.6, F8): its boards count from then, and say so.
+	const bool Blank = S.WorldStart() == world::Start::Blank;
+	const std::string Opened = net::DateLabel(net::NightOneDay);
+	const bool BooksYear = Blank && Year == world::YearOf(net::NightOneDay);
 	switch (BoardShown)
 	{
 	case net::Board::NightShift:
@@ -2999,14 +3005,26 @@ void RiverLine::BoardsPage(double Now)
 		Ends = life::NightShiftStart(World) + 12.0 * 60.0;
 		break;
 	case net::Board::Season:
-		About = "Player of the Year " + Yr + ". Points from every final table since January. The top three win RCOP " + std::to_string(Year + 1) + " Platinum Passes worth $25,000.";
+		About = "Player of the Year " + Yr + ". Points from every final table since " + (BooksYear ? Opened + ", the night the record books opened" : std::string("January")) +
+			". The top three win RCOP " + std::to_string(Year + 1) + " Platinum Passes worth $25,000.";
 		Ends = YearEnds;
 		break;
-	case net::Board::Earnings: About = "All-time tournament winnings on RiverLine. Every cash counts, every buy-in forgotten."; break;
+	case net::Board::Earnings:
+		About = Blank ? "Tournament winnings on RiverLine since " + Opened + (BooksYear ? std::string() : ", " + std::to_string(world::YearOf(net::NightOneDay))) +
+				". Every cash counts, every buy-in forgotten."
+					  : std::string("All-time tournament winnings on RiverLine. Every cash counts, every buy-in forgotten.");
+		break;
 	case net::Board::Wins: About = "Tournament titles won in " + Yr + ". Anyone can run deep once."; Ends = YearEnds; break;
 	case net::Board::FinalTables: About = "Final tables reached in " + Yr + ". The consistency board."; Ends = YearEnds; break;
 	case net::Board::Series:
-		About = "Points from every final table at " + (Sr ? Sr->Name : std::string("the series")) + ". The top three win RCOP Main Event packages.";
+		if (Blank && Sr && Sr->FirstDay < net::NightOneDay)
+		{
+			About = "Points from every final table at " + Sr->Name + ", from " + Opened + ": the series opened before the record books did. The top three win RCOP Main Event packages.";
+		}
+		else
+		{
+			About = "Points from every final table at " + (Sr ? Sr->Name : std::string("the series")) + ". The top three win RCOP Main Event packages.";
+		}
 		Ends = Sr ? static_cast<double>(Sr->LastDay + 1) * net::MinutesPerDay : -1.0;
 		break;
 	case net::Board::Live:
@@ -3065,15 +3083,20 @@ void RiverLine::BoardsPage(double Now)
 		{
 			const std::string& Nm = Last->Npc == -1 ? S.HeroName : Last->Name;
 			const AvatarSpec Pic = NetAvatar(*C, Rt.X + 42.0f, Y + 28.0f, 15.0f, Nm, pal::Gold, Last->Npc == -1);
+			// A fresh start's first season was short (update 2 §3.6, F6): "2026 · from Oct 6".
+			const std::string Season = std::to_string(Last->Year) + (Blank && Last->Year == world::YearOf(net::NightOneDay) ? " \xC2\xB7 from " + Opened : std::string());
+			const std::string Line = Season + " \xC2\xB7 " + Grouped(Last->Entries) + " pts";
+			const float LineW = UI.Measure(Line, 13.0f, 700, true);
+			const float NameMax = std::min(250.0f, Rt.W - 26.0f - LineW - 12.0f - 66.0f);
 			if (Last->Npc >= -1 && (Last->Npc == -1 || S.Living().Get(Last->Npc)))
 			{
-				PlayerName(Last->Npc, Rt.X + 66.0f, Y + 34.0f, 15.0f, 250.0f, true, NetBadgeFrame(Pic));
+				PlayerName(Last->Npc, Rt.X + 66.0f, Y + 34.0f, 15.0f, NameMax, true, NetBadgeFrame(Pic));
 			}
 			else
 			{
-				UI.Text(Nm, Rt.X + 66.0f, Y + 34.0f, Ts(15.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, 250.0f));
+				UI.Text(Nm, Rt.X + 66.0f, Y + 34.0f, Ts(15.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, NameMax));
 			}
-			UI.Text(std::to_string(Last->Year) + " \xC2\xB7 " + Grouped(Last->Entries) + " pts", Rt.X + Rt.W - 26.0f, Y + 34.0f, Ts(13.0f, 700, pal::Gold, Align::Right, Baseline::Alphabetic, true));
+			UI.Text(Line, Rt.X + Rt.W - 26.0f, Y + 34.0f, Ts(13.0f, 700, pal::Gold, Align::Right, Baseline::Alphabetic, true));
 		}
 		else
 		{
@@ -3589,6 +3612,22 @@ void RiverLine::CareerPage(double Now)
 			ShowPlayer(HeroCard, Now);
 		}
 	}
+	{
+		// Update 2 (§2.11): the autoplay settings card: the career's default plan (autoplay\tpref) and the player's Form,
+		// the graded play online that sharpens it (§2.5).
+		const autoplay::TableAuto Def = autoplay::DefaultPlan(S.Life.Auto);
+		bool Rusty = false;
+		const double Form = autoplay::FormNow(S.Life.Auto, World, &Rusty);
+		const Rect Pc{1076.0f - 168.0f - 12.0f - 420.0f, 640.0f, 420.0f, 32.0f};
+		UI.RRect(Pc, 9.0f, Hex(0x101a2b), pal::Line);
+		float Px = Pc.X + 14.0f;
+		Px += NetSpaced(*C, "AUTOPLAY", Px, Pc.Y + 21.0f, 9.5f, 800, pal::Dim, 1.4f) + 10.0f;
+		Px += UI.Text(style::InfoOf(Def.S).Name, Px, Pc.Y + 21.5f, Ts(13.5f, 800, pal::Ink)) + 8.0f;
+		UI.Text("\xC2\xB7 " + autoplay::SpeedName(Def.Speed) + " \xC2\xB7 your default", Px, Pc.Y + 21.5f, Ts(12.5f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, false, Pc.X + Pc.W - 150.0f - Px));
+		const std::string FormText = std::to_string(static_cast<int>(std::lround(Form))) + (Rusty ? ", rusty" : "");
+		const float Fw = UI.Text(FormText, Pc.X + Pc.W - 14.0f, Pc.Y + 21.5f, Ts(13.5f, 800, Form >= 80.0 ? pal::Gold : Rusty ? pal::Orange : pal::Ink, Align::Right));
+		NetSpaced(*C, "FORM", Pc.X + Pc.W - 22.0f - Fw, Pc.Y + 21.0f, 9.5f, 800, pal::Dim, 1.4f, Align::Right);
+	}
 	if (S.History.empty())
 	{
 		UI.Text("No tournaments yet. The Night Owl Turbo is running right now.", 24.0f, 706.0f, Ts(16.0f, 500, pal::Muted));
@@ -3600,13 +3639,26 @@ void RiverLine::CareerPage(double Now)
 		UI.RRect(R, 10.0f, Hex(0x101a2b), Rgba(255, 255, 255, 0.03f));
 		const bool Cashed = H.Prize > 0;
 		C->FillRoundRect({R.X + 1.0f, R.Y + 10.0f, 4.0f, R.H - 20.0f}, 2.0f, H.Place == 1 ? pal::Gold : Cashed ? pal::Green : pal::Dim);
-		UI.Text(H.Name, R.X + 22.0f, R.Y + 30.0f, Ts(16.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, 420.0f));
+		// Update 2 (§2.9): an event the plan played carries its tag ("AUTO · LAG 82%": the plan's share of the decisions),
+		// and the accuracy is the player's own: "—" when they made none (bug 8).
+		const autoplay::Played* ByPlan = rlauto_detail::AutoPlayedFor(S, H);
+		const std::string Tag = ByPlan ? autoplay::CareerTag(*ByPlan) : std::string();
+		const float TagW = Tag.empty() ? 0.0f : C->Measure(Tag, 10.0f, 700) + 10.0f * 1.3f;
+		const float NameW = UI.Text(H.Name, R.X + 22.0f, R.Y + 30.0f, Ts(16.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, Tag.empty() ? 420.0f : 460.0f - TagW - 12.0f));
+		if (!Tag.empty())
+		{
+			NetPill(*C, Tag, R.X + 22.0f + NameW + 10.0f, R.Y + 15.0f, pal::Accent2, false, 10.0f);
+		}
 		UI.Text(Ordinal(H.Place) + " of " + Grouped(H.Entrants), R.X + 500.0f, R.Y + 30.0f, Ts(15.0f, 700, H.Place <= 9 ? pal::Gold : pal::Ink, Align::Left, Baseline::Alphabetic, true));
 		UI.Text(Cashed ? "+" + Money(H.Prize) : std::string("\xE2\x80\x94"), R.X + 760.0f, R.Y + 30.0f, Ts(15.0f, 800, Cashed ? pal::Green : pal::Dim, Align::Right, Baseline::Alphabetic, true));
-		const float Acc = Nf(Clamp01(H.AccuracyPct / 100.0));
+		const bool Own = !ByPlan || ByPlan->OwnDecisions > 0;
+		const float Acc = Own ? Nf(Clamp01(H.AccuracyPct / 100.0)) : 0.0f;
 		UI.RRect({R.X + 820.0f, R.Y + 22.0f, 120.0f, 6.0f}, 3.0f, Rgba(255, 255, 255, 0.07f));
-		UI.RRect({R.X + 820.0f, R.Y + 22.0f, std::max(6.0f, 120.0f * Acc * In), 6.0f}, 3.0f, Acc > 0.85f ? pal::Green : Acc > 0.7f ? pal::Gold : pal::Orange);
-		UI.Text(Fixed(H.AccuracyPct, 0) + "%", R.X + R.W - 18.0f, R.Y + 30.0f, Ts(14.0f, 700, pal::Muted, Align::Right, Baseline::Alphabetic, true));
+		if (Own)
+		{
+			UI.RRect({R.X + 820.0f, R.Y + 22.0f, std::max(6.0f, 120.0f * Acc * In), 6.0f}, 3.0f, Acc > 0.85f ? pal::Green : Acc > 0.7f ? pal::Gold : pal::Orange);
+		}
+		UI.Text(Own ? Fixed(H.AccuracyPct, 0) + "%" : std::string("\xE2\x80\x94"), R.X + R.W - 18.0f, R.Y + 30.0f, Ts(14.0f, 700, pal::Muted, Align::Right, Baseline::Alphabetic, true));
 	}
 
 	// Career path.

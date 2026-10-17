@@ -190,6 +190,9 @@ stake::View ViewOf(const Session& S, const rep::Public& Rec)
 			V.Rolls[Name] = N->Bankroll;
 		}
 	}
+	// The online ROI's rank among the regulars, once the sample is big enough to rank (200 paid events; below that there's
+	// nothing to rank: 0). World::RoiRank answers -1 when too few regulars are on record to rank against (a fresh world's
+	// first week or two, update 2 bug 6): it passes through as it is, and Mrs. Park's gate reads the sample instead (stake::List).
 	V.RoiRank = Rec.OnlineEvents >= 200 ? W.RoiRank(Rec.OnlineRoi) : 0.0;
 	V.Cashes = W.HeroStats().Cashes + Rec.LiveCashes;
 	// Who the world has down for the room's swap nights (the Sunday, the Big Stack, the Turbo) over the next three days.

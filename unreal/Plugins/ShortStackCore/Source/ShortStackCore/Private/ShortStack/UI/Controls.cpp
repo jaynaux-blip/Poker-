@@ -11,6 +11,14 @@
 // Seated: X fold, A check or call, Y raise on release (held past 0.35 s it fills ALL IN and goes all in at 0.95 s), B
 // backs out and nothing else; the keyboard's all in is a hold of A. On foot in the card room the controls are the
 // street's: the left stick moves, LB (or L3) runs, Y is the view, A uses, B pauses.
+//
+// Update 2 (SPEC §2.6.2): autoplay. At the table K puts the plan in charge with the style the PLAY page shows, and takes
+// it back (the keyboard's: a pad turns it on and off from the PLAY page); any action key during the plan's think takes the
+// wheel (the first press only takes it, the next one acts); T (right on the d-pad) steps the watch speed while the plan
+// holds the seat; K or B stops a skip at the next gap between hands (backing out of it: B still does nothing else). The
+// PLAY page uses only what's free while the card is held: the arrows (A on a pad) pick the style, K (A held on a pad)
+// turns the plan on or off, 1 to 5 (X on a pad) pick the skip's target and Enter held (X held) skips. A control with no
+// glyph for a device ("auto" has none on a pad, "autohold" none on the keyboard) isn't that device's, and no row draws it.
 
 namespace ss
 {
@@ -53,12 +61,23 @@ const std::vector<Control>& Controls(ControlContext C)
 		{"shoulder", "B", "R3", false, "OTHER SHOULDER"},
 		{"back", "ESC", "B", false, "BACK"},
 		{"pause", "ESC", "MENU", false, "PAUSE"},
+		// Update 2: autoplay at the table.
+		{"auto", "K", "", false, "AUTOPLAY"},
+		{"wheel", "F C R A", "X A Y", false, "TAKE THE WHEEL"},
+		{"watch", "T", "RIGHT", false, "WATCH SPEED"},
+		{"stopskip", "K", "B", false, "STOP THE SKIP"},
 	};
 	static const std::vector<Control> Card = {
 		{"page", "Q E", "LB RB", false, "PAGE"},
 		{"units", "U", "Y", false, "CHIPS / BB"},
 		{"card", "TAB", "UP", true, "LET GO TO CLOSE"},
 		{"back", "ESC", "B", false, "CLOSE"},
+		// Update 2: the PLAY page.
+		{"style", "LEFT RIGHT", "A", false, "STYLE"},
+		{"auto", "K", "", false, "AUTOPLAY ON / OFF"},
+		{"autohold", "", "A", true, "AUTOPLAY ON / OFF"},
+		{"target", "1-5", "X", false, "SKIP TO"},
+		{"skip", "ENTER", "X", true, "SKIP"},
 	};
 	switch (C)
 	{

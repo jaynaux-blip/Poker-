@@ -220,6 +220,7 @@ RiverLine::~RiverLine()
 	rlnet_detail::ForgetNet(this);
 	rlmail_detail::ForgetMail(this);
 	backing_detail::Forget(UI);
+	rlauto_detail::ForgetAuto(this);
 	BadgeCheers().erase(this);
 }
 
@@ -245,6 +246,10 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	}
 	if (AppShown == App::RiverLine)
 	{
+		if (S.CurrentScreen != Screen::Table && rlauto_detail::AutoPanelOpen(this))
+		{
+			rlauto_detail::AutoClosePanel(this); // the autoplay panel belongs to the tables (update 2 §2.6.1)
+		}
 		TopBar(Now);
 		switch (S.CurrentScreen)
 		{
@@ -252,17 +257,20 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 		case Screen::Lobby: LobbyPages(Now); break;
 		case Screen::Table:
 		{
-			// A player card (a name at the table caught the player's eye) holds the table's input while it's up.
+			// A player card (a name at the table caught the player's eye) holds the table's input while it's up, and so does
+			// the autoplay panel (update 2 §2.6.1).
 			const bool Card = CardOpen();
+			const bool Auto = !Card && rlauto_detail::AutoPanelOpen(this);
 			const Pointer Held = UI.Ptr;
-			if (Card)
+			if (Card || Auto)
 			{
 				UI.Ptr.Pressed = false;
 				UI.Ptr.Released = false;
 				UI.Ptr.Wheel = 0.0f;
 				UI.Ptr.Active = false;
 			}
-			if (S.Tiled && S.TableCount() >= 2)
+			const bool Tiled = S.Tiled && S.TableCount() >= 2;
+			if (Tiled)
 			{
 				Tiles(Now);
 			}
@@ -274,6 +282,13 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 			{
 				UI.Ptr = Held;
 				PlayerCard(Now);
+			}
+			else if (Auto)
+			{
+				UI.Ptr = Held;
+				// Over the felt (one table), or the middle of the screen (the tiles).
+				const float Pw = 1108.0f;
+				AutoPanel({Tiled ? (RlW - Pw) / 2.0f : TableCx - Pw / 2.0f, RlTop + 14.0f, Pw, 870.0f}, Now);
 			}
 			break;
 		}
@@ -1148,7 +1163,12 @@ void RiverLine::Key(const std::string& K)
 		SelectEvent(Listed[static_cast<size_t>(I)]);
 		return;
 	}
-	if (!S.HasPrompt)
+	// Autoplay's keys (update 2 §2.6.1): K and Backspace, and an action key while the plan thinks (it takes the wheel).
+	if (AppShown == App::RiverLine && rlauto_detail::AutoKey(this, S, K))
+	{
+		return;
+	}
+	if (!S.HasPrompt || rlauto_detail::AutoPanelOpen(this))
 	{
 		return;
 	}
@@ -1195,23 +1215,39 @@ void RiverLine::Controls(double Now)
 	const float Ax = 640.0f;
 	const float Aw = 1170.0f - Ax;
 
-	// Pace and HUD (bottom-left).
-	const std::pair<Pace, const char*> Paces[3] = {{Pace::Full, "Full"}, {Pace::Smart, "Smart"}, {Pace::Sprint, "Sprint"}};
+	// Pace and HUD (bottom-left): FULL · SMART · AUTO (update 2 §2.6.1). AUTO opens the autoplay panel; it's lit while the
+	// plan holds or skips this table, and FULL or SMART hands the seat back.
+	const int Front = S.FocusedTable();
+	// On a stream (Kast's preview) the laptop shows none of it: nothing in the world ever says the plan played (U1).
+	const autoplay::Panel Plan = Previewing ? autoplay::Panel() : S.AutoPanel(Front);
+	const std::pair<Pace, const char*> Paces[2] = {{Pace::Full, "Full"}, {Pace::Smart, "Smart"}};
 	UI.Text("Pace", 24.0f, 866.0f, Ts(13.0f, 700, pal::Muted));
 	for (int I = 0; I < 3; ++I)
 	{
 		const Rect R{24.0f + static_cast<float>(I) * 96.0f, 874.0f, 92.0f, 36.0f};
-		const Ui::ClickState St = UI.Clickable(std::string("pace") + Paces[I].second, R);
-		const bool Active = S.CurrentPace == Paces[I].first;
+		const bool IsAuto = I == 2;
+		const std::string Label = IsAuto ? std::string("AUTO") : std::string(Paces[I].second);
+		const Ui::ClickState St = UI.Clickable("pace" + Label, R);
+		const bool Active = IsAuto ? Plan.On || rlauto_detail::AutoPanelOpen(this) : !Plan.On && S.CurrentPace == Paces[I].first;
 		UI.RRect(R, 9.0f, Active ? Hex(0x1f4d63) : St.Hover ? Hex(0x172a42) : pal::Panel, Active ? pal::Accent : pal::Line);
-		UI.Text(Paces[I].second, R.X + R.W / 2.0f, R.Y + 24.0f, Ts(15.0f, 700, Active ? pal::Ink : pal::Muted, Align::Center));
-		if (St.Clicked && !Active)
+		UI.Text(Label, R.X + R.W / 2.0f, R.Y + 24.0f, Ts(15.0f, IsAuto ? 800 : 700, Active ? pal::Ink : pal::Muted, Align::Center));
+		if (!St.Clicked)
 		{
-			S.CurrentPace = Paces[I].first;
-			if (Paces[I].first == Pace::Sprint)
+			continue;
+		}
+		if (IsAuto)
+		{
+			rlauto_detail::AutoOpenPanel(this, S, Front, Now);
+		}
+		else if (!Active)
+		{
+			if (Plan.On)
 			{
-				S.SystemLine("Sprint: autopilot plays your hands until the bubble or the final table. Safe, a bit passive, a step behind your best.");
+				autoplay::TableAuto Off = Plan.Now;
+				Off.M = autoplay::Mode::Off;
+				S.SetAutoplay(Front, Off);
 			}
+			S.CurrentPace = Paces[I].first;
 		}
 	}
 	const Rect HudR{24.0f, 918.0f, 130.0f, 30.0f};
@@ -1246,6 +1282,17 @@ void RiverLine::Controls(double Now)
 		}
 	}
 
+	if (Plan.On && !S.Sprinting && S.HasPrompt)
+	{
+		// A hand taken back from the plan (K, or a stop rule): one line over the player's own controls.
+		AutoStrip({712.0f, 752.0f, Ax + Aw - 712.0f, 26.0f}, Now);
+	}
+	if (!S.HasPrompt && Plan.On && !S.Sprinting)
+	{
+		// The plan holds the seat (§2.6.1): the watch strip where the player's buttons go.
+		AutoStrip({Ax, 778.0f, Aw, 154.0f}, Now);
+		return;
+	}
 	if (!S.HasPrompt)
 	{
 		// Waiting state.
@@ -1541,32 +1588,15 @@ void RiverLine::Overlays(double Now)
 	}
 	if (S.Sprinting && S.T)
 	{
-		const Tournament& T = *S.T;
-		C->FillRect({0.0f, RlTop, RlSideX - 8.0f, RlH - RlTop}, Rgba(5, 9, 16, 0.78f));
-		UI.Text("SPRINTING AHEAD", TableCx, 330.0f, Ts(40.0f, 900, pal::Accent, Align::Center));
-		UI.Text("The game is playing your hands in a solid, tight-aggressive style.", TableCx, 372.0f, Ts(17.0f, 500, pal::Muted, Align::Center));
-		const Level& L = T.CurrentLevel();
-		const std::pair<std::string, std::string> Stats[4] = {
-			{"Level", std::to_string(T.LevelIndex + 1) + " \xC2\xB7 " + ChipsText(static_cast<double>(L.Sb)) + "/" + ChipsText(static_cast<double>(L.Bb))},
-			{"Players left", ChipsText(T.Remaining)},
-			{"Your stack", ChipsText(static_cast<double>(T.Hero().Stack)) + " (" + std::to_string(static_cast<int>(JsRound(static_cast<double>(T.Hero().Stack) / static_cast<double>(L.Bb)))) + " BB)"},
-			{"Your rank", Ordinal(T.HeroRank())},
-		};
-		for (int I = 0; I < 4; ++I)
+		// The skip card (update 2 §2.6.1): "SKIPPING · <STYLE>" over the dimmed table, where Sprint's card was. On a stream
+		// the table only dims: nothing in the world ever says the plan played (U1).
+		if (Previewing)
 		{
-			const float X = TableCx - 330.0f + static_cast<float>(I) * 220.0f;
-			UI.Text(Stats[I].first, X + 100.0f, 450.0f, Ts(15.0f, 500, pal::Muted, Align::Center));
-			UI.Text(Stats[I].second, X + 100.0f, 482.0f, Ts(21.0f, 800, pal::Ink, Align::Center, Baseline::Alphabetic, true));
+			C->FillRect({0.0f, RlTop, RlSideX - 8.0f, RlH - RlTop}, Rgba(5, 9, 16, 0.78f));
 		}
-		const float Bar = static_cast<float>(std::fmod(Now * 0.8, 1.0));
-		UI.RRect({TableCx - 300.0f, 530.0f, 600.0f, 8.0f}, 4.0f, Hex(0x0b1422));
-		UI.RRect({TableCx - 300.0f + Bar * 480.0f, 530.0f, 120.0f, 8.0f}, 4.0f, pal::Accent);
-		ButtonOpts O;
-		O.Kind = ButtonKind::Gold;
-		O.Size = 20.0f;
-		if (UI.Button("stopsprint", {TableCx - 120.0f, 580.0f, 240.0f, 60.0f}, "Take the wheel", O))
+		else
 		{
-			S.StopSprint("you took over");
+			SkipCard({0.0f, RlTop, RlSideX - 8.0f, RlH - RlTop}, Now);
 		}
 	}
 }
@@ -1633,9 +1663,15 @@ void RiverLine::ResultsScreen(double Now)
 	}
 	UI.Text(R.Grades.empty() ? std::string("\xE2\x80\x94") : Fixed(Acc, 1), Gx, Gy + 14.0f, Ts(52.0f, 900, pal::Ink, Align::Center, Baseline::Alphabetic, true));
 	UI.Text("Decision accuracy", Gx, Gy + 60.0f, Ts(16.0f, 500, pal::Muted, Align::Center));
+	// Update 2 (§2.9, §2.11): who played it. The accuracy is the player's own decisions only; the plan's are never graded.
+	const autoplay::Played* ByPlan = Previewing ? nullptr : rlauto_detail::AutoPlayedFor(S, R); // never on a stream (U1)
+	if (ByPlan)
+	{
+		UI.Text(autoplay::PlayedLine(*ByPlan), Gx, Gy + 112.0f, Ts(15.0f, 700, pal::Accent, Align::Center, Baseline::Alphabetic, false, 2.0f * (RlW - Gx) - 40.0f));
+	}
 	const int Xp = static_cast<int>(JsRound(static_cast<double>(R.Grades.size()) * (Acc / 100.0) * 12.0 + (Cashed ? 60.0 : 0.0)));
 	UI.Text("Skill XP +" + std::to_string(Xp), Gx, Gy + 150.0f, Ts(22.0f, 800, pal::Accent, Align::Center));
-	UI.Text("XP comes from decisions, not results.", Gx, Gy + 178.0f, Ts(14.0f, 500, pal::Muted, Align::Center));
+	UI.Text(ByPlan ? rlauto_detail::AutoXpOwn : "XP comes from decisions, not results.", Gx, Gy + 178.0f, Ts(14.0f, 500, pal::Muted, Align::Center));
 
 	// Grade distribution.
 	const Grade Order[5] = {Grade::Best, Grade::Good, Grade::Inaccuracy, Grade::Mistake, Grade::Blunder};
@@ -1678,7 +1714,7 @@ void RiverLine::ResultsScreen(double Now)
 	UI.Text("Hand review", 60.0f, By + 110.0f, Ts(22.0f, 800));
 	if (Worst.empty())
 	{
-		UI.Text(R.Grades.empty() ? "No decisions graded." : "Clean game. No significant mistakes found.", 60.0f, By + 144.0f, Ts(17.0f, 500, pal::Muted));
+		UI.Text(R.Grades.empty() ? (ByPlan ? rlauto_detail::AutoEveryDecision : "No decisions graded.") : "Clean game. No significant mistakes found.", 60.0f, By + 144.0f, Ts(17.0f, 500, pal::Muted));
 	}
 	for (size_t I = 0; I < Worst.size(); ++I)
 	{

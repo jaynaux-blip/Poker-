@@ -56,6 +56,20 @@ std::string RentByMidnight(double Deadline, double World)
 	const std::string Day = RentDueDay(Deadline, World);
 	return Day == "tonight" || Day == "tomorrow" ? "midnight " + Day : Day + " at midnight";
 }
+
+/** Autoplay's watch speeds (update 2 §2.6.2): any number read from a settings file lands on the nearest one at or below it. */
+int MenuAutoSpeed(int N)
+{
+	return N >= 8 ? 8 : N >= 4 ? 4 : N >= 2 ? 2 : 1;
+}
+
+/** The GAMEPLAY tab's autoplay row (update 2 §2.6.2, §6.4: key autospeed). System UI, so it may say "AI autoplay" (U1). */
+std::string MenuAutoSpeedHelp(bool Gamepad)
+{
+	return std::string("How fast you watch when you hand your seat at a live table to AI autoplay. It saves you real time, not the night's: a hand costs the "
+					   "same minutes at any speed. From 4x the table talk thins out, and Dee's game tops out there. ") +
+		(Gamepad ? "While the plan plays, right on the d-pad changes it." : "While the plan plays, T changes it.");
+}
 } // namespace menu_detail
 
 using namespace frontend_detail;
@@ -102,6 +116,7 @@ std::string GameSettings::Serialize() const
 	Put("stackunits", StackUnits);
 	Put("turncue", TurnCue);
 	Put("hudscale", HudScale);
+	Put("autospeed", AutoSpeed);
 	Out += "resolution=" + Resolution + "\n";
 	return Out;
 }
@@ -161,6 +176,7 @@ bool GameSettings::Parse(const std::string& Text, GameSettings& Out)
 		else if (Name == "stackunits") S.StackUnits = std::clamp(N, 0, 1);
 		else if (Name == "turncue") S.TurnCue = std::clamp(N, 0, 2);
 		else if (Name == "hudscale") S.HudScale = std::clamp(N, 80, 130);
+		else if (Name == "autospeed") S.AutoSpeed = MenuAutoSpeed(N); // update 2 §6.5 (7): a file without it reads 1x
 		else if (Name == "resolution") S.Resolution = Value;
 	}
 	Out = S;
@@ -203,6 +219,8 @@ FrontEndInfo DescribeSession(const Session& S, bool HasSave)
 	{
 		Out.TopBadge = *Top;
 	}
+	// A fresh start's career wears its pill on the CONTINUE card (update 2 §3.1).
+	Out.Blank = S.WorldStart() == world::Start::Blank;
 	Out.World = S.WorldMinutes();
 	Out.RentStage = S.Life.RentStage;
 	Out.RentDueCents = S.Life.RentDueCents;
@@ -779,6 +797,16 @@ std::vector<FrontEnd::SettingRow> FrontEnd::Rows(int ForTab)
 		Choice("Stack units", TableSettingHelp("stackunits", Gamepad), -1, {"BIG BLINDS", "CHIPS"}, [&S] { return std::clamp(S.StackUnits, 0, 1); }, [&S](int V) { S.StackUnits = V; });
 		Choice("Turn cue", TableSettingHelp("turncue", Gamepad), -1, {"OFF", "DEALER", "DEALER AND SOUND"}, [&S] { return std::clamp(S.TurnCue, 0, 2); }, [&S](int V) { S.TurnCue = V; });
 		Slider("HUD size", TableSettingHelp("hudscale", Gamepad), -1, 80, 130, 5, "%", [&S] { return S.HudScale; }, [&S](int V) { S.HudScale = V; });
+		{
+			// Update 2: the speed a live table's autoplay starts at (key autospeed). Last, so the rows above keep their places.
+			static const int Speeds[] = {1, 2, 4, 8};
+			Choice("Autoplay watch speed", MenuAutoSpeedHelp(Gamepad), -1, {"1x", "2x", "4x", "8x"},
+				[&S] {
+					const int Speed = MenuAutoSpeed(S.AutoSpeed);
+					return Speed == 8 ? 3 : Speed == 4 ? 2 : Speed == 2 ? 1 : 0;
+				},
+				[&S](int V) { S.AutoSpeed = Speeds[std::clamp(V, 0, 3)]; });
+		}
 		break;
 	}
 	return Out;
@@ -1039,12 +1067,26 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 		}
 	};
 	// The person behind the screen name, like a career mode's player card: a live photo, the screen name over the
-	// real one, where they're from and the life that brought them here.
-	auto Person = [&](const std::string& Heading) {
+	// real one, where they're from and the life that brought them here. Fresh: a fresh start's pill rides beside the
+	// background's when both fit (update 2 §3.1); returns whether it did.
+	auto Person = [&](const std::string& Heading, bool Fresh) {
 		const hero::Character& P = Info.Person;
 		const float Pw = 112.0f;
 		const float Ph = 132.0f;
 		const Rect Photo{X + Pad, Yc - 28.0f, Pw, Ph};
+		// The pills' row runs from the text column to the card's edge; the background's pill (sized as below) comes first.
+		const float PillsX = Photo.X + Pw + 22.0f;
+		const float PillsEnd = X + CardW - Pad;
+		const float FreshX = PillsX + std::min(PillsEnd - PillsX, TrackedWidth(*C, UpperCase(hero::InfoOf(P.Story).Name), 11.0f, 800, 2.2f) + 46.0f) + 8.0f;
+		const float FreshW = TrackedWidth(*C, "FRESH START", 11.0f, 800, 2.2f) + 28.0f;
+		const bool FreshPill = Fresh && FreshX + FreshW <= PillsEnd;
+		if (CardPaint && FreshPill)
+		{
+			const Rect Fr{FreshX, Photo.Y + Ph - 30.0f, FreshW, 28.0f};
+			C->FillRoundRect(Fr, 14.0f, Paint(F(MenuTeal, 0.14f * A)));
+			C->StrokeRoundRect(Fr, 14.0f, F(MenuTeal, 0.7f * A), 1.2f);
+			TrackedText(*C, "FRESH START", Fr.X + Fr.W * 0.5f, Fr.Y + 19.0f, 11.0f, 800, F(MenuTeal, A), 2.2f, Align::Center);
+		}
 		if (CardPaint)
 		{
 			const hero::BackgroundInfo& Bi = hero::InfoOf(P.Story);
@@ -1084,6 +1126,7 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 			TrackedText(*C, Pill, Pr.X + 31.0f, Pr.Y + 19.0f, 11.0f, 800, F(Bc, A), 2.2f);
 		}
 		Yc = Photo.Y + Ph - 14.0f;
+		return FreshPill;
 	};
 	// Where the rent stands, in the landlord's terms: owed, covered, paid, a final notice, or the locks changed.
 	auto RentLine = [&]() {
@@ -1131,7 +1174,7 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 			Label("TONIGHT", MenuTeal);
 			if (Info.Person.Created)
 			{
-				Person(Info.HeroName);
+				Person(Info.HeroName, false);
 			}
 			else
 			{
@@ -1169,16 +1212,23 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 		switch (Sel)
 		{
 		case 0:
+		{
 			Label("CONTINUE CAREER", MenuTeal);
+			bool FreshShown = false;
 			if (Info.Person.Created)
 			{
-				Person(Info.HeroName);
+				FreshShown = Person(Info.HeroName, Info.Blank);
 			}
 			else
 			{
 				Title(Info.HeroName);
 			}
 			Row("BANKROLL", Money(Info.BankrollCents), MenuGold);
+			if (Info.Blank && !FreshShown)
+			{
+				// No room for the pill beside the background (or no person to wear it): the world gets its own row.
+				Row("WORLD", "FRESH START", MenuTeal);
+			}
 			if (Info.ClubTier > 0 || Info.TopBadge.K != badge::Kind::Count)
 			{
 				// The career's marks (§5.6): the Embercrest club crest and the network's one badge, at 24, with their words.
@@ -1223,14 +1273,19 @@ float FrontEnd::ContextBody(float X, float Y, float CardW)
 			}
 			RentLine();
 			break;
+		}
 		case 1:
 			Label("NEW CAREER", MenuTeal);
 			Title("Night One");
 			Para("Rain on the window, $2.37 in your RiverLine account and a final notice on the door. Rent is due Friday.", MenuInk);
 			if (DraftTouched && !Draft.FirstName.empty())
 			{
-				// Backed out of the creator: the person they were making is still there.
+				// Backed out of the creator: the person they were making is still there, and the world they picked.
 				Row("IN THE CREATOR", Draft.FullName(), MenuInk);
+				if (WorldStart == world::Start::Blank)
+				{
+					Row("WORLD", "FRESH START", MenuTeal);
+				}
 			}
 			if (Info.HasSave)
 			{

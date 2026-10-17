@@ -875,5 +875,49 @@ inline std::string LivePaying(const LiveCard& Card)
 	return Card.FundLine;
 }
 } // namespace rlnet_detail
+
+/**
+ * Update 2 (§2.6.1, §2.9, §2.11): RiverLine's autoplay screens (RiverLineAuto.cpp). The panel's open state lives beside
+ * the class, by laptop (RiverLine.h is frozen); the table, the tabs, the tiles, the results and Career read through here.
+ */
+namespace rlauto_detail
+{
+// The copy these screens add to core's (autoplay::Text, style::Catalog). Sentences are in AutoUiInventory (the lint).
+inline constexpr const char* AutoSubtitle = "Your plan plays your seat in the style you pick. Any hand is yours again with one press of K.";
+inline constexpr const char* AutoCloseHint = "K or Backspace closes this.";
+inline constexpr const char* AutoSharpOff = "Read when your plan takes the seat.";
+inline constexpr const char* AutoFormNote = "Form is your own graded play online. From 80 it sharpens your plan; at 95 it's as sharp as it gets.";
+inline constexpr const char* AutoSloppy = "Under 70% your plan gets sloppy: eat, rest, play some hands yourself.";
+inline constexpr const char* AutoThinkHint = "Any action takes the wheel.";
+inline constexpr const char* AutoYourHand = "This hand is yours. Your plan's back on the next one.";
+inline constexpr const char* AutoYourHandKeys = "Your plan's back next hand. K turns autoplay off.";
+inline constexpr const char* AutoPending = "Skipping from the next hand.";
+inline constexpr const char* AutoDefaultSaved = "Saved. New tables start with this plan.";
+inline constexpr const char* AutoEveryDecision = "Your plan made every decision, so there's nothing of yours to review.";
+inline constexpr const char* AutoXpOwn = "XP comes from your own decisions, never your plan's.";
+/** The closed table's toast where "no decisions" was (§2.9): a fragment, like the line it replaces. */
+inline constexpr const char* AutoPlayedToast = "played by your plan";
+
+/** Whether the autoplay panel is open on this laptop. */
+bool AutoPanelOpen(const RiverLine* RL);
+/** Opens the panel over open table Table (an index; the panel closes by itself if that table goes). */
+void AutoOpenPanel(const RiverLine* RL, const Session& S, int Table, double Now);
+void AutoClosePanel(const RiverLine* RL);
+/** Drops a laptop's autoplay state when it goes (~RiverLine). */
+void ForgetAuto(const RiverLine* RL);
+/**
+ * K, Backspace, and an action key during the plan's think, at the table in front (§2.6.1, §2.6.5): true when taken.
+ * The panel open: K or Backspace closes it. Backspace stops a skip. K with autoplay off hands the seat to the plan the
+ * panel shows; with it on, Session::TakeOver. F C X R B A while the plan thinks take the wheel and do nothing else.
+ */
+bool AutoKey(const RiverLine* RL, Session& S, const std::string& Key);
+/** What the plan played in a finished event (its played line), when it played any of it; else null. */
+const autoplay::Played* AutoPlayedFor(const Session& S, const Results& R);
+const autoplay::Played* AutoPlayedFor(const Session& S, const HistoryEntry& H);
+/** A table's one line while the plan holds or skips it ("AUTO · GTO 2x · CALLED 3,200", the skip's line); "" when off. */
+std::string AutoTileLine(const autoplay::Panel& P);
+/** Every sentence the autoplay screens draw beyond core's own copy, for the copy lint. */
+std::vector<std::string> AutoUiInventory();
+} // namespace rlauto_detail
 } // namespace ui
 } // namespace ss

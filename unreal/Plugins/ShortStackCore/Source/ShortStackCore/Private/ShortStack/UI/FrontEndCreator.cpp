@@ -1,5 +1,5 @@
-// The character creator: New Game's four steps (who, how they got here, how they look, the card that
-// says so) around a live portrait of the person being made.
+// The character creator: New Game's five steps (who, how they got here, how they look, the world they walk
+// into, the card that says so) around a live portrait of the person being made.
 #include "ShortStack/UI/FrontEnd.h"
 #include "../StrictFloat.h"
 #include "FrontEndShared.h"
@@ -20,9 +20,30 @@ namespace ui
 {
 namespace creator_detail
 {
-const char* const StepNames[4] = {"IDENTITY", "BACKGROUND", "LOOK", "REVIEW"};
-const char* const StepTitles[4] = {"WHO ARE YOU?", "HOW YOU GOT HERE", "HOW YOU LOOK", "THIS IS YOU"};
+/** The steps, in CreatorStage's order. */
+constexpr int CreatorStepCount = 5;
+const char* const StepNames[CreatorStepCount] = {"IDENTITY", "BACKGROUND", "LOOK", "WORLD", "REVIEW"};
+const char* const StepTitles[CreatorStepCount] = {"WHO ARE YOU?", "HOW YOU GOT HERE", "HOW YOU LOOK", "THE WORLD", "THIS IS YOU"};
 const char* const LookTabs[4] = {"FACE", "HAIR", "BODY", "STYLE"};
+
+// THE WORLD (update 2 §3.1): the two cards, in world::Start's order (Established, Blank), and the line under them. The
+// record board each card draws (CreatorWorldBoard) reads like the Leaderboards page it stands for: the Season board's
+// "since" and, in a fresh world, its empty state's own words.
+const char* const CreatorWorldNames[2] = {"Established world", "Fresh start"};
+const char* const CreatorWorldCopy[2] = {
+	"RiverLine's been running for years. The boards are full, the regulars have records, and there are champions on the wall.",
+	"Everyone's record starts where yours does: no winnings, no events, no titles. The boards, the badges and the wall fill in as the world plays. "
+	"Bankrolls and skills still differ, so the stars will show.",
+};
+const char* const CreatorWorldSince[2] = {"SINCE JAN 1", "SINCE OCT 6"};
+const char* const CreatorWorldEmpty = "Nobody's scored yet.";
+const char* const CreatorWorldEither = "EITHER WAY";
+const char* const CreatorWorldSame = "Same city, same people, same skills, same bankrolls. You only pick once: a career keeps the world it starts in.";
+/** The pill the player's card and the CONTINUE card wear in a fresh world (§3.6). */
+const char* const CreatorFreshPill = "FRESH START";
+/** The cards' accents: an established world's gold (its champions), a fresh start's teal. */
+const uint32_t CreatorWorldGold = 0xf2c14e;
+const uint32_t CreatorWorldTeal = 0x27d3c3;
 constexpr int IdentityRows = 5; // first name, last name, screen name, age, country
 /** Drafts kept to undo (each randomize, and a typed name a suggestion replaced). */
 constexpr size_t UndoDepth = 12;
@@ -374,6 +395,71 @@ void frontend_detail::BackgroundIcon(Canvas& C, hero::Background B, float Cx, fl
 	}
 }
 
+namespace creator_detail
+{
+/**
+ * THE WORLD's picture of a choice (Which: 0 established, 1 fresh): the Season board as it reads on Night One. An
+ * established world's is full (rank, face, name, points); a fresh start's has its rows and nobody on them yet, in the
+ * board's own empty-state words. A is the alpha it draws at (the page's fade and the card's ease).
+ */
+void CreatorWorldBoard(Canvas& C, const Rect& B, int Which, const Color& Accent, float A)
+{
+	const bool Fresh = Which == 1;
+	C.FillRoundRect(B, 10.0f, Paint(Hex(0x0b0f1a, 0.85f * A)));
+	C.StrokeRoundRect({B.X + 0.5f, B.Y + 0.5f, B.W - 1.0f, B.H - 1.0f}, 10.0f, WithAlpha(MenuInk, 0.08f * A), 1.0f);
+	TrackedText(C, "SEASON", B.X + 16.0f, B.Y + 26.0f, 11.0f, 800, WithAlpha(MenuMuted, A), 2.6f);
+	TrackedText(C, CreatorWorldSince[Fresh ? 1 : 0], B.X + B.W - 16.0f, B.Y + 26.0f, 10.0f, 800, WithAlpha(Accent, 0.9f * A), 2.2f, Align::Right);
+	C.FillRect({B.X + 16.0f, B.Y + 37.0f, B.W - 32.0f, 1.0f}, Paint(WithAlpha(MenuInk, 0.1f * A)));
+	const int Rows = 4;
+	const float Top = B.Y + 44.0f;
+	const float Rh = (B.H - 52.0f) / Fc(Rows);
+	// The established board's rows: how long each name runs and each score, top to bottom (a picture, not anyone's numbers).
+	const float NameLen[Rows] = {0.62f, 0.48f, 0.56f, 0.4f};
+	const float Points[Rows] = {56.0f, 47.0f, 42.0f, 36.0f};
+	const uint32_t Faces[Rows] = {0xff8a5c, 0x6fb7ff, 0xb48cff, 0x7ddc8a};
+	for (int I = 0; I < Rows; ++I)
+	{
+		const float Cy = Top + (Fc(I) + 0.5f) * Rh;
+		C.Text(std::to_string(I + 1), B.X + 24.0f, Cy + 4.5f, Ts(12.0f, 800, WithAlpha(MenuInk, (Fresh ? 0.22f : I == 0 ? 0.95f : 0.6f) * A), Align::Center));
+		if (Fresh)
+		{
+			C.FillRect({B.X + 42.0f, Cy, B.W - 58.0f, 1.0f}, Paint(WithAlpha(MenuInk, 0.07f * A)));
+			continue;
+		}
+		C.FillCircle(B.X + 48.0f, Cy, 6.5f, Paint(Hex(Faces[I], 0.85f * A)));
+		const float NameRoom = B.W - 62.0f - 16.0f - 74.0f;
+		C.FillRoundRect({B.X + 62.0f, Cy - 3.5f, std::max(24.0f, NameRoom * NameLen[I]), 7.0f}, 3.5f, Paint(WithAlpha(MenuInk, (I == 0 ? 0.5f : 0.3f) * A)));
+		C.FillRoundRect({B.X + B.W - 16.0f - Points[I], Cy - 3.5f, Points[I], 7.0f}, 3.5f, Paint(WithAlpha(Accent, (I == 0 ? 0.95f : 0.55f) * A)));
+	}
+	if (Fresh)
+	{
+		const float Ty = Top + Fc(Rows) * Rh * 0.5f;
+		const float Tw = C.Measure(CreatorWorldEmpty, 15.0f, 600);
+		C.FillRoundRect({B.X + B.W * 0.5f - Tw * 0.5f - 16.0f, Ty - 15.0f, Tw + 32.0f, 30.0f}, 15.0f, Paint(Hex(0x0b0f1a, A)));
+		C.Text(CreatorWorldEmpty, B.X + B.W * 0.5f, Ty + 5.5f, Ts(15.0f, 600, WithAlpha(MenuInk, 0.8f * A), Align::Center));
+	}
+}
+
+/** THE WORLD's sentences and labels, keyed, for the copy lint (riverline_ui's ui_seg_creator.cpp declares it). */
+std::vector<std::pair<std::string, std::string>> CreatorWorldInventory()
+{
+	return {
+		{"world.established.name", CreatorWorldNames[0]},
+		{"world.established", CreatorWorldCopy[0]},
+		{"world.fresh.name", CreatorWorldNames[1]},
+		{"world.fresh", CreatorWorldCopy[1]},
+		{"world.board.empty", CreatorWorldEmpty},
+		{"world.either.label", CreatorWorldEither},
+		{"world.either", CreatorWorldSame},
+		{"world.pill", CreatorFreshPill},
+		{"world.since.established", CreatorWorldSince[0]},
+		{"world.since.fresh", CreatorWorldSince[1]},
+		{"world.step", StepNames[3]},
+		{"world.title", StepTitles[3]},
+	};
+}
+} // namespace creator_detail
+
 // ------------------------------------------------------------------ flow
 
 void FrontEnd::CreatorOpen(double Now)
@@ -399,6 +485,9 @@ void FrontEnd::CreatorOpen(double Now)
 	Draft = hero::Random(R);
 	Rolled = Draft;
 	Undo.clear();
+	// A new draft walks into an established world until the player picks otherwise on THE WORLD (picking is a touch, so a
+	// fresh start survives backing out like the rest of the draft).
+	WorldStart = world::Start::Established;
 }
 
 void FrontEnd::CreatorGo(CreatorStage Target, double Now)
@@ -460,13 +549,12 @@ void FrontEnd::CreatorNext(double Now)
 		return;
 	}
 	Sound(SoundId::Chip, 0.5);
-	if (Stage == CreatorStage::Look)
+	if (Stage == CreatorStage::World)
 	{
-		// The card's photo is taken.
+		// On to the review: the card's photo is taken.
 		Sound(SoundId::Flip, 0.45);
 	}
-	// THE WORLD (update 2 §3.1) is ui-front's step: until it lands, Look goes straight to Review.
-	CreatorGo(Stage == CreatorStage::Look ? CreatorStage::Review : static_cast<CreatorStage>(static_cast<int>(Stage) + 1), Now);
+	CreatorGo(static_cast<CreatorStage>(static_cast<int>(Stage) + 1), Now);
 }
 
 void FrontEnd::CreatorBack(double Now)
@@ -478,7 +566,7 @@ void FrontEnd::CreatorBack(double Now)
 		Sel = 1;
 		return;
 	}
-	CreatorGo(Stage == CreatorStage::Review ? CreatorStage::Look : static_cast<CreatorStage>(static_cast<int>(Stage) - 1), Now);
+	CreatorGo(static_cast<CreatorStage>(static_cast<int>(Stage) - 1), Now);
 }
 
 void FrontEnd::BeginNewGame(double Now)
@@ -629,6 +717,17 @@ void FrontEnd::CreatorChange(int Delta, bool Wrap)
 		const hero::Slot S = Slots[static_cast<size_t>(Field)];
 		Draft.Appearance.Set(S, Draft.Appearance.Get(S) + Delta, Wrap && S != hero::Slot::Height);
 	}
+	else if (Stage == CreatorStage::World)
+	{
+		// Two cards side by side: left is the established world, right the fresh start (Wrap flips between them).
+		const world::Start Want = Wrap ? (WorldStart == world::Start::Blank ? world::Start::Established : world::Start::Blank)
+									   : (Delta < 0 ? world::Start::Established : world::Start::Blank);
+		if (Want == WorldStart)
+		{
+			return;
+		}
+		WorldStart = Want;
+	}
 	else
 	{
 		return;
@@ -733,6 +832,19 @@ void FrontEnd::CreatorKey(const std::string& Name, double Now)
 			CreatorTouched();
 			SelAt = Now;
 			Sound(SoundId::Click, 0.3);
+		}
+		return;
+	}
+	if (Stage == CreatorStage::World)
+	{
+		// Left and Right pick a card; Tab (and the bumpers) flip between them. Up and down have nowhere to go.
+		if (Name == "Left" || Name == "Right")
+		{
+			CreatorChange(Name == "Left" ? -1 : 1, false);
+		}
+		else if (Name == "Tab" || Name == "TabPrev" || Name == "TabNext")
+		{
+			CreatorChange(1, true);
 		}
 		return;
 	}
@@ -899,16 +1011,16 @@ void FrontEnd::CreatorHeader(double Now)
 	const float X = MenuMargin;
 	const float In = Ease(PageTime / 0.45);
 	const float Dx = (1.0f - In) * -30.0f;
-	// The step's place in the stepper (THE WORLD has none until ui-front's step lands: Review stays the fourth).
-	const int S = static_cast<int>(Stage) - (Stage == CreatorStage::Review ? 1 : 0);
+	// The step's place in the stepper.
+	const int S = std::clamp(static_cast<int>(Stage), 0, CreatorStepCount - 1);
 	C->FillRect({X + Dx + 2.0f, 143.0f, 44.0f, 3.0f}, Paint(F(MenuNeon, In)));
-	TrackedText(*C, "NEW CAREER \xC2\xB7 STEP " + std::to_string(S + 1) + " OF 4", X + Dx + 62.0f, 151.0f, 15.0f, 700, F(MenuNeon, In), 6.0f);
+	TrackedText(*C, "NEW CAREER \xC2\xB7 STEP " + std::to_string(S + 1) + " OF " + std::to_string(CreatorStepCount), X + Dx + 62.0f, 151.0f, 15.0f, 700, F(MenuNeon, In), 6.0f);
 	const float Ti = Ease((Now - StageAt) / 0.35);
 	TrackedText(*C, StepTitles[S], X + (1.0f - Ti) * -18.0f, 230.0f, 62.0f, 900, F(MenuInk, Ti), 3.0f);
 	// The stepper: done steps teal, this one neon, the rest waiting (dimmer, but still readable over the room). Narrow
 	// screens tighten the names, then drop the numbers, so neighbours never touch.
 	const float W = CreatorFormWidth(ViewW);
-	const float Seg = W / 4.0f;
+	const float Seg = W / Fc(CreatorStepCount);
 	float Track = 3.0f;
 	auto Widest = [&](float T) {
 		float Most = 0.0f;
@@ -925,7 +1037,7 @@ void FrontEnd::CreatorHeader(double Now)
 		Numbers = 34.0f + Widest(Track) <= Seg - 16.0f;
 	}
 	const Color Waiting = Mix(MenuDim, MenuMuted, 0.6f);
-	for (int I = 0; I < 4; ++I)
+	for (int I = 0; I < CreatorStepCount; ++I)
 	{
 		const float Sx = X + Fc(I) * Seg;
 		const Rect Hit{Sx, 252.0f, Seg - 12.0f, 44.0f};
@@ -1427,6 +1539,23 @@ void FrontEnd::PlayersCard(const Rect& R, double Now)
 	}
 	C->PopClip();
 	C->StrokeRoundRect(Ph, 12.0f, F(Ash, 0.16f), 1.0f);
+	if (WorldStart == world::Start::Blank)
+	{
+		// A fresh start (update 2 §3.1): its pill beside NEW MEMBER while the header has room for both, else stamped across
+		// the photo's foot, clear of the face.
+		const Color Teal = Hex(CreatorWorldTeal);
+		const float Fw = TrackedWidth(*C, CreatorFreshPill, 11.0f, 800, 2.4f) + 28.0f;
+		const float Brand = R.X + 86.0f + std::max(TrackedWidth(*C, "EMBERCREST", 20.0f, 900, 5.0f), TrackedWidth(*C, "CASINO \xC2\xB7 PLAYERS CLUB", 11.0f, 700, 3.0f));
+		Rect Fr{R.X + R.W - 28.0f - Pw - 10.0f - Fw, R.Y + 30.0f, Fw, 26.0f};
+		if (Fr.X < Brand + 14.0f)
+		{
+			Fr = {Ph.X + (Ph.W - Fw) * 0.5f, Ph.Y + Ph.H - 13.0f, Fw, 26.0f};
+		}
+		C->FillRoundRect(Fr, 13.0f, Paint(F(Hex(BrandMidnight), 0.92f)));
+		C->FillRoundRect(Fr, 13.0f, Paint(F(Teal, 0.16f)));
+		C->StrokeRoundRect(Fr, 13.0f, F(Teal, 0.55f), 1.0f);
+		TrackedText(*C, CreatorFreshPill, Fr.X + Fr.W * 0.5f, Fr.Y + 18.0f, 11.0f, 800, F(Teal), 2.4f, Align::Center);
+	}
 	// Fields.
 	const float Fx = R.X + 252.0f;
 	auto FieldText = [&](const std::string& Label, const std::string& Value, float Fx0, float Fy, float Size) {
@@ -1466,6 +1595,65 @@ void FrontEnd::ReviewStep(double Now)
 {
 	const float X = MenuMargin;
 	const float W = CreatorFormWidth(ViewW);
+	if (Stage == CreatorStage::World)
+	{
+		// THE WORLD (update 2 §3.1): an established world on the left, a fresh start on the right, each with the board it
+		// opens on. (FrontEnd.h froze in Phase A without a draw member for this step, so it draws here, ahead of the
+		// review it leads to.)
+		const float Gap = 24.0f;
+		const float Cw = (W - Gap) * 0.5f;
+		// Both cards stand as tall as the longer copy needs (it wraps further on 4:3 and 5:4), between 360 and 420, so the
+		// line under them always clears the buttons.
+		size_t Lines = 0;
+		for (const char* Copy : CreatorWorldCopy)
+		{
+			Lines = std::max(Lines, WrapText(*C, Copy, Cw - 48.0f, 16.0f, 400).size());
+		}
+		const float Ch = std::clamp(258.0f + 24.0f * Fc(static_cast<int>(Lines)), 360.0f, 420.0f);
+		for (int I = 0; I < 2; ++I)
+		{
+			const world::Start Which = I == 0 ? world::Start::Established : world::Start::Blank;
+			const float Ci = Ease((Now - StageAt - 0.06 * I) / 0.4);
+			const Rect R{X + Fc(I) * (Cw + Gap), 340.0f + (1.0f - Ci) * 16.0f, Cw, Ch};
+			const bool Picked = WorldStart == Which;
+			const bool Over = Interactive && Inside(R, Ptr.X, Ptr.Y);
+			const Color Ac = Hex(I == 0 ? CreatorWorldGold : CreatorWorldTeal);
+			if (Picked)
+			{
+				C->GlowRoundRect(R, 4.0f, F(Ac, 0.28f * Ci), 26.0f);
+			}
+			C->FillRect(R, Paint::Linear({R.X, R.Y}, {R.X + R.W, R.Y + R.H}, F(Picked ? Mix(MenuPanel, Ac, 0.12f) : MenuPanel, 0.92f * Ci), F(MenuPanel, 0.8f * Ci)));
+			C->StrokeRoundRect({R.X + 0.75f, R.Y + 0.75f, R.W - 1.5f, R.H - 1.5f}, 2.0f, F(Picked ? Ac : MenuInk, (Picked ? 0.9f : Over ? 0.24f : 0.1f) * Ci), Picked ? 2.0f : 1.0f);
+			C->FillRect({R.X, R.Y, 4.0f, R.H}, Paint(F(Ac, (Picked ? 1.0f : 0.45f) * Ci)));
+			CreatorWorldBoard(*C, {R.X + 24.0f, R.Y + 24.0f, R.W - 48.0f, 150.0f}, I, Ac, Fade * Ci);
+			// The choice: a radio mark (the pick never rides on color alone), the name, and what it means.
+			const float Ny = R.Y + 224.0f;
+			const float Mx = R.X + 34.0f;
+			C->StrokeEllipse(Mx, Ny - 9.0f, 10.0f, 10.0f, F(Picked ? Ac : MenuInk, (Picked ? 1.0f : 0.4f) * Ci), 2.0f);
+			if (Picked)
+			{
+				C->FillCircle(Mx, Ny - 9.0f, 5.0f, Paint(F(Ac, Ci)));
+			}
+			const float Nx = R.X + 56.0f;
+			const float Room = R.X + R.W - 24.0f - Nx;
+			float Size = 26.0f;
+			while (Size > 18.0f && C->Measure(CreatorWorldNames[I], Size, 900) > Room)
+			{
+				Size -= 1.0f;
+			}
+			C->Text(CreatorWorldNames[I], Nx, Ny, Ts(Size, 900, F(MenuInk, Ci), Align::Left, Baseline::Alphabetic, false, Room));
+			FitLines(*C, CreatorWorldCopy[I], R.X + 24.0f, Ny + 10.0f, R.W - 48.0f, R.Y + R.H - 16.0f, 16.0f, 13.0f, 400, F(Mix(MenuMuted, MenuInk, 0.4f), Ci));
+			if (Released(R) && !Picked)
+			{
+				CreatorChange(I == 0 ? -1 : 1, false);
+			}
+		}
+		// What doesn't change, and that it's for good.
+		const float Ey = 340.0f + Ch + 40.0f;
+		TrackedText(*C, CreatorWorldEither, X, Ey, 12.0f, 800, F(MenuMuted), 3.0f);
+		FitLines(*C, CreatorWorldSame, X, Ey + 4.0f, W, 892.0f, 18.0f, 15.0f, 300, F(MenuInk, 0.9f));
+		return;
+	}
 	// The card, and the perk beside it when there's room (16:10 narrows the card a little to keep it); on 4:3 and 5:4
 	// the perk comes as a strip under the card.
 	float Cw = std::min(620.0f, W);
@@ -1536,6 +1724,8 @@ void FrontEnd::NewGamePage(double Now)
 	case CreatorStage::Identity: IdentityStep(Now); break;
 	case CreatorStage::Background: BackgroundStep(Now); break;
 	case CreatorStage::Look: LookStep(Now); break;
+	// THE WORLD draws in ReviewStep (see there).
+	case CreatorStage::World:
 	default: ReviewStep(Now); break;
 	}
 	if (Cur != Page::NewGame)
@@ -1613,7 +1803,8 @@ void FrontEnd::NewGamePage(double Now)
 			Pairs.push_back({"R/Y", "RANDOMIZE"});
 		}
 		break;
-	case CreatorStage::Background: Pairs.push_back({"LEFT|RIGHT/DPAD", "CHOOSE"}); break;
+	case CreatorStage::Background:
+	case CreatorStage::World: Pairs.push_back({"LEFT|RIGHT/DPAD", "CHOOSE"}); break;
 	case CreatorStage::Look:
 		Pairs.push_back({"Q|E/LB|RB", "SECTION"});
 		Pairs.push_back({"UP|DOWN/DPAD", "SELECT"});

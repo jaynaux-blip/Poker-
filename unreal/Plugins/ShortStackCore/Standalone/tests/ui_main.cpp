@@ -670,9 +670,11 @@ void FrontEndFlows()
 	Fe.Key("Right", Now);
 	Expect(Fe.CreatorTab() == 3 || (Fe.CreatorTab() == 2 && Fe.Draft.Appearance.Height == std::min(ss::hero::MaxHeight, Height + 1)), "the body tab sets the height");
 	Fe.Key("Enter", Now);
+	Expect(Fe.CreatorStep() == Step::World && Fe.WorldStart == ss::world::Start::Established, "then the world, established until picked");
+	Fe.Key("Enter", Now);
 	Expect(Fe.CreatorStep() == Step::Review, "then the review");
 	Fe.Key("Escape", Now);
-	Expect(Fe.CreatorStep() == Step::Look, "Escape steps back");
+	Expect(Fe.CreatorStep() == Step::World, "Escape steps back");
 	Fe.Key("Enter", Now);
 	Fe.Key("Enter", Now);
 	Expect(H.NewGameName == "acehigh" && !Fe.IsOpen() && H.Who.FirstName == "Rosa Mar\xC3\xAD" "a" && H.Who.LastName == "Delgado" && H.Who.Story == Chosen && H.Who.Created,
@@ -793,10 +795,12 @@ void FrontEndScreens()
 	Fe.Key("E", Now);
 	Now = Settle(Fe, Now, 0.8);
 	EmitMenu("menu_creator_style", Fe, Now);
+	Fe.Key("Enter", Now); // THE WORLD (its own dumps are ui-front's, in ui_seg_creator.cpp)
 	Fe.Key("Enter", Now);
 	Now = Settle(Fe, Now, 1.0);
 	EmitMenu("menu_creator_review", Fe, Now);
 	EmitMenu("menu_creator_review_ultrawide", Fe, Now + 0.05, 2520.0f);
+	Fe.Key("Escape", Now);
 	Fe.Key("Escape", Now);
 	Fe.Key("Escape", Now);
 	Fe.Key("Escape", Now);
@@ -2111,6 +2115,7 @@ void CreatorInputFixes()
 	Fe.Key("Enter", Now);
 	Fe.Key("Enter", Now);
 	Fe.Key("Enter", Now);
+	Fe.Key("Enter", Now); // through THE WORLD
 	const ss::hero::Character AtReview = Fe.Draft;
 	Fe.Key("R", Now);
 	Fe.Key("Reset", Now);

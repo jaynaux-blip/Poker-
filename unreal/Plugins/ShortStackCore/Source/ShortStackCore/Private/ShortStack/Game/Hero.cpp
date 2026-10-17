@@ -35,7 +35,7 @@ const BackgroundInfo Backgrounds[BackgroundCount] = {
 		"You ran errands for people like Marcus before you could drive, and you've never been picked up. You know which corners have cameras and which "
 		"cops work nights. You'd rather win it at the table, but the table doesn't always pay the rent.",
 		"Low Profile", "Burner runs are 5% less likely to go wrong, and police heat cools 50% faster.", 0xb36bff},
-	{Background::Newcomer, "newcomer", "Fresh Start", "New in town with one suitcase.",
+	{Background::Newcomer, "newcomer", "Out-of-Towner", "New in town with one suitcase.",
 		"You sold everything that didn't fit in one suitcase and took the night bus to the city. The deposit on the apartment ate most of what you saved, "
 		"and nobody here knows your name yet. That might be the best thing about it.",
 		"Rainy-Day Fund", "You start with $40 more in the bank.", 0x27d3c3},

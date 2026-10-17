@@ -69,7 +69,7 @@ const Table& Bodies()
 			"{Why} RiverLine would like you on Team RiverLine. The patch on your chest, our tournaments on your stream, a monthly retainer, tickets to the Daily Main, "
 			"and the gold frame on your name. Six months. The full terms are below."},
 		{"offer:riverline:1",
-			"{Why} Team RiverLine is ten players and a few streamers, and we have a seat open. You'd wear the patch at every live event, stream our tournaments, and get "
+			"{Why} Team RiverLine keeps a short roster, and we have a seat open. You'd wear the patch at every live event, stream our tournaments, and get "
 			"a retainer, Daily Main tickets and the gold frame. Terms below."},
 		{"offer:sitwell:0",
 			"{Why} Ten thousand people sit with you every night. Sitwell would like to be the chair. One comes with the deal, along with hourly pay and a read a "

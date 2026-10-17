@@ -252,7 +252,15 @@ void RiverLine::StatsKpis(const world::Tracker& T, const Rect& R, double Now)
 			Vx += Ts0 * 2.0f + 8.0f;
 		}
 		UI.Text(Kp.Value, Vx, Vy, Ts(K == 0 ? 40.0f : 26.0f, 800, StInk, Align::Left, Baseline::Alphabetic, false, Tr.X + W - Vx - 12.0f));
-		UI.Text(Kp.Sub, Tr.X + 16.0f, Tr.Y + R.H - 14.0f, Ts(11.5f, 600, StSoft, Align::Left, Baseline::Alphabetic, false, W - 26.0f));
+		if (K == 1 && Unranked)
+		{
+			// Why there's no rank (update 2 §3.6) is a sentence, too long for one line of a narrow tile: two smaller ones.
+			NetParagraph(*C, Kp.Sub, Tr.X + 14.0f, Tr.Y + R.H - 26.0f, W - 22.0f, 10.5f, 600, StSoft, 13.0f, 2);
+		}
+		else
+		{
+			UI.Text(Kp.Sub, Tr.X + 16.0f, Tr.Y + R.H - 14.0f, Ts(11.5f, 600, StSoft, Align::Left, Baseline::Alphabetic, false, W - 26.0f));
+		}
 		X += W + Gap;
 	}
 }

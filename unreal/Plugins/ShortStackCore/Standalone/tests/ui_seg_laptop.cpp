@@ -1127,6 +1127,92 @@ void ContinueCard()
 	Expect(Bank.Found && Mark.Found && std::fabs((Mark.X + Mark.W) - (Bank.X + Bank.W)) < 1.0f, "continue card: the marks end where the card's values do");
 }
 
+// ------------------------------------------------------------------ a fresh start (update 2 §3.6)
+
+/** Every text run from x X0 on, in draw order, joined with spaces (a wrapped paragraph read back whole). */
+std::string JoinedFrom(const DrawList& L, float X0, float X1 = 1.0e9f)
+{
+	std::string Out;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.X >= X0 && Cmd.Text.X <= X1)
+		{
+			Out += (Out.empty() ? "" : " ") + Cmd.Text.Text;
+		}
+	}
+	return Out;
+}
+
+void FreshStart()
+{
+	// Night One, 2:07 AM, a fresh start: every board but Night Shift says nobody's scored, Earnings that nobody's cashed;
+	// the about lines count from Oct 6; the Hall says why nobody's eligible; the player's stats say why there's no rank.
+	ss::hero::Character Who;
+	Laptop P("laptop-fresh");
+	ss::Session& S = P.S;
+	S.NewCareer(Who, ss::world::Start::Blank);
+	S.CurrentScreen = ss::Screen::Lobby;
+	P.Now = Step(S, P.Now, 0.2);
+	Expect(S.WorldStart() == ss::world::Start::Blank, "fresh: a Blank world");
+	struct BoardCase
+	{
+		ss::net::Board B;
+		const char* Empty;
+	};
+	const BoardCase Cases[4] = {{ss::net::Board::NightShift, "No scores yet tonight."},
+		{ss::net::Board::Season, "Nobody's scored yet."},
+		{ss::net::Board::Earnings, "Nobody's cashed on RiverLine yet."},
+		{ss::net::Board::Wins, "Nobody's scored yet."}};
+	P.RL.OpenPage(Page::Leaderboards, P.Now);
+	for (const BoardCase& C : Cases)
+	{
+		P.RL.ShowBoard(C.B, P.Now);
+		const DrawList L = P.Settled();
+		const std::vector<ss::net::BoardRow> Rows = ss::net::Shared().Leaderboard(C.B, S.WorldMinutes(), ss::net::HeroStats(), 60, nullptr);
+		Expect(!Rows.empty() || DrewRun(L, C.Empty), (std::string("fresh: an empty board says so (board ") + std::to_string(static_cast<int>(C.B)) + ")").c_str());
+		Expect(C.B == ss::net::Board::NightShift || Rows.empty(), (std::string("fresh: nobody's on the board at 2:07 AM (board ") + std::to_string(static_cast<int>(C.B)) + ")").c_str());
+		if (C.B == ss::net::Board::Season)
+		{
+			WriteList("fresh_boards_season", L);
+			Expect(JoinedFrom(L, 1092.0f).find("Points from every final table since Oct 6, the night the record books opened.") != std::string::npos,
+				"fresh: the Season board counts from Oct 6, the night the record books opened");
+			Expect(DrewRun(L, "Crowned on New Year's Day. Nobody holds it yet."), "fresh: REIGNING: nobody holds it yet");
+		}
+		if (C.B == ss::net::Board::Earnings)
+		{
+			Expect(JoinedFrom(L, 1092.0f).find("Tournament winnings on RiverLine since Oct 6.") != std::string::npos, "fresh: Earnings counts from Oct 6");
+		}
+	}
+	// The Hall: nobody's eligible, and why.
+	{
+		const DrawList L0 = P.Settled();
+		const Box Honors = RunOf(L0, "Honors", P.M);
+		P.Click(Honors.X + Honors.W / 2.0f, Honors.Base - 5.0f);
+		const DrawList L = P.Settled();
+		Expect(JoinedFrom(L, 24.0f, 560.0f).find("Nobody's eligible yet. The Hall wants ten years on the scene.") != std::string::npos, "fresh: the Hall wants ten years on the scene");
+		WriteList("fresh_honors", L);
+	}
+	// The player's stats: a big enough sample, too few regulars on record to rank it against (RoiRank -1).
+	S.Living().GrantHeroResults(260);
+	P.RL.OpenPage(Page::Career, P.Now);
+	P.RL.ShowPlayer(ss::ui::RiverLine::HeroCard, P.Now);
+	{
+		const DrawList L = P.Settled();
+		Expect(S.Living().RoiRank(S.Living().HeroStats().Roi()) < 0.0, "fresh: too few regulars to rank anyone yet");
+		// The ROI tile (the second of six, from x 552): the whole sentence, over its two lines, nothing cut.
+		Expect(JoinedFrom(L, 552.0f, 700.0f).find("Not enough regulars on record yet to rank you.") != std::string::npos && !Drew(L, "regulars\xE2\x80\xA6"),
+			"fresh: the stats page says why there's no rank, whole");
+		WriteList("fresh_stats_unranked", L);
+	}
+	P.RL.ShowPlayer(-1, P.Now);
+	// An established world keeps its own words.
+	Laptop E("laptop-established");
+	E.RL.OpenPage(Page::Leaderboards, E.Now);
+	E.RL.ShowBoard(ss::net::Board::Season, E.Now);
+	const DrawList Le = E.Settled();
+	Expect(JoinedFrom(Le, 1092.0f).find("Points from every final table since January.") != std::string::npos, "established: the Season board counts from January");
+}
+
 // ------------------------------------------------------------------ the copy
 
 void Copy()
@@ -1164,6 +1250,16 @@ void Copy()
 		{"results", "Prize $410.00 went into Lantern Row Staking's roll. Your cut comes at the chop."},
 		{"embercrest", "You're $25.80 short: your end of the buy-in and the bus are $125.80."},
 		{"embercrest", "You're $3.20 short: the bus is $5.80."},
+		// Update 2 (§3.6): a fresh start's empty boards and their about lines, the Hall, the stats page.
+		{"boards", "Nobody's scored yet."},
+		{"boards", "Nobody's cashed on RiverLine yet."},
+		{"boards", "Player of the Year 2026. Points from every final table since Oct 6, the night the record books opened. The top three win RCOP 2027 Platinum Passes worth $25,000."},
+		{"boards", "Tournament winnings on RiverLine since Oct 6. Every cash counts, every buy-in forgotten."},
+		{"boards", "Tournament winnings on RiverLine since Oct 6, 2026. Every cash counts, every buy-in forgotten."},
+		{"boards", "Points from every final table at Micro Madness, from Oct 6: the series opened before the record books did. The top three win RCOP Main Event packages."},
+		{"honors", "Nobody's eligible yet. The Hall wants ten years on the scene."},
+		{"stats", "Not enough regulars on record yet to rank you."},
+		{"stats", "Not enough regulars on record yet to rank them."},
 	};
 	Failures += copylint::Run("ui-laptop", Lines, copylint::LetterBody);
 }
@@ -1187,6 +1283,7 @@ void SegLaptop()
 	laptop_seg::Dates();
 	laptop_seg::Results();
 	laptop_seg::ContinueCard();
+	laptop_seg::FreshStart();
 	laptop_seg::Copy();
 }
 } // namespace ui_test
