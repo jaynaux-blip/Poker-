@@ -199,7 +199,7 @@ public:
 		Identity,
 		Background,
 		Look,
-		World, // update 2: Established world or Fresh start (ui-front's step; skipped until it lands)
+		World, // update 2: Established world or Fresh start (THE WORLD, step 4 of 5; it draws in ReviewStep)
 		Review,
 	};
 	CreatorStage CreatorStep() const { return Stage; }
@@ -264,7 +264,7 @@ private:
 	void StartCareer(double Now);
 	bool NameValid() const;
 
-	// The character creator (FrontEndCreator.cpp): New Game's four steps around a live portrait.
+	// The character creator (FrontEndCreator.cpp): New Game's five steps around a live portrait.
 	void CreatorOpen(double Now);
 	void CreatorGo(CreatorStage Target, double Now);
 	void CreatorNext(double Now);

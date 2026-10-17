@@ -3612,9 +3612,10 @@ void RiverLine::CareerPage(double Now)
 			ShowPlayer(HeroCard, Now);
 		}
 	}
+	if (!Previewing)
 	{
 		// Update 2 (§2.11): the autoplay settings card: the career's default plan (autoplay\tpref) and the player's Form,
-		// the graded play online that sharpens it (§2.5).
+		// the graded play online that sharpens it (§2.5). Never on a stream (U1: the plan is the player's business).
 		const autoplay::TableAuto Def = autoplay::DefaultPlan(S.Life.Auto);
 		bool Rusty = false;
 		const double Form = autoplay::FormNow(S.Life.Auto, World, &Rusty);
@@ -3641,8 +3642,9 @@ void RiverLine::CareerPage(double Now)
 		C->FillRoundRect({R.X + 1.0f, R.Y + 10.0f, 4.0f, R.H - 20.0f}, 2.0f, H.Place == 1 ? pal::Gold : Cashed ? pal::Green : pal::Dim);
 		// Update 2 (§2.9): an event the plan played carries its tag ("AUTO · LAG 82%": the plan's share of the decisions),
 		// and the accuracy is the player's own: "—" when they made none (bug 8).
+		// On a stream the row keeps its "—" but never the tag (U1, §1.10: the AUTO tag is for the player only).
 		const autoplay::Played* ByPlan = rlauto_detail::AutoPlayedFor(S, H);
-		const std::string Tag = ByPlan ? autoplay::CareerTag(*ByPlan) : std::string();
+		const std::string Tag = ByPlan && !Previewing ? autoplay::CareerTag(*ByPlan) : std::string();
 		const float TagW = Tag.empty() ? 0.0f : C->Measure(Tag, 10.0f, 700) + 10.0f * 1.3f;
 		const float NameW = UI.Text(H.Name, R.X + 22.0f, R.Y + 30.0f, Ts(16.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, Tag.empty() ? 420.0f : 460.0f - TagW - 12.0f));
 		if (!Tag.empty())

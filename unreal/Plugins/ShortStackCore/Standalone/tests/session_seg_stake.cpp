@@ -329,6 +329,34 @@ void ParkReadsTheSample()
 			}
 		}
 	}
+	// Under 200 paid online events there's nothing to rank yet: the session passes 0, never the rank a hot start would
+	// earn. An established world, ten events at a time until the small sample's ROI sits in the regulars' top half.
+	{
+		Hooks H;
+		ss::Session S(H, "stake-park-small");
+		S.NewCareer(Who);
+		S.CurrentScreen = ss::Screen::Lobby;
+		Wait(S, 0.0, 0.2);
+		ss::world::World& W = S.Living();
+		const int Park = W.Find("Mrs. Park");
+		for (int K = 0; K < 4; ++K)
+		{
+			W.Lent(Park, true, S.WorldMinutes());
+		}
+		ss::rep::Public Rec = S.Record();
+		while (W.HeroStats().Events < 190 && !(Rec.OnlineEvents > 0 && W.RoiRank(Rec.OnlineRoi) >= 0.5))
+		{
+			W.GrantHeroResults(10);
+			Rec = S.Record();
+		}
+		const double Rank = W.RoiRank(Rec.OnlineRoi);
+		std::string Said;
+		const int Share = ParkShare(S, N.Id, Said);
+		std::printf("  stake: Mrs. Park, established: %d paid online events at %s%%, rank %s, her share %d permille\n", Rec.OnlineEvents,
+			ss::Fixed(100.0 * Rec.OnlineRoi, 1).c_str(), ss::Fixed(Rank, 3).c_str(), Share);
+		Expect(Rec.OnlineEvents > 0 && Rec.OnlineEvents < 200 && Rank >= 0.5 && Share == 0,
+			"stake: Mrs. Park, an established world: a top-half ROI on fewer than 200 paid online events buys no piece");
+	}
 }
 } // namespace stake_seg
 

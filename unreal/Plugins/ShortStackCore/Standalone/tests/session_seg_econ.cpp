@@ -8,10 +8,11 @@
 //   EconPaceSession   the session's own inputs (autoplay off, watching at 1x/2x/4x/8x, skipping) reach the stream with
 //                     those factors.
 //   EconFreshTalk     a fresh world's first month on the block (§3.3 F9, §3.5): the board up at the Embercrest blank and
-//                     the first Nightly still to come only while they are; the first winners up the hill, the first of
-//                     each event, two wins, the room's points leader, the Season board's leader and the first Night
-//                     Shift board, each naming the real result; the books in the first week; nothing after day 30. Every
-//                     line linted (U1's words, no brand, a line the card holds).
+//                     the first of each of the room's events still to come only while they are; the first winners up
+//                     the hill, the first of each event, two wins, the room's points leader, the Season board's leader
+//                     (from the ones who watch it) and the first Night Shift board, each naming the real result; the
+//                     books in the first week, true of every background; nothing after day 30. Every line linted (U1's
+//                     words, no brand, a line the card holds).
 //   EconFreshYou      the same when the player is the one winning: the first name on the board, the first Noon
 //                     Deepstack, two wins, the room's points and the Season board.
 //   EconEstablished   an established world's block says none of it, at the same hours.
@@ -201,13 +202,14 @@ void EconPace()
 
 	// Whole nights on a grown channel over several seeds: 4x thins the strangers and keeps the follow chance; 8x and a
 	// skip thin both as Sprint did.
-	double Faces[4] = {0, 0, 0, 0};
-	double Follows[4] = {0, 0, 0, 0};
-	const int Speeds[4] = {1, 4, 8, 1};
-	const bool Sprints[4] = {false, false, true, true};
+	// The fifth: 8x when only the speed says so (no Sprinting flag) thins the follows exactly as 8x with it.
+	double Faces[5] = {0, 0, 0, 0, 0};
+	double Follows[5] = {0, 0, 0, 0, 0};
+	const int Speeds[5] = {1, 4, 8, 1, 8};
+	const bool Sprints[5] = {false, false, true, true, false};
 	for (int Seed = 0; Seed < 16; ++Seed)
 	{
-		for (int K = 0; K < 4; ++K)
+		for (int K = 0; K < 5; ++K)
 		{
 			const EconStreamRun R = EconStream("econ-pace-" + std::to_string(Seed), EconAt(Base, Speeds[K], Sprints[K]), 480.0, 0.5, true);
 			Faces[K] += R.Sum.NewFaces;
@@ -227,6 +229,7 @@ void EconPace()
 	Expect(Face8 > 0.72 && Face8 < 0.86 && FaceSkip == Face8, "econ pace: at 8x and on a skip about a fifth fewer, the same as each other");
 	Expect(Follows[0] >= 80.0 && Per4 > 0.88 * Per1 && Per4 < 1.12 * Per1, "econ pace: at 4x the ones who stay follow as often as at 1x");
 	Expect(Per8 > 0.35 * Per1 && Per8 < 0.75 * Per1 && PerSkip == Per8, "econ pace: at 8x and on a skip they follow about 40% less often (Sprinting)");
+	Expect(Faces[4] == Faces[2] && Follows[4] == Follows[2], "econ pace: 8x on the speed alone is the Sprinting stream, follows and all");
 }
 
 ss::autoplay::TableAuto EconPlan(ss::autoplay::Mode M, int Speed)
@@ -534,7 +537,7 @@ void EconCheckLine(ss::Session& S, const EconSaid& E, EconMonth& M)
 	if (E.Key.rfind("fresh:season:", 0) == 0)
 	{
 		const std::string Who = EconBoardTop(S, ss::net::Board::Season);
-		if (Who.empty() || (Who == S.HeroName ? !EconHas(E.Line, "you're on top") : E.Line.find(Who) == std::string::npos))
+		if (Who.empty() || (Who == S.HeroName ? !EconHas(E.Line, "you're on top") && !EconHas(E.Line, "you're top") : E.Line.find(Who) == std::string::npos))
 		{
 			Bad("isn't the Season board's leader (" + Who + ")");
 		}
@@ -565,6 +568,46 @@ void EconCheckLine(ss::Session& S, const EconSaid& E, EconMonth& M)
 	if (E.Key.rfind("fresh:books:", 0) == 0 && Fresh >= 7)
 	{
 		Bad("the books' first-week line after the first week");
+	}
+	if (E.Key.rfind("fresh:first-next:", 0) == 0 || E.Key.rfind("fresh:first-nightly:", 0) == 0)
+	{
+		// The first of its kind still to come: this one isn't decided, and none of its kind has been won in the books.
+		const std::string Id = E.Key.substr(E.Key.find(':', 6) + 1);
+		const ss::live::Occurrence O = ss::live::FindOccurrence(Id);
+		bool HeroWon = false;
+		for (const ss::life::LiveEntry& L : S.Life.LiveEntries)
+		{
+			HeroWon = HeroWon || (L.Id == Id && L.State == ss::life::LiveEntry::Finished && L.Place == 1);
+		}
+		if (!O.Valid() || !EconWinner(S, Id).empty() || HeroWon)
+		{
+			Bad("the event is already decided (" + Id + ")");
+		}
+		else
+		{
+			for (int D = ss::net::DayOf(W.StartedAt()) - 1; D <= ss::net::DayOf(E.At); ++D)
+			{
+				for (const ss::live::Occurrence& P : ss::live::Occurrences(D))
+				{
+					if (P.Id != Id && std::string(P.T->Key) == O.T->Key && P.Start + P.T->Hours * 60.0 > W.StartedAt() && !EconWinner(S, P.Id).empty())
+					{
+						Bad("a " + std::string(O.T->Short) + " has already been won in the books (" + P.Id + ")");
+					}
+				}
+			}
+			if (E.Line.find(O.T->Short) == std::string::npos)
+			{
+				Bad(std::string("doesn't name the event (") + O.T->Short + ")");
+			}
+		}
+	}
+	if (E.Key.rfind("fresh:season:", 0) == 0 && E.Speaker != "mei" && E.Speaker != "twitch" && E.Speaker != "benny")
+	{
+		Bad("reads out RiverLine's Season board without being one of the block's who watch it");
+	}
+	if (FreshLine && (EconHas(E.Line, "got to town") || EconHas(E.Line, "got here") || EconHas(E.Line, "new in town")))
+	{
+		Bad("tells the player they just arrived (a dealer's kid grew up in the Embercrest's break room)");
 	}
 	if (E.Key.rfind("fresh:hill:", 0) == 0 && W.HeroRoom().Events > 0)
 	{
@@ -674,6 +717,8 @@ void EconFreshTalk()
 		"econ fresh: nobody twice yet, then two wins, the room's points leader and the Season board's, through the month");
 	Expect(Topics["fresh:books"] >= 5 && Topics["fresh:hill"] >= 3 && Topics["nightshift:first"] >= 1 && Topics["fresh:wall-blank"] == 1 && Topics["fresh:first-nightly"] == 1,
 		"econ fresh: the books in the first week, the hill once a week, the first Night Shift board; the blank board and the first Nightly once, on Night One");
+	Expect(Topics["fresh:first-next"] >= 4 && Topics["fresh:first-next"] <= 8 && Topics["fresh:no-repeat"] <= 5,
+		"econ fresh: who takes the first of the room's other events, through the first week; nobody twice yet at most once a week");
 	int After = 0;
 	int FreshAfter = 0;
 	for (const EconSaid& E : M.Said)
@@ -702,6 +747,16 @@ void EconFreshYou()
 		W.EnsurePlanned(O.Day);
 		W.HeroEntered(Id, O.T->Name);
 		W.HeroFinished(Id, 1, 250000, world::World::TableReport());
+		// The card room settles the player's entry at once; the world tells the result at the schedule's end. Until then
+		// nobody on the block asks who takes the first one (EconCheckLine).
+		ss::life::LiveEntry L;
+		L.Id = Id;
+		L.Name = O.T->Name;
+		L.State = ss::life::LiveEntry::Finished;
+		L.Place = 1;
+		L.PrizeCents = 250000;
+		L.FinishedAt = Opened + 2.0;
+		S.Life.LiveEntries.push_back(L);
 	}
 	// A big online win on the Season board.
 	ss::HistoryEntry Big;
@@ -737,7 +792,8 @@ void EconFreshYou()
 	Expect(EconFind(M.Said, "fresh:twice:you:2") && EconFind(M.Said, "fresh:twice:you:2")->Line == "Two wins up the hill already, and the books aren't a month old. Easy now.",
 		"econ fresh (the player): two wins up the hill");
 	Expect(Got.count("fresh:leader") && EconHas(Got["fresh:leader"], "you're top of the points"), "econ fresh (the player): the room's points leader is the player");
-	Expect(Got.count("fresh:season") && EconHas(Got["fresh:season"], "you're on top of the season board"), "econ fresh (the player): on top of the Season board");
+	Expect(Got.count("fresh:season") && EconHas(Got["fresh:season"], "you're") && EconHas(Got["fresh:season"], "top of the season board"),
+		"econ fresh (the player): on top of the Season board");
 	Expect(!EconFind(M.Said, "fresh:hill:"), "econ fresh (the player): nobody tells a player who's won up the hill to go up there");
 }
 

@@ -129,7 +129,9 @@ void ABackRoomPlayerController::PlayerTick(float DeltaTime)
 	static const FKey DeskKeys[] = {EKeys::W, EKeys::A, EKeys::S, EKeys::D, EKeys::E, EKeys::F, EKeys::C, EKeys::R, EKeys::L, EKeys::N, EKeys::Q, EKeys::T, EKeys::V, EKeys::B,
 		EKeys::P, EKeys::Tab, EKeys::SpaceBar, EKeys::Escape, EKeys::LeftShift, EKeys::RightShift, EKeys::Up, EKeys::Down, EKeys::Left, EKeys::Right, EKeys::LeftMouseButton,
 		EKeys::RightMouseButton, EKeys::MiddleMouseButton, EKeys::MouseScrollUp, EKeys::MouseScrollDown, EKeys::U, EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four,
-		EKeys::Five, EKeys::Six, EKeys::BackSpace};
+		EKeys::Five, EKeys::Six, EKeys::BackSpace,
+		// Update 2 (§2.6.2): K hands the seat to the plan (and takes it back); Enter held skips from the PLAY page.
+		EKeys::K, EKeys::Enter};
 	bool bPad = false;
 	for (const FKey& Key : PadButtons)
 	{

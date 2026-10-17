@@ -1081,10 +1081,12 @@ void HeroBlock(Canvas& C, const TableHudInfo& I, double Now)
 	const std::string Big = BbBig ? Bbs : Count;
 	const std::string Small = BbBig ? Count : Bbs;
 	const Color Col = Dollars(Where) ? Ash : Depth(I.HeroStack, Bb);
+	// The cards, once looked at (none while a live skip runs: its hands go by off screen, so the last ones are stale).
+	const size_t Cards = I.SkipOn ? 0 : std::min<size_t>(2, I.HeroCards.size());
 	// A soft midnight shade under the block, so it reads over a lit sleeve or a bright felt (the clock card's ink, feathered
 	// out; over the dark felt it hardly shows): as wide as the stack's row, the heart's or the Focus bar, whichever is widest.
 	{
-		float Row = C.Measure(Big, 40.0f, 900) + 18.0f + (Small.empty() ? 0.0f : C.Measure(Small, 20.0f, 700) + 16.0f) + Fl(std::min<size_t>(2, I.HeroCards.size())) * 36.0f;
+		float Row = C.Measure(Big, 40.0f, 900) + 18.0f + (Small.empty() ? 0.0f : C.Measure(Small, 20.0f, 700) + 16.0f) + Fl(Cards) * 36.0f;
 		Row = std::max(Row, 226.0f + C.Measure(std::to_string(static_cast<int>(std::lround(I.Bpm))), 26.0f, 800, true));
 		Row = std::max(Row, I.Focus < 0.995f || I.Studying ? 450.0f : 0.0f);
 		const float Top = B - 120.0f - (I.Steadying ? 24.0f : 6.0f);
@@ -1098,8 +1100,7 @@ void HeroBlock(Canvas& C, const TableHudInfo& I, double Now)
 	{
 		Cx += C.Text(Small, Cx, B - 12.0f, Ts(20.0f, 700, Fa(Ash, 0.75f))) + 16.0f;
 	}
-	// The cards, once looked at.
-	for (size_t K = 0; K < I.HeroCards.size() && K < 2; ++K)
+	for (size_t K = 0; K < Cards; ++K)
 	{
 		MiniCard(C, I.HeroCards[K], Cx + Fl(K) * 36.0f, B - 50.0f, 32.0f, 0.95f);
 	}
@@ -1762,22 +1763,27 @@ void AutoLines(Canvas& C, const TableHudInfo& I, double Now)
 		: std::string();
 	const std::string Thinking = Think ? AutoThinkLine(I.AutoStyle) : std::string();
 	const std::vector<Choice> ThinkKeys = {{"wheel", "Take the wheel"}};
+	// Where they sit: the think in the prompt's place, the status just over it. Both stay under the captions' floor
+	// (CaptionsAt: 904, the boxes grow upward), since the room talks every hand the plan plays at 1x; the host's own Status
+	// line keeps its place above (it wins: the plan's status steps aside for it).
+	const float ThinkY = Tall - 120.0f;
+	const float StatusY = Tall - 156.0f;
 	// A soft midnight shade under the lines, as under the hero block, so they read over a bright felt.
 	float Wide = 0.0f;
 	float Top = Tall;
 	float Bottom = 0.0f;
 	if (Status)
 	{
-		Wide = std::max(Wide, KeyedLine(C, Lead, 17.0f, Window ? 800 : 600, Gold, LeadKeys, Ctx, Pad, W * 0.5f, Tall - 190.0f, 17.0f, 1.0f, StatusWidth(W), false));
-		Top = Tall - 214.0f;
-		Bottom = Tall - 174.0f;
+		Wide = std::max(Wide, KeyedLine(C, Lead, 17.0f, Window ? 800 : 600, Gold, LeadKeys, Ctx, Pad, W * 0.5f, StatusY, 17.0f, 1.0f, StatusWidth(W), false));
+		Top = StatusY - 24.0f;
+		Bottom = StatusY + 16.0f;
 	}
 	if (Think || !Last.empty())
 	{
-		Wide = std::max(Wide, Think ? KeyedLine(C, Thinking, 18.0f, 700, Ash, ThinkKeys, Ctx, Pad, W * 0.5f, Tall - 120.0f, 16.0f, 1.0f, W - 2.0f * Margin, false)
+		Wide = std::max(Wide, Think ? KeyedLine(C, Thinking, 18.0f, 700, Ash, ThinkKeys, Ctx, Pad, W * 0.5f, ThinkY, 16.0f, 1.0f, W - 2.0f * Margin, false)
 									: std::min(W - 2.0f * Margin, TrackedWidth(C, Last, 15.0f, 800, 1.8f)));
-		Top = std::min(Top, Tall - 146.0f);
-		Bottom = Tall - 106.0f;
+		Top = std::min(Top, ThinkY - 26.0f);
+		Bottom = ThinkY + 14.0f;
 	}
 	if (Wide > 0.0f)
 	{
@@ -1785,22 +1791,22 @@ void AutoLines(Canvas& C, const TableHudInfo& I, double Now)
 	}
 	if (Status)
 	{
-		const float Lw = KeyedLine(C, Lead, 17.0f, Window ? 800 : 600, Gold, LeadKeys, Ctx, Pad, W * 0.5f, Tall - 190.0f, 17.0f, 1.0f, StatusWidth(W));
+		const float Lw = KeyedLine(C, Lead, 17.0f, Window ? 800 : 600, Gold, LeadKeys, Ctx, Pad, W * 0.5f, StatusY, 17.0f, 1.0f, StatusWidth(W));
 		if (Window)
 		{
 			const float Left = std::clamp(I.AutoResumeWindow / static_cast<float>(autoplay::ResumeWindowSeconds), 0.0f, 1.0f);
-			C.FillRect({W * 0.5f - Lw * 0.5f, Tall - 178.0f, Lw, 3.0f}, Paint(Rgba(0, 0, 0, 0.45f)));
-			C.FillRect({W * 0.5f - Lw * 0.5f, Tall - 178.0f, Lw * Left, 3.0f}, Paint(Gold));
+			C.FillRect({W * 0.5f - Lw * 0.5f, StatusY + 12.0f, Lw, 3.0f}, Paint(Rgba(0, 0, 0, 0.45f)));
+			C.FillRect({W * 0.5f - Lw * 0.5f, StatusY + 12.0f, Lw * Left, 3.0f}, Paint(Gold));
 		}
 	}
 	if (Think)
 	{
-		KeyedLine(C, Thinking, 18.0f, 700, Ash, ThinkKeys, Ctx, Pad, W * 0.5f, Tall - 120.0f, 16.0f, 1.0f, W - 2.0f * Margin);
+		KeyedLine(C, Thinking, 18.0f, 700, Ash, ThinkKeys, Ctx, Pad, W * 0.5f, ThinkY, 16.0f, 1.0f, W - 2.0f * Margin);
 	}
 	else if (!Last.empty())
 	{
 		const float Lw = std::min(W - 2.0f * Margin, TrackedWidth(C, Last, 15.0f, 800, 1.8f));
-		TrackedText(C, Last, W * 0.5f - Lw * 0.5f, Tall - 120.0f, 15.0f, 800, Fa(Ice, 0.95f), 1.8f);
+		TrackedText(C, Last, W * 0.5f - Lw * 0.5f, ThinkY, 15.0f, 800, Fa(Ice, 0.95f), 1.8f);
 	}
 }
 

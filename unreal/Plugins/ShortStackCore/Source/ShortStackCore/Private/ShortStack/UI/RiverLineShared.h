@@ -891,6 +891,8 @@ inline constexpr const char* AutoSloppy = "Under 70% your plan gets sloppy: eat,
 inline constexpr const char* AutoThinkHint = "Any action takes the wheel.";
 inline constexpr const char* AutoYourHand = "This hand is yours. Your plan's back on the next one.";
 inline constexpr const char* AutoYourHandKeys = "Your plan's back next hand. K turns autoplay off.";
+// Autoplay turned on while the player's own decision was open: that one stays theirs, the plan takes the next.
+inline constexpr const char* AutoYourDecision = "This decision's yours. Your plan takes the next one.";
 inline constexpr const char* AutoPending = "Skipping from the next hand.";
 inline constexpr const char* AutoDefaultSaved = "Saved. New tables start with this plan.";
 inline constexpr const char* AutoEveryDecision = "Your plan made every decision, so there's nothing of yours to review.";
@@ -900,8 +902,11 @@ inline constexpr const char* AutoPlayedToast = "played by your plan";
 
 /** Whether the autoplay panel is open on this laptop. */
 bool AutoPanelOpen(const RiverLine* RL);
-/** Opens the panel over open table Table (an index; the panel closes by itself if that table goes). */
-void AutoOpenPanel(const RiverLine* RL, const Session& S, int Table, double Now);
+/**
+ * Opens the panel over open table Table (an index; the panel closes by itself if that table goes). Opening it marks the
+ * career's autoplay\tpref line as kept (Life.h's U2AutoPref: "opening the panel and any autoplay use", §6.2).
+ */
+void AutoOpenPanel(const RiverLine* RL, Session& S, int Table, double Now);
 void AutoClosePanel(const RiverLine* RL);
 /** Drops a laptop's autoplay state when it goes (~RiverLine). */
 void ForgetAuto(const RiverLine* RL);
@@ -916,6 +921,12 @@ const autoplay::Played* AutoPlayedFor(const Session& S, const Results& R);
 const autoplay::Played* AutoPlayedFor(const Session& S, const HistoryEntry& H);
 /** A table's one line while the plan holds or skips it ("AUTO · GTO 2x · CALLED 3,200", the skip's line); "" when off. */
 std::string AutoTileLine(const autoplay::Panel& P);
+/**
+ * A table tab's line for the plan, whole, at the largest size that fits MaxW (11 or 10): the tile's status ("AUTO · GTO
+ * 2x", "SKIP · 31 to the bubble"), else its short form ("AUTO · 8x", "SKIP · Bubble": the skip's target, not its count).
+ * Size returns the size to draw it at (weight 600, the text face).
+ */
+std::string AutoTabLine(Canvas& Cv, const autoplay::Panel& P, const std::string& Status, float MaxW, float& Size);
 /** Every sentence the autoplay screens draw beyond core's own copy, for the copy lint. */
 std::vector<std::string> AutoUiInventory();
 } // namespace rlauto_detail

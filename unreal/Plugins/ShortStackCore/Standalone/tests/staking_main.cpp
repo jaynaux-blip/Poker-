@@ -508,7 +508,7 @@ bool ParkBuys(const ss::rep::Public* P, double RoiRank)
 void ParkGate()
 {
 	// Mrs. Park wants a record (next_segment_spec §2.5): twenty live events, or an online ROI in the regulars' top half.
-	// World::RoiRank says -1 when fewer than 20 regulars have 200 events on record (a fresh world's first months). That's
+	// World::RoiRank says -1 when fewer than 20 regulars have 200 events on record (a fresh world's first week or two). That's
 	// no verdict either way (update 2 SPEC §3.6): she reads the sample itself, 200 paid online events in profit.
 	const ss::rep::Public Profit = Record(220, 0.06, 550, 0, 0.0, 0.0);
 	const ss::rep::Public Loss = Record(220, -0.04, 550, 0, 0.0, 0.0);

@@ -4,8 +4,8 @@
 // point, empty; ui-front fills it, its helpers in ui_test::creator_seg.
 //
 // Also here: the FRESH START pill on the review's player card and on the CONTINUE card (DescribeSession's Blank), the
-// GAMEPLAY tab's autoplay speed row and its settings key (autospeed, §6.4; a file without it reads 1x, §6.5), and the copy
-// lint over THE WORLD's words and the row's help.
+// GAMEPLAY tab's autoplay speed row and its settings key (autospeed, §6.4; a file without it reads 1x, §6.5), every
+// settings label clearing its control down to 5:4, and the copy lint over THE WORLD's words and the row's help.
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -13,6 +13,7 @@
 #include "ShortStack/UI/FrontEnd.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -561,13 +562,22 @@ void ContinueCard()
 		Expect(Says(L, "WORLD") && Drew(L, "FRESH START"), "CONTINUE: without a person card the world is a row");
 	}
 	{
-		// A long background name leaves no room beside it: the row again.
-		ss::ui::FrontEndInfo Long = Fi;
-		Long.Person.Story = ss::hero::Background::Bouncer;
-		const DrawList L = Card(Long, nullptr);
-		const Spot Story = GlyphsAt(L, "CASINO BOUNCER");
-		const Spot Pill = GlyphsAt(L, "FRESH START");
-		Expect(Story.Found && Pill.Found && (std::fabs(Pill.Base - Story.Base) < 0.5f || Says(L, "WORLD")), "CONTINUE: the pill or the row, never neither");
+		// Every background: the pill beside the background's when it fits, else the world's row; never neither, never both
+		// (today every name leaves room, CASINO BOUNCER the least).
+		bool Each = true;
+		for (int B = 0; B < ss::hero::BackgroundCount; ++B)
+		{
+			ss::ui::FrontEndInfo One = Fi;
+			One.Person.Story = static_cast<ss::hero::Background>(B);
+			const DrawList L = Card(One, nullptr);
+			std::string Name = ss::hero::InfoOf(One.Person.Story).Name;
+			std::transform(Name.begin(), Name.end(), Name.begin(), [](unsigned char Ch) { return static_cast<char>(std::toupper(Ch)); });
+			const Spot Story = GlyphsAt(L, Name);
+			const Spot Pill = GlyphsAt(L, "FRESH START");
+			const bool Beside = Story.Found && Pill.Found && std::fabs(Pill.Base - Story.Base) < 0.5f && Pill.X > Story.X;
+			Each = Each && Story.Found && Beside != Says(L, "WORLD");
+		}
+		Expect(Each, "CONTINUE: for every background, the pill beside it or the world's row; never neither, never both");
 	}
 }
 
@@ -648,6 +658,55 @@ void AutoSpeedSetting()
 	}
 }
 
+/**
+ * Every settings row's label clears its control (the left chevron, or a slider's track) on every tab, at 5:4, 4:3 and
+ * 16:9: at 5:4 the longest labels ("Autoplay watch speed", "Chromatic aberration") shrink rather than run under it.
+ */
+void SettingsLabelsFit()
+{
+	TableMeasurer M;
+	for (const float Width : {1350.0f, 1440.0f, 1920.0f})
+	{
+		CreatorHooks H;
+		FrontEnd Fe(H);
+		double Now = 0.0;
+		Fe.Open(FrontEnd::Page::Main, Now);
+		Now = Settle(Fe, Now, 0.6, Width);
+		Fe.Key("Down", Now); // SETTINGS (no save: NEW GAME was selected)
+		Fe.Key("Enter", Now);
+		// The controls' right edge: a slider's value ends there; a choice's left chevron sits 314 in, a slider's track 330.
+		const float Rx = 132.0f + std::min(900.0f, Width - 2.0f * 132.0f - 560.0f);
+		int Labels = 0;
+		std::string Over;
+		for (int Tab = 0; Tab < 5; ++Tab)
+		{
+			Now = Settle(Fe, Now, 0.6, Width);
+			const DrawList L = Frame(Fe, Now, Width);
+			for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+			{
+				// A row's label starts 8 past the margin, below the tabs.
+				if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || std::fabs(Cmd.Text.X - 140.0f) > 0.5f || Cmd.Text.BaselineY < 340.0f || Cmd.Text.BaselineY > 900.0f)
+				{
+					continue;
+				}
+				bool Slider = false;
+				for (const ss::ui::DrawCmd& Value : L.Cmds)
+				{
+					Slider = Slider || (Value.Type == ss::ui::DrawCmd::Kind::Text && std::fabs(Value.Text.BaselineY - Cmd.Text.BaselineY) < 0.5f &&
+										   std::fabs(Value.Text.X + M.Width(Value.Text.Text, Value.Text.Face, Value.Text.SizePx) - Rx) < 1.5f);
+				}
+				++Labels;
+				if (Cmd.Text.X + M.Width(Cmd.Text.Text, Cmd.Text.Face, Cmd.Text.SizePx) > Rx - (Slider ? 330.0f : 314.0f) - 4.0f)
+				{
+					Over += " \"" + Cmd.Text.Text + "\"";
+				}
+			}
+			Fe.Key("E", Now);
+		}
+		Expect(Labels >= 30 && Over.empty(), ("settings at " + std::to_string(static_cast<int>(Width)) + ": every label clears its control" + Over).c_str());
+	}
+}
+
 // ------------------------------------------------------------------ copy
 
 void Copy()
@@ -702,6 +761,7 @@ void SegCreator()
 	creator_seg::Screens();
 	creator_seg::ContinueCard();
 	creator_seg::AutoSpeedSetting();
+	creator_seg::SettingsLabelsFit();
 	creator_seg::Copy();
 }
 } // namespace ui_test

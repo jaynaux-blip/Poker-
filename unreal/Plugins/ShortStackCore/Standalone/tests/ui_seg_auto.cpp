@@ -19,6 +19,7 @@
 #include "ShortStack/AI/Style.h"
 #include "ShortStack/Game/Autoplay.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Gear.h"
 #include "ShortStack/Game/Network.h"
 
 #include <algorithm>
@@ -254,6 +255,36 @@ bool DrewAMove(const DrawList& L)
 	return false;
 }
 
+/**
+ * The plan's lines (a tab's or tile's "AUTO · …", "SKIP · …", the skip card's "SKIPPING · …") that a MaxWidth cut short
+ * with an ellipsis: the count (printed). Overflows can't see those, since a cut line fits by construction.
+ */
+int CutPlanLines(const DrawList& L)
+{
+	const std::string Ellipsis = "\xE2\x80\xA6";
+	int Cut = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		const std::string& T = Cmd.Text.Text;
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || T.size() < Ellipsis.size() || T.compare(T.size() - Ellipsis.size(), Ellipsis.size(), Ellipsis) != 0)
+		{
+			continue;
+		}
+		for (const char* Head : {"AUTO \xC2\xB7", "SKIP \xC2\xB7", "SKIPPING", "hand "})
+		{
+			if (T.rfind(Head, 0) == 0)
+			{
+				++Cut;
+				std::printf("  cut short: \"%s\"\n", T.c_str());
+				break;
+			}
+		}
+	}
+	return Cut;
+}
+
+int PlanWords(const DrawList& L); // below, with the stream's checks
+
 /** The centre of the drawn button whose label is Label (its run), or {-1, -1}. */
 ss::ui::Vec2 ButtonAt(const DrawList& L, const std::string& Label, const TableMeasurer& M)
 {
@@ -293,13 +324,16 @@ void PaceAndPanel()
 	DrawList L = D.Frame();
 	Expect(DrewRun(L, "Full") && DrewRun(L, "Smart") && DrewRun(L, "AUTO") && !DrewRun(L, "Sprint"), "autoplay: the pace row reads FULL · SMART · AUTO");
 	Expect(SpelledAt(L, "AI AUTOPLAY") < 0, "autoplay: the panel starts closed");
-	// AUTO opens the panel (the third pace button).
+	// AUTO opens the panel (the third pace button). As an old save would (no autoplay\tpref line read), the career starts
+	// without U2AutoPref: opening the panel sets it, so the plan and Form the panel showed are saved from then (§6.2).
+	S.Life.Update2LinesRead &= ~static_cast<uint32_t>(ss::life::U2AutoPref);
 	const ss::ui::Vec2 Auto = ButtonAt(L, "AUTO", D.M);
 	D.Click(Auto.X, Auto.Y);
 	L = D.Frame();
 	const long Title = SpelledAt(L, "AI AUTOPLAY");
 	Expect(Title >= 0, "autoplay: AUTO opens the panel, titled AI AUTOPLAY");
 	Expect(S.Autoplay(0).M == ss::autoplay::Mode::Off, "autoplay: opening the panel turns nothing on");
+	Expect((S.Life.Update2LinesRead & ss::life::U2AutoPref) != 0, "autoplay: opening the panel keeps the career's autoplay line");
 	// Eleven tiles in a 4-3-4 grid: every style's name, each edge line whole inside its tile.
 	std::vector<AutoRun> Names;
 	for (const ss::style::Info& I : ss::style::Catalog())
@@ -338,8 +372,11 @@ void PaceAndPanel()
 	const ss::autoplay::Panel P = D.Plan();
 	Expect(SpelledAt(L, "SHARPNESS") >= 0 && DrewRun(L, P.SharpWhy) && Drew(L, "Read when your plan takes the seat."), "autoplay: Sharpness, its causes, and when it's read");
 	Expect(DrewRun(L, "1x") && DrewRun(L, "2x") && DrewRun(L, "4x") && DrewRun(L, "8x") && DrewRun(L, "SKIP"), "autoplay: the speed row, 1x to 8x and SKIP");
+	// Online events take no breaks, so the first target reads "Next level" there (the skip stops at the next level).
+	Expect(S.T && S.T->Spec.BreakEvery == 0 && DrewRun(L, "Next level") && !DrewRun(L, ss::autoplay::TargetName(ss::autoplay::Target::NextBreak)),
+		"autoplay: online, the first target is the next level, not a break");
 	bool Targets = true;
-	for (const ss::autoplay::Target To : {ss::autoplay::Target::NextBreak, ss::autoplay::Target::Bubble, ss::autoplay::Target::FinalTable, ss::autoplay::Target::Result, ss::autoplay::Target::Hands})
+	for (const ss::autoplay::Target To : {ss::autoplay::Target::Bubble, ss::autoplay::Target::FinalTable, ss::autoplay::Target::Result, ss::autoplay::Target::Hands})
 	{
 		Targets = Targets && DrewRun(L, ss::autoplay::TargetName(To));
 	}
@@ -547,6 +584,7 @@ void WatchStrip()
 	Expect(D.Until([&]() { return S.HasPrompt; }, 5.0), "autoplay: the player's prompt opens at once");
 	L = D.Frame();
 	Expect(DrewRun(L, "YOUR HAND"), "autoplay: the strip says whose hand it is");
+	WriteList("auto_strip_yours", L);
 	Expect(DrewRun(L, "Your plan's back next hand. K turns autoplay off."), "autoplay: and how to keep it");
 	const ss::ui::Vec2 Real = ButtonIn(L, "Fold", ActionRow, D.M);
 	Expect(std::fabs(Real.X - Ghost.X) < 1.0f && std::fabs(Real.Y - Ghost.Y) < 6.0f, "autoplay: the buttons that take the wheel sit where the player's own do");
@@ -558,6 +596,15 @@ void WatchStrip()
 	Expect(DrewRun(L, ss::autoplay::Text(ss::autoplay::Words::Resumes)), "autoplay: the strip says AUTO RESUMES · [K] keep playing");
 	D.RL.Key("k");
 	Expect(S.Autoplay(0).M == ss::autoplay::Mode::Off, "autoplay: K in the window keeps the seat (autoplay off)");
+	// K at the player's own decision (autoplay off): the plan holds the seat from the next decision; this one stays theirs,
+	// and the line over the controls says so (not "back next hand": the plan may act again in this one).
+	Expect(D.Until([&]() { return S.HasPrompt; }, 120.0), "autoplay: the player's own turn");
+	D.RL.Key("k");
+	L = D.Frame();
+	Expect(S.Autoplay(0).M == ss::autoplay::Mode::Watch && S.HasPrompt && !D.Plan().TakenOver && DrewRun(L, "This decision's yours. Your plan takes the next one."),
+		"autoplay: K at the player's own decision: that one stays theirs, the plan takes the next");
+	D.RL.Key("f");
+	Expect(!S.HasPrompt, "autoplay: and the player acts it");
 	// An action key (C) during a think takes the wheel too.
 	A.Speed = 1;
 	S.SetAutoplay(0, A);
@@ -670,6 +717,7 @@ void TileStatus()
 	}
 	Expect(AutoPaces == 2 && !DrewRun(L, "Sprint"), "autoplay: each tile's pace row reads FULL · SMART · AUTO");
 	Expect(Overflows(L, {0.0f, 0.0f, ss::ui::RiverLine::Width, 64.0f}, 0, D.M, "tabs") == 0, "autoplay: the tab lines fit the laptop");
+	Expect(CutPlanLines(L) == 0, "autoplay: no tab or tile cuts the plan's line short");
 	WriteList("auto_tile_status", L);
 	std::printf("  auto_tile_status %5zu vertices %5zu commands\n", L.Vertices.size(), L.Cmds.size());
 	// A tile's AUTO brings its table forward with the panel over it.
@@ -689,7 +737,205 @@ void TileStatus()
 	D.Click(Second.X + Second.W / 2.0f, Second.Base - 4.0f);
 	const DrawList Lp = D.Frame();
 	Expect(SpelledAt(Lp, "AI AUTOPLAY") >= 0 && S.FocusedTable() == 1, "autoplay: a tile's AUTO opens the panel for that table");
+	D.RL.Key("k");
+	// On a stream the tiles and tabs say nothing of either plan (U1): no tab line, no tile line, no skip card.
+	S.BankrollCents += 300000;
+	Expect(S.Buy(ss::gear::FirstPcUpgrade().Id).empty() && S.GoLive().empty() && S.Streaming(), "autoplay: two tiles live on Kast");
+	D.RL.OpenApp(ss::ui::RiverLine::App::Kast, D.Now);
+	D.RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
+	int Words = 0;
+	bool Tiles = false;
+	for (int I = 0; I < 20; ++I)
+	{
+		D.Now += 1.0 / 30.0;
+		S.Update(D.Now);
+		const DrawList Ls = D.Frame();
+		Tiles = Tiles || Drew(Ls, "TILE VIEW");
+		Words += PlanWords(Ls);
+	}
+	Expect(Tiles && Words == 0, "autoplay: the stream's tiles show nothing of the plans");
 	S.SprintBudgetMs = 10.0;
+}
+
+/**
+ * Four tables, the narrowest tabs (about a hundred units for a line), the longest names: Balanced Reg at 8x, Exploitative
+ * skipping to the final table. Every plan line is whole: the tab steps down a size or to its short form, never an
+ * ellipsis; the tiles' lines and skip cards keep inside their tiles.
+ */
+void FourTiles()
+{
+	AutoDesk D("ui-auto-four");
+	ss::Session& S = D.S;
+	S.BankrollCents = 80000;
+	Expect(S.Buy("monitor-24").empty() && S.Buy("monitor-27").empty(), "autoplay: the two screens four tables need");
+	const ss::net::Network& Net = ss::net::Shared();
+	std::vector<ss::LobbyEvent> Four;
+	std::set<std::string> Names;
+	for (const ss::net::EventInstance& E : Net.Window(S.WorldMinutes() - 180.0, S.WorldMinutes() + 90.0))
+	{
+		const ss::LobbyEvent L = Net.Listing(E, nullptr, S.Unlocks());
+		if (L.Joinable && L.BuyInCents <= 1100 && L.Spec.Entrants <= 1500 && Four.size() < 4 && Names.insert(L.Spec.Name).second)
+		{
+			Four.push_back(L);
+		}
+	}
+	Expect(Four.size() == 4 && S.MaxTables() >= 4, "autoplay: four small events to tile");
+	if (Four.size() < 4)
+	{
+		return;
+	}
+	for (const ss::LobbyEvent& E : Four)
+	{
+		S.RegisterEvent(E);
+	}
+	S.Tiled = true;
+	D.Run(1.0);
+	Expect(S.TableCount() == 4, "autoplay: four tables open");
+	const ss::style::Style Styles[4] = {ss::style::Style::Reg, ss::style::Style::Exploit, ss::style::Style::Gto, ss::style::Style::Lag};
+	for (int I = 0; I < 4 && I < S.TableCount(); ++I)
+	{
+		ss::autoplay::TableAuto A;
+		A.S = Styles[I];
+		A.M = ss::autoplay::Mode::Watch;
+		A.Speed = I == 0 ? 8 : 4;
+		S.SetAutoplay(I, A);
+	}
+	Expect(S.SkipAhead(1, ss::autoplay::Target::FinalTable).empty() && S.SkipAhead(3, ss::autoplay::Target::Bubble).empty(), "autoplay: two of the four skip");
+	S.SprintBudgetMs = 0.0;
+	bool Skipping = false;
+	for (int Guard = 0; Guard < 30 * 60 && !Skipping; ++Guard)
+	{
+		D.Now += 1.0 / 30.0;
+		S.Update(D.Now);
+		D.Frame();
+		bool One = false;
+		bool Three = false;
+		S.WithTable(1, [&]() { One = S.Sprinting; });
+		S.WithTable(3, [&]() { Three = S.Sprinting; });
+		Skipping = One && Three;
+	}
+	Expect(Skipping, "autoplay: both skips are running");
+	D.Run(0.3);
+	const DrawList L = D.Frame();
+	const ss::autoplay::Panel P0 = S.AutoPanel(0);
+	Expect(P0.Status == "AUTO \xC2\xB7 Balanced Reg 8x" && (Drew(L, "AUTO \xC2\xB7 Balanced Reg 8x") || DrewRun(L, "AUTO \xC2\xB7 8x")), "autoplay: Balanced Reg at 8x, whole or in its short form, in its tab");
+	Expect(Drew(L, "SKIPPING \xC2\xB7 EXPLOITATIVE \xC2\xB7 hand "), "autoplay: Exploitative's skip in its tile");
+	Expect(Overflows(L, {0.0f, 0.0f, ss::ui::RiverLine::Width, 64.0f}, 0, D.M, "tabs (four)") == 0, "autoplay: four tabs' lines fit the laptop");
+	Expect(CutPlanLines(L) == 0, "autoplay: four tables, and no plan line cut short");
+	WriteList("auto_tile_status_4", L);
+	S.SprintBudgetMs = 10.0;
+}
+
+/** The plan's words a frame drew (the strip, the skip card, the tags, the panel): the count. */
+int PlanWords(const DrawList& L)
+{
+	int N = SpelledAt(L, "AI AUTOPLAY") >= 0 || SpelledAt(L, "LAST MOVE") >= 0 ? 1 : 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text)
+		{
+			continue;
+		}
+		const std::string& T = Cmd.Text.Text;
+		for (const char* Word : {"is thinking\xE2\x80\xA6", "Take over [K]", "Autoplay off [K]", "AUTO \xC2\xB7", "SKIP \xC2\xB7", "SKIPPING", "YOUR HAND", "This event so far",
+				 "Any action takes the wheel.", "Played by your plan", "played by your plan", "Take the wheel", "AUTO RESUMES"})
+		{
+			if (T.find(Word) != std::string::npos)
+			{
+				++N;
+				std::printf("  on the stream: \"%s\"\n", T.c_str());
+				break;
+			}
+		}
+	}
+	return N;
+}
+
+/**
+ * U1: nothing in the world ever says the plan played. On a stream (Kast's preview of the laptop) the table plays as it
+ * would for the player: no strip, no think line, no skip card, no tab line, while the laptop itself shows them.
+ */
+void StreamShowsNone()
+{
+	AutoDesk D("ui-auto-stream");
+	ss::Session& S = D.S;
+	S.BankrollCents = 300000;
+	Expect(S.Buy(ss::gear::FirstPcUpgrade().Id).empty(), "stream: a PC that can stream");
+	Expect(D.Seat(), "stream: seated");
+	ss::autoplay::TableAuto A;
+	A.S = ss::style::Style::Gto;
+	A.M = ss::autoplay::Mode::Watch;
+	A.Speed = 2;
+	Expect(S.SetAutoplay(0, A).empty(), "stream: GTO holds the seat");
+	Expect(S.GoLive().empty() && S.Streaming(), "stream: live on Kast");
+	Expect(D.Until([&]() { return D.Plan().Thinking; }, 120.0) && PlanWords(D.Frame()) > 0, "stream: the laptop shows the plan at the table");
+	D.RL.OpenApp(ss::ui::RiverLine::App::Kast, D.Now);
+	D.RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
+	// Watching: through several thinks and the plan's moves, the preview draws the table and none of the plan's words.
+	std::string Opponent;
+	for (const ss::SeatVis& V : S.Seats)
+	{
+		Opponent = Opponent.empty() && V.Present && !V.IsHero ? V.Name : Opponent;
+	}
+	int Words = 0;
+	int Thinks = 0;
+	bool TableShown = false;
+	for (int Guard = 0; Guard < 30 * 90 && Thinks < 90; ++Guard)
+	{
+		D.Now += 1.0 / 30.0;
+		S.Update(D.Now);
+		const DrawList L = D.Frame();
+		Thinks += D.Plan().Thinking ? 1 : 0;
+		TableShown = TableShown || (!Opponent.empty() && DrewRun(L, Opponent));
+		Words += PlanWords(L);
+	}
+	Expect(TableShown && Thinks > 0, "stream: the preview draws the table while the plan thinks");
+	Expect(Words == 0, "stream: the preview shows nothing of the plan while it watches");
+	// Skipping: the preview's table dims, and says nothing.
+	S.SprintBudgetMs = 0.0;
+	Expect(S.SkipAhead(0, ss::autoplay::Target::Bubble).empty() && D.Until([&]() { return S.Sprinting; }, 120.0), "stream: a skip on stream");
+	Words = 0;
+	for (int I = 0; I < 30; ++I)
+	{
+		D.Now += 1.0 / 30.0;
+		S.Update(D.Now);
+		Words += PlanWords(D.Frame());
+	}
+	Expect(Words == 0, "stream: the preview shows nothing of the skip");
+	S.SprintBudgetMs = 10.0;
+
+	// Career on a stream: the plan's event keeps its "—", and neither its AUTO tag nor the autoplay card goes out.
+	{
+		AutoDesk C("ui-auto-stream-career");
+		ss::Session& Sc = C.S;
+		Sc.BankrollCents = 300000;
+		Expect(Sc.Buy(ss::gear::FirstPcUpgrade().Id).empty(), "stream: a PC for the career page");
+		ss::HistoryEntry H;
+		H.Name = "Night Owl Turbo";
+		H.Place = 37;
+		H.Entrants = 1000;
+		H.Prize = 1210;
+		H.EventId = "night-owl@1410";
+		Sc.History.insert(Sc.History.begin(), H);
+		ss::autoplay::TableAuto Lag;
+		Lag.S = ss::style::Style::Lag;
+		ss::autoplay::Run Run;
+		Run.AiDecisions = 214;
+		Run.AiHands = 260;
+		ss::autoplay::Record(Sc.Life.Auto, H.EventId, 0, 0, Lag, Run);
+		C.RL.OpenPage(ss::ui::RiverLine::Page::Career, C.Now);
+		C.Now += 2.0;
+		Expect(Drew(C.Frame(), "AUTO \xC2\xB7 LAG 100%") && SpelledAt(C.Frame(), "AUTOPLAY") >= 0, "stream: the laptop's own Career shows the tag and the card");
+		Expect(Sc.GoLive().empty() && Sc.Streaming(), "stream: live with Career open");
+		C.RL.OpenApp(ss::ui::RiverLine::App::Kast, C.Now);
+		C.RL.ShowKastPage(ss::ui::RiverLine::KastPage::Studio);
+		C.Now += 2.0;
+		C.Frame();
+		C.Now += 0.1;
+		const DrawList L = C.Frame();
+		Expect(DrewRun(L, "Night Owl Turbo") && DrewRun(L, "37th of 1,000"), "stream: the preview shows the Career page");
+		Expect(PlanWords(L) == 0 && SpelledAt(L, "AUTOPLAY") < 0, "stream: no AUTO tag and no autoplay card on the stream");
+	}
 }
 
 // ------------------------------------------------------------------ results and Career
@@ -794,12 +1040,30 @@ void ResultsAndCareer()
 	Expect(Tag.Found && Tag2.Found && Row.Found && std::fabs(Tag.Base - Row.Base) < 20.0f, "career: the plan's events carry AUTO · LAG 100% and AUTO · GTO 82%");
 	const AutoRun Place = RunOf(L, "37th of 1,000", D.M);
 	Expect(Tag.Found && Place.Found && Tag.X + Tag.W < Place.X, "career: the tag ends before the place");
-	int Dashes = 0;
-	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	// The accuracy column: right-aligned at the row's right edge (RiverLineNet.cpp's CareerPage: 24 + 1052 - 18). The
+	// taskbar draws its own percentages (the battery), so each row is read by its baseline, never the page at large.
+	const float AccRight = 24.0f + 1052.0f - 18.0f;
+	auto AccuracyOn = [&](const AutoRun& Name) {
+		std::string Out;
+		for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+		{
+			if (Name.Found && Cmd.Type == ss::ui::DrawCmd::Kind::Text && std::fabs(Cmd.Text.BaselineY - Name.Base) < 2.0f &&
+				std::fabs(Cmd.Text.X + D.M.Width(Cmd.Text.Text, Cmd.Text.Face, Cmd.Text.SizePx) - AccRight) < 1.5f)
+			{
+				Out = Cmd.Text.Text;
+			}
+		}
+		return Out;
+	};
+	const std::string NightOwlAcc = AccuracyOn(Row);
+	const std::string GrindAcc = AccuracyOn(RunOf(L, "Daily Grind", D.M));
+	const std::string HyperAcc = AccuracyOn(RunOf(L, "Hyper Hour", D.M));
+	Expect(NightOwlAcc == "\xE2\x80\x94" && GrindAcc == "91%" && HyperAcc == "84%",
+		"career: \"—\" for the event the plan played whole (never 0%); the others keep their percentage");
+	if (NightOwlAcc != "\xE2\x80\x94" || GrindAcc != "91%" || HyperAcc != "84%")
 	{
-		Dashes += Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "\xE2\x80\x94" && std::fabs(Cmd.Text.BaselineY - Row.Base) < 2.0f ? 1 : 0;
+		std::printf("  career accuracy column: \"%s\" \"%s\" \"%s\"\n", NightOwlAcc.c_str(), GrindAcc.c_str(), HyperAcc.c_str());
 	}
-	Expect(Dashes >= 1 && DrewRun(L, "91%") && DrewRun(L, "84%") && !DrewRun(L, "0%"), "career: \"—\" for the event the plan played whole (never 0%); the others keep their percentage");
 	// Career's autoplay card (§2.11): the panel's default style and the player's Form, whole, inside the card.
 	const ss::ui::Rect Card{1076.0f - 168.0f - 12.0f - 420.0f, 640.0f, 420.0f, 32.0f};
 	Expect(SpelledAt(L, "AUTOPLAY") >= 0 && SpelledAt(L, "FORM") >= 0 && DrewRun(L, "Exploitative") && Drew(L, "8x \xC2\xB7 your default"),
@@ -826,6 +1090,7 @@ void Copy()
 		{"strip", "Any action takes the wheel."},
 		{"strip", "This hand is yours. Your plan's back on the next one."},
 		{"strip", "Your plan's back next hand. K turns autoplay off."},
+		{"strip", "This decision's yours. Your plan takes the next one."},
 		{"strip", "Skipping from the next hand."},
 		{"strip", "This event so far: 41 decisions by your plan, 3 by you."},
 		{"results", "Your plan made every decision, so there's nothing of yours to review."},
@@ -848,6 +1113,8 @@ void SegAuto()
 	auto_seg::WatchStrip();
 	auto_seg::SkipCard();
 	auto_seg::TileStatus();
+	auto_seg::FourTiles();
+	auto_seg::StreamShowsNone();
 	auto_seg::ResultsAndCareer();
 	auto_seg::Copy();
 }

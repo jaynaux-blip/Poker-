@@ -1530,9 +1530,17 @@ void FrontEnd::SettingsPage(double Now)
 			C->FillRect(Band, Paint::Linear({Band.X, 0.0f}, {Band.X + Band.W, 0.0f}, F(MenuNeon, 0.15f * Hi * In), F(MenuNeon, 0.03f * Hi * In)));
 			C->FillRect({Band.X, Band.Y, 3.0f, Band.H}, Paint(F(MenuNeon, Hi * In)));
 		}
-		C->Text(R.Label, X + 8.0f, Yr, Ts(22.0f, 500, F(Mix(MenuMuted, MenuInk, 0.35f + 0.65f * Hi), In)));
-
 		const float Rx = X + RowW;
+		// The label gives way to its control: on 5:4 the longest labels shrink rather than run under the left chevron or the
+		// slider's track ("Autoplay watch speed", "Chromatic aberration").
+		const float LabelRoom = Rx - (R.Slider ? 342.0f : 326.0f) - (X + 8.0f);
+		float LabelSize = 22.0f;
+		while (LabelSize > 16.0f && C->Measure(R.Label, LabelSize, 500) > LabelRoom)
+		{
+			LabelSize -= 1.0f;
+		}
+		C->Text(R.Label, X + 8.0f, Yr, Ts(LabelSize, 500, F(Mix(MenuMuted, MenuInk, 0.35f + 0.65f * Hi), In)));
+
 		const int V = R.Get();
 		if (R.Slider)
 		{

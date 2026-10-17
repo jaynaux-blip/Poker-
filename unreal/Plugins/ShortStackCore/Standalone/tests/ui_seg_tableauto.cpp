@@ -8,7 +8,8 @@
 // - the plan's lines on the HUD (P0a; table_hud_auto_watch, _think, _resume, _skip): the status with [K] Take over, the
 //   think that names no move (a stale last action included), the last action once played, the take-over window, the
 //   host's own Status and Prompt winning their places, the ladder only on a decision handed back, the out-of-hand row
-//   and the hints saying WATCH SPEED, and the live skip's card over the dimmed table (no plates, no glyph spots);
+//   and the hints saying WATCH SPEED, the lines under the captions' floor (table_hud_auto_captions: the room talks every
+//   hand), and the live skip's card over the dimmed table (no plates, no glyph spots, no stale hole cards);
 // - the plates' guarantees unchanged under autoplay (the same layout with the plan's fields set);
 // - the control map's autoplay entries (K, T under autoplay, the PLAY page's A and X, nothing else on the held card's
 //   keys) and the table card's footer qualifier (YOUR PLAN KEEPS PLAYING);
@@ -584,7 +585,7 @@ void HudLines()
 		Thinking(T, 1920.0f);
 		const ss::ui::DrawList Keys = Frame(T.I, 1920.0f);
 		const float ThinkY = 1080.0f - 120.0f;
-		const float StatusY = 1080.0f - 190.0f;
+		const float StatusY = 1080.0f - 156.0f;
 		Expect(KeyAt(Keys, "F", 1920.0f, ThinkY) && KeyAt(Keys, "C", 1920.0f, ThinkY) && KeyAt(Keys, "R", 1920.0f, ThinkY) && KeyAt(Keys, "A", 1920.0f, ThinkY) &&
 				   KeyAt(Keys, "K", 1920.0f, StatusY),
 			"HUD: the think's keys F C R A, and K on the status line to take over");
@@ -613,6 +614,53 @@ void HudLines()
 		T.I.Prompt = "Your seat's on hold";
 		const ss::ui::DrawList L = Frame(T.I, 1920.0f);
 		Expect(Says(L, "Racking up after this hand") && Says(L, "Your seat's on hold") && !Says(L, "AUTOPLAY \xC2\xB7") && !Says(L, Think), "HUD: the host's Status and Prompt win their places");
+	}
+	// The room talks while the plan plays (every hand at 1x): the captions grow up from their floor, so the plan's lines
+	// (their key glyphs rise about 17 units over the baseline) sit wholly under the lowest caption box, never on a line said.
+	for (const float Width : Widths)
+	{
+		for (const bool Window : {false, true})
+		{
+			Table T;
+			Thinking(T, Width);
+			T.I.AutoResumeWindow = Window ? 2.1f : 0.0f;
+			ss::ui::Caption Pa;
+			Pa.Style = 1;
+			Pa.Line = "Players, the blinds are now 800 and 1,600, with a big blind ante of 1,600.";
+			Pa.At = Now - 1.0;
+			ss::ui::Caption Talk;
+			Talk.Speaker = "Sal";
+			Talk.Line = "Average is about forty-six thousand. Somebody's got all of mine.";
+			Talk.At = Now - 0.5;
+			T.I.Captions = {Pa, Talk};
+			const ss::ui::DrawList L = Frame(T.I, Width);
+			float Floor = -1.0f; // the lowest caption box's bottom: its last line's baseline + 9 (CaptionsAt, DrawCaptions)
+			float Lead = -1.0f;
+			float Wheel = -1.0f;
+			for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+			{
+				if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || Cmd.Text.Text.size() < 4)
+				{
+					continue;
+				}
+				const std::string& S = Cmd.Text.Text;
+				if (Pa.Line.find(S) != std::string::npos || Talk.Line.find(S) != std::string::npos)
+				{
+					Floor = std::max(Floor, Cmd.Text.BaselineY + 9.0f);
+				}
+				Lead = S.rfind(Window ? "AUTO RESUMES" : "AUTOPLAY \xC2\xB7", 0) == 0 ? Cmd.Text.BaselineY : Lead;
+				Wheel = S == Think ? Cmd.Text.BaselineY : Wheel;
+			}
+			Expect(Floor > 0.0f && Lead > 0.0f && Wheel > 0.0f && Lead - 18.0f >= Floor && Wheel - 18.0f >= Lead + 9.0f,
+				("HUD: the plan's status and think sit under the captions (floor " + std::to_string(static_cast<int>(Floor)) + ", status " +
+					std::to_string(static_cast<int>(Lead)) + ", think " + std::to_string(static_cast<int>(Wheel)) + ") at " + W(Width) + (Window ? ", the window" : ""))
+					.c_str());
+			Fits(L, Width, "the plan's lines under the captions");
+			if (Width == Widths[0] && !Window)
+			{
+				WriteList("table_hud_auto_captions", L);
+			}
+		}
 	}
 	// A decision handed back (a stop rule, a take-over): the ladder is up, and the plan's lines step aside.
 	{
@@ -666,6 +714,19 @@ void HudLines()
 		Expect(KeyAt(L, "B", 1920.0f, 1080.0f * 0.4f + 148.0f) && Says(L, "Stop the skip"), "HUD: the pad's B stops the skip");
 		T.I.Gamepad = false;
 		Expect(KeyAt(Frame(T.I, 1920.0f), "K", 1920.0f, 1080.0f * 0.4f + 148.0f), "HUD: the keyboard's K stops the skip");
+		// The hero block keeps the stack and the heart, but not the last hand's cards (stale: the hands go by off screen).
+		{
+			ss::ui::TableHudInfo NoCards = T.I;
+			NoCards.HeroCards.clear();
+			const ss::ui::DrawList With = Frame(T.I, 1920.0f);
+			const ss::ui::DrawList Without = Frame(NoCards, 1920.0f);
+			ss::ui::TableHudInfo Seated = T.I;
+			Seated.SkipOn = false;
+			NoCards.SkipOn = false;
+			Expect(With.Cmds.size() == Without.Cmds.size() && Joined(With) == Joined(Without) && Says(With, "YOUR STACK") &&
+					   Frame(Seated, 1920.0f).Cmds.size() > Frame(NoCards, 1920.0f).Cmds.size(),
+				"HUD: a live skip shows no hole cards in the hero block (they're the last hand's), and they're back after it");
+		}
 		T.I.SkipOn = false;
 		Expect(!ss::ui::HudGlyphs(T.I, 1920.0f, Now).empty(), "HUD: the plates' glyph spots come back after the skip");
 	}

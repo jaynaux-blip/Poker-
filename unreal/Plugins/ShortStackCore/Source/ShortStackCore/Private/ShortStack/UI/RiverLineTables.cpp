@@ -163,6 +163,7 @@ void RiverLine::TableStrip(float X, double Now)
 			UI.Text(NetShortName(G.Name), R.X + 33.0f, R.Y + 17.0f, Ts(12.5f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, R.W - 40.0f - (Tag.empty() ? 0.0f : TagW + 4.0f)));
 			std::string Line;
 			Color LineCol = pal::Muted;
+			bool PlanLine = false;
 			if (G.YourTurn)
 			{
 				Line = SecondsLabel(Remain) + " to act";
@@ -176,13 +177,24 @@ void RiverLine::TableStrip(float X, double Now)
 			{
 				Line = Plan.Status.empty() ? "SKIP \xC2\xB7 " + BbLabel(G.StackBb) : Plan.Status;
 				LineCol = pal::Accent2;
+				PlanLine = !Plan.Status.empty();
 			}
 			else
 			{
 				Line = BbLabel(G.StackBb) + " \xC2\xB7 " + Grouped(G.Rank) + "/" + Grouped(G.Remaining);
 				LineCol = G.InMoney ? pal::Gold : pal::Muted;
 			}
-			UI.Text(Line, R.X + 33.0f, R.Y + 32.0f, Ts(11.0f, 600, LineCol, Align::Left, Baseline::Alphabetic, true, R.W - 40.0f));
+			if (PlanLine)
+			{
+				// The plan's words, whole (§2.11): the text face, a size down or the short form when the tab is narrow.
+				float Size = 11.0f;
+				const std::string Fit = rlauto_detail::AutoTabLine(*C, Plan, Line, R.W - 40.0f, Size);
+				UI.Text(Fit, R.X + 33.0f, R.Y + 32.0f, Ts(Size, 600, LineCol, Align::Left, Baseline::Alphabetic, false, R.W - 40.0f));
+			}
+			else
+			{
+				UI.Text(Line, R.X + 33.0f, R.Y + 32.0f, Ts(11.0f, 600, LineCol, Align::Left, Baseline::Alphabetic, true, R.W - 40.0f));
+			}
 			if (InFront && !S.Tiled)
 			{
 				UI.RRect({R.X + 10.0f, R.Y + R.H - 3.0f, R.W - 20.0f, 3.0f}, 1.5f, pal::Accent);

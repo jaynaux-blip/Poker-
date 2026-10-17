@@ -532,8 +532,9 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 		BotKind = static_cast<int32>(D.Action.Type);
 		BotTo = D.Action.To;
 		bBotBluff = D.Action.Type == ss::PlayerAction::Kind::Raise && D.Equity < 0.42;
-		// (Update 2, §2.8: while the plan holds the seat the engine's HeroReadHook reads its bets, the same on the skip path.)
-		if (bHeroAggressedThisStreet && View.ToCall > 0 && !HeroAutoHolds())
+		// (Update 2, §2.8: while the plan holds the seat the engine's HeroReadHook reads its bets, the same on the skip path. At
+		// Dee's game there's no engine to read the plan and no skip to keep in step with, so this read stays on for it there.)
+		if (bHeroAggressedThisStreet && View.ToCall > 0 && (!HeroAutoHolds() || !Tourney))
 		{
 			ReadHero(*S, BotKind, BotTo, D.Equity);
 		}

@@ -246,12 +246,14 @@ bool AutoPanelOpen(const RiverLine* RL)
 	return It != AutoUiStates().end() && It->second.Open;
 }
 
-void AutoOpenPanel(const RiverLine* RL, const Session& S, int Table, double Now)
+void AutoOpenPanel(const RiverLine* RL, Session& S, int Table, double Now)
 {
 	if (Table < 0 || Table >= S.TableCount())
 	{
 		return;
 	}
+	// The panel shows the career's plan and Form: from here the save keeps them (§6.2's U2AutoPref rule).
+	S.Life.Update2LinesRead |= life::U2AutoPref;
 	AutoUi& U = AutoUiOf(RL);
 	U.Open = true;
 	U.Table = Table;
@@ -380,9 +382,31 @@ std::string AutoTileLine(const autoplay::Panel& P)
 	return P.LastAction.empty() ? P.Status : P.Status + " \xC2\xB7 " + P.LastAction;
 }
 
+std::string AutoTabLine(Canvas& Cv, const autoplay::Panel& P, const std::string& Status, float MaxW, float& Size)
+{
+	// Four tabs leave about a hundred units for the line: "SKIP · 799 to the bubble" or "AUTO · Balanced Reg 8x" would
+	// lose their ends to an ellipsis there, so the line steps down a size, then to its short form, never cut.
+	// (The laptop's tables are online, where no event takes a break: the first target is the next level.)
+	const std::string Where = P.Now.To == autoplay::Target::NextBreak ? std::string("Next level") : std::string(autoplay::TargetName(P.Now.To));
+	const std::string Short = P.Skipping ? "SKIP \xC2\xB7 " + Where : "AUTO \xC2\xB7 " + autoplay::SpeedName(P.Now.Speed);
+	for (const std::string* Line : {&Status, &Short})
+	{
+		for (const float Try : {11.0f, 10.0f})
+		{
+			if (Cv.Measure(*Line, Try, 600) <= MaxW)
+			{
+				Size = Try;
+				return *Line;
+			}
+		}
+	}
+	Size = 10.0f;
+	return Short;
+}
+
 std::vector<std::string> AutoUiInventory()
 {
-	return {AutoSubtitle, AutoCloseHint, AutoSharpOff, AutoFormNote, AutoSloppy, AutoThinkHint, AutoYourHand, AutoYourHandKeys, AutoPending,
+	return {AutoSubtitle, AutoCloseHint, AutoSharpOff, AutoFormNote, AutoSloppy, AutoThinkHint, AutoYourHand, AutoYourHandKeys, AutoYourDecision, AutoPending,
 		AutoDefaultSaved, AutoEveryDecision, AutoXpOwn};
 }
 } // namespace rlauto_detail
@@ -590,7 +614,8 @@ void RiverLine::AutoPanel(const Rect& R, double Now)
 		float Tx = X;
 		for (const autoplay::Target To : {autoplay::Target::NextBreak, autoplay::Target::Bubble, autoplay::Target::FinalTable, autoplay::Target::Result, autoplay::Target::Hands})
 		{
-			const std::string Label = autoplay::TargetName(To);
+			// Online events take no breaks: there the first target stops at the next level, and says so (as its button does).
+			const std::string Label = To == autoplay::Target::NextBreak && !Breaks ? std::string("Next level") : std::string(autoplay::TargetName(To));
 			const float W = rlauto_detail::AutoSegmentW(UI, Label);
 			const bool Reachable = !(To == autoplay::Target::Bubble && InMoney) && !(To == autoplay::Target::FinalTable && Final);
 			const Rect B{Tx, Lower + 90.0f, W, 32.0f};
@@ -744,7 +769,7 @@ void RiverLine::AutoStrip(const Rect& R, double Now)
 	{
 		// Over the player's own controls (a hand taken over, the prompt open): one line that says whose hand it is.
 		const float Pw = rlnet_detail::NetPill(*C, "YOUR HAND", R.X, R.Y + 2.0f, pal::Gold, true, 10.0f);
-		UI.Text(Stop.empty() ? std::string(rlauto_detail::AutoYourHandKeys) : Stop, R.X + Pw + 10.0f, R.Y + 15.0f,
+		UI.Text(!Stop.empty() ? Stop : std::string(P.TakenOver ? rlauto_detail::AutoYourHandKeys : rlauto_detail::AutoYourDecision), R.X + Pw + 10.0f, R.Y + 15.0f,
 			Ts(13.0f, 700, Stop.empty() ? Hex(0xc3cedf) : pal::Gold, Align::Left, Baseline::Alphabetic, false, R.W - Pw - 10.0f));
 		return;
 	}
@@ -885,6 +910,9 @@ void RiverLine::SkipCard(const Rect& R, double Now)
 	if (Compact)
 	{
 		const float Cy = R.Y + R.H / 2.0f;
+		// A plate under the words: in a tile the board sits right behind them, and shows through the dim.
+		const float Pw = std::min(R.W - 24.0f, std::max(380.0f, std::max(UI.Measure(Line.first, 24.0f, 900), UI.Measure(Line.second, 14.0f, 600)) + 80.0f));
+		UI.RRect({Cx - Pw / 2.0f, Cy - 58.0f, Pw, 140.0f}, 12.0f, Rgba(6, 10, 18, 0.9f), rlnet_detail::NetA(pal::Accent, 0.35f));
 		UI.Text(Line.first, Cx, Cy - 26.0f, Ts(24.0f, 900, pal::Accent, Align::Center, Baseline::Alphabetic, false, R.W - 40.0f));
 		UI.Text(Line.second, Cx, Cy + 2.0f, Ts(14.0f, 600, pal::Ink, Align::Center, Baseline::Alphabetic, false, R.W - 40.0f));
 		UI.RRect({Cx - 160.0f, Cy + 20.0f, 320.0f, 5.0f}, 2.5f, Hex(0x0b1422));
