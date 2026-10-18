@@ -28,6 +28,7 @@
 #include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Video.h"
+#include "ShortStack/UI/FrontEnd.h"
 #include "ShortStack/UI/TableHud.h"
 
 #include <algorithm>
@@ -220,12 +221,13 @@ void FAutoHost::Init()
 	{
 		Book = BackRoomAutoRules::AutoLearnedOf(S->Life.Reads);
 	}
-	// The plan the PLAY page shows: the career's default (autoplay\tpref), off.
+	// The plan the PLAY page shows: the career's default (autoplay\tpref), off, at the settings' watch speed (the GAMEPLAY
+	// row "Autoplay watch speed" is the live table's starting speed; Dee's tops out at 4x).
 	if (S && !bRestoredAuto)
 	{
 		const ss::autoplay::TableAuto D = ss::autoplay::DefaultPlan(S->Life.Auto);
 		Plan.S = D.S;
-		Plan.Speed = BackRoomAutoDetail::AutoSpeedOf(D.Speed, !IsLive());
+		Plan.Speed = StartSpeed(D.Speed);
 		Plan.To = D.To;
 		Plan.Hands = D.Hands;
 		Plan.Stops = D.Stops;
@@ -309,6 +311,12 @@ void FAutoHost::RefreshBrain()
 	Brain = ss::autoplay::BrainFor(Plan, Run, TiltGain, Where, Notes, &Book);
 }
 
+int32 FAutoHost::StartSpeed(int32 Fallback) const
+{
+	const ss::ui::GameSettings* Settings = Mode.GetSettings();
+	return BackRoomAutoDetail::AutoSpeedOf(Settings ? Settings->AutoSpeed : Fallback, !IsLive());
+}
+
 void FAutoHost::ApplyTable()
 {
 	if (ABackRoomTable* T = Mode.Table)
@@ -360,6 +368,14 @@ void FAutoHost::ReadPlan(const ss::Hand& H, int32 Seat, ss::BotDecision& D)
 	{
 		ReadsTonight.erase(ReadsTonight.begin());
 	}
+	// Watching, at the table's own hand: the table shows it the way ReadHero shows a read on the player (the reader's line,
+	// the whisper). A skip's reads happen off screen.
+	const ABackRoomTable* Tb = Mode.Table;
+	if (!bSkipping && Tb && Tb->HeroHandForAuto() == &H)
+	{
+		TableRead = N;
+		bTableReadReady = true;
+	}
 	UE_LOG(LogEmbercrest, Log, TEXT("Autoplay: %s read the plan's hands (shake %.2f, %s) -> %s"), *BackRoomAutoDetail::AutoStr(N.Reader), N.Shake, N.Bluffing ? TEXT("bluffing") : TEXT("value"),
 		N.Called ? TEXT("call") : TEXT("fold"));
 }
@@ -400,6 +416,7 @@ void FAutoHost::Set(const ss::autoplay::TableAuto& NewPlan)
 	const bool bWasOff = Plan.M == ss::autoplay::Mode::Off;
 	Plan.S = NewPlan.S;
 	Plan.Speed = BackRoomAutoDetail::AutoSpeedOf(NewPlan.Speed, !IsLive());
+	bSpeedChosen = true; // a whole plan handed in says its own speed
 	Plan.Stops = NewPlan.Stops & (ss::autoplay::StopFinalTable | ss::autoplay::StopBubble | BackRoomAutoDetail::AutoDecisionStops);
 	if (NewPlan.M == ss::autoplay::Mode::Off)
 	{
@@ -672,6 +689,12 @@ void FAutoHost::TurnOn()
 		if (Plan.M == ss::autoplay::Mode::Off)
 		{
 			StartRun();
+			// The settings' watch speed, read as the plan takes the seat (changed in the pause menu since, it counts), until a
+			// speed's picked tonight (T keeps its pick for the night).
+			if (!bSpeedChosen)
+			{
+				Plan.Speed = StartSpeed(Plan.Speed);
+			}
 		}
 		Note(TEXT("AUTOPLAY · ") + BackRoomAutoDetail::AutoName(Plan.S).ToUpper(),
 			FString::Printf(TEXT("Your plan has the seat. Sharpness %d%%."), FMath::RoundToInt(Run.Sharp * 100.0)));
@@ -784,6 +807,7 @@ void FAutoHost::CycleSpeed()
 	const bool bDees = !IsLive();
 	const int32 Now = BackRoomAutoDetail::AutoSpeedOf(Plan.Speed, bDees);
 	Plan.Speed = Now == 1 ? 2 : Now == 2 ? 4 : (Now == 4 && !bDees) ? 8 : 1;
+	bSpeedChosen = true;
 	MarkUsed();
 	Note(BackRoomAutoDetail::AutoStr(ss::autoplay::WatchToast(Plan.Speed)), BackRoomAutoDetail::AutoSpeedBody(Plan.Speed, bDees));
 }
@@ -855,6 +879,7 @@ void FAutoHost::OnNewHand(int32 HandNumber)
 {
 	HandSeen = HandNumber;
 	PlanActsThisHand = 0;
+	bTableReadReady = false; // a read the table never showed was the last hand's
 	bAwayThisHand = Mode.Table && Mode.Table->bHeroAway;
 	// A take-over pressed between hands is this new hand's: the player plays it, and the window opens after it. (The flag
 	// lasts only until the next deal, so a stale one never takes a later hand.)
@@ -1029,6 +1054,16 @@ bool FAutoHost::PawnKeys(ABackRoomPawn& Pawn, APlayerController* PC, bool bCardL
 		RefreshBrain();
 		ApplyTable();
 		return false;
+	}
+	// AUTO RESUMES on a pad (the control map's "keep"; a pad has no K at the table and B only ever backs out): in the next
+	// hand's first 3 s after a take-over, X, A or Y keeps the seat the player's, autoplay off, as K does on the keys. The press
+	// only takes the seat; the next one acts (after the lock).
+	const bool bPadAction = Pawn.Pressed(PC, EKeys::Gamepad_FaceButton_Left) || Pawn.Pressed(PC, EKeys::Gamepad_FaceButton_Bottom) || Pawn.Pressed(PC, EKeys::Gamepad_FaceButton_Top);
+	if (bPadAction && IsPlaying() && Plan.M == ss::autoplay::Mode::Watch && Now < Run.ResumeWindowUntil)
+	{
+		TurnOff(false);
+		LockUntil = Now + BackRoomAutoDetail::AutoWheelLock;
+		return true;
 	}
 	// The plan thinking: the first action press takes the wheel and does nothing else; the next one acts (after the lock).
 	const bool bThinking = T->IsHeroAutoDeciding();
@@ -1421,22 +1456,33 @@ void FAutoHost::FillCard(ss::ui::TableCardInfo& Out) const
 	}
 }
 
-FString FAutoHost::StatusLine() const
+FString FAutoHost::StatusLine(bool bPad) const
 {
-	// The legacy HUD's P0a line (ss.Table.LegacyHud 1): the same facts the core HUD draws from the fields.
+	// The legacy HUD's P0a line (ss.Table.LegacyHud 1): the same facts the core HUD draws from the fields. The keys are K's on
+	// the keyboard; a pad's come from the control map (B stops a skip, X A Y keep playing in the AUTO RESUMES window, and take
+	// the wheel while the plan thinks), since a pad has no K at the table.
 	if (!bInit)
 	{
 		return FString();
 	}
+	const FString Dot = TEXT(" · ");
+	auto PadKey = [](ss::ui::ControlContext Ctx, const char* Id) {
+		const ss::ui::Control* C = ss::ui::FindControl(Ctx, Id);
+		return C && C->Pad && *C->Pad ? FString(UTF8_TO_TCHAR(C->Pad)) : FString();
+	};
 	if (bSkipping && Tourney())
 	{
 		ss::autoplay::TableAuto Shown = Plan;
 		Shown.Hands = SkipHandsLeft;
-		return TEXT("SKIPPING · ") + BackRoomAutoDetail::AutoName(Plan.S).ToUpper() + TEXT(" · ") + BackRoomAutoDetail::AutoStr(BackRoomAutoRules::AutoSkipCardLine(*Tourney(), Shown)) + TEXT(" · [K] Stop");
+		const FString Stop = bPad ? TEXT("[") + PadKey(ss::ui::ControlContext::Table, "stopskip") + TEXT("] Stop") : FString(TEXT("[K] Stop"));
+		return TEXT("SKIPPING") + Dot + BackRoomAutoDetail::AutoName(Plan.S).ToUpper() + Dot + BackRoomAutoDetail::AutoStr(BackRoomAutoRules::AutoSkipCardLine(*Tourney(), Shown)) + Dot + Stop;
 	}
 	if (bResumedPaused)
 	{
-		return BackRoomAutoDetail::AutoStr(ss::autoplay::WasPlayingLine(Plan.S));
+		// (A pad carries on from the PLAY page: A held there turns the plan back on.)
+		return bPad ? FString::Printf(TEXT("Your plan was playing: %s. Hold %s on the PLAY page to carry on."), *BackRoomAutoDetail::AutoName(Plan.S),
+						  *PadKey(ss::ui::ControlContext::TableCard, "autohold"))
+					: BackRoomAutoDetail::AutoStr(ss::autoplay::WasPlayingLine(Plan.S));
 	}
 	if (bPausedUp && Plan.M != ss::autoplay::Mode::Off)
 	{
@@ -1448,11 +1494,21 @@ FString FAutoHost::StatusLine() const
 	}
 	if (Plan.M == ss::autoplay::Mode::Watch && FPlatformTime::Seconds() < Run.ResumeWindowUntil)
 	{
-		return BackRoomAutoDetail::AutoStr(ss::autoplay::Text(ss::autoplay::Words::Resumes));
+		return bPad ? TEXT("AUTO RESUMES") + Dot + TEXT("[") + PadKey(ss::ui::ControlContext::Table, "keep") + TEXT("] keep playing")
+					: BackRoomAutoDetail::AutoStr(ss::autoplay::Text(ss::autoplay::Words::Resumes));
 	}
 	ss::autoplay::TableAuto Shown = Plan;
 	Shown.M = ss::autoplay::Mode::Watch;
-	return BackRoomAutoDetail::AutoStr(ss::autoplay::StatusLine(Shown, Run.Sharp));
+	const FString Line = BackRoomAutoDetail::AutoStr(ss::autoplay::StatusLine(Shown, Run.Sharp));
+	if (!bPad)
+	{
+		return Line;
+	}
+	// On a pad the take-over is the wheel's, during the plan's think: the K on the end goes.
+	const int32 Key = Line.Find(Dot + TEXT("[K]"));
+	const FString Base = Key == INDEX_NONE ? Line : Line.Left(Key);
+	const ABackRoomTable* Tb = Mode.Table;
+	return Tb && Tb->IsHeroAutoDeciding() ? Base + Dot + TEXT("[") + PadKey(ss::ui::ControlContext::Table, "wheel") + TEXT("] take the wheel") : Base;
 }
 
 // ------------------------------------------------------------------ the table's side
@@ -1488,6 +1544,51 @@ void FAutoHost::NotePlanDrew(const ss::Hand& H)
 bool FAutoHost::PlanDecisionFresh(const ss::Hand& H) const
 {
 	return DrewHand == (Mode.Table ? Mode.Table->GetHandNumber() : -1) && DrewHistory == static_cast<int32>(H.History.size());
+}
+
+bool FAutoHost::PlanHeart(const ss::Hand& H, float& OutBpm, bool& OutBluff) const
+{
+	// The Embercrest only (Dee's game reads the plan with the table's own ReadHero, off the body's heart), the plan holding the
+	// seat at a hand it's in, and its bet or raise the street's last.
+	const ABackRoomTable* Tb = Mode.Table;
+	const ss::Tournament* T = Tourney();
+	if (!bInit || !IsLive() || !T || bSkipping || !ReadsApply() || !Tb || Tb->HeroHandForAuto() != &H)
+	{
+		return false;
+	}
+	const int32 Last = BackRoomAutoRules::AutoLastAggression(H);
+	const int32 HandNo = Tb->GetHandNumber();
+	if (Last < 0)
+	{
+		return false;
+	}
+	if (HandNo != HeartHand || Last != HeartLast || T->Tick != HeartTick || Run.Tilt != HeartTilt)
+	{
+		// Once a bet: everything the heart's made of is fixed once it's out (AutoPlanHeartAt), so later frames read this.
+		HeartHand = HandNo;
+		HeartLast = Last;
+		HeartTick = T->Tick;
+		HeartTilt = Run.Tilt;
+		HeartAt = BackRoomAutoRules::AutoPlanHeartAt(Reads, Run.Tilt, T, H, BackRoomAutoRules::AutoHeroIndex(H));
+	}
+	if (HeartAt.Shake < 0.0)
+	{
+		return false;
+	}
+	OutBpm = static_cast<float>(HeartAt.Bpm);
+	OutBluff = HeartAt.Bluff;
+	return true;
+}
+
+bool FAutoHost::TakeTableRead(BackRoomAutoRules::AutoReadNote& Out)
+{
+	if (!bTableReadReady)
+	{
+		return false;
+	}
+	bTableReadReady = false;
+	Out = TableRead;
+	return true;
 }
 
 // ------------------------------------------------------------------ the live skip (§2.12)
@@ -1739,13 +1840,14 @@ void FAutoHost::SkippedHand(const ss::Hand& H, int32 HeroIdx)
 		int64& Was = Mode.LiveBigPots.FindOrAdd(BackRoomAutoDetail::AutoStr(Across));
 		Was = FMath::Abs(static_cast<int64>(Net)) > FMath::Abs(Was) ? static_cast<int64>(Net) : Was;
 	}
-	ss::recall::Record Rec = BackRoomAutoRules::AutoSkippedRecord(*T, H, HeroIdx, T->Tick);
+	// The HANDS page numbers it on from the last hand it holds (the table's own count is behind by every hand skipped), and the
+	// table's next hand takes the number after (ABackRoomTable::TakeRecall): no number shows twice.
+	ss::recall::Record Rec = BackRoomAutoRules::AutoSkippedRecord(*T, H, HeroIdx, BackRoomAutoRules::AutoNextHandNumber(Mode.RecentHands, (Mode.Table ? Mode.Table->GetHandNumber() : 0) + 1));
 	if (S)
 	{
 		ss::video::LiveContext Ctx;
 		Ctx.Source = 1;
-		// (A skipped hand is numbered by the engine's tick, the table's by its own count: ":skip" keeps their candidate ids
-		// apart, so a hand the table deals later never reads as one noted already.)
+		// (":skip" keeps a skipped hand's candidate id apart from the table's own, as it did when the two counts could meet.)
 		Ctx.EntryId = BackRoomAutoDetail::AutoUtf8(Mode.LiveEntryId) + ":skip";
 		Ctx.Event = BackRoomAutoDetail::AutoUtf8(Mode.LiveName);
 		Ctx.BuyIn = T->Spec.BuyInCents;
@@ -1872,6 +1974,7 @@ FString FAutoHost::Command(const FString& Line)
 	if (Verb == TEXT("speed"))
 	{
 		Plan.Speed = BackRoomAutoDetail::AutoSpeedOf(FCString::Atoi(*Arg), !IsLive());
+		bSpeedChosen = true;
 		MarkUsed();
 		return FString::Printf(TEXT("Watch speed %s%s."), *BackRoomAutoDetail::AutoStr(ss::autoplay::SpeedName(Plan.Speed)), Plan.M == ss::autoplay::Mode::Off ? TEXT(" (autoplay is off)") : TEXT(""));
 	}

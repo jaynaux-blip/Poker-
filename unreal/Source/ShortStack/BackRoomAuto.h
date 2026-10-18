@@ -11,7 +11,9 @@
 //   BackRoomHud.cpp       FillTableHud (FillHud; YourTurn and the toast lane ask IsAutoPlaying), FillTableCard (FillCard),
 //                         the legacy HUD's status line (StatusLine) and its ladder
 //   BackRoomTable.cpp     the hero branch, the turn cue, the ReadHero bypass and EndHand's FinishTickWith (the table's own
-//                         members, bodies in BackRoomTableAuto.cpp, which ask this host for the stop rules and the cash seed)
+//                         members, bodies in BackRoomTableAuto.cpp, which ask this host for the stop rules and the cash seed);
+//                         C1: the heart under the plan (PlanHeart), the reads on the plan it shows (TakeTableRead), and the
+//                         HANDS page's numbers (TakeRecall, BackRoomAutoRules::AutoNextHandNumber)
 //   Update2Commands.cpp   ss.Auto.* in the card room (Command)
 // FAutoHost is a friend of ABackRoomGameMode and ABackRoomPawn: its bodies read and move the night's own state (the
 // tournament, the save, the room's feed, the pawn's keys) without either header changing again.
@@ -19,8 +21,9 @@
 // The plan, in short. K (or holding A on the table card's PLAY page) hands the seat to the plan in the style shown; the table
 // asks the plan at the hero's turn (Tournament::HeroDecisionFor, or style::DecideCash at Dee's), checks the stop rules, waits
 // the plan's think and acts through HeroAct, so the body pushes the chips as it does for the player. Any action key during the
-// think takes the wheel for the hand (the next press acts); K in the next hand's first 3 s turns the plan off. T steps the
-// watch speed (the pawn's pace target). A skip (PLAY page) runs between hands through live::SkipSlice, a budgeted slice a
+// think takes the wheel for the hand (the next press acts); K in the next hand's first 3 s turns the plan off (X, A or Y on a
+// pad: the control map's "keep"). T steps the watch speed (the pawn's pace target), which starts at the settings' "Autoplay
+// watch speed" (GameSettings::AutoSpeed; 4x at most at Dee's). A skip (PLAY page) runs between hands through live::SkipSlice, a budgeted slice a
 // frame, and the room hears it as a catch-up. The room reads the plan's bets through the engine's HeroReadHook (the same on
 // both paths). The night's run rides in the checkpoint's host text, so a night closed mid-plan comes back paused at 1x.
 #pragma once
@@ -112,8 +115,9 @@ struct FAutoHost
 	void FillHud(ss::ui::TableHudInfo& Out, const FBackRoomPrompt& Prompt) const;
 	/** The table card's PLAY page (TableCardInfo::Play), at the end of FillTableCard. */
 	void FillCard(ss::ui::TableCardInfo& Out) const;
-	/** The legacy canvas HUD's status line (the P0a one), or "". */
-	FString StatusLine() const;
+	/** The legacy canvas HUD's status line (the P0a one), or "": on a pad (bPad) with the control map's buttons written in
+	 *  (a pad has no K at the table: B stops a skip, X A Y keep playing in the AUTO RESUMES window), drawn as it is. */
+	FString StatusLine(bool bPad = false) const;
 	/** ss.Auto.* in the card room: the verb in lower case and its arguments ("style gto", "skip hands 50"). The answer. */
 	FString Command(const FString& Line);
 
@@ -128,6 +132,16 @@ struct FAutoHost
 	void NotePlanDrew(const ss::Hand& H);
 	/** The held decision is still this spot's: nobody acted since it was drawn (the seat is the only one to act meanwhile). */
 	bool PlanDecisionFresh(const ss::Hand& H) const;
+	/**
+	 * The heart the room reads off the plan's bet (§2.8, §2.12: BackRoomAutoRules::AutoPlanHeartAt, the same numbers the
+	 * engine's HeroReadHook rolls on, on both paths): true while the plan holds the seat at the Embercrest (not skipping) and
+	 * its bet or raise is the street's last, with the heart rate and whether it was a bluff. The table's heart shows it.
+	 * Worked out once a bet (the felt's equity is a few hundred deals), then kept.
+	 */
+	bool PlanHeart(const ss::Hand& H, float& OutBpm, bool& OutBluff) const;
+	/** A read the engine just took on the plan at the table's own hand (watching, not skipping), for the table to show as
+	 *  ReadHero shows the player's: the reader's line and the whisper. Taken once. */
+	bool TakeTableRead(BackRoomAutoRules::AutoReadNote& Out);
 
 private:
 	// ---- the night
@@ -146,6 +160,12 @@ private:
 	TSharedPtr<bool> Alive;
 	std::vector<BackRoomAutoRules::AutoReadNote> ReadsTonight; // the last 12
 	int32 ReadsTaken = 0;
+	/** The read the table hasn't shown yet (TakeTableRead), and the plan's heart at its last bet (PlanHeart's, by the spot). */
+	bool bTableReadReady = false;
+	BackRoomAutoRules::AutoReadNote TableRead;
+	mutable int32 HeartHand = -1, HeartLast = -1, HeartTick = -1;
+	mutable double HeartTilt = -1.0;
+	mutable BackRoomAutoRules::AutoPlanHeart HeartAt;
 	/** Dee's notes as the night began (the plan reads these, not the ones tonight's hands are folded into as they end). */
 	ss::reads::Table NightNotes;
 	std::map<std::string, double> NightNoteSeen;
@@ -156,6 +176,8 @@ private:
 	bool bResumedPaused = false;
 	bool bSharpPinned = false;
 	bool bPausedUp = false;
+	/** The watch speed was picked tonight (T, ss.Auto.Speed): until it is, the plan takes the seat at the settings' speed. */
+	bool bSpeedChosen = false;
 	/** The hand the table is on, how many of its decisions were the plan's, and whether the player was up during it. */
 	int32 HandSeen = -1;
 	int32 PlanActsThisHand = 0;
@@ -204,6 +226,9 @@ private:
 	/** Why the plan can't take the seat now ("" when it can). */
 	FString WhyNot() const;
 	void RefreshBrain();
+	/** The speed the plan takes the seat at (GameSettings::AutoSpeed, the GAMEPLAY row; Fallback without settings), 4x at most
+	 *  at Dee's. */
+	int32 StartSpeed(int32 Fallback) const;
 	/** The table's HeroBrain and cards-known flags as the plan stands. */
 	void ApplyTable();
 	void EnsureHook();

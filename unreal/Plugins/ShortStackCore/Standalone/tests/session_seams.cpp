@@ -14,12 +14,20 @@
 //   - Settings: the ten new settings default, clamp and round-trip; today's string reads to the defaults;
 //   - SessionSeams: the Session.h block's stubs keep today's behavior (Record's renown is town::Renown's);
 //   - Wave1a: the lead's fixes after wave 1a (the world knows the player's birth year; a package's roll affords online).
+//   - Gate1Fixtures (update 2 C1, SPEC §6.5): the gate's two committed saves (fixture_tool write-g1) parse, write back byte
+//     for byte, load a second time the same, and keep what PIE §8.1 reads from them: the Blank world and its boards, the
+//     played lines and Career's tags; the checkpointed Nightly's host text (auto, autoseen, autoread), the engine
+//     checkpoint restoring, and the plan carrying on from it.
 // Phase C's MigrationAll (§7.5) builds on SaveFixtures. A feature whose migration writes lines on load (§7.5 steps 2 to 4)
 // keeps SaveFixtures green: only the segment's own lines (and Kast's legacy deal lines) may change, and that's reported.
 #include "CopyLint.h"
 #include "SessionSeg.h"
 
+#include "ShortStack/AI/Reads.h"
+#include "ShortStack/AI/Style.h"
+#include "ShortStack/Game/Autoplay.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/LiveAuto.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Room.h"
@@ -839,6 +847,226 @@ void Wave1a()
 		Expect(Before.ClubTier == 0 && Before.TopBadge.K == ss::badge::Kind::Count && After.ClubTier == 2, "wave 1a: the CONTINUE card's club tier is the career's");
 	}
 }
+
+/** The checkpoint host text's lines (one per line, split on tabs). */
+std::vector<std::vector<std::string>> HostLines(const std::string& Text)
+{
+	std::vector<std::vector<std::string>> Out;
+	size_t At = 0;
+	while (At < Text.size())
+	{
+		size_t End = Text.find('\n', At);
+		End = End == std::string::npos ? Text.size() : End;
+		std::vector<std::string> F(1);
+		for (size_t K = At; K < End; ++K)
+		{
+			if (Text[K] == '\t')
+			{
+				F.emplace_back();
+			}
+			else
+			{
+				F.back().push_back(Text[K]);
+			}
+		}
+		if (End > At)
+		{
+			Out.push_back(F);
+		}
+		At = End + 1;
+	}
+	return Out;
+}
+
+/** A hand the skip played, into the run (the card room host's sink, as fixture_tool's and G1Journey's). */
+struct GateSink : ss::live::SkipSink
+{
+	ss::autoplay::Run* R = nullptr;
+	ss::style::HeroBrain* Brain = nullptr;
+	const ss::autoplay::TableAuto* Plan = nullptr;
+	const ss::style::Learned* Book = nullptr;
+	int Hands = 0;
+	void HandDone(const ss::Hand& H, int HeroSeat) override
+	{
+		ss::autoplay::NoteSkippedHand(*R, H, HeroSeat, 1.0);
+		*Brain = ss::autoplay::BrainFor(*Plan, *R, 1.0, 1, nullptr, Book);
+		++Hands;
+	}
+	void Events(const std::vector<ss::TEvent>&) override {}
+	void Checkpoint(int) override {}
+};
+
+void Gate1Fixtures()
+{
+	namespace autoplay = ss::autoplay;
+	const char* Names[] = {"update2_blank_world.ssave", "update2_auto_mid_nightly.ssave"};
+	for (const char* Name : Names)
+	{
+		const std::string Saved = Fixture(Name);
+		ss::SaveData D;
+		const bool Parsed = Saved.rfind("shortstack.nightone.v2\n", 0) == 0 && ss::SaveData::Parse(Saved, D);
+		Expect(Parsed, (std::string("gate 1 fixtures: ") + Name + " is there and parses").c_str());
+		const std::string Again = D.Serialize();
+		ss::SaveData Second;
+		Expect(Again == Saved && ss::SaveData::Parse(Again, Second) && Second.Serialize() == Again,
+			(std::string("gate 1 fixtures: ") + Name + " writes back byte for byte and loads a second time the same").c_str());
+		std::printf("  gate 1 fixtures: %s: %s (%zu bytes)\n", Name, Again == Saved ? "written back byte for byte" : "NOT written back byte for byte", Again.size());
+	}
+	// The fresh start, four days in: the world it began with comes back Blank (its world lines are in the save), its boards
+	// have filled from nothing, and Career reads the plan's events as PIE §8.1 step 3 expects.
+	{
+		ss::SaveData D;
+		ss::SaveData::Parse(Fixture("update2_blank_world.ssave"), D);
+		Hooks H;
+		ss::Session S(H, "gate1-blank", &D);
+		const std::string Line = S.DebugWorld("");
+		int Team = 0;
+		for (const ss::world::Npc& N : S.Living().People())
+		{
+			Team += N.Pro ? 1 : 0;
+		}
+		Expect(S.WorldStart() == ss::world::Start::Blank && S.Living().Began() == ss::world::Start::Blank && Team == 0 &&
+				   Line.find("World: Fresh start, version " + std::to_string(ss::world::Version)) == 0,
+			("gate 1 fixtures: the blank world loads Blank, version " + std::to_string(ss::world::Version) + ", no team yet (" + Line.substr(0, Line.find('\n')) + ")").c_str());
+		ss::net::HeroStats Hero;
+		Hero.Name = S.HeroName;
+		const std::vector<ss::net::BoardRow> Season = ss::net::Shared().Leaderboard(ss::net::Board::Season, S.WorldMinutes(), Hero, 60, nullptr);
+		const std::vector<ss::net::BoardRow> Earnings = ss::net::Shared().Leaderboard(ss::net::Board::Earnings, S.WorldMinutes(), Hero, 60, nullptr);
+		bool Positive = !Season.empty() && !Earnings.empty();
+		for (const ss::net::BoardRow& R : Season)
+		{
+			Positive = Positive && R.Value > 0.0;
+		}
+		for (const ss::net::BoardRow& R : Earnings)
+		{
+			Positive = Positive && R.Value > 0.0;
+		}
+		Expect(ss::net::Shared().Attached() == &S.Living() && Positive, "gate 1 fixtures: four days in, the Season and Earnings boards have filled, with no $0 rows");
+		// The played lines: an event the plan played whole (Career's AUTO tag, the accuracy "—"), one shared with the player
+		// (the results line), and the Nightly it skipped.
+		const autoplay::Played* Whole = nullptr;
+		const autoplay::Played* Shared = nullptr;
+		const autoplay::Played* Night = nullptr;
+		for (const autoplay::Played& P : S.Life.Auto.Results)
+		{
+			Whole = !Whole && P.Venue == 0 && P.OwnDecisions == 0 && P.S != ss::style::Style::Autopilot ? &P : Whole;
+			Shared = !Shared && P.Venue == 0 && P.OwnDecisions > 0 && P.AiDecisions > 0 ? &P : Shared;
+			Night = !Night && P.Venue == 1 ? &P : Night;
+		}
+		bool WholeDash = false;
+		for (const ss::HistoryEntry& E : S.History)
+		{
+			WholeDash = WholeDash || (Whole && E.EventId == Whole->Id && E.AccuracyPct == 0.0);
+		}
+		Expect(Whole && WholeDash && autoplay::CareerTag(*Whole).rfind("AUTO \xC2\xB7 ", 0) == 0 && autoplay::CareerTag(*Whole).find("100%") != std::string::npos,
+			"gate 1 fixtures: an event the plan played whole reads AUTO at 100%, with no accuracy of the player's (the \xE2\x80\x94)");
+		Expect(Shared && autoplay::PlayedLine(*Shared).rfind("Played by your plan: " + std::to_string(Shared->AiDecisions) + " of " +
+														   std::to_string(Shared->AiDecisions + Shared->OwnDecisions) + " decisions",
+							 0) == 0,
+			("gate 1 fixtures: the shared event's results line (" + (Shared ? autoplay::PlayedLine(*Shared) : std::string("none")) + ")").c_str());
+		const ss::life::LiveEntry* E = Night ? live::EntryFor(S.Life, Night->Id) : nullptr;
+		Expect(Night && E && E->State == ss::life::LiveEntry::Finished && Night->AiHands > 0 && Night->OwnDecisions == 0, "gate 1 fixtures: the Nightly the plan skipped, settled and on the record");
+		Expect((S.Life.Update2LinesRead & (ss::life::U2AutoPref | ss::life::U2AutoPlayed | ss::life::U2Notes)) == (ss::life::U2AutoPref | ss::life::U2AutoPlayed | ss::life::U2Notes) &&
+				   S.Life.Auto.Pref.Form > autoplay::FormStart && !S.Life.Auto.Notes.empty(),
+			"gate 1 fixtures: the player's own decisions moved Form; the notes are kept");
+	}
+	// The checkpointed Nightly: the game goes back to it, the host text carries the plan, and the plan carries on from it.
+	{
+		ss::SaveData D;
+		ss::SaveData::Parse(Fixture("update2_auto_mid_nightly.ssave"), D);
+		Hooks H;
+		ss::Session S(H, "gate1-auto", &D);
+		const std::string Id = "embercrest-nightly@9";
+		const ss::life::LiveEntry* E = live::EntryFor(S.Life, Id);
+		Expect(S.LiveInProgress() == Id && E && E->State == ss::life::LiveEntry::Registered && E->Checkpoint.rfind("ck1 ", 0) == 0 && !E->Room.empty(),
+			"gate 1 fixtures: tonight's Nightly is there to go back to, checkpointed, the room's state kept");
+		if (!E)
+		{
+			return;
+		}
+		autoplay::TableAuto Plan;
+		autoplay::Run Run;
+		ss::style::Learned Book;
+		int Autos = 0;
+		int Seen = 0;
+		int Reads = 0;
+		int Hands = -1;
+		bool Parsed = true;
+		for (const std::vector<std::string>& F : HostLines(E->CheckpointHost))
+		{
+			std::string Joined;
+			for (size_t K = 0; K < F.size(); ++K)
+			{
+				Joined += (K ? "\t" : "") + F[K];
+			}
+			if (F[0] == "auto")
+			{
+				++Autos;
+				Parsed = autoplay::ReadRun(Joined, Plan, Run) && Parsed;
+			}
+			else if (F[0] == "autoseen" && F.size() >= 17)
+			{
+				++Seen;
+				ss::reads::Stats St;
+				Parsed = ss::reads::Parse(Joined.substr(Joined.find('\t', 9) + 1), St) && Parsed;
+				Run.Seen[F[1]] = St;
+			}
+			else if (F[0] == "autoread" && F.size() >= 3)
+			{
+				++Reads;
+				Book.Tells[F[1]] = std::atoi(F[2].c_str());
+			}
+			else if (F[0] == "hands" && F.size() == 2)
+			{
+				Hands = std::atoi(F[1].c_str());
+			}
+		}
+		// The read book the night seated with: the learned tells (seen twice or more), by name.
+		std::map<std::string, int> Learned;
+		for (const auto& Kv : S.Life.Reads)
+		{
+			const size_t Slash = Kv.first.find('/');
+			if (Kv.second >= 2 && Slash != std::string::npos)
+			{
+				++Learned[Kv.first.substr(0, Slash)];
+			}
+		}
+		Expect(Parsed && Autos == 1 && Seen > 0 && Reads > 0 && Book.Tells == Learned && Hands == Run.AiHands + Run.OwnHands,
+			"gate 1 fixtures: the host text's auto, autoseen and autoread lines read back (the book as seated: the tells seen twice)");
+		Expect(Plan.S == ss::style::Style::Gto && Plan.M == autoplay::Mode::Skip && Plan.To == autoplay::Target::Bubble && Run.AiHands > 0 && Run.AiDecisions >= Run.AiHands &&
+				   Run.OwnDecisions == 0 && Run.Sharp > 0.80 && Run.Sharp <= 1.0,
+			"gate 1 fixtures: the plan was GTO, skipping to the bubble, with its Sharpness and its counts");
+		Expect(autoplay::WasPlayingLine(Plan.S) == "Your plan was playing: GTO. [K] carry on.", "gate 1 fixtures: the line the room shows when the night comes back");
+		// The engine's checkpoint restores, and the plan skips on from it to the bubble (or the night's end) with the run as kept.
+		const live::Occurrence O = live::FindOccurrence(Id);
+		std::vector<ss::ReservedPlayer> Known;
+		for (const std::pair<std::string, int>& R : E->Roster)
+		{
+			ss::ReservedPlayer P;
+			P.Name = R.first;
+			P.Type = static_cast<ss::Archetype>(R.second);
+			Known.push_back(P);
+		}
+		bool Restored = false;
+		std::unique_ptr<ss::Tournament> T = live::ResumeField(O, *E, E->Entrants, S.HeroName, Known, true, Restored);
+		const bool Same = Restored && T && T->Checkpoint() == E->Checkpoint;
+		ss::style::HeroBrain Brain = autoplay::BrainFor(Plan, Run, 1.0, 1, nullptr, &Book);
+		GateSink Sink;
+		Sink.R = &Run;
+		Sink.Brain = &Brain;
+		Sink.Plan = &Plan;
+		Sink.Book = &Book;
+		const int Before = Run.AiHands;
+		ss::live::SkipWhy Why = ss::live::SkipWhy::Budget;
+		for (int Guard = 0; Same && Guard < 2000 && Why == ss::live::SkipWhy::Budget; ++Guard)
+		{
+			Why = ss::live::SkipSlice(*T, Brain, Plan, 0.0, Sink).Why;
+		}
+		std::printf("  gate 1 fixtures: tonight resumed at hand %d, the plan skipped %d more hands (why %d)\n", Same ? T->Tick - Sink.Hands : -1, Sink.Hands, static_cast<int>(Why));
+		Expect(Same && Why != ss::live::SkipWhy::Budget && Sink.Hands > 0 && Run.AiHands == Before + Sink.Hands,
+			"gate 1 fixtures: the engine checkpoint restores and the plan skips on from it, its counts carried");
+	}
+}
 } // namespace seams
 
 void SegLead()
@@ -852,5 +1080,6 @@ void SegLead()
 	seams::SessionSeams();
 	seams::RenownKept();
 	seams::Wave1a();
+	seams::Gate1Fixtures();
 }
 } // namespace session_test

@@ -41,6 +41,7 @@
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/TableTalk.h"
+#include "ShortStack/Game/World.h"
 #include "ShortStack/Tournament.h"
 #include "ShortStack/UI/FrontEnd.h"
 
@@ -1104,6 +1105,16 @@ int32 SideOf(const FVector& Eye, const FVector& Forward, const FVector& At)
 	}
 	return FVector::CrossProduct(Fwd, Dir).Z > 0.0 ? 1 : -1;
 }
+
+/**
+ * A fresh world's books for the regulars' talk (update 2 §3.3 F9; ss::room::BooksOf): which of the room's events have a
+ * winner yet, the first names on the board, the wins up the hill. From the save's world (the lines the books need, only
+ * for a fresh start in its first month: any other world costs its head line). World: the room's clock (minutes).
+ */
+ss::room::Books RoomFreshBooks(const ss::SaveData& D, double World)
+{
+	return D.WorldSnapshot ? ss::room::BooksOf(*D.WorldSnapshot, D.Life.LiveEntries) : ss::room::BooksOfText(D.WorldText, D.Life.LiveEntries, World);
+}
 } // namespace LiveDetail
 
 void ABackRoomGameMode::PlayCue(const ss::room::Cue& Cue)
@@ -1311,6 +1322,19 @@ void ABackRoomGameMode::BuildDirector()
 	RoomDirector = MakeShared<ss::room::Director>(*E, O, ss::live::SeedFor(*E, Save->HeroName) + ":room", First);
 	RoomDirector->HeroFullName = Me.Created ? Me.FullName() : First;
 	RoomDirector->BreakSeconds = BreakRealSeconds;
+	// A fresh start's first month (update 2 §3.3 F9): the books as the save's world has them, before the first hand, so the
+	// regulars talk about the room's firsts only while they're true. Nothing in an established world.
+	{
+		const uint64 B0 = FPlatformTime::Cycles64();
+		RoomDirector->Fresh = RoomFreshBooks(*Save, Minutes);
+		const ss::room::Books& B = RoomDirector->Fresh;
+		if (B.Blank)
+		{
+			UE_LOG(LogEmbercrest, Log, TEXT("The room's books: a fresh start, day %d of %d; %d firsts decided, %d called off; your wins up the hill %d, the most %d; read in %.1f ms"),
+				ss::net::DayOf(Minutes) - ss::net::DayOf(B.Opened), ss::room::FreshBooksDays, static_cast<int32>(B.Firsts.size()), static_cast<int32>(B.Cancelled.size()), B.HeroWins,
+				B.MostWins, FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64() - B0));
+		}
+	}
 	// Only a night come back to from its checkpoint resumes: a fresh seat (a late one too) is welcomed by the first Clock
 	// with where registration stands.
 	if (bResumed)

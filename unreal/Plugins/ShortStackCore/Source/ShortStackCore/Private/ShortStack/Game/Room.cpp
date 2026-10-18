@@ -641,6 +641,403 @@ life::LiveVoice VoiceOf(const world::World& W, int Npc, const std::string& Hero)
 	return V;
 }
 
+// ------------------------------------------------------------------ a fresh start's books (update 2 §3.3 F9)
+
+namespace room_detail
+{
+/** When one of the room's events is over: its schedule's hours, as the world plays it (WorldCalendar: start + hours). */
+double FreshEnds(const live::Occurrence& O)
+{
+	return O.Start + O.T->Hours * 60.0;
+}
+
+/** The room's events from Day From to Day To that end after Opened, in the order they end (start order on a tie). */
+std::vector<live::Occurrence> FreshRoom(double Opened, int From, int To)
+{
+	std::vector<live::Occurrence> Out;
+	for (int D = From; D <= To; ++D)
+	{
+		for (const live::Occurrence& O : live::Occurrences(D))
+		{
+			if (FreshEnds(O) > Opened)
+			{
+				Out.push_back(O);
+			}
+		}
+	}
+	std::stable_sort(Out.begin(), Out.end(), [](const live::Occurrence& A, const live::Occurrence& B) { return FreshEnds(A) < FreshEnds(B); });
+	return Out;
+}
+
+/** How a first-month line names one of the room's events: its short name, but "Embercrest Sunday" ("the first Sunday in
+ *  the books" would be a day). */
+std::string FreshEvent(const live::Occurrence& O)
+{
+	const std::string Name = O.T->Name;
+	return std::string(O.T->Key) == "sunday" ? Name.substr(0, Name.find(" $")) : std::string(O.T->Short);
+}
+
+/** The world's news of a family's first ("Embercrest Nightly", "Embercrest Noon Deepstack": WorldSim's BooksFamily). */
+std::string FreshFamily(const live::Occurrence& O)
+{
+	const std::string Name = std::string(O.T->Name).substr(0, std::string(O.T->Name).rfind(" $"));
+	return Name.find("Embercrest") == std::string::npos ? "Embercrest " + Name : Name;
+}
+
+/** How the table says one of the world's people in a first-month line: by name when the room knows them by it (or it's a
+ *  whole name), else the first name in their handle; "" when there's only a handle (handles are never said). */
+std::string FreshName(const std::string& Name)
+{
+	if (Name.empty())
+	{
+		return std::string();
+	}
+	if (talk::KnownByName(Name) || Name.find(' ') != std::string::npos)
+	{
+		return Name;
+	}
+	return talk::FirstNameIn(Name);
+}
+
+bool FreshEvening(const live::Occurrence& O)
+{
+	return O.T->StartMinute >= 17 * 60;
+}
+
+/** When one of the room's events still to come is, from Now: "on right now", "tonight", "tomorrow", "Saturday night". */
+std::string FreshWhen(const live::Occurrence& O, double Now)
+{
+	const int Day = net::DayOf(Now);
+	if (O.Start <= Now)
+	{
+		return "on right now";
+	}
+	if (O.Day <= Day)
+	{
+		return FreshEvening(O) ? "tonight" : "later today";
+	}
+	if (O.Day == Day + 1)
+	{
+		return FreshEvening(O) ? "tomorrow night" : "tomorrow";
+	}
+	return std::string(net::WeekdayName(O.Day, true)) + (FreshEvening(O) ? " night" : "");
+}
+
+/** When one of the room's events now over was played, from Now: "yesterday", "last night", "Saturday night", "opening week". */
+std::string FreshThen(const live::Occurrence& O, double Now, double Opened)
+{
+	const int Ago = net::DayOf(Now) - O.Day;
+	if (Ago <= 0)
+	{
+		return FreshEvening(O) ? "tonight" : "today";
+	}
+	if (Ago == 1)
+	{
+		return FreshEvening(O) ? "last night" : "yesterday";
+	}
+	if (Ago < 7)
+	{
+		return std::string(net::WeekdayName(O.Day, true)) + (FreshEvening(O) ? " night" : "");
+	}
+	if (O.Day - net::DayOf(Opened) < 7)
+	{
+		return "opening week";
+	}
+	return Ago < 14 ? "last week" : "a while back";
+}
+
+/** One thing a regular could honestly say about a fresh world's books right now (FreshTopics). */
+struct FreshTalk
+{
+	std::string Key;   // what it spends, once a night ("next:bigstack")
+	std::string Topic; // the pool ("fresh.next"); "...self" or "...you" when it's about the speaker or the player
+	std::map<std::string, std::string> Vars;
+	std::string Who;   // whom it's about (the world's name for them)
+	bool Hero = false; // it's about the player
+};
+
+/**
+ * What's true of a fresh world's books at Now, the night of Tonight (whose winner nobody knows while the room still talks),
+ * from what B can show: each topic only while it's true (U5). Decided: a first the books show, or over and not known to
+ * be called off (its winner then unknown, so a first after it is never claimed). Empty in an established world and after
+ * the books' first FreshBooksDays.
+ */
+std::vector<FreshTalk> FreshTopics(const Books& B, const live::Occurrence& Tonight, double Now)
+{
+	std::vector<FreshTalk> Out;
+	const int Fresh = net::DayOf(Now) - net::DayOf(B.Opened);
+	if (!B.Blank || Now < B.Opened || Fresh < 0 || Fresh >= FreshBooksDays)
+	{
+		return Out;
+	}
+	const auto Cancelled = [&B](const std::string& Id) { return std::find(B.Cancelled.begin(), B.Cancelled.end(), Id) != B.Cancelled.end(); };
+	const auto FirstOf = [&B](const std::string& Id) -> const Books::First* {
+		for (const Books::First& F : B.Firsts)
+		{
+			if (F.Id == Id)
+			{
+				return &F;
+			}
+		}
+		return nullptr;
+	};
+	const auto Decided = [&](const live::Occurrence& O) {
+		if (Tonight.Valid() && O.Id == Tonight.Id)
+		{
+			return false;
+		}
+		return FirstOf(O.Id) != nullptr || (FreshEnds(O) <= Now && !Cancelled(O.Id));
+	};
+	const std::vector<live::Occurrence> Room = FreshRoom(B.Opened, net::DayOf(B.Opened) - 1, net::DayOf(Now) + 6);
+	std::set<std::string> Won; // the families with a winner in the books by now
+	for (const live::Occurrence& O : Room)
+	{
+		if (Decided(O))
+		{
+			Won.insert(O.T->Key);
+		}
+	}
+	const std::string TonightKey = Tonight.Valid() ? std::string(Tonight.T->Key) : std::string();
+	// Nothing the room has played since the books opened has a winner yet: the board by the desk is blank.
+	if (Won.empty())
+	{
+		Out.push_back({"wall", "fresh.wall", {}, std::string(), false});
+	}
+	// Tonight's is the first of its kind in the books.
+	if (Tonight.Valid() && FreshEnds(Tonight) > B.Opened && !Won.count(TonightKey))
+	{
+		Out.push_back({"tonight", "fresh.tonight", {{"FreshEvent", FreshEvent(Tonight)}}, std::string(), false});
+	}
+	// The first of each of the room's other events still to come: its next one, being dealt now or within the week.
+	std::set<std::string> Looked;
+	for (const live::Occurrence& O : Room)
+	{
+		const std::string Key = O.T->Key;
+		if (Key == TonightKey || FreshEnds(O) <= Now || Cancelled(O.Id) || Looked.count(Key))
+		{
+			continue;
+		}
+		Looked.insert(Key); // the family's next one decides it
+		if (!Won.count(Key))
+		{
+			Out.push_back({"next:" + Key, Key == "nightly" ? "fresh.next.nightly" : "fresh.next", {{"FreshEvent", FreshEvent(O)}, {"FreshWhen", FreshWhen(O, Now)}},
+				std::string(), false});
+		}
+	}
+	// The firsts the books can show, oldest first: the first name on the board, then each family's. A first is claimed only
+	// when every event that ended before it (of its family; for the board, of any) is one the room knows was called off.
+	const auto Clear = [&](const live::Occurrence& Of, bool Family) {
+		for (const live::Occurrence& O : Room)
+		{
+			if (FreshEnds(O) > FreshEnds(Of))
+			{
+				break;
+			}
+			if (O.Id != Of.Id && (!Family || std::string(O.T->Key) == std::string(Of.T->Key)) && !Cancelled(O.Id))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	const auto Claim = [&](const std::string& Key, const char* Topic, const live::Occurrence& O, const Books::First& F) {
+		const std::string Then = FreshThen(O, Now, B.Opened);
+		FreshTalk T{Key, Topic, {{"FreshEvent", FreshEvent(O)}, {"FreshThen", Then}, {"FreshThenCap", talk::Capitalized(Then)}}, F.Hero ? std::string() : F.Winner, F.Hero};
+		if (!F.Hero)
+		{
+			T.Vars["FreshWho"] = FreshName(F.Winner);
+		}
+		Out.push_back(T);
+	};
+	const auto Sayable = [](const Books::First& F) { return F.Hero || !FreshName(F.Winner).empty(); };
+	std::string BoardKey;
+	for (const Books::First& F : B.Firsts)
+	{
+		const live::Occurrence O = live::FindOccurrence(F.Id);
+		if (!O.Valid() || (Tonight.Valid() && O.Id == Tonight.Id) || FreshEnds(O) <= B.Opened)
+		{
+			continue;
+		}
+		if (Clear(O, false) && Sayable(F))
+		{
+			Claim("wallfirst", "fresh.wallfirst", O, F);
+			BoardKey = O.T->Key;
+		}
+		break; // the board's first is the oldest first the books show, whoever it was
+	}
+	for (const Books::First& F : B.Firsts)
+	{
+		const live::Occurrence O = live::FindOccurrence(F.Id);
+		if (O.Valid() && !(Tonight.Valid() && O.Id == Tonight.Id) && FreshEnds(O) > B.Opened && std::string(O.T->Key) != BoardKey && Clear(O, true) && Sayable(F))
+		{
+			Claim("first:" + std::string(O.T->Key), "fresh.first", O, F);
+		}
+	}
+	// More than one win up the hill already (at least: there may be more since the world was read). Never "nobody's won
+	// twice": the world doesn't keep the wins of the strangers it doesn't follow, so the room can't know it.
+	if (B.HeroWins >= 2)
+	{
+		Out.push_back({"twice:you", "fresh.twice", {}, std::string(), true});
+	}
+	if (B.MostWins >= 2 && !FreshName(B.Most).empty())
+	{
+		Out.push_back({"twice", "fresh.twice", {{"FreshWho", FreshName(B.Most)}}, B.Most, false});
+	}
+	// The books' first week.
+	if (Fresh < 7)
+	{
+		Out.push_back({"books", "fresh.books", {}, std::string(), false});
+	}
+	return Out;
+}
+} // namespace room_detail
+
+Books BooksOf(const world::World& W, const std::vector<life::LiveEntry>& Entries)
+{
+	Books B;
+	if (!W.Ready() || W.Began() != world::Start::Blank)
+	{
+		return B;
+	}
+	B.Blank = true;
+	B.Opened = W.StartedAt();
+	B.Known = W.Clock();
+	// The room's wins in the books (a fresh world's records start at nothing, so every win it keeps is one of them).
+	B.HeroWins = W.HeroRoom().Wins;
+	for (const world::Npc& N : W.People())
+	{
+		if (N.Room.Wins > B.MostWins)
+		{
+			B.MostWins = N.Room.Wins;
+			B.Most = N.Name;
+		}
+	}
+	const auto EntryOf = [&Entries](const std::string& Id) -> const life::LiveEntry* {
+		for (const life::LiveEntry& E : Entries)
+		{
+			if (E.Id == Id)
+			{
+				return &E;
+			}
+		}
+		return nullptr;
+	};
+	// Each family's first decided event, in the order they ended. One the world can't tell about yet (not over by its
+	// clock, or the player's own, still being played) holds its family: nothing after it is a first anyone can claim.
+	std::set<std::string> Held;
+	for (const live::Occurrence& O : FreshRoom(B.Opened, net::DayOf(B.Opened) - 1, net::DayOf(B.Known) + 1))
+	{
+		const std::string Key = O.T->Key;
+		if (W.CancellationOf(O.Id))
+		{
+			B.Cancelled.push_back(O.Id);
+			continue;
+		}
+		if (Held.count(Key))
+		{
+			continue;
+		}
+		Held.insert(Key);
+		Books::First F;
+		F.Id = O.Id;
+		bool Decided = false;
+		const life::LiveEntry* E = EntryOf(O.Id);
+		if (const net::EventResult* R = W.ResultOf(O.Id))
+		{
+			Decided = !R->FinalTable.empty();
+			for (const net::Placing& P : R->FinalTable)
+			{
+				if (P.Place == 1)
+				{
+					const world::Npc* N = P.Player >= 0 ? W.Get(P.Player) : nullptr;
+					F.Hero = P.Player == -1;
+					F.Winner = F.Hero ? std::string() : N ? N->Name : P.Name;
+				}
+			}
+		}
+		else if (E && E->State == life::LiveEntry::Finished)
+		{
+			// The player's own night, settled in the room before the world hears of it.
+			Decided = true;
+			F.Hero = E->Place == 1;
+		}
+		else if (FreshEnds(O) <= B.Known && !(E && E->State == life::LiveEntry::Registered))
+		{
+			// Over by the world's clock and no result kept (it keeps a few days'): its first, as the world's own news has it.
+			Decided = true;
+			const std::string Family = FreshFamily(O);
+			for (const world::WorldEvent& Ev : W.Events())
+			{
+				if (Ev.Kind == world::EventKind::FirstWinner && Ev.What == Family && std::fabs(Ev.At - FreshEnds(O)) < 1.0)
+				{
+					const world::Npc* N = W.Get(Ev.Npc);
+					F.Hero = Ev.Npc == -1;
+					F.Winner = F.Hero || !N ? std::string() : N->Name;
+				}
+			}
+		}
+		if (Decided)
+		{
+			B.Firsts.push_back(F);
+		}
+	}
+	return B;
+}
+
+Books BooksOfText(const std::string& WorldText, const std::vector<life::LiveEntry>& Entries, double Now)
+{
+	const std::string& Text = WorldText;
+	std::vector<std::string> Fields;
+	const auto ReadLine = [&Text, &Fields](world::World& W, size_t From, size_t End) {
+		Fields.clear();
+		for (size_t Cell = From, K = From; K <= End; ++K)
+		{
+			if (K == End || Text[K] == '\t')
+			{
+				Fields.emplace_back(Text, Cell, K - Cell);
+				Cell = K + 1;
+			}
+		}
+		W.Read(Fields);
+	};
+	// The head first: how the world began, and when its books opened.
+	const std::string HeadTag = "world\thead\t";
+	size_t Head = Text.compare(0, HeadTag.size(), HeadTag) == 0 ? 0 : Text.find("\n" + HeadTag);
+	if (Head == std::string::npos)
+	{
+		return Books();
+	}
+	Head += Head == 0 ? 0 : 1;
+	world::World Peek;
+	ReadLine(Peek, Head, std::min(Text.find('\n', Head), Text.size()));
+	if (!Peek.Ready() || Peek.Began() != world::Start::Blank || net::DayOf(Now) - net::DayOf(Peek.StartedAt()) >= FreshBooksDays)
+	{
+		return Books();
+	}
+	// Then what the books read: the people (their names and their records up the hill), results, cancellations, the news.
+	world::World W;
+	static const char* const Needed[] = {"head", "npc", "ghost", "room", "res", "cancelled", "log"};
+	for (size_t From = 0; From < Text.size();)
+	{
+		const size_t End = std::min(Text.find('\n', From), Text.size());
+		const size_t Kind = From + 6; // after "world\t"
+		const size_t Tab = Kind < End ? Text.find('\t', Kind) : std::string::npos;
+		if (Text.compare(From, 6, "world\t") == 0 && Tab != std::string::npos && Tab < End)
+		{
+			for (const char* N : Needed)
+			{
+				if (Text.compare(Kind, Tab - Kind, N) == 0)
+				{
+					ReadLine(W, From, End);
+					break;
+				}
+			}
+		}
+		From = End + 1;
+	}
+	return BooksOf(W, Entries);
+}
+
 // ------------------------------------------------------------------ the director
 
 Director::Director(const life::LiveEntry& E, const live::Occurrence& O, const std::string& Seed, const std::string& HeroFirstName)
@@ -2399,6 +2796,10 @@ void Director::Chatter(const Tournament& T, const HandNote& H, const std::vector
 	bool Thread = false;
 	bool Asked = false;
 	const std::string Tick = std::to_string(T.Tick);
+	// A fresh world's first month (update 2 §3.3 F9): what the room's regulars could say about its new books right now
+	// (worked out when someone first gets to the topics; never in an established world).
+	std::vector<FreshTalk> BookTalk;
+	bool BooksRead = false;
 	for (const Seen& P : Ready)
 	{
 		if (Thread && Asked)
@@ -2510,6 +2911,22 @@ void Director::Chatter(const Tournament& T, const HandNote& H, const std::vector
 					Options.push_back(Common);
 				}
 			}
+			// The room's own (its locals, the eight, the live regulars) on the new books: each topic once a night.
+			if (Fresh.Blank && (talk::KnownByName(P.Name) || V.Is == static_cast<int>(world::Identity::LiveRegular)))
+			{
+				if (!BooksRead)
+				{
+					BookTalk = FreshTopics(Fresh, Occ, TickWorld(T));
+					BooksRead = true;
+				}
+				for (size_t I = 0; I < BookTalk.size(); ++I)
+				{
+					if (!Told.count("fresh:" + BookTalk[I].Key))
+					{
+						Options.push_back("fresh:" + std::to_string(I));
+					}
+				}
+			}
 			// The first option that's true of them, starting from one the seed picks among the personal ones.
 			std::stable_sort(Options.begin(), Options.end(), [this, &P, &Tick](const std::string& A, const std::string& B) {
 				const auto Weight = [](const std::string& O) { return O.rfind("story:", 0) == 0 ? 0 : O.find(':') != std::string::npos ? 1 : O == "trip" || O == "food" || O == "room" || O == "night" ? 3 : 2; };
@@ -2557,6 +2974,15 @@ void Director::Chatter(const Tournament& T, const HandNote& H, const std::vector
 					ToVoice = VoiceOfSeat[Other.Name];
 					Try["Name"] = Other.Caption;
 				}
+				else if (O.rfind("fresh:", 0) == 0)
+				{
+					// About the speaker themselves ("...self") or the player, to them ("...you").
+					const FreshTalk& F = BookTalk[static_cast<size_t>(std::atoi(O.c_str() + 6))];
+					Tp = F.Topic + (F.Hero ? ".you" : !F.Who.empty() && F.Who == P.Name ? ".self" : "");
+					Try = F.Vars;
+					Try["Books"] = "fresh";
+					Try["FreshKey"] = F.Key;
+				}
 				Try["Topic"] = Tp;
 				// Check it's honest and fits before spending the line.
 				talk::Context Probe;
@@ -2585,13 +3011,15 @@ void Director::Chatter(const Tournament& T, const HandNote& H, const std::vector
 		{
 			Vars["Topic"] = Topic;
 		}
-		if (!Say(T, P, talk::Moment::Small, Vars, true, false, To))
+		// (A first-month line about the player is said to them, and nobody answers for them.)
+		const bool ToYou = Topic.rfind("fresh.", 0) == 0 && Topic.size() > 4 && Topic.compare(Topic.size() - 4, 4, ".you") == 0;
+		if (!Say(T, P, talk::Moment::Small, Vars, true, ToYou, To))
 		{
 			continue;
 		}
 		Spend();
 		Thread = true;
-		if (Topic.empty())
+		if (Topic.empty() || ToYou)
 		{
 			continue; // the eight's own chat stands alone
 		}

@@ -1,19 +1,43 @@
 // Monkey test: drives the session and the RiverLine client with random clicks and keys across every screen, sits
 // down at random events (up to four tables), and checks invariants every frame: the bankroll only moves through the
 // ledger, tournament chips are conserved, the clock never runs backwards, tables never stall, saves round-trip.
-// Usage: monkey_test [seeds] [frames] [first seed]
+// Update 2 (C1): the plan in the seat too: random autoplay changes, take-overs and skips on the open tables, and no
+// decision the plan made is ever graded (each table's graded decisions are exactly the player's own); no frame writes
+// more than 20 ledger lines.
+//
+// The segment's phase (the last segment's carried invariants, next_segment_spec §7.6; update 2 SPEC debt item 9): careers
+// of Days days stepped an hour or a few at a time, with random staking (offers taken, countered or left; pieces listed and
+// called off; debts paid; chops asked for; walking away), sponsors (offers signed, countered, declined; patches sewn and
+// unpicked; notice; raises; appearances), the pawn, online events (the plan skipping, or Sprint) and nights at the
+// Embercrest (played by the engine or the plan, or called off). After every step: the bankroll moves only through the
+// ledger, never below zero; no backing or sponsor payment is written twice; at most one brand per exclusive category; at
+// most two deals on the overlay; patches only for running contracts; sponsor property never sells at the pawn; an open
+// offer is never dropped from Mail; no step writes more than 20 ledger lines; the staked roll never goes below zero; no AI
+// decision graded. At the end the segment's lines are at most 80 KB of the save, update 2's non-world lines at most 60 KB,
+// and the save reads back the same.
+// Usage: monkey_test [seeds] [frames] [first seed] [segment careers] [days]
+#include "ShortStack/AI/Style.h"
+#include "ShortStack/Game/Autoplay.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Life.h"
+#include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/LiveAuto.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Stake.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/UI/RiverLine.h"
 #include "ShortStack/UI/ShopScreen.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -118,6 +142,551 @@ bool SameEntry(const ss::life::LedgerEntry& A, const ss::life::LedgerEntry& B)
 {
 	return A.At == B.At && A.Label == B.Label && A.Amount == B.Amount && A.Kind == B.Kind;
 }
+
+/** How many of Cur's lines are new since Prev (the ledger keeps the newest 60: the shortest prefix after which it goes on as Prev). */
+size_t FreshLines(const std::vector<ss::life::LedgerEntry>& Cur, const std::vector<ss::life::LedgerEntry>& Prev)
+{
+	size_t Fresh = Cur.size();
+	if (Cur.size() < 60 && Cur.size() >= Prev.size())
+	{
+		Fresh = Cur.size() - Prev.size(); // not full yet: exact
+	}
+	for (size_t Nn = 0; Cur.size() >= 60 && Nn < Cur.size() && !Prev.empty(); ++Nn)
+	{
+		bool Match = true;
+		for (size_t I = 0; Nn + I < Cur.size() && I < Prev.size() && Match; ++I)
+		{
+			Match = SameEntry(Cur[Nn + I], Prev[I]);
+		}
+		if (Match)
+		{
+			Fresh = Nn;
+			break;
+		}
+	}
+	return Fresh;
+}
+
+/** A plan for a table, drawn: a style that's on the menu, watch or skip (or off), a speed, a target and the stops. */
+ss::autoplay::TableAuto RandomPlan(ss::Rng& R, bool Skip)
+{
+	namespace autoplay = ss::autoplay;
+	std::vector<ss::style::Style> Menu;
+	for (const ss::style::Info& I : ss::style::Catalog())
+	{
+		if (!I.Hidden && !I.BountyOnly)
+		{
+			Menu.push_back(I.S);
+		}
+	}
+	static const int Speeds[] = {1, 2, 4, 8};
+	static const autoplay::Target Targets[] = {autoplay::Target::NextBreak, autoplay::Target::Bubble, autoplay::Target::FinalTable, autoplay::Target::Result, autoplay::Target::Hands};
+	autoplay::TableAuto A;
+	A.S = Menu[static_cast<size_t>(R.Int(static_cast<int>(Menu.size())))];
+	const double M = R.Next();
+	A.M = Skip ? autoplay::Mode::Skip : M < 0.2 ? autoplay::Mode::Off : M < 0.6 ? autoplay::Mode::Watch : autoplay::Mode::Skip;
+	A.Speed = Speeds[R.Int(4)];
+	A.To = Targets[R.Int(5)];
+	A.Hands = 5 + R.Int(60);
+	A.Stops = static_cast<uint32_t>(R.Int(32));
+	return A;
+}
+
+// ------------------------------------------------------------------ the segment's phase
+
+struct SegHooks : ss::SessionHooks
+{
+	ss::SaveData Last;
+	int Texts = 0;
+	void Save(const ss::SaveData& D) override { Last = D; }
+	void Text(const std::string&, const std::string&) override { ++Texts; }
+	bool GoOut(const std::string&, ss::Chips) override { return true; }
+};
+
+/** The career's books, audited after every step (SegmentJourney's, session_main.cpp, as a monkey's). */
+struct SegBooks
+{
+	ss::Chips Bank = 0;
+	ss::Chips Injected = 0;
+	std::vector<ss::life::LedgerEntry> Seen;
+	std::vector<ss::life::LedgerEntry> Paid; // every backing and sponsor line once
+	int MostLines = 0;
+
+	void Start(const ss::Session& S)
+	{
+		Bank = S.BankrollCents;
+		Seen = S.Life.Ledger;
+	}
+	void Give(ss::Session& S, ss::Chips Cents)
+	{
+		S.BankrollCents += Cents;
+		Injected += Cents;
+	}
+	void Audit(ss::Session& S, int Seed, int Step, const std::string& Where)
+	{
+		namespace sponsor = ss::sponsor;
+		const std::vector<ss::life::LedgerEntry>& Cur = S.Life.Ledger;
+		const size_t Fresh = FreshLines(Cur, Seen);
+		ss::Chips Logged = 0;
+		for (size_t K = 0; K < Fresh; ++K)
+		{
+			const ss::life::LedgerEntry& E = Cur[K];
+			Logged += E.Amount;
+			if (E.Kind == ss::life::LedgerBacking || E.Kind == ss::life::LedgerSponsors)
+			{
+				for (const ss::life::LedgerEntry& Old : Paid)
+				{
+					if (SameEntry(Old, E))
+					{
+						Fail("segment: a backing or sponsor payment written twice (" + E.Label + ", " + Where + ")", Seed, Step);
+					}
+				}
+				Paid.push_back(E);
+			}
+		}
+		MostLines = std::max(MostLines, static_cast<int>(Fresh));
+		if (Fresh > 20)
+		{
+			Fail("segment: one step wrote more than 20 ledger lines (" + std::to_string(Fresh) + ", " + Where + ")", Seed, Step);
+		}
+		if (S.BankrollCents - Bank != Logged + Injected)
+		{
+			Fail("segment: the bankroll moved without the ledger (" + ss::Money(S.BankrollCents - Bank) + " vs " + ss::Money(Logged + Injected) + ", " + Where + ")", Seed, Step);
+		}
+		if (S.BankrollCents < 0)
+		{
+			Fail("segment: a negative bankroll (" + Where + ")", Seed, Step);
+		}
+		Bank = S.BankrollCents;
+		Injected = 0;
+		Seen = Cur;
+		for (const ss::stake::Deal& D : S.Life.Stakes.Deals)
+		{
+			if (D.RollNow < 0)
+			{
+				Fail("segment: a staked roll below zero (" + Where + ")", Seed, Step);
+			}
+		}
+		const double World = S.WorldMinutes();
+		const sponsor::Book& B = S.Life.Sponsors;
+		std::map<int, int> ByCategory;
+		for (const sponsor::Brand& Br : sponsor::Brands())
+		{
+			if (sponsor::ExclusiveCategory(Br.Cat) && sponsor::Active(B, Br.Id, World) && ++ByCategory[static_cast<int>(Br.Cat)] > 1)
+			{
+				Fail("segment: two brands active in one exclusive category (" + Where + ")", Seed, Step);
+			}
+		}
+		// The overlay's slots: the deals that take a spot on it (a deal can pay on stream without one).
+		const std::vector<ss::kast::Deal> OnStream = sponsor::StreamView(B, World);
+		if (std::count_if(OnStream.begin(), OnStream.end(), [](const ss::kast::Deal& D) { return D.Overlay; }) > ss::kast::MaxDeals)
+		{
+			Fail("segment: more than two deals on the stream's overlay (" + Where + ")", Seed, Step);
+		}
+		for (const std::string& Patch : S.Life.Closet.Patches)
+		{
+			if (!Patch.empty() && !sponsor::Running(B, Patch, World))
+			{
+				Fail("segment: a patch for a brand with no running contract (" + Patch + ", " + Where + ")", Seed, Step);
+			}
+		}
+		for (const auto& Owned : std::map<std::string, double>(S.Gear.begin(), S.Gear.end()))
+		{
+			if (sponsor::IsProperty(B, Owned.first, World) && S.PawnSell("gear:" + Owned.first).empty())
+			{
+				Fail("segment: sponsor property sold at the pawn (" + Owned.first + ", " + Where + ")", Seed, Step);
+			}
+		}
+		for (const sponsor::Contract& C : B.Contracts)
+		{
+			if (C.St == sponsor::State::Offered && C.ExpiresAt > World &&
+				std::none_of(S.Life.Inbox.begin(), S.Life.Inbox.end(), [&C](const ss::life::Letter& L) { return L.Thread == C.Id; }))
+			{
+				Fail("segment: an open offer dropped from Mail (" + C.Id + ", " + Where + ")", Seed, Step);
+			}
+		}
+	}
+};
+
+/** The bytes a save's lines of the given tags take. */
+size_t LineBytes(const std::string& Text, std::initializer_list<const char*> Tags)
+{
+	size_t Bytes = 0;
+	size_t Start = 0;
+	while (Start < Text.size())
+	{
+		size_t End = Text.find('\n', Start);
+		End = End == std::string::npos ? Text.size() : End + 1;
+		for (const char* Tag : Tags)
+		{
+			if (Text.compare(Start, std::strlen(Tag), Tag) == 0)
+			{
+				Bytes += End - Start;
+				break;
+			}
+		}
+		Start = End;
+	}
+	return Bytes;
+}
+
+/** A hand the plan skipped at the Embercrest, into its run (the card room host's sink). */
+struct SegPlanSink : ss::live::SkipSink
+{
+	ss::autoplay::Run* R = nullptr;
+	ss::style::HeroBrain* Brain = nullptr;
+	const ss::autoplay::TableAuto* A = nullptr;
+	void HandDone(const ss::Hand& H, int HeroSeat) override
+	{
+		ss::autoplay::NoteSkippedHand(*R, H, HeroSeat, 1.0);
+		*Brain = ss::autoplay::BrainFor(*A, *R, 1.0, 1, nullptr, nullptr);
+	}
+	void Events(const std::vector<ss::TEvent>&) override {}
+	void Checkpoint(int) override {}
+};
+
+/**
+ * One career of Days days, its steps drawn from Seed: the segment's features at random, the books audited after each.
+ * Returns the number of steps.
+ */
+int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
+{
+	namespace autoplay = ss::autoplay;
+	namespace life = ss::life;
+	namespace live = ss::live;
+	namespace sponsor = ss::sponsor;
+	namespace stake = ss::stake;
+	const double Day = ss::net::MinutesPerDay;
+	SegHooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "monkey-segment-" + std::to_string(Seed)));
+	ss::hero::Character Who;
+	Who.FirstName = "Sam";
+	Who.LastName = "Ortiz";
+	Who.Created = true;
+	S->NewCareer(Who);
+	S->CurrentScreen = ss::Screen::Lobby;
+	ss::Rng R("monkey-segment-rng-" + std::to_string(Seed));
+	double Now = 0.0;
+	auto Frames = [&](double Seconds) {
+		for (double T = 0.0; T < Seconds; T += 1.0 / 30.0)
+		{
+			Now += 1.0 / 30.0;
+			S->Update(Now);
+		}
+	};
+	auto Fed = [&]() {
+		S->Life.Hunger = 10.0;
+		S->Life.Thirst = 10.0;
+		S->Life.Energy = 90.0;
+	};
+	Frames(0.1);
+	SegBooks B;
+	B.Start(*S);
+	const double End = S->WorldMinutes() + static_cast<double>(Days) * Day;
+	int Step = 0;
+	static const char* const Backers[] = {"lou", "dee", "mei", "rick", "lanternrow", "sam"};
+	for (; S->WorldMinutes() < End && Step < 4000; ++Step)
+	{
+		std::string Where;
+		Fed();
+		if (S->BankrollCents < 30000 && R.Chance(0.5))
+		{
+			B.Give(*S, 50000);
+		}
+		const double Pick = R.Next();
+		const double World = S->WorldMinutes();
+		if (Pick < 0.40)
+		{
+			// Time passes: an hour to most of a day (the calendar runs: rent, stipends, chops, reviews, offers).
+			S->LobbyMinutes += 60.0 + R.Next() * 15.0 * 60.0;
+			Frames(0.05);
+			if (S->Evicted() && S->BankrollCents >= S->Life.RentDueCents + 20000)
+			{
+				S->MoveBackIn();
+			}
+			Where = "time";
+		}
+		else if (Pick < 0.48)
+		{
+			const std::string Said = S->DebugStake(std::string("offer ") + Backers[R.Int(6)]);
+			Reached[Said.rfind("Offer ", 0) == 0 ? "seg:stake offered" : "seg:stake refused"]++;
+			Where = "a stake offered";
+		}
+		else if (Pick < 0.56)
+		{
+			// The stake book: an offer taken or countered, a debt paid, a chop asked for, walking away.
+			const std::vector<stake::Offer> Offers = S->Life.Stakes.Offers;
+			const std::vector<stake::Deal> Deals = S->Life.Stakes.Deals;
+			const double Act = R.Next();
+			if (!Offers.empty() && Act < 0.55)
+			{
+				const stake::Offer& O = Offers[static_cast<size_t>(R.Int(static_cast<int>(Offers.size())))];
+				Reached[(R.Chance(0.8) ? S->AcceptStake(O.Id) : S->CounterStake(O.Id, R.Int(4))).empty() ? "seg:stake taken" : "seg:stake not taken"]++;
+			}
+			else if (!Deals.empty() && Act < 0.75)
+			{
+				const stake::Deal& D = Deals[static_cast<size_t>(R.Int(static_cast<int>(Deals.size())))];
+				Reached[(R.Chance(0.7) ? S->RequestChop(D.Id) : S->WalkAway(D.Id)).empty() ? "seg:deal chopped or left" : "seg:deal kept"]++;
+			}
+			else
+			{
+				Reached[S->DebugStake("pay").rfind("Paid ", 0) == 0 ? "seg:debt paid" : "seg:nothing owed"]++;
+			}
+			Where = "the stake book";
+		}
+		else if (Pick < 0.60)
+		{
+			// Pieces of an event at the Embercrest, listed or called off.
+			const std::vector<live::Occurrence> Ahead = live::Reachable(World, 48.0);
+			if (!Ahead.empty())
+			{
+				const live::Occurrence& O = Ahead[static_cast<size_t>(R.Int(static_cast<int>(Ahead.size())))];
+				static const int Marks[] = {1000, 1100, 1250};
+				const std::string Said = R.Chance(0.75) ? S->ListAction(O.Id, 50 * (1 + R.Int(3)), Marks[R.Int(3)]) : S->CancelListing(O.Id);
+				Reached[Said.empty() ? "seg:pieces listed or called off" : "seg:pieces refused"]++;
+			}
+			Where = "pieces";
+		}
+		else if (Pick < 0.68)
+		{
+			// A sponsor's offer, made as the brand makes it; signed, countered or declined.
+			const std::vector<sponsor::Brand>& Brands = sponsor::Brands();
+			const sponsor::Brand& Br = Brands[static_cast<size_t>(R.Int(static_cast<int>(Brands.size())))];
+			S->DebugSponsor("offer " + Br.Id);
+			const std::string Id = sponsor::OpenOfferFor(S->Life.Sponsors, Br.Id, S->WorldMinutes());
+			if (!Id.empty())
+			{
+				const double Act = R.Next();
+				const std::string Said = Act < 0.6 ? S->SignDeal(Id) : Act < 0.8 ? S->CounterDeal(Id, R.Int(5)) : std::string("declined");
+				if (Act >= 0.8)
+				{
+					S->DeclineDeal(Id);
+				}
+				Reached[Said.empty() ? "seg:sponsor signed or countered" : "seg:sponsor not signed"]++;
+			}
+			Where = "a sponsor's offer";
+		}
+		else if (Pick < 0.74)
+		{
+			// The sponsor book: a patch sewn or unpicked, notice, a raise asked for, an appearance in its window.
+			std::vector<std::string> Running;
+			for (const sponsor::Contract& C : S->Life.Sponsors.Contracts)
+			{
+				if (sponsor::Running(S->Life.Sponsors, C.Brand, World) == &C)
+				{
+					Running.push_back(C.Id);
+				}
+			}
+			const double Act = R.Next();
+			if (Act < 0.4)
+			{
+				const std::vector<std::string> Can = sponsor::PatchesFor(S->Life.Sponsors, R.Int(sponsor::PatchSpots), World);
+				const int Spot = R.Int(sponsor::PatchSpots);
+				const std::string Brand = Can.empty() || R.Chance(0.2) ? std::string() : Can[static_cast<size_t>(R.Int(static_cast<int>(Can.size())))];
+				Reached[S->SewPatch(Spot, Brand).empty() ? "seg:patch sewn" : "seg:patch refused"]++;
+			}
+			else if (!Running.empty() && Act < 0.6)
+			{
+				const std::string& Id = Running[static_cast<size_t>(R.Int(static_cast<int>(Running.size())))];
+				Reached[(R.Chance(0.5) ? S->GiveNotice(Id) : S->AskForRaise(Id)).empty() ? "seg:notice or raise" : "seg:notice or raise refused"]++;
+			}
+			else
+			{
+				for (const sponsor::Window& W : sponsor::Appearances(S->Life.Sponsors, World, World + 60.0))
+				{
+					if (World >= W.From && World < W.To - 25.0 && S->Appear(W.Venue).empty())
+					{
+						Frames(4.0);
+						Reached["seg:appearance"]++;
+						break;
+					}
+				}
+			}
+			Where = "the sponsor book";
+		}
+		else if (Pick < 0.77)
+		{
+			// The pawn: whatever gear the player has (sponsor property must be refused: the audit checks it every step).
+			if (!S->Gear.empty())
+			{
+				auto It = S->Gear.begin();
+				std::advance(It, R.Int(static_cast<int>(S->Gear.size())));
+				Reached[S->PawnSell("gear:" + It->first).empty() ? "seg:pawned" : "seg:pawn refused"]++;
+			}
+			else if (R.Chance(0.5))
+			{
+				const std::vector<ss::gear::Item>& Cat = ss::gear::Catalog();
+				const ss::gear::Item& It = Cat[static_cast<size_t>(R.Int(static_cast<int>(Cat.size())))];
+				Reached[S->Buy(It.Id).empty() ? "seg:bought" : "seg:not bought"]++;
+			}
+			Where = "the pawn";
+		}
+		else if (Pick < 0.90)
+		{
+			// An online event: the plan skips it (any style, the stops drawn), or today's Sprint plays it.
+			const ss::net::Network& Net = ss::net::Shared();
+			std::vector<ss::LobbyEvent> Open;
+			for (const ss::net::EventInstance& E : Net.Window(World - 120.0, World + 60.0))
+			{
+				const ss::LobbyEvent L = Net.Listing(E, nullptr, S->Unlocks());
+				if (L.Joinable && L.Spec.Entrants <= 400 && S->CanAfford(L) && !S->IsPlaying(L.Spec.Id))
+				{
+					Open.push_back(L);
+				}
+			}
+			if (!Open.empty())
+			{
+				const ss::LobbyEvent L = Open[static_cast<size_t>(R.Int(static_cast<int>(Open.size())))];
+				S->RegisterEvent(L);
+				if (S->CurrentScreen == ss::Screen::Table)
+				{
+					S->SprintBudgetMs = 1.0e9;
+					const bool Plan = R.Chance(0.7);
+					if (Plan)
+					{
+						S->SetAutoplay(0, RandomPlan(R, true));
+					}
+					for (int F = 0; F < 400000 && S->CurrentScreen == ss::Screen::Table; ++F)
+					{
+						if (!Plan || (S->TableCount() > 0 && !S->Glance(0).Busted && !S->AutoPanel(0).On))
+						{
+							S->CurrentPace = ss::Pace::Sprint;
+						}
+						else if (S->TableCount() > 0 && !S->Glance(0).Busted && !S->AutoPanel(0).Skipping && !S->HasPrompt)
+						{
+							S->SkipAhead(0, autoplay::Target::Result);
+						}
+						Now += 1.0 / 30.0;
+						S->Update(Now);
+						if (S->HasPrompt && Now - S->Prompt.OpenedAt > 0.3)
+						{
+							S->HeroAct(R.Chance(0.5) ? ss::PlayerAction::Fold() : S->Prompt.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Call());
+						}
+					}
+					// No AI decision graded: the event's graded decisions are exactly the player's own.
+					const autoplay::Played* P = autoplay::PlayedFor(S->Life.Auto, L.Spec.Id);
+					if (S->CurrentScreen == ss::Screen::Results && P && static_cast<size_t>(P->OwnDecisions) != S->LastResults.Grades.size())
+					{
+						Fail("segment: a graded decision that wasn't the player's (" + std::to_string(S->LastResults.Grades.size()) + " graded, " + std::to_string(P->OwnDecisions) + " own)", Seed,
+							Step);
+					}
+					Reached[Plan ? "seg:online by the plan" : "seg:online sprinted"]++;
+					S->LeaveResults();
+				}
+			}
+			Where = "an online event";
+		}
+		else
+		{
+			// A night at the Embercrest: the host's side (the desk; the engine or the plan plays it, or it's called off).
+			const std::vector<live::Occurrence> Ahead = live::Reachable(World, 30.0);
+			if (!Ahead.empty())
+			{
+				const live::Occurrence O = Ahead[static_cast<size_t>(R.Int(static_cast<int>(Ahead.size())))];
+				S->LobbyMinutes += std::max(0.0, O.DeskOpens + 30.0 - S->WorldMinutes());
+				Frames(0.05);
+				B.Audit(*S, Seed, Step, "to the desk");
+				Fed();
+				if (S->GoToLive(O.Id).empty())
+				{
+					S->Save();
+					ss::SaveData D = H.Last;
+					D.Life = S->Life;
+					D.BankrollCents = S->BankrollCents;
+					if (D.WorldText.empty() && D.WorldSnapshot)
+					{
+						D.WorldSnapshot->Write(D.WorldText);
+					}
+					life::LiveEntry* E = live::EntryFor(D.Life, O.Id);
+					double Ends = O.Start + 5.0;
+					if (E && R.Chance(0.1))
+					{
+						live::Refund(D.BankrollCents, D.Life, O.Id, O.Start + 2.0, "not enough players");
+						live::PayFare(D.BankrollCents, D.Life, O.Id, true, Ends);
+						Reached["seg:night called off"]++;
+					}
+					else if (E)
+					{
+						E->ArrivedAt = O.Start - 15.0;
+						std::vector<ss::ReservedPlayer> Known;
+						for (const std::pair<std::string, int>& Rs : E->Roster)
+						{
+							ss::ReservedPlayer P;
+							P.Name = Rs.first;
+							P.Type = static_cast<ss::Archetype>(Rs.second);
+							Known.push_back(P);
+						}
+						bool Restored = false;
+						std::unique_ptr<ss::Tournament> T = live::ResumeField(O, *E, E->Entrants, D.HeroName, Known, false, Restored);
+						const bool Plan = R.Chance(0.5);
+						autoplay::TableAuto A = RandomPlan(R, true);
+						A.To = autoplay::Target::Result;
+						autoplay::Run Run;
+						if (Plan)
+						{
+							ss::style::HeroBrain Brain = autoplay::BrainFor(A, Run, 1.0, 1, nullptr, nullptr);
+							SegPlanSink Sink;
+							Sink.R = &Run;
+							Sink.Brain = &Brain;
+							Sink.A = &A;
+							for (int Guard = 0; Guard < 200 && !T->Hero().Busted && !T->bFinished; ++Guard)
+							{
+								ss::live::SkipSlice(*T, Brain, A, 1.0e9, Sink);
+							}
+						}
+						else
+						{
+							const ss::Profile Tag = ss::MakeProfile(ss::Archetype::Tag, T->R);
+							for (int Guard = 0; Guard < 6000 && !T->Hero().Busted && !T->bFinished; ++Guard)
+							{
+								T->SimulateTick(&Tag);
+							}
+						}
+						const int Place = T->Hero().Place > 0 ? T->Hero().Place : T->HeroRank();
+						const ss::Chips Prize = T->PrizeFor(Place);
+						Ends = O.Start + T->ClockMinutes() - static_cast<double>(O.T->StartMinute);
+						live::Settle(D.BankrollCents, D.Life, O.Id, Place, T->Spec.Entrants, Prize, Ends);
+						live::PayFare(D.BankrollCents, D.Life, O.Id, true, Ends + 5.0);
+						if (Plan && (Run.AiHands > 0 || Run.AiDecisions > 0))
+						{
+							autoplay::Record(D.Life.Auto, O.Id, 1, 0, A, Run);
+							D.Life.Update2LinesRead |= life::U2AutoPlayed | life::U2AutoPref;
+						}
+						D.NoteLive(Ends, O.Id, Place, Prize, T->Spec.Entrants, {});
+						Reached[Plan ? "seg:night by the plan" : "seg:night by the engine"]++;
+					}
+					D.ClockMinutes = Ends + 30.0 - Day;
+					S.reset();
+					S.reset(new ss::Session(H, "monkey-segment-" + std::to_string(Seed), &D));
+					S->CurrentScreen = ss::Screen::Lobby;
+					S->ResumeCalendarFrom(Ends + 30.0);
+					Frames(0.05);
+				}
+			}
+			Where = "a night";
+		}
+		B.Audit(*S, Seed, Step, Where);
+	}
+	S->Save();
+	const std::string Text = H.Last.Serialize();
+	const size_t Segment = LineBytes(Text, {"livefund\t", "livevoice\t", "liveroom\t", "livebadge\t", "liveleader\t", "livepatch\t", "mail\t", "stake\t", "coach\t", "sponsor\t", "badge\t",
+										   "life\tshift\t", "life\tliveday\t"});
+	const size_t Update2 = LineBytes(Text, {"autoplay\t", "video\t", "site\t"});
+	ss::SaveData Back;
+	if (!ss::SaveData::Parse(Text, Back) || Back.Serialize() != Text)
+	{
+		Fail("segment: the save doesn't read back the same", Seed, Step);
+	}
+	if (Segment > 80 * 1024 || Update2 > 60 * 1024)
+	{
+		Fail("segment: the save's lines grew too big (" + std::to_string(Segment) + " segment, " + std::to_string(Update2) + " update 2)", Seed, Step);
+	}
+	std::printf("segment career %d: %d days, %d steps, bankroll %s, %zu results online, %d live, %zu stakes, %zu contracts, %zu letters, at most %d ledger lines a step, segment "
+				"lines %zu bytes, update 2's %zu\n",
+		Seed, Days, Step, ss::Money(S->BankrollCents).c_str(), S->History.size(), S->Life.LiveEvents, S->Life.Stakes.Deals.size(), S->Life.Sponsors.Contracts.size(),
+		S->Life.Inbox.size(), B.MostLines, Segment, Update2);
+	return Step;
+}
 } // namespace
 
 int main(int Argc, char** Argv)
@@ -125,6 +694,8 @@ int main(int Argc, char** Argv)
 	const int Seeds = Argc > 1 ? std::atoi(Argv[1]) : 4;
 	const int Frames = Argc > 2 ? std::atoi(Argv[2]) : 15000;
 	const int First = Argc > 3 ? std::atoi(Argv[3]) : 0;
+	const int Careers = Argc > 4 ? std::atoi(Argv[4]) : 1;
+	const int CareerDays = Argc > 5 ? std::atoi(Argv[5]) : 60;
 	const std::vector<Spot> Spots = Hotspots();
 	const char* Keys[] = {"f", "c", "x", "r", "b", "a", "ArrowUp", "ArrowDown"};
 	Measurer M;
@@ -140,6 +711,7 @@ int main(int Argc, char** Argv)
 		ss::Rng R("monkey-rng-" + std::to_string(Seed));
 		ss::Rng Dr(std::string("monkey-drop-") + std::to_string(Seed)); // Penny Drop's own draws, so the rest of the run is as before
 		ss::Rng Sr(std::string("monkey-shops-") + std::to_string(Seed)); // Northside's shop screens: their own draws too
+		ss::Rng Ar(std::string("monkey-auto-") + std::to_string(Seed));  // autoplay's (update 2): its own draws as well
 		std::unique_ptr<ss::ui::ShopScreen> Shop;
 		double ShopUntil = 0.0;
 		if (Seed % 3 == 1)
@@ -256,6 +828,31 @@ int main(int Argc, char** Argv)
 				const int K = R.Int(S.TableCount());
 				const ss::Pace Pc = static_cast<ss::Pace>(R.Int(3));
 				S.WithTable(K, [&]() { S.CurrentPace = Pc; });
+			}
+			// Autoplay (update 2 C1): now and then a table's plan changes (a style, watch or skip or off, a speed, a target,
+			// the stops), the player takes over, a skip starts or stops. Its own draws, so the clicks and keys are as before.
+			if (!Wrapping && S.TableCount() > 0 && Ar.Chance(0.003))
+			{
+				const int K = Ar.Int(S.TableCount());
+				const double Pick = Ar.Next();
+				if (Pick < 0.45)
+				{
+					Reached[S.SetAutoplay(K, RandomPlan(Ar, false)).empty() ? "auto:plan" : "auto:plan refused"]++;
+				}
+				else if (Pick < 0.7)
+				{
+					Reached[S.TakeOver(K).empty() ? "auto:takeover" : "auto:takeover refused"]++;
+				}
+				else if (Pick < 0.9)
+				{
+					const ss::autoplay::TableAuto A = RandomPlan(Ar, true);
+					Reached[S.SkipAhead(K, A.To, A.Hands).empty() ? "auto:skip" : "auto:skip refused"]++;
+				}
+				else
+				{
+					S.StopSkip(K);
+					++Reached["auto:stop"];
+				}
 			}
 			// Streaming: shop now and then (the PC upgrade first), go live and off again, work the studio.
 			if (R.Chance(0.002))
@@ -550,6 +1147,10 @@ int main(int Argc, char** Argv)
 				{
 					Fail("bankroll moved without the ledger (" + ss::Money(S.BankrollCents - PrevBank) + " vs " + ss::Money(Logged) + ")", Seed, F);
 				}
+				if (Fresh > 20)
+				{
+					Fail("a single frame wrote more than 20 ledger lines (" + std::to_string(Fresh) + ")", Seed, F);
+				}
 				PrevBank = S.BankrollCents;
 				PrevLedger = S.Life.Ledger;
 			}
@@ -629,6 +1230,18 @@ int main(int Argc, char** Argv)
 					{
 						Fail("a prompt when it isn't the player's turn", Seed, F);
 					}
+					// No AI decision graded (update 2 §2.9): the table's graded decisions are exactly the player's own (both only
+					// ever grow, so a look every 15 frames sees any that slipped in; the panel is too dear to build every frame).
+					if (F % 15 == 0)
+					{
+						const ss::autoplay::Panel Ap = S.AutoPanel(I);
+						if (S.Grades.size() != static_cast<size_t>(Ap.OwnDecisions))
+						{
+							Fail("a graded decision that wasn't the player's (" + std::to_string(S.Grades.size()) + " graded, " + std::to_string(Ap.OwnDecisions) + " own)", Seed, F);
+						}
+						Reached["auto:on"] += Ap.On ? 1 : 0;
+						Reached["auto:skipping"] += Ap.Skipping ? 1 : 0;
+					}
 					ss::Chips Sum = 0;
 					for (const ss::TPlayer* Pl : S.T->AlivePlayers())
 					{
@@ -685,6 +1298,14 @@ int main(int Argc, char** Argv)
 		std::printf("seed %d: %s, bankroll %s, %zu results, %d texts, rent %d paid, energy %.0f, %d tables open\n", Seed, ss::ClockString(S.ClockMinutes()).c_str(), ss::Money(S.BankrollCents).c_str(),
 			S.History.size(), H.Texts, S.Life.RentsPaid, S.Life.Energy, S.TableCount());
 	}
+	// The segment's phase: careers stepped over Days days with the segment's features at random.
+	const auto SegStart = std::chrono::steady_clock::now();
+	int SegSteps = 0;
+	for (int K = 0; K < Careers; ++K)
+	{
+		SegSteps += SegmentCareer(First + K, CareerDays, Reached);
+	}
+	std::printf("segment phase: %d careers, %d steps, %.1f s\n", Careers, SegSteps, std::chrono::duration<double>(std::chrono::steady_clock::now() - SegStart).count());
 	std::printf("\nreached:");
 	for (const auto& R : Reached)
 	{
@@ -699,6 +1320,18 @@ int main(int Argc, char** Argv)
 	if (Seeds >= 3 && Frames >= 15000 && (Reached["table+4"] == 0 || Reached["results"] == 0 || Reached["registered"] == 0))
 	{
 		std::printf("FAIL: the monkey didn't reach four tables and a results screen\n");
+		++Failures;
+	}
+	if (Seeds >= 3 && Frames >= 15000 && (Reached["auto:plan"] == 0 || Reached["auto:takeover"] == 0 || Reached["auto:skip"] == 0 || Reached["auto:on"] == 0 || Reached["auto:skipping"] == 0))
+	{
+		std::printf("FAIL: the monkey never handed a table to the plan, took over and skipped\n");
+		++Failures;
+	}
+	if (Careers >= 1 && CareerDays >= 60 &&
+		(Reached["seg:stake taken"] == 0 || Reached["seg:sponsor signed or countered"] == 0 || Reached["seg:online by the plan"] == 0 || Reached["seg:night by the plan"] == 0 ||
+			Reached["seg:night by the engine"] == 0))
+	{
+		std::printf("FAIL: the segment's careers never took a stake, signed a sponsor, or played online and live\n");
 		++Failures;
 	}
 	std::printf("%s: %d failures\n", Failures == 0 ? "monkey passed" : "MONKEY FAILED", Failures);

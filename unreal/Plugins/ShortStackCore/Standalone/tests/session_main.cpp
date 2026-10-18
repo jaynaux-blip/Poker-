@@ -1,10 +1,15 @@
 // Plays whole tournaments through the Night One session (the layer the Unreal
 // client drives), with a scripted hero, and checks the flow end to end.
+#include "ShortStack/AI/Reads.h"
+#include "ShortStack/AI/Style.h"
+#include "ShortStack/Game/Autoplay.h"
+#include "ShortStack/Game/Coach.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/LiveAuto.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Sponsor.h"
@@ -13,7 +18,9 @@
 #include "SessionSeg.h"
 
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <algorithm>
@@ -3196,6 +3203,7 @@ namespace session_test
 namespace seams
 {
 std::string Fixture(const char* Name); // session_seams.cpp
+void Gate1Fixtures();                 // session_seams.cpp (also SegLead's)
 } // namespace seams
 
 namespace pacing
@@ -3242,6 +3250,21 @@ struct LedgerTally
 	}
 };
 
+/** One event a career played (G1's paired comparison reads them): its result, how long it took and who played it. */
+struct EventRec
+{
+	std::string Id;
+	int Place = 0;
+	int Field = 0;
+	ss::Chips Prize = 0;
+	int Hands = 0;
+	double At = 0.0;      // world minutes: its start
+	ss::Chips BuyIn = 0;  // with the fee
+	double Minutes = 0.0; // world minutes from its start to the result
+	bool Live = false;
+	bool Plan = false; // played by the plan (G1's career: TAG, skipped, at the default Sharpness)
+};
+
 /** One of EconomyPacing's careers and what it measured. Kind: 0 live-only, 1 streaming, 2 mixed. */
 struct Career
 {
@@ -3249,6 +3272,8 @@ struct Career
 	int Kind = 2;
 	bool Deals = true;
 	int Days = 180;
+	bool Auto = false; // G1's autoplay career: every other event (online and live) skipped by TAG at Sharpness 0.80
+	std::vector<EventRec> Events;
 	LedgerTally Ledger;
 	std::vector<double> LouAt;     // when Big Lou's stakes were taken
 	int Lantern = 0;               // Lantern Row's package offers seen
@@ -3357,9 +3382,25 @@ double Online(ss::Session& S, Career& C, double Now)
 	}
 	++C.Online;
 	S.SprintBudgetMs = 1.0e9; // a stretch to its stop in one update: the same frames on any machine
+	// G1's career: every other event the plan (TAG) skips to the result, at the default Sharpness (pinned: the hands the
+	// careful twin's Sprint hands back, played with the grader's best, would lift Form above 80).
+	const bool Plan = C.Auto && C.Online % 2 == 0;
+	if (Plan)
+	{
+		ss::autoplay::TableAuto A;
+		A.S = ss::style::Style::Tag;
+		A.M = ss::autoplay::Mode::Skip;
+		A.To = ss::autoplay::Target::Result;
+		A.Stops = 0;
+		S.SetAutoplay(0, A);
+		S.DebugAuto("sharp 0.80");
+	}
 	for (int Frames = 0; S.CurrentScreen == ss::Screen::Table && Frames < 4000000; ++Frames)
 	{
-		S.CurrentPace = ss::Pace::Sprint;
+		if (!Plan)
+		{
+			S.CurrentPace = ss::Pace::Sprint;
+		}
 		Now += 1.0 / 30.0;
 		S.Update(Now);
 		if (S.HasPrompt && Now - S.Prompt.OpenedAt > 0.3)
@@ -3373,7 +3414,18 @@ double Online(ss::Session& S, Career& C, double Now)
 			S.HeroAct(Opts.empty() ? ss::PlayerAction::Fold() : Opts[Best].Action);
 		}
 	}
+	EventRec Rec;
+	Rec.Id = I.Id;
+	Rec.Place = S.LastResults.Place;
+	Rec.Field = S.LastResults.Entrants;
+	Rec.Prize = S.LastResults.PrizeCents;
+	Rec.Hands = S.LastResults.Hands;
+	Rec.At = I.Start;
+	Rec.BuyIn = ss::net::Shared().Listing(I).BuyInCents;
+	Rec.Plan = Plan;
 	S.LeaveResults();
+	Rec.Minutes = S.WorldMinutes() - I.Start;
+	C.Events.push_back(Rec);
 	C.Ledger.Take(S.Life);
 	return Now;
 }
@@ -3427,17 +3479,63 @@ double LiveNight(std::unique_ptr<ss::Session>& S, PaceHooks& H, Career& C, doubl
 	}
 	bool Restored = false;
 	std::unique_ptr<ss::Tournament> T = live::ResumeField(O, *E, E->Entrants, D.HeroName, Known, false, Restored);
-	const ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, T->R);
 	int Place = 0;
 	ss::Chips Prize = 0;
-	for (int Guard = 0; Guard < 6000 && !T->Hero().Busted && !T->bFinished; ++Guard)
+	// G1's career: every other night the plan (TAG, Sharpness 0.80) skips it through live::SkipSlice, the card room's way.
+	const bool Plan = C.Auto && C.Live % 2 == 0;
+	ss::autoplay::TableAuto PlanA;
+	ss::autoplay::Run PlanR;
+	if (Plan)
 	{
-		for (const ss::TEvent& Ev : T->SimulateTick(&Auto))
+		PlanA.S = ss::style::Style::Tag;
+		PlanA.M = ss::autoplay::Mode::Skip;
+		PlanA.To = ss::autoplay::Target::Result;
+		PlanA.Stops = 0;
+		PlanR.Sharp = 0.80;
+		PlanR.SharpSetAt = O.Start;
+		struct Sink : ss::live::SkipSink
 		{
-			if (Ev.Type == ss::TEventType::Bust && Ev.IsHero)
+			ss::autoplay::Run* R = nullptr;
+			ss::style::HeroBrain* B = nullptr;
+			const ss::autoplay::TableAuto* A = nullptr;
+			const ss::reads::Table* Notes = nullptr;
+			double Gain = 1.0;
+			void HandDone(const ss::Hand& H, int HeroSeat) override
 			{
-				Place = Ev.Place;
-				Prize = Ev.PrizeCents;
+				ss::autoplay::NoteSkippedHand(*R, H, HeroSeat, Gain);
+				*B = ss::autoplay::BrainFor(*A, *R, Gain, 1, Notes, nullptr);
+			}
+			void Events(const std::vector<ss::TEvent>&) override {}
+			void Checkpoint(int) override {}
+		};
+		const double Gain = std::min(2.5, std::max(0.3, D.Life.Perks.TiltGain));
+		ss::style::HeroBrain Brain = ss::autoplay::BrainFor(PlanA, PlanR, Gain, 1, &D.Life.Auto.Notes, nullptr);
+		Sink K;
+		K.Gain = Gain;
+		K.R = &PlanR;
+		K.B = &Brain;
+		K.A = &PlanA;
+		K.Notes = &D.Life.Auto.Notes;
+		for (int Guard = 0; Guard < 6000 && !T->Hero().Busted && !T->bFinished; ++Guard)
+		{
+			if (ss::live::SkipSlice(*T, Brain, PlanA, 1.0e9, K).Why != ss::live::SkipWhy::Budget)
+			{
+				break;
+			}
+		}
+	}
+	else
+	{
+		const ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, T->R);
+		for (int Guard = 0; Guard < 6000 && !T->Hero().Busted && !T->bFinished; ++Guard)
+		{
+			for (const ss::TEvent& Ev : T->SimulateTick(&Auto))
+			{
+				if (Ev.Type == ss::TEventType::Bust && Ev.IsHero)
+				{
+					Place = Ev.Place;
+					Prize = Ev.PrizeCents;
+				}
 			}
 		}
 	}
@@ -3449,7 +3547,26 @@ double LiveNight(std::unique_ptr<ss::Session>& S, PaceHooks& H, Career& C, doubl
 	const double End = O.Start + T->ClockMinutes() - static_cast<double>(O.T->StartMinute);
 	live::Settle(D.BankrollCents, D.Life, O.Id, Place, T->Spec.Entrants, Prize, End);
 	live::PayFare(D.BankrollCents, D.Life, O.Id, true, End + 5.0);
+	if (Plan && (PlanR.AiHands > 0 || PlanR.AiDecisions > 0))
+	{
+		ss::autoplay::Record(D.Life.Auto, O.Id, 1, 0, PlanA, PlanR);
+		D.Life.Update2LinesRead |= ss::life::U2AutoPlayed | ss::life::U2AutoPref;
+	}
 	D.NoteLive(End, O.Id, Place, Prize, T->Spec.Entrants, {});
+	{
+		EventRec Rec;
+		Rec.Id = O.Id;
+		Rec.Place = Place;
+		Rec.Field = T->Spec.Entrants;
+		Rec.Prize = Prize;
+		Rec.Hands = T->Tick;
+		Rec.At = O.Start;
+		Rec.BuyIn = O.T->BuyInCents;
+		Rec.Minutes = End - O.Start;
+		Rec.Live = true;
+		Rec.Plan = Plan;
+		C.Events.push_back(Rec);
+	}
 	D.ClockMinutes = End + 30.0 - Day;
 	S.reset();
 	S.reset(new ss::Session(H, C.Seed, &D));
@@ -3610,6 +3727,117 @@ void Checks(const Career& On, const Career& Off)
 	Expect(LouMax <= ss::stake::LouMonthCap, (Tag + "Lou's stakes move at most $300 of EV in any 30 days (at most four)").c_str());
 }
 
+/** A finish as a percentile of the field (100 the winner, 0 last; GAME_DESIGN's "average finish", 50 the middle). */
+double Percentile(const EventRec& E)
+{
+	return E.Field > 1 ? 100.0 * static_cast<double>(E.Field - E.Place) / static_cast<double>(E.Field - 1) : 50.0;
+}
+
+/** The mean of V and its standard error. */
+std::pair<double, double> MeanSe(const std::vector<double>& V)
+{
+	if (V.empty())
+	{
+		return {0.0, 0.0};
+	}
+	double Sum = 0.0;
+	for (const double X : V)
+	{
+		Sum += X;
+	}
+	const double Mean = Sum / static_cast<double>(V.size());
+	double Sq = 0.0;
+	for (const double X : V)
+	{
+		Sq += (X - Mean) * (X - Mean);
+	}
+	const double Sd = V.size() > 1 ? std::sqrt(Sq / static_cast<double>(V.size() - 1)) : 0.0;
+	return {Mean, Sd / std::sqrt(static_cast<double>(V.size()))};
+}
+
+/**
+ * G1's career (update 2 SPEC §1.11, U3): the autoplay career against its twin, the same seed and schedule played today's
+ * way (Sprint, the hands it hands back played with the grader's best), over the autoplay career's days.
+ *   - Autoplay buys time, not hands: events per world hour (the career) and hands per world hour at the online tables at
+ *     most 1.05x the twin's.
+ *   - It doesn't out-earn the careful career: on the events the plan played, paired with the twin's same events, neither
+ *     the finish percentile nor the ROI is significantly higher (the paired mean difference must not exceed 2 SE; a
+ *     money ratio over one career is decided by a few deep runs, so the honest claim is the paired one, and the strength
+ *     harness's intervals hold the edge itself). The prize totals and the bankrolls are printed beside it.
+ */
+void AutoChecks(const Career& Auto, const Career& Twin)
+{
+	const double Begin = Auto.Events.empty() ? 0.0 : std::min(Auto.Events.front().At, Twin.Events.empty() ? Auto.Events.front().At : Twin.Events.front().At);
+	const double Limit = static_cast<double>(ss::net::DayOf(Begin) + Auto.Days) * Day;
+	auto Rates = [&](const Career& C, int& Events, double& HandsPerHour) {
+		Events = 0;
+		int Hands = 0;
+		double Minutes = 0.0;
+		for (const EventRec& E : C.Events)
+		{
+			if (E.At >= Limit)
+			{
+				continue;
+			}
+			++Events;
+			if (!E.Live)
+			{
+				Hands += E.Hands;
+				Minutes += E.Minutes;
+			}
+		}
+		HandsPerHour = Minutes > 0.0 ? 60.0 * static_cast<double>(Hands) / Minutes : 0.0;
+	};
+	int EventsA = 0;
+	int EventsT = 0;
+	double HandsA = 0.0;
+	double HandsT = 0.0;
+	Rates(Auto, EventsA, HandsA);
+	Rates(Twin, EventsT, HandsT);
+	const double Hours = static_cast<double>(Auto.Days) * 24.0;
+	// The paired comparison on the events the plan played.
+	std::vector<double> Finish;
+	std::vector<double> Roi;
+	ss::Chips PrizeA = 0;
+	ss::Chips PrizeT = 0;
+	int Plan = 0;
+	int PlanLive = 0;
+	for (const EventRec& A : Auto.Events)
+	{
+		if (!A.Plan)
+		{
+			continue;
+		}
+		++Plan;
+		PlanLive += A.Live ? 1 : 0;
+		for (const EventRec& T : Twin.Events)
+		{
+			if (T.Id == A.Id && T.BuyIn > 0)
+			{
+				Finish.push_back(Percentile(A) - Percentile(T));
+				Roi.push_back(static_cast<double>(A.Prize - T.Prize) / static_cast<double>(T.BuyIn));
+				PrizeA += A.Prize;
+				PrizeT += T.Prize;
+				break;
+			}
+		}
+	}
+	const std::pair<double, double> F = MeanSe(Finish);
+	const std::pair<double, double> R = MeanSe(Roi);
+	std::printf("  pacing autoplay (%d days, every other event TAG skipped at Sharpness 0.80): %d events (%d by the plan, %d of them live), the twin %d; events per world hour "
+				"%.4f vs %.4f; hands per world hour online %.1f vs %.1f\n",
+		Auto.Days, EventsA, Plan, PlanLive, EventsT, static_cast<double>(EventsA) / Hours, static_cast<double>(EventsT) / Hours, HandsA, HandsT);
+	std::printf("  pacing autoplay: %zu paired events: finish percentile %+.2f (SE %.2f), ROI %+.3f buy-ins (SE %.3f); their prizes $%.2f by the plan, $%.2f by the twin (ratio %.2f); "
+				"bankroll on day 30 $%.2f vs $%.2f, day 60 $%.2f vs $%.2f, last $%.2f\n",
+		Finish.size(), F.first, F.second, R.first, R.second, static_cast<double>(PrizeA) / 100.0, static_cast<double>(PrizeT) / 100.0,
+		PrizeT > 0 ? static_cast<double>(PrizeA) / static_cast<double>(PrizeT) : 0.0, static_cast<double>(Auto.Bank[0]) / 100.0, static_cast<double>(Twin.Bank[0]) / 100.0,
+		static_cast<double>(Auto.Bank[1]) / 100.0, static_cast<double>(Twin.Bank[1]) / 100.0, static_cast<double>(Auto.Bank[Auto.Days <= 60 ? 1 : 3]) / 100.0);
+	Expect(EventsT > 0 && static_cast<double>(EventsA) <= 1.05 * static_cast<double>(EventsT), "pacing (autoplay): events per world hour at most 1.05x the same seeds sprinted with Autopilot");
+	Expect(HandsT > 0.0 && HandsA <= 1.05 * HandsT, "pacing (autoplay): hands per world hour at the online tables at most 1.05x Sprint's (autoplay buys time, not hands)");
+	Expect(Finish.size() >= 5, "pacing (autoplay): the plan's events pair with the twin's");
+	Expect(F.first <= 2.0 * F.second && R.first <= 2.0 * R.second, "pacing (autoplay): the plan at the default Sharpness doesn't out-finish or out-earn the careful career on the same events (U3)");
+}
+
 /** The median of the careers' bankrolls on day 30 (K 0), 60 (1) or 90 (2). */
 ss::Chips Median(const std::vector<Career>& Runs, size_t K)
 {
@@ -3655,6 +3883,17 @@ void EconomyPacing(bool Long)
 		const ss::Chips B = pacing::Median(Offs, K);
 		std::printf("  pacing: day %zu, the median bankroll $%.2f with the deals on, $%.2f off\n", 30 * (K + 1), static_cast<double>(A) / 100.0, static_cast<double>(B) / 100.0);
 		Expect(A * 100 <= std::max<ss::Chips>(B, 1) * 115, ("pacing: the median bankroll with deals on stays within +15% of the same seeds with them off (day " + std::to_string(30 * (K + 1)) + ")").c_str());
+	}
+	// G1's career (update 2 SPEC §1.11): the autoplay career on the mixed career's seed and schedule, the mixed career its twin.
+	// 60 days by default; the whole 180 in "long".
+	{
+		pacing::Career Auto;
+		Auto.Seed = Ons[0].Seed;
+		Auto.Kind = Ons[0].Kind;
+		Auto.Auto = true;
+		Auto.Days = Long ? 180 : 60;
+		pacing::Run(Auto);
+		pacing::AutoChecks(Auto, Ons[0]);
 	}
 }
 
@@ -3788,10 +4027,1418 @@ void MigrationAll()
 }
 } // namespace session_test
 
+// ------------------------------------------------------------------ update 2's C1 journeys (update 2 SPEC §7.5 C1, §6.7)
+
+namespace session_test
+{
+namespace journeys
+{
+namespace autoplay = ss::autoplay;
+namespace life = ss::life;
+namespace live = ss::live;
+namespace style = ss::style;
+const double Day = 1440.0;
+
+double SecondsSince(const std::chrono::steady_clock::time_point& T0)
+{
+	return std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count();
+}
+
+autoplay::TableAuto PlanOf(style::Style S, autoplay::Mode M, int Speed, autoplay::Target To, uint32_t Stops)
+{
+	autoplay::TableAuto A;
+	A.S = S;
+	A.M = M;
+	A.Speed = Speed;
+	A.To = To;
+	A.Stops = Stops;
+	return A;
+}
+
+ss::hero::Character Jesse()
+{
+	ss::hero::Character Who;
+	Who.FirstName = "Jesse";
+	Who.LastName = "Cole";
+	Who.Story = ss::hero::Background::DealersKid;
+	Who.Created = true;
+	return Who;
+}
+
+/** The open table playing EventId (tables close as they finish, so an index moves), or -1. */
+int TableOf(ss::Session& S, const std::string& EventId)
+{
+	for (int I = 0; I < S.TableCount(); ++I)
+	{
+		if (S.Glance(I).EventId == EventId)
+		{
+			return I;
+		}
+	}
+	return -1;
+}
+
+/** The player's turn at table I, if it's open: the grader's best option (DeepRuns' hero), through the tile's buttons. */
+bool BestAt(ss::Session& S, int I, double Now)
+{
+	const ss::TableGlance G = S.Glance(I);
+	if (!G.YourTurn || Now - G.TurnOpenedAt < 0.3)
+	{
+		return false;
+	}
+	ss::PlayerAction A = ss::PlayerAction::Fold();
+	S.WithTable(I, [&]() {
+		const std::vector<ss::OptionEV>& Opts = S.Prompt.Analysis.Options;
+		size_t Best = 0;
+		for (size_t K = 1; K < Opts.size(); ++K)
+		{
+			Best = Opts[K].Ev > Opts[Best].Ev ? K : Best;
+		}
+		A = Opts.empty() ? ss::PlayerAction::Fold() : Opts[Best].Action;
+	});
+	S.HeroActAt(I, A);
+	return true;
+}
+
+/** Every decision the coach has tallied (Life.Study): only the player's own decisions ever reach it (U4). */
+int Coached(const ss::Session& S)
+{
+	int N = 0;
+	for (const ss::coach::Tally& T : S.Life.Study.All)
+	{
+		N += T.Decisions;
+	}
+	return N;
+}
+
+/** The learned read book as the card room seats a night with it (BackRoomAutoRules::AutoLearnedOf). */
+style::Learned LearnedOf(const std::map<std::string, int>& Reads)
+{
+	style::Learned Out;
+	for (const auto& Kv : Reads)
+	{
+		const size_t Slash = Kv.first.find('/');
+		if (Kv.second >= 2 && Slash != std::string::npos && Slash > 0)
+		{
+			++Out.Tells[Kv.first.substr(0, Slash)];
+		}
+	}
+	return Out;
+}
+
+/** The plan's run as text: the auto line and an autoseen line a player (what the host text keeps of it). */
+std::string RunState(const autoplay::TableAuto& A, const autoplay::Run& R)
+{
+	std::string Out = autoplay::RunText(A, R);
+	for (const auto& Kv : R.Seen)
+	{
+		Out += "\nautoseen\t" + Kv.first + "\t" + ss::reads::Write(Kv.second);
+	}
+	return Out;
+}
+
+/**
+ * A night the plan skips through live::SkipSlice, on the card room host's side (FAutoHost::TickSkip's sink, as the
+ * fixture_tool's): each hand into the run (NoteSkippedHand) and the brain read afresh, the tablemates kept, every
+ * checkpoint's state (the engine's and the host text's) noted. HostText is what LiveHostText writes.
+ */
+struct PlanNight : ss::live::SkipSink
+{
+	ss::Tournament* T = nullptr;
+	autoplay::TableAuto A;
+	autoplay::Run R;
+	style::Learned Book;
+	const ss::reads::Table* Notes = nullptr;
+	double TiltGain = 1.0;
+	style::HeroBrain Brain;
+	std::vector<std::string> Met;
+	int Hands = 0;
+	int LastCheckpoint = -1;
+	std::vector<int> CheckpointTicks;
+
+	void Think() { Brain = autoplay::BrainFor(A, R, TiltGain, 1, Notes, &Book); }
+	void HandDone(const ss::Hand& H, int HeroSeat) override
+	{
+		autoplay::NoteSkippedHand(R, H, HeroSeat, TiltGain);
+		Think();
+		++Hands;
+		for (size_t K = 0; K < H.Seats.size(); ++K)
+		{
+			const std::string& Id = H.Seats[K].Id;
+			if (static_cast<int>(K) != HeroSeat && !Id.empty() && std::find(Met.begin(), Met.end(), Id) == Met.end())
+			{
+				Met.push_back(Id);
+			}
+		}
+	}
+	void Events(const std::vector<ss::TEvent>&) override {}
+	void Checkpoint(int Tick) override
+	{
+		LastCheckpoint = Tick;
+		CheckpointTicks.push_back(Tick);
+	}
+	std::string HostText() const
+	{
+		std::string Out = "hands\t" + std::to_string(Hands) + "\n";
+		for (const std::string& Id : Met)
+		{
+			Out += "met\t" + Id + "\n";
+		}
+		Out += autoplay::RunText(A, R) + "\n";
+		for (const auto& Kv : R.Seen)
+		{
+			Out += "autoseen\t" + Kv.first + "\t" + ss::reads::Write(Kv.second) + "\n";
+		}
+		for (const auto& Kv : Book.Tells)
+		{
+			Out += "autoread\t" + Kv.first + "\t" + std::to_string(Kv.second) + "\n";
+		}
+		return Out;
+	}
+	/** Skips to the plan's target or a stop (SkipSlice's reason), or, with UntilCheckpoint, to the first checkpoint at
+	 *  or past that hand. */
+	ss::live::SkipWhy Skip(int UntilCheckpoint = -1)
+	{
+		ss::live::SkipWhy Why = ss::live::SkipWhy::Budget;
+		for (int Guard = 0; Guard < 20000 && !T->Hero().Busted && !T->bFinished; ++Guard)
+		{
+			Why = ss::live::SkipSlice(*T, Brain, A, 0.0, *this).Why;
+			if (Why != ss::live::SkipWhy::Budget || (UntilCheckpoint >= 0 && LastCheckpoint >= UntilCheckpoint))
+			{
+				break;
+			}
+		}
+		return Why;
+	}
+};
+
+/** The plan takes the seat as the night begins (FAutoHost::StartRun): Sharpness read once from Form and condition. */
+void TakeSeat(PlanNight& N, life::State& L, double World)
+{
+	const double Form = autoplay::FormAt(L.Auto, World);
+	N.R.Sharp = autoplay::SharpnessOf(Form, 0.0, false, false);
+	N.R.SharpSetAt = World;
+	N.R.Tilt = 0.0;
+	N.TiltGain = std::min(2.5, std::max(0.3, L.Perks.TiltGain));
+	N.Book = LearnedOf(L.Reads);
+	N.Notes = &L.Auto.Notes;
+	L.Update2LinesRead |= life::U2AutoPref;
+	N.Think();
+}
+
+/** The checkpoint host text read back the way FAutoHost::ReadHostLine does: the plan and its run, the stats, the book. */
+bool ReadPlanLines(const std::string& Host, autoplay::TableAuto& A, autoplay::Run& R, style::Learned& Book, int& Hands)
+{
+	bool Ok = false;
+	size_t At = 0;
+	while (At < Host.size())
+	{
+		size_t End = Host.find('\n', At);
+		End = End == std::string::npos ? Host.size() : End;
+		const std::string Line = Host.substr(At, End - At);
+		At = End + 1;
+		if (Line.rfind("auto\t", 0) == 0)
+		{
+			Ok = autoplay::ReadRun(Line, A, R);
+		}
+		else if (Line.rfind("autoseen\t", 0) == 0)
+		{
+			const size_t Tab = Line.find('\t', 9);
+			ss::reads::Stats St;
+			if (Tab == std::string::npos || !ss::reads::Parse(Line.substr(Tab + 1), St))
+			{
+				return false;
+			}
+			R.Seen[Line.substr(9, Tab - 9)] = St;
+		}
+		else if (Line.rfind("autoread\t", 0) == 0)
+		{
+			const size_t Tab = Line.find('\t', 9);
+			Book.Tells[Line.substr(9, Tab - 9)] = Tab == std::string::npos ? 0 : std::atoi(Line.c_str() + Tab + 1);
+		}
+		else if (Line.rfind("hands\t", 0) == 0)
+		{
+			Hands = std::atoi(Line.c_str() + 6);
+		}
+	}
+	return Ok;
+}
+
+/** The roster as the engine's reserved players. */
+std::vector<ss::ReservedPlayer> KnownOf(const life::LiveEntry& E)
+{
+	std::vector<ss::ReservedPlayer> Out;
+	for (const std::pair<std::string, int>& R : E.Roster)
+	{
+		ss::ReservedPlayer P;
+		P.Name = R.first;
+		P.Type = static_cast<ss::Archetype>(R.second);
+		Out.push_back(P);
+	}
+	return Out;
+}
+
+/** The save the host has while the player is out (the session's last save, the life and bankroll as they stand). */
+ss::SaveData HostSave(const Hooks& H, const ss::Session& S)
+{
+	ss::SaveData D = H.Last;
+	D.Life = S.Life;
+	D.BankrollCents = S.BankrollCents;
+	if (D.WorldText.empty() && D.WorldSnapshot)
+	{
+		D.WorldSnapshot->Write(D.WorldText);
+	}
+	return D;
+}
+
+/**
+ * The career's books as SegmentJourney audits them after every step (the last segment's monkey invariants, carried:
+ * next_segment_spec §7.6): the bankroll moves only through the ledger (money the test hands the career is counted in
+ * Injected), it never goes negative, no backing or sponsor payment is written twice, at most one brand holds an exclusive
+ * category, the stream's overlay holds at most two deals, every patch sewn is a running contract's, sponsor property never
+ * sells at the pawn, and an unanswered offer is never dropped from Mail.
+ */
+struct Books
+{
+	ss::Chips Bank = 0;
+	ss::Chips Injected = 0;
+	std::vector<life::LedgerEntry> Seen; // the ledger as it stood at the last audit
+	std::vector<life::LedgerEntry> All;  // every line once, oldest first
+	int Steps = 0;
+	int MostLines = 0;
+	std::map<std::string, int> Broken; // invariant -> times broken
+	std::string First;
+
+	void Break(const std::string& What, const std::string& Where)
+	{
+		if (Broken[What]++ == 0 && First.empty())
+		{
+			First = What + " (" + Where + ")";
+		}
+	}
+	static bool Same(const life::LedgerEntry& A, const life::LedgerEntry& B) { return A.At == B.At && A.Label == B.Label && A.Amount == B.Amount && A.Kind == B.Kind; }
+	void Start(const ss::Session& S)
+	{
+		Bank = S.BankrollCents;
+		Seen = S.Life.Ledger;
+		for (size_t K = Seen.size(); K-- > 0;)
+		{
+			All.push_back(Seen[K]);
+		}
+	}
+	void Give(ss::Session& S, ss::Chips Cents)
+	{
+		S.BankrollCents += Cents;
+		Injected += Cents;
+	}
+	void Audit(ss::Session& S, const std::string& Where)
+	{
+		++Steps;
+		// New lines: the shortest prefix after which the ledger goes on as it stood (it keeps the newest 60).
+		const std::vector<life::LedgerEntry>& Cur = S.Life.Ledger;
+		size_t Fresh = Cur.size();
+		if (Cur.size() < 60 && Cur.size() >= Seen.size())
+		{
+			Fresh = Cur.size() - Seen.size();
+		}
+		for (size_t N = 0; Cur.size() >= 60 && N < Cur.size() && !Seen.empty(); ++N)
+		{
+			bool Match = true;
+			for (size_t I = 0; N + I < Cur.size() && I < Seen.size() && Match; ++I)
+			{
+				Match = Same(Cur[N + I], Seen[I]);
+			}
+			if (Match)
+			{
+				Fresh = N;
+				break;
+			}
+		}
+		ss::Chips Logged = 0;
+		for (size_t K = Fresh; K-- > 0;)
+		{
+			const life::LedgerEntry& E = Cur[K];
+			Logged += E.Amount;
+			if (E.Kind == life::LedgerBacking || E.Kind == life::LedgerSponsors)
+			{
+				for (const life::LedgerEntry& Old : All)
+				{
+					if (Same(Old, E))
+					{
+						Break("a backing or sponsor payment written twice: " + E.Label, Where);
+					}
+				}
+			}
+			All.push_back(E);
+		}
+		MostLines = std::max(MostLines, static_cast<int>(Fresh));
+		if (S.BankrollCents - Bank != Logged + Injected)
+		{
+			Break("the bankroll moved without the ledger (" + ss::Money(S.BankrollCents - Bank) + " vs " + ss::Money(Logged + Injected) + ")", Where);
+		}
+		if (S.BankrollCents < 0)
+		{
+			Break("a negative bankroll", Where);
+		}
+		Bank = S.BankrollCents;
+		Injected = 0;
+		Seen = Cur;
+		// The sponsor book.
+		const double World = S.WorldMinutes();
+		const ss::sponsor::Book& B = S.Life.Sponsors;
+		std::map<int, int> ByCategory;
+		for (const ss::sponsor::Brand& Br : ss::sponsor::Brands())
+		{
+			if (ss::sponsor::ExclusiveCategory(Br.Cat) && ss::sponsor::Active(B, Br.Id, World))
+			{
+				++ByCategory[static_cast<int>(Br.Cat)];
+			}
+		}
+		for (const auto& It : ByCategory)
+		{
+			if (It.second > 1)
+			{
+				Break("two brands active in one exclusive category", Where);
+			}
+		}
+		const std::vector<ss::kast::Deal> OnStream = ss::sponsor::StreamView(B, World);
+		if (std::count_if(OnStream.begin(), OnStream.end(), [](const ss::kast::Deal& D) { return D.Overlay; }) > ss::kast::MaxDeals)
+		{
+			Break("more than two deals on the stream's overlay", Where);
+		}
+		for (const std::string& Patch : S.Life.Closet.Patches)
+		{
+			if (!Patch.empty() && !ss::sponsor::Running(B, Patch, World))
+			{
+				Break("a patch sewn for a brand with no running contract: " + Patch, Where);
+			}
+		}
+		for (const auto& Owned : S.Gear)
+		{
+			if (ss::sponsor::IsProperty(B, Owned.first, World) && S.PawnSell("gear:" + Owned.first).empty())
+			{
+				Break("sponsor property sold at the pawn: " + Owned.first, Where);
+			}
+		}
+		for (const ss::sponsor::Contract& C : B.Contracts)
+		{
+			if (C.St == ss::sponsor::State::Offered && C.ExpiresAt > World)
+			{
+				const bool Mailed = std::any_of(S.Life.Inbox.begin(), S.Life.Inbox.end(), [&C](const life::Letter& L) { return L.Thread == C.Id; });
+				if (!Mailed)
+				{
+					Break("an open offer dropped from Mail: " + C.Id, Where);
+				}
+			}
+		}
+	}
+};
+
+/** The bytes a save's lines of the given tags take (the segment's ≤ 80 KB, update 2's non-world ≤ 60 KB). */
+size_t LineBytes(const std::string& Text, std::initializer_list<const char*> Tags)
+{
+	size_t Bytes = 0;
+	size_t Start = 0;
+	while (Start < Text.size())
+	{
+		size_t End = Text.find('\n', Start);
+		End = End == std::string::npos ? Text.size() : End + 1;
+		for (const char* Tag : Tags)
+		{
+			if (Text.compare(Start, std::strlen(Tag), Tag) == 0)
+			{
+				Bytes += End - Start;
+				break;
+			}
+		}
+		Start = End;
+	}
+	return Bytes;
+}
+
+/**
+ * SegmentJourney's deals: every stake offered is taken (EconomyPacing's TakeDeals), but of the sponsors only the
+ * journey's own (Lucky Penny, Volt Rush) are signed; any other brand's offer is declined, so a natural offer can't take
+ * the spot a scripted patch needs.
+ */
+void SegDeals(ss::Session& S, pacing::Career& C)
+{
+	const double World = S.WorldMinutes();
+	for (const ss::stake::Offer& O : std::vector<ss::stake::Offer>(S.Life.Stakes.Offers))
+	{
+		if (O.State == ss::stake::OfferStanding && O.Expires >= World && S.AcceptStake(O.Id).empty() && O.Backer == "Big Lou")
+		{
+			C.LouAt.push_back(World);
+		}
+	}
+	for (const ss::sponsor::Brand& B : ss::sponsor::Brands())
+	{
+		const std::string Id = ss::sponsor::OpenOfferFor(S.Life.Sponsors, B.Id, World);
+		if (Id.empty())
+		{
+			continue;
+		}
+		if (B.Id == "luckypenny" || B.Id == "voltrush")
+		{
+			ss::sponsor::HeardOffer(S.Life.Sponsors, S.Life, Id, World);
+			C.Signed += S.SignDeal(Id).empty() ? 1 : 0;
+		}
+		else if (B.Id != "overclock")
+		{
+			S.DeclineDeal(Id);
+		}
+	}
+	C.Ledger.Take(S.Life);
+}
+
+/**
+ * A night at the Embercrest on the host's side (EconomyPacing's LiveNight, any event key): the save taken as it stands,
+ * the desk (whoever pays: the player, a backer, a sponsor's cover, pieces sold), the engine plays the night (a TAG), the
+ * cage settles it on the save, and the save loads again. Fills Funded with who paid; false when it didn't happen. With
+ * Finish, the night ends in that place five hours in (the fixtures' "won" night: a deep run the test wants paid out).
+ */
+bool SegNight(std::unique_ptr<ss::Session>& S, pacing::PaceHooks& H, pacing::Career& C, double& Now, int DayNo, const char* Key, life::Funding* Funded = nullptr,
+	int* PlaceOut = nullptr, int Finish = 0)
+{
+	live::Occurrence O;
+	for (const live::Occurrence& X : live::Occurrences(DayNo))
+	{
+		O = std::string(X.T->Key) == Key ? X : O;
+	}
+	if (!O.Valid() || S->WorldMinutes() > O.Start - 45.0)
+	{
+		return false; // (the bus wouldn't make the first hand)
+	}
+	Now = pacing::Hop(*S, C, Now, std::max(S->WorldMinutes(), O.DeskOpens + 30.0));
+	pacing::Fed(*S);
+	SegDeals(*S, C);
+	const std::string Refused = S->GoToLive(O.Id);
+	if (!Refused.empty())
+	{
+		std::printf("    (the desk at %s: %s)\n", O.Id.c_str(), Refused.c_str());
+		return false;
+	}
+	++C.Live;
+	S->Save();
+	ss::SaveData D = HostSave(H, *S);
+	life::LiveEntry* E = live::EntryFor(D.Life, O.Id);
+	if (!E)
+	{
+		return false;
+	}
+	if (Funded)
+	{
+		*Funded = E->Fund;
+	}
+	E->ArrivedAt = O.Start - 15.0;
+	bool Restored = false;
+	std::unique_ptr<ss::Tournament> T = live::ResumeField(O, *E, E->Entrants, D.HeroName, KnownOf(*E), false, Restored);
+	const ss::Profile Auto = ss::MakeProfile(ss::Archetype::Tag, T->R);
+	for (int Guard = 0; Finish <= 0 && Guard < 6000 && !T->Hero().Busted && !T->bFinished; ++Guard)
+	{
+		T->SimulateTick(&Auto);
+	}
+	const int Place = Finish > 0 ? Finish : T->Hero().Place > 0 ? T->Hero().Place : T->HeroRank();
+	const ss::Chips Prize = T->PrizeFor(Place);
+	const double End = Finish > 0 ? O.Start + 300.0 : O.Start + T->ClockMinutes() - static_cast<double>(O.T->StartMinute);
+	live::Settle(D.BankrollCents, D.Life, O.Id, Place, T->Spec.Entrants, Prize, End);
+	live::PayFare(D.BankrollCents, D.Life, O.Id, true, End + 5.0);
+	D.NoteLive(End, O.Id, Place, Prize, T->Spec.Entrants, {});
+	D.ClockMinutes = End + 30.0 - Day;
+	if (PlaceOut)
+	{
+		*PlaceOut = Place;
+	}
+	S.reset();
+	S.reset(new ss::Session(H, C.Seed, &D));
+	S->CurrentScreen = ss::Screen::Lobby;
+	S->ResumeCalendarFrom(End + 30.0);
+	Now = Wait(*S, Now, 0.1);
+	C.Ledger.Take(S->Life);
+	return true;
+}
+
+/** Whole-word, case-blind: does Text say Word? (U1: nothing in the world says autoplay played.) */
+bool Says(const std::string& Text, const std::string& Word)
+{
+	std::string Low;
+	for (const char Ch : Text)
+	{
+		Low.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(Ch))));
+	}
+	for (size_t P = Low.find(Word); P != std::string::npos; P = Low.find(Word, P + 1))
+	{
+		const bool Left = P == 0 || !std::isalnum(static_cast<unsigned char>(Low[P - 1]));
+		const bool Right = P + Word.size() >= Low.size() || !std::isalnum(static_cast<unsigned char>(Low[P + Word.size()]));
+		if (Left && Right)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+} // namespace journeys
+
+/**
+ * G1Journey (update 2 SPEC §7.5 C1, §6.7): one career through gate 1's user-visible guarantees, end to end in core.
+ *   1. A fresh start (§3.1): no team, nobody on Season or Earnings at 2:07 AM; the panel's default (Autopilot, Form 70).
+ *   2. Online autoplay on three tables (§2.6.1, §8.1 step 3): Push/Fold skipped to the bubble stops there and the plan holds
+ *      the seat at 1x; with "My all-in decisions" on, the skip hands a decision over mid-hand (AdoptHand); GTO watched at
+ *      2x is taken over mid-think (the prompt opens, nothing acts; graded, but Form doesn't move), then the resume window;
+ *      TAG skipped whole leaves a played line with no decision of the player's (Career's AUTO tag and the "—"). The coach
+ *      tallies exactly the player's own decisions (U4); ss.Auto.Parity on another table: equal hashes.
+ *   3. A save and a reload: the Blank world, Form, the played lines and the notes come back.
+ *   4. The Embercrest (§2.12, §8.1 step 4): the Nightly the plan skips through live::SkipSlice, checkpointed every 5 hands
+ *      (R5); the game "killed" after a checkpoint and loaded from the save carries on from it exactly as the night that
+ *      never stopped (the engine checkpoint, the tilt, Sharpness, the counts and the stats); the skip stops at the bubble
+ *      between hands; the night settled, its played line on the record.
+ *   5. The world hears the plan's events as the player's (§2.9), and never that a plan played them (U1); the fresh world's
+ *      boards fill.
+ */
+void G1Journey()
+{
+	namespace autoplay = ss::autoplay;
+	namespace style = ss::style;
+	namespace life = ss::life;
+	namespace live = ss::live;
+	using journeys::Day;
+	const auto T0 = std::chrono::steady_clock::now();
+	pacing::PaceHooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "g1-journey"));
+	S->NewCareer(journeys::Jesse(), ss::world::Start::Blank);
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.1);
+	pacing::Fed(*S);
+	// 1. Night One in a fresh world.
+	{
+		ss::net::HeroStats Hero;
+		Hero.Name = S->HeroName;
+		const std::vector<ss::net::BoardRow> Season = ss::net::Shared().Leaderboard(ss::net::Board::Season, S->WorldMinutes(), Hero, 60, nullptr);
+		const std::vector<ss::net::BoardRow> Earnings = ss::net::Shared().Leaderboard(ss::net::Board::Earnings, S->WorldMinutes(), Hero, 60, nullptr);
+		int Team = 0;
+		for (const ss::world::Npc& N : S->Living().People())
+		{
+			Team += N.Pro ? 1 : 0;
+		}
+		Expect(S->WorldStart() == ss::world::Start::Blank && Team == 0 && Season.empty() && Earnings.empty() &&
+				   S->DebugWorld("").find("World: Fresh start, version " + std::to_string(ss::world::Version)) == 0,
+			"g1 journey: night one in a fresh world: no team, nobody on Season or Earnings at 2:07 AM");
+		const autoplay::Panel P = S->AutoPanel(0);
+		Expect(!P.On && P.Now.S == style::Style::Autopilot && P.Form == autoplay::FormStart && std::fabs(P.Sharp - 0.80) < 1e-9 && P.Styles.size() == static_cast<size_t>(style::Style::Count),
+			"g1 journey: the panel's default is Autopilot, Form 70, Sharpness 0.80");
+	}
+	// 2. Three tables online (the monitors for them), each with its own plan.
+	S->BankrollCents += 14900 + 28900 + 50000;
+	Expect(S->Buy("monitor-24").empty() && S->Buy("monitor-27").empty() && S->MaxTables() == ss::Session::TableLimit, "g1 journey: the screens for four tables");
+	// The events: small fields (the bubble comes in reasonable time), no bounties, open now and not played yet.
+	std::vector<std::string> Used;
+	auto PickEvents = [&](size_t Count) {
+		std::vector<ss::LobbyEvent> Out;
+		const ss::net::Network& Net = ss::net::Shared();
+		const double World = S->WorldMinutes();
+		for (const ss::net::EventInstance& E : Net.Window(World - 180.0, World + 90.0))
+		{
+			const ss::LobbyEvent L = Net.Listing(E, nullptr, S->Unlocks());
+			if (L.Joinable && L.Spec.Entrants >= 90 && L.Spec.Entrants <= 400 && L.Spec.BountyCents == 0 && L.BuyInCents <= 1100 && S->CanAfford(L) && !S->IsPlaying(L.Spec.Id) &&
+				std::find(Used.begin(), Used.end(), L.Spec.Id) == Used.end() && Out.size() < Count)
+			{
+				Out.push_back(L);
+			}
+		}
+		return Out;
+	};
+	std::vector<ss::LobbyEvent> Picks = PickEvents(3);
+	Expect(Picks.size() == 3, "g1 journey: three small events open on night one");
+	if (Picks.size() < 3)
+	{
+		return;
+	}
+	std::string IdA = Picks[0].Spec.Id;       // Nit, skipped to the bubble (another event if it busts before)
+	const std::string IdB = Picks[1].Spec.Id; // GTO, watched at 2x
+	const std::string IdC = Picks[2].Spec.Id; // Push/Fold, skipped whole
+	const autoplay::TableAuto PlanA = journeys::PlanOf(style::Style::Nit, autoplay::Mode::Skip, 1, autoplay::Target::Bubble, autoplay::StopFinalTable | autoplay::StopBubble);
+	for (const ss::LobbyEvent& L : Picks)
+	{
+		Used.push_back(L.Spec.Id);
+		S->RegisterEvent(L);
+	}
+	Expect(S->TableCount() == 3, "g1 journey: three tables open");
+	const int CoachedBefore = journeys::Coached(*S);
+	S->SprintBudgetMs = 1.0e9; // a skip runs to its stop in one update: the same frames on any machine
+	Expect(S->SetAutoplay(journeys::TableOf(*S, IdA), PlanA).empty() &&
+			   S->SetAutoplay(journeys::TableOf(*S, IdB), journeys::PlanOf(style::Style::Gto, autoplay::Mode::Watch, 2, autoplay::Target::Result, autoplay::StopFinalTable | autoplay::StopBubble)).empty() &&
+			   S->SetAutoplay(journeys::TableOf(*S, IdC), journeys::PlanOf(style::Style::PushFold, autoplay::Mode::Skip, 1, autoplay::Target::Result, 0)).empty(),
+		"g1 journey: the Nit skips to the bubble, GTO watches at 2x, Push/Fold skips to the result");
+	{
+		const autoplay::Panel PB = S->AutoPanel(journeys::TableOf(*S, IdB));
+		Expect(PB.On && PB.Status == "AUTO \xC2\xB7 GTO 2x" && std::fabs(PB.Sharp - 0.80) < 1e-9, "g1 journey: GTO's tile line, its Sharpness held at the default");
+	}
+	int Mine = 0;              // the player's own decisions (each one HeroAct: graded, tallied)
+	int Retries = 0;           // events the Nit busted in before the bubble
+	bool BubbleStop = false;   // A's skip stopped at the bubble, the plan holding the seat at 1x
+	bool AllInOn = false;      // "My all-in decisions" turned on for A, and the skip on to the result
+	int HandOffs = 0;          // decisions A's skip handed over mid-hand
+	bool HandOffMidHand = false;
+	bool TookOver = false;     // K during GTO's think at B
+	bool QuietTake = false;    // the take-over acted nothing: the prompt opened on the same history
+	bool TakeGraded = false;   // the decision in that hand: graded, a week's decision, Form unmoved
+	bool Window = false;       // the next hand at B opened in the resume window
+	bool BSkipped = false;
+	double FormAtTake = 0.0;
+	int WeekAtTake = 0;
+	size_t HistoryAtTake = 0;
+	int MineAtTake = 0;
+	auto AnotherA = [&]() {
+		// The Nit busted before the bubble: the test of the bubble's stop goes on at another event.
+		const std::vector<ss::LobbyEvent> More = PickEvents(1);
+		if (More.empty())
+		{
+			return;
+		}
+		++Retries;
+		IdA = More[0].Spec.Id;
+		Used.push_back(IdA);
+		S->RegisterEvent(More[0]);
+		S->SetAutoplay(journeys::TableOf(*S, IdA), PlanA);
+	};
+	for (int F = 0; F < 4000000; ++F)
+	{
+		if (S->CurrentScreen == ss::Screen::Results || S->TableCount() == 0)
+		{
+			if (BubbleStop || Retries >= 6)
+			{
+				break;
+			}
+			S->LeaveResults();
+			AnotherA();
+			if (S->TableCount() == 0)
+			{
+				break;
+			}
+		}
+		Now += 1.0 / 30.0;
+		S->Update(Now);
+		int A = journeys::TableOf(*S, IdA);
+		const int B = journeys::TableOf(*S, IdB);
+		if (A < 0 && !BubbleStop && Retries < 6 && S->CurrentScreen == ss::Screen::Table)
+		{
+			AnotherA();
+			A = journeys::TableOf(*S, IdA);
+		}
+		// A: the bubble stop, then "My all-in decisions" and on to the result; every hand-off answered.
+		if (A >= 0 && !S->Glance(A).Busted)
+		{
+			const autoplay::Panel PA = S->AutoPanel(A);
+			if (!BubbleStop && PA.On && !PA.Skipping && !PA.TakenOver)
+			{
+				BubbleStop = PA.Now.M == autoplay::Mode::Watch && PA.Now.Speed == 1 &&
+					(PA.StopReason == autoplay::Text(autoplay::Words::AtBubble) || PA.StopReason == autoplay::Text(autoplay::Words::AtHandForHand));
+				S->WithTable(A, [&]() { BubbleStop = BubbleStop && S->T->Remaining <= S->T->PaidPlaces() + 15; });
+				autoplay::TableAuto Next = S->Autoplay(A);
+				Next.Stops |= autoplay::StopMyAllIn;
+				S->SetAutoplay(A, Next);
+				AllInOn = S->SkipAhead(A, autoplay::Target::Result).empty();
+			}
+			else if (AllInOn && S->Glance(A).YourTurn)
+			{
+				if (PA.TakenOver && PA.StopReason == autoplay::Text(autoplay::Words::HandedOver))
+				{
+					S->WithTable(A, [&]() { HandOffMidHand = HandOffMidHand || (S->CurHand && !S->CurHand->History.empty()); });
+				}
+				if (journeys::BestAt(*S, A, Now))
+				{
+					++Mine;
+					++HandOffs;
+				}
+			}
+			else if (AllInOn && PA.On && !PA.Skipping && !S->Glance(A).YourTurn)
+			{
+				S->SkipAhead(A, autoplay::Target::Result);
+			}
+		}
+		// B: K during the plan's think, the prompt, the answer, the resume window, then skipped to the result.
+		if (B >= 0 && !S->Glance(B).Busted)
+		{
+			const autoplay::Panel PB = S->AutoPanel(B);
+			int Tick = 0;
+			S->WithTable(B, [&]() { Tick = S->T ? S->T->Tick : 0; });
+			if (!TookOver && PB.Thinking && Tick >= 4)
+			{
+				FormAtTake = S->Life.Auto.Pref.Form;
+				WeekAtTake = S->Life.Auto.Pref.WeekDecisions;
+				MineAtTake = Mine;
+				S->WithTable(B, [&]() { HistoryAtTake = S->CurHand ? S->CurHand->History.size() : 0; });
+				TookOver = S->TakeOver(B).empty() && S->AutoPanel(B).TakenOver && !S->AutoPanel(B).Thinking;
+			}
+			else if (TookOver && !TakeGraded && S->Glance(B).YourTurn)
+			{
+				S->WithTable(B, [&]() { QuietTake = QuietTake || (S->CurHand && S->CurHand->History.size() == HistoryAtTake); });
+				if (journeys::BestAt(*S, B, Now))
+				{
+					++Mine;
+					TakeGraded = S->Life.Auto.Pref.Form == FormAtTake && S->Life.Auto.Pref.WeekDecisions == WeekAtTake + 1 && Mine == MineAtTake + 1;
+				}
+			}
+			else if (TakeGraded && !Window && PB.ResumeWindow)
+			{
+				Window = PB.On && !PB.TakenOver && PB.ResumeLeft > 0.0;
+			}
+			else if ((Window || (TakeGraded && Tick > 40)) && !BSkipped && PB.On && !PB.TakenOver && !S->Glance(B).YourTurn)
+			{
+				BSkipped = S->SetAutoplay(B, journeys::PlanOf(style::Style::Gto, autoplay::Mode::Skip, 1, autoplay::Target::Result, 0)).empty();
+			}
+			else if (TookOver && S->Glance(B).YourTurn && journeys::BestAt(*S, B, Now))
+			{
+				++Mine;
+			}
+		}
+		// Anything else that's the player's (a hand taken over runs to its end), answered.
+		for (int I = 0; I < S->TableCount(); ++I)
+		{
+			if (I != A && I != B && journeys::BestAt(*S, I, Now))
+			{
+				++Mine;
+			}
+		}
+	}
+	Expect(S->CurrentScreen == ss::Screen::Results, "g1 journey: the events played to their results");
+	Expect(BubbleStop, ("g1 journey: the Nit's skip stopped at the bubble, the plan holding the seat at 1x (after " + std::to_string(Retries) + " events it busted in first)").c_str());
+	Expect(TookOver && QuietTake && TakeGraded, "g1 journey: K during GTO's think took the wheel: the prompt opened with nothing acted; the decision graded, Form unmoved");
+	Expect(Window, "g1 journey: the next hand opened in the resume window (AUTO RESUMES)");
+	std::printf("  g1 journey: online: bubble stop %s (%d retries), %d hand-offs (%s mid-hand), take-over %s, %d decisions of the player's, %.1f s\n", BubbleStop ? "yes" : "no", Retries,
+		HandOffs, HandOffMidHand ? "one" : "none", TookOver ? "yes" : "no", Mine, journeys::SecondsSince(T0));
+	Expect(HandOffs > 0, "g1 journey: with \"My all-in decisions\" on, the skip handed decisions over (AdoptHand)");
+	// The record: three history rows; the played lines; Career's tags; only the player's own decisions coached.
+	const autoplay::Played* PA = autoplay::PlayedFor(S->Life.Auto, IdA);
+	const autoplay::Played* PB = autoplay::PlayedFor(S->Life.Auto, IdB);
+	const autoplay::Played* PC = autoplay::PlayedFor(S->Life.Auto, IdC);
+	Expect(PA && PB && PC && S->History.size() >= 3, "g1 journey: a played line for each event the plan played");
+	if (PA && PB && PC)
+	{
+		bool CDash = false;
+		for (const ss::HistoryEntry& E : S->History)
+		{
+			CDash = CDash || (E.EventId == IdC && E.AccuracyPct == 0.0);
+		}
+		const std::string TagC = autoplay::CareerTag(*PC);
+		Expect(PC->S == style::Style::PushFold && PC->OwnDecisions == 0 && PC->AiDecisions > 0 && CDash && TagC.rfind("AUTO \xC2\xB7 ", 0) == 0 && TagC.size() > 5 &&
+				   TagC.substr(TagC.size() - 5) == " 100%",
+			("g1 journey: the event the player never touched: " + TagC + ", the accuracy \xE2\x80\x94").c_str());
+		Expect(PB->S == style::Style::Gto && PB->OwnDecisions >= 1 && PB->AiDecisions > 0 &&
+				   autoplay::PlayedLine(*PB).rfind("Played by your plan: " + std::to_string(PB->AiDecisions) + " of " + std::to_string(PB->AiDecisions + PB->OwnDecisions) + " decisions (GTO)", 0) == 0,
+			("g1 journey: the results line for the event taken over (" + autoplay::PlayedLine(*PB) + ")").c_str());
+		Expect(PA->S == style::Style::Nit && PA->AiDecisions > 0 && PA->OwnDecisions == HandOffs, "g1 journey: the Nit's line counts the hand-offs as the player's");
+		Expect(journeys::Coached(*S) - CoachedBefore == Mine && PA->OwnDecisions + PB->OwnDecisions + PC->OwnDecisions == Mine,
+			"g1 journey: the coach tallied exactly the player's own decisions, none of the plan's (U4)");
+	}
+	S->LeaveResults();
+	// ss.Auto.Parity on a new table (§8.1 step 3), then skipped to its result.
+	{
+		const std::vector<ss::LobbyEvent> More = PickEvents(1);
+		if (!More.empty())
+		{
+			S->RegisterEvent(More[0]);
+		}
+		const int I = More.empty() ? -1 : journeys::TableOf(*S, More[0].Spec.Id);
+		Expect(I == 0 && S->SetAutoplay(0, journeys::PlanOf(style::Style::Gto, autoplay::Mode::Watch, 2, autoplay::Target::Result, autoplay::StopFinalTable | autoplay::StopBubble)).empty(),
+			"g1 journey: a new table, GTO watching");
+		if (I != 0)
+		{
+			return;
+		}
+		for (int F = 0; F < 30; ++F)
+		{
+			Now += 1.0 / 30.0;
+			S->Update(Now);
+		}
+		const std::string Parity = S->DebugAuto("parity 30");
+		std::printf("  g1 journey: %s\n", Parity.c_str());
+		Expect(Parity.find(": equal.") != std::string::npos, "g1 journey: ss.Auto.Parity 30 on a fresh world's table: equal hashes");
+		S->SkipAhead(0, autoplay::Target::Result);
+		for (int F = 0; F < 300000 && S->CurrentScreen == ss::Screen::Table; ++F)
+		{
+			Now += 1.0 / 30.0;
+			S->Update(Now);
+			if (S->TableCount() > 0 && !S->Glance(0).Busted && S->AutoPanel(0).On && !S->AutoPanel(0).Skipping && !S->Glance(0).YourTurn)
+			{
+				S->SkipAhead(0, autoplay::Target::Result);
+			}
+			if (S->TableCount() > 0 && journeys::BestAt(*S, 0, Now))
+			{
+				++Mine;
+			}
+		}
+		S->LeaveResults();
+	}
+	// 3. Saved and loaded: the fresh world, Form, the played lines and the notes.
+	{
+		pacing::Fed(*S);
+		S->Save();
+		ss::SaveData D;
+		const bool Parsed = ss::SaveData::Parse(H.Last.Serialize(), D);
+		pacing::PaceHooks H2;
+		ss::Session Back(H2, "g1-journey", &D);
+		Expect(Parsed && Back.WorldStart() == ss::world::Start::Blank && Back.Living().Began() == ss::world::Start::Blank && std::fabs(Back.Life.Auto.Pref.Form - S->Life.Auto.Pref.Form) < 1e-9 &&
+				   Back.Life.Auto.Results.size() == S->Life.Auto.Results.size() && Back.Life.Auto.Notes.size() == S->Life.Auto.Notes.size() && D.Serialize() == H.Last.Serialize(),
+			"g1 journey: saved and loaded: the fresh world, Form, the played lines and the notes");
+	}
+	// 4. The Embercrest: the next Nightly, the plan (GTO) skipping to the bubble.
+	live::Occurrence O;
+	for (int DayNo = ss::net::DayOf(S->WorldMinutes()); DayNo < ss::net::DayOf(S->WorldMinutes()) + 8 && !O.Valid(); ++DayNo)
+	{
+		for (const live::Occurrence& X : live::Occurrences(DayNo))
+		{
+			if (!O.Valid() && std::string(X.T->Key) == "nightly" && X.DeskOpens > S->WorldMinutes() + 30.0)
+			{
+				O = X;
+			}
+		}
+	}
+	S->LobbyMinutes += O.DeskOpens + 30.0 - S->WorldMinutes();
+	Now = Wait(*S, Now, 0.1);
+	pacing::Fed(*S);
+	S->BankrollCents += 20000;
+	Expect(O.Valid() && S->GoToLive(O.Id).empty(), "g1 journey: registered for the Nightly");
+	ss::SaveData D = journeys::HostSave(H, *S);
+	life::LiveEntry* E = live::EntryFor(D.Life, O.Id);
+	if (!E)
+	{
+		return;
+	}
+	E->ArrivedAt = O.Start - 15.0;
+	const double DayStart = O.Start - static_cast<double>(O.T->StartMinute);
+	const autoplay::TableAuto LivePlan = journeys::PlanOf(style::Style::Gto, autoplay::Mode::Skip, 1, autoplay::Target::Bubble, autoplay::StopFinalTable | autoplay::StopBubble);
+	// The night that never stops: to the bubble.
+	bool Restored = false;
+	std::unique_ptr<ss::Tournament> T1 = live::ResumeField(O, *E, E->Entrants, D.HeroName, journeys::KnownOf(*E), false, Restored);
+	journeys::PlanNight Whole;
+	Whole.T = T1.get();
+	Whole.A = LivePlan;
+	life::State L1 = D.Life;
+	journeys::TakeSeat(Whole, L1, O.Start);
+	const ss::live::SkipWhy WholeWhy = Whole.Skip();
+	// The same night, the game killed just after its checkpoint at hand 15, the night's save written by the host as the room does.
+	std::unique_ptr<ss::Tournament> T2 = live::ResumeField(O, *E, E->Entrants, D.HeroName, journeys::KnownOf(*E), false, Restored);
+	journeys::PlanNight First;
+	First.T = T2.get();
+	First.A = LivePlan;
+	life::State L2 = D.Life;
+	journeys::TakeSeat(First, L2, O.Start);
+	First.Skip(15);
+	ss::SaveData Killed = D;
+	Killed.Life = L2;
+	life::LiveEntry* KE = live::EntryFor(Killed.Life, O.Id);
+	KE->Checkpoint = T2->Checkpoint();
+	KE->CheckpointAt = DayStart + T2->ClockMinutes();
+	KE->CheckpointHost = First.HostText();
+	Killed.ClockMinutes = KE->CheckpointAt - Day;
+	const std::string AtKill = journeys::RunState(First.A, First.R);
+	// Relaunched: the save loaded into a new session, the night's checkpoint and host text read back.
+	ss::SaveData Relaunch;
+	const bool ReParsed = ss::SaveData::Parse(Killed.Serialize(), Relaunch);
+	pacing::PaceHooks H3;
+	S.reset(new ss::Session(H3, "g1-journey", &Relaunch));
+	S->CurrentScreen = ss::Screen::Lobby;
+	S->Save(); // (the host holds the career's save: what it says now)
+	const life::LiveEntry* RE = live::EntryFor(S->Life, O.Id);
+	Expect(ReParsed && S->LiveInProgress() == O.Id && RE && RE->Checkpoint == KE->Checkpoint && RE->CheckpointHost == KE->CheckpointHost,
+		"g1 journey: relaunched, the game goes back to the Nightly at its last checkpoint");
+	journeys::PlanNight Second;
+	std::unique_ptr<ss::Tournament> T3 = RE ? live::ResumeField(O, *RE, RE->Entrants, S->HeroName, journeys::KnownOf(*RE), true, Restored) : nullptr;
+	int HostHands = -1;
+	const bool Read = RE && journeys::ReadPlanLines(RE->CheckpointHost, Second.A, Second.R, Second.Book, HostHands);
+	Expect(T3 && Restored && T3->Checkpoint() == KE->Checkpoint && Read && journeys::RunState(Second.A, Second.R) == AtKill && Second.Book.Tells == First.Book.Tells &&
+			   HostHands == First.Hands && autoplay::WasPlayingLine(Second.A.S) == "Your plan was playing: GTO. [K] carry on.",
+		"g1 journey: the checkpoint restores the night, and the host text the plan: the same tilt, Sharpness, counts and stats");
+	if (!T3)
+	{
+		return;
+	}
+	Second.T = T3.get();
+	Second.Hands = HostHands;
+	Second.TiltGain = First.TiltGain;
+	Second.Notes = &S->Life.Auto.Notes;
+	Second.Think();
+	const ss::live::SkipWhy SecondWhy = Second.Skip();
+	const bool BetweenHands = !T3->FinishPending();
+	Expect(SecondWhy == WholeWhy && T3->Checkpoint() == T1->Checkpoint() && journeys::RunState(Second.A, Second.R) == journeys::RunState(Whole.A, Whole.R),
+		"g1 journey: the night carries on from its checkpoint exactly as the night that never stopped (ResumeEqualsUninterrupted, through the save)");
+	bool Checkpoints5 = !Whole.CheckpointTicks.empty();
+	for (size_t K = 0; K + 1 < Whole.CheckpointTicks.size(); ++K)
+	{
+		Checkpoints5 = Checkpoints5 && Whole.CheckpointTicks[K] % 5 == 0;
+	}
+	const bool AtBubble = !T3->Hero().Busted && (SecondWhy == ss::live::SkipWhy::Bubble || SecondWhy == ss::live::SkipWhy::HandForHand) && T3->Remaining <= T3->PaidPlaces() + 15;
+	Expect(Checkpoints5 && BetweenHands && (AtBubble || T3->Hero().Busted), "g1 journey: checkpoints every 5 hands; the skip stops at the bubble, between hands (or the night ends first)");
+	std::printf("  g1 journey: the Nightly: %d entrants, skip stopped (why %d) at hand %d with %d left (paid %d), %zu checkpoints, the plan %d hands / %d decisions, tilt %.3f, Sharpness %.2f\n",
+		T3->Spec.Entrants, static_cast<int>(SecondWhy), T3->Tick, T3->Remaining, T3->PaidPlaces(), Whole.CheckpointTicks.size(), Second.R.AiHands, Second.R.AiDecisions, Second.R.Tilt,
+		Second.R.Sharp);
+	// "Skip to the result" chosen again: past the final table's stop, to the end of the night; settled on the save.
+	Second.A.To = autoplay::Target::Result;
+	for (int Guard = 0; Guard < 10 && !T3->Hero().Busted && !T3->bFinished; ++Guard)
+	{
+		Second.Skip();
+	}
+	ss::SaveData Night = journeys::HostSave(H3, *S);
+	const int Place = T3->Hero().Place > 0 ? T3->Hero().Place : T3->HeroRank();
+	const ss::Chips Prize = T3->PrizeFor(Place);
+	const double End = DayStart + T3->ClockMinutes();
+	live::Settle(Night.BankrollCents, Night.Life, O.Id, Place, T3->Spec.Entrants, Prize, End);
+	live::PayFare(Night.BankrollCents, Night.Life, O.Id, true, End + 5.0);
+	autoplay::Record(Night.Life.Auto, O.Id, 1, 0, Second.A, Second.R);
+	Night.Life.Update2LinesRead |= life::U2AutoPlayed | life::U2AutoPref;
+	Night.NoteLive(End, O.Id, Place, Prize, T3->Spec.Entrants, {});
+	Night.ClockMinutes = End + 30.0 - Day;
+	pacing::PaceHooks H4;
+	S.reset(new ss::Session(H4, "g1-journey", &Night));
+	S->CurrentScreen = ss::Screen::Lobby;
+	S->ResumeCalendarFrom(End + 30.0);
+	Now = Wait(*S, Now, 0.1);
+	const autoplay::Played* PL = autoplay::PlayedFor(S->Life.Auto, O.Id);
+	const life::LiveEntry* Done = live::EntryFor(S->Life, O.Id);
+	Expect(PL && PL->Venue == 1 && PL->S == style::Style::Gto && PL->AiHands == Second.R.AiHands && PL->OwnDecisions == 0 && Done && Done->State == life::LiveEntry::Finished &&
+			   Done->Place == Place && S->LiveInProgress().empty(),
+		"g1 journey: the Nightly settled: its played line (the Embercrest, GTO, every hand the plan's) and the result on the record");
+	// 5. The world: the plan's events are the player's; nobody says a plan played them; the boards fill.
+	S->LobbyMinutes += (static_cast<double>(ss::net::DayOf(S->WorldMinutes()) + 1) * Day + 9.0 * 60.0) - S->WorldMinutes();
+	Now = Wait(*S, Now, 0.1);
+	{
+		const ss::world::Tracker& Page = S->Living().HeroStats();
+		ss::net::HeroStats Hero;
+		Hero.Name = S->HeroName;
+		const std::vector<ss::net::BoardRow> Season = ss::net::Shared().Leaderboard(ss::net::Board::Season, S->WorldMinutes(), Hero, 60, nullptr);
+		bool Positive = !Season.empty();
+		for (const ss::net::BoardRow& R : Season)
+		{
+			Positive = Positive && R.Value > 0.0;
+		}
+		std::string Said;
+		int Items = 0;
+		for (const ss::net::NewsItem& N : ss::net::Shared().News(S->WorldMinutes(), Hero, 60))
+		{
+			++Items;
+			for (const char* Word : {"ai", "bot", "bots", "autoplay", "autoplayed", "autopilot"})
+			{
+				Said = Said.empty() && (journeys::Says(N.Title, Word) || journeys::Says(N.Body, Word)) ? N.Title : Said;
+			}
+		}
+		const int Results = static_cast<int>(S->History.size()) + S->Life.LiveEvents;
+		std::printf("  g1 journey: the world: %d events on the player's page (%d results online and live), %zu Season rows, %d news items\n", Page.Events, Results, Season.size(), Items);
+		Expect(Page.Events == Results && S->Life.LiveEvents == 1, "g1 journey: every event the plan played reached the world as the player's (SPEC 2.9)");
+		Expect(Positive, "g1 journey: the fresh world's Season board has filled, every row above zero");
+		Expect(Items > 0 && Said.empty(), ("g1 journey: the news never says a plan played (U1)" + (Said.empty() ? std::string() : ": " + Said)).c_str());
+	}
+	std::printf("  g1 journey: %.1f s\n", journeys::SecondsSince(T0));
+}
+
+/**
+ * SegmentJourney (carried from the last segment, next_segment_spec §7.6; update 2 SPEC debt item 9): one career of Days
+ * days (120 in "long", the whole journey; 60 by default) through every feature of the last segment, with the books
+ * audited after every step (journeys::Books). In order:
+ *   - Night One: Big Lou's stake on Tuesday's Nightly: his money pays the desk (the three lines); a deep run (third),
+ *     and the cage pays him his share, once;
+ *   - Thursday: Lantern Row's package: the online buy-ins in its range come off the roll, and the roll never pays rent;
+ *   - Friday: pieces of Saturday's Nightly listed at par (Night One's deep run is a result to buy on); Sunday: Dee's
+ *     ten percent of the Sunday $150 at par, paid at once, and Mei's swap on it;
+ *   - the next Monday: Lucky Penny signed (a patch sewn, Ray's appearance at the store, the Noon Deepstack covered);
+ *     Wednesday: a cap from the thrift, Volt Rush signed and its patch on the cap, Overclock refused for the category;
+ *   - week three: six Nightlies in six nights, and the club card that comes of them (Regular, toasted once);
+ *   - Volt Rush's stipend at its review and never before; notice after it, the term ended at the next review (long);
+ *   - every Saturday a Nightly, a hyper every other afternoon (every fourth after two weeks), a shift when the money's
+ *     short; the save round-trips each week;
+ *   - at the end the segment's lines take at most 80 KB of the save, update 2's non-world lines at most 60 KB.
+ */
+void SegmentJourney(bool Long)
+{
+	namespace life = ss::life;
+	namespace live = ss::live;
+	namespace stake = ss::stake;
+	namespace sponsor = ss::sponsor;
+	using journeys::Day;
+	const auto T0 = std::chrono::steady_clock::now();
+	pacing::Career C;
+	C.Seed = "segment-journey";
+	C.Kind = 2;
+	C.Days = Long ? 120 : 60;
+	pacing::PaceHooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, C.Seed));
+	S->NewCareer(journeys::Jesse());
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.1);
+	C.Ledger.Take(S->Life);
+	journeys::Books B;
+	B.Start(*S);
+	const int FirstDay = ss::net::DayOf(S->WorldMinutes());
+	bool LouPaid = false;       // Lou's money paid the desk: his stake line, the buy-in and the fee
+	bool LouShared = false;     // the cage paid him his share (or the night paid nothing)
+	bool RollPays = false;      // an online buy-in in the package's range came off the roll
+	std::string Pieces;         // what listing pieces of Saturday's Nightly said
+	bool Swapped = false;       // Mei's swap on the Sunday: accepted, played
+	bool Covered = false;       // Lucky Penny covered the Noon Deepstack
+	bool PatchSewn = false;
+	bool OverclockRefused = false;
+	int WeekNights = 0;         // Nightlies in week three
+	bool ClubToast = false;     // the club card toasted once (Unseen)
+	int ClubTier = 0;
+	std::string VoltId;
+	int VoltStipends = 0;
+	bool StipendEarly = false;
+	int Appearances = 0;
+	bool NoticeGiven = false;
+	bool CleanEnd = false;
+	int RoundTrips = 0;
+	bool RoundTripsSame = true;
+	double NightSeconds = 0.0; // (where the time goes: the host's nights reload the career, world and all)
+	double SaveSeconds = 0.0;
+	auto Step = [&](const std::string& Where) { B.Audit(*S, Where); };
+	auto Night = [&](int DayNo, const char* Key, life::Funding* F) {
+		const auto N0 = std::chrono::steady_clock::now();
+		const bool Ok = journeys::SegNight(S, H, C, Now, DayNo, Key, F);
+		NightSeconds += journeys::SecondsSince(N0);
+		return Ok;
+	};
+	auto ContractOf = [&](const std::string& Brand) -> const sponsor::Contract* {
+		const sponsor::Contract* Found = nullptr;
+		for (const sponsor::Contract& K : S->Life.Sponsors.Contracts)
+		{
+			Found = K.Brand == Brand && K.St != sponsor::State::Offered ? &K : Found;
+		}
+		return Found;
+	};
+	for (int K = 0; K < C.Days; ++K)
+	{
+		const int DayNo = FirstDay + K;
+		const std::string When = "day " + std::to_string(K);
+		Now = pacing::Hop(*S, C, Now, static_cast<double>(DayNo) * Day + 7.0 * 60.0);
+		pacing::Fed(*S);
+		if (S->Evicted() && S->Life.StorageDue > 0.0 && S->Life.StorageDue < S->WorldMinutes() + 2.0 * Day)
+		{
+			S->PayStorage();
+		}
+		if (S->Evicted() && S->BankrollCents >= S->Life.RentDueCents + 20000)
+		{
+			S->MoveBackIn();
+		}
+		Step(When + " morning");
+		// The money to play the journey's nights (counted, not earned: Injected).
+		if (K == 0 || (K >= 13 && K <= 18 && S->BankrollCents < 60000) || S->BankrollCents < 20000)
+		{
+			B.Give(*S, K == 0 ? 150000 : 60000);
+			Step(When + " a cushion");
+		}
+		// The scripted offers: what the books would take months to bring, made as their makers make them.
+		if (K == 0)
+		{
+			S->DebugStake("offer lou");
+		}
+		else if (K == 2)
+		{
+			S->DebugStake("grant lanternrow");
+		}
+		else if (K == 5)
+		{
+			S->DebugStake("offer mei");
+		}
+		else if (K == 6)
+		{
+			S->DebugSponsor("offer luckypenny");
+		}
+		else if (K == 8)
+		{
+			// Volt Rush wants its patch on a cap: a ball cap from the thrift, worn.
+			Now = pacing::Hop(*S, C, Now, static_cast<double>(DayNo) * Day + 11.0 * 60.0);
+			ss::Session::ShopOrder Cap;
+			Cap.Venue = "thrift";
+			Cap.Garments = {"hat.ballcap"};
+			const std::string Bought = S->ShopPay(Cap);
+			const std::string Worn = Bought.empty() ? S->Wear("hat.ballcap") : Bought;
+			if (!Worn.empty())
+			{
+				std::printf("    (the cap: %s)\n", Worn.c_str());
+			}
+			Step(When + " a cap");
+			S->DebugSponsor("offer voltrush");
+		}
+		journeys::SegDeals(*S, C);
+		Step(When + " the deals");
+		if (K == 3)
+		{
+			// Pieces of Saturday's Nightly, at par.
+			for (const live::Occurrence& X : live::Occurrences(DayNo + 1))
+			{
+				Pieces = std::string(X.T->Key) == "nightly" ? S->ListAction(X.Id, 100, 1000) + "|" + X.Id : Pieces;
+			}
+			Step(When + " pieces listed");
+		}
+		if (K == 6 || K == 8)
+		{
+			// The patch on a spot the contract takes (its asks count only the events it's worn at).
+			const std::string Brand = K == 6 ? "luckypenny" : "voltrush";
+			bool Sewn = false;
+			for (int Spot = 0; Spot < sponsor::PatchSpots && !Sewn; ++Spot)
+			{
+				const std::vector<std::string> Can = sponsor::PatchesFor(S->Life.Sponsors, Spot, S->WorldMinutes());
+				if (std::find(Can.begin(), Can.end(), Brand) != Can.end() && S->Life.Closet.Patches[static_cast<size_t>(Spot)].empty())
+				{
+					Sewn = S->SewPatch(Spot, Brand).empty() && S->Life.Closet.Patches[static_cast<size_t>(Spot)] == Brand;
+				}
+			}
+			PatchSewn = (K == 6 || PatchSewn) && Sewn;
+			if (K == 8)
+			{
+				const sponsor::Contract* V = ContractOf("voltrush");
+				VoltId = V && V->St != sponsor::State::Ended ? V->Id : std::string();
+				if (VoltId.empty())
+				{
+					const std::string Open = sponsor::OpenOfferFor(S->Life.Sponsors, "voltrush", S->WorldMinutes());
+					std::printf("    (Volt Rush not signed: %s)\n", Open.empty() ? "no offer open" : S->SignDeal(Open).c_str());
+				}
+				// A second energy drink while Volt Rush holds the category: refused, and said why.
+				S->DebugSponsor("offer overclock");
+				const std::string Offer = sponsor::OpenOfferFor(S->Life.Sponsors, "overclock", S->WorldMinutes());
+				OverclockRefused = !VoltId.empty() && !Offer.empty() && !S->SignDeal(Offer).empty() && !sponsor::Active(S->Life.Sponsors, "overclock", S->WorldMinutes()) &&
+					!sponsor::Conflicts(S->Life.Sponsors, S->Life, Offer, S->WorldMinutes()).empty();
+				S->DeclineDeal(Offer);
+			}
+			Step(When + " a patch");
+		}
+		// An appearance a contract asks for, when its window falls before the afternoon (the photo with Ray at the store).
+		for (const sponsor::Window& W : sponsor::Appearances(S->Life.Sponsors, S->WorldMinutes(), static_cast<double>(DayNo) * Day + 11.0 * 60.0))
+		{
+			if (W.Done || W.To <= S->WorldMinutes() + 25.0)
+			{
+				continue;
+			}
+			Now = pacing::Hop(*S, C, Now, std::max(S->WorldMinutes(), W.From + 1.0));
+			if (S->Appear(W.Venue).empty())
+			{
+				for (int Guard = 0; S->TimeSkip.Active && Guard < 200; ++Guard)
+				{
+					Now = Wait(*S, Now, 0.5);
+				}
+				++Appearances;
+			}
+			Step(When + " an appearance at " + W.Venue);
+			break;
+		}
+		// Monday noon: the Noon Deepstack on Lucky Penny's cover.
+		if (K == 6)
+		{
+			life::Funding F;
+			Covered = Night(DayNo, "noon", &F) && F.From == life::Paid::Sponsor && F.Who == "Lucky Penny";
+			Step(When + " the Noon Deepstack");
+		}
+		// The afternoon: a hyper every other day for two weeks, then every fourth (the roll pays once it's there), a shift
+		// when money's short.
+		if (K != 6 && S->BankrollCents < ss::life::MonthlyRentCents + 40000)
+		{
+			Now = pacing::Shift(*S, C, Now);
+			Step(When + " a shift");
+		}
+		Now = pacing::Hop(*S, C, Now, static_cast<double>(DayNo) * Day + 14.0 * 60.0);
+		pacing::Fed(*S);
+		if (K % 2 == 0 && (K < 14 || K % 4 == 2))
+		{
+			const ss::Chips BankBefore = S->BankrollCents;
+			const ss::Chips RollBefore = pacing::RollSum(*S);
+			const int Played = C.Online;
+			Now = pacing::Online(*S, C, Now);
+			if (C.Online > Played && RollBefore > 0)
+			{
+				// The buy-in came off the roll: the bankroll didn't pay it (the bank moves only by what the deal's lines say).
+				const pacing::EventRec& E = C.Events.back();
+				RollPays = RollPays || (pacing::RollSum(*S) != RollBefore && S->BankrollCents - BankBefore != -E.BuyIn);
+			}
+			Step(When + " a hyper");
+		}
+		// The evening's Embercrest: Lou's Nightly, Saturday's, Mei's Sunday, the covered Noon, week three's six.
+		const int Weekday = ss::net::Weekday(DayNo);
+		if (K == 0)
+		{
+			life::Funding F;
+			const bool Played = journeys::SegNight(S, H, C, Now, DayNo, "nightly", &F, nullptr, 3); // (a deep run: third)
+			bool Stake = false;
+			int Shares = 0;
+			for (const life::LedgerEntry& E : S->Life.Ledger)
+			{
+				Stake = Stake || (E.Label == "Big Lou: stake, Embercrest Nightly" && E.Amount == 12000 && E.Kind == life::LedgerBacking);
+				Shares += E.Label.rfind("Big Lou: his share", 0) == 0 && E.Amount < 0 ? 1 : 0;
+			}
+			const life::LiveEntry* LE = nullptr;
+			for (const life::LiveEntry& X : S->Life.LiveEntries)
+			{
+				LE = X.Id.find("nightly@" + std::to_string(DayNo)) != std::string::npos ? &X : LE;
+			}
+			LouPaid = Played && F.From == life::Paid::Backer && F.Who == "Big Lou" && Stake;
+			LouShared = LE && LE->Place == 3 && LE->PrizeCents > 0 && Shares == 1;
+			Step(When + " Lou's Nightly");
+		}
+		else if (K == 5)
+		{
+			Swapped = Night(DayNo, "sunday", nullptr);
+			Step(When + " Mei's Sunday");
+		}
+		else if (K >= 13 && K <= 18)
+		{
+			WeekNights += Night(DayNo, "nightly", nullptr) ? 1 : 0;
+			Step(When + " week three's Nightly");
+		}
+		else if (Weekday == 5)
+		{
+			Night(DayNo, "nightly", nullptr);
+			Step(When + " Saturday's Nightly");
+		}
+		// The club card, toasted once.
+		if (K >= 18 && !ClubToast)
+		{
+			for (const ss::badge::Badge& Bd : S->Unseen())
+			{
+				ClubToast = ClubToast || Bd.K == ss::badge::Kind::Club;
+			}
+			const ss::badge::Badge* Club = S->HeroBadges().Find(ss::badge::Kind::Club);
+			ClubTier = Club ? Club->Tier : 0;
+		}
+		// Volt Rush: its stipend paid at each review, never at signing; notice after the second review.
+		if (!VoltId.empty())
+		{
+			int Lines = 0;
+			for (const life::LedgerEntry& E : B.All)
+			{
+				Lines += E.Kind == life::LedgerSponsors && E.Label.rfind("Volt Rush: monthly", 0) == 0 ? 1 : 0;
+			}
+			VoltStipends = Lines;
+			const sponsor::Contract* V = sponsor::Find(S->Life.Sponsors, VoltId);
+			// Paid at a review, never at signing: never more stipends than reviews done.
+			StipendEarly = StipendEarly || (V && Lines > V->Period);
+			if (V && !NoticeGiven && V->Period >= 1 && V->St == sponsor::State::Active)
+			{
+				// Notice after the first review: the term's next review is its last, paid if its asks were met.
+				NoticeGiven = S->GiveNotice(VoltId).empty() && sponsor::Find(S->Life.Sponsors, VoltId)->St == sponsor::State::Notice;
+				Step(When + " notice to Volt Rush");
+			}
+			if (V && NoticeGiven && V->St == sponsor::State::Ended)
+			{
+				CleanEnd = V->Why == sponsor::End::Walked;
+			}
+		}
+		// A week's save, read back: the same bytes.
+		if (K % 7 == 6)
+		{
+			const auto S0 = std::chrono::steady_clock::now();
+			S->Save();
+			ss::SaveData Back;
+			const std::string Text = H.Last.Serialize();
+			RoundTripsSame = RoundTripsSame && ss::SaveData::Parse(Text, Back) && Back.Serialize() == Text;
+			++RoundTrips;
+			SaveSeconds += journeys::SecondsSince(S0);
+		}
+	}
+	S->Save();
+	const std::string Text = H.Last.Serialize();
+	const size_t SegmentBytes = journeys::LineBytes(Text, {"livefund\t", "livevoice\t", "liveroom\t", "livebadge\t", "liveleader\t", "livepatch\t", "mail\t", "stake\t", "coach\t",
+															   "sponsor\t", "badge\t", "life\tshift\t", "life\tliveday\t"});
+	const size_t Update2Bytes = journeys::LineBytes(Text, {"autoplay\t", "video\t", "site\t"});
+	int Packages = 0;
+	for (const stake::Deal& D : S->Life.Stakes.Deals)
+	{
+		Packages += D.K == stake::Kind::Package ? 1 : 0;
+	}
+	std::printf("  segment journey (%d days): %d online, %d live (%d in week three), %d audits, at most %d ledger lines a step; Lou %s/%s; roll pays %s; pieces: %s; swap %s; "
+				"covered %s; patch %s; Overclock refused %s; club tier %d (toast %s); Volt Rush stipends %d, notice %s, clean end %s; %d appearances; %d round trips; segment lines %zu bytes, "
+				"update 2's %zu; %.1f s (%.1f in the nights, %.1f in the weekly saves)\n",
+		C.Days, C.Online, C.Live, WeekNights, B.Steps, B.MostLines, LouPaid ? "paid" : "no", LouShared ? "shared" : "no", RollPays ? "yes" : "no", Pieces.c_str(), Swapped ? "yes" : "no",
+		Covered ? "yes" : "no", PatchSewn ? "yes" : "no", OverclockRefused ? "yes" : "no", ClubTier, ClubToast ? "yes" : "no", VoltStipends, NoticeGiven ? "yes" : "no",
+		CleanEnd ? "yes" : "no", Appearances, RoundTrips, SegmentBytes, Update2Bytes, journeys::SecondsSince(T0), NightSeconds, SaveSeconds);
+	bool PiecesSold = false;
+	bool MeiSettled = false;
+	for (const life::LedgerEntry& E : B.All)
+	{
+		PiecesSold = PiecesSold || (E.Kind == life::LedgerBacking && E.Label.rfind("Pieces sold: ", 0) == 0 && E.Amount > 0);
+		MeiSettled = MeiSettled || (E.Kind == life::LedgerBacking && E.Label.rfind("Mei: ", 0) == 0 && E.Label.find("swap") != std::string::npos);
+	}
+	const int FailuresBefore = Failures;
+	Expect(B.Broken.empty(), ("segment journey: the books hold after every step (" + (B.First.empty() ? std::string("none broken") : B.First) + ")").c_str());
+	Expect(PiecesSold && Pieces.rfind("|embercrest-nightly@", 0) == 0, ("segment journey: pieces listed at par and sold pay the player at once (" + Pieces + ")").c_str());
+	Expect(LouPaid && LouShared, "segment journey: Big Lou's money paid the desk, and the cage paid him his share");
+	Expect(Packages >= 1 && RollPays && !C.RollPaidRent, "segment journey: the package's roll pays the online buy-ins in its range, and never the rent");
+	for (const stake::Swap& Sw : S->Life.Stakes.Swaps)
+	{
+		MeiSettled = MeiSettled || (Sw.Partner == "Mei" && Sw.State == stake::SwapSettled);
+	}
+	Expect(Swapped && MeiSettled, "segment journey: Mei's swap: the Sunday played, the swap settled");
+	Expect(Covered && PatchSewn, "segment journey: Lucky Penny covers the Noon Deepstack; a patch sewn for a running contract");
+	Expect(OverclockRefused, "segment journey: a second energy drink is refused while Volt Rush holds the category, and says why");
+	Expect(WeekNights == 6 && ClubTier >= 1 && ClubToast, "segment journey: six Nightlies in a week: the club card, toasted once");
+	Expect(VoltStipends >= 1 && !StipendEarly && NoticeGiven, "segment journey: Volt Rush's stipend at its reviews, never at signing; notice given after the first");
+	Expect(!Long || (CleanEnd && VoltStipends >= 2), "segment journey: the notice ends the term at its next review, cleanly, that period paid");
+	Expect(RoundTrips >= 8 && RoundTripsSame, "segment journey: each week's save reads back the same bytes");
+	Expect(SegmentBytes <= 80 * 1024 && Update2Bytes <= 60 * 1024, "segment journey: the segment's lines at most 80 KB of the save, update 2's non-world lines at most 60 KB");
+	if (Failures > FailuresBefore)
+	{
+		// What the career did, for whoever reads the failure.
+		for (const auto& It : B.Broken)
+		{
+			std::printf("    broken %d times: %s\n", It.second, It.first.c_str());
+		}
+		for (const sponsor::Contract& K : S->Life.Sponsors.Contracts)
+		{
+			std::printf("    contract %s: state %d (%s), period %d of %d, strikes %d, paid %s\n", K.Id.c_str(), static_cast<int>(K.St), sponsor::Pill(K, S->WorldMinutes()), K.Period,
+				sponsor::Periods(K), K.Strikes, ss::Money(K.PaidCents).c_str());
+		}
+		for (const life::LedgerEntry& E : B.All)
+		{
+			if (E.Kind == life::LedgerSponsors || E.Kind == life::LedgerBacking)
+			{
+				std::printf("    %s %s %s\n", ss::net::DateLabel(ss::net::DayOf(E.At)).c_str(), ss::Money(E.Amount).c_str(), E.Label.c_str());
+			}
+		}
+	}
+}
+} // namespace session_test
+
 int main(int Argc, char** Argv)
 {
-	// "session_test long": the long careers (EconomyPacing's beyond the first; update 2 SPEC §6.7).
-	const bool Long = Argc > 1 && std::string(Argv[1]) == "long";
+	// "session_test long": the long careers (EconomyPacing's beyond the first, SegmentJourney's whole 120 days; update 2
+	// SPEC §6.7). "session_test c1 [long]": only the lead's C1 checks (the gate's fixtures, the journeys, the pacing).
+	bool Long = false;
+	bool C1 = false;
+	for (int K = 1; K < Argc; ++K)
+	{
+		Long = Long || std::string(Argv[K]) == "long";
+		C1 = C1 || std::string(Argv[K]) == "c1";
+	}
+	if (C1)
+	{
+		// "c1 [fixtures] [g1] [pacing] [segment] [long]": those parts only (all four when none is named).
+		std::set<std::string> Parts;
+		for (int K = 1; K < Argc; ++K)
+		{
+			const std::string A = Argv[K];
+			if (A == "fixtures" || A == "g1" || A == "pacing" || A == "segment")
+			{
+				Parts.insert(A);
+			}
+		}
+		const bool All = Parts.empty();
+		if (All || Parts.count("fixtures"))
+		{
+			session_test::seams::Gate1Fixtures();
+		}
+		if (All || Parts.count("g1"))
+		{
+			session_test::G1Journey();
+		}
+		if (All || Parts.count("pacing"))
+		{
+			session_test::EconomyPacing(Long);
+		}
+		if (All || Parts.count("segment"))
+		{
+			session_test::SegmentJourney(Long);
+		}
+		std::printf("%s\n", session_test::Failures == 0 ? "session tests (c1): all passed" : "session tests (c1): FAILED");
+		return session_test::Failures == 0 ? 0 : 1;
+	}
 	session_test::Formatting();
 	session_test::NetworkChecks();
 	session_test::ScheduledTournament();
@@ -3824,6 +5471,9 @@ int main(int Argc, char** Argv)
 	// Update 2: the lead's carried checks (update 2 SPEC §7.2, day 5), before the tracks'.
 	session_test::EconomyPacing(Long);
 	session_test::MigrationAll();
+	// Update 2 C1 (the lead): the journeys of gate 1 and the carried segment.
+	session_test::G1Journey();
+	session_test::SegmentJourney(Long);
 	session_test::SegStake();
 	session_test::SegSponsor();
 	session_test::SegTableUi();

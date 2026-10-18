@@ -104,7 +104,8 @@ FString Str(const std::string& S)
 }
 
 /** The one control map's gamepad buttons for a key the legacy canvas HUD's prompts name ("R" is Y, "Space" the left
- *  trigger), or the key itself. */
+ *  trigger), or the key itself. A control with no button on a pad (update 2's "auto": K is the keyboard's alone) isn't the
+ *  pad's, so it's passed over rather than read out as "[]". */
 FString PadNameFor(const FString& Key)
 {
 	FString K = Key.ToUpper();
@@ -113,7 +114,7 @@ FString PadNameFor(const FString& Key)
 	{
 		for (const ss::ui::Control& C : ss::ui::Controls(Ctx))
 		{
-			if (C.Key && K == UTF8_TO_TCHAR(C.Key))
+			if (C.Key && C.Pad && *C.Pad && K == UTF8_TO_TCHAR(C.Key))
 			{
 				return FString(UTF8_TO_TCHAR(C.Pad)) + (C.Hold ? TEXT(" held") : TEXT(""));
 			}
@@ -749,11 +750,13 @@ void ABackRoomHUD::DrawHUD()
 	}
 	else if (const FAutoHost* Auto = FAutoHost::Of(GM))
 	{
-		// Update 2 (§2.11 P0a): the plan's status line, the one the core HUD gets through FillTableHud (ue-auto's).
-		const FString AutoLine = Auto->StatusLine();
+		// Update 2 (§2.11 P0a): the plan's status line, the one the core HUD gets through FillTableHud (ue-auto's). It comes
+		// with the device's own keys written in (K on the keyboard; on a pad K's jobs are different buttons, from the control
+		// map), so it's drawn as it is rather than through KeyText.
+		const FString AutoLine = Auto->StatusLine(bPad);
 		if (!AutoLine.IsEmpty())
 		{
-			KeyLine(AutoLine, Paper, W * 0.5f, H - 190.0f * S, Small, 1.1f, 1);
+			Text(AutoLine, Paper, W * 0.5f, H - 190.0f * S, Small, 1.1f, 1);
 		}
 	}
 

@@ -19,6 +19,9 @@
 // PLAY page uses only what's free while the card is held: the arrows (A on a pad) pick the style, K (A held on a pad)
 // turns the plan on or off, 1 to 5 (X on a pad) pick the skip's target and Enter held (X held) skips. A control with no
 // glyph for a device ("auto" has none on a pad, "autohold" none on the keyboard) isn't that device's, and no row draws it.
+// "keep" (C1): in the AUTO RESUMES window (the first 3 s of the hand after a take-over) K keeps the seat yours, autoplay off.
+// A pad has no K at the table and B only ever backs out, so there X, A or Y does it: an action button pressed then means
+// you're playing. Like taking the wheel, that press only takes the seat; the next one acts.
 
 namespace ss
 {
@@ -64,6 +67,7 @@ const std::vector<Control>& Controls(ControlContext C)
 		// Update 2: autoplay at the table.
 		{"auto", "K", "", false, "AUTOPLAY"},
 		{"wheel", "F C R A", "X A Y", false, "TAKE THE WHEEL"},
+		{"keep", "K", "X A Y", false, "KEEP PLAYING"},
 		{"watch", "T", "RIGHT", false, "WATCH SPEED"},
 		{"stopskip", "K", "B", false, "STOP THE SKIP"},
 	};

@@ -181,6 +181,8 @@ struct Setup
 	int Entrants = 96;
 	/** The host calls AllInCalled mid-hand (the Sunday's does; the Nightly's golden is the night without it). */
 	bool Lean = false;
+	/** A fresh world's books (update 2 §3.3 F9): the host's Director::Fresh. Blank false: an established world's night. */
+	room::Books Books;
 };
 
 Setup MakeNight(const std::string& OccurrenceId, int Entrants, const std::string& HeroPatch, const std::string& Salt)
@@ -370,6 +372,7 @@ struct TickFacts
 	ss::Level Blinds;
 	std::map<int, ss::Chips> FinalSeats; // seat -> stack, when this tick made the final table
 	std::vector<std::pair<std::string, ss::Chips>> Stacks; // everyone alive (name, stack)
+	double World = 0.0; // world minutes at the hand's end (the director's TickWorld)
 };
 
 struct Saved
@@ -466,6 +469,7 @@ Night Play(const Setup& S, int ClockCalls, float TalkScale, int StartAt = -1, co
 	D.HeroFullName = S.HeroFull;
 	D.TalkScale = TalkScale;
 	D.SetRail(S.Rail);
+	D.Fresh = S.Books;
 	room::Mood Last = D.Now();
 	std::vector<room::Mood> Turned; // the mood as it turned during the tick, after every call
 	auto Watch = [&]() {
@@ -547,6 +551,7 @@ Night Play(const Setup& S, int ClockCalls, float TalkScale, int StartAt = -1, co
 		{
 			F.HadNote = true;
 			F.Note = NoteOf(*T, *H, T->Tick);
+			F.World = WorldAt(S, *T);
 			N.HeroTables.insert(F.HeroTable);
 			const room::HandNote& Nt = F.Note;
 			N.EquityHands += Nt.AllIn && Nt.Called && Nt.Board.size() == 5 && Nt.BoardAtAllIn.size() < 5 && Nt.Shown.size() >= 2 ? 1 : 0;
@@ -1723,7 +1728,10 @@ void RoomTalkCopy()
 		{"Bubble", "Maria G."}, {"PlaceWord", "Seventeenth"}, {"PlaceLower", "seventeenth"}, {"EventSpoken", "Midnight Turbo"}, {"When", "Wednesday"},
 		{"WhenCap", "Yesterday"}, {"Entries", "114"}, {"Prize", "$1,280"}, {"LevelsCap", "Two"}, {"Spoken", "Eighteen thousand four hundred."},
 		{"Rough", "Two hundred-something"}, {"RoughLower", "two hundred-something"}, {"Event", "Saturday Big Stack"}, {"Short", "Midnight Turbo"},
-		{"Name", "Danny Q."}, {"TableWord", "eighteen"}};
+		{"Name", "Danny Q."}, {"TableWord", "eighteen"},
+		// A fresh start's first month (update 2 §3.3 F9), at their longest: the Sunday's name, a weekday night, a long first name.
+		{"FreshEvent", "Embercrest Sunday"}, {"FreshWhen", "Wednesday night"}, {"FreshThen", "Wednesday night"}, {"FreshThenCap", "Wednesday night"},
+		{"FreshWho", "Alessandro"}};
 	std::vector<std::pair<std::string, std::string>> Talk;
 	std::vector<std::pair<std::string, std::string>> Pa;
 	for (const auto& Kv : talk::Inventory())
@@ -1744,6 +1752,17 @@ void RoomTalkCopy()
 			 "field.suckout", "field.nicehand", "field.doubleup", "field.bubble"})
 	{
 		Expect(Pools[Pool] >= 6, std::string("room copy: at least six variants in ") + Pool);
+	}
+	// A fresh start's first month: every opener has a second way to say it, every answer pool four.
+	for (const char* Pool : {"field.fresh.tonight", "field.fresh.next", "field.fresh.next.nightly", "field.fresh.wall", "field.fresh.wallfirst", "field.fresh.wallfirst.self",
+			 "field.fresh.wallfirst.you", "field.fresh.first", "field.fresh.first.self", "field.fresh.first.you", "field.fresh.twice", "field.fresh.twice.self",
+			 "field.fresh.twice.you", "field.fresh.books"})
+	{
+		Expect(Pools[Pool] >= 2, std::string("room copy: at least two variants in ") + Pool);
+	}
+	for (const char* Pool : {"field.fresh.reply", "field.fresh.first.reply", "field.fresh.self.reply"})
+	{
+		Expect(Pools[Pool] >= 4, std::string("room copy: at least four answers in ") + Pool);
 	}
 	// The Back Room's eight, word for word (BackRoomPlayerTells.cpp's FLines and BackRoomLive.cpp's Goodbye at c09bc31).
 	struct Frozen
@@ -2056,6 +2075,517 @@ void RoomFinalTable()
 	}
 	Expect(Intros == 0 && Honors <= 1, "room final table: a Nightly gets no introductions and at most one honorific sentence");
 }
+
+// ------------------------------------------------------------------ RoomFresh (update 2 §3.3 F9: a fresh world's books)
+
+/** Night One, 2:07 AM on Tuesday (day 1): when a fresh world's books open. */
+const double FreshOpened = 1440.0 + 127.0;
+
+double FreshEnd(const live::Occurrence& O)
+{
+	return O.Start + O.T->Hours * 60.0;
+}
+
+/** The world's text read as the card room's host reads it (every line, no Finish). */
+void FreshRead(world::World& W, const std::string& Text)
+{
+	for (const std::string& L : SplitLines(Text))
+	{
+		std::vector<std::string> F;
+		size_t A = 0;
+		while (true)
+		{
+			const size_t B = L.find('\t', A);
+			F.push_back(L.substr(A, B == std::string::npos ? std::string::npos : B - A));
+			if (B == std::string::npos)
+			{
+				break;
+			}
+			A = B + 1;
+		}
+		W.Read(F);
+	}
+}
+
+bool SameBooks(const room::Books& A, const room::Books& B)
+{
+	bool Same = A.Blank == B.Blank && A.Opened == B.Opened && A.Known == B.Known && A.Cancelled == B.Cancelled && A.HeroWins == B.HeroWins &&
+		A.Most == B.Most && A.MostWins == B.MostWins && A.Firsts.size() == B.Firsts.size();
+	for (size_t I = 0; Same && I < A.Firsts.size(); ++I)
+	{
+		Same = A.Firsts[I].Id == B.Firsts[I].Id && A.Firsts[I].Winner == B.Firsts[I].Winner && A.Firsts[I].Hero == B.Firsts[I].Hero;
+	}
+	return Same;
+}
+
+/** BooksOf against a living fresh world: the first Nightly decided by three on Night One, the save's text, the player's own. */
+void RoomFreshBooksOf()
+{
+	world::World W;
+	W.Create(0x5eedf5e5u, FreshOpened, world::Start::Blank);
+	W.HeroName = "Jesse";
+	const live::Occurrence Monday = live::FindOccurrence("embercrest-nightly@0");
+	const live::Occurrence Noon = live::FindOccurrence("embercrest-noon@1");
+	Expect(Monday.Valid() && Noon.Valid() && FreshEnd(Monday) > FreshOpened && FreshEnd(Monday) < Noon.Start,
+		"room fresh books: Monday's Nightly is dealt across the books' opening and ends before Tuesday's Noon Deepstack");
+	W.AdvanceTo(Noon.Start - 30.0);
+	const room::Books B = room::BooksOf(W, {});
+	Expect(B.Blank && B.Opened == FreshOpened && B.Known == W.Clock(), "room fresh books: a fresh world's books, opened on Night One, read at the world's clock");
+	std::string Winner;
+	if (const ss::net::EventResult* R = W.ResultOf(Monday.Id))
+	{
+		for (const ss::net::Placing& P : R->FinalTable)
+		{
+			if (P.Place == 1)
+			{
+				const world::Npc* N = P.Player >= 0 ? W.Get(P.Player) : nullptr;
+				Winner = N ? N->Name : P.Name;
+			}
+		}
+	}
+	std::printf("room fresh books: the first Nightly in the books (%s, over %s) went to %s; Tuesday 11:30 knows %d first(s), %d called off\n", Monday.Id.c_str(),
+		ss::net::TimeLabel(FreshEnd(Monday)).c_str(), Winner.empty() ? "(nobody the world shows)" : Winner.c_str(), static_cast<int>(B.Firsts.size()),
+		static_cast<int>(B.Cancelled.size()));
+	Expect(!Winner.empty() && B.Firsts.size() == 1 && B.Firsts.front().Id == Monday.Id && B.Firsts.front().Winner == Winner && !B.Firsts.front().Hero,
+		"room fresh books: the first Nightly is decided at 3 AM on Night One, the books' only first by Tuesday noon, and its winner is the world's");
+	// The save's text as the card room's host reads it (BooksOfText: the lines the books need), against the whole world.
+	std::string Text;
+	W.Write(Text);
+	room::Books Read;
+	const double Ms = Timed([&] { Read = room::BooksOfText(Text, {}, Noon.Start); });
+	world::World Copy;
+	room::Books Whole;
+	const double WholeMs = Timed([&] {
+		FreshRead(Copy, Text);
+		Whole = room::BooksOf(Copy, {});
+	});
+	std::printf("room fresh books: the host reads the books from %d KB of world in %.1f ms (the whole world: %.1f ms)\n", static_cast<int>(Text.size() / 1024), Ms, WholeMs);
+	Expect(SameBooks(B, Read) && SameBooks(B, Whole), "room fresh books: the save's world, read back, has the same books (the host's lines and the whole world)");
+	// An established world's head (Start 0), a world never made, a fresh one past its first month: no books.
+	{
+		std::string Old;
+		for (const std::string& L : SplitLines(Text))
+		{
+			Old += (Starts(L, "world\thead\t") ? L.substr(0, L.rfind('\t')) + "\t0" : L) + "\n";
+		}
+		world::World Est;
+		FreshRead(Est, Old);
+		world::World None;
+		double EstMs = 0.0;
+		bool EstBlank = true;
+		EstMs = Timed([&] { EstBlank = room::BooksOfText(Old, {}, Noon.Start).Blank; });
+		Expect(Est.Ready() && !room::BooksOf(Est, {}).Blank && !EstBlank && !room::BooksOf(None, {}).Blank && !room::BooksOfText(std::string(), {}, Noon.Start).Blank,
+			"room fresh books: an established world (and no world) has none");
+		Expect(!room::BooksOfText(Text, {}, FreshOpened + room::FreshBooksDays * 1440.0).Blank && room::BooksOfText(Text, {}, FreshOpened + 29.5 * 1440.0).Blank,
+			"room fresh books: the host reads none past the books' first thirty days");
+		std::printf("room fresh books: an established world's text costs the host %.3f ms\n", EstMs);
+	}
+	// The player's own night, settled in the room before the world hears of it, is the first Noon Deepstack; one they're
+	// still playing holds its family.
+	life::LiveEntry Mine;
+	Mine.Id = Noon.Id;
+	Mine.State = life::LiveEntry::Finished;
+	Mine.Place = 1;
+	const room::Books Theirs = room::BooksOf(W, {Mine});
+	Mine.State = life::LiveEntry::Registered;
+	const room::Books Playing = room::BooksOf(W, {Mine});
+	Expect(Theirs.Firsts.size() == 2 && Theirs.Firsts[1].Id == Noon.Id && Theirs.Firsts[1].Hero && Playing.Firsts.size() == 1,
+		"room fresh books: the player's settled win is their first; a night still being played decides nothing");
+	// Tuesday night: the Noon Deepstack is over, the world has its winner.
+	W.AdvanceTo(FreshEnd(Noon) + 60.0);
+	const room::Books Night = room::BooksOf(W, {});
+	Expect(Night.Firsts.size() == 2 && Night.Firsts[1].Id == Noon.Id && (Night.Firsts[1].Hero || !Night.Firsts[1].Winner.empty()),
+		"room fresh books: by Tuesday night the first Noon Deepstack is in, with its winner");
+	// A week on (results are kept a few days, the news longer): the firsts are still the firsts.
+	W.AdvanceTo(FreshOpened + 8.0 * 1440.0);
+	std::string Later;
+	W.Write(Later);
+	const room::Books Old = room::BooksOfText(Later, {}, W.Clock());
+	int Named = 0;
+	for (const room::Books::First& F : Old.Firsts)
+	{
+		Named += F.Hero || !F.Winner.empty() ? 1 : 0;
+	}
+	std::printf("room fresh books: a week on, %d firsts decided, %d with the winner the books still show; the most wins up the hill %d (%s)\n",
+		static_cast<int>(Old.Firsts.size()), Named, Old.MostWins, Old.Most.c_str());
+	Expect(Old.Firsts.size() == 6 && Old.Firsts.front().Id == Monday.Id && Old.Firsts.front().Winner == Winner,
+		"room fresh books: a week on, every one of the room's six events has its first, the Nightly's still the oldest, named from the world's news of it");
+}
+
+/** What a night's first-month lines said, checked against the books they were said from. */
+struct FreshHeard
+{
+	int Lines = 0;
+	int Answers = 0;
+	int ToYou = 0;
+	std::map<std::string, int> Topics;
+	std::vector<std::string> Said;
+	std::vector<std::pair<std::string, double>> When; // what each spent, and when (world minutes)
+	std::string Problem;
+};
+
+FreshHeard FreshListen(const Setup& S, const Night& N)
+{
+	FreshHeard H;
+	const room::Books& B = S.Books;
+	std::map<std::string, std::string> Templates;
+	for (const auto& Kv : talk::Inventory())
+	{
+		Templates[Kv.first] = Kv.second;
+	}
+	const auto Cancelled = [&B](const std::string& Id) { return std::find(B.Cancelled.begin(), B.Cancelled.end(), Id) != B.Cancelled.end(); };
+	const auto Decided = [&](const live::Occurrence& O, double At) {
+		const bool First = std::any_of(B.Firsts.begin(), B.Firsts.end(), [&O](const room::Books::First& F) { return F.Id == O.Id; });
+		return O.Id != S.O.Id && (First || (FreshEnd(O) <= At && !Cancelled(O.Id)));
+	};
+	const auto Room = [&](double At) {
+		std::vector<live::Occurrence> Out;
+		for (int D = ss::net::DayOf(B.Opened) - 1; D <= ss::net::DayOf(At) + 6; ++D)
+		{
+			for (const live::Occurrence& O : live::Occurrences(D))
+			{
+				if (FreshEnd(O) > B.Opened)
+				{
+					Out.push_back(O);
+				}
+			}
+		}
+		return Out;
+	};
+	const auto Won = [&](const std::string& Key, double At) {
+		for (const live::Occurrence& O : Room(At))
+		{
+			if (O.T->Key == Key && Decided(O, At))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	for (const auto& TC : N.Cues)
+	{
+		const room::Cue& C = TC.second;
+		if (C.What != room::Kind::Line || !Starts(C.Key, "field.fresh."))
+		{
+			continue;
+		}
+		const auto Fact = N.Facts.find(TC.first);
+		const double At = Fact != N.Facts.end() ? Fact->second.World : S.O.Start;
+		const int Day = ss::net::DayOf(At);
+		const std::string What = "\"" + C.Speaker + ": " + C.Text + "\" (" + C.Key + ", day " + std::to_string(Day) + " " + ss::net::TimeLabel(At) + ")";
+		const auto Problem = [&H, &What](const std::string& Why) {
+			if (H.Problem.empty())
+			{
+				H.Problem = Why + ": " + What;
+			}
+		};
+		if (Contains(C.Key, ".reply."))
+		{
+			++H.Answers;
+			continue;
+		}
+		++H.Lines;
+		H.ToYou += C.ToHero ? 1 : 0;
+		H.Said.push_back(What);
+		H.When.push_back({C.Topic, At});
+		if (++H.Topics[C.Topic] > 1)
+		{
+			Problem("said twice in a night");
+		}
+		const std::string Name = N.NameOfId.count(C.Who) ? N.NameOfId.at(C.Who) : C.Who;
+		const life::LiveVoice* V = nullptr;
+		for (const life::LiveVoice& Each : S.E.Voices)
+		{
+			V = Each.Name == Name ? &Each : V;
+		}
+		if (!talk::KnownByName(Name) && !(V && V->Is == static_cast<int>(world::Identity::LiveRegular)))
+		{
+			Problem("not one of the room's own");
+		}
+		if (!B.Blank || Day - ss::net::DayOf(B.Opened) >= room::FreshBooksDays)
+		{
+			Problem("past the books' first month");
+		}
+		const std::string Template = Templates[C.Key];
+		const std::string Key = Starts(C.Topic, "fresh:") ? C.Topic.substr(6) : std::string();
+		const bool You = Contains(C.Key, ".you.");
+		const bool Self = Contains(C.Key, ".self.");
+		if (You != C.ToHero)
+		{
+			Problem("a line about the player not said to them");
+		}
+		if (Key == "tonight")
+		{
+			if (Won(S.O.T->Key, At))
+			{
+				Problem("tonight's isn't the first");
+			}
+		}
+		else if (Starts(Key, "next:"))
+		{
+			const std::string Family = Key.substr(5);
+			if (Family == S.O.T->Key || Won(Family, At))
+			{
+				Problem("that first is decided");
+			}
+			live::Occurrence Next;
+			for (const live::Occurrence& O : Room(At))
+			{
+				Next = !Next.Valid() && O.T->Key == Family && FreshEnd(O) > At ? O : Next;
+			}
+			const bool Evening = Next.Valid() && Next.T->StartMinute >= 17 * 60;
+			const std::string When = !Next.Valid() ? std::string("?") : Next.Start <= At ? std::string("on right now") : Next.Day == Day ? std::string(Evening ? "tonight" : "later today")
+				: Next.Day == Day + 1 ? std::string(Evening ? "tomorrow night" : "tomorrow") : std::string(ss::net::WeekdayName(Next.Day, true)) + (Evening ? " night" : "");
+			if (!Contains(C.Text, When + "."))
+			{
+				Problem("the wrong day for it (" + When + ")");
+			}
+		}
+		else if (Key == "wall")
+		{
+			for (const live::Occurrence& O : Room(At))
+			{
+				if (Decided(O, At))
+				{
+					Problem("the board isn't blank (" + O.Id + ")");
+				}
+			}
+		}
+		else if (Key == "wallfirst" || Starts(Key, "first:"))
+		{
+			const room::Books::First* F = nullptr;
+			for (const room::Books::First& Each : B.Firsts)
+			{
+				const live::Occurrence O = live::FindOccurrence(Each.Id);
+				F = !F && (Key == "wallfirst" || Key == "first:" + std::string(O.T->Key)) ? &Each : F;
+			}
+			if (!F)
+			{
+				Problem("no such first in the books");
+				continue;
+			}
+			const live::Occurrence Of = live::FindOccurrence(F->Id);
+			for (const live::Occurrence& O : Room(At))
+			{
+				if (O.Id != Of.Id && FreshEnd(O) <= FreshEnd(Of) && (Key == "wallfirst" || O.T->Key == Of.T->Key) && !Cancelled(O.Id))
+				{
+					Problem("something ended before that first (" + O.Id + ")");
+				}
+			}
+			const int Ago = Day - Of.Day;
+			const bool Evening = Of.T->StartMinute >= 17 * 60;
+			const std::string Then = Ago == 1 ? std::string(Evening ? "last night" : "yesterday") : Ago < 7 ? std::string(ss::net::WeekdayName(Of.Day, true)) + (Evening ? " night" : "")
+																					   : std::string("opening week");
+			if (F->Hero != You || (Self && Name != F->Winner) || (!You && !Self && !Contains(C.Text, F->Winner)))
+			{
+				Problem("whose first it was");
+			}
+			if (Contains(Template, "{FreshThen") && !Contains(Lower(C.Text), Lower(Then)))
+			{
+				Problem("the wrong day for it (" + Then + ")");
+			}
+		}
+		else if (Key == "twice" || Key == "twice:you")
+		{
+			if ((Key == "twice" ? B.MostWins : B.HeroWins) < 2 || (Key == "twice" && !Self && !Contains(C.Text, B.Most)) || (Self && Name != B.Most))
+			{
+				Problem("more than once, or whose");
+			}
+		}
+		else if (Key == "books")
+		{
+			if (Day - ss::net::DayOf(B.Opened) >= 7)
+			{
+				Problem("past the books' first week");
+			}
+		}
+		else
+		{
+			Problem("a topic nobody offers");
+		}
+	}
+	return H;
+}
+
+void FreshReport(const char* Name, const FreshHeard& H)
+{
+	std::printf("room fresh: %s: %d first-month lines (%d to you), %d answers\n", Name, H.Lines, H.ToYou, H.Answers);
+	for (size_t I = 0; I < H.Said.size() && I < 4; ++I)
+	{
+		std::printf("  %s\n", H.Said[I].c_str());
+	}
+	if (!H.Problem.empty())
+	{
+		std::printf("  PROBLEM %s\n", H.Problem.c_str());
+	}
+}
+
+/**
+ * The director on a fresh world's books (update 2 §3.3 F9): the regulars talk about the room's firsts only while they're
+ * true, an established world's room is unchanged, and past the books' first month a fresh one's is too.
+ */
+void RoomFresh()
+{
+	// The talk itself: only from the director's books, once a night, and the answers claim nothing.
+	{
+		talk::Context C;
+		const life::LiveVoice Boots = MakeVoice("Boots", ss::Archetype::Fish, 0.6f, 0.3f, world::Identity::LiveRegular, 55);
+		C.Self = &Boots;
+		C.Vars = {{"Topic", "fresh.next"}, {"FreshEvent", "Big Stack"}, {"FreshWhen", "Saturday"}};
+		const talk::Said Bare = talk::Line(talk::Moment::Small, C);
+		C.Vars["Books"] = "fresh";
+		const talk::Said Keyless = talk::Line(talk::Moment::Small, C);
+		C.Vars["FreshKey"] = "next:bigstack";
+		const talk::Said Said = talk::Line(talk::Moment::Small, C);
+		std::set<std::string> Told;
+		talk::Remember(Told, Said);
+		C.Told = &Told;
+		const talk::Said Again = talk::Line(talk::Moment::Small, C);
+		Expect(Bare.Text.empty() && Keyless.Text.empty() && Contains(Said.Text, "Big Stack") && Contains(Said.Text, "Saturday.") && Said.Topic == "fresh:next:bigstack" &&
+				   Again.Text.empty(),
+			"room fresh: a first-month line only with the director's books, once a night (" + Said.Text + ")");
+		const auto Answer = [&Boots](const std::string& Topic) {
+			talk::Context A;
+			A.Self = &Boots;
+			A.Vars = {{"Topic", Topic}};
+			return talk::Line(talk::Moment::Answer, A);
+		};
+		Expect(Answer("fresh.first.you").Text.empty() && Starts(Answer("fresh.first").Key, "field.fresh.first.reply.") &&
+				   Starts(Answer("fresh.wallfirst.self").Key, "field.fresh.self.reply.") && Starts(Answer("fresh.next.nightly").Key, "field.fresh.reply."),
+			"room fresh: the answers (none to a line said to the player)");
+	}
+	const double Tue = 1440.0;
+	const double Wed = 2.0 * 1440.0;
+	// Tuesday's Noon Deepstack, the first in the books; the first Nightly went to Maria G. at three on Night One.
+	Setup A = MakeNight("embercrest-noon@1", 72, "", ":fresh");
+	A.Books.Blank = true;
+	A.Books.Opened = FreshOpened;
+	A.Books.Known = Tue + 11.5 * 60.0;
+	A.Books.Firsts = {{"embercrest-nightly@0", "Maria G.", false}};
+	A.Books.Most = "Maria G.";
+	A.Books.MostWins = 1;
+	const Night NA = Play(A, 4, 1.5f);
+	const FreshHeard HA = FreshListen(A, NA);
+	FreshReport("the first Noon Deepstack in the books", HA);
+	Expect(HA.Problem.empty() && HA.Lines >= 3 && (HA.Topics.count("fresh:tonight") || HA.Topics.count("fresh:next:bigstack") || HA.Topics.count("fresh:next:turbo")),
+		"room fresh: at the first Noon Deepstack in the books the regulars talk about the firsts, each only while it's true");
+	// The same night in an established world (the books' facts ignored without Blank) says exactly what it always did.
+	{
+		Setup Est = A;
+		Est.Books.Blank = false;
+		Setup Plain = A;
+		Plain.Books = room::Books();
+		const Night NPlain = Play(Plain, 4, 1.5f);
+		Expect(Play(Est, 4, 1.5f).Log == NPlain.Log, "room fresh: an established world's room is unchanged (the books' facts ignored)");
+		std::printf("room fresh: the same night without the books: %.4f ms a hand end (with them: %.4f)\n", NPlain.PlainMs / std::max(1, NPlain.PlainTicks),
+			NA.PlainMs / std::max(1, NA.PlainTicks));
+	}
+	// Tuesday's Nightly, the world read at six: the Noon Deepstack's first is still being played until nine, then decided
+	// (whoever won it: the room can't say), and the question stops.
+	// (Three nights of it, at the chattiest table setting, so the question comes up before nine and the talk goes on after.)
+	const double Nine = FreshEnd(live::FindOccurrence("embercrest-noon@1"));
+	int AskedBefore = 0;
+	int AskedAfter = 0;
+	int TalkAfter = 0;
+	std::string BProblem;
+	for (const char* Salt : {":fresh2", ":fresh2b", ":fresh2c"})
+	{
+		Setup B = MakeNight("embercrest-nightly@1", 96, "", Salt);
+		B.Books = A.Books;
+		B.Books.Known = Tue + 18.0 * 60.0;
+		const Night NB = Play(B, 4, 2.0f);
+		const FreshHeard HB = FreshListen(B, NB);
+		FreshReport("Tuesday's Nightly, the first Noon Deepstack over at nine", HB);
+		for (const std::pair<std::string, double>& W : HB.When)
+		{
+			AskedBefore += W.first == "fresh:next:noon" && W.second < Nine ? 1 : 0;
+			AskedAfter += W.first == "fresh:next:noon" && W.second >= Nine ? 1 : 0;
+			TalkAfter += W.second >= Nine ? 1 : 0;
+		}
+		const bool Wrong = !HB.Problem.empty() || HB.Topics.count("fresh:tonight") || HB.Topics.count("fresh:next:nightly");
+		BProblem = BProblem.empty() && Wrong ? HB.Problem + " (or the second Nightly called the first)" : BProblem;
+	}
+	// And a night taken up after nine with nothing said yet (an established night's checkpoint, resumed on the fresh books):
+	// every other topic can still come up, the Noon Deepstack's first never.
+	int ResumedLines = 0;
+	{
+		Setup Plain = MakeNight("embercrest-nightly@1", 96, "", ":fresh2b");
+		const Night NP = Play(Plain, 4, 2.0f);
+		int From = -1;
+		for (const auto& F : NP.Facts)
+		{
+			From = From < 0 && F.second.HadNote && F.second.HeroTable >= 0 && F.second.World >= Nine + 5.0 && NP.Saves.count(F.first) ? F.first : From;
+		}
+		Setup B = Plain;
+		B.Books = A.Books;
+		B.Books.Known = Tue + 18.0 * 60.0;
+		if (From >= 0)
+		{
+			const FreshHeard HR = FreshListen(B, Play(B, 4, 2.0f, From, &NP.Saves.at(From)));
+			FreshReport("Tuesday's Nightly, taken up after nine", HR);
+			ResumedLines = HR.Lines;
+			for (const std::pair<std::string, double>& W : HR.When)
+			{
+				AskedAfter += W.first == "fresh:next:noon" ? 1 : 0;
+				TalkAfter += W.second >= Nine ? 1 : 0;
+			}
+			BProblem = BProblem.empty() ? HR.Problem : BProblem;
+		}
+		std::printf("room fresh: Tuesday's Nightly taken up at hand %d (%s)\n", From, From >= 0 ? ss::net::TimeLabel(NP.Facts.at(From).World).c_str() : "never");
+	}
+	std::printf("room fresh: Tuesday's Nightlies: the first Noon Deepstack asked about %d time(s) before %s, %d after; %d first-month line(s) after it\n", AskedBefore,
+		ss::net::TimeLabel(Nine).c_str(), AskedAfter, TalkAfter);
+	Expect(BProblem.empty() && AskedBefore >= 1 && AskedAfter == 0 && TalkAfter >= 1 && ResumedLines >= 1,
+		"room fresh: at the second Nightly in the books nobody calls it the first, and the Noon Deepstack's first is asked about only until nine" + BProblem);
+	// Monday's Nightly called off: on Tuesday nothing in the books has a winner, the board is blank, and the first Nightly is
+	// tonight.
+	// (Three nights of it, so the blank board and the first Nightly both come up.)
+	int Blank = 0;
+	int FirstNightly = 0;
+	std::string EProblem;
+	for (const char* Salt : {":fresh3", ":fresh3b", ":fresh3c"})
+	{
+		Setup E = MakeNight("embercrest-noon@1", 72, "", Salt);
+		E.Books.Blank = true;
+		E.Books.Opened = FreshOpened;
+		E.Books.Known = Tue + 11.5 * 60.0;
+		E.Books.Cancelled = {"embercrest-nightly@0"};
+		const FreshHeard HE = FreshListen(E, Play(E, 4, 1.5f));
+		FreshReport("Monday's Nightly called off", HE);
+		Blank += static_cast<int>(HE.Topics.count("fresh:wall"));
+		FirstNightly += static_cast<int>(HE.Topics.count("fresh:next:nightly"));
+		EProblem = EProblem.empty() && (!HE.Problem.empty() || HE.Topics.count("fresh:wallfirst")) ? HE.Problem + " (or a first name claimed)" : EProblem;
+	}
+	Expect(EProblem.empty() && Blank >= 1 && FirstNightly >= 1, "room fresh: with nothing won yet the board is blank and the first Nightly is still to come (" +
+		std::to_string(Blank) + " blank, " + std::to_string(FirstNightly) + " first Nightly)" + EProblem);
+	// Wednesday's Noon Deepstack: the player took the first Nightly and has two wins; Boots took the first Noon Deepstack.
+	Setup F = MakeNight("embercrest-noon@2", 72, "", ":fresh4");
+	F.Books.Blank = true;
+	F.Books.Opened = FreshOpened;
+	F.Books.Known = Wed + 11.0 * 60.0;
+	F.Books.Firsts = {{"embercrest-nightly@0", "", true}, {"embercrest-noon@1", "Boots", false}};
+	F.Books.HeroWins = 2;
+	F.Books.Most = "Boots";
+	F.Books.MostWins = 1;
+	const Night NF = Play(F, 4, 1.5f);
+	const FreshHeard HF = FreshListen(F, NF);
+	FreshReport("the player's first, and Boots's", HF);
+	Expect(HF.Problem.empty() && HF.ToYou >= 1 && !HF.Topics.count("fresh:tonight"),
+		"room fresh: the player's own first is said to them, Boots's by name, and nobody calls Wednesday's the first");
+	// Past the books' first month a fresh world's room is an established one's.
+	Setup C = MakeNight("embercrest-nightly@36", 60, "", ":fresh5");
+	C.Books = A.Books;
+	C.Books.Known = 36.0 * 1440.0 + 17.0 * 60.0;
+	const Night NC = Play(C, 4, 1.0f);
+	Setup CPlain = C;
+	CPlain.Books = room::Books();
+	Expect(FreshListen(C, NC).Lines == 0 && NC.Log == Play(CPlain, 4, 1.0f).Log, "room fresh: past the books' first month the room says what an established one would");
+	// What the books cost the director (a fresh night's hands against the golden's budget of 0.05 ms).
+	const double FreshPlain = NA.PlainMs / std::max(1, NA.PlainTicks);
+	std::printf("room fresh: the director takes %.4f ms a hand end on fresh books (budget 0.05), %.4f with the night's equity runs averaged in\n", FreshPlain,
+		NA.DirectorMs / std::max(1, NA.Ticks));
+	Expect(FreshPlain < 0.25, "room fresh: the books cost the director next to nothing a hand");
+}
 } // namespace room_test
 
 namespace room_field
@@ -2085,6 +2615,8 @@ int main(int argc, char** argv)
 	room_test::RoomHeroHonor();
 	room_test::RoomNightly(Write);
 	room_test::RoomFinalTable();
+	room_test::RoomFreshBooksOf();
+	room_test::RoomFresh();
 	room_test::Failures += room_field::Run();
 	room_test::Failures += room_seg_auto::Run();
 	const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count();

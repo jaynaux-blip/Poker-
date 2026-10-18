@@ -7,8 +7,9 @@
 //                           the measured standard deviations, the cost of a hand, and the sample sizes they set
 //   style_test ring [scale] assertions 2, 3, 4, 5, 7, 10 and 14 at S-8's sizes (scale multiplies them; minutes)
 //   style_test sng [scale]  assertions 8, 9 and 13 at S-8's sizes (minutes)
-//   style_test strength [hypers] [turbos] [deep] [styles]   §2.5's table: Autopilot, coach-best and the 94% hero and
-//                           every style at Sharpness 1.0 and 0.80 on the same paired seeds, with intervals (offline, hours)
+//   style_test strength [hypers] [turbos] [deep] [styles] [sharp=x] [dump=path] [salt=x]   §2.5's table: Autopilot,
+//                           coach-best and the 94% hero and every style at Sharpness 1.0 and 0.80 on the same paired seeds,
+//                           with intervals and U3's checks (offline, hours; C1's sample 6,000 / 2,000 / 2,000 by default)
 //   --threads N             worker threads for the long modes (default 3, and at most 3 in the CI run)
 //
 // The statistics rule (§2.10): fixed seeds make every comparison deterministic, so a comparison passes only when
@@ -585,10 +586,8 @@ RingResult RunRing(const RingConfig& C, const HeroSpec& Hero)
 		P.Adjusted.assign(static_cast<size_t>(C.Hands), 0.0);
 		P.Seen.assign(static_cast<size_t>(C.Hands), 0);
 		RingBlock(C, Hero, B, P);
-	});
-	for (int B = 0; B < BlockCount; ++B)
-	{
-		const RingResult& P = Parts[static_cast<size_t>(B)];
+		// The block's own hands into the result (each block writes only its slice), then its series go: every block
+		// keeping a whole-run series made the ring mode's memory grow with the square of its length (C1: 40 GB at 0.5).
 		const int First = B * C.Reseat;
 		const int Last = std::min(C.Hands, First + C.Reseat);
 		for (int I = First; I < Last; ++I)
@@ -597,6 +596,13 @@ RingResult RunRing(const RingConfig& C, const HeroSpec& Hero)
 			Out.Adjusted[static_cast<size_t>(I)] = P.Adjusted[static_cast<size_t>(I)];
 			Out.Seen[static_cast<size_t>(I)] = P.Seen[static_cast<size_t>(I)];
 		}
+		std::vector<double>().swap(P.Net);
+		std::vector<double>().swap(P.Adjusted);
+		std::vector<int>().swap(P.Seen);
+	});
+	for (int B = 0; B < BlockCount; ++B)
+	{
+		const RingResult& P = Parts[static_cast<size_t>(B)];
 		Out.Illegal += P.Illegal;
 		Out.Decisions += P.Decisions;
 		auto Merge = [](Moments& Into, const Moments& From) {
@@ -1379,17 +1385,48 @@ bool SlipSpot(const ss::PlayerView& V)
 	return V.Hole.size() == 2 && (ss::HandPercentile(V.Hole[0], V.Hole[1]) <= 0.5 || StackBb <= 15.0);
 }
 
-/** §2.5's slip profile: pushed toward the losing station direction. */
+/** §2.5's slip profile as C1 calibrated it: the Calling Station's numbers after the opening decision, the style's own
+ *  opening range, limps and 3-bets kept. */
 ss::Profile SlipProfile(const ss::Profile& P)
 {
+	const ss::Profile St = ss::profiles_detail::Base(ss::Archetype::Station);
 	ss::Profile S = P;
-	S.Aggression = P.Aggression * 0.5;
-	S.Stickiness = std::min(0.95, P.Stickiness + 0.30);
-	S.CallWidth = P.CallWidth * 1.4;
-	S.Bluff = P.Bluff * 0.5;
-	S.PushFold = P.PushFold * 0.5;
-	S.IcmAware = P.IcmAware * 0.3;
+	S.CallWidth = St.CallWidth;
+	S.Stickiness = St.Stickiness;
+	S.Aggression = St.Aggression;
+	S.Bluff = St.Bluff;
+	S.Cbet = St.Cbet;
+	S.Sizing = St.Sizing;
+	S.PushFold = St.PushFold;
+	S.IcmAware = St.IcmAware;
 	return S;
+}
+
+/**
+ * C1's slip floors (update2/C1_CALIBRATION.md), pinned: what each profile style slips at Sharpness 1.0. A change here is a
+ * calibration change: re-measure with style_test strength and record it there.
+ */
+double SlipFloor(ss::style::Style S)
+{
+	using ss::style::Style;
+	switch (S)
+	{
+	case Style::Tag:
+	case Style::Exploit: return 0.38;
+	case Style::Lag: return 0.25;
+	case Style::Nit: return 0.70;
+	case Style::Reg: return 0.25;
+	case Style::IcmShark: return 0.32; // out of its zone (no tournament here); 0 in it
+	default: return 0.0;
+	}
+}
+
+/** The slip's chance at a non-trivial decision: the floor + k x (1 - Sharpness), k = 1.2 (x 2 for GTO, x 2.5 for the
+ *  Maniac: C1), at most 1. */
+double SlipChanceAt(ss::style::Style S, double Sharp)
+{
+	const double Slope = 1.2 * (S == ss::style::Style::Gto ? 2.0 : S == ss::style::Style::Maniac ? 2.5 : 1.0);
+	return std::min(1.0, SlipFloor(S) + Slope * (1.0 - std::max(0.0, std::min(1.0, Sharp))));
 }
 
 /** What one random-spot run saw: decisions, the non-trivial ones, the slips among them, and any that played otherwise. */
@@ -1401,7 +1438,8 @@ struct SlipRun
 /**
  * Random spots (RandomSpots' tables and opponents) where every hero decision of style S goes through style::Decide and is
  * checked, draw for draw, against ss::Decide with the profile the spec says it plays (Expect): the style's own, or the
- * slipped one when the decision is non-trivial and Mix's slip draw lands under k x (1 - Sharpness), at the tilt the style
+ * slipped one when the decision is non-trivial and Mix's slip draw lands under its slip chance (C1: the style's floor +
+ * k x (1 - Sharpness)), at the tilt the style
  * feels (Tilt x TiltProne / 0.35, clamped) and the bots' pressure. Seen: the observed stats Exploitative reads (never
  * counted here, so they stay as given). Differs counts the decisions that don't match Expect (Exploitative's reads).
  */
@@ -1453,8 +1491,7 @@ SlipRun SlipSpots(ss::style::Style S, double Sharp, double Tilt, int Want, const
 				ss::Rng Rb = Ra;
 				const ss::BotDecision X = ss::style::Decide(C, B, Ra);
 				const bool NonTrivial = SlipSpot(C.View);
-				const bool Slip = NonTrivial &&
-					ss::style::Mix(MixSeed, Hand, Idx, static_cast<int>(C.View.History.size()), 0x736c6970u) < 1.2 * (1.0 - std::max(0.0, std::min(1.0, Sharp)));
+				const bool Slip = NonTrivial && ss::style::Mix(MixSeed, Hand, Idx, static_cast<int>(C.View.History.size()), 0x736c6970u) < SlipChanceAt(S, Sharp);
 				const ss::Profile P = Slip ? SlipProfile(Base) : Base;
 				ss::BotContext Ctx;
 				Ctx.Prof = &P;
@@ -1500,14 +1537,16 @@ SlipRun SlipSpots(ss::style::Style S, double Sharp, double Tilt, int Want, const
 
 /**
  * The slip and the tilt inside style::Decide (§2.5), decision by decision: the profile styles (TAG, LAG, Nit, Maniac,
- * Balanced Reg) play ss::Decide with their own profile, or with the slipped one at the non-trivial decisions Mix picks
- * (k x (1 - Sharpness): 60% at 0.5), at the tilt each feels; never a slip at Sharpness 1.0. And Exploitative is plain TAG
- * until it has reads (§2.4.3: the tile's promise), and plays otherwise once it has some.
+ * Balanced Reg, and ICM Shark away from a tournament, out of its zone) play ss::Decide with their own profile, or with the
+ * slipped one at the non-trivial decisions Mix picks
+ * (C1: the style's floor + k x (1 - Sharpness), at most 1), at the tilt each feels; at Sharpness 1.0 only the floor
+ * slips, and the Maniac (no floor) never. And Exploitative is plain TAG until it has reads (§2.4.3: the tile's promise),
+ * slips included, and plays otherwise once it has some.
  */
 void CiSlipAndReads()
 {
 	using ss::style::Style;
-	const std::vector<Style> Plain = {Style::Tag, Style::Lag, Style::Nit, Style::Maniac, Style::Reg};
+	const std::vector<Style> Plain = {Style::Tag, Style::Lag, Style::Nit, Style::Maniac, Style::Reg, Style::IcmShark};
 	std::vector<SlipRun> Half(Plain.size()), Full(Plain.size());
 	ss::reads::Table Empty, Stations;
 	for (int Seat = 1; Seat < 9; ++Seat)
@@ -1529,7 +1568,7 @@ void CiSlipAndReads()
 		{
 			const std::string Id = ss::style::InfoOf(Plain[static_cast<size_t>(K)]).Id;
 			Half[static_cast<size_t>(K)] = SlipSpots(Plain[static_cast<size_t>(K)], 0.5, 0.5, 900, "slip:" + Id, nullptr, Plain[static_cast<size_t>(K)]);
-			Full[static_cast<size_t>(K)] = SlipSpots(Plain[static_cast<size_t>(K)], 1.0, 0.0, 300, "slip-full:" + Id, nullptr, Plain[static_cast<size_t>(K)]);
+			Full[static_cast<size_t>(K)] = SlipSpots(Plain[static_cast<size_t>(K)], 1.0, 0.0, 900, "slip-full:" + Id, nullptr, Plain[static_cast<size_t>(K)]);
 		}
 		else if (K == static_cast<int>(Plain.size()))
 		{
@@ -1549,10 +1588,16 @@ void CiSlipAndReads()
 		Expect(H.Decisions >= 900 && H.Mismatch == 0, std::string("slip: ") + ss::style::InfoOf(Plain[K]).Name +
 														   " at Sharpness 0.5 plays its profile, or the slipped one where the slip lands, at the tilt it feels (" +
 														   std::to_string(H.Mismatch) + " off)");
-		Expect(std::fabs(Share - 0.6) < 0.05 && H.Decisions > H.NonTrivial, std::string("slip: ") + ss::style::InfoOf(Plain[K]).Name +
-																			   " slips at k x (1 - Sharpness) of its non-trivial decisions, never a trivial one");
-		Expect(Full[K].Decisions >= 300 && Full[K].Mismatch == 0 && Full[K].Slips == 0,
-			std::string("slip: ") + ss::style::InfoOf(Plain[K]).Name + " never slips at Sharpness 1.0");
+		const double Want = SlipChanceAt(Plain[K], 0.5);
+		Expect(std::fabs(Share - Want) < 0.05 && H.Decisions > H.NonTrivial, std::string("slip: ") + ss::style::InfoOf(Plain[K]).Name +
+																				" slips at its floor + k x (1 - Sharpness) of its non-trivial decisions, never a trivial one");
+		const SlipRun& F = Full[K];
+		const double FullShare = static_cast<double>(F.Slips) / std::max(1, F.NonTrivial);
+		const double Floor = SlipFloor(Plain[K]);
+		std::printf("  slip: %-13s at 1.0, %d of %d non-trivial decisions slipped (%.1f%%; its floor %.0f%%)\n", ss::style::InfoOf(Plain[K]).Name, F.Slips,
+			F.NonTrivial, 100.0 * FullShare, 100.0 * Floor);
+		Expect(F.Decisions >= 900 && F.Mismatch == 0 && (Floor > 0.0 ? std::fabs(FullShare - Floor) < 0.06 : F.Slips == 0),
+			std::string("slip: ") + ss::style::InfoOf(Plain[K]).Name + " slips at its floor at Sharpness 1.0 (C1), the Maniac never");
 	}
 	std::printf("  Exploitative against TAG: %d of %d decisions differ with no reads, %d of %d against eight read stations\n", NoReads.Differs, NoReads.Decisions,
 		WithReads.Differs, WithReads.Decisions);
@@ -1624,6 +1669,102 @@ void CiSlipAndReads()
 }
 
 /**
+ * Push/Fold's chart depth (C1 round 2, §2.5's knob 2): on tables where every stack starts between 17 and 24 big blinds
+ * Push/Fold is its profile through ss::Decide, draw for draw (its charts stop at 15; its floor is only deeper than 25,
+ * and at Sharpness 1.0 nothing else slips); where every stack starts between 4 and 14, each first-in
+ * decision with no limper is a jam or a fold (the charts), which the profile alone wouldn't always make.
+ */
+void CiPushFoldDepth()
+{
+	const ss::Profile P = ss::style::ProfileOf(ss::style::Style::PushFold);
+	int Mid = 0, MidOff = 0, Short = 0, ShortOff = 0, ShortDiffers = 0;
+	for (int Hand = 0; Hand < 1200; ++Hand)
+	{
+		const bool Deeper = Hand % 3 == 0;
+		ss::Rng G("pushfold-depth:" + std::to_string(Hand));
+		ss::HandConfig Cfg;
+		const int Players = 3 + G.Int(7);
+		for (int Seat = 0; Seat < Players; ++Seat)
+		{
+			ss::SeatInput In;
+			In.Seat = Seat;
+			In.Id = Seat == 0 ? std::string(ss::HeroId) : "p" + std::to_string(Seat);
+			In.Stack = static_cast<ss::Chips>((Deeper ? 17.0 + G.Next() * 7.0 : 4.0 + G.Next() * 10.0) * 100.0);
+			Cfg.Players.push_back(In);
+		}
+		Cfg.ButtonSeat = G.Int(Players);
+		Cfg.SmallBlind = 50;
+		Cfg.BigBlind = 100;
+		Cfg.Ante = G.Chance(0.6) ? 100 : 0;
+		ss::Hand H(Cfg, G);
+		int Guard = 0;
+		while (!H.bComplete && ++Guard < 300)
+		{
+			const int Idx = H.ToAct;
+			const ss::LegalActions L = H.GetLegalActions();
+			if (H.Seats[static_cast<size_t>(Idx)].Id != ss::HeroId)
+			{
+				const double Roll = G.Next();
+				ss::PlayerAction A = L.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Fold();
+				if (Roll < 0.45)
+				{
+					A = L.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Call();
+				}
+				else if (Roll < 0.7 && L.CanRaise)
+				{
+					A = ss::PlayerAction::RaiseTo(G.Chance(0.3) ? static_cast<double>(L.MaxRaiseTo) : static_cast<double>(L.MinRaiseTo));
+				}
+				if (!H.Act(A))
+				{
+					H.Act(L.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Fold());
+				}
+				continue;
+			}
+			ss::style::HeroContext C;
+			C.View = ss::MakeView(H, Idx);
+			C.HeroIdx = Idx;
+			C.MixSeed = 11;
+			C.Tick = Hand;
+			ss::style::HeroBrain B;
+			B.S = ss::style::Style::PushFold;
+			B.Sharp = 1.0;
+			ss::Rng Ra("pushfold-depth-r:" + std::to_string(Hand) + ":" + std::to_string(Guard));
+			ss::Rng Rb = Ra;
+			const ss::BotDecision X = ss::style::Decide(C, B, Ra);
+			ss::BotContext Ctx;
+			Ctx.Prof = &P;
+			Ctx.R = &Rb;
+			const ss::BotDecision Y = ss::Decide(C.View, Ctx);
+			uint32_t Sa[4], Sb[4];
+			Ra.GetState(Sa);
+			Rb.GetState(Sb);
+			const bool Same = X.Action.Type == Y.Action.Type && X.Action.To == Y.Action.To && std::memcmp(Sa, Sb, sizeof(Sa)) == 0;
+			if (Deeper)
+			{
+				++Mid;
+				MidOff += Same ? 0 : 1;
+			}
+			else if (C.View.CurrentStreet == ss::Street::Preflop && ss::PreflopSummary(C.View).Raises == 0 && ss::PreflopSummary(C.View).Limpers == 0 && C.View.Me != C.View.BbIdx)
+			{
+				++Short;
+				const bool Jam = X.Action.Type == ss::PlayerAction::Kind::Raise && X.Action.To == static_cast<double>(C.View.MaxRaiseTo);
+				const bool Folds = X.Action.Type == ss::PlayerAction::Kind::Fold || X.Action.Type == ss::PlayerAction::Kind::Check;
+				ShortOff += Jam || Folds ? 0 : 1;
+				ShortDiffers += Same ? 0 : 1;
+			}
+			if (!H.Act(X.Action))
+			{
+				H.Act(L.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Fold());
+			}
+		}
+	}
+	std::printf("  Push/Fold's depth: %d decisions from 17 to 24 BB (%d off its profile); %d first-in decisions under 15 BB (%d neither a jam nor a fold, %d unlike the profile)\n",
+		Mid, MidOff, Short, ShortOff, ShortDiffers);
+	Expect(Mid >= 300 && MidOff == 0, "Push/Fold plays its profile from 17 to 24 big blinds, draw for draw (its charts stop at 15: C1)");
+	Expect(Short >= 100 && ShortOff == 0 && ShortDiffers > 0, "Push/Fold jams or folds first in under 15 big blinds (its charts)");
+}
+
+/**
  * Exploitative's pre-pass (§2.4.3), on heads-up flops built for it: against a read station (VPIP >= 0.40, aggression
  * <= 1.2, c >= 0.3) with no bet to face, it bets half the pot with HeuristicEquity in [0.60 - 0.06c, 0.60); facing a read
  * nit's bet (130 into 200: a price of 0.28), it folds under the pot odds + 0.08c. The villain is "v", read over 300 hands.
@@ -1682,6 +1823,11 @@ void CiExploitPrePass()
 		Ctx.HeroIdx = H.ToAct;
 		Ctx.MixSeed = 7;
 		Ctx.Tick = Deal;
+		// A decision the slip takes (C1: Exploitative slips at TAG's floor even at Sharpness 1.0) never reaches the pre-pass.
+		if (ss::style::Mix(Ctx.MixSeed, Ctx.Tick, Ctx.HeroIdx, static_cast<int>(Ctx.View.History.size()), 0x736c6970u) < SlipChanceAt(ss::style::Style::Exploit, 1.0))
+		{
+			continue;
+		}
 		const double He = ss::HeuristicEquity(Ctx.View.Hole, Ctx.View.Board, 1);
 		const double Odds = static_cast<double>(Ctx.View.ToCall) / static_cast<double>(Ctx.View.Pot + Ctx.View.ToCall);
 		ss::style::HeroBrain B;
@@ -1985,6 +2131,7 @@ void RunCi(bool Write)
 	CiReads();
 	CiMixAndSlip();
 	CiSlipAndReads();
+	CiPushFoldDepth();
 	CiExploitPrePass();
 	CiIcm();
 	CiCopy();
@@ -2449,14 +2596,118 @@ void SngMode(double Scale)
 
 struct StrengthRow
 {
-	std::string Label;
+	HeroSpec Hero;
 	std::map<std::string, EventSet> ByFormat;
 };
 
+/**
+ * §2.5's band for a style at full Sharpness in a format, relative to Autopilot's mean on the same seeds (Maniac's hypers
+ * and turbos are absolute, 40-47%). A band passes when the style's 95% interval overlaps it. The bands are the design's
+ * targets and print as ok or MISS; U3's ceilings and its default rule are what fail the run.
+ */
+struct StrengthBand
+{
+	bool Known = false;
+	double Lo = -1e9, Hi = 1e9;
+	bool Absolute = false;
+};
+
+StrengthBand StrengthBandOf(ss::style::Style S, bool Deep)
+{
+	using ss::style::Style;
+	StrengthBand B;
+	B.Known = true;
+	auto Set = [&B](double Lo, double Hi) {
+		B.Lo = Lo;
+		B.Hi = Hi;
+	};
+	switch (S)
+	{
+	case Style::Nit: Deep ? Set(-1e9, 0.0) : Set(-4.0, -1.0); break;
+	case Style::Tag: Deep ? Set(-1.0, 0.5) : Set(-1.5, 0.5); break;
+	case Style::Lag: Deep ? Set(-1.0, 1.0) : Set(-3.0, 0.5); break;
+	case Style::Maniac:
+		if (Deep)
+		{
+			Set(-1e9, -5.0);
+		}
+		else
+		{
+			Set(40.0, 47.0);
+			B.Absolute = true;
+		}
+		break;
+	case Style::Reg:
+	case Style::IcmShark: Set(-1.0, 0.5); break;
+	case Style::Gto: Set(-1.0, 1.0); break;
+	case Style::Exploit: Deep ? Set(0.0, 1.5) : Set(-2.0, 0.0); break;
+	case Style::PushFold: Deep ? Set(-4.0, -2.0) : Set(0.5, 1.5); break;
+	default: B.Known = false; break;
+	}
+	return B;
+}
+
+/**
+ * The mixed schedule (U3): hypers, turbos and deep events weighted 3:1:1, the spec's sample (3,000 hypers, 1,000 turbos,
+ * 1,000 deep events), whatever counts are run, so a bigger sample in one format never changes the schedule. Each format's
+ * paired difference is independent of the others', so the mix's SE is the weighted root sum of squares.
+ */
+struct StrengthMix
+{
+	double Mean = 0, Se = 0;
+};
+
+StrengthMix StrengthMixOf(const std::vector<std::pair<std::string, Moments>>& Parts)
+{
+	StrengthMix M;
+	double Weights = 0, Var = 0;
+	for (const auto& P : Parts)
+	{
+		const double W = P.first == "hyper" ? 3.0 : 1.0;
+		Weights += W;
+		M.Mean += W * P.second.Mean;
+		Var += W * W * P.second.Se() * P.second.Se();
+	}
+	if (Weights > 0)
+	{
+		M.Mean /= Weights;
+		M.Se = std::sqrt(Var) / Weights;
+	}
+	return M;
+}
+
+/** One event per line, for paired analysis across runs: hero,format,index,finish,roi,itm,won,hands,place. */
+void StrengthDump(std::FILE* F, const std::string& Label, const std::string& Format, const EventSet& E)
+{
+	for (size_t I = 0; I < E.R.size(); ++I)
+	{
+		const EventResult& X = E.R[I];
+		std::fprintf(F, "%s,%s,%zu,%.6f,%.6f,%d,%d,%d,%d\n", Label.c_str(), Format.c_str(), I, X.Pct, X.Roi * 100.0, X.Itm ? 1 : 0, X.Won ? 1 : 0, X.Hands, X.Place);
+	}
+	std::fflush(F);
+}
+
+/**
+ * §2.5's strength table (offline, the lead's C1): Autopilot, coach-best, the 94% hero and every shown style at Sharpness
+ * 1.0 and at the default 0.80, on paired seeds, in the three MTT formats. Options after the counts: style ids (or "coach",
+ * "accurate") to run only those, "sharp=0.9" (repeatable) for other Sharpnesses, "dump=path" to append every event,
+ * "salt=x" for a fresh set of seeds (tuning away from the official ones).
+ *
+ * U3's checks (C1_CALIBRATION.md §1):
+ *   - the default Sharpness, on the mixed schedule, one-sided: the paired finish difference + 1.645 SE <= 0, and the
+ *     paired ROI difference + 1.645 SE <= 0;
+ *   - full Sharpness, every format: the paired finish difference + 1.645 SE <= 1.5, and the mean + 1.645 SE <= 55.5; on
+ *     the mixed schedule, the ROI difference's estimate <= +8 points (its one-sided number prints beside it).
+ * Paired ROI is the prize's luck: its SE is about 10 points on the spec's sample (6.5 on C1's 6,000 / 2,000 / 2,000) and
+ * 25 to 40 in a 1,000-runner turbo, where a single win moves the mean 20 points. A style at its default Sharpness sits
+ * far enough under Autopilot for the one-sided rule; at full Sharpness, where a style may sit level with Autopilot, a
+ * one-sided ROI ceiling would force it 10 to 15 ROI points under, so that one reads the estimate. A format's own ROI
+ * prints with its interval and isn't checked: a win or two decides it. The default counts are C1's final sample;
+ * Push/Fold's turbo ceiling needs 6,000 turbos (it sits at Autopilot + 0.5 there): strength 0 6000 0 pushfold.
+ */
 void StrengthMode(int Hypers, int Turbos, int Deeps, const std::vector<std::string>& Only)
 {
 	using ss::style::Style;
-	std::printf("ai_styles strength: §2.5 (hypers %d, turbos %d, deep %d, %d threads). Average finish, 50%% = average.\n", Hypers, Turbos, Deeps, Threads);
 	struct Format
 	{
 		const char* Name;
@@ -2464,19 +2715,37 @@ void StrengthMode(int Hypers, int Turbos, int Deeps, const std::vector<std::stri
 		int Count;
 	};
 	const std::vector<Format> Formats = {{"hyper", HyperSpec(), Hypers}, {"turbo", TurboSpec(), Turbos}, {"deep", DeepSpec(), Deeps}};
-	std::vector<HeroSpec> Heroes = {StyleHero(Style::Autopilot)};
-	// "sharp=0.9" (one or more) replaces the two Sharpnesses measured (1.0 and the default 0.80).
 	std::vector<double> Sharps;
 	std::vector<std::string> Ids;
+	std::string DumpPath, Salt;
 	for (const std::string& O : Only)
 	{
-		(O.rfind("sharp=", 0) == 0 ? (void)Sharps.push_back(std::atof(O.c_str() + 6)) : (void)Ids.push_back(O));
+		if (O.rfind("sharp=", 0) == 0)
+		{
+			Sharps.push_back(std::atof(O.c_str() + 6));
+		}
+		else if (O.rfind("dump=", 0) == 0)
+		{
+			DumpPath = O.substr(5);
+		}
+		else if (O.rfind("salt=", 0) == 0)
+		{
+			Salt = O.substr(5) + ":";
+		}
+		else
+		{
+			Ids.push_back(O);
+		}
 	}
 	if (Sharps.empty())
 	{
 		Sharps = {1.0, 0.8};
 	}
+	std::printf("ai_styles strength: §2.5 (hypers %d, turbos %d, deep %d, %d threads%s). Average finish, 50%% = average.\n", Hypers, Turbos, Deeps, Threads,
+		Salt.empty() ? "" : ", tuning seeds");
+	std::FILE* Dump = DumpPath.empty() ? nullptr : std::fopen(DumpPath.c_str(), "a");
 	auto Wanted = [&](const std::string& Id) { return Ids.empty() || std::find(Ids.begin(), Ids.end(), Id) != Ids.end(); };
+	std::vector<HeroSpec> Heroes = {StyleHero(Style::Autopilot)};
 	if (Wanted("coach"))
 	{
 		Heroes.push_back(CoachHero());
@@ -2510,7 +2779,7 @@ void StrengthMode(int Hypers, int Turbos, int Deeps, const std::vector<std::stri
 	for (const HeroSpec& H : Heroes)
 	{
 		StrengthRow Row;
-		Row.Label = H.Label;
+		Row.Hero = H;
 		for (const Format& F : Formats)
 		{
 			if (F.Count <= 0)
@@ -2518,7 +2787,7 @@ void StrengthMode(int Hypers, int Turbos, int Deeps, const std::vector<std::stri
 				continue;
 			}
 			const double Start = NowMs();
-			Row.ByFormat[F.Name] = RunEvents(F.Spec, std::string("strength:") + F.Name, F.Count, H, false, false, false);
+			Row.ByFormat[F.Name] = RunEvents(F.Spec, Salt + "strength:" + F.Name, F.Count, H, false, false, false);
 			// The shape §2.5 checks: the finish's SD, the cash rate, wins per 100 and early busts (the bottom quarter).
 			const EventSet& Got = Row.ByFormat[F.Name];
 			double Early = 0;
@@ -2530,25 +2799,31 @@ void StrengthMode(int Hypers, int Turbos, int Deeps, const std::vector<std::stri
 				Of(Got.Pct()).Mean, Of(Got.Pct()).Se(), Of(Got.Pct()).Sd(), Of(Got.Roi()).Mean, Of(Got.Flag(&EventResult::Itm)).Mean, Of(Got.Flag(&EventResult::Won)).Mean,
 				100.0 * Early / static_cast<double>(std::max<size_t>(1, Got.R.size())), Got.Accuracy(), (NowMs() - Start) / 1000.0);
 			std::fflush(stdout);
+			if (Dump)
+			{
+				StrengthDump(Dump, H.Label, F.Name, Got);
+			}
 		}
 		Rows.push_back(Row);
 	}
-	// The table: each format's mean with its 95% interval and the paired difference to Autopilot.
-	std::printf("\n  %-22s", "hero");
-	for (const Format& F : Formats)
+	if (Dump)
 	{
-		if (F.Count > 0)
-		{
-			std::printf(" | %-36s", F.Name);
-		}
+		std::fclose(Dump);
 	}
-	std::printf(" | mixed: finish, ROI vs Autopilot\n");
+	// The table: each format's mean finish with its 95% interval, the paired difference to Autopilot, the finish's SD,
+	// and the ROI with its paired difference; then the mixed schedule's differences.
 	const StrengthRow& A = Rows.front();
 	std::vector<std::pair<bool, std::string>> Later; // the checks, printed after the table
+	std::vector<std::string> Notes;                  // the bands and shapes (the design's targets: printed, not failed)
+	std::printf("\n  %-22s %-6s %16s %16s %5s | %8s %16s | %5s %5s %5s\n", "hero", "format", "finish (95%)", "vs Autopilot", "SD", "ROI", "ROI vs Autopilot", "cash", "win%",
+		"early");
 	for (const StrengthRow& Row : Rows)
 	{
-		std::printf("  %-22s", Row.Label.c_str());
-		std::vector<double> MixPct, MixRoi;
+		const HeroSpec& H = Row.Hero;
+		const bool IsStyle = H.K == HeroSpec::Kind::Style && H.S != Style::Autopilot;
+		const bool Full = IsStyle && H.Sharp >= 0.999;
+		const bool Default = IsStyle && std::fabs(H.Sharp - 0.80) < 1e-9;
+		std::vector<std::pair<std::string, Moments>> MixPct, MixRoi;
 		for (const Format& F : Formats)
 		{
 			if (F.Count <= 0)
@@ -2559,36 +2834,144 @@ void StrengthMode(int Hypers, int Turbos, int Deeps, const std::vector<std::stri
 			const EventSet& Ea = A.ByFormat.at(F.Name);
 			const Moments M = Of(E.Pct());
 			const Moments D = Paired(E.Pct(), Ea.Pct());
-			std::printf(" | %5.1f +-%4.2f  vs A %+5.2f +-%4.2f      ", M.Mean, 1.96 * M.Se(), D.Mean, 1.96 * D.Se());
-			const std::vector<double> Dp = Diff(E.Pct(), Ea.Pct());
-			const std::vector<double> Dr = Diff(E.Roi(), Ea.Roi());
-			MixPct.insert(MixPct.end(), Dp.begin(), Dp.end());
-			MixRoi.insert(MixRoi.end(), Dr.begin(), Dr.end());
-			// The ceilings (one-sided): no style above A + 1.5 or 55.5%; ROI at most Autopilot's + 8.
-			if (&Row != &A)
+			const Moments R = Of(E.Roi());
+			const Moments Dr = Paired(E.Roi(), Ea.Roi());
+			double Early = 0;
+			for (const EventResult& X : E.R)
 			{
-				const Moments R = Paired(E.Roi(), Ea.Roi());
+				Early += X.Pct < 25.0 ? 1.0 : 0.0;
+			}
+			std::printf("  %-22s %-6s %6.2f +-%5.2f   %+6.2f +-%5.2f %5.1f | %+7.1f%% %+7.1f +-%6.1f | %5.1f %5.2f %5.1f\n", H.Label.c_str(), F.Name, M.Mean, 1.96 * M.Se(), D.Mean,
+				1.96 * D.Se(), M.Sd(), R.Mean, Dr.Mean, 1.96 * Dr.Se(), Of(E.Flag(&EventResult::Itm)).Mean, Of(E.Flag(&EventResult::Won)).Mean,
+				100.0 * Early / static_cast<double>(std::max<size_t>(1, E.R.size())));
+			MixPct.emplace_back(F.Name, D);
+			MixRoi.emplace_back(F.Name, Dr);
+			if (Full)
+			{
+				// U3's ceiling, one-sided: no style above Autopilot + 1.5 or 55.5% in any format.
 				const bool Ceiling = D.Mean + 1.645 * D.Se() <= 1.5 && M.Mean + 1.645 * M.Se() <= 55.5;
-				const bool RoiCeiling = R.Mean + 1.645 * R.Se() <= 8.0;
-				if (Row.Label.find('@') == std::string::npos && Row.Label.find("coach") == std::string::npos && Row.Label.find("94%") == std::string::npos)
+				char Buf[200];
+				std::snprintf(Buf, sizeof(Buf), " (%+.2f + 1.645 SE = %+.2f; mean + 1.645 SE = %.2f)", D.Mean, D.Mean + 1.645 * D.Se(), M.Mean + 1.645 * M.Se());
+				Later.emplace_back(Ceiling, "U3 ceiling: " + H.Label + " in " + F.Name + " stays under Autopilot + 1.5 and 55.5%" + Buf);
+				const StrengthBand B = StrengthBandOf(H.S, std::string(F.Name) == "deep");
+				if (B.Known)
 				{
-					Later.emplace_back(Ceiling, "U3 ceiling: " + Row.Label + " in " + F.Name + " stays under Autopilot + 1.5 and 55.5%");
-					Later.emplace_back(RoiCeiling, "U3 ceiling: " + Row.Label + " in " + F.Name + " stays under Autopilot's ROI + 8");
+					const double Lo = B.Absolute ? M.Mean - 1.96 * M.Se() : D.Mean - 1.96 * D.Se();
+					const double Hi = B.Absolute ? M.Mean + 1.96 * M.Se() : D.Mean + 1.96 * D.Se();
+					const bool Ok = Hi >= B.Lo && Lo <= B.Hi;
+					std::snprintf(Buf, sizeof(Buf), "  band %s %-6s %-14s [%s%+.1f, %s%+.1f]: %s%+.2f +- %.2f  %s", Ok ? "ok  " : "MISS", F.Name, ss::style::InfoOf(H.S).Name,
+						B.Absolute ? "" : "A", B.Lo < -1e8 ? -99.0 : B.Lo, B.Absolute ? "" : "A", B.Hi > 1e8 ? 99.0 : B.Hi, B.Absolute ? "" : "A", B.Absolute ? M.Mean : D.Mean,
+						1.96 * (B.Absolute ? M.Se() : D.Se()), Ok ? "" : "(the ship rule, §2.5)");
+					Notes.push_back(Buf);
 				}
 			}
 		}
-		const Moments Mp = Of(MixPct);
-		const Moments Mr = Of(MixRoi);
-		std::printf(" | %+5.2f +-%4.2f, %+6.1f +-%5.1f\n", Mp.Mean, 1.96 * Mp.Se(), Mr.Mean, 1.96 * Mr.Se());
-		// At the default Sharpness, on the mixed schedule, nothing beats Autopilot: one-sided the same way as the ceilings
-		// (§2.5), the paired difference plus 1.645 SE at or under 0, for the finish and for the ROI.
-		if (Row.Label.find("@80") != std::string::npos)
+		const StrengthMix Mp = StrengthMixOf(MixPct);
+		const StrengthMix Mr = StrengthMixOf(MixRoi);
+		if (&Row != &A)
 		{
-			Later.emplace_back(Mp.Mean + 1.645 * Mp.Se() <= 0.0 && Mr.Mean + 1.645 * Mr.Se() <= 0.0, "U3 default Sharpness: " + Row.Label + " doesn't beat Autopilot on the mixed schedule");
+			std::printf("  %-22s %-6s %16s   %+6.2f +-%5.2f %5s | %8s %+7.1f +-%6.1f |\n", H.Label.c_str(), "mixed", "", Mp.Mean, 1.96 * Mp.Se, "", "", Mr.Mean, 1.96 * Mr.Se);
+		}
+		char Buf[200];
+		if (Full)
+		{
+			std::snprintf(Buf, sizeof(Buf), " (%+.1f; one-sided %+.1f)", Mr.Mean, Mr.Mean + 1.645 * Mr.Se);
+			Later.emplace_back(Mr.Mean <= 8.0, "U3 ceiling: " + H.Label + " on the mixed schedule stays under Autopilot's ROI + 8" + Buf);
+		}
+		if (Default)
+		{
+			// At the default Sharpness, on the mixed schedule, nothing beats Autopilot (U3): one-sided, the paired difference
+			// + 1.645 SE at or under 0, for the finish and for the ROI.
+			std::snprintf(Buf, sizeof(Buf), " (finish %+.2f + 1.645 SE = %+.2f)", Mp.Mean, Mp.Mean + 1.645 * Mp.Se);
+			Later.emplace_back(Mp.Mean + 1.645 * Mp.Se <= 0.0, "U3 default Sharpness: " + H.Label + " doesn't out-finish Autopilot on the mixed schedule" + Buf);
+			std::snprintf(Buf, sizeof(Buf), " (ROI %+.1f + 1.645 SE = %+.1f)", Mr.Mean, Mr.Mean + 1.645 * Mr.Se);
+			Later.emplace_back(Mr.Mean + 1.645 * Mr.Se <= 0.0, "U3 default Sharpness: " + H.Label + " doesn't out-earn Autopilot on the mixed schedule" + Buf);
 		}
 	}
+	// §2.5's shapes, at full Sharpness (printed; the design's targets).
+	auto RowOf = [&](Style S) -> const StrengthRow* {
+		for (const StrengthRow& R : Rows)
+		{
+			if (R.Hero.K == HeroSpec::Kind::Style && R.Hero.S == S && R.Hero.Sharp >= 0.999)
+			{
+				return &R;
+			}
+		}
+		return nullptr;
+	};
+	for (const Format& F : Formats)
+	{
+		if (F.Count <= 0)
+		{
+			continue;
+		}
+		const StrengthRow* Nit = RowOf(Style::Nit);
+		const StrengthRow* Tag = RowOf(Style::Tag);
+		const StrengthRow* Lag = RowOf(Style::Lag);
+		const StrengthRow* Man = RowOf(Style::Maniac);
+		double LoSd = 1e9, HiSd = -1e9;
+		for (const StrengthRow& R : Rows)
+		{
+			if (R.Hero.K == HeroSpec::Kind::Style && R.Hero.Sharp >= 0.999)
+			{
+				const double Sd = Of(R.ByFormat.at(F.Name).Pct()).Sd();
+				LoSd = std::min(LoSd, Sd);
+				HiSd = std::max(HiSd, Sd);
+			}
+		}
+		char Buf[240];
+		if (Nit)
+		{
+			const double Sd = Of(Nit->ByFormat.at(F.Name).Pct()).Sd();
+			std::snprintf(Buf, sizeof(Buf), "  shape %s %-6s the Nit's finish SD is the lowest (%.1f; lowest %.1f)", Sd <= LoSd + 1e-9 ? "ok  " : "MISS", F.Name, Sd, LoSd);
+			Notes.push_back(Buf);
+		}
+		if (Man)
+		{
+			const double Sd = Of(Man->ByFormat.at(F.Name).Pct()).Sd();
+			std::snprintf(Buf, sizeof(Buf), "  shape %s %-6s the Maniac's finish SD is the highest (%.1f; highest %.1f)", Sd >= HiSd - 1e-9 ? "ok  " : "MISS", F.Name, Sd, HiSd);
+			Notes.push_back(Buf);
+		}
+		if (Tag && Lag)
+		{
+			const EventSet& T = Tag->ByFormat.at(F.Name);
+			const EventSet& L = Lag->ByFormat.at(F.Name);
+			const double Ratio = Of(L.Pct()).Sd() / std::max(1e-9, Of(T.Pct()).Sd());
+			double EarlyT = 0, EarlyL = 0;
+			for (const EventResult& X : T.R)
+			{
+				EarlyT += X.Pct < 25.0 ? 1.0 : 0.0;
+			}
+			for (const EventResult& X : L.R)
+			{
+				EarlyL += X.Pct < 25.0 ? 1.0 : 0.0;
+			}
+			const double WinsT = Of(T.Flag(&EventResult::Won)).Mean, WinsL = Of(L.Flag(&EventResult::Won)).Mean;
+			std::snprintf(Buf, sizeof(Buf), "  shape %s %-6s LAG's finish SD >= TAG's x 1.10 (x %.2f)", Ratio >= 1.10 ? "ok  " : "MISS", F.Name, Ratio);
+			Notes.push_back(Buf);
+			std::snprintf(Buf, sizeof(Buf), "  shape %s %-6s LAG wins more and busts early more than TAG (wins/100 %.2f vs %.2f, early %.1f%% vs %.1f%%)",
+				WinsL > WinsT && EarlyL > EarlyT ? "ok  " : "MISS", F.Name, WinsL, WinsT, 100.0 * EarlyL / static_cast<double>(std::max<size_t>(1, L.R.size())),
+				100.0 * EarlyT / static_cast<double>(std::max<size_t>(1, T.R.size())));
+			Notes.push_back(Buf);
+			const double RoiL = Of(L.Roi()).Mean, RoiT = Of(T.Roi()).Mean;
+			const bool Deep = std::string(F.Name) == "deep";
+			std::snprintf(Buf, sizeof(Buf), "  shape %s %-6s LAG's ROI %s TAG's (%+.1f vs %+.1f)", (Deep ? RoiL >= RoiT : RoiL < RoiT) ? "ok  " : "MISS", F.Name,
+				Deep ? ">=" : "<", RoiL, RoiT);
+			Notes.push_back(Buf);
+		}
+	}
+	std::printf("\n  The design's targets (§2.5's bands at full Sharpness and its shapes; the ship rule decides a miss):\n");
+	for (const std::string& N : Notes)
+	{
+		std::printf("%s\n", N.c_str());
+	}
+	std::printf("\n  U3:\n");
 	for (const auto& L : Later)
 	{
+		if (L.first)
+		{
+			std::printf("  ok: %s\n", L.second.c_str());
+		}
 		Expect(L.first, L.second);
 	}
 }
@@ -2648,7 +3031,7 @@ int main(int Argc, char** Argv)
 	else if (Mode == "strength")
 	{
 		std::vector<std::string> Only(Args.size() > 4 ? Args.begin() + 4 : Args.end(), Args.end());
-		StrengthMode(static_cast<int>(Num(1, 3000)), static_cast<int>(Num(2, 1000)), static_cast<int>(Num(3, 1000)), Only);
+		StrengthMode(static_cast<int>(Num(1, 6000)), static_cast<int>(Num(2, 2000)), static_cast<int>(Num(3, 2000)), Only);
 	}
 	else
 	{

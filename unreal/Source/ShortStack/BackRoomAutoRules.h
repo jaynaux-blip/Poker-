@@ -1,9 +1,11 @@
 // ue-auto's rules for the plan in the hero's seat at the card room (update 2 SPEC §2.8, §2.12), in plain C++ over the core's
-// types and nothing of Unreal's, so they can be run headless beside the core's tests: the read the room takes on the plan's
-// bets (the engine's HeroReadHook, the same on the watch and the skip paths), the checkpoint host text's auto, autoseen and
-// autoread lines, what a hand played through live::SkipSlice leaves behind (the tablemates, the HANDS page's record, a big
-// pot remembered), Dee's per-hand clock, the live skip card's line and ss.Auto.Parity's hash. FAutoHost (BackRoomAuto.cpp)
-// and the table's side (BackRoomTableAuto.cpp) call them. ue-auto's file; every name here is prefixed Auto.
+// types and nothing of Unreal's, so they run headless in the core's card_room suite (tests/room_seg_autorules.cpp, C1): the
+// heart's terms as ABackRoomTable::UpdateComposure adds them, and the read the room takes on the plan's bets off that heart
+// (the engine's HeroReadHook, the same on the watch and the skip paths; the table's heart shows it), the checkpoint host
+// text's auto, autoseen and autoread lines, what a hand played through live::SkipSlice leaves behind (the tablemates, the
+// HANDS page's record and its number, a big pot remembered), Dee's per-hand clock, the live skip card's line and
+// ss.Auto.Parity's hash. FAutoHost (BackRoomAuto.cpp) and the table (BackRoomTable.cpp, BackRoomTableAuto.cpp) call them.
+// ue-auto's file; every name here is prefixed Auto.
 #pragma once
 
 #include "ShortStack/AI/Bot.h"
@@ -47,7 +49,8 @@ struct AutoReadModel
 /** One read the room took on the plan (ss.Auto.Describe lists tonight's). */
 struct AutoReadNote
 {
-	std::string Reader;
+	std::string Reader;   // the name the room knows them by
+	std::string ReaderId; // their tournament id
 	int Tick = 0;
 	double Shake = 0.0;
 	bool Bluffing = false;
@@ -70,27 +73,75 @@ inline int AutoHeroIndex(const ss::Hand& H)
 	return -1;
 }
 
+// ------------------------------------------------------------------ the heart the room reads (§2.8, §2.12)
+
 /**
- * How shaken the player's hands looked pushing their last bet or raise of this street, 0..1, the way the table's heart has it
- * (ABackRoomTable::UpdateComposure): the pot against the stack they started the hand with, all in, a bluff, the plan's own
- * tilt and the moment (the final table, the bubble, hand for hand), through the night's resting rate and sensitivity. Bluff:
- * the table's own rule (FeltEquity: equity against random hands for everyone still in, under 0.42), drawn from a stream keyed
- * by the hand's state, never the tournament's R, so watching and skipping see the same. -1 when the player isn't the
- * street's last aggressor (nothing to read).
+ * The table's line between a bet with the goods and a bluff (ABackRoomTable's FeltEquity, the body's heart, and the read on the
+ * plan all use it): the felt's equity, against random hands for everyone still in, under this is a bluff.
  */
-inline double AutoPlanShake(const AutoReadModel& M, double Tilt, const ss::Tournament* T, const ss::Hand& H, int HeroIdx, bool& OutBluff)
+constexpr double AutoBluffEquity = 0.42;
+
+/** A bet without the goods: the felt's equity under the line. */
+inline bool AutoIsBluff(double FeltEquity)
 {
-	OutBluff = false;
-	if (HeroIdx < 0 || HeroIdx >= static_cast<int>(H.Seats.size()))
-	{
-		return -1.0;
-	}
-	const ss::HandSeat& Me = H.Seats[static_cast<size_t>(HeroIdx)];
-	if (Me.Folded || Me.Hole.size() < 2)
-	{
-		return -1.0;
-	}
-	// The street's last bet or raise, and what's gone in since (the pot as it stood when the player pushed theirs).
+	return FeltEquity < AutoBluffEquity;
+}
+
+/**
+ * What presses on the player's heart, term by term as ABackRoomTable::UpdateComposure adds them up (BackRoomTable.cpp): being in
+ * the hand at all, the pot against the stack the hand began with, the price to call at the decision (and whether that price
+ * was everything), all in, a bluff out there, eyes on the player, tilt and the moment.
+ */
+struct AutoHeartTerms
+{
+	double PotOverStack = 0.0;   // the pot against the stack the hand began with
+	double PriceOverStack = 0.0; // the price to call at the decision against the stack then (0: nothing to call)
+	bool CallAllIn = false;      // that price was all the player had
+	bool AllIn = false;          // all in now
+	bool Bluff = false;          // the street's last bet is a bluff
+	bool Watched = false;        // somebody's eyes are on the player
+	double Tilt = 0.0;           // 0..1
+	double Extra = 0.0;          // the moment (AutoMomentPressure)
+};
+
+/** UpdateComposure's sum for a player in the hand: 6, +30 x pot/stack (to 1.5), +22 x the price (to half the stack), +28 for an
+ *  all-in call, +28 all in, +18 a bluff, +8 watched, +20 x tilt, + the moment. */
+inline double AutoHeartPressure(const AutoHeartTerms& In)
+{
+	double P = 6.0 + 30.0 * std::min(std::max(0.0, In.PotOverStack), 1.5) / 1.5;
+	P += 22.0 * std::min(1.0, std::max(0.0, In.PriceOverStack * 2.0));
+	P += In.CallAllIn ? 28.0 : 0.0;
+	P += In.AllIn ? 28.0 : 0.0;
+	P += In.Bluff ? 18.0 : 0.0;
+	P += In.Watched ? 8.0 : 0.0;
+	P += 20.0 * std::min(1.0, std::max(0.0, In.Tilt));
+	P += In.Extra;
+	return P;
+}
+
+/** Where a pressure settles the heart (UpdateComposure's target, no slow breaths): the night's resting rate (48 to 80) plus
+ *  the share that reaches it, from 10 under rest to 168. */
+inline double AutoHeartBpm(const AutoReadModel& M, double Pressure)
+{
+	const double Rest = std::min(80.0, std::max(48.0, M.RestBpm));
+	return std::min(168.0, std::max(Rest - 10.0, Rest + M.Sensitivity * Pressure));
+}
+
+/** How much hands shake at a heart rate (FBackRoomComposure::Shake): none to 95, all of it at 150. */
+inline double AutoShakeAt(double Bpm)
+{
+	return std::min(1.0, std::max(0.0, (Bpm - 95.0) / 55.0));
+}
+
+/** The moment's pressure (LiveTick's ExtraPressure): hand for hand 14, the final table 10, six from the money 6. */
+inline double AutoMomentPressure(const ss::Tournament* T)
+{
+	return !T ? 0.0 : T->HandForHand() ? 14.0 : T->Tables.size() <= 1 ? 10.0 : (T->Remaining <= T->PaidPlaces() + 6 ? 6.0 : 0.0);
+}
+
+/** The index in H.History of this street's last bet or raise (-1: nobody has bet this street). */
+inline int AutoLastAggression(const ss::Hand& H)
+{
 	int Last = -1;
 	for (size_t I = 0; I < H.History.size(); ++I)
 	{
@@ -100,46 +151,153 @@ inline double AutoPlanShake(const AutoReadModel& M, double Tilt, const ss::Tourn
 			Last = static_cast<int>(I);
 		}
 	}
-	if (Last < 0 || H.History[static_cast<size_t>(Last)].Seat != Me.Seat)
+	return Last;
+}
+
+/**
+ * Eyes on the player, made a function of the table (the body's +8 is an opponent's stare, which the camera rolls): somebody at
+ * the player's table who reads shaking hands (in the model, folded or not) is watching for it.
+ */
+inline bool AutoWatched(const AutoReadModel& M, const ss::Hand& H, int HeroIdx)
+{
+	for (size_t I = 0; I < H.Seats.size(); ++I)
 	{
-		return -1.0;
+		const auto It = static_cast<int>(I) == HeroIdx ? M.HeroRead.end() : M.HeroRead.find(H.Seats[I].Id);
+		if (It != M.HeroRead.end() && std::fabs(It->second) >= 0.05)
+		{
+			return true;
+		}
 	}
-	ss::Chips Since = 0;
-	for (size_t I = static_cast<size_t>(Last) + 1; I < H.History.size(); ++I)
+	return false;
+}
+
+/**
+ * The felt's equity behind the player's bet at History[Last] (FeltEquity's rule: against random hands for everyone still in
+ * when it went in, scaled by how many), from a stream keyed by the night's seed, the tick and the bet, never the tournament's R,
+ * so watching and skipping see the same, and so does every reader of that bet.
+ */
+inline double AutoPlanEquity(const ss::Tournament* T, const ss::Hand& H, int HeroIdx, int Last)
+{
+	if (HeroIdx < 0 || HeroIdx >= static_cast<int>(H.Seats.size()) || H.Seats[static_cast<size_t>(HeroIdx)].Hole.size() < 2)
 	{
-		Since += H.History[I].Added;
+		return 0.5;
 	}
-	const double PotAtBet = static_cast<double>(std::max<ss::Chips>(0, H.Pot() - Since));
 	int InHand = 0;
 	for (const ss::HandSeat& S : H.Seats)
 	{
 		InHand += S.Folded ? 0 : 1;
+	}
+	for (size_t I = static_cast<size_t>(std::max(0, Last + 1)); I < H.History.size(); ++I)
+	{
+		InHand += H.History[I].Type == ss::ActionType::Fold ? 1 : 0; // still in when the bet went in
 	}
 	const int Others = std::max(1, InHand - 1);
 	const std::vector<ss::RangeBand> Ranges(static_cast<size_t>(Others), ss::RangeBand{0.0, 1.0});
 	char Key[96];
 	std::snprintf(Key, sizeof(Key), "autoread:%016llx:%d:%d", static_cast<unsigned long long>(T ? T->SeedHash : 0ull), T ? T->Tick : 0, Last);
 	ss::Rng R(Key);
-	const double Eq = std::min(1.0, std::max(0.0, ss::EquityVsRanges(Me.Hole, H.Board, Ranges, 300, R) * (0.6 + 0.4 * static_cast<double>(Others))));
-	OutBluff = Eq < 0.42;
-	const double Extra = !T ? 0.0 : T->HandForHand() ? 14.0 : T->Tables.size() <= 1 ? 10.0 : (T->Remaining <= T->PaidPlaces() + 6 ? 6.0 : 0.0);
-	const double Stack = static_cast<double>(std::max<ss::Chips>(1, Me.StartStack));
-	double Pressure = 6.0 + 30.0 * std::min(PotAtBet / Stack, 1.5) / 1.5;
-	Pressure += Me.AllIn ? 28.0 : 0.0;
-	Pressure += OutBluff ? 18.0 : 0.0;
-	Pressure += 20.0 * std::min(1.0, std::max(0.0, Tilt));
-	Pressure += Extra;
-	const double Rest = std::min(80.0, std::max(48.0, M.RestBpm));
-	const double Bpm = std::min(168.0, std::max(Rest - 10.0, Rest + M.Sensitivity * Pressure));
-	return std::min(1.0, std::max(0.0, (Bpm - 95.0) / 55.0));
+	const double Eq = ss::EquityVsRanges(H.Seats[static_cast<size_t>(HeroIdx)].Hole, H.Board, Ranges, 300, R) * (0.6 + 0.4 * static_cast<double>(Others));
+	return std::min(1.0, std::max(0.0, Eq));
+}
+
+/** The player's heart as the room reads it at their last bet or raise of the street (AutoPlanHeartAt). */
+struct AutoPlanHeart
+{
+	double Shake = -1.0; // 0..1; -1: nothing to read (the player isn't the street's last aggressor)
+	double Bpm = 0.0;
+	double Pressure = 0.0;
+	double Equity = 0.0;
+	bool Bluff = false;
+	AutoHeartTerms Terms;
+};
+
+/**
+ * How shaken the player's hands looked pushing their last bet or raise of this street, the way the table's heart has it
+ * (UpdateComposure's terms, AutoHeartPressure) at the moment the bet went in: the pot then against the stack the hand began
+ * with, the price they faced deciding it, all in, a bluff (AutoIsBluff of AutoPlanEquity), a reader at the table watching,
+ * the plan's own tilt and the moment, through the night's resting rate and sensitivity. Every input is fixed once the bet is
+ * out, so the shake holds for every reader of it and the HUD's heart can show it. Shake -1 when the player isn't the street's
+ * last aggressor (nothing to read).
+ */
+inline AutoPlanHeart AutoPlanHeartAt(const AutoReadModel& M, double Tilt, const ss::Tournament* T, const ss::Hand& H, int HeroIdx)
+{
+	AutoPlanHeart Out;
+	if (HeroIdx < 0 || HeroIdx >= static_cast<int>(H.Seats.size()))
+	{
+		return Out;
+	}
+	const ss::HandSeat& Me = H.Seats[static_cast<size_t>(HeroIdx)];
+	const int Last = AutoLastAggression(H);
+	if (Me.Folded || Me.Hole.size() < 2 || Last < 0 || H.History[static_cast<size_t>(Last)].Seat != Me.Seat)
+	{
+		return Out;
+	}
+	// What's gone in since the bet (the pot as it stood when the player pushed theirs), and the stack they decided it with.
+	ss::Chips Since = 0;
+	ss::Chips Mine = 0;
+	for (size_t I = static_cast<size_t>(Last); I < H.History.size(); ++I)
+	{
+		Since += I > static_cast<size_t>(Last) ? H.History[I].Added : 0;
+		Mine += H.History[I].Seat == Me.Seat ? H.History[I].Added : 0;
+	}
+	const ss::ActionRecord& Bet = H.History[static_cast<size_t>(Last)];
+	const double Before = static_cast<double>(std::max<ss::Chips>(1, Me.Stack + Mine));
+	Out.Equity = AutoPlanEquity(T, H, HeroIdx, Last);
+	Out.Bluff = AutoIsBluff(Out.Equity);
+	AutoHeartTerms& In = Out.Terms;
+	In.PotOverStack = static_cast<double>(std::max<ss::Chips>(0, H.Pot() - Since)) / static_cast<double>(std::max<ss::Chips>(1, Me.StartStack));
+	In.PriceOverStack = static_cast<double>(std::max<ss::Chips>(0, Bet.Facing)) / Before;
+	In.CallAllIn = Bet.Facing > 0 && static_cast<double>(Bet.Facing) >= Before;
+	In.AllIn = Me.AllIn;
+	In.Bluff = Out.Bluff;
+	In.Watched = AutoWatched(M, H, HeroIdx);
+	In.Tilt = Tilt;
+	In.Extra = AutoMomentPressure(T);
+	Out.Pressure = AutoHeartPressure(In);
+	Out.Bpm = AutoHeartBpm(M, Out.Pressure);
+	Out.Shake = AutoShakeAt(Out.Bpm);
+	return Out;
+}
+
+/** AutoPlanHeartAt's shake and bluff alone (-1: nothing to read). */
+inline double AutoPlanShake(const AutoReadModel& M, double Tilt, const ss::Tournament* T, const ss::Hand& H, int HeroIdx, bool& OutBluff)
+{
+	const AutoPlanHeart P = AutoPlanHeartAt(M, Tilt, T, H, HeroIdx);
+	OutBluff = P.Bluff;
+	return P.Shake;
+}
+
+// ------------------------------------------------------------------ the read on the plan's bet (§2.8)
+
+/** The least shake anyone reads (ReadHero's 0.08), and the least read a player has to have to look (|HeroRead| 0.05). */
+constexpr double AutoReadMinShake = 0.08;
+constexpr double AutoReadMinEye = 0.05;
+
+/** The chance a reader sees it (ReadHero's): shakier hands and sharper eyes, more often; never more than 0.9. */
+inline double AutoReadChance(double Shake, double Read)
+{
+	return std::min(0.9, std::max(0.0, Shake * std::fabs(Read) * 1.4));
+}
+
+/** What a reader takes the shake for (ReadHero's): the sharp ones (read above 0) see a bluff for a bluff and a bet with the
+ *  goods for one; the rest think nerves mean a bluff, whatever it was. True: they read the player as weak. */
+inline bool AutoReadsWeak(double Read, bool Bluffing)
+{
+	return Read > 0.0 ? Bluffing : true;
+}
+
+/** The roll on whether the reader at Seat sees it this time: style::Mix of the night's seed, the tick, the seat and the action. */
+inline double AutoReadRoll(const ss::Tournament& T, const ss::Hand& H, int Seat)
+{
+	return ss::style::Mix(T.SeedHash, T.Tick, Seat, static_cast<int>(H.History.size()), AutoReadSalt);
 }
 
 /**
  * The room's read on the plan (Tournament::HeroReadHook's body, §2.8): ABackRoomTable::ReadHero with every random part made a
  * function of the hand. A player at the hero's table facing the plan's bet or raise of this street, who reads hands
- * (|HeroRead| at least 0.05), sees the shake (AutoPlanShake) with chance shake x |read| x 1.4 (at most 0.9), rolled with
- * style::Mix(seed, tick, seat, action, "READ"); the sharp ones read a bluff for what it is, the rest take nerves for one: a
- * fold becomes a call (with more than 12% equity) or a call a fold (under 60%). True when it changed D (Out says how).
+ * (|HeroRead| at least AutoReadMinEye), sees the shake (AutoPlanHeartAt) with AutoReadChance, rolled with AutoReadRoll; what they
+ * make of it is AutoReadsWeak: read as weak, a fold becomes a call (with more than 12% equity); read as strong, a call becomes a
+ * fold (under 60%). True when it changed D (Out says how).
  */
 inline bool AutoApplyRead(const AutoReadModel& M, double Tilt, const ss::Tournament& T, const ss::Hand& H, int Seat, ss::BotDecision& D, AutoReadNote* Out)
 {
@@ -150,7 +308,7 @@ inline bool AutoApplyRead(const AutoReadModel& M, double Tilt, const ss::Tournam
 	const ss::HandSeat& Reader = H.Seats[static_cast<size_t>(Seat)];
 	const auto It = M.HeroRead.find(Reader.Id);
 	const double Read = It == M.HeroRead.end() ? 0.0 : It->second;
-	if (std::fabs(Read) < 0.05 || H.CurrentBet - Reader.StreetBet <= 0)
+	if (std::fabs(Read) < AutoReadMinEye || H.CurrentBet - Reader.StreetBet <= 0)
 	{
 		return false;
 	}
@@ -160,18 +318,16 @@ inline bool AutoApplyRead(const AutoReadModel& M, double Tilt, const ss::Tournam
 	{
 		return false;
 	}
-	bool Bluffing = false;
-	const double Shake = AutoPlanShake(M, Tilt, &T, H, AutoHeroIndex(H), Bluffing);
-	if (Shake < 0.08)
+	const AutoPlanHeart Heart = AutoPlanHeartAt(M, Tilt, &T, H, AutoHeroIndex(H));
+	if (Heart.Shake < AutoReadMinShake)
 	{
 		return false;
 	}
-	const double Roll = ss::style::Mix(T.SeedHash, T.Tick, Seat, static_cast<int>(H.History.size()), AutoReadSalt);
-	if (Roll > std::min(0.9, std::max(0.0, Shake * std::fabs(Read) * 1.4)))
+	if (AutoReadRoll(T, H, Seat) > AutoReadChance(Heart.Shake, Read))
 	{
 		return false;
 	}
-	const bool ReadsWeak = Read > 0.0 ? Bluffing : true;
+	const bool ReadsWeak = AutoReadsWeak(Read, Heart.Bluff);
 	bool Changed = false;
 	if (ReadsWeak && Fold && D.Equity > 0.12)
 	{
@@ -187,12 +343,30 @@ inline bool AutoApplyRead(const AutoReadModel& M, double Tilt, const ss::Tournam
 	{
 		const int Idx = T.PlayerIndex(Reader.Id);
 		Out->Reader = Idx >= 0 ? T.Players[static_cast<size_t>(Idx)].Name : Reader.Id;
+		Out->ReaderId = Reader.Id;
 		Out->Tick = T.Tick;
-		Out->Shake = Shake;
-		Out->Bluffing = Bluffing;
+		Out->Shake = Heart.Shake;
+		Out->Bluffing = Heart.Bluff;
 		Out->Called = D.Action.Type == ss::PlayerAction::Kind::Call;
 	}
 	return Changed;
+}
+
+// ------------------------------------------------------------------ the HANDS page's numbers
+
+/**
+ * The number the table card's HANDS page gives the next hand it keeps: the one asked for (the table's own count, or for a
+ * skipped hand the count after it), or one past the highest it holds when that's taken. Hands the skip played and a night come
+ * back to carry the count on, so no two hands on the page share a number.
+ */
+inline int AutoNextHandNumber(const std::vector<ss::recall::Record>& Kept, int Wanted)
+{
+	int Next = Wanted;
+	for (const ss::recall::Record& R : Kept)
+	{
+		Next = std::max(Next, R.Number + 1);
+	}
+	return Next;
 }
 
 // ------------------------------------------------------------------ the read book's snapshot

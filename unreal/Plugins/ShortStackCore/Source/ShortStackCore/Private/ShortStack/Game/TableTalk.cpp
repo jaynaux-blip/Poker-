@@ -472,6 +472,84 @@ const std::vector<Template>& FloorTemplates()
 	return All;
 }
 
+// ------------------------------------------------------------------ a fresh start's first month (update 2 §3.3 F9)
+
+const std::vector<Template>& FreshTemplates()
+{
+	// The regulars on the room's new books, the first thirty days of a fresh start. The director picks a topic only while
+	// it's true (room::Books: which of the room's events have a winner yet, the first names on the board) and fills the
+	// event, the day and the name; no line here claims a result by itself (U5). After the dealers and the floor in the
+	// inventory, so every older template keeps its number (a night's Told and the room's golden).
+	static const std::vector<Template> All = {
+		// Tonight's event is the first of its kind since the books opened.
+		{"field.fresh.tonight", "First {FreshEvent} in the new books, and we're all sitting in it."},
+		{"field.fresh.tonight", "Nobody's won the {FreshEvent} in the new books. That changes before we go home."},
+		{"field.fresh.tonight", "Whoever takes this one, first {FreshEvent} winner in the books. That sticks."},
+		{"field.fresh.tonight", "Board's got no {FreshEvent} winner on it yet. One of us fixes that."},
+		{"field.fresh.tonight", "First {FreshEvent} of the new books. Feels like it should pay more."},
+		{"field.fresh.tonight", "Somebody in this room is the first {FreshEvent} winner in the books."},
+		// The first of another of the room's events, still to come (or being dealt now).
+		{"field.fresh.next", "Who takes the first {FreshEvent} in the books? It's {FreshWhen}."},
+		{"field.fresh.next", "First {FreshEvent} in the books is {FreshWhen}. Somebody's name goes up."},
+		{"field.fresh.next", "Nobody's won the {FreshEvent} since the books opened. It's {FreshWhen}."},
+		{"field.fresh.next", "Been thinking about the first {FreshEvent} in the books. It's {FreshWhen}."},
+		{"field.fresh.next", "Board's still waiting on its first {FreshEvent} winner. That's {FreshWhen}."},
+		{"field.fresh.next.nightly", "Who takes the first Nightly? It's {FreshWhen}. Everybody wants to be first."},
+		{"field.fresh.next.nightly", "First Nightly in the new books is {FreshWhen}. Somebody's name goes up first."},
+		{"field.fresh.next.nightly", "Nobody's taken a Nightly since the books opened. It's {FreshWhen}."},
+		// Nothing the room has played since the books opened has been won yet.
+		{"field.fresh.wall", "Board by the desk is still blank. Somebody's name goes up first."},
+		{"field.fresh.wall", "Nobody's won a thing in here since the books opened. That board's anybody's."},
+		{"field.fresh.wall", "Whole board by the desk, and not one name on it yet."},
+		// The first name on the board: the first of the room's events won in the books.
+		{"field.fresh.wallfirst", "{FreshWho}'s the first name on that board. The {FreshEvent}, {FreshThen}."},
+		{"field.fresh.wallfirst", "First name up on that board? {FreshWho}. The {FreshEvent}, {FreshThen}."},
+		{"field.fresh.wallfirst", "{FreshWho} got the first name up on that board. People remember that."},
+		{"field.fresh.wallfirst.self", "First name on that board is mine. Somebody had to be first."},
+		{"field.fresh.wallfirst.self", "Took the {FreshEvent} {FreshThen}. First name up there. Still sinking in."},
+		{"field.fresh.wallfirst.you", "First name on that board's yours, {Hero}. Don't let it go to your head."},
+		{"field.fresh.wallfirst.you", "You're the first name on the board by the desk. They'll tell that one a while."},
+		// The first of one of the room's events, won.
+		{"field.fresh.first", "{FreshWho} took the first {FreshEvent} in the books {FreshThen}."},
+		{"field.fresh.first", "First {FreshEvent} in the books went to {FreshWho}. {FreshThenCap}, that was."},
+		{"field.fresh.first", "{FreshWho} won the first {FreshEvent} since the books opened. Good for them."},
+		{"field.fresh.first.self", "Won the first {FreshEvent} in the books {FreshThen}. Look it up."},
+		{"field.fresh.first.self", "First {FreshEvent} in the books went to me. Still buying my own coffee."},
+		{"field.fresh.first.you", "You took the first {FreshEvent} in the books, {Hero}. They'll talk about that."},
+		{"field.fresh.first.you", "First {FreshEvent} in the new books has your name on it, {Hero}."},
+		// More than one win up the hill already.
+		{"field.fresh.twice", "{FreshWho}'s won in here more than once already, and the books aren't a month old."},
+		{"field.fresh.twice", "Books aren't a month old and {FreshWho}'s up on that board more than once."},
+		{"field.fresh.twice.self", "Up on that board more than once already. Books aren't a month old."},
+		{"field.fresh.twice.self", "More than one win in here already. Nobody's buying me a drink, though."},
+		{"field.fresh.twice.you", "You're up on that board more than once already, {Hero}. Easy now."},
+		{"field.fresh.twice.you", "More than one win in here already, {Hero}, and the books aren't a month old."},
+		// The books' first week.
+		{"field.fresh.books", "New books, same faces. Everybody's record starts from the same nothing."},
+		{"field.fresh.books", "Books are a week old, if that. Everybody's even. Won't last."},
+		{"field.fresh.books", "Fresh books this week. Whatever you did in here before, nobody wrote it down."},
+		{"field.fresh.books", "Whole room's starting from zero. The new books don't care who you were."},
+		// The answers: nothing in them is a claim.
+		{"field.fresh.reply", "Somebody's got to be first."},
+		{"field.fresh.reply", "Might as well be somebody at this table."},
+		{"field.fresh.reply", "First is first. Nobody remembers second."},
+		{"field.fresh.reply", "I'll take it. First, last, whatever pays."},
+		{"field.fresh.reply", "Get in line."},
+		{"field.fresh.reply", "We'll see who's first."},
+		{"field.fresh.first.reply", "Good for them."},
+		{"field.fresh.first.reply", "Name's up there for good now."},
+		{"field.fresh.first.reply", "That's how you get remembered in here."},
+		{"field.fresh.first.reply", "Lucky. Or good. Hard to tell yet."},
+		{"field.fresh.first.reply", "Somebody had to be first."},
+		{"field.fresh.first.reply", "Huh. Didn't see that one coming."},
+		{"field.fresh.self.reply", "We heard."},
+		{"field.fresh.self.reply", "Yeah, yeah. Buy a round, then."},
+		{"field.fresh.self.reply", "You'll tell us again next week."},
+		{"field.fresh.self.reply", "Enjoy it while it lasts."},
+	};
+	return All;
+}
+
 // ------------------------------------------------------------------ the Back Room's eight, word for word
 
 struct CastSet
@@ -570,7 +648,7 @@ const std::vector<Indexed>& Everything()
 	static const std::vector<Indexed> All = [] {
 		std::vector<Indexed> Out;
 		std::map<std::string, int> Seen;
-		for (const std::vector<Template>* Set : {&FieldTemplates(), &DealerTemplates(), &FloorTemplates()})
+		for (const std::vector<Template>* Set : {&FieldTemplates(), &DealerTemplates(), &FloorTemplates(), &FreshTemplates()})
 		{
 			for (const Template& T : *Set)
 			{
@@ -1212,6 +1290,35 @@ Said Line(Moment M, const Context& C)
 	case Moment::Answer:
 	{
 		const bool Reply = M == Moment::Answer;
+		if (Topic.rfind("fresh.", 0) == 0)
+		{
+			// A fresh start's first month (update 2 §3.3 F9): only from the director, which reads the room's books and offers a
+			// topic only while it's true ("Books"), each once a night ("FreshKey"). The answers claim nothing; a line to the
+			// player ("...you") gets none.
+			const bool Mine = Topic.size() > 5 && Topic.compare(Topic.size() - 5, 5, ".self") == 0;
+			const bool Yours = Topic.size() > 4 && Topic.compare(Topic.size() - 4, 4, ".you") == 0;
+			if (Reply)
+			{
+				if (Yours)
+				{
+					return Said();
+				}
+				const bool About = Topic.rfind("fresh.first", 0) == 0 || Topic.rfind("fresh.wallfirst", 0) == 0 || Topic.rfind("fresh.twice", 0) == 0;
+				Pool = Mine ? "field.fresh.self.reply" : About ? "field.fresh.first.reply" : "field.fresh.reply";
+				break;
+			}
+			if (Var(C.Vars, "Books") != "fresh" || Var(C.Vars, "FreshKey").empty())
+			{
+				return Said();
+			}
+			Spends = "fresh:" + Var(C.Vars, "FreshKey");
+			if (C.Told && C.Told->count(Spends))
+			{
+				return Said();
+			}
+			Pool = "field." + Topic;
+			break;
+		}
 		std::string T = Topic.empty() ? std::string("night") : Topic;
 		if (!Reply && Self)
 		{

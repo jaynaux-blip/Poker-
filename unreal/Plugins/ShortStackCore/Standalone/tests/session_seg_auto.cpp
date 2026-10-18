@@ -471,9 +471,9 @@ void AutoNoGrading()
 	S.RegisterEvent(ss::net::Shared().Listing(Hyper));
 	const double FormBefore = S.Life.Auto.Pref.Form;
 	const ss::coach::Notes StudyBefore = S.Life.Study;
-	Expect(S.SetAutoplay(0, AutoPlanOf(style::Style::Tag, autoplay::Mode::Watch, 8)).empty(), "autoplay: TAG takes the seat");
+	Expect(S.SetAutoplay(0, AutoPlanOf(style::Style::Lag, autoplay::Mode::Watch, 8)).empty(), "autoplay: LAG takes the seat");
 	const autoplay::Panel On = S.AutoPanel(0);
-	Expect(On.On && On.Now.S == style::Style::Tag && On.Sharp == 0.80 && On.Status == "AUTO \xC2\xB7 TAG 8x" && On.Styles.size() == static_cast<size_t>(style::Style::Count) &&
+	Expect(On.On && On.Now.S == style::Style::Lag && On.Sharp == 0.80 && On.Status == "AUTO \xC2\xB7 LAG 8x" && On.Styles.size() == static_cast<size_t>(style::Style::Count) &&
 			   On.Greyed.size() == On.Styles.size(),
 		"autoplay: the panel (held Sharpness, the tile's line, a tile per style)");
 	double Now = 0.0;
@@ -502,9 +502,9 @@ void AutoNoGrading()
 	}
 	Expect(Untouched && S.Life.Auto.Pref.Form == FormBefore, "autoplay: the coach's tallies and Form untouched by the plan");
 	const autoplay::Played* P = autoplay::PlayedFor(S.Life.Auto, Hyper.Id);
-	Expect(P && P->S == style::Style::Tag && P->AiDecisions > 0 && P->OwnDecisions == 0 && P->AiHands > 0 && P->OwnHands == 0,
+	Expect(P && P->S == style::Style::Lag && P->AiDecisions > 0 && P->OwnDecisions == 0 && P->AiHands > 0 && P->OwnHands == 0,
 		"autoplay: the played line (keyed by the event id: the plan's decisions and hands, none of yours)");
-	Expect(P && autoplay::CareerTag(*P) == "AUTO \xC2\xB7 TAG 100%", "autoplay: Career's row reads AUTO, and its accuracy has no decision of yours (the \xE2\x80\x94)");
+	Expect(P && autoplay::CareerTag(*P) == "AUTO \xC2\xB7 LAG 100%", "autoplay: Career's row reads AUTO, and its accuracy has no decision of yours (the \xE2\x80\x94)");
 	std::printf("  autoplay: %s, %d hands (%d by the plan, %d decisions); biggest pot %s; %.1f s\n", ss::Ordinal(S.LastResults.Place).c_str(), S.LastResults.Hands,
 		P ? P->AiHands : 0, P ? P->AiDecisions : 0, ss::ChipsText(static_cast<double>(S.LastResults.BiggestPot)).c_str(), AutoSecondsSince(T0));
 	Expect(S.LastResults.BiggestPot > 0 || S.LastResults.Hands < 20, "autoplay: the skip keeps the biggest pot won (bug 1's BiggestPot)");
@@ -1056,7 +1056,9 @@ void AutoOtherTables()
 		}
 		return First < 0 && Compared > 15; // (the hero can bust a 1,000-runner field early: every common tick counts)
 	};
-	const bool Reached = !Both[0].At41.empty() && Both[0].At41 != "past 41";
+	// The first table may bust before hand 42 (a plan at the default Sharpness slips, C1); then every path busts it at the
+	// same hand, which the hand-by-hand comparison holds.
+	const bool Reached = (!Both[0].At41.empty() && Both[0].At41 != "past 41") || (Both[0].At41.empty() && Both[0].Gone);
 	Expect(Same(Both[0].Hands, Alone[0].Hands, C1, "alone") && Reached && Both[0].At41 == Alone[0].At41,
 		"autoplay: a skipping table plays as it does alone (the other table watched)");
 	Expect(Same(Both[1].Hands, Watched[1].Hands, C2, "watched"), "autoplay: a watched table plays the same whether the other skips or is watched");

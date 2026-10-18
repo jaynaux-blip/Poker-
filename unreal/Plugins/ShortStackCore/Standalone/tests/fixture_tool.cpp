@@ -24,9 +24,20 @@
 //   - pre_update2_veteran: 300 and more results online, live days, titles on the wall and badges;
 //   - world_v2.txt: the staked save's world (version 2).
 //
+// Update 2's gate 1 fixtures (update2 SPEC §6.5, §7.5 C1; for PIE §8.1), built with gate 1's code (only on a tree that
+// has autoplay: the block below is compiled when Game/LiveAuto.h is there, so this file still builds against bda07f3's):
+//   - update2_blank_world: a fresh-start (Blank) career four days in, WITH its world lines (an imported save without them
+//     would build an Established world): hypers the plan skipped (one whole, one with the bubble taken by hand), one
+//     played by hand, a shift, Thursday's Nightly skipped by the plan through live::SkipSlice and settled;
+//   - update2_auto_mid_nightly: tonight's Nightly (Wednesday October 14) on the player's own money, the plan (GTO)
+//     skipping to the bubble and the night checkpointed mid-skip the way the card room saves it every 5 hands (R5): the
+//     engine checkpoint, the room director's state and the host text with its hands, met, auto, autoseen and autoread
+//     lines (FAutoHost's, BackRoomAutoRules::AutoHostText's format). Without its world lines, like pre_update2_*.
+//
 //   fixture_tool write <dir>   writes the fixtures (the saves without their world lines, which go in world_v1.txt;
 //                              <name>.expected.ssave is what loading and saving the v1 save gives)
 //   fixture_tool write2 <dir>  writes update 2's day-0 fixtures (the saves without their world lines; world_v2.txt)
+//   fixture_tool write-g1 <dir>  writes update 2's gate 1 fixtures (deterministic: two writes are byte for byte the same)
 //   fixture_tool transcript    prints every save as the careers are built and as each fixture is loaded and played on
 //                              (texts, ledgers, the whole save but the world, whose size and hash are printed), the
 //                              c09bc31 careers first, then update 2's; a build whose transcript matches the code the
@@ -43,9 +54,21 @@
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Store.h"
 
+#if __has_include("ShortStack/Game/LiveAuto.h")
+#define SS_FIXTURE_GATE1 1
+#include "ShortStack/AI/Reads.h"
+#include "ShortStack/AI/Style.h"
+#include "ShortStack/Game/Autoplay.h"
+#include "ShortStack/Game/LiveAuto.h"
+#include "ShortStack/Game/World.h"
+#else
+#define SS_FIXTURE_GATE1 0
+#endif
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -763,6 +786,419 @@ ss::SaveData Veteran()
 	return H.Last;
 }
 
+#if SS_FIXTURE_GATE1
+// ---------------------------------------------------------------- update 2's gate 1 fixtures (write-g1)
+
+namespace autoplay = ss::autoplay;
+namespace style = ss::style;
+
+autoplay::TableAuto PlanOf(style::Style St, autoplay::Mode M, autoplay::Target To, uint32_t Stops)
+{
+	autoplay::TableAuto A;
+	A.S = St;
+	A.M = M;
+	A.Speed = 1;
+	A.To = To;
+	A.Stops = Stops;
+	return A;
+}
+
+/** The learned read book as the card room seats a night with it (BackRoomAutoRules::AutoLearnedOf): every "Name/Tell" read
+ *  seen twice or more, counted by name. */
+style::Learned LearnedOf(const std::map<std::string, int>& Reads)
+{
+	style::Learned Out;
+	for (const auto& Kv : Reads)
+	{
+		const size_t Slash = Kv.first.find('/');
+		if (Kv.second >= 2 && Slash != std::string::npos && Slash > 0)
+		{
+			++Out.Tells[Kv.first.substr(0, Slash)];
+		}
+	}
+	return Out;
+}
+
+/** The plan's lines of the checkpoint host text, as FAutoHost writes them (BackRoomAutoRules::AutoHostText): the auto line
+ *  (autoplay::RunText), an autoseen line for each player observed tonight, an autoread line for each name in the book. */
+std::string PlanHostText(const autoplay::TableAuto& A, const autoplay::Run& R, const style::Learned& Book)
+{
+	std::string Out = autoplay::RunText(A, R) + "\n";
+	for (const auto& Kv : R.Seen)
+	{
+		Out += "autoseen\t" + Kv.first + "\t" + ss::reads::Write(Kv.second) + "\n";
+	}
+	for (const auto& Kv : Book.Tells)
+	{
+		if (Kv.second > 0)
+		{
+			Out += "autoread\t" + Kv.first + "\t" + std::to_string(Kv.second) + "\n";
+		}
+	}
+	return Out;
+}
+
+/**
+ * A night the plan skips, on the card room host's side (FAutoHost::TickSkip and its sink): each hand the skip played goes
+ * into the run (autoplay::NoteSkippedHand) and the brain is read afresh for the next one, the player's tablemates are kept
+ * for the world, and the room director hears every tick. HostText is what LiveHostText writes at a checkpoint.
+ */
+struct PlanNight : ss::live::SkipSink
+{
+	ss::Tournament* T = nullptr;
+	ss::room::Director* Room = nullptr;
+	double DayStart = 0.0; // world minutes at the tournament clock's zero
+	autoplay::TableAuto A;
+	autoplay::Run R;
+	style::Learned Book;
+	const ss::reads::Table* Notes = nullptr;
+	double TiltGain = 1.0;
+	style::HeroBrain Brain;
+	std::vector<std::string> Met;
+	int Hands = 0;
+	int Checkpoints = 0;
+	int LastCheckpoint = -1;
+
+	void Think() { Brain = autoplay::BrainFor(A, R, TiltGain, 1, Notes, &Book); }
+	void HandDone(const ss::Hand& H, int HeroSeat) override
+	{
+		autoplay::NoteSkippedHand(R, H, HeroSeat, TiltGain);
+		Think();
+		++Hands;
+		for (size_t K = 0; K < H.Seats.size(); ++K)
+		{
+			const std::string& Id = H.Seats[K].Id;
+			if (static_cast<int>(K) != HeroSeat && !Id.empty() && std::find(Met.begin(), Met.end(), Id) == Met.end())
+			{
+				Met.push_back(Id);
+			}
+		}
+	}
+	void Events(const std::vector<ss::TEvent>& E) override
+	{
+		if (Room && T)
+		{
+			const double World = DayStart + T->ClockMinutes();
+			Room->Events(*T, E, World);
+			Room->Rounds(*T, T->Rounds());
+			Room->Clock(*T, World, 0.0);
+			Room->Take();
+		}
+	}
+	void Checkpoint(int Tick) override
+	{
+		++Checkpoints;
+		LastCheckpoint = Tick;
+	}
+	std::string HostText() const
+	{
+		std::string Out = "hands\t" + std::to_string(Hands) + "\n";
+		for (const std::string& Id : Met)
+		{
+			Out += "met\t" + Id + "\n";
+		}
+		return Out + PlanHostText(A, R, Book);
+	}
+};
+
+/** The plan takes the seat as the night begins (FAutoHost::StartRun): Sharpness read once from Form and the player's
+ *  condition (fed and rested here), held for the run; the plan's tilt from the player's (calm); the read book seated. */
+void TakeSeat(PlanNight& N, ss::SaveData& D, double World)
+{
+	const double Form = autoplay::FormAt(D.Life.Auto, World);
+	N.R.Sharp = autoplay::SharpnessOf(Form, 0.0, false, false);
+	N.R.SharpSetAt = World;
+	N.R.Tilt = 0.0;
+	N.TiltGain = std::min(2.5, std::max(0.3, D.Life.Perks.TiltGain));
+	N.Book = LearnedOf(D.Life.Reads);
+	N.Notes = &D.Life.Auto.Notes;
+	D.Life.Update2LinesRead |= life::U2AutoPref;
+	N.Think();
+}
+
+/**
+ * A Nightly the plan skips to the result through live::SkipSlice, settled the host's way (the cage, the bus home,
+ * FAutoHost::OnSettle's played line and notes, the night noted for the world) and the save loaded again.
+ */
+double PlanNightToResult(std::unique_ptr<ss::Session>& S, Hooks& H, double Now, const char* Seed, const char* Id, style::Style St)
+{
+	const live::Occurrence O = live::FindOccurrence(Id);
+	Now = At(*S, Now, O.DeskOpens + 40.0);
+	Fed(*S);
+	const std::string Why = S->GoToLive(O.Id);
+	if (!Why.empty())
+	{
+		std::printf("fixture: %s: %s\n", Id, Why.c_str());
+		return Now;
+	}
+	ss::SaveData D = HostSave(H, *S);
+	life::LiveEntry* E = live::EntryFor(D.Life, O.Id);
+	E->ArrivedAt = O.Start - 15.0;
+	bool Restored = false;
+	std::unique_ptr<ss::Tournament> T = live::ResumeField(O, *E, E->Entrants, D.HeroName, Known(*E), false, Restored);
+	PlanNight N;
+	N.T = T.get();
+	N.DayStart = O.Start - static_cast<double>(O.T->StartMinute);
+	N.A = PlanOf(St, autoplay::Mode::Skip, autoplay::Target::Result, 0);
+	TakeSeat(N, D, O.Start);
+	for (int Guard = 0; Guard < 20000 && !T->Hero().Busted && !T->bFinished; ++Guard)
+	{
+		if (ss::live::SkipSlice(*T, N.Brain, N.A, 0.0, N).Why != ss::live::SkipWhy::Budget)
+		{
+			break;
+		}
+	}
+	const int Place = T->Hero().Place > 0 ? T->Hero().Place : T->HeroRank();
+	const ss::Chips Prize = T->PrizeFor(Place);
+	const double End = N.DayStart + T->ClockMinutes();
+	const std::vector<ss::LiveSeen> Table = Seen(*E);
+	live::Settle(D.BankrollCents, D.Life, O.Id, Place, T->Spec.Entrants, Prize, End);
+	live::PayFare(D.BankrollCents, D.Life, O.Id, true, End + 5.0);
+	if (N.R.AiHands > 0 || N.R.AiDecisions > 0)
+	{
+		autoplay::Record(D.Life.Auto, O.Id, 1, 0, N.A, N.R);
+		D.Life.Update2LinesRead |= life::U2AutoPlayed | life::U2AutoPref;
+	}
+	ss::reads::Table Named;
+	for (const auto& It : N.R.Seen)
+	{
+		if (It.first.rfind("npc:", 0) == 0)
+		{
+			Named[autoplay::NoteKey(T.get(), It.first)] = It.second;
+		}
+	}
+	autoplay::FoldNotes(D.Life.Auto, Named, End);
+	if (!D.Life.Auto.Notes.empty())
+	{
+		D.Life.Update2LinesRead |= life::U2Notes;
+	}
+	D.NoteLive(End, O.Id, Place, Prize, T->Spec.Entrants, Table);
+	D.ClockMinutes = End + 30.0 - Day;
+	if (Transcript)
+	{
+		std::printf("  [plan] %s: %s skipped %d hands (%d decisions), %s of %d for %s\n", Id, style::InfoOf(St).Name, N.R.AiHands, N.R.AiDecisions, ss::Ordinal(Place).c_str(),
+			T->Spec.Entrants, ss::Money(Prize).c_str());
+	}
+	Dump(Id, D);
+	S.reset();
+	S.reset(new ss::Session(H, Seed, &D));
+	S->CurrentScreen = ss::Screen::Lobby;
+	S->ResumeCalendarFrom(End + 30.0);
+	return Wait(*S, Now, 0.2);
+}
+
+/**
+ * A network event from its start to the result with the plan in the seat, skipped (SkipAhead's path) with the stops
+ * given. A decision a stop rule hands over is answered with the grader's best option. The first time a stop leaves the
+ * plan watching at 1x, the player turns it off and plays Mine hands the same way, then skips on to the result (and again
+ * after any later stop). False when it didn't open.
+ */
+bool PlanHyper(ss::Session& S, double& Now, const ss::net::EventInstance& I, style::Style St, uint32_t Stops, int Mine)
+{
+	const ss::net::Network& Net = ss::net::Shared();
+	if (S.WorldMinutes() < I.Start)
+	{
+		Now = At(S, Now, I.Start);
+	}
+	Fed(S);
+	S.RegisterEvent(Net.Listing(I));
+	if (S.CurrentScreen != ss::Screen::Table)
+	{
+		return false;
+	}
+	// Whole stretches in one update: the same frames on any machine.
+	S.SprintBudgetMs = 1.0e9;
+	S.SetAutoplay(0, PlanOf(St, autoplay::Mode::Skip, autoplay::Target::Result, Stops));
+	int MineFrom = -1;
+	for (int Frames = 0; S.CurrentScreen == ss::Screen::Table && Frames < 4000000; ++Frames)
+	{
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		if (S.TableCount() == 0 || S.Finishing())
+		{
+			continue;
+		}
+		ActBest(S, Now);
+		if (S.HasPrompt)
+		{
+			continue;
+		}
+		const autoplay::Panel P = S.AutoPanel(0);
+		if (MineFrom < 0 && P.On && !P.Skipping)
+		{
+			// The first stop: the player takes the next hands.
+			MineFrom = S.HandsPlayed;
+			autoplay::TableAuto Off = S.Autoplay(0);
+			Off.M = autoplay::Mode::Off;
+			S.SetAutoplay(0, Off);
+		}
+		else if (MineFrom >= 0 && ((!P.On && S.HandsPlayed >= MineFrom + Mine) || (P.On && !P.Skipping)))
+		{
+			S.SkipAhead(0, autoplay::Target::Result);
+		}
+	}
+	S.LeaveResults();
+	return true;
+}
+
+/** A network event played by hand from its start to the result: every decision the grader's best option (DeepRuns' hero). */
+bool ByHand(ss::Session& S, double& Now, const ss::net::EventInstance& I)
+{
+	const ss::net::Network& Net = ss::net::Shared();
+	if (S.WorldMinutes() < I.Start)
+	{
+		Now = At(S, Now, I.Start);
+	}
+	Fed(S);
+	S.RegisterEvent(Net.Listing(I));
+	if (S.CurrentScreen != ss::Screen::Table)
+	{
+		return false;
+	}
+	// The pace the last table left (a skip leaves it at Sprint) carries over: this one is played, at Smart.
+	S.CurrentPace = ss::Pace::Smart;
+	for (int Frames = 0; S.CurrentScreen == ss::Screen::Table && Frames < 6000000; ++Frames)
+	{
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		ActBest(S, Now);
+	}
+	S.LeaveResults();
+	return true;
+}
+
+/** update2_blank_world: a fresh-start career four days in (Friday, October 9), its world lines kept. */
+ss::SaveData BlankWorld()
+{
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "fixture-g1-blank"));
+	S->NewCareer(Someone(), ss::world::Start::Blank);
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.2);
+	S->BankrollCents += 100000;
+	const ss::net::Network& Net = ss::net::Shared();
+	ss::net::EventInstance I;
+	// Night One: the first hyper after 2:07 AM, skipped whole by the plan (GTO): nothing of the player's to grade.
+	if (Net.Next("hyper-sprint", S->WorldMinutes() + 1.0, I))
+	{
+		PlanHyper(*S, Now, I, style::Style::Gto, 0, 0);
+	}
+	// Tuesday: a shift at the Wash & Fold, then a hyper played by hand (the grader's best, every decision): Form moves.
+	Now = At(*S, Now, 1.0 * Day + 7.0 * 60.0);
+	Fed(*S);
+	if (!S->StartActivity("washfold").empty())
+	{
+		std::printf("fixture: the shift didn't start\n");
+	}
+	Now = Wait(*S, Now, 6.0);
+	if (Net.Next("hyper-sprint", 1.0 * Day + 14.0 * 60.0, I))
+	{
+		ByHand(*S, Now, I);
+	}
+	// Wednesday: a hyper the plan (TAG) skips with the premium-hands, all-in and bubble stops on: those decisions come to the
+	// player (a night can't end without an all-in, so one always does), and at the first stop the player takes four hands,
+	// then skips on to the result. Its played line has both.
+	if (Net.Next("hyper-sprint", 2.0 * Day + 14.0 * 60.0, I))
+	{
+		PlanHyper(*S, Now, I, style::Style::Tag, autoplay::StopBubble | autoplay::StopPremium | autoplay::StopMyAllIn, 4);
+	}
+	Dump("update2 g1: blank world, three hypers", H.Last);
+	// Thursday's Nightly at the Embercrest, skipped by the plan (TAG) to the result.
+	Now = PlanNightToResult(S, H, Now, "fixture-g1-blank", "embercrest-nightly@3", style::Style::Tag);
+	// Friday afternoon, fed: saved.
+	Now = At(*S, Now, 4.0 * Day + 15.0 * 60.0);
+	Fed(*S);
+	Now = Wait(*S, Now, 0.2);
+	S->Save();
+	Dump("update2 g1: blank world", H.Last);
+	return H.Last;
+}
+
+/** update2_auto_mid_nightly: tonight's Nightly, the plan (GTO) skipping to the bubble, checkpointed mid-skip. */
+ss::SaveData AutoMidNightly()
+{
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "fixture-g1-auto"));
+	S->NewCareer(Someone());
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.2);
+	// Wednesday, October 7: a shift, the rent paid, then a hyper the plan (TAG) skipped to the result.
+	Now = At(*S, Now, 2.0 * Day + 7.0 * 60.0);
+	Fed(*S);
+	S->BankrollCents += 200000;
+	if (!S->StartActivity("washfold").empty())
+	{
+		std::printf("fixture: the shift didn't start\n");
+	}
+	Now = Wait(*S, Now, 6.0);
+	S->PayRent();
+	ss::net::EventInstance I;
+	if (ss::net::Shared().Next("hyper-sprint", 2.0 * Day + 14.0 * 60.0, I))
+	{
+		PlanHyper(*S, Now, I, style::Style::Tag, 0, 0);
+	}
+	// A player who has been grinding hands (Form 88, the dev command's way), with tells learned at the tables.
+	const std::string Form = S->DebugAuto("form 88");
+	S->Life.Reads["Mei/ChipGlance"] = 3;
+	S->Life.Reads["Big Lou/Swallow"] = 2;
+	S->Life.Reads["Sal/StareDown"] = 1;
+	if (Transcript)
+	{
+		std::printf("  [plan] %s\n", Form.c_str());
+	}
+	// Tonight, Wednesday October 14: the Nightly on the player's own money; the plan takes the seat and skips to the bubble.
+	const live::Occurrence O = live::FindOccurrence("embercrest-nightly@9");
+	Now = At(*S, Now, O.DeskOpens + 30.0);
+	Fed(*S);
+	const std::string Why = S->GoToLive(O.Id);
+	if (!Why.empty())
+	{
+		std::printf("fixture: tonight: %s\n", Why.c_str());
+	}
+	ss::SaveData D = HostSave(H, *S);
+	life::LiveEntry* E = live::EntryFor(D.Life, O.Id);
+	if (E)
+	{
+		E->ArrivedAt = O.Start - 20.0;
+		bool Restored = false;
+		std::unique_ptr<ss::Tournament> T = live::ResumeField(O, *E, E->Entrants, D.HeroName, Known(*E), false, Restored);
+		ss::room::Director Room(*E, O, live::SeedFor(*E, D.HeroName) + ":room", D.Person.FirstName);
+		PlanNight N;
+		N.T = T.get();
+		N.Room = &Room;
+		N.DayStart = O.Start - static_cast<double>(O.T->StartMinute);
+		N.A = PlanOf(style::Style::Gto, autoplay::Mode::Skip, autoplay::Target::Bubble, autoplay::StopFinalTable | autoplay::StopBubble);
+		TakeSeat(N, D, O.Start);
+		// The game closed just after the checkpoint at hand 25 (the skip saves the night every 5 hands, R5).
+		ss::live::SkipWhy Last = ss::live::SkipWhy::Budget;
+		for (int Guard = 0; Guard < 2000 && N.LastCheckpoint < 25 && !T->Hero().Busted && !T->bFinished; ++Guard)
+		{
+			Last = ss::live::SkipSlice(*T, N.Brain, N.A, 0.0, N).Why;
+			if (Last != ss::live::SkipWhy::Budget)
+			{
+				break;
+			}
+		}
+		if (Last != ss::live::SkipWhy::Budget || T->Hero().Busted)
+		{
+			std::printf("fixture: tonight's skip ended before its checkpoint (why %d, hand %d)\n", static_cast<int>(Last), T->Tick);
+		}
+		E->Checkpoint = T->Checkpoint();
+		E->CheckpointAt = N.DayStart + T->ClockMinutes();
+		E->CheckpointHost = N.HostText();
+		E->Room = Room.Write();
+		D.ClockMinutes = E->CheckpointAt - Day;
+		if (Transcript)
+		{
+			std::printf("  [plan] tonight: %s, Sharpness %.2f, tilt %.3f, %d hands (%d decisions) by the plan, %d checkpoints, hand %d, %d left\n", style::InfoOf(N.A.S).Name,
+				N.R.Sharp, N.R.Tilt, N.R.AiHands, N.R.AiDecisions, N.Checkpoints, T->Tick, T->Remaining);
+		}
+	}
+	Dump("update2 g1: auto mid nightly, checkpointed", D);
+	return D;
+}
+#endif
+
 bool WriteFile(const std::string& Path, const std::string& Text)
 {
 	FILE* F = std::fopen(Path.c_str(), "wb");
@@ -803,12 +1239,31 @@ int main(int Argc, char** Argv)
 {
 	using namespace fixture_tool;
 	const std::string Mode = Argc > 1 ? Argv[1] : "";
-	if (Mode != "write" && Mode != "write2" && Mode != "transcript")
+	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "transcript")
 	{
-		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool transcript\n");
+		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool write-g1 <dir> [show] | fixture_tool transcript\n");
 		return 2;
 	}
 	Transcript = Mode == "transcript";
+	if (Mode == "write-g1")
+	{
+#if SS_FIXTURE_GATE1
+		if (Argc < 3)
+		{
+			std::printf("usage: fixture_tool write-g1 <dir> [show]\n");
+			return 2;
+		}
+		// "show" prints the careers as they're built (the transcript's dump), for the lead's PIE notes.
+		Transcript = Argc > 3 && std::string(Argv[3]) == "show";
+		const std::string Dir = std::string(Argv[2]) + "/";
+		bool Ok = WriteFile(Dir + "update2_blank_world.ssave", BlankWorld().Serialize());
+		Ok = WriteFile(Dir + "update2_auto_mid_nightly.ssave", WithoutWorld(AutoMidNightly().Serialize())) && Ok;
+		return Ok ? 0 : 1;
+#else
+		std::printf("fixture_tool write-g1: this tree has no autoplay (update 2 gate 1)\n");
+		return 2;
+#endif
+	}
 	if (Mode == "write2")
 	{
 		if (Argc < 3)

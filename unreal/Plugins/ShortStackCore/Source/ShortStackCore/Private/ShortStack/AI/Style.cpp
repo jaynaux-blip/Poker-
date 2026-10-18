@@ -3,6 +3,7 @@
 
 #include "StyleDetail.h"
 
+#include "ShortStack/AI/IcmPlay.h"
 #include "ShortStack/Equity.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Tournament.h"
@@ -99,16 +100,76 @@ bool StyleNonTrivial(const PlayerView& V)
 	return V.Hole.size() == 2 && (HandPercentile(V.Hole[0], V.Hole[1]) <= 0.5 || StackBb <= 15.0);
 }
 
-/** The slip's profile: pushed toward the losing station direction (§2.5). Every style gets worse, the Nit included. */
+// ---------------------------------------------------------------------------------------------------------- the slip
+// C1's calibration (§2.5's knobs, in update2/C1_CALIBRATION.md with every number before and after). The archetype bases
+// beat Autopilot by more than U3 allows (TAG by 3.2 points of finish in deep events; the Nit by 5 to 8 points in every
+// format) and the bases never change, so the slip carries the calibration: a stronger slip, a floor a style slips at even
+// at Sharpness 1.0 (Form 95, rested), and k x (1 - Sharpness) on top (k x 2 for GTO, x 2.5 for the Maniac), which is what
+// Form earns back from the default 0.80.
+
+/** What a style slips at Sharpness 1.0 (C1). */
+double StyleSlipFloor(Style S, const HeroContext& C)
+{
+	switch (S)
+	{
+	case Style::Tag:
+	case Style::Exploit: return 0.38; // the same, so Exploitative is plain TAG until it has reads (§2.4.3), slips included
+	case Style::Lag: return 0.25;     // LAG's edge is its ROI: 20 points over Autopilot's in hypers with no floor
+	case Style::Nit: return 0.70;     // the Nit outlasts Autopilot by 5 to 8 points of finish with no floor
+	case Style::Reg: return 0.25;
+	case Style::IcmShark:
+		// Slips like Balanced Reg until chips stop being worth their face (InZone); sharp on the bubble and at the final table.
+		return C.T && icmplay::InZone(*C.T) ? 0.0 : 0.32;
+	case Style::PushFold:
+		// Built for fast events: its charts and its game in hypers and turbos never slip at a floor. In a slow game (levels
+		// of 8 minutes or more: deep events, the Embercrest; or no tournament clock at all, as in the ring harness: at a
+		// cash table it plays as TAG), deeper than 25 big blinds it's the Push/Fold profile, a step behind TAG (§2.4.4);
+		// with no floor there it finished 3 points over Autopilot in deep events, level with TAG.
+		return (!C.T || C.T->Spec.LevelMinutes >= 8.0) && C.View.Hole.size() == 2 && StylePreflopNode(C.View, C.View.History.size()).E > 25.0 ? 0.45 : 0.0;
+	default: return 0.0; // Autopilot never slips; GTO and the Maniac sit under Autopilot at 1.0 with no floor
+	}
+}
+
+/**
+ * What Sharpness under 1.0 adds to a style's slip chance per point: k, doubled for GTO and x 2.5 for the Maniac, whose
+ * money at the default Sharpness otherwise sat level with Autopilot's (their finish is far under it, their wins aren't:
+ * GTO's push/fold charts and the Maniac's raises win more hypers than Autopilot does). At full Sharpness neither needs it.
+ */
+double StyleSlipSlope(Style S)
+{
+	return SlipK * (S == Style::Gto ? 2.0 : S == Style::Maniac ? 2.5 : 1.0);
+}
+
+/** A slip's chance at a non-trivial decision: the style's floor + its slope x (1 - Sharpness), at most 1; Autopilot's is 0. */
+double StyleSlipChance(Style S, double Sharp, const HeroContext& C)
+{
+	if (S == Style::Autopilot)
+	{
+		return 0.0;
+	}
+	return Min(1.0, StyleSlipFloor(S, C) + StyleSlipSlope(S) * (1.0 - Max(0.0, Min(1.0, Sharp))));
+}
+
+/**
+ * The slip's profile (§2.5; C1 round 1): the Calling Station's own numbers for everything after the opening decision (its
+ * call width against a raise, stickiness, aggression, bluffs, c-bets, bet sizes, short-stack and bubble play), with the
+ * style's own opening range, limps and 3-bets kept. A slipped TAG still opens like a TAG; it calls a raise it should
+ * fold, calls down too light and bets too little. §2.5's push toward the Station (Aggression x 0.5, Stickiness + 0.30,
+ * Call width x 1.4, ...) cost almost nothing: a TAG slipping every non-trivial decision finished level with Autopilot,
+ * which is roughly that TAG. Every style gets worse, the Nit included.
+ */
 Profile StyleSlipped(const Profile& P)
 {
+	const Profile St = profiles_detail::Base(Archetype::Station);
 	Profile S = P;
-	S.Aggression = P.Aggression * 0.5;
-	S.Stickiness = Min(0.95, P.Stickiness + 0.30);
-	S.CallWidth = P.CallWidth * 1.4;
-	S.Bluff = P.Bluff * 0.5;
-	S.PushFold = P.PushFold * 0.5;
-	S.IcmAware = P.IcmAware * 0.3;
+	S.CallWidth = St.CallWidth;
+	S.Stickiness = St.Stickiness;
+	S.Aggression = St.Aggression;
+	S.Bluff = St.Bluff;
+	S.Cbet = St.Cbet;
+	S.Sizing = St.Sizing;
+	S.PushFold = St.PushFold;
+	S.IcmAware = St.IcmAware;
 	return S;
 }
 } // namespace style_detail
@@ -122,14 +183,17 @@ const std::vector<Info>& Catalog()
 		{Style::Tag, "tag", "TAG", "Tight and aggressive. Few hands, played hard.", Swing::Even, "Anywhere", false, false, Style::Tag, 1.8, false},
 		{Style::Lag, "lag", "LAG", "Loose and aggressive. More pots, more pressure, more swings.", Swing::Swingy, "Tables of nits; deep stacks", false, false, Style::Lag, 1.4,
 			false},
-		{Style::Nit, "nit", "Nit", "Premiums only. Rarely busts early. Rarely wins.", Swing::Steady, "Satellites; reaching the money", false, false, Style::Nit, 2.0, false},
+		// C1's ship rule (§2.5): calibrated under Autopilot, the Nit swings least but no longer cashes more than the rest.
+		{Style::Nit, "nit", "Nit", "Premiums only. Rarely busts early. Rarely wins.", Swing::Steady, "Low swings; getting through the early levels", false, false, Style::Nit, 2.0,
+			false},
 		{Style::Maniac, "maniac", "Maniac", "Raises everything. Huge nights, early busts. Loses money.", Swing::Wild, "Entertainment", false, false, Style::Maniac, 0.9, false},
 		{Style::Reg, "reg", "Balanced Reg", "A solid regular. Beats weak fields steadily; breaks even against good ones.", Swing::Steady, "Anywhere", false, false, Style::Reg,
 			2.0, false},
 		{Style::Gto, "gto", "GTO",
 			"Balanced ranges from charts. About the same against anyone; leaves money against weak players. An approximation, not a solver.", Swing::Steady,
 			"Tough fields", false, false, Style::Gto, 2.4, false},
-		{Style::Exploit, "exploit", "Exploitative", "Learns the table, then attacks it. Plain TAG until it has reads.", Swing::Even,
+		// C1's ship rule (§2.5): its reads move it about a quarter of a big blind per 100 hands, so the tile says so.
+		{Style::Exploit, "exploit", "Exploitative", "Learns the table, then leans on what it's seen. Plain TAG until it has reads, and only a little better after.", Swing::Even,
 			"Long sessions; soft fields; regulars it has notes on", false, false, Style::Exploit, 2.2, false},
 		{Style::PushFold, "pushfold", "Push/Fold", "Short-stack charts. Best in turbos and hypers.", Swing::Swingy, "Hypers, turbos, any short stack", true, false, Style::Tag,
 			1.2, false},
@@ -213,8 +277,8 @@ BotDecision Decide(const HeroContext& C, const HeroBrain& B, Rng& R)
 	}
 	const Profile P = ProfileOf(B.S);
 	const double Tilt = StyleTiltSeen(B, P);
-	// The slip (§2.5): drawn with Mix, so the watch and skip paths slip at the same decisions.
-	const double SlipChance = SlipK * (1.0 - Max(0.0, Min(1.0, B.Sharp)));
+	// The slip (§2.5, C1's calibration): drawn with Mix, so the watch and skip paths slip at the same decisions.
+	const double SlipChance = StyleSlipChance(B.S, B.Sharp, C);
 	if (SlipChance > 0.0 && StyleNonTrivial(C.View) &&
 		Mix(C.MixSeed, C.Tick, C.HeroIdx, static_cast<int>(C.View.History.size()), SaltSlip) < SlipChance)
 	{

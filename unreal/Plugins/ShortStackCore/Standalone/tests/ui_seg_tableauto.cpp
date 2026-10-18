@@ -576,7 +576,7 @@ void HudLines()
 		{"RAISE TO", "to call", "is thinking", "Take the wheel"}, {"Take over"}, {});
 	Golden("table_hud_auto_think", Thinking, {"AUTOPLAY \xC2\xB7 GTO 2x \xC2\xB7 Sharpness 93%", Think, "Take the wheel"},
 		{"RAISE TO", "to call", "CALLED", "RAISED", "CHECKED", "FOLDED"}, {"Take over"}, {});
-	Golden("table_hud_auto_resume", Resuming, {"AUTO RESUMES"}, {"AUTOPLAY \xC2\xB7 GTO", "RAISE TO"}, {"Keep playing"}, {});
+	Golden("table_hud_auto_resume", Resuming, {"AUTO RESUMES", "Keep playing"}, {"AUTOPLAY \xC2\xB7 GTO", "RAISE TO"}, {}, {}); // C1: K on the keys, X A Y on a pad ("keep")
 	Golden("table_hud_auto_skip", Skipping, {"SKIPPING \xC2\xB7 PUSH/FOLD", "Level 9 \xC2\xB7 31 left of 88 \xC2\xB7 you 42 BB", "Stop the skip", "PRIZE POOL", "YOUR STACK"},
 		{"Dana Whitfield", "Mrs. Park", "13.1 BB", "POT 4,000", "AUTOPLAY \xC2\xB7", "RAISE TO", "is thinking"}, {}, {});
 	// The think's keys on each device: the keyboard's F C R A, the pad's X A Y (the first press only takes the wheel).

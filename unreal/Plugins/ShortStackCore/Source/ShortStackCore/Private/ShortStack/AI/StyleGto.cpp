@@ -14,8 +14,9 @@
 #include <cmath>
 #include <vector>
 
-// GTO (update 2 §2.4.2): preflop from charts (Tests/charts/gto_preflop.txt, compiled by tools/chartgen; Push/Fold's Nash
-// charts at 25 big blinds and under), and heads-up after the flop from equilibrium identities over the range it actually
+// GTO (update 2 §2.4.2): preflop from charts (Tests/charts/gto_preflop.txt, compiled by tools/chartgen, over 25 big blinds;
+// Push/Fold's Nash charts at 15 and under, its fallback profile between, since C1's calibration: StylePushFold.cpp's
+// PushFoldChartDepth), and heads-up after the flop from equilibrium identities over the range it actually
 // holds: value and bluff regions by the bluff-to-value ratio, defence by MDF. Multiway pots and stack-deciding spots go to
 // the engine's decision with GTO's fallback profile. Every mix is drawn with style::Mix, so it draws nothing from the
 // tournament's R; only the fallback does, exactly as a bot would. An approximation, not a solver: the tile says so.
@@ -148,6 +149,7 @@ PreflopPlan StyleGtoPlan(const PreflopNode& N, int HandClass, double Wide)
 {
 	if (N.E <= 25.0)
 	{
+		// Push/Fold's charts, to their depth (15 BB, C1); from there to 25 they're unknown and the fallback profile plays.
 		return StylePushFoldPlan(N, HandClass, Wide);
 	}
 	PreflopPlan Plan;

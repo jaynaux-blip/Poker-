@@ -1750,11 +1750,12 @@ void AutoLines(Canvas& C, const TableHudInfo& I, double Now)
 	const float W = C.Width();
 	const bool Pad = I.Gamepad;
 	const ControlContext Ctx = ControlContext::Table;
-	// The status: the hand after a take-over has the plan back unless K keeps the seat the player's (§2.6.5).
+	// The status: the hand after a take-over has the plan back unless K keeps the seat the player's (§2.6.5); on a pad
+	// that's an action button ("keep": a pad has no K at the table), so the window names the keep control, not "auto".
 	const bool Window = I.AutoResumeWindow > 0.0f;
 	const bool Status = I.Status.empty();
 	const std::string Lead = Window ? std::string("AUTO RESUMES") : AutoStatusText(I);
-	const std::vector<Choice> LeadKeys = {{"auto", Window ? "Keep playing" : "Take over"}};
+	const std::vector<Choice> LeadKeys = {{Window ? "keep" : "auto", Window ? "Keep playing" : "Take over"}};
 	// The think in the prompt's place (whose, never what: any action key now takes the wheel and does nothing else), or
 	// the plan's last action once it's played.
 	const bool Think = I.Prompt.empty() && I.AutoDeciding;
@@ -2972,7 +2973,8 @@ std::string TableSettingHelp(const std::string& Key, bool Gamepad)
 		// (Update 2: the qualifier, landing with the copy lint's rule that "always wait for you" says "autoplay", §2.11.)
 		return std::string("At a live table: how long the other players take to act, and how quickly a hand you've folded plays out. Your own decisions wait for you, "
 						   "unless you've handed the seat to autoplay. ") +
-			(Gamepad ? "Right on the d-pad changes it at the table." : "T changes it at the table.");
+			(Gamepad ? "Right on the d-pad changes it at the table. While autoplay has your seat, it sets the watch speed instead."
+				 : "T changes it at the table. While autoplay has your seat, T sets its watch speed instead.");
 	}
 	if (Key == "stackreadout")
 	{

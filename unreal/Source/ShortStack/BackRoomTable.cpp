@@ -1,8 +1,10 @@
 #include "BackRoomTable.h"
 
 #include "BackRoomAmbience.h"
+#include "BackRoomAuto.h"
 #include "BackRoomCard.h"
 #include "BackRoomChips.h"
+#include "BackRoomGameMode.h"
 #include "BackRoomPlayer.h"
 #include "BackRoomPlayerController.h"
 #include "BackRoomStage.h"
@@ -47,6 +49,12 @@ std::vector<int> ToStd(const TArray<int32>& In)
 FString CardName(int32 Card)
 {
 	return UTF8_TO_TCHAR(ss::CardToString(Card).c_str());
+}
+
+/** The plan's host on the table's night (update 2, ue-auto's FAutoHost): null in a world without a Back Room game mode. */
+FAutoHost* TablePlanHost(const UWorld* World)
+{
+	return World ? FAutoHost::Of(Cast<ABackRoomGameMode>(World->GetAuthGameMode())) : nullptr;
 }
 
 const TCHAR* MeaningWord(uint8 Means)
@@ -538,6 +546,22 @@ void ABackRoomTable::Tick(float DeltaSeconds)
 		{
 			ReadHero(*S, BotKind, BotTo, D.Equity);
 		}
+		else if (Tourney && HeroAutoHolds())
+		{
+			// The engine read the plan's bet just now, inside BotDecisionFor (the hook): the reader says so, and the whisper
+			// comes, as ReadHero has them when the hands were the player's (§2.8). The decision is already the read one.
+			BackRoomAutoRules::AutoReadNote PlanRead;
+			FAutoHost* PlanHost = TablePlanHost(GetWorld());
+			if (PlanHost && PlanHost->TakeTableRead(PlanRead) && S->Player && PlanRead.ReaderId == TCHAR_TO_UTF8(*S->Id))
+			{
+				const FString Name = S->Player->Persona.Name;
+				if (Fx.FRand() < 0.7f)
+				{
+					S->Player->Say(ShakeLine(Name, PlanRead.Called, Fx));
+				}
+				Whisper(FString::Printf(TEXT("%s caught your hands shaking."), *Name));
+			}
+		}
 		if (bTestShove && IsHeroInHand())
 		{
 			// (Testing, ss.Live.Shove: this one moves all in.)
@@ -841,8 +865,22 @@ float ABackRoomTable::Consume(const ss::HandEvent& Ev)
 			}
 			if (bAggressive)
 			{
-				// The bet is out there now, with the hands that pushed it: whatever the heart was doing shows.
-				Composure.Bluff = FeltEquity(S->HandSeat) < 0.42f ? 1.0f : 0.0f;
+				// The bet is out there now, with the hands that pushed it: whatever the heart was doing shows. Under the plan at
+				// the Embercrest the heart is the one the room reads off the bet (update 2, §2.8, §2.12: the engine's read, the
+				// same on the skip path), so the HUD's heart and the hands show the shake the readers see.
+				float PlanBpm = 0.0f;
+				bool bPlanBluff = false;
+				FAutoHost* PlanHost = Tourney && HeroAutoHolds() ? TablePlanHost(GetWorld()) : nullptr;
+				if (PlanHost && Hand && PlanHost->PlanHeart(*Hand, PlanBpm, bPlanBluff))
+				{
+					Composure.Bluff = bPlanBluff ? 1.0f : 0.0f;
+					Composure.Bpm = PlanBpm;
+					Composure.Target = PlanBpm;
+				}
+				else
+				{
+					Composure.Bluff = BackRoomAutoRules::AutoIsBluff(FeltEquity(S->HandSeat)) ? 1.0f : 0.0f;
+				}
 				HeroShakeAtBet = Composure.Shake();
 				bHeroAggressedThisStreet = true;
 			}
@@ -2003,6 +2041,16 @@ void ABackRoomTable::UpdateComposure(float Dt)
 	const float Steady = static_cast<float>(FMath::Clamp(Fitness.SteadyBpm, 0.0, 30.0));
 	const float Settle = static_cast<float>(FMath::Clamp(Fitness.SettleScale, 0.5, 2.5));
 	C.Target = FMath::Clamp(Rest + C.Sensitivity * Pressure - (C.bSteadying ? Steady : 0.0f), Rest - 10.0f, 168.0f);
+	// Update 2 (§2.12): while the plan's bet or raise is the street's last at the Embercrest, the heart holds where the room
+	// reads it (BackRoomAutoRules::AutoPlanHeartAt: these same terms, fixed as the bet went in), so the HUD shows the shake
+	// the readers act on. The street moves on, and the body's own pressure takes the heart back.
+	float PlanBpm = 0.0f;
+	bool bPlanBluff = false;
+	FAutoHost* PlanHost = bIn && Tourney && HeroAutoHolds() ? TablePlanHost(GetWorld()) : nullptr;
+	if (PlanHost && PlanHost->PlanHeart(*Hand, PlanBpm, bPlanBluff))
+	{
+		C.Target = PlanBpm;
+	}
 	// The heart jumps fast and settles slowly; steady breathing brings it down quicker.
 	const float Rate = C.Target > C.Bpm ? 0.55f : (C.bSteadying ? 0.32f : 0.12f) * Settle;
 	C.Bpm = FMath::Lerp(C.Bpm, C.Target, 1.0f - FMath::Exp(-Rate * Dt));
@@ -2358,6 +2406,12 @@ bool ABackRoomTable::TakeRecall(ss::recall::Record& Out)
 	}
 	Out = MoveTemp(*RecallReady);
 	RecallReady.Reset();
+	// The HANDS page's number: the table's own count, unless the page already holds it (update 2: hands a skip played carry the
+	// count on, and a night come back to holds the hands from before its table counted from 1 again). Never one shown twice.
+	if (const ABackRoomGameMode* Mode = GetWorld() ? Cast<ABackRoomGameMode>(GetWorld()->GetAuthGameMode()) : nullptr)
+	{
+		Out.Number = BackRoomAutoRules::AutoNextHandNumber(Mode->GetRecentHands(), Out.Number);
+	}
 	return true;
 }
 

@@ -163,6 +163,33 @@ struct RailBacker
 	std::string Name;
 	int Permille = 0;
 };
+/** How long a fresh world's room talks about its new books: their first thirty days (update 2 §3.3 F9). */
+constexpr int FreshBooksDays = 30;
+/**
+ * A fresh world's books as the room can know them (update 2 §3.3 F9, U5): what the regulars' talk about the room's firsts
+ * may claim. BooksOf reads them from the save's world; the host sets Director::Fresh before the night's first hand. Blank
+ * false (an established world, no world, a host that never set them): the room says none of it.
+ */
+struct Books
+{
+	bool Blank = false;
+	double Opened = 0.0; // when the books opened (World::StartedAt), world minutes
+	double Known = 0.0;  // the world's clock as read (World::Clock): of whatever finished after it, nothing is claimed
+	/** The room's events called off in the books (never played: no first is spent on them). */
+	std::vector<std::string> Cancelled;
+	/** Each of the room's event families' first decided event in the books, oldest first. */
+	struct First
+	{
+		std::string Id;     // the occurrence ("embercrest-nightly@0")
+		std::string Winner; // as the world has them, "" when it can't show who
+		bool Hero = false;  // the player won it
+	};
+	std::vector<First> Firsts;
+	/** Wins up the hill in the books: the player's, and who the world follows with the most (strangers' it doesn't keep). */
+	int HeroWins = 0;
+	std::string Most;
+	int MostWins = 0;
+};
 class Director
 {
 public:
@@ -196,6 +223,8 @@ public:
 	double BreakSeconds = 24.0;
 	/** The player is up from their seat (on foot): a move is called on the PA; seated, their dealer tells them. */
 	bool HeroUp = false;
+	/** A fresh world's books (BooksOf, from the host before the first hand): the regulars' talk about the room's firsts. */
+	Books Fresh;
 	SHORTSTACKCORE_API std::string Write() const;
 	SHORTSTACKCORE_API bool Read(const std::string& Text);
 	/** Tables whose hands the director ran equity for, in order (RoomEquityScope: only the hero's and the feature table). */
@@ -305,5 +334,14 @@ SHORTSTACKCORE_API std::vector<life::LiveVoice> VoicesFor(const life::LiveEntry&
 SHORTSTACKCORE_API life::LiveVoice VoiceOf(const world::World& W, int Npc, const std::string& Hero);
 /** A voice for someone the save knows nothing about (the anonymous field): how they play and a hash of their name. */
 SHORTSTACKCORE_API life::LiveVoice VoiceForStranger(const std::string& Name, int Style);
+/**
+ * A world's books for the room (update 2 §3.3 F9): Blank only for a fresh start. Each family's first decided event (a
+ * result, the player's own settled entry, the world's FirstWinner news, or over by the world's clock and not called off,
+ * its winner then unknown), the room's wins, and the events called off. Entries: the player's (life::State::LiveEntries).
+ */
+SHORTSTACKCORE_API Books BooksOf(const world::World& W, const std::vector<life::LiveEntry>& Entries);
+/** BooksOf from a save's world text (SaveData::WorldText), as the card room's host has it: a fresh start in its books' first
+ *  FreshBooksDays at Now is read (only the lines the books need); any other world costs its head line. */
+SHORTSTACKCORE_API Books BooksOfText(const std::string& WorldText, const std::vector<life::LiveEntry>& Entries, double Now);
 } // namespace room
 } // namespace ss
