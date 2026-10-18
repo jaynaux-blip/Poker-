@@ -2552,12 +2552,15 @@ void SngMode(double Scale)
 		}
 		Expect(Lowest, "#9 Nit's ROI swings the least of the styles");
 	}
-	// #13: against micro on paired seeds.
+	// #13: against micro on paired seeds. Its first line is reversed since C1 (update2/C1_CALIBRATION.md §6.1, SPEC §11.7):
+	// v1.1 asked Balanced Reg, TAG and GTO to be shown no worse than Autopilot - 2 at full Sharpness, which U3 rules out by
+	// construction (it puts every style at or under Autopilot there). What U3 bounds is the other side: at full Sharpness no
+	// style out-earns Autopilot by more than 8 points of ROI (§2.5's ceiling).
 	for (const Style S : {Style::Reg, Style::Tag, Style::Gto})
 	{
-		const Moments D = Paired(Get(S).Roi(), Get(Style::Autopilot).Roi());
-		Expect(Clears(std::string("#13 ") + ss::style::InfoOf(S).Name + " ROI - Autopilot's, over -2", D.Mean, D.Se(), -2.0),
-			std::string("#13 ") + ss::style::InfoOf(S).Name + " is no worse than Autopilot by 2 points of ROI");
+		const Moments D = Paired(Get(Style::Autopilot).Roi(), Get(S).Roi());
+		Expect(Clears(std::string("#13 Autopilot's ROI - ") + ss::style::InfoOf(S).Name + "'s, over -8", D.Mean, D.Se(), -8.0),
+			std::string("#13 ") + ss::style::InfoOf(S).Name + " doesn't out-earn Autopilot by more than 8 points of ROI (U3)");
 	}
 	{
 		const Moments D = Paired(Get(Style::Autopilot).Roi(), Get(Style::Maniac).Roi());

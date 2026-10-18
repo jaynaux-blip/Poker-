@@ -21,6 +21,8 @@ namespace charts
 SHORTSTACKCORE_API bool Jam(int Position, double EffBb, double AnteBb, int HandClass);
 /** Call a first-in jam from JammerPos at JammerBb (to 20); Multiway: someone else is already in (one band tighter). */
 SHORTSTACKCORE_API bool CallJam(int JammerPos, int MyPos, double JammerBb, double AnteBb, int HandClass, bool Multiway);
+// (C1's calibration: the styles play these charts to 15 BB only, StylePushFold.cpp's PushFoldChartDepth, so of the
+// re-shove tables they read just the 15 BB step, a shorter stack included; the steps over 15 stay in the tables, unread.)
 /** Re-jam over one open at 15 to 25 BB. OpenerBucket: 0 UTG to MP, 1 LJ and HJ, 2 CO and BTN, 3 the small blind. */
 SHORTSTACKCORE_API bool Reshove(int OpenerBucket, int MyPos, double EffBb, double AnteBb, int HandClass);
 enum class Spot : int
@@ -36,6 +38,8 @@ struct Mixed
 {
 	double Raise = 0, Call = 0;
 };
+// (C1: no style reads the "25 and under" band any more: its only reader was Push/Fold's 15 to 25 BB open, and the
+// charts now stop at 15. GTO plays these charts over 25 BB only.)
 /**
  * GTO's charts: Rfi (Position), BbVsOpen and IpVsOpen (VsPosition: the opener; the small blind's row 3-bets or folds),
  * Vs3Bet (Position: mine, VsPosition: the 3-bettor's), Vs4Bet. Bands by EffBb: 25 and under, 25 to 40, over 40.
@@ -47,6 +51,7 @@ SHORTSTACKCORE_API uint64_t Checksum();
 // ---------------------------------------------------------------------------------------------------------- appended by
 // core-styles in G1 (append-only from here)
 
+// (C1: as Reshove, read at the 15 BB step only.)
 /** The opener's call when re-jammed over its open at 15 to 25 BB: ShoverPos is the re-jammer's seat order. */
 SHORTSTACKCORE_API bool CallReshove(int OpenerBucket, int ShoverPos, double EffBb, double AnteBb, int HandClass);
 } // namespace charts

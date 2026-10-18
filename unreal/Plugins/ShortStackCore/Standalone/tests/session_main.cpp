@@ -3226,8 +3226,12 @@ struct LedgerTally
 	life::LedgerEntry Newest;
 	bool Any = false;
 	std::vector<life::LedgerEntry> All;
+	ss::Chips Credit = 0;    // the store credit the sponsors' perks granted (no ledger line: read off the book's balance)
+	ss::Chips CreditNow = 0; // the balance last seen (only the corner store spends it, which the careers never visit)
 	void Take(const life::State& L)
 	{
+		Credit += std::max<ss::Chips>(0, L.Sponsors.StoreCreditCents - CreditNow);
+		CreditNow = L.Sponsors.StoreCreditCents;
 		size_t Fresh = 0;
 		while (Fresh < L.Ledger.size())
 		{
@@ -3282,8 +3286,34 @@ struct Career
 	int RentChecks = 0;
 	std::vector<int> TierByDay;    // SponsorTier() each day
 	std::array<ss::Chips, 4> Bank{}; // the bankroll on days 30, 60, 90 and the last
+	std::array<ss::Chips, 3> DealsTo{};  // check 6: what the deals put in by days 30, 60 and 90 (DealValue)
+	std::array<ss::Chips, 3> IncomeTo{}; // check 6: the income by then (Income: check 1's kinds)
 	int Online = 0, Live = 0, Streams = 0, Signed = 0;
 };
+
+/** Income as check 1 reads it: poker, the job, hustles, prizes, streaming and the sponsors' lines. */
+bool Income(const life::LedgerEntry& E)
+{
+	return E.Amount > 0 && (E.Kind == 0 || E.Kind == 1 || E.Kind == 2 || E.Kind == 4 || E.Kind == 6 || E.Kind == life::LedgerSponsors);
+}
+
+/**
+ * Check 6's measure of the deals so far: what they put in, cash and in-kind at face. The sponsors' lines (signing,
+ * stipends, bonuses, the covered entries and the covered bus fares, less a cut, a cover returned or signing money paid
+ * back) and the store credit their perks granted; backing's lines (a stake, pieces sold, a chop) net of what the backers
+ * took back. Each kind counts at zero when it took more than it gave.
+ */
+ss::Chips DealValue(const LedgerTally& T)
+{
+	ss::Chips Sponsors = 0;
+	ss::Chips Backing = 0;
+	for (const life::LedgerEntry& E : T.All)
+	{
+		Sponsors += E.Kind == life::LedgerSponsors ? E.Amount : 0;
+		Backing += E.Kind == life::LedgerBacking ? E.Amount : 0;
+	}
+	return std::max<ss::Chips>(0, Sponsors) + T.Credit + std::max<ss::Chips>(0, Backing);
+}
 
 ss::Chips RollSum(const ss::Session& S)
 {
@@ -3662,12 +3692,23 @@ void Run(Career& C)
 		{
 			C.Bank[Done == 30 ? 0 : Done == 60 ? 1 : Done == 90 ? 2 : 3] = S->BankrollCents;
 		}
+		if (Done == 30 || Done == 60 || Done == 90)
+		{
+			C.Ledger.Take(S->Life);
+			ss::Chips Earned = 0;
+			for (const life::LedgerEntry& E : C.Ledger.All)
+			{
+				Earned += Income(E) ? E.Amount : 0;
+			}
+			C.DealsTo[static_cast<size_t>(Done / 30 - 1)] = DealValue(C.Ledger);
+			C.IncomeTo[static_cast<size_t>(Done / 30 - 1)] = Earned;
+		}
 	}
 	(void)Start;
 }
 
-/** The last segment's first five checks on one career (its deals-off twin printed beside it; the sixth reads the medians). */
-void Checks(const Career& On, const Career& Off)
+/** The last segment's six checks on one career (the deals on; the sixth as restated in C1, against the career's income). */
+void Checks(const Career& On)
 {
 	const char* Name = On.Kind == 0 ? "live-only" : On.Kind == 1 ? "streaming" : "mixed";
 	const double Start = On.Ledger.All.empty() ? 0.0 : On.Ledger.All.front().At;
@@ -3676,8 +3717,7 @@ void Checks(const Career& On, const Career& Off)
 	ss::Chips Income60 = 0;
 	for (const life::LedgerEntry& E : On.Ledger.All)
 	{
-		const bool Income = E.Amount > 0 && (E.Kind == 0 || E.Kind == 1 || E.Kind == 2 || E.Kind == 4 || E.Kind == 6 || E.Kind == life::LedgerSponsors);
-		if (E.At < Start + 60.0 * Day && Income)
+		if (E.At < Start + 60.0 * Day && Income(E))
 		{
 			Income60 += E.Amount;
 			Sponsor60 += E.Kind == life::LedgerSponsors ? E.Amount : 0;
@@ -3711,12 +3751,16 @@ void Checks(const Career& On, const Career& Off)
 		LouMax = std::max(LouMax, In);
 	}
 	std::printf("  pacing %s (%d days): %d online, %d live, %d streams, %d deals signed; sponsor cash $%.2f of $%.2f income in 60 days; the worst month's "
-				"sponsorship before tier 3 $%.2f; Lou %zu stakes (at most %d in 30 days); Lantern Row %d offers; %d rent deadlines checked; bankroll on/off day 30 "
-				"$%.2f/$%.2f, day 60 $%.2f/$%.2f, day 90 $%.2f/$%.2f, last $%.2f\n",
+				"sponsorship before tier 3 $%.2f; Lou %zu stakes (at most %d in 30 days); Lantern Row %d offers; %d rent deadlines checked; bankroll day 30 $%.2f, "
+				"day 60 $%.2f, day 90 $%.2f, last $%.2f\n",
 		Name, On.Days, On.Online, On.Live, On.Streams, On.Signed, static_cast<double>(Sponsor60) / 100.0, static_cast<double>(Income60) / 100.0,
 		static_cast<double>(WorstMonth) / 100.0, On.LouAt.size(), LouMax, On.Lantern, On.RentChecks, static_cast<double>(On.Bank[0]) / 100.0,
-		static_cast<double>(Off.Bank[0]) / 100.0, static_cast<double>(On.Bank[1]) / 100.0, static_cast<double>(Off.Bank[1]) / 100.0, static_cast<double>(On.Bank[2]) / 100.0,
-		static_cast<double>(Off.Bank[2]) / 100.0, static_cast<double>(On.Bank[3]) / 100.0);
+		static_cast<double>(On.Bank[1]) / 100.0, static_cast<double>(On.Bank[2]) / 100.0, static_cast<double>(On.Bank[3]) / 100.0);
+	auto Share = [&](size_t K) { return On.IncomeTo[K] > 0 ? 100.0 * static_cast<double>(On.DealsTo[K]) / static_cast<double>(On.IncomeTo[K]) : 0.0; };
+	std::printf("  pacing %s: the deals' value (cash, and in-kind at face) $%.2f of $%.2f income by day 30 (%.1f%%), $%.2f of $%.2f by day 60 (%.1f%%), $%.2f of $%.2f "
+				"by day 90 (%.1f%%)\n",
+		Name, static_cast<double>(On.DealsTo[0]) / 100.0, static_cast<double>(On.IncomeTo[0]) / 100.0, Share(0), static_cast<double>(On.DealsTo[1]) / 100.0,
+		static_cast<double>(On.IncomeTo[1]) / 100.0, Share(1), static_cast<double>(On.DealsTo[2]) / 100.0, static_cast<double>(On.IncomeTo[2]) / 100.0, Share(2));
 	const std::string Tag = std::string("pacing (") + Name + "): ";
 	Expect(Income60 <= 0 || Sponsor60 * 5 < Income60, (Tag + "sponsor cash stays under 20% of income for the first 60 days").c_str());
 	Expect(WorstMonth < ss::life::MonthlyRentCents, (Tag + "no month's rent is covered by sponsorship alone before tier 3").c_str());
@@ -3725,6 +3769,16 @@ void Checks(const Career& On, const Career& Off)
 	// 4. Lantern Row's offers are its tiers' terms, which staking_backing's Monte Carlo proves positive for the backer.
 	Expect(!On.LanternOffTier, (Tag + "Lantern Row's offers are never negative-EV for the backer (each a tier's terms)").c_str());
 	Expect(LouMax <= ss::stake::LouMonthCap, (Tag + "Lou's stakes move at most $300 of EV in any 30 days (at most four)").c_str());
+	// 6. On days 30, 60 and 90, the deals' value (cash, and in-kind at face: covered entries, fares, credit) is at most 15%
+	// of the career's income to date: deals help; they don't carry a career. (Restated in C1, update2/C1_REPORT.md §3: the
+	// last segment's "median bankroll with the deals on within +15% of the same seeds' with them off" came down to one
+	// career's deal on a three-career median, and no sponsor that covers even one $120 Nightly fits +15% of the live-only
+	// career's $736 roll on day 90. That comparison is printed in "long", for information.)
+	for (size_t K = 0; K < 3; ++K)
+	{
+		Expect(On.DealsTo[K] * 100 <= std::max<ss::Chips>(On.IncomeTo[K], 0) * 15,
+			(Tag + "the deals' value (cash, and in-kind at face) stays at most 15% of the career's income to date (day " + std::to_string(30 * (K + 1)) + ")").c_str());
+	}
 }
 
 /** A finish as a percentile of the field (100 the winner, 0 last; GAME_DESIGN's "average finish", 50 the middle). */
@@ -3853,9 +3907,11 @@ ss::Chips Median(const std::vector<Career>& Runs, size_t K)
 
 /**
  * EconomyPacing (update 2 SPEC §1.11, carried from next_segment_spec §1.11): seeded 180-day careers (live-only, streaming,
- * mixed) with every feature on, each against its own seed with backing and sponsors off for the bankroll check. The default
- * run plays the mixed career; "session_test long" plays all three. The checks are the last segment's six; each gate adds a
- * career of its own (G1 autoplay, G2 creator, G3 multi-site).
+ * mixed) with every feature on. The default run plays the mixed career's first 90 days (every check still reads: check 1
+ * 60 days, check 6 days 30, 60 and 90, G1's twin its 60; C1 moved the rest behind "long" for the suite's 120 s budget);
+ * "session_test long" plays all three whole, each beside its own seed with backing and sponsors off for the bankroll
+ * comparison the sixth check used to be (printed, not asserted: C1). The checks are the last segment's six; each gate
+ * adds a career of its own (G1 autoplay, G2 creator, G3 multi-site).
  */
 void EconomyPacing(bool Long)
 {
@@ -3867,22 +3923,39 @@ void EconomyPacing(bool Long)
 		pacing::Career On;
 		On.Seed = "pacing-" + std::to_string(Kinds[K]);
 		On.Kind = Kinds[K];
-		pacing::Career Off = On;
-		Off.Deals = false;
-		Off.Days = 90; // the sixth check reads days 30, 60 and 90
+		On.Days = Long ? 180 : 90;
 		pacing::Run(On);
-		pacing::Run(Off);
-		pacing::Checks(On, Off);
+		pacing::Checks(On);
 		Ons.push_back(On);
-		Offs.push_back(Off);
+		if (Long)
+		{
+			pacing::Career Off;
+			Off.Seed = On.Seed;
+			Off.Kind = On.Kind;
+			Off.Deals = false;
+			Off.Days = 90; // the comparison reads days 30, 60 and 90
+			pacing::Run(Off);
+			Offs.push_back(Off);
+		}
 	}
-	// 6. On days 30, 60 and 90, the median bankroll with backing and sponsors on is within +15% of the same seeds' with them off.
-	for (size_t K = 0; K < 3; ++K)
+	// The sixth check as the last segment had it: on days 30, 60 and 90, the median bankroll with backing and sponsors on
+	// within +15% of the same seeds' with them off. Information since C1 (check 6 is now the deals against income, in
+	// Checks): on three careers the median is one career's, and one covered Nightly is more than 15% of a thin roll. In
+	// "long" only: the deals-off twins cost a 90-day career each (about 16 s) and assert nothing; three seeds a kind would
+	// add about 200 s to "long", so it stays on the three careers' own seeds.
+	for (size_t I = 0; I < Offs.size(); ++I)
+	{
+		const char* Name = Ons[I].Kind == 0 ? "live-only" : Ons[I].Kind == 1 ? "streaming" : "mixed";
+		std::printf("  pacing %s (information, not a check): the bankroll with the deals on/off, day 30 $%.2f/$%.2f, day 60 $%.2f/$%.2f, day 90 $%.2f/$%.2f\n", Name,
+			static_cast<double>(Ons[I].Bank[0]) / 100.0, static_cast<double>(Offs[I].Bank[0]) / 100.0, static_cast<double>(Ons[I].Bank[1]) / 100.0,
+			static_cast<double>(Offs[I].Bank[1]) / 100.0, static_cast<double>(Ons[I].Bank[2]) / 100.0, static_cast<double>(Offs[I].Bank[2]) / 100.0);
+	}
+	for (size_t K = 0; K < 3 && !Offs.empty(); ++K)
 	{
 		const ss::Chips A = pacing::Median(Ons, K);
 		const ss::Chips B = pacing::Median(Offs, K);
-		std::printf("  pacing: day %zu, the median bankroll $%.2f with the deals on, $%.2f off\n", 30 * (K + 1), static_cast<double>(A) / 100.0, static_cast<double>(B) / 100.0);
-		Expect(A * 100 <= std::max<ss::Chips>(B, 1) * 115, ("pacing: the median bankroll with deals on stays within +15% of the same seeds with them off (day " + std::to_string(30 * (K + 1)) + ")").c_str());
+		std::printf("  pacing (information, not a check): day %zu, the median bankroll $%.2f with the deals on, $%.2f off (%+.0f%%; the old bound +15%%)\n", 30 * (K + 1),
+			static_cast<double>(A) / 100.0, static_cast<double>(B) / 100.0, B > 0 ? 100.0 * static_cast<double>(A - B) / static_cast<double>(B) : 0.0);
 	}
 	// G1's career (update 2 SPEC §1.11): the autoplay career on the mixed career's seed and schedule, the mixed career its twin.
 	// 60 days by default; the whole 180 in "long".
@@ -5398,8 +5471,8 @@ void SegmentJourney(bool Long)
 
 int main(int Argc, char** Argv)
 {
-	// "session_test long": the long careers (EconomyPacing's beyond the first, SegmentJourney's whole 120 days; update 2
-	// SPEC §6.7). "session_test c1 [long]": only the lead's C1 checks (the gate's fixtures, the journeys, the pacing).
+	// "session_test long": the long careers (EconomyPacing's three whole, with their deals-off twins; SegmentJourney's whole
+	// 120 days; update 2 SPEC §6.7). "session_test c1 [long]": only the lead's C1 checks (the gate's fixtures, the journeys, the pacing).
 	bool Long = false;
 	bool C1 = false;
 	for (int K = 1; K < Argc; ++K)

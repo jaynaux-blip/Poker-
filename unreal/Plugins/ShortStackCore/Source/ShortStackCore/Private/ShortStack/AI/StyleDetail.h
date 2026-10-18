@@ -73,10 +73,15 @@ namespace style
 namespace style_detail
 {
 // ---------------------------------------------------------------------------------------------------------- knobs
-// §2.5's calibration knobs, in the order they turn: (1) the slip coefficient; (2) each module's constants (here and in
-// the modules); (3) SkillTerm's floor (core-autoplay's). Every change is recorded in the spec's §2.5.
+// §2.5's calibration knobs, in the order they turn: (1) the slip coefficient (and since C1 each style's floor); (2) each
+// module's constants (here and in the modules); (3) SkillTerm's floor (core-autoplay's). C1's turns are recorded in
+// update2/C1_CALIBRATION.md, with every number before and after.
 
-/** A slip's chance at a non-trivial decision: k x (1 - Sharpness). */
+/**
+ * The slip's base slope k. Since C1 a slip's chance at a non-trivial decision is the style's floor (what it slips at
+ * Sharpness 1.0) + its slope x (1 - Sharpness), at most 1: the slope is k, k x 2 for GTO and k x 2.5 for the Maniac
+ * (Style.cpp's StyleSlipFloor, StyleSlipSlope and StyleSlipChance). Autopilot never slips.
+ */
 constexpr double SlipK = 1.2;
 
 // ---------------------------------------------------------------------------------------------------------- shared
@@ -139,9 +144,12 @@ struct PreflopPlan
 	double RaiseToBb = 0; // the size when it raises (in big blinds; a jam is the whole stack)
 	bool Jam = false;
 };
-/** Push/Fold's charts (§2.4.4): Nash jams, calls and re-shoves at 25 BB and under; Known is false deeper. */
+/**
+ * Push/Fold's charts (§2.4.4): Nash jams, calls and re-shoves at PushFoldChartDepth and under (15 BB since C1's
+ * calibration; the spec had 25); Known is false deeper (the Push/Fold profile plays).
+ */
 PreflopPlan StylePushFoldPlan(const PreflopNode& N, int HandClass, double Wide);
-/** GTO's charts (§2.4.2): Push/Fold's at 25 BB and under, the scenario charts deeper. */
+/** GTO's charts (§2.4.2): Push/Fold's at 15 BB and under (C1), none to 25 (its fallback profile), the scenario charts over 25. */
 PreflopPlan StyleGtoPlan(const PreflopNode& N, int HandClass, double Wide);
 /** A plan into an action at the view: Mix draws the mixed frequency (U uniform in [0, 1)). */
 PlayerAction StylePlanAction(const PlayerView& V, const PreflopPlan& Plan, double U);
