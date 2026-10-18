@@ -1664,13 +1664,25 @@ void RiverLine::ResultsScreen(double Now)
 	UI.Text(R.Grades.empty() ? std::string("\xE2\x80\x94") : Fixed(Acc, 1), Gx, Gy + 14.0f, Ts(52.0f, 900, pal::Ink, Align::Center, Baseline::Alphabetic, true));
 	UI.Text("Decision accuracy", Gx, Gy + 60.0f, Ts(16.0f, 500, pal::Muted, Align::Center));
 	// Update 2 (§2.9, §2.11): who played it. The accuracy is the player's own decisions only; the plan's are never graded.
-	const autoplay::Played* ByPlan = Previewing ? nullptr : rlauto_detail::AutoPlayedFor(S, R); // never on a stream (U1)
+	const autoplay::Played* PlanRec = rlauto_detail::AutoPlayedFor(S, R);
+	const autoplay::Played* ByPlan = Previewing ? nullptr : PlanRec; // never on a stream (U1)
 	if (ByPlan)
 	{
 		UI.Text(autoplay::PlayedLine(*ByPlan), Gx, Gy + 112.0f, Ts(15.0f, 700, pal::Accent, Align::Center, Baseline::Alphabetic, false, 2.0f * (RlW - Gx) - 40.0f));
 	}
-	const int Xp = static_cast<int>(JsRound(static_cast<double>(R.Grades.size()) * (Acc / 100.0) * 12.0 + (Cashed ? 60.0 : 0.0)));
-	UI.Text("Skill XP +" + std::to_string(Xp), Gx, Gy + 150.0f, Ts(22.0f, 800, pal::Accent, Align::Center));
+	// Skill XP is the player's own (U4, C1's copy pass): once the plan played any of the event, only the player's graded
+	// decisions earn it (the cash was the plan's work too, so no cash bonus), and an event the plan played whole earns
+	// none. A stream shows the same figure, without the line that names the plan.
+	const double OwnXp = static_cast<double>(R.Grades.size()) * (Acc / 100.0) * 12.0;
+	const int Xp = static_cast<int>(JsRound(OwnXp + (Cashed && !PlanRec ? 60.0 : 0.0)));
+	if (PlanRec && R.Grades.empty())
+	{
+		UI.Text("No skill XP", Gx, Gy + 150.0f, Ts(22.0f, 800, pal::Muted, Align::Center));
+	}
+	else
+	{
+		UI.Text("Skill XP +" + std::to_string(Xp), Gx, Gy + 150.0f, Ts(22.0f, 800, pal::Accent, Align::Center));
+	}
 	UI.Text(ByPlan ? rlauto_detail::AutoXpOwn : "XP comes from decisions, not results.", Gx, Gy + 178.0f, Ts(14.0f, 500, pal::Muted, Align::Center));
 
 	// Grade distribution.

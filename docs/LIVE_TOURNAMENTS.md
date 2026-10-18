@@ -2,6 +2,8 @@
 
 Draft v1, 2026-10-03. Written against `desktop-work` at 4354ebc. Extends `GAME_DESIGN.md` §3, §6 and §7. It doesn't replace them.
 
+Updated 2026-10-18 for update 2's first gate: autoplay at the live tables (§16), the skip's checkpoints (R5), the filming rule (R11) and a fresh world at the Embercrest (§17).
+
 **This update:** grow the Embercrest from "the Sunday tournament" into the city's **local casino card room**. It runs 2 to 3 tournaments every day, with fields of 60 to 120, in a room you can walk around.
 
 ## 1. The recommendation
@@ -49,7 +51,7 @@ Directives for every venue.
 
 **R4. One entry per player per occurrence.** The player's entry is a record in the save: entry id, occurrence id, what paid (cash or ticket), fee, state, place, prize and a settled flag. Money moves only in `Register`, `Refund` and `Settle`, each idempotent by entry id. Separate ledger lines: entry, fee, travel, prize.
 
-**R5. Safe-save boundaries are explicit.** The game saves at registration, **after every completed hand**, at every break and at settlement. A checkpoint holds the tournament state (players, stacks, tables, tick, level, RNG state). If the game is quit mid-hand, a confirmation says "This hand will be folded." If it crashes mid-hand, the next load resumes at the start of that hand with the same deal. A registration is never lost; a buy-in is never charged twice.
+**R5. Safe-save boundaries are explicit.** The game saves at registration, **after every completed hand**, at every break and at settlement. A checkpoint holds the tournament state (players, stacks, tables, tick, level, RNG state). If the game is quit mid-hand, a confirmation says "This hand will be folded." If it crashes mid-hand, the next load resumes at the start of that hand with the same deal. A registration is never lost; a buy-in is never charged twice. While autoplay skips ahead (§16), the game saves every 5 hands and where the skip stops, and the checkpoint carries the plan too (its style, tilt, Sharpness and counts), so a crash mid-skip comes back at most four hands earlier, with the same deals and the same plan, waiting for the player's K.
 
 **R6. Minimum field, stated.** Each event names its minimum (the Embercrest's: 18 entrants, three tables). Below it the event is cancelled and every entry refunded in full; the screens say so. No invented entrants or prize money. Anonymous entrants are part of the world's planned count (their skill is in `Pending::Strength`), generated deterministically from the occurrence id. They are not padding for an unresolved rule.
 
@@ -60,6 +62,8 @@ Directives for every venue.
 **R9. Presentation can't change results.** Chips, cards, eliminations and payouts come from the engine. An actor that fails to reach a chair is blinked into it. A skipped celebration settles exactly the same.
 
 **R10. Table size.** The Embercrest is a **6-max room**: its tables, seat anchors and table animation are built for six and a dealer. 60 to 120 entrants is 10 to 20 tables. A 9-handed room would need a new table rig and is a separate decision.
+
+**R11. No filming at the tables.** The Embercrest, like real card rooms, doesn't allow cameras at its tables, and no venue streams: Kast stays at home, and leaving for a venue ends a stream. A live night reaches the player's video channel (update 2's Rerun, gate 2) told vlog-style: the hands replayed as cards, the player's portrait instead of a facecam, and only what the player saw. Dee's game is storytime only: no names, no faces but the player's, "a back-room game".
 
 ## 4. The Embercrest Casino card room
 
@@ -221,12 +225,13 @@ Targets for this update (to verify, not promises):
 | Calendar and RiverLine **Live** tab | | |
 | `ss.Live.Describe` debug | | |
 | Since then (next_segment_spec): backing (stakes, pieces, swaps, packages, coaches who back you) and sponsors (contracts, negotiation, patches, Team Embercrest) | The player backing others | |
+| Since then (update 2, gate 1): autoplay at every Embercrest event and at Dee's game from night 2, with the budgeted live skip (§16); the filming rule (R11); a fresh world's empty board and its talk (§17) | A skip at Dee's; a live skip that hands over a premium hand mid-hand; the plan's auto-peek | |
 
 ## 14. A Saturday at the Embercrest
 
 Saturday, 12:10 PM. Rent's paid, $640 in the bank. The calendar has three blue cards: the Big Stack at 1, the Nightly at 7, the Turbo at 10:30. The Big Stack is $200, a third of your roll. Dee texted Thursday: "big stack's a reach. nightly's your game." You take the 14 bus ($2.90) at 6:15 for the Nightly instead.
 
-6:40 PM. The Big Stack is still running: 31 left of 112, four tables lit in the back row, a railbird at Table 18 filming on his phone. The winners' wall says *THU NIGHTLY: SAL M. — $1,960*. At the desk: $105 + $15. "Table 12, seat 4." Table 12 is under the old proscenium. Sal's at Table 11, back to back with you, and nods. The other five at yours you've never seen. One is wearing a River City Classic lanyard.
+6:40 PM. The Big Stack is still running: 31 left of 112, four tables lit in the back row, a railbird at Table 18 holding up his phone until the floor waves it down (R11). The winners' wall says *THU NIGHTLY: SAL M. — $1,960*. At the desk: $105 + $15. "Table 12, seat 4." Table 12 is under the old proscenium. Sal's at Table 11, back to back with you, and nods. The other five at yours you've never seen. One is wearing a River City Classic lanyard.
 
 8:00 PM. Last call for registration: 94 runners. 9:05 PM, the first break. On the terrace, Rick, who knocked you out at Dee's on Tuesday, says "You again." Mrs. Park didn't come tonight. Her player card says she played the Noon Deepstack and min-cashed.
 
@@ -250,7 +255,7 @@ Saturday, 12:10 PM. Rent's paid, $640 in the bank. The calendar has three blue c
     - A hand already dealt when the game closed is dead (checked through or mucked), so no deck is seen twice.
     - A night the player never returns to is blinded off from its checkpoint.
     - Tested: session_test reopens a Sunday after any hand, and every forty hands; it plays on event for event and chip for chip. In the editor, the editor process was killed mid-hand and resumed into the same seat.
-  - **Pacing.** A Table pace setting (Live / Brisk / Fast; also T at the table, where P, Esc and gamepad Start pause) scales the others' thinking and the folded speed-up. N plays out a folded hand quickly. Neither ever decides anything for the player.
+  - **Pacing.** A Table pace setting (Live / Brisk / Fast; also T at the table, where P, Esc and gamepad Start pause) scales the others' thinking and the folded speed-up. N plays out a folded hand quickly. Neither ever decides anything for the player; autoplay (§16) is separate, and acts only when the player turns it on.
   - **Recurring faces.**
     - The room has 39 regulars of its own in the living world (`live::RoomLocals`, `world::Origin::Local`), added to older saves on load. 64 regulars in all (`World::EmbercrestRegulars`), each with their own nights (`live::RegularHabit`). world_test measures about 8 at a Nightly, and most come back three or more times a month.
     - The entry records the faces in its field: who they are to the player, and what they say on sitting down (`life::LiveFace`, from the world's bonds).
@@ -310,3 +315,51 @@ Saturday, 12:10 PM. Rent's paid, $640 in the bank. The calendar has three blue c
 - Messages from bonds.
 - `Tournament::Write`/`Read` per-hand checkpoints and crash resume (R5).
 - `ss.Live.Describe`.
+
+## 16. Autoplay at the tables (update 2, gate 1)
+
+The player can hand their seat to a plan at every Embercrest event, and at Dee's game from their second night. The styles, Sharpness, Form and the measured numbers are in `GAME_DESIGN.md` §5; this section is what changes at a live table. In the fiction it's the player's own body playing to a plan. Nobody at the table, on the PA, in the news or among the backers ever knows, and R9 holds: the engine decides, the room only shows it.
+
+**Controls.** Holds are 0.6 seconds.
+
+| Control | Keyboard | Pad | What it does |
+|---|---|---|---|
+| Autoplay on or off | K | PLAY page: hold A | On with the style the PLAY page shows; off gives the seat back from the next decision |
+| Pick a style | PLAY page: ← → | PLAY page: tap A | A style that doesn't fit is greyed and says why |
+| Skip | PLAY page: 1 to 5 pick the target, hold Enter | PLAY page: tap X for the target, hold X | The skip card over the dimmed table |
+| Watch speed | T | d-pad right | 1x → 2x → 4x → 8x → 1x, with a "WATCH 4x" note. The table's LIVE / BRISK / FAST setting is untouched |
+| Take the wheel | any action key (F C R A, 1 to 6) while the plan is thinking, the card closed | X, A or Y, the card closed | The first press takes the seat and does nothing else; the next one acts |
+| Stop a skip | K | B | The skip ends at the next gap between hands |
+
+- **The PLAY page** is the table card's sixth page (header "AI AUTOPLAY"). It shows the style, Sharpness and its causes, the speed, the skip's target (the next break, the bubble, the final table, the result, 50 hands) and the stop rules, and warns when the plan will be sloppy ("Sharpness 63%: tired and hungry, and your Form's still 70. Your plan gets sloppy."). It opens on the career's default plan from RiverLine's panel, at the GAMEPLAY setting "Autoplay watch speed".
+- **While the plan has the seat** the status line reads "AUTOPLAY · GTO · Sharpness 93% · [K] take over". The player's own hands push the chips, knock the felt and muck; the heart and the breathing carry on. There's no turn cue and no 20-second call, and the hole cards show in the hero block without a peek. A think bar shows the plan thinking but never the move before it's made.
+- **Watching at speed.** 2x plays the plan quicker. At 4x the room's talk thins to the dealers and the PA, and at 8x only the PA comes through; captions stay bounded.
+- **Taking the wheel is for this hand.** The plan picks up again on the next hand, and for its first three seconds the line reads "AUTO RESUMES · [K] keep playing" (X, A or Y on a pad); pressing it there keeps the seat the player's and turns autoplay off. K between hands gives the player the next hand. Whatever the plan was about to do is dropped unseen.
+- **Standing up pauses it.** Q leaves the chair to the away rule (never a bet, call or raise): "Your plan's paused while you're up." Sitting back down: "Your plan's back on: GTO."
+- **Stops while watching.** The stop rules that hand over a decision (the player's all-in decisions, pots over 40 BB, premium hands) work at a live table while the plan is watched: the decision opens as the player's own.
+
+**The live skip.** Skipping plays the night headless, between hands, through core's `live::SkipSlice` in slices of 4 ms a frame (`ss.Auto.SkipSliceMs`), so the frame stays smooth while the skip card counts ("SKIPPING · GTO · …"). Watching at 8x and skipping the same hands give the same night, hash for hash (`ss.Auto.Parity`).
+- **Where it stops.** At its target, at the bubble (15 from the money) and at hand for hand when the bubble rule is on, and always at the final table: the skip ends after the hand that seats it, and the walk to the stage plays out as it always does. "Skip to the result" can be picked again from the stage. A bust goes straight to the night's end. A live skip never stops mid-hand: a half-played hand can't be handed back with its real cards and chips on the felt, so the decision-level stops only run while watching.
+- **What it keeps.** Breaks pass while it skips unless the break is its target. A table move blinks the player to the new seat at the end of the skip instead of walking (R8: no hand is lost to it). The room catches up as it goes: the room's feed, tablemates met, the plan's tilt and counts, and the hands kept for the video channel (gate 2).
+- **R5 during a skip.** A checkpoint every 5 hands and where the skip stops, with the plan's own state in the host text beside the engine's (the style, the mode, the speed, its tilt, the Sharpness held for the run, the stops and the counts; what it has seen of each opponent tonight; the read book it seated with). The engine's checkpoint is unchanged. A night closed mid-plan comes back in the same seat with the same plan, paused at 1x: "Your plan was playing: GTO. [K] carry on." An action key instead means the player plays it themselves.
+- Pausing the game freezes the skip with everything else.
+
+**Plans get read.** Under the plan, the table's reads move into the engine so watching and skipping read the same. When the plan bets or raises without the hand for it, the player's heart answers the size of the bet, an all-in, being watched and the plan's tilt, and a reader at the table may turn a fold into a call, on a roll keyed to the night, the hand and the reader. The heart on the HUD shows the same shake. `ss.Auto.Describe` lists tonight's reads on the plan. When the player has the seat, the old read is unchanged.
+- **Exploitative at the Embercrest** leans on what it has seen of each opponent tonight, its notes on the regulars, and the player's learned tells as they stood when the night seated (a snapshot, so a resumed night reads the same).
+
+**Dee's game, from night 2.** On the first night the PLAY page says Dee: "First night, you play your own cards." and nothing starts.
+- Watching at 1x, 2x or 4x (no 8x: it's a room of people you know). There's no skip ("Dee's game plays hand by hand. A cash game has nothing to skip to."), and no talk is thinned.
+- The night clock moves 4.5 world minutes for every hand the plan plays, with energy draining alongside, instead of real seconds (a stand-in until Dee's hands are timed at human pace). Manual play keeps the old clock.
+- The plan stops when the player is felted ("You're out of chips. The reload's your call, not your plan's."), at Dee's last-hand call and when she sends the player home.
+- Push/Fold and ICM Shark have no meaning a hundred big blinds deep with no payouts: their tiles read "Plays as TAG here" and "Plays as Balanced Reg here". The cast reads the plan the way they read the player. Exploitative uses the night's own counts, its notes on the cast and the player's learned tells.
+
+**What it records.** Results count fully: the entry settles exactly as before (R4), and the cage, the bank, the boards, the world and the talk treat the night as the player's. Live hands aren't graded either way. The event's row on Career reads "AUTO · GTO 82%", keyed by the entry's id. The checks are in `card_room` (`LiveSkipSliceEqualsTicks`, the read rules) and `night_one_session` (`G1Journey`), and in PIE the update 2 spec's §8.1 step 4.
+
+## 17. A fresh world at the Embercrest (update 2, gate 1)
+
+In a fresh-start career (`GAME_DESIGN.md` §8) the room's records start from nothing. Nothing about the room's schedule, fields or people changes.
+
+- **The board builds from real results.** The champions' board by the desk (the winners' wall) and the month's leaders start empty when the books open, with YOUR NAME HERE on the empty plaques.
+- **The first name goes up before the player can arrive.** Monday's Nightly (7 PM, Oct 5) is dealt across the books' opening and decided at 3:00 AM on Night One, so it's the first Nightly in the books and its winner is the first name on the champions' board. The earliest seat the player can take is Tuesday's Noon Deepstack. (This corrects the update 2 spec's §3.1 and §3.3 F9, which had the wall blank and "who takes the first Nightly?" in the room's talk until a winner went up later.)
+- **The room's fresh talk, for 30 days.** Only the room's own people say it (its locals, the Back Room eight, the live regulars), each topic once a night and only while it's true: tonight is the first of its kind in the books; the firsts still to come, with their day; the first name on the board and each event's first winner (the player, when it was theirs); anyone up there more than once; the books' first week. "Who takes the first Nightly?" and "the board's still blank" come up only when Monday's Nightly was called off. There's no "nobody's won twice" line: the world doesn't keep the wins of the strangers it doesn't follow, so the room can't count the board.
+- **Faces take time.** Nobody is an "Embercrest regular" on the field page for the first two or three weeks, and club tiers (Regular, Ember, Crest) are earned from the first night, about 2 to 3, 7 and 13 weeks in for a Nightly regular.

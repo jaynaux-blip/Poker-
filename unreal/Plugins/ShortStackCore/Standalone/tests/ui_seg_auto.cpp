@@ -973,6 +973,8 @@ void ResultsAndCareer()
 	Expect(DrewRun(L, "Played by your plan: 214 of 214 decisions (LAG)") && DrewRun(L, "\xE2\x80\x94"), "results: played by the plan, and the player's accuracy is a dash");
 	Expect(DrewRun(L, "Your plan made every decision, so there's nothing of yours to review.") && DrewRun(L, "XP comes from your own decisions, never your plan's."),
 		"results: nothing of the player's to grade, and XP is the player's own");
+	// C1's copy pass: the plan cashed it, but none of its decisions earn skill XP, so there's no figure (and no cash bonus).
+	Expect(DrewRun(L, "No skill XP") && !DrewRun(L, "Skill XP +60") && !DrewRun(L, "Skill XP +0"), "results: an event the plan played whole earns no skill XP");
 	Expect(Overflows(L, {0.0f, 64.0f, ss::ui::RiverLine::Width, 900.0f}, 0, D.M, "results") == 0, "results: every line fits the laptop");
 	WriteList("results_auto", L);
 	// A shared event: the player made some decisions.
@@ -982,6 +984,8 @@ void ResultsAndCareer()
 	S.LastResults.AccuracyPct = 88.0;
 	L = D.Frame();
 	Expect(DrewRun(L, "Played by your plan: 214 of 260 decisions (LAG)") && DrewRun(L, "88.0"), "results: the plan's share, and the player's own accuracy");
+	// Skill XP from the player's 46 graded decisions at 88% (46 x 0.88 x 12 = 486); the cash bonus was the plan's work too.
+	Expect(DrewRun(L, "Skill XP +486") && !DrewRun(L, "Skill XP +546") && !DrewRun(L, "No skill XP"), "results: skill XP counts the player's own decisions only");
 	S.LastResults.Grades.clear();
 	// A closed table's toast while others play: "played by your plan" where "no decisions" was.
 	S.HasResults = false;

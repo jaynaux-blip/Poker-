@@ -22,7 +22,7 @@ A first-person poker RPG about grinding from nothing to the top of the tournamen
 Progress comes in two deliberately separate forms:
 
 - **Money and fame come from results.** Results mix luck and skill, as in real poker.
-- **Skill XP comes from decision quality, graded by expected value (EV).** If you get all-in as an 80% favorite and lose, your bankroll takes the hit, but you still earn full XP. Luck can slow your wallet, never your growth.
+- **Skill XP comes from decision quality, graded by expected value (EV).** If you get all-in as an 80% favorite and lose, your bankroll takes the hit, but you still earn full XP. Luck can slow your wallet, never your growth. Only your own decisions count: when autoplay plays your seat (§5), its decisions earn nothing.
 
 ## 3. Career structure
 
@@ -150,7 +150,7 @@ The whole online career is played from a first-person desk. The apartment is the
 - **Table tabs** in the top bar show each table's stack in big blinds and your rank. A table where it's your turn turns orange and shows a shrinking clock ring and the seconds left, and its turn chime plays even when it's behind. Chips and cards from tables behind stay quiet.
 - **One in front (default):** when the table in front doesn't need you and another does, that one comes forward on its own (the longest-waiting first). It waits a moment after you act or switch, and holds while your own all-in runs out unless another clock is nearly gone.
 - **Tile view:** all tables at once in a 2×2 grid (two side by side), each with its own Fold, Check/Call, Raise and All-in buttons, its clock bar, time bank, pace and banners. The keyboard's F, C and R act at the highlighted table.
-- **Each table is its own tournament:** its own clock, levels, time bank, pace (one can Sprint while the others play), bounties and grades. Tilt is yours across all of them.
+- **Each table is its own tournament:** its own clock, levels, time bank, pace (one can skip ahead on autoplay while you play the others), bounties and grades. Tilt is yours across all of them.
 - **When a table finishes while others run,** it closes with a toast (place, prize, accuracy) and its result goes into your history and bankroll. The results screen waits for the last table and adds up the sitting: how many tournaments and the net across every buy-in.
 - Later: the Focus stat raises the limit further; the HUD and notes carry across tables.
 
@@ -262,17 +262,78 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
 - **Notes and color tags** you write on players, which carry over between sessions.
 - **Chat:** needling, bragging and tilted players typing in all caps.
 
-**Pacing (critical for MTTs).** Real tournaments last for hours, so the game has three speeds:
+**Pacing (critical for MTTs).** Real tournaments last for hours, so each table's pace row reads FULL · SMART · AUTO:
 
 - **Full:** you play every hand.
 - **Smart (default):** junk hands auto-fold and fast-forward. The game stops for any hand that needs a decision: playable holdings, blind defense, facing a raise, bubble and ICM spots, or a tell worth watching. It never folds a cheap price for you (calling less than a quarter of the pot): measured over hundreds of tournaments, a quarter of those blind folds threw away a playable spot. About half of all spots auto-fold, at a cost of about 0.03 big blinds each.
-- **Sprint (optional):** skips ahead to the next milestone (a break, the bubble or the final table). An autopilot plays your hands: safe on paper but a step behind good play (it calls too wide, rarely bluffs, shoves short stacks by feel and half-ignores the bubble), so it finishes like an average player while playing your own hands well finishes clearly ahead. Later: a play-style you pick and your stats make it better.
+- **Auto: autoplay (built, update 2; it replaced Sprint).** The game plays your seat in a style you pick. You watch it at 1x, 2x, 4x or 8x or skip ahead, and any hand is yours again with one press of K. Results count fully; only your own decisions are graded. Sprint's old autopilot is still on the menu as Autopilot, number for number: safe on paper but a step behind good play (it calls too wide, rarely bluffs, shoves short stacks by feel and half-ignores the bubble), and it's the bar every other style is measured against. The Embercrest and Dee's game are in `docs/LIVE_TOURNAMENTS.md` §16.
 
-**Measured balance (simulated, Night One build).**
+**Autoplay (built, update 2).** You pick the play-style, and your own stats make it sharper.
 
-- **Skill pays.** Over 300 $0.25 hyper turbos each, average finishing position (50% = average): always the coach's best play 58–59%, mostly-best play (94% accuracy) 52%, the autopilot 52–54%, random play 37%.
-- **Length.** At Smart pace a typical bust takes 10 minutes of real time in a 180-player hyper, 15 in the 1,000-player Night Owl Turbo and 23 in the 700-player Daily Grind; a deep run in a 1,000-player field takes about an hour. About 140–160 decisions an hour, one every 25 seconds or so; four tables make that one every 6 seconds.
-- **Rent.** Shifts pay about $50 each, so honest work alone can't reach $1,225 by Friday (about $600 at three shifts a day). Marcus's long run ($380–600) gets there in two or three nights with roughly a one-in-three chance of an arrest along the way; doing a drop-off and a run every night pushes that past one-in-two within two nights. Dee's game, Sam's account and a tournament score fill the gap.
+- **The panel.** AUTO on the pace row opens "AI AUTOPLAY" over the table; K, Backspace or a click outside closes it. It has the style tiles, your Sharpness and Form, the watch speed (1x 2x 4x 8x SKIP), where a skip runs to (the next break, or the next level in an event without breaks; the bubble; the final table; the result; 50 hands), the stop rules and "Make this my default". Each of up to four tables keeps its own plan. A change applies from the plan's next decision, and a skip from the next hand.
+- **The styles.** A tile that doesn't fit the event is greyed and says why.
+
+  | Style | The tile says | Swing | Best in |
+  |---|---|---|---|
+  | Autopilot | The old Sprint. Safe on paper, a step behind good play. | EVEN | Getting through a night |
+  | TAG | Tight and aggressive. Few hands, played hard. | EVEN | Anywhere |
+  | LAG | Loose and aggressive. More pots, more pressure, more swings. | SWINGY | Tables of nits; deep stacks |
+  | Nit | Premiums only. Rarely busts early. Rarely wins. | STEADY | Low swings; getting through the early levels |
+  | Maniac | Raises everything. Huge nights, early busts. Loses money. | WILD | Entertainment |
+  | Balanced Reg | A solid regular. Beats weak fields steadily; breaks even against good ones. | STEADY | Anywhere |
+  | GTO | Balanced ranges from charts. About the same against anyone; leaves money against weak players. An approximation, not a solver. | STEADY | Tough fields |
+  | Exploitative | Learns the table, then leans on what it's seen. Plain TAG until it has reads, and only a little better after. | EVEN | Long sessions; soft fields; regulars it has notes on |
+  | Push/Fold | Short-stack charts. Best in turbos and hypers. | SWINGY | Hypers, turbos, any short stack |
+  | ICM Shark | Plays the payout ladder. Best on bubbles and in satellites. | EVEN | Satellites, bubbles, final tables |
+
+  - **How they play.** TAG, LAG, Nit, Maniac and Balanced Reg are the opponents' own archetypes. GTO plays charts deeper than 25 big blinds and push/fold charts at 15 and under (a solid fallback in between), and balanced frequencies from its own range after the flop. Exploitative counts what each opponent does tonight, keeps notes on regulars across nights, and leans on what it's seen. Push/Fold jams or folds first in at 15 big blinds and under and plays a step behind TAG deeper. ICM Shark weighs the payout ladder near the bubble and at the final table.
+  - At a cash table Push/Fold plays as TAG and ICM Shark as Balanced Reg. Bounty Hunter (calls wider for a head, knockout events only) stays off the menu until its module is built.
+- **Watching.** The table plays as it does for you, at the speed you set. A strip under the felt shows the style, a think bar ("GTO is thinking…") and the plan's last move once it's made. It never shows a move before the plan makes it, so it can't be read as advice. Smart's auto-fold is off: the style plays the junk hands too.
+- **Taking over.** K, or any action button while the plan is thinking, gives you the rest of that hand. On the next hand the strip reads "AUTO RESUMES · [K] keep playing" for three seconds, and K there turns autoplay off. K at any other time turns it off or on.
+- **Skipping.** The table dims behind the skip card ("SKIPPING · PUSH/FOLD · hand 214 · level 11 · 31 to the bubble · [K] Take the wheel · [Backspace] Stop"), and the table's tab says the same in one line.
+  - It stops at its target and, by default, at the bubble (15 from the money) and the final table, where it switches to watching at 1x with the plan still in the seat ("You'll want to see this.").
+  - Stop rules you can add hand a decision to you: your all-in decisions (and calls of half your stack or more), pots over 40 BB, and premium hands (QQ+, AK). A skip that stops mid-hand replays the hand from the deal up to your decision.
+  - The deal and every opponent's decision are untouched, and the plan's own randomness is keyed to the hand, so watching a table and skipping it from the same moment play the same night, bit for bit.
+- **Sharpness** (50 to 100%) is how cleanly your plan plays: "Sharpness 92%: Form 89, rested". It's read once when the plan takes the seat and held for the run.
+  - **Form** is your own graded online play. Each of your decisions moves it 1/400 of the way toward its grade (Best 100, Good 88, Inaccuracy 62, Mistake 30, Blunder 0). A new career starts at 70, and a world week with fewer than 100 graded decisions of your own pulls it a point back toward 70 ("Form 84, rusty: play some hands"). Live hands aren't graded, so they don't move it, and neither do your decisions in a hand you took over mid-think.
+  - Sharpness is 80% up to a Form of 80 and rises to 100% at 95. Tilt over 0.2 trims it (by up to a quarter at full tilt), exhaustion ×0.85, hunger or thirst ×0.92. Under 70% the panel warns you: "Your plan gets sloppy."
+  - **Slips.** At a decision that matters (facing a bet, any decision after the flop, a pot over 10 BB) the plan sometimes slips and plays the spot like a calling station: it keeps its own opening range, then calls a raise it should fold, calls down too light and bets too small. The chance is the style's floor plus 1.2 × (1 − Sharpness), with twice that slope for GTO and 2.5 times for the Maniac. The floors: Nit 70%; Push/Fold 45%, only deeper than 25 BB in slow events (levels of 8 minutes or more: deep online events and the Embercrest); TAG and Exploitative 38%; ICM Shark 32%, and none near the bubble or at the final table; LAG and Balanced Reg 25%; GTO and the Maniac none. At Form 70, rested, a TAG slips on about three of those decisions in five and the Nit on almost all of them. Autopilot never slips.
+  - **The plan's tilt.** A bad beat or a big lost pot tilts it (by your background's tilt gain), a won pot calms it, and it fades every hand. GTO barely feels it and the Maniac twice as much. Autopilot never tilts.
+- **What counts.** Results count fully: the bankroll, ROI, the boards, Player of the Year, badges, backers, sponsors, reputation, the news and Kast. Grades, the coach, the accuracy record and the best-play and blunder moments come only from decisions you made, and the plan's decisions earn no skill XP.
+  - The results screen says "Played by your plan: 214 of 260 decisions (LAG)", and its skill XP counts only your decisions ("No skill XP" when the plan made them all).
+  - Career's row reads "AUTO · LAG 82%", with "—" for accuracy when you made no decisions.
+- **Nobody in the world knows.** No site bans it, no backer or sponsor sees it, and no talk, news or mail mentions it. On stream, the plan's lines never show and a skip only dims the table. At 4x, strangers stay on the stream a little less (×0.9); at 8x or skipping, the stream pays Sprint's old cost (strangers ×0.8, follows ×0.6).
+
+**Measured balance (simulated).**
+
+- **Skill pays.** The yardstick is average finishing position (50% = average). For the Night One build, over 300 $0.25 hyper turbos each: always the coach's best play 58–59%, mostly-best play (94% accuracy) 52%, the autopilot 52–54%, random play 37%. Re-measured for update 2 on much bigger paired samples (every player on the same decks and fields): Autopilot 52.6% over 6,000 hypers, the coach's best play 56.7% and a 94%-accurate player 48.3% over 3,000.
+- **No style beats Autopilot over a mixed schedule, and skill still pays.** Measured after two calibration rounds (update 2, C1):
+  - At the default Sharpness (Form 70, rested, calm), on a mixed schedule of hypers, turbos and deep events, every style finishes 2 to 5 points under Autopilot (the Maniac 14) and makes 16 to 48 points less ROI. Picking a style picks a shape, not an edge.
+  - At Form 95 the styles close to 0.5 to 1.7 points under Autopilot (LAG 3.5, GTO 2.7, the Maniac 16). Only Push/Fold in turbos finishes over it, by 0.4 to 0.7 points: the one "best format" edge left. No style passes 55.5% anywhere.
+  - On the mix, most styles at Form 95 finish 2.4 to 3.5 points ahead of the 94%-accurate player (GTO about 1.3, LAG about half a point, the Maniac far behind). On the same seeds, the coach's best play stays 4.9 points over the best style in hypers, 2.3 in turbos and 2.1 in deep events.
+
+  | Plan | Hypers: Form 70 / 95 | Turbos: Form 70 / 95 | Deep: Form 70 / 95 | Mixed vs Autopilot, finish: Form 70 / 95 | Mixed vs Autopilot, ROI points: Form 70 / 95 |
+  |---|---|---|---|---|---|
+  | Autopilot | 52.6% | 53.1% | 52.7% | — | — |
+  | TAG | 49.5 / 51.5 | 48.7 / 51.8 | 49.8 / 51.7 | −3.4 / −1.2 | −27.2 / −15.1 |
+  | LAG | 48.1 / 48.9 | 48.6 / 50.8 | 48.3 / 48.8 | −4.5 / −3.5 | −16.0 / −0.4 |
+  | Nit | 48.9 / 51.8 | 48.3 / 51.6 | 48.9 / 51.7 | −3.9 / −1.0 | −47.8 / −35.5 |
+  | Maniac | 39.0 / 37.7 | 38.2 / 36.0 | 37.2 / 35.5 | −14.2 / −15.8 | −28.2 / −4.5 |
+  | Balanced Reg | 49.5 / 51.4 | 49.7 / 51.9 | 50.1 / 51.4 | −3.1 / −1.3 | −22.5 / −4.2 |
+  | GTO | 47.6 / 49.7 | 46.2 / 49.6 | 48.2 / 51.5 | −5.3 / −2.7 | −31.6 / −11.6 |
+  | Exploitative | 49.5 / 51.4 | 48.6 / 52.0 | 49.8 / 51.5 | −3.4 / −1.2 | −27.1 / −15.0 |
+  | Push/Fold | 50.8 / 52.2 | 52.2 / 53.8 | 49.0 / 51.0 | −2.1 / −0.5 | −26.6 / −8.1 |
+  | ICM Shark | 49.2 / 51.1 | 49.3 / 51.2 | 50.0 / 51.0 | −3.3 / −1.7 | −22.9 / −0.5 |
+  | The coach's best play | 56.7 | 56.6 | 52.7 | +3.5 | +61.1 |
+  | 94% accuracy | 48.3 | 47.6 | 49.3 | −4.0 | +4.9 |
+
+  - **How to read it.** Average finish in %. Form 70 is Sharpness 80% (rested, calm); Form 95 is 100%. Hypers are the $0.25 Hyper Sprint (180 runners), turbos the $1.10 Night Owl Turbo (1,000) and deep events the Daily Grind's 700-runner structure. Autopilot and the styles played 6,000 hypers, 2,000 turbos and 2,000 deep events each; the coach and the 94% player 3,000, 1,000 and 1,000. Autopilot's ROI: +0% in hypers, +16% in turbos, +21% deep.
+  - "Mixed" weighs hypers, turbos and deep events 3 : 1 : 1, and its differences are paired: a standard error of about 0.4 points of finish and 7 ROI points. Compare the coach and the 94% player across rows with care: they played fewer of the same seeds. ROI is mostly luck at these samples: one 1,000-runner win moves a turbo's mean by about 20 points. Push/Fold's turbos at Form 95, over 6,000: +0.4 ± 0.5 points over Autopilot.
+  - **Shapes.** The Nit swings least (a finish SD of 26 to 27 points, the lowest in every format) and the Maniac most (30 to 32). LAG wins about twice as many hypers as TAG (0.97 against 0.55 per 100) and busts early more (28.6% against 22.6%). ICM Shark and LAG keep Autopilot's money at Form 95 while finishing under it.
+  - **What the bands missed.** LAG in deep events (3.9 under Autopilot; its tile promises swings, not finishes), the Maniac in hypers and turbos (weaker than its 40–47% target), GTO in hypers and turbos (2.9 and 3.5 under; it ships with its charts anyway, since its fallback would likely sit over the bar), and Push/Fold's hypers by 0.1 point. The calibration changed two tiles to match what it measured: the Nit's "Best in" (it no longer cashes more than the rest) and Exploitative's edge line (its reads are worth about a quarter of a big blind per 100 hands).
+  - The measurements have no tilt and no notes across events. In the game a style also tilts (Autopilot never does), so it plays a little under these numbers; Exploitative with notes on regulars could play a little over them.
+- **Length (Night One build).** At Smart pace a typical bust takes 10 minutes of real time in a 180-player hyper, 15 in the 1,000-player Night Owl Turbo and 23 in the 700-player Daily Grind; a deep run in a 1,000-player field takes about an hour. About 140–160 decisions an hour, one every 25 seconds or so; four tables make that one every 6 seconds.
+- **Rent (Night One build).** Shifts pay about $50 each, so honest work alone can't reach $1,225 by Friday (about $600 at three shifts a day). Marcus's long run ($380–600) gets there in two or three nights with roughly a one-in-three chance of an arrest along the way; doing a drop-off and a run every night pushes that past one-in-two within two nights. Dee's game, Sam's account and a tournament score fill the gap.
 
 ## 6. Tournament engine
 
@@ -379,6 +440,15 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
 
   - **Their journey:** every card has a Journey tab with dated steps, kept for good: joined, first tournament, first cash (or first bounty), first final table, first title, first live event, stake moves, bracelets and rings, career-best scores, turning pro, sponsorships, breaks, comebacks and retirement. Old hands' journeys start with "Playing since 2019" and grow from there.
   - **Where you meet them:** up to five of the world's players sit at your table, a new face or two first. Their names open their cards at the table itself, as well as anywhere on RiverLine. Players who joined in the last month carry a NEW tag.
+- **A fresh start (built, update 2).** A new career picks its world on the creator's THE WORLD step (§9). An **established world** is the one above: RiverLine's been running for years, the boards are full and there are champions on the wall. In a **fresh start**, everyone's record starts where yours does. A career keeps the world it starts in, and Review and the title screen's CONTINUE card wear a FRESH START pill.
+  - **The same people.** A fresh world is built exactly as an established one from the same seed, then wiped. Names, skills, traits, tiers, bankrolls, live levels, schedules and table styles are identical. Results follow skill from the first night, so the best players climb the boards on their own.
+  - **What's zeroed:** prize winnings, events, cashes, final tables and titles (online, live and underground); the season, the years and the form line; best scores; bracelets, rings, majors and awards; the tracker's stats; the Embercrest's club records; Verified Pro; Team RiverLine; the Honors, the series boards and the Night Shift board. "On the scene since" restarts at Night One for everyone who came with the world ("One of RiverLine's regulars since the first night."), so nobody is eligible for the Hall of Fame until 2036. Events that ended before Night One have winners the world doesn't know, and the old hand-written headlines are gone.
+  - **What still varies:** bankrolls, peak rolls, income and living costs ($0 in winnings, not $0 in the bank, so everyone can still buy in); skills, potential and traits; tiers, schedules, formats and live levels. The Kast streamers keep their audiences, since Kast is another platform (VikingVolta still has 418,000 followers and no results), but fame alone no longer signs a team contract.
+  - **The boards from nothing.** At 2:07 AM Season reads "Nobody's scored yet.", with "Points from every final table since Oct 6, the night the record books opened." Earnings is empty instead of rows of $0 (every board now stops at zero, in both worlds). The first micro final tables fill Season within hours, every arrow reading NEW; after midnight the arrows show the moves since the day turned. Player of the Year 2026 is crowned on Jan 1, "from Oct 6".
+  - **Team RiverLine signs on results.** It starts empty. From Nov 1 it signs only players with an online final table on record or a top-100 Season rank (Dec 1 if nobody qualifies by then), and the signing's headline says which ("signed on results: a final table on record and No. 12 on the Season board"). A streamer with 418,000 followers and no final table waits.
+  - **Week one is loud with real news.** A board report runs every morning of the first week, then every Monday to week 4 ("Night one on the books: Ana Ribeiro tops the Season board with 214 points", with the biggest riser under it). In the first 60 days, each event family's first result in the books gets a "first winner" item ("The first Night Owl Turbo title in the record books goes to …") when the winner is someone the world follows, or you; a stranger's first stays in the books without a headline. Fake milestones wait: a breakout headline needs 30 events on record, and in the first 60 days a "first title" milestone needs a major. The first Verified Pro can come at the Dec 1 review at the earliest.
+  - **The Embercrest's fresh talk.** For the first 30 days the room's own people (its locals, the Back Room eight and the live regulars) talk about the new books, each topic once a night and only while it's true: tonight's event is the first of its kind in the books; the firsts still to come, with their day (the first Midnight Turbo on Friday night, the first Big Stack on Saturday, the first Warm-Up and Embercrest Sunday on Sunday); the first name on the champions' board, and each event's first winner (or you, when it was yours); anyone up there more than once already; and, in the first week, the books themselves ("Fresh books this week. Whatever you did in here before, nobody wrote it down."). The block has its own fresh talk on the street, held to the same rule.
+  - **Who's first on the board.** Monday's Nightly (7 PM, Oct 5) is dealt across the books' opening and decided at 3:00 AM on Night One, so it's the first Nightly in the books and its winner is the first name on the champions' board before you can reach the room (the earliest seat is Tuesday's Noon Deepstack). The board's other plaques still read YOUR NAME HERE. "Who takes the first Nightly?" and "the board's still blank" come up only when Monday's Nightly was called off. (This corrects the update 2 spec's §3.1 and §3.3 F9, which had the wall blank and the room asking who'd take the first Nightly until a winner went up later.)
 
 ## 9. RPG systems
 
@@ -394,13 +464,17 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
 
 Skills give you information. They never make decisions for you.
 
-**Decision grading.** Every meaningful decision is graded against an EV estimate as Best, Good, Inaccuracy, Mistake or Blunder, and the grades roll up into an Accuracy score for the session. XP comes from Accuracy plus milestones (first cash, first final table, first title).
+**The one exception is autoplay (update 2), and only when you turn it on.** It plays your seat to the style you picked (§5). Skills, coaching, perks and pace still never decide anything. Autoplay never shows its decision before it acts, so it can't be used as an oracle, and its decisions are never graded and earn no skill XP. In the world it doesn't exist: at a live table it's your own body playing to a plan, and nobody, from the sites to your backers to the people at the table, ever knows.
 
-**Your character (built).** A new career starts in the character creator:
+**Decision grading.** Every meaningful decision is graded against an EV estimate as Best, Good, Inaccuracy, Mistake or Blunder, and the grades roll up into an Accuracy score for the session. XP comes from Accuracy plus milestones (first cash, first final table, first title). Only your own decisions are graded: when autoplay played part of an event, its skill XP is your decisions' alone, and an event it played whole earns none.
+
+**Your character (built).** A new career starts in the character creator's five steps:
 
 - **Who:** name, screen name, age and country.
 - **Background:** one of six backstories, each with a small permanent perk. A line cook's shifts pay more, a dealer's kid learns tells at the first showdown that confirms them, a dropout starts with bounty events open, a bouncer tilts slower, a hustler runs safer, a newcomer has savings.
 - **Look:** face, hair, body, height, jacket, glasses and hat.
+- **The world:** an established world or a fresh start ("Same city, same people, same skills, same bankrolls. You only pick once: a career keeps the world it starts in."). See §8.
+- **Review:** the player card, wearing a FRESH START pill in a fresh world.
 
 The player walks the street as that character, a MetaHuman matched to the look, and sees their own head at the table in third person.
 
