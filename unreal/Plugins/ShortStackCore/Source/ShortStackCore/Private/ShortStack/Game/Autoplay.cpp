@@ -797,7 +797,15 @@ std::string CareerTag(const Played& P)
 {
 	const int All = P.AiDecisions + P.OwnDecisions;
 	const std::string Head = "AUTO \xC2\xB7 " + std::string(style::InfoOf(P.S).Name);
-	return All <= 0 ? Head : Head + " " + autoplay_detail::AutoPercent(static_cast<double>(P.AiDecisions) / static_cast<double>(All));
+	if (All <= 0)
+	{
+		return Head;
+	}
+	// Rounded, but never to 100% while a decision was yours (the row's accuracy is that decision's), nor to 0% while one
+	// was the plan's.
+	const double Share = static_cast<double>(P.AiDecisions) / static_cast<double>(All);
+	const double Shown = P.OwnDecisions > 0 ? std::min(Share, 0.99) : Share;
+	return Head + " " + autoplay_detail::AutoPercent(P.AiDecisions > 0 ? std::max(Shown, 0.01) : Shown);
 }
 
 std::string SharpWhy(double Form, bool Rusty, double Tilt, bool Exhausted, bool Needy)

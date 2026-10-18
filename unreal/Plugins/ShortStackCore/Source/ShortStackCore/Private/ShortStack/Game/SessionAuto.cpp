@@ -588,7 +588,10 @@ void Session::SkipStep()
 		const TPlayer& Hero = T->Hero();
 		if (Hero.Busted)
 		{
+			// The skip is over with the event: the pace leaves Sprint too, so the strip stops saying it's skipping and the
+			// next sitting's first table doesn't start skipping on its own.
 			Sprinting = false;
+			CurrentPace = Pace::Smart;
 			HasBustInfo = true;
 			BustPlace = Hero.Place;
 			BustPrize = Hero.PrizeCents;
@@ -600,6 +603,7 @@ void Session::SkipStep()
 		if (T->bFinished)
 		{
 			Sprinting = false;
+			CurrentPace = Pace::Smart;
 			HasBustInfo = true;
 			BustPlace = 1;
 			BustPrize = Hero.PrizeCents;

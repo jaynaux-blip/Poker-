@@ -493,6 +493,7 @@ void AutoNoGrading()
 		Prompts += S.HasPrompt ? 1 : 0;
 	}
 	Expect(S.CurrentScreen == ss::Screen::Results, "autoplay: the plan plays the event to its result");
+	Expect(!S.Sprinting && S.CurrentPace != ss::Pace::Sprint && !S.AutoPanel(0).Skipping, "autoplay: the skip ends with the event (the pace isn't left on Sprint)");
 	Expect(Prompts == 0 && S.LastResults.Grades.empty() && S.LastResults.AccuracyPct == 0.0 && !S.History.empty() && S.History[0].AccuracyPct == 0.0,
 		"autoplay: no AI decision is graded (assertion 11): no prompt, no grade, accuracy 0");
 	bool Untouched = S.Life.Study.Sessions == StudyBefore.Sessions;
@@ -505,6 +506,21 @@ void AutoNoGrading()
 	Expect(P && P->S == style::Style::Lag && P->AiDecisions > 0 && P->OwnDecisions == 0 && P->AiHands > 0 && P->OwnHands == 0,
 		"autoplay: the played line (keyed by the event id: the plan's decisions and hands, none of yours)");
 	Expect(P && autoplay::CareerTag(*P) == "AUTO \xC2\xB7 LAG 100%", "autoplay: Career's row reads AUTO, and its accuracy has no decision of yours (the \xE2\x80\x94)");
+	{
+		// Rounded, but 100% only when every decision was the plan's, and 0% only when none was (PIE: 1 of ~300 read 100%).
+		autoplay::Played Mixed;
+		Mixed.S = style::Style::Lag;
+		Mixed.AiDecisions = 299;
+		Mixed.OwnDecisions = 1;
+		autoplay::Played Mostly = Mixed;
+		Mostly.AiDecisions = 1;
+		Mostly.OwnDecisions = 299;
+		autoplay::Played Half = Mixed;
+		Half.AiDecisions = 82;
+		Half.OwnDecisions = 18;
+		Expect(autoplay::CareerTag(Mixed) == "AUTO \xC2\xB7 LAG 99%" && autoplay::CareerTag(Mostly) == "AUTO \xC2\xB7 LAG 1%" && autoplay::CareerTag(Half) == "AUTO \xC2\xB7 LAG 82%",
+			"autoplay: Career's tag never rounds to 100% with a decision of yours, nor to 0% with one of the plan's");
+	}
 	std::printf("  autoplay: %s, %d hands (%d by the plan, %d decisions); biggest pot %s; %.1f s\n", ss::Ordinal(S.LastResults.Place).c_str(), S.LastResults.Hands,
 		P ? P->AiHands : 0, P ? P->AiDecisions : 0, ss::ChipsText(static_cast<double>(S.LastResults.BiggestPot)).c_str(), AutoSecondsSince(T0));
 	Expect(S.LastResults.BiggestPot > 0 || S.LastResults.Hands < 20, "autoplay: the skip keeps the biggest pot won (bug 1's BiggestPot)");
@@ -525,6 +541,19 @@ void AutoNoGrading()
 	Expect(ss::SaveData::Parse(H.Last.Serialize(), Back) && autoplay::PlayedFor(Back.Life.Auto, Hyper.Id) && H.Last.Serialize().find("autoplay\tpref\ttag") == std::string::npos &&
 			   H.Last.Serialize().find("autoplay\tpref\t") != std::string::npos,
 		"autoplay: the played line and the pref line are saved");
+	// The next sitting's first table opens with the player in the seat, even from a session an older build left on Sprint
+	// (PIE: after a skip that busted, the next event was sprinted by Autopilot, unasked, while the player was in the lobby).
+	S.CurrentPace = ss::Pace::Sprint;
+	S.LeaveResults();
+	S.Register(2);
+	Expect(S.CurrentScreen == ss::Screen::Table && S.CurrentPace == ss::Pace::Smart && !S.AutoPanel(0).On,
+		"autoplay: a new sitting's first table opens with the player in the seat, the pace off Sprint");
+	for (int F = 0; F < 600 && S.CurrentScreen == ss::Screen::Table; ++F)
+	{
+		Now += 0.1;
+		S.Update(Now);
+	}
+	Expect(S.CurrentScreen == ss::Screen::Table && !S.Sprinting, "autoplay: ... and nothing skips it");
 }
 
 void AutoFieldPots()

@@ -1727,10 +1727,10 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	Active = static_cast<int>(Runs.size()) - 1;
 	FocusHoldUntil = Now + 1.5;
 	++SessionEvents;
-	if (!First)
-	{
-		CurrentPace = PrevPace; // a new table plays like the one before it (the first keeps the session's pace, as always)
-	}
+	// A new table plays like the one before it (the first keeps the session's pace), but never skips: a skip is a table's
+	// own plan (update 2 §2.6), and a new table starts with the player in the seat. Before this, a plan's skip that ended
+	// in a bust left the pace on Sprint, and the next sitting's first table was sprinted by Autopilot unasked.
+	CurrentPace = PrevPace;
 	Joined = Listing;
 	// The table opens now, or when the event starts if that's later (the wait passes at the desk).
 	Joined.Spec.StartClock = std::max(Joined.Spec.StartClock, Clock);
