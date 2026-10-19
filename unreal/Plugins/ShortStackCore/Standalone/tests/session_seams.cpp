@@ -1258,7 +1258,7 @@ std::vector<ss::kast::MomentNote> LinkNotesSince(const ss::Session& S, size_t Be
 }
 
 /** Whether two moment notes are the same note (HypeAfter climbs with every moment, so two notes never match; the link is
- *  left out: a tick's own moments, a level or the bubble, can be linked a hand after they land). */
+ *  left out: a hand's note is linked as the hand ends, after it lands). */
 bool LinkSameNote(const ss::kast::MomentNote& A, const ss::kast::MomentNote& B)
 {
 	return A.Kind == B.Kind && A.World == B.World && A.Real == B.Real && A.Viewers == B.Viewers && A.HypeAfter == B.HypeAfter;
@@ -1271,7 +1271,7 @@ bool LinkSameNote(const ss::kast::MomentNote& A, const ss::kast::MomentNote& B)
  *     skipped hand's candidate (they fired after it, unlinked, before C2), and a clipped one's candidate holds the clip's
  *     time (so its upload freezes the Kast clip: the audit's double count);
  *   - the watch path: the knockout links to its own hand (it fired at the tick's end before C2, on the next hand's clock,
- *     and the next hand's candidate took it), and the next hand's candidate takes only its own moment;
+ *     and the next hand's candidate took it), and the next hand's candidate takes only its own moment, never the tick's (a level, a new tournament: 2d);
  *   - a streamed bounty event, skipped: every knockout the player made is on stream exactly once (the bounty count), each
  *     linked to its own hand's candidate, and the skipped hands' won all-ins link too.
  */
@@ -1460,6 +1460,74 @@ void StreamLinks()
 			Outs += N.Kind == kast::Moment::Knockout ? 1 : 0;
 		}
 		Expect(Dealt && Outs == 0, "stream links: a player busted in a side pot the kings won is the kings' knockout, not the player's (the main pot's)");
+	}
+	// 2c. A chop, as the tournament reckons it (C2's verify): the pot that sent the queens home split between the player on the
+	// button and the kings' seat, so its first winner left of the button (the kings) has the knockout and the bounty. Not the
+	// player's stream's, or "bye" and the bounty count would part ways.
+	{
+		S.T->Tick += 1;
+		const std::string Queens = S.T->Players[2].Id;
+		const std::string Kings = S.T->Players[3].Id;
+		std::vector<ss::Card> Deck = ss::ParseCards("AhQsAcKdQcKs2cQhJdTc3c4s5c2h");
+		for (int C = 0; C < 52; ++C)
+		{
+			if (std::find(Deck.begin(), Deck.end(), C) == Deck.end())
+			{
+				Deck.push_back(C);
+			}
+		}
+		ss::HandConfig Cfg;
+		Cfg.Players = {{0, Kings, 8000}, {1, Queens, 2000}, {2, ss::HeroId, 8000}};
+		Cfg.ButtonSeat = 2;
+		Cfg.SmallBlind = 100;
+		Cfg.BigBlind = 200;
+		Cfg.Deck = Deck;
+		ss::Rng R("seams-link-chop");
+		ss::Hand Hd(Cfg, R);
+		for (const ss::PlayerAction& A : {ss::PlayerAction::RaiseTo(8000), ss::PlayerAction::Call(), ss::PlayerAction::Call()})
+		{
+			if (!Hd.bComplete)
+			{
+				Hd.Act(A);
+			}
+		}
+		const ss::HandSeat* Out = Hd.SeatByNumber(1);
+		const bool Dealt = Hd.bComplete && Out && Out->Stack == 0 && !Hd.PotResults.empty() && Hd.PotResults[0].Winners == std::vector<int>{0, 2};
+		ss::Session::HandFacts F;
+		F.Skipped = false;
+		const size_t Before = S.Stream.Moments.size();
+		S.HeroHandDone(Hd, F);
+		int Outs = 0;
+		for (const kast::MomentNote& N : LinkNotesSince(S, Before))
+		{
+			Outs += N.Kind == kast::Moment::Knockout ? 1 : 0;
+		}
+		Expect(Dealt && Outs == 0, "stream links: a chopped pot's knockout is its first winner's left of the button (the kings'), not the player's");
+	}
+	// 2d. The tick's own moments (C2's verify): a level and a new tournament fire between hands, on the next hand's clock (the
+	// watch path's HandleTourneyEvents, a registration). That hand's candidate takes its own moment and leaves them: their chat
+	// ("new tourney lets go") isn't the hand's.
+	{
+		S.T->Tick += 1;
+		const auto Beat = LinkAces("7d", Villain);
+		ss::Session::HandFacts G;
+		G.Skipped = false;
+		const size_t Then = S.Stream.Moments.size();
+		S.Stream.OnMoment(S.Channel, S.StreamInputs(), kast::Moment::Register, S.T->Spec.Name);
+		S.Stream.OnMoment(S.Channel, S.StreamInputs(), kast::Moment::LevelUp);
+		S.Stream.OnMoment(S.Channel, S.StreamInputs(), kast::Moment::BadBeat); // what AfterAward fires for it
+		S.HeroHandDone(*Beat, G);
+		const std::string Id = Prefix + std::to_string(S.T->Tick + 1);
+		int Own = 0, Ticks = 0, TicksLinked = 0;
+		for (const kast::MomentNote& N : LinkNotesSince(S, Then))
+		{
+			const bool Tick = N.Kind == kast::Moment::Register || N.Kind == kast::Moment::LevelUp;
+			Own += N.Kind == kast::Moment::BadBeat && N.Candidate == Id ? 1 : 0;
+			Ticks += Tick ? 1 : 0;
+			TicksLinked += Tick && !N.Candidate.empty() ? 1 : 0;
+		}
+		Expect(Own == 1 && Ticks == 2 && TicksLinked == 0 && CandidateOf(S, Id) != nullptr,
+			"stream links: a hand's candidate takes its own moment and leaves the tick's (a level, a new tournament) unlinked");
 	}
 	// 3. A streamed bounty event, skipped (BountyTournament's Headhunter, a millisecond of skip a frame so the log never
 	// turns over inside one): every note as it lands. The first of a few careers whose player sends somebody home.

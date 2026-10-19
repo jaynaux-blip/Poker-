@@ -8,6 +8,7 @@
 #include "SessionSeg.h"
 
 #include "ShortStack/Cards.h"
+#include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Network.h"
@@ -650,6 +651,45 @@ void StoriesAndSaves()
 			"video debug: ss.Video.Describe and .Candidates read the channel");
 	}
 }
+
+void FakesDealTrue()
+{
+	// C2's verify: ss.Video.Fake's scripted hands (PIE §8.2 step 2, VC1) deal what their records say. A hand turned up on a
+	// full board wins or loses as the cards play it: the cooler's kings make a set under the aces' set (it lost), the
+	// suckout's ace-jack catches two pair past the queens (it won); the frames draw these cards next to the titles.
+	int Checked = 0, Wrong = 0;
+	for (const char* Kind : {"badbeat", "suckout", "cooler", "bubble", "knockout", "rival"})
+	{
+		for (const char* Source : {"online", "dees"})
+		{
+			Hooks H;
+			ss::Session S(H, std::string("video-fake-true-") + Kind + Source);
+			double Now = 0.0;
+			Lobby(S, Now);
+			S.DebugVideo(std::string("fake ") + Kind + " " + Source);
+			if (S.Life.Video.Open.empty())
+			{
+				continue;
+			}
+			const ss::recall::Record& R = S.Life.Video.Open.back().Rec;
+			if (R.Shown.empty() || R.Board.size() != 5 || R.Mine.size() != 2)
+			{
+				continue;
+			}
+			const int Mine = ss::EvaluateHand(R.Mine, R.Board);
+			const int Theirs = ss::EvaluateHand(R.Shown.front().second, R.Board);
+			const bool Ok = (R.HeroNet > 0 && Mine > Theirs) || (R.HeroNet < 0 && Mine < Theirs);
+			++Checked;
+			Wrong += Ok ? 0 : 1;
+			if (!Ok)
+			{
+				std::printf("  video fake %s %s: the player's %s against %s, yet the record's net is %lld\n", Kind, Source, ss::Describe(Mine).c_str(), ss::Describe(Theirs).c_str(),
+					static_cast<long long>(R.HeroNet));
+			}
+		}
+	}
+	Expect(Checked >= 10 && Wrong == 0, "video fake: every scripted showdown wins or loses as its cards play");
+}
 } // namespace video_seg
 
 void SegVideo()
@@ -663,6 +703,7 @@ void SegVideo()
 	video_seg::PayoutsThroughTheCalendar();
 	video_seg::EditThroughFinishSkip();
 	video_seg::StoriesAndSaves();
+	video_seg::FakesDealTrue();
 	std::printf("  video: core-video's session checks in %.1f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 }
 } // namespace session_test

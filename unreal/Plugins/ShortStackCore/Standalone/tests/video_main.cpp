@@ -227,6 +227,12 @@ void Classification()
 		Play(*Small, {PA::RaiseTo(600), PA::RaiseTo(1900), PA::Call()});
 		const ss::recall::Record S = RecordOf(*Small, Sd);
 		Expect(S.Pot == 3800 && video::Classify(S, 0.95, false, Sd, 20.0, Is) != video::Kind::Cooler, "classify: set over set for 19 big blinds isn't a cooler (40 or more)");
+		// A split: kings and nines both ways for 64 big blinds (the C2 verify's chop, titled "nothing I could do").
+		auto Chop = HeadsUp("KhJd", "KcTc", "QsKd9c9h8h", 6400);
+		Play(*Chop, {PA::RaiseTo(6400), PA::Call()});
+		const ss::recall::Record C = RecordOf(*Chop, Sd);
+		Expect(C.Pot == 12800 && C.HeroNet * 4 < C.Pot && video::Classify(C, 0.5, false, Sd, 20.0, Is) != video::Kind::Cooler,
+			"classify: a split pot of two good hands isn't a cooler");
 	}
 	// A bluff: six-five of spades, three barrels, a fold on the river (30 big blinds).
 	{
@@ -1831,6 +1837,45 @@ void AdviceBeforeTheGate()
 			   video::Deleted() == "Taken down. The subscribers it brought in stay.",
 		"copy: PublishWhy and Deleted come from Video.h");
 }
+
+void CoolerOutcome()
+{
+	// C2's verify: a cooler is two big hands, and the player wins half of them (set over set, either way). The titles that
+	// tell a loss ("nothing I could do", "sent my night sideways") are the lost one's alone; the won one gets the rest.
+	int WonSaidLoss = 0, LostSaidLoss = 0, WonTitles = 0;
+	for (const Chips Net : {Chips(6400), Chips(-6400)})
+	{
+		video::Channel C;
+		video::Candidate X = Moment("rl:cooler@9:" + std::to_string(Net > 0 ? 1 : 2), 9.0 * Day + 20.0 * 60.0);
+		X.Rec.Mine = ss::ParseCards(Net > 0 ? "AhAc" : "KdKs");
+		X.Rec.Shown = {{"Mike_R", ss::ParseCards(Net > 0 ? "KdKs" : "AhAc")}};
+		X.Rec.Board = ss::ParseCards("Kh7dAs9s4h");
+		X.Rec.HeroNet = Net;
+		X.Opponent = "Mike_R";
+		video::NoteHand(C, X);
+		for (int T = 0; T < 5; ++T)
+		{
+			for (uint32_t Seed = 0; Seed < 48; ++Seed)
+			{
+				video::Choice Ch;
+				Ch.Candidates = {C.Open[0].Id};
+				Ch.T = static_cast<video::TitleStyle>(T);
+				const std::string Title = video::Title(Ch, C.Open, Seed);
+				const bool Loss = Title.find("nothing I could do") != std::string::npos || Title.find("sideways") != std::string::npos ||
+					Title.find("RAN INTO") != std::string::npos || Title.find("always going to lose") != std::string::npos;
+				WonSaidLoss += Net > 0 && Loss ? 1 : 0;
+				LostSaidLoss += Net < 0 && Loss ? 1 : 0;
+				WonTitles += Net > 0 && !Title.empty() ? 1 : 0;
+				if (Net > 0 && Loss)
+				{
+					std::printf("  a won cooler: \"%s\"\n", Title.c_str());
+				}
+			}
+		}
+	}
+	Expect(WonTitles == 5 * 48 && WonSaidLoss == 0, "cooler: a cooler the player won never gets a title that tells a loss");
+	Expect(LostSaidLoss > 0, "cooler: a lost one can");
+}
 } // namespace video_test
 
 int main(int Argc, char** Argv)
@@ -1895,6 +1940,7 @@ int main(int Argc, char** Argv)
 	video_test::PayoutMarks();
 	video_test::StatementWithPayout();
 	video_test::AdviceBeforeTheGate();
+	video_test::CoolerOutcome();
 	const double Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count();
 	std::printf("video tests: %d checks, %d failed, %.1f s\n", video_test::Checks, video_test::Failures, Seconds);
 	return video_test::Failures == 0 ? 0 : 1;

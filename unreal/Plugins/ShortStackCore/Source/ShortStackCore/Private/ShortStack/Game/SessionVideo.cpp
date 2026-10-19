@@ -123,6 +123,31 @@ bool RentPaidByPoker(const life::State& L)
 	return Poker >= -Rent->Amount;
 }
 
+/**
+ * A moment of the hand itself, the kind a candidate links (§4.4's stream add-on): its all-in and how it went, its pot, a
+ * decision graded in it, a knockout, and the bust, cash or win it ended the night with. The tick's own moments (a new
+ * tournament, a level, the bubble, the money, the final table, the rival sitting down) land on the clock between hands,
+ * so the window would hand them to the next hand's candidate (its chat, its face), and they aren't that hand's.
+ */
+bool VideoHandMoment(kast::Moment M)
+{
+	switch (M)
+	{
+	case kast::Moment::AllIn:
+	case kast::Moment::WonAllIn:
+	case kast::Moment::LostAllIn:
+	case kast::Moment::BadBeat:
+	case kast::Moment::BigPot:
+	case kast::Moment::Knockout:
+	case kast::Moment::Win:
+	case kast::Moment::Bust:
+	case kast::Moment::Cashed:
+	case kast::Moment::BestPlay:
+	case kast::Moment::Blunder: return true;
+	default: return false;
+	}
+}
+
 /** "rl:" for RiverLine, the site's key for a rival (§4.4). */
 std::string SitePrefix(const std::string& EventId)
 {
@@ -279,7 +304,9 @@ video::Candidate Fake(video::Kind K, int Source, double World)
 		const bool Hero = K == Kind::Suckout || K == Kind::Knockout || K == Kind::Rival;
 		R.Mine = Cards(K == Kind::Cooler ? "KdKs" : Hero && K == Kind::Suckout ? "AcJd" : "AsAd");
 		const std::vector<Card> Theirs = Cards(K == Kind::Cooler ? "AhAc" : K == Kind::Suckout ? "QhQc" : "7c7h");
-		R.Board = Cards(K == Kind::Cooler ? "Kh7d2c9s4h" : K == Kind::Suckout ? "8d3cJs5h2d" : K == Kind::BadBeat ? "Kd8s2c9h7d" : "Kd8s2c9h4d");
+		// Each board deals the hand its record says: the kings' set under the aces' (the cooler), ace-jack two pair on the river
+		// past the queens (the suckout), the sevens' river set (the bad beat), the aces holding (the rest).
+		R.Board = Cards(K == Kind::Cooler ? "Kh7dAs9s4h" : K == Kind::Suckout ? "8d3cJs5hAh" : K == Kind::BadBeat ? "Kd8s2c9h7d" : "Kd8s2c9h4d");
 		Line(Street::Preflop, "You", "raises to", 600);
 		Line(Street::Preflop, Villain, "all in", 6400);
 		Line(Street::Preflop, "You", "all in", 6400);
@@ -582,7 +609,8 @@ void Session::VideoNoteHand(const Hand& H, const HandFacts& F)
 		const double Window = std::min(1.5, 0.5 * T->Spec.SecondsPerHand / 60.0);
 		for (kast::MomentNote& M : Stream.Moments)
 		{
-			if (!M.Candidate.empty() || M.World < World - Window)
+			// (The hand's own moments only, never the tick's, which land on this hand's clock from the last tick: VideoHandMoment.)
+			if (!M.Candidate.empty() || M.World < World - Window || !VideoHandMoment(M.Kind))
 			{
 				continue;
 			}

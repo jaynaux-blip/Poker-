@@ -42,7 +42,7 @@ Progress comes in two deliberately separate forms:
 
 The whole online career is played from a first-person desk. The apartment is the hub, the menu and the most important graphics showcase.
 
-- **Computer:** runs the RiverLine poker client (tournament lobby and tables), study tools, a poker forum, the staking marketplace, the GearDrop store and the Kast streaming studio. All UI is rendered on the in-world monitors, with no floating menus.
+- **Computer:** runs the RiverLine poker client (tournament lobby and tables), study tools, a poker forum, the staking marketplace, the GearDrop store, the Kast streaming studio and the Rerun video channel. All UI is rendered on the in-world monitors, with no floating menus.
 - **Phone:** messages from Dee, backers, friends and the rival, plus tournament alerts, your bank balance and rent reminders.
 - **Wall calendar:** the tournament schedule and live series dates.
 - **Bed:** sleeping ends the day and restores energy.
@@ -254,6 +254,82 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
   | $2,000 rig, no schedule, ignoring chat | stream 26 | about stream 150 | — |
   | Full studio | stream 17 | stream 74 | — |
 
+**Rerun: the video channel (built, update 2).** Kast is where you're live; Rerun is where the hand lives on. It's the laptop's ninth app, a fictional video site in marigold on ink. You cut highlights from your own hands and streams, choose a format, a title style and a thumbnail frame, and the videos earn views for weeks. Nothing is typed and nothing is made up: every title and thumbnail is built from a hand, a night or a moment that happened, as you saw it.
+
+- **Candidates.** A hand worth showing waits in Studio; nothing interrupts the table. A marigold dot on Rerun's taskbar button means three or more new ones since your last look, or a milestone on the bell.
+  - **Where they come from:** the online hands you play or watch, and the ones your plan plays while skipping; the Embercrest's hands, watched or skipped; Dee's game (as storytime, below); the end of a tournament that was a deep run (a cash of 3× the buy-in or more), a final table or a win, online or at the Embercrest; and life's big beats, once each: the first rent, if poker paid it (winnings in the 30 days before it covered it; a shift, a cushion or a refund doesn't count), a seat to the RCOP Main Event, a first bracelet or ring, a series title, and moving back in after an eviction.
+  - **The stream add-on:** a hand played on stream carries the viewer count, the facecam's face at that moment, a few lines of chat and the Kast clip, and ranks higher. Kast's end-of-stream card has **Cut highlights (N)**, which opens Studio on tonight's stream.
+  - **The kinds,** read from the hand alone: a bad beat (all in at 60% or better, and lost), a suckout (all in at 40% or worse, and won), a cooler (two pair or better against two pair or better, 40 BB or more), a bluff (won with no showdown after seeing a flop, holding bottom pair or worse, 15 BB or more; preflop steals don't count), a bluff caught, a hero call (a river call with one pair or worse that wins), a big fold (a top-10% hand folded to an all-in or a bet of half the pot), a big pot, a knockout, a bubble all-in, a pot of 20 BB or more against gh0stfold, a deep run, a final table, a win and a story.
+  - **Studio** lists them best first: the kind (a win, a bad beat and a bluff weigh most), the size of the pot, a bubble, final table or series, a name people know, and the stream. Each row shows the kind, its chips (AUTO, LIVE, STORYTIME, the site), the days left, the event, the pot and the opponent ("Night Owl Turbo · 65 BB · vs Mike_R"). At most 30 wait, for three weeks; the least dramatic go first.
+- **Who's in the video.** Only what you saw: an opponent's cards appear only if they were turned up. A bluff's video can show what you had; nobody at the table saw it, and the video is where you show it.
+  - **The Embercrest doesn't allow filming at its tables** (`docs/LIVE_TOURNAMENTS.md` R11), so its hands are told vlog-style: the cards replayed as art, and your portrait instead of a facecam, which draws a few fewer clicks on a Reaction thumbnail (×0.9).
+  - **Dee's game is private.** Its hands go up only as storytime: nobody named (the others are "Seat 1", "Seat 2"), no face but yours, and the event is "a back-room game". The first time, Dee texts: "Saw the video. No names. Good."
+  - **Autoplay:** a hand your plan played wears an AUTO chip in Studio ("Your plan played this one. The video never says so."). Its title, its thumbnail and the channel never mention it.
+- **Publishing.** Pick one candidate, or several from one night or one event:
+
+  | Format | Length | Uses | Edit | Energy | Watch hours |
+  |---|---|---|---|---|---|
+  | Short | 45 s | One moment | 20 min | 2 | No |
+  | Breakdown | 8 min | One hand | 1 h 30 m | 8 | Yes |
+  | Vlog | 18 min | Three to eight moments from one night | 3 h | 15 | Yes |
+  | Recap | 14 min | A deep run, final table or win, plus two to six hands from that event | 2 h 30 m | 12 | Yes |
+
+  - **Title styles.** Titles are written from the hand's facts, from several templates for each style and kind; there's no free text. For a bad beat, AA against 77 in the $5.50 Night Owl Turbo:
+
+    | Style | A title | Clicks | Watching | Subscribing | Ads |
+    |---|---|---|---|---|---|
+    | Story | "the river that ruined my night" | ×1.0 | ×1.1 | ×1.15 | ×1.0 |
+    | Hype | "81% AND I STILL LOST" | ×1.3 | ×0.85 (×0.6 on a small pot) | ×0.9 | ×0.9 |
+    | Teaching | "Getting it in good: 81% is all you can ask for" | ×0.85 | ×1.25 | ×1.3 | ×1.2 |
+    | Question | "Is this the worst river in poker?" | ×1.1 | ×1.0 | ×1.1 | ×1.0 |
+    | Plain | "$5.50 Night Owl Turbo: AA vs 77, 65 big blind pot" | ×0.9 | ×1.0 | ×1.0 | ×1.0 |
+
+    A small pot is under 40 BB and not a final table or a win: clickbait on it costs retention, as the real platforms punish it. A Teaching Breakdown of a decision (a bluff, a hero call, a big fold or a bubble all-in) is a strategy video (below).
+  - **Thumbnail frames,** drawn live from the hand:
+
+    | Frame | Draws | Suits | Undersells |
+    |---|---|---|---|
+    | Reaction | Your face in the moment's mood (the facecam on stream, your portrait live), the big words ("81%"), the cards in a corner | Beats and stories | — |
+    | Cards | Your cards, theirs if shown, the board, "ALL IN" when it was | Bluffs, calls and folds; beats | Runs and stories |
+    | Number | The pot in big blinds or the prize, huge, over your cards | Big pots, knockouts and bubbles; runs | Bluffs, calls and folds |
+    | Versus | Your mark against theirs (gh0stfold's ghost; a silhouette for anyone from Dee's game), "VS" | The rival | Stories |
+    | Trophy | A gold trophy and the place ("4TH OF 104") or WINNER | Deep runs, final tables and wins | Beats, bluffs, calls and folds, big pots |
+
+  - Studio's right-hand column says what each choice does in words, never as a number ("Bad beats travel.", "Teaching titles keep people watching. On a decision, people keep finding it for months."), and the preview shows the real title and the real thumbnail.
+  - **PUBLISH** costs the edit's time and energy, like a shift: the clock races through it and the calendar runs. It's greyed while tables are open ("Close your tables first. Editing needs your whole attention."), mid-stream ("End the stream first.") and under 10 energy ("Too tired to edit. Get some sleep first."). The video goes up when the edit ends ("Up on Rerun").
+- **The honest model.** It uses the real platforms' numbers: a partner gate of 1,000 subscribers and 4,000 watch hours in a year, ad money of a few dollars per 1,000 views in gaming, payment once a month over a $100 minimum, click-through of 2 to 10%, a subscriber for every 100 to 1,000 views. Each video's numbers are rolled once, at upload, from the save's seed and the video, so a reload never rerolls.
+  - **Reach** (how many people Rerun shows a video to) starts at 1,200 and grows with subscribers, Kast followers (the first 20,000 count) and the size of the library. The poker niche saturates: past about 20,000 subscribers each new one adds less. A steady cadence helps (up to ×1.3 with six uploads in the last two weeks); more than three in a week split the same audience (the fourth reaches ×0.87, the sixth ×0.71).
+  - **The topic** multiplies it: the kind (a win ×2.2, a bad beat ×2.0, a big pot ×1.2), the stakes (×1.0 at $5.50, from ×0.8 at the smallest to ×1.6 at about $175 and up), a series event ×1.3, gh0stfold or a name people know ×1.25, and the stream that night (up to ×1.5 at 100 viewers). Then luck: two videos in three land within a factor of 2.5 of the usual, and a rare one travels (0.5%, or 1% for a bad beat, a win or a bluff: ×20 to ×50).
+  - **Clicks:** 5% of the people shown, times the frame's fit, the title, your gear's production value (×0.7 to ×1.2) and a fresh haircut (up to ×1.05); never under 2% or over 14%.
+  - **Watching:** the format's retention (Short 70%, Breakdown 45%, Recap 40%, Vlog 35%), times the title and the production value (×0.85 to ×1.15).
+  - **Subscribing:** 0.65% of viewers, times the title and how well the video holds them, ×1.15 when most of your last ten videos are the same kind of thing and ×1.1 with two uploads in the last two weeks; never under 0.2% or over 1.2%. A Short's viewers subscribe at half that rate: a Short holds people best and converts worst, and without the half rate a channel of Shorts outgrew every other plan.
+  - **Views over time.** Most videos are news: three quarters of their views come in the first few days and the rest over the next month. A Short's come almost all in its first week. A strategy video starts slower, then picks up search views every day for a year. A video keeps earning views whether you post again or not.
+  - **The gate.** No ads until the channel is a Rerun Partner: 1,000 subscribers and 4,000 watch hours from long videos in the last 365 days. Shorts bring subscribers, never watch hours. The Channel page fills both bars; on crossing them Mail says "Your channel's under review.", and a week later "Welcome to the Rerun Partner Program." Views from before that day never earn.
+  - **Ads,** after Rerun's share: per 1,000 views, $2.50 on a Breakdown, $3.50 on a Vlog or Recap (mid-rolls) and 7.5 cents on a Short; ×1.2 with a Teaching title and ×0.9 with Hype; up to ×1.15 at 100,000 subscribers.
+  - **Payday:** the balance pays on the 21st if it's $100 or more: one line in the Bank, "Rerun payout: April", in the "Streaming & video" row, and a statement in Mail with it. Less rolls over to the next month. The wall calendar and the second screen mark the 21st only when a payout is due.
+  - **Taking a video down** stops its views; the subscribers it brought stay.
+- **The app.**
+  - **Studio:** the candidates on the left; in the middle the format, the title style with the real title, the thumbnail frame at full size, the edit's cost ("Edit: 1 h 30 m · 8 energy") and PUBLISH; the advice on the right.
+  - **Channel:** the banner (your avatar, PARTNER once you're in, subscribers, views and videos), the Partner Program's two bars (then the balance and what's been paid out), a chart of the last 28 days' views, subscribers and, after the gate, money, and the videos as tiles with their views, age and, once you're a Partner, earnings.
+  - **The bell** keeps the milestones: 100, 1,000, 10,000 and 100,000 views on a video; 100, 1,000 and 10,000 subscribers; the review; Partner. Rerun's letters in Mail have an "Open your channel" button. Rerun never texts.
+  - Empty, Studio says "Play some hands. The good ones show up here." and Channel "No videos yet."
+- **What it feeds.**
+  - **Kast.** Each new Rerun subscriber is 0.08 of a Kast follow, and every 2,000 views one more, so video fans join the stream's community as new members, to be won over on stream like anyone else. Your Kast followers raise every video's reach. A video doing well brings strangers to tonight's stream: views in the last 48 hours bring up to 30% more strangers from the directory (all 30% at 5,000 views). A Kast clip cut into a video stops bringing follows of its own.
+  - **Renown.** The public record carries the channel's subscribers, its views in the last 30 days and Partner. A subscriber counts as half a Kast follower in renown, so the street knows a video face ("Hey, I've seen you. The poker videos, right? My cousin watches every one."), and demand for pieces of your action follows video fame too.
+  - **The creator road to sponsors.** Sponsor standing takes the best of its roads: the stream, the live room and now Rerun. On the creator road, "Known on the block" comes at 1,000 subscribers; "A face in the room" at 5,000 and 20,000 views in 30 days; "A name in the city" as a Rerun Partner with 10,000; "On the circuit" at 50,000 and 150,000 views in 30 days; "A poker personality" at 250,000. When Rerun is what lifted standing, the offer says so ("Rerun made you a Partner, and 2,255 people subscribe."). Team RiverLine, otherwise a Partner streamer's deal, also opens at "On the circuit" by any road, so it can come to a creator who doesn't stream; its asks are hours live, reads and a community stream, so signing it means streaming.
+- **Measured growth** (simulated in closed form, medians of 5 seeds: the same $5.50 cooler every upload, Story titles, the Versus frame, a mid rig, no Kast audience, uploads from day 7). Rerun starts as slowly as Kast and doesn't pay a living on its own: three videos a week bring about an eighth of the rent a month at the end of the first year and two-thirds of it in year 5; a video a day, about one rent in year 5.
+
+  | Plan | Subscribers | Partner | First payout | Ads a month |
+  |---|---|---|---|---|
+  | Three a week (a Short, a Breakdown and a Vlog in turn) | 19 at day 30, 141 at day 90 | Day 237 | Day 289 | $131 at day 365; $703 in year 5 |
+  | Daily (the same turn) | 226,038 in year 5 | Day 119 | — | $450 at day 365, $588 at day 540; $1,018 in year 5 |
+  | Three Breakdowns a week | 7,934 at day 365, 32,731 at day 730 | Day 183 | — | — |
+  | Three Shorts a day | 1,809, 29,622 and 112,140 at days 90, 365 and 730; 50,000 on day 464 | Never: Shorts bring no watch hours | Never | $0 |
+  | A Short a day and three Breakdowns a week | 677, 14,741 and 70,191 at days 90, 365 and 730; 50,000 on day 619 | Day 164 | — | $222 at day 365 |
+
+  - Shorts buy subscribers, not money: three a day end the first year with 3.7 times the subscribers of three Breakdowns a week (7.7 times before Shorts' half rate) and earn nothing.
+  - **In a simulated career** (a streamer's first 180 days, plus $133 of webcam, mic and ring light and about three videos a week cut from its own hands: 25 Shorts, 33 Breakdowns and 17 Vlogs), the channel has 8, 32, 70 and 358 subscribers on days 30, 60, 90 and 180, is far from the gate and pays nothing. The bankroll reads $1,190.22, $2,332.06, $1,084.26 and $1,361.85.
+
 **Reading opponents online (digital tells)**
 
 - **HUD (unlockable software):** VPIP, PFR, 3-bet %, aggression and fold-to-c-bet. The stats are computed from hands you have actually observed, so small samples really are unreliable.
@@ -299,10 +375,10 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
   - Sharpness is 80% up to a Form of 80 and rises to 100% at 95. Tilt over 0.2 trims it (by up to a quarter at full tilt), exhaustion ×0.85, hunger or thirst ×0.92. Under 70% the panel warns you: "Your plan gets sloppy."
   - **Slips.** At a decision that matters (facing a bet, any decision after the flop, a pot over 10 BB) the plan sometimes slips and plays the spot like a calling station: it keeps its own opening range, then calls a raise it should fold, calls down too light and bets too small. The chance is the style's floor plus 1.2 × (1 − Sharpness), with twice that slope for GTO and 2.5 times for the Maniac. The floors: Nit 70%; Push/Fold 45%, only deeper than 25 BB in slow events (levels of 8 minutes or more: deep online events and the Embercrest); TAG and Exploitative 38%; ICM Shark 32%, and none near the bubble or at the final table; LAG and Balanced Reg 25%; GTO and the Maniac none. At Form 70, rested, a TAG slips on about three of those decisions in five and the Nit on almost all of them. Autopilot never slips.
   - **The plan's tilt.** A bad beat or a big lost pot tilts it (by your background's tilt gain), a won pot calms it, and it fades every hand. GTO barely feels it and the Maniac twice as much. Autopilot never tilts.
-- **What counts.** Results count fully: the bankroll, ROI, the boards, Player of the Year, badges, backers, sponsors, reputation, the news and Kast. Grades, the coach, the accuracy record and the best-play and blunder moments come only from decisions you made, and the plan's decisions earn no skill XP.
+- **What counts.** Results count fully: the bankroll, ROI, the boards, Player of the Year, badges, backers, sponsors, reputation, the news, Kast and Rerun. Grades, the coach, the accuracy record and the best-play and blunder moments come only from decisions you made, and the plan's decisions earn no skill XP.
   - The results screen says "Played by your plan: 214 of 260 decisions (LAG)", and its skill XP counts only your decisions ("No skill XP" when the plan made them all).
   - Career's row reads "AUTO · LAG 82%", with "—" for accuracy when you made no decisions.
-- **Nobody in the world knows.** No site bans it, no backer or sponsor sees it, and no talk, news or mail mentions it. On stream, the plan's lines never show and a skip only dims the table. At 4x, strangers stay on the stream a little less (×0.9); at 8x or skipping, the stream pays Sprint's old cost (strangers ×0.8, follows ×0.6).
+- **Nobody in the world knows.** No site bans it, no backer or sponsor sees it, and no talk, news or mail mentions it. On stream, the plan's lines never show and a skip only dims the table. On Rerun, a hand the plan played wears an AUTO chip in Studio for you alone; the video never says so. At 4x, strangers stay on the stream a little less (×0.9); at 8x or skipping, the stream pays Sprint's old cost (strangers ×0.8, follows ×0.6).
 
 **Measured balance (simulated).**
 
@@ -501,7 +577,7 @@ The player walks the street as that character, a MetaHuman matched to the look, 
 - **Bankroll:** your life. Rent, food, travel, hotels and gear all come out of it.
 - **Staking:** backers pay your buy-ins for a share of the profit, with makeup (you must win back their losses before you profit). Deal terms vary by backer personality.
 - **Selling action:** for live events, you sell pieces of your action at a markup your reputation justifies.
-- **Sponsorship:** unlocked by fame. A sponsor covers buy-ins and asks for patches, appearances and streaming hours. Streaming sponsors are built (see Kast).
+- **Sponsorship:** unlocked by fame. A sponsor covers buy-ins and asks for patches, appearances and streaming hours. Streaming sponsors are built (see Kast), and a Rerun channel is a road to them too (see Rerun).
 - **Fame:** grows with results and memorable hands. It changes how tables play against you and unlocks invitations, including The Summit.
 
 **Getting on your feet (built).** Early on, the bankroll is $2.37 and the rent is $1,225 by Friday midnight. The laptop has apps beside RiverLine for the other ways to get there; each one fast-forwards the clock while the room goes from night to day and back:
@@ -510,7 +586,7 @@ The player walks the street as that character, a MetaHuman matched to the look, 
 - **Burner:** Marcus pays $120 to $200 a drop-off (and $380 to $600 for the long run once you've proven yourself). Every run adds police heat, and heat raises the chance of getting picked up: a fine, a night in holding, and a debt to Marcus for the lost bag. Sam, a rich player who notices you once you cash, pays you to play his RiverLine account ("ghosting"). If site security catches it, your account is restricted for 24 hours.
 - **Bank:** the balance, the rent countdown and payment, and where every dollar came from and went.
 - **Sleep:** a nap or a full night. Energy drains while you're awake and with every shift; under 20% your time bank at the table is halved.
-- **GearDrop and Kast:** the store and the streaming site (see Online play). Streaming becomes a second career, slowly: it takes months of steady streaming to build a community, and by the time a channel is Partner, a month of streams pays the rent.
+- **GearDrop, Kast and Rerun:** the store, the streaming site and the video site (see Online play). Streaming becomes a second career, slowly: it takes months of steady streaming to build a community, and by the time a channel is Partner, a month of streams pays the rent. Videos are slower still to pay: Rerun's ads start only at its partner gate, and three videos a week bring about an eighth of the rent a month after a year.
 - **Rent day:** the first month is $1,225 (the late fee is already in it), due Friday at midnight. After that it's $1,075 a month: due at midnight on October 31, then every 30 days.
   - **Reminders.** A week out, a paid month turns due again and the landlord texts the amount and the date. More texts come at 9 AM the day before and at 6 PM on the day. The Bank's taskbar badge goes red in the last 24 hours.
   - **Collection.** At the deadline the landlord takes it if it's in the account. You can also pay early from the Bank app, or pay a month ahead.

@@ -1112,7 +1112,9 @@ Kind Classify(const recall::Record& Rec, double EquityAtAllIn, bool Bubble, bool
 			Take(Kind::Suckout);
 		}
 	}
-	if (Showdown && !H.HeroFolded && PotBb >= 40.0 && OwnCategory(Rec.Mine, Rec.Board) >= static_cast<int>(Category::TwoPair))
+	// A cooler moves the pot one way: a split (net about nothing) is two good hands, not one beaten by another.
+	const bool OneWay = std::fabs(static_cast<double>(Rec.HeroNet)) * 4.0 >= static_cast<double>(Rec.Pot);
+	if (Showdown && !H.HeroFolded && OneWay && PotBb >= 40.0 && OwnCategory(Rec.Mine, Rec.Board) >= static_cast<int>(Category::TwoPair))
 	{
 		for (const auto& S : Rec.Shown)
 		{

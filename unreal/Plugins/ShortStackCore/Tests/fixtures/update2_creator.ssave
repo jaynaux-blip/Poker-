@@ -1,5 +1,5 @@
 shortstack.nightone.v2
-bankroll	60415
+bankroll	61093
 name	grinder_3c
 hero	name	Jesse	Cole
 hero	age	24
@@ -302,18 +302,16 @@ night	207
 night	208
 night	209
 night	210
-ledger	262860.00	1	5123	Wash & Fold shift
-ledger	262950.00	0	-25	Buy-in: $0.25 Hyper Sprint
-ledger	264300.00	1	4828	Wash & Fold shift
-ledger	264390.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	265740.00	1	5111	Wash & Fold shift
 ledger	265830.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	267180.00	1	4863	Wash & Fold shift
 ledger	267270.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	268620.00	1	5037	Wash & Fold shift
 ledger	268710.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	268740.81	6	2	Kast payout
 ledger	270060.00	1	5076	Wash & Fold shift
 ledger	270150.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	270182.91	6	8	Kast payout
 ledger	271500.00	1	5095	Wash & Fold shift
 ledger	271590.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	272940.00	1	5039	Wash & Fold shift
@@ -322,47 +320,51 @@ ledger	274380.00	1	4884	Wash & Fold shift
 ledger	274470.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	275820.00	1	4866	Wash & Fold shift
 ledger	275910.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	275962.51	6	502	Kast payout
 ledger	277260.00	1	5034	Wash & Fold shift
 ledger	277350.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	278700.00	1	4995	Wash & Fold shift
 ledger	278790.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	278832.71	6	2	Kast payout
 ledger	280140.00	1	5081	Wash & Fold shift
 ledger	280230.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	281580.00	1	5099	Wash & Fold shift
 ledger	281670.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	283020.00	1	5055	Wash & Fold shift
 ledger	283110.00	0	-25	Buy-in: $0.25 Hyper Sprint
-ledger	283142.91	6	2	Kast payout
+ledger	283142.91	6	1	Kast payout
 ledger	284460.00	1	5027	Wash & Fold shift
 ledger	284550.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	284596.21	6	3	Kast payout
-ledger	285120.00	13	10440	Rerun payout: April
+ledger	285120.00	13	10597	Rerun payout: April
 ledger	285990.00	0	-25	Buy-in: $0.25 Hyper Sprint
-ledger	286030.61	6	1	Kast payout
+ledger	286030.61	6	2	Kast payout
 ledger	287430.00	0	-25	Buy-in: $0.25 Hyper Sprint
-ledger	287474.11	6	2	Kast payout
+ledger	287474.11	6	5	Kast payout
 ledger	288870.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	290310.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	290363.20	0	50	Prize: $0.25 Hyper Sprint
-ledger	290363.21	6	2	Kast payout
+ledger	290363.21	6	3	Kast payout
 ledger	291750.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	293190.00	0	-25	Buy-in: $0.25 Hyper Sprint
-ledger	293221.51	6	3	Kast payout
+ledger	293221.51	6	5	Kast payout
 ledger	294630.00	0	-25	Buy-in: $0.25 Hyper Sprint
 ledger	296070.00	0	-25	Buy-in: $0.25 Hyper Sprint
-ledger	296115.51	6	253	Kast payout
+ledger	296115.51	6	5	Kast payout
 ledger	297510.00	0	-25	Buy-in: $0.25 Hyper Sprint
-ledger	297555.51	6	2	Kast payout
+ledger	297555.51	6	252	Kast payout
 ledger	298080.00	3	-107500	Rent (collected)
 ledger	298860.00	1	4990	Wash & Fold shift
 ledger	298950.00	0	-25	Buy-in: $0.25 Hyper Sprint
-ledger	298982.21	6	4	Kast payout
+ledger	298982.21	6	3	Kast payout
 ledger	299080.00	0	-10500	Embercrest Nightly $120: buy-in
 ledger	299080.00	0	-1500	Embercrest Nightly $120: entry fee
 ledger	299080.00	3	-290	The 14 bus up to the Embercrest
 ledger	299402.50	3	-290	The 14 bus home
 ledger	301020.00	0	18800	Dee's game
+text	bond-slot:208:0
 text	bond-slot:61:0
+text	bond:207:Lin
 text	bond:60:dusty_muck5
 text	dee-bubble
 text	dee-ft
@@ -403,7 +405,6 @@ text	rent-tonight:56
 text	rent-tonight:86
 text	sam-intro
 text	world:110880:1605:3
-text	world:126719:1599:18
 text	world:131040:1606:3
 text	world:167118:1606:0
 text	world:181440:1606:3
@@ -418,364 +419,386 @@ gear	ram-32	0.00
 gear	ring-light	0.00
 gear	webcam-720	0.00
 leds	0	1	1
-kast	ch	0	327	0.9549	13659.14	23405.9	10	207	1	0	250	303300.00	1	0
-kast	earn	250	0	500	22	0	0	772
-kast	sub	QuietQueen5	296096.60	339296.60	1	1
-kast	clip	284588.50	17.9	17.9	2	Mahjong99	grinder_3c holds the all-in for 22,806
-kast	clip	260114.10	27.3	27.3	2	Rodeo	grinder_3c holds the all-in for 55,966
-kast	clip	209685.40	15.6	15.6	2	dee_spincycle	grinder_3c holds the all-in for 9,465
-kast	clip	129043.30	5.2	5.2	5	mei_ng	grinder_3c drags a monster pot	rl:hyper-sprint@129030:19
-kast	clip	107482.50	2.1	2.1	4	mei_ng	grinder_3c gets rivered at 59,668	rl:hyper-sprint@107430:75
-kast	clip	62826.40	63.9	63.9	2	mei_ng	grinder_3c holds the all-in for 28,750
-kast	log	213960.00	61.51	2	2	0	0	0	Grinding the micros to make rent · !rent	2	0
-kast	log	215400.00	81.11	2	2	0	0	0	Grinding the micros to make rent · !rent	2	0
-kast	log	216840.00	60.81	2	2	0	0	0	Grinding the micros to make rent · !rent	4	0
+kast	ch	0	352	0.3464	13659.14	24662.8	9	207	1	0	250	303300.00	3	0
+kast	earn	750	0	500	43	0	0	1293
+kast	sub	LeiChen	275947.10	319147.10	1	1
+kast	sub	ThirstyJoker	275960.40	319160.40	1	1
+kast	sub	BankrollRIP	297545.00	340745.00	1	1
+kast	clip	290356.90	28.8	28.9	2	Paula_Siesta	grinder_3c holds the all-in for 60,164
+kast	clip	290330.30	43.2	43.3	2	salonen21	SHIP IT (grinder_3c doubles)
+kast	clip	260149.10	8.3	8.3	4	dee_spincycle	the cruelest river (grinder_3c)	rl:hyper-sprint@260070:113
+kast	clip	242791.40	38.9	38.9	2	AFK_at_BB	SHIP IT (grinder_3c doubles)	rl:hyper-sprint@242790:2
+kast	clip	212600.40	3.1	3.1	2	mia13	SHIP IT (grinder_3c doubles)	rl:hyper-sprint@212550:72
+kast	clip	212582.90	2.8	2.8	2	xXRailXx	SHIP IT (grinder_3c doubles)	rl:hyper-sprint@212550:47
+kast	clip	201079.00	68.6	68.6	4	mei_ng	the cruelest river (grinder_3c)	rl:hyper-sprint@201030:70
+kast	clip	169417.90	6.4	6.4	2	dee_spincycle	SHIP IT (grinder_3c doubles)	rl:hyper-sprint@169350:97
+kast	clip	48443.90	15.2	15.2	2	martin04	grinder_3c holds the all-in for 101,125
+kast	clip	39806.00	4.1	4.1	2	dee_spincycle	SHIP IT (grinder_3c doubles)
+kast	log	213960.00	61.51	1	1	0	0	0	Grinding the micros to make rent · !rent	2	0
+kast	log	215400.00	81.11	1	2	0	0	0	Grinding the micros to make rent · !rent	2	0
+kast	log	216840.00	60.81	2	2	0	0	0	Grinding the micros to make rent · !rent	1	0
 kast	log	218280.00	65.01	1	2	0	0	0	Grinding the micros to make rent · !rent	1	0
-kast	log	219720.00	92.31	4	5	0	0	0	Grinding the micros to make rent · !rent	6	0
-kast	log	221160.00	43.31	1	2	0	0	0	Grinding the micros to make rent · !rent	2	0
-kast	log	222600.00	43.31	2	2	0	0	0	Grinding the micros to make rent · !rent	2	0
-kast	log	224040.00	58.01	2	2	0	0	0	Grinding the micros to make rent · !rent	3	0
-kast	log	225480.00	72.71	2	2	0	0	0	Grinding the micros to make rent · !rent	3	0
-kast	log	226920.00	88.11	2	3	0	0	0	Grinding the micros to make rent · !rent	3	0
-kast	log	228360.00	65.71	2	3	0	0	0	Grinding the micros to make rent · !rent	4	0
+kast	log	219720.00	92.31	4	6	0	0	0	Grinding the micros to make rent · !rent	8	0
+kast	log	221160.00	43.31	3	4	0	0	0	Grinding the micros to make rent · !rent	6	0
+kast	log	222600.00	43.31	1	1	0	0	0	Grinding the micros to make rent · !rent	1	0
+kast	log	224040.00	58.01	3	4	0	0	0	Grinding the micros to make rent · !rent	5	0
+kast	log	225480.00	72.71	1	2	0	0	0	Grinding the micros to make rent · !rent	1	0
+kast	log	226920.00	88.11	2	5	0	0	0	Grinding the micros to make rent · !rent	4	0
+kast	log	228360.00	65.71	4	6	0	0	0	Grinding the micros to make rent · !rent	5	0
 kast	log	229800.00	53.11	3	3	0	0	0	Grinding the micros to make rent · !rent	3	0
-kast	log	231240.00	68.51	3	4	0	0	0	Grinding the micros to make rent · !rent	6	0
-kast	log	232680.00	62.91	3	4	0	0	0	Grinding the micros to make rent · !rent	4	0
-kast	log	234120.00	60.11	1	2	0	0	0	Grinding the micros to make rent · !rent	3	0
-kast	log	235560.00	65.01	2	2	0	0	0	Grinding the micros to make rent · !rent	3	0
-kast	log	237000.00	62.21	1	1	0	0	0	Grinding the micros to make rent · !rent	0	0
-kast	log	238440.00	44.71	2	3	0	0	0	Grinding the micros to make rent · !rent	5	0
-kast	log	239880.00	73.41	2	2	0	0	0	Grinding the micros to make rent · !rent	2	0
-kast	log	241320.00	52.41	1	1	0	0	0	Grinding the micros to make rent · !rent	2	0
-kast	log	242760.00	67.11	1	2	0	0	0	Grinding the micros to make rent · !rent	2	0
-kast	log	244200.00	65.01	1	1	0	0	0	Grinding the micros to make rent · !rent	2	0
-kast	log	245640.00	60.11	1	1	0	0	0	Grinding the micros to make rent · !rent	3	0
-kast	log	247080.00	62.21	3	4	0	0	0	Grinding the micros to make rent · !rent	4	0
-kast	log	248520.00	32.81	2	3	0	0	0	Grinding the micros to make rent · !rent	1	0
-kast	log	249960.00	65.71	1	2	0	0	0	Grinding the micros to make rent · !rent	2	0
-kast	log	251400.00	48.91	4	5	0	0	0	Grinding the micros to make rent · !rent	7	0
-kast	log	252840.00	30.71	6	6	0	0	0	Grinding the micros to make rent · !rent	6	0
-kast	log	254280.00	51.71	2	2	0	0	0	Grinding the micros to make rent · !rent	4	0
-kast	log	255720.00	79.71	5	5	0	0	0	Grinding the micros to make rent · !rent	8	0
-kast	log	257160.00	101.41	2	4	0	0	0	Grinding the micros to make rent · !rent	7	0
-kast	log	258600.00	93.71	2	4	0	0	0	Grinding the micros to make rent · !rent	8	0
-kast	log	260040.00	109.11	2	5	0	0	0	Grinding the micros to make rent · !rent	6	0
-kast	log	261480.00	60.11	5	7	0	0	0	Grinding the micros to make rent · !rent	14	0
-kast	log	262920.00	76.91	4	7	0	0	0	Grinding the micros to make rent · !rent	10	0
-kast	log	264360.00	46.81	3	3	0	0	0	Grinding the micros to make rent · !rent	6	0
-kast	log	265800.00	67.81	4	5	0	0	0	Grinding the micros to make rent · !rent	7	0
-kast	log	267240.00	60.81	1	2	0	0	0	Grinding the micros to make rent · !rent	7	0
-kast	log	268680.00	60.81	4	5	0	0	0	Grinding the micros to make rent · !rent	11	0
-kast	log	270120.00	62.91	3	4	0	0	0	Grinding the micros to make rent · !rent	3	0
-kast	log	271560.00	53.11	7	8	0	0	0	Grinding the micros to make rent · !rent	9	0
-kast	log	273000.00	30.71	6	6	0	0	0	Grinding the micros to make rent · !rent	6	0
-kast	log	274440.00	50.31	4	5	0	0	0	Grinding the micros to make rent · !rent	8	0
-kast	log	275880.00	82.51	3	3	0	0	0	Grinding the micros to make rent · !rent	11	0
-kast	log	277320.00	37.71	5	5	0	0	0	Grinding the micros to make rent · !rent	7	0
-kast	log	278760.00	72.71	5	8	0	0	0	Grinding the micros to make rent · !rent	9	0
-kast	log	280200.00	55.21	4	5	0	0	0	Grinding the micros to make rent · !rent	6	0
-kast	log	281640.00	50.31	5	5	0	0	0	Grinding the micros to make rent · !rent	9	0
-kast	log	283080.00	62.91	2	3	0	0	2	Grinding the micros to make rent · !rent	5	0
-kast	log	284520.00	76.21	4	4	0	0	3	Grinding the micros to make rent · !rent	7	0
-kast	log	285960.00	70.61	3	6	0	0	1	Grinding the micros to make rent · !rent	11	0
-kast	log	287400.00	74.11	2	2	0	0	2	Grinding the micros to make rent · !rent	3	0
-kast	log	288840.00	56.61	1	2	0	0	0	Grinding the micros to make rent · !rent	3	0
-kast	log	290280.00	83.21	3	4	0	0	2	Grinding the micros to make rent · !rent	10	0
-kast	log	291720.00	55.21	2	3	0	0	0	Grinding the micros to make rent · !rent	7	0
-kast	log	293160.00	61.51	4	5	0	0	3	Grinding the micros to make rent · !rent	13	0
-kast	log	294600.00	53.11	4	5	0	0	0	Grinding the micros to make rent · !rent	10	0
-kast	log	296040.00	75.51	5	9	0	1	253	Grinding the micros to make rent · !rent	14	0
-kast	log	297480.00	75.51	4	6	0	0	2	Grinding the micros to make rent · !rent	7	0
-kast	log	298920.00	62.21	8	10	0	0	4	Grinding the micros to make rent · !rent	14	0
-kast	mem	dee_spincycle	0.9085	0.9500	2280.00	298982.21	87	4037.8	1510	3	499
-kast	mem	mei_ng	0.7714	0.8500	2280.00	293221.51	69	3226.6	1239	3	0
-kast	mem	FullHouseFred	0.0763	0.1909	19140.00	283142.91	10	225.9	18	1	0
-kast	mem	george.s	0.0240	0.0535	22020.00	283142.91	7	171.6	24	1	0
-kast	mem	ColdCall4bet	0.0263	0.0731	29220.00	275962.51	5	108.7	28	1	0
-kast	mem	martin04	0.1881	0.4274	36420.00	296115.51	9	215.9	19	1	0
-kast	mem	AAlmeida	0.2432	0.6127	40740.00	273030.71	10	225.1	65	1	0
-kast	mem	MaxWeber	0.0604	0.4496	46500.00	293221.51	2	48.3	20	1	0
-kast	mem	SilentBubble02	0.3697	0.6009	53700.00	284596.21	15	418.3	101	1	0
-kast	mem	ColdChip21	0.0151	0.1258	56580.00	56580.00	0	0.0	0	1	0
-kast	mem	tiago.s	0.0646	0.3311	59460.00	280255.21	4	79.2	24	1	0
-kast	mem	mia13	0.0443	0.4433	60900.00	260149.11	5	27.2	0	1	0
-kast	mem	PolarMonster	0.0179	0.0517	62340.00	231308.51	4	36.2	0	1	0
-kast	mem	byang	0.0212	0.0502	63780.00	284596.21	4	71.5	2	1	0
-kast	mem	Ficha101	0.0200	0.0500	66660.00	228425.71	3	68.7	22	1	0
-kast	mem	salonen21	0.1130	0.5699	68100.00	208273.41	5	109.6	2	1	0
-kast	mem	Moser4	0.0187	0.0514	70980.00	277357.71	6	37.5	0	1	0
-kast	mem	camila.f	0.0420	0.1755	76740.00	219812.31	2	86.3	13	1	0
-kast	mem	LateRegLarry	0.0320	0.1378	78180.00	277357.71	7	68.9	45	1	0
-kast	mem	Mahjong99	0.3300	0.4582	81060.00	298982.21	22	630.8	135	1	0
-kast	mem	pepe.c	0.0180	0.0516	83940.00	265867.81	3	27.2	0	1	0
-kast	mem	jack86	0.0199	0.0506	86820.00	206851.61	4	91.8	4	1	0
-kast	mem	LazyBluff	0.0196	0.0535	130020.00	165065.01	2	20.8	0	1	0
-kast	mem	nikitas	0.0279	0.0512	131460.00	296115.51	6	159.3	17	1	0
-kast	mem	bondarenko101	0.0245	0.0502	132900.00	283142.91	3	104.3	21	1	0
-kast	mem	lauti.r	0.0537	0.4497	132900.00	178013.11	1	41.0	2	1	0
-kast	mem	irinai	0.0217	0.0919	134340.00	241372.41	2	15.8	0	1	0
-kast	mem	SaltyNuts	0.0258	0.1009	135780.00	298982.21	4	25.7	2	1	0
-kast	mem	StoneQuads	0.0225	0.1025	137220.00	260149.11	2	14.8	3	1	0
-kast	mem	CrimsonMonster	0.0224	0.0527	138660.00	261540.11	3	46.7	2	1	0
-kast	mem	lauri_salonen	0.0618	0.4054	140100.00	290363.21	4	47.1	0	1	0
-kast	mem	NoteTaker	0.0465	0.2216	141540.00	274490.31	4	60.7	11	1	0
-kast	mem	PocketRockets	0.0193	0.4854	144420.00	144420.00	0	0.0	0	1	0
-kast	mem	ColdDeckCasey	0.0199	0.0507	145860.00	242827.11	1	6.4	0	1	0
-kast	mem	CrimsonBubble	0.0195	0.4693	147300.00	147300.00	0	0.0	0	1	0
-kast	mem	restless_ace	0.0242	0.0507	148740.00	284596.21	4	70.3	9	1	0
-kast	mem	elarsson	0.0225	0.0519	151620.00	219812.31	3	52.6	5	1	0
-kast	mem	brb_tilt	0.0427	0.2507	153060.00	293221.51	2	46.9	11	1	0
-kast	mem	xXSnowmanXx	0.0203	0.0508	154500.00	287474.11	1	4.0	0	1	0
-kast	mem	GhostTown	0.0221	0.0508	157380.00	202486.81	2	37.4	8	1	0
-kast	mem	SaltyJacare	0.0654	0.2327	158820.00	239953.41	3	112.8	20	1	0
-kast	mem	Sorte88	0.0253	0.0500	161700.00	288896.61	3	93.4	4	1	0
-kast	mem	SaltyMuck5	0.0833	0.3350	164580.00	257261.41	5	94.4	11	1	0
-kast	mem	AFK_at_BB	0.0282	0.1136	166020.00	271613.11	2	36.2	1	1	0
-kast	mem	DeepStackDan	0.0240	0.0525	168900.00	242827.11	2	48.8	25	1	0
-kast	mem	IronRocket4	0.0225	0.1229	170340.00	234180.11	1	6.4	0	1	0
-kast	mem	ShadyZver	0.0852	0.5944	171780.00	296115.51	3	51.5	0	1	0
-kast	mem	moser84	0.0225	0.0500	173220.00	221203.31	1	26.3	11	1	0
-kast	mem	AceRag	0.0533	0.1808	174660.00	288896.61	4	88.4	22	1	0
-kast	mem	SleepyWilk	0.0245	0.0503	176100.00	291775.21	3	57.2	0	1	0
-kast	mem	moore80	0.0223	0.0508	177540.00	281690.31	2	12.2	0	1	0
-kast	mem	StoneJoker	0.0245	0.0511	177540.00	265867.81	1	50.0	5	1	0
-kast	mem	xXQuadsXx	0.0255	0.1169	178980.00	251448.91	1	20.0	0	1	0
-kast	mem	alessandro92	0.0348	0.1004	180420.00	297555.51	4	66.8	15	1	0
-kast	mem	Cuppa7	0.0574	0.4381	181860.00	261540.11	1	32.1	4	1	0
-kast	mem	lei.w	0.0224	0.0872	183300.00	222643.31	1	4.6	0	1	0
-kast	mem	SteadyCooler	0.0247	0.0559	184740.00	262996.91	2	47.3	10	1	0
-kast	mem	Kitsune	0.0225	0.0500	186180.00	231308.51	1	16.0	0	1	0
-kast	mem	Rodeo	0.0273	0.0572	187620.00	260149.11	2	74.7	40	1	0
-kast	mem	rogue_raise	0.0415	0.5181	189060.00	290363.21	1	14.4	0	1	0
-kast	mem	ysmirnov	0.0707	0.1636	191940.00	278832.71	6	175.0	22	1	0
-kast	mem	juhom	0.0340	0.2175	191940.00	252870.71	2	20.0	2	1	0
-kast	mem	felipe33	0.0256	0.0720	193380.00	278832.71	1	23.8	3	1	0
-kast	mem	oisin.d	0.0290	0.1207	194820.00	228425.71	2	35.9	0	1	0
-kast	mem	taeyang_jung	0.0223	0.0502	196260.00	196260.00	0	0.0	0	1	0
-kast	mem	MaximKuznetsov	0.0258	0.0659	196260.00	296115.51	5	29.3	0	1	0
-kast	mem	n00bbluff	0.0224	0.1814	197700.00	197700.00	0	0.0	0	1	0
-kast	mem	UdachaShark	0.0254	0.0794	199140.00	238484.71	2	25.1	0	1	0
-kast	mem	IronMuck	0.0266	0.1316	200580.00	212647.31	1	19.1	0	1	0
-kast	mem	SaltyDeuce	0.0238	0.1167	203460.00	216900.81	1	4.0	0	1	0
-kast	mem	junzhang	0.0235	0.0520	204900.00	251448.91	1	9.9	0	1	0
-kast	mem	lucky_deuce	0.0300	0.0849	204900.00	297555.51	3	40.4	13	1	0
-kast	mem	LaoHuQueen	0.0891	0.4433	206340.00	275962.51	2	70.0	3	1	0
-kast	mem	ThinValueTim	0.0547	0.2882	207780.00	252870.71	2	47.9	11	1	0
-kast	mem	dmitri8	0.0232	0.1357	210660.00	210660.00	0	0.0	0	1	0
-kast	mem	SneakyAce	0.0233	0.1549	212100.00	212100.00	0	0.0	0	1	0
-kast	mem	QuietButton	0.0262	0.0500	213540.00	255799.71	1	50.1	5	1	0
-kast	mem	SaltyButton	0.0235	0.0524	214980.00	214980.00	0	0.0	0	1	0
-kast	mem	Jack_Timbit	0.0243	0.0632	216420.00	264406.81	1	5.8	0	1	0
-kast	mem	ElectricGutshot	0.0420	0.1931	217860.00	296115.51	3	39.9	3	1	0
-kast	mem	RunGoodRandy	0.0590	0.4174	219300.00	293221.51	1	29.8	3	1	0
-kast	mem	xXGutshotXx	0.0265	0.0557	220740.00	298982.21	2	28.8	5	1	0
-kast	mem	ShadyBubble	0.0240	0.0500	222180.00	222180.00	0	0.0	0	1	0
-kast	mem	WildButton3	0.0242	0.3609	225060.00	225060.00	0	0.0	0	1	0
-kast	mem	Giulia_Gnocchi	0.0243	0.0600	226500.00	226500.00	0	0.0	0	1	0
-kast	mem	n00bgutshot	0.0247	0.0501	226500.00	298982.21	1	4.0	0	1	0
-kast	mem	ButtonMasher	0.0272	0.1405	227940.00	228425.71	1	10.4	0	1	0
-kast	mem	KAnderson	0.0245	0.0773	229380.00	229380.00	0	0.0	0	1	0
-kast	mem	TripsTracy	0.0258	0.0502	230820.00	273030.71	1	16.3	1	1	0
-kast	mem	TheProfessor	0.0275	0.0720	232260.00	275962.51	1	20.1	25	1	0
-kast	mem	ThirstyOwl	0.0247	0.2691	233700.00	233700.00	0	0.0	0	1	0
-kast	mem	HijackHank	0.0248	0.0500	235140.00	235140.00	0	0.0	0	1	0
-kast	mem	landersson	0.0249	0.6177	236580.00	236580.00	0	0.0	0	1	0
-kast	mem	ChipsAndSalsa	0.0278	0.0500	238020.00	297555.51	4	50.4	8	1	0
-kast	mem	souza86	0.0265	0.0753	239460.00	244265.01	1	11.6	0	1	0
-kast	mem	SlowRollSam	0.0261	0.0904	240900.00	267300.81	1	4.0	0	1	0
-kast	mem	RoyalDealer	0.0289	0.0523	242340.00	294653.11	2	47.6	4	1	0
-kast	mem	CountessOfCards	0.0283	0.1224	242340.00	255799.71	2	9.7	0	1	0
-kast	mem	Calavera	0.0437	0.2128	243780.00	293221.51	3	36.0	15	1	0
-kast	mem	StraightEdge	0.0256	0.0520	245220.00	245220.00	0	0.0	0	1	0
-kast	mem	paul.b	0.0507	0.1506	245220.00	298982.21	6	74.4	8	1	0
-kast	mem	marco_russo	0.0258	0.0501	248100.00	248100.00	0	0.0	0	1	0
-kast	mem	DustySnowman	0.0346	0.1512	249540.00	298982.21	1	29.4	0	1	0
-kast	mem	n00bdeuce	0.0259	0.0522	249540.00	249540.00	0	0.0	0	1	0
-kast	mem	Coringa	0.0259	0.1050	249540.00	249540.00	0	0.0	0	1	0
-kast	mem	PolarBlinds	0.0259	0.0500	249540.00	249540.00	0	0.0	0	1	0
-kast	mem	sondre_olsen	0.0339	0.4325	249540.00	284596.21	1	5.8	0	1	0
-kast	mem	OutbackDeuce	0.0331	0.4358	250980.00	264406.81	1	5.3	0	1	0
-kast	mem	Morales3	0.0260	0.1049	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	StoneRocket92	0.0620	0.1943	250980.00	294653.11	3	86.9	37	1	0
-kast	mem	lei_wu	0.0260	0.0672	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	FrostyCowboy93	0.0269	0.0586	250980.00	275962.51	2	9.0	0	1	0
-kast	mem	LunarTurn	0.0260	0.0500	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	hao_huang	0.0284	0.0748	250980.00	298982.21	1	19.5	0	1	0
-kast	mem	LeiLiu	0.0260	0.2487	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	CheckRaiseCarl	0.1098	0.6227	250980.00	297555.51	2	51.1	11	1	0
-kast	mem	ElTiburon	0.0260	0.3752	250980.00	250980.00	0	0.0	0	1	0
+kast	log	231240.00	68.51	1	1	0	0	0	Grinding the micros to make rent · !rent	2	0
+kast	log	232680.00	62.91	1	1	0	0	0	Grinding the micros to make rent · !rent	2	0
+kast	log	234120.00	60.11	1	1	0	0	0	Grinding the micros to make rent · !rent	2	0
+kast	log	235560.00	65.01	3	4	0	0	0	Grinding the micros to make rent · !rent	5	0
+kast	log	237000.00	62.21	1	2	0	0	0	Grinding the micros to make rent · !rent	1	0
+kast	log	238440.00	44.71	1	1	0	0	0	Grinding the micros to make rent · !rent	1	0
+kast	log	239880.00	73.41	3	3	0	0	0	Grinding the micros to make rent · !rent	2	0
+kast	log	241320.00	52.41	3	4	0	0	0	Grinding the micros to make rent · !rent	6	0
+kast	log	242760.00	67.11	2	3	0	0	0	Grinding the micros to make rent · !rent	4	0
+kast	log	244200.00	65.01	1	1	0	0	0	Grinding the micros to make rent · !rent	0	0
+kast	log	245640.00	60.11	3	4	0	0	0	Grinding the micros to make rent · !rent	3	0
+kast	log	247080.00	62.21	2	3	0	0	0	Grinding the micros to make rent · !rent	2	0
+kast	log	248520.00	32.81	3	3	0	0	0	Grinding the micros to make rent · !rent	3	0
+kast	log	249960.00	65.71	5	5	0	0	0	Grinding the micros to make rent · !rent	6	0
+kast	log	251400.00	48.91	4	5	0	0	0	Grinding the micros to make rent · !rent	8	0
+kast	log	252840.00	30.71	3	3	0	0	0	Grinding the micros to make rent · !rent	2	0
+kast	log	254280.00	51.71	5	6	0	0	0	Grinding the micros to make rent · !rent	7	0
+kast	log	255720.00	79.71	2	4	0	0	0	Grinding the micros to make rent · !rent	6	0
+kast	log	257160.00	101.41	4	6	0	0	0	Grinding the micros to make rent · !rent	13	0
+kast	log	258600.00	93.71	4	4	0	0	0	Grinding the micros to make rent · !rent	5	0
+kast	log	260040.00	109.11	4	5	0	0	0	Grinding the micros to make rent · !rent	10	0
+kast	log	261480.00	60.11	1	2	0	0	0	Grinding the micros to make rent · !rent	4	0
+kast	log	262920.00	76.91	2	2	0	0	0	Grinding the micros to make rent · !rent	6	0
+kast	log	264360.00	46.81	7	8	0	0	0	Grinding the micros to make rent · !rent	9	0
+kast	log	265800.00	67.81	4	7	0	0	0	Grinding the micros to make rent · !rent	7	0
+kast	log	267240.00	60.81	7	9	0	0	0	Grinding the micros to make rent · !rent	11	0
+kast	log	268680.00	60.81	2	2	0	0	2	Grinding the micros to make rent · !rent	5	0
+kast	log	270120.00	62.91	9	9	0	0	8	Grinding the micros to make rent · !rent	11	0
+kast	log	271560.00	53.11	3	3	0	0	0	Grinding the micros to make rent · !rent	2	0
+kast	log	273000.00	30.71	4	4	0	0	0	Grinding the micros to make rent · !rent	5	0
+kast	log	274440.00	50.31	5	5	0	0	0	Grinding the micros to make rent · !rent	9	0
+kast	log	275880.00	82.51	2	2	0	2	502	Grinding the micros to make rent · !rent	3	0
+kast	log	277320.00	37.71	7	9	0	0	0	Grinding the micros to make rent · !rent	11	0
+kast	log	278760.00	72.71	3	4	0	0	2	Grinding the micros to make rent · !rent	9	0
+kast	log	280200.00	55.21	2	3	0	0	0	Grinding the micros to make rent · !rent	5	0
+kast	log	281640.00	50.31	4	5	0	0	0	Grinding the micros to make rent · !rent	4	0
+kast	log	283080.00	62.91	2	3	0	0	1	Grinding the micros to make rent · !rent	5	0
+kast	log	284520.00	76.21	4	6	0	0	3	Grinding the micros to make rent · !rent	9	0
+kast	log	285960.00	70.61	3	4	0	0	2	Grinding the micros to make rent · !rent	5	0
+kast	log	287400.00	74.11	5	6	0	0	5	Grinding the micros to make rent · !rent	10	0
+kast	log	288840.00	56.61	6	8	0	0	0	Grinding the micros to make rent · !rent	14	0
+kast	log	290280.00	83.21	4	5	0	0	3	Grinding the micros to make rent · !rent	8	0
+kast	log	291720.00	55.21	4	4	0	0	0	Grinding the micros to make rent · !rent	5	0
+kast	log	293160.00	61.51	6	8	0	0	5	Grinding the micros to make rent · !rent	8	0
+kast	log	294600.00	53.11	4	4	0	0	0	Grinding the micros to make rent · !rent	9	0
+kast	log	296040.00	75.51	5	6	0	0	5	Grinding the micros to make rent · !rent	9	0
+kast	log	297480.00	75.51	3	4	0	1	252	Grinding the micros to make rent · !rent	7	0
+kast	log	298920.00	62.21	5	6	0	0	3	Grinding the micros to make rent · !rent	14	0
+kast	mem	dee_spincycle	0.9375	0.9500	2280.00	297555.51	74	3686.2	1482	3	1497
+kast	mem	mei_ng	0.7916	0.8500	2280.00	298982.21	72	3566.9	1260	3	0
+kast	mem	FullHouseFred	0.0661	0.1909	19140.00	267300.81	8	196.8	20	1	0
+kast	mem	george.s	0.0188	0.0535	22020.00	212647.31	5	88.0	75	1	0
+kast	mem	ColdCall4bet	0.0392	0.0731	27780.00	296115.51	11	283.9	41	1	0
+kast	mem	martin04	0.2156	0.4274	27780.00	273030.71	11	392.3	83	1	0
+kast	mem	AAlmeida	0.2419	0.6127	29220.00	297555.51	6	179.8	26	1	0
+kast	mem	MaxWeber	0.0920	0.4496	32100.00	284596.21	5	104.6	9	1	0
+kast	mem	SilentBubble02	0.4241	0.6009	36420.00	287474.11	17	566.9	113	1	0
+kast	mem	ColdChip21	0.0307	0.1258	39300.00	281690.31	7	92.3	10	1	0
+kast	mem	tiago.s	0.0204	0.3311	42180.00	267300.81	1	4.0	1	1	0
+kast	mem	mia13	0.1012	0.4433	47940.00	290363.21	6	86.6	49	1	0
+kast	mem	PolarMonster	0.0177	0.0517	53700.00	293221.51	3	40.3	0	1	0
+kast	mem	byang	0.0247	0.0502	56580.00	290363.21	4	139.4	28	1	0
+kast	mem	Ficha101	0.0174	0.0500	59460.00	126166.81	2	50.9	12	1	0
+kast	mem	salonen21	0.3721	0.5699	60900.00	293221.51	17	530.8	129	1	0
+kast	mem	Moser4	0.0154	0.0514	62340.00	62340.00	0	0.0	0	1	0
+kast	mem	camila.f	0.0287	0.1755	63780.00	131945.01	3	59.0	20	1	0
+kast	mem	LateRegLarry	0.0247	0.1378	65220.00	137702.91	2	44.5	16	1	0
+kast	mem	Mahjong99	0.0390	0.4582	66660.00	172255.21	2	22.6	19	1	0
+kast	mem	pepe.c	0.0240	0.0516	68100.00	281690.31	5	129.1	36	1	0
+kast	mem	jack86	0.0205	0.0506	70980.00	232742.91	6	98.8	30	1	0
+kast	mem	LazyBluff	0.0197	0.0535	73860.00	205380.11	3	59.4	17	1	0
+kast	mem	nikitas	0.0221	0.0512	78180.00	281690.31	5	92.3	18	1	0
+kast	mem	bondarenko101	0.0165	0.0502	79620.00	153543.61	1	6.9	0	1	0
+kast	mem	lauti.r	0.0292	0.4497	81060.00	193886.71	1	14.4	0	1	0
+kast	mem	irinai	0.0194	0.0919	83940.00	231308.51	3	22.8	0	1	0
+kast	mem	SaltyNuts	0.0483	0.1009	86820.00	287474.11	8	227.9	43	1	0
+kast	mem	StoneQuads	0.0208	0.1025	134340.00	258693.71	1	8.5	0	1	0
+kast	mem	CrimsonMonster	0.0228	0.0527	134340.00	221203.31	3	80.4	7	1	0
+kast	mem	lauri_salonen	0.0550	0.4054	135780.00	209718.31	2	42.5	7	1	0
+kast	mem	NoteTaker	0.0305	0.2216	137220.00	280255.21	3	25.1	0	1	0
+kast	mem	PocketRockets	0.1037	0.4854	138660.00	273030.71	4	80.1	31	1	0
+kast	mem	ColdDeckCasey	0.0199	0.0507	140100.00	178013.11	1	17.4	0	1	0
+kast	mem	CrimsonBubble	0.2679	0.4693	141540.00	296115.51	12	328.1	79	1	0
+kast	mem	restless_ace	0.0207	0.0507	142980.00	254331.71	2	27.2	0	1	0
+kast	mem	elarsson	0.0222	0.0519	145860.00	241372.41	3	38.2	6	1	0
+kast	mem	brb_tilt	0.0413	0.2507	147300.00	294653.11	2	31.9	3	1	0
+kast	mem	xXSnowmanXx	0.0211	0.0508	147300.00	262996.91	2	25.6	0	1	0
+kast	mem	GhostTown	0.0247	0.0508	150180.00	296115.51	4	71.3	13	1	0
+kast	mem	SaltyJacare	0.0229	0.2327	151620.00	288896.61	1	4.0	0	1	0
+kast	mem	Sorte88	0.0205	0.0500	153060.00	179467.11	1	17.5	0	1	0
+kast	mem	SaltyMuck5	0.0360	0.3350	155940.00	178013.11	1	22.3	12	1	0
+kast	mem	AFK_at_BB	0.0309	0.1136	157380.00	260149.11	3	48.1	23	1	0
+kast	mem	DeepStackDan	0.0242	0.0525	158820.00	288896.61	2	48.8	11	1	0
+kast	mem	IronRocket4	0.0239	0.1229	161700.00	248552.81	1	10.7	6	1	0
+kast	mem	ShadyZver	0.0291	0.5944	163140.00	274490.31	1	4.3	0	1	0
+kast	mem	moser84	0.0235	0.0500	166020.00	257261.41	2	47.3	4	1	0
+kast	mem	AceRag	0.0222	0.1808	167460.00	170835.51	1	4.0	0	1	0
+kast	mem	SleepyWilk	0.0213	0.0503	168900.00	224098.01	1	8.0	1	1	0
+kast	mem	moore80	0.0212	0.0508	170340.00	199619.41	1	8.6	0	1	0
+kast	mem	StoneJoker	0.0227	0.0511	171780.00	264406.81	1	22.8	1	1	0
+kast	mem	xXQuadsXx	0.0209	0.1169	173220.00	173220.00	0	0.0	0	1	0
+kast	mem	alessandro92	0.0444	0.1004	174660.00	293221.51	4	158.8	12	1	0
+kast	mem	Cuppa7	0.1179	0.4381	176100.00	262996.91	5	105.5	13	1	0
+kast	mem	lei.w	0.0227	0.0872	177540.00	202486.81	2	9.2	0	1	0
+kast	mem	SteadyCooler	0.0212	0.0559	177540.00	177540.00	0	0.0	0	1	0
+kast	mem	Kitsune	0.0223	0.0500	178980.00	235625.01	3	15.6	3	1	0
+kast	mem	Rodeo	0.0225	0.0572	180420.00	235625.01	2	11.9	3	1	0
+kast	mem	rogue_raise	0.1033	0.5181	181860.00	290363.21	4	66.3	3	1	0
+kast	mem	ysmirnov	0.0309	0.1636	183300.00	268740.81	3	26.0	0	1	0
+kast	mem	juhom	0.0565	0.2175	184740.00	293221.51	2	75.2	4	1	0
+kast	mem	felipe33	0.0217	0.0720	186180.00	186180.00	0	0.0	0	1	0
+kast	mem	oisin.d	0.0246	0.1207	187620.00	242827.11	1	8.4	17	1	0
+kast	mem	taeyang_jung	0.0235	0.0502	189060.00	227008.11	1	26.8	13	1	0
+kast	mem	MaximKuznetsov	0.0219	0.0659	190500.00	190500.00	0	0.0	0	1	0
+kast	mem	n00bbluff	0.0335	0.1814	191940.00	254331.71	2	25.6	2	1	0
+kast	mem	UdachaShark	0.0221	0.0794	193380.00	193380.00	0	0.0	0	1	0
+kast	mem	IronMuck	0.0265	0.1316	194820.00	250025.71	1	17.3	0	1	0
+kast	mem	SaltyDeuce	0.0243	0.1167	196260.00	238484.71	1	8.2	0	1	0
+kast	mem	junzhang	0.0242	0.0520	196260.00	232742.91	1	29.9	3	1	0
+kast	mem	lucky_deuce	0.0320	0.0849	197700.00	277357.71	4	62.8	2	1	0
+kast	mem	LaoHuQueen	0.0452	0.4433	199140.00	288896.61	1	21.9	0	1	0
+kast	mem	ThinValueTim	0.0459	0.2882	200580.00	257261.41	1	33.5	2	1	0
+kast	mem	dmitri8	0.0336	0.1357	202020.00	298982.21	4	40.1	0	1	0
+kast	mem	SneakyAce	0.0445	0.1549	203460.00	287474.11	2	91.9	7	1	0
+kast	mem	QuietButton	0.0231	0.0500	204900.00	214021.51	1	4.7	0	1	0
+kast	mem	SaltyButton	0.0235	0.0524	206340.00	208273.41	1	10.4	0	1	0
+kast	mem	Jack_Timbit	0.0259	0.0632	207780.00	251448.91	3	29.8	1	1	0
+kast	mem	ElectricGutshot	0.0455	0.1931	209220.00	298982.21	2	43.7	2	1	0
+kast	mem	RunGoodRandy	0.0667	0.4174	210660.00	298982.21	2	37.2	4	1	0
+kast	mem	xXGutshotXx	0.0283	0.0557	212100.00	228425.71	2	89.5	8	1	0
+kast	mem	ShadyBubble	0.0242	0.0500	213540.00	251448.91	2	12.1	0	1	0
+kast	mem	WildButton3	0.1488	0.3609	214980.00	288896.61	7	166.2	16	1	0
+kast	mem	Giulia_Gnocchi	0.0263	0.0600	216420.00	288896.61	2	24.3	6	1	0
+kast	mem	n00bgutshot	0.0269	0.0501	217860.00	270182.91	4	50.0	6	1	0
+kast	mem	ButtonMasher	0.0469	0.1405	219300.00	267300.81	2	92.2	10	1	0
+kast	mem	KAnderson	0.0239	0.0773	220740.00	220740.00	0	0.0	0	1	0
+kast	mem	TripsTracy	0.0280	0.0502	222180.00	293221.51	3	58.3	3	1	0
+kast	mem	TheProfessor	0.0292	0.0720	225060.00	293221.51	2	35.8	1	1	0
+kast	mem	ThirstyOwl	0.0529	0.2691	226500.00	277357.71	3	44.1	5	1	0
+kast	mem	HijackHank	0.0243	0.0500	226500.00	226500.00	0	0.0	0	1	0
+kast	mem	landersson	0.0327	0.6177	227940.00	264406.81	1	4.0	0	1	0
+kast	mem	ChipsAndSalsa	0.0248	0.0500	229380.00	234180.11	1	4.0	2	1	0
+kast	mem	souza86	0.0246	0.0753	230820.00	230820.00	0	0.0	0	1	0
+kast	mem	SlowRollSam	0.0247	0.0904	232260.00	232260.00	0	0.0	0	1	0
+kast	mem	RoyalDealer	0.0297	0.0523	233700.00	294653.11	3	84.2	3	1	0
+kast	mem	CountessOfCards	0.0247	0.1224	233700.00	233700.00	0	0.0	0	1	0
+kast	mem	Calavera	0.0248	0.2128	235140.00	235140.00	0	0.0	0	1	0
+kast	mem	StraightEdge	0.0249	0.0520	236580.00	236580.00	0	0.0	0	1	0
+kast	mem	paul.b	0.0251	0.1506	239460.00	239460.00	0	0.0	0	1	0
+kast	mem	marco_russo	0.0263	0.0501	240900.00	250025.71	1	15.3	6	1	0
+kast	mem	DustySnowman	0.0283	0.1512	242340.00	242827.11	1	8.9	0	1	0
+kast	mem	n00bdeuce	0.0259	0.0522	242340.00	283142.91	1	6.8	0	1	0
+kast	mem	Coringa	0.0310	0.1050	243780.00	290363.21	1	22.1	10	1	0
+kast	mem	PolarBlinds	0.0256	0.0500	245220.00	245220.00	0	0.0	0	1	0
+kast	mem	sondre_olsen	0.0359	0.4325	245220.00	273030.71	1	8.5	0	1	0
+kast	mem	OutbackDeuce	0.0257	0.4358	246660.00	246660.00	0	0.0	0	1	0
+kast	mem	Morales3	0.0258	0.1049	248100.00	248100.00	0	0.0	0	1	0
+kast	mem	StoneRocket92	0.0340	0.1943	249540.00	286030.61	2	16.0	0	1	0
+kast	mem	lei_wu	0.0265	0.0672	249540.00	294653.11	1	4.0	0	1	0
+kast	mem	FrostyCowboy93	0.0281	0.0586	249540.00	262996.91	1	37.2	0	1	0
+kast	mem	LunarTurn	0.0259	0.0500	249540.00	249540.00	0	0.0	0	1	0
+kast	mem	hao_huang	0.0259	0.0748	249540.00	249540.00	0	0.0	0	1	0
+kast	mem	LeiLiu	0.0477	0.2487	250980.00	264406.81	1	37.8	2	1	0
+kast	mem	CheckRaiseCarl	0.1379	0.6227	250980.00	290363.21	2	69.1	28	1	0
+kast	mem	ElTiburon	0.0873	0.3752	250980.00	297555.51	2	68.3	12	1	0
 kast	mem	pavel_sokolov	0.0260	0.1031	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	BankrollRIP	0.0276	0.0958	250980.00	252870.71	1	8.9	0	1	0
-kast	mem	Cr1spyB04t	0.0264	0.0503	250980.00	268740.81	1	6.2	0	1	0
-kast	mem	MinBetMatt	0.0531	0.3389	250980.00	291775.21	1	28.7	2	1	0
-kast	mem	miller97	0.0296	0.0500	250980.00	281690.31	2	59.4	6	1	0
-kast	mem	Jun_XiongMao	0.0269	0.0500	250980.00	254331.71	1	18.7	0	1	0
-kast	mem	TheRailbird	0.0260	0.3051	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	WildHammer1	0.0407	0.2472	250980.00	264406.81	1	22.7	6	1	0
-kast	mem	VelvetMuck	0.0348	0.6487	250980.00	267300.81	1	4.0	0	1	0
-kast	mem	GG_rail	0.0260	0.0752	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	BankrollRIP	0.0312	0.0958	250980.00	297555.51	1	23.2	3	1	0
+kast	mem	Cr1spyB04t	0.0260	0.0503	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	MinBetMatt	0.0260	0.3389	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	miller97	0.0271	0.0500	250980.00	298982.21	1	17.1	0	1	0
+kast	mem	Jun_XiongMao	0.0271	0.0500	250980.00	297555.51	1	18.5	0	1	0
+kast	mem	TheRailbird	0.0485	0.3051	250980.00	291775.21	1	26.1	1	1	0
+kast	mem	WildHammer1	0.0399	0.2472	250980.00	267300.81	1	29.6	0	1	0
+kast	mem	VelvetMuck	0.0260	0.6487	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	GG_rail	0.0266	0.0752	250980.00	251448.91	1	4.0	0	1	0
 kast	mem	gabriel.s	0.0260	0.3364	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	Paula_Siesta	0.0260	0.0553	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	MinCashMike	0.0267	0.0500	250980.00	278832.71	2	8.0	2	1	0
-kast	mem	martin89	0.0271	0.0863	250980.00	261540.11	1	6.1	0	1	0
+kast	mem	Paula_Siesta	0.0324	0.0553	250980.00	290363.21	2	93.3	7	1	0
+kast	mem	MinCashMike	0.0263	0.0500	250980.00	288896.61	1	4.1	0	1	0
+kast	mem	martin89	0.0324	0.0863	250980.00	274490.31	1	42.5	3	1	0
 kast	mem	walker04	0.0260	0.0545	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	SultanOfSuited	0.0260	0.0506	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	rodriguez13	0.0260	0.1108	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	SultanOfSuited	0.0277	0.0506	250980.00	254331.71	1	31.6	4	1	0
+kast	mem	rodriguez13	0.0284	0.1108	250980.00	255799.71	1	11.2	0	1	0
 kast	mem	RocketTTV	0.0260	0.0668	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	lazy_river	0.0368	0.1242	250980.00	271613.11	2	42.1	2	1	0
-kast	mem	daiki.t	0.0460	0.3252	250980.00	257261.41	1	23.4	10	1	0
-kast	mem	LazySuerte	0.0260	0.1362	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	SunriseGrinder	0.0260	0.0591	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	lazy_river	0.0278	0.1242	250980.00	257261.41	1	6.2	0	1	0
+kast	mem	daiki.t	0.0330	0.3252	250980.00	297555.51	1	7.0	0	1	0
+kast	mem	LazySuerte	0.0364	0.1362	250980.00	265867.81	1	36.5	3	1	0
+kast	mem	SunriseGrinder	0.0316	0.0591	250980.00	284596.21	2	74.9	12	1	0
 kast	mem	DonkBetDonna	0.0260	0.1373	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	AkulaFelt	0.0281	0.0519	250980.00	291775.21	3	31.1	0	1	0
-kast	mem	SneakyDingo	0.0661	0.6358	250980.00	258693.71	1	22.6	13	1	0
-kast	mem	neon_ace	0.0260	0.6167	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	AkulaFelt	0.0260	0.0519	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	SneakyDingo	0.0412	0.6358	250980.00	251448.91	1	9.1	0	1	0
+kast	mem	neon_ace	0.2141	0.6167	250980.00	296115.51	4	135.8	36	1	0
 kast	mem	tomas.a	0.0260	0.0500	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	stone_rocket	0.1433	0.4975	250980.00	286030.61	3	106.8	9	1	0
-kast	mem	sergio_lopez	0.0276	0.0504	250980.00	251448.91	1	30.4	8	1	0
-kast	mem	Banshee90	0.0260	0.0511	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	stone_rocket	0.0449	0.4975	250980.00	264406.81	1	16.3	0	1	0
+kast	mem	sergio_lopez	0.0269	0.0504	250980.00	278832.71	2	13.5	0	1	0
+kast	mem	Banshee90	0.0267	0.0511	250980.00	260149.11	1	12.6	0	1	0
 kast	mem	pavelkuznetsov	0.0260	0.0511	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	SmoothBluffatore	0.0273	0.0500	250980.00	291775.21	1	23.7	0	1	0
+kast	mem	SmoothBluffatore	0.0270	0.0500	250980.00	277357.71	1	13.6	3	1	0
 kast	mem	maya02	0.0260	0.0504	250980.00	250980.00	0	0.0	0	1	0
-kast	mem	Mr_Fold	0.0261	0.0500	252420.00	252420.00	0	0.0	0	1	0
-kast	mem	n00bdealer	0.0261	0.2782	252420.00	252420.00	0	0.0	0	1	0
-kast	mem	LWeber	0.0297	0.1906	252420.00	267300.81	1	7.3	0	1	0
-kast	mem	GiuliaFerrari	0.0418	0.4046	252420.00	298982.21	1	10.4	4	1	0
-kast	mem	TomasNovotny	0.0881	0.5314	252420.00	290363.21	1	45.8	17	1	0
-kast	mem	chloe.t	0.0847	0.5206	252420.00	281690.31	2	44.4	8	1	0
-kast	mem	JOliveira	0.0292	0.0509	252420.00	298982.21	2	48.7	7	1	0
-kast	mem	doyle89	0.0317	0.0501	252420.00	294653.11	3	94.7	26	1	0
-kast	mem	linam	0.0261	0.0658	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	Mr_Fold	0.0260	0.0500	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	n00bdealer	0.0443	0.2782	250980.00	280255.21	3	25.6	0	1	0
+kast	mem	LWeber	0.0308	0.1906	250980.00	296115.51	2	8.0	0	1	0
+kast	mem	GiuliaFerrari	0.0322	0.4046	250980.00	261540.11	1	5.0	0	1	0
+kast	mem	TomasNovotny	0.0260	0.5314	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	chloe.t	0.0260	0.5206	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	JOliveira	0.0279	0.0509	250980.00	268740.81	2	29.8	4	1	0
+kast	mem	doyle89	0.0260	0.0501	250980.00	250980.00	0	0.0	0	1	0
+kast	mem	linam	0.0267	0.0658	250980.00	298982.21	1	4.6	0	1	0
 kast	mem	Hetman	0.0261	0.0500	252420.00	252420.00	0	0.0	0	1	0
-kast	mem	GG_shove	0.0279	0.0500	252420.00	262996.91	1	31.3	8	1	0
-kast	mem	kaito77	0.0261	0.1088	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	GG_shove	0.0261	0.0500	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	kaito77	0.0356	0.1088	252420.00	261540.11	2	47.5	5	1	0
 kast	mem	larspeeters	0.0261	0.2760	252420.00	252420.00	0	0.0	0	1	0
-kast	mem	Crims0nShove	0.0276	0.0564	252420.00	278832.71	1	15.9	3	1	0
-kast	mem	SmoothCanuck	0.0293	0.2659	252420.00	254331.71	1	4.0	0	1	0
-kast	mem	CrispyHammer9	0.0374	0.1768	252420.00	293221.51	2	29.1	0	1	0
+kast	mem	Crims0nShove	0.0261	0.0564	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	SmoothCanuck	0.0313	0.2659	252420.00	288896.61	1	4.7	5	1	0
+kast	mem	CrispyHammer9	0.0261	0.1768	252420.00	252420.00	0	0.0	0	1	0
 kast	mem	ferrari8	0.0261	0.5636	252420.00	252420.00	0	0.0	0	1	0
-kast	mem	SergeiMorozov	0.0306	0.3262	252420.00	286030.61	1	4.0	0	1	0
-kast	mem	rafael86	0.0763	0.3259	252420.00	293221.51	2	73.0	6	1	0
-kast	mem	Olga_Medved	0.0292	0.0508	252420.00	280255.21	1	55.1	7	1	0
-kast	mem	ChatBanned	0.0276	0.0501	252420.00	290363.21	2	28.9	0	1	0
+kast	mem	SergeiMorozov	0.0261	0.3262	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	rafael86	0.0261	0.3259	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	Olga_Medved	0.0261	0.0508	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	ChatBanned	0.0264	0.0501	252420.00	260149.11	1	4.0	0	1	0
 kast	mem	chloe_tremblay	0.0261	0.3414	252420.00	252420.00	0	0.0	0	1	0
-kast	mem	ElectricQueen	0.0335	0.2395	252420.00	258693.71	1	14.0	0	1	0
-kast	mem	TheGrinder	0.0270	0.0500	253860.00	286030.61	2	13.2	0	1	0
-kast	mem	Aoi_Kaiju	0.0296	0.0639	253860.00	267300.81	1	36.2	14	1	0
-kast	mem	SmoothKicker	0.0262	0.0805	253860.00	253860.00	0	0.0	0	1	0
-kast	mem	CopperCowboy	0.0521	0.1472	253860.00	284596.21	4	90.5	16	1	0
-kast	mem	Frites	0.0273	0.0533	253860.00	294653.11	1	14.6	0	1	0
-kast	mem	LunarQuads	0.0269	0.0501	253860.00	271613.11	1	13.4	0	1	0
-kast	mem	SaltyFlussratte	0.0382	0.5386	253860.00	258693.71	1	8.1	0	1	0
-kast	mem	obrien92	0.0393	0.3067	253860.00	281690.31	1	13.2	9	1	0
-kast	mem	FoldEquity	0.0262	0.1906	253860.00	253860.00	0	0.0	0	1	0
-kast	mem	GG_queen	0.0281	0.0500	253860.00	274490.31	1	32.2	6	1	0
-kast	mem	AntoineMoreau	0.0262	0.0864	253860.00	253860.00	0	0.0	0	1	0
-kast	mem	josh_garcia	0.0276	0.0532	253860.00	258693.71	2	23.3	0	1	0
-kast	mem	NeonDealer101	0.0270	0.0579	253860.00	261540.11	1	10.6	0	1	0
-kast	mem	LHoffmann	0.0262	0.2249	253860.00	253860.00	0	0.0	0	1	0
-kast	mem	iryna95	0.0263	0.0500	255300.00	255300.00	0	0.0	0	1	0
-kast	mem	MinRaiseMaria	0.1178	0.5639	255300.00	296115.51	1	69.3	6	1	0
-kast	mem	MrRiver	0.1033	0.5731	255300.00	294653.11	2	51.9	5	1	0
-kast	mem	GoldenWhale	0.0340	0.1284	255300.00	277357.71	2	30.7	0	1	0
-kast	mem	Cosm1cBo4t	0.0263	0.0766	255300.00	255300.00	0	0.0	0	1	0
-kast	mem	ChipAndAChair	0.0263	0.0567	255300.00	255300.00	0	0.0	0	1	0
-kast	mem	VelvetBacalhau	0.0263	0.0961	255300.00	255300.00	0	0.0	0	1	0
-kast	mem	dmitriivanov	0.0406	0.1348	255300.00	298982.21	3	42.1	3	1	0
-kast	mem	RoyalShark	0.0785	0.2548	255300.00	265867.81	2	102.8	9	1	0
-kast	mem	BigSlickRick	0.0271	0.0542	256740.00	296115.51	1	8.0	0	1	0
-kast	mem	RailTTV	0.0264	0.0615	256740.00	256740.00	0	0.0	0	1	0
-kast	mem	SnapCallSandy	0.0284	0.0569	256740.00	281690.31	2	23.2	11	1	0
-kast	mem	kacper88	0.0350	0.1796	256740.00	286030.61	2	20.3	0	1	0
-kast	mem	sondre84	0.0280	0.1243	256740.00	261540.11	1	5.1	0	1	0
-kast	mem	CopperNuts	0.0327	0.1128	256740.00	294653.11	1	22.8	6	1	0
-kast	mem	GG_rounder	0.0770	0.3068	256740.00	298982.21	2	71.5	5	1	0
-kast	mem	Glueckspilz77	0.0351	0.0979	258180.00	277357.71	3	54.3	0	1	0
-kast	mem	Kabir_Masala	0.0299	0.0560	258180.00	274490.31	1	48.9	5	1	0
-kast	mem	C0ldC0ol3r	0.0266	0.0599	258180.00	260149.11	1	0.6	1	1	0
-kast	mem	mateo.g	0.0304	0.0610	258180.00	286030.61	1	43.4	3	1	0
-kast	mem	diegor	0.0275	0.0509	258180.00	261540.11	1	21.3	0	1	0
-kast	mem	GG_whale	0.0295	0.1018	259620.00	290363.21	1	14.2	0	1	0
-kast	mem	ollie95	0.0266	0.0501	259620.00	259620.00	0	0.0	0	1	0
-kast	mem	kasia_wisniewski	0.0266	0.0501	259620.00	259620.00	0	0.0	0	1	0
-kast	mem	Tomas_Krtek	0.0266	0.1245	259620.00	259620.00	0	0.0	0	1	0
-kast	mem	Sne4kyBluff	0.0370	0.0735	259620.00	278832.71	3	100.3	15	1	0
-kast	mem	hsato	0.0274	0.0501	261060.00	297555.51	2	8.0	0	1	0
-kast	mem	Magnus_Troll	0.0267	0.0502	261060.00	261060.00	0	0.0	0	1	0
-kast	mem	kabirs	0.0267	0.2695	261060.00	261060.00	0	0.0	0	1	0
-kast	mem	javi44	0.0430	0.3234	261060.00	293221.51	1	15.5	5	1	0
-kast	mem	MateQueen	0.0268	0.0507	262500.00	262500.00	0	0.0	0	1	0
-kast	mem	FoldPreRepeat	0.0268	0.0501	262500.00	262500.00	0	0.0	0	1	0
-kast	mem	arthur_peeters	0.0268	0.0659	262500.00	262500.00	0	0.0	0	1	0
-kast	mem	Jack_Skint	0.0521	0.2502	263940.00	278832.71	1	43.1	2	1	0
-kast	mem	harrybrown	0.0269	0.0501	263940.00	263940.00	0	0.0	0	1	0
-kast	mem	PizzaAndPoker	0.0270	0.0503	265380.00	265380.00	0	0.0	0	1	0
-kast	mem	reckless_rocket	0.0287	0.0883	265380.00	268740.81	1	10.3	0	1	0
-kast	mem	PolarFish	0.0684	0.2925	265380.00	296115.51	5	54.2	14	1	0
-kast	mem	tim_hoffmann	0.0270	0.5270	265380.00	265380.00	0	0.0	0	1	0
-kast	mem	SuitedAnything	0.0271	0.0804	266820.00	266820.00	0	0.0	0	1	0
-kast	mem	jun.l	0.0275	0.0515	266820.00	275962.51	1	4.0	0	1	0
-kast	mem	tyler_garcia	0.0306	0.0681	268260.00	296115.51	1	26.4	7	1	0
-kast	mem	oliverw	0.0366	0.1332	268260.00	298982.21	2	28.1	1	1	0
-kast	mem	GG_cowboy	0.0304	0.0594	269700.00	298982.21	1	32.4	1	1	0
-kast	mem	RustyCooler	0.0375	0.5687	269700.00	274490.31	1	4.0	7	1	0
-kast	mem	PunterChip	0.0305	0.0916	271140.00	275962.51	1	20.4	0	1	0
-kast	mem	CosmicBoat	0.0275	0.0504	271140.00	271140.00	0	0.0	0	1	0
-kast	mem	sergei.m	0.0683	0.5630	271140.00	281690.31	1	25.1	4	1	0
-kast	mem	BrunoSantos	0.0276	0.0527	272580.00	272580.00	0	0.0	0	1	0
-kast	mem	anna.s	0.0276	0.0500	272580.00	272580.00	0	0.0	0	1	0
-kast	mem	schmidt33	0.0276	0.1367	272580.00	272580.00	0	0.0	0	1	0
-kast	mem	jakub_svoboda	0.0277	0.0723	274020.00	274020.00	0	0.0	0	1	0
-kast	mem	PeixeFlop	0.0296	0.0505	274020.00	277357.71	1	32.8	4	1	0
-kast	mem	steady_dealer	0.0292	0.0503	274020.00	281690.31	1	22.4	5	1	0
-kast	mem	stone_muck87	0.0278	0.1851	275460.00	275460.00	0	0.0	0	1	0
-kast	mem	pavel80	0.0278	0.1204	275460.00	275460.00	0	0.0	0	1	0
-kast	mem	n00bturn	0.0295	0.0566	275460.00	286030.61	1	18.2	2	1	0
-kast	mem	LuchaJoker	0.0279	0.0508	276900.00	276900.00	0	0.0	0	1	0
-kast	mem	huang01	0.0501	0.5205	276900.00	286030.61	1	17.4	0	1	0
-kast	mem	gabriel.o	0.0280	0.0548	278340.00	278340.00	0	0.0	0	1	0
-kast	mem	salty_ace	0.0280	0.1998	278340.00	278340.00	0	0.0	0	1	0
-kast	mem	mellow_button9	0.0320	0.2862	278340.00	286030.61	1	4.2	0	1	0
-kast	mem	SickHeater	0.0392	0.2818	279780.00	283142.91	2	13.6	0	1	0
-kast	mem	OWright	0.0281	0.4063	279780.00	279780.00	0	0.0	0	1	0
-kast	mem	Janssens8	0.0307	0.0504	279780.00	290363.21	1	45.3	24	1	0
-kast	mem	TenguBoat	0.0282	0.0622	281220.00	281220.00	0	0.0	0	1	0
-kast	mem	FlopTTV	0.0282	0.0614	281220.00	281220.00	0	0.0	0	1	0
-kast	mem	SilentKicker93	0.0282	0.2156	281220.00	281220.00	0	0.0	0	1	0
-kast	mem	MayaLeblanc	0.0296	0.0501	281220.00	294653.11	2	22.8	0	1	0
-kast	mem	LucasSantos	0.0284	0.0521	282660.00	282660.00	0	0.0	0	1	0
-kast	mem	mateus_costa	0.0284	0.0501	282660.00	282660.00	0	0.0	0	1	0
-kast	mem	LuckyRounder	0.0302	0.0500	282660.00	296115.51	2	33.9	0	1	0
-kast	mem	CrispyBlinds	0.0285	0.0500	284100.00	284100.00	0	0.0	0	1	0
-kast	mem	SteadyAce4	0.0285	0.4608	284100.00	284100.00	0	0.0	0	1	0
-kast	mem	RamenBudget	0.0285	0.0730	284100.00	284100.00	0	0.0	0	1	0
-kast	mem	Mike_Jersey	0.0286	0.5911	285540.00	285540.00	0	0.0	0	1	0
-kast	mem	veerav	0.0286	0.2116	285540.00	285540.00	0	0.0	0	1	0
-kast	mem	HollowBluff	0.0286	0.2196	285540.00	285540.00	0	0.0	0	1	0
-kast	mem	FSantos	0.0344	0.1802	286980.00	293221.51	1	13.3	0	1	0
-kast	mem	thijsjansen	0.0292	0.0622	286980.00	293221.51	1	4.2	0	1	0
-kast	mem	KWilson	0.0288	0.0503	288420.00	288420.00	0	0.0	0	1	0
-kast	mem	dsokolov	0.0289	0.1627	289860.00	289860.00	0	0.0	0	1	0
-kast	mem	QuietQueen5	0.0383	0.1452	289860.00	296115.51	1	25.7	8	1	0
-kast	mem	aoi.t	0.0322	0.0747	291300.00	296115.51	1	21.0	1	1	0
-kast	mem	xXDeuceXx	0.0305	0.0508	291300.00	297555.51	1	20.6	5	1	0
-kast	mem	freddieh	0.0292	0.5931	292740.00	292740.00	0	0.0	0	1	0
-kast	mem	ElectricProper	0.0292	0.0548	292740.00	292740.00	0	0.0	0	1	0
-kast	mem	hansen85	0.0317	0.1968	292740.00	293221.51	1	4.0	0	1	0
-kast	mem	Jacare	0.0293	0.2847	294180.00	294180.00	0	0.0	0	1	0
-kast	mem	bohdan22	0.0293	0.0501	294180.00	294180.00	0	0.0	0	1	0
-kast	mem	jgomez	0.0293	0.2556	294180.00	294180.00	0	0.0	0	1	0
-kast	mem	DRicci	0.0293	0.4567	294180.00	294180.00	0	0.0	0	1	0
-kast	mem	ShadyRounder	0.0294	0.0506	295620.00	295620.00	0	0.0	0	1	0
-kast	mem	Karhu86	0.0294	0.1119	295620.00	295620.00	0	0.0	0	1	0
-kast	mem	DealMeIn	0.0294	0.0503	295620.00	295620.00	0	0.0	0	1	0
-kast	mem	DustyMuck	0.0294	0.0500	295620.00	295620.00	0	0.0	0	1	0
-kast	mem	neon_muck04	0.0295	0.0506	297060.00	297060.00	0	0.0	0	1	0
-kast	mem	SteadyWheel	0.0295	0.1509	297060.00	297060.00	0	0.0	0	1	0
-kast	mem	CallStationCarl	0.0295	0.1294	297060.00	297060.00	0	0.0	0	1	0
-kast	mem	SlyReiDoRio	0.0296	0.0510	298500.00	298500.00	0	0.0	0	1	0
-kast	mem	DustyDealer8	0.0296	0.0512	298500.00	298500.00	0	0.0	0	1	0
-kast	growth	0	1260	20428.0	30	0	30	0	0.0	0	0	0	210	0
+kast	mem	ElectricQueen	0.0301	0.2395	252420.00	257261.41	1	6.1	0	1	0
+kast	mem	TheGrinder	0.0261	0.0500	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	Aoi_Kaiju	0.0261	0.0639	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	SmoothKicker	0.0261	0.0805	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	CopperCowboy	0.0261	0.1472	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	Frites	0.0293	0.0533	252420.00	284596.21	3	47.3	1	1	0
+kast	mem	LunarQuads	0.0261	0.0501	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	SaltyFlussratte	0.1510	0.5386	252420.00	294653.11	4	108.8	5	1	0
+kast	mem	obrien92	0.0261	0.3067	252420.00	252420.00	0	0.0	0	1	0
+kast	mem	FoldEquity	0.0425	0.1906	252420.00	288896.61	1	35.1	6	1	0
+kast	mem	GG_queen	0.0287	0.0500	252420.00	298982.21	1	39.7	3	1	0
+kast	mem	AntoineMoreau	0.0328	0.0864	252420.00	290363.21	2	44.3	3	1	0
+kast	mem	josh_garcia	0.0290	0.0532	252420.00	278832.71	1	43.5	7	1	0
+kast	mem	NeonDealer101	0.0262	0.0579	253860.00	253860.00	0	0.0	0	1	0
+kast	mem	LHoffmann	0.0566	0.2249	253860.00	270182.91	2	59.5	6	1	0
+kast	mem	iryna95	0.0263	0.0500	253860.00	298982.21	1	0.7	0	1	0
+kast	mem	MinRaiseMaria	0.0262	0.5639	253860.00	253860.00	0	0.0	0	1	0
+kast	mem	MrRiver	0.0800	0.5731	253860.00	277357.71	1	35.9	2	1	0
+kast	mem	GoldenWhale	0.0262	0.1284	253860.00	253860.00	0	0.0	0	1	0
+kast	mem	Cosm1cBo4t	0.0262	0.0766	253860.00	253860.00	0	0.0	0	1	0
+kast	mem	ChipAndAChair	0.0262	0.0567	253860.00	253860.00	0	0.0	0	1	0
+kast	mem	VelvetBacalhau	0.0262	0.0961	253860.00	253860.00	0	0.0	0	1	0
+kast	mem	dmitriivanov	0.0464	0.1348	253860.00	281690.31	2	74.6	12	1	0
+kast	mem	RoyalShark	0.0262	0.2548	253860.00	253860.00	0	0.0	0	1	0
+kast	mem	BigSlickRick	0.0282	0.0542	253860.00	258693.71	1	31.0	11	1	0
+kast	mem	RailTTV	0.0275	0.0615	253860.00	255799.71	1	17.3	0	1	0
+kast	mem	SnapCallSandy	0.0262	0.0569	253860.00	253860.00	0	0.0	0	1	0
+kast	mem	kacper88	0.0263	0.1796	255300.00	255300.00	0	0.0	0	1	0
+kast	mem	sondre84	0.0291	0.1243	255300.00	296115.51	2	8.0	0	1	0
+kast	mem	CopperNuts	0.0376	0.1128	255300.00	258693.71	1	59.2	1	1	0
+kast	mem	GG_rounder	0.0587	0.3068	255300.00	284596.21	2	41.3	1	1	0
+kast	mem	Glueckspilz77	0.0283	0.0979	255300.00	277357.71	1	9.8	0	1	0
+kast	mem	Kabir_Masala	0.0298	0.0560	255300.00	271613.11	1	53.0	3	1	0
+kast	mem	C0ldC0ol3r	0.0263	0.0599	255300.00	255300.00	0	0.0	0	1	0
+kast	mem	mateo.g	0.0263	0.0610	255300.00	255300.00	0	0.0	0	1	0
+kast	mem	diegor	0.0263	0.0509	255300.00	255300.00	0	0.0	0	1	0
+kast	mem	GG_whale	0.0275	0.1018	256740.00	274490.31	1	4.0	0	1	0
+kast	mem	ollie95	0.0264	0.0501	256740.00	256740.00	0	0.0	0	1	0
+kast	mem	kasia_wisniewski	0.0264	0.0501	256740.00	256740.00	0	0.0	0	1	0
+kast	mem	Tomas_Krtek	0.0264	0.1245	256740.00	256740.00	0	0.0	0	1	0
+kast	mem	Sne4kyBluff	0.0264	0.0735	256740.00	256740.00	0	0.0	0	1	0
+kast	mem	hsato	0.0274	0.0501	256740.00	268740.81	1	14.9	1	1	0
+kast	mem	Magnus_Troll	0.0265	0.0502	258180.00	258180.00	0	0.0	0	1	0
+kast	mem	kabirs	0.0265	0.2695	258180.00	258180.00	0	0.0	0	1	0
+kast	mem	javi44	0.0371	0.3234	258180.00	298982.21	2	9.8	0	1	0
+kast	mem	MateQueen	0.0306	0.0507	258180.00	297555.51	2	62.2	19	1	0
+kast	mem	FoldPreRepeat	0.0265	0.0501	258180.00	258180.00	0	0.0	0	1	0
+kast	mem	arthur_peeters	0.0265	0.0659	258180.00	258180.00	0	0.0	0	1	0
+kast	mem	Jack_Skint	0.0266	0.2502	259620.00	259620.00	0	0.0	0	1	0
+kast	mem	harrybrown	0.0279	0.0501	259620.00	278832.71	1	18.1	5	1	0
+kast	mem	PizzaAndPoker	0.0274	0.0503	259620.00	294653.11	1	11.6	0	1	0
+kast	mem	reckless_rocket	0.0292	0.0883	259620.00	278832.71	1	17.3	0	1	0
+kast	mem	PolarFish	0.0266	0.2925	259620.00	259620.00	0	0.0	0	1	0
+kast	mem	tim_hoffmann	0.0467	0.5270	261060.00	291775.21	1	14.5	0	1	0
+kast	mem	SuitedAnything	0.0275	0.0804	261060.00	278832.71	1	4.2	0	1	0
+kast	mem	jun.l	0.0267	0.0515	261060.00	261060.00	0	0.0	0	1	0
+kast	mem	tyler_garcia	0.0267	0.0681	261060.00	261060.00	0	0.0	0	1	0
+kast	mem	oliverw	0.0267	0.1332	261060.00	261060.00	0	0.0	0	1	0
+kast	mem	GG_cowboy	0.0275	0.0594	262500.00	298982.21	2	4.5	3	1	0
+kast	mem	RustyCooler	0.0268	0.5687	262500.00	262500.00	0	0.0	0	1	0
+kast	mem	PunterChip	0.0268	0.0916	262500.00	262500.00	0	0.0	0	1	0
+kast	mem	CosmicBoat	0.0269	0.0504	263940.00	263940.00	0	0.0	0	1	0
+kast	mem	sergei.m	0.1368	0.5630	263940.00	277357.71	3	81.3	10	1	0
+kast	mem	BrunoSantos	0.0334	0.0527	265380.00	294653.11	5	96.8	27	1	0
+kast	mem	anna.s	0.0270	0.0500	265380.00	265380.00	0	0.0	0	1	0
+kast	mem	schmidt33	0.0270	0.1367	265380.00	265380.00	0	0.0	0	1	0
+kast	mem	jakub_svoboda	0.0303	0.0723	266820.00	298982.21	2	18.6	6	1	0
+kast	mem	PeixeFlop	0.0271	0.0505	266820.00	266820.00	0	0.0	0	1	0
+kast	mem	steady_dealer	0.0276	0.0503	268260.00	275962.51	1	4.0	0	1	0
+kast	mem	stone_muck87	0.0272	0.1851	268260.00	268260.00	0	0.0	0	1	0
+kast	mem	pavel80	0.0287	0.1204	269700.00	284596.21	1	4.0	0	1	0
+kast	mem	n00bturn	0.0303	0.0566	269700.00	270182.91	1	43.5	3	1	0
+kast	mem	LuchaJoker	0.0274	0.0508	269700.00	269700.00	0	0.0	0	1	0
+kast	mem	huang01	0.0275	0.5205	271140.00	271140.00	0	0.0	0	1	0
+kast	mem	gabriel.o	0.0275	0.0548	271140.00	271140.00	0	0.0	0	1	0
+kast	mem	salty_ace	0.0276	0.1998	272580.00	272580.00	0	0.0	0	1	0
+kast	mem	mellow_button9	0.0515	0.2862	272580.00	287474.11	1	45.4	0	1	0
+kast	mem	SickHeater	0.0276	0.2818	272580.00	272580.00	0	0.0	0	1	0
+kast	mem	OWright	0.0276	0.4063	272580.00	272580.00	0	0.0	0	1	0
+kast	mem	Janssens8	0.0276	0.0504	272580.00	272580.00	0	0.0	0	1	0
+kast	mem	TenguBoat	0.0289	0.0622	274020.00	287474.11	1	12.8	0	1	0
+kast	mem	FlopTTV	0.0277	0.0614	274020.00	274020.00	0	0.0	0	1	0
+kast	mem	SilentKicker93	0.0277	0.2156	274020.00	274020.00	0	0.0	0	1	0
+kast	mem	MayaLeblanc	0.0278	0.0501	275460.00	275460.00	0	0.0	0	1	0
+kast	mem	LucasSantos	0.0278	0.0521	275460.00	275460.00	0	0.0	0	1	0
+kast	mem	mateus_costa	0.0278	0.0501	275460.00	275460.00	0	0.0	0	1	0
+kast	mem	LuckyRounder	0.0288	0.0500	276900.00	278832.71	1	18.1	0	1	0
+kast	mem	CrispyBlinds	0.0279	0.0500	276900.00	276900.00	0	0.0	0	1	0
+kast	mem	SteadyAce4	0.0279	0.4608	276900.00	276900.00	0	0.0	0	1	0
+kast	mem	RamenBudget	0.0287	0.0730	278340.00	287474.11	1	4.0	0	1	0
+kast	mem	Mike_Jersey	0.1123	0.5911	278340.00	293221.51	1	59.0	3	1	0
+kast	mem	veerav	0.0280	0.2116	278340.00	278340.00	0	0.0	0	1	0
+kast	mem	HollowBluff	0.0310	0.2196	279780.00	283142.91	1	4.0	0	1	0
+kast	mem	FSantos	0.0281	0.1802	279780.00	279780.00	0	0.0	0	1	0
+kast	mem	thijsjansen	0.0282	0.0622	281220.00	281220.00	0	0.0	0	1	0
+kast	mem	KWilson	0.0282	0.0503	281220.00	281220.00	0	0.0	0	1	0
+kast	mem	dsokolov	0.0282	0.1627	281220.00	281220.00	0	0.0	0	1	0
+kast	mem	QuietQueen5	0.0284	0.1452	282660.00	282660.00	0	0.0	0	1	0
+kast	mem	aoi.t	0.0284	0.0747	282660.00	282660.00	0	0.0	0	1	0
+kast	mem	xXDeuceXx	0.0284	0.0508	282660.00	282660.00	0	0.0	0	1	0
+kast	mem	freddieh	0.0284	0.5931	282660.00	282660.00	0	0.0	0	1	0
+kast	mem	ElectricProper	0.0285	0.0548	284100.00	284100.00	0	0.0	0	1	0
+kast	mem	hansen85	0.0285	0.1968	284100.00	284100.00	0	0.0	0	1	0
+kast	mem	Jacare	0.0429	0.2847	284100.00	298982.21	1	15.6	2	1	0
+kast	mem	bohdan22	0.0289	0.0501	285540.00	288896.61	1	4.0	0	1	0
+kast	mem	jgomez	0.0286	0.2556	285540.00	285540.00	0	0.0	0	1	0
+kast	mem	DRicci	0.0286	0.4567	285540.00	285540.00	0	0.0	0	1	0
+kast	mem	ShadyRounder	0.0287	0.0506	286980.00	286980.00	0	0.0	0	1	0
+kast	mem	Karhu86	0.0317	0.1119	286980.00	294653.11	1	12.5	0	1	0
+kast	mem	DealMeIn	0.0293	0.0503	286980.00	291775.21	1	9.1	0	1	0
+kast	mem	DustyMuck	0.0295	0.0500	288420.00	298982.21	1	10.0	0	1	0
+kast	mem	neon_muck04	0.0292	0.0506	288420.00	298982.21	1	4.0	0	1	0
+kast	mem	SteadyWheel	0.0288	0.1509	288420.00	288420.00	0	0.0	0	1	0
+kast	mem	CallStationCarl	0.0289	0.1294	289860.00	289860.00	0	0.0	0	1	0
+kast	mem	SlyReiDoRio	0.0289	0.0510	289860.00	289860.00	0	0.0	0	1	0
+kast	mem	DustyDealer8	0.0291	0.0512	291300.00	291300.00	0	0.0	0	1	0
+kast	mem	costa23	0.0291	0.0804	291300.00	291300.00	0	0.0	0	1	0
+kast	mem	LucaColombo	0.0292	0.0606	292740.00	292740.00	0	0.0	0	1	0
+kast	mem	SofiiaKovalenko	0.0292	0.0501	292740.00	292740.00	0	0.0	0	1	0
+kast	mem	RoyalQueen	0.0293	0.3265	294180.00	294180.00	0	0.0	0	1	0
+kast	mem	SteelWheel	0.0293	0.3538	294180.00	294180.00	0	0.0	0	1	0
+kast	mem	Skint88	0.0293	0.5109	294180.00	294180.00	0	0.0	0	1	0
+kast	mem	YuiIto	0.0293	0.0505	294180.00	294180.00	0	0.0	0	1	0
+kast	mem	Kuba_Zubr	0.0293	0.4993	294180.00	294180.00	0	0.0	0	1	0
+kast	mem	HammerTime72	0.0294	0.4213	295620.00	295620.00	0	0.0	0	1	0
+kast	mem	HumbleWheel	0.0294	0.1933	295620.00	295620.00	0	0.0	0	1	0
+kast	mem	NiceHandSir	0.0294	0.2807	295620.00	295620.00	0	0.0	0	1	0
+kast	mem	QuadsOrBust	0.0295	0.0587	297060.00	297060.00	0	0.0	0	1	0
+kast	mem	CSilva	0.0295	0.2652	297060.00	297060.00	0	0.0	0	1	0
+kast	mem	CrimsonBl1nds	0.0295	0.0501	297060.00	297060.00	0	0.0	0	1	0
+kast	mem	RoyalBlinds	0.0296	0.0507	298500.00	298500.00	0	0.0	0	1	0
+kast	mem	SlyFlush	0.0296	0.0576	298500.00	298500.00	0	0.0	0	1	0
+kast	growth	0	1260	20482.3	30	0	30	0	0.0	0	0	0	210	0
 kast	day	148
 kast	day	149
 kast	day	150
@@ -964,9 +987,9 @@ coach	tally	7	13	0	0	13	0	0
 coach	tally	8	7	0	0	7	0	0
 coach	tally	9	3	0	0	3	0	0
 badge	review	24328	0
-mail	250560.00	rerun:partner	video	1	0	Rerun	Your channel's under review.	Your channel just cleared both bars for the Rerun Partner Program: 1,172 subscribers and 7,913 watch hours in the last twelve months. Someone here is looking it over now, which usually takes about a week. Nothing to do but keep posting.
+mail	250560.00	rerun:partner	video	1	0	Rerun	Your channel's under review.	Your channel just cleared both bars for the Rerun Partner Program: 1,284 subscribers and 8,762 watch hours in the last twelve months. Someone here is looking it over now, which usually takes about a week. Nothing to do but keep posting.
 mail	260640.00	rerun:partner	video	2	0	Rerun	Welcome to the Rerun Partner Program.	You're in. From today ads run on your videos, and you keep your share of what they earn. It adds up through the month and pays out on the 21st once your balance reaches $100; anything less rolls over. Views from before today don't count, so keep the uploads coming.
-mail	285120.00	rerun:pay	video	3	0	Rerun	Your Rerun payout for April.	We've sent $104.40 to your bank account. It should already be there. Thanks for making videos people want to watch.
+mail	285120.00	rerun:pay	video	3	0	Rerun	Your Rerun payout for April.	We've sent $105.97 to your bank account. It should already be there. Thanks for making videos people want to watch.
 autoplay	pref	autopilot	1	1	3	72448	29	34
 autoplay	played	embercrest-nightly@207	1	0	tag	110	0	65	0
 autoplay	played	hyper-sprint@297510	0	0	autopilot	89	1	64	1
@@ -1340,142 +1363,143 @@ autoplay	note	npc:wwillems	231308	18	3	3	6	0	0	0	2	2	0	0	3	3	4	0
 autoplay	note	npc:xXBlindsXx	271613	128	23	14	55	3	2	2	5	5	4	1	18	13	8	8
 autoplay	note	npc:xXTurnXx	5222	23	4	2	11	0	1	1	0	0	1	1	3	1	0	1
 autoplay	note	npc:yuitanaka	169421	24	5	1	10	1	0	0	1	1	1	0	4	3	2	2
-video	ch	2254.963766682775	260640	250560	7037	10440	302400	12	5
-video	vid	v214470	214470	2	1	4	4	0	312.5	0.75	1.5	12	0	0.0066974	0.4215	8	2.5024		1	0	4	1	QdQh/9cKh/TcTd7s9h6s	COOLER	16743001	shady_whale	0	$0.25 Hyper Sprint, hand 25: QQ vs K9, 45 big blinds
-video	vid	v215910	215910	6	1	2	1	1	1436.6	0.45	2	30	2.1549	0.0108833	0.5269	8	3.003		1	0	1	1	KcQs/JcQd/9c2dQh6d5d	HERO FOLD	8177406	HumbleWhale	0	Big laydowns: folding king-queen with 19 big blinds in the middle
-video	vid	v217280	217280	13	0	1	0	2	946.03	0.9	1	6	0	0.0028129	0.3934	0.75	0.0676		1	0	0	4	7d8d//Qd7s6d9s7c	RIVAL	16752412	gh0stfold	0	ME VS GH0STFOLD!
-video	vid	v218790	218790	6	1	3	2	0	289.53	0.75	1.5	12	0	0.0073671	0.4215	8	2.5025		1	0	2	0	AhQh/9c9h/2cTs5h8d2d	71 BB	8177406	LeoGirard	0	Fold or call? $0.25 Hyper Sprint, ace-queen, 71 big blinds
-video	vid	v220320	220320	10	2	0	3	0	938.39	0.75	1.5	12	0	0.0065895	0.3606	18	3.5035		1	0	3	1		VS	16765286		0	14th of 180: my night at the $0.25 Hyper Sprint
-video	vid	v221670	221670	2	1	4	4	0	138.68	0.75	1.5	12	0	0.0066974	0.4215	8	2.5026		1	0	4	1	4hTd/KhJc/3c4s5h4d3s	COOLER	16743001	megan.g	0	$0.25 Hyper Sprint, hand 4: T4 vs KJ, 62 big blinds
-video	vid	v223110	223110	6	1	2	1	1	768.51	0.45	2	30	1.1528	0.0108833	0.5269	8	3.0031		1	0	1	0	AhQc/7s7h/8s2hJcJh4d	HERO FOLD	8177406	RestlessKicker	0	Why I folded ace-queen on the turn
-video	vid	v224480	224480	13	0	1	0	2	2418.39	0.9	1	6	0	0.003985	0.5573	0.75	0.0676		1	0	0	4	9sKh/AcAd/4h5d6cTs5h	RIVAL	16752412	gh0stfold	0	ME VS GH0STFOLD!
-video	vid	v225990	225990	2	1	3	2	0	818.35	0.75	1.5	12	0	0.0073671	0.4215	8	2.5026		1	0	2	4	8d8c/AcAd/ThJs5s5cQh	49 BB	16743001	Gator99	0	Can anyone fold here? Eights vs aces
-video	vid	v227520	227520	6	2	0	3	0	1508.63	0.75	1.5	12	0	0.0065895	0.3606	18	3.5037		1	0	3	0	AcJh/ThTs/3h5c2cAdKh	VS	8177406	Lucky8	0	8 hands from the $0.25 Hyper Sprint
-video	vid	v228870	228870	13	1	4	4	0	287.06	0.75	1.5	12	0	0.0066974	0.4215	8	2.5027		1	0	4	1	JsAs/QdAh/9sKs7hKh6d	RIVAL	16752412	gh0stfold	0	$0.25 Hyper Sprint, hand 50: vs gh0stfold, 29 big blinds
-video	vid	v230310	230310	6	1	2	1	1	835.59	0.45	2	30	1.2534	0.0108833	0.5269	8	3.0033		1	0	1	0	KhAc/QcQd/Qh3s5c5sJs	HERO FOLD	8177406	LeonWeber	0	Not good enough this time: folding ace-king to a shove
-video	vid	v231680	231680	13	0	1	0	2	1500.88	0.9	1	6	0	0.003985	0.5573	0.75	0.0676		1	0	0	1	JdKd/9hKc/2hJh9s5s8d	RIVAL	16752412	gh0stfold	0	ME VS GH0STFOLD!
-video	vid	v233190	233190	2	1	3	2	0	960.44	0.75	1.5	12	0	0.0073671	0.4215	8	2.5028		1	0	2	1	8dJd/AsKc/JcJh5sKdTs	87 BB	16743001	Lotte_Klompen	0	Would you have found a fold? $0.25 Hyper Sprint, 87 big blinds
-video	vid	v234720	234720	0	2	0	3	0	303.93	0.75	1.5	12	0	0.0065895	0.3606	18	3.5039		1	0	3	3	QdKs/Tc9s/8d9d4hJsAs	VS	16743001	yui_watanabe	0	4 hands from the $0.25 Hyper Sprint
-video	vid	v236070	236070	2	1	4	4	0	165.71	0.75	1.5	12	0	0.0066974	0.4215	8	2.5028		1	0	4	1	AdKs/QhKd/9cKh7h7d6s	COOLER	16743001	VarianceVictim	0	$0.25 Hyper Sprint: cooler, AK vs KQ
-video	vid	v237510	237510	6	1	2	1	1	1813.44	0.45	2	30	2.7202	0.0108833	0.5269	8	3.0034		1	0	1	1	AdTd//9h3d9s9d4d	HERO FOLD	8177406	StatsGeek	0	Why I folded ace-ten on the river
-video	vid	v238880	238880	2	0	1	0	2	2082.74	0.9	1	6	0	0.003985	0.5573	0.75	0.0676		1	0	0	4	9s9d/AdAs/Kh9cAc4d3d	COOLER	16743001	LunarDealer	0	THE BIGGEST COOLER I'VE EVER PLAYED
-video	vid	v240390	240390	13	1	3	2	0	1125.72	0.75	1.5	12	0	0.0073671	0.4215	8	2.5029		1	0	2	1	AcJd//9sThAd6d4c	26 BB	16752412	gh0stfold	0	How would you play against gh0stfold?
-video	vid	v241830	241830	0	1	0	0	0	1499.43	0.75	1.5	12	0	0.0084722	0.4637	8	2.5029		1	0	0	4	JhAs/Tc3c/9d3s9s4dTd	63%	16743001	johnson88	0	ace-jack against ten-three, and the deck had other plans
-video	vid	v243270	243270	13	1	4	4	0	1189.65	0.75	1.5	12	0	0.0066974	0.4215	8	2.503		1	0	4	1	As9s/QdTh/Jd3sQh6hKd	RIVAL	16752412	gh0stfold	0	$0.25 Hyper Sprint, hand 45: vs gh0stfold, 35 big blinds
-video	vid	v244710	244710	6	1	2	1	1	35.2	0.45	2	30	0.0528	0.0108833	0.5269	8	3.0036		1	0	1	1	AsQc/Ac9d/4cQd4s2c3h	HERO FOLD	8177406	msousa	0	Not good enough this time: folding ace-queen to a shove
-video	vid	v246080	246080	6	0	1	0	2	913.87	0.9	1	6	0	0.003985	0.5573	0.75	0.0676		1	0	0	0	KhJh/9d9c/2s3c2h7c4h	HERO FOLD	8177406	NOlsen	0	FOLDING KING-JACK ON THE FLOP?!
-video	vid	v247590	247590	2	1	3	2	0	1329.24	0.75	1.5	12	0	0.0073671	0.4215	8	2.503		1	0	2	1	Kc7c/KhAh/JcQhTsAc7d	181 BB	16743001	El3ctr1cFish	0	Can anyone fold here? King-seven vs ace-king
-video	vid	v249030	249030	0	1	0	0	0	101909.52	0.75	1.5	12	0	0.0084722	0.4637	8	2.5031		1	0	0	4	KcKs/JdJs/7dKd3dAcQd	82%	16743001	lucassouza	0	the river that ruined my night
-video	vid	v250470	250470	1	1	4	4	0	269.74	0.75	1.5	12	0	0.0066974	0.4215	8	2.5043		1	0	4	2	QsQc/AsAd/Qd2c3h6s5d	SUCKOUT	16743001	HannahPichler	0	$0.25 Hyper Sprint: QQ wins a 222 big blind pot from behind
-video	vid	v251910	251910	6	1	2	1	1	1008.12	0.45	2	30	1.5122	0.0108833	0.5269	8	3.006		1	0	1	1	AsKs/Kd9c/8s3h9s5hJs	HERO FOLD	8177406	QuietWheel	0	Not good enough this time: folding ace-king to a shove
-video	vid	v253280	253280	0	0	1	0	2	4495.23	0.9	1	6	0	0.003985	0.5573	0.75	0.0676		1	0	0	4	KdKh/ThTs/TdAh7dQs9c	80%	16743001	Moose	0	THE DECK HATES ME
-video	vid	v254790	254790	2	1	3	2	0	1583.3	0.75	1.5	12	0	0.0084722	0.4215	8	2.5057		1	0	2	0	7d7h/KhKc/6dTd8d2hTs	119 BB	16743001	nora.a	0	Is there any way out of this hand?
-video	vid	v256320	256320	13	2	0	3	0	7812.8	0.75	1.5	12	0	0.0065895	0.3606	18	3.5082		1	0	3	4	5c4c/AdKh/TdAh9d6dQc	VS	16752412	gh0stfold	0	one night, 5 hands
-video	vid	v257730	257730	10	3	4	4	0	2903.75	0.75	1.5	12	0	0.0059532	0.3747	14	3.5085		1	0	4	1		10TH OF 180	16765286		0	$0.25 Hyper Sprint recap: 10th of 180, $1.03
-video	vid	v259110	259110	9	1	2	1	1	2386.89	0.45	2	30	3.5803	0.0108833	0.5269	8	3.0074		1	0	1	2	8d2d/KdQs/6dTdKc7c4d	ALL IN	15901498	GG_blinds	0	Shoving the bubble with eight-deuce: the ICM math
-video	vid	v260480	260480	2	0	1	0	2	1905.93	0.9	1	6	0	0.0045827	0.5573	0.75	0.0677		1	0	0	2	KsKd/Jd6d/KcJhJc4d3h	COOLER	16743001	sleepy_whale7	0	KINGS OVER JACK-SIX FOR 104 BIG BLINDS
-video	vid	v261990	261990	13	1	3	2	0	1134.36	0.75	1.5	12	0	0.0073671	0.4215	8	2.5064		1	0	2	1	Jc9d/5hAd/JdQs5dQd3h	21 BB	16752412	gh0stfold	0	How would you play against gh0stfold?
-video	vid	v263430	263430	0	1	0	0	0	2678.64	0.75	1.5	12	0	0.0084722	0.4637	8	2.5065		1	0	0	3	KhKs/JsAd/Tc2dThAs9s	87%	16743001	lihuang	0	kings all in for 27 big blinds. you know how this ends
-video	vid	v264930	264930	11	3	4	4	0	250.17	0.75	1.5	12	0	0.0059532	0.3747	14	3.5092		1	0	4	1		5TH OF 180	16765286		0	$0.25 Hyper Sprint recap: 5th of 180, $2.15
-video	vid	v266310	266310	6	1	2	1	1	2057.52	0.45	2	30	3.0863	0.0108833	0.5269	8	3.008		1	0	1	1	AdKd/9s9h/7h2dQcJs8c	HERO FOLD	8177406	joliveira	0	Why I folded ace-king to a shove
-video	vid	v267680	267680	2	0	1	0	2	1627.8	0.9	1	6	0	0.003985	0.5573	0.75	0.0677		1	0	0	4	7s9c/7hTc/6d7d8cThTs	COOLER	16743001	CopperDeuce	0	NOBODY FOLDS HERE
-video	vid	v269190	269190	0	1	3	2	0	582.92	0.75	1.5	12	0	0.0073671	0.4215	8	2.5068		1	0	2	4	9c9d/7h7d/As4hTc7cQh	34 BB	16743001	PolarNuts	0	Would you get nines in here? $0.25 Hyper Sprint, 34 big blinds
-video	vid	v270630	270630	2	1	0	0	0	6692.41	0.75	1.5	12	0	0.0084722	0.4637	8	2.5068		1	0	0	0	9hAd/AcAh/2s4c9c9s3d	COOLER	16743001	linneajohansson	0	ace-nine into aces. nothing I could do
-video	vid	v272130	272130	10	3	4	4	0	134.33	0.75	1.5	12	0	0.0059532	0.3747	14	3.5097		1	0	4	1		15TH OF 180	16765286		0	$0.25 Hyper Sprint recap: 15th of 180, $0.82
-video	vid	v273510	273510	6	1	2	1	1	894.9	0.45	2	30	1.3424	0.0108833	0.5269	8	3.0084		1	0	1	0	JhAc//Ks8s5sQc4d	HERO FOLD	8177406	michallewandowski	0	Big laydowns: folding ace-jack with 41 big blinds in the middle
-video	vid	v274880	274880	2	0	1	0	2	2442.77	0.9	1	6	0	0.003985	0.5573	0.75	0.0677		1	0	0	1	TsAh/JsKs/8s9c7sAsJd	COOLER	16743001	rogue_queen	0	NOBODY FOLDS HERE
-video	vid	v276390	276390	0	1	3	2	0	925.26	0.75	1.5	12	0	0.0084722	0.4215	8	2.5072		1	0	2	3	KhKd/AcTc/8cJd5hAs8h	26 BB	16743001	aarav_mehta	0	Would you get kings in here? $0.25 Hyper Sprint, 26 big blinds
-video	vid	v277830	277830	6	1	0	0	0	4363.22	0.75	1.5	12	0	0.0084722	0.4637	8	2.5072		1	0	0	0	9s9h/KhKc/Kd8hQs8d3d	HERO FOLD	8177406	william85	0	the hardest fold of my $0.25 Hyper Sprint
-video	vid	v279270	279270	13	1	4	4	0	2928.7	0.75	1.5	12	0	0.0066974	0.4215	8	2.5073		1	0	4	2	QhQd/TcTh/6d9sKs8dJc	RIVAL	16752412	gh0stfold	0	$0.25 Hyper Sprint: QQ against gh0stfold
-video	vid	v280710	280710	9	1	2	1	1	5532.52	0.45	2	30	8.2988	0.0108833	0.5269	8	3.0089		1	0	1	4	6cKh/KdTs/8c4h5cAd8d	ALL IN	15901498	larsen77	0	Bubble play: shoving king-six with the money in sight
-video	vid	v282080	282080	2	0	1	0	2	1123.88	0.9	1	6	0	0.003985	0.5573	0.75	0.0677		1	0	0	0	AcKs/AdAh/4sKh7c2c4c	COOLER	16743001	DustyQuads	0	THE BIGGEST COOLER I'VE EVER PLAYED
-video	vid	v283590	283590	4	1	3	2	0	956.06	0.75	1.5	12	0	0.0073671	0.4215	8	2.5076		1	0	2	4	QcAh/TcJc/9d8dTs2c4d	113 BB	8177406	NathanRoux	0	Was this bluff ever working? $0.25 Hyper Sprint, 113 big blinds
-video	vid	v285120	285120	0	2	0	3	0	4025	0.75	1.5	12	0	0.0065895	0.3606	18	3.5107		1	0	3	4	JcJd/JhKh/5c2s5s3sKc	VS	16743001	lucassouza	0	3 hands from the $0.25 Hyper Sprint
-video	vid	v286470	286470	6	1	4	4	0	702.81	0.75	1.5	12	0	0.0066974	0.4215	8	2.5077		1	0	4	1	KdQc//9hAd2s	HERO FOLD	8177406	SleepyFlush00	0	$0.25 Hyper Sprint, hand 21: KQ folded on the flop
-video	vid	v287910	287910	6	1	2	1	1	255.8	0.45	2	30	0.3837	0.0108833	0.5269	8	3.0094		1	0	1	1	TsTc/9sQs/4d8hAh2d9d	HERO FOLD	8177406	CopperPunter	0	Not good enough this time: folding tens to a shove
-video	vid	v289280	289280	13	0	1	0	2	1355.44	0.9	1	6	0	0.003985	0.5573	0.75	0.0677		1	0	0	1	KcAh/AsKs/3h4d3sJcAc	RIVAL	16752412	gh0stfold	0	ME VS GH0STFOLD!
-video	vid	v290790	290790	5	1	3	2	0	1910.59	0.75	1.5	12	0	0.0073671	0.4215	8	2.5079		1	0	2	1	QcAs/KdQh/QdTs2h3hJh	153 BB	8177406	EBouchard	0	Genius or lucky? I called with ace-queen
-video	vid	v292230	292230	2	1	0	0	0	7488.72	0.75	1.5	12	0	0.0084722	0.4637	8	2.5079		1	0	0	0	JsKh/QhAd/KcQcThAh9h	COOLER	16743001	gh0stfold	0	there was no folding this one
-video	vid	v293670	293670	2	1	4	4	0	1482.31	0.75	1.5	12	0	0.0066974	0.4215	8	2.5081		1	0	4	1	Kh6c/6sAs/9c7h8h5hTd	COOLER	16743001	Weber7	0	$0.25 Hyper Sprint: cooler, K6 vs A6
-video	vid	v295110	295110	5	1	2	1	1	2968.98	0.45	2	30	4.4535	0.0108833	0.5269	8	3.0098		1	0	1	1	3cAs/2cAh/Qs7c5hAdKd	HERO CALL	8177406	EmmaCampbell	0	How I knew to call the river with ace-three
-video	vid	v296480	296480	13	0	1	0	2	473.75	0.9	1	6	0	0.0028129	0.3934	0.75	0.0677		1	0	0	0	Td9h/TsAh/3h8hTc9cAs	RIVAL	16752412	gh0stfold	0	ME VS GH0STFOLD!
-video	vid	v297990	297990	2	1	3	2	0	1141.19	0.75	1.5	12	0	0.0073671	0.4215	8	2.5083		1	0	2	1	8s8h/QsAs/7h6cKs6sAd	65 BB	16743001	maxim80	0	Would you have found a fold? $0.25 Hyper Sprint, 65 big blinds
-video	vid	v299608	299607.5	5	2	0	3	0	1669.74	0.75	1.5	12	0	0.0065895	0.3606	18	3.5117		1	0	3	1	9c9h/QhAs/Jc5c5d2hTs	VS	8177406	Sokil96	0	one night, 5 hands
-video	tail	0	46231.100000000006	353.012826211	127481.38464199999	1.2473211936562785e-15	8.583305138130267e-18	3.891735869702677e-15	8.902908101709926	0.06802190567276593	24.956883451034663
-video	tail	1	19082.28	218.46322603699997	57273.773514	3.752584376037325e-12	4.095318843918196e-14	1.1268242530548535e-11	359.82320987539515	4.115034381406473	1080.2333600775708
-video	tail	2	26679.55	109.60877199600002	1801.1624920000006	6.270388153006149e-26	2.8735307757229198e-28	4.238782391379366e-27	0.003437849863472456	1.5620615269919224e-05	0.00023237447816465775
+video	ch	2429.215832105795	260640	250560	7117	10597	302400	12	5
+video	vid	v214470	214470	7	1	4	4	0	253.65	0.75	1.5	12	0	0.0066974	0.4215	8	2.5027		1	0	4	1	AhQd/KhQh/3d7dQcAs8c	BIG POT	15901498	StoneJoker	0	$0.25 Hyper Sprint: 162 big blind pot with AQ
+video	vid	v215910	215910	6	1	2	1	1	1529.95	0.45	2	30	2.2949	0.0108833	0.5269	8	3.0033		1	0	1	1	KcQs/JcQd/9c2dQh6d5d	HERO FOLD	8177406	HumbleWhale	0	Big laydowns: folding king-queen with 19 big blinds in the middle
+video	vid	v217280	217280	6	0	1	0	2	795.74	0.9	1	6	0	0.0028129	0.3934	0.75	0.0676		1	0	0	0	AhQc/7s7h/8s2hJcJh4d	HERO FOLD	8177406	RestlessKicker	0	THE HARDEST FOLD OF MY LIFE
+video	vid	v218790	218790	6	1	3	2	0	308.09	0.75	1.5	12	0	0.0073671	0.4215	8	2.5028		1	0	2	0	AhQh/9c9h/2cTs5h8d2d	71 BB	8177406	LeoGirard	0	Fold or call? $0.25 Hyper Sprint, ace-queen, 71 big blinds
+video	vid	v220320	220320	10	2	0	3	0	1003.11	0.75	1.5	12	0	0.0065895	0.3606	18	3.504		1	0	3	1		VS	16765286		0	14th of 180: my night at the $0.25 Hyper Sprint
+video	vid	v221670	221670	2	1	4	4	0	148.95	0.75	1.5	12	0	0.0066974	0.4215	8	2.5029		1	0	4	1	4hTd/KhJc/3c4s5h4d3s	COOLER	16743001	megan.g	0	$0.25 Hyper Sprint, hand 4: T4 vs KJ, 62 big blinds
+video	vid	v223110	223110	6	1	2	1	1	821.26	0.45	2	30	1.2319	0.0108833	0.5269	8	3.0034		1	0	1	0	AhQs//Js6d7c4h3h	HERO FOLD	8177406	mateo_morales	0	Not good enough this time: folding ace-queen on the river
+video	vid	v224480	224480	13	0	1	0	2	2571.26	0.9	1	6	0	0.003985	0.5573	0.75	0.0676		1	0	0	4	9sKh/AcAd/4h5d6cTs5h	RIVAL	16752412	gh0stfold	0	ME VS GH0STFOLD!
+video	vid	v225990	225990	6	1	3	2	0	690.69	0.75	1.5	12	0	0.0073671	0.4215	8	2.5029		1	0	2	0	KhAc/QcQd/Qh3s5c5sJs	82 BB	8177406	LeonWeber	0	Would you fold ace-king here?
+video	vid	v227520	227520	6	2	0	3	0	1618.37	0.75	1.5	12	0	0.0075779	0.3606	18	3.5041		1	0	3	0	AcJh/ThTs/3h5c2cAdKh	VS	8177406	Lucky8	0	8 hands from the $0.25 Hyper Sprint
+video	vid	v228870	228870	13	1	4	4	0	310.99	0.75	1.5	12	0	0.007702	0.4215	8	2.503		1	0	4	1	JsAs/QdAh/9sKs7hKh6d	RIVAL	16752412	gh0stfold	0	$0.25 Hyper Sprint, hand 50: vs gh0stfold, 29 big blinds
+video	vid	v230310	230310	6	1	2	1	1	892.13	0.45	2	30	1.3382	0.012	0.5269	8	3.0036		1	0	1	1	AdTd//9h3d9s9d4d	HERO FOLD	8177406	StatsGeek	0	Why I folded ace-ten on the river
+video	vid	v231680	231680	13	0	1	0	2	1571.25	0.9	1	6	0	0.003985	0.5573	0.75	0.0676		1	0	0	1	JdKd/9hKc/2hJh9s5s8d	RIVAL	16752412	gh0stfold	0	ME VS GH0STFOLD!
+video	vid	v233190	233190	2	1	3	2	0	1005.38	0.75	1.5	12	0	0.0073671	0.4215	8	2.5031		1	0	2	1	8dJd/AsKc/JcJh5sKdTs	87 BB	16743001	Lotte_Klompen	0	Would you have found a fold? $0.25 Hyper Sprint, 87 big blinds
+video	vid	v234720	234720	0	2	0	3	0	322.87	0.75	1.5	12	0	0.0065895	0.3606	18	3.5044		1	0	3	3	QdKs/Tc9s/8d9d4hJsAs	VS	16743001	yui_watanabe	0	4 hands from the $0.25 Hyper Sprint
+video	vid	v236070	236070	2	1	4	4	0	178.64	0.75	1.5	12	0	0.0066974	0.4215	8	2.5031		1	0	4	1	AdKs/QhKd/9cKh7h7d6s	COOLER	16743001	VarianceVictim	0	$0.25 Hyper Sprint: cooler, AK vs KQ
+video	vid	v237510	237510	6	1	2	1	1	1945.13	0.45	2	30	2.9177	0.0108833	0.5269	8	3.0038		1	0	1	1	AsQc/Ac9d/4cQd4s2c3h	HERO FOLD	8177406	msousa	0	Not good enough this time: folding ace-queen to a shove
+video	vid	v238880	238880	2	0	1	0	2	2189.96	0.9	1	6	0	0.003985	0.5573	0.75	0.0676		1	0	0	4	9s9d/AdAs/Kh9cAc4d3d	COOLER	16743001	LunarDealer	0	THE BIGGEST COOLER I'VE EVER PLAYED
+video	vid	v240390	240390	13	1	3	2	0	1213.03	0.75	1.5	12	0	0.0073671	0.4215	8	2.5032		1	0	2	1	AcJd//9sThAd6d4c	26 BB	16752412	gh0stfold	0	How would you play against gh0stfold?
+video	vid	v241830	241830	0	1	0	0	0	1591.71	0.75	1.5	12	0	0.0084722	0.4637	8	2.5033		1	0	0	4	JhAs/Tc3c/9d3s9s4dTd	63%	16743001	johnson88	0	ace-jack against ten-three, and the deck had other plans
+video	vid	v243270	243270	13	1	4	4	0	1268.85	0.75	1.5	12	0	0.0066974	0.4215	8	2.5033		1	0	4	1	As9s/QdTh/Jd3sQh6hKd	RIVAL	16752412	gh0stfold	0	$0.25 Hyper Sprint, hand 45: vs gh0stfold, 35 big blinds
+video	vid	v244710	244710	6	1	2	1	1	37.35	0.45	2	30	0.056	0.0108833	0.5269	8	3.004		1	0	1	0	TcKc/Ad9d/9h2h5h6d7h	HERO FOLD	8177406	CrispyQueen4	0	Why I folded king-ten to a shove
+video	vid	v246080	246080	6	0	1	0	2	979.27	0.9	1	6	0	0.003985	0.5573	0.75	0.0676		1	0	0	0	KhJh/9d9c/2s3c2h7c4h	HERO FOLD	8177406	NOlsen	0	FOLDING KING-JACK ON THE FLOP?!
+video	vid	v247590	247590	1	1	3	2	0	1091.41	0.75	1.5	12	0	0.0073671	0.4215	8	2.5034		1	0	2	2	QsQc/AsAd/Qd2c3h6s5d	222 BB	16743001	HannahPichler	0	Do I deserve this pot?
+video	vid	v249030	249030	0	1	0	0	0	108570.33	0.75	1.5	12	0	0.0084722	0.4637	8	2.5034		1	0	0	4	KcKs/JdJs/7dKd3dAcQd	82%	16743001	lucassouza	0	the river that ruined my night
+video	vid	v250470	250470	13	1	4	4	0	591	0.75	1.5	12	0	0.0066974	0.4215	8	2.5048		1	0	4	4	5c4c/AdKh/TdAh9d6dQc	RIVAL	16752412	gh0stfold	0	$0.25 Hyper Sprint: 54 against gh0stfold
+video	vid	v251910	251910	6	1	2	1	1	1051.88	0.45	2	30	1.5778	0.0108833	0.5269	8	3.0066		1	0	1	0	AcJd//5d6hQh9cKd	HERO FOLD	8177406	thirsty_owl	0	Big laydowns: folding ace-jack with 18 big blinds in the middle
+video	vid	v253280	253280	0	0	1	0	2	4664.9	0.9	1	6	0	0.003985	0.5573	0.75	0.0677		1	0	0	4	KdKh/ThTs/TdAh7dQs9c	80%	16743001	Moose	0	THE DECK HATES ME
+video	vid	v254790	254790	2	1	3	2	0	1666.42	0.75	1.5	12	0	0.0073671	0.4215	8	2.5062		1	0	2	0	7d7h/KhKc/6dTd8d2hTs	119 BB	16743001	nora.a	0	Is there any way out of this hand?
+video	vid	v256320	256320	13	2	0	3	0	8218.06	0.75	1.5	12	0	0.0065895	0.3606	18	3.5089		1	0	3	1	Jc9d/5hAd/JdQs5dQd3h	VS	16752412	gh0stfold	0	a Thursday night at the $0.25 Hyper Sprint
+video	vid	v257730	257730	10	3	4	4	0	3082.75	0.75	1.5	12	0	0.0059532	0.3747	14	3.5092		1	0	4	1		10TH OF 180	16765286		0	$0.25 Hyper Sprint recap: 10th of 180, $1.03
+video	vid	v259110	259110	9	1	2	1	1	2508.59	0.45	2	30	3.7629	0.0108833	0.5269	8	3.008		1	0	1	2	8d2d/KdQs/6dTdKc7c4d	ALL IN	15901498	GG_blinds	0	Shoving the bubble with eight-deuce: the ICM math
+video	vid	v260480	260480	2	0	1	0	2	2022.34	0.9	1	6	0	0.003985	0.5573	0.75	0.0677		1	0	0	2	KsKd/Jd6d/KcJhJc4d3h	COOLER	16743001	sleepy_whale7	0	KINGS OVER JACK-SIX FOR 104 BIG BLINDS
+video	vid	v261990	261990	0	1	3	2	0	1059.01	0.75	1.5	12	0	0.0073671	0.4215	8	2.5069		1	0	2	3	KhKs/JsAd/Tc2dThAs9s	27 BB	16743001	lihuang	0	How do you bounce back from this?
+video	vid	v263520	263520	11	2	0	3	0	251.39	0.75	1.5	12	0	0.0065895	0.3606	18	3.5098		1	0	3	1		VS	16765286		0	fifth at the $0.25 Hyper Sprint (and the river that ended it)
+video	vid	v264930	264930	10	3	4	4	0	199.25	0.75	1.5	12	0	0.0059532	0.3747	14	3.5099		1	0	4	1		15TH OF 180	16765286		0	$0.25 Hyper Sprint recap: 15th of 180, $0.82
+video	vid	v266310	266310	6	1	2	1	1	2098.15	0.45	2	30	3.1472	0.0108833	0.5269	8	3.0086		1	0	1	1	AdKd/9s9h/7h2dQcJs8c	HERO FOLD	8177406	joliveira	0	Why I folded ace-king to a shove
+video	vid	v267680	267680	2	0	1	0	2	1741.3	0.9	1	6	0	0.003985	0.5573	0.75	0.0677		1	0	0	4	7s9c/7hTc/6d7d8cThTs	COOLER	16743001	CopperDeuce	0	NOBODY FOLDS HERE
+video	vid	v269190	269190	0	1	3	2	0	617.15	0.75	1.5	12	0	0.0073671	0.4215	8	2.5073		1	0	2	4	9c9d/7h7d/As4hTc7cQh	34 BB	16743001	PolarNuts	0	Would you get nines in here? $0.25 Hyper Sprint, 34 big blinds
+video	vid	v270630	270630	2	1	0	0	0	7119.24	0.75	1.5	12	0	0.0084722	0.4637	8	2.5073		1	0	0	0	9hAd/AcAh/2s4c9c9s3d	COOLER	16743001	linneajohansson	0	there was no folding this one
+video	vid	v272070	272070	2	1	4	4	0	970.98	0.75	1.5	12	0	0.007702	0.4215	8	2.5074		1	0	4	0	AcKs/AdAh/4sKh7c2c4c	COOLER	16743001	DustyQuads	0	$0.25 Hyper Sprint, hand 10: AK vs AA, 44 big blinds
+video	vid	v273510	273510	6	1	2	1	1	894.81	0.45	2	30	1.3422	0.012	0.5269	8	3.009		1	0	1	0	JhAc//Ks8s5sQc4d	HERO FOLD	8177406	michallewandowski	0	Big laydowns: folding ace-jack with 41 big blinds in the middle
+video	vid	v274880	274880	2	0	1	0	2	2524.62	0.9	1	6	0	0.0045827	0.5573	0.75	0.0677		1	0	0	0	TsAh/JsKs/8s9c7sAsJd	COOLER	16743001	rogue_queen	0	NOBODY FOLDS HERE
+video	vid	v276390	276390	0	1	3	2	0	961.2	0.75	1.5	12	0	0.0084722	0.4215	8	2.5077		1	0	2	3	KhKd/AcTc/8cJd5hAs8h	26 BB	16743001	aarav_mehta	0	Would you get kings in here? $0.25 Hyper Sprint, 26 big blinds
+video	vid	v277830	277830	6	1	0	0	0	4600.01	0.75	1.5	12	0	0.009743	0.4637	8	2.5077		1	0	0	0	9s9h/KhKc/Kd8hQs8d3d	HERO FOLD	8177406	william85	0	the hardest fold of my $0.25 Hyper Sprint
+video	vid	v279270	279270	13	1	4	4	0	3000.77	0.75	1.5	12	0	0.007702	0.4215	8	2.5079		1	0	4	2	QhQd/TcTh/6d9sKs8dJc	RIVAL	16752412	gh0stfold	0	$0.25 Hyper Sprint: QQ against gh0stfold
+video	vid	v280710	280710	9	1	2	1	1	5754.3	0.45	2	30	8.6315	0.012	0.5269	8	3.0095		1	0	1	4	6cKh/KdTs/8c4h5cAd8d	ALL IN	15901498	larsen77	0	Bubble play: shoving king-six with the money in sight
+video	vid	v282080	282080	4	0	1	0	2	840.91	0.9	1	6	0	0.003985	0.5573	0.75	0.0677		1	0	0	4	QcAh/TcJc/9d8dTs2c4d	BLUFF CAUGHT	8177406	NathanRoux	0	ACE-QUEEN?! WHAT WAS I DOING
+video	vid	v283590	283590	0	1	3	2	0	1499.78	0.75	1.5	12	0	0.0073671	0.4215	8	2.5082		1	0	2	4	JcJd/JhKh/5c2s5s3sKc	21 BB	16743001	lucassouza	0	How do you bounce back from this?
+video	vid	v285120	285120	6	2	0	3	0	3319.73	0.75	1.5	12	0	0.0065895	0.3606	18	3.5115		1	0	3	1	KdQc//9hAd2s	VS	8177406	SleepyFlush00	0	5 hands from the $0.25 Hyper Sprint
+video	vid	v286470	286470	5	1	4	4	0	826.89	0.75	1.5	12	0	0.0066974	0.4215	8	2.5083		1	0	4	0	QhJh/9c7c/3d5d7dQc6s	HERO CALL	8177406	Quid05	0	$0.25 Hyper Sprint, hand 26: QJ calls the river and wins
+video	vid	v287910	287910	6	1	2	1	1	272.77	0.45	2	30	0.4092	0.0108833	0.5269	8	3.0101		1	0	1	1	TsTc/9sQs/4d8hAh2d9d	HERO FOLD	8177406	CopperPunter	0	Not good enough this time: folding tens to a shove
+video	vid	v289280	289280	13	0	1	0	2	1445.25	0.9	1	6	0	0.003985	0.5573	0.75	0.0677		1	0	0	1	KcAh/AsKs/3h4d3sJcAc	RIVAL	16752412	gh0stfold	0	ME VS GH0STFOLD!
+video	vid	v290790	290790	5	1	3	2	0	2007.31	0.75	1.5	12	0	0.0084722	0.4215	8	2.5085		1	0	2	1	QcAs/KdQh/QdTs2h3hJh	153 BB	8177406	EBouchard	0	Genius or lucky? I called with ace-queen
+video	vid	v292230	292230	2	1	0	0	0	7830.74	0.75	1.5	12	0	0.0084722	0.4637	8	2.5085		1	0	0	0	JsKh/QhAd/KcQcThAh9h	COOLER	16743001	gh0stfold	0	somebody had to lose this one. not me
+video	vid	v293670	293670	13	1	4	4	0	2503.15	0.75	1.5	12	0	0.0066974	0.4215	8	2.5087		1	0	4	0	Td9h/TsAh/3h8hTc9cAs	RIVAL	16752412	gh0stfold	0	$0.25 Hyper Sprint, hand 30: vs gh0stfold, 32 big blinds
+video	vid	v295110	295110	5	1	2	1	1	3090.88	0.45	2	30	4.6363	0.012	0.5269	8	3.0105		1	0	1	1	3cAs/2cAh/Qs7c5hAdKd	HERO CALL	8177406	EmmaCampbell	0	How I knew to call the river with ace-three
+video	vid	v296480	296480	2	0	1	0	2	523.27	0.9	1	6	0	0.003985	0.5573	0.75	0.0677		1	0	0	1	8s8h/QsAs/7h6cKs6sAd	COOLER	16743001	maxim80	0	NOBODY FOLDS HERE
+video	vid	v297990	297990	5	1	3	2	0	1072.54	0.75	1.5	12	0	0.0084722	0.4215	8	2.509		1	0	2	1	9c9h/QhAs/Jc5c5d2hTs	63 BB	8177406	Sokil96	0	Call or fold? $0.25 Hyper Sprint, 63 big blinds, river
+video	vid	v299518	299517.5	2	1	0	0	0	894.27	0.75	1.5	12	0	0.0084722	0.4637	8	2.509		1	0	0	1	JcAs/TcAc/7d8c9hTd7s	COOLER	16743001	CopperPunter	0	there was no folding this one
+video	tail	0	52979.41	404.615800083	146613.934615	1.3494230956092822e-15	9.288924154921693e-18	4.213909314451388e-15	9.537086151865418	0.07164246138342331	27.187289657184735
+video	tail	1	20948.17	235.94625521100002	62878.511928	3.715406266990773e-12	4.055473520869811e-14	1.1158078387276359e-11	376.4636993426033	4.238260766602795	1130.2967057607787
+video	tail	2	29465.949999999993	119.52566220099999	1989.682296	6.68797272551791e-26	2.6760811543344306e-28	4.521069562450106e-27	0.0037058492709287814	1.6041222672136695e-05	0.00025051312842196106
 video	stub	v7110	7110	0.2064	0.011378	3
 video	stub	v14310	14310	0.0554	0.0108833	3
 video	stub	v21510	21510	0.1033	0.0108833	3.0001
-video	stub	v28710	28710	0.308	0.012	3.0001
-video	stub	v35910	35910	0.7361	0.0108833	3.0001
-video	stub	v43110	43110	0.4653	0.0108833	3.0002
-video	stub	v50310	50310	0.2178	0.0108833	3.0002
-video	stub	v57510	57510	0.3118	0.0108833	3.0002
-video	stub	v64710	64710	0.3604	0.0108833	3.0004
-video	stub	v71910	71910	0.0614	0.012	3.0004
-video	stub	v79110	79110	0.5083	0.012	3.0005
-video	stub	v86310	86310	2.209	0.012	3.0006
-video	stub	v93510	93510	2.3466	0.012	3.0007
-video	stub	v100710	100710	0.9503	0.0108833	3.0008
-video	stub	v107910	107910	1.3516	0.0108833	3.0009
-video	stub	v115110	115110	0.9294	0.0108833	3.001
-video	stub	v122310	122310	1.0337	0.0108833	3.0011
-video	stub	v129510	129510	2.8911	0.012	3.0012
-video	stub	v136710	136710	0.3718	0.012	3.0014
-video	stub	v143910	143910	1.2642	0.0108833	3.0015
-video	stub	v151110	151110	1.3939	0.0108833	3.0017
-video	stub	v158310	158310	0.7187	0.012	3.0018
-video	stub	v165510	165510	0.7884	0.012	3.0019
-video	stub	v172710	172710	1.4037	0.0108833	3.002
-video	stub	v179910	179910	1.8096	0.0108833	3.0022
-video	stub	v187110	187110	1.5633	0.012	3.0023
-video	stub	v194310	194310	2.276	0.012	3.0025
-video	stub	v201510	201510	0.3531	0.012	3.0027
-video	stub	v208710	208710	1.6349	0.0108833	3.0028
-video	cand	rl:hyper-sprint@275910:1	275910	0	0	7	0.79	306150	1	1	0	-1	Shamrock99	1041	0	$0.25 Hyper Sprint	25	180	1	0	3	19.82084998623899	1	-1	kastHype|kastHype|new tourney lets go	1;1;1;50;100;100;15176;7871;39,37;18,40,38,42,4;0,366,StoicBoat44,raises to/0,0,vgupta,folds/0,366,Shamrock99,calls/0,0,ChipAndAChair,folds/0,0,RustyChip,folds/0,0,RogueBlinds,folds/0,0,JulienLaurent,folds/0,1318,You,raises to/0,0,larsen77,folds/0,0,StoicBoat44,folds/0,1318,Shamrock99,calls/1,2156,You,bets/1,2156,Shamrock99,calls/2,3831,You,bets/2,3831,Shamrock99,calls/3,2695,You,all in/3,0,Shamrock99,folds;
-video	cand	rl:hyper-sprint@275910:32	275932.4	3	0	6	0.5698	306172.4	1	1	0	-1	RustyDesi	-1	0	$0.25 Hyper Sprint	25	180	11	0	3	45.19771043862562	1	-1		1;32;8;250;500;500;2750;-1000;48,41;30,1,23,37,32;0,0,felixf,folds/0,0,chris13,folds/0,1000,You,raises to/0,0,TomekKaminski,folds/0,0,SleepyFlush00,folds/0,0,CosmicBubble9,folds/0,0,xXBubbleXx,folds/0,0,RPereira,folds/0,1000,RustyDesi,calls/1,0,RustyDesi,checks/1,0,You,checks/2,0,RustyDesi,checks/2,0,You,checks/3,1855,RustyDesi,bets/3,0,You,folds;
-video	cand	rl:hyper-sprint@275910:68	275957.6	3	0	1	0.5485	306197.6	1	1	0	0.23282828282828283	RPereira	-1	0	$0.25 Hyper Sprint	25	180	38	0	3	100	2	-1	holds!!|kastClap kastClap|kastHype kastHype	1;68;16;1500;3000;3000;25836;3000;26,44;47,48,0,33,2;0,0,larsen77,folds/0,0,CosmicBubble9,folds/0,0,RustyChip,folds/0,6000,RPereira,raises to/0,0,EmilLarsen,folds/0,0,felixf,folds/0,6000,You,calls/0,0,TomekKaminski,folds/1,0,You,checks/1,5454,RPereira,bets/1,3918,You,all in;RPereira,46,42
-video	cand	rl:hyper-sprint@278790:47	278822.9	3	0	6	0.6275	309062.9	1	1	0	-1	gabriel.o	-1	0	$0.25 Hyper Sprint	25	180	50	0	8	51.49101414040954	2	-1		1;47;11;500;1000;1000;9354;0;47,42;19,38,44,50,28;0,0,RecklessJjang,folds/0,12233,gabriel.o,all in/0,3427,SleepyGutshot,all in/0,0,tobiaspichler,folds/0,0,ButtonTTV,folds/0,0,You,folds/0,0,diaz90,folds/0,0,Gagnon1,folds/0,0,ElectricPokerface,folds;gabriel.o,39,37/SleepyGutshot,30,32
-video	cand	rl:hyper-sprint@278790:55	278828.5	3	0	6	0.6214	309068.5	1	1	0	-1	gabriel.o	-1	0	$0.25 Hyper Sprint	25	180	47	0	8	52.49101414040954	2	-1		1;55;13;800;1600;1600;14152;0;50,45;43,37,31,25,23;0,0,ElectricPokerface,folds/0,0,RecklessJjang,folds/0,16006,gabriel.o,all in/0,0,pavel.s,folds/0,0,arthur_maes,folds/0,5076,SneakyFish,all in/0,0,You,folds/0,0,Garcia9,folds/0,0,Gagnon1,folds;gabriel.o,47,19/SneakyFish,51,32
-video	cand	rl:hyper-sprint@283110:26	283128.2	3	0	5	0.7779	313368.2	1	0	0	-1	Quid05	-1	0	$0.25 Hyper Sprint	25	180	72	0	3	16.99101414040954	0	-1		1;26;7;150;300;300;5886;3168;42,38;5,13,21,40,19;0,615,You,raises to/0,0,ColdCooler,folds/0,0,Moose,folds/0,0,CodyGarcia,folds/0,0,Humbl3R0und3r,folds/0,0,paul.w,folds/0,0,RustyStack,folds/0,0,gh0stfold,folds/0,615,Quid05,calls/1,0,Quid05,checks/1,946,You,bets/1,946,Quid05,calls/2,0,Quid05,checks/2,0,You,checks/3,1157,Quid05,bets/3,1157,You,calls;Quid05,28,20
-video	cand	rl:hyper-sprint@284550:49	284584.3	3	0	6	0.6655	314824.3	1	1	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	73	0	4	19.99101414040954	0	-1		1;49;12;600;1200;1200;6342;0;49,36;7,1,27,37,26;0,2271,joon87,all in/0,0,Ste4dySh0ve,folds/0,0,You,folds/0,0,Freddie_Punter,folds/0,0,claraa,folds/0,0,R0y4lShark,folds/0,0,logan_campbell,folds/0,0,RestlessKicker,folds/0,2271,gh0stfold,calls;gh0stfold,42,31/joon87,11,19
-video	cand	rl:hyper-sprint@287430:29	287450.3	3	0	2	0.8801	317690.3	1	1	0	-1	CopperPunter	-1	0	$0.25 Hyper Sprint	25	180	21	0	2	31.49101414040954	1	-1		1;29;7;200;400;400;20118;9959;36,51;21,24,30,33,23;0,0,ThiagoCosta,folds/0,0,gh0stfold,folds/0,0,dusty_blinds,folds/0,1156,CopperPunter,raises to/0,0,WildKicker,folds/0,0,pepe.r,folds/0,0,CrimsonRaise,folds/0,0,oscar.l,folds/0,1156,You,calls/1,0,You,checks/1,1539,CopperPunter,bets/1,1539,You,calls/2,0,You,checks/2,4502,CopperPunter,bets/2,4502,You,calls/3,2562,You,all in/3,2562,CopperPunter,calls;CopperPunter,32,48
-video	cand	rl:hyper-sprint@287430:39	287457.3	3	0	7	0.7333	317697.3	1	1	0	-1	dusty_blinds	861	0	$0.25 Hyper Sprint	25	180	2	0	2	46.49101414040954	1	-1	monster pot|kastHype	1;39;10;300;600;600;54018;36212;38,37;26,39,18,4,30;0,0,CopperPunter,folds/0,0,WildKicker,folds/0,0,pepe.r,folds/0,0,WildMonster,folds/0,1230,You,raises to/0,0,ThiagoCosta,folds/0,4616,LiWang,raises to/0,4616,dusty_blinds,calls/0,17806,You,all in/0,17806,LiWang,calls/0,17806,dusty_blinds,calls/1,0,LiWang,checks/1,0,dusty_blinds,checks/2,0,LiWang,checks/2,0,dusty_blinds,checks/3,0,LiWang,checks/3,0,dusty_blinds,checks;LiWang,43,40/dusty_blinds,49,25
-video	cand	rl:hyper-sprint@288870:7	288874.9	3	0	1	0.657	319114.9	1	0	0	0.31875	ryan22	-1	0	$0.25 Hyper Sprint	25	180	28	0	2	27.471014140409537	1	-1	EZ|EZ|another scalp	1;7;2;60;120;120;2808;1554;48,20;49,35,5,14,18;0,0,n00bfelt,folds/0,288,You,raises to/0,0,Proper,folds/0,0,ElectricBoat,folds/0,0,seo.c,folds/0,1254,ryan22,all in/0,0,Lucky8,folds/0,0,claraa,folds/0,0,HoserPot,folds/0,1254,You,calls;ryan22,42,40
-video	cand	rl:hyper-sprint@290310:21	290324.7	3	0	6	0.7517	320564.7	1	1	0	-1	JinLongFlop	1201	0	$0.25 Hyper Sprint	25	180	14	0	4	30.49101414040954	1	-1		1;21;5;125;250;250;7343;-500;33,34;7,41,39,44,13;0,500,You,raises to/0,500,CosmicFish,calls/0,500,VelvetCowboy,calls/0,0,PocketRockets,folds/0,0,QuietKicker,folds/0,0,tkachenko77,folds/0,500,LRodriguez,calls/0,0,Chen_JinLong,folds/0,500,JinLongFlop,calls/1,0,JinLongFlop,checks/1,0,You,checks/1,0,CosmicFish,checks/1,0,VelvetCowboy,checks/1,0,LRodriguez,checks/2,2234,JinLongFlop,bets/2,0,You,folds/2,0,CosmicFish,folds/2,2234,VelvetCowboy,calls/2,0,LRodriguez,folds/3,0,JinLongFlop,checks/3,0,VelvetCowboy,checks;JinLongFlop,50,35/VelvetCowboy,48,40
-video	cand	rl:hyper-sprint@290310:29	290330.3	3	0	2	0.8772	320570.3	1	1	0	0.25	tkachenko77	-1	0	$0.25 Hyper Sprint	25	180	5	0	4	66.59234747374288	1	-1	chat we're so back|never in doubt|SHIP IT kastHype	1;29;7;200;400;400;19576;10288;39,50;10,2,22,11,49;0,0,JinLongFlop,folds/0,800,You,raises to/0,0,CosmicFish,folds/0,0,VelvetCowboy,folds/0,0,PocketRockets,folds/0,0,QuietKicker,folds/0,2281,tkachenko77,raises to/0,0,LRodriguez,folds/0,0,Chen_JinLong,folds/0,2281,You,calls/1,0,You,checks/1,2910,tkachenko77,bets/1,2910,You,calls/2,6238,You,bets/2,4097,tkachenko77,all in;tkachenko77,46,47
-video	cand	rl:hyper-sprint@290310:40	290338	3	0	1	0.5868	320578	1	1	0	0.386	PocketRockets	-1	0	$0.25 Hyper Sprint	25	180	11	0	4	85.09234747374288	1	-1	LETS GOOO|chat we're so back|grinder_3c on a heater	1;40;10;400;800;800;9800;4700;21,16;33,4,17,47,22;0,0,CosmicFish,folds/0,0,VelvetCowboy,folds/0,4300,PocketRockets,all in/0,0,QuietKicker,folds/0,0,islac,folds/0,0,LRodriguez,folds/0,0,Chen_JinLong,folds/0,0,JinLongFlop,folds/0,4300,You,calls;PocketRockets,43,46
-video	cand	rl:hyper-sprint@290310:67	290356.9	3	0	1	0.6403	320596.9	1	1	0	0.2728333333333333	SleepyBlinds1	-1	0	$0.25 Hyper Sprint	25	180	21	0	4	98.7881696959651	2	-1	kastHype kastHype|chat we're so back|kastClap kastClap	1;67;16;1500;3000;3000;60164;25188;4,49;50,31,7,14,29;0,0,CosmicFish,folds/0,0,VelvetCowboy,folds/0,27818,aarav.r,all in/0,0,SilentKicker,folds/0,0,huang82,folds/0,0,VelvetBibimbap,folds/0,0,steady_gutshot,folds/0,22285,SleepyBlinds1,all in/0,12594,You,all in;SleepyBlinds1,47,39/aarav.r,36,38
-video	cand	rl:hyper-sprint@293190:17	293201.9	3	0	8	0.5301	323441.9	1	1	0	0.8636363636363636	ren_suzuki	1589	0	$0.25 Hyper Sprint	25	180	32	0	4	39.068347473742875	1	-1	kastHype kastHype|kastClap kastClap|grinder_3c on a heater	1;17;4;100;200;200;5279;3686;35,32;14,7,37,38,12;0,400,You,raises to/0,0,RecklessFelt,folds/0,400,kevin85,calls/0,0,SmoothBluff,folds/0,0,Tom_Skint,folds/0,1593,ren_suzuki,all in/0,0,gh0stfold,folds/0,0,PizzaioloNuts,folds/0,1593,You,calls/0,1593,kevin85,calls/1,0,You,checks/1,0,kevin85,checks/2,3005,You,bets/2,0,kevin85,folds;ren_suzuki,43,51
-video	cand	rl:hyper-sprint@293190:27	293208.9	3	0	2	0.8778	323448.9	1	1	0	-1	Tom_Skint	-1	0	$0.25 Hyper Sprint	25	180	80	0	4	40.568347473742875	1	-1		1;27;7;200;400;400;19696;-100;46,39;43,45,28,30,26;0,0,RecklessFelt,folds/0,0,kevin85,folds/0,0,SmoothBluff,folds/0,963,Tom_Skint,raises to/0,0,Bayou13,folds/0,0,gh0stfold,folds/0,0,royal_blinds04,folds/0,0,PizzaioloNuts,folds/0,963,You,calls/1,1419,You,bets/1,1419,Tom_Skint,calls/2,0,You,checks/2,2905,Tom_Skint,bets/2,2905,You,calls/3,0,You,checks/3,6145,Tom_Skint,bets/3,4261,You,all in;Tom_Skint,44,33
-video	cand	rl:hyper-sprint@294630:32	294652.4	3	0	6	0.5208	324892.4	1	0	0	-1	IronShark	-1	0	$0.25 Hyper Sprint	25	180	79	0	5	17.99101414040954	1	-1		1;32;8;250;500;500;1750;0;40,45;;0,2543,kevin85,all in/0,0,RounderTTV,folds/0,0,ximenaf,folds/0,0,gh0stfold,folds/0,0,BankrollRIP,folds/0,0,You,folds/0,0,hao23,folds/0,0,valeria.r,folds/0,0,IronShark,folds;
-video	cand	rl:hyper-sprint@297510:17	297521.9	3	0	8	0.6537	327761.9	1	0	0	0.9090909090909091	CrimsonDealer	-1	0	$0.25 Hyper Sprint	25	180	23	0	6	59.349352765090984	1	-1	holds!!|doubled up kastChip|SHIP IT kastHype	1;17;4;100;200;200;16470;8838;46,44;29,30,19,41,49;0,706,tomekkowalski,raises to/0,2542,You,raises to/0,0,polar_whale77,folds/0,0,silva78,folds/0,0,ShoveTTV,folds/0,2542,CrimsonDealer,calls/0,0,gh0stfold,folds/0,0,SmoothStack4,folds/0,0,ville_nieminen,folds/0,0,tomekkowalski,folds/1,3943,You,bets/1,3943,CrimsonDealer,calls/2,0,You,checks/2,1147,CrimsonDealer,all in/2,1147,You,calls;CrimsonDealer,35,47
-video	cand	rl:hyper-sprint@297510:50	297545	3	0	8	0.5276	327785	1	0	0	0.7485	GoldenCooler	-1	0	$0.25 Hyper Sprint	25	180	6	0	6	86.10668609842432	1	-1	HOLDS kastHype|never in doubt|holds!!	1;50;12;600;1200;1200;30954;15177;47,40;14,9,32,45,41;0,14577,GoldenCooler,all in/0,0,n00bchip,folds/0,0,Hetman,folds/0,0,JBrown,folds/0,0,CosmicFlush,folds/0,0,jonas_fischer,folds/0,0,SmoothStack4,folds/0,14577,You,calls;GoldenCooler,44,35
-video	cand	rl:hyper-sprint@297510:51	297545.7	3	0	8	0.4717	327785.7	1	0	0	0.60225	n00bchip	-1	0	$0.25 Hyper Sprint	25	180	5	0	6	100	1	-1	kastHype kastHype|doubled up kastChip|kastHype kastHype	1;51;12;600;1200;1200;18488;8944;48,35;13,49,30,19,38;0,8344,n00bchip,all in/0,0,Hetman,folds/0,0,JBrown,folds/0,0,CosmicFlush,folds/0,0,jonas_fischer,folds/0,0,ville_nieminen,folds/0,0,SmoothStack4,folds/0,8344,You,calls;n00bchip,41,29
-video	cand	rl:hyper-sprint@298950:32	298971.7	0	0	2	0.8584	329211.7	0	0	0	-1	piotrlewandowski	-1	0	$0.25 Hyper Sprint	25	180	37	0	6	11.317670342079435	0	-1	great fold|that's the spot|that's the spot	1;32;8;250;500;500;20596;-9923;49,32;35,40,14,21,43;0,0,gh0stfold,folds/0,0,daikisato,folds/0,0,StoicRaise,folds/0,0,ColdShove85,folds/0,0,virtanen88,folds/0,1000,You,raises to/0,0,Ivan_Volk,folds/0,1000,piotrlewandowski,calls/1,1798,piotrlewandowski,bets/1,3596,You,raises to/1,3596,piotrlewandowski,calls/2,0,piotrlewandowski,checks/2,4971,You,bets/2,4971,piotrlewandowski,calls/3,356,piotrlewandowski,all in/3,356,You,calls;piotrlewandowski,39,42
+video	stub	v28710	28710	0.3575	0.012	3.0002
+video	stub	v35910	35910	0.9399	0.0108833	3.0002
+video	stub	v43110	43110	0.5482	0.0108833	3.0003
+video	stub	v50310	50310	0.2571	0.0108833	3.0003
+video	stub	v57510	57510	0.4756	0.0108833	3.0004
+video	stub	v64710	64710	0.3193	0.0108833	3.0005
+video	stub	v71910	71910	0.0698	0.012	3.0006
+video	stub	v79110	79110	0.5352	0.012	3.0007
+video	stub	v86310	86310	2.4932	0.012	3.0008
+video	stub	v93510	93510	2.6296	0.012	3.0009
+video	stub	v100710	100710	1.0581	0.0108833	3.001
+video	stub	v107910	107910	1.5044	0.0108833	3.0011
+video	stub	v115110	115110	1.0316	0.0108833	3.0012
+video	stub	v122310	122310	1.3364	0.0108833	3.0013
+video	stub	v129510	129510	3.1575	0.0108833	3.0015
+video	stub	v136710	136710	0.2912	0.0108833	3.0017
+video	stub	v143910	143910	1.7886	0.0108833	3.0018
+video	stub	v151110	151110	1.5156	0.0108833	3.0019
+video	stub	v158310	158310	0.7826	0.012	3.0021
+video	stub	v165510	165510	0.9178	0.012	3.0022
+video	stub	v172710	172710	1.5248	0.0108833	3.0023
+video	stub	v179910	179910	1.5109	0.0108833	3.0025
+video	stub	v187110	187110	1.581	0.0108833	3.0027
+video	stub	v194310	194310	2.4358	0.012	3.0028
+video	stub	v201510	201510	0.3806	0.012	3.003
+video	stub	v208710	208710	1.6149	0.0108833	3.0032
+video	cand	rl:hyper-sprint@274470:1	274470	0	0	6	0.7334	304710	0	0	0	-1	PavelPetrov	-1	0	$0.25 Hyper Sprint	25	180	1	0	5	8.320849986238988	0	-1	sick read|great fold	1;1;1;50;100;100;2480;-436;27,24;16,15,43,47,42;0,0,FrostyFlop9,folds/0,0,liam8,folds/0,0,tobias_moser,folds/0,0,CopperStack,folds/0,0,GHughes,folds/0,336,PavelPetrov,raises to/0,0,bazza77,folds/0,336,lucassouza,calls/0,336,You,calls/1,0,lucassouza,checks/1,0,You,checks/1,686,PavelPetrov,bets/1,686,lucassouza,calls/1,0,You,folds/2,0,lucassouza,checks/2,0,PavelPetrov,checks/3,0,lucassouza,checks/3,2019,PavelPetrov,bets/3,0,lucassouza,folds;
+video	cand	rl:hyper-sprint@274470:7	274474.9	3	0	6	0.6899	304714.9	1	0	0	-1	PavelPetrov	-1	0	$0.25 Hyper Sprint	25	180	147	0	5	8.349352765090982	0	-1		1;7;2;60;120;120;1994;-907;49,47;16,8,4,14;0,0,bazza77,folds/0,0,lucassouza,folds/0,288,You,raises to/0,0,FrostyFlop9,folds/0,0,liam8,folds/0,0,tobias_moser,folds/0,0,CopperStack,folds/0,0,GHughes,folds/0,288,PavelPetrov,calls/1,619,PavelPetrov,bets/1,619,You,calls/2,1990,PavelPetrov,bets/2,0,You,folds;
+video	cand	rl:hyper-sprint@278790:47	278822.9	3	0	6	0.6275	309062.9	1	1	0	-1	gabriel.o	-1	0	$0.25 Hyper Sprint	25	180	50	0	4	51.49101414040954	2	-1		1;47;11;500;1000;1000;9354;0;47,42;19,38,44,50,28;0,0,RecklessJjang,folds/0,12233,gabriel.o,all in/0,3427,SleepyGutshot,all in/0,0,tobiaspichler,folds/0,0,ButtonTTV,folds/0,0,You,folds/0,0,diaz90,folds/0,0,Gagnon1,folds/0,0,ElectricPokerface,folds;gabriel.o,39,37/SleepyGutshot,30,32
+video	cand	rl:hyper-sprint@278790:55	278828.5	3	0	6	0.6214	309068.5	1	1	0	-1	gabriel.o	-1	0	$0.25 Hyper Sprint	25	180	47	0	4	52.49101414040954	2	-1		1;55;13;800;1600;1600;14152;0;50,45;43,37,31,25,23;0,0,ElectricPokerface,folds/0,0,RecklessJjang,folds/0,16006,gabriel.o,all in/0,0,pavel.s,folds/0,0,arthur_maes,folds/0,5076,SneakyFish,all in/0,0,You,folds/0,0,Garcia9,folds/0,0,Gagnon1,folds;gabriel.o,47,19/SneakyFish,51,32
+video	cand	rl:hyper-sprint@284550:49	284584.3	3	0	6	0.6655	314824.3	1	1	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	73	0	6	19.99101414040954	0	-1		1;49;12;600;1200;1200;6342;0;49,36;7,1,27,37,26;0,2271,joon87,all in/0,0,Ste4dySh0ve,folds/0,0,You,folds/0,0,Freddie_Punter,folds/0,0,claraa,folds/0,0,R0y4lShark,folds/0,0,logan_campbell,folds/0,0,RestlessKicker,folds/0,2271,gh0stfold,calls;gh0stfold,42,31/joon87,11,19
+video	cand	rl:hyper-sprint@287430:39	287457.3	3	0	7	0.7333	317697.3	1	1	0	-1	dusty_blinds	861	0	$0.25 Hyper Sprint	25	180	2	0	6	46.49101414040954	1	-1	big pot kastChip|kastHype|stack it	1;39;10;300;600;600;54018;36212;38,37;26,39,18,4,30;0,0,CopperPunter,folds/0,0,WildKicker,folds/0,0,pepe.r,folds/0,0,WildMonster,folds/0,1230,You,raises to/0,0,ThiagoCosta,folds/0,4616,LiWang,raises to/0,4616,dusty_blinds,calls/0,17806,You,all in/0,17806,LiWang,calls/0,17806,dusty_blinds,calls/1,0,LiWang,checks/1,0,dusty_blinds,checks/2,0,LiWang,checks/2,0,dusty_blinds,checks/3,0,LiWang,checks/3,0,dusty_blinds,checks;LiWang,43,40/dusty_blinds,49,25
+video	cand	rl:hyper-sprint@288870:7	288874.9	3	0	1	0.657	319114.9	1	0	0	0.31875	ryan22	-1	0	$0.25 Hyper Sprint	25	180	28	0	8	27.471014140409537	1	-1	kastClap kastClap|LETS GOOO|kastHype kastHype	1;7;2;60;120;120;2808;1554;48,20;49,35,5,14,18;0,0,n00bfelt,folds/0,288,You,raises to/0,0,Proper,folds/0,0,ElectricBoat,folds/0,0,seo.c,folds/0,1254,ryan22,all in/0,0,Lucky8,folds/0,0,claraa,folds/0,0,HoserPot,folds/0,1254,You,calls;ryan22,42,40
+video	cand	rl:hyper-sprint@290310:21	290324.7	3	0	6	0.7517	320564.7	1	1	0	-1	JinLongFlop	1201	0	$0.25 Hyper Sprint	25	180	14	0	5	30.49101414040954	1	-1		1;21;5;125;250;250;7343;-500;33,34;7,41,39,44,13;0,500,You,raises to/0,500,CosmicFish,calls/0,500,VelvetCowboy,calls/0,0,PocketRockets,folds/0,0,QuietKicker,folds/0,0,tkachenko77,folds/0,500,LRodriguez,calls/0,0,Chen_JinLong,folds/0,500,JinLongFlop,calls/1,0,JinLongFlop,checks/1,0,You,checks/1,0,CosmicFish,checks/1,0,VelvetCowboy,checks/1,0,LRodriguez,checks/2,2234,JinLongFlop,bets/2,0,You,folds/2,0,CosmicFish,folds/2,2234,VelvetCowboy,calls/2,0,LRodriguez,folds/3,0,JinLongFlop,checks/3,0,VelvetCowboy,checks;JinLongFlop,50,35/VelvetCowboy,48,40
+video	cand	rl:hyper-sprint@290310:29	290330.3	3	0	2	0.8772	320570.3	1	1	0	0.25	tkachenko77	-1	0	$0.25 Hyper Sprint	25	180	5	0	5	66.59234747374288	1	290330.3016666667	HOLDS kastHype|never in doubt|doubled up kastChip	1;29;7;200;400;400;19576;10288;39,50;10,2,22,11,49;0,0,JinLongFlop,folds/0,800,You,raises to/0,0,CosmicFish,folds/0,0,VelvetCowboy,folds/0,0,PocketRockets,folds/0,0,QuietKicker,folds/0,2281,tkachenko77,raises to/0,0,LRodriguez,folds/0,0,Chen_JinLong,folds/0,2281,You,calls/1,0,You,checks/1,2910,tkachenko77,bets/1,2910,You,calls/2,6238,You,bets/2,4097,tkachenko77,all in;tkachenko77,46,47
+video	cand	rl:hyper-sprint@290310:40	290338	3	0	1	0.5868	320578	1	1	0	0.386	PocketRockets	-1	0	$0.25 Hyper Sprint	25	180	11	0	5	85.09234747374288	1	-1	kastClap kastClap|kastClap kastClap|never in doubt	1;40;10;400;800;800;9800;4700;21,16;33,4,17,47,22;0,0,CosmicFish,folds/0,0,VelvetCowboy,folds/0,4300,PocketRockets,all in/0,0,QuietKicker,folds/0,0,islac,folds/0,0,LRodriguez,folds/0,0,Chen_JinLong,folds/0,0,JinLongFlop,folds/0,4300,You,calls;PocketRockets,43,46
+video	cand	rl:hyper-sprint@290310:67	290356.9	3	0	1	0.6403	320596.9	1	1	0	0.2728333333333333	SleepyBlinds1	-1	0	$0.25 Hyper Sprint	25	180	21	0	5	98.7881696959651	2	290356.90166666673	doubled up kastChip|kastHype kastHype|LETS GOOO	1;67;16;1500;3000;3000;60164;25188;4,49;50,31,7,14,29;0,0,CosmicFish,folds/0,0,VelvetCowboy,folds/0,27818,aarav.r,all in/0,0,SilentKicker,folds/0,0,huang82,folds/0,0,VelvetBibimbap,folds/0,0,steady_gutshot,folds/0,22285,SleepyBlinds1,all in/0,12594,You,all in;SleepyBlinds1,47,39/aarav.r,36,38
+video	cand	rl:hyper-sprint@293190:17	293201.9	3	0	8	0.5301	323441.9	1	1	0	0.8636363636363636	ren_suzuki	1589	0	$0.25 Hyper Sprint	25	180	32	0	8	39.068347473742875	1	-1	kastClap kastClap|HOLDS kastHype|SHIP IT kastHype	1;17;4;100;200;200;5279;3686;35,32;14,7,37,38,12;0,400,You,raises to/0,0,RecklessFelt,folds/0,400,kevin85,calls/0,0,SmoothBluff,folds/0,0,Tom_Skint,folds/0,1593,ren_suzuki,all in/0,0,gh0stfold,folds/0,0,PizzaioloNuts,folds/0,1593,You,calls/0,1593,kevin85,calls/1,0,You,checks/1,0,kevin85,checks/2,3005,You,bets/2,0,kevin85,folds;ren_suzuki,43,51
+video	cand	rl:hyper-sprint@294630:32	294652.4	3	0	6	0.5208	324892.4	1	0	0	-1	IronShark	-1	0	$0.25 Hyper Sprint	25	180	79	0	4	17.99101414040954	1	-1		1;32;8;250;500;500;1750;0;40,45;;0,2543,kevin85,all in/0,0,RounderTTV,folds/0,0,ximenaf,folds/0,0,gh0stfold,folds/0,0,BankrollRIP,folds/0,0,You,folds/0,0,hao23,folds/0,0,valeria.r,folds/0,0,IronShark,folds;
+video	cand	rl:hyper-sprint@296070:10	296077	3	0	7	0.7591	326317	1	1	0	0.9161616161616162	matteo99	-1	0	$0.25 Hyper Sprint	25	180	4	0	4	47.49101414040954	1	-1	EZ|EZ|never in doubt	1;10;3;80;160;160;18264;9412;42,40;31,7,1,17,51;0,0,JunYang,folds/0,160,lena.s,calls/0,0,IronDealer2,folds/0,0,SaltyTurn,folds/0,160,You,calls/0,0,Sokil96,folds/0,1240,matteo99,raises to/0,0,patient_chip,folds/0,0,ShadyShove1,folds/0,0,lena.s,folds/0,4464,You,raises to/0,4464,matteo99,calls/1,5081,You,bets/1,4388,matteo99,all in;matteo99,20,22
+video	cand	rl:hyper-sprint@296070:38	296096.6	3	0	2	0.8711	326336.6	1	1	0	0.81925	ShadyShove1	346	0	$0.25 Hyper Sprint	25	180	5	0	4	100	1	-1	LETS GOOO|doubled up kastChip|holds!!	1;38;9;300;600;600;27776;14638;33,34;7,45,21,11,20;0,0,gh0stfold,folds/0,1230,You,raises to/0,0,GoldenClover,folds/0,0,CrimsonStack,folds/0,0,patient_chip,folds/0,13138,ShadyShove1,all in/0,0,JunYang,folds/0,0,Brandon_Vegas,folds/0,13138,You,calls;ShadyShove1,30,28
+video	cand	rl:hyper-sprint@296070:41	296098.7	3	0	4	0.6077	326338.7	1	1	0	-1	reckless_ace	-1	0	$0.25 Hyper Sprint	25	180	9	0	4	100	1	-1		1;41;10;400;800;800;8610;-4505;32,18;0,42,47,1,36;0,0,GoldenClover,folds/0,0,CrimsonStack,folds/0,0,patient_chip,folds/0,0,JunYang,folds/0,0,Brandon_Vegas,folds/0,1600,reckless_ace,raises to/0,0,gh0stfold,folds/0,1600,You,calls/1,0,You,checks/1,0,reckless_ace,checks/2,0,You,checks/2,0,reckless_ace,checks/3,2105,You,bets/3,2105,reckless_ace,calls;reckless_ace,37,45
+video	cand	rl:hyper-sprint@296070:44	296100.8	3	0	1	0.6519	326340.8	1	1	0	0.3409090909090909	patient_chip	-1	0	$0.25 Hyper Sprint	25	180	10	0	4	100	2	-1	kastHype kastHype|kastClap kastClap|holds!!	1;44;11;500;1000;1000;22320;750;51,12;7,40,24,50,49;0,0,JunYang,folds/0,0,Brandon_Vegas,folds/0,0,reckless_ace,folds/0,0,gh0stfold,folds/0,2000,You,raises to/0,0,GoldenClover,folds/0,0,CrimsonStack,folds/0,2000,patient_chip,calls/1,3397,patient_chip,bets/1,3397,You,calls/2,5013,patient_chip,all in/2,5013,You,calls;patient_chip,16,48
+video	cand	rl:hyper-sprint@296070:49	296104.3	3	0	8	0.4417	326344.3	1	1	0	0.88675	Olga_Zver	-1	0	$0.25 Hyper Sprint	25	180	6	0	4	100	1	-1	HOLDS kastHype|never in doubt|LETS GOOO	1;49;12;600;1200;1200;14032;9901;51,50;44,48,30,32,31;0,0,conor94,folds/0,0,ashleym,folds/0,0,julienroux,folds/0,0,jkang,folds/0,4131,Brandon_Vegas,raises to/0,0,StoneRaise,folds/0,30716,You,all in/0,3370,Olga_Zver,all in/0,0,n00bstack,folds/0,0,Brandon_Vegas,folds;Olga_Zver,27,6
+video	cand	rl:hyper-sprint@297510:17	297521.9	3	0	8	0.6537	327761.9	1	0	0	0.9090909090909091	CrimsonDealer	-1	0	$0.25 Hyper Sprint	25	180	23	0	4	59.349352765090984	1	-1	EZ|doubled up kastChip|chat we're so back	1;17;4;100;200;200;16470;8838;46,44;29,30,19,41,49;0,706,tomekkowalski,raises to/0,2542,You,raises to/0,0,polar_whale77,folds/0,0,silva78,folds/0,0,ShoveTTV,folds/0,2542,CrimsonDealer,calls/0,0,gh0stfold,folds/0,0,SmoothStack4,folds/0,0,ville_nieminen,folds/0,0,tomekkowalski,folds/1,3943,You,bets/1,3943,CrimsonDealer,calls/2,0,You,checks/2,1147,CrimsonDealer,all in/2,1147,You,calls;CrimsonDealer,35,47
+video	cand	rl:hyper-sprint@297510:50	297545	3	0	8	0.5276	327785	1	0	0	0.7485	GoldenCooler	-1	0	$0.25 Hyper Sprint	25	180	6	0	4	89.70668609842431	1	-1	SHIP IT kastHype|never in doubt|doubled up kastChip	1;50;12;600;1200;1200;30954;15177;47,40;14,9,32,45,41;0,14577,GoldenCooler,all in/0,0,n00bchip,folds/0,0,Hetman,folds/0,0,JBrown,folds/0,0,CosmicFlush,folds/0,0,jonas_fischer,folds/0,0,SmoothStack4,folds/0,14577,You,calls;GoldenCooler,44,35
+video	cand	rl:hyper-sprint@297510:51	297545.7	3	0	8	0.4717	327785.7	1	0	0	0.60225	n00bchip	-1	0	$0.25 Hyper Sprint	25	180	5	0	4	100	1	-1	SHIP IT kastHype|SHIP IT kastHype|kastClap kastClap	1;51;12;600;1200;1200;18488;8944;48,35;13,49,30,19,38;0,8344,n00bchip,all in/0,0,Hetman,folds/0,0,JBrown,folds/0,0,CosmicFlush,folds/0,0,jonas_fischer,folds/0,0,ville_nieminen,folds/0,0,SmoothStack4,folds/0,8344,You,calls;n00bchip,41,29
+video	cand	rl:hyper-sprint@298950:32	298971.7	0	0	2	0.8584	329211.7	0	0	0	-1	piotrlewandowski	-1	0	$0.25 Hyper Sprint	25	180	37	0	4	11.317670342079435	0	-1	solver approved|textbook|that's the spot	1;32;8;250;500;500;20596;-9923;49,32;35,40,14,21,43;0,0,gh0stfold,folds/0,0,daikisato,folds/0,0,StoicRaise,folds/0,0,ColdShove85,folds/0,0,virtanen88,folds/0,1000,You,raises to/0,0,Ivan_Volk,folds/0,1000,piotrlewandowski,calls/1,1798,piotrlewandowski,bets/1,3596,You,raises to/1,3596,piotrlewandowski,calls/2,0,piotrlewandowski,checks/2,4971,You,bets/2,4971,piotrlewandowski,calls/3,356,piotrlewandowski,all in/3,356,You,calls;piotrlewandowski,39,42
 video	cand	lv:embercrest-nightly@207:skip:36	299310	1	0	6	0.614	329550	1	1	0	-1	Gus	-1	0	Embercrest Nightly $120	12000	73	0	0	0	0	0	-1		1;36;5;300;600;600;19724;-9112;49,29;12,14,34,21,2;0,0,Seat 5,folds/0,1230,You,raises to/0,0,Seat 1,folds/0,4468,Gus,raises to/0,0,Seat 3,folds/0,0,Sven,folds/0,4468,You,calls/1,0,You,checks/1,4644,Gus,bets/1,4644,You,calls/2,0,You,checks/2,0,Gus,checks/3,0,You,checks/3,14609,Gus,bets/3,0,You,folds;
 video	cand	lv:embercrest-nightly@207:skip:57	299377.5	1	0	2	0.7324	329617.5	1	1	0	-1	Seat 5	-1	0	Embercrest Nightly $120	12000	73	0	0	0	0	0	-1		1;57;8;600;1200;1200;61612;-28706;43,48;41,44,47,39,2;0,2400,Seat 5,raises to/0,2400,You,calls/0,0,Seat 1,folds/0,0,Gus,folds/0,0,Seat 3,folds/0,2400,Seat 4,calls/1,0,Seat 4,checks/1,6206,Seat 5,bets/1,6206,You,calls/1,0,Seat 4,folds/2,11083,Seat 5,bets/2,11083,You,calls/3,9017,Seat 5,all in/3,9017,You,calls;Seat 5,45,29
 video	cand	dee:208:14	300875	2	0	2	0.88	331115	0	0	1	0.8323	Seat 2	-1	0	a back-room game	0	0	0	0	0	0	0	-1		1;14;1;100;200;0;40000;20000;26,25;27,48,45,0,31;0,0,Seat 1,folds/0,600,You,raises to/0,600,Seat 2,calls/1,800,You,bets/1,19400,Seat 2,all in/1,19400,You,all in;Seat 2,50,46
 video	paid	pay:2027-04
 video	paid	story:*
-video	bell	285120	100 views on “Was this bluff ever working? $0.25 Hyper Sprint, 113 big blinds”.
-video	bell	286560	1,000 views on “THE BIGGEST COOLER I'VE EVER PLAYED”.
-video	bell	286560	100 views on “3 hands from the $0.25 Hyper Sprint”.
-video	bell	286560	1,000 views on “3 hands from the $0.25 Hyper Sprint”.
-video	bell	288000	100 views on “$0.25 Hyper Sprint, hand 21: KQ folded on the flop”.
+video	bell	286560	1,000 views on “5 hands from the $0.25 Hyper Sprint”.
+video	bell	288000	1,000 views on “How do you bounce back from this?”.
+video	bell	288000	1,000 views on “How do you bounce back from this?”.
+video	bell	288000	100 views on “$0.25 Hyper Sprint, hand 26: QJ calls the river and wins”.
 video	bell	289440	100 views on “ME VS GH0STFOLD!”.
 video	bell	292320	100 views on “Not good enough this time: folding tens to a shove”.
 video	bell	292320	1,000 views on “ME VS GH0STFOLD!”.
 video	bell	292320	100 views on “Genius or lucky? I called with ace-queen”.
-video	bell	292320	100 views on “there was no folding this one”.
+video	bell	292320	100 views on “somebody had to lose this one. not me”.
 video	bell	293760	1,000 views on “Genius or lucky? I called with ace-queen”.
-video	bell	293760	1,000 views on “there was no folding this one”.
-video	bell	295200	100,000 views on “the river that ruined my night”.
-video	bell	295200	100 views on “$0.25 Hyper Sprint: cooler, K6 vs A6”.
+video	bell	293760	1,000 views on “somebody had to lose this one. not me”.
+video	bell	295200	100 views on “$0.25 Hyper Sprint, hand 30: vs gh0stfold, 32 big blinds”.
+video	bell	295200	1,000 views on “$0.25 Hyper Sprint, hand 30: vs gh0stfold, 32 big blinds”.
+video	bell	296640	1,000 views on “14th of 180: my night at the $0.25 Hyper Sprint”.
 video	bell	296640	100 views on “How I knew to call the river with ace-three”.
-video	bell	298080	1,000 views on “$0.25 Hyper Sprint: cooler, K6 vs A6”.
-video	bell	298080	100 views on “ME VS GH0STFOLD!”.
-video	bell	299520	1,000 views on “How I knew to call the river with ace-three”.
-video	bell	299520	100 views on “Would you have found a fold? $0.25 Hyper Sprint, 65 big blinds”.
-video	bell	300960	100 views on “one night, 5 hands”.
+video	bell	298080	1,000 views on “How I knew to call the river with ace-three”.
+video	bell	298080	100 views on “NOBODY FOLDS HERE”.
+video	bell	299520	100 views on “Call or fold? $0.25 Hyper Sprint, 63 big blinds, river”.
+video	bell	300960	1,000 views on “Would you have found a fold? $0.25 Hyper Sprint, 87 big blinds”.
+video	bell	300960	100 views on “there was no folding this one”.

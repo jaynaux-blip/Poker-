@@ -100,9 +100,9 @@ const std::vector<Template>& Templates()
 		{int(K::Suckout), S::Plain, "{Stakes}, hand {HandNo}: {Mine} vs {Theirs}, {Eq}% and won"},
 		{int(K::Suckout), S::Plain, "{Stakes}: {Mine} wins a {Bb} big blind pot from behind"},
 		// ---- coolers
-		{int(K::Cooler), S::Story, "{MineWords} into {TheirsWords}. nothing I could do"},
+		{int(K::Cooler), S::Story, "#L {MineWords} into {TheirsWords}. nothing I could do"},
 		{int(K::Cooler), S::Story, "there was no folding this one"},
-		{int(K::Cooler), S::Story, "the cooler that sent my {Event} sideways"},
+		{int(K::Cooler), S::Story, "#L the cooler that sent my {Event} sideways"},
 		{int(K::Cooler), S::Story, "#L a {Bb} big blind pot I was always going to lose"},
 		{int(K::Cooler), S::Story, "#W somebody had to lose this one. not me"},
 		{int(K::Cooler), S::Hype, "THE BIGGEST COOLER I'VE EVER PLAYED"},
