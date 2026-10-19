@@ -34,10 +34,25 @@
 //     engine checkpoint, the room director's state and the host text with its hands, met, auto, autoseen and autoread
 //     lines (FAutoHost's, BackRoomAutoRules::AutoHostText's format). Without its world lines, like pre_update2_*.
 //
+// Update 2's gate 2 fixture (update2 SPEC §6.5, §7.5 C2; for PIE §8.2), built with gate 2's code (compiled when the tree has
+// gate 1's autoplay and Game/Video.h):
+//   - update2_creator: an Established career that streams its hypers on Kast and cuts a Rerun video from its own hands
+//     every evening, from Night One until the week after Rerun's first payout: the Wash & Fold when the roll needs it, a
+//     hyper every afternoon on stream (sprinted one day, skipped by the plan the next, the last one played by hand), the
+//     stream kit, two Friday Nightlies at the Embercrest skipped by the plan with their hands noted the card room's way
+//     (video::NoteLiveHand, NoteLiveRecap). Studio's picks rotate the four formats, the five title styles and the five
+//     frames; a Teaching Breakdown of a strategy hand is evergreen. So the channel holds the 60 newest videos whole, the
+//     older ones folded into its tails, evergreen stubs, the partner gate crossed (the review, the welcome), a payout paid
+//     (its key and its bank line), a balance accruing, and open candidates: the plan's (AUTO), the player's own from the
+//     last hyper, the Embercrest's, and a hand at Dee's table on the last night (storytime). Without its world lines, like
+//     pre_update2_*. Its numbers follow Rerun's model, so a change there (the Shorts' FormatSubs, say) means writing it again.
+//
 //   fixture_tool write <dir>   writes the fixtures (the saves without their world lines, which go in world_v1.txt;
 //                              <name>.expected.ssave is what loading and saving the v1 save gives)
 //   fixture_tool write2 <dir>  writes update 2's day-0 fixtures (the saves without their world lines; world_v2.txt)
 //   fixture_tool write-g1 <dir>  writes update 2's gate 1 fixtures (deterministic: two writes are byte for byte the same)
+//   fixture_tool write-g2 <dir> [show]  writes update 2's gate 2 fixture (deterministic too; "show" prints the channel as it
+//                              grows, every ten days, and the save's video lines)
 //   fixture_tool transcript    prints every save as the careers are built and as each fixture is loaded and played on
 //                              (texts, ledgers, the whole save but the world, whose size and hash are printed), the
 //                              c09bc31 careers first, then update 2's; a build whose transcript matches the code the
@@ -65,7 +80,22 @@
 #define SS_FIXTURE_GATE1 0
 #endif
 
+#if SS_FIXTURE_GATE1 && __has_include("ShortStack/Game/Video.h")
+#define SS_FIXTURE_GATE2 1
+#include "ShortStack/Cards.h"
+#include "ShortStack/Game/Gear.h"
+#include "ShortStack/Game/Recall.h"
+#include "ShortStack/Game/TableTalk.h"
+#include "ShortStack/Game/Video.h"
+#include "ShortStack/Hand.h"
+#include "ShortStack/Rng.h"
+#else
+#define SS_FIXTURE_GATE2 0
+#endif
+
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -858,6 +888,9 @@ struct PlanNight : ss::live::SkipSink
 	int Hands = 0;
 	int Checkpoints = 0;
 	int LastCheckpoint = -1;
+	// Gate 2: the night's hands noted for Rerun the card room's way (FAutoHost::OnSkippedHand), into the host's save.
+	life::State* Film = nullptr;
+	std::string FilmEntry, FilmEvent;
 
 	void Think() { Brain = autoplay::BrainFor(A, R, TiltGain, 1, Notes, &Book); }
 	void HandDone(const ss::Hand& H, int HeroSeat) override
@@ -873,7 +906,63 @@ struct PlanNight : ss::live::SkipSink
 				Met.push_back(Id);
 			}
 		}
+#if SS_FIXTURE_GATE2
+		if (Film && T)
+		{
+			FilmHand(H, HeroSeat);
+		}
+#endif
 	}
+#if SS_FIXTURE_GATE2
+	/** The hand as the table card's HANDS page records it (BackRoomAutoRules::AutoSkippedRecord: the player "You", the others
+	 *  by the room's caption name, the hands turned up once each), then video::NoteLiveHand with the night's context. */
+	void FilmHand(const ss::Hand& H, int HeroSeat)
+	{
+		std::vector<std::string> Names;
+		std::vector<int> Shown;
+		const int Mine = HeroSeat >= 0 && HeroSeat < static_cast<int>(H.Seats.size()) ? H.Seats[static_cast<size_t>(HeroSeat)].Seat : -1;
+		for (const ss::HandSeat& S : H.Seats)
+		{
+			if (S.Seat >= static_cast<int>(Names.size()))
+			{
+				Names.resize(static_cast<size_t>(S.Seat) + 1);
+			}
+			const int Idx = T->PlayerIndex(S.Id);
+			const std::string Name = Idx >= 0 ? T->Players[static_cast<size_t>(Idx)].Name : std::string();
+			Names[static_cast<size_t>(S.Seat)] = S.Seat == Mine ? std::string("You") : ss::talk::CaptionName(S.Id, Name, S.Seat);
+		}
+		for (const ss::HandEvent& E : H.Events)
+		{
+			if (E.Type == ss::EventType::Showdown)
+			{
+				for (const ss::ShowdownHand& SH : E.Hands)
+				{
+					Shown.push_back(SH.Seat);
+				}
+			}
+			else if (E.Type == ss::EventType::Reveal)
+			{
+				Shown.insert(Shown.end(), E.Seats.begin(), E.Seats.end());
+			}
+		}
+		std::sort(Shown.begin(), Shown.end());
+		Shown.erase(std::unique(Shown.begin(), Shown.end()), Shown.end());
+		const ss::recall::Record Rec = ss::recall::Of(H, Mine, Names, Shown, T->Tick, T->LevelIndex + 1);
+		ss::video::LiveContext Ctx;
+		Ctx.Source = 1;
+		Ctx.EntryId = FilmEntry;
+		Ctx.Event = FilmEvent;
+		Ctx.BuyIn = T->Spec.BuyInCents;
+		Ctx.Field = T->Spec.Entrants;
+		Ctx.Remaining = T->Remaining;
+		Ctx.Bubble = T->HandForHand();
+		Ctx.Final = T->Tables.size() <= 1;
+		Ctx.Auto = true;
+		Ctx.Style = static_cast<int>(A.S);
+		Ctx.World = DayStart + T->ClockMinutes();
+		ss::video::NoteLiveHand(*Film, Rec, nullptr, Ctx);
+	}
+#endif
 	void Events(const std::vector<ss::TEvent>& E) override
 	{
 		if (Room && T)
@@ -920,7 +1009,7 @@ void TakeSeat(PlanNight& N, ss::SaveData& D, double World)
  * A Nightly the plan skips to the result through live::SkipSlice, settled the host's way (the cage, the bus home,
  * FAutoHost::OnSettle's played line and notes, the night noted for the world) and the save loaded again.
  */
-double PlanNightToResult(std::unique_ptr<ss::Session>& S, Hooks& H, double Now, const char* Seed, const char* Id, style::Style St)
+double PlanNightToResult(std::unique_ptr<ss::Session>& S, Hooks& H, double Now, const char* Seed, const char* Id, style::Style St, bool Film = false)
 {
 	const live::Occurrence O = live::FindOccurrence(Id);
 	Now = At(*S, Now, O.DeskOpens + 40.0);
@@ -941,6 +1030,17 @@ double PlanNightToResult(std::unique_ptr<ss::Session>& S, Hooks& H, double Now, 
 	N.DayStart = O.Start - static_cast<double>(O.T->StartMinute);
 	N.A = PlanOf(St, autoplay::Mode::Skip, autoplay::Target::Result, 0);
 	TakeSeat(N, D, O.Start);
+#if SS_FIXTURE_GATE2
+	if (Film)
+	{
+		// The skipped hands' ids as the card room keeps them apart from the table's own ("lv:<entry>:skip:<n>", BackRoomAuto.cpp).
+		N.Film = &D.Life;
+		N.FilmEntry = O.Id + ":skip";
+		N.FilmEvent = O.T->Name;
+	}
+#else
+	(void)Film;
+#endif
 	for (int Guard = 0; Guard < 20000 && !T->Hero().Busted && !T->bFinished; ++Guard)
 	{
 		if (ss::live::SkipSlice(*T, N.Brain, N.A, 0.0, N).Why != ss::live::SkipWhy::Budget)
@@ -954,6 +1054,24 @@ double PlanNightToResult(std::unique_ptr<ss::Session>& S, Hooks& H, double Now, 
 	const std::vector<ss::LiveSeen> Table = Seen(*E);
 	live::Settle(D.BankrollCents, D.Life, O.Id, Place, T->Spec.Entrants, Prize, End);
 	live::PayFare(D.BankrollCents, D.Life, O.Id, true, End + 5.0);
+#if SS_FIXTURE_GATE2
+	if (Film)
+	{
+		// The night's recap, when it was one (FAutoHost::OnSettle's NoteLiveRecap).
+		ss::video::LiveContext Ctx;
+		Ctx.Source = 1;
+		Ctx.EntryId = O.Id;
+		Ctx.Event = O.T->Name;
+		Ctx.BuyIn = T->Spec.BuyInCents;
+		Ctx.Field = T->Spec.Entrants;
+		Ctx.Remaining = T->Remaining;
+		Ctx.Final = T->Tables.size() <= 1;
+		Ctx.Auto = N.R.AiHands > 0;
+		Ctx.Style = Ctx.Auto ? static_cast<int>(N.A.S) : 0;
+		Ctx.World = End;
+		ss::video::NoteLiveRecap(D.Life, Ctx, Place, Prize);
+	}
+#endif
 	if (N.R.AiHands > 0 || N.R.AiDecisions > 0)
 	{
 		autoplay::Record(D.Life.Auto, O.Id, 1, 0, N.A, N.R);
@@ -1199,6 +1317,391 @@ ss::SaveData AutoMidNightly()
 }
 #endif
 
+#if SS_FIXTURE_GATE2
+// ---------------------------------------------------------------- update 2's gate 2 fixture (write-g2)
+
+namespace video = ss::video;
+
+/** The clock to World if it's still ahead (At would wind it back). */
+double CreatorUntil(ss::Session& S, double Now, double World)
+{
+	return World > S.WorldMinutes() ? At(S, Now, World) : Now;
+}
+
+/** A Teaching Breakdown of one of these is a strategy video, evergreen (§4.5). */
+bool CreatorStrategy(video::Kind K)
+{
+	return K == video::Kind::Bluff || K == video::Kind::HeroCall || K == video::Kind::HeroFold || K == video::Kind::Bubble;
+}
+
+bool CreatorEventKind(video::Kind K)
+{
+	return K == video::Kind::DeepRun || K == video::Kind::FinalTable || K == video::Kind::Win;
+}
+
+/** The night a candidate was cut on (Video.cpp's NightKey: the small hours count with the evening before). */
+int CreatorNight(double World)
+{
+	return static_cast<int>(std::floor((World - 10.0 * 60.0) / Day));
+}
+
+/** The event a candidate came from (Video.cpp's EventKey: the id less its hand, and a live skip's ":skip"). */
+std::string CreatorEvent(const std::string& Id)
+{
+	const size_t Cut = Id.rfind(':');
+	std::string Key = Cut == std::string::npos ? Id : Id.substr(0, Cut);
+	if (Key.size() >= 5 && Key.compare(Key.size() - 5, 5, ":skip") == 0)
+	{
+		Key.resize(Key.size() - 5);
+	}
+	return Key;
+}
+
+/**
+ * Studio's pick for an evening, in turn, from the open candidates (best first): a Teaching Breakdown of a strategy hand
+ * (evergreen), a Hype Short, a Question Breakdown with the Number frame, a Vlog of the best night (three to eight of its
+ * hands), a Recap of an event's result with its hands (two to six; else a Plain Breakdown with the Trophy frame); whatever
+ * the turn can't make, a Story Breakdown.
+ */
+std::vector<video::Choice> CreatorPicks(const std::vector<video::Candidate>& Open, int Turn)
+{
+	std::vector<video::Choice> Out;
+	if (Open.empty())
+	{
+		return Out;
+	}
+	auto One = [](const video::Candidate& C, video::Format F, video::TitleStyle T, video::Frame Fr) {
+		video::Choice Ch;
+		Ch.Candidates = {C.Id};
+		Ch.F = F;
+		Ch.T = T;
+		Ch.Fr = Fr;
+		return Ch;
+	};
+	const video::Candidate& Best = Open.front();
+	switch (Turn % 5)
+	{
+	case 0:
+	{
+		const auto It = std::find_if(Open.begin(), Open.end(), [](const video::Candidate& C) { return CreatorStrategy(C.K); });
+		Out.push_back(One(It != Open.end() ? *It : Best, video::Format::Breakdown, video::TitleStyle::Teaching, video::Frame::Cards));
+		break;
+	}
+	case 1:
+		Out.push_back(One(Best, video::Format::Short, video::TitleStyle::Hype, video::Frame::Reaction));
+		break;
+	case 2:
+		Out.push_back(One(Best, video::Format::Breakdown, video::TitleStyle::Question, video::Frame::Number));
+		break;
+	case 3:
+	{
+		video::Choice Night;
+		Night.F = video::Format::Vlog;
+		Night.T = video::TitleStyle::Story;
+		Night.Fr = video::Frame::Versus;
+		const auto Lead = std::find_if(Open.begin(), Open.end(), [](const video::Candidate& C) { return C.K != video::Kind::Story; });
+		for (const video::Candidate& X : Open)
+		{
+			if (Lead != Open.end() && Night.Candidates.size() < 8 && X.K != video::Kind::Story && CreatorNight(X.At) == CreatorNight(Lead->At))
+			{
+				Night.Candidates.push_back(X.Id);
+			}
+		}
+		Out.push_back(Night);
+		break;
+	}
+	default:
+	{
+		for (const video::Candidate& E : Open)
+		{
+			if (!CreatorEventKind(E.K))
+			{
+				continue;
+			}
+			video::Choice Recap;
+			Recap.F = video::Format::Recap;
+			Recap.T = video::TitleStyle::Plain;
+			Recap.Fr = video::Frame::Trophy;
+			Recap.Candidates = {E.Id};
+			for (const video::Candidate& X : Open)
+			{
+				if (Recap.Candidates.size() < 7 && !CreatorEventKind(X.K) && X.K != video::Kind::Story && CreatorEvent(X.Id) == CreatorEvent(E.Id))
+				{
+					Recap.Candidates.push_back(X.Id);
+				}
+			}
+			Out.push_back(Recap);
+			break;
+		}
+		Out.push_back(One(Best, video::Format::Breakdown, video::TitleStyle::Plain, video::Frame::Trophy));
+		break;
+	}
+	}
+	Out.push_back(One(Best, video::Format::Breakdown, video::TitleStyle::Story, video::Frame::Reaction));
+	return Out;
+}
+
+/** The evening's upload through Studio's PUBLISH: the edit's time and energy pass, and FinishSkip lands it. */
+bool CreatorUpload(ss::Session& S, double& Now, int Turn, std::array<int, 4>& ByFormat)
+{
+	for (const video::Choice& Ch : CreatorPicks(S.VideoCandidates(), Turn))
+	{
+		if (!video::CanUpload(Ch, S.Life.Video.Open).empty())
+		{
+			continue;
+		}
+		Fed(S);
+		if (!S.Publish(Ch).empty())
+		{
+			return false;
+		}
+		for (int Guard = 0; S.TimeSkip.Active && Guard < 200; ++Guard)
+		{
+			Now = Wait(S, Now, 0.5);
+		}
+		++ByFormat[static_cast<size_t>(Ch.F)];
+		return true;
+	}
+	return false;
+}
+
+/** A network event sprinted from its start to the result (today's Sprint; the hands it hands back played with the grader's
+ *  best), whole stretches an update so the stream sees the same frames on any machine. False when it didn't open. */
+bool CreatorSprint(ss::Session& S, double& Now, const ss::net::EventInstance& I)
+{
+	Now = CreatorUntil(S, Now, I.Start);
+	Fed(S);
+	S.RegisterEvent(ss::net::Shared().Listing(I));
+	if (S.CurrentScreen != ss::Screen::Table)
+	{
+		return false;
+	}
+	S.SprintBudgetMs = 1.0e9;
+	for (int Frames = 0; S.CurrentScreen == ss::Screen::Table && Frames < 4000000; ++Frames)
+	{
+		S.CurrentPace = ss::Pace::Sprint;
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		ActBest(S, Now);
+	}
+	S.LeaveResults();
+	return true;
+}
+
+/**
+ * A hand at Dee's table on the night the host played (FAutoHost::OnHandEnded's video::NoteLiveHand, Source 2): a cooler,
+ * the player's eights against Sal's ace-king, all in on the flop at $1/$2 with $200 behind. Sal and Twitch are in the
+ * record as the table had them; the candidate is storytime, and its titles name nobody.
+ */
+void CreatorDeeHand(life::State& L, double World)
+{
+	std::vector<ss::Card> Deck = ss::ParseCards("8hAh7c8dKh2d3h8sAcKd4h2c5h9s");
+	for (int C = 0; C < 52; ++C)
+	{
+		if (std::find(Deck.begin(), Deck.end(), C) == Deck.end())
+		{
+			Deck.push_back(C);
+		}
+	}
+	ss::HandConfig Cfg;
+	Cfg.Players = {{0, ss::HeroId, 20000}, {1, "Sal", 20000}, {2, "Twitch", 20000}};
+	Cfg.ButtonSeat = 2;
+	Cfg.SmallBlind = 100;
+	Cfg.BigBlind = 200;
+	Cfg.Deck = Deck;
+	ss::Rng R("fixture-g2-dee-hand");
+	ss::Hand H(Cfg, R);
+	// Twitch folds the button; the player raises from the small blind and Sal calls; the player bets the flop, Sal moves in.
+	for (const ss::PlayerAction& A : {ss::PlayerAction::Fold(), ss::PlayerAction::RaiseTo(600), ss::PlayerAction::Call(), ss::PlayerAction::RaiseTo(800),
+			 ss::PlayerAction::RaiseTo(19400), ss::PlayerAction::Call()})
+	{
+		if (!H.bComplete)
+		{
+			H.Act(A);
+		}
+	}
+	std::vector<int> Shown;
+	for (const ss::HandEvent& E : H.Events)
+	{
+		if (E.Type == ss::EventType::Showdown)
+		{
+			for (const ss::ShowdownHand& SH : E.Hands)
+			{
+				Shown.push_back(SH.Seat);
+			}
+		}
+		else if (E.Type == ss::EventType::Reveal)
+		{
+			Shown.insert(Shown.end(), E.Seats.begin(), E.Seats.end());
+		}
+	}
+	std::sort(Shown.begin(), Shown.end());
+	Shown.erase(std::unique(Shown.begin(), Shown.end()), Shown.end());
+	const ss::recall::Record Rec = ss::recall::Of(H, 0, {"You", "Sal", "Twitch"}, Shown, 14, 1);
+	ss::video::LiveContext Ctx;
+	Ctx.Source = 2;
+	Ctx.World = World;
+	ss::video::NoteLiveHand(L, Rec, nullptr, Ctx);
+	if (!H.bComplete || Transcript)
+	{
+		std::printf("  [dee] the cooler: %s, pot %lld, the player's net %lld\n", H.bComplete ? "dealt out" : "NOT COMPLETE", static_cast<long long>(Rec.Pot),
+			static_cast<long long>(Rec.HeroNet));
+	}
+}
+
+/** One line on the channel (the "show" mode's progress). */
+void CreatorLine(const ss::Session& S, int K)
+{
+	const video::Channel& C = S.Life.Video;
+	const double World = S.WorldMinutes();
+	std::printf("  [creator] day %3d %s: %6.0f subscribers, %8.0f views, %2zu videos whole, %2zu stubs, %2zu open; partner %s; balance %s, paid %s; Kast %d; bank %s\n", K,
+		ss::net::DateLabel(ss::net::DayOf(World)).c_str(), video::SubsAt(C, World), video::TotalViews(C, World), C.Videos.size(), C.Stubs.size(), C.Open.size(),
+		C.PartnerAt >= 0.0 ? ss::net::DateLabel(ss::net::DayOf(C.PartnerAt)).c_str() : C.ReviewAt >= 0.0 ? "review" : "no", ss::Money(C.BalanceCents).c_str(),
+		ss::Money(C.PaidCents).c_str(), S.Channel.Followers, ss::Money(S.BankrollCents).c_str());
+}
+
+/**
+ * update2_creator (see the top): the creator's days until Rerun's first payout has landed and the next Friday (at most
+ * MaxDays), then a night at Dee's, saved the next afternoon. The last Friday's hyper is played by hand on stream (the
+ * watch path: a candidate of the player's own with the stream's face and chat), and its Nightly filmed.
+ */
+ss::SaveData Creator(int MaxDays)
+{
+	const char* Seed = "fixture-g2-creator";
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, Seed));
+	S->NewCareer(Someone());
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.2);
+	// Night One: a little saved up from the last job (the first rent and a mid rig: 32 GB of RAM to stream, a webcam, a USB
+	// mic, a ring light). After that the Wash & Fold keeps the roll over the rent.
+	S->BankrollCents += 160000;
+	for (const char* Id : {"ram-32", "webcam-720", "mic-usb", "ring-light"})
+	{
+		const std::string Why = S->Buy(Id);
+		if (!Why.empty())
+		{
+			std::printf("fixture: the creator's %s: %s\n", Id, Why.c_str());
+		}
+	}
+	S->SprintBudgetMs = 1.0e9;
+	const ss::net::Network& Net = ss::net::Shared();
+	const int FirstDay = ss::net::DayOf(S->WorldMinutes());
+	// Two Nightlies at the Embercrest, skipped by the plan (TAG) with the hands noted: a Friday about two months in (its
+	// hands make videos), and the last Friday (its hands still open).
+	const int EarlyFriday = FirstDay + 60 - ((ss::net::Weekday(FirstDay + 60) + 7 - 4) % 7);
+	int PaidDay = -1;
+	int Turn = 0;
+	std::array<int, 4> ByFormat{};
+	bool Last = false;
+	int Days = 0;
+	for (int K = 0; K < MaxDays && !Last; ++K)
+	{
+		const int DayNo = FirstDay + K;
+		Days = K + 1;
+		PaidDay = PaidDay < 0 && S->Life.Video.PaidCents > 0 ? DayNo : PaidDay;
+		Last = PaidDay >= 0 && DayNo >= PaidDay + 3 && ss::net::Weekday(DayNo) == 4;
+		// 7 AM: a shift when the roll's under the rent and a cushion.
+		Now = CreatorUntil(*S, Now, static_cast<double>(DayNo) * Day + 7.0 * 60.0);
+		Fed(*S);
+		if (S->BankrollCents < ss::life::MonthlyRentCents + 40000 && S->StartActivity("washfold").empty())
+		{
+			for (int Guard = 0; S->TimeSkip.Active && Guard < 200; ++Guard)
+			{
+				Now = Wait(*S, Now, 0.5);
+			}
+		}
+		// 2 PM: a hyper on stream; the plan (TAG) skips it whole one day, Sprint plays it the next.
+		Now = CreatorUntil(*S, Now, static_cast<double>(DayNo) * Day + 14.0 * 60.0);
+		Fed(*S);
+		ss::net::EventInstance I;
+		if (S->BankrollCents >= 500 && Net.Next("hyper-sprint", S->WorldMinutes() + 1.0, I))
+		{
+			const bool OnAir = S->GoLive().empty();
+			if (Last)
+			{
+				ByHand(*S, Now, I);
+			}
+			else if (K % 2 == 0)
+			{
+				PlanHyper(*S, Now, I, style::Style::Tag, 0, 0);
+			}
+			else
+			{
+				CreatorSprint(*S, Now, I);
+			}
+			if (OnAir)
+			{
+				Now = Wait(*S, Now, 0.5);
+				S->EndStream();
+			}
+		}
+		if (DayNo == EarlyFriday || Last)
+		{
+			ss::live::Occurrence O;
+			for (const ss::live::Occurrence& X : ss::live::Occurrences(DayNo))
+			{
+				O = std::string(X.T->Key) == "nightly" ? X : O;
+			}
+			if (O.Valid() && S->BankrollCents >= O.T->BuyInCents + 30000)
+			{
+				Now = PlanNightToResult(S, H, Now, Seed, O.Id.c_str(), style::Style::Tag, true);
+			}
+		}
+		// 9 PM (or home from the Embercrest): the evening's video, from day 3.
+		if (K >= 3)
+		{
+			Now = CreatorUntil(*S, Now, static_cast<double>(DayNo) * Day + 21.0 * 60.0);
+			Turn += CreatorUpload(*S, Now, Turn, ByFormat) ? 1 : 0;
+		}
+		if (Transcript && K % 10 == 9)
+		{
+			CreatorLine(*S, K + 1);
+		}
+	}
+	// The last night: Dee's game (the next one open), played out by the host: the cooler noted for Rerun, the night's net
+	// on the save and the world told, the save loaded again.
+	const life::Activity* G = life::Find("dee-game");
+	const double Doors = G ? life::NextOpen(*G, S->WorldMinutes()) : -1.0;
+	if (Doors > 0.0)
+	{
+		Now = CreatorUntil(*S, Now, Doors + 30.0);
+		Fed(*S);
+		const std::string Why = S->GoToGame("dee-game", 20000);
+		if (!Why.empty())
+		{
+			std::printf("fixture: Dee's game: %s\n", Why.c_str());
+		}
+		ss::SaveData D = HostSave(H, *S);
+		const double End = Doors + 4.0 * 60.0;
+		CreatorDeeHand(D.Life, Doors + 95.0);
+		const ss::Chips NightNet = 18800;
+		D.BankrollCents += NightNet;
+		D.Life.Record(End, "Dee's game", NightNet, 0);
+		D.Life.BackRoomNights += 1;
+		D.Life.BackRoomNetCents += NightNet;
+		D.NoteBackRoom(End, {"Sal", "Big Lou", "Twitch", "Mei"}, NightNet);
+		D.ClockMinutes = End + 4.0 - ss::net::MinutesPerDay * ss::net::NightOneDay;
+		S.reset();
+		S.reset(new ss::Session(H, Seed, &D));
+		S->CurrentScreen = ss::Screen::Lobby;
+		S->ResumeCalendarFrom(End + 4.0);
+		Now = Wait(*S, Now, 0.2);
+	}
+	// The next afternoon, fed: saved.
+	Now = CreatorUntil(*S, Now, static_cast<double>(ss::net::DayOf(S->WorldMinutes()) + 1) * Day + 15.0 * 60.0);
+	Fed(*S);
+	Now = Wait(*S, Now, 0.2);
+	S->Save();
+	if (Transcript)
+	{
+		CreatorLine(*S, Days + 1);
+		std::printf("  [creator] %d uploads: %d Shorts, %d Breakdowns, %d Vlogs, %d Recaps\n", Turn, ByFormat[0], ByFormat[1], ByFormat[2], ByFormat[3]);
+	}
+	return H.Last;
+}
+#endif
+
 bool WriteFile(const std::string& Path, const std::string& Text)
 {
 	FILE* F = std::fopen(Path.c_str(), "wb");
@@ -1239,12 +1742,29 @@ int main(int Argc, char** Argv)
 {
 	using namespace fixture_tool;
 	const std::string Mode = Argc > 1 ? Argv[1] : "";
-	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "transcript")
+	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "write-g2" && Mode != "transcript")
 	{
-		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool write-g1 <dir> [show] | fixture_tool transcript\n");
+		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool write-g1 <dir> [show] | fixture_tool write-g2 <dir> [show] | fixture_tool transcript\n");
 		return 2;
 	}
 	Transcript = Mode == "transcript";
+	if (Mode == "write-g2")
+	{
+#if SS_FIXTURE_GATE2
+		if (Argc < 3)
+		{
+			std::printf("usage: fixture_tool write-g2 <dir> [show]\n");
+			return 2;
+		}
+		// "show" prints the channel every ten days as the career is built, for the lead's PIE notes.
+		Transcript = Argc > 3 && std::string(Argv[3]) == "show";
+		const std::string Dir = std::string(Argv[2]) + "/";
+		return WriteFile(Dir + "update2_creator.ssave", WithoutWorld(Creator(420).Serialize())) ? 0 : 1;
+#else
+		std::printf("fixture_tool write-g2: this tree has no Rerun (update 2 gate 2)\n");
+		return 2;
+#endif
+	}
 	if (Mode == "write-g1")
 	{
 #if SS_FIXTURE_GATE1

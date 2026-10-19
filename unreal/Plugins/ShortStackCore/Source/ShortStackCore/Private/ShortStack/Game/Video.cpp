@@ -82,21 +82,26 @@ Shape ShapeOf(Class C)
 	return {0.75, 1.5, 12.0};
 }
 
+/**
+ * A format's row (§4.5, §4.6). Subs is FormatSubs in c (v1.2, the G2 audit's S2): a Short's viewers subscribe far less per
+ * view than a long video's. 0.5 is the lowest value that keeps §4.6's three-a-week floors (the subscribers on day 90, the
+ * gate's day): below it a creator whose rotation includes Shorts falls under them.
+ */
 struct FormatRow
 {
-	double LengthMin, Retention, EditMin, Energy, Rpm;
+	double LengthMin, Retention, EditMin, Energy, Rpm, Subs;
 	bool Hours;
 };
 FormatRow RowOf(Format F)
 {
 	switch (F)
 	{
-	case Format::Short: return {0.75, 0.70, 20.0, 2.0, 0.03, false};
-	case Format::Vlog: return {18.0, 0.35, 180.0, 15.0, 1.4, true};
-	case Format::Recap: return {14.0, 0.40, 150.0, 12.0, 1.4, true};
+	case Format::Short: return {0.75, 0.70, 20.0, 2.0, 0.03, 0.5, false};
+	case Format::Vlog: return {18.0, 0.35, 180.0, 15.0, 1.4, 1.0, true};
+	case Format::Recap: return {14.0, 0.40, 150.0, 12.0, 1.4, 1.0, true};
 	case Format::Breakdown: break;
 	}
-	return {8.0, 0.45, 90.0, 8.0, 1.0, true};
+	return {8.0, 0.45, 90.0, 8.0, 1.0, 1.0, true};
 }
 
 struct TitleRow
@@ -177,11 +182,20 @@ int NightKey(double At)
 	return DayIndex(At - 10.0 * 60.0);
 }
 
-/** "rl:mm-26@1530:214" -> "rl:mm-26@1530": the event a candidate came from (a Recap's hands are one event's). */
+/**
+ * "rl:mm-26@1530:214" -> "rl:mm-26@1530": the event a candidate came from (a Recap's hands are one event's). A live hand
+ * the plan played through a skip is "lv:<entry>:skip:<n>" (BackRoomAuto.cpp): the same entry's, so ":skip" goes too.
+ */
 std::string EventKey(const std::string& Id)
 {
 	const size_t Cut = Id.rfind(':');
-	return Cut == std::string::npos ? Id : Id.substr(0, Cut);
+	std::string Key = Cut == std::string::npos ? Id : Id.substr(0, Cut);
+	const size_t Skip = Key.size() >= 5 ? Key.size() - 5 : std::string::npos;
+	if (Skip != std::string::npos && Key.compare(Skip, 5, ":skip") == 0)
+	{
+		Key.resize(Skip);
+	}
+	return Key;
 }
 
 double PotBbOf(const Candidate& C)
@@ -742,7 +756,9 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 				C.PaidCents += Cents;
 				C.BalanceCents = 0;
 			}
-			if (!WroteThisWeek(L, D1))
+			// A payout always comes with its statement (the bank line never arrives unexplained); a month that rolls over
+			// keeps to the one routine letter a week (§1.7).
+			if (Pays || !WroteThisWeek(L, D1))
 			{
 				Mail(L, D1, "rerun:pay", LetterStatement, video_copy::StatementSubject(Month, Pays), video_copy::StatementBody(Month, Cents, C.BalanceCents, Pays));
 			}
@@ -1532,7 +1548,8 @@ std::string Upload(Channel& C, const Choice& Ch, double World, const std::string
 	}
 	const double Niche = static_cast<double>(Same) >= 0.6 * static_cast<double>(Last) ? 1.15 : 1.0;
 	const double Consistency = N14 >= 2 ? 1.1 : 1.0;
-	const double Conv = std::clamp(0.0065 * T.Subs * (Retention / 0.45) * Niche * Consistency, 0.002, 0.012);
+	// FormatSubs (v1.2): Shorts hold people best and convert worst; without it a channel of Shorts outgrows every other plan.
+	const double Conv = std::clamp(0.0065 * T.Subs * (Retention / 0.45) * Niche * Consistency * Row.Subs, 0.002, 0.012);
 	// The class: a Teaching Breakdown of a decision is evergreen (§4.5).
 	const bool Decision = Lead->K == Kind::Bluff || Lead->K == Kind::HeroCall || Lead->K == Kind::HeroFold || Lead->K == Kind::Bubble;
 	V.C = Ch.F == Format::Short ? Class::Short : (Ch.F == Format::Breakdown && Ch.T == TitleStyle::Teaching && Decision) ? Class::Strategy : Class::News;
@@ -1684,7 +1701,9 @@ std::vector<life::Mark> Marks(const Channel& C, double From, double To)
 			Out.push_back(M);
 		}
 	}
-	if (C.PartnerAt >= 0.0 || C.ReviewAt >= 0.0)
+	// A payday is marked only when it will pay: a Partner (the welcome letter came) with $100 or more already in the balance.
+	// The review week and a month that would roll over get no mark.
+	if (C.PartnerAt >= 0.0 && C.BalanceCents >= PayoutMinCents)
 	{
 		for (int D = DayIndex(From); D <= DayIndex(To); ++D)
 		{

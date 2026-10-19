@@ -28,13 +28,11 @@ double EquityAt(const std::vector<Card>& Mine, const std::vector<std::vector<Car
 } // namespace video_detail
 namespace video_copy
 {
-std::string PublishWhy(int Reason); // VideoCopy.cpp
-std::string EditLabel(Format F);
+std::string EditLabel(Format F); // VideoCopy.cpp
 std::string UploadedTitle();
 std::string UploadedBody(const std::string& Title);
 std::string EditFailedTitle();
 std::string DeeStorytime();
-std::string Deleted();
 std::string NoSuchVideo();
 std::string WhyNot(int Reason);
 } // namespace video_copy
@@ -90,6 +88,39 @@ void Touch(life::State& L, const std::set<std::string>& TextsSeen, bool Evicted)
 	}
 	L.Update2LinesRead |= life::U2Video;
 	MarkOldStories(L, TextsSeen, Evicted);
+}
+
+/**
+ * The rent-paid story's titles say poker paid the rent ("I paid rent with poker money"), so it's a story only when that's
+ * true: the poker money in (ledger kinds 0 and 4: prizes, cashes, the Night Shift) in the 30 days to the rent covered it.
+ * A refunded buy-in is the player's own money back, not money won (the Bank counts it off the spending the same way).
+ * The rent is the newest rent line on the ledger (PayRent's, a moment before the calendar's step reads it).
+ */
+bool RentPaidByPoker(const life::State& L)
+{
+	const life::LedgerEntry* Rent = nullptr;
+	for (const life::LedgerEntry& E : L.Ledger) // newest first
+	{
+		if (E.Kind == 3 && E.Amount < 0 && E.Label.rfind("Rent", 0) == 0)
+		{
+			Rent = &E;
+			break;
+		}
+	}
+	if (!Rent)
+	{
+		return false;
+	}
+	Chips Poker = 0;
+	for (const life::LedgerEntry& E : L.Ledger)
+	{
+		if ((E.Kind == 0 || E.Kind == 4) && E.Amount > 0 && E.Label.find(": refunded") == std::string::npos && E.At <= Rent->At &&
+			E.At >= Rent->At - 30.0 * net::MinutesPerDay)
+		{
+			Poker += E.Amount;
+		}
+	}
+	return Poker >= -Rent->Amount;
 }
 
 /** "rl:" for RiverLine, the site's key for a rival (§4.4). */
@@ -630,19 +661,19 @@ std::string Session::Publish(const video::Choice& C)
 	using namespace session_video_detail;
 	if (TimeSkip.Active)
 	{
-		return video::video_copy::PublishWhy(1);
+		return video::PublishWhy(1);
 	}
 	if (T || TableCount() > 0)
 	{
-		return video::video_copy::PublishWhy(2);
+		return video::PublishWhy(2);
 	}
 	if (Stream.Live)
 	{
-		return video::video_copy::PublishWhy(3);
+		return video::PublishWhy(3);
 	}
 	if (Life.Energy < 10.0)
 	{
-		return video::video_copy::PublishWhy(4);
+		return video::PublishWhy(4);
 	}
 	const std::string Why = video::CanUpload(C, Life.Video.Open);
 	if (!Why.empty())
@@ -778,10 +809,16 @@ void Session::VideoStep(double From, double To)
 	// Life stories (§4.4): a beat the session told once becomes a candidate once.
 	for (const char* Key : StoryKeys)
 	{
-		if (TextsSeen.count(Key) > 0)
+		if (TextsSeen.count(Key) == 0 || Life.Video.Paid.count(std::string("story:") + Key) > 0)
 		{
-			video::NoteStory(Life.Video, Key, To);
+			continue;
 		}
+		if (std::string(Key) == "rent-paid" && !RentPaidByPoker(Life))
+		{
+			Life.Video.Paid.insert(std::string("story:") + Key); // told, with no story in it: poker didn't pay that rent
+			continue;
+		}
+		video::NoteStory(Life.Video, Key, To);
 	}
 	if (Life.Evictions > 0 && !Evicted())
 	{
@@ -908,7 +945,7 @@ std::string Session::DebugVideo(const std::string& Args)
 	if (Verb == "delete" && W.size() > 1)
 	{
 		const std::string Why = DeleteVideo(W[1]);
-		return Why.empty() ? video::video_copy::Deleted() : Why;
+		return Why.empty() ? video::Deleted() : Why;
 	}
 	return "ss.Video.<Describe|Candidates|Fake|Upload|Advance|Grant>";
 }

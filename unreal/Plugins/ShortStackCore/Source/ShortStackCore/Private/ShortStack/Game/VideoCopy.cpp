@@ -820,20 +820,7 @@ std::string WhyNot(int Reason)
 	return "Pick something to post first.";
 }
 
-// The session's lines (SessionVideo.cpp declares these).
-std::string PublishWhy(int Reason)
-{
-	switch (Reason)
-	{
-	case 1: return "You're busy.";
-	case 2: return "Close your tables first. Editing needs your whole attention.";
-	case 3: return "End the stream first.";
-	case 4: return "Too tired to edit. Get some sleep first.";
-	default: break;
-	}
-	return "Rerun can't open that right now.";
-}
-
+// The session's lines (SessionVideo.cpp declares these; PublishWhy and Deleted are public, in Video.h).
 std::string EditLabel(Format F)
 {
 	switch (F)
@@ -864,11 +851,6 @@ std::string EditFailedTitle()
 std::string DeeStorytime()
 {
 	return "Saw the video. No names. Good.";
-}
-
-std::string Deleted()
-{
-	return "Taken down. The subscribers it brought in stay.";
 }
 
 std::string NoSuchVideo()
@@ -1095,7 +1077,30 @@ const char* FrameName(Frame F)
 	return "Reaction";
 }
 
+std::string PublishWhy(int Reason)
+{
+	switch (Reason)
+	{
+	case 1: return "You're busy.";
+	case 2: return "Close your tables first. Editing needs your whole attention.";
+	case 3: return "End the stream first.";
+	case 4: return "Too tired to edit. Get some sleep first.";
+	default: break;
+	}
+	return "Rerun can't open that right now.";
+}
+
+std::string Deleted()
+{
+	return "Taken down. The subscribers it brought in stay.";
+}
+
 std::vector<std::string> Advice(const Choice& Ch, const std::vector<Candidate>& Open)
+{
+	return Advice(Ch, Open, false);
+}
+
+std::vector<std::string> Advice(const Choice& Ch, const std::vector<Candidate>& Open, bool AdsOn)
 {
 	std::vector<std::string> Out;
 	const std::vector<Candidate> P = Picked(Ch, Open);
@@ -1103,7 +1108,10 @@ std::vector<std::string> Advice(const Choice& Ch, const std::vector<Candidate>& 
 	{
 	case Format::Short: Out.push_back("Shorts get seen fast and forgotten fast, and they don't count toward watch hours."); break;
 	case Format::Breakdown: Out.push_back("A Breakdown walks through one hand, and it counts toward watch hours."); break;
-	case Format::Vlog: Out.push_back("A Vlog tells the whole night. Longer videos carry more ads."); break;
+	case Format::Vlog:
+		// Ads are no reason to pick a format until there are any (the gate, then the review).
+		Out.push_back(AdsOn ? "A Vlog tells the whole night. Longer videos carry more ads." : "A Vlog tells the whole night, and it counts toward watch hours.");
+		break;
 	case Format::Recap: Out.push_back("A Recap follows one run from the first hand to the last."); break;
 	}
 	switch (Ch.T)
@@ -1244,11 +1252,17 @@ std::vector<std::string> Inventory()
 	}
 	for (int F = 2; F < 4; ++F)
 	{
-		Choice Ch;
-		Ch.F = static_cast<Format>(F);
-		for (const std::string& L : Advice(Ch, {}))
+		for (const bool AdsOn : {false, true})
 		{
-			Out.push_back("line\t" + L);
+			Choice Ch;
+			Ch.F = static_cast<Format>(F);
+			for (const std::string& L : Advice(Ch, {}, AdsOn))
+			{
+				if (std::find(Out.begin(), Out.end(), "line\t" + L) == Out.end())
+				{
+					Out.push_back("line\t" + L);
+				}
+			}
 		}
 	}
 	return Out;

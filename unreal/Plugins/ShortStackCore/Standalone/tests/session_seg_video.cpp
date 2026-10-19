@@ -1,6 +1,7 @@
 // night_one_session: core-video's additions (update 2 SPEC §6.7): capture on the watch path draws nothing (a hyper played
 // with every hand captured twice tells the same chat and finishes the same), capture on the skip path, the event's recap,
-// a life story, VideoGrind (§4.6: two creators in closed form, their floors and ceilings), payouts through CheckCalendar
+// a life story (the rent-paid one only when poker paid it: C2's S4), VideoGrind (§4.6: two creators in closed form, their
+// floors and ceilings; C2's S2: the long-form creator and two Shorts-heavy ones), payouts through CheckCalendar
 // (the review, Partner, the 21st), the edit through FinishSkip (its time, its energy, the result card, Dee's one text),
 // and a save that only writes the channel once it has something. Compiled into session_test and called from main() in
 // session_main.cpp (the kit is SessionSeg.h); helpers in session_test::video_seg.
@@ -260,12 +261,26 @@ struct Grind
 {
 	int Gate = 0;       // the day Partner began (0: never)
 	int FirstPay = 0;   // the day of the first payout (0: never)
-	double Subs30 = 0, Subs90 = 0, Subs5y = 0;
+	int Tier4 = 0;      // the first day at 50,000 subscribers (the creator road's tier 4; 0: never)
+	double Subs30 = 0, Subs90 = 0, Subs180 = 0, Subs365 = 0, Subs730 = 0, Subs5y = 0;
 	double Ads365 = 0, Ads540 = 0, Ads5y = 0; // dollars earned in the 30 days to that day
 };
 
-/** A creator in closed form (a channel and a calendar, no tables): uploads from day 7 on these weekdays, Short, Breakdown and Vlog in turn. */
-Grind Creator(const std::string& Seed, const std::vector<int>& Weekdays, int Days)
+/**
+ * What a creator posts each day from day 7 (Story titles, the Versus frame, a mid rig). §4.6's two creators rotate Short,
+ * Breakdown and Vlog on their weekdays; v1.2 (S2) adds the long-form creator they're measured against and two
+ * Shorts-heavy ones.
+ */
+enum class GrindPlan
+{
+	Rotation,           // on the weekdays given: Short, Breakdown and Vlog in turn, at 3:30 AM
+	Breakdowns,         // on the weekdays given: a Breakdown at 3:30 AM (three a week: the long-form creator)
+	ShortsTriple,       // every day: three Shorts, at 3:30 AM, 11:30 AM and 7:30 PM
+	ShortAndBreakdowns, // every day a Short at 3:30 AM; on the weekdays given a Breakdown at 3:30 PM too
+};
+
+/** A creator in closed form (a channel and a calendar, no tables): uploads from day 7, by the plan. */
+Grind Creator(const std::string& Seed, GrindPlan Plan, const std::vector<int>& Weekdays, int Days)
 {
 	video::Channel C;
 	life::State L;
@@ -276,16 +291,44 @@ Grind Creator(const std::string& Seed, const std::vector<int>& Weekdays, int Day
 	int Uploads = 0;
 	for (int D = 0; D <= Days; ++D)
 	{
-		const double At = static_cast<double>(D) * Day + 3.0 * 60.0;
-		if (D >= 7 && std::find(Weekdays.begin(), Weekdays.end(), D % 7) != Weekdays.end())
+		const bool OnDay = std::find(Weekdays.begin(), Weekdays.end(), D % 7) != Weekdays.end();
+		std::vector<std::pair<double, video::Format>> Today; // (the hour the moment came, the format)
+		if (D >= 7)
 		{
+			switch (Plan)
+			{
+			case GrindPlan::Rotation:
+				if (OnDay)
+				{
+					Today.push_back({3.0, static_cast<video::Format>(Uploads % 3)});
+				}
+				break;
+			case GrindPlan::Breakdowns:
+				if (OnDay)
+				{
+					Today.push_back({3.0, video::Format::Breakdown});
+				}
+				break;
+			case GrindPlan::ShortsTriple: Today = {{3.0, video::Format::Short}, {11.0, video::Format::Short}, {19.0, video::Format::Short}}; break;
+			case GrindPlan::ShortAndBreakdowns:
+				Today.push_back({3.0, video::Format::Short});
+				if (OnDay)
+				{
+					Today.push_back({15.0, video::Format::Breakdown});
+				}
+				break;
+			}
+		}
+		for (size_t Slot = 0; Slot < Today.size(); ++Slot)
+		{
+			const double At = static_cast<double>(D) * Day + Today[Slot].first * 60.0;
 			video::Choice Ch;
-			Ch.F = static_cast<video::Format>(Uploads % 3);
+			Ch.F = Today[Slot].second;
 			Ch.T = video::TitleStyle::Story;
 			Ch.Fr = video::Frame::Versus;
 			for (int I = 0; I < (Ch.F == video::Format::Vlog ? 3 : 1); ++I)
 			{
-				const std::string Id = "rl:grind@" + std::to_string(D) + ":" + std::to_string(I);
+				const std::string Id = "rl:grind@" + std::to_string(D) + ":" + std::to_string(static_cast<int>(Slot) * 10 + I);
 				video::NoteHand(C, Moment(Id, At));
 				Ch.Candidates.push_back(Id);
 			}
@@ -298,9 +341,13 @@ Grind Creator(const std::string& Seed, const std::vector<int>& Weekdays, int Day
 		video::Step(C, L, Bank, K, static_cast<double>(D) * Day, static_cast<double>(D + 1) * Day);
 		G.FirstPay = G.FirstPay == 0 && Bank > Was ? D + 1 : G.FirstPay;
 		G.Gate = G.Gate == 0 && C.PartnerAt >= 0.0 ? static_cast<int>(C.PartnerAt / Day) : G.Gate;
+		G.Tier4 = G.Tier4 == 0 && C.Subs >= 50000.0 ? D + 1 : G.Tier4;
 		Earned[static_cast<size_t>(D + 1)] = C.BalanceCents + C.PaidCents;
 		G.Subs30 = D + 1 == 30 ? C.Subs : G.Subs30;
 		G.Subs90 = D + 1 == 90 ? C.Subs : G.Subs90;
+		G.Subs180 = D + 1 == 180 ? C.Subs : G.Subs180;
+		G.Subs365 = D + 1 == 365 ? C.Subs : G.Subs365;
+		G.Subs730 = D + 1 == 730 ? C.Subs : G.Subs730;
 		G.Subs5y = C.Subs;
 	}
 	auto Month = [&Earned](int To) { return To < 30 || To >= static_cast<int>(Earned.size()) ? 0.0 : static_cast<double>(Earned[static_cast<size_t>(To)] - Earned[static_cast<size_t>(To - 30)]) / 100.0; };
@@ -322,8 +369,8 @@ void VideoGrind()
 	std::vector<double> Gate3, Pay3, S30, S90, A365, A5y, GateD, AD365, AD540, AD5y, SD5y;
 	for (int Seed = 0; Seed < 5; ++Seed)
 	{
-		const Grind Three = Creator("grind:3:" + std::to_string(Seed), {0, 2, 4}, 1825);
-		const Grind Daily = Creator("grind:7:" + std::to_string(Seed), {0, 1, 2, 3, 4, 5, 6}, 1825);
+		const Grind Three = Creator("grind:3:" + std::to_string(Seed), GrindPlan::Rotation, {0, 2, 4}, 1825);
+		const Grind Daily = Creator("grind:7:" + std::to_string(Seed), GrindPlan::Rotation, {0, 1, 2, 3, 4, 5, 6}, 1825);
 		Gate3.push_back(Three.Gate > 0 ? Three.Gate : 9999);
 		Pay3.push_back(Three.FirstPay > 0 ? Three.FirstPay : 9999);
 		S30.push_back(Three.Subs30);
@@ -352,6 +399,52 @@ void VideoGrind()
 	Expect(Median(AD365) <= 1000.0, "VideoGrind: daily, at most $1,000 a month at day 365");
 	Expect(Median(AD540) >= 540.0, "VideoGrind: daily, at least half the rent a month at day 540");
 	Expect(Median(AD5y) <= 2150.0 && Median(SD5y) <= 1000000.0, "VideoGrind: daily, at most two rents a month and a million subscribers in year 5");
+
+	// v1.2 (the G2 audit's S2): Shorts must not outgrow every other plan. FormatSubs (a Short's viewers subscribe at half a
+	// long video's rate) against three creators to day 730: three Breakdowns a week (the long-form creator they're measured
+	// against), three Shorts a day, and a Short a day with three Breakdowns a week.
+	const auto T1 = std::chrono::steady_clock::now();
+	std::vector<double> LongS365, LongS730, LongGate, ShortsS90, ShortsS365, ShortsS730, ShortsAds, ShortsTier4, MixedS90, MixedS365, MixedS730, MixedGate, MixedAds, MixedTier4;
+	for (int Seed = 0; Seed < 5; ++Seed)
+	{
+		const Grind Long = Creator("grind:long:" + std::to_string(Seed), GrindPlan::Breakdowns, {0, 2, 4}, 730);
+		const Grind Shorts = Creator("grind:shorts:" + std::to_string(Seed), GrindPlan::ShortsTriple, {}, 730);
+		const Grind Mixed = Creator("grind:mixed:" + std::to_string(Seed), GrindPlan::ShortAndBreakdowns, {0, 2, 4}, 730);
+		LongS365.push_back(Long.Subs365);
+		LongS730.push_back(Long.Subs730);
+		LongGate.push_back(Long.Gate > 0 ? Long.Gate : 9999);
+		ShortsS90.push_back(Shorts.Subs90);
+		ShortsS365.push_back(Shorts.Subs365);
+		ShortsS730.push_back(Shorts.Subs730);
+		ShortsAds.push_back(Shorts.Ads365);
+		ShortsTier4.push_back(Shorts.Tier4 > 0 ? Shorts.Tier4 : 9999);
+		MixedS90.push_back(Mixed.Subs90);
+		MixedS365.push_back(Mixed.Subs365);
+		MixedS730.push_back(Mixed.Subs730);
+		MixedGate.push_back(Mixed.Gate > 0 ? Mixed.Gate : 9999);
+		MixedAds.push_back(Mixed.Ads365);
+		MixedTier4.push_back(Mixed.Tier4 > 0 ? Mixed.Tier4 : 9999);
+	}
+	const double LongMedian = Median(LongS365);
+	std::printf("  VideoGrind (v1.2, %.1f s): three Breakdowns a week: %.0f subscribers at day 365, %.0f at day 730; Partner on day %.0f\n",
+		std::chrono::duration<double>(std::chrono::steady_clock::now() - T1).count(), LongMedian, Median(LongS730), Median(LongGate));
+	auto Tier4Day = [](const std::vector<double>& X) { return Median(X) >= 9999.0 ? std::string("not by day 730") : "day " + std::to_string(static_cast<int>(Median(X))); };
+	std::printf("  VideoGrind: three Shorts a day: %.0f / %.0f / %.0f subscribers at days 90 / 365 / 730 (%.2fx the long-form creator at day 365); 50,000 on %s; "
+				"$%.0f a month at day 365\n",
+		Median(ShortsS90), Median(ShortsS365), Median(ShortsS730), Median(ShortsS365) / std::max(1.0, LongMedian), Tier4Day(ShortsTier4).c_str(), Median(ShortsAds));
+	std::printf("  VideoGrind: a Short a day + three Breakdowns a week: %.0f / %.0f / %.0f subscribers at days 90 / 365 / 730 (%.2fx); 50,000 on %s; Partner on day %.0f; "
+				"$%.0f a month at day 365\n",
+		Median(MixedS90), Median(MixedS365), Median(MixedS730), Median(MixedS365) / std::max(1.0, LongMedian), Tier4Day(MixedTier4).c_str(), Median(MixedGate),
+		Median(MixedAds));
+	Expect(Median(ShortsAds) < 150.0, "VideoGrind: three Shorts a day earn under $150 a month at day 365 (Shorts' RPM is 0.03)");
+	Expect(Median(MixedS365) <= 2.5 * LongMedian, "VideoGrind: a Short a day + three Breakdowns a week, at most 2.5x the long-form creator's subscribers at day 365");
+	Expect(Median(ShortsS365) < 50000.0 && Median(MixedS365) < 50000.0, "VideoGrind: neither Shorts-heavy creator reaches 50,000 subscribers (tier 4) in the first year");
+	// The lead's call (C2): FormatSubs stays at 0.5, the lowest that keeps §4.6's three-a-week floors (0.35 failed them: the
+	// sweep in STATUS_c2-video.txt), and the Shorts-only grinder's ceilings are restated to what that buys: at most 4.5x the
+	// long-form creator at day 365 (3.7x measured; 7.7x before the factor), and no Shorts-heavy creator at tier 4 before day
+	// 400 (days 464 and 619 measured; 2.5 and 730 asked, which no factor reaches with the floors held).
+	Expect(Median(ShortsS365) <= 4.5 * LongMedian, "VideoGrind: three Shorts a day, at most 4.5x the long-form creator's subscribers at day 365");
+	Expect(Median(ShortsTier4) >= 400.0 && Median(MixedTier4) >= 400.0, "VideoGrind: no Shorts-heavy creator reaches 50,000 subscribers (tier 4) before day 400");
 }
 
 // ------------------------------------------------------------------ the session's calendar, the edit, the save
@@ -495,7 +588,39 @@ void StoriesAndSaves()
 		Expect(Text.find("video\tch\t") != std::string::npos && ss::SaveData::Parse(Text, Back) && VideoLines(Back.Serialize()) == VideoLines(Text),
 			"video save: a new career writes the channel, and it round-trips");
 	}
-	// A life story: the first rent paid, once the channel has something.
+	// The rent-paid story says poker paid it (S4, G2 audit): no story when it didn't. The rent paid from other money (a
+	// bankroll with no poker in it, poker money from more than 30 days before, or a buy-in refunded) is told without a
+	// candidate, once.
+	for (const int Case : {0, 1, 2})
+	{
+		Hooks H;
+		ss::Session S(H, Case == 0 ? "video-story-job" : Case == 1 ? "video-story-old" : "video-story-refund");
+		double Now = 0.0;
+		Lobby(S, Now);
+		S.DebugVideo("fake bigpot online");
+		S.BankrollCents = 500000;
+		if (Case == 1)
+		{
+			S.Life.Record(S.WorldMinutes() - 31.0 * Day, "Prize: Night Owl Turbo", 200000, 0); // a month and a day before
+		}
+		if (Case == 2)
+		{
+			// A called-off event's buy-in back (Live.cpp's refund line, kind 0): the player's own money, not poker's winnings.
+			S.Life.Record(S.WorldMinutes() - 3.0 * Day, "Embercrest Sunday: refunded buy-in (the room called it off)", 150000, 0);
+		}
+		S.Life.Record(S.WorldMinutes() - 2.0 * Day, "Prize: Hyper Sprint", 4000, 0); // poker, but nowhere near the rent
+		Expect(S.PayRent(), "video story: the rent is paid from the bankroll");
+		Now = Wait(S, Now, 1.0);
+		const bool None = std::none_of(S.Life.Video.Open.begin(), S.Life.Video.Open.end(), [](const video::Candidate& C) { return C.Id == "story:rent-paid"; });
+		Expect(None && S.Life.Video.Paid.count("story:rent-paid") == 1,
+			Case == 0 ? "video story: rent poker didn't cover is no rent-paid story (told once, with no candidate)"
+			: Case == 1 ? "video story: poker money from more than 30 days before the rent doesn't count toward it"
+						: "video story: a refunded buy-in isn't poker money toward the rent");
+		Now = Wait(S, Now, 1.0);
+		Expect(std::none_of(S.Life.Video.Open.begin(), S.Life.Video.Open.end(), [](const video::Candidate& C) { return C.Id == "story:rent-paid"; }),
+			"video story: and it doesn't come back");
+	}
+	// A life story: the first rent paid with poker money, once the channel has something.
 	{
 		Hooks H;
 		ss::Session S(H, "video-story");
@@ -503,6 +628,8 @@ void StoriesAndSaves()
 		Lobby(S, Now);
 		S.DebugVideo("fake bigpot online");
 		S.BankrollCents = 500000;
+		S.Life.Record(S.WorldMinutes() - 6.0 * Day, "Prize: Night Owl Turbo", 90000, 0); // poker's month: $900 and $400,
+		S.Life.Record(S.WorldMinutes() - 2.0 * Day, "Night Shift: 3rd", 40000, 4);       // $1,300 for the first rent's $1,225
 		Expect(S.PayRent(), "video story: the rent is paid");
 		Now = Wait(S, Now, 1.0);
 		const std::vector<video::Candidate> Open = S.VideoCandidates();

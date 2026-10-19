@@ -751,8 +751,8 @@ void Session::FieldPotsFill(const Hand& H, const HandFacts& F)
 void Session::SkipMoments(const Hand& H, const HandFacts& F)
 {
 	// Bug 2 (skip only): the stream moments the skip used to drop: an all-in won or a bad beat, a big pot won (60 big
-	// blinds or more), the bust, the cash or the win, and the stream's prediction resolved. Knockouts come through
-	// HandleTourneyEvents as they always did. Draws nothing from the tournament or the session.
+	// blinds or more), the bust, the cash or the win, and the stream's prediction resolved. The player's knockouts fire in
+	// HeroHandDone on both paths (C2), after these and before the hand's candidate. Draws nothing from the tournament or the session.
 	if (!Stream.Live || !T)
 	{
 		return;

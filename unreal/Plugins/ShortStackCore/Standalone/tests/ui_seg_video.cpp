@@ -19,6 +19,8 @@
 // - (review-ui-video) an old save looked over writes no video line; the review week (no mark, no money, its line whole);
 //   a pre-gate video earns only from the gate on; PUBLISH drawn greyed; a ninth Vlog moment refused; a click off the bell
 //   does nothing under it; the dot after a load (the last 12 hours new); a series event's long name keeps the pot.
+// - (C2) a Recap of an Embercrest night with a skipped hand in it (S1); no ad talk in Studio before ads run (N3); PUBLISH's
+//   greyed words from Video.h's PublishWhy (N6).
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -1376,6 +1378,75 @@ void ChipsFit()
 	Check(D.S.Life.Video.Open.size() == 4 && Auto == 4 && Site == 3 && Story == 1, "chips: every row keeps AUTO, its site or STORYTIME beside the widest kinds");
 }
 
+// ------------------------------------------------------------------ C2: the G2 audit's fixes (S1, N3, N6)
+
+/**
+ * S1: a night at the Embercrest skipped in part. A hand the plan played through the skip is "lv:<entry>:skip:<n>"
+ * (BackRoomAuto.cpp), the same event as the night's watched hands and its recap: the Recap format brings the run in and
+ * keeps the skipped hand, and a watched one joins them.
+ */
+void SkipRecap()
+{
+	Desk D("rerun-skip-recap");
+	D.Fake("badbeat embercrest");
+	D.Fake("bluff embercrest");
+	D.Fake("win embercrest");
+	const std::string Skipped = "lv:embercrest-nightly@9:skip:12", Watched = "lv:embercrest-nightly@9:13", Run = "lv:embercrest-nightly@9:recap";
+	for (video::Candidate& C : D.S.Life.Video.Open)
+	{
+		C.Id = C.K == video::Kind::BadBeat ? Skipped : C.K == video::Kind::Bluff ? Watched : Run;
+		C.Auto = C.K == video::Kind::BadBeat;
+	}
+	D.Open(0);
+	DrawList L = D.Frame();
+	Check(ClickRun(D, L, "BAD BEAT", 100.0f, 960.0f), "skip recap: pick the hand the plan played through the skip");
+	L = D.Frame();
+	Check(ClickRun(D, L, "Recap", 112.0f, 168.0f), "skip recap: the Recap format");
+	L = D.Frame();
+	Check(!DrewRun(L, "another event"), "skip recap: the night's other moments aren't another event");
+	Check(ClickRun(D, L, "BLUFF", 100.0f, 960.0f), "skip recap: add a hand that was watched");
+	L = D.Frame();
+	const video::Choice Recap = ChoiceOf({Run, Skipped, Watched}, video::Format::Recap);
+	Check(video::CanUpload(Recap, D.S.Life.Video.Open).empty() && !Drew(L, "A Recap needs") && !Drew(L, "aren't all from the same event"),
+		"skip recap: the run, its skipped hand and its watched hand make a Recap");
+	Check(Drew(L, ("\xE2\x80\x9C" + video::Title(Recap, D.S.Life.Video.Open, 0)).substr(0, 14)), "skip recap: Studio previews that Recap's real title");
+}
+
+/** N3: Studio says nothing about ads until they run; a Partner's Vlog says longer videos carry more. */
+void AdsAfterTheGate()
+{
+	Desk D("rerun-ads");
+	D.Fake("badbeat online");
+	D.Fake("bluff online");
+	D.Fake("bigpot online");
+	D.Open(0);
+	DrawList L = D.Frame();
+	Check(ClickRun(D, L, "Vlog", 112.0f, 168.0f), "ads: the Vlog format");
+	const std::vector<video::Candidate> List = D.S.VideoCandidates();
+	for (size_t I = 1; I < List.size(); ++I) // the best one is picked already
+	{
+		L = D.Frame();
+		ClickRun(D, L, video::KindLabel(List[I].K), 100.0f, 960.0f);
+	}
+	auto Side = [&D]() {
+		std::string S = TextIn(D.Frame(), {1180.0f, 110.0f, 400.0f, 210.0f});
+		std::replace(S.begin(), S.end(), '\n', ' ');
+		return S;
+	};
+	const std::string Before = Side();
+	Check(Before.find("A Vlog tells the whole night") != std::string::npos && Before.find(" ads") == std::string::npos && Before.find("Ads") == std::string::npos,
+		"ads: before the gate the Vlog's line says nothing about ads");
+	D.S.Life.Video.ReviewAt = D.S.WorldMinutes() - 2.0 * 1440.0;
+	Check(Side().find(" ads") == std::string::npos, "ads: nor in the review week");
+	D.S.Life.Video.PartnerAt = D.S.WorldMinutes() - 1440.0;
+	Check(Side().find("carry more ads") != std::string::npos, "ads: a Partner's Vlog says longer videos carry more ads");
+	// N6: the greyed PUBLISH's words are Video.h's PublishWhy, the session's own.
+	D.S.Life.Energy = 5.0;
+	L = D.Frame();
+	Check(DrewRun(L, video::PublishWhy(4)) && video::PublishWhy(4) == D.S.Publish(ChoiceOf({D.S.Life.Video.Open[0].Id}, video::Format::Short)),
+		"ads: PUBLISH greyed with Video.h's PublishWhy, word for word Session::Publish's");
+}
+
 // ------------------------------------------------------------------ the copy
 
 void Copy()
@@ -1438,6 +1509,8 @@ void SegVideo()
 	video_seg::DotAfterLoad();
 	video_seg::LongEventName();
 	video_seg::ChipsFit();
+	video_seg::SkipRecap();
+	video_seg::AdsAfterTheGate();
 	video_seg::Copy();
 	std::printf("  ui-video: %d checks\n", video_seg::Checks);
 }

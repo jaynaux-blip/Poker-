@@ -284,5 +284,17 @@ SHORTSTACKCORE_API double TotalViews(const Channel& C, double World);
 SHORTSTACKCORE_API double Buzz(const Channel& C, double World);
 /** The card room's settle (FAutoHost::OnSettle): a DeepRun, FinalTable or Win candidate for the night, when it was one. */
 SHORTSTACKCORE_API void NoteLiveRecap(life::State& L, const LiveContext& Ctx, int Place, Chips PrizeCents);
+
+// ------------------------------------------------------------------ C2's additions (gate 2's integration; append-only)
+
+/**
+ * Studio's right-hand column with the channel's state: a line about ads only once they run (AdsOn: a Partner, past the
+ * review). The two-argument Advice above is this one with AdsOn false.
+ */
+SHORTSTACKCORE_API std::vector<std::string> Advice(const Choice& Ch, const std::vector<Candidate>& Open, bool AdsOn);
+/** Session::Publish's refusals, word for word (Studio greys PUBLISH with them): 1 busy, 2 tables open, 3 mid-stream, 4 too tired. */
+SHORTSTACKCORE_API std::string PublishWhy(int Reason);
+/** The line after a video is taken down (Session::DeleteVideo's success; the Channel page's note). */
+SHORTSTACKCORE_API std::string Deleted();
 } // namespace video
 } // namespace ss

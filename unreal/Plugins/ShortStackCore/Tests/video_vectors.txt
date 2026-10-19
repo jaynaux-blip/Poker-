@@ -13,7 +13,7 @@ views	3	1	17.5410804
 views	3	7	38.8911943
 views	3	30	44.6348466
 views	3	365	45.57
-upload	4	v17580	P=842.03	c=0.0116278	r=0.7	rpm=0.075	E=0	class=2	title=$5.50 Night Owl Turbo: AA vs 77, 64 big blind pot	big=81%
+upload	4	v17580	P=842.03	c=0.0058139	r=0.7	rpm=0.075	E=0	class=2	title=$5.50 Night Owl Turbo: AA vs 77, 64 big blind pot	big=81%
 views	4	1	491.964726
 views	4	7	815.117866
 views	4	30	841.462645
@@ -23,8 +23,8 @@ views	5	1	93.7910831
 views	5	7	207.948835
 views	5	30	238.659792
 views	5	365	243.66
-creator	30	subs=25.0105596	views=2312.82363	review=-1	partner=-1	balance=0	paid=0
-creator	90	subs=222.430566	views=21663.3802	review=-1	partner=-1	balance=0	paid=0
-creator	180	subs=2721.49208	views=244232.444	review=218880	partner=228960	balance=5817	paid=0
-creator	365	subs=8260.25024	views=790960.293	review=218880	partner=228960	balance=7227	paid=109775
-creator	400	subs=10270.101	views=988178.961	review=218880	partner=228960	balance=10755	paid=143235
+creator	30	subs=18.9971217	views=2197.38236	review=-1	partner=-1	balance=0	paid=0
+creator	90	subs=177.336814	views=20163.5298	review=-1	partner=-1	balance=0	paid=0
+creator	180	subs=1763.47499	views=209123.728	review=224640	partner=234720	balance=3583	paid=0
+creator	365	subs=5510.38177	views=635979.2	review=224640	partner=234720	balance=14110	paid=75890
+creator	400	subs=6852.15449	views=793453.078	review=224640	partner=234720	balance=8558	paid=110794

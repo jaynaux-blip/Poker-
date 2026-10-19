@@ -5,6 +5,7 @@
 #include "ShortStack/Game/Autoplay.h"
 #include "ShortStack/Game/Coach.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Gear.h"
 #include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Store.h"
@@ -14,6 +15,7 @@
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
+#include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/World.h"
 #include "SessionSeg.h"
 
@@ -3204,6 +3206,8 @@ namespace seams
 {
 std::string Fixture(const char* Name); // session_seams.cpp
 void Gate1Fixtures();                 // session_seams.cpp (also SegLead's)
+void Gate2Fixtures();                 // session_seams.cpp (also SegLead's)
+void StreamLinks();                   // session_seams.cpp (also SegLead's)
 } // namespace seams
 
 namespace pacing
@@ -3289,6 +3293,18 @@ struct Career
 	std::array<ss::Chips, 3> DealsTo{};  // check 6: what the deals put in by days 30, 60 and 90 (DealValue)
 	std::array<ss::Chips, 3> IncomeTo{}; // check 6: the income by then (Income: check 1's kinds)
 	int Online = 0, Live = 0, Streams = 0, Signed = 0;
+	// G2's creator career (update 2 SPEC §1.11): the streaming career's schedule with the stream kit once it's back in (not
+	// §1.11's mid rig: CreatorPacing), and a Rerun upload three times a week from day 7 (Tuesday, Thursday and Saturday: the
+	// career starts on Night One's Tuesday), cut from its own hands.
+	bool Creator = false;
+	double Start = 0.0;                 // world minutes when the career began
+	int Uploads = 0, UploadsMissed = 0; // what went up; upload days with nothing to cut
+	std::array<int, 4> ByFormat{};      // uploads by format (Short, Breakdown, Vlog, Recap)
+	std::array<double, 4> Subs{};       // Rerun's subscribers on days 30, 60, 90 and the last
+	std::array<double, 4> Views{};      // and its views to date
+	double PartnerAt = -1.0;            // world minutes
+	int Kast = 0;                       // Kast followers at the end
+	double Rig = 0.0;                   // the rig's quality at the end (gear::Effects::Quality)
 };
 
 /** Income as check 1 reads it: poker, the job, hustles, prizes, streaming and the sponsors' lines. */
@@ -3622,6 +3638,87 @@ double Shift(ss::Session& S, Career& C, double Now)
 	return Now;
 }
 
+/** G2's creator: the stream kit (720p), a piece at a time as the roll allows once back in from the lockout (the stream's RAM
+ *  first, then a webcam, a USB mic and a ring light), never into the rent. */
+void CreatorRig(ss::Session& S, Career& C)
+{
+	for (const char* Id : {"ram-32", "webcam-720", "mic-usb", "ring-light"})
+	{
+		if (S.Owns(Id))
+		{
+			continue;
+		}
+		const ss::gear::Item* I = ss::gear::Find(Id);
+		if (I && S.BankrollCents >= I->PriceCents + 30000)
+		{
+			S.Buy(Id);
+			C.Ledger.Take(S.Life);
+		}
+		return;
+	}
+}
+
+/** The night a candidate belongs to (Video.cpp's: the world day it was cut, the small hours counted with the evening before). */
+int CreatorNight(double At)
+{
+	return static_cast<int>(std::floor((At - 10.0 * 60.0) / Day));
+}
+
+/**
+ * G2's creator: one upload at 9 PM, picked as a player picks in Studio: Short, Breakdown and Vlog in turn (the Python
+ * model's rotation), the best candidate first (a Vlog is the best night's best three to eight; a Breakdown when that night
+ * hasn't three), Story titles, the Reaction frame. Through Publish: the edit's time and energy pass and FinishSkip lands it.
+ */
+double CreatorUpload(ss::Session& S, Career& C, double Now, int DayNo)
+{
+	namespace video = ss::video;
+	Now = Hop(S, C, Now, static_cast<double>(DayNo) * Day + 21.0 * 60.0);
+	Fed(S);
+	const std::vector<video::Candidate> Open = S.VideoCandidates();
+	if (Open.empty())
+	{
+		++C.UploadsMissed;
+		return Now;
+	}
+	video::Choice Ch;
+	Ch.F = static_cast<video::Format>(C.Uploads % 3);
+	Ch.T = video::TitleStyle::Story;
+	Ch.Fr = video::Frame::Reaction;
+	Ch.Candidates = {Open.front().Id};
+	if (Ch.F == video::Format::Vlog)
+	{
+		Ch.F = video::Format::Breakdown;
+		const auto Lead = std::find_if(Open.begin(), Open.end(), [](const video::Candidate& X) { return X.K != video::Kind::Story; });
+		if (Lead != Open.end())
+		{
+			video::Choice Night = Ch;
+			Night.F = video::Format::Vlog;
+			Night.Candidates.clear();
+			for (const video::Candidate& X : Open)
+			{
+				if (Night.Candidates.size() < 8 && X.K != video::Kind::Story && CreatorNight(X.At) == CreatorNight(Lead->At))
+				{
+					Night.Candidates.push_back(X.Id);
+				}
+			}
+			Ch = video::CanUpload(Night, S.Life.Video.Open).empty() ? Night : Ch;
+		}
+	}
+	if (!S.Publish(Ch).empty())
+	{
+		++C.UploadsMissed;
+		return Now;
+	}
+	for (int Guard = 0; S.TimeSkip.Active && Guard < 200; ++Guard)
+	{
+		Now = Wait(S, Now, 0.5);
+	}
+	++C.Uploads;
+	++C.ByFormat[static_cast<size_t>(Ch.F)];
+	C.Ledger.Take(S.Life);
+	return Now;
+}
+
 /**
  * A career of Days days, from Night One's $2.37: a shift each morning until there's a cushion over the rent, a hyper online
  * every other afternoon (streamed, for the streamer, once the rig can), the Saturday Nightly on its own money or a backer's
@@ -3642,6 +3739,7 @@ void Run(Career& C)
 	double Now = Wait(*S, 0.0, 0.1);
 	C.Ledger.Take(S->Life);
 	const double Start = S->WorldMinutes();
+	C.Start = Start;
 	const int FirstDay = ss::net::DayOf(Start);
 	for (int K = 0; K < C.Days; ++K)
 	{
@@ -3660,6 +3758,10 @@ void Run(Career& C)
 		}
 		C.Ledger.Take(S->Life);
 		TakeDeals(*S, C);
+		if (C.Creator && !S->Evicted())
+		{
+			CreatorRig(*S, C);
+		}
 		if (S->BankrollCents < (S->Evicted() ? S->Life.RentDueCents : ss::life::MonthlyRentCents) + 40000)
 		{
 			Now = Shift(*S, C, Now);
@@ -3686,11 +3788,19 @@ void Run(Career& C)
 		{
 			Now = LiveNight(S, H, C, Now, DayNo);
 		}
+		// G2's creator: Tuesday, Thursday and Saturday (the career's days 0, 2 and 4 of each week), from day 7, after the day's play.
+		if (C.Creator && K >= 7 && (K % 7 == 0 || K % 7 == 2 || K % 7 == 4))
+		{
+			Now = CreatorUpload(*S, C, Now, DayNo);
+		}
 		C.TierByDay.push_back(S->SponsorTier());
 		const int Done = K + 1;
 		if (Done == 30 || Done == 60 || Done == 90 || Done == C.Days)
 		{
-			C.Bank[Done == 30 ? 0 : Done == 60 ? 1 : Done == 90 ? 2 : 3] = S->BankrollCents;
+			const size_t At = Done == 30 ? 0 : Done == 60 ? 1 : Done == 90 ? 2 : 3;
+			C.Bank[At] = S->BankrollCents;
+			C.Subs[At] = ss::video::SubsAt(S->Life.Video, S->WorldMinutes());
+			C.Views[At] = ss::video::TotalViews(S->Life.Video, S->WorldMinutes());
 		}
 		if (Done == 30 || Done == 60 || Done == 90)
 		{
@@ -3704,13 +3814,19 @@ void Run(Career& C)
 			C.IncomeTo[static_cast<size_t>(Done / 30 - 1)] = Earned;
 		}
 	}
-	(void)Start;
+	if (C.Creator)
+	{
+		C.Ledger.Take(S->Life);
+	}
+	C.PartnerAt = S->Life.Video.PartnerAt;
+	C.Kast = S->Channel.Followers;
+	C.Rig = S->GearFx().Quality;
 }
 
 /** The last segment's six checks on one career (the deals on; the sixth as restated in C1, against the career's income). */
 void Checks(const Career& On)
 {
-	const char* Name = On.Kind == 0 ? "live-only" : On.Kind == 1 ? "streaming" : "mixed";
+	const char* Name = On.Creator ? "creator" : On.Kind == 0 ? "live-only" : On.Kind == 1 ? "streaming" : "mixed";
 	const double Start = On.Ledger.All.empty() ? 0.0 : On.Ledger.All.front().At;
 	// 1. Sponsor cash under 20% of income for the first 60 days.
 	ss::Chips Sponsor60 = 0;
@@ -3892,6 +4008,64 @@ void AutoChecks(const Career& Auto, const Career& Twin)
 	Expect(F.first <= 2.0 * F.second && R.first <= 2.0 * R.second, "pacing (autoplay): the plan at the default Sharpness doesn't out-finish or out-earn the careful career on the same events (U3)");
 }
 
+/**
+ * G2's creator career (update 2 SPEC §1.11, U11): Rerun pays nothing before its partner gate, so
+ *   - no month's rent before day 60 is covered by Rerun (each rent paid or collected in the first 60 days, against what
+ *     Rerun paid into the bank in the 30 days before it, and all Rerun paid in those days under one month's rent: a career
+ *     locked out by Night One's rent pays none till later; RiverLine Rewards, the check's other half, is G3's and pays
+ *     nothing yet), and
+ *   - Rerun's first payout (its first ledger line, kind 13) lands on day 90 or later.
+ * VideoGrind (session_seg_video.cpp) holds the longer floors and ceilings in closed form; this is the same channel grown
+ * from a career's own hands, through Studio's Publish and the calendar (CheckCalendar's VideoStep). Its numbers print.
+ */
+void CreatorChecks(const Career& C)
+{
+	double FirstPay = -1.0; // days from the career's start
+	ss::Chips Paid = 0;
+	ss::Chips Paid60 = 0; // what Rerun paid into the bank in the first 60 days, any rent or none
+	int Lines = 0;
+	for (const life::LedgerEntry& E : C.Ledger.All)
+	{
+		if (E.Kind == life::LedgerVideo && E.Amount > 0)
+		{
+			FirstPay = FirstPay < 0.0 ? (E.At - C.Start) / Day : FirstPay;
+			Paid += E.Amount;
+			Paid60 += E.At < C.Start + 60.0 * Day ? E.Amount : 0;
+			++Lines;
+		}
+	}
+	int Rents = 0;
+	ss::Chips WorstCover = 0;
+	bool Covered = false;
+	for (const life::LedgerEntry& R : C.Ledger.All)
+	{
+		const bool Rent = R.Kind == 3 && R.Amount < 0 && (R.Label.rfind("Rent", 0) == 0 || R.Label.rfind("Back rent", 0) == 0);
+		if (!Rent || R.At >= C.Start + 60.0 * Day)
+		{
+			continue;
+		}
+		++Rents;
+		ss::Chips Rerun = 0;
+		for (const life::LedgerEntry& E : C.Ledger.All)
+		{
+			Rerun += E.Kind == life::LedgerVideo && E.Amount > 0 && E.At > R.At - 30.0 * Day && E.At <= R.At ? E.Amount : 0;
+		}
+		WorstCover = std::max(WorstCover, Rerun);
+		Covered = Covered || Rerun >= -R.Amount;
+	}
+	std::printf("  pacing creator (%d days, the rig at quality %.2f by the end): %d uploads (%d Shorts, %d Breakdowns, %d Vlogs, %d Recaps), %d upload days with nothing to cut; "
+				"Rerun subscribers %.0f / %.0f / %.0f / %.0f on days 30 / 60 / 90 / %d, views %.0f / %.0f / %.0f / %.0f; Partner %s; %d payouts, $%.2f, the first %s; "
+				"%d Kast followers\n",
+		C.Days, C.Rig, C.Uploads, C.ByFormat[0], C.ByFormat[1], C.ByFormat[2], C.ByFormat[3], C.UploadsMissed, C.Subs[0], C.Subs[1], C.Subs[2], C.Subs[3], C.Days, C.Views[0],
+		C.Views[1], C.Views[2], C.Views[3], C.PartnerAt >= 0.0 ? ("day " + std::to_string(static_cast<int>((C.PartnerAt - C.Start) / Day))).c_str() : "not in these days", Lines,
+		static_cast<double>(Paid) / 100.0, FirstPay >= 0.0 ? ("on day " + std::to_string(static_cast<int>(FirstPay))).c_str() : "never", C.Kast);
+	std::printf("  pacing creator: %d rents paid in the first 60 days, the most Rerun paid in the 30 days before one $%.2f; Rerun paid $%.2f in those 60 days\n", Rents,
+		static_cast<double>(WorstCover) / 100.0, static_cast<double>(Paid60) / 100.0);
+	Expect(C.Uploads >= C.Days / 4, "pacing (creator): the creator uploads about three times a week from day 7, cut from the career's own hands");
+	Expect(!Covered && Paid60 < ss::life::MonthlyRentCents, "pacing (creator): no month's rent before day 60 is covered by Rerun");
+	Expect(FirstPay < 0.0 || FirstPay >= 90.0, "pacing (creator): Rerun's first payout lands no earlier than day 90");
+}
+
 /** The median of the careers' bankrolls on day 30 (K 0), 60 (1) or 90 (2). */
 ss::Chips Median(const std::vector<Career>& Runs, size_t K)
 {
@@ -3904,6 +4078,35 @@ ss::Chips Median(const std::vector<Career>& Runs, size_t K)
 	return V.empty() ? 0 : V[V.size() / 2];
 }
 } // namespace pacing
+
+/**
+ * G2's career (update 2 SPEC §1.11, §7.5 C2): the creator, on the streaming career's seed and schedule with a Rerun upload
+ * three times a week from day 7, the last segment's six checks and the creator's own (pacing::CreatorChecks).
+ * In "long" only (180 days, about the time of a streaming career): the default run's budget has no room for it, and its
+ * day-90 check needs the days.
+ * Not §1.11's mid rig (the model's gear quality 0.5; StreamGrind's desktop, fiber and 1080p webcam): this seed's career is
+ * locked out by Night One's rent from day 7 to day 70 (it pays no rent before then), and on Dee's couch the rig sits in
+ * storage (the laptop alone, RefreshGear); back in, it buys the stream kit by day 75 (720p, quality 0.29). Its uploads are
+ * the weaker for it. Rerun still pays nothing in 180 days with the partner gate at 5 subscribers and 5 hours, and $74 in all
+ * with the $100 minimum at $1 too (which fails the day-90 check: review-c2-lead, 2026-10-19).
+ */
+void CreatorPacing(bool Long)
+{
+	if (!Long)
+	{
+		return;
+	}
+	const auto T0 = std::chrono::steady_clock::now();
+	pacing::Career C;
+	C.Seed = "pacing-1";
+	C.Kind = 1;
+	C.Creator = true;
+	C.Days = 180;
+	pacing::Run(C);
+	pacing::Checks(C);
+	pacing::CreatorChecks(C);
+	std::printf("  pacing creator: %.1f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
+}
 
 /**
  * EconomyPacing (update 2 SPEC §1.11, carried from next_segment_spec §1.11): seeded 180-day careers (live-only, streaming,
@@ -3968,6 +4171,7 @@ void EconomyPacing(bool Long)
 		pacing::Run(Auto);
 		pacing::AutoChecks(Auto, Ons[0]);
 	}
+	CreatorPacing(Long);
 }
 
 /**
@@ -3975,13 +4179,14 @@ void EconomyPacing(bool Long)
  * parses, writes back byte for byte (§6.4: no update 2 line is written before its Update2LinesRead bit is set, and loading
  * sets none, so an untouched old save comes back as it was, at every gate), loads a second time the same, loads into a
  * session, and keeps its facts: the staked entry's funding and checkpoint, the sponsor book, Mail and the clip, the
- * veteran's results and badges, the eviction. The world's own text reads and writes back too.
+ * veteran's results and badges, the eviction. The world's own text reads and writes back too. From C2 the gate's own
+ * fixture, update2_creator (fixture_tool write-g2), goes through the same chain (its facts: seams::Gate2Fixtures).
  */
 void MigrationAll()
 {
 	namespace life = ss::life;
 	const char* Names[] = {"pre_update2_fresh.ssave", "pre_update2_staked_mid_nightly.ssave", "pre_update2_sponsored_streamer.ssave", "pre_update2_evicted.ssave",
-		"pre_update2_veteran.ssave"};
+		"pre_update2_veteran.ssave", "update2_creator.ssave"};
 	for (const char* Name : Names)
 	{
 		const std::string Saved = seams::Fixture(Name);
@@ -5471,14 +5676,47 @@ void SegmentJourney(bool Long)
 
 int main(int Argc, char** Argv)
 {
-	// "session_test long": the long careers (EconomyPacing's three whole, with their deals-off twins; SegmentJourney's whole
-	// 120 days; update 2 SPEC §6.7). "session_test c1 [long]": only the lead's C1 checks (the gate's fixtures, the journeys, the pacing).
+	// "session_test long": the long careers (EconomyPacing's three whole, with their deals-off twins, and G2's creator career;
+	// SegmentJourney's whole 120 days; update 2 SPEC §6.7). "session_test c1 [long]": only the lead's C1 checks (the gate's
+	// fixtures, the journeys, the pacing). "session_test c2": only the lead's C2 checks (below).
 	bool Long = false;
 	bool C1 = false;
+	bool C2 = false;
 	for (int K = 1; K < Argc; ++K)
 	{
 		Long = Long || std::string(Argv[K]) == "long";
 		C1 = C1 || std::string(Argv[K]) == "c1";
+		C2 = C2 || std::string(Argv[K]) == "c2";
+	}
+	if (C2)
+	{
+		// "c2 [fixtures] [streams] [creator]": only the lead's C2 checks (the gate's fixture with SaveFixtures and MigrationAll,
+		// the stream's links, EconomyPacing's creator career whole); all three when none is named.
+		std::set<std::string> Parts;
+		for (int K = 1; K < Argc; ++K)
+		{
+			const std::string A = Argv[K];
+			if (A == "fixtures" || A == "streams" || A == "creator")
+			{
+				Parts.insert(A);
+			}
+		}
+		const bool All = Parts.empty();
+		if (All || Parts.count("fixtures"))
+		{
+			session_test::seams::Gate2Fixtures();
+			session_test::MigrationAll();
+		}
+		if (All || Parts.count("streams"))
+		{
+			session_test::seams::StreamLinks();
+		}
+		if (All || Parts.count("creator"))
+		{
+			session_test::CreatorPacing(true);
+		}
+		std::printf("%s\n", session_test::Failures == 0 ? "session tests (c2): all passed" : "session tests (c2): FAILED");
+		return session_test::Failures == 0 ? 0 : 1;
 	}
 	if (C1)
 	{

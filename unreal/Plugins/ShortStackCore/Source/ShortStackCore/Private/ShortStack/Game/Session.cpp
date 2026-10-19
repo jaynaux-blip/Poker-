@@ -2929,14 +2929,51 @@ void Session::AfterAward()
 void Session::HeroHandDone(const Hand& H, const HandFacts& F)
 {
 	// One call per feature, in this order (§1.3), on both paths: autoplay's tilt, counters and observed stats; the big
-	// pots the world hears about; Rerun's candidate; the stream moments a skip would otherwise drop (skip only).
+	// pots the world hears about; the stream moments a skip would otherwise drop (skip only) and the player's knockouts;
+	// then Rerun's candidate, last, so it links the moments this hand fired (their face, chat and clip time, §4.4).
 	AutoAfterHand(H, F);
 	FieldPotsFill(H, F);
-	VideoNoteHand(H, F);
 	if (F.Skipped)
 	{
 		SkipMoments(H, F);
 	}
+	// The player's knockouts on stream. They used to fire as the tick's eliminations came in (HandleKnockout), after the
+	// candidate: unlinked on the skip path, and on the watch path at the next hand's clock, so the next hand's candidate
+	// took them. Who busted whom as the tournament reckons it (ApplyHand: whoever won the last pot the busted player was
+	// in), in its order (the smaller starting stack first, then the field's order). Draws nothing but the stream's own.
+	if (Stream.Live && T)
+	{
+		std::vector<const HandSeat*> Busted;
+		for (const HandSeat& S : H.Seats)
+		{
+			if (S.Id == HeroId || S.Stack > 0)
+			{
+				continue;
+			}
+			std::string By;
+			for (const PotResult& P : H.PotResults)
+			{
+				if (std::find(P.Eligible.begin(), P.Eligible.end(), S.Seat) != P.Eligible.end() && !P.Winners.empty())
+				{
+					const HandSeat* W = H.SeatByNumber(P.Winners.front());
+					By = W && W->Id != S.Id ? W->Id : By;
+				}
+			}
+			if (By == HeroId)
+			{
+				Busted.push_back(&S);
+			}
+		}
+		std::stable_sort(Busted.begin(), Busted.end(), [this](const HandSeat* A, const HandSeat* B) {
+			return A->StartStack != B->StartStack ? A->StartStack < B->StartStack : T->PlayerIndex(A->Id) < T->PlayerIndex(B->Id);
+		});
+		for (const HandSeat* S : Busted)
+		{
+			const TPlayer* P = PlayerById(S->Id);
+			StreamMoment(kast::Moment::Knockout, P ? P->Name : SeatName(S->Seat));
+		}
+	}
+	VideoNoteHand(H, F);
 }
 
 void Session::BustBanner(const TPlayer& Hero, const char* NoCashSub)
@@ -5265,10 +5302,7 @@ bool Session::PayDebt()
 
 void Session::HandleKnockout(const TEvent& E)
 {
-	if (T && E.EliminatedBy == HeroId)
-	{
-		StreamMoment(kast::Moment::Knockout, E.Name);
-	}
+	// (The player's knockout on stream fires with the hand, in HeroHandDone, before its candidate is cut.)
 	if (!T || T->Spec.BountyCents <= 0 || E.EliminatedBy.empty())
 	{
 		return;

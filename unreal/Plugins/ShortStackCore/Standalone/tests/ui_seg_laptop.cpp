@@ -681,7 +681,8 @@ void RerunDates()
 		Tenth = Dm == 10 ? D : -1;
 	}
 	P.At(static_cast<double>(Tenth) * Day + 14.0 * 60.0);
-	S.Life.Video.PartnerAt = S.WorldMinutes() - Day; // a Partner: the 21st pays
+	S.Life.Video.PartnerAt = S.WorldMinutes() - Day; // a Partner with $100 in the balance: the 21st pays, so it's marked
+	S.Life.Video.BalanceCents = 12000;
 	const auto Coming = [&P, &S]() {
 		DrawList Tile;
 		ss::ui::Canvas C(Tile, P.M, ss::ui::secondscreen::Width, ss::ui::secondscreen::Height, 1.0f);

@@ -131,9 +131,9 @@ FUpdate2Command AutoParity(EUpdate2Feature::Auto, TEXT("ss.Auto.Parity"), TEXT("
 	TEXT("ss.Auto.Parity <hands>: plays the next hands watched at 8x, restores the checkpoint from before them, skips the same hands headless, and prints both hashes (testing)."));
 // Rerun (§4).
 FUpdate2Command VideoDescribe(EUpdate2Feature::Video, TEXT("ss.Video.Describe"), TEXT("Describe"), TEXT("Rerun: the channel, the partner gate's bars, the balance and the videos."));
-FUpdate2Command VideoCandidates(EUpdate2Feature::Video, TEXT("ss.Video.Candidates"), TEXT("Candidates"), TEXT("Rerun: the open highlight candidates, newest first."));
+FUpdate2Command VideoCandidates(EUpdate2Feature::Video, TEXT("ss.Video.Candidates"), TEXT("Candidates"), TEXT("Rerun: the open highlight candidates, best first (the newest of a tie)."));
 FUpdate2Command VideoFake(EUpdate2Feature::Video, TEXT("ss.Video.Fake"), TEXT("Fake"),
-	TEXT("ss.Video.Fake <kind> <online|embercrest|dees|skip>: a candidate of that kind and source, from a real recorded hand when there is one (dev only)."));
+	TEXT("ss.Video.Fake <kind> <online|embercrest|dees|skip>: a candidate of that kind and source, cut from a scripted hand (dev only)."));
 FUpdate2Command VideoUpload(EUpdate2Feature::Video, TEXT("ss.Video.Upload"), TEXT("Upload"),
 	TEXT("ss.Video.Upload <candidate> <format> <title> <frame>: publishes without the laptop; the edit's time still passes (testing)."));
 FUpdate2Command VideoAdvance(EUpdate2Feature::Video, TEXT("ss.Video.Advance"), TEXT("Advance"), TEXT("ss.Video.Advance <days>: the channel's views move on (testing)."));

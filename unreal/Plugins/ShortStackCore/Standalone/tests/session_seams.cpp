@@ -18,6 +18,13 @@
 //     for byte, load a second time the same, and keep what PIE §8.1 reads from them: the Blank world and its boards, the
 //     played lines and Career's tags; the checkpointed Nightly's host text (auto, autoseen, autoread), the engine
 //     checkpoint restoring, and the plan carrying on from it.
+//   - Gate2Fixtures (update 2 C2, SPEC §6.5): update2_creator (fixture_tool write-g2) parses, writes back byte for byte,
+//     and holds what §6.5 and PIE §8.2 read: the videos, the tails and stubs, the open candidates (AUTO, the player's own,
+//     the Embercrest's, Dee's storytime), Partner, a payout and a balance; it plays on through the calendar and takes
+//     §8.2's four fakes.
+//   - StreamLinks (update 2 C2, the g2 audit's S3): a hand's stream moments (SkipMoments' on the skip path, the player's
+//     knockouts on both) fire before its Rerun candidate is cut, so the candidate links them; a streamed bounty event's
+//     knockouts are each on stream once, linked to their own hands.
 // Phase C's MigrationAll (§7.5) builds on SaveFixtures. A feature whose migration writes lines on load (§7.5 steps 2 to 4)
 // keeps SaveFixtures green: only the segment's own lines (and Kast's legacy deal lines) may change, and that's reported.
 #include "CopyLint.h"
@@ -25,20 +32,28 @@
 
 #include "ShortStack/AI/Reads.h"
 #include "ShortStack/AI/Style.h"
+#include "ShortStack/Cards.h"
 #include "ShortStack/Game/Autoplay.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Gear.h"
+#include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/LiveAuto.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Town.h"
+#include "ShortStack/Game/Video.h"
+#include "ShortStack/Hand.h"
+#include "ShortStack/Rng.h"
 #include "ShortStack/UI/FrontEnd.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -153,7 +168,8 @@ void RoundTrip(const char* Name, const std::string& Saved, const std::string& Ex
 
 void SaveFixtures()
 {
-	const char* Names[] = {"pre_segment_fresh.ssave", "pre_segment_mid_nightly.ssave", "pre_segment_team_riverline.ssave", "pre_segment_evicted.ssave"};
+	// (update2_creator, update 2 C2's: a gate fixture written by this build's code, so byte for byte with every line kept.)
+	const char* Names[] = {"pre_segment_fresh.ssave", "pre_segment_mid_nightly.ssave", "pre_segment_team_riverline.ssave", "pre_segment_evicted.ssave", "update2_creator.ssave"};
 	for (const char* Name : Names)
 	{
 		const std::string Saved = Fixture(Name);
@@ -1067,6 +1083,460 @@ void Gate1Fixtures()
 			"gate 1 fixtures: the engine checkpoint restores and the plan skips on from it, its counts carried");
 	}
 }
+
+// ------------------------------------------------------------------ update 2 C2: the gate's fixture
+
+/**
+ * Gate2Fixtures (update 2 C2, SPEC §6.5, for PIE §8.2): the gate's committed save (fixture_tool write-g2) parses, writes back
+ * byte for byte, loads a second time the same, and holds what §6.5 asks of it and §8.2 step 2 opens: an Established career
+ * with a Kast channel; the 60 newest videos whole, of several kinds, formats, title styles and frames; the older ones folded
+ * into the tails and the evergreen ones under a year old as stubs; open candidates the plan played (AUTO), the player's own,
+ * the Embercrest's and Dee's (storytime); the partner gate crossed (the review and the welcome in Mail), a payout paid (its
+ * key and its bank line, kind 13) and a balance accruing. In a session: the Channel's view adds up (its 28 days never more
+ * than the views to date), the calendar plays it on a week with its views and the save round-trips; §8.2 step 2's four
+ * fakes go into Studio with their chips.
+ */
+void Gate2Fixtures()
+{
+	namespace video = ss::video;
+	const char* Name = "update2_creator.ssave";
+	const std::string Saved = Fixture(Name);
+	ss::SaveData D;
+	const bool Parsed = Saved.rfind("shortstack.nightone.v2\n", 0) == 0 && ss::SaveData::Parse(Saved, D);
+	Expect(Parsed, "gate 2 fixtures: update2_creator.ssave is there and parses");
+	if (!Parsed)
+	{
+		return;
+	}
+	const std::string Again = D.Serialize();
+	ss::SaveData Second;
+	Expect(Again == Saved && ss::SaveData::Parse(Again, Second) && Second.Serialize() == Again,
+		"gate 2 fixtures: update2_creator.ssave writes back byte for byte and loads a second time the same");
+	std::printf("  gate 2 fixtures: %s: %s (%zu bytes)\n", Name, Again == Saved ? "written back byte for byte" : "NOT written back byte for byte", Again.size());
+	const video::Channel& C = D.Life.Video;
+	std::set<int> Kinds, Formats, Styles, Frames;
+	for (const video::Video& V : C.Videos)
+	{
+		Kinds.insert(static_cast<int>(V.K));
+		Formats.insert(static_cast<int>(V.F));
+		Styles.insert(static_cast<int>(V.T));
+		Frames.insert(static_cast<int>(V.Fr));
+	}
+	bool Tail = false;
+	for (const video::Tail& T : C.Tails)
+	{
+		Tail = Tail || T.Total[0] > 0.0;
+	}
+	const double World = D.ClockMinutes + ss::net::MinutesPerDay * ss::net::NightOneDay;
+	bool Young = !C.Stubs.empty();
+	for (const video::Stub& S : C.Stubs)
+	{
+		Young = Young && World - S.At < 365.0 * ss::net::MinutesPerDay && S.E > 0.0;
+	}
+	bool Auto = false, Own = false, Live = false, Story = false;
+	for (const video::Candidate& X : C.Open)
+	{
+		Auto = Auto || (X.Auto && X.Source != 2);
+		Own = Own || (X.Source == 0 && !X.Auto);
+		Live = Live || (X.Source == 1 && X.Id.rfind("lv:", 0) == 0);
+		Story = Story || (X.Source == 2 && X.Storytime && X.Id.rfind("dee:", 0) == 0);
+	}
+	std::string Key;
+	for (const std::string& K : C.Paid)
+	{
+		Key = K.rfind("pay:", 0) == 0 ? K : Key;
+	}
+	const ss::life::LedgerEntry* Paid = nullptr;
+	for (const ss::life::LedgerEntry& E : D.Life.Ledger)
+	{
+		Paid = E.Kind == ss::life::LedgerVideo && E.Amount >= 10000 && E.Label.rfind("Rerun payout: ", 0) == 0 ? &E : Paid;
+	}
+	int Review = 0, Welcome = 0;
+	for (const ss::life::Letter& M : D.Life.Inbox)
+	{
+		Review += M.Source == "video" && M.Kind == video::LetterReview ? 1 : 0;
+		Welcome += M.Source == "video" && M.Kind == video::LetterWelcome ? 1 : 0;
+	}
+	std::printf("  gate 2 fixtures: the creator on %s: %zu videos whole (%zu kinds, %zu formats, %zu title styles, %zu frames), %zu stubs, %zu open candidates, %.0f "
+				"subscribers, Partner since %s, paid %s (%s), balance %s\n",
+		ss::net::DateLabel(ss::net::DayOf(World)).c_str(), C.Videos.size(), Kinds.size(), Formats.size(), Styles.size(), Frames.size(), C.Stubs.size(), C.Open.size(), C.Subs,
+		C.PartnerAt >= 0.0 ? ss::net::DateLabel(ss::net::DayOf(C.PartnerAt)).c_str() : "never", ss::Money(C.PaidCents).c_str(), Key.c_str(), ss::Money(C.BalanceCents).c_str());
+	Expect((D.Life.Update2LinesRead & ss::life::U2Video) != 0 && D.WorldText.empty() && C.Videos.size() == 60 && Kinds.size() >= 6 && Formats.size() >= 3 && Styles.size() >= 4 &&
+			   Frames.size() >= 4,
+		"gate 2 fixtures: the 60 newest videos whole, of six kinds or more, three formats and four title styles and frames (no world lines: an Established world)");
+	Expect(Tail && Young && C.Stubs.size() >= 5, "gate 2 fixtures: the older videos folded into the tails, the evergreen ones under a year old kept as stubs");
+	Expect(Auto && Own && Live && Story && C.Open.size() <= 30, "gate 2 fixtures: open candidates the plan played (AUTO), the player's own, the Embercrest's and Dee's (storytime)");
+	Expect(C.ReviewAt >= 0.0 && C.PartnerAt > C.ReviewAt && Review == 1 && Welcome == 1, "gate 2 fixtures: the partner gate crossed: the review, then the welcome, in Mail");
+	Expect(!Key.empty() && Paid && C.PaidCents >= Paid->Amount && C.BalanceCents > 0, "gate 2 fixtures: a payout paid (its key, its bank line, kind 13) and a balance accruing");
+	// In a session: the Kast channel, the Channel page's view, a week on through the calendar, the save.
+	Hooks H;
+	ss::Session S(H, "gate2-creator", &D);
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	const video::ChannelView V = S.VideoView();
+	const double Total = video::TotalViews(S.Life.Video, S.WorldMinutes());
+	double Chart = 0.0;
+	for (const double X : V.ViewsByDay)
+	{
+		Chart += X;
+	}
+	std::printf("  gate 2 fixtures: in a session: %d Kast followers over %d streams; the Channel page: %.0f subscribers, %.0f views in 28 days (the chart's days %.0f) of "
+				"%.0f to date\n",
+		S.Channel.Followers, S.Channel.Streams, V.Subs, V.Views28, Chart, Total);
+	Expect(S.WorldStart() == ss::world::Start::Established && S.Channel.Followers > 0 && S.Channel.Streams > 0, "gate 2 fixtures: an Established career with a Kast channel");
+	Expect(V.Partner && V.Subs >= 1000.0 && V.Views28 > 0.0 && V.Views28 <= Total && Chart <= Total + 0.5,
+		"gate 2 fixtures: the Channel page reads Partner, and its 28 days never add up to more than the views to date");
+	const double Subs0 = video::SubsAt(S.Life.Video, S.WorldMinutes());
+	const double Views0 = Total;
+	Now = Walk(S, Now, S.WorldMinutes() + 7.0 * Day);
+	S.Save();
+	ss::SaveData Back;
+	const bool Round = ss::SaveData::Parse(H.Last.Serialize(), Back) && Back.Serialize() == H.Last.Serialize();
+	Expect(Round && video::TotalViews(S.Life.Video, S.WorldMinutes()) > Views0 && video::SubsAt(S.Life.Video, S.WorldMinutes()) >= Subs0 && S.Life.Video.SteppedTo > World,
+		"gate 2 fixtures: a week on, the channel's views and subscribers grew through the calendar, and the save round-trips");
+	// PIE §8.2 step 2: the four fakes in Studio, with their chips.
+	Hooks Hf;
+	ss::SaveData F;
+	ss::SaveData::Parse(Saved, F);
+	ss::Session P(Hf, "gate2-creator-fakes", &F);
+	P.CurrentScreen = ss::Screen::Lobby;
+	Wait(P, 0.0, 0.2);
+	const size_t Before = P.Life.Video.Open.size();
+	bool Faked = true;
+	for (const char* Args : {"fake badbeat online", "fake bluff embercrest", "fake bigpot skip", "fake cooler dees"})
+	{
+		Faked = P.DebugVideo(Args).rfind("Faked ", 0) == 0 && Faked;
+	}
+	// (The dev command's ids: "rl:fake@<minute>:<kind>" online and skipped, "lv:fake@..." at the Embercrest, Dee's numbered 500 on.)
+	int Fakes = 0;
+	bool Chips = true;
+	for (const video::Candidate& X : P.VideoCandidates())
+	{
+		const size_t Cut = X.Id.rfind(':');
+		const bool Fake = X.Id.find("fake@") != std::string::npos || (X.Id.rfind("dee:", 0) == 0 && Cut != std::string::npos && std::atoi(X.Id.c_str() + Cut + 1) >= 500);
+		Fakes += Fake ? 1 : 0;
+		Chips = Chips && (!Fake || ((X.Source != 3 || X.Auto) && (X.Source != 2 || X.Storytime) && (X.Source != 1 || X.Id.rfind("lv:", 0) == 0)));
+	}
+	std::printf("  gate 2 fixtures: Studio after the four fakes: %zu candidates (%zu before)\n", P.Life.Video.Open.size(), Before);
+	Expect(Faked && Fakes >= 4 && Chips && P.Life.Video.Open.size() <= 30, "gate 2 fixtures: PIE's four fakes go into Studio (the skipped hand AUTO, Dee's storytime)");
+}
+
+// ------------------------------------------------------------------ update 2 C2: the stream's moments and their hands
+
+/** Aces all in preflop against sevens, the player on the button and Villain in the other seat, 64 big blinds each (the
+ *  deal session_seg_video.cpp's AcesAllIn uses): "5d" on the river and the aces hold, the villain out of chips; "7d" and
+ *  the sevens get there. */
+std::unique_ptr<ss::Hand> LinkAces(const char* River, const std::string& Villain)
+{
+	std::vector<ss::Card> Deck = ss::ParseCards(std::string("7cAs7hAd2hKd8s2c3h9h4h") + River);
+	for (int C = 0; C < 52; ++C)
+	{
+		if (std::find(Deck.begin(), Deck.end(), C) == Deck.end())
+		{
+			Deck.push_back(C);
+		}
+	}
+	ss::HandConfig Cfg;
+	Cfg.Players = {{0, ss::HeroId, 6400}, {1, Villain, 6400}};
+	Cfg.ButtonSeat = 0;
+	Cfg.SmallBlind = 100;
+	Cfg.BigBlind = 200;
+	Cfg.Deck = Deck;
+	ss::Rng R("seams-link-aces");
+	auto Hd = std::make_unique<ss::Hand>(Cfg, R);
+	for (const ss::PlayerAction& A : {ss::PlayerAction::RaiseTo(600), ss::PlayerAction::RaiseTo(6400), ss::PlayerAction::Call()})
+	{
+		Hd->Act(A);
+	}
+	return Hd;
+}
+
+/** The notes the stream logged since it held Before (the log keeps the newest 60; these checks stay far under). */
+std::vector<ss::kast::MomentNote> LinkNotesSince(const ss::Session& S, size_t Before)
+{
+	return std::vector<ss::kast::MomentNote>(S.Stream.Moments.begin() + static_cast<std::ptrdiff_t>(std::min(Before, S.Stream.Moments.size())), S.Stream.Moments.end());
+}
+
+/** Whether two moment notes are the same note (HypeAfter climbs with every moment, so two notes never match; the link is
+ *  left out: a tick's own moments, a level or the bubble, can be linked a hand after they land). */
+bool LinkSameNote(const ss::kast::MomentNote& A, const ss::kast::MomentNote& B)
+{
+	return A.Kind == B.Kind && A.World == B.World && A.Real == B.Real && A.Viewers == B.Viewers && A.HypeAfter == B.HypeAfter;
+}
+
+/**
+ * S3 (update 2 C2, g2 audit): a hand's stream moments fire before its Rerun candidate is cut (HeroHandDone), so the
+ * candidate carries that hand's face, chat and clip time (§4.4's stream add-on):
+ *   - the skip path: the moments a skip used to drop (SkipMoments: a won all-in here) and the player's knockout link to the
+ *     skipped hand's candidate (they fired after it, unlinked, before C2), and a clipped one's candidate holds the clip's
+ *     time (so its upload freezes the Kast clip: the audit's double count);
+ *   - the watch path: the knockout links to its own hand (it fired at the tick's end before C2, on the next hand's clock,
+ *     and the next hand's candidate took it), and the next hand's candidate takes only its own moment;
+ *   - a streamed bounty event, skipped: every knockout the player made is on stream exactly once (the bounty count), each
+ *     linked to its own hand's candidate, and the skipped hands' won all-ins link too.
+ */
+void StreamLinks()
+{
+	namespace kast = ss::kast;
+	namespace video = ss::video;
+	auto CandidateOf = [](const ss::Session& S, const std::string& Id) -> const video::Candidate* {
+		for (const video::Candidate& C : S.Life.Video.Open)
+		{
+			if (C.Id == Id)
+			{
+				return &C;
+			}
+		}
+		return nullptr;
+	};
+	Hooks H;
+	ss::Session S(H, "seams-stream-links");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 300000;
+	const bool Rig = S.Buy(ss::gear::FirstPcUpgrade().Id).empty();
+	S.Register(1); // $0.25 Hyper Sprint, 180 players
+	const std::string Live = Rig && S.T ? S.GoLive() : std::string("no table");
+	Expect(Live.empty() && S.Stream.Live, "stream links: live on Kast at a table");
+	if (!S.Stream.Live || !S.T || S.T->Players.size() < 2)
+	{
+		return;
+	}
+	const std::string Villain = S.T->Players[1].Id; // somebody in the field (a name the stream can say)
+	const ss::TPlayer* Who = S.PlayerById(Villain);
+	const std::string Prefix = "rl:" + S.T->Spec.Id + ":";
+	// 1. The skip path: the aces hold and send the villain home. The won all-in and the knockout go on stream first.
+	{
+		S.T->Tick += 1;
+		S.Stream.Viewers = 40.0;
+		const auto Hd = LinkAces("5d", Villain);
+		ss::Session::HandFacts F;
+		F.ByPlan = true;
+		F.Skipped = true;
+		F.EquityAtAllIn = 0.81;
+		for (const ss::PotResult& P : Hd->PotResults)
+		{
+			F.PotBefore += P.Amount;
+		}
+		const size_t Before = S.Stream.Moments.size();
+		S.HeroHandDone(*Hd, F);
+		const std::vector<kast::MomentNote> Notes = LinkNotesSince(S, Before);
+		const std::string Id = Prefix + std::to_string(S.T->Tick);
+		const video::Candidate* C = CandidateOf(S, Id);
+		bool Won = false, Out = false, Linked = !Notes.empty();
+		std::vector<std::string> Chat;
+		for (const kast::MomentNote& N : Notes)
+		{
+			Won = Won || N.Kind == kast::Moment::WonAllIn;
+			Out = Out || N.Kind == kast::Moment::Knockout;
+			Linked = Linked && N.Candidate == Id;
+			for (const std::string& Line : N.Chat)
+			{
+				if (Chat.size() < 3)
+				{
+					Chat.push_back(Line);
+				}
+			}
+		}
+		std::printf("  stream links: a skipped hand fired %zu moments (won all-in %d, knockout %d), its candidate %s, face %d, %zu chat lines\n", Notes.size(), Won ? 1 : 0, Out ? 1 : 0,
+			C ? C->Id.c_str() : "none", C ? C->Stream.Face : -1, C ? C->Stream.Chat.size() : 0);
+		Expect(Won && Out && Linked && C && C->Source == 3 && C->Auto, "stream links: a skipped hand's won all-in and knockout go to its own candidate (SkipMoments before the candidate)");
+		Expect(C && C->Stream.Face == static_cast<int>(Notes.back().Face) && C->Stream.Chat == Chat && C->Stream.Viewers >= 40,
+			"stream links: the skipped hand's candidate carries the moments' face, chat and viewers");
+	}
+	// 1b. The clip's time (the audit's double count): the same skipped hand, a hand at a time, until somebody in chat clips
+	// one of its moments (a won all-in 18%, a knockout 10% with the room full). Its candidate holds the clip's time, so the
+	// upload stops that Kast clip bringing its own follows (§4.7). (The log is cleared first so its newest 60 hold them all.)
+	{
+		S.Stream.Moments.clear();
+		double Clip = -1.0;
+		std::string Id;
+		int Hands = 0;
+		for (; Hands < 30 && Clip < 0.0; ++Hands)
+		{
+			S.T->Tick += 1;
+			S.Stream.Viewers = 40.0;
+			const auto Hd = LinkAces("5d", Villain);
+			ss::Session::HandFacts F;
+			F.ByPlan = true;
+			F.Skipped = true;
+			F.EquityAtAllIn = 0.81;
+			for (const ss::PotResult& P : Hd->PotResults)
+			{
+				F.PotBefore += P.Amount;
+			}
+			const size_t Before = S.Stream.Moments.size();
+			S.HeroHandDone(*Hd, F);
+			for (const kast::MomentNote& N : LinkNotesSince(S, Before))
+			{
+				Clip = Clip >= 0.0 ? Clip : N.ClipAt;
+			}
+			Id = Prefix + std::to_string(S.T->Tick);
+		}
+		const video::Candidate* C = CandidateOf(S, Id);
+		std::printf("  stream links: a skipped hand clipped on the %s try, its candidate %s, clip at %.1f (the candidate's %.1f)\n", ss::Ordinal(Hands).c_str(), C ? C->Id.c_str() : "none",
+			Clip, C ? C->Stream.ClipAt : -1.0);
+		Expect(Clip >= 0.0 && C && C->Stream.ClipAt == Clip, "stream links: a clipped skipped hand's candidate holds the clip's time (its upload freezes that clip)");
+	}
+	// 2. The watch path: the same deal watched (AfterAward has fired its own all-in moment; here the hook alone). One
+	// knockout note, this hand's; then the next hand (the clock a hand on) loses an all-in, and its candidate takes only that.
+	{
+		S.T->Tick += 1;
+		const auto Hd = LinkAces("5d", Villain);
+		ss::Session::HandFacts F;
+		F.Skipped = false;
+		for (const ss::PotResult& P : Hd->PotResults)
+		{
+			F.PotBefore += P.Amount;
+		}
+		const size_t Before = S.Stream.Moments.size();
+		S.HeroHandDone(*Hd, F);
+		const std::vector<kast::MomentNote> Notes = LinkNotesSince(S, Before);
+		const std::string Id = Prefix + std::to_string(S.T->Tick + 1);
+		const bool One = Notes.size() == 1 && Notes[0].Kind == kast::Moment::Knockout && Notes[0].Candidate == Id && CandidateOf(S, Id) != nullptr;
+		bool Named = false;
+		for (const kast::ChatMsg& M : S.Stream.Chat)
+		{
+			Named = Named || (Who && M.Text == "bye " + Who->Name + " kastGG");
+		}
+		Expect(One && (Named || Notes[0].Chat.empty()), "stream links: a watched hand's knockout is on stream once, by name, and goes to that hand's candidate");
+		S.T->Tick += 1;
+		const auto Beat = LinkAces("7d", Villain);
+		ss::Session::HandFacts G;
+		G.Skipped = false;
+		const size_t Then = S.Stream.Moments.size();
+		S.Stream.OnMoment(S.Channel, S.StreamInputs(), kast::Moment::BadBeat); // what AfterAward fires for it
+		S.HeroHandDone(*Beat, G);
+		const std::vector<kast::MomentNote> Next = LinkNotesSince(S, Then);
+		const std::string NextId = Prefix + std::to_string(S.T->Tick + 1);
+		int Knockouts = 0;
+		for (const kast::MomentNote& N : S.Stream.Moments)
+		{
+			Knockouts += N.Kind == kast::Moment::Knockout && N.Candidate == Id ? 1 : 0;
+		}
+		Expect(Next.size() == 1 && Next[0].Kind == kast::Moment::BadBeat && Next[0].Candidate == NextId && Knockouts == 1,
+			"stream links: the next hand's candidate takes its own moment, never the last hand's knockout");
+	}
+	// 2b. Who busted whom as the tournament reckons it (ApplyHand: whoever won the last pot the busted player was in). Three
+	// all in preflop, the player's aces the shortest stack against queens and kings: the aces take the main pot, the kings
+	// the side pot over the queens. The queens are out of chips, sent home by the kings: no knockout on the player's stream.
+	{
+		S.T->Tick += 1;
+		const std::string Queens = S.T->Players[2].Id;
+		const std::string Kings = S.T->Players[3].Id;
+		std::vector<ss::Card> Deck = ss::ParseCards("AsQsKdAhQhKc8s2c7d9hJh3sTs4c");
+		for (int C = 0; C < 52; ++C)
+		{
+			if (std::find(Deck.begin(), Deck.end(), C) == Deck.end())
+			{
+				Deck.push_back(C);
+			}
+		}
+		ss::HandConfig Cfg;
+		Cfg.Players = {{0, ss::HeroId, 2000}, {1, Queens, 4000}, {2, Kings, 8000}};
+		Cfg.ButtonSeat = 2;
+		Cfg.SmallBlind = 100;
+		Cfg.BigBlind = 200;
+		Cfg.Deck = Deck;
+		ss::Rng R("seams-link-side-pot");
+		ss::Hand Hd(Cfg, R);
+		for (const ss::PlayerAction& A : {ss::PlayerAction::RaiseTo(8000), ss::PlayerAction::Call(), ss::PlayerAction::Call()})
+		{
+			if (!Hd.bComplete)
+			{
+				Hd.Act(A);
+			}
+		}
+		const ss::HandSeat* Mine = Hd.SeatByNumber(0);
+		const ss::HandSeat* Out = Hd.SeatByNumber(1);
+		const bool Dealt = Hd.bComplete && Mine && Mine->Stack > 0 && Out && Out->Stack == 0 && Hd.PotResults.size() >= 2 && Hd.PotResults[0].Winners == std::vector<int>{0} &&
+			Hd.PotResults[1].Winners == std::vector<int>{2};
+		ss::Session::HandFacts F;
+		F.Skipped = false;
+		const size_t Before = S.Stream.Moments.size();
+		S.HeroHandDone(Hd, F);
+		int Outs = 0;
+		for (const kast::MomentNote& N : LinkNotesSince(S, Before))
+		{
+			Outs += N.Kind == kast::Moment::Knockout ? 1 : 0;
+		}
+		Expect(Dealt && Outs == 0, "stream links: a player busted in a side pot the kings won is the kings' knockout, not the player's (the main pot's)");
+	}
+	// 3. A streamed bounty event, skipped (BountyTournament's Headhunter, a millisecond of skip a frame so the log never
+	// turns over inside one): every note as it lands. The first of a few careers whose player sends somebody home.
+	for (int Try = 0; Try < 6; ++Try)
+	{
+		Hooks Hp;
+		ss::Session P(Hp, "seams-stream-pko-" + std::to_string(Try));
+		P.CurrentScreen = ss::Screen::Lobby;
+		P.Life.Unlocks.insert("bounty");
+		P.BankrollCents = 300000;
+		const bool PkoRig = P.Buy(ss::gear::FirstPcUpgrade().Id).empty();
+		ss::net::EventInstance Pko;
+		const bool Found = ss::net::Shared().FindInstance("hh-110@1500", Pko);
+		if (Found)
+		{
+			P.RegisterEvent(ss::net::Shared().Listing(Pko, nullptr, P.Unlocks()));
+		}
+		const std::string OnAir = PkoRig && P.T ? P.GoLive() : std::string("no table");
+		Expect(Found && OnAir.empty() && P.Stream.Live, "stream links: live on Kast at the Headhunter");
+		if (!P.Stream.Live || !P.T)
+		{
+			return;
+		}
+		P.CurrentPace = ss::Pace::Sprint;
+		P.SprintBudgetMs = 1.0;
+		std::vector<kast::MomentNote> All;
+		bool Lost = false;
+		double Now = 0.0;
+		ss::Rng Choice("seams-stream-pko-choices");
+		for (int Frames = 0; P.CurrentScreen == ss::Screen::Table && Frames < 4000000; ++Frames)
+		{
+			Now += 1.0 / 30.0;
+			P.Update(Now);
+			const std::vector<kast::MomentNote>& M = P.Stream.Moments;
+			size_t From = 0;
+			if (!All.empty())
+			{
+				bool Seen = false;
+				for (size_t K = M.size(); K-- > 0 && !Seen;)
+				{
+					Seen = LinkSameNote(M[K], All.back());
+					From = Seen ? K + 1 : From;
+				}
+				From = Seen ? From : M.size();
+				Lost = Lost || !Seen;
+			}
+			All.insert(All.end(), M.begin() + static_cast<std::ptrdiff_t>(From), M.end());
+			if (P.HasPrompt && Now - P.Prompt.OpenedAt > 0.5)
+			{
+				// A hand Sprint handed back (the bubble's approach, the final table): call or check, the watch path's hands.
+				P.HeroAct(P.Prompt.CanCheck ? ss::PlayerAction::Check() : Choice.Next() < 0.7 ? ss::PlayerAction::Call() : ss::PlayerAction::Fold());
+			}
+		}
+		int Outs = 0, OutsLinked = 0, Swings = 0, SwingsLinked = 0;
+		for (const kast::MomentNote& N : All)
+		{
+			const bool Out = N.Kind == kast::Moment::Knockout;
+			const bool Swing = N.Kind == kast::Moment::WonAllIn || N.Kind == kast::Moment::BadBeat || N.Kind == kast::Moment::BigPot;
+			Outs += Out ? 1 : 0;
+			OutsLinked += Out && !N.Candidate.empty() ? 1 : 0;
+			Swings += Swing ? 1 : 0;
+			SwingsLinked += Swing && !N.Candidate.empty() ? 1 : 0;
+		}
+		const ss::Results& R = P.LastResults;
+		std::printf("  stream links: a streamed Headhunter (career %d), skipped: %s of %d, %d knockouts (the bounty count), %d knockout notes (%d linked); %d swings on "
+					"stream, %d linked to their hands\n",
+			Try, ss::Ordinal(R.Place).c_str(), R.Entrants, R.Knockouts, Outs, OutsLinked, Swings, SwingsLinked);
+		Expect(!Lost && P.CurrentScreen == ss::Screen::Results, "stream links: the Headhunter reaches the results, every note seen");
+		Expect(Outs == R.Knockouts && OutsLinked == Outs, "stream links: every knockout is on stream exactly once, linked to its own hand's candidate");
+		if (R.Knockouts == 0 && Try < 5)
+		{
+			continue;
+		}
+		Expect(R.Knockouts > 0 && SwingsLinked > 0, "stream links: a career with knockouts; the skipped hands' all-ins and big pots link to their candidates");
+		break;
+	}
+}
 } // namespace seams
 
 void SegLead()
@@ -1081,5 +1551,7 @@ void SegLead()
 	seams::RenownKept();
 	seams::Wave1a();
 	seams::Gate1Fixtures();
+	seams::Gate2Fixtures();
+	seams::StreamLinks();
 }
 } // namespace session_test

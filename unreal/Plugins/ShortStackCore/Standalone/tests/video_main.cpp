@@ -4,6 +4,9 @@
 // 30 one-day steps), the $100 rollover and one ledger line a month, the fold (folded tails and stubs against every video
 // kept whole, over three years; nothing overflows over fourteen), the saturation and fatigue terms, the bounds,
 // determinism, the save's round trip, the thumbnails' frames, and the copy lint and trademark screen. core-video.
+// C2 (the G2 audit): a heavy uploader's 28 and 30 days never over the views (B1), a Recap mixing a live night's skipped
+// hands (S1), FormatSubs for Shorts (S2), payout marks only when the 21st pays (S5), no ad talk before the gate (N3), the
+// statement with every payout (N5), PublishWhy and Deleted in Video.h (N6).
 #include "CopyLint.h"
 
 #include "ShortStack/Cards.h"
@@ -12,8 +15,10 @@
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Recall.h"
+#include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Video.h"
+#include "ShortStack/Game/World.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/UI/Canvas.h"
@@ -1533,6 +1538,299 @@ void Rules()
 		"rules: the Recap goes up, its moments used");
 	Expect(video::Upload(C, Ch, 41.0 * Day, "rules", F).empty() && C.Videos.size() == 1, "rules: and can't go up twice");
 }
+
+// ------------------------------------------------------------------ C2: the G2 audit's fixes (B1, S1, S2, S5, N3, N5, N6)
+
+/** The first world day after From that falls on the 21st (Rerun's payday). */
+int NextPayday(int From)
+{
+	for (int D = From; D < From + 40; ++D)
+	{
+		int Y = 0, M = 0, Dm = 0;
+		ss::world::CivilDate(D, Y, M, Dm);
+		if (Dm == 21)
+		{
+			return D;
+		}
+	}
+	return -1;
+}
+
+void HeavyUploader()
+{
+	// B1: three Shorts a day for 400 days (the plan that broke the Channel's chart). Read mid-day, past the stepped clock,
+	// and at each midnight: the Channel page's 28 days and the public record's 30 (a sponsor's letter quotes it) never claim
+	// more views than the channel has had, ever; and at each midnight, never more than the month really brought (the views
+	// to date then, less the views to date as read forward that many days before).
+	life::State L;
+	video::Channel& C = L.Video;
+	ss::kast::Channel K;
+	Chips Bank = 0;
+	int Over28 = 0, Over30 = 0, OverMonth28 = 0, OverMonth30 = 0, Reads = 0;
+	double Worst = 0.0;
+	std::vector<double> ToDateAt(402, 0.0); // the views to date at each midnight, read forward (exact)
+	for (int D = 0; D <= 400; ++D)
+	{
+		if (D >= 7)
+		{
+			for (int Slot = 0; Slot < 3; ++Slot)
+			{
+				const double At = static_cast<double>(D) * Day + (3.0 + 8.0 * Slot) * 60.0;
+				const std::string Id = "rl:heavy@" + std::to_string(D) + ":" + std::to_string(Slot);
+				video::NoteHand(C, Moment(Id, At));
+				video::Choice Ch;
+				Ch.Candidates = {Id};
+				Ch.F = video::Format::Short;
+				Ch.Fr = video::Frame::Versus;
+				video::UploadFacts F;
+				F.GearQuality = 0.5;
+				video::Upload(C, Ch, At + 30.0, "heavy", F);
+			}
+		}
+		for (int Read = 0; Read < 2; ++Read)
+		{
+			const double W = Read == 0 ? static_cast<double>(D) * Day + 20.0 * 60.0 : static_cast<double>(D + 1) * Day;
+			if (Read == 1)
+			{
+				video::Step(C, L, Bank, K, static_cast<double>(D) * Day, W);
+			}
+			const double ToDate = video::TotalViews(C, W);
+			const video::ChannelView V = video::View(C, W);
+			const ss::rep::Public P = ss::rep::Of(L, K, nullptr, W);
+			Over28 += V.Views28 > ToDate + 0.5 ? 1 : 0;
+			Over30 += static_cast<double>(P.Views30) > ToDate + 1.0 ? 1 : 0;
+			Worst = std::max(Worst, ToDate > 0.0 ? std::max(V.Views28, static_cast<double>(P.Views30)) / ToDate : 0.0);
+			++Reads;
+			if (Read == 1)
+			{
+				ToDateAt[static_cast<size_t>(D + 1)] = ToDate;
+				const double Month28 = ToDate - ToDateAt[static_cast<size_t>(std::max(0, D + 1 - 28))];
+				const double Month30 = ToDate - ToDateAt[static_cast<size_t>(std::max(0, D + 1 - 30))];
+				OverMonth28 += V.Views28 > Month28 + 0.5 ? 1 : 0;
+				OverMonth30 += static_cast<double>(P.Views30) > Month30 + 1.0 ? 1 : 0;
+			}
+		}
+	}
+	std::printf("  heavy uploader: %d reads over 400 days of three Shorts a day, %zu kept, the 28 and 30 days at most %.3f of views to date\n", Reads, C.Videos.size(), Worst);
+	Expect(C.Videos.size() == 60 && C.Tails[static_cast<size_t>(video::Class::Short)].Total[0] > 0.0, "heavy uploader: Shorts fold younger than a month (the case B1 broke)");
+	Expect(Over28 == 0, "heavy uploader: View().Views28 never exceeds the views to date (" + std::to_string(Over28) + " reads over)");
+	Expect(Over30 == 0, "heavy uploader: rep's Views30 never exceeds the views to date (" + std::to_string(Over30) + " reads over)");
+	Expect(OverMonth28 == 0 && OverMonth30 == 0,
+		"heavy uploader: and never more than the month brought (" + std::to_string(OverMonth28) + " and " + std::to_string(OverMonth30) + " midnights over)");
+}
+
+void SkipRecap()
+{
+	// S1: a hand the plan played through a live skip is "lv:<entry>:skip:<n>" (BackRoomAuto.cpp). It's the same night's
+	// event as the hands watched and the recap ("lv:<entry>:recap"), so a Recap can mix them.
+	life::State L;
+	bool Sd = false;
+	ss::room::HandNote N;
+	N.AllIn = true;
+	N.Called = true;
+	N.Shown = {{"You", ss::ParseCards("AsAd")}, {"Mike_R", ss::ParseCards("7c7h")}};
+	video::NoteLiveHand(L, BadBeatHand(Sd), &N, LiveCtx(1, 9.0 * Day + 20.0 * 60.0));
+	video::LiveContext Skip = LiveCtx(1, 9.0 * Day + 21.0 * 60.0);
+	Skip.EntryId += ":skip"; // BackRoomAuto.cpp's skipped hands
+	Skip.Auto = true;
+	ss::recall::Record Second = BadBeatHand(Sd, true);
+	Second.Number = 230;
+	video::NoteLiveHand(L, Second, nullptr, Skip);
+	video::NoteLiveRecap(L, LiveCtx(1, 9.0 * Day + 23.0 * 60.0), 4, 119000);
+	const std::vector<std::string> Ids = {"lv:embercrest-nightly@9:recap", "lv:embercrest-nightly@9:214", "lv:embercrest-nightly@9:skip:230"};
+	bool All = L.Video.Open.size() == 3;
+	for (const std::string& Id : Ids)
+	{
+		All = All && std::any_of(L.Video.Open.begin(), L.Video.Open.end(), [&Id](const video::Candidate& X) { return X.Id == Id; });
+	}
+	Expect(All, "skip recap: the night's watched hand, its skipped hand and its recap are candidates");
+	video::Choice Ch;
+	Ch.F = video::Format::Recap;
+	Ch.T = video::TitleStyle::Story;
+	Ch.Fr = video::Frame::Trophy;
+	Ch.Candidates = Ids;
+	Expect(video::CanUpload(Ch, L.Video.Open).empty(), "skip recap: a Recap mixing the night's watched and skipped hands can go up (" + video::CanUpload(Ch, L.Video.Open) + ")");
+	Ch.Candidates = {Ids[0], Ids[2], "lv:embercrest-nightly@9:214"};
+	Expect(video::CanUpload(Ch, L.Video.Open).empty(), "skip recap: in any order");
+	// Another night's skipped hand is still another event.
+	video::LiveContext Other = LiveCtx(1, 10.0 * Day + 21.0 * 60.0);
+	Other.EntryId = "embercrest-nightly@10:skip";
+	ss::recall::Record Third = BadBeatHand(Sd);
+	Third.Number = 240;
+	video::NoteLiveHand(L, Third, nullptr, Other);
+	Ch.Candidates = {Ids[0], Ids[2], "lv:embercrest-nightly@10:skip:240"};
+	Expect(!video::CanUpload(Ch, L.Video.Open).empty(), "skip recap: another night's skipped hand doesn't join the run's Recap");
+	Ch.Candidates = Ids;
+	video::UploadFacts F;
+	Expect(!video::Upload(L.Video, Ch, 10.0 * Day, "skip-recap", F).empty() && L.Video.Videos.size() == 1 && L.Video.Videos[0].F == video::Format::Recap,
+		"skip recap: and it goes up");
+}
+
+void ShortsConvert()
+{
+	// S2 (v1.2): FormatSubs in c. A Short holds people best and converts worst: its c is the formula's times 0.5, where it
+	// sat on the 0.012 ceiling before. The long formats are as they were.
+	video::Channel C;
+	auto Conv = [&C](video::Format Fm, const std::string& Id) {
+		video::NoteHand(C, Moment(Id, 30.0 * Day));
+		video::Choice Ch;
+		Ch.Candidates = {Id};
+		Ch.F = Fm;
+		Ch.T = video::TitleStyle::Story;
+		video::UploadFacts F;
+		F.GearQuality = 0.5;
+		const std::string V = video::Upload(C, Ch, 30.0 * Day + 60.0, "convert", F);
+		return V.empty() ? -1.0 : C.Videos.back().Conv;
+	};
+	const double Long = Conv(video::Format::Breakdown, "rl:conv@1:1");
+	const double Short = Conv(video::Format::Short, "rl:conv@1:2");
+	// Story: TitleSubs 1.15, title retention 1.10; a mid rig: x1.0; Niche 1.15 (every upload so far one kind group); fewer
+	// than two uploads in 14 days before each: no Consistency.
+	const double ShortFormula = std::clamp(0.0065 * 1.15 * (0.70 * 1.10 / 0.45) * 1.15 * 0.5, 0.002, 0.012);
+	const double LongFormula = std::clamp(0.0065 * 1.15 * (0.45 * 1.10 / 0.45) * 1.15, 0.002, 0.012);
+	Expect(std::fabs(Long - LongFormula) < 1e-6, "shorts: a Breakdown converts as before (" + Num(Long) + " against " + Num(LongFormula) + ")");
+	Expect(std::fabs(Short - ShortFormula) < 1e-6 && Short < Long, "shorts: a Short converts at half the formula, under a Breakdown (" + Num(Short) + " against " + Num(ShortFormula) + ")");
+}
+
+void PayoutMarks()
+{
+	// S5: the wall calendar marks the 21st only when it pays: a Partner (the welcome came) with $100 in the balance as the
+	// marks are read. The review week and a month that will roll over get no payout mark.
+	const int Pay = NextPayday(60);
+	Expect(Pay > 0, "marks: a 21st after day 60");
+	auto PayMarks = [Pay](const video::Channel& C) {
+		int N = 0;
+		for (const ss::life::Mark& M : video::Marks(C, (Pay - 6.0) * Day, (Pay + 5.0) * Day))
+		{
+			N += M.Kind == video::MarkPayout && M.At == Pay * Day && M.Label == "Rerun payout" ? 1 : 0;
+		}
+		return N;
+	};
+	video::Channel Review;
+	Review.Subs = 1100.0;
+	Review.SteppedTo = (Pay - 6.0) * Day;
+	Review.ReviewAt = (Pay - 8.0) * Day;
+	const std::vector<ss::life::Mark> InReview = video::Marks(Review, (Pay - 6.0) * Day, (Pay + 5.0) * Day);
+	Expect(PayMarks(Review) == 0 && std::any_of(InReview.begin(), InReview.end(), [](const ss::life::Mark& M) { return M.Kind == video::MarkReview; }),
+		"marks: the review week marks the review's answer, never a payout");
+	video::Channel Low = Review;
+	Low.PartnerAt = (Pay - 1.0) * Day;
+	Low.BalanceCents = 9999;
+	Expect(PayMarks(Low) == 0, "marks: a Partner with $99.99 gets no payout mark (it rolls over)");
+	video::Channel Full = Low;
+	Full.BalanceCents = 10000;
+	Expect(PayMarks(Full) == 1, "marks: a Partner with $100 gets the 21st marked");
+}
+
+void StatementWithPayout()
+{
+	// N5: a payout always comes with its statement, even when Rerun wrote that week (the welcome three days before); a
+	// month that rolls over keeps to one routine letter a week.
+	const int Pay = NextPayday(60);
+	for (const Chips Balance : {Chips(12000), Chips(5000)})
+	{
+		video::Channel C;
+		life::State M;
+		Chips Bank = 0;
+		ss::kast::Channel K;
+		C.Subs = 1500.0;
+		C.SteppedTo = (Pay - 3.0) * Day;
+		C.ReviewAt = (Pay - 10.0) * Day;
+		C.PartnerAt = (Pay - 3.0) * Day;
+		C.BalanceCents = Balance;
+		life::Letter Welcome;
+		Welcome.At = (Pay - 3.0) * Day;
+		Welcome.Thread = "rerun:partner";
+		Welcome.Source = "video";
+		Welcome.From = "Rerun";
+		Welcome.Kind = video::LetterWelcome;
+		Welcome.Subject = "Welcome to the Rerun Partner Program.";
+		ss::life::Post(M, Welcome);
+		video::Step(C, M, Bank, K, (Pay - 3.0) * Day, (Pay + 2.0) * Day);
+		int Statements = 0, Lines = 0;
+		for (const life::Letter& X : M.Inbox)
+		{
+			Statements += X.Source == "video" && X.Kind == video::LetterStatement ? 1 : 0;
+		}
+		for (const life::LedgerEntry& E : M.Ledger)
+		{
+			Lines += E.Kind == life::LedgerVideo ? 1 : 0;
+		}
+		if (Balance >= 10000)
+		{
+			Expect(Bank == Balance && Lines == 1 && Statements == 1, "statement: a payout the week of the welcome still comes with its statement");
+		}
+		else
+		{
+			Expect(Bank == 0 && Lines == 0 && Statements == 0, "statement: a rollover the week of the welcome stays quiet (one routine letter a week)");
+		}
+	}
+}
+
+/** True when a line talks about ads ("ad", "ads", "advert..."). */
+bool TalksAds(const std::string& Line)
+{
+	std::string Word;
+	for (size_t I = 0; I <= Line.size(); ++I)
+	{
+		const char Ch = I < Line.size() ? static_cast<char>(std::tolower(static_cast<unsigned char>(Line[I]))) : ' ';
+		if (Ch >= 'a' && Ch <= 'z')
+		{
+			Word.push_back(Ch);
+			continue;
+		}
+		if (Word == "ad" || Word == "ads" || Word.rfind("advert", 0) == 0)
+		{
+			return true;
+		}
+		Word.clear();
+	}
+	return false;
+}
+
+void AdviceBeforeTheGate()
+{
+	// N3: Studio says nothing about ads before they run (the gate, then the review); once they do, a Vlog says longer
+	// videos carry more. The two-argument Advice is the before-the-gate one.
+	video::Channel C;
+	for (int I = 0; I < 3; ++I)
+	{
+		video::NoteHand(C, Moment("lv:ads@5:" + std::to_string(I), 5.0 * Day + 20.0 * 60.0 + I));
+	}
+	int Before = 0, Lines = 0;
+	for (int F = 0; F < 4; ++F)
+	{
+		for (int T = 0; T < 5; ++T)
+		{
+			for (int Fr = 0; Fr < 5; ++Fr)
+			{
+				video::Choice Ch;
+				Ch.F = static_cast<video::Format>(F);
+				Ch.T = static_cast<video::TitleStyle>(T);
+				Ch.Fr = static_cast<video::Frame>(Fr);
+				Ch.Candidates = F >= 2 ? std::vector<std::string>{"lv:ads@5:0", "lv:ads@5:1", "lv:ads@5:2"} : std::vector<std::string>{"lv:ads@5:0"};
+				for (const std::vector<std::string>& Set : {video::Advice(Ch, C.Open), video::Advice(Ch, C.Open, false)})
+				{
+					for (const std::string& A : Set)
+					{
+						Before += TalksAds(A) ? 1 : 0;
+						++Lines;
+					}
+				}
+			}
+		}
+	}
+	Expect(Lines > 0 && Before == 0, "advice: no line about ads before the gate (" + std::to_string(Before) + " of " + std::to_string(Lines) + ")");
+	video::Choice Vlog;
+	Vlog.F = video::Format::Vlog;
+	Vlog.Candidates = {"lv:ads@5:0", "lv:ads@5:1", "lv:ads@5:2"};
+	const std::vector<std::string> After = video::Advice(Vlog, C.Open, true);
+	Expect(std::any_of(After.begin(), After.end(), [](const std::string& A) { return TalksAds(A); }), "advice: once ads run, a Vlog says longer videos carry more");
+	// N6: Session::Publish's refusals and the take-down line are public (Video.h), word for word what Studio shows.
+	Expect(video::PublishWhy(4) == "Too tired to edit. Get some sleep first." && video::PublishWhy(2) == "Close your tables first. Editing needs your whole attention." &&
+			   video::Deleted() == "Taken down. The subscribers it brought in stay.",
+		"copy: PublishWhy and Deleted come from Video.h");
+}
 } // namespace video_test
 
 int main(int Argc, char** Argv)
@@ -1591,6 +1889,12 @@ int main(int Argc, char** Argv)
 	video_test::Copy();
 	video_test::Storytime();
 	video_test::Rules();
+	video_test::HeavyUploader();
+	video_test::SkipRecap();
+	video_test::ShortsConvert();
+	video_test::PayoutMarks();
+	video_test::StatementWithPayout();
+	video_test::AdviceBeforeTheGate();
 	const double Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count();
 	std::printf("video tests: %d checks, %d failed, %.1f s\n", video_test::Checks, video_test::Failures, Seconds);
 	return video_test::Failures == 0 ? 0 : 1;

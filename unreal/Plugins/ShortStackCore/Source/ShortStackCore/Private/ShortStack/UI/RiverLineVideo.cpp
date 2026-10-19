@@ -32,17 +32,6 @@
 
 namespace ss
 {
-namespace video
-{
-namespace video_copy
-{
-// VideoCopy.cpp's (core-video): Session::Publish's refusals and DeleteVideo's line, word for word, so the greyed button
-// says exactly what the press would.
-std::string PublishWhy(int Reason);
-std::string Deleted();
-} // namespace video_copy
-} // namespace video
-
 namespace ui
 {
 namespace rlvideo_detail
@@ -225,11 +214,20 @@ int RrNight(double At)
 	return static_cast<int>(std::floor((At - 600.0) / net::MinutesPerDay + 1e-9));
 }
 
-/** "rl:mm-26@1530:214" -> "rl:mm-26@1530": the event a moment came from (a Recap's are one event's). */
+/**
+ * "rl:mm-26@1530:214" -> "rl:mm-26@1530": the event a moment came from (a Recap's are one event's). A live hand the plan
+ * played through a skip is "lv:<entry>:skip:<n>": the same entry's (Video.cpp's EventKey reads it the same way).
+ */
 std::string RrEventKey(const std::string& Id)
 {
 	const size_t Cut = Id.rfind(':');
-	return Cut == std::string::npos ? Id : Id.substr(0, Cut);
+	std::string Key = Cut == std::string::npos ? Id : Id.substr(0, Cut);
+	const size_t Skip = Key.size() >= 5 ? Key.size() - 5 : std::string::npos;
+	if (Skip != std::string::npos && Key.compare(Skip, 5, ":skip") == 0)
+	{
+		Key.resize(Skip);
+	}
+	return Key;
 }
 
 bool RrEventKind(video::Kind K)
@@ -497,7 +495,7 @@ std::vector<std::string> RrPublishWhy(const Session& S, const video::Choice& Ch)
 	}
 	if (Reason > 0)
 	{
-		Out.push_back(video::video_copy::PublishWhy(Reason));
+		Out.push_back(video::PublishWhy(Reason));
 	}
 	return Out;
 }
@@ -1099,7 +1097,9 @@ void RrSide(RrFrame& F, const std::vector<video::Candidate>& Open)
 	const float X = RrSideX, W = RrSideW;
 	NetSpaced(F.C, "WHAT IT DOES", X + 2.0f, 100.0f, 10.0f, 900, RrMuted, 1.4f);
 	const video::Choice Ch = RrChoice(U);
-	std::vector<std::string> Lines = video::Advice(Ch, Open);
+	// Ads come up only once they run (a Partner, past the review): before that they're no reason to pick a format.
+	const video::Channel& Rerun = F.S.Life.Video;
+	std::vector<std::string> Lines = video::Advice(Ch, Open, Rerun.PartnerAt >= 0.0 && Rerun.PartnerAt <= F.World);
 	bool Auto = false;
 	for (const std::string& Id : U.Pick)
 	{
@@ -1460,7 +1460,7 @@ void RrVideos(RrFrame& F, const video::ChannelView& V)
 	{
 		const std::string Why = F.S.DeleteVideo(Delete);
 		U.Confirm.clear();
-		U.Note = Why.empty() ? video::video_copy::Deleted() : Why;
+		U.Note = Why.empty() ? video::Deleted() : Why;
 		U.NoteBad = !Why.empty();
 		U.NoteAt = F.Now;
 	}
