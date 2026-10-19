@@ -51,6 +51,9 @@ std::pair<int, std::string> Word(const life::Mark& M)
 	case sponsor::MarkReview: return {3, "REVIEW"};
 	case sponsor::MarkRenewal: return {4, "RENEW"};
 	case sponsor::MarkOfferEnds: return {5, "OFFER"};
+	// Rerun's (update 2 §1.6, §4.9): the 21st's payout and the review's answer, both in the channel's name.
+	case video::MarkPayout: return {6, "RERUN"};
+	case video::MarkReview: return {6, "RERUN"};
 	default: return {9, std::string()};
 	}
 }
@@ -273,7 +276,11 @@ void Tracker(Canvas& C, const Session& S, double Now)
 			const float Ly = Y + 34.0f + static_cast<float>(I) * 30.0f;
 			const int On = net::DayOf(M.At);
 			const int Today = net::DayOf(World);
-			const std::string When = On == Today ? std::string("Today") : On == Today + 1 ? std::string("Tomorrow") : std::string(net::WeekdayName(On, true));
+			// A weekday reads as this week's: a date a week or more out gets its date ("Apr 21": "Rerun payout", §1.6).
+			const std::string When = On == Today ? std::string("Today")
+				: On == Today + 1                ? std::string("Tomorrow")
+				: On < Today + 7                 ? std::string(net::WeekdayName(On, true))
+												 : net::DateLabel(On);
 			const float Ww = C.Text(When, Cx, Ly, Ts(18.0f, 700, agenda_detail::Word(M).first <= 1 ? pal::Orange : pal::Accent));
 			C.Text(M.Label, Cx + std::max(Ww, 110.0f) + 14.0f, Ly, Ts(18.0f, 500, pal::Ink, Align::Left, Baseline::Alphabetic, false, W - 60.0f - (Cx + std::max(Ww, 110.0f) + 14.0f)));
 		}

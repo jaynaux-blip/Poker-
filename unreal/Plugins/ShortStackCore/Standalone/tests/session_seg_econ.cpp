@@ -16,19 +16,45 @@
 //   EconFreshYou      the same when the player is the one winning: the first name on the board, the first Noon
 //                     Deepstack, two wins, the room's points and the Season board.
 //   EconEstablished   an established world's block says none of it, at the same hours.
-// G2 and G3 (VideoBuzz, the moment log, rep::Public's video and site fields) land with their gates.
+//
+// G2 (P0, §4.7, §4.4, §1.11):
+//   EconBuzz          Rerun's buzz in the directory: the views of the last 48 hours raise the strangers by
+//                     1 + 0.3 x min(1, buzz / 5,000), so x1 at none, x1.15 at 2,500 and x1.3 at 5,000 and at 50,000, on
+//                     top of the watch speed's factor; over whole nights the new faces follow.
+//   EconBuzzSession   the session hands the stream video::Buzz (none without a video; a day-old upload and a viral run).
+//   EconMomentLog     tonight's moment log on the stream (§4.4): one note a moment (its kind, the clock, the viewers, the
+//                     hype it left, the face, up to three of chat's own lines, the clip's time when somebody clipped it),
+//                     the newest 60, empty again at the next stream; chat's lines say nothing of U1's words or a brand;
+//                     a moment nobody clipped carries no clip time even in a clipped moment's minute, and a small room's
+//                     clipped moment keeps chat's lines, not Kast's "clipped it" notice.
+//   EconMomentLink    the session links a hand's note and its clip to the hand's candidate (SessionVideo's capture);
+//                     publishing it freezes the clip, and Kast's offline days add no clip views or follows for it.
+//   EconClipFollows   the same on Kast alone: an uploaded clip stops where it was, the others go on (no double count).
+//   EconRecord        rep::Public's Rerun fields from the life record alone: VideoSubs (the closed-form count), Views30
+//                     (the last 30 days only: exact while every folded video is older than the month, tails and stubs
+//                     counted; for a heavy uploader whose tails folded young, never more than the month's real views),
+//                     VideoPartner (from the welcome on, not the review); RenownOf's follower term
+//                     log10(1 + F + subs / 2), the old term to the bit without subscribers; an old save reads none of it;
+//                     the street's recognition follows, naming the videos once subscribers / 2 outweigh followers.
+// G3 (rep::Public's site fields) lands with its gate.
 #include "CopyLint.h"
 #include "SessionSeg.h"
 
 #include "ShortStack/AI/Style.h"
+#include "ShortStack/Cards.h"
 #include "ShortStack/Game/Autoplay.h"
 #include "ShortStack/Game/Gear.h"
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/TableTalk.h"
 #include "ShortStack/Game/Talk.h"
+#include "ShortStack/Game/Town.h"
+#include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Hand.h"
+#include "ShortStack/Rng.h"
 
 #include <algorithm>
 #include <chrono>
@@ -44,10 +70,16 @@
 
 namespace session_test
 {
+namespace seams
+{
+std::string Fixture(const char* Name); // session_seams.cpp (the lead's): a committed fixture's text
+} // namespace seams
+
 namespace econ_seg
 {
 namespace kast = ss::kast;
 namespace world = ss::world;
+namespace video = ss::video;
 
 double EconSecondsSince(const std::chrono::steady_clock::time_point& T0)
 {
@@ -363,14 +395,9 @@ bool EconNames(const std::string& Line, const std::string& Name)
 	return !First.empty() && Line.find(First) != std::string::npos;
 }
 
-/** What's wrong with a line the block says (U1's words, a brand, the card's 140 characters, the lint), or "". */
-std::string EconLint(const std::string& Line)
+/** What's wrong with an in-world line's words (U1's: "AI", "bot", "autoplay"; a real brand), or "". */
+std::string EconWorldWords(const std::string& Line)
 {
-	const std::string Why = copylint::Check(Line, 140, {});
-	if (!Why.empty())
-	{
-		return Why;
-	}
 	const std::string Low = " " + EconLower(Line) + " ";
 	for (const char* Word : {"ai", "bot", "bots", "autoplay"})
 	{
@@ -392,6 +419,13 @@ std::string EconLint(const std::string& Line)
 		}
 	}
 	return "";
+}
+
+/** What's wrong with a line the block says (U1's words, a brand, the card's 140 characters, the lint), or "". */
+std::string EconLint(const std::string& Line)
+{
+	const std::string Why = copylint::Check(Line, 140, {});
+	return Why.empty() ? EconWorldWords(Line) : Why;
 }
 
 /** The board's top row's name now (the player's for -1), or "". */
@@ -814,6 +848,693 @@ void EconEstablished()
 	std::printf("  econ: an established world's first week on the block: %zu lines, %d winners' rumours, %d fresh\n", M.Said.size(), Winners, Fresh);
 	Expect(S.WorldStart() == world::Start::Established && Fresh == 0 && Winners > 0 && M.Problems == 0, "econ established: the block says none of a fresh world's talk");
 }
+// ------------------------------------------------------------------ G2: Rerun's buzz on Kast (§4.7)
+
+constexpr double EconDay = 1440.0;
+
+kast::Inputs EconBuzzAt(kast::Inputs In, double Buzz)
+{
+	In.VideoBuzz = Buzz;
+	return In;
+}
+
+/** §4.7's factor, as the spec writes it. */
+double EconBuzzFactor(double Buzz)
+{
+	return 1.0 + 0.3 * std::min(1.0, std::max(0.0, Buzz) / 5000.0);
+}
+
+void EconBuzz()
+{
+	const kast::Inputs Base = EconBaseInputs();
+	const double Tick = 0.25 / 6.0;
+	// The first tick: the same stream up to the strangers, so their ratio is the factor itself.
+	const double None = EconStream("econ-buzz", EconBuzzAt(Base, 0.0), Tick).First;
+	const double Half = EconStream("econ-buzz", EconBuzzAt(Base, 2500.0), Tick).First;
+	const double Full = EconStream("econ-buzz", EconBuzzAt(Base, 5000.0), Tick).First;
+	const double Way = EconStream("econ-buzz", EconBuzzAt(Base, 50000.0), Tick).First;
+	const double Nonsense = EconStream("econ-buzz", EconBuzzAt(Base, -40.0), Tick).First;
+	const double Four = EconStream("econ-buzz", EconAt(EconBuzzAt(Base, 5000.0), 4, false), Tick).First;
+	const double Skip = EconStream("econ-buzz", EconAt(EconBuzzAt(Base, 2500.0), 1, true), Tick).First;
+	std::printf("  econ buzz: first-tick strangers at 0 / 2,500 / 5,000 / 50,000 views: %.6f / %.6f (x%.4f) / %.6f (x%.4f) / %.6f (x%.4f)\n", None, Half, Half / None, Full,
+		Full / None, Way, Way / None);
+	Expect(None > 0.0 && EconNear(Half, 1.15 * None) && EconNear(Full, 1.3 * None) && EconNear(Way, 1.3 * None),
+		"econ buzz: the directory's strangers x1.15 at 2,500 views in 48 hours, x1.3 at 5,000, and no more past it (50,000)");
+	Expect(Nonsense == None, "econ buzz: no views (or a count below none) is the stream without buzz, to the bit");
+	Expect(EconNear(Four, 0.9 * 1.3 * None) && EconNear(Skip, 0.8 * 1.15 * None), "econ buzz: on top of the watch speed's factor (4x x0.9, a skip x0.8)");
+
+	// Whole nights on a grown channel: about three in ten more strangers drop in, and more of them follow.
+	double Faces[2] = {0, 0};
+	double Follows[2] = {0, 0};
+	for (int Seed = 0; Seed < 8; ++Seed)
+	{
+		for (int K = 0; K < 2; ++K)
+		{
+			const EconStreamRun R = EconStream("econ-buzz-" + std::to_string(Seed), EconBuzzAt(Base, K == 0 ? 0.0 : 5000.0), 480.0, 0.5, true);
+			Faces[K] += R.Sum.NewFaces;
+			Follows[K] += R.Sum.Follows;
+		}
+	}
+	const double Ratio = Faces[1] / std::max(1.0, Faces[0]);
+	std::printf("  econ buzz: eight 8-hour streams: new faces %.0f without buzz, %.0f at 5,000 views (x%.3f); follows %.0f / %.0f\n", Faces[0], Faces[1], Ratio, Follows[0], Follows[1]);
+	Expect(Faces[0] > 0.0 && Ratio > 1.15 && Ratio < 1.5, "econ buzz: over whole nights at full buzz about three in ten more strangers drop in");
+	Expect(Follows[1] > Follows[0], "econ buzz: and more of them follow");
+}
+
+/** A cooler at $5.50 (session_seg_video's shape): a candidate a channel can publish. */
+video::Candidate EconCooler(const std::string& Id, double World)
+{
+	video::Candidate C;
+	C.Id = Id;
+	C.At = World;
+	C.K = video::Kind::Cooler;
+	C.Event = "Night Owl Turbo";
+	C.BuyIn = 550;
+	C.Rec.Blinds.Bb = 200;
+	C.Rec.Pot = 12800;
+	C.Rec.HeroNet = -6400;
+	C.Rec.Mine = {48, 49};
+	C.Expires = World + 21.0 * EconDay;
+	return C;
+}
+
+/** Publishes one new candidate as F at World, straight on the channel (the edit's time is the session's, not the point here). */
+std::string EconUpload(video::Channel& C, const std::string& Id, double World, video::Format F, int KastFollowers = 0,
+	video::TitleStyle T = video::TitleStyle::Story, video::Kind K = video::Kind::Cooler)
+{
+	video::Candidate Cand = EconCooler(Id, World);
+	Cand.K = K;
+	video::NoteHand(C, Cand);
+	video::Choice Ch;
+	Ch.Candidates = {Id};
+	Ch.F = F;
+	Ch.T = T;
+	Ch.Fr = video::Frame::Versus;
+	video::UploadFacts Facts;
+	Facts.GearQuality = 0.5; // a mid rig
+	Facts.KastFollowers = KastFollowers;
+	return video::Upload(C, Ch, World, "econ-g2", Facts);
+}
+
+/** A session with a rig that streams, at a table. */
+bool EconAtTable(ss::Session& S)
+{
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 300000;
+	const bool Rig = S.Buy(ss::gear::FirstPcUpgrade().Id).empty();
+	S.Register(1);
+	return Rig && S.T && S.StreamInputs().Gear.CanStream();
+}
+
+void EconBuzzSession()
+{
+	Hooks H;
+	ss::Session S(H, "econ-buzz-session");
+	const bool Ready = EconAtTable(S);
+	const double World = S.WorldMinutes();
+	const double Off = EconFirstStrangers(S.StreamInputs());
+	const bool Quiet = S.StreamInputs().VideoBuzz == 0.0;
+	// A Breakdown up a day and a half ago: its first days' views are tonight's buzz.
+	const std::string Id = EconUpload(S.Life.Video, "rl:econ-buzz:1", World - 1.5 * EconDay, video::Format::Breakdown, 400);
+	const double Buzz = video::Buzz(S.Life.Video, World);
+	const double Handed = S.StreamInputs().VideoBuzz;
+	const double Up = EconFirstStrangers(S.StreamInputs()) / Off;
+	// A run that went viral (the dev grant's video, its views over a month): far past 5,000 in 48 hours.
+	video::Grant(S.Life.Video, 0.0, 0.0, 600000.0, World - 1.0 * EconDay);
+	const double Viral = video::Buzz(S.Life.Video, World);
+	const double Capped = EconFirstStrangers(S.StreamInputs()) / Off;
+	std::printf("  econ buzz session: no channel x1 (buzz %.0f); a day-old Breakdown: %.1f views in 48 hours, strangers x%.4f; viral: %.0f views, x%.4f\n",
+		Quiet ? 0.0 : -1.0, Buzz, Up, Viral, Capped);
+	Expect(Ready && Quiet && Off > 0.0, "econ buzz session: no channel, no buzz");
+	Expect(!Id.empty() && Buzz > 0.0 && Buzz < 5000.0 && Handed == Buzz && EconNear(Up, EconBuzzFactor(Buzz)),
+		"econ buzz session: the session hands the stream Rerun's last 48 hours (video::Buzz), and the strangers rise by its factor");
+	Expect(Viral >= 5000.0 && S.StreamInputs().VideoBuzz == Viral && EconNear(Capped, 1.3), "econ buzz session: a viral week tops out at x1.3");
+}
+
+// ------------------------------------------------------------------ G2: tonight's moment log (§4.4)
+
+void EconMomentLog()
+{
+	kast::Inputs In = EconBaseInputs();
+	kast::Channel Ch;
+	Ch.Xp = kast::Channel::LevelXp(20);
+	kast::Stream St("econ-moments");
+	St.Start(Ch, In);
+	const kast::Moment Kinds[] = {kast::Moment::AllIn, kast::Moment::BadBeat, kast::Moment::WonAllIn, kast::Moment::Knockout, kast::Moment::FinalTable, kast::Moment::Win,
+		kast::Moment::BigPot};
+	bool Each = true;
+	bool Clipped = true;
+	bool Lines = true;
+	int Clips = 0;
+	int Problems = 0;
+	std::vector<double> Times;
+	for (int K = 0; K < 70; ++K)
+	{
+		In.World += 1.5;
+		In.Real += 9.0;
+		St.Viewers = 40.0; // a room big enough to clip things (the stream's own ticks would take a while to get there)
+		const kast::Moment M = Kinds[K % 7];
+		const double HypeBefore = St.Hype;
+		const int ClipsBefore = St.Tonight.Clips;
+		const size_t LogBefore = St.Moments.size();
+		St.OnMoment(Ch, In, M, M == kast::Moment::Knockout ? "villain" : "");
+		Times.push_back(In.World);
+		const bool Logged = !St.Moments.empty() && (St.Moments.size() == LogBefore + 1 || (LogBefore == 60 && St.Moments.size() == 60));
+		const kast::MomentNote N = Logged ? St.Moments.back() : kast::MomentNote();
+		Each = Each && Logged && N.Kind == M && N.World == In.World && N.Real == In.Real && N.Viewers == 40 && N.HypeAfter >= HypeBefore - 1e-9 && N.HypeAfter <= St.Hype + 1e-9 &&
+			N.Face == St.Face && N.Candidate.empty();
+		const bool Made = St.Tonight.Clips > ClipsBefore;
+		Clips += Made ? 1 : 0;
+		Clipped = Clipped &&
+			(Made ? N.ClipAt == In.World && !Ch.Clips.empty() && Ch.Clips.front().At == In.World && Ch.Clips.front().Kind == static_cast<int>(M) : N.ClipAt == -1.0);
+		// Chat's own reaction: one to three lines, each one chat wrote just now.
+		bool Said = !N.Chat.empty() && N.Chat.size() <= 3;
+		for (const std::string& Line : N.Chat)
+		{
+			bool Found = false;
+			for (const kast::ChatMsg& Msg : St.Chat)
+			{
+				Found = Found || (Msg.Kind == kast::LineKind::Chat && Msg.Text == Line && Msg.At >= In.Real && !Msg.Toxic);
+			}
+			Said = Said && Found;
+			const std::string Why = EconWorldWords(Line);
+			if (!Why.empty())
+			{
+				++Problems;
+				std::printf("  econ moments: \"%s\": %s\n", Line.c_str(), Why.c_str());
+			}
+		}
+		Lines = Lines && Said;
+		if (K < 3)
+		{
+			std::printf("  econ moments: %s at %.1f: %d viewers, hype %.1f, face %d, clip %s, chat \"%s\"\n", kast::MomentName(M), N.World, N.Viewers, N.HypeAfter,
+				static_cast<int>(N.Face), N.ClipAt >= 0.0 ? "yes" : "no", N.Chat.empty() ? "" : N.Chat.front().c_str());
+		}
+	}
+	const bool Kept = St.Moments.size() == 60 && St.Moments.front().World == Times[10] && St.Moments.back().World == Times.back();
+	St.Stop(Ch, In);
+	const bool Stays = St.Moments.size() == 60;
+	In.World += 600.0;
+	In.Real += 60.0;
+	St.Start(Ch, In);
+	const bool Fresh = St.Live && St.Moments.empty();
+	std::printf("  econ moments: 70 moments, %d clipped; the log keeps %d through the night\n", Clips, Kept ? 60 : -1);
+	Expect(Each, "econ moments: each moment is one note: its kind, the world clock and the real one, the viewers, the hype it left, the face, no candidate yet");
+	Expect(Clips > 0 && Clipped, "econ moments: a clipped moment carries the clip's time (its At, as the clip has it); the others carry none");
+	Expect(Lines, "econ moments: one to three of chat's own lines about it");
+	Expect(Kept && Stays && Fresh, "econ moments: the newest 60 are kept through the night and after it; the next stream starts with none");
+	Expect(Problems == 0, "econ moments: chat's lines say none of U1's words and no real brand");
+
+	// Two moments of one hand share its minute (the tick clock stands still through a hand: the all-in won, then the
+	// knockout). A clip of the first isn't the second's: the second carries a clip time only if somebody clipped it.
+	{
+		kast::Inputs Same = EconBaseInputs();
+		kast::Channel Ch2;
+		Ch2.Xp = kast::Channel::LevelXp(20);
+		kast::Stream St2("econ-moments-same");
+		St2.Start(Ch2, Same);
+		Same.World += 30.0;
+		int Pairs = 0;
+		bool Own = true;
+		for (int K = 0; K < 400 && Pairs < 3; ++K)
+		{
+			Same.Real += 9.0;
+			St2.Viewers = 40.0;
+			const int Before = St2.Tonight.Clips;
+			St2.OnMoment(Ch2, Same, kast::Moment::WonAllIn);
+			if (St2.Tonight.Clips == Before)
+			{
+				continue;
+			}
+			const int AfterFirst = St2.Tonight.Clips;
+			St2.OnMoment(Ch2, Same, kast::Moment::Knockout, "villain");
+			if (St2.Tonight.Clips == AfterFirst)
+			{
+				++Pairs;
+				Own = Own && St2.Moments.back().Kind == kast::Moment::Knockout && St2.Moments.back().ClipAt == -1.0 && St2.Moments[St2.Moments.size() - 2].ClipAt == Same.World;
+			}
+		}
+		std::printf("  econ moments: %d hands with the all-in clipped and the knockout not, in one minute\n", Pairs);
+		Expect(Pairs > 0 && Own, "econ moments: in one hand's minute, a moment nobody clipped carries no clip time (the all-in's clip is the all-in's)");
+	}
+
+	// A small room (under two viewers: two lines of chat a moment): when somebody clips it, Kast's own "clipped it" notice
+	// follows the two lines, and the note keeps chat's lines only.
+	{
+		kast::Inputs Small = EconBaseInputs();
+		kast::Channel Ch3;
+		Ch3.Xp = kast::Channel::LevelXp(20);
+		kast::Stream St3("econ-moments-small");
+		St3.Start(Ch3, Small);
+		int SmallClips = 0;
+		bool ChatOnly = true;
+		for (int K = 0; K < 2000 && SmallClips < 3; ++K)
+		{
+			Small.World += 1.5;
+			Small.Real += 9.0;
+			St3.Viewers = 1.6;
+			const int Before = St3.Tonight.Clips;
+			St3.OnMoment(Ch3, Small, kast::Moment::BadBeat);
+			if (St3.Tonight.Clips == Before)
+			{
+				continue;
+			}
+			++SmallClips;
+			const kast::MomentNote& N = St3.Moments.back();
+			ChatOnly = ChatOnly && N.ClipAt == Small.World && !N.Chat.empty() && N.Chat.size() <= 2;
+			for (const std::string& Line : N.Chat)
+			{
+				ChatOnly = ChatOnly && !EconHas(Line, "clipped it");
+			}
+		}
+		std::printf("  econ moments: a room of two: %d clipped moments\n", SmallClips);
+		Expect(SmallClips > 0 && ChatOnly, "econ moments: a small room's clipped moment keeps chat's own lines, not Kast's \"clipped it\" notice");
+	}
+}
+
+/** Aces all in preflop against sevens, the player on the button, then River (session_seg_video's hand). */
+std::unique_ptr<ss::Hand> EconAcesAllIn(const char* River)
+{
+	std::vector<ss::Card> Deck = ss::ParseCards(std::string("7cAs7hAd2hKd8s2c3h9h4h") + River);
+	for (int C = 0; C < 52; ++C)
+	{
+		if (std::find(Deck.begin(), Deck.end(), C) == Deck.end())
+		{
+			Deck.push_back(C);
+		}
+	}
+	ss::HandConfig Cfg;
+	Cfg.Players = {{0, ss::HeroId, 6400}, {1, "villain", 6400}};
+	Cfg.ButtonSeat = 0;
+	Cfg.SmallBlind = 100;
+	Cfg.BigBlind = 200;
+	Cfg.Deck = Deck;
+	ss::Rng R("econ-aces");
+	auto Hd = std::make_unique<ss::Hand>(Cfg, R);
+	for (const ss::PlayerAction& A : {ss::PlayerAction::RaiseTo(600), ss::PlayerAction::RaiseTo(6400), ss::PlayerAction::Call()})
+	{
+		Hd->Act(A);
+	}
+	return Hd;
+}
+
+/** Kast's clip follows from a day off (0.002 a view, Kast.cpp's Offline): what the unlinked clips gain from their views to World. */
+double EconClipGain(const kast::Channel& Ch, double World)
+{
+	double Gain = 0.0;
+	for (const kast::Clip& C : Ch.Clips)
+	{
+		if (C.Candidate.empty())
+		{
+			Gain += std::max(0.0, C.Reach * (1.0 - std::exp(-(World - C.At) / (1.5 * EconDay))) - C.Views);
+		}
+	}
+	return Gain;
+}
+
+void EconMomentLink()
+{
+	Hooks H;
+	ss::Session S(H, "econ-moment-link");
+	const bool Ready = EconAtTable(S);
+	const std::string Live = Ready ? S.GoLive() : std::string("no table");
+	Expect(Ready && Live.empty() && S.Stream.Live, "econ link: live on Kast at a table");
+	if (!Ready || !S.Stream.Live || !S.T)
+	{
+		return;
+	}
+	const auto Beat = EconAcesAllIn("7d");
+	video::Candidate Got;
+	kast::MomentNote Note;
+	bool Each = true;
+	int Tries = 0;
+	for (; Tries < 30 && Got.Id.empty(); ++Tries)
+	{
+		// A new hand (the tick clock moves a hand on), its award's moment (what Session::StreamMoment does), then its
+		// capture at the same tick (HeroHandDone's VideoNoteHand, at the end of AfterAward).
+		S.T->Tick += 1;
+		S.Stream.Viewers = 40.0;
+		S.Stream.OnMoment(S.Channel, S.StreamInputs(), kast::Moment::BadBeat);
+		ss::Session::HandFacts F;
+		S.VideoNoteHand(*Beat, F);
+		const kast::MomentNote N = S.Stream.Moments.empty() ? kast::MomentNote() : S.Stream.Moments.back();
+		const video::Candidate* C = nullptr;
+		for (const video::Candidate& X : S.Life.Video.Open)
+		{
+			C = !N.Candidate.empty() && X.Id == N.Candidate ? &X : C;
+		}
+		Each = Each && C && C->K == video::Kind::BadBeat && C->Stream.Chat == N.Chat && C->Stream.ClipAt == N.ClipAt && C->Stream.Viewers == 40;
+		if (C && N.ClipAt >= 0.0)
+		{
+			Got = *C;
+			Note = N;
+		}
+	}
+	auto ClipOf = [&S](double At) -> const kast::Clip* {
+		const kast::Clip* Out = nullptr;
+		for (const kast::Clip& K : S.Channel.Clips)
+		{
+			Out = K.At == At ? &K : Out;
+		}
+		return Out;
+	};
+	const kast::Clip* Clip = ClipOf(Note.ClipAt);
+	std::printf("  econ link: %d hands captured live; the clipped one: %s, clip at %.2f (\"%s\"), %zu chat lines\n", Tries, Got.Id.c_str(), Got.Stream.ClipAt,
+		Clip ? Clip->Title.c_str() : "", Got.Stream.Chat.size());
+	Expect(Each, "econ link: every hand's moment goes to that hand's candidate, with its chat lines, its viewers and its clip time");
+	Expect(!Got.Id.empty() && Note.Candidate == Got.Id && Got.Stream.ClipAt == Note.ClipAt && Clip && Clip->Candidate.empty() && !Got.Stream.Chat.empty(),
+		"econ link: a clipped bad beat's candidate carries the Kast clip's time (clips have no id: they link by At)");
+	if (!Clip)
+	{
+		return;
+	}
+	// Half a day of the clip being watched on Kast, then published (the edit's settle, FinishSkip's "video:" activity):
+	// the clip is the video's now.
+	const double T0 = S.WorldMinutes();
+	ss::Rng R("econ-link-offline");
+	kast::Offline(S.Channel, T0 + 0.5 * EconDay, R);
+	const std::string Up = S.SettleEdit("video:1:0:0:" + Got.Id);
+	Clip = ClipOf(Note.ClipAt);
+	const double Views = Clip ? Clip->Views : -1.0;
+	Expect(Up.empty() && Clip && Clip->Candidate == Got.Id && Views > 0.0, "econ link: publishing it marks the Kast clip (watched a while) as the video's");
+	// Kast's days off: the clip's views stand where they were and it brings no follows; any other clip goes on as before.
+	double Expected = 0.0;
+	const double Before = static_cast<double>(S.Channel.Followers) + S.Channel.FollowFrac;
+	for (const double Days : {1.0, 2.0, 3.5})
+	{
+		Expected += 0.002 * EconClipGain(S.Channel, T0 + Days * EconDay);
+		kast::Offline(S.Channel, T0 + Days * EconDay, R);
+	}
+	Clip = ClipOf(Note.ClipAt);
+	const double After = static_cast<double>(S.Channel.Followers) + S.Channel.FollowFrac;
+	std::printf("  econ link: three days on, the uploaded clip at %.2f views (%.2f at the upload); clip follows %.6f (the other clips' %.6f)\n", Clip ? Clip->Views : -1.0,
+		Views, After - Before, Expected);
+	Expect(Clip && Clip->Views == Views && std::fabs((After - Before) - Expected) < 1e-9, "econ link: an uploaded clip adds no clip views and no clip follows (no double count)");
+}
+
+void EconClipFollows()
+{
+	// Two clips of one moment with the same reach; five hours on, the second goes up on Rerun (SettleEdit's freeze: its
+	// reach is its views, its Candidate set). Over the next four days, a day off at a time, only the first gains, and only
+	// the first adds follows (a frozen clip read again would lose views and win them back, follows and all).
+	const double At = 10.0 * EconDay + 22.0 * 60.0;
+	auto Night = [At](bool Upload, double& Frac, double& Second) {
+		kast::Channel Ch;
+		for (int K = 0; K < 2; ++K)
+		{
+			kast::Clip C;
+			C.Title = K == 0 ? "the cruelest river" : "rivered again";
+			C.By = "railbird_9";
+			C.At = At;
+			C.Reach = 140.0;
+			C.Kind = static_cast<int>(kast::Moment::BadBeat);
+			Ch.Clips.push_back(C);
+		}
+		ss::Rng R("econ-clip-follows");
+		kast::Offline(Ch, At + 300.0, R);
+		if (Upload)
+		{
+			Ch.Clips[1].Reach = Ch.Clips[1].Views;
+			Ch.Clips[1].Candidate = "rl:econ-clip:12";
+		}
+		const double Was = Ch.FollowFrac + static_cast<double>(Ch.Followers);
+		const double Held = Ch.Clips[1].Views;
+		double Low = Held;
+		for (const double Days : {1.0, 2.0, 3.0, 4.0})
+		{
+			kast::Offline(Ch, At + Days * EconDay, R);
+			Low = std::min(Low, Ch.Clips[1].Views);
+		}
+		Frac = Ch.FollowFrac + static_cast<double>(Ch.Followers) - Was;
+		Second = Ch.Clips[1].Views - Held + (Low - Held);
+		return Ch.Clips[0].Views;
+	};
+	double FracBoth = 0.0, FracOne = 0.0, GainBoth = 0.0, GainUp = 0.0;
+	const double First = Night(false, FracBoth, GainBoth);
+	const double FirstUp = Night(true, FracOne, GainUp);
+	std::printf("  econ clips: four days on: the first clip at %.1f views either way; the second gained %.1f (on Kast) / %.1f (uploaded); clip follows %.4f / %.4f\n", First,
+		GainBoth, GainUp, FracBoth, FracOne);
+	Expect(First == FirstUp && GainBoth > 0.0 && GainUp == 0.0, "econ clips: the uploaded clip stops where it was; the other goes on as before");
+	Expect(FracOne > 0.0 && EconNear(FracBoth, 2.0 * FracOne, 1e-6), "econ clips: and only the clip still on Kast brings follows (half the follows of two)");
+}
+
+// ------------------------------------------------------------------ G2: the public record's Rerun fields (§4.7)
+
+/** RenownOf before update 2 (Town.cpp's formula as it was), for the to-the-bit comparison. */
+double EconOldRenown(const ss::rep::Public& P)
+{
+	const double Followers = std::min(1.0, std::log10(1.0 + static_cast<double>(std::max(0, P.Followers))) / 5.0);
+	const double Fans = std::min(1.0, static_cast<double>(P.Superfans) / 40.0);
+	const double Cashes = std::min(1.0, static_cast<double>(P.LiveCashes) / 15.0);
+	const double Wins = std::min(1.0, static_cast<double>(P.Titles) / 4.0);
+	const double Awards = std::min(1.0, static_cast<double>(P.Bracelets + P.Rings) / 2.0);
+	return std::min(1.0, 0.35 * Followers + 0.15 * Fans + 0.15 * Cashes + 0.15 * Wins + 0.2 * Awards);
+}
+
+void EconRecord()
+{
+	namespace rep = ss::rep;
+	namespace life = ss::life;
+	// The formula: without subscribers the old one to the bit; a subscriber counts half a follower.
+	bool Old = true;
+	bool Half = true;
+	bool Rises = true;
+	for (const int F : {0, 1, 7, 64, 2400, 31000, 250000, 4000000})
+	{
+		for (const int Fans : {0, 12, 40})
+		{
+			rep::Public P;
+			P.Followers = F;
+			P.Superfans = Fans;
+			P.LiveCashes = 6;
+			P.Titles = 1;
+			P.Bracelets = F % 2;
+			Old = Old && rep::RenownOf(P) == EconOldRenown(P);
+			rep::Public V = P;
+			V.VideoSubs = 2 * (F + 13);
+			rep::Public Same = P;
+			Same.Followers = F + F + 13;
+			Half = Half && rep::RenownOf(V) == rep::RenownOf(Same);
+			Rises = Rises && (F >= 99999 ? rep::RenownOf(V) == rep::RenownOf(P) : rep::RenownOf(V) > rep::RenownOf(P));
+		}
+	}
+	Expect(Old, "econ record: with no subscribers RenownOf is the old formula to the bit");
+	Expect(Half && Rises, "econ record: the follower term is log10(1 + followers + subscribers / 2): renown rises with the channel until the term tops out");
+
+	// No channel (an old save's life record): nothing, and the old renown.
+	life::State Blank;
+	kast::Channel NoKast;
+	const rep::Public E = rep::Of(Blank, NoKast, nullptr, 40.0 * EconDay);
+	Expect(E.VideoSubs == 0 && E.Views30 == 0 && !E.VideoPartner && E.Renown == EconOldRenown(E), "econ record: no channel: no subscribers, no views, no Partner, the old renown");
+	bool Fixtures = true;
+	for (const char* Name : {"pre_update2_sponsored_streamer.ssave", "pre_update2_veteran.ssave"})
+	{
+		ss::SaveData D;
+		const bool Parsed = ss::SaveData::Parse(seams::Fixture(Name), D);
+		Hooks H;
+		ss::Session S(H, std::string("econ-record-") + Name, &D);
+		const rep::Public R = S.Record();
+		Fixtures = Fixtures && Parsed && R.VideoSubs == 0 && R.Views30 == 0 && !R.VideoPartner && R.Renown == EconOldRenown(R);
+		std::printf("  econ record: %s: %d followers, renown %.6f (the old formula's %.6f)\n", Name, R.Followers, R.Renown, EconOldRenown(R));
+	}
+	Expect(Fixtures, "econ record: an old save (the sponsored streamer, the veteran) reads no channel and renders the old renown");
+
+	// One Breakdown up on day 10, the days stepped as the calendar steps them: the record reads the channel at the hour.
+	life::State L;
+	kast::Channel K;
+	ss::Chips Bank = 0;
+	const std::string Id = EconUpload(L.Video, "rl:econ-record:1", 10.0 * EconDay + 180.0, video::Format::Breakdown, 20000);
+	bool Fits = true;
+	bool Young = false;
+	bool Aged = false;
+	for (int D = 10; D <= 60; ++D)
+	{
+		video::Step(L.Video, L, Bank, K, static_cast<double>(D) * EconDay, static_cast<double>(D + 1) * EconDay);
+		if (D + 1 != 12 && D + 1 != 25 && D + 1 != 41 && D + 1 != 55)
+		{
+			continue;
+		}
+		const double W = static_cast<double>(D + 1) * EconDay + 600.0;
+		const rep::Public P = rep::Of(L, K, nullptr, W);
+		const video::Video& V = L.Video.Videos.front();
+		const double All = video::Views(V, W);
+		const double Window = All - video::Views(V, W - 30.0 * EconDay);
+		Fits = Fits && P.VideoSubs == static_cast<int>(std::floor(video::SubsAt(L.Video, W))) && std::abs(P.Views30 - static_cast<int>(std::floor(Window))) <= 1;
+		Young = Young || (D + 1 == 12 && std::abs(P.Views30 - static_cast<int>(std::floor(All))) <= 1 && P.Views30 > 0);
+		Aged = Aged || (D + 1 == 55 && Window < 0.5 * All && P.Views30 < static_cast<int>(All) && P.Views30 > 0);
+		std::printf("  econ record: day %d: %d subscribers (%.3f), views %.1f to date, Views30 %d (the window's %.1f)\n", D + 1, P.VideoSubs, video::SubsAt(L.Video, W), All,
+			P.Views30, Window);
+	}
+	Expect(!Id.empty() && Fits, "econ record: VideoSubs is the channel's closed-form count; Views30 the views of the 30 days to the hour");
+	Expect(Young && Aged, "econ record: two days in Views30 is every view; 45 days in it's only the last month's");
+
+	// The gate (a dev grant past both bars): the review first, the welcome a week on. VideoPartner from the welcome.
+	video::Grant(L.Video, 1000.0, 4000.0, 0.0, 61.0 * EconDay);
+	bool InReview = false;
+	bool ReviewSaysNo = true;
+	bool PartnerSaysYes = false;
+	double PartnerDay = -1.0;
+	for (int D = 61; D <= 75; ++D)
+	{
+		video::Step(L.Video, L, Bank, K, static_cast<double>(D) * EconDay, static_cast<double>(D + 1) * EconDay);
+		const double W = static_cast<double>(D + 1) * EconDay + 60.0;
+		const rep::Public P = rep::Of(L, K, nullptr, W);
+		if (L.Video.ReviewAt >= 0.0 && L.Video.PartnerAt < 0.0)
+		{
+			InReview = true;
+			ReviewSaysNo = ReviewSaysNo && !P.VideoPartner;
+		}
+		if (L.Video.PartnerAt >= 0.0 && PartnerDay < 0.0)
+		{
+			PartnerDay = L.Video.PartnerAt / EconDay;
+			PartnerSaysYes = P.VideoPartner && !rep::Of(L, K, nullptr, L.Video.PartnerAt - 1.0).VideoPartner;
+		}
+	}
+	std::printf("  econ record: the gate's review from day %.0f, Partner from day %.0f\n", L.Video.ReviewAt / EconDay, PartnerDay);
+	Expect(InReview && ReviewSaysNo && PartnerSaysYes, "econ record: VideoPartner reads false through the review and true from the welcome on");
+
+	// The month's views as the same videos kept whole would have them (a video's curve doesn't change when it folds).
+	auto Month = [](const std::vector<video::Video>& Vs, double At) {
+		double Sum = 0.0;
+		for (const video::Video& V : Vs)
+		{
+			Sum += video::Views(V, At) - video::Views(V, At - 30.0 * EconDay);
+		}
+		return Sum;
+	};
+
+	// A short-spammer: four Shorts a day for 50 days. Past 60 the oldest fold into the tail two weeks old, and a tail read
+	// back a month runs its closed form before those videos went up (fifteen 48-hour windows of it, unbounded: below), so
+	// the tails count only from the oldest kept upload on. Views30 is views that happened: no more than the month's real
+	// views (well under the views to date), more than the kept videos' own.
+	life::State L2;
+	kast::Channel K2;
+	ss::Chips Bank2 = 0;
+	std::vector<video::Video> Whole2;
+	for (int D = 0; D < 50; ++D)
+	{
+		for (int I = 0; I < 4; ++I)
+		{
+			EconUpload(L2.Video, "rl:econ-spam:" + std::to_string(D * 4 + I), static_cast<double>(100 + D) * EconDay + 60.0 * (I + 1), video::Format::Short);
+			Whole2.push_back(L2.Video.Videos.back());
+		}
+		video::Step(L2.Video, L2, Bank2, K2, static_cast<double>(100 + D) * EconDay, static_cast<double>(101 + D) * EconDay);
+	}
+	const double W2 = 150.0 * EconDay + 60.0;
+	double Raw = 0.0;
+	for (int Wnd = 0; Wnd < 15; ++Wnd)
+	{
+		Raw += video::Buzz(L2.Video, W2 - 2.0 * static_cast<double>(Wnd) * EconDay);
+	}
+	const double ToDate = video::TotalViews(L2.Video, W2);
+	const double Real2 = Month(Whole2, W2);
+	const double Kept2 = Month(L2.Video.Videos, W2);
+	const rep::Public P2 = rep::Of(L2, K2, nullptr, W2);
+	std::printf("  econ record: four Shorts a day for 50 days: %zu kept whole, views to date %.1f, the month's real views %.1f, Views30 %d, the kept videos' "
+				"own %.1f (fifteen 48-hour windows unbounded: %.4g)\n",
+		L2.Video.Videos.size(), ToDate, Real2, P2.Views30, Kept2, Raw);
+	Expect(L2.Video.Videos.size() == 60 && Real2 < 0.9 * ToDate && P2.Views30 <= static_cast<int>(std::floor(Real2)) && static_cast<double>(P2.Views30) > Kept2 + 1.0,
+		"econ record: a heavy uploader's Views30 is views that happened: no more than the month's real views, more than the kept videos' own");
+
+	// A daily strategy channel (Teaching Breakdowns of bluffs) 100 days on: 40 videos folded, all older than the month, with
+	// their evergreen stubs. There the tails and the stubs are exact, and Views30 is the month's real views.
+	life::State L4;
+	kast::Channel K4;
+	ss::Chips Bank4 = 0;
+	std::vector<video::Video> Whole4;
+	for (int D = 7; D < 107; ++D)
+	{
+		EconUpload(L4.Video, "rl:econ-daily:" + std::to_string(D), static_cast<double>(D) * EconDay + 600.0, video::Format::Breakdown, 200, video::TitleStyle::Teaching,
+			video::Kind::Bluff);
+		Whole4.push_back(L4.Video.Videos.back());
+		video::Step(L4.Video, L4, Bank4, K4, static_cast<double>(D) * EconDay, static_cast<double>(D + 1) * EconDay);
+	}
+	const double W4 = 107.0 * EconDay + 600.0;
+	const double Real4 = Month(Whole4, W4);
+	const double Kept4 = Month(L4.Video.Videos, W4);
+	const rep::Public P4 = rep::Of(L4, K4, nullptr, W4);
+	std::printf("  econ record: a daily strategy channel at day 107: %zu kept, %zu stubs, the month's real views %.1f (the kept videos' own %.1f), Views30 %d\n",
+		L4.Video.Videos.size(), L4.Video.Stubs.size(), Real4, Kept4, P4.Views30);
+	Expect(L4.Video.Videos.size() == 60 && !L4.Video.Stubs.empty() && Real4 > Kept4 + 2.0 && std::abs(P4.Views30 - static_cast<int>(std::floor(Real4))) <= 1,
+		"econ record: with every folded video older than the month, Views30 is the month's real views, the tails and the stubs counted");
+
+	// Before the day's step: the record reads the channel at the hour, not as of the last step. Four Breakdowns up this
+	// morning have brought subscribers by tonight that the saved count (stepped to midnight) hasn't counted yet.
+	life::State L3;
+	for (int I = 0; I < 4; ++I)
+	{
+		EconUpload(L3.Video, "rl:econ-today:" + std::to_string(I), 200.0 * EconDay + 60.0 * (I + 7), video::Format::Breakdown, 20000);
+	}
+	const double W3 = 200.0 * EconDay + 22.0 * 60.0;
+	const rep::Public P3 = rep::Of(L3, K2, nullptr, W3);
+	std::printf("  econ record: four Breakdowns this morning: %d subscribers by 10 PM (%.3f; the count saved at midnight %.3f), Views30 %d\n", P3.VideoSubs,
+		video::SubsAt(L3.Video, W3), L3.Video.Subs, P3.Views30);
+	Expect(L3.Video.Videos.size() == 4 && P3.VideoSubs == static_cast<int>(std::floor(video::SubsAt(L3.Video, W3))) && P3.VideoSubs >= 1 + static_cast<int>(L3.Video.Subs),
+		"econ record: the record counts today's subscribers in closed form, before the calendar steps the day");
+
+	// The card room's build (SaveData alone, no world) reads the same fields as the session's.
+	{
+		Hooks H;
+		ss::Session S(H, "econ-record-room");
+		S.Life.Video = L.Video;
+		const double W = S.WorldMinutes();
+		const rep::Public A = S.Record();
+		const rep::Public B = rep::Of(S.Life, S.Channel, nullptr, W);
+		Expect(A.VideoSubs == B.VideoSubs && A.Views30 == B.Views30 && A.VideoPartner == B.VideoPartner && A.VideoSubs >= 1000,
+			"econ record: the card room's record (no world) reads the channel the same");
+	}
+
+	// The street: 15 cashes and four titles on the wall aren't a known face; 20,000 subscribers on top are, and the block
+	// says so (Talk's Famous is renown 0.55), naming the videos when they're most of it.
+	{
+		Hooks H;
+		ss::Session S(H, "econ-record-street");
+		S.Life.LiveCashes = 15;
+		for (int T = 0; T < 4; ++T)
+		{
+			life::LiveEntry Won;
+			Won.Id = "embercrest-nightly@" + std::to_string(2 + T);
+			Won.Name = "Embercrest Nightly $120";
+			Won.State = life::LiveEntry::Finished;
+			Won.Place = 1;
+			S.Life.LiveEntries.push_back(Won);
+		}
+		S.Life.Hunger = 0.0;
+		S.Life.Thirst = 0.0;
+		S.Life.Energy = 100.0;
+		const double Plain = ss::town::Renown(S);
+		const ss::town::Talk Before = ss::town::Open(*ss::town::ContextFor(S, "sal", ""));
+		video::Grant(S.Life.Video, 20000.0, 0.0, 0.0, S.WorldMinutes());
+		const double Known = ss::town::Renown(S);
+		const rep::Public R = S.Record();
+		const ss::town::Talk Sal = ss::town::Open(*ss::town::ContextFor(S, "sal", ""));
+		const ss::town::Talk Lonnie = ss::town::Open(*ss::town::ContextFor(S, "lonnie", "barber"));
+		// The stream's own fame: the same renown from followers says the stream's line.
+		S.Life.Video = video::Channel();
+		S.Channel.Followers = 10000;
+		const ss::town::Talk Streamer = ss::town::Open(*ss::town::ContextFor(S, "sal", ""));
+		std::printf("  econ record: the street: renown %.3f -> %.3f with %d subscribers; Sal: [%s] \"%s\"; Lonnie: \"%s\"; a streamer hears \"%s\"\n", Plain, Known, R.VideoSubs,
+			Sal.Topic.c_str(), Sal.Line.c_str(), Lonnie.Line.c_str(), Streamer.Line.c_str());
+		Expect(R.VideoSubs == 20000 && Plain < 0.55 && Known >= 0.55, "econ record: 20,000 subscribers make a known face of a player with 15 cashes and four titles");
+		Expect(Before.Topic != "look:famous" && Sal.Topic == "look:famous" && EconHas(Sal.Line, "videos") && EconHas(Lonnie.Line, "videos") && !EconHas(Lonnie.Line, "Kast"),
+			"econ record: the block knows the face, from the videos");
+		Expect(Streamer.Topic == "look:famous" && EconHas(Streamer.Line, "stream"), "econ record: a face known from the stream still hears the stream's line");
+		// Both: renown weighs a subscriber at half a follower, and the line names the bigger half. 15,000 subscribers beside
+		// 10,000 followers (7,500 against 10,000) are the stream's face still; 25,000 (12,500) are the videos'.
+		video::Grant(S.Life.Video, 15000.0, 0.0, 0.0, S.WorldMinutes());
+		const ss::town::Talk Mostly = ss::town::Open(*ss::town::ContextFor(S, "sal", ""));
+		video::Grant(S.Life.Video, 10000.0, 0.0, 0.0, S.WorldMinutes());
+		const ss::town::Talk Overtaken = ss::town::Open(*ss::town::ContextFor(S, "sal", ""));
+		std::printf("  econ record: 10,000 followers and 15,000 subscribers: \"%s\"; and 25,000: \"%s\"\n", Mostly.Line.c_str(), Overtaken.Line.c_str());
+		Expect(Mostly.Topic == "look:famous" && EconHas(Mostly.Line, "stream") && Overtaken.Topic == "look:famous" && EconHas(Overtaken.Line, "videos"),
+			"econ record: the line names the videos once their subscribers, at half a follower each, outweigh the stream's followers");
+		for (const ss::town::Talk* T : {&Sal, &Lonnie})
+		{
+			const std::string Why = EconLint(T->Line);
+			Expect(Why.empty(), ("econ record: the videos' line passes the lint (" + Why + ")").c_str());
+		}
+	}
+}
 } // namespace econ_seg
 
 void SegEcon()
@@ -824,6 +1545,13 @@ void SegEcon()
 	econ_seg::EconFreshTalk();
 	econ_seg::EconFreshYou();
 	econ_seg::EconEstablished();
+	// G2: Rerun on Kast and in the public record.
+	econ_seg::EconBuzz();
+	econ_seg::EconBuzzSession();
+	econ_seg::EconMomentLog();
+	econ_seg::EconMomentLink();
+	econ_seg::EconClipFollows();
+	econ_seg::EconRecord();
 	std::printf("  econ: core-econ's checks %.1f s\n", econ_seg::EconSecondsSince(T0));
 }
 } // namespace session_test

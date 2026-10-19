@@ -234,6 +234,10 @@ const Table& Spoken()
 		{"why:cans", "You've bought {Count} of our cans at the Lucky Penny."},
 		{"why:tier", "People in the room know your name now."},
 		{"why:webcam", "Your stream's getting bigger and your camera isn't."},
+		// The creator road (update 2 SPEC §4.7): when Rerun is what lifted standing, the channel's own numbers.
+		{"why:rerun", "Your Rerun channel's up to {Subs} subscribers, and they keep watching."},
+		{"why:rerun:views", "Your Rerun videos pulled {Views} views in the last month, and {Subs} people subscribe."},
+		{"why:rerun:partner", "Rerun made you a Partner, and {Subs} people subscribe."},
 		{"why:migrated", "We wrote you through Kast a while back."},
 		// Texts from the brands (the phone).
 		{"product:voltrush", "Case is at your door. Twelve cans. Keep them in frame."},
@@ -316,6 +320,8 @@ std::map<std::string, std::string> Samples()
 		{"Count", "12"},
 		{"Cashes", "5"},
 		{"Followers", "25,000"},
+		{"Subs", "48,200"},
+		{"Views", "152,300"},
 	};
 }
 } // namespace sponsor_copy

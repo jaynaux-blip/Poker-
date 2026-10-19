@@ -4,6 +4,7 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Shop.h"
 #include "ShortStack/Game/Sponsor.h"
@@ -73,6 +74,7 @@ struct TalkContext
 	int CutDay = -1;
 	bool NewLook = false;
 	bool Famous = false;
+	bool FamousOnVideo = false; // known more from Rerun's videos than from the stream (update 2 §4.7)
 	bool Member = false;
 	// The bond.
 	Bond Town;
@@ -134,6 +136,8 @@ const Table& Lines()
 		{"*|look:cut", {"Fresh cut? Lonnie's work. I'd know those corners anywhere."}},
 		{"*|look:new", {"New jacket? Looks good on you."}},
 		{"*|look:famous", {"Hey, I've seen you. On the stream, right? My cousin watches you."}},
+		// Known from Rerun more than from the stream (update 2 §4.7: renown counts the channel's subscribers too).
+		{"*|look:famous:video", {"Hey, I've seen you. The poker videos, right? My cousin watches every one."}},
 		{"*|bond:evicted", {"Heard about your place. Sorry. Dee's good people, you'll be all right."}},
 		{"*|bond:away", {"Look who it is. Haven't seen you around in a while."}},
 		{"*|bond:regular", {"Hey, there's a familiar face."}},
@@ -186,6 +190,7 @@ const Table& Lines()
 		{"lonnie|look:cut", {"There it is. Holding up nice. You're welcome."}},
 		{"lonnie|look:new", {"New jacket? Look at you. Somebody's winning."}},
 		{"lonnie|look:famous", {"My nephew watches you on that Kast. Says you fold too much. I told him that's how you get old."}},
+		{"lonnie|look:famous:video", {"My nephew showed me one of your videos. Says you fold too much. I told him that's how you get old."}},
 		{"lonnie|bond:away", {"Look who it is. I was about to put your picture on a milk carton."}},
 		{"lonnie|bond:evicted", {"Heard about the apartment. Dee's couch is lumpy, but she means well."}},
 		{"lonnie|bond:tipper", {"My best tipper walks in. Sit, sit."}},
@@ -1533,7 +1538,7 @@ void Opener(const TalkContext& C, Talk& T, bool Keeper)
 		{
 			Try(true, "look:patch:" + Patch, "patch:" + Sp + ":" + Patch);
 		}
-		Try(C.Famous && C.Role != Job::Cook, "look:famous", "famous:" + Sp);
+		Try(C.Famous && C.Role != Job::Cook, C.FamousOnVideo ? "look:famous:video" : "look:famous", "famous:" + Sp, "look:famous");
 	}
 	Try(Sp == "rosa" && C.Fitness >= 50.0 && C.Met, "look:fit", Keeper ? std::string() : "fit:rosa:" + std::to_string(C.Day / 30));
 	// 2. What this person knows.
@@ -1665,6 +1670,13 @@ std::shared_ptr<const TalkContext> ContextFor(const Session& S, const std::strin
 	C->FreshCut = S.Life.Groom.Cuts > 0 && S.Life.Groom.CutAt > C->World - 3.0 * 1440.0 && S.Life.Groom.CutAt <= C->World;
 	C->CutDay = net::DayOf(std::max(0.0, S.Life.Groom.CutAt));
 	C->Famous = Renown(S) >= 0.55;
+	if (C->Famous)
+	{
+		// Where they know the face from: renown's follower term counts Rerun's subscribers at half a follower each, so the
+		// line names the videos when those are most of it (an old save, with none, hears the stream's line as it did).
+		const rep::Public Rec = S.Record();
+		C->FamousOnVideo = static_cast<double>(Rec.VideoSubs) / 2.0 > static_cast<double>(Rec.Followers);
+	}
 	C->Member = S.Owns("gym");
 	// The bond.
 	const auto Bonded = S.Life.Town.find(Speaker);

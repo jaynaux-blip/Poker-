@@ -88,6 +88,38 @@ std::string Resolve(const sponsor::Book& B, const std::string& Id, double World)
 	const sponsor::Contract* C = sponsor::Running(B, Id, World);
 	return C ? C->Id : Id;
 }
+
+/**
+ * One road of standing alone (sponsor::Tier of a record holding only that road's fields, the conduct clean): the stream
+ * road (Kast), the live road (the Embercrest) or the creator road (Rerun, update 2 SPEC §4.7). Describe prints all three,
+ * so a test can see which one standing stands on.
+ */
+int RoadTier(const rep::Public& P, int Road)
+{
+	rep::Public Q;
+	if (Road == 0)
+	{
+		Q.Followers = P.Followers;
+		Q.Avg30 = P.Avg30;
+		Q.Partner = P.Partner;
+	}
+	else if (Road == 1)
+	{
+		Q.LiveEvents = P.LiveEvents;
+		Q.Embercrest60 = P.Embercrest60;
+		Q.Cashes60 = P.Cashes60;
+		Q.Cashes90 = P.Cashes90;
+		Q.BestEmbercrestPlace = P.BestEmbercrestPlace;
+		Q.Titles = P.Titles;
+	}
+	else
+	{
+		Q.VideoSubs = P.VideoSubs;
+		Q.Views30 = P.Views30;
+		Q.VideoPartner = P.VideoPartner;
+	}
+	return sponsor::Tier(Q, std::string());
+}
 } // namespace session_sponsor_detail
 
 std::string Session::SignDeal(const std::string& Id)
@@ -412,6 +444,8 @@ std::string Session::DebugSponsor(const std::string& Args)
 	// Describe.
 	const rep::Public P = Record();
 	std::string Out = "Standing " + std::to_string(SponsorTier()) + " (" + sponsor::StandingWords(SponsorTier()) + ") \xC2\xB7 credit " + Money(B.StoreCreditCents) + "\n";
+	Out += "  roads: stream " + std::to_string(RoadTier(P, 0)) + ", live " + std::to_string(RoadTier(P, 1)) + ", Rerun " + std::to_string(RoadTier(P, 2)) + " (" +
+		Grouped(P.VideoSubs) + " subscribers, " + Grouped(P.Views30) + " views in 30 days" + (P.VideoPartner ? ", Partner" : "") + ")\n";
 	for (const sponsor::Contract& C : B.Contracts)
 	{
 		Out += "  " + C.Id + " " + StateName(C.St) + " " + sponsor::Pill(C, World) + " period " + std::to_string(C.Period) + "/" + std::to_string(sponsor::Periods(C)) + " strikes " +

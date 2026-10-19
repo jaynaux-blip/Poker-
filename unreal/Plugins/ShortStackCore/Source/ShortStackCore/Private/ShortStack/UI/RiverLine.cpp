@@ -221,6 +221,7 @@ RiverLine::~RiverLine()
 	rlmail_detail::ForgetMail(this);
 	backing_detail::Forget(UI);
 	rlauto_detail::ForgetAuto(this);
+	rlvideo_detail::ForgetVideo(this);
 	BadgeCheers().erase(this);
 }
 
@@ -319,6 +320,10 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	else if (AppShown == App::Mail)
 	{
 		MailApp(Now);
+	}
+	else if (AppShown == App::Video)
+	{
+		VideoApp(Now); // Rerun (update 2 §4.8; RiverLineVideo.cpp, ui-video's)
 	}
 	else
 	{

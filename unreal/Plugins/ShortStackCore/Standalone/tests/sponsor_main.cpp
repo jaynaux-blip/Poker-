@@ -17,7 +17,9 @@
 #include "ShortStack/UI/SponsorArt.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <set>
 #include <string>
@@ -1283,6 +1285,397 @@ void Art()
 	ss::ui::sponsorart::Polaroid(Cp, ss::hero::Look(), "PENNY'S PICK");
 	Expect(Banner.Vertices.size() > 100 && Photo.Vertices.size() > 500, "art: the ambassador banner and the Polaroid");
 }
+
+// ------------------------------------------------------------------ 17. update 2: the creator road (SPEC §4.7 item 5)
+
+/** A record with a Rerun channel and nothing else: Subs subscribers, Views in the last 30 days, Partner or not. */
+ss::rep::Public Creator(int Subs, int Views = 0, bool Partner = false)
+{
+	ss::rep::Public P;
+	P.VideoSubs = Subs;
+	P.Views30 = Views;
+	P.VideoPartner = Partner;
+	return P;
+}
+
+/** The offer letter Brand's look put in Mail (its body), "" for none. */
+std::string OfferLetter(const life::State& L, const std::string& Brand)
+{
+	for (const life::Letter& M : L.Inbox)
+	{
+		if (M.Kind == sponsor::LetterOffer && M.Thread.rfind(Brand + "@", 0) == 0)
+		{
+			return M.Body;
+		}
+	}
+	return std::string();
+}
+
+/** Whether a word stands alone in Text (no letter on either side), case-insensitive: "ai" in "said" doesn't count. */
+bool SaysWord(const std::string& Text, const std::string& Word)
+{
+	const std::string Low = Lower(Text);
+	for (size_t At = Low.find(Word); At != std::string::npos; At = Low.find(Word, At + 1))
+	{
+		const bool Before = At > 0 && std::isalpha(static_cast<unsigned char>(Low[At - 1]));
+		const bool After = At + Word.size() < Low.size() && std::isalpha(static_cast<unsigned char>(Low[At + Word.size()]));
+		if (!Before && !After)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void CreatorRoad()
+{
+	const auto T = [](const ss::rep::Public& P) { return sponsor::Tier(P, "voltrush"); };
+	// Each tier at its edges, the channel alone (no Kast, no Embercrest).
+	Expect(T(Creator(999, 5000000, false)) == 0, "creator road: 999 subscribers is nobody yet, whatever the views");
+	Expect(T(Creator(1000)) == 1, "creator road: 1,000 subscribers is known on the block");
+	Expect(T(Creator(4999, 5000000)) == 1, "creator road: 4,999 subscribers is still tier 1, whatever the views");
+	Expect(T(Creator(5000, 19999)) == 1, "creator road: 5,000 without 20,000 views in 30 days is still tier 1");
+	Expect(T(Creator(5000, 20000)) == 2, "creator road: 5,000 and 20,000 views in 30 days is a face in the room");
+	Expect(T(Creator(9999, 20000, true)) == 2, "creator road: Partner with 9,999 is still tier 2");
+	Expect(T(Creator(9999, 0, true)) == 1, "creator road: Partner with 9,999 and a quiet month is tier 1");
+	Expect(T(Creator(10000, 0, true)) == 3, "creator road: Rerun Partner with 10,000 is a name in the city");
+	Expect(T(Creator(10000, 0, false)) == 1 && T(Creator(10000, 20000, false)) == 2, "creator road: 10,000 without Partner is tier 1 or 2, by the month's views");
+	Expect(T(Creator(49999, 5000000, true)) == 3, "creator road: 49,999 is still tier 3, whatever the views");
+	Expect(T(Creator(50000, 149999, true)) == 3, "creator road: 50,000 short of 150,000 views is still tier 3");
+	Expect(T(Creator(50000, 150000, false)) == 4 && T(Creator(50000, 150000, true)) == 4, "creator road: 50,000 and 150,000 views in 30 days is on the circuit");
+	Expect(T(Creator(249999, 5000000, true)) == 4, "creator road: 249,999 is still tier 4");
+	Expect(T(Creator(250000)) == 5 && T(Creator(250000, 0, true)) == 5, "creator road: 250,000 subscribers is a poker personality, whatever the month");
+	// More of anything never lowers the road.
+	bool Monotone = true;
+	const int Subs[] = {0, 999, 1000, 4999, 5000, 9999, 10000, 49999, 50000, 249999, 250000, 2000000};
+	const int Views[] = {0, 19999, 20000, 149999, 150000, 50000000};
+	for (int S = 0; S < 12; ++S)
+	{
+		for (int V = 0; V < 6; ++V)
+		{
+			for (int Pa = 0; Pa < 2; ++Pa)
+			{
+				const int Here = T(Creator(Subs[S], Views[V], Pa == 1));
+				Monotone = Monotone && (S == 11 || T(Creator(Subs[S + 1], Views[V], Pa == 1)) >= Here) && (V == 5 || T(Creator(Subs[S], Views[V + 1], Pa == 1)) >= Here) &&
+					(Pa == 1 || T(Creator(Subs[S], Views[V], true)) >= Here) && Here >= 0 && Here <= 5;
+			}
+		}
+	}
+	Expect(Monotone, "creator road: more subscribers, more views or Partner never lowers it");
+	// Standing takes the best of the roads.
+	ss::rep::Public Mixed = Streamer(600, 25.0); // the stream road's 2
+	Mixed.VideoSubs = 1000;
+	Expect(T(Mixed) == 2, "creator road: the best road counts (the stream's 2 over Rerun's 1)");
+	Mixed.VideoSubs = 10000;
+	Mixed.VideoPartner = true;
+	Expect(T(Mixed) == 3, "creator road: the best road counts (Rerun's 3 over the stream's 2)");
+	ss::rep::Public Regular;
+	Regular.Titles = 1; // the live road's 3
+	Regular.VideoSubs = 5000;
+	Regular.Views30 = 20000;
+	Expect(T(Regular) == 3, "creator road: the live road's title over Rerun's 2");
+	Regular.VideoSubs = 50000;
+	Regular.Views30 = 150000;
+	Expect(T(Regular) == 4, "creator road: Rerun's 4 over the live road's 3");
+	// The conduct limits hold on it.
+	ss::rep::Public Famous = Creator(300000, 2000000, true);
+	Famous.PickedUp90 = true;
+	Expect(sponsor::Tier(Famous, "voltrush") == 1 && sponsor::Tier(Famous, "riverline") == 1, "creator road: a pickup holds every brand to tier 1, subscribers or not");
+	Famous.PickedUp90 = false;
+	Famous.Restricted180 = true;
+	Expect(sponsor::Tier(Famous, "riverline") == 0 && sponsor::Tier(Famous, "rangewise") == 0 && sponsor::Tier(Famous, "voltrush") == 5,
+		"creator road: a restriction shuts out sites and training, subscribers or not");
+	// TierOf (Career's words, the renewals) takes it too, with Dee's road and the block road under it.
+	{
+		life::State L;
+		sponsor::Book B;
+		L.BackRoomNetCents = 20000;
+		Expect(sponsor::TierOf(Creator(5000, 20000), B, L, "barber", 100.0 * Day) == 2 && sponsor::TierOf(Creator(0), B, L, "barber", 100.0 * Day) == 1,
+			"creator road: TierOf takes the best of every road");
+		Expect(std::string(sponsor::StandingWords(sponsor::TierOf(Creator(50000, 150000), B, L, std::string(), 100.0 * Day))) == "On the circuit",
+			"creator road: Career's words for it (never the thresholds)");
+	}
+	// It opens standing, not Kast's own gates: brands that pay by the live hour and the read still want a stream.
+	{
+		life::State L;
+		sponsor::Book B;
+		const ss::rep::Public Big = Creator(300000, 2000000, true);
+		Expect(!sponsor::Eligible(B, L, Big, "overclock", 100.0 * Day).empty() && !sponsor::Eligible(B, L, Big, "tunnelrat", 100.0 * Day).empty() &&
+				   !sponsor::Eligible(B, L, Big, "sitwell", 100.0 * Day).empty() && !sponsor::Eligible(B, L, Big, "stacked", 100.0 * Day).empty(),
+			"creator road: the overlay and apparel brands still want Kast's followers (or a title)");
+		Expect(sponsor::Eligible(B, L, Big, "riverline", 100.0 * Day).empty(), "creator road: Team RiverLine opens on standing alone (on the circuit)");
+		Expect(!sponsor::Eligible(B, L, Creator(10000, 0, true), "riverline", 100.0 * Day).empty(), "creator road: a name in the city isn't enough for Team RiverLine");
+	}
+	// Leverage and the raise read standing: a channel that grew since signing can ask.
+	{
+		World W;
+		W.P = Creator(5000, 20000);
+		const std::string Id = W.Signed("voltrush", 40.0 * Day);
+		const sponsor::Contract* C = sponsor::Find(W.L.Sponsors, Id);
+		Expect(C && C->TierAtSigning == 2, "creator road: the standing at signing is the channel's");
+		Expect(sponsor::Leverage(W.L.Sponsors, Creator(250000), "voltrush") > sponsor::Leverage(W.L.Sponsors, Creator(5000, 20000), "voltrush"),
+			"creator road: a bigger channel has more leverage in a counter");
+		Expect(sponsor::AskForRaise(W.L.Sponsors, Creator(5000, 20000), Id, 41.0 * Day) == "Your numbers haven't moved enough to ask.", "creator road: no raise on the same channel");
+		Expect(sponsor::AskForRaise(W.L.Sponsors, Creator(50000, 150000), Id, 41.0 * Day).empty(), "creator road: the channel grew two tiers since signing, so the raise is asked");
+	}
+	// Offers on the weekly look, and why the letter says they're calling.
+	{
+		World W;
+		W.P = Creator(50000, 150000);
+		W.Step(20.0 * Day, 41.0 * Day);
+		const std::string Letter = OfferLetter(W.L, "riverline");
+		Expect(Letter.rfind("Your Rerun videos pulled 150,000 views in the last month, and 50,000 people subscribe. ", 0) == 0,
+			"creator road: Team RiverLine calls on a channel on the circuit, and says it's the channel");
+		Expect(std::none_of(W.L.Sponsors.Contracts.begin(), W.L.Sponsors.Contracts.end(),
+				   [](const sponsor::Contract& C) { return C.Brand != "riverline"; }),
+			"creator road: nobody else calls (their gates want Kast, cans, cuts or the room)");
+		World Partner;
+		Partner.P = Creator(10000, 0, true);
+		Partner.Step(20.0 * Day, 41.0 * Day);
+		Expect(Partner.L.Sponsors.Contracts.empty(), "creator road: Rerun Partner with 10,000 opens no deal on its own (no gate of theirs is tier 3)");
+	}
+	{
+		// Volt Rush: a face in the room and six cans; the letter's reason is the cans, true either way.
+		World W;
+		W.P = Creator(5000, 20000);
+		W.L.Bought["volt-rush"] = 6;
+		W.Step(20.0 * Day, 41.0 * Day);
+		Expect(OfferLetter(W.L, "voltrush").rfind("You've bought 6 of our cans at the Lucky Penny. ", 0) == 0, "creator road: Volt Rush calls at Rerun's tier 2 with six cans bought");
+		World Short;
+		Short.P = Creator(5000, 19999);
+		Short.L.Bought["volt-rush"] = 6;
+		Short.Step(20.0 * Day, 41.0 * Day);
+		Expect(OfferLetter(Short.L, "voltrush").empty(), "creator road: not a view short of tier 2");
+	}
+	{
+		// Halo: a face in the room with a webcam, and the face is Rerun's, so the letter doesn't count Kast followers.
+		World W;
+		W.P = Creator(5000, 20000);
+		ss::gear::Owned Desk;
+		Desk["webcam-720"] = 0.0;
+		sponsor::StepContext Ctx;
+		Ctx.Gear = &Desk;
+		sponsor::Step(W.L.Sponsors, W.L, W.Bank, W.Ch, W.P, 20.0 * Day, 41.0 * Day, "test-seed", Ctx);
+		const std::string Letter = OfferLetter(W.L, "halo");
+		Expect(Letter.rfind("Your Rerun videos pulled 20,000 views in the last month, and 5,000 people subscribe. ", 0) == 0,
+			"creator road: Halo calls a creator with a webcam, and says it's the channel (not '0 followers')");
+		World None;
+		None.P = Creator(5000, 20000);
+		sponsor::Step(None.L.Sponsors, None.L, None.Bank, None.Ch, None.P, 20.0 * Day, 41.0 * Day, "test-seed");
+		Expect(OfferLetter(None.L, "halo").empty(), "creator road: no webcam, no Halo");
+	}
+	{
+		// The barber makes his offer in person: known on the block by Rerun and five cuts.
+		World W;
+		W.P = Creator(1000);
+		W.L.Groom.Cuts = 5;
+		W.Step(20.0 * Day, 27.0 * Day); // a week: the shop looks once (an offer stands seven days)
+		Expect(!sponsor::OpenOfferFor(W.L.Sponsors, "barber", 27.0 * Day).empty() && W.L.Inbox.empty(), "creator road: Lonnie's offer waits at the shop, known on the block by Rerun");
+		World Nobody;
+		Nobody.L.Groom.Cuts = 5;
+		Nobody.Step(20.0 * Day, 27.0 * Day);
+		Expect(Nobody.L.Sponsors.Contracts.empty(), "creator road: five cuts and nobody knows you: no offer");
+	}
+	{
+		// A forced offer (ss.Sponsor.Offer) says the channel's own numbers when Rerun leads, the room's line when it doesn't.
+		World W;
+		W.P = Creator(250000);
+		sponsor::MakeOffer(W.L.Sponsors, W.L, W.P, "turnstone", 30.0 * Day, "test-seed", true);
+		Expect(OfferLetter(W.L, "turnstone").rfind("Your Rerun channel's up to 250,000 subscribers, and they keep watching. ", 0) == 0,
+			"creator road: a forced offer to a big channel says the subscribers");
+		World P2;
+		P2.P = Creator(10000, 0, true);
+		sponsor::MakeOffer(P2.L.Sponsors, P2.L, P2.P, "riverline", 30.0 * Day, "test-seed", true);
+		Expect(OfferLetter(P2.L, "riverline").rfind("Rerun made you a Partner, and 10,000 people subscribe. ", 0) == 0, "creator road: and Partner when that's the tier");
+		World Tie;
+		Tie.P = Streamer(30000, 700.0); // the stream road's 5
+		Tie.P.VideoSubs = 250000;       // Rerun's 5: a tie, so the stream's own line stands
+		sponsor::MakeOffer(Tie.L.Sponsors, Tie.L, Tie.P, "turnstone", 30.0 * Day, "test-seed", true);
+		Expect(OfferLetter(Tie.L, "turnstone").rfind("People in the room know your name now. ", 0) == 0, "creator road: a tie with another road keeps that road's line");
+		World Nobody;
+		sponsor::MakeOffer(Nobody.L.Sponsors, Nobody.L, Nobody.P, "turnstone", 30.0 * Day, "test-seed", true);
+		Expect(OfferLetter(Nobody.L, "turnstone").rfind("People in the room know your name now. ", 0) == 0, "creator road: no channel, the old line");
+		// Rerun leads only over both roads: the live road's title above Rerun's 2 keeps the room's line.
+		World Live;
+		Live.P = Creator(5000, 20000);
+		Live.P.Titles = 1; // the live road's 3
+		sponsor::MakeOffer(Live.L.Sponsors, Live.L, Live.P, "turnstone", 30.0 * Day, "test-seed", true);
+		Expect(OfferLetter(Live.L, "turnstone").rfind("People in the room know your name now. ", 0) == 0, "creator road: the live road above Rerun keeps the room's line");
+		// Tier 1 stands on subscribers alone, so its letter says them, never a month's views it needn't have.
+		World Small;
+		Small.P = Creator(1000, 300);
+		sponsor::MakeOffer(Small.L.Sponsors, Small.L, Small.P, "turnstone", 30.0 * Day, "test-seed", true);
+		Expect(OfferLetter(Small.L, "turnstone").rfind("Your Rerun channel's up to 1,000 subscribers, and they keep watching. ", 0) == 0,
+			"creator road: tier 1 says the subscribers, not the month's views");
+	}
+	{
+		// A brand's own gate met says that gate, even with Rerun bigger: Team RiverLine on Kast's Partner and its numbers,
+		// Rangewise on a title. Rerun's words are only for a door Rerun opened.
+		World Kast;
+		Kast.P = Creator(50000, 150000); // Rerun's 4
+		Kast.P.Followers = 3000;         // the stream road's 3, and Team RiverLine's stream gate
+		Kast.P.Avg30 = 80.0;
+		Kast.P.Partner = true;
+		sponsor::MakeOffer(Kast.L.Sponsors, Kast.L, Kast.P, "riverline", 30.0 * Day, "test-seed", true);
+		Expect(OfferLetter(Kast.L, "riverline").rfind("Kast made you a Partner. ", 0) == 0, "creator road: Team RiverLine's stream gate met, its letter says Kast's Partner");
+		World Champ;
+		Champ.P = Creator(250000); // Rerun's 5
+		Champ.P.Titles = 1;
+		Champ.P.LiveCashes = 5;
+		Champ.Played(25.0 * Day, "", 1);
+		sponsor::MakeOffer(Champ.L.Sponsors, Champ.L, Champ.P, "rangewise", 30.0 * Day, "test-seed", true);
+		Expect(OfferLetter(Champ.L, "rangewise").rfind("You won the Embercrest Nightly $120, and people noticed. ", 0) == 0,
+			"creator road: Rangewise's own gate (a title and five cashes) says the title");
+	}
+	// The words: every offer body with each Rerun reason in it, at a big channel's numbers, still passes the lint, and nothing
+	// the book can write says a plan played (U1) or names a real platform.
+	{
+		std::map<std::string, std::string> Vars = sponsor::InventorySamples();
+		Vars["Subs"] = "1,250,000";
+		Vars["Views"] = "12,500,000";
+		std::vector<std::pair<std::string, std::string>> Filled;
+		int Reasons = 0;
+		for (const std::pair<std::string, std::string>& Line : sponsor::Inventory(2))
+		{
+			if (Line.first.rfind("why:rerun", 0) != 0)
+			{
+				continue;
+			}
+			++Reasons;
+			for (const std::pair<std::string, std::string>& Body : sponsor::Inventory(0))
+			{
+				if (Body.second.find("{Why}") != std::string::npos)
+				{
+					std::map<std::string, std::string> One = Vars;
+					One["Why"] = copylint::Fill(Line.second, Vars);
+					Filled.push_back({Body.first + "+" + Line.first, copylint::Fill(Body.second, One)});
+				}
+			}
+		}
+		Expect(Reasons == 3, "creator road: three Rerun reasons in the copy (subscribers, views, Partner)");
+		Expect(copylint::Run("sponsor letters with Rerun's reasons", Filled, copylint::LetterBody, Vars) == 0 && Filled.size() >= 30,
+			"creator road: every offer letter with a Rerun reason passes the copy lint at a big channel's numbers");
+		std::string Said;
+		for (int Kind = 0; Kind < 3; ++Kind)
+		{
+			for (const std::pair<std::string, std::string>& Line : sponsor::Inventory(Kind))
+			{
+				for (const char* Word : {"ai", "bot", "bots", "autoplay", "autoplayed", "autopilot", "youtube", "twitch", "tiktok", "kick", "rumble", "vimeo"})
+				{
+					Said = Said.empty() && SaysWord(Line.second, Word) ? Line.first + " says '" + Word + "'" : Said;
+				}
+			}
+		}
+		Expect(Said.empty(), ("creator road: no sponsor line says a plan played or names a real platform (U1, the trademark screen)" + (Said.empty() ? std::string() : ": " + Said)).c_str());
+	}
+}
+
+// ------------------------------------------------------------------ 18. update 2: old books, no video (SPEC §4.7, U10)
+
+/** FNV-1a, 64 bits: a digest of what a book wrote. */
+uint64_t Digest(const std::string& S, uint64_t H = 1469598103934665603ull)
+{
+	for (const char Ch : S)
+	{
+		H = (H ^ static_cast<uint8_t>(Ch)) * 1099511628211ull;
+	}
+	return H;
+}
+
+/** One old save's book and mail stepped Days days from the save's minute with record P: everything the book wrote. */
+std::string SteppedBook(const ss::SaveData& D, const ss::rep::Public& P, double Days)
+{
+	life::State L = D.Life;
+	Chips Bank = D.BankrollCents;
+	ss::kast::Channel Ch = D.Channel;
+	std::vector<std::pair<std::string, std::string>> Texts;
+	sponsor::StepContext Ctx;
+	Ctx.Gear = &D.Gear;
+	Ctx.Texts = &Texts;
+	const double From = ss::net::MinutesPerDay * ss::net::NightOneDay + D.ClockMinutes;
+	sponsor::Step(L.Sponsors, L, Bank, Ch, P, From, From + Days * Day, "old-books", Ctx);
+	std::string Out;
+	sponsor::WriteLines(L, Out);
+	for (const life::Letter& M : L.Inbox)
+	{
+		Out += "mail|" + std::to_string(static_cast<long long>(std::llround(M.At * 100.0))) + "|" + M.Thread + "|" + M.Source + "|" + M.From + "|" + M.Subject + "|" + M.Body + "|" +
+			std::to_string(M.Kind) + "\n";
+	}
+	for (const life::LedgerEntry& E : L.Ledger)
+	{
+		Out += "ledger|" + std::to_string(E.Kind) + "|" + E.Label + "|" + std::to_string(E.Amount) + "\n";
+	}
+	for (const std::pair<std::string, std::string>& T : Texts)
+	{
+		Out += "text|" + T.first + "|" + T.second + "\n";
+	}
+	return Out + "bank|" + std::to_string(Bank) + "\n";
+}
+
+/**
+ * The creator road is a road with nothing on it in an old save: no channel, so rep::Public's video fields are 0, and every
+ * old book behaves as it did. Five fixtures' books stepped 120 days under five records (nobody, a streamer, a Partner star,
+ * a live regular, a restricted Partner), and once more with the video fields just short of the road's first tier (999
+ * subscribers, 19,999 views in 30 days, even Partner): the same letters, the same money, the same lines. The digest is
+ * pinned from fc70b71's build, before the creator road (sponsor_test printed it there).
+ */
+void OldBooks()
+{
+	const std::string Dir = std::string(SS_TESTS_DIR) + "/fixtures/";
+	std::vector<ss::rep::Public> Records(5);
+	Records[1] = Streamer(600, 25.0);
+	Records[2] = Streamer(30000, 700.0);
+	Records[2].Partner = true;
+	Records[2].Titles = 1;
+	Records[3].LiveEvents = 10;
+	Records[3].Embercrest60 = 9;
+	Records[3].Cashes60 = 3;
+	Records[3].Cashes90 = 5;
+	Records[3].BestEmbercrestPlace = 4;
+	Records[3].Titles = 1;
+	Records[4] = Streamer(3000, 80.0);
+	Records[4].Partner = true;
+	Records[4].Restricted180 = true;
+	uint64_t All = Digest("");
+	bool Same = true;
+	int Books = 0;
+	std::set<uint64_t> Distinct;
+	size_t Letters = 0;
+	for (const char* Name : {"pre_update2_sponsored_streamer.ssave", "pre_update2_veteran.ssave", "pre_update2_staked_mid_nightly.ssave", "pre_segment_team_riverline.ssave",
+			 "pre_update2_fresh.ssave"})
+	{
+		ss::SaveData D;
+		if (!ss::SaveData::Parse(ReadFile(Dir + Name), D))
+		{
+			Expect(false, "old books: the fixture parses");
+			continue;
+		}
+		Expect(D.Life.Video.Videos.empty() && D.Life.Video.Subs == 0.0, "old books: an old save has no channel");
+		uint64_t One = Digest("");
+		for (const ss::rep::Public& P : Records)
+		{
+			const std::string Book = SteppedBook(D, P, 120.0);
+			ss::rep::Public Short = P;
+			Short.VideoSubs = 999;
+			Short.Views30 = 19999;
+			Short.VideoPartner = true;
+			Same = Same && SteppedBook(D, Short, 120.0) == Book;
+			One = Digest(Book, One);
+			Distinct.insert(Digest(Book));
+			for (size_t At = Book.find("\nmail|"); At != std::string::npos; At = Book.find("\nmail|", At + 1))
+			{
+				++Letters;
+			}
+			++Books;
+		}
+		std::printf("  old books: %s %016llx\n", Name, static_cast<unsigned long long>(One));
+		All = Digest(std::to_string(One), All);
+	}
+	std::printf("  old books: %d books stepped 120 days (%zu different, %zu letters), digest %016llx\n", Books, Distinct.size(), Letters, static_cast<unsigned long long>(All));
+	Expect(Books == 25 && Distinct.size() >= 15 && Letters >= 100, "old books: five fixtures under five records, and the records lead the books different ways");
+	Expect(Same, "old books: a channel short of the creator road's first tier changes nothing");
+	Expect(All == 0x4d1d7fe1ca2fae27ull, "old books: every old book behaves as it did before the creator road (the digest from fc70b71)");
+}
 } // namespace sponsor_test
 
 int main()
@@ -1305,6 +1698,8 @@ int main()
 	Exploits();
 	Readers();
 	Art();
+	CreatorRoad();
+	OldBooks();
 	std::printf("sponsor tests: %d checks, %d failed\n", Checks, Failures);
 	if (Failures == 0)
 	{

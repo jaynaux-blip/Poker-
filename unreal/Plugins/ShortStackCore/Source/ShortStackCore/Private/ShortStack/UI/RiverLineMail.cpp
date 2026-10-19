@@ -6,6 +6,7 @@
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/UI/SponsorArt.h"
+#include "ShortStack/UI/VideoArt.h"
 
 #include <algorithm>
 #include <cmath>
@@ -19,7 +20,8 @@
 // contract card in three columns (what you get; what they ask, each with this period's progress; the fine print) with
 // its buttons: Sign, Counter (five levers, each with the rep's mood before it's sent) and Decline on an offer; Give
 // notice (behind a confirm card) and Ask for a raise on a running deal. A conflict shows in red over Sign. Lantern Row's
-// and Finch School's letters (Source "stake") link to the Backing page. Opening a thread marks its letters read.
+// and Finch School's letters (Source "stake") link to the Backing page; Rerun's (Source "video": the review, the Partner
+// welcome, the statements; update 2 §4.9) wear its mark and open the Channel page. Opening a thread marks its letters read.
 //
 // The app's own state (the thread picked, the panel open) lives here, by RiverLine: its header is Phase A's.
 
@@ -45,6 +47,11 @@ const Color Navy = Hex(0x1f2a3a);
 const Color Blue = Hex(0x2f5d9e);
 const Color Red = Hex(0xc0392b);
 const Color Green = Hex(0x2f8f5b);
+
+/** Rerun's letters (Source "video", update 2 §4.9): under the name, and the button to the Channel page (§4.8's page 1). */
+constexpr const char* RerunDesk = "Partner Program";
+constexpr const char* RerunButton = "Open your channel";
+constexpr int RerunChannelPage = 1;
 
 struct MailState
 {
@@ -244,6 +251,10 @@ void RiverLine::MailApp(double Now)
 		{
 			sponsorart::Mark(*C, K->Brand, {Row.X + 14.0f, Row.Y + 16.0f, 44.0f, 44.0f});
 		}
+		else if (T.Source == "video")
+		{
+			videoart::Logo(*C, {Row.X + 14.0f, Row.Y + 16.0f, 44.0f, 44.0f});
+		}
 		else
 		{
 			Seal(*C, T.From, Row.X + 36.0f, Row.Y + 38.0f, 22.0f);
@@ -326,9 +337,17 @@ void RiverLine::MailApp(double Now)
 	}
 	else if (T)
 	{
-		Seal(*C, T->From, PaneX + 29.0f, 121.0f, 29.0f);
+		const bool Rerun = T->Source == "video";
+		if (Rerun)
+		{
+			videoart::Logo(*C, {PaneX, 92.0f, 58.0f, 58.0f});
+		}
+		else
+		{
+			Seal(*C, T->From, PaneX + 29.0f, 121.0f, 29.0f);
+		}
 		UI.Text(T->From, PaneX + 74.0f, 118.0f, Ts(24.0f, 900, Ink));
-		UI.Text(T->Source == "stake" ? std::string("Backing") : std::string("Mail"), PaneX + 74.0f, 142.0f, Ts(14.0f, 600, Muted));
+		UI.Text(T->Source == "stake" ? std::string("Backing") : Rerun ? std::string(RerunDesk) : std::string("Mail"), PaneX + 74.0f, 142.0f, Ts(14.0f, 600, Muted));
 	}
 	const float LettersBottom = K ? 452.0f : MailH - 90.0f;
 	C->PushClip({PaneX - 4.0f, 160.0f, PaneW + 8.0f, LettersBottom - 160.0f});
@@ -357,6 +376,14 @@ void RiverLine::MailApp(double Now)
 	{
 		OpenApp(App::RiverLine, Now);
 		OpenPage(Page::Backing, Now);
+		return;
+	}
+	// Rerun's letters, whichever they are (the review, the Partner welcome, a statement): to the Channel page, where the gate's
+	// bars, the balance and the payouts are (§4.8, §4.9).
+	if (T && T->Source == "video" &&
+		AppButton("mailrerun", {PaneX, MailH - 70.0f, 220.0f, 44.0f}, RerunButton, Hex(videoart::Marigold), Hex(videoart::Ink), !Previewing))
+	{
+		rlvideo_detail::VideoOpen(*this, RerunChannelPage, Now);
 		return;
 	}
 	if (!K)

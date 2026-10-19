@@ -930,5 +930,22 @@ std::string AutoTabLine(Canvas& Cv, const autoplay::Panel& P, const std::string&
 /** Every sentence the autoplay screens draw beyond core's own copy, for the copy lint. */
 std::vector<std::string> AutoUiInventory();
 } // namespace rlauto_detail
+
+/**
+ * Update 2, G2 (§4.8, §4.9): Rerun's entry points for the rest of the laptop. The app and its side state (the page, what's
+ * been seen since the last visit) are ui-video's (RiverLineVideo.cpp, RiverLine::VideoApp); the taskbar's ninth button
+ * and its dot, Mail's link and ~RiverLine (ui-laptop's) reach it through these.
+ */
+namespace rlvideo_detail
+{
+/** Switches the laptop to Rerun at a page: 0 Studio, 1 Channel (Mail's Rerun letters open 1). */
+void VideoOpen(RiverLine& RL, int Page, double Now);
+/** The taskbar's marigold dot: three or more candidates new since the last visit, or a bell milestone not yet seen. */
+bool VideoDot(const RiverLine* RL, const Session& S);
+/** Drops a laptop's Rerun state when it goes (~RiverLine). */
+void ForgetVideo(const RiverLine* RL);
+/** Every sentence Rerun's pages draw beyond core's own copy, for the copy lint. */
+std::vector<std::string> VideoUiInventory();
+} // namespace rlvideo_detail
 } // namespace ui
 } // namespace ss

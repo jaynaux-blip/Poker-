@@ -1,6 +1,6 @@
 // riverline_ui: ui-laptop's additions (next_segment_spec §7.6, §8.3), compiled into ui_test and called from main() in
 // ui_main.cpp (the shared kit is UiSeg.h):
-// - the taskbar with 8 apps, Mail opened from it (core-sponsor's mail_* goldens run once it is);
+// - the taskbar with 8 apps (9 from update 2's G2), Mail opened from it (core-sponsor's mail_* goldens run once it is);
 // - bank_segment: 9 In and 8 Out rows at the 26-unit pitch, the ledger's kinds 10 to 12 by name, the staked-roll and
 //   store-credit cards that never count toward Net;
 // - the Backing tab (hidden until stake::Anything), the nav with four table tabs and Backing (nav_four_tables_backing);
@@ -12,7 +12,13 @@
 //   (badges_board_live, badges_board_honors, badges_board_hover, badges_card_rail, badges_card_tab,
 //   badges_career_progress), HONORS and CIRCUIT CARDS;
 // - the second screen's COMING UP and the wall calendar's marks;
-// - the copy lint over this track's sentences.
+// - the copy lint over this track's sentences;
+// - update 2, G2 (§4.8, §4.9, §1.2, §5.11): Rerun the ninth app after Mail, the news wire's lane at 1,600 wide with the
+//   status at its widest (taskbar_rerun) and "Your turn at ..." whole in it, Rerun's marigold dot (taskbar_rerun_dot; a
+//   new laptop where the last one was starts its own count), the Bank's "Streaming & video" row
+//   for an old save and with a Rerun payout (bank_video_old_save, bank_video), Mail's button to the Channel page
+//   (mail_rerun, mail_rerun_opened), "Rerun payout" on the second screen and the wall calendar (second_screen_rerun,
+//   wall_calendar_rerun).
 // Checks that need the badges' rules (core-badges) say so and skip while those are stubs.
 #include "UiSeg.h"
 
@@ -23,16 +29,22 @@
 #include "ShortStack/Game/Sizing.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
+#include "ShortStack/Game/Video.h"
+#include "ShortStack/Game/World.h"
 #include "ShortStack/UI/FrontEnd.h"
 #include "ShortStack/UI/RiverLine.h"
 #include "ShortStack/UI/SecondScreen.h"
+#include "ShortStack/UI/VideoArt.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <iterator>
 #include <new>
 #include <set>
+#include <sstream>
 
 namespace ui_test
 {
@@ -57,6 +69,12 @@ struct Laptop
 	TableMeasurer M;
 	double Now = 1.0;
 	explicit Laptop(const std::string& Seed) : S(H, Seed), RL(S)
+	{
+		S.CurrentScreen = ss::Screen::Lobby;
+		Now = Step(S, Now, 0.2);
+	}
+	/** A career loaded from a save (a fixture). */
+	Laptop(const std::string& Seed, const ss::SaveData& Loaded) : S(H, Seed, &Loaded), RL(S)
 	{
 		S.CurrentScreen = ss::Screen::Lobby;
 		Now = Step(S, Now, 0.2);
@@ -274,7 +292,10 @@ void Taskbar()
 		}
 		Expect(Waiting && TaskbarDot(Q.Settled(), "Kast", ss::ui::pal::Gold, Q.M), "taskbar: a sponsor's open offer puts the gold dot on Kast");
 	}
-	const char* Apps[9] = {"RiverLine", "ShiftLink", "Burner", "Bank", "GearDrop", "Kast", "Penny Drop", "Mail", "Sleep"};
+	// Update 2 (§4.8, §5.11): Rerun is the ninth app, after Mail. The old check here was eight apps, with Sleep's end under
+	// x 1,100; Rerun's button (about 93 units) moves Sleep past that, so the room left is checked where it matters, the news
+	// wire's lane between Sleep and the status (TaskbarLane, below: at least 120 at 1,600 wide in the widest case).
+	const char* Apps[10] = {"RiverLine", "ShiftLink", "Burner", "Bank", "GearDrop", "Kast", "Penny Drop", "Mail", "Rerun", "Sleep"};
 	float Prev = -1.0f;
 	bool Ordered = true;
 	bool All = true;
@@ -285,9 +306,7 @@ void Taskbar()
 		Ordered = Ordered && B.X > Prev;
 		Prev = B.X + B.W;
 	}
-	Expect(All && Ordered, "laptop: the taskbar has its eight apps and Sleep, in order");
-	const Box Sleep = RunOf(L, "Sleep", P.M, 960.0f, 1000.0f);
-	Expect(Sleep.X + Sleep.W < 1100.0f, "laptop: eight apps and Sleep leave the news wire and the status room");
+	Expect(All && Ordered, "laptop: the taskbar has its nine apps and Sleep, in order (Rerun after Mail)");
 	// Mail opens from the taskbar.
 	const Box Mail = RunOf(L, "Mail", P.M, 960.0f, 1000.0f);
 	P.Click(Mail.X + Mail.W / 2.0f, Mail.Base - 4.0f);
@@ -325,7 +344,8 @@ void Bank()
 	P.RL.OpenApp(App::Bank, P.Now);
 	const DrawList L = P.Settled();
 	WriteList("bank_segment", L);
-	const char* In[9] = {"Tournament cashes", "The Embercrest", "Leaderboard prizes", "Shifts", "Cash work", "Streaming", "Sponsors", "Backers & buyers", "Sales & refunds"};
+	// Update 2 §1.2: the sixth row is "Streaming & video" (Kast and Rerun's payouts, kinds 6 and 13); still nine (BankVideo).
+	const char* In[9] = {"Tournament cashes", "The Embercrest", "Leaderboard prizes", "Shifts", "Cash work", "Streaming & video", "Sponsors", "Backers & buyers", "Sales & refunds"};
 	const char* Out[8] = {"Buy-ins & entry fees", "Rent, bills & fares", "Food & deliveries", "Gear", "Fines & Marcus", "Looks, fitness & food out", "Backers' shares & swaps", "Coaching"};
 	bool Rows = true;
 	for (const char* R : In)
@@ -349,6 +369,372 @@ void Bank()
 	Expect(Spelled(L, "STAKED ROLL") && DrewRun(L, "Lantern Row Staking") && Drew(L, "\xE2\x88\x92$680 makeup"), "bank: the staked roll's card, makeup with its sign");
 	Expect(Spelled(L, "STORE CREDIT") && Drew(L, "$25.00") && Drew(L, "Lucky Penny"), "bank: the store credit's card");
 	Expect(Drew(L, "$4,123.00"), "bank: the balance is the bankroll alone");
+}
+
+// ------------------------------------------------------------------ Rerun around its app (update 2, G2)
+
+/** A fixture's text (Tests/fixtures), "" when it can't be read. */
+std::string Fixture(const std::string& Name)
+{
+	std::ifstream In(std::string(SS_TESTS_DIR) + "/fixtures/" + Name, std::ios::binary);
+	std::stringstream Text;
+	Text << In.rdbuf();
+	return Text.str();
+}
+
+/**
+ * The news wire's lane in a taskbar frame (RiverLineApps.cpp, Taskbar): from the ticker's LIVE pill (drawn 18 in from the
+ * lane's left, and only while the lane is over 120 wide) to the battery, which sits 40 left of the energy figure with the
+ * lane stopping 18 short of it. -1 when the frame has no ticker or no energy figure.
+ */
+float LaneWidth(const DrawList& L, float& Left)
+{
+	float Live = -1.0f;
+	float Energy = -1.0f;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || Cmd.Text.BaselineY < 962.0f || Cmd.Text.BaselineY > 1000.0f)
+		{
+			continue;
+		}
+		const std::string& T = Cmd.Text.Text;
+		Live = T == "LIVE" ? Cmd.Text.X : Live;
+		Energy = !T.empty() && T.back() == '%' ? Cmd.Text.X : Energy;
+	}
+	if (Live < 0.0f || Energy < 0.0f)
+	{
+		return -1.0f;
+	}
+	Left = Live - 18.0f;
+	return Energy - 40.0f - 18.0f - Left;
+}
+
+void TaskbarLane()
+{
+	// Nine apps and Sleep at 1,600 wide (§5.11: the lane needs 120; G3's caret takes about 20 more): measured in a frame with
+	// the status at its widest that a frame can be set to (heat at 100, energy at 100%), less what the widest weekday and
+	// date, and the widest clock, would take over the ones drawn.
+	Laptop P("laptop-taskbar-lane");
+	ss::Session& S = P.S;
+	S.Life.Heat = 100.0;
+	S.Life.Energy = 100.0;
+	const DrawList L = P.Settled();
+	WriteList("taskbar_rerun", L);
+	float Left = 0.0f;
+	const float Lane = LaneWidth(L, Left);
+	const ss::ui::Font DayFace = ss::ui::Canvas::FaceFor(600, false);
+	const ss::ui::Font Clock = ss::ui::Canvas::FaceFor(700, true);
+	const auto DayText = [](int D) { return std::string(ss::net::WeekdayName(D)) + ", " + ss::net::DateLabel(D); };
+	const double World = S.WorldMinutes();
+	float DayMax = 0.0f;
+	for (int D = 0; D < 2 * 366; ++D)
+	{
+		DayMax = std::max(DayMax, P.M.Width(DayText(D), DayFace, 12.0f));
+	}
+	float ClockMax = 0.0f;
+	for (int M = 0; M < 24 * 60; ++M)
+	{
+		ClockMax = std::max(ClockMax, P.M.Width(ss::net::TimeLabel(static_cast<double>(M)), Clock, 14.0f));
+	}
+	const float Worst = Lane - (DayMax - P.M.Width(DayText(ss::net::DayOf(World)), DayFace, 12.0f)) - (ClockMax - P.M.Width(ss::net::TimeLabel(World), Clock, 14.0f));
+	std::printf("  taskbar: nine apps and Sleep end at x %.0f; the news wire's lane is %.0f wide here, %.0f at its narrowest (needs 120)\n", Left, Lane, Worst);
+	Expect(Lane > 0.0f && Worst >= 120.0f, "taskbar: nine apps and Sleep leave the news wire its 120 at 1,600 wide, the status at its widest");
+	Expect(Worst >= 140.0f, "taskbar: and the 20 more G3's poker-button caret will take (§5.11)");
+}
+
+void TaskbarTurn()
+{
+	// A table waiting on the player while another app is up: the lane says whose turn it is, whole. With the ninth app it has
+	// about 90 less, so the clock's half ("the clock is running") goes when it won't fit beside the name.
+	Laptop P("laptop-taskbar-turn");
+	ss::Session& S = P.S;
+	S.BankrollCents = 5000;
+	const std::vector<ss::LobbyEvent> One = OpenNow(S, 1);
+	if (One.empty())
+	{
+		std::printf("  laptop: no event open right now; the lane's turn check is skipped\n");
+		return;
+	}
+	S.RegisterEvent(One.front());
+	S.CurrentPace = ss::Pace::Full;
+	for (int Guard = 0; Guard < 30 * 900 && S.TablesWaiting() < 1; ++Guard)
+	{
+		P.Now = Step(S, P.Now, 1.0 / 30.0);
+	}
+	S.Life.Heat = 100.0; // the status at its widest
+	P.RL.OpenApp(App::Bank, P.Now);
+	const DrawList L = P.Settled();
+	std::string Said;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.BaselineY > 962.0f && Cmd.Text.Text.rfind("Your turn at ", 0) == 0)
+		{
+			Said = Cmd.Text.Text;
+		}
+	}
+	std::printf("  taskbar: a table waiting, the lane says \"%s\"\n", Said.c_str());
+	Expect(S.TablesWaiting() == 1 && !Said.empty() && Said.find("\xE2\x80\xA6") == std::string::npos, "taskbar: whose turn it is reads whole beside nine apps");
+}
+
+void RerunTaskbar()
+{
+	Laptop P("laptop-rerun-dot");
+	ss::Session& S = P.S;
+	const ss::ui::Color Marigold = ss::ui::Hex(ss::ui::videoart::Marigold);
+	Expect(!TaskbarDot(P.Settled(), "Rerun", Marigold, P.M), "rerun dot: none with nothing new");
+	S.DebugVideo("fake badbeat online");
+	S.DebugVideo("fake bluff embercrest");
+	Expect(S.Life.Video.Open.size() == 2 && !TaskbarDot(P.Settled(), "Rerun", Marigold, P.M), "rerun dot: two new highlights aren't enough");
+	S.DebugVideo("fake bigpot skip");
+	const DrawList Three = P.Settled();
+	WriteList("taskbar_rerun_dot", Three);
+	Expect(S.Life.Video.Open.size() == 3 && TaskbarDot(Three, "Rerun", Marigold, P.M), "rerun dot: three new highlights put the marigold dot on Rerun");
+	// A visit sees them: the button opens Rerun, its underline in marigold, and the dot's gone after.
+	const Box Btn = RunOf(Three, "Rerun", P.M, 960.0f, 1000.0f);
+	P.Click(Btn.X + Btn.W / 2.0f, Btn.Base - 4.0f);
+	Expect(P.RL.CurrentApp() == App::Video, "rerun: the taskbar opens Rerun");
+	const DrawList Open = P.Settled();
+	Expect(FilledNear(Open, Marigold, Btn.X - 38.0f + 9.0f, ss::ui::RiverLine::Height - 2.0f, 3.0f), "rerun: its button's underline is marigold while it's open");
+	P.RL.OpenApp(App::RiverLine, P.Now);
+	Expect(!TaskbarDot(P.Settled(), "Rerun", Marigold, P.M), "rerun dot: gone after a visit");
+	S.DebugVideo("fake cooler dees");
+	S.DebugVideo("fake herocall online");
+	Expect(!TaskbarDot(P.Settled(), "Rerun", Marigold, P.M), "rerun dot: two more since the visit still aren't enough");
+	// A milestone on the bell (Channel::Bell, the last 20) brings it back on its own.
+	S.Life.Video.Bell.push_back({S.WorldMinutes(), "100 subscribers."});
+	Expect(TaskbarDot(P.Settled(), "Rerun", Marigold, P.M), "rerun dot: a milestone on the bell puts it back");
+	// With Rerun in front the dot waits (the bell in its header says it there).
+	P.RL.OpenApp(App::Video, P.Now);
+	Expect(!TaskbarDot(P.Settled(), "Rerun", Marigold, P.M), "rerun dot: not on its button while Rerun is open");
+}
+
+void RerunForget()
+{
+	// ~RiverLine drops Rerun's side state (rlvideo_detail::ForgetVideo): a second career's laptop made where the first one's
+	// was takes its own first look, its highlights from before the last twelve hours seen, so no dot.
+	alignas(Laptop) static unsigned char Room[sizeof(Laptop)];
+	Laptop* First = new (Room) Laptop("laptop-rerun-forget-a");
+	(void)First->Settled(); // the first laptop's first look
+	First->~Laptop();
+	Laptop* P = new (Room) Laptop("laptop-rerun-forget-b");
+	ss::Session& S = P->S;
+	S.DebugVideo("fake badbeat online");
+	S.DebugVideo("fake bluff embercrest");
+	S.DebugVideo("fake bigpot skip");
+	P->At(S.WorldMinutes() + 13.0 * 60.0);
+	const bool Dot = TaskbarDot(P->Settled(), "Rerun", ss::ui::Hex(ss::ui::videoart::Marigold), P->M);
+	const size_t Open = S.Life.Video.Open.size();
+	P->~Laptop();
+	Expect(Open == 3 && !Dot, "rerun dot: a new laptop where the last one was starts its own count (three from yesterday aren't new)");
+}
+
+void RerunEdit()
+{
+	// A video's edit (§4.5) is a time skip like a shift; its result card wears Rerun's marigold and name.
+	Laptop P("laptop-rerun-edit");
+	ss::Session& S = P.S;
+	S.DebugVideo("fake badbeat online");
+	ss::video::Choice Ch;
+	Ch.Candidates = {S.Life.Video.Open.empty() ? std::string() : S.Life.Video.Open.front().Id};
+	Ch.F = ss::video::Format::Breakdown;
+	const std::string Why = S.Publish(Ch);
+	for (int Guard = 0; Guard < 200 && (S.TimeSkip.Active || !S.HasOutcome); ++Guard)
+	{
+		P.Now = Step(S, P.Now, 0.1);
+	}
+	const DrawList L = P.Settled();
+	WriteList("rerun_edit_outcome", L);
+	// The kicker (tracked capitals at the card's top, y 316) in marigold.
+	bool Marigold = false;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		Marigold = Marigold || (Cmd.Type == ss::ui::DrawCmd::Kind::Text && std::fabs(Cmd.Text.BaselineY - 316.0f) < 1.0f && SameColor(Cmd.Text.Col, ss::ui::Hex(ss::ui::videoart::Marigold)));
+	}
+	Expect(Why.empty() && S.HasOutcome && S.LastOutcome.ActivityId.rfind("video:", 0) == 0 && Spelled(L, "RERUN") && Drew(L, "Up on Rerun") && Marigold,
+		("rerun: the edit's result card says RERUN in marigold" + (Why.empty() ? std::string() : " (" + Why + ")")).c_str());
+}
+
+/** The amount on one of the Bank's MONEY IN rows: the run on the label's baseline that ends at the column's right (x 452). */
+std::string InRowAmount(const DrawList& L, const std::string& Label, const TableMeasurer& M)
+{
+	const Box Lb = RunOf(L, Label, M, 570.0f, 930.0f);
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Lb.Found && Cmd.Type == ss::ui::DrawCmd::Kind::Text && std::fabs(Cmd.Text.BaselineY - Lb.Base) < 0.01f && Cmd.Text.X > Lb.X + Lb.W &&
+			std::fabs(Cmd.Text.X + M.Width(Cmd.Text.Text, Cmd.Text.Face, Cmd.Text.SizePx) - 452.0f) < 0.5f)
+		{
+			return Cmd.Text.Text;
+		}
+	}
+	return std::string();
+}
+
+void BankVideo()
+{
+	// An old save (a streamer with a Kast payout, nothing from Rerun): the row is renamed and its total is the same, the
+	// kind-6 lines it always summed.
+	{
+		ss::SaveData D;
+		const bool Parsed = ss::SaveData::Parse(Fixture("pre_update2_sponsored_streamer.ssave"), D);
+		Laptop P("laptop-bank-old", D);
+		ss::Chips Kast = 0;
+		bool Rerun = false;
+		for (const ss::life::LedgerEntry& E : P.S.Life.Ledger)
+		{
+			Kast += E.Kind == 6 && E.Amount > 0 ? E.Amount : 0;
+			Rerun = Rerun || E.Kind == ss::life::LedgerVideo;
+		}
+		P.RL.OpenApp(App::Bank, P.Now);
+		const DrawList L = P.Settled();
+		WriteList("bank_video_old_save", L);
+		const std::string Shown = InRowAmount(L, "Streaming & video", P.M);
+		std::printf("  bank: an old save's streaming row reads %s (its Kast lines: %s)\n", Shown.c_str(), ss::Money(Kast).c_str());
+		Expect(Parsed && Kast > 0 && !Rerun && Shown == ss::Money(Kast) && !DrewRun(L, "Streaming"), "bank: an old save's row reads \"Streaming & video\", its total the same");
+	}
+	// A Rerun payout beside a Kast payout: one row holds both (still nine rows), Net counts it, the history names it.
+	{
+		Laptop P("laptop-bank-video");
+		ss::Session& S = P.S;
+		S.Life.Ledger.clear();
+		const double W = S.WorldMinutes();
+		S.Life.Record(W - 120.0, "Kast payout", 2380, 6);
+		S.Life.Record(W - 60.0, "Rerun payout: April", 14620, ss::life::LedgerVideo);
+		P.RL.OpenApp(App::Bank, P.Now);
+		const DrawList L = P.Settled();
+		WriteList("bank_video", L);
+		Expect(InRowAmount(L, "Streaming & video", P.M) == "$170.00", "bank: a Rerun payout sums into \"Streaming & video\" with Kast's (kinds 6 and 13)");
+		Expect(Drew(L, "Net +$170.00"), "bank: the payout counts in Net");
+		Expect(DrewRun(L, "Rerun payout: April") && Drew(L, "\xC2\xB7 Rerun") && !Drew(L, "\xC2\xB7 Prizes"), "bank: the history names Rerun's line (kind 13 isn't Prizes)");
+		int Rows = 0;
+		for (const char* R : {"Tournament cashes", "The Embercrest", "Leaderboard prizes", "Shifts", "Cash work", "Streaming & video", "Sponsors", "Backers & buyers", "Sales & refunds"})
+		{
+			Rows += DrewRun(L, R) ? 1 : 0;
+		}
+		Expect(Rows == 9, "bank: still nine rows in");
+	}
+}
+
+void MailRerun()
+{
+	// Rerun's letters (Source "video"): its mark, "Partner Program" under the name, and a button to the Channel page.
+	{
+		Laptop P("laptop-mail-rerun");
+		ss::Session& S = P.S;
+		const double W = S.WorldMinutes();
+		S.Life.Inbox.push_back(ss::life::Letter{W - 60.0, "rerun:partner", "video", "Rerun", "Your channel's under review.",
+			"Your channel just cleared both bars for the Rerun Partner Program. Someone here is looking it over now.", ss::video::LetterReview, false});
+		S.Life.Inbox.push_back(ss::life::Letter{W, "rerun:partner", "video", "Rerun", "Welcome to the Rerun Partner Program.",
+			"You're in. From today ads run on your videos.", ss::video::LetterWelcome, false});
+		P.RL.OpenApp(App::Mail, P.Now);
+		const DrawList L = P.Settled();
+		WriteList("mail_rerun", L);
+		Expect(DrewRun(L, "Open your channel") && DrewRun(L, "Partner Program") && !DrewRun(L, "Open the Backing page"), "mail: Rerun's letters get a button to the channel");
+		const Box B = RunOf(L, "Open your channel", P.M);
+		P.Click(B.X + B.W / 2.0f, B.Base - 5.0f);
+		Expect(P.RL.CurrentApp() == App::Video, "mail: the button opens Rerun");
+		const DrawList V = P.Settled();
+		WriteList("mail_rerun_opened", V);
+		Expect(Drew(V, "No videos yet.") && !Drew(V, "Play some hands. The good ones show up here."), "mail: at the Channel page (an empty channel's \"No videos yet.\")");
+	}
+	// A statement has it too.
+	{
+		Laptop P("laptop-mail-rerun-pay");
+		P.S.Life.Inbox.push_back(ss::life::Letter{P.S.WorldMinutes(), "rerun:pay", "video", "Rerun", "Your Rerun payout for April.",
+			"We've sent $146.20 to your bank account.", ss::video::LetterStatement, false});
+		P.RL.OpenApp(App::Mail, P.Now);
+		Expect(DrewRun(P.Settled(), "Open your channel"), "mail: a Rerun statement links to the channel too");
+	}
+	// A staking outfit's letter keeps its own link, and no Rerun button.
+	{
+		Laptop P("laptop-mail-stake");
+		P.S.Life.Inbox.push_back(ss::life::Letter{P.S.WorldMinutes(), "note", "stake", "Lantern Row Staking", "A note", "Read me.", 25, false});
+		P.RL.OpenApp(App::Mail, P.Now);
+		const DrawList L = P.Settled();
+		Expect(DrewRun(L, "Open the Backing page") && !DrewRun(L, "Open your channel"), "mail: a staking letter still links to Backing, not Rerun");
+	}
+}
+
+/** The baseline of the first run exactly Text in L, or -1. */
+float RunBase(const DrawList& L, const std::string& Text)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Text)
+		{
+			return Cmd.Text.BaselineY;
+		}
+	}
+	return -1.0f;
+}
+
+void RerunDates()
+{
+	// "Rerun payout Apr 21" (§1.6, §4.9): Session::Marks merges video::Marks. The second screen's COMING UP gives a mark a
+	// week or more out its date (a weekday would read as this week's), and the wall calendar writes RERUN on the 21st.
+	Laptop P("laptop-rerun-dates");
+	ss::Session& S = P.S;
+	int Tenth = -1;
+	for (int D = ss::net::DayOf(S.WorldMinutes()); D < 400 && Tenth < 0; ++D)
+	{
+		int Y = 0, M = 0, Dm = 0;
+		ss::world::CivilDate(D, Y, M, Dm);
+		Tenth = Dm == 10 ? D : -1;
+	}
+	P.At(static_cast<double>(Tenth) * Day + 14.0 * 60.0);
+	S.Life.Video.PartnerAt = S.WorldMinutes() - Day; // a Partner: the 21st pays
+	const auto Coming = [&P, &S]() {
+		DrawList Tile;
+		ss::ui::Canvas C(Tile, P.M, ss::ui::secondscreen::Width, ss::ui::secondscreen::Height, 1.0f);
+		ss::ui::secondscreen::Draw(C, S, 0, P.Now);
+		return Tile;
+	};
+	const int Pay = Tenth + 11;
+	const DrawList Far = Coming();
+	WriteList("second_screen_rerun", Far);
+	const float Label = RunBase(Far, "Rerun payout");
+	Expect(DrewRun(Far, "COMING UP") && Label > 0.0f && RunBase(Far, ss::net::DateLabel(Pay)) == Label,
+		("second screen: \"" + ss::net::DateLabel(Pay) + "  Rerun payout\", eleven days out").c_str());
+	DrawList Wall;
+	{
+		ss::ui::Canvas C(Wall, P.M, ss::ui::wallcalendar::Width, ss::ui::wallcalendar::Height, 1.4f);
+		ss::ui::wallcalendar::Draw(C, S);
+	}
+	WriteList("wall_calendar_rerun", Wall);
+	Expect(DrewRun(Wall, "RERUN"), "wall calendar: the 21st's payout written on the month");
+	// Four days out it's a weekday again.
+	P.At(static_cast<double>(Pay - 4) * Day + 14.0 * 60.0);
+	S.Life.Video.PartnerAt = S.WorldMinutes() - Day;
+	const DrawList Near = Coming();
+	const float Label2 = RunBase(Near, "Rerun payout");
+	Expect(Label2 > 0.0f && RunBase(Near, ss::net::WeekdayName(Pay, true)) == Label2, "second screen: four days out, the payout's weekday");
+}
+
+/** The labels this track adds that aren't sentences (the copy lint wants an ending): no placeholder, no real brand, no "AI". */
+void RerunLabels()
+{
+	const char* Labels[] = {"Rerun", "Streaming & video", "Poker sites", "Open your channel", "Partner Program", "RERUN"};
+	const char* Real[] = {"youtube", "twitch", "kick", "tiktok", "rumble", "vimeo", "dailymotion", "pokerstars", "ggpoker", "skrill", "paypal", "venmo"};
+	bool Clean = true;
+	for (const char* Lb : Labels)
+	{
+		const std::string Low = copylint::Lower(Lb);
+		Clean = Clean && !Low.empty() && Low.find("  ") == std::string::npos && Low.find("todo") == std::string::npos && Low.find("placeholder") == std::string::npos;
+		for (const char* R : Real)
+		{
+			Clean = Clean && Low.find(R) == std::string::npos;
+		}
+		for (const char* Word : {"ai", "bot", "autoplay"})
+		{
+			const std::string W(Word);
+			for (size_t At = Low.find(W); At != std::string::npos; At = Low.find(W, At + 1))
+			{
+				const bool Start = At == 0 || !std::isalpha(static_cast<unsigned char>(Low[At - 1]));
+				const bool End = At + W.size() >= Low.size() || !std::isalpha(static_cast<unsigned char>(Low[At + W.size()]));
+				Clean = Clean && !(Start && End);
+			}
+		}
+	}
+	Expect(Clean, "rerun: the taskbar, Bank, Mail and calendar labels pass the screen (no placeholder, no real platform, no \"AI\")");
 }
 
 // ------------------------------------------------------------------ the Backing tab and the nav
@@ -1269,6 +1655,16 @@ void SegLaptop()
 {
 	laptop_seg::Taskbar();
 	laptop_seg::Bank();
+	// Update 2, G2: Rerun around its app.
+	laptop_seg::TaskbarLane();
+	laptop_seg::TaskbarTurn();
+	laptop_seg::RerunTaskbar();
+	laptop_seg::RerunForget();
+	laptop_seg::RerunEdit();
+	laptop_seg::BankVideo();
+	laptop_seg::MailRerun();
+	laptop_seg::RerunDates();
+	laptop_seg::RerunLabels();
 	laptop_seg::Backing();
 	laptop_seg::Sizing();
 	laptop_seg::SeatPins();

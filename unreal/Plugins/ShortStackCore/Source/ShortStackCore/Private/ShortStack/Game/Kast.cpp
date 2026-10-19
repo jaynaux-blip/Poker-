@@ -73,6 +73,23 @@ double KastPaceFollows(const Inputs& In)
 	return KastSprinting(In) ? 0.6 : 1.0;
 }
 
+/**
+ * Rerun's buzz (update 2 §4.7): a video doing well this week sends people looking for the stream. The views in the last
+ * 48 hours (Inputs::VideoBuzz, the session's video::Buzz) raise the directory's strangers by up to 30%, all of it from
+ * 5,000 views on. No views, no change: the factor is exactly 1.
+ */
+constexpr double KastBuzzFull = 5000.0;
+constexpr double KastBuzzMost = 0.3;
+
+double KastBuzz(const Inputs& In)
+{
+	return 1.0 + KastBuzzMost * std::min(1.0, std::max(0.0, In.VideoBuzz) / KastBuzzFull);
+}
+
+/** Tonight's moment log (update 2 §4.4): at most this many notes, and this many chat lines on each. */
+constexpr size_t KastMomentNotes = 60;
+constexpr size_t KastMomentLines = 3;
+
 std::string Fill(std::string Text, const std::string& Key, const std::string& Value)
 {
 	for (size_t At = Text.find(Key); At != std::string::npos; At = Text.find(Key, At + Value.size()))
@@ -984,10 +1001,16 @@ void Offline(Channel& Ch, double World, Rng& R)
 							 [&](const Member& M) { return !M.Friend && M.Loyalty < 0.012 && M.LastSeen < World - 45.0 * kast_detail::KastDay && !Ch.IsSub(M.Name, World) && !Ch.IsMod(M.Name); }),
 			Ch.Members.end());
 	}
-	// Clips keep getting watched for a few days; a few of those viewers follow.
+	// Clips keep getting watched for a few days; a few of those viewers follow. A clip whose moment went up on Rerun
+	// (Candidate set when the video was published) stops where it was: its watchers are the video's now, and the video
+	// brings its own follows (update 2 §4.7: no double count).
 	double Gained = 0.0;
 	for (Clip& C : Ch.Clips)
 	{
+		if (!C.Candidate.empty())
+		{
+			continue;
+		}
 		const double Was = C.Views;
 		C.Views = C.Reach * (1.0 - std::exp(-(World - C.At) / (1.5 * kast_detail::KastDay)));
 		Gained += std::max(0.0, C.Views - Was);
@@ -1046,6 +1069,7 @@ double Stream::StrangerRate(const Channel& Ch, const Inputs& In) const
 	A *= 1.0 + 0.08 * static_cast<double>(std::min(3, std::max(0, In.Tables - 1)));
 	A *= In.AtTable ? 1.0 : In.Results ? 0.8 : 0.5;
 	A *= kast_detail::KastPaceStrangers(In); // 4x x0.9; 8x and a skip x0.8 (today's Sprinting)
+	A *= kast_detail::KastBuzz(In);          // Rerun's last 48 hours: up to x1.3 (update 2 §4.7)
 	A *= AdRunning(In.Real) ? 0.6 : 1.0;
 	A *= 0.6 + 0.4 * Health;
 	return A;
@@ -1644,6 +1668,7 @@ void Stream::Start(Channel& Ch, const Inputs& In)
 	Graph.clear();
 	LastReal = In.Real;
 	Tonight = Summary();
+	Moments.clear(); // tonight's moment log starts with tonight
 	Pred = Prediction();
 	Face = Mood::Happy;
 	FaceAt = In.Real;
@@ -1804,6 +1829,8 @@ void Stream::OnMoment(Channel& Ch, const Inputs& In, Moment M, const std::string
 		return;
 	}
 	LastReal = In.Real;
+	const int FirstLine = NextId;        // the moment's own chat lines start here (tonight's moment log, below)
+	const int ClipsBefore = Tonight.Clips; // and a clip, if somebody makes one
 	const kast_detail::Hit H = kast_detail::HitOf(M);
 	Hype = std::min(100.0, Hype + H.Hype * kast_detail::TitleOf(Ch).Hype * std::max(0.5, std::min(2.0, Size)) * (1.0 + In.Gear.Hype));
 	LastMoment = M;
@@ -1821,6 +1848,33 @@ void Stream::OnMoment(Channel& Ch, const Inputs& In, Moment M, const std::string
 		Chat.back().Text = "bye " + Detail + " kastGG";
 	}
 	MakeClip(Ch, In, M, Detail, Size);
+	// Tonight's moment log (update 2 §4.4): what Rerun keeps of the stream around a hand. The viewers, the hype it left,
+	// the face, the first few things chat said about it (the reaction, not the system's notices or a troll), and the
+	// clip's time when somebody clipped it: clips have no id, so a candidate links its clip by At. It reads the stream
+	// and draws nothing, so the stream goes exactly as it did without it. The session (SessionVideo.cpp) links each note
+	// to the hand that fired it.
+	{
+		MomentNote Note;
+		Note.Kind = M;
+		Note.World = In.World;
+		Note.Real = In.Real;
+		Note.Viewers = static_cast<int>(std::lround(Viewers));
+		Note.HypeAfter = Hype;
+		Note.Face = Face;
+		for (const ChatMsg& Line : Chat)
+		{
+			if (Line.Id >= FirstLine && Line.Kind == LineKind::Chat && !Line.Toxic && !Line.Spam && Note.Chat.size() < kast_detail::KastMomentLines)
+			{
+				Note.Chat.push_back(Line.Text);
+			}
+		}
+		Note.ClipAt = Tonight.Clips > ClipsBefore && !Ch.Clips.empty() && Ch.Clips.front().At == In.World ? In.World : -1.0;
+		Moments.push_back(Note);
+		if (Moments.size() > kast_detail::KastMomentNotes)
+		{
+			Moments.erase(Moments.begin(), Moments.begin() + static_cast<std::ptrdiff_t>(Moments.size() - kast_detail::KastMomentNotes));
+		}
+	}
 	// The big moments: superfans gift subs, and the network notices deep runs.
 	const bool Big = M == Moment::WonAllIn || M == Moment::InTheMoney || M == Moment::FinalTable || M == Moment::Win;
 	if (Big && Ch.Affiliate)

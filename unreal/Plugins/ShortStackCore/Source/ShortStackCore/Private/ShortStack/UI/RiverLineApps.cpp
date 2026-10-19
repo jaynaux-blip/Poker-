@@ -11,6 +11,7 @@
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/UI/BadgeArt.h"
+#include "ShortStack/UI/VideoArt.h"
 
 #include <algorithm>
 #include <cmath>
@@ -43,6 +44,7 @@ AppBrand BrandOf(RiverLine::App A)
 	case RiverLine::App::Kast: return {"Kast", 0xb07cff, 0x6d28d9};
 	case RiverLine::App::PennyDrop: return {"Penny Drop", 0xe23a4f, 0xa3122a};
 	case RiverLine::App::Mail: return {"Mail", 0x2f5d9e, 0x1f2a3a};
+	case RiverLine::App::Video: return {"Rerun", videoart::Marigold, videoart::Ink}; // update 2 §4.2: marigold on ink
 	default: return {"RiverLine", 0x27d3c3, 0x1a8fd8};
 	}
 }
@@ -74,6 +76,7 @@ Color KindColor(int Kind)
 	case life::LedgerBacking: return Hex(0xf2a93b);  // Lantern Row's lantern
 	case life::LedgerSponsors: return Hex(0x2f5d9e); // Mail's navy: the brands write there
 	case life::LedgerCoaching: return Hex(0x0891b2);
+	case life::LedgerVideo: return Hex(videoart::Marigold); // Rerun's payouts (update 2 §1.2)
 	default: return Hex(0xf2c14e);
 	}
 }
@@ -95,6 +98,8 @@ const char* KindName(int Kind)
 	case life::LedgerBacking: return "Backing";   // stakes, pieces, swaps and their shares
 	case life::LedgerSponsors: return "Sponsors"; // covers, stipends, cuts and bonuses
 	case life::LedgerCoaching: return "Coaching";
+	case life::LedgerVideo: return "Rerun";       // update 2 §1.2: "Rerun payout: April", one line a month at most
+	case life::LedgerSites: return "Poker sites"; // update 2 §1.2: a rival site's card and cashier fees (from G3)
 	default: return "Prizes";
 	}
 }
@@ -326,6 +331,12 @@ void RiverLine::TryActivity(const std::string& Id, double Now)
 
 void RiverLine::AppIcon(App A, float X, float Y, float Sz)
 {
+	if (A == App::Video)
+	{
+		// Rerun's own mark (§4.2): the play triangle in a counter-clockwise arrow, ink on its marigold square.
+		videoart::Logo(*C, {X, Y, Sz, Sz});
+		return;
+	}
 	const AppBrand B = BrandOf(A);
 	const Rect R{X, Y, Sz, Sz};
 	C->FillRoundRect(R, Sz * 0.26f, Paint::Linear({X, Y}, {X + Sz, Y + Sz}, Hex(B.Col), Hex(B.Col2)));
@@ -392,6 +403,7 @@ void RiverLine::AppIcon(App A, float X, float Y, float Sz)
 		C->FillRoundRect({Cx - Sz * 0.26f, Cy - Sz * 0.17f, Sz * 0.52f, Sz * 0.34f}, Sz * 0.04f, W);
 		C->StrokePolyline({{Cx - Sz * 0.24f, Cy - Sz * 0.14f}, {Cx, Cy + Sz * 0.04f}, {Cx + Sz * 0.24f, Cy - Sz * 0.14f}}, false, Hex(B.Col), Sz * 0.05f, true);
 		break;
+	case App::Video: break; // drawn above (videoart::Logo)
 	}
 }
 
@@ -432,7 +444,8 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 	C->FillRect(R, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x0c1422), Hex(0x060a12)));
 	C->FillRect({R.X, R.Y, R.W, 1.0f}, Rgba(255, 255, 255, 0.08f));
 	const life::Context Ctx = S.LifeContext();
-	const App Apps[8] = {App::RiverLine, App::ShiftLink, App::Burner, App::Bank, App::GearDrop, App::Kast, App::PennyDrop, App::Mail};
+	// Rerun, the ninth (update 2 §4.8, §5.11), after Mail; its dot reads Rerun's own record of what's been seen.
+	const App Apps[9] = {App::RiverLine, App::ShiftLink, App::Burner, App::Bank, App::GearDrop, App::Kast, App::PennyDrop, App::Mail, App::Video};
 	float X = R.X + 8.0f;
 	for (const App A : Apps)
 	{
@@ -528,6 +541,12 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 			// Unread mail: the envelope's own blue, brightened to read on the dark bar.
 			Dot = Hex(0x6fa8ff);
 		}
+		if (A == App::Video && AppShown != App::Video && rlvideo_detail::VideoDot(this, S))
+		{
+			// Three or more new highlights since the last visit, or a milestone on the bell not yet seen: Rerun's marigold
+			// (§4.1, §4.9). Nothing interrupts the table; the dot just waits.
+			Dot = Hex(videoart::Marigold);
+		}
 		if (Dot.A > 0.0f)
 		{
 			C->FillCircle(Btn.X + 29.0f, Btn.Y + 4.0f, 4.5f, Dot);
@@ -587,9 +606,11 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 		const int Waiting = S.TablesWaiting();
 		const int Tables = S.TableCount();
 		std::string Lane2 = Tables > 1 ? "Playing " + std::to_string(Tables) + " tables" : "Playing " + S.T->Spec.Name;
+		std::string Clock; // the clock's half, said only when the lane has room for it beside where
 		if (Waiting > 1)
 		{
-			Lane2 = "Your turn at " + std::to_string(Waiting) + " tables  \xC2\xB7  the clocks are running";
+			Lane2 = "Your turn at " + std::to_string(Waiting) + " tables";
+			Clock = "  \xC2\xB7  the clocks are running";
 		}
 		else if (Waiting == 1)
 		{
@@ -599,7 +620,13 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 				const TableGlance G = S.Glance(I);
 				Where = G.YourTurn ? G.Name : Where;
 			}
-			Lane2 = "Your turn at " + Where + "  \xC2\xB7  the clock is running";
+			Lane2 = "Your turn at " + Where;
+			Clock = "  \xC2\xB7  the clock is running";
+		}
+		// Update 2's ninth app (Rerun) took about 90 of the lane: whose turn it is never gets cut for the clock's words.
+		if (!Clock.empty() && UI.Measure(Lane2 + Clock, 13.0f, 700) <= Lane.W - 30.0f)
+		{
+			Lane2 += Clock;
 		}
 		UI.Text(Lane2, Lane.X + 22.0f, R.Y + R.H / 2.0f + 1.0f, Ts(13.0f, 700, Waiting > 0 ? pal::Red : Hex(0xb9c4d6), Align::Left, Baseline::Middle, false, Lane.W - 30.0f));
 	}
@@ -1826,7 +1853,8 @@ void RiverLine::BankApp(double Now)
 		Window = L.Ledger.size() >= LedgerKept ? "Your last " + std::to_string(LedgerKept) + " transactions, since " + When : "Everything since " + When;
 	}
 	UI.Text(Window, Flow.X + 32.0f, Flow.Y + 66.0f, Ts(12.5f, 600, Gray));
-	// In: 0 tournament cashes, 1 the Embercrest, 2 leaderboard prizes, 3 shifts, 4 cash work, 5 streaming, 6 sponsors
+	// In: 0 tournament cashes, 1 the Embercrest, 2 leaderboard prizes, 3 shifts, 4 cash work, 5 streaming and video (Kast,
+	// and Rerun's monthly payouts: kinds 6 and 13, update 2 §1.2, so the nine rows stay nine), 6 sponsors
 	// (covers, stipends and bonuses, less a cut or a clawback), 7 backers and buyers (a stake, the pieces sold), 8
 	// Northside's sales and refunds (the pawn's cash, a loan).
 	// Out: 0 buy-ins (less refunds), 1 rent, bills and fares, 2 food and deliveries, 3 gear, 4 fines and Marcus, 5 the
@@ -1875,7 +1903,7 @@ void RiverLine::BankApp(double Now)
 			{
 				Ins[4] += E.Amount;
 			}
-			else if (E.Kind == 6)
+			else if (E.Kind == 6 || E.Kind == life::LedgerVideo)
 			{
 				Ins[5] += E.Amount;
 			}
@@ -1911,7 +1939,7 @@ void RiverLine::BankApp(double Now)
 		uint32_t Col;
 	};
 	const FlowRow InRows[9] = {{"Tournament cashes", Ins[0], 0x27d3c3}, {"The Embercrest", Ins[1], EmberRgb}, {"Leaderboard prizes", Ins[2], 0xf2c14e}, {"Shifts", Ins[3], 0xff8a1f},
-		{"Cash work", Ins[4], 0x16a34a}, {"Streaming", Ins[5], 0x9b5cff}, {"Sponsors", Ins[6], 0x2f5d9e}, {"Backers & buyers", Ins[7], 0xf2a93b}, {"Sales & refunds", Ins[8], 0xec4899}};
+		{"Cash work", Ins[4], 0x16a34a}, {"Streaming & video", Ins[5], 0x9b5cff}, {"Sponsors", Ins[6], 0x2f5d9e}, {"Backers & buyers", Ins[7], 0xf2a93b}, {"Sales & refunds", Ins[8], 0xec4899}};
 	const FlowRow OutRows[8] = {{"Buy-ins & entry fees", Outs[0], 0x0d9488}, {"Rent, bills & fares", Outs[1], 0xef4d5a}, {"Food & deliveries", Outs[2], 0xe23b4e}, {"Gear", Outs[3], 0xff6b2c},
 		{"Fines & Marcus", Outs[4], 0x7c3aed}, {"Looks, fitness & food out", Outs[5], 0xdb2777}, {"Backers' shares & swaps", Outs[6], 0xd97706}, {"Coaching", Outs[7], 0x0891b2}};
 	Chips Top = 1;
@@ -2069,12 +2097,20 @@ void RiverLine::OutcomeCard(double Now)
 	const life::Outcome& O = S.LastOutcome;
 	const life::Activity* A = life::Find(O.ActivityId);
 	const life::Kind K = A ? A->Type : life::Kind::Sleep;
-	const Color Tone = O.Bad ? pal::Red : K == life::Kind::Job ? Hex(0xff8a1f) : K == life::Kind::Hustle ? Hex(0x2fd27a) : K == life::Kind::Ghost ? pal::Gold : Hex(0x8b5cf6);
+	// A video's edit (update 2 §4.5: Session::Publish's "video:" TimeSkip, settled by SettleEdit) wears Rerun's marigold.
+	const bool Edit = O.ActivityId.rfind("video:", 0) == 0;
+	const Color Tone = O.Bad ? pal::Red
+		: Edit               ? Hex(videoart::Marigold)
+		: K == life::Kind::Job    ? Hex(0xff8a1f)
+		: K == life::Kind::Hustle ? Hex(0x2fd27a)
+		: K == life::Kind::Ghost  ? pal::Gold
+								  : Hex(0x8b5cf6);
 	C->FillRect({0.0f, 0.0f, NetW, RiverLine::Height}, Rgba(2, 5, 10, 0.72f));
 	const Rect R{470.0f, 270.0f, 660.0f, 380.0f};
 	C->GlowRoundRect({R.X, R.Y + 10.0f, R.W, R.H}, 20.0f, NetA(Tone, 0.25f), 30.0f);
 	UI.RRect(R, 20.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Mix(Hex(0x111c2e), Tone, 0.14f), Hex(0x0d1729)), NetA(Tone, 0.6f), 1.5f);
-	NetSpaced(*C, A ? NetUpper(A->Place == "Bed" ? std::string(S.Evicted() ? "Dee's couch" : "Rest") : A->Place) : std::string(), R.X + 36.0f, R.Y + 46.0f, 12.0f, 900, Tone, 2.0f);
+	NetSpaced(*C, A ? NetUpper(A->Place == "Bed" ? std::string(S.Evicted() ? "Dee's couch" : "Rest") : A->Place) : Edit ? std::string("RERUN") : std::string(), R.X + 36.0f, R.Y + 46.0f, 12.0f, 900, Tone,
+		2.0f);
 	UI.Text(O.Title, R.X + 36.0f, R.Y + 92.0f, Ts(38.0f, 900, pal::Ink));
 	UI.Text(net::TimeLabel(O.Start) + "  \xE2\x86\x92  " + net::TimeLabel(O.End) + "  \xC2\xB7  " + net::Countdown(O.End - O.Start), R.X + 36.0f, R.Y + 120.0f, Ts(14.0f, 600, pal::Muted));
 	NetParagraph(*C, O.Body, R.X + 36.0f, R.Y + 160.0f, R.W - 72.0f, 16.0f, 500, Hex(0xc9d3e2), 23.0f, 4);

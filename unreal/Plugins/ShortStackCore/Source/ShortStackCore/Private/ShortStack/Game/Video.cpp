@@ -412,6 +412,21 @@ double EquityAt(const std::vector<Card>& Mine, const std::vector<std::vector<Car
 /** Views gained between T0 and T1 by the folded tails (their sums are as of C.SteppedTo). */
 void TailGain(const Channel& C, double T0, double T1, double Out[3])
 {
+	// Read back before the last step, the tails' closed form holds only once every folded video was up: from the oldest
+	// kept upload on (every folded video went up before it). A channel posting more than two a day folds videos younger
+	// than a month, and read back past their uploads the curves run backwards (e^(age/tau) of views that never happened).
+	// That stretch is left out: a little under for such a channel, never over. Forward reads (the steps, SubsAt) and every
+	// channel whose folded videos are older than the read are as they were, to the bit.
+	double Exact = C.SteppedTo;
+	for (const Video& V : C.Videos)
+	{
+		Exact = std::min(Exact, V.At);
+	}
+	T0 = std::max(T0, Exact);
+	if (T1 <= T0)
+	{
+		return;
+	}
 	for (int K = 0; K < 3; ++K)
 	{
 		const Shape S = ShapeOf(static_cast<Class>(K));

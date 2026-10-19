@@ -188,8 +188,10 @@ SHORTSTACKCORE_API const char* CategoryWord(Category C);
 SHORTSTACKCORE_API const char* SpotWord(Spot S);
 
 /**
- * Standing (§3.3), 0 to 5, from the public record: the live road (the Embercrest's record), the stream road (the
- * channel); tiers 4 and 5 by the live road open when their venues are playable, so only the stream reaches them now.
+ * Standing (§3.3), 0 to 5, from the public record, the best of its roads: the live road (the Embercrest's record), the
+ * stream road (the channel) and, from update 2 (SPEC §4.7), the creator road (Rerun's subscribers, its views in the
+ * last 30 days and Partner); tiers 4 and 5 by the live road open when their venues are playable, so only the stream
+ * and Rerun reach them now.
  * The conduct limits: a pickup in the last 90 days holds every brand to tier 1, and a restriction in the last 180 keeps
  * poker sites and training sites at 0. Never saved; computed every time. (Dee's road and the block road need the life:
  * TierOf.)

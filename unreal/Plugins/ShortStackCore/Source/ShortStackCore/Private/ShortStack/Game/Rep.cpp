@@ -5,9 +5,11 @@
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/World.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 
 // The public record (next_segment_spec §1.1). Owned by the lead.
@@ -31,6 +33,47 @@ constexpr int MarkWalked = 3;
 bool MarkedSince(const stake::Conduct& C, int Kind, double Since)
 {
 	return std::any_of(C.Marks.begin(), C.Marks.end(), [Kind, Since](const std::pair<double, int>& M) { return M.second == Kind && M.first >= Since; });
+}
+
+/** Rerun's month (update 2 §4.7: Views30). */
+constexpr double RepViewsDays = 30.0;
+
+/**
+ * The views Rerun's channel gained in the 30 days to World, in the channel's own closed forms: every kept video and every
+ * evergreen stub whole, and the folded tails from the oldest kept upload on. Every folded video went up before that one,
+ * so from there the tails' sums are exact. Before it they aren't: a channel posting more than two a day folds videos
+ * younger than a month, and a tail read back past their uploads runs their curves backwards (e^(age/tau) of views that
+ * never happened). That stretch isn't counted, so the number is always views that happened: exact for any channel whose
+ * folded videos are all older than the month, a little under for a heavy uploader, never over (a sponsor's letter
+ * quotes it). An empty channel is 0.
+ */
+double RepViews30(const video::Channel& V, double World)
+{
+	const double From = World - RepViewsDays * DayMinutes;
+	double Sum = 0.0;
+	double Oldest = V.SteppedTo;
+	for (const video::Video& X : V.Videos)
+	{
+		Sum += std::max(0.0, video::Views(X, World) - video::Views(X, From));
+		Oldest = std::min(Oldest, X.At);
+	}
+	if (!V.Stubs.empty())
+	{
+		video::Channel Stubs;
+		Stubs.Stubs = V.Stubs;
+		Sum += std::max(0.0, video::TotalViews(Stubs, World) - video::TotalViews(Stubs, From));
+	}
+	video::Channel Tails;
+	Tails.Tails = V.Tails;
+	Tails.SteppedTo = V.SteppedTo;
+	Sum += std::max(0.0, video::TotalViews(Tails, World) - video::TotalViews(Tails, std::max(From, Oldest)));
+	return Sum;
+}
+
+/** A count of people for the record: whole ones, never negative, never past an int. */
+int RepWhole(double Count)
+{
+	return Count > 0.0 ? static_cast<int>(std::min(static_cast<double>(INT_MAX), std::floor(Count))) : 0;
 }
 } // namespace rep_detail
 
@@ -129,6 +172,14 @@ Public Of(const life::State& L, const kast::Channel& C, const world::World* W, d
 	}
 	P.Avg30 = Minutes > 0.0 ? ViewerMinutes / Minutes : 0.0;
 
+	// Reach on Rerun (update 2 §4.7): the channel as anyone could see it tonight, in closed form (its saved numbers are as
+	// of the last day stepped). From the life record alone, so the card room's SaveData-only build gets the same. An old
+	// save with no videos reads 0, 0 and no Partner, and its renown is what it was.
+	const video::Channel& Rerun = L.Video;
+	P.VideoSubs = RepWhole(video::SubsAt(Rerun, World));
+	P.Views30 = RepWhole(RepViews30(Rerun, World));
+	P.VideoPartner = Rerun.PartnerAt >= 0.0 && Rerun.PartnerAt <= World;
+
 	// Conduct the world can know: the paper (a pickup, 90 days), the site (a restriction, 180), word of mouth (365).
 	for (const life::LedgerEntry& X : L.Ledger)
 	{
@@ -147,8 +198,11 @@ Public Of(const life::State& L, const kast::Channel& C, const world::World* W, d
 
 double RenownOf(const Public& P)
 {
-	// Town.cpp's formula, as it was: followers on a log scale, superfans, live cashes, titles on the wall, trophies.
-	const double Followers = std::min(1.0, std::log10(1.0 + static_cast<double>(std::max(0, P.Followers))) / 5.0);
+	// Town.cpp's formula: followers on a log scale, superfans, live cashes, titles on the wall, trophies. Update 2 (§4.7):
+	// Rerun's subscribers count in the follower term at half a Kast follower each (they know the face, not the voice), so
+	// the street and the backers follow video fame too. With no subscribers the term is the old one to the bit.
+	const double Reach = static_cast<double>(std::max(0, P.Followers)) + static_cast<double>(std::max(0, P.VideoSubs)) / 2.0;
+	const double Followers = std::min(1.0, std::log10(1.0 + Reach) / 5.0);
 	const double Fans = std::min(1.0, static_cast<double>(P.Superfans) / 40.0);
 	const double Cashes = std::min(1.0, static_cast<double>(P.LiveCashes) / 15.0);
 	const double Wins = std::min(1.0, static_cast<double>(P.Titles) / 4.0);

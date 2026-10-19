@@ -746,21 +746,61 @@ const char* SpotWord(Spot S)
 
 namespace sponsor_standing_detail
 {
-/** The live road and the stream road, before the conduct limits. */
-int Roads(const rep::Public& P)
+/** The stream road: Kast's followers and nightly average, and Partner. */
+int StreamRoad(const rep::Public& P)
 {
 	int T = 0;
-	// The stream road.
 	T = P.Followers >= 150 ? 1 : T;
 	T = P.Followers >= 500 && P.Avg30 >= 20.0 ? 2 : T;
 	T = P.Partner ? std::max(T, 3) : T;
 	T = P.Followers >= 5000 && P.Avg30 >= 150.0 ? std::max(T, 4) : T;
 	T = P.Followers >= 25000 && P.Avg30 >= 600.0 ? 5 : T;
-	// The live road (the Embercrest's; tiers 4 and 5 open when their venues are playable).
+	return T;
+}
+
+/** The live road (the Embercrest's; tiers 4 and 5 open when their venues are playable). */
+int LiveRoad(const rep::Public& P)
+{
 	int Live = P.LiveEvents >= 3 ? 1 : 0;
 	Live = (P.Embercrest60 >= 8 && P.Cashes60 >= 2) || (P.BestEmbercrestPlace > 0 && P.BestEmbercrestPlace <= 6) ? 2 : Live;
 	Live = P.Titles >= 1 || P.Cashes90 >= 5 ? 3 : Live;
-	return std::max(T, Live);
+	return Live;
+}
+
+/**
+ * The creator road (update 2 SPEC §4.7 item 5): Rerun's subscribers, its views in the last 30 days and Partner, from
+ * rep::Public (rep::Of fills them from life::State::Video; an old save has no channel, so the road is empty and every
+ * old book behaves as it did). The real platforms' partner gate is 1,000 subscribers, so the first tier starts there;
+ * the poker niche saturates past about 20,000 (§4.6), so tiers 4 and 5 are years of steady work or a viral run.
+ */
+int CreatorRoad(const rep::Public& P)
+{
+	int T = P.VideoSubs >= 1000 ? 1 : 0;
+	T = P.VideoSubs >= 5000 && P.Views30 >= 20000 ? std::max(T, 2) : T;
+	T = P.VideoPartner && P.VideoSubs >= 10000 ? std::max(T, 3) : T;
+	T = P.VideoSubs >= 50000 && P.Views30 >= 150000 ? std::max(T, 4) : T;
+	T = P.VideoSubs >= 250000 ? 5 : T;
+	return T;
+}
+
+/** The stream road, the live road and the creator road, before the conduct limits: standing takes the best of them. */
+int Roads(const rep::Public& P)
+{
+	return std::max({StreamRoad(P), LiveRoad(P), CreatorRoad(P)});
+}
+
+/** The creator road is what lifted standing (above both the others): the offer letter says so (why:rerun). */
+bool CreatorLeads(const rep::Public& P)
+{
+	const int Creator = CreatorRoad(P);
+	return Creator > 0 && Creator > std::max(StreamRoad(P), LiveRoad(P));
+}
+
+/** The why:rerun line for what the creator road's tier stands on: Partner (3), the month's views (2, 4), or subscribers. */
+std::string CreatorWhyKey(const rep::Public& P)
+{
+	const int Creator = CreatorRoad(P);
+	return Creator == 3 ? "why:rerun:partner" : Creator == 2 || Creator == 4 ? "why:rerun:views" : "why:rerun";
 }
 
 int Limited(const rep::Public& P, const Brand* B, int T)
@@ -1143,7 +1183,12 @@ std::string WhyLine(const Brand& Br, const life::State& L, const rep::Public& P,
 	V["Count"] = std::to_string(P.Embercrest60);
 	V["Cashes"] = std::to_string(P.Cashes60);
 	V["Followers"] = Grouped(P.Followers);
-	std::string Key = "why:tier";
+	V["Subs"] = Grouped(P.VideoSubs);
+	V["Views"] = Grouped(P.Views30);
+	// The creator road (update 2 SPEC §4.7): where standing is what opened the door and Rerun is what lifted it, the
+	// letter says Rerun, not the room or a Kast count the record doesn't have.
+	const bool Creator = sponsor_standing_detail::CreatorLeads(P);
+	std::string Key = Creator ? sponsor_standing_detail::CreatorWhyKey(P) : std::string("why:tier");
 	std::string LastTitle;
 	for (const life::LiveEntry& E : L.LiveEntries)
 	{
@@ -1165,6 +1210,8 @@ std::string WhyLine(const Brand& Br, const life::State& L, const rep::Public& P,
 	}
 	else if (Br.Id == "halo")
 	{
+		// Below 500 followers Halo's gate is the webcam, which MakeOffer can't see, so that letter's reason is MakeOffer's
+		// own (the channel's numbers when Rerun made the face).
 		Key = P.Followers >= 500 || !OwnsWebcam(Gear) ? "why:channel" : "why:webcam";
 	}
 	else if (Br.Id == "stacked")
@@ -1173,7 +1220,9 @@ std::string WhyLine(const Brand& Br, const life::State& L, const rep::Public& P,
 	}
 	else if (Br.Id == "rangewise" || Br.Id == "riverline")
 	{
-		Key = P.Partner ? "why:partner" : !LastTitle.empty() ? "why:title" : "why:tier";
+		// Team RiverLine short of its stream gate opened on standing (on the circuit): when Rerun lifted it, Rerun says why.
+		const bool ByRerun = Br.Id == "riverline" && Creator && !(P.Partner && P.Followers >= 2500 && P.Avg30 >= 75.0);
+		Key = ByRerun ? Key : P.Partner ? "why:partner" : !LastTitle.empty() ? "why:title" : "why:tier";
 	}
 	else if (!Br.Kast.empty())
 	{
@@ -1305,9 +1354,18 @@ std::string MakeOffer(Book& B, life::State& L, const rep::Public& P, const std::
 	if (Mails(*Br) && !Br->Pitch.empty())
 	{
 		const size_t Variant = Hash(Seed + ":sponsor:" + BrandId + ":" + std::to_string(net::DayOf(World))) % Br->Pitch.size();
-		// Why they're calling now; an offer put on the table past its gate (ss.Sponsor.Offer) says only that the room knows
-		// the name, never a number the record doesn't have.
-		const std::string Reason = Why.empty() ? WhyLine(*Br, L, P, nullptr) : Fill(Text(sponsor_copy::Spoken, "why:tier"), {});
+		// Why they're calling now; an offer put on the table past its gate (ss.Sponsor.Offer, or a gate this call can't see,
+		// like Halo's webcam) says only that the room knows the name, or, when Rerun is what lifted standing, the channel's
+		// own numbers: never a number the record doesn't have.
+		std::string Reason = Fill(Text(sponsor_copy::Spoken, "why:tier"), {});
+		if (Why.empty())
+		{
+			Reason = WhyLine(*Br, L, P, nullptr);
+		}
+		else if (sponsor_standing_detail::CreatorLeads(P))
+		{
+			Reason = Fill(Text(sponsor_copy::Spoken, sponsor_standing_detail::CreatorWhyKey(P)), {{"Subs", Grouped(P.VideoSubs)}, {"Views", Grouped(P.Views30)}});
+		}
 		const std::string Body = Fill(Text(sponsor_copy::Body, Br->Pitch[Variant]), {{"Why", Reason}});
 		Post(L, World, B.Contracts.back(), LetterOffer, "offer", Body);
 	}

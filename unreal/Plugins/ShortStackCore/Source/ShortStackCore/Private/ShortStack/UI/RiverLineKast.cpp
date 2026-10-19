@@ -12,6 +12,7 @@
 #include "ShortStack/UI/BadgeArt.h"
 #include "ShortStack/UI/SponsorArt.h"
 #include "ShortStack/UI/StreamArt.h"
+#include "ShortStack/UI/VideoArt.h"
 
 #include <algorithm>
 #include <cmath>
@@ -21,6 +22,13 @@ namespace ss
 namespace ui
 {
 using namespace rlnet_detail;
+
+namespace rlvideo_detail
+{
+// Rerun's (RiverLineVideo.cpp, ui-video's): the stream summary's Cut highlights (update 2 §4.8).
+int VideoCutCount(const Session& S, double From, double To);
+void VideoOpenTonight(RiverLine& RL, double From, double To, double Now);
+} // namespace rlvideo_detail
 
 namespace rlkast_detail
 {
@@ -2014,11 +2022,25 @@ void RiverLine::StreamSummary(double Now)
 	UI.Text("Level " + std::to_string(Lv), R.X + 40.0f, Ly + 4.0f, Ts(15.0f, 900, KGold));
 	C->FillRoundRect({R.X + 120.0f, Ly - 6.0f, 240.0f, 8.0f}, 4.0f, KPanel2);
 	C->FillRoundRect({R.X + 120.0f, Ly - 6.0f, std::max(8.0f, 240.0f * P), 8.0f}, 4.0f, KGold);
+	// Rerun (update 2 §4.8): the moments this stream made, cut in Studio with the list filtered to tonight.
+	const double CutFrom = S.Stream.StartWorld - 1.0;
+	const double CutTo = S.Stream.StartWorld + L.Minutes + 1.0;
+	const int Cut = rlvideo_detail::VideoCutCount(S, CutFrom, CutTo);
+	const std::string CutLabel = "Cut highlights (" + std::to_string(Cut) + ")";
+	const float CutW = UI.Measure(CutLabel, 17.0f, 800) + 44.0f;
+	const float CutX = R.X + R.W - 200.0f - 16.0f - CutW;
 	const std::vector<kast::StageSpec>& Stg = kast::Stages();
 	const int Next = Ch.Streams > 0 ? Ch.Stage + 1 : 0;
 	if (Next < static_cast<int>(Stg.size()))
 	{
-		UI.Text("Next stage: " + Stg[static_cast<size_t>(Next)].Name, R.X + 40.0f, Ly + 30.0f, Ts(13.0f, 700, KMuted, Align::Left, Baseline::Alphabetic, false, R.W - 300.0f));
+		const float NextW = Cut > 0 ? CutX - 16.0f - (R.X + 40.0f) : R.W - 300.0f;
+		UI.Text("Next stage: " + Stg[static_cast<size_t>(Next)].Name, R.X + 40.0f, Ly + 30.0f, Ts(13.0f, 700, KMuted, Align::Left, Baseline::Alphabetic, false, NextW));
+	}
+	if (Cut > 0 && AppButton("kastcut", {CutX, R.Y + R.H - 70.0f, CutW, 46.0f}, CutLabel, Hex(ui::videoart::Marigold), Hex(ui::videoart::Ink), !Previewing))
+	{
+		S.StreamCard = false;
+		rlvideo_detail::VideoOpenTonight(*this, CutFrom, CutTo, Now);
+		return;
 	}
 	if (AppButton("kastdone", {R.X + R.W - 200.0f, R.Y + R.H - 70.0f, 160.0f, 46.0f}, "Done", KViolet, Hex(0xffffff), true))
 	{

@@ -49,7 +49,9 @@ void Loud(Canvas& C, const std::string& Text, float X, float Y, float Size, cons
 	const float W = C.Measure(Text, Size, 900);
 	if (MaxW > 0.0f && W > MaxW)
 	{
-		S.Size = std::max(10.0f, Size * MaxW / W);
+		// A hair under the width: the size scaled to exactly MaxW measures MaxW give or take a float's rounding, and a hair
+		// over it Canvas::Text cuts the word with an ellipsis ("BIG P..." on a Channel tile's Reaction frame).
+		S.Size = std::max(10.0f, Size * MaxW / W * 0.98f);
 	}
 	const float Edge = std::max(1.5f, S.Size * 0.06f);
 	S.Col = Hex(0x000000, 0.75f);
@@ -314,11 +316,13 @@ void Thumbnail(Canvas& C, Rect R, const video::Thumb& T, const hero::Character* 
 		Loud(C, T.BigText, R.X + R.W * 0.79f, R.Y + R.H * 0.3f, 74.0f * U, Accent, Align::Center, R.W * 0.4f);
 		if (Mine.size() >= 2)
 		{
-			CardRow(C, Mine, R.X + R.W * 0.62f, R.Y + R.H * 0.52f, 70.0f * U, 98.0f * U, 8.0f * U, -1);
+			// With the opponent's shown cards beside them, both pairs shrink so the two fit inside the frame's right edge.
+			const bool Both = Theirs.size() >= 2;
+			CardRow(C, Mine, R.X + R.W * 0.62f, R.Y + R.H * 0.52f, (Both ? 60.0f : 70.0f) * U, (Both ? 84.0f : 98.0f) * U, (Both ? 6.0f : 8.0f) * U, -1);
 		}
 		if (Theirs.size() >= 2)
 		{
-			CardRow(C, Theirs, R.X + R.W * 0.62f + 160.0f * U, R.Y + R.H * 0.6f, 50.0f * U, 70.0f * U, 5.0f * U, -1);
+			CardRow(C, Theirs, R.X + R.W - 110.0f * U, R.Y + R.H * 0.6f, 46.0f * U, 64.0f * U, 4.0f * U, -1);
 		}
 		break;
 	}

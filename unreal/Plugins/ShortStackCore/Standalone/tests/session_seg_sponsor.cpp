@@ -336,6 +336,122 @@ void KastTrap()
 	Expect(H.Last.Serialize().find("kast\tdeal") == std::string::npos && H.Last.Serialize().find("sponsor\tdeal") != std::string::npos, "kast trap: the save keeps the deal in the book");
 	(void)Now;
 }
+
+std::string Fixture(const char* Name)
+{
+	std::string Text;
+	FILE* F = std::fopen((std::string(SS_TESTS_DIR) + "/fixtures/" + Name).c_str(), "rb");
+	if (F)
+	{
+		char Buf[65536];
+		size_t N = 0;
+		while ((N = std::fread(Buf, 1, sizeof(Buf), F)) > 0)
+		{
+			Text.append(Buf, N);
+		}
+		std::fclose(F);
+	}
+	Text.erase(std::remove(Text.begin(), Text.end(), '\r'), Text.end());
+	return Text;
+}
+
+/** The sponsor lines of a save, in order. */
+std::string SponsorLines(const std::string& Save)
+{
+	std::string Out;
+	size_t I = 0;
+	while (I < Save.size())
+	{
+		const size_t E = Save.find('\n', I);
+		const std::string Line = Save.substr(I, E == std::string::npos ? std::string::npos : E - I);
+		Out += Line.rfind("sponsor\t", 0) == 0 ? Line + "\n" : std::string();
+		I = E == std::string::npos ? Save.size() : E + 1;
+	}
+	return Out;
+}
+
+/**
+ * Update 2 (SPEC §4.7, U10): an old sponsored streamer's save has no Rerun channel, so the creator road is empty: the
+ * session's record has no video, standing and the book read as they did, the save round-trips byte for byte, a month of
+ * the calendar writes no letter that mentions Rerun, and Describe shows the road at 0.
+ */
+void OldStreamer()
+{
+	const std::string Text = Fixture("pre_update2_sponsored_streamer.ssave");
+	ss::SaveData D;
+	Expect(ss::SaveData::Parse(Text, D), "old streamer: the save parses");
+	const std::string Book = SponsorLines(D.Serialize());
+	Expect(!Book.empty() && Book == SponsorLines(Text), "old streamer: the sponsor book reads back as it was written");
+	Hooks H;
+	ss::Session S(H, "sponsor-old-streamer", &D);
+	const ss::rep::Public P = S.Record();
+	Expect(P.VideoSubs == 0 && P.Views30 == 0 && !P.VideoPartner && S.Life.Video.Videos.empty(), "old streamer: no channel, no video in the record");
+	const std::string Said = S.DebugSponsor("describe");
+	Expect(Said.find(", Rerun 0 (0 subscribers, 0 views in 30 days)") != std::string::npos, "old streamer: Describe shows the creator road at 0");
+	S.Save();
+	ss::SaveData Again;
+	Expect(ss::SaveData::Parse(H.Last.Serialize(), Again) && Again.Serialize() == H.Last.Serialize() && SponsorLines(H.Last.Serialize()) == SponsorLines(D.Serialize()),
+		"old streamer: saved at once, the book is the same lines, and the save round-trips");
+	S.BankrollCents = std::max<Chips>(S.BankrollCents, 600000); // the rent's collected at its deadline: nothing here is about the rent
+	double Now = 0.0;
+	for (int K = 1; K <= 4; ++K)
+	{
+		Now = Jump(S, Now, S.WorldMinutes() + 7.0 * Day);
+	}
+	Expect(std::none_of(S.Life.Inbox.begin(), S.Life.Inbox.end(), [](const life::Letter& M) { return M.Body.find("Rerun") != std::string::npos; }),
+		"old streamer: a month of the calendar, and no letter says Rerun");
+	S.Save();
+	ss::SaveData Later;
+	Expect(ss::SaveData::Parse(H.Last.Serialize(), Later) && Later.Serialize() == H.Last.Serialize(), "old streamer: a month on, the save still round-trips");
+}
+
+/**
+ * The creator road end to end (SPEC §4.7 items 4 and 5): a channel granted through ss.Video.Grant's dev path reaches the
+ * public record (rep::Of, core-econ's half), standing takes it, Describe names the road, and Team RiverLine's weekly look
+ * brings an offer whose letter says it's the channel. The record's fields come from core-econ's Rep.cpp.
+ */
+void Creator()
+{
+	Hooks H;
+	ss::Session S(H, "sponsor-creator");
+	S.BankrollCents = 600000;
+	double Now = Jump(S, 0.0, 20.0 * Day + 9.0 * 60.0);
+	Expect(S.SponsorTier() == 0, "creator: nobody calls a nobody");
+	S.DebugVideo("grant 50000 4000 300000");
+	// A day at a time: the calendar reads the record as of each step's end, and the views come in over the month.
+	for (int K = 0; K < 10; ++K)
+	{
+		Now = Jump(S, Now, S.WorldMinutes() + Day);
+	}
+	const ss::rep::Public P = S.Record();
+	std::printf("  creator: day %d, %d subscribers, %d views in 30 days, Partner %d, standing %d\n", ss::net::DayOf(S.WorldMinutes()), P.VideoSubs, P.Views30, P.VideoPartner ? 1 : 0,
+		S.SponsorTier());
+	Expect(P.VideoSubs >= 50000 && P.Views30 >= 150000, "creator: the channel is in the public record (rep::Of's video fields)");
+	Expect(S.SponsorTier() == 4 && std::string(sponsor::StandingWords(S.SponsorTier())) == "On the circuit", "creator: on the circuit by the creator road");
+	const std::string Said = S.DebugSponsor("describe");
+	Expect(Said.find("roads: stream 0, live 0, Rerun 4 (") != std::string::npos && Said.find(" views in 30 days, Partner)\n") != std::string::npos,
+		"creator: Describe shows the road standing stands on, and Partner");
+	// A day at a time, so the offer is still open when its letter turns up (an offer stands seven days).
+	std::string Letter;
+	for (int K = 0; K <= 21 && Letter.empty(); ++K)
+	{
+		Now = K == 0 ? Now : Jump(S, Now, S.WorldMinutes() + Day);
+		for (const life::Letter& M : S.Life.Inbox)
+		{
+			Letter = M.Kind == sponsor::LetterOffer && M.Thread.rfind("riverline@", 0) == 0 ? M.Body : Letter;
+		}
+	}
+	Expect(Letter.rfind("Your Rerun videos pulled ", 0) == 0 || Letter.rfind("Your Rerun channel's up to ", 0) == 0,
+		("creator: Team RiverLine's letter says it's the channel: " + Letter.substr(0, 90)).c_str());
+	// The deal signs like any other, and the save keeps the book and the channel.
+	const std::string Id = sponsor::OpenOfferFor(S.Life.Sponsors, "riverline", S.WorldMinutes());
+	const std::string Signed = Id.empty() ? std::string("no open offer") : S.SignDeal(Id);
+	Expect(Signed.empty() && S.TeamRiverLine(), ("creator: signed, Team RiverLine" + (Signed.empty() ? std::string() : ": " + Signed)).c_str());
+	S.Save();
+	ss::SaveData Again;
+	Expect(ss::SaveData::Parse(H.Last.Serialize(), Again) && Again.Serialize() == H.Last.Serialize() && Again.Life.Video.Subs >= 50000.0,
+		"creator: the save round-trips with the deal and the channel");
+}
 } // namespace sponsor_seg
 
 void SegSponsor()
@@ -346,5 +462,7 @@ void SegSponsor()
 	sponsor_seg::Clawback();
 	sponsor_seg::Membership();
 	sponsor_seg::KastTrap();
+	sponsor_seg::OldStreamer();
+	sponsor_seg::Creator();
 }
 } // namespace session_test
