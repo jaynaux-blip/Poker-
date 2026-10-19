@@ -1189,6 +1189,8 @@ void FAutoHost::OnHeroBusted()
 	if (Plan.M != ss::autoplay::Mode::Off || bSkipPending)
 	{
 		TurnOff(true);
+		// Said under the felt's own note (it holds, with its choices): FillHud shows the line there while it's fresh.
+		Note(TEXT("AUTOPLAY OFF"), TEXT("You're out of chips. The reload's your call, not your plan's."));
 		UE_LOG(LogEmbercrest, Log, TEXT("Autoplay: felted, the plan stops; the reload is the player's"));
 	}
 }
@@ -1424,6 +1426,13 @@ void FAutoHost::FillHud(ss::ui::TableHudInfo& Out, const FBackRoomPrompt& Prompt
 		Out.NoteSub = ss::autoplay::WasPlayingLine(Plan.S);
 		Out.NoteAt = Now - 1.0;
 		Out.NoteHolds = true;
+		return;
+	}
+	// Felted: the night's note holds with its choices, so a fresh note of the plan's (its stop, or K pressed there) speaks in
+	// the line under it for a moment instead of the bankroll's; otherwise the key would seem dead.
+	if (Mode.Phase == EBackRoomPhase::Busted && Out.NoteHolds && Now - NoteAt < BackRoomAutoDetail::AutoNoteSeconds * 1.5)
+	{
+		Out.NoteSub = BackRoomAutoDetail::AutoUtf8(NoteBody);
 		return;
 	}
 	// The plan's own note a moment (a toggle, a speed, a skip's end, the stand), unless the night's own is newer or holds.
