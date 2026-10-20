@@ -3,7 +3,7 @@
 // ids and seeds that never meet RiverLine's, and net::SiteOf reads the site off any of them. Rivals have no regulars and
 // no past: their people and results come from the living world, from the day their lobby opened.
 //
-// Ignite Poker: 18 dailies from $1.10 to $22 (Flip & Go every hour, the Flip & Go Bounty every two, the $5.50 Spark Jackpot
+// Ignite Poker: 18 dailies from $1.10 to $22 (Flip & Run every hour, the Flip & Run Bounty every two, the $5.50 Spark Jackpot
 // at 8 PM), the $11 Sunday Blaze, and Wildfire in February and August (24 events each), about 800 templates through 2040 with
 // its launch week. RunItTwice: 22 dailies from $3.30 to $215, three Sunday majors (the $22 Sunday Grind, the $109 Sunday 100K,
 // the $530 High Bridge), the RunItTwice Open in April and November (40 events; Nov 13-29 in 2026) and the Ironworks PKO series
@@ -128,13 +128,14 @@ void NetSitesShape(EventTemplate& T, const char* Speed)
 const int NetSitesEvery = 0x7f;
 const int NetSitesSunday = 1 << 6;
 
-// Ignite: bright, soft, loud. Flips around the clock, a jackpot at night, a blaze on Sundays.
+// Ignite: bright, soft, loud. Flips around the clock, a jackpot at night, a blaze on Sundays. ("Flip & Run", never the real
+// format name the internal ids "flip-go" come from: the ids stay, as saves and tickets key on them.)
 const NetSitesDaily IgniteDailies[] = {
-	{"flip-go", "Flip & Go", 1.10, Format::Flip, "Hyper", 60, 0, 60, NetSitesAt(23, 0), NetSitesEvery, false, false, 2000, 8,
+	{"flip-go", "Flip & Run", 1.10, Format::Flip, "Hyper", 60, 0, 60, NetSitesAt(23, 0), NetSitesEvery, false, false, 2000, 8,
 		"Start short, flip fast, play poker with whoever's left. Every hour, on the hour."},
-	{"flip-go-bounty", "Flip & Go Bounty", 3.30, Format::Bounty, "Hyper", 45, NetSitesAt(0, 30), 120, NetSitesAt(22, 30), NetSitesEvery, false, false, 2000, 8,
+	{"flip-go-bounty", "Flip & Run Bounty", 3.30, Format::Bounty, "Hyper", 45, NetSitesAt(0, 30), 120, NetSitesAt(22, 30), NetSitesEvery, false, false, 2000, 8,
 		"The short-stack flip with a price on every head. Every two hours."},
-	{"two-am-twister", "2 AM Twister", 1.10, Format::Freezeout, "Hyper", 80, NetSitesAt(2, 0), 0, 1439, NetSitesEvery, false, false, 0, 0, ""},
+	{"two-am-afterburner", "2 AM Afterburner", 1.10, Format::Freezeout, "Hyper", 80, NetSitesAt(2, 0), 0, 1439, NetSitesEvery, false, false, 0, 0, ""},
 	{"wake-up-call", "Wake-Up Call", 1.10, Format::Freezeout, "Turbo", 70, NetSitesAt(7, 0), 0, 1439, NetSitesEvery, false, false, 0, 0, ""},
 	{"coffee-crash", "Coffee Crash", 2.20, Format::ReEntry, "Turbo", 90, NetSitesAt(9, 0), 0, 1439, NetSitesEvery, true, false, 0, 0, ""},
 	{"lunch-break-pko", "Lunch Break PKO", 3.30, Format::Bounty, "Turbo", 110, NetSitesAt(12, 0), 0, 1439, NetSitesEvery, true, false, 0, 0, ""},

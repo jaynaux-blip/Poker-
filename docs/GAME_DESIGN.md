@@ -37,12 +37,13 @@ Progress comes in two deliberately separate forms:
 - The bankroll figures are guidance, not hard gates. You can buy into anything you can afford. Dee, your mentor, pushes bankroll discipline (about 1 to 2% of your roll per MTT buy-in), and ignoring it is the classic way to go broke.
 - **Satellites connect the tiers.** The "$11 satellite to the Main Event" dream is playable end to end. Online step satellites win tickets to bigger satellites, and those lead to a live seat package.
 - **Going broke doesn't end the game.** You drop back a tier and choose how to recover: take a stake from a backer (with makeup), grind the back-room cash game or sell action.
+- **Other sites come later.** In Act I RiverLine is the only site you can play. Once two rents are paid, Ignite Poker and RunItTwice can invite you, each at its own door (§5).
 
 ## 4. The hub: your apartment
 
 The whole online career is played from a first-person desk. The apartment is the hub, the menu and the most important graphics showcase.
 
-- **Computer:** runs the RiverLine poker client (tournament lobby and tables), study tools, a poker forum, the staking marketplace, the GearDrop store, the Kast streaming studio and the Rerun video channel. All UI is rendered on the in-world monitors, with no floating menus.
+- **Computer:** runs the RiverLine poker client (tournament lobby and tables; the rival sites, Ignite Poker and RunItTwice, join it once they invite you), study tools, a poker forum, the staking marketplace, the GearDrop store, the Kast streaming studio and the Rerun video channel. All UI is rendered on the in-world monitors, with no floating menus.
 - **Phone:** messages from Dee, backers, friends and the rival, plus tournament alerts, your bank balance and rent reminders.
 - **Wall calendar:** the tournament schedule and live series dates.
 - **Bed:** sleeping ends the day and restores energy.
@@ -64,7 +65,7 @@ The whole online career is played from a first-person desk. The apartment is the
 
 **The network (built).** RiverLine runs like a big real site, all day, every day. It is simulated from fixed seeds and the world clock, so it is the same on every run and moves on as the night does.
 
-- **Schedule.** About 270 recurring events: dailies across the stakes ($0.25 hypers to a $525 High Roller), PKOs, mystery bounties, flip & gos, six-max, Omaha, deepstacks, step satellites, and weekly majors (Monday Madness, Thursday Heater, the $1,050 RiverLine Millions with $3M guaranteed, the $215 Sunday Showdown with $1M guaranteed). Every event has a registration curve, late registration, a field that shrinks, a final table and an overlay when the guarantee isn't met.
+- **Schedule.** About 270 recurring events: dailies across the stakes ($0.25 hypers to a $525 High Roller), PKOs, mystery bounties, flip & runs, six-max, Omaha, deepstacks, step satellites, and weekly majors (Monday Madness, Thursday Heater, the $1,050 RiverLine Millions with $3M guaranteed, the $215 Sunday Showdown with $1M guaranteed). Every event has a registration curve, late registration, a field that shrinks, a final table and an overlay when the guarantee isn't met.
 - **Series.** Micro Madness (Oct 1 to 14: 70 events, $5M guaranteed, an $11 Main Event for $1M) is running on Night One. RCOP 2026 (Oct 18 to Nov 8: 154 events, $100M guaranteed, a $5,250 Main Event with $25M guaranteed) is announced, with a step-satellite ladder from $2.20. Summer Slam is history.
 - **The series calendar (built).** After RCOP 2026, RiverLine runs nine series a year, every year through 2040, starting with Holiday Heist in December 2026. Each year:
 
@@ -138,7 +139,7 @@ The whole online career is played from a first-person desk. The apartment is the
 - **Players.** 1,600 named regulars from 28 countries, with skill, volume, stakes, lifetime records and weekly form, including Team RiverLine pros and the rival, gh0stfold. Events the player isn't in are resolved statistically: the regulars who make each final table are drawn by skill, volume and stakes.
 - **Screen names.** Handles read like the ones people really pick: slang compounds ("VelvetRiver", "lazy_owl"), real names in each country's style ("kenji.k", "pablo_ortega", "BramvdBerg"), poker words in the players' own languages ("Kartenhai", "ElTiburon", "ReiDoRio"), grind jokes ("OneMoreTable", "LandlordHatesMe") and the odd gamer tag ("n00bflop", "BlindsTTV"). High-stakes pros favor understated names ("YMorozov", "mbouchard"). Table fields are named the same way and seeded with real regulars from the right stakes (about 3% of the field, 4 to 40 players), so the names on the leaderboards turn up at your tables.
 - **Avatars.** Every account has a profile picture: one of 35 vector icons (sharks, owls, foxes, wolves, crowns, rockets, robots, pizza, eight balls and more) on a colored disc. Names pick fitting icons in any language: "ElTiburon" and "C0ldSh4rk" get sharks, "CoolerKing" a crown, "CoffeeAndCards" a mug. Everyone else draws one from the set by name. Frames mark status: a chip edge or colored ring for flair, gold with a star for Team RiverLine, neon for you and the rival, whose ghost no one else may wear. Seats show the player's country flag on the avatar.
-- **Leaderboards.** The Night Shift (tonight's micro-stakes race, $1,000 to the top 20), Player of the Year, the all-time Money List, Titles, Final Tables and the running series. Rows show rank movement and eight-week form. The player's own rank is estimated across the whole 412,000-player network.
+- **Leaderboards.** The Night Shift (tonight's micro-stakes race, $1,000 to the top 20), Player of the Year, the all-time Money List, Titles, Final Tables and the running series. Rows show rank movement and eight-week form. The player's own rank is estimated across the whole 412,000-player network. They count RiverLine results only; Ignite and RunItTwice keep their own boards (below).
 - **News.** Big wins, series updates, schedule changes and records, plus the player's own results ("grinder_3c wins MM #26").
 - **Career.** Lifetime stats, a rank by winnings (Rookie to Legend), the rent bar ($1,225 by Friday), a career path from first cash to the RCOP Main Event, and a head-to-head card against the rival.
 - **What you can play.** Tonight's story events and any scheduled Hold'em freezeout or re-entry with a full-ring field of up to 3,000 can be played, an hour before the start through late registration. Bounties, satellites, Omaha, six-max and huge fields are locked "until later in your career."
@@ -328,7 +329,96 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
   | A Short a day and three Breakdowns a week | 677, 14,741 and 70,191 at days 90, 365 and 730; 50,000 on day 619 | Day 164 | — | $222 at day 365 |
 
   - Shorts buy subscribers, not money: three a day end the first year with 3.7 times the subscribers of three Breakdowns a week (7.7 times before Shorts' half rate) and earn nothing.
-  - **In a simulated career** (a streamer's first 180 days, plus $133 of webcam, mic and ring light and about three videos a week cut from its own hands: 25 Shorts, 33 Breakdowns and 17 Vlogs), the channel has 8, 32, 70 and 358 subscribers on days 30, 60, 90 and 180, is far from the gate and pays nothing. The bankroll reads $1,190.22, $2,332.06, $1,084.26 and $1,361.85.
+  - **In a simulated career** (a streamer's first 180 days, plus $133 of webcam, mic and ring light and about three videos a week cut from its own hands: 25 Shorts, 32 Breakdowns and 18 Vlogs), the channel has 8, 29, 65 and 357 subscribers on days 30, 60, 90 and 180, is far from the gate and pays nothing. The bankroll reads $1,190.22, $2,332.06, $1,084.26 and $1,361.85. (Re-measured with the rival sites in the world: they move who plays where, and so which hands the career's tables deal. Before them it was 8, 32, 70 and 358 subscribers from 25, 33 and 17 uploads, with the same bankroll.)
+
+**The rival sites: Ignite Poker and RunItTwice (built, update 2).** RiverLine stops being the only site, later in the career. Two fictional rivals run beside it in the world, each with its own look, schedule, traffic, rake, promotions, boards and balance: **Ignite Poker**, a bright, soft, loud app with rake you feel, and **RunItTwice**, the serious one, with bigger guarantees, tougher fields and a pro team of its own. You hear about a site before you can play it, and it writes to you only once you've risen far enough. RiverLine stays home: linked to the bank, running everything every night, and Career, the Embercrest and Backing stay its pages.
+
+- **The two sites.**
+
+  | | Ignite Poker | RunItTwice |
+  |---|---|---|
+  | The pitch | "Poker that's actually fun." | "Tournaments for grown-ups." |
+  | Who writes | Bree Okafor, Ignite Partnerships | Ingrid Vale, RunItTwice Player Development |
+  | In the world from | Mon Nov 2, 2026, with a launch week (Nov 2 to 8) of guarantees half again as big | Night One: its new lobby and points season opened Tue Oct 6, 2026 |
+  | Look (both dark) | Coral and sky on plum; a flame | Slate and gold, its sponsor patch's colours; two river cards, the second run over the first |
+  | Traffic | Fields 0.30 of RiverLine's, busiest at 8 PM, Sundays ×1.2; about 95,000 players online | 0.55, busiest at 9 PM, Sundays ×1.5; about 175,000 |
+  | Schedule | 18 dailies from $1.10 to $22: Flip & Run every hour ($1.10), the Flip & Run Bounty every two hours ($3.30), the $5.50 Spark Jackpot at 8 PM, the $22 Sky High at 7 PM. The $11 Sunday Blaze at 7 PM on Sundays. Wildfire Winter (February) and Wildfire Summer (August) from 2027: 24 events in 12 days | 22 dailies from $3.30 to $215, The Hourly to The Big Session. Sundays: the $22 Sunday Grind (5 PM), the $109 RunItTwice Sunday 100K ($100,000 guaranteed, 7 PM) and the $530 High Bridge. The RunItTwice Open in November (Nov 13 to 29 in 2026, right after RCOP: 40 events and a $530 Main Event) and, from 2027, in April; Ironworks, 24 PKO events, in July from 2027 |
+  | Rake | 11% of every buy-in | 8% up to $55, 7% from $109, 5.5% from $530 |
+  | Tables | "Soft" at micro and low stakes: Fish 30, Calling Station 20, Nit 14, TAG 14, LAG 7, Maniac 8 and Reg 7 in 100, softer than RiverLine's micro tables. Hands come faster: 30 seconds at the hypers, 38 elsewhere | One band tougher than RiverLine's at the same buy-in: its micro events seat RiverLine's low-stakes mix, its low events the high-stakes one. RiverLine's pace |
+  | Promotions | A welcome bonus | Welcome tickets and the Second Run Club |
+  | Boards | Month, Season | Season, Wins, Series |
+  | Team | — | Team RunItTwice, six pros |
+
+  - **No floor under a rival's field.** RiverLine sets its guarantees to be beaten. A rival's field is its traffic, the day and the night's luck, and its guarantee is nine-tenths of the prize pool it usually draws, rounded down to a clean figure the way lobbies write them. So the weak nights overlay, as they do on small real sites, and an overlay is a reason to play there. The world's skilled regulars hunt them too.
+  - **Flip & Run** on a rival is an eight-handed hyper that starts everyone on 2,000 chips ("Start short, flip fast, play poker with whoever's left."), and its lobby times it as the hyper it is. RiverLine's own flip events still unlock later in the career.
+- **You hear about them first.** RunItTwice is open from Night One. Ignite's launch is on its own News page the morning it opens, and a few nights later, if you've played at Dee's, Rick texts: "ignite is a ATM rn. dont tell anyone."
+- **Invitations, as you rise.** Each site checks its door once a day and writes the first day it's met:
+
+  | Site | The door |
+  |---|---|
+  | Ignite | Open in your world, Act I over (two rents paid), and 150 paid online events (freerolls and live events don't count) |
+  | RunItTwice | Act I over, and one of: 300 paid online events at an average buy-in of $11 or more over the last hundred; an online series title; Kast Partner |
+
+  - The doors read your public record and the rents you've paid, never your bankroll, and no site writes before Act I is over. An older save is checked at its first midnight after loading, so a veteran career may find a letter that morning.
+  - **Accept** in Mail opens the account at once, with a welcome letter, and the site joins the poker button. **Decline** and it writes once more, 30 days later, with the same offer; turn that down too and it's done ("You passed twice. They won't write again."). An unanswered invitation never leaves Mail: the 80-letter trim keeps it while it waits for you.
+- **On the laptop.**
+  - **The poker button.** The first taskbar button wears the logo of the site in front. With a rival account it gains a caret, and the caret lists every site you play with its balance (RiverLine's reads "Your bank: it pays the rent").
+  - **A rival's client** wears its skin throughout, with its own nav: LOBBY · SERIES · LEADERBOARDS · NEWS · PROMOTIONS · CASHIER.
+  - **Tables from any mix of sites** run at once, with multi-tabling, autoplay and the stop rules as on RiverLine. Each tile wears its site's skin, card backs included, and its site's mark when the sites are mixed; Kast's preview wears whatever the table in front wears. A rival's results screen names the wallet the prize went to ("Ignite balance now $104.40"), and Career's recent results tag rival rows with their site.
+- **The money: a wallet for each site.** RiverLine stays linked to the bank: no fees, no waits. A rival account is a wallet of its own. Its buy-ins, prizes, bounties, rakeback and bonus move only there, in its own lines (the Cashier keeps the last 40), never in the bank's ledger.
+
+  | | Deposit (card) | Withdrawal (bank transfer) |
+  |---|---|---|
+  | Ignite | 3% fee, $10 minimum, lands at once | 72 to 120 hours (drawn once for each request), $3 fee, $20 minimum |
+  | RunItTwice | 2.5% fee, $10 minimum, lands at once | 48 hours, $5 fee, $20 minimum |
+
+  - **A deposit** leaves the bank at once as two lines: "Deposit: Ignite −$50.00" and "Ignite card fee −$1.50". You choose what lands on the site; the bank pays that plus the fee.
+  - **A withdrawal** leaves the wallet at once ("Withdrawal requested ($3.00 fee)") and is in neither balance until it lands, to the minute, as one bank line net of the fee ("Withdrawal: Ignite +$37.00"). The wall calendar and the second screen mark the day.
+  - **Never site to site.** Money always comes back through the bank, so moving it between sites costs two fees and two waits.
+  - **Site money never pays rent.** Only the bank pays the rent, the store and a live buy-in. The Bank's side column lists the pots (the staked roll, store credit, each site, and money on its way back, "arriving Mon 11:00 PM"), and its "Poker & sites" row adds the card fees to the buy-ins. When a rent deadline is 72 hours away or less and the bank alone is short but the bank and the sites together aren't, the rent card says so: "Rent is due Mon. $45.60 is on its way from Ignite (Mon to Wed), and $15.00 sits on Ignite. Site money can't pay rent." A withdrawal that lands before the deadline is in the bank before the landlord looks.
+  - The results screen's sitting net counts the wallets and the money on its way back, and Dee's "Broke?" text waits while money sits on a site.
+  - **Backers and sponsors use the pot the money's in.** Lantern Row's package funds RiverLine events only ("This one's your own money."). Pieces sold on a rival event are paid into that site's wallet, and a cash there pays the buyers and any backer from the same wallet; only a share that falls due after the wallet's been emptied comes from the bank.
+  - **A RiverLine restriction is RiverLine's alone.** Caught ghosting Sam's account, RiverLine's register button says so, and Ignite and RunItTwice don't know or care.
+- **Promotions.**
+
+  | Site | Promotion | The rule |
+  |---|---|---|
+  | Ignite | Welcome bonus | 100% of the first deposit, up to $100, pending. $5 comes off into the wallet for every $20 of rake paid on Ignite inside 60 days; the rest expires, and Mail says how much came off |
+  | RunItTwice | Welcome tickets | A first deposit of $50 or more brings a $22 Sunday Grind ticket and two $5.50 Supper Stack tickets ($33). A smaller first deposit gets none |
+  | RunItTwice | Second Run Club | Rakeback into the wallet on the 1st, by the month's rake there: Member at $50 (15%), Regular at $250 (20%), High Table at $1,000 (25%), Inner Circle at $4,000 (30%) |
+  | RiverLine | RiverLine Rewards | Rakeback into the bank on the 1st, by the month's RiverLine rake (every event entered with money, played by you or your plan): Bronze under $40 (nothing), Silver at $40 (8%), Gold at $200 (14%), Platinum at $800 (20%), Diamond at $3,000 (27%). One bank line, "RiverLine Rewards: Gold, March", and its statement in Mail. Career's Rewards card shows the tier and the month's progress |
+
+  - Ignite's bonus is harder to earn than it looks: at $5.50 a grinder pays about 61 cents of rake an event, so the whole $100 takes $400 of rake, about 650 events.
+  - Each company sends at most one routine letter a week, but a letter that carries money (the tickets, a Rewards or Second Run statement) always comes.
+- **RiverLine pushes back.**
+  - **"We noticed."** Your first deposit on any rival brings a letter from RiverLine Player Relations and Rewards one tier up for 60 days. The bump pays on a 1st inside those days, and Career's card shows it ("+1 TIER").
+  - **Silence.** RiverLine's News never shows an item that names another site; the rivals' own News pages carry them.
+  - **Bracelets and rings stay RiverLine's.** The Championship Online and Ring Rush are its partnerships with the live tours, and no rival hosts one.
+  - **The clause.** Every Team RiverLine contract offered or renewed from update 2 on plays only on RiverLine: "One condition: while the deal runs, you play, stream and post on RiverLine and nowhere else." A deal already running keeps its old terms until renewal, and the renewal letter explains the new line.
+    - Registering at another site's table, having one in front while you're live, or publishing a video of an online hand from another site is a strike: at most one a day, cured by two clean weeks ("Stay on RiverLine through Thursday, Nov 19 and we're square."). A second strike in the term ends the deal. Nothing is held back, since nothing was missed.
+    - **It warns first.** Under the clause a rival's register button reads "Strike under your Team RiverLine deal" and its confirm step "Take the strike", and Studio's PUBLISH warns the same way. The strike lands only on the second press.
+    - Live play is never a strike: a night at the Embercrest, and its video, are fine (`docs/LIVE_TOURNAMENTS.md` R12).
+- **Team RunItTwice.** RunItTwice's own team, six pros in the world, makes an offer to a player who grinds its tables: a RunItTwice account with 100 events there, or a series title won there. That door is the whole gate, whatever your sponsor standing, so an online grinder who never streams can be signed.
+  - On the catalog's terms: $4,000 a month for a year, its patch on your chest, four live events in the patch every 30 days, $2,500 for every live final table made wearing it, and "plays only on RunItTwice" (now a RiverLine table is the strike).
+  - A chest has room for one poker site. While a Team RiverLine deal has more than a month to run, RunItTwice waits, and its offer comes in that deal's last month. Signing it ends Team RiverLine that day ("You signed with Team RunItTwice, and a chest only has room for one poker site."), and signing Team RiverLine ends it. A RiverLine restriction doesn't touch it.
+  - On the block, the patch gets noticed: "RunItTwice on your chest. The serious site. They pay you to wear that?"
+- **Boards and your numbers, site by site.**
+  - RiverLine's boards, the Night Shift and Player of the Year count RiverLine results only: a final table on Ignite moves no RiverLine board row, Night Shift point or Player of the Year point of yours. Once your history holds 100 results, RiverLine's YOU row comes from the world's tracker less your live and rival results, and never reads below what your last hundred show.
+  - Each rival keeps its own boards (Ignite's Month and Season; RunItTwice's Season, Wins and Series), ranking only the people with a record there. Its points season began on its launch day ("since its lobby opened on Oct 6") and starts again every Jan 1 ("since January").
+  - **The tracker follows you everywhere,** as real trackers do: Stats, backers and the sites' doors read every paid online event. Career unlocks (bounties, satellites, six-max) open on RiverLine results and apply on every site.
+- **News and word of mouth.** A rival's News page carries its launch and its welcome promo, its overlays (a headline like "$11 Sunday Blaze overlays by $1,890", in whole dollars, and "Ignite covered the difference."), its series a week out, its biggest wins, and the world's news about it: team signings and known regulars opening accounts there. Dee keeps an eye on it: a win on a rival brings "Get it off that site and pay the rent.", and a rival series title "Different site, same cards. Nobody can take that away from you."
+- **In the world.** Both sites are part of the living world (§8), run from the same seeds whether you've joined or not.
+  - **Who plays where.** RunItTwice opened on Night One with 22% of the online regulars at low stakes and up who play online at least half the time, and 8% of the micro ones; more follow as they move up. In Ignite's first 30 days, 30% of the micro and 10% of the low-stakes regulars who play online at least 40% of the time open accounts, each on a day of their own. From its launch, 40% of new online players start with an Ignite account, a fifth of them on Ignite alone ("Downloaded Ignite on a slow night…").
+  - **Choosing events.** People plan their days across every site they belong to, each site's events weighted by its traffic. Skilled players lean toward Ignite and toward overlaid events, and mid- and high-stakes players toward RunItTwice's Sunday majors. RunItTwice's members put 22.6% of their entries there (measured). Off-screen, Ignite's fields play softer and RunItTwice's tougher.
+  - **Who sits with you.** A rival's table seats only that site's members, and gh0stfold only where he has an account.
+  - **Team RunItTwice** signs six on the 1st: in an established world the best-known pros who play there (from Night One), in a fresh start the best on its Season board from Nov 1, as Team RiverLine does. It never signs gh0stfold. Its pros play only on RunItTwice, so they never show on RiverLine's boards.
+  - **An older save** gets the sites the day it loads: memberships as of that day, RunItTwice "open since Oct 6", Ignite launching the day after loading if the save is already past Nov 2 (no history before it, and no launch week once Nov 8 has passed), and Team RunItTwice signing at the next 1st. RiverLine's boards read exactly as before. A fresh start seeds the same memberships, since an account isn't a record.
+- **Measured (simulated).**
+  - **Overlays** over a simulated month: 19.8% of Ignite's 394 guaranteed events and 20.3% of RunItTwice's 882 (17.5% of 922 with the RunItTwice Open running); in Ignite's launch week, 92.4% of 92, its Sunday Blaze carrying $25,000. The target was 10 to 25%, and at least half in the launch week.
+  - **Soft isn't free money.** The coach's best play on every decision, over 300 $5.50 sit-and-gos a site: +43.8% ROI after rake on Ignite against +56.3% at RiverLine's micro tables, a ratio of 0.78 (the cap is 1.5). Over 2,000 a site, +43.5% against +46.6%. Ignite's 11% rake takes back what its softer tables give.
+  - **A multi-site career** (180 days from Night One's $2.37 on the mixed career's life: RiverLine's hypers to 200 tracked events, then $11 and up while the bank holds the rent; each site joined the morning its letter comes, $50 by card on each, what piles up withdrawn). Act I ends on day 95 and Ignite writes the same day (354 events, the last hundred averaging $0.25). It plays $11 events from day 116, but its last hundred average $10.57 on day 180, so RunItTwice hasn't written. 526 online events: 494 on RiverLine ($833.00 in buy-ins) and 32 on Ignite ($332.20). 5 deposits ($250.00), 3 withdrawals ($254.58 asked back) and $7.50 in card fees; $58.00 on the sites at the end, and no rent missed. RiverLine Rewards paid $2.89 in all and nothing in Act I: none of the five simulated careers reaches Silver's $40 of monthly rake there. The bankroll: $1,268.23, $2,458.12, $1,447.38 and $1,452.86 on days 30, 60, 90 and 180.
+  - **A scripted career** (150 days in a fresh world, with autoplay and uploads): Ignite writes on day 27 (160 events) and RunItTwice on day 83 (301 events at an $11.00 average). With a rent made short on purpose, the rent card warned every hour from 72 hours out; the withdrawal landed after the deadline, and the rent was paid late, in its grace days. Under Team RiverLine's clause, a RunItTwice table and a published video each warned first and then struck, and the second strike ended the deal.
+- Later: Halcyon, a quiet international high-roller site (its members are already seeded in the world); Ignite's daily race and RunItTwice's Ladder; another way to pay in and out; rival series crests and rival patches on the street.
 
 **Reading opponents online (digital tells)**
 
@@ -493,7 +583,7 @@ The best item in each slot counts (a 1080p webcam replaces the 720p one; buying 
   - Going broke and rebuilding, and staking deals that run for six months.
   - Turning pro, taking breaks, retiring and coming back.
   - Newcomers arrive and keep the population steady, and rare big scores make overnight stories.
-- **The calendar:** local weeklies, Dee's back room, regional festivals, the Grand Circuit, the Championship (with its summer Main Event), The Summit and RiverLine's online series. Everyone in the world plays them, and the results stand.
+- **The calendar:** local weeklies, Dee's back room, regional festivals, the Grand Circuit, the Championship (with its summer Main Event), The Summit and RiverLine's online series, and the rival sites' schedules for those who play there (§5). Everyone in the world plays them, and the results stand.
 - **History:** titles, Player of the Year and every honor are kept forever. Results and events are kept for as long as they matter, and old retirees fold into short records.
 - **You, in their world:**
   - People who sat with you remember it: met, said hello, big pots, who busted whom, nights at Dee's game, the Embercrest.
@@ -577,14 +667,14 @@ The player walks the street as that character, a MetaHuman matched to the look, 
 - **Bankroll:** your life. Rent, food, travel, hotels and gear all come out of it.
 - **Staking:** backers pay your buy-ins for a share of the profit, with makeup (you must win back their losses before you profit). Deal terms vary by backer personality.
 - **Selling action:** for live events, you sell pieces of your action at a markup your reputation justifies.
-- **Sponsorship:** unlocked by fame. A sponsor covers buy-ins and asks for patches, appearances and streaming hours. Streaming sponsors are built (see Kast), and a Rerun channel is a road to them too (see Rerun).
+- **Sponsorship:** unlocked by fame. A sponsor covers buy-ins and asks for patches, appearances and streaming hours. Streaming sponsors are built (see Kast), and a Rerun channel is a road to them too (see Rerun). The poker sites' own teams, Team RiverLine and Team RunItTwice, now come with a "plays only on" clause for their own site (see the rival sites).
 - **Fame:** grows with results and memorable hands. It changes how tables play against you and unlocks invitations, including The Summit.
 
 **Getting on your feet (built).** Early on, the bankroll is $2.37 and the rent is $1,225 by Friday midnight. The laptop has apps beside RiverLine for the other ways to get there; each one fast-forwards the clock while the room goes from night to day and back:
 
 - **ShiftLink:** minimum-wage gig shifts. Night cashier at the Lucky Penny on Fifth ($7.25/hr), attendant at the Wash & Fold across the street ($8), delivery driver ($6 plus tips), warehouse loader ($9.50, early mornings). Safe, slow, exhausting.
-- **Burner:** Marcus pays $120 to $200 a drop-off (and $380 to $600 for the long run once you've proven yourself). Every run adds police heat, and heat raises the chance of getting picked up: a fine, a night in holding, and a debt to Marcus for the lost bag. Sam, a rich player who notices you once you cash, pays you to play his RiverLine account ("ghosting"). If site security catches it, your account is restricted for 24 hours.
-- **Bank:** the balance, the rent countdown and payment, and where every dollar came from and went.
+- **Burner:** Marcus pays $120 to $200 a drop-off (and $380 to $600 for the long run once you've proven yourself). Every run adds police heat, and heat raises the chance of getting picked up: a fine, a night in holding, and a debt to Marcus for the lost bag. Sam, a rich player who notices you once you cash, pays you to play his RiverLine account ("ghosting"). If site security catches it, your RiverLine account is restricted for 24 hours (the other sites don't know or care).
+- **Bank:** the balance, the rent countdown and payment, and where every dollar came from and went. Once you play another site, it lists that site's balance and any money on its way back, which can't pay the rent (see the rival sites).
 - **Sleep:** a nap or a full night. Energy drains while you're awake and with every shift; under 20% your time bank at the table is halved.
 - **GearDrop, Kast and Rerun:** the store, the streaming site and the video site (see Online play). Streaming becomes a second career, slowly: it takes months of steady streaming to build a community, and by the time a channel is Partner, a month of streams pays the rent. Videos are slower still to pay: Rerun's ads start only at its partner gate, and three videos a week bring about an eighth of the rent a month after a year.
 - **Rent day:** the first month is $1,225 (the late fee is already in it), due Friday at midnight. After that it's $1,075 a month: due at midnight on October 31, then every 30 days.
@@ -599,7 +689,7 @@ The player walks the street as that character, a MetaHuman matched to the look, 
     - Your security deposit paid the first 30 days of storage. After that the unit is $60 every 30 days, with a warning two days before. If it isn't paid, the gear is sold at a lien auction and it's gone.
   - **Moving back in.** The Bank's **Move back in** button pays the back rent and the month. You get the key and the gear (whatever wasn't auctioned), and the next rent is due 30 days from that night.
   - **On the desktop.** The apartment's desk empties while you're out. `ss.Rent.Next` jumps the clock to a minute before the next deadline, or the storage renewal while you're evicted.
-- **Career unlocks:** your first cash opens bounty events (progressive knockouts and mystery bounties), your first final table opens satellites (the steps to the RCOP Main Event pay tickets), and your first title opens six-max.
+- **Career unlocks:** your first cash opens bounty events (progressive knockouts and mystery bounties), your first final table opens satellites (the steps to the RCOP Main Event pay tickets), and your first title opens six-max. They open on RiverLine results and apply on every site.
 - **The Night Shift pays:** at 6 AM the top 20 on the night's micro-stakes leaderboard are paid into your balance.
 
 ## 11. Narrative

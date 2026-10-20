@@ -23,18 +23,12 @@ life	earned	4850	0
 life	backroom	0	0
 life	live	0	0	0	0	0	0
 liveentry	embercrest-nightly@9	0	12000	1500	13950.00	85	1	0	0	0	0.00	Embercrest Nightly $120
-liveroster	embercrest-nightly@9	moore03	3
-liveroster	embercrest-nightly@9	RuthlessRail	6
+liveroster	embercrest-nightly@9	Big Lou	1
+liveroster	embercrest-nightly@9	Ines	2
+liveroster	embercrest-nightly@9	Lin	3
 liveroster	embercrest-nightly@9	Yolanda	1
-liveroster	embercrest-nightly@9	Omar	3
-liveroster	embercrest-nightly@9	Maria G.	3
-liveroster	embercrest-nightly@9	Patty	1
+liveroster	embercrest-nightly@9	moore03	3
 liveroster	embercrest-nightly@9	J.P.	3
-liveroster	embercrest-nightly@9	BluffSquadTV	4
-liveroster	embercrest-nightly@9	Sal	2
-liveroster	embercrest-nightly@9	Connie	0
-liveroster	embercrest-nightly@9	Carla	2
-liveroster	embercrest-nightly@9	dusty_muck5	6
 liveboard	embercrest-nightly@9	TUE NIGHTLY\temorin\t307580
 liveboard	embercrest-nightly@9	TUE NOON DEEPSTACK\tlenaschmidt\t140339
 liveboard	embercrest-nightly@9	MON NIGHTLY\tSmith3\t234568
@@ -43,54 +37,36 @@ liveboard	embercrest-nightly@9	SUN SUNDAY\tCarla\t372940
 liveboard	embercrest-nightly@9	SUN WARM-UP\tvdberg88\t155616
 liveboard	embercrest-nightly@9	SAT MIDNIGHT TURBO\tolgas\t101516
 liveboard	embercrest-nightly@9	SAT NIGHTLY\tRossi6\t231599
-liveface	embercrest-nightly@9	moore03	Embercrest regular	
-liveface	embercrest-nightly@9	RuthlessRail	Embercrest regular	
+liveface	embercrest-nightly@9	Big Lou	Embercrest regular	
+liveface	embercrest-nightly@9	Ines	Embercrest regular	
+liveface	embercrest-nightly@9	Lin	Embercrest regular	
 liveface	embercrest-nightly@9	Yolanda	Embercrest regular	
-liveface	embercrest-nightly@9	Omar	Embercrest regular	
-liveface	embercrest-nightly@9	Maria G.	Embercrest regular	
-liveface	embercrest-nightly@9	Patty	Embercrest regular	
+liveface	embercrest-nightly@9	moore03	Embercrest regular	
 liveface	embercrest-nightly@9	J.P.	Embercrest regular	
-liveface	embercrest-nightly@9	BluffSquadTV	Embercrest regular	
-liveface	embercrest-nightly@9	Sal	Embercrest regular	
-liveface	embercrest-nightly@9	Connie	Embercrest regular	
-liveface	embercrest-nightly@9	Carla	Embercrest regular	
-liveface	embercrest-nightly@9	dusty_muck5	Embercrest regular	
-livecheck	embercrest-nightly@9	14080.00	14162.500	ck1 8a2a4804079bee8b 85 13;r dcdcd789 34d7f9ab bccd4657 4a5425a;c 25 3 76 0 0 0 0 0 0 0;p 12927 7 2 0 0 0 0 25 8 7 -1 13227;p 22692 4 2 0 0 0 0 25 5 2 -1 22692;p 23749 6 0 0 0 0 0 25 10 7 -1 22449;p 14734 6 1 0 0 0 0 25 8 2 -1 14734;p 0 5 0 1 79 0 0 20 4 2 25 17233;p 21781 14 0 0 0 0 0 25 5 3 -1 22781;p 34517 9 2 0 0 0 0 25 11 4 -1 36299;p 10113 8 3 0 0 0 0 25 7 4 -1 10413;p 0 2 5 1 84 0 0 3 2 1 17 17689;p 27287 13 1 0 0 0 0 25 4 2 -1 27287;p 12277 11 5 0 0 0 3fae3a63b4a9180c 25 8 3 -1 12777;p 23402 3 0 0 0 0 0 25 5 4 -1 23402;p 6230 9 4 0 0 0 3f86bb3d9a28a342 25 5 3 -1 6230;p 48284 8 4 0 0 0 0 25 13 5 -1 48384;p 17750 2 2 0 0 0 0 25 4 3 -1 17450;p 19132 13 0 0 0 0 0 25 5 3 -1 19132;p 21018 8 2 0 0 0 0 25 7 3 -1 21018;p 20740 2 0 0 0 0 3fb3a47e200a6f37 25 9 9 -1 20740;p 12805 7 0 0 0 0 3fac587119c56d68 25 7 5 -1 12805;p 18127 6 2 0 0 0 0 25 4 3 -1 18127;p 25359 12 3 0 0 0 0 25 6 2 -1 24059;p 41982 10 3 0 0 0 0 25 7 4 -1 20741;p 8415 12 5 0 0 0 3fc1eb10c24a6654 25 9 2 -1 9415;p 34747 11 3 0 0 0 0 25 8 6 -1 34747;p 22313 14 1 0 0 0 0 25 4 3 -1 22313;p 39167 7 3 0 0 0 0 25 6 5 -1 42001;p 0 5 1 1 80 0 3fc6144ee00df1ff 20 8 6 25 3642;p 11346 3 5 0 0 0 0 25 7 4 -1 12346;p 19270 10 0 0 0 0 0 25 9 4 -1 19270;p 13696 7 1 0 0 0 0 25 4 3 -1 10562;p 19673 14 2 0 0 0 0 25 3 1 -1 19673;p 0 3 2 1 83 0 0 3 1 1 75 19700;p 21030 8 0 0 0 0 0 25 8 5 -1 21030;p 39369 3 4 0 0 0 0 25 7 4 -1 39669;p 23965 1 1 0 0 0 0 25 6 4 -1 22665;p 20287 12 4 0 0 0 0 25 5 4 -1 20587;p 41417 7 4 0 0 0 0 25 4 2 -1 41417;p 10396 1 0 0 0 0 0 25 6 3 -1 11396;p 19839 9 5 0 0 0 0 25 9 3 -1 19839;p 13024 11 0 0 0 0 0 25 14 7 -1 12524;p 43575 2 3 0 0 0 0 25 9 8 -1 43575;p 16781 8 1 0 0 0 0 25 4 1 -1 16781;p 20582 9 0 0 0 0 0 25 4 2 -1 20582;p 18414 14 4 0 0 0 0 25 9 6 -1 18414;p 0 4 1 1 77 0 3faff35175c8e78a 25 9 5 62 3023;p 16876 13 4 0 0 0 0 25 3 2 -1 17176;p 22325 2 4 0 0 0 0 25 5 1 -1 22325;p 18801 10 1 0 0 0 0 25 3 1 -1 18801;p 14559 4 0 0 0 0 0 25 7 2 -1 16080;p 27543 12 2 0 0 0 0 25 6 5 -1 27543;p 14310 6 3 0 0 0 0 25 7 5 -1 14310;p 31398 3 3 0 0 0 0 25 5 3 -1 23453;p 1293 10 4 0 0 0 3fc933e0ae9d9235 25 4 2 -1 22534;p 15418 4 3 0 0 0 0 25 5 3 -1 15418;p 0 7 3 1 81 0 3fb7433a8a755805 19 11 4 18 4820;p 18283 11 4 0 0 0 0 25 10 2 -1 18283;p 38832 9 1 0 0 0 0 25 6 2 -1 37050;p 18897 2 5 0 0 0 0 25 8 1 -1 18897;p 46906 14 3 0 0 0 0 25 7 5 -1 46906;p 22250 6 5 0 0 0 0 25 4 1 -1 23250;p 18383 1 3 0 0 0 0 25 9 3 -1 18383;p 23730 1 2 0 0 0 0 25 4 3 -1 23730;p 47506 4 5 0 0 0 0 25 15 12 -1 42962;p 20240 13 2 0 0 0 0 25 3 1 -1 20240;p 19825 4 4 0 0 0 0 25 6 5 -1 19825;p 41990 7 5 0 0 0 0 25 9 1 -1 41990;p 27744 10 5 0 0 0 0 25 9 7 -1 27744;p 20060 12 1 0 0 0 0 25 5 4 -1 20060;p 33336 1 5 0 0 0 0 25 10 5 -1 33636;p 10190 1 4 0 0 0 3fc2ff359ec04b26 25 9 3 -1 10190;p 19044 11 1 0 0 0 0 25 2 0 -1 19044;p 29593 3 2 0 0 0 0 25 13 6 -1 36238;p 0 15 5 1 85 0 0 1 1 1 58 20000;p 15812 13 5 0 0 0 0 25 9 3 -1 16812;p 2774 8 5 0 0 0 3fbdfc63f5d3e82a 25 4 3 -1 2374;p 43278 3 1 0 0 0 0 25 12 7 -1 43278;p 26830 6 4 0 0 0 0 25 10 4 -1 27130;p 16325 2 1 0 0 0 0 25 6 4 -1 16625;p 18136 12 0 0 0 0 0 25 1 0 -1 18136;p 17715 11 2 0 0 0 0 25 3 2 -1 17715;p 10910 10 2 0 0 0 0 25 7 5 -1 10910;p 0 9 3 1 82 0 3faddb25f5ec0a93 18 7 6 6 9792;p 16023 14 5 0 0 0 0 25 13 12 -1 15023;p 0 3 3 1 78 0 0 20 4 3 33 19391;p 20653 13 3 0 0 0 0 25 10 2 -1 19353;t 1 4 37 34 61 60 69 68;t 2 0 17 77 14 40 46 57;t 3 3 11 75 71 51 33 27;t 4 5 48 -1 1 53 64 62;t 6 3 2 3 19 50 76 59;t 7 1 18 29 0 25 36 65;t 8 2 32 41 16 7 13 74;t 9 0 42 56 6 -1 12 38;t 10 2 28 47 80 21 52 66;t 11 4 39 70 79 23 55 10;t 12 3 78 67 49 20 35 22;t 13 3 15 9 63 84 45 73;t 14 4 5 24 30 58 43 82	hands\t25\nmet\tp5\nmet\tp16\nmet\tp41\nmet\tp23\nmet\tp52\nmet\tp12\nauto\tgto\t2\t1\t0\t89\t1\t3\t36\t0\t25\t0\nautoseen\tp12\t5\t3\t2\t2\t0\t1\t1\t0\t0\t1\t0\t1\t0\t0\t1\nautoseen\tp16\t25\t4\t3\t8\t0\t0\t0\t2\t1\t0\t0\t5\t4\t5\t2\nautoseen\tp23\t25\t4\t2\t12\t0\t0\t0\t1\t0\t0\t0\t4\t3\t4\t1\nautoseen\tp41\t19\t11\t4\t11\t1\t1\t0\t2\t2\t1\t0\t9\t5\t10\t5\nautoseen\tp5\t25\t7\t5\t8\t2\t0\t0\t0\t0\t0\t0\t4\t3\t2\t4\nautoseen\tp52\t25\t9\t1\t12\t0\t0\t0\t0\t0\t2\t1\t8\t6\t2\t7\nautoread\tBig Lou\t1\nautoread\tMei\t1\n
-liveroom	embercrest-nightly@9	room1|said=8223|lvl=4|brk=0,0,0,0,-1,0,0|mood=2|t=25,1125,1110,1125,0,0,0,-1,-1,0,7,-100|tl=45,855|sp=|sm=|nd=|acc=|told=#255,#4|beats=|champ=-1.00
-livevoice	embercrest-nightly@9	moore03	3	0.245	0.460	0.392	0	2	45	0	0	0.000	0.000	0.000		
-livevoice	embercrest-nightly@9	RuthlessRail	6	0.721	0.556	0.447	0	13	21	0	0	0.000	0.000	0.000	9^$55 Step 3 · RCOP Main^2^37^0^1|8^$11 Step 2 · RCOP Main^2^50^0^1|8^$11 Step 2 · RCOP Main^1^62^0^1	
+livecheck	embercrest-nightly@9	14080.00	14162.500	ck1 6953ae290a8cc063 85 14;r 3a49a097 de3c340c 58f7cd7d 49fe7e1;c 25 3 82 0 0 0 0 0 0 0;p 24826 5 3 0 0 0 0 25 7 3 -1 24826;p 16896 7 4 0 0 0 0 25 8 3 -1 18096;p 21300 1 2 0 0 0 0 25 1 0 -1 21600;p 17527 10 0 0 0 0 0 25 8 6 -1 15248;p 21327 4 1 0 0 0 0 25 9 4 -1 21327;p 32709 7 5 0 0 0 0 25 4 3 -1 33009;p 9586 1 5 0 0 0 3f8de8bc8d92a7a4 25 6 4 -1 9586;p 12942 7 1 0 0 0 3f9e30e38b04e1c2 25 6 4 -1 12942;p 19793 8 1 0 0 0 0 25 5 4 -1 19793;p 17730 9 1 0 0 0 0 25 6 3 -1 22336;p 17687 8 2 0 0 0 0 25 4 3 -1 18687;p 18887 2 4 0 0 0 0 25 9 3 -1 18987;p 20293 8 3 0 0 0 0 25 5 4 -1 20293;p 61664 11 3 0 0 0 0 25 10 1 -1 62664;p 18436 11 4 0 0 0 3fa395ed692e71cc 25 7 6 -1 18436;p 0 11 2 1 84 0 0 23 1 1 13 19700;p 17652 2 2 0 0 0 0 25 1 1 -1 17652;p 13142 13 3 0 0 0 0 25 13 3 -1 13142;p 6728 12 0 0 0 0 3fbb9aaacdffdef6 25 6 3 -1 6728;p 14709 9 5 0 0 0 0 25 12 5 -1 15709;p 35100 12 1 0 0 0 0 25 5 2 -1 35100;p 17040 4 5 0 0 0 0 25 8 6 -1 17040;p 23219 10 4 0 0 0 0 25 8 6 -1 24498;p 21044 7 0 0 0 0 0 25 3 3 -1 22044;p 16679 7 2 0 0 0 0 25 11 2 -1 16679;p 13848 10 2 0 0 0 0 25 4 2 -1 13848;p 20558 5 2 0 0 0 0 25 3 3 -1 20558;p 23412 1 1 0 0 0 0 25 10 6 -1 22112;p 19129 3 2 0 0 0 0 25 5 3 -1 19129;p 15596 4 4 0 0 0 0 25 5 1 -1 15696;p 19060 13 5 0 0 0 0 25 11 4 -1 19060;p 25785 2 3 0 0 0 0 25 8 7 -1 26085;p 17296 10 3 0 0 0 0 25 5 5 -1 17296;p 7638 6 2 0 0 0 3fc09064c67763c2 25 10 2 -1 8638;p 16328 15 4 0 0 0 0 25 7 5 -1 16428;p 8990 5 1 0 0 0 0 25 14 10 -1 8990;p 36197 6 4 0 0 0 0 25 9 8 -1 34897;p 14215 6 3 0 0 0 0 25 8 6 -1 14215;p 16885 10 5 0 0 0 0 25 4 3 -1 16885;p 14512 2 0 0 0 0 0 25 6 1 -1 14512;p 50547 13 1 0 0 0 0 25 10 5 -1 50247;p 25905 9 2 0 0 0 0 25 6 6 -1 25905;p 20614 8 4 0 0 0 0 25 7 4 -1 21614;p 9603 4 3 0 0 0 0 25 3 0 -1 9903;p 31225 10 1 0 0 0 0 25 4 3 -1 32225;p 20000 12 5 0 0 0 0 25 2 2 -1 19700;p 28649 15 1 0 0 0 0 25 9 8 -1 28649;p 38045 3 3 0 0 0 0 25 17 12 -1 36745;p 27192 13 2 0 0 0 0 25 8 6 -1 27192;p 14174 3 5 0 0 0 0 25 4 4 -1 14174;p 13927 3 0 0 0 0 0 25 3 2 -1 14227;p 16735 15 5 0 0 0 0 25 2 1 -1 16735;p 18620 6 1 0 0 0 3fc3e9cab390ecef 25 12 4 -1 18920;p 21400 8 5 0 0 0 0 25 2 1 -1 19400;p 13130 3 1 0 0 0 0 25 8 5 -1 14130;p 38636 12 3 0 0 0 0 25 4 2 -1 38936;p 13348 1 3 0 0 0 0 25 9 3 -1 14348;p 0 14 0 1 85 0 3fdd998206e70a4a 10 6 2 74 59;p 19807 2 5 0 0 0 0 25 1 1 -1 19807;p 29961 1 0 0 0 0 0 25 2 1 -1 29961;p 10512 9 3 0 0 0 3fa662db291a2adc 25 4 1 -1 4606;p 27223 6 0 0 0 0 0 25 9 5 -1 27223;p 6743 13 4 0 0 0 3fc23dd0b0a693da 25 9 2 -1 6743;p 9869 11 5 0 0 0 0 25 10 5 -1 14264;p 19730 7 3 0 0 0 3fa0401bac8e29da 25 10 6 -1 17230;p 18400 15 3 0 0 0 0 25 3 3 -1 18700;p 16107 6 5 0 0 0 0 25 3 1 -1 16107;p 19100 11 0 0 0 0 0 25 2 2 -1 19100;p 14913 5 0 0 0 0 0 25 7 3 -1 16442;p 23305 13 0 0 0 0 0 25 5 3 -1 23605;p 21712 4 0 0 0 0 0 25 4 2 -1 21312;p 21595 3 4 0 0 0 0 25 9 3 -1 21595;p 19006 12 2 0 0 0 0 25 7 4 -1 19006;p 20213 8 0 0 0 0 0 25 4 4 -1 20213;p 25562 15 0 0 0 0 0 25 6 4 -1 25162;p 0 12 4 1 83 0 3fdd50a431f3f337 24 11 3 20 2812;p 23357 2 1 0 0 0 0 25 5 4 -1 22957;p 20913 5 4 0 0 0 0 25 6 5 -1 19084;p 29800 5 5 0 0 0 0 25 9 6 -1 30100;p 9790 11 1 0 0 0 3fb22d08c3194711 25 6 4 -1 4395;p 34722 4 2 0 0 0 0 25 12 9 -1 34722;p 35638 9 0 0 0 0 0 25 6 5 -1 35638;p 22393 1 4 0 0 0 0 25 3 2 -1 22393;p 15506 9 4 0 0 0 0 25 6 0 -1 15806;p 16008 15 2 0 0 0 0 25 2 0 -1 16008;t 1 1 59 27 2 56 82 6;t 2 2 39 76 16 31 11 58;t 3 5 50 54 28 47 71 49;t 4 2 70 4 80 43 29 21;t 5 4 68 35 26 0 77 78;t 6 0 61 52 33 37 36 66;t 7 4 23 7 24 64 1 5;t 8 3 73 8 10 12 42 53;t 9 3 81 9 41 60 83 19;t 10 5 3 44 25 32 22 38;t 11 0 67 79 -1 13 14 63;t 12 2 18 20 72 55 -1 45;t 13 5 69 40 48 17 62 30;t 15 2 74 46 84 65 34 51	hands\t25\nmet\tp61\nmet\tp28\nmet\tp19\nmet\tp70\nmet\tp71\nauto\tgto\t2\t1\t0\t89\t1\t3\t42\t0\t25\t0\nautoseen\tp19\t25\t3\t3\t16\t2\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\nautoseen\tp28\t25\t14\t10\t12\t1\t3\t3\t2\t2\t1\t0\t8\t3\t7\t3\nautoseen\tp61\t25\t7\t3\t14\t0\t1\t1\t1\t1\t3\t2\t5\t1\t4\t2\nautoseen\tp70\t25\t6\t5\t10\t1\t0\t0\t3\t3\t0\t0\t5\t0\t6\t1\nautoseen\tp71\t25\t9\t6\t10\t0\t1\t1\t2\t1\t2\t0\t7\t4\t5\t6\nautoread\tBig Lou\t1\nautoread\tMei\t1\n
+liveroom	embercrest-nightly@9	room1|said=8223|lvl=4|brk=0,0,0,0,-1,0,0|mood=2|t=25,1125,1110,1125,0,0,0,-1,-1,0,5,-100|tl=45|sp=|sm=|nd=|acc=|told=#2|beats=|champ=-1.00
+livevoice	embercrest-nightly@9	Big Lou	1	0.800	0.600	0.600	0	11	52	0	0	0.000	0.000	0.000		
+livevoice	embercrest-nightly@9	Ines	2	0.620	0.254	0.411	0	1	28	0	0	0.000	0.000	0.000		
+livevoice	embercrest-nightly@9	Lin	3	0.644	0.634	0.738	0	1	29	0	0	0.000	0.000	0.000		
 livevoice	embercrest-nightly@9	Yolanda	1	0.443	0.221	0.508	0	1	46	0	0	0.000	0.000	0.000	1^Embercrest Nightly $120^4^96^80876^0	
-livevoice	embercrest-nightly@9	Omar	3	0.581	0.649	0.583	0	1	33	0	0	0.000	0.000	0.000	5^Embercrest Nightly $120^6^94^53876^0	
-livevoice	embercrest-nightly@9	Maria G.	3	0.398	0.355	0.837	0	1	47	0	0	0.000	0.000	0.000	9^Embercrest Nightly $120^3^100^108317^0	
-livevoice	embercrest-nightly@9	Patty	1	0.781	0.203	0.547	2	1	62	0	0	0.000	0.000	0.000	7^Embercrest Sunday $150^6^97^67983^0	
+livevoice	embercrest-nightly@9	moore03	3	0.245	0.460	0.392	0	2	45	0	0	0.000	0.000	0.000	3^$11 Daily Grind^4^593^29238^1	
 livevoice	embercrest-nightly@9	J.P.	3	0.980	0.501	0.309	0	1	51	0	0	0.000	0.000	0.000		
-livevoice	embercrest-nightly@9	BluffSquadTV	4	0.950	0.814	0.411	0	7	27	0	0	0.000	0.000	0.000	5^$55 Step 3 · RCOP Main^2^53^0^1	
-livevoice	embercrest-nightly@9	Sal	2	0.350	0.120	0.700	0	1	58	0	0	0.000	0.000	0.000		
-livevoice	embercrest-nightly@9	Connie	0	0.780	0.699	0.310	0	1	52	0	0	0.000	0.000	0.000		
-livevoice	embercrest-nightly@9	Carla	2	0.492	0.604	0.500	6	1	34	0	0	0.000	0.000	0.000	7^Embercrest Sunday $150^1^97^372940^0	
-livevoice	embercrest-nightly@9	dusty_muck5	6	0.225	0.407	0.514	0	2	22	0	0	0.000	0.000	0.000	9^$109 Daily Main Event^9^656^139700^1|8^$109 Daily Main Event^8^527^131974^1|5^$54 Headhunter PKO^8^1036^51282^1	
+livebadge	embercrest-nightly@9	Big Lou	11.1.15
+livebadge	embercrest-nightly@9	Ines	11.1.8
+livebadge	embercrest-nightly@9	Lin	11.1.16
+livebadge	embercrest-nightly@9	Yolanda	11.2.18
 livebadge	embercrest-nightly@9	moore03	11.2.22
-livebadge	embercrest-nightly@9	RuthlessRail	11.1.13
-livebadge	embercrest-nightly@9	Yolanda	11.2.19
-livebadge	embercrest-nightly@9	Omar	11.2.35
-livebadge	embercrest-nightly@9	Maria G.	11.1.16
-livebadge	embercrest-nightly@9	Patty	11.2.35
 livebadge	embercrest-nightly@9	J.P.	11.2.19
-livebadge	embercrest-nightly@9	BluffSquadTV	11.2.31
-livebadge	embercrest-nightly@9	Sal	11.2.34
-livebadge	embercrest-nightly@9	Connie	11.2.30
-livebadge	embercrest-nightly@9	Carla	10.0.1.2026;11.1.10
-livebadge	embercrest-nightly@9	dusty_muck5	11.2.17
 liveleader	embercrest-nightly@9	1	Carla	313.00	10.0.1.2026;11.1.10
 liveleader	embercrest-nightly@9	2	Moe	307.00	11.2.31
-liveleader	embercrest-nightly@9	3	Rosie	304.00	10.0.1.2026;11.2.30
+liveleader	embercrest-nightly@9	3	Rosie	304.00	10.0.1.2026;11.2.29
 liveleader	embercrest-nightly@9	4	Tammy	214.00	11.2.27
 liveleader	embercrest-nightly@9	5	Rick	211.00	11.2.27
-liveleader	embercrest-nightly@9	6	RecklessRocket	210.00	11.3.42
-liveleader	embercrest-nightly@9	7	Shirley	199.00	11.1.16
-liveleader	embercrest-nightly@9	8	Maria G.	178.00	11.1.16
-liveleader	embercrest-nightly@9	9	Mei	157.00	11.1.14
-liveleader	embercrest-nightly@9	10	Yolanda	151.00	11.2.19
+liveleader	embercrest-nightly@9	6	Shirley	199.00	11.1.17
+liveleader	embercrest-nightly@9	7	Mei	157.00	11.1.14
+liveleader	embercrest-nightly@9	8	Yolanda	151.00	11.2.18
+liveleader	embercrest-nightly@9	9	Lorraine	133.00	11.2.15
+liveleader	embercrest-nightly@9	10	cdavis	128.00	8;11.1.16
 read	Big Lou/Swallow	2
 read	Mei/ChipGlance	3
 read	Sal/StareDown	1
@@ -143,7 +119,7 @@ autoplay	note	npc:LuckySnowman	3742	16	4	1	8	0	1	0	0	0	1	0	3	2	1	2
 autoplay	note	npc:Oscar_Isbjorn	3742	16	6	1	8	0	0	0	1	1	2	1	5	4	1	2
 autoplay	note	npc:gh0stfold	3742	9	2	2	5	0	0	0	1	1	1	0	1	1	1	1
 video	ch	0	-1	-1	0	0	12960	0	0
-video	cand	story:rent-paid	3720	4	0	14	0.525	33960	0	0	0	-1		-1	0	rent-paid	0	0	0	0	0	0	0	-1		1;0;0;0;0;0;0;0;;;;
 video	cand	rl:hyper-sprint@3720:22	3735.4	3	0	13	0.74	33975.4	1	1	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	48	0	0	0	0	-1		1;22;6;125;250;250;5482;2616;36,34;38,51,41,16,37;0,0,LuckyBubble,folds/0,0,LuckySnowman,folds/0,0,VelvetCooler,folds/0,0,n00bace,folds/0,0,PolarDnipro,folds/0,0,lucas85,folds/0,0,Oscar_Isbjorn,folds/0,500,gh0stfold,raises to/0,500,You,calls/1,799,gh0stfold,bets/1,799,You,calls/2,0,gh0stfold,checks/2,1317,You,bets/2,1317,gh0stfold,calls/3,0,gh0stfold,checks/3,4246,You,bets/3,0,gh0stfold,folds;
 video	paid	story:*
 video	paid	story:rent-paid
+site	rewards	2026-10	2	0	0

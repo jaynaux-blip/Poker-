@@ -58,7 +58,7 @@ const SiteCopyLine SiteCopyTable[] = {
 	// Invitations (LetterInvite: Accept and Decline in Mail, §5.4).
 	{"invite:ignite:subject", "Poker that's actually fun", false},
 	{"invite:ignite",
-		"Hi, it's Bree from Ignite Poker. We hear you play a lot of tournaments, so here's ours: Flip & Go every hour, the Spark Jackpot every night at 8 PM, and "
+		"Hi, it's Bree from Ignite Poker. We hear you play a lot of tournaments, so here's ours: Flip & Run every hour, the Spark Jackpot every night at 8 PM, and "
 		"tables a lot friendlier than the ones you're used to. Open an account and we'll match your first deposit 100%, up to $100. The match comes off as you play, "
 		"$5 for every $20 of rake inside 60 days. Accept below and your Cashier's ready.",
 		true},
@@ -76,6 +76,7 @@ const SiteCopyLine SiteCopyTable[] = {
 	{"why:0", "Three hundred tournaments and counting, at eleven dollars or more on average, is a serious schedule, and we noticed.", true},
 	{"why:1", "A series title gets noticed around here.", true},
 	{"why:2", "We watch the streams, and yours is worth watching.", true},
+	{"why:3", "We like to say hello early.", true}, // ss.Site.Invite past every gate: no reason the record can't back up
 	{"invite2:runittwice:subject", "The door's still open at RunItTwice", false},
 	{"invite2:runittwice",
 		"Ingrid again. The tickets are still on the table: $33 for a first deposit of $50 or more. The Sunday Grind goes off every Sunday at 5 PM. Accept "
@@ -140,8 +141,8 @@ const SiteCopyLine SiteCopyTable[] = {
 	// The rivals' News (§5.10).
 	{"news:launch:ignite:title", "Ignite Poker is live", false},
 	{"news:launch:ignite",
-		"Flip & Go every hour, the Spark Jackpot every night at 8 PM, and a {Gtd} Sunday Blaze to close a launch week of guarantees half again as big.", true},
-	{"news:launch:ignite:late", "Flip & Go every hour, the Spark Jackpot every night at 8 PM and the Sunday Blaze at 7 PM on Sundays.", true},
+		"Flip & Run every hour, the Spark Jackpot every night at 8 PM, and a {Gtd} Sunday Blaze to close a launch week of guarantees half again as big.", true},
+	{"news:launch:ignite:late", "Flip & Run every hour, the Spark Jackpot every night at 8 PM and the Sunday Blaze at 7 PM on Sundays.", true},
 	{"news:launch:runittwice:title", "RunItTwice opens its new lobby", false},
 	{"news:launch:runittwice", "Tournaments for grown-ups: lower rake at the top, the Sunday 100K every week, and a points season that starts tonight.", true},
 	{"news:promo:ignite:title", "Ignite doubles your first deposit", false},
@@ -296,6 +297,16 @@ bool SiteRoutine(life::State& L, net::SiteId S, double World, const std::string&
 	return true;
 }
 
+/**
+ * A routine letter that carries money (tickets on the account, a Rewards or Second Run statement with its payment): it always
+ * goes, even in a week that company has already written (C2's N5 rule for Rerun's statements, C3). It still counts as that
+ * week's routine letter, so a letter with nothing in it holds back after it as before.
+ */
+void SitePaid(life::State& L, net::SiteId S, double World, const std::string& Subject, const std::string& Body)
+{
+	PostLetter(L, S, World, LetterRoutine, Subject, Body);
+}
+
 /** Closes one calendar month (its 1st is Payday) for RiverLine Rewards and every account: rakeback in, keys moved on. */
 void SiteCloseMonth(Book& B, life::State& L, Chips& Bankroll, double Payday)
 {
@@ -318,7 +329,7 @@ void SiteCloseMonth(Book& B, life::State& L, Chips& Bankroll, double Payday)
 				{"Rake", Money(R.Rake)}, {"Rate", SiteRate(Tiers[static_cast<size_t>(Tier)].Permille)}, {"Amount", Money(Pay)}};
 			Bankroll += Pay;
 			L.Record(Payday, FillCopy(SiteText("label:rewards"), Vars), Pay, 4);
-			SiteRoutine(L, net::SiteId::RiverLine, Payday, FillCopy(SiteText("rewards:subject"), Vars), FillCopy(SiteText(Boosted ? "rewards:boost" : "rewards"), Vars));
+			SitePaid(L, net::SiteId::RiverLine, Payday, FillCopy(SiteText("rewards:subject"), Vars), FillCopy(SiteText(Boosted ? "rewards:boost" : "rewards"), Vars));
 			B.Done.insert(SiteDated(Key, Payday));
 		}
 		R.Tier = Tier;
@@ -351,7 +362,7 @@ void SiteCloseMonth(Book& B, life::State& L, Chips& Bankroll, double Payday)
 					{"Rake", Money(A.RakeMonth)}, {"Rate", SiteRate(Tiers[static_cast<size_t>(Tier)].Permille)}, {"Amount", Money(Pay)}};
 				A.Cents += Pay;
 				SiteLineTo(A, Payday, 4, Pay, FillCopy(SiteText("label:wallet:secondrun"), Vars));
-				SiteRoutine(L, A.Site, Payday, FillCopy(SiteText("secondrun:subject"), Vars), FillCopy(SiteText("secondrun"), Vars));
+				SitePaid(L, A.Site, Payday, FillCopy(SiteText("secondrun:subject"), Vars), FillCopy(SiteText("secondrun"), Vars));
 				B.Done.insert(SiteDated(Key, Payday));
 			}
 			A.Vip = Tier;
@@ -480,12 +491,16 @@ bool GateMet(net::SiteId S, const rep::Public& P, int RentsPaid, double World, i
 	{
 		return false;
 	}
+	// Open in this world (World::SiteLaunched, through the site's network: a save migrated past Nov 2 opens Ignite the day after
+	// it loads, and ss.Site.Launch opens it now), not only on its defined day (C3).
 	const net::SiteDef& D = net::Def(S);
-	if (World < static_cast<double>(D.LaunchDay) * site_money_detail::SiteDay || RentsPaid < D.Gate.MinRentsPaid)
+	if (World < net::netsites_detail::NetSitesLaunch(net::Site(S)) || RentsPaid < D.Gate.MinRentsPaid)
 	{
 		return false;
 	}
-	const bool Volume = D.Gate.MinEvents > 0 && P.OnlineEvents >= D.Gate.MinEvents && P.Abi100 >= D.Gate.MinAbi100;
+	// The world's tracker counts the career's events since it began keeping them (2026-10-03); a career older than that, or a
+	// save with no world, still has its last hundred in History: the gate counts at least those.
+	const bool Volume = D.Gate.MinEvents > 0 && std::max(P.OnlineEvents, P.Paid100) >= D.Gate.MinEvents && P.Abi100 >= D.Gate.MinAbi100;
 	const bool Title = D.Gate.SeriesTitle && P.OnlineSeriesTitles > 0;
 	const bool Partner = D.Gate.KastPartner && P.Partner;
 	if (Why)
@@ -568,7 +583,7 @@ void Invite(Book& B, life::State& L, net::SiteId S, double World, int Why, bool 
 	Found->At = World;
 	Found->State = Second ? 3 : 0;
 	const std::string Key = std::string(Second ? "invite2:" : "invite:") + net::KeyOf(S);
-	const std::vector<std::pair<std::string, std::string>> Vars = {{"Why", SiteText("why:" + std::to_string(std::max(0, std::min(2, Why))))}};
+	const std::vector<std::pair<std::string, std::string>> Vars = {{"Why", SiteText("why:" + std::to_string(std::max(0, std::min(3, Why))))}};
 	PostLetter(L, S, World, LetterInvite, FillCopy(SiteText(Key + ":subject"), Vars), FillCopy(SiteText(Key), Vars));
 	L.Update2LinesRead |= life::U2Sites;
 }
@@ -688,7 +703,7 @@ std::string Deposit(Book& B, life::State& L, Chips& Bankroll, net::SiteId S, Chi
 		L.Tickets["runittwice.sunday-grind"] += 1;
 		L.Tickets["runittwice.supper-stack"] += 2;
 		B.Done.insert("tickets:runittwice");
-		SiteRoutine(L, S, World, SiteText("tickets:subject"), SiteText("tickets"));
+		SitePaid(L, S, World, SiteText("tickets:subject"), SiteText("tickets"));
 	}
 	// RiverLine notices (§5.7): the first deposit on any rival brings "We noticed." and a tier up for 60 days.
 	if (!SiteDone(B, "retention"))
@@ -939,8 +954,9 @@ void Step(Book& B, life::State& L, Chips& Bankroll, const rep::Public& P, int Sp
 			It = Old ? B.Done.erase(It) : std::next(It);
 		}
 	}
-	// Word of mouth (people text, §1.7): a few nights after Ignite opens, someone from Dee's game has found it.
-	const double Opened = static_cast<double>(net::Def(net::SiteId::Ignite).LaunchDay) * SiteDay;
+	// Word of mouth (people text, §1.7): a few nights after Ignite opens in this world (World::SiteLaunched, C3), someone from
+	// Dee's game has found it.
+	const double Opened = net::netsites_detail::NetSitesLaunch(net::Site(net::SiteId::Ignite));
 	const double Rick = Opened + SiteRickAfterDays * SiteDay + 22.0 * SiteHour;
 	if (IsRival(net::SiteId::Ignite) && To >= Rick && To < Opened + SiteRickWithinDays * SiteDay && L.BackRoomNights > 0 && !SiteDone(B, "rick:ignite"))
 	{

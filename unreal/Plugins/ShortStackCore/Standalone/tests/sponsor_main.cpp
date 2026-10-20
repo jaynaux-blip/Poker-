@@ -1791,8 +1791,8 @@ void Clause()
 			"clause: a renewal of a term that had the clause keeps it and says nothing new");
 	}
 
-	// Team RunItTwice's door: a RunItTwice account with 100 events there, or a series title won there; then the brand's own
-	// gate (tier 5, a poker personality) as the catalog has it.
+	// Team RunItTwice's door: a RunItTwice account with 100 events there, or a series title won there; the door is its whole
+	// gate, whatever the sponsor standing (the user's call, 2026-10-20: an online grinder can get it).
 	{
 		ss::rep::Public Star = Streamer(25000, 600.0);
 		Star.Partner = true;
@@ -1806,8 +1806,9 @@ void Clause()
 		Expect(!No.Of("turnstone"), "site team: and no offer on its looks");
 		No.L.Sites.Accounts[0].LifetimeEvents = 100;
 		Expect(sponsor::Eligible(No.L.Sponsors, No.L, Star, "turnstone", T0 + 15.0 * Day).empty(), "site team: 100 events there opens the door");
-		ss::rep::Public Small = Streamer(3000, 80.0);
-		Expect(sponsor::Eligible(No.L.Sponsors, No.L, Small, "turnstone", T0 + 15.0 * Day) == "A poker personality first.", "site team: the brand's own tier still holds");
+		// The door is the whole gate (the user's call, 2026-10-20): a grinder with no public profile at all is eligible too.
+		ss::rep::Public Nobody;
+		Expect(sponsor::Eligible(No.L.Sponsors, No.L, Nobody, "turnstone", T0 + 15.0 * Day).empty(), "site team: the door is enough, whatever the sponsor standing");
 		No.Step(T0 + 15.0 * Day, T0 + 23.0 * Day);
 		const sponsor::Contract* Tc = No.Of("turnstone");
 		const std::string Letter = OfferLetter(No.L, "turnstone");

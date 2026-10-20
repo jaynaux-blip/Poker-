@@ -6,6 +6,7 @@
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <string>
@@ -273,9 +274,12 @@ std::string Session::DebugSite(const std::string& Args)
 					: I.State == 2		? "declined " + net::DateLabel(net::DayOf(I.At))
 										: "sent " + net::DateLabel(net::DayOf(I.At)) + ", unanswered";
 			}
-			Out += "\n" + D.Name + "'s gate (" + (site::GateMet(D.Id, P, Life.RentsPaid, World) ? "met" : "not met") + "; invitation " + State + "): opens " +
-				net::DateLabel(D.LaunchDay) + ", rents paid " + std::to_string(Life.RentsPaid) + "/" + std::to_string(D.Gate.MinRentsPaid) + ", paid online events " +
-				std::to_string(P.OnlineEvents) + "/" + std::to_string(D.Gate.MinEvents);
+			// When it opens in this world (World::SiteLaunched; its own day before the world says, C3).
+			const double Opens = LivingWorld.SiteLaunched(D.Id) >= 0.0 ? LivingWorld.SiteLaunched(D.Id) : static_cast<double>(D.LaunchDay) * net::MinutesPerDay;
+			Out += "\n" + D.Name + "'s gate (" + (site::GateMet(D.Id, P, Life.RentsPaid, World) ? "met" : "not met") + "; invitation " + State + "): " +
+				(Opens <= World ? "open since " : "opens ") + net::DateLabel(net::DayOf(Opens)) + ", rents paid " + std::to_string(Life.RentsPaid) + "/" +
+				std::to_string(D.Gate.MinRentsPaid) + ", paid online events " +
+				std::to_string(std::max(P.OnlineEvents, P.Paid100)) + "/" + std::to_string(D.Gate.MinEvents);
 			if (D.Gate.MinAbi100 > 0)
 			{
 				Out += ", last-100 average " + Money(P.Abi100) + "/" + Money(D.Gate.MinAbi100);
@@ -298,7 +302,12 @@ std::string Session::DebugSite(const std::string& Args)
 		{
 			return site::FillCopy(site::CopyText("err:joined"), {{"Site", net::Def(Named).Name}});
 		}
-		site::Invite(Life.Sites, Life, Named, World, 0, false);
+		// The letter gives the reason the record meets (its gate's), or, forced past every gate, none it can't back up (why:3).
+		rep::Public P = Record();
+		rep::FromHistory(P, History);
+		int Why = 3;
+		Why = site::GateMet(Named, P, Life.RentsPaid, World, &Why) ? Why : 3;
+		site::Invite(Life.Sites, Life, Named, World, Why, false);
 		Save();
 		return net::Def(Named).Name + "'s invitation is in Mail.";
 	}
@@ -334,8 +343,30 @@ std::string Session::DebugSite(const std::string& Args)
 	}
 	if (Verb == "advance")
 	{
+		// The sites' calendar runs Hours ahead while the clock stays where it is (a test's fast-forward), so whatever that brings
+		// (a withdrawal landing, the 1st's rakeback, a letter) happens now and is dated now: a bank line, a wallet line or a
+		// letter dated after the clock would sit in the future of every screen (C3).
 		const double Hours = W.size() > 1 ? std::max(0.0, std::atof(W[1].c_str())) : 24.0;
 		SiteStep(World, World + Hours * 60.0);
+		for (life::LedgerEntry& E : Life.Ledger)
+		{
+			E.At = std::min(E.At, World);
+		}
+		for (life::Letter& M : Life.Inbox)
+		{
+			M.At = std::min(M.At, World);
+		}
+		for (site::Account& A : Life.Sites.Accounts)
+		{
+			for (site::Line& L : A.Lines)
+			{
+				L.At = std::min(L.At, World);
+			}
+		}
+		for (site::Transfer& X : Life.Sites.Transfers)
+		{
+			X.ArrivesAt = X.State != 0 ? std::min(X.ArrivesAt, World) : X.ArrivesAt;
+		}
 		Save();
 		return "The sites' calendar moved on " + Fixed(Hours, 0) + " hours. " + DebugSite("describe");
 	}

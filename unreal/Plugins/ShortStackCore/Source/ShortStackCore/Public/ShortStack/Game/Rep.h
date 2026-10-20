@@ -78,6 +78,7 @@ struct Public
 	int SiteAccounts = 0;
 	Chips Abi100 = 0; // the average buy-in of the last hundred tracked events
 	int OnlineSeriesTitles = 0;
+	int Paid100 = 0; // the paid events among the last hundred (History): the sites' gates count at least these (C3)
 };
 
 SHORTSTACKCORE_API Public Of(const life::State& L, const kast::Channel& C, const world::World* W, double World);

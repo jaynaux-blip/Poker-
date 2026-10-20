@@ -228,6 +228,7 @@ void FromHistory(Public& P, const std::vector<HistoryEntry>& History)
 	}
 	P.Abi100 = Paid > 0 ? Spent / Paid : 0;
 	P.OnlineSeriesTitles = Titles;
+	P.Paid100 = Paid;
 }
 
 double RenownOf(const Public& P)

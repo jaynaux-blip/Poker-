@@ -578,7 +578,7 @@ inline std::string NetFormat(const net::EventTemplate& T)
 	case net::Format::Bounty: return "Progressive KO";
 	case net::Format::Mystery: return "Mystery Bounty";
 	case net::Format::Satellite: return "Satellite";
-	case net::Format::Flip: return "Flip & Go";
+	case net::Format::Flip: return "Flip & Run";
 	}
 	return "";
 }

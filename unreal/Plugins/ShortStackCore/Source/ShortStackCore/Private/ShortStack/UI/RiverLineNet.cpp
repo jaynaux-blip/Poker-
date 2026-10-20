@@ -1208,7 +1208,7 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	{
 		Bx += NetPill(*C, NetUpper(T.Speed), Bx, By, T.Speed == "Hyper" ? pal::Orange : T.Speed == "Turbo" ? Hex(0x4f9bff) : Hex(0x9b6bff), false, 9.5f) + 5.0f;
 	}
-	const char* FmtTag = T.Fmt == net::Format::Bounty ? "PKO" : T.Fmt == net::Format::Mystery ? "MYSTERY" : T.Fmt == net::Format::Satellite ? "SATELLITE" : T.Fmt == net::Format::Flip ? "FLIP & GO" : T.Fmt == net::Format::ReEntry ? "RE-ENTRY" : nullptr;
+	const char* FmtTag = T.Fmt == net::Format::Bounty ? "PKO" : T.Fmt == net::Format::Mystery ? "MYSTERY" : T.Fmt == net::Format::Satellite ? "SATELLITE" : T.Fmt == net::Format::Flip ? "FLIP & RUN" : T.Fmt == net::Format::ReEntry ? "RE-ENTRY" : nullptr;
 	if (FmtTag)
 	{
 		const Color Fc = T.Fmt == net::Format::Bounty ? pal::Orange : T.Fmt == net::Format::Mystery ? Hex(0xd46bff) : T.Fmt == net::Format::Satellite ? pal::Gold : T.Fmt == net::Format::Flip ? pal::Red : pal::Muted;

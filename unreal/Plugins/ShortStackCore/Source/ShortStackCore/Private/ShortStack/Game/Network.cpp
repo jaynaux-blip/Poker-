@@ -990,7 +990,10 @@ EventInstance Network::Make(int TemplateIndex, double Start) const
 		E.Entries = std::max(8, static_cast<int>(std::round(Field * Factor)));
 		E.Pool = T.BuyInCents == 0 ? T.GtdCents : std::max(T.GtdCents, Contribution * static_cast<Chips>(E.Entries));
 	}
-	const double Speed = T.Fmt == Format::Flip ? 0.25 : 1.0;
+	// RiverLine's Flip Frenzy flips all-in from the first hand, so it runs a quarter of a normal event (U9: as it was). A rival's
+	// Flip & Run plays as a short-stacked eight-handed hyper (core-sites), so it takes a hyper's full time: at a quarter the
+	// lobby called a running one Finished and closed its late registration after ten minutes (C3).
+	const double Speed = T.Fmt == Format::Flip && NetSite == SiteId::RiverLine ? 0.25 : 1.0;
 	E.Duration = T.LevelMinutes * (14.0 + 3.2 * std::log2(static_cast<double>(E.Entries) / static_cast<double>(T.TableSize) + 1.0)) * Speed;
 	E.LateReg = std::min(static_cast<double>(T.LateRegMinutes), E.Duration * 0.55);
 	return E;
@@ -1400,7 +1403,7 @@ bool Network::Joinable(const EventInstance& E, std::string* Lock, int Unlocks) c
 	const bool Bounty = T.Fmt == Format::Bounty || T.Fmt == Format::Mystery;
 	const char* Why = T.JoinIndex >= 0 ? nullptr
 		: T.Omaha ? "Pot-Limit Omaha unlocks later in your career."
-		: T.Fmt == Format::Flip && NetSite == SiteId::RiverLine ? "Flip & Go unlocks later in your career." // a rival's start short and play as hypers
+		: T.Fmt == Format::Flip && NetSite == SiteId::RiverLine ? "Flip & Run unlocks later in your career." // a rival's start short and play as hypers
 		: E.Entries > 3000 ? "Fields this big unlock later in your career."
 		: Bounty && !(Unlocks & UnlockBounty) ? "Cash in any tournament to unlock bounty events."
 		: T.Fmt == Format::Satellite && !(Unlocks & UnlockSatellite) ? "Make a final table to unlock satellites."
@@ -1949,7 +1952,10 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 				const bool Week = Opened <= static_cast<double>(Rules->LaunchDay) * MinutesPerDay && Sunday;
 				Body = Week ? site::FillCopy(Body, {{"Gtd", MoneyShort(Sunday->GtdCents)}}) : std::string(site::CopyText("news:launch:" + Key + ":late"));
 			}
-			const double At = Opened + (NetSite == SiteId::RunItTwice ? 60.0 : 9.0 * 60.0);
+			// A lobby that opens at midnight (its own day, or the day after an older save loads) posts in the morning; one forced
+			// open mid-day (ss.Site.Launch) posts at its minute, so its page isn't empty while it's open (C3).
+			const bool Midnight = std::fmod(Opened, MinutesPerDay) == 0.0;
+			const double At = Midnight ? Opened + (NetSite == SiteId::RunItTwice ? 60.0 : 9.0 * 60.0) : Opened;
 			Post(At, NewsKind::Schedule, Title, Body, NetSite == SiteId::RunItTwice ? "NEW LOBBY" : "LAUNCH");
 			Post(At + 1.0, NewsKind::Schedule, site::CopyText("news:promo:" + Key + ":title"), site::CopyText("news:promo:" + Key), "PROMO");
 		}
@@ -1965,15 +1971,19 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 			}
 		}
 		std::stable_sort(Short.begin(), Short.end(), [](const std::pair<Chips, const EventInstance*>& A, const std::pair<Chips, const EventInstance*>& B) { return A.first > B.first; });
+		// A headline's money in whole dollars, as news writes it ("left the $67,000 guarantee $1,890 short", C3).
+		const auto Dollars = [](Chips C) { return "$" + Grouped(static_cast<int64_t>(std::llround(static_cast<double>(C) / 100.0))); };
 		for (size_t K = 0; K < Short.size() && K < 3; ++K)
 		{
 			const EventInstance& E = *Short[K].second;
 			const EventTemplate& T = TemplateOf(E);
 			const std::string EventName = !T.Series.empty() ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
-			const std::vector<std::pair<std::string, std::string>> Vars = {{"Event", EventName}, {"Amount", Money(Short[K].first)}, {"Entries", Grouped(E.Entries)},
-				{"Gtd", Money(T.GtdCents)}, {"Site", Rules->Name}};
+			const std::vector<std::pair<std::string, std::string>> Vars = {{"Event", EventName}, {"Amount", Dollars(Short[K].first)}, {"Entries", Grouped(E.Entries)},
+				{"Gtd", Dollars(T.GtdCents)}, {"Site", Rules->Name}};
+			// The item's figure (the card's big number, the ticker's "(…)") is the headline's whole dollars too, never "$1,889.50"
+			// beside "$1,890" (review-c3-fixes).
 			Post(E.Start + E.LateReg, NewsKind::Record, site::FillCopy(site::CopyText("news:overlay:title"), Vars), site::FillCopy(site::CopyText("news:overlay"), Vars), "OVERLAY",
-				Short[K].first);
+				static_cast<Chips>(std::llround(static_cast<double>(Short[K].first) / 100.0)) * 100);
 		}
 		// A series a week out.
 		for (const SeriesInfo& S : AllSeries)

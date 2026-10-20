@@ -80,7 +80,7 @@ struct SeatVis
 	bool IsRival = false;
 	std::string Country; // ISO 3166 alpha-2 ("" when unknown)
 	bool Regular = false; // one of the network's regulars (the leaderboards know them)
-	bool Pro = false;     // Team RiverLine
+	bool Pro = false;     // a site team's pro: Team RiverLine, or the player under Team RunItTwice (C3)
 	Chips Stack = 0;
 	Chips Bet = 0;
 	std::vector<Card> Hole; // known to the viewer (hero, or revealed)

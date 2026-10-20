@@ -74,7 +74,7 @@ enum class Format : int
 	Bounty,  // progressive knockout
 	Mystery, // mystery bounty
 	Satellite,
-	Flip, // flip & go
+	Flip, // flip & run (the player sees "Flip & Run": "Flip & Go" is a real site's format name, C3)
 };
 
 enum class Status : int

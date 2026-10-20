@@ -1273,6 +1273,13 @@ std::string Gate(const Brand& Br, const Book& B, const life::State& L, const rep
 		const bool Stream = P.Partner && P.Followers >= 2500 && P.Avg30 >= 75.0;
 		return Stream || T >= 4 ? std::string() : std::string("Partner with 2,500 followers and 75 a night.");
 	}
+	if (Br.Site >= 0 && !Br.Offer.Only.empty() && Br.Id != "riverline")
+	{
+		// A rival site's team (Team RunItTwice): its own door is the whole gate, whatever the sponsor standing (the user's
+		// call, 2026-10-20), so an online grinder who has put 100 events into RunItTwice, or won a series there, hears from it.
+		return SiteTeamGate(Br, B, L) ? std::string()
+									  : Br.Short + " signs players who grind its tables: " + std::to_string(SiteTeamEvents) + " events there, or a series title won there.";
+	}
 	if (Br.Needs.Followers > 0 || Br.Needs.AvgViewers > 0 || Br.Needs.Partner)
 	{
 		const bool Ok = P.Followers >= Br.Needs.Followers && P.Avg30 >= static_cast<double>(Br.Needs.AvgViewers) && (!Br.Needs.Partner || P.Partner);

@@ -15,6 +15,10 @@
 // the money, the rent line, the gates, the promotions, the player's numbers by site, the rivals' News, the threading contract,
 // the save lines, the marks, SiteStep's cost, the copy lint and the trademark screen, and the soft population's bound on 300
 // sit-and-gos a site ("sites_test soft [count]" plays more).
+//
+// C3 (the gate audit's fixes): RiverLine's row never below its last hundred (HeroBySite), letters that carry money always go
+// (PaidLetters), a rival's Flip & Run runs a hyper's full time (RealSchedules), overlay headlines in whole dollars (RivalNews),
+// and no real site's format name in any string a player reads (SitesFormatNames).
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "CopyLint.h"
 #include "ShortStack/AI/Grading.h"
@@ -42,10 +46,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -1114,7 +1120,7 @@ void RealSchedules()
 	Expect(Spark && Spark->BuyInCents == 550 && Spark->StartMinute == 20 * 60 && Spark->GtdCents > 0 && Spark->Featured, "the Spark Jackpot: $5.50 every night at 8 PM, guaranteed");
 	Expect(Flip && Flip->Fmt == net::Format::Flip && Flip->EveryMinutes == 60 && Flip->Speed == "Hyper" && Ig.FindTemplate("ignite.flip-go-bounty") &&
 			Ig.FindTemplate("ignite.flip-go-bounty")->Fmt == net::Format::Bounty,
-		"Flip & Go every hour, and the Flip & Go Bounty");
+		"Flip & Run every hour, and the Flip & Run Bounty");
 	Expect(Blaze && Blaze->BuyInCents == 1100 && Blaze->Days == 1 << 6 && Blaze->GtdCents == 1600000, "the Sunday Blaze: $11 on Sundays, $16,000 guaranteed (" + (Blaze ? ss::Money(Blaze->GtdCents) : std::string()) + ")");
 	const net::EventTemplate* Hundred = Rt.FindTemplate("runittwice.sunday-100k");
 	const net::EventTemplate* Grind = Rt.FindTemplate("runittwice.sunday-grind");
@@ -1159,7 +1165,7 @@ void RealSchedules()
 		}
 	}
 	Expect(Priced && Seen.size() >= 12, "every rival series event is priced at a standard buy-in (" + std::to_string(Seen.size() - 1) + " of them in use)");
-	// The lobby: a rival's Flip & Go plays (RiverLine's "Flip & Go unlocks later" is RiverLine's), its tables and pace its own.
+	// The lobby: a rival's Flip & Run plays (RiverLine's "Flip & Run unlocks later" is RiverLine's), its tables and pace its own.
 	const int Day = ss::world::DayOn(2026, 11, 20);
 	int Flips = 0;
 	bool FlipsPlay = true;
@@ -1180,10 +1186,47 @@ void RealSchedules()
 	{
 		if (net::Shared().TemplateOf(E).Fmt == net::Format::Flip && !RlLocked)
 		{
-			RlLocked = !net::Shared().Joinable(E, &RlLock, 7) && RlLock == "Flip & Go unlocks later in your career.";
+			RlLocked = !net::Shared().Joinable(E, &RlLock, 7) && RlLock == "Flip & Run unlocks later in your career.";
 		}
 	}
-	Expect(Flips == 24 && FlipsPlay && RlLocked, "Ignite's 24 Flip & Go a day play from a short stack at once; RiverLine's Flip Frenzy is still locked (" + std::to_string(Flips) + ")");
+	Expect(Flips == 24 && FlipsPlay && RlLocked, "Ignite's 24 Flip & Run a day play from a short stack at once; RiverLine's Flip Frenzy is still locked (" + std::to_string(Flips) + ")");
+	// (C3, the audit's should-fix 3.) A rival's Flip & Run is a short-stacked eight-handed hyper, not RiverLine's all-in flip, so
+	// the lobby gives it a hyper's full time: at RiverLine's quarter it called a running one Finished about 18 minutes in and
+	// closed its late registration near 10. The engine plays one out; the lobby's clock covers it. RiverLine's keeps its quarter.
+	{
+		const net::EventInstance* Fr = nullptr;
+		std::vector<net::EventInstance> Today = Ig.Window(Day * SitesDay + 18 * 60.0, Day * SitesDay + 19 * 60.0);
+		for (const net::EventInstance& E : Today)
+		{
+			Fr = !Fr && Ig.TemplateOf(E).Fmt == net::Format::Flip ? &E : Fr;
+		}
+		double Played = 0.0;
+		bool Running = false;
+		if (Fr)
+		{
+			const ss::LobbyEvent L = Ig.Listing(*Fr, nullptr, 0);
+			ss::Tournament T(L.Spec, "Hero", "sites-flip-length");
+			for (int Guard = 0; !T.bFinished && Guard < 100000; ++Guard)
+			{
+				T.SimulateTick();
+			}
+			Played = T.ClockMinutes() - L.Spec.StartClock;
+			Running = T.bFinished && Ig.Live(*Fr, Fr->Start + 0.9 * Played).St != net::Status::Finished;
+		}
+		const net::EventTemplate* Frenzy = net::Shared().FindTemplate("flip-1");
+		bool Quarter = false;
+		for (const net::EventInstance& E : net::Shared().Window(Day * SitesDay, (Day + 1) * SitesDay))
+		{
+			const net::EventTemplate& T = net::Shared().TemplateOf(E);
+			Quarter = Quarter || (&T == Frenzy &&
+									 E.Duration == T.LevelMinutes * (14.0 + 3.2 * std::log2(static_cast<double>(E.Entries) / static_cast<double>(T.TableSize) + 1.0)) * 0.25);
+		}
+		std::printf("flip & run: %d entries, the lobby's %.0f minutes (late registration %.0f) against the engine's %.0f\n", Fr ? Fr->Entries : 0, Fr ? Fr->Duration : 0.0,
+			Fr ? Fr->LateReg : 0.0, Played);
+		Expect(Fr && Played > 20.0 && Fr->Duration >= Played && Running && Quarter,
+			"Ignite's Flip & Run runs the lobby's full hyper time (" + SitesNum(Fr ? Fr->Duration : 0.0) + " minutes against the engine's " + SitesNum(Played) +
+				"), still running 90% of the way in; RiverLine's Flip Frenzy keeps its quarter");
+	}
 }
 
 /** Whether an instance overlays: what its field puts in falls short of its guarantee. */
@@ -1515,6 +1558,15 @@ void Invitations()
 	P.OnlineEvents = 150;
 	Expect(site::GateMet(net::SiteId::Ignite, P, 2, After) && !site::GateMet(net::SiteId::Ignite, P, 1, After), "Ignite: 150 and two rents paid, yes; one rent, no (Act I isn't over)");
 	Expect(!site::GateMet(net::SiteId::Ignite, P, 2, (net::Def(net::SiteId::Ignite).LaunchDay - 1) * SitesDay + 600.0), "Ignite: never before it opens");
+	{
+		// A career older than the world's tracker (or a save with no world): its last hundred in History count (C3).
+		ss::rep::Public Old;
+		Old.Paid100 = 100;
+		Expect(!site::GateMet(net::SiteId::Ignite, Old, 2, After), "Ignite: 100 in History and none tracked is still under 150");
+		Old.OnlineEvents = 40;
+		Old.Paid100 = 150;
+		Expect(site::GateMet(net::SiteId::Ignite, Old, 2, After), "Ignite: the gate counts History's paid events when the tracker has fewer");
+	}
 	P.OnlineEvents = 300;
 	P.Abi100 = 1099;
 	int Why = -1;
@@ -1690,6 +1742,56 @@ void Promotions()
 	Expect(M.Sites.RiverLine.Rake == 50 && M.Sites.RiverLine.MonthKey == "2026-11", "Rewards count RiverLine's rake only, by month");
 }
 
+/**
+ * (C3, the audit's should-fix 2.) A letter that carries money always goes, even in a week its company has already written
+ * (C2's N5 rule for Rerun's statements): RunItTwice's "Your tickets are in" minutes after its welcome, the first Second Run
+ * statement and RiverLine's first Rewards statement inside the week of "We noticed". A letter with nothing in it still waits.
+ */
+void PaidLetters()
+{
+	const double T0 = ss::world::DayOn(2026, 11, 26) * SitesDay + 600.0; // Thursday, Nov 26: Dec 1 is five days on
+	const ss::rep::Public P;
+	std::vector<std::pair<std::string, std::string>> Texts;
+	const auto Has = [](const State& L, const char* Thread, const std::string& Subject) {
+		int N = 0;
+		for (const ss::life::Letter& M : L.Inbox)
+		{
+			N += M.Source == "site" && M.Thread == Thread && M.Subject == Subject ? 1 : 0;
+		}
+		return N;
+	};
+	State R;
+	Chips Bank = 100000;
+	site::Join(R.Sites, net::SiteId::RunItTwice, T0);
+	site::Step(R.Sites, R, Bank, P, 0, T0, T0, Texts); // the welcome, at once
+	Expect(site::Deposit(R.Sites, R, Bank, net::SiteId::RunItTwice, 5000, "", T0 + 5.0).empty() && R.TicketsFor("runittwice.sunday-grind") == 1 &&
+			R.TicketsFor("runittwice.supper-stack") == 2,
+		"RunItTwice's welcome tickets on a $50 first deposit");
+	Expect(Has(R, "runittwice", "Your RunItTwice account is open") == 1 && Has(R, "runittwice", "Your tickets are in") == 1,
+		"\"Your tickets are in\" arrives with the tickets, five minutes after the welcome letter");
+	Expect(Has(R, "riverline", "We noticed") == 1, "RiverLine notices the deposit");
+	// November's rake: $60 on RunItTwice (Member, 15%) and $40 on RiverLine (Silver, a tier up with the boost: Gold, 14%).
+	site::OnBuyIn(R.Sites, net::SiteId::RunItTwice, 0, 6000, "Buy-in", T0 + 60.0);
+	site::OnBuyIn(R.Sites, net::SiteId::RiverLine, 0, 4000, "Buy-in", T0 + 60.0);
+	const Chips Before = Bank;
+	site::Step(R.Sites, R, Bank, P, 0, T0 + 60.0, site::NextMonthStart(T0) + 60.0, Texts);
+	Expect(Bank == Before + 560 && Has(R, "riverline", "RiverLine Rewards: Gold, November") == 1,
+		"RiverLine's first Rewards statement goes out with its $5.60, though \"We noticed\" came that week");
+	Expect(site::AccountOf(R.Sites, net::SiteId::RunItTwice)->Lines.back().Cents == 900 && Has(R, "runittwice", "Second Run Club: November") == 1,
+		"the first Second Run statement goes out with its $9.00, though RunItTwice wrote twice that week");
+	// Nothing in it, it waits: Ignite's bonus-end letter in the week of its welcome.
+	State I;
+	Chips IBank = 100000;
+	site::Join(I.Sites, net::SiteId::Ignite, T0);
+	site::Step(I.Sites, I, IBank, P, 0, T0, T0, Texts);
+	site::Deposit(I.Sites, I, IBank, net::SiteId::Ignite, 5000, "", T0 + 5.0);
+	site::Account* Ia = site::AccountOf(I.Sites, net::SiteId::Ignite);
+	Ia->BonusExpires = T0 + 2 * SitesDay;
+	site::Step(I.Sites, I, IBank, P, 0, T0 + 5.0, T0 + 3 * SitesDay, Texts);
+	Expect(Ia->BonusPending == 0 && Has(I, "ignite", "Your welcome bonus has ended") == 0 && Has(I, "ignite", "You're in") == 1,
+		"a letter with no money in it still keeps to one a week (the bonus's end, two days after the welcome)");
+}
+
 void HeroBySite()
 {
 	// RiverLine's boards never move for a rival's result (bug 7): StatsFrom reads RiverLine's events only.
@@ -1744,11 +1846,15 @@ void HeroBySite()
 	Expect(InDecember.SiteBoard == 0.0 && InDecember.Wins == 1, "Ignite's Month board: November's points are gone in December (its win still counts)");
 	// (Review.) Past the last hundred (History is full), RiverLine's lifetime numbers come from the world's tracker, which follows
 	// the player everywhere, less every rival account's (bug 7): Earnings less LifetimeWon, Tournaments less LifetimeEvents,
-	// Season the world's RiverLine-only HeroPoints.
+	// Season the world's RiverLine-only HeroPoints. (C3: the hundred here are out of the money, no prize and no points, so the
+	// tracker's numbers are the larger and the subtraction shows.)
 	ss::world::World W;
 	W.Create(92u, 1440.0 + 127.0);
 	W.GrantHeroResults(160);
-	const std::vector<ss::HistoryEntry> Full(100, History.front());
+	ss::HistoryEntry OutOfTheMoney = History.front();
+	OutOfTheMoney.Place = std::max(2, OutOfTheMoney.Entrants);
+	OutOfTheMoney.Prize = 0;
+	const std::vector<ss::HistoryEntry> Full(100, OutOfTheMoney);
 	site::Book Two;
 	site::Join(Two, net::SiteId::Ignite, Now - SitesDay);
 	site::Join(Two, net::SiteId::RunItTwice, Now - SitesDay);
@@ -1765,6 +1871,26 @@ void HeroBySite()
 			Less.Tournaments == Whole.Tournaments - 7 && Whole.SeasonPoints == W.HeroSeasonPoints() && Short.Earnings == A.Earnings && Short.Tournaments == A.Tournaments,
 		"RiverLine's lifetime row from a full History: the tracker's " + ss::Money(Whole.Earnings) + " less the rivals' $40.00 (" + ss::Money(Less.Earnings) +
 			"); a History short of a hundred reads StatsFrom");
+	// (C3, the audit's should-fix 1.) Never below what History shows. The tracker only exists since abeb60b and nothing back-fills
+	// it, so a career older than it (or a save that kept no world: the creator fixture) has a tracker short of its own last
+	// hundred, and the YOU row fell to $0, 0 tournaments and 0 points. Each number is the larger of the two.
+	{
+		ss::world::World Before;
+		Before.Create(92u, 1440.0 + 127.0); // the tracker knows nothing of the player
+		const std::vector<ss::HistoryEntry> Cashed(100, History.front()); // a hundred $40 cashes on RiverLine
+		const net::HeroStats Hist = net::StatsFrom("grinder_3c", Cashed, Now);
+		const net::HeroStats Pre = site::HeroOn(net::SiteId::RiverLine, "grinder_3c", Cashed, Two, &Before, Now);
+		Expect(Hist.Earnings == 400000 && Hist.Tournaments == 100 && Hist.SeasonPoints > 0.0 && Pre.Earnings == Hist.Earnings && Pre.Tournaments == Hist.Tournaments &&
+				Pre.SeasonPoints == Hist.SeasonPoints,
+			"a career older than the tracker: RiverLine's row is its last hundred's (" + ss::Money(Pre.Earnings) + ", " + std::to_string(Pre.Tournaments) + " events, " +
+				SitesNum(Pre.SeasonPoints) + " points), never $0");
+		// A tracker that began partway through: each number on its own, the larger of the two.
+		const net::HeroStats Mixed = site::HeroOn(net::SiteId::RiverLine, "grinder_3c", Cashed, Two, &W, Now);
+		Expect(Mixed.Earnings == std::max<Chips>(Hist.Earnings, Tr.Prizes - Lv.Prizes - 4000) && Mixed.Tournaments == std::max(Hist.Tournaments, Tr.Events - Lv.Events - 7) &&
+				Mixed.SeasonPoints == std::max(Hist.SeasonPoints, W.HeroSeasonPoints()) && Mixed.Tournaments > Hist.Tournaments,
+			"a tracker that began partway: Earnings " + ss::Money(Mixed.Earnings) + " (History's " + ss::Money(Hist.Earnings) + "), " + std::to_string(Mixed.Tournaments) +
+				" events (the tracker's), each the larger");
+	}
 }
 
 void RivalNews()
@@ -1782,15 +1908,44 @@ void RivalNews()
 	bool Promo = false;
 	bool Overlay = false;
 	bool Quiet = true;
+	// (C3.) A headline's money is in whole dollars ("left the $67,000 guarantee $1,890 short"), never "$1,889.50".
+	const auto Cents = [](const std::string& Text) {
+		for (size_t At = Text.find('$'); At != std::string::npos; At = Text.find('$', At + 1))
+		{
+			size_t K = At + 1;
+			while (K < Text.size() && ((Text[K] >= '0' && Text[K] <= '9') || Text[K] == ','))
+			{
+				++K;
+			}
+			if (K > At + 1 && K + 1 < Text.size() && Text[K] == '.' && Text[K + 1] >= '0' && Text[K + 1] <= '9')
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	bool Whole = true;
+	bool Figure = true;
+	std::string OverlayLine;
 	for (const net::NewsItem& It : Week)
 	{
 		Opened = Opened || (It.Title == "Ignite Poker is live" && It.Body.find("$25K Sunday Blaze") != std::string::npos && It.Tag == "LAUNCH");
 		Promo = Promo || It.Tag == "PROMO";
 		Overlay = Overlay || (It.Tag == "OVERLAY" && It.Title.find("overlays by") != std::string::npos && It.Body.find("Ignite covered the difference.") != std::string::npos);
+		// (The event's own name keeps its buy-in, "$5.50 Spark Jackpot"; the money it's short is what's counted.)
+		const size_t By = It.Title.find(" overlays by ");
+		Whole = Whole && (It.Tag != "OVERLAY" || (By != std::string::npos && !Cents(It.Title.substr(By)) && !Cents(It.Body)));
+		// (review-c3-fixes) The figure the item carries (the news card's big number, the ticker's "(...)") is the headline's
+		// whole dollars, never "$983.61" beside "overlays by $984".
+		Figure = Figure && (It.Tag != "OVERLAY" || (By != std::string::npos && It.Amount > 0 && It.Amount % 100 == 0 &&
+								   It.Title.compare(By, std::string::npos, " overlays by $" + ss::Grouped(It.Amount / 100)) == 0));
+		OverlayLine = It.Tag == "OVERLAY" && OverlayLine.empty() ? It.Title + ": " + It.Body + " [" + ss::Money(It.Amount) + "]" : OverlayLine;
 		Quiet = Quiet && It.Tag != "RCOP 2026" && It.Tag != "SCHEDULE" && It.Tag != "RECORD" && It.Tag != "YOU" && It.At >= Launch * SitesDay;
 	}
 	Expect(Opened && Promo, "Ignite's News opens with its launch (\"a $25K Sunday Blaze\") and its welcome");
 	Expect(Overlay, "Ignite's News reports the overlays it paid");
+	Expect(Overlay && Whole, "an overlay's headline counts whole dollars (" + OverlayLine + ")");
+	Expect(Overlay && Figure, "an overlay's figure beside the headline is the same whole dollars (" + OverlayLine + ")");
 	Expect(Quiet, "nothing of RiverLine's on Ignite's page, nothing before it opened");
 	bool Lobby = false;
 	for (const net::NewsItem& It : Rt.News(net::NightOneDay * SitesDay + 127.0, Hero, 20))
@@ -2197,7 +2352,9 @@ void SitesCopy()
 	const char* Real[] = {"pokerstars", "ggpoker", "partypoker", "888", "wsop", "world series", "wpt", "run it once", "upswing", "bodog", "ignition", "americas cardroom", "natural8",
 		"bovada", "pokerbros", "global poker", "acr poker", "youtube", "twitch", "kick", "tiktok", "rumble", "vimeo", "dailymotion", "skrill", "neteller", "paypal", "venmo",
 		"ecopayz", "muchbetter", "betonline", "coinpoker", "winamax", "unibet", "northpot", "bluffharbor", "aceline", "chipcity", "felt republic", "pocketrocket", "riverbend",
-		"saltwater poker", "cardroom 88", "tiltproof", "monster", "red bull", "rockstar"};
+		"saltwater poker", "cardroom 88", "tiltproof", "monster", "red bull", "rockstar",
+		// (C3) real sites' format names: GGPoker's Flip & Go, Spin & Gold, Rush & Cash and All-in or Fold; PokerStars' Spin & Go and Zoom.
+		"flip & go", "flip and go", "spin & go", "spin and go", "spin & gold", "rush & cash", "all-in or fold", "zoom poker"};
 	std::vector<std::string> Names;
 	for (net::SiteId S : SitesRivals)
 	{
@@ -2231,6 +2388,135 @@ void SitesCopy()
 	}
 	Expect(Hit.empty(), "the trademark screen passes over the sites, reps, series, events and promotions" + (Hit.empty() ? std::string() : ": " + Hit));
 }
+
+/** The string literals in a source file (comments and character literals skipped, escapes read), with their lines. */
+std::vector<std::pair<int, std::string>> SitesLiterals(const std::string& Src)
+{
+	std::vector<std::pair<int, std::string>> Out;
+	int Line = 1;
+	const size_t N = Src.size();
+	for (size_t I = 0; I < N; ++I)
+	{
+		const char C = Src[I];
+		if (C == '\n')
+		{
+			++Line;
+		}
+		else if (C == '/' && I + 1 < N && Src[I + 1] == '/')
+		{
+			while (I + 1 < N && Src[I + 1] != '\n')
+			{
+				++I;
+			}
+		}
+		else if (C == '/' && I + 1 < N && Src[I + 1] == '*')
+		{
+			for (I += 2; I + 1 < N && !(Src[I] == '*' && Src[I + 1] == '/'); ++I)
+			{
+				Line += Src[I] == '\n' ? 1 : 0;
+			}
+			++I;
+		}
+		else if (C == '\'')
+		{
+			for (++I; I < N && Src[I] != '\'' && Src[I] != '\n'; ++I)
+			{
+				I += Src[I] == '\\' ? 1 : 0;
+			}
+		}
+		else if (C == '"')
+		{
+			std::string S;
+			for (++I; I < N && Src[I] != '"' && Src[I] != '\n'; ++I)
+			{
+				if (Src[I] == '\\' && I + 1 < N)
+				{
+					++I;
+				}
+				S += Src[I];
+			}
+			Out.emplace_back(Line, S);
+		}
+	}
+	return Out;
+}
+
+/**
+ * (C3, the lead's decision.) No real site's format name on any screen. "Flip & Go" is GGPoker's, and RiverLine already showed it
+ * (its format label, the lobby's tag, the lock line), so every player-facing name is "Flip & Run" now: Ignite's Flip & Run and
+ * Flip & Run Bounty, RiverLine's label and lock line, Bree's letter and Ignite's launch news. The ids ("flip-go", Format::Flip)
+ * stay, as saves and tickets key on them. Every string literal in the core and the game module is screened, and the sites' copy.
+ */
+void SitesFormatNames()
+{
+	const char* Real[] = {"flip & go", "flip and go", "flip&go", "spin & go", "spin and go", "spin&go", "spin & gold", "rush & cash", "all-in or fold", "zoom poker"};
+	std::vector<std::pair<std::string, std::string>> Said;
+	for (const std::string& S : site::Inventory())
+	{
+		Said.emplace_back("sites' copy", S);
+	}
+	for (const std::string& S : site::CopyLabels())
+	{
+		Said.emplace_back("sites' labels", S);
+	}
+	for (const net::SiteDef& D : net::Sites())
+	{
+		for (const net::EventTemplate& T : net::Site(D.Id).Templates())
+		{
+			Said.emplace_back(D.Key + " " + T.Id, T.Name + " " + T.Blurb);
+		}
+	}
+	std::string Lock;
+	for (const net::EventInstance& E : net::Shared().Window(5 * SitesDay, 6 * SitesDay))
+	{
+		std::string Why;
+		Lock = net::Shared().TemplateOf(E).Fmt == net::Format::Flip && !net::Shared().Joinable(E, &Why, 0) ? Why : Lock;
+	}
+	Said.emplace_back("RiverLine's lock line", Lock);
+	namespace fs = std::filesystem;
+	const fs::path Roots[] = {fs::path(SS_TESTS_DIR) / ".." / "Source", fs::path(SS_TESTS_DIR) / ".." / ".." / ".." / "Source"};
+	int Files = 0;
+	for (const fs::path& Root : Roots)
+	{
+		std::error_code Ec;
+		for (fs::recursive_directory_iterator It(Root, Ec), End; !Ec && It != End; It.increment(Ec))
+		{
+			const std::string Ext = It->path().extension().string();
+			if (!It->is_regular_file() || (Ext != ".cpp" && Ext != ".h"))
+			{
+				continue;
+			}
+			std::FILE* F = std::fopen(It->path().string().c_str(), "rb");
+			if (!F)
+			{
+				continue;
+			}
+			std::string Src;
+			char Buf[65536];
+			for (size_t Got = 0; (Got = std::fread(Buf, 1, sizeof(Buf), F)) > 0;)
+			{
+				Src.append(Buf, Got);
+			}
+			std::fclose(F);
+			++Files;
+			for (const std::pair<int, std::string>& L : SitesLiterals(Src))
+			{
+				Said.emplace_back(It->path().filename().string() + ":" + std::to_string(L.first), L.second);
+			}
+		}
+	}
+	std::string Hit;
+	for (const std::pair<std::string, std::string>& S : Said)
+	{
+		for (const char* R : Real)
+		{
+			Hit += copylint::Lower(S.second).find(R) != std::string::npos ? std::string(R) + " at " + S.first + " (\"" + S.second + "\") " : std::string();
+		}
+	}
+	std::printf("format names: %zu strings screened, from %d source files\n", Said.size(), Files);
+	Expect(Files >= 200 && Lock == "Flip & Run unlocks later in your career." && Hit.empty(),
+		"no real site's format name anywhere a player reads (Flip & Run, never GGPoker's)" + (Hit.empty() ? std::string() : ": " + Hit));
+}
 } // namespace sites_test
 
 int main(int Argc, char** Argv)
@@ -2261,6 +2547,7 @@ int main(int Argc, char** Argv)
 	RentLine();
 	Invitations();
 	Promotions();
+	PaidLetters();
 	HeroBySite();
 	RivalNews();
 	RivalNewsIsTheirs();
@@ -2269,6 +2556,7 @@ int main(int Argc, char** Argv)
 	SitesMarks();
 	StepBudget();
 	SitesCopy();
+	SitesFormatNames();
 	SoftBound(300);
 	std::printf("sites tests: %d passed, %d failed in %.1fs\n", Passed, Failures, SitesSeconds(T0));
 	return Failures == 0 ? 0 : 1;

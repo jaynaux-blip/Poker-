@@ -96,7 +96,8 @@ std::string FillCopy(const std::string& Template, const std::vector<std::pair<st
 /**
  * The player's numbers for a site's boards (§5.8, bug 7). RiverLine: StatsFrom's (its own events only), and with a world
  * and a full History (the last 100 can't be the whole record) the lifetime numbers by subtraction: Earnings = the world's
- * online prizes less every rival account's LifetimeWon, Season = the world's HeroPoints, Tournaments the same way. A rival:
+ * online prizes less every rival account's LifetimeWon, Season = the world's HeroPoints, Tournaments the same way, each never below
+ * StatsFrom's (a career older than the tracker, or a save without a world, C3). A rival:
  * its account's record (Season, Wins, Final tables this year, LifetimeWon as Earnings), its running series' points and this
  * month's points from History, and SiteBoard = this month's points (Ignite's Month board).
  */

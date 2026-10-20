@@ -46,6 +46,20 @@
 //     (its key and its bank line), a balance accruing, and open candidates: the plan's (AUTO), the player's own from the
 //     last hyper, the Embercrest's, and a hand at Dee's table on the last night (storytime). Without its world lines, like
 //     pre_update2_*. Its numbers follow Rerun's model, so a change there (the Shorts' FormatSubs, say) means writing it again.
+//     (Gate 3's world moves who plays the Embercrest's nights: on a gate 3 tree write-g2 writes another creator, Ignite's
+//     letter in Mail from day 151 but its last Nightly leaving no candidate open, which Gate2Fixtures needs. The committed
+//     file stays C2's, update 2 C3; a gate 2 save in a gate 3 build is MigrationAll2's case.)
+//
+// Update 2's gate 3 fixture (update2 SPEC §6.5, §7.5 C3; for PIE §8.3), built with gate 3's code (compiled when the tree has
+// gate 2's and the rival sites' money rules):
+//   - update2_multisite: an Established career that grinds RiverLine's Hyper Sprints five an afternoon from Night One (two
+//     rents paid from the bank, the Rewards rake counting), signs Team RiverLine under the "plays only on RiverLine" clause
+//     (the offer made as ss.Sponsor.Offer makes it), and once Act I is over takes Ignite's invitation as its gate sends it
+//     (Mail's Accept) and RunItTwice's as ss.Site.Invite sends it (its own door, 300 events at an $11 average, is months
+//     away): $50 by card on each (the fees, "We noticed", Ignite's pending bonus, RunItTwice's tickets), the Supper Stack on
+//     a RunItTwice ticket and the Spark Jackpot on Ignite's wallet the same evening (one strike under the clause, its cure
+//     date in Mail), and the next morning $40 out of Ignite: saved that afternoon with the withdrawal in transit. Without
+//     its world lines, like pre_update2_*.
 //
 //   fixture_tool write <dir>   writes the fixtures (the saves without their world lines, which go in world_v1.txt;
 //                              <name>.expected.ssave is what loading and saving the v1 save gives)
@@ -53,6 +67,8 @@
 //   fixture_tool write-g1 <dir>  writes update 2's gate 1 fixtures (deterministic: two writes are byte for byte the same)
 //   fixture_tool write-g2 <dir> [show]  writes update 2's gate 2 fixture (deterministic too; "show" prints the channel as it
 //                              grows, every ten days, and the save's video lines)
+//   fixture_tool write-g3 <dir> [show]  writes update 2's gate 3 fixture (deterministic too; "show" prints the career's days
+//                              and the site book as it goes)
 //   fixture_tool transcript    prints every save as the careers are built and as each fixture is loaded and played on
 //                              (texts, ledgers, the whole save but the world, whose size and hash are printed), the
 //                              c09bc31 careers first, then update 2's; a build whose transcript matches the code the
@@ -91,6 +107,14 @@
 #include "ShortStack/Rng.h"
 #else
 #define SS_FIXTURE_GATE2 0
+#endif
+
+// Gate 3's rival sites (their money rules came with B3's private SitesDetail.h; Sites.h's declarations date from Phase A).
+#if SS_FIXTURE_GATE2 && __has_include("../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h")
+#define SS_FIXTURE_GATE3 1
+#include "ShortStack/Game/Sites.h"
+#else
+#define SS_FIXTURE_GATE3 0
 #endif
 
 #include <algorithm>
@@ -1702,6 +1726,179 @@ ss::SaveData Creator(int MaxDays)
 }
 #endif
 
+#if SS_FIXTURE_GATE3
+// ---------------------------------------------------------------- update 2's gate 3 fixture (write-g3)
+
+/** A site's event (RiverLine's or a rival's) sprinted from its start to the result, the hands Sprint hands back played with
+ *  the grader's best (whole stretches an update: the same frames on any machine). False when it didn't open. */
+bool MultisiteSprint(ss::Session& S, double& Now, const ss::net::Network& Net, const ss::net::EventInstance& I)
+{
+	if (S.WorldMinutes() < I.Start)
+	{
+		Now = At(S, Now, I.Start);
+	}
+	Fed(S);
+	S.RegisterEvent(Net.Listing(I, nullptr, S.Unlocks()));
+	if (S.CurrentScreen != ss::Screen::Table)
+	{
+		return false;
+	}
+	S.SprintBudgetMs = 1.0e9;
+	for (int Frames = 0; S.CurrentScreen == ss::Screen::Table && Frames < 4000000; ++Frames)
+	{
+		S.CurrentPace = ss::Pace::Sprint;
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		ActBest(S, Now);
+	}
+	S.LeaveResults();
+	return true;
+}
+
+/** A daily's next start from From to To on a site's network, its launch week's one-off included ("ignite.spark-jackpot" or
+ *  "ignite.spark-jackpot-launch4": a launch week runs the guaranteed dailies as one-offs of their own). */
+bool MultisiteNext(const ss::net::Network& Net, const std::string& Base, double From, double To, ss::net::EventInstance& Out)
+{
+	bool Found = false;
+	for (const ss::net::EventInstance& I : Net.Window(From, To))
+	{
+		const std::string Template = I.Id.substr(0, I.Id.find('@'));
+		if (I.Start >= From && (Template == Base || Template.rfind(Base + "-launch", 0) == 0) && (!Found || I.Start < Out.Start))
+		{
+			Out = I;
+			Found = true;
+		}
+	}
+	return Found;
+}
+
+/** The site's invitation as Mail holds it, unanswered (State 0 or 3), or null. */
+const ss::site::Invitation* MultisiteOpenInvite(const ss::Session& S, ss::net::SiteId Site)
+{
+	const ss::site::Invitation* Out = nullptr;
+	for (const ss::site::Invitation& I : S.Life.Sites.Invites)
+	{
+		Out = I.Site == Site && (I.State == 0 || I.State == 3) ? &I : Out;
+	}
+	return Out;
+}
+
+/** One line on the career (the "show" mode's progress). */
+void MultisiteLine(const ss::Session& S, int K, const char* What)
+{
+	std::string Book;
+	for (const ss::site::Account& A : S.Life.Sites.Accounts)
+	{
+		Book += std::string(" ") + ss::net::KeyOf(A.Site) + " " + ss::Money(A.Cents);
+	}
+	std::printf("  [multisite] day %3d %s: %s; bank %s, rents paid %d, %zu results, Rewards rake %s;%s\n", K, ss::net::DateLabel(ss::net::DayOf(S.WorldMinutes())).c_str(), What,
+		ss::Money(S.BankrollCents).c_str(), S.Life.RentsPaid, S.History.size(), ss::Money(S.Life.Sites.RiverLine.Rake).c_str(), Book.c_str());
+}
+
+/** update2_multisite (see the top): the grind to Ignite's invitation, the sites joined, an evening on both, a withdrawal. */
+ss::SaveData Multisite()
+{
+	namespace net = ss::net;
+	const char* Seed = "fixture-g3-multisite";
+	Hooks H;
+	ss::Session S(H, Seed);
+	S.NewCareer(Someone());
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	// Night One: the last job's savings (both rents and a cushion; the grind's buy-ins come out of the same bank).
+	S.BankrollCents += 260000;
+	const net::Network& Home = net::Shared();
+	const int FirstDay = net::DayOf(S.WorldMinutes());
+	int JoinedDay = -1;
+	for (int K = 0; K < 70; ++K)
+	{
+		const int DayNo = FirstDay + K;
+		// 2 PM: five Hyper Sprints at RiverLine, back to back (the rake counts toward RiverLine Rewards).
+		Now = CreatorUntil(S, Now, static_cast<double>(DayNo) * Day + 14.0 * 60.0);
+		for (int N = 0; N < 5 && JoinedDay < 0; ++N)
+		{
+			net::EventInstance I;
+			if (Home.Next("hyper-sprint", S.WorldMinutes() + 1.0, I))
+			{
+				MultisiteSprint(S, Now, Home, I);
+			}
+		}
+		// The second Monday: Team RiverLine's offer, signed from Mail; signed from now on, it plays only on RiverLine.
+		if (K == 6)
+		{
+			const std::string Offered = S.DebugSponsor("offer riverline");
+			const std::string Id = ss::sponsor::OpenOfferFor(S.Life.Sponsors, "riverline", S.WorldMinutes());
+			const std::string Why = Id.empty() ? Offered : S.SignDeal(Id);
+			if (!Why.empty() || Transcript)
+			{
+				std::printf("  [multisite] Team RiverLine: %s\n", Why.empty() ? "signed" : Why.c_str());
+			}
+		}
+		// Act I over (two rents paid) and 150 paid events: Ignite's letter comes on its own at a midnight. Accepted from Mail
+		// that morning with $50 by card; RunItTwice's invitation as the console sends it, accepted, $50 by card (its tickets).
+		if (JoinedDay < 0 && MultisiteOpenInvite(S, net::SiteId::Ignite))
+		{
+			Now = CreatorUntil(S, Now, static_cast<double>(DayNo) * Day + 15.0 * 60.0);
+			std::string Why = S.AnswerInvite(net::SiteId::Ignite, true);
+			Why += S.Deposit(net::SiteId::Ignite, 5000, "card");
+			Why += S.DebugSite("invite runittwice").find("invitation is in Mail") != std::string::npos ? std::string() : std::string("no RunItTwice letter. ");
+			Why += S.AnswerInvite(net::SiteId::RunItTwice, true);
+			Why += S.Deposit(net::SiteId::RunItTwice, 5000, "card");
+			if (!Why.empty())
+			{
+				std::printf("  [multisite] joining: %s\n", Why.c_str());
+			}
+			JoinedDay = K;
+			// That evening: the Supper Stack on a RunItTwice ticket (the strike under the clause, the first site play of the
+			// day), then the Spark Jackpot on Ignite's wallet (no second strike the same day).
+			const net::Network& Rit = net::Site(net::SiteId::RunItTwice);
+			const net::Network& Ign = net::Site(net::SiteId::Ignite);
+			const double Evening = static_cast<double>(DayNo) * Day + 17.0 * 60.0;
+			net::EventInstance I;
+			if (!MultisiteNext(Rit, "runittwice.supper-stack", Evening, Evening + 6.0 * 60.0, I) || !MultisiteSprint(S, Now, Rit, I))
+			{
+				std::printf("  [multisite] the Supper Stack didn't open\n");
+			}
+			if (!MultisiteNext(Ign, "ignite.spark-jackpot", Evening, Evening + 6.0 * 60.0, I) || !MultisiteSprint(S, Now, Ign, I))
+			{
+				std::printf("  [multisite] the Spark Jackpot didn't open\n");
+			}
+			if (Transcript)
+			{
+				MultisiteLine(S, K, "joined Ignite and RunItTwice, an evening on both");
+			}
+			continue;
+		}
+		// The next morning: $40 out of Ignite to the bank (three to five days), and saved that afternoon with it in transit.
+		if (JoinedDay >= 0 && K == JoinedDay + 1)
+		{
+			Now = CreatorUntil(S, Now, static_cast<double>(DayNo) * Day + 10.0 * 60.0);
+			const std::string Why = S.Withdraw(net::SiteId::Ignite, 4000, "bank");
+			if (!Why.empty())
+			{
+				std::printf("  [multisite] the withdrawal: %s\n", Why.c_str());
+			}
+			Now = CreatorUntil(S, Now, static_cast<double>(DayNo) * Day + 15.0 * 60.0);
+			Fed(S);
+			Now = Wait(S, Now, 0.2);
+			S.Save();
+			if (Transcript)
+			{
+				MultisiteLine(S, K, "saved");
+			}
+			return H.Last;
+		}
+		if (Transcript && K % 5 == 4)
+		{
+			MultisiteLine(S, K, "the grind");
+		}
+	}
+	std::printf("fixture: Ignite's invitation never came in 70 days\n");
+	S.Save();
+	return H.Last;
+}
+#endif
+
 bool WriteFile(const std::string& Path, const std::string& Text)
 {
 	FILE* F = std::fopen(Path.c_str(), "wb");
@@ -1742,12 +1939,30 @@ int main(int Argc, char** Argv)
 {
 	using namespace fixture_tool;
 	const std::string Mode = Argc > 1 ? Argv[1] : "";
-	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "write-g2" && Mode != "transcript")
+	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "write-g2" && Mode != "write-g3" && Mode != "transcript")
 	{
-		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool write-g1 <dir> [show] | fixture_tool write-g2 <dir> [show] | fixture_tool transcript\n");
+		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool write-g1 <dir> [show] | fixture_tool write-g2 <dir> [show] | fixture_tool write-g3 <dir> "
+					"[show] | fixture_tool transcript\n");
 		return 2;
 	}
 	Transcript = Mode == "transcript";
+	if (Mode == "write-g3")
+	{
+#if SS_FIXTURE_GATE3
+		if (Argc < 3)
+		{
+			std::printf("usage: fixture_tool write-g3 <dir> [show]\n");
+			return 2;
+		}
+		// "show" prints the career every five days and the site book as it goes, for the lead's PIE notes.
+		Transcript = Argc > 3 && std::string(Argv[3]) == "show";
+		const std::string Dir = std::string(Argv[2]) + "/";
+		return WriteFile(Dir + "update2_multisite.ssave", WithoutWorld(Multisite().Serialize())) ? 0 : 1;
+#else
+		std::printf("fixture_tool write-g3: this tree has no rival sites (update 2 gate 3)\n");
+		return 2;
+#endif
+	}
 	if (Mode == "write-g2")
 	{
 #if SS_FIXTURE_GATE2

@@ -22,6 +22,10 @@
 //     and holds what §6.5 and PIE §8.2 read: the videos, the tails and stubs, the open candidates (AUTO, the player's own,
 //     the Embercrest's, Dee's storytime), Partner, a payout and a balance; it plays on through the calendar and takes
 //     §8.2's four fakes.
+//   - Gate3Fixtures (update 2 C3, SPEC §6.5): update2_multisite (fixture_tool write-g3) parses, writes back byte for byte, and
+//     holds what PIE §8.3 reads: accounts on both rivals (deposits, fees, wallets that add up), a withdrawal in transit that
+//     lands once through the calendar (across a save and a load too), RunItTwice's tickets, rival results, Rewards' boost,
+//     and Team RiverLine under the clause with one strike.
 //   - StreamLinks (update 2 C2, the g2 audit's S3): a hand's stream moments (SkipMoments' on the skip path, the player's
 //     knockouts on both) fire before its Rerun candidate is cut, so the candidate links them; a streamed bounty event's
 //     knockouts are each on stream once, linked to their own hands.
@@ -56,6 +60,7 @@
 #include "ShortStack/UI/FrontEnd.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -175,8 +180,10 @@ void RoundTrip(const char* Name, const std::string& Saved, const std::string& Ex
 
 void SaveFixtures()
 {
-	// (update2_creator, update 2 C2's: a gate fixture written by this build's code, so byte for byte with every line kept.)
-	const char* Names[] = {"pre_segment_fresh.ssave", "pre_segment_mid_nightly.ssave", "pre_segment_team_riverline.ssave", "pre_segment_evicted.ssave", "update2_creator.ssave"};
+	// (Every update2_* fixture, update 2 §6.5: gate fixtures written by this build's code, so byte for byte with every line kept.
+	// C1's two, C2's creator, C3's multi-site career.)
+	const char* Names[] = {"pre_segment_fresh.ssave", "pre_segment_mid_nightly.ssave", "pre_segment_team_riverline.ssave", "pre_segment_evicted.ssave", "update2_blank_world.ssave",
+		"update2_auto_mid_nightly.ssave", "update2_creator.ssave", "update2_multisite.ssave"};
 	for (const char* Name : Names)
 	{
 		const std::string Saved = Fixture(Name);
@@ -1226,6 +1233,229 @@ void Gate2Fixtures()
 	}
 	std::printf("  gate 2 fixtures: Studio after the four fakes: %zu candidates (%zu before)\n", P.Life.Video.Open.size(), Before);
 	Expect(Faked && Fakes >= 4 && Chips && P.Life.Video.Open.size() <= 30, "gate 2 fixtures: PIE's four fakes go into Studio (the skipped hand AUTO, Dee's storytime)");
+}
+
+// ------------------------------------------------------------------ update 2 C3: the gate's fixture
+
+/**
+ * The copy pass on letters as the game wrote them (update 2 §1.8, §6.7, C3's trademark pass): every body passes the copy lint
+ * (a letter's 600 characters); no subject or body names a real site, wallet or video platform, one of the ten sites that
+ * closed in the world's own story, a real format's name ("Flip & Go"), or the rivals' old names; and none says the game
+ * played for anyone ("AI", "bot", "autoplay": U1). Returns the problems (printed).
+ */
+int ScreenLetters(const char* Suite, const std::vector<life::Letter>& Letters)
+{
+	std::vector<std::pair<std::string, std::string>> Bodies;
+	int Problems = 0;
+	auto Word = [](const std::string& Text, const std::string& W, bool Blind) {
+		std::string T = Text;
+		std::string Find = W;
+		if (Blind)
+		{
+			T = copylint::Lower(T);
+			Find = copylint::Lower(Find);
+		}
+		for (size_t P = T.find(Find); P != std::string::npos; P = T.find(Find, P + 1))
+		{
+			const bool Left = P == 0 || !std::isalnum(static_cast<unsigned char>(T[P - 1]));
+			const bool Right = P + Find.size() >= T.size() || !std::isalnum(static_cast<unsigned char>(T[P + Find.size()]));
+			if (Left && Right)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	for (const life::Letter& L : Letters)
+	{
+		Bodies.emplace_back(L.From + " / " + L.Subject, L.Body);
+		for (const std::string& Text : {L.Subject, L.Body, L.From})
+		{
+			for (const char* Name : {"PokerStars", "GGPoker", "partypoker", "888poker", "ACR", "Ignition", "BetOnline", "WPT Global", "CoinPoker", "Natural8", "Winamax", "Unibet",
+					 "Run It Once", "Skrill", "Neteller", "PayPal", "Venmo", "ecoPayz", "MuchBetter", "YouTube", "TikTok", "Rumble", "Vimeo", "Dailymotion", "NorthPot", "BluffHarbor",
+					 "AceLine", "ChipCity", "Felt Republic", "PocketRocket", "RiverBend Poker", "Saltwater Poker", "CardRoom 88", "Tiltproof", "Flip & Go", "Flopjoy", "Turnstone"})
+			{
+				if (Word(Text, Name, false))
+				{
+					++Problems;
+					std::printf("COPY (%s) %s: names \"%s\": %s\n", Suite, L.Subject.c_str(), Name, Text.c_str());
+				}
+			}
+			for (const char* W : {"AI", "bot", "bots", "autoplay"})
+			{
+				if (Word(Text, W, std::string(W) != "AI"))
+				{
+					++Problems;
+					std::printf("COPY (%s) %s: says \"%s\": %s\n", Suite, L.Subject.c_str(), W, Text.c_str());
+				}
+			}
+		}
+	}
+	return Problems + copylint::Run(Suite, Bodies, copylint::LetterBody);
+}
+
+/** The save a session writes now, its world's text in it (a session may hand the host a snapshot to write instead). */
+std::string SavedNowSeams(ss::Session& S, Hooks& H)
+{
+	S.Save();
+	ss::SaveData D = H.Last;
+	if (D.WorldText.empty() && D.WorldSnapshot)
+	{
+		D.WorldSnapshot->Write(D.WorldText);
+	}
+	return D.Serialize();
+}
+
+/**
+ * Gate3Fixtures (update 2 C3, SPEC §6.5, for PIE §8.3): update2_multisite (fixture_tool write-g3) parses, writes back byte for
+ * byte, loads a second time the same, and holds what §6.5 asks of it: accounts on both rivals (Ignite's from its own gate,
+ * after Act I and 150 paid events; RunItTwice's as the console sends it), a card deposit on each with its fee in the bank's
+ * ledger, each wallet its lines' sum, a withdrawal in transit, RunItTwice's tickets, rival results, Rewards with the "We
+ * noticed" boost, and a Team RiverLine deal under the clause with one strike. In a session, through the calendar: the
+ * withdrawal lands once, as one bank line net of its fee, on its minute; a save and a load across it never lands it twice.
+ */
+void Gate3Fixtures()
+{
+	namespace net = ss::net;
+	namespace site = ss::site;
+	const char* Name = "update2_multisite.ssave";
+	const std::string Saved = Fixture(Name);
+	ss::SaveData D;
+	const bool Parsed = Saved.rfind("shortstack.nightone.v2\n", 0) == 0 && ss::SaveData::Parse(Saved, D);
+	Expect(Parsed, "gate 3 fixtures: update2_multisite.ssave is there and parses");
+	if (!Parsed)
+	{
+		return;
+	}
+	const std::string Again = D.Serialize();
+	ss::SaveData Second;
+	Expect(Again == Saved && ss::SaveData::Parse(Again, Second) && Second.Serialize() == Again,
+		"gate 3 fixtures: update2_multisite.ssave writes back byte for byte and loads a second time the same");
+	std::printf("  gate 3 fixtures: %s: %s (%zu bytes)\n", Name, Again == Saved ? "written back byte for byte" : "NOT written back byte for byte", Again.size());
+	const site::Book& B = D.Life.Sites;
+	const site::Account* Ign = nullptr;
+	const site::Account* Rit = nullptr;
+	for (const site::Account& A : B.Accounts)
+	{
+		Ign = A.Site == net::SiteId::Ignite ? &A : Ign;
+		Rit = A.Site == net::SiteId::RunItTwice ? &A : Rit;
+	}
+	auto Lines = [](const site::Account* A) {
+		ss::Chips Sum = 0;
+		for (const site::Line& L : A ? A->Lines : std::vector<site::Line>())
+		{
+			Sum += L.Cents;
+		}
+		return Sum;
+	};
+	const site::Transfer* Out = nullptr;
+	for (const site::Transfer& X : B.Transfers)
+	{
+		Out = X.State == 0 && X.Out && X.Site == net::SiteId::Ignite ? &X : Out;
+	}
+	int Deposits = 0;
+	int CardFees = 0;
+	for (const life::LedgerEntry& E : D.Life.Ledger)
+	{
+		Deposits += E.Kind == 7 && E.Amount == -5000 && E.Label.rfind("Deposit: ", 0) == 0 ? 1 : 0;
+		CardFees += E.Kind == life::LedgerSites && E.Amount < 0 ? 1 : 0;
+	}
+	const double World = D.ClockMinutes + ss::net::MinutesPerDay * ss::net::NightOneDay;
+	double IgniteAsked = -1.0;
+	for (const site::Invitation& I : B.Invites)
+	{
+		IgniteAsked = I.Site == net::SiteId::Ignite && I.State == 1 ? I.At : IgniteAsked;
+	}
+	const ss::sponsor::Contract* Team = nullptr;
+	for (const ss::sponsor::Contract& C : D.Life.Sponsors.Contracts)
+	{
+		Team = C.Brand == "riverline" && C.St == ss::sponsor::State::Active ? &C : Team;
+	}
+	int OnIgnite = 0, OnRit = 0;
+	for (const ss::HistoryEntry& E : D.History)
+	{
+		OnIgnite += net::SiteOf(E.EventId) == net::SiteId::Ignite ? 1 : 0;
+		OnRit += net::SiteOf(E.EventId) == net::SiteId::RunItTwice ? 1 : 0;
+	}
+	std::printf("  gate 3 fixtures: the multi-site career on %s: bank %s, Ignite %s, RunItTwice %s, %s in transit (arriving %s), %d rents paid, Team RiverLine %s (%d strike), "
+				"%d Ignite and %d RunItTwice results\n",
+		ss::net::DateLabel(ss::net::DayOf(World)).c_str(), ss::Money(D.BankrollCents).c_str(), Ign ? ss::Money(Ign->Cents).c_str() : "none", Rit ? ss::Money(Rit->Cents).c_str() : "none",
+		Out ? ss::Money(Out->Cents - Out->FeeCents).c_str() : "nothing", Out ? ss::net::DateLabel(ss::net::DayOf(Out->ArrivesAt)).c_str() : "-", D.Life.RentsPaid,
+		Team ? Team->T.Only.c_str() : "none", Team ? Team->Strikes : 0, OnIgnite, OnRit);
+	Expect((D.Life.Update2LinesRead & (life::U2Sites | life::U2Rewards)) == (life::U2Sites | life::U2Rewards) && D.WorldText.empty() && D.Life.RentsPaid >= 2,
+		"gate 3 fixtures: the sites' and Rewards' lines kept, two rents paid (Act I over), no world lines (an Established world)");
+	Expect(Ign && Rit && Ign->Cents == Lines(Ign) && Rit->Cents == Lines(Rit) && Ign->Deposited == 5000 && Rit->Deposited == 5000 && Deposits == 2 && CardFees == 2,
+		"gate 3 fixtures: $50 by card on each rival (the bank's kind-7 line and its fee), each wallet its own lines' sum");
+	Expect(Out && Out->Cents == 4000 && Out->FeeCents == 300 && Out->ArrivesAt > World && Ign && Ign->Withdrawn == 4000,
+		"gate 3 fixtures: $40 out of Ignite, in transit (in neither balance) until it lands");
+	Expect(IgniteAsked >= static_cast<double>(ss::net::Def(net::SiteId::Ignite).LaunchDay) * ss::net::MinutesPerDay && Ign && Ign->BonusPending > 0 &&
+			   D.Life.Sites.RiverLine.BoostUntil > World && D.Life.TicketsFor("runittwice.sunday-grind") == 1 && D.Life.TicketsFor("runittwice.supper-stack") == 1,
+		"gate 3 fixtures: Ignite's letter after its launch, its bonus pending, RiverLine's boost, RunItTwice's tickets left");
+	Expect(Team && Team->T.Only == "riverline" && Team->Strikes == 1 && OnIgnite >= 1 && OnRit >= 1,
+		"gate 3 fixtures: Team RiverLine under the clause with one strike, and results on both rivals");
+	// The copy pass on the letters as the game wrote them (the invitations, the welcomes, the tickets, "We noticed", the strike).
+	const int Copy = ScreenLetters("gate 3 fixtures: Mail", D.Life.Inbox);
+	Failures += Copy;
+	std::printf("  gate 3 fixtures: the copy pass over %zu letters: %d problems\n", D.Life.Inbox.size(), Copy);
+	// In a session: the calendar lands the withdrawal once, net of the fee, as one bank line; across a save and a load too.
+	if (!Out)
+	{
+		return;
+	}
+	const ss::Chips Net = Out->Cents - Out->FeeCents;
+	const double Arrives = Out->ArrivesAt;
+	const std::string Label = "Withdrawal: Ignite";
+	auto BankLines = [&Label](const ss::Session& S) {
+		int N = 0;
+		for (const life::LedgerEntry& E : S.Life.Ledger)
+		{
+			N += E.Label == Label && E.Kind == 7 ? 1 : 0;
+		}
+		return N;
+	};
+	Hooks H;
+	ss::Session S(H, "gate3-multisite", &D);
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.1);
+	const ss::Chips Bank = S.BankrollCents;
+	const ss::Chips Wallet = Ign ? Ign->Cents : 0;
+	// To an hour before it lands: nothing yet; saved there and loaded again; then past it.
+	S.LobbyMinutes += Arrives - 60.0 - S.WorldMinutes();
+	Now = Wait(S, Now, 0.1);
+	const bool Early = BankLines(S) == 0;
+	ss::SaveData Mid;
+	ss::SaveData::Parse(SavedNowSeams(S, H), Mid);
+	Hooks H2;
+	ss::Session L(H2, "gate3-multisite", &Mid);
+	L.CurrentScreen = ss::Screen::Lobby;
+	Now = Wait(L, Now, 0.1);
+	L.LobbyMinutes += Arrives + 2.0 * Day - L.WorldMinutes();
+	Now = Wait(L, Now, 0.1);
+	const site::Transfer* Landed = nullptr;
+	for (const site::Transfer& X : L.Life.Sites.Transfers)
+	{
+		Landed = X.Id == Out->Id ? &X : Landed;
+	}
+	const life::LedgerEntry* Line = nullptr;
+	for (const life::LedgerEntry& E : L.Life.Ledger)
+	{
+		Line = E.Label == Label && E.Kind == 7 ? &E : Line;
+	}
+	ss::Chips SpentAfter = 0;
+	for (const life::LedgerEntry& E : L.Life.Ledger)
+	{
+		SpentAfter += E.At > World && E.Label != Label ? E.Amount : 0;
+	}
+	ss::Chips WalletNow = 0;
+	for (const site::Account& A : L.Life.Sites.Accounts)
+	{
+		WalletNow = A.Site == net::SiteId::Ignite ? A.Cents : WalletNow;
+	}
+	std::printf("  gate 3 fixtures: the withdrawal lands %s: %s, the bank %s -> %s\n", Line ? (ss::net::DateLabel(ss::net::DayOf(Line->At)) + " " + ss::net::TimeLabel(Line->At)).c_str() : "never",
+		Line ? ss::Money(Line->Amount).c_str() : "-", ss::Money(Bank).c_str(), ss::Money(L.BankrollCents).c_str());
+	Expect(Early && BankLines(L) == 1 && Line && Line->Amount == Net && std::fabs(Line->At - Arrives) < 1e-6 && Landed && Landed->State == 1 && WalletNow == Wallet &&
+			   L.BankrollCents == Bank + Net + SpentAfter,
+		"gate 3 fixtures: the withdrawal lands once on its minute, one bank line net of its $3 fee, across a save and a load; the wallet doesn't move");
 }
 
 // ------------------------------------------------------------------ update 2 C2: the stream's moments and their hands
@@ -2301,6 +2531,7 @@ void SegLead()
 	seams::Wave1a();
 	seams::Gate1Fixtures();
 	seams::Gate2Fixtures();
+	seams::Gate3Fixtures();
 	seams::StreamLinks();
 	seams::RivalSites();
 }

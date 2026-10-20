@@ -1046,30 +1046,44 @@ void SitesRivalBoardHero()
 void SitesLifetime()
 {
 	// Bug 7 (§5.8): RiverLine's numbers on the laptop are site::HeroOn's: its own events only, and once History is full (it
-	// holds the last hundred, never the whole record) the lifetime ones from the world's tracker less the rivals'. Here the
-	// tracker has none of these hundred (they were written straight into History), so Career's winnings are the tracker's,
-	// not the hundred's sum.
+	// holds the last hundred, never the whole record) the lifetime ones from the world's tracker less the rivals'. C3 (the gate
+	// audit's should-fix 1): never below the hundred's own, since the tracker only exists since abeb60b and a career older than it
+	// (or a save without a world) has a tracker that knows fewer. Here the tracker knows more than the hundred (200 results
+	// granted), so Career's winnings are the tracker's; and on a laptop whose tracker knows none of them, the hundred's, never $0.
+	const auto Hundred = [](ss::Session& S) {
+		for (int K = 0; K < 100; ++K)
+		{
+			ss::HistoryEntry H;
+			H.Name = "Daily Grind";
+			H.Place = 40;
+			H.Entrants = 500;
+			H.Prize = 1 + K;
+			H.BuyInCents = 1100;
+			H.EventId = "daily-grind@" + std::to_string(1000 + K * 10);
+			S.History.push_back(H);
+		}
+	};
 	SitesLaptop P("sites-lifetime");
 	ss::Session& S = P.S;
 	P.At(SitesEvening);
-	for (int K = 0; K < 100; ++K)
-	{
-		ss::HistoryEntry H;
-		H.Name = "Daily Grind";
-		H.Place = 40;
-		H.Entrants = 500;
-		H.Prize = 1234 + K;
-		H.BuyInCents = 1100;
-		H.EventId = "daily-grind@" + std::to_string(1000 + K * 10);
-		S.History.push_back(H);
-	}
+	Hundred(S);
+	S.Living().GrantHeroResults(200);
 	const double World = S.WorldMinutes();
 	const ss::net::HeroStats Want = ss::site::HeroOn(SiteId::RiverLine, S.HeroName, S.History, S.Life.Sites, &S.Living(), World);
-	const ss::net::HeroStats Hundred = ss::net::StatsFrom(S.HeroName, S.History, World);
+	const ss::net::HeroStats Last = ss::net::StatsFrom(S.HeroName, S.History, World);
 	P.RL.OpenPage(Page::Career, P.Now);
 	const DrawList L = P.Settled();
-	SitesExpect(Want.Earnings != Hundred.Earnings && DrewRun(L, ss::Money(Want.Earnings)) && !DrewRun(L, ss::Money(Hundred.Earnings)),
+	SitesExpect(Want.Earnings > Last.Earnings && DrewRun(L, ss::Money(Want.Earnings)) && !DrewRun(L, ss::Money(Last.Earnings)),
 		"career: RiverLine's lifetime numbers are site::HeroOn's (the tracker less the rivals'), not the last hundred's");
+	SitesLaptop Q("sites-lifetime-before");
+	Q.At(SitesEvening);
+	Hundred(Q.S);
+	const ss::net::HeroStats Older = ss::site::HeroOn(SiteId::RiverLine, Q.S.HeroName, Q.S.History, Q.S.Life.Sites, &Q.S.Living(), Q.S.WorldMinutes());
+	const ss::net::HeroStats Own = ss::net::StatsFrom(Q.S.HeroName, Q.S.History, Q.S.WorldMinutes());
+	Q.RL.OpenPage(Page::Career, Q.Now);
+	const DrawList Lq = Q.Settled();
+	SitesExpect(Q.S.Living().HeroStats().Events == 0 && Own.Earnings > 0 && Older.Earnings == Own.Earnings && DrewRun(Lq, ss::Money(Own.Earnings)),
+		"career: a tracker that knows none of the hundred shows the hundred's winnings, never $0 (C3)");
 }
 
 void SitesKast()

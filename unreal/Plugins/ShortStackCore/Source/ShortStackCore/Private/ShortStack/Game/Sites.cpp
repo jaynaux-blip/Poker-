@@ -226,6 +226,9 @@ net::HeroStats HeroOn(net::SiteId S, const std::string& Name, const std::vector<
 	{
 		// RiverLine's boards (bug 7): its own events only (StatsFrom), and once History is full (the last hundred can't be the
 		// whole record) the lifetime numbers by subtraction from the world's tracker, which follows the player everywhere.
+		// Never below what History shows, though (C3): the tracker only exists since abeb60b and nothing back-fills it, so a
+		// career older than it, or a save that kept no world (the creator fixture), has a tracker short of its own last
+		// hundred, and the YOU row would fall to $0. Each number is the larger of the two.
 		net::HeroStats H = net::StatsFrom(Name, History, Now);
 		if (W && History.size() >= 100)
 		{
@@ -238,9 +241,9 @@ net::HeroStats HeroOn(net::SiteId S, const std::string& Name, const std::vector<
 				Rivals += A.LifetimeWon;
 				RivalEvents += A.LifetimeEvents;
 			}
-			H.Earnings = std::max<Chips>(0, T.Prizes - Live.Prizes - Rivals);
-			H.Tournaments = std::max(0, T.Events - Live.Events - RivalEvents);
-			H.SeasonPoints = W->HeroSeasonPoints();
+			H.Earnings = std::max<Chips>(H.Earnings, T.Prizes - Live.Prizes - Rivals);
+			H.Tournaments = std::max(H.Tournaments, T.Events - Live.Events - RivalEvents);
+			H.SeasonPoints = std::max(H.SeasonPoints, W->HeroSeasonPoints());
 		}
 		return H;
 	}

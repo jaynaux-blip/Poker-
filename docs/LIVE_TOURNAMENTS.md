@@ -2,7 +2,7 @@
 
 Draft v1, 2026-10-03. Written against `desktop-work` at 4354ebc. Extends `GAME_DESIGN.md` §3, §6 and §7. It doesn't replace them.
 
-Updated 2026-10-18 for update 2's first gate: autoplay at the live tables (§16), the skip's checkpoints (R5), the filming rule (R11) and a fresh world at the Embercrest (§17). Updated 2026-10-19 for its second gate: the live nights on Rerun, the video channel (R11).
+Updated 2026-10-18 for update 2's first gate: autoplay at the live tables (§16), the skip's checkpoints (R5), the filming rule (R11) and a fresh world at the Embercrest (§17). Updated 2026-10-19 for its second gate: the live nights on Rerun, the video channel (R11). Updated 2026-10-20 for its third gate: the rival online sites stay online (R12).
 
 **This update:** grow the Embercrest from "the Sunday tournament" into the city's **local casino card room**. It runs 2 to 3 tournaments every day, with fields of 60 to 120, in a room you can walk around.
 
@@ -64,6 +64,8 @@ Directives for every venue.
 **R10. Table size.** The Embercrest is a **6-max room**: its tables, seat anchors and table animation are built for six and a dealer. 60 to 120 entrants is 10 to 20 tables. A 9-handed room would need a new table rig and is a separate decision.
 
 **R11. No filming at the tables.** The Embercrest, like real card rooms, doesn't allow cameras at its tables, and no venue streams: Kast stays at home, and leaving for a venue ends a stream. A live night reaches the player's video channel (Rerun, built at update 2's gate 2; `GAME_DESIGN.md` §5) told vlog-style: the hands replayed as cards, the player's portrait instead of a facecam (on a Reaction thumbnail a portrait draws a few fewer clicks than a facecam), and only what the player saw. Hands the plan played through a skip are kept as well, with an AUTO chip that only the player sees, and a night's Recap can mix them with hands that were watched. Dee's game is storytime only: no names (the others are "Seat 1", "Seat 2"), no faces but the player's, "a back-room game"; the first time one goes up, Dee texts "Saw the video. No names. Good."
+
+**R12. The rival sites stay online.** Ignite Poker and RunItTwice (built at update 2's gate 3; `GAME_DESIGN.md` §5) are online sites. No venue hosts their events, and no rival hosts a bracelet or ring: the Championship Online and Ring Rush are RiverLine's partnerships with the live tours. A live buy-in, like the rent, comes only from the bank; money on a site, or on its way back from one, never pays at the desk. A site deal's "plays only on" clause covers online tables, streams and the videos of online hands, so a night at the Embercrest, and its video, is never a strike under Team RiverLine or Team RunItTwice. Team RunItTwice is the site deal that wants you in the room: four live events every 30 days in its patch, and a bonus for every live final table made wearing it.
 
 ## 4. The Embercrest Casino card room
 
@@ -227,6 +229,7 @@ Targets for this update (to verify, not promises):
 | Since then (next_segment_spec): backing (stakes, pieces, swaps, packages, coaches who back you) and sponsors (contracts, negotiation, patches, Team Embercrest) | The player backing others | |
 | Since then (update 2, gate 1): autoplay at every Embercrest event and at Dee's game from night 2, with the budgeted live skip (§16); the filming rule (R11); a fresh world's empty board and its talk (§17) | A skip at Dee's; a live skip that hands over a premium hand mid-hand; the plan's auto-peek | |
 | Since then (update 2, gate 2): the Embercrest's hands and nights on Rerun, told vlog-style, and Dee's game as storytime (R11) | | |
+| Since then (update 2, gate 3): the rival online sites, kept online: bank-only live buy-ins, no clause strike for live play, Team RunItTwice's patch at live events (R12) | | A rival site's live event, series stop or venue |
 
 ## 14. A Saturday at the Embercrest
 

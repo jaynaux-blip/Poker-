@@ -2020,7 +2020,7 @@ void Session::BuildSeats()
 		const auto Country = FieldCountry.find(P.Id);
 		V.Country = Country == FieldCountry.end() ? std::string() : Country->second;
 		V.Regular = FieldRegulars.count(P.Id) > 0;
-		V.Pro = FieldPros.count(P.Id) > 0 || (P.IsHero && TeamRiverLine());
+		V.Pro = FieldPros.count(P.Id) > 0 || (P.IsHero && (TeamRiverLine() || sponsor::Active(Life.Sponsors, "turnstone", WorldMinutes()))); // a site team's pro: Team RiverLine or Team RunItTwice (C3)
 		// One badge on the seat, the network's (next_segment_spec §5, rule C1): the world's people from the index, the
 		// player's own from the session.
 		const badge::Badge* Top = P.IsHero ? badge::Top(HeroBadges(), badge::Network, badge::FrameNone)

@@ -1,5 +1,6 @@
 #include "ShortStack/Game/Talk.h"
 #include "../StrictFloat.h"
+#include "SitesDetail.h"
 
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
@@ -502,7 +503,7 @@ const Table& Lines()
 		{"*|look:patch:stacked", {"Stacked? Those hoodies cost more than my rent."}},
 		{"*|look:patch:rangewise", {"Rangewise patch. So you're a teacher now."}},
 		{"*|look:patch:riverline", {"Team RiverLine on your chest. Look at you."}},
-		{"*|look:patch:turnstone", {"RunItTwice. Never heard of them. They pay?"}},
+		{"*|look:patch:turnstone", {"RunItTwice on your chest. The serious site. They pay you to wear that?"}}, // (G3: the site is live, with a team)
 		{"*|rumour:sponsor-you", {"Heard {brand} is sponsoring you now. Look at you.", "Word is {brand} signed you. Don't forget the little people."}},
 		{"big-lou|rumour:sponsor-you", {"{brand} sponsors you? Huh. Respect."}},
 		{"sal|rumour:sponsor-you", {"{brand}, huh. Back in my day you paid for your own hat."}},
@@ -1063,7 +1064,9 @@ void TalkFreshGather(const Session& S, TalkContext& C)
 	// watch RiverLine's boards, as with the Night Shift's: the barber and Mrs. Park don't read out online handles.
 	if (C.Speaker == "mei" || C.Speaker == "twitch" || C.Speaker == "benny")
 	{
-		const net::HeroStats Hero = net::StatsFrom(S.HeroName, S.History, Now);
+		// The player's row as the board's YOU row reads it (site::HeroOn, bug 7): past a hundred results the last hundred
+		// aren't the whole season, so StatsFrom alone could crown someone the board has below the player (C3).
+		const net::HeroStats Hero = site::HeroOn(net::SiteId::RiverLine, S.HeroName, S.History, S.Life.Sites, &W, Now);
 		const std::vector<net::BoardRow> Board = net::Shared().Leaderboard(net::Board::Season, Now, Hero, 1, nullptr);
 		if (!Board.empty() && Board.front().Value > 0.0)
 		{

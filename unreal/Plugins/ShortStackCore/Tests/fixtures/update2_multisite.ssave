@@ -1,0 +1,676 @@
+shortstack.nightone.v2
+bankroll	28822
+name	grinder_3c
+hero	name	Jesse	Cole
+hero	age	24
+hero	country	US
+hero	background	dealerskid
+hero	look	body	0	face	0	skin	3	eyes	1	brows	1	hair	3	haircolor	1	facialhair	1	build	1	height	178	outfit	0	outfitcolor	0	glasses	0	hat	0
+hero	created	1
+clock	45540.01
+life	energy	90.00
+life	heat	0.00
+life	needs	10.00	10.00
+pantry	oodle-cup	2
+life	drop	0	-1000000000.00
+life	rent	1	107500	82080.00	2
+life	evicted	0	0.00	0	0.00	0
+life	debt	0
+life	ban	0.00
+life	count	0	0	0	0	0
+life	earned	0	0
+life	backroom	0	0
+life	live	0	0	0	0
+unlock	bounty
+unlock	satellite
+unlock	sixmax
+ticket	daily-main	2
+ticket	runittwice.sunday-grind	1
+ticket	runittwice.supper-stack	1
+night	1
+night	2
+night	3
+night	4
+night	5
+night	6
+night	7
+night	8
+night	9
+night	10
+night	11
+night	12
+night	13
+night	14
+night	15
+night	16
+night	17
+night	18
+night	19
+night	20
+night	21
+night	22
+night	23
+night	24
+night	25
+night	26
+night	27
+night	28
+night	29
+night	30
+night	31
+night	32
+ledger	32580.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	32610.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	32670.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	32730.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	33990.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	34020.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	34081.60	0	82	Prize: $0.25 Hyper Sprint
+ledger	34110.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	34168.10	0	82	Prize: $0.25 Hyper Sprint
+ledger	34170.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	34200.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	35430.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	35460.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	35490.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	35520.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	35580.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	36870.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	36900.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	36930.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	36960.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	37020.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	38310.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	38340.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	38370.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	38430.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	38490.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	38880.00	3	-107500	Rent (collected)
+ledger	39750.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	39780.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	39810.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	39840.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	39900.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	39956.70	0	50	Prize: $0.25 Hyper Sprint
+ledger	41190.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	41267.70	0	181	Prize: $0.25 Hyper Sprint
+ledger	41280.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	41310.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	41340.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	41400.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	42630.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	42695.80	0	103	Prize: $0.25 Hyper Sprint
+ledger	42720.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	42780.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	42840.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	42870.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	44070.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	44130.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	44190.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	44248.80	0	50	Prize: $0.25 Hyper Sprint
+ledger	44250.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	44310.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	45510.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	45540.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	45570.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	45600.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	45660.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	45707.60	7	-5000	Deposit: Ignite
+ledger	45707.60	14	-150	Ignite card fee
+ledger	45707.60	7	-5000	Deposit: RunItTwice
+ledger	45707.60	14	-125	RunItTwice card fee
+text	dee-bubble
+text	dee-embercrest-13
+text	dee-embercrest-20
+text	dee-embercrest-27
+text	dee-embercrest-6
+text	dee-ft
+text	dee-itm
+text	first-cash
+text	marcus-intro
+text	needs:thirsty:1
+text	needs:thirsty:10
+text	needs:thirsty:11
+text	needs:thirsty:12
+text	needs:thirsty:13
+text	needs:thirsty:14
+text	needs:thirsty:15
+text	needs:thirsty:16
+text	needs:thirsty:17
+text	needs:thirsty:18
+text	needs:thirsty:19
+text	needs:thirsty:2
+text	needs:thirsty:20
+text	needs:thirsty:21
+text	needs:thirsty:22
+text	needs:thirsty:23
+text	needs:thirsty:24
+text	needs:thirsty:25
+text	needs:thirsty:26
+text	needs:thirsty:27
+text	needs:thirsty:28
+text	needs:thirsty:29
+text	needs:thirsty:3
+text	needs:thirsty:30
+text	needs:thirsty:31
+text	needs:thirsty:32
+text	needs:thirsty:4
+text	needs:thirsty:5
+text	needs:thirsty:6
+text	needs:thirsty:7
+text	needs:thirsty:8
+text	needs:thirsty:9
+text	rent-friday
+text	rent-notice:26
+text	rent-soon:26
+text	rent-thursday
+text	rent-tonight:26
+text	sam-intro
+text	world:10080:1601:3
+text	world:10080:1602:3
+text	world:20160:1605:3
+text	world:20160:1606:3
+leds	0	1	1
+kast	ch	0	0	0.0000	0.00	0.0	0	0	0	0	0	46980.00	0	0
+kast	earn	0	0	0	0	0	0	0
+kast	growth	0	1260	0.0	0	0	4	0	0.0	0	0	0	32	0
+result	$5.50 Spark Jackpot	28	373	2001	100.000	550	ignite.spark-jackpot-launch4@45840
+result	$5.50 Supper Stack	74	152	0	0.000	550	runittwice.supper-stack@45720
+result	$0.25 Hyper Sprint	38	180	0	100.000	25	hyper-sprint@45660
+result	$0.25 Hyper Sprint	67	180	0	0.000	25	hyper-sprint@45600
+result	$0.25 Hyper Sprint	161	180	0	0.000	25	hyper-sprint@45570
+result	$0.25 Hyper Sprint	175	180	0	0.000	25	hyper-sprint@45540
+result	$0.25 Hyper Sprint	149	180	0	0.000	25	hyper-sprint@45510
+result	$0.25 Hyper Sprint	45	180	0	100.000	25	hyper-sprint@44310
+result	$0.25 Hyper Sprint	32	180	0	0.000	25	hyper-sprint@44250
+result	$0.25 Hyper Sprint	22	180	50	0.000	25	hyper-sprint@44190
+result	$0.25 Hyper Sprint	51	180	0	0.000	25	hyper-sprint@44130
+result	$0.25 Hyper Sprint	47	180	0	0.000	25	hyper-sprint@44070
+result	$0.25 Hyper Sprint	78	180	0	0.000	25	hyper-sprint@42870
+result	$0.25 Hyper Sprint	157	180	0	100.000	25	hyper-sprint@42840
+result	$0.25 Hyper Sprint	30	180	0	0.000	25	hyper-sprint@42780
+result	$0.25 Hyper Sprint	86	180	0	0.000	25	hyper-sprint@42720
+result	$0.25 Hyper Sprint	10	180	103	100.000	25	hyper-sprint@42630
+result	$0.25 Hyper Sprint	130	180	0	100.000	25	hyper-sprint@41400
+result	$0.25 Hyper Sprint	83	180	0	0.000	25	hyper-sprint@41340
+result	$0.25 Hyper Sprint	144	180	0	100.000	25	hyper-sprint@41310
+result	$0.25 Hyper Sprint	128	180	0	0.000	25	hyper-sprint@41280
+result	$0.25 Hyper Sprint	6	180	181	0.000	25	hyper-sprint@41190
+result	$0.25 Hyper Sprint	23	180	50	100.000	25	hyper-sprint@39900
+result	$0.25 Hyper Sprint	50	180	0	100.000	25	hyper-sprint@39840
+result	$0.25 Hyper Sprint	170	180	0	100.000	25	hyper-sprint@39810
+result	$0.25 Hyper Sprint	147	180	0	100.000	25	hyper-sprint@39780
+result	$0.25 Hyper Sprint	143	180	0	0.000	25	hyper-sprint@39750
+result	$0.25 Hyper Sprint	94	180	0	0.000	25	hyper-sprint@38490
+result	$0.25 Hyper Sprint	68	180	0	0.000	25	hyper-sprint@38430
+result	$0.25 Hyper Sprint	105	180	0	0.000	25	hyper-sprint@38370
+result	$0.25 Hyper Sprint	122	180	0	0.000	25	hyper-sprint@38340
+result	$0.25 Hyper Sprint	140	180	0	0.000	25	hyper-sprint@38310
+result	$0.25 Hyper Sprint	50	180	0	0.000	25	hyper-sprint@37020
+result	$0.25 Hyper Sprint	63	180	0	0.000	25	hyper-sprint@36960
+result	$0.25 Hyper Sprint	143	180	0	100.000	25	hyper-sprint@36930
+result	$0.25 Hyper Sprint	123	180	0	100.000	25	hyper-sprint@36900
+result	$0.25 Hyper Sprint	177	180	0	0.000	25	hyper-sprint@36870
+result	$0.25 Hyper Sprint	120	180	0	100.000	25	hyper-sprint@35580
+result	$0.25 Hyper Sprint	48	180	0	0.000	25	hyper-sprint@35520
+result	$0.25 Hyper Sprint	176	180	0	100.000	25	hyper-sprint@35490
+result	$0.25 Hyper Sprint	150	180	0	0.000	25	hyper-sprint@35460
+result	$0.25 Hyper Sprint	123	180	0	0.000	25	hyper-sprint@35430
+result	$0.25 Hyper Sprint	97	180	0	100.000	25	hyper-sprint@34200
+result	$0.25 Hyper Sprint	166	180	0	0.000	25	hyper-sprint@34170
+result	$0.25 Hyper Sprint	14	180	82	100.000	25	hyper-sprint@34110
+result	$0.25 Hyper Sprint	14	180	82	100.000	25	hyper-sprint@34020
+result	$0.25 Hyper Sprint	161	180	0	100.000	25	hyper-sprint@33990
+result	$0.25 Hyper Sprint	87	180	0	0.000	25	hyper-sprint@32730
+result	$0.25 Hyper Sprint	89	180	0	100.000	25	hyper-sprint@32670
+result	$0.25 Hyper Sprint	78	180	0	0.000	25	hyper-sprint@32610
+result	$0.25 Hyper Sprint	112	180	0	0.000	25	hyper-sprint@32580
+result	$0.25 Hyper Sprint	128	180	0	0.000	25	hyper-sprint@32550
+result	$0.25 Hyper Sprint	2	180	513	0.000	25	hyper-sprint@31320
+result	$0.25 Hyper Sprint	175	180	0	100.000	25	hyper-sprint@31290
+result	$0.25 Hyper Sprint	24	180	50	100.000	25	hyper-sprint@31230
+result	$0.25 Hyper Sprint	52	180	0	0.000	25	hyper-sprint@31170
+result	$0.25 Hyper Sprint	71	180	0	100.000	25	hyper-sprint@31110
+result	$0.25 Hyper Sprint	153	180	0	0.000	25	hyper-sprint@29850
+result	$0.25 Hyper Sprint	63	180	0	0.000	25	hyper-sprint@29790
+result	$0.25 Hyper Sprint	169	180	0	0.000	25	hyper-sprint@29760
+result	$0.25 Hyper Sprint	162	180	0	100.000	25	hyper-sprint@29730
+result	$0.25 Hyper Sprint	29	180	0	100.000	25	hyper-sprint@29670
+result	$0.25 Hyper Sprint	38	180	0	100.000	25	hyper-sprint@28440
+result	$0.25 Hyper Sprint	115	180	0	0.000	25	hyper-sprint@28410
+result	$0.25 Hyper Sprint	44	180	0	100.000	25	hyper-sprint@28350
+result	$0.25 Hyper Sprint	104	180	0	100.000	25	hyper-sprint@28290
+result	$0.25 Hyper Sprint	105	180	0	0.000	25	hyper-sprint@28230
+result	$0.25 Hyper Sprint	38	180	0	100.000	25	hyper-sprint@27030
+result	$0.25 Hyper Sprint	25	180	50	100.000	25	hyper-sprint@26970
+result	$0.25 Hyper Sprint	47	180	0	100.000	25	hyper-sprint@26910
+result	$0.25 Hyper Sprint	95	180	0	0.000	25	hyper-sprint@26850
+result	$0.25 Hyper Sprint	111	180	0	100.000	25	hyper-sprint@26790
+result	$0.25 Hyper Sprint	94	180	0	100.000	25	hyper-sprint@25560
+result	$0.25 Hyper Sprint	110	180	0	0.000	25	hyper-sprint@25500
+result	$0.25 Hyper Sprint	106	180	0	100.000	25	hyper-sprint@25440
+result	$0.25 Hyper Sprint	37	180	0	100.000	25	hyper-sprint@25380
+result	$0.25 Hyper Sprint	180	180	0	100.000	25	hyper-sprint@25350
+result	$0.25 Hyper Sprint	39	180	0	100.000	25	hyper-sprint@24090
+result	$0.25 Hyper Sprint	50	180	0	100.000	25	hyper-sprint@24030
+result	$0.25 Hyper Sprint	49	180	0	0.000	25	hyper-sprint@23970
+result	$0.25 Hyper Sprint	146	180	0	100.000	25	hyper-sprint@23940
+result	$0.25 Hyper Sprint	151	180	0	0.000	25	hyper-sprint@23910
+result	$0.25 Hyper Sprint	95	180	0	100.000	25	hyper-sprint@22650
+result	$0.25 Hyper Sprint	157	180	0	0.000	25	hyper-sprint@22620
+result	$0.25 Hyper Sprint	152	180	0	0.000	25	hyper-sprint@22590
+result	$0.25 Hyper Sprint	102	180	0	100.000	25	hyper-sprint@22530
+result	$0.25 Hyper Sprint	35	180	0	100.000	25	hyper-sprint@22470
+result	$0.25 Hyper Sprint	97	180	0	100.000	25	hyper-sprint@21270
+result	$0.25 Hyper Sprint	172	180	0	0.000	25	hyper-sprint@21240
+result	$0.25 Hyper Sprint	59	180	0	0.000	25	hyper-sprint@21180
+result	$0.25 Hyper Sprint	22	180	50	0.000	25	hyper-sprint@21120
+result	$0.25 Hyper Sprint	13	180	82	100.000	25	hyper-sprint@21030
+result	$0.25 Hyper Sprint	1	180	991	0.000	25	hyper-sprint@19770
+result	$0.25 Hyper Sprint	39	180	0	100.000	25	hyper-sprint@19710
+result	$0.25 Hyper Sprint	175	180	0	0.000	25	hyper-sprint@19680
+result	$0.25 Hyper Sprint	52	180	0	100.000	25	hyper-sprint@19620
+result	$0.25 Hyper Sprint	127	180	0	0.000	25	hyper-sprint@19590
+result	$0.25 Hyper Sprint	142	180	0	100.000	25	hyper-sprint@18390
+result	$0.25 Hyper Sprint	106	180	0	0.000	25	hyper-sprint@18330
+result	$0.25 Hyper Sprint	4	180	266	100.000	25	hyper-sprint@18240
+closet	seeded
+closet	own	bottom.jeans.mid
+closet	own	bottom.shorts.khaki
+closet	own	outer.hoodie.charcoal
+closet	own	shoes.sneakers.white
+closet	own	top.tee.white
+closet	wear	1	outer.hoodie.charcoal
+closet	wear	2	bottom.jeans.mid
+closet	wear	3	shoes.sneakers.white
+fit	0.0000	-1000000000.00	0	0	0.00	46980.01
+groom	-8513.00	-8513.00	0
+pawn	next	412
+meal	0.00	-1000000000.00
+coach	tally	0	43	0	0	43	0	0
+coach	tally	1	22	0	0	22	0	0
+coach	tally	2	3	0	0	3	0	0
+coach	tally	3	8	0	0	8	0	0
+coach	tally	4	8	0	0	8	0	0
+coach	tally	5	12	0	0	12	0	0
+coach	tally	6	2	0	0	2	0	0
+coach	tally	7	10	0	0	10	0	0
+coach	tally	8	6	0	0	6	0	0
+coach	tally	9	1	0	0	1	0	0
+sponsor	book	46980.00	0	0
+sponsor	strikes	45720.00
+sponsor	deal	riverline@7	riverline	2	0	11194.30	21274.30	11194.30	270394.30	0	1	0	65880.00	0	0	0	-1000000000.00	0	0	45720.00	0	0	0.00	-1	0		0	0	
+sponsor	terms	riverline@7	days=180	sign=0	mo=150000	hr=2500	rd=6000	ft=0	ti=0	ce=0	cc=0	fa=0	cut=0	ex=1	cond=1	cure=14	pt=0	tc=0	ask=60,12,0,0,0,0,0,1	wants=0	ev=	perk=5.daily-main.2.10900.30	only=riverline
+sponsor	paid	only|riverline@7|31
+sponsor	paid	ticket|riverline@7|1
+badge	review	24322	0
+mail	11194.30	riverline@7	sponsor	1	0	RiverLine Player Relations	An invitation to Team RiverLine.	People in the room know your name now. Team RiverLine keeps a short roster, and we have a seat open. You'd wear the patch at every live event, stream our tournaments, and get a retainer, Daily Main tickets and the gold frame. Terms below. One condition: while the deal runs, you play, stream and post on RiverLine and nowhere else.
+mail	11194.30	riverline@7	sponsor	2	0	RiverLine Player Relations	Team RiverLine: welcome aboard.	Welcome to Team RiverLine. The patch, the gold frame and your first Daily Main tickets are on your account today. The first-Saturday community stream is the one we'll ask about.
+mail	45480.00	ignite	site	1	1	Bree Okafor, Ignite Partnerships	Poker that's actually fun	Hi, it's Bree from Ignite Poker. We hear you play a lot of tournaments, so here's ours: Flip & Run every hour, the Spark Jackpot every night at 8 PM, and tables a lot friendlier than the ones you're used to. Open an account and we'll match your first deposit 100%, up to $100. The match comes off as you play, $5 for every $20 of rake inside 60 days. Accept below and your Cashier's ready.
+mail	45707.60	ignite	site	10	0	Bree Okafor, Ignite Partnerships	You're in	Welcome to Ignite. Your account's open. Deposits go in by card for a 3% fee, $10 minimum, and we match the first one up to $100. Withdrawals reach your bank in three to five days, $3 each. Have fun out there. That's the whole idea.
+mail	45707.60	riverline	site	10	0	RiverLine Player Relations	We noticed	We saw some of your bankroll head to another site. No hard feelings, everybody shops around. But you've played with us since your first night, so for the next 60 days your RiverLine Rewards sit one tier up, on us. The Night Shift's still the Night Shift.
+mail	45707.60	runittwice	site	1	1	Ingrid Vale, RunItTwice Player Development	An invitation from RunItTwice	This is Ingrid Vale at RunItTwice. We like to say hello early. We run tournaments for grown-ups: bigger guarantees, lower rake at the top, and fields that make you earn it. Make a first deposit of $50 or more and we'll put $33 in tickets on your account: a $22 Sunday Grind and two $5.50 Supper Stacks. Accept below and the Cashier's yours.
+mail	45707.60	runittwice	site	10	0	Ingrid Vale, RunItTwice Player Development	Your RunItTwice account is open	Welcome to RunItTwice. Card deposits cost 2.5%, $10 minimum. Withdrawals reach your bank in 48 hours for a $5 fee. A first deposit of $50 or more brings your $33 in tickets, and the Second Run Club pays rakeback on the 1st once a month's rake passes $50. Good luck at the tables.
+mail	45707.60	runittwice	site	10	0	Ingrid Vale, RunItTwice Player Development	Your tickets are in	Thanks for the deposit. A $22 Sunday Grind ticket and two $5.50 Supper Stack tickets are on your account. Register for either and the ticket goes in before your balance does.
+mail	45720.00	riverline@7	sponsor	4	0	RiverLine Player Relations	Team RiverLine: about where you play.	Your deal says RiverLine and nowhere else, and today you were on RunItTwice. That's a strike. Stay on RiverLine through Thursday, Nov 19 and we're square. A second strike this term ends the deal.
+autoplay	pref	autopilot	1	1	3	73931	4	7
+autoplay	played	ignite.spark-jackpot-launch4@45840	0	1	autopilot	364	1	261	2
+autoplay	played	runittwice.supper-stack@45720	0	2	autopilot	156	0	118	1
+autoplay	played	hyper-sprint@45660	0	0	autopilot	83	1	66	2
+autoplay	played	hyper-sprint@45600	0	0	autopilot	59	0	54	1
+autoplay	played	hyper-sprint@45570	0	0	autopilot	34	0	25	1
+autoplay	played	hyper-sprint@45540	0	0	autopilot	4	0	3	1
+autoplay	played	hyper-sprint@45510	0	0	autopilot	46	0	29	1
+autoplay	played	hyper-sprint@44310	0	0	autopilot	80	1	63	1
+autoplay	played	hyper-sprint@44250	0	0	autopilot	81	0	73	2
+autoplay	played	hyper-sprint@44190	0	0	autopilot	116	0	82	2
+autoplay	played	hyper-sprint@44130	0	0	autopilot	75	0	61	1
+autoplay	played	hyper-sprint@44070	0	0	autopilot	75	0	63	1
+autoplay	played	hyper-sprint@42870	0	0	autopilot	67	0	51	1
+autoplay	played	hyper-sprint@42840	0	0	autopilot	37	1	24	1
+autoplay	played	hyper-sprint@42780	0	0	autopilot	95	0	73	2
+autoplay	played	hyper-sprint@42720	0	0	autopilot	61	0	51	1
+autoplay	played	hyper-sprint@42630	0	0	autopilot	120	1	92	2
+autoplay	played	hyper-sprint@41400	0	0	autopilot	64	1	35	1
+autoplay	played	hyper-sprint@41340	0	0	autopilot	66	0	50	1
+autoplay	played	hyper-sprint@41310	0	0	autopilot	35	1	29	1
+autoplay	played	hyper-sprint@41280	0	0	autopilot	44	0	39	1
+autoplay	played	hyper-sprint@41190	0	0	autopilot	151	0	108	3
+autoplay	played	hyper-sprint@39900	0	0	autopilot	102	2	79	2
+autoplay	played	hyper-sprint@39840	0	0	autopilot	80	4	62	1
+autoplay	played	hyper-sprint@39810	0	0	autopilot	28	1	16	1
+autoplay	played	hyper-sprint@39780	0	0	autopilot	43	1	29	1
+autoplay	played	hyper-sprint@39750	0	0	autopilot	46	0	30	1
+autoplay	played	hyper-sprint@38490	0	0	autopilot	66	0	45	1
+autoplay	played	hyper-sprint@38430	0	0	autopilot	79	0	56	1
+autoplay	played	hyper-sprint@38370	0	0	autopilot	49	0	44	1
+autoplay	played	hyper-sprint@38340	0	0	autopilot	54	0	38	1
+autoplay	played	hyper-sprint@38310	0	0	autopilot	53	0	27	1
+autoplay	played	hyper-sprint@37020	0	0	autopilot	68	0	62	1
+autoplay	played	hyper-sprint@36960	0	0	autopilot	71	0	59	1
+autoplay	played	hyper-sprint@36930	0	0	autopilot	37	1	28	1
+autoplay	played	hyper-sprint@36900	0	0	autopilot	52	1	38	1
+autoplay	played	hyper-sprint@36870	0	0	autopilot	4	0	2	1
+autoplay	played	hyper-sprint@35580	0	0	autopilot	62	1	38	1
+autoplay	played	hyper-sprint@35520	0	0	autopilot	81	0	63	1
+autoplay	played	hyper-sprint@35490	0	0	autopilot	11	1	6	1
+autoplay	played	hyper-sprint@35460	0	0	autopilot	44	0	28	1
+autoplay	played	hyper-sprint@35430	0	0	autopilot	53	0	37	1
+autoplay	played	hyper-sprint@34200	0	0	autopilot	54	1	44	1
+autoplay	played	hyper-sprint@34170	0	0	autopilot	30	0	19	1
+autoplay	played	hyper-sprint@34110	0	0	autopilot	104	1	81	2
+autoplay	played	hyper-sprint@34020	0	0	autopilot	106	1	86	2
+autoplay	played	hyper-sprint@33990	0	0	autopilot	29	1	19	1
+autoplay	played	hyper-sprint@32730	0	0	autopilot	65	0	49	1
+autoplay	played	hyper-sprint@32670	0	0	autopilot	59	1	50	1
+autoplay	played	hyper-sprint@32610	0	0	autopilot	64	0	53	1
+autoplay	played	hyper-sprint@32580	0	0	autopilot	64	0	40	1
+autoplay	played	hyper-sprint@32550	0	0	autopilot	55	0	36	1
+autoplay	played	hyper-sprint@31320	0	0	autopilot	160	0	127	3
+autoplay	played	hyper-sprint@31290	0	0	autopilot	9	1	7	1
+autoplay	played	hyper-sprint@31230	0	0	autopilot	101	1	79	2
+autoplay	played	hyper-sprint@31170	0	0	autopilot	72	0	61	1
+autoplay	played	hyper-sprint@31110	0	0	autopilot	84	1	51	1
+autoplay	played	hyper-sprint@29850	0	0	autopilot	39	0	20	1
+autoplay	played	hyper-sprint@29790	0	0	autopilot	81	0	58	1
+autoplay	played	hyper-sprint@29760	0	0	autopilot	20	0	13	1
+autoplay	played	hyper-sprint@29730	0	0	autopilot	26	1	18	1
+autoplay	played	hyper-sprint@29670	0	0	autopilot	95	1	70	2
+autoplay	played	hyper-sprint@28440	0	0	autopilot	85	1	68	2
+autoplay	played	hyper-sprint@28410	0	0	autopilot	55	0	39	1
+autoplay	played	hyper-sprint@28350	0	0	autopilot	75	1	61	1
+autoplay	played	hyper-sprint@28290	0	0	autopilot	51	2	42	1
+autoplay	played	hyper-sprint@28230	0	0	autopilot	45	0	43	1
+autoplay	played	hyper-sprint@27030	0	0	autopilot	77	1	68	2
+autoplay	played	hyper-sprint@26970	0	0	autopilot	94	1	76	2
+autoplay	played	hyper-sprint@26910	0	0	autopilot	80	1	67	1
+autoplay	played	hyper-sprint@26850	0	0	autopilot	70	0	45	1
+autoplay	played	hyper-sprint@26790	0	0	autopilot	57	1	43	1
+autoplay	played	hyper-sprint@25560	0	0	autopilot	68	1	47	1
+autoplay	played	hyper-sprint@25500	0	0	autopilot	52	0	42	1
+autoplay	played	hyper-sprint@25440	0	0	autopilot	48	1	43	1
+autoplay	played	hyper-sprint@25380	0	0	autopilot	97	1	68	2
+autoplay	played	hyper-sprint@24090	0	0	autopilot	103	4	68	2
+autoplay	played	hyper-sprint@24030	0	0	autopilot	81	1	64	1
+autoplay	played	hyper-sprint@23970	0	0	autopilot	67	0	63	1
+autoplay	played	hyper-sprint@23940	0	0	autopilot	36	2	25	1
+autoplay	played	hyper-sprint@23910	0	0	autopilot	39	0	22	1
+autoplay	played	hyper-sprint@22650	0	0	autopilot	66	1	48	1
+autoplay	played	hyper-sprint@22620	0	0	autopilot	25	0	19	1
+autoplay	played	hyper-sprint@22590	0	0	autopilot	38	0	27	1
+autoplay	played	hyper-sprint@22530	0	0	autopilot	58	4	43	1
+autoplay	played	hyper-sprint@22470	0	0	autopilot	77	1	66	2
+autoplay	played	hyper-sprint@21270	0	0	autopilot	53	2	43	1
+autoplay	played	hyper-sprint@21240	0	0	autopilot	16	0	9	1
+autoplay	played	hyper-sprint@21180	0	0	autopilot	71	0	57	1
+autoplay	played	hyper-sprint@21120	0	0	autopilot	102	0	79	2
+autoplay	played	hyper-sprint@21030	0	0	autopilot	109	1	93	2
+autoplay	played	hyper-sprint@19770	0	0	autopilot	151	0	127	3
+autoplay	played	hyper-sprint@19710	0	0	autopilot	87	1	67	2
+autoplay	played	hyper-sprint@19680	0	0	autopilot	5	0	3	1
+autoplay	played	hyper-sprint@19620	0	0	autopilot	71	4	60	1
+autoplay	played	hyper-sprint@19590	0	0	autopilot	61	0	37	1
+autoplay	played	hyper-sprint@18390	0	0	autopilot	33	1	28	1
+autoplay	played	hyper-sprint@18330	0	0	autopilot	61	0	42	1
+autoplay	played	hyper-sprint@18240	0	0	autopilot	144	1	115	3
+autoplay	played	hyper-sprint@18210	0	0	autopilot	54	1	24	1
+autoplay	played	hyper-sprint@18150	0	0	autopilot	56	0	44	1
+autoplay	played	hyper-sprint@16890	0	0	autopilot	59	0	35	1
+autoplay	played	hyper-sprint@16860	0	0	autopilot	35	0	26	1
+autoplay	played	hyper-sprint@16830	0	0	autopilot	51	1	34	1
+autoplay	played	hyper-sprint@16770	0	0	autopilot	74	1	42	1
+autoplay	played	hyper-sprint@16710	0	0	autopilot	78	3	44	1
+autoplay	played	hyper-sprint@15450	0	0	autopilot	21	0	11	1
+autoplay	played	hyper-sprint@15390	0	0	autopilot	123	1	78	2
+autoplay	played	hyper-sprint@15330	0	0	autopilot	52	0	41	1
+autoplay	played	hyper-sprint@15300	0	0	autopilot	38	0	24	1
+autoplay	played	hyper-sprint@15270	0	0	autopilot	20	0	14	1
+autoplay	played	hyper-sprint@13980	0	0	autopilot	94	1	78	2
+autoplay	played	hyper-sprint@13950	0	0	autopilot	25	0	14	1
+autoplay	played	hyper-sprint@13890	0	0	autopilot	92	1	70	2
+autoplay	played	hyper-sprint@13860	0	0	autopilot	45	0	30	1
+autoplay	played	hyper-sprint@13830	0	0	autopilot	44	0	32	1
+autoplay	played	hyper-sprint@12660	0	0	autopilot	98	2	78	2
+autoplay	played	hyper-sprint@12600	0	0	autopilot	101	1	74	2
+autoplay	played	hyper-sprint@12540	0	0	autopilot	54	2	43	1
+autoplay	played	hyper-sprint@12450	0	0	autopilot	148	3	111	3
+autoplay	played	hyper-sprint@12390	0	0	autopilot	50	4	42	1
+autoplay	played	hyper-sprint@11160	0	0	autopilot	67	1	48	1
+autoplay	played	hyper-sprint@11100	0	0	autopilot	61	0	50	1
+autoplay	played	hyper-sprint@11040	0	0	autopilot	73	0	59	1
+autoplay	played	hyper-sprint@11010	0	0	autopilot	19	1	16	1
+autoplay	played	hyper-sprint@10950	0	0	autopilot	92	2	74	2
+autoplay	played	hyper-sprint@9720	0	0	autopilot	24	0	14	1
+autoplay	played	hyper-sprint@9660	0	0	autopilot	71	1	52	1
+autoplay	played	hyper-sprint@9630	0	0	autopilot	18	0	10	1
+autoplay	played	hyper-sprint@9570	0	0	autopilot	94	1	74	2
+autoplay	played	hyper-sprint@9510	0	0	autopilot	88	0	68	2
+autoplay	played	hyper-sprint@8280	0	0	autopilot	77	1	56	1
+autoplay	played	hyper-sprint@8220	0	0	autopilot	89	2	79	2
+autoplay	played	hyper-sprint@8190	0	0	autopilot	48	1	40	1
+autoplay	played	hyper-sprint@8130	0	0	autopilot	47	0	45	1
+autoplay	played	hyper-sprint@8070	0	0	autopilot	48	0	43	1
+autoplay	played	hyper-sprint@6840	0	0	autopilot	96	3	65	2
+autoplay	played	hyper-sprint@6780	0	0	autopilot	75	0	46	1
+autoplay	played	hyper-sprint@6750	0	0	autopilot	34	0	24	1
+autoplay	played	hyper-sprint@6720	0	0	autopilot	58	0	39	1
+autoplay	played	hyper-sprint@6630	0	0	autopilot	117	0	90	2
+autoplay	played	hyper-sprint@5340	0	0	autopilot	140	1	110	3
+autoplay	played	hyper-sprint@5280	0	0	autopilot	96	0	62	1
+autoplay	played	hyper-sprint@5250	0	0	autopilot	40	1	30	1
+autoplay	played	hyper-sprint@5220	0	0	autopilot	9	0	7	1
+autoplay	played	hyper-sprint@5190	0	0	autopilot	51	4	34	1
+autoplay	played	hyper-sprint@3960	0	0	autopilot	78	1	62	1
+autoplay	played	hyper-sprint@3900	0	0	autopilot	109	0	80	2
+autoplay	played	hyper-sprint@3840	0	0	autopilot	64	1	51	1
+autoplay	played	hyper-sprint@3780	0	0	autopilot	83	1	69	2
+autoplay	played	hyper-sprint@3750	0	0	autopilot	55	0	35	1
+autoplay	played	hyper-sprint@2490	0	0	autopilot	64	0	32	1
+autoplay	played	hyper-sprint@2430	0	0	autopilot	90	5	77	2
+autoplay	played	hyper-sprint@2370	0	0	autopilot	56	0	45	1
+autoplay	played	hyper-sprint@2340	0	0	autopilot	26	0	12	1
+autoplay	played	hyper-sprint@2310	0	0	autopilot	8	0	5	1
+autoplay	note	npc:AMakinen	11082	15	4	3	5	0	0	0	2	1	1	1	3	1	3	0
+autoplay	note	npc:Aksel_Troll	38469	51	6	4	24	1	1	1	1	1	0	0	5	3	2	1
+autoplay	note	npc:Aleksi_Kettu	21247	5	1	0	1	0	0	0	0	0	0	0	1	0	0	0
+autoplay	note	npc:AllInAnnie	46006	47	19	9	17	0	1	1	6	5	4	1	18	13	8	9
+autoplay	note	npc:Andrea_Asso	19758	27	4	2	13	0	0	0	1	1	1	1	4	3	1	1
+autoplay	note	npc:BigBlindBill	2314	3	2	0	3	0	0	0	0	0	1	0	1	1	0	1
+autoplay	note	npc:BigSlickRick	8162	7	1	0	4	0	0	0	0	0	1	0	1	0	0	1
+autoplay	note	npc:BrollyBoat	45803	60	14	12	24	2	3	2	5	4	2	1	10	5	9	3
+autoplay	note	npc:Bystro	12570	6	1	0	2	0	0	0	0	0	0	0	1	1	1	0
+autoplay	note	npc:Camila_Sorte	45542	36	10	6	16	1	0	0	3	2	0	0	8	5	4	3
+autoplay	note	npc:ColdBlinds	9637	6	2	1	5	1	0	0	1	1	0	0	2	2	3	0
+autoplay	note	npc:CopperDealer	28320	7	2	1	4	0	0	0	1	1	0	0	2	2	1	1
+autoplay	note	npc:CopperMuck	32705	23	8	2	13	0	0	0	1	0	3	1	5	4	2	3
+autoplay	note	npc:CopperOwl	3829	24	4	4	10	0	0	0	3	2	1	1	3	1	3	1
+autoplay	note	npc:CopperQueen	45588	22	10	3	13	1	2	1	2	0	2	1	9	8	1	4
+autoplay	note	npc:CosmicBlef	32765	39	8	5	17	3	2	1	2	2	1	1	5	5	3	4
+autoplay	note	npc:CrimsonRocket	27024	21	6	3	8	0	1	0	1	0	2	0	7	7	2	4
+autoplay	note	npc:CrispyJack	19861	14	4	2	7	0	0	0	1	0	0	0	2	2	0	1
+autoplay	note	npc:DaniGarcia	28489	15	4	1	7	0	0	0	1	1	1	0	4	3	1	2
+autoplay	note	npc:Diego_Jaguar	28489	6	1	1	2	0	0	0	0	0	0	0	0	0	0	0
+autoplay	note	npc:DonkBetDonna	41331	30	9	6	17	2	1	0	2	1	1	0	7	6	2	3
+autoplay	note	npc:DukeOfDeuces	16854	18	6	2	9	0	0	0	2	1	2	0	5	4	2	3
+autoplay	note	npc:EmmaLarsen	21176	15	4	2	7	1	0	0	1	0	1	0	4	4	3	2
+autoplay	note	npc:Ficha96	22517	23	5	3	8	0	1	1	1	0	1	0	3	3	2	2
+autoplay	note	npc:FrostyMonster85	44354	54	14	7	24	2	3	0	3	1	4	1	14	11	3	9
+autoplay	note	npc:GG_chip	44354	14	4	1	6	0	0	0	0	0	1	1	4	2	2	2
+autoplay	note	npc:GG_cooler	18410	15	4	1	7	0	0	0	1	0	1	1	2	1	1	1
+autoplay	note	npc:GG_turn	46006	10	3	2	4	0	0	0	1	1	0	0	3	3	1	1
+autoplay	note	npc:GoldenLongWei	29769	31	13	4	13	1	0	0	3	1	3	1	12	8	6	6
+autoplay	note	npc:GoldenShove	41375	22	4	3	8	1	0	0	2	2	0	0	3	2	2	1
+autoplay	note	npc:HYoon	45707	27	8	2	13	0	1	0	1	1	2	1	7	6	4	4
+autoplay	note	npc:HollowSnowman	5225	4	2	1	1	0	0	0	1	0	0	0	1	1	0	1
+autoplay	note	npc:HoserPot	38329	24	5	2	11	0	1	0	1	1	2	1	4	3	2	2
+autoplay	note	npc:IronFish	44173	67	19	5	37	1	1	0	3	3	4	1	14	10	7	9
+autoplay	note	npc:Ivan_Volk	36872	2	0	0	1	0	0	0	0	0	0	0	0	0	0	0
+autoplay	note	npc:Jacare	2349	7	1	0	3	0	0	0	0	0	1	1	1	0	0	0
+autoplay	note	npc:Jaguar21	6767	13	3	1	7	0	1	1	1	1	1	0	2	1	2	1
+autoplay	note	npc:JuleBecker	24014	31	8	2	19	0	0	0	0	0	1	0	7	6	1	1
+autoplay	note	npc:JulienLaurent	45531	16	4	2	7	1	0	0	0	0	2	1	4	3	1	1
+autoplay	note	npc:Kacper_Wilk	38367	20	9	8	8	2	1	1	1	1	1	1	5	4	2	1
+autoplay	note	npc:LLindberg	29720	26	5	1	10	0	0	0	1	0	2	1	5	4	2	2
+autoplay	note	npc:LeoGirard	42906	66	19	5	35	0	1	0	3	1	5	4	18	12	6	5
+autoplay	note	npc:LoonieChip	3775	8	2	0	4	0	0	0	0	0	1	1	3	2	1	2
+autoplay	note	npc:Lucas_Jacare	13940	13	5	2	7	1	0	0	1	0	1	0	5	3	1	3
+autoplay	note	npc:Lucky8	39956	31	9	4	17	0	2	0	2	0	4	1	7	5	2	4
+autoplay	note	npc:LuckyCowboy	15446	1	0	0	1	0	0	0	0	0	0	0	0	0	0	0
+autoplay	note	npc:Manon_Jeton	9730	35	11	5	17	2	1	1	2	2	1	0	9	6	4	2
+autoplay	note	npc:Masala77	15446	17	4	1	7	1	0	0	0	0	2	0	4	2	1	5
+autoplay	note	npc:MidnightMuck	9637	6	3	1	5	0	0	0	0	0	1	0	3	2	1	1
+autoplay	note	npc:Moe	12570	28	6	5	13	2	0	0	3	2	1	0	7	5	6	3
+autoplay	note	npc:Molen	41331	21	5	2	10	0	1	0	1	1	3	1	5	4	1	3
+autoplay	note	npc:MomSaidOneMore	29864	11	5	1	3	0	1	1	0	0	2	1	4	3	0	3
+autoplay	note	npc:MonsterUnderBed	4004	18	3	1	10	0	1	1	0	0	1	1	2	1	0	0
+autoplay	note	npc:Moose	45588	52	21	9	22	0	2	1	4	1	4	2	16	11	6	7
+autoplay	note	npc:MuckTTV	46006	30	12	5	13	1	1	0	3	2	4	3	12	7	7	4
+autoplay	note	npc:NeonShove	9559	21	8	3	10	1	0	0	1	1	1	0	7	6	3	3
+autoplay	note	npc:NoteTaker	8319	7	3	0	3	0	0	0	0	0	1	0	3	2	2	2
+autoplay	note	npc:Oliveira9	34004	10	3	1	4	1	0	0	1	1	1	1	3	2	1	0
+autoplay	note	npc:PatientCooler81	44114	56	18	8	25	3	1	0	4	1	4	1	18	14	6	10
+autoplay	note	npc:PokerfaceMuck	2402	21	3	2	9	1	0	0	1	1	0	0	3	2	1	1
+autoplay	note	npc:PolarFlop	41308	67	11	4	35	1	2	1	2	0	4	2	11	7	5	8
+autoplay	note	npc:Proper	24014	7	2	2	4	0	1	0	1	1	1	0	2	2	1	1
+autoplay	note	npc:QuietRaise	9697	41	8	7	17	0	2	1	2	1	0	0	6	5	3	2
+autoplay	note	npc:QuietWheel	41308	70	21	9	33	2	1	0	3	0	6	4	21	12	3	6
+autoplay	note	npc:R3stl3ssAc3	45803	24	5	3	10	1	0	0	1	1	1	0	4	3	2	1
+autoplay	note	npc:RecklessCowboy	34004	57	19	7	28	1	1	0	4	1	6	3	18	10	4	6
+autoplay	note	npc:RecklessElPibe	32608	28	9	4	10	0	0	0	2	1	3	2	7	6	3	3
+autoplay	note	npc:RecklessFelt	9730	8	4	1	4	1	0	0	0	0	2	1	3	2	1	3
+autoplay	note	npc:RestlessNuts	5419	4	1	1	2	0	0	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:RestlessQuads	46006	49	20	6	21	1	0	0	4	3	5	2	18	12	11	7
+autoplay	note	npc:RoyalPot	41425	18	8	1	8	0	0	0	1	0	2	0	7	6	3	4
+autoplay	note	npc:RoyalWheel	42695	33	11	3	15	1	1	0	2	2	3	1	10	6	4	3
+autoplay	note	npc:RustyButton	41425	18	7	3	7	1	0	0	2	0	0	0	7	6	3	4
+autoplay	note	npc:RuthlessSnowman7	23958	13	5	1	5	0	1	0	1	1	1	1	5	3	3	1
+autoplay	note	npc:SNakamura	27079	18	3	1	9	0	0	0	1	0	0	0	2	2	2	2
+autoplay	note	npc:Shamrock99	44248	48	20	9	27	2	2	1	3	1	4	1	14	10	8	9
+autoplay	note	npc:SisuButton	32608	64	20	9	29	2	1	0	6	3	3	1	17	13	8	6
+autoplay	note	npc:SleepyStralya	29831	21	4	2	10	0	1	1	1	1	1	1	2	1	1	1
+autoplay	note	npc:SlyFlop3	45707	115	34	15	54	2	5	2	6	2	4	2	27	20	12	14
+autoplay	note	npc:SmoothNuts4	42832	106	37	14	47	1	1	0	6	2	7	4	27	18	10	11
+autoplay	note	npc:SteadyChip	37064	30	4	1	14	0	0	0	0	0	0	0	4	4	1	5
+autoplay	note	npc:SteadyGutshot	45638	21	2	1	12	0	0	0	0	0	1	1	2	1	2	1
+autoplay	note	npc:StoicQuads	11003	14	4	1	6	0	0	0	0	0	1	1	4	3	1	2
+autoplay	note	npc:Taeyang_Bibimbap	32765	10	3	2	5	1	0	0	1	0	0	0	2	2	1	1
+autoplay	note	npc:Tapas86	19616	7	1	0	4	0	0	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:ThirstyGaffer	5225	4	1	0	1	0	0	0	0	0	1	0	1	0	0	1
+autoplay	note	npc:Tubarao	35480	34	10	5	13	2	1	1	3	3	1	1	10	7	4	4
+autoplay	note	npc:TurnTTV	18322	9	3	1	4	1	0	0	1	0	1	1	3	2	2	2
+autoplay	note	npc:VelvetChip	28489	26	4	2	14	0	0	0	1	1	0	0	4	2	2	1
+autoplay	note	npc:WojtekWisniewski	45638	24	8	5	12	1	1	0	2	0	2	1	6	5	2	3
+autoplay	note	npc:WoutGoossens	22634	7	3	2	4	0	0	0	2	2	0	0	2	1	2	1
+autoplay	note	npc:alexeisokolov	5419	16	3	3	5	1	1	0	1	0	1	0	3	3	1	1
+autoplay	note	npc:almeida23	39956	21	6	2	10	0	0	0	2	0	1	0	6	3	2	2
+autoplay	note	npc:brb_tilt	15458	6	1	0	3	0	0	0	0	0	0	0	1	1	0	1
+autoplay	note	npc:byrne91	19682	2	1	1	1	0	0	0	0	0	0	0	0	0	0	0
+autoplay	note	npc:camilarocha	16915	18	5	2	6	0	1	0	1	1	2	1	6	4	3	2
+autoplay	note	npc:charlie_wright	2349	7	1	1	3	0	0	0	1	0	0	0	1	1	0	0
+autoplay	note	npc:chen.w	2314	3	1	1	1	0	0	0	0	0	1	1	1	0	1	1
+autoplay	note	npc:cian_ryan	37002	92	33	15	45	2	4	2	5	4	9	2	25	18	12	13
+autoplay	note	npc:daand	42832	11	3	2	4	0	0	0	1	0	1	0	4	3	1	3
+autoplay	note	npc:dmytrok	13960	8	2	1	5	0	0	0	1	1	1	0	2	1	2	1
+autoplay	note	npc:elsa33	46006	49	16	6	19	0	0	0	4	1	4	1	14	12	6	7
+autoplay	note	npc:emma.h	22517	17	2	2	6	0	1	1	0	0	0	0	2	1	2	1
+autoplay	note	npc:emmat	45542	2	1	1	1	1	0	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:filiplarsen	4004	18	5	2	8	1	0	0	1	0	1	0	5	3	3	3
+autoplay	note	npc:florian_moser	25429	19	4	3	8	0	0	0	2	1	1	1	4	2	2	1
+autoplay	note	npc:frosty_rocket5	42695	137	40	18	72	2	4	0	8	4	9	2	36	28	13	17
+autoplay	note	npc:gh0stfold	45707	1459	292	211	674	43	43	24	89	66	34	10	228	167	148	77
+autoplay	note	npc:giuliaromano	42906	31	13	4	14	1	0	0	2	2	0	0	9	6	4	3
+autoplay	note	npc:holsson	29831	48	13	6	22	2	2	0	2	1	2	0	13	7	5	4
+autoplay	note	npc:humble_chip	44302	24	8	4	11	1	1	0	1	0	1	0	6	6	2	2
+autoplay	note	npc:ines.s	42756	161	57	27	85	6	3	1	12	11	10	4	45	35	27	16
+autoplay	note	npc:jakub.n	31213	20	8	2	13	0	0	0	2	2	1	0	7	6	3	3
+autoplay	note	npc:joao97	32705	2	2	1	1	0	0	0	0	0	0	0	1	1	1	1
+autoplay	note	npc:jonas.w	15359	2	2	1	1	0	0	0	1	1	0	0	1	1	1	1
+autoplay	note	npc:juhom	11194	37	7	5	21	1	0	0	1	1	0	0	5	4	2	2
+autoplay	note	npc:jule_fischer	45542	204	33	18	95	5	3	1	6	1	4	1	27	20	16	10
+autoplay	note	npc:kenji84	11135	20	2	1	8	0	1	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:kkowalski	2402	23	10	3	11	1	1	0	1	0	2	1	7	4	3	4
+autoplay	note	npc:lena.s	32647	15	3	2	7	0	0	0	1	1	1	1	3	2	2	3
+autoplay	note	npc:loganm	3775	7	4	1	3	0	1	0	0	0	1	0	3	2	1	1
+autoplay	note	npc:lucas.j	13881	16	5	2	7	1	1	1	1	0	0	0	4	2	2	1
+autoplay	note	npc:lucas.s	41375	43	12	4	23	1	2	1	2	1	3	2	9	7	6	2
+autoplay	note	npc:lucas95	31286	2	1	1	2	1	0	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:lucia.s	21220	21	5	1	11	0	0	0	1	0	2	1	4	3	1	2
+autoplay	note	npc:lucky_whale	38367	20	5	2	11	1	1	1	0	0	2	0	4	4	0	6
+autoplay	note	npc:lunar_snowman	41267	29	5	4	10	0	0	0	1	1	0	0	3	3	1	0
+autoplay	note	npc:maja05	8162	7	3	1	3	0	0	0	0	0	1	1	1	0	0	0
+autoplay	note	npc:matej04	29743	32	7	5	14	2	1	1	3	2	1	0	6	5	3	3
+autoplay	note	npc:megan.w	39821	29	7	3	14	2	1	1	1	0	0	0	5	3	2	2
+autoplay	note	npc:n00bfish	35607	20	2	1	9	0	0	0	0	0	0	0	2	2	1	1
+autoplay	note	npc:n00bmonster	25429	19	5	2	8	0	0	0	2	1	0	0	6	5	2	1
+autoplay	note	npc:n00bqueen	21247	5	2	1	2	1	0	0	1	1	1	0	2	1	1	2
+autoplay	note	npc:neon_raise	6694	7	2	1	4	0	0	0	0	0	0	0	1	0	0	1
+autoplay	note	npc:noahbouchard	31213	17	7	3	9	1	1	0	2	0	2	0	7	6	1	4
+autoplay	note	npc:olgao	18360	4	2	0	2	0	0	0	0	0	0	0	2	2	1	1
+autoplay	note	npc:oliver.h	21176	5	1	0	2	0	0	0	0	0	0	0	1	1	1	0
+autoplay	note	npc:oscar.l	15446	11	4	1	4	0	0	0	0	0	0	0	3	3	1	3
+autoplay	note	npc:owen.r	21176	28	4	3	13	0	0	0	1	1	0	0	2	2	1	1
+autoplay	note	npc:paulaf	39771	16	6	3	6	0	0	0	2	1	1	1	6	4	2	2
+autoplay	note	npc:quiet_gutshot	18322	20	6	2	11	0	1	1	1	0	1	0	4	3	0	3
+autoplay	note	npc:reckless_bluff	34231	7	3	1	4	1	0	0	0	0	1	0	2	2	0	1
+autoplay	note	npc:reckless_flop	3829	24	6	4	12	1	0	0	1	1	1	0	4	3	2	1
+autoplay	note	npc:restless_rocket	12716	18	7	2	8	0	0	0	2	1	1	0	6	5	1	3
+autoplay	note	npc:rusty_cooler95	15359	20	3	1	11	1	1	1	0	0	1	0	2	1	1	1
+autoplay	note	npc:salty_ace	44302	45	19	8	20	1	1	0	5	2	3	1	18	13	7	8
+autoplay	note	npc:salty_pot	41375	37	8	3	17	1	0	0	1	0	3	1	8	6	4	4
+autoplay	note	npc:shady_cowboy78	35607	20	1	1	8	0	0	0	1	1	0	0	2	1	1	0
+autoplay	note	npc:silent_kicker3	13853	24	3	1	13	0	0	0	0	0	1	0	1	1	1	1
+autoplay	note	npc:thiago88	5419	9	3	2	6	1	1	0	1	1	0	0	2	1	2	0
+autoplay	note	npc:tom.j	26820	75	22	5	34	2	2	0	2	1	5	2	20	14	6	8
+autoplay	note	npc:tomasnovak	6748	20	5	1	10	0	0	0	1	1	1	0	5	4	2	3
+autoplay	note	npc:visser97	5324	21	10	3	12	1	1	0	1	0	2	2	10	7	2	2
+autoplay	note	npc:wtaylor	28489	33	5	1	20	0	0	0	0	0	1	0	4	3	2	2
+autoplay	note	npc:xXBoatXx	18322	15	4	1	7	0	1	0	0	0	1	1	4	2	1	2
+autoplay	note	npc:xXTurnXx	6748	11	5	1	6	0	0	0	1	1	2	1	4	3	1	4
+video	ch	0	-1	-1	0	0	46080	0	0
+video	cand	rl:hyper-sprint@16710:8	16715.6	3	0	2	0.8623	46955.6	1	0	0	-1	RoyalMuck	-1	0	$0.25 Hyper Sprint	25	180	36	0	0	0	0	-1		1;8;2;60;120;120;20388;-6756;45,31;46,10,19,28,26;0,0,LeoGirard,folds/0,0,MartimPereira,folds/0,0,GG_wheel,folds/0,120,Szczescie88,calls/0,0,XiongMao77,folds/0,0,larsen22,folds/0,0,Lucas_Jeton,folds/0,120,You,calls/0,0,RoyalMuck,checks/1,0,You,checks/1,0,RoyalMuck,checks/1,335,Szczescie88,bets/1,335,You,calls/1,335,RoyalMuck,calls/2,0,You,checks/2,699,RoyalMuck,bets/2,2189,Szczescie88,raises to/2,2189,You,calls/2,2189,RoyalMuck,calls/3,0,You,checks/3,0,RoyalMuck,checks/3,4112,Szczescie88,bets/3,4112,You,calls/3,4112,RoyalMuck,calls;Szczescie88,18,16/RoyalMuck,35,44
+video	cand	rl:hyper-sprint@16860:7	16864.9	3	0	2	0.851	47104.9	1	0	0	-1	Jack_Croc	-1	0	$0.25 Hyper Sprint	25	180	171	0	0	0	0	-1		1;7;2;60;120;120;18378;-9219;47,7;40,34,45,30,4;0,0,lucia.s,folds/0,418,Jack_Croc,raises to/0,0,jun.y,folds/0,0,ryan88,folds/0,0,Mahjong83,folds/0,0,Oscar_Daner,folds/0,0,rohan.k,folds/0,0,SilentQueen,folds/0,418,You,calls/1,0,You,checks/1,886,Jack_Croc,bets/1,886,You,calls/2,0,You,checks/2,2352,Jack_Croc,bets/2,2352,You,calls/3,0,You,checks/3,5443,Jack_Croc,all in/3,5443,You,calls;Jack_Croc,43,42
+video	cand	rl:hyper-sprint@18210:25	18227.5	3	0	13	0.8623	48467.5	1	0	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	149	0	0	0	0	-1		1;25;6;150;300;300;20302;-9508;43,29;28,13,24,19,0;0,0,frosty_rocket5,folds/0,0,lucas01,folds/0,0,Th1rstyButton,folds/0,0,Lucas_Fietser,folds/0,0,Aoi_Samurai,folds/0,600,gh0stfold,raises to/0,0,ming_wang,folds/0,600,charlotte_martin,calls/0,600,You,calls/1,0,charlotte_martin,checks/1,0,You,checks/1,986,gh0stfold,bets/1,986,charlotte_martin,calls/1,986,You,calls/2,0,charlotte_martin,checks/2,3317,You,bets/2,3317,gh0stfold,calls/2,0,charlotte_martin,folds/3,0,You,checks/3,4740,gh0stfold,all in/3,4305,You,all in;gh0stfold,46,44
+video	cand	rl:hyper-sprint@18330:6	18334.2	3	0	2	0.8577	48574.2	1	0	0	-1	alfie22	-1	0	$0.25 Hyper Sprint	25	180	5	0	0	0	0	-1		1;6;2;60;120;120;19542;9921;42,51;50,19,48,28,44;0,0,xXDeuceXx,folds/0,0,CosmicBlef,folds/0,315,alfie22,raises to/0,0,oleksiik,folds/0,0,johansen92,folds/0,315,You,calls/0,0,felix_becker,folds/0,0,CartasCooler,folds/1,634,alfie22,bets/1,1881,You,raises to/1,1881,alfie22,calls/2,0,alfie22,checks/2,3534,You,bets/2,3534,alfie22,calls/3,0,alfie22,checks/3,3891,You,all in/3,3891,alfie22,calls;alfie22,41,43
+video	cand	rl:hyper-sprint@19620:36	19645.2	3	0	13	0.8157	49885.2	1	0	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	15	0	0	0	0	-1		1;36;9;300;600;600;26411;13724;45,51;1,40,47,14,8;0,0,iron_snowman,folds/0,0,jack_bouchard,folds/0,0,RustyJoker,folds/0,0,patient_shark,folds/0,1637,RustyQuads,all in/0,0,neon_pot99,folds/0,0,milan91,folds/0,1637,gh0stfold,calls/0,1637,You,calls/1,0,gh0stfold,checks/1,0,You,checks/2,0,gh0stfold,checks/2,3386,You,bets/2,3386,gh0stfold,calls/3,0,gh0stfold,checks/3,7064,You,all in/3,7064,gh0stfold,calls;RustyQuads,49,24/gh0stfold,44,22
+video	cand	rl:hyper-sprint@19710:29	19730.3	3	0	13	0.8523	49970.3	1	0	0	0.06818181818181818	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	64	0	0	0	0	-1		1;29;7;200;400;400;24674;-11837;28,48;6,19,24,26,10;0,0,frosty_rocket5,folds/0,960,You,raises to/0,0,andrear,folds/0,0,SteadyMonster,folds/0,0,Darragh_Gaff,folds/0,3554,gh0stfold,raises to/0,0,PavelMorozov,folds/0,0,Andrea_Asso,folds/0,0,kowalski04,folds/0,3554,You,calls/1,4440,You,bets/1,4440,gh0stfold,calls/2,0,You,checks/2,3843,gh0stfold,all in/2,3843,You,calls;gh0stfold,36,37
+video	cand	rl:hyper-sprint@19770:recap	19861	0	0	12	0.87	50101	0	0	0	-1		-1	0	$0.25 Hyper Sprint	25	180	1	2	0	0	0	-1		1;0;31;0;0;0;991;966;;;;
+video	cand	rl:hyper-sprint@21240:10	21247	3	0	2	0.8571	51487	1	0	0	-1	ShadyHammer	-1	0	$0.25 Hyper Sprint	25	180	172	0	0	0	0	-1		1;10;3;80;160;160;25909;-6785;36,40;39,15,26,42,50;0,0,n00bqueen,folds/0,0,Aleksi_Kettu,folds/0,424,VelvetRiver,raises to/0,424,You,calls/0,0,lewandowski97,folds/0,0,PolarLaChance,folds/0,0,ThirstyBluff,folds/0,0,BacalhauButton,folds/0,424,ShadyHammer,calls/1,0,ShadyHammer,checks/1,880,VelvetRiver,bets/1,880,You,calls/1,880,ShadyHammer,calls/2,0,ShadyHammer,checks/2,0,VelvetRiver,checks/2,2094,You,bets/2,2094,ShadyHammer,calls/2,2094,VelvetRiver,calls/3,0,ShadyHammer,checks/3,6483,VelvetRiver,all in/3,3387,You,all in/3,6044,ShadyHammer,all in;ShadyHammer,37,14/VelvetRiver,49,48
+video	cand	rl:hyper-sprint@22590:25	22607.5	3	0	0	0.8185	52847.5	1	0	0	0.6515151515151515	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	142	0	0	0	0	-1		1;25;6;150;300;300;7112;-3481;20,22;28,50,30,47,19;0,0,GoldenLongWei,folds/0,0,nora.l,folds/0,0,OSmith,folds/0,0,StoneJack,folds/0,300,SmoothNuts4,calls/0,1495,gh0stfold,raises to/0,0,ThirstyAce,folds/0,1495,You,calls/0,0,SmoothNuts4,folds/1,0,You,checks/1,1686,gh0stfold,all in/1,1686,You,calls;gh0stfold,35,45
+video	cand	rl:hyper-sprint@23910:23	23926.1	3	0	2	0.8172	54166.1	1	0	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	151	0	0	0	0	-1		1;23;6;150;300;300;13396;-5858;44,46;49,27,4,5,51;0,0,NeonButton,folds/0,0,QuietHammer,folds/0,615,You,raises to/0,0,ElectricCanuck,folds/0,615,MellowWheel,calls/0,0,kubal,folds/0,615,gh0stfold,calls/0,0,Chris_Vegas,folds/0,615,FSmith,calls/1,0,FSmith,checks/1,1057,You,bets/1,0,MellowWheel,folds/1,1057,gh0stfold,calls/1,0,FSmith,folds/2,3115,You,bets/2,3115,gh0stfold,calls/3,0,You,checks/3,6863,gh0stfold,all in/3,1071,You,all in;gh0stfold,50,39
+video	cand	rl:hyper-sprint@26850:24	26866.8	3	0	13	0.8428	57106.8	1	0	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	45	0	0	0	0	-1		1;24;6;150;300;300;16950;-600;15,21;40,2,11,38,23;0,0,Silva8,folds/0,669,gh0stfold,raises to/0,0,jule_fischer,folds/0,0,LiWang,folds/0,0,CosmicRounder,folds/0,0,Laine7,folds/0,669,PolarFlop,calls/0,0,You,folds/1,1289,PolarFlop,bets/1,3836,gh0stfold,raises to/1,3836,PolarFlop,calls/2,6365,PolarFlop,bets/2,3670,gh0stfold,all in;gh0stfold,45,46/PolarFlop,39,37
+video	cand	rl:hyper-sprint@28230:21	28244.7	3	0	13	0.8809	58484.7	1	0	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	104	0	0	0	0	-1		1;21;5;125;250;250;20073;-500;1,8;0,17,51,49,26;0,500,lucky_fish,raises to/0,0,SlyFlop3,folds/0,0,NeonTurn,folds/0,1660,gh0stfold,raises to/0,0,jisookim,folds/0,0,LunarButton,folds/0,0,PolarNuts,folds/0,0,golden_felt,folds/0,0,You,folds/0,12149,lucky_fish,all in/0,9724,gh0stfold,all in;gh0stfold,43,42/lucky_fish,39,37
+video	cand	rl:hyper-sprint@31320:109	31396.3	3	0	0	0.8333	61636.3	1	0	0	0.8863636363636364	LazyNuts	-1	0	$0.25 Hyper Sprint	25	180	5	2	0	0	0	-1		1;109;26;15000;30000;30000;815222;-385111;51,7;41,11,48,36,12;0,0,LMueller,folds/0,61500,You,raises to/0,0,Peeters6,folds/0,0,marco.r,folds/0,61500,LazyNuts,calls/1,140248,LazyNuts,bets/1,140248,You,calls/2,0,LazyNuts,checks/2,263707,You,bets/2,183363,LazyNuts,all in;LazyNuts,14,43
+video	cand	rl:hyper-sprint@32550:35	32574.5	3	0	2	0.8031	62814.5	1	0	0	0.15016666666666667	Lucas_Tubarao	-1	0	$0.25 Hyper Sprint	25	180	29	0	0	0	0	-1		1;35;9;250;500;500;49261;-18330;38,39;40,2,44,30,31;0,1000,Oliver_Brolly,raises to/0,0,jule_fischer,folds/0,0,ryan82,folds/0,3513,Lucas_Tubarao,raises to/0,0,CarlosFlores,folds/0,8080,You,raises to/0,0,Julia_Sorte,folds/0,0,gh0stfold,folds/0,8080,JuleHoffmann,calls/0,0,Oliver_Brolly,folds/0,18330,Lucas_Tubarao,all in/0,18330,You,calls/0,10851,JuleHoffmann,all in;JuleHoffmann,46,47/Lucas_Tubarao,41,43
+video	cand	rl:hyper-sprint@32670:4	32672.8	3	0	6	0.8139	62912.8	1	0	0	-1	rusty_chip	-1	0	$0.25 Hyper Sprint	25	180	143	0	0	0	0	-1		1;4;1;50;100;100;20732;-382;48,46;9,7,41,36,29;0,0,valen79,folds/0,0,CrimsonMuck,folds/0,282,rusty_chip,raises to/0,282,joao97,calls/0,0,CopperMuck,folds/0,0,HeroCallHarry,folds/0,0,DaikiYamamoto,folds/0,0,ChipAndAChair,folds/0,282,You,calls/1,0,You,checks/1,0,rusty_chip,checks/1,633,joao97,bets/1,0,You,folds/1,633,rusty_chip,calls/2,1733,rusty_chip,bets/2,5071,joao97,raises to/2,5071,rusty_chip,calls/3,4364,rusty_chip,all in/3,4164,joao97,all in;rusty_chip,45,37/joao97,50,43
+video	cand	rl:hyper-sprint@34110:16	34121.2	3	0	13	0.9042	64361.2	1	0	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	119	0	0	0	0	-1		1;16;4;100;200;200;19906;-400;0,2;5,31,9,45,37;0,200,Moose,calls/0,0,CopperShove,folds/0,1146,sly_nuts,raises to/0,0,LazyChip,folds/0,0,IronFish,folds/0,9742,gh0stfold,all in/0,0,micar,folds/0,0,Ferreira4,folds/0,0,You,folds/0,0,Moose,folds/0,9603,sly_nuts,all in;gh0stfold,40,43/sly_nuts,48,35
+video	cand	rl:hyper-sprint@36870:3	36872.1	3	0	0	0.9591	67112.1	1	0	0	0.798	Tapis33	-1	0	$0.25 Hyper Sprint	25	180	177	0	0	0	0	-1		1;3;1;50;100;100;21756;-9950;50,48;40,0,38,43,16;0,0,Bluffeur22,folds/0,0,MellowSzczescie,folds/0,0,Zocker04,folds/0,200,ChipAndAChair,raises to/0,0,huber13,folds/0,720,You,raises to/0,0,Ivan_Volk,folds/0,1656,Tapis33,raises to/0,0,CrispyTurn,folds/0,1656,ChipAndAChair,calls/0,3809,You,raises to/0,10432,Tapis33,all in/0,0,ChipAndAChair,folds/0,9950,You,all in;Tapis33,37,39
+video	cand	rl:hyper-sprint@36960:14	36969.8	3	0	2	0.7994	67209.8	1	0	0	-1	chuy04	-1	0	$0.25 Hyper Sprint	25	180	9	0	0	0	0	-1		1;14;4;100;200;200;19040;9720;33,45;23,10,44,8,47;0,0,SokolCowboy,folds/0,0,HammerTTV,folds/0,0,GeorgeWright,folds/0,0,Josh_Vegas,folds/0,440,You,raises to/0,0,Dingo101,folds/0,1462,chuy04,raises to/0,0,SmoothBubble,folds/0,1462,You,calls/1,1541,chuy04,bets/1,1541,You,calls/2,0,chuy04,checks/2,4198,You,bets/2,4198,chuy04,calls/3,0,chuy04,checks/3,2149,You,all in/3,2119,chuy04,all in;chuy04,39,37
+video	cand	rl:hyper-sprint@39840:37	39865.9	3	0	2	0.8462	70105.9	1	0	0	0.796969696969697	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	6	0	0	0	0	-1		1;37;9;300;600;600;35004;23836;47,45;21,38,20,0,41;0,0,KaasHaai44,folds/0,1491,gh0stfold,raises to/0,1491,WildRail,calls/0,0,jakobwagner,folds/0,0,NeonMuck,folds/0,11168,You,all in/0,0,chloe.m,folds/0,0,salty_ace,folds/0,0,CroissantRiver,folds/0,11168,gh0stfold,calls/0,11168,WildRail,calls/1,17917,gh0stfold,all in/1,0,WildRail,folds;gh0stfold,39,51
+video	cand	rl:hyper-sprint@41190:13	41199.1	3	0	2	0.8289	71439.1	1	0	0	-1	bohdan.b	-1	0	$0.25 Hyper Sprint	25	180	5	0	0	0	0	-1		1;13;4;80;160;160;19978;10149;47,43;23,35,25,9,39;0,0,camila.a,folds/0,0,StoicKicker87,folds/0,384,You,raises to/0,0,SilentShark,folds/0,0,RustyBoat,folds/0,0,jule_fischer,folds/0,384,bohdan.b,calls/0,0,lunar_snowman,folds/1,0,bohdan.b,checks/1,545,You,bets/1,545,bohdan.b,calls/2,955,bohdan.b,bets/2,955,You,calls/3,2612,bohdan.b,bets/3,10511,You,all in/3,7945,bohdan.b,all in;bohdan.b,46,30
+video	cand	rl:hyper-sprint@41190:25	41207.5	3	0	2	0.8527	71447.5	1	0	0	0.11363636363636363	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	42	0	0	0	0	-1		1;25;6;150;300;300;18572;-9211;39,50;45,6,3,36,5;0,0,SilentShark,folds/0,300,RustyBoat,calls/0,1377,gh0stfold,raises to/0,0,jule_fischer,folds/0,0,Zhang8,folds/0,0,lunar_snowman,folds/0,0,camila.a,folds/0,0,StoicKicker87,folds/0,1377,You,calls/0,0,RustyBoat,folds/1,0,You,checks/1,2499,gh0stfold,bets/1,2499,You,calls/2,0,You,checks/2,5035,gh0stfold,all in/2,5035,You,calls;gh0stfold,46,34
+video	cand	rl:hyper-sprint@41340:18	41352.6	3	0	2	0.8202	71592.6	1	0	0	0.17373737373737375	ebauer	-1	0	$0.25 Hyper Sprint	25	180	2	0	0	0	0	-1		1;18;5;100;200;200;23064;11732;45,49;21,19,22,10,51;0,0,gh0stfold,folds/0,0,GoldenShove,folds/0,0,leon85,folds/0,0,lucas.s,folds/0,0,salty_pot,folds/0,0,SleepyKaasHaai,folds/0,617,ebauer,raises to/0,2221,You,raises to/0,0,PatientWhale,folds/0,5108,ebauer,raises to/0,5108,You,calls/1,0,You,checks/1,9002,ebauer,all in/1,6224,You,all in;ebauer,47,46
+video	cand	rl:hyper-sprint@41400:11	41407.7	3	0	2	0.8461	71647.7	1	0	0	-1	EmmaGagnon	-1	0	$0.25 Hyper Sprint	25	180	2	0	0	0	0	-1		1;11;3;80;160;160;23421;12538;49,42;50,48,13,46,2;0,0,PatientCooler81,folds/0,0,SneakyRocket2,folds/0,323,RustyButton,raises to/0,323,EmmaGagnon,calls/0,0,GaufreButton,folds/0,0,smirnov8,folds/0,323,You,calls/0,0,RoyalPot,folds/0,323,ming_zhang,calls/1,0,ming_zhang,checks/1,0,RustyButton,checks/1,769,EmmaGagnon,bets/1,769,You,calls/1,0,ming_zhang,folds/1,769,RustyButton,calls/2,0,RustyButton,checks/2,2633,EmmaGagnon,bets/2,2633,You,calls/2,0,RustyButton,folds/3,7158,EmmaGagnon,all in/3,7158,You,calls;EmmaGagnon,26,51
+video	cand	rl:hyper-sprint@44130:39	44157.3	3	0	0	0.8178	74397.3	1	0	0	0.68975	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	92	0	0	0	0	-1		1;39;10;300;600;600;14136;-7218;22,20;42,8,44,12,21;0,0,GG_bubble,folds/0,0,smooth_turn,folds/0,0,chloe_lefevre,folds/0,0,RoyalBluff,folds/0,6618,gh0stfold,all in/0,0,KatyaKuznetsov,folds/0,0,IronFish,folds/0,0,GoldenRounder,folds/0,6618,You,calls;gh0stfold,0,48
+video	cand	rl:hyper-sprint@44310:9	44316.3	3	0	2	0.8388	74556.3	1	0	0	-1	FrostyMonster85	1294	0	$0.25 Hyper Sprint	25	180	7	0	0	0	0	-1		1;9;3;60;120;120;16416;8358;50,46;11,51,39,17,18;0,0,GG_chip,folds/0,0,StoneBlef,folds/0,0,Isbjorn,folds/0,0,jule_fischer,folds/0,240,FrostyMonster85,raises to/0,864,You,raises to/0,0,ReiDoRio93,folds/0,0,cody88,folds/0,0,DustyHammer,folds/0,864,FrostyMonster85,calls/1,0,FrostyMonster85,checks/1,1297,You,bets/1,1297,FrostyMonster85,calls/2,2263,FrostyMonster85,bets/2,2263,You,calls/3,0,FrostyMonster85,checks/3,5276,You,all in/3,3634,FrostyMonster85,all in;FrostyMonster85,49,33
+video	cand	rl:hyper-sprint@45510:30	45531	3	0	2	0.8371	75771	1	0	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	149	0	0	0	0	-1		1;30;8;200;400;400;21444;-10222;41,43;3,48,2,49,37;0,820,You,raises to/0,0,kumar89,folds/0,820,gh0stfold,calls/0,0,QuietAce,folds/0,0,ChaiJack,folds/0,0,Jjang89,folds/0,0,Lorenzo_Pizzaiolo,folds/0,0,ThirstyWheel,folds/1,1433,You,bets/1,1433,gh0stfold,calls/2,3576,You,bets/2,3576,gh0stfold,calls/3,0,You,checks/3,7195,gh0stfold,bets/3,4393,You,all in;gh0stfold,33,51
+video	cand	rl:hyper-sprint@45540:4	45542.8	3	0	2	0.891	75782.8	1	0	0	0.18625	emmat	1509	0	$0.25 Hyper Sprint	25	180	175	0	0	0	0	-1		1;4;1;50;100;100;22130;-10000;38,36;45,28,26,21,30;0,0,Camila_Sorte,folds/0,249,ElectricKicker21,raises to/0,0,lucas_moreau,folds/0,0,quiet_turn,folds/0,948,emmat,raises to/0,0,SilentQuads,folds/0,0,FrostyJack2,folds/0,0,jule_fischer,folds/0,2180,You,raises to/0,2180,ElectricKicker21,calls/0,9950,emmat,all in/0,9900,You,all in/0,0,ElectricKicker21,folds;emmat,46,44
+video	cand	rl:hyper-sprint@45660:30	45681	3	0	13	0.8351	75921	1	0	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	18	0	0	0	0	-1		1;30;8;200;400;400;21062;400;36,49;6,9,29,50,41;0,826,gh0stfold,raises to/0,0,SlyFlop3,folds/0,0,joao.s,folds/0,0,HYoon,folds/0,0,Hoser86,folds/0,0,eliska96,folds/0,0,sleepy_fish,folds/0,826,You,calls/0,0,Vovk95,folds/1,0,You,checks/1,1161,gh0stfold,bets/1,1161,You,calls/2,2904,You,bets/2,2904,gh0stfold,calls/3,7346,You,bets/3,5240,gh0stfold,all in;gh0stfold,37,48
+video	cand	runittwice:runittwice.supper-stack@45720:2	45721.4	3	2	6	0.8546	75961.4	1	0	0	-1	CharlieClarke	-1	0	$5.50 Supper Stack	550	152	124	0	0	0	0	-1		1;2;1;100;200;200;60347;-447;42,47;0,13,10,40,4;0,0,BrollyBoat,folds/0,0,LuckyVolk,folds/0,0,KitsuneRocket,folds/0,447,R3stl3ssAc3,raises to/0,447,You,calls/0,0,n00bbluff,folds/0,0,camila_ferreira,folds/0,447,CharlieClarke,calls/1,0,CharlieClarke,checks/1,1161,R3stl3ssAc3,bets/1,0,You,folds/1,1161,CharlieClarke,calls/2,0,CharlieClarke,checks/2,2602,R3stl3ssAc3,bets/2,2602,CharlieClarke,calls/3,0,CharlieClarke,checks/3,6484,R3stl3ssAc3,bets/3,25590,CharlieClarke,all in/3,25590,R3stl3ssAc3,calls;R3stl3ssAc3,50,49/CharlieClarke,12,17
+video	cand	runittwice:runittwice.supper-stack@45720:6	45724.2	3	2	2	0.9048	75964.2	1	0	0	-1	BrollyBoat	838	0	$5.50 Supper Stack	550	152	147	0	0	0	0	-1		1;6;1;100;200;200;50252;-24636;38,51;39,23,19,16,5;0,480,You,raises to/0,0,n00bbluff,folds/0,0,camila_ferreira,folds/0,480,CharlieClarke,calls/0,1553,BrollyBoat,raises to/0,0,LuckyVolk,folds/0,0,KitsuneRocket,folds/0,0,R3stl3ssAc3,folds/0,1553,You,calls/0,0,CharlieClarke,folds/1,2695,You,bets/1,2695,BrollyBoat,calls/2,0,You,checks/2,6000,BrollyBoat,bets/2,6000,You,calls/3,0,You,checks/3,14388,BrollyBoat,bets/3,14388,You,calls;BrollyBoat,45,44
+video	paid	story:*
+site	acct	1	45707.60166666666	2451	2026-11	61	61	0	0	5000	0	132107.60166666665	5000	4000	66	2001	0	0	1	2026	2001	1
+site	line	1	45707.60166666666	7	5000	Deposit
+site	line	1	45840.00166666666	0	-550	Buy-in: $5.50 Spark Jackpot
+site	line	1	46006.56833333333	0	2001	Prize: $5.50 Spark Jackpot
+site	line	1	46920.00166666666	7	-4000	Withdrawal requested ($3.00 fee)
+site	acct	2	45707.60166666666	5000	2026-11	0	0	0	0	0	0	0	5000	0	0	0	0	0	1	2026	0	1
+site	line	2	45707.60166666666	7	5000	Deposit
+site	line	2	45720.00166666666	0	0	Ticket: $5.50 Supper Stack
+site	xfer	ignite:46920	1	1	bank	4000	300	46920.00166666666	53075.00166666666	0
+site	invite	1	45480.000555555554	1
+site	invite	2	45707.60166666666	1
+site	rewards	2026-11	50	0	132107.60166666665
+site	done	retention
+site	done	tickets:runittwice
+site	done	welcome:ignite
+site	done	welcome:runittwice

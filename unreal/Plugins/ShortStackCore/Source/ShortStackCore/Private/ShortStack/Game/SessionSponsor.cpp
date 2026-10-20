@@ -490,7 +490,10 @@ std::string Session::DebugSponsor(const std::string& Args)
 	std::string Strikes;
 	for (int Site = 0; Site < static_cast<int>(net::SiteId::Count); ++Site)
 	{
-		Strikes += sponsor::WouldStrike(B, Site, false, false) ? std::string(Strikes.empty() ? "" : ", ") + net::KeyOf(static_cast<net::SiteId>(Site)) : std::string();
+		// Only the sites a player can sit at: Halcyon (P1) isn't registered yet, so it isn't listed (C3).
+		const net::SiteId Id = static_cast<net::SiteId>(Site);
+		const bool Open = Id == net::SiteId::RiverLine || (net::Def(Id).Id == Id && !net::Def(Id).P1);
+		Strikes += Open && sponsor::WouldStrike(B, Site, false, false) ? std::string(Strikes.empty() ? "" : ", ") + net::KeyOf(static_cast<net::SiteId>(Site)) : std::string();
 	}
 	Out += Strikes.empty() ? std::string() : "  a table would be a strike on: " + Strikes + "\n";
 	for (const sponsor::Brand& Br : sponsor::Brands())

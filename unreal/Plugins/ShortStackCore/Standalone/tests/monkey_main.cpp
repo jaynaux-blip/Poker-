@@ -15,6 +15,12 @@
 // offer is never dropped from Mail; no step writes more than 20 ledger lines; the staked roll never goes below zero; no AI
 // decision graded. At the end the segment's lines are at most 80 KB of the save, update 2's non-world lines at most 60 KB,
 // and the save reads back the same.
+// Update 2 (C3): beside each step, on draws of their own, the rival sites and Rerun at random: invitations (as the console
+// sends them) and Mail's answers, deposits and withdrawals (refused ones too), a rival's events by the plan or Sprint, uploads.
+// After every step, SPEC §1.2's money invariants (SegSites): each wallet moves only by its lines; deposits out of the bank
+// equal the wallets' deposits, their fees the card's rate; withdrawals asked for equal transit plus arrivals plus fees, to the
+// cent; a transfer lands once; no month's Rewards or Rerun payout twice; no unanswered invitation dropped from Mail (opened,
+// and Mail filled past its keep).
 // Usage: monkey_test [seeds] [frames] [first seed] [segment careers] [days]
 #include "ShortStack/AI/Style.h"
 #include "ShortStack/Game/Autoplay.h"
@@ -24,14 +30,17 @@
 #include "ShortStack/Game/LiveAuto.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
+#include "ShortStack/Game/Video.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/UI/RiverLine.h"
 #include "ShortStack/UI/ShopScreen.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -140,7 +149,8 @@ std::vector<Spot> Hotspots()
 
 bool SameEntry(const ss::life::LedgerEntry& A, const ss::life::LedgerEntry& B)
 {
-	return A.At == B.At && A.Label == B.Label && A.Amount == B.Amount && A.Kind == B.Kind;
+	// (The save keeps a line's minute to two places: the same line after a save and a load, update 2 C3's reload.)
+	return std::fabs(A.At - B.At) <= 0.0051 && A.Label == B.Label && A.Amount == B.Amount && A.Kind == B.Kind;
 }
 
 /** How many of Cur's lines are new since Prev (the ledger keeps the newest 60: the shortest prefix after which it goes on as Prev). */
@@ -210,6 +220,7 @@ struct SegBooks
 	ss::Chips Injected = 0;
 	std::vector<ss::life::LedgerEntry> Seen;
 	std::vector<ss::life::LedgerEntry> Paid; // every backing and sponsor line once
+	std::vector<ss::life::LedgerEntry> NewLines; // the last audit's new lines, oldest first (the sites' books read them)
 	int MostLines = 0;
 
 	void Start(const ss::Session& S)
@@ -227,6 +238,7 @@ struct SegBooks
 		namespace sponsor = ss::sponsor;
 		const std::vector<ss::life::LedgerEntry>& Cur = S.Life.Ledger;
 		const size_t Fresh = FreshLines(Cur, Seen);
+		NewLines.assign(Cur.rend() - static_cast<std::ptrdiff_t>(Fresh), Cur.rend());
 		ss::Chips Logged = 0;
 		for (size_t K = 0; K < Fresh; ++K)
 		{
@@ -308,6 +320,125 @@ struct SegBooks
 	}
 };
 
+/**
+ * The rival sites' books (update 2 SPEC §1.2, §6.7; C3), audited after every step beside SegBooks:
+ *   - each wallet moves only by its own lines;
+ *   - deposits out of the bank equal the wallets' deposit lines, and the bank's card fees are the card's rate on each;
+ *   - withdrawals asked for equal what's in transit plus what landed plus the fees taken, to the cent;
+ *   - a transfer lands once (one bank line each); no month's RiverLine Rewards or Rerun payout is paid twice;
+ *   - an invitation not yet answered is never dropped from Mail.
+ */
+struct SegSites
+{
+	struct Wallet
+	{
+		ss::Chips Cents = 0;
+		std::vector<ss::site::Line> Lines;
+	};
+	std::map<int, Wallet> Wallets;
+	std::map<std::string, int> Xfers;
+	ss::Chips DepositOut = 0, DepositIn = 0, Fees = 0, FeesDue = 0, Asked = 0, Landed = 0, LandedFees = 0;
+	int Arrivals = 0, LandedXfers = 0;
+	std::set<std::string> Months;
+
+	static bool Same(const ss::site::Line& A, const ss::site::Line& B) { return A.At == B.At && A.Kind == B.Kind && A.Cents == B.Cents && A.Label == B.Label; }
+	void Audit(const ss::Session& S, const std::vector<ss::life::LedgerEntry>& NewLines, int Seed, int Step, const std::string& Where)
+	{
+		namespace net = ss::net;
+		namespace site = ss::site;
+		for (const ss::life::LedgerEntry& E : NewLines)
+		{
+			if (E.Kind == 7 && E.Amount < 0 && E.Label.rfind("Deposit: ", 0) == 0)
+			{
+				DepositOut -= E.Amount;
+				for (const net::SiteDef& D : net::Sites())
+				{
+					for (const net::CashMethod& M : D.Cashier)
+					{
+						const bool Card = D.Id != net::SiteId::RiverLine && E.Label == "Deposit: " + D.Name && M.Id == "card";
+						FeesDue += Card ? static_cast<ss::Chips>(std::llround(static_cast<double>(-E.Amount) * static_cast<double>(M.FeePermille) / 1000.0)) : 0;
+					}
+				}
+			}
+			if (E.Kind == 7 && E.Amount > 0 && E.Label.rfind("Withdrawal: ", 0) == 0)
+			{
+				Landed += E.Amount;
+				++Arrivals;
+			}
+			Fees -= E.Kind == ss::life::LedgerSites ? E.Amount : 0;
+			const bool Monthly = (E.Kind == 4 && E.Label.rfind("RiverLine Rewards:", 0) == 0) || (E.Kind == ss::life::LedgerVideo && E.Label.rfind("Rerun payout:", 0) == 0);
+			if (Monthly && !Months.insert(E.Label).second)
+			{
+				Fail("sites: a month paid twice (" + E.Label + ", " + Where + ")", Seed, Step);
+			}
+		}
+		for (const site::Account& A : S.Life.Sites.Accounts)
+		{
+			Wallet& W = Wallets[static_cast<int>(A.Site)];
+			size_t From = 0;
+			for (size_t K = A.Lines.size(); !W.Lines.empty() && K-- > 0;)
+			{
+				if (Same(A.Lines[K], W.Lines.back()))
+				{
+					From = K + 1;
+					break;
+				}
+			}
+			ss::Chips Moved = 0;
+			for (size_t K = From; K < A.Lines.size(); ++K)
+			{
+				const site::Line& L = A.Lines[K];
+				Moved += L.Cents;
+				DepositIn += L.Kind == 7 && L.Cents > 0 ? L.Cents : 0;
+				Asked += L.Kind == 7 && L.Cents < 0 ? -L.Cents : 0;
+			}
+			if (A.Cents - W.Cents != Moved)
+			{
+				Fail("sites: a wallet moved without its lines (" + std::string(net::KeyOf(A.Site)) + " " + ss::Money(A.Cents - W.Cents) + " vs " + ss::Money(Moved) + ", " + Where + ")", Seed, Step);
+			}
+			if (A.Cents < 0)
+			{
+				Fail("sites: a wallet below zero (" + Where + ")", Seed, Step);
+			}
+			W.Cents = A.Cents;
+			W.Lines = A.Lines;
+		}
+		ss::Chips Transit = 0;
+		for (const site::Transfer& X : S.Life.Sites.Transfers)
+		{
+			const auto It = Xfers.find(X.Id);
+			if (X.State == 1 && (It == Xfers.end() || It->second == 0))
+			{
+				++LandedXfers;
+				LandedFees += X.FeeCents;
+			}
+			Transit += X.State == 0 && X.Out ? X.Cents : 0;
+			Xfers[X.Id] = X.State;
+		}
+		if (DepositOut != DepositIn || Fees != FeesDue)
+		{
+			Fail("sites: deposits or their fees don't add up (" + ss::Money(DepositOut) + " out, " + ss::Money(DepositIn) + " in; fees " + ss::Money(Fees) + " vs " + ss::Money(FeesDue) + ", " +
+					Where + ")",
+				Seed, Step);
+		}
+		if (Asked != Transit + Landed + LandedFees || Arrivals != LandedXfers)
+		{
+			Fail("sites: withdrawals don't add up (" + ss::Money(Asked) + " asked, " + ss::Money(Transit) + " in transit, " + ss::Money(Landed) + " landed, " + ss::Money(LandedFees) +
+					" in fees; " + std::to_string(Arrivals) + " bank lines for " + std::to_string(LandedXfers) + " landed, " + Where + ")",
+				Seed, Step);
+		}
+		for (const site::Invitation& I : S.Life.Sites.Invites)
+		{
+			const std::string Thread = net::KeyOf(I.Site);
+			if ((I.State == 0 || I.State == 3) &&
+				std::none_of(S.Life.Inbox.begin(), S.Life.Inbox.end(), [&Thread](const ss::life::Letter& L) { return L.Source == "site" && L.Thread == Thread && L.Kind == ss::site::LetterInvite; }))
+			{
+				Fail("sites: an unanswered invitation dropped from Mail (" + Thread + ", " + Where + ")", Seed, Step);
+			}
+		}
+	}
+};
+
 /** The bytes a save's lines of the given tags take. */
 size_t LineBytes(const std::string& Text, std::initializer_list<const char*> Tags)
 {
@@ -382,8 +513,149 @@ int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
 	Frames(0.1);
 	SegBooks B;
 	B.Start(*S);
+	SegSites Books;
+	ss::Rng X("monkey-sites-rng-" + std::to_string(Seed)); // the rival sites' and Rerun's draws (update 2 C3), apart from the segment's
 	const double End = S->WorldMinutes() + static_cast<double>(Days) * Day;
 	int Step = 0;
+	// An event at a table, any site's: the plan skips it (any style, the stops drawn), or today's Sprint plays it; the event's
+	// graded decisions are exactly the player's own (no AI decision graded).
+	auto PlayOnline = [&](const ss::LobbyEvent& L, ss::Rng& D, int At, const char* PlanTag, const char* SprintTag) {
+		S->RegisterEvent(L);
+		if (S->CurrentScreen != ss::Screen::Table)
+		{
+			return;
+		}
+		S->SprintBudgetMs = 1.0e9;
+		const bool Plan = D.Chance(0.7);
+		if (Plan)
+		{
+			S->SetAutoplay(0, RandomPlan(D, true));
+		}
+		for (int F = 0; F < 400000 && S->CurrentScreen == ss::Screen::Table; ++F)
+		{
+			if (!Plan || (S->TableCount() > 0 && !S->Glance(0).Busted && !S->AutoPanel(0).On))
+			{
+				S->CurrentPace = ss::Pace::Sprint;
+			}
+			else if (S->TableCount() > 0 && !S->Glance(0).Busted && !S->AutoPanel(0).Skipping && !S->HasPrompt)
+			{
+				S->SkipAhead(0, autoplay::Target::Result);
+			}
+			Now += 1.0 / 30.0;
+			S->Update(Now);
+			if (S->HasPrompt && Now - S->Prompt.OpenedAt > 0.3)
+			{
+				S->HeroAct(D.Chance(0.5) ? ss::PlayerAction::Fold() : S->Prompt.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Call());
+			}
+		}
+		// No AI decision graded: the event's graded decisions are exactly the player's own.
+		const autoplay::Played* P = autoplay::PlayedFor(S->Life.Auto, L.Spec.Id);
+		if (S->CurrentScreen == ss::Screen::Results && P && static_cast<size_t>(P->OwnDecisions) != S->LastResults.Grades.size())
+		{
+			Fail("segment: a graded decision that wasn't the player's (" + std::to_string(S->LastResults.Grades.size()) + " graded, " + std::to_string(P->OwnDecisions) + " own)", Seed, At);
+		}
+		Reached[Plan ? PlanTag : SprintTag]++;
+		S->LeaveResults();
+	};
+	// The rival sites and Rerun (update 2 C3, SPEC §6.7): an invitation forced as the console does it and Mail's answer,
+	// deposits and withdrawals (some refused: under a minimum, a method the site doesn't take, more than the balance), a
+	// rival's event, an upload. Returns what it did.
+	auto SiteAction = [&](int At) -> std::string {
+		namespace net = ss::net;
+		namespace site = ss::site;
+		const net::SiteId Site = X.Chance(0.5) ? net::SiteId::Ignite : net::SiteId::RunItTwice;
+		const ss::Chips* Wallet = site::WalletOf(S->Life.Sites, Site);
+		const double Pick = X.Next();
+		if (!Wallet)
+		{
+			// No account there yet: its invitation (sent as the console sends it), or Mail's answer to one that's waiting.
+			const bool Waiting = std::any_of(S->Life.Sites.Invites.begin(), S->Life.Sites.Invites.end(),
+				[Site](const site::Invitation& I) { return I.Site == Site && (I.State == 0 || I.State == 3); });
+			if (!Waiting)
+			{
+				const std::string Said = S->DebugSite(std::string("invite ") + net::KeyOf(Site));
+				Reached[Said.find("invitation is in Mail") != std::string::npos ? "sites:invited" : "sites:not invited"]++;
+				return "an invitation";
+			}
+			if (Pick < 0.5)
+			{
+				Reached[S->AnswerInvite(Site, X.Chance(0.85)).empty() ? "sites:answered" : "sites:answer refused"]++;
+				return "Mail's buttons";
+			}
+			// The player opens the letter and leaves it (Mail marks a thread read when it shows it), and Mail fills past its keep
+			// with letters that want no answer: the trim (life::Post) must still keep the open invitation, whose Accept lives only
+			// on it (§1.7, §5.4; the g3 audit's blocker 4). A career's own Mail never reaches the keep in 60 days.
+			for (ss::life::Letter& L : S->Life.Inbox)
+			{
+				L.Read = L.Read || (L.Source == "site" && L.Thread == net::KeyOf(Site));
+			}
+			for (size_t K = 0; K <= ss::life::InboxKeep; ++K)
+			{
+				ss::life::Letter F;
+				F.At = S->WorldMinutes();
+				F.Thread = "monkey-flood";
+				F.Source = "monkey";
+				F.From = "Monkey";
+				F.Subject = "Nothing to answer";
+				F.Body = "A letter that wants no answer.";
+				F.Read = K % 2 == 0;
+				ss::life::Post(S->Life, F);
+			}
+			Reached["sites:mail opened and filled"]++;
+			return "Mail opened and filled";
+		}
+		if (Pick < 0.30)
+		{
+			// Some refused: under the $10 minimum, a method the site doesn't take in, more than the bank holds.
+			static const ss::Chips Amounts[] = {999, 1000, 2500, 5000, 10000, 500000};
+			const std::string Why = S->Deposit(Site, Amounts[X.Int(6)], X.Chance(0.85) ? "card" : "bank");
+			Reached[Why.empty() ? "sites:deposit" : "sites:deposit refused"]++;
+			return "a deposit";
+		}
+		if (Pick < 0.55)
+		{
+			// Some refused: under the $20 minimum, a method the site doesn't pay out by, more than the wallet holds.
+			const ss::Chips Has = *Wallet;
+			const ss::Chips Amounts[] = {1999, 2000, Has / 2, Has, Has + 100};
+			const std::string Why = S->Withdraw(Site, Amounts[X.Int(5)], X.Chance(0.85) ? "bank" : "card");
+			Reached[Why.empty() ? "sites:withdraw" : "sites:withdraw refused"]++;
+			return "a withdrawal";
+		}
+		if (Pick < 0.85)
+		{
+			const net::Network& Net = net::Site(Site);
+			const double W = S->WorldMinutes();
+			std::vector<ss::LobbyEvent> Open;
+			for (const net::EventInstance& E : Net.Window(W - 120.0, W + 60.0))
+			{
+				const ss::LobbyEvent L = Net.Listing(E, nullptr, S->Unlocks());
+				if (L.Joinable && L.Spec.Entrants <= 400 && S->CanAfford(L) && !S->IsPlaying(L.Spec.Id))
+				{
+					Open.push_back(L);
+				}
+			}
+			if (!Open.empty())
+			{
+				PlayOnline(Open[static_cast<size_t>(X.Int(static_cast<int>(Open.size())))], X, At, "sites:rival event by the plan", "sites:rival event sprinted");
+			}
+			return "a rival's event";
+		}
+		const std::vector<ss::video::Candidate> Cands = S->VideoCandidates();
+		if (!Cands.empty())
+		{
+			ss::video::Choice Ch;
+			Ch.Candidates = {Cands[static_cast<size_t>(X.Int(static_cast<int>(Cands.size())))].Id};
+			Ch.F = X.Chance(0.5) ? ss::video::Format::Short : ss::video::Format::Breakdown;
+			Fed();
+			const std::string Why = S->Publish(Ch);
+			for (int Guard = 0; Why.empty() && S->TimeSkip.Active && Guard < 200; ++Guard)
+			{
+				Frames(0.5);
+			}
+			Reached[Why.empty() ? "sites:upload" : "sites:upload refused"]++;
+		}
+		return "an upload";
+	};
 	static const char* const Backers[] = {"lou", "dee", "mei", "rick", "lanternrow", "sam"};
 	for (; S->WorldMinutes() < End && Step < 4000; ++Step)
 	{
@@ -536,43 +808,7 @@ int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
 			}
 			if (!Open.empty())
 			{
-				const ss::LobbyEvent L = Open[static_cast<size_t>(R.Int(static_cast<int>(Open.size())))];
-				S->RegisterEvent(L);
-				if (S->CurrentScreen == ss::Screen::Table)
-				{
-					S->SprintBudgetMs = 1.0e9;
-					const bool Plan = R.Chance(0.7);
-					if (Plan)
-					{
-						S->SetAutoplay(0, RandomPlan(R, true));
-					}
-					for (int F = 0; F < 400000 && S->CurrentScreen == ss::Screen::Table; ++F)
-					{
-						if (!Plan || (S->TableCount() > 0 && !S->Glance(0).Busted && !S->AutoPanel(0).On))
-						{
-							S->CurrentPace = ss::Pace::Sprint;
-						}
-						else if (S->TableCount() > 0 && !S->Glance(0).Busted && !S->AutoPanel(0).Skipping && !S->HasPrompt)
-						{
-							S->SkipAhead(0, autoplay::Target::Result);
-						}
-						Now += 1.0 / 30.0;
-						S->Update(Now);
-						if (S->HasPrompt && Now - S->Prompt.OpenedAt > 0.3)
-						{
-							S->HeroAct(R.Chance(0.5) ? ss::PlayerAction::Fold() : S->Prompt.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Call());
-						}
-					}
-					// No AI decision graded: the event's graded decisions are exactly the player's own.
-					const autoplay::Played* P = autoplay::PlayedFor(S->Life.Auto, L.Spec.Id);
-					if (S->CurrentScreen == ss::Screen::Results && P && static_cast<size_t>(P->OwnDecisions) != S->LastResults.Grades.size())
-					{
-						Fail("segment: a graded decision that wasn't the player's (" + std::to_string(S->LastResults.Grades.size()) + " graded, " + std::to_string(P->OwnDecisions) + " own)", Seed,
-							Step);
-					}
-					Reached[Plan ? "seg:online by the plan" : "seg:online sprinted"]++;
-					S->LeaveResults();
-				}
+				PlayOnline(Open[static_cast<size_t>(R.Int(static_cast<int>(Open.size())))], R, Step, "seg:online by the plan", "seg:online sprinted");
 			}
 			Where = "an online event";
 		}
@@ -586,6 +822,7 @@ int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
 				S->LobbyMinutes += std::max(0.0, O.DeskOpens + 30.0 - S->WorldMinutes());
 				Frames(0.05);
 				B.Audit(*S, Seed, Step, "to the desk");
+				Books.Audit(*S, B.NewLines, Seed, Step, "to the desk");
 				Fed();
 				if (S->GoToLive(O.Id).empty())
 				{
@@ -656,6 +893,17 @@ int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
 						Reached[Plan ? "seg:night by the plan" : "seg:night by the engine"]++;
 					}
 					D.ClockMinutes = Ends + 30.0 - Day;
+					// Through the save's text and back (update 2 C3, §1.2): what the sites keep (a transfer's state, the done keys,
+					// Rewards' month) has to survive a save and a load, or a transfer lands twice; SegSites' books run on across it.
+					ss::SaveData Loaded;
+					if (ss::SaveData::Parse(D.Serialize(), Loaded))
+					{
+						D = Loaded;
+					}
+					else
+					{
+						Fail("segment: the night's save doesn't read back", Seed, Step);
+					}
 					S.reset();
 					S.reset(new ss::Session(H, "monkey-segment-" + std::to_string(Seed), &D));
 					S->CurrentScreen = ss::Screen::Lobby;
@@ -666,7 +914,17 @@ int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
 			Where = "a night";
 		}
 		B.Audit(*S, Seed, Step, Where);
+		Books.Audit(*S, B.NewLines, Seed, Step, Where);
+		// Update 2 C3: the rival sites and Rerun beside the step, on their own draws (SiteAction), the books audited again.
+		if (X.Chance(0.35))
+		{
+			Fed();
+			const std::string Did = SiteAction(Step);
+			B.Audit(*S, Seed, Step, Did);
+			Books.Audit(*S, B.NewLines, Seed, Step, Did);
+		}
 	}
+	Reached["sites:landed"] += Books.LandedXfers;
 	S->Save();
 	const std::string Text = H.Last.Serialize();
 	const size_t Segment = LineBytes(Text, {"livefund\t", "livevoice\t", "liveroom\t", "livebadge\t", "liveleader\t", "livepatch\t", "mail\t", "stake\t", "coach\t", "sponsor\t", "badge\t",
@@ -1332,6 +1590,14 @@ int main(int Argc, char** Argv)
 			Reached["seg:night by the engine"] == 0))
 	{
 		std::printf("FAIL: the segment's careers never took a stake, signed a sponsor, or played online and live\n");
+		++Failures;
+	}
+	if (Careers >= 1 && CareerDays >= 60 &&
+		(Reached["sites:deposit"] == 0 || Reached["sites:withdraw"] == 0 || Reached["sites:landed"] == 0 || Reached["sites:upload"] == 0 ||
+			Reached["sites:rival event by the plan"] + Reached["sites:rival event sprinted"] == 0 || Reached["sites:mail opened and filled"] == 0))
+	{
+		std::printf("FAIL: the segment's careers never moved money to a site and back, played a rival's event, uploaded, or filled Mail past its keep with an "
+					"invitation open\n");
 		++Failures;
 	}
 	std::printf("%s: %d failures\n", Failures == 0 ? "monkey passed" : "MONKEY FAILED", Failures);

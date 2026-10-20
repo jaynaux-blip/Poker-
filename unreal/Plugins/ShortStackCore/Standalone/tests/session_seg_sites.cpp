@@ -10,16 +10,25 @@
 
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Sites.h"
+#include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/Game/Talk.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
 
 namespace session_test
 {
+namespace seams
+{
+std::string Fixture(const char* Name); // session_seams.cpp (the lead's): a committed fixture's text
+} // namespace seams
+
 namespace sites_seg
 {
 namespace net = ss::net;
@@ -232,6 +241,184 @@ void RewardsOnTheFirst()
 	Expect(S.BankrollCents == Before + 320 && S.Life.Ledger.front().Kind == 4 && S.Life.Ledger.front().Label == "RiverLine Rewards: Silver, October",
 		"sites: on Nov 1, Silver's 8% of October's $40 lands as one bank line, \"RiverLine Rewards: Silver, October\", once");
 }
+
+// ------------------------------------------------------------------ C3: the gate audit's fixes (c3-fixes)
+
+int SitesLetters(const ss::Session& S, const char* Thread, const std::string& Subject)
+{
+	int N = 0;
+	for (const ss::life::Letter& M : S.Life.Inbox)
+	{
+		N += M.Source == "site" && M.Thread == Thread && M.Subject == Subject ? 1 : 0;
+	}
+	return N;
+}
+
+/**
+ * Should-fix 1: the creator fixture kept no world, so the world's tracker never saw its hundred results. RiverLine's YOU row
+ * (site::HeroOn, as RiverLineNet.cpp reads it) is its History's, not $0, 0 tournaments and 0 points.
+ */
+void CreatorNumbers()
+{
+	ss::SaveData D;
+	const bool Parsed = ss::SaveData::Parse(seams::Fixture("update2_creator.ssave"), D);
+	Hooks H;
+	ss::Session S(H, "sites-creator", &D);
+	const double World = S.WorldMinutes();
+	const net::HeroStats Hist = net::StatsFrom(S.HeroName, S.History, World);
+	const net::HeroStats You = site::HeroOn(net::SiteId::RiverLine, S.HeroName, S.History, S.Life.Sites, &S.Living(), World);
+	std::printf("  sites: the creator's RiverLine row: %s, %d events, %.0f points (History's %s, %d, %.0f; the tracker's %d events)\n", ss::Money(You.Earnings).c_str(),
+		You.Tournaments, You.SeasonPoints, ss::Money(Hist.Earnings).c_str(), Hist.Tournaments, Hist.SeasonPoints, S.Living().HeroStats().Events);
+	Expect(Parsed && S.History.size() >= 100 && Hist.Earnings > 0 && Hist.SeasonPoints > 0.0 && You.Earnings >= Hist.Earnings && You.Tournaments >= Hist.Tournaments &&
+			You.SeasonPoints >= Hist.SeasonPoints,
+		"sites: the creator's RiverLine row never falls below its last hundred (a save that kept no world)");
+}
+
+/** Should-fix 2, through the session: "Your tickets are in" arrives with the tickets, minutes after the welcome letter. */
+void TicketsLetter()
+{
+	Hooks H;
+	ss::Session S(H, "sites-tickets");
+	double Now = 0.0;
+	Lobby(S, Now);
+	S.BankrollCents = 100000;
+	site::Invite(S.Life.Sites, S.Life, net::SiteId::RunItTwice, S.WorldMinutes(), 0, false);
+	Expect(S.AnswerInvite(net::SiteId::RunItTwice, true).empty() && S.Deposit(net::SiteId::RunItTwice, 5000, "card").empty() &&
+			S.Life.TicketsFor("runittwice.sunday-grind") == 1 && S.Life.TicketsFor("runittwice.supper-stack") == 2,
+		"sites: a $50 first deposit on RunItTwice puts the $33 in tickets on the account");
+	Expect(SitesLetters(S, "runittwice", "Your RunItTwice account is open") == 1 && SitesLetters(S, "runittwice", "Your tickets are in") == 1,
+		"sites: and \"Your tickets are in\" says so, though the welcome letter came minutes before");
+}
+
+/**
+ * The nice-to-haves on Team RunItTwice: the player's pro badge on their seat (Session.cpp's seat, as under Team RiverLine), and
+ * should-fix 4: the block no longer says it never heard of a live site with a team.
+ */
+void TeamRunItTwice()
+{
+	Hooks H;
+	ss::Session S(H, "sites-team");
+	double Now = 0.0;
+	Lobby(S, Now);
+	S.BankrollCents = 200000;
+	site::Invite(S.Life.Sites, S.Life, net::SiteId::RunItTwice, S.WorldMinutes(), 0, false);
+	S.AnswerInvite(net::SiteId::RunItTwice, true);
+	S.Deposit(net::SiteId::RunItTwice, 5000, "card");
+	const std::string Signed = S.DebugSponsor("sign turnstone");
+	Expect(ss::sponsor::Active(S.Life.Sponsors, "turnstone", S.WorldMinutes()) && !S.TeamRiverLine(), ("sites: Team RunItTwice signed (" + Signed + ")").c_str());
+	ss::LobbyEvent Ev;
+	bool Pro = false;
+	if (Joinable(S, net::SiteId::RunItTwice, Ev) && S.CanAfford(Ev))
+	{
+		S.RegisterEvent(Ev);
+		Now = Wait(S, Now, 2.0);
+		for (const ss::SeatVis& V : S.Seats)
+		{
+			Pro = Pro || (V.IsHero && V.Pro);
+		}
+	}
+	Expect(S.T && Pro, "sites: under Team RunItTwice the player's seat wears the pro badge, as under Team RiverLine");
+	// The patch on the chest: the block remarks on it, and knows the site is real.
+	Expect(S.SewPatch(0, "turnstone").empty(), "sites: Team RunItTwice's patch sewn on");
+	S.Life.Hunger = 0.0;
+	S.Life.Thirst = 0.0;
+	S.Life.Energy = 100.0;
+	const ss::town::Talk T = ss::town::Open(*ss::town::ContextFor(S, "mei", ""));
+	Expect(T.Topic == "look:patch:turnstone" && T.Line.find("RunItTwice") != std::string::npos && T.Line.find("Never heard") == std::string::npos,
+		("sites: the block notices the RunItTwice patch and knows the site (" + T.Topic + ": " + T.Line + ")").c_str());
+}
+
+/** The nice-to-have on ss.Site.Advance: what it lands is dated now, the clock where it was; nothing sits in the future. */
+void AdvanceDating()
+{
+	Hooks H;
+	ss::Session S(H, "sites-advance");
+	double Now = 0.0;
+	Lobby(S, Now);
+	S.BankrollCents = 100000;
+	site::Invite(S.Life.Sites, S.Life, net::SiteId::RunItTwice, S.WorldMinutes(), 0, false);
+	S.AnswerInvite(net::SiteId::RunItTwice, true);
+	S.Deposit(net::SiteId::RunItTwice, 5000, "card");
+	Expect(S.Withdraw(net::SiteId::RunItTwice, 4000, "").empty(), "sites: $40 withdrawn from RunItTwice (48 hours, $5)");
+	// (review-c3-fixes) A month's close inside the span too, so every kind of thing the advance lands is seen dated: October's
+	// $60 of RunItTwice rake pays the Second Run Club's $9.00 on Nov 1, a wallet line and its letter, beside the bank line.
+	site::OnBuyIn(S.Life.Sites, net::SiteId::RunItTwice, 0, 6000, "Buy-in", S.WorldMinutes());
+	const size_t Letters = S.Life.Inbox.size();
+	const size_t Lines = site::AccountOf(S.Life.Sites, net::SiteId::RunItTwice)->Lines.size();
+	const double World = S.WorldMinutes();
+	const Chips Bank = S.BankrollCents;
+	S.DebugSite("advance 720");
+	const site::Account* Rit = site::AccountOf(S.Life.Sites, net::SiteId::RunItTwice);
+	const bool Paid = Rit && Rit->Lines.size() == Lines + 1 && Rit->Lines.back().Cents == 900 && S.Life.Inbox.size() > Letters;
+	bool Past = S.WorldMinutes() == World;
+	for (const site::Transfer& X : S.Life.Sites.Transfers)
+	{
+		Past = Past && X.State != 0 && X.ArrivesAt <= World;
+	}
+	for (const ss::life::LedgerEntry& E : S.Life.Ledger)
+	{
+		Past = Past && E.At <= World;
+	}
+	for (const ss::life::Letter& M : S.Life.Inbox)
+	{
+		Past = Past && M.At <= World;
+	}
+	for (const site::Account& A : S.Life.Sites.Accounts)
+	{
+		for (const site::Line& L : A.Lines)
+		{
+			Past = Past && L.At <= World;
+		}
+	}
+	Expect(S.BankrollCents == Bank + 3500 && S.Life.Ledger.front().Label == "Withdrawal: RunItTwice" && S.Life.Ledger.front().Amount == 3500 && Paid && Past,
+		"sites: ss.Site.Advance 720 lands the $35.00 and Nov 1's $9.00 rakeback now, dated now; no bank line, wallet line, letter or transfer after the clock");
+}
+
+/**
+ * The nice-to-haves on a launch in this world (World::SiteLaunched): ss.Site.Launch opens Ignite mid-day on Night One; its News
+ * has its launch at that minute, its invitation gate counts from it, Describe says it's open, and Rick's text comes a few nights
+ * after it (not after Nov 2).
+ */
+void LaunchedHere()
+{
+	Hooks H;
+	ss::Session S(H, "sites-launch");
+	double Now = 0.0;
+	Lobby(S, Now);
+	ss::rep::Public P;
+	P.OnlineEvents = 150;
+	const double Night = S.WorldMinutes();
+	Expect(!site::GateMet(net::SiteId::Ignite, P, 2, Night + 60.0), "sites: before Ignite opens in this world, its gate can't be met");
+	const std::string Said = S.DebugSite("launch ignite");
+	const double Opened = S.Living().SiteLaunched(net::SiteId::Ignite);
+	Expect(Opened >= 0.0 && Opened <= S.WorldMinutes() && std::fmod(Opened, 1440.0) != 0.0, ("sites: ss.Site.Launch opens Ignite now, mid-day (" + Said + ")").c_str());
+	net::HeroStats Hero;
+	Hero.Name = S.HeroName;
+	bool Live = false;
+	for (const net::NewsItem& It : net::Site(net::SiteId::Ignite).News(S.WorldMinutes(), Hero, 20))
+	{
+		Live = Live || (It.Title == "Ignite Poker is live" && It.At == Opened);
+	}
+	Expect(Live, "sites: Ignite's News has its launch at the minute it opened, not nine hours on");
+	Expect(site::GateMet(net::SiteId::Ignite, P, 2, S.WorldMinutes() + 60.0), "sites: Ignite's gate counts from when it opened in this world");
+	// (review-c3-fixes) Ignite's own line: RunItTwice's, open since Night One, carries the same date.
+	const std::string Describe = S.DebugSite("describe");
+	const size_t Gate = Describe.find("Ignite's gate (");
+	const std::string IgniteLine = Gate == std::string::npos ? std::string() : Describe.substr(Gate, Describe.find('\n', Gate) - Gate);
+	Expect(IgniteLine.find("open since " + net::DateLabel(net::DayOf(Opened))) != std::string::npos,
+		("sites: ss.Site.Describe says Ignite's open since it opened here (" + IgniteLine + ")").c_str());
+	ss::life::State L = S.Life;
+	L.BackRoomNights = 1;
+	Chips Bank = 0;
+	std::vector<std::pair<std::string, std::string>> Texts;
+	site::Step(L.Sites, L, Bank, ss::rep::Public(), 0, Opened + 4.0 * 1440.0 + 21.0 * 60.0, Opened + 5.0 * 1440.0, Texts);
+	bool Rick = false;
+	for (const std::pair<std::string, std::string>& Tx : Texts)
+	{
+		Rick = Rick || (Tx.first == "Rick" && Tx.second.find("ignite") != std::string::npos);
+	}
+	Expect(Rick, "sites: Rick texts about Ignite a few nights after it opened in this world");
+}
 } // namespace sites_seg
 
 void SegSites()
@@ -240,5 +427,11 @@ void SegSites()
 	sites_seg::Restrictions();
 	sites_seg::Decline();
 	sites_seg::RewardsOnTheFirst();
+	// C3 (c3-fixes): the gate audit's should-fixes and nice-to-haves.
+	sites_seg::CreatorNumbers();
+	sites_seg::TicketsLetter();
+	sites_seg::TeamRunItTwice();
+	sites_seg::AdvanceDating();
+	sites_seg::LaunchedHere();
 }
 } // namespace session_test

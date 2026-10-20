@@ -37,8 +37,14 @@
 //                     log10(1 + F + subs / 2), the old term to the bit without subscribers; an old save reads none of it;
 //                     the street's recognition follows, naming the videos once subscribers / 2 outweigh followers.
 // G3 (rep::Public's site fields) lands with its gate.
+//
+// C3 (c3-fixes, the gate audit's should-fix 5):
+//   EconSeasonPastHundred  the Season leader the block names is the board's, the player's row read as its YOU row is
+//                     (site::HeroOn): past a hundred results the last hundred aren't the season. EconBoardTop reads it too.
 #include "CopyLint.h"
 #include "SessionSeg.h"
+
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 
 #include "ShortStack/AI/Style.h"
 #include "ShortStack/Cards.h"
@@ -428,10 +434,10 @@ std::string EconLint(const std::string& Line)
 	return Why.empty() ? EconWorldWords(Line) : Why;
 }
 
-/** The board's top row's name now (the player's for -1), or "". */
+/** The board's top row's name now (the player's for -1), or "": the player's row as the board's YOU row reads it (site::HeroOn, C3). */
 std::string EconBoardTop(const ss::Session& S, ss::net::Board B)
 {
-	const ss::net::HeroStats Hero = ss::net::StatsFrom(S.HeroName, S.History, S.WorldMinutes());
+	const ss::net::HeroStats Hero = ss::site::HeroOn(ss::net::SiteId::RiverLine, S.HeroName, S.History, S.Life.Sites, &S.Living(), S.WorldMinutes());
 	const std::vector<ss::net::BoardRow> Rows = ss::net::Shared().Leaderboard(B, S.WorldMinutes(), Hero, 1, nullptr);
 	if (Rows.empty() || Rows.front().Value <= 0.0)
 	{
@@ -835,6 +841,64 @@ void EconFreshYou()
 	Expect(Got.count("fresh:season") && EconHas(Got["fresh:season"], "you're") && EconHas(Got["fresh:season"], "top of the season board"),
 		"econ fresh (the player): on top of the Season board");
 	Expect(!EconFind(M.Said, "fresh:hill:"), "econ fresh (the player): nobody tells a player who's won up the hill to go up there");
+}
+
+/**
+ * (C3, the audit's should-fix 5.) The Season board's leader the block names is the board's. Past a hundred results the board's
+ * YOU row reads the world's season (site::HeroOn), not the last hundred: a player whose big score has left History is still on
+ * top of the board, and Mei says so, rather than naming whoever's second.
+ */
+void EconSeasonPastHundred()
+{
+	Hooks H;
+	ss::Session S(H, "econ-season-hundred");
+	S.NewCareer(EconWho(), world::Start::Blank);
+	world::World& W = S.Living();
+	const double Opened = W.StartedAt();
+	EconClock(S, Opened + 2.0);
+	// The night's biggest score on RiverLine, the player's: the world counts its Season points (HeroPoints).
+	const ss::net::Network& N = ss::net::Shared();
+	std::string BigId;
+	std::string BigName;
+	double Best = 0.0;
+	for (const ss::net::EventInstance& E : N.Window(Opened, Opened + 600.0))
+	{
+		const ss::net::EventTemplate& T = N.TemplateOf(E);
+		const double P = T.JoinIndex < 0 && T.BuyInCents > 0 && T.BuyInCents <= 2200 ? ss::net::Points(1, E.Entries, T.BuyInCents) : 0.0;
+		if (P > Best)
+		{
+			Best = P;
+			BigId = E.Id;
+			BigName = T.Name;
+		}
+	}
+	W.HeroEntered(BigId, BigName);
+	W.HeroFinished(BigId, 1, 250000, world::World::TableReport());
+	// A hundred results since, out of the money: History holds those, and none of them scores.
+	for (int K = 0; K < 100; ++K)
+	{
+		ss::HistoryEntry E;
+		E.Name = "Night Owl Turbo";
+		E.Place = 900;
+		E.Entrants = 1000;
+		E.Prize = 0;
+		E.BuyInCents = 110;
+		S.History.push_back(E);
+	}
+	const ss::net::HeroStats Last100 = ss::net::StatsFrom(S.HeroName, S.History, S.WorldMinutes());
+	const std::string Top = EconBoardTop(S, ss::net::Board::Season);
+	EconMonth M = EconWalkMonth(S, 2);
+	std::string Season;
+	for (const EconSaid& E : M.Said)
+	{
+		Season = Season.empty() && E.Key.rfind("fresh:season:", 0) == 0 ? E.Line : Season;
+	}
+	std::printf("  econ: the Season board past a hundred results: %s's %.0f points (the world's %.0f) against the last hundred's %.0f, top \"%s\"; \"%s\"\n", BigName.c_str(), Best,
+		W.HeroSeasonPoints(), Last100.SeasonPoints, Top.c_str(), Season.c_str());
+	Expect(Best > 0.0 && W.HeroSeasonPoints() > 0.0 && Last100.SeasonPoints == 0.0 && Top == S.HeroName,
+		"econ season: the player tops the Season board on the world's points, with a hundred results since that score none");
+	Expect(M.Problems == 0 && EconHas(Season, "you're") && EconHas(Season, "top of the season board"),
+		"econ season: the block names the player as the Season board's leader, as the board does (site::HeroOn, not the last hundred)");
 }
 
 void EconEstablished()
@@ -1550,6 +1614,7 @@ void SegEcon()
 	econ_seg::EconPaceSession();
 	econ_seg::EconFreshTalk();
 	econ_seg::EconFreshYou();
+	econ_seg::EconSeasonPastHundred();
 	econ_seg::EconEstablished();
 	// G2: Rerun on Kast and in the public record.
 	econ_seg::EconBuzz();
