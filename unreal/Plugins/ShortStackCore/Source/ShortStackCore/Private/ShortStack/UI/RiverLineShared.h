@@ -21,6 +21,17 @@ namespace ss
 {
 namespace ui
 {
+// Update 2 (G3): the skin-aware shades the helpers below use (RiverLineSites.cpp; declared again with the rest further down).
+namespace rlsites_detail
+{
+bool SitesHome();
+Color SitesTone(uint32_t Rgb);
+Color SitesOnAccent();
+Color SitesAccentDeep();
+Color SitesOnGold();
+Color SitesGoldDeep();
+} // namespace rlsites_detail
+
 namespace rlnet_detail
 {
 const float NetTop = 64.0f;
@@ -76,11 +87,11 @@ inline Color NetTier(net::Tier T)
 {
 	switch (T)
 	{
-	case net::Tier::Freeroll: return Hex(0x3ecf6e);
-	case net::Tier::Micro: return Hex(0x27d3c3);
-	case net::Tier::Low: return Hex(0x3b82f6);
+	case net::Tier::Freeroll: return pal::Green;
+	case net::Tier::Micro: return pal::Accent;
+	case net::Tier::Low: return pal::Accent2;
 	case net::Tier::Mid: return Hex(0x9b6bff);
-	case net::Tier::High: return Hex(0xf2c14e);
+	case net::Tier::High: return pal::Gold;
 	}
 	return pal::Accent;
 }
@@ -89,12 +100,12 @@ inline Color NetStatus(net::Status St)
 {
 	switch (St)
 	{
-	case net::Status::Announced: return Hex(0x6b7a93);
+	case net::Status::Announced: return rlsites_detail::SitesTone(0x6b7a93);
 	case net::Status::Registering: return Hex(0x4f9bff);
-	case net::Status::LateReg: return Hex(0x3ecf6e);
-	case net::Status::Running: return Hex(0x9aa7bd);
-	case net::Status::FinalTable: return Hex(0xf2c14e);
-	case net::Status::Finished: return Hex(0x4d5b73);
+	case net::Status::LateReg: return pal::Green;
+	case net::Status::Running: return rlsites_detail::SitesTone(0x9aa7bd);
+	case net::Status::FinalTable: return pal::Gold;
+	case net::Status::Finished: return pal::Dim;
 	}
 	return pal::Muted;
 }
@@ -103,11 +114,11 @@ inline Color NetKind(net::NewsKind K)
 {
 	switch (K)
 	{
-	case net::NewsKind::BigWin: return Hex(0xf2c14e);
+	case net::NewsKind::BigWin: return pal::Gold;
 	case net::NewsKind::Series: return Hex(0xb8ff2e);
 	case net::NewsKind::Schedule: return Hex(0x4f9bff);
-	case net::NewsKind::Record: return Hex(0xf28a3a);
-	case net::NewsKind::Hero: return Hex(0x27d3c3);
+	case net::NewsKind::Record: return pal::Orange;
+	case net::NewsKind::Hero: return pal::Accent;
 	case net::NewsKind::People: return Hex(0xc084fc);
 	}
 	return pal::Accent;
@@ -149,7 +160,7 @@ inline float NetPill(Canvas& Cv, const std::string& Label, float X, float Y, con
 	{
 		Cv.StrokeRoundRect({X, Y, W, H}, H / 2.0f, NetA(Col, 0.45f), 1.0f);
 	}
-	Cv.Text(Label, X + W / 2.0f, Y + H / 2.0f + 0.5f, Ts(Size, 700, Solid ? Hex(0x07121c) : Col, Align::Center, Baseline::Middle));
+	Cv.Text(Label, X + W / 2.0f, Y + H / 2.0f + 0.5f, Ts(Size, 700, Solid ? rlsites_detail::SitesTone(0x07121c) : Col, Align::Center, Baseline::Middle));
 	return W;
 }
 
@@ -498,7 +509,7 @@ inline void NetTrophy(Canvas& Cv, float Cx, float Top, float Sz, const Color& Co
 	Cv.FillPolygon(Cup, Metal);
 	Cv.FillRect({Cx - Sz * 0.05f, Top + Sz * 0.46f, Sz * 0.1f, Sz * 0.22f}, Metal);
 	Cv.FillRoundRect({Cx - Sz * 0.22f, Top + Sz * 0.66f, Sz * 0.44f, Sz * 0.08f}, Sz * 0.02f, Metal);
-	Cv.FillRoundRect({Cx - Sz * 0.3f, Top + Sz * 0.74f, Sz * 0.6f, Sz * 0.16f}, Sz * 0.03f, Paint::Linear({0.0f, Top + Sz * 0.74f}, {0.0f, Top + Sz * 0.9f}, Hex(0x2a2f3a), Hex(0x12151c)));
+	Cv.FillRoundRect({Cx - Sz * 0.3f, Top + Sz * 0.74f, Sz * 0.6f, Sz * 0.16f}, Sz * 0.03f, Paint::Linear({0.0f, Top + Sz * 0.74f}, {0.0f, Top + Sz * 0.9f}, rlsites_detail::SitesTone(0x2a2f3a), rlsites_detail::SitesTone(0x12151c)));
 	// Shine.
 	Cv.FillEllipse(Cx - Sz * 0.16f, Top + Sz * 0.2f, Sz * 0.06f, Sz * 0.16f, Rgba(255, 255, 255, 0.35f));
 }
@@ -689,7 +700,7 @@ inline void NetEmbercrest(Canvas& Cv, float Cx, float Cy, float Size, const Colo
 inline Color LiveColor(const live::EventTemplate& T)
 {
 	const std::string Key = T.Key;
-	return Key == "nightly" ? Hex(EcEmberHot) : Key == "sunday" ? Hex(EcGold) : Key == "turbo" ? Hex(0xef4d5a) : Key == "bigstack" ? Hex(0xb48cff)
+	return Key == "nightly" ? Hex(EcEmberHot) : Key == "sunday" ? Hex(EcGold) : Key == "turbo" ? pal::Red : Key == "bigstack" ? Hex(0xb48cff)
 		: Key == "warmup" ? Hex(0x5fd3b0) : Hex(0x7cc4ff);
 }
 
@@ -947,5 +958,154 @@ void ForgetVideo(const RiverLine* RL);
 /** Every sentence Rerun's pages draw beyond core's own copy, for the copy lint. */
 std::vector<std::string> VideoUiInventory();
 } // namespace rlvideo_detail
+
+/**
+ * Update 2, G3 (§1.8, §5.5, §5.11): the rival sites on the laptop (RiverLineSites.cpp). Which site the client wears and
+ * in whose colours (a SkinScope for its SiteDef's palette), the player's money and record there, the poker button's
+ * list, the Cashier and Promotions pages, Career's Rewards card, and a site's own shades of RiverLine's literal colours.
+ * Side state lives here by laptop, as Mail's does (RiverLine.h is frozen).
+ */
+namespace rlsites_detail
+{
+/** Whether a rival site is registered (core-sites' SiteDef in net::Sites()); RiverLine always is. */
+bool SitesRegistered(net::SiteId Site);
+/** The player's account on a rival (null for RiverLine, or a site not joined). */
+const site::Account* SitesAccount(const Session& S, net::SiteId Site);
+/** The sites the player plays: RiverLine first, then each joined rival that's registered, in SiteId order. */
+std::vector<net::SiteId> SitesPlayed(const Session& S);
+/** Money to play with on a site: RiverLine's is the bank (the bankroll), a rival's its wallet (0 with no account). */
+Chips SitesBalance(const Session& S, net::SiteId Site);
+/** What's on its way back from a site (pending withdrawals, net of their fees): the sum, or one site's (Site < Count). */
+Chips SitesInTransit(const Session& S, net::SiteId Site = net::SiteId::Count);
+/** A site's palette as a skin (RiverLine's is pal::'s own values). */
+Skin SitesSkin(net::SiteId Site);
+/** True while pal:: holds RiverLine's values (outside any rival's scope): RiverLine's literal colours stay exact. */
+bool SitesHome();
+/**
+ * One of RiverLine's literal dark-ground or ink colours, in the skin being drawn: exactly Hex(Rgb) at home; inside a
+ * rival's scope, the same shade moved with the nearest of RiverLine's 16 tokens to that token's place in the skin, so
+ * panels and rows sit on the site's own ground (§1.8: every P0 skin is dark).
+ */
+Color SitesTone(uint32_t Rgb);
+/** Ink on the accent (a lit chip, a primary button): RiverLine's dark teal at home, the skin's accent darkened away. */
+Color SitesOnAccent();
+/** The accent's deeper end (a lit chip's gradient): RiverLine's at home, the skin's accent darkened a little away. */
+Color SitesAccentDeep();
+/** Ink on gold, and gold's deeper end, the same way. */
+Color SitesOnGold();
+Color SitesGoldDeep();
+/** The felt's lit middle: RiverLine's literal at home, the skin's felt brightened inside a rival's scope. */
+Color SitesFeltLight();
+/** Where the poker button's list of sites opens (above the taskbar's first button), for the input under it. */
+Rect SitesMenuRect(const Session& S);
+/** The site the laptop's poker client wears now: the lobby's site, the table in front's, a result's event's. */
+net::SiteId SitesClient(const RiverLine& RL, const Session& S);
+/** The lobby's site (RiverLine::SiteShown) while the player holds an account there; else RiverLine. */
+net::SiteId SitesShown(const RiverLine& RL, const Session& S);
+/** A table's site (its event id's prefix). */
+net::SiteId SitesOfTable(const Session& S);
+/**
+ * The player's numbers on a rival's boards (§5.8): its season from the account, the series and month points from the
+ * results there (net::Points, as the network scores them). RiverLine's stay the session's (net::StatsFrom).
+ */
+net::HeroStats SitesHero(const Session& S, net::SiteId Site, const net::Network& Net, double World, net::Board For);
+/** The boards a site shows, in order (Ignite: Month, Season; RunItTwice: Season, Wins, the series while one runs). */
+std::vector<net::Board> SitesBoards(net::SiteId Site, bool SeriesLive);
+/** A board's name on a site ("This Month", "Season"); RiverLine's are NetBoardName's. */
+std::string SitesBoardName(net::SiteId Site, net::Board B);
+/** What a rival's board is, for the page's right panel. */
+std::string SitesBoardAbout(const Session& S, net::SiteId Site, net::Board B, double World);
+/**
+ * The warning before a strike (§5.7): "Strike under your Team RiverLine deal" when playing (or streaming, or posting a
+ * video) on Site breaks a running deal's "plays only on" clause; "" when nothing would.
+ */
+std::string SitesClauseWarning(const Session& S, net::SiteId Site, bool Streaming, bool Video);
+/** A site's short name in capitals, for a slide's kicker ("TONIGHT ON IGNITE"). */
+std::string SitesUpperName(net::SiteId Site);
+/** A site's short name ("Ignite", "RunItTwice", "RiverLine"): the lobby, the buttons, the boards. */
+std::string SitesShortName(net::SiteId Site);
+/** Its full name where there's room ("Ignite Poker"): the poker button's list, the Bank's pots, Mail. */
+std::string SitesLongName(net::SiteId Site);
+/**
+ * A button in the skin being drawn: exactly Ui::Button at home; inside a rival's scope the same layout in the skin's own
+ * colours (Ui.cpp's button shades are RiverLine's literals).
+ */
+bool SitesButton(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const std::string& Label, const ButtonOpts& Opts);
+/** The poker button's list of sites is open (the taskbar's caret). */
+bool SitesMenuOpen(const RiverLine* RL);
+void SitesMenuToggle(const RiverLine* RL, bool Open);
+/** The rival lobby's pages after its first four (§5.11: PROMOTIONS, CASHIER), and the Cashier's small choices. */
+struct SitesUi
+{
+	bool MenuOpen = false;
+	double MenuAt = -100.0;
+	int Deposit = 1;         // the deposit step ($10, $50, $100, $500)
+	Chips Withdraw = 0;      // the amount picked to take out (0: not picked yet)
+	std::string Note;        // the Cashier's last answer
+	bool NoteBad = false;
+	double NoteAt = -100.0;
+	double PageAt = -100.0;
+};
+SitesUi& SitesOf(const RiverLine* RL);
+/** Drops a laptop's sites state when it goes (~RiverLine). */
+void ForgetSites(const RiverLine* RL);
+/**
+ * The rent card's line (§5.5) when the bank alone can't cover the rent but the bank and the sites could: core-sites'
+ * words (site::RentWarning), "" otherwise.
+ */
+std::string SitesRentLine(const Session& S, double World);
+/** One of the pots the Bank lists beside the balance once a site holds money or money is on its way back (§5.11). */
+struct SitesPot
+{
+	std::string Kicker;
+	std::string Name;
+	Chips Cents = 0;
+	std::string Sub;
+	uint32_t Col = 0;
+	net::SiteId Site = net::SiteId::Count; // a site's wallet wears its mark
+};
+/** Whose a letter in Mail is (Source "site": the thread names the site by its key, "ignite" or "ignite:welcome"; else the
+ * rep or the site's name in From); SiteId::Count for a letter that isn't a site's.
+ */
+net::SiteId SitesOfMail(const std::string& Source, const std::string& Thread, const std::string& From);
+/** A site's latest invitation, if it sent one. */
+const site::Invitation* SitesInvite(const Session& S, net::SiteId Site);
+/** Whether the player has played on a rival (Kast's channel says "Poker · tournaments" from then on). */
+bool SitesPlayedRival(const Session& S);
+/** Every sentence the sites' screens draw, for the copy lint. */
+std::vector<std::string> SitesUiInventory();
+/** The words Mail and the taskbar use for a site's letters and buttons. */
+inline constexpr const char* SitesAcceptLabel = "Accept";
+inline constexpr const char* SitesDeclineLabel = "Decline";
+inline constexpr const char* SitesCashierLink = "Open the Cashier";
+inline constexpr const char* SitesPromotionsLink = "See the promotions";
+inline constexpr const char* SitesRewardsLink = "Open Career";
+inline constexpr const char* SitesInviteOnce = "Decline and they'll write once more, in a month.";
+inline constexpr const char* SitesInviteLast = "They wrote again. They won't a third time.";
+inline constexpr const char* SitesInviteDeclined = "You passed. They'll write once more, in a month.";
+// The sites' sentences the lobby draws (filled with SitesFill; SitesUiInventory hands the templates to the copy lint).
+inline constexpr const char* SitesAboutMonth = "This month's race on {Site}: points from every final table since the 1st, the bigger the field and the deeper the run the more. It starts again next month.";
+inline constexpr const char* SitesAboutSeason = "The season on {Site}: points from every final table since its lobby opened on {Date}. Nothing from RiverLine counts here.";
+/** A rival's season after its first year: the world starts every rival's points season again on January 1. */
+inline constexpr const char* SitesAboutSeasonYear = "The season on {Site}: points from every final table since January. Nothing from RiverLine counts here.";
+/** Ignite's welcome bonus once its 60 days are up (core-sites drops what was still pending). */
+inline constexpr const char* SitesBonusClosed = "The 60 days ran out on {Date}. What wasn't released by then went with them.";
+/** A second invitation declined: the site won't write again. */
+inline constexpr const char* SitesInviteDone = "You passed twice. They won't write again.";
+/** RunItTwice's welcome tickets once a first deposit under $50 has passed them by. */
+inline constexpr const char* SitesTicketsMissed = "Your first deposit was under $50, so the welcome tickets passed you by.";
+inline constexpr const char* SitesAboutWins = "Titles won on {Site} this season. The board for closers.";
+inline constexpr const char* SitesAboutSeries = "Points from every final table at {Series}.";
+inline constexpr const char* SitesAboutAny = "Points from every final table on {Site}.";
+inline constexpr const char* SitesBonusSlide = "On your first deposit, released $5 for every $20 of rake you pay here.";
+inline constexpr const char* SitesClubSlide = "Rakeback on the 1st by the month's rake, from 15% at $50.";
+inline constexpr const char* SitesOwnMoney = "{Backer} funds RiverLine events only. This one's your own money.";
+inline constexpr const char* SitesStrikeConfirm = "Confirm and it's a strike under the deal.";
+inline constexpr const char* SitesKastClient = "A poker client and a stream encoder at once is too much for it: the fans scream and the stream drops out.";
+/** Fills a template's {Key}s. */
+std::string SitesFill(std::string Text, const std::vector<std::pair<std::string, std::string>>& Vars);
+/** Studio's PUBLISH once it has warned of a clause strike (RiverLineVideo.cpp). */
+inline constexpr const char* SitesPublishArmed = "Press again and it's a strike under the deal.";
+} // namespace rlsites_detail
 } // namespace ui
 } // namespace ss

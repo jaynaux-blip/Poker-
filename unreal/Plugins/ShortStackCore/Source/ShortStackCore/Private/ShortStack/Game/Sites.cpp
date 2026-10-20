@@ -1,13 +1,19 @@
 #include "ShortStack/Game/Sites.h"
 
+#include "SitesDetail.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/World.h"
 
-// The poker sites' data (update 2 §5.3) and the money rules' entry points (§5.5-§5.7). Phase A, day 1 (the lead): the
-// registry holds RiverLine alone, as it is today (its rake and traffic are today's numbers), and the money rules are stubs
-// that move nothing and write no line, so every save writes back as it was read. The routing (Site, SiteOf, ForEvent,
-// AttachAll, SetHeroAll) lives in Network.cpp. core-sites owns this file from here (Ignite's and RunItTwice's SiteDefs,
-// and SiteMoney.cpp beside it); dormant until G3.
+#include <algorithm>
+#include <cmath>
+
+// The poker sites' data (update 2 §5.3) and their rake (§5.8). RiverLine first, exactly as it always was: its rake is FeeOf
+// with 0.915 of the rest to the pools, its fields keep the 1.2x floor, its tickers are today's, and it is linked to the bank
+// (no wallet, no fees, no delays: U8). Then the two rivals that ship at G3: Ignite Poker, the soft and loud first rival, and
+// RunItTwice, the tougher one with the team. Halcyon (P1) isn't registered, so its network stays empty and no id reaches it.
+// The money rules are SiteMoney.cpp's; the routing lives in Network.cpp; the schedules in NetworkSites.cpp (core-sites).
 
 namespace ss
 {
@@ -32,23 +38,170 @@ SiteDef SitesRiverLine()
 	D.Linked = true; // the bank's site: no wallet, no fees, no delays (U8)
 	return D;
 }
+
+/** A card: instant deposits at a fee (§5.5's P0 deposit method). */
+CashMethod SitesCard(int FeePermille)
+{
+	CashMethod M;
+	M.Id = "card";
+	M.Name = "Card";
+	M.FeePermille = FeePermille;
+	M.MinCents = 1000;
+	M.DepositHours = 0.0;
+	M.Withdraws = false;
+	return M;
+}
+
+/**
+ * A bank transfer: the P0 way out (a fee, a wait drawn once per request between the two hours). Its deposits (24 hours, $50
+ * minimum, free) are P1 and the method's P1 flag says so: a deposit refuses it until they land.
+ */
+CashMethod SitesBank(Chips WithdrawFee, double HoursMin, double HoursMax)
+{
+	CashMethod M;
+	M.Id = "bank";
+	M.Name = "Bank transfer";
+	M.FeePermille = 0;
+	M.MinCents = 5000;
+	M.DepositHours = 24.0;
+	M.Withdraws = true;
+	M.WithdrawFeeCents = WithdrawFee;
+	M.WithdrawHoursMin = HoursMin;
+	M.WithdrawHoursMax = HoursMax;
+	M.P1 = true; // its deposit side
+	return M;
+}
+
+/**
+ * Ignite Poker (§5.3): "Poker that's actually fun." A bright app that launches in the world on Mon Nov 2, 2026, with a week
+ * of guarantees half again as big. Soft tables (the "soft" population, Pending.Strength -0.06), 11% rake on everything, 30
+ * seconds a hand at the hypers, a third of RiverLine's traffic (busiest at 8 PM, Sundays x1.2). It invites after Act I and 150
+ * paid online events; its welcome is 100% of the first deposit up to $100, released by rake. Coral and sky on plum: every one
+ * of its 16 colours differs from RiverLine's, so the laptop's palette-leak check reads any RiverLine colour inside its skin as
+ * a leak.
+ */
+SiteDef SitesIgnite()
+{
+	SiteDef D;
+	D.Id = SiteId::Ignite;
+	D.Key = "ignite";
+	D.Name = "Ignite";
+	D.Tagline = "Poker that's actually fun.";
+	D.Rep = "Bree Okafor";
+	D.RepTitle = "Ignite Partnerships";
+	D.Palette = {0x1a1220, 0x20162a, 0x24182c, 0x2e2038, 0x46325a, 0xfff4ec, 0xc4afc9, 0x8a7493, 0xff6b57, 0x4fc3f7, 0xffc94a, 0xff4d6d, 0xff9e3d, 0x5be08a, 0x4a2142,
+		0x2c1228};
+	D.Rake.Kind = 1;
+	D.Rake.Flat = 0.11;
+	D.Traffic.Scale = 0.30;
+	D.Traffic.Sunday = 1.2;
+	D.Traffic.PeakHour = 20;
+	D.Traffic.OnlineBase = 95000;
+	D.Traffic.OnlineSwing = 28000;
+	D.Softness = {-0.06, -0.06, -0.06, -0.06, -0.06};
+	D.Population = {"freeroll", "soft", "soft", "low", "high"};
+	D.SecondsPerHand[0] = 30.0;
+	D.SecondsPerHand[1] = 38.0;
+	D.FieldFloor = false;
+	D.GtdOfPool = 0.9;
+	D.LaunchGtd = 1.5;
+	D.TeamSize = 0; // Ignite Squad is P1
+	D.Cashier = {SitesCard(30), SitesBank(300, 72.0, 120.0)};
+	D.MinWithdraw = 2000;
+	D.Gate.MinEvents = 150;
+	D.Gate.MinRentsPaid = 2;
+	D.LaunchDay = 28; // Mon Nov 2, 2026
+	return D;
+}
+
+/**
+ * RunItTwice (§5.3): "Tournaments for grown-ups." The rival the sponsor catalog already named (its brand keeps the id
+ * "turnstone"): bigger guarantees, tougher fields (one band up from RiverLine at the same buy-in, Pending.Strength +0.03),
+ * rake that falls at the top (8% to $55, 7% from $109, 5.5% from $530), 55% of RiverLine's traffic (busiest at 9 PM, Sundays
+ * x1.5), its own team of six. Its new lobby and points season opened on Night One. It invites at 300 tracked online events
+ * with an $11 average over the last hundred, or an online series title, or Kast Partner; its welcome is $33 in tickets.
+ * The brand's slate and gold (the patch's), with every one of its 16 colours apart from RiverLine's.
+ */
+SiteDef SitesRunItTwice()
+{
+	SiteDef D;
+	D.Id = SiteId::RunItTwice;
+	D.Key = "runittwice";
+	D.Name = "RunItTwice";
+	D.Tagline = "Tournaments for grown-ups.";
+	D.Rep = "Ingrid Vale";
+	D.RepTitle = "RunItTwice Player Development";
+	D.TeamName = "Team RunItTwice";
+	D.Palette = {0x141a24, 0x18202c, 0x1c2433, 0x243044, 0x334155, 0xeef1f5, 0x9aa6b8, 0x5e6a7d, 0xd4a843, 0x8fa3bf, 0xe8c25a, 0xe5505e, 0xe88b45, 0x48c77a, 0x1d4a3e,
+		0x0f2b24};
+	D.Rake.Kind = 2;
+	D.Rake.Steps = {{0, 0.08}, {10900, 0.07}, {53000, 0.055}};
+	D.Traffic.Scale = 0.55;
+	D.Traffic.Sunday = 1.5;
+	D.Traffic.PeakHour = 21;
+	D.Traffic.OnlineBase = 175000;
+	D.Traffic.OnlineSwing = 52000;
+	D.Softness = {0.03, 0.03, 0.03, 0.03, 0.03};
+	D.Population = {"freeroll", "low", "high", "high", "high"};
+	D.SecondsPerHand[0] = 36.0;
+	D.SecondsPerHand[1] = 42.0;
+	D.FieldFloor = false;
+	D.GtdOfPool = 0.9;
+	D.LaunchGtd = 1.0;
+	D.TeamSize = 6;
+	D.Cashier = {SitesCard(25), SitesBank(500, 48.0, 48.0)};
+	D.MinWithdraw = 2000;
+	D.Gate.MinEvents = 300;
+	D.Gate.MinRentsPaid = 2; // no rival invites before Act I is over (U11)
+	D.Gate.MinAbi100 = 1100;
+	D.Gate.SeriesTitle = true;
+	D.Gate.KastPartner = true;
+	D.LaunchDay = NightOneDay; // its new lobby opened Tue Oct 6, 2026
+	return D;
+}
 } // namespace sites_detail
 
 Chips RakeRule::Fee(Chips BuyIn) const
 {
-	// Kind 0: RiverLine's (FeeOf). The rivals' rules are core-sites'.
-	return Kind == 0 ? FeeOf(BuyIn) : static_cast<Chips>(static_cast<double>(BuyIn) * Flat);
+	// Kind 0: RiverLine's (FeeOf), to the cent. Kind 1: a flat share of the buy-in. Kind 2: the share of the last step at or
+	// under the buy-in. A rival's fee is whole cents, and its prize share is what's left of the buy-in (PrizeShare), so the fee
+	// and the pool's part always add up to the buy-in.
+	if (Kind == 0)
+	{
+		return FeeOf(BuyIn);
+	}
+	if (BuyIn <= 0)
+	{
+		return 0;
+	}
+	double Rate = Flat;
+	if (Kind == 2)
+	{
+		for (const std::pair<Chips, double>& S : Steps)
+		{
+			Rate = BuyIn >= S.first ? S.second : Rate;
+		}
+	}
+	return static_cast<Chips>(std::llround(static_cast<double>(BuyIn) * Rate));
 }
 
 double RakeRule::PrizeShare(const EventTemplate& T) const
 {
-	// Kind 0: RiverLine's (Network.cpp's prize share: 0.915 of a paid event's buy-in, after its fee).
-	return T.BuyInCents == 0 ? 0.0 : 0.915;
+	// Kind 0: RiverLine's (0.915 of a paid event's buy-in to its pool, bit for bit). A rival: what its fee leaves.
+	if (T.BuyInCents == 0)
+	{
+		return 0.0;
+	}
+	if (Kind == 0)
+	{
+		return 0.915;
+	}
+	return static_cast<double>(T.BuyInCents - Fee(T.BuyInCents)) / static_cast<double>(T.BuyInCents);
 }
 
 const std::vector<SiteDef>& Sites()
 {
-	static const std::vector<SiteDef> All = {sites_detail::SitesRiverLine()};
+	static const std::vector<SiteDef> All = {sites_detail::SitesRiverLine(), sites_detail::SitesIgnite(), sites_detail::SitesRunItTwice()};
 	return All;
 }
 
@@ -67,137 +220,71 @@ const SiteDef& Def(SiteId S)
 
 namespace site
 {
-std::string Join(Book& B, net::SiteId S, double World)
+net::HeroStats HeroOn(net::SiteId S, const std::string& Name, const std::vector<HistoryEntry>& History, const Book& B, const world::World* W, double Now)
 {
-	(void)B;
-	(void)S;
-	(void)World;
-	return "Only RiverLine's open to you.";
-}
-
-void AddLine(Book& B, net::SiteId S, double At, int Kind, Chips Cents, const std::string& Label)
-{
-	(void)B;
-	(void)S;
-	(void)At;
-	(void)Kind;
-	(void)Cents;
-	(void)Label;
-}
-
-std::string Deposit(Book& B, life::State& L, Chips& Bankroll, net::SiteId S, Chips Cents, const std::string& Method, double World)
-{
-	(void)B;
-	(void)L;
-	(void)Bankroll;
-	(void)S;
-	(void)Cents;
-	(void)Method;
-	(void)World;
-	return "Only RiverLine's open to you.";
-}
-
-std::string Withdraw(Book& B, net::SiteId S, Chips Cents, const std::string& Method, double World)
-{
-	(void)B;
-	(void)S;
-	(void)Cents;
-	(void)Method;
-	(void)World;
-	return "Only RiverLine's open to you.";
-}
-
-std::string Reverse(Book& B, const std::string& TransferId, double World)
-{
-	(void)B;
-	(void)TransferId;
-	(void)World;
-	return "Only RiverLine's open to you.";
-}
-
-Chips* WalletOf(Book& B, net::SiteId S)
-{
-	// RiverLine has no wallet: its money is the bank's. Phase A: no rival account exists.
-	(void)B;
-	(void)S;
-	return nullptr;
-}
-
-void OnBuyIn(Book& B, net::SiteId S, Chips BuyIn, Chips Fee, const std::string& Label, double World)
-{
-	// Phase A's stub: the rake into RiverLine Rewards or a rival's VIP month is core-sites' (G3).
-	(void)B;
-	(void)S;
-	(void)BuyIn;
-	(void)Fee;
-	(void)Label;
-	(void)World;
-}
-
-void OnPrize(Book& B, net::SiteId S, Chips Cents, const std::string& Label, double World, const Season& Add)
-{
-	(void)B;
-	(void)S;
-	(void)Cents;
-	(void)Label;
-	(void)World;
-	(void)Add;
-}
-
-void Step(Book& B, life::State& L, Chips& Bankroll, const rep::Public& P, int SponsorTier, double From, double To, std::vector<std::pair<std::string, std::string>>& Mail)
-{
-	// Phase A's stub: nothing to step (a no-op until G3).
-	(void)B;
-	(void)L;
-	(void)Bankroll;
-	(void)P;
-	(void)SponsorTier;
-	(void)From;
-	(void)To;
-	(void)Mail;
-}
-
-bool RentWarning(const Book& B, Chips Bankroll, Chips RentDue, double Deadline, double World, std::string& Line)
-{
-	(void)B;
-	(void)Bankroll;
-	(void)RentDue;
-	(void)Deadline;
-	(void)World;
-	(void)Line;
-	return false;
-}
-
-std::vector<life::Mark> Marks(const Book& B, double From, double To)
-{
-	(void)B;
-	(void)From;
-	(void)To;
-	return {};
-}
-
-std::vector<std::string> Inventory()
-{
-	return {};
-}
-
-void WriteLines(const life::State& L, std::string& Out)
-{
-	// Phase A's stub: no site line yet, so every save writes back as it was read.
-	(void)L;
-	(void)Out;
-}
-
-bool ReadLine(const std::vector<std::string>& P, life::State& L)
-{
-	(void)P;
-	(void)L;
-	return false;
-}
-
-void AfterParse(SaveData& D)
-{
-	(void)D;
+	if (S == net::SiteId::RiverLine)
+	{
+		// RiverLine's boards (bug 7): its own events only (StatsFrom), and once History is full (the last hundred can't be the
+		// whole record) the lifetime numbers by subtraction from the world's tracker, which follows the player everywhere.
+		net::HeroStats H = net::StatsFrom(Name, History, Now);
+		if (W && History.size() >= 100)
+		{
+			const world::Tracker& T = W->HeroStats();
+			const world::TrackLine& Live = T.ByStake[static_cast<size_t>(world::TrackStake::Live)];
+			Chips Rivals = 0;
+			int RivalEvents = 0;
+			for (const Account& A : B.Accounts)
+			{
+				Rivals += A.LifetimeWon;
+				RivalEvents += A.LifetimeEvents;
+			}
+			H.Earnings = std::max<Chips>(0, T.Prizes - Live.Prizes - Rivals);
+			H.Tournaments = std::max(0, T.Events - Live.Events - RivalEvents);
+			H.SeasonPoints = W->HeroSeasonPoints();
+		}
+		return H;
+	}
+	// A rival's boards: the account's record (its season and what it has paid), and from History (the last hundred) the
+	// finishes, this month's points (Ignite's Month board reads them as SiteBoard) and the running series there.
+	net::HeroStats H;
+	H.Name = Name;
+	const int Year = world::YearOf(net::DayOf(Now));
+	if (const Account* A = AccountOf(B, S))
+	{
+		H.Earnings = A->LifetimeWon;
+		H.Tournaments = A->LifetimeEvents;
+		if (A->Hero.Year == Year)
+		{
+			H.SeasonPoints = A->Hero.Points;
+			H.SeasonWins = A->Hero.Wins;
+			H.SeasonFinalTables = A->Hero.FinalTables;
+		}
+	}
+	const net::Network& Net = net::Site(S);
+	const net::SeriesInfo* Running = Net.CurrentSeries(Now);
+	const std::string Month = MonthKeyAt(Now);
+	for (const HistoryEntry& E : History)
+	{
+		if (net::SiteOf(E.EventId) != S)
+		{
+			continue;
+		}
+		const double Points = net::Points(E.Place, E.Entrants, std::max<Chips>(0, E.BuyInCents));
+		const double Start = net::EntryStart(E);
+		H.Wins += E.Place == 1 ? 1 : 0;
+		H.FinalTables += E.Place >= 1 && E.Place <= 9 ? 1 : 0;
+		H.Cashes += E.Prize > 0 ? 1 : 0;
+		H.Best = std::max(H.Best, E.Prize);
+		H.SiteBoard += Start <= Now && MonthKeyAt(Start) == Month ? Points : 0.0;
+		const size_t Cut = E.EventId.rfind('@');
+		const net::EventTemplate* T = Cut == std::string::npos ? nullptr : Net.FindTemplate(E.EventId.substr(0, Cut));
+		if (T && !T->Series.empty())
+		{
+			H.SeriesTitles += E.Place == 1 ? 1 : 0;
+			H.SeriesPoints += Running && Running->Id == T->Series ? Points : 0.0;
+		}
+	}
+	return H;
 }
 } // namespace site
 } // namespace ss

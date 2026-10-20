@@ -7,6 +7,7 @@
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/World.h"
 
@@ -1437,12 +1438,13 @@ int Checks()
 			"a Hall of Fame class makes a headline (" + Body + ")");
 		Check(copylint::Run("world", {{"Hall of Fame", Body}}, copylint::Pa) == 0, "the Hall of Fame's headline passes the copy lint");
 	}
-	// The world's sponsored: brands from the catalog (or Kast's, before it lands), never the site's or a card room's.
+	// The world's sponsored: brands from the catalog (or Kast's, before it lands), never the site's or a card room's. (A poker
+	// site's own team, Team RiverLine's or Team RunItTwice's, is the site's: update 2 §5.9.)
 	{
 		bool Fit = true;
 		for (const world::Npc& N : W.People())
 		{
-			if (N.Pro || N.Sponsor.empty())
+			if (N.Pro || N.Sponsor.empty() || N.Sponsor == ss::net::Def(ss::net::SiteId::RunItTwice).TeamName)
 			{
 				continue;
 			}

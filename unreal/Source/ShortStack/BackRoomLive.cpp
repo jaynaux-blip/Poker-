@@ -48,6 +48,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/TableTalk.h"
 #include "ShortStack/Tournament.h"
 
@@ -215,6 +216,10 @@ FString ABackRoomGameMode::Chips(int64 Amount) const
 
 bool ABackRoomGameMode::LoadLive()
 {
+	// Update 2 (SPEC §5.8's threading contract): every poker site's network is built here, on the game thread, before the
+	// desk's worker (FLiveDeskSignup) can build them off it. The card room has no Session to do it (Night One's does at
+	// home); asking for one rival's builds them all, once.
+	ss::net::Site(ss::net::SiteId::Ignite);
 	FString Event = UGameplayStatics::ParseOption(OptionsString, TEXT("Live"));
 	if (Event.IsEmpty())
 	{

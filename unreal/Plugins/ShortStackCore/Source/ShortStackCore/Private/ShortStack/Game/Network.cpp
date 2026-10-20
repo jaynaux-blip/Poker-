@@ -1,5 +1,6 @@
 #include "ShortStack/Game/Network.h"
 
+#include "SitesDetail.h"
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
@@ -277,6 +278,13 @@ HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& Hi
 	const SeriesInfo* Running = Net.CurrentSeries(Now);
 	for (const HistoryEntry& E : History)
 	{
+		// RiverLine's boards are RiverLine's (update 2 §5.8, bug 7): a result on a rival site moves none of its rows, its Night
+		// Shift points (and so its pay) or its series; the rivals' own boards read site::HeroOn. Every id before G3 is bare,
+		// so a RiverLine-only career's numbers are exactly what they were.
+		if (SiteOf(E.EventId) != SiteId::RiverLine)
+		{
+			continue;
+		}
 		++H.Tournaments;
 		H.Earnings += E.Prize;
 		H.Best = std::max(H.Best, E.Prize);
@@ -403,6 +411,8 @@ bool Network::NextFor(const std::string& Ticket, double From, EventInstance& Out
 		// A ticket to an event on the weekly schedule (a step satellite): its next run.
 		return Next(Ticket, From, Out);
 	}
+	// A rival's one-offs count only once its lobby opened in the attached world (update 2 §5.4).
+	const double Launch = NetSite == SiteId::RiverLine ? -1.0e18 : netsites_detail::NetSitesLaunch(*this);
 	for (int K : It->second)
 	{
 		const EventTemplate& T = Temps[static_cast<size_t>(K)];
@@ -411,7 +421,7 @@ bool Network::NextFor(const std::string& Ticket, double From, EventInstance& Out
 			continue;
 		}
 		const EventInstance E = Make(K, static_cast<double>(T.OnlyDay) * MinutesPerDay + static_cast<double>(T.StartMinute));
-		if (E.Start >= From)
+		if (E.Start >= From && E.Start >= Launch)
 		{
 			Out = E;
 			return true;
@@ -964,11 +974,15 @@ EventInstance Network::Make(int TemplateIndex, double Start) const
 	else
 	{
 		const bool Series = !T.Series.empty();
-		const double Factor = Series ? R.Range(0.9, 1.15) : DayFactor(DayOf(Start)) * R.Range(0.82, 1.25);
+		// A rival's day (update 2 §5.8): RiverLine's weekday factors with its own Sunday crowd; its template fields are
+		// RiverLine-sized and scale by its traffic. RiverLine's arithmetic is as it was, draw for draw (U9).
+		const bool Home = NetSite == SiteId::RiverLine;
+		const double Day = Home ? DayFactor(DayOf(Start)) : netsites_detail::NetSitesDayFactor(*Rules, Weekday(DayOf(Start)));
+		const double Factor = Series ? R.Range(0.9, 1.15) : Day * R.Range(0.82, 1.25);
 		const Chips Contribution = static_cast<Chips>(std::llround(static_cast<double>(T.BuyInCents) * Rules->Rake.PrizeShare(T)));
 		// Guarantees are set to be beaten: the usual field clears one by a fifth, so overlays are rare. That floor is
 		// RiverLine's (U9); a rival's field has none, so its guarantees can overlay (update 2 §5.8, core-sites).
-		double Field = static_cast<double>(T.Field);
+		double Field = Home ? static_cast<double>(T.Field) : static_cast<double>(T.Field) * Rules->Traffic.Scale;
 		if (Rules->FieldFloor && T.GtdCents > 0 && Contribution > 0)
 		{
 			Field = std::max(Field, 1.2 * static_cast<double>(T.GtdCents) / static_cast<double>(Contribution));
@@ -991,15 +1005,27 @@ void Network::Instances(int Day, std::vector<EventInstance>& Out) const
 		const int Wd = Weekday(Day);
 		std::vector<int> Today = Recurring;
 		const auto One = OnDay.find(Day);
+		// A rival's launch week (update 2 §5.3): a guaranteed daily runs as its one-off that day ("ignite.spark-jackpot-launch3",
+		// the guarantee raised), so the daily itself stays out. RiverLine has none.
+		std::set<int> Standing;
 		if (One != OnDay.end())
 		{
 			Today.insert(Today.end(), One->second.begin(), One->second.end());
+			for (int K : One->second)
+			{
+				const std::string Base = NetSite == SiteId::RiverLine ? std::string() : netsites_detail::NetSitesLaunchBase(Temps[static_cast<size_t>(K)].Id);
+				const auto It = Base.empty() ? TempIndex.end() : TempIndex.find(Base);
+				if (It != TempIndex.end())
+				{
+					Standing.insert(It->second);
+				}
+			}
 		}
 		for (int K : Today)
 		{
 			const size_t I = static_cast<size_t>(K);
 			const EventTemplate& T = Temps[I];
-			if (T.OnlyDay == -9999 && !(T.Days & (1 << Wd)))
+			if ((T.OnlyDay == -9999 && !(T.Days & (1 << Wd))) || (!Standing.empty() && Standing.count(K) > 0))
 			{
 				continue;
 			}
@@ -1037,7 +1063,21 @@ void Network::Instances(int Day, std::vector<EventInstance>& Out) const
 		std::sort(List.begin(), List.end(), [](const EventInstance& A, const EventInstance& B) { return A.Start < B.Start || (A.Start == B.Start && A.Id < B.Id); });
 		Found = DayCache.emplace(Day, std::move(List)).first;
 	}
-	Out.insert(Out.end(), Found->second.begin(), Found->second.end());
+	if (NetSite == SiteId::RiverLine)
+	{
+		Out.insert(Out.end(), Found->second.begin(), Found->second.end());
+		return;
+	}
+	// A rival has no events before its lobby opened in the attached world (update 2 §5.4, §5.9: no history before launch).
+	// The day's list is shared by every world, so the launch is applied here, outside the cache.
+	const double Launch = netsites_detail::NetSitesLaunch(*this);
+	for (const EventInstance& E : Found->second)
+	{
+		if (E.Start >= Launch)
+		{
+			Out.push_back(E);
+		}
+	}
 }
 
 std::vector<EventInstance> Network::Window(double From, double To) const
@@ -1360,7 +1400,7 @@ bool Network::Joinable(const EventInstance& E, std::string* Lock, int Unlocks) c
 	const bool Bounty = T.Fmt == Format::Bounty || T.Fmt == Format::Mystery;
 	const char* Why = T.JoinIndex >= 0 ? nullptr
 		: T.Omaha ? "Pot-Limit Omaha unlocks later in your career."
-		: T.Fmt == Format::Flip ? "Flip & Go unlocks later in your career."
+		: T.Fmt == Format::Flip && NetSite == SiteId::RiverLine ? "Flip & Go unlocks later in your career." // a rival's start short and play as hypers
 		: E.Entries > 3000 ? "Fields this big unlock later in your career."
 		: Bounty && !(Unlocks & UnlockBounty) ? "Cash in any tournament to unlock bounty events."
 		: T.Fmt == Format::Satellite && !(Unlocks & UnlockSatellite) ? "Make a final table to unlock satellites."
@@ -1841,8 +1881,25 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 		Post(DayAt(1, 1, 30), NewsKind::Series, "Micro Madness, day six: the Night Crawler is running",
 			"Event #26 at 1:30 AM: $2.20 buy-in, $2,000 guaranteed, late registration until 3:10 AM. Title, trophy and leaderboard points to the winner.", "MICRO MADNESS");
 	}
-	// The biggest results of the last three days.
-	for (const EventInstance& E : Finished(Now - 3.0 * MinutesPerDay, Now))
+	// The biggest results of the last three days. A rival's fields are smaller (update 2 §5.10): its page shows its eight
+	// biggest wins, every series main and every result of the player's, against RiverLine's fixed bars.
+	const std::vector<EventInstance> Recent = Finished(Now - 3.0 * MinutesPerDay, Now);
+	Chips RivalBar = 0;
+	if (!Home)
+	{
+		std::vector<Chips> Firsts;
+		for (const EventInstance& E : Recent)
+		{
+			const EventResult& R = Result(E);
+			if (!R.FinalTable.empty() && E.Start + E.Duration <= Now)
+			{
+				Firsts.push_back(R.FinalTable.front().Prize);
+			}
+		}
+		std::sort(Firsts.begin(), Firsts.end(), [](Chips A, Chips B) { return A > B; });
+		RivalBar = Firsts.empty() ? 0 : Firsts[std::min<size_t>(Firsts.size(), 8) - 1];
+	}
+	for (const EventInstance& E : Recent)
 	{
 		const EventTemplate& T = TemplateOf(E);
 		const EventResult& R = Result(E);
@@ -1852,7 +1909,7 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 		}
 		const Placing& W = R.FinalTable.front();
 		const bool Series = !T.Series.empty();
-		if (W.Prize < Cents(Series ? 400.0 : 9000.0) && W.Player != -1)
+		if (Home ? (W.Prize < Cents(Series ? 400.0 : 9000.0) && W.Player != -1) : (W.Prize < RivalBar && W.Player != -1 && !T.Main))
 		{
 			continue;
 		}
@@ -1864,6 +1921,91 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 		if (W.Player == -2)
 		{
 			Items.back().Player = -2;
+		}
+	}
+	// A rival's own page (update 2 §5.10): the day its lobby opened and its welcome, the overlays it paid, its series coming,
+	// and the world's items that name it (its team's signings, who joined). Nothing before it opened in this world.
+	if (!Home && !Rules->Key.empty())
+	{
+		using netsites_detail::NetSitesLaunch;
+		const double Opened = NetSitesLaunch(*this);
+		const std::string Key = Rules->Key;
+		const std::string Title = site::CopyText("news:launch:" + Key + ":title");
+		if (!Title.empty())
+		{
+			// Ignite's launch week is its own one-offs on its own launch days: its Sunday's guarantee is the headline, when the
+			// world opened it then (a save that opens it later has no launch week, and the post says only what runs).
+			std::string Body = site::CopyText("news:launch:" + Key);
+			const EventTemplate* Sunday = nullptr;
+			for (const EventTemplate& T : Temps)
+			{
+				if (T.OnlyDay != -9999 && Weekday(T.OnlyDay) == 6 && !netsites_detail::NetSitesLaunchBase(T.Id).empty() && (!Sunday || T.GtdCents > Sunday->GtdCents))
+				{
+					Sunday = &T;
+				}
+			}
+			if (Rules->LaunchGtd > 1.0)
+			{
+				const bool Week = Opened <= static_cast<double>(Rules->LaunchDay) * MinutesPerDay && Sunday;
+				Body = Week ? site::FillCopy(Body, {{"Gtd", MoneyShort(Sunday->GtdCents)}}) : std::string(site::CopyText("news:launch:" + Key + ":late"));
+			}
+			const double At = Opened + (NetSite == SiteId::RunItTwice ? 60.0 : 9.0 * 60.0);
+			Post(At, NewsKind::Schedule, Title, Body, NetSite == SiteId::RunItTwice ? "NEW LOBBY" : "LAUNCH");
+			Post(At + 1.0, NewsKind::Schedule, site::CopyText("news:promo:" + Key + ":title"), site::CopyText("news:promo:" + Key), "PROMO");
+		}
+		// The overlays it paid in the last three days, the three biggest (the guarantee less what the field put in).
+		std::vector<std::pair<Chips, const EventInstance*>> Short;
+		for (const EventInstance& E : Recent)
+		{
+			const EventTemplate& T = TemplateOf(E);
+			const Chips In = static_cast<Chips>(std::llround(static_cast<double>(T.BuyInCents) * Rules->Rake.PrizeShare(T))) * static_cast<Chips>(E.Entries);
+			if (T.GtdCents > 0 && T.BuyInCents > 0 && In < T.GtdCents && T.GtdCents - In >= Cents(25.0))
+			{
+				Short.emplace_back(T.GtdCents - In, &E);
+			}
+		}
+		std::stable_sort(Short.begin(), Short.end(), [](const std::pair<Chips, const EventInstance*>& A, const std::pair<Chips, const EventInstance*>& B) { return A.first > B.first; });
+		for (size_t K = 0; K < Short.size() && K < 3; ++K)
+		{
+			const EventInstance& E = *Short[K].second;
+			const EventTemplate& T = TemplateOf(E);
+			const std::string EventName = !T.Series.empty() ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
+			const std::vector<std::pair<std::string, std::string>> Vars = {{"Event", EventName}, {"Amount", Money(Short[K].first)}, {"Entries", Grouped(E.Entries)},
+				{"Gtd", Money(T.GtdCents)}, {"Site", Rules->Name}};
+			Post(E.Start + E.LateReg, NewsKind::Record, site::FillCopy(site::CopyText("news:overlay:title"), Vars), site::FillCopy(site::CopyText("news:overlay"), Vars), "OVERLAY",
+				Short[K].first);
+		}
+		// A series a week out.
+		for (const SeriesInfo& S : AllSeries)
+		{
+			const double Announce = (static_cast<double>(S.FirstDay) - 7.0) * MinutesPerDay + 10.0 * 60.0;
+			if (Announce < Opened || Announce > Now || Now >= static_cast<double>(S.LastDay + 1) * MinutesPerDay)
+			{
+				continue;
+			}
+			const EventTemplate* Main = FindTemplate(S.MainEvent);
+			const std::vector<std::pair<std::string, std::string>> Vars = {{"Series", S.Name}, {"Day", DateLabel(S.FirstDay)}, {"Events", std::to_string(S.Events)},
+				{"Days", std::to_string(S.LastDay - S.FirstDay + 1)}, {"Gtd", MoneyShort(S.GtdCents)}, {"Buyin", Main ? BuyIn(Main->BuyInCents) : std::string("the top")}};
+			Post(Announce, NewsKind::Series, site::FillCopy(site::CopyText("news:series:title"), Vars), site::FillCopy(site::CopyText("news:series"), Vars), S.Short);
+		}
+		// The world's items that name it (core-world tags them with its site): signings, who joined, a series won live. Its launch
+		// and its overlays are posted above from its own schedule.
+		if (Living)
+		{
+			const std::vector<world::WorldEvent>& Log = Living->Events();
+			for (auto It = Log.rbegin(); It != Log.rend() && It->At > Now - 4.0 * MinutesPerDay; ++It)
+			{
+				const bool OnlineWin = (It->Kind == world::EventKind::Won || It->Kind == world::EventKind::Champion) && (It->Flags & world::FlagLive) == 0;
+				std::string Headline;
+				std::string Body;
+				std::string Tag;
+				if (world::FlagSiteOf(It->Flags) != NetSite || OnlineWin || It->At > Now || It->At < Opened || It->Kind == world::EventKind::SiteLaunched ||
+					It->Kind == world::EventKind::SiteOverlay || !Living->Headline(*It, Headline, Body, Tag))
+				{
+					continue;
+				}
+				Post(It->At, NewsKind::People, Headline, Body, Tag, It->Amount, It->Npc);
+			}
 		}
 	}
 	// A living world's people: live titles, careers, comebacks, retirements (its online wins are above).

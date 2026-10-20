@@ -3208,6 +3208,7 @@ std::string Fixture(const char* Name); // session_seams.cpp
 void Gate1Fixtures();                 // session_seams.cpp (also SegLead's)
 void Gate2Fixtures();                 // session_seams.cpp (also SegLead's)
 void StreamLinks();                   // session_seams.cpp (also SegLead's)
+void RivalSites();                    // session_seams.cpp (also SegLead's; update 2 B3)
 } // namespace seams
 
 namespace pacing
@@ -4298,9 +4299,47 @@ void MigrationAll()
 		ReadWorld(Again, Second);
 		std::string Third;
 		Second.Write(Third);
-		Expect(W.Ready() && Text.rfind(V2 + "\t", 0) == 0 && Again == Expected && Third == Again && W.Began() == ss::world::Start::Established &&
+		// From version 4 (update 2 G3, §6.4, §6.5) an old world also gains the sites: each npc line one field more (Sites,
+		// appended), and new "world\tsite..." lines (the launch days, the sparse site maps). Everything else is version 3's,
+		// line for line (the head may append its own new fields).
+		auto SameButSites = [](const std::string& Want, const std::string& Got) {
+			auto Lines = [](const std::string& T) {
+				std::vector<std::string> Out;
+				for (size_t Start = 0; Start < T.size();)
+				{
+					const size_t End = std::min(T.find('\n', Start), T.size());
+					Out.push_back(T.substr(Start, End - Start));
+					Start = End + 1;
+				}
+				return Out;
+			};
+			const std::vector<std::string> A = Lines(Want);
+			size_t I = 0;
+			for (const std::string& L : Lines(Got))
+			{
+				if (L.rfind("world\tsite", 0) == 0)
+				{
+					continue;
+				}
+				if (I >= A.size())
+				{
+					return false;
+				}
+				const std::string& E = A[I++];
+				const bool Grows = E.rfind("world\tnpc\t", 0) == 0 || E.rfind("world\thead\t", 0) == 0;
+				const bool OneMore = L.size() > E.size() + 1 && L.compare(0, E.size(), E) == 0 && L[E.size()] == '\t' && L.find('\t', E.size() + 1) == std::string::npos;
+				if (!(L == E || (Grows && (OneMore || (E.rfind("world\thead\t", 0) == 0 && L.compare(0, E.size(), E) == 0)))))
+				{
+					return false;
+				}
+			}
+			return I == A.size();
+		};
+		const bool Kept = ss::world::Version >= 4 ? SameButSites(Expected, Again) : Again == Expected;
+		Expect(W.Ready() && Text.rfind(V2 + "\t", 0) == 0 && Kept && Third == Again && W.Began() == ss::world::Start::Established &&
 				   Second.Began() == ss::world::Start::Established,
-			"migration: world_v2.txt reads and writes back as it was (from version 3, but the head's version and Start), an established world");
+			"migration: world_v2.txt reads and writes back as it was (from version 3, but the head's version and Start; from version 4, the sites), an "
+			"established world");
 	}
 }
 } // namespace session_test
@@ -5682,11 +5721,22 @@ int main(int Argc, char** Argv)
 	bool Long = false;
 	bool C1 = false;
 	bool C2 = false;
+	bool G3 = false;
 	for (int K = 1; K < Argc; ++K)
 	{
 		Long = Long || std::string(Argv[K]) == "long";
 		C1 = C1 || std::string(Argv[K]) == "c1";
 		C2 = C2 || std::string(Argv[K]) == "c2";
+		G3 = G3 || std::string(Argv[K]) == "g3";
+	}
+	if (G3)
+	{
+		// "g3": only the lead's seams for the rival sites (update 2 B3; also in the default run, in SegLead), then the old
+		// saves (MigrationAll), which the sites' lines and the world's version 4 must keep.
+		session_test::seams::RivalSites();
+		session_test::MigrationAll();
+		std::printf("%s\n", session_test::Failures == 0 ? "session tests (g3): all passed" : "session tests (g3): FAILED");
+		return session_test::Failures == 0 ? 0 : 1;
 	}
 	if (C2)
 	{

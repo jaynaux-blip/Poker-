@@ -26,13 +26,35 @@ namespace rlstats_detail
 const Color StProfit = Hex(0x1aa99c);
 const Color StLoss = Hex(0xe5484d);
 const Color StBar = Hex(0x3987e5);
-const Color StGold = Hex(0xf2c14e);
-const Color StInk = Hex(0xe6edf7);
-const Color StSoft = Hex(0xc3cedf);
-const Color StGrid = Hex(0x1a2a42);
-const Color StAxis = Hex(0x2e4361);
-const Color StPanel = Hex(0x0d1828);
-const Color StEdge = Hex(0x223352);
+// The dashboard's grounds and inks, read each draw: a card opened on a rival's board wears its skin (update 2 §1.8).
+Color StGold()
+{
+	return pal::Gold;
+}
+Color StInk()
+{
+	return pal::Ink;
+}
+Color StSoft()
+{
+	return rlsites_detail::SitesTone(0xc3cedf);
+}
+Color StGrid()
+{
+	return rlsites_detail::SitesTone(0x1a2a42);
+}
+Color StAxis()
+{
+	return rlsites_detail::SitesTone(0x2e4361);
+}
+Color StPanel()
+{
+	return rlsites_detail::SitesTone(0x0d1828);
+}
+Color StEdge()
+{
+	return pal::Line;
+}
 const char* const StMinus = "\xE2\x88\x92";
 
 /** Money the way a tracker writes it: cents under $1,000, short above. */
@@ -127,7 +149,7 @@ void StColumnMark(Canvas& Cv, float X, float Y0, float Y1, float W, const Color&
 /** An annotation on the graph: small text on a dark pill so it reads over the line and the wash. */
 Rect StNote(Canvas& Cv, const std::string& Text, float X, float Y, bool Draw)
 {
-	TextStyle St = Ts(10.5f, 700, StInk);
+	TextStyle St = Ts(10.5f, 700, StInk());
 	const float W = Cv.Measure(Text, 10.5f, 700) + 12.0f;
 	const Rect Box{X - 6.0f, Y - 12.0f, W, 17.0f};
 	if (Draw)
@@ -146,8 +168,8 @@ bool StOverlap(const Rect& A, const Rect& B)
 /** The panels' plate. */
 void StPlate(Canvas& Cv, const Rect& R)
 {
-	Cv.FillRoundRect(R, 14.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x0f1c2f), StPanel));
-	Cv.StrokeRoundRect(R, 14.0f, StEdge, 1.0f);
+	Cv.FillRoundRect(R, 14.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x0f1c2f), StPanel()));
+	Cv.StrokeRoundRect(R, 14.0f, StEdge(), 1.0f);
 }
 
 /** A tooltip: the value first (strong), what it is after (muted). */
@@ -164,12 +186,12 @@ void StTip(Canvas& Cv, Ui& U, float X, float Y, const Rect& Within, const std::s
 	Tx = Tx + W > Within.X + Within.W - 6.0f ? X - W - 16.0f : Tx;
 	Ty = Ty < Within.Y + 6.0f ? Y + 14.0f : Ty;
 	Cv.GlowRoundRect({Tx, Ty + 4.0f, W, H}, 10.0f, Rgba(0, 0, 0, 0.5f), 18.0f);
-	Cv.FillRoundRect({Tx, Ty, W, H}, 10.0f, Hex(0x15253d));
-	Cv.StrokeRoundRect({Tx, Ty, W, H}, 10.0f, Hex(0x2e4361), 1.0f);
-	Cv.Text(Value, Tx + 14.0f, Ty + 24.0f, Ts(15.0f, 800, StInk));
+	Cv.FillRoundRect({Tx, Ty, W, H}, 10.0f, rlsites_detail::SitesTone(0x15253d));
+	Cv.StrokeRoundRect({Tx, Ty, W, H}, 10.0f, rlsites_detail::SitesTone(0x2e4361), 1.0f);
+	Cv.Text(Value, Tx + 14.0f, Ty + 24.0f, Ts(15.0f, 800, StInk()));
 	for (size_t K = 0; K < Lines.size(); ++K)
 	{
-		Cv.Text(Lines[K], Tx + 14.0f, Ty + 43.0f + 18.0f * static_cast<float>(K), Ts(12.0f, 600, StSoft));
+		Cv.Text(Lines[K], Tx + 14.0f, Ty + 43.0f + 18.0f * static_cast<float>(K), Ts(12.0f, 600, StSoft()));
 	}
 }
 
@@ -237,8 +259,8 @@ void RiverLine::StatsKpis(const world::Tracker& T, const Rect& R, double Now)
 	{
 		const float W = K == 0 ? Hero : Tw;
 		const Rect Tr{X, R.Y, W, R.H};
-		C->FillRoundRect(Tr, 12.0f, Paint::Linear({0.0f, Tr.Y}, {0.0f, Tr.Y + Tr.H}, Hex(0x112036), Hex(0x0d1828)));
-		C->StrokeRoundRect(Tr, 12.0f, StEdge, 1.0f);
+		C->FillRoundRect(Tr, 12.0f, Paint::Linear({0.0f, Tr.Y}, {0.0f, Tr.Y + Tr.H}, rlsites_detail::SitesTone(0x112036), rlsites_detail::SitesTone(0x0d1828)));
+		C->StrokeRoundRect(Tr, 12.0f, StEdge(), 1.0f);
 		const Kpi& Kp = Tiles[K];
 		NetSpaced(*C, Kp.Label, Tr.X + 16.0f, Tr.Y + 24.0f, 9.5f, 800, pal::Muted, 1.4f);
 		float Vx = Tr.X + 16.0f;
@@ -251,15 +273,15 @@ void RiverLine::StatsKpis(const world::Tracker& T, const Rect& R, double Now)
 			NetTriangle(*C, Vx + Ts0, Vy - (K == 0 ? 15.0f : 10.0f), Ts0 * 2.0f, Kp.Sign > 0, Dc);
 			Vx += Ts0 * 2.0f + 8.0f;
 		}
-		UI.Text(Kp.Value, Vx, Vy, Ts(K == 0 ? 40.0f : 26.0f, 800, StInk, Align::Left, Baseline::Alphabetic, false, Tr.X + W - Vx - 12.0f));
+		UI.Text(Kp.Value, Vx, Vy, Ts(K == 0 ? 40.0f : 26.0f, 800, StInk(), Align::Left, Baseline::Alphabetic, false, Tr.X + W - Vx - 12.0f));
 		if (K == 1 && Unranked)
 		{
 			// Why there's no rank (update 2 §3.6) is a sentence, too long for one line of a narrow tile: two smaller ones.
-			NetParagraph(*C, Kp.Sub, Tr.X + 14.0f, Tr.Y + R.H - 26.0f, W - 22.0f, 10.5f, 600, StSoft, 13.0f, 2);
+			NetParagraph(*C, Kp.Sub, Tr.X + 14.0f, Tr.Y + R.H - 26.0f, W - 22.0f, 10.5f, 600, StSoft(), 13.0f, 2);
 		}
 		else
 		{
-			UI.Text(Kp.Sub, Tr.X + 16.0f, Tr.Y + R.H - 14.0f, Ts(11.5f, 600, StSoft, Align::Left, Baseline::Alphabetic, false, W - 26.0f));
+			UI.Text(Kp.Sub, Tr.X + 16.0f, Tr.Y + R.H - 14.0f, Ts(11.5f, 600, StSoft(), Align::Left, Baseline::Alphabetic, false, W - 26.0f));
 		}
 		X += W + Gap;
 	}
@@ -271,7 +293,7 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 	if (T.Events == 0)
 	{
 		StPlate(*C, R);
-		UI.Text("No tournaments on record yet.", R.X + R.W / 2.0f, R.Y + R.H / 2.0f - 6.0f, Ts(18.0f, 700, StInk, Align::Center));
+		UI.Text("No tournaments on record yet.", R.X + R.W / 2.0f, R.Y + R.H / 2.0f - 6.0f, Ts(18.0f, 700, StInk(), Align::Center));
 		UI.Text("Every buy-in and every cash shows up here: profit, ROI, ITM and the graph.", R.X + R.W / 2.0f, R.Y + R.H / 2.0f + 20.0f, Ts(13.0f, 500, pal::Muted, Align::Center));
 		return;
 	}
@@ -301,8 +323,8 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 				CardTabAt = Now;
 			}
 			const bool On = StatsGraph == K;
-			UI.RRect(Tr, 11.0f, On ? NetA(pal::Accent, 0.18f) : St.Hover ? Hex(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? pal::Accent : StEdge);
-			NetSpaced(*C, Views[K], Tr.X + Tw / 2.0f, Tr.Y + 15.0f, 10.5f, 800, On ? StInk : pal::Muted, 1.2f, Align::Center);
+			UI.RRect(Tr, 11.0f, On ? NetA(pal::Accent, 0.18f) : St.Hover ? rlsites_detail::SitesTone(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? pal::Accent : StEdge());
+			NetSpaced(*C, Views[K], Tr.X + Tw / 2.0f, Tr.Y + 15.0f, 10.5f, 800, On ? StInk() : pal::Muted, 1.2f, Align::Center);
 			Tx -= 6.0f;
 		}
 		NetSpaced(*C, StatsGraph == 1 ? "AVERAGE BUY-IN" : "PROFIT", Pg.X + 18.0f, Pg.Y + 28.0f, 11.0f, 800, pal::Muted, 1.6f);
@@ -348,7 +370,7 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 		for (double V = Lo; V <= Hi + Step * 0.5; V += Step)
 		{
 			const float Y = Yof(V);
-			C->FillRect({Plot.X, Y, Plot.W, 1.0f}, std::fabs(V) < Step * 0.01 ? StAxis : StGrid);
+			C->FillRect({Plot.X, Y, Plot.W, 1.0f}, std::fabs(V) < Step * 0.01 ? StAxis() : StGrid());
 			UI.Text(StAxisMoney(V), Plot.X - 10.0f, Y + 4.0f, Ts(11.0f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, true));
 		}
 		{
@@ -356,7 +378,7 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 			for (double E = 0.0; E <= Events + 0.5; E += Xs)
 			{
 				const float X = Xof(E);
-				C->FillRect({X, Plot.Y + Plot.H, 1.0f, 5.0f}, StAxis);
+				C->FillRect({X, Plot.Y + Plot.H, 1.0f, 5.0f}, StAxis());
 				UI.Text(StAxisCount(E), X, Plot.Y + Plot.H + 20.0f, Ts(11.0f, 600, pal::Muted, Align::Center, Baseline::Alphabetic, true));
 			}
 		}
@@ -423,7 +445,7 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 			}
 			// The peak, the biggest score, the titles: marked where they happened (labels only where there is room).
 			const auto Dot = [&](float X, float Y, const Color& Col, float Rr) {
-				C->FillCircle(X, Y, Rr + 2.0f, StPanel);
+				C->FillCircle(X, Y, Rr + 2.0f, StPanel());
 				C->FillCircle(X, Y, Rr, Col);
 			};
 			// Where the titles sit (their icons) and the downswing's note, so the other notes keep clear of them.
@@ -471,14 +493,14 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 			{
 				BestX = Xof(T.BestAt);
 				BestY = Yof(StNetAt(Pts, T.BestAt));
-				C->FillRect({BestX, BestY + 6.0f, 1.0f, std::max(0.0f, Plot.Y + Plot.H - BestY - 6.0f)}, NetA(StGold, 0.35f));
-				Dot(BestX, BestY, StGold, 4.5f);
+				C->FillRect({BestX, BestY + 6.0f, 1.0f, std::max(0.0f, Plot.Y + Plot.H - BestY - 6.0f)}, NetA(StGold(), 0.35f));
+				Dot(BestX, BestY, StGold(), 4.5f);
 			}
 			if (T.Peak > 0 && T.PeakAt > 0 && std::fabs(Xof(T.PeakAt) - BestX) > 90.0f)
 			{
 				const float X = Xof(T.PeakAt);
 				const float Y = Yof(static_cast<double>(T.Peak) / 100.0);
-				Dot(X, Y, StInk, 3.5f);
+				Dot(X, Y, StInk(), 3.5f);
 				Place("Peak " + StSigned(T.Peak), X, Y, true);
 			}
 			if (BestX > -1000.0f)
@@ -494,8 +516,8 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 				const float X = Xof(A.Tourney);
 				const float Y = Yof(StNetAt(Pts, A.Tourney));
 				const float Iy = std::max(Plot.Y + 14.0f, Y - 30.0f);
-				C->FillRect({X, Iy + 10.0f, 1.0f, std::max(0.0f, Y - Iy - 14.0f)}, NetA(StGold, 0.6f));
-				Dot(X, Y, StGold, 3.5f);
+				C->FillRect({X, Iy + 10.0f, 1.0f, std::max(0.0f, Y - Iy - 14.0f)}, NetA(StGold(), 0.6f));
+				Dot(X, Y, StGold(), 3.5f);
 				eventart::Trophy(*C, A, X, Iy, 28.0f, Now);
 			}
 			const float Ex = Path.back().first;
@@ -504,7 +526,7 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 			C->PopClip();
 			if (In > 0.98f)
 			{
-				UI.Text(StSigned(T.Net), Ex + 12.0f, Ey + 5.0f, Ts(13.5f, 800, StInk));
+				UI.Text(StSigned(T.Net), Ex + 12.0f, Ey + 5.0f, Ts(13.5f, 800, StInk()));
 			}
 		}
 		// Hover: a crosshair that finds the nearest point, and what it says.
@@ -518,8 +540,8 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 			}
 			const float X = Xof(Pts[Near].first);
 			const float Y = Yof(Pts[Near].second);
-			C->FillRect({X, Plot.Y, 1.0f, Plot.H}, Hex(0x4a6280));
-			C->FillCircle(X, Y, 6.0f, StPanel);
+			C->FillRect({X, Plot.Y, 1.0f, Plot.H}, rlsites_detail::SitesTone(0x4a6280));
+			C->FillCircle(X, Y, 6.0f, StPanel());
 			C->FillCircle(X, Y, 4.5f, Pts[Near].second < 0.0 ? StLoss : StProfit);
 			StTip(*C, UI, X, Y, Pg, StSigned(static_cast<Chips>(std::llround(Pts[Near].second * 100.0))),
 				Near == 0 ? std::vector<std::string>{"The start"}
@@ -558,14 +580,14 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 		const float Ph = Bottom - Top;
 		const float Y0 = Top + Ph * Nf(Hi0 / (Hi0 - Lo0));
 		const float Slot = (P.W - 32.0f) / Nf(N);
-		C->FillRect({P.X + 16.0f, Y0, P.W - 32.0f, 1.0f}, StAxis);
+		C->FillRect({P.X + 16.0f, Y0, P.W - 32.0f, 1.0f}, StAxis());
 		int Hovered = -1;
 		for (int K = 0; K < N; ++K)
 		{
 			const world::TrackLine& L = Lines[K];
 			const float Cx = P.X + 16.0f + Slot * (Nf(K) + 0.5f);
 			const bool Any = L.Events > 0 && L.BuyIns > 0;
-			UI.Text(Names[K], Cx, P.Y + P.H - 24.0f, Ts(11.5f, 700, Any ? StInk : pal::Dim, Align::Center));
+			UI.Text(Names[K], Cx, P.Y + P.H - 24.0f, Ts(11.5f, 700, Any ? StInk() : pal::Dim, Align::Center));
 			UI.Text(Any ? StTally(L.Events) : std::string("\xE2\x80\x94"), Cx, P.Y + P.H - 10.0f, Ts(10.0f, 600, pal::Muted, Align::Center, Baseline::Alphabetic, true));
 			if (!Any)
 			{
@@ -578,7 +600,7 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 			Hovered = Hov ? K : Hovered;
 			const Color Col = R0 < 0.0 ? StLoss : StProfit;
 			StColumnMark(*C, Cx - 10.0f, Y0, Ye, 20.0f, Hov ? Mix(Col, Hex(0xffffff), 0.2f) : Col);
-			UI.Text(StSignedPct(R0, 0), Cx, R0 < 0.0 ? Ye + 14.0f : Ye - 6.0f, Ts(11.0f, 700, StInk, Align::Center, Baseline::Alphabetic, true));
+			UI.Text(StSignedPct(R0, 0), Cx, R0 < 0.0 ? Ye + 14.0f : Ye - 6.0f, Ts(11.0f, 700, StInk(), Align::Center, Baseline::Alphabetic, true));
 		}
 		if (Hovered >= 0)
 		{
@@ -597,8 +619,8 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 	NetSpaced(*C, "FINISHES", Fn.X + 18.0f, Fn.Y + 26.0f, 11.0f, 800, pal::Muted, 1.6f);
 	{
 		const double Itm = T.Itm();
-		UI.Text("In the money", Fn.X + 18.0f, Fn.Y + 56.0f, Ts(13.0f, 700, StSoft));
-		UI.Text(StPct(Itm), Fn.X + Fn.W - 18.0f, Fn.Y + 58.0f, Ts(22.0f, 800, StInk, Align::Right));
+		UI.Text("In the money", Fn.X + 18.0f, Fn.Y + 56.0f, Ts(13.0f, 700, StSoft()));
+		UI.Text(StPct(Itm), Fn.X + Fn.W - 18.0f, Fn.Y + 58.0f, Ts(22.0f, 800, StInk(), Align::Right));
 		const Rect Track{Fn.X + 18.0f, Fn.Y + 70.0f, Fn.W - 36.0f, 8.0f};
 		C->FillRoundRect(Track, 4.0f, NetA(StProfit, 0.18f));
 		C->FillRoundRect({Track.X, Track.Y, std::max(8.0f, Track.W * Nf(Itm) * In), Track.H}, 4.0f, StProfit);
@@ -620,11 +642,11 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 		for (int K = 0; K < 4; ++K)
 		{
 			const float Cy = Top + Row * Nf(K) + Row / 2.0f;
-			UI.Text(Parts[K].first, Fn.X + 18.0f, Cy + 4.5f, Ts(12.5f, 700, StInk));
+			UI.Text(Parts[K].first, Fn.X + 18.0f, Cy + 4.5f, Ts(12.5f, 700, StInk()));
 			const float Len = Bw * Nf(static_cast<double>(Parts[K].second) / Most) * In;
 			const bool Hov = UI.Hover({Fn.X + 8.0f, Cy - Row / 2.0f, Fn.W - 16.0f, Row}) && CardOpen();
 			StBarMark(*C, Bx, Bx + std::max(Parts[K].second > 0 ? 3.0f : 0.0f, Len), Cy - 6.0f, 12.0f, Hov ? Mix(StBar, Hex(0xffffff), 0.2f) : StBar);
-			UI.Text(Grouped(Parts[K].second), Fn.X + Fn.W - 58.0f, Cy + 4.5f, Ts(12.0f, 700, StInk, Align::Right, Baseline::Alphabetic, true));
+			UI.Text(Grouped(Parts[K].second), Fn.X + Fn.W - 58.0f, Cy + 4.5f, Ts(12.0f, 700, StInk(), Align::Right, Baseline::Alphabetic, true));
 			UI.Text(StPct(static_cast<double>(Parts[K].second) / Cashes, 0), Fn.X + Fn.W - 18.0f, Cy + 4.5f, Ts(11.5f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, true));
 			if (Hov)
 			{
@@ -654,10 +676,10 @@ void RiverLine::StatsBoard(const world::Tracker& T, const std::vector<world::Awa
 			const float Y = Top + Row * Nf(K) + Row / 2.0f + 4.5f;
 			if (K > 0)
 			{
-				C->FillRect({Rc.X + 18.0f, Top + Row * Nf(K), Rc.W - 36.0f, 1.0f}, StGrid);
+				C->FillRect({Rc.X + 18.0f, Top + Row * Nf(K), Rc.W - 36.0f, 1.0f}, StGrid());
 			}
-			UI.Text(Lines[K].first, Rc.X + 18.0f, Y, Ts(12.5f, 600, StSoft));
-			UI.Text(Lines[K].second, Rc.X + Rc.W - 18.0f, Y, Ts(12.5f, 800, StInk, Align::Right, Baseline::Alphabetic, false, Rc.W - 150.0f));
+			UI.Text(Lines[K].first, Rc.X + 18.0f, Y, Ts(12.5f, 600, StSoft()));
+			UI.Text(Lines[K].second, Rc.X + Rc.W - 18.0f, Y, Ts(12.5f, 800, StInk(), Align::Right, Baseline::Alphabetic, false, Rc.W - 150.0f));
 		}
 	}
 }
@@ -717,7 +739,7 @@ void RiverLine::StatsAbi(const world::Tracker& T, const Rect& Pg, const Rect& Pl
 			C->FillRect({Plot.X, Yb, Plot.W, Ya - Yb}, K % 2 == 0 ? Rgba(255, 255, 255, 0.025f) : Rgba(255, 255, 255, 0.0f));
 			if (Edges[K + 1] < Hi)
 			{
-				C->FillRect({Plot.X, Yb, Plot.W, 1.0f}, StAxis);
+				C->FillRect({Plot.X, Yb, Plot.W, 1.0f}, StAxis());
 			}
 			if (Ya - Yb >= 18.0f)
 			{
@@ -745,14 +767,14 @@ void RiverLine::StatsAbi(const world::Tracker& T, const Rect& Pg, const Rect& Pl
 				continue;
 			}
 			const float Y = Yof(V);
-			C->FillRect({Plot.X, Y, Plot.W, 1.0f}, StGrid);
+			C->FillRect({Plot.X, Y, Plot.W, 1.0f}, StGrid());
 			UI.Text(V < 1.0 ? "$" + Fixed(V, 2) : StAxisMoney(V), Plot.X - 10.0f, Y + 4.0f, Ts(11.0f, 600, pal::Muted, Align::Right, Baseline::Alphabetic, true));
 		}
 		const double Xs = StNiceStep(Events, 5);
 		for (double E = 0.0; E <= Events + 0.5; E += Xs)
 		{
 			const float X = Xof(E);
-			C->FillRect({X, Plot.Y + Plot.H, 1.0f, 5.0f}, StAxis);
+			C->FillRect({X, Plot.Y + Plot.H, 1.0f, 5.0f}, StAxis());
 			UI.Text(StAxisCount(E), X, Plot.Y + Plot.H + 20.0f, Ts(11.0f, 600, pal::Muted, Align::Center, Baseline::Alphabetic, true));
 		}
 	}
@@ -778,15 +800,15 @@ void RiverLine::StatsAbi(const world::Tracker& T, const Rect& Pg, const Rect& Pl
 		if (Life >= Lo && Life <= Hi)
 		{
 			const float Y = Yof(Life);
-			C->FillRect({Plot.X, Y, Plot.W, 1.0f}, NetA(StGold, 0.55f));
+			C->FillRect({Plot.X, Y, Plot.W, 1.0f}, NetA(StGold(), 0.55f));
 		}
 		const Vec2 End = Stair.back();
-		C->FillCircle(End.X, End.Y, 6.5f, StPanel);
+		C->FillCircle(End.X, End.Y, 6.5f, StPanel());
 		C->FillCircle(End.X, End.Y, 4.5f, StBar);
 		C->PopClip();
 		if (In > 0.98f)
 		{
-			UI.Text(StAmount(T.StretchAbi(Parts.size() - 1)), End.X + 12.0f, End.Y + 5.0f, Ts(13.5f, 800, StInk));
+			UI.Text(StAmount(T.StretchAbi(Parts.size() - 1)), End.X + 12.0f, End.Y + 5.0f, Ts(13.5f, 800, StInk()));
 			if (Life >= Lo && Life <= Hi)
 			{
 				const float Y = Yof(Life);
@@ -802,7 +824,7 @@ void RiverLine::StatsAbi(const world::Tracker& T, const Rect& Pg, const Rect& Pl
 		{
 			Wd += C->Measure(std::string(1, *Ch), 9.0f, 800) + 1.4f;
 		}
-		C->FillRoundRect({Plot.X + 4.0f, Band.second - 10.0f, Wd + 6.0f, 14.0f}, 4.0f, NetA(StPanel, 0.82f));
+		C->FillRoundRect({Plot.X + 4.0f, Band.second - 10.0f, Wd + 6.0f, 14.0f}, 4.0f, NetA(StPanel(), 0.82f));
 		NetSpaced(*C, Band.first, Plot.X + 8.0f, Band.second, 9.0f, 800, Hex(0x6d86a6), 1.4f);
 	}
 	// Hover: the stretch under the pointer.
@@ -836,7 +858,7 @@ void RiverLine::StatsBrand(float X, float Y)
 		const float H = 6.0f + 4.0f * Nf(K);
 		C->FillRoundRect({X + Nf(K) * 6.0f, Y - H, 4.0f, H}, 1.5f, K == 2 ? StProfit : NetA(StProfit, 0.55f));
 	}
-	const float W = NetSpaced(*C, "RIVERLINE STATS", X + 26.0f, Y, 11.0f, 900, StInk, 1.8f);
+	const float W = NetSpaced(*C, "RIVERLINE STATS", X + 26.0f, Y, 11.0f, 900, StInk(), 1.8f);
 	UI.Text("Tournament results  \xC2\xB7  every buy-in, every cash", X + 38.0f + W, Y, Ts(11.5f, 600, pal::Muted));
 }
 
@@ -851,20 +873,21 @@ void RiverLine::HeroStatsCard(double Now)
 	const float A0 = C->GetAlpha();
 	C->SetAlpha(A0 * In);
 	C->GlowRoundRect({R.X, R.Y + 8.0f, R.W, R.H}, 22.0f, Rgba(0, 0, 0, 0.5f), 36.0f);
-	UI.RRect(R, 22.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x13223a), Hex(0x0c1626)), StEdge);
+	UI.RRect(R, 22.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x13223a), rlsites_detail::SitesTone(0x0c1626)), StEdge());
 	C->FillRoundRect({R.X, R.Y, R.W, 6.0f}, 3.0f, pal::Accent);
 	const AvatarSpec Pic = NetAvatar(*C, R.X + 76.0f, R.Y + 84.0f, 46.0f, S.HeroName, pal::Accent, true);
-	const float Nw = UI.Text(S.HeroName, R.X + 142.0f, R.Y + 70.0f, Ts(34.0f, 900, StInk, Align::Left, Baseline::Alphabetic, false, 460.0f));
+	const float Nw = UI.Text(S.HeroName, R.X + 142.0f, R.Y + 70.0f, Ts(34.0f, 900, StInk(), Align::Left, Baseline::Alphabetic, false, 460.0f));
 	// The player's badges beside the name (next_segment_spec §5.6): 22 units, the top three labelled, before the close button;
 	// not what the avatar's frame already says (C2: a ring winner's card has no second bracelet, §9.1).
 	NetBadgeRail(*C, UI, this, NetCardBadges(S.HeroBadges(), 6, NetBadgeFrame(Pic)), -1, R.X + 156.0f + Nw, R.Y + 58.0f, 22.0f, 3, R.X + R.W - 80.0f - (R.X + 156.0f + Nw), Now);
-	UI.Text("Your tournaments on RiverLine since Night One", R.X + 142.0f, R.Y + 102.0f, Ts(16.0f, 600, StSoft));
+	// The tracker follows the player across sites (update 2 §1.10): once a rival has been played, it says so.
+	UI.Text(rlsites_detail::SitesPlayedRival(S) ? "Your online tournaments since Night One" : "Your tournaments on RiverLine since Night One", R.X + 142.0f, R.Y + 102.0f, Ts(16.0f, 600, StSoft()));
 	{
 		const Rect X{R.X + R.W - 56.0f, R.Y + 22.0f, 36.0f, 36.0f};
 		const Ui::ClickState Cx = UI.Clickable("herostatsclose", X);
-		C->FillCircle(X.X + 18.0f, X.Y + 18.0f, 18.0f, Cx.Hover ? Hex(0x223352) : Hex(0x162540));
-		C->StrokePolyline({{X.X + 12.0f, X.Y + 12.0f}, {X.X + 24.0f, X.Y + 24.0f}}, false, StSoft, 2.0f, true);
-		C->StrokePolyline({{X.X + 24.0f, X.Y + 12.0f}, {X.X + 12.0f, X.Y + 24.0f}}, false, StSoft, 2.0f, true);
+		C->FillCircle(X.X + 18.0f, X.Y + 18.0f, 18.0f, Cx.Hover ? pal::Line : rlsites_detail::SitesTone(0x162540));
+		C->StrokePolyline({{X.X + 12.0f, X.Y + 12.0f}, {X.X + 24.0f, X.Y + 24.0f}}, false, StSoft(), 2.0f, true);
+		C->StrokePolyline({{X.X + 24.0f, X.Y + 12.0f}, {X.X + 12.0f, X.Y + 24.0f}}, false, StSoft(), 2.0f, true);
 		if (Cx.Clicked)
 		{
 			CardShown = -1;

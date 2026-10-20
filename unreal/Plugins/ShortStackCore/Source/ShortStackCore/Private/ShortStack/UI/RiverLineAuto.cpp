@@ -184,14 +184,14 @@ bool AutoToggle(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const 
 	const Ui::ClickState St = UI.Clickable(Id, R, Enabled);
 	const float A0 = Cv.GetAlpha();
 	Cv.SetAlpha(A0 * (Enabled ? 1.0f : 0.45f));
-	UI.RRect(R, 8.0f, On ? rlnet_detail::NetA(pal::Accent, 0.14f) : St.Hover ? Hex(0x172a42) : Hex(0x0e1a2c), On ? rlnet_detail::NetA(pal::Accent, 0.7f) : pal::Line);
+	UI.RRect(R, 8.0f, On ? rlnet_detail::NetA(pal::Accent, 0.14f) : St.Hover ? rlsites_detail::SitesTone(0x172a42) : rlsites_detail::SitesTone(0x0e1a2c), On ? rlnet_detail::NetA(pal::Accent, 0.7f) : pal::Line);
 	const Rect Box{R.X + 10.0f, R.Y + R.H / 2.0f - 8.0f, 16.0f, 16.0f};
-	UI.RRect(Box, 4.0f, On ? pal::Accent : Hex(0x0b1422), On ? pal::Accent : pal::Muted);
+	UI.RRect(Box, 4.0f, On ? pal::Accent : rlsites_detail::SitesTone(0x0b1422), On ? pal::Accent : pal::Muted);
 	if (On)
 	{
-		rlnet_detail::NetCheck(Cv, Box.X + 8.0f, Box.Y + 8.0f, 10.0f, Hex(0x06201d));
+		rlnet_detail::NetCheck(Cv, Box.X + 8.0f, Box.Y + 8.0f, 10.0f, rlsites_detail::SitesOnAccent());
 	}
-	UI.Text(Label, R.X + 34.0f, R.Y + R.H / 2.0f + 0.5f, Ts(13.0f, 700, On ? pal::Ink : Hex(0xc3cedf), Align::Left, Baseline::Middle, false, R.W - 42.0f));
+	UI.Text(Label, R.X + 34.0f, R.Y + R.H / 2.0f + 0.5f, Ts(13.0f, 700, On ? pal::Ink : rlsites_detail::SitesTone(0xc3cedf), Align::Left, Baseline::Middle, false, R.W - 42.0f));
 	Cv.SetAlpha(A0);
 	return St.Clicked && Enabled;
 }
@@ -202,7 +202,7 @@ bool AutoSegment(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const
 	const Ui::ClickState St = UI.Clickable(Id, R, Enabled);
 	const float A0 = Cv.GetAlpha();
 	Cv.SetAlpha(A0 * (Enabled ? 1.0f : 0.4f));
-	UI.RRect(R, 8.0f, Lit ? Hex(0x1f4d63) : St.Hover && Enabled ? Hex(0x172a42) : pal::Panel, Lit ? pal::Accent : pal::Line);
+	UI.RRect(R, 8.0f, Lit ? rlsites_detail::SitesTone(0x1f4d63) : St.Hover && Enabled ? rlsites_detail::SitesTone(0x172a42) : pal::Panel, Lit ? pal::Accent : pal::Line);
 	UI.Text(Label, R.X + R.W / 2.0f, R.Y + R.H / 2.0f + 0.5f, Ts(13.5f, 700, Lit ? pal::Ink : pal::Muted, Align::Center, Baseline::Middle));
 	Cv.SetAlpha(A0);
 	return St.Clicked && Enabled;
@@ -468,7 +468,7 @@ void RiverLine::AutoPanel(const Rect& R, double Now)
 	C->FillRect({0.0f, 64.0f, Width, Height - 64.0f - 38.0f}, Rgba(5, 9, 16, 0.6f * In));
 	C->SetAlpha(A0 * In);
 	C->GlowRoundRect({R.X, R.Y + 10.0f, R.W, R.H}, 18.0f, Rgba(0, 0, 0, 0.6f), 28.0f);
-	UI.RRect(R, 18.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x13213a), Hex(0x0c1524)), Hex(0x2a3f60), 1.5f);
+	UI.RRect(R, 18.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x13213a), rlsites_detail::SitesTone(0x0c1524)), rlsites_detail::SitesTone(0x2a3f60), 1.5f);
 
 	// Header: whose panel this is, the state it's in, and the way out.
 	rlnet_detail::NetSpaced(*C, autoplay::Text(autoplay::Words::PanelTitle), R.X + 30.0f, R.Y + 38.0f, 12.0f, 800, pal::Accent, 2.0f);
@@ -477,7 +477,7 @@ void RiverLine::AutoPanel(const Rect& R, double Now)
 	{
 		const Rect X{R.X + R.W - 52.0f, R.Y + 20.0f, 34.0f, 34.0f};
 		const Ui::ClickState Cx = UI.Clickable("autoclose", X);
-		C->FillCircle(X.X + 17.0f, X.Y + 17.0f, 17.0f, Cx.Hover ? Hex(0x223352) : Hex(0x162540));
+		C->FillCircle(X.X + 17.0f, X.Y + 17.0f, 17.0f, Cx.Hover ? pal::Line : rlsites_detail::SitesTone(0x162540));
 		C->StrokePolyline({{X.X + 11.0f, X.Y + 11.0f}, {X.X + 23.0f, X.Y + 23.0f}}, false, pal::Ink, 2.0f, true);
 		C->StrokePolyline({{X.X + 23.0f, X.Y + 11.0f}, {X.X + 11.0f, X.Y + 23.0f}}, false, pal::Ink, 2.0f, true);
 		const std::string State = P.Skipping ? std::string("SKIPPING") : P.On ? "WATCHING " + autoplay::SpeedName(P.Now.Speed) : std::string("OFF");
@@ -509,14 +509,14 @@ void RiverLine::AutoPanel(const Rect& R, double Now)
 		{
 			C->GlowRoundRect(T, 12.0f, rlnet_detail::NetA(pal::Accent, 0.28f), 12.0f);
 		}
-		UI.RRect(T, 12.0f, Paint::Linear({0.0f, T.Y}, {0.0f, T.Y + T.H}, Picked ? Hex(0x163a4c) : St.Hover ? Hex(0x16263d) : Hex(0x111d31), Picked ? Hex(0x0f2433) : Hex(0x0d1729)),
+		UI.RRect(T, 12.0f, Paint::Linear({0.0f, T.Y}, {0.0f, T.Y + T.H}, Picked ? rlsites_detail::SitesTone(0x163a4c) : St.Hover ? rlsites_detail::SitesTone(0x16263d) : rlsites_detail::SitesTone(0x111d31), Picked ? rlsites_detail::SitesTone(0x0f2433) : rlsites_detail::SitesTone(0x0d1729)),
 			Picked && !Greyed ? pal::Accent : pal::Line, Picked && !Greyed ? 2.0f : 1.0f);
 		const Color Sw = rlauto_detail::AutoSwingColor(I.Var);
 		const std::string Swing = style::SwingName(I.Var);
 		const float SwW = C->Measure(Swing, 9.5f, 700) + 9.5f * 1.3f;
 		rlnet_detail::NetPill(*C, Swing, T.X + T.W - 14.0f - SwW, T.Y + 13.0f, Sw, false, 9.5f);
-		UI.Text(I.Name, T.X + 16.0f, T.Y + 30.0f, Ts(17.0f, 800, Picked ? pal::Ink : Hex(0xdbe4f0), Align::Left, Baseline::Alphabetic, false, T.W - 32.0f - SwW - 8.0f));
-		rlnet_detail::NetParagraph(*C, I.Edge, T.X + 16.0f, T.Y + 50.0f, T.W - 32.0f, rlauto_detail::AutoEdgeSize, 500, Hex(0xb6c2d4), rlauto_detail::AutoEdgeLine, rlauto_detail::AutoEdgeLines);
+		UI.Text(I.Name, T.X + 16.0f, T.Y + 30.0f, Ts(17.0f, 800, Picked ? pal::Ink : rlsites_detail::SitesTone(0xdbe4f0), Align::Left, Baseline::Alphabetic, false, T.W - 32.0f - SwW - 8.0f));
+		rlnet_detail::NetParagraph(*C, I.Edge, T.X + 16.0f, T.Y + 50.0f, T.W - 32.0f, rlauto_detail::AutoEdgeSize, 500, rlsites_detail::SitesTone(0xb6c2d4), rlauto_detail::AutoEdgeLine, rlauto_detail::AutoEdgeLines);
 		if (Greyed)
 		{
 			rlnet_detail::NetLockIcon(*C, T.X + 15.0f, T.Y + T.H - 25.0f, 13.0f, pal::Orange);
@@ -673,7 +673,7 @@ void RiverLine::AutoPanel(const Rect& R, double Now)
 		D.Kind = ButtonKind::Secondary;
 		D.Size = 15.0f;
 		D.Enabled = !IsDefault;
-		if (UI.Button("autodefault", {R.X + 30.0f, Fy, 240.0f, 46.0f}, IsDefault ? std::string("Your default") : std::string(autoplay::Text(autoplay::Words::MakeDefault)), D) && !IsDefault)
+		if (rlsites_detail::SitesButton(UI, *C, "autodefault", {R.X + 30.0f, Fy, 240.0f, 46.0f}, IsDefault ? std::string("Your default") : std::string(autoplay::Text(autoplay::Words::MakeDefault)), D) && !IsDefault)
 		{
 			autoplay::SetDefault(S.Life.Auto, S.Life, P.Now);
 			Say(rlauto_detail::AutoDefaultSaved, false);
@@ -705,7 +705,7 @@ void RiverLine::AutoPanel(const Rect& R, double Now)
 			Go.Kind = U.SkipPicked ? ButtonKind::Gold : ButtonKind::Primary;
 			Label = U.SkipPicked ? rlauto_detail::AutoSkipButton(P.Now.To, Breaks) : "Watch it play \xC2\xB7 " + autoplay::SpeedName(P.Now.Speed);
 		}
-		if (UI.Button("autogo", {R.X + R.W - 290.0f, Fy, 260.0f, 46.0f}, Label, Go) && !Done)
+		if (rlsites_detail::SitesButton(UI, *C, "autogo", {R.X + R.W - 290.0f, Fy, 260.0f, 46.0f}, Label, Go) && !Done)
 		{
 			bool Closed = false;
 			if (P.Skipping)
@@ -770,10 +770,10 @@ void RiverLine::AutoStrip(const Rect& R, double Now)
 		// Over the player's own controls (a hand taken over, the prompt open): one line that says whose hand it is.
 		const float Pw = rlnet_detail::NetPill(*C, "YOUR HAND", R.X, R.Y + 2.0f, pal::Gold, true, 10.0f);
 		UI.Text(!Stop.empty() ? Stop : std::string(P.TakenOver ? rlauto_detail::AutoYourHandKeys : rlauto_detail::AutoYourDecision), R.X + Pw + 10.0f, R.Y + 15.0f,
-			Ts(13.0f, 700, Stop.empty() ? Hex(0xc3cedf) : pal::Gold, Align::Left, Baseline::Alphabetic, false, R.W - Pw - 10.0f));
+			Ts(13.0f, 700, Stop.empty() ? rlsites_detail::SitesTone(0xc3cedf) : pal::Gold, Align::Left, Baseline::Alphabetic, false, R.W - Pw - 10.0f));
 		return;
 	}
-	UI.RRect(R, 12.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x102036), Hex(0x0b1524)), rlnet_detail::NetA(pal::Accent, 0.35f));
+	UI.RRect(R, 12.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x102036), rlsites_detail::SitesTone(0x0b1524)), rlnet_detail::NetA(pal::Accent, 0.35f));
 
 	// Row 1: the style (it opens the panel), the speeds, Take over [K].
 	const float Ry = R.Y + 10.0f;
@@ -809,7 +809,7 @@ void RiverLine::AutoStrip(const Rect& R, double Now)
 		O.Kind = P.TakenOver ? ButtonKind::Secondary : ButtonKind::Gold;
 		O.Size = 13.5f;
 		const std::string Label = P.TakenOver || P.ResumeWindow ? std::string("Autoplay off [K]") : std::string(autoplay::Text(autoplay::Words::TakeOverKey));
-		if (UI.Button("autotake", {R.X + R.W - 10.0f - TakeW, Ry, TakeW, 30.0f}, Label, O))
+		if (rlsites_detail::SitesButton(UI, *C, "autotake", {R.X + R.W - 10.0f - TakeW, Ry, TakeW, 30.0f}, Label, O))
 		{
 			S.TakeOver(Table);
 		}
@@ -868,13 +868,13 @@ void RiverLine::AutoStrip(const Rect& R, double Now)
 		ButtonOpts O;
 		O.Kind = ButtonKind::Ghost;
 		O.Size = 22.0f;
-		bool Take = UI.Button("autofold", {Ax, By, Bw, 66.0f}, "Fold", O);
+		bool Take = rlsites_detail::SitesButton(UI, *C, "autofold", {Ax, By, Bw, 66.0f}, "Fold", O);
 		ButtonOpts Co = O;
 		Co.Sub = Legal.CanCheck ? std::string() : ChipsText(static_cast<double>(Legal.CallAmount));
-		Take = UI.Button("autocall", {Ax + Bw + 10.0f, By, Bw, 66.0f}, Legal.CanCheck ? "Check" : "Call", Co) || Take;
+		Take = rlsites_detail::SitesButton(UI, *C, "autocall", {Ax + Bw + 10.0f, By, Bw, 66.0f}, Legal.CanCheck ? "Check" : "Call", Co) || Take;
 		if (Legal.CanRaise)
 		{
-			Take = UI.Button("autoraise", {Ax + (Bw + 10.0f) * 2.0f, By, Bw, 66.0f}, Legal.IsBet ? "Bet" : "Raise", O) || Take;
+			Take = rlsites_detail::SitesButton(UI, *C, "autoraise", {Ax + (Bw + 10.0f) * 2.0f, By, Bw, 66.0f}, Legal.IsBet ? "Bet" : "Raise", O) || Take;
 		}
 		if (Take)
 		{
@@ -915,12 +915,12 @@ void RiverLine::SkipCard(const Rect& R, double Now)
 		UI.RRect({Cx - Pw / 2.0f, Cy - 58.0f, Pw, 140.0f}, 12.0f, Rgba(6, 10, 18, 0.9f), rlnet_detail::NetA(pal::Accent, 0.35f));
 		UI.Text(Line.first, Cx, Cy - 26.0f, Ts(24.0f, 900, pal::Accent, Align::Center, Baseline::Alphabetic, false, R.W - 40.0f));
 		UI.Text(Line.second, Cx, Cy + 2.0f, Ts(14.0f, 600, pal::Ink, Align::Center, Baseline::Alphabetic, false, R.W - 40.0f));
-		UI.RRect({Cx - 160.0f, Cy + 20.0f, 320.0f, 5.0f}, 2.5f, Hex(0x0b1422));
+		UI.RRect({Cx - 160.0f, Cy + 20.0f, 320.0f, 5.0f}, 2.5f, rlsites_detail::SitesTone(0x0b1422));
 		UI.RRect({Cx - 160.0f + Bar * 256.0f, Cy + 20.0f, 64.0f, 5.0f}, 2.5f, pal::Accent);
 		ButtonOpts O;
 		O.Kind = ButtonKind::Secondary;
 		O.Size = 13.0f;
-		if (UI.Button("autoskipstop" + T.Spec.Id, {Cx - 70.0f, Cy + 40.0f, 140.0f, 32.0f}, "Stop", O))
+		if (rlsites_detail::SitesButton(UI, *C, "autoskipstop" + T.Spec.Id, {Cx - 70.0f, Cy + 40.0f, 140.0f, 32.0f}, "Stop", O))
 		{
 			S.StopSkip(Table);
 		}
@@ -941,14 +941,14 @@ void RiverLine::SkipCard(const Rect& R, double Now)
 		UI.Text(Stats[I].first, X + 100.0f, R.Y + 386.0f, Ts(15.0f, 500, pal::Muted, Align::Center));
 		UI.Text(Stats[I].second, X + 100.0f, R.Y + 418.0f, Ts(21.0f, 800, pal::Ink, Align::Center, Baseline::Alphabetic, true));
 	}
-	UI.RRect({Cx - 300.0f, R.Y + 466.0f, 600.0f, 8.0f}, 4.0f, Hex(0x0b1422));
+	UI.RRect({Cx - 300.0f, R.Y + 466.0f, 600.0f, 8.0f}, 4.0f, rlsites_detail::SitesTone(0x0b1422));
 	UI.RRect({Cx - 300.0f + Bar * 480.0f, R.Y + 466.0f, 120.0f, 8.0f}, 4.0f, pal::Accent);
 	// K takes the wheel in two presses (§2.6.5: the skip stops with the plan at 1x, then the hand is yours); the button does
 	// both, so its words hold. Stop leaves the plan the seat at 1x, as Backspace does.
 	ButtonOpts O;
 	O.Kind = ButtonKind::Gold;
 	O.Size = 20.0f;
-	if (UI.Button("stopsprint", {Cx - 250.0f, R.Y + 516.0f, 240.0f, 60.0f}, "Take the wheel", O))
+	if (rlsites_detail::SitesButton(UI, *C, "stopsprint", {Cx - 250.0f, R.Y + 516.0f, 240.0f, 60.0f}, "Take the wheel", O))
 	{
 		S.StopSkip(Table);
 		S.TakeOver(Table);
@@ -956,7 +956,7 @@ void RiverLine::SkipCard(const Rect& R, double Now)
 	ButtonOpts So;
 	So.Kind = ButtonKind::Secondary;
 	So.Size = 20.0f;
-	if (UI.Button("autoskipstop", {Cx + 10.0f, R.Y + 516.0f, 240.0f, 60.0f}, "Stop", So))
+	if (rlsites_detail::SitesButton(UI, *C, "autoskipstop", {Cx + 10.0f, R.Y + 516.0f, 240.0f, 60.0f}, "Stop", So))
 	{
 		S.StopSkip(Table);
 	}

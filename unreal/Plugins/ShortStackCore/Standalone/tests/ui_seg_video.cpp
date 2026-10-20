@@ -27,6 +27,8 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sites.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Video.h"
 #include "ShortStack/UI/VideoArt.h"
 
@@ -1449,6 +1451,45 @@ void AdsAfterTheGate()
 
 // ------------------------------------------------------------------ the copy
 
+// ------------------------------------------------------------------ PUBLISH under the clause (update 2 G3, §5.7)
+
+void PublishClause()
+{
+	// Under a Team RiverLine deal that plays only on RiverLine, a video of a RunItTwice hand is a strike: Studio says so over
+	// PUBLISH, the first press only warns ("PUBLISH ANYWAY" and "Press again..."), and only the second starts the edit.
+	Desk D("rerun-clause");
+	D.Fake("badbeat online");
+	for (video::Candidate& C : D.S.Life.Video.Open)
+	{
+		C.Site = static_cast<int>(ss::net::SiteId::RunItTwice);
+	}
+	D.S.DebugSponsor("offer riverline");
+	for (ss::sponsor::Contract& K : D.S.Life.Sponsors.Contracts)
+	{
+		K.T.Only = K.Brand == "riverline" ? std::string("riverline") : K.T.Only;
+	}
+	if (D.S.Life.Sponsors.Contracts.empty() || !D.S.SignDeal(D.S.Life.Sponsors.Contracts.back().Id).empty() ||
+		!ss::sponsor::WouldStrike(D.S.Life.Sponsors, static_cast<int>(ss::net::SiteId::RunItTwice), false, true))
+	{
+		std::printf("  ui-video: no clause deal to publish under; the PUBLISH clause check is skipped\n");
+		return;
+	}
+	D.Rest();
+	D.Open(0);
+	DrawList L = D.Frame();
+	Check(DrewRun(L, "Strike under your Team RiverLine deal"), "publish clause: Studio warns over PUBLISH before a RunItTwice hand goes up");
+	Check(ClickRun(D, L, "PUBLISH") && !D.S.TimeSkip.Active && D.S.Life.Video.Videos.empty(), "publish clause: the first press only warns");
+	L = D.Frame();
+	Check(DrewRun(L, "Press again and it's a strike under the deal.") && ClickRun(D, L, "PUBLISH ANYWAY") && D.S.TimeSkip.Active, "publish clause: the second press starts the edit");
+	D.Until([&D]() { return !D.S.TimeSkip.Active; }, 15.0);
+	D.S.HasOutcome = false;
+	// A RiverLine hand under the same deal: nothing to warn of.
+	D.Fake("bluff online");
+	D.Open(0);
+	L = D.Frame();
+	Check(!DrewRun(L, "Strike under your Team RiverLine deal") && !DrewRun(L, "PUBLISH ANYWAY"), "publish clause: a RiverLine hand under a RiverLine deal goes up without a warning");
+}
+
 void Copy()
 {
 	std::vector<std::pair<std::string, std::string>> Lines;
@@ -1511,6 +1552,7 @@ void SegVideo()
 	video_seg::ChipsFit();
 	video_seg::SkipRecap();
 	video_seg::AdsAfterTheGate();
+	video_seg::PublishClause();
 	video_seg::Copy();
 	std::printf("  ui-video: %d checks\n", video_seg::Checks);
 }

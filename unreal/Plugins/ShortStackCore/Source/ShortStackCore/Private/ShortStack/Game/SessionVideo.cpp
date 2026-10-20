@@ -5,6 +5,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Recall.h"
 #include "ShortStack/Game/Sites.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Video.h"
 
 #include <algorithm>
@@ -737,6 +738,16 @@ std::string Session::Publish(const video::Choice& C)
 	HasOutcome = false;
 	ConfirmRegister = false;
 	Touch(Life, TextsSeen, Evicted());
+	// Update 2 (§5.7, core-deals): a video that shows a site's table (an online hand, watched or skipped) is a strike under a
+	// deal that plays only on another site; at most one a day (sponsor::NoteSitePlay). Studio's PUBLISH warned first
+	// (sponsor::WouldStrike with Video); this is the second press. Live and story candidates show no site.
+	for (const video::Candidate& X : Life.Video.Open)
+	{
+		if ((X.Source == 0 || X.Source == 3) && std::find(C.Candidates.begin(), C.Candidates.end(), X.Id) != C.Candidates.end())
+		{
+			sponsor::NoteSitePlay(Life.Sponsors, Life, X.Site, World, false, true);
+		}
+	}
 	Sound(SoundId::Click, 0.6);
 	return "";
 }

@@ -149,7 +149,8 @@ struct Gate
 	int Tier = 0;
 	std::string BlockVenue;
 	int BlockVisits = 0;
-	/** Offers come at all (RunItTwice's tier needs venues that aren't playable yet: only ss.Sponsor.Offer brings it). */
+	/** Offers come at all on the brand's weekly looks. Team RunItTwice's is false: it opens instead at its door (update 2 §5.6: a
+	 *  RunItTwice account with 100 events there, or a series title won there); ss.Sponsor.Offer brings any brand. */
 	bool Open = true;
 };
 struct Brand
@@ -415,11 +416,14 @@ enum class Breach : int
 	AccountRestricted,
 };
 SHORTSTACKCORE_API void Conduct(Book& B, life::State& L, Chips& Bankroll, Breach Why, double World);
-// Update 2 (§5.7; core-deals fills them): a contract's "plays only on" clause. Conduct(AccountRestricted) ends only the
-// contracts whose brand's Site is RiverLine (§5.5).
-/** Whether playing (or streaming, or posting a video) on Site would be a strike under a running clause: the warning first. */
+// Update 2 (§5.7; core-deals): a contract's "plays only on" clause (Team RiverLine's offered or renewed from G3, Team
+// RunItTwice's). Conduct(AccountRestricted) ends only the training deals and the poker-site deals aligned with RiverLine
+// (Brand::Site RiverLine), never a rival site's team (§5.5).
+/** Whether playing (or streaming, or posting a video) on Site breaks a running deal's clause: the warning before the press. A
+ *  renewal signed ahead isn't running yet. */
 SHORTSTACKCORE_API bool WouldStrike(const Book& B, int Site, bool Streaming, bool Video);
-/** The player played (streamed, posted) on Site: a strike under a running "only" clause. */
+/** The player played (streamed, posted) on Site: a strike under a running clause, at most one a day a deal, cured by two clean
+ *  weeks (nothing held); a second strike in a term ends the deal for cause. */
 SHORTSTACKCORE_API void NoteSitePlay(Book& B, life::State& L, int Site, double World, bool Streaming, bool Video);
 SHORTSTACKCORE_API bool Active(const Book& B, const std::string& BrandId, double World);
 /** The contract running for Brand at World (Active or under notice, inside its term), or nullptr. */

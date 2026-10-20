@@ -221,7 +221,13 @@ void CardBack(Canvas& C, float X, float Y, float W, float H)
 	C.GlowRoundRect({X, Y + 2.0f, W, H}, W * 0.1f, Rgba(0, 0, 0, 0.45f), 6.0f);
 	C.FillRoundRect({X, Y, W, H}, W * 0.1f, Hex(0xf4f6fa));
 	const Rect In{X + W * 0.07f, Y + W * 0.07f, W - W * 0.14f, H - W * 0.14f};
-	C.FillRoundRect(In, W * 0.06f, Paint::Linear({X, Y}, {X + W, Y + H}, Hex(0x0e7c72), Hex(0x0b3f5c)));
+	// Update 2 (§1.8): a rival site's deck wears that site's colours (its accents, darkened); RiverLine's teal back is
+	// exactly as it was whenever pal:: holds RiverLine's accent (outside any rival's SkinScope).
+	const Color HomeAccent = Hex(0x27d3c3);
+	const bool Home = pal::Accent.R == HomeAccent.R && pal::Accent.G == HomeAccent.G && pal::Accent.B == HomeAccent.B;
+	const Color BackTop = Home ? Hex(0x0e7c72) : Mix(pal::Accent, Hex(0x000000), 0.5f);
+	const Color BackBottom = Home ? Hex(0x0b3f5c) : Mix(pal::Accent2, Hex(0x000000), 0.62f);
+	C.FillRoundRect(In, W * 0.06f, Paint::Linear({X, Y}, {X + W, Y + H}, BackTop, BackBottom));
 	// Diagonal hatching, clipped to the inner panel analytically.
 	for (float I = -H; I < W + H; I += 9.0f)
 	{

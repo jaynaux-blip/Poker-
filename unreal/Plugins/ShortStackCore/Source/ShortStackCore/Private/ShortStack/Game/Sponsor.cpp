@@ -9,6 +9,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Wardrobe.h"
 #include "ShortStack/Game/World.h"
 
@@ -621,6 +622,9 @@ std::vector<Brand> Build()
 		Asks(B, {{Ask::LiveHours, 60.0}, {Ask::Reads, 12.0}, {Ask::CommunityStreams, 1.0}});
 		B.Offer.Wants = {Spot::Chest};
 		B.Legacy = true;
+		// Update 2 (§5.7): RiverLine's own deal, and from G3 every one offered or renewed says "plays only on RiverLine".
+		B.Site = static_cast<int>(net::SiteId::RiverLine);
+		B.Offer.Only = net::KeyOf(net::SiteId::RiverLine);
 		V.push_back(B);
 	}
 	{
@@ -643,10 +647,12 @@ std::vector<Brand> Build()
 		V.push_back(B);
 	}
 	{
-		// The poker site that isn't RiverLine (§1.9 #15): RunItTwice, the name the user gave it in update 2 (it was Turnstone
-		// Poker; the brand id stays "turnstone" so saves keep their books). Tier 5 needs venues that aren't playable yet, so
-		// it never looks on its own (P2); ss.Sponsor.Offer turnstone brings it.
-		Brand B = Make("turnstone", "RunItTwice", "RunItTwice", Category::Site, 5, 0x334155, 0xd4a843, 12);
+		// The poker site that isn't RiverLine (§1.9 #15): Team RunItTwice, the rival site's own team (update 2 §5.6; the user
+		// renamed Turnstone Poker RunItTwice, and the brand id stays "turnstone" so saves keep their books). It looks only
+		// once the player holds a RunItTwice account with 100 events there or a series title won there (Opens: Needs.Open
+		// stays false, so an old save with no account never hears from it); ss.Sponsor.Offer turnstone brings it any time.
+		// Its deal plays only on RunItTwice, and it's a site's team: signing it ends Team RiverLine's (SiteTeamSwitch, §1.9 #11).
+		Brand B = Make("turnstone", "Team RunItTwice", "RunItTwice", Category::Site, 5, 0x334155, 0xd4a843, 12);
 		B.Rep = "Ingrid Vale";
 		B.RepTitle = "Head of sponsored pros";
 		B.Needs.Open = false;
@@ -655,6 +661,8 @@ std::vector<Brand> Build()
 		B.Offer.FinalTableBonusCents = 250000;
 		Asks(B, {{Ask::LiveEvents, 4.0}});
 		B.Offer.Wants = {Spot::Chest};
+		B.Site = static_cast<int>(net::SiteId::RunItTwice);
+		B.Offer.Only = net::KeyOf(net::SiteId::RunItTwice);
 		V.push_back(B);
 	}
 	for (Brand& B : V)
@@ -804,19 +812,93 @@ std::string CreatorWhyKey(const rep::Public& P)
 	return Creator == 3 ? "why:rerun:partner" : Creator == 2 || Creator == 4 ? "why:rerun:views" : "why:rerun";
 }
 
+/**
+ * Whether RiverLine restricting the account touches B (update 2 §5.5, §1.9 #12): the training sites, as before, and the
+ * poker-site deals aligned with RiverLine (Team RiverLine). A rival site's own team doesn't know or care.
+ */
+bool RiverLineAligned(const Brand& B)
+{
+	return B.Cat == Category::Training || (B.Cat == Category::Site && B.Site <= static_cast<int>(net::SiteId::RiverLine));
+}
+
 int Limited(const rep::Public& P, const Brand* B, int T)
 {
 	if (P.PickedUp90)
 	{
 		T = std::min(T, 1);
 	}
-	if (P.Restricted180 && B && (B->Cat == Category::Site || B->Cat == Category::Training))
+	if (P.Restricted180 && B && RiverLineAligned(*B))
 	{
 		T = 0;
 	}
 	return T;
 }
 } // namespace sponsor_standing_detail
+
+// ------------------------------------------------------------------ the "plays only on" clause (update 2 §5.7)
+
+namespace sponsor_clause_detail
+{
+/** A site's name from its key ("runittwice" -> "RunItTwice"): the registry's, or, for a site not registered yet, its own. */
+std::string SiteName(const std::string& Key)
+{
+	static const char* const Own[] = {"RiverLine", "Ignite Poker", "RunItTwice", "Halcyon"};
+	for (int S = 0; S < static_cast<int>(net::SiteId::Count) && S < 4; ++S)
+	{
+		const net::SiteId Id = static_cast<net::SiteId>(S);
+		if (Key == net::KeyOf(Id))
+		{
+			const net::SiteDef& D = net::Def(Id);
+			return D.Id == Id && !D.Name.empty() ? D.Name : std::string(Own[S]);
+		}
+	}
+	return Key;
+}
+
+std::string SiteNameOf(int Site)
+{
+	return Site >= 0 && Site < static_cast<int>(net::SiteId::Count) ? SiteName(net::KeyOf(static_cast<net::SiteId>(Site))) : std::string("another site");
+}
+
+/** The site a clause keeps the player on, by name ("" with no clause). */
+std::string HomeOf(const Contract& C)
+{
+	return !C.T.Only.empty() ? SiteName(C.T.Only) : !C.T.OnlyStream.empty() ? SiteName(C.T.OnlyStream) : std::string();
+}
+
+/**
+ * Whether playing on Site (or streaming it, or posting a video of it) breaks C's clause: only= keeps the play, the stream
+ * and the videos on its site; onlystream= (P1, Ignite Squad) keeps the stream there.
+ */
+bool Breaks(const Contract& C, int Site, bool Streaming)
+{
+	if (Site < 0 || Site >= static_cast<int>(net::SiteId::Count))
+	{
+		return false;
+	}
+	const std::string Key = net::KeyOf(static_cast<net::SiteId>(Site));
+	return (!C.T.Only.empty() && C.T.Only != Key) || (Streaming && !C.T.OnlyStream.empty() && C.T.OnlyStream != Key);
+}
+
+/** The day's clause strike under C (Book::PaidKeys): at most one a day, and the mark that its cure is a clause's. */
+std::string StrikeKey(const Contract& C, double At)
+{
+	return "only|" + C.Id + "|" + std::to_string(net::DayOf(At));
+}
+
+/** C's open cure is a clause strike's: nothing to make up, two weeks with no more play elsewhere. */
+bool ClauseCure(const Book& B, const Contract& C)
+{
+	return C.CureUntil > 0.0 && B.PaidKeys.count(StrikeKey(C, C.CureFrom)) > 0;
+}
+
+/** The clause as an offer or a renewal says it (a sentence, "" with no clause). */
+std::string ClauseLine(const Contract& C, const std::string& Key)
+{
+	const std::string Home = HomeOf(C);
+	return Home.empty() ? std::string() : BodyFor(C, Key, {{"Home", Home}});
+}
+} // namespace sponsor_clause_detail
 
 int Tier(const rep::Public& P, const std::string& BrandId)
 {
@@ -914,27 +996,6 @@ const Contract* Running(const Book& B, const std::string& BrandId, double World)
 		}
 	}
 	return nullptr;
-}
-
-bool WouldStrike(const Book& B, int Site, bool Streaming, bool Video)
-{
-	// Phase A's stub (core-deals, G3): no contract carries a "plays only on" clause yet.
-	(void)B;
-	(void)Site;
-	(void)Streaming;
-	(void)Video;
-	return false;
-}
-
-void NoteSitePlay(Book& B, life::State& L, int Site, double World, bool Streaming, bool Video)
-{
-	// Phase A's stub (core-deals, G3): nothing to strike yet.
-	(void)B;
-	(void)L;
-	(void)Site;
-	(void)World;
-	(void)Streaming;
-	(void)Video;
 }
 
 bool Active(const Book& B, const std::string& BrandId, double World)
@@ -1123,6 +1184,49 @@ bool OwnsWebcam(const gear::Owned* Gear)
 	return Gear && (Gear->count("webcam-720") > 0 || Gear->count("webcam-1080") > 0 || Gear->count("mirrorless") > 0);
 }
 
+/** A rival site's team signs players who grind its tables (update 2 §5.6): this many events on the site. */
+constexpr int SiteTeamEvents = 100;
+
+/** The player's account on a rival site Br belongs to (nullptr: none, or not a rival site's brand). */
+const site::Account* SiteAccountFor(const Brand& Br, const life::State& L)
+{
+	if (Br.Cat != Category::Site || Br.Site <= static_cast<int>(net::SiteId::RiverLine))
+	{
+		return nullptr;
+	}
+	for (const site::Account& A : L.Sites.Accounts)
+	{
+		if (static_cast<int>(A.Site) == Br.Site)
+		{
+			return &A;
+		}
+	}
+	return nullptr;
+}
+
+/**
+ * The mark of an online series title won on a rival site ("sitetitle|runittwice"): SessionSponsor.cpp sets it from the
+ * session's results (the book can't see them), and the prune keeps it. Written only once there's one, so an old book
+ * writes back as it was read.
+ */
+std::string SiteTitleKey(int Site)
+{
+	return std::string("sitetitle|") + net::KeyOf(static_cast<net::SiteId>(Site));
+}
+
+/** Team RunItTwice's door (§5.6): a RunItTwice account with 100 events there, or a series title won there. */
+bool SiteTeamGate(const Brand& Br, const Book& B, const life::State& L)
+{
+	const site::Account* A = SiteAccountFor(Br, L);
+	return A && (A->LifetimeEvents >= SiteTeamEvents || B.PaidKeys.count(SiteTitleKey(Br.Site)) > 0);
+}
+
+/** Whether Br's offers come at all: the catalog's flag, or (a rival site's team) the door above. */
+bool Opens(const Brand& Br, const Book& B, const life::State& L)
+{
+	return Br.Needs.Open || SiteTeamGate(Br, B, L);
+}
+
 /** The brand's own gate (§3.4), "" when it's met. */
 std::string Gate(const Brand& Br, const Book& B, const life::State& L, const rep::Public& P, double World, const gear::Owned* Gear)
 {
@@ -1178,7 +1282,7 @@ std::string Gate(const Brand& Br, const Book& B, const life::State& L, const rep
 }
 
 /** Why the brand is calling now: the first sentence of its offer. */
-std::string WhyLine(const Brand& Br, const life::State& L, const rep::Public& P, const gear::Owned* Gear)
+std::string WhyLine(const Brand& Br, const Book& B, const life::State& L, const rep::Public& P, const gear::Owned* Gear)
 {
 	std::map<std::string, std::string> V;
 	V["Count"] = std::to_string(P.Embercrest60);
@@ -1224,6 +1328,14 @@ std::string WhyLine(const Brand& Br, const life::State& L, const rep::Public& P,
 		// Team RiverLine short of its stream gate opened on standing (on the circuit): when Rerun lifted it, Rerun says why.
 		const bool ByRerun = Br.Id == "riverline" && Creator && !(P.Partner && P.Followers >= 2500 && P.Avg30 >= 75.0);
 		Key = ByRerun ? Key : P.Partner ? "why:partner" : !LastTitle.empty() ? "why:title" : "why:tier";
+	}
+	else if (SiteTeamGate(Br, B, L))
+	{
+		// A rival site's team calls because of what the player did on its tables (update 2 §5.6): a series title won there,
+		// else the events played there.
+		const site::Account* A = SiteAccountFor(Br, L);
+		V["Events"] = Grouped(A ? A->LifetimeEvents : 0);
+		Key = B.PaidKeys.count(SiteTitleKey(Br.Site)) > 0 ? "why:site:title" : "why:site";
 	}
 	else if (!Br.Kast.empty())
 	{
@@ -1282,9 +1394,11 @@ std::string Eligible(const Book& B, const life::State& L, const rep::Public& P, 
 	{
 		return "No such brand.";
 	}
-	if (!Br->Needs.Open)
+	if (!sponsor_offer_detail::Opens(*Br, B, L))
 	{
-		return Br->Short + " isn't signing players here yet.";
+		return Br->Cat == Category::Site && Br->Site > static_cast<int>(net::SiteId::RiverLine)
+			? Br->Short + " signs players who grind its tables: " + std::to_string(sponsor_offer_detail::SiteTeamEvents) + " events there, or a series title won there."
+			: Br->Short + " isn't signing players here yet.";
 	}
 	for (const Contract& C : B.Contracts)
 	{
@@ -1316,7 +1430,7 @@ std::string Eligible(const Book& B, const life::State& L, const rep::Public& P, 
 	{
 		return "Not with your name in the paper.";
 	}
-	if (P.Restricted180 && (Br->Cat == Category::Site || Br->Cat == Category::Training))
+	if (P.Restricted180 && sponsor_standing_detail::RiverLineAligned(*Br))
 	{
 		return "Not with your RiverLine account restricted.";
 	}
@@ -1361,13 +1475,15 @@ std::string MakeOffer(Book& B, life::State& L, const rep::Public& P, const std::
 		std::string Reason = Fill(Text(sponsor_copy::Spoken, "why:tier"), {});
 		if (Why.empty())
 		{
-			Reason = WhyLine(*Br, L, P, nullptr);
+			Reason = WhyLine(*Br, B, L, P, nullptr);
 		}
 		else if (sponsor_standing_detail::CreatorLeads(P))
 		{
 			Reason = Fill(Text(sponsor_copy::Spoken, sponsor_standing_detail::CreatorWhyKey(P)), {{"Subs", Grouped(P.VideoSubs)}, {"Views", Grouped(P.Views30)}});
 		}
-		const std::string Body = Fill(Text(sponsor_copy::Body, Br->Pitch[Variant]), {{"Why", Reason}});
+		// The "plays only on" clause (update 2 §5.7) is said in the letter, as well as on the card.
+		const std::string Body =
+			Joined({Fill(Text(sponsor_copy::Body, Br->Pitch[Variant]), {{"Why", Reason}}), sponsor_clause_detail::ClauseLine(B.Contracts.back(), "only:offer")});
 		Post(L, World, B.Contracts.back(), LetterOffer, "offer", Body);
 	}
 	return C.Id;
@@ -1444,6 +1560,16 @@ std::string SpotsWords(const std::vector<Spot>& Spots)
 	return Out;
 }
 
+/**
+ * Whether signing New ends Old's deal instead of colliding with it (update 2 §1.9 #11, §5.1 scene 3): the poker sites' own
+ * teams, one at a time. Signing one site's team (Team RunItTwice) ends another site's (Team RiverLine), and the other way
+ * round; every other exclusive category still refuses the signature while its deal runs.
+ */
+bool SiteTeamSwitch(const Brand& New, const Brand& Old)
+{
+	return New.Cat == Category::Site && Old.Cat == Category::Site && New.Site >= 0 && Old.Site >= 0 && New.Site != Old.Site;
+}
+
 /** What signing C collides with ("" when nothing): an exclusive category, the overlay's two slots, the patch spots. */
 std::string Collides(const Book& B, const Contract& C, double World)
 {
@@ -1462,6 +1588,10 @@ std::string Collides(const Book& B, const Contract& C, double World)
 			continue;
 		}
 		const Brand* Xb = BrandOf(X);
+		if (Xb && SiteTeamSwitch(*Br, *Xb))
+		{
+			continue; // signing ends it (Sign): its category and its patch spot are this deal's
+		}
 		if (Xb && Xb->Cat == Br->Cat && ExclusiveCategory(Br->Cat) && (X.T.Exclusive || C.T.Exclusive))
 		{
 			return Xb->Short + " has your " + CategoryWord(Br->Cat) + " category until " + net::DateLabel(net::DayOf(X.Until)) + ".";
@@ -1540,8 +1670,23 @@ std::vector<std::string> Conflicts(const Book& B, const life::State& L, const st
 			Out.push_back("Only one can be signed: signing passes on " + Xb->Short + ".");
 		}
 	}
+	// A poker site's team ends another site's running deal (update 2 §1.9 #11): the desk says so before the pen does.
+	for (const Contract& X : B.Contracts)
+	{
+		const Brand* Xb = BrandOf(X);
+		if (&X != C && OpenOffer(*C) && Live(X) && X.Since <= World && X.Until > World && Xb && sponsor_sign_detail::SiteTeamSwitch(*Br, *Xb))
+		{
+			Out.push_back("Signing ends your " + Xb->Name + " deal today.");
+		}
+	}
 	return Out;
 }
+
+namespace sponsor_step_detail
+{
+void EndContract(Book& B, life::State& L, size_t I, End Why, double At);
+std::string PatchLine(const life::State& L, const Contract& C);
+} // namespace sponsor_step_detail
 
 std::string Sign(Book& B, life::State& L, Chips& Bankroll, const std::string& ContractId, double World)
 {
@@ -1604,6 +1749,23 @@ std::string Sign(Book& B, life::State& L, Chips& Bankroll, const std::string& Co
 				B.Cooldown[X.Brand] = std::max(B.Cooldown[X.Brand], World + DeclineCooldownDays * DayMinutes);
 			}
 		}
+	}
+	// A poker site's team ends another site's (update 2 §1.9 #11, §5.1 scene 3): one site's patch on the chest at a time. The
+	// other deal ends today, as walking away from it would (with a renewal of it signed ahead): the month isn't paid, the
+	// patch comes off, and its letter says why.
+	for (size_t I = 0; Br && I < B.Contracts.size(); ++I)
+	{
+		const Contract& X = B.Contracts[I];
+		const Brand* Xb = BrandOf(X);
+		if (X.Id == Id || !Live(X) || X.Until <= World || !Xb || !sponsor_sign_detail::SiteTeamSwitch(*Br, *Xb))
+		{
+			continue;
+		}
+		if (X.Since <= World)
+		{
+			Post(L, World, X, LetterEnded, "ended", Joined({BodyFor(X, "ended:switch", {{"Rival", Br->Name}}), sponsor_step_detail::PatchLine(L, X)}));
+		}
+		sponsor_step_detail::EndContract(B, L, I, End::Walked, World);
 	}
 	C = Find(B, Id);
 	Post(L, World, *C, LetterWelcome, "welcome", BodyFor(*C, "welcome"));
@@ -2004,6 +2166,22 @@ bool TryCure(Ctx& K, size_t I, double At)
 	{
 		return false;
 	}
+	// A clause strike's cure (update 2 §5.7) is the time itself: two weeks with no more play elsewhere (another one in them
+	// is the second strike, and the end). Nothing is held, so it's cured, not paid, at the deadline.
+	const bool Clause = sponsor_clause_detail::ClauseCure(K.B, C);
+	if (Clause)
+	{
+		if (At + 1e-9 < C.CureUntil)
+		{
+			return false;
+		}
+		C.CureUntil = 0.0;
+		C.Short = Tally();
+		C.Cure = Tally();
+		C.CompsHalved = false;
+		Post(K.L, At, C, LetterCured, "cured", sponsor_clause_detail::ClauseLine(C, "cured:only"));
+		return true;
+	}
 	const Tally W = Counts(K, C, C.CureFrom, std::max(C.CureFrom, At), C.Cure, C.CureWorkoutBase);
 	for (const Ask A : AllAsks)
 	{
@@ -2213,6 +2391,8 @@ void Renewal(Ctx& K, size_t I, double At)
 			NT.Days = 90;
 		}
 	}
+	// Update 2 (§5.7): a renewal carries the brand's "plays only on" clause from G3 on (a term signed before it ran without).
+	NT.Only = Br->Offer.Only.empty() ? NT.Only : Br->Offer.Only;
 	// The right to match: a rival's offer in the category on the table, and the incumbent matches its money.
 	std::string Rival;
 	for (const Contract& X : K.B.Contracts)
@@ -2238,7 +2418,9 @@ void Renewal(Ctx& K, size_t I, double At)
 	const std::string Body = Old.Legacy ? BodyFor(Made, "renewal:legacy", {{"Until", DateWords(Old.Until)}})
 		: !Rival.empty()               ? BodyFor(Made, "renewal:match", {{"Until", DateWords(Old.Until)}, {"Rival", Rival}})
 									   : BodyFor(Made, "renewal", {{"Until", DateWords(Old.Until)}});
-	Post(K.L, At, Made, LetterRenewal, "renewal", Body);
+	// The renewal letter explains a clause the old term didn't have (§5.7).
+	Post(K.L, At, Made, LetterRenewal, "renewal",
+		Joined({Body, Old.T.Only == Made.T.Only ? std::string() : sponsor_clause_detail::ClauseLine(Made, "only:renewal")}));
 }
 
 /** A counter's or a raise's answer. */
@@ -2390,7 +2572,7 @@ double Earliest(const Ctx& K, double Prev)
 	}
 	for (const Brand& Br : Brands())
 	{
-		if (Br.Needs.Open)
+		if (sponsor_offer_detail::Opens(Br, K.B, K.L))
 		{
 			Next = std::min(Next, sponsor_offer_detail::NextLook(Br, Prev, K.Seed));
 		}
@@ -2466,7 +2648,7 @@ void ProcessAt(Ctx& K, double Prev, double At)
 	}
 	for (const Brand& Br : Brands())
 	{
-		if (!Br.Needs.Open)
+		if (!sponsor_offer_detail::Opens(Br, K.B, K.L))
 		{
 			continue;
 		}
@@ -2511,7 +2693,11 @@ void Prune(Book& B, const life::State& L, double World)
 	{
 		const std::vector<std::string> F = Split(*It, '|');
 		bool Keep = F.size() >= 2;
-		if (Keep && EntryKey(F[0]))
+		if (Keep && F[0] == "sitetitle")
+		{
+			Keep = true; // a series title won on a rival site (Team RunItTwice's door): a career's, not a contract's
+		}
+		else if (Keep && EntryKey(F[0]))
 		{
 			Keep = std::any_of(L.LiveEntries.begin(), L.LiveEntries.end(), [&F](const life::LiveEntry& E) { return E.Id == F[1]; });
 		}
@@ -3061,7 +3247,9 @@ void Conduct(Book& B, life::State& L, Chips& Bankroll, Breach Why, double World)
 		{
 			continue;
 		}
-		const bool Site = Br->Cat == Category::Site || Br->Cat == Category::Training;
+		// A RiverLine restriction is RiverLine's (update 2 §5.5, §1.9 #12): it ends the training deals and Team RiverLine,
+		// never a rival site's own team.
+		const bool Site = sponsor_standing_detail::RiverLineAligned(*Br);
 		const bool Hit = Why == Breach::PickedUp ? C.T.ConductClause : Site;
 		if (!Hit)
 		{
@@ -3111,11 +3299,74 @@ void Conduct(Book& B, life::State& L, Chips& Bankroll, Breach Why, double World)
 	}
 	else
 	{
-		for (const Category Cat : {Category::Site, Category::Training})
+		// The training sites stay away a year, and so does every poker-site deal aligned with RiverLine (by brand: the
+		// rival sites' own teams can still call).
+		const std::string Key = "cat:" + std::to_string(static_cast<int>(Category::Training));
+		B.Cooldown[Key] = std::max(B.Cooldown[Key], World + RestrictedDays * DayMinutes);
+		for (const Brand& Br : Brands())
 		{
-			const std::string Key = "cat:" + std::to_string(static_cast<int>(Cat));
-			B.Cooldown[Key] = std::max(B.Cooldown[Key], World + RestrictedDays * DayMinutes);
+			if (Br.Cat == Category::Site && sponsor_standing_detail::RiverLineAligned(Br))
+			{
+				B.Cooldown[Br.Id] = std::max(B.Cooldown[Br.Id], World + RestrictedDays * DayMinutes);
+			}
 		}
+	}
+}
+
+// ------------------------------------------------------------------ the "plays only on" clause (update 2 §5.7)
+
+bool WouldStrike(const Book& B, int Site, bool Streaming, bool Video)
+{
+	// The warning before the press (a rival's register button, Studio's PUBLISH): a running deal whose clause the play
+	// would break. A renewal signed ahead isn't running yet (its prior term is); the strike itself is NoteSitePlay's, at
+	// most one a day, so a second table the same day breaks the clause without a second strike.
+	(void)Video; // only= covers the play, the stream and the videos alike
+	for (const Contract& C : B.Contracts)
+	{
+		if (!Live(C) || !sponsor_clause_detail::Breaks(C, Site, Streaming))
+		{
+			continue;
+		}
+		const Contract* Prior = C.Renews.empty() ? nullptr : Find(B, C.Renews);
+		if (Prior && Live(*Prior) && Prior->Until <= C.Since + 1e-6)
+		{
+			continue; // signed ahead: the old term is the one running
+		}
+		return true;
+	}
+	return false;
+}
+
+void NoteSitePlay(Book& B, life::State& L, int Site, double World, bool Streaming, bool Video)
+{
+	using namespace sponsor_step_detail;
+	(void)Video;
+	for (size_t I = 0; I < B.Contracts.size(); ++I)
+	{
+		Contract& C = B.Contracts[I];
+		if (!RunningAt(C, World) || !sponsor_clause_detail::Breaks(C, Site, Streaming) || !B.PaidKeys.insert(sponsor_clause_detail::StrikeKey(C, World)).second)
+		{
+			continue;
+		}
+		// A strike (at most one a day), as a month short would be one: two in a term end it. Its cure is two weeks with no
+		// more play elsewhere; nothing is held, since nothing was missed.
+		B.NextAt = 0.0;
+		++C.Strikes;
+		B.Strikes.push_back(World);
+		const std::map<std::string, std::string> Vars = {{"Home", sponsor_clause_detail::HomeOf(C)}, {"Site", sponsor_clause_detail::SiteNameOf(Site)}};
+		if (C.Strikes >= 2)
+		{
+			Post(L, World, C, LetterEnded, "ended", Joined({BodyFor(C, "ended:cause"), ReturnedLine(B, C, World, true), PatchLine(L, C)}));
+			EndContract(B, L, I, End::ForCause, World);
+			continue;
+		}
+		C.CureFrom = World;
+		C.CureUntil = World + static_cast<double>(std::max(1, C.T.CureDays)) * DayMinutes;
+		C.Short = Tally();
+		C.Cure = Tally();
+		C.CureWorkoutBase = L.Fit.Workouts;
+		Post(L, World, C, LetterStrike, "strike:only", BodyFor(C, "strike:only", {{"Home", Vars.at("Home")}, {"Site", Vars.at("Site")}, {"Cure", DateWords(C.CureUntil)}}),
+			Vars);
 	}
 }
 
@@ -3409,6 +3660,15 @@ Card CardOf(const Contract& C, const life::State& L, const kast::Channel& Ch, do
 		K.Fine.push_back("A month short is a strike: half held, " + std::to_string(T.CureDays) + " days to make it up");
 		K.Fine.push_back("Two strikes in a term end it");
 	}
+	// Update 2 (§5.7): the "plays only on" clause.
+	if (!T.Only.empty())
+	{
+		K.Fine.push_back("Plays only on " + sponsor_clause_detail::SiteName(T.Only) + ": a table, a stream or a video on another site is a strike");
+	}
+	else if (!T.OnlyStream.empty())
+	{
+		K.Fine.push_back("Streams only on " + sponsor_clause_detail::SiteName(T.OnlyStream) + ": a stream from another site is a strike");
+	}
 	if (T.ConductClause)
 	{
 		K.Fine.push_back(C.Brand == "luckypenny" ? "Conduct: the owner forgives one pickup" : "Conduct: a pickup ends it");
@@ -3491,6 +3751,12 @@ std::string TermsFields(const Terms& T)
 	{
 		Out += "\tperk=" + std::to_string(static_cast<int>(Pk.Kind)) + "." + Pk.Id + "." + std::to_string(Pk.Count) + "." + std::to_string(Pk.Cents) + "." + std::to_string(Pk.EveryDays);
 	}
+	// Update 2 (§6.4): the clause and the P1 terms, each only when set, so a book without them writes back as it was read.
+	Out += T.Only.empty() ? std::string() : "\tonly=" + T.Only;
+	Out += T.OnlyStream.empty() ? std::string() : "\tonlystream=" + T.OnlyStream;
+	Out += T.OnSite.empty() ? std::string() : "\tonsite=" + T.OnSite;
+	Out += T.VideoIntCents == 0 ? std::string() : "\tvi=" + std::to_string(T.VideoIntCents);
+	Out += T.VideoInts == 0 ? std::string() : "\tvia=" + std::to_string(T.VideoInts);
 	return Out;
 }
 
@@ -3565,6 +3831,11 @@ void ReadTerms(const std::vector<std::string>& F, size_t From, Terms& T)
 				T.Perks.push_back(Pk);
 			}
 		}
+		else if (K == "only") T.Only = V;
+		else if (K == "onlystream") T.OnlyStream = V;
+		else if (K == "onsite") T.OnSite = V;
+		else if (K == "vi") T.VideoIntCents = N;
+		else if (K == "via") T.VideoInts = static_cast<int>(N);
 	}
 }
 
@@ -3828,7 +4099,8 @@ void AfterParse(SaveData& D)
 		C.OfferedAt = World;
 		C.ExpiresAt = World + OfferDays * DayMinutes;
 		B.Contracts.push_back(C);
-		Post(D.Life, World, B.Contracts.back(), LetterOffer, "migrated", BodyFor(B.Contracts.back(), "migrated"));
+		Post(D.Life, World, B.Contracts.back(), LetterOffer, "migrated",
+			Joined({BodyFor(B.Contracts.back(), "migrated"), sponsor_clause_detail::ClauseLine(B.Contracts.back(), "only:offer")}));
 	}
 	// 3. A declined one: sixty days, not never.
 	for (const std::string& Id : Ch.Declined)

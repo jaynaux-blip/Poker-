@@ -122,6 +122,7 @@ struct VideoUi
 	size_t ViewVideos = 0;
 	Chips ViewBalance = 0;
 	std::string Confirm; // the video whose Delete was pressed once
+	std::string StrikeArmed; // update 2 §5.7: the pick whose PUBLISH has warned of a clause strike once
 	double ConfirmAt = -100.0;
 	// The bell.
 	bool BellOpen = false;
@@ -360,7 +361,7 @@ std::string RrFact(const video::Candidate& C, const std::vector<video::Candidate
 		return Line.empty() ? std::string("A story from your own life") : Line;
 	}
 	// Dee's game is told as storytime (§4.4): nobody named, and no "Dee's" either.
-	const std::string Out = C.Storytime ? std::string("A back-room game") : C.Event.empty() ? std::string("RiverLine") : C.Event;
+	const std::string Out = C.Storytime ? std::string("A back-room game") : C.Event.empty() ? rlsites_detail::SitesShortName(static_cast<net::SiteId>(std::clamp(C.Site, 0, static_cast<int>(net::SiteId::Count) - 1))) : C.Event;
 	if (RrEventKind(C.K))
 	{
 		if (C.PlaceSoFar > 0)
@@ -1056,8 +1057,32 @@ void RrEditor(RrFrame& F, const std::vector<video::Candidate>& Open)
 	F.UI.Text("It goes up at " + net::TimeLabel(F.World + Minutes) + ".", X, 824.0f, Ts(13.0f, 600, RrMuted));
 	const std::vector<std::string> Why = RrPublishWhy(F.S, Ch);
 	const Rect Btn{X + W - 220.0f, 776.0f, 220.0f, 56.0f};
-	if (RrButton(F, "rrpublish", Btn, "PUBLISH", Why.empty()))
+	// Update 2 (§5.7): a video of an online table (any site's) is a strike under a deal that plays only on another one. PUBLISH
+	// says so first, and the strike lands only on the second press.
+	std::string Strike;
+	std::string PickKey;
+	for (const std::string& Id : U.Pick)
 	{
+		PickKey += Id + "|";
+		const video::Candidate* Cand = RrFind(Open, Id);
+		if (Strike.empty() && Cand && (Cand->Source == 0 || Cand->Source == 3) && Cand->Site >= 0 && Cand->Site < static_cast<int>(net::SiteId::Count))
+		{
+			Strike = rlsites_detail::SitesClauseWarning(F.S, static_cast<net::SiteId>(Cand->Site), false, true);
+		}
+	}
+	const bool Armed = !Strike.empty() && U.StrikeArmed == PickKey;
+	if (!Strike.empty() && Why.empty())
+	{
+		F.UI.Text(Armed ? std::string(rlsites_detail::SitesPublishArmed) : Strike, X + W, 764.0f, Ts(14.0f, 800, RrWarn, Align::Right, Baseline::Alphabetic, false, W));
+	}
+	const bool Pressed = RrButton(F, "rrpublish", Btn, Armed ? std::string("PUBLISH ANYWAY") : std::string("PUBLISH"), Why.empty());
+	if (Pressed && !Strike.empty() && !Armed)
+	{
+		U.StrikeArmed = PickKey; // the first press only warns
+	}
+	else if (Pressed)
+	{
+		U.StrikeArmed.clear();
 		const std::string Refused = F.S.Publish(Ch);
 		if (Refused.empty())
 		{

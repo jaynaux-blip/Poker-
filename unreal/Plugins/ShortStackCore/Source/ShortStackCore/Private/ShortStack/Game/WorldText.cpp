@@ -3,6 +3,7 @@
 
 #include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Sites.h"
 #include "WorldSim.h"
 
 #include <algorithm>
@@ -123,6 +124,30 @@ std::string Prize(Chips C)
 	return C >= 1000000 ? net::MoneyShort(C) : Money(C);
 }
 
+/** A site's everyday name (update 2 §5.3): "Ignite" for Ignite Poker; RunItTwice and RiverLine as they are. */
+std::string TextSiteShort(net::SiteId S)
+{
+	std::string Name = net::Def(S).Name;
+	const std::string Tail = " Poker";
+	if (Name.size() > Tail.size() && Name.compare(Name.size() - Tail.size(), Tail.size(), Tail) == 0)
+	{
+		Name.resize(Name.size() - Tail.size());
+	}
+	return Name;
+}
+
+/** "Ignite's", "RunItTwice's". */
+std::string TextSitePossessive(net::SiteId S)
+{
+	return TextSiteShort(S) + "'s";
+}
+
+/** Whole dollars, as the news writes a guarantee or an overlay: "$3,100". */
+std::string TextWholeDollars(Chips C)
+{
+	return "$" + Grouped(static_cast<int64_t>(std::llround(static_cast<double>(C) / 100.0)));
+}
+
 /** How they arrived, in a sentence (the same every time for the same person). */
 std::string ArrivalText(const World& W, const Npc& N)
 {
@@ -139,6 +164,12 @@ std::string ArrivalText(const World& W, const Npc& N)
 	{
 		static const char* const Lines[4] = {"Downloaded RiverLine on a slow night and never uninstalled it.", "Signed up for the freerolls. Stayed for everything else.",
 			"A friend's referral link, a ten-dollar deposit, and here they are.", "Watched one hand over a roommate's shoulder. Opened an account that night."};
+		if (H % 4 == 0 && !N.Path.empty() && N.Path.front().Kind == StepKind::Joined && N.Path.front().What == net::Def(net::SiteId::Ignite).Name)
+		{
+			// One of Ignite's own arrivals (update 2 §5.9): they found the game there, not on RiverLine. (Their journey's first
+			// step says so for good; where they play now can change: a team's "plays only on" leaves one site's bit alone.)
+			return "Downloaded " + net::Def(net::SiteId::Ignite).Name + " on a slow night and never uninstalled it.";
+		}
 		return Lines[H % 4];
 	}
 	case Arrival::CameOfAge: return "Turned " + std::to_string(std::max(18, Y - N.Born)) + " in " + Months[M - 1] + " and registered the same night.";
@@ -178,7 +209,7 @@ std::string StepText(const Step& S)
 	const std::string Paid = S.Amount > 0 ? " (" + Prize(S.Amount) + ")" : std::string();
 	switch (S.Kind)
 	{
-	case StepKind::Joined: return "Joined RiverLine.";
+	case StepKind::Joined: return S.What.empty() ? std::string("Joined RiverLine.") : "Joined " + S.What + "."; // (Ignite's own arrivals name it)
 	case StepKind::FirstEvent: return "First tournament: " + Place + Of + " " + In(S.What) + Paid + ".";
 	case StepKind::FirstCash:
 		// Out of the money but a head or two collected: a bounty, not a cash.
@@ -369,6 +400,43 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		Tag = "BOARD REPORT";
 		return true;
 	}
+	// The rival sites' own news (update 2 §5.9, §5.10): their events carry the site in their flags, so only that site's News
+	// shows them (RiverLine's never names a rival).
+	const net::SiteId Site = FlagSiteOf(E.Flags);
+	if (E.Kind == EventKind::SiteLaunched)
+	{
+		const net::SiteId Launched = net::SiteOf(E.What + ".");
+		const net::SiteDef& Info = net::Def(Launched);
+		if (Launched == net::SiteId::RiverLine || Info.Id != Launched)
+		{
+			return false;
+		}
+		const bool OnTime = sim::DayAt(E.At) == Info.LaunchDay;
+		if (Launched == net::SiteId::RunItTwice)
+		{
+			Title = Info.Name + " opens its new lobby";
+			Body = (Info.Tagline.empty() ? std::string() : Info.Tagline + " ") + "Its points season starts today.";
+		}
+		else
+		{
+			Title = Info.Name + " opens its lobby";
+			// (Ignite's launch week runs bigger guarantees on its own dates; a world that met it later just sees the doors open.)
+			Body = (Info.Tagline.empty() ? std::string() : Info.Tagline + " ") + (OnTime ? "Launch week runs bigger guarantees." : "The lobby's open and the tables are filling.");
+		}
+		Tag = "LAUNCH";
+		return true;
+	}
+	if (E.Kind == EventKind::SiteOverlay)
+	{
+		if (Site == net::SiteId::RiverLine || E.Amount <= 0)
+		{
+			return false;
+		}
+		Title = TextSitePossessive(Site) + " " + E.What + " posts a " + TextWholeDollars(E.Amount) + " overlay";
+		Body = Grouped(E.Value) + " entries didn't cover the guarantee. The site paid the other " + TextWholeDollars(E.Amount) + ".";
+		Tag = "OVERLAY";
+		return true;
+	}
 	const Npc* N = Get(E.Npc);
 	if (!N)
 	{
@@ -489,6 +557,25 @@ bool World::Headline(const WorldEvent& E, std::string& Title, std::string& Body,
 		}
 		Tag = "SPONSOR";
 		return true;
+	case EventKind::SignedSiteTeam:
+		// A rival's team (update 2 §5.9): "Ana Ribeiro joins Team RunItTwice".
+		Title = Who + " joins " + E.What;
+		Body = TextSitePossessive(Site) + " newest sponsored pro." + (Fresh ? " Signed on results." : "");
+		Tag = "SPONSOR";
+		return Site != net::SiteId::RiverLine;
+	case EventKind::JoinedSite:
+	{
+		// A regular the news knows opens an account on a rival.
+		const net::SiteId Account = net::SiteOf(E.What + ".");
+		if (!Known || Account == net::SiteId::RiverLine)
+		{
+			return false;
+		}
+		Title = Who + " opens an account on " + net::Def(Account).Name;
+		Body = Account == net::SiteId::RunItTwice ? "Another regular takes on the tougher fields." : "Another familiar name in the lobby.";
+		Tag = "MOVES";
+		return true;
+	}
 	case EventKind::Milestone:
 		if (E.What == "career-won")
 		{
@@ -637,6 +724,20 @@ std::string World::Describe(int Id) const
 		O << "  sponsor " << N.Sponsor;
 	}
 	O << "\n  career " << Money(N.CareerWon()) << "  bracelets " << N.Bracelets << "  rings " << N.Rings << "  series titles " << N.Titles << "  majors " << N.Majors << "\n";
+	// The sites they play, and their record on each rival (update 2 §5.9).
+	O << "  sites:";
+	for (int S = 0; S < static_cast<int>(net::SiteId::Count); ++S)
+	{
+		if (((N.Sites >> S) & 1) != 0)
+		{
+			O << " " << net::KeyOf(static_cast<net::SiteId>(S));
+			if (const SiteRecord* R = SiteRecordOf(static_cast<net::SiteId>(S), N.Id))
+			{
+				O << " (" << R->Events << " events, " << Fixed(R->Points, 0) << " pts, " << Money(R->Won) << " this season, " << Money(R->Lifetime) << " all time)";
+			}
+		}
+	}
+	O << "\n";
 	{
 		const Tracker& T = N.Stats;
 		char Buf[256];
@@ -888,6 +989,33 @@ std::string World::Report() const
 		O << "  badges: verified " << Verified << ", cards " << Cards[1] << "/" << Cards[2] << "/" << Cards[3] << " (last season " << Last[1] << "/" << Last[2] << "/" << Last[3]
 		  << "), club " << Club[1] << "/" << Club[2] << "/" << Club[3] << ", on the wall " << Wall << ", bracelet holders " << Bracelets << ", ring holders " << Rings
 		  << ", Team RiverLine " << Team << ", brand-sponsored " << Branded << ", Hall of Fame " << Hall << "\n";
+	}
+	if (!SiteLaunches.empty())
+	{
+		// The rival sites (update 2 §5.9): who plays where, each one's records and its team.
+		O << "  sites:";
+		for (const auto& It : SiteLaunches)
+		{
+			const net::SiteId S = It.first;
+			int Members = 0;
+			int Only = 0;
+			int Team = 0;
+			const std::string TeamName = net::Def(S).Id == S ? net::Def(S).TeamName : std::string();
+			for (const Npc& N : Roster)
+			{
+				if (!N.Playing() || ((N.Sites >> static_cast<int>(S)) & 1) == 0)
+				{
+					continue;
+				}
+				++Members;
+				Only += (N.Sites & 1) == 0 ? 1 : 0;
+				Team += !TeamName.empty() && N.Sponsor == TeamName ? 1 : 0;
+			}
+			const auto Records = SiteRecords.find(S);
+			O << " " << net::KeyOf(S) << " opens " << net::DateLabel(sim::DayAt(It.second)) << " " << YearOf(sim::DayAt(It.second)) << ": " << Members << " playing (" << Only
+			  << " there only), " << (Records == SiteRecords.end() ? 0 : Records->second.size()) << " with a record, team " << Team << ";";
+		}
+		O << "\n";
 	}
 	return O.str();
 }

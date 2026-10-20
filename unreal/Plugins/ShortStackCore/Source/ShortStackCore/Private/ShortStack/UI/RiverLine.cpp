@@ -10,6 +10,7 @@
 #include "ShortStack/Structure.h"
 #include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/BadgeArt.h"
+#include "ShortStack/UI/SiteArt.h"
 #include "RiverLineShared.h"
 
 #include <algorithm>
@@ -34,11 +35,11 @@ Color GradeColor(Grade G)
 {
 	switch (G)
 	{
-	case Grade::Best: return Hex(0x3ecf6e);
-	case Grade::Good: return Hex(0x27d3c3);
-	case Grade::Inaccuracy: return Hex(0xf2c14e);
-	case Grade::Mistake: return Hex(0xf28a3a);
-	default: return Hex(0xef4d5a);
+	case Grade::Best: return pal::Green;
+	case Grade::Good: return pal::Accent;
+	case Grade::Inaccuracy: return pal::Gold;
+	case Grade::Mistake: return pal::Orange;
+	default: return pal::Red;
 	}
 }
 
@@ -193,7 +194,7 @@ void BadgeToasts(Ui& UI, Canvas& C, const Session& S, std::vector<BadgeCheer>& L
 		const float A0 = C.GetAlpha();
 		C.SetAlpha(A0 * In * Out);
 		C.GlowRoundRect({R.X, R.Y + 6.0f, R.W, R.H}, 12.0f, Rgba(0, 0, 0, 0.5f), 16.0f);
-		UI.RRect(R, 12.0f, Paint::Linear({R.X, 0.0f}, {R.X + R.W, 0.0f}, Mix(Hex(0x0f1a2b), Col, 0.12f), Hex(0x0d1626)), rlnet_detail::NetA(Col, 0.55f));
+		UI.RRect(R, 12.0f, Paint::Linear({R.X, 0.0f}, {R.X + R.W, 0.0f}, Mix(rlsites_detail::SitesTone(0x0f1a2b), Col, 0.12f), rlsites_detail::SitesTone(0x0d1626)), rlnet_detail::NetA(Col, 0.55f));
 		UI.RRect({R.X, R.Y, 5.0f, R.H}, 2.5f, Col);
 		badgeart::Draw(C, List[I].B, R.X + 38.0f, R.Y + H / 2.0f, 32.0f, Now);
 		rlnet_detail::NetSpaced(C, "BADGE EARNED", R.X + 68.0f, R.Y + 24.0f, 10.0f, 800, pal::Muted, 1.2f);
@@ -222,6 +223,7 @@ RiverLine::~RiverLine()
 	backing_detail::Forget(UI);
 	rlauto_detail::ForgetAuto(this);
 	rlvideo_detail::ForgetVideo(this);
+	rlsites_detail::ForgetSites(this);
 	BadgeCheers().erase(this);
 }
 
@@ -234,7 +236,14 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	NetFrame(Now);
 	rlnet_detail::NetTipOf(this).Up = false;
 	C->Save();
-	C->FillRect({0.0f, 0.0f, RlW, RlH}, Paint::Linear({0.0f, 0.0f}, {0.0f, RlH}, pal::Bg2, pal::Bg));
+	// Update 2 (§1.8, §5.11): the poker client wears the colours of the site in front (the lobby's site, the table in
+	// front's, a result's event's); RiverLine's own are pal::'s values, so at home nothing changes. The taskbar, the toasts
+	// and the other apps stay outside the scope.
+	const net::SiteId Wears = AppShown == App::RiverLine ? rlsites_detail::SitesClient(*this, S) : net::SiteId::RiverLine;
+	{
+		const SkinScope Ground(rlsites_detail::SitesSkin(Wears));
+		C->FillRect({0.0f, 0.0f, RlW, RlH}, Paint::Linear({0.0f, 0.0f}, {0.0f, RlH}, pal::Bg2, pal::Bg));
+	}
 	// While the clock races (a shift, a run, sleep) or a result is up, the screen underneath takes no input.
 	const bool Modal = S.TimeSkip.Active || S.HasOutcome;
 	const Pointer Real = UI.Ptr;
@@ -245,8 +254,18 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 		UI.Ptr.Wheel = 0.0f;
 		UI.Ptr.Active = false;
 	}
+	// The poker button's list of sites is up (over the screen's foot): what's under it takes no input there.
+	const bool UnderMenu = !Modal && rlsites_detail::SitesMenuOpen(this) && UI.Hover(rlsites_detail::SitesMenuRect(S));
+	if (UnderMenu)
+	{
+		UI.Ptr.Pressed = false;
+		UI.Ptr.Released = false;
+		UI.Ptr.Wheel = 0.0f;
+		UI.Ptr.Active = false;
+	}
 	if (AppShown == App::RiverLine)
 	{
+		const SkinScope Client(rlsites_detail::SitesSkin(Wears));
 		if (S.CurrentScreen != Screen::Table && rlauto_detail::AutoPanelOpen(this))
 		{
 			rlauto_detail::AutoClosePanel(this); // the autoplay panel belongs to the tables (update 2 §2.6.1)
@@ -343,6 +362,10 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 		}
 	}
 	BadgeToasts(UI, *C, S, Cheering, AppShown == App::RiverLine, Now);
+	if (UnderMenu)
+	{
+		UI.Ptr = Real; // the list itself (drawn with the taskbar) takes the pointer
+	}
 	Taskbar({0.0f, RlH - 38.0f, RlW, 38.0f}, Now);
 	if (SleepOpen)
 	{
@@ -480,9 +503,18 @@ void RiverLine::Logo(float X, float Y, float Scale)
 
 void RiverLine::TopBar(double Now)
 {
-	C->FillRect({0.0f, 0.0f, RlW, RlTop}, Hex(0x08101b));
+	// The site in front's logo and its own balance (update 2 §5.11: a rival's is its wallet; RiverLine's the bank).
+	const net::SiteId Site = rlsites_detail::SitesClient(*this, S);
+	C->FillRect({0.0f, 0.0f, RlW, RlTop}, rlsites_detail::SitesTone(0x08101b));
 	C->FillRect({0.0f, RlTop - 1.0f, RlW, 1.0f}, pal::Line);
-	Logo(24.0f, 16.0f, 1.0f);
+	if (Site == net::SiteId::RiverLine)
+	{
+		Logo(24.0f, 16.0f, 1.0f);
+	}
+	else
+	{
+		siteart::Logo(*C, {24.0f, 14.0f, 214.0f, 36.0f}, Site);
+	}
 	if (S.CurrentScreen != Screen::Boot)
 	{
 		NavTabs(Now);
@@ -490,9 +522,9 @@ void RiverLine::TopBar(double Now)
 	// Balance and clock.
 	UI.Text(ClockString(S.ClockMinutes()), RlW - 24.0f, 34.0f, Ts(17.0f, 700, pal::Ink, Align::Right, Baseline::Alphabetic, true));
 	UI.Text(std::string(net::WeekdayName(net::DayOf(World))) + ", " + net::DateLabel(net::DayOf(World)), RlW - 24.0f, 52.0f, Ts(12.0f, 600, pal::Muted, Align::Right));
-	const std::string Bal = "Balance " + Money(S.BankrollCents);
+	const std::string Bal = "Balance " + Money(rlsites_detail::SitesBalance(S, Site));
 	const float Bw = UI.Measure(Bal, 17.0f, 700) + 28.0f;
-	UI.RRect({RlW - 140.0f - Bw, 16.0f, Bw, 32.0f}, 16.0f, Hex(0x10213a), pal::Line);
+	UI.RRect({RlW - 140.0f - Bw, 16.0f, Bw, 32.0f}, 16.0f, rlsites_detail::SitesTone(0x10213a), pal::Line);
 	UI.Text(Bal, RlW - 140.0f - Bw / 2.0f, 38.0f, Ts(17.0f, 700, pal::Gold, Align::Center));
 	if (S.Streaming())
 	{
@@ -526,7 +558,7 @@ void RiverLine::DrawCursor()
 	C->Translate(P.X, P.Y);
 	if (UI.CursorIsPointer)
 	{
-		C->FillCircle(0.0f, 0.0f, 9.0f, Rgba(39, 211, 195, 0.25f));
+		C->FillCircle(0.0f, 0.0f, 9.0f, rlnet_detail::NetA(pal::Accent, 0.25f));
 		C->StrokeArc(0.0f, 0.0f, 9.0f, 0.0f, 2.0f * Pi, Hex(0xffffff), 2.0f);
 	}
 	else
@@ -556,7 +588,7 @@ void RiverLine::Boot(double Now)
 	}
 	C->SetAlpha(Prev);
 	const Rect Card{RlW / 2.0f - 280.0f, 200.0f, 560.0f, 420.0f};
-	UI.RRect(Card, 18.0f, Rgba(17, 28, 46, 0.92f), pal::Line);
+	UI.RRect(Card, 18.0f, rlnet_detail::NetA(pal::Panel, 0.92f), pal::Line);
 	Logo(Card.X + 150.0f, Card.Y + 50.0f, 1.6f);
 	UI.Text("Welcome back, " + S.HeroName, RlW / 2.0f, Card.Y + 175.0f, Ts(26.0f, 700, pal::Ink, Align::Center));
 	UI.Text("Account balance", RlW / 2.0f, Card.Y + 225.0f, Ts(16.0f, 500, pal::Muted, Align::Center));
@@ -564,7 +596,7 @@ void RiverLine::Boot(double Now)
 	ButtonOpts Login;
 	Login.Kind = ButtonKind::Primary;
 	Login.Size = 24.0f;
-	if (UI.Button("login", {Card.X + 60.0f, Card.Y + 320.0f, Card.W - 120.0f, 64.0f}, "Log in", Login))
+	if (rlsites_detail::SitesButton(UI, *C, "login", {Card.X + 60.0f, Card.Y + 320.0f, Card.W - 120.0f, 64.0f}, "Log in", Login))
 	{
 		S.CurrentScreen = Screen::Lobby;
 		S.OnBoot();
@@ -654,11 +686,20 @@ void RiverLine::Table(double Now)
 
 	// Felt and rail.
 	C->FillEllipse(TableCx, TableCy + 10.0f, TableRx + 34.0f, TableRy + 34.0f, Rgba(0, 0, 0, 0.5f));
-	C->FillEllipse(TableCx, TableCy, TableRx + 30.0f, TableRy + 30.0f, Paint::Linear({0.0f, TableCy - TableRy}, {0.0f, TableCy + TableRy}, Hex(0x2a3342), Hex(0x10151d)));
-	C->FillEllipse(TableCx, TableCy, TableRx, TableRy, Paint::Radial({TableCx, TableCy - 40.0f}, 30.0f, {TableCx, TableCy}, TableRx, Hex(0x15875f), 0.7f, pal::Felt, pal::FeltDark));
+	C->FillEllipse(TableCx, TableCy, TableRx + 30.0f, TableRy + 30.0f, Paint::Linear({0.0f, TableCy - TableRy}, {0.0f, TableCy + TableRy}, rlsites_detail::SitesTone(0x2a3342), rlsites_detail::SitesTone(0x10151d)));
+	C->FillEllipse(TableCx, TableCy, TableRx, TableRy, Paint::Radial({TableCx, TableCy - 40.0f}, 30.0f, {TableCx, TableCy}, TableRx, rlsites_detail::SitesFeltLight(), 0.7f, pal::Felt, pal::FeltDark));
 	C->StrokeEllipse(TableCx, TableCy, TableRx - 40.0f, TableRy - 34.0f, Rgba(255, 255, 255, 0.08f), 2.0f);
 	C->SetAlpha(0.14f);
-	Logo(TableCx - 95.0f, TableCy + 88.0f, 1.25f);
+	// The site's own mark on its felt (update 2 §5.11).
+	const net::SiteId Site = rlsites_detail::SitesOfTable(S);
+	if (Site == net::SiteId::RiverLine)
+	{
+		Logo(TableCx - 95.0f, TableCy + 88.0f, 1.25f);
+	}
+	else
+	{
+		siteart::Logo(*C, {TableCx - 125.0f, TableCy + 92.0f, 250.0f, 42.0f}, Site);
+	}
 	C->SetAlpha(1.0f);
 
 	// Pot and board: the stack is what's been gathered in; the label counts the bets out in front too.
@@ -915,10 +956,10 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 	}
 	if (Seat.Winner && HandOver)
 	{
-		C->GlowRoundRect(Plate, 14.0f, Rgba(242, 193, 78, 0.9f), 24.0f);
+		C->GlowRoundRect(Plate, 14.0f, rlnet_detail::NetA(pal::Gold, 0.9f), 24.0f);
 		UI.RRect(Plate, 14.0f, Hex(0x2d2410));
 	}
-	const Paint PlateBg = Paint::Linear({0.0f, Plate.Y}, {0.0f, Plate.Y + Plate.H}, IsHero ? Hex(0x1b3552) : Hex(0x1a2536), IsHero ? Hex(0x10223a) : Hex(0x0f1726));
+	const Paint PlateBg = Paint::Linear({0.0f, Plate.Y}, {0.0f, Plate.Y + Plate.H}, IsHero ? rlsites_detail::SitesTone(0x1b3552) : rlsites_detail::SitesTone(0x1a2536), IsHero ? rlsites_detail::SitesTone(0x10223a) : rlsites_detail::SitesTone(0x0f1726));
 	const Color Edge = Seat.IsRival ? Hex(0xb8324a) : Seat.Winner && HandOver ? pal::Gold : Rgba(255, 255, 255, 0.1f);
 	UI.RRect(Plate, 14.0f, PlateBg, Edge, Seat.IsRival ? 2.0f : 1.0f);
 	// Avatar, with the country flag pinned to it.
@@ -926,7 +967,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 	if (IsHero)
 	{
 		Pic.Frame = AvatarFrame::Neon;
-		Pic.Rim = 0x27d3c3;
+		Pic.Rim = rlnet_detail::NetRgb(pal::Accent);
 	}
 	else if (Seat.Pro)
 	{
@@ -937,7 +978,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 	if (!Seat.Country.empty())
 	{
 		const Rect Fl{Plate.X + 40.0f, P.Y + 10.0f, 15.0f, 10.0f};
-		C->FillRoundRect({Fl.X - 2.0f, Fl.Y - 2.0f, Fl.W + 4.0f, Fl.H + 4.0f}, 3.5f, Hex(0x0b1220));
+		C->FillRoundRect({Fl.X - 2.0f, Fl.Y - 2.0f, Fl.W + 4.0f, Fl.H + 4.0f}, 3.5f, rlsites_detail::SitesTone(0x0b1220));
 		rlnet_detail::NetFlag(*C, Seat.Country, Fl.X, Fl.Y, Fl.W, Fl.H);
 	}
 	// Someone the world knows: their name opens their card.
@@ -966,7 +1007,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 		{
 			const float Gx = Plate.X + 46.0f;
 			const float Gy = P.Y - 16.0f;
-			C->FillCircle(Gx, Gy, 9.0f, Hex(0x0b1220));
+			C->FillCircle(Gx, Gy, 9.0f, rlsites_detail::SitesTone(0x0b1220));
 			badgeart::Draw(*C, Pin, Gx, Gy, 13.0f, Now);
 			if (Npc >= -1 && UI.Hover({Gx - 8.0f, Gy - 8.0f, 16.0f, 16.0f}))
 			{
@@ -1048,7 +1089,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 	{
 		const float Tw = UI.Measure(Seat.HandLabel, 13.0f, 700) + 16.0f;
 		UI.RRect({P.X - Tw / 2.0f, Plate.Y - 20.0f, Tw, 22.0f}, 11.0f, Seat.Winner ? pal::Gold : Rgba(0, 0, 0, 0.7f));
-		UI.Text(Seat.HandLabel, P.X, Plate.Y - 4.0f, Ts(13.0f, 700, Seat.Winner ? Hex(0x231704) : pal::Ink, Align::Center));
+		UI.Text(Seat.HandLabel, P.X, Plate.Y - 4.0f, Ts(13.0f, 700, Seat.Winner ? rlsites_detail::SitesOnGold() : pal::Ink, Align::Center));
 	}
 
 	// HUD.
@@ -1136,7 +1177,7 @@ void RiverLine::GradeBadges(double Now)
 		const double Alpha = std::min(1.0, Age * 5.0) * (1.0 - std::max(0.0, Age - 2.6) / 0.6);
 		const float Y = P.Y - 70.0f - static_cast<float>(I) * 6.0f - static_cast<float>(EaseOutCubic(Age * 2.0)) * 30.0f;
 		C->SetAlpha(static_cast<float>(std::max(0.0, Alpha)));
-		const TextStyle St = Ts(17.0f, 800, Hex(0x08101b), Align::Center, Baseline::Middle);
+		const TextStyle St = Ts(17.0f, 800, rlsites_detail::SitesTone(0x08101b), Align::Center, Baseline::Middle);
 		const std::string Name = GradeName(Bd.G.Result);
 		const float Wd = GradeLabel(Bd.G.Result, Name, 0.0f, 0.0f, St, false) + 28.0f;
 		const float X = P.X + 150.0f;
@@ -1234,7 +1275,7 @@ void RiverLine::Controls(double Now)
 		const std::string Label = IsAuto ? std::string("AUTO") : std::string(Paces[I].second);
 		const Ui::ClickState St = UI.Clickable("pace" + Label, R);
 		const bool Active = IsAuto ? Plan.On || rlauto_detail::AutoPanelOpen(this) : !Plan.On && S.CurrentPace == Paces[I].first;
-		UI.RRect(R, 9.0f, Active ? Hex(0x1f4d63) : St.Hover ? Hex(0x172a42) : pal::Panel, Active ? pal::Accent : pal::Line);
+		UI.RRect(R, 9.0f, Active ? rlsites_detail::SitesTone(0x1f4d63) : St.Hover ? rlsites_detail::SitesTone(0x172a42) : pal::Panel, Active ? pal::Accent : pal::Line);
 		UI.Text(Label, R.X + R.W / 2.0f, R.Y + 24.0f, Ts(15.0f, IsAuto ? 800 : 700, Active ? pal::Ink : pal::Muted, Align::Center));
 		if (!St.Clicked)
 		{
@@ -1260,7 +1301,7 @@ void RiverLine::Controls(double Now)
 	{
 		S.Hud = !S.Hud;
 	}
-	UI.RRect(HudR, 8.0f, S.Hud ? Hex(0x16354a) : pal::Panel, S.Hud ? pal::Accent : pal::Line);
+	UI.RRect(HudR, 8.0f, S.Hud ? rlsites_detail::SitesTone(0x16354a) : pal::Panel, S.Hud ? pal::Accent : pal::Line);
 	UI.Text(S.Hud ? "HUD ON" : "HUD OFF", HudR.X + HudR.W / 2.0f, HudR.Y + 21.0f, Ts(13.0f, 700, S.Hud ? pal::Ink : pal::Muted, Align::Center));
 	const Rect LeanR{164.0f, 918.0f, 148.0f, 30.0f};
 	if (UI.Clickable("lean", LeanR).Clicked)
@@ -1273,7 +1314,7 @@ void RiverLine::Controls(double Now)
 	// Composure meter.
 	const double Tilt = S.HeroTilt;
 	UI.Text("Composure", 24.0f, 812.0f, Ts(13.0f, 700, pal::Muted));
-	UI.RRect({112.0f, 802.0f, 170.0f, 10.0f}, 5.0f, Hex(0x0b1422), pal::Line);
+	UI.RRect({112.0f, 802.0f, 170.0f, 10.0f}, 5.0f, rlsites_detail::SitesTone(0x0b1422), pal::Line);
 	const float Comp = static_cast<float>(1.0 - Tilt);
 	UI.RRect({112.0f, 802.0f, 170.0f * Comp, 10.0f}, 5.0f, Comp > 0.6f ? pal::Green : Comp > 0.35f ? pal::Gold : pal::Red);
 	if (Tilt > 0.3 && !S.SitOutNext)
@@ -1281,7 +1322,7 @@ void RiverLine::Controls(double Now)
 		ButtonOpts O;
 		O.Kind = ButtonKind::Ghost;
 		O.Size = 13.0f;
-		if (UI.Button("sitout", {24.0f, 824.0f, 258.0f, 26.0f}, "Step away: sit out next hand", O))
+		if (rlsites_detail::SitesButton(UI, *C, "sitout", {24.0f, 824.0f, 258.0f, 26.0f}, "Step away: sit out next hand", O))
 		{
 			S.RequestSitOut();
 		}
@@ -1331,13 +1372,13 @@ void RiverLine::Controls(double Now)
 			ButtonOpts O;
 			O.Kind = P.RaiseTo == Val ? ButtonKind::Primary : ButtonKind::Secondary;
 			O.Size = Presets.size() > 5 ? 13.5f : 15.0f;
-			if (UI.Button("pre" + std::to_string(I), R, Presets[I].Label, O))
+			if (rlsites_detail::SitesButton(UI, *C, "pre" + std::to_string(I), R, Presets[I].Label, O))
 			{
 				P.RaiseTo = Val;
 			}
 		}
 		const Rect Box{Ax + 376.0f, 786.0f, Aw - 376.0f, 34.0f};
-		UI.RRect(Box, 8.0f, Hex(0x0b1422), pal::Line);
+		UI.RRect(Box, 8.0f, rlsites_detail::SitesTone(0x0b1422), pal::Line);
 		UI.Text(ChipsText(static_cast<double>(P.RaiseTo)), Box.X + Box.W - 12.0f, Box.Y + 24.0f, Ts(18.0f, 700, pal::Ink, Align::Right, Baseline::Alphabetic, true));
 		// The size as a player reads it: "2.2x", "67% POT", or big blinds. When "2.5x · 23.3 BB" won't clear the
 		// amount, the first half says it.
@@ -1364,7 +1405,7 @@ void RiverLine::Controls(double Now)
 	const Chips MaxRaise = P.MaxRaise;
 	const bool IsBet = P.IsBet;
 	const Chips PotNow = P.Pot;
-	if (UI.Button("fold", {Ax, By, Bw, 66.0f}, "Fold", FoldO))
+	if (rlsites_detail::SitesButton(UI, *C, "fold", {Ax, By, Bw, 66.0f}, "Fold", FoldO))
 	{
 		S.HeroAct(PlayerAction::Fold());
 	}
@@ -1380,7 +1421,7 @@ void RiverLine::Controls(double Now)
 	ButtonOpts CallO;
 	CallO.Hotkey = "C";
 	CallO.Sub = CanCheck ? std::string() : ChipsText(static_cast<double>(ToCall));
-	if (UI.Button("call", {Ax + Bw + 10.0f, By, Bw, 66.0f}, CallLabel, CallO) && S.HasPrompt)
+	if (rlsites_detail::SitesButton(UI, *C, "call", {Ax + Bw + 10.0f, By, Bw, 66.0f}, CallLabel, CallO) && S.HasPrompt)
 	{
 		S.HeroAct(CanCheck ? PlayerAction::Check() : PlayerAction::Call());
 	}
@@ -1391,7 +1432,7 @@ void RiverLine::Controls(double Now)
 		RaiseO.Kind = AllIn ? ButtonKind::Gold : ButtonKind::Primary;
 		RaiseO.Sub = ChipsText(static_cast<double>(RaiseTo));
 		RaiseO.Hotkey = "R";
-		if (UI.Button("raise", {Ax + (Bw + 10.0f) * 2.0f, By, Bw, 66.0f}, AllIn ? "All-in" : IsBet ? "Bet" : "Raise to", RaiseO) && S.HasPrompt)
+		if (rlsites_detail::SitesButton(UI, *C, "raise", {Ax + (Bw + 10.0f) * 2.0f, By, Bw, 66.0f}, AllIn ? "All-in" : IsBet ? "Bet" : "Raise to", RaiseO) && S.HasPrompt)
 		{
 			S.HeroAct(PlayerAction::RaiseTo(static_cast<double>(RaiseTo)));
 		}
@@ -1493,7 +1534,7 @@ void RiverLine::SidePanel(double Now)
 		StreamSide(Box, Now);
 		return;
 	}
-	UI.RRect(Box, 14.0f, Hex(0x0c1524), pal::Line);
+	UI.RRect(Box, 14.0f, rlsites_detail::SitesTone(0x0c1524), pal::Line);
 	C->PushClip(Box);
 	if (Shown == RightTab::Chat)
 	{
@@ -1502,7 +1543,7 @@ void RiverLine::SidePanel(double Now)
 		for (size_t Ii = S.Chat.size(); Ii-- > 0 && Y > Box.Y + 10.0f;)
 		{
 			const ChatLine& L = S.Chat[Ii];
-			const Color Col = L.Kind == ChatKind::Dealer ? Hex(0x8fa0bb) : L.Kind == ChatKind::System ? pal::Gold : L.Kind == ChatKind::Rival ? Hex(0xff8da0) : pal::Ink;
+			const Color Col = L.Kind == ChatKind::Dealer ? rlsites_detail::SitesTone(0x8fa0bb) : L.Kind == ChatKind::System ? pal::Gold : L.Kind == ChatKind::Rival ? Hex(0xff8da0) : pal::Ink;
 			const Color WhoCol = L.Kind == ChatKind::Rival ? Hex(0xff5c7a) : L.Kind == ChatKind::Dealer ? Hex(0x5f6f88) : pal::Accent;
 			const std::string Prefix = L.Who.empty() ? std::string() : L.Who + ": ";
 			const std::vector<std::string> Wrapped = WrapLines(Prefix + L.Text, Box.W - 28.0f, 14.0f);
@@ -1646,7 +1687,11 @@ void RiverLine::ResultsScreen(double Now)
 		UI.Text(Split, 60.0f, RlTop + 290.0f, Ts(17.0f, 700, Hex(0xf2a93b), Align::Left, Baseline::Alphabetic, false, 1060.0f));
 	}
 	UI.Text("Buy-in " + (R.BuyInCents ? Money(R.BuyInCents) : std::string("free")) + " \xC2\xB7 " + std::to_string(R.Hands) + " hands \xC2\xB7 biggest pot won " + ChipsText(static_cast<double>(R.BiggestPot)), 60.0f, RlTop + 292.0f + Shift, Ts(17.0f, 500, pal::Muted));
-	const float BalW = UI.Text("Balance now " + Money(S.BankrollCents), 60.0f, RlTop + 330.0f + Shift, Ts(20.0f, 700, pal::Ink));
+	// A rival's prize lands on its wallet, never the bank (update 2 §5.5): the balance shown is the one the result moved.
+	const net::SiteId PaidOn = rlsites_detail::SitesClient(*this, S);
+	const std::string BalNow = PaidOn == net::SiteId::RiverLine ? "Balance now " + Money(S.BankrollCents)
+															  : rlsites_detail::SitesShortName(PaidOn) + " balance now " + Money(rlsites_detail::SitesBalance(S, PaidOn));
+	const float BalW = UI.Text(BalNow, 60.0f, RlTop + 330.0f + Shift, Ts(20.0f, 700, pal::Ink));
 	if (R.SessionEvents > 1)
 	{
 		// Multi-tabling: the whole sitting, every buy-in against every prize.
@@ -1660,7 +1705,7 @@ void RiverLine::ResultsScreen(double Now)
 	const float Gy = RlTop + 200.0f;
 	const double Acc = R.AccuracyPct;
 	const double Shown = Acc * (Now >= S.ResultsAt ? EaseOutCubic((Now - S.ResultsAt) / 1.4) : 1.0);
-	C->StrokeArc(Gx, Gy, 110.0f, Pi * 0.75f, Pi * 2.25f, Hex(0x13213a), 18.0f, true);
+	C->StrokeArc(Gx, Gy, 110.0f, Pi * 0.75f, Pi * 2.25f, rlsites_detail::SitesTone(0x13213a), 18.0f, true);
 	if (Shown > 0.1)
 	{
 		const Color GaugeCol = Acc >= 85.0 ? pal::Green : Acc >= 70.0 ? pal::Accent : Acc >= 55.0 ? pal::Gold : pal::Red;
@@ -1745,7 +1790,7 @@ void RiverLine::ResultsScreen(double Now)
 
 	ButtonOpts Back;
 	Back.Kind = ButtonKind::Primary;
-	if (UI.Button("backlobby", {1120.0f, RlH - 120.0f, 420.0f, 70.0f}, "Back to lobby", Back))
+	if (rlsites_detail::SitesButton(UI, *C, "backlobby", {1120.0f, RlH - 120.0f, 420.0f, 70.0f}, "Back to lobby", Back))
 	{
 		S.LeaveResults();
 	}

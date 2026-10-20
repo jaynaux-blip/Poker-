@@ -11,6 +11,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/Game/Wardrobe.h"
@@ -442,14 +443,15 @@ void Offers()
 	sponsor::HeardOffer(Local.L.Sponsors, Local.L, Penny, 26.0 * Day);
 	sponsor::HeardOffer(Local.L.Sponsors, Local.L, Penny, 26.0 * Day + 5.0);
 	Expect(Local.Letters(sponsor::LetterHeard) == 1 && Local.L.Inbox.back().From == "Lucky Penny #212", "offers: heard in person, it's put in writing once");
-	// RunItTwice needs venues that aren't playable yet: it never looks on its own.
+	// Team RunItTwice looks only once the player has a RunItTwice account with 100 events there or a series title won there
+	// (update 2 §5.6, tested in Clause): a star with no account never hears from it.
 	World Star;
 	Star.P = Streamer(30000, 700.0);
 	Star.P.Partner = true;
 	Star.Step(20.0 * Day, 50.0 * Day);
 	Expect(std::none_of(Star.L.Sponsors.Contracts.begin(), Star.L.Sponsors.Contracts.end(), [](const sponsor::Contract& C) { return C.Brand == "turnstone"; }) &&
 			   std::any_of(Star.L.Sponsors.Contracts.begin(), Star.L.Sponsors.Contracts.end(), [](const sponsor::Contract& C) { return C.Brand == "riverline"; }),
-		"offers: the site at tier 4 offers, RunItTwice doesn't (P2)");
+		"offers: the site at tier 4 offers, Team RunItTwice doesn't (no RunItTwice account)");
 }
 
 // ------------------------------------------------------------------ 4. exclusivity, the overlay, the patch spots
@@ -729,7 +731,11 @@ void Conduct()
 	R.Signed("voltrush", T0);
 	sponsor::Conduct(R.L.Sponsors, R.L, R.Bank, sponsor::Breach::AccountRestricted, T0 + Day);
 	Expect(!R.Of("riverline") && R.Of("voltrush"), "conduct: a restriction ends Team RiverLine, not the energy drink");
-	Expect(R.L.Sponsors.Cooldown["cat:" + std::to_string(static_cast<int>(sponsor::Category::Site))] >= T0 + 364.0 * Day, "conduct: no site offers for a year");
+	// Update 2 (§5.5, §1.9 #12): the restriction is RiverLine's. Team RiverLine and the training sites stay away a year; the
+	// poker-site category isn't closed, so a rival site's own team can still call (Clause tests it end to end).
+	Expect(R.L.Sponsors.Cooldown["riverline"] >= T0 + 364.0 * Day && R.L.Sponsors.Cooldown["cat:" + std::to_string(static_cast<int>(sponsor::Category::Training))] >= T0 + 364.0 * Day,
+		"conduct: no Team RiverLine and no training offers for a year");
+	Expect(R.L.Sponsors.Cooldown.count("cat:" + std::to_string(static_cast<int>(sponsor::Category::Site))) == 0, "conduct: the poker-site category stays open to the rivals");
 	// A clawback stops at the rent reserve and writes off the rest.
 	World C;
 	const std::string Off = sponsor::MakeOffer(C.L.Sponsors, C.L, C.P, "stacked", T0, "s", true);
@@ -1570,6 +1576,373 @@ void CreatorRoad()
 	}
 }
 
+// ------------------------------------------------------------------ 19. update 2: the clause, Team RunItTwice, restrictions by site
+
+/** A RunItTwice account with Events played there (update 2 §5.5: the site's own record, which Team RunItTwice's door reads). */
+void RunItTwiceAccount(life::State& L, int Events)
+{
+	ss::site::Account A;
+	A.Site = ss::net::SiteId::RunItTwice;
+	A.JoinedAt = 10.0 * Day;
+	A.LifetimeEvents = Events;
+	L.Sites.Accounts.push_back(A);
+}
+
+/** The newest letter of Kind on Thread ("" when there's none). */
+std::string LetterOn(const life::State& L, const std::string& Thread, int Kind)
+{
+	std::string Body;
+	for (const life::Letter& M : L.Inbox)
+	{
+		Body = M.Thread == Thread && M.Kind == Kind ? M.Body : Body;
+	}
+	return Body;
+}
+
+/** The book's lines read back into a fresh life (the save's own path for the sponsor lines). */
+void ReadBack(const std::string& Saved, life::State& Into)
+{
+	Into.Sponsors = sponsor::Book();
+	size_t I = 0;
+	while (I < Saved.size())
+	{
+		const size_t E = Saved.find('\n', I);
+		std::vector<std::string> F(1);
+		for (size_t K = I; K < E && K < Saved.size(); ++K)
+		{
+			if (Saved[K] == '\t')
+			{
+				F.emplace_back();
+			}
+			else
+			{
+				F.back().push_back(Saved[K]);
+			}
+		}
+		sponsor::ReadLine(F, Into);
+		I = E == std::string::npos ? Saved.size() : E + 1;
+	}
+}
+
+/**
+ * Update 2 §5.5-§5.7 (G3): the "plays only on" clause in Team RiverLine's deals offered or renewed from G3 and in Team
+ * RunItTwice's; the warning (WouldStrike) and the strike on the second press (NoteSitePlay): at most one a day, a two-week
+ * clean cure, a second strike ending the deal; deals already running keep their old terms until renewal; Team RunItTwice's
+ * door (a RunItTwice account with 100 events, or a series title won there); a RiverLine restriction ending only what's
+ * aligned with RiverLine.
+ */
+void Clause()
+{
+	const int Rl = static_cast<int>(ss::net::SiteId::RiverLine);
+	const int Ig = static_cast<int>(ss::net::SiteId::Ignite);
+	const int Rt = static_cast<int>(ss::net::SiteId::RunItTwice);
+	const double T0 = 120.0 * Day + 600.0;
+	// The catalog: the two site teams carry their clause and their site; nobody else has either.
+	bool Catalog = true;
+	for (const sponsor::Brand& B : sponsor::Brands())
+	{
+		const std::string Want = B.Id == "riverline" ? "riverline" : B.Id == "turnstone" ? "runittwice" : "";
+		const int Site = B.Id == "riverline" ? Rl : B.Id == "turnstone" ? Rt : -1;
+		Catalog = Catalog && B.Offer.Only == Want && B.Site == Site && B.Offer.OnlyStream.empty() && B.Offer.OnSite.empty();
+	}
+	Expect(Catalog, "clause: Team RiverLine plays only on RiverLine, Team RunItTwice only on RunItTwice, and no other brand has a clause");
+	Expect(sponsor::FindBrandByName("Team RunItTwice") == sponsor::FindBrand("turnstone") && sponsor::FindBrandByName("RunItTwice") == sponsor::FindBrand("turnstone"),
+		"clause: the world's 'Team RunItTwice' is the turnstone brand (its id kept for old saves)");
+	{
+		World None;
+		bool Any = false;
+		for (int S = 0; S < static_cast<int>(ss::net::SiteId::Count); ++S)
+		{
+			Any = Any || sponsor::WouldStrike(None.L.Sponsors, S, true, true);
+		}
+		Expect(!Any, "clause: no deal, no warning on any site");
+		// An offer on the table isn't a deal: its clause warns of nothing until it's signed.
+		World Offered;
+		const std::string Oid = sponsor::MakeOffer(Offered.L.Sponsors, Offered.L, Offered.P, "riverline", T0, "test-seed", true);
+		const sponsor::Contract* Oc = sponsor::Find(Offered.L.Sponsors, Oid);
+		Expect(Oc && Oc->St == sponsor::State::Offered && Oc->T.Only == "riverline" && !sponsor::WouldStrike(Offered.L.Sponsors, Rt, true, true),
+			"clause: an offer that isn't signed yet warns of nothing");
+	}
+	{
+		// A Team RiverLine offer still waiting in Kast's own list (a save from before sponsors) is made again on load on
+		// today's terms: the clause is in its terms and its letter says so (TunnelRat's, with no clause, reads as it did).
+		std::string Text = ReadFile(std::string(SS_TESTS_DIR) + "/fixtures/pre_segment_team_riverline.ssave");
+		const size_t At = Text.find("kast\tdeal\triverline\t");
+		const size_t End = At == std::string::npos ? At : Text.find_first_of("\r\n", At);
+		if (At != std::string::npos && End != std::string::npos)
+		{
+			Text.replace(At, End - At, "kast\toffer\triverline");
+		}
+		ss::SaveData D;
+		const bool Parsed = At != std::string::npos && ss::SaveData::Parse(Text, D);
+		const double Loaded = ss::net::MinutesPerDay * ss::net::NightOneDay + D.ClockMinutes;
+		const std::string Offer = Parsed ? sponsor::OpenOfferFor(D.Life.Sponsors, "riverline", Loaded) : std::string();
+		const sponsor::Contract* Mc = Offer.empty() ? nullptr : sponsor::Find(D.Life.Sponsors, Offer);
+		bool Says = false;
+		for (const life::Letter& M : D.Life.Inbox)
+		{
+			Says = Says || (M.Thread == Offer && M.Body.find(" One condition: while the deal runs, you play, stream and post on RiverLine and nowhere else.") != std::string::npos);
+		}
+		Expect(Mc && Mc->T.Only == "riverline" && Says, "clause: a Kast-era Team RiverLine offer, made again on load, carries the clause and its letter says it");
+	}
+
+	// Team RiverLine from G3: the clause in the terms, the letter and the card, and through a save.
+	World W;
+	const std::string Id = W.Signed("riverline", T0);
+	W.L.Closet.Patches[0] = "riverline";
+	sponsor::Find(W.L.Sponsors, Id)->T.Asks = {}; // what's tested is the clause, not the reviews
+	const sponsor::Contract* C = sponsor::Find(W.L.Sponsors, Id);
+	Expect(C && C->T.Only == "riverline", "clause: a Team RiverLine deal offered from G3 plays only on RiverLine");
+	Expect(OfferLetter(W.L, "riverline").find("One condition: while the deal runs, you play, stream and post on RiverLine and nowhere else.") != std::string::npos,
+		"clause: the offer letter says it");
+	const sponsor::Card K = C ? sponsor::CardOf(*C, W.L, W.Ch, T0 + Day) : sponsor::Card();
+	Expect(std::find(K.Fine.begin(), K.Fine.end(), "Plays only on RiverLine: a table, a stream or a video on another site is a strike") != K.Fine.end(),
+		"clause: the card's fine print says it");
+	{
+		std::string Saved;
+		sponsor::WriteLines(W.L, Saved);
+		World Back;
+		ReadBack(Saved, Back.L);
+		std::string Again;
+		sponsor::WriteLines(Back.L, Again);
+		const sponsor::Contract* Bc = sponsor::Find(Back.L.Sponsors, Id);
+		Expect(Saved.find("\tonly=riverline") != std::string::npos && Again == Saved && Bc && Bc->T.Only == "riverline", "clause: only= is saved and read back, byte for byte");
+	}
+	// The warning: RiverLine is fine; a table, a stream or a video on another site would be a strike.
+	Expect(!sponsor::WouldStrike(W.L.Sponsors, Rl, true, true) && sponsor::WouldStrike(W.L.Sponsors, Rt, false, false) &&
+			   sponsor::WouldStrike(W.L.Sponsors, Ig, false, false) && sponsor::WouldStrike(W.L.Sponsors, Rt, true, false) && sponsor::WouldStrike(W.L.Sponsors, Rt, false, true),
+		"clause: the warning on every rival site, playing, streaming or posting, never on RiverLine");
+	// Playing on RiverLine, streaming it: nothing.
+	sponsor::NoteSitePlay(W.L.Sponsors, W.L, Rl, T0 + Day, true, false);
+	Expect(C->Strikes == 0 && W.Letters(sponsor::LetterStrike) == 0, "clause: a RiverLine table is no strike");
+	// The second press: a strike, its cure two weeks out, and the letter the same hour.
+	const double Hit = T0 + 2.0 * Day + 120.0;
+	sponsor::NoteSitePlay(W.L.Sponsors, W.L, Rt, Hit, false, false);
+	C = sponsor::Find(W.L.Sponsors, Id);
+	const std::string Strike = LetterOn(W.L, Id, sponsor::LetterStrike);
+	Expect(C && C->Strikes == 1 && std::fabs(C->CureUntil - (Hit + 14.0 * Day)) < 1e-6 && std::string(sponsor::Pill(*C, Hit)) == "STRIKE" && C->HeldCents == 0,
+		"clause: a RunItTwice table is a strike, cure in fourteen days, nothing held");
+	Expect(Strike.find("Your deal says RiverLine and nowhere else, and today you were on RunItTwice. That's a strike.") == 0 && Strike.find("Stay on RiverLine through ") != std::string::npos &&
+			   W.L.Inbox.back().Subject == "Team RiverLine: about where you play." && W.L.Inbox.back().At == Hit,
+		"clause: the strike letter, the same hour, with where and the cure date");
+	// At most one a day: another table, a stream, on another rival, the same day.
+	sponsor::NoteSitePlay(W.L.Sponsors, W.L, Ig, Hit + 180.0, true, false);
+	sponsor::NoteSitePlay(W.L.Sponsors, W.L, Rt, Hit + 300.0, false, true);
+	Expect(C->Strikes == 1 && W.Letters(sponsor::LetterStrike) == 1 && sponsor::WouldStrike(W.L.Sponsors, Rt, false, false), "clause: at most one strike a day (the warning stands)");
+	// The cure is the time itself: not before the two weeks are up, and then a clean slate (the strike stays on the term).
+	W.Step(T0, Hit + 13.0 * Day);
+	C = sponsor::Find(W.L.Sponsors, Id);
+	Expect(C && C->CureUntil > 0.0 && W.Letters(sponsor::LetterCured) == 0, "clause: not cured before the two weeks are up");
+	W.Step(Hit + 13.0 * Day, Hit + 14.0 * Day + 60.0);
+	C = sponsor::Find(W.L.Sponsors, Id);
+	Expect(C && C->CureUntil == 0.0 && C->Strikes == 1 && C->St == sponsor::State::Active && LetterOn(W.L, Id, sponsor::LetterCured) == "Two weeks on RiverLine and nowhere else. We're square.",
+		"clause: two clean weeks cure it");
+	// A second strike in the term ends the deal for cause, and the patch comes off.
+	const double Again = Hit + 20.0 * Day;
+	sponsor::NoteSitePlay(W.L.Sponsors, W.L, Ig, Again, false, false);
+	C = sponsor::Find(W.L.Sponsors, Id);
+	Expect(C && C->St == sponsor::State::Ended && C->Why == sponsor::End::ForCause && W.Letters(sponsor::LetterEnded) == 1 && W.L.Closet.Patches[0].empty() &&
+			   W.L.Sponsors.Cooldown["riverline"] >= Again + 119.0 * Day,
+		"clause: a second strike ends it for cause, the patch comes off");
+	Expect(!sponsor::WouldStrike(W.L.Sponsors, Rt, false, false), "clause: no deal left, no warning");
+
+	// A deal signed before G3 keeps its old terms until renewal; the renewal brings the line, and its letter explains it.
+	{
+		World Old;
+		const std::string Oid = Old.Signed("riverline", T0);
+		sponsor::Contract* Oc = sponsor::Find(Old.L.Sponsors, Oid);
+		Oc->T.Only.clear(); // as signed before G3
+		Oc->T.Asks = {};
+		Expect(!sponsor::WouldStrike(Old.L.Sponsors, Rt, false, false), "clause: a deal signed before G3 has no clause, so no warning");
+		sponsor::NoteSitePlay(Old.L.Sponsors, Old.L, Rt, T0 + 3.0 * Day, false, false);
+		Expect(Oc->Strikes == 0 && Old.Letters(sponsor::LetterStrike) == 0, "clause: and no strike");
+		const double End = Oc->Until;
+		Old.Step(T0, End - 10.0 * Day);
+		std::string Renewal;
+		for (const sponsor::Contract& X : Old.L.Sponsors.Contracts)
+		{
+			Renewal = X.Renews == Oid ? X.Id : Renewal;
+		}
+		const sponsor::Contract* Rc = sponsor::Find(Old.L.Sponsors, Renewal);
+		Expect(Rc && Rc->T.Only == "riverline" &&
+				   LetterOn(Old.L, Renewal, sponsor::LetterRenewal).find(" One line is new this term: while it runs, you play, stream and post on RiverLine and nowhere else.") !=
+					   std::string::npos,
+			"clause: the renewal carries the clause, and its letter explains the new line");
+		// Signed ahead, the new term isn't running yet: the old one (no clause) is, so no warning and no strike.
+		Expect(Rc && sponsor::Sign(Old.L.Sponsors, Old.L, Old.Bank, Renewal, End - 10.0 * Day).empty(), "clause: the renewal signed ahead");
+		Expect(!sponsor::WouldStrike(Old.L.Sponsors, Rt, false, false), "clause: signed ahead, the old term's still the one running (no warning)");
+		sponsor::NoteSitePlay(Old.L.Sponsors, Old.L, Rt, End - 5.0 * Day, false, false);
+		Expect(Old.Letters(sponsor::LetterStrike) == 0, "clause: nor a strike");
+		Old.Step(End - 10.0 * Day, End + Day);
+		Expect(sponsor::Active(Old.L.Sponsors, "riverline", End + Day) && sponsor::WouldStrike(Old.L.Sponsors, Rt, false, false),
+			"clause: once the new term starts, the clause runs");
+		// A renewal of a term that already had the clause says nothing new.
+		World New;
+		const std::string Nid = New.Signed("riverline", T0);
+		sponsor::Find(New.L.Sponsors, Nid)->T.Asks = {};
+		New.Step(T0, sponsor::Find(New.L.Sponsors, Nid)->Until - 10.0 * Day);
+		std::string Nr;
+		for (const sponsor::Contract& X : New.L.Sponsors.Contracts)
+		{
+			Nr = X.Renews == Nid ? X.Id : Nr;
+		}
+		const std::string NrBody = LetterOn(New.L, Nr, sponsor::LetterRenewal);
+		Expect(!NrBody.empty() && NrBody.find("One line is new") == std::string::npos && sponsor::Find(New.L.Sponsors, Nr)->T.Only == "riverline",
+			"clause: a renewal of a term that had the clause keeps it and says nothing new");
+	}
+
+	// Team RunItTwice's door: a RunItTwice account with 100 events there, or a series title won there; then the brand's own
+	// gate (tier 5, a poker personality) as the catalog has it.
+	{
+		ss::rep::Public Star = Streamer(25000, 600.0);
+		Star.Partner = true;
+		World No;
+		No.P = Star;
+		Expect(sponsor::Eligible(No.L.Sponsors, No.L, Star, "turnstone", T0) == "RunItTwice signs players who grind its tables: 100 events there, or a series title won there.",
+			"site team: no account, no door (and it says what opens it)");
+		RunItTwiceAccount(No.L, 99);
+		Expect(!sponsor::Eligible(No.L.Sponsors, No.L, Star, "turnstone", T0).empty(), "site team: 99 events there isn't 100");
+		No.Step(T0, T0 + 15.0 * Day);
+		Expect(!No.Of("turnstone"), "site team: and no offer on its looks");
+		No.L.Sites.Accounts[0].LifetimeEvents = 100;
+		Expect(sponsor::Eligible(No.L.Sponsors, No.L, Star, "turnstone", T0 + 15.0 * Day).empty(), "site team: 100 events there opens the door");
+		ss::rep::Public Small = Streamer(3000, 80.0);
+		Expect(sponsor::Eligible(No.L.Sponsors, No.L, Small, "turnstone", T0 + 15.0 * Day) == "A poker personality first.", "site team: the brand's own tier still holds");
+		No.Step(T0 + 15.0 * Day, T0 + 23.0 * Day);
+		const sponsor::Contract* Tc = No.Of("turnstone");
+		const std::string Letter = OfferLetter(No.L, "turnstone");
+		Expect(Tc && Tc->St == sponsor::State::Offered && Tc->T.Only == "runittwice" && Tc->T.MonthlyCents == 400000, "site team: the weekly look offers the catalog's terms, RunItTwice only");
+		Expect(Letter.rfind("You've played 100 tournaments on our tables, and it shows. ", 0) == 0 &&
+				   Letter.find("One condition: while the deal runs, you play, stream and post on RunItTwice and nowhere else.") != std::string::npos,
+			"site team: the letter says why (its tables) and the clause");
+		// A series title won there opens it too, with three events.
+		World Title;
+		Title.P = Star;
+		RunItTwiceAccount(Title.L, 3);
+		Expect(!sponsor::Eligible(Title.L.Sponsors, Title.L, Star, "turnstone", T0).empty(), "site team: three events, no title: closed");
+		Title.L.Sponsors.PaidKeys.insert("sitetitle|runittwice");
+		Title.Step(T0, T0 + 8.0 * Day);
+		Expect(OfferLetter(Title.L, "turnstone").rfind("You won a series event on our tables, and we noticed. ", 0) == 0, "site team: a series title won there opens it, and the letter says so");
+		std::string Saved;
+		sponsor::WriteLines(Title.L, Saved);
+		Title.Step(T0 + 8.0 * Day, T0 + 400.0 * Day);
+		Expect(Saved.find("sitetitle|runittwice") != std::string::npos && Title.L.Sponsors.PaidKeys.count("sitetitle|runittwice") == 1,
+			"site team: the title's mark is saved and kept a career (the prune leaves it)");
+		// Signed: the clause runs the other way (a RiverLine table is the strike).
+		World Rt2;
+		const std::string Tid = Rt2.Signed("turnstone", T0);
+		Expect(sponsor::WouldStrike(Rt2.L.Sponsors, Rl, false, false) && !sponsor::WouldStrike(Rt2.L.Sponsors, Rt, true, true), "site team: RiverLine is where its strike is");
+		sponsor::NoteSitePlay(Rt2.L.Sponsors, Rt2.L, Rl, T0 + Day, false, false);
+		Expect(sponsor::Find(Rt2.L.Sponsors, Tid)->Strikes == 1 &&
+				   LetterOn(Rt2.L, Tid, sponsor::LetterStrike).find("Your deal says RunItTwice and nowhere else, and today you were on RiverLine.") == 0,
+			"site team: a RiverLine table under Team RunItTwice is a strike");
+		Expect(LetterOn(Rt2.L, Tid, sponsor::LetterWelcome).rfind("Welcome to Team RunItTwice.", 0) == 0, "site team: its welcome");
+		// One poker-site team at a time (update 2 §1.9 #11, §5.1 scene 3): signing Team RunItTwice ends Team RiverLine's deal that
+		// day, with a renewal of it signed ahead; the desk says so first, the patch comes off, and Team RiverLine's letter says
+		// why. The other way round too.
+		World Both;
+		const std::string Rid = Both.Signed("riverline", T0);
+		Both.L.Closet.Patches[0] = "riverline";
+		sponsor::Find(Both.L.Sponsors, Rid)->T.Asks = {};
+		const double Late = sponsor::Find(Both.L.Sponsors, Rid)->Until - 10.0 * Day;
+		Both.Step(T0, Late);
+		std::string Ahead;
+		for (const sponsor::Contract& X : Both.L.Sponsors.Contracts)
+		{
+			Ahead = X.Renews == Rid ? X.Id : Ahead;
+		}
+		Expect(!Ahead.empty() && sponsor::Sign(Both.L.Sponsors, Both.L, Both.Bank, Ahead, Late).empty(), "site team: Team RiverLine's renewal signed ahead");
+		const std::string Off = sponsor::MakeOffer(Both.L.Sponsors, Both.L, Both.P, "turnstone", Late + Day, "test-seed", true);
+		const std::vector<std::string> Said = sponsor::Conflicts(Both.L.Sponsors, Both.L, Off, Late + Day);
+		Expect(sponsor::CanSign(Both.L.Sponsors, Both.L, Off, Late + Day).empty() && Said.size() == 1 && Said[0] == "Signing ends your Team RiverLine deal today.",
+			"site team: Team RunItTwice can be signed over Team RiverLine, and the desk says it ends Team RiverLine's deal");
+		const size_t Before = Both.L.Inbox.size();
+		Expect(sponsor::Sign(Both.L.Sponsors, Both.L, Both.Bank, Off, Late + Day).empty(), "site team: Team RunItTwice signed");
+		const sponsor::Contract* Gone = sponsor::Find(Both.L.Sponsors, Rid);
+		const sponsor::Contract* Next = sponsor::Find(Both.L.Sponsors, Ahead);
+		Expect(Gone && Gone->St == sponsor::State::Ended && Gone->Why == sponsor::End::Walked && Next && Next->St == sponsor::State::Ended &&
+				   !sponsor::Active(Both.L.Sponsors, "riverline", Late + 2.0 * Day) && sponsor::Active(Both.L.Sponsors, "turnstone", Late + 2.0 * Day) &&
+				   Both.L.Closet.Patches[0] != "riverline",
+			"site team: Team RiverLine's deal and its renewal end that day, and its patch comes off");
+		Expect(Both.L.Inbox.size() == Before + 2 && LetterOn(Both.L, Rid, sponsor::LetterEnded).rfind("You signed with Team RunItTwice, and a chest only has room for one poker site.", 0) == 0 &&
+				   LetterOn(Both.L, Ahead, sponsor::LetterEnded).empty(),
+			"site team: one letter from Team RiverLine says why (and Team RunItTwice's welcome)");
+		Expect(sponsor::WouldStrike(Both.L.Sponsors, Rl, false, false) && !sponsor::WouldStrike(Both.L.Sponsors, Rt, false, false), "site team: from then on, RiverLine's tables are the strike");
+		World Back;
+		Back.Signed("turnstone", T0);
+		const std::string Home = sponsor::MakeOffer(Back.L.Sponsors, Back.L, Back.P, "riverline", T0 + Day, "test-seed", true);
+		Expect(sponsor::Sign(Back.L.Sponsors, Back.L, Back.Bank, Home, T0 + Day).empty() && !Back.Of("turnstone") && Back.Of("riverline") &&
+				   LetterOn(Back.L, Back.L.Sponsors.Contracts[0].Id, sponsor::LetterEnded).rfind("You signed with Team RiverLine, ", 0) == 0,
+			"site team: signing Team RiverLine ends Team RunItTwice's deal the same way");
+	}
+
+	// A RiverLine restriction is RiverLine's: it ends Team RiverLine and the training deals, not Team RunItTwice.
+	{
+		World R;
+		R.Signed("turnstone", T0);
+		R.Signed("rangewise", T0);
+		sponsor::Conduct(R.L.Sponsors, R.L, R.Bank, sponsor::Breach::AccountRestricted, T0 + Day);
+		Expect(R.Of("turnstone") && R.Of("turnstone")->St == sponsor::State::Active && !R.Of("rangewise"), "restricted: Team RunItTwice runs on, Rangewise ends");
+		ss::rep::Public Star = Streamer(25000, 600.0);
+		Star.Restricted180 = true;
+		Expect(sponsor::Tier(Star, "turnstone") == 5 && sponsor::Tier(Star, "riverline") == 0 && sponsor::Tier(Star, "rangewise") == 0,
+			"restricted: standing holds Team RiverLine and training at 0, never a rival site's team");
+		World Open;
+		RunItTwiceAccount(Open.L, 150);
+		Expect(sponsor::Eligible(Open.L.Sponsors, Open.L, Star, "turnstone", T0).empty() &&
+				   sponsor::Eligible(Open.L.Sponsors, Open.L, Star, "riverline", T0) == "Not with your RiverLine account restricted.",
+			"restricted: RunItTwice would still offer; Team RiverLine wouldn't");
+	}
+
+	// P1's stream-only clause (onlystream=, Ignite Squad's): read, written, and a stream elsewhere is the strike, a table isn't.
+	{
+		World S;
+		const std::string Sid = S.Signed("overclock", T0);
+		sponsor::Find(S.L.Sponsors, Sid)->T.OnlyStream = "ignite";
+		Expect(!sponsor::WouldStrike(S.L.Sponsors, Rl, false, false) && sponsor::WouldStrike(S.L.Sponsors, Rl, true, false) && !sponsor::WouldStrike(S.L.Sponsors, Ig, true, false),
+			"clause: streams only on Ignite: a RiverLine stream would be a strike, a RiverLine table wouldn't");
+		std::string Saved;
+		sponsor::WriteLines(S.L, Saved);
+		World Back;
+		ReadBack(Saved, Back.L);
+		Expect(Saved.find("\tonlystream=ignite") != std::string::npos && sponsor::Find(Back.L.Sponsors, Sid) && sponsor::Find(Back.L.Sponsors, Sid)->T.OnlyStream == "ignite",
+			"clause: onlystream= round-trips");
+	}
+
+	// Every clause letter, at its longest, passes the letter lint (the offers with the reasons and the clause line joined on).
+	{
+		std::map<std::string, std::string> Vars = sponsor::InventorySamples();
+		std::vector<std::pair<std::string, std::string>> Filled;
+		std::string Clause;
+		std::string Renewal;
+		for (const std::pair<std::string, std::string>& L : sponsor::Inventory(0))
+		{
+			Clause = L.first == "only:offer" ? L.second : Clause;
+			Renewal = L.first == "only:renewal" ? L.second : Renewal;
+		}
+		for (const std::pair<std::string, std::string>& L : sponsor::Inventory(0))
+		{
+			const bool Offer = L.first.rfind("offer:riverline", 0) == 0 || L.first.rfind("offer:turnstone", 0) == 0;
+			const bool Renew = L.first.rfind("renewal", 0) == 0;
+			for (const std::pair<std::string, std::string>& Why : sponsor::Inventory(2))
+			{
+				if (Offer && Why.first.rfind("why:", 0) == 0)
+				{
+					std::map<std::string, std::string> One = Vars;
+					One["Why"] = copylint::Fill(Why.second, Vars);
+					Filled.push_back({L.first + "+" + Why.first, copylint::Fill(L.second, One) + " " + Clause});
+				}
+			}
+			if (Renew)
+			{
+				Filled.push_back({L.first + "+only", L.second + " " + Renewal});
+			}
+		}
+		Expect(!Clause.empty() && !Renewal.empty() && Filled.size() >= 40 && copylint::Run("clause letters", Filled, copylint::LetterBody, Vars) == 0,
+			"clause: every offer and renewal with the clause line passes the letter lint");
+	}
+}
+
 // ------------------------------------------------------------------ 18. update 2: old books, no video (SPEC §4.7, U10)
 
 /** FNV-1a, 64 bits: a digest of what a book wrote. */
@@ -1613,8 +1986,35 @@ std::string SteppedBook(const ss::SaveData& D, const ss::rep::Public& P, double 
 }
 
 /**
+ * A stepped book with update 2's clause taken out (§5.7): Team RiverLine's offers and renewals made from G3 on say "plays
+ * only on RiverLine", in their terms (only=riverline) and in their letters (one sentence each). Everything else an old
+ * book does must read exactly as before. Clauses counts what was taken out (so the cut is never a no-op unnoticed).
+ */
+std::string WithoutClause(std::string Book, int& Clauses)
+{
+	std::vector<std::string> Cut = {"\tonly=riverline"};
+	for (const std::pair<std::string, std::string>& L : sponsor::Inventory(0))
+	{
+		if (L.first == "only:offer" || L.first == "only:renewal")
+		{
+			Cut.push_back(" " + copylint::Fill(L.second, {{"Home", "RiverLine"}}));
+		}
+	}
+	for (const std::string& C : Cut)
+	{
+		for (size_t At = Book.find(C); At != std::string::npos; At = Book.find(C, At))
+		{
+			Book.erase(At, C.size());
+			++Clauses;
+		}
+	}
+	return Book;
+}
+
+/**
  * The creator road is a road with nothing on it in an old save: no channel, so rep::Public's video fields are 0, and every
- * old book behaves as it did. Five fixtures' books stepped 120 days under five records (nobody, a streamer, a Partner star,
+ * old book behaves as it did. From G3 (update 2 §5.7) the books are compared with the clause taken out (WithoutClause):
+ * the clause is the one thing G3 changes in an old book, and only in Team RiverLine's offers and renewals. Five fixtures' books stepped 120 days under five records (nobody, a streamer, a Partner star,
  * a live regular, a restricted Partner), and once more with the video fields just short of the road's first tier (999
  * subscribers, 19,999 views in 30 days, even Partner): the same letters, the same money, the same lines. The digest is
  * pinned from fc70b71's build, before the creator road (sponsor_test printed it there).
@@ -1637,8 +2037,10 @@ void OldBooks()
 	Records[4].Partner = true;
 	Records[4].Restricted180 = true;
 	uint64_t All = Digest("");
+	uint64_t Raw = Digest("");
 	bool Same = true;
 	int Books = 0;
+	int Clauses = 0;
 	std::set<uint64_t> Distinct;
 	size_t Letters = 0;
 	for (const char* Name : {"pre_update2_sponsored_streamer.ssave", "pre_update2_veteran.ssave", "pre_update2_staked_mid_nightly.ssave", "pre_segment_team_riverline.ssave",
@@ -1654,12 +2056,14 @@ void OldBooks()
 		uint64_t One = Digest("");
 		for (const ss::rep::Public& P : Records)
 		{
-			const std::string Book = SteppedBook(D, P, 120.0);
+			const std::string Stepped = SteppedBook(D, P, 120.0);
+			Raw = Digest(Stepped, Raw);
+			const std::string Book = WithoutClause(Stepped, Clauses);
 			ss::rep::Public Short = P;
 			Short.VideoSubs = 999;
 			Short.Views30 = 19999;
 			Short.VideoPartner = true;
-			Same = Same && SteppedBook(D, Short, 120.0) == Book;
+			Same = Same && SteppedBook(D, Short, 120.0) == Stepped;
 			One = Digest(Book, One);
 			Distinct.insert(Digest(Book));
 			for (size_t At = Book.find("\nmail|"); At != std::string::npos; At = Book.find("\nmail|", At + 1))
@@ -1671,10 +2075,12 @@ void OldBooks()
 		std::printf("  old books: %s %016llx\n", Name, static_cast<unsigned long long>(One));
 		All = Digest(std::to_string(One), All);
 	}
-	std::printf("  old books: %d books stepped 120 days (%zu different, %zu letters), digest %016llx\n", Books, Distinct.size(), Letters, static_cast<unsigned long long>(All));
+	std::printf("  old books: %d books stepped 120 days (%zu different, %zu letters), digest %016llx (%d clause cuts; as stepped %016llx)\n", Books, Distinct.size(), Letters,
+		static_cast<unsigned long long>(All), Clauses, static_cast<unsigned long long>(Raw));
 	Expect(Books == 25 && Distinct.size() >= 15 && Letters >= 100, "old books: five fixtures under five records, and the records lead the books different ways");
 	Expect(Same, "old books: a channel short of the creator road's first tier changes nothing");
-	Expect(All == 0x4d1d7fe1ca2fae27ull, "old books: every old book behaves as it did before the creator road (the digest from fc70b71)");
+	Expect(Clauses > 0, "old books: Team RiverLine's offers and renewals made from G3 on carry the clause (and only that was taken out)");
+	Expect(All == 0x4d1d7fe1ca2fae27ull, "old books: with the clause taken out, every old book behaves as it did before the creator road (the digest from fc70b71)");
 }
 } // namespace sponsor_test
 
@@ -1699,6 +2105,7 @@ int main()
 	Readers();
 	Art();
 	CreatorRoad();
+	Clause();
 	OldBooks();
 	std::printf("sponsor tests: %d checks, %d failed\n", Checks, Failures);
 	if (Failures == 0)

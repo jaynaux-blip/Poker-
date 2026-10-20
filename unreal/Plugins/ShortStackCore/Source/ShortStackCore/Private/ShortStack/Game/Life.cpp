@@ -4,6 +4,7 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Rng.h"
 
 #include <algorithm>
@@ -479,10 +480,26 @@ void Post(State& L, const Letter& Mail)
 	Kept.Body = life_mail_detail::MailCut(Mail.Body, LetterBodyMax);
 	L.Inbox.push_back(Kept);
 	// Over the keep, the oldest letter that's read or wants no answer goes first: an offer or an invitation still unread
-	// goes only when every letter kept is one (update 2 §1.7).
+	// goes only when every letter kept is one (update 2 §1.7). A site's invitation still open in the book (sent or sent
+	// again, not answered) is unanswered however often it was opened: Mail marks a thread read when it shows it, and its
+	// Accept and Decline live only on that letter (update 2 §5.4).
+	const auto Open = [&L](const Letter& M) {
+		if (M.Source != "site" || M.Kind != site::LetterInvite)
+		{
+			return false;
+		}
+		for (const site::Invitation& I : L.Sites.Invites)
+		{
+			if ((I.State == 0 || I.State == 3) && M.Thread == net::KeyOf(I.Site))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
 	while (L.Inbox.size() > InboxKeep)
 	{
-		const auto Spare = std::find_if(L.Inbox.begin(), L.Inbox.end(), [](const Letter& M) { return M.Read || !WantsAnswer(M); });
+		const auto Spare = std::find_if(L.Inbox.begin(), L.Inbox.end(), [&Open](const Letter& M) { return (M.Read && !Open(M)) || !WantsAnswer(M); });
 		L.Inbox.erase(Spare != L.Inbox.end() ? Spare : L.Inbox.begin());
 	}
 }

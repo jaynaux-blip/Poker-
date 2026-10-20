@@ -5,6 +5,7 @@
 #include "ShortStack/UI/EventArt.h"
 
 #include "ShortStack/Game/Sites.h"
+#include "ShortStack/UI/Ui.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1580,7 +1581,7 @@ Metal MetalOf(Alloy A)
 	{
 	case Alloy::Bronze: return {Hex(0xffd9b3), Hex(0xcd8a52), Hex(0x5e3216)};
 	case Alloy::Silver: return {Hex(0xffffff), Hex(0xc3ccd8), Hex(0x515e70)};
-	case Alloy::Gold: return {Hex(0xfff4c6), Hex(0xf2c14e), Hex(0x7a4e0e)};
+	case Alloy::Gold: return {Hex(0xfff4c6), pal::Gold, Hex(0x7a4e0e)}; // the skin's gold (update 2 §1.8: RiverLine's at home)
 	case Alloy::Platinum: return {Hex(0xffffff), Hex(0xd6defa), Hex(0x5a6396)};
 	}
 	return {Hex(0xffffff), Hex(0xc3ccd8), Hex(0x515e70)};
@@ -1896,6 +1897,9 @@ uint64_t CrestKey(const CrestLook& L, float Size)
 	H = Fnv(H, Ints, sizeof(Ints));
 	H = Fnv(H, Flags, sizeof(Flags));
 	H = Fnv(H, Floats, sizeof(Floats));
+	// The paint reads pal::Gold (a gold rim's metal), so the fragment is the skin's too (update 2 §1.8).
+	const uint64_t SkinKey = Skin::Current().Key();
+	H = Fnv(H, &SkinKey, sizeof(SkinKey));
 	return Fnv(H, L.Banner.data(), L.Banner.size());
 }
 
@@ -2118,11 +2122,19 @@ const Family Families[] = {
 	{"slingshot", Glyph::Slingshot, 0x0a8ad6, 0x0b3550, 0xf87171},
 };
 
+/** A template id without its site's key ("ignite.flip-go-110" is "flip-go-110", update 2 §5.8); RiverLine's as it is. */
+std::string EventStem(const std::string& Id)
+{
+	return net::SiteOf(Id) == net::SiteId::RiverLine ? Id : Id.substr(Id.find('.') + 1);
+}
+
 const Family* FamilyOf(const std::string& Id)
 {
+	// A rival's ids carry their site's key: the family is the stem's.
+	const std::string Stem = EventStem(Id);
 	for (const Family& F : Families)
 	{
-		if (Id.rfind(F.Prefix, 0) == 0)
+		if (Stem.rfind(F.Prefix, 0) == 0)
 		{
 			return &F;
 		}
@@ -2137,11 +2149,17 @@ void Tile(Canvas& C, Glyph G, uint32_t A, uint32_t B, uint32_t GemColor, bool Fe
 {
 	// The tile is drawn once and copied in after (Canvas::Cached); the featured glint pulses on top.
 	uint64_t Key = 0xcbf29ce484222325ull;
-	const uint32_t Ints[6] = {static_cast<uint32_t>(G), A, B, GemColor, Featured ? 1u : 0u, static_cast<uint32_t>(Badge)};
+	// RiverLine's gold (a gem, the featured rim) is the skin's gold inside a rival's scope (update 2 §1.8), so the key has it.
+	const Color Gold = pal::Gold;
+	const auto Byte = [](float V) { return static_cast<uint32_t>(std::min(255.0f, std::max(0.0f, V * 255.0f + 0.5f))); };
+	const uint32_t GoldRgb = Byte(Gold.R) << 16 | Byte(Gold.G) << 8 | Byte(Gold.B);
+	const uint32_t Gem = GemColor == 0xf2c14e ? GoldRgb : GemColor;
+	const uint32_t Ints[6] = {static_cast<uint32_t>(G), A, B, Gem, Featured ? 1u : 0u, static_cast<uint32_t>(Badge)};
 	Key = Fnv(Key, "tile1", 5);
 	Key = Fnv(Key, Ints, sizeof(Ints));
 	Key = Fnv(Key, &Size, sizeof(Size));
-	C.Cached(Key, Cx, Cy, [&](Canvas& At) { TileBody(At, G, A, B, GemColor, Featured, Badge, 0.0f, 0.0f, Size); });
+	Key = Fnv(Key, &GoldRgb, sizeof(GoldRgb));
+	C.Cached(Key, Cx, Cy, [&](Canvas& At) { TileBody(At, G, A, B, Gem, Featured, Badge, 0.0f, 0.0f, Size); });
 	if (Featured && Size >= 40.0f)
 	{
 		const float H = Size * 0.5f;
@@ -2167,7 +2185,7 @@ void TileBody(Canvas& C, Glyph G, uint32_t A, uint32_t B, uint32_t GemColor, boo
 	const Tone White{Hex(0xf8fafc), Mix(Hex(0xf8fafc), Cb, 0.3f), Sink(Cb, 0.55f), Hex(GemColor), Hex(0xffffff)};
 	Draw(P.At(0.0f, 0.07f, 1.0f), G, Shadowed(0.4f));
 	Draw(P, G, White);
-	C.StrokeRoundRect(R, Rad, Featured ? Hex(0xf2c14e) : Rgba(255, 255, 255, 0.16f), Featured ? std::max(1.5f, Size * 0.035f) : 1.0f);
+	C.StrokeRoundRect(R, Rad, Featured ? pal::Gold : Rgba(255, 255, 255, 0.16f), Featured ? std::max(1.5f, Size * 0.035f) : 1.0f);
 	if (Badge > 0)
 	{
 		const float Br = Size * 0.17f;
@@ -2544,7 +2562,8 @@ void Emblem(Canvas& C, const net::EventTemplate& T, float Cx, float Cy, float Si
 	}
 	if (const Family* F = FamilyOf(T.Id))
 	{
-		const int Step = T.Id.rfind("step", 0) == 0 && T.Id.size() > 4 ? T.Id[4] - '0' : 0;
+		const std::string Stem = EventStem(T.Id); // a satellite step's number, a site's key or not
+		const int Step = Stem.rfind("step", 0) == 0 && Stem.size() > 4 ? Stem[4] - '0' : 0;
 		Tile(C, F->G, F->A, F->B, F->Gem, T.Featured, Step, Cx, Cy, Size, Time);
 		return;
 	}

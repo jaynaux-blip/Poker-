@@ -9,7 +9,8 @@
 //   8 negotiation answers across seeds, the same after a reload; 9 ROI shrinkage and ceilings against §2.6;
 //   10 backer EV: a fixed-seed Monte Carlo over 5,000 periods per tier (and Lou's stake's EV to the player);
 //   11 the save round trip and migration; 12 coaching tallies, the review's choice, the TiltGain floor;
-//   13 exploits; plus the funding policy's order, the rail, the marks and the copy lint over every line.
+//   13 exploits; plus the funding policy's order, the rail, the marks and the copy lint over every line;
+//   update 2 (G3): stakes on a rival site's pot (the "pot" vectors; packages fund RiverLine only; shares off the wallet).
 // Goldens and fixtures are read from SS_TESTS_DIR (unreal/Plugins/ShortStackCore/Tests, set by CMakeLists.txt).
 #include "CopyLint.h"
 #include "ShortStack/AI/Grading.h"
@@ -20,6 +21,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/TableTalk.h"
 #include "ShortStack/Game/World.h"
@@ -30,6 +32,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace stake_test
@@ -1980,6 +1983,295 @@ void Copy()
 		Expect(Has, std::string("copy: Lantern Row writes a ") + K + " letter");
 	}
 }
+
+// ------------------------------------------------------------------ update 2 (G3): stakes on a rival site's pot
+
+/** Whether site::AddLine keeps lines in this build (core-sites' body; a stub writes nothing, and the site lines go unchecked). */
+bool SiteLinesKept()
+{
+	ss::site::Book B;
+	ss::site::Account A;
+	A.Site = ss::net::SiteId::RunItTwice;
+	B.Accounts.push_back(A);
+	ss::site::AddLine(B, ss::net::SiteId::RunItTwice, 0.0, life::LedgerBacking, 1, "Probe");
+	return !B.Accounts[0].Lines.empty();
+}
+
+/** The sum of a rival account's lines of Kind. */
+Chips SiteLines(const life::State& L, int Kind)
+{
+	Chips Sum = 0;
+	for (const ss::site::Account& A : L.Sites.Accounts)
+	{
+		for (const ss::site::Line& X : A.Lines)
+		{
+			Sum += X.Kind == Kind ? X.Cents : 0;
+		}
+	}
+	return Sum;
+}
+
+/** A life with one rival account (the event id's site) holding Cents. */
+life::State WithAccount(const std::string& EventId, Chips Cents)
+{
+	life::State L;
+	ss::site::Account A;
+	A.Site = ss::net::SiteOf(EventId);
+	A.Cents = Cents;
+	L.Sites.Accounts.push_back(A);
+	return L;
+}
+
+/** An online listing filled whole a day before At, by Who (the market when ""). */
+stake::Listing OnlineListing(const std::string& EventId, Chips BuyIn, int Markup, int Permille, double At, const std::string& Who = std::string())
+{
+	stake::Listing Ls;
+	Ls.EventId = EventId;
+	Ls.Ask = Permille;
+	Ls.Markup = Markup;
+	Ls.Opens = At - 2.0 * Day;
+	Ls.Closes = At + 60.0;
+	Ls.BuyIn = BuyIn;
+	Ls.Live = false;
+	Ls.Plan.push_back(std::make_tuple(At - Day, Who, Permille));
+	return Ls;
+}
+
+/** Sam's debt, the deal over (only the garnish is left). */
+stake::Deal SamsDebt(Chips Debt)
+{
+	stake::Deal D;
+	D.Id = "deal:sam:test";
+	D.K = stake::Kind::Package;
+	D.By = stake::Outfit::Sam;
+	D.Backer = "Sam";
+	D.Debt = Debt;
+	D.State = stake::DealEnded;
+	return D;
+}
+
+/**
+ * Update 2 §1.2 and §5.5 (G3, core-deals): a stake on a rival site's event moves in that site's wallet (stake::Pot) with
+ * the site's own lines and never a bank line; Lantern Row's and Sam's packages fund RiverLine's events only; a buyer's
+ * share comes off the wallet the prize landed in while it holds it (the bank otherwise, as always); RiverLine's pot is the
+ * bankroll, byte for byte.
+ */
+void RivalPots()
+{
+	const bool Lines = SiteLinesKept();
+	if (!Lines)
+	{
+		std::printf("  rival pots: site::AddLine keeps no lines in this build (core-sites' stub): the site lines go unchecked\n");
+	}
+	// The vectors (Tests/staking_vectors.txt, "pot").
+	int Rows = 0;
+	for (const std::vector<std::string>& V : Vectors("pot"))
+	{
+		++Rows;
+		const std::string Id = V[1];
+		const Chips BuyIn = C(V[2]);
+		const Chips Before = C(V[3]);
+		const int Markup = std::atoi(V[4].c_str());
+		const int Permille = std::atoi(V[5].c_str());
+		const Chips Prize = C(V[7]);
+		const double At = 30.0 * Day + 600.0;
+		life::State L = WithAccount(Id, Before);
+		Chips& Wallet = L.Sites.Accounts[0].Cents;
+		Chips Bank = 100000;
+		if (Permille > 0)
+		{
+			L.Stakes.Listings.push_back(OnlineListing(Id, BuyIn, Markup, Permille, At));
+		}
+		if (C(V[9]) > 0)
+		{
+			L.Stakes.Deals.push_back(SamsDebt(C(V[9])));
+		}
+		// The session's registration: the buy-in off the wallet, then the stake's (the pieces collected into the wallet).
+		const life::Funding F = stake::FundFor(L.Stakes, Id, BuyIn, false, At);
+		Wallet -= BuyIn;
+		stake::OnlineEntered(L.Stakes, Bank, L, Id, "Vector " + Id, BuyIn, F, Before, 0.0, At);
+		Expect(F.From == life::Paid::Own && F.Cents == C(V[6]) && Wallet == Before - BuyIn + C(V[6]), "pot vector: collected " + V[6] + " into the " + Id + " wallet");
+		// The prize lands in the wallet (ShowResults), then the stake settles on that pot.
+		Wallet += Prize;
+		stake::Pot P;
+		P.Cents = &Wallet;
+		P.Site = static_cast<int>(ss::net::SiteOf(Id));
+		stake::OnlineSettle(L.Stakes, P, L, Id, Prize, At + 300.0);
+		Chips Owed = 0;
+		for (const stake::Owed& O : L.Stakes.Owes)
+		{
+			Owed += O.ToYou ? 0 : O.Cents;
+		}
+		Expect(Owed == C(V[8]) && Wallet == Before - BuyIn + C(V[6]) + Prize - C(V[10]), "pot vector: the buyers' shares " + V[8] + " owed, Sam's " + V[10] + " off the wallet");
+		// The due time: the shares come off the wallet the prize landed in.
+		std::vector<std::pair<std::string, std::string>> Texts;
+		stake::Step(L.Stakes, Bank, L, At + 300.0, At + 300.0 + 4.0 * Day, Texts);
+		Expect(Wallet == C(V[11]), "pot vector: the wallet after is " + V[11]);
+		Expect(Bank == 100000 && L.Ledger.empty(), "pot vector: the bankroll never moved, and the bank's ledger has no line");
+		Expect(!Lines || SiteLines(L, life::LedgerBacking) == C(V[6]) - C(V[10]) - C(V[8]), "pot vector: the wallet's own lines hold every stake move, to the cent");
+	}
+	Expect(Rows == 4, "pot vectors: four rows");
+
+	// Lantern Row's package funds RiverLine's events only: a rival entry is the player's own money, and the desk says so.
+	{
+		life::State L = WithAccount("runittwice.x@1", 50000);
+		const double T0 = 40.0 * Day;
+		L.Stakes.Deals.push_back(PackageDeal(2, T0));
+		Expect(stake::FundFor(L.Stakes, "daily-main@20160", 2200, false, T0).From == life::Paid::Package, "rival pot: a RiverLine event plays on the roll");
+		Expect(stake::FundFor(L.Stakes, "runittwice.vector-grind@20100", 2200, false, T0).From == life::Paid::Own &&
+				   stake::FundFor(L.Stakes, "ignite.vector-jackpot@20000", 550, false, T0).From == life::Paid::Own,
+			"rival pot: Lantern Row's roll doesn't pay a RunItTwice or an Ignite entry");
+		const std::vector<std::pair<life::Funding, std::string>> Opts = stake::OnlineFundingOptions(L, "runittwice.vector-grind@20100", 2200, T0);
+		Expect(Opts.size() == 2 && Opts[0].first.From == life::Paid::Package && Opts[0].second == "Lantern Row Staking funds RiverLine events only. This one's your own money." &&
+				   Opts[1].first.From == life::Paid::Own && Opts[1].second.empty(),
+			"rival pot: the desk lists the roll with why it won't pay, then the player's own money");
+		// Played: the roll untouched, no fund, the wallet paid and won.
+		Chips Bank = 7000;
+		Chips& Wallet = L.Sites.Accounts[0].Cents;
+		const life::Funding F = stake::FundFor(L.Stakes, "runittwice.vector-grind@20100", 2200, false, T0);
+		Wallet -= 2200;
+		stake::OnlineEntered(L.Stakes, Bank, L, "runittwice.vector-grind@20100", "Sunday Grind", 2200, F, 50000, 0.0, T0);
+		Wallet += 9000;
+		stake::Pot P;
+		P.Cents = &Wallet;
+		P.Site = static_cast<int>(ss::net::SiteId::RunItTwice);
+		stake::OnlineSettle(L.Stakes, P, L, "runittwice.vector-grind@20100", 9000, T0 + 200.0);
+		Expect(L.Stakes.Funds.empty() && L.Stakes.Deals[0].RollNow == L.Stakes.Deals[0].T.Roll && L.Stakes.Deals[0].Events == 0 && Bank == 7000 && Wallet == 56800,
+			"rival pot: the roll and its volume untouched, the bankroll too; the wallet paid and won");
+	}
+
+	// A share owed on a rival cash comes off the wallet while it holds it: paid when due with no rent to keep, or by hand
+	// with an empty bank. The wallet emptied first (withdrawn), it's the bank's, as always.
+	{
+		const std::string Id = "runittwice.vector-sunday@20160";
+		const double At = 30.0 * Day + 600.0;
+		for (int Case = 0; Case < 4; ++Case)
+		{
+			life::State L = WithAccount(Id, 50000);
+			Chips& Wallet = L.Sites.Accounts[0].Cents;
+			Chips Bank = Case == 2 ? 200000 : 0;
+			// (Mrs. Park bought the piece in the first case: she texts, so a reminder would show.)
+			L.Stakes.Listings.push_back(OnlineListing(Id, 10900, 1050, 300, At, Case == 0 ? "Mrs. Park" : ""));
+			const life::Funding F = stake::FundFor(L.Stakes, Id, 10900, false, At);
+			Wallet -= 10900;
+			stake::OnlineEntered(L.Stakes, Bank, L, Id, "RunItTwice Sunday 100K", 10900, F, 50000, 0.0, At);
+			Wallet += 250000;
+			stake::Pot P;
+			P.Cents = &Wallet;
+			P.Site = static_cast<int>(ss::net::SiteId::RunItTwice);
+			stake::OnlineSettle(L.Stakes, P, L, Id, 250000, At + 300.0);
+			Expect(L.Stakes.Owes.size() == 1 && L.Stakes.Owes[0].Cents == 75000, "rival pot: the buyers' 30% owed once");
+			if (L.Stakes.Owes.size() != 1)
+			{
+				continue;
+			}
+			const Chips Was = Wallet;
+			if (Case == 0)
+			{
+				// No money in the bank at all, rent due tomorrow: the wallet pays it at the due time anyway, on time.
+				L.RentStage = life::Rent::Due;
+				L.RentDueCents = 107500;
+				L.RentDeadline = At + 2.0 * Day;
+				std::vector<std::pair<std::string, std::string>> Texts;
+				stake::Step(L.Stakes, Bank, L, At + 300.0, At + 300.0 + 4.0 * Day, Texts);
+				Expect(L.Stakes.Owes[0].State == stake::OwedPaid && Wallet == Was - 75000 && Bank == 0 && L.Ledger.empty(),
+					"rival pot: due, the wallet pays it (a bank with no money, the rent due: no matter)");
+				const bool LateMark = std::any_of(L.Stakes.Record.Marks.begin(), L.Stakes.Record.Marks.end(), [](const std::pair<double, int>& M) { return M.second == stake::MarkLate; });
+				Expect(L.Stakes.Record.Late == 0 && !LateMark && Texts.size() == 1 && Texts[0].first == "Mrs. Park" && Texts[0].second.find("Received") != std::string::npos,
+					"rival pot: on time: no reminder, no late mark, only Mrs. Park's thanks");
+			}
+			else if (Case == 1)
+			{
+				Expect(stake::Pay(L.Stakes, Bank, L, L.Stakes.Owes[0].Id, At + 400.0).empty() && Wallet == Was - 75000 && Bank == 0 && L.Ledger.empty(),
+					"rival pot: paid by hand off the wallet, the bank empty");
+			}
+			else if (Case == 3)
+			{
+				// Withdrawn and the bank empty at the due time: late. Money back on the site: paid off it then, still no bank line.
+				Wallet = 1000;
+				std::vector<std::pair<std::string, std::string>> Texts;
+				stake::Step(L.Stakes, Bank, L, At + 300.0, At + 300.0 + 4.0 * Day, Texts);
+				const bool Late = L.Stakes.Owes[0].State == stake::OwedLate;
+				Wallet += 100000;
+				stake::Step(L.Stakes, Bank, L, At + 300.0 + 4.0 * Day, At + 300.0 + 4.0 * Day + 60.0, Texts);
+				Expect(Late && L.Stakes.Owes[0].State == stake::OwedPaid && Wallet == 101000 - 75000 && Bank == 0 && L.Ledger.empty(),
+					"rival pot: late with the wallet and the bank empty; paid off the wallet once it holds it");
+			}
+			else
+			{
+				// Withdrawn before the due time: the bank pays, with the bank's line, as any debt.
+				Wallet = 1000;
+				std::vector<std::pair<std::string, std::string>> Texts;
+				stake::Step(L.Stakes, Bank, L, At + 300.0, At + 300.0 + 4.0 * Day, Texts);
+				const life::LedgerEntry* Paid = FindLine(L, "Online buyers: 30% of your");
+				Expect(L.Stakes.Owes[0].State == stake::OwedPaid && Wallet == 1000 && Bank == 200000 - 75000 && Paid && Paid->Amount == -75000 && Paid->Kind == life::LedgerBacking,
+					"rival pot: the wallet emptied first, the bank pays it, with its line");
+			}
+		}
+	}
+
+	// The save keeps where a share is paid from (the owed record's event id).
+	{
+		const std::string Id = "ignite.vector-jackpot@20000";
+		const double At = 50.0 * Day;
+		life::State L = WithAccount(Id, 20000);
+		Chips Bank = 0;
+		L.Stakes.Listings.push_back(OnlineListing(Id, 550, 1000, 500, At));
+		const life::Funding F = stake::FundFor(L.Stakes, Id, 550, false, At);
+		L.Sites.Accounts[0].Cents -= 550;
+		stake::OnlineEntered(L.Stakes, Bank, L, Id, "Spark Jackpot", 550, F, 20000, 0.0, At);
+		L.Sites.Accounts[0].Cents += 18600;
+		stake::Pot P;
+		P.Cents = &L.Sites.Accounts[0].Cents;
+		P.Site = static_cast<int>(ss::net::SiteId::Ignite);
+		stake::OnlineSettle(L.Stakes, P, L, Id, 18600, At + 200.0);
+		life::State Back;
+		Chips Bb = 0;
+		const bool Kept = Load(Save(L, Bank), Back, Bb) && Back.Stakes.Owes.size() == 1 && Back.Stakes.Owes[0].EntryId == Id;
+		Expect(Kept, "rival pot: the owed record keeps its event across a save");
+		Back.Sites = L.Sites; // (the site lines are core-sites'; the wallet as it stood)
+		std::vector<std::pair<std::string, std::string>> Texts;
+		stake::Step(Back.Stakes, Bb, Back, At + 200.0, At + 200.0 + 4.0 * Day, Texts);
+		Expect(Kept && Back.Stakes.Owes[0].State == stake::OwedPaid && Back.Sites.Accounts[0].Cents == 20000 - 550 + 300 + 18600 - 9300 && Bb == 0,
+			"rival pot: after the reload the Spark Jackpot's buyers are paid off Ignite's wallet");
+	}
+
+	// RiverLine's pot is the bankroll, byte for byte: the same night through OnlineSettle(Bankroll) and through a Pot.
+	{
+		std::string Saved[2];
+		Chips Banks[2] = {0, 0};
+		for (int Way = 0; Way < 2; ++Way)
+		{
+			life::State L;
+			Chips Bank = 40000;
+			const double At = 70.0 * Day;
+			L.Stakes.Listings.push_back(OnlineListing("daily-main@20160", 10900, 1100, 200, At));
+			L.Stakes.Deals.push_back(SamsDebt(30000));
+			const life::Funding F = stake::FundFor(L.Stakes, "daily-main@20160", 10900, false, At);
+			Bank -= 10900;
+			L.Record(At, "Buy-in: Daily Main", -10900, 0);
+			stake::OnlineEntered(L.Stakes, Bank, L, "daily-main@20160", "Daily Main", 10900, F, 40000, 0.0, At);
+			Bank += 120000;
+			L.Record(At + 300.0, "Prize: Daily Main", 120000, 0);
+			if (Way == 0)
+			{
+				stake::OnlineSettle(L.Stakes, Bank, L, "daily-main@20160", 120000, At + 300.0);
+			}
+			else
+			{
+				stake::Pot P;
+				P.Cents = &Bank;
+				P.Site = 0;
+				stake::OnlineSettle(L.Stakes, P, L, "daily-main@20160", 120000, At + 300.0);
+			}
+			std::vector<std::pair<std::string, std::string>> Texts;
+			stake::Step(L.Stakes, Bank, L, At + 300.0, At + 300.0 + 4.0 * Day, Texts);
+			Saved[Way] = Save(L, Bank);
+			Banks[Way] = Bank;
+		}
+		Expect(Saved[0] == Saved[1] && Banks[0] == Banks[1] && Saved[0].find("Sam: 25% of") != std::string::npos, "rival pot: RiverLine's pot is the bankroll, byte for byte");
+	}
+}
 } // namespace stake_test
 
 int main()
@@ -2003,6 +2295,7 @@ int main()
 	Policy();
 	Offers();
 	Copy();
+	RivalPots();
 	if (Failures == 0)
 	{
 		std::printf("staking tests: all passed\n");

@@ -4,7 +4,9 @@
 
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
+#include "ShortStack/UI/SiteArt.h"
 #include "ShortStack/UI/SponsorArt.h"
 #include "ShortStack/UI/VideoArt.h"
 
@@ -255,6 +257,11 @@ void RiverLine::MailApp(double Now)
 		{
 			videoart::Logo(*C, {Row.X + 14.0f, Row.Y + 16.0f, 44.0f, 44.0f});
 		}
+		else if (T.Source == "site")
+		{
+			// A poker site's letter (update 2 §1.7, §5.4): its logo.
+			siteart::Logo(*C, {Row.X + 14.0f, Row.Y + 16.0f, 44.0f, 44.0f}, rlsites_detail::SitesOfMail(T.Source, T.Id, T.From));
+		}
 		else
 		{
 			Seal(*C, T.From, Row.X + 36.0f, Row.Y + 38.0f, 22.0f);
@@ -338,16 +345,24 @@ void RiverLine::MailApp(double Now)
 	else if (T)
 	{
 		const bool Rerun = T->Source == "video";
+		const bool Site = T->Source == "site";
+		const net::SiteId Who = Site ? rlsites_detail::SitesOfMail(T->Source, T->Id, T->From) : net::SiteId::Count;
 		if (Rerun)
 		{
 			videoart::Logo(*C, {PaneX, 92.0f, 58.0f, 58.0f});
+		}
+		else if (Site)
+		{
+			siteart::Logo(*C, {PaneX, 92.0f, 58.0f, 58.0f}, Who);
 		}
 		else
 		{
 			Seal(*C, T->From, PaneX + 29.0f, 121.0f, 29.0f);
 		}
 		UI.Text(T->From, PaneX + 74.0f, 118.0f, Ts(24.0f, 900, Ink));
-		UI.Text(T->Source == "stake" ? std::string("Backing") : Rerun ? std::string(RerunDesk) : std::string("Mail"), PaneX + 74.0f, 142.0f, Ts(14.0f, 600, Muted));
+		// A site's letters say which site (RiverLine Player Relations' too).
+		const std::string Desk = Site ? (Who == net::SiteId::RiverLine ? std::string("RiverLine Player Relations") : rlsites_detail::SitesLongName(Who)) : std::string();
+		UI.Text(T->Source == "stake" ? std::string("Backing") : Rerun ? std::string(RerunDesk) : Site ? Desk : std::string("Mail"), PaneX + 74.0f, 142.0f, Ts(14.0f, 600, Muted));
 	}
 	const float LettersBottom = K ? 452.0f : MailH - 90.0f;
 	C->PushClip({PaneX - 4.0f, 160.0f, PaneW + 8.0f, LettersBottom - 160.0f});
@@ -384,6 +399,73 @@ void RiverLine::MailApp(double Now)
 		AppButton("mailrerun", {PaneX, MailH - 70.0f, 220.0f, 44.0f}, RerunButton, Hex(videoart::Marigold), Hex(videoart::Ink), !Previewing))
 	{
 		rlvideo_detail::VideoOpen(*this, RerunChannelPage, Now);
+		return;
+	}
+	// A poker site's letters (update 2 §5.4, §5.11): an invitation's Accept and Decline, then the way to the site's Cashier
+	// and promotions; RiverLine Player Relations' letters go to Career, where the Rewards card is.
+	if (T && T->Source == "site")
+	{
+		const net::SiteId Who = rlsites_detail::SitesOfMail(T->Source, T->Id, T->From);
+		const site::Invitation* Inv = Who != net::SiteId::RiverLine ? rlsites_detail::SitesInvite(S, Who) : nullptr;
+		const bool Joined = rlsites_detail::SitesAccount(S, Who) != nullptr;
+		const float Fy = MailH - 70.0f;
+		auto Refuse = [this, Now](const std::string& Why) {
+			if (!Why.empty())
+			{
+				Toast = Why;
+				ToastAt = Now;
+			}
+		};
+		auto Visit = [this, Now, Who](Page P) {
+			SiteShown = Who;
+			OpenApp(App::RiverLine, Now);
+			if (S.CurrentScreen != Screen::Boot)
+			{
+				S.ShowLobby();
+			}
+			OpenPage(P, Now);
+		};
+		if (Inv && !Joined && (Inv->State == 0 || Inv->State == 3))
+		{
+			if (AppButton("mailsiteaccept", {PaneX, Fy, 170.0f, 44.0f}, rlsites_detail::SitesAcceptLabel, Green, Hex(0xffffff), !Previewing))
+			{
+				Refuse(S.AnswerInvite(Who, true));
+				return;
+			}
+			if (AppButton("mailsitedecline", {PaneX + 182.0f, Fy, 150.0f, 44.0f}, rlsites_detail::SitesDeclineLabel, Hex(0xe5e1d8), Ink, !Previewing))
+			{
+				Refuse(S.AnswerInvite(Who, false));
+				return;
+			}
+			UI.Text(Inv->State == 3 ? rlsites_detail::SitesInviteLast : rlsites_detail::SitesInviteOnce, PaneX + 350.0f, Fy + 28.0f, Ts(13.0f, 600, Muted, Align::Left, Baseline::Alphabetic, false, PaneW - 350.0f));
+			return;
+		}
+		if (Who == net::SiteId::RiverLine)
+		{
+			if (AppButton("mailsiterewards", {PaneX, Fy, 220.0f, 44.0f}, rlsites_detail::SitesRewardsLink, Navy, Hex(0xffffff), !Previewing))
+			{
+				Visit(Page::Career);
+			}
+			return;
+		}
+		if (Joined)
+		{
+			if (AppButton("mailsitecashier", {PaneX, Fy, 220.0f, 44.0f}, rlsites_detail::SitesCashierLink, Navy, Hex(0xffffff), !Previewing))
+			{
+				Visit(Page::Cashier);
+				return;
+			}
+			if (AppButton("mailsitepromos", {PaneX + 232.0f, Fy, 220.0f, 44.0f}, rlsites_detail::SitesPromotionsLink, Hex(0xe5e1d8), Ink, !Previewing))
+			{
+				Visit(Page::Promotions);
+			}
+		}
+		else if (Inv && Inv->State == 2)
+		{
+			// The second letter, declined too, is the last (core-sites marks it sent with "resent:<key>").
+			const bool Last = S.Life.Sites.Done.count("resent:" + std::string(net::KeyOf(Who))) > 0;
+			UI.Text(Last ? rlsites_detail::SitesInviteDone : rlsites_detail::SitesInviteDeclined, PaneX, Fy + 28.0f, Ts(13.0f, 600, Muted));
+		}
 		return;
 	}
 	if (!K)
@@ -508,6 +590,13 @@ void RiverLine::MailApp(double Now)
 	}
 	if (K->St == sponsor::State::Active && K->Until > World)
 	{
+		// A strike open (a missed ask, or a clause broken: update 2 §5.7): its cure date over the buttons, in words.
+		if (K->CureUntil > World && St.Panel != 2)
+		{
+			UI.Text("Strike " + std::to_string(std::max(1, K->Strikes)) + " \xC2\xB7 cure it by " + std::string(net::WeekdayName(net::DayOf(K->CureUntil), true)) + ", " +
+					net::DateLabel(net::DayOf(K->CureUntil)),
+				Box.X + 24.0f, By - 10.0f, Ts(13.5f, 800, Red));
+		}
 		if (St.Panel == 2)
 		{
 			const Rect Pn{Box.X + 24.0f, By - 86.0f, Box.W - 48.0f, 138.0f};

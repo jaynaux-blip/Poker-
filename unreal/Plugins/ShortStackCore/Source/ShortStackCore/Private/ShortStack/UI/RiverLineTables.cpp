@@ -7,8 +7,10 @@
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/UI/Avatars.h"
+#include "ShortStack/UI/SiteArt.h"
 
 #include <algorithm>
 #include <cmath>
@@ -89,7 +91,7 @@ void RiverLine::TableStrip(float X, double Now)
 	{
 		return;
 	}
-	const std::string Bal = "Balance " + Money(S.BankrollCents);
+	const std::string Bal = "Balance " + Money(rlsites_detail::SitesBalance(S, rlsites_detail::SitesClient(*this, S))); // as the top bar shows it
 	// Room for the balance (and Kast's LIVE pill beside it while streaming).
 	const float Pill = S.Streaming() ? UI.Measure(std::to_string(static_cast<long long>(std::round(S.Stream.Viewers))), 13.0f, 900, true) + 80.0f + 24.0f : 0.0f;
 	const float Right = Width - 140.0f - (UI.Measure(Bal, 17.0f, 700) + 28.0f) - 14.0f - Pill;
@@ -104,7 +106,7 @@ void RiverLine::TableStrip(float X, double Now)
 		// One table: the live pill, as it always was.
 		const std::string Name = S.T ? S.T->Spec.Name : std::string();
 		const float W = std::min(UI.Measure(Name, 14.0f, 700) + 64.0f, Right - Px - 46.0f);
-		UI.RRect({Px, 17.0f, W, 30.0f}, 15.0f, Rgba(239, 77, 90, 0.12f), NetA(pal::Red, 0.5f));
+		UI.RRect({Px, 17.0f, W, 30.0f}, 15.0f, NetA(pal::Red, 0.12f), NetA(pal::Red, 0.5f));
 		C->FillCircle(Px + 16.0f, 32.0f, 4.5f, NetA(pal::Red, 0.6f + 0.4f * Nf(std::sin(Now * 4.0))));
 		UI.Text("LIVE", Px + 26.0f, 36.5f, Ts(11.0f, 800, pal::Red));
 		UI.Text(Name, Px + 58.0f, 37.0f, Ts(14.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, false, W - 66.0f));
@@ -134,7 +136,7 @@ void RiverLine::TableStrip(float X, double Now)
 			{
 				C->GlowRoundRect(R, 10.0f, NetA(Turn, 0.2f + 0.25f * Pulse(Now, 6.0)), 12.0f);
 			}
-			const Color Fill = G.YourTurn ? Mix(Hex(0x1a1410), Turn, 0.18f + 0.1f * Pulse(Now, 6.0)) : InFront ? Hex(0x15304a) : St.Hover ? Hex(0x132339) : Hex(0x0e1a2c);
+			const Color Fill = G.YourTurn ? Mix(Hex(0x1a1410), Turn, 0.18f + 0.1f * Pulse(Now, 6.0)) : InFront ? rlsites_detail::SitesTone(0x15304a) : St.Hover ? rlsites_detail::SitesTone(0x132339) : rlsites_detail::SitesTone(0x0e1a2c);
 			const Color Edge = G.YourTurn ? Turn : InFront ? NetA(pal::Accent, 0.8f) : pal::Line;
 			UI.RRect(R, 10.0f, Fill, Edge, G.YourTurn || InFront ? 1.5f : 1.0f);
 			const float Cx = R.X + 18.0f;
@@ -207,7 +209,7 @@ void RiverLine::TableStrip(float X, double Now)
 	auto IconButton = [&](const std::string& Id, const std::string& Label, bool Lit) {
 		const Rect R{Px, 14.0f, 36.0f, 36.0f};
 		const Ui::ClickState St = UI.Clickable(Id, R);
-		UI.RRect(R, 18.0f, Lit ? Hex(0x16354a) : St.Hover ? Hex(0x172a42) : Hex(0x0e1a2c), Lit ? pal::Accent : pal::Line);
+		UI.RRect(R, 18.0f, Lit ? rlsites_detail::SitesTone(0x16354a) : St.Hover ? rlsites_detail::SitesTone(0x172a42) : rlsites_detail::SitesTone(0x0e1a2c), Lit ? pal::Accent : pal::Line);
 		if (St.Hover)
 		{
 			Hint = Label;
@@ -244,7 +246,7 @@ void RiverLine::TableStrip(float X, double Now)
 	{
 		const float Hw = UI.Measure(Hint, 12.0f, 700) + 20.0f;
 		const float Hx = std::min(Width - Hw - 8.0f, HintX - Hw / 2.0f);
-		UI.RRect({Hx, 58.0f, Hw, 24.0f}, 6.0f, Hex(0x0b1422), pal::Line);
+		UI.RRect({Hx, 58.0f, Hw, 24.0f}, 6.0f, rlsites_detail::SitesTone(0x0b1422), pal::Line);
 		UI.Text(Hint, Hx + Hw / 2.0f, 74.5f, Ts(12.0f, 700, pal::Ink, Align::Center));
 	}
 }
@@ -280,11 +282,11 @@ void RiverLine::Tiles(double Now)
 		if (Count < S.MaxTables())
 		{
 			const Ui::ClickState St = UI.Clickable("tileadd" + std::to_string(I), R);
-			UI.RRect(R, 14.0f, St.Hover ? Hex(0x0f1c2f) : Hex(0x0b1523), NetA(pal::Line, St.Hover ? 1.0f : 0.6f));
+			UI.RRect(R, 14.0f, St.Hover ? rlsites_detail::SitesTone(0x0f1c2f) : rlsites_detail::SitesTone(0x0b1523), NetA(pal::Line, St.Hover ? 1.0f : 0.6f));
 			C->StrokeRoundRect({R.X + 10.0f, R.Y + 10.0f, R.W - 20.0f, R.H - 20.0f}, 10.0f, NetA(pal::Muted, 0.2f), 1.5f);
 			const float Cx = R.X + R.W / 2.0f;
 			const float Cy = R.Y + R.H / 2.0f - 14.0f;
-			C->FillCircle(Cx, Cy, 26.0f, St.Hover ? Hex(0x16354a) : Hex(0x111f33));
+			C->FillCircle(Cx, Cy, 26.0f, St.Hover ? rlsites_detail::SitesTone(0x16354a) : rlsites_detail::SitesTone(0x111f33));
 			C->FillRect({Cx - 10.0f, Cy - 1.5f, 20.0f, 3.0f}, pal::Accent);
 			C->FillRect({Cx - 1.5f, Cy - 10.0f, 3.0f, 20.0f}, pal::Accent);
 			UI.Text("Add a table", Cx, Cy + 52.0f, Ts(16.0f, 800, pal::Ink, Align::Center));
@@ -308,6 +310,9 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 	{
 		return;
 	}
+	// Update 2 (§5.11): each tile wears its site's colours, whatever the client around it wears.
+	const net::SiteId TileSite = rlsites_detail::SitesOfTable(S);
+	const SkinScope Skin(rlsites_detail::SitesSkin(TileSite));
 	const Tournament& Tn = *S.T;
 	const std::string Id = "t" + std::to_string(Index);
 	const bool Turn = S.HasPrompt;
@@ -324,7 +329,7 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 	{
 		C->GlowRoundRect(R, 14.0f, NetA(TurnCol, 0.22f + 0.22f * Pulse(Now, 6.0)), 16.0f);
 	}
-	UI.RRect(R, 14.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x0f1a2b), Hex(0x0a121e)), Turn ? TurnCol : Front ? NetA(pal::Accent, 0.75f) : pal::Line, Turn || Front ? 2.0f : 1.0f);
+	UI.RRect(R, 14.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x0f1a2b), rlsites_detail::SitesTone(0x0a121e)), Turn ? TurnCol : Front ? NetA(pal::Accent, 0.75f) : pal::Line, Turn || Front ? 2.0f : 1.0f);
 
 	// Header: the event, the blinds, where the player stands.
 	const Level& Lv = Tn.CurrentLevel();
@@ -368,9 +373,19 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 	const float Ex = R.W * 0.31f;
 	const float Ey = (Bottom - Top) * 0.29f;
 	C->FillEllipse(Cx, Cy + 6.0f, Ex + 20.0f, Ey + 20.0f, Rgba(0, 0, 0, 0.45f));
-	C->FillEllipse(Cx, Cy, Ex + 16.0f, Ey + 16.0f, Paint::Linear({0.0f, Cy - Ey}, {0.0f, Cy + Ey}, Hex(0x2a3342), Hex(0x10151d)));
-	C->FillEllipse(Cx, Cy, Ex, Ey, Paint::Radial({Cx, Cy - Ey * 0.3f}, 10.0f, {Cx, Cy}, Ex, Hex(0x15875f), 0.7f, pal::Felt, pal::FeltDark));
+	C->FillEllipse(Cx, Cy, Ex + 16.0f, Ey + 16.0f, Paint::Linear({0.0f, Cy - Ey}, {0.0f, Cy + Ey}, rlsites_detail::SitesTone(0x2a3342), rlsites_detail::SitesTone(0x10151d)));
+	C->FillEllipse(Cx, Cy, Ex, Ey, Paint::Radial({Cx, Cy - Ey * 0.3f}, 10.0f, {Cx, Cy}, Ex, rlsites_detail::SitesFeltLight(), 0.7f, pal::Felt, pal::FeltDark));
 	C->StrokeEllipse(Cx, Cy, Ex - 20.0f, Ey - 16.0f, Rgba(255, 255, 255, 0.07f), 1.5f);
+	// Its site's mark at the corner, once the open tables aren't all RiverLine's (a RiverLine-only sitting looks as it did).
+	bool Mixed = false;
+	for (int K = 0; K < S.TableCount(); ++K)
+	{
+		Mixed = Mixed || net::SiteOf(S.Glance(K).EventId) != net::SiteId::RiverLine;
+	}
+	if (Mixed)
+	{
+		siteart::Strip(*C, {R.X + 12.0f, R.Y + 44.0f, 100.0f, 16.0f}, TileSite);
+	}
 
 	const int Seats = std::max(2, static_cast<int>(S.Seats.size()));
 	const int HeroNo = HeroSeatNo();
@@ -464,16 +479,16 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		C->SetAlpha(A0 * (Dim ? 0.45f : 1.0f));
 		if (Sv.Winner && HandOver)
 		{
-			C->GlowRoundRect(Plate, 9.0f, Rgba(242, 193, 78, 0.8f), 14.0f);
+			C->GlowRoundRect(Plate, 9.0f, NetA(pal::Gold, 0.8f), 14.0f);
 		}
 		const Color Edge = Sv.Acting ? pal::Accent : Sv.IsRival ? Hex(0xb8324a) : Sv.Winner && HandOver ? pal::Gold : Rgba(255, 255, 255, 0.1f);
-		UI.RRect(Plate, 9.0f, Paint::Linear({0.0f, Plate.Y}, {0.0f, Plate.Y + Plate.H}, Sv.IsHero ? Hex(0x1b3552) : Hex(0x1a2536), Sv.IsHero ? Hex(0x10223a) : Hex(0x0f1726)), Edge,
+		UI.RRect(Plate, 9.0f, Paint::Linear({0.0f, Plate.Y}, {0.0f, Plate.Y + Plate.H}, Sv.IsHero ? rlsites_detail::SitesTone(0x1b3552) : rlsites_detail::SitesTone(0x1a2536), Sv.IsHero ? rlsites_detail::SitesTone(0x10223a) : rlsites_detail::SitesTone(0x0f1726)), Edge,
 			Sv.Acting ? 1.5f : 1.0f);
 		AvatarSpec Pic = AvatarFor(Sv.Name);
 		if (Sv.IsHero)
 		{
 			Pic.Frame = AvatarFrame::Neon;
-			Pic.Rim = 0x27d3c3;
+			Pic.Rim = rlnet_detail::NetRgb(pal::Accent);
 		}
 		else if (Sv.Pro)
 		{
@@ -573,7 +588,7 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 	{
 		const double Span = std::max(1.0, ClockEnd - (S.Prompt.TimeBankUntil > 0.0 ? S.Prompt.Deadline : S.Prompt.OpenedAt));
 		const float Frac = static_cast<float>(Clamp01(Remain / Span));
-		UI.RRect({R.X + 12.0f, Fy - 8.0f, R.W - 24.0f, 4.0f}, 2.0f, Hex(0x0b1422));
+		UI.RRect({R.X + 12.0f, Fy - 8.0f, R.W - 24.0f, 4.0f}, 2.0f, rlsites_detail::SitesTone(0x0b1422));
 		UI.RRect({R.X + 12.0f, Fy - 8.0f, (R.W - 24.0f) * Frac, 4.0f}, 2.0f, TurnCol);
 		if (S.Prompt.TimeBankUntil > 0.0)
 		{
@@ -596,14 +611,14 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		O.Size = 15.0f;
 		bool Acted = false;
 		O.Kind = ButtonKind::Danger;
-		if (UI.Button(Id + "fold", Slot(0), "Fold", O))
+		if (rlsites_detail::SitesButton(UI, *C, Id + "fold", Slot(0), "Fold", O))
 		{
 			S.HeroAct(PlayerAction::Fold());
 			Acted = true;
 		}
 		O.Kind = ButtonKind::Secondary;
 		const std::string CallLabel = P.CanCheck ? std::string("Check") : P.ToCall >= HeroStack ? "Call all-in" : "Call " + ChipsText(static_cast<double>(P.ToCall));
-		if (UI.Button(Id + "call", Slot(1), CallLabel, O) && !Acted)
+		if (rlsites_detail::SitesButton(UI, *C, Id + "call", Slot(1), CallLabel, O) && !Acted)
 		{
 			S.HeroAct(P.CanCheck ? PlayerAction::Check() : PlayerAction::Call());
 			Acted = true;
@@ -612,13 +627,13 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		{
 			O.Kind = ButtonKind::Primary;
 			const bool Shove = P.RaiseTo >= P.MaxRaise;
-			if (!Shove && UI.Button(Id + "raise", Slot(2), (P.IsBet ? "Bet " : "Raise ") + ChipsText(static_cast<double>(P.RaiseTo)), O) && !Acted)
+			if (!Shove && rlsites_detail::SitesButton(UI, *C, Id + "raise", Slot(2), (P.IsBet ? "Bet " : "Raise ") + ChipsText(static_cast<double>(P.RaiseTo)), O) && !Acted)
 			{
 				S.HeroAct(PlayerAction::RaiseTo(static_cast<double>(P.RaiseTo)));
 				Acted = true;
 			}
 			O.Kind = ButtonKind::Gold;
-			if (UI.Button(Id + "allin", Shove ? Rect{Slot(2).X, Fy, Bw3 * 2.0f + Gap, 40.0f} : Slot(3), "All-in " + ChipsText(static_cast<double>(P.MaxRaise)), O) && !Acted)
+			if (rlsites_detail::SitesButton(UI, *C, Id + "allin", Shove ? Rect{Slot(2).X, Fy, Bw3 * 2.0f + Gap, 40.0f} : Slot(3), "All-in " + ChipsText(static_cast<double>(P.MaxRaise)), O) && !Acted)
 			{
 				S.HeroAct(PlayerAction::RaiseTo(static_cast<double>(P.MaxRaise)));
 				Acted = true;
@@ -670,7 +685,7 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 			const Rect Pr{R.X + R.W - 12.0f - Nf(3 - K) * 76.0f, Fy + 6.0f, 72.0f, 28.0f};
 			const Ui::ClickState St = UI.Clickable(Id + "pace" + Label, Pr, !S.Finishing());
 			const bool Lit = IsAuto ? Plan.On : !Plan.On && S.CurrentPace == Paces[K].first;
-			UI.RRect(Pr, 8.0f, Lit ? Hex(0x1f4d63) : St.Hover ? Hex(0x172a42) : pal::Panel, Lit ? pal::Accent : pal::Line);
+			UI.RRect(Pr, 8.0f, Lit ? rlsites_detail::SitesTone(0x1f4d63) : St.Hover ? rlsites_detail::SitesTone(0x172a42) : pal::Panel, Lit ? pal::Accent : pal::Line);
 			UI.Text(Label, Pr.X + Pr.W / 2.0f, Pr.Y + 19.0f, Ts(12.5f, IsAuto ? 800 : 700, Lit ? pal::Ink : pal::Muted, Align::Center));
 			if (!St.Clicked)
 			{
@@ -719,7 +734,7 @@ void RiverLine::FinishedToasts(double Now)
 		const float A0 = C->GetAlpha();
 		C->SetAlpha(A0 * In * Out);
 		C->GlowRoundRect({R.X, R.Y + 6.0f, R.W, R.H}, 12.0f, Rgba(0, 0, 0, 0.5f), 16.0f);
-		UI.RRect(R, 12.0f, Paint::Linear({R.X, 0.0f}, {R.X + R.W, 0.0f}, Mix(Hex(0x0f1a2b), Col, 0.12f), Hex(0x0d1626)), NetA(Col, 0.55f));
+		UI.RRect(R, 12.0f, Paint::Linear({R.X, 0.0f}, {R.X + R.W, 0.0f}, Mix(rlsites_detail::SitesTone(0x0f1a2b), Col, 0.12f), rlsites_detail::SitesTone(0x0d1626)), NetA(Col, 0.55f));
 		UI.RRect({R.X, R.Y, 5.0f, R.H}, 2.5f, Col);
 		NetSpaced(*C, "TABLE CLOSED", R.X + 20.0f, R.Y + 22.0f, 10.0f, 800, pal::Muted, 1.2f);
 		const std::string Head = Seat ? std::string("Seat won") : Res.Won ? std::string("Champion") : "Finished " + Ordinal(Res.Place) + " of " + Grouped(Res.Entrants);

@@ -76,12 +76,13 @@ const Table& Bodies()
 			"stream. Thirty days to start."},
 		{"offer:sitwell:1",
 			"{Why} Long sessions are our whole business. Put Sitwell on your overlay, read for us once a stream, and the chair under you is on us. Terms below."},
+		// Team RunItTwice (update 2 §5.6): the rival site's own team, calling a player who already grinds its tables.
 		{"offer:turnstone:0",
-			"{Why} RunItTwice is new in town, and we want our name on the chest of somebody people already watch. A monthly retainer, a bonus for every final "
-			"table on the stage, and the big one covered with travel. One year. It's all below."},
+			"{Why} Team RunItTwice is a short roster of players who grind our tables and carry our patch onto the live stage. We'd like you on it: a monthly "
+			"retainer, our patch on your chest, and a bonus for every live final table you make wearing it. One year. It's all below."},
 		{"offer:turnstone:1",
-			"{Why} We're building a team before we open the doors, and we'd like you on it. Our patch at every live event, appearances when we ask, and a retainer "
-			"that makes that easy. One year. Terms below."},
+			"{Why} We'd rather sponsor someone who already plays here than buy a name that never logs in. Wear our patch at live events, make the stage when you "
+			"can, and the retainer makes the rest easy. One year. Terms below."},
 		// ---------------------------------------------------------------- offers made in person, then put in writing
 		{"heard:luckypenny",
 			"Ray told you the deal at the counter. Here it is in writing, in case you'd rather sign here than on the back of a receipt. Store credit every week, one "
@@ -122,7 +123,9 @@ const Table& Bodies()
 			"the one we'll ask about."},
 		{"welcome:sitwell",
 			"Welcome. The chair ships today. Sit in it, stream in it, read for us once a stream. It's ours until the term ends clean, then it's yours."},
-		{"welcome:turnstone", "Welcome to RunItTwice. Our patch at every live event, and the stage is where we want to see it. We'll be in touch about the Championship."},
+		{"welcome:turnstone",
+			"Welcome to Team RunItTwice. Our patch goes on your chest at every live event, and your online game stays on our tables. The stage is where we want "
+			"to see you."},
 		{"welcome", "Welcome aboard. Everything we agreed is on the card below, and the first review is a month from today."},
 		// ---------------------------------------------------------------- reviews
 		{"review:paid", "Month {Period} is in the books, and you did everything we asked. {Amount} is in your account. Same again this month."},
@@ -147,9 +150,20 @@ const Table& Bodies()
 		{"strike:kind:luckypenny", "Owner went over the month with Ray. We came up short: {Missed}. Half the credit's on hold until you make it up. You have until {Cure}."},
 		{"cured:money", "You made it up. The {Amount} we held is in your account. Clean slate."},
 		{"cured:kind", "You made it up. We're square, and next month's extras are back to normal."},
+		// ---------------------------------------------------------------- the "plays only on" clause (update 2 §5.7)
+		{"only:offer", "One condition: while the deal runs, you play, stream and post on {Home} and nowhere else."},
+		{"only:renewal",
+			"One line is new this term: while it runs, you play, stream and post on {Home} and nowhere else. A table, a stream or a video from another site is "
+			"a strike."},
+		{"strike:only",
+			"Your deal says {Home} and nowhere else, and today you were on {Site}. That's a strike. Stay on {Home} through {Cure} and we're square. A second "
+			"strike this term ends the deal."},
+		{"cured:only", "Two weeks on {Home} and nowhere else. We're square."},
 		// ---------------------------------------------------------------- endings
 		{"ended:cause", "Two strikes in one term. We're ending it here, effective today. No hard feelings. It just didn't fit."},
 		{"ended:cure", "The two weeks are up and the shortfall is still there. We're ending it here, effective today."},
+		// A poker site's team signed over this one (update 2 §1.9 #11): one site's patch on the chest at a time.
+		{"ended:switch", "You signed with {Rival}, and a chest only has room for one poker site. We're ending ours here, effective today. No hard feelings."},
 		{"ended:conduct", "We saw the paper this morning. Our name can't sit next to that, so the deal is over, effective today."},
 		{"ended:conduct:embercrest", "I saw the paper. Team Embercrest is over, effective today."},
 		{"ended:conduct:luckypenny", "Owner saw the paper again. He can't keep the picture up this time. The deal's over."},
@@ -203,6 +217,7 @@ const Table& Subjects()
 		{"welcome:embercrest", "Welcome to Team Embercrest."},
 		{"review", "{Short}: month {Period} is in."},
 		{"strike", "{Short}: we came up short."},
+		{"strike:only", "{Short}: about where you play."},
 		{"cured", "{Short}: we're square."},
 		{"ended", "{Short}: we're done."},
 		{"ended:conduct", "{Short}: about the paper."},
@@ -239,6 +254,9 @@ const Table& Spoken()
 		{"why:rerun:views", "Your Rerun videos pulled {Views} views in the last month, and {Subs} people subscribe."},
 		{"why:rerun:partner", "Rerun made you a Partner, and {Subs} people subscribe."},
 		{"why:migrated", "We wrote you through Kast a while back."},
+		// A rival site's own team (update 2 §5.6): what the player did on its tables.
+		{"why:site", "You've played {Events} tournaments on our tables, and it shows."},
+		{"why:site:title", "You won a series event on our tables, and we noticed."},
 		// Texts from the brands (the phone).
 		{"product:voltrush", "Case is at your door. Twelve cans. Keep them in frame."},
 		{"product:voltrush:dee", "Case left with Dee at her door. Twelve cans. Keep them in frame."},
@@ -322,6 +340,9 @@ std::map<std::string, std::string> Samples()
 		{"Followers", "25,000"},
 		{"Subs", "48,200"},
 		{"Views", "152,300"},
+		{"Home", "RunItTwice"},
+		{"Site", "Ignite Poker"},
+		{"Events", "1,250"},
 	};
 }
 } // namespace sponsor_copy

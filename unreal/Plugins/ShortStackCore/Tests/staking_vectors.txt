@@ -19,3 +19,12 @@ swap	100	12345	12345	0
 # package <roll> <makeup before> <buy-in> <prize> <cut permille> <period net> <player's chop> <roll after the chop>
 package	220000	68000	2200	390000	450	319800	143910	220000
 package	110000	0	1100	0	350	-1100	0	108900
+# Update 2 (G3, SPEC §1.2, §6.7; added by core-deals, no line above changed): a stake on a rival site's event moves in that
+# site's wallet (stake::Pot), never the bankroll, and writes no bank ledger line. The ids are site-prefixed and synthetic (the
+# money never reads the schedule). The buy-in comes off the wallet (the session's), the online buyers' money is collected
+# into it at registration, the prize lands in it, and Sam's quarter and the buyers' shares (paid at the due time) come off it.
+# pot <event id> <buy-in> <wallet before> <markup> <permille sold> <collected at registration> <prize> <buyers' shares> <Sam's debt> <garnished> <wallet after>
+pot	runittwice.vector-sunday@20160	10900	50000	1050	300	3420	250000	75000	0	0	217520
+pot	ignite.vector-jackpot@20000	550	2000	1000	200	120	0	0	0	0	1570
+pot	runittwice.vector-grind@20100	2200	10000	1000	0	0	50000	0	20000	12500	45300
+pot	runittwice.vector-major@20200	5500	30000	1100	150	915	100001	15000	5000	5000	105416

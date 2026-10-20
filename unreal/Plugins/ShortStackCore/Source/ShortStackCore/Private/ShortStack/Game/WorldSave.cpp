@@ -447,6 +447,18 @@ void World::Write(std::string& Out) const
 		L << I(N.Streams) << I(N.Followers) << Esc(N.Sponsor) << I(N.Pro) << I(N.Rival) << I(N.Anchored) << I(static_cast<int>(N.St)) << I(N.Until) << I(N.Joined)
 		  << I(N.LastDay) << I(N.Left) << I(N.TripFrom) << I(N.TripUntil) << Esc(N.Trip) << I(static_cast<int>(N.Is)) << I(static_cast<int>(N.Began))
 		  << I(static_cast<int>(N.Came)) << I(N.Arrived) << I(N.CameWith);
+		// Version 4 (update 2 §5.9): the sites they play, appended (read by the cursor, so an older line reads RiverLine's
+		// alone). Before the version moves to 4, only someone who plays elsewhere writes it, so a world the sites never
+		// reached writes back exactly as it was read.
+		bool WithSites = N.Sites != 1;
+		if constexpr (Version >= 4)
+		{
+			WithSites = true;
+		}
+		if (WithSites)
+		{
+			L << I(N.Sites);
+		}
 		Emit(L);
 		if (!N.Recent.empty())
 		{
@@ -660,6 +672,29 @@ void World::Write(std::string& Out) const
 		// morning's riser from the minute it was loaded.)
 		Emit(Line("seasonranks") << JoinRecords(R));
 	}
+	// Version 4 (update 2 §5.9, §6.4): the rival sites. When each opened in this world; the sparse records (only the people
+	// who played there); each rival's running race (RunItTwice's series, Ignite's month). A world the sites never reached has
+	// none of these.
+	for (const auto& It : SiteLaunches)
+	{
+		Emit(Line("sitelaunch") << I(static_cast<int>(It.first)) << D(It.second));
+	}
+	for (const auto& Site : SiteRecords)
+	{
+		for (const auto& It : Site.second)
+		{
+			const SiteRecord& Sr = It.second;
+			Emit(Line("site") << I(static_cast<int>(Site.first)) << I(It.first) << D(Sr.Points) << I(Sr.Won) << I(Sr.Wins) << I(Sr.FinalTables) << I(Sr.Events)
+							  << I(Sr.Lifetime));
+		}
+	}
+	for (const auto& Site : SiteSeries)
+	{
+		for (const auto& It : Site.second.second)
+		{
+			Emit(Line("siteseries") << I(static_cast<int>(Site.first)) << Esc(Site.second.first) << I(It.first) << D(It.second));
+		}
+	}
 }
 
 bool World::Read(const std::vector<std::string>& Fields)
@@ -706,6 +741,7 @@ bool World::Read(const std::vector<std::string>& Fields)
 		{
 			Rk.clear();
 		}
+		SiteRanksYesterday.clear();
 	}
 	else if (Kind == "field")
 	{
@@ -825,6 +861,9 @@ bool World::Read(const std::vector<std::string>& Fields)
 			N.Arrived = 0;
 			N.CameWith = -1;
 		}
+		// Version 4: the sites they play (an older line has none: RiverLine's alone).
+		const int Sites = C.Small();
+		N.Sites = static_cast<uint8_t>(Sites > 0 && Sites < 256 ? Sites : 1);
 		if (N.Id < 0 || N.Id > 1000000)
 		{
 			return true;
@@ -1149,6 +1188,45 @@ bool World::Read(const std::vector<std::string>& Fields)
 			M[A] = Rc.Dbl();
 		}
 	}
+	else if (Kind == "sitelaunch" || Kind == "site" || Kind == "siteseries")
+	{
+		// Version 4 (update 2 §5.9): a rival's launch, someone's record there, their points in its running race.
+		const int Raw = C.Small();
+		if (Raw <= 0 || Raw >= static_cast<int>(net::SiteId::Count))
+		{
+			return true; // RiverLine keeps no rows; a site this build doesn't know is dropped
+		}
+		const net::SiteId Site = static_cast<net::SiteId>(Raw);
+		if (Kind == "sitelaunch")
+		{
+			SiteLaunches[Site] = C.Dbl();
+		}
+		else if (Kind == "site")
+		{
+			const int Id = C.Small();
+			if (Id < 0 || Id > 1000000)
+			{
+				return true;
+			}
+			SiteRecord& Sr = SiteRecords[Site][Id];
+			Sr.Points = C.Dbl();
+			Sr.Won = C.Int();
+			Sr.Wins = C.Small();
+			Sr.FinalTables = C.Small();
+			Sr.Events = C.Small();
+			Sr.Lifetime = C.Int();
+		}
+		else
+		{
+			std::pair<std::string, std::map<int, double>>& Race = SiteSeries[Site];
+			Race.first = C.Str();
+			const int Id = C.Small();
+			if (Id >= 0 && Id <= 1000000)
+			{
+				Race.second[Id] = C.Dbl();
+			}
+		}
+	}
 	else if (Kind == "seasonranks")
 	{
 		// (Finish keeps them for a fresh world's board report: the ranks at the last day's turn, not at the load. Everyone
@@ -1338,6 +1416,18 @@ void Sim::Migrate(World& W, int From)
 	// Version 3 (update 2 §6.5): a world from before the fresh start began as every world did then, Established. Its head
 	// has no Start, and the head's read gives a missing one Established, so the step has nothing left to set (a fresh start
 	// written before the version moved carries its Start and keeps it). Nothing else in a version 2 world changes.
+	if constexpr (Version >= 4)
+	{
+		if (From < 4)
+		{
+			// Version 4 (update 2 §5.9, §6.5): the rival sites reach a world that had none. Every NPC keeps RiverLine and gets
+			// the accounts the rule gives them as of today (Team RiverLine's pros play only on RiverLine); RunItTwice's lobby has
+			// been open since Night One, Ignite opens on its own day or, past it, on the first day the world hasn't planned yet
+			// ("Ignite launches" in that morning's news, no history before); Team RunItTwice signs at the next 1st (on results in
+			// a fresh world). No rival has a record yet, so RiverLine's boards read exactly as they did.
+			Sim::OpenSites(W, Today, true);
+		}
+	}
 }
 } // namespace world
 } // namespace ss

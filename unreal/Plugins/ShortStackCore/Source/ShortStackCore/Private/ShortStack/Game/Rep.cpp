@@ -1,10 +1,13 @@
 #include "ShortStack/Game/Rep.h"
 #include "../StrictFloat.h"
+#include "SitesDetail.h"
 
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/World.h"
 
@@ -180,6 +183,10 @@ Public Of(const life::State& L, const kast::Channel& C, const world::World* W, d
 	P.Views30 = RepWhole(RepViews30(Rerun, World));
 	P.VideoPartner = Rerun.PartnerAt >= 0.0 && Rerun.PartnerAt <= World;
 
+	// The rival sites (update 2 §5.4): the accounts the player holds. The invitation gates' last-hundred numbers come from
+	// History, which the session holds (FromHistory, below; Session::Record and SiteStep add them).
+	P.SiteAccounts = static_cast<int>(L.Sites.Accounts.size());
+
 	// Conduct the world can know: the paper (a pickup, 90 days), the site (a restriction, 180), word of mouth (365).
 	for (const life::LedgerEntry& X : L.Ledger)
 	{
@@ -194,6 +201,33 @@ Public Of(const life::State& L, const kast::Channel& C, const world::World* W, d
 
 	P.Renown = RenownOf(P);
 	return P;
+}
+
+void FromHistory(Public& P, const std::vector<HistoryEntry>& History)
+{
+	// History holds the last hundred results (update 2 §5.4): the average buy-in of the paid ones (a freeroll costs nothing and
+	// an old save's unknown buy-in says nothing), and the online series titles among them, on any site (the template on the
+	// event's own site; an old result with no id by its name, as StatsFrom reads them).
+	Chips Spent = 0;
+	int Paid = 0;
+	int Titles = 0;
+	for (const HistoryEntry& E : History)
+	{
+		if (E.BuyInCents > 0)
+		{
+			Spent += E.BuyInCents;
+			++Paid;
+		}
+		if (E.Place != 1)
+		{
+			continue;
+		}
+		const size_t Cut = E.EventId.rfind('@');
+		const net::EventTemplate* T = Cut == std::string::npos ? nullptr : net::ForEvent(E.EventId).FindTemplate(E.EventId.substr(0, Cut));
+		Titles += (T && !T->Series.empty()) || (!T && (E.Name.rfind("MM #", 0) == 0 || E.Name.rfind("RCOP #", 0) == 0)) ? 1 : 0;
+	}
+	P.Abi100 = Paid > 0 ? Spent / Paid : 0;
+	P.OnlineSeriesTitles = Titles;
 }
 
 double RenownOf(const Public& P)

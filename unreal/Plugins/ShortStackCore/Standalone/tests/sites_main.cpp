@@ -8,19 +8,36 @@
 // byte for byte with the registry built and two rivals beside it (its templates, instances, listings, payouts, results,
 // boards and news against a network built fresh, and through Network(SiteDef)), the rake hook (FeeOf and 0.915, bit for
 // bit), the id rule (every rival id prefixed with its site's key, unique across the sites, routed home), a rival network's
-// safe defaults (no regulars, no past, no RiverLine posts), GetPopulation("soft"), and the skins (Skin, SkinScope). The
-// rivals here are A3's placeholder schedules (NetworkSites.cpp) built from stub SiteDefs; core-sites' real ones replace them.
+// safe defaults (no regulars, no past, no RiverLine posts), GetPopulation("soft"), and the skins (Skin, SkinScope). A3's
+// checks build their rivals from stub SiteDefs (SitesStub), so they read NetworkSites.cpp's schedules without a launch week.
+//
+// B3 (core-sites, from RealSites on): Ignite Poker and RunItTwice as registered, their schedules, fields, overlays and launch,
+// the money, the rent line, the gates, the promotions, the player's numbers by site, the rivals' News, the threading contract,
+// the save lines, the marks, SiteStep's cost, the copy lint and the trademark screen, and the soft population's bound on 300
+// sit-and-gos a site ("sites_test soft [count]" plays more).
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
+#include "CopyLint.h"
+#include "ShortStack/AI/Grading.h"
 #include "ShortStack/AI/Profiles.h"
+#include "ShortStack/Equity.h"
+#include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Structure.h"
+#include "ShortStack/Tournament.h"
 #include "ShortStack/UI/Ui.h"
+#include "ShortStack/AI/Bot.h"
+#include "ShortStack/AI/View.h"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -29,6 +46,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace sites_test
@@ -484,23 +502,45 @@ void RoutedCallSites()
 	}
 	Expect(Held["rcop-main"] > 0, "regulars keep their RCOP Main seats through Nov 1's ticket expiry (" + std::to_string(Held["rcop-main"]) + " seats)");
 	W.AdvanceTo(40 * 1440.0 + 60.0);
+	// B3, core-world's G3 subtraction (update 2 §5.9; core-world-g3's patch to this check, merged): RiverLine's value is the
+	// world's record less each rival's (Earnings less the lifetime money there, the season's boards less this season's there;
+	// Series, Night Shift and Live are RiverLine's already), and its ranks a day ago are the world's own (worked out from those
+	// values). Forty days on, regulars have played the rivals, so the subtraction is exercised.
 	bool Same = true;
 	std::string Nonzero;
 	bool Every = true;
+	int Elsewhere = 0;
 	for (int B = 0; B <= static_cast<int>(net::Board::Live); ++B)
 	{
 		const net::Board Bd = static_cast<net::Board>(B);
 		int Ranked = 0;
 		for (int Npc = 0; Npc < static_cast<int>(W.People().size()); ++Npc)
 		{
-			Same = Same && W.RankBefore(net::SiteId::RiverLine, Bd, Npc) == W.RankBefore(Bd, Npc) &&
-				W.BoardValue(net::SiteId::RiverLine, Bd, Npc, W.Clock()) == W.BoardValue(Bd, Npc, W.Clock());
+			double Less = 0.0;
+			for (const net::SiteId S : {net::SiteId::Ignite, net::SiteId::RunItTwice})
+			{
+				if (const ss::world::SiteRecord* R = W.SiteRecordOf(S, Npc))
+				{
+					Less += Bd == net::Board::Earnings ? static_cast<double>(R->Lifetime)
+						: Bd == net::Board::Season	   ? R->Points
+						: Bd == net::Board::Wins	   ? static_cast<double>(R->Wins)
+						: Bd == net::Board::FinalTables ? static_cast<double>(R->FinalTables)
+														: 0.0;
+				}
+			}
+			Elsewhere += Less > 0.0 ? 1 : 0;
+			const double Whole = W.BoardValue(Bd, Npc, W.Clock());
+			const double Home = W.BoardValue(net::SiteId::RiverLine, Bd, Npc, W.Clock());
+			const double Want = Whole - Less > 1e-6 ? Whole - Less : 0.0;
+			Same = Same && W.RankBefore(net::SiteId::RiverLine, Bd, Npc) == W.RankBefore(Bd, Npc) && std::fabs(Home - Want) <= 1e-6 * std::max(1.0, Whole);
 			Ranked += W.RankBefore(Bd, Npc) != 0 ? 1 : 0;
 		}
 		Every = Every && Ranked > 0;
 		Nonzero += " " + std::to_string(Ranked);
 	}
-	Expect(Same && Every, "RiverLine's boards by site are the world's, every regular, every board up to Live (ranked a day ago:" + Nonzero + ")");
+	Expect(Same && Every && Elsewhere > 0,
+		"RiverLine's boards by site are the world's less the rivals', every regular, every board up to Live (" + std::to_string(Elsewhere) +
+			" rows with rival play; ranked a day ago:" + Nonzero + ")");
 }
 
 // ------------------------------------------------------------------ a rival network's safe defaults
@@ -935,14 +975,1275 @@ void ReadyForB3()
 	const std::set<std::array<float, 3>> After = PaintOnce(Art);
 	Expect(Only(First, Home.Ink) && Only(Inside, Fj.Ink) && Only(After, Home.Ink), "a cached fragment keyed by Skin::Key replays each skin's own colours");
 }
+
+// ================================================================== B3 (core-sites): the real rivals
+//
+// Ignite Poker and RunItTwice as registered (Sites.cpp) with their real schedules (NetworkSites.cpp), their fields and
+// guarantees, the launch, the money (SiteMoney.cpp), the gates, the promotions, the player's numbers by site, the rivals'
+// News, the threading contract, the copy and the trademark screen.
+
+namespace site = ss::site;
+using ss::life::State;
+
+constexpr double SitesDay = 1440.0;
+
+/** WCAG's contrast ratio between two colours (the laptop's skins: Ink on Panel and Muted on Bg at 4.5 or more). */
+double SitesContrast(uint32_t A, uint32_t B)
+{
+	auto Lum = [](uint32_t H) {
+		auto C = [](double V) {
+			V /= 255.0;
+			return V <= 0.03928 ? V / 12.92 : std::pow((V + 0.055) / 1.055, 2.4);
+		};
+		return 0.2126 * C(static_cast<double>((H >> 16) & 255)) + 0.7152 * C(static_cast<double>((H >> 8) & 255)) + 0.0722 * C(static_cast<double>(H & 255));
+	};
+	double La = Lum(A);
+	double Lb = Lum(B);
+	if (La < Lb)
+	{
+		std::swap(La, Lb);
+	}
+	return (La + 0.05) / (Lb + 0.05);
+}
+
+const net::SiteId SitesRivals[] = {net::SiteId::Ignite, net::SiteId::RunItTwice};
+
+void RealSites()
+{
+	const net::SiteDef& Rl = net::Def(net::SiteId::RiverLine);
+	Expect(net::Sites().size() == 3 && net::Sites()[0].Id == net::SiteId::RiverLine, "three sites registered, RiverLine first (Halcyon is P1)");
+	Expect(&net::Def(net::SiteId::Halcyon) == &net::Sites().front() && !site::IsRival(net::SiteId::Halcyon) && net::Site(net::SiteId::Halcyon).Templates().empty(),
+		"Halcyon isn't registered: its network is empty and it takes no account");
+	for (net::SiteId S : SitesRivals)
+	{
+		const net::SiteDef& D = net::Def(S);
+		const std::string K = D.Key;
+		Expect(D.Id == S && D.Key == net::KeyOf(S) && !D.Linked && !D.P1 && !D.FieldFloor && site::IsRival(S), K + ": a registered rival with no field floor and a wallet");
+		bool Apart = true;
+		std::set<uint32_t> Own(D.Palette.begin(), D.Palette.end());
+		for (uint32_t C : D.Palette)
+		{
+			Apart = Apart && std::find(Rl.Palette.begin(), Rl.Palette.end(), C) == Rl.Palette.end();
+		}
+		Expect(Apart && Own.size() == 16, K + ": all 16 of its colours differ from RiverLine's (the palette-leak check needs no exemption)");
+		const double InkPanel = SitesContrast(D.Palette[5], D.Palette[2]);
+		const double MutedBg = SitesContrast(D.Palette[6], D.Palette[0]);
+		Expect(InkPanel >= 4.5 && MutedBg >= 4.5, K + ": Ink on Panel " + SitesNum(InkPanel) + ", Muted on Bg " + SitesNum(MutedBg) + " (4.5 or more)");
+		// The rake: fee plus the pool's share is the buy-in to the cent, for every template, and every listing charges the rule's fee.
+		const net::Network& N = net::Site(S);
+		bool Cent = !N.Templates().empty();
+		for (const net::EventTemplate& T : N.Templates())
+		{
+			const Chips Pool = static_cast<Chips>(std::llround(static_cast<double>(T.BuyInCents) * D.Rake.PrizeShare(T)));
+			Cent = Cent && D.Rake.Fee(T.BuyInCents) + Pool == T.BuyInCents && D.Rake.Fee(T.BuyInCents) > 0;
+		}
+		Expect(Cent, K + ": fee + prize pool = buy-in to the cent on every template (" + std::to_string(N.Templates().size()) + ")");
+	}
+	const net::SiteDef& Ig = net::Def(net::SiteId::Ignite);
+	const net::SiteDef& Rt = net::Def(net::SiteId::RunItTwice);
+	Expect(Ig.Rake.Fee(550) == 61 && Ig.Rake.Fee(110) == 12 && Ig.Rake.Fee(2200) == 242 && Ig.Rake.Fee(0) == 0, "Ignite: 11% flat ($5.50 pays 61 cents)");
+	Expect(Rt.Rake.Fee(330) == 26 && Rt.Rake.Fee(5500) == 440 && Rt.Rake.Fee(8250) == 660 && Rt.Rake.Fee(10900) == 763 && Rt.Rake.Fee(21500) == 1505 && Rt.Rake.Fee(53000) == 2915,
+		"RunItTwice: 8% to $55, 7% from $109 to $215, 5.5% from $530");
+	Expect(Ig.SecondsPerHand[0] == 30.0 && Ig.SecondsPerHand[1] == 38.0 && Rt.SecondsPerHand[0] == 36.0 && Rt.SecondsPerHand[1] == 42.0, "seconds a hand: Ignite 30/38, RunItTwice 36/42");
+	Expect(Ig.Population[1] == "soft" && Ig.Population[2] == "soft" && Rt.Population[1] == "low" && Rt.Population[2] == "high" && Ig.Softness[1] == -0.06 && Rt.Softness[2] == 0.03,
+		"tables: Ignite seats the soft mix (-0.06), RunItTwice one band tougher (+0.03)");
+	Expect(Ig.Traffic.Scale == 0.30 && Ig.Traffic.Sunday == 1.2 && Ig.Traffic.PeakHour == 20 && Rt.Traffic.Scale == 0.55 && Rt.Traffic.Sunday == 1.5 && Rt.Traffic.PeakHour == 21,
+		"traffic: Ignite 0.30 (Sunday x1.2, peak 8 PM), RunItTwice 0.55 (x1.5, 9 PM)");
+	Expect(Ig.LaunchDay == ss::world::DayOn(2026, 11, 2) && Rt.LaunchDay == net::NightOneDay && Ig.LaunchGtd == 1.5 && Rt.TeamSize == 6 && Rt.TeamName == "Team RunItTwice",
+		"Ignite opens Mon Nov 2 with a launch week x1.5; RunItTwice's lobby on Night One, its team of six");
+	const net::CashMethod* Card = site::MethodFor(net::SiteId::Ignite, "", false);
+	const net::CashMethod* Out = site::MethodFor(net::SiteId::Ignite, "", true);
+	const net::CashMethod* RtOut = site::MethodFor(net::SiteId::RunItTwice, "", true);
+	Expect(Card && Card->Id == "card" && Card->FeePermille == 30 && Card->MinCents == 1000 && Out && Out->WithdrawFeeCents == 300 && Out->WithdrawHoursMin == 72.0 &&
+			Out->WithdrawHoursMax == 120.0 && RtOut && RtOut->WithdrawFeeCents == 500 && RtOut->WithdrawHoursMin == 48.0 && RtOut->WithdrawHoursMax == 48.0 &&
+			site::MethodFor(net::SiteId::RunItTwice, "", false)->FeePermille == 25 && !site::MethodFor(net::SiteId::RunItTwice, "bank", false) &&
+			!site::MethodFor(net::SiteId::RiverLine, "", false) && Ig.MinWithdraw == 2000 && Rt.MinWithdraw == 2000,
+		"the Cashier: one method each way (card in at 3% / 2.5%, $10 minimum; bank out in 72-120 h for $3 / 48 h for $5, $20 minimum)");
+}
+
+void RealSchedules()
+{
+	struct Want
+	{
+		net::SiteId S;
+		int Dailies;
+		Chips Lo, Hi;
+		int Sundays;
+		size_t TemplatesLo, TemplatesHi;
+	};
+	const Want Wants[] = {{net::SiteId::Ignite, 18, 110, 2200, 1, 650, 900}, {net::SiteId::RunItTwice, 22, 330, 21500, 3, 1400, 1650}};
+	std::set<std::string> Every;
+	for (const net::EventTemplate& T : net::Shared().Templates())
+	{
+		Every.insert(T.Id);
+	}
+	for (const Want& W : Wants)
+	{
+		const net::Network& N = net::Site(W.S);
+		const std::string K = net::KeyOf(W.S);
+		int Dailies = 0;
+		int Sundays = 0;
+		Chips Lo = 1 << 30;
+		Chips Hi = 0;
+		bool Prefixed = true;
+		size_t Fresh = 0;
+		for (const net::EventTemplate& T : N.Templates())
+		{
+			const bool Daily = T.OnlyDay == -9999 && T.Days == 0x7f;
+			Dailies += Daily ? 1 : 0;
+			Sundays += T.OnlyDay == -9999 && T.Days == (1 << 6) ? 1 : 0;
+			Lo = Daily ? std::min(Lo, T.BuyInCents) : Lo;
+			Hi = Daily ? std::max(Hi, T.BuyInCents) : Hi;
+			Prefixed = Prefixed && T.Id.rfind(K + ".", 0) == 0 && net::SiteOf(T.Id) == W.S && net::SiteOf(N.TicketOf(T.Id)) == W.S && N.FindTemplate(T.Id) == &T &&
+				&net::ForEvent(T.Id + "@100") == &N;
+			Fresh += Every.insert(T.Id).second ? 1 : 0;
+		}
+		Expect(Dailies == W.Dailies && Lo == W.Lo && Hi == W.Hi && Sundays == W.Sundays,
+			K + ": " + std::to_string(Dailies) + " dailies from " + net::BuyIn(Lo) + " to " + net::BuyIn(Hi) + ", " + std::to_string(Sundays) + " Sunday majors");
+		Expect(N.Templates().size() >= W.TemplatesLo && N.Templates().size() <= W.TemplatesHi, K + ": " + std::to_string(N.Templates().size()) + " templates through 2040");
+		Expect(Prefixed && Fresh == N.Templates().size(), K + ": every template, ticket and series id is its own, unique across the three sites");
+		// Deterministic: built again from the same def, the same schedule, instance for instance.
+		const net::Network Again(net::Def(W.S));
+		Expect(SitesDump(Again, 60) == SitesDump(N, 60), K + ": its schedule is the same every build");
+	}
+	const net::Network& Ig = net::Site(net::SiteId::Ignite);
+	const net::Network& Rt = net::Site(net::SiteId::RunItTwice);
+	const net::EventTemplate* Spark = Ig.FindTemplate("ignite.spark-jackpot");
+	const net::EventTemplate* Flip = Ig.FindTemplate("ignite.flip-go");
+	const net::EventTemplate* Blaze = Ig.FindTemplate("ignite.sunday-blaze");
+	Expect(Spark && Spark->BuyInCents == 550 && Spark->StartMinute == 20 * 60 && Spark->GtdCents > 0 && Spark->Featured, "the Spark Jackpot: $5.50 every night at 8 PM, guaranteed");
+	Expect(Flip && Flip->Fmt == net::Format::Flip && Flip->EveryMinutes == 60 && Flip->Speed == "Hyper" && Ig.FindTemplate("ignite.flip-go-bounty") &&
+			Ig.FindTemplate("ignite.flip-go-bounty")->Fmt == net::Format::Bounty,
+		"Flip & Go every hour, and the Flip & Go Bounty");
+	Expect(Blaze && Blaze->BuyInCents == 1100 && Blaze->Days == 1 << 6 && Blaze->GtdCents == 1600000, "the Sunday Blaze: $11 on Sundays, $16,000 guaranteed (" + (Blaze ? ss::Money(Blaze->GtdCents) : std::string()) + ")");
+	const net::EventTemplate* Hundred = Rt.FindTemplate("runittwice.sunday-100k");
+	const net::EventTemplate* Grind = Rt.FindTemplate("runittwice.sunday-grind");
+	const net::EventTemplate* Bridge = Rt.FindTemplate("runittwice.high-bridge");
+	Expect(Hundred && Hundred->BuyInCents == 10900 && Hundred->GtdCents == 10000000 && Grind && Grind->BuyInCents == 2200 && Bridge && Bridge->BuyInCents == 53000,
+		"RunItTwice's Sundays: the $22 Sunday Grind, the $109 Sunday 100K with $100,000 guaranteed, the $530 High Bridge");
+	Expect(Rt.FindTemplate("runittwice.supper-stack") && Rt.FindTemplate("runittwice.supper-stack")->BuyInCents == 550 && Rt.FindTemplate("runittwice.run-it-back") &&
+			Rt.FindTemplate("runittwice.run-it-back")->BuyInCents == 3300,
+		"the welcome tickets' $5.50 Supper Stack, and Run It Back at $33");
+	// The series calendar.
+	const net::SeriesInfo* Open = Rt.FindSeries("runittwice.open26");
+	const net::SeriesInfo* Spring = Rt.FindSeries("runittwice.openspring27");
+	const net::SeriesInfo* Iron = Rt.FindSeries("runittwice.ironworks27");
+	const net::SeriesInfo* Feb = Ig.FindSeries("ignite.wildfeb27");
+	const net::SeriesInfo* Aug = Ig.FindSeries("ignite.wildaug27");
+	Expect(Open && Open->FirstDay == ss::world::DayOn(2026, 11, 13) && Open->LastDay == ss::world::DayOn(2026, 11, 29) && Open->Events == 40 && Rt.FindTemplate(Open->MainEvent) &&
+			Rt.FindTemplate(Open->MainEvent)->BuyInCents == 53000 && Rt.FindTemplate("runittwice.open26-12"),
+		"the RunItTwice Open 2026: Nov 13-29, 40 events, a $530 Main (and runittwice.open26-12)");
+	bool Bounties = Iron != nullptr;
+	for (const net::EventTemplate& T : Rt.Templates())
+	{
+		Bounties = Bounties && (!Iron || T.Series != Iron->Id || T.Fmt == net::Format::Bounty);
+	}
+	Expect(Spring && ss::world::DayOn(2027, 4, 1) <= Spring->FirstDay && Spring->FirstDay < ss::world::DayOn(2027, 5, 1) && Iron && Iron->Events == 24 && Bounties &&
+			ss::world::DayOn(2027, 7, 1) <= Iron->FirstDay && Iron->FirstDay < ss::world::DayOn(2027, 8, 1),
+		"the Open in April too, and Ironworks in July: 24 knockout events");
+	Expect(Feb && Aug && Feb->Events == 24 && Aug->Events == 24 && ss::world::DayOn(2027, 2, 1) <= Feb->FirstDay && Feb->FirstDay < ss::world::DayOn(2027, 3, 1) &&
+			ss::world::DayOn(2027, 8, 1) <= Aug->FirstDay && Aug->FirstDay < ss::world::DayOn(2027, 9, 1) && !Ig.FindSeries("ignite.wildaug26"),
+		"Wildfire in February and August from 2027 (after Ignite opens), 24 events each");
+	// (Review.) A rival series event costs a standard buy-in, as RiverLine's series do ($5.50, $11, $22, $55, $109...), never
+	// a $67.90 or a $118.20.
+	static const Chips Standard[] = {110, 220, 330, 440, 550, 770, 1100, 1650, 2200, 2750, 3300, 4400, 5500, 8250, 10900, 16200, 21500, 32000, 53000};
+	bool Priced = true;
+	std::set<Chips> Seen;
+	for (const net::Network* Nw : {&Ig, &Rt})
+	{
+		for (const net::EventTemplate& T : Nw->Templates())
+		{
+			const bool Known = std::find(std::begin(Standard), std::end(Standard), T.BuyInCents) != std::end(Standard);
+			Priced = Priced && (T.Series.empty() || Known);
+			Seen.insert(T.Series.empty() ? 0 : T.BuyInCents);
+		}
+	}
+	Expect(Priced && Seen.size() >= 12, "every rival series event is priced at a standard buy-in (" + std::to_string(Seen.size() - 1) + " of them in use)");
+	// The lobby: a rival's Flip & Go plays (RiverLine's "Flip & Go unlocks later" is RiverLine's), its tables and pace its own.
+	const int Day = ss::world::DayOn(2026, 11, 20);
+	int Flips = 0;
+	bool FlipsPlay = true;
+	for (const net::EventInstance& E : Ig.Window(Day * SitesDay, (Day + 1) * SitesDay))
+	{
+		const net::EventTemplate& T = Ig.TemplateOf(E);
+		if (T.Fmt == net::Format::Flip)
+		{
+			std::string Lock;
+			const ss::LobbyEvent L = Ig.Listing(E, &Lock, 0);
+			FlipsPlay = FlipsPlay && L.Joinable && Lock.empty() && L.Spec.StartingStack == 2000 && L.Spec.SecondsPerHand == 30.0 && L.Spec.Population == "soft";
+			++Flips;
+		}
+	}
+	std::string RlLock;
+	bool RlLocked = false;
+	for (const net::EventInstance& E : net::Shared().Window(Day * SitesDay, (Day + 1) * SitesDay))
+	{
+		if (net::Shared().TemplateOf(E).Fmt == net::Format::Flip && !RlLocked)
+		{
+			RlLocked = !net::Shared().Joinable(E, &RlLock, 7) && RlLock == "Flip & Go unlocks later in your career.";
+		}
+	}
+	Expect(Flips == 24 && FlipsPlay && RlLocked, "Ignite's 24 Flip & Go a day play from a short stack at once; RiverLine's Flip Frenzy is still locked (" + std::to_string(Flips) + ")");
+}
+
+/** Whether an instance overlays: what its field puts in falls short of its guarantee. */
+bool SitesOverlays(const net::Network& N, const net::EventInstance& E)
+{
+	const net::EventTemplate& T = N.TemplateOf(E);
+	const Chips In = static_cast<Chips>(std::llround(static_cast<double>(T.BuyInCents) * N.Definition().Rake.PrizeShare(T))) * static_cast<Chips>(E.Entries);
+	return T.GtdCents > 0 && T.BuyInCents > 0 && In < T.GtdCents;
+}
+
+void LaunchAndFields()
+{
+	const net::Network& Ig = net::Site(net::SiteId::Ignite);
+	const net::Network& Rt = net::Site(net::SiteId::RunItTwice);
+	const int Launch = net::Def(net::SiteId::Ignite).LaunchDay;
+	// No history before launch: nothing on Ignite before Nov 2 or on RunItTwice before Night One, detached or attached to a
+	// world that opened them on their days; and an id from before can't be found.
+	Expect(Ig.Window((Launch - 30) * SitesDay, Launch * SitesDay).empty() && !Ig.Window(Launch * SitesDay, (Launch + 1) * SitesDay).empty(), "Ignite lists nothing before Mon Nov 2");
+	Expect(Rt.Window(-14 * SitesDay, net::NightOneDay * SitesDay).empty() && !Rt.Window(net::NightOneDay * SitesDay, (net::NightOneDay + 1) * SitesDay).empty(),
+		"RunItTwice lists nothing before Night One");
+	net::EventInstance Found;
+	Expect(!Ig.FindInstance("ignite.spark-jackpot@" + std::to_string((Launch - 1) * 1440 + 1200), Found) &&
+			Ig.FindInstance("ignite.spark-jackpot@" + std::to_string((Launch + 7) * 1440 + 1200), Found),
+		"Ignite's Spark Jackpot the night before launch was never scheduled; a week after, it is");
+	// Ignite's launch week: every guaranteed event those seven days is its own one-off, the guarantee half again as big; the
+	// daily stays out; on Nov 9 the dailies are back.
+	int Twins = 0;
+	bool OnlyTwins = true;
+	bool Raised = true;
+	for (int D = Launch; D < Launch + 7; ++D)
+	{
+		for (const net::EventInstance& E : Ig.Window(D * SitesDay, (D + 1) * SitesDay))
+		{
+			const net::EventTemplate& T = Ig.TemplateOf(E);
+			const std::string Base = net::netsites_detail::NetSitesLaunchBase(T.Id);
+			if (T.GtdCents <= 0)
+			{
+				continue;
+			}
+			OnlyTwins = OnlyTwins && !Base.empty() && T.OnlyDay == D;
+			const net::EventTemplate* Daily = Base.empty() ? nullptr : Ig.FindTemplate(Base);
+			const double Ratio = Daily ? static_cast<double>(T.GtdCents) / static_cast<double>(Daily->GtdCents) : 0.0;
+			Raised = Raised && Daily && Ratio > 1.35 && Ratio < 1.65 && T.Name == Daily->Name && T.StartMinute == Daily->StartMinute;
+			++Twins;
+		}
+	}
+	Expect(Twins >= 7 * 13 && OnlyTwins && Raised, "Ignite's launch week: " + std::to_string(Twins) + " guaranteed events run as one-offs at about 1.5x the guarantee");
+	const net::EventTemplate* SundayLaunch = Ig.FindTemplate("ignite.sunday-blaze-launch7");
+	Expect(SundayLaunch && SundayLaunch->OnlyDay == Launch + 6 && SundayLaunch->GtdCents == 2500000, "launch week's Sunday Blaze is the $25,000 Sunday");
+	bool Back = false;
+	for (const net::EventInstance& E : Ig.Window((Launch + 7) * SitesDay, (Launch + 8) * SitesDay))
+	{
+		Back = Back || E.Id.rfind("ignite.spark-jackpot@", 0) == 0;
+	}
+	Expect(Back, "on Nov 9 the Spark Jackpot is its daily self again");
+	// Fields without the floor, guarantees at 0.9 of the median pool: 10-25% of guaranteed events overlay over a month; at least
+	// half in Ignite's launch week.
+	auto Rate = [](const net::Network& N, int From, int To, int& Gtd) {
+		int Over = 0;
+		Gtd = 0;
+		for (const net::EventInstance& E : N.Window(From * SitesDay, To * SitesDay))
+		{
+			if (N.TemplateOf(E).GtdCents > 0)
+			{
+				++Gtd;
+				Over += SitesOverlays(N, E) ? 1 : 0;
+			}
+		}
+		return Gtd > 0 ? static_cast<double>(Over) / static_cast<double>(Gtd) : 0.0;
+	};
+	int G1 = 0;
+	int G2 = 0;
+	int G3 = 0;
+	int G4 = 0;
+	const double IgMonth = Rate(Ig, Launch + 7, Launch + 37, G1);
+	const double IgWeek = Rate(Ig, Launch, Launch + 7, G2);
+	const double RtMonth = Rate(Rt, net::NightOneDay, net::NightOneDay + 30, G3);
+	const double RtOpen = Rate(Rt, ss::world::DayOn(2026, 11, 13), ss::world::DayOn(2026, 12, 13), G4);
+	std::printf("overlays: Ignite %.1f%% of %d (launch week %.1f%% of %d); RunItTwice %.1f%% of %d (with the Open %.1f%% of %d)\n", 100.0 * IgMonth, G1, 100.0 * IgWeek, G2,
+		100.0 * RtMonth, G3, 100.0 * RtOpen, G4);
+	if (std::getenv("SS_SITES_OVERLAYS"))
+	{
+		for (const net::Network* N : {&Ig, &Rt})
+		{
+			std::map<std::string, std::pair<int, int>> By;
+			for (const net::EventInstance& E : N->Window((Launch + 7) * SitesDay, (Launch + 67) * SitesDay))
+			{
+				const net::EventTemplate& T = N->TemplateOf(E);
+				if (T.GtdCents > 0)
+				{
+					By[T.Series.empty() ? T.Id : T.Series].first += SitesOverlays(*N, E) ? 1 : 0;
+					By[T.Series.empty() ? T.Id : T.Series].second += 1;
+				}
+			}
+			for (const auto& It : By)
+			{
+				std::printf("  %-36s %3d / %3d  %5.1f%%  gtd %s\n", It.first.c_str(), It.second.first, It.second.second, 100.0 * It.second.first / It.second.second,
+					N->FindTemplate(It.first) ? ss::Money(N->FindTemplate(It.first)->GtdCents).c_str() : "");
+			}
+		}
+	}
+	Expect(IgMonth >= 0.10 && IgMonth <= 0.25 && RtMonth >= 0.10 && RtMonth <= 0.25 && RtOpen >= 0.10 && RtOpen <= 0.25, "10-25% of a rival's guaranteed events overlay over a month");
+	Expect(IgWeek >= 0.5, "at least half of Ignite's launch week overlays");
+	// A rival's field is its template's x its traffic x the day x the draw: Sundays busier, no floor (some fields under the guarantee).
+	int Sunday = 0;
+	int Monday = 0;
+	for (const net::EventInstance& E : Rt.Window(ss::world::DayOn(2026, 12, 6) * SitesDay, ss::world::DayOn(2026, 12, 8) * SitesDay))
+	{
+		(net::Weekday(net::DayOf(E.Start)) == 6 ? Sunday : Monday) += Rt.TemplateOf(E).OnlyDay == -9999 && Rt.TemplateOf(E).Days == 0x7f ? E.Entries : 0;
+	}
+	Expect(Sunday > Monday * 1.3, "RunItTwice's Sunday crowd: " + std::to_string(Sunday) + " daily entries against Monday's " + std::to_string(Monday));
+}
+
+// ------------------------------------------------------------------ the money
+
+/** The sum of the bank ledger lines added since a ledger of Before lines (newest first). */
+Chips SitesLedgerSince(const State& L, size_t Before)
+{
+	Chips Sum = 0;
+	for (size_t I = 0; I + Before < L.Ledger.size(); ++I)
+	{
+		Sum += L.Ledger[I].Amount;
+	}
+	return Sum;
+}
+
+Chips SitesLines(const site::Account& A)
+{
+	Chips Sum = 0;
+	for (const site::Line& X : A.Lines)
+	{
+		Sum += X.Cents;
+	}
+	return Sum;
+}
+
+/** The book's lines written and read back into a fresh state (the save's way). */
+State SitesReload(const State& L)
+{
+	std::string Text;
+	site::WriteLines(L, Text);
+	State Back;
+	for (size_t From = 0; From < Text.size();)
+	{
+		const size_t End = std::min(Text.find('\n', From), Text.size());
+		std::vector<std::string> P;
+		for (size_t Cell = From, K = From; K <= End; ++K)
+		{
+			if (K == End || Text[K] == '\t')
+			{
+				P.emplace_back(Text, Cell, K - Cell);
+				Cell = K + 1;
+			}
+		}
+		site::ReadLine(P, Back);
+		From = End + 1;
+	}
+	return Back;
+}
+
+void Money()
+{
+	const double T0 = ss::world::DayOn(2026, 11, 13) * SitesDay + 23.0 * 60.0; // a Friday, 11 PM
+	State L;
+	Chips Bank = 100000;
+	site::Book& B = L.Sites;
+	Expect(!site::Deposit(B, L, Bank, net::SiteId::Ignite, 5000, "", T0).empty() && Bank == 100000, "no deposit without an account");
+	Expect(!site::Deposit(B, L, Bank, net::SiteId::RiverLine, 5000, "", T0).empty() && site::WalletOf(B, net::SiteId::RiverLine) == nullptr, "RiverLine has no wallet: its money is the bank's");
+	Expect(site::Join(B, net::SiteId::Ignite, T0).empty() && site::Join(B, net::SiteId::Ignite, T0).empty() && B.Accounts.size() == 1 && !site::Join(B, net::SiteId::Halcyon, T0).empty(),
+		"joining opens one account a site (and none on a site that isn't registered)");
+	const size_t Lines0 = L.Ledger.size();
+	Expect(!site::Deposit(B, L, Bank, net::SiteId::Ignite, 999, "", T0).empty() && !site::Deposit(B, L, Bank, net::SiteId::Ignite, 5000, "bank", T0).empty() &&
+			!site::Deposit(B, L, Bank, net::SiteId::Ignite, 99000, "card", T0).empty() && Bank == 100000 && L.Ledger.size() == Lines0,
+		"refused: under the $10 minimum, by a method that doesn't take deposits, more than the bank holds with the fee");
+	Expect(site::Deposit(B, L, Bank, net::SiteId::Ignite, 5000, "card", T0).empty(), "a $50 card deposit to Ignite");
+	const site::Account* A = site::AccountOf(B, net::SiteId::Ignite);
+	Expect(Bank == 100000 - 5150 && L.Ledger.size() == Lines0 + 2 && L.Ledger[1].Amount == -5000 && L.Ledger[1].Kind == 7 && L.Ledger[1].Label == "Deposit: Ignite" &&
+			L.Ledger[0].Amount == -150 && L.Ledger[0].Kind == ss::life::LedgerSites && L.Ledger[0].Label == "Ignite card fee",
+		"two bank lines: \"Deposit: Ignite\" -$50.00 (transfers) and \"Ignite card fee\" -$1.50 (poker sites)");
+	Expect(A && A->Cents == 5000 && A->Deposited == 5000 && A->Lines.size() == 1 && A->Lines[0].Cents == 5000 && A->Lines[0].Label == "Deposit" && A->BonusPending == 5000 &&
+			A->BonusExpires == T0 + 60 * SitesDay,
+		"the wallet holds $50 with its own line, and $50 of welcome bonus pending for 60 days");
+	Expect(B.RiverLine.BoostUntil == T0 + 60 * SitesDay && B.Done.count("retention") && !L.Inbox.empty() && L.Inbox.back().Thread == "riverline" && L.Inbox.back().Subject == "We noticed" &&
+			L.Inbox.back().From == "RiverLine Player Relations",
+		"RiverLine notices: \"We noticed.\" and Rewards one tier up for 60 days");
+	// A withdrawal: out of the wallet now, in transit, then one bank line net of the fee 72 to 120 hours later.
+	Expect(!site::Withdraw(B, net::SiteId::Ignite, 1999, "", T0).empty() && !site::Withdraw(B, net::SiteId::Ignite, 5001, "", T0).empty() &&
+			!site::Withdraw(B, net::SiteId::Ignite, 3000, "card", T0).empty(),
+		"refused: under the $20 minimum, more than the balance, by a method that doesn't pay out");
+	const Chips Bank0 = Bank;
+	const size_t Lines1 = L.Ledger.size();
+	Expect(site::Withdraw(B, net::SiteId::Ignite, 4000, "", T0).empty() && A->Cents == 1000 && B.Transfers.size() == 1 && A->Lines.back().Cents == -4000 &&
+			A->Lines.back().Label == "Withdrawal requested ($3.00 fee)" && Bank == Bank0 && L.Ledger.size() == Lines1,
+		"a $40 withdrawal leaves the wallet at once; the bank hears nothing yet");
+	const site::Transfer X = B.Transfers.front();
+	const double Hours = (X.ArrivesAt - X.RequestedAt) / 60.0;
+	Expect(X.Out && X.State == 0 && X.Cents == 4000 && X.FeeCents == 300 && Hours >= 72.0 && Hours <= 120.0 && std::floor(X.ArrivesAt) == X.ArrivesAt,
+		"in transit: arrives " + SitesNum(Hours) + " hours later, to the minute");
+	std::vector<std::pair<std::string, std::string>> Texts;
+	const ss::rep::Public P;
+	site::Step(B, L, Bank, P, 0, T0, X.ArrivesAt - 1.0, Texts);
+	Expect(Bank == Bank0 && B.Transfers.front().State == 0, "a minute before it's due, still in transit");
+	// The save in transit, and the same step on both: it lands once in each.
+	State Saved = SitesReload(L);
+	Chips SavedBank = Bank;
+	site::Step(B, L, Bank, P, 0, X.ArrivesAt - 1.0, X.ArrivesAt, Texts);
+	Expect(Bank == Bank0 + 3700 && B.Transfers.front().State == 1, "a step that ends on its minute lands it (review: to the minute, not a minute late)");
+	site::Step(B, L, Bank, P, 0, X.ArrivesAt, X.ArrivesAt + 3 * SitesDay, Texts);
+	site::Step(Saved.Sites, Saved, SavedBank, P, 0, X.ArrivesAt - 1.0, X.ArrivesAt + 2 * SitesDay, Texts);
+	Expect(Bank == Bank0 + 3700 && SavedBank == Bank && L.Ledger.front().Amount == 3700 && L.Ledger.front().Kind == 7 && L.Ledger.front().Label == "Withdrawal: Ignite" &&
+			L.Ledger.front().At == X.ArrivesAt && B.Transfers.front().State == 1,
+		"it lands once as \"Withdrawal: Ignite\" +$37.00 at its minute, and once after a save in transit");
+	State After = SitesReload(L);
+	Chips AfterBank = Bank;
+	site::Step(After.Sites, After, AfterBank, P, 0, X.ArrivesAt + 3 * SitesDay, X.ArrivesAt + 4 * SitesDay, Texts);
+	Expect(AfterBank == Bank, "a save after it landed never lands it again");
+	// Conservation (§1.2): the bank's change is its ledger's; the wallet's change its lines'; deposits out of the bank are the
+	// wallet's credit and the fee; a withdrawal is what landed and its fee.
+	Expect(Bank - 100000 == SitesLedgerSince(L, Lines0) && A->Cents == SitesLines(*A) && 5000 + 150 == A->Deposited + 150 && A->Withdrawn == 3700 + 300,
+		"conservation to the cent: bank, wallet, deposit and withdrawal");
+	// Thirty days after it landed, the transfer's record goes (the day's step); its money never comes back.
+	site::Step(B, L, Bank, P, 0, X.ArrivesAt + 31 * SitesDay, X.ArrivesAt + 32 * SitesDay, Texts);
+	Expect(B.Transfers.empty() && Bank == Bank0 + 3700, "a landed transfer's record goes after 30 days");
+	// RunItTwice: card in at 2.5%; out by bank in exactly 48 hours for $5; the tickets on a first deposit of $50 or more only.
+	State Small;
+	Chips SmallBank = 100000;
+	site::Join(Small.Sites, net::SiteId::RunItTwice, T0);
+	site::Deposit(Small.Sites, Small, SmallBank, net::SiteId::RunItTwice, 4999, "", T0);
+	site::Deposit(Small.Sites, Small, SmallBank, net::SiteId::RunItTwice, 6000, "", T0);
+	Expect(SmallBank == 100000 - 4999 - 125 - 6000 - 150 && Small.Tickets.empty(), "RunItTwice: 2.5% card fees; a first deposit under $50 brings no tickets");
+	State Big;
+	Chips BigBank = 100000;
+	site::Join(Big.Sites, net::SiteId::RunItTwice, T0);
+	site::Deposit(Big.Sites, Big, BigBank, net::SiteId::RunItTwice, 5000, "", T0);
+	Expect(Big.TicketsFor("runittwice.sunday-grind") == 1 && Big.TicketsFor("runittwice.supper-stack") == 2 &&
+			net::ForEvent("runittwice.sunday-grind").TicketOf("runittwice.sunday-grind") == "runittwice.sunday-grind",
+		"a first deposit of $50: a $22 Sunday Grind ticket and two $5.50 Supper Stack tickets ($33)");
+	site::Withdraw(Big.Sites, net::SiteId::RunItTwice, 2000, "", T0);
+	Expect(!Big.Sites.Transfers.empty() && Big.Sites.Transfers.front().ArrivesAt == T0 + 48 * 60 && Big.Sites.Transfers.front().FeeCents == 500, "RunItTwice pays out in 48 hours for $5");
+	// (Review.) Ignite's wait is drawn once per request from its id: each request its own wait, all inside 72 to 120 hours, whole
+	// minutes, the draw the id's own (so a save and a reload agree on it).
+	State Many;
+	Chips ManyBank = 1000000;
+	site::Join(Many.Sites, net::SiteId::Ignite, T0);
+	site::Deposit(Many.Sites, Many, ManyBank, net::SiteId::Ignite, 500000, "", T0);
+	double Shortest = 1.0e9;
+	double Longest = 0.0;
+	bool Drawn = true;
+	for (int K = 0; K < 24; ++K)
+	{
+		site::Withdraw(Many.Sites, net::SiteId::Ignite, 2000, "", T0 + 37.0 * K);
+		const site::Transfer& Y = Many.Sites.Transfers.back();
+		const double Wait = Y.ArrivesAt - Y.RequestedAt;
+		const double Want = std::round((72.0 + 48.0 * static_cast<double>(ss::Fnv1a(Y.Id) % 10001u) / 10000.0) * 60.0);
+		Shortest = std::min(Shortest, Wait / 60.0);
+		Longest = std::max(Longest, Wait / 60.0);
+		Drawn = Drawn && Wait == Want;
+	}
+	Expect(Drawn && Shortest >= 72.0 && Longest <= 120.0 && Longest - Shortest >= 24.0,
+		"Ignite's withdrawals: a wait drawn per request from its id, " + SitesNum(Shortest) + " to " + SitesNum(Longest) + " hours over 24 requests");
+	// (Review.) RiverLine notices once: a first deposit on the second rival brings no second "We noticed." and no fresh 60 days.
+	State Both;
+	Chips BothBank = 100000;
+	site::Join(Both.Sites, net::SiteId::Ignite, T0);
+	site::Join(Both.Sites, net::SiteId::RunItTwice, T0);
+	site::Deposit(Both.Sites, Both, BothBank, net::SiteId::Ignite, 2000, "", T0);
+	const double Boost = Both.Sites.RiverLine.BoostUntil;
+	site::Deposit(Both.Sites, Both, BothBank, net::SiteId::RunItTwice, 2000, "", T0 + 3 * SitesDay);
+	int Noticed = 0;
+	for (const ss::life::Letter& M : Both.Inbox)
+	{
+		Noticed += M.Thread == "riverline" && M.Subject == "We noticed" ? 1 : 0;
+	}
+	Expect(Noticed == 1 && Both.Sites.RiverLine.BoostUntil == Boost && Boost == T0 + 60 * SitesDay, "RiverLine's \"We noticed.\" comes once, on the first deposit anywhere");
+	// The buy-in and prize lines the session's settle writes: the wallet moved in the session, the lines say so.
+	State Play;
+	Chips PlayBank = 100000;
+	site::Join(Play.Sites, net::SiteId::Ignite, T0);
+	site::Deposit(Play.Sites, Play, PlayBank, net::SiteId::Ignite, 10000, "", T0);
+	site::Account* Pa = site::AccountOf(Play.Sites, net::SiteId::Ignite);
+	Pa->Cents -= 550;
+	site::OnBuyIn(Play.Sites, net::SiteId::Ignite, 550, 61, "Buy-in: $5.50 Spark Jackpot", T0 + 60);
+	site::Season Add;
+	Add.Points = 120;
+	Add.Won = 18600;
+	Add.FinalTables = 1;
+	Add.Events = 1;
+	Pa->Cents += 18600;
+	site::OnPrize(Play.Sites, net::SiteId::Ignite, 18600, "Prize: $5.50 Spark Jackpot", T0 + 300, Add);
+	Expect(Pa->Cents == SitesLines(*Pa) && Pa->RakeMonth == 61 && Pa->RakeLife == 61 && Pa->LifetimeWon == 18600 && Pa->LifetimeEvents == 1 && Pa->Hero.FinalTables == 1 &&
+			Pa->Hero.Points == 120.0 && Pa->Lines.size() == 3,
+		"a rival's buy-in and prize: one line each, the rake and the record counted, the wallet equal to its lines");
+}
+
+void RentLine()
+{
+	const double Deadline = ss::world::DayOn(2026, 11, 28) * SitesDay; // Friday's midnight
+	site::Book B;
+	site::Account A;
+	A.Site = net::SiteId::RunItTwice;
+	A.Cents = 6400;
+	B.Accounts.push_back(A);
+	site::Transfer X;
+	X.Id = "ignite:1";
+	X.Site = net::SiteId::Ignite;
+	X.Out = true;
+	X.Method = "bank";
+	X.Cents = 20000;
+	X.FeeCents = 300;
+	X.RequestedAt = Deadline - 26 * 60.0;
+	X.ArrivesAt = X.RequestedAt + 96 * 60.0;
+	B.Transfers.push_back(X);
+	std::string Line;
+	const Chips Due = ss::life::MonthlyRentCents;
+	Expect(!site::RentWarning(B, 90000, Due, Deadline, Deadline - 72 * 60.0 - 1.0, Line), "the rent line waits until 72 hours before the deadline");
+	Expect(site::RentWarning(B, 90000, Due, Deadline, Deadline - 72 * 60.0, Line), "72 hours out, the bank short and the bank and the sites enough: the line shows");
+	Expect(Line == "Rent is due Fri. $197.00 is on its way from Ignite (Sun to Tue), and $64.00 sits on RunItTwice. Site money can't pay rent.", "the line: " + Line);
+	Expect(!site::RentWarning(B, Due, Due, Deadline, Deadline - 60.0, Line) && !site::RentWarning(B, 50000, Due, Deadline, Deadline - 60.0, Line) &&
+			!site::RentWarning(B, 90000, Due, Deadline, Deadline, Line),
+		"no line when the bank covers it, when even the sites couldn't, or past the deadline");
+}
+
+void Invitations()
+{
+	const double After = (net::Def(net::SiteId::Ignite).LaunchDay + 3) * SitesDay + 600.0;
+	ss::rep::Public P;
+	P.OnlineEvents = 149;
+	Expect(!site::GateMet(net::SiteId::Ignite, P, 2, After), "Ignite: 149 paid online events, no");
+	P.OnlineEvents = 150;
+	Expect(site::GateMet(net::SiteId::Ignite, P, 2, After) && !site::GateMet(net::SiteId::Ignite, P, 1, After), "Ignite: 150 and two rents paid, yes; one rent, no (Act I isn't over)");
+	Expect(!site::GateMet(net::SiteId::Ignite, P, 2, (net::Def(net::SiteId::Ignite).LaunchDay - 1) * SitesDay + 600.0), "Ignite: never before it opens");
+	P.OnlineEvents = 300;
+	P.Abi100 = 1099;
+	int Why = -1;
+	Expect(!site::GateMet(net::SiteId::RunItTwice, P, 2, After), "RunItTwice: 300 events at a $10.99 average, no");
+	P.Abi100 = 1100;
+	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why) && Why == 0, "RunItTwice: 300 at $11.00, yes");
+	P.OnlineEvents = 299;
+	Expect(!site::GateMet(net::SiteId::RunItTwice, P, 2, After), "RunItTwice: 299 at $11.00, no");
+	P.OnlineSeriesTitles = 1;
+	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why) && Why == 1 && !site::GateMet(net::SiteId::RunItTwice, P, 1, After), "RunItTwice: an online series title, yes (after Act I)");
+	P.OnlineSeriesTitles = 0;
+	P.Partner = true;
+	Expect(site::GateMet(net::SiteId::RunItTwice, P, 2, After, &Why) && Why == 2, "RunItTwice: Kast Partner, yes");
+	// (Review.) The record's last-hundred numbers from History (rep::FromHistory): Abi100 averages the paid events only (a
+	// freeroll costs nothing), and a series title is a win in a series event on any site; a daily won, or a series event
+	// cashed short of first, is no title.
+	{
+		std::vector<ss::HistoryEntry> Last;
+		for (int K = 0; K < 100; ++K)
+		{
+			ss::HistoryEntry E;
+			E.Name = "Somewhere";
+			E.EventId = "ignite.spark-jackpot@" + std::to_string(40000 + K);
+			E.Place = 50;
+			E.BuyInCents = K < 40 ? 0 : K % 2 == 0 ? 1100 : 2200;
+			Last.push_back(E);
+		}
+		Last[0].EventId = "runittwice.open26-12@" + std::to_string(ss::world::DayOn(2026, 11, 18) * 1440 + 900);
+		Last[0].Place = 1;
+		Last[1].EventId = "runittwice.open26-13@" + std::to_string(ss::world::DayOn(2026, 11, 18) * 1440 + 1020);
+		Last[1].Place = 2;
+		Last[2].Place = 1; // a daily won
+		ss::rep::Public Q100;
+		ss::rep::FromHistory(Q100, Last);
+		Expect(Q100.Abi100 == 1650 && Q100.OnlineSeriesTitles == 1,
+			"the gates' record from History: a $16.50 average of the 60 paid (" + ss::Money(Q100.Abi100) + "), one series title (" + std::to_string(Q100.OnlineSeriesTitles) + ")");
+	}
+	// The step mails it the first day the gate is met, once; a decline brings one more letter 30 days later, and no third.
+	State L;
+	L.RentsPaid = 2;
+	Chips Bank = 0;
+	std::vector<std::pair<std::string, std::string>> Texts;
+	ss::rep::Public Q;
+	Q.OnlineEvents = 150;
+	site::Step(L.Sites, L, Bank, Q, 0, After, After + 60.0, Texts);
+	Expect(L.Inbox.empty(), "the gates are checked once a day, over a midnight");
+	site::Step(L.Sites, L, Bank, Q, 0, After + 60.0, After + SitesDay, Texts);
+	auto Letters = [&L](const char* Thread, int Kind) {
+		int N = 0;
+		for (const ss::life::Letter& M : L.Inbox)
+		{
+			N += M.Source == "site" && M.Thread == Thread && M.Kind == Kind ? 1 : 0;
+		}
+		return N;
+	};
+	Expect(Letters("ignite", site::LetterInvite) == 1 && Letters("runittwice", site::LetterInvite) == 0 && L.Inbox.back().From == "Bree Okafor, Ignite Partnerships" &&
+			ss::life::WantsAnswer(L.Inbox.back()),
+		"Ignite's invitation, from Bree Okafor, wanting an answer");
+	site::Step(L.Sites, L, Bank, Q, 0, After + SitesDay, After + 3 * SitesDay, Texts);
+	Expect(Letters("ignite", site::LetterInvite) == 1, "once");
+	L.Sites.Invites.front().State = 2; // declined (Session::AnswerInvite)
+	L.Sites.Invites.front().At = After + 3 * SitesDay;
+	site::Step(L.Sites, L, Bank, Q, 0, After + 3 * SitesDay, After + 32 * SitesDay, Texts);
+	Expect(Letters("ignite", site::LetterInvite) == 1, "a decline: nothing for 30 days");
+	site::Step(L.Sites, L, Bank, Q, 0, After + 32 * SitesDay, After + 34 * SitesDay, Texts);
+	Expect(Letters("ignite", site::LetterInvite) == 2 && L.Sites.Invites.front().State == 3, "30 days after a decline, the second letter");
+	L.Sites.Invites.front().State = 2;
+	site::Step(L.Sites, L, Bank, Q, 0, After + 34 * SitesDay, After + 90 * SitesDay, Texts);
+	Expect(Letters("ignite", site::LetterInvite) == 2, "and no third");
+	// Accepted: the account, and the welcome letter at the next step; no invitation for a site already joined.
+	State J;
+	J.RentsPaid = 2;
+	site::Join(J.Sites, net::SiteId::Ignite, After);
+	site::Step(J.Sites, J, Bank, Q, 0, After, After, Texts);
+	Expect(J.Inbox.size() == 1 && J.Inbox.front().Thread == "ignite" && J.Inbox.front().Kind == site::LetterRoutine && J.Inbox.front().Subject == "You're in",
+		"an account opened: Ignite's welcome letter at once");
+	// (Review.) One routine letter a week a company (§1.7): Ignite has written this week for seven days, and nobody else has.
+	Expect(site::WroteThisWeek(J, net::SiteId::Ignite, After + 6.9 * SitesDay) && !site::WroteThisWeek(J, net::SiteId::Ignite, After + 7.1 * SitesDay) &&
+			!site::WroteThisWeek(J, net::SiteId::RunItTwice, After + SitesDay),
+		"a routine letter holds that company's next one for a week, no other's");
+	site::Step(J.Sites, J, Bank, Q, 0, After, After + 2 * SitesDay, Texts);
+	Expect(J.Inbox.size() == 1, "and no invitation from a site already joined");
+}
+
+void Promotions()
+{
+	const double T0 = ss::world::DayOn(2026, 11, 10) * SitesDay + 600.0;
+	// Ignite's welcome: $5 into the wallet for each $20 of rake inside 60 days, never past the match; what's left expires.
+	State L;
+	Chips Bank = 100000;
+	site::Join(L.Sites, net::SiteId::Ignite, T0);
+	site::Deposit(L.Sites, L, Bank, net::SiteId::Ignite, 5000, "", T0);
+	site::Account* A = site::AccountOf(L.Sites, net::SiteId::Ignite);
+	site::OnBuyIn(L.Sites, net::SiteId::Ignite, 0, 1999, "Buy-in", T0 + 10);
+	Expect(A->BonusReleased == 0 && A->Cents == 5000, "$19.99 of rake releases nothing");
+	site::OnBuyIn(L.Sites, net::SiteId::Ignite, 0, 1, "Buy-in", T0 + 20);
+	Expect(A->BonusReleased == 500 && A->BonusPending == 4500 && A->Cents == 5500 && A->Lines.back().Label == "Welcome bonus released" && A->Lines.back().Cents == 500,
+		"$20.00 of rake releases $5 into the wallet, with its line");
+	site::OnBuyIn(L.Sites, net::SiteId::Ignite, 0, 30000, "Buy-in", T0 + 30);
+	Expect(A->BonusReleased == 5000 && A->BonusPending == 0 && A->Cents == 10000 && A->Cents == SitesLines(*A) + 0, "never more than the match ($50)");
+	State E;
+	Chips EBank = 100000;
+	site::Join(E.Sites, net::SiteId::Ignite, T0);
+	site::Deposit(E.Sites, E, EBank, net::SiteId::Ignite, 20000, "", T0);
+	site::Account* Ea = site::AccountOf(E.Sites, net::SiteId::Ignite);
+	Expect(Ea->BonusPending == 10000, "a $200 first deposit is matched up to $100");
+	site::OnBuyIn(E.Sites, net::SiteId::Ignite, 0, 4000, "Buy-in", T0 + 60);
+	std::vector<std::pair<std::string, std::string>> Texts;
+	const ss::rep::Public P;
+	site::Step(E.Sites, E, EBank, P, 0, T0 + 60, T0 + 60 * SitesDay + 1.0, Texts);
+	site::OnBuyIn(E.Sites, net::SiteId::Ignite, 0, 4000, "Buy-in", T0 + 61 * SitesDay);
+	Expect(Ea->BonusReleased == 1000 && Ea->BonusPending == 0, "after 60 days what's left ($90) expires, and rake releases nothing more");
+	// The Second Run Club on the 1st, into RunItTwice's wallet: $49.99 nothing, $50 15%, $250 20%, $1,000 25%, $4,000 30%.
+	const Chips Rakes[] = {4999, 5000, 25000, 100000, 400000};
+	const Chips Pays[] = {0, 750, 5000, 25000, 120000};
+	for (size_t K = 0; K < 5; ++K)
+	{
+		State R;
+		Chips RBank = 0;
+		site::Join(R.Sites, net::SiteId::RunItTwice, T0);
+		site::Account* Ra = site::AccountOf(R.Sites, net::SiteId::RunItTwice);
+		site::OnBuyIn(R.Sites, net::SiteId::RunItTwice, 0, Rakes[K], "Buy-in", T0);
+		const Chips Before = Ra->Cents;
+		const double First = site::NextMonthStart(T0);
+		site::Step(R.Sites, R, RBank, P, 0, T0, First + 60.0, Texts);
+		site::Step(R.Sites, R, RBank, P, 0, First + 60.0, First + 10 * SitesDay, Texts);
+		Expect(Ra->Cents - Before == Pays[K] && RBank == 0 && Ra->RakeMonth == 0 && Ra->MonthKey == "2026-12" && (Pays[K] == 0 || Ra->Lines.back().Label == "Second Run Club: November") &&
+				Ra->Vip == static_cast<int>(K),
+			"Second Run Club: " + ss::Money(Rakes[K]) + " of November's rake pays " + ss::Money(Pays[K]) + " on Dec 1, once, into the wallet");
+	}
+	// RiverLine Rewards on the 1st, into the bank as a prize (kind 4): $39.99 Bronze nothing; $40 Silver 8%; Gold 14%; Platinum
+	// 20%; Diamond 27%; and one tier up while the retention letter's boost runs.
+	const Chips Rl[] = {3999, 4000, 20000, 80000, 300000};
+	const Chips RlPay[] = {0, 320, 2800, 16000, 81000};
+	for (size_t K = 0; K < 5; ++K)
+	{
+		for (const bool Boost : {false, true})
+		{
+			State R;
+			Chips RBank = 0;
+			R.Sites.RiverLine.BoostUntil = Boost ? T0 + 60 * SitesDay : 0.0;
+			site::OnBuyIn(R.Sites, net::SiteId::RiverLine, 0, Rl[K], "Buy-in", T0);
+			const double First = site::NextMonthStart(T0);
+			const State Saved = SitesReload(R);
+			site::Step(R.Sites, R, RBank, P, 0, T0, First + 60.0, Texts);
+			State Again = Saved;
+			Chips AgainBank = 0;
+			site::Step(Again.Sites, Again, AgainBank, P, 0, T0, First + 2 * SitesDay, Texts);
+			site::Step(R.Sites, R, RBank, P, 0, First + 60.0, First + 3 * SitesDay, Texts);
+			const std::vector<site::TierInfo>& Tiers = site::RewardsTiers();
+			const int Tier = std::min(4, static_cast<int>(K) + (Boost ? 1 : 0));
+			const Chips Want = Boost ? static_cast<Chips>(std::llround(static_cast<double>(Rl[K]) * Tiers[static_cast<size_t>(Tier)].Permille / 1000.0)) : RlPay[K];
+			const bool Line = Want == 0 || (!R.Ledger.empty() && R.Ledger.front().Kind == 4 && R.Ledger.front().Amount == Want &&
+									   R.Ledger.front().Label == std::string("RiverLine Rewards: ") + Tiers[static_cast<size_t>(Tier)].Name + ", November");
+			Expect(RBank == Want && AgainBank == Want && Line && R.Sites.RiverLine.Rake == 0 && R.Sites.RiverLine.Tier == Tier,
+				std::string("RiverLine Rewards: ") + ss::Money(Rl[K]) + (Boost ? " with the boost" : "") + " pays " + ss::Money(RBank) + " on Dec 1, once (and once after a save)");
+			if (K == 1 && !Boost)
+			{
+				// Its key is kept: the same month handed back can't be paid twice.
+				R.Sites.RiverLine.MonthKey = "2026-11";
+				R.Sites.RiverLine.Rake = Rl[K];
+				const Chips Paid = RBank;
+				site::Step(R.Sites, R, RBank, P, 0, First - 60.0, First + 60.0, Texts);
+				Expect(RBank == Paid && R.Sites.Done.size() >= 1, "November's Rewards are paid once, by their key, even handed back");
+			}
+		}
+	}
+	// The month's rake is every RiverLine buy-in's fee; a rival's rake never counts toward it.
+	State M;
+	site::Join(M.Sites, net::SiteId::Ignite, T0);
+	site::OnBuyIn(M.Sites, net::SiteId::RiverLine, 550, 50, "Buy-in", T0);
+	site::OnBuyIn(M.Sites, net::SiteId::Ignite, 550, 61, "Buy-in", T0);
+	Expect(M.Sites.RiverLine.Rake == 50 && M.Sites.RiverLine.MonthKey == "2026-11", "Rewards count RiverLine's rake only, by month");
+}
+
+void HeroBySite()
+{
+	// RiverLine's boards never move for a rival's result (bug 7): StatsFrom reads RiverLine's events only.
+	const double Now = ss::world::DayOn(2026, 11, 20) * SitesDay + 6.0 * 60.0;
+	std::vector<ss::HistoryEntry> History;
+	for (const net::EventInstance& E : net::Shared().Window(Now - 600.0, Now - 300.0))
+	{
+		if (net::Shared().TemplateOf(E).BuyInCents > 0 && net::Shared().TemplateOf(E).BuyInCents <= 550)
+		{
+			ss::HistoryEntry H;
+			H.Name = net::Shared().TemplateOf(E).Name;
+			H.EventId = E.Id;
+			H.Place = 3;
+			H.Entrants = E.Entries;
+			H.Prize = 4000;
+			H.BuyInCents = net::Shared().TemplateOf(E).BuyInCents;
+			History.push_back(H);
+			break;
+		}
+	}
+	std::vector<ss::HistoryEntry> With = History;
+	for (const net::EventInstance& E : net::Site(net::SiteId::Ignite).Window(Now - 600.0, Now - 200.0))
+	{
+		ss::HistoryEntry H;
+		H.Name = net::Site(net::SiteId::Ignite).TemplateOf(E).Name;
+		H.EventId = E.Id;
+		H.Place = 1;
+		H.Entrants = E.Entries;
+		H.Prize = 25000;
+		H.BuyInCents = net::Site(net::SiteId::Ignite).TemplateOf(E).BuyInCents;
+		With.insert(With.begin(), H);
+		break;
+	}
+	const net::HeroStats A = net::StatsFrom("grinder_3c", History, Now);
+	const net::HeroStats B = net::StatsFrom("grinder_3c", With, Now);
+	Expect(With.size() == 2 && A.Earnings == B.Earnings && A.Wins == B.Wins && A.FinalTables == B.FinalTables && A.SeasonPoints == B.SeasonPoints && A.NightPoints == B.NightPoints &&
+			A.Tournaments == B.Tournaments && A.SeasonWins == B.SeasonWins && A.Cashes == B.Cashes && A.Best == B.Best && A.SeriesTitles == B.SeriesTitles,
+		"an Ignite win moves none of the player's RiverLine numbers (Earnings, Season, wins, Night Shift points)");
+	site::Book Bk;
+	site::Join(Bk, net::SiteId::Ignite, Now - SitesDay);
+	site::Account* Acc = site::AccountOf(Bk, net::SiteId::Ignite);
+	Acc->Hero.Year = 2026;
+	Acc->Hero.Points = 80.0;
+	Acc->Hero.Wins = 1;
+	Acc->LifetimeWon = 25000;
+	const net::HeroStats Ig = site::HeroOn(net::SiteId::Ignite, "grinder_3c", With, Bk, nullptr, Now);
+	const net::HeroStats Rl = site::HeroOn(net::SiteId::RiverLine, "grinder_3c", With, Bk, nullptr, Now);
+	Expect(Ig.Wins == 1 && Ig.SeasonPoints == 80.0 && Ig.SeasonWins == 1 && Ig.Earnings == 25000 && Ig.SiteBoard > 0.0 && Rl.Earnings == A.Earnings && Rl.Wins == 0,
+		"site::HeroOn: Ignite's boards read the account and Ignite's results (this month's points " + SitesNum(Ig.SiteBoard) + "); RiverLine's, StatsFrom's");
+	// (Review.) Ignite's Month board is this month's: in December, November's win counts nothing there.
+	const net::HeroStats InDecember = site::HeroOn(net::SiteId::Ignite, "grinder_3c", With, Bk, nullptr, ss::world::DayOn(2026, 12, 3) * SitesDay + 600.0);
+	Expect(InDecember.SiteBoard == 0.0 && InDecember.Wins == 1, "Ignite's Month board: November's points are gone in December (its win still counts)");
+	// (Review.) Past the last hundred (History is full), RiverLine's lifetime numbers come from the world's tracker, which follows
+	// the player everywhere, less every rival account's (bug 7): Earnings less LifetimeWon, Tournaments less LifetimeEvents,
+	// Season the world's RiverLine-only HeroPoints.
+	ss::world::World W;
+	W.Create(92u, 1440.0 + 127.0);
+	W.GrantHeroResults(160);
+	const std::vector<ss::HistoryEntry> Full(100, History.front());
+	site::Book Two;
+	site::Join(Two, net::SiteId::Ignite, Now - SitesDay);
+	site::Join(Two, net::SiteId::RunItTwice, Now - SitesDay);
+	site::AccountOf(Two, net::SiteId::Ignite)->LifetimeWon = 2500;
+	site::AccountOf(Two, net::SiteId::Ignite)->LifetimeEvents = 4;
+	site::AccountOf(Two, net::SiteId::RunItTwice)->LifetimeWon = 1500;
+	site::AccountOf(Two, net::SiteId::RunItTwice)->LifetimeEvents = 3;
+	const ss::world::Tracker& Tr = W.HeroStats();
+	const ss::world::TrackLine& Lv = Tr.ByStake[static_cast<size_t>(ss::world::TrackStake::Live)];
+	const net::HeroStats Whole = site::HeroOn(net::SiteId::RiverLine, "grinder_3c", Full, site::Book(), &W, Now);
+	const net::HeroStats Less = site::HeroOn(net::SiteId::RiverLine, "grinder_3c", Full, Two, &W, Now);
+	const net::HeroStats Short = site::HeroOn(net::SiteId::RiverLine, "grinder_3c", History, Two, &W, Now);
+	Expect(Tr.Prizes - Lv.Prizes > 4000 && Whole.Earnings == Tr.Prizes - Lv.Prizes && Less.Earnings == Whole.Earnings - 4000 && Whole.Tournaments == Tr.Events - Lv.Events &&
+			Less.Tournaments == Whole.Tournaments - 7 && Whole.SeasonPoints == W.HeroSeasonPoints() && Short.Earnings == A.Earnings && Short.Tournaments == A.Tournaments,
+		"RiverLine's lifetime row from a full History: the tracker's " + ss::Money(Whole.Earnings) + " less the rivals' $40.00 (" + ss::Money(Less.Earnings) +
+			"); a History short of a hundred reads StatsFrom");
+}
+
+void RivalNews()
+{
+	const net::Network& Ig = net::Site(net::SiteId::Ignite);
+	const net::Network& Rt = net::Site(net::SiteId::RunItTwice);
+	const int Launch = net::Def(net::SiteId::Ignite).LaunchDay;
+	net::HeroStats Hero;
+	Hero.Name = "grinder_3c";
+	Hero.Wins = 2;
+	Hero.FinalTables = 4;
+	Expect(Ig.News(Launch * SitesDay - 1.0, Hero, 40).empty(), "Ignite's News is empty before it opens (no history before launch)");
+	const std::vector<net::NewsItem> Week = Ig.News((Launch + 6) * SitesDay + 23 * 60.0, Hero, 60);
+	bool Opened = false;
+	bool Promo = false;
+	bool Overlay = false;
+	bool Quiet = true;
+	for (const net::NewsItem& It : Week)
+	{
+		Opened = Opened || (It.Title == "Ignite Poker is live" && It.Body.find("$25K Sunday Blaze") != std::string::npos && It.Tag == "LAUNCH");
+		Promo = Promo || It.Tag == "PROMO";
+		Overlay = Overlay || (It.Tag == "OVERLAY" && It.Title.find("overlays by") != std::string::npos && It.Body.find("Ignite covered the difference.") != std::string::npos);
+		Quiet = Quiet && It.Tag != "RCOP 2026" && It.Tag != "SCHEDULE" && It.Tag != "RECORD" && It.Tag != "YOU" && It.At >= Launch * SitesDay;
+	}
+	Expect(Opened && Promo, "Ignite's News opens with its launch (\"a $25K Sunday Blaze\") and its welcome");
+	Expect(Overlay, "Ignite's News reports the overlays it paid");
+	Expect(Quiet, "nothing of RiverLine's on Ignite's page, nothing before it opened");
+	bool Lobby = false;
+	for (const net::NewsItem& It : Rt.News(net::NightOneDay * SitesDay + 127.0, Hero, 20))
+	{
+		Lobby = Lobby || (It.Title == "RunItTwice opens its new lobby" && It.Tag == "NEW LOBBY");
+	}
+	Expect(Lobby, "RunItTwice's News on Night One: its new lobby");
+	bool Coming = false;
+	for (const net::NewsItem& It : Rt.News(ss::world::DayOn(2026, 11, 8) * SitesDay + 12 * 60.0, Hero, 60))
+	{
+		Coming = Coming || (It.Kind == net::NewsKind::Series && It.Title == "RunItTwice Open 2026 starts Nov 13");
+	}
+	Expect(Coming, "a week out, the RunItTwice Open is announced");
+}
+
+/**
+ * (Review.) The world's items go to the News of the site they name (§5.7, §5.10): a living world past Ignite's launch, each
+ * site's page against the world's headlines of the last days by their site flags. None crosses over.
+ */
+void RivalNewsIsTheirs()
+{
+	ss::world::World W;
+	W.Create(93u, 1440.0 + 127.0);
+	net::AttachAll(&W);
+	const double Now = ss::world::DayOn(2026, 11, 12) * SitesDay + 12.0 * 60.0;
+	W.AdvanceTo(Now);
+	std::map<int, std::set<std::string>> Titles;
+	for (const ss::world::WorldEvent& E : W.Events())
+	{
+		std::string Title;
+		std::string Body;
+		std::string Tag;
+		if (E.At > Now - 4.0 * SitesDay && E.At <= Now && W.Headline(E, Title, Body, Tag))
+		{
+			Titles[static_cast<int>(ss::world::FlagSiteOf(E.Flags))].insert(Title);
+		}
+	}
+	net::HeroStats Hero;
+	Hero.Name = "grinder_3c";
+	int Crossed = 0;
+	int Own = 0;
+	for (const net::SiteId S : {net::SiteId::RiverLine, net::SiteId::Ignite, net::SiteId::RunItTwice})
+	{
+		for (const net::NewsItem& It : net::Site(S).News(Now, Hero, 80))
+		{
+			for (const auto& By : Titles)
+			{
+				const bool Mine = By.first == static_cast<int>(S);
+				Crossed += !Mine && By.second.count(It.Title) > 0 ? 1 : 0;
+				Own += Mine && S != net::SiteId::RiverLine && By.second.count(It.Title) > 0 ? 1 : 0;
+			}
+		}
+	}
+	net::AttachAll(nullptr);
+	const size_t Rival = Titles[static_cast<int>(net::SiteId::Ignite)].size() + Titles[static_cast<int>(net::SiteId::RunItTwice)].size();
+	std::printf("rival news: %zu RiverLine and %zu rival world headlines in the last four days; %d on their own rival page, %d crossed\n",
+		Titles[static_cast<int>(net::SiteId::RiverLine)].size(), Rival, Own, Crossed);
+	Expect(Crossed == 0 && Rival > 0 && !Titles[static_cast<int>(net::SiteId::RiverLine)].empty(),
+		"every site's News carries only the world's items that name it (" + std::to_string(Rival) + " rival headlines, " + std::to_string(Own) + " on their page)");
+}
+
+/** Every rival's window, live state and listing over a few days: what the desk's worker reads. */
+uint64_t SitesRead(int From, int To)
+{
+	uint64_t H = 1469598103934665603ull;
+	for (net::SiteId S : SitesRivals)
+	{
+		const net::Network& N = net::Site(S);
+		for (const net::EventInstance& E : N.Window(From * SitesDay, To * SitesDay))
+		{
+			const net::LiveState L = N.Live(E, From * SitesDay + 600.0);
+			H = SitesFnv(H, E.Id + "|" + std::to_string(E.Entries) + "|" + std::to_string(E.Pool) + "|" + std::to_string(L.Entries) + "|" + std::to_string(static_cast<int>(L.St)));
+		}
+	}
+	return H;
+}
+
+void Threading()
+{
+	// The contract (§5.8): the registry is built and prewarmed on the game thread before the desk's worker runs; the worker's
+	// world reads only const paths. A world loaded on a worker reads the rivals exactly as the game thread does.
+	ss::world::World W;
+	W.Create(91u, 1440.0 + 127.0);
+	net::AttachAll(&W);
+	const int Day = net::NightOneDay;
+	const uint64_t Main = SitesRead(Day, Day + 3);
+	std::string Text;
+	W.Write(Text);
+	uint64_t Worker = 0;
+	double Launched = -2.0;
+	std::thread T([&]() {
+		ss::world::World Desk;
+		SitesReadWorld(Text, Desk);
+		Launched = Desk.SiteLaunched(net::SiteId::Ignite);
+		Worker = SitesRead(Day, Day + 3);
+	});
+	const uint64_t Again = SitesRead(Day, Day + 3);
+	T.join();
+	net::AttachAll(nullptr);
+	Expect(Worker == Main && Again == Main && Launched == W.SiteLaunched(net::SiteId::Ignite), "a desk-worker world reads the rivals identically while the game thread does");
+}
+
+void SaveLines()
+{
+	const double T0 = ss::world::DayOn(2026, 11, 13) * SitesDay + 600.0;
+	State L;
+	Chips Bank = 100000;
+	Expect([&L]() {
+		std::string S;
+		site::WriteLines(L, S);
+		return S.empty();
+	}(),
+		"an empty book writes nothing (an old save round-trips byte for byte)");
+	site::Join(L.Sites, net::SiteId::Ignite, T0);
+	site::Join(L.Sites, net::SiteId::RunItTwice, T0);
+	site::Deposit(L.Sites, L, Bank, net::SiteId::Ignite, 7777, "", T0);
+	site::Deposit(L.Sites, L, Bank, net::SiteId::RunItTwice, 5000, "", T0);
+	site::Withdraw(L.Sites, net::SiteId::RunItTwice, 2500, "", T0 + 1.0 / 3.0);
+	site::OnBuyIn(L.Sites, net::SiteId::Ignite, 550, 61, "Buy-in: tab\tand \\ backslash", T0 + 2);
+	site::OnBuyIn(L.Sites, net::SiteId::RiverLine, 1100, 100, "Buy-in", T0 + 3);
+	L.Sites.Invites.push_back({net::SiteId::Ignite, T0 - 0.125, 1});
+	std::string A;
+	site::WriteLines(L, A);
+	const State Back = SitesReload(L);
+	std::string B;
+	site::WriteLines(Back, B);
+	Expect(!A.empty() && A == B && Back.Sites.Accounts.size() == 2 && Back.Sites.Transfers.size() == 1 && Back.Sites.Accounts[0].Lines.back().Label == "Buy-in: tab\tand \\ backslash",
+		"the site lines round-trip exactly (" + std::to_string(A.size()) + " bytes)");
+	// A whole save: Serialize(Parse(S)) == S with the site lines in it.
+	ss::SaveData D;
+	D.Life = L;
+	D.BankrollCents = Bank;
+	const std::string S1 = D.Serialize();
+	ss::SaveData E;
+	Expect(ss::SaveData::Parse(S1, E) && E.Serialize() == S1 && S1.find("site\tacct\t1\t") != std::string::npos && S1.find("site\trewards\t2026-11\t100\t") != std::string::npos,
+		"a save with an account, a transfer, an invitation and Rewards reads back and writes back byte for byte");
+	// A new career sets every bit and holds nothing: no site line (RiverLine-only careers' saves are as they were). A month
+	// closed with nothing still keeps its key, so a rewards line once written always reads back the same.
+	State Fresh;
+	Fresh.Update2LinesRead = ~0u;
+	std::string None;
+	site::WriteLines(Fresh, None);
+	State R;
+	std::vector<std::string> Line = {"site", "rewards", "2026-12", "0", "0", "0"};
+	site::ReadLine(Line, R);
+	std::string Out;
+	site::WriteLines(R, Out);
+	Expect(None.empty() && Out == "site\trewards\t2026-12\t0\t0\t0\n", "a new career writes no site line; a rewards line with only its month reads back the same");
+}
+
+void SitesMarks()
+{
+	const double T0 = ss::world::DayOn(2026, 11, 6) * SitesDay + 23 * 60.0;
+	State L;
+	Chips Bank = 100000;
+	site::Join(L.Sites, net::SiteId::Ignite, T0);
+	site::Join(L.Sites, net::SiteId::RunItTwice, T0);
+	site::Deposit(L.Sites, L, Bank, net::SiteId::Ignite, 20000, "", T0);
+	site::Withdraw(L.Sites, net::SiteId::Ignite, 20000, "", T0);
+	site::OnBuyIn(L.Sites, net::SiteId::RiverLine, 550, 50, "Buy-in", T0);
+	const std::vector<ss::life::Mark> M = site::Marks(L.Sites, T0, T0 + 70 * SitesDay);
+	std::map<int, std::string> Seen;
+	for (const ss::life::Mark& K : M)
+	{
+		Seen[K.Kind] = Seen[K.Kind].empty() ? K.Label : Seen[K.Kind];
+	}
+	Expect(Seen[site::MarkTransfer] == "Ignite withdrawal $197.00 arrives" && Seen[site::MarkRewards] == "RiverLine Rewards" && Seen[site::MarkBonus] == "Ignite welcome bonus ends" &&
+			Seen[site::MarkSeries] == "RunItTwice Open 2026 starts",
+		"the marks: a withdrawal arriving, Rewards day, the bonus's end, a joined rival's series");
+	bool Ordered = std::is_sorted(M.begin(), M.end(), [](const ss::life::Mark& A, const ss::life::Mark& B) { return A.At < B.At; });
+	Expect(Ordered && site::Marks(L.Sites, T0 + 200 * SitesDay, T0 + 201 * SitesDay).empty(), "in time order, and none where nothing falls");
+}
+
+void StepBudget()
+{
+	// §9: VideoStep + SiteStep over a 30-day skip <= 2 ms. A busy book: two accounts, a pending withdrawal each, Rewards, invites.
+	const double T0 = ss::world::DayOn(2026, 11, 20) * SitesDay + 600.0;
+	State L;
+	L.RentsPaid = 2;
+	Chips Bank = 500000;
+	site::Join(L.Sites, net::SiteId::Ignite, T0);
+	site::Join(L.Sites, net::SiteId::RunItTwice, T0);
+	site::Deposit(L.Sites, L, Bank, net::SiteId::Ignite, 30000, "", T0);
+	site::Deposit(L.Sites, L, Bank, net::SiteId::RunItTwice, 30000, "", T0);
+	site::Withdraw(L.Sites, net::SiteId::Ignite, 5000, "", T0);
+	site::Withdraw(L.Sites, net::SiteId::RunItTwice, 5000, "", T0);
+	for (int K = 0; K < 40; ++K)
+	{
+		site::OnBuyIn(L.Sites, net::SiteId::RunItTwice, 1100, 88, "Buy-in", T0 + K);
+		site::OnBuyIn(L.Sites, net::SiteId::RiverLine, 550, 50, "Buy-in", T0 + K);
+	}
+	ss::rep::Public P;
+	P.OnlineEvents = 400;
+	std::vector<std::pair<std::string, std::string>> Texts;
+	State First = L;
+	Chips FirstBank = Bank;
+	const auto C0 = std::chrono::steady_clock::now();
+	site::Step(First.Sites, First, FirstBank, P, 0, T0, T0 + 30 * SitesDay, Texts);
+	const double Ms = SitesSeconds(C0) * 1000.0;
+	State Daily = L;
+	Chips DailyBank = Bank;
+	const auto C1 = std::chrono::steady_clock::now();
+	for (int D = 0; D < 30; ++D)
+	{
+		site::Step(Daily.Sites, Daily, DailyBank, P, 0, T0 + D * SitesDay, T0 + (D + 1) * SitesDay, Texts);
+	}
+	const double DailyMs = SitesSeconds(C1) * 1000.0;
+	std::printf("SiteStep: a 30-day skip %.3f ms; 30 daily steps %.3f ms\n", Ms, DailyMs);
+	Expect(Ms <= 2.0, "SiteStep over a 30-day skip takes " + SitesNum(Ms) + " ms (2 ms or less)");
+	Expect(FirstBank == DailyBank && First.Ledger.size() == Daily.Ledger.size(), "a 30-day skip lands what 30 daily steps do, to the cent");
+}
+
+// ------------------------------------------------------------------ the soft population's bound (§5.3)
+
+/**
+ * Smart pace's auto-fold, as the style harness plays its grader heroes (styles_main.cpp, SmartFolds): junk facing a price
+ * folds without a decision, as the session would have folded it.
+ */
+bool SitesSmartFolds(const ss::PlayerView& V)
+{
+	if (V.CurrentStreet != ss::Street::Preflop || V.CanCheck || V.Hole.size() != 2)
+	{
+		return false;
+	}
+	const double Price = static_cast<double>(V.ToCall) / static_cast<double>(std::max<Chips>(1, V.Pot + V.ToCall));
+	if (Price < 0.25)
+	{
+		return false;
+	}
+	const double Pct = ss::HandPercentile(V.Hole[0], V.Hole[1]);
+	const ss::StreetSummary Sum = ss::PreflopSummary(V);
+	const ss::PublicSeat& Me = V.Seats[static_cast<size_t>(V.Me)];
+	const double StackBb = static_cast<double>(Me.Stack + Me.StreetBet) / static_cast<double>(std::max<Chips>(1, V.BigBlind));
+	if (StackBb <= 15.0 && Sum.Raises == 0)
+	{
+		return Pct > ss::PushRange(StackBb, ss::PlayersBehind(V, V.Me)) * 1.4;
+	}
+	if (Sum.Raises == 0)
+	{
+		static const double Open[9] = {0.55, 0.5, 1.0, 0.16, 0.18, 0.2, 0.24, 0.28, 0.36};
+		return Pct > Open[static_cast<int>(ss::PositionOf(V, V.Me))];
+	}
+	return V.Me == V.BbIdx ? Pct > 0.5 : Pct > 0.22;
+}
+
+/** The grader's best option (the coach's best play). */
+ss::PlayerAction SitesGraderBest(const ss::PlayerView& V, ss::Rng& GradeRng)
+{
+	const ss::DecisionAnalysis A = ss::AnalyzeDecision(V, GradeRng, 1200);
+	if (A.Options.empty())
+	{
+		return V.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Fold();
+	}
+	size_t Best = 0;
+	for (size_t I = 1; I < A.Options.size(); ++I)
+	{
+		Best = A.Options[I].Ev > A.Options[Best].Ev ? I : Best;
+	}
+	return A.Options[Best].Action;
+}
+
+/** One 9-player sit-and-go at a site's rake (50/30/20 of what's left), the grader-best hero against Pop: the hero's prize. */
+Chips SitesSng(const std::string& Pop, const std::string& Seed, Chips BuyIn, Chips Fee)
+{
+	ss::TournamentSpec S;
+	S.Id = "sites-sng";
+	S.Name = "Sit and go";
+	S.BuyInCents = BuyIn;
+	S.FeeCents = Fee;
+	S.Entrants = 9;
+	S.StartingStack = 5000;
+	S.LevelMinutes = 5.0;
+	S.SecondsPerHand = 42.0;
+	S.Population = Pop;
+	S.Speed = "Turbo";
+	S.TableSize = 9;
+	ss::Tournament T(S, "Hero", Seed);
+	const Chips Pool = 9 * (BuyIn - Fee);
+	const Chips First = static_cast<Chips>(std::llround(0.5 * static_cast<double>(Pool)));
+	const Chips Second = static_cast<Chips>(std::llround(0.3 * static_cast<double>(Pool)));
+	T.Payouts = {First, Second, Pool - First - Second};
+	ss::Rng GradeRng(Seed + ":grade");
+	for (int Guard = 0; !T.bFinished && !T.Hero().Busted && Guard < 20000; ++Guard)
+	{
+		std::vector<ss::TEvent> Events;
+		std::unique_ptr<ss::Hand> H = T.StartTick(Events);
+		if (H)
+		{
+			for (int Steps = 0; !H->bComplete && Steps < 1000; ++Steps)
+			{
+				const int Idx = H->ToAct;
+				ss::PlayerAction Act;
+				if (H->Seats[static_cast<size_t>(Idx)].Id == ss::HeroId)
+				{
+					const ss::PlayerView V = ss::MakeView(*H, Idx);
+					Act = T.HeroSitsOut || SitesSmartFolds(V) ? (V.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Fold()) : SitesGraderBest(V, GradeRng);
+				}
+				else
+				{
+					Act = T.BotDecisionFor(*H, true).Action;
+				}
+				if (!H->Act(Act))
+				{
+					const ss::LegalActions L = H->GetLegalActions();
+					H->Act(L.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Fold());
+				}
+			}
+		}
+		T.FinishTick(H.get(), nullptr);
+	}
+	return T.Hero().PrizeCents;
+}
+
+/**
+ * The soft population is bounded (§5.3): the grader-best hero's after-rake ROI on Ignite (the "soft" tables, 11% rake) is at
+ * most 1.5x RiverLine's (micro tables, FeeOf) at the same buy-in, $5.50. Sit-and-gos on the same seeds; Count of each.
+ */
+void SoftBound(int Count)
+{
+	const auto C0 = std::chrono::steady_clock::now();
+	const Chips BuyIn = 550;
+	const Chips IgFee = net::Def(net::SiteId::Ignite).Rake.Fee(BuyIn);
+	const Chips RlFee = net::FeeOf(BuyIn);
+	// Every sit-and-go stands alone (its own seed, tournament and grader), so three threads split them; the sums are taken in
+	// seed order, so the result is the same however they split.
+	std::vector<double> Soft(static_cast<size_t>(Count), 0.0);
+	std::vector<double> Micro(static_cast<size_t>(Count), 0.0);
+	const int Threads = std::max(1, std::min(3, Count));
+	std::vector<std::thread> Pool;
+	for (int Th = 0; Th < Threads; ++Th)
+	{
+		Pool.emplace_back([&, Th]() {
+			for (int K = Th; K < Count; K += Threads)
+			{
+				const std::string Seed = "sites-soft:" + std::to_string(K);
+				Soft[static_cast<size_t>(K)] = static_cast<double>(SitesSng("soft", Seed, BuyIn, IgFee)) / static_cast<double>(BuyIn) - 1.0;
+				Micro[static_cast<size_t>(K)] = static_cast<double>(SitesSng("micro", Seed, BuyIn, RlFee)) / static_cast<double>(BuyIn) - 1.0;
+			}
+		});
+	}
+	for (std::thread& T : Pool)
+	{
+		T.join();
+	}
+	double SoftRoi = 0.0;
+	double MicroRoi = 0.0;
+	for (int K = 0; K < Count; ++K)
+	{
+		SoftRoi += Soft[static_cast<size_t>(K)];
+		MicroRoi += Micro[static_cast<size_t>(K)];
+	}
+	SoftRoi /= std::max(1, Count);
+	MicroRoi /= std::max(1, Count);
+	std::printf("soft bound: the grader-best hero's ROI over %d $5.50 sit-and-gos: Ignite %+.1f%% (soft, 11%% rake), RiverLine %+.1f%% (micro, FeeOf), ratio %.2f; %.1fs\n",
+		Count, 100.0 * SoftRoi, 100.0 * MicroRoi, MicroRoi > 0.0 ? SoftRoi / MicroRoi : 0.0, SitesSeconds(C0));
+	const double Soft0 = SoftRoi;
+	const double Micro0 = MicroRoi;
+	Expect(Micro0 > 0.0 && Soft0 <= 1.5 * Micro0,
+		"the soft population's bound: Ignite's after-rake ROI " + SitesNum(100.0 * Soft0) + "% is at most 1.5x RiverLine's " + SitesNum(100.0 * Micro0) + "%");
+}
+
+void SitesCopy()
+{
+	std::map<std::string, std::string> Vars = copylint::Samples();
+	Vars.insert({{"Site", "Ignite"}, {"Month", "November"}, {"Tier", "Gold"}, {"Rate", "14%"}, {"Rake", "$212.40"}, {"Released", "$35.00"},
+		{"Left", "$65.00"}, {"Min", "$10.00"}, {"Fee", "$1.50"}, {"Why", "A series title gets noticed around here."}, {"Money", "$197.00 is on its way from Ignite (Mon to Wed)."},
+		{"Gtd", "$25K"}, {"Entries", "410"}, {"Events", "40"}, {"Days", "17"}, {"Series", "RunItTwice Open 2026"}, {"Buyin", "$530"}, {"Window", "Mon to Wed"}, {"Method", "card"}});
+	std::vector<std::pair<std::string, std::string>> Sentences;
+	for (const std::string& S : site::Inventory())
+	{
+		Sentences.emplace_back("sites", S);
+	}
+	int Problems = copylint::Run("sites", Sentences, copylint::LetterBody, Vars);
+	// Titles, subjects and labels: no stop at the end, otherwise the same rules (filled, no doubled space, nothing banned).
+	for (const std::string& S : site::CopyLabels())
+	{
+		const std::string Why = copylint::Check(S + ".", copylint::MailSubject, Vars);
+		if (!Why.empty())
+		{
+			++Problems;
+			std::printf("COPY (sites labels) \"%s\": %s\n", S.c_str(), Why.c_str());
+		}
+	}
+	Expect(Problems == 0 && site::Inventory().size() >= 40, "every line the sites write passes the copy lint (" + std::to_string(site::Inventory().size()) + " sentences)");
+	// In-world copy never says AI, bot or autoplay (U1).
+	bool Silent = true;
+	for (const std::string& S : site::Inventory())
+	{
+		std::string Word;
+		for (const char Ch : copylint::Lower(S) + " ")
+		{
+			if (Ch >= 'a' && Ch <= 'z')
+			{
+				Word.push_back(Ch);
+				continue;
+			}
+			Silent = Silent && Word != "ai" && Word != "bot" && Word != "bots" && Word != "autoplay";
+			Word.clear();
+		}
+	}
+	Expect(Silent, "the sites' copy never mentions AI, bots or autoplay");
+	// The trademark screen over the sites, their reps, series, events, promotions and methods: no real site, wallet or platform,
+	// none of the ten closed sites the world already tells of.
+	const char* Real[] = {"pokerstars", "ggpoker", "partypoker", "888", "wsop", "world series", "wpt", "run it once", "upswing", "bodog", "ignition", "americas cardroom", "natural8",
+		"bovada", "pokerbros", "global poker", "acr poker", "youtube", "twitch", "kick", "tiktok", "rumble", "vimeo", "dailymotion", "skrill", "neteller", "paypal", "venmo",
+		"ecopayz", "muchbetter", "betonline", "coinpoker", "winamax", "unibet", "northpot", "bluffharbor", "aceline", "chipcity", "felt republic", "pocketrocket", "riverbend",
+		"saltwater poker", "cardroom 88", "tiltproof", "monster", "red bull", "rockstar"};
+	std::vector<std::string> Names;
+	for (net::SiteId S : SitesRivals)
+	{
+		const net::SiteDef& D = net::Def(S);
+		Names.insert(Names.end(), {D.Name, D.Tagline, D.Rep, D.RepTitle, D.TeamName});
+		for (const net::CashMethod& M : D.Cashier)
+		{
+			Names.push_back(M.Name);
+		}
+		for (const net::EventTemplate& T : net::Site(S).Templates())
+		{
+			Names.push_back(T.Name + " " + T.Blurb);
+		}
+		for (const net::SeriesInfo& Sr : net::Site(S).Series())
+		{
+			Names.push_back(Sr.Name + " " + Sr.Tagline);
+		}
+	}
+	for (const site::TierInfo& T : site::SecondRunTiers())
+	{
+		Names.push_back(T.Name);
+	}
+	Names.push_back("Ignite Poker Second Run Club RiverLine Rewards");
+	std::string Hit;
+	for (const std::string& N : Names)
+	{
+		for (const char* R : Real)
+		{
+			Hit += copylint::Lower(N).find(R) != std::string::npos ? std::string(R) + " in \"" + N + "\" " : std::string();
+		}
+	}
+	Expect(Hit.empty(), "the trademark screen passes over the sites, reps, series, events and promotions" + (Hit.empty() ? std::string() : ": " + Hit));
+}
 } // namespace sites_test
 
 int main(int Argc, char** Argv)
 {
-	(void)Argc;
-	(void)Argv;
 	using namespace sites_test;
 	const auto T0 = std::chrono::steady_clock::now();
+	if (Argc > 1 && std::string(Argv[1]) == "soft")
+	{
+		// sites_test soft [count]: the soft population's bound on more sit-and-gos than the default run plays.
+		SoftBound(Argc > 2 ? std::max(1, std::atoi(Argv[2])) : 2000);
+		std::printf("sites tests: %d passed, %d failed in %.1fs\n", Passed, Failures, SitesSeconds(T0));
+		return Failures == 0 ? 0 : 1;
+	}
 	RiverLineUnchanged();
 	RiverLinePinned();
 	RakeHook();
@@ -952,6 +2253,23 @@ int main(int Argc, char** Argv)
 	SoftPopulation();
 	Skins();
 	ReadyForB3();
+	// B3 (core-sites): the real rivals.
+	RealSites();
+	RealSchedules();
+	LaunchAndFields();
+	Money();
+	RentLine();
+	Invitations();
+	Promotions();
+	HeroBySite();
+	RivalNews();
+	RivalNewsIsTheirs();
+	Threading();
+	SaveLines();
+	SitesMarks();
+	StepBudget();
+	SitesCopy();
+	SoftBound(300);
 	std::printf("sites tests: %d passed, %d failed in %.1fs\n", Passed, Failures, SitesSeconds(T0));
 	return Failures == 0 ? 0 : 1;
 }

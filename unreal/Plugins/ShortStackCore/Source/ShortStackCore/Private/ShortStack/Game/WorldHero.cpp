@@ -629,9 +629,11 @@ void World::HeroFinished(const std::string& EventId, int Place, Chips Prize, con
 		const Pending& Ev = *P;
 		const bool Online = Ev.Online;
 		const double Pts = Ev.BuyIn > 0 ? net::Points(Place, Ev.Entries, Ev.BuyIn) : 0.0;
-		if (Online && !Again)
+		if (Online && !Again && net::SiteOf(EventId) == net::SiteId::RiverLine)
 		{
-			HeroPoints += Pts; // (once: a result told twice isn't two results)
+			// (Once: a result told twice isn't two results. RiverLine's points only: Player of the Year is RiverLine's title, and
+			// a rival's points stay in the player's book on that site, update 2 §5.8. The stats page below is every site's.)
+			HeroPoints += Pts;
 		}
 		else if (!Online && !Again && CircuitEvent(static_cast<LiveKind>(Ev.Kind), (Ev.Kinds & KindSatellite) != 0))
 		{

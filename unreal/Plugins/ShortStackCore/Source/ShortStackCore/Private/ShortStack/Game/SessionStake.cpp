@@ -679,7 +679,15 @@ std::string Session::DebugStake(const std::string& Args)
 void Session::StakeEntered(const std::string& EventId, Chips BuyInCents, const life::Funding& F)
 {
 	const std::string Name = Joined.Spec.Id == EventId ? Joined.Spec.Name : EventId;
-	const Chips Before = F.From == life::Paid::Package ? BankrollCents : BankrollCents + BuyInCents;
+	// A shot is a buy-in over 5% of the player's roll before it (next_segment_spec §2.9). Update 2 (§1.2): the roll is the
+	// bank and the money on the rival sites (0 on a RiverLine-only career), whichever pot this buy-in came out of: a $50
+	// deposit on a site doesn't make every $5.50 there a shot. OnlineEntered collects the pieces into the event's own pot.
+	Chips Have = BankrollCents;
+	for (const site::Account& A : Life.Sites.Accounts)
+	{
+		Have += A.Cents;
+	}
+	const Chips Before = F.From == life::Paid::Package ? Have : Have + BuyInCents;
 	stake::OnlineEntered(Life.Stakes, BankrollCents, Life, EventId, Name, BuyInCents, F, Before, HeroTilt, WorldMinutes());
 }
 

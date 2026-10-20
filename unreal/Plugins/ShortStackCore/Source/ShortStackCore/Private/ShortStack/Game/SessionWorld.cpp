@@ -1,7 +1,9 @@
 #include "ShortStack/Game/Session.h"
 
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
+#include "WorldSim.h"
 
 // The world's side of the session (update 2 §3, §6.2): how the career's world began, and the world's debug command
 // (ss.World.Start). Phase A, day 1 (the lead). core-world owns this file from here.
@@ -15,9 +17,30 @@ world::Start Session::WorldStart() const
 
 std::string Session::DebugWorld(const std::string& Args)
 {
-	// ss.World.Start: the world's start mode, its version, when its books opened and Team RiverLine's size (the rival
-	// sites' launch days join at G3).
-	(void)Args;
+	// ss.Site.Launch <site> (§6.6, testing; SessionSites.cpp forwards it as "sitelaunch <key>"): a rival opens in this world
+	// now, its news with it, instead of on its own day.
+	if (Args.rfind("sitelaunch", 0) == 0)
+	{
+		const std::string Key = Args.size() > 11 ? Args.substr(11) : std::string();
+		net::SiteId Site = net::SiteId::Count;
+		for (const net::SiteDef& D : net::Sites())
+		{
+			Site = D.Id != net::SiteId::RiverLine && D.Key == Key ? D.Id : Site;
+		}
+		if (Site == net::SiteId::Count || !LivingWorld.Ready())
+		{
+			return "ss.Site.Launch <ignite|runittwice>";
+		}
+		const double Was = LivingWorld.SiteLaunched(Site);
+		if (!world::Sim::LaunchNow(LivingWorld, Site))
+		{
+			return net::Def(Site).Name + " is already open (since " + net::DateLabel(net::DayOf(Was)) + " " + std::to_string(world::YearOf(net::DayOf(Was))) + ").";
+		}
+		Save();
+		return net::Def(Site).Name + " opens now. " + DebugWorld("start");
+	}
+	// ss.World.Start: the world's start mode, its version, when its books opened and Team RiverLine's size, then each rival
+	// site's launch day, its regulars and its team.
 	const bool Blank = LivingWorld.Began() == world::Start::Blank;
 	int Team = 0;
 	for (const world::Npc& N : LivingWorld.People())
@@ -43,6 +66,36 @@ std::string Session::DebugWorld(const std::string& Args)
 		Out += " (signs on results from " + net::DateLabel(Today < Opened ? Opened : NextFirst(Today)) + ")";
 	}
 	Out += ".";
+	// The rival sites (update 2 §5.9, G3): when each opens in this world, how many play there, and its team.
+	for (const net::SiteDef& D : net::Sites())
+	{
+		if (D.Id == net::SiteId::RiverLine)
+		{
+			continue;
+		}
+		const double Launch = LivingWorld.SiteLaunched(D.Id);
+		if (Launch < 0.0)
+		{
+			Out += " " + D.Name + ": not in this world yet.";
+			continue;
+		}
+		const int Day = net::DayOf(Launch);
+		int Members = 0;
+		int Pros = 0;
+		for (const world::Npc& N : LivingWorld.People())
+		{
+			const bool There = N.Playing() && ((N.Sites >> static_cast<int>(D.Id)) & 1) != 0;
+			Members += There ? 1 : 0;
+			Pros += There && !D.TeamName.empty() && N.Sponsor == D.TeamName ? 1 : 0;
+		}
+		Out += " " + D.Name + (Launch <= LivingWorld.Clock() ? ": open since " : ": opens ") + net::DateLabel(Day) + " " + std::to_string(world::YearOf(Day)) + ", " +
+			std::to_string(Members) + " regulars";
+		if (!D.TeamName.empty() && (D.TeamSize > 0 || Pros > 0))
+		{
+			Out += ", " + D.TeamName + " " + std::to_string(Pros) + (Pros == 1 ? " pro" : " pros");
+		}
+		Out += ".";
+	}
 	return Out;
 }
 } // namespace ss

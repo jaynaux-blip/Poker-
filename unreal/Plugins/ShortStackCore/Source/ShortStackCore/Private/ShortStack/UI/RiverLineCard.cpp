@@ -22,9 +22,25 @@ using namespace rlnet_detail;
 
 namespace rlcard_detail
 {
-const Color CardInk = Hex(0xe6edf7);
-const Color CardSoft = Hex(0xc3cedf);
-const Color CardRule = Hex(0x223352);
+// The card's inks, read each draw: a card opened on a rival's board wears its skin (update 2 §1.8).
+Color CardInk()
+{
+	return pal::Ink;
+}
+Color CardSoft()
+{
+	return rlsites_detail::SitesTone(0xc3cedf);
+}
+Color CardRule()
+{
+	return pal::Line;
+}
+
+/** Where someone arrived (update 2 §5.9): RiverLine, or the site their journey's first step names (Ignite's own arrivals). */
+std::string CardJoinedSite(const world::Npc* N)
+{
+	return N && !N->Path.empty() && N->Path.front().Kind == world::StepKind::Joined && !N->Path.front().What.empty() ? N->Path.front().What : std::string("RiverLine");
+}
 
 Color RepColor(int K)
 {
@@ -92,7 +108,7 @@ float NetBadgeRail(Canvas& Cv, Ui& UI, const RiverLine* RL, const std::vector<ba
 		const std::string L = static_cast<int>(K) < Labels ? badge::Label(Row[K]) : std::string();
 		if (!L.empty())
 		{
-			Xx += 6.0f + NetSpaced(Cv, L, Xx + 6.0f, Cy + LabelSize * 0.36f, LabelSize, 800, rlcard_detail::CardSoft, 1.2f);
+			Xx += 6.0f + NetSpaced(Cv, L, Xx + 6.0f, Cy + LabelSize * 0.36f, LabelSize, 800, rlcard_detail::CardSoft(), 1.2f);
 		}
 		Xx += 8.0f;
 	}
@@ -147,20 +163,20 @@ void CardBadgeTiles(Canvas& Cv, Ui& UI, const Session& S, int Npc, const badge::
 		const float A0 = Cv.GetAlpha();
 		Cv.SetAlpha(A0 * Ri);
 		const Rect T{X + Nf(K % 2) * (Tw + Gap), Top + 14.0f + Nf(K / 2) * (Th + Gap) + (1.0f - Ri) * 8.0f, Tw, Th};
-		Cv.FillRoundRect(T, 12.0f, Hex(0x0f1b2e));
-		Cv.StrokeRoundRect(T, 12.0f, CardRule, 1.0f);
+		Cv.FillRoundRect(T, 12.0f, rlsites_detail::SitesTone(0x0f1b2e));
+		Cv.StrokeRoundRect(T, 12.0f, CardRule(), 1.0f);
 		badgeart::Draw(Cv, B, T.X + 44.0f, T.Y + T.H / 2.0f, 64.0f, Now);
 		const std::string Title = badge::Title(B);
 		const float Yw = B.Year > 0 ? UI.Text(std::to_string(B.Year), T.X + T.W - 14.0f, T.Y + 26.0f, Ts(12.0f, 700, pal::Muted, Align::Right, Baseline::Alphabetic, true)) + 10.0f : 0.0f;
-		UI.Text(Title.empty() ? badge::Label(B) : Title, T.X + 86.0f, T.Y + 26.0f, Ts(15.0f, 800, CardInk, Align::Left, Baseline::Alphabetic, false, T.W - 100.0f - Yw));
-		NetParagraph(Cv, badge::HowEarned(B, Who), T.X + 86.0f, T.Y + 46.0f, T.W - 100.0f, 12.5f, 500, CardSoft, 16.0f, 3);
+		UI.Text(Title.empty() ? badge::Label(B) : Title, T.X + 86.0f, T.Y + 26.0f, Ts(15.0f, 800, CardInk(), Align::Left, Baseline::Alphabetic, false, T.W - 100.0f - Yw));
+		NetParagraph(Cv, badge::HowEarned(B, Who), T.X + 86.0f, T.Y + 46.0f, T.W - 100.0f, 12.5f, 500, CardSoft(), 16.0f, 3);
 		Cv.SetAlpha(A0);
 	}
 	if (All.size() > Shown)
 	{
 		const Rect T{X + Nf(Shown % 2) * (Tw + Gap), Top + 14.0f + Nf(Shown / 2) * (Th + Gap), Tw, Th};
-		Cv.StrokeRoundRect(T, 12.0f, CardRule, 1.0f);
-		UI.Text("+" + std::to_string(All.size() - Shown) + " more", T.X + T.W / 2.0f, T.Y + T.H / 2.0f + 1.0f, Ts(15.0f, 800, CardSoft, Align::Center, Baseline::Middle));
+		Cv.StrokeRoundRect(T, 12.0f, CardRule(), 1.0f);
+		UI.Text("+" + std::to_string(All.size() - Shown) + " more", T.X + T.W / 2.0f, T.Y + T.H / 2.0f + 1.0f, Ts(15.0f, 800, CardSoft(), Align::Center, Baseline::Middle));
 	}
 }
 } // namespace rlcard_detail
@@ -230,8 +246,8 @@ void RiverLine::PlayerCard(double Now)
 	const float A0 = C->GetAlpha();
 	C->SetAlpha(A0 * In);
 	C->GlowRoundRect({R.X, R.Y + 8.0f, R.W, R.H}, 22.0f, Rgba(0, 0, 0, 0.5f), 36.0f);
-	UI.RRect(R, 22.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x13223a), Hex(0x0c1626)), CardRule);
-	const Color Ring = P.Rival ? Hex(0xb36bff) : P.Pro ? pal::Gold : P.Bond.empty() ? CardRule : pal::Accent;
+	UI.RRect(R, 22.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x13223a), rlsites_detail::SitesTone(0x0c1626)), CardRule());
+	const Color Ring = P.Rival ? Hex(0xb36bff) : P.Pro ? pal::Gold : P.Bond.empty() ? CardRule() : pal::Accent;
 	C->FillRoundRect({R.X, R.Y, R.W, 6.0f}, 3.0f, Ring);
 
 	// Who: the face, the name, what the world calls them.
@@ -240,7 +256,7 @@ void RiverLine::PlayerCard(double Now)
 	const uint8_t Frame = NetBadgeFrame(Pic);
 	NetFlag(*C, P.Country, R.X + 140.0f, R.Y + 44.0f, 30.0f, 20.0f);
 	float Nx = R.X + 180.0f;
-	Nx += UI.Text(P.Name, Nx, R.Y + 64.0f, Ts(34.0f, 900, P.Rival ? Hex(0xd5b8ff) : CardInk, Align::Left, Baseline::Alphabetic, false, 520.0f)) + 14.0f;
+	Nx += UI.Text(P.Name, Nx, R.Y + 64.0f, Ts(34.0f, 900, P.Rival ? Hex(0xd5b8ff) : CardInk(), Align::Left, Baseline::Alphabetic, false, 520.0f)) + 14.0f;
 	// RIVAL, then the badge rail (§5.6): 22 units, the top three labelled, "+N" past six (it opens TROPHIES & BADGES).
 	// The status pill and the close button keep the right end.
 	if (P.Rival)
@@ -261,8 +277,8 @@ void RiverLine::PlayerCard(double Now)
 		const std::string More = "+" + std::to_string(Total - static_cast<size_t>(OnRail));
 		const float Mw = UI.Measure(More, 13.0f, 800) + 14.0f;
 		const Ui::ClickState Mc = UI.Clickable("cardmorebadges", {Nx, R.Y + 38.0f, Mw, 24.0f});
-		UI.RRect({Nx, R.Y + 38.0f, Mw, 24.0f}, 12.0f, Mc.Hover ? Hex(0x223352) : Hex(0x162540), CardRule);
-		UI.Text(More, Nx + Mw / 2.0f, R.Y + 51.0f, Ts(13.0f, 800, CardSoft, Align::Center, Baseline::Middle));
+		UI.RRect({Nx, R.Y + 38.0f, Mw, 24.0f}, 12.0f, Mc.Hover ? pal::Line : rlsites_detail::SitesTone(0x162540), CardRule());
+		UI.Text(More, Nx + Mw / 2.0f, R.Y + 51.0f, Ts(13.0f, 800, CardSoft(), Align::Center, Baseline::Middle));
 		if (Mc.Clicked && CardTab != 2)
 		{
 			CardTab = 2;
@@ -305,12 +321,12 @@ void RiverLine::PlayerCard(double Now)
 			eventart::Trophy(*C, A, X, Sy, 50.0f, Now + 0.7 * static_cast<double>(K));
 		}
 		NetSpaced(*C, P.Bracelets > 0 && P.Rings > 0 ? "BRACELETS & RINGS" : P.Bracelets > 0 ? (P.Bracelets == 1 ? "BRACELET" : "BRACELETS") : (P.Rings == 1 ? "RING" : "RINGS"),
-			Sx, Sy - 30.0f, 9.5f, 800, Hex(0xf28a3a), 1.6f, Align::Right);
+			Sx, Sy - 30.0f, 9.5f, 800, pal::Orange, 1.6f, Align::Right);
 	}
-	const std::string Since = P.Arrived >= 0 ? "on RiverLine since " + net::DateLabel(P.Arrived) + ", " + std::to_string(world::YearOf(P.Arrived))
+	const std::string Since = P.Arrived >= 0 ? "on " + CardJoinedSite(N) + " since " + net::DateLabel(P.Arrived) + ", " + std::to_string(world::YearOf(P.Arrived))
 											 : "on the scene since " + std::to_string(P.Since);
 	UI.Text(P.Known + "  \xC2\xB7  " + std::to_string(P.Age) + "  \xC2\xB7  " + Since, R.X + 142.0f, R.Y + 98.0f,
-		Ts(16.0f, 600, CardSoft, Align::Left, Baseline::Alphabetic, false, 640.0f));
+		Ts(16.0f, 600, CardSoft(), Align::Left, Baseline::Alphabetic, false, 640.0f));
 	UI.Text(P.Stakes + "  \xC2\xB7  " + P.Live + "  \xC2\xB7  " + P.Style + (P.Streams ? "  \xC2\xB7  Kast, " + Grouped(P.Followers) + " followers" : std::string()), R.X + 142.0f, R.Y + 124.0f,
 		Ts(14.0f, 500, pal::Muted, Align::Left, Baseline::Alphabetic, false, 700.0f));
 	// Status and the close button.
@@ -319,9 +335,9 @@ void RiverLine::PlayerCard(double Now)
 		NetPill(*C, NetUpper(P.Status), R.X + R.W - 170.0f, R.Y + 34.0f, Sc, false, 10.0f);
 		const Rect X{R.X + R.W - 56.0f, R.Y + 22.0f, 36.0f, 36.0f};
 		const Ui::ClickState Cx = UI.Clickable("cardclose", X);
-		C->FillCircle(X.X + 18.0f, X.Y + 18.0f, 18.0f, Cx.Hover ? Hex(0x223352) : Hex(0x162540));
-		C->StrokePolyline({{X.X + 12.0f, X.Y + 12.0f}, {X.X + 24.0f, X.Y + 24.0f}}, false, CardSoft, 2.0f, true);
-		C->StrokePolyline({{X.X + 24.0f, X.Y + 12.0f}, {X.X + 12.0f, X.Y + 24.0f}}, false, CardSoft, 2.0f, true);
+		C->FillCircle(X.X + 18.0f, X.Y + 18.0f, 18.0f, Cx.Hover ? pal::Line : rlsites_detail::SitesTone(0x162540));
+		C->StrokePolyline({{X.X + 12.0f, X.Y + 12.0f}, {X.X + 24.0f, X.Y + 24.0f}}, false, CardSoft(), 2.0f, true);
+		C->StrokePolyline({{X.X + 24.0f, X.Y + 12.0f}, {X.X + 12.0f, X.Y + 24.0f}}, false, CardSoft(), 2.0f, true);
 		if (Cx.Clicked)
 		{
 			CardShown = -1;
@@ -350,17 +366,17 @@ void RiverLine::PlayerCard(double Now)
 			const Tile Tiles[6] = {
 				{net::MoneyShort(On.Won), "ONLINE WINNINGS", pal::Accent},
 				{net::MoneyShort(Lv.Won), "LIVE WINNINGS", pal::Gold},
-				{Grouped(On.Wins + Lv.Wins), "TITLES", CardInk},
-				{Grouped(On.FinalTables + Lv.FinalTables), "FINAL TABLES", CardInk},
+				{Grouped(On.Wins + Lv.Wins), "TITLES", CardInk()},
+				{Grouped(On.FinalTables + Lv.FinalTables), "FINAL TABLES", CardInk()},
 				{net::MoneyShort(P.Best), "BIGGEST SCORE", pal::Gold},
-				{std::to_string(P.Bracelets) + " \xC2\xB7 " + std::to_string(P.Rings), "BRACELETS \xC2\xB7 RINGS", Hex(0xf28a3a)},
+				{std::to_string(P.Bracelets) + " \xC2\xB7 " + std::to_string(P.Rings), "BRACELETS \xC2\xB7 RINGS", pal::Orange},
 			};
 			const float Tw = (R.W - 48.0f - 5.0f * 10.0f) / 6.0f;
 			for (int K = 0; K < 6; ++K)
 			{
 				const Rect T{R.X + 24.0f + Nf(K) * (Tw + 10.0f), R.Y + 152.0f, Tw, 78.0f};
-				C->FillRoundRect(T, 12.0f, Hex(0x0f1b2e));
-				C->StrokeRoundRect(T, 12.0f, CardRule, 1.0f);
+				C->FillRoundRect(T, 12.0f, rlsites_detail::SitesTone(0x0f1b2e));
+				C->StrokeRoundRect(T, 12.0f, CardRule(), 1.0f);
 				UI.Text(Tiles[K].Value, T.X + 14.0f, T.Y + 40.0f, Ts(24.0f, 800, Tiles[K].Col, Align::Left, Baseline::Alphabetic, true, Tw - 20.0f));
 				NetSpaced(*C, Tiles[K].Label, T.X + 14.0f, T.Y + 62.0f, 9.5f, 800, pal::Muted, 1.2f);
 			}
@@ -385,14 +401,14 @@ void RiverLine::PlayerCard(double Now)
 		{
 			const int V = P.Reps[static_cast<size_t>(K)];
 			const float By = Y + Nf(K) * 30.0f;
-			UI.Text(world::RepName(static_cast<world::Rep>(K)), Lx, By + 17.0f, Ts(13.0f, 600, CardSoft));
+			UI.Text(world::RepName(static_cast<world::Rep>(K)), Lx, By + 17.0f, Ts(13.0f, 600, CardSoft()));
 			const Rect Bar{Lx + 108.0f, By + 8.0f, Lw - 150.0f, 9.0f};
-			C->FillRoundRect(Bar, 4.5f, Hex(0x1a2a44));
+			C->FillRoundRect(Bar, 4.5f, rlsites_detail::SitesTone(0x1a2a44));
 			if (V > 0)
 			{
 				C->FillRoundRect({Bar.X, Bar.Y, std::max(9.0f, Bar.W * Nf(V) / 100.0f), Bar.H}, 4.5f, RepColor(K));
 			}
-			UI.Text(std::to_string(V), Lx + Lw, By + 17.0f, Ts(13.0f, 800, V > 0 ? CardInk : pal::Dim, Align::Right, Baseline::Alphabetic, true));
+			UI.Text(std::to_string(V), Lx + Lw, By + 17.0f, Ts(13.0f, 800, V > 0 ? CardInk() : pal::Dim, Align::Right, Baseline::Alphabetic, true));
 		}
 		Y += 6.0f * 30.0f + 22.0f;
 		// Form: board points the last eight weeks.
@@ -407,7 +423,7 @@ void RiverLine::PlayerCard(double Now)
 			for (size_t K = 0; K < P.Form.size(); ++K)
 			{
 				const float H = std::max(3.0f, 46.0f * P.Form[K] / Top);
-				C->FillRoundRect({Lx + Nf(K) * (Bw + 6.0f), Y + 62.0f - H, Bw, H}, 3.0f, K + 1 == P.Form.size() ? pal::Accent : Hex(0x2b4a6e));
+				C->FillRoundRect({Lx + Nf(K) * (Bw + 6.0f), Y + 62.0f - H, Bw, H}, 3.0f, K + 1 == P.Form.size() ? pal::Accent : rlsites_detail::SitesTone(0x2b4a6e));
 			}
 		}
 		Y += 86.0f;
@@ -428,7 +444,7 @@ void RiverLine::PlayerCard(double Now)
 				const float Wd = std::max(2.0f, Full * Nf(static_cast<double>(Yr.Online + Yr.Live) / static_cast<double>(Top)));
 				C->FillRoundRect({Lx + 46.0f, Ry + 5.0f, Wd, 10.0f}, 3.0f, Yr.Live > Yr.Online ? pal::Gold : pal::Accent);
 				UI.Text(net::MoneyShort(Yr.Online + Yr.Live) + (Yr.Wins > 0 ? "  \xC2\xB7  " + std::to_string(Yr.Wins) + (Yr.Wins == 1 ? " win" : " wins") : ""), Lx + 54.0f + Wd, Ry + 14.0f,
-					Ts(12.0f, 600, CardSoft, Align::Left, Baseline::Alphabetic, false, Lx + Lw - (Lx + 54.0f + Wd) + 40.0f));
+					Ts(12.0f, 600, CardSoft(), Align::Left, Baseline::Alphabetic, false, Lx + Lw - (Lx + 54.0f + Wd) + 40.0f));
 			}
 		}
 
@@ -454,8 +470,8 @@ void RiverLine::PlayerCard(double Now)
 				CardTabAt = Now;
 			}
 			const bool On = CardTab == K;
-			UI.RRect(Tr, 13.0f, On ? NetA(pal::Accent, 0.18f) : St.Hover ? Hex(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? pal::Accent : CardRule);
-			NetSpaced(*C, Tabs[K], Tr.X + Tw / 2.0f, Tr.Y + 17.0f, 11.0f, 800, On ? CardInk : pal::Muted, 1.2f, Align::Center);
+			UI.RRect(Tr, 13.0f, On ? NetA(pal::Accent, 0.18f) : St.Hover ? rlsites_detail::SitesTone(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? pal::Accent : CardRule());
+			NetSpaced(*C, Tabs[K], Tr.X + Tw / 2.0f, Tr.Y + 17.0f, 11.0f, 800, On ? CardInk() : pal::Muted, 1.2f, Align::Center);
 			Tx -= 8.0f;
 		}
 	}
@@ -495,8 +511,8 @@ void RiverLine::PlayerCard(double Now)
 		const float Ry = My + Nf(K) * 30.0f;
 		UI.Text(net::DateLabel(F.Day), Mx, Ry + 20.0f, Ts(12.0f, 600, pal::Muted, Align::Left, Baseline::Alphabetic, true));
 		const std::string Place = Ordinal(F.Place) + " / " + Grouped(F.Entries);
-		UI.Text(Place, Mx + 62.0f, Ry + 20.0f, Ts(13.0f, 800, F.Place == 1 ? pal::Gold : F.Place <= 9 ? CardInk : CardSoft, Align::Left, Baseline::Alphabetic, true));
-		UI.Text(F.Event, Mx + 170.0f, Ry + 20.0f, Ts(13.0f, 600, F.Major ? CardInk : CardSoft, Align::Left, Baseline::Alphabetic, false, Mw - 280.0f));
+		UI.Text(Place, Mx + 62.0f, Ry + 20.0f, Ts(13.0f, 800, F.Place == 1 ? pal::Gold : F.Place <= 9 ? CardInk() : CardSoft(), Align::Left, Baseline::Alphabetic, true));
+		UI.Text(F.Event, Mx + 170.0f, Ry + 20.0f, Ts(13.0f, 600, F.Major ? CardInk() : CardSoft(), Align::Left, Baseline::Alphabetic, false, Mw - 280.0f));
 		UI.Text(F.Seat > 0 ? "Seat \xC2\xB7 " + NetMoney(F.Seat) : NetMoney(F.Prize), Mx + Mw, Ry + 20.0f,
 			Ts(13.0f, 800, F.Prize > 0 || F.Seat > 0 ? pal::Gold : pal::Dim, Align::Right, Baseline::Alphabetic, true));
 		if (F.Where == 1)
@@ -505,7 +521,7 @@ void RiverLine::PlayerCard(double Now)
 		}
 	}
 	My += Nf(std::min<size_t>(P.Recent.size(), 6)) * 30.0f + 26.0f;
-	C->FillRect({Mx, My - 8.0f, Mw, 1.0f}, CardRule);
+	C->FillRect({Mx, My - 8.0f, Mw, 1.0f}, CardRule());
 	// What they think of you, and why.
 	const float Half = (Mw - 24.0f) / 2.0f;
 	float Ay = My + 12.0f;
@@ -524,7 +540,7 @@ void RiverLine::PlayerCard(double Now)
 		}
 		for (size_t K = 0; K < P.Memories.size() && K < 4; ++K)
 		{
-			Ay = NetParagraph(*C, P.Memories[K], Mx, Ay + 16.0f, Half, 13.0f, 500, CardSoft, 18.0f, 2) - 2.0f;
+			Ay = NetParagraph(*C, P.Memories[K], Mx, Ay + 16.0f, Half, 13.0f, 500, CardSoft(), 18.0f, 2) - 2.0f;
 		}
 	}
 	// Their story, and the people they're known to run with.
@@ -538,7 +554,7 @@ void RiverLine::PlayerCard(double Now)
 	}
 	for (size_t K = 0; K < P.Story.size() && K < 4; ++K)
 	{
-		By = NetParagraph(*C, P.Story[K], Rx, By + 16.0f, Half, 13.0f, 500, CardSoft, 18.0f, 2) - 2.0f;
+		By = NetParagraph(*C, P.Story[K], Rx, By + 16.0f, Half, 13.0f, 500, CardSoft(), 18.0f, 2) - 2.0f;
 	}
 	if (!P.Knows.empty())
 	{
@@ -546,7 +562,7 @@ void RiverLine::PlayerCard(double Now)
 		NetSpaced(*C, "RUNS WITH", Rx, By, 11.0f, 800, pal::Muted, 1.6f);
 		for (size_t K = 0; K < P.Knows.size() && K < 3; ++K)
 		{
-			UI.Text(P.Knows[K].first + ": " + P.Knows[K].second, Rx, By + 22.0f + Nf(K) * 20.0f, Ts(13.0f, 600, CardSoft, Align::Left, Baseline::Alphabetic, false, Half));
+			UI.Text(P.Knows[K].first + ": " + P.Knows[K].second, Rx, By + 22.0f + Nf(K) * 20.0f, Ts(13.0f, 600, CardSoft(), Align::Left, Baseline::Alphabetic, false, Half));
 		}
 	}
 	(void)Ay;
@@ -568,7 +584,7 @@ void RiverLine::CardTrophies(const world::Profile& P, float X, float Y, float W,
 	NetSpaced(*C, "BRACELETS AND RINGS", X, Y, 11.0f, 800, pal::Muted, 1.6f);
 	if (P.Awards.empty())
 	{
-		float Ty = NetParagraph(*C, "No bracelets or rings. Yet.", X, Y + 30.0f, W, 17.0f, 600, CardInk, 23.0f, 1);
+		float Ty = NetParagraph(*C, "No bracelets or rings. Yet.", X, Y + 30.0f, W, 17.0f, 600, CardInk(), 23.0f, 1);
 		if (!Badges)
 		{
 			NetParagraph(*C,
@@ -595,14 +611,14 @@ void RiverLine::CardTrophies(const world::Profile& P, float X, float Y, float W,
 		C->SetAlpha(A0 * Ri);
 		const Rect Cd{X + Nf(static_cast<int>(K) % Cols) * (Cw + Gap), Y + 18.0f + Nf(static_cast<int>(K) / Cols) * (Ch + Gap) + (1.0f - Ri) * 10.0f, Cw, Ch};
 		const Color Tint = Hex(eventart::TrophyStone(A));
-		C->FillRoundRect(Cd, 14.0f, Paint::Linear({0.0f, Cd.Y}, {0.0f, Cd.Y + Cd.H}, Mix(Hex(0x0f1b2e), Tint, 0.16f), Hex(0x0c1626)));
-		C->StrokeRoundRect(Cd, 14.0f, A.Main ? NetA(pal::Gold, 0.7f) : CardRule, A.Main ? 1.5f : 1.0f);
+		C->FillRoundRect(Cd, 14.0f, Paint::Linear({0.0f, Cd.Y}, {0.0f, Cd.Y + Cd.H}, Mix(rlsites_detail::SitesTone(0x0f1b2e), Tint, 0.16f), rlsites_detail::SitesTone(0x0c1626)));
+		C->StrokeRoundRect(Cd, 14.0f, A.Main ? NetA(pal::Gold, 0.7f) : CardRule(), A.Main ? 1.5f : 1.0f);
 		const float Ix = Cd.X + Cd.W / 2.0f;
 		const float Iy = Cd.Y + (Big ? 64.0f : 46.0f);
 		C->FillEllipse(Ix, Iy, Big ? 70.0f : 48.0f, Big ? 56.0f : 38.0f, Paint::Radial({Ix, Iy}, 0.0f, {Ix, Iy}, Big ? 70.0f : 48.0f, NetA(Tint, 0.28f), 0.5f, NetA(Tint, 0.08f), NetA(Tint, 0.0f)));
 		eventart::Trophy(*C, A, Ix, Iy, (Big ? 108.0f : 76.0f) * (0.9f + 0.1f * In), Now + 0.6 * static_cast<double>(K));
 		const float Ty = Cd.Y + (Big ? 132.0f : 98.0f);
-		NetSpaced(*C, A.Main ? (A.Ring ? "MAIN EVENT RING" : "MAIN EVENT BRACELET") : A.Ring ? "RING" : "BRACELET", Ix, Ty, Big ? 9.5f : 8.5f, 900, A.Main ? pal::Gold : Hex(0xf28a3a), 1.5f, Align::Center);
+		NetSpaced(*C, A.Main ? (A.Ring ? "MAIN EVENT RING" : "MAIN EVENT BRACELET") : A.Ring ? "RING" : "BRACELET", Ix, Ty, Big ? 9.5f : 8.5f, 900, A.Main ? pal::Gold : pal::Orange, 1.5f, Align::Center);
 		// The event's name, on two lines when it needs them.
 		const std::string Event = eventart::TrophyEvent(A).empty() ? std::string(A.Ring ? "A ring" : "A bracelet") : eventart::TrophyEvent(A);
 		const float Ts0 = Big ? 15.0f : 12.5f;
@@ -628,12 +644,12 @@ void RiverLine::CardTrophies(const world::Profile& P, float X, float Y, float W,
 			}
 		}
 		const float Off = Second.empty() ? 0.0f : 17.0f;
-		UI.Text(First, Ix, Ty + (Big ? 21.0f : 18.0f), Ts(Ts0, 800, CardInk, Align::Center, Baseline::Alphabetic, false, Room));
+		UI.Text(First, Ix, Ty + (Big ? 21.0f : 18.0f), Ts(Ts0, 800, CardInk(), Align::Center, Baseline::Alphabetic, false, Room));
 		if (!Second.empty())
 		{
-			UI.Text(Second, Ix, Ty + 38.0f, Ts(Ts0, 800, CardInk, Align::Center, Baseline::Alphabetic, false, Room));
+			UI.Text(Second, Ix, Ty + 38.0f, Ts(Ts0, 800, CardInk(), Align::Center, Baseline::Alphabetic, false, Room));
 		}
-		UI.Text(eventart::TrophySeries(A), Ix, Ty + (Big ? 40.0f : 34.0f) + Off, Ts(Big ? 12.0f : 10.5f, 600, CardSoft, Align::Center, Baseline::Alphabetic, false, Room));
+		UI.Text(eventart::TrophySeries(A), Ix, Ty + (Big ? 40.0f : 34.0f) + Off, Ts(Big ? 12.0f : 10.5f, 600, CardSoft(), Align::Center, Baseline::Alphabetic, false, Room));
 		if (Big)
 		{
 			std::string When = A.Day > 0 ? net::DateLabel(A.Day) + ", " + std::to_string(world::YearOf(A.Day)) : std::string();
@@ -660,18 +676,18 @@ void RiverLine::CardJourney(const world::Profile& P, float X, float Y, float W, 
 	const float In = NetEase((Now - CardTabAt) / 0.4);
 	const int Today = net::DayOf(S.WorldMinutes());
 	NetSpaced(*C, "HOW THEY GOT HERE", X, Y, 11.0f, 800, pal::Muted, 1.6f);
-	float Ty = NetParagraph(*C, P.Came, X, Y + 26.0f, W, 17.0f, 600, CardInk, 23.0f, 2);
+	float Ty = NetParagraph(*C, P.Came, X, Y + 26.0f, W, 17.0f, 600, CardInk(), 23.0f, 2);
 	if (P.Arrived >= 0)
 	{
 		const int Ago = Today - P.Arrived;
 		const std::string When = Ago <= 0 ? "today" : Ago == 1 ? "yesterday" : Ago < 60 ? std::to_string(Ago) + " days ago" : Ago < 730 ? std::to_string(Ago / 30) + " months ago"
 																																: std::to_string(Ago / 365) + " years ago";
-		UI.Text("Joined RiverLine " + net::DateLabel(P.Arrived) + ", " + std::to_string(world::YearOf(P.Arrived)) + "  \xC2\xB7  " + When, X, Ty + 18.0f,
+		UI.Text("Joined " + CardJoinedSite(S.Living().Get(CardShown)) + " " + net::DateLabel(P.Arrived) + ", " + std::to_string(world::YearOf(P.Arrived)) + "  \xC2\xB7  " + When, X, Ty + 18.0f,
 			Ts(13.0f, 600, P.New ? pal::Accent : pal::Muted));
 		Ty += 22.0f;
 	}
 	Ty += 24.0f;
-	C->FillRect({X, Ty - 10.0f, W, 1.0f}, CardRule);
+	C->FillRect({X, Ty - 10.0f, W, 1.0f}, CardRule());
 	NetSpaced(*C, "THE JOURNEY", X, Ty + 10.0f, 11.0f, 800, pal::Muted, 1.6f);
 	Ty += 22.0f;
 	// The timeline: the first steps always, then the latest (as many as fit).
@@ -702,7 +718,7 @@ void RiverLine::CardJourney(const world::Profile& P, float X, float Y, float W, 
 	const float Lx = X + 118.0f;
 	if (!Shown.empty())
 	{
-		C->FillRect({Lx - 1.0f, Ty + 8.0f, 2.0f, Nf(Shown.size() - 1) * Row * In}, Hex(0x2b4a6e));
+		C->FillRect({Lx - 1.0f, Ty + 8.0f, 2.0f, Nf(Shown.size() - 1) * Row * In}, rlsites_detail::SitesTone(0x2b4a6e));
 	}
 	for (size_t K = 0; K < Shown.size(); ++K)
 	{
@@ -727,7 +743,7 @@ void RiverLine::CardJourney(const world::Profile& P, float X, float Y, float W, 
 		case world::StepKind::FirstEvent:
 		case world::StepKind::FirstCash:
 		case world::StepKind::FirstFinalTable:
-		case world::StepKind::FirstLive: Col = Hex(0x27d3c3); break;
+		case world::StepKind::FirstLive: Col = pal::Accent; break;
 		case world::StepKind::FirstWin:
 		case world::StepKind::FirstSeries:
 		case world::StepKind::Major:
@@ -735,11 +751,11 @@ void RiverLine::CardJourney(const world::Profile& P, float X, float Y, float W, 
 		case world::StepKind::PlayerOfYear:
 		case world::StepKind::HallOfFame: Col = pal::Gold; break;
 		case world::StepKind::Bracelet:
-		case world::StepKind::Ring: Col = Hex(0xf28a3a); break;
+		case world::StepKind::Ring: Col = pal::Orange; break;
 		case world::StepKind::MovedUp:
 		case world::StepKind::TurnedPro:
 		case world::StepKind::Sponsored:
-		case world::StepKind::StartedStreaming: Col = Hex(0x3b82f6); break;
+		case world::StepKind::StartedStreaming: Col = pal::Accent2; break;
 		case world::StepKind::WentBroke:
 		case world::StepKind::MovedDown: Col = pal::Red; break;
 		case world::StepKind::Break:
@@ -748,9 +764,9 @@ void RiverLine::CardJourney(const world::Profile& P, float X, float Y, float W, 
 		}
 		UI.Text(net::DateLabel(M->Day), X + 100.0f, Ry + 13.0f, Ts(12.0f, 700, pal::Muted, Align::Right, Baseline::Alphabetic, true));
 		UI.Text(std::to_string(world::YearOf(M->Day)), X + 100.0f, Ry + 27.0f, Ts(10.0f, 600, pal::Dim, Align::Right, Baseline::Alphabetic, true));
-		C->FillCircle(Lx, Ry + 8.0f, 6.0f, Hex(0x0c1626));
+		C->FillCircle(Lx, Ry + 8.0f, 6.0f, rlsites_detail::SitesTone(0x0c1626));
 		C->FillCircle(Lx, Ry + 8.0f, 4.5f, Col);
-		UI.Text(M->Text, Lx + 18.0f, Ry + 13.0f, Ts(13.5f, 600, M->Kind == world::StepKind::Joined ? CardInk : CardSoft, Align::Left, Baseline::Alphabetic, false, W - 140.0f));
+		UI.Text(M->Text, Lx + 18.0f, Ry + 13.0f, Ts(13.5f, 600, M->Kind == world::StepKind::Joined ? CardInk() : CardSoft(), Align::Left, Baseline::Alphabetic, false, W - 140.0f));
 		C->SetAlpha(A0);
 	}
 }
@@ -794,7 +810,7 @@ void RiverLine::HonorsPanel(const Rect& R, double Now)
 		}
 		else
 		{
-			UI.Text(Nm, X + 38.0f, Y, Ts(15.0f, 700, CardSoft, Align::Left, Baseline::Alphabetic, false, MaxW - 38.0f));
+			UI.Text(Nm, X + 38.0f, Y, Ts(15.0f, 700, CardSoft(), Align::Left, Baseline::Alphabetic, false, MaxW - 38.0f));
 		}
 	};
 
@@ -805,7 +821,7 @@ void RiverLine::HonorsPanel(const Rect& R, double Now)
 		badge::Badge Medal;
 		Medal.K = badge::Kind::HallOfFame;
 		badgeart::Draw(*C, Medal, P.X + 40.0f, P.Y + 40.0f, 32.0f, Now);
-		UI.Text("Hall of Fame", P.X + 66.0f, P.Y + 48.0f, Ts(24.0f, 900, CardInk));
+		UI.Text("Hall of Fame", P.X + 66.0f, P.Y + 48.0f, Ts(24.0f, 900, CardInk()));
 		float Y = P.Y + 92.0f;
 		if (Hall.empty())
 		{
@@ -886,7 +902,7 @@ void RiverLine::HonorsPanel(const Rect& R, double Now)
 		badge::Badge Medal;
 		Medal.K = badge::Kind::PlayerOfYear;
 		badgeart::Draw(*C, Medal, P.X + 40.0f, P.Y + 40.0f, 32.0f, Now);
-		UI.Text("Players of the Year", P.X + 66.0f, P.Y + 48.0f, Ts(24.0f, 900, CardInk));
+		UI.Text("Players of the Year", P.X + 66.0f, P.Y + 48.0f, Ts(24.0f, 900, CardInk()));
 		float Y = P.Y + 92.0f;
 		if (Poy.empty())
 		{
@@ -953,11 +969,11 @@ void RiverLine::HonorsPanel(const Rect& R, double Now)
 	{
 		const Rect Rt{R.X + R.W + 16.0f, 84.0f, 484.0f, 866.0f};
 		Panel(Rt);
-		UI.Text("Honors", Rt.X + 26.0f, Rt.Y + 54.0f, Ts(28.0f, 900, CardInk));
+		UI.Text("Honors", Rt.X + 26.0f, Rt.Y + 54.0f, Ts(28.0f, 900, CardInk()));
 		float Y = NetParagraph(*C,
 			"The titles that stay with a name. The Hall of Fame takes its class each July 15; the Players of the Year are crowned when the year turns, one online and one "
 			"live. They show on every card and every board.",
-			Rt.X + 26.0f, Rt.Y + 90.0f, Rt.W - 52.0f, 15.0f, 500, CardSoft, 22.0f, 6) + 18.0f;
+			Rt.X + 26.0f, Rt.Y + 90.0f, Rt.W - 52.0f, 15.0f, 500, CardSoft(), 22.0f, 6) + 18.0f;
 		C->FillRect({Rt.X + 26.0f, Y, Rt.W - 52.0f, 1.0f}, pal::Line);
 		Y += 36.0f;
 		// The player's own: theirs if they hold any, else the honest distance.
@@ -974,7 +990,7 @@ void RiverLine::HonorsPanel(const Rect& R, double Now)
 		const std::string Own = MyHall ? "In the Hall of Fame, class of " + std::to_string(MyHall->Year) + "."
 			: Titles > 0 || MyPoy || MyLive ? std::to_string(std::max(Titles, 1)) + (Titles > 1 ? " Player of the Year titles." : " Player of the Year title.")
 											: std::string("None yet. The Season board is this year's race.");
-		NetParagraph(*C, Own, Rt.X + 26.0f, Y + 28.0f, Rt.W - 52.0f, 15.0f, 600, MyHall || Titles > 0 ? pal::Gold : CardSoft, 21.0f, 3);
+		NetParagraph(*C, Own, Rt.X + 26.0f, Y + 28.0f, Rt.W - 52.0f, 15.0f, 600, MyHall || Titles > 0 ? pal::Gold : CardSoft(), 21.0f, 3);
 	}
 }
 
@@ -999,9 +1015,9 @@ void RiverLine::BadgeTip(const badge::Badge& B, float X, float Y, double Now)
 		R.Y = Y - 30.0f - H;
 	}
 	C->GlowRoundRect({R.X, R.Y + 6.0f, R.W, R.H}, 12.0f, Rgba(0, 0, 0, 0.55f), 18.0f);
-	UI.RRect(R, 12.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x172a44), Hex(0x0e1a2c)), Hex(0x2a3f60));
+	UI.RRect(R, 12.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x172a44), rlsites_detail::SitesTone(0x0e1a2c)), rlsites_detail::SitesTone(0x2a3f60));
 	badgeart::Draw(*C, B, R.X + 36.0f, R.Y + 44.0f, 32.0f, Now);
-	UI.Text(Title, R.X + 70.0f, R.Y + 30.0f, Ts(14.5f, 800, CardInk, Align::Left, Baseline::Alphabetic, false, TextW));
+	UI.Text(Title, R.X + 70.0f, R.Y + 30.0f, Ts(14.5f, 800, CardInk(), Align::Left, Baseline::Alphabetic, false, TextW));
 	float Ly = R.Y + 50.0f;
 	for (size_t K = 0; K < Shown; ++K)
 	{
@@ -1010,7 +1026,7 @@ void RiverLine::BadgeTip(const badge::Badge& B, float X, float Y, double Now)
 		{
 			L += " " + Lines[K + 1];
 		}
-		UI.Text(L, R.X + 70.0f, Ly, Ts(12.5f, 500, CardSoft, Align::Left, Baseline::Alphabetic, false, TextW));
+		UI.Text(L, R.X + 70.0f, Ly, Ts(12.5f, 500, CardSoft(), Align::Left, Baseline::Alphabetic, false, TextW));
 		Ly += 17.0f;
 	}
 }

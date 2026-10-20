@@ -8,9 +8,11 @@
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/UI/BadgeArt.h"
+#include "ShortStack/UI/SiteArt.h"
 #include "ShortStack/UI/VideoArt.h"
 
 #include <algorithm>
@@ -77,6 +79,7 @@ Color KindColor(int Kind)
 	case life::LedgerSponsors: return Hex(0x2f5d9e); // Mail's navy: the brands write there
 	case life::LedgerCoaching: return Hex(0x0891b2);
 	case life::LedgerVideo: return Hex(videoart::Marigold); // Rerun's payouts (update 2 §1.2)
+	case life::LedgerSites: return Hex(0x0d9488); // the rival sites' fees, the colour of "Poker & sites" (update 2 §1.2)
 	default: return Hex(0xf2c14e);
 	}
 }
@@ -450,6 +453,22 @@ void RiverLine::Taskbar(const Rect& R, double Now)
 	for (const App A : Apps)
 	{
 		const AppBrand B = BrandOf(A);
+		if (A == App::RiverLine)
+		{
+			// The poker button (update 2 §5.11): the site in front's mark and name, and a caret once a rival account is open.
+			const net::SiteId Front = AppShown == App::RiverLine ? rlsites_detail::SitesClient(*this, S) : rlsites_detail::SitesShown(*this, S);
+			const float W = 40.0f + UI.Measure(rlsites_detail::SitesShortName(Front), 13.0f, 700) + 12.0f + (rlsites_detail::SitesPlayed(S).size() > 1 ? 20.0f : 0.0f);
+			const Rect Btn{X, R.Y + 4.0f, W, R.H - 8.0f};
+			PokerButton(Btn, Now);
+			if (S.HasPrompt && AppShown != App::RiverLine)
+			{
+				const Color Dot = NetA(pal::Red, 0.6f + 0.4f * Nf(std::sin(Now * 6.0)));
+				C->FillCircle(Btn.X + 29.0f, Btn.Y + 4.0f, 4.5f, Dot);
+				C->StrokeEllipse(Btn.X + 29.0f, Btn.Y + 4.0f, 4.5f, 4.5f, Hex(0x060a12), 1.5f);
+			}
+			X += W + 4.0f;
+			continue;
+		}
 		const float W = 40.0f + UI.Measure(B.Name, 13.0f, 700) + 12.0f;
 		const Rect Btn{X, R.Y + 4.0f, W, R.H - 8.0f};
 		const Ui::ClickState St = UI.Clickable(std::string("app") + B.Name, Btn);
@@ -1668,10 +1687,55 @@ void RiverLine::BankApp(double Now)
 	const float In = NetEase((Now - AppAt) / 0.6);
 
 	// The pots that aren't the balance (next_segment_spec §1.2: never in the bankroll, never in Net, never the rent): a
-	// package's staked roll and a sponsor's store credit, each on its own small card beside the balance.
+	// package's staked roll and a sponsor's store credit, each on its own small card beside the balance. Once a rival site
+	// holds money or money is on its way back from one (update 2 §5.11), the column becomes a list of up to six pots at 56
+	// a row: the staked roll, the store credit, each site's wallet, the money in transit.
 	const stake::Deal* Package = stake::ActivePackage(L.Stakes);
 	const BankCredit Credit = CreditOf(L.Sponsors, World);
-	const int Pots = (Package ? 1 : 0) + (Credit.Shown ? 1 : 0);
+	std::vector<rlsites_detail::SitesPot> SitePots;
+	for (const net::SiteId X : rlsites_detail::SitesPlayed(S))
+	{
+		if (X == net::SiteId::RiverLine)
+		{
+			continue;
+		}
+		rlsites_detail::SitesPot P;
+		P.Kicker = rlsites_detail::SitesUpperName(X);
+		P.Name = rlsites_detail::SitesLongName(X);
+		P.Cents = rlsites_detail::SitesBalance(S, X);
+		P.Sub = "Its own wallet \xC2\xB7 never the rent";
+		P.Col = net::Def(X).Palette[8];
+		P.Site = X;
+		SitePots.push_back(P);
+	}
+	if (const Chips Coming = rlsites_detail::SitesInTransit(S); Coming > 0)
+	{
+		// One row for everything on its way back, said in words as well as colour ("arriving").
+		std::string From;
+		double Last = 0.0;
+		int Sites = 0;
+		for (int I = 1; I < static_cast<int>(net::SiteId::Count); ++I)
+		{
+			if (rlsites_detail::SitesInTransit(S, static_cast<net::SiteId>(I)) > 0)
+			{
+				From = rlsites_detail::SitesShortName(static_cast<net::SiteId>(I));
+				++Sites;
+			}
+		}
+		for (const site::Transfer& T : L.Sites.Transfers)
+		{
+			Last = T.Out && T.State == 0 ? std::max(Last, T.ArrivesAt) : Last;
+		}
+		rlsites_detail::SitesPot P;
+		P.Kicker = "IN TRANSIT";
+		P.Name = Sites > 1 ? std::to_string(Sites) + " sites" : From;
+		P.Cents = Coming;
+		P.Sub = (Sites > 1 ? std::string("From ") + std::to_string(Sites) + " sites" : "From " + From) + " \xC2\xB7 arriving by " + net::WeekdayName(net::DayOf(Last));
+		P.Col = 0x60a5fa;
+		SitePots.push_back(P);
+	}
+	const bool PotList = !SitePots.empty();
+	const int Pots = (Package ? 1 : 0) + (Credit.Shown ? 1 : 0) + static_cast<int>(SitePots.size());
 	const float PotW = 304.0f;
 	const float PotGap = 16.0f;
 
@@ -1685,7 +1749,52 @@ void RiverLine::BankApp(double Now)
 	NetSpaced(*C, "CHECKING \xC2\xB7\xC2\xB7\xC2\xB7 4471", Bal.X + 32.0f, Bal.Y + 42.0f, 12.0f, 800, Hex(0xbcd0f0), 2.0f);
 	UI.Text(Money(static_cast<Chips>(static_cast<double>(S.BankrollCents) * static_cast<double>(In))), Bal.X + 32.0f, Bal.Y + 112.0f, Ts(58.0f, 900, Hex(0xffffff), Align::Left, Baseline::Alphabetic, true));
 	UI.Text("Available balance \xC2\xB7 linked to RiverLine", Bal.X + 32.0f, Bal.Y + 146.0f, Ts(14.0f, 600, Hex(0xbcd0f0)));
-	if (Pots > 0)
+	if (PotList)
+	{
+		// The list: 56 a row, 6 apart; past three rows it runs down beside the rent card, which narrows to make room.
+		std::vector<rlsites_detail::SitesPot> Rows;
+		if (Package)
+		{
+			const Chips Makeup = stake::MakeupOf(L.Stakes);
+			rlsites_detail::SitesPot P;
+			P.Kicker = "STAKED ROLL";
+			P.Name = stake::BackerName(*Package);
+			P.Cents = Package->RollNow;
+			P.Sub = Makeup > 0 ? "\xE2\x88\x92" + NetMoney(Makeup) + " makeup \xC2\xB7 theirs" : std::string("Theirs \xC2\xB7 never the rent");
+			P.Col = 0xf2a93b;
+			Rows.push_back(P);
+		}
+		if (Credit.Shown)
+		{
+			rlsites_detail::SitesPot P;
+			P.Kicker = "STORE CREDIT";
+			P.Name = Credit.From;
+			P.Cents = Credit.Cents;
+			P.Sub = "The counter and Penny Drop only";
+			P.Col = 0x2f5d9e;
+			Rows.push_back(P);
+		}
+		Rows.insert(Rows.end(), SitePots.begin(), SitePots.end());
+		const float Px = Bal.X + Bal.W + PotGap;
+		for (size_t I = 0; I < Rows.size() && I < 6; ++I)
+		{
+			const rlsites_detail::SitesPot& P = Rows[I];
+			const Rect Pr{Px, Bal.Y + Nf(I) * 62.0f, PotW, 56.0f};
+			C->GlowRoundRect({Pr.X, Pr.Y + 4.0f, Pr.W, Pr.H}, 12.0f, Rgba(13, 37, 71, 0.08f), 10.0f);
+			UI.RRect(Pr, 12.0f, Hex(0xffffff), Hex(0xe2e8f0));
+			C->FillRoundRect({Pr.X, Pr.Y + 8.0f, 5.0f, Pr.H - 16.0f}, 2.5f, Hex(P.Col));
+			float Kx = Pr.X + 18.0f;
+			if (P.Site != net::SiteId::Count)
+			{
+				siteart::Logo(*C, {Kx, Pr.Y + 10.0f, 16.0f, 16.0f}, P.Site);
+				Kx += 22.0f;
+			}
+			NetSpaced(*C, P.Kicker, Kx, Pr.Y + 22.0f, 10.0f, 900, Mix(Hex(P.Col), Dark, 0.35f), 1.4f);
+			UI.Text(P.Sub, Pr.X + 18.0f, Pr.Y + 44.0f, Ts(11.5f, 600, Gray, Align::Left, Baseline::Alphabetic, false, Pr.W - 130.0f));
+			UI.Text(Money(P.Cents), Pr.X + Pr.W - 16.0f, Pr.Y + 36.0f, Ts(20.0f, 900, Dark, Align::Right, Baseline::Alphabetic, true, 120.0f));
+		}
+	}
+	else if (Pots > 0)
 	{
 		const float PotH = Pots == 2 ? (Bal.H - 12.0f) / 2.0f : Bal.H;
 		float Py = Bal.Y;
@@ -1706,8 +1815,14 @@ void RiverLine::BankApp(double Now)
 		}
 	}
 
-	// Rent.
-	const Rect Rr{40.0f, 300.0f, 860.0f, 250.0f};
+	// Rent (beside a pots list that runs past the balance card, it narrows).
+	const Rect Rr{40.0f, 300.0f, PotList && Pots > 3 ? 860.0f - PotW - PotGap : 860.0f, 250.0f};
+	// The bank alone can't make the deadline but the bank and the sites could (update 2 §5.5): site money never pays rent.
+	const std::string SiteLine = rlsites_detail::SitesRentLine(S, World);
+	// The button and the line beside it (narrower beside a long pots list).
+	const float RentBtnW = Rr.W < 860.0f ? 220.0f : 300.0f;
+	const float RentParaX = Rr.X + RentBtnW + 56.0f;
+	const float RentParaW = Rr.W - RentBtnW - 92.0f;
 	const bool Late = L.RentStage == life::Rent::FinalNotice;
 	const bool Out = L.RentStage == life::Rent::Evicted;
 	const bool Paid = L.RentStage == life::Rent::Paid;
@@ -1778,7 +1893,7 @@ void RiverLine::BankApp(double Now)
 		// The same checks MoveBackIn makes; the button's second line says which one is in the way.
 		const Chips Short = std::max<Chips>(0, L.RentDueCents - S.BankrollCents);
 		const std::string Why = Short > 0 ? "Short " + Money(Short) : S.T ? std::string("Finish your tables first") : S.TimeSkip.Active ? std::string("Busy right now") : std::string();
-		if (AppButton("movein", {Rr.X + 36.0f, Rr.Y + 186.0f, 300.0f, 46.0f}, "Move back in", Hex(0x16a34a), Hex(0xffffff), Why.empty(), Why))
+		if (AppButton("movein", {Rr.X + 36.0f, Rr.Y + 186.0f, RentBtnW, 46.0f}, "Move back in", Hex(0x16a34a), Hex(0xffffff), Why.empty(), Why))
 		{
 			const std::string Fail = S.MoveBackIn();
 			if (!Fail.empty())
@@ -1799,7 +1914,7 @@ void RiverLine::BankApp(double Now)
 		}
 		const int Less = static_cast<int>(std::lround((1.0 - life::CouchRest) * 100.0));
 		NetParagraph(*C, "Meanwhile: " + Rig + ", the couch gives back " + std::to_string(Less) + "% less sleep, and " + NetMoney(life::CouchChipInCents) + " a day goes to Dee's groceries.",
-			Rr.X + 356.0f, Rr.Y + 200.0f, Rr.W - 392.0f, 13.0f, 500, Gray, 18.0f, 2);
+			RentParaX, Rr.Y + 200.0f, RentParaW, 13.0f, 500, Gray, 18.0f, 2);
 	}
 	else
 	{
@@ -1815,11 +1930,16 @@ void RiverLine::BankApp(double Now)
 		// The same checks PayRent makes; the button's second line says which one is in the way.
 		const Chips Short = std::max<Chips>(0, L.RentDueCents - S.BankrollCents);
 		const std::string Why = Short > 0 ? "Short " + Money(Short) : S.T ? std::string("Finish your tables first") : std::string();
-		if (AppButton("payrent", {Rr.X + 36.0f, Rr.Y + 186.0f, 300.0f, 46.0f}, Paid ? "Pay next month early" : "Pay rent", Hex(0x1d4ed8), Hex(0xffffff), Why.empty(), Why))
+		if (AppButton("payrent", {Rr.X + 36.0f, Rr.Y + 186.0f, RentBtnW, 46.0f}, Paid ? "Pay next month early" : "Pay rent", Hex(0x1d4ed8), Hex(0xffffff), Why.empty(), Why))
 		{
 			S.PayRent();
 		}
-		if (Late)
+		if (!SiteLine.empty())
+		{
+			// "Rent is due Sat. $197 is on its way from Ignite (Mon to Wed). Site money can't pay rent." (update 2 §5.5)
+			NetParagraph(*C, SiteLine, RentParaX, Rr.Y + 196.0f, RentParaW, 13.0f, 700, Hex(0xc2410c), 17.0f, 3);
+		}
+		else if (Late)
 		{
 			// Only gear bought outright goes into a unit (Session::Evict); with none, it's just the laptop and the couch.
 			bool Stores = false;
@@ -1831,11 +1951,11 @@ void RiverLine::BankApp(double Now)
 			NetParagraph(*C,
 				Stores ? "Miss this and the locks change: the gear goes to storage, you go to Dee's couch, and a key costs the back rent plus a month."
 					   : "Miss this and the locks change: you and the laptop go to Dee's couch, and a key costs the back rent plus a month.",
-				Rr.X + 356.0f, Rr.Y + 200.0f, Rr.W - 392.0f, 13.0f, 600, Hex(0xdc2626), 18.0f, 2);
+				RentParaX, Rr.Y + 200.0f, RentParaW, 13.0f, 600, Hex(0xdc2626), 18.0f, 2);
 		}
 		else
 		{
-			UI.Text(Paid ? "Paid " + std::to_string(L.RentsPaid) + (L.RentsPaid == 1 ? " month" : " months") + " so far." : "The landlord collects at the deadline if the money is here.", Rr.X + 356.0f,
+			UI.Text(Paid ? "Paid " + std::to_string(L.RentsPaid) + (L.RentsPaid == 1 ? " month" : " months") + " so far." : "The landlord collects at the deadline if the money is here.", RentParaX,
 				Rr.Y + 214.0f, Ts(14.0f, 500, Gray));
 		}
 	}
@@ -1857,7 +1977,7 @@ void RiverLine::BankApp(double Now)
 	// and Rerun's monthly payouts: kinds 6 and 13, update 2 §1.2, so the nine rows stay nine), 6 sponsors
 	// (covers, stipends and bonuses, less a cut or a clawback), 7 backers and buyers (a stake, the pieces sold), 8
 	// Northside's sales and refunds (the pawn's cash, a loan).
-	// Out: 0 buy-ins (less refunds), 1 rent, bills and fares, 2 food and deliveries, 3 gear, 4 fines and Marcus, 5 the
+	// Out: 0 buy-ins (less refunds) and the rival sites' fees (kind 14: update 2 §1.2, "Poker & sites"), 1 rent, bills and fares, 2 food and deliveries, 3 gear, 4 fines and Marcus, 5 the
 	// shops on the block (cuts, clothes, the gym, Ruby's, the pawn), 6 backers' shares and swaps, 7 coaching.
 	Chips Ins[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 	Chips Outs[8] = {0, 0, 0, 0, 0, 0, 0, 0};
@@ -1883,9 +2003,9 @@ void RiverLine::BankApp(double Now)
 			{
 				Ins[7] += E.Amount;
 			}
-			else if (E.Kind == 0 && E.Label.find(": refunded") != std::string::npos)
+			else if ((E.Kind == 0 && E.Label.find(": refunded") != std::string::npos) || E.Kind == life::LedgerSites)
 			{
-				Outs[0] -= E.Amount; // a refund takes its buy-in back off the spending
+				Outs[0] -= E.Amount; // a refund takes its buy-in (or a site's fee) back off the spending
 			}
 			else if (E.Kind == 0)
 			{
@@ -1922,6 +2042,7 @@ void RiverLine::BankApp(double Now)
 		switch (E.Kind)
 		{
 		case 0: Outs[0] += Spent; break;
+		case life::LedgerSites: Outs[0] += Spent; break; // a rival site's card and cashier fees (update 2 §1.2)
 		case 5: Outs[3] += Spent; break;
 		case 2: Outs[4] += Spent; break;
 		case 9: Outs[5] += Spent; break; // the shops on the block
@@ -1940,7 +2061,7 @@ void RiverLine::BankApp(double Now)
 	};
 	const FlowRow InRows[9] = {{"Tournament cashes", Ins[0], 0x27d3c3}, {"The Embercrest", Ins[1], EmberRgb}, {"Leaderboard prizes", Ins[2], 0xf2c14e}, {"Shifts", Ins[3], 0xff8a1f},
 		{"Cash work", Ins[4], 0x16a34a}, {"Streaming & video", Ins[5], 0x9b5cff}, {"Sponsors", Ins[6], 0x2f5d9e}, {"Backers & buyers", Ins[7], 0xf2a93b}, {"Sales & refunds", Ins[8], 0xec4899}};
-	const FlowRow OutRows[8] = {{"Buy-ins & entry fees", Outs[0], 0x0d9488}, {"Rent, bills & fares", Outs[1], 0xef4d5a}, {"Food & deliveries", Outs[2], 0xe23b4e}, {"Gear", Outs[3], 0xff6b2c},
+	const FlowRow OutRows[8] = {{"Poker & sites", Outs[0], 0x0d9488}, {"Rent, bills & fares", Outs[1], 0xef4d5a}, {"Food & deliveries", Outs[2], 0xe23b4e}, {"Gear", Outs[3], 0xff6b2c},
 		{"Fines & Marcus", Outs[4], 0x7c3aed}, {"Looks, fitness & food out", Outs[5], 0xdb2777}, {"Backers' shares & swaps", Outs[6], 0xd97706}, {"Coaching", Outs[7], 0x0891b2}};
 	Chips Top = 1;
 	Chips InSum = 0;

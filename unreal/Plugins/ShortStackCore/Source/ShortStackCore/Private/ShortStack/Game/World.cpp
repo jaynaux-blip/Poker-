@@ -853,6 +853,14 @@ void World::Create(uint32_t InSeed, double StartWorld, Start S)
 		Sim::SeedChampions(*this);
 		Sim::SeedRoomHistory(*this, Today);
 	}
+	// The rival sites (update 2 §5.9): when each opens in this world, who has an account where on the first night (a fork of
+	// its own: nobody's other dice move), and an established world's Team RunItTwice, already signed (a fresh world's signs on
+	// results, as Team RiverLine does). A membership isn't a record: a fresh start seeds them the same way.
+	Sim::OpenSites(*this, Today, false);
+	if (Mode != Start::Blank)
+	{
+		Sim::SiteTeams(*this, Today, true);
+	}
 	// The month's Verified review (a fresh world's finds nobody).
 	Sim::Review(*this, Today);
 	Target = static_cast<int>(Roster.size());
@@ -973,35 +981,58 @@ void Sim::Wipe(World& W)
 	W.NightPoints.clear();
 	W.NightPointsHourAgo.clear();
 	W.WeekPairs.clear();
+	W.SiteRecords.clear();
+	W.SiteSeries.clear();
+	W.SiteRanksYesterday.clear();
 	W.RefreshAll();
 }
 
 double World::BoardValue(net::SiteId Site, net::Board B, int Npc, double At) const
 {
-	// Phase A's stub (core-world, G3): RiverLine is the only site, so its board is today's.
-	return Site == net::SiteId::RiverLine ? BoardValue(B, Npc, At) : 0.0;
+	// Update 2 §5.9: a rival reads its sparse maps; RiverLine reads the world's record less the rivals' (an older world has no
+	// rival records, so its boards read exactly as they did).
+	return Sim::SiteValue(*this, Site, B, Npc, At);
 }
 
 const SiteRecord* World::SiteRecordOf(net::SiteId Site, int Npc) const
 {
-	// Phase A's stub (core-world, G3): nobody has a record on a rival yet.
-	(void)Site;
-	(void)Npc;
-	return nullptr;
+	// RiverLine keeps no row: its record is the NPC's own (less the rivals', BoardValue).
+	const auto S = SiteRecords.find(Site);
+	if (Site == net::SiteId::RiverLine || S == SiteRecords.end())
+	{
+		return nullptr;
+	}
+	const auto It = S->second.find(Npc);
+	return It == S->second.end() ? nullptr : &It->second;
 }
 
 double World::SiteLaunched(net::SiteId Site) const
 {
-	// Phase A's stub (core-world, G3): no rival has launched.
-	(void)Site;
-	return -1.0;
+	// RiverLine has always been open (0). A rival: the minute its lobby opens in this world, which can be ahead of the clock
+	// (Ignite's Nov 2 before it comes): launched means 0 <= SiteLaunched(S) <= Clock(). -1: not in this world (a site not
+	// registered, or an older save before its migration).
+	if (Site == net::SiteId::RiverLine)
+	{
+		return 0.0;
+	}
+	const auto It = SiteLaunches.find(Site);
+	return It == SiteLaunches.end() || !Sim::Registered(Site) ? -1.0 : It->second;
 }
 
 int World::RankBefore(net::SiteId Site, net::Board B, int Npc) const
 {
-	// A3's seam (core-world fills the rivals' at G3 from SiteRanksYesterday): RiverLine's boards are today's; a rival's board
-	// has no rank yesterday yet. RanksYesterday is never indexed past Live.
-	return Site == net::SiteId::RiverLine && B <= net::Board::Live ? RankBefore(B, Npc) : 0;
+	// RiverLine's boards are its seven (RanksYesterday ends at Live and is never indexed past it); a rival's come from its
+	// own ranks a day ago (Sim::Ranks), 0 for nothing on the board then.
+	if (Site == net::SiteId::RiverLine)
+	{
+		return B <= net::Board::Live ? RankBefore(B, Npc) : 0;
+	}
+	const auto It = SiteRanksYesterday.find({Site, B});
+	if (It == SiteRanksYesterday.end() || Npc < 0 || static_cast<size_t>(Npc) >= It->second.size())
+	{
+		return 0;
+	}
+	return It->second[static_cast<size_t>(Npc)];
 }
 
 int World::Find(const std::string& Name) const

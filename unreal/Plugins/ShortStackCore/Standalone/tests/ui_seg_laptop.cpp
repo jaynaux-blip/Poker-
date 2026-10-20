@@ -346,7 +346,8 @@ void Bank()
 	WriteList("bank_segment", L);
 	// Update 2 §1.2: the sixth row is "Streaming & video" (Kast and Rerun's payouts, kinds 6 and 13); still nine (BankVideo).
 	const char* In[9] = {"Tournament cashes", "The Embercrest", "Leaderboard prizes", "Shifts", "Cash work", "Streaming & video", "Sponsors", "Backers & buyers", "Sales & refunds"};
-	const char* Out[8] = {"Buy-ins & entry fees", "Rent, bills & fares", "Food & deliveries", "Gear", "Fines & Marcus", "Looks, fitness & food out", "Backers' shares & swaps", "Coaching"};
+	// Update 2 §1.2 (G3): the first Out row is "Poker & sites" (buy-ins, and a rival site's card and cashier fees, kind 14).
+	const char* Out[8] = {"Poker & sites", "Rent, bills & fares", "Food & deliveries", "Gear", "Fines & Marcus", "Looks, fitness & food out", "Backers' shares & swaps", "Coaching"};
 	bool Rows = true;
 	for (const char* R : In)
 	{

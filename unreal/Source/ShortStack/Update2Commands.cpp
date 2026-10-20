@@ -13,8 +13,11 @@
 //          | .Sharp <0.5..1> | .Form <70..100> | .Describe | .Parity <hands>
 //   ss.Video.Describe | .Candidates | .Fake <kind> <online|embercrest|dees|skip> | .Upload <cand> <format> <title> <frame>
 //          | .Advance <days> | .Grant <subs> <hours> <views>
-//   ss.Site.Describe | .Invite <site> | .Launch <site> | .Deposit <site> <dollars> <method>
-//          | .Withdraw <site> <dollars> <method> | .Advance <hours>
+//   ss.Site.Describe | .Invite <site> | .Accept <site> | .Decline <site> | .Launch <site> | .Deposit <site> <dollars> [card]
+//          | .Withdraw <site> <dollars> [bank] | .Advance <hours>
+//          (each is "<verb> <args>" to Session::DebugSite: "describe", "invite ignite", "accept ignite", "decline runittwice",
+//          "launch ignite", "deposit ignite 50 card", "withdraw ignite 40 bank", "advance 120"; <site> is a site's key; P0 has
+//          one method each way, a card in and a bank transfer out, and the method left out is that one)
 //   ss.Career.New <name> <established|blank>
 //   ss.World.Start
 //
@@ -142,10 +145,14 @@ FUpdate2Command VideoGrant(EUpdate2Feature::Video, TEXT("ss.Video.Grant"), TEXT(
 // The rival sites (§5).
 FUpdate2Command SiteDescribe(EUpdate2Feature::Site, TEXT("ss.Site.Describe"), TEXT("Describe"), TEXT("The poker sites: accounts, money in transit, each invitation's gate and how close it is."));
 FUpdate2Command SiteInvite(EUpdate2Feature::Site, TEXT("ss.Site.Invite"), TEXT("Invite"), TEXT("ss.Site.Invite <site>: that site's invitation arrives now, past its gate (testing)."));
+FUpdate2Command SiteAccept(EUpdate2Feature::Site, TEXT("ss.Site.Accept"), TEXT("Accept"),
+	TEXT("ss.Site.Accept <site>: answers that site's invitation yes, as Mail's Accept does: the account opens and its welcome letter arrives (testing)."));
+FUpdate2Command SiteDecline(EUpdate2Feature::Site, TEXT("ss.Site.Decline"), TEXT("Decline"),
+	TEXT("ss.Site.Decline <site>: answers that site's invitation no, as Mail's Decline does; it writes once more 30 days later (testing)."));
 FUpdate2Command SiteLaunch(EUpdate2Feature::Site, TEXT("ss.Site.Launch"), TEXT("Launch"), TEXT("ss.Site.Launch <site>: that site launches in the world today (testing)."));
-FUpdate2Command SiteDeposit(EUpdate2Feature::Site, TEXT("ss.Site.Deposit"), TEXT("Deposit"), TEXT("ss.Site.Deposit <site> <dollars> <method>: money from the bank onto a site, as the Cashier does (testing)."));
+FUpdate2Command SiteDeposit(EUpdate2Feature::Site, TEXT("ss.Site.Deposit"), TEXT("Deposit"), TEXT("ss.Site.Deposit <site> <dollars> [card]: money from the bank onto a site, as the Cashier does (testing)."));
 FUpdate2Command SiteWithdraw(EUpdate2Feature::Site, TEXT("ss.Site.Withdraw"), TEXT("Withdraw"),
-	TEXT("ss.Site.Withdraw <site> <dollars> <method>: a withdrawal requested, as the Cashier does; it arrives days later (testing)."));
+	TEXT("ss.Site.Withdraw <site> <dollars> [bank]: a withdrawal requested by bank transfer, as the Cashier does; it arrives days later (testing)."));
 FUpdate2Command SiteAdvance(EUpdate2Feature::Site, TEXT("ss.Site.Advance"), TEXT("Advance"), TEXT("ss.Site.Advance <hours>: the sites' calendar moves on (transfers, promotions, invitations) (testing)."));
 // The fresh start (§3).
 FUpdate2Command WorldStart(EUpdate2Feature::World, TEXT("ss.World.Start"), TEXT("Start"), TEXT("The world's start (established or a fresh start), its version, the sites' launch days and the teams' sizes."));

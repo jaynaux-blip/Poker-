@@ -10,6 +10,7 @@
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/World.h"
 
@@ -158,6 +159,32 @@ ss::Chips TeamWeekly()
 	return Weekly > 0 ? Weekly : 150000;
 }
 
+/** Team RunItTwice (update 2 §5.9): an established world's six, signed on the first night; a fresh world's sign on results. */
+bool RunItTwicePro(const world::Npc& N)
+{
+	const net::SiteDef& D = net::Def(net::SiteId::RunItTwice);
+	return D.Id == net::SiteId::RunItTwice && !D.TeamName.empty() && N.Sponsor == D.TeamName;
+}
+
+/** What Team RunItTwice pays a week (its sponsor brand's terms: the "turnstone" brand). */
+ss::Chips RunItTwiceWeekly()
+{
+	for (const ss::sponsor::Brand& B : ss::sponsor::Brands())
+	{
+		if (B.Cat == ss::sponsor::Category::Site && B.Site == static_cast<int>(net::SiteId::RunItTwice) && ss::sponsor::NpcWeekly(B.Id) > 0)
+		{
+			return ss::sponsor::NpcWeekly(B.Id);
+		}
+	}
+	return TeamWeekly();
+}
+
+/** A world event that happened on a rival site (update 2 §5.10): its own news, not the record books'. */
+bool OnRival(const world::WorldEvent& E)
+{
+	return world::FlagSiteOf(E.Flags) != net::SiteId::RiverLine;
+}
+
 // ------------------------------------------------------------------ FreshSamePeople (U6, F1)
 
 void SamePeople(const world::World& Old, const world::World& Fresh)
@@ -170,11 +197,15 @@ void SamePeople(const world::World& Old, const world::World& Fresh)
 	{
 		const world::Npc& A = Old.People()[I];
 		const world::Npc& B = Fresh.People()[I];
-		const bool Pay = A.Pro ? B.Income == std::max<ss::Chips>(0, A.Income - TeamWeekly()) : B.Income == A.Income;
+		// (A team's pros differ by the team alone: its pay, and its "plays only on" in their sites, update 2 §5.9.)
+		const bool Team = A.Pro || RunItTwicePro(A);
+		const bool Pay = A.Pro ? B.Income == std::max<ss::Chips>(0, A.Income - TeamWeekly())
+			: RunItTwicePro(A) ? B.Income == std::max<ss::Chips>(0, A.Income - RunItTwiceWeekly())
+							   : B.Income == A.Income;
 		const bool Here = A.Id == B.Id && A.Name == B.Name && A.Country == B.Country && A.Born == B.Born && A.Hue == B.Hue && A.From == B.From && A.Skills == B.Skills &&
 			A.Traits == B.Traits && A.Peak == B.Peak && A.Potential == B.Potential && A.OnlineShare == B.OnlineShare && A.Formats == B.Formats && A.Schedule == B.Schedule &&
 			A.Professional == B.Professional && A.Tier == B.Tier && A.Live == B.Live && A.Bankroll == B.Bankroll && A.PeakRoll == B.PeakRoll && A.Living == B.Living && Pay &&
-			A.Followers == B.Followers && A.Streams == B.Streams && A.Rival == B.Rival && A.Anchored == B.Anchored && A.Sites == B.Sites &&
+			A.Followers == B.Followers && A.Streams == B.Streams && A.Rival == B.Rival && A.Anchored == B.Anchored && (Team || A.Sites == B.Sites) &&
 			ss::live::PlayStyle(A) == ss::live::PlayStyle(B);
 		if (!Here)
 		{
@@ -213,13 +244,13 @@ void DayOne(const world::World& W)
 			Who = N.Name;
 		}
 		Records = Records && Clean;
-		Team += N.Pro ? 1 : 0;
+		Team += N.Pro || RunItTwicePro(N) ? 1 : 0;
 		Kept = Kept && N.Sponsor != "Team RiverLine";
 		Since = Since && (N.Came != world::Arrival::None || (N.Joined == Today && N.TierSince == Today));
 		Streamers += N.Streams && N.Followers >= 100000 ? 1 : 0;
 	}
 	Check(Records, "fresh day one: every record is zero (totals, season, stats, titles, the room, the circuit, Verified, best events)" + (Who.empty() ? "" : ": " + Who));
-	Check(Team == 0 && Kept, "fresh day one: Team RiverLine starts empty (F3)");
+	Check(Team == 0 && Kept, "fresh day one: Team RiverLine (and Team RunItTwice) start empty (F3)");
 	Check(Since, "fresh day one: everyone who came with the world is on the scene since the first night (F4)");
 	Check(Streamers >= 2, "fresh day one: Kast's big streamers keep their audiences (F5)");
 	// Fame came from the record: on day one only a Kast audience makes anyone known (F5), so nobody without one has a name.
@@ -234,7 +265,8 @@ void DayOne(const world::World& W)
 		}
 	}
 	Check(Unknown, "fresh day one: nobody without a Kast audience has a reputation yet" + (Famous.empty() ? std::string() : ": " + Famous));
-	Check(W.Honors().empty() && W.Events().empty(), "fresh day one: no honors, no news");
+	// (A rival's own news is no record: RunItTwice's new lobby opens on Night One in either mode, update 2 §5.9.)
+	Check(W.Honors().empty() && std::all_of(W.Events().begin(), W.Events().end(), OnRival), "fresh day one: no honors, no news");
 	bool Boards = true;
 	for (const net::Board B : {net::Board::Earnings, net::Board::Season, net::Board::Wins, net::Board::FinalTables, net::Board::Series, net::Board::Live, net::Board::NightShift})
 	{
@@ -268,7 +300,8 @@ void Ranks(const world::World& W, const std::string& What)
 		std::vector<std::pair<double, int>> On;
 		for (const world::Npc& N : W.People())
 		{
-			const double V = W.BoardValue(B, N.Id, W.Clock());
+			// (RiverLine's boards: what was played on RiverLine, update 2 §5.8; with no rival record, the world's own numbers.)
+			const double V = W.BoardValue(net::SiteId::RiverLine, B, N.Id, W.Clock());
 			const int R = W.RankBefore(B, N.Id);
 			Ok = Ok && (V > 0.0) == (R > 0);
 			if (R > 0)
@@ -930,8 +963,9 @@ void SessionSide()
 		{
 			Team += N.Pro ? 1 : 0;
 		}
-		Check(S.WorldStart() == world::Start::Blank && S.Living().Began() == world::Start::Blank && Team == 0 && S.Living().Events().empty(),
-			"fresh session: a new career in a fresh start gets a wiped world");
+		Check(S.WorldStart() == world::Start::Blank && S.Living().Began() == world::Start::Blank && Team == 0 &&
+				  std::all_of(S.Living().Events().begin(), S.Living().Events().end(), OnRival),
+			"fresh session: a new career in a fresh start gets a wiped world (a rival's own news aside)");
 		Check(Line.find("World: Fresh start, version " + std::to_string(world::Version) + ", began Oct 6 ") == 0 &&
 				  Line.find("Team RiverLine: 0 pros (signs on results from Nov 1).") != std::string::npos,
 			"fresh session: ss.World.Start says how the world began, its version and when the team signs (" + Line + ")");

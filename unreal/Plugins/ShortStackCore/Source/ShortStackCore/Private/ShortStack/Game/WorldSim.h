@@ -50,6 +50,32 @@ constexpr size_t MaxLog = 6000;
 /** World::RoiRank and RoiPlace rank nobody against fewer qualifying regulars than this: unknown (-1; update 2 bug 6). */
 constexpr int RoiRankMinimum = 20;
 
+// The rival sites (update 2 §5.9, G3): who has an account where, and how they choose between the sites.
+/** RunItTwice from Night One: online regulars (OnlineShare at least this) at Low and up, and Micro ones. */
+constexpr float RunItTwiceShare = 0.5f;
+constexpr double RunItTwiceLowUp = 0.22;
+constexpr double RunItTwiceMicro = 0.08;
+/** Halcyon from Night One (P1's site, seeded now so P1 needs no world bump): High-tier online regulars. */
+constexpr double HalcyonHigh = 0.30;
+/** Ignite from its launch: over IgniteJoinDays, Micro and Low regulars (OnlineShare at least IgniteShare) join; from its
+ *  launch, IgniteArrivals of the new online arrivals start with an account, IgniteOnly of those on Ignite alone. */
+constexpr float IgniteShare = 0.4f;
+constexpr double IgniteMicro = 0.30;
+constexpr double IgniteLow = 0.10;
+constexpr int IgniteJoinDays = 30;
+constexpr double IgniteArrivals = 0.40;
+constexpr double IgniteOnly = 0.20;
+/** The skilled (Overall at least this) like Ignite's soft fields and an overlay; Mid and High players like RunItTwice's
+ *  majors (§5.9's weights). */
+constexpr float SkilledOverall = 0.70f;
+constexpr double SkilledIgnite = 1.3;
+constexpr double SkilledOverlay = 1.2;
+constexpr double RunItTwiceMajors = 1.2;
+/** Team RunItTwice's size (the SiteDef's TeamSize when it has one). */
+constexpr int RunItTwiceTeam = 6;
+/** An overlay worth a headline on the site's own news: at least this much, and a tenth of the guarantee. */
+constexpr Chips OverlayNews = 50000;
+
 inline double Clamp(double V, double Lo, double Hi)
 {
 	return V < Lo ? Lo : V > Hi ? Hi : V;
@@ -200,6 +226,60 @@ struct Sim
 	static Chips TeamWeekly();
 	/** A world saved at an older version, brought up to this one (WorldSave.cpp; once, in Finish). */
 	static void Migrate(World& W, int From);
+
+	// ---- the rival sites (WorldSim.cpp; update 2 §5.9, G3)
+	/** A site's bit in Npc::Sites. */
+	static int SiteBit(net::SiteId S) { return 1 << static_cast<int>(S); }
+	/** The site an event is on (its id's prefix; live events are nobody's). */
+	static net::SiteId SiteOf(const Pending& P);
+	/** A world event's flags for something that happened on a site: the site in FlagSiteBits (RiverLine's: none). */
+	static int SiteFlags(net::SiteId S) { return S == net::SiteId::RiverLine ? 0 : (static_cast<int>(S) << FlagSiteShift) & FlagSiteBits; }
+	/** Whether a rival is registered (its SiteDef in net::Sites()); RiverLine always is. */
+	static bool Registered(net::SiteId S);
+	/** The day a rival opens its lobby in this world (its launch, as this world keeps it), -1 for none. */
+	static int LaunchDay(const World& W, net::SiteId S);
+	/** The sites with a lobby open on Day, as bits: RiverLine's always, a registered rival's from its launch day. */
+	static int OpenOn(const World& W, int Day);
+	/**
+	 * Someone's accounts as §5.9's rule has them on Day, from their own fork ("world/<seed>/sites/<name>", so no other
+	 * draw moves): RunItTwice and Halcyon by their stakes, Ignite's joiners over its first month and its share of the
+	 * arrivals since. RiverLine's bit for everyone but Ignite's own arrivals; nothing but RiverLine's in a world the sites
+	 * haven't opened in (an older save before its migration). Nothing about the teams (SiteTeams).
+	 */
+	static int SeedSites(const World& W, const Npc& N, int Day);
+	/** Night One and a world brought up to version 4: every launch day this world doesn't have yet, and everyone's accounts as
+	 *  of Today (Load: a past launch other than the first night's moves to the first day after loading, §6.5). Npc::Sites is
+	 *  where someone plays: a team pro's is the team's site alone ("plays only on", §1.9 #11). */
+	static void OpenSites(World& W, int Today, bool Load);
+	/** NewDay: a rival's launch (its news), and Ignite's joiners for the day after (tomorrow's registrations). */
+	static void SitesDay(World& W, int Day, bool News = true);
+	/**
+	 * ss.Site.Launch (testing, §6.6; Session::DebugWorld's "sitelaunch"): a rival not yet open in this world opens this minute,
+	 * with its news and, for Ignite, its first month of joiners from today; nothing before this minute (no history). False for
+	 * RiverLine, a site not registered, or one already open.
+	 */
+	static bool LaunchNow(World& W, net::SiteId S);
+	/** NewMonth: the people who rose to RunItTwice's stakes open their accounts. */
+	static void SitesMonth(World& W, int Day);
+	/**
+	 * Team RunItTwice (§5.9): leaves as Team RiverLine's do; signs the best-known members on the 1st (a fresh world: on
+	 * results, from the 1st after its first month). Founding: an established world's first night, its team already signed
+	 * (no news, as Team RiverLine's ten have none).
+	 */
+	static void SiteTeams(World& W, int Day, bool Founding = false);
+	/** A finish on a rival: its sparse record and its running race (Apply). */
+	static void SiteResult(World& W, Npc& N, const Pending& P, int Place, Chips Prize, double Points);
+	/** A rival's running points race: RunItTwice's series, Ignite's month ("" when the event doesn't count). */
+	static std::string RaceKey(net::SiteId S, const Pending& P);
+	static std::string MonthRace(int Day);
+	/** A board's value on a site (World::BoardValue by site): RiverLine's is the whole record less the rivals'. */
+	static double SiteValue(const World& W, net::SiteId S, net::Board B, int Npc, double At);
+	/** Where everyone stands on a site's board (BoardRanks by site). */
+	static std::vector<int> BoardRanks(const World& W, net::SiteId S, net::Board B, double At);
+	/** A rival's boards that keep yesterday's ranks (SiteRanksYesterday). */
+	static const std::vector<net::Board>& SiteBoards();
+	/** The new year: the rivals' seasons start again (lifetime money stays). */
+	static void SitesNewYear(World& W);
 };
 } // namespace world
 } // namespace ss

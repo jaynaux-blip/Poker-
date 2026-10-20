@@ -2,6 +2,7 @@
 // Embercrest's wall calendar by the window, drawn from the same career.
 #include "ShortStack/UI/SecondScreen.h"
 #include "../StrictFloat.h"
+#include "../Game/SitesDetail.h"
 #include "RiverLineShared.h"
 
 #include "ShortStack/Game/Format.h"
@@ -54,6 +55,12 @@ std::pair<int, std::string> Word(const life::Mark& M)
 	// Rerun's (update 2 §1.6, §4.9): the 21st's payout and the review's answer, both in the channel's name.
 	case video::MarkPayout: return {6, "RERUN"};
 	case video::MarkReview: return {6, "RERUN"};
+	// The sites' (update 2 §1.6, site::Marks): a withdrawal landing (in the site's name, its Where), a welcome bonus running
+	// out, RiverLine Rewards on the 1st, a rival's series starting.
+	case site::MarkTransfer: return {6, rlnet_detail::NetUpper(M.Where)};
+	case site::MarkBonus: return {5, "BONUS"};
+	case site::MarkRewards: return {6, "REWARDS"};
+	case site::MarkSeries: return {8, "SERIES"};
 	default: return {9, std::string()};
 	}
 }
@@ -831,8 +838,15 @@ void Draw(Canvas& C, const Session& S)
 		}
 		else if (const auto Mk = Written.find(Day); Mk != Written.end())
 		{
-			// What else is due that day, in ballpoint: a payment, a chop, a sponsor's review.
-			C.Text(Mk->second, Cx + Cell - 6.0f, Cy + 16.0f, Ts(10.0f, 900, Pen, Align::Right));
+			// What else is due that day, in ballpoint: a payment, a chop, a sponsor's review. A longer word (a rival site's
+			// name) is written smaller so it clears the date at the square's left (every older word fits at 10).
+			const float Room = Cell - 6.0f - 7.0f - C.Measure("30", 15.0f, 900) - 4.0f;
+			float Size = 10.0f;
+			while (Size > 6.0f && C.Measure(Mk->second, Size, 900) > Room)
+			{
+				Size -= 0.5f;
+			}
+			C.Text(Mk->second, Cx + Cell - 6.0f, Cy + 16.0f, Ts(Size, 900, Pen, Align::Right));
 		}
 		if (Day < Today)
 		{

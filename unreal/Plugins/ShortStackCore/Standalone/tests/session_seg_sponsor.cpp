@@ -7,9 +7,11 @@
 #include "SessionSeg.h"
 
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/Game/Talk.h"
+#include "ShortStack/Game/Video.h"
 
 #include <algorithm>
 #include <cmath>
@@ -452,6 +454,212 @@ void Creator()
 	Expect(ss::SaveData::Parse(H.Last.Serialize(), Again) && Again.Serialize() == H.Last.Serialize() && Again.Life.Video.Subs >= 50000.0,
 		"creator: the save round-trips with the deal and the channel");
 }
+
+/** A joinable event on Site now (the cheapest small one: what's tested is where it's played, not the play). */
+bool SiteEvent(const ss::Session& S, ss::net::SiteId Site, ss::LobbyEvent& Out)
+{
+	const double World = S.WorldMinutes();
+	bool Found = false;
+	for (const ss::net::EventInstance& I : ss::net::Site(Site).Window(World - 120.0, World + 90.0))
+	{
+		const ss::LobbyEvent L = ss::net::Site(Site).Listing(I, nullptr, S.Unlocks());
+		if (L.Joinable && L.BuyInCents > 0 && L.BuyInCents <= 2200 && (!Found || L.BuyInCents < Out.BuyInCents))
+		{
+			Out = L;
+			Found = true;
+		}
+	}
+	return Found;
+}
+
+/** The newest sponsor letter of Kind on a contract of Brand's ("" for none). */
+std::string BrandLetter(const ss::Session& S, const std::string& Brand, int Kind)
+{
+	std::string Body;
+	for (const life::Letter& M : S.Life.Inbox)
+	{
+		Body = M.Source == "sponsor" && M.Kind == Kind && M.Thread.rfind(Brand + "@", 0) == 0 ? M.Body : Body;
+	}
+	return Body;
+}
+
+/**
+ * Update 2 (§5.7, §8.3 step 5, G3): the clause through the session. Team RiverLine signed from G3 plays only on RiverLine:
+ * a RiverLine table is nothing; opening a RunItTwice table (the register button's second press: RegisterEvent) is a strike
+ * with its Mail the same hour and the cure date; a second table there the same day isn't a second strike. An old Team
+ * RiverLine deal (signed before G3, the Kast migration's) has no clause until it renews.
+ */
+void Clause()
+{
+	// An old Team RiverLine deal (the Kast migration's, signed before G3): no clause, no warning, no strike.
+	{
+		ss::SaveData D;
+		Expect(ss::SaveData::Parse(Fixture("pre_segment_team_riverline.ssave"), D), "clause: the old Team RiverLine save parses");
+		bool Old = false;
+		for (const sponsor::Contract& X : D.Life.Sponsors.Contracts)
+		{
+			Old = Old || (X.Brand == "riverline" && (X.St == sponsor::State::Active || X.St == sponsor::State::Notice) && X.T.Only.empty());
+		}
+		bool Warns = false;
+		for (int Site = 0; Site < static_cast<int>(ss::net::SiteId::Count); ++Site)
+		{
+			Warns = Warns || sponsor::WouldStrike(D.Life.Sponsors, Site, true, true);
+		}
+		Expect(Old && !Warns && SponsorLines(D.Serialize()).find("only=") == std::string::npos, "clause: an old Team RiverLine deal keeps its old terms (no clause, no warning)");
+	}
+	Hooks H;
+	ss::Session S(H, "sponsor-clause");
+	S.BankrollCents = 600000;
+	double Now = Jump(S, 0.0, 30.0 * Day + 20.0 * 60.0);
+	const std::string Signed = S.DebugSponsor("sign riverline");
+	const sponsor::Contract* C = sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
+	Expect(C && C->T.Only == "riverline", ("clause: Team RiverLine signed from G3 plays only on RiverLine: " + Signed).c_str());
+	Expect(S.DebugSponsor("describe").find("  a table would be a strike on: ignite, runittwice") != std::string::npos, "clause: Describe says where a table would be a strike");
+	// A RunItTwice account, as if joined (core-sites' Join), with money on it.
+	ss::site::Account A;
+	A.Site = ss::net::SiteId::RunItTwice;
+	A.JoinedAt = S.WorldMinutes();
+	A.Cents = 50000;
+	S.Life.Sites.Accounts.push_back(A);
+	ss::LobbyEvent Home;
+	ss::LobbyEvent Away;
+	if (ss::net::Site(ss::net::SiteId::RunItTwice).Templates().empty())
+	{
+		std::printf("  clause: RunItTwice has no schedule in this build (core-sites' registry): the register button's strike is skipped\n");
+		return;
+	}
+	if (!SiteEvent(S, ss::net::SiteId::RiverLine, Home) || !SiteEvent(S, ss::net::SiteId::RunItTwice, Away))
+	{
+		Expect(false, "clause: a RiverLine and a RunItTwice event to register for");
+		return;
+	}
+	Expect(!sponsor::WouldStrike(S.Life.Sponsors, static_cast<int>(ss::net::SiteOf(Home.Spec.Id)), false, false) &&
+			   sponsor::WouldStrike(S.Life.Sponsors, static_cast<int>(ss::net::SiteOf(Away.Spec.Id)), false, false),
+		"clause: the register button warns on RunItTwice's table, not on RiverLine's");
+	S.RegisterEvent(Home);
+	Expect(S.IsPlaying(Home.Spec.Id) && C->Strikes == 0 && BrandLetter(S, "riverline", sponsor::LetterStrike).empty(), "clause: a RiverLine table, no strike");
+	const double At = S.WorldMinutes();
+	S.RegisterEvent(Away);
+	C = sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
+	const std::string Strike = BrandLetter(S, "riverline", sponsor::LetterStrike);
+	Expect(S.IsPlaying(Away.Spec.Id) && C && C->Strikes == 1 && C->CureUntil > At + 13.9 * Day && Strike.find("today you were on RunItTwice") != std::string::npos &&
+			   S.Life.Inbox.back().At == At,
+		("clause: the RunItTwice table is a strike, its Mail the same hour, cure in two weeks: " + Strike.substr(0, 80)).c_str());
+	Now = Jump(S, Now, S.WorldMinutes() + 60.0);
+	C = sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
+	Expect(C && C->Strikes == 1, "clause: one strike, however long the table runs");
+	// The save keeps the clause and the strike's day (a reload doesn't strike that day again).
+	S.Save();
+	ss::SaveData Back;
+	Expect(ss::SaveData::Parse(H.Last.Serialize(), Back) && Back.Serialize() == H.Last.Serialize() && SponsorLines(H.Last.Serialize()).find("\tonly=riverline") != std::string::npos,
+		"clause: the save keeps the clause and round-trips");
+	const sponsor::Contract* Bc = sponsor::Running(Back.Life.Sponsors, "riverline", At);
+	sponsor::NoteSitePlay(Back.Life.Sponsors, Back.Life, static_cast<int>(ss::net::SiteId::RunItTwice), At + 120.0, false, false);
+	Expect(Bc && Bc->Strikes == 1, "clause: reloaded, the same day is still one strike");
+}
+
+/**
+ * Update 2 (§5.6): Team RunItTwice's door also opens on a series title won on RunItTwice. The book can't see results, so the
+ * sponsor step marks it from the session's History (MarkSiteTitles): a RunItTwice series event won, with an account there.
+ * Not a second place, not a RunItTwice daily, not a RiverLine series title, and nothing without an account.
+ */
+void SiteTitle()
+{
+	Hooks H;
+	ss::Session S(H, "sponsor-site-title");
+	Jump(S, 0.0, 30.0 * Day + 12.0 * 60.0);
+	const ss::net::EventTemplate* Series = nullptr;
+	const ss::net::EventTemplate* Daily = nullptr;
+	for (const ss::net::EventTemplate& T : ss::net::Site(ss::net::SiteId::RunItTwice).Templates())
+	{
+		Series = !Series && !T.Series.empty() ? &T : Series;
+		Daily = !Daily && T.Series.empty() ? &T : Daily;
+	}
+	const ss::net::EventTemplate* Home = nullptr;
+	for (const ss::net::EventTemplate& T : ss::net::Shared().Templates())
+	{
+		Home = !Home && !T.Series.empty() ? &T : Home;
+	}
+	if (!Series || !Daily || !Home)
+	{
+		Expect(false, "site title: a RunItTwice series event, a RunItTwice daily and a RiverLine series event");
+		return;
+	}
+	const auto Result = [&S](const ss::net::EventTemplate& T, int Place) {
+		ss::HistoryEntry E;
+		E.Name = T.Name;
+		E.Place = Place;
+		E.Entrants = 300;
+		E.BuyInCents = T.BuyInCents;
+		E.EventId = T.Id + "@" + std::to_string(static_cast<long long>(S.WorldMinutes() - 600.0));
+		return E;
+	};
+	const auto Step = [&S]() {
+		S.Life.Sponsors.NextAt = 0.0;
+		S.SponsorStep(S.WorldMinutes() - 1.0, S.WorldMinutes());
+		return S.Life.Sponsors.PaidKeys.count("sitetitle|runittwice") > 0;
+	};
+	const std::string Door = "RunItTwice signs players who grind its tables: 100 events there, or a series title won there.";
+	S.History.insert(S.History.begin(), Result(*Series, 1));
+	Expect(!Step(), "site title: no RunItTwice account, no mark");
+	ss::site::Account A;
+	A.Site = ss::net::SiteId::RunItTwice;
+	A.JoinedAt = S.WorldMinutes() - Day;
+	A.LifetimeEvents = 3;
+	S.Life.Sites.Accounts.push_back(A);
+	S.History = {Result(*Series, 2), Result(*Daily, 1), Result(*Home, 1)};
+	Expect(!Step() && S.Life.Sponsors.PaidKeys.count("sitetitle|riverline") == 0 && sponsor::Eligible(S.Life.Sponsors, S.Life, S.Record(), "turnstone", S.WorldMinutes()) == Door,
+		"site title: a RunItTwice second place, a RunItTwice daily won, a RiverLine series title: the door stays shut");
+	S.History.insert(S.History.begin(), Result(*Series, 1));
+	Expect(Step() && sponsor::Eligible(S.Life.Sponsors, S.Life, S.Record(), "turnstone", S.WorldMinutes()) != Door,
+		("site title: a RunItTwice series event won opens Team RunItTwice's door (" + Series->Name + ")").c_str());
+}
+
+/**
+ * Update 2 (§5.7, §8.3 step 5): Studio's PUBLISH under the clause. A video of a RunItTwice hand warns (WouldStrike with
+ * Video) and, published, is a strike; a video of an Embercrest hand shows no site and never is. The strike on publishing is
+ * core-video's call in Session::Publish (patches/core-deals-g3_to_core-video_1.diff); a build without it says so.
+ */
+void VideoStrike()
+{
+	for (const char* Where : {"embercrest", "online"})
+	{
+		const bool Online = std::string(Where) == "online";
+		Hooks H;
+		ss::Session S(H, std::string("sponsor-video-strike-") + Where);
+		S.BankrollCents = 600000;
+		Jump(S, 0.0, 30.0 * Day + 12.0 * 60.0);
+		S.Life.Energy = 80.0;
+		S.DebugSponsor("sign riverline");
+		S.DebugVideo(std::string("fake bigpot ") + Where);
+		if (S.Life.Video.Open.empty())
+		{
+			Expect(false, "clause: a candidate to publish");
+			continue;
+		}
+		ss::video::Candidate& X = S.Life.Video.Open.back();
+		X.Site = Online ? static_cast<int>(ss::net::SiteId::RunItTwice) : X.Site;
+		const bool Warned = sponsor::WouldStrike(S.Life.Sponsors, X.Site, false, true);
+		ss::video::Choice C;
+		C.Candidates = {X.Id};
+		C.F = ss::video::Format::Breakdown;
+		const std::string Why = S.Publish(C);
+		const sponsor::Contract* K = sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
+		if (!Online)
+		{
+			Expect(Why.empty() && !Warned && K && K->Strikes == 0, "clause: a video of an Embercrest hand shows no site: no warning, no strike");
+			continue;
+		}
+		Expect(Warned && Why.empty(), "clause: Studio's PUBLISH warns on a RunItTwice hand, and it publishes");
+		if (K && K->Strikes == 0)
+		{
+			std::printf("  clause: Session::Publish doesn't note the video's site in this build (patches/core-deals-g3_to_core-video_1.diff): its strike isn't checked\n");
+			continue;
+		}
+		Expect(K && K->Strikes == 1 && BrandLetter(S, "riverline", sponsor::LetterStrike).find("today you were on RunItTwice") != std::string::npos,
+			"clause: published, a video of a RunItTwice hand is a strike");
+	}
+}
 } // namespace sponsor_seg
 
 void SegSponsor()
@@ -464,5 +672,8 @@ void SegSponsor()
 	sponsor_seg::KastTrap();
 	sponsor_seg::OldStreamer();
 	sponsor_seg::Creator();
+	sponsor_seg::Clause();
+	sponsor_seg::SiteTitle();
+	sponsor_seg::VideoStrike();
 }
 } // namespace session_test

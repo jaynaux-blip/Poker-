@@ -25,6 +25,11 @@
 //   - StreamLinks (update 2 C2, the g2 audit's S3): a hand's stream moments (SkipMoments' on the skip path, the player's
 //     knockouts on both) fire before its Rerun candidate is cut, so the candidate links them; a streamed bounty event's
 //     knockouts are each on stream once, linked to their own hands.
+//   - RivalSites (update 2 B3, SPEC §5.5, §5.8, §5.9): the session's seams for the rival sites: the networks on the game
+//     thread and never left on a gone world; accounts, wallets and RiverLine-only restrictions; no bank line for a rival's
+//     ticket or seat; the sitting's net and Dee's "broke" counting the sites' money; a rival's field (members only, the
+//     buy-in's stakes, the rival only with an account); with core-sites' and core-deals' bodies, the wallet's buy-in and
+//     prize and the clause's strike when another site's table comes to the front on stream.
 // Phase C's MigrationAll (§7.5) builds on SaveFixtures. A feature whose migration writes lines on load (§7.5 steps 2 to 4)
 // keeps SaveFixtures green: only the segment's own lines (and Kast's legacy deal lines) may change, and that's reported.
 #include "CopyLint.h"
@@ -41,6 +46,8 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Room.h"
+#include "ShortStack/Game/Sites.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/Game/Video.h"
@@ -1605,6 +1612,680 @@ void StreamLinks()
 		break;
 	}
 }
+// ------------------------------------------------------------------ G3: the rival sites' session seams (update 2 B3)
+
+/**
+ * A listing on a site of the test's own: tonight's $0.25 Hyper Sprint (the lobby's second row) under the site's prefix
+ * ("runittwice.seams-<name>@<start>"), with the buy-in, field and table population asked for. No network schedules it, so
+ * the world registers nobody for it: the session seats the field itself (NameField's fallback).
+ */
+ss::LobbyEvent SitesListing(ss::net::SiteId Site, const std::string& Name, ss::Chips BuyIn, int Entrants, const char* Population)
+{
+	ss::LobbyEvent L = ss::Lobby()[1];
+	// (The hand-tuned listing's id has no start; a scheduled event's is "<template>@<world minute it starts>".)
+	const long long Start = static_cast<long long>(std::llround(ss::net::MinutesPerDay * static_cast<double>(ss::net::NightOneDay) + L.Spec.StartClock));
+	L.Spec.Id = (Site == ss::net::SiteId::RiverLine ? std::string() : std::string(ss::net::KeyOf(Site)) + ".") + "seams-" + Name + "@" + std::to_string(Start);
+	L.Spec.Name = "Seams " + Name;
+	L.Name = L.Spec.Name;
+	L.Spec.BuyInCents = BuyIn;
+	L.BuyInCents = BuyIn;
+	L.Spec.FeeCents = BuyIn / 10;
+	L.Spec.GuaranteeCents = 0;
+	L.Spec.BountyCents = 0;
+	L.Spec.MysteryBounty = false;
+	L.Spec.SeatValueCents = 0;
+	L.Spec.SeatTicket.clear();
+	L.Spec.Entrants = Entrants;
+	L.Spec.Population = Population;
+	L.Joinable = true;
+	return L;
+}
+
+/** A satellite that seats everyone (its pool buys a seat each), so it ends at the first look: a seat, no money. */
+ss::LobbyEvent SitesAllSeats(ss::net::SiteId Site, const std::string& Name, const std::string& SeatTicket)
+{
+	ss::LobbyEvent L = SitesListing(Site, Name, 550, 18, Site == ss::net::SiteId::RunItTwice ? "low" : "micro");
+	L.Spec.SeatValueCents = L.Spec.BuyInCents - L.Spec.FeeCents;
+	L.Spec.SeatTicket = SeatTicket;
+	return L;
+}
+
+/** An account on a rival, as the Cashier would have it (the test's own: no deposit, no letter). */
+void SitesOpen(ss::Session& S, ss::net::SiteId Site, ss::Chips Cents)
+{
+	ss::site::Account A;
+	A.Site = Site;
+	A.JoinedAt = S.WorldMinutes();
+	A.Cents = Cents;
+	S.Life.Sites.Accounts.push_back(A);
+}
+
+ss::site::Account* SitesAccount(ss::Session& S, ss::net::SiteId Site)
+{
+	for (ss::site::Account& A : S.Life.Sites.Accounts)
+	{
+		if (A.Site == Site)
+		{
+			return &A;
+		}
+	}
+	return nullptr;
+}
+
+/** The bank's lines with this label (the ledger keeps the newest 60). */
+int SitesBankLines(const ss::Session& S, const std::string& Label)
+{
+	int N = 0;
+	for (const life::LedgerEntry& E : S.Life.Ledger)
+	{
+		N += E.Label == Label ? 1 : 0;
+	}
+	return N;
+}
+
+/** Sprints the table in front to its results (the hero checks or folds when Sprint hands a decision back). */
+double SitesPlayOut(ss::Session& S, double Now)
+{
+	S.CurrentPace = ss::Pace::Sprint;
+	ss::Rng Choice("seams-sites-choices");
+	int Decisions = 0;
+	return PlayOut(S, Choice, Now, Decisions);
+}
+
+/** Whether core-sites' wallets are in (site::WalletOf answers for an account): the money checks that need its bodies. */
+bool SitesWalletsLive()
+{
+	ss::site::Book B;
+	ss::site::Account A;
+	A.Site = ss::net::SiteId::Ignite;
+	B.Accounts.push_back(A);
+	return ss::site::WalletOf(B, ss::net::SiteId::Ignite) == &B.Accounts.front().Cents;
+}
+
+/**
+ * The rival sites' seams in Session.cpp (update 2 B3, §5.5, §5.8, §5.9, §6.2; review_ready.md's traps in the lead's file):
+ *   0. every site's network shows the session's world from its constructor, and a session going away moves every network
+ *      that showed its world on (a rival attached on its own too);
+ *   1. a rival's tables need an account there (freerolls too) and its wallet's money, never the bank's; RiverLine's
+ *      restriction is RiverLine's alone;
+ *   2. a ticket into a rival's event writes no bank line (its line is the site's); RiverLine's still writes its $0 line;
+ *   3. a seat won on a rival writes no bank line either, the seat's ticket keeps its site's prefix, and a rival's results
+ *      don't open RiverLine's account features (bounty, satellites, six-max) or bring Sam;
+ *   4. the sitting's net counts the sites' money (wallets and transfers on their way), and Dee's "broke" text doesn't fire
+ *      on a player with money sitting on a site;
+ *   5. a rival's field: the session seats only the site's members, at the stakes its buy-in says (not RunItTwice's tougher
+ *      population's), and the player's rival only with an account there; RiverLine's fields as ever, its fallback never
+ *      seating someone who plays only on Ignite;
+ *   6. (with core-sites' wallets) a rival's buy-in and prize move its wallet and never the bank or its ledger;
+ *   7. (with core-deals' clause) registering on another site, or bringing its table to the front on stream, is a strike;
+ *   8. Dee's text on a rival win; 9. on a rival's series title (Ignite keeps no series board: no leaderboard in it).
+ */
+void RivalSites()
+{
+	namespace net = ss::net;
+	namespace site = ss::site;
+	const net::SiteId Home = net::SiteId::RiverLine;
+	const net::SiteId Ignite = net::SiteId::Ignite;
+	const net::SiteId Rit = net::SiteId::RunItTwice;
+	auto AllShow = [](const ss::world::World* W) {
+		bool All = net::Shared().Attached() == W;
+		for (int K = 1; K < static_cast<int>(net::SiteId::Count); ++K)
+		{
+			All = All && net::Site(static_cast<net::SiteId>(K)).Attached() == W;
+		}
+		return All;
+	};
+	// 0. The registry on the game thread, and nothing left pointing at a world that's gone.
+	{
+		Hooks Ha;
+		auto Old = std::make_unique<ss::Session>(Ha, "seams-sites-old");
+		Expect(AllShow(&Old->Living()), "sites: every site's network shows the session's world from its constructor (built and attached on the game thread)");
+		Hooks Hb;
+		ss::Session New(Hb, "seams-sites-new");
+		net::Site(Ignite).Attach(&Old->Living()); // a rival attached on its own (not through AttachAll)
+		Old.reset();
+		Expect(AllShow(&New.Living()), "sites: a session going away moves every network that showed its world on to the newest (a rival's too)");
+	}
+	// 1. Accounts, the wallet, restrictions.
+	{
+		Hooks H;
+		ss::Session S(H, "seams-sites-afford");
+		S.CurrentScreen = ss::Screen::Lobby;
+		S.BankrollCents = 100000;
+		const ss::LobbyEvent Free = SitesListing(Ignite, "free", 0, 18, "soft");
+		const ss::LobbyEvent Paid = SitesListing(Ignite, "paid", 550, 18, "soft");
+		const ss::LobbyEvent Ours = SitesListing(Home, "home", 550, 18, "micro");
+		Expect(net::SiteOf(Free.Spec.Id) == Ignite && net::SiteOf(Ours.Spec.Id) == Home, "sites: the test's listings are Ignite's and RiverLine's");
+		Expect(!S.CanAfford(Free) && !S.CanAfford(Paid) && S.CanAfford(Ours), "sites: no account, no rival table (not even a freeroll); RiverLine's as ever");
+		SitesOpen(S, Ignite, 549);
+		SitesOpen(S, Rit, 100000); // (review-lead-g3) another site's money never pays for this one's seat
+		Expect(S.CanAfford(Free) && !S.CanAfford(Paid),
+			"sites: an account opens a rival's freerolls; a buy-in needs that wallet's money ($1,000 in the bank or on RunItTwice doesn't count)");
+		SitesAccount(S, Ignite)->Cents = 550;
+		Expect(S.CanAfford(Paid), "sites: $5.50 on Ignite buys an Ignite $5.50");
+		S.Life.BannedUntil = S.WorldMinutes() + 24.0 * 60.0;
+		Expect(!S.CanAfford(Ours) && S.CanAfford(Paid) && S.Restricted(Home) && !S.Restricted(Ignite) && !S.Restricted(Rit),
+			"sites: RiverLine's restriction closes RiverLine's tables only (the rivals don't know or care)");
+		// The record the invitation gates read (review-lead-g3; core-sites' rep::FromHistory, applied in Session::Record): the
+		// last hundred results' average paid buy-in, a freeroll left out.
+		S.History.clear();
+		for (const ss::Chips BuyIn : {ss::Chips(1100), ss::Chips(2200), ss::Chips(0)})
+		{
+			ss::HistoryEntry E;
+			E.Name = "Seams record";
+			E.Place = 5;
+			E.Entrants = 50;
+			E.BuyInCents = BuyIn;
+			S.History.push_back(E);
+		}
+		Expect(S.Record().Abi100 == 1650, "sites: Record() carries the last hundred's average paid buy-in (a freeroll left out) for the gates");
+	}
+	// 2. A ticket into a rival's event: no bank line, no money anywhere.
+	{
+		Hooks H;
+		ss::Session S(H, "seams-sites-ticket");
+		S.CurrentScreen = ss::Screen::Lobby;
+		SitesOpen(S, Rit, 0);
+		const ss::LobbyEvent Grind = SitesListing(Rit, "grind", 2200, 18, "low");
+		const std::string Tid = "runittwice.seams-grind";
+		S.Life.Tickets[Tid] = 1;
+		const ss::Chips Bank = S.BankrollCents;
+		const size_t Lines = S.Life.Ledger.size();
+		const bool Could = S.CanAfford(Grind);
+		S.RegisterEvent(Grind);
+		const site::Account* A = SitesAccount(S, Rit);
+		Expect(Could && S.T && S.T->Spec.Id == Grind.Spec.Id && S.Life.TicketsFor(Tid) == 0 && S.BankrollCents == Bank && A && A->Cents == 0,
+			"sites: a RunItTwice ticket enters its event (an account with $0 on it), and no money moves");
+		Expect(S.Life.Ledger.size() == Lines && SitesBankLines(S, "Ticket: Seams grind") == 0, "sites: a rival's ticket writes no bank line ($0 lines for a rival never reach the bank)");
+		bool SiteLine = false;
+		for (const site::Line& L : A ? A->Lines : std::vector<site::Line>())
+		{
+			SiteLine = SiteLine || (L.Label == "Ticket: Seams grind" && L.Cents == 0);
+		}
+		std::printf("  sites: a rival ticket's line in the site's own ledger: %s\n", SiteLine ? "yes" : "not kept (core-sites' AddLine not in yet)");
+		Expect(SiteLine || !SitesWalletsLive(), "sites: a rival ticket's line is in the site's own ledger (once core-sites keeps lines)");
+		Hooks Hh;
+		ss::Session Ours(Hh, "seams-sites-ticket-home");
+		Ours.CurrentScreen = ss::Screen::Lobby;
+		Ours.Life.Tickets["seams-grind"] = 1;
+		Ours.RegisterEvent(SitesListing(Home, "grind", 2200, 18, "low"));
+		Expect(Ours.T && SitesBankLines(Ours, "Ticket: Seams grind") == 1 && Ours.Life.Ledger.front().Amount == 0, "sites: RiverLine's ticket still writes its $0 bank line");
+	}
+	// 3. A seat won on a rival.
+	{
+		Hooks H;
+		ss::Session S(H, "seams-sites-seat");
+		S.CurrentScreen = ss::Screen::Lobby;
+		SitesOpen(S, Rit, 0);
+		S.Life.Tickets["runittwice.seams-sat"] = 1;
+		const ss::Chips Bank = S.BankrollCents;
+		const size_t Inbox = H.Inbox.size();
+		S.RegisterEvent(SitesAllSeats(Rit, "sat", "runittwice.seams-grind"));
+		const bool Opened = S.T != nullptr;
+		SitesPlayOut(S, 0.0);
+		Expect(Opened && S.CurrentScreen == ss::Screen::Results && S.LastResults.SeatWon == "runittwice.seams-grind" && S.Life.TicketsFor("runittwice.seams-grind") == 1,
+			"sites: a RunItTwice satellite's seat is a RunItTwice ticket (its prefix kept)");
+		Expect(S.BankrollCents == Bank && SitesBankLines(S, "Seat won: Seams sat") == 0 && SitesBankLines(S, "Ticket: Seams sat") == 0,
+			"sites: a seat won on a rival writes no bank line");
+		bool SeatLine = false; // (review-lead-g3) the seat's own line is the site's
+		for (const site::Line& L : SitesAccount(S, Rit) ? SitesAccount(S, Rit)->Lines : std::vector<site::Line>())
+		{
+			SeatLine = SeatLine || (L.Label == "Seat won: Seams sat" && L.Cents == 0);
+		}
+		Expect(SeatLine || !SitesWalletsLive(), "sites: a seat won on a rival is a $0 line in the site's own ledger");
+		Expect(S.Life.Unlocks.empty() && !H.Got(Inbox, "RiverLine", "New on your account") && !H.Got(Inbox, "Sam", "riverline board"),
+			"sites: a rival's result opens nothing of RiverLine's account, and Sam didn't see it on RiverLine's board");
+		Hooks Hh;
+		ss::Session Ours(Hh, "seams-sites-seat-home");
+		Ours.CurrentScreen = ss::Screen::Lobby;
+		Ours.Life.Tickets["seams-sat"] = 1;
+		Ours.RegisterEvent(SitesAllSeats(Home, "sat", "seams-grind"));
+		SitesPlayOut(Ours, 0.0);
+		Expect(Ours.LastResults.SeatWon == "seams-grind" && SitesBankLines(Ours, "Seat won: Seams sat") == 1 && Ours.Life.Unlocks.count("bounty") == 1,
+			"sites: RiverLine's seat still writes its bank line, and its result opens bounty events");
+	}
+	// 4. The sitting's net and Dee's "broke".
+	{
+		Hooks H;
+		ss::Session S(H, "seams-sites-net");
+		S.CurrentScreen = ss::Screen::Lobby;
+		SitesOpen(S, Ignite, 5000);
+		S.Life.Tickets["seams-net"] = 1;
+		S.RegisterEvent(SitesAllSeats(Home, "net", "seams-grind"));
+		// Mid-sitting, money moves on the site: $12.34 lands there, and $20 leaves it for the bank (on its way for days).
+		site::Account* A = SitesAccount(S, Ignite);
+		if (A)
+		{
+			A->Cents += 1234 - 2000;
+		}
+		site::Transfer X;
+		X.Id = "seams-net-out";
+		X.Site = Ignite;
+		X.Out = true;
+		X.Cents = 2000;
+		X.FeeCents = 300;
+		X.RequestedAt = S.WorldMinutes();
+		X.ArrivesAt = S.WorldMinutes() + 5.0 * 24.0 * 60.0;
+		S.Life.Sites.Transfers.push_back(X);
+		SitesPlayOut(S, 0.0);
+		std::printf("  sites: the sitting's net with $12.34 landing on Ignite and $20 on its way back: %s\n", ss::Money(S.LastResults.SessionNetCents).c_str());
+		Expect(S.CurrentScreen == ss::Screen::Results && S.LastResults.SessionNetCents == 1234,
+			"sites: the sitting's net counts the sites' money (the wallets and what's on its way), not the bank's alone");
+		auto Broke = [Ignite](ss::Chips SiteCents, const char* Seed) {
+			Hooks Hk;
+			ss::Session B(Hk, Seed);
+			B.CurrentScreen = ss::Screen::Lobby;
+			B.BankrollCents = 10;
+			if (SiteCents > 0)
+			{
+				SitesOpen(B, Ignite, SiteCents);
+			}
+			B.Life.Tickets["seams-broke"] = 1;
+			const size_t Since = Hk.Inbox.size();
+			B.RegisterEvent(SitesAllSeats(ss::net::SiteId::RiverLine, "broke", "seams-grind"));
+			SitesPlayOut(B, 0.0);
+			return B.CurrentScreen == ss::Screen::Results && Hk.Got(Since, "Dee", "Broke?");
+		};
+		Expect(Broke(0, "seams-sites-broke"), "sites: Dee's \"Broke?\" for a player with 10 cents and nothing on a site");
+		Expect(!Broke(5000, "seams-sites-not-broke"), "sites: no \"Broke?\" for a player with $50 sitting on Ignite");
+		// (review-lead-g3) Money on its way when the sitting starts lands during it, in the bank net of its fee: the sitting
+		// nets that fee alone (a landed transfer is the bank's now, never counted twice).
+		Hooks Hl;
+		ss::Session L(Hl, "seams-sites-landed");
+		L.CurrentScreen = ss::Screen::Lobby;
+		SitesOpen(L, Ignite, 0);
+		site::Transfer Y = X;
+		Y.Id = "seams-net-landing";
+		Y.RequestedAt = L.WorldMinutes() - 60.0;
+		Y.ArrivesAt = L.WorldMinutes() + 60.0;
+		L.Life.Sites.Transfers.push_back(Y);
+		L.Life.Tickets["seams-landed"] = 1;
+		L.RegisterEvent(SitesAllSeats(Home, "landed", "seams-grind"));
+		site::Transfer& Landed = L.Life.Sites.Transfers.back();
+		Landed.State = 1;
+		L.BankrollCents += Landed.Cents - Landed.FeeCents;
+		SitesPlayOut(L, 0.0);
+		Expect(L.CurrentScreen == ss::Screen::Results && L.LastResults.SessionNetCents == -300,
+			"sites: a withdrawal landing mid-sitting nets only its fee (a landed transfer is the bank's, never counted twice)");
+	}
+	// 5. Who sits at a rival's tables.
+	{
+		Hooks H;
+		ss::Session S(H, "seams-sites-field");
+		S.CurrentScreen = ss::Screen::Lobby;
+		SitesOpen(S, Rit, 0);
+		// RunItTwice accounts for every third weak micro regular (the ones NameField's fallback seats), and for none at Low.
+		const unsigned Bit = 1u << static_cast<unsigned>(Rit);
+		std::set<int> Members;
+		int Pool = 0;
+		for (const ss::world::Npc& N : S.Living().People())
+		{
+			if (N.Playing() && N.Tier == 1 && !N.Rival && N.Overall() < 0.5f && Pool++ % 3 == 0)
+			{
+				const_cast<ss::world::Npc&>(N).Sites = static_cast<uint8_t>(N.Sites | Bit);
+				Members.insert(N.Id);
+			}
+		}
+		// A $3.30 RunItTwice event seats RunItTwice's tougher population ("low"), but its people are micro players.
+		S.Life.Tickets["runittwice.seams-field"] = 1;
+		S.RegisterEvent(SitesListing(Rit, "field", 330, 180, "low"));
+		// (The world may have given RunItTwice accounts of its own, core-world's memberships: a member is anyone with the bit.)
+		int Seated = 0, Strangers = 0, WrongTier = 0;
+		for (const auto& It : S.FieldNpc)
+		{
+			const ss::world::Npc* N = S.Living().Get(It.second);
+			Seated += 1;
+			Strangers += !N || (N->Sites & Bit) == 0 ? 1 : 0;
+			WrongTier += N && N->Tier != 1 ? 1 : 0;
+		}
+		std::printf("  sites: a RunItTwice $3.30 seats %d people from the world (%zu micro regulars given an account; %d without one, %d not micro), rival at the table: %s\n",
+			Seated, Members.size(), Strangers, WrongTier, S.PlayerById(ss::RivalId()) ? "yes" : "no");
+		Expect(S.T && Members.size() >= 4 && Seated >= 4 && Strangers == 0 && WrongTier == 0,
+			"sites: a RunItTwice table seats only RunItTwice's members, at the stakes its buy-in says (micro, not its population's low)");
+		Expect(S.T && !S.PlayerById(ss::RivalId()) && S.FieldNpc.count(ss::RivalId()) == 0, "sites: the player's rival, with no RunItTwice account, isn't at a RunItTwice table");
+		// With an account there, the rival plays it like anybody.
+		Hooks Hr;
+		ss::Session R(Hr, "seams-sites-field-rival");
+		R.CurrentScreen = ss::Screen::Lobby;
+		SitesOpen(R, Rit, 0);
+		const int Rival = R.Living().Find(ss::RivalName);
+		if (const ss::world::Npc* N = R.Living().Get(Rival))
+		{
+			const_cast<ss::world::Npc&>(*N).Sites = static_cast<uint8_t>(N->Sites | Bit);
+		}
+		R.Life.Tickets["runittwice.seams-field"] = 1;
+		R.RegisterEvent(SitesListing(Rit, "field", 330, 180, "low"));
+		Expect(Rival >= 0 && R.T && R.PlayerById(ss::RivalId()) && R.FieldNpc.count(ss::RivalId()) == 1, "sites: the rival with a RunItTwice account sits in its events");
+		// RiverLine's own field still has the rival, and its regulars without any rival account.
+		Hooks Hh;
+		ss::Session Ours(Hh, "seams-sites-field-home");
+		Ours.CurrentScreen = ss::Screen::Lobby;
+		Ours.Life.Tickets["seams-field"] = 1;
+		Ours.RegisterEvent(SitesListing(Home, "field", 330, 180, "micro"));
+		Expect(Ours.T && Ours.PlayerById(ss::RivalId()) && Ours.FieldNpc.count(ss::RivalId()) == 1 && Ours.FieldNpc.size() >= 5,
+			"sites: RiverLine's fields as ever: the rival, and the regulars who play it");
+		// RiverLine's fallback seats only RiverLine's people: someone who plays only on Ignite (a few of its own arrivals) or
+		// only for a rival's team never takes a RiverLine seat the world didn't give them (review-lead-g3).
+		{
+			Hooks Ho;
+			ss::Session Only(Ho, "seams-sites-field-only");
+			Only.CurrentScreen = ss::Screen::Lobby;
+			std::set<int> Elsewhere;
+			int Weak = 0;
+			for (const ss::world::Npc& N : Only.Living().People())
+			{
+				if (N.Playing() && N.Tier == 1 && !N.Rival && N.Overall() < 0.5f && Weak++ % 2 == 0)
+				{
+					const_cast<ss::world::Npc&>(N).Sites = static_cast<uint8_t>(1u << static_cast<unsigned>(Ignite));
+					Elsewhere.insert(N.Id);
+				}
+			}
+			Only.Life.Tickets["seams-only"] = 1;
+			Only.RegisterEvent(SitesListing(Home, "only", 330, 180, "micro"));
+			const int RivalNpc = Only.Living().Find(ss::RivalName);
+			int FromWorld = 0, IgniteOnly = 0;
+			for (const auto& It : Only.FieldNpc)
+			{
+				FromWorld += It.second != RivalNpc ? 1 : 0;
+				IgniteOnly += static_cast<int>(Elsewhere.count(It.second));
+			}
+			std::printf("  sites: a RiverLine $3.30 with %zu weak micro regulars on Ignite alone seats %d people from the world, %d of them Ignite-only\n",
+				Elsewhere.size(), FromWorld, IgniteOnly);
+			Expect(Only.T && Elsewhere.size() >= 4 && FromWorld >= 4 && IgniteOnly == 0,
+				"sites: RiverLine's own fallback seats only people with a RiverLine account (never someone who plays on Ignite alone)");
+		}
+		// A real rival event from its site's schedule (once core-sites has one): the world's own registrations, members only.
+		ss::net::EventInstance E;
+		bool Found = false;
+		for (const ss::net::EventInstance& C : net::Site(Rit).Window(S.WorldMinutes(), S.WorldMinutes() + 3.0 * Day))
+		{
+			Found = Found || (E = C, C.Entries > 30);
+			if (Found)
+			{
+				break;
+			}
+		}
+		if (!Found)
+		{
+			std::printf("  sites: RunItTwice has no schedule yet (core-sites): the world's own registrations unchecked here\n");
+		}
+		else
+		{
+			Hooks Hw;
+			ss::Session W(Hw, "seams-sites-field-world");
+			W.CurrentScreen = ss::Screen::Lobby;
+			SitesOpen(W, Rit, 0);
+			ss::LobbyEvent L = net::Site(Rit).Listing(E, nullptr, W.Unlocks());
+			L.Joinable = true;
+			W.Life.Tickets[net::Site(Rit).TicketOf(E.Id.substr(0, E.Id.find('@')))] = 1;
+			// (review-lead-g3) The session's own filter, not only the world's: people with no RunItTwice account put on the
+			// world's list for it never take a seat.
+			std::set<int> Injected;
+			for (const ss::world::Npc& N : W.Living().People())
+			{
+				if (Injected.size() < 3 && N.Playing() && !N.Rival && (N.Sites & Bit) == 0)
+				{
+					W.Living().Join(E.Id, N.Id);
+					Injected.insert(N.Id);
+				}
+			}
+			const std::vector<int> Before = W.Living().Registered(E.Id);
+			int Listed = 0;
+			for (const int Id : Before)
+			{
+				Listed += static_cast<int>(Injected.count(Id));
+			}
+			Expect(Listed == 3, "sites: (the test) three people without a RunItTwice account are on the world's list for its event");
+			W.RegisterEvent(L);
+			int Outsiders = 0;
+			for (const auto& It : W.FieldNpc)
+			{
+				const ss::world::Npc* N = W.Living().Get(It.second);
+				Outsiders += N && (N->Sites & Bit) == 0 ? 1 : 0;
+			}
+			std::printf("  sites: %s (%d registered by the world) seats %zu people from the world\n", E.Id.c_str(), static_cast<int>(Before.size()), W.FieldNpc.size());
+			Expect(W.T && Outsiders == 0, "sites: a real RunItTwice event seats nobody without a RunItTwice account");
+		}
+	}
+	// 6. The money on a rival's tables (core-sites' wallets: PotFor, OnBuyIn, SiteSettle).
+	if (!SitesWalletsLive())
+	{
+		std::printf("  sites: core-sites' wallets aren't in yet: the rival buy-in and prize checks wait for them\n");
+	}
+	else
+	{
+		// Ignite $5.50s to the end (the first with 18 runners, then heads-up), a career at a time, until one cashes: each
+		// one's buy-in and prize move the wallet alone, and the wallet's own lines say so.
+		bool Cashed = false;
+		for (int Try = 0; Try < 12 && !Cashed; ++Try)
+		{
+			Hooks H;
+			ss::Session S(H, "seams-sites-pot-" + std::to_string(Try));
+			S.CurrentScreen = ss::Screen::Lobby;
+			S.BankrollCents = 100000;
+			SitesOpen(S, Ignite, 10000);
+			const size_t Lines = S.Life.Ledger.size();
+			S.RegisterEvent(SitesListing(Ignite, "pot", 550, Try == 0 ? 18 : 2, "soft"));
+			const site::Account* A = SitesAccount(S, Ignite);
+			Expect(S.T && S.BankrollCents == 100000 && A && A->Cents == 10000 - 550 && S.Life.Ledger.size() == Lines,
+				"sites: an Ignite buy-in comes off the Ignite wallet: the bank and its ledger don't move");
+			SitesPlayOut(S, 0.0);
+			const ss::Chips Won = S.LastResults.PrizeCents + S.LastResults.BountyCents;
+			A = SitesAccount(S, Ignite);
+			Cashed = Won > 0;
+			std::printf("  sites: an Ignite $5.50 to the end: %s of %d, %s won; the wallet %s\n", ss::Ordinal(S.LastResults.Place).c_str(), S.LastResults.Entrants,
+				ss::Money(Won).c_str(), A ? ss::Money(A->Cents).c_str() : "gone");
+			Expect(S.CurrentScreen == ss::Screen::Results && S.BankrollCents == 100000 && A && A->Cents == 10000 - 550 + Won && S.Life.Ledger.size() == Lines &&
+					   S.LastResults.SessionNetCents == Won - 550,
+				"sites: its prize lands in the wallet, the bank's ledger untouched, and the sitting's net is the wallet's");
+			bool BuyLine = false, PrizeLine = !Cashed;
+			for (const site::Line& L : A ? A->Lines : std::vector<site::Line>())
+			{
+				BuyLine = BuyLine || (L.Label == "Buy-in: Seams pot" && L.Cents == -550);
+				PrizeLine = PrizeLine || (L.Label == "Prize: Seams pot" && L.Cents == S.LastResults.PrizeCents);
+			}
+			Expect(BuyLine && PrizeLine, "sites: the wallet's own lines hold the buy-in and the prize (never the bank's)");
+		}
+		Expect(Cashed, "sites: one of the Ignite $5.50s cashed (the prize side was checked)");
+	}
+	// 7. The clause (core-deals' WouldStrike and NoteSitePlay): playing on another site, and its table in front on stream.
+	{
+		Hooks H;
+		ss::Session S(H, "seams-sites-clause");
+		S.CurrentScreen = ss::Screen::Lobby;
+		S.BankrollCents = 300000;
+		const bool Rig = S.Buy(ss::gear::FirstPcUpgrade().Id).empty();
+		SitesOpen(S, Ignite, 0);
+		ss::sponsor::Contract C;
+		C.Id = "seams-clause";
+		C.Brand = "riverline";
+		C.St = ss::sponsor::State::Active;
+		C.T.Only = "riverline";
+		C.Since = S.WorldMinutes() - 60.0;
+		C.Until = S.WorldMinutes() + 90.0 * Day;
+		ss::sponsor::Book Book;
+		Book.Contracts.push_back(C);
+		if (!ss::sponsor::WouldStrike(Book, static_cast<int>(Ignite), false, false))
+		{
+			std::printf("  sites: core-deals' clause isn't in yet: the strike checks wait for it\n");
+		}
+		else
+		{
+			// An Ignite table opened before the deal (no strike), then the deal, a RiverLine table in front, live.
+			S.Life.Tickets["ignite.seams-clause"] = 1;
+			S.RegisterEvent(SitesListing(Ignite, "clause", 0, 18, "soft"));
+			S.Life.Sponsors.Contracts.push_back(C);
+			S.Life.Tickets["seams-clause"] = 1;
+			S.RegisterEvent(SitesListing(Home, "clause", 0, 18, "micro"));
+			// (review-lead-g3) Off stream, the table in front is nobody's business: the Ignite tile to the front and back again
+			// is no strike.
+			for (const net::SiteId Front : {Ignite, Home})
+			{
+				for (int K = 0; K < S.TableCount(); ++K)
+				{
+					if (net::SiteOf(S.Glance(K).EventId) == Front)
+					{
+						S.FocusTable(K);
+					}
+				}
+			}
+			const std::string Live = Rig && S.TableCount() == 2 ? S.GoLive() : std::string("no rig or no second table");
+			const ss::sponsor::Contract* Mine = nullptr;
+			for (const ss::sponsor::Contract& K : S.Life.Sponsors.Contracts)
+			{
+				Mine = K.Id == "seams-clause" ? &K : Mine;
+			}
+			const int Before = Mine ? Mine->Strikes : -1;
+			int Ig = -1;
+			for (int K = 0; K < S.TableCount(); ++K)
+			{
+				Ig = net::SiteOf(S.Glance(K).EventId) == Ignite ? K : Ig;
+			}
+			const bool RiverLineInFront = S.T && net::SiteOf(S.T->Spec.Id) == Home;
+			S.FocusTable(Ig);
+			Mine = nullptr;
+			for (const ss::sponsor::Contract& K : S.Life.Sponsors.Contracts)
+			{
+				Mine = K.Id == "seams-clause" ? &K : Mine;
+			}
+			std::printf("  sites: Team RiverLine's clause, an Ignite table brought to the front on stream: strikes %d -> %d\n", Before, Mine ? Mine->Strikes : -1);
+			Expect(Live.empty() && RiverLineInFront && Ig >= 0 && Before == 0 && Mine && Mine->Strikes == 1,
+				"sites: on stream, bringing another site's table to the front is a strike under \"plays only on RiverLine\"");
+			// (review-lead-g3) Live, a RiverLine table that finishes hands the front to the table left, an Ignite one: it's on
+			// stream now, and that's a strike too (CloseFinishedTables; the tile wasn't clicked).
+			Hooks Hc;
+			ss::Session Two(Hc, "seams-sites-clause-close");
+			Two.CurrentScreen = ss::Screen::Lobby;
+			Two.BankrollCents = 300000;
+			Two.AutoFocus = false; // only the finished table moves the front
+			const bool Rig2 = Two.Buy(ss::gear::FirstPcUpgrade().Id).empty();
+			SitesOpen(Two, Ignite, 0);
+			Two.Life.Tickets["ignite.seams-close"] = 1;
+			Two.RegisterEvent(SitesListing(Ignite, "close", 0, 18, "soft"));
+			Two.Life.Sponsors.Contracts.push_back(C);
+			Two.Life.Tickets["seams-close"] = 1;
+			Two.RegisterEvent(SitesAllSeats(Home, "close", "seams-grind"));
+			const std::string Live2 = Rig2 && Two.TableCount() == 2 ? Two.GoLive() : std::string("no rig or no second table");
+			auto Strikes = [](const ss::Session& Of) {
+				int N = -1;
+				for (const ss::sponsor::Contract& K : Of.Life.Sponsors.Contracts)
+				{
+					N = K.Id == "seams-clause" ? K.Strikes : N;
+				}
+				return N;
+			};
+			const int Before2 = Strikes(Two);
+			Two.CurrentPace = ss::Pace::Sprint; // the RiverLine satellite in front, to its seat
+			double Clock = 0.0;
+			for (int Frames = 0; Two.TableCount() == 2 && Frames < 400000; ++Frames)
+			{
+				Clock += 1.0 / 30.0;
+				Two.Update(Clock);
+				if (Two.HasPrompt && Clock - Two.Prompt.OpenedAt > 0.5)
+				{
+					Two.HeroAct(Two.Prompt.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Fold());
+				}
+			}
+			const bool IgniteInFront = Two.TableCount() == 1 && Two.T && net::SiteOf(Two.T->Spec.Id) == Ignite;
+			std::printf("  sites: live, a RiverLine table finishing hands the front to an Ignite one: strikes %d -> %d\n", Before2, Strikes(Two));
+			Expect(Live2.empty() && Before2 == 0 && IgniteInFront && Strikes(Two) == 1,
+				"sites: on stream, a finished table handing the front to another site's is a strike under \"plays only on RiverLine\"");
+		}
+	}
+	// 8. Dee hears about a win on a rival: the prize is on that site, and site money never pays rent. Heads-up Ignite
+	// freerolls, played by hand on the watch path (the one that texts her), until the player takes one; her text, linted.
+	{
+		std::vector<std::pair<std::string, std::string>> Copy;
+		int Tries = 0;
+		for (; Tries < 20 && Copy.empty(); ++Tries)
+		{
+			Hooks H;
+			ss::Session S(H, "seams-sites-win-" + std::to_string(Tries));
+			S.CurrentScreen = ss::Screen::Lobby;
+			SitesOpen(S, Ignite, 0);
+			const size_t Since = H.Inbox.size();
+			ss::LobbyEvent Win = SitesListing(Ignite, "win", 0, 2, "soft");
+			Win.Spec.GuaranteeCents = 200; // $2 to the winner
+			S.RegisterEvent(Win);
+			ss::Rng Choice("seams-sites-win-choices");
+			int Decisions = 0;
+			PlayOut(S, Choice, 0.0, Decisions);
+			for (size_t K = Since; K < H.Inbox.size(); ++K)
+			{
+				if (H.Inbox[K].first == "Dee" && H.Inbox[K].second.rfind("You did WHAT?!", 0) == 0)
+				{
+					Copy.push_back(H.Inbox[K]);
+				}
+			}
+		}
+		const bool Honest = !Copy.empty() && Copy[0].second.find("Get it off that site and pay the rent.") != std::string::npos;
+		std::printf("  sites: a heads-up Ignite win on the %s try: \"%s\"\n", ss::Ordinal(Tries).c_str(), Copy.empty() ? "no win" : Copy[0].second.c_str());
+		Expect(Honest, "sites: Dee's text on a rival site's win tells the player to get it off the site first (it can't pay rent there)");
+		Copy.push_back({"Dee", "You did WHAT?! Get it off that site and put it toward your key. Then come see me. We need to talk about your future."});
+		Failures += copylint::Run("sites (session)", Copy, copylint::Pa);
+		for (const auto& Line : Copy)
+		{
+			const std::string Low = copylint::Lower(Line.second);
+			bool Clean = true;
+			for (const char* Word : {" ai ", " bot", "autoplay", "flopjoy", "turnstone"})
+			{
+				Clean = Clean && Low.find(Word) == std::string::npos;
+			}
+			Expect(Clean, "sites: Dee's lines say nothing of autoplay or the old names");
+		}
+	}
+	// 9. A series title won on a rival (review-lead-g3): Ignite keeps no series board (its boards are the month's and the
+	// season's), so Dee names the title and no leaderboard. Heads-up Ignite freerolls dressed as Wildfire's first event (its
+	// template, tonight), played by hand, until the player takes one.
+	{
+		const net::EventTemplate* Wild = net::Site(Ignite).FindTemplate("ignite.wildfeb27-1");
+		const net::SeriesInfo* Series = Wild ? net::Site(Ignite).FindSeries(Wild->Series) : nullptr;
+		if (!Series)
+		{
+			std::printf("  sites: Ignite has no Wildfire yet (core-sites): the rival series title's text unchecked here\n");
+		}
+		else
+		{
+			std::vector<std::pair<std::string, std::string>> Said;
+			bool Won = false;
+			int Tries = 0;
+			for (; Tries < 20 && !Won; ++Tries)
+			{
+				Hooks H;
+				ss::Session S(H, "seams-sites-series-" + std::to_string(Tries));
+				S.CurrentScreen = ss::Screen::Lobby;
+				SitesOpen(S, Ignite, 0);
+				const size_t Since = H.Inbox.size();
+				ss::LobbyEvent L = SitesListing(Ignite, "series", 0, 2, "soft");
+				L.Spec.Id = Wild->Id + L.Spec.Id.substr(L.Spec.Id.find('@'));
+				L.Spec.GuaranteeCents = 200;
+				S.RegisterEvent(L);
+				ss::Rng Choice("seams-sites-series-choices");
+				int Decisions = 0;
+				PlayOut(S, Choice, 0.0, Decisions);
+				Won = S.CurrentScreen == ss::Screen::Results && S.LastResults.Place == 1;
+				for (size_t K = Since; K < H.Inbox.size(); ++K)
+				{
+					if (H.Inbox[K].first == "Dee")
+					{
+						Said.push_back(H.Inbox[K]);
+					}
+				}
+			}
+			const std::string Want = "A " + Series->Name + " title. Different site, same cards. Nobody can take that away from you.";
+			bool Title = false, Board = false;
+			for (const auto& Line : Said)
+			{
+				Title = Title || Line.second == Want;
+				Board = Board || Line.second.find("leaderboard") != std::string::npos;
+			}
+			std::printf("  sites: a %s title on the %s try: Dee %s\n", Series->Name.c_str(), ss::Ordinal(Tries).c_str(),
+				Title ? "names the title" : Board ? "points at a leaderboard Ignite doesn't keep" : "says nothing of it");
+			Expect(Won && Title && !Board, "sites: a rival's series title brings Dee's text about the title, never a leaderboard the site doesn't keep");
+			Failures += copylint::Run("sites (session, series)", Said, copylint::Pa);
+		}
+	}
+}
 } // namespace seams
 
 void SegLead()
@@ -1621,5 +2302,6 @@ void SegLead()
 	seams::Gate1Fixtures();
 	seams::Gate2Fixtures();
 	seams::StreamLinks();
+	seams::RivalSites();
 }
 } // namespace session_test

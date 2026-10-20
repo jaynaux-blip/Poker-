@@ -805,23 +805,27 @@ void RiverLine::StreamPreview(const Rect& R, double Now)
 	C->Save();
 	C->Translate(R.X, R.Y - std::min(Crop, 64.0f) * Scale);
 	C->Scale(Scale, Scale);
-	C->FillRect({0.0f, 0.0f, NetW, 1000.0f}, Paint::Linear({0.0f, 0.0f}, {0.0f, 1000.0f}, pal::Bg2, pal::Bg));
-	TopBar(Now);
-	switch (S.CurrentScreen)
 	{
-	case Screen::Boot: Boot(Now); break;
-	case Screen::Lobby: LobbyPages(Now); break;
-	case Screen::Table:
-		if (S.Tiled && S.TableCount() >= 2)
+		// Update 2 (§1.8, §5.11): the stream shows whatever the poker client wears, a rival's skin included.
+		const SkinScope Skin(rlsites_detail::SitesSkin(rlsites_detail::SitesClient(*this, S)));
+		C->FillRect({0.0f, 0.0f, NetW, 1000.0f}, Paint::Linear({0.0f, 0.0f}, {0.0f, 1000.0f}, pal::Bg2, pal::Bg));
+		TopBar(Now);
+		switch (S.CurrentScreen)
 		{
-			Tiles(Now);
+		case Screen::Boot: Boot(Now); break;
+		case Screen::Lobby: LobbyPages(Now); break;
+		case Screen::Table:
+			if (S.Tiled && S.TableCount() >= 2)
+			{
+				Tiles(Now);
+			}
+			else
+			{
+				Table(Now);
+			}
+			break;
+		case Screen::Results: ResultsScreen(Now); break;
 		}
-		else
-		{
-			Table(Now);
-		}
-		break;
-	case Screen::Results: ResultsScreen(Now); break;
 	}
 	C->Restore();
 	Previewing = false;
@@ -1005,7 +1009,7 @@ void RiverLine::KastStudio(double Now)
 		C->FillCircle(Cx, Prev.Y + 120.0f, 46.0f, NetA(KViolet, 0.18f));
 		NetLockIcon(*C, Cx - 26.0f, Prev.Y + 90.0f, 52.0f, KInk);
 		UI.Text("Your laptop can't stream", Cx, Prev.Y + 222.0f, Ts(32.0f, 900, KInk, Align::Center));
-		UI.Text("RiverLine and a stream encoder at once is too much for it: the fans scream and the stream drops out.", Cx, Prev.Y + 256.0f,
+		UI.Text(rlsites_detail::SitesPlayedRival(S) ? rlsites_detail::SitesKastClient : "RiverLine and a stream encoder at once is too much for it: the fans scream and the stream drops out.", Cx, Prev.Y + 256.0f,
 			Ts(15.0f, 500, KMuted, Align::Center, Baseline::Alphabetic, false, Prev.W - 80.0f));
 		UI.Text("Upgrade the PC on GearDrop and Kast opens up: chat, followers, subs, sponsors.", Cx, Prev.Y + 280.0f, Ts(15.0f, 500, KMuted, Align::Center, Baseline::Alphabetic, false, Prev.W - 80.0f));
 		const Rect Card{Cx - 260.0f, Prev.Y + 312.0f, 520.0f, 110.0f};
@@ -1577,7 +1581,8 @@ void RiverLine::KastChannel(double Now)
 	}
 	UI.Text(Grouped(Ch.Followers) + " followers \xC2\xB7 " + Grouped(Ch.ActiveSubs(World)) + " subs \xC2\xB7 " + std::to_string(Ch.Streams) + " streams \xC2\xB7 " + NetHms(Ch.MinutesLive).substr(0, 6) + " live",
 		Ban.X + 170.0f, Ban.Y + 104.0f, Ts(15.0f, 600, Hex(0xcfc4ee)));
-	UI.Text("Poker \xC2\xB7 RiverLine tournaments \xC2\xB7 peak " + Grouped(Ch.Peak) + " viewers", Ban.X + 170.0f, Ban.Y + 130.0f, Ts(13.0f, 600, KMuted));
+	// The channel's line: RiverLine's tournaments, until a rival site has been played on stream or off (update 2 §5.11).
+	UI.Text(std::string(rlsites_detail::SitesPlayedRival(S) ? "Poker \xC2\xB7 tournaments" : "Poker \xC2\xB7 RiverLine tournaments") + " \xC2\xB7 peak " + Grouped(Ch.Peak) + " viewers", Ban.X + 170.0f, Ban.Y + 130.0f, Ts(13.0f, 600, KMuted));
 	// Money.
 	const float Mx = Ban.X + Ban.W - 30.0f;
 	NetSpaced(*C, "CHANNEL BALANCE", Mx - 260.0f, Ban.Y + 42.0f, 10.0f, 900, Hex(0xcfc4ee), 1.4f);

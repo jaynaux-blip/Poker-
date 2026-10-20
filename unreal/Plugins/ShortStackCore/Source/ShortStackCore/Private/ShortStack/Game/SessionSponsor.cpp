@@ -4,6 +4,7 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 
 #include <algorithm>
@@ -119,6 +120,39 @@ int RoadTier(const rep::Public& P, int Road)
 		Q.VideoPartner = P.VideoPartner;
 	}
 	return sponsor::Tier(Q, std::string());
+}
+
+/**
+ * Team RunItTwice's door (update 2 §5.6) opens on an online series title won on its site: the book can't see results, so
+ * the session marks it in the book ("sitetitle|<site>", Sponsor.cpp's key, kept by its prune) from the history it keeps.
+ * Only with a rival account, and only once a site.
+ */
+void MarkSiteTitles(sponsor::Book& B, const life::State& L, const std::vector<HistoryEntry>& History)
+{
+	if (L.Sites.Accounts.empty())
+	{
+		return;
+	}
+	for (const HistoryEntry& E : History)
+	{
+		const size_t At = E.EventId.rfind('@');
+		const net::SiteId Site = net::SiteOf(E.EventId);
+		if (E.Place != 1 || At == std::string::npos || Site == net::SiteId::RiverLine)
+		{
+			continue;
+		}
+		const std::string Key = std::string("sitetitle|") + net::KeyOf(Site);
+		if (B.PaidKeys.count(Key) > 0)
+		{
+			continue;
+		}
+		const net::EventTemplate* T = net::ForEvent(E.EventId).FindTemplate(E.EventId.substr(0, At));
+		if (T && !T->Series.empty())
+		{
+			B.PaidKeys.insert(Key);
+			B.NextAt = 0.0;
+		}
+	}
 }
 } // namespace session_sponsor_detail
 
@@ -309,6 +343,7 @@ void Session::SponsorStep(double From, double To)
 	{
 		return; // nothing due before then (a look, a review, a reply, a perk); every change outside the step resets it
 	}
+	session_sponsor_detail::MarkSiteTitles(B, Life, History);
 	std::vector<std::pair<std::string, std::string>> Texts;
 	sponsor::StepContext Ctx;
 	Ctx.Gear = &Gear;
@@ -449,8 +484,15 @@ std::string Session::DebugSponsor(const std::string& Args)
 	for (const sponsor::Contract& C : B.Contracts)
 	{
 		Out += "  " + C.Id + " " + StateName(C.St) + " " + sponsor::Pill(C, World) + " period " + std::to_string(C.Period) + "/" + std::to_string(sponsor::Periods(C)) + " strikes " +
-			std::to_string(C.Strikes) + " paid " + Money(C.PaidCents) + "\n";
+			std::to_string(C.Strikes) + " paid " + Money(C.PaidCents) + (C.T.Only.empty() ? std::string() : " only " + C.T.Only) + "\n";
 	}
+	// The clause (update 2 §5.7): where a table would be a strike now (the register button's warning).
+	std::string Strikes;
+	for (int Site = 0; Site < static_cast<int>(net::SiteId::Count); ++Site)
+	{
+		Strikes += sponsor::WouldStrike(B, Site, false, false) ? std::string(Strikes.empty() ? "" : ", ") + net::KeyOf(static_cast<net::SiteId>(Site)) : std::string();
+	}
+	Out += Strikes.empty() ? std::string() : "  a table would be a strike on: " + Strikes + "\n";
 	for (const sponsor::Brand& Br : sponsor::Brands())
 	{
 		const std::string Why = sponsor::Eligible(B, Life, P, Br.Id, World, &Gear);

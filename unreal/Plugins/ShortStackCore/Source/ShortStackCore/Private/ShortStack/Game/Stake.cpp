@@ -667,7 +667,7 @@ void Move(Chips& Bankroll, life::State& L, double At, const std::string& Label, 
 
 /**
  * The same on a site's pot (update 2 §1.2): RiverLine's is the bankroll and the bank's line, as above; a rival's wallet
- * moves with no bank line (its own site line, through site::AddLine, is core-deals' at G3).
+ * moves with its own site line (site::AddLine, the same kind and label the bank's line would have) and never a bank line.
  */
 void Move(const Pot& P, life::State& L, double At, const std::string& Label, Chips Amount)
 {
@@ -681,6 +681,44 @@ void Move(const Pot& P, life::State& L, double At, const std::string& Label, Chi
 		return;
 	}
 	*P.Cents += Amount;
+	site::AddLine(L.Sites, static_cast<net::SiteId>(P.Site), At, life::LedgerBacking, Amount, Label);
+}
+
+/** A rival's wallet: its account's balance (site::WalletOf's rule, on SiteData.h's account); null for RiverLine or none. */
+Chips* StakeWallet(life::State& L, int Site)
+{
+	if (Site <= static_cast<int>(net::SiteId::RiverLine))
+	{
+		return nullptr;
+	}
+	for (site::Account& A : L.Sites.Accounts)
+	{
+		if (static_cast<int>(A.Site) == Site)
+		{
+			return &A.Cents;
+		}
+	}
+	return nullptr;
+}
+
+/**
+ * The pot an online event's stake money moves in (§1.2, Session::PotFor's rule): a rival event's is its site's wallet,
+ * anything else (RiverLine's, a live entry's, a rival with no account) the bankroll.
+ */
+Pot StakePotOn(life::State& L, Chips& Bankroll, const std::string& EventId)
+{
+	const int Site = static_cast<int>(net::SiteOf(EventId));
+	Chips* Wallet = StakeWallet(L, Site);
+	Pot P;
+	P.Cents = Wallet ? Wallet : &Bankroll;
+	P.Site = Wallet ? Site : 0;
+	return P;
+}
+
+/** Packages fund RiverLine's events only (§5.5: Lantern Row's and Sam's accounts are RiverLine accounts). */
+bool PackagePlays(const std::string& EventId)
+{
+	return net::SiteOf(EventId) == net::SiteId::RiverLine;
 }
 
 void FlowTo(Book& B, const std::string& Id, const std::string& Who, const std::string& Where, Chips Cents, Memory M, double At)
@@ -1758,7 +1796,8 @@ life::Funding FundFor(const Book& B, const std::string& EntryId, Chips BuyIn, bo
 			return F;
 		}
 	}
-	if (const Deal* P = ActivePackage(B))
+	// A package's roll pays RiverLine's events (and the Embercrest's) only: a rival entry is the player's own money (§5.5).
+	if (const Deal* P = PackagePlays(EntryId) ? ActivePackage(B) : nullptr)
 	{
 		const Chips Cap = Live ? P->T.CapLive : P->T.CapOnline;
 		int Bullets = 0;
@@ -1889,7 +1928,12 @@ std::vector<std::pair<life::Funding, std::string>> OnlineFundingOptions(const li
 			F.Permille = 1000 - P->T.CutPermille;
 			F.Cents = BuyIn;
 			std::string Why;
-			if (BuyIn <= 0)
+			if (!PackagePlays(EventId))
+			{
+				// Update 2 (§5.5): the package's account is a RiverLine account. The register button says so.
+				Why = BackerName(*P) + " funds RiverLine events only. This one's your own money.";
+			}
+			else if (BuyIn <= 0)
 			{
 				Why = "Freerolls are on you. No roll needed.";
 			}
@@ -1952,8 +1996,11 @@ void TopUp(Deal& D, double At)
 	D.Makeup = std::max<Chips>(0, D.Funded - D.RollNow);
 }
 
-/** A listing's fills become pieces of the entry, and the buyers' money moves in one line (§1.2). */
-void Collect(Book& B, Chips& Bankroll, life::State& L, const std::string& EventId, const std::string& EntryName, const life::LiveEntry* E, double World)
+/**
+ * A listing's fills become pieces of the entry, and the buyers' money moves in one line (§1.2), into the pot the entry's
+ * buy-in came out of (update 2: a rival event's wallet).
+ */
+void Collect(Book& B, const Pot& Into, life::State& L, const std::string& EventId, const std::string& EntryName, const life::LiveEntry* E, double World)
 {
 	Chips Total = 0;
 	int Permille = 0;
@@ -1987,9 +2034,16 @@ void Collect(Book& B, Chips& Bankroll, life::State& L, const std::string& EventI
 	}
 	if (Total > 0)
 	{
-		Move(Bankroll, L, World, "Pieces sold: " + Title(EntryName) + ", " + PctText(Permille) + (Markup > 0 ? " at " + MarkupText(Markup) : std::string()), Total);
+		Move(Into, L, World, "Pieces sold: " + Title(EntryName) + ", " + PctText(Permille) + (Markup > 0 ? " at " + MarkupText(Markup) : std::string()), Total);
 	}
 	// What was listed and not filled by now is off the table.
+}
+
+void Collect(Book& B, Chips& Bankroll, life::State& L, const std::string& EventId, const std::string& EntryName, const life::LiveEntry* E, double World)
+{
+	Pot P;
+	P.Cents = &Bankroll;
+	Collect(B, P, L, EventId, EntryName, E, World);
 }
 
 /** The listings and swaps on an event someone else paid for lapse: covered and staked entries go in clean. */
@@ -2071,9 +2125,16 @@ void LouNet(Book& B, double World)
 	}
 }
 
-/** Sam's debt: a quarter of every cash and shift until it's paid. */
-void Garnish(Book& B, Chips& Bankroll, life::State& L, Chips Income, const std::string& What, double World)
+/**
+ * Sam's debt: a quarter of every cash and shift until it's paid, off the pot the money landed in (update 2 §1.2: a rival
+ * cash's quarter comes off that site's wallet, with a site line and no bank line).
+ */
+void Garnish(Book& B, const Pot& From, life::State& L, Chips Income, const std::string& What, double World)
 {
+	if (!From.Cents)
+	{
+		return;
+	}
 	for (Deal& D : B.Deals)
 	{
 		if (D.Debt <= 0 || Income <= 0)
@@ -2085,7 +2146,7 @@ void Garnish(Book& B, Chips& Bankroll, life::State& L, Chips Income, const std::
 		{
 			continue;
 		}
-		Move(Bankroll, L, World, "Sam: 25% of " + What, -Take);
+		Move(From, L, World, "Sam: 25% of " + What, -Take);
 		D.Debt -= Take;
 		DealLine(D, World, -Take, "Garnished: " + What);
 		Once(B, "garnish:" + D.Id + ":" + F2(World) + ":" + What, World);
@@ -2096,13 +2157,12 @@ void Garnish(Book& B, Chips& Bankroll, life::State& L, Chips Income, const std::
 	}
 }
 
-/** Sam's quarter on a site's pot (update 2 §1.2): RiverLine's forwards to the bankroll's; a rival's is core-deals' (G3). */
-void Garnish(Book& B, const Pot& P, life::State& L, Chips Income, const std::string& What, double World)
+/** Sam's quarter of money that landed in the bankroll (a shift, a RiverLine or live cash). */
+void Garnish(Book& B, Chips& Bankroll, life::State& L, Chips Income, const std::string& What, double World)
 {
-	if (P.Cents && P.Site == 0)
-	{
-		Garnish(B, *P.Cents, L, Income, What, World);
-	}
+	Pot P;
+	P.Cents = &Bankroll;
+	Garnish(B, P, L, Income, What, World);
 }
 
 /** Swaps settle once both results are in: each side's share of the other's prize, and the difference owed once. */
@@ -2432,12 +2492,26 @@ void OnlineEntered(Book& B, Chips& Bankroll, life::State& L, const std::string& 
 		TopUp(*D, World);
 		return;
 	}
-	// The first bullet collects what the listing sold (a listing collects once: Listing::Collected).
-	Collect(B, Bankroll, L, EventId, Name, nullptr, World);
+	// The first bullet collects what the listing sold (a listing collects once: Listing::Collected), into the pot the buy-in
+	// came out of (update 2 §1.2: a rival event's wallet, with a site line).
+	Collect(B, StakePotOn(L, Bankroll, EventId), L, EventId, Name, nullptr, World);
 }
 
 void OnlineSettle(Book& B, Chips& Bankroll, life::State& L, const std::string& EventId, Chips Prize, double World)
 {
+	Pot P;
+	P.Cents = &Bankroll;
+	OnlineSettle(B, P, L, EventId, Prize, World);
+}
+
+void OnlineSettle(Book& B, const Pot& P, life::State& L, const std::string& EventId, Chips Prize, double World)
+{
+	// Update 2 §1.2: everything moves on the pot the prize landed in. RiverLine's is the bankroll and the bank's lines, as
+	// always; a rival's is that site's wallet, with site lines and never a bank line.
+	if (!P.Cents)
+	{
+		return;
+	}
 	// The bullet this result belongs to: the package's oldest unsettled fund (Fund::Settled guards it, saved with it), or
 	// the player's own entry.
 	for (Fund& Fd : B.Funds)
@@ -2450,7 +2524,7 @@ void OnlineSettle(Book& B, Chips& Bankroll, life::State& L, const std::string& E
 		Deal* D = FindDeal(B, Fd.DealId);
 		if (D && Prize > 0)
 		{
-			Move(Bankroll, L, World, BackerName(*D) + "'s roll: " + Fd.Name, -Prize);
+			Move(P, L, World, BackerName(*D) + "'s roll: " + Fd.Name, -Prize);
 			D->RollNow += Prize;
 			DealLine(*D, World, Prize, Fd.Name + ": prize");
 			if (D->By == Outfit::LanternRow && Prize >= 100 * D->T.CapOnline)
@@ -2473,17 +2547,7 @@ void OnlineSettle(Book& B, Chips& Bankroll, life::State& L, const std::string& E
 	if (Prize > 0 && std::any_of(B.Deals.begin(), B.Deals.end(), [](const Deal& D) { return D.Debt > 0; }) && Once(B, "osettle:" + EventId + ":" + F2(World), World))
 	{
 		const EventFacts Fc = FactsOf(EventId);
-		Garnish(B, Bankroll, L, Prize, "the " + (Fc.Valid ? Title(Fc.Name) : std::string("tournament")) + " cash", World);
-	}
-}
-
-void OnlineSettle(Book& B, const Pot& P, life::State& L, const std::string& EventId, Chips Prize, double World)
-{
-	// RiverLine's pot is the bankroll: today's path. A rival's (core-deals, G3) settles on its wallet with site lines only;
-	// until then every event routes to RiverLine, so nothing reaches it.
-	if (P.Cents && P.Site == 0)
-	{
-		OnlineSettle(B, *P.Cents, L, EventId, Prize, World);
+		Garnish(B, P, L, Prize, "the " + (Fc.Valid ? Title(Fc.Name) : std::string("tournament")) + " cash", World);
 	}
 }
 
@@ -2813,12 +2877,27 @@ void SettleSwap(Book& B, Chips& Bankroll, life::State& L, const std::string& Ent
 
 namespace stake_detail
 {
+/**
+ * Where an owed record is paid from (update 2 §1.2): a share of a rival event's prize comes off that site's wallet while
+ * the wallet holds it (the prize landed there); anything else, or a wallet since emptied, from the bank as always.
+ */
+Pot OwedPot(life::State& L, Chips& Bankroll, const Owed& O)
+{
+	Pot P = StakePotOn(L, Bankroll, O.EntryId);
+	if (P.Site != 0 && *P.Cents < O.Cents)
+	{
+		P.Cents = &Bankroll;
+		P.Site = 0;
+	}
+	return P;
+}
+
 /** The player pays an owed record: one line, the counterparty's flow, the record kept. */
 void PayOwed(Book& B, Chips& Bankroll, life::State& L, Owed& O, double At, std::vector<std::pair<std::string, std::string>>* Texts)
 {
 	const bool WasLate = O.State == OwedLate || O.State == OwedWelched;
 	const bool Early = !WasLate && At <= O.Since + 24.0 * Hour;
-	Move(Bankroll, L, At, O.Who + ": " + O.Label, -O.Cents);
+	Move(OwedPot(L, Bankroll, O), L, At, O.Who + ": " + O.Label, -O.Cents);
 	O.State = OwedPaid;
 	O.PaidAt = At;
 	B.Record.Honored += WasLate ? 0 : 1;
@@ -3100,7 +3179,8 @@ void Step(Book& B, Chips& Bankroll, life::State& L, double From, double To, std:
 			{
 				O.Reminded = true;
 				const double At = std::max(From, O.Due - 24.0 * Hour);
-				if (Bankroll < O.Cents + Reserve(L, At) && O.Who != MarketName)
+				// (A share a rival site's wallet covers is paid from there, rent or not: no reminder.)
+				if (OwedPot(L, Bankroll, O).Site == 0 && Bankroll < O.Cents + Reserve(L, At) && O.Who != MarketName)
 				{
 					const std::string Said = Say(O.Who, "reminder", Hash(O.Id), Vs);
 					if (!Said.empty())
@@ -3112,7 +3192,7 @@ void Step(Book& B, Chips& Bankroll, life::State& L, double From, double To, std:
 			if (O.Due <= To)
 			{
 				const double At = std::max(From, O.Due);
-				if (Bankroll >= O.Cents + Reserve(L, At))
+				if (OwedPot(L, Bankroll, O).Site != 0 || Bankroll >= O.Cents + Reserve(L, At))
 				{
 					PayOwed(B, Bankroll, L, O, At, &Texts);
 					continue;
@@ -3138,8 +3218,8 @@ void Step(Book& B, Chips& Bankroll, life::State& L, double From, double To, std:
 		}
 		if (O.State == OwedLate || O.State == OwedWelched)
 		{
-			// Paid as soon as the money covers it, keeping the rent reserve.
-			if (Bankroll >= O.Cents + Reserve(L, To))
+			// Paid as soon as the money covers it, keeping the rent reserve (a rival wallet that covers it has no rent to keep).
+			if (OwedPot(L, Bankroll, O).Site != 0 || Bankroll >= O.Cents + Reserve(L, To))
 			{
 				PayOwed(B, Bankroll, L, O, To, &Texts);
 				continue;
@@ -3477,7 +3557,7 @@ std::string Pay(Book& B, Chips& Bankroll, life::State& L, const std::string& Owe
 		{
 			return "That's paid.";
 		}
-		if (Bankroll < O.Cents)
+		if (OwedPot(L, Bankroll, O).Site == 0 && Bankroll < O.Cents)
 		{
 			return "You don't have " + Money(O.Cents) + ".";
 		}

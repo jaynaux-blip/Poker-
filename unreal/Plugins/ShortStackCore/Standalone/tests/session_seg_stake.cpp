@@ -10,11 +10,13 @@
 #include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/World.h"
 
 #include <algorithm>
 #include <cstdio>
+#include <set>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -358,6 +360,198 @@ void ParkReadsTheSample()
 			"stake: Mrs. Park, an established world: a top-half ROI on fewer than 200 paid online events buys no piece");
 	}
 }
+/**
+ * Update 2 (G3, §1.2, §8.5's "Sites' money"): a stake on a RunItTwice cash through the session. The buyers' money comes
+ * into RunItTwice's wallet at registration, the prize lands there, Sam's quarter and the buyers' share (when it's due) come
+ * off it; the bankroll and its ledger never move. Lantern Row's roll doesn't pay a RunItTwice entry, and the desk says so.
+ * Needs core-sites' Session::PotFor (a rival's wallet); a build without it says so and skips.
+ */
+void RivalPot()
+{
+	Hooks H;
+	ss::Session S(H, "stake-rival-pot");
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	S.BankrollCents = 300000;
+	S.Life.RentStage = life::Rent::Paid; // nothing here is about the rent
+	ss::site::Account A;
+	A.Site = ss::net::SiteId::RunItTwice;
+	A.JoinedAt = S.WorldMinutes();
+	A.Cents = 100000;
+	S.Life.Sites.Accounts.push_back(A);
+	const stake::Pot P = S.PotFor(ss::net::SiteId::RunItTwice);
+	if (P.Site != static_cast<int>(ss::net::SiteId::RunItTwice) || P.Cents != &S.Life.Sites.Accounts[0].Cents)
+	{
+		std::printf("  stake: Session::PotFor has no rival wallet in this build (core-sites' SessionSites.cpp): the rival pot through the session is skipped\n");
+		return;
+	}
+	S.DebugStake("grant lanternrow");
+	// Sam's old debt (the deal's over; his quarter of a cash is left).
+	stake::Deal Sam;
+	Sam.Id = "deal:sam:rival";
+	Sam.K = stake::Kind::Package;
+	Sam.By = stake::Outfit::Sam;
+	Sam.Backer = "Sam";
+	Sam.Debt = 1000000;
+	Sam.State = stake::DealEnded;
+	S.Life.Stakes.Deals.push_back(Sam);
+	const ss::Chips Roll = stake::StakedRoll(S.Life.Stakes);
+	const auto BankLines = [&S]() {
+		int N = 0;
+		for (const life::LedgerEntry& E : S.Life.Ledger)
+		{
+			N += E.Kind == 0 || E.Kind == life::LedgerBacking ? 1 : 0;
+		}
+		return N;
+	};
+	const int Lines0 = BankLines();
+	// Small RunItTwice events, one after another, 30% of each sold to the market at par, until one cashes (at most twenty).
+	std::set<std::string> Played;
+	ss::Rng Choice("stake-rival-play");
+	bool Cashed = false;
+	for (int Round = 0; Round < 20 && !Cashed; ++Round)
+	{
+		ss::LobbyEvent Pick;
+		bool Found = false;
+		for (int Wait30 = 0; Wait30 < 16 && !Found; ++Wait30)
+		{
+			if (Wait30 > 0)
+			{
+				S.LobbyMinutes += 60.0; // the next hour's lobby
+				Now = Wait(S, Now, 0.1);
+			}
+			const double World = S.WorldMinutes();
+			for (const ss::net::EventInstance& I : ss::net::Site(ss::net::SiteId::RunItTwice).Window(World - 120.0, World + 90.0))
+			{
+				const ss::LobbyEvent L = ss::net::Site(ss::net::SiteId::RunItTwice).Listing(I, nullptr, S.Unlocks());
+				// (Over $5.50, so no Night Shift points in the way; no seat as the prize, so the prize is the money that lands.)
+				if (L.Joinable && Played.count(L.Spec.Id) == 0 && L.Spec.Entrants <= 600 && L.BuyInCents > 550 && L.BuyInCents <= 5500 && L.Spec.SeatValueCents == 0 &&
+					(!Found || L.Spec.Entrants < Pick.Spec.Entrants))
+				{
+					Pick = L;
+					Found = true;
+				}
+			}
+		}
+		const double World = S.WorldMinutes();
+		if (!Found)
+		{
+			Expect(Round > 0, "stake: a small RunItTwice event to play");
+			break;
+		}
+		Played.insert(Pick.Spec.Id);
+		if (Round == 0)
+		{
+			const std::vector<std::pair<life::Funding, std::string>> Opts = S.FundingOptions(Pick.Spec.Id);
+			Expect(Opts.size() == 2 && Opts[0].first.From == life::Paid::Package && Opts[0].second == "Lantern Row Staking funds RiverLine events only. This one's your own money." &&
+					   Opts[1].first.From == life::Paid::Own,
+				"stake: on RunItTwice the desk lists Lantern Row's roll with why it won't pay");
+		}
+		stake::Listing Ls;
+		Ls.EventId = Pick.Spec.Id;
+		Ls.Ask = 300;
+		Ls.Markup = 1000;
+		Ls.Opens = World - 2.0 * Day;
+		Ls.Closes = World + 600.0;
+		Ls.BuyIn = Pick.BuyInCents;
+		Ls.Live = false;
+		Ls.Plan.push_back(std::make_tuple(World - Day, std::string(), 300));
+		S.Life.Stakes.Listings.push_back(Ls);
+		const ss::Chips Collected = (Pick.BuyInCents * 1000 + 50000) / 100000 * 30;
+		const ss::Chips Wallet0 = S.Life.Sites.Accounts[0].Cents;
+		ss::Chips Debt = 0;
+		for (const stake::Deal& D : S.Life.Stakes.Deals)
+		{
+			Debt += D.Id == "deal:sam:rival" ? D.Debt : 0;
+		}
+		S.CurrentScreen = ss::Screen::Lobby;
+		const ss::Chips BankNow = S.BankrollCents; // (the days go by between events: the bills may move the bank, never the stake)
+		S.RegisterEvent(Pick);
+		Expect(S.IsPlaying(Pick.Spec.Id) && S.BankrollCents == BankNow && stake::StakedRoll(S.Life.Stakes) == Roll && S.Life.Stakes.Funds.empty() &&
+				   S.Life.Sites.Accounts[0].Cents == Wallet0 - Pick.BuyInCents + Collected && BankLines() == Lines0,
+			"stake: registered on RunItTwice's wallet, the buyers' money into it, the roll and the bank untouched");
+		S.CurrentPace = ss::Pace::Sprint;
+		int Decisions = 0;
+		Now = PlayOut(S, Choice, Now, Decisions);
+		S.LeaveResults();
+		const ss::Chips Prize = S.History.empty() ? 0 : S.History[0].Prize;
+		const ss::Chips Garnished = std::min<ss::Chips>(Debt, Prize / 4);
+		const ss::Chips Share = Prize * 300 / 1000;
+		std::printf("  stake: a RunItTwice %s, $%.2f in: %s, prize $%.2f, Sam's $%.2f, the buyers' $%.2f\n", Pick.Spec.Name.c_str(), static_cast<double>(Pick.BuyInCents) / 100.0,
+			S.History.empty() ? "?" : std::to_string(S.History[0].Place).c_str(), static_cast<double>(Prize) / 100.0, static_cast<double>(Garnished) / 100.0,
+			static_cast<double>(Share) / 100.0);
+		Expect(BankLines() == Lines0 && S.Life.Sites.Accounts[0].Cents == Wallet0 - Pick.BuyInCents + Collected + Prize - Garnished,
+			"stake: the result in RunItTwice's wallet, Sam's quarter of a cash off it; no poker or backing line in the bank's ledger");
+		if (Prize <= 0)
+		{
+			continue;
+		}
+		Cashed = true;
+		ss::Chips Owed = 0;
+		for (const stake::Owed& O : S.Life.Stakes.Owes)
+		{
+			Owed += O.ToYou || O.State == stake::OwedPaid ? 0 : O.Cents;
+		}
+		Expect(Owed == Share && Garnished > 0, "stake: the buyers' 30% owed, Sam's quarter taken");
+		// (Eighty hours of the calendar: the bills may move the bank. The stake writes none of its lines.)
+		S.DebugStake("advance 80");
+		bool Paid = !S.Life.Stakes.Owes.empty();
+		for (const stake::Owed& O : S.Life.Stakes.Owes)
+		{
+			Paid = Paid && (O.ToYou || O.State == stake::OwedPaid);
+		}
+		Expect(Paid && BankLines() == Lines0 && S.Life.Sites.Accounts[0].Cents == Wallet0 - Pick.BuyInCents + Collected + Prize - Garnished - Share,
+			"stake: when due, the buyers are paid off RunItTwice's wallet, never with a bank line");
+	}
+	std::printf("  stake: %zu RunItTwice events played on the wallet, %s\n", Played.size(), Cashed ? "one cashed (the settle and the shares checked)" : "none cashed");
+	// A shot is a buy-in over 5% of the player's roll, the bank and the sites together (§2.9; update 2 §1.2), not of the
+	// site's wallet or the bank alone: $60 on RunItTwice with $3,000 in the bank, an entry there is no shot; $3,000 there with
+	// $10 in the bank, no shot either; $60 there and $10 in the bank, a shot.
+	Expect(S.Life.Stakes.Record.Shots == 0, "stake: none of the RunItTwice entries above was a shot against the whole roll");
+	for (int Case = 0; Case < 3; ++Case)
+	{
+		ss::LobbyEvent Pick;
+		bool Found = false;
+		for (int Hour = 0; Hour < 16 && !Found; ++Hour)
+		{
+			if (Hour > 0)
+			{
+				S.LobbyMinutes += 60.0;
+				Now = Wait(S, Now, 0.1);
+			}
+			const double World = S.WorldMinutes();
+			for (const ss::net::EventInstance& I : ss::net::Site(ss::net::SiteId::RunItTwice).Window(World - 120.0, World + 90.0))
+			{
+				const ss::LobbyEvent L = ss::net::Site(ss::net::SiteId::RunItTwice).Listing(I, nullptr, S.Unlocks());
+				if (!Found && L.Joinable && Played.count(L.Spec.Id) == 0 && !S.IsPlaying(L.Spec.Id) && L.BuyInCents > 350 && L.BuyInCents <= 2750)
+				{
+					Pick = L;
+					Found = true;
+				}
+			}
+		}
+		if (!Found)
+		{
+			Expect(false, "stake: a RunItTwice entry for the shot check");
+			return;
+		}
+		Played.insert(Pick.Spec.Id);
+		S.Life.Sites.Accounts[0].Cents = Case == 1 ? 300000 : 6000;
+		S.BankrollCents = Case == 0 ? 300000 : 1000;
+		const int Shots = S.Life.Stakes.Record.Shots;
+		S.CurrentScreen = ss::Screen::Lobby;
+		S.RegisterEvent(Pick);
+		Expect(S.IsPlaying(Pick.Spec.Id) && S.Life.Stakes.Record.Shots == Shots + (Case == 2 ? 1 : 0),
+			Case == 0 ? "stake: $60 on RunItTwice and $3,000 in the bank, an entry there is no shot"
+			: Case == 1 ? "stake: $3,000 on RunItTwice and $10 in the bank, no shot either"
+						: "stake: $60 there and $10 in the bank, it's a shot");
+		// (Played out, so the next case has a seat: the laptop fits two tables.)
+		S.CurrentPace = ss::Pace::Sprint;
+		int Decisions = 0;
+		Now = PlayOut(S, Choice, Now, Decisions);
+		S.LeaveResults();
+	}
+}
 } // namespace stake_seg
 
 void SegStake()
@@ -368,5 +562,6 @@ void SegStake()
 	stake_seg::Calendar();
 	stake_seg::Seams();
 	stake_seg::ParkReadsTheSample();
+	stake_seg::RivalPot();
 }
 } // namespace session_test

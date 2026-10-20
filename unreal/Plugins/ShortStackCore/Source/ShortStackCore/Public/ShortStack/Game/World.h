@@ -40,9 +40,12 @@ namespace world
  * memories (next_segment_spec §5, §7.3). A version 1 world migrates once in Finish (§7.5 step 5).
  * 3 (update 2 G1): the head's Start after HeroCardPrev, how the world began (§3.8). A version 2 world has none and reads as
  * Established; it writes back as version 3 with Start 0 and nothing else changed (Sim::Migrate's From < 3 step).
- * Update 2 bumps it to 4 at G3 (the NPCs' Sites), in one commit with its complete migration and the pinned asserts (§6.5).
+ * 4 (update 2 G3): the rival sites (§5.9). The npc line's Sites (appended), world\tsitelaunch, world\tsite (the rivals' sparse
+ * records) and world\tsiteseries (their running races). A version 3 world gets the sites in Sim::Migrate's From < 4 step: everyone's
+ * accounts as of the load day, RunItTwice open since Night One, Ignite on Nov 2 or (past it) the first day after loading, Team
+ * RunItTwice at the next 1st; no rival record, so RiverLine's boards read exactly as they did.
  */
-constexpr int Version = 3;
+constexpr int Version = 4;
 
 /**
  * How a world began (update 2 §3): Established is today's (the network's history, the founders' records); Blank is the
@@ -587,7 +590,10 @@ struct Npc
 	int CardLast = CardNone;   // last season's, good through this one
 	bool Verified = false;     // Verified Pro at the last monthly review (the 1st; VerifiedRecord)
 	int ReviewMonth = -1;      // MonthKeyOf the last review that found them Verified (-1: never)
-	/** The sites they play (update 2 §5.9): a bit per net::SiteId, RiverLine's always. On the npc line from version 4. */
+	/**
+	 * The sites they play (update 2 §5.9): a bit per net::SiteId. RiverLine's for everyone but Ignite's own arrivals (a few play
+	 * Ignite alone); a team pro's is the team's site alone ("plays only on", §1.9 #11). On the npc line from version 4.
+	 */
 	uint8_t Sites = 1;
 
 	float SkillOf(world::Skill S) const { return Skills[static_cast<size_t>(S)]; }
@@ -985,7 +991,11 @@ public:
 	SHORTSTACKCORE_API double BoardValue(net::SiteId Site, net::Board B, int Npc, double At) const;
 	/** Someone's record on a site (null: none, or RiverLine, whose record is the NPC's own). */
 	SHORTSTACKCORE_API const SiteRecord* SiteRecordOf(net::SiteId Site, int Npc) const;
-	/** When a site opened its lobby (world minutes), or -1. */
+	/**
+	 * When a site opens its lobby in this world (world minutes), which can be ahead of the clock (Ignite's Nov 2 before it comes):
+	 * launched is 0 <= SiteLaunched(S) <= Clock(). RiverLine's is 0; -1 for a site not in this world (not registered, or an older
+	 * save before its migration).
+	 */
 	SHORTSTACKCORE_API double SiteLaunched(net::SiteId Site) const;
 	/**
 	 * Someone's rank on a site's board a day (an hour) ago, 0 for none (A3, beside BoardValue by site: Network::Ranked reads
@@ -1218,7 +1228,8 @@ private:
 	// (RiverLine never has a row: its record is the NPC's own). Saved from version 4 (world\tsite, world\tsiteseries,
 	// world\tsitelaunch); an older world reads them empty, so RiverLine's boards read exactly as they did.
 	std::map<net::SiteId, std::map<int, SiteRecord>> SiteRecords;                     // SiteSeason and SiteMoney, by npc
-	std::map<net::SiteId, std::pair<std::string, std::map<int, double>>> SiteSeries; // the running series' key, npc -> points
+	std::map<net::SiteId, std::pair<std::string, std::map<int, double>>> SiteSeries; // each rival's running race (RunItTwice's
+	                                                                                  // series, Ignite's month): key, npc -> points
 	std::map<net::SiteId, double> SiteLaunches;                                       // the world minute each rival launched
 	std::map<std::pair<net::SiteId, net::Board>, std::vector<int>> SiteRanksYesterday; // a rival board's ranks a day ago
 

@@ -1,5 +1,6 @@
 #include "ShortStack/Game/Session.h"
 #include "../StrictFloat.h"
+#include "SitesDetail.h"
 
 #include "ShortStack/AI/Bot.h"
 #include "ShortStack/AI/Style.h"
@@ -1025,6 +1026,13 @@ Session::Session(SessionHooks& InHooks, const std::string& Seed, const SaveData*
 	BadgeStep(WorldMinutes(), WorldMinutes());
 	// While the game loads: simulate the network's past results now, so the first leaderboard or page doesn't stall.
 	net::Shared().Prewarm(WorldMinutes());
+	// The rival sites' too (update 2 §5.8's threading contract: every network built and prewarmed on the game thread before
+	// a desk worker runs; StartWorld's AttachAll built them). A rival has no past before the living world's, so today
+	// there's nothing to work out, and this stays a guarantee should one ever have.
+	for (int K = 1; K < static_cast<int>(net::SiteId::Count); ++K)
+	{
+		net::Site(static_cast<net::SiteId>(K)).Prewarm(WorldMinutes());
+	}
 }
 
 namespace session_detail
@@ -1061,6 +1069,70 @@ void TellBirthYear(world::World& W, const hero::Character& Person)
 	W.HeroBorn = world::YearOf(net::DayOf(W.StartedAt())) - Person.Age;
 }
 
+/**
+ * The player's money on the rival sites (update 2 §1.2): every wallet, and what's on its way between a site and the bank
+ * (a withdrawal's whole request until it lands, the fee coming off then: §1.2's conservation). Never the bank's, and it
+ * never pays rent; the sitting's net and Dee's "broke" read it beside the bankroll. A RiverLine-only career's is 0.
+ */
+Chips SiteMoneyCents(const site::Book& B)
+{
+	Chips Sum = 0;
+	for (const site::Account& A : B.Accounts)
+	{
+		Sum += A.Cents;
+	}
+	for (const site::Transfer& X : B.Transfers)
+	{
+		Sum += X.State == 0 ? X.Cents : 0;
+	}
+	return Sum;
+}
+
+/** Whether the player has an account on a site (RiverLine's is the bank's, always open; a rival's once it was joined). */
+bool SiteHasAccount(const site::Book& B, net::SiteId Site)
+{
+	bool Open = Site == net::SiteId::RiverLine;
+	for (const site::Account& A : B.Accounts)
+	{
+		Open = Open || A.Site == Site;
+	}
+	return Open;
+}
+
+/**
+ * Whether someone in the world plays a site (update 2 §5.9: Npc::Sites, a bit per net::SiteId): only the people with an
+ * account there. RiverLine's bit is nearly everyone's (an older world's is everyone's), but not quite: some of Ignite's own
+ * arrivals play Ignite alone, and a site team's pros play only on their site (§1.9 #11), so none of them is seated at a
+ * RiverLine table the world didn't put them at.
+ */
+bool PlaysOnSite(const world::Npc& N, net::SiteId Site)
+{
+	return (N.Sites & (1u << static_cast<unsigned>(Site))) != 0;
+}
+
+/** Whether the player's rival (Chat.h's RivalName, a regular in the world) sits in an event: every RiverLine one; a rival
+ *  site's only with an account there, like anybody else (a RunItTwice table never seats a RiverLine-only regular). */
+bool RivalPlaysOn(const world::World& W, const std::string& EventId)
+{
+	const net::SiteId Site = net::SiteOf(EventId);
+	if (Site == net::SiteId::RiverLine)
+	{
+		return true;
+	}
+	const world::Npc* N = W.Get(W.Find(RivalName));
+	return N && PlaysOnSite(*N, Site);
+}
+
+/** Streaming the table in front (update 2 §5.7): a site's table on stream is a strike under a deal that plays only on
+ *  another one (core-deals' NoteSitePlay; at most one a day). GoLive, a new table and every change of the front table. */
+void NoteFrontOnStream(Session& S)
+{
+	if (S.Stream.Live && S.T)
+	{
+		sponsor::NoteSitePlay(S.Life.Sponsors, S.Life, static_cast<int>(net::SiteOf(S.T->Spec.Id)), S.WorldMinutes(), true, false);
+	}
+}
+
 /** The worlds of the sessions alive now, newest last: the network shows the newest. */
 std::vector<const world::World*>& LiveWorlds()
 {
@@ -1073,9 +1145,15 @@ Session::~Session()
 {
 	std::vector<const world::World*>& Worlds = session_detail::LiveWorlds();
 	Worlds.erase(std::remove(Worlds.begin(), Worlds.end(), &LivingWorld), Worlds.end());
-	if (net::Shared().Attached() == &LivingWorld)
+	// Every site's network shows the same world (update 2 §5.8). If any of them still shows this one (RiverLine's, or a
+	// rival's attached on its own), they all move on to the newest world left, so none keeps a world that's gone.
+	bool Shown = net::Shared().Attached() == &LivingWorld;
+	for (int K = 1; K < static_cast<int>(net::SiteId::Count); ++K)
 	{
-		// Every site's network shows the same world (update 2 §5.8).
+		Shown = Shown || net::Site(static_cast<net::SiteId>(K)).Attached() == &LivingWorld;
+	}
+	if (Shown)
+	{
 		net::AttachAll(Worlds.empty() ? nullptr : Worlds.back());
 	}
 }
@@ -1673,9 +1751,13 @@ void Session::OnBoot()
 bool Session::CanAfford(const LobbyEvent& Ev) const
 {
 	// The player's money, a ticket, or a package's roll (it pays every event in its range, short bankroll or not: §2.7).
-	// Update 2 (§5.5): the money on the event's own site (RiverLine's is the bankroll; every event is RiverLine's until
-	// G3), and that site's restriction alone.
+	// Update 2 (§5.5): the money on the event's own site (RiverLine's is the bankroll; a rival's its wallet), and that
+	// site's restriction alone. A rival's events need an account there first, freerolls and tickets too.
 	const net::SiteId Site = net::SiteOf(Ev.Spec.Id);
+	if (!session_detail::SiteHasAccount(Life.Sites, Site))
+	{
+		return false;
+	}
 	Chips Have = BankrollCents;
 	if (Site != net::SiteId::RiverLine)
 	{
@@ -1721,7 +1803,9 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	}
 	else
 	{
-		SessionStartBankroll = BankrollCents;
+		// The sitting's money (update 2 §1.2): the bank, and what's on the rival sites or on its way back (0 on a RiverLine-
+		// only career), so a night on Ignite nets what it won there.
+		SessionStartBankroll = BankrollCents + session_detail::SiteMoneyCents(Life.Sites);
 		SessionEvents = 0;
 		Finished.clear();
 	}
@@ -1744,7 +1828,17 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 		{
 			Life.Tickets.erase(Tid);
 		}
-		Life.Record(WorldMinutes(), "Ticket: " + Ev.Spec.Name, 0, 0);
+		// The entry's line goes in its site's ledger (update 2 §1.2): RiverLine's is the bank's; a rival's ticket never
+		// touches the bank, so its line is the site's own.
+		const net::SiteId TicketSite = net::SiteOf(Ev.Spec.Id);
+		if (TicketSite == net::SiteId::RiverLine)
+		{
+			Life.Record(WorldMinutes(), "Ticket: " + Ev.Spec.Name, 0, 0);
+		}
+		else
+		{
+			site::AddLine(Life.Sites, TicketSite, WorldMinutes(), 0, 0, "Ticket: " + Ev.Spec.Name);
+		}
 	}
 	else
 	{
@@ -1803,7 +1897,13 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	CurHand.reset();
 	const std::string Seed = Ev.Spec.Id + ":" + SeedBase + ":" + std::to_string(RegisterCount++);
 	LastTick = -1.0;
-	T = std::make_unique<Tournament>(Ev.Spec, HeroName, Seed, std::vector<ReservedPlayer>{{RivalName, Archetype::Crusher}});
+	// The player's rival plays every RiverLine event, and a rival site's only with an account there (update 2 §5.9).
+	std::vector<ReservedPlayer> Reserved{{RivalName, Archetype::Crusher}};
+	if (!session_detail::RivalPlaysOn(LivingWorld, Ev.Spec.Id))
+	{
+		Reserved.clear();
+	}
+	T = std::make_unique<Tournament>(Ev.Spec, HeroName, Seed, Reserved);
 	CurrentScreen = Screen::Table;
 	LivingWorld.HeroEntered(Ev.Spec.Id, Ev.Spec.Name);
 	NameField();
@@ -3060,6 +3160,11 @@ void Session::EndHand()
 		CurrentBanner.At = Now;
 		CurrentBanner.Color = session_detail::Gold;
 		const char* Then = !Evicted() ? "Pay the rent." : (BankrollCents >= Life.RentDueCents ? "Go get your key back." : "Put it toward your key.");
+		if (net::SiteOf(T->Spec.Id) != net::SiteId::RiverLine)
+		{
+			// A rival site's prize sits on that site, and site money never pays rent (update 2 §5.5).
+			Then = !Evicted() ? "Get it off that site and pay the rent." : "Get it off that site and put it toward your key.";
+		}
 		StoryText("won-" + T->Spec.Id, "Dee", std::string("You did WHAT?! ") + Then + " Then come see me. We need to talk about your future.", false);
 		return;
 	}
@@ -3216,7 +3321,17 @@ void Session::ShowResults()
 		LastResults.SeatWon = T->Spec.SeatTicket;
 		LastResults.SeatValueCents = T->Spec.SeatValueCents;
 		++Life.Tickets[T->Spec.SeatTicket];
-		Life.Record(WorldMinutes(), "Seat won: " + T->Spec.Name, 0, 4);
+		// The seat's line in its site's ledger (update 2 §1.2): RiverLine's is the bank's; a rival's seat never touches the
+		// bank, so its line is the site's own.
+		const net::SiteId SeatSite = net::SiteOf(T->Spec.Id);
+		if (SeatSite == net::SiteId::RiverLine)
+		{
+			Life.Record(WorldMinutes(), "Seat won: " + T->Spec.Name, 0, 4);
+		}
+		else
+		{
+			site::AddLine(Life.Sites, SeatSite, WorldMinutes(), 4, 0, "Seat won: " + T->Spec.Name);
+		}
 		StoryText("seat-" + T->Spec.SeatTicket, "Dee", T->Spec.SeatTicket == "rcop-main" ? "You WON A SEAT TO THE MAIN EVENT?? $5,250 for nothing. Twenty-five million guaranteed. Kid." : "A ticket up the ladder. Keep climbing.");
 	}
 	if (BustPrize + BountyWon > 0 && Pot.Site == 0)
@@ -3226,7 +3341,8 @@ void Session::ShowResults()
 	// A backer's share, a package's prize into its roll (next_segment_spec §2), once per event, off the pot it landed in.
 	stake::OnlineSettle(Life.Stakes, Pot, Life, T->Spec.Id, BustPrize + BountyWon, WorldMinutes());
 	LastResults.SessionEvents = SessionEvents;
-	LastResults.SessionNetCents = BankrollCents - SessionStartBankroll;
+	// The sitting's net (update 2 §1.2): the bank and the sites' money now, against before its first buy-in.
+	LastResults.SessionNetCents = BankrollCents + session_detail::SiteMoneyCents(Life.Sites) - SessionStartBankroll;
 	const ss::Results ThisEvent = LastResults; // for update 2's hooks below (LastResults may go back to the screen's)
 	if (OthersPlaying)
 	{
@@ -3268,7 +3384,8 @@ void Session::ShowResults()
 	}
 	Heartbeat(false);
 	Save();
-	if (BankrollCents < 25 && BustPrize == 0)
+	// Broke is broke everywhere: money sitting on a rival site (or on its way back) isn't nothing (update 2 §1.2).
+	if (BankrollCents + session_detail::SiteMoneyCents(Life.Sites) < 25 && BustPrize == 0)
 	{
 		StoryText("broke", "Dee", "Broke? It happens to everybody. Freeroll's always running. Or come by Tuesday. Bring quarters for the dryers.", false);
 	}
@@ -3291,7 +3408,17 @@ void Session::ShowResults()
 	}
 	else if (Played && Played->Id.rfind("mm", 0) != 0 && BustPlace == 1)
 	{
-		StoryText("series-title", "Dee", "Your name is on the " + Played->Name + " leaderboard. A series title. Nobody can take that off the page.");
+		const net::SiteId TitleSite = net::SiteOf(T->Spec.Id);
+		if (TitleSite == net::SiteId::RiverLine)
+		{
+			StoryText("series-title", "Dee", "Your name is on the " + Played->Name + " leaderboard. A series title. Nobody can take that off the page.");
+		}
+		else
+		{
+			// A rival's series (update 2 §5.3): Ignite keeps no series board (its boards are the month's and the season's), so
+			// Dee says only what's true on every site. Each site's first title, once; RiverLine's text stays RiverLine's.
+			StoryText("series-title-" + std::string(net::KeyOf(TitleSite)), "Dee", "A " + Played->Name + " title. Different site, same cards. Nobody can take that away from you.");
+		}
 	}
 	const bool SeriesEvent = T->Spec.Name.rfind("MM #", 0) == 0 || (Played && Played->Id.rfind("mm", 0) == 0);
 	if (SeriesEvent && BustPlace == 1)
@@ -3437,6 +3564,8 @@ void Session::FocusTable(int Index)
 	Active = Index;
 	SwapActive(*Runs[static_cast<size_t>(Active)]);
 	FocusHoldUntil = Now + 1.5;
+	// Live, the table in front is the one on stream (update 2 §5.7).
+	session_detail::NoteFrontOnStream(*this);
 	Heartbeat(HeroAllInReveal && CurHand && !CurHand->bComplete);
 }
 
@@ -3592,6 +3721,7 @@ void Session::CloseFinishedTables()
 		Active = Pick;
 		SwapActive(*Runs[static_cast<size_t>(Active)]);
 		FocusHoldUntil = Now + 0.8;
+		session_detail::NoteFrontOnStream(*this); // the table now in front is the one on stream (update 2 §5.7)
 	}
 	if (Runs.empty() && Active < 0 && CurrentScreen == Screen::Table)
 	{
@@ -5161,7 +5291,11 @@ std::string Session::AcceptDeal(const std::string& Id)
 
 rep::Public Session::Record() const
 {
-	return rep::Of(Life, Channel, &LivingWorld, WorldMinutes());
+	// Update 2 (5.4): the rival sites' gates read the last hundred results (Abi100, online series titles), which History holds
+	// and rep::Of can't see (core-sites' rep::FromHistory, SitesDetail.h).
+	rep::Public P = rep::Of(Life, Channel, &LivingWorld, WorldMinutes());
+	rep::FromHistory(P, History);
+	return P;
 }
 
 std::vector<life::Mark> Session::Marks(double From, double To) const
@@ -5359,15 +5493,35 @@ void Session::NameField()
 	std::vector<int> Who = LivingWorld.Registered(T->Spec.Id);
 	const int Rival = LivingWorld.Find(RivalName);
 	Who.erase(std::remove(Who.begin(), Who.end(), Rival), Who.end());
+	// Update 2 (§5.9): a site's event seats only people with an account there (a RunItTwice table never seats a RiverLine-only
+	// regular, and RiverLine's fallback below never seats someone who plays only on Ignite or a rival's team). The world
+	// registers only a site's members for its events, so RiverLine's own registrations stand as they are.
+	const net::SiteId Site = net::SiteOf(T->Spec.Id);
+	if (Site != net::SiteId::RiverLine)
+	{
+		Who.erase(std::remove_if(Who.begin(), Who.end(),
+					  [&](int Id) {
+						  const world::Npc* N = LivingWorld.Get(Id);
+						  return !N || !session_detail::PlaysOnSite(*N, Site);
+					  }),
+			Who.end());
+	}
 	if (Who.empty())
 	{
-		// An event the world's regulars skip (a freeroll): a few of the weakest micro regulars play it anyway.
+		// An event the world's regulars skip (a freeroll): a few of the weakest micro regulars play it anyway. RiverLine
+		// reads the stakes off its table population, as always; a rival site's population is its own (Ignite's "soft",
+		// RunItTwice a band tougher than the buy-in), so its stakes come from the buy-in. Only the site's members play, on
+		// RiverLine too.
 		const std::string& Pop = T->Spec.Population;
-		const int Tier = Pop == "low" ? 2 : Pop == "high" ? 3 : 1;
+		int Tier = Pop == "low" ? 2 : Pop == "high" ? 3 : 1;
+		if (Site != net::SiteId::RiverLine)
+		{
+			Tier = std::max(1, static_cast<int>(net::TierOf(T->Spec.BuyInCents)));
+		}
 		std::vector<int> Pool;
 		for (const world::Npc& N : LivingWorld.People())
 		{
-			if (N.Playing() && N.Tier == Tier && !N.Rival && N.Name != HeroName && N.Overall() < 0.5f)
+			if (N.Playing() && N.Tier == Tier && !N.Rival && N.Name != HeroName && N.Overall() < 0.5f && session_detail::PlaysOnSite(N, Site))
 			{
 				Pool.push_back(N.Id);
 			}
@@ -5499,6 +5653,11 @@ void Session::NameField()
 		P.Name = Ids[K].Name;
 		FieldCountry[P.Id] = Ids[K].Country;
 	}
+	// The player's rival, when they're in this field (every RiverLine event; a rival site's only with an account there).
+	if (!PlayerById(RivalId()))
+	{
+		return;
+	}
 	FieldCountry["npc:" + std::string(RivalName)] = "CA";
 	if (Rival >= 0)
 	{
@@ -5576,6 +5735,12 @@ void Session::CheckUnlocks()
 	int Wins = 0;
 	for (const HistoryEntry& H : History)
 	{
+		// RiverLine's account opens on RiverLine's results (and Sam saw the name on its board): a rival site's don't count
+		// (update 2 §5.8).
+		if (net::SiteOf(H.EventId) != net::SiteId::RiverLine)
+		{
+			continue;
+		}
 		Cashes += H.Prize > 0 ? 1 : 0;
 		Finals += H.Place >= 1 && H.Place <= 9 ? 1 : 0;
 		Wins += H.Place == 1 ? 1 : 0;
@@ -5665,6 +5830,9 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 		{
 			DeliverOrders(Life.RentDeadline);
 		}
+		// (Update 2 §5.5: a withdrawal from a site that lands before the deadline is in the bank when the landlord comes, however
+		// long the step: a night at the Embercrest comes home in one. SiteStep lands each transfer once, so the step below is safe.)
+		SiteStep(From, Life.RentDeadline);
 		RentDeadline();
 	}
 	RenewGear(From, To);

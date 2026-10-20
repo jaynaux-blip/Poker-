@@ -584,7 +584,13 @@ void EconCheckLine(ss::Session& S, const EconSaid& E, EconMonth& M)
 		{
 			Bad("calls the shift the first in the books when it isn't, or the other way round");
 		}
-		if (EconHas(E.Line, "again") || EconHas(E.Line, "I was winning"))
+		// (The line's own words: a leader's handle can hold one, "TensFullAgain".)
+		std::string Said = E.Line;
+		if (!Who.empty() && Said.find(Who) != std::string::npos)
+		{
+			Said.erase(Said.find(Who), Who.size());
+		}
+		if (EconHas(Said, "again") || EconHas(Said, "I was winning"))
 		{
 			const ss::net::HeroStats Hero = ss::net::StatsFrom(S.HeroName, S.History, E.At);
 			const std::vector<ss::net::BoardRow> Last = ss::net::Shared().Leaderboard(ss::net::Board::NightShift, ss::life::NightShiftStart(E.At) - 1.0, ss::net::StatsFrom(S.HeroName, S.History, ss::life::NightShiftStart(E.At) - 1.0), 1, nullptr);
