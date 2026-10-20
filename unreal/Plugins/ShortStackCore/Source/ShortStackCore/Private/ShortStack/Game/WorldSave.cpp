@@ -2,6 +2,7 @@
 // written at full precision, so a world that is saved and loaded carries on exactly as it would have.
 #include "ShortStack/Game/World.h"
 
+#include "ShortStack/Game/Sites.h"
 #include "WorldSim.h"
 
 #include <algorithm>
@@ -1219,12 +1220,13 @@ void World::Finish()
 			A.Prize = H.Prize;
 			A.Entries = H.Entries;
 			const size_t At = H.EventId.find('@');
-			const net::EventTemplate* T = net::Shared().FindTemplate(H.EventId.substr(0, At));
+			const net::Network& Net = net::ForEvent(H.EventId);
+			const net::EventTemplate* T = Net.FindTemplate(H.EventId.substr(0, At));
 			if (T && (T->Bracelet || T->Ring))
 			{
 				A.Ring = T->Ring;
 				A.Series = T->Series;
-				const net::SeriesInfo* Sr = net::Shared().FindSeries(T->Series);
+				const net::SeriesInfo* Sr = Net.FindSeries(T->Series);
 				A.Main = Sr && Sr->MainEvent == T->Id;
 			}
 			else if (!T && H.Title.rfind("The Championship ", 0) == 0)

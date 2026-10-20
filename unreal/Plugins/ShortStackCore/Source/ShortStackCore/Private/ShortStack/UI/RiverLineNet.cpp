@@ -10,6 +10,7 @@
 #include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Chat.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Rng.h"
@@ -59,7 +60,7 @@ void RiverLine::NetFrame(double Now)
 	Dt = LastFrame < 0.0 ? 0.0 : std::min(0.1, std::max(0.0, Now - LastFrame));
 	LastFrame = Now;
 	World = S.WorldMinutes();
-	net::Shared().SetHero(S.HeroName, S.History);
+	net::SetHeroAll(S.HeroName, S.History);
 	You = net::StatsFrom(S.HeroName, S.History, World);
 	You.LivePoints = S.Living().HeroSeasonLivePoints();
 	if (NewsSeenAt == 0.0)
@@ -390,7 +391,7 @@ void RiverLine::NetLobby(double Now)
 	const std::vector<ListRow> Rows = ScheduleRows();
 	// Something is always selected: the first event the player can join, or the top of the list.
 	net::EventInstance Current;
-	if (EventId.empty() || !Net.FindInstance(EventId, Current))
+	if (EventId.empty() || !net::ForEvent(EventId).FindInstance(EventId, Current))
 	{
 		for (const ListRow& Row : Rows)
 		{
@@ -1090,7 +1091,8 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 
 void RiverLine::EventPanel(const Rect& R, double Now)
 {
-	const net::Network& Net = net::Shared();
+	// The selected event on its own site's network (update 2 §5.8).
+	const net::Network& Net = net::ForEvent(EventId);
 	net::EventInstance E;
 	Panel(R);
 	if (!Net.FindInstance(EventId, E))
@@ -1178,7 +1180,8 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 	UI.Text(RingText, Rx, Ry + 1.0f, Ts(12.0f, 800, pal::Ink, Align::Center, Baseline::Middle));
 
 	// Facts.
-	const Chips Fee = T.JoinIndex >= 0 ? Lobby()[static_cast<size_t>(T.JoinIndex)].Spec.FeeCents : net::FeeOf(T.BuyInCents);
+	// The event's own site's rake (RiverLine's rule is FeeOf: update 2 §5.8).
+	const Chips Fee = T.JoinIndex >= 0 ? Lobby()[static_cast<size_t>(T.JoinIndex)].Spec.FeeCents : Net.Definition().Rake.Fee(T.BuyInCents);
 	const int Paid = std::max(1, static_cast<int>(std::round(static_cast<double>(E.Entries) * 0.15)));
 	std::string Late = "Closed";
 	if (L.St == net::Status::Announced || L.St == net::Status::Registering || L.St == net::Status::LateReg)
@@ -1356,7 +1359,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 
 void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState& L, const Rect& R, double Now)
 {
-	const net::Network& Net = net::Shared();
+	const net::Network& Net = net::ForEvent(E.Id);
 	const net::EventTemplate& T = Net.TemplateOf(E);
 	std::string Lock;
 	const bool Joinable = Net.Joinable(E, &Lock, S.Unlocks());
@@ -3198,7 +3201,8 @@ void RiverLine::BoardsPage(double Now)
 			}
 		}
 		const float Wide = Rt.W;
-		C->Cached(Art, Rt.X, Y, [Year, Wide](Canvas& Cc) {
+		// The paint reads pal::, so the fragment is the skin's too (update 2 §1.8: this page may draw inside a rival's scope).
+		C->Cached(Art ^ Skin::Current().Key(), Rt.X, Y, [Year, Wide](Canvas& Cc) {
 			for (int I = 0; I < 3; ++I)
 			{
 				const float Ry = 30.0f + Nf(I) * 28.0f;

@@ -11,8 +11,10 @@
 #include "ShortStack/Structure.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
 #include <set>
 
 namespace ss
@@ -47,9 +49,52 @@ double DayFactor(int Day)
 	return F[Weekday(Day)];
 }
 
-double PrizeShare(const EventTemplate& T)
+// The prize share (0.915 of a paid buy-in to the schedule's pools) and the fee (FeeOf) are the site's rake rule now
+// (update 2 §5.8, A3): Network::Rules->Rake, which for RiverLine returns exactly those numbers.
+
+/**
+ * The site keys (update 2 §5.3, §5.8): a rival's template, series, event and ticket ids start "<key>.", so SiteOf reads the
+ * site off any id. Fixed with net::SiteId and saved inside ids, so append-only; a registered SiteDef's Key is the same.
+ */
+const char* const NetSiteKeys[] = {"riverline", "flopjoy", "turnstone", "halcyon"};
+static_assert(sizeof(NetSiteKeys) / sizeof(NetSiteKeys[0]) == static_cast<size_t>(SiteId::Count), "a key for every SiteId");
+
+/**
+ * The registry (update 2 §5.8): every site's network, built once and all together, then never moved (the desk worker holds
+ * references, so it owns std::unique_ptr<Network>). RiverLine's is Shared(), as it always was. A registered rival's is
+ * built from its SiteDef (Sites()); a site not registered yet gets an empty network of its own (no key, no schedule), so an
+ * id never routes to another site's schedule. Nowhere answers a SiteId out of range.
+ */
+struct NetSiteRegistry
 {
-	return T.BuyInCents == 0 ? 0.0 : 0.915;
+	std::array<std::unique_ptr<Network>, static_cast<size_t>(SiteId::Count)> Rivals; // [0] stays empty: RiverLine is Shared()
+	std::unique_ptr<Network> Nowhere;
+
+	NetSiteRegistry()
+	{
+		for (size_t I = 1; I < Rivals.size(); ++I)
+		{
+			const SiteId S = static_cast<SiteId>(I);
+			const SiteDef* Registered = nullptr;
+			for (const SiteDef& D : Sites())
+			{
+				Registered = D.Id == S ? &D : Registered;
+			}
+			SiteDef Unregistered;
+			Unregistered.Id = S;
+			Rivals[I] = std::make_unique<Network>(Registered ? *Registered : Unregistered);
+		}
+		SiteDef None;
+		None.Id = SiteId::Count;
+		Nowhere = std::make_unique<Network>(None);
+	}
+};
+
+/** Built on first use (thread-safe): AttachAll, in the Session's constructor, does it on the game thread (§5.8). */
+NetSiteRegistry& NetSites()
+{
+	static NetSiteRegistry Registry;
+	return Registry;
 }
 } // namespace network_detail
 
@@ -257,9 +302,10 @@ HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& Hi
 		{
 			H.NightPoints += P;
 		}
-		// Series: titles in any of them, points in the one running (older saves' results only know their names).
+		// Series: titles in any of them, points in the one running (older saves' results only know their names). The
+		// template is looked up on the event's own site (update 2 §5.8); the running series is RiverLine's.
 		const size_t Cut = E.EventId.rfind('@');
-		const EventTemplate* T = Cut == std::string::npos ? nullptr : Net.FindTemplate(E.EventId.substr(0, Cut));
+		const EventTemplate* T = Cut == std::string::npos ? nullptr : ForEvent(E.EventId).FindTemplate(E.EventId.substr(0, Cut));
 		const std::string Series = T ? T->Series : E.Name.rfind("MM #", 0) == 0 ? "mm" : E.Name.rfind("RCOP #", 0) == 0 ? "rcop" : "";
 		if (!Series.empty())
 		{
@@ -272,13 +318,36 @@ HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& Hi
 
 // ------------------------------------------------------------------ the network
 
-Network::Network()
+Network::Network() : Rules(std::make_shared<const SiteDef>(Def(SiteId::RiverLine)))
 {
 	BuildPlayers();
 	BuildSeries();
 	BuildSchedule();
 	BuildCalendar();
 	Index();
+}
+
+Network::Network(const SiteDef& D) : Rules(std::make_shared<const SiteDef>(D)), NetSite(D.Id)
+{
+	if (NetSite == SiteId::RiverLine)
+	{
+		// RiverLine's own builders, exactly as the default network's (U9).
+		BuildPlayers();
+		BuildSeries();
+		BuildSchedule();
+		BuildCalendar();
+	}
+	else
+	{
+		// A rival: no regulars and no past of its own (§5.8), only its schedule.
+		BuildSite();
+	}
+	Index();
+}
+
+const SiteDef& Network::Definition() const
+{
+	return *Rules;
 }
 
 void Network::Index()
@@ -810,7 +879,7 @@ void Network::BuildSchedule()
 					T.TableSize = Kind == 2 ? 6 : 8;
 					T.Speed = Kind == 3 ? "Turbo" : Kind == 6 || Kind == 7 ? "Deep" : "Regular";
 					T.LevelMinutes = Kind == 3 ? 6.0 : Kind == 6 || Kind == 7 ? 15.0 : 12.0;
-					T.Field = static_cast<int>(static_cast<double>(T.GtdCents) / 100.0 / (B * 0.915) * 1.1);
+					T.Field = static_cast<int>(static_cast<double>(T.GtdCents) / 100.0 / (B * Rules->Rake.PrizeShare(T)) * 1.1);
 				}
 				Temps.push_back(T);
 			}
@@ -896,10 +965,11 @@ EventInstance Network::Make(int TemplateIndex, double Start) const
 	{
 		const bool Series = !T.Series.empty();
 		const double Factor = Series ? R.Range(0.9, 1.15) : DayFactor(DayOf(Start)) * R.Range(0.82, 1.25);
-		const Chips Contribution = static_cast<Chips>(std::llround(static_cast<double>(T.BuyInCents) * PrizeShare(T)));
-		// Guarantees are set to be beaten: the usual field clears one by a fifth, so overlays are rare.
+		const Chips Contribution = static_cast<Chips>(std::llround(static_cast<double>(T.BuyInCents) * Rules->Rake.PrizeShare(T)));
+		// Guarantees are set to be beaten: the usual field clears one by a fifth, so overlays are rare. That floor is
+		// RiverLine's (U9); a rival's field has none, so its guarantees can overlay (update 2 §5.8, core-sites).
 		double Field = static_cast<double>(T.Field);
-		if (T.GtdCents > 0 && Contribution > 0)
+		if (Rules->FieldFloor && T.GtdCents > 0 && Contribution > 0)
 		{
 			Field = std::max(Field, 1.2 * static_cast<double>(T.GtdCents) / static_cast<double>(Contribution));
 		}
@@ -1119,7 +1189,7 @@ const EventResult& Network::Unknowns(const EventInstance& E) const
 			P.Player = -2;
 			P.Country = handles::PickCountry(R);
 			P.Name = handles::Make(R, P.Country, TierOf(T.BuyInCents) >= Tier::Mid);
-			if (Living->Find(P.Name) >= 0)
+			if (Living && Living->Find(P.Name) >= 0)
 			{
 				P.Name += std::to_string(R.Int(90) + 10);
 			}
@@ -1131,6 +1201,11 @@ const EventResult& Network::Unknowns(const EventInstance& E) const
 
 const EventResult& Network::Deterministic(const EventInstance& E) const
 {
+	if (People.empty())
+	{
+		// A rival has no regulars of its own (update 2 §5.8): what the world didn't play went to handles nobody follows.
+		return Unknowns(E);
+	}
 	auto Found = Results.find(E.Id);
 	if (Found != Results.end())
 	{
@@ -1184,8 +1259,9 @@ const EventResult& Network::Deterministic(const EventInstance& E) const
 
 void Network::Prewarm(double Now) const
 {
-	// With a living world, only the network's own past needs working out; a fresh start (update 2 §3.3 F7) has none.
-	if (Living && Living->Began() == world::Start::Blank)
+	// With a living world, only the network's own past needs working out; a fresh start (update 2 §3.3 F7) has none, and
+	// neither has a rival (§5.8: no regulars, no past).
+	if ((Living && Living->Began() == world::Start::Blank) || People.empty())
 	{
 		return;
 	}
@@ -1225,14 +1301,17 @@ LobbyEvent Network::Listing(const EventInstance& E, std::string* Lock, int Unloc
 		Sp.Id = T.Id;
 		Sp.Name = !T.Series.empty() ? T.Name : BuyIn(T.BuyInCents) + " " + T.Name;
 		Sp.BuyInCents = T.BuyInCents;
-		Sp.FeeCents = FeeOf(T.BuyInCents);
+		// The site's rake, pace and tables (update 2 §5.3, §5.8): RiverLine's are FeeOf, 36 or 42 seconds a hand, and the
+		// population by tier, exactly as before.
+		Sp.FeeCents = Rules->Rake.Fee(T.BuyInCents);
 		Sp.GuaranteeCents = T.GtdCents;
 		Sp.Entrants = E.Entries;
 		Sp.StartingStack = T.StartStack;
 		Sp.LevelMinutes = T.LevelMinutes;
-		Sp.SecondsPerHand = T.Speed == "Hyper" ? 36.0 : 42.0;
+		Sp.SecondsPerHand = T.Speed == "Hyper" ? Rules->SecondsPerHand[0] : Rules->SecondsPerHand[1];
 		const Tier Tr = TierOf(T.BuyInCents);
-		Sp.Population = Tr == Tier::Freeroll ? "freeroll" : Tr == Tier::Micro ? "micro" : Tr == Tier::Low ? "low" : "high";
+		const std::string& Seated = Rules->Population[static_cast<size_t>(Tr)];
+		Sp.Population = !Seated.empty() ? Seated : Tr == Tier::Freeroll ? "freeroll" : Tr == Tier::Micro ? "micro" : Tr == Tier::Low ? "low" : "high";
 		Sp.Speed = T.Speed;
 		Sp.TableSize = T.TableSize;
 		if (T.Fmt == Format::Bounty || T.Fmt == Format::Mystery)
@@ -1518,13 +1597,14 @@ const Network::Ranking& Network::Ranked(Board B, double Now) const
 	const double SimStart = static_cast<double>(SimFirstDay) * MinutesPerDay;
 	if (Living)
 	{
-		// The living world keeps the boards itself (and where everyone stood a day, or an hour, ago).
+		// The living world keeps the boards itself (and where everyone stood a day, or an hour, ago), by site (update 2
+		// §5.8): RiverLine's are its boards as they always were (core-world's G3 subtracts the rivals' tallies there).
 		const size_t Count = Living->View().size();
 		Ranking Rk;
 		Rk.Values.assign(Count, 0.0);
 		for (size_t I = 0; I < Count; ++I)
 		{
-			Rk.Values[I] = Living->BoardValue(B, static_cast<int>(I), Now);
+			Rk.Values[I] = Living->BoardValue(NetSite, B, static_cast<int>(I), Now);
 		}
 		Rk.Order.resize(Count);
 		for (size_t I = 0; I < Count; ++I)
@@ -1535,7 +1615,7 @@ const Network::Ranking& Network::Ranked(Board B, double Now) const
 		Rk.RankBefore.assign(Count, 0);
 		for (size_t I = 0; I < Count; ++I)
 		{
-			Rk.RankBefore[I] = Living->RankBefore(B, static_cast<int>(I));
+			Rk.RankBefore[I] = Living->RankBefore(NetSite, B, static_cast<int>(I));
 		}
 		return RankCache.emplace(Key, std::move(Rk)).first->second;
 	}
@@ -1579,6 +1659,10 @@ const Network::Ranking& Network::Ranked(Board B, double Now) const
 			break;
 		}
 		case Board::Live: break; // a living world's board
+		case Board::Today:
+		case Board::Month:
+		case Board::Ladder:
+		case Board::HighRollers: break; // a rival's boards: the living world's site maps (update 2 §5.8)
 		}
 		return V;
 	};
@@ -1618,7 +1702,8 @@ std::vector<BoardRow> Network::Leaderboard(Board B, double Now, const HeroStats&
 		: B == Board::FinalTables ? static_cast<double>(Hero.SeasonFinalTables)
 		: B == Board::Series ? Hero.SeriesPoints
 		: B == Board::Live ? Hero.LivePoints
-		: Hero.NightPoints;
+		: B == Board::NightShift ? Hero.NightPoints
+		: Hero.SiteBoard; // a rival's own boards (update 2 §5.8): the caller's per-site value (core-sites' site::Account)
 	std::vector<BoardRow> Rows;
 	int HeroRank = 0;
 	int Rank = 1;
@@ -1728,28 +1813,34 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 	// A fresh start (update 2 §3.3 F7, §3.6) tells no history it doesn't have: no title before the record books opened,
 	// and the team that hasn't been signed yet.
 	const bool Blank = Living && Living->Began() == world::Start::Blank;
-	if (!Blank)
+	// RiverLine's own posts, its world headlines and the player's fallbacks are RiverLine's alone: a rival's page starts with
+	// its own results (update 2 §5.10; its promos, series and signings are core-sites').
+	const bool Home = NetSite == SiteId::RiverLine;
+	if (Home)
 	{
-		Post(DayAt(-30, 23, 40), NewsKind::Series, std::string(RivalName) + " wins Summer Slam #41",
-			"The night-shift regular takes down the $22 Six-Max for $18,406, his biggest score to date. \"The micros are a job. I clock in.\"", "SUMMER SLAM", Cents(18406.0), Rival);
+		if (!Blank)
+		{
+			Post(DayAt(-30, 23, 40), NewsKind::Series, std::string(RivalName) + " wins Summer Slam #41",
+				"The night-shift regular takes down the $22 Six-Max for $18,406, his biggest score to date. \"The micros are a job. I clock in.\"", "SUMMER SLAM", Cents(18406.0), Rival);
+		}
+		else
+		{
+			Post(DayAt(0, 9, 0), NewsKind::Schedule, "RiverLine signs its first team pros on Nov 1",
+				"Team RiverLine starts from nothing. An online final table on record or a top-100 Season rank gets you a look.", "TEAM RIVERLINE");
+		}
+		Post(DayAt(-7, 12, 0), NewsKind::Schedule, "Mystery Madness goes nightly",
+			"Every night at 10:00 PM: $10.80 to enter, $40,000 guaranteed, mystery bounties up to $10,000 in the envelopes.", "SCHEDULE");
+		Post(DayAt(-6, 10, 0), NewsKind::Series, "RCOP 2026: the schedule",
+			"154 events. $100,000,000 guaranteed. October 18 to November 8. Satellites run every day from $2.20.", "RCOP 2026");
+		Post(DayAt(-5, 15, 0), NewsKind::Series, "Micro Madness starts Thursday",
+			"Seventy events from 55\xC2\xA2 with $5,000,000 guaranteed. The Main Event on October 11: $11 to play for $1,000,000.", "MICRO MADNESS");
+		Post(DayAt(-1, 23, 55), NewsKind::Record, "Record night for the Sunday Showdown",
+			"7,412 entries crushed the $1,000,000 guarantee: a $1.47M prize pool and $214,880 to the winner.", "RECORD");
+		Post(DayAt(0, 18, 0), NewsKind::Schedule, "RCOP Main Event guarantee raised to $25M",
+			"Record satellite numbers push the guarantee up from $20M. The steps to a $5,250 seat start at $2.20.", "RCOP 2026");
+		Post(DayAt(1, 1, 30), NewsKind::Series, "Micro Madness, day six: the Night Crawler is running",
+			"Event #26 at 1:30 AM: $2.20 buy-in, $2,000 guaranteed, late registration until 3:10 AM. Title, trophy and leaderboard points to the winner.", "MICRO MADNESS");
 	}
-	else
-	{
-		Post(DayAt(0, 9, 0), NewsKind::Schedule, "RiverLine signs its first team pros on Nov 1",
-			"Team RiverLine starts from nothing. An online final table on record or a top-100 Season rank gets you a look.", "TEAM RIVERLINE");
-	}
-	Post(DayAt(-7, 12, 0), NewsKind::Schedule, "Mystery Madness goes nightly",
-		"Every night at 10:00 PM: $10.80 to enter, $40,000 guaranteed, mystery bounties up to $10,000 in the envelopes.", "SCHEDULE");
-	Post(DayAt(-6, 10, 0), NewsKind::Series, "RCOP 2026: the schedule",
-		"154 events. $100,000,000 guaranteed. October 18 to November 8. Satellites run every day from $2.20.", "RCOP 2026");
-	Post(DayAt(-5, 15, 0), NewsKind::Series, "Micro Madness starts Thursday",
-		"Seventy events from 55\xC2\xA2 with $5,000,000 guaranteed. The Main Event on October 11: $11 to play for $1,000,000.", "MICRO MADNESS");
-	Post(DayAt(-1, 23, 55), NewsKind::Record, "Record night for the Sunday Showdown",
-		"7,412 entries crushed the $1,000,000 guarantee: a $1.47M prize pool and $214,880 to the winner.", "RECORD");
-	Post(DayAt(0, 18, 0), NewsKind::Schedule, "RCOP Main Event guarantee raised to $25M",
-		"Record satellite numbers push the guarantee up from $20M. The steps to a $5,250 seat start at $2.20.", "RCOP 2026");
-	Post(DayAt(1, 1, 30), NewsKind::Series, "Micro Madness, day six: the Night Crawler is running",
-		"Event #26 at 1:30 AM: $2.20 buy-in, $2,000 guaranteed, late registration until 3:10 AM. Title, trophy and leaderboard points to the winner.", "MICRO MADNESS");
 	// The biggest results of the last three days.
 	for (const EventInstance& E : Finished(Now - 3.0 * MinutesPerDay, Now))
 	{
@@ -1776,16 +1867,19 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 		}
 	}
 	// A living world's people: live titles, careers, comebacks, retirements (its online wins are above).
-	if (Living)
+	if (Living && Home)
 	{
 		const std::vector<world::WorldEvent>& Log = Living->Events();
 		for (auto It = Log.rbegin(); It != Log.rend() && It->At > Now - 4.0 * MinutesPerDay; ++It)
 		{
 			const bool OnlineWin = (It->Kind == world::EventKind::Won || It->Kind == world::EventKind::Champion) && (It->Flags & world::FlagLive) == 0;
+			// RiverLine's News never names a rival (update 2 §5.7): an event on another site (its flags say which) is that
+			// site's news.
+			const bool Elsewhere = world::FlagSiteOf(It->Flags) != SiteId::RiverLine;
 			std::string Title;
 			std::string Body;
 			std::string Tag;
-			if (OnlineWin || It->At > Now || !Living->Headline(*It, Title, Body, Tag))
+			if (OnlineWin || Elsewhere || It->At > Now || !Living->Headline(*It, Title, Body, Tag))
 			{
 				continue;
 			}
@@ -1797,11 +1891,11 @@ std::vector<NewsItem> Network::News(double Now, const HeroStats& Hero, int Count
 	}
 	// The player's own milestones (when no result of theirs made the news).
 	const bool HeroNews = std::any_of(Items.begin(), Items.end(), [](const NewsItem& It) { return It.Kind == NewsKind::Hero; });
-	if (!HeroNews && Hero.Wins > 0)
+	if (Home && !HeroNews && Hero.Wins > 0)
 	{
 		Post(Now - 1.0, NewsKind::Hero, Hero.Name + " takes a title", "A first tournament win on RiverLine. The regulars have started to notice the name.", "YOU");
 	}
-	else if (!HeroNews && Hero.FinalTables > 0)
+	else if (Home && !HeroNews && Hero.FinalTables > 0)
 	{
 		Post(Now - 1.0, NewsKind::Hero, Hero.Name + " reaches a final table", "Nine left, and one of them is you. It's a start.", "YOU");
 	}
@@ -1820,18 +1914,47 @@ Network& Shared()
 }
 
 // ------------------------------------------------------------------ the sites (update 2 §5.8)
-// Phase A: the routing is dormant. Every site is RiverLine's network and every id is RiverLine's, so nothing moves; the
-// lead's A3 builds the rivals' networks (the registry holds them) and routes their prefixed ids to them.
+// A3: the routing is live. RiverLine is Shared(), untouched; a bare id is RiverLine's; a "<key>." id is that site's and
+// goes to its own network in the registry. Until core-sites registers a rival (G3), its network is empty, so nothing a
+// player can reach moves.
+
+const char* KeyOf(SiteId S)
+{
+	const size_t I = static_cast<size_t>(S);
+	return I < static_cast<size_t>(SiteId::Count) ? NetSiteKeys[I] : "";
+}
 
 Network& Site(SiteId S)
 {
-	(void)S;
-	return Shared();
+	if (S == SiteId::RiverLine)
+	{
+		return Shared();
+	}
+	NetSiteRegistry& Registry = NetSites();
+	const size_t I = static_cast<size_t>(S);
+	return I < Registry.Rivals.size() && Registry.Rivals[I] ? *Registry.Rivals[I] : *Registry.Nowhere;
 }
 
 SiteId SiteOf(const std::string& Id)
 {
-	(void)Id;
+	// The prefix before the first '.', if it's a site's key and comes before the start ("@"): RiverLine's ids have none.
+	const size_t Dot = Id.find('.');
+	if (Dot == std::string::npos || Dot == 0)
+	{
+		return SiteId::RiverLine;
+	}
+	const size_t At = Id.find('@');
+	if (At != std::string::npos && At < Dot)
+	{
+		return SiteId::RiverLine;
+	}
+	for (size_t I = 1; I < static_cast<size_t>(SiteId::Count); ++I)
+	{
+		if (Id.compare(0, Dot, NetSiteKeys[I]) == 0)
+		{
+			return static_cast<SiteId>(I);
+		}
+	}
 	return SiteId::RiverLine;
 }
 
@@ -1840,14 +1963,30 @@ Network& ForEvent(const std::string& Id)
 	return Site(SiteOf(Id));
 }
 
-void AttachAll(world::World* W)
+void AttachAll(const world::World* W)
 {
+	// Every site shows the same world. The first call builds the registry (on the game thread: the Session's constructor).
 	Shared().Attach(W);
+	for (std::unique_ptr<Network>& N : NetSites().Rivals)
+	{
+		if (N)
+		{
+			N->Attach(W);
+		}
+	}
 }
 
 void SetHeroAll(const std::string& Name, const std::vector<HistoryEntry>& History)
 {
+	// SetHero keys finishes by instance id, so each site picks out its own.
 	Shared().SetHero(Name, History);
+	for (std::unique_ptr<Network>& N : NetSites().Rivals)
+	{
+		if (N)
+		{
+			N->SetHero(Name, History);
+		}
+	}
 }
 } // namespace net
 } // namespace ss

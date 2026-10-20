@@ -6,6 +6,7 @@
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Stake.h"
 
 #include <algorithm>
@@ -431,12 +432,13 @@ void Sell(Ui& UI, Canvas& C, Session& S, PageState& St, double World, double Now
 	// An online event opened from its register block (Preselect): it joins the picks, sold in whole percents.
 	net::EventInstance Online;
 	if (!St.Event.empty() && std::none_of(Events.begin(), Events.end(), [&St](const EventPick& P) { return P.Id == St.Event; }) &&
-		!live::FindOccurrence(St.Event).Valid() && net::Shared().FindInstance(St.Event, Online) && Online.Start + Online.LateReg > World)
+		!live::FindOccurrence(St.Event).Valid() && net::ForEvent(St.Event).FindInstance(St.Event, Online) && Online.Start + Online.LateReg > World)
 	{
-		const net::EventTemplate& T = net::Shared().TemplateOf(Online);
+		const net::EventTemplate& T = net::ForEvent(St.Event).TemplateOf(Online);
 		EventPick P;
 		P.Id = Online.Id;
-		P.Label = "RiverLine" + Dot + (net::DayOf(Online.Start) == net::DayOf(World) ? std::string("Today") : std::string(net::WeekdayName(net::DayOf(Online.Start))));
+		// The event's own site's name (update 2 §5.8: "RiverLine" for RiverLine's).
+		P.Label = net::ForEvent(St.Event).Definition().Name + Dot + (net::DayOf(Online.Start) == net::DayOf(World) ? std::string("Today") : std::string(net::WeekdayName(net::DayOf(Online.Start))));
 		P.Name = T.Name;
 		P.BuyIn = T.BuyInCents;
 		P.Start = Online.Start;

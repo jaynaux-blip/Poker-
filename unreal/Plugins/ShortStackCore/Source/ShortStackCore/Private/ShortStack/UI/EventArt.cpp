@@ -4,6 +4,8 @@
 // event means (rays, laurel and crown for a Main Event, a bracelet, a ring, a diamond, twinkling glints).
 #include "ShortStack/UI/EventArt.h"
 
+#include "ShortStack/Game/Sites.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -2513,7 +2515,8 @@ void Emblem(Canvas& C, const net::EventTemplate& T, float Cx, float Cy, float Si
 {
 	if (!T.Series.empty())
 	{
-		const net::SeriesInfo* Sr = net::Shared().FindSeries(T.Series);
+		// The series on its own site (update 2 §5.8: a rival's series id carries its key).
+		const net::SeriesInfo* Sr = net::ForEvent(T.Series).FindSeries(T.Series);
 		CrestLook L;
 		L.Shape = FrameOf(SlotOf(T.Series));
 		L.Rim = T.Main ? Alloy::Gold : AlloyFor(T.BuyInCents);
@@ -2601,7 +2604,7 @@ std::string TrophySeries(const world::Award& A)
 	}
 	if (A.Online)
 	{
-		const net::SeriesInfo* Sr = net::Shared().FindSeries(A.Series);
+		const net::SeriesInfo* Sr = net::ForEvent(A.Series).FindSeries(A.Series);
 		return Sr ? Sr->Name : A.Series;
 	}
 	return A.Series;

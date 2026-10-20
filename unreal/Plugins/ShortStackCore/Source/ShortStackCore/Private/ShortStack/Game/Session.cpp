@@ -1075,7 +1075,8 @@ Session::~Session()
 	Worlds.erase(std::remove(Worlds.begin(), Worlds.end(), &LivingWorld), Worlds.end());
 	if (net::Shared().Attached() == &LivingWorld)
 	{
-		net::Shared().Attach(Worlds.empty() ? nullptr : Worlds.back());
+		// Every site's network shows the same world (update 2 §5.8).
+		net::AttachAll(Worlds.empty() ? nullptr : Worlds.back());
 	}
 }
 
@@ -1104,8 +1105,9 @@ void Session::StartWorld(const SaveData* Loaded, world::Start S)
 	{
 		Worlds.push_back(&LivingWorld);
 	}
-	net::Shared().Attach(&LivingWorld);
-	net::Shared().SetHero(HeroName, History);
+	// Every site's network (update 2 §5.8): the rivals' are built here, on the game thread, before any desk worker runs.
+	net::AttachAll(&LivingWorld);
+	net::SetHeroAll(HeroName, History);
 	WorldNewsAt = LivingWorld.Clock();
 	// Live events called off short of their minimum: settled, and the world told, before it plays on past them (it would
 	// otherwise decide them without the player and crown a winner nobody played against).
@@ -1690,7 +1692,7 @@ bool Session::CanAfford(const LobbyEvent& Ev) const
 int Session::TicketsFor(const LobbyEvent& Ev) const
 {
 	const size_t At = Ev.Spec.Id.find('@');
-	return At == std::string::npos ? 0 : Life.TicketsFor(net::Shared().TicketOf(Ev.Spec.Id.substr(0, At)));
+	return At == std::string::npos ? 0 : Life.TicketsFor(net::ForEvent(Ev.Spec.Id).TicketOf(Ev.Spec.Id.substr(0, At)));
 }
 
 void Session::Register(int Index)
@@ -1737,7 +1739,7 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	const LobbyEvent& Ev = Joined;
 	if (TicketsFor(Ev) > 0)
 	{
-		const std::string Tid = net::Shared().TicketOf(Ev.Spec.Id.substr(0, Ev.Spec.Id.find('@')));
+		const std::string Tid = net::ForEvent(Ev.Spec.Id).TicketOf(Ev.Spec.Id.substr(0, Ev.Spec.Id.find('@')));
 		if (--Life.Tickets[Tid] <= 0)
 		{
 			Life.Tickets.erase(Tid);
@@ -3276,8 +3278,9 @@ void Session::ShowResults()
 	}
 	CheckUnlocks();
 	// Series results reach the people who follow the boards.
-	const net::EventTemplate* Tmpl = net::Shared().FindTemplate(T->Spec.Id.substr(0, T->Spec.Id.find('@')));
-	const net::SeriesInfo* Played = Tmpl ? net::Shared().FindSeries(Tmpl->Series) : nullptr;
+	const net::Network& EventNet = net::ForEvent(T->Spec.Id);
+	const net::EventTemplate* Tmpl = EventNet.FindTemplate(T->Spec.Id.substr(0, T->Spec.Id.find('@')));
+	const net::SeriesInfo* Played = Tmpl ? EventNet.FindSeries(Tmpl->Series) : nullptr;
 	if (Tmpl && BustPlace == 1 && Tmpl->Bracelet)
 	{
 		StoryText("bracelet-first", "Dee", "A BRACELET. A real Championship bracelet. Online counts, kid. Don't let anybody tell you different.");
@@ -5900,8 +5903,9 @@ void Session::PayNightShift(double End)
 		return;
 	}
 	Life.NightsPaid.insert(Day);
+	// The Night Shift is RiverLine's board; every site's network gets the player's finishes (update 2 §5.8).
+	net::SetHeroAll(HeroName, History);
 	net::Network& Net = net::Shared();
-	Net.SetHero(HeroName, History);
 	const double At = End - 0.01;
 	net::BoardRow Row;
 	Net.Leaderboard(net::Board::NightShift, At, net::StatsFrom(HeroName, History, At), 0, &Row);

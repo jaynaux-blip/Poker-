@@ -708,7 +708,17 @@ enum EventFlag : int
 	FlagHero = 8,      // the player was there
 	FlagLive = 16,     // a live event
 	FlagUnknown = 32,  // the world hadn't been following them
+	// Update 2 §5.7, §5.10 (review of A3; core-world sets them at G3): a rival site's event carries its net::SiteId in these
+	// bits (RiverLine's: none), so RiverLine's News can leave it out and the site's own News show it. Saved with the log's
+	// flags. FlagSiteOf reads it.
+	FlagSiteBits = 0xF00,
 };
+constexpr int FlagSiteShift = 8;
+/** The site a world event happened on (update 2 §5.10): RiverLine's unless its flags carry a rival's. */
+inline net::SiteId FlagSiteOf(int Flags)
+{
+	return static_cast<net::SiteId>((Flags & FlagSiteBits) >> FlagSiteShift);
+}
 
 /** A Hall of Fame class's Honor title (Entries: the score it was inducted with, rounded; Prize: career winnings). */
 constexpr const char HallOfFameTitle[] = "Hall of Fame";
@@ -977,6 +987,12 @@ public:
 	SHORTSTACKCORE_API const SiteRecord* SiteRecordOf(net::SiteId Site, int Npc) const;
 	/** When a site opened its lobby (world minutes), or -1. */
 	SHORTSTACKCORE_API double SiteLaunched(net::SiteId Site) const;
+	/**
+	 * Someone's rank on a site's board a day (an hour) ago, 0 for none (A3, beside BoardValue by site: Network::Ranked reads
+	 * both). RiverLine's is RankBefore(B, Npc) for its boards up to Live; a rival's board comes from the site maps
+	 * (SiteRanksYesterday, core-world's at G3), never from RanksYesterday, which ends at Live.
+	 */
+	SHORTSTACKCORE_API int RankBefore(net::SiteId Site, net::Board B, int Npc) const;
 
 	// The player.
 	/** Someone takes a seat in an event (the player's tables seat a regular the world hadn't planned there). */

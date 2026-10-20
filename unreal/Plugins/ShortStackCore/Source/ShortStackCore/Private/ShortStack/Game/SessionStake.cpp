@@ -5,6 +5,7 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Stake.h"
 
 #include <algorithm>
@@ -421,9 +422,10 @@ std::vector<std::pair<life::Funding, std::string>> Session::FundingOptions(const
 		return stake::FundingOptions(Life, O, World);
 	}
 	net::EventInstance I;
-	if (net::Shared().FindInstance(EventOrOccurrenceId, I))
+	const net::Network& Net = net::ForEvent(EventOrOccurrenceId);
+	if (Net.FindInstance(EventOrOccurrenceId, I))
 	{
-		return stake::OnlineFundingOptions(Life, EventOrOccurrenceId, net::Shared().TemplateOf(I).BuyInCents, World);
+		return stake::OnlineFundingOptions(Life, EventOrOccurrenceId, Net.TemplateOf(I).BuyInCents, World);
 	}
 	return {{life::Funding(), std::string()}};
 }

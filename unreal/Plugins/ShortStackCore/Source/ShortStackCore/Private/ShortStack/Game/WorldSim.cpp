@@ -12,6 +12,7 @@
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Structure.h"
 #include "WorldSim.h"
@@ -80,13 +81,13 @@ std::string TicketKey(const Pending& P)
 		return P.Kind == static_cast<int>(LiveKind::ChampionshipMain) ? "championship-main" : "";
 	}
 	const size_t At = P.Id.rfind('@');
-	return net::Shared().TicketOf(At == std::string::npos ? P.Id : P.Id.substr(0, At));
+	return net::ForEvent(P.Id).TicketOf(At == std::string::npos ? P.Id : P.Id.substr(0, At));
 }
 
-/** Where a satellite's chain of seats ends (step 1 -> step 2 -> ... -> the Main Event). */
+/** Where a satellite's chain of seats ends (step 1 -> step 2 -> ... -> the Main Event), on the ticket's own site. */
 std::string FinalTarget(const std::string& Ticket)
 {
-	const net::Network& Net = net::Shared();
+	const net::Network& Net = net::ForEvent(Ticket);
 	std::string At = Ticket;
 	for (int Guard = 0; Guard < 8; ++Guard)
 	{
@@ -106,7 +107,7 @@ Chips SeatValueOf(const std::string& Ticket)
 	{
 		return 1000000;
 	}
-	return net::Shared().SeatValue(Ticket);
+	return net::ForEvent(Ticket).SeatValue(Ticket);
 }
 
 /** Notable enough for the record (a player card's recent results, the news). */
@@ -414,8 +415,8 @@ Award Sim::AwardOf(const Pending& P, int Day, Chips Prize)
 	A.Entries = P.Entries;
 	if (P.Online)
 	{
-		// Online: the series' own Main Event (its id says which).
-		const net::Network& Net = net::Shared();
+		// Online: the series' own Main Event (its id says which), on the event's own site.
+		const net::Network& Net = net::ForEvent(P.Id);
 		const net::EventTemplate* T = P.Template >= 0 && static_cast<size_t>(P.Template) < Net.Templates().size() ? &Net.Templates()[static_cast<size_t>(P.Template)] : nullptr;
 		const net::SeriesInfo* Sr = T ? Net.FindSeries(T->Series) : nullptr;
 		A.Main = Sr && Sr->MainEvent == T->Id;
@@ -476,7 +477,7 @@ bool Sim::Major(const Pending& P)
 
 Pending Sim::OnlineEvent(World& W, const net::EventInstance& E)
 {
-	const net::Network& Net = net::Shared();
+	const net::Network& Net = net::ForEvent(E.Id);
 	const net::EventTemplate& T = Net.TemplateOf(E);
 	Pending P;
 	P.Id = E.Id;
@@ -842,7 +843,7 @@ void Sim::PlanDay(World& W, int Day)
 			{
 				for (Option& O : Online)
 				{
-					auto T = N.Tickets.find(net::Shared().TicketOf(O.Template));
+					auto T = N.Tickets.find(net::ForEvent(O.Template).TicketOf(O.Template));
 					if (T != N.Tickets.end() && static_cast<int>(O.P.Who.size()) < O.Cap)
 					{
 						Enter(O, 0, true, 1, 1.0f);
@@ -2587,9 +2588,10 @@ Chips CashOut(Npc& N)
 
 void ExpireTickets(Npc& N, double Now)
 {
-	const net::Network& Net = net::Shared();
 	for (auto It = N.Tickets.begin(); It != N.Tickets.end();)
 	{
+		// A ticket is for an event on its own site (update 2 §5.8: rival ticket ids carry the site's key).
+		const net::Network& Net = net::ForEvent(It->first);
 		net::EventInstance Next;
 		const std::string Target = FinalTarget(It->first);
 		if (It->first != "championship-main" && !Net.NextFor(It->first, Now, Next) && !Net.NextFor(Target, Now, Next))
@@ -3232,7 +3234,7 @@ std::string BooksFamily(const Pending& P)
 	}
 	if (P.Online)
 	{
-		const net::Network& Net = net::Shared();
+		const net::Network& Net = net::ForEvent(P.Id);
 		if (P.Template < 0 || static_cast<size_t>(P.Template) >= Net.Templates().size())
 		{
 			return "";

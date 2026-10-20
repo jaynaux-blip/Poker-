@@ -28,10 +28,11 @@ class World;
 }
 
 /**
- * The poker sites (update 2 §5.8): RiverLine and its rivals, each a net::Network built from its SiteDef. Phase A
- * registers only RiverLine and routes every id to it (the routing bodies in Network.cpp: Site, SiteOf, ForEvent,
- * AttachAll, SetHeroAll), so nothing moves; A3 builds the rivals' networks and G3 opens them. RiverLine's schedule, ids,
- * seeds, rake, fields and payouts never change (U9). Data: core-sites (Game/Sites.cpp).
+ * The poker sites (update 2 §5.8): RiverLine and its rivals, each a net::Network built from its SiteDef. The routing
+ * (Network.cpp: KeyOf, Site, SiteOf, ForEvent, AttachAll, SetHeroAll) is live since A3: a "<key>." id is that site's, and
+ * every site has its own network in the registry, empty until core-sites registers the site's SiteDef in Sites() and its
+ * schedule in NetworkSites.cpp (G3). RiverLine's schedule, ids, seeds, rake, fields and payouts never change (U9).
+ * Data: core-sites (Game/Sites.cpp).
  */
 namespace net
 {
@@ -97,14 +98,28 @@ struct SiteDef
 SHORTSTACKCORE_API const std::vector<SiteDef>& Sites();
 /** A site's definition (one not registered yet: RiverLine's). */
 SHORTSTACKCORE_API const SiteDef& Def(SiteId S);
-/** A site's network (RiverLine: Shared()). */
+/**
+ * A site's network (RiverLine: Shared()). Every site has its own: a registered rival's is built from its SiteDef, one not
+ * registered yet is empty (no schedule), so an id never reaches another site's events. The rivals' are built once, all
+ * together, the first time one is asked for (AttachAll does it on the game thread, before the desk's worker runs: §5.8's
+ * threading contract), and never move.
+ */
 SHORTSTACKCORE_API Network& Site(SiteId S);
-/** The site an event, template or ticket id belongs to: "turnstone.sunday-100k@..." is Turnstone's; a bare id RiverLine's. */
+/**
+ * The site an id belongs to (an event, template, series or ticket id): the prefix before the first '.', when it is a site's
+ * key and comes before any '@' ("turnstone.sunday-100k@1500" is Turnstone's); anything else, every bare id, RiverLine's.
+ */
 SHORTSTACKCORE_API SiteId SiteOf(const std::string& Id);
+/** Site(SiteOf(Id)): the network an event, template, series or ticket id lives on. */
 SHORTSTACKCORE_API Network& ForEvent(const std::string& Id);
-/** Network::Attach and SetHero on every site's network. */
-SHORTSTACKCORE_API void AttachAll(world::World* W);
+/** Network::Attach and SetHero on every site's network (they all show the same world; each picks out its own finishes). */
+SHORTSTACKCORE_API void AttachAll(const world::World* W);
 SHORTSTACKCORE_API void SetHeroAll(const std::string& Name, const std::vector<HistoryEntry>& History);
+/**
+ * A site's key, the prefix of its ids: "riverline", "flopjoy", "turnstone", "halcyon" ("" for a SiteId out of range). Fixed
+ * with SiteId, since saved ids carry it; a registered SiteDef's Key must be the same (sites_test checks it).
+ */
+SHORTSTACKCORE_API const char* KeyOf(SiteId S);
 } // namespace net
 
 /** The money rules on the rival sites (§5.5, §5.6, §5.7). Bodies: core-sites (Sites.cpp, SiteMoney.cpp); dormant until G3. */

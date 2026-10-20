@@ -8,6 +8,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/UI/EventArt.h"
 
@@ -302,7 +303,8 @@ std::string SeriesName(const world::Award& A)
 	}
 	if (A.Online)
 	{
-		const net::SeriesInfo* Sr = net::Shared().FindSeries(A.Series);
+		// On the series' own site (update 2 §5.8: a rival's series id carries its key).
+		const net::SeriesInfo* Sr = net::ForEvent(A.Series).FindSeries(A.Series);
 		return Sr ? Sr->Name : A.Series;
 	}
 	return A.Series;

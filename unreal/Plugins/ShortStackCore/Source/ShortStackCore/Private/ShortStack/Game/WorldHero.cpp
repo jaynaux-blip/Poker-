@@ -5,6 +5,7 @@
 #include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
+#include "ShortStack/Game/Sites.h"
 #include "WorldSim.h"
 
 #include <algorithm>
@@ -344,7 +345,12 @@ int World::RankBefore(net::Board B, int Npc) const
 		// Nothing an hour ago is no rank at all (update 2 §3.6): the row reads NEW.
 		return V > 0.0 ? Rank : 0;
 	}
-	// 0: nothing on the board a day ago (Sim::Ranks), or someone who wasn't in the world yet.
+	// 0: nothing on the board a day ago (Sim::Ranks), or someone who wasn't in the world yet. RanksYesterday ends at Live: a
+	// rival's board (update 2 §5.8, appended after it) keeps its ranks in the site maps, so it has none here.
+	if (static_cast<size_t>(B) >= RanksYesterday.size())
+	{
+		return 0;
+	}
 	const std::vector<int>& Rk = RanksYesterday[static_cast<size_t>(B)];
 	return Npc >= 0 && static_cast<size_t>(Npc) < Rk.size() ? Rk[static_cast<size_t>(Npc)] : 0;
 }
@@ -381,7 +387,7 @@ void World::HeroEntered(const std::string& EventId, const std::string& EventName
 	{
 		// Nobody the world follows is in it: the player's result still makes it a world event.
 		net::EventInstance E;
-		if (net::Shared().FindInstance(EventId, E))
+		if (net::ForEvent(EventId).FindInstance(EventId, E))
 		{
 			Queue.push_back(Sim::OnlineEvent(*this, E));
 		}
@@ -425,7 +431,7 @@ int World::PlannedEntries(const std::string& EventId)
 	}
 	// Nobody the world follows is in it: the crowd it has anyway.
 	net::EventInstance E;
-	if (net::Shared().FindInstance(EventId, E))
+	if (net::ForEvent(EventId).FindInstance(EventId, E))
 	{
 		return Sim::OnlineEvent(*this, E).Entries;
 	}

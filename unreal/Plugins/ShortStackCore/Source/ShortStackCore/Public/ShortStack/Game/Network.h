@@ -1,10 +1,12 @@
 #pragma once
 
 #include "ShortStack/Game/Lobby.h"
+#include "ShortStack/Game/SiteData.h"
 
 #include <array>
 #include <cmath>
 #include <map>
+#include <memory>
 
 namespace ss
 {
@@ -26,6 +28,8 @@ class World;
  */
 namespace net
 {
+struct SiteDef;
+
 // ------------------------------------------------------------------ calendar
 
 /** World time is minutes since Monday, October 5, 2026, 00:00, on the player's clock. */
@@ -202,6 +206,9 @@ struct HeroStats
 	int SeasonWins = 0;
 	int SeasonFinalTables = 0;
 	double LivePoints = 0.0; // live Player of the Year (the session fills it from its world)
+	// Update 2 §5.3 (review of A3): the player's value on a rival's own board (Today, Month, Ladder, HighRollers), filled by the
+	// caller for the board it asks for from core-sites' per-site numbers. RiverLine's boards never read it.
+	double SiteBoard = 0.0;
 };
 /** Night points count the Night Shift that contains Now (life::NightShiftStart). */
 SHORTSTACKCORE_API HeroStats StatsFrom(const std::string& Name, const std::vector<HistoryEntry>& History, double Now = MinutesPerDay + 127.0);
@@ -227,6 +234,12 @@ enum class Board : int
 	Series,      // the running series
 	NightShift,  // tonight's micro-stakes leaderboard
 	Live,        // live Player of the Year points (a living world only)
+	// Update 2 §5.3, §5.8 (A3), appended: the rival sites' own boards. Their values and yesterday's ranks live in the
+	// world's sparse site maps (World::BoardValue and RankBefore by site), never in RanksYesterday, which ends at Live.
+	Today,       // a day's points race (Flopjoy's, P1)
+	Month,       // this month's points (Flopjoy)
+	Ladder,      // the monthly ladder (Turnstone's, P1)
+	HighRollers, // the high rollers' season (Halcyon's, P1)
 };
 
 struct BoardRow
@@ -280,7 +293,19 @@ struct NewsItem
 class Network
 {
 public:
+	/** RiverLine's network: its regulars, its schedule and its series, exactly as before update 2 (U9). */
 	SHORTSTACKCORE_API Network();
+	/**
+	 * A site's network from its definition (update 2 §5.8). RiverLine's builds the default network, byte for byte. A rival's
+	 * has no regulars and no past of its own (its people and results come from the living world it's attached to), and
+	 * its schedule comes from BuildSite (NetworkSites.cpp, core-sites), every template and series id prefixed with the
+	 * site's key ("turnstone.sunday-100k"), so its event ids and seeds never meet RiverLine's.
+	 */
+	SHORTSTACKCORE_API explicit Network(const SiteDef& Def);
+	/** The site this network is (RiverLine for the default one). */
+	SiteId Site() const { return NetSite; }
+	/** Its definition: rake, traffic, fields, populations, seconds a hand. */
+	SHORTSTACKCORE_API const SiteDef& Definition() const;
 
 	/** Everyone on the network: the living world's people when one is attached (the same first indices). */
 	const std::vector<Player>& Players() const { return Living ? LivingRows() : People; }
@@ -407,9 +432,14 @@ private:
 	const world::World* Living = nullptr;
 	mutable int LivingRev = -1;
 	mutable std::map<std::string, EventResult> Unknown;
+	// Update 2 §5.8 (A3): the site this network is, and its rules.
+	/** A rival's schedule from its SiteDef: dailies, weeklies and a light series calendar (NetworkSites.cpp, core-sites). */
+	void BuildSite();
+	std::shared_ptr<const SiteDef> Rules; // never null; shared, so a Network still copies
+	SiteId NetSite = SiteId::RiverLine;
 };
 
-/** The network every screen shows (built on first use). */
+/** The network every screen shows (built on first use): RiverLine's. net::Site and net::ForEvent (Sites.h) reach the others. */
 SHORTSTACKCORE_API Network& Shared();
 } // namespace net
 } // namespace ss

@@ -4,6 +4,7 @@
 // events anywhere share a name: every event that isn't a Main Event or a High Roller has a name of its own.
 #include "ShortStack/Game/Network.h"
 
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 
@@ -547,7 +548,7 @@ void Network::BuildCalendar()
 					T.Featured = T.GtdCents >= SeriesCents(500000.0) || (Award && Dollars >= 525.0);
 				}
 				T.BuyInCents = SeriesCents(Dollars);
-				T.Field = std::max(20, static_cast<int>(static_cast<double>(T.GtdCents) / 100.0 / (Dollars * 0.915) * 1.1));
+				T.Field = std::max(20, static_cast<int>(static_cast<double>(T.GtdCents) / 100.0 / (Dollars * Rules->Rake.PrizeShare(T)) * 1.1));
 				Gtd += static_cast<double>(T.GtdCents);
 				Sr.Bracelets += T.Bracelet ? 1 : 0;
 				Sr.Rings += T.Ring ? 1 : 0;
@@ -635,7 +636,7 @@ void Network::BuildCalendar()
 		T.StartMinute = Wk.Start;
 		T.OpensHours = 72;
 		T.Blurb = Wk.Blurb;
-		T.Field = std::max(40, static_cast<int>(Wk.Gtd / (Wk.BuyIn * 0.915) * 1.15));
+		T.Field = std::max(40, static_cast<int>(Wk.Gtd / (Wk.BuyIn * Rules->Rake.PrizeShare(T)) * 1.15));
 		Temps.push_back(T);
 	}
 }

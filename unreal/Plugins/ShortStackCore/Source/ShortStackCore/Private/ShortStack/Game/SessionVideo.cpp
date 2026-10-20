@@ -148,16 +148,16 @@ bool VideoHandMoment(kast::Moment M)
 	}
 }
 
-/** "rl:" for RiverLine, the site's key for a rival (§4.4). */
+/** "rl:" for RiverLine, the site's key for a rival (§4.4): KeyOf, exact for every SiteId (Def falls back to RiverLine's). */
 std::string SitePrefix(const std::string& EventId)
 {
 	const net::SiteId Site = net::SiteOf(EventId);
-	return Site == net::SiteId::RiverLine ? std::string("rl:") : net::Def(Site).Key + ":";
+	return Site == net::SiteId::RiverLine ? std::string("rl:") : std::string(net::KeyOf(Site)) + ":";
 }
 
 bool SeriesEvent(const Tournament& T)
 {
-	const net::EventTemplate* Tmpl = net::Shared().FindTemplate(T.Spec.Id.substr(0, T.Spec.Id.find('@')));
+	const net::EventTemplate* Tmpl = net::ForEvent(T.Spec.Id).FindTemplate(T.Spec.Id.substr(0, T.Spec.Id.find('@')));
 	return (Tmpl && (!Tmpl->Series.empty() || Tmpl->Bracelet || Tmpl->Ring || Tmpl->Main)) || T.Spec.Name.rfind("MM #", 0) == 0;
 }
 

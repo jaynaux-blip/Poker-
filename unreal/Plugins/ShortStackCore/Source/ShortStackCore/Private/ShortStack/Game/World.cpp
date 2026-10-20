@@ -997,6 +997,13 @@ double World::SiteLaunched(net::SiteId Site) const
 	return -1.0;
 }
 
+int World::RankBefore(net::SiteId Site, net::Board B, int Npc) const
+{
+	// A3's seam (core-world fills the rivals' at G3 from SiteRanksYesterday): RiverLine's boards are today's; a rival's board
+	// has no rank yesterday yet. RanksYesterday is never indexed past Live.
+	return Site == net::SiteId::RiverLine && B <= net::Board::Live ? RankBefore(B, Npc) : 0;
+}
+
 int World::Find(const std::string& Name) const
 {
 	const auto It = ByName.find(Name);

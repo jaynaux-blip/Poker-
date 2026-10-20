@@ -8,6 +8,7 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/TableTalk.h"
 #include "ShortStack/Rng.h"
@@ -160,7 +161,7 @@ std::string Title(const std::string& Name)
 
 bool Online(const std::string& EventId, net::EventInstance& Out)
 {
-	return !live::FindOccurrence(EventId).Valid() && net::Shared().FindInstance(EventId, Out);
+	return !live::FindOccurrence(EventId).Valid() && net::ForEvent(EventId).FindInstance(EventId, Out);
 }
 
 /** The event's name, its short name, its buy-in and when late registration closes (live or online). */
@@ -195,7 +196,7 @@ EventFacts FactsOf(const std::string& EventId)
 	net::EventInstance I;
 	if (Online(EventId, I))
 	{
-		const net::EventTemplate& T = net::Shared().TemplateOf(I);
+		const net::EventTemplate& T = net::ForEvent(EventId).TemplateOf(I);
 		F.Valid = true;
 		F.Name = T.Name;
 		F.Short = T.Name;
