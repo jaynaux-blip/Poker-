@@ -123,6 +123,8 @@ public:
 	void ShowContact(int Contact) { BurnerContact = Contact; }
 	/** The sleep menu over the taskbar. */
 	void ShowSleepMenu(bool Open) { SleepOpen = Open; }
+	/** Where the Sleep menu sits while it's up (over the screen's foot, above its button); nothing under it takes a press. */
+	SHORTSTACKCORE_API static Rect SleepMenuRect();
 	/** GearDrop's category (-1 all, else gear::Category). */
 	void ShowStoreCategory(int Category) { StoreCat = Category; StoreScroll = StoreScrollGoal = 0.0f; }
 	/** Opens the order card for an item (the confirm step). */

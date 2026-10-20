@@ -131,6 +131,30 @@ void Mail()
 	P.RL.OpenApp(App::Mail, P.Now);
 	ss::ui::DrawList Tally = P.Shot("mail_contract_tally");
 	Expect(Drew(Tally, "Live events in the patch") && Drew(Tally, "Period ends") && Drew(Tally, "Give notice"), "mail: a running deal's asks, deadline and notice");
+	// The Sleep menu up over Give notice (update 2's gate 3 play-test): a press on the menu went to the app under it too, and a
+	// night's sleep gave notice to the sponsor. Nothing under the menu takes a press now.
+	{
+		float Nx = -1.0f;
+		float Ny = -1.0f;
+		for (const ss::ui::DrawCmd& Cmd : Tally.Cmds)
+		{
+			if (Nx < 0.0f && Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "Give notice")
+			{
+				Nx = Cmd.Text.X + P.M.Width(Cmd.Text.Text, Cmd.Text.Face, Cmd.Text.SizePx) / 2.0f;
+				Ny = Cmd.Text.BaselineY - 5.0f;
+			}
+		}
+		const ss::ui::Rect Menu = ss::ui::RiverLine::SleepMenuRect();
+		const bool Under = Nx >= Menu.X && Nx <= Menu.X + Menu.W && Ny >= Menu.Y && Ny <= Menu.Y + Menu.H;
+		P.RL.ShowSleepMenu(true);
+		// A quick click lands in one frame, pressed and released together (as the game's input can give it): every button
+		// under the pointer took it then, the app's first.
+		P.Frame(Nx, Ny, false, true, true);
+		P.Now += 0.05;
+		const ss::ui::DrawList Slept = P.Shot("mail_notice_under_sleep");
+		P.RL.ShowSleepMenu(false);
+		Expect(Under && !Drew(Slept, "Give notice to "), "mail: a press on the Sleep menu over Give notice doesn't ask to give notice");
+	}
 	// A month short: the strike.
 	P.S.DebugSponsor("period");
 	ss::ui::DrawList Strike = P.Shot("mail_strike");

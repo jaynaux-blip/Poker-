@@ -209,17 +209,17 @@ const NetSitesSeries RunItTwiceSeries[] = {
 double NetSitesMedianField(const SiteDef& D, const EventTemplate& T)
 {
 	const bool Series = !T.Series.empty();
-	std::vector<double> Days;
+	std::vector<double> Factors;
 	for (int Wd = 0; Wd < 7 && !Series; ++Wd)
 	{
 		const bool Runs = T.OnlyDay == -9999 ? (T.Days & (1 << Wd)) != 0 : Wd == Weekday(T.OnlyDay);
 		if (Runs)
 		{
-			Days.push_back(NetSitesDayFactor(D, Wd));
+			Factors.push_back(NetSitesDayFactor(D, Wd));
 		}
 	}
-	std::sort(Days.begin(), Days.end());
-	const double Day = Series || Days.empty() ? 1.0 : Days[Days.size() / 2];
+	std::sort(Factors.begin(), Factors.end());
+	const double Day = Series || Factors.empty() ? 1.0 : Factors[Factors.size() / 2];
 	const double Draw = Series ? (0.9 + 1.15) / 2.0 : (0.82 + 1.25) / 2.0;
 	return static_cast<double>(T.Field) * D.Traffic.Scale * Day * Draw;
 }

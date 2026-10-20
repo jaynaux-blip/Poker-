@@ -2137,9 +2137,14 @@ void RiverLine::BankApp(double Now)
 
 // ------------------------------------------------------------------ sleep and time
 
+Rect RiverLine::SleepMenuRect()
+{
+	return {360.0f, RiverLine::Height - 38.0f - 228.0f, 380.0f, 220.0f};
+}
+
 void RiverLine::SleepMenu(double Now)
 {
-	const Rect R{360.0f, RiverLine::Height - 38.0f - 228.0f, 380.0f, 220.0f};
+	const Rect R = SleepMenuRect();
 	if (UI.Ptr.Released && !UI.Hover(R) && UI.Ptr.Y < RiverLine::Height - 38.0f)
 	{
 		SleepOpen = false;

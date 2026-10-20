@@ -1073,7 +1073,8 @@ void RrEditor(RrFrame& F, const std::vector<video::Candidate>& Open)
 	const bool Armed = !Strike.empty() && U.StrikeArmed == PickKey;
 	if (!Strike.empty() && Why.empty())
 	{
-		F.UI.Text(Armed ? std::string(rlsites_detail::SitesPublishArmed) : Strike, X + W, 764.0f, Ts(14.0f, 800, RrWarn, Align::Right, Baseline::Alphabetic, false, W));
+		// Under the button: above it the line sat on the thumbnail's frame (it ends at 764).
+		F.UI.Text(Armed ? std::string(rlsites_detail::SitesPublishArmed) : Strike, X + W, 856.0f, Ts(14.0f, 800, RrWarn, Align::Right, Baseline::Alphabetic, false, W));
 	}
 	const bool Pressed = RrButton(F, "rrpublish", Btn, Armed ? std::string("PUBLISH ANYWAY") : std::string("PUBLISH"), Why.empty());
 	if (Pressed && !Strike.empty() && !Armed)

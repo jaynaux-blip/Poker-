@@ -3744,12 +3744,13 @@ void RiverLine::NewsPage(double Now)
 	Y += 16.0f;
 	Section("SERIES CALENDAR", Rt.X + 26.0f, Y, pal::Accent);
 	Y += 16.0f;
-	// RiverLine's calendar as it always was; a rival's (update 2 §5.10) is its series running or still to come, soonest
-	// first, as many as the panel holds, the names fitted beside their dates.
+	// RiverLine's calendar as it always was; a rival's (update 2 §5.10) is its series running or starting within the year,
+	// soonest first, as many as the panel holds, the names fitted beside their dates. (Without the year it ran on into
+	// 2029, and the fitted names hid which year each was.)
 	std::vector<const net::SeriesInfo*> Calendar;
 	for (const net::SeriesInfo& Sr : Net.Series())
 	{
-		if (Site == net::SiteId::RiverLine || net::DayOf(World) <= Sr.LastDay)
+		if (Site == net::SiteId::RiverLine || (net::DayOf(World) <= Sr.LastDay && Sr.FirstDay <= net::DayOf(World) + 365))
 		{
 			Calendar.push_back(&Sr);
 		}

@@ -255,7 +255,9 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 		UI.Ptr.Active = false;
 	}
 	// The poker button's list of sites is up (over the screen's foot): what's under it takes no input there.
-	const bool UnderMenu = !Modal && rlsites_detail::SitesMenuOpen(this) && UI.Hover(rlsites_detail::SitesMenuRect(S));
+	// So is what's under the Sleep menu: a press on one of its buttons was also a press on the app's button beneath
+	// (a night's sleep gave notice to a sponsor in Mail).
+	const bool UnderMenu = !Modal && ((rlsites_detail::SitesMenuOpen(this) && UI.Hover(rlsites_detail::SitesMenuRect(S))) || (SleepOpen && UI.Hover(SleepMenuRect())));
 	if (UnderMenu)
 	{
 		UI.Ptr.Pressed = false;
@@ -1686,7 +1688,7 @@ void RiverLine::ResultsScreen(double Now)
 	{
 		UI.Text(Split, 60.0f, RlTop + 290.0f, Ts(17.0f, 700, Hex(0xf2a93b), Align::Left, Baseline::Alphabetic, false, 1060.0f));
 	}
-	UI.Text("Buy-in " + (R.BuyInCents ? Money(R.BuyInCents) : std::string("free")) + " \xC2\xB7 " + std::to_string(R.Hands) + " hands \xC2\xB7 biggest pot won " + ChipsText(static_cast<double>(R.BiggestPot)), 60.0f, RlTop + 292.0f + Shift, Ts(17.0f, 500, pal::Muted));
+	UI.Text("Buy-in " + (R.BuyInCents ? Money(R.BuyInCents) : std::string("free")) + " \xC2\xB7 " + std::to_string(R.Hands) + (R.Hands == 1 ? " hand" : " hands") + " \xC2\xB7 biggest pot won " + ChipsText(static_cast<double>(R.BiggestPot)), 60.0f, RlTop + 292.0f + Shift, Ts(17.0f, 500, pal::Muted));
 	// A rival's prize lands on its wallet, never the bank (update 2 §5.5): the balance shown is the one the result moved.
 	const net::SiteId PaidOn = rlsites_detail::SitesClient(*this, S);
 	const std::string BalNow = PaidOn == net::SiteId::RiverLine ? "Balance now " + Money(S.BankrollCents)
