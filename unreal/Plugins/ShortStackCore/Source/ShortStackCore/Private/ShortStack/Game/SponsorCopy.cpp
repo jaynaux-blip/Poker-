@@ -77,7 +77,7 @@ const Table& Bodies()
 		{"offer:sitwell:1",
 			"{Why} Long sessions are our whole business. Put Sitwell on your overlay, read for us once a stream, and the chair under you is on us. Terms below."},
 		{"offer:turnstone:0",
-			"{Why} Turnstone Poker is new in town, and we want our name on the chest of somebody people already watch. A monthly retainer, a bonus for every final "
+			"{Why} RunItTwice is new in town, and we want our name on the chest of somebody people already watch. A monthly retainer, a bonus for every final "
 			"table on the stage, and the big one covered with travel. One year. It's all below."},
 		{"offer:turnstone:1",
 			"{Why} We're building a team before we open the doors, and we'd like you on it. Our patch at every live event, appearances when we ask, and a retainer "
@@ -122,7 +122,7 @@ const Table& Bodies()
 			"the one we'll ask about."},
 		{"welcome:sitwell",
 			"Welcome. The chair ships today. Sit in it, stream in it, read for us once a stream. It's ours until the term ends clean, then it's yours."},
-		{"welcome:turnstone", "Welcome to Turnstone. Our patch at every live event, and the stage is where we want to see it. We'll be in touch about the Championship."},
+		{"welcome:turnstone", "Welcome to RunItTwice. Our patch at every live event, and the stage is where we want to see it. We'll be in touch about the Championship."},
 		{"welcome", "Welcome aboard. Everything we agreed is on the card below, and the first review is a month from today."},
 		// ---------------------------------------------------------------- reviews
 		{"review:paid", "Month {Period} is in the books, and you did everything we asked. {Amount} is in your account. Same again this month."},
@@ -195,7 +195,7 @@ const Table& Subjects()
 		{"offer:rangewise", "Teach on Rangewise?"},
 		{"offer:riverline", "An invitation to Team RiverLine."},
 		{"offer:sitwell", "The chair under you."},
-		{"offer:turnstone", "Turnstone Poker would like a word."},
+		{"offer:turnstone", "RunItTwice would like a word."},
 		{"heard:luckypenny", "Penny's Pick, in writing."},
 		{"heard:barber", "Fifth St. Barbers, in writing."},
 		{"heard:ironhouse", "IronHouse, in writing."},

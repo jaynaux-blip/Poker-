@@ -211,7 +211,7 @@ void Catalog()
 		const sponsor::Brand* B = sponsor::FindBrand(Id);
 		Expect(B && B->Legacy, "catalog: Kast's five ids are kept, and marked legacy");
 	}
-	Expect(sponsor::FindBrand("turnstone") && !sponsor::FindBrand("lantern") && !sponsor::FindBrand("lanternpoker"), "catalog: the site is Turnstone Poker, not Lantern");
+	Expect(sponsor::FindBrand("turnstone") && !sponsor::FindBrand("lantern") && !sponsor::FindBrand("lanternpoker"), "catalog: the site is RunItTwice, not Lantern");
 	Expect(sponsor::FindBrandByName("RiverLine") == sponsor::FindBrand("riverline") && sponsor::FindBrandByName("Team RiverLine") == sponsor::FindBrand("riverline"),
 		"catalog: the world's 'RiverLine' and 'Team RiverLine' are the site's deal");
 	// Kast's view: the five, in their old order, with their old names and rates (the world's streamers draw from these).
@@ -442,14 +442,14 @@ void Offers()
 	sponsor::HeardOffer(Local.L.Sponsors, Local.L, Penny, 26.0 * Day);
 	sponsor::HeardOffer(Local.L.Sponsors, Local.L, Penny, 26.0 * Day + 5.0);
 	Expect(Local.Letters(sponsor::LetterHeard) == 1 && Local.L.Inbox.back().From == "Lucky Penny #212", "offers: heard in person, it's put in writing once");
-	// Turnstone needs venues that aren't playable yet: it never looks on its own.
+	// RunItTwice needs venues that aren't playable yet: it never looks on its own.
 	World Star;
 	Star.P = Streamer(30000, 700.0);
 	Star.P.Partner = true;
 	Star.Step(20.0 * Day, 50.0 * Day);
 	Expect(std::none_of(Star.L.Sponsors.Contracts.begin(), Star.L.Sponsors.Contracts.end(), [](const sponsor::Contract& C) { return C.Brand == "turnstone"; }) &&
 			   std::any_of(Star.L.Sponsors.Contracts.begin(), Star.L.Sponsors.Contracts.end(), [](const sponsor::Contract& C) { return C.Brand == "riverline"; }),
-		"offers: the site at tier 4 offers, Turnstone doesn't (P2)");
+		"offers: the site at tier 4 offers, RunItTwice doesn't (P2)");
 }
 
 // ------------------------------------------------------------------ 4. exclusivity, the overlay, the patch spots

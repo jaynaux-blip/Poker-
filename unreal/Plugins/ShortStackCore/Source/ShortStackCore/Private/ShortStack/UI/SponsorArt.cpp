@@ -199,17 +199,17 @@ void Chair(Canvas& C, const Box& B, const Color& Orange, const Color& Ink)
 	C.FillRoundRect({B.Cx - B.L(0.14f), B.Cy + B.L(0.24f), B.L(0.34f), B.L(0.05f)}, B.L(0.025f), Ink);
 }
 
-void Turnstile(Canvas& C, const Box& B, const Color& Slate, const Color& Gold)
+void TwiceCards(Canvas& C, const Box& B, const Color& Slate, const Color& Gold)
 {
-	// A turnstile's three arms seen end on: Turnstone.
+	// Two river cards, the second run dealt over the first: RunItTwice.
 	C.FillCircle(B.Cx, B.Cy, B.L(0.48f), Slate);
 	C.StrokeEllipse(B.Cx, B.Cy, B.L(0.42f), B.L(0.42f), Gold, B.L(0.03f));
-	for (int K = 0; K < 3; ++K)
-	{
-		const float A = -Pi * 0.5f + static_cast<float>(K) * Pi * 2.0f / 3.0f;
-		C.StrokePolyline({{B.Cx, B.Cy}, {B.Cx + std::cos(A) * B.L(0.3f), B.Cy + std::sin(A) * B.L(0.3f)}}, false, Gold, B.L(0.08f), true);
-	}
-	C.FillCircle(B.Cx, B.Cy, B.L(0.09f), Gold);
+	const float W = B.L(0.24f);
+	const float H = B.L(0.34f);
+	C.FillRoundRect({B.Cx - B.L(0.22f), B.Cy - B.L(0.24f), W, H}, B.L(0.04f), Gold);
+	C.FillRoundRect({B.Cx - B.L(0.22f) + B.L(0.03f), B.Cy - B.L(0.24f) + B.L(0.03f), W - B.L(0.06f), H - B.L(0.06f)}, B.L(0.025f), Slate);
+	C.FillRoundRect({B.Cx - B.L(0.03f), B.Cy - B.L(0.1f), W, H}, B.L(0.04f), Gold);
+	C.FillCircle(B.Cx - B.L(0.03f) + W * 0.5f, B.Cy - B.L(0.1f) + H * 0.5f, B.L(0.05f), Slate);
 }
 
 /** WCAG contrast between two 0xRRGGBB colours (1: the same, 21: black on white). */
@@ -274,7 +274,7 @@ void Mark(Canvas& C, const std::string& BrandId, const Rect& R)
 	case 9: Range(C, B, Main, Ink); break;
 	case 10: Waves(C, B, Main, Ink); break;
 	case 11: Chair(C, B, Main, Ink); break;
-	default: Turnstile(C, B, Main, Ink); break;
+	default: TwiceCards(C, B, Main, Ink); break;
 	}
 }
 
@@ -287,7 +287,7 @@ bool PatchColors(const std::string& BrandId, uint32_t& Ground, uint32_t& Thread)
 		return false;
 	}
 	// Six brands' patches are twill in a colour of their own (the Lucky Penny's green, the barber's cream, Team
-	// Embercrest's, Stacked's, Team RiverLine's and Turnstone's brand colour); the rest sit on near-black twill.
+	// Embercrest's, Stacked's, Team RiverLine's and RunItTwice's brand colour); the rest sit on near-black twill.
 	const bool Dark = Br->Mark == 0 || Br->Mark == 1 || Br->Mark == 5 || Br->Mark == 8 || Br->Mark == 10 || Br->Mark == 12;
 	Ground = Br->Mark == 0 ? 0x1f5c3au : Br->Mark == 1 ? 0xf4f1eau : Dark ? Br->Color : 0x16181du;
 	Thread = Br->Mark == 1 ? Br->Color : Br->Mark == 0 ? Br->Ink : Dark ? Br->Ink : Br->Color;

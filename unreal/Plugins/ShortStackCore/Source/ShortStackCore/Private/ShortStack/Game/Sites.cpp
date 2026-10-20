@@ -6,7 +6,7 @@
 // The poker sites' data (update 2 §5.3) and the money rules' entry points (§5.5-§5.7). Phase A, day 1 (the lead): the
 // registry holds RiverLine alone, as it is today (its rake and traffic are today's numbers), and the money rules are stubs
 // that move nothing and write no line, so every save writes back as it was read. The routing (Site, SiteOf, ForEvent,
-// AttachAll, SetHeroAll) lives in Network.cpp. core-sites owns this file from here (Flopjoy's and Turnstone's SiteDefs,
+// AttachAll, SetHeroAll) lives in Network.cpp. core-sites owns this file from here (Ignite's and RunItTwice's SiteDefs,
 // and SiteMoney.cpp beside it); dormant until G3.
 
 namespace ss

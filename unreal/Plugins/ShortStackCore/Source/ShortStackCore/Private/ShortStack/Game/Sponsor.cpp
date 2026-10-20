@@ -643,9 +643,10 @@ std::vector<Brand> Build()
 		V.push_back(B);
 	}
 	{
-		// The poker site that isn't RiverLine (§1.9 #15): named for the street before the river. Tier 5 needs venues that
-		// aren't playable yet, so it never looks on its own (P2); ss.Sponsor.Offer turnstone brings it.
-		Brand B = Make("turnstone", "Turnstone Poker", "Turnstone", Category::Site, 5, 0x334155, 0xd4a843, 12);
+		// The poker site that isn't RiverLine (§1.9 #15): RunItTwice, the name the user gave it in update 2 (it was Turnstone
+		// Poker; the brand id stays "turnstone" so saves keep their books). Tier 5 needs venues that aren't playable yet, so
+		// it never looks on its own (P2); ss.Sponsor.Offer turnstone brings it.
+		Brand B = Make("turnstone", "RunItTwice", "RunItTwice", Category::Site, 5, 0x334155, 0xd4a843, 12);
 		B.Rep = "Ingrid Vale";
 		B.RepTitle = "Head of sponsored pros";
 		B.Needs.Open = false;

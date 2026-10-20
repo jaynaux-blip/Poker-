@@ -67,7 +67,7 @@ BRANDS = [
     Brand(9, 'rangewise', 'Rangewise', 'TRAINING', 0x6366f1, 0xeef2ff, 0x16181d, 0x6366f1),
     Brand(10, 'riverline', 'Team RiverLine', 'POKER SITE', 0x27d3c3, 0x04201d, 0x27d3c3, 0x04201d),
     Brand(11, 'sitwell', 'Sitwell', 'GEAR', 0xfb923c, 0x1f0d02, 0x16181d, 0xfb923c),
-    Brand(12, 'turnstone', 'Turnstone', 'POKER SITE', 0x334155, 0xd4a843, 0x334155, 0xd4a843),
+    Brand(12, 'turnstone', 'RunItTwice', 'POKER SITE', 0x334155, 0xd4a843, 0x334155, 0xd4a843),
 ]
 BY_ID = {b.id: b for b in BRANDS}
 # The P0 brands (spec 3.11): the ones the closet sews first.
@@ -426,14 +426,16 @@ def chair(p, B, orange, ink):
     p.rrect(B.cx - B.L(0.14), B.cy + B.L(0.24), B.L(0.34), B.L(0.05), B.L(0.025), ink)
 
 
-def turnstile(p, B, slate, gold):
-    # A turnstile's three arms seen end on: Turnstone.
+def twice_cards(p, B, slate, gold):
+    # Two river cards, the second run dealt over the first: RunItTwice (the user's name for the site, update 2; it was
+    # Turnstone Poker, and its brand id stays 'turnstone' so saves keep their books).
     p.circle(B.cx, B.cy, B.L(0.48), slate)
     p.ring(B.cx, B.cy, B.L(0.42), B.L(0.03), gold)
-    for k in range(3):
-        a = -math.pi * 0.5 + k * math.pi * 2.0 / 3.0
-        p.stroke([(B.cx, B.cy), (B.cx + math.cos(a) * B.L(0.3), B.cy + math.sin(a) * B.L(0.3))], B.L(0.08), gold)
-    p.circle(B.cx, B.cy, B.L(0.09), gold)
+    w, h = B.L(0.24), B.L(0.34)
+    p.rrect(B.cx - B.L(0.22), B.cy - B.L(0.24), w, h, B.L(0.04), gold)
+    p.rrect(B.cx - B.L(0.22) + B.L(0.03), B.cy - B.L(0.24) + B.L(0.03), w - B.L(0.06), h - B.L(0.06), B.L(0.025), slate)
+    p.rrect(B.cx - B.L(0.03), B.cy - B.L(0.1), w, h, B.L(0.04), gold)
+    p.circle(B.cx - B.L(0.03) + w * 0.5, B.cy - B.L(0.1) + h * 0.5, B.L(0.05), slate)
 
 
 def mark(p, b, cx, cy, S):
@@ -442,7 +444,7 @@ def mark(p, b, cx, cy, S):
     if b.index == 5:
         crest(p, B, b.color)
         return
-    draw = [penny, barber_pole, dumbbell, bolt, gauge, None, halo_ring, shield, stack, range_chart, waves, chair, turnstile][b.index]
+    draw = [penny, barber_pole, dumbbell, bolt, gauge, None, halo_ring, shield, stack, range_chart, waves, chair, twice_cards][b.index]
     draw(p, B, b.color, b.ink)
 
 

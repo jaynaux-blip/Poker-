@@ -502,7 +502,7 @@ const Table& Lines()
 		{"*|look:patch:stacked", {"Stacked? Those hoodies cost more than my rent."}},
 		{"*|look:patch:rangewise", {"Rangewise patch. So you're a teacher now."}},
 		{"*|look:patch:riverline", {"Team RiverLine on your chest. Look at you."}},
-		{"*|look:patch:turnstone", {"Turnstone Poker. Never heard of them. They pay?"}},
+		{"*|look:patch:turnstone", {"RunItTwice. Never heard of them. They pay?"}},
 		{"*|rumour:sponsor-you", {"Heard {brand} is sponsoring you now. Look at you.", "Word is {brand} signed you. Don't forget the little people."}},
 		{"big-lou|rumour:sponsor-you", {"{brand} sponsors you? Huh. Respect."}},
 		{"sal|rumour:sponsor-you", {"{brand}, huh. Back in my day you paid for your own hat."}},

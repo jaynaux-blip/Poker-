@@ -41,7 +41,7 @@ struct Public;
 
 /**
  * Sponsors (next_segment_spec §3): thirteen fictional brands in five tiers, from a Polaroid on the Lucky Penny's
- * corkboard to Turnstone Poker's chest patch, and the contract book. Asks are counted from things the player already
+ * corkboard to RunItTwice's chest patch, and the contract book. Asks are counted from things the player already
  * does; 30-day reviews pay stipends in arrears; strikes have a cure; categories are exclusive; a morals clause; counters
  * and renewals. Patches go on in the closet. Offers and letters go to life::State::Inbox (Thread = the contract id,
  * Source "sponsor"), which the Mail app reads. Kast's legacy deals become contracts (§3.8) and Kast works on a view
@@ -136,7 +136,7 @@ struct Terms
 	int CureDays = 14;
 	// Update 2 (§5.7; core-deals). Written as key=value only when set (never a new Ask: ask= is positional).
 	std::string Only;       // only=<site>: plays, streams and posts only on that site
-	std::string OnlyStream; // onlystream=<site>: streams only on that site (P1, Flopjoy Squad)
+	std::string OnlyStream; // onlystream=<site>: streams only on that site (P1, Ignite Squad)
 	std::string OnSite;     // onsite=<site>: live hours count only with that site's table in front (P1)
 	Chips VideoIntCents = 0; // vi=: a video integration's fee (P1)
 	int VideoInts = 0;       // via=: integrations a period (P1)
@@ -149,7 +149,7 @@ struct Gate
 	int Tier = 0;
 	std::string BlockVenue;
 	int BlockVisits = 0;
-	/** Offers come at all (Turnstone's tier needs venues that aren't playable yet: only ss.Sponsor.Offer brings it). */
+	/** Offers come at all (RunItTwice's tier needs venues that aren't playable yet: only ss.Sponsor.Offer brings it). */
 	bool Open = true;
 };
 struct Brand
@@ -173,9 +173,9 @@ struct Brand
 	Terms Offer;
 	std::vector<std::string> Pitch; // the offer letter's wordings (one is picked by the seed)
 	bool Legacy = false;            // one of Kast's five (its id is in old saves)
-	int Site = -1;                  // update 2: a Site-category brand's net::SiteId ("riverline", "turnstone", "flopjoy"); -1 for the rest
+	int Site = -1;                  // update 2: a Site-category brand's net::SiteId ("riverline", "runittwice", "ignite"); -1 for the rest
 };
-/** The catalog: 13 brands (§3.4; the site is turnstone, not lantern). */
+/** The catalog: 13 brands (§3.4; the site is RunItTwice, brand id "turnstone" from before the user renamed it in update 2: saves keep the id; not lantern). */
 SHORTSTACKCORE_API const std::vector<Brand>& Brands();
 SHORTSTACKCORE_API const Brand* FindBrand(const std::string& Id);
 /** Npc::Sponsor holds display names: the brand's Name, its Short or its Kast name ("RiverLine" and "Team RiverLine"). */

@@ -56,7 +56,7 @@ double DayFactor(int Day)
  * The site keys (update 2 §5.3, §5.8): a rival's template, series, event and ticket ids start "<key>.", so SiteOf reads the
  * site off any id. Fixed with net::SiteId and saved inside ids, so append-only; a registered SiteDef's Key is the same.
  */
-const char* const NetSiteKeys[] = {"riverline", "flopjoy", "turnstone", "halcyon"};
+const char* const NetSiteKeys[] = {"riverline", "ignite", "runittwice", "halcyon"};
 static_assert(sizeof(NetSiteKeys) / sizeof(NetSiteKeys[0]) == static_cast<size_t>(SiteId::Count), "a key for every SiteId");
 
 /**

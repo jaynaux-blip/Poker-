@@ -10,7 +10,7 @@ namespace ui
 /**
  * The poker sites' marks (update 2 §1.8, §5.3): siteart::Logo is the one source of a site's logo (the poker button, the
  * lobby, the Cashier, Mail, a video's thumbnail), Strip the narrow band a table tile carries. RiverLine's is today's;
- * Turnstone's is its patch's (art/blender/sponsors.py). Fictional sites only.
+ * RunItTwice's is its patch's (art/blender/sponsors.py). Fictional sites only.
  *
  * Bodies: ui-laptop (SiteArt.cpp). Phase A, day 1: stubs that compile and draw nothing.
  */

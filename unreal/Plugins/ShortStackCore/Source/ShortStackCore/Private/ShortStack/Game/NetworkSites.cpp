@@ -1,12 +1,12 @@
 // The rival sites' schedules (update 2 §5.3, §5.8): Network::BuildSite, the rival side of Network(const SiteDef&). Every
-// template and series id starts with the site's key ("turnstone.sunday-grind", "turnstone.open26-12"), so Make() derives
+// template and series id starts with the site's key ("runittwice.sunday-grind", "runittwice.open26-12"), so Make() derives
 // ids and seeds that never meet RiverLine's, and net::SiteOf reads the site off any of them. Rivals have no regulars and
 // no past: their people and results come from the living world.
 //
-// A3's placeholder (the lead): schedules of the planned sizes and shapes, for spike S-6 and the id rules' tests. Flopjoy:
-// 18 dailies from $1.10 to $22 (the hourly Flip & Go hypers, the $5.50 Joy Jackpot), the Sunday Splash, and Splashfest in
-// February and August (24 events each), about 690 templates through 2040. Turnstone: 22 dailies from $3.30 to $215, the
-// Sunday Grind, the Sunday 100K and the High Bridge, the Turnstone Open in April and November (40 events; Nov 13-29 in
+// A3's placeholder (the lead): schedules of the planned sizes and shapes, for spike S-6 and the id rules' tests. Ignite:
+// 18 dailies from $1.10 to $22 (the hourly Flip & Go hypers, the $5.50 Spark Jackpot), the Sunday Blaze, and Wildfire in
+// February and August (24 events each), about 690 templates through 2040. RunItTwice: 22 dailies from $3.30 to $215, the
+// Sunday Grind, the Sunday 100K and the High Bridge, the RunItTwice Open in April and November (40 events; Nov 13-29 in
 // 2026) and the Ironworks PKO series in July (24), about 1,520. The names, buy-ins, times, fields and guarantees are
 // stand-ins: core-sites owns this file from B3 and replaces these tables with the real schedules (§5.3's guarantees at 0.9
 // of the expected pool, the launch week's × 1.5). Nothing a player can reach uses them until core-sites registers the
@@ -47,7 +47,7 @@ struct NetSitesDaily
 /** A series on a rival's calendar: where it falls in the year, how many events, its buy-ins and its main event. */
 struct NetSitesSeries
 {
-	const char* Key;   // the series id's stem, before the year ("open", "splashfeb")
+	const char* Key;   // the series id's stem, before the year ("open", "wildfeb")
 	const char* Name;  // with the year after it
 	const char* Short;
 	int Month;
@@ -91,14 +91,14 @@ void NetSitesShape(EventTemplate& T, const char* Speed)
 	T.LateRegMinutes = S == "Hyper" ? 15 : S == "Turbo" ? 60 : S == "Deep" ? 180 : 120;
 }
 
-// Flopjoy: bright, soft, loud. Hypers around the clock, a jackpot at night, a splash on Sundays.
-const NetSitesDaily FlopjoyDailies[] = {
+// Ignite: bright, soft, loud. Hypers around the clock, a jackpot at night, a blaze on Sundays.
+const NetSitesDaily IgniteDailies[] = {
 	{"flip-go-110", "Flip & Go Bounty", 1.10, Format::Flip, "Hyper", 90, 0, 60, NetSitesAt(23, 0), 0x7f, false, false},
 	{"flip-go-330", "Flip & Go Bounty Plus", 3.30, Format::Flip, "Hyper", 60, NetSitesAt(0, 30), 120, NetSitesAt(22, 30), 0x7f, false, false},
-	{"joy-jackpot", "Joy Jackpot", 5.50, Format::Freezeout, "Regular", 410, NetSitesAt(20, 0), 0, 1439, 0x7f, true, true},
+	{"spark-jackpot", "Spark Jackpot", 5.50, Format::Freezeout, "Regular", 410, NetSitesAt(20, 0), 0, 1439, 0x7f, true, true},
 	{"sunrise-spin", "Sunrise Spin", 1.10, Format::Freezeout, "Turbo", 120, NetSitesAt(7, 0), 0, 1439, 0x7f, false, false},
 	{"coffee-crash", "Coffee Crash", 2.20, Format::ReEntry, "Turbo", 140, NetSitesAt(9, 0), 0, 1439, 0x7f, true, false},
-	{"lunch-splash", "Lunch Splash", 3.30, Format::Bounty, "Turbo", 160, NetSitesAt(12, 0), 0, 1439, 0x7f, true, false},
+	{"lunch-blaze", "Lunch Blaze", 3.30, Format::Bounty, "Turbo", 160, NetSitesAt(12, 0), 0, 1439, 0x7f, true, false},
 	{"afternoon-fizz", "Afternoon Fizz", 1.65, Format::Freezeout, "Regular", 130, NetSitesAt(14, 0), 0, 1439, 0x7f, false, false},
 	{"coral-classic", "Coral Classic", 11.0, Format::ReEntry, "Regular", 220, NetSitesAt(16, 0), 0, 1439, 0x7f, true, false},
 	{"plum-turbo", "Plum Turbo", 3.30, Format::Freezeout, "Turbo", 180, NetSitesAt(17, 30), 0, 1439, 0x7f, true, false},
@@ -111,19 +111,19 @@ const NetSitesDaily FlopjoyDailies[] = {
 	{"two-am-twister", "2 AM Twister", 1.10, Format::Freezeout, "Hyper", 110, NetSitesAt(2, 0), 0, 1439, 0x7f, false, false},
 	{"deep-end", "The Deep End", 5.50, Format::ReEntry, "Deep", 150, NetSitesAt(15, 0), 0, 1439, 0x7f, true, false},
 	{"confetti-cannon", "Confetti Cannon", 16.5, Format::Bounty, "Turbo", 120, NetSitesAt(20, 30), 0, 1439, 0x7f, true, false},
-	{"sunday-splash", "Sunday Splash", 11.0, Format::ReEntry, "Regular", 1200, NetSitesAt(19, 0), 0, 1439, 1 << 6, true, true},
+	{"sunday-blaze", "Sunday Blaze", 11.0, Format::ReEntry, "Regular", 1200, NetSitesAt(19, 0), 0, 1439, 1 << 6, true, true},
 };
-const NetSitesSeries FlopjoySeries[] = {
-	{"splashfeb", "Splashfest Winter", "SPLASH", 2, 6, 12, 24, 1.10, 22.0, 33.0, 300, false, 2027},
-	{"splashaug", "Splashfest Summer", "SPLASH", 8, 8, 12, 24, 1.10, 22.0, 33.0, 300, false, 2027},
+const NetSitesSeries IgniteSeries[] = {
+	{"wildfeb", "Wildfire Winter", "WILDFIRE", 2, 6, 12, 24, 1.10, 22.0, 33.0, 300, false, 2027},
+	{"wildaug", "Wildfire Summer", "WILDFIRE", 8, 8, 12, 24, 1.10, 22.0, 33.0, 300, false, 2027},
 };
 
-// Turnstone: tournaments for grown-ups. A grind all day, three Sunday majors, the Open twice a year and a PKO summer.
-const NetSitesDaily TurnstoneDailies[] = {
+// RunItTwice: tournaments for grown-ups. A grind all day, three Sunday majors, the Open twice a year and a PKO summer.
+const NetSitesDaily RunItTwiceDailies[] = {
 	{"iron-hour", "Iron Hour", 3.30, Format::Freezeout, "Turbo", 70, NetSitesAt(0, 15), 60, NetSitesAt(23, 15), 0x7f, false, false},
 	{"slate-turbo", "Slate Turbo", 5.50, Format::ReEntry, "Turbo", 90, NetSitesAt(1, 0), 120, NetSitesAt(23, 0), 0x7f, true, false},
 	{"daily-grind", "The Daily Grind", 11.0, Format::ReEntry, "Regular", 260, NetSitesAt(19, 0), 0, 1439, 0x7f, true, true},
-	{"keystone", "Keystone", 33.0, Format::ReEntry, "Regular", 180, NetSitesAt(20, 0), 0, 1439, 0x7f, true, false},
+	{"run-it-back", "Run It Back", 33.0, Format::ReEntry, "Regular", 180, NetSitesAt(20, 0), 0, 1439, 0x7f, true, false},
 	{"foundry-pko", "Foundry PKO", 22.0, Format::Bounty, "Regular", 200, NetSitesAt(20, 30), 0, 1439, 0x7f, true, false},
 	{"bridge-55", "The Bridge", 55.0, Format::ReEntry, "Regular", 140, NetSitesAt(21, 0), 0, 1439, 0x7f, true, true},
 	{"mortar", "Mortar", 5.50, Format::Freezeout, "Regular", 210, NetSitesAt(18, 0), 0, 1439, 0x7f, true, false},
@@ -143,12 +143,12 @@ const NetSitesDaily TurnstoneDailies[] = {
 	{"tower-pko", "Tower PKO", 82.5, Format::Bounty, "Regular", 80, NetSitesAt(21, 15), 0, 1439, 0x7f, true, false},
 	{"last-brick", "The Last Brick", 16.5, Format::Freezeout, "Turbo", 130, NetSitesAt(1, 30), 0, 1439, 0x7f, true, false},
 	{"sunday-grind", "Sunday Grind", 22.0, Format::ReEntry, "Regular", 900, NetSitesAt(17, 0), 0, 1439, 1 << 6, true, true},
-	{"sunday-100k", "Turnstone Sunday 100K", 109.0, Format::ReEntry, "Regular", 950, NetSitesAt(19, 0), 0, 1439, 1 << 6, true, true},
+	{"sunday-100k", "RunItTwice Sunday 100K", 109.0, Format::ReEntry, "Regular", 950, NetSitesAt(19, 0), 0, 1439, 1 << 6, true, true},
 	{"high-bridge", "High Bridge", 530.0, Format::ReEntry, "Regular", 180, NetSitesAt(20, 0), 0, 1439, 1 << 6, true, true},
 };
-const NetSitesSeries TurnstoneSeries[] = {
-	{"openspring", "Turnstone Open Spring", "OPEN", 4, 12, 17, 40, 3.30, 215.0, 530.0, 380, false, 2027},
-	{"open", "Turnstone Open", "OPEN", 11, 13, 17, 40, 3.30, 215.0, 530.0, 380, false, 2026},
+const NetSitesSeries RunItTwiceSeries[] = {
+	{"openspring", "RunItTwice Open Spring", "OPEN", 4, 12, 17, 40, 3.30, 215.0, 530.0, 380, false, 2027},
+	{"open", "RunItTwice Open", "OPEN", 11, 13, 17, 40, 3.30, 215.0, 530.0, 380, false, 2026},
 	{"ironworks", "Ironworks", "IRON", 7, 10, 12, 24, 5.50, 109.0, 215.0, 300, true, 2027},
 };
 
@@ -175,19 +175,19 @@ void Network::BuildSite()
 	uint32_t Color2 = 0x3b82f6;
 	switch (NetSite)
 	{
-	case SiteId::Flopjoy:
-		Dailies = netsites_detail::FlopjoyDailies;
-		DailyCount = sizeof(netsites_detail::FlopjoyDailies) / sizeof(netsites_detail::FlopjoyDailies[0]);
-		Plans = netsites_detail::FlopjoySeries;
-		PlanCount = sizeof(netsites_detail::FlopjoySeries) / sizeof(netsites_detail::FlopjoySeries[0]);
+	case SiteId::Ignite:
+		Dailies = netsites_detail::IgniteDailies;
+		DailyCount = sizeof(netsites_detail::IgniteDailies) / sizeof(netsites_detail::IgniteDailies[0]);
+		Plans = netsites_detail::IgniteSeries;
+		PlanCount = sizeof(netsites_detail::IgniteSeries) / sizeof(netsites_detail::IgniteSeries[0]);
 		Color = 0xff6b57;
 		Color2 = 0x4fc3f7;
 		break;
-	case SiteId::Turnstone:
-		Dailies = netsites_detail::TurnstoneDailies;
-		DailyCount = sizeof(netsites_detail::TurnstoneDailies) / sizeof(netsites_detail::TurnstoneDailies[0]);
-		Plans = netsites_detail::TurnstoneSeries;
-		PlanCount = sizeof(netsites_detail::TurnstoneSeries) / sizeof(netsites_detail::TurnstoneSeries[0]);
+	case SiteId::RunItTwice:
+		Dailies = netsites_detail::RunItTwiceDailies;
+		DailyCount = sizeof(netsites_detail::RunItTwiceDailies) / sizeof(netsites_detail::RunItTwiceDailies[0]);
+		Plans = netsites_detail::RunItTwiceSeries;
+		PlanCount = sizeof(netsites_detail::RunItTwiceSeries) / sizeof(netsites_detail::RunItTwiceSeries[0]);
 		Color = 0xd4a843;
 		Color2 = 0x334155;
 		break;

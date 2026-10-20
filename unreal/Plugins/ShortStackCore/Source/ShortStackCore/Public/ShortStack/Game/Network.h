@@ -236,9 +236,9 @@ enum class Board : int
 	Live,        // live Player of the Year points (a living world only)
 	// Update 2 §5.3, §5.8 (A3), appended: the rival sites' own boards. Their values and yesterday's ranks live in the
 	// world's sparse site maps (World::BoardValue and RankBefore by site), never in RanksYesterday, which ends at Live.
-	Today,       // a day's points race (Flopjoy's, P1)
-	Month,       // this month's points (Flopjoy)
-	Ladder,      // the monthly ladder (Turnstone's, P1)
+	Today,       // a day's points race (Ignite's, P1)
+	Month,       // this month's points (Ignite)
+	Ladder,      // the monthly ladder (RunItTwice's, P1)
 	HighRollers, // the high rollers' season (Halcyon's, P1)
 };
 
@@ -299,7 +299,7 @@ public:
 	 * A site's network from its definition (update 2 §5.8). RiverLine's builds the default network, byte for byte. A rival's
 	 * has no regulars and no past of its own (its people and results come from the living world it's attached to), and
 	 * its schedule comes from BuildSite (NetworkSites.cpp, core-sites), every template and series id prefixed with the
-	 * site's key ("turnstone.sunday-100k"), so its event ids and seeds never meet RiverLine's.
+	 * site's key ("runittwice.sunday-100k"), so its event ids and seeds never meet RiverLine's.
 	 */
 	SHORTSTACKCORE_API explicit Network(const SiteDef& Def);
 	/** The site this network is (RiverLine for the default one). */

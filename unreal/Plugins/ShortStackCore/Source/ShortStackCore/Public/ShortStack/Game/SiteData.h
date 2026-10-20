@@ -19,8 +19,8 @@ namespace net
 enum class SiteId : int
 {
 	RiverLine,
-	Flopjoy,
-	Turnstone,
+	Ignite,
+	RunItTwice,
 	Halcyon,
 	Count,
 };

@@ -71,9 +71,9 @@ net::SiteDef SitesStub(net::SiteId S)
 	D.Key = net::KeyOf(S);
 	D.FieldFloor = false;
 	D.Rake.Kind = 1;
-	if (S == net::SiteId::Flopjoy)
+	if (S == net::SiteId::Ignite)
 	{
-		D.Name = "Flopjoy";
+		D.Name = "Ignite";
 		D.Rake.Flat = 0.11;
 		D.SecondsPerHand[0] = 30;
 		D.SecondsPerHand[1] = 38;
@@ -83,7 +83,7 @@ net::SiteDef SitesStub(net::SiteId S)
 	}
 	else
 	{
-		D.Name = "Turnstone Poker";
+		D.Name = "RunItTwice";
 		D.Rake.Flat = 0.08;
 		D.Population = {"freeroll", "low", "high", "high", "high"};
 		D.Palette = {0x141a24, 0x18202c, 0x1c2433, 0x232c3d, 0x334155, 0xe8ecf2, 0x8a96a8, 0x566174, 0xd4a843, 0x6b7f99, 0xd4a843, 0xef4d5a, 0xf28a3a, 0x3ecf6e, 0x1f4a3c,
@@ -174,17 +174,17 @@ void RiverLineUnchanged()
 	const double DumpSeconds = SitesSeconds(T0);
 	// The registry and two rivals built beside it, every network attached and detached: RiverLine's own state is untouched.
 	const auto T1 = std::chrono::steady_clock::now();
-	net::Network& Unregistered = net::Site(net::SiteId::Flopjoy);
+	net::Network& Unregistered = net::Site(net::SiteId::Ignite);
 	const double RegistrySeconds = SitesSeconds(T1);
 	const auto T2 = std::chrono::steady_clock::now();
 	const net::Network Fresh;
 	const double RiverLineSeconds = SitesSeconds(T2);
 	const auto T3 = std::chrono::steady_clock::now();
-	const net::Network Flopjoy(SitesStub(net::SiteId::Flopjoy));
-	const double FlopjoySeconds = SitesSeconds(T3);
+	const net::Network Ignite(SitesStub(net::SiteId::Ignite));
+	const double IgniteSeconds = SitesSeconds(T3);
 	const auto T4 = std::chrono::steady_clock::now();
-	const net::Network Turnstone(SitesStub(net::SiteId::Turnstone));
-	const double TurnstoneSeconds = SitesSeconds(T4);
+	const net::Network RunItTwice(SitesStub(net::SiteId::RunItTwice));
+	const double RunItTwiceSeconds = SitesSeconds(T4);
 	net::AttachAll(nullptr);
 	(void)Unregistered;
 	const std::string After = SitesDump(net::Shared(), 30);
@@ -194,10 +194,10 @@ void RiverLineUnchanged()
 	Expect(SitesDump(ByDef, 30) == Before, "Network(RiverLine's SiteDef) builds RiverLine's network, byte for byte");
 	Expect(Fresh.Site() == net::SiteId::RiverLine && net::Shared().Site() == net::SiteId::RiverLine && ByDef.Site() == net::SiteId::RiverLine, "RiverLine's networks say so");
 	Expect(Fresh.Templates().size() == net::Shared().Templates().size() && !Fresh.Founding().empty(), "RiverLine keeps its regulars and its templates");
-	std::printf("riverline: %zu templates, %zu series, %zu regulars; dump %zu bytes in %.2fs; built in %.3fs (rivals: Flopjoy %zu templates in %.3fs, Turnstone %zu in %.3fs, "
+	std::printf("riverline: %zu templates, %zu series, %zu regulars; dump %zu bytes in %.2fs; built in %.3fs (rivals: Ignite %zu templates in %.3fs, RunItTwice %zu in %.3fs, "
 				"together %.0f%% of RiverLine's; registry %.4fs)\n",
-		Fresh.Templates().size(), Fresh.Series().size(), Fresh.Founding().size(), Before.size(), DumpSeconds, RiverLineSeconds, Flopjoy.Templates().size(), FlopjoySeconds,
-		Turnstone.Templates().size(), TurnstoneSeconds, 100.0 * (FlopjoySeconds + TurnstoneSeconds) / std::max(1e-9, RiverLineSeconds), RegistrySeconds);
+		Fresh.Templates().size(), Fresh.Series().size(), Fresh.Founding().size(), Before.size(), DumpSeconds, RiverLineSeconds, Ignite.Templates().size(), IgniteSeconds,
+		RunItTwice.Templates().size(), RunItTwiceSeconds, 100.0 * (IgniteSeconds + RunItTwiceSeconds) / std::max(1e-9, RiverLineSeconds), RegistrySeconds);
 }
 
 uint64_t SitesFnv(uint64_t H, const std::string& S)
@@ -308,18 +308,18 @@ void RakeHook()
 void Routing()
 {
 	using net::SiteId;
-	Expect(std::string(net::KeyOf(SiteId::RiverLine)) == "riverline" && std::string(net::KeyOf(SiteId::Flopjoy)) == "flopjoy" &&
-			std::string(net::KeyOf(SiteId::Turnstone)) == "turnstone" && std::string(net::KeyOf(SiteId::Halcyon)) == "halcyon" && std::string(net::KeyOf(SiteId::Count)).empty(),
+	Expect(std::string(net::KeyOf(SiteId::RiverLine)) == "riverline" && std::string(net::KeyOf(SiteId::Ignite)) == "ignite" &&
+			std::string(net::KeyOf(SiteId::RunItTwice)) == "runittwice" && std::string(net::KeyOf(SiteId::Halcyon)) == "halcyon" && std::string(net::KeyOf(SiteId::Count)).empty(),
 		"the site keys are fixed with SiteId");
 	for (const net::SiteDef& D : net::Sites())
 	{
 		Expect(D.Key == net::KeyOf(D.Id), "a registered site's Key is its id prefix: " + D.Key);
 	}
-	const std::pair<const char*, SiteId> Ids[] = {{"", SiteId::RiverLine}, {".", SiteId::RiverLine}, {".flopjoy", SiteId::RiverLine}, {"flopjoy", SiteId::RiverLine},
-		{"flopjoy.joy-jackpot", SiteId::Flopjoy}, {"flopjoy.joy-jackpot@40320", SiteId::Flopjoy}, {"turnstone.open26-12", SiteId::Turnstone}, {"turnstone.sunday-grind", SiteId::Turnstone},
-		{"halcyon.high-roller@3", SiteId::Halcyon}, {"riverline.hh-110", SiteId::RiverLine}, {"flopjoyx.y", SiteId::RiverLine}, {"Flopjoy.x", SiteId::RiverLine},
+	const std::pair<const char*, SiteId> Ids[] = {{"", SiteId::RiverLine}, {".", SiteId::RiverLine}, {".ignite", SiteId::RiverLine}, {"ignite", SiteId::RiverLine},
+		{"ignite.spark-jackpot", SiteId::Ignite}, {"ignite.spark-jackpot@40320", SiteId::Ignite}, {"runittwice.open26-12", SiteId::RunItTwice}, {"runittwice.sunday-grind", SiteId::RunItTwice},
+		{"halcyon.high-roller@3", SiteId::Halcyon}, {"riverline.hh-110", SiteId::RiverLine}, {"ignitex.y", SiteId::RiverLine}, {"Ignite.x", SiteId::RiverLine},
 		{"hh-110@1500", SiteId::RiverLine}, {"night-owl@15.5", SiteId::RiverLine}, {"rcop-main", SiteId::RiverLine}, {"championship-main", SiteId::RiverLine},
-		{"embercrest-nightly@9", SiteId::RiverLine}, {"x@flopjoy.y", SiteId::RiverLine}};
+		{"embercrest-nightly@9", SiteId::RiverLine}, {"x@ignite.y", SiteId::RiverLine}};
 	for (const auto& It : Ids)
 	{
 		Expect(net::SiteOf(It.first) == It.second, std::string("SiteOf(\"") + It.first + "\")");
@@ -349,7 +349,7 @@ void Routing()
 	Expect(&net::Site(SiteId::RiverLine) == &net::Shared() && &net::ForEvent("hh-110@1500") == &net::Shared(), "RiverLine's network is Shared()");
 
 	// The registry: a network per site, never moved; one not registered yet is empty, so nothing routes to another site's.
-	for (SiteId S : {SiteId::Flopjoy, SiteId::Turnstone, SiteId::Halcyon})
+	for (SiteId S : {SiteId::Ignite, SiteId::RunItTwice, SiteId::Halcyon})
 	{
 		net::Network& A = net::Site(S);
 		net::Network& B = net::Site(S);
@@ -360,7 +360,7 @@ void Routing()
 		}
 		Expect(&A == &B && &A != &net::Shared() && A.Site() == S, std::string("the registry holds ") + net::KeyOf(S) + "'s own network");
 		Expect(Registered ? !A.Templates().empty() : A.Templates().empty() && A.Series().empty(), std::string(net::KeyOf(S)) + (Registered ? ": registered, scheduled" : ": not registered yet, empty"));
-		const std::string Id = std::string(net::KeyOf(S)) + ".joy-jackpot@40320";
+		const std::string Id = std::string(net::KeyOf(S)) + ".spark-jackpot@40320";
 		Expect(&net::ForEvent(Id) == &A, std::string("a ") + net::KeyOf(S) + " id goes to its network");
 		net::EventInstance E;
 		Expect(Registered || (!net::ForEvent(Id).FindInstance(Id, E) && !net::Shared().FindInstance(Id, E)), "an unregistered site's id finds nothing anywhere");
@@ -369,7 +369,7 @@ void Routing()
 	Expect(Nowhere.Templates().empty() && &Nowhere != &net::Shared(), "a SiteId out of range gets an empty network");
 
 	// The rivals' placeholder schedules: every id prefixed, unique across the sites, at home on its own network.
-	for (SiteId S : {SiteId::Flopjoy, SiteId::Turnstone})
+	for (SiteId S : {SiteId::Ignite, SiteId::RunItTwice})
 	{
 		const net::Network N(SitesStub(S));
 		const std::string Key = std::string(net::KeyOf(S)) + ".";
@@ -507,7 +507,7 @@ void RoutedCallSites()
 
 void RivalDefaults()
 {
-	const net::SiteDef Def = SitesStub(net::SiteId::Flopjoy);
+	const net::SiteDef Def = SitesStub(net::SiteId::Ignite);
 	const net::Network N(Def);
 	N.Prewarm(40 * 1440.0); // no past: nothing to do
 	const int Day = ss::world::DayOn(2026, 11, 8);
@@ -557,7 +557,7 @@ void RivalDefaults()
 	}
 	for (int B = 0; B <= static_cast<int>(net::Board::HighRollers); ++B)
 	{
-		Expect(W.RankBefore(net::SiteId::Flopjoy, static_cast<net::Board>(B), 3) == 0, "no rank yesterday on a rival's board");
+		Expect(W.RankBefore(net::SiteId::Ignite, static_cast<net::Board>(B), 3) == 0, "no rank yesterday on a rival's board");
 		Expect(B > static_cast<int>(net::Board::Live) ? W.RankBefore(net::SiteId::RiverLine, static_cast<net::Board>(B), 3) == 0
 													   : W.RankBefore(net::SiteId::RiverLine, static_cast<net::Board>(B), 3) == W.RankBefore(static_cast<net::Board>(B), 3),
 			"RiverLine's rank yesterday by site is today's, and never past Live");
@@ -566,7 +566,7 @@ void RivalDefaults()
 	// AttachAll and SetHeroAll reach every site's network.
 	net::AttachAll(&W);
 	bool Attached3 = net::Shared().Attached() == &W;
-	for (net::SiteId S : {net::SiteId::Flopjoy, net::SiteId::Turnstone, net::SiteId::Halcyon})
+	for (net::SiteId S : {net::SiteId::Ignite, net::SiteId::RunItTwice, net::SiteId::Halcyon})
 	{
 		Attached3 = Attached3 && net::Site(S).Attached() == &W;
 	}
@@ -582,14 +582,14 @@ void RivalDefaults()
 		break;
 	}
 	ss::HistoryEntry Rival;
-	Rival.EventId = "flopjoy.joy-jackpot@" + std::to_string(Day * 1440 + 1200);
+	Rival.EventId = "ignite.spark-jackpot@" + std::to_string(Day * 1440 + 1200);
 	Rival.Place = 2;
 	History.push_back(Rival);
 	net::SetHeroAll("grinder_3c", History);
-	Expect(net::Shared().HeroName() == "grinder_3c" && net::Site(net::SiteId::Turnstone).HeroName() == "grinder_3c", "SetHeroAll names the player on every site");
+	Expect(net::Shared().HeroName() == "grinder_3c" && net::Site(net::SiteId::RunItTwice).HeroName() == "grinder_3c", "SetHeroAll names the player on every site");
 	net::AttachAll(nullptr);
 	bool Detached = net::Shared().Attached() == nullptr;
-	for (net::SiteId S : {net::SiteId::Flopjoy, net::SiteId::Turnstone, net::SiteId::Halcyon})
+	for (net::SiteId S : {net::SiteId::Ignite, net::SiteId::RunItTwice, net::SiteId::Halcyon})
 	{
 		Detached = Detached && net::Site(S).Attached() == nullptr;
 	}
@@ -653,30 +653,30 @@ void Skins()
 	const ui::Skin Home = ui::Skin::FromHex(RiverLine);
 	Expect(SitesSame(ui::Skin::Current(), Home), "outside any scope, pal:: is RiverLine's palette");
 	Expect(SitesSame(ui::Skin::FromHex(net::Def(net::SiteId::RiverLine).Palette), Home), "RiverLine's SiteDef palette is pal::'s, token for token");
-	const ui::Skin Flopjoy = ui::Skin::FromHex(SitesStub(net::SiteId::Flopjoy).Palette);
-	const ui::Skin Turnstone = ui::Skin::FromHex(SitesStub(net::SiteId::Turnstone).Palette);
+	const ui::Skin Ignite = ui::Skin::FromHex(SitesStub(net::SiteId::Ignite).Palette);
+	const ui::Skin RunItTwice = ui::Skin::FromHex(SitesStub(net::SiteId::RunItTwice).Palette);
 	{
-		ui::SkinScope Outer(Flopjoy);
-		Expect(SitesSame(ui::Skin::Current(), Flopjoy) && SitesSame(ui::pal::Bg, ui::Hex(0x1a1220)) && SitesSame(ui::pal::Accent, ui::Hex(0xff6b57)), "a scope swaps all 16 tokens");
+		ui::SkinScope Outer(Ignite);
+		Expect(SitesSame(ui::Skin::Current(), Ignite) && SitesSame(ui::pal::Bg, ui::Hex(0x1a1220)) && SitesSame(ui::pal::Accent, ui::Hex(0xff6b57)), "a scope swaps all 16 tokens");
 		Expect(SitesSame(ui::Ts(12.0f).Col, ui::Hex(0xfff4ec)), "a default text colour inside a scope is the skin's Ink");
 		{
-			ui::SkinScope Inner(Turnstone);
-			Expect(SitesSame(ui::Skin::Current(), Turnstone), "scopes nest");
+			ui::SkinScope Inner(RunItTwice);
+			Expect(SitesSame(ui::Skin::Current(), RunItTwice), "scopes nest");
 		}
-		Expect(SitesSame(ui::Skin::Current(), Flopjoy), "an inner scope puts the outer skin back");
+		Expect(SitesSame(ui::Skin::Current(), Ignite), "an inner scope puts the outer skin back");
 	}
 	Expect(SitesSame(ui::Skin::Current(), Home) && SitesSame(ui::Ts(12.0f).Col, ui::Hex(0xe6edf7)), "the outer scope puts RiverLine's palette back");
 
 	// Review of A3: every way out of a scope puts the palette back, bit for bit (a return from inside one, a continue or a break
 	// out of a loop body that opened one, a scope opened on one branch only, three deep), and a scope over the palette as it
 	// stands changes nothing.
-	auto Early = [&Flopjoy, &Turnstone](int Way) -> bool {
-		ui::SkinScope Outer(Flopjoy);
+	auto Early = [&Ignite, &RunItTwice](int Way) -> bool {
+		ui::SkinScope Outer(Ignite);
 		if (Way == 0)
 		{
 			return SitesSame(ui::pal::Accent, ui::Hex(0xff6b57));
 		}
-		ui::SkinScope Inner(Turnstone);
+		ui::SkinScope Inner(RunItTwice);
 		if (Way == 1)
 		{
 			return SitesSame(ui::pal::Accent, ui::Hex(0xd4a843));
@@ -689,7 +689,7 @@ void Skins()
 	int Bodies = 0;
 	for (int I = 0; I < 6; ++I)
 	{
-		ui::SkinScope Each(I % 2 == 0 ? Flopjoy : Turnstone);
+		ui::SkinScope Each(I % 2 == 0 ? Ignite : RunItTwice);
 		++Bodies;
 		if (I == 1)
 		{
@@ -706,22 +706,22 @@ void Skins()
 		std::unique_ptr<ui::SkinScope> Maybe;
 		if (Rival)
 		{
-			Maybe.reset(new ui::SkinScope(Turnstone));
+			Maybe.reset(new ui::SkinScope(RunItTwice));
 		}
-		Expect(SitesSame(ui::Skin::Current(), Rival ? Turnstone : Home), "a scope opened on one branch only applies there");
+		Expect(SitesSame(ui::Skin::Current(), Rival ? RunItTwice : Home), "a scope opened on one branch only applies there");
 	}
 	Expect(SitesSame(ui::Skin::Current(), Home), "a scope opened on one branch only restores RiverLine's palette");
 	{
-		ui::SkinScope A(Flopjoy);
+		ui::SkinScope A(Ignite);
 		{
-			ui::SkinScope B(Turnstone);
+			ui::SkinScope B(RunItTwice);
 			{
-				ui::SkinScope C(Flopjoy);
-				Expect(SitesSame(ui::Skin::Current(), Flopjoy), "three deep");
+				ui::SkinScope C(Ignite);
+				Expect(SitesSame(ui::Skin::Current(), Ignite), "three deep");
 			}
-			Expect(SitesSame(ui::Skin::Current(), Turnstone), "three deep: the middle scope's skin is back");
+			Expect(SitesSame(ui::Skin::Current(), RunItTwice), "three deep: the middle scope's skin is back");
 		}
-		Expect(SitesSame(ui::Skin::Current(), Flopjoy), "three deep: the outer scope's skin is back");
+		Expect(SitesSame(ui::Skin::Current(), Ignite), "three deep: the outer scope's skin is back");
 	}
 	{
 		ui::SkinScope Same(ui::Skin::Current());
@@ -818,7 +818,7 @@ void ReadyForB3()
 	}
 	Expect(Ignored, "RiverLine's boards never read HeroStats::SiteBoard");
 	{
-		net::Network Rival(SitesStub(net::SiteId::Flopjoy));
+		net::Network Rival(SitesStub(net::SiteId::Ignite));
 		Rival.Attach(&W);
 		net::HeroStats Mine = Hero;
 		Mine.SiteBoard = 12.5;
@@ -834,10 +834,10 @@ void ReadyForB3()
 	// A world event's site rides in its flags (FlagSiteBits), clear of every other flag, and survives the world's text.
 	Expect((ss::world::FlagSiteBits & (ss::world::FlagQualifier | ss::world::FlagStaked | ss::world::FlagFirst | ss::world::FlagHero | ss::world::FlagLive | ss::world::FlagUnknown)) == 0 &&
 			ss::world::FlagSiteOf(0) == net::SiteId::RiverLine && ss::world::FlagSiteOf(ss::world::FlagLive) == net::SiteId::RiverLine &&
-			ss::world::FlagSiteOf(ss::world::FlagFirst | (static_cast<int>(net::SiteId::Turnstone) << ss::world::FlagSiteShift)) == net::SiteId::Turnstone &&
+			ss::world::FlagSiteOf(ss::world::FlagFirst | (static_cast<int>(net::SiteId::RunItTwice) << ss::world::FlagSiteShift)) == net::SiteId::RunItTwice &&
 			ss::world::FlagSiteOf(static_cast<int>(net::SiteId::Halcyon) << ss::world::FlagSiteShift) == net::SiteId::Halcyon,
 		"FlagSiteBits holds a SiteId beside the other flags");
-	// The world a fortnight on: a headline RiverLine's News shows from its log, tagged as Flopjoy's in the world's text, leaves
+	// The world a fortnight on: a headline RiverLine's News shows from its log, tagged as Ignite's in the world's text, leaves
 	// RiverLine's News (§5.7's silence) and keeps its tag through a load.
 	W.AdvanceTo(14 * 1440.0 + 600.0);
 	const double Now = W.Clock();
@@ -883,14 +883,14 @@ void ReadyForB3()
 		const size_t End = Text.find('\n', Line);
 		const size_t Last = Text.rfind('\t', End);
 		const int Flags = std::atoi(Text.c_str() + Last + 1);
-		const int Tagged = Flags | (static_cast<int>(net::SiteId::Flopjoy) << ss::world::FlagSiteShift);
+		const int Tagged = Flags | (static_cast<int>(net::SiteId::Ignite) << ss::world::FlagSiteShift);
 		std::string Edited = Text.substr(0, Last + 1) + std::to_string(Tagged) + Text.substr(End);
 		ss::world::World Back;
 		SitesReadWorld(Edited, Back);
 		int Found = 0;
 		for (const ss::world::WorldEvent& E : Back.Events())
 		{
-			Found += ss::world::FlagSiteOf(E.Flags) == net::SiteId::Flopjoy && (E.Flags & ~ss::world::FlagSiteBits) == Flags ? 1 : 0;
+			Found += ss::world::FlagSiteOf(E.Flags) == net::SiteId::Ignite && (E.Flags & ~ss::world::FlagSiteBits) == Flags ? 1 : 0;
 		}
 		std::string Again;
 		Back.Write(Again);
@@ -901,13 +901,13 @@ void ReadyForB3()
 		{
 			Expected.erase(Headline);
 		}
-		Expect(After == Expected, "a world headline tagged as Flopjoy's leaves RiverLine's News, and nothing else does");
+		Expect(After == Expected, "a world headline tagged as Ignite's leaves RiverLine's News, and nothing else does");
 	}
 
 	// Skin::Key: one per palette; art cached from a paint that reads pal:: replays each skin's own colours when its key is mixed in.
 	const ui::Skin Home = ui::Skin::Current();
-	const ui::Skin Fj = ui::Skin::FromHex(SitesStub(net::SiteId::Flopjoy).Palette);
-	Expect(Home.Key() == ui::Skin::FromHex(net::Def(net::SiteId::RiverLine).Palette).Key() && Home.Key() != Fj.Key() && Fj.Key() == ui::Skin::FromHex(SitesStub(net::SiteId::Flopjoy).Palette).Key(),
+	const ui::Skin Fj = ui::Skin::FromHex(SitesStub(net::SiteId::Ignite).Palette);
+	Expect(Home.Key() == ui::Skin::FromHex(net::Def(net::SiteId::RiverLine).Palette).Key() && Home.Key() != Fj.Key() && Fj.Key() == ui::Skin::FromHex(SitesStub(net::SiteId::Ignite).Palette).Key(),
 		"Skin::Key tells palettes apart and agrees for the same one");
 	SitesNoText M;
 	// Every vertex the fragment replays, as RGB (the fill's anti-aliased edge fades its alpha, never its colour).

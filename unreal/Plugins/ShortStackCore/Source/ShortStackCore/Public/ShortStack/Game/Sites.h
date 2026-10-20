@@ -107,7 +107,7 @@ SHORTSTACKCORE_API const SiteDef& Def(SiteId S);
 SHORTSTACKCORE_API Network& Site(SiteId S);
 /**
  * The site an id belongs to (an event, template, series or ticket id): the prefix before the first '.', when it is a site's
- * key and comes before any '@' ("turnstone.sunday-100k@1500" is Turnstone's); anything else, every bare id, RiverLine's.
+ * key and comes before any '@' ("runittwice.sunday-100k@1500" is RunItTwice's); anything else, every bare id, RiverLine's.
  */
 SHORTSTACKCORE_API SiteId SiteOf(const std::string& Id);
 /** Site(SiteOf(Id)): the network an event, template, series or ticket id lives on. */
@@ -116,7 +116,7 @@ SHORTSTACKCORE_API Network& ForEvent(const std::string& Id);
 SHORTSTACKCORE_API void AttachAll(const world::World* W);
 SHORTSTACKCORE_API void SetHeroAll(const std::string& Name, const std::vector<HistoryEntry>& History);
 /**
- * A site's key, the prefix of its ids: "riverline", "flopjoy", "turnstone", "halcyon" ("" for a SiteId out of range). Fixed
+ * A site's key, the prefix of its ids: "riverline", "ignite", "runittwice", "halcyon" ("" for a SiteId out of range). Fixed
  * with SiteId, since saved ids carry it; a registered SiteDef's Key must be the same (sites_test checks it).
  */
 SHORTSTACKCORE_API const char* KeyOf(SiteId S);

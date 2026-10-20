@@ -126,7 +126,7 @@ const Population& GetPopulation(const std::string& Name)
 	static const Population Micro = {{Archetype::Fish, 26}, {Archetype::Station, 18}, {Archetype::Nit, 15}, {Archetype::Tag, 16}, {Archetype::Lag, 8}, {Archetype::Maniac, 7}, {Archetype::Reg, 10}};
 	static const Population Low = {{Archetype::Fish, 16}, {Archetype::Station, 12}, {Archetype::Nit, 16}, {Archetype::Tag, 24}, {Archetype::Lag, 12}, {Archetype::Maniac, 4}, {Archetype::Reg, 15}, {Archetype::Crusher, 1}};
 	static const Population High = {{Archetype::Fish, 4}, {Archetype::Nit, 6}, {Archetype::Tag, 20}, {Archetype::Lag, 15}, {Archetype::Reg, 35}, {Archetype::Crusher, 20}};
-	// Update 2 §5.3, §5.8: a soft site's tables (Flopjoy), softer than Micro and not the freeroll mix. The freeze's one
+	// Update 2 §5.3, §5.8: a soft site's tables (Ignite), softer than Micro and not the freeroll mix. The freeze's one
 	// carve-out: a new name only, so every existing name seats exactly as before and no golden passes "soft".
 	static const Population Soft = {{Archetype::Fish, 30}, {Archetype::Station, 20}, {Archetype::Nit, 14}, {Archetype::Tag, 14}, {Archetype::Lag, 7}, {Archetype::Maniac, 8}, {Archetype::Reg, 7}};
 	if (Name == "freeroll") return Freeroll;
