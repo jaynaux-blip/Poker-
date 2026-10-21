@@ -547,6 +547,13 @@ void ABackRoomGameMode::LiveEvent(const ss::TEvent& E)
 {
 	// The host's part of the engine's news: banners, the room's people, the stage, a hold, a move. What's said about it
 	// (the floor, the dealers, the table's goodbyes, the applause) is the director's (TickRoom feeds it the same events).
+	// The night's over: the last hand can end a level too (the engine's Level and Break come after its Finished), and the
+	// room has none of it, as the director doesn't: no banner over the champion's, no break clock for the winner to sit
+	// through, no floor's call of it without a director.
+	if (Tourney && Tourney->bFinished && (E.Type == ss::TEventType::Level || E.Type == ss::TEventType::Break))
+	{
+		return;
+	}
 	switch (E.Type)
 	{
 	case ss::TEventType::Bust:
