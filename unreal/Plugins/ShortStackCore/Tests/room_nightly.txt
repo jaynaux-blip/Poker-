@@ -1,584 +1,609 @@
-# room_nightly: the cue log of a seeded Embercrest Nightly (embercrest-nightly@15, 96 runners, seed "embercrest-nightly@15:Jesse:22585.00:20:room").
+# room_nightly: the cue log of a seeded Embercrest Nightly (embercrest-nightly@15, 96 runners, seed "embercrest-nightly@15:Jesse:22585.00:1782:room").
 # tick	kind	where	table	seat	speaker	key	text	priority	delay	flags (room_test --write regenerates it)
 0	PA	pa	t0	s-1	Floor	pa.desk.open.0	The Embercrest Nightly is now open for registration at the tournament desk.	p1	d0.0	chime 
 0	PA	pa	t0	s-1	Floor	pa.desk.open.0	20,000 chips, 20-minute levels, cards at 7:00 PM.	p1	d7.1	
 0	PA	pa	t0	s-1	Floor	pa.ten.minutes.0	Players for the Embercrest Nightly, ten minutes. Your table and seat are on your receipt.	p2	d11.6	chime 
 0	PA	pa	t0	s-1	Floor	pa.start.0	Ladies and gentlemen, welcome to the Embercrest Nightly. 96 players, a prize pool of $10,080.	p3	d20.0	chime 
 0	PA	pa	t0	s-1	Floor	pa.start.0	Dealers, shuffle up and deal!	p3	d28.4	
-0	LINE	here	t12	s2	Seat 3	field.sitdown.5	Evening. Who's running good?	p0	d31.4	
+0	LINE	here	t12	s0	Rick	face.greeting	Look who's back. Try not to cry this time.	p0	d31.4	to-you 
+0	LINE	here	t12	s1	Sonny	face.greeting	Evening. Save some chips for the rest of us.	p0	d35.3	to-you 
+1	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.4	
+1	CALL	table	t15	s-1	Dealer	dealer.table.seatopen.0	Seat open, fifteen!	p0	d3.4	
 1	MOOD	Early
-2	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
-3	LINE	here	t12	s5	Seat 6	field.needle.5	I'll show you one of these days. Maybe.	p0	d0.6	to-you 
-4	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.1	
-4	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.0	Seat open, one!	p0	d0.1	
-7	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.0	
-7	LINE	here	t12	s0	Priya	field.tank.2	Whatever you do, do it with feeling.	p0	d0.6	to-you 
+4	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.1	
+4	CALL	table	t15	s-1	Dealer	dealer.table.seatopen.0	Seat open, fifteen!	p0	d1.1	
 8	PA	pa	t0	s-1	Floor	pa.level.0	Players, the blinds are now 200 and 300.	p1	d0.0	chime 
-8	LINE	here	t12	s0	Priya	field.small.room.open.5	Somebody tell the slots to keep it down.	p0	d0.6	
-8	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
-8	LINE	here	t12	s5	Seat 6	field.small.room.reply.3	I like it. Feels like a card room should.	p0	d5.0	
-8	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.1	Eighteen thousand, give or take. Keep going.	p0	d9.2	to-you 
-9	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.0	
-9	CALL	table	t11	s-1	Dealer	dealer.table.seatopen.0	Seat open, eleven!	p0	d1.0	
-11	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.6	
-11	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.1	Seat open on three!	p0	d0.6	
-12	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
-13	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
-13	CALL	table	t10	s-1	Dealer	dealer.table.seatopen.0	Seat open, ten!	p0	d3.7	
-14	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
-15	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
-15	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.4	
+8	CALL	here	t12	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d5.0	
+8	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.1	Thirty-something, give or take. Keep going.	p0	d7.2	to-you 
+9	LINE	here	t12	s4	Seat 5	field.win.5	I'll take those.	p0	d0.0	
+9	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
+9	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.1	Seat open on one!	p0	d1.3	
+9	LINE	here	t12	s0	Rick	field.noticed.luckypenny.0	The corner store sponsors you?	p0	d2.8	to-you 
+10	LINE	here	t12	s4	Seat 5	field.small.room.open.1	Listen to that slot floor. Somebody's hitting.	p0	d0.6	
+11	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.1	
+12	LINE	here	t12	s1	Sonny	field.small.down.2	I'm running bad. Like, historically bad.	p0	d0.6	
+12	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
+12	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
+12	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
+12	CALL	table	t13	s-1	Dealer	dealer.table.seatopen.0	Seat open, thirteen!	p0	d3.3	
+12	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.0	Seat open, one!	p0	d3.3	
+12	LINE	here	t12	s2	Seat 3	field.small.down.reply.2	Hang in there. Tight is right.	p0	d5.0	
+13	LINE	here	t12	s0	Rick	field.needle.bluff.1	Okay. Okay. I'll remember that.	p0	d0.6	to-you 
+13	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
+13	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
+13	CALL	table	t11	s-1	Dealer	dealer.table.seatopen.1	Seat open on eleven!	p0	d1.6	
+14	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.6	
+14	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+14	CALL	table	t7	s-1	Dealer	dealer.table.seatopen.0	Seat open, seven!	p0	d1.7	
+14	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.9	
+14	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.6	
+15	LINE	here	t12	s4	Seat 5	field.win.1	I'll take it.	p0	d0.0	
+15	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.5	
+15	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.1	
+15	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.0	Seat open, five!	p0	d3.1	
 16	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 200 and 400, with a big blind ante of 400.	p1	d0.0	chime 
-17	LINE	here	t12	s4	Mike	field.small.week.online.0	Seventh out of 410 online yesterday. Took home $610.	p0	d0.6	
-17	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.4	
-17	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.0	Seat open, eight!	p0	d3.4	
+17	LINE	here	t12	s0	Rick	cast.rick.win.0	That's how it's done!	p0	d0.0	
+17	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
+17	LINE	here	t12	s1	Sonny	field.needle.4	Scared money don't make money.	p0	d3.1	to-you 
+17	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.4	
 18	PA	pa	t0	s-1	Floor	pa.last.call.0	Ladies and gentlemen, this is the last call for registration for the Embercrest Nightly.	p3	d0.0	chime 
+18	LINE	here	t12	s0	Rick	cast.rick.small.1	Raise it up, let's play some poker!	p0	d0.6	
 18	PA	pa	t0	s-1	Floor	pa.last.call.0	Late registration closes at 8:00 PM.	p3	d8.0	
-19	LINE	here	t12	s5	Seat 6	field.needle.1	Every time I raise, huh?	p0	d0.6	to-you 
-19	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
-19	CALL	table	t2	s-1	Dealer	dealer.table.seatopen.1	Seat open on two!	p0	d3.7	
-20	LINE	here	t12	s1	Luis	field.small.trip.open.5	Every time I come up here my ears pop twice.	p0	d0.6	
-20	LINE	here	t12	s2	Seat 3	field.small.trip.reply.2	Drove. Don't ask me about the parking.	p0	d5.2	
-21	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.1	
-21	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.1	Seat open on nine!	p0	d0.1	
-21	LINE	here	t12	s0	Priya	field.small.food.open.5	They still do that chili at the bar?	p0	d0.6	
-21	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
-21	LINE	here	t12	s5	Seat 6	field.small.food.reply.5	I'm saving my appetite for your chips.	p0	d4.7	
-22	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
-22	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
-23	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.0	
-23	CALL	table	t6	s-1	Dealer	dealer.table.seatopen.0	Seat open, six!	p0	d0.0	
-23	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.1	
-23	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.0	Seat open, eight!	p0	d2.1	
-23	CALL	table	t16	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
-23	CALL	table	t16	s-1	Dealer	dealer.table.seatopen.1	Seat open on sixteen!	p0	d2.9	
+19	LINE	here	t12	s3	Seat 4	field.small.room.open.3	Same felt, same chairs, same coffee.	p0	d0.6	
+19	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.9	
+19	CALL	table	t13	s-1	Dealer	dealer.table.seatopen.1	Seat open on thirteen!	p0	d0.9	
+19	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.5	
+19	LINE	here	t12	s4	Seat 5	field.small.room.reply.3	I like it. Feels like a card room should.	p0	d4.7	
+20	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
+21	LINE	here	t12	s1	Sonny	field.small.food.open.2	What's good at the grill here? Don't say the wings.	p0	d0.6	
+21	LINE	here	t12	s0	Rick	field.small.food.reply.1	Ate in the car. Regret it.	p0	d5.7	
+21	CALL	here	t12	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d8.5	
+21	LINE	here	t12	s2	Seat 3	field.goodbye.2	Good luck, everybody.	p0	d10.1	
+22	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.6	
+22	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.2	
+23	LINE	here	t12	s1	Sonny	field.win.4	There we go.	p0	d0.0	
+23	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
 24	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 300 and 500, with a big blind ante of 500.	p1	d0.0	chime 
-24	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
-24	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.1	Seat open on five!	p0	d0.4	
-24	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.short.0	Thirteen thousand. Pick your spots.	p0	d0.4	to-you 
-24	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.0	
-24	CALL	table	t14	s-1	Dealer	dealer.table.seatopen.0	Seat open, fourteen!	p0	d1.0	
-24	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
-24	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.8	
-24	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.0	Seat open, three!	p0	d2.8	
-24	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
+24	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.1	
+24	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.0	Seat open, three!	p0	d2.1	
+24	CALL	here	t12	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.1	
 24	PA	pa	t0	s-1	Floor	pa.reg.closed.0	Registration for the Nightly is now closed.	p3	d7.1	chime 
+24	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.2	Looks like twenty-something from here. Don't spew it.	p0	d9.3	to-you 
 24	PA	pa	t0	s-1	Floor	pa.reg.closed.0	96 players, a prize pool of $10,080, and the top 14 are paid. A min-cash is $248.	p3	d11.9	
 24	MOOD	Running
-25	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.1	
-25	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.1	
-25	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.1	Seat open on nine!	p0	d3.1	
-26	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Good. Now protect it.	p0	d0.4	to-you 
-26	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
-26	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
-26	CALL	table	t6	s-1	Dealer	dealer.table.seatopen.1	Seat open on six!	p0	d2.7	
-27	LINE	here	t12	s4	Mike	field.win.2	Ship it.	p0	d0.0	
-27	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.6	
-27	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.1	
-27	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.1	Seat open on three!	p0	d3.1	
-28	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
-28	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.8	
-29	LINE	here	t12	s0	Priya	field.small.night.open.4	Promised myself I'd play tight tonight. We'll see.	p0	d0.6	
-29	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
-29	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
-29	LINE	here	t12	s5	Seat 6	field.small.night.reply.3	Long as I'm still here for it.	p0	d5.6	
-30	LINE	here	t12	s0	Priya	field.tank.0	Take your time. I'm only getting older.	p0	d0.6	to-you 
-30	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
-30	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.0	Seat open, three!	p0	d0.7	
-30	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
-30	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.0	Seat open, eight!	p0	d1.3	
-30	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.1	
-30	CALL	table	t6	s-1	Dealer	dealer.table.seatopen.1	Seat open on six!	p0	d2.1	
-30	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.5	
-30	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.0	Seat open, four!	p0	d3.5	
-31	PA	pa	t0	s-1	Floor	pa.table.breaking.0	Table 6 is breaking. Players, take your chips and your seat cards from the floor.	p1	d0.0	
-31	LINE	here	t12	s4	Mike	field.small.online.4	Feels weird holding real cards again.	p0	d0.6	
-32	CALL	here	t12	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
+25	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
+25	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
+25	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.0	
+26	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.2	
+26	CALL	table	t7	s-1	Dealer	dealer.table.seatopen.1	Seat open on seven!	p0	d0.2	
+26	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.2	
+26	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.2	
+27	PA	pa	t0	s-1	Floor	pa.table.breaking.0	Table 7 is breaking. Players, take your chips and your seat cards from the floor.	p1	d0.0	
+27	CALL	here	t12	s-1	Dealer	dealer.welcome.0	Welcome. Seat 3.	p0	d0.0	
+28	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.2	
+28	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.1	Seat open on one!	p0	d0.2	
+28	LINE	here	t12	s1	Sonny	field.small.food.open.4	Came up here on an empty stomach. Rookie move.	p0	d0.6	
+28	LINE	here	t12	s0	Rick	field.small.food.reply.4	Wings are fine. Just don't look at them.	p0	d5.4	
+29	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.8	
+30	LINE	here	t12	s4	Seat 5	field.tank.0	Take your time. I'm only getting older.	p0	d0.6	to-you 
+30	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.6	
+30	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.1	Seat open on five!	p0	d2.6	
+30	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
+30	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.1	Seat open on four!	p0	d2.7	
+31	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
+31	CALL	table	t2	s-1	Dealer	dealer.table.seatopen.0	Seat open, two!	p0	d1.5	
+31	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
+31	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.0	Seat open, five!	p0	d2.0	
+31	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
+31	CALL	table	t15	s-1	Dealer	dealer.table.seatopen.0	Seat open, fifteen!	p0	d2.3	
+31	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.0	
+31	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.1	Seat open on four!	p0	d3.0	
 32	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 300 and 600, with a big blind ante of 600.	p1	d0.0	chime 
-32	LINE	here	t12	s4	Mike	field.goodbye.1	I'll be at the bar if anyone needs a sad story.	p0	d1.6	
-32	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
-32	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.0	Seat open, one!	p0	d3.7	
+32	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
+32	CALL	table	t10	s-1	Dealer	dealer.table.seatopen.0	Seat open, ten!	p0	d0.4	
 32	CALL	here	t12	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.1	
-34	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.8	
-34	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
-34	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.0	Seat open, eight!	p0	d1.6	
-34	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.4	
-34	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.0	Seat open, one!	p0	d3.4	
-35	PA	pa	t0	s-1	Floor	pa.table.breaking.0	Table 1 is breaking. Players, take your chips and your seat cards from the floor.	p1	d0.0	
-35	CALL	here	t12	s-1	Dealer	dealer.welcome.0	Welcome. Seat 5.	p0	d0.0	
-35	LINE	here	t12	s1	Luis	field.win.5	I'll take those.	p0	d0.0	
-35	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.8	
-35	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.1	Seat open on nine!	p0	d0.8	
-36	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
-37	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.9	
-37	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.1	Seat open on five!	p0	d0.9	
-37	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
-37	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
-37	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
-39	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
-39	CALL	table	t14	s-1	Dealer	dealer.table.seatopen.0	Seat open, fourteen!	p0	d3.7	
-40	LINE	here	t12	s4	Seat 5	field.win.1	I'll take it.	p0	d0.0	
-40	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.5	
-40	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.0	Seat open, nine!	p0	d0.5	
-40	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 400 and 800, with a big blind ante of 800.	p1	d1.0	chime 
-40	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.1	
-40	LINE	here	t12	s1	Luis	field.ask.break.0	How long till the break?	p0	d2.6	
-40	CALL	here	t12	s-1	Dealer	dealer.break.next.0	Break after this level.	p0	d5.3	
-40	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.0	Forty-something. You're fine.	p0	d8.1	to-you 
-41	LINE	here	t12	s0	Priya	field.doubleup.3	Needed that one.	p0	d0.0	
-41	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.6	
-41	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.6	
-42	LINE	here	t12	s5	Seat 6	field.needle.2	Folding again? I'm starting to like you.	p0	d0.6	to-you 
-42	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
-42	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
-42	LINE	here	t12	s0	Priya	field.small.night.open.5	First one out buys coffee for the table.	p0	d5.0	
-43	LINE	here	t12	s5	Seat 6	field.small.room.open.1	Listen to that slot floor. Somebody's hitting.	p0	d0.6	
-43	LINE	here	t12	s4	Seat 5	field.small.room.reply.4	Beats my living room.	p0	d5.4	
-44	LINE	here	t12	s2	Seat 3	field.small.food.open.4	Came up here on an empty stomach. Rookie move.	p0	d0.6	
-44	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.9	
-44	CALL	table	t2	s-1	Dealer	dealer.table.seatopen.1	Seat open on two!	p0	d0.9	
-44	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.4	
-44	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.6	
-45	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
-45	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.0	Seat open, five!	p0	d0.7	
-45	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.4	
-45	CALL	table	t13	s-1	Dealer	dealer.table.seatopen.1	Seat open on thirteen!	p0	d1.4	
-45	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+33	CALL	here	t12	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
+33	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.2	
+33	LINE	here	t12	s1	Sonny	field.goodbye.1	I'll be at the bar if anyone needs a sad story.	p0	d1.6	
+33	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+33	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
+34	LINE	here	t12	s4	Seat 5	field.small.night.open.0	Long night ahead.	p0	d0.6	
+34	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+34	CALL	table	t13	s-1	Dealer	dealer.table.seatopen.1	Seat open on thirteen!	p0	d1.7	
+34	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.9	
+34	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
+35	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
+35	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
+35	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.0	Seat open, nine!	p0	d3.3	
+35	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.6	
+35	CALL	table	t10	s-1	Dealer	dealer.table.seatopen.0	Seat open, ten!	p0	d3.6	
+36	CALL	here	t12	s-1	Dealer	dealer.welcome.0	Welcome. Seat 2.	p0	d0.0	
+36	LINE	here	t12	s0	Rick	cast.rick.win.1	Stack 'em up, sweetheart.	p0	d0.0	
+36	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.2	
+36	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
+36	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.0	Seat open, three!	p0	d1.5	
+36	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
+36	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.1	Seat open on eight!	p0	d3.9	
+37	LINE	here	t12	s0	Rick	cast.rick.lose.1	Whatever. I'm rebuying next week.	p0	d0.0	
+37	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.4	
+37	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.0	Seat open, nine!	p0	d1.4	
+37	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.4	
+37	CALL	table	t2	s-1	Dealer	dealer.table.seatopen.0	Seat open, two!	p0	d2.4	
+37	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
+37	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.1	Seat open on four!	p0	d3.8	
+38	LINE	here	t12	s0	Rick	cast.rick.win.0	That's how it's done!	p0	d0.0	
+38	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.6	
+38	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
+39	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.2	
+39	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.6	
+40	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 400 and 800, with a big blind ante of 800.	p1	d0.0	chime 
+40	LINE	here	t12	s0	Rick	field.small.food.open.1	Somebody order me a burger before I fold out of hunger.	p0	d0.6	
+40	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
+40	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.1	Seat open on one!	p0	d2.9	
+40	CALL	here	t12	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.1	
+40	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.0	Thirty-something. You're fine.	p0	d9.3	to-you 
+41	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Well played. Now breathe.	p0	d0.4	to-you 
+41	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.0	
+41	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
+41	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
+41	CALL	here	t12	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d3.0	
+41	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
+41	LINE	here	t12	s3	Seat 4	field.goodbye.3	Well. That's the night.	p0	d4.5	
+42	LINE	here	t12	s1	Bev	field.win.0	Thank you.	p0	d0.0	
+42	LINE	here	t12	s4	Seat 5	field.small.night.open.3	Tell me we're not going to three in the morning again.	p0	d2.4	
+42	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
+42	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.0	Seat open, three!	p0	d3.3	
+42	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
+43	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
+43	CALL	table	t6	s-1	Dealer	dealer.table.seatopen.0	Seat open, six!	p0	d3.3	
+44	LINE	here	t12	s2	Seat 3	field.nicehand.2	Well played.	p0	d0.0	
+44	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.1	
+44	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+44	LINE	here	t12	s1	Bev	field.small.week.5	I got tenth in the Noon Deepstack Sunday. $310. Good enough.	p0	d2.5	
+44	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
+44	CALL	table	t13	s-1	Dealer	dealer.table.seatopen.1	Seat open on thirteen!	p0	d2.9	
+44	LINE	here	t12	s0	Rick	field.small.week.reply.5	Hey, a cash is a cash.	p0	d8.2	
+45	LINE	here	t12	s2	Seat 3	field.small.night.open.2	Whoever wins this better buy breakfast.	p0	d0.6	
 45	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
-45	CALL	table	t15	s-1	Dealer	dealer.table.seatopen.0	Seat open, fifteen!	p0	d2.7	
-45	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.8	
-45	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
-46	PA	pa	t0	s-1	Floor	pa.table.breaking.0	Table 15 is breaking. Players, take your chips and your seat cards from the floor.	p1	d0.0	
-46	LINE	here	t12	s0	Priya	field.win.4	There we go.	p0	d0.0	
-47	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
-47	CALL	table	t2	s-1	Dealer	dealer.table.seatopen.0	Seat open, two!	p0	d0.7	
-47	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.1	
-47	CALL	table	t7	s-1	Dealer	dealer.table.seatopen.1	Seat open on seven!	p0	d2.1	
-48	PA	pa	t0	s-1	Floor	pa.break.0	Players, we are on a 15-minute break. Please be back in your seats when the clock says so.	p3	d0.0	chime 
-48	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
-48	PA	pa	t0	s-1	Floor	pa.break.next.ante.0	When we come back, the blinds will be 500 and 1,000 with a 1,000 big blind ante.	p3	d8.5	
-48	CALL	here	t12	s-1	Dealer	dealer.break.0	Break, folks. Stretch your legs.	p0	d8.5	
-48	LINE	here	t12	s1	Luis	field.break.2	Bathroom line's going to be a nightmare.	p0	d11.6	
-48	PA	pa	t0	s-1	Floor	pa.five.minutes.0	Five minutes, players. Five minutes left on the break.	p1	d15.2	
-48	LINE	here	t12	s2	Seat 3	field.break.4	Stretch break. My back's done.	p0	d15.3	
-48	PHONE	rail	t0	s-1	Mrs. Park	stake.break	How many chips? Exactly, please.	p0	d18.8	to-you 
-48	PA	pa	t0	s-1	Floor	pa.break.over.0	Players, the break is over. Please take your seats, the cards are in the air.	p2	d20.1	chime 
+45	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.2	
+46	CALL	here	t12	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
+46	LINE	here	t12	s4	Seat 5	field.goodbye.0	That's me. Good luck, all.	p0	d1.6	
+47	CALL	here	t12	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
+47	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
+47	LINE	here	t12	s4	Maria G.	field.goodbye.5	Nice playing with you all.	p0	d1.6	
+47	CALL	table	t15	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
+48	CALL	here	t12	s-1	Dealer	dealer.move.0	You're moving. Table 15, seat 2. Grab your chips.	p0	d0.0	
+48	LINE	here	t15	s0	Mike	field.sitdown.4	Alright. Let's see some cards.	p0	d0.0	
+48	PA	pa	t0	s-1	Floor	pa.break.0	Players, we are on a 15-minute break. Please be back in your seats when the clock says so.	p3	d1.0	chime 
+48	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
+48	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.5	
+48	CALL	table	t14	s-1	Dealer	dealer.table.seatopen.0	Seat open, fourteen!	p0	d2.5	
+48	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
+48	PA	pa	t0	s-1	Floor	pa.break.next.ante.0	When we come back, the blinds will be 500 and 1,000 with a 1,000 big blind ante.	p3	d9.5	
+48	CALL	here	t15	s-1	Dealer	dealer.break.0	Break, folks. Stretch your legs.	p0	d9.5	
+48	LINE	here	t15	s3	Seat 4	field.break.4	Stretch break. My back's done.	p0	d12.6	
+48	PHONE	rail	t0	s-1	Mrs. Park	stake.break	Your count, please. To the chip.	p0	d16.1	to-you 
+48	PA	pa	t0	s-1	Floor	pa.five.minutes.0	Five minutes, players. Five minutes left on the break.	p1	d16.2	
+48	PA	pa	t0	s-1	Floor	pa.break.over.0	Players, the break is over. Please take your seats, the cards are in the air.	p2	d21.1	chime 
 48	MOOD	Break
 48	MOOD	Running
-49	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
-50	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
-52	LINE	here	t12	s4	Seat 5	field.win.3	Come to me.	p0	d0.0	
-52	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.1	
-52	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.0	
-53	LINE	here	t12	s4	Seat 5	field.doubleup.1	Back in business.	p0	d0.0	
-53	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
-53	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.2	
-53	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.4	
-53	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.1	Seat open on four!	p0	d2.4	
-53	LINE	here	t12	s0	Priya	field.tank.5	Go with your gut. It's usually right.	p0	d2.8	to-you 
-53	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.5	
-53	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.6	
-54	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.2	
-54	LINE	here	t12	s4	Seat 5	field.small.night.open.0	Long night ahead.	p0	d0.6	
-54	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
-54	LINE	here	t12	s5	Seat 6	field.small.night.reply.5	We'll see who's tired at two.	p0	d3.4	
-55	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
-55	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
-56	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 600 and 1,200, with a big blind ante of 1,200.	p1	d0.0	chime 
-56	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.3	
-56	LINE	here	t12	s0	Priya	field.small.night.open.1	Gonna be a late one.	p0	d0.6	
-56	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.2	
-56	CALL	here	t12	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.4	
-56	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.short.1	Twenty-something, maybe. Tighten up.	p0	d9.6	to-you 
-57	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
-57	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
-57	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.6	
-57	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.0	Seat open, five!	p0	d3.6	
-57	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
-57	CALL	table	t14	s-1	Dealer	dealer.table.seatopen.1	Seat open on fourteen!	p0	d3.8	
-58	LINE	here	t12	s5	Seat 6	field.win.0	Thank you.	p0	d0.0	
-58	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
-58	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
-59	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.8	
-60	LINE	here	t12	s5	Seat 6	field.needle.3	Keep folding. I'll keep raising.	p0	d0.6	to-you 
-60	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.6	
-60	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
-61	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
-61	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
-61	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.0	Seat open, five!	p0	d1.6	
-61	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
-61	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
-62	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
-62	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
-62	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.8	
-62	CALL	table	t2	s-1	Dealer	dealer.table.seatopen.1	Seat open on two!	p0	d2.8	
-62	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.6	
-62	CALL	table	t7	s-1	Dealer	dealer.table.seatopen.1	Seat open on seven!	p0	d3.6	
-63	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.9	
-63	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.1	
-63	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
+49	CALL	here	t15	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
+49	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
+49	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+50	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.0	
+51	LINE	here	t15	s5	Big Sam	field.win.3	Come to me.	p0	d0.0	
+51	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
+51	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
+51	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.6	
+51	CALL	table	t2	s-1	Dealer	dealer.table.seatopen.0	Seat open, two!	p0	d3.6	
+52	LINE	here	t15	s2	Dre	cast.dre.small.0	Y'all see the game today? Brutal.	p0	d0.6	
+52	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.2	
+52	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+52	CALL	table	t6	s-1	Dealer	dealer.table.seatopen.1	Seat open on six!	p0	d1.7	
+52	CALL	table	t14	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.8	
+52	CALL	table	t14	s-1	Dealer	dealer.table.seatopen.1	Seat open on fourteen!	p0	d1.8	
+52	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.2	
+52	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
+52	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.1	Seat open on one!	p0	d3.9	
+54	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.4	
+54	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.8	
+55	LINE	here	t15	s5	Big Sam	field.small.regular.0	Every night I tell myself just the Nightly. Every night.	p0	d0.6	
+55	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.0	
+55	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.0	Seat open, four!	p0	d1.0	
+55	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+56	LINE	here	t15	s0	Mike	field.nicehand.called.air.0	Good call. I had nothing.	p0	d0.0	
+56	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.2	
+56	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.0	Seat open, one!	p0	d0.2	
+56	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 600 and 1,200, with a big blind ante of 1,200.	p1	d1.0	chime 
+56	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.1	
+56	CALL	table	t6	s-1	Dealer	dealer.table.seatopen.0	Seat open, six!	p0	d1.1	
+56	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.1	Ninety-something, give or take. Keep going.	p0	d3.2	to-you 
+56	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
+56	CALL	table	t11	s-1	Dealer	dealer.table.seatopen.1	Seat open on eleven!	p0	d3.8	
+58	LINE	here	t15	s0	Mike	field.suckout.5	That's poker. Sorry, though.	p0	d0.0	
+58	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.2	
+58	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.1	
+58	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
+58	LINE	here	t15	s3	Omar	field.badbeat.0	Aces. Tens. On the river.	p0	d3.0	
+58	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.1	
+58	CALL	here	t15	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d5.7	
+59	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.8	
+59	CALL	table	t2	s-1	Dealer	dealer.table.seatopen.0	Seat open, two!	p0	d0.8	
+59	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.5	
+59	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.1	Seat open on eight!	p0	d3.5	
+60	CALL	here	t15	s-1	Dealer	dealer.move.0	You're moving. Table 2, seat 3. Grab your chips.	p0	d0.0	
+60	LINE	here	t2	s3	Seat 4	field.sitdown.3	Mind the elbow. Long night.	p0	d0.0	
+60	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.0	
+60	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
+60	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.0	Seat open, eight!	p0	d0.4	
+61	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
+62	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
+63	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.5	
 64	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 800 and 1,600, with a big blind ante of 1,600.	p1	d0.0	chime 
-64	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.9	
-64	CALL	table	t10	s-1	Dealer	dealer.table.seatopen.1	Seat open on ten!	p0	d0.9	
-64	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
-64	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.8	
-64	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.1	Seat open on eight!	p0	d2.8	
-64	CALL	table	t2	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
-64	CALL	table	t2	s-1	Dealer	dealer.table.seatopen.0	Seat open, two!	p0	d3.3	
-64	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
-64	CALL	here	t12	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.4	
-65	LINE	here	t12	s4	Seat 5	field.badbeat.0	Ace-six. Nine-six. On the river.	p0	d0.0	
-65	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.1	
-65	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.0	Seat open, five!	p0	d1.1	
-65	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
-65	CALL	table	t13	s-1	Dealer	dealer.table.seatopen.1	Seat open on thirteen!	p0	d1.6	
-65	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.8	
-65	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
-66	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Nicely played. Don't celebrate yet.	p0	d0.4	to-you 
-66	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
-66	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.0	Seat open, nine!	p0	d1.5	
-66	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
-66	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.4	
-66	LINE	here	t12	s5	Seat 6	field.small.room.open.0	They turn the heat up in here, or is it me?	p0	d4.2	
-66	LINE	here	t12	s0	Priya	field.small.room.reply.5	Keeps you awake, at least.	p0	d8.8	
-67	LINE	here	t12	s4	Seat 5	field.small.room.open.2	This chair's been here since the eighties.	p0	d0.6	
-67	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
-67	CALL	table	t10	s-1	Dealer	dealer.table.seatopen.0	Seat open, ten!	p0	d1.6	
-67	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.9	
-67	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
-68	LINE	here	t12	s0	Priya	field.win.5	I'll take those.	p0	d0.0	
-68	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.4	
-68	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.1	Seat open on four!	p0	d1.4	
-68	LINE	here	t12	s1	Luis	field.small.food.open.3	Coffee in this place could strip paint.	p0	d2.8	
-69	CALL	here	t12	s-1	Dealer	dealer.welcome.0	Welcome. Seat 3.	p0	d0.0	
-69	LINE	here	t12	s0	Priya	field.doubleup.5	Double up. Let's go.	p0	d0.0	
-69	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.6	
-69	CALL	here	t12	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d2.4	
-69	LINE	here	t12	s1	Luis	field.goodbye.5	Nice playing with you all.	p0	d4.0	
-70	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
-70	CALL	table	t10	s-1	Dealer	dealer.table.seatopen.1	Seat open on ten!	p0	d0.7	
-70	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.4	
-70	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.5	
-70	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.0	Seat open, four!	p0	d3.5	
-71	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
+64	LINE	here	t2	s5	Hector	field.small.heater.0	I'm running good this week. Nobody say anything.	p0	d0.6	
+64	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+64	CALL	here	t2	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.4	
+65	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+65	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.8	
+65	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.5	
+66	LINE	here	t2	s5	Hector	field.nicehand.called.made.0	Good call. I had it.	p0	d0.0	to-you 
+66	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
+66	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.1	Seat open on four!	p0	d1.6	
+66	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.2	
+66	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
+67	LINE	here	t2	s1	Olga	field.win.2	Ship it.	p0	d0.0	
+67	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.9	
+68	LINE	here	t2	s4	Mei	cast.mei.win.0	Thank you.	p0	d0.0	
+68	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.6	
+68	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
+68	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
+68	LINE	here	t2	s0	Seat 1	field.small.food.open.3	Coffee in this place could strip paint.	p0	d2.4	
+68	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.2	
+68	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.4	
+68	LINE	here	t2	s1	Olga	field.small.food.reply.5	I'm saving my appetite for your chips.	p0	d6.7	
+69	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
+69	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
+69	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
+70	LINE	here	t2	s5	Hector	field.small.online.3	Twelve tables at home, and here I am staring at one.	p0	d0.6	
+70	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.5	
+70	CALL	table	t11	s-1	Dealer	dealer.table.seatopen.0	Seat open, eleven!	p0	d3.5	
+71	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.0	
 72	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 1,000 and 2,000, with a big blind ante of 2,000.	p1	d0.0	chime 
-72	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.2	Looks like forty-something from here. Don't spew it.	p0	d0.4	to-you 
-73	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
-73	CALL	table	t7	s-1	Dealer	dealer.table.seatopen.0	Seat open, seven!	p0	d0.7	
-73	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.9	
-73	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.1	
-74	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
-75	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
-75	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.6	
-76	LINE	here	t12	s4	Seat 5	field.needle.tank.1	It's not that hard. Fold.	p0	d0.6	to-you 
-76	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
-76	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.0	
-76	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.9	
-76	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.0	Seat open, three!	p0	d1.9	
-76	LINE	here	t12	s0	Priya	field.small.room.open.3	Same felt, same chairs, same coffee.	p0	d4.0	
-76	LINE	here	t12	s5	Seat 6	field.small.room.reply.0	It's you. You're running hot.	p0	d8.1	
-77	CALL	here	t12	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
-77	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.1	
-77	LINE	here	t12	s2	Earl	field.goodbye.3	Well. That's the night.	p0	d1.6	
-77	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
-77	CALL	here	t12	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d4.2	
-78	CALL	here	t12	s-1	Dealer	dealer.move.0	You're moving. Table 4, seat 1. Grab your chips.	p0	d0.0	
-78	LINE	here	t4	s1	Sal	field.sitdown.1	How we doing, folks?	p0	d0.0	
-78	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.3	
-78	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.1	Seat open on three!	p0	d0.3	
-79	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.0	
-79	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
-79	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.1	Seat open on five!	p0	d2.0	
-79	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.8	
-80	LINE	here	t4	s5	Seat 6	field.win.3	Come to me.	p0	d0.0	
-80	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.2	
-80	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 1,200 and 2,400, with a big blind ante of 2,400.	p1	d1.0	chime 
-80	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
-80	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.1	Seat open on eight!	p0	d1.6	
-80	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
-80	CALL	here	t4	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d8.5	
-81	LINE	here	t4	s1	Sal	field.cooler.3	That's a cooler. Good hand.	p0	d0.0	
-81	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
-81	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.1	Seat open on nine!	p0	d0.4	
-81	CALL	table	t10	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
-81	CALL	table	t10	s-1	Dealer	dealer.table.seatopen.0	Seat open, ten!	p0	d1.6	
-81	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.1	
-82	PA	pa	t0	s-1	Floor	pa.table.breaking.0	Table 10 is breaking. Players, take your chips and your seat cards from the floor.	p1	d0.0	
-82	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.0	
-82	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.4	
-82	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.5	
-82	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.1	Seat open on nine!	p0	d3.5	
-82	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
-82	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.1	Seat open on eight!	p0	d3.7	
-83	LINE	here	t4	s5	Seat 6	field.needle.4	Scared money don't make money.	p0	d0.6	to-you 
-83	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.8	
-83	CALL	table	t7	s-1	Dealer	dealer.table.seatopen.1	Seat open on seven!	p0	d1.8	
-83	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
-84	LINE	here	t4	s1	Sal	field.doubleup.2	Now we're playing.	p0	d0.0	
-84	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.0	
-84	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
-84	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.1	Seat open on five!	p0	d2.0	
-84	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.2	
-84	LINE	here	t4	s2	Seat 3	field.cooler.4	Couldn't get away. Nobody could.	p0	d2.3	
-85	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.5	
-86	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
-87	LINE	here	t4	s5	Seat 6	field.needle.0	You can have the next one, champ.	p0	d0.6	to-you 
-87	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.8	
-87	LINE	here	t4	s3	Seat 4	field.small.food.open.2	What's good at the grill here? Don't say the wings.	p0	d4.5	
-87	LINE	here	t4	s4	Luis	field.small.food.reply.4	Wings are fine. Just don't look at them.	p0	d9.6	
-88	CALL	here	t4	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
+72	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
+72	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.2	Looks like sixty-something from here. Don't spew it.	p0	d0.4	to-you 
+72	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
+72	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.1	
+72	CALL	table	t11	s-1	Dealer	dealer.table.seatopen.0	Seat open, eleven!	p0	d2.1	
+73	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.5	
+73	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.0	
+73	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.0	Seat open, one!	p0	d1.0	
+73	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.2	
+73	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.1	Seat open on three!	p0	d1.2	
+73	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+73	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.4	
+73	CALL	table	t13	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
+73	CALL	table	t13	s-1	Dealer	dealer.table.seatopen.1	Seat open on thirteen!	p0	d3.9	
+74	PA	pa	t0	s-1	Floor	pa.table.breaking.0	Table 13 is breaking. Players, take your chips and your seat cards from the floor.	p1	d0.0	
+74	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.3	
+74	CALL	table	t11	s-1	Dealer	dealer.table.seatopen.0	Seat open, eleven!	p0	d0.3	
+74	LINE	here	t2	s3	Seat 4	field.small.room.open.5	Somebody tell the slots to keep it down.	p0	d0.6	
+74	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.9	
+75	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.8	
+75	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
+75	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
+75	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.0	Seat open, four!	p0	d3.8	
+76	LINE	here	t2	s1	Olga	field.tank.4	Big decision. Take a breath.	p0	d0.6	to-you 
+77	LINE	here	t2	s5	Hector	field.small.room.open.2	This chair's been here since the eighties.	p0	d0.6	
+77	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.0	
+77	CALL	table	t6	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.1	
+77	CALL	table	t6	s-1	Dealer	dealer.table.seatopen.0	Seat open, six!	p0	d3.1	
+77	LINE	here	t2	s0	Seat 1	field.small.room.reply.2	Chair's older than me and holding up better.	p0	d5.1	
+77	CALL	here	t2	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d9.1	
+77	LINE	here	t2	s4	Mei	cast.mei.goodbye.0	Good game, everyone.	p0	d10.7	
+78	CALL	here	t2	s-1	Dealer	dealer.welcome.0	Welcome. Seat 5.	p0	d0.0	
+78	LINE	here	t2	s1	Olga	field.win.1	I'll take it.	p0	d0.0	
+79	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
+80	CALL	here	t2	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
+80	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 1,200 and 2,400, with a big blind ante of 2,400.	p1	d0.0	chime 
+80	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.5	
+80	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.4	
+80	LINE	here	t2	s3	Seat 4	field.goodbye.4	Gonna go stare at the mountain for a while.	p0	d1.6	
+80	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
+81	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.1	
+81	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.0	Seat open, eight!	p0	d0.1	
+81	LINE	here	t2	s1	Olga	field.small.food.open.5	They still do that chili at the bar?	p0	d0.6	
+81	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.8	
+81	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
+82	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
+82	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.6	
+83	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
+83	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
+84	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.0	
+84	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.2	
+84	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.3	
+84	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
+85	LINE	here	t2	s5	Hector	field.small.food.open.0	Anybody eaten? I'm running on peanuts from the bar.	p0	d0.6	
+85	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
+85	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.1	Seat open on eight!	p0	d1.3	
+85	LINE	here	t2	s4	Seat 5	field.small.food.reply.0	The fries. Only the fries.	p0	d5.7	
+86	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.2	
+86	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.0	
+87	CALL	here	t2	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
+87	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.3	
+87	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.1	Seat open on four!	p0	d0.3	
+87	CALL	table	t11	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
+87	CALL	table	t11	s-1	Dealer	dealer.table.seatopen.0	Seat open, eleven!	p0	d0.7	
+87	LINE	here	t2	s5	Hector	field.goodbye.2	Good luck, everybody.	p0	d1.6	
+88	PA	pa	t0	s-1	Floor	pa.table.breaking.0	Table 11 is breaking. Players, take your chips and your seat cards from the floor.	p1	d0.0	
+88	CALL	here	t2	s-1	Dealer	dealer.welcome.0	Welcome. Seat 6.	p0	d0.0	
 88	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 1,500 and 3,000, with a big blind ante of 3,000.	p1	d0.0	chime 
-88	LINE	here	t4	s2	Seat 3	field.goodbye.4	Gonna go stare at the mountain for a while.	p0	d1.6	
-88	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
-88	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.0	
-88	CALL	here	t4	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.5	
-88	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.short.2	Looks like thirty-something. Find a good one.	p0	d9.8	to-you 
-89	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
-89	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.1	
-90	CALL	table	t7	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.0	
-90	CALL	table	t7	s-1	Dealer	dealer.table.seatopen.0	Seat open, seven!	p0	d0.0	
-90	CALL	table	t7	s-1	Dealer	dealer.table.seatopen.0	Seat open, seven!	p0	d0.0	
-90	LINE	here	t4	s5	Seat 6	field.small.food.open.1	Somebody order me a burger before I fold out of hunger.	p0	d0.6	
-90	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.2	
-91	CALL	here	t4	s-1	Dealer	dealer.welcome.0	Welcome. Seat 3.	p0	d0.0	
-91	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.1	
-91	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.0	Seat open, five!	p0	d1.1	
-92	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.8	
-92	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.1	Seat open on eight!	p0	d0.8	
-92	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
-92	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.1	Seat open on nine!	p0	d3.8	
-93	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.5	
-93	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
-93	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.1	Seat open on three!	p0	d1.5	
-93	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.9	
-95	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
+88	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
+88	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
+88	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
+88	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
+88	CALL	here	t2	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.5	
+88	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.1	A hundred-something, give or take. Keep going.	p0	d9.8	to-you 
+89	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.1	
+89	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
+89	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.0	Seat open, eight!	p0	d1.3	
+89	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
+89	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.1	Seat open on one!	p0	d2.3	
+90	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.9	
+90	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.0	Seat open, three!	p0	d0.9	
+90	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
+90	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.0	Seat open, one!	p0	d1.3	
+91	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.4	
+91	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.0	Seat open, eight!	p0	d0.4	
+91	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.5	
+91	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
+91	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.1	Seat open on one!	p0	d3.3	
+92	PA	pa	t0	s-1	Floor	pa.table.breaking.0	Table 8 is breaking. Players, take your chips and your seat cards from the floor.	p1	d0.0	
+92	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.1	
+92	LINE	here	t2	s0	Seat 1	field.small.food.open.5	They still do that chili at the bar?	p0	d0.6	
+92	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.6	
+92	LINE	here	t2	s1	Olga	field.small.food.reply.2	Coffee's free. That's the review.	p0	d4.7	
+93	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.4	
+93	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.1	Seat open on three!	p0	d2.4	
+94	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.2	
+94	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
+94	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
+95	LINE	here	t2	s5	Nina	field.small.down.5	Been a long few weeks. I just want a sweat.	p0	d0.6	
+95	VOCAL	table	t1	s-1			[The rail leans in.]	p0	d0.6	
+95	VOCAL	table	t3	s-1			[The rail leans in.]	p0	d0.6	
+95	CALL	table	t1	s-1	Dealer	dealer.table.called.1	All in and a call on one!	p0	d2.8	shout
+95	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.0	Seat open, one!	p0	d2.8	
+95	CALL	table	t3	s-1	Dealer	dealer.table.called.1	All in and a call on three!	p0	d3.2	shout
+95	LINE	here	t2	s4	Seat 5	field.small.down.reply.3	We've all been there.	p0	d5.2	
+95	MOOD	MoneyClose
 96	PA	pa	t0	s-1	Floor	pa.break.0	Players, we are on a 15-minute break. Please be back in your seats when the clock says so.	p3	d0.0	chime 
-96	LINE	here	t4	s5	Seat 6	field.small.room.open.4	You can hear the wind off the ridge in here.	p0	d0.6	
-96	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.3	
+96	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.0	
 96	PA	pa	t0	s-1	Floor	pa.break.next.ante.0	When we come back, the blinds will be 2,000 and 4,000 with a 4,000 big blind ante.	p3	d8.5	
-96	CALL	here	t4	s-1	Dealer	dealer.break.0	Break, folks. Stretch your legs.	p0	d8.5	
-96	PHONE	rail	t0	s-1	Mrs. Park	stake.break	Your count, please. To the chip.	p0	d12.0	to-you 
+96	CALL	here	t2	s-1	Dealer	dealer.break.0	Break, folks. Stretch your legs.	p0	d8.5	
+96	PHONE	rail	t0	s-1	Mrs. Park	stake.break	How many chips? Exactly, please.	p0	d12.0	to-you 
 96	PA	pa	t0	s-1	Floor	pa.colorup.0	We're coloring up the black hundreds on this break.	p3	d15.4	
 96	PA	pa	t0	s-1	Floor	pa.colorup.0	Your dealer will make the change at your seat.	p3	d19.6	
 96	PA	pa	t0	s-1	Floor	pa.five.minutes.0	Five minutes, players. Five minutes left on the break.	p1	d23.9	
 96	PA	pa	t0	s-1	Floor	pa.break.over.0	Players, the break is over. Please take your seats, the cards are in the air.	p2	d28.8	chime 
 96	MOOD	Break
-96	MOOD	Running
-97	LINE	here	t4	s3	Seat 4	field.small.food.open.0	Anybody eaten? I'm running on peanuts from the bar.	p0	d0.6	
-97	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.9	
-99	LINE	here	t4	s4	Luis	field.win.4	There we go.	p0	d0.0	
-99	CALL	table	t5	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.4	
-99	CALL	table	t5	s-1	Dealer	dealer.table.seatopen.0	Seat open, five!	p0	d2.4	
-99	LINE	here	t4	s5	Seat 6	field.needle.tank.0	Any day now.	p0	d2.5	to-you 
-100	PA	pa	t0	s-1	Floor	pa.table.breaking.0	Table 5 is breaking. Players, take your chips and your seat cards from the floor.	p1	d0.0	
-100	CALL	here	t4	s-1	Dealer	dealer.welcome.0	Welcome. Seat 2.	p0	d0.0	
-100	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.7	
-100	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.1	Seat open on nine!	p0	d2.7	
-101	LINE	here	t4	s2	Jay	field.doubleup.0	There's the double.	p0	d0.0	
-101	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.8	
-102	CALL	here	t4	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
-102	LINE	here	t4	s1	Seat 2	field.goodbye.0	That's me. Good luck, all.	p0	d1.6	
-102	MOOD	MoneyClose
-103	VOCAL	table	t4	s-1			[The rail leans in: ooh.]	p0	d0.0	
-103	CALL	table	t9	s-1	Dealer	dealer.table.called.0	All in and a call, table nine!	p0	d0.3	shout
-103	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.0	Seat open, nine!	p0	d0.3	
-103	VOCAL	table	t9	s-1			[The rail leans in.]	p0	d0.6	
-104	LINE	here	t4	s2	Jay	field.doubleup.4	Breathing room. Finally.	p0	d0.0	
-104	VOCAL	table	t4	s-1			[The rail leans in: ooh.]	p0	d0.0	
-104	VOCAL	table	t4	s-1			[A sharp "Ohh!" from the rail.]	p0	d1.2	
-104	VOCAL	table	t4	s-1			[The rail groans.]	p0	d1.9	
-104	LINE	here	t4	s5	Seat 6	field.cooler.5	Set up. Happens.	p0	d2.7	
-104	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 2,500 and 5,000, with a big blind ante of 5,000.	p1	d3.0	chime 
-104	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.short.0	Forty-something. Pick your spots.	p0	d5.3	to-you 
-105	VOCAL	table	t4	s-1			[The rail leans in: ooh.]	p0	d0.0	
-105	CALL	here	t4	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
-105	CALL	table	t9	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.7	
-106	CALL	here	t4	s-1	Dealer	dealer.welcome.0	Welcome. Seat 2.	p0	d0.0	
-106	VOCAL	table	t4	s-1			[The rail leans in: ooh.]	p0	d0.0	
-106	LINE	here	t4	s3	Seat 4	field.ask.average.2	Dealer, what's average?	p0	d0.6	
-106	VOCAL	table	t8	s-1			[The rail leans in.]	p0	d0.6	
-106	VOCAL	table	t9	s-1			[The rail leans in.]	p0	d0.6	
-106	PA	pa	t0	s-1	Floor	pa.bust.0	Table 9, seat 2 is out in 18th place.	p1	d1.0	chime 
-106	CALL	table	t8	s-1	Dealer	dealer.table.called.1	All in and a call on eight!	p0	d1.3	shout
-106	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.0	Seat open, eight!	p0	d1.3	
-106	CALL	table	t9	s-1	Dealer	dealer.table.called.0	All in and a call, table nine!	p0	d1.9	shout
-106	CALL	table	t9	s-1	Dealer	dealer.table.seatopen.0	Seat open, nine!	p0	d1.9	
-106	CALL	here	t4	s-1	Dealer	dealer.average.0	Average is about 113,000.	p0	d3.2	
-106	PA	pa	t0	s-1	Floor	pa.away.0	Players, we are three away from the money. 14 places are paid, and a min-cash is $248.	p2	d5.7	chime 
-106	CALL	here	t4	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d5.8	
-106	LINE	here	t4	s1	Seat 2	field.goodbye.2	Good luck, everybody.	p0	d7.4	
-107	CALL	here	t4	s-1	Dealer	dealer.welcome.0	Welcome. Seat 2.	p0	d0.0	
-107	CALL	here	t4	s-1	Dealer	dealer.welcome.0	Welcome. Seat 6.	p0	d2.0	
-107	CALL	table	t3	s-1	Dealer	dealer.table.called.0	All in and a call, table three!	p0	d0.4	shout
-107	LINE	here	t4	s1	Sal	cast.sal.small.3	Patience. That's the whole game, kid.	p0	d0.6	
-107	VOCAL	table	t3	s-1			[The rail leans in.]	p0	d0.6	
-107	VOCAL	table	t8	s-1			[The rail leans in.]	p0	d0.6	
-107	CALL	table	t8	s-1	Dealer	dealer.table.called.1	All in and a call on eight!	p0	d0.9	shout
-108	PA	pa	t0	s-1	Floor	pa.bust.0	Table 3, seat 5 is out in 17th place.	p1	d0.0	chime 
-108	VOCAL	table	t3	s-1			[The rail leans in.]	p0	d0.6	
-108	CALL	table	t3	s-1	Dealer	dealer.table.called.0	All in and a call, table three!	p0	d2.1	shout
-108	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.1	Seat open on three!	p0	d2.1	shout
-108	PA	pa	t0	s-1	Floor	pa.h4h.0	Players, we are on the bubble. We're now hand for hand.	p3	d4.7	chime 
-108	PA	pa	t0	s-1	Floor	pa.h4h.0	Dealers, please hold your decks until every table has finished the hand.	p3	d10.4	
-108	CALL	here	t4	s-1	Dealer	dealer.h4h.0	Hand for hand, folks. Take your time.	p0	d16.5	
-108	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Patience. Nobody is paying you to be brave.	p0	d20.3	to-you 
-108	MOOD	HandForHand
-109	PA	pa	t0	s-1	Floor	pa.h4h.call.0	We have an all-in and a call at table 3.	p2	d0.0	
-109	VOCAL	table	t3	s-1			[The rail leans in.]	p0	d0.6	
-109	CALL	table	t3	s-1	Dealer	dealer.table.called.0	All in and a call, table three!	p0	d1.3	shout
-110	VOCAL	table	t4	s-1			[The rail leans in: ooh.]	p0	d0.0	
-110	PA	pa	t0	s-1	Floor	pa.h4h.done.0	All tables complete. Dealers, next hand.	p1	d0.0	
-110	CALL	here	t4	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
-110	LINE	here	t4	s4	Luis	field.goodbye.0	That's me. Good luck, all.	p0	d1.6	
-111	VOCAL	table	t4	s-1			[The rail leans in: ooh.]	p0	d0.0	
-111	LINE	here	t4	s3	Seat 4	field.cooler.2	Wrong place, wrong time.	p0	d0.0	
-111	VOCAL	table	t4	s-1			[A sharp "Ohh!" from the rail.]	p0	d1.2	
-111	VOCAL	pa	t0	s-1			[Applause all around.]	p0	d1.4	
-111	VOCAL	table	t4	s-1			[The rail groans.]	p0	d1.9	
-111	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.3	
-111	CALL	here	t4	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d2.7	
-111	PA	pa	t0	s-1	Floor	pa.bubble.seat.0	And that's the bubble! Table 4, seat 4, thank you for playing.	p3	d2.9	chime 
-111	PA	pa	t0	s-1	Floor	pa.bubble.seat.0	Congratulations, everyone remaining is in the money.	p3	d9.0	
-111	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Good. Now the real tournament starts.	p0	d13.5	to-you 
-111	MOOD	Burst
+96	MOOD	MoneyClose
+97	VOCAL	table	t2	s-1			[The rail leans in: ooh.]	p0	d0.0	
+97	CALL	here	t2	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
+97	LINE	here	t2	s4	Seat 5	field.goodbye.3	Well. That's the night.	p0	d1.6	
+98	VOCAL	table	t2	s-1			[The rail leans in: ooh.]	p0	d0.0	
+98	LINE	here	t2	s1	Olga	field.small.room.open.4	You can hear the wind off the ridge in here.	p0	d0.6	
+98	LINE	here	t2	s0	Seat 1	field.small.room.reply.0	It's you. You're running hot.	p0	d5.2	
+98	CALL	here	t2	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d8.3	
+98	LINE	here	t2	s3	Seat 4	field.goodbye.0	That's me. Good luck, all.	p0	d9.8	
+99	CALL	here	t2	s-1	Dealer	dealer.welcome.0	Welcome. Seat 5.	p0	d0.0	
+99	LINE	here	t2	s1	Olga	field.win.0	Thank you.	p0	d0.0	
+99	VOCAL	table	t1	s-1			[The rail leans in.]	p0	d0.6	
+99	VOCAL	table	t3	s-1			[The rail leans in.]	p0	d0.6	
+99	CALL	table	t3	s-1	Dealer	dealer.table.called.0	All in and a call, table three!	p0	d1.1	shout
+99	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.0	Seat open, three!	p0	d1.1	
+99	CALL	table	t1	s-1	Dealer	dealer.table.called.0	All in and a call, table one!	p0	d2.7	shout
+99	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.0	Seat open, one!	p0	d2.7	
+100	PA	pa	t0	s-1	Floor	pa.table.breaking.0	Table 3 is breaking. Players, take your chips and your seat cards from the floor.	p1	d0.0	
+100	CALL	here	t2	s-1	Dealer	dealer.welcome.0	Welcome. Seat 4.	p0	d0.0	
+100	VOCAL	table	t2	s-1			[The rail leans in: ooh.]	p0	d0.0	
+101	LINE	here	t2	s0	Seat 1	field.doubleup.3	Needed that one.	p0	d0.0	
+101	VOCAL	table	t2	s-1			[The rail leans in: ooh.]	p0	d0.0	
+101	VOCAL	table	t4	s-1			[The rail leans in.]	p0	d0.6	
+101	PA	pa	t0	s-1	Floor	pa.bust.0	Table 4, seat 5 is out in 18th place.	p1	d1.0	chime 
+101	LINE	here	t2	s5	Nina	field.small.food.open.2	What's good at the grill here? Don't say the wings.	p0	d2.8	
+101	CALL	table	t4	s-1	Dealer	dealer.table.called.0	All in and a call, table four!	p0	d3.1	shout
+101	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.0	Seat open, four!	p0	d3.1	
+101	PA	pa	t0	s-1	Floor	pa.away.0	Players, we are three away from the money. 14 places are paid, and a min-cash is $248.	p2	d5.7	chime 
+102	PA	pa	t0	s-1	Floor	pa.bust.0	Table 1, seat 5 is out in 17th place.	p1	d0.0	chime 
+102	VOCAL	table	t1	s-1			[The rail leans in.]	p0	d0.6	
+102	CALL	table	t1	s-1	Dealer	dealer.table.called.1	All in and a call on one!	p0	d2.7	shout
+102	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.1	Seat open on one!	p0	d2.7	shout
+102	PA	pa	t0	s-1	Floor	pa.h4h.0	Players, we are now hand for hand.	p3	d4.7	chime 
+102	PA	pa	t0	s-1	Floor	pa.h4h.0	Dealers, please hold your decks until every table has finished the hand.	p3	d8.9	
+102	CALL	here	t2	s-1	Dealer	dealer.h4h.0	Hand for hand, folks. Take your time.	p0	d15.0	
+102	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Patience. Nobody is paying you to be brave.	p0	d18.8	to-you 
+102	MOOD	HandForHand
+104	PA	pa	t0	s-1	Floor	pa.h4h.done.0	All tables complete. Dealers, next hand.	p1	d0.0	
+104	CALL	here	t2	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d3.9	
+104	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.0	A hundred-something. You're fine.	p0	d6.1	to-you 
+105	VOCAL	table	t2	s-1			[The rail leans in: ooh.]	p0	d0.0	
+105	PA	pa	t0	s-1	Floor	pa.h4h.call.0	We have an all-in and a call at table 4.	p2	d0.0	
+105	CALL	here	t2	s-1	Dealer	dealer.seatopen.0	Seat open.	p0	d0.0	
+105	VOCAL	table	t4	s-1			[The rail leans in.]	p0	d0.6	
+105	LINE	here	t2	s0	Seat 1	field.goodbye.1	I'll be at the bar if anyone needs a sad story.	p0	d1.6	
+105	CALL	table	t4	s-1	Dealer	dealer.table.called.0	All in and a call, table four!	p0	d3.3	shout
+105	PA	pa	t0	s-1	Floor	pa.onbubble.0	Players, we are on the bubble.	p2	d3.9	chime 
+106	PA	pa	t0	s-1	Floor	pa.h4h.call.0	We have an all-in and a call at table 4.	p2	d0.0	
+106	VOCAL	table	t4	s-1			[The rail leans in.]	p0	d0.6	
+106	CALL	table	t4	s-1	Dealer	dealer.table.called.0	All in and a call, table four!	p0	d3.8	shout
+106	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.0	Seat open, four!	p0	d3.8	shout
+106	PA	pa	t0	s-1	Floor	pa.bubble.seat.0	And that's the bubble! Table 4, seat 1, thank you for playing.	p3	d3.9	chime 
+106	PA	pa	t0	s-1	Floor	pa.bubble.seat.0	Congratulations, everyone remaining is in the money.	p3	d10.0	
+106	LINE	here	t2	s1	Olga	field.bubble.5	Money! Somebody call my mother.	p0	d14.1	
+106	VOCAL	pa	t0	s-1			[Applause all around.]	p0	d14.7	
+106	LINE	here	t2	s4	Seat 5	field.bubble.2	We're in! We're in.	p0	d17.3	
+106	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Good. Now the real tournament starts.	p0	d20.0	to-you 
+106	MOOD	Burst
+107	CALL	here	t2	s-1	Dealer	dealer.cage.0	14th place. See the cage for $247.90. Good game.	p0	d0.0	
+107	MOOD	Running
+109	LINE	here	t2	s3	Seat 4	field.cooler.1	Can't fold that. Nobody folds that.	p0	d0.0	
+109	PA	pa	t0	s-1	Floor	pa.bust.paid.0	Table 4, seat 3 is out in 13th place, collecting $248.	p1	d1.0	chime 
+109	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
+109	CALL	table	t4	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.0	
+109	CALL	table	t4	s-1	Dealer	dealer.table.seatopen.1	Seat open on four!	p0	d3.0	
+109	CALL	here	t2	s-1	Dealer	dealer.cage.0	12th place. See the cage for $302.30. Good game.	p0	d3.4	
+110	PA	pa	t0	s-1	Floor	pa.two.tables.0	We're down to our last two tables. 11 players left.	p2	d0.0	chime 
+110	MOOD	LastTables
 112	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 3,000 and 6,000, with a big blind ante of 6,000.	p1	d0.0	chime 
-112	CALL	here	t4	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.5	
-112	MOOD	Running
-113	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.2	
-113	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.4	
-114	LINE	here	t4	s2	Jay	field.small.room.open.3	Same felt, same chairs, same coffee.	p0	d0.6	
-114	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.6	
-114	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.7	
-115	PA	pa	t0	s-1	Floor	pa.bust.paid.0	Table 8, seat 6 is out in 14th place, collecting $248.	p1	d0.0	chime 
-115	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.3	
-115	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.0	Seat open, eight!	p0	d3.3	
-116	PA	pa	t0	s-1	Floor	pa.bust.paid.0	Table 8, seat 2 is out in 13th place, collecting $248.	p1	d0.0	chime 
-116	CALL	table	t8	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.8	
-116	CALL	table	t8	s-1	Dealer	dealer.table.seatopen.1	Seat open on eight!	p0	d3.8	
-117	CALL	here	t4	s-1	Dealer	dealer.welcome.0	Welcome. Seat 5.	p0	d0.0	
-117	PA	pa	t0	s-1	Floor	pa.two.tables.0	We're down to our last two tables. 12 players left.	p2	d0.0	chime 
-117	MOOD	LastTables
-119	LINE	here	t4	s5	Mike	field.win.2	Ship it.	p0	d0.0	
-120	LINE	here	t4	s5	Mike	field.win.1	I'll take it.	p0	d0.0	
-120	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 4,000 and 8,000, with a big blind ante of 8,000.	p1	d1.0	chime 
-120	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.9	
-120	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.0	A hundred-something. You're fine.	p0	d2.4	to-you 
-121	LINE	here	t4	s4	Duke	field.nicehand.3	You had it. Fair enough.	p0	d0.0	to-you 
-121	CALL	here	t4	s-1	Dealer	dealer.cage.0	12th place. See the cage for $302.30. Good game.	p0	d2.7	
-123	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.4	
-126	LINE	here	t4	s2	Jay	field.small.food.open.3	Coffee in this place could strip paint.	p0	d0.6	
-126	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.7	
-128	PA	pa	t0	s-1	Floor	pa.bust.paid.0	Table 3, seat 3 is out in 11th place, collecting $302.	p1	d0.0	chime 
-128	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.1	
-128	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.1	Seat open on three!	p0	d1.1	
-128	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.1	Seat open on three!	p0	d1.1	
-128	CALL	here	t4	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d6.0	
-129	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Well played. Now breathe.	p0	d0.4	to-you 
-129	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.8	
-129	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.0	Seat open, three!	p0	d0.8	
-129	PA	pa	t0	s-1	Floor	pa.bust.paid.0	Table 3, seat 2 is out in 9th place, collecting $364.	p1	d1.4	chime 
-130	CALL	here	t4	s-1	Dealer	dealer.cage.0	8th place. See the cage for $407.01. Good game.	p0	d0.0	
-130	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.4	
-130	LINE	here	t4	s5	Mike	field.goodbye.paid.0	Took a little something. Good luck, all.	p0	d4.0	
-131	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.4	
-133	LINE	here	t4	s1	Sal	field.ask.left.0	How many left?	p0	d0.6	
-133	CALL	here	t4	s-1	Dealer	dealer.left.itm.0	7 left. Everybody's in the money.	p0	d2.6	
-135	PA	pa	t0	s-1	Floor	pa.bust.paid.0	Table 3, seat 4 is out in 7th place, collecting $462.	p1	d0.0	chime 
-135	CALL	table	t3	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.6	
-135	CALL	table	t3	s-1	Dealer	dealer.table.seatopen.0	Seat open, three!	p0	d3.6	
-136	PA	pa	t0	s-1	Floor	pa.final.0	Ladies and gentlemen, we are down to our final table!	p3	d0.0	chime 
-136	PA	pa	t0	s-1	Floor	pa.final.0	Players, please bring your chips to the feature table.	p3	d5.5	
-136	PA	pa	t0	s-1	Floor	pa.final.honor.article.0	Among them, Jesse Cole, representing the Lucky Penny.	p3	d10.3	
-136	VOCAL	rail	t3	s-1			[Applause from the rail.]	p0	d15.1	
-136	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Sit up straight. They read slouching.	p0	d15.5	to-you 
-136	LINE	here	t3	s4	Maria G.	field.final.0	Final table. Somebody take my picture.	p0	d18.9	
-136	MOOD	FinalTable
-136	LINE	here	t3	s1	Mei	cast.mei.win.1	Nice try.	p0	d0.0	
-136	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 6,000 and 12,000, with a big blind ante of 12,000.	p1	d1.0	chime 
-136	CALL	here	t3	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d8.7	
-136	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.1	Five hundred-something, give or take. Keep going.	p0	d10.9	to-you 
-137	LINE	here	t3	s1	Mei	cast.mei.lose.0	Good call.	p0	d0.0	
-138	VOCAL	rail	t3	s-1			[The rail leans in: ooh.]	p0	d0.0	
-140	VOCAL	rail	t3	s-1			[The rail leans in: ooh.]	p0	d0.0	
-140	VOCAL	rail	t3	s-1			[Polite applause.]	p0	d0.8	
-140	VOCAL	rail	t3	s-1			[A murmur, then light applause.]	p0	d1.2	
-140	LINE	rail	t3	s-1	Mrs. Park	field.rail.1	Let's go, Jesse!	p0	d1.6	to-you shout
-140	CALL	here	t3	s-1	Dealer	dealer.cage.0	6th place. See the cage for $534.93. Good game.	p0	d3.4	
-140	LINE	here	t3	s3	Jay	field.goodbye.paid.1	A cash is a cash. Night, all.	p0	d7.4	
-143	LINE	here	t3	s5	Sal	cast.sal.lose.0	Eh. Cards are cards.	p0	d0.0	
-143	LINE	here	t3	s0	Priya	field.ask.break.2	We breaking soon?	p0	d3.0	
-143	CALL	here	t3	s-1	Dealer	dealer.break.next.0	Break after this level.	p0	d5.3	
+112	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d1.8	
+115	LINE	here	t2	s1	Olga	field.small.food.open.1	Somebody order me a burger before I fold out of hunger.	p0	d0.6	
+115	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d3.1	
+116	LINE	here	t2	s3	Gloria	field.doubleup.1	Back in business.	p0	d0.0	
+117	LINE	here	t2	s4	Seat 5	field.nicehand.4	Couldn't get away from it.	p0	d0.0	
+117	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.2	
+117	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.1	Seat open on one!	p0	d0.2	
+117	PA	pa	t0	s-1	Floor	pa.bust.paid.0	Table 1, seat 6 is out in 11th place, collecting $302.	p1	d1.0	chime 
+118	LINE	here	t2	s5	Nina	field.small.room.open.0	They turn the heat up in here, or is it me?	p0	d0.6	
+118	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d0.8	
+120	PA	pa	t0	s-1	Floor	pa.bust.paid.0	Table 1, seat 4 is out in 10th place, collecting $302.	p1	d0.0	chime 
+120	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.2	Looks like two hundred-something from here. Don't spew it.	p0	d0.4	to-you 
+120	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.0	
+120	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.1	Seat open on one!	p0	d2.0	
+121	CALL	here	t2	s-1	Dealer	dealer.cage.0	9th place. See the cage for $363.92. Good game.	p0	d0.0	
+121	LINE	here	t2	s4	Seat 5	field.goodbye.paid.1	A cash is a cash. Night, all.	p0	d4.0	
+122	LINE	here	t2	s1	Olga	field.tank.5	Go with your gut. It's usually right.	p0	d0.6	to-you 
+123	LINE	here	t2	s3	Gloria	field.win.3	Come to me.	p0	d0.0	
+125	LINE	here	t2	s1	Olga	field.ask.average.1	What's the average stack now?	p0	d0.6	
+125	CALL	here	t2	s-1	Dealer	dealer.average.0	Average is about 240,000.	p0	d3.6	
+125	LINE	here	t2	s5	Nina	field.small.food.open.4	Came up here on an empty stomach. Rookie move.	p0	d6.8	
+128	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 5,000 and 10,000, with a big blind ante of 10,000.	p1	d0.0	chime 
+132	LINE	here	t2	s5	Nina	field.win.4	There we go.	p0	d0.0	
+133	LINE	here	t2	s1	Olga	field.ask.left.0	How many left?	p0	d0.6	
+133	CALL	here	t2	s-1	Dealer	dealer.left.itm.0	8 left. Everybody's in the money.	p0	d2.6	
+133	LINE	here	t2	s5	Nina	field.small.room.open.4	You can hear the wind off the ridge in here.	p0	d6.3	
+136	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 6,000 and 12,000, with a big blind ante of 12,000.	p1	d0.0	chime 
+136	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.1	A hundred-something, give or take. Keep going.	p0	d0.4	to-you 
+137	LINE	here	t2	s3	Gloria	field.doubleup.5	Double up. Let's go.	p0	d0.0	
+140	LINE	here	t2	s3	Gloria	field.doubleup.2	Now we're playing.	p0	d0.0	
+141	LINE	here	t2	s1	Olga	field.suckout.4	Ugly. I'll take it anyway.	p0	d0.0	
+141	LINE	here	t2	s5	Nina	field.badbeat.4	Queens, all in, ahead. Then the river.	p0	d2.8	
+141	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.9	
+141	CALL	here	t2	s-1	Dealer	dealer.cage.0	8th place. See the cage for $407.01. Good game.	p0	d6.5	
+142	PA	pa	t0	s-1	Floor	pa.bust.paid.0	Table 1, seat 3 is out in 7th place, collecting $462.	p1	d0.0	chime 
+142	CALL	table	t1	s-1	Dealer	dealer.table.allin.0	All in.	p0	d2.5	
+142	CALL	table	t1	s-1	Dealer	dealer.table.seatopen.1	Seat open on one!	p0	d2.5	
+143	PA	pa	t0	s-1	Floor	pa.final.0	Ladies and gentlemen, we are down to our final table!	p3	d0.0	chime 
+143	PA	pa	t0	s-1	Floor	pa.final.0	Players, please bring your chips to the feature table.	p3	d5.5	
+143	PA	pa	t0	s-1	Floor	pa.final.honor.article.0	Among them, Jesse Cole, representing the Lucky Penny.	p3	d10.3	
+143	VOCAL	rail	t1	s-1			[Applause from the rail.]	p0	d15.1	
+143	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Sit up straight. They read slouching.	p0	d15.5	to-you 
+143	LINE	here	t1	s2	Gloria	field.final.4	Look at us. Big stage.	p0	d18.9	
+143	MOOD	FinalTable
 144	PA	pa	t0	s-1	Floor	pa.break.0	Players, we are on a 15-minute break. Please be back in your seats when the clock says so.	p3	d0.0	chime 
 144	PA	pa	t0	s-1	Floor	pa.break.next.ante.0	When we come back, the blinds will be 8,000 and 16,000 with a 16,000 big blind ante.	p3	d8.5	
-144	CALL	here	t3	s-1	Dealer	dealer.break.0	Break, folks. Stretch your legs.	p0	d8.5	
-144	LINE	here	t3	s4	Maria G.	field.break.0	Need some air. Back in a bit.	p0	d11.6	
-144	PHONE	rail	t0	s-1	Mrs. Park	stake.break	How many chips? Exactly, please.	p0	d15.0	to-you 
+144	CALL	here	t1	s-1	Dealer	dealer.break.0	Break, folks. Stretch your legs.	p0	d8.5	
+144	LINE	here	t1	s0	Seat 1	field.break.1	Coffee. Now.	p0	d11.6	
+144	LINE	here	t1	s1	Seat 2	field.break.3	Gonna call home. Back before the cards.	p0	d13.5	
 144	PA	pa	t0	s-1	Floor	pa.colorup.0	We're coloring up the purple five-hundreds on this break.	p3	d15.5	
+144	PHONE	rail	t0	s-1	Mrs. Park	stake.break	Your count, please. To the chip.	p0	d17.6	to-you 
 144	PA	pa	t0	s-1	Floor	pa.colorup.0	Your dealer will make the change at your seat.	p3	d20.2	
 144	PA	pa	t0	s-1	Floor	pa.five.minutes.0	Five minutes, players. Five minutes left on the break.	p1	d24.5	
 144	PA	pa	t0	s-1	Floor	pa.break.over.0	Players, the break is over. Please take your seats, the cards are in the air.	p2	d29.3	chime 
 144	MOOD	Break
 144	MOOD	FinalTable
-145	LINE	here	t3	s4	Maria G.	field.win.0	Thank you.	p0	d0.0	
-146	VOCAL	rail	t3	s-1			[The rail leans in: ooh.]	p0	d0.0	
-146	VOCAL	rail	t3	s-1			[A murmur, then light applause.]	p0	d1.2	
-147	VOCAL	rail	t3	s-1			[The rail leans in: ooh.]	p0	d0.0	
-147	CALL	here	t3	s-1	Dealer	dealer.cage.0	5th place. See the cage for $636.10. Good game.	p0	d0.0	
-147	VOCAL	rail	t3	s-1			[Polite applause.]	p0	d0.8	
-147	VOCAL	rail	t3	s-1			[A sharp "Ohh!" from the rail.]	p0	d1.2	
-147	VOCAL	rail	t3	s-1			[The rail groans.]	p0	d1.9	
-147	LINE	here	t3	s1	Mei	field.goodbye.paid.2	I'll take the money and the bus. Good luck.	p0	d4.0	
-149	LINE	here	t3	s4	Maria G.	field.small.food.open.5	They still do that chili at the bar?	p0	d0.6	
-149	LINE	here	t3	s5	Sal	field.small.food.reply.2	Coffee's free. That's the review.	p0	d4.7	
-151	LINE	here	t3	s4	Maria G.	field.nicehand.5	Good hand. Ship it.	p0	d0.0	to-you 
+145	LINE	here	t1	s0	Seat 1	field.needle.tank.1	It's not that hard. Fold.	p0	d0.6	to-you 
+145	LINE	here	t1	s5	Olga	field.small.food.open.3	Coffee in this place could strip paint.	p0	d4.0	
+145	LINE	here	t1	s4	Big Sam	field.small.food.reply.3	Grab me something on the break.	p0	d8.3	
+146	LINE	here	t1	s0	Seat 1	field.win.5	I'll take those.	p0	d0.0	
+147	LINE	here	t1	s2	Gloria	field.doubleup.0	There's the double.	p0	d0.0	
+147	VOCAL	rail	t1	s-1			[The rail leans in: ooh.]	p0	d0.0	
+147	VOCAL	rail	t1	s-1			[A murmur, then light applause.]	p0	d1.2	
+148	LINE	here	t1	s2	Gloria	field.small.room.open.1	Listen to that slot floor. Somebody's hitting.	p0	d0.6	
+150	LINE	here	t1	s0	Seat 1	field.small.room.open.5	Somebody tell the slots to keep it down.	p0	d0.6	
 152	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 10,000 and 20,000, with a big blind ante of 20,000.	p1	d0.0	chime 
-152	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.2	Looks like six hundred-something from here. Don't spew it.	p0	d0.4	to-you 
-157	LINE	here	t3	s0	Priya	field.small.room.open.1	Listen to that slot floor. Somebody's hitting.	p0	d0.6	
-160	LINE	here	t3	s5	Sal	cast.sal.lose.1	Shoulda stayed home tonight.	p0	d0.0	
-160	VOCAL	rail	t3	s-1			[Polite applause.]	p0	d0.8	
-160	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 15,000 and 30,000, with a big blind ante of 30,000.	p1	d1.0	chime 
-160	CALL	here	t3	s-1	Dealer	dealer.cage.0	4th place. See the cage for $786.30. Good game.	p0	d3.0	
-166	LINE	here	t3	s0	Priya	field.small.room.open.5	Somebody tell the slots to keep it down.	p0	d0.6	
+152	LINE	here	t1	s0	Seat 1	field.needle.1	Every time I raise, huh?	p0	d0.6	to-you 
+152	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.short.2	Looks like a hundred-something. Find a good one.	p0	d3.7	to-you 
+154	LINE	here	t1	s5	Olga	field.small.food.open.2	What's good at the grill here? Don't say the wings.	p0	d0.6	
+154	LINE	here	t1	s4	Big Sam	field.small.food.reply.2	Coffee's free. That's the review.	p0	d5.7	
+158	LINE	here	t1	s0	Seat 1	field.needle.3	Keep folding. I'll keep raising.	p0	d0.6	to-you 
+159	VOCAL	rail	t1	s-1			[The rail leans in: ooh.]	p0	d0.0	
+159	LINE	here	t1	s4	Big Sam	field.small.food.open.4	Came up here on an empty stomach. Rookie move.	p0	d0.6	
+159	VOCAL	rail	t1	s-1			[Polite applause.]	p0	d0.8	
+159	VOCAL	rail	t1	s-1			[A murmur, then light applause.]	p0	d1.2	
+159	CALL	here	t1	s-1	Dealer	dealer.cage.0	6th place. See the cage for $534.93. Good game.	p0	d4.8	
+159	LINE	here	t1	s2	Gloria	field.goodbye.paid.2	I'll take the money and the bus. Good luck.	p0	d8.8	
+160	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 15,000 and 30,000, with a big blind ante of 30,000.	p1	d0.0	chime 
+160	LINE	here	t1	s1	Seat 2	field.small.online.2	Online you don't wait for the shuffle.	p0	d0.6	
+160	LINE	here	t1	s0	Seat 1	field.small.online.reply.3	Enjoy the cards. Real ones.	p0	d4.8	
+160	CALL	here	t1	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.7	
+162	VOCAL	rail	t1	s-1			[The rail leans in: ooh.]	p0	d0.0	
+162	VOCAL	rail	t1	s-1			[A murmur, then light applause.]	p0	d1.2	
+162	LINE	rail	t1	s-1	Mrs. Park	field.rail.1	Let's go, Jesse!	p0	d1.6	to-you shout
+163	VOCAL	rail	t1	s-1			[The rail leans in: ooh.]	p0	d0.0	
+163	LINE	here	t1	s4	Big Sam	field.suckout.2	Didn't deserve that one.	p0	d0.0	
+163	VOCAL	rail	t1	s-1			[A sharp "Ohh!" from the rail.]	p0	d1.2	
+163	VOCAL	rail	t1	s-1			[The rail groans.]	p0	d1.9	
+163	LINE	here	t1	s0	Seat 1	field.badbeat.5	Had jack-nine suited. Lost to queen-six on the turn. Sure.	p0	d2.7	
+165	VOCAL	rail	t1	s-1			[The rail leans in: ooh.]	p0	d0.0	
+165	CALL	here	t1	s-1	Dealer	dealer.cage.0	5th place. See the cage for $636.10. Good game.	p0	d0.0	
+165	VOCAL	rail	t1	s-1			[Polite applause.]	p0	d0.8	
+165	VOCAL	rail	t1	s-1			[A murmur, then light applause.]	p0	d1.2	
+165	LINE	here	t1	s4	Big Sam	field.goodbye.paid.0	Took a little something. Good luck, all.	p0	d4.0	
+166	VOCAL	rail	t1	s-1			[The rail leans in: ooh.]	p0	d0.0	
+166	LINE	here	t1	s5	Olga	field.cooler.2	Wrong place, wrong time.	p0	d0.0	
+166	VOCAL	rail	t1	s-1			[A sharp "Ohh!" from the rail.]	p0	d1.2	
+166	VOCAL	rail	t1	s-1			[The rail groans.]	p0	d1.9	
 168	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 20,000 and 40,000, with a big blind ante of 40,000.	p1	d0.0	chime 
-168	LINE	here	t3	s0	Priya	field.tank.1	No rush. I've got all night.	p0	d0.6	to-you 
-168	CALL	here	t3	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.7	
-168	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.0	Five hundred-something. You're fine.	p0	d10.0	to-you 
-174	VOCAL	rail	t3	s-1			[The rail leans in: ooh.]	p0	d0.0	
-174	CALL	here	t3	s-1	Dealer	dealer.cage.0	3rd place. See the cage for $1,033.42. Good game.	p0	d0.0	
-174	VOCAL	rail	t3	s-1			[Polite applause.]	p0	d0.8	
-174	VOCAL	rail	t3	s-1			[A murmur, then light applause.]	p0	d1.2	
-174	PA	pa	t0	s-1	Floor	pa.headsup.0	We're heads-up for the Embercrest Nightly title. Jesse Cole, 874,604. Maria G., 1,045,396.	p3	d2.2	chime 
-174	LINE	here	t3	s0	Priya	field.goodbye.paid.0	Took a little something. Good luck, all.	p0	d4.2	
-174	PA	pa	t0	s-1	Floor	pa.headsup.0	First place pays $2,935.	p3	d10.3	
-174	MOOD	HeadsUp
+168	LINE	here	t1	s0	Seat 1	field.needle.5	I'll show you one of these days. Maybe.	p0	d0.6	to-you 
+168	VOCAL	rail	t1	s-1			[Polite applause.]	p0	d0.8	
+168	CALL	here	t1	s-1	Dealer	dealer.cage.0	4th place. See the cage for $786.30. Good game.	p0	d4.3	
+168	LINE	here	t1	s5	Olga	field.goodbye.paid.2	I'll take the money and the bus. Good luck.	p0	d8.3	
+168	CALL	here	t1	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d12.3	
+168	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.short.0	Four hundred-something. Pick your spots.	p0	d14.5	to-you 
+171	LINE	here	t1	s0	Seat 1	field.win.0	Thank you.	p0	d0.0	
+172	VOCAL	rail	t1	s-1			[The rail leans in: ooh.]	p0	d0.0	
+172	LINE	rail	t0	s-1	Mrs. Park	stake.rail	Good. Now protect it.	p0	d0.4	to-you 
+172	VOCAL	rail	t1	s-1			[A murmur, then light applause.]	p0	d1.2	
+172	LINE	rail	t1	s-1	Boots	field.rail.2	That's it, Jesse!	p0	d2.7	to-you shout
+172	LINE	here	t1	s1	Seat 2	field.cooler.5	Set up. Happens.	p0	d4.5	
+172	LINE	here	t1	s0	Seat 1	field.small.room.open.2	This chair's been here since the eighties.	p0	d7.3	
 176	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 25,000 and 50,000, with a big blind ante of 50,000.	p1	d0.0	chime 
-176	CALL	here	t3	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.7	
-177	LINE	here	t3	s4	Maria G.	field.win.2	Ship it.	p0	d0.0	
+177	VOCAL	rail	t1	s-1			[The rail leans in: ooh.]	p0	d0.0	
+177	CALL	here	t1	s-1	Dealer	dealer.cage.0	3rd place. See the cage for $1,033.42. Good game.	p0	d0.0	
+177	VOCAL	rail	t1	s-1			[Polite applause.]	p0	d0.8	
+177	VOCAL	rail	t1	s-1			[A murmur, then light applause.]	p0	d1.2	
+177	PA	pa	t0	s-1	Floor	pa.headsup.0	We're heads-up for the Embercrest Nightly title. Seat 1, 749,692. Jesse Cole, 1,170,308.	p3	d2.2	chime 
+177	LINE	here	t1	s1	Seat 2	field.goodbye.paid.1	A cash is a cash. Night, all.	p0	d4.2	
+177	PA	pa	t0	s-1	Floor	pa.headsup.0	First place pays $2,935.	p3	d10.2	
+177	MOOD	HeadsUp
+183	LINE	here	t1	s0	Seat 1	field.win.1	I'll take it.	p0	d0.0	
 184	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 30,000 and 60,000, with a big blind ante of 60,000.	p1	d0.0	chime 
-184	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.1	Nine hundred-something, give or take. Keep going.	p0	d0.4	to-you 
+184	CALL	here	t1	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.7	
+184	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.2	Looks like over a million from here. Don't spew it.	p0	d10.0	to-you 
+191	LINE	here	t1	s0	Seat 1	field.needle.2	Folding again? I'm starting to like you.	p0	d0.6	to-you 
 192	PA	pa	t0	s-1	Floor	pa.break.0	Players, we are on a 15-minute break. Please be back in your seats when the clock says so.	p3	d0.0	chime 
 192	PA	pa	t0	s-1	Floor	pa.break.next.ante.0	When we come back, the blinds will be 40,000 and 80,000 with a 80,000 big blind ante.	p3	d8.5	
-192	CALL	here	t3	s-1	Dealer	dealer.break.0	Break, folks. Stretch your legs.	p0	d8.5	
-192	LINE	here	t3	s4	Maria G.	field.break.5	Anybody want anything from the bar?	p0	d11.6	
-192	PHONE	rail	t0	s-1	Mrs. Park	stake.break	Your count, please. To the chip.	p0	d15.4	to-you 
+192	CALL	here	t1	s-1	Dealer	dealer.break.0	Break, folks. Stretch your legs.	p0	d8.5	
+192	LINE	here	t1	s0	Seat 1	field.break.beat.2	Jack-nine suited against queen-six. I keep seeing that turn.	p0	d11.6	
 192	PA	pa	t0	s-1	Floor	pa.colorup.0	We're coloring up the yellow thousands on this break.	p3	d15.6	
+192	PHONE	rail	t0	s-1	Mrs. Park	stake.break	How many chips? Exactly, please.	p0	d17.1	to-you 
 192	PA	pa	t0	s-1	Floor	pa.colorup.0	Your dealer will make the change at your seat.	p3	d20.0	
 192	PA	pa	t0	s-1	Floor	pa.five.minutes.0	Five minutes, players. Five minutes left on the break.	p1	d24.3	
 192	PA	pa	t0	s-1	Floor	pa.break.over.0	Players, the break is over. Please take your seats, the cards are in the air.	p2	d29.1	chime 
 192	MOOD	Break
 192	MOOD	HeadsUp
-199	LINE	here	t3	s4	Maria G.	field.win.4	There we go.	p0	d0.0	
+195	LINE	here	t1	s0	Seat 1	field.needle.0	You can have the next one, champ.	p0	d0.6	to-you 
+196	LINE	here	t1	s0	Seat 1	field.win.2	Ship it.	p0	d0.0	
+197	LINE	here	t1	s0	Seat 1	field.win.3	Come to me.	p0	d0.0	
+198	LINE	here	t1	s0	Seat 1	field.win.4	There we go.	p0	d0.0	
 200	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 50,000 and 100,000, with a big blind ante of 100,000.	p1	d0.0	chime 
-200	CALL	here	t3	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.9	
-200	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.2	Looks like eight hundred-something from here. Don't spew it.	p0	d10.1	to-you 
-201	LINE	here	t3	s4	Maria G.	field.win.3	Come to me.	p0	d0.0	
-208	PA	pa	t0	s-1	Floor	pa.level.ante.0	Players, the blinds are now 60,000 and 120,000, with a big blind ante of 120,000.	p1	d0.0	chime 
-208	CALL	here	t3	s-1	Dealer	dealer.blinds.0	Blinds are up.	p0	d7.9	
-209	VOCAL	rail	t3	s-1			[The rail leans in: ooh.]	p0	d0.0	
-209	VOCAL	rail	t3	s-1			[A murmur, then light applause.]	p0	d1.2	
-209	PA	pa	t0	s-1	Floor	pa.champion.0	Ladies and gentlemen, your Embercrest Nightly champion... Maria G.!	p3	d2.2	chime 
-209	VOCAL	rail	t3	s-1			[The rail cheers.]	p0	d8.5	
-209	VOCAL	pa	t0	s-1			[Applause.]	p0	d9.1	
-209	LINE	rail	t0	s-1	Mrs. Park	stake.rail	It happens. Write the hand down tonight.	p0	d9.5	to-you 
-209	MOOD	Champion
-209	MOOD	After
+200	LINE	rail	t0	s-1	Mrs. Park	field.rail.read.0	Seven hundred-something. You're fine.	p0	d0.4	to-you 
+202	VOCAL	rail	t1	s-1			[The rail leans in: ooh.]	p0	d0.0	
+202	LINE	here	t1	s0	Seat 1	field.goodbye.felted.2	Well played tonight.	p0	d0.0	to-you 
+202	VOCAL	rail	t1	s-1			[A sharp "Ohh!" from the rail.]	p0	d1.2	
+202	VOCAL	rail	t1	s-1			[The rail groans.]	p0	d1.9	
+202	PA	pa	t0	s-1	Floor	pa.champion.seat.0	Ladies and gentlemen, we have a champion. Congratulations to table 1, seat 1!	p3	d2.9	chime 
+202	VOCAL	rail	t1	s-1			[The rail cheers.]	p0	d9.9	
+202	VOCAL	pa	t0	s-1			[Applause.]	p0	d10.5	
+202	LINE	rail	t0	s-1	Mrs. Park	stake.rail	It happens. Write the hand down tonight.	p0	d10.9	to-you 
+202	MOOD	Champion
+202	MOOD	After

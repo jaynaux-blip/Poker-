@@ -441,8 +441,8 @@ const std::vector<Template>& FloorTemplates()
 		{"pa.colorup", "We're coloring up the {Denoms} on this break. Your dealer will make the change at your seat."},
 		{"pa.five.minutes", "Five minutes, players. Five minutes left on the break."},
 		{"pa.break.over", "Players, the break is over. Please take your seats, the cards are in the air."},
-		{"pa.away", "Players, we are {Away} away from the money. {Paid} places are paid, and a min-cash is {MinCash}."},
-		{"pa.h4h", "Players, we are on the bubble. We're now hand for hand. Dealers, please hold your decks until every table has finished the hand."},
+		{"pa.away", "Players, we are {Away} away from the money. {Paid} {PlacesAre} paid, and a min-cash is {MinCash}."},
+		{"pa.h4h", "Players, we are now hand for hand. Dealers, please hold your decks until every table has finished the hand."},
 		{"pa.h4h.call", "We have an all-in and a call at table {Table}."},
 		{"pa.h4h.done", "All tables complete. Dealers, next hand."},
 		{"pa.bubble", "And that's the bubble! {Name}, thank you for playing. Congratulations, everyone remaining is in the money."},
@@ -550,6 +550,20 @@ const std::vector<Template>& FreshTemplates()
 	return All;
 }
 
+const std::vector<Template>& FloorLaterTemplates()
+{
+	// The floor's calls added since the fresh books: after them in the inventory, so every older template keeps its number.
+	static const std::vector<Template> All = {
+		// One from the money (room::Director: walked down to it, or the field's jump there called with hand for hand).
+		{"pa.onbubble", "Players, we are on the bubble."},
+		// The away call's form when the field jumps straight to one away: on the bubble, then what's paid (said once).
+		{"pa.away.bubble", "Players, we are on the bubble. {Paid} {PlacesAre} paid, and a min-cash is {MinCash}."},
+		// Hand for hand at a lone table: no other table for the dealer to wait on.
+		{"pa.h4h.lone", "Players, we are now hand for hand."},
+	};
+	return All;
+}
+
 // ------------------------------------------------------------------ the Back Room's eight, word for word
 
 struct CastSet
@@ -648,7 +662,7 @@ const std::vector<Indexed>& Everything()
 	static const std::vector<Indexed> All = [] {
 		std::vector<Indexed> Out;
 		std::map<std::string, int> Seen;
-		for (const std::vector<Template>* Set : {&FieldTemplates(), &DealerTemplates(), &FloorTemplates(), &FreshTemplates()})
+		for (const std::vector<Template>* Set : {&FieldTemplates(), &DealerTemplates(), &FloorTemplates(), &FreshTemplates(), &FloorLaterTemplates()})
 		{
 			for (const Template& T : *Set)
 			{

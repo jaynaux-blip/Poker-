@@ -3203,10 +3203,14 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 			Sound(SoundId::Level, 1.0);
 			break;
 		case TEventType::HandForHand:
-			SystemLine("We are on the bubble. Hand-for-hand play.");
+		{
+			// Hand for hand starts two from the money (three with seven tables and more); the bubble is one from it, as the
+			// card room's floor says it (room::Director).
+			const int Away = T->Remaining - T->PaidPlaces();
+			SystemLine(Away <= 1 ? "We are on the bubble. Hand-for-hand play." : "Hand-for-hand play.");
 			CurrentBanner.Active = true;
-			CurrentBanner.Title = "THE BUBBLE";
-			CurrentBanner.Sub = std::to_string(T->Remaining - T->PaidPlaces()) + " away from the money";
+			CurrentBanner.Title = Away <= 1 ? "THE BUBBLE" : "HAND FOR HAND";
+			CurrentBanner.Sub = std::to_string(Away) + " away from the money";
 			CurrentBanner.At = Now;
 			CurrentBanner.Color = session_detail::Orange;
 			Sound(SoundId::Bubble, 1.0);
@@ -3216,6 +3220,7 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 				StoryText("dee-bubble", "Dee", "Bubble? Breathe. Fold the trash, shove the good ones. Nobody remembers who min-cashed scared.");
 			}
 			break;
+		}
 		case TEventType::Bubble:
 			SystemLine(E.Name + " bursts the bubble. Everyone left is in the money!");
 			if (!T->Hero().Busted)

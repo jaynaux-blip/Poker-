@@ -262,11 +262,14 @@ bool DrewAMove(const DrawList& L)
 int CutPlanLines(const DrawList& L)
 {
 	const std::string Ellipsis = "\xE2\x80\xA6";
+	// A tab's "AUTO · <style> 8x · thinking…" ends in its own ellipsis, whole (RiverLineAuto.cpp): not a cut.
+	const std::string Thinking = " thinking\xE2\x80\xA6";
 	int Cut = 0;
 	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
 	{
 		const std::string& T = Cmd.Text.Text;
-		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || T.size() < Ellipsis.size() || T.compare(T.size() - Ellipsis.size(), Ellipsis.size(), Ellipsis) != 0)
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || T.size() < Ellipsis.size() || T.compare(T.size() - Ellipsis.size(), Ellipsis.size(), Ellipsis) != 0 ||
+			(T.size() >= Thinking.size() && T.compare(T.size() - Thinking.size(), Thinking.size(), Thinking) == 0))
 		{
 			continue;
 		}

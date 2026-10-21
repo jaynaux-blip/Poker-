@@ -6,7 +6,9 @@
 // - TableSizing: the presets, defaults, steps and labels of §6.2 D on real hands (unopened with an ante, facing a raise
 //   out of position, a flop bet, a raise of a bet, a cash game with no ante), every preset a legal raise;
 // - HandRecallHonest: a hand's record holds only what the player saw (their cards, the board as dealt, the actions, the
-//   hands turned up), and survives the checkpoint's text.
+//   hands turned up), and survives the checkpoint's text;
+// - HandForHandWords: online, hand for hand is "Hand-for-hand play." under HAND FOR HAND at two and more from the money,
+//   "on the bubble" (THE BUBBLE) only at one.
 #include "SessionSeg.h"
 
 #include "ShortStack/AI/Profiles.h"
@@ -17,6 +19,7 @@
 #include "ShortStack/UI/TableHud.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -413,6 +416,84 @@ void HandRecallHonest()
 		Expect(Pre.Board.empty() && Pre.Shown.empty(), "HandRecallHonest: no board when it ended preflop");
 	}
 }
+
+/**
+ * Online, hand for hand (round 4): "Hand-for-hand play." under HAND FOR HAND at two and more from the money, "on the
+ * bubble" (THE BUBBLE) only at one, as the card room's floor says it. The $0.25 Hyper Sprint cut to twenty runners (two
+ * tables, three paid) is played through to hand for hand, the player taking the grader's best option, night after night
+ * until the engine has called it both at two from the money and at one (the field jumping there in one hand); each call's
+ * line and banner are read against how far the money is when it's made.
+ */
+void HandForHandWords()
+{
+	ss::LobbyEvent Listing = ss::Lobby()[1];
+	Listing.Spec.Entrants = 20;
+	int OneAway = 0;
+	int Further = 0;
+	int Nights = 0;
+	std::string Problem;
+	for (char Seed = 'a'; Seed <= 'x' && (OneAway == 0 || Further == 0); ++Seed)
+	{
+		++Nights;
+		Hooks H;
+		ss::Session S(H, std::string("h4h-words-") + Seed);
+		S.CurrentScreen = ss::Screen::Lobby;
+		S.BankrollCents = 10000;
+		S.RegisterEvent(Listing);
+		if (!S.T)
+		{
+			Problem = ": no table";
+			break;
+		}
+		double Now = 0.0;
+		std::string Line;
+		int Away = 0;
+		for (int Frames = 0; Frames < 400000 && Line.empty() && S.CurrentScreen == ss::Screen::Table; ++Frames)
+		{
+			Now += 1.0 / 30.0;
+			S.Update(Now);
+			for (const ss::ChatLine& L : S.Chat) // the chat keeps its last 80 lines: read whole, every frame
+			{
+				if (Line.empty() && L.Kind == ss::ChatKind::System && L.Text.find("Hand-for-hand") != std::string::npos)
+				{
+					Line = L.Text;
+					Away = S.T ? S.T->Remaining - S.T->PaidPlaces() : 0;
+				}
+			}
+			if (S.HasPrompt && Now - S.Prompt.OpenedAt > 0.3)
+			{
+				const std::vector<ss::OptionEV>& Opts = S.Prompt.Analysis.Options;
+				size_t Best = 0;
+				for (size_t I = 1; I < Opts.size(); ++I)
+				{
+					Best = Opts[I].Ev > Opts[Best].Ev ? I : Best;
+				}
+				S.HeroAct(Opts.empty() ? ss::PlayerAction::Fold() : Opts[Best].Action);
+			}
+		}
+		if (Line.empty())
+		{
+			continue; // out before hand for hand
+		}
+		// The banner, unless the player's own bust took its place in the same hand.
+		const std::string& Title = S.CurrentBanner.Title;
+		const bool Banner = Title == "HAND FOR HAND" || Title == "THE BUBBLE";
+		const bool Right = Away == 1 ? Line == "We are on the bubble. Hand-for-hand play." && (!Banner || Title == "THE BUBBLE")
+									 : Away >= 2 && Line == "Hand-for-hand play." && (!Banner || Title == "HAND FOR HAND");
+		std::printf("  hand for hand online (night %c): %d from the money, \"%s\" under %s (%s)\n", Seed, Away, Line.c_str(), Title.c_str(), S.CurrentBanner.Sub.c_str());
+		OneAway += Away == 1 && Banner ? 1 : 0;
+		Further += Away >= 2 && Banner ? 1 : 0;
+		if (!Right && Problem.empty())
+		{
+			Problem = ": \"" + Line + "\" under " + Title + ", " + std::to_string(Away) + " from the money";
+		}
+	}
+	Expect(Problem.empty() && OneAway >= 1 && Further >= 1, ("HandForHandWords: hand for hand online is \"Hand-for-hand play.\" (HAND FOR HAND) at two and more from the money, "
+															 "\"on the bubble\" (THE BUBBLE) at one (" +
+															 std::to_string(Further) + " at two and more, " + std::to_string(OneAway) + " at one, " +
+															 std::to_string(Nights) + " nights" + Problem + ")")
+															.c_str());
+}
 } // namespace tableui_seg
 
 void SegTableUi()
@@ -420,5 +501,6 @@ void SegTableUi()
 	tableui_seg::EmbercrestClock();
 	tableui_seg::TableSizing();
 	tableui_seg::HandRecallHonest();
+	tableui_seg::HandForHandWords();
 }
 } // namespace session_test

@@ -133,18 +133,30 @@ void SprintTournament()
 	S.CurrentPace = ss::Pace::Sprint;
 	ss::Rng Choice("sprint-choices");
 	int Decisions = 0;
-	int Stops = 0;
+	int Sprinted = 0; // decisions put to the hero while the sprint was still on: none, ever
 	double Now = 0.0;
-	while (S.CurrentScreen == ss::Screen::Table && Stops < 10)
+	// PlayOut's loop, counting the prompts by pace: a sprint plays by itself until it stops (approaching the bubble, the
+	// final table); a deep run hands the seat back there, and those decisions are the hero's (the 2026-10-20 limp fix
+	// sent this freeroll's hero past the bubble).
+	for (int Frames = 0; S.CurrentScreen == ss::Screen::Table && Frames < 4000000; ++Frames)
 	{
-		Now = PlayOut(S, Choice, Now, Decisions);
-		break;
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		if (S.HasPrompt && Now - S.Prompt.OpenedAt > 0.5)
+		{
+			++Decisions;
+			Sprinted += S.CurrentPace == ss::Pace::Sprint ? 1 : 0;
+			const double Roll = Choice.Next();
+			S.HeroAct(Roll < 0.15 && S.Prompt.CanRaise ? ss::PlayerAction::RaiseTo(static_cast<double>(S.Prompt.RaiseTo))
+					  : Roll < 0.75 || S.Prompt.CanCheck ? (S.Prompt.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Call())
+														  : ss::PlayerAction::Fold());
+		}
 	}
-	(void)Stops;
 	Expect(S.CurrentScreen == ss::Screen::Results, "sprint tournament reaches results");
-	std::printf("  freeroll with sprint: finished %s of %d after %d hands (%d hero decisions), cans %d\n",
-		ss::Ordinal(S.LastResults.Place).c_str(), S.LastResults.Entrants, S.LastResults.Hands, Decisions, H.Cans);
-	Expect(S.LastResults.Hands > 5 && Decisions == 0, "sprint plays the hands by itself");
+	std::printf("  freeroll with sprint: finished %s of %d after %d hands (%d hero decisions, %d while sprinting; stopped: %s), cans %d\n",
+		ss::Ordinal(S.LastResults.Place).c_str(), S.LastResults.Entrants, S.LastResults.Hands, Decisions, Sprinted,
+		S.SprintStopReason.empty() ? "no" : S.SprintStopReason.c_str(), H.Cans);
+	Expect(S.LastResults.Hands > 5 && Sprinted == 0 && (Decisions == 0 || !S.SprintStopReason.empty()), "sprint plays the hands by itself until it stops");
 }
 
 /** A hero that always takes the grader's best option: goes deep, so the bubble and final table get exercised. */
@@ -6711,7 +6723,8 @@ bool JourneyUpload(ss::Session& S, pacing::Career& C, double& Now)
 {
 	for (const ss::video::Candidate& X : S.VideoCandidates())
 	{
-		if (X.Source == 0 && X.Site != 0 && ss::sponsor::WouldStrike(S.Life.Sponsors, X.Site, false, true))
+		// Any online hand on a rival's table: the player's (Source 0) or the plan's (3), as Studio's warning reads them.
+		if ((X.Source == 0 || X.Source == 3) && X.Site != 0 && ss::sponsor::WouldStrike(S.Life.Sponsors, X.Site, false, true))
 		{
 			continue;
 		}

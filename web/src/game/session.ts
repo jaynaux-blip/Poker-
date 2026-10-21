@@ -796,12 +796,16 @@ export class Session {
           this.lastLevelUpAt = this.now;
           this.hooks.sound('level');
           break;
-        case 'handForHand':
-          this.system('We are on the bubble. Hand-for-hand play.');
-          this.banner = { title: 'THE BUBBLE', sub: `${t.remaining - t.paidPlaces} away from the money`, at: this.now, color: '#f28a3a' };
+        case 'handForHand': {
+          // Hand for hand starts two from the money (three with seven tables and more); the bubble is one from it, as the
+          // card room's floor says it (Session.cpp, room::Director).
+          const away = t.remaining - t.paidPlaces;
+          this.system(away <= 1 ? 'We are on the bubble. Hand-for-hand play.' : 'Hand-for-hand play.');
+          this.banner = { title: away <= 1 ? 'THE BUBBLE' : 'HAND FOR HAND', sub: `${away} away from the money`, at: this.now, color: '#f28a3a' };
           this.hooks.sound('bubble');
           if (!t.hero.busted) this.storyText('dee-bubble', 'Dee', 'Bubble? Breathe. Fold the trash, shove the good ones. Nobody remembers who min-cashed scared.');
           break;
+        }
         case 'bubble':
           this.system(`${e.bubbleName} bursts the bubble. Everyone left is in the money!`);
           if (!t.hero.busted) {

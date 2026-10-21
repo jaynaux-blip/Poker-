@@ -304,6 +304,15 @@ private:
 	std::map<std::string, std::string> RoomVars(const Tournament& T) const;
 	void Pa(const Tournament& T, const std::string& Name, std::map<std::string, std::string> Vars, int Priority, bool Chime, const std::string& Speaker = "Floor",
 		bool Routine = true);
+	/** Floor calls said as one announcement (PaTogether): each call's name and its vars, in the order they're said. */
+	using FloorCalls = std::vector<std::pair<std::string, std::map<std::string, std::string>>>;
+	/**
+	 * One announcement of the calls in turn (the floor's milestones near the money): one chime, one "Players," (the calls
+	 * after the first without theirs), and a key naming every call's template ("pa.away.0+pa.h4h.0"). One call: Pa's.
+	 */
+	void PaTogether(const Tournament& T, const FloorCalls& Calls, int Priority);
+	/** An announcement's parts on the PA, in caption-sized parts (Pa's and PaTogether's). */
+	void Announce(const talk::Said& S, int Priority, bool Chime, const std::string& Speaker);
 	void Call(const Tournament& T, const std::string& Name, std::map<std::string, std::string> Vars, int TableId, float Effort, const std::string& Speaker = "Dealer",
 		bool AtHero = false);
 	/** Who calls the player's name from the rail: a backer there, or someone out tonight who knows them (false: nobody). */
@@ -313,6 +322,12 @@ private:
 		bool Reaction = false);
 	void Vocal(audio::Vocal V, From Where, int TableId, int Count, const std::string& Sound, double Delay);
 	void RailSay(const Tournament& T, int Moment, const std::string& Text = std::string(), const std::string& Key = std::string());
+	/**
+	 * The floor's calls near the money, each once, added to Calls when due: how far from the money (three away, or two when
+	 * the field jumps there; a jump to one is the away call's on-the-bubble form), and on the bubble (one away). Milestones
+	 * says them; at hand for hand they open its call.
+	 */
+	void Away(const Tournament& T, FloorCalls& Calls);
 	void Milestones(const Tournament& T, double World);
 	void Showdown(const Tournament& T, const HandNote& H, const std::vector<Seen>& Table, int TableId);
 	void Chatter(const Tournament& T, const HandNote& H, const std::vector<Seen>& Table);

@@ -828,10 +828,11 @@ void CheckTourneyResult(Checker& K, int LineNo, const Tokens& T, const std::stri
 }
 } // namespace golden_detail
 
-GoldenResult RunGoldenVectors(const std::string& FileText)
+GoldenResult RunGoldenVectors(const std::string& FileText, bool Rewrite)
 {
 	using namespace golden_detail;
 	Checker K;
+	const std::string Eol = FileText.find("\r\n") != std::string::npos ? "\r\n" : "\n";
 	size_t Start = 0;
 	int LineNo = 0;
 	while (Start < FileText.size())
@@ -847,6 +848,12 @@ GoldenResult RunGoldenVectors(const std::string& FileText)
 		const std::string Line = FileText.substr(Start, Len);
 		Start = End + 1;
 		++LineNo;
+		// Rewrite: every line as it was but a tournament's ticks and result, written as this build plays them (the ticks
+		// right after their tourney line, below). The file's last line keeps its ending, or lack of one.
+		if (Rewrite && Line.rfind("tick ", 0) != 0 && Line.rfind("tresult ", 0) != 0 && (End < FileText.size() || !Line.empty()))
+		{
+			K.Result.Rewritten += Line + (End < FileText.size() ? Eol : std::string());
+		}
 		if (Line.empty() || Line[0] == '#')
 		{
 			continue;
@@ -876,9 +883,23 @@ GoldenResult RunGoldenVectors(const std::string& FileText)
 		else if (Type == "payout") CheckPayout(K, LineNo, T);
 		else if (Type == "icm") CheckIcm(K, LineNo, T);
 		else if (Type == "names") CheckNames(K, LineNo, T);
-		else if (Type == "tourney") RunTourney(K, T);
+		else if (Type == "tourney")
+		{
+			RunTourney(K, T);
+			for (const std::string& Tick : Rewrite ? K.PendingTicks[T[1]] : std::deque<std::string>())
+			{
+				K.Result.Rewritten += "tick " + T[1] + " " + Tick + Eol;
+			}
+		}
 		else if (Type == "tick") CheckTick(K, LineNo, T, Line);
-		else if (Type == "tresult") CheckTourneyResult(K, LineNo, T, Line);
+		else if (Type == "tresult")
+		{
+			CheckTourneyResult(K, LineNo, T, Line);
+			if (Rewrite)
+			{
+				K.Result.Rewritten += "tresult " + T[1] + " " + K.TourneyResults[T[1]] + (End < FileText.size() ? Eol : std::string());
+			}
+		}
 		else K.Skip(Type);
 	}
 	std::string Summary;

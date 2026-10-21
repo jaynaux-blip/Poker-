@@ -59,6 +59,7 @@ enum Milestone : int
 	SaidHeadsUp,
 	SaidChampion,
 	SaidCourtesy,
+	SaidOnBubble, // after the rest: a night kept before it reads with it unsaid
 };
 
 uint32_t Fnv(const std::string& S, uint32_t H = 2166136261u)
@@ -1232,6 +1233,7 @@ std::map<std::string, std::string> Director::RoomVars(const Tournament& T) const
 	V["Players"] = std::to_string(T.Spec.Entrants);
 	V["Pool"] = talk::Dollars(T.PrizePoolCents);
 	V["Paid"] = std::to_string(T.PaidPlaces());
+	V["PlacesAre"] = T.PaidPlaces() == 1 ? "place is" : "places are"; // "{Paid} {PlacesAre} paid": "1 place is paid", "14 places are paid"
 	V["MinCash"] = T.Payouts.empty() ? std::string() : talk::Dollars((T.Payouts.back() + 50) / 100 * 100); // the floor rounds to the dollar
 	V["Left"] = std::to_string(T.Remaining);
 	V["Hero"] = HeroFirst;
@@ -1304,6 +1306,41 @@ void Director::Pa(const Tournament& T, const std::string& Name, std::map<std::st
 	{
 		PaFree = Engine + PaGap;
 	}
+	Announce(S, Priority, Chime, Speaker);
+}
+
+void Director::PaTogether(const Tournament& T, const FloorCalls& Calls, int Priority)
+{
+	// As the floor says it in one breath (how far from the money, then hand for hand): one chime and one "Players,". The
+	// key names each call's template, so nothing keyed to one of them (a recorded line) is played for the whole. Each
+	// call's line is the one Pa would pick for it, and the routine PA waits after it as after Pa's.
+	static const std::string Players = "Players, ";
+	talk::Said All;
+	for (const auto& Call : Calls)
+	{
+		const talk::Said S = talk::Floor(Call.first, Call.second, Hash("pa:" + Call.first + ":" + std::to_string(T.Tick)));
+		if (S.Text.empty())
+		{
+			continue;
+		}
+		std::string Text = S.Text;
+		if (!All.Text.empty() && Text.size() > Players.size() && Text.compare(0, Players.size(), Players) == 0)
+		{
+			Text = talk::Capitalized(Text.substr(Players.size()));
+		}
+		All.Text += (All.Text.empty() ? "" : " ") + Text;
+		All.Key += (All.Key.empty() ? "" : "+") + S.Key;
+	}
+	if (All.Text.empty())
+	{
+		return;
+	}
+	PaFree = Engine + PaGap;
+	Announce(All, Priority, true, "Floor");
+}
+
+void Director::Announce(const talk::Said& S, int Priority, bool Chime, const std::string& Speaker)
+{
 	// One announcement, a caption-sized part at a time: the chime, then the floor reads straight through.
 	const std::vector<std::string> Parts = SplitAnnouncement(S.Text);
 	for (size_t I = 0; I < Parts.size(); ++I)
@@ -1954,7 +1991,13 @@ void Director::Events(const Tournament& T, const std::vector<TEvent>& E, double 
 			if (!Has(SaidH4H))
 			{
 				Mark(SaidH4H);
-				Pa(T, "h4h", RoomVars(T), 3, true);
+				// One announcement: how far the money is when the field got here in one hand (on the bubble, at one away),
+				// then hand for hand; one chime and one "Players," however many calls it carries.
+				// At a lone table there's no other table for its dealer to wait on: the rule without the decks.
+				FloorCalls Calls;
+				Away(T, Calls);
+				Calls.push_back({T.Tables.size() == 1 ? "h4h.lone" : "h4h", RoomVars(T)});
+				PaTogether(T, Calls, 3);
 				if (Here >= 0)
 				{
 					TalkCursor = std::max(TalkCursor, PaCursor);
@@ -1969,6 +2012,7 @@ void Director::Events(const Tournament& T, const std::vector<TEvent>& E, double 
 				Mark(SaidBubble);
 				Mark(SaidH4H);
 				Mark(SaidAway);
+				Mark(SaidOnBubble); // defensive: Away marks it in the money, but Milestones skips Away on a burst that ends the night (one paid)
 				BurstTick = T.Tick;
 				const Seen B = Find(T, Ev.Name);
 				const std::string Name = Spoken(B);
@@ -1984,7 +2028,9 @@ void Director::Events(const Tournament& T, const std::vector<TEvent>& E, double 
 					V["Seat"] = std::to_string(live::SeatLabel(B.Seat));
 					Pa(T, "bubble.seat", V, 3, true);
 				}
-				Vocal(audio::Vocal::Applause, From::Pa, 0, 40, "[Applause all around.]", 1.4);
+				// The room answers the call, after it (as at the final table): a fixed delay came before it when the floor had
+				// already spoken that hand (a paid bust called first).
+				Vocal(audio::Vocal::Applause, From::Pa, 0, 40, "[Applause all around.]", PaCursor);
 				if (Here >= 0)
 				{
 					// One or two at the table, the sociable ones, once the floor has said it (and the bubble's name only
@@ -2286,6 +2332,50 @@ void Director::FinalTableCalls(const Tournament& T)
 	Mark(SaidIntros);
 }
 
+void Director::Away(const Tournament& T, FloorCalls& Calls)
+{
+	// Three away from the money (or two, when the field jumps past three in one hand): said once, before hand for hand
+	// when they come together (as a floor says it: how far, then the rule). Then on the bubble, once, at one away: the
+	// field walked down to it, or jumped there with the rest in one call. A jump straight to one away is said once, as a
+	// floor would: on the bubble, what's paid, then the rule (no "one away from the money" and then "on the bubble"). The
+	// burst is its own call.
+	const int Left = T.Remaining - T.PaidPlaces();
+	if (!Has(SaidAway))
+	{
+		if (T.InTheMoney())
+		{
+			Mark(SaidAway);
+		}
+		else if (Left <= 3 && Has(SaidStart))
+		{
+			Mark(SaidAway);
+			std::map<std::string, std::string> V = RoomVars(T);
+			if (Left == 1 && !Has(SaidOnBubble))
+			{
+				Mark(SaidOnBubble);
+				Calls.push_back({"away.bubble", V});
+			}
+			else
+			{
+				V["Away"] = talk::NumberWords(Left);
+				Calls.push_back({"away", V});
+			}
+		}
+	}
+	if (!Has(SaidOnBubble))
+	{
+		if (T.InTheMoney())
+		{
+			Mark(SaidOnBubble);
+		}
+		else if (Left == 1 && Has(SaidStart))
+		{
+			Mark(SaidOnBubble);
+			Calls.push_back({"onbubble", RoomVars(T)});
+		}
+	}
+}
+
 void Director::Milestones(const Tournament& T, double World)
 {
 	(void)World;
@@ -2293,22 +2383,11 @@ void Director::Milestones(const Tournament& T, double World)
 	{
 		return;
 	}
-	const int Paid = T.PaidPlaces();
-	// Three away from the money (or two, when the field jumps past three in one hand).
-	if (!Has(SaidAway))
+	FloorCalls Calls;
+	Away(T, Calls);
+	if (!Calls.empty())
 	{
-		const int Away = T.Remaining - Paid;
-		if (T.InTheMoney() || Away <= 1)
-		{
-			Mark(SaidAway);
-		}
-		else if (Away <= 3 && Has(SaidStart))
-		{
-			Mark(SaidAway);
-			std::map<std::string, std::string> V = RoomVars(T);
-			V["Away"] = talk::NumberWords(Away);
-			Pa(T, "away", V, 2, true);
-		}
+		PaTogether(T, Calls, 2);
 	}
 	if (!Has(SaidTwoTables) && T.Tables.size() <= 2)
 	{
@@ -2413,11 +2492,12 @@ void Director::Rounds(const Tournament& T, const std::vector<TableRound>& R)
 			Call(T, "table.allin", V, Round.TableId, 0.6f);
 		}
 	}
-	// Hand for hand: the floor sends the room on after any hand with an all-in, otherwise every third hand.
+	// Hand for hand: the floor sends the room on after any hand with an all-in, otherwise every third hand. A lone table
+	// has no other tables to wait for, so nothing to call complete (the hands still count).
 	if (H4H && !T.InTheMoney() && Has(SaidH4H))
 	{
 		++H4HHands;
-		if (AnyAllIn || H4HHands % 3 == 0)
+		if (T.Tables.size() > 1 && (AnyAllIn || H4HHands % 3 == 0))
 		{
 			Pa(T, "h4h.done", {}, 1, false);
 		}
@@ -2738,7 +2818,10 @@ void Director::Greetings(const Tournament& T)
 
 void Director::Chatter(const Tournament& T, const HandNote& H, const std::vector<Seen>& Table)
 {
-	if (OnBreak || !Has(SaidStart) || Current == Mood::HandForHand || Current == Mood::Champion || Current == Mood::After || Current == Mood::Burst || Current == Mood::HeadsUp)
+	// Hand for hand is reactions only, from the hand that took the room there: Hand runs before the mood turns (its busts
+	// are in the engine already), so the engine's word counts as well as the mood's (as Rounds reads it).
+	if (OnBreak || !Has(SaidStart) || Current == Mood::HandForHand || T.HandForHand() || Current == Mood::Champion || Current == Mood::After || Current == Mood::Burst ||
+		Current == Mood::HeadsUp)
 	{
 		return;
 	}
@@ -3504,6 +3587,10 @@ void Director::Resume(const Tournament& T, const std::string& State, double Worl
 	if (T.InTheMoney() || T.Remaining <= T.PaidPlaces() + 3)
 	{
 		Mark(SaidAway);
+	}
+	if (T.InTheMoney() || T.Remaining <= T.PaidPlaces() + 1)
+	{
+		Mark(SaidOnBubble);
 	}
 	if (T.InTheMoney() || T.HandForHand())
 	{

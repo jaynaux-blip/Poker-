@@ -158,6 +158,9 @@ BotDecision MakeChoice(const PlayerAction& Action, double ThinkMs, double Equity
 	return D;
 }
 
+/** The premiums that never fold to a limp, whatever the profile's ranges (HandPercentile: the top 3% of combos). */
+constexpr double LimpKeepPct = 0.03;
+
 BotDecision Preflop(const PlayerView& V, const Profile& P, double Pressure, const BotContext& Ctx)
 {
 	Rng& R = *Ctx.R;
@@ -217,6 +220,13 @@ BotDecision Preflop(const PlayerView& V, const Profile& P, double Pressure, cons
 				return Act(PlayerAction::RaiseTo(Bb * (3.5 + Sum.Limpers) * P.Sizing), 0.35);
 			}
 			if (Pct <= Open * 1.3 && R.Chance(0.5 + P.LimpRate * 0.5))
+			{
+				return Act(PlayerAction::Call(), 0.3);
+			}
+			// A hand worth an iso-raise, or a premium (the top 3%: aces to jacks, big slick), never folds to a limp: when both
+			// rolls miss it limps behind. It used to fold (aces 8.5% of the time at Sharpness 0.80); fixed at the user's call,
+			// 2026-10-20. The rolls above are drawn exactly as before, so only those folds change.
+			if (Pct <= Open * 0.55 || Pct <= LimpKeepPct)
 			{
 				return Act(PlayerAction::Call(), 0.3);
 			}

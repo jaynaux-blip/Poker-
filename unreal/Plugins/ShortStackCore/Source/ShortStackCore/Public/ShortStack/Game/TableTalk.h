@@ -108,9 +108,10 @@ SHORTSTACKCORE_API Said Dealer(const std::string& Call, const Context& C);
 /**
  * The floor on the PA (§4.7): "desk.open", "ten.minutes", "start", "start.late", "start.closed", "level", "level.ante",
  * "last.call", "reg.closed", "break", "break.next", "break.next.ante", "colorup", "five.minutes", "break.over", "away",
- * "h4h", "h4h.call", "h4h.done", "bubble", "bubble.seat", "bust", "bust.paid", "table.breaking", "moved", "two.tables",
- * "final", "final.honor.title" / ".own" / ".article", "intro.open", "intro.seat", "intro.seat.title" / ".own" /
- * ".article" / ".nameless", "headsup", "champion", "champion.dee.hero", "champion.seat", "cancelled", "courtesy".
+ * "away.bubble", "onbubble", "h4h", "h4h.lone", "h4h.call", "h4h.done", "bubble", "bubble.seat", "bust", "bust.paid",
+ * "table.breaking", "moved", "two.tables", "final", "final.honor.title" / ".own" / ".article", "intro.open", "intro.seat",
+ * "intro.seat.title" / ".own" / ".article" / ".nameless", "headsup", "champion", "champion.dee.hero", "champion.seat",
+ * "cancelled", "courtesy".
  */
 SHORTSTACKCORE_API Said Floor(const std::string& Call, const std::map<std::string, std::string>& Vars, uint32_t Salt);
 /** The Back Room's eight, word for word: Small (their chat), Win, Lose, Noticed (when you stare), Goodbye (leaving a

@@ -124,6 +124,9 @@ function isInPosition(view: PlayerView): boolean {
 
 // ------------------------------------------------------------------ preflop
 
+/** The premiums that never fold to a limp, whatever the profile's ranges (the top 3% of combos). */
+const LIMP_KEEP_PCT = 0.03;
+
 function preflop(view: PlayerView, p: Profile, pressure: number, ctx: BotContext): Choice {
   const rng = ctx.rng;
   const bb = bbOf(view);
@@ -168,6 +171,9 @@ function preflop(view: PlayerView, p: Profile, pressure: number, ctx: BotContext
         return act({ type: 'raise', to: bb * (3.5 + sum.limpers) * p.sizing }, 0.35);
       }
       if (pct <= open * 1.3 && rng.chance(0.5 + p.limpRate * 0.5)) return act({ type: 'call' }, 0.3);
+      // A hand worth an iso-raise, or a premium (the top 3%), never folds to a limp: it limps behind when both rolls miss
+      // (it used to fold; fixed with the C++ Bot.cpp, 2026-10-20). The rolls above are drawn exactly as before.
+      if (pct <= open * 0.55 || pct <= LIMP_KEEP_PCT) return act({ type: 'call' }, 0.3);
       return fold(pct > open * 1.6);
     }
     if (pct <= open) {
