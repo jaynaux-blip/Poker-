@@ -8,11 +8,17 @@ import shortstack_setup
 _state = {"handle": None, "ticks": 0}
 
 
+def _playing():
+    # Play In Editor is running: the editor's asset calls refuse then ("The Editor is currently in a play mode") and report
+    # every asset missing, so the setup would offer to overwrite the materials the running game is using.
+    return unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world() is not None
+
+
 def _tick(_delta):
-    # Wait until the editor has settled and the asset registry has finished its initial scan.
+    # Wait until the editor has settled, the asset registry has finished its initial scan, and nobody is playing.
     _state["ticks"] += 1
     registry = unreal.AssetRegistryHelpers.get_asset_registry()
-    if _state["ticks"] < 30 or registry.is_loading_assets():
+    if _state["ticks"] < 30 or registry.is_loading_assets() or _playing():
         return
     unreal.unregister_slate_post_tick_callback(_state["handle"])
     try:
