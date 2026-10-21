@@ -27,5 +27,33 @@ SHORTSTACKCORE_API void DrawPortrait(Canvas& C, const hero::Character& Who, floa
 
 /** A full-length silhouette for the height chart: feet on FeetY, PxPerCm units per centimeter. */
 SHORTSTACKCORE_API void DrawFigure(Canvas& C, const hero::Look& L, float X, float FeetY, float PxPerCm, const Color& Fill, const Color& Edge);
+
+// Update 3 (SPEC §6.1, §7.2): the faces Rerun's thumbnails need. Bodies: ui-thumbs (Portrait.cpp); the overload above stays
+// byte-identical.
+/** How the face reads: the brows, the eyes, the mouth, the head's tilt. All zero (and EyeOpen 1) is the default face. */
+struct PortraitExpression
+{
+	float BrowLift = 0, BrowKnit = 0, BrowAsym = 0, EyeOpen = 1, LookX = 0, LookY = 0, Smile = 0, MouthOpen = 0, Smirk = 0, HeadTilt = 0;
+	bool Teeth = false, Tear = false;
+};
+/** What the hands are doing (P0: the first four after None). */
+enum class PortraitPose : uint8_t
+{
+	None,
+	HandsOnHead,
+	Facepalm,
+	Point,
+	FistPump,
+	CardsUp, // P1 from here
+	Holding,
+	Shrug,
+	ThumbsDown,
+	Count,
+};
+/** The portrait with an expression and a pose; Lod draws the small-tile version. */
+SHORTSTACKCORE_API void DrawPortrait(Canvas& C, const hero::Character& Who, float X, float Y, float Scale, double Time, const PortraitLight& Light, const PortraitExpression& E, PortraitPose P,
+	bool Lod);
+/** The 12 named expressions, 0 Neutral .. 11 Exhausted (out of range: Neutral). */
+SHORTSTACKCORE_API const PortraitExpression& ExpressionOf(int Expr);
 } // namespace ui
 } // namespace ss

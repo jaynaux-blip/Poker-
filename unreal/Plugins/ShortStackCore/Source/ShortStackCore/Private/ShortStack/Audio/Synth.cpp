@@ -264,6 +264,17 @@ std::vector<float> Render(SoundId Id, float Volume, uint32_t Seed)
 		Tone(B, 1046.0, 0.3, 0.1 * V);
 		break;
 	case SoundId::Click:
+	// Update 3 (§1.11): the revamped sites' ten cues are today's click until the audio track gives each its own (G1).
+	case SoundId::IgSpark:
+	case SoundId::IgPop:
+	case SoundId::IgTick:
+	case SoundId::IgFuse:
+	case SoundId::IgBoom:
+	case SoundId::RitBlip:
+	case SoundId::RitFlap:
+	case SoundId::RitBell:
+	case SoundId::RitStamp:
+	case SoundId::RitRank:
 		Tone(B, 1900.0, 0.02, 0.05 * V, 0.0, Wave::Square);
 		break;
 	case SoundId::Win:

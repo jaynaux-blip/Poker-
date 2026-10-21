@@ -538,8 +538,21 @@ void Clause()
 		"clause: the register button warns on RunItTwice's table, not on RiverLine's");
 	S.RegisterEvent(Home);
 	Expect(S.IsPlaying(Home.Spec.Id) && C->Strikes == 0 && BrandLetter(S, "riverline", sponsor::LetterStrike).empty(), "clause: a RiverLine table, no strike");
+	// Update 3 (W3, a deliberate rewrite at Phase A): the gate is in core now. Without the second press's token the table is
+	// refused, with nothing changed (no table, no debit, no strike) and the reason returned; the second press takes it.
+	{
+		const ss::Chips* Rit = ss::site::WalletOf(S.Life.Sites, ss::net::SiteId::RunItTwice);
+		const ss::Chips Wallet = Rit ? *Rit : -1, Bank = S.BankrollCents;
+		const size_t Tables = static_cast<size_t>(S.TableCount()), Letters = S.Life.Inbox.size();
+		const std::string Why = S.RegisterEvent(Away);
+		C = sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
+		Rit = ss::site::WalletOf(S.Life.Sites, ss::net::SiteId::RunItTwice);
+		Expect(!Why.empty() && !S.IsPlaying(Away.Spec.Id) && static_cast<size_t>(S.TableCount()) == Tables && Rit && *Rit == Wallet && S.BankrollCents == Bank && C &&
+				   C->Strikes == 0 && S.Life.Inbox.size() == Letters && BrandLetter(S, "riverline", sponsor::LetterStrike).empty(),
+			("clause: without the second press, core refuses the RunItTwice table and changes nothing: " + Why).c_str());
+	}
 	const double At = S.WorldMinutes();
-	S.RegisterEvent(Away);
+	S.RegisterEvent(Away, ss::StrikeConfirm{true});
 	C = sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
 	const std::string Strike = BrandLetter(S, "riverline", sponsor::LetterStrike);
 	Expect(S.IsPlaying(Away.Spec.Id) && C && C->Strikes == 1 && C->CureUntil > At + 13.9 * Day && Strike.find("today you were on RunItTwice") != std::string::npos &&

@@ -5,6 +5,7 @@
 //
 // Goldens and fixtures are read from SS_TESTS_DIR (unreal/Plugins/ShortStackCore/Tests, set by CMakeLists.txt).
 #include "CopyLint.h"
+#include "Trademarks.h"
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
@@ -227,13 +228,11 @@ void Catalog()
 	}
 	Expect(Same, "catalog: kast::Sponsors is the legacy five, in order, at their old rates");
 	Expect(ss::kast::FindSponsor("halo") && ss::kast::FindSponsor("halo")->PerHourCents == 200 && !ss::kast::FindSponsor("voltrush"), "catalog: Kast finds any brand that pays on stream");
-	// The trademark screen: none of the catalog's words is a real poker site, drink, VPN, chair, camera or training site.
-	const char* Real[] = {"pokerstars", "ggpoker", "partypoker", "888", "wsop", "world series", "wpt", "run it once", "upswing", "red bull", "redbull", "monster",
-		"rockstar", "celsius", "g fuel", "gfuel", "bang energy", "prime hydration", "ghost energy", "nordvpn", "expressvpn", "surfshark", "secretlab", "dxracer",
-		"logitech", "elgato", "razer", "nike", "adidas", "bodog", "ignition", "americas cardroom", "natural8", "bovada", "pokerbros", "global poker", "acr poker",
-		// Update 2 (update 2 SPEC §1.8): video platforms, payment wallets and more real poker sites, for Rerun and the rival sites.
-		"youtube", "twitch", "kick", "tiktok", "rumble", "vimeo", "dailymotion", "skrill", "neteller", "paypal", "venmo", "ecopayz", "muchbetter", "888poker", "acr ",
-		"betonline", "wpt global", "coinpoker", "winamax", "unibet"};
+	// The trademark screen: none of the catalog's words is a real poker site, platform, product or creator (tests/Trademarks.h,
+	// both tiers, whole words), drink, VPN, chair, camera or training site (the catalog's own list: "monster" is an ordinary
+	// word elsewhere in the game, so it is screened over the catalog only, as before).
+	const char* Real[] = {"red bull", "redbull", "monster", "rockstar", "celsius", "g fuel", "gfuel", "bang energy", "prime hydration", "ghost energy", "nordvpn",
+		"expressvpn", "surfshark", "secretlab", "dxracer", "logitech", "elgato", "razer", "nike", "adidas"};
 	bool Clean = true;
 	for (const sponsor::Brand& B : All)
 	{
@@ -244,6 +243,14 @@ void Catalog()
 			{
 				Clean = false;
 				std::printf("  real brand '%s' in %s\n", R, B.Id.c_str());
+			}
+		}
+		for (const char* Hit : {trademarks::Find(Words, trademarks::kSourceScan), trademarks::Find(Words, trademarks::kCopyScan)})
+		{
+			if (Hit)
+			{
+				Clean = false;
+				std::printf("  real name '%s' in %s\n", Hit, B.Id.c_str());
 			}
 		}
 	}

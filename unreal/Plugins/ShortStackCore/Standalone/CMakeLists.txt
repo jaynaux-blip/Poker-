@@ -136,7 +136,9 @@ target_link_libraries(style_test PRIVATE ShortStackCore)
 target_compile_definitions(style_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 add_test(NAME ai_styles COMMAND style_test)
 
-add_executable(video_test tests/video_main.cpp)
+# Update 3 (update 3 SPEC §7.7, §8.2): video_main.cpp's title and copy checks moved verbatim to video_seg_copy.cpp
+# (core-videocontent's from Phase A); the kit they share is tests/VideoSeg.h.
+add_executable(video_test tests/video_main.cpp tests/video_seg_copy.cpp)
 target_link_libraries(video_test PRIVATE ShortStackCore)
 target_compile_definitions(video_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 add_test(NAME video_channel COMMAND video_test)
@@ -145,6 +147,37 @@ add_executable(sites_test tests/sites_main.cpp)
 target_link_libraries(sites_test PRIVATE ShortStackCore)
 target_compile_definitions(sites_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 add_test(NAME rival_sites COMMAND sites_test)
+
+# Update 3 (update 3 SPEC §7.7): five suites of its own. Each has a short default run and its slow modes behind an argument.
+# Budgets: site_play <= 30 s, rerun_algo <= 30 s, rerun_content <= 20 s, rivals_ui <= 60 s, rerun_ui <= 60 s. Three core:
+# the revamped sites' loops, the Governor and FUSE (core-siteplay, with core-fuse's siteplay_fuse.cpp); Rerun 2.0's model
+# and money (core-videoalgo); its titles, thumbnails, ideas and comments (core-videocontent). Two UI, apart from
+# riverline_ui (64 s of its 75 s already): the rival sites' screens (ui-ignite, ui-rit) and Rerun 2.0's (ui-rerun,
+# ui-thumbs), each track's checks in its own file, the kit's definitions in ui_seg_kit.cpp.
+add_executable(siteplay_test tests/siteplay_main.cpp tests/siteplay_session.cpp tests/siteplay_fuse.cpp)
+target_link_libraries(siteplay_test PRIVATE ShortStackCore)
+target_compile_definitions(siteplay_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME site_play COMMAND siteplay_test)
+
+add_executable(rerun_algo_test tests/rerun_algo_main.cpp)
+target_link_libraries(rerun_algo_test PRIVATE ShortStackCore)
+target_compile_definitions(rerun_algo_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME rerun_algo COMMAND rerun_algo_test)
+
+add_executable(rerun_content_test tests/rerun_content_main.cpp)
+target_link_libraries(rerun_content_test PRIVATE ShortStackCore)
+target_compile_definitions(rerun_content_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME rerun_content COMMAND rerun_content_test)
+
+add_executable(rivals_ui_test tests/rivals_ui_main.cpp tests/ui_seg_kit.cpp tests/ui_seg_seams.cpp tests/ui_seg_ignite.cpp tests/ui_seg_rit.cpp)
+target_link_libraries(rivals_ui_test PRIVATE ShortStackCore)
+target_compile_definitions(rivals_ui_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME rivals_ui COMMAND rivals_ui_test)
+
+add_executable(rerun_ui_test tests/rerun_ui_main.cpp tests/ui_seg_kit.cpp tests/ui_seg_canvas.cpp tests/ui_seg_video3.cpp tests/ui_seg_thumbs.cpp)
+target_link_libraries(rerun_ui_test PRIVATE ShortStackCore)
+target_compile_definitions(rerun_ui_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME rerun_ui COMMAND rerun_ui_test)
 
 # Not a suite: core-styles' chart compiler (update 2 SPEC §2.4.2, §2.4.4), Tests/charts/*.txt into AI/ChartTables.cpp.
 add_executable(chartgen tools/chartgen/chartgen_main.cpp)
@@ -162,6 +195,12 @@ target_link_libraries(fixture_tool PRIVATE ShortStackCore)
 # using-directive leak into every file after it in a blob, so two such names that collide (TableHud.cpp's Margin and
 # StoreCounter.cpp's, in Phase C) break the Unreal build only when adaptive unity happens to put the two files together.
 # This compiles every arrangement at once. Compile only: nothing links or runs.
+# Update 3 (update 3 SPEC §0.6 #4, §8.2): it also sees the shadowing Unreal's build treats as errors (C4456-C4459: a local
+# hiding a local, a parameter, a member or a name another file's using-directive brought in, as 700d61f's C4459 in
+# NetworkSites.cpp did), at warning level 1 with those four as errors; the rest stays quiet. /weNNNN alone both turns each on
+# at /W1 and makes it an error: Visual Studio's generator puts /w1NNNN after /we on the command line, which would make them
+# plain warnings again, so they aren't passed. Proven once by a canary (a deliberately shadowing translation unit failed the
+# probe with C4456 and C4459 as errors, then went).
 option(SS_UNITY_PROBE "Compile the core as one unity blob, both orders, to catch Unreal unity-build name collisions" OFF)
 if(SS_UNITY_PROBE)
   set(PROBE_SOURCES ${CORE_SOURCES})
@@ -182,7 +221,8 @@ if(SS_UNITY_PROBE)
     # As Unreal 5.6 compiles the module: C++20, and on MSVC its conformance switches.
     set_target_properties(unity_probe_${Order} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
     if(MSVC)
-      target_compile_options(unity_probe_${Order} PRIVATE /W0 /bigobj /fp:precise /EHs-c- /GR- /permissive- /Zc:inline /Zc:preprocessor /Zc:strictStrings-)
+      target_compile_options(unity_probe_${Order} PRIVATE /W1 /we4456 /we4457 /we4458 /we4459 /bigobj /fp:precise /EHs-c- /GR- /permissive- /Zc:inline /Zc:preprocessor
+        /Zc:strictStrings-)
       target_compile_definitions(unity_probe_${Order} PRIVATE _HAS_EXCEPTIONS=0 _CRT_SECURE_NO_WARNINGS)
     else()
       target_compile_options(unity_probe_${Order} PRIVATE -w -ffp-contract=off -fno-exceptions -fno-rtti)

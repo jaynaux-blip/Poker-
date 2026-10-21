@@ -802,30 +802,16 @@ void RiverLine::StreamPreview(const Rect& R, double Now)
 	UI.Ptr.Released = false;
 	UI.Ptr.Wheel = 0.0f;
 	Previewing = true;
+	// Update 3 (§1.11): the client's own frame, cropped by its own chrome's height (RiverLine's top bar is 64).
+	const net::SiteId Client = rlsites_detail::SitesClient(*this, S);
 	C->Save();
-	C->Translate(R.X, R.Y - std::min(Crop, 64.0f) * Scale);
+	C->Translate(R.X, R.Y - std::min(Crop, rlsites_detail::SitesLook(Client).ChromeH) * Scale);
 	C->Scale(Scale, Scale);
 	{
 		// Update 2 (§1.8, §5.11): the stream shows whatever the poker client wears, a rival's skin included.
-		const SkinScope Skin(rlsites_detail::SitesSkin(rlsites_detail::SitesClient(*this, S)));
+		const SkinScope Skin(rlsites_detail::SitesSkin(Client, World));
 		C->FillRect({0.0f, 0.0f, NetW, 1000.0f}, Paint::Linear({0.0f, 0.0f}, {0.0f, 1000.0f}, pal::Bg2, pal::Bg));
-		TopBar(Now);
-		switch (S.CurrentScreen)
-		{
-		case Screen::Boot: Boot(Now); break;
-		case Screen::Lobby: LobbyPages(Now); break;
-		case Screen::Table:
-			if (S.Tiled && S.TableCount() >= 2)
-			{
-				Tiles(Now);
-			}
-			else
-			{
-				Table(Now);
-			}
-			break;
-		case Screen::Results: ResultsScreen(Now); break;
-		}
+		ClientFrame(Now, true);
 	}
 	C->Restore();
 	Previewing = false;

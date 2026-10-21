@@ -913,6 +913,27 @@ struct Cancellation
 	int Field = 0;   // who had come for it, the player included
 };
 
+/**
+ * Update 3 (SPEC §3.6 R2, §7.2): one of the 19 people in the player's League group on a site, as the world records them:
+ * their RunItTwice results scored through site::play::LeagueScore, the best 8 days kept. core-world's (G2).
+ */
+struct LeagueMember
+{
+	int Npc = -1;
+	int8_t Days = 0;   // days with a result
+	uint16_t Form = 0; // 5 x 2 bits
+	int TodayKey = -1;
+	int8_t TodayCount = 0; // the first-3 rule
+	std::array<std::pair<int8_t, int16_t>, 8> Best{}; // (day of month, points x 10), the best 8
+};
+/** The month's group (<= 19 members): written as the optional world\tleague line only when one exists (no version bump). */
+struct LeagueBook
+{
+	int MonthKey = -1;
+	int8_t Div = 0;
+	std::vector<LeagueMember> Members;
+};
+
 class World
 {
 public:
@@ -1003,6 +1024,11 @@ public:
 	 * (SiteRanksYesterday, core-world's at G3), never from RanksYesterday, which ends at Live.
 	 */
 	SHORTSTACKCORE_API int RankBefore(net::SiteId Site, net::Board B, int Npc) const;
+	// Update 3 (SPEC §3.6 R2, §7.2; core-world's bodies at G2): the player's League group, recorded by the world.
+	/** The month's group on a site (the session hands it the roster site::play::Step drew); Sim::SiteResult scores its members. */
+	SHORTSTACKCORE_API void SetLeagueRoster(net::SiteId Site, int MonthKey, int Div, const std::vector<int>& Npcs);
+	/** The group recorded on a site (null: none recorded). */
+	SHORTSTACKCORE_API const LeagueBook* League(net::SiteId Site) const;
 
 	// The player.
 	/** Someone takes a seat in an event (the player's tables seat a regular the world hadn't planned there). */
@@ -1232,6 +1258,9 @@ private:
 	                                                                                  // series, Ignite's month): key, npc -> points
 	std::map<net::SiteId, double> SiteLaunches;                                       // the world minute each rival launched
 	std::map<std::pair<net::SiteId, net::Board>, std::vector<int>> SiteRanksYesterday; // a rival board's ranks a day ago
+	// Update 3 (§3.6 R2; core-world's, empty until G2): the player's League group by site, saved as the optional
+	// world\tleague line only when one exists (the world stays version 4).
+	std::map<net::SiteId, LeagueBook> Leagues;
 
 	void Refresh(int Id);
 	void RefreshAll();

@@ -3,12 +3,15 @@
 #include "ShortStack/AI/Grading.h"
 #include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Fuse.h"
 #include "ShortStack/Game/Gear.h"
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Game/Rep.h"
 #include "ShortStack/Game/Store.h"
+#include "ShortStack/Game/VideoContent.h"
+#include "ShortStack/Game/VideoStats.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 #include "ShortStack/Tournament.h"
@@ -67,6 +70,26 @@ enum class SoundId : int
 	Bubble,
 	Cash,
 	Mail, // a letter in the Mail app (next_segment_spec §3.9; audio-synth renders it)
+	// Update 3 (SPEC §1.11, §7.2): the revamped sites' cues, played through Session::UiSound (audio's bodies in Synth.cpp).
+	IgSpark, // Ignite: a rising tick
+	IgPop,
+	IgTick,
+	IgFuse, // a crackling loop segment, 2 s at most
+	IgBoom,
+	RitBlip, // RunItTwice
+	RitFlap,
+	RitBell,
+	RitStamp,
+	RitRank, // a tick and a two-note rise or fall
+};
+
+/**
+ * Update 3 (SPEC §1.5, W3): the second press under a "plays only on" clause. Only the register button's confirmed second
+ * press (rlsites_detail::SitesTwoPress) sets Second; without it, a registration the clause flags is refused in core.
+ */
+struct StrikeConfirm
+{
+	bool Second = false;
 };
 
 /** What the viewer sees at one seat of the hero's table. */
@@ -427,8 +450,13 @@ public:
 	bool CanAfford(const LobbyEvent& Ev) const;
 	/** Registers for a Lobby() event (tonight's hand-tuned listings). */
 	void Register(int Index);
-	/** Registers for any joinable listing (the network schedule builds them); pays the buy-in and opens the table. */
-	SHORTSTACKCORE_API void RegisterEvent(const LobbyEvent& Listing);
+	/**
+	 * Registers for any joinable listing (the network schedule builds them); pays the buy-in and opens the table. Returns ""
+	 * when it registered, else why not. Update 3 (W3; the gate lands with Phase A's core seams): a registration on any site a running deal's clause flags
+	 * (sponsor::WouldStrike) is refused without Confirm.Second (no table, no debit, no strike). RakeOverride >= 0 is the fee
+	 * the rake hooks see instead of the spec's FeeCents (FUSE's real fee, §2.6 F7).
+	 */
+	SHORTSTACKCORE_API std::string RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Confirm = {}, Chips RakeOverride = -1);
 
 	void DealerLine(const std::string& Text);
 	void SystemLine(const std::string& Text);
@@ -765,6 +793,53 @@ public:
 	SHORTSTACKCORE_API std::string DebugSite(const std::string& Args);
 	SHORTSTACKCORE_API std::string DebugWorld(const std::string& Args); // SessionWorld.cpp (core-world)
 
+	// ------------------------------------------------------------ update 3 (update 3 SPEC §7.2)
+	// The revamped rival sites' loops, FUSE and Rerun 2.0. Declared in Phase A; the bodies are the feature tracks' (in
+	// SessionSitePlay.cpp, SessionFuse.cpp and SessionVideo3.cpp, the SessionStake.cpp precedent), stubs that keep today's
+	// behaviour until they land. Each "" or why not, like the rest of the session's.
+	/** A laptop cue from the UI (public; forwards to SessionHooks::Sound): at most one an id every 50 ms. */
+	SHORTSTACKCORE_API void UiSound(SoundId Id, float Vol = 0.4f);
+	/** The site of the result on the Results screen (ShowResults sets it): FUSE never enters History (§1.11). */
+	net::SiteId LastSiteResult = net::SiteId::RiverLine;
+	// ---- Site play (§2.6, §3.6: SessionSitePlay.cpp, core-siteplay)
+	/** Everything the G2 pages draw (const: computed defaults while the book is empty, so a draw never writes, S10). */
+	SHORTSTACKCORE_API site::play::View SitePlayView(net::SiteId S) const;
+	/** Spins today's lit ring: draws, autosaves, then the UI animates the known result. */
+	SHORTSTACKCORE_API std::string SpinWheel();
+	/** "*" opens every Cracker on the shelf in shelf order. */
+	SHORTSTACKCORE_API std::string OpenCracker(const std::string& BoxId);
+	SHORTSTACKCORE_API std::string ClaimDare(int Slot);
+	SHORTSTACKCORE_API std::string ClaimTier(int Tier);
+	/** Item: the Prize Counter catalog's index. */
+	SHORTSTACKCORE_API std::string BuyPrize(int Item);
+	SHORTSTACKCORE_API std::string Equip(int Slot, int Look);
+	SHORTSTACKCORE_API std::string StarEvent(const std::string& TemplateId, bool On);
+	SHORTSTACKCORE_API std::string CallOut(int Npc);
+	/** HeroHandDone's call after VideoNoteHand, on both paths. Draws nothing. */
+	SHORTSTACKCORE_API void SitePlayHand(const Hand& H, const HandFacts& F);
+	/** CheckCalendar, right after SiteStep: never creates state; hands a drawn League roster to the world. */
+	SHORTSTACKCORE_API void SitePlayStep(double From, double To);
+	SHORTSTACKCORE_API std::string DebugSitePlay(const std::string& Args); // ss.Site.Play
+	// ---- FUSE (§2.6 F7: SessionFuse.cpp, core-fuse; "not yet" until spike S-J passes)
+	/** Pays (or takes a ticket), advances the tier's ordinal, draws the multiplier, autosaves, then seats the 3-max table. */
+	SHORTSTACKCORE_API std::string LightFuse(int Tier, bool Ticket, StrikeConfirm Confirm = {});
+	SHORTSTACKCORE_API fuse::Reveal FuseReveal(int Table) const;
+	// ---- Rerun 2.0 (§4-§6: SessionVideo3.cpp, core-videocontent). Publish(const video::Choice&) keeps its signature; the
+	// Choice carries the Update 3 fields and waits in the session's pending edit (not saved) while the edit's TimeSkip runs.
+	SHORTSTACKCORE_API std::vector<video::IdeaCard> VideoIdeas() const;
+	/** Creates the idea's candidate (Source 5). */
+	SHORTSTACKCORE_API std::string ChooseIdea(int IdeaId);
+	SHORTSTACKCORE_API std::vector<video::TitleOption> TitleOptions(const video::Choice& C, int Shuffle) const;
+	SHORTSTACKCORE_API std::vector<video::ThumbSpec> ThumbOptions(const video::Choice& C, int Shuffle) const;
+	SHORTSTACKCORE_API std::string Repackage(const std::string& VideoId, const video::Repack& R);
+	/** Refused on Update 2 and folded videos, and within 7 days of the last change. */
+	SHORTSTACKCORE_API std::string SetAdLoad(const std::string& VideoId, video::AdLoad L);
+	/** A TimeSkip "video-act:<a>:<id>". */
+	SHORTSTACKCORE_API std::string LaunchAction(const std::string& VideoId, video::Launch A);
+	/** FinishSkip's "video-act:" branch. */
+	SHORTSTACKCORE_API std::string SettleVideoAct(const std::string& ActivityId);
+	SHORTSTACKCORE_API video::VideoStats VideoStatsOf(const std::string& VideoId) const;
+
 	// Who is who in the tournament being played (player id -> country; regulars from the network).
 	std::map<std::string, std::string> FieldCountry;
 	std::set<std::string> FieldRegulars;
@@ -1023,6 +1098,8 @@ private:
 	double StreamSoundAt = -100.0;
 	double OfflineAt = -1.0;
 	Rng KastRng;
+	/** Update 3: when UiSound last played each id (Now; not saved). */
+	std::map<int, double> UiSoundAt;
 };
 
 const char* SoundName(SoundId Id);

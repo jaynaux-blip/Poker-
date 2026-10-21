@@ -81,6 +81,91 @@ void ChipConservationFuzz()
 	}
 }
 
+/**
+ * Update 3 (SPEC §3.6 R8, §8.2; spike S-D's harness): once a hand ends, the deck it was dealt from reads back through Hand's
+ * two const accessors, so the Second Board can show the stub past DeckPosForShow(). What the hand drew is the deck's head in
+ * the order it drew it (the hole cards round by round from the button's left, then a burn before each street's cards), the
+ * stub is the rest, and looking draws nothing: the hand and its Rng carry on exactly as if nobody had.
+ */
+void DeckStubForShow()
+{
+	ss::Rng R("deck-stub");
+	int Hands = 0, AllIns = 0, Wrong = 0;
+	for (int T = 0; T < 2000; ++T)
+	{
+		const int N = 2 + R.Int(8);
+		ss::HandConfig Cfg;
+		for (int I = 0; I < N; ++I)
+		{
+			Cfg.Players.push_back({I, "p" + std::to_string(I), 1 + R.Int(20000)});
+		}
+		Cfg.ButtonSeat = R.Int(N);
+		Cfg.SmallBlind = 50;
+		Cfg.BigBlind = 100;
+		ss::Hand H(Cfg, R);
+		bool AllIn = false;
+		for (int Guard = 0; !H.bComplete && Guard < 500; ++Guard)
+		{
+			const ss::LegalActions L = H.GetLegalActions();
+			const double Roll = R.Next();
+			ss::PlayerAction A = Roll < 0.2 ? ss::PlayerAction::Fold() : ss::PlayerAction::Call();
+			if (Roll >= 0.85 && L.CanRaise)
+			{
+				A = ss::PlayerAction::RaiseTo(static_cast<double>(L.MaxRaiseTo));
+			}
+			if (!H.Act(A))
+			{
+				break;
+			}
+		}
+		for (const ss::HandSeat& S : H.Seats)
+		{
+			AllIn = AllIn || (S.AllIn && !S.Folded);
+		}
+		uint32_t Before[4];
+		R.GetState(Before);
+		const size_t Events = H.Events.size();
+		const std::vector<ss::Card> Board = H.Board;
+		const std::vector<ss::Card>& Deck = H.DeckForShow();
+		const int Pos = H.DeckPosForShow();
+		// The head: two rounds of hole cards, then each street's burn and cards.
+		std::vector<ss::Card> Head;
+		for (int Round = 0; Round < 2; ++Round)
+		{
+			for (int I = 1; I <= N; ++I)
+			{
+				const ss::HandSeat& S = H.Seats[static_cast<size_t>((H.ButtonIndex() + I) % N)];
+				Head.push_back(S.Hole.size() > static_cast<size_t>(Round) ? S.Hole[static_cast<size_t>(Round)] : -1);
+			}
+		}
+		const size_t Streets = Board.size() >= 5 ? 3 : Board.size() >= 4 ? 2 : Board.size() >= 3 ? 1 : 0;
+		bool Ok = H.bComplete && Deck.size() == 52 && Pos == static_cast<int>(Head.size() + Streets + Board.size()) && Pos <= static_cast<int>(Deck.size());
+		for (size_t K = 0; Ok && K < Head.size(); ++K)
+		{
+			Ok = Deck[K] == Head[K];
+		}
+		const size_t At = Head.size();
+		for (size_t K = 0; Ok && K < Board.size(); ++K)
+		{
+			// The flop sits after one burn, the turn after two, the river after three.
+			const size_t Burns = K < 3 ? 1 : K == 3 ? 2 : 3;
+			Ok = Deck[At + Burns + K] == Board[K];
+		}
+		std::vector<ss::Card> Sorted(Deck.begin(), Deck.end());
+		std::sort(Sorted.begin(), Sorted.end());
+		Ok = Ok && std::adjacent_find(Sorted.begin(), Sorted.end()) == Sorted.end() && (Sorted.empty() || (Sorted.front() == 0 && Sorted.back() == 51));
+		// Looking drew nothing and changed nothing.
+		uint32_t After[4];
+		R.GetState(After);
+		Ok = Ok && std::equal(Before, Before + 4, After) && H.Events.size() == Events && H.DeckPosForShow() == Pos && H.Board == Board;
+		Wrong += Ok ? 0 : 1;
+		++Hands;
+		AllIns += AllIn ? 1 : 0;
+	}
+	std::printf("deck stub (S-D): %d hands read back through DeckForShow (%d with an all-in), %d wrong\n", Hands, AllIns, Wrong);
+	Expect(Wrong == 0, "update 3: a finished hand's deck reads back through its const accessors, the stub past DeckPosForShow, drawing nothing");
+}
+
 void IllegalActionsRejected()
 {
 	ss::Rng R("illegal");
@@ -511,6 +596,7 @@ void Update2Engine()
 int main()
 {
 	ChipConservationFuzz();
+	DeckStubForShow();
 	IllegalActionsRejected();
 	TournamentRunsToCompletion();
 	ChipSetLayout();

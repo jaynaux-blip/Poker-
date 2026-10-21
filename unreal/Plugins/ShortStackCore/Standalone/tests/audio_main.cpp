@@ -430,7 +430,8 @@ const char* const Lines[] = {
 void OneShots()
 {
 	std::printf("one-shots\n");
-	for (int I = 0; I <= static_cast<int>(ss::SoundId::Mail); ++I)
+	// (Update 3, §1.11: through the revamped sites' ten cues, the last id; each its own sound once the audio track lands.)
+	for (int I = 0; I <= static_cast<int>(ss::SoundId::RitRank); ++I)
 	{
 		const ss::SoundId Id = static_cast<ss::SoundId>(I);
 		Check(ss::SoundName(Id), Render(Id, 1.0f, 7u + static_cast<uint32_t>(I)), 0.01f);

@@ -65,6 +65,47 @@ void Fail(const std::string& What, int Seed, int Frame)
 	++Failures;
 }
 
+/**
+ * Update 3 (W3, a deliberate rewrite at Phase A): the monkey presses a register button once or twice, at random (its own
+ * draws, so every other draw is as before), and core's strike gate decides. A registration refused, under a clause without
+ * the second press or for any other reason, leaves everything as it was: no table, no money moved, no ledger line, no strike.
+ */
+std::string MonkeyRegister(ss::Session& S, const ss::LobbyEvent& L, ss::Rng& Press, int Seed, int Frame)
+{
+	const bool Second = Press.Chance(0.5);
+	auto Strikes = [&S]() {
+		int N = 0;
+		for (const ss::sponsor::Contract& C : S.Life.Sponsors.Contracts)
+		{
+			N += C.Strikes;
+		}
+		return N;
+	};
+	auto Wallets = [&S]() {
+		ss::Chips Sum = 0;
+		size_t Lines = 0;
+		for (const ss::site::Account& A : S.Life.Sites.Accounts)
+		{
+			Sum += A.Cents;
+			Lines += A.Lines.size();
+		}
+		return std::make_pair(Sum, Lines);
+	};
+	const ss::Chips Bank = S.BankrollCents;
+	const std::pair<ss::Chips, size_t> Sites = Wallets();
+	const int Tables = S.TableCount(), Struck = Strikes();
+	const size_t Ledger = S.Life.Ledger.size(), Letters = S.Life.Inbox.size();
+	const std::string Top = S.Life.Ledger.empty() ? std::string() : S.Life.Ledger.front().Label;
+	const bool Playing = S.IsPlaying(L.Spec.Id);
+	const std::string Why = S.RegisterEvent(L, ss::StrikeConfirm{Second});
+	if (!Why.empty() && (S.BankrollCents != Bank || Wallets() != Sites || S.TableCount() != Tables || Strikes() != Struck || S.Life.Ledger.size() != Ledger ||
+							(!S.Life.Ledger.empty() && S.Life.Ledger.front().Label != Top) || S.Life.Inbox.size() != Letters || S.IsPlaying(L.Spec.Id) != Playing))
+	{
+		Fail("strike gate: a refused registration changed something (" + Why + ")", Seed, Frame);
+	}
+	return Why;
+}
+
 struct Measurer : ss::ui::TextMeasurer
 {
 	float Width(const std::string& S, ss::ui::Font, float Size) const override { return static_cast<float>(S.size()) * Size * 0.55f; }
@@ -515,12 +556,13 @@ int SegmentCareer(int Seed, int Days, std::map<std::string, int>& Reached)
 	B.Start(*S);
 	SegSites Books;
 	ss::Rng X("monkey-sites-rng-" + std::to_string(Seed)); // the rival sites' and Rerun's draws (update 2 C3), apart from the segment's
+	ss::Rng Press("monkey-press-" + std::to_string(Seed)); // the register button pressed once or twice (update 3): its own draws
 	const double End = S->WorldMinutes() + static_cast<double>(Days) * Day;
 	int Step = 0;
 	// An event at a table, any site's: the plan skips it (any style, the stops drawn), or today's Sprint plays it; the event's
 	// graded decisions are exactly the player's own (no AI decision graded).
 	auto PlayOnline = [&](const ss::LobbyEvent& L, ss::Rng& D, int At, const char* PlanTag, const char* SprintTag) {
-		S->RegisterEvent(L);
+		MonkeyRegister(*S, L, Press, Seed, At);
 		if (S->CurrentScreen != ss::Screen::Table)
 		{
 			return;
@@ -970,6 +1012,7 @@ int main(int Argc, char** Argv)
 		ss::Rng Dr(std::string("monkey-drop-") + std::to_string(Seed)); // Penny Drop's own draws, so the rest of the run is as before
 		ss::Rng Sr(std::string("monkey-shops-") + std::to_string(Seed)); // Northside's shop screens: their own draws too
 		ss::Rng Ar(std::string("monkey-auto-") + std::to_string(Seed));  // autoplay's (update 2): its own draws as well
+		ss::Rng Pr(std::string("monkey-press-") + std::to_string(Seed)); // the register button's presses (update 3): its own too
 		std::unique_ptr<ss::ui::ShopScreen> Shop;
 		double ShopUntil = 0.0;
 		if (Seed % 3 == 1)
@@ -1077,7 +1120,7 @@ int main(int Argc, char** Argv)
 				}
 				if (!Open.empty())
 				{
-					S.RegisterEvent(Open[static_cast<size_t>(R.Int(static_cast<int>(Open.size())))]);
+					MonkeyRegister(S, Open[static_cast<size_t>(R.Int(static_cast<int>(Open.size())))], Pr, Seed, F);
 					++Reached["registered"];
 				}
 			}

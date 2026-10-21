@@ -951,6 +951,8 @@ namespace rlvideo_detail
 {
 /** Switches the laptop to Rerun at a page: 0 Studio, 1 Channel (Mail's Rerun letters open 1). */
 void VideoOpen(RiverLine& RL, int Page, double Now);
+/** Update 3 (§7.6, ss.Laptop.Open): the page VideoOpen takes for a page's name ("studio", "channel"); -1 for none. */
+int VideoPageNamed(const std::string& Name);
 /** The taskbar's marigold dot: three or more candidates new since the last visit, or a bell milestone not yet seen. */
 bool VideoDot(const RiverLine* RL, const Session& S);
 /** Drops a laptop's Rerun state when it goes (~RiverLine). */
@@ -977,8 +979,6 @@ std::vector<net::SiteId> SitesPlayed(const Session& S);
 Chips SitesBalance(const Session& S, net::SiteId Site);
 /** What's on its way back from a site (pending withdrawals, net of their fees): the sum, or one site's (Site < Count). */
 Chips SitesInTransit(const Session& S, net::SiteId Site = net::SiteId::Count);
-/** A site's palette as a skin (RiverLine's is pal::'s own values). */
-Skin SitesSkin(net::SiteId Site);
 /** True while pal:: holds RiverLine's values (outside any rival's scope): RiverLine's literal colours stay exact. */
 bool SitesHome();
 /**
@@ -1106,6 +1106,167 @@ inline constexpr const char* SitesKastClient = "A poker client and a stream enco
 std::string SitesFill(std::string Text, const std::vector<std::pair<std::string, std::string>>& Vars);
 /** Studio's PUBLISH once it has warned of a clause strike (RiverLineVideo.cpp). */
 inline constexpr const char* SitesPublishArmed = "Press again and it's a strike under the deal.";
+
+// ---- Update 3 (SPEC §1.2, §1.11, §7.2; declared by the lead in Phase A, bodies with Phase A's UI seams, then ui-tablestyle's)
+/** The felt's outline: RiverLine's oval, Ignite's capsule, RunItTwice's octagon. */
+enum class TableShape : uint8_t
+{
+	Oval,
+	Capsule,
+	Octagon,
+};
+/** A button's outline: RiverLine's rounded, Ignite's pill, RunItTwice's slab. */
+enum class ButtonShape : uint8_t
+{
+	Rounded,
+	Pill,
+	Slab,
+};
+/** A seat's plate: RiverLine's plate, Ignite's bubble, RunItTwice's data card. */
+enum class SeatStyle : uint8_t
+{
+	Plate,
+	Bubble,
+	DataCard,
+};
+/**
+ * A site's look (UI-only, never in SiteDef): the radii, the panel and button style, the type ramp, the table's shape and its
+ * parameters, explicit seat lists (used when SeatList is set; SlotPos's generic ring otherwise), the lower third, the felt,
+ * rail, chips, card back, dealer button and seats, bets in chips or big blinds, the clock, the HUD's default, the motion
+ * constants, and a Key mixed into every Canvas::Cached key with Skin::Current().Key(). Threaded through SitesButton, Panel,
+ * Section, NetPill, ScheduleRow, EventPanel, RegisterBlock, SiteCashier's money block, Table, DrawSeat, Tile, SlotPos,
+ * BetPos, CardBack, DrawChipStack and the dealer button. RiverLine's reproduces today's literals exactly (no seat list).
+ */
+struct SiteLook
+{
+	float Radius = 10, PanelRadius = 14, ButtonH = 66;
+	ButtonShape Button = ButtonShape::Rounded;
+	int8_t TitleFace = -1, NumberFace = -1;
+	bool LabelCaps = false;
+	float Tracking = 0;
+	TableShape Shape = TableShape::Oval;
+	float Cx = 590, Cy = 430, Rx = 420, Ry = 226, Chamfer = 0;
+	uint32_t Felt = 0, FeltLight = 0, FeltDark = 0;
+	int Rail = 0, ChipSet = 0, CardBack = 0, Dealer = 0;
+	SeatStyle Seat = SeatStyle::Plate;
+	bool BetsInBb = false, HudDefault = false, Clock24 = false;
+	bool SeatList = false;
+	std::array<Vec2, 8> Seat8{};
+	std::array<Vec2, 6> Seat6{};
+	std::array<Vec2, 3> Seat3{};
+	Rect LowerThird{}; // the all-in band
+	float CardW = 200, ChromeH = 64; // ChromeH: the stream preview's crop of the frame's own chrome
+	float EaseSeconds = 0.4f;
+	bool RestoreAlpha = false;
+	uint64_t Key = 0;
+};
+/**
+ * A site's look (RiverLine: today's literals exactly, the no-op proof). Phase A: every site's is RiverLine's (Ignite and
+ * RunItTwice draw as today until ui-tablestyle lands their looks); the address is stable for the program's life.
+ */
+const SiteLook& SitesLook(net::SiteId S);
+/** The look with what the player wears there (Ignite's equipped back, felt and chips: G2). */
+SiteLook SitesLookFor(const Session& S, net::SiteId Site);
+/** The look of the table in front (its site's: SitesOfTable), for the shared table's drawing. */
+const SiteLook& SitesTableLook(const Session& S);
+/** The look of the site the client wears (SitesClient), for the lobby's shared helpers. */
+const SiteLook& SitesClientLook(const RiverLine& RL, const Session& S);
+/**
+ * A site's palette as a skin at a world minute (RiverLine's is pal::'s own values): Ignite's Afterburner palette in its
+ * night window. It replaces Update 2's SitesSkin(Site), so the night is chosen in this one place for Draw, the stream
+ * preview and the tiles.
+ */
+Skin SitesSkin(net::SiteId Site, double WorldMin);
+/**
+ * SitesButton in a site's look (its corner radius, a pill's round ends): exactly Ui::Button at home in RiverLine's look,
+ * as the six-argument SitesButton above, which draws in RiverLine's.
+ */
+bool SitesButton(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const std::string& Label, const ButtonOpts& Opts, const SiteLook& L);
+/** The pointer an overlay held back from what draws under it (SitesBlockUnder), handed back by SitesUnblock. */
+struct SitesBlocked
+{
+	Pointer Saved;
+	bool Active = false; // the pointer was held back (a modal overlay, or the pointer over R)
+	bool Scrim = false;  // a modal's scrim was clicked this frame: the overlay closes, and the click reaches nothing
+};
+/**
+ * House law 3: at the top of a frame with an overlay open, blanks Pressed, Released, Wheel and Active for everything drawn
+ * before the overlay; R is the overlay's rect (Modal: the whole screen is its scrim; else only what's under R is held).
+ */
+SitesBlocked SitesBlockUnder(Ui& U, Rect R, bool Modal);
+/**
+ * Before the overlay draws: the pointer back. A click on the scrim (B.Scrim: the overlay closes itself on it) stays
+ * swallowed: the overlay and whatever draws after it never see it.
+ */
+void SitesUnblock(Ui& U, const SitesBlocked& B);
+/** The register button's two presses under a clause (RegisterBlock's step, extracted). */
+enum class TwoPress : uint8_t
+{
+	Idle,
+	Armed,
+	Confirmed,
+	Cancelled,
+};
+/** What the two presses say and where their state lives, beyond the declared signature (RegisterBlock's step needs them). */
+struct TwoPressOpts
+{
+	ButtonOpts First;            // the first press's button: its kind, size and the line under its label (Danger under the clause)
+	std::string Strike;          // the clause's warning (SitesClauseWarning): under the clause, the first press's label
+	std::string Note;            // the confirm step's line over its buttons off the clause ("" for none)
+	std::string Ok = "Confirm";  // the confirm button off the clause ("Take the strike" under it)
+	bool Always = false;         // a confirm step off the clause too (RegisterBlock's); else one press confirms
+	bool* Armed = nullptr;       // where the armed state lives (RegisterBlock: Session::ConfirmRegister); null: by Id, per laptop
+};
+/**
+ * The button and, under a clause, its warning and second press, drawn in R ("<Id>", then "<Id>ok" and "<Id>no" side by
+ * side): under the clause the first press reads the warning ("Strike under your Team RiverLine deal", "<Label> anyway"
+ * under it) and arms; the second says SitesStrikeConfirm over "Take the strike" and "Cancel". Confirmed: the caller passes
+ * StrikeConfirm{true} to core (Session::RegisterEvent, LightFuse); the gate is core's either way.
+ */
+TwoPress SitesTwoPress(Canvas& C, Ui& U, const SiteLook& L, const std::string& Id, Rect R, const std::string& Label, bool UnderClause, const TwoPressOpts& O = TwoPressOpts());
+/** One open table in the strip (the TableStrip's data). */
+struct StripRow
+{
+	int Table = 0;
+	net::SiteId Site{};
+	std::string Event, Short;
+	double StackBb = 0;
+	bool YourTurn = false;
+};
+/** Every open table, in the session's order: Ignite's table bubbles, RunItTwice's Seated rows (TableStrip's data). */
+std::vector<StripRow> SitesTableStrip(const RiverLine& RL, const Session& S);
+/**
+ * The page Site's client shows for P: a page the site doesn't have goes to its Lobby. RiverLine's own (Career, the
+ * Embercrest, Backing) on a rival; a rival's (Promotions, Cashier; update 3's Fuse and Profile, Ignite's; Live, League and
+ * Desk, RunItTwice's) on RiverLine or on another rival.
+ */
+RiverLine::Page SitesPageHome(net::SiteId Site, RiverLine::Page P);
 } // namespace rlsites_detail
+
+namespace rlnet_detail
+{
+/**
+ * NetPill in a site's look (update 3, §7.2): caps when the look sets them, a slab's corners when its buttons are slabs.
+ * RiverLine's look draws exactly the pill above.
+ */
+inline float NetPill(Canvas& Cv, const rlsites_detail::SiteLook& L, const std::string& Label, float X, float Y, const Color& Col, bool Solid = false, float Size = 10.5f)
+{
+	if (!L.LabelCaps && L.Button != rlsites_detail::ButtonShape::Slab)
+	{
+		return NetPill(Cv, Label, X, Y, Col, Solid, Size);
+	}
+	const std::string Text = L.LabelCaps ? NetUpper(Label) : Label;
+	const float W = Cv.Measure(Text, Size, 700) + Size * 1.3f;
+	const float H = Size + 8.0f;
+	const float Corner = L.Button == rlsites_detail::ButtonShape::Slab ? std::min(H / 2.0f, L.Radius) : H / 2.0f;
+	Cv.FillRoundRect({X, Y, W, H}, Corner, Solid ? Col : NetA(Col, 0.16f));
+	if (!Solid)
+	{
+		Cv.StrokeRoundRect({X, Y, W, H}, Corner, NetA(Col, 0.45f), 1.0f);
+	}
+	Cv.Text(Text, X + W / 2.0f, Y + H / 2.0f + 0.5f, Ts(Size, 700, Solid ? rlsites_detail::SitesTone(0x07121c) : Col, Align::Center, Baseline::Middle));
+	return W;
+}
+} // namespace rlnet_detail
 } // namespace ui
 } // namespace ss

@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <filesystem>
 #include <map>
 #include <set>
 #include <vector>
@@ -5565,6 +5566,87 @@ size_t LineBytes(const std::string& Text, std::initializer_list<const char*> Tag
 	return Bytes;
 }
 
+// Update 3 (update 3 SPEC §0.6 #10b, §1.8, §7.4): Update 3's lines live inside site\t and video\t (new sub-tags, and fields
+// appended to video\tvid after its title and to video\tcand after its recall record), so Update 2's budget counts Update 2's
+// part of those lines only (LineBytesU2) and Update 3's 27 KB counts the rest (LineBytesU3).
+
+/** Update 3's sub-tags inside site\t and video\t (§7.4). */
+bool U3SubTag(const std::string& Text, size_t Start)
+{
+	static const char* const Tags[] = {"site\tspark\t", "site\tflame\t", "site\tdare\t", "site\tbox\t", "site\tband\t", "site\tlevel\t", "site\tlook\t", "site\tfuse\t",
+		"site\tbeef\t", "site\tstick\t", "site\tstar\t", "site\tleague\t", "site\tlhist\t", "site\tcallout\t", "site\th2h\t", "site\tscalp\t", "site\tluck\t", "site\tcred\t",
+		"site\tgov\t", "site\thold\t", "video\tvcomp\t", "video\tvday\t", "video\tvmonth\t", "video\tvtop\t", "video\tvlife\t", "video\tvtailx\t", "video\tvmom\t",
+		"video\tvlook\t", "video\tvlist\t", "video\tvchal\t", "video\tvidea\t", "video\tvtrend\t", "video\tvsnap\t", "video\tvstubd\t"};
+	for (const char* Tag : Tags)
+	{
+		if (Text.compare(Start, std::strlen(Tag), Tag) == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** Of the line at [Start, End): the bytes Update 2's fields take (a vid's first 29 fields, a cand's first 27; any other line whole). */
+size_t U2PartOf(const std::string& Text, size_t Start, size_t End)
+{
+	const int Keep = Text.compare(Start, 10, "video\tvid\t") == 0 ? 29 : Text.compare(Start, 11, "video\tcand\t") == 0 ? 27 : 0;
+	if (Keep == 0)
+	{
+		return End - Start;
+	}
+	int Fields = 1;
+	for (size_t I = Start; I < End; ++I)
+	{
+		if (Text[I] == '\t' && ++Fields > Keep)
+		{
+			return I - Start + 1; // up to Update 2's last field, and the line's end
+		}
+	}
+	return End - Start;
+}
+
+/** The bytes Update 2's lines take (autoplay\t, video\t and site\t without Update 3's sub-tags and appended fields). */
+size_t LineBytesU2(const std::string& Text)
+{
+	size_t Bytes = 0;
+	size_t Start = 0;
+	while (Start < Text.size())
+	{
+		size_t End = Text.find('\n', Start);
+		End = End == std::string::npos ? Text.size() : End + 1;
+		const bool Ours = Text.compare(Start, 9, "autoplay\t") == 0 || Text.compare(Start, 6, "video\t") == 0 || Text.compare(Start, 5, "site\t") == 0;
+		if (Ours && !U3SubTag(Text, Start))
+		{
+			Bytes += U2PartOf(Text, Start, End);
+		}
+		Start = End;
+	}
+	return Bytes;
+}
+
+/** The bytes Update 3's lines take (its sub-tags, and the fields appended to vid and cand): its own budget, world lines aside. */
+size_t LineBytesU3(const std::string& Text)
+{
+	size_t Bytes = 0;
+	size_t Start = 0;
+	while (Start < Text.size())
+	{
+		size_t End = Text.find('\n', Start);
+		End = End == std::string::npos ? Text.size() : End + 1;
+		if (U3SubTag(Text, Start))
+		{
+			Bytes += End - Start;
+		}
+		else if (Text.compare(Start, 6, "video\t") == 0)
+		{
+			Bytes += End - Start - U2PartOf(Text, Start, End);
+		}
+		Start = End;
+	}
+	return Bytes;
+}
+
 /**
  * SegmentJourney's deals: every stake offered is taken (EconomyPacing's TakeDeals), but of the sponsors only the
  * journey's own (Lucky Penny, Volt Rush) are signed; any other brand's offer is declined, so a natural offer can't take
@@ -6446,7 +6528,8 @@ void SegmentJourney(bool Long)
 	const std::string Text = H.Last.Serialize();
 	const size_t SegmentBytes = journeys::LineBytes(Text, {"livefund\t", "livevoice\t", "liveroom\t", "livebadge\t", "liveleader\t", "livepatch\t", "mail\t", "stake\t", "coach\t",
 															   "sponsor\t", "badge\t", "life\tshift\t", "life\tliveday\t"});
-	const size_t Update2Bytes = journeys::LineBytes(Text, {"autoplay\t", "video\t", "site\t"});
+	// Update 3 (Phase A, a listed rewrite): Update 2's lines without Update 3's sub-tags and appended fields (LineBytesU2).
+	const size_t Update2Bytes = journeys::LineBytesU2(Text);
 	int Packages = 0;
 	for (const stake::Deal& D : S->Life.Stakes.Deals)
 	{
@@ -6663,7 +6746,21 @@ bool JourneyEvent(ss::Session& S, pacing::Career& C, double& Now, ss::net::SiteI
 	{
 		return false;
 	}
-	S.RegisterEvent(L);
+	// Update 3 (W3, a deliberate rewrite at Phase A): under a "plays only on" clause the register button's second press is
+	// the token core asks for (SitesTwoPress). The first press alone is refused, with nothing changed; the second registers
+	// and strikes, as the journey's RegisterStruck expects.
+	const bool Clause = ss::sponsor::WouldStrike(S.Life.Sponsors, static_cast<int>(Site), false, false);
+	if (Clause)
+	{
+		const ss::Chips* Wallet = ss::site::WalletOf(S.Life.Sites, Site);
+		const ss::Chips Before = Wallet ? *Wallet : -1, Bank = S.BankrollCents;
+		const int Tables = S.TableCount();
+		const std::string Why = S.RegisterEvent(L);
+		Wallet = ss::site::WalletOf(S.Life.Sites, Site);
+		Expect(!Why.empty() && S.TableCount() == Tables && (Wallet ? *Wallet : -1) == Before && S.BankrollCents == Bank && !S.IsPlaying(L.Spec.Id),
+			("journey: under the clause, a registration without the second press is refused and changes nothing: " + Why).c_str());
+	}
+	S.RegisterEvent(L, ss::StrikeConfirm{Clause});
 	if (S.CurrentScreen != ss::Screen::Table)
 	{
 		return false;
@@ -7082,7 +7179,8 @@ void Update2Journey()
 	}
 	S->Save();
 	const std::string Text = H.Last.Serialize();
-	const size_t Update2Bytes = journeys::LineBytes(Text, {"autoplay\t", "video\t", "site\t"});
+	// Update 3 (Phase A, a listed rewrite): Update 2's lines without Update 3's sub-tags and appended fields (LineBytesU2).
+	const size_t Update2Bytes = journeys::LineBytesU2(Text);
 	// What the journey saw.
 	const double Act1 = pacing::ActIEndOf(C.Ledger);
 	int RiverLineTeam = 0, RitTeam = 0;
@@ -7163,17 +7261,190 @@ void Update2Journey()
 }
 } // namespace session_test
 
+// ------------------------------------------------------------------ update 3's migration (update 3 SPEC §7.5)
+
+namespace session_test
+{
+namespace migration3
+{
+/** Every committed fixture's name, sorted: Tests/fixtures' *.ssave and world_*.txt, by glob (a new fixture joins without a list). */
+std::vector<std::string> Committed()
+{
+	namespace fs = std::filesystem;
+	std::vector<std::string> Out;
+	std::error_code Ec;
+	for (fs::directory_iterator It(fs::path(SS_TESTS_DIR) / "fixtures", Ec), End; !Ec && It != End; It.increment(Ec))
+	{
+		const std::string Name = It->path().filename().string();
+		const std::string Ext = It->path().extension().string();
+		if (It->is_regular_file() && (Ext == ".ssave" || (Ext == ".txt" && Name.rfind("world_", 0) == 0)))
+		{
+			Out.push_back(Name);
+		}
+	}
+	std::sort(Out.begin(), Out.end());
+	return Out;
+}
+
+/** The bytes of Update 3's lines in a save's text: its site\t and video\t sub-tags and the fields appended to vid and cand
+ *  (journeys::LineBytesU3), and the League's world line. Zero in any save Update 3 never touched (S10). */
+size_t U3Bytes(const std::string& Text)
+{
+	return journeys::LineBytesU3(Text) + journeys::LineBytes(Text, {"world\tleague\t"});
+}
+
+/** A world's own text read a line at a time (World::Read takes a line's fields), then finished. */
+void ReadWorldText(const std::string& Text, ss::world::World& W)
+{
+	size_t Start = 0;
+	while (Start < Text.size())
+	{
+		const size_t End = std::min(Text.find('\n', Start), Text.size());
+		std::vector<std::string> Fields(1);
+		for (size_t K = Start; K < End; ++K)
+		{
+			if (Text[K] == '\t')
+			{
+				Fields.emplace_back();
+			}
+			else
+			{
+				Fields.back().push_back(Text[K]);
+			}
+		}
+		W.Read(Fields);
+		Start = End + 1;
+	}
+	W.Finish();
+}
+} // namespace migration3
+
+/**
+ * MigrationAll3 (update 3 SPEC §7.5; behind "session_test u3", which every C pass runs). Phase A's stub: every committed
+ * fixture, found by glob and not by a list (Phase 0's 17 frozen snapshots: 6 pre_segment_* with v1's .expected, 5
+ * pre_update2_*, 4 update2_*, world_v1.txt and world_v2.txt):
+ *   - a save parses and writes back byte for byte (the v1 save as its .expected), and its text parses a second time the same;
+ *   - it loads into a session whose save reads and writes back byte for byte, and that loads a second time identically;
+ *   - a world reads, migrates once to version 4 and from then on writes back byte for byte;
+ *   - and none of it carries an Update 3 line (a site\t play sub-tag, a video\t Update 3 line or appended field, world\tleague):
+ *     Update 3 writes nothing into a save it never touched (S10).
+ * Then the no-write case's core half: update2_multisite (the clause's save) stepped 40 days through the calendar, so across
+ * a 1st, writes no Update 3 line and sets no Update3LinesRead bit. Opening every rival page through ss.Laptop.Open and the
+ * Kast preview of each join it at C2, with the rivals' frames; update3_siteplay's facts at C2 and update3_creator's at C3.
+ */
+void MigrationAll3()
+{
+	const auto T0 = std::chrono::steady_clock::now();
+	const std::vector<std::string> All = migration3::Committed();
+	static const char* const Frozen[] = {"pre_segment_evicted.ssave", "pre_segment_fresh.ssave", "pre_segment_mid_nightly.ssave", "pre_segment_team_riverline.ssave",
+		"pre_segment_v1.expected.ssave", "pre_segment_v1.ssave", "pre_update2_evicted.ssave", "pre_update2_fresh.ssave", "pre_update2_sponsored_streamer.ssave",
+		"pre_update2_staked_mid_nightly.ssave", "pre_update2_veteran.ssave", "update2_auto_mid_nightly.ssave", "update2_blank_world.ssave", "update2_creator.ssave",
+		"update2_multisite.ssave", "world_v1.txt", "world_v2.txt"};
+	int Known = 0;
+	for (const char* Name : Frozen)
+	{
+		Known += std::find(All.begin(), All.end(), std::string(Name)) != All.end() ? 1 : 0;
+	}
+	std::printf("  migration (update 3): %zu committed fixtures by glob, %d of Phase 0's 17 among them\n", All.size(), Known);
+	Expect(Known == 17, "migration (update 3): the glob finds every committed fixture (Phase 0's 17 frozen snapshots)");
+	int Exact = 0;
+	for (const std::string& Name : All)
+	{
+		const auto F0 = std::chrono::steady_clock::now();
+		const std::string Tag = "migration (update 3): " + Name;
+		const std::string Saved = seams::Fixture(Name.c_str());
+		if (Name.rfind("world_", 0) == 0)
+		{
+			ss::world::World W;
+			migration3::ReadWorldText(Saved, W);
+			std::string Again;
+			W.Write(Again);
+			ss::world::World Second;
+			migration3::ReadWorldText(Again, Second);
+			std::string Third;
+			Second.Write(Third);
+			const bool Kept = W.Ready() && !Saved.empty() && Again.rfind("world\thead\t" + std::to_string(ss::world::Version) + "\t", 0) == 0 && ss::world::Version == 4 && Third == Again;
+			Exact += Kept ? 1 : 0;
+			std::printf("  migration (update 3): %s: version %d -> %d, then written back %s; Update 3 bytes %zu (%.2f s)\n", Name.c_str(), migration2::WorldVersionIn(Saved),
+				migration2::WorldVersionIn(Again), Third == Again ? "byte for byte" : ("differently at " + migration2::FirstDifference(Again, Third)).c_str(),
+				migration3::U3Bytes(Again), migration2::Since(F0));
+			Expect(Kept, (Tag + " reads, migrates once to version 4 and then writes back byte for byte").c_str());
+			Expect(migration3::U3Bytes(Again) == 0, (Tag + ": no League line in a world Update 3 never touched").c_str());
+			continue;
+		}
+		// A save that has an .expected beside it (the v1 "riverside" save) writes that back; every other one itself. The
+		// written-back check is SaveFixtures' (seams::RoundTrip): byte for byte, or for a save from before the last segment
+		// byte for byte but for that segment's own lines, which its migration writes; then a second parse writes the same.
+		const std::string ExpectedName = Name.substr(0, Name.size() - std::string(".ssave").size()) + ".expected.ssave";
+		const bool HasExpected = std::find(All.begin(), All.end(), ExpectedName) != All.end();
+		const std::string Expected = HasExpected ? seams::Fixture(ExpectedName.c_str()) : Saved;
+		seams::RoundTrip(Name.c_str(), Saved, Expected);
+		ss::SaveData D;
+		const bool Parsed = ss::SaveData::Parse(Saved, D);
+		const std::string Again = Parsed ? D.Serialize() : std::string();
+		if (!Parsed)
+		{
+			continue;
+		}
+		const std::string Seed = "migration3-" + Name;
+		std::string First;
+		{
+			Hooks H;
+			ss::Session S(H, Seed, &D);
+			First = migration2::SavedNow(S, H);
+		}
+		ss::SaveData Back;
+		const bool Reads = ss::SaveData::Parse(First, Back) && Back.Serialize() == First;
+		std::string Second;
+		{
+			Hooks H;
+			ss::Session S(H, Seed, &Back);
+			Second = migration2::SavedNow(S, H);
+		}
+		const size_t U3 = migration3::U3Bytes(Again) + migration3::U3Bytes(First) + migration3::U3Bytes(Second);
+		Exact += Again == Expected ? 1 : 0;
+		std::printf("  migration (update 3): %s: written back %s; its session's save %zu bytes, %s; Update 3 bytes %zu (%.2f s)\n", Name.c_str(),
+			Again == Expected ? "byte for byte" : "with the last segment's own lines (as SaveFixtures allows)", First.size(),
+			Second == First ? "the same from a second load" : ("a second load differs at " + migration2::FirstDifference(First, Second)).c_str(), U3, migration2::Since(F0));
+		Expect(Reads && Second == First, (Tag + ": its session's save reads and writes back byte for byte, and loads a second time identically").c_str());
+		Expect(U3 == 0, (Tag + ": no Update 3 line written back or by its session (S10)").c_str());
+	}
+	// The no-write case's core half: the clause's save, 40 days of the calendar (ss.Stake.Advance's path: every step
+	// CheckCalendar runs, SiteStep and SitePlayStep, VideoStep and the world's), so across a 1st.
+	{
+		ss::SaveData D;
+		const bool Parsed = ss::SaveData::Parse(seams::Fixture("update2_multisite.ssave"), D);
+		Hooks H;
+		ss::Session S(H, "migration3-no-write", &D);
+		const bool Clause = S.TeamRiverLine();
+		const double From = S.WorldMinutes();
+		const std::string Stepped = S.DebugStake("advance 960");
+		const std::string After = migration2::SavedNow(S, H);
+		const size_t U3 = migration3::U3Bytes(After);
+		std::printf("  migration (update 3): update2_multisite stepped %.0f days under the clause: %s; Update 3 bytes %zu, Update3LinesRead %u\n",
+			(S.WorldMinutes() - From) / ss::net::MinutesPerDay, Stepped.c_str(), U3, static_cast<unsigned>(S.Life.Update3LinesRead));
+		Expect(Parsed && Clause && Stepped.rfind("Advanced", 0) == 0 && S.WorldMinutes() - From >= 40.0 * ss::net::MinutesPerDay - 1.0 && U3 == 0 &&
+				   S.Life.Update3LinesRead == 0,
+			"migration (update 3): the no-write case: update2_multisite's 40 days across a 1st write no Update 3 line and set no Update 3 bit");
+	}
+	std::printf("  migration (update 3): %d of %zu fixtures written back byte for byte (a world after its one migration; the rest but for the last segment's "
+				"own lines), none with an Update 3 line, %.1f s\n",
+		Exact, All.size(), migration2::Since(T0));
+}
+} // namespace session_test
+
 int main(int Argc, char** Argv)
 {
 	// "session_test long": the long careers (EconomyPacing's three whole, with their deals-off twins, G2's creator career and G3's
 	// multi-site career; SegmentJourney's whole 120 days; C3's Update2Journey; update 2 SPEC §6.7). "session_test c1 [long]":
 	// only the lead's C1 checks (the gate's fixtures, the journeys, the pacing). "session_test c2" and "session_test c3": only
-	// the lead's C2 or C3 checks (below).
+	// the lead's C2 or C3 checks (below). "session_test u3": update 3's (below).
 	bool Long = false;
 	bool C1 = false;
 	bool C2 = false;
 	bool G3 = false;
 	bool C3 = false;
+	bool U3 = false;
 	for (int K = 1; K < Argc; ++K)
 	{
 		Long = Long || std::string(Argv[K]) == "long";
@@ -7181,6 +7452,16 @@ int main(int Argc, char** Argv)
 		C2 = C2 || std::string(Argv[K]) == "c2";
 		G3 = G3 || std::string(Argv[K]) == "g3";
 		C3 = C3 || std::string(Argv[K]) == "c3";
+		U3 = U3 || std::string(Argv[K]) == "u3";
+	}
+	if (U3)
+	{
+		// "u3": update 3's lead checks (update 3 SPEC §7.5, §7.7), run by every C pass and kept out of the default run (no new
+		// check there): MigrationAll3, Phase A's stub over every committed fixture; U3SitesJourney joins it at C2 and
+		// U3CreatorJourney at C3.
+		session_test::MigrationAll3();
+		std::printf("%s\n", session_test::Failures == 0 ? "session tests (u3): all passed" : "session tests (u3): FAILED");
+		return session_test::Failures == 0 ? 0 : 1;
 	}
 	if (C3)
 	{

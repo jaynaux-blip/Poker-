@@ -7,6 +7,7 @@
 #include "ShortStack/Game/Hero.h"
 #include "ShortStack/Game/Shop.h"
 #include "ShortStack/Game/SiteData.h"
+#include "ShortStack/Game/SitePlay.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Town.h"
@@ -433,6 +434,17 @@ struct State
 	 */
 	uint32_t Update2LinesRead = 0;
 
+	// ---- update 3 (update 3 SPEC §7.2): the rival sites' loops and the Governor (SitePlay.h), saved as site\t sub-tags
+	// (spark, flame, dare, box, band, level, look, fuse, beef, stick, star, league, lhist, callout, h2h, scalp, luck, cred,
+	// gov, hold) by site::play::WriteLines once U3SitePlay is set. Ledger kinds unchanged (0-14): no new kind, no new pot.
+	site::play::Book SitePlay;
+	/**
+	 * Not saved: Update3Line bits. A bit is set when the save had a line of its family, or when the feature first has state
+	 * (the first paid rival entry or Clicked claim; the first Update 3 upload); NewCareer sets every bit (the SegShift
+	 * precedent). Never in AfterParse (S10).
+	 */
+	uint32_t Update3LinesRead = 0;
+
 	SHORTSTACKCORE_API void Record(double At, const std::string& Label, Chips Amount, int Kind);
 	int TicketsFor(const std::string& TemplateId) const;
 };
@@ -449,6 +461,13 @@ enum Update2Line : uint32_t
 	U2Sites = 8,      // site\t... (accounts, transfers, invitations)
 	U2Rewards = 16,   // site\trewards
 	U2Notes = 32,     // autoplay\tnote
+};
+
+/** Bits of State::Update3LinesRead (update 3 §1.8 S2, §7.2): each feature writes its lines only once its bit is set. */
+enum Update3Line : uint32_t
+{
+	U3SitePlay = 1, // site\t play sub-tags (site::play::WriteLines)
+	U3Video = 2,    // video\t Update 3 sub-tags and vid's appended fields (video::WriteLinesU3)
 };
 
 /**

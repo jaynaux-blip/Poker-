@@ -99,13 +99,43 @@ void Session::SiteSettle(const Results& Res)
 	{
 		site::OnPrize(Life.Sites, Site, Res.BountyCents, "Bounties: " + Res.EventName, World, Add);
 	}
-	Add.Points = Res.BuyInCents > 0 ? net::Points(Res.Place, Res.Entrants, Res.BuyInCents) : 0.0;
+	// Update 3 (§2.6 F7; dormant until G2): a FUSE scores no Month or Season points and no final table; it counts in the
+	// record's events and money, and in Ignite's own loops (below).
+	const bool Fuse = fuse::IsFuse(T->Spec.Id);
+	Add.Points = Res.BuyInCents > 0 && !Fuse ? net::Points(Res.Place, Res.Entrants, Res.BuyInCents) : 0.0;
 	Add.Won = Res.PrizeCents + Res.BountyCents;
 	Add.Wins = Res.Place == 1 ? 1 : 0;
-	Add.FinalTables = Res.Place >= 1 && Res.Place <= 9 ? 1 : 0;
+	Add.FinalTables = Res.Place >= 1 && Res.Place <= 9 && !Fuse ? 1 : 0;
 	Add.Events = 1;
 	site::OnPrize(Life.Sites, Site, Res.PrizeCents, "Prize: " + Res.EventName, World, Add);
 	Life.Update2LinesRead |= life::U2Sites;
+	if (Fuse)
+	{
+		// The result as the site play book hears it (core-siteplay's OnResult; core-sites-g2 hands every result over at G2):
+		// who the player knocked out and who knocked them out, by name, the multiplier and its winner.
+		site::play::SettleFacts F;
+		F.Site = Site;
+		F.EventId = T->Spec.Id;
+		F.Place = Res.Place;
+		F.Entrants = Res.Entrants;
+		F.Prize = Res.PrizeCents;
+		F.BuyIn = Res.BuyInCents;
+		F.Win = Res.Place == 1;
+		F.Format = static_cast<int>(net::Format::Freezeout); // the engine's format; Fuse says what it was
+		F.Fuse = true;
+		F.FuseM = Res.BuyInCents > 0 ? static_cast<int>(T->Spec.GuaranteeCents / Res.BuyInCents) : 0;
+		const TPlayer& Hero = T->Hero();
+		for (const TPlayer& P : T->Players)
+		{
+			if (P.Busted && P.KnockedOutBy == Hero.Id && P.Id != Hero.Id)
+			{
+				F.Knocked.push_back(P.Name);
+			}
+			F.BustedBy = P.Id == Hero.KnockedOutBy && P.Id != Hero.Id ? P.Name : F.BustedBy;
+			F.FuseWinner = P.Place == 1 ? P.Name : F.FuseWinner;
+		}
+		site::play::OnResult(Life.SitePlay, Life, F, World);
+	}
 }
 
 std::string Session::AnswerInvite(net::SiteId S, bool Accept)
@@ -227,6 +257,13 @@ std::string Session::DebugSite(const std::string& Args)
 	const double World = WorldMinutes();
 	const net::SiteId Named = W.size() > 1 ? SitesNamed(W[1]) : net::SiteId::Count;
 	const std::string Usage = "ss.Site.<Describe|Invite <site>|Accept <site>|Decline <site>|Launch <site>|Deposit <site> <dollars> [card]|Withdraw <site> <dollars> [bank]|Advance <hours>>";
+	// Update 3 (§7.6): ss.Site.Play's verbs, the rest of the line as typed (core-siteplay's DebugSitePlay).
+	if (Verb == "play")
+	{
+		const size_t Word = Args.find_first_not_of(" \t");
+		const size_t Rest = Word == std::string::npos ? std::string::npos : Args.find_first_not_of(" \t", Args.find_first_of(" \t", Word));
+		return DebugSitePlay(Rest == std::string::npos ? std::string() : Args.substr(Rest));
+	}
 	if (Verb == "describe")
 	{
 		const site::Book& B = Life.Sites;

@@ -1175,6 +1175,8 @@ struct Roboto : ss::ui::TextMeasurer
 		case ss::ui::Font::Mono: return test_font::MonoAscii;
 		case ss::ui::Font::Black: return test_font::BlackAscii;
 		case ss::ui::Font::Light: return test_font::LightAscii;
+		case ss::ui::Font::BlackItalic: return test_font::BlackItalicAscii; // update 3 (SPEC §1.11): the faces TextStyle::Face draws
+		case ss::ui::Font::BoldCondensed: return test_font::BoldCondensedAscii;
 		default: return test_font::RegularAscii;
 		}
 	}

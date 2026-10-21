@@ -57,6 +57,9 @@ struct TableMeasurer : ss::ui::TextMeasurer
 		case ss::ui::Font::Mono: return test_font::MonoAscii;
 		case ss::ui::Font::Black: return test_font::BlackAscii;
 		case ss::ui::Font::Light: return test_font::LightAscii;
+		// Update 3 (SPEC §1.11): the faces drawn only through TextStyle::Face, measured as Unreal's TTFs advance them.
+		case ss::ui::Font::BlackItalic: return test_font::BlackItalicAscii;
+		case ss::ui::Font::BoldCondensed: return test_font::BoldCondensedAscii;
 		default: return test_font::RegularAscii;
 		}
 	}
@@ -68,6 +71,8 @@ struct TableMeasurer : ss::ui::TextMeasurer
 		case ss::ui::Font::Mono: return test_font::MonoSpecial;
 		case ss::ui::Font::Black: return test_font::BlackSpecial;
 		case ss::ui::Font::Light: return test_font::LightSpecial;
+		case ss::ui::Font::BlackItalic: return test_font::BlackItalicSpecial;
+		case ss::ui::Font::BoldCondensed: return test_font::BoldCondensedSpecial;
 		default: return test_font::RegularSpecial;
 		}
 	}
@@ -130,7 +135,8 @@ struct TableMeasurer : ss::ui::TextMeasurer
 	}
 	float Ascent(ss::ui::Font Face, float SizePx) const override
 	{
-		const float A = Face == ss::ui::Font::Bold ? test_font::BoldAscent : Face == ss::ui::Font::Mono ? test_font::MonoAscent : Face == ss::ui::Font::Black ? test_font::BlackAscent : Face == ss::ui::Font::Light ? test_font::LightAscent : test_font::RegularAscent;
+		const float A = Face == ss::ui::Font::Bold ? test_font::BoldAscent : Face == ss::ui::Font::Mono ? test_font::MonoAscent : Face == ss::ui::Font::Black ? test_font::BlackAscent : Face == ss::ui::Font::Light ? test_font::LightAscent
+			: Face == ss::ui::Font::BlackItalic ? test_font::BlackItalicAscent : Face == ss::ui::Font::BoldCondensed ? test_font::BoldCondensedAscent : test_font::RegularAscent;
 		return A * SizePx / 100.0f;
 	}
 };

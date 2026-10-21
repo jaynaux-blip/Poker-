@@ -2,6 +2,7 @@
 #include "../StrictFloat.h"
 
 #include <cstring>
+#include <list>
 #include <unordered_map>
 #include <cmath>
 #include <algorithm>
@@ -419,7 +420,7 @@ std::string DrawList::ToJson() const
 			AppendNum(Out, T.BaselineY);
 			Out += ",\"size\":";
 			AppendNum(Out, T.SizePx);
-			Out += ",\"font\":";
+			Out += ",\"font\":"; // ss::ui::Font's index: 0-4 by weight, update 3's 5 BlackItalic and 6 BoldCondensed
 			Out += std::to_string(static_cast<int>(T.Face));
 			char Buf[64];
 			std::snprintf(Buf, sizeof(Buf), ",\"c\":[%d,%d,%d,%.3f]}", static_cast<int>(T.Col.R * 255.0f + 0.5f), static_cast<int>(T.Col.G * 255.0f + 0.5f), static_cast<int>(T.Col.B * 255.0f + 0.5f), static_cast<double>(T.Col.A));
@@ -1103,16 +1104,61 @@ void Canvas::GlowRoundRect(const Rect& R, float Radius, const Color& C, float Bl
 
 namespace
 {
-struct FragmentCache
+/** A fragment in a pool that evicts least-recently-used: where it sits in its pool's use order. */
+struct PooledFragment
 {
-	std::unordered_map<uint64_t, Fragment> Map;
-	size_t Vertices = 0;
+	Fragment F;
+	std::list<uint64_t>::iterator Used;
 };
 
-FragmentCache& Fragments()
+/**
+ * One pool of the cache (update 3, §7.2, §10). Shared is the cache as it always was: one map, started over whole once past
+ * its budget (it keeps no use order). The others evict their least-recently-used fragments past their own budget and
+ * never touch another pool.
+ */
+struct FragmentCache
 {
-	thread_local FragmentCache Cache;
+	std::unordered_map<uint64_t, Fragment> Map; // Shared
+	std::unordered_map<uint64_t, PooledFragment> Lru; // every other pool
+	std::list<uint64_t> Order;                  // most recently used first
+	size_t Vertices = 0;
+	size_t Budget = 0;
+};
+
+/** The pools' budgets in vertices until SetPoolBudget says otherwise: Shared's is the 1.5M it always had. */
+size_t CanvasPoolDefault(Canvas::CachePool Pool)
+{
+	switch (Pool)
+	{
+	case Canvas::CachePool::Shared: return 1500000; // a page's worth of art is a few hundred thousand vertices
+	case Canvas::CachePool::Rerun: return 750000;   // about 18 MB of thumbnails until spike S-T sizes it (§10)
+	case Canvas::CachePool::Boardwalk: return 120000;
+	case Canvas::CachePool::Count: break;
+	}
+	return 0;
+}
+
+FragmentCache& Fragments(Canvas::CachePool Pool = Canvas::CachePool::Shared)
+{
+	thread_local FragmentCache Caches[static_cast<size_t>(Canvas::CachePool::Count)];
+	FragmentCache& Cache = Caches[static_cast<size_t>(Pool)];
+	if (Cache.Budget == 0)
+	{
+		Cache.Budget = CanvasPoolDefault(Pool);
+	}
 	return Cache;
+}
+
+/** Evicts a least-recently-used pool's oldest fragments until Extra more vertices fit its budget (or it's empty). */
+void CanvasEvict(FragmentCache& Cache, size_t Extra)
+{
+	while (!Cache.Order.empty() && Cache.Vertices + Extra > Cache.Budget)
+	{
+		const auto Oldest = Cache.Lru.find(Cache.Order.back());
+		Cache.Vertices -= Oldest->second.F.Vertices.size();
+		Cache.Lru.erase(Oldest);
+		Cache.Order.pop_back();
+	}
 }
 
 uint64_t MixKey(uint64_t H, uint64_t V)
@@ -1156,7 +1202,7 @@ void Canvas::Cached(uint64_t Key, float X, float Y, const std::function<void(Can
 		F.Indices = std::move(Temp.Indices);
 		F.Cmds = std::move(Temp.Cmds);
 		// A page's worth of art is a few hundred thousand vertices: the cache starts over well past that.
-		if (Cache.Vertices + F.Vertices.size() > 1500000)
+		if (Cache.Vertices + F.Vertices.size() > Cache.Budget)
 		{
 			Cache.Map.clear();
 			Cache.Vertices = 0;
@@ -1165,6 +1211,195 @@ void Canvas::Cached(uint64_t Key, float X, float Y, const std::function<void(Can
 		Found = Cache.Map.emplace(Full, std::move(F)).first;
 	}
 	Replay(Found->second, S * X + Xf.Tx, S * Y + Xf.Ty);
+}
+
+// Update 3 (SPEC §7.2, §10): the cache's pools, the presence query a progressive page asks before it paints, the glow
+// around any polygon and dashed lines.
+bool Canvas::IsCached(uint64_t Key) const
+{
+	// Keyed as Cached keys it: only an unrotated, evenly scaled canvas caches at all.
+	const Affine& Xf = State.Xf;
+	const float S = Xf.A;
+	if (std::fabs(Xf.B) > 1e-6f || std::fabs(Xf.C) > 1e-6f || S <= 0.0f || std::fabs(Xf.D - S) > 1e-5f * S)
+	{
+		return false;
+	}
+	const uint64_t Full = MixKey(MixKey(Key, FloatBits(S)), FloatBits(PxScale));
+	for (size_t P = 0; P < static_cast<size_t>(CachePool::Count); ++P)
+	{
+		const FragmentCache& Cache = Fragments(static_cast<CachePool>(P));
+		if (Cache.Map.count(Full) > 0 || Cache.Lru.count(Full) > 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void Canvas::Cached(uint64_t Key, float X, float Y, const std::function<void(Canvas&)>& PaintFn, CachePool Pool)
+{
+	if (Pool == CachePool::Shared || Pool == CachePool::Count)
+	{
+		Cached(Key, X, Y, PaintFn);
+		return;
+	}
+	const Affine& Xf = State.Xf;
+	const float S = Xf.A;
+	if (std::fabs(Xf.B) > 1e-6f || std::fabs(Xf.C) > 1e-6f || S <= 0.0f || std::fabs(Xf.D - S) > 1e-5f * S)
+	{
+		Save();
+		Translate(X, Y);
+		PaintFn(*this);
+		Restore();
+		return;
+	}
+	const uint64_t Full = MixKey(MixKey(Key, FloatBits(S)), FloatBits(PxScale));
+	FragmentCache& Cache = Fragments(Pool);
+	auto Found = Cache.Lru.find(Full);
+	if (Found == Cache.Lru.end())
+	{
+		DrawList Temp;
+		Canvas Tc(Temp, Measurer, W, H, PxScale);
+		Tc.State.Xf.A = S;
+		Tc.State.Xf.D = S;
+		PaintFn(Tc);
+		PooledFragment P;
+		P.F.Vertices = std::move(Temp.Vertices);
+		P.F.Indices = std::move(Temp.Indices);
+		P.F.Cmds = std::move(Temp.Cmds);
+		// Room for it: this pool's oldest go first (one fragment larger than the whole budget still caches, alone).
+		CanvasEvict(Cache, P.F.Vertices.size());
+		Cache.Vertices += P.F.Vertices.size();
+		Cache.Order.push_front(Full);
+		P.Used = Cache.Order.begin();
+		Found = Cache.Lru.emplace(Full, std::move(P)).first;
+	}
+	else
+	{
+		Cache.Order.splice(Cache.Order.begin(), Cache.Order, Found->second.Used);
+	}
+	Replay(Found->second.F, S * X + Xf.Tx, S * Y + Xf.Ty);
+}
+
+void Canvas::SetPoolBudget(CachePool Pool, size_t Vertices)
+{
+	if (Pool == CachePool::Count)
+	{
+		return;
+	}
+	FragmentCache& Cache = Fragments(Pool);
+	Cache.Budget = Vertices > 0 ? Vertices : CanvasPoolDefault(Pool);
+	if (Pool != CachePool::Shared)
+	{
+		CanvasEvict(Cache, 0);
+	}
+}
+
+void Canvas::GlowPolygon(const std::vector<Vec2>& Points, const Color& C, float Blur)
+{
+	// GlowRoundRect's falloff around any polygon: a solid core inset by a third of the blur (along each corner's bisector),
+	// then a wide fringe to transparent, so the glow reaches Blur past the outline. One feathered concave path overlaps its
+	// own fringe at a reflex corner: glow a concave shape as convex pieces.
+	const size_t N = Points.size();
+	if (N < 3)
+	{
+		return;
+	}
+	if (Blur <= 0.0f)
+	{
+		FillPath(Points, Paint(C), Feather(), false);
+		return;
+	}
+	float Twice = 0.0f;
+	for (size_t I = 0; I < N; ++I)
+	{
+		Twice += Cross(Points[I], Points[(I + 1) % N]);
+	}
+	if (std::fabs(Twice) < 1e-6f)
+	{
+		return;
+	}
+	const float Side = Twice > 0.0f ? 1.0f : -1.0f; // which side of an edge is inside
+	const float Inset = Blur * 0.3f;
+	std::vector<Vec2> Core(N);
+	for (size_t I = 0; I < N; ++I)
+	{
+		const Vec2 E0 = Norm(Sub(Points[I], Points[(I + N - 1) % N]));
+		const Vec2 E1 = Norm(Sub(Points[(I + 1) % N], Points[I]));
+		const Vec2 In0{-E0.Y * Side, E0.X * Side};
+		const Vec2 In1{-E1.Y * Side, E1.X * Side};
+		Vec2 Bis = Norm(Add(In0, In1));
+		if (Len(Bis) < 0.5f)
+		{
+			Bis = In1;
+		}
+		const float Miter = Clampf(1.0f / (Dot(Bis, In1) > 0.3f ? Dot(Bis, In1) : 0.3f), 1.0f, 3.0f);
+		Core[I] = Add(Points[I], Mul(Bis, Inset * Miter));
+	}
+	FillPath(Core, Paint(C), Blur * 1.3f * State.Xf.UniformScale(), false);
+}
+
+void Canvas::StrokeDashed(const std::vector<Vec2>& Points, const Color& C, float Width, float Dash, float Gap)
+{
+	// Walks the line in device space, Dash units on, Gap units off (both scale with the canvas); a dash that turns a corner
+	// keeps the corner. Dash or Gap at or under zero: a solid line.
+	if (Points.size() < 2)
+	{
+		return;
+	}
+	if (Dash <= 0.0f || Gap <= 0.0f)
+	{
+		StrokePolyline(Points, false, C, Width);
+		return;
+	}
+	const float Scale = State.Xf.UniformScale();
+	const float Wd = Width * Scale;
+	const float Lengths[2] = {Dash * Scale, Gap * Scale};
+	std::vector<Vec2> Dev;
+	Dev.reserve(Points.size());
+	for (const Vec2& P : Points)
+	{
+		Dev.push_back(State.Xf.Apply(P));
+	}
+	std::vector<Vec2> Seg{Dev[0]};
+	bool On = true;
+	float Left = Lengths[0];
+	for (size_t I = 1; I < Dev.size(); ++I)
+	{
+		Vec2 A = Dev[I - 1];
+		const Vec2 B = Dev[I];
+		float Remaining = Len(Sub(B, A));
+		const Vec2 Dir = Remaining > 0.0f ? Mul(Sub(B, A), 1.0f / Remaining) : Vec2{0.0f, 0.0f};
+		while (Remaining > 0.0f)
+		{
+			if (Left <= Remaining)
+			{
+				A = Add(A, Mul(Dir, Left));
+				Remaining -= Left;
+				if (On)
+				{
+					Seg.push_back(A);
+					StrokeDevice(Seg, false, C, Wd, false);
+				}
+				Seg.assign(1, A);
+				On = !On;
+				Left = Lengths[On ? 0 : 1];
+			}
+			else
+			{
+				Left -= Remaining;
+				Remaining = 0.0f;
+				if (On)
+				{
+					Seg.push_back(B);
+				}
+			}
+		}
+	}
+	if (On && Seg.size() > 1)
+	{
+		StrokeDevice(Seg, false, C, Wd, false);
+	}
 }
 
 void Canvas::Replay(const Fragment& F, float Dx, float Dy)
@@ -1247,9 +1482,15 @@ float Canvas::Measure(const std::string& S, float Size, int Weight, bool Mono) c
 	return Measurer.Width(S, FaceFor(Weight, Mono), Size);
 }
 
+float Canvas::Measure(const std::string& S, float Size, Font Face) const
+{
+	return Measurer.Width(S, Face, Size);
+}
+
 float Canvas::Text(const std::string& S, float X, float Y, const TextStyle& Style)
 {
-	const Font Face = FaceFor(Style.Weight, Style.Mono);
+	// Update 3 (§1.11): a style's own face (BlackItalic, BoldCondensed) measures and draws as itself; -1 is the weight's.
+	const Font Face = Style.Face >= 0 ? static_cast<Font>(Style.Face) : FaceFor(Style.Weight, Style.Mono);
 	std::string Str = S;
 	if (Style.MaxWidth > 0.0f && Measurer.Width(Str, Face, Style.Size) > Style.MaxWidth)
 	{

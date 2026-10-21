@@ -485,7 +485,7 @@ const net::CashMethod* MethodFor(net::SiteId S, const std::string& Id, bool Out)
 	return nullptr;
 }
 
-bool GateMet(net::SiteId S, const rep::Public& P, int RentsPaid, double World, int* Why)
+bool GateMet(net::SiteId S, const rep::Public& P, int RentsPaid, double World, int* Why, int IgniteLevel)
 {
 	if (!IsRival(S))
 	{
@@ -503,11 +503,14 @@ bool GateMet(net::SiteId S, const rep::Public& P, int RentsPaid, double World, i
 	const bool Volume = D.Gate.MinEvents > 0 && std::max(P.OnlineEvents, P.Paid100) >= D.Gate.MinEvents && P.Abi100 >= D.Gate.MinAbi100;
 	const bool Title = D.Gate.SeriesTitle && P.OnlineSeriesTitles > 0;
 	const bool Partner = D.Gate.KastPartner && P.Partner;
+	// Update 3 (§11 Q4; the values are core-sites-g2's at G2, zero until then): a second volume path and an Ignite Level path.
+	const bool Volume2 = D.Gate.MinEvents2 > 0 && std::max(P.OnlineEvents, P.Paid100) >= D.Gate.MinEvents2 && P.Abi100 >= D.Gate.MinAbi100_2;
+	const bool LevelPath = D.Gate.IgniteLevel > 0 && IgniteLevel >= D.Gate.IgniteLevel;
 	if (Why)
 	{
-		*Why = Volume ? 0 : Title ? 1 : 2;
+		*Why = Volume ? 0 : Title ? 1 : Partner ? 2 : Volume2 ? 3 : LevelPath ? 4 : 2;
 	}
-	return Volume || Title || Partner;
+	return Volume || Title || Partner || Volume2 || LevelPath;
 }
 
 void PostLetter(life::State& L, net::SiteId S, double World, int Kind, const std::string& Subject, const std::string& Body)
@@ -1139,6 +1142,12 @@ void WriteLines(const life::State& L, std::string& Out)
 	{
 		Out += "site\tdone\t" + SiteEscape(K) + "\n";
 	}
+	// Update 3 (§7.4, S2): the rival sites' loops and the Governor last, their own lines (SitePlay.cpp), and nothing until
+	// the play book has had a line or its first state.
+	if ((L.Update3LinesRead & life::U3SitePlay) != 0)
+	{
+		play::WriteLines(L, Out);
+	}
 }
 
 bool ReadLine(const std::vector<std::string>& P, life::State& L)
@@ -1225,6 +1234,22 @@ bool ReadLine(const std::vector<std::string>& P, life::State& L)
 	else if (Tag == "done" && P.size() >= 3)
 	{
 		B.Done.insert(SiteUnescape(P[2]));
+	}
+	else
+	{
+		// Update 3 (§7.4, S3): the play book's sub-tags go to their own reader (SitePlay.cpp); its family's bit says the save
+		// had one, so they're written back.
+		static const char* const PlayTags[] = {"spark", "flame", "dare", "box", "band", "level", "look", "fuse", "beef", "stick",
+			"star", "league", "lhist", "callout", "h2h", "scalp", "luck", "cred", "gov", "hold"};
+		for (const char* Play : PlayTags)
+		{
+			if (Tag == Play)
+			{
+				L.Update3LinesRead |= life::U3SitePlay;
+				(void)play::ReadLine(P, L);
+				break;
+			}
+		}
 	}
 	// Every site line is ours, a tag this build doesn't know included (a newer build's): nothing else reads it.
 	L.Update2LinesRead |= life::U2Sites;

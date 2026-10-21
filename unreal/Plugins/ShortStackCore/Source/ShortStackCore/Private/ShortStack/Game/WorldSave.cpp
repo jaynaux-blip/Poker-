@@ -695,6 +695,34 @@ void World::Write(std::string& Out) const
 			Emit(Line("siteseries") << I(static_cast<int>(Site.first)) << Esc(Site.second.first) << I(It.first) << D(It.second));
 		}
 	}
+	// Update 3 (§3.6 R2, §7.4): the player's League group on a site, only once one was drawn (optional: no version bump, and
+	// an older build drops the line). The 19 ids (-1 for none), then each member as npc:days:form:todayKey:todayCount and
+	// its best days as day/points x 10 (up to the last one held), the members comma-joined.
+	for (const auto& Lg : Leagues)
+	{
+		const LeagueBook& Lb = Lg.second;
+		Line L("league");
+		L << I(static_cast<int>(Lg.first)) << I(Lb.MonthKey) << I(Lb.Div);
+		for (size_t K = 0; K < 19; ++K)
+		{
+			L << I(K < Lb.Members.size() ? Lb.Members[K].Npc : -1);
+		}
+		std::string Members;
+		for (const LeagueMember& M : Lb.Members)
+		{
+			Members += (Members.empty() ? "" : ",") + I(M.Npc) + ":" + I(M.Days) + ":" + I(M.Form) + ":" + I(M.TodayKey) + ":" + I(M.TodayCount);
+			size_t Held = 0;
+			for (size_t K = 0; K < M.Best.size(); ++K)
+			{
+				Held = M.Best[K].first != 0 || M.Best[K].second != 0 ? K + 1 : Held;
+			}
+			for (size_t K = 0; K < Held; ++K)
+			{
+				Members += ":" + I(M.Best[K].first) + "/" + I(M.Best[K].second);
+			}
+		}
+		Emit(L << Members);
+	}
 }
 
 bool World::Read(const std::vector<std::string>& Fields)
@@ -1224,6 +1252,54 @@ bool World::Read(const std::vector<std::string>& Fields)
 			if (Id >= 0 && Id <= 1000000)
 			{
 				Race.second[Id] = C.Dbl();
+			}
+		}
+	}
+	else if (Kind == "league")
+	{
+		// Update 3 (§3.6 R2): the player's League group on a site (World::Write's line; core-world's records from G2).
+		const int Raw = C.Small();
+		if (Raw <= 0 || Raw >= static_cast<int>(net::SiteId::Count))
+		{
+			return true;
+		}
+		LeagueBook& Lb = Leagues[static_cast<net::SiteId>(Raw)];
+		Lb = LeagueBook();
+		Lb.MonthKey = C.Small();
+		Lb.Div = static_cast<int8_t>(C.Small());
+		for (int K = 0; K < 19; ++K)
+		{
+			const int Who = C.Small();
+			if (Who >= 0)
+			{
+				LeagueMember M;
+				M.Npc = Who;
+				Lb.Members.push_back(M);
+			}
+		}
+		for (const std::string& Entry : Split(C.At < Fields.size() ? Fields[C.At] : std::string(), ','))
+		{
+			const std::vector<std::string> V = Split(Entry, ':');
+			Cursor Rc{V, 0};
+			const int Who = Rc.Small();
+			for (LeagueMember& M : Lb.Members)
+			{
+				if (M.Npc != Who)
+				{
+					continue;
+				}
+				M.Days = static_cast<int8_t>(Rc.Small());
+				M.Form = static_cast<uint16_t>(Rc.Small());
+				M.TodayKey = Rc.Small();
+				M.TodayCount = static_cast<int8_t>(Rc.Small());
+				for (size_t K = 0; K < M.Best.size() && Rc.At < V.size(); ++K)
+				{
+					const std::string& Pair = V[Rc.At++];
+					const size_t Slash = Pair.find('/');
+					M.Best[K].first = static_cast<int8_t>(std::strtol(Pair.c_str(), nullptr, 10));
+					M.Best[K].second = static_cast<int16_t>(Slash == std::string::npos ? 0 : std::strtol(Pair.c_str() + Slash + 1, nullptr, 10));
+				}
+				break;
 			}
 		}
 	}

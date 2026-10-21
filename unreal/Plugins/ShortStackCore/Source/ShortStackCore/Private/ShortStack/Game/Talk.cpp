@@ -839,8 +839,8 @@ int TalkFreshDay(const world::World& W, double Now)
 	{
 		return -1;
 	}
-	const int Day = net::DayOf(Now) - net::DayOf(W.StartedAt());
-	return Day >= 0 && Day < TalkFreshDays ? Day : -1;
+	const int FreshDay = net::DayOf(Now) - net::DayOf(W.StartedAt());
+	return FreshDay >= 0 && FreshDay < TalkFreshDays ? FreshDay : -1;
 }
 
 /** When one of the room's events is over (about: the schedule's hours, as the rumours read it). */

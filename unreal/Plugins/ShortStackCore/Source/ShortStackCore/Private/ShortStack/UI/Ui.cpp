@@ -216,8 +216,11 @@ void CardFace(Canvas& C, int Card, float X, float Y, float W, float H)
 	C.SetAlpha(Prev);
 }
 
-void CardBack(Canvas& C, float X, float Y, float W, float H)
+void CardBack(Canvas& C, float X, float Y, float W, float H, int Back)
 {
+	// Update 3 (§1.11): a site look's back (Back > 0: Ignite's Sunset and looks, RunItTwice's Twin Stripe) lands with
+	// ui-tablestyle; until then every back is today's.
+	(void)Back;
 	C.GlowRoundRect({X, Y + 2.0f, W, H}, W * 0.1f, Rgba(0, 0, 0, 0.45f), 6.0f);
 	C.FillRoundRect({X, Y, W, H}, W * 0.1f, Hex(0xf4f6fa));
 	const Rect In{X + W * 0.07f, Y + W * 0.07f, W - W * 0.14f, H - W * 0.14f};
@@ -293,7 +296,7 @@ void DrawCard(Canvas& C, int Card, float X, float Y, float W, float H, const Car
 	}
 	else
 	{
-		CardBack(C, -W / 2.0f, -H / 2.0f, W, H);
+		CardBack(C, -W / 2.0f, -H / 2.0f, W, H, Opts.Back);
 	}
 	if (Opts.Dim)
 	{
@@ -317,12 +320,15 @@ void ChipColors(Chips Value, Color& Face, Color& Edge)
 }
 } // namespace ui_detail
 
-void DrawChipStack(Canvas& C, Chips Amount, float X, float Y, float Scale, float Alpha)
+void DrawChipStack(Canvas& C, Chips Amount, float X, float Y, float Scale, float Alpha, int Set)
 {
 	if (Amount <= 0)
 	{
 		return;
 	}
+	// Update 3 (§1.11): a site look's chips (Set > 0: Ignite's candy, RunItTwice's lacquer) land with ui-tablestyle; until then
+	// every stack is today's.
+	(void)Set;
 	static const Chips Denoms[8] = {100000, 25000, 5000, 1000, 500, 100, 25, 5};
 	Chips Rem = Amount;
 	std::vector<std::pair<Chips, int>> Stacks;

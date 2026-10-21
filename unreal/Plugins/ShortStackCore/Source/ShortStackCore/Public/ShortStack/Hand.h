@@ -192,6 +192,12 @@ public:
 	int ButtonIndex() const { return ButtonIdx; }
 	int SmallBlindIndex() const { return SbIdx; }
 	int BigBlindIndex() const { return BbIdx; }
+	/**
+	 * Update 3 (SPEC §3.6 R8, §7.2): the deck as shuffled and how far the hand drew it, read-only, so the Second Board can show
+	 * what the rest of the stub held (for show; burns are the caller's to skip). Const: draws nothing, moves no golden.
+	 */
+	const std::vector<Card>& DeckForShow() const { return Deck; }
+	int DeckPosForShow() const { return DeckPos; }
 
 private:
 	Chips Commit(HandSeat& S, Chips Amount);

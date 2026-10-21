@@ -312,7 +312,9 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 	}
 	// Update 2 (§5.11): each tile wears its site's colours, whatever the client around it wears.
 	const net::SiteId TileSite = rlsites_detail::SitesOfTable(S);
-	const SkinScope Skin(rlsites_detail::SitesSkin(TileSite));
+	const SkinScope Skin(rlsites_detail::SitesSkin(TileSite, World));
+	// Update 3 (§1.11): and its look (its card backs and dealer button; the tile keeps its own geometry).
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesLook(TileSite);
 	const Tournament& Tn = *S.T;
 	const std::string Id = "t" + std::to_string(Index);
 	const bool Turn = S.HasPrompt;
@@ -419,10 +421,11 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		}
 		CardOpts O;
 		O.Flip = static_cast<float>(std::min(1.0, (Now - At) / 0.25));
+		O.Back = Look.CardBack;
 		DrawCard(*C, S.Board[I], Bx0 + Nf(I) * (Bw + 5.0f), Cy - 34.0f, Bw, Bh, O);
 	}
 
-	// Dealer button and bets.
+	// Dealer button (Look.Dealer > 0: a site's own, ui-tablestyle's; RiverLine's is the white disc) and bets.
 	{
 		const Vec2 Bp = SeatAt(S.ButtonSeat);
 		const float Dx = Cx + (Bp.X - Cx) * 0.8f + 24.0f;
@@ -472,6 +475,7 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 				CardOpts O;
 				O.Rotate = Faces ? 0.0f : (Nf(K) - 0.5f) * 0.18f;
 				O.Highlight = Sv.Winner && HandOver;
+				O.Back = Look.CardBack;
 				DrawCard(*C, Faces ? Sv.Hole[static_cast<size_t>(K)] : -1, P.X + 18.0f + Nf(K) * (Faces ? Cw + 2.0f : 11.0f), Yc, Cw, Ch, O);
 			}
 		}
@@ -530,6 +534,7 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 			O.Flip = static_cast<float>(Clamp01((Now - HeroVis->DealtAt - 0.3 - static_cast<double>(K) * 0.1) / 0.25));
 			O.Rotate = (Nf(K) - 0.5f) * 0.06f;
 			O.Highlight = HeroVis->Winner && HandOver;
+			O.Back = Look.CardBack;
 			DrawCard(*C, HeroVis->Hole[K], P.X - Cw - 2.0f + Nf(K) * (Cw + 4.0f), P.Y - 17.0f - Ch + 4.0f, Cw, Ch, O);
 		}
 		std::vector<Card> Shown;
@@ -553,6 +558,7 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 			CardOpts O;
 			O.Alpha = static_cast<float>(1.0 - (Now - S.AutoFoldedAt) / 1.2);
 			O.Dim = true;
+			O.Back = Look.CardBack;
 			DrawCard(*C, S.AutoFoldedCards[K], P.X - 46.0f + Nf(K) * 48.0f, P.Y - 75.0f, 44.0f, 62.0f, O);
 		}
 	}
@@ -611,14 +617,14 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		O.Size = 15.0f;
 		bool Acted = false;
 		O.Kind = ButtonKind::Danger;
-		if (rlsites_detail::SitesButton(UI, *C, Id + "fold", Slot(0), "Fold", O))
+		if (rlsites_detail::SitesButton(UI, *C, Id + "fold", Slot(0), "Fold", O, Look))
 		{
 			S.HeroAct(PlayerAction::Fold());
 			Acted = true;
 		}
 		O.Kind = ButtonKind::Secondary;
 		const std::string CallLabel = P.CanCheck ? std::string("Check") : P.ToCall >= HeroStack ? "Call all-in" : "Call " + ChipsText(static_cast<double>(P.ToCall));
-		if (rlsites_detail::SitesButton(UI, *C, Id + "call", Slot(1), CallLabel, O) && !Acted)
+		if (rlsites_detail::SitesButton(UI, *C, Id + "call", Slot(1), CallLabel, O, Look) && !Acted)
 		{
 			S.HeroAct(P.CanCheck ? PlayerAction::Check() : PlayerAction::Call());
 			Acted = true;
@@ -627,13 +633,13 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		{
 			O.Kind = ButtonKind::Primary;
 			const bool Shove = P.RaiseTo >= P.MaxRaise;
-			if (!Shove && rlsites_detail::SitesButton(UI, *C, Id + "raise", Slot(2), (P.IsBet ? "Bet " : "Raise ") + ChipsText(static_cast<double>(P.RaiseTo)), O) && !Acted)
+			if (!Shove && rlsites_detail::SitesButton(UI, *C, Id + "raise", Slot(2), (P.IsBet ? "Bet " : "Raise ") + ChipsText(static_cast<double>(P.RaiseTo)), O, Look) && !Acted)
 			{
 				S.HeroAct(PlayerAction::RaiseTo(static_cast<double>(P.RaiseTo)));
 				Acted = true;
 			}
 			O.Kind = ButtonKind::Gold;
-			if (rlsites_detail::SitesButton(UI, *C, Id + "allin", Shove ? Rect{Slot(2).X, Fy, Bw3 * 2.0f + Gap, 40.0f} : Slot(3), "All-in " + ChipsText(static_cast<double>(P.MaxRaise)), O) && !Acted)
+			if (rlsites_detail::SitesButton(UI, *C, Id + "allin", Shove ? Rect{Slot(2).X, Fy, Bw3 * 2.0f + Gap, 40.0f} : Slot(3), "All-in " + ChipsText(static_cast<double>(P.MaxRaise)), O, Look) && !Acted)
 			{
 				S.HeroAct(PlayerAction::RaiseTo(static_cast<double>(P.MaxRaise)));
 				Acted = true;

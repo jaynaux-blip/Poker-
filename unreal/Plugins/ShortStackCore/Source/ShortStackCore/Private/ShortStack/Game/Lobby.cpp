@@ -60,7 +60,7 @@ std::vector<LobbyEvent> Build()
 	Free.Blurb = "Free to enter. Everyone shoves. Somebody has to win the $9.";
 	L.push_back(Free);
 
-	L.push_back(Listing("Bounty Builder", "4:00 AM", "$5.50", 550, "NL Hold'em PKO", "Regular", "612", "$3K GTD", "Registering"));
+	L.push_back(Listing("Bounty Ladder", "4:00 AM", "$5.50", 550, "NL Hold'em PKO", "Regular", "612", "$3K GTD", "Registering"));
 	L.push_back(Listing("Big Stack $11", "8:00 PM", "$11", 1100, "NL Hold'em", "Regular", "\xE2\x80\x94", "$10K GTD", "Tomorrow"));
 	L.push_back(Listing("Sunday Showdown", "Sun 3:00 PM", "$215", 21500, "NL Hold'em", "Regular", "\xE2\x80\x94", "$1M GTD", "Starts Sun"));
 	L.push_back(Listing("Step 1 \xC2\xB7 Grand Circuit", "5:30 AM", "$2.20", 220, "Satellite", "Turbo", "88", "8 tickets", "Registering"));

@@ -1170,7 +1170,7 @@ std::vector<std::string> Inventory()
 			Out.push_back(std::string("title\t") + L);
 		}
 	}
-	for (int K = 0; K < static_cast<int>(Kind::Count); ++K)
+	for (int K = 0; K < KindCountU2; ++K)
 	{
 		Out.push_back(std::string("title\t") + KindPhrase(static_cast<Kind>(K)) + " from {Stakes}");
 	}
@@ -1214,7 +1214,7 @@ std::vector<std::string> Inventory()
 		Out.push_back(std::string("label\t") + TitleStyleName(static_cast<TitleStyle>(T)));
 		Out.push_back(std::string("label\t") + FrameName(static_cast<Frame>(T)));
 	}
-	for (int K = 0; K < static_cast<int>(Kind::Count); ++K)
+	for (int K = 0; K < KindCountU2; ++K)
 	{
 		Out.push_back(std::string("label\t") + KindLabel(static_cast<Kind>(K)));
 	}

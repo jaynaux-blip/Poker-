@@ -984,6 +984,7 @@ void Sim::Wipe(World& W)
 	W.SiteRecords.clear();
 	W.SiteSeries.clear();
 	W.SiteRanksYesterday.clear();
+	W.Leagues.clear(); // Update 3: and any League group (none before G2)
 	W.RefreshAll();
 }
 
@@ -1033,6 +1034,28 @@ int World::RankBefore(net::SiteId Site, net::Board B, int Npc) const
 		return 0;
 	}
 	return It->second[static_cast<size_t>(Npc)];
+}
+
+void World::SetLeagueRoster(net::SiteId Site, int MonthKey, int Div, const std::vector<int>& Npcs)
+{
+	// Update 3 (§3.6 R2): the month's group as the session drew it (dormant: nothing draws one before G2; core-world's
+	// Sim::SiteResult scores its members and WorldSave writes it then).
+	LeagueBook& B = Leagues[Site];
+	B.MonthKey = MonthKey;
+	B.Div = static_cast<int8_t>(Div);
+	B.Members.clear();
+	for (const int Npc : Npcs)
+	{
+		LeagueMember M;
+		M.Npc = Npc;
+		B.Members.push_back(M);
+	}
+}
+
+const LeagueBook* World::League(net::SiteId Site) const
+{
+	const auto It = Leagues.find(Site);
+	return It == Leagues.end() ? nullptr : &It->second;
 }
 
 int World::Find(const std::string& Name) const

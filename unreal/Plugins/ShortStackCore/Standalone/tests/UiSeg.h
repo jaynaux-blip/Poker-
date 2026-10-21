@@ -35,6 +35,9 @@ struct TableMeasurer : ss::ui::TextMeasurer
 		case ss::ui::Font::Mono: return test_font::MonoAscii;
 		case ss::ui::Font::Black: return test_font::BlackAscii;
 		case ss::ui::Font::Light: return test_font::LightAscii;
+		// Update 3 (SPEC §1.11): the faces drawn only through TextStyle::Face, measured as Unreal's TTFs advance them.
+		case ss::ui::Font::BlackItalic: return test_font::BlackItalicAscii;
+		case ss::ui::Font::BoldCondensed: return test_font::BoldCondensedAscii;
 		default: return test_font::RegularAscii;
 		}
 	}
@@ -46,6 +49,8 @@ struct TableMeasurer : ss::ui::TextMeasurer
 		case ss::ui::Font::Mono: return test_font::MonoSpecial;
 		case ss::ui::Font::Black: return test_font::BlackSpecial;
 		case ss::ui::Font::Light: return test_font::LightSpecial;
+		case ss::ui::Font::BlackItalic: return test_font::BlackItalicSpecial;
+		case ss::ui::Font::BoldCondensed: return test_font::BoldCondensedSpecial;
 		default: return test_font::RegularSpecial;
 		}
 	}
@@ -78,7 +83,8 @@ struct TableMeasurer : ss::ui::TextMeasurer
 	}
 	float Ascent(ss::ui::Font Face, float SizePx) const override
 	{
-		const float A = Face == ss::ui::Font::Bold ? test_font::BoldAscent : Face == ss::ui::Font::Mono ? test_font::MonoAscent : Face == ss::ui::Font::Black ? test_font::BlackAscent : Face == ss::ui::Font::Light ? test_font::LightAscent : test_font::RegularAscent;
+		const float A = Face == ss::ui::Font::Bold ? test_font::BoldAscent : Face == ss::ui::Font::Mono ? test_font::MonoAscent : Face == ss::ui::Font::Black ? test_font::BlackAscent : Face == ss::ui::Font::Light ? test_font::LightAscent
+			: Face == ss::ui::Font::BlackItalic ? test_font::BlackItalicAscent : Face == ss::ui::Font::BoldCondensed ? test_font::BoldCondensedAscent : test_font::RegularAscent;
 		return A * SizePx / 100.0f;
 	}
 };
@@ -113,4 +119,13 @@ void SegVideo();     // ui-video: tests/ui_seg_video.cpp
 void SegSites();     // ui-laptop: tests/ui_seg_sites.cpp
 void SegCreator();   // ui-front: tests/ui_seg_creator.cpp
 void SegTableAuto(); // core-tableui: tests/ui_seg_tableauto.cpp
+// Update 3's (update 3 SPEC §7.7): two suites of their own, each with its main (the kit's definitions in ui_seg_kit.cpp).
+void SegIgnite(); // rivals_ui, ui-ignite: tests/ui_seg_ignite.cpp
+void SegRit();    // rivals_ui, ui-rit: tests/ui_seg_rit.cpp
+void SegVideo3(); // rerun_ui, ui-rerun: tests/ui_seg_video3.cpp
+void SegThumbs(); // rerun_ui, ui-thumbs: tests/ui_seg_thumbs.cpp
+// Phase A's UI seams (the lead's): the motion kit, the font seam, the glow and the dashes, SitesBlockUnder, SitesTwoPress,
+// SitesPageHome, DebugOpen (rivals_ui); the cache pools and DrawPortrait's default (rerun_ui).
+void SegSeams();  // rivals_ui: tests/ui_seg_seams.cpp
+void SegCanvas(); // rerun_ui: tests/ui_seg_canvas.cpp
 } // namespace ui_test

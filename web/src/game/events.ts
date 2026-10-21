@@ -57,7 +57,7 @@ export const LOBBY: LobbyEvent[] = [
     status: 'Late Reg',
     blurb: 'Free to enter. Everyone shoves. Somebody has to win the $9.',
   },
-  { spec: null, name: 'Bounty Builder', start: '4:00 AM', buyInLabel: '$5.50', buyInCents: 550, game: "NL Hold'em PKO", speed: 'Regular', entrantsLabel: '612', guaranteeLabel: '$3K GTD', status: 'Registering', blurb: '' },
+  { spec: null, name: 'Bounty Ladder', start: '4:00 AM', buyInLabel: '$5.50', buyInCents: 550, game: "NL Hold'em PKO", speed: 'Regular', entrantsLabel: '612', guaranteeLabel: '$3K GTD', status: 'Registering', blurb: '' },
   { spec: null, name: 'Big Stack $11', start: '8:00 PM', buyInLabel: '$11', buyInCents: 1100, game: "NL Hold'em", speed: 'Regular', entrantsLabel: '—', guaranteeLabel: '$10K GTD', status: 'Tomorrow', blurb: '' },
   { spec: null, name: 'Sunday Showdown', start: 'Sun 3:00 PM', buyInLabel: '$215', buyInCents: 21500, game: "NL Hold'em", speed: 'Regular', entrantsLabel: '—', guaranteeLabel: '$1M GTD', status: 'Starts Sun', blurb: '' },
   { spec: null, name: 'Step 1 → Grand Circuit', start: '5:30 AM', buyInLabel: '$2.20', buyInCents: 220, game: 'Satellite', speed: 'Turbo', entrantsLabel: '88', guaranteeLabel: '8 tickets', status: 'Registering', blurb: '' },

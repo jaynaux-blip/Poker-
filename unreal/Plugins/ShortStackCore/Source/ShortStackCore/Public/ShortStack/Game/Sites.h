@@ -72,6 +72,11 @@ struct InviteGate
 	Chips MinAbi100 = 0;
 	bool SeriesTitle = false, KastPartner = false, BraceletOrRing = false;
 	int SponsorTier = 0;
+	// Update 3 (SPEC §7.2, §11 Q4; appended, 0 = no such path): a second volume path (RunItTwice: 150 paid online events at
+	// a $5.50 average) and an Ignite Level path (RunItTwice: Level 20). Values set by core-sites-g2 at G2.
+	int MinEvents2 = 0;
+	Chips MinAbi100_2 = 0;
+	int IgniteLevel = 0;
 };
 /** One site: its brand, its palette (pal:: order, 16 tokens), rake, traffic, fields, cashier, gate and launch. */
 struct SiteDef
@@ -93,6 +98,10 @@ struct SiteDef
 	int LaunchDay = 0;
 	bool Linked = false; // RiverLine: linked to the bank (no wallet, no fees)
 	bool P1 = false;
+	// Update 3 (SPEC §1.11, §7.2; appended): a second 16-token palette for the night (Ignite's Afterburner Hours; all zero:
+	// none) and its window in world minutes of the day (Ignite 00:00-06:00). core-sites-look fills Sites.cpp at G1.
+	std::array<uint32_t, 16> NightPalette{};
+	int NightFromMin = 0, NightToMin = 360;
 };
 /** Every registered site, RiverLine first (Phase A: only RiverLine). */
 SHORTSTACKCORE_API const std::vector<SiteDef>& Sites();

@@ -125,11 +125,6 @@ Chips SitesInTransit(const Session& S, net::SiteId Site)
 	return Sum;
 }
 
-Skin SitesSkin(net::SiteId Site)
-{
-	return Skin::FromHex(net::Def(SitesRegistered(Site) ? Site : net::SiteId::RiverLine).Palette);
-}
-
 bool SitesHome()
 {
 	static const Color Bg = Hex(SitesHomeHex[0]);
@@ -373,7 +368,14 @@ std::string SitesClauseWarning(const Session& S, net::SiteId Site, bool Streamin
 
 bool SitesButton(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const std::string& Label, const ButtonOpts& Opts)
 {
-	if (SitesHome())
+	return SitesButton(UI, Cv, Id, R, Label, Opts, SitesLook(net::SiteId::RiverLine));
+}
+
+bool SitesButton(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const std::string& Label, const ButtonOpts& Opts, const SiteLook& L)
+{
+	// The look's corners (update 3, §1.11): a pill's ends are round; RiverLine's look is Ui::Button's 10.
+	const float Corner = L.Button == ButtonShape::Pill ? R.H / 2.0f : L.Radius;
+	if (SitesHome() && Corner == 10.0f)
 	{
 		return UI.Button(Id, R, Label, Opts);
 	}
@@ -409,10 +411,10 @@ bool SitesButton(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const
 	const float Prev = Cv.GetAlpha();
 	Cv.SetAlpha(Opts.Enabled ? Prev : Prev * 0.35f);
 	const Rect Body{R.X, R.Y + Shift, R.W, R.H};
-	Cv.FillRoundRect(Body, 10.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, St.Hover ? Hi : Base, Base));
+	Cv.FillRoundRect(Body, Corner, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, St.Hover ? Hi : Base, Base));
 	if (Opts.Kind == ButtonKind::Ghost)
 	{
-		Cv.StrokeRoundRect(Body, 10.0f, Rgba(255, 255, 255, 0.12f), 1.0f);
+		Cv.StrokeRoundRect(Body, Corner, Rgba(255, 255, 255, 0.12f), 1.0f);
 	}
 	const float Size = Opts.Size;
 	const float Cy = R.Y + R.H / 2.0f + Shift;
@@ -444,9 +446,17 @@ SitesUi& SitesOf(const RiverLine* RL)
 	return SitesStates()[RL];
 }
 
+std::map<std::pair<const Ui*, std::string>, bool>& SitesArmedStates();
+
 void ForgetSites(const RiverLine* RL)
 {
 	SitesStates().erase(RL);
+	// Update 3: its two presses waiting on a second (SitesTwoPress), so a new laptop at the same address starts unarmed.
+	std::map<std::pair<const Ui*, std::string>, bool>& Armed = SitesArmedStates();
+	for (auto It = Armed.begin(); It != Armed.end();)
+	{
+		It = It->first.first == &RL->UI ? Armed.erase(It) : std::next(It);
+	}
 }
 
 bool SitesMenuOpen(const RiverLine* RL)
@@ -948,6 +958,8 @@ void RiverLine::SiteCashier(double Now)
 	const net::CashMethod* Out = SitesWithdrawMethod(Site);
 	const Chips Balance = A ? A->Cents : 0;
 	const float Ease = NetEase((Now - PageAt) / 0.6);
+	// Update 3 (§1.11): the money block (the steps and the two buttons) in the site's look.
+	const SiteLook& Look = SitesLook(Site);
 	auto Answer = [&](const std::string& Why, const std::string& Done) {
 		U.Note = Why.empty() ? Done : Why;
 		U.NoteBad = !Why.empty();
@@ -988,7 +1000,7 @@ void RiverLine::SiteCashier(double Now)
 			U.Deposit = K;
 		}
 		const bool On = U.Deposit == K;
-		UI.RRect(Ch, 10.0f, On ? NetA(pal::Accent, 0.2f) : St.Hover ? SitesTone(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? pal::Accent : pal::Line, On ? 1.5f : 1.0f);
+		UI.RRect(Ch, Look.Radius, On ? NetA(pal::Accent, 0.2f) : St.Hover ? SitesTone(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? pal::Accent : pal::Line, On ? 1.5f : 1.0f);
 		UI.Text(NetMoney(SitesDepositSteps[K]), Ch.X + Ch.W / 2.0f, Ch.Y + 27.0f, Ts(17.0f, 800, On ? pal::Ink : pal::Muted, Align::Center, Baseline::Alphabetic, true));
 	}
 	const Chips Amount = SitesDepositSteps[U.Deposit];
@@ -1024,7 +1036,7 @@ void RiverLine::SiteCashier(double Now)
 		O.Size = 18.0f;
 		O.Enabled = Why.empty() && !Previewing;
 		O.Sub = Why.empty() ? (In ? In->Name + " \xC2\xB7 lands at once" : std::string()) : Why;
-		if (SitesButton(UI, *C, "cashdeposit", {Dp.X + 26.0f, Dp.Y + 314.0f, Dp.W - 52.0f, 60.0f}, "Deposit " + NetMoney(Amount), O))
+		if (SitesButton(UI, *C, "cashdeposit", {Dp.X + 26.0f, Dp.Y + 314.0f, Dp.W - 52.0f, 60.0f}, "Deposit " + NetMoney(Amount), O, Look))
 		{
 			Answer(S.Deposit(Site, Amount, In->Id), "Deposited " + Money(Amount) + ". It's on " + Name + " now.");
 		}
@@ -1051,7 +1063,7 @@ void RiverLine::SiteCashier(double Now)
 			U.Withdraw = Step;
 		}
 		const bool On = U.Withdraw == Step && (K < 4 || Balance > 0);
-		UI.RRect(Ch, 10.0f, On ? NetA(pal::Accent, 0.2f) : St.Hover ? SitesTone(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? pal::Accent : pal::Line, On ? 1.5f : 1.0f);
+		UI.RRect(Ch, Look.Radius, On ? NetA(pal::Accent, 0.2f) : St.Hover ? SitesTone(0x172a42) : Rgba(255, 255, 255, 0.02f), On ? pal::Accent : pal::Line, On ? 1.5f : 1.0f);
 		UI.Text(K < 4 ? NetMoney(Step) : std::string("All"), Ch.X + Ch.W / 2.0f, Ch.Y + 27.0f, Ts(16.0f, 800, On ? pal::Ink : pal::Muted, Align::Center, Baseline::Alphabetic, true));
 	}
 	const Chips Take = U.Withdraw;
@@ -1090,7 +1102,7 @@ void RiverLine::SiteCashier(double Now)
 		O.Size = 18.0f;
 		O.Enabled = Why.empty() && !Previewing;
 		O.Sub = Why.empty() ? "Expected " + When : Why;
-		if (SitesButton(UI, *C, "cashwithdraw", {Wd.X + 26.0f, Wd.Y + 314.0f, Wd.W - 52.0f, 60.0f}, "Withdraw " + Money(Take), O))
+		if (SitesButton(UI, *C, "cashwithdraw", {Wd.X + 26.0f, Wd.Y + 314.0f, Wd.W - 52.0f, 60.0f}, "Withdraw " + Money(Take), O, Look))
 		{
 			Answer(S.Withdraw(Site, Take, Out->Id), "Requested. " + Money(std::max<Chips>(0, Take - OutFee)) + " is on its way to your bank.");
 			U.Withdraw = SitesWithdrawSteps[0];
@@ -1164,6 +1176,159 @@ std::vector<std::string> SitesUiInventory()
 	return {SitesStaysThere, SitesNothingComing, SitesDepositHow, SitesWithdrawHow, SitesOnlyBank, SitesNoLines, SitesBonusRule, SitesBonusStart, SitesBonusDone, SitesTicketsRule,
 		SitesTicketsNone, SitesClubRule, SitesNoLetters, SitesMenuNote, SitesInviteOnce, SitesInviteLast, SitesInviteDeclined, SitesPublishArmed, SitesAboutMonth, SitesAboutSeason, SitesAboutWins, SitesAboutSeries, SitesAboutAny,
 		SitesBonusSlide, SitesClubSlide, SitesOwnMoney, SitesStrikeConfirm, SitesKastClient, SitesAboutSeasonYear, SitesBonusClosed, SitesInviteDone, SitesTicketsMissed};
+}
+
+// ---- Update 3 (SPEC §1.2, §1.11, §7.2): the shared seams the revamped sites draw through. Phase A: every look is RiverLine's
+// (today's literals), so each helper below draws and behaves exactly as RiverLine does today; ui-tablestyle lands Ignite's and
+// RunItTwice's looks and the Afterburner choice.
+const SiteLook& SitesLook(net::SiteId /*S*/)
+{
+	static const SiteLook SitesTodayLook;
+	return SitesTodayLook;
+}
+
+SiteLook SitesLookFor(const Session& /*S*/, net::SiteId Site)
+{
+	return SitesLook(Site);
+}
+
+const SiteLook& SitesTableLook(const Session& S)
+{
+	return SitesLook(SitesOfTable(S));
+}
+
+const SiteLook& SitesClientLook(const RiverLine& RL, const Session& S)
+{
+	return SitesLook(SitesClient(RL, S));
+}
+
+Skin SitesSkin(net::SiteId Site, double /*WorldMin*/)
+{
+	// Phase A: the day palette at every hour (ui-tablestyle chooses Afterburner here from NightPalette, G1).
+	return Skin::FromHex(net::Def(SitesRegistered(Site) ? Site : net::SiteId::RiverLine).Palette);
+}
+
+SitesBlocked SitesBlockUnder(Ui& U, Rect R, bool Modal)
+{
+	SitesBlocked B;
+	B.Saved = U.Ptr;
+	const bool Over = U.Hover(R);
+	B.Active = Modal || Over;
+	// A one-frame click (Pressed and Released together, under ~33 ms at 30 Hz) is still a click: it's held back here too.
+	B.Scrim = Modal && !Over && U.Ptr.Active && U.Ptr.Released;
+	if (B.Active)
+	{
+		U.Ptr.Pressed = false;
+		U.Ptr.Released = false;
+		U.Ptr.Wheel = 0.0f;
+		U.Ptr.Active = false;
+	}
+	return B;
+}
+
+void SitesUnblock(Ui& U, const SitesBlocked& B)
+{
+	if (!B.Active)
+	{
+		return;
+	}
+	U.Ptr = B.Saved;
+	if (B.Scrim)
+	{
+		U.Ptr.Pressed = false;
+		U.Ptr.Released = false;
+	}
+}
+
+/** Two presses waiting on their second (SitesTwoPress without a caller's state), by laptop (its Ui) and button id. */
+std::map<std::pair<const Ui*, std::string>, bool>& SitesArmedStates()
+{
+	static std::map<std::pair<const Ui*, std::string>, bool> ByButton;
+	return ByButton;
+}
+
+TwoPress SitesTwoPress(Canvas& C, Ui& U, const SiteLook& L, const std::string& Id, Rect R, const std::string& Label, bool UnderClause, const TwoPressOpts& O)
+{
+	bool& Armed = O.Armed ? *O.Armed : SitesArmedStates()[{&U, Id}];
+	if (!Armed)
+	{
+		ButtonOpts First = O.First;
+		std::string Text = Label;
+		if (UnderClause)
+		{
+			// Under the clause (update 2 §5.7) the button says what it costs, and takes a second press.
+			First.Kind = ButtonKind::Danger;
+			First.Sub = Label + " anyway";
+			Text = O.Strike.empty() ? std::string("Strike under your sponsor's deal") : O.Strike;
+		}
+		if (!SitesButton(U, C, Id, R, Text, First, L))
+		{
+			return TwoPress::Idle;
+		}
+		if (UnderClause || O.Always)
+		{
+			Armed = true;
+			return TwoPress::Armed;
+		}
+		return TwoPress::Confirmed;
+	}
+	// The confirm step. Under the clause it always says it's a strike, however it was reached (the register button, or a
+	// featured slide's Register, which opens this step directly).
+	const std::string Note = UnderClause ? std::string(SitesStrikeConfirm) : O.Note;
+	if (!Note.empty())
+	{
+		U.Text(Note, R.X, R.Y - 10.0f, Ts(14.0f, 600, UnderClause ? pal::Red : pal::Muted));
+	}
+	TwoPress Out = TwoPress::Armed;
+	ButtonOpts Ok;
+	Ok.Kind = UnderClause ? ButtonKind::Danger : ButtonKind::Gold;
+	Ok.Size = O.First.Size;
+	const float Hw = (R.W - 12.0f) / 2.0f;
+	if (SitesButton(U, C, Id + "ok", {R.X, R.Y, Hw, R.H}, UnderClause ? std::string("Take the strike") : O.Ok, Ok, L))
+	{
+		Armed = false;
+		Out = TwoPress::Confirmed;
+	}
+	ButtonOpts No;
+	No.Kind = ButtonKind::Ghost;
+	No.Size = O.First.Size;
+	if (SitesButton(U, C, Id + "no", {R.X + Hw + 12.0f, R.Y, Hw, R.H}, "Cancel", No, L))
+	{
+		Armed = false;
+		Out = TwoPress::Cancelled;
+	}
+	return Out;
+}
+
+std::vector<StripRow> SitesTableStrip(const RiverLine& /*RL*/, const Session& S)
+{
+	std::vector<StripRow> Out;
+	for (int I = 0; I < S.TableCount(); ++I)
+	{
+		const TableGlance G = S.Glance(I);
+		StripRow Row;
+		Row.Table = I;
+		const net::SiteId X = net::SiteOf(G.EventId);
+		Row.Site = SitesRegistered(X) ? X : net::SiteId::RiverLine;
+		Row.Event = G.Name;
+		Row.Short = NetShortName(G.Name);
+		Row.StackBb = G.StackBb;
+		Row.YourTurn = G.YourTurn;
+		Out.push_back(Row);
+	}
+	return Out;
+}
+
+RiverLine::Page SitesPageHome(net::SiteId Site, RiverLine::Page P)
+{
+	using Pg = RiverLine::Page;
+	const bool Rival = Site != net::SiteId::RiverLine;
+	const bool HomeOnly = P == Pg::Career || P == Pg::Embercrest || P == Pg::Backing;
+	const bool RivalsOnly = P == Pg::Promotions || P == Pg::Cashier;
+	const bool IgniteOnly = P == Pg::Fuse || P == Pg::Profile;
+	const bool RitOnly = P == Pg::Live || P == Pg::League || P == Pg::Desk;
+	const bool Missing = Rival ? HomeOnly || (IgniteOnly && Site != net::SiteId::Ignite) || (RitOnly && Site != net::SiteId::RunItTwice) : RivalsOnly || IgniteOnly || RitOnly;
+	return Missing ? Pg::Lobby : P;
 }
 } // namespace rlsites_detail
 } // namespace ui

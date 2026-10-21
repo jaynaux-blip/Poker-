@@ -247,9 +247,10 @@ bool ReadEditId(const std::string& Id, video::Choice& C)
 		Fields[I] = std::atoi(Id.substr(At, Colon - At).c_str());
 		At = Colon + 1;
 	}
-	C.F = static_cast<video::Format>(std::clamp(Fields[0], 0, 3));
-	C.T = static_cast<video::TitleStyle>(std::clamp(Fields[1], 0, 4));
-	C.Fr = static_cast<video::Frame>(std::clamp(Fields[2], 0, 4));
+	// (Update 3, §7.3: clamped to each enum's Count, so an appended value reads as itself; every old value as before.)
+	C.F = static_cast<video::Format>(std::clamp(Fields[0], 0, static_cast<int>(video::Format::Count) - 1));
+	C.T = static_cast<video::TitleStyle>(std::clamp(Fields[1], 0, static_cast<int>(video::TitleStyle::Count) - 1));
+	C.Fr = static_cast<video::Frame>(std::clamp(Fields[2], 0, static_cast<int>(video::Frame::Count) - 1));
 	C.Candidates.clear();
 	std::string Cur;
 	for (size_t I = At; I <= Id.size(); ++I)
@@ -837,8 +838,9 @@ video::ChannelView Session::VideoView() const
 void Session::VideoStep(double From, double To)
 {
 	using namespace session_video_detail;
-	// CheckCalendar's step after the sponsors' (§1.6): views, subscribers, the review and the monthly payout.
-	video::Step(Life.Video, Life, BankrollCents, Channel, From, To);
+	// CheckCalendar's step after the sponsors' (§1.6): views, subscribers, the review and the monthly payout. Update 3
+	// (§4.6.10): with the session's world, whose log the week's trends read.
+	video::Step(Life.Video, Life, BankrollCents, Channel, From, To, &LivingWorld);
 	if ((Life.Update2LinesRead & life::U2Video) == 0)
 	{
 		return; // the channel has nothing yet: the stories start once it does (Touch)
@@ -986,6 +988,58 @@ std::string Session::DebugVideo(const std::string& Args)
 		const std::string Why = DeleteVideo(W[1]);
 		return Why.empty() ? video::Deleted() : Why;
 	}
-	return "ss.Video.<Describe|Candidates|Fake|Upload|Advance|Grant>";
+	// Update 3 (§7.6): Rerun 2.0's levers and numbers through the session's own methods (their bodies are core-videocontent's
+	// and core-videoalgo's, G3); the rest of the new verbs land with those tracks.
+	if (Verb == "ads")
+	{
+		static const char* const Loads[] = {"light", "standard", "heavy"};
+		for (int I = 0; W.size() > 2 && I < static_cast<int>(video::AdLoad::Count); ++I)
+		{
+			if (W[2] == Loads[I])
+			{
+				const std::string Why = SetAdLoad(W[1], static_cast<video::AdLoad>(I));
+				return Why.empty() ? "Ads on " + W[1] + ": " + Loads[I] + ", from the next midnight." : Why;
+			}
+		}
+		return "ss.Video.Ads <id> <light|standard|heavy>";
+	}
+	if (Verb == "launch")
+	{
+		static const char* const Acts[] = {"cut", "kast", "teaser", "reply"};
+		for (int I = 0; W.size() > 2 && I < static_cast<int>(video::Launch::Count); ++I)
+		{
+			if (W[2] == Acts[I])
+			{
+				const std::string Why = LaunchAction(W[1], static_cast<video::Launch>(I));
+				return Why.empty() ? std::string("Launch action: ") + Acts[I] + " for " + W[1] + "." : Why;
+			}
+		}
+		return "ss.Video.Launch <id> <cut|kast|teaser|reply>";
+	}
+	if (Verb == "stats" && W.size() > 1)
+	{
+		const video::VideoStats V = VideoStatsOf(W[1]);
+		return W[1] + (V.Estimated ? " (est.)" : "") + ": " + Grouped(static_cast<int64_t>(V.Views)) + " views, " + Grouped(static_cast<int64_t>(V.Impressions)) +
+			" impressions, CTR " + Fixed(100.0 * V.CtrLife, 1) + "%, " + Fixed(V.AvdMin, 1) + " min average view, " + Grouped(static_cast<int64_t>(V.Likes)) + " likes, " +
+			Grouped(static_cast<int64_t>(V.Dislikes)) + " dislikes, " + Grouped(static_cast<int64_t>(V.Comments)) + " comments, " + Grouped(static_cast<int64_t>(V.SubsNet)) +
+			" subscribers net, " + Money(V.EarnedCents) + " earned (RPM " + Fixed(V.Rpm, 2) + ", CPM " + Fixed(V.Cpm, 2) + "), verdict " + std::to_string(V.Verdict) + ".";
+	}
+	if (Verb == "ideas")
+	{
+		const std::vector<video::IdeaCard> Cards = VideoIdeas();
+		std::string Out = std::to_string(Cards.size()) + " ideas:";
+		for (const video::IdeaCard& I : Cards)
+		{
+			Out += "\n" + std::to_string(I.Id) + ". " + I.Name + (I.Ready ? "" : "  locked: " + I.Hint) + (I.Strike ? "  (a strike)" : "");
+		}
+		return Out;
+	}
+	// §7.6's verbs whose bodies are still to land (core-videocontent's SessionVideo3.cpp, core-videoalgo's numbers): the
+	// stub's line, as DebugSitePlay's, until they do (Update3Commands.cpp registers their ss.Video.* names).
+	if (Verb == "checkin" || Verb == "trends" || Verb == "sheet" || Verb == "repack" || Verb == "duel")
+	{
+		return "video " + Verb + ": not in this build yet";
+	}
+	return "ss.Video.<Describe|Candidates|Fake|Upload|Advance|Grant|Ads|Launch|Stats|Ideas|Checkin|Trends|Sheet|Repack|Duel>";
 }
 } // namespace ss

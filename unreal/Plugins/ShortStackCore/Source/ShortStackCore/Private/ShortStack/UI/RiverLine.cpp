@@ -5,6 +5,7 @@
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Badges.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sizing.h"
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Structure.h"
@@ -241,7 +242,7 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	// and the other apps stay outside the scope.
 	const net::SiteId Wears = AppShown == App::RiverLine ? rlsites_detail::SitesClient(*this, S) : net::SiteId::RiverLine;
 	{
-		const SkinScope Ground(rlsites_detail::SitesSkin(Wears));
+		const SkinScope Ground(rlsites_detail::SitesSkin(Wears, World));
 		C->FillRect({0.0f, 0.0f, RlW, RlH}, Paint::Linear({0.0f, 0.0f}, {0.0f, RlH}, pal::Bg2, pal::Bg));
 	}
 	// While the clock races (a shift, a run, sleep) or a result is up, the screen underneath takes no input.
@@ -267,56 +268,8 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	}
 	if (AppShown == App::RiverLine)
 	{
-		const SkinScope Client(rlsites_detail::SitesSkin(Wears));
-		if (S.CurrentScreen != Screen::Table && rlauto_detail::AutoPanelOpen(this))
-		{
-			rlauto_detail::AutoClosePanel(this); // the autoplay panel belongs to the tables (update 2 §2.6.1)
-		}
-		TopBar(Now);
-		switch (S.CurrentScreen)
-		{
-		case Screen::Boot: Boot(Now); break;
-		case Screen::Lobby: LobbyPages(Now); break;
-		case Screen::Table:
-		{
-			// A player card (a name at the table caught the player's eye) holds the table's input while it's up, and so does
-			// the autoplay panel (update 2 §2.6.1).
-			const bool Card = CardOpen();
-			const bool Auto = !Card && rlauto_detail::AutoPanelOpen(this);
-			const Pointer Held = UI.Ptr;
-			if (Card || Auto)
-			{
-				UI.Ptr.Pressed = false;
-				UI.Ptr.Released = false;
-				UI.Ptr.Wheel = 0.0f;
-				UI.Ptr.Active = false;
-			}
-			const bool Tiled = S.Tiled && S.TableCount() >= 2;
-			if (Tiled)
-			{
-				Tiles(Now);
-			}
-			else
-			{
-				Table(Now);
-			}
-			if (Card)
-			{
-				UI.Ptr = Held;
-				PlayerCard(Now);
-			}
-			else if (Auto)
-			{
-				UI.Ptr = Held;
-				// Over the felt (one table), or the middle of the screen (the tiles).
-				const float Pw = 1108.0f;
-				AutoPanel({Tiled ? (RlW - Pw) / 2.0f : TableCx - Pw / 2.0f, RlTop + 14.0f, Pw, 870.0f}, Now);
-			}
-			break;
-		}
-		case Screen::Results: ResultsScreen(Now); break;
-		}
-		FinishedToasts(Now);
+		const SkinScope Client(rlsites_detail::SitesSkin(Wears, World));
+		ClientFrame(Now, false);
 	}
 	else if (AppShown == App::ShiftLink)
 	{
@@ -397,6 +350,86 @@ void RiverLine::Draw(Canvas& Cv, double Now)
 	C->Restore();
 	UI.End();
 	C = nullptr;
+}
+
+void RiverLine::ClientFrame(double Now, bool Preview)
+{
+	// Update 3 (W1, §1.11): one dispatch for the poker client, inside the client's SkinScope. A revamped rival draws its own
+	// frame (its layout, navigation, chrome, pages and table layer); Boot stays RiverLine's.
+	if (S.CurrentScreen != Screen::Boot)
+	{
+		const net::SiteId Client = rlsites_detail::SitesClient(*this, S);
+		if (Client == net::SiteId::Ignite)
+		{
+			IgniteFrame(Now, Preview);
+			return;
+		}
+		if (Client == net::SiteId::RunItTwice)
+		{
+			RitFrame(Now, Preview);
+			return;
+		}
+	}
+	HomeFrame(Now, Preview);
+}
+
+void RiverLine::HomeFrame(double Now, bool Preview)
+{
+	// The top bar and the screen. The stream preview (Preview) shows the client as it is and nothing that belongs to the
+	// player's desk: no player card or autoplay panel over the table, no toasts, and it never closes the panel (U1: the
+	// stream never shows the plan).
+	if (!Preview && S.CurrentScreen != Screen::Table && rlauto_detail::AutoPanelOpen(this))
+	{
+		rlauto_detail::AutoClosePanel(this); // the autoplay panel belongs to the tables (update 2 §2.6.1)
+	}
+	TopBar(Now);
+	switch (S.CurrentScreen)
+	{
+	case Screen::Boot: Boot(Now); break;
+	case Screen::Lobby: LobbyPages(Now); break;
+	case Screen::Table:
+	{
+		// A player card (a name at the table caught the player's eye) holds the table's input while it's up, and so does
+		// the autoplay panel (update 2 §2.6.1).
+		const bool Card = !Preview && CardOpen();
+		const bool Auto = !Preview && !Card && rlauto_detail::AutoPanelOpen(this);
+		const Pointer Held = UI.Ptr;
+		if (Card || Auto)
+		{
+			UI.Ptr.Pressed = false;
+			UI.Ptr.Released = false;
+			UI.Ptr.Wheel = 0.0f;
+			UI.Ptr.Active = false;
+		}
+		const bool Tiled = S.Tiled && S.TableCount() >= 2;
+		if (Tiled)
+		{
+			Tiles(Now);
+		}
+		else
+		{
+			Table(Now);
+		}
+		if (Card)
+		{
+			UI.Ptr = Held;
+			PlayerCard(Now);
+		}
+		else if (Auto)
+		{
+			UI.Ptr = Held;
+			// Over the felt (one table), or the middle of the screen (the tiles).
+			const float Pw = 1108.0f;
+			AutoPanel({Tiled ? (RlW - Pw) / 2.0f : TableCx - Pw / 2.0f, RlTop + 14.0f, Pw, 870.0f}, Now);
+		}
+		break;
+	}
+	case Screen::Results: ResultsScreen(Now); break;
+	}
+	if (!Preview)
+	{
+		FinishedToasts(Now);
+	}
 }
 
 // ------------------------------------------------------------------ small drawing helpers
@@ -665,17 +698,24 @@ int RiverLine::HeroSeatNo() const
 
 Vec2 RiverLine::SlotPos(int Seat) const
 {
-	// Seats around the oval from the hero at the bottom (nine-handed, or six-max).
+	// Seats around the oval from the hero at the bottom (nine-handed, or six-max). Update 3 (§2.5, §3.5): a site's look may
+	// place them itself, for 8, 6 and 3 seats (RiverLine's has no list: the ring, as always).
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesTableLook(S);
 	const int N = std::max(2, static_cast<int>(S.Seats.size()));
 	const int Slot = (Seat - HeroSeatNo() + N) % N;
+	if (Look.SeatList && (N == 8 || N == 6 || N == 3))
+	{
+		return N == 8 ? Look.Seat8[static_cast<size_t>(Slot)] : N == 6 ? Look.Seat6[static_cast<size_t>(Slot)] : Look.Seat3[static_cast<size_t>(Slot)];
+	}
 	const float A = (90.0f + static_cast<float>(Slot) * 360.0f / static_cast<float>(N)) * Pi / 180.0f;
-	return {TableCx + (TableRx + 50.0f) * std::cos(A), TableCy + (TableRy + 64.0f) * std::sin(A)};
+	return {Look.Cx + (Look.Rx + 50.0f) * std::cos(A), Look.Cy + (Look.Ry + 64.0f) * std::sin(A)};
 }
 
 Vec2 RiverLine::BetPos(int Seat) const
 {
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesTableLook(S);
 	const Vec2 P = SlotPos(Seat);
-	return {TableCx + (P.X - TableCx) * 0.56f, TableCy + (P.Y - TableCy) * 0.5f};
+	return {Look.Cx + (P.X - Look.Cx) * 0.56f, Look.Cy + (P.Y - Look.Cy) * 0.5f};
 }
 
 void RiverLine::Table(double Now)
@@ -685,38 +725,49 @@ void RiverLine::Table(double Now)
 		return;
 	}
 	const Tournament& T = *S.T;
+	// Update 3 (§1.11): the shared table in its site's look: the felt's centre and radii, its paints, the chips, the backs and
+	// the dealer button (RiverLine's: today's oval and literals; the capsule, the octagon and the rivals' art are
+	// ui-tablestyle's).
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesTableLook(S);
+	const float FeltCx = Look.Cx;
+	const float FeltCy = Look.Cy;
+	const float FeltRx = Look.Rx;
+	const float FeltRy = Look.Ry;
+	const Color FeltMid = Look.Felt ? Hex(Look.Felt) : pal::Felt;
+	const Color FeltHi = Look.FeltLight ? Hex(Look.FeltLight) : rlsites_detail::SitesFeltLight();
+	const Color FeltLo = Look.FeltDark ? Hex(Look.FeltDark) : pal::FeltDark;
 
 	// Felt and rail.
-	C->FillEllipse(TableCx, TableCy + 10.0f, TableRx + 34.0f, TableRy + 34.0f, Rgba(0, 0, 0, 0.5f));
-	C->FillEllipse(TableCx, TableCy, TableRx + 30.0f, TableRy + 30.0f, Paint::Linear({0.0f, TableCy - TableRy}, {0.0f, TableCy + TableRy}, rlsites_detail::SitesTone(0x2a3342), rlsites_detail::SitesTone(0x10151d)));
-	C->FillEllipse(TableCx, TableCy, TableRx, TableRy, Paint::Radial({TableCx, TableCy - 40.0f}, 30.0f, {TableCx, TableCy}, TableRx, rlsites_detail::SitesFeltLight(), 0.7f, pal::Felt, pal::FeltDark));
-	C->StrokeEllipse(TableCx, TableCy, TableRx - 40.0f, TableRy - 34.0f, Rgba(255, 255, 255, 0.08f), 2.0f);
+	C->FillEllipse(FeltCx, FeltCy + 10.0f, FeltRx + 34.0f, FeltRy + 34.0f, Rgba(0, 0, 0, 0.5f));
+	C->FillEllipse(FeltCx, FeltCy, FeltRx + 30.0f, FeltRy + 30.0f, Paint::Linear({0.0f, FeltCy - FeltRy}, {0.0f, FeltCy + FeltRy}, rlsites_detail::SitesTone(0x2a3342), rlsites_detail::SitesTone(0x10151d)));
+	C->FillEllipse(FeltCx, FeltCy, FeltRx, FeltRy, Paint::Radial({FeltCx, FeltCy - 40.0f}, 30.0f, {FeltCx, FeltCy}, FeltRx, FeltHi, 0.7f, FeltMid, FeltLo));
+	C->StrokeEllipse(FeltCx, FeltCy, FeltRx - 40.0f, FeltRy - 34.0f, Rgba(255, 255, 255, 0.08f), 2.0f);
 	C->SetAlpha(0.14f);
 	// The site's own mark on its felt (update 2 §5.11).
 	const net::SiteId Site = rlsites_detail::SitesOfTable(S);
 	if (Site == net::SiteId::RiverLine)
 	{
-		Logo(TableCx - 95.0f, TableCy + 88.0f, 1.25f);
+		Logo(FeltCx - 95.0f, FeltCy + 88.0f, 1.25f);
 	}
 	else
 	{
-		siteart::Logo(*C, {TableCx - 125.0f, TableCy + 92.0f, 250.0f, 42.0f}, Site);
+		siteart::Logo(*C, {FeltCx - 125.0f, FeltCy + 92.0f, 250.0f, 42.0f}, Site);
 	}
 	C->SetAlpha(1.0f);
 
 	// Pot and board: the stack is what's been gathered in; the label counts the bets out in front too.
 	if (S.PotChips > 0)
 	{
-		DrawChipStack(*C, S.PotChips, TableCx, TableCy - 75.0f, 1.0f);
+		DrawChipStack(*C, S.PotChips, FeltCx, FeltCy - 75.0f, 1.0f, 1.0f, Look.ChipSet);
 	}
 	if (const Chips Total = PotTotal(); Total > 0)
 	{
-		UI.RRect({TableCx - 80.0f, TableCy - 128.0f, 160.0f, 30.0f}, 15.0f, Rgba(0, 0, 0, 0.45f));
-		UI.Text("Pot " + ChipsText(static_cast<double>(Total)), TableCx, TableCy - 107.0f, Ts(17.0f, 700, pal::Ink, Align::Center));
+		UI.RRect({FeltCx - 80.0f, FeltCy - 128.0f, 160.0f, 30.0f}, 15.0f, Rgba(0, 0, 0, 0.45f));
+		UI.Text("Pot " + ChipsText(static_cast<double>(Total)), FeltCx, FeltCy - 107.0f, Ts(17.0f, 700, pal::Ink, Align::Center));
 	}
 	const float Bw = 84.0f;
 	const float Bh = 118.0f;
-	const float Bx0 = TableCx - (5.0f * Bw + 4.0f * 10.0f) / 2.0f;
+	const float Bx0 = FeltCx - (5.0f * Bw + 4.0f * 10.0f) / 2.0f;
 	const std::vector<Card> Winners = WinningCards();
 	auto IsWinner = [&](Card Cd) { return std::find(Winners.begin(), Winners.end(), Cd) != Winners.end(); };
 	for (size_t I = 0; I < S.Board.size(); ++I)
@@ -730,13 +781,14 @@ void RiverLine::Table(double Now)
 		O.Flip = static_cast<float>(std::min(1.0, (Now - At) / 0.25));
 		O.Highlight = IsWinner(S.Board[I]);
 		O.Dim = !Winners.empty() && !IsWinner(S.Board[I]);
-		DrawCard(*C, S.Board[I], Bx0 + static_cast<float>(I) * (Bw + 10.0f), TableCy - 45.0f, Bw, Bh, O);
+		O.Back = Look.CardBack;
+		DrawCard(*C, S.Board[I], Bx0 + static_cast<float>(I) * (Bw + 10.0f), FeltCy - 45.0f, Bw, Bh, O);
 	}
 
-	// Dealer button.
+	// Dealer button (Look.Dealer > 0: a site's own button, ui-tablestyle's; RiverLine's is the white disc).
 	const Vec2 Bp = SlotPos(S.ButtonSeat);
-	const float Dbx = TableCx + (Bp.X - TableCx) * 0.74f + 34.0f;
-	const float Dby = TableCy + (Bp.Y - TableCy) * 0.7f;
+	const float Dbx = FeltCx + (Bp.X - FeltCx) * 0.74f + 34.0f;
+	const float Dby = FeltCy + (Bp.Y - FeltCy) * 0.7f;
 	C->FillCircle(Dbx, Dby, 15.0f, Hex(0xf4f4f4));
 	UI.Text("D", Dbx, Dby + 1.0f, Ts(16.0f, 800, Hex(0x111111), Align::Center, Baseline::Middle));
 
@@ -748,7 +800,7 @@ void RiverLine::Table(double Now)
 			continue;
 		}
 		const Vec2 P = BetPos(Seat.Seat);
-		DrawChipStack(*C, Seat.Bet, P.X, P.Y, 0.85f);
+		DrawChipStack(*C, Seat.Bet, P.X, P.Y, 0.85f, 1.0f, Look.ChipSet);
 		UI.Text(ChipsText(static_cast<double>(Seat.Bet)), P.X, P.Y + 30.0f, Ts(15.0f, 700, Hex(0xffffff), Align::Center));
 	}
 
@@ -841,7 +893,17 @@ void RiverLine::Table(double Now)
 	Overlays(Now);
 	if (S.Streaming() && !Previewing)
 	{
-		StreamAlert(TableCx, TableCy - TableRy + 24.0f, 0.72f, Now); // follows, subs, tips as they come in, on the felt
+		StreamAlert(FeltCx, FeltCy - FeltRy + 24.0f, 0.72f, Now); // follows, subs, tips as they come in, on the felt
+	}
+	// Update 3 (§2.5, §3.5): a revamped rival's own layer over the shared table (Ignite's pins, stickers and Ouch bubble;
+	// RunItTwice's lower third, the Second Board and its tabs).
+	if (Site == net::SiteId::Ignite)
+	{
+		IgniteTableLayer(Now);
+	}
+	else if (Site == net::SiteId::RunItTwice)
+	{
+		RitTableLayer(Now);
 	}
 }
 
@@ -898,6 +960,9 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 	const Rect Plate{P.X - Pw / 2.0f, P.Y - Ph / 2.0f, Pw, Ph};
 	const bool Dim = Seat.Folded && !Seat.Winner;
 	const bool HandOver = S.CurHand && S.CurHand->bComplete;
+	// Update 3 (§1.11): the seat in its table's look (its card backs, the felt's middle; the bubbles and data cards of
+	// SiteLook::Seat are ui-tablestyle's, RiverLine's is the plate).
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesTableLook(S);
 
 	// Cards.
 	if (Seat.HasCards && !Seat.Folded)
@@ -913,6 +978,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 				O.Flip = static_cast<float>(Clamp01((Dealt - 0.35 - static_cast<double>(I) * 0.1) / 0.25));
 				O.Rotate = (static_cast<float>(I) - 0.5f) * 0.06f;
 				O.Highlight = Seat.Winner;
+				O.Back = Look.CardBack;
 				DrawCard(*C, Seat.Hole[I], P.X - Cw - 4.0f + static_cast<float>(I) * (Cw + 8.0f), P.Y - Ph / 2.0f - Ch + 16.0f, Cw, Ch, O);
 			}
 		}
@@ -924,6 +990,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 			{
 				CardOpts O;
 				O.Highlight = Seat.Winner;
+				O.Back = Look.CardBack;
 				DrawCard(*C, Seat.Hole[I], P.X - Cw - 2.0f + static_cast<float>(I) * (Cw + 4.0f), P.Y - Ph / 2.0f - Ch + 14.0f, Cw, Ch, O);
 			}
 		}
@@ -935,6 +1002,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 			{
 				CardOpts O;
 				O.Rotate = (static_cast<float>(I) - 0.5f) * 0.15f;
+				O.Back = Look.CardBack;
 				DrawCard(*C, -1, P.X - 30.0f + static_cast<float>(I) * 18.0f, P.Y - Ph / 2.0f - Ch + 18.0f, Cw, Ch, O);
 			}
 		}
@@ -946,6 +1014,7 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 			CardOpts O;
 			O.Alpha = static_cast<float>(1.0 - (Now - S.AutoFoldedAt) / 1.5);
 			O.Dim = true;
+			O.Back = Look.CardBack;
 			DrawCard(*C, S.AutoFoldedCards[I], P.X - 84.0f + static_cast<float>(I) * 88.0f, P.Y - Ph / 2.0f - 100.0f, 80.0f, 112.0f, O);
 		}
 	}
@@ -1111,8 +1180,8 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 			{
 				// The seats along the top: beside their cards, toward the middle, clear of the top bar.
 				Hy = Plate.Y - 30.0f;
-				Hx = P.X + (P.X < TableCx ? 66.0f : -66.0f);
-				Ha = P.X < TableCx ? Align::Left : Align::Right;
+				Hx = P.X + (P.X < Look.Cx ? 66.0f : -66.0f);
+				Ha = P.X < Look.Cx ? Align::Left : Align::Right;
 			}
 			UI.Text(Hud, Hx, Hy, Ts(13.0f, 700, Col, Ha, Baseline::Alphabetic, true));
 		}
@@ -1121,11 +1190,13 @@ void RiverLine::DrawSeat(const SeatVis& Seat, double Now)
 
 Vec2 RiverLine::FlightPoint(const FlightEnd& End) const
 {
+	// The felt's centre is the table's look's (update 3, §1.11).
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesTableLook(S);
 	switch (End.Type)
 	{
-	case FlightEnd::Kind::Pot: return {TableCx, TableCy - 75.0f};
-	case FlightEnd::Kind::Deck: return {TableCx, TableCy - 160.0f};
-	case FlightEnd::Kind::Muck: return {TableCx, TableCy - 20.0f};
+	case FlightEnd::Kind::Pot: return {Look.Cx, Look.Cy - 75.0f};
+	case FlightEnd::Kind::Deck: return {Look.Cx, Look.Cy - 160.0f};
+	case FlightEnd::Kind::Muck: return {Look.Cx, Look.Cy - 20.0f};
 	case FlightEnd::Kind::Bet: return BetPos(End.Seat);
 	default:
 	{
@@ -1147,15 +1218,17 @@ void RiverLine::DrawFlight(const Flight& F, double Now)
 	const Vec2 B = FlightPoint(F.To);
 	const float X = A.X + (B.X - A.X) * K;
 	const float Y = A.Y + (B.Y - A.Y) * K - std::sin(K * Pi) * 20.0f;
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesTableLook(S);
 	if (F.IsChips)
 	{
-		DrawChipStack(*C, F.Amount, X, Y, 0.75f, static_cast<float>(1.0 - std::max(0.0, T - 0.85) * 5.0));
+		DrawChipStack(*C, F.Amount, X, Y, 0.75f, static_cast<float>(1.0 - std::max(0.0, T - 0.85) * 5.0), Look.ChipSet);
 	}
 	else
 	{
 		CardOpts O;
 		O.Rotate = K * 3.0f;
 		O.Alpha = static_cast<float>(1.0 - std::max(0.0, T - 0.8) * 4.0);
+		O.Back = Look.CardBack;
 		DrawCard(*C, -1, X - 20.0f, Y - 28.0f, 40.0f, 56.0f, O);
 	}
 }
@@ -1394,7 +1467,9 @@ void RiverLine::Controls(double Now)
 		P.RaiseTo = static_cast<Chips>(UI.Slider("raise", {Ax + 10.0f, 826.0f, Aw - 20.0f, 26.0f}, static_cast<double>(P.RaiseTo), static_cast<double>(P.MinRaise), static_cast<double>(P.MaxRaise), Step));
 	}
 
-	// Main buttons (each may end the prompt, so re-check it).
+	// Main buttons (each may end the prompt, so re-check it), in the table's look (update 3, §1.11: its corners and height;
+	// RiverLine's 66).
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesTableLook(S);
 	const float Bw = (Aw - 20.0f) / 3.0f;
 	const float By = 862.0f;
 	ButtonOpts FoldO;
@@ -1407,7 +1482,7 @@ void RiverLine::Controls(double Now)
 	const Chips MaxRaise = P.MaxRaise;
 	const bool IsBet = P.IsBet;
 	const Chips PotNow = P.Pot;
-	if (rlsites_detail::SitesButton(UI, *C, "fold", {Ax, By, Bw, 66.0f}, "Fold", FoldO))
+	if (rlsites_detail::SitesButton(UI, *C, "fold", {Ax, By, Bw, Look.ButtonH}, "Fold", FoldO, Look))
 	{
 		S.HeroAct(PlayerAction::Fold());
 	}
@@ -1423,7 +1498,7 @@ void RiverLine::Controls(double Now)
 	ButtonOpts CallO;
 	CallO.Hotkey = "C";
 	CallO.Sub = CanCheck ? std::string() : ChipsText(static_cast<double>(ToCall));
-	if (rlsites_detail::SitesButton(UI, *C, "call", {Ax + Bw + 10.0f, By, Bw, 66.0f}, CallLabel, CallO) && S.HasPrompt)
+	if (rlsites_detail::SitesButton(UI, *C, "call", {Ax + Bw + 10.0f, By, Bw, Look.ButtonH}, CallLabel, CallO, Look) && S.HasPrompt)
 	{
 		S.HeroAct(CanCheck ? PlayerAction::Check() : PlayerAction::Call());
 	}
@@ -1434,7 +1509,7 @@ void RiverLine::Controls(double Now)
 		RaiseO.Kind = AllIn ? ButtonKind::Gold : ButtonKind::Primary;
 		RaiseO.Sub = ChipsText(static_cast<double>(RaiseTo));
 		RaiseO.Hotkey = "R";
-		if (rlsites_detail::SitesButton(UI, *C, "raise", {Ax + (Bw + 10.0f) * 2.0f, By, Bw, 66.0f}, AllIn ? "All-in" : IsBet ? "Bet" : "Raise to", RaiseO) && S.HasPrompt)
+		if (rlsites_detail::SitesButton(UI, *C, "raise", {Ax + (Bw + 10.0f) * 2.0f, By, Bw, Look.ButtonH}, AllIn ? "All-in" : IsBet ? "Bet" : "Raise to", RaiseO, Look) && S.HasPrompt)
 		{
 			S.HeroAct(PlayerAction::RaiseTo(static_cast<double>(RaiseTo)));
 		}
@@ -1608,14 +1683,16 @@ void RiverLine::SidePanel(double Now)
 
 void RiverLine::Overlays(double Now)
 {
+	// Over the felt's centre, the table's look's (update 3, §1.11).
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesTableLook(S);
 	if (S.Moving)
 	{
 		const double Age = Now - S.MovingAt;
 		const double A = std::min(1.0, Age * 4.0) * (1.0 - std::max(0.0, Age - 1.6) / 0.6);
 		C->SetAlpha(static_cast<float>(std::max(0.0, A)));
-		UI.RRect({TableCx - 230.0f, TableCy - 70.0f, 460.0f, 110.0f}, 16.0f, Rgba(8, 16, 27, 0.94f), pal::Accent2);
-		UI.Text("Table balancing", TableCx, TableCy - 30.0f, Ts(17.0f, 500, pal::Muted, Align::Center));
-		ArrowText("Table " + std::to_string(S.MovingFrom), "Table " + std::to_string(S.MovingTo), TableCx, TableCy + 12.0f, Ts(28.0f, 800, pal::Ink, Align::Center));
+		UI.RRect({Look.Cx - 230.0f, Look.Cy - 70.0f, 460.0f, 110.0f}, 16.0f, Rgba(8, 16, 27, 0.94f), pal::Accent2);
+		UI.Text("Table balancing", Look.Cx, Look.Cy - 30.0f, Ts(17.0f, 500, pal::Muted, Align::Center));
+		ArrowText("Table " + std::to_string(S.MovingFrom), "Table " + std::to_string(S.MovingTo), Look.Cx, Look.Cy + 12.0f, Ts(28.0f, 800, pal::Ink, Align::Center));
 		C->SetAlpha(1.0f);
 	}
 	if (S.CurrentBanner.Active)
@@ -1627,7 +1704,7 @@ void RiverLine::Overlays(double Now)
 		const Color Col = Hex(B.Color);
 		C->Save();
 		C->SetAlpha(static_cast<float>(std::max(0.0, A)));
-		C->Translate(TableCx, TableCy - 10.0f);
+		C->Translate(Look.Cx, Look.Cy - 10.0f);
 		C->Scale(Sc, Sc);
 		UI.RRect({-330.0f, -80.0f, 660.0f, 150.0f}, 20.0f, Rgba(6, 10, 18, 0.92f), Col, 2.0f);
 		UI.Text(B.Title, 0.0f, -12.0f, Ts(42.0f, 900, Col, Align::Center));
@@ -1796,6 +1873,137 @@ void RiverLine::ResultsScreen(double Now)
 	{
 		S.LeaveResults();
 	}
+}
+
+bool RiverLine::DebugOpen(const std::string& Args)
+{
+	// Update 3 (§7.6): ss.Laptop.Open <app> [page] [site], so a PIE shot never depends on where a button sits: "riverline lobby
+	// ignite", "riverline league runittwice", "kast channel", "video studio", "burner sam". Names are case-insensitive; when
+	// one names nothing (or a page the app hasn't got yet), nothing opens and it says so.
+	std::vector<std::string> Words;
+	for (size_t I = 0; I < Args.size();)
+	{
+		const size_t End = std::min(Args.find(' ', I), Args.size());
+		if (End > I)
+		{
+			Words.push_back(Lower(Args.substr(I, End - I)));
+		}
+		I = End + 1;
+	}
+	if (Words.empty())
+	{
+		return false;
+	}
+	const double Now = LastFrame < 0.0 ? 0.0 : LastFrame;
+	const std::string& Name = Words[0];
+	const size_t More = Words.size() - 1;
+	if (Name == "riverline" || Name == "poker")
+	{
+		static const std::pair<const char*, Page> OpenPages[] = {{"lobby", Page::Lobby}, {"series", Page::Series}, {"leaderboards", Page::Leaderboards}, {"boards", Page::Leaderboards},
+			{"news", Page::News}, {"career", Page::Career}, {"embercrest", Page::Embercrest}, {"backing", Page::Backing}, {"promotions", Page::Promotions},
+			{"cashier", Page::Cashier}, {"fuse", Page::Fuse}, {"profile", Page::Profile}, {"live", Page::Live}, {"league", Page::League}, {"desk", Page::Desk}};
+		bool HasPage = false;
+		bool HasSite = false;
+		Page Want = Page::Lobby;
+		net::SiteId Site = net::SiteId::RiverLine;
+		for (size_t K = 1; K < Words.size(); ++K)
+		{
+			bool Known = false;
+			for (const std::pair<const char*, Page>& P : OpenPages)
+			{
+				if (!HasPage && !HasSite && Words[K] == P.first)
+				{
+					Want = P.second;
+					HasPage = Known = true;
+				}
+			}
+			for (int X = 0; X < static_cast<int>(net::SiteId::Count) && !Known; ++X)
+			{
+				if (!HasSite && Words[K] == net::KeyOf(static_cast<net::SiteId>(X)))
+				{
+					Site = static_cast<net::SiteId>(X);
+					HasSite = Known = true;
+				}
+			}
+			if (!Known)
+			{
+				return false;
+			}
+		}
+		if (HasSite)
+		{
+			SiteShown = Site; // the lobby shows it once the player holds an account there (rlsites_detail::SitesShown)
+		}
+		OpenApp(App::RiverLine, Now);
+		if (HasPage || HasSite)
+		{
+			if (S.CurrentScreen != Screen::Boot)
+			{
+				S.ShowLobby();
+			}
+			OpenPage(Want, Now);
+		}
+		return true;
+	}
+	if (Name == "kast")
+	{
+		static const std::pair<const char*, KastPage> OpenKast[] = {{"studio", KastPage::Studio}, {"community", KastPage::Community}, {"channel", KastPage::Channel}, {"browse", KastPage::Browse}};
+		const std::pair<const char*, KastPage>* Found = nullptr;
+		for (const std::pair<const char*, KastPage>& P : OpenKast)
+		{
+			Found = More == 1 && Words[1] == P.first ? &P : Found;
+		}
+		if (More > 1 || (More == 1 && !Found))
+		{
+			return false;
+		}
+		if (Found)
+		{
+			ShowKastPage(Found->second);
+		}
+		OpenApp(App::Kast, Now);
+		return true;
+	}
+	if (Name == "video" || Name == "rerun")
+	{
+		const int P = More == 1 ? rlvideo_detail::VideoPageNamed(Words[1]) : 0;
+		if (More > 1 || P < 0)
+		{
+			return false;
+		}
+		if (More == 1)
+		{
+			rlvideo_detail::VideoOpen(*this, P, Now);
+		}
+		else
+		{
+			OpenApp(App::Video, Now);
+		}
+		return true;
+	}
+	if (Name == "burner")
+	{
+		if (More > 1 || (More == 1 && Words[1] != "marcus" && Words[1] != "sam"))
+		{
+			return false;
+		}
+		if (More == 1)
+		{
+			ShowContact(Words[1] == "sam" ? 1 : 0);
+		}
+		OpenApp(App::Burner, Now);
+		return true;
+	}
+	static const std::pair<const char*, App> OpenApps[] = {{"shiftlink", App::ShiftLink}, {"bank", App::Bank}, {"geardrop", App::GearDrop}, {"pennydrop", App::PennyDrop}, {"mail", App::Mail}};
+	for (const std::pair<const char*, App>& A : OpenApps)
+	{
+		if (Name == A.first && More == 0)
+		{
+			OpenApp(A.second, Now);
+			return true;
+		}
+	}
+	return false;
 }
 } // namespace ui
 } // namespace ss

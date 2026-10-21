@@ -81,9 +81,11 @@ const net::CashMethod* MethodFor(net::SiteId S, const std::string& Id, bool Out)
 /**
  * The invitation gate (§5.4) against the public record: the site launched by World, Act I over (RentsPaid), and the site's
  * own door (Ignite: 150 paid online events; RunItTwice: 300 with an $11 average over the last hundred, or an online series
- * title, or Kast Partner). Why (when met): 0 events, 1 a series title, 2 Kast Partner.
+ * title, or Kast Partner). Why (when met): 0 events, 1 a series title, 2 Kast Partner. Update 3 (SPEC §7.2, §11 Q4): 3 the
+ * second volume path (InviteGate::MinEvents2 at MinAbi100_2), 4 the Ignite Level path (IgniteLevel, the play book's level the
+ * caller passes); both are off while their gate fields are zero (until G2).
  */
-bool GateMet(net::SiteId S, const rep::Public& P, int RentsPaid, double World, int* Why = nullptr);
+bool GateMet(net::SiteId S, const rep::Public& P, int RentsPaid, double World, int* Why = nullptr, int IgniteLevel = 0);
 /** Sends a site's invitation now (State 0, or 3 for the second letter 30 days after a decline). Forced by ss.Site.Invite. */
 void Invite(Book& B, life::State& L, net::SiteId S, double World, int Why, bool Second);
 /** Mail from a site (Source "site", the thread its key): LetterInvite, or LetterRoutine (at most one a week a company, §1.7). */

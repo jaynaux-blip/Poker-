@@ -7,7 +7,12 @@
 // C2 (the G2 audit): a heavy uploader's 28 and 30 days never over the views (B1), a Recap mixing a live night's skipped
 // hands (S1), FormatSubs for Shorts (S2), payout marks only when the 21st pays (S5), no ad talk before the gate (N3), the
 // statement with every payout (N5), PublishWhy and Deleted in Video.h (N6).
+// Update 3 (SPEC §7.7, §8.2, Phase A): the title and copy checks (the copy lint, the trademark screen, every generated
+// title, storytime, Studio's rules, the cooler's titles) moved verbatim to tests/video_seg_copy.cpp (core-videocontent's),
+// still called from main() below in their order; the thumbnail draws moved to tests/ui_seg_thumbs.cpp (rerun_ui,
+// ui-thumbs'). The helpers they share are this file's, declared in VideoSeg.h.
 #include "CopyLint.h"
+#include "VideoSeg.h"
 
 #include "ShortStack/Cards.h"
 #include "ShortStack/Evaluator.h"
@@ -59,7 +64,7 @@ namespace video = ss::video;
 namespace life = ss::life;
 using ss::Card;
 using ss::Chips;
-const double Day = 1440.0;
+// Day: VideoSeg.h's.
 
 int Failures = 0;
 int Checks = 0;
@@ -189,7 +194,7 @@ ss::recall::Record RecordOf(const ss::Hand& H, bool& Showdown)
 
 using PA = ss::PlayerAction;
 
-ss::recall::Record BadBeatHand(bool& Showdown, bool Swap = false)
+ss::recall::Record BadBeatHand(bool& Showdown, bool Swap)
 {
 	auto H = Swap ? HeadsUp("7c7h", "AsAd", "Kd8s2c9h7d", 6400) : HeadsUp("AsAd", "7c7h", "Kd8s2c9h7d", 6400);
 	Play(*H, {PA::RaiseTo(600), PA::RaiseTo(6400), PA::Call()});
@@ -590,8 +595,11 @@ std::string Goldens()
 		video::UploadFacts F;
 		F.GearQuality = 0.5;
 		F.KastFollowers = 4;
+		// Update 3 (§4.4, Phase A): Update 2's P for these choices, read before the upload makes the video (UploadU2).
+		const double PU2 = video::UploadU2(C, Ch, 12.0 * Day + 5.0 * 60.0, "golden:" + std::to_string(S), F);
 		const std::string Id = video::Upload(C, Ch, 12.0 * Day + 5.0 * 60.0, "golden:" + std::to_string(S), F);
 		const video::Video& V = C.Videos.back();
+		Expect(PU2 == V.P && PU2 > 0.0, "goldens: UploadU2 gives the upload's own P, exactly (update 3 §4.4)");
 		Out += "upload\t" + std::to_string(S) + "\t" + Id + "\tP=" + Num(V.P) + "\tc=" + Num(V.Conv) + "\tr=" + Num(V.Retention) + "\trpm=" + Num(V.Rpm) + "\tE=" + Num(V.E) +
 			"\tclass=" + std::to_string(static_cast<int>(V.C)) + "\ttitle=" + V.Title + "\tbig=" + V.Th.BigText + "\n";
 		for (const double T : {1.0, 7.0, 30.0, 365.0})
@@ -1143,406 +1151,222 @@ void Saves()
 	}
 }
 
-void Thumbnails()
+// ------------------------------------------------------------------ update 3, Phase A: the save seams (SPEC §7.3, §7.4)
+
+/** A save's lines, each split on its tabs. */
+std::vector<std::vector<std::string>> SplitLines(const std::string& Text)
 {
-	struct Measure : ss::ui::TextMeasurer
+	std::vector<std::vector<std::string>> Out;
+	std::istringstream In(Text);
+	std::string Line;
+	while (std::getline(In, Line))
 	{
-		float Width(const std::string& Text, ss::ui::Font, float Size) const override { return 0.55f * Size * static_cast<float>(Text.size()); }
-		float Ascent(ss::ui::Font, float Size) const override { return Size * 0.93f; }
+		Out.emplace_back(1);
+		for (const char Ch : Line)
+		{
+			if (Ch == '\t')
+			{
+				Out.back().emplace_back();
+			}
+			else
+			{
+				Out.back().back().push_back(Ch);
+			}
+		}
+	}
+	return Out;
+}
+
+/**
+ * Update 3 (Phase A): every saved enum reads clamped to its Count, so an appended value reads as itself and a value past
+ * the last reads as the last (they read as the last old value before); Rerun 2.0's state (an Update 3 video's block and
+ * its components, an idea candidate, the channel's X) writes back byte for byte, and only once U3Video is set, so a channel
+ * nobody touched since Update 2 writes what it always did.
+ */
+void SavesU3()
+{
+	auto Basic = [](const std::string& Id, double At) {
+		video::Video V;
+		V.Id = Id;
+		V.At = At;
+		V.P = 2400.0;
+		V.A = 0.6;
+		V.Tau1 = 1.5;
+		V.Tau2 = 12.0;
+		V.Conv = 0.006;
+		V.Retention = 0.45;
+		V.LengthMin = 9.0;
+		V.Rpm = 2.4;
+		V.Title = "Kings, 82% to win";
+		return V;
 	};
-	const Measure M;
-	bool Sd = false;
-	const ss::recall::Record Beat = BadBeatHand(Sd);
-	const video::Kind Groups[] = {video::Kind::BadBeat, video::Kind::Bluff, video::Kind::BigPot, video::Kind::Win, video::Kind::Rival, video::Kind::Story};
-	int Drawn = 0;
-	for (const video::Kind K : Groups)
 	{
-		for (int Source = 0; Source <= 2; Source += 1)
+		life::State L;
+		L.Update2LinesRead |= life::U2Video;
+		L.Video.SteppedTo = 30.0 * Day;
+		video::Video V = Basic("v-enums", 29.0 * Day);
+		V.K = static_cast<video::Kind>(static_cast<int>(video::Kind::Count) - 1);
+		V.F = static_cast<video::Format>(static_cast<int>(video::Format::Count) - 1);
+		V.T = static_cast<video::TitleStyle>(static_cast<int>(video::TitleStyle::Count) - 1);
+		V.Fr = video::Frame::Recipe;
+		V.C = static_cast<video::Class>(static_cast<int>(video::Class::Count) - 1);
+		V.Th.Fr = video::Frame::Recipe;
+		L.Video.Videos.push_back(V);
+		const std::string Text = SaveText(L);
+		const life::State Back = Reload(Text);
+		const video::Video& B = Back.Video.Videos.back();
+		Expect(B.K == V.K && B.F == V.F && B.T == V.T && B.Fr == video::Frame::Recipe && B.C == V.C && B.Th.Fr == video::Frame::Recipe && SaveText(Back) == Text,
+			"update 3 save: each saved enum's last value, the appended ones included, reads back as itself");
+		// Past every enum's last value: the last value.
+		life::State Past;
+		for (std::vector<std::string> P : SplitLines(Text))
 		{
-			video::Channel C;
-			video::Candidate X = Moment("rl:thumb@1:" + std::to_string(static_cast<int>(K)), 40.0 * Day);
-			X.K = K;
-			X.Rec = Beat;
-			X.Source = Source;
-			X.Storytime = Source == 2;
-			X.Opponent = K == video::Kind::Rival ? ss::RivalName : "Mike_R";
-			X.Rival = K == video::Kind::Rival;
-			X.PlaceSoFar = K == video::Kind::Win ? 1 : 0;
-			if (K == video::Kind::Win)
+			if (P.size() > 21 && P[1] == "vid")
 			{
-				X.Rec = ss::recall::Record();
-				X.Rec.Pot = 119000;
-			}
-			video::NoteHand(C, X);
-			for (int Fr = 0; Fr < 5; ++Fr)
-			{
-				video::Choice Ch;
-				Ch.Candidates = {C.Open[0].Id};
-				Ch.Fr = static_cast<video::Frame>(Fr);
-				const video::Thumb T = video::ThumbFor(Ch, C.Open);
-				ss::ui::DrawList L;
-				ss::ui::Canvas Cv(L, M, 640.0f, 360.0f, 1.0f);
-				ss::ui::videoart::Thumbnail(Cv, {0.0f, 0.0f, 640.0f, 360.0f}, T);
-				Drawn += L.Vertices.size() > 100 && !L.Cmds.empty() ? 1 : 0;
-				if (Source == 2)
+				for (const size_t K : std::vector<size_t>{4, 5, 6, 7, 8, 21})
 				{
-					Expect(T.Opponent.empty() && T.Mood >= 10, "thumbs: storytime draws no one but the player");
+					P[K] = "99";
 				}
 			}
+			video::ReadLine(P, Past);
 		}
+		const video::Video* Pv = Past.Video.Videos.empty() ? nullptr : &Past.Video.Videos.back();
+		Expect(Pv && Pv->K == V.K && Pv->F == V.F && Pv->T == V.T && Pv->Fr == video::Frame::Recipe && Pv->C == V.C && Pv->Th.Fr == video::Frame::Recipe,
+			"update 3 save: a value past an enum's last reads as its last (the Count sentinels)");
+		// An Update 2 channel writes the same bytes with U3Video set: nothing of Update 3's until something holds it.
+		life::State Set = L;
+		Set.Update3LinesRead |= life::U3Video;
+		Expect(SaveText(Set) == Text && Text.find("\tvlife\t") == std::string::npos && Text.find("\tvcomp\t") == std::string::npos && (Back.Update3LinesRead & life::U3Video) == 0,
+			"update 3 save: an Update 2 channel writes no Update 3 line with or without the bit, and reading it sets no bit");
 	}
-	Expect(Drawn == 6 * 3 * 5, "thumbs: every frame draws for every kind group (" + std::to_string(Drawn) + " of 90)");
-	ss::ui::DrawList L;
-	ss::ui::Canvas Cv(L, M, 400.0f, 400.0f, 1.0f);
-	ss::ui::videoart::Logo(Cv, {0.0f, 0.0f, 120.0f, 120.0f});
-	video::Video V;
-	V.Title = "the hand that wrecked my Night Owl Turbo and then some more words that wrap";
-	V.P = 1200.0;
-	V.A = 0.75;
-	V.Tau1 = 1.5;
-	V.Tau2 = 12.0;
-	V.LengthMin = 8.0;
-	ss::ui::videoart::Tile(Cv, {130.0f, 0.0f, 260.0f, 220.0f}, V, 3.0 * Day);
-	for (int K = 0; K < static_cast<int>(video::Kind::Count); ++K)
 	{
-		ss::ui::videoart::KindGlyph(Cv, 20.0f, 300.0f, 24.0f, static_cast<video::Kind>(K));
-	}
-	Expect(L.Vertices.size() > 200, "thumbs: the logo, a tile and every kind's glyph draw");
-}
-
-/** No "AI", "bot" or "autoplay" in the world's words (U1), as whole words. */
-bool SaysAutoplay(const std::string& Text)
-{
-	const std::string Low = Lower(Text);
-	for (const char* Word : {"ai", "bot", "bots", "autoplay", "autopilot"})
-	{
-		const std::string W(Word);
-		for (size_t At = Low.find(W); At != std::string::npos; At = Low.find(W, At + 1))
+		life::State L;
+		L.Update2LinesRead |= life::U2Video;
+		L.Update3LinesRead |= life::U3Video;
+		video::Channel& C = L.Video;
+		C.Subs = 1234.5;
+		C.SteppedTo = 40.0 * Day;
+		C.Videos.push_back(Basic("v-legacy", 20.0 * Day));
+		video::Video V = Basic("v-u3", 39.0 * Day + 21.0 * 60.0);
+		V.Fr = video::Frame::Recipe;
+		video::VideoX& X = V.X;
+		X.On = true;
+		X.Fate = 4000000000u;
+		X.Ctr = 0.0612345;
+		X.Sigma = 0.9;
+		X.KastShare = 0.125;
+		X.S0 = -0.25;
+		X.S0Base = 0.1;
+		X.P0 = 812.5;
+		X.CtrNoise = 1.0731;
+		X.Earned = 123456.789;
+		X.Idea = 42;
+		X.Series = 3;
+		X.TitleTpl = "beats.loud|7\tb";
+		X.Repacks = 2;
+		X.LastRepackDay = 38;
+		X.Promise = 3;
+		X.Payoff = 2;
+		X.C = video::Coin::Limited;
+		X.Ads = video::AdLoad::Heavy;
+		X.AdsAtUpload = video::AdLoad::Light;
+		X.Len = video::LengthOpt::Extended;
+		X.AdsChangedDay = 37;
+		X.Launch = 0x5;
+		X.DuelCtr = {0.071f, 0.0645f, 0.0f};
+		X.Duels = 2;
+		X.DuelWin = 1;
+		X.Verdict = 3;
+		X.SettledS = 0.4375f;
+		X.Spec[0].Arch = 7;
+		X.Spec[0].Layout = 11;
+		X.Spec[0].Mirror = 1;
+		X.Spec[0].Pal = 4;
+		X.Spec[0].Expr = 9;
+		X.Spec[0].PropA = 12;
+		X.Spec[0].Sticker = 3;
+		X.Spec[0].LookRef = 0;
+		X.Spec[0].Variant = 3000000000u;
+		X.Spec[0].Caption = "82%; then \\ the river | a tab\there";
+		X.Spec[0].Caption2 = "KINGS";
+		X.Spec[1].Arch = 2;
+		X.Spec[1].Caption = ";";
+		X.Comps.push_back({39.0 * Day + 21.0 * 60.0, 812.5, 0.6, video::CompKind::Verdict, 0, 1.0f});
+		X.Comps.push_back({46.0 * Day, 140.25, 0.35, video::CompKind::Check7, 3, 1.05f});
+		X.NextUp = "v-legacy";
+		C.Videos.push_back(V);
+		video::Candidate Ic = Moment("idea:42@40:1", 40.0 * Day);
+		Ic.Source = 5;
+		Ic.K = video::Kind::Idea;
+		Ic.Idea = 42;
+		Ic.IdeaFacts = "month=2026-10\tnet=12345|events=31";
+		C.Open.push_back(Ic);
+		video::ChannelX& Cx = C.X;
+		Cx.On = true;
+		video::DayRow Row;
+		Row.Key = 39;
+		Row.Views = 1540.5f;
+		Row.WatchH = 88.25f;
+		Row.Gained = 12.0f;
+		Row.Lost = 1.5f;
+		Row.Likes = 61.0f;
+		Row.Dislikes = 2.0f;
+		Row.Impr = 21000.0f;
+		Row.Comments = 9.0f;
+		Row.Cents = 412;
+		Cx.Days = {Row, Row};
+		Cx.Days[1].Key = 40;
+		Cx.Months = {Row};
+		Cx.Months[0].Key = 2026 * 12 + 9;
+		Cx.Life = Row;
+		Cx.Life.Key = 0;
+		Cx.Top.push_back({"v-old", "An old \t one | top", 50000.0, 8800, 2.0 * Day});
+		Cx.TailsX[1].Total[0] = 10.5;
+		Cx.TailsX[1].Decay[1][3] = 0.25;
+		Cx.Momentum = 1.0625;
+		Cx.Settled = {0.5f, -0.25f, 0.0f, 0.125f, 0.0f, 0.0f};
+		Cx.SettledN = 4;
+		Cx.LastUploadDay = 39;
+		Cx.WelcomeBack = true;
+		video::FrozenLook Look;
+		Look.Ref = 1;
+		for (size_t K = 0; K < Look.Look.size(); ++K)
 		{
-			const bool Start = At == 0 || !std::isalnum(static_cast<unsigned char>(Low[At - 1]));
-			const bool End = At + W.size() >= Low.size() || !std::isalnum(static_cast<unsigned char>(Low[At + W.size()]));
-			if (Start && End)
-			{
-				return true;
-			}
+			Look.Look[K] = static_cast<int16_t>(static_cast<int>(K) * 3 - 5);
 		}
-	}
-	return false;
-}
-
-/** The trademark screen (sponsor_main.cpp's list, as whole words): no real video platform, payment wallet or poker site. */
-bool RealBrand(const std::string& Text, std::string& Which)
-{
-	const std::string Low = " " + Lower(Text) + " ";
-	for (const char* R : {"pokerstars", "ggpoker", "partypoker", "888", "wsop", "world series", "wpt", "run it once", "upswing", "youtube", "twitch", "kick", "tiktok", "rumble",
-			 "vimeo", "dailymotion", "skrill", "neteller", "paypal", "venmo", "ecopayz", "muchbetter", "betonline", "coinpoker", "winamax", "unibet", "natural8", "bovada", "ignition"})
-	{
-		const std::string W(R);
-		for (size_t At = Low.find(W); At != std::string::npos; At = Low.find(W, At + 1))
+		Cx.Looks.push_back(Look);
+		Cx.Lists.push_back({"pl1", "Coolers | and \t beats", {"v-legacy", "v-u3"}});
+		Cx.Challenges.push_back({1, 2, 1, 2000, 100000, 35.0 * Day, 1, 3});
+		Cx.IdeaCool.push_back({42, 39, 2});
+		Cx.TrendCool.push_back({7, 40, 1});
+		Cx.Snaps.push_back({2026 * 12 + 9, 31, 6, -4500, 3100, 330, -87, 41.5f});
+		Cx.StubDays.push_back({39, 1.5, 0.009, 3.6, 0.75, 0.0045, 1.8});
+		Cx.TrendWeek = 5;
+		Cx.Since = 10;
+		const std::string Text = SaveText(L);
+		const life::State Back = Reload(Text);
+		const video::Video* Bv = nullptr;
+		for (const video::Video& Each : Back.Video.Videos)
 		{
-			if (!std::isalnum(static_cast<unsigned char>(Low[At - 1])) && !std::isalnum(static_cast<unsigned char>(Low[At + W.size()])))
-			{
-				Which = R;
-				return true;
-			}
+			Bv = Each.Id == "v-u3" ? &Each : Bv;
 		}
+		const bool Legacy = !Back.Video.Videos.empty() && !Back.Video.Videos.front().X.On;
+		Expect(SaveText(Back) == Text, "update 3 save: Rerun 2.0's state writes back byte for byte");
+		Expect((Back.Update3LinesRead & life::U3Video) != 0 && Back.Video.X.On && Legacy && Bv && Bv->X.On && Bv->X.Comps.size() == 2 && Bv->X.Fate == X.Fate &&
+				   Bv->X.Spec[0].Caption == X.Spec[0].Caption && Bv->X.Spec[0].Variant == X.Spec[0].Variant && Bv->X.Spec[1].Caption == ";" && Bv->X.Spec[2].Arch == -1 &&
+				   Bv->X.TitleTpl == X.TitleTpl && Bv->X.Ads == video::AdLoad::Heavy && Bv->X.DuelCtr[1] == 0.0645f && !Back.Video.Open.empty() &&
+				   Back.Video.Open.back().Idea == 42 && Back.Video.Open.back().IdeaFacts == Ic.IdeaFacts && Back.Video.X.Lists.size() == 1 &&
+				   Back.Video.X.Lists[0].Videos.size() == 2 && Back.Video.X.TrendWeek == 5 && Back.Video.X.Since == 10,
+			"update 3 save: the video's block, its components, the idea candidate and the channel's X come back as they were, the legacy video legacy");
+		// The bit unset: the channel's X and the components stay unwritten (the block rides on its video, which only an Update 3
+		// upload makes, and that upload sets the bit).
+		life::State Unset = L;
+		Unset.Update3LinesRead = 0;
+		const std::string Plain = SaveText(Unset);
+		Expect(Plain.find("\tvcomp\t") == std::string::npos && Plain.find("\tvlife\t") == std::string::npos && Plain.find("\tvday\t") == std::string::npos,
+			"update 3 save: nothing of the channel's X or the components without U3Video");
+		std::printf("  update 3 save: %zu bytes of Rerun 2.0 lines for one Update 3 video and a channel's X\n", Text.size() - Plain.size());
 	}
-	return false;
-}
-
-void Copy()
-{
-	std::map<std::string, std::string> Vars = {{"Event", "Night Owl Turbo"}, {"Stakes", "$5.50 Night Owl Turbo"}, {"BuyIn", "$5.50"}, {"Bb", "64"}, {"Eq", "81"},
-		{"Mine", "AA"}, {"MineWords", "aces"}, {"Theirs", "77"}, {"TheirsWords", "sevens"}, {"Killer", "a seven on the river"}, {"KillStreet", "river"},
-		{"Saver", "a king on the turn"}, {"SaveStreet", "turn"}, {"Street", "river"}, {"Spot", "on the bubble"}, {"Opp", "gh0stfold"}, {"HandNo", "214"}, {"Place", "4th"},
-		{"PlaceWord", "fourth"}, {"Field", "104"}, {"Prize", "$1,190"}, {"Count", "5"}, {"Weekday", "Tuesday"}, {"Ender", "the river that ended it"}};
-	std::vector<std::pair<std::string, std::string>> Titles, Lines, Subjects, Bodies, Labels;
-	for (const std::string& E : video::Inventory())
-	{
-		const size_t Tab = E.find('\t');
-		const std::string Kind = E.substr(0, Tab), Text = E.substr(Tab + 1);
-		(Kind == "title" ? Titles : Kind == "line" ? Lines : Kind == "subject" ? Subjects : Kind == "body" ? Bodies : Labels).push_back({Kind, Text});
-	}
-	Expect(Titles.size() >= 250 && !Lines.empty() && Subjects.size() == 4 && Bodies.size() == 4, "copy: the inventory has every kind of line (" + std::to_string(Titles.size()) + " titles)");
-	// Titles aren't sentences: the lint's closing stop is the one rule they skip.
-	std::vector<std::pair<std::string, std::string>> Stopped;
-	for (const auto& T : Titles)
-	{
-		Stopped.push_back({T.first, T.second + "."});
-	}
-	int Problems = copylint::Run("rerun titles", Stopped, 101, Vars);
-	Problems += copylint::Run("rerun lines", Lines, copylint::Pa, Vars);
-	Problems += copylint::Run("rerun subjects", Subjects, copylint::MailSubject, Vars);
-	Problems += copylint::Run("rerun letters", Bodies, copylint::LetterBody, Vars);
-	Expect(Problems == 0 && copylint::SelfCheck() == 0, "copy: the lint passes (" + std::to_string(Problems) + " problems)");
-	// The world never says who decided (U1), and no real brand anywhere (the trademark screen).
-	int Said = 0, Brands = 0;
-	for (const std::string& E : video::Inventory())
-	{
-		const std::string Filled = copylint::Fill(E.substr(E.find('\t') + 1), Vars);
-		std::string Which;
-		if (SaysAutoplay(Filled))
-		{
-			++Said;
-			std::printf("  U1: \"%s\"\n", Filled.c_str());
-		}
-		if (RealBrand(Filled, Which))
-		{
-			++Brands;
-			std::printf("  trademark '%s': \"%s\"\n", Which.c_str(), Filled.c_str());
-		}
-	}
-	std::string Which;
-	Expect(Said == 0, "copy: no line says AI, bot or autoplay");
-	Expect(Brands == 0 && !RealBrand("Rerun", Which), "copy: the trademark screen passes over Rerun and every line");
-	// Titles generated from real candidates of every kind, by every style and format: every one non-empty, linted, and clean.
-	int Bad = 0;
-	bool Sd = false;
-	const ss::recall::Record Beat = BadBeatHand(Sd);
-	for (int K = 0; K < static_cast<int>(video::Kind::Count); ++K)
-	{
-		video::Channel C;
-		for (int I = 0; I < 3; ++I)
-		{
-			video::Candidate X = Moment("rl:copy@9:" + std::to_string(I), 50.0 * Day + I);
-			X.K = static_cast<video::Kind>(K);
-			X.Rec = Beat;
-			X.Rec.Number = 200 + I;
-			X.EquityAtAllIn = 0.81;
-			X.Opponent = K == static_cast<int>(video::Kind::Rival) ? ss::RivalName : "Mike_R";
-			X.Rival = K == static_cast<int>(video::Kind::Rival);
-			if (X.K == video::Kind::Story)
-			{
-				X.Id = "story:rent-paid";
-				X.Event = "rent-paid";
-				X.Rec = ss::recall::Record();
-			}
-			if (X.K == video::Kind::Win || X.K == video::Kind::FinalTable || X.K == video::Kind::DeepRun)
-			{
-				X.Rec = ss::recall::Record();
-				X.Rec.Pot = 119000;
-				X.PlaceSoFar = X.K == video::Kind::Win ? 1 : 4;
-				X.Field = 104;
-			}
-			video::NoteHand(C, X);
-		}
-		for (int F = 0; F < 4; ++F)
-		{
-			for (int T = 0; T < 5; ++T)
-			{
-				video::Choice Ch;
-				Ch.F = static_cast<video::Format>(F);
-				Ch.T = static_cast<video::TitleStyle>(T);
-				for (const video::Candidate& X : C.Open)
-				{
-					Ch.Candidates.push_back(X.Id);
-					if (F < 2)
-					{
-						break;
-					}
-				}
-				if (!video::CanUpload(Ch, C.Open).empty())
-				{
-					continue;
-				}
-				const std::string Title = video::Title(Ch, C.Open, 0);
-				std::string Brand;
-				const std::string Why = copylint::Check(Title + ".", 101, {});
-				if (Title.empty() || !Why.empty() || SaysAutoplay(Title) || RealBrand(Title, Brand) || Title.find('{') != std::string::npos)
-				{
-					++Bad;
-					std::printf("  title: \"%s\" %s\n", Title.c_str(), Why.c_str());
-				}
-			}
-		}
-	}
-	Expect(Bad == 0, "copy: every generated title is filled, linted and clean");
-}
-
-/** Every title a storytime moment can get (every template, by sweeping the seed): no name, and it reads as English. */
-void Storytime()
-{
-	video::Channel C;
-	ss::room::HandNote N;
-	N.AllIn = true;
-	N.Called = true;
-	std::vector<std::string> Ids;
-	const video::Kind Kinds[] = {video::Kind::BadBeat, video::Kind::Suckout, video::Kind::Cooler, video::Kind::Bluff, video::Kind::BluffCaught, video::Kind::HeroCall,
-		video::Kind::HeroFold, video::Kind::BigPot, video::Kind::Knockout};
-	for (int I = 0; I < 9; ++I)
-	{
-		video::Candidate X;
-		X.Id = "dee:9:" + std::to_string(40 + I);
-		X.At = 9.0 * Day + 23.0 * 60.0 + I;
-		X.Source = 2;
-		X.K = Kinds[I];
-		X.Rec = DeesHand();
-		X.Rec.Number = 40 + I;
-		X.EquityAtAllIn = 0.81;
-		X.Opponent = "Big Lou";
-		X.Event = "Dee's game";
-		X.BuyIn = 4000;
-		X.Storytime = true;
-		video::NoteHand(C, X);
-		Ids.push_back(X.Id);
-	}
-	int Bad = 0, Seen = 0;
-	for (int F = 0; F < 3; ++F)
-	{
-		for (int T = 0; T < 5; ++T)
-		{
-			for (size_t K = 0; K < Ids.size(); ++K)
-			{
-				video::Choice Ch;
-				Ch.F = static_cast<video::Format>(F);
-				Ch.T = static_cast<video::TitleStyle>(T);
-				Ch.Candidates = {Ids[K]};
-				if (Ch.F == video::Format::Vlog)
-				{
-					Ch.Candidates.push_back(Ids[(K + 1) % Ids.size()]);
-					Ch.Candidates.push_back(Ids[(K + 2) % Ids.size()]);
-				}
-				if (!video::CanUpload(Ch, C.Open).empty())
-				{
-					continue;
-				}
-				for (uint32_t Seed = 1; Seed <= 40; ++Seed)
-				{
-					const std::string Title = video::Title(Ch, C.Open, Seed);
-					const std::string Low = " " + Lower(Title) + " ";
-					++Seen;
-					if (Title.empty() || Low.find(" my a ") != std::string::npos || Low.find(" the a ") != std::string::npos || Low.find(" of a back") != std::string::npos ||
-						Low.find("lou") != std::string::npos || Low.find("dee") != std::string::npos || !copylint::Check(Title + ".", 101, {}).empty())
-					{
-						++Bad;
-						std::printf("  storytime title: \"%s\"\n", Title.c_str());
-					}
-				}
-			}
-		}
-	}
-	Expect(Seen > 1000 && Bad == 0, "storytime: every title a back-room hand can get names nobody and reads right (" + std::to_string(Bad) + " of " + std::to_string(Seen) + ")");
-	// A live event's name with its price on it (the card room's "Embercrest Nightly $120") says the price once, in front.
-	video::Channel Live;
-	video::Candidate X = Moment("lv:embercrest-nightly@9:12", 9.0 * Day + 21.0 * 60.0);
-	X.Source = 1;
-	X.Event = "Embercrest Nightly $120";
-	X.BuyIn = 12000;
-	video::NoteHand(Live, X);
-	int Twice = 0, Priced = 0;
-	for (int T = 0; T < 5; ++T)
-	{
-		video::Choice Ch;
-		Ch.Candidates = {X.Id};
-		Ch.T = static_cast<video::TitleStyle>(T);
-		for (uint32_t Seed = 1; Seed <= 40; ++Seed)
-		{
-			const std::string Title = video::Title(Ch, Live.Open, Seed);
-			const size_t First = Title.find("$120");
-			Twice += First != std::string::npos && Title.find("$120", First + 1) != std::string::npos ? 1 : 0;
-			Twice += Lower(Title).find("nightly $120") != std::string::npos ? 1 : 0;
-			Priced += First != std::string::npos ? 1 : 0;
-		}
-	}
-	Expect(Twice == 0 && Priced > 0, "titles: a live event's price is said once, in front (" + video::Title({{X.Id}, video::Format::Breakdown, video::TitleStyle::Plain}, Live.Open, 3) + ")");
-	// A bluff with bottom pair didn't have "nothing"; one with no pair can say so.
-	int SaidNothing[2] = {0, 0};
-	for (int Pair = 0; Pair < 2; ++Pair)
-	{
-		video::Channel B;
-		video::Candidate Y = Moment("rl:bluff@9:" + std::to_string(Pair), 9.0 * Day);
-		Y.K = video::Kind::Bluff;
-		Y.Rec.Mine = ss::ParseCards(Pair == 1 ? "3d2d" : "6s5s");
-		Y.Rec.Board = ss::ParseCards("KhQd2cJs8h");
-		Y.Rec.HeroNet = 3000;
-		video::NoteHand(B, Y);
-		for (int T = 0; T < 5; ++T)
-		{
-			video::Choice Ch;
-			Ch.Candidates = {Y.Id};
-			Ch.T = static_cast<video::TitleStyle>(T);
-			for (uint32_t Seed = 1; Seed <= 40; ++Seed)
-			{
-				SaidNothing[Pair] += Lower(video::Title(Ch, B.Open, Seed)).find("nothing") != std::string::npos ? 1 : 0;
-			}
-		}
-	}
-	Expect(SaidNothing[0] > 0 && SaidNothing[1] == 0, "titles: a bluff says it had nothing only when it had no pair");
-}
-
-void Rules()
-{
-	// Studio's rules for what goes up together.
-	video::Channel C;
-	for (int I = 0; I < 9; ++I)
-	{
-		video::NoteHand(C, Moment("lv:sunday@40:" + std::to_string(I), 40.0 * Day + 20.0 * 60.0 + I));
-	}
-	video::Candidate Recap = Moment("lv:sunday@40:recap", 40.0 * Day + 23.0 * 60.0);
-	Recap.K = video::Kind::FinalTable;
-	Recap.PlaceSoFar = 4;
-	Recap.Field = 88;
-	Recap.Rec = ss::recall::Record();
-	Recap.Rec.Pot = 119000;
-	video::NoteHand(C, Recap);
-	video::NoteHand(C, Moment("rl:other@41:1", 42.0 * Day));
-	video::Choice Ch;
-	Ch.F = video::Format::Vlog;
-	Ch.Candidates = {"lv:sunday@40:0", "lv:sunday@40:1"};
-	Expect(!video::CanUpload(Ch, C.Open).empty(), "rules: a Vlog needs three moments");
-	Ch.Candidates.push_back("lv:sunday@40:recap");
-	Expect(video::CanUpload(Ch, C.Open).empty(), "rules: three moments from one night make a Vlog");
-	Ch.Candidates.push_back("rl:other@41:1");
-	Expect(!video::CanUpload(Ch, C.Open).empty(), "rules: a Vlog's moments are one night's");
-	Ch.F = video::Format::Recap;
-	Ch.Candidates = {"lv:sunday@40:recap", "lv:sunday@40:2"};
-	Expect(!video::CanUpload(Ch, C.Open).empty(), "rules: a Recap needs two hands at least");
-	Ch.Candidates.push_back("lv:sunday@40:3");
-	Expect(video::CanUpload(Ch, C.Open).empty(), "rules: a final table and two of its hands make a Recap");
-	Ch.Candidates = {"lv:sunday@40:2", "lv:sunday@40:3", "lv:sunday@40:4"};
-	Expect(!video::CanUpload(Ch, C.Open).empty(), "rules: a Recap needs the run itself");
-	Ch.F = video::Format::Breakdown;
-	Ch.Candidates = {"lv:sunday@40:2", "lv:sunday@40:3"};
-	Expect(!video::CanUpload(Ch, C.Open).empty(), "rules: a Breakdown is one hand");
-	Ch.Candidates = {"gone"};
-	Expect(!video::CanUpload(Ch, C.Open).empty(), "rules: a moment that's gone can't go up");
-	// The recap's title and frame read the run.
-	Ch.F = video::Format::Recap;
-	Ch.T = video::TitleStyle::Plain;
-	Ch.Fr = video::Frame::Trophy;
-	Ch.Candidates = {"lv:sunday@40:recap", "lv:sunday@40:2", "lv:sunday@40:3"};
-	const std::string Title = video::Title(Ch, C.Open, 0);
-	const video::Thumb T = video::ThumbFor(Ch, C.Open);
-	Expect(Title.find("4th") != std::string::npos && T.BigText.find("4TH") != std::string::npos, "rules: a Recap's title and trophy carry the place (" + Title + ", " + T.BigText + ")");
-	// "{Count} hands" counts the two hands, not the run that leads the Recap.
-	bool Counted = true;
-	for (int S = 0; S < 5; ++S)
-	{
-		for (uint32_t Seed = 1; Seed <= 30; ++Seed)
-		{
-			video::Choice Any = Ch;
-			Any.T = static_cast<video::TitleStyle>(S);
-			const std::string X = Lower(video::Title(Any, C.Open, Seed));
-			Counted = Counted && X.find("3 hands") == std::string::npos && X.find("3 spots") == std::string::npos;
-		}
-	}
-	Expect(Counted, "rules: a Recap of a final table and two hands says two hands");
-	// Advice never promises a number.
-	for (const std::string& A : video::Advice(Ch, C.Open))
-	{
-		bool Digit = false;
-		for (const char X : A)
-		{
-			Digit = Digit || (X >= '0' && X <= '9');
-		}
-		Expect(!Digit, "rules: Studio's advice promises no number (" + A + ")");
-	}
-	// Upload uses them up, and the video keeps its own copy of what it needs.
-	video::UploadFacts F;
-	const std::string Id = video::Upload(C, Ch, 41.0 * Day, "rules", F);
-	Expect(!Id.empty() && C.Open.size() == 8 && C.Videos.size() == 1 && C.Videos[0].K == video::Kind::FinalTable && C.Videos[0].F == video::Format::Recap,
-		"rules: the Recap goes up, its moments used");
-	Expect(video::Upload(C, Ch, 41.0 * Day, "rules", F).empty() && C.Videos.size() == 1, "rules: and can't go up twice");
 }
 
 // ------------------------------------------------------------------ C2: the G2 audit's fixes (B1, S1, S2, S5, N3, N5, N6)
@@ -1837,45 +1661,6 @@ void AdviceBeforeTheGate()
 			   video::Deleted() == "Taken down. The subscribers it brought in stay.",
 		"copy: PublishWhy and Deleted come from Video.h");
 }
-
-void CoolerOutcome()
-{
-	// C2's verify: a cooler is two big hands, and the player wins half of them (set over set, either way). The titles that
-	// tell a loss ("nothing I could do", "sent my night sideways") are the lost one's alone; the won one gets the rest.
-	int WonSaidLoss = 0, LostSaidLoss = 0, WonTitles = 0;
-	for (const Chips Net : {Chips(6400), Chips(-6400)})
-	{
-		video::Channel C;
-		video::Candidate X = Moment("rl:cooler@9:" + std::to_string(Net > 0 ? 1 : 2), 9.0 * Day + 20.0 * 60.0);
-		X.Rec.Mine = ss::ParseCards(Net > 0 ? "AhAc" : "KdKs");
-		X.Rec.Shown = {{"Mike_R", ss::ParseCards(Net > 0 ? "KdKs" : "AhAc")}};
-		X.Rec.Board = ss::ParseCards("Kh7dAs9s4h");
-		X.Rec.HeroNet = Net;
-		X.Opponent = "Mike_R";
-		video::NoteHand(C, X);
-		for (int T = 0; T < 5; ++T)
-		{
-			for (uint32_t Seed = 0; Seed < 48; ++Seed)
-			{
-				video::Choice Ch;
-				Ch.Candidates = {C.Open[0].Id};
-				Ch.T = static_cast<video::TitleStyle>(T);
-				const std::string Title = video::Title(Ch, C.Open, Seed);
-				const bool Loss = Title.find("nothing I could do") != std::string::npos || Title.find("sideways") != std::string::npos ||
-					Title.find("RAN INTO") != std::string::npos || Title.find("always going to lose") != std::string::npos;
-				WonSaidLoss += Net > 0 && Loss ? 1 : 0;
-				LostSaidLoss += Net < 0 && Loss ? 1 : 0;
-				WonTitles += Net > 0 && !Title.empty() ? 1 : 0;
-				if (Net > 0 && Loss)
-				{
-					std::printf("  a won cooler: \"%s\"\n", Title.c_str());
-				}
-			}
-		}
-	}
-	Expect(WonTitles == 5 * 48 && WonSaidLoss == 0, "cooler: a cooler the player won never gets a title that tells a loss");
-	Expect(LostSaidLoss > 0, "cooler: a lost one can");
-}
 } // namespace video_test
 
 int main(int Argc, char** Argv)
@@ -1887,7 +1672,7 @@ int main(int Argc, char** Argv)
 		// "video_test titles": a sample of what Studio would offer, every kind by every style (for the copy review).
 		bool Sd = false;
 		const ss::recall::Record Beat = video_test::BadBeatHand(Sd);
-		for (int K = 0; K < static_cast<int>(ss::video::Kind::Count); ++K)
+		for (int K = 0; K < ss::video::KindCountU2; ++K)
 		{
 			ss::video::Channel C;
 			ss::video::Candidate X = video_test::Moment("rl:sample@9:1", 50.0 * video_test::Day);
@@ -1930,7 +1715,9 @@ int main(int Argc, char** Argv)
 	video_test::Terms();
 	video_test::Bounds();
 	video_test::Saves();
-	video_test::Thumbnails();
+	video_test::SavesU3();
+	// Update 3, Phase A: Thumbnails moved to rerun_ui (tests/ui_seg_thumbs.cpp); Copy, Storytime, Rules and CoolerOutcome
+	// are tests/video_seg_copy.cpp's.
 	video_test::Copy();
 	video_test::Storytime();
 	video_test::Rules();

@@ -922,6 +922,180 @@ std::vector<std::string> SplitList(const std::string& Field)
 	return Out;
 }
 
+// ---------------------------------------------------------------- Update 3's fields (update 3 SPEC §7.4; the lead, Phase A)
+// Written only for what holds Update 3 state (an Update 3 video's block, an idea candidate, the channel's X), so a save
+// nobody touched since Update 2 writes back byte for byte; every saved enum is read clamped to its Count.
+
+/** The 14 small ints of a recipe, in ThumbSpec's order. */
+std::array<int16_t*, 14> U3SpecInts(ThumbSpec& S)
+{
+	return {&S.Arch, &S.Layout, &S.Mirror, &S.Bg, &S.Pal, &S.Subj, &S.Expr, &S.Pose, &S.PropA, &S.PropB, &S.CapStyle, &S.Sticker, &S.Corner, &S.LookRef};
+}
+
+/** A caption inside a recipe's field: '\' and ';' escaped, so the field splits on its own ';'. */
+std::string U3SemiEsc(const std::string& In)
+{
+	std::string Out;
+	for (const char Ch : In)
+	{
+		if (Ch == '\\' || Ch == ';')
+		{
+			Out.push_back('\\');
+		}
+		Out.push_back(Ch);
+	}
+	return Out;
+}
+
+/**
+ * A thumbnail recipe in one field: "<14 ints, comma-joined>;<variant>;<caption>;<caption2>". A default recipe (a Duel's
+ * contender that isn't there) is the empty field.
+ */
+std::string U3PackSpec(const ThumbSpec& S)
+{
+	ThumbSpec Copy = S;
+	ThumbSpec Blank;
+	const std::array<int16_t*, 14> Given = U3SpecInts(Copy);
+	const std::array<int16_t*, 14> Unset = U3SpecInts(Blank);
+	bool Same = S.Variant == Blank.Variant && S.Caption.empty() && S.Caption2.empty();
+	std::string Ints;
+	for (size_t I = 0; I < Given.size(); ++I)
+	{
+		Same = Same && *Given[I] == *Unset[I];
+		Ints += (I > 0 ? "," : "") + std::to_string(static_cast<int>(*Given[I]));
+	}
+	return Same ? std::string() : Ints + ";" + std::to_string(S.Variant) + ";" + U3SemiEsc(S.Caption) + ";" + U3SemiEsc(S.Caption2);
+}
+
+ThumbSpec U3UnpackSpec(const std::string& Field)
+{
+	ThumbSpec S;
+	if (Field.empty())
+	{
+		return S;
+	}
+	std::vector<std::string> Parts(1);
+	for (size_t I = 0; I < Field.size(); ++I)
+	{
+		if (Field[I] == '\\' && I + 1 < Field.size())
+		{
+			Parts.back().push_back(Field[++I]);
+		}
+		else if (Field[I] == ';')
+		{
+			Parts.emplace_back();
+		}
+		else
+		{
+			Parts.back().push_back(Field[I]);
+		}
+	}
+	const std::array<int16_t*, 14> Ints = U3SpecInts(S);
+	size_t At = 0;
+	for (size_t I = 0; I < Ints.size() && At <= Parts[0].size(); ++I)
+	{
+		const size_t Comma = std::min(Parts[0].find(',', At), Parts[0].size());
+		*Ints[I] = static_cast<int16_t>(ToInt(Parts[0].substr(At, Comma - At)));
+		At = Comma + 1;
+	}
+	S.Variant = Parts.size() > 1 ? static_cast<uint32_t>(ToInt(Parts[1])) : 0u;
+	S.Caption = Parts.size() > 2 ? Parts[2] : std::string();
+	S.Caption2 = Parts.size() > 3 ? Parts[3] : std::string();
+	return S;
+}
+
+/** A float field as the shortest text that reads back as exactly it. */
+std::string U3Flt(float X)
+{
+	return Num(static_cast<double>(X));
+}
+
+/** An enum saved as an int, read back clamped to its Count. */
+template <typename E>
+E U3Enum(const std::string& Field)
+{
+	return static_cast<E>(std::clamp(static_cast<int>(ToInt(Field)), 0, static_cast<int>(E::Count) - 1));
+}
+
+/** vid's Update 3 block, after the title (P[28]): "3", then the fields in VideoX's saved order (§7.4); the Comps are vcomp lines. */
+void U3WriteVideoX(const VideoX& X, std::string& Out)
+{
+	Out += "\t3\t" + std::to_string(X.Fate) + "\t" + Num(X.Ctr) + "\t" + Num(X.CtrNoise) + "\t" + Num(X.Sigma) + "\t" + Num(X.KastShare) + "\t" + Num(X.S0) + "\t" + Num(X.S0Base) +
+		"\t" + Num(X.P0) + "\t" + std::to_string(X.Idea) + "\t" + std::to_string(X.Series) + "\t" + Esc(X.TitleTpl) + "\t" + std::to_string(X.Repacks) + "\t" +
+		std::to_string(X.LastRepackDay) + "\t" + std::to_string(static_cast<int>(X.Promise)) + "\t" + std::to_string(static_cast<int>(X.Payoff)) + "\t" +
+		std::to_string(static_cast<int>(X.C)) + "\t" + std::to_string(static_cast<int>(X.Ads)) + "\t" + std::to_string(static_cast<int>(X.AdsAtUpload)) + "\t" +
+		std::to_string(static_cast<int>(X.Len)) + "\t" + std::to_string(X.AdsChangedDay) + "\t" + std::to_string(static_cast<int>(X.Launch)) + "\t" +
+		std::to_string(static_cast<int>(X.Duels)) + "\t" + U3Flt(X.DuelCtr[0]) + "\t" + U3Flt(X.DuelCtr[1]) + "\t" + U3Flt(X.DuelCtr[2]) + "\t" +
+		std::to_string(static_cast<int>(X.DuelWin)) + "\t" + std::to_string(static_cast<int>(X.Verdict)) + "\t" + U3Flt(X.SettledS) + "\t" + Num(X.Earned) + "\t" +
+		Esc(X.NextUp);
+	for (const ThumbSpec& S : X.Spec)
+	{
+		Out += "\t" + Esc(U3PackSpec(S));
+	}
+}
+
+/** The fields of vid's Update 3 block (P[29] .. P[62]). */
+constexpr size_t U3VideoFields = 63;
+
+void U3ReadVideoX(const std::vector<std::string>& P, VideoX& X)
+{
+	X = VideoX();
+	X.On = true;
+	X.Fate = static_cast<uint32_t>(ToInt(P[30]));
+	X.Ctr = ToNum(P[31]);
+	X.CtrNoise = ToNum(P[32]);
+	X.Sigma = ToNum(P[33]);
+	X.KastShare = ToNum(P[34]);
+	X.S0 = ToNum(P[35]);
+	X.S0Base = ToNum(P[36]);
+	X.P0 = ToNum(P[37]);
+	X.Idea = static_cast<int>(ToInt(P[38]));
+	X.Series = static_cast<int>(ToInt(P[39]));
+	X.TitleTpl = Unesc(P[40]);
+	X.Repacks = static_cast<int>(ToInt(P[41]));
+	X.LastRepackDay = static_cast<int>(ToInt(P[42]));
+	X.Promise = static_cast<uint8_t>(ToInt(P[43]));
+	X.Payoff = static_cast<uint8_t>(ToInt(P[44]));
+	X.C = U3Enum<Coin>(P[45]);
+	X.Ads = U3Enum<AdLoad>(P[46]);
+	X.AdsAtUpload = U3Enum<AdLoad>(P[47]);
+	X.Len = U3Enum<LengthOpt>(P[48]);
+	X.AdsChangedDay = static_cast<int>(ToInt(P[49]));
+	X.Launch = static_cast<uint8_t>(ToInt(P[50]));
+	X.Duels = static_cast<int8_t>(ToInt(P[51]));
+	for (size_t K = 0; K < 3; ++K)
+	{
+		X.DuelCtr[K] = static_cast<float>(ToNum(P[52 + K]));
+	}
+	X.DuelWin = static_cast<int8_t>(ToInt(P[55]));
+	X.Verdict = static_cast<int8_t>(ToInt(P[56]));
+	X.SettledS = static_cast<float>(ToNum(P[57]));
+	X.Earned = ToNum(P[58]);
+	X.NextUp = Unesc(P[59]);
+	for (size_t K = 0; K < 3; ++K)
+	{
+		X.Spec[K] = U3UnpackSpec(Unesc(P[60 + K]));
+	}
+}
+
+/** A ring row's numbers (vday, vmonth, vlife: the key is the caller's). */
+std::string U3RowText(const DayRow& R)
+{
+	return "\t" + U3Flt(R.Views) + "\t" + U3Flt(R.WatchH) + "\t" + U3Flt(R.Gained) + "\t" + U3Flt(R.Lost) + "\t" + U3Flt(R.Likes) + "\t" + U3Flt(R.Dislikes) + "\t" +
+		U3Flt(R.Impr) + "\t" + U3Flt(R.Comments) + "\t" + std::to_string(R.Cents);
+}
+
+/** Reads U3RowText's nine fields from P[At]. */
+void U3ReadRow(const std::vector<std::string>& P, size_t At, DayRow& R)
+{
+	float* const Fields[] = {&R.Views, &R.WatchH, &R.Gained, &R.Lost, &R.Likes, &R.Dislikes, &R.Impr, &R.Comments};
+	for (size_t K = 0; K < 8; ++K)
+	{
+		*Fields[K] = static_cast<float>(ToNum(P[At + K]));
+	}
+	R.Cents = ToInt(P[At + 8]);
+}
+
 void WriteCandidate(const Candidate& C, std::string& Out)
 {
 	const int Flags = (C.Bubble ? 1 : 0) | (C.Final ? 2 : 0) | (C.Series ? 4 : 0);
@@ -930,7 +1104,13 @@ void WriteCandidate(const Candidate& C, std::string& Out)
 		Num(C.EquityAtAllIn) + "\t" + Esc(C.Opponent) + "\t" + std::to_string(C.OpponentNpc) + "\t" + (C.Rival ? "1" : "0") + "\t" + Esc(C.Event) + "\t" +
 		std::to_string(C.BuyIn) + "\t" + std::to_string(C.Field) + "\t" + std::to_string(C.PlaceSoFar) + "\t" + std::to_string(Flags) + "\t" +
 		std::to_string(C.Stream.Viewers) + "\t" + Num(C.Stream.HypeAfter) + "\t" + std::to_string(C.Stream.Face) + "\t" + Num(C.Stream.ClipAt) + "\t" +
-		JoinList(C.Stream.Chat) + "\t" + Esc(recall::Write(C.Rec)) + "\n";
+		JoinList(C.Stream.Chat) + "\t" + Esc(recall::Write(C.Rec));
+	// Update 3 (§7.4): an idea candidate (Source 5) carries its idea and its facts after the recall record.
+	if (C.Idea >= 0)
+	{
+		Out += "\t" + std::to_string(C.Idea) + "\t" + Esc(C.IdeaFacts);
+	}
+	Out += "\n";
 }
 
 bool ReadCandidate(const std::vector<std::string>& P, Candidate& C)
@@ -966,6 +1146,11 @@ bool ReadCandidate(const std::vector<std::string>& P, Candidate& C)
 	C.Stream.Face = static_cast<int>(ToInt(P[23]));
 	C.Stream.ClipAt = ToNum(P[24]);
 	C.Stream.Chat = SplitList(P[25]);
+	if (P.size() >= 29)
+	{
+		C.Idea = static_cast<int>(ToInt(P[27]));
+		C.IdeaFacts = Unesc(P[28]);
+	}
 	return recall::Read(Unesc(P[26]), C.Rec);
 }
 
@@ -976,7 +1161,13 @@ void WriteVideo(const Video& V, std::string& Out)
 		"\t" + Num(V.Tau1) + "\t" + Num(V.Tau2) + "\t" + Num(V.E) + "\t" + Num(V.Conv) + "\t" + Num(V.Retention) + "\t" + Num(V.LengthMin) + "\t" + Num(V.Rpm) + "\t" +
 		Esc(V.Sponsor) + "\t" + (V.Auto ? "1" : "0") + "\t" + std::to_string(V.Site) + "\t" + std::to_string(static_cast<int>(V.Th.Fr)) + "\t" + std::to_string(V.Th.Mood) +
 		"\t" + Esc(V.Th.Cards) + "\t" + Esc(V.Th.BigText) + "\t" + std::to_string(V.Th.Accent) + "\t" + Esc(V.Th.Opponent) + "\t" + std::to_string(V.Th.Site) + "\t" +
-		Esc(V.Title) + "\n";
+		Esc(V.Title);
+	// Update 3 (§7.4, S4): an Update 3 video's block after the title (an older build reads the line to the title and drops it).
+	if (V.X.On)
+	{
+		U3WriteVideoX(V.X, Out);
+	}
+	Out += "\n";
 }
 
 bool ReadVideo(const std::vector<std::string>& P, Video& V)
@@ -988,10 +1179,11 @@ bool ReadVideo(const std::vector<std::string>& P, Video& V)
 	V.Id = Unesc(P[2]);
 	V.At = ToNum(P[3]);
 	V.K = static_cast<Kind>(std::clamp(static_cast<int>(ToInt(P[4])), 0, static_cast<int>(Kind::Count) - 1));
-	V.F = static_cast<Format>(std::clamp(static_cast<int>(ToInt(P[5])), 0, 3));
-	V.T = static_cast<TitleStyle>(std::clamp(static_cast<int>(ToInt(P[6])), 0, 4));
-	V.Fr = static_cast<Frame>(std::clamp(static_cast<int>(ToInt(P[7])), 0, 4));
-	V.C = static_cast<Class>(std::clamp(static_cast<int>(ToInt(P[8])), 0, 2));
+	// (Update 3, §7.3: each saved enum clamped to its Count, so an appended value reads as itself; every old value as before.)
+	V.F = static_cast<Format>(std::clamp(static_cast<int>(ToInt(P[5])), 0, static_cast<int>(Format::Count) - 1));
+	V.T = static_cast<TitleStyle>(std::clamp(static_cast<int>(ToInt(P[6])), 0, static_cast<int>(TitleStyle::Count) - 1));
+	V.Fr = static_cast<Frame>(std::clamp(static_cast<int>(ToInt(P[7])), 0, static_cast<int>(Frame::Count) - 1));
+	V.C = static_cast<Class>(std::clamp(static_cast<int>(ToInt(P[8])), 0, static_cast<int>(Class::Count) - 1));
 	V.P = ToNum(P[9]);
 	V.A = ToNum(P[10]);
 	V.Tau1 = ToNum(P[11]);
@@ -1004,7 +1196,7 @@ bool ReadVideo(const std::vector<std::string>& P, Video& V)
 	V.Sponsor = Unesc(P[18]);
 	V.Auto = P[19] == "1";
 	V.Site = static_cast<int>(ToInt(P[20]));
-	V.Th.Fr = static_cast<Frame>(std::clamp(static_cast<int>(ToInt(P[21])), 0, 4));
+	V.Th.Fr = static_cast<Frame>(std::clamp(static_cast<int>(ToInt(P[21])), 0, static_cast<int>(Frame::Count) - 1));
 	V.Th.Mood = static_cast<int>(ToInt(P[22]));
 	V.Th.Cards = Unesc(P[23]);
 	V.Th.BigText = Unesc(P[24]);
@@ -1012,6 +1204,10 @@ bool ReadVideo(const std::vector<std::string>& P, Video& V)
 	V.Th.Opponent = Unesc(P[26]);
 	V.Th.Site = static_cast<int>(ToInt(P[27]));
 	V.Title = Unesc(P[28]);
+	if (P.size() >= U3VideoFields && P[29] == "3")
+	{
+		U3ReadVideoX(P, V.X);
+	}
 	return V.Tau1 > 0.0 && V.Tau2 > 0.0;
 }
 
@@ -1451,13 +1647,16 @@ double EditEnergy(Format F)
 	return video_detail::RowOf(F).Energy;
 }
 
-std::string Upload(Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F)
+namespace video_detail
 {
-	using namespace video_detail;
-	if (!CanUpload(Ch, C.Open).empty())
-	{
-		return std::string();
-	}
+/**
+ * Update 2's upload of a choice set (update 3 §4.4: extracted verbatim from Upload at Phase A): the new video with its id,
+ * its four draws, its reach and click-through (P), retention, conversion, class and money, everything but its title and
+ * thumbnail. Upload makes the video from it, UploadU2 reads its P; nothing here changes the channel, which the caller has
+ * anchored (Anchor) and checked (CanUpload).
+ */
+Video UploadPlanU2(const Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F)
+{
 	const std::vector<Candidate> P = Picked(Ch, C.Open);
 	// The lead: a Recap's event, else the most dramatic moment.
 	const Candidate* Lead = &P.front();
@@ -1468,7 +1667,6 @@ std::string Upload(Channel& C, const Choice& Ch, double World, const std::string
 			Lead = &X;
 		}
 	}
-	Anchor(C, World);
 	Video V;
 	V.At = Quantize(World, 100.0);
 	V.Id = "v" + std::to_string(static_cast<long long>(std::llround(World)));
@@ -1572,6 +1770,38 @@ std::string Upload(Channel& C, const Choice& Ch, double World, const std::string
 	V.Rpm = Quantize(2.5 * Row.Rpm * T.AdFit * Tier, 1e4);
 	V.Auto = std::any_of(P.begin(), P.end(), [](const Candidate& X) { return X.Auto; });
 	V.Site = Lead->Site;
+	return V;
+}
+} // namespace video_detail
+
+double UploadU2(const Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F)
+{
+	// Update 3 (§4.4, V2): P_U2, Update 2's impressions x click-through for these choices, exactly as Upload computes it
+	// (a channel never stepped is anchored first, on a copy, as Upload anchors the real one). 0 for a choice Upload refuses.
+	using namespace video_detail;
+	if (!CanUpload(Ch, C.Open).empty())
+	{
+		return 0.0;
+	}
+	if (C.SteppedTo <= 0.0)
+	{
+		Channel First = C;
+		Anchor(First, World);
+		return UploadPlanU2(First, Ch, World, Seed, F).P;
+	}
+	return UploadPlanU2(C, Ch, World, Seed, F).P;
+}
+
+std::string Upload(Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F)
+{
+	using namespace video_detail;
+	if (!CanUpload(Ch, C.Open).empty())
+	{
+		return std::string();
+	}
+	Anchor(C, World);
+	// Update 2's numbers for these choices (UploadU2's), then the title and the thumbnail.
+	Video V = UploadPlanU2(C, Ch, World, Seed, F);
 	V.Title = Title(Ch, C.Open, 0);
 	V.Th = ThumbFor(Ch, C.Open);
 	// The moments are used up; the video keeps its own copy of what it needs.
@@ -1594,7 +1824,7 @@ double Views(const Video& V, double World)
 	return V.P * (V.A * (1.0 - std::exp(-Days / V.Tau1)) + (1.0 - V.A) * (1.0 - std::exp(-Days / V.Tau2))) + V.E * std::min(Days, video_detail::EvergreenDays);
 }
 
-void Step(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, double From, double To)
+void Step(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, double From, double To, const world::World* /*W*/)
 {
 	video_detail::StepKeep(C, L, Bankroll, K, From, To, video_detail::KeepVideos);
 }
@@ -1830,6 +2060,109 @@ void WriteLines(const life::State& L, std::string& Out)
 	{
 		Out += "video\tgrant\t" + Num(C.GrantedHours) + "\n";
 	}
+	WriteLinesU3(L, Out);
+}
+
+void WriteLinesU3(const life::State& L, std::string& Out)
+{
+	// Update 3 (§7.4): Rerun 2.0's lines, after Update 2's, only once U3Video is set and only what holds something: the
+	// components of each Update 3 video (its block rides on its vid line), then the channel's X when it's on.
+	using namespace video_detail;
+	if ((L.Update3LinesRead & life::U3Video) == 0)
+	{
+		return;
+	}
+	const Channel& C = L.Video;
+	for (const Video& V : C.Videos)
+	{
+		for (size_t K = 0; V.X.On && K < V.X.Comps.size(); ++K)
+		{
+			const Comp& Cp = V.X.Comps[K];
+			Out += "video\tvcomp\t" + Esc(V.Id) + "\t" + Num(Cp.T) + "\t" + Num(Cp.P) + "\t" + Num(Cp.A) + "\t" + std::to_string(static_cast<int>(Cp.Kind)) + "\t" +
+				std::to_string(static_cast<int>(Cp.SrcMix)) + "\t" + U3Flt(Cp.CtrF) + "\n";
+		}
+	}
+	const ChannelX& X = C.X;
+	if (!X.On)
+	{
+		return;
+	}
+	// The lifetime row and the recommender's standing always (they say the channel's X is on), the rest when they hold any.
+	Out += "video\tvlife" + U3RowText(X.Life) + "\t" + std::to_string(X.Since) + "\n";
+	Out += "video\tvmom\t" + Num(X.Momentum) + "\t" + std::to_string(X.SettledN);
+	for (const float S : X.Settled)
+	{
+		Out += "\t" + U3Flt(S);
+	}
+	Out += "\t" + std::to_string(X.LastUploadDay) + "\t" + (X.WelcomeBack ? "1" : "0") + "\t" + std::to_string(X.TrendWeek) + "\n";
+	for (const DayRow& R : X.Days)
+	{
+		Out += "video\tvday\t" + std::to_string(R.Key) + U3RowText(R) + "\n";
+	}
+	for (const DayRow& R : X.Months)
+	{
+		Out += "video\tvmonth\t" + std::to_string(R.Key) + U3RowText(R) + "\n";
+	}
+	for (const TopRow& R : X.Top)
+	{
+		Out += "video\tvtop\t" + Esc(R.Id) + "\t" + Num(R.Views) + "\t" + std::to_string(R.Cents) + "\t" + Num(R.At) + "\t" + Esc(R.Title) + "\n";
+	}
+	for (size_t K = 0; K < X.TailsX.size(); ++K)
+	{
+		const TailX& T = X.TailsX[K];
+		bool Any = false;
+		std::string TailLine = "video\tvtailx\t" + std::to_string(K);
+		for (int W = 0; W < 4; ++W)
+		{
+			Any = Any || T.Total[W] != 0.0;
+			TailLine += "\t" + Num(T.Total[W]);
+		}
+		for (int J = 0; J < 2; ++J)
+		{
+			for (int W = 0; W < 4; ++W)
+			{
+				Any = Any || T.Decay[J][W] != 0.0;
+				TailLine += "\t" + Num(T.Decay[J][W]);
+			}
+		}
+		Out += Any ? TailLine + "\n" : std::string();
+	}
+	for (const FrozenLook& Frozen : X.Looks)
+	{
+		Out += "video\tvlook\t" + std::to_string(Frozen.Ref);
+		for (const int16_t Part : Frozen.Look)
+		{
+			Out += "\t" + std::to_string(static_cast<int>(Part));
+		}
+		Out += "\n";
+	}
+	for (const Playlist& Pl : X.Lists)
+	{
+		Out += "video\tvlist\t" + Esc(Pl.Id) + "\t" + Esc(Pl.Name) + "\t" + JoinList(Pl.Videos) + "\n";
+	}
+	for (const Challenge& Ch : X.Challenges)
+	{
+		Out += "video\tvchal\t" + std::to_string(Ch.Id) + "\t" + std::to_string(Ch.Kind) + "\t" + std::to_string(Ch.Site) + "\t" + std::to_string(Ch.Start) + "\t" +
+			std::to_string(Ch.Goal) + "\t" + Num(Ch.StartedAt) + "\t" + std::to_string(Ch.State) + "\t" + std::to_string(Ch.Episodes) + "\n";
+	}
+	for (const Cool& Cl : X.IdeaCool)
+	{
+		Out += "video\tvidea\t" + std::to_string(Cl.Key) + "\t" + std::to_string(Cl.LastDay) + "\t" + std::to_string(Cl.Count) + "\n";
+	}
+	for (const Cool& Cl : X.TrendCool)
+	{
+		Out += "video\tvtrend\t" + std::to_string(Cl.Key) + "\t" + std::to_string(Cl.Count) + "\t" + std::to_string(Cl.LastDay) + "\n";
+	}
+	for (const Snap& Sn : X.Snaps)
+	{
+		Out += "video\tvsnap\t" + std::to_string(Sn.Month) + "\t" + std::to_string(Sn.Events) + "\t" + std::to_string(Sn.Cashes) + "\t" + std::to_string(Sn.Net) + "\t" +
+			std::to_string(Sn.Rake) + "\t" + std::to_string(Sn.Abi) + "\t" + std::to_string(Sn.RoiMilli) + "\t" + U3Flt(Sn.Hours) + "\n";
+	}
+	for (const StubDay& Sd : X.StubDays)
+	{
+		Out += "video\tvstubd\t" + std::to_string(Sd.Day) + "\t" + Num(Sd.E) + "\t" + Num(Sd.EConv) + "\t" + Num(Sd.ERpm) + "\t" + Num(Sd.EF) + "\t" + Num(Sd.EConvF) + "\t" +
+			Num(Sd.ERpmF) + "\n";
+	}
 }
 
 bool ReadLine(const std::vector<std::string>& P, life::State& L)
@@ -1859,6 +2192,8 @@ bool ReadLine(const std::vector<std::string>& P, life::State& L)
 		Video V;
 		if (ReadVideo(P, V))
 		{
+			// (An Update 3 video's block: the save had a line of Rerun 2.0's family.)
+			L.Update3LinesRead |= V.X.On ? static_cast<uint32_t>(life::U3Video) : 0u;
 			C.Videos.push_back(V);
 			Ok = true;
 		}
@@ -1904,6 +2239,7 @@ bool ReadLine(const std::vector<std::string>& P, life::State& L)
 		Candidate X;
 		if (ReadCandidate(P, X))
 		{
+			L.Update3LinesRead |= X.Idea >= 0 ? static_cast<uint32_t>(life::U3Video) : 0u;
 			C.Open.push_back(X);
 			Ok = true;
 		}
@@ -1922,6 +2258,164 @@ bool ReadLine(const std::vector<std::string>& P, life::State& L)
 	{
 		C.GrantedHours = ToNum(P[2]);
 		Ok = true;
+	}
+	else if (Tag.size() > 1 && Tag[0] == 'v')
+	{
+		// Update 3 (§7.4): Rerun 2.0's sub-tags (WriteLinesU3's). A video's components follow its vid line; the rest are
+		// the channel's X, which any of them turns on.
+		bool U3 = false;
+		ChannelX& X = C.X;
+		if (Tag == "vcomp" && P.size() >= 9)
+		{
+			const std::string Id = Unesc(P[2]);
+			for (Video& V : C.Videos)
+			{
+				if (V.Id == Id && V.X.On)
+				{
+					Comp Cp;
+					Cp.T = ToNum(P[3]);
+					Cp.P = ToNum(P[4]);
+					Cp.A = ToNum(P[5]);
+					Cp.Kind = U3Enum<CompKind>(P[6]);
+					Cp.SrcMix = static_cast<uint8_t>(ToInt(P[7]));
+					Cp.CtrF = static_cast<float>(ToNum(P[8]));
+					V.X.Comps.push_back(Cp);
+				}
+			}
+			L.Update3LinesRead |= life::U3Video;
+			Ok = true;
+		}
+		else if ((Tag == "vday" || Tag == "vmonth") && P.size() >= 12)
+		{
+			DayRow R;
+			R.Key = static_cast<int>(ToInt(P[2]));
+			U3ReadRow(P, 3, R);
+			(Tag == "vday" ? X.Days : X.Months).push_back(R);
+			U3 = true;
+		}
+		else if (Tag == "vlife" && P.size() >= 12)
+		{
+			U3ReadRow(P, 2, X.Life);
+			X.Since = static_cast<int>(ToInt(P[11]));
+			U3 = true;
+		}
+		else if (Tag == "vmom" && P.size() >= 12)
+		{
+			X.Momentum = ToNum(P[2]);
+			X.SettledN = static_cast<int>(ToInt(P[3]));
+			for (size_t K = 0; K < X.Settled.size(); ++K)
+			{
+				X.Settled[K] = static_cast<float>(ToNum(P[4 + K]));
+			}
+			X.LastUploadDay = static_cast<int>(ToInt(P[10]));
+			X.WelcomeBack = P[11] == "1";
+			X.TrendWeek = P.size() >= 13 ? static_cast<int>(ToInt(P[12])) : -1;
+			U3 = true;
+		}
+		else if (Tag == "vtop" && P.size() >= 7)
+		{
+			TopRow R;
+			R.Id = Unesc(P[2]);
+			R.Views = ToNum(P[3]);
+			R.Cents = ToInt(P[4]);
+			R.At = ToNum(P[5]);
+			R.Title = Unesc(P[6]);
+			X.Top.push_back(R);
+			U3 = true;
+		}
+		else if (Tag == "vtailx" && P.size() >= 15)
+		{
+			const int K = static_cast<int>(ToInt(P[2]));
+			if (K >= 0 && K < static_cast<int>(X.TailsX.size()))
+			{
+				TailX& T = X.TailsX[static_cast<size_t>(K)];
+				for (int W = 0; W < 4; ++W)
+				{
+					T.Total[W] = ToNum(P[static_cast<size_t>(3 + W)]);
+					T.Decay[0][W] = ToNum(P[static_cast<size_t>(7 + W)]);
+					T.Decay[1][W] = ToNum(P[static_cast<size_t>(11 + W)]);
+				}
+			}
+			U3 = true;
+		}
+		else if (Tag == "vlook" && P.size() >= 17)
+		{
+			FrozenLook Frozen;
+			Frozen.Ref = static_cast<int>(ToInt(P[2]));
+			for (size_t K = 0; K < Frozen.Look.size(); ++K)
+			{
+				Frozen.Look[K] = static_cast<int16_t>(ToInt(P[3 + K]));
+			}
+			X.Looks.push_back(Frozen);
+			U3 = true;
+		}
+		else if (Tag == "vlist" && P.size() >= 5)
+		{
+			Playlist Pl;
+			Pl.Id = Unesc(P[2]);
+			Pl.Name = Unesc(P[3]);
+			Pl.Videos = SplitList(P[4]);
+			X.Lists.push_back(Pl);
+			U3 = true;
+		}
+		else if (Tag == "vchal" && P.size() >= 10)
+		{
+			Challenge Ch;
+			Ch.Id = static_cast<int>(ToInt(P[2]));
+			Ch.Kind = static_cast<int>(ToInt(P[3]));
+			Ch.Site = static_cast<int>(ToInt(P[4]));
+			Ch.Start = ToInt(P[5]);
+			Ch.Goal = ToInt(P[6]);
+			Ch.StartedAt = ToNum(P[7]);
+			Ch.State = static_cast<int>(ToInt(P[8]));
+			Ch.Episodes = static_cast<int>(ToInt(P[9]));
+			X.Challenges.push_back(Ch);
+			U3 = true;
+		}
+		else if ((Tag == "videa" || Tag == "vtrend") && P.size() >= 5)
+		{
+			// videa: idea, last day, count; vtrend: key, count, week.
+			const bool IsIdea = Tag == "videa";
+			Cool Cl;
+			Cl.Key = static_cast<int>(ToInt(P[2]));
+			Cl.LastDay = static_cast<int>(ToInt(P[IsIdea ? 3 : 4]));
+			Cl.Count = static_cast<int>(ToInt(P[IsIdea ? 4 : 3]));
+			(IsIdea ? X.IdeaCool : X.TrendCool).push_back(Cl);
+			U3 = true;
+		}
+		else if (Tag == "vsnap" && P.size() >= 10)
+		{
+			Snap Sn;
+			Sn.Month = static_cast<int>(ToInt(P[2]));
+			Sn.Events = static_cast<int>(ToInt(P[3]));
+			Sn.Cashes = static_cast<int>(ToInt(P[4]));
+			Sn.Net = ToInt(P[5]);
+			Sn.Rake = ToInt(P[6]);
+			Sn.Abi = ToInt(P[7]);
+			Sn.RoiMilli = static_cast<int>(ToInt(P[8]));
+			Sn.Hours = static_cast<float>(ToNum(P[9]));
+			X.Snaps.push_back(Sn);
+			U3 = true;
+		}
+		else if (Tag == "vstubd" && P.size() >= 9)
+		{
+			StubDay Sd;
+			Sd.Day = static_cast<int>(ToInt(P[2]));
+			Sd.E = ToNum(P[3]);
+			Sd.EConv = ToNum(P[4]);
+			Sd.ERpm = ToNum(P[5]);
+			Sd.EF = ToNum(P[6]);
+			Sd.EConvF = ToNum(P[7]);
+			Sd.ERpmF = ToNum(P[8]);
+			X.StubDays.push_back(Sd);
+			U3 = true;
+		}
+		if (U3)
+		{
+			X.On = true;
+			L.Update3LinesRead |= life::U3Video;
+			Ok = true;
+		}
 	}
 	if (Ok)
 	{

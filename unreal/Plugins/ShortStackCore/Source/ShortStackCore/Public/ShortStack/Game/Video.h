@@ -26,6 +26,10 @@ namespace room
 {
 struct HandNote;
 }
+namespace world
+{
+class World;
+}
 
 /**
  * Rerun (update 2 §4): the fictional video site where the player posts highlights cut from their own hands and streams.
@@ -56,17 +60,35 @@ enum class Kind : int
 	Rival,
 	Story,
 	StreamMoment,
+	// Update 3 (SPEC §6.3, §7.3): the new hand kinds and the idea videos (core-videocontent's Classify rules and copy, G3).
+	Monster,
+	SetOverSet,
+	RunnerRunner,
+	DoubleKo,
+	LadderFold,
+	MinCash,
+	Envelope,
+	HeadsUp,
+	BiggestPot,
+	LastHand,
+	Idea,
 	Count,
 };
-/** Saved: append-only. */
+/**
+ * Update 2's kinds (BadBeat .. StreamMoment): the loops over what Update 2 ships (its copy, its glyphs, its tests) stop here,
+ * so the kinds Update 3 appends change nothing until their copy lands (G3).
+ */
+constexpr int KindCountU2 = static_cast<int>(Kind::StreamMoment) + 1;
+/** Saved: append-only. Short is shown as "Cut" from G3 (the enum is unchanged). */
 enum class Format : int
 {
 	Short,
 	Breakdown,
 	Vlog,
 	Recap,
+	Count,
 };
-/** Saved: append-only. */
+/** Saved: append-only. Hype is shown as "Loud" from G3 (the enum is unchanged). */
 enum class TitleStyle : int
 {
 	Story,
@@ -74,6 +96,7 @@ enum class TitleStyle : int
 	Teaching,
 	Question,
 	Plain,
+	Count,
 };
 /** The thumbnail's frame. Saved: append-only. */
 enum class Frame : int
@@ -83,6 +106,8 @@ enum class Frame : int
 	Number,
 	Versus,
 	Trophy,
+	Recipe, // Update 3: drawn from the video's ThumbSpec (ui-thumbs' compositor)
+	Count,
 };
 /** How a video's tail behaves. Saved: append-only. */
 enum class Class : int
@@ -90,6 +115,184 @@ enum class Class : int
 	News,
 	Strategy,
 	Short,
+	Count,
+};
+
+// ------------------------------------------------------------------ Update 3 (SPEC §7.3; declared by the lead in Phase A)
+// Rerun 2.0's data: the levers (ad load, length, suitability, launch actions), the thumbnail recipe, a video's curve
+// components and its Update 3 block, the channel's rings. Every saved enum is append-only. Written (video\t... sub-tags and
+// vid's appended fields, §7.4) only for Update 3 videos and once Update3LinesRead's U3Video bit is set, so an old save
+// writes back byte for byte; bodies by core-videoalgo and core-videocontent (G3).
+
+/** The ads on a video (§4.5.5). Saved: append-only. */
+enum class AdLoad : uint8_t
+{
+	Light,
+	Standard,
+	Heavy,
+	Count,
+};
+/** The edit's length (§4.5.5). Saved: append-only. */
+enum class LengthOpt : uint8_t
+{
+	Tight,
+	Standard,
+	Extended,
+	Count,
+};
+/** Suitability (§4.5.4): full ads, limited, none (18+). Saved: append-only. */
+enum class Coin : uint8_t
+{
+	Full,
+	Limited,
+	NoAds,
+	Count,
+};
+/** The launch actions (§4.6.9): bits in VideoX::Launch. Saved: append-only. */
+enum class Launch : uint8_t
+{
+	Cut,
+	Kast,
+	Teaser,
+	Reply,
+	Count,
+};
+/** What a curve component is (§4.4). Saved: append-only. */
+enum class CompKind : uint8_t
+{
+	Verdict,
+	Check7,
+	Check14,
+	Check30,
+	Check90,
+	Breakout,
+	Duel,
+	Repackage,
+	Trend,
+	FromCut,
+	Kast,
+	FromNextUp,
+	Count,
+};
+/** A thumbnail recipe (§6.1): the archetype, layout and the rest, drawn by ui-thumbs' compositor; captions only from facts. */
+struct ThumbSpec
+{
+	int16_t Arch = -1, Layout = -1, Mirror = 0, Bg = 0, Pal = 0, Subj = 0, Expr = 0, Pose = 0, PropA = -1, PropB = -1, CapStyle = 0, Sticker = -1, Corner = 0, LookRef = -1;
+	uint32_t Variant = 0;
+	std::string Caption, Caption2;
+};
+/** One curve component (V1): P [A (1 - e^(-(t - T)/tau1)) + (1 - A)(1 - e^(-(t - T)/tau2))] for t > T, the class's taus. */
+struct Comp
+{
+	double T = 0, P = 0, A = 0;
+	CompKind Kind = CompKind::Verdict;
+	uint8_t SrcMix = 0;
+	float CtrF = 1;
+};
+/** An Update 3 video's block (On), after the title in its vid line. Video::P keeps the full P. */
+struct VideoX
+{
+	bool On = false;
+	uint32_t Fate = 0;
+	double Ctr = 0, Sigma = 0, KastShare = 0, S0 = 0, S0Base = 0, P0 = 0;
+	double CtrNoise = 1, Earned = 0; // P0: the first wave's; Earned in double cents
+	int Idea = -1, Series = -1;
+	std::string TitleTpl;
+	int Repacks = 0, LastRepackDay = -1;
+	uint8_t Promise = 0, Payoff = 0;
+	Coin C = Coin::Full;
+	AdLoad Ads = AdLoad::Standard, AdsAtUpload = AdLoad::Standard;
+	LengthOpt Len = LengthOpt::Standard;
+	int AdsChangedDay = -1;
+	uint8_t Launch = 0;
+	std::array<float, 3> DuelCtr{};
+	int8_t Duels = 1, DuelWin = -1, Verdict = -1;
+	float SettledS = 0;
+	std::array<ThumbSpec, 3> Spec{}; // [0] shown; [1], [2] the Duel's contenders
+	std::vector<Comp> Comps;         // <= 9; the first wave is P0
+	std::string NextUp;              // the Next-up card's target
+};
+/** A day's (or a month's) row of the channel's rings. */
+struct DayRow
+{
+	int Key = 0;
+	float Views = 0, WatchH = 0, Gained = 0, Lost = 0, Likes = 0, Dislikes = 0, Impr = 0, Comments = 0;
+	Chips Cents = 0;
+};
+/** The folded tails' engagement: likes, dislikes, comments, impressions, per time constant. */
+struct TailX
+{
+	double Total[4] = {0, 0, 0, 0};
+	double Decay[2][4] = {};
+};
+/** A video kept in the lifetime top 20 after it left the newest 60. */
+struct TopRow
+{
+	std::string Id, Title;
+	double Views = 0;
+	Chips Cents = 0;
+	double At = 0;
+};
+/** A face frozen for a thumbnail (the Look it was drawn with). */
+struct FrozenLook
+{
+	int Ref = 0;
+	std::array<int16_t, 14> Look{};
+};
+struct Playlist
+{
+	std::string Id, Name;
+	std::vector<std::string> Videos;
+};
+/** A challenge series (a bankroll run on a site, say). */
+struct Challenge
+{
+	int Id = 0, Kind = 0, Site = 0;
+	Chips Start = 0, Goal = 0;
+	double StartedAt = 0;
+	int State = 0, Episodes = 0;
+};
+/** A cooldown: an idea or a trend used, and when. */
+struct Cool
+{
+	int Key = 0, LastDay = -1, Count = 0;
+};
+/** A month of the player's poker, for the monthly ideas' facts. */
+struct Snap
+{
+	int Month = 0, Events = 0, Cashes = 0;
+	Chips Net = 0, Rake = 0, Abi = 0;
+	int RoiMilli = 0;
+	float Hours = 0;
+};
+/** An upload day's evergreen stubs, summed (vstubd): F is the same sum x the minute offset / 1440. */
+struct StubDay
+{
+	int Day = 0;
+	double E = 0, EConv = 0, ERpm = 0, EF = 0, EConvF = 0, ERpmF = 0;
+};
+/** The channel's Update 3 state (On): the rings, the lifetime row, Momentum, looks, lists, cooldowns, snapshots, stubs. */
+struct ChannelX
+{
+	bool On = false;
+	std::vector<DayRow> Days;   // <= 90
+	std::vector<DayRow> Months; // <= 24
+	std::vector<TopRow> Top;    // <= 20
+	DayRow Life;
+	std::array<TailX, 3> TailsX{};
+	double Momentum = 1.0;
+	std::array<float, 6> Settled{};
+	int SettledN = 0, LastUploadDay = -1;
+	bool WelcomeBack = false;
+	std::vector<FrozenLook> Looks;   // <= 8
+	std::vector<Playlist> Lists;     // <= 8
+	std::vector<Challenge> Challenges; // <= 4
+	std::vector<Cool> IdeaCool;      // <= 40
+	std::vector<Cool> TrendCool;     // <= 12
+	std::vector<Snap> Snaps;         // <= 24
+	std::vector<StubDay> StubDays;   // <= 366
+	int TrendWeek = -1;
+	int Since = -1;
 };
 /** What the stream had going when a candidate came from it (Kast's moment log). */
 struct StreamBit
@@ -121,6 +324,9 @@ struct Candidate
 	bool Storytime = false;
 	StreamBit Stream;
 	double Drama = 0, Expires = 0;
+	// Update 3 (§7.3; Source 5 = an idea video, §6.3): appended to the cand line for Idea candidates only.
+	int Idea = -1;
+	std::string IdeaFacts; // escaped key=value facts
 };
 /** What the player picked in Studio. */
 struct Choice
@@ -129,6 +335,16 @@ struct Choice
 	Format F = Format::Breakdown;
 	TitleStyle T = TitleStyle::Story;
 	Frame Fr = Frame::Reaction;
+	// Update 3 (§7.3): the template picked, the shuffle, the recipes (1-3: a Duel's contenders), the levers. An empty
+	// TitleTpl and no Thumbs is an Update 2 choice set (Update 2's own title picker and frame).
+	std::string TitleTpl;
+	int Shuffle = 0;
+	std::vector<ThumbSpec> Thumbs; // 1-3
+	AdLoad Ads = AdLoad::Standard;
+	LengthOpt Len = LengthOpt::Standard;
+	bool CleanEdit = false;
+	std::string NextUp;
+	int Series = -1;
 };
 struct Thumb
 {
@@ -155,6 +371,7 @@ struct Video
 	std::string Sponsor;
 	bool Auto = false;
 	int Site = 0;
+	VideoX X; // Update 3 (§7.3): read and written only when X.On
 };
 /** The folded tails of videos past the newest 60, per time constant; weights: views, subscribers, ad RPM (rebased each step). */
 struct Tail
@@ -185,6 +402,7 @@ struct Channel
 	int Uploads14 = 0, Uploads7 = 0;
 	std::vector<std::pair<double, std::string>> Bell; // the in-app bell, the last 20: when (world minutes), the line (video\tbell)
 	double GrantedHours = 0; // dev only
+	ChannelX X; // Update 3 (§7.3): read and written only when X.On
 };
 /** What the Channel page draws. */
 struct ChannelView
@@ -214,6 +432,9 @@ struct UploadFacts
 	int StreamViewers = 0;
 	int KastFollowers = 0;
 	double Energy = 0;
+	// Update 3 (§7.3): the review waits for two rents paid (W11); burnout counts Update 3's extra editing only (§4.6.6).
+	int RentsPaid = 0;
+	double ExtraHours7 = 0;
 };
 SHORTSTACKCORE_API Kind Classify(const recall::Record& Rec, double EquityAtAllIn, bool Bubble, bool Showdown, double AvgStackBb, bool& Is);
 SHORTSTACKCORE_API void NoteHand(Channel& C, const Candidate& Cand);
@@ -223,8 +444,11 @@ SHORTSTACKCORE_API std::string Title(const Choice& Ch, const std::vector<Candida
 /** Publishes (the edit's time is the session's TimeSkip): the new video's id, or "" with nothing changed. */
 SHORTSTACKCORE_API std::string Upload(Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F);
 SHORTSTACKCORE_API double Views(const Video& V, double World);
-/** Views, subscribers, the gate, the review and the monthly payout from From to To (idempotent over any span). */
-SHORTSTACKCORE_API void Step(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, double From, double To);
+/**
+ * Views, subscribers, the gate, the review and the monthly payout from From to To (idempotent over any span). W: the
+ * session's world (Update 3's trends read its log, §4.6.10); null reads the calendar's trends only.
+ */
+SHORTSTACKCORE_API void Step(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, double From, double To, const world::World* W = nullptr);
 SHORTSTACKCORE_API ChannelView View(const Channel& C, double World);
 SHORTSTACKCORE_API std::vector<life::Mark> Marks(const Channel& C, double From, double To);
 /** Dev (ss.Video.Grant): subscribers, watch hours and a synthetic video that gains Views over the next 30 days. */
@@ -241,7 +465,8 @@ SHORTSTACKCORE_API void AfterParse(SaveData& D);
 //   - A candidate's Rec names the player "You" (the live recall's own convention, BackRoomTable.cpp), so the online
 //     records match the live ones. Storytime records (Dee's) name nobody else: "Seat 1", "Seat 2" by first appearance.
 //   - Candidate::Source: 0 online, 1 the Embercrest, 2 Dee's (storytime), 3 an online hand the plan played while
-//     skipping, 4 a life story (NoteStory). Rival: gh0stfold, or a name the room knows (Rep Overall >= 35).
+//     skipping, 4 a life story (NoteStory), 5 an idea video (Update 3, §6.3). Rival: gh0stfold, or a name the room knows
+//     (Rep Overall >= 35).
 //   - DeepRun, FinalTable and Win candidates are the event, not a hand: Rec.Pot is the prize in cents, Rec.HeroNet the
 //     prize less the buy-in, Rec.Mine and Rec.Lines empty.
 //   - Thumb::Mood: a kast::Mood (0..5) for the facecam; 10 + mood for the portrait (live, where nobody films: §4.4).
@@ -296,5 +521,15 @@ SHORTSTACKCORE_API std::vector<std::string> Advice(const Choice& Ch, const std::
 SHORTSTACKCORE_API std::string PublishWhy(int Reason);
 /** The line after a video is taken down (Session::DeleteVideo's success; the Channel page's note). */
 SHORTSTACKCORE_API std::string Deleted();
+
+// ------------------------------------------------------------------ Update 3 (SPEC §7.3; the lead, Phase A)
+
+/**
+ * Update 2's impressions x click-through for a choice set, verbatim (§4.4: P_U2, quantised; Upload's own computation,
+ * extracted at Phase A). video_main's five vectors upload through it, so video_vectors.txt's upload lines stay pinned.
+ */
+SHORTSTACKCORE_API double UploadU2(const Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F);
+/** The Update 3 lines (vid's appended fields aside): called at the end of WriteLines; pure const; nothing while U3Video is unset. */
+SHORTSTACKCORE_API void WriteLinesU3(const life::State& L, std::string& Out);
 } // namespace video
 } // namespace ss

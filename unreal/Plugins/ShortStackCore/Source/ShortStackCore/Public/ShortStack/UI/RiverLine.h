@@ -17,6 +17,17 @@ namespace rlnet_detail
 {
 struct LiveCard;
 }
+// Update 3 (SPEC §1.11, §7.2): the revamped sites' pages live in files with no member function of their own, and reach the
+// client's private state (S, C, UI, Listed, EventId, PageShown) and its gatekeepers (RegisterBlock, EventPanel,
+// ScheduleRows) only through these: structs of static forwarders, each defined in its track's own file.
+namespace rlignite_detail
+{
+struct Access; // RiverLineIgnitePlay.cpp (ui-ignite)
+}
+namespace rlrit_detail
+{
+struct Access; // RiverLineRitLeague.cpp (ui-rit)
+}
 
 /**
  * RiverLine: the fictional poker site running on the laptop. Draws the boot
@@ -46,6 +57,13 @@ public:
 		// Update 2 (G3, ui-laptop's): a rival site's money and offers (RiverLineSites.cpp).
 		Promotions,
 		Cashier,
+		// Update 3 (SPEC §2.4, §3.4; never saved, never named by the game module): the revamped sites' own pages. Ignite's
+		// FUSE booth and Player Card; RunItTwice's Sunday Live, League and Desk.
+		Fuse,
+		Profile,
+		Live,
+		League,
+		Desk,
 	};
 	/** Schedule filters (the chips above the list). */
 	enum class Filter : int
@@ -155,8 +173,26 @@ public:
 	KastPage CurrentKastPage() const { return KastShown; }
 	/** Update 2 (G3): the poker site the lobby shows (RiverLine until the rivals open). */
 	net::SiteId SiteShown = net::SiteId::RiverLine;
+	/**
+	 * Update 3 (SPEC §7.6): ss.Laptop.Open <app> [page] [site] ("riverline lobby ignite", "riverline league runittwice",
+	 * "video analytics"): opens an app, a page and a site without clicking. False when the arguments name nothing.
+	 */
+	SHORTSTACKCORE_API bool DebugOpen(const std::string& Args);
 
 private:
+	friend struct rlignite_detail::Access;
+	friend struct rlrit_detail::Access;
+	// Update 3 (SPEC §1.11, §7.2): the poker client's frame. ClientFrame is today's TopBar and screen switch, verbatim; Draw
+	// calls it with Preview false, StreamPreview with Preview true (no player card, autoplay panel, AutoClosePanel, pointer
+	// holds or toasts). It branches first to a revamped rival's own frame (RiverLineIgnite.cpp, RiverLineRit.cpp); the
+	// table layers run at the end of Table() when the front table is that site's.
+	void ClientFrame(double Now, bool Preview);
+	/** RiverLine's own frame (ClientFrame's body past the branch): Boot, a rival's frame until it draws its own, RiverLine. */
+	void HomeFrame(double Now, bool Preview);
+	void IgniteFrame(double Now, bool Preview);
+	void RitFrame(double Now, bool Preview);
+	void IgniteTableLayer(double Now);
+	void RitTableLayer(double Now);
 	void Logo(float X, float Y, float Scale);
 	void TopBar(double Now);
 	void DrawCursor();
@@ -247,7 +283,8 @@ private:
 	void PlayerName(int Index, float X, float Y, float Size, float MaxW, bool Badges, uint8_t Frame = 0);
 	void PlayerName(const net::Placing& P, float X, float Y, float Size, float MaxW, bool Badges, uint8_t Frame = 0);
 	std::string PlacingName(const net::Placing& P) const;
-	void Panel(const Rect& R, float Radius = 14.0f);
+	/** A lobby panel; Radius < 0 takes the client's site's look (update 3: rlsites_detail::SiteLook::PanelRadius, RiverLine's 14). */
+	void Panel(const Rect& R, float Radius = -1.0f);
 	float Section(const std::string& Title, float X, float Y, const Color& Col);
 	float Wrap(const std::string& Text, float X, float Y, float MaxW, float Size, const Color& Col, float LineHeight);
 	std::vector<std::string> WrapLines(const std::string& Text, float MaxW, float Size);

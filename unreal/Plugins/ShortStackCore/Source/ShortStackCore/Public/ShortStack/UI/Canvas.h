@@ -97,6 +97,11 @@ enum class Font : int
 	Mono,
 	Black,
 	Light,
+	// Update 3 (SPEC §1.11, §7.2; appended): faces no weight maps to, drawn only through TextStyle::Face. Ignite's titles and
+	// numbers (BlackItalic); RunItTwice's display face (BoldCondensed, v1.2: titles, big numbers, the Board's cells, labels in
+	// caps). Unreal registers both in its default font (SlateDrawList.cpp's FontFor).
+	BlackItalic,
+	BoldCondensed,
 };
 
 enum class Align : int
@@ -123,6 +128,7 @@ struct TextStyle
 	Baseline VAlign = Baseline::Alphabetic;
 	bool Mono = false;
 	float MaxWidth = 0.0f; // truncate with an ellipsis beyond this width (0 = no limit)
+	int8_t Face = -1;      // update 3: -1 the face FaceFor(Weight, Mono) gives, as before; else a Font (BlackItalic, BoldCondensed)
 };
 
 /** Text measurement comes from the host (Slate's font cache in Unreal, a metrics table in tests). */
@@ -249,10 +255,40 @@ public:
 	 * Paint just draws.
 	 */
 	SHORTSTACKCORE_API void Cached(uint64_t Key, float X, float Y, const std::function<void(Canvas&)>& Paint);
+	/**
+	 * Update 3 (SPEC §10, §7.2): the cache split into pools, each evicting its least-recently-used fragments past its own
+	 * budget, never another pool's. Shared is the cache above, exactly as it behaves today; Rerun holds the thumbnails (sized
+	 * from spike S-T), Boardwalk Ignite's band.
+	 */
+	enum class CachePool : uint8_t
+	{
+		Shared,
+		Rerun,
+		Boardwalk,
+		Count,
+	};
+	/** Whether Key is cached at this canvas's scale (mixed as Cached mixes it), in any pool: skeleton tiles until it is. */
+	SHORTSTACKCORE_API bool IsCached(uint64_t Key) const;
+	/** Cached through a pool (Shared: exactly the four-argument Cached). */
+	SHORTSTACKCORE_API void Cached(uint64_t Key, float X, float Y, const std::function<void(Canvas&)>& Paint, CachePool Pool);
+	/**
+	 * A pool's budget in vertices (every canvas on this thread; 0 puts the default back: Shared 1.5M, Rerun 750k until spike
+	 * S-T sizes it, Boardwalk 120k). A least-recently-used pool evicts down to a smaller budget at once.
+	 */
+	SHORTSTACKCORE_API static void SetPoolBudget(CachePool Pool, size_t Vertices);
+	/**
+	 * A soft glow around any polygon, GlowRoundRect's falloff (a core inset by Blur * 0.3, the private FillPath's fringe
+	 * Blur * 1.3 wide): Ignite's neon, the Board's lit rows. Glow a concave shape as convex pieces.
+	 */
+	SHORTSTACKCORE_API void GlowPolygon(const std::vector<Vec2>& Points, const Color& C, float Blur);
+	/** A dashed polyline, Dash units on and Gap off (the charts' dashed series, a fuse's trail); Dash or Gap <= 0 is solid. */
+	SHORTSTACKCORE_API void StrokeDashed(const std::vector<Vec2>& Points, const Color& C, float Width, float Dash, float Gap);
 
 	// Text.
 	SHORTSTACKCORE_API float Text(const std::string& S, float X, float Y, const TextStyle& Style);
 	SHORTSTACKCORE_API float Measure(const std::string& S, float Size, int Weight = 500, bool Mono = false) const;
+	/** Update 3: measures in the face drawn (BlackItalic and BoldCondensed included), not the one a weight maps to. */
+	SHORTSTACKCORE_API float Measure(const std::string& S, float Size, Font Face) const;
 	static Font FaceFor(int Weight, bool Mono) { return Mono ? Font::Mono : Weight >= 900 ? Font::Black : Weight >= 600 ? Font::Bold : Weight <= 300 ? Font::Light : Font::Regular; }
 
 	float Width() const { return W; }

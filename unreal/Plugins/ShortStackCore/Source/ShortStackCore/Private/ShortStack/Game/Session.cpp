@@ -23,6 +23,7 @@
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/Game/Video.h"
+#include "ShortStack/Game/VideoAlgo.h"
 #include "ShortStack/Game/Wardrobe.h"
 
 #include <algorithm>
@@ -993,7 +994,8 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 
 const char* SoundName(SoundId Id)
 {
-	static const char* const Names[] = {"chip", "chips", "card", "flip", "check", "fold", "turn", "win", "level", "bust", "click", "alert", "move", "allin", "bubble", "cash", "mail"};
+	static const char* const Names[] = {"chip", "chips", "card", "flip", "check", "fold", "turn", "win", "level", "bust", "click", "alert", "move", "allin", "bubble", "cash", "mail",
+		"igspark", "igpop", "igtick", "igfuse", "igboom", "ritblip", "ritflap", "ritbell", "ritstamp", "ritrank"};
 	return Names[static_cast<int>(Id)];
 }
 
@@ -1131,6 +1133,43 @@ void NoteFrontOnStream(Session& S)
 	{
 		sponsor::NoteSitePlay(S.Life.Sponsors, S.Life, static_cast<int>(net::SiteOf(S.T->Spec.Id)), S.WorldMinutes(), true, false);
 	}
+}
+
+/**
+ * Update 3 (W3, §1.5): why RegisterEvent refuses a table the running deal's clause flags, without the second press. The
+ * same deal the register button names (its team's name: "Team RiverLine", "Team RunItTwice"), so the refusal and the
+ * warning say one thing.
+ */
+std::string ClauseRefusal(const Session& S, net::SiteId Site)
+{
+	const double World = S.WorldMinutes();
+	for (const sponsor::Contract& K : S.Life.Sponsors.Contracts)
+	{
+		if (K.T.Only.empty() || K.T.Only == net::KeyOf(Site) || !sponsor::Active(S.Life.Sponsors, K.Brand, World))
+		{
+			continue;
+		}
+		const sponsor::Brand* Br = sponsor::FindBrand(K.Brand);
+		std::string Team = Br ? Br->Name : K.Brand;
+		if (Br && Br->Site > 0 && Br->Site < static_cast<int>(net::SiteId::Count) && net::Def(static_cast<net::SiteId>(Br->Site)).Id == static_cast<net::SiteId>(Br->Site))
+		{
+			const std::string& Named = net::Def(static_cast<net::SiteId>(Br->Site)).TeamName;
+			Team = Named.empty() ? Team : Named;
+		}
+		return "A table here is a strike under your " + Team + " deal.";
+	}
+	return "A table here is a strike under your sponsor's deal.";
+}
+
+/** Update 3 (§2.6 F7): a FUSE id's tier ("ignite.fuse<tier>@<minute>#<n>", fuse::IdFor); 0 when it has none. */
+int FuseTierOf(const std::string& EventId)
+{
+	static const std::string Prefix = "ignite.fuse";
+	if (EventId.rfind(Prefix, 0) != 0)
+	{
+		return 0;
+	}
+	return std::atoi(EventId.c_str() + Prefix.size());
 }
 
 /** The worlds of the sessions alive now, newest last: the network shows the newest. */
@@ -1434,6 +1473,9 @@ void Session::NewCareer(const hero::Character& Who, world::Start S)
 	ResetSave(S);
 	// Update 2 (§6.2): a new career keeps every one of the update's lines from the start (the SegShift precedent).
 	Life.Update2LinesRead = life::U2AutoPref | life::U2AutoPlayed | life::U2Video | life::U2Sites | life::U2Rewards | life::U2Notes;
+	// Update 3 (§1.8 S2): and every one of Update 3's. Each writer still writes only what holds something, so a new career's
+	// save has no new line until a feature has state.
+	Life.Update3LinesRead = life::U3SitePlay | life::U3Video;
 	Person = Who;
 	Person.Created = true;
 	session_detail::TellBirthYear(LivingWorld, Person);
@@ -1787,11 +1829,35 @@ void Session::Register(int Index)
 	RegisterEvent(L[static_cast<size_t>(Index)]);
 }
 
-void Session::RegisterEvent(const LobbyEvent& Listing)
+std::string Session::RegisterEvent(const LobbyEvent& Listing, StrikeConfirm Confirm, Chips RakeOverride)
 {
-	if (!CanAfford(Listing) || IsPlaying(Listing.Spec.Id) || TableCount() >= MaxTables())
+	// Update 3 (§7.2): the reason is returned ("" registered), so a refusal is observable.
+	if (!CanAfford(Listing))
 	{
-		return;
+		return "Not enough to cover the buy-in.";
+	}
+	if (IsPlaying(Listing.Spec.Id))
+	{
+		return "You're already in this one.";
+	}
+	if (TableCount() >= MaxTables())
+	{
+		return "That's as many tables as you can handle.";
+	}
+	// Update 3 (W3, §1.5): the strike gate, in core, for every site. A table on a site a running deal's "plays only on"
+	// clause flags (a rival under Team RiverLine; Ignite or RiverLine under Team RunItTwice) opens only on the register
+	// button's second press (StrikeConfirm), whichever button asked: nothing changes without it (no table, no debit, no
+	// strike). With it, NoteSitePlay below takes the strike, as the second press always did.
+	const net::SiteId GateSite = net::SiteOf(Listing.Spec.Id);
+	if (sponsor::WouldStrike(Life.Sponsors, static_cast<int>(GateSite), false, false) && !Confirm.Second)
+	{
+		return session_detail::ClauseRefusal(*this, GateSite);
+	}
+	// FUSE's synthetic event (§2.6 F7; dormant: no FUSE id exists before G2) carries FeeCents = BuyIn so its pool is exactly
+	// the guarantee; the rake hooks must see its real fee instead, which only LIGHT IT passes.
+	if (fuse::IsFuse(Listing.Spec.Id) && RakeOverride < 0)
+	{
+		return "FUSE lights at the Fuse Booth.";
 	}
 	// Another table: the one in front steps back and keeps playing; the new one opens in front.
 	const double Clock = ClockMinutes();
@@ -1860,7 +1926,17 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 				Life.Record(WorldMinutes(), "Buy-in: " + Ev.Spec.Name, -Ev.BuyInCents, 0);
 			}
 		}
-		site::OnBuyIn(Life.Sites, Site, Ev.BuyInCents, Ev.Spec.FeeCents, "Buy-in: " + Ev.Spec.Name, WorldMinutes());
+		// Update 3 (§2.6 F7): the fee the rake hooks see is the override when there is one (FUSE's real fee, never its spec's).
+		const Chips RakeFee = RakeOverride >= 0 ? RakeOverride : Ev.Spec.FeeCents;
+		site::OnBuyIn(Life.Sites, Site, Ev.BuyInCents, RakeFee, "Buy-in: " + Ev.Spec.Name, WorldMinutes());
+		// Update 3 (W4, §7.2; core-siteplay's body at G2): a rival entry paid from its wallet moves the site's loops, with the
+		// same fee. Not a ticket (the branch above), a freeroll or a package's roll (it pays RiverLine's only).
+		if (Site != net::SiteId::RiverLine && Fund.From != life::Paid::Package && Ev.BuyInCents > 0)
+		{
+			const net::EventTemplate* EntryTmpl = net::ForEvent(Ev.Spec.Id).FindTemplate(Ev.Spec.Id.substr(0, Ev.Spec.Id.find('@')));
+			const int EntryFormat = static_cast<int>(EntryTmpl ? EntryTmpl->Fmt : net::Format::Freezeout);
+			site::play::OnPaidEntry(Life.SitePlay, Life, Site, RakeFee, Ev.BuyInCents, EntryFormat, Ev.Spec.Id, WorldMinutes());
+		}
 		StakeEntered(Ev.Spec.Id, Ev.BuyInCents, Fund);
 	}
 	// Update 2 (§5.7, §7.4; core-deals' body at G3): a table opened on a site (and streamed, if the stream's live) is a
@@ -1898,14 +1974,20 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	const std::string Seed = Ev.Spec.Id + ":" + SeedBase + ":" + std::to_string(RegisterCount++);
 	LastTick = -1.0;
 	// The player's rival plays every RiverLine event, and a rival site's only with an account there (update 2 §5.9).
+	// A FUSE's two other seats are the keyed members NameField seats (§2.6 F7), never a reserved one.
+	const bool FuseTable = fuse::IsFuse(Ev.Spec.Id);
 	std::vector<ReservedPlayer> Reserved{{RivalName, Archetype::Crusher}};
-	if (!session_detail::RivalPlaysOn(LivingWorld, Ev.Spec.Id))
+	if (FuseTable || !session_detail::RivalPlaysOn(LivingWorld, Ev.Spec.Id))
 	{
 		Reserved.clear();
 	}
 	T = std::make_unique<Tournament>(Ev.Spec, HeroName, Seed, Reserved);
 	CurrentScreen = Screen::Table;
-	LivingWorld.HeroEntered(Ev.Spec.Id, Ev.Spec.Name);
+	// Update 3 (§2.6 F7): FUSE is session-only; the world never planned it, so it doesn't hear the player sat down.
+	if (!FuseTable)
+	{
+		LivingWorld.HeroEntered(Ev.Spec.Id, Ev.Spec.Name);
+	}
 	NameField();
 	if (Ev.Spec.BountyCents > 0)
 	{
@@ -1930,6 +2012,7 @@ void Session::RegisterEvent(const LobbyEvent& Listing)
 	SystemLine("Blinds " + std::to_string(L0.Sb) + "/" + std::to_string(L0.Bb) + ", ante " + std::to_string(L0.Ante) + ". Good luck!");
 	Sound(SoundId::Alert, 1.0);
 	StartNextHand();
+	return std::string();
 }
 
 // ------------------------------------------------------------------ chat helpers
@@ -3076,6 +3159,9 @@ void Session::HeroHandDone(const Hand& H, const HandFacts& F)
 		}
 	}
 	VideoNoteHand(H, F);
+	// Update 3 (§7.2; core-siteplay's body at G2): the site play book's look at the hand (Beef, the Luck Ledger, the Ouch
+	// Bonus), after Rerun's, on both paths. Draws nothing.
+	SitePlayHand(H, F);
 }
 
 void Session::BustBanner(const TPlayer& Hero, const char* NoCashSub)
@@ -3292,6 +3378,16 @@ void Session::ShowResults()
 	{
 		BountyWon += Bounties[HeroId]; // the winner keeps their own head
 	}
+	// Update 3 (§2.6 F7; dormant until G2): FUSE is session-only. Its pool is exactly m x buy-in and its 3-handed table pays
+	// the winner all of it; the session pays the places instead (80/12/8 from x25, the mystery bounties' precedent), and
+	// below keeps it out of History, the world's books and the people's memories.
+	const bool FuseResult = fuse::IsFuse(T->Spec.Id);
+	if (FuseResult)
+	{
+		const int FuseM = T->Spec.BuyInCents > 0 ? static_cast<int>(T->Spec.GuaranteeCents / T->Spec.BuyInCents) : 0;
+		const std::array<Chips, 3> Places = fuse::Payout(session_detail::FuseTierOf(T->Spec.Id), FuseM);
+		BustPrize = BustPlace >= 1 && BustPlace <= 3 ? Places[static_cast<size_t>(BustPlace - 1)] : 0;
+	}
 	// Update 2 (§1.2): the prize lands in its site's pot. RiverLine's is the bankroll, with the bank's line below; a rival's
 	// is its wallet, whose line SiteSettle writes (every event is RiverLine's until G3).
 	stake::Pot Pot = PotFor(net::SiteOf(T->Spec.Id));
@@ -3359,21 +3455,27 @@ void Session::ShowResults()
 	else
 	{
 		HasResults = true;
+		// Update 3 (§1.11): the Results screen's site, for its frame (a FUSE never enters History, so History can't say).
+		LastSiteResult = net::SiteOf(T->Spec.Id);
 	}
 	LobbyMinutes = std::max(LobbyMinutes, T->ClockMinutes());
-	ReportToWorld();
-	HistoryEntry Entry;
-	Entry.Name = T->Spec.Name;
-	Entry.Place = BustPlace;
-	Entry.Entrants = T->Spec.Entrants;
-	Entry.Prize = BustPrize + BountyWon + (SeatWon ? T->Spec.SeatValueCents : 0);
-	Entry.AccuracyPct = Acc;
-	Entry.BuyInCents = T->Spec.BuyInCents;
-	Entry.EventId = T->Spec.Id.find('@') != std::string::npos ? T->Spec.Id : std::string();
-	History.insert(History.begin(), Entry);
-	if (History.size() > 100)
+	// (A FUSE: no world\theroresult, no memories of the raw id, no History line feeding the gates and the career.)
+	if (!FuseResult)
 	{
-		History.resize(100);
+		ReportToWorld();
+		HistoryEntry Entry;
+		Entry.Name = T->Spec.Name;
+		Entry.Place = BustPlace;
+		Entry.Entrants = T->Spec.Entrants;
+		Entry.Prize = BustPrize + BountyWon + (SeatWon ? T->Spec.SeatValueCents : 0);
+		Entry.AccuracyPct = Acc;
+		Entry.BuyInCents = T->Spec.BuyInCents;
+		Entry.EventId = T->Spec.Id.find('@') != std::string::npos ? T->Spec.Id : std::string();
+		History.insert(History.begin(), Entry);
+		if (History.size() > 100)
+		{
+			History.resize(100);
+		}
 	}
 	// Update 2 (§1.3): the event's end, one call per feature, in this order: what the plan played (the played line), the
 	// money by site, Rerun's recap candidates.
@@ -3789,6 +3891,20 @@ void Session::Sound(SoundId Id, double Volume)
 	case SoundId::AllIn: Hooks.Sound(Id, Volume * 0.35); break;
 	default: break;
 	}
+}
+
+void Session::UiSound(SoundId Id, float Vol)
+{
+	// Update 3 (§1.11): the laptop's own cues, from a Clicked or a reveal stage crossed; a cue asked for again inside 50 ms
+	// (a stage crossed twice in one frame's work) plays once.
+	const int Key = static_cast<int>(Id);
+	const auto Last = UiSoundAt.find(Key);
+	if (Last != UiSoundAt.end() && Now - Last->second < 0.05 && Now >= Last->second)
+	{
+		return;
+	}
+	UiSoundAt[Key] = Now;
+	Hooks.Sound(Id, Vol);
 }
 
 void Session::Heartbeat(bool On)
@@ -4744,6 +4860,11 @@ void Session::FinishSkip()
 		// Update 2 (§4.5): an edit ("video:<id>") lands as an upload, the outcome line its own (SessionVideo.cpp).
 		(void)SettleEdit(O.ActivityId);
 	}
+	else if (O.ActivityId.rfind("video-act:", 0) == 0)
+	{
+		// Update 3 (§4.6.9; SessionVideo3.cpp, core-videocontent): a launch action ("video-act:<a>:<id>") lands.
+		(void)SettleVideoAct(O.ActivityId);
+	}
 	HasOutcome = true;
 	Sound(O.Bad ? SoundId::Bust : Change > 0 ? SoundId::Cash : SoundId::Click, 1.0);
 	Save();
@@ -5132,6 +5253,9 @@ void Session::EndStream(const std::string& Raid)
 		return;
 	}
 	Stream.Stop(Channel, StreamInputs(), Raid);
+	// Update 3 (§1.6, §4.6.9; core-videoalgo's body at G3): Rerun hears of the stream that just ended (going live soon after
+	// a publish is a launch action). Kast itself is untouched.
+	video::algo::NoteStream(Life.Video, Stream.StartWorld, WorldMinutes(), Stream.Last.Peak);
 	SponsorStreamDone();
 	PlayStreamNotices();
 	PayOut("Kast payout");
@@ -5494,6 +5618,55 @@ void Session::NameField()
 	FieldMet.clear();
 	FieldGreeted.clear();
 	FieldPots.clear();
+	// Update 3 (§2.6 F7, §1.9; dormant until G2): a FUSE seats two Ignite members online that hour, keyed on its tier and the
+	// tier's ordinal (fuse::SeatsFor), never this field's own Rng, so a reload seats the same two. The world planned no FUSE:
+	// nobody joins one in its books.
+	if (fuse::IsFuse(T->Spec.Id))
+	{
+		const std::string& FuseId = T->Spec.Id;
+		const size_t Hash = FuseId.rfind('#');
+		const int Ordinal = Hash == std::string::npos ? 0 : std::atoi(FuseId.c_str() + Hash + 1);
+		const std::vector<std::string> Keyed = fuse::SeatsFor(&LivingWorld, WorldSeed(), session_detail::FuseTierOf(FuseId), Ordinal, WorldMinutes());
+		std::set<std::string> FuseTaken = {HeroName, RivalName};
+		for (const world::Npc& Somebody : LivingWorld.People())
+		{
+			FuseTaken.insert(Somebody.Name);
+		}
+		std::vector<size_t> Unnamed;
+		size_t Next = 0;
+		for (size_t I = 0; I < T->Players.size(); ++I)
+		{
+			TPlayer& P = T->Players[I];
+			if (P.IsHero)
+			{
+				continue;
+			}
+			const world::Npc* Member = Next < Keyed.size() ? LivingWorld.Get(LivingWorld.Find(Keyed[Next++])) : nullptr;
+			if (!Member)
+			{
+				Unnamed.push_back(I);
+				continue;
+			}
+			P.Name = Member->Name;
+			FieldCountry[P.Id] = Member->Country;
+			FieldRegulars.insert(P.Id);
+			FieldNpc[P.Id] = Member->Id;
+			if (Member->Pro)
+			{
+				FieldPros.insert(P.Id);
+			}
+		}
+		// Fewer members online than seats: a screen name for the rest, drawn from the FUSE's own id.
+		Rng Fr(FuseId + ":fuseseat");
+		const std::vector<handles::Identity> Ids = handles::Field(static_cast<int>(Unnamed.size()), Fr, FuseTaken);
+		for (size_t K = 0; K < Unnamed.size() && K < Ids.size(); ++K)
+		{
+			TPlayer& P = T->Players[Unnamed[K]];
+			P.Name = Ids[K].Name;
+			FieldCountry[P.Id] = Ids[K].Country;
+		}
+		return;
+	}
 	Rng Nr(T->Spec.Id + ":" + SeedBase + ":field");
 	std::vector<int> Who = LivingWorld.Registered(T->Spec.Id);
 	const int Rival = LivingWorld.Find(RivalName);
@@ -6018,6 +6191,8 @@ void Session::CheckCalendar(double From, double To, bool Awake)
 	// before the backers' rent reserve reads the bankroll.
 	VideoStep(From, To);
 	SiteStep(From, To);
+	// Update 3 (§1.1): the rival sites' loops after the sites' own step; it steps only a book that already exists.
+	SitePlayStep(From, To);
 	StakeStep(From, To);
 	BadgeStep(From, To);
 	BondTexts(From, To);

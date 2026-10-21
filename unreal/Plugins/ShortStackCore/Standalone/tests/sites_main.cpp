@@ -21,6 +21,7 @@
 // and no real site's format name in any string a player reads (SitesFormatNames).
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "CopyLint.h"
+#include "Trademarks.h"
 #include "ShortStack/AI/Grading.h"
 #include "ShortStack/AI/Profiles.h"
 #include "ShortStack/Equity.h"
@@ -2347,14 +2348,11 @@ void SitesCopy()
 		}
 	}
 	Expect(Silent, "the sites' copy never mentions AI, bots or autoplay");
-	// The trademark screen over the sites, their reps, series, events, promotions and methods: no real site, wallet or platform,
-	// none of the ten closed sites the world already tells of.
-	const char* Real[] = {"pokerstars", "ggpoker", "partypoker", "888", "wsop", "world series", "wpt", "run it once", "upswing", "bodog", "ignition", "americas cardroom", "natural8",
-		"bovada", "pokerbros", "global poker", "acr poker", "youtube", "twitch", "kick", "tiktok", "rumble", "vimeo", "dailymotion", "skrill", "neteller", "paypal", "venmo",
-		"ecopayz", "muchbetter", "betonline", "coinpoker", "winamax", "unibet", "northpot", "bluffharbor", "aceline", "chipcity", "felt republic", "pocketrocket", "riverbend",
-		"saltwater poker", "cardroom 88", "tiltproof", "monster", "red bull", "rockstar",
-		// (C3) real sites' format names: GGPoker's Flip & Go, Spin & Gold, Rush & Cash and All-in or Fold; PokerStars' Spin & Go and Zoom.
-		"flip & go", "flip and go", "spin & go", "spin and go", "spin & gold", "rush & cash", "all-in or fold", "zoom poker"};
+	// The trademark screen over the sites, their reps, series, events, promotions and methods: no real site, wallet, platform,
+	// format or product (tests/Trademarks.h, both tiers, whole words), none of the ten closed sites the world already tells of
+	// and no drink brand (the screen's own list, matched anywhere as before).
+	const char* Real[] = {"northpot", "bluffharbor", "aceline", "chipcity", "felt republic", "pocketrocket", "riverbend", "saltwater poker", "cardroom 88", "tiltproof",
+		"monster", "red bull", "rockstar"};
 	std::vector<std::string> Names;
 	for (net::SiteId S : SitesRivals)
 	{
@@ -2384,6 +2382,10 @@ void SitesCopy()
 		for (const char* R : Real)
 		{
 			Hit += copylint::Lower(N).find(R) != std::string::npos ? std::string(R) + " in \"" + N + "\" " : std::string();
+		}
+		for (const char* R : {trademarks::Find(N, trademarks::kSourceScan), trademarks::Find(N, trademarks::kCopyScan)})
+		{
+			Hit += R ? std::string(R) + " in \"" + N + "\" " : std::string();
 		}
 	}
 	Expect(Hit.empty(), "the trademark screen passes over the sites, reps, series, events and promotions" + (Hit.empty() ? std::string() : ": " + Hit));
@@ -2446,10 +2448,12 @@ std::vector<std::pair<int, std::string>> SitesLiterals(const std::string& Src)
  * (its format label, the lobby's tag, the lock line), so every player-facing name is "Flip & Run" now: Ignite's Flip & Run and
  * Flip & Run Bounty, RiverLine's label and lock line, Bree's letter and Ignite's launch news. The ids ("flip-go", Format::Flip)
  * stay, as saves and tickets key on them. Every string literal in the core and the game module is screened, and the sites' copy.
+ * Update 3 (§1.10, Phase A): the screen is tests/Trademarks.h's kSourceScan, matched on whole words: every real site, platform,
+ * wallet, format, series, product, tool and creator that is no ordinary word. Two real events' names were on RiverLine
+ * ("Bounty Builder", "Monster Stack"): Bounty Ladder and Mammoth Stack now, their ids kept.
  */
 void SitesFormatNames()
 {
-	const char* Real[] = {"flip & go", "flip and go", "flip&go", "spin & go", "spin and go", "spin&go", "spin & gold", "rush & cash", "all-in or fold", "zoom poker"};
 	std::vector<std::pair<std::string, std::string>> Said;
 	for (const std::string& S : site::Inventory())
 	{
@@ -2508,10 +2512,8 @@ void SitesFormatNames()
 	std::string Hit;
 	for (const std::pair<std::string, std::string>& S : Said)
 	{
-		for (const char* R : Real)
-		{
-			Hit += copylint::Lower(S.second).find(R) != std::string::npos ? std::string(R) + " at " + S.first + " (\"" + S.second + "\") " : std::string();
-		}
+		const char* R = trademarks::Grandfathered(S.second) ? nullptr : trademarks::Find(S.second, trademarks::kSourceScan);
+		Hit += R ? std::string(R) + " at " + S.first + " (\"" + S.second + "\") " : std::string();
 	}
 	std::printf("format names: %zu strings screened, from %d source files\n", Said.size(), Files);
 	Expect(Files >= 200 && Lock == "Flip & Run unlocks later in your career." && Hit.empty(),

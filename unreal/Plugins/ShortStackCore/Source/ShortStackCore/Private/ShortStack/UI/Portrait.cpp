@@ -1723,5 +1723,19 @@ void DrawFigure(Canvas& C, const hero::Look& L, float X, float FeetY, float PxPe
 	C.StrokePolyline(Out, true, Edge, 1.0f);
 	C.StrokeEllipse(X, Top + HeadR + 0.5f * K, HeadR * 0.88f * (L.Build == 3 ? 1.08f : 1.0f), HeadR, Edge, 1.0f);
 }
+
+// Update 3 (SPEC §6.1, §7.2). Phase A, day 1: the expression overload draws the default portrait and every named
+// expression is the neutral face, until ui-thumbs lands the 12 expressions, the poses and the LOD.
+void DrawPortrait(Canvas& C, const hero::Character& Who, float X, float Y, float Scale, double Time, const PortraitLight& Light, const PortraitExpression& /*E*/,
+	PortraitPose /*P*/, bool /*Lod*/)
+{
+	DrawPortrait(C, Who, X, Y, Scale, Time, Light);
+}
+
+const PortraitExpression& ExpressionOf(int /*Expr*/)
+{
+	static const PortraitExpression PortraitNeutral;
+	return PortraitNeutral;
+}
 } // namespace ui
 } // namespace ss

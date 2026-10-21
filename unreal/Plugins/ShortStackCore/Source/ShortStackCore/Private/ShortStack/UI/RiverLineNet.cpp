@@ -305,8 +305,10 @@ void RiverLine::NavTabs(double Now)
 	TableStrip(X, Now);
 }
 
-void RiverLine::Panel(const Rect& R, float Radius)
+void RiverLine::Panel(const Rect& R, float RadiusIn)
 {
+	// Update 3 (§1.11): the client's site's look sets a panel's corners unless the caller does.
+	const float Radius = RadiusIn < 0.0f ? rlsites_detail::SitesClientLook(*this, S).PanelRadius : RadiusIn;
 	C->GlowRoundRect({R.X, R.Y + 6.0f, R.W, R.H}, Radius, Rgba(0, 0, 0, 0.35f), 18.0f);
 	UI.RRect(R, Radius, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x122036), rlsites_detail::SitesTone(0x0d1729)), pal::Line);
 	C->FillRect({R.X + Radius, R.Y + 1.0f, R.W - Radius * 2.0f, 1.0f}, Rgba(255, 255, 255, 0.05f));
@@ -314,8 +316,10 @@ void RiverLine::Panel(const Rect& R, float Radius)
 
 float RiverLine::Section(const std::string& Title, float X, float Y, const Color& Col)
 {
+	// Update 3 (§1.11): the look's caps and extra tracking (RiverLine's: as written, 1.6).
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesClientLook(*this, S);
 	C->FillRoundRect({X, Y - 11.0f, 3.0f, 13.0f}, 1.5f, Col);
-	return NetSpaced(*C, Title, X + 11.0f, Y, 12.0f, 800, pal::Muted, 1.6f) + 11.0f;
+	return NetSpaced(*C, Look.LabelCaps ? NetUpper(Title) : Title, X + 11.0f, Y, 12.0f, 800, pal::Muted, 1.6f + Look.Tracking) + 11.0f;
 }
 
 std::string RiverLine::PlacingName(const net::Placing& P) const
@@ -1145,14 +1149,17 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	}
 	const bool Sel = EventId == Row.E.Id;
 	const Color Edge = NetEdge(Net, T);
+	// Update 3 (§1.11): the row's corners and pills are its site's look's.
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesLook(Site);
+	const float Corner = Look.Radius;
 	if (Sel)
 	{
-		C->GlowRoundRect(R, 10.0f, NetA(Edge, 0.22f), 12.0f);
-		UI.RRect(R, 10.0f, Paint::Linear({R.X, 0.0f}, {R.X + R.W, 0.0f}, Mix(pal::Panel, Edge, 0.2f), pal::Panel), NetA(Edge, 0.85f), 1.5f);
+		C->GlowRoundRect(R, Corner, NetA(Edge, 0.22f), 12.0f);
+		UI.RRect(R, Corner, Paint::Linear({R.X, 0.0f}, {R.X + R.W, 0.0f}, Mix(pal::Panel, Edge, 0.2f), pal::Panel), NetA(Edge, 0.85f), 1.5f);
 	}
 	else
 	{
-		UI.RRect(R, 10.0f, St.Hover ? rlsites_detail::SitesTone(0x15253d) : rlsites_detail::SitesTone(0x101a2b), St.Hover ? rlsites_detail::SitesTone(0x2a3f60) : Rgba(255, 255, 255, 0.03f));
+		UI.RRect(R, Corner, St.Hover ? rlsites_detail::SitesTone(0x15253d) : rlsites_detail::SitesTone(0x101a2b), St.Hover ? rlsites_detail::SitesTone(0x2a3f60) : Rgba(255, 255, 255, 0.03f));
 	}
 	C->FillRoundRect({R.X + 1.0f, R.Y + 10.0f, 4.0f, R.H - 20.0f}, 2.0f, Edge);
 	const float Top = R.Y + 24.0f;
@@ -1194,37 +1201,37 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	if (!T.Series.empty())
 	{
 		const net::SeriesInfo* Sr = Net.FindSeries(T.Series);
-		Bx += NetPill(*C, Sr ? Sr->Short : T.Series, Bx, By, Edge, true, 9.5f) + 5.0f;
+		Bx += NetPill(*C, Look, Sr ? Sr->Short : T.Series, Bx, By, Edge, true, 9.5f) + 5.0f;
 	}
 	if (T.Bracelet || T.Ring)
 	{
-		Bx += NetPill(*C, T.Bracelet ? "BRACELET" : "RING", Bx, By, pal::Gold, true, 9.5f) + 5.0f;
+		Bx += NetPill(*C, Look, T.Bracelet ? "BRACELET" : "RING", Bx, By, pal::Gold, true, 9.5f) + 5.0f;
 	}
 	if (T.Main)
 	{
-		Bx += NetPill(*C, "MAIN EVENT", Bx, By, pal::Gold, false, 9.5f) + 5.0f;
+		Bx += NetPill(*C, Look, "MAIN EVENT", Bx, By, pal::Gold, false, 9.5f) + 5.0f;
 	}
 	if (T.Speed == "Hyper" || T.Speed == "Turbo" || T.Speed == "Deep")
 	{
-		Bx += NetPill(*C, NetUpper(T.Speed), Bx, By, T.Speed == "Hyper" ? pal::Orange : T.Speed == "Turbo" ? Hex(0x4f9bff) : Hex(0x9b6bff), false, 9.5f) + 5.0f;
+		Bx += NetPill(*C, Look, NetUpper(T.Speed), Bx, By, T.Speed == "Hyper" ? pal::Orange : T.Speed == "Turbo" ? Hex(0x4f9bff) : Hex(0x9b6bff), false, 9.5f) + 5.0f;
 	}
 	const char* FmtTag = T.Fmt == net::Format::Bounty ? "PKO" : T.Fmt == net::Format::Mystery ? "MYSTERY" : T.Fmt == net::Format::Satellite ? "SATELLITE" : T.Fmt == net::Format::Flip ? "FLIP & RUN" : T.Fmt == net::Format::ReEntry ? "RE-ENTRY" : nullptr;
 	if (FmtTag)
 	{
 		const Color Fc = T.Fmt == net::Format::Bounty ? pal::Orange : T.Fmt == net::Format::Mystery ? Hex(0xd46bff) : T.Fmt == net::Format::Satellite ? pal::Gold : T.Fmt == net::Format::Flip ? pal::Red : pal::Muted;
-		Bx += NetPill(*C, FmtTag, Bx, By, Fc, false, 9.5f) + 5.0f;
+		Bx += NetPill(*C, Look, FmtTag, Bx, By, Fc, false, 9.5f) + 5.0f;
 	}
 	if (T.TableSize == 6)
 	{
-		Bx += NetPill(*C, "6-MAX", Bx, By, pal::Muted, false, 9.5f) + 5.0f;
+		Bx += NetPill(*C, Look, "6-MAX", Bx, By, pal::Muted, false, 9.5f) + 5.0f;
 	}
 	if (T.Omaha)
 	{
-		Bx += NetPill(*C, "PLO", Bx, By, Hex(0x4f9bff), false, 9.5f) + 5.0f;
+		Bx += NetPill(*C, Look, "PLO", Bx, By, Hex(0x4f9bff), false, 9.5f) + 5.0f;
 	}
 	if (Tickets > 0)
 	{
-		Bx += NetPill(*C, "TICKET", Bx, By, pal::Gold, true, 9.5f) + 5.0f;
+		Bx += NetPill(*C, Look, "TICKET", Bx, By, pal::Gold, true, 9.5f) + 5.0f;
 	}
 	if (!T.Seats.empty())
 	{
@@ -1237,7 +1244,7 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 	const float Pw = UI.Text(NetMoney(L.Pool), Px, Top, Ts(17.0f, 800, pal::Ink, Align::Left, Baseline::Alphabetic, true));
 	if (L.Overlay)
 	{
-		NetPill(*C, "OVERLAY", Px, R.Y + 32.0f, pal::Red, true, 9.0f);
+		NetPill(*C, Look, "OVERLAY", Px, R.Y + 32.0f, pal::Red, true, 9.0f);
 	}
 	else if (T.GtdCents > 0 && L.Pool > T.GtdCents)
 	{
@@ -1295,10 +1302,11 @@ void RiverLine::ScheduleRow(const ListRow& Row, const Rect& R, double Now, int I
 
 void RiverLine::EventPanel(const Rect& R, double Now)
 {
-	// The selected event on its own site's network (update 2 §5.8).
+	// The selected event on its own site's network (update 2 §5.8), in that site's look (update 3, §1.11).
 	const net::Network& Net = net::ForEvent(EventId);
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesLook(net::SiteOf(EventId));
 	net::EventInstance E;
-	Panel(R);
+	Panel(R, Look.PanelRadius);
 	if (!Net.FindInstance(EventId, E))
 	{
 		UI.Text("Select a tournament", R.X + R.W / 2.0f, R.Y + 200.0f, Ts(18.0f, 600, pal::Muted, Align::Center));
@@ -1311,7 +1319,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 	const float A0 = C->GetAlpha();
 	C->SetAlpha(A0 * (0.3f + 0.7f * In));
 	// Header band.
-	C->FillRoundRect({R.X, R.Y, R.W, 168.0f}, 14.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + 168.0f}, Mix(rlsites_detail::SitesTone(0x122036), Edge, 0.3f), rlsites_detail::SitesTone(0x122036)));
+	C->FillRoundRect({R.X, R.Y, R.W, 168.0f}, Look.PanelRadius, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + 168.0f}, Mix(rlsites_detail::SitesTone(0x122036), Edge, 0.3f), rlsites_detail::SitesTone(0x122036)));
 	C->PushClip({R.X, R.Y, R.W, 168.0f});
 	DrawSuit(*C, 3, R.X + R.W - 150.0f, R.Y - 20.0f + (1.0f - In) * 20.0f, 190.0f, NetA(Hex(0xffffff), 0.03f));
 	C->PopClip();
@@ -1331,7 +1339,7 @@ void RiverLine::EventPanel(const Rect& R, double Now)
 	float Ty = NetParagraph(*C, T.Name, R.X + 26.0f, R.Y + 74.0f, R.W - 200.0f, 27.0f, 900, pal::Ink, 32.0f, 2);
 	std::string Sub = std::string(T.Omaha ? "PL Omaha" : "NL Hold'em") + " \xC2\xB7 " + T.Speed + " \xC2\xB7 " + std::to_string(static_cast<int>(T.LevelMinutes)) + "-min levels \xC2\xB7 " + std::to_string(T.TableSize) + "-max";
 	UI.Text(Sub, R.X + 26.0f, Ty + 2.0f, Ts(14.0f, 500, rlsites_detail::SitesTone(0xa9b5c8), Align::Left, Baseline::Alphabetic, false, R.W - 190.0f));
-	NetPill(*C, NetFormat(T), R.X + 26.0f, R.Y + 138.0f, Edge, false, 10.0f);
+	NetPill(*C, Look, NetFormat(T), R.X + 26.0f, R.Y + 138.0f, Edge, false, 10.0f);
 
 	// Countdown and progress ring.
 	const float Cy = R.Y + 186.0f;
@@ -1572,6 +1580,8 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 	// RiverLine's alone, and a deal that plays only on another site warns before it strikes.
 	const net::SiteId Site = net::SiteOf(E.Id);
 	const bool Home = Site == net::SiteId::RiverLine;
+	// Update 3 (§1.11): the event's site's look (RiverLine's literals for every site until ui-tablestyle lands the rivals').
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesLook(Site);
 	const Chips Balance = rlsites_detail::SitesBalance(S, Site);
 	std::string Lock;
 	const bool Joinable = Net.Joinable(E, &Lock, S.Unlocks());
@@ -1588,7 +1598,7 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 		O.Kind = ButtonKind::Secondary;
 		O.Enabled = false;
 		O.Sub = Sub;
-		rlsites_detail::SitesButton(UI, *C, "regx", R, Label, O);
+		rlsites_detail::SitesButton(UI, *C, "regx", R, Label, O, Look);
 	};
 	if (S.IsPlaying(E.Id))
 	{
@@ -1601,7 +1611,7 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 		const TableGlance G = S.Glance(Seat);
 		O.Kind = G.YourTurn ? ButtonKind::Gold : ButtonKind::Primary;
 		O.Sub = G.YourTurn ? std::string("It's your turn") : "You're in \xC2\xB7 " + Grouped(G.Rank) + " of " + Grouped(G.Remaining);
-		if (rlsites_detail::SitesButton(UI, *C, "regopen", R, "Open table", O))
+		if (rlsites_detail::SitesButton(UI, *C, "regopen", R, "Open table", O, Look))
 		{
 			S.ShowTables();
 			S.FocusTable(Seat);
@@ -1612,7 +1622,7 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 	{
 		const net::EventResult& Res = Net.Result(E);
 		const net::Placing* W = Res.FinalTable.empty() ? nullptr : &Res.FinalTable.front();
-		UI.RRect(R, 10.0f, NetA(pal::Gold, 0.07f), NetA(pal::Gold, 0.3f));
+		UI.RRect(R, Look.Radius, NetA(pal::Gold, 0.07f), NetA(pal::Gold, 0.3f));
 		NetTrophy(*C, R.X + 34.0f, R.Y + 16.0f, 40.0f, Hex(0xffe08a), Hex(0xc9962b));
 		UI.Text("Winner", R.X + 68.0f, R.Y + 28.0f, Ts(12.0f, 700, pal::Muted));
 		if (W)
@@ -1651,14 +1661,19 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 	{
 		Disabled("Table limit reached", S.MaxTables() < ss::Session::TableLimit ? "Too tired for more than " + std::to_string(S.MaxTables()) + " tables" : "Four tables is as many as you can follow");
 	}
-	else if (!S.ConfirmRegister)
+	else
 	{
+		// The register button and its confirm step, through the shared two presses (update 3 W3, §1.5: SitesTwoPress). Under
+		// the clause (update 2 §5.7) the button says what it costs and the confirm step always says it's a strike, however it
+		// was reached (the register button, or a featured slide's Register, which arms the step directly). Off the clause the
+		// confirm step says what the entry leaves.
+		const bool Striking = !Strike.empty();
 		O.Kind = ButtonKind::Primary;
 		O.Sub = L.St == net::Status::LateReg ? "Late registration \xC2\xB7 " + NetHms(L.LateRegLeft) + " left" : "Starts at " + net::TimeLabel(E.Start);
-		const float Glow = 0.5f + 0.5f * Nf(std::sin(Now * 2.4));
-		if (Strike.empty())
+		if (!S.ConfirmRegister && !Striking)
 		{
-			C->GlowRoundRect(R, 10.0f, NetA(pal::Accent, 0.18f + 0.14f * Glow), 18.0f);
+			const float Glow = 0.5f + 0.5f * Nf(std::sin(Now * 2.4));
+			C->GlowRoundRect(R, Look.Radius, NetA(pal::Accent, 0.18f + 0.14f * Glow), 18.0f);
 		}
 		if (Tickets > 0)
 		{
@@ -1669,45 +1684,20 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 		{
 			O.Sub = Fund.Who + "'s roll pays";
 		}
-		std::string Label = Tickets > 0 ? std::string("Register with ticket") : "Register \xC2\xB7 " + net::BuyIn(T.BuyInCents);
-		if (!Strike.empty())
+		const std::string Label = Tickets > 0 ? std::string("Register with ticket") : "Register \xC2\xB7 " + net::BuyIn(T.BuyInCents);
+		rlsites_detail::TwoPressOpts Two;
+		Two.First = O;
+		Two.Strike = Strike;
+		Two.Note = Tickets > 0 ? std::string("One ticket will be used")
+			: RollPays         ? "The roll pays: your balance stays " + Money(S.BankrollCents)
+			: Home             ? "Balance after: " + Money(S.BankrollCents - T.BuyInCents)
+							   : rlsites_detail::SitesShortName(Site) + " balance after: " + Money(Balance - T.BuyInCents);
+		Two.Always = true;
+		Two.Armed = &S.ConfirmRegister;
+		if (rlsites_detail::SitesTwoPress(*C, UI, Look, "reg", R, Label, Striking, Two) == rlsites_detail::TwoPress::Confirmed)
 		{
-			// Under the clause (§5.7) the button says what it costs, and takes a second press.
-			O.Kind = ButtonKind::Danger;
-			O.Sub = Label + " anyway";
-			Label = Strike;
-		}
-		if (rlsites_detail::SitesButton(UI, *C, "reg", R, Label, O))
-		{
-			S.ConfirmRegister = true;
-		}
-	}
-	else
-	{
-		// Under the clause the confirm step always says it's a strike, however it was reached (the register button, or a
-		// featured slide's Register, which opens this step directly).
-		const bool Striking = !Strike.empty();
-		UI.Text(Striking ? std::string(rlsites_detail::SitesStrikeConfirm)
-				: Tickets > 0 ? std::string("One ticket will be used")
-				: RollPays    ? "The roll pays: your balance stays " + Money(S.BankrollCents)
-				: Home        ? "Balance after: " + Money(S.BankrollCents - T.BuyInCents)
-							  : rlsites_detail::SitesShortName(Site) + " balance after: " + Money(Balance - T.BuyInCents),
-			R.X, R.Y - 10.0f, Ts(14.0f, 600, Striking ? pal::Red : pal::Muted));
-		ButtonOpts Ok;
-		Ok.Kind = Striking ? ButtonKind::Danger : ButtonKind::Gold;
-		Ok.Size = 20.0f;
-		const float Hw = (R.W - 12.0f) / 2.0f;
-		if (rlsites_detail::SitesButton(UI, *C, "regok", {R.X, R.Y, Hw, R.H}, Striking ? std::string("Take the strike") : std::string("Confirm"), Ok))
-		{
-			S.ConfirmRegister = false;
-			S.RegisterEvent(Net.Listing(E, nullptr, S.Unlocks()));
-		}
-		ButtonOpts No;
-		No.Kind = ButtonKind::Ghost;
-		No.Size = 20.0f;
-		if (rlsites_detail::SitesButton(UI, *C, "regno", {R.X + Hw + 12.0f, R.Y, Hw, R.H}, "Cancel", No))
-		{
-			S.ConfirmRegister = false;
+			// The player confirmed (the strike, under the clause): core's gate takes the token (W3).
+			S.RegisterEvent(Net.Listing(E, nullptr, S.Unlocks()), StrikeConfirm{true});
 		}
 	}
 }
@@ -1789,12 +1779,9 @@ void RiverLine::LobbyPages(double Now)
 		UI.Ptr.X = -1.0f;
 		UI.Ptr.Y = -1.0f;
 	}
-	// A rival has its own PROMOTIONS and CASHIER; Career, the Embercrest and Backing are RiverLine's (update 2 §5.11).
-	const bool Rival = rlsites_detail::SitesClient(*this, S) != net::SiteId::RiverLine;
-	if (Rival ? PageShown == Page::Career || PageShown == Page::Embercrest || PageShown == Page::Backing : PageShown == Page::Promotions || PageShown == Page::Cashier)
-	{
-		PageShown = Page::Lobby;
-	}
+	// A page that isn't the client's site's goes to its Lobby (rlsites_detail::SitesPageHome: a rival has its own PROMOTIONS
+	// and CASHIER; Career, the Embercrest and Backing are RiverLine's, update 2 §5.11).
+	PageShown = rlsites_detail::SitesPageHome(rlsites_detail::SitesClient(*this, S), PageShown);
 	C->Save();
 	C->SetAlpha(A0 * In);
 	C->Translate(0.0f, (1.0f - In) * 16.0f);

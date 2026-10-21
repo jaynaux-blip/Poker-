@@ -18,7 +18,8 @@ bool FSlateTextMeasurer::IsAvailable()
 
 FSlateFontInfo FSlateTextMeasurer::FontFor(ss::ui::Font Face, float SizePx)
 {
-	// Typefaces of Unreal's default font (Roboto, and Droid Sans Mono for "Mono").
+	// Typefaces of Unreal's default font (Roboto, and Droid Sans Mono for "Mono"). Update 3's two faces (Ignite's BlackItalic,
+	// RunItTwice's BoldCondensed) are already in it (LegacySlateFontInfoCache.cpp registers both).
 	const TCHAR* Typeface = TEXT("Regular");
 	switch (Face)
 	{
@@ -26,6 +27,8 @@ FSlateFontInfo FSlateTextMeasurer::FontFor(ss::ui::Font Face, float SizePx)
 	case ss::ui::Font::Mono: Typeface = TEXT("Mono"); break;
 	case ss::ui::Font::Black: Typeface = TEXT("Black"); break;
 	case ss::ui::Font::Light: Typeface = TEXT("Light"); break;
+	case ss::ui::Font::BlackItalic: Typeface = TEXT("BlackItalic"); break;
+	case ss::ui::Font::BoldCondensed: Typeface = TEXT("BoldCondensed"); break;
 	default: break;
 	}
 	FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle(FName(Typeface), 10);

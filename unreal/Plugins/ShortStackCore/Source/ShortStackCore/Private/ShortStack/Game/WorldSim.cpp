@@ -3953,6 +3953,14 @@ void Sim::SiteResult(World& W, Npc& N, const Pending& P, int Place, Chips Prize,
 		}
 		Race.second[N.Id] += Points;
 	}
+	// Update 3 (§3.6 R2): the player's League group on this site keeps its members' scored days. Dormant: no group is
+	// recorded before G2.
+	const auto LeagueGroup = W.Leagues.find(S);
+	if (LeagueGroup != W.Leagues.end() && !LeagueGroup->second.Members.empty())
+	{
+		// core-world (G2): a member's result, scored through site::play::LeagueScore (the floor, the first-3 rule, the
+		// multipliers), into their best 8, their days and their form.
+	}
 }
 
 double Sim::SiteValue(const World& W, net::SiteId S, net::Board B, int Npc, double At)

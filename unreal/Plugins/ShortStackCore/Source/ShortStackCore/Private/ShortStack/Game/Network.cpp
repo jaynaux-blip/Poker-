@@ -682,10 +682,12 @@ void Network::BuildSchedule()
 	Add("plo-550", "Omaha Circuit", 5.50, 1500, Format::Freezeout, "Regular", 8.0, 260, At(2, 30), 0, 90).Omaha = true;
 	Add("plo-22", "Omaha Circuit", 22, 10000, Format::Bounty, "Regular", 10.0, 420, At(19, 0), 0, 150).Omaha = true;
 	Add("bigstack-11", "Big Stack", 11, 10000, Format::Freezeout, "Deep", 12.0, 980, At(20, 0), 0, 180);
-	Add("bounty-builder", "Bounty Builder", 5.50, 3000, Format::Bounty, "Regular", 10.0, 612, At(4, 0), 0, 120);
+	// Update 3 (§1.10): "Bounty Ladder" and "Mammoth Stack" are renamed from two real events' names; their ids stay, as saves,
+	// tickets and seeds key on them (Fnv1a(E.Id)).
+	Add("bounty-builder", "Bounty Ladder", 5.50, 3000, Format::Bounty, "Regular", 10.0, 612, At(4, 0), 0, 120);
 	Add("graveyard", "Graveyard Grind", 3.30, 2000, Format::ReEntry, "Turbo", 6.0, 640, At(3, 0), 0, 90);
 	Add("sunrise", "Sunrise Special", 5.50, 3000, Format::Freezeout, "Turbo", 6.0, 540, At(6, 0), 0, 90);
-	Add("monster-550", "Monster Stack", 5.50, 20000, Format::ReEntry, "Deep", 12.0, 4100, At(23, 30), 0, 240);
+	Add("monster-550", "Mammoth Stack", 5.50, 20000, Format::ReEntry, "Deep", 12.0, 4100, At(23, 30), 0, 240);
 	// Satellites: the steps to the RCOP Main Event.
 	{
 		EventTemplate& T = Add("step1", "Step 1 \xC2\xB7 RCOP Main", 2.20, 0, Format::Satellite, "Turbo", 5.0, 90, At(1, 30), 240, 30);

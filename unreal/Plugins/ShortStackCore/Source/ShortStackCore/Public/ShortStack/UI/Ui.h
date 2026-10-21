@@ -195,6 +195,8 @@ public:
 	void RRectStroke(const Rect& R, float Radius, const Color& Stroke, float LineWidth = 1.0f);
 	float Text(const std::string& S, float X, float Y, const TextStyle& Style) { return C->Text(S, X, Y, Style); }
 	float Measure(const std::string& S, float Size, int Weight = 500, bool Mono = false) const { return C->Measure(S, Size, Weight, Mono); }
+	/** Update 3: in the face drawn (TextStyle::Face's BlackItalic and BoldCondensed included), as Canvas::Measure(S, Size, Face). */
+	float Measure(const std::string& S, float Size, Font Face) const { return C->Measure(S, Size, Face); }
 	bool Button(const std::string& Id, const Rect& R, const std::string& Label, const ButtonOpts& Opts = ButtonOpts());
 	/** Horizontal slider; returns the new value. */
 	double Slider(const std::string& Id, const Rect& R, double Value, double Min, double Max, double Step = 1.0);
@@ -213,6 +215,7 @@ struct CardOpts
 	float Rotate = 0.0f;
 	bool Dim = false;
 	bool Highlight = false;
+	int Back = 0; // update 3 (§1.11): a site look's card back; 0 is today's (RiverLine's wave, a rival's colours)
 };
 
 /** Four-color deck (clubs green, diamonds blue, hearts red, spades black). */
@@ -221,7 +224,7 @@ Color SuitColor(int Suit);
 void DrawSuit(Canvas& C, int Suit, float X, float Y, float Size, const Color& Col);
 /** Card at top-left (X, Y); Card < 0 draws the back. */
 void DrawCard(Canvas& C, int Card, float X, float Y, float W, float H, const CardOpts& Opts = CardOpts());
-/** A small stack of chips representing Amount, centered at (X, Y). */
-void DrawChipStack(Canvas& C, Chips Amount, float X, float Y, float Scale = 1.0f, float Alpha = 1.0f);
+/** A small stack of chips representing Amount, centered at (X, Y). Set: a site look's chip set (update 3; 0 is today's). */
+void DrawChipStack(Canvas& C, Chips Amount, float X, float Y, float Scale = 1.0f, float Alpha = 1.0f, int Set = 0);
 } // namespace ui
 } // namespace ss

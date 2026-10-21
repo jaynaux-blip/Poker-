@@ -513,16 +513,22 @@ std::vector<LiveEvent> LiveCalendar(int Day)
 			double BuyIn;
 			const char* Name;
 			int Field;
+			// Update 3 (§1.10): an event renamed from a real one keeps the id its old name made (Slug(Series) + "-" + this).
+			const char* IdSlug = nullptr;
 		};
 		static const Bracelet Events[] = {{1000, "$1,000 Mega Stack", 5200}, {1500, "$1,500 No-Limit Hold'em", 2300}, {3000, "$3,000 Six-Max", 1150},
 			{1500, "$1,500 Bounty", 2400}, {5000, "$5,000 No-Limit Hold'em", 650}, {2500, "$2,500 Freezeout", 1300}, {10000, "$10,000 Heads-Up Championship", 120},
 			{25000, "$25,000 High Roller", 190}, {1000, "$1,000 Seniors", 4100}, {3000, "$3,000 Turbo", 1000}, {50000, "$50,000 High Roller", 95},
-			{1500, "$1,500 Monster Stack", 6200}, {10000, "$10,000 Short Deck", 110}, {100000, "$100,000 High Roller", 70}};
+			{1500, "$1,500 Mammoth Stack", 6200, "1-500-monster-stack"}, {10000, "$10,000 Short Deck", 110}, {100000, "$100,000 High Roller", 70}};
 		if (K < 22 || (K >= 23 && K % 3 == 0))
 		{
 			const Bracelet& B = Events[static_cast<size_t>(K) % (sizeof(Events) / sizeof(Events[0]))];
 			LiveEvent E = Make(B.Name, "Las Vegas", Series, Region::Americas, B.BuyIn >= 25000.0 ? LiveKind::HighRoller : LiveKind::Championship,
 				B.BuyIn >= 25000.0 ? LiveLevel::HighRoller : LiveLevel::Championship, B.BuyIn, Vary(B.Field, Day, 30, B.Field / 5), Day, At(11, 0), B.Field > 2000 ? 40.0 : 26.0);
+			if (B.IdSlug)
+			{
+				E.Id = Slug(Series) + "-" + B.IdSlug + "@" + std::to_string(static_cast<long long>(std::llround(E.Start)));
+			}
 			E.Bracelet = true;
 			Out.push_back(E);
 		}

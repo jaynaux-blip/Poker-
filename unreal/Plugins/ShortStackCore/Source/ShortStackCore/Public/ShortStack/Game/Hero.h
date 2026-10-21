@@ -174,5 +174,10 @@ SHORTSTACKCORE_API int NameLength(const std::string& Part);
 constexpr int MaxNameLength = 16;
 /** A name part the creator accepts: 1 to 16 letters, spaces, apostrophes or hyphens, starting with a letter. */
 SHORTSTACKCORE_API bool NameValid(const std::string& Part);
+/**
+ * Update 3 (SPEC §6.1, §7.2): a person with a Look hashed from a name (the world's creators and opponents on Rerun's
+ * thumbnails): the same name always gives the same face. Body: ui-thumbs (Game/HeroFaces.cpp).
+ */
+SHORTSTACKCORE_API Character CharacterFor(const std::string& Name);
 } // namespace hero
 } // namespace ss
