@@ -3,6 +3,7 @@
 // Usage: audio_test                      the checks
 //        audio_test <out-dir>            the checks, and every one-shot as a 16-bit WAV in <out-dir>
 //        audio_test --listening <dir>    the listening gate's renders (§4.10) into <dir>, no checks
+//        audio_test --cues <dir>         Update 3's site cues on their own and in their moments (reels), no checks
 #include "ShortStack/Audio/CardRoom.h"
 #include "ShortStack/Audio/Synth.h"
 #include "ShortStack/Audio/Voice.h"
@@ -430,7 +431,7 @@ const char* const Lines[] = {
 void OneShots()
 {
 	std::printf("one-shots\n");
-	// (Update 3, §1.11: through the revamped sites' ten cues, the last id; each its own sound once the audio track lands.)
+	// (Update 3, §1.11: through the revamped sites' ten cues, the last id; SiteCueChecks below holds them to their own.)
 	for (int I = 0; I <= static_cast<int>(ss::SoundId::RitRank); ++I)
 	{
 		const ss::SoundId Id = static_cast<ss::SoundId>(I);
@@ -472,6 +473,459 @@ void OneShots()
 		PeakQuiet = std::max(PeakQuiet, std::fabs(V));
 	}
 	Expect(PeakQuiet < PeakLoud * 0.6f, "Mail follows its volume");
+}
+
+// ------------------------------------------------------------------ Update 3: the revamped sites' ten cues (SPEC §1.11, §10)
+
+/** A cue as the sites ask for it: the id at the volume a caller uses (which picks IgBoom's and RitRank's variants), a
+ *  quieter volume inside the same variant, the longest it may run, whether it's a tick that repeats (a count, a wheel, a
+ *  wave, a feed: short and quiet), and whether it carries noise (so each render is its own). */
+struct SiteCue
+{
+	const char* Name;
+	ss::SoundId Id;
+	float Vol, Quieter;
+	double MaxSeconds;
+	bool Tick, Seeded;
+};
+
+const SiteCue SiteCues[] = {
+	{"igspark", ss::SoundId::IgSpark, 0.35f, 0.25f, 0.1, true, true},
+	{"igpop", ss::SoundId::IgPop, 0.45f, 0.3f, 0.5, false, true},
+	{"igtick", ss::SoundId::IgTick, 0.35f, 0.25f, 0.06, true, true},
+	{"igfuse", ss::SoundId::IgFuse, 0.4f, 0.3f, 2.0, false, true},
+	{"igboom", ss::SoundId::IgBoom, 0.45f, 0.25f, 1.2, false, true},
+	{"igboom-long", ss::SoundId::IgBoom, 0.6f, 0.5f, 2.6, false, true},
+	{"ritblip", ss::SoundId::RitBlip, 0.3f, 0.25f, 0.06, true, true},
+	{"ritflap", ss::SoundId::RitFlap, 0.35f, 0.25f, 0.25, true, true},
+	{"ritbell", ss::SoundId::RitBell, 0.45f, 0.3f, 2.0, false, true},
+	{"ritstamp", ss::SoundId::RitStamp, 0.5f, 0.3f, 0.4, false, true},
+	{"ritrank", ss::SoundId::RitRank, 0.35f, 0.25f, 0.08, true, true},
+	{"ritrank-fall", ss::SoundId::RitRank, 0.45f, 0.45f, 0.8, false, false},
+	{"ritrank-rise", ss::SoundId::RitRank, 0.6f, 0.5f, 0.8, false, false},
+};
+/** Distinct: a cue's nearest other sound is at least this far (dB, Apart below) and this much farther than the cue is from
+ *  itself with other seeds. */
+const double SiteCueApart = 8.0;
+const double SiteCueOverSelf = 2.0;
+
+float PeakOf(const std::vector<float>& S)
+{
+	float P = 0.0f;
+	for (const float V : S)
+	{
+		P = std::max(P, std::fabs(V));
+	}
+	return P;
+}
+
+/** RMS over [T0, T1) seconds (0 outside the render). */
+double RmsOf(const std::vector<float>& S, double T0, double T1)
+{
+	const size_t From = static_cast<size_t>(std::max(0.0, T0) * SampleRate), To = std::min(S.size(), static_cast<size_t>(T1 * SampleRate));
+	double P = 0.0;
+	for (size_t I = From; I < To; ++I)
+	{
+		P += static_cast<double>(S[I]) * S[I];
+	}
+	return To > From ? std::sqrt(P / static_cast<double>(To - From)) : 0.0;
+}
+
+/** The strongest frequency in [T0, T1) seconds (Hann-windowed, zero-padded to 8192 points). */
+double DominantHz(const std::vector<float>& S, double T0, double T1)
+{
+	const size_t N = 8192;
+	const size_t From = static_cast<size_t>(T0 * SampleRate), To = std::min(S.size(), static_cast<size_t>(T1 * SampleRate));
+	if (To <= From + 1)
+	{
+		return 0.0;
+	}
+	std::vector<std::complex<double>> A(N);
+	for (size_t I = From; I < To && I - From < N; ++I)
+	{
+		const double W = 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * static_cast<double>(I - From) / static_cast<double>(To - From - 1));
+		A[I - From] = std::complex<double>(S[I] * W, 0.0);
+	}
+	Fft(A);
+	size_t Best = 1;
+	for (size_t K = 1; K < N / 2; ++K)
+	{
+		Best = std::norm(A[K]) > std::norm(A[Best]) ? K : Best;
+	}
+	return static_cast<double>(Best) * SampleRate / static_cast<double>(N);
+}
+
+/** The share of a render's energy under Hz. */
+double ShareUnder(const std::vector<float>& S, double Hz)
+{
+	const double All = BandEnergy(S, 1.0, SampleRate * 0.5);
+	return All > 0.0 ? BandEnergy(S, 1.0, Hz) / All : 0.0;
+}
+
+/**
+ * A sound's look, as an ear tells two apart: a spectrogram in 24 third-octave bands from 80 Hz (1,024-point frames, 512
+ * apart), in dB under its own reference, floored 45 dB under it and capped at it, running to the last frame with a cell
+ * above the floor. The reference is the 99th percentile of the cells within 60 dB of the loudest, so one loud cell (a
+ * thump's first frame) doesn't push the rest of the sound into the floor. Its loudness doesn't count, only its colour and
+ * its shape in time.
+ */
+using CueLook = std::vector<std::vector<double>>;
+
+CueLook LookOf(const std::vector<float>& S)
+{
+	const size_t N = 1024, Hop = 512;
+	const int Bands = 24;
+	CueLook L;
+	std::vector<std::complex<double>> A(N);
+	double Loudest = -300.0;
+	for (long long At = -static_cast<long long>(N / 2); At < static_cast<long long>(S.size()); At += static_cast<long long>(Hop))
+	{
+		for (size_t I = 0; I < N; ++I)
+		{
+			const double W = 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * static_cast<double>(I) / static_cast<double>(N));
+			const long long J = At + static_cast<long long>(I);
+			A[I] = std::complex<double>(J >= 0 && J < static_cast<long long>(S.size()) ? S[static_cast<size_t>(J)] * W : 0.0, 0.0);
+		}
+		Fft(A);
+		std::vector<double> Row(Bands, 0.0);
+		for (size_t K = 1; K < N / 2; ++K)
+		{
+			const double Hz = static_cast<double>(K) * SampleRate / static_cast<double>(N);
+			const int Band = static_cast<int>(std::floor(std::log2(Hz / 80.0) * 3.0));
+			if (Band >= 0 && Band < Bands)
+			{
+				Row[static_cast<size_t>(Band)] += std::norm(A[K]);
+			}
+		}
+		for (double& E : Row)
+		{
+			E = 10.0 * std::log10(E + 1.0e-30);
+			Loudest = std::max(Loudest, E);
+		}
+		L.push_back(Row);
+	}
+	std::vector<double> Cells;
+	for (const std::vector<double>& Row : L)
+	{
+		for (const double E : Row)
+		{
+			if (E > Loudest - 60.0)
+			{
+				Cells.push_back(E);
+			}
+		}
+	}
+	std::sort(Cells.begin(), Cells.end());
+	const double Reference = Cells.empty() ? Loudest : Cells[static_cast<size_t>(0.99 * static_cast<double>(Cells.size() - 1))];
+	size_t Last = 0;
+	for (size_t F = 0; F < L.size(); ++F)
+	{
+		for (double& E : L[F])
+		{
+			E = std::min(0.0, std::max(-45.0, E - Reference));
+			Last = E > -45.0 ? F : Last;
+		}
+	}
+	L.resize(Last + 1);
+	return L;
+}
+
+/** How far apart two looks are: the mean dB difference over every cell where either is above the floor. */
+double Apart(const CueLook& A, const CueLook& B)
+{
+	double Sum = 0.0;
+	size_t Cells = 0;
+	for (size_t F = 0; F < std::max(A.size(), B.size()); ++F)
+	{
+		for (size_t K = 0; K < 24; ++K)
+		{
+			const double Ea = F < A.size() ? A[F][K] : -45.0, Eb = F < B.size() ? B[F][K] : -45.0;
+			if (Ea > -45.0 || Eb > -45.0)
+			{
+				Sum += std::fabs(Ea - Eb);
+				++Cells;
+			}
+		}
+	}
+	return Cells ? Sum / static_cast<double>(Cells) : 0.0;
+}
+
+/** The ten site cues (§1.11): each its own, bounded, distinct from each other and from the game's sounds, at the
+ *  volumes the sites use (§10: 0.25-0.6), cheap enough to render on the game thread. */
+void SiteCueChecks()
+{
+	std::printf("the sites' cues\n");
+	const int Cases = static_cast<int>(sizeof(SiteCues) / sizeof(SiteCues[0]));
+	std::vector<std::vector<float>> Heard;
+	for (const SiteCue& C : SiteCues)
+	{
+		const std::vector<float> S = Render(C.Id, C.Vol, 11u);
+		const float Peak = PeakOf(S);
+		bool Finite = !S.empty();
+		for (const float V : S)
+		{
+			Finite = Finite && std::isfinite(V);
+		}
+		const double Seconds = static_cast<double>(S.size()) / SampleRate;
+		const bool Ok = Finite && Seconds <= C.MaxSeconds && Peak >= 0.01f && Peak <= (C.Tick ? 0.1f : 0.6f);
+		Expect(Ok, std::string(C.Name) + " is bounded",
+			Fmt("%.3f s (%.2f at most), ", Seconds, C.MaxSeconds) + Fmt("peak %.3f (%.2f at most) at volume %.2f", static_cast<double>(Peak), C.Tick ? 0.1 : 0.6, static_cast<double>(C.Vol)));
+		if (!OutDir.empty())
+		{
+			WriteWav(OutDir + "/" + C.Name + ".wav", S, 1);
+		}
+		const float Quiet = PeakOf(Render(C.Id, C.Quieter, 11u));
+		if (C.Quieter < C.Vol)
+		{
+			const double Want = std::sqrt(static_cast<double>(C.Vol) / static_cast<double>(C.Quieter));
+			Expect(static_cast<double>(Peak) >= static_cast<double>(Quiet) * Want, std::string(C.Name) + " follows its volume",
+				Fmt("peak %.3f at %.2f against %.3f", static_cast<double>(Quiet), static_cast<double>(C.Quieter), static_cast<double>(Peak)));
+		}
+		const bool Same = Render(C.Id, C.Vol, 5u) == Render(C.Id, C.Vol, 5u);
+		const bool Own = !C.Seeded || Render(C.Id, C.Vol, 5u) != Render(C.Id, C.Vol, 6u);
+		Expect(Same && Own, std::string(C.Name) + (C.Seeded ? " is deterministic and seeded" : " is deterministic"));
+		Heard.push_back(S);
+	}
+
+	// §10's range: every id, 0.25 to 0.6, heard and bounded, whatever seed the host renders it with (eight of them).
+	bool Range = true;
+	float Loudest = 0.0f;
+	std::string RangeWhy;
+	for (int I = static_cast<int>(ss::SoundId::IgSpark); I <= static_cast<int>(ss::SoundId::RitRank); ++I)
+	{
+		const ss::SoundId Id = static_cast<ss::SoundId>(I);
+		for (uint32_t Seed = 1u; Seed <= 8u; ++Seed)
+		{
+			const float Low = PeakOf(Render(Id, 0.25f, Seed)), High = PeakOf(Render(Id, 0.6f, Seed));
+			Loudest = std::max(Loudest, High);
+			if (Low < 0.01f || High > 0.6f)
+			{
+				Range = false;
+				RangeWhy += std::string(ss::SoundName(Id)) + Fmt(" seed %.0f: %.3f to %.3f; ", Seed, static_cast<double>(Low), static_cast<double>(High));
+			}
+		}
+	}
+	Expect(Range, "every cue is heard at 0.25 and peaks at 0.6 or under at 0.6 (eight seeds)",
+		RangeWhy.empty() ? Fmt("the loudest %.3f", static_cast<double>(Loudest)) : RangeWhy);
+	{
+		// The booms' noise is the loudest thing a seed moves: the host seeds each render afresh (Seed++), and without the
+		// ceiling 4 of seeds 1-96 took the long tail past 0.6 at 0.6 (21, 38, 65, 70; about 1 render in 20 overall).
+		float BoomTop = 0.0f;
+		for (uint32_t Seed = 1u; Seed <= 96u; ++Seed)
+		{
+			BoomTop = std::max({BoomTop, PeakOf(Render(ss::SoundId::IgBoom, 0.45f, Seed)), PeakOf(Render(ss::SoundId::IgBoom, 0.6f, Seed))});
+		}
+		Expect(BoomTop <= 0.6f, "IgBoom peaks at 0.6 or under whatever the seed (96 seeds, both variants)", Fmt("the loudest %.3f", static_cast<double>(BoomTop)));
+	}
+
+	// The variants by volume, at the volumes callers pass (UiSound's default 0.4 is the everyday one).
+	auto Secs = [](const std::vector<float>& S) { return static_cast<double>(S.size()) / SampleRate; };
+	const double Boom4 = Secs(Render(ss::SoundId::IgBoom, 0.4f, 1u)), Boom45 = Secs(Render(ss::SoundId::IgBoom, 0.45f, 1u));
+	const double Boom5 = Secs(Render(ss::SoundId::IgBoom, 0.5f, 1u)), Boom6 = Secs(Render(ss::SoundId::IgBoom, 0.6f, 1u));
+	Expect(Boom4 <= 1.2 && Boom45 <= 1.2 && Boom5 >= 1.8 && Boom6 >= 1.8, "IgBoom: 0.25-0.45 lands short, 0.5-0.6 carries the long tail (x25 and up)",
+		Fmt("%.2f s at 0.4, %.2f at 0.45, ", Boom4, Boom45) + Fmt("%.2f at 0.5, %.2f at 0.6", Boom5, Boom6));
+	const std::vector<float> Tick = Render(ss::SoundId::RitRank, 0.4f, 1u), Fall = Render(ss::SoundId::RitRank, 0.45f, 1u);
+	const std::vector<float> Rise = Render(ss::SoundId::RitRank, 0.5f, 1u), Rise6 = Render(ss::SoundId::RitRank, 0.6f, 1u);
+	const double FallA = DominantHz(Fall, 0.02, 0.12), FallB = DominantHz(Fall, 0.2, 0.35), RiseA = DominantHz(Rise, 0.02, 0.12), RiseB = DominantHz(Rise, 0.2, 0.35);
+	Expect(Secs(Tick) <= 0.08 && Secs(Render(ss::SoundId::RitRank, 0.25f, 1u)) <= 0.08, "RitRank: 0.25-0.4 is one tick", Fmt("%.3f s at 0.4", Secs(Tick)));
+	Expect(Secs(Fall) > 0.3 && FallB < FallA && FallB / FallA > 0.7 && FallB / FallA < 0.8, "RitRank at 0.45: two notes falling a fourth (a relegation)",
+		Fmt("%.0f Hz then %.0f Hz", FallA, FallB));
+	Expect(Secs(Rise) > 0.3 && RiseB / RiseA > 1.4 && RiseB / RiseA < 1.6 && Rise6 != Rise && Secs(Rise6) > 0.3,
+		"RitRank at 0.5-0.6: two notes rising a fifth (a promotion)", Fmt("%.0f Hz then %.0f Hz", RiseA, RiseB));
+
+	// Each cue's character.
+	const std::vector<float>& Spark = Heard[0];
+	const double SparkA = DominantHz(Spark, 0.003, 0.015), SparkB = DominantHz(Spark, 0.03, 0.045);
+	Expect(SparkB >= SparkA * 1.25, "IgSpark rises", Fmt("%.0f Hz then %.0f Hz", SparkA, SparkB));
+	const std::vector<float>& Fuse = Heard[3];
+	const double FuseRms = RmsOf(Fuse, 0.0, 1.0);
+	Expect(static_cast<double>(PeakOf(Fuse)) >= 6.0 * FuseRms, "IgFuse crackles (peak over RMS 6 or more)", Fmt("%.1f", static_cast<double>(PeakOf(Fuse)) / FuseRms));
+	Expect(std::fabs(Fuse.front()) <= 0.01f * PeakOf(Fuse) && std::fabs(Fuse.back()) <= 0.01f * PeakOf(Fuse), "IgFuse fades in and out (a loop segment)");
+	{
+		// Four segments fired 0.5 s apart, as the sites hold a long fuse: the 20 ms overlaps hold the level (no gap, no dip).
+		std::vector<float> Chain(static_cast<size_t>(2.1 * SampleRate), 0.0f);
+		for (uint32_t K = 0; K < 4; ++K)
+		{
+			const std::vector<float> Seg = Render(ss::SoundId::IgFuse, 0.4f, 21u + K);
+			const size_t At = static_cast<size_t>(0.5 * K * SampleRate);
+			for (size_t I = 0; I < Seg.size() && At + I < Chain.size(); ++I)
+			{
+				Chain[At + I] += Seg[I];
+			}
+		}
+		std::vector<double> Windows;
+		for (double T = 0.03; T + 0.02 < 2.0; T += 0.01)
+		{
+			Windows.push_back(RmsOf(Chain, T, T + 0.02));
+		}
+		std::sort(Windows.begin(), Windows.end());
+		const double Median = Windows[Windows.size() / 2];
+		double Worst = 1.0e9;
+		for (int K = 1; K <= 3; ++K)
+		{
+			Worst = std::min(Worst, RmsOf(Chain, 0.5 * K, 0.5 * K + 0.02));
+		}
+		Expect(Db(Worst * Worst) >= Db(Median * Median) - 3.0 && Secs(Fuse) <= 2.0, "IgFuse loops: fired every 0.5 s, the seams hold the level",
+			Fmt("the weakest seam %.1f dB against the median", Db(Worst * Worst) - Db(Median * Median)));
+	}
+	const std::vector<float>& BoomShort = Heard[4];
+	const std::vector<float>& BoomLong = Heard[5];
+	Expect(ShareUnder(BoomShort, 200.0) >= 0.3 && ShareUnder(BoomLong, 200.0) >= 0.3, "IgBoom booms (a third of its energy or more under 200 Hz)",
+		Fmt("%.2f and %.2f", ShareUnder(BoomShort, 200.0), ShareUnder(BoomLong, 200.0)));
+	Expect(Db(RmsOf(BoomLong, 1.2, 2.0) * RmsOf(BoomLong, 1.2, 2.0)) >= Db(RmsOf(BoomLong, 0.0, 0.3) * RmsOf(BoomLong, 0.0, 0.3)) - 40.0,
+		"IgBoom's long tail is still heard 1.2-2.0 s in (within 40 dB of the boom)");
+	{
+		// Flaps: onsets in the 1 ms envelope above 30% of its peak, 10 ms or more apart.
+		const std::vector<float>& Flap = Heard[7];
+		std::vector<float> Env;
+		for (size_t I = 0; I < Flap.size(); I += 48)
+		{
+			float P = 0.0f;
+			for (size_t J = I; J < std::min(Flap.size(), I + 48); ++J)
+			{
+				P = std::max(P, std::fabs(Flap[J]));
+			}
+			Env.push_back(P);
+		}
+		const float Top = PeakOf(Env);
+		int Onsets = 0;
+		for (size_t I = 0; I < Env.size(); ++I)
+		{
+			bool Crest = Env[I] >= 0.3f * Top;
+			for (size_t J = I >= 5 ? I - 5 : 0; J < std::min(Env.size(), I + 6) && Crest; ++J)
+			{
+				Crest = Env[J] <= Env[I];
+			}
+			if (Crest)
+			{
+				++Onsets;
+				I += 9;
+			}
+		}
+		Expect(Onsets == 6 && Secs(Flap) <= 0.2, "RitFlap is six flaps settling", Fmt("%.0f flaps in %.3f s", Onsets, Secs(Flap)));
+	}
+	const std::vector<float>& Bell = Heard[8];
+	const double BellHz = DominantHz(Bell, 0.05, 0.5);
+	Expect(BellHz > 2250.0 && BellHz < 2450.0 && Db(RmsOf(Bell, 0.9, 1.0) * RmsOf(Bell, 0.9, 1.0)) >= Db(RmsOf(Bell, 0.0, 0.1) * RmsOf(Bell, 0.0, 0.1)) - 35.0,
+		"RitBell is a bell at about 2.35 kHz, ringing past 1 s", Fmt("%.0f Hz", BellHz));
+	Expect(ShareUnder(Heard[9], 300.0) >= 0.4, "RitStamp thunks (two fifths of its energy or more under 300 Hz)", Fmt("%.2f", ShareUnder(Heard[9], 300.0)));
+
+	// Distinct: every cue (and each variant) is farther from everything else than from itself with another seed, and far
+	// from all 17 of the game's other sounds and its effects (how far the game's own sounds sit apart: printed).
+	std::vector<std::pair<std::string, CueLook>> Others;
+	for (int I = 0; I <= static_cast<int>(ss::SoundId::Mail); ++I)
+	{
+		Others.push_back({ss::SoundName(static_cast<ss::SoundId>(I)), LookOf(Render(static_cast<ss::SoundId>(I), 0.6f, 7u + static_cast<uint32_t>(I)))});
+	}
+	const char* const EffectNames[] = {"buzz", "canopen", "heartbeat", "step", "scrape", "breath", "chime", "applause", "cardprint"};
+	for (int I = 0; I <= static_cast<int>(Effect::CardPrint); ++I)
+	{
+		Others.push_back({EffectNames[I], LookOf(Render(static_cast<Effect>(I), 1u + static_cast<uint32_t>(I)))});
+	}
+	double GameNearest = 1.0e9;
+	std::string GamePair;
+	for (int I = 0; I <= static_cast<int>(ss::SoundId::Mail); ++I)
+	{
+		for (int J = I + 1; J <= static_cast<int>(ss::SoundId::Mail); ++J)
+		{
+			const double D = Apart(Others[static_cast<size_t>(I)].second, Others[static_cast<size_t>(J)].second);
+			if (D < GameNearest)
+			{
+				GameNearest = D;
+				GamePair = Others[static_cast<size_t>(I)].first + " and " + Others[static_cast<size_t>(J)].first;
+			}
+		}
+	}
+	std::printf("         the game's own nearest pair: %s, %.1f dB apart\n", GamePair.c_str(), GameNearest);
+	std::vector<CueLook> Looks;
+	for (const std::vector<float>& S : Heard)
+	{
+		Looks.push_back(LookOf(S));
+	}
+	for (int I = 0; I < Cases; ++I)
+	{
+		const SiteCue& C = SiteCues[I];
+		double Self = 0.0;
+		if (C.Seeded)
+		{
+			const CueLook A = LookOf(Render(C.Id, C.Vol, 12u)), B = LookOf(Render(C.Id, C.Vol, 13u));
+			Self = std::max({Apart(Looks[static_cast<size_t>(I)], A), Apart(Looks[static_cast<size_t>(I)], B), Apart(A, B)});
+		}
+		double Nearest = 1.0e9;
+		std::string Who;
+		for (int J = 0; J < Cases; ++J)
+		{
+			const double D = J == I ? 1.0e9 : Apart(Looks[static_cast<size_t>(I)], Looks[static_cast<size_t>(J)]);
+			if (D < Nearest)
+			{
+				Nearest = D;
+				Who = SiteCues[J].Name;
+			}
+		}
+		for (const auto& O : Others)
+		{
+			const double D = Apart(Looks[static_cast<size_t>(I)], O.second);
+			if (D < Nearest)
+			{
+				Nearest = D;
+				Who = O.first;
+			}
+		}
+		Expect(Nearest >= SiteCueApart && Nearest >= Self + SiteCueOverSelf, std::string(C.Name) + " is distinct",
+			Fmt("nearest %.1f dB (", Nearest) + Who + Fmt("), %.1f dB from itself with other seeds", Self));
+	}
+
+	// Cheap enough for the game thread (the host renders a cue when it's asked for, up to 20 a second in a count): the
+	// thread's own time, the best of five, per second of sound no more than the game's own one-shots take (their median,
+	// measured in the same run, so a busy machine slows both), and under a ceiling (ticks 0.5 ms, the rest 6 ms).
+	auto Cost = [](ss::SoundId Id, float Vol, double& Seconds) {
+		double Best = 1.0e9;
+		for (uint32_t K = 0; K < 5; ++K)
+		{
+			const double T0 = ThreadMs();
+			const std::vector<float> S = Render(Id, Vol, 40u + K);
+			Best = std::min(Best, ThreadMs() - T0);
+			Seconds = static_cast<double>(S.size()) / SampleRate;
+		}
+		return Best;
+	};
+	std::vector<double> GameRates;
+	for (int I = 0; I <= static_cast<int>(ss::SoundId::Mail); ++I)
+	{
+		double Seconds = 1.0;
+		const double Ms = Cost(static_cast<ss::SoundId>(I), 0.6f, Seconds);
+		GameRates.push_back(Ms / std::max(Seconds, 0.01));
+	}
+	std::sort(GameRates.begin(), GameRates.end());
+	const double GameRate = GameRates[GameRates.size() / 2];
+	std::printf("         the game's one-shots render in %.2f ms a second of sound (the median)\n", GameRate);
+	for (const SiteCue& C : SiteCues)
+	{
+		double Seconds = 1.0;
+		const double Ms = Cost(C.Id, C.Vol, Seconds);
+		const double Ceiling = C.Tick ? 0.5 : 6.0;
+		Expect(Ms <= Ceiling && Ms / std::max(Seconds, 0.01) <= GameRate, std::string(C.Name) + " renders fast",
+			Fmt("%.3f ms (%.1f at most), %.2f ms a second", Ms, Ceiling, Ms / std::max(Seconds, 0.01)));
+	}
+
+	// A host's bad volume: a non-number or an infinity is silence, a negative one too, a huge one the top of the range;
+	// never past the limiter.
+	bool BadOk = true;
+	const float Bad[] = {std::nanf(""), INFINITY, -INFINITY, -1.0f, 1.0e9f};
+	for (int I = static_cast<int>(ss::SoundId::IgSpark); I <= static_cast<int>(ss::SoundId::RitRank); ++I)
+	{
+		for (const float V : Bad)
+		{
+			const std::vector<float> S = Render(static_cast<ss::SoundId>(I), V, 2u);
+			bool Finite = !S.empty();
+			for (const float X : S)
+			{
+				Finite = Finite && std::isfinite(X);
+			}
+			BadOk = BadOk && Finite && PeakOf(S) <= 0.84f && (V == 1.0e9f ? PeakOf(S) > 0.0f : PeakOf(S) == 0.0f);
+		}
+	}
+	Expect(BadOk, "a bad volume renders finite and bounded: NaN, infinities and negatives are silence, a huge one the top");
 }
 
 void Timbres()
@@ -1830,6 +2284,151 @@ void Listening(const std::string& Dir)
 		std::fclose(F);
 	}
 }
+
+/**
+ * The sites' cues in their moments (SPEC §2.3, §2.4 FUSE's reveal, §3.3-§3.4), for the lead's ears before PIE: each cue on
+ * its own, and a reel per site with the cues timed as the pages fire them (UiSound's 50 ms per id included).
+ */
+struct CueReelTrack
+{
+	std::vector<float> S;
+	double LastAt[64] = {};
+	/** Mixes Id in at At seconds, unless the same id played under 50 ms ago (Session::UiSound's limit). */
+	void Put(ss::SoundId Id, float Vol, double At, uint32_t Seed)
+	{
+		const size_t K = static_cast<size_t>(Id);
+		if (LastAt[K] > 0.0 && At - LastAt[K] < 0.05)
+		{
+			return;
+		}
+		LastAt[K] = At;
+		const std::vector<float> X = Render(Id, Vol, Seed);
+		const size_t From = static_cast<size_t>(At * SampleRate);
+		if (S.size() < From + X.size())
+		{
+			S.resize(From + X.size(), 0.0f);
+		}
+		for (size_t I = 0; I < X.size(); ++I)
+		{
+			S[From + I] += X[I];
+		}
+	}
+};
+
+void CueReel(const std::string& Dir)
+{
+	std::printf("the sites' cues into %s\n", Dir.c_str());
+	uint32_t Seed = 100u;
+	auto Save = [&](const std::string& Name, const std::vector<float>& S) {
+		WriteWav(Dir + "/" + Name, S, 1);
+		std::printf("  %s (%.2f s)\n", Name.c_str(), static_cast<double>(S.size()) / SampleRate);
+	};
+	for (const SiteCue& C : SiteCues)
+	{
+		Save(std::string("cue_") + C.Name + ".wav", Render(C.Id, C.Vol, Seed++));
+	}
+	{
+		CueReelTrack Ig;
+		double T = 0.2;
+		// The rewards ticker: Sparks counting up over 0.9 s (an odometer step every 55 ms), then three Dare checks 0.25 s apart.
+		for (int K = 0; K < 17; ++K)
+		{
+			Ig.Put(ss::SoundId::IgSpark, 0.3f, T + 0.055 * K, Seed++);
+		}
+		T += 1.6;
+		for (int K = 0; K < 3; ++K)
+		{
+			Ig.Put(ss::SoundId::IgSpark, 0.35f, T + 0.25 * K, Seed++);
+		}
+		T += 1.5;
+		// The wheel: 3.2 s of deceleration, theta(t) = theta1 - (theta1 - theta0)(1 - t)^3 over 64 wedges, a tick a wedge.
+		int Wedge = 0;
+		for (double U = 0.0; U <= 3.2; U += 1.0 / 240.0)
+		{
+			const int Now = static_cast<int>((1.0 - std::pow(1.0 - U / 3.2, 3.0)) * 64.0);
+			if (Now > Wedge)
+			{
+				Wedge = Now;
+				Ig.Put(ss::SoundId::IgTick, 0.3f, T + U, Seed++);
+			}
+		}
+		T += 4.0;
+		// A cracker.
+		Ig.Put(ss::SoundId::IgPop, 0.45f, T, Seed++);
+		T += 1.5;
+		// FUSE at x2: the fuse 0.15-0.6 s (one segment), the reel 0.6-1.2 s (an IgTick a symbol), the boom at 1.2 s.
+		Ig.Put(ss::SoundId::IgFuse, 0.4f, T + 0.15, Seed++);
+		for (int K = 0; K < 6; ++K)
+		{
+			Ig.Put(ss::SoundId::IgTick, 0.3f, T + 0.6 + 0.1 * K, Seed++);
+		}
+		Ig.Put(ss::SoundId::IgBoom, 0.45f, T + 1.2, Seed++);
+		T += 3.0;
+		// FUSE at x25: the fuse 0.3-1.9 s (a segment every 0.5 s), the reel 1.9-4.3 s slowing onto the result, the long boom.
+		for (double F = 0.3; F < 1.9; F += 0.5)
+		{
+			Ig.Put(ss::SoundId::IgFuse, 0.4f, T + F, Seed++);
+		}
+		for (double U = 0.0, Gap = 0.07; U < 2.4; U += Gap, Gap *= 1.12)
+		{
+			Ig.Put(ss::SoundId::IgTick, 0.3f, T + 1.9 + U, Seed++);
+		}
+		Ig.Put(ss::SoundId::IgBoom, 0.6f, T + 4.3, Seed++);
+		Save("reel_ignite.wav", Ig.S);
+	}
+	{
+		CueReelTrack Rit;
+		double T = 0.2;
+		// Selecting rows on the Board, a new feed line.
+		for (int K = 0; K < 3; ++K)
+		{
+			Rit.Put(ss::SoundId::RitBlip, 0.25f, T + 0.35 * K, Seed++);
+		}
+		T += 1.4;
+		// Opening the Board: the settle wave, one flap a row over about 0.4 s (UiSound keeps them 50 ms apart).
+		for (int K = 0; K < 10; ++K)
+		{
+			Rit.Put(ss::SoundId::RitFlap, 0.35f, T + 0.045 * K, Seed++);
+		}
+		T += 1.4;
+		// The desk bell.
+		Rit.Put(ss::SoundId::RitBell, 0.45f, T, Seed++);
+		T += 2.0;
+		// The Settlement prints for 0.6 s, then the stamp.
+		Rit.Put(ss::SoundId::RitStamp, 0.5f, T + 0.6, Seed++);
+		T += 1.6;
+		// League Night: the rows re-sort, a tick per place gained (four), then the promotion; later a relegation.
+		for (int K = 0; K < 4; ++K)
+		{
+			Rit.Put(ss::SoundId::RitRank, 0.3f, T + 0.12 * K, Seed++);
+		}
+		Rit.Put(ss::SoundId::RitRank, 0.55f, T + 0.8, Seed++);
+		T += 2.0;
+		Rit.Put(ss::SoundId::RitRank, 0.45f, T, Seed++);
+		T += 1.0;
+		// The Second Board's ghost runout slides in (a flap), and a TAKEN stamp on a Team pro's card.
+		Rit.Put(ss::SoundId::RitFlap, 0.35f, T, Seed++);
+		Rit.Put(ss::SoundId::RitStamp, 0.45f, T + 1.0, Seed++);
+		Save("reel_runittwice.wav", Rit.S);
+	}
+	FILE* F = std::fopen((Dir + "/README.txt").c_str(), "wb");
+	if (F)
+	{
+		std::fprintf(F,
+			"The revamped sites' ten cues (Update 3 SPEC 1.11, 2.3, 3.3), standalone renders. 48 kHz 16-bit mono.\n\n"
+			"cue_<name>.wav         each cue on its own at the volume a page asks for it: igspark 0.35, igpop 0.45, igtick 0.35,\n"
+			"                       igfuse 0.4 (one 0.52 s loop segment), igboom 0.45, igboom-long 0.6 (x25 and up),\n"
+			"                       ritblip 0.3, ritflap 0.35, ritbell 0.45, ritstamp 0.5, ritrank 0.35 (a tick),\n"
+			"                       ritrank-fall 0.45, ritrank-rise 0.6.\n"
+			"reel_ignite.wav        Sparks counting up, three Dare checks, the wheel's 3.2 s spin (a tick a wedge), a cracker,\n"
+			"                       FUSE at x2 (the fuse, the reel, the boom: 1.5 s) and at x25 (the fuse held 1.6 s by\n"
+			"                       segments every 0.5 s, the reel slowing, the long boom).\n"
+			"reel_runittwice.wav    three row selections, the Board's settle wave, the desk bell, the Settlement's stamp,\n"
+			"                       League Night (four place ticks, the promotion), a relegation, the Second Board's flap and\n"
+			"                       a TAKEN stamp.\n");
+		std::fclose(F);
+	}
+}
 } // namespace audio_test
 
 int main(int Argc, char** Argv)
@@ -1839,11 +2438,17 @@ int main(int Argc, char** Argv)
 		audio_test::Listening(Argv[2]);
 		return 0;
 	}
+	if (Argc > 2 && std::string(Argv[1]) == "--cues")
+	{
+		audio_test::CueReel(Argv[2]);
+		return 0;
+	}
 	if (Argc > 1)
 	{
 		audio_test::OutDir = Argv[1];
 	}
 	audio_test::OneShots();
+	audio_test::SiteCueChecks();
 	audio_test::Timbres();
 	audio_test::Speech();
 	audio_test::Vocals();

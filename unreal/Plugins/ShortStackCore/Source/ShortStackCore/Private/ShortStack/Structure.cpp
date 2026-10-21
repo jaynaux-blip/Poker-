@@ -2,6 +2,7 @@
 #include "StrictFloat.h"
 
 #include <cmath>
+#include <cstdint>
 
 namespace ss
 {
@@ -12,12 +13,15 @@ struct IcmState
 	const std::vector<double>* Stacks;
 	const std::vector<double>* Prizes;
 	std::vector<double>* Result;
+	// By player: already in the finishing order being expanded. One flag each, so any number of players: a 32-bit mask
+	// (1u << I) took player 33 for player 1 (shift counts wrap at 32 on x64), e.g. 40 left paying 3 (g1-audit N7).
+	std::vector<uint8_t>* Placed;
 	int N;
 	int Places;
 };
 
 // Expand every finishing order: P(i finishes next) = stack_i / chips left.
-void IcmRecurse(const IcmState& S, uint32_t Mask, int Depth, double Prob, double Remaining)
+void IcmRecurse(const IcmState& S, int Depth, double Prob, double Remaining)
 {
 	if (Depth >= S.Places)
 	{
@@ -25,7 +29,7 @@ void IcmRecurse(const IcmState& S, uint32_t Mask, int Depth, double Prob, double
 	}
 	for (int I = 0; I < S.N; ++I)
 	{
-		if (Mask & (1u << I))
+		if ((*S.Placed)[static_cast<size_t>(I)] != 0)
 		{
 			continue;
 		}
@@ -36,7 +40,9 @@ void IcmRecurse(const IcmState& S, uint32_t Mask, int Depth, double Prob, double
 			continue;
 		}
 		(*S.Result)[static_cast<size_t>(I)] += P * (*S.Prizes)[static_cast<size_t>(Depth)];
-		IcmRecurse(S, Mask | (1u << I), Depth + 1, P, Remaining - Stack);
+		(*S.Placed)[static_cast<size_t>(I)] = 1;
+		IcmRecurse(S, Depth + 1, P, Remaining - Stack);
+		(*S.Placed)[static_cast<size_t>(I)] = 0;
 	}
 }
 } // namespace structure_detail
@@ -206,8 +212,9 @@ std::vector<double> Icm(const std::vector<double>& Stacks, const std::vector<dou
 		}
 		return Result;
 	}
-	const structure_detail::IcmState State{&Stacks, &Prizes, &Result, N, Places};
-	structure_detail::IcmRecurse(State, 0u, 0, 1.0, Total);
+	std::vector<uint8_t> Placed(static_cast<size_t>(N), 0);
+	const structure_detail::IcmState State{&Stacks, &Prizes, &Result, &Placed, N, Places};
+	structure_detail::IcmRecurse(State, 0, 1.0, Total);
 	return Result;
 }
 } // namespace ss

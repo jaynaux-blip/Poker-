@@ -308,9 +308,20 @@ void RiverLine::NavTabs(double Now)
 void RiverLine::Panel(const Rect& R, float RadiusIn)
 {
 	// Update 3 (§1.11): the client's site's look sets a panel's corners unless the caller does.
-	const float Radius = RadiusIn < 0.0f ? rlsites_detail::SitesClientLook(*this, S).PanelRadius : RadiusIn;
+	const rlsites_detail::SiteLook& Look = rlsites_detail::SitesClientLook(*this, S);
+	const float Radius = RadiusIn < 0.0f ? Look.PanelRadius : RadiusIn;
 	C->GlowRoundRect({R.X, R.Y + 6.0f, R.W, R.H}, Radius, Rgba(0, 0, 0, 0.35f), 18.0f);
-	UI.RRect(R, Radius, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x122036), rlsites_detail::SitesTone(0x0d1729)), pal::Line);
+	const Paint Ground = Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, rlsites_detail::SitesTone(0x122036), rlsites_detail::SitesTone(0x0d1729));
+	if (Look.Cut > 0.0f)
+	{
+		// G1 (v1.2, §13.2 #5): square, with the look's 45-degree cut on the top-right corner (RunItTwice's 10).
+		const std::vector<Vec2> Path = rlsites_detail::SitesCutPath(R, Look.Cut);
+		C->FillPolygon(Path, Ground);
+		C->StrokePolyline(Path, true, pal::Line, 1.0f);
+		C->FillRect({R.X + 1.0f, R.Y + 1.0f, std::max(0.0f, R.W - Look.Cut - 2.0f), 1.0f}, Rgba(255, 255, 255, 0.05f));
+		return;
+	}
+	UI.RRect(R, Radius, Ground, pal::Line);
 	C->FillRect({R.X + Radius, R.Y + 1.0f, R.W - Radius * 2.0f, 1.0f}, Rgba(255, 255, 255, 0.05f));
 }
 
@@ -1684,7 +1695,10 @@ void RiverLine::RegisterBlock(const net::EventInstance& E, const net::LiveState&
 		{
 			O.Sub = Fund.Who + "'s roll pays";
 		}
-		const std::string Label = Tickets > 0 ? std::string("Register with ticket") : "Register \xC2\xB7 " + net::BuyIn(T.BuyInCents);
+		// Ignite's pill speaks its own voice ("Let's go · $5.50", SPEC §2.4 B; g1-audit); RiverLine's and RunItTwice's as before.
+		const std::string Label = Tickets > 0 ? std::string("Register with ticket")
+			: Site == net::SiteId::Ignite ? "Let's go \xC2\xB7 " + net::BuyIn(T.BuyInCents)
+										  : "Register \xC2\xB7 " + net::BuyIn(T.BuyInCents);
 		rlsites_detail::TwoPressOpts Two;
 		Two.First = O;
 		Two.Strike = Strike;

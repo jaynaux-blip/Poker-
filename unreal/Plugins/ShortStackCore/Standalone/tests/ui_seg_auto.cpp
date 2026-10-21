@@ -13,6 +13,10 @@
 // - the skip card (table_skip) and K, Backspace and its buttons; the tile and tab lines (auto_tile_status);
 // - the results line and the "—" accuracy (results_auto); Career's AUTO tag and "—" (career_auto_row);
 // - everything fits the laptop's 1600-unit width, and the copy lint over this track's autoplay sentences.
+// Update 3, G1 fix 2 (fix2-auto; g1-audit N1; §2.5, §3.5, §9.6): at Ignite's and RunItTwice's tables the panel, the strip and
+// the skip card (a tile's too) in each site's own language: its faces, none of RiverLine's colours, every line whole in its
+// card and no plan line cut; the panel's one-frame click (a tile picks; the scrim closes it and reaches nothing under it) on
+// all three sites (site_auto_panel_*, site_auto_strip_*, site_table_skip_*, site_tile_skip_*).
 #include "UiSeg.h"
 
 #include "CopyLint.h"
@@ -20,11 +24,17 @@
 #include "ShortStack/Game/Autoplay.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Gear.h"
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Sites.h"
+#include "ShortStack/UI/Ui.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <set>
 
 namespace ui_test
@@ -66,6 +76,13 @@ struct AutoDesk
 		Now += 0.05;
 		Frame(X, Y, false, false, true);
 		Now += 0.05;
+	}
+	/** A click shorter than a frame: pressed and released in one (§9.6's overlay check, house law 3). */
+	DrawList OneFrame(float X, float Y)
+	{
+		const DrawList L = Frame(X, Y, false, true, true);
+		Now += 0.05;
+		return L;
 	}
 	/** The session run for some seconds, a frame drawn every step (the pointer away). */
 	void Run(double Seconds)
@@ -1081,6 +1098,462 @@ void ResultsAndCareer()
 	std::printf("  career_auto_row %5zu vertices %5zu commands\n", L.Vertices.size(), L.Cmds.size());
 }
 
+// ------------------------------------------------------------------ at a rival's table (update 3, G1 fix 2: g1-audit N1)
+
+/** Wed Nov 4, 2026, 7:30 PM (ui_seg_sites' SitesEvening): both rivals open, their evening events registering. */
+constexpr double RivalEvening = 30.0 * 1440.0 + 19.5 * 60.0;
+
+/** A label as Site's look writes it: RunItTwice's in capitals (ASCII), the others' as written. */
+std::string Cased(ss::net::SiteId Site, const std::string& Text)
+{
+	std::string Out = Text;
+	if (Site == ss::net::SiteId::RunItTwice)
+	{
+		for (char& Ch : Out)
+		{
+			Ch = Ch >= 'a' && Ch <= 'z' ? static_cast<char>(Ch - 'a' + 'A') : Ch;
+		}
+	}
+	return Out;
+}
+
+/** The panel's title on screen (tracked capitals at RiverLine; one run in a rival's face). */
+bool PanelUp(const DrawList& L)
+{
+	return SpelledAt(L, "AI AUTOPLAY") >= 0 || DrewRun(L, "AI AUTOPLAY");
+}
+
+/**
+ * The panel's rect at a rival's table: Ignite's under its marquee (RiverLineIgnite.cpp: 72 + 6); RunItTwice's under its tape
+ * and header (RiverLineRit.cpp: 84 + 14, 850 tall), moved clear of its rail (64) by RiverLineAuto.cpp.
+ */
+ss::ui::Rect RivalPanel(ss::net::SiteId Site)
+{
+	return Site == ss::net::SiteId::RunItTwice ? ss::ui::Rect{72.0f, 84.0f + 14.0f, 1108.0f, 850.0f} : ss::ui::Rect{590.0f - 554.0f, 72.0f + 6.0f, 1108.0f, 870.0f};
+}
+
+uint32_t RgbOf(const ss::ui::Color& C)
+{
+	const auto Byte = [](float V) { return static_cast<uint32_t>(std::min(255.0f, std::max(0.0f, V * 255.0f + 0.5f))); };
+	return Byte(C.R) << 16 | Byte(C.G) << 8 | Byte(C.B);
+}
+
+std::set<uint32_t> TokensOf(const ss::ui::Skin& K)
+{
+	const ss::ui::Color* T[16] = {&K.Bg, &K.Bg2, &K.Panel, &K.Panel2, &K.Line, &K.Ink, &K.Muted, &K.Dim, &K.Accent, &K.Accent2, &K.Gold, &K.Red, &K.Orange, &K.Green, &K.Felt, &K.FeltDark};
+	std::set<uint32_t> Out;
+	for (const ss::ui::Color* C : T)
+	{
+		Out.insert(RgbOf(*C));
+	}
+	return Out;
+}
+
+/**
+ * RiverLine's own colours inside Area from command From on, what the autoplay chrome drew over the table (ui_seg_sites' leak
+ * rule: text runs and vertices that show in one of RiverLine's 16 tokens that isn't one of the site's; a run whose stray
+ * vertices span under 12 by 12 is the shared art's own ink): the count, each printed.
+ */
+int HomeColours(const DrawList& L, ss::net::SiteId Site, const ss::ui::Rect& Area, size_t From, const char* What)
+{
+	const std::set<uint32_t> Home = TokensOf(ss::ui::Skin::FromHex(ss::net::Def(ss::net::SiteId::RiverLine).Palette));
+	const std::set<uint32_t> Own = TokensOf(ss::ui::Skin::FromHex(ss::net::Def(Site).Palette));
+	int Count = 0;
+	for (size_t I = From; I < L.Cmds.size(); ++I)
+	{
+		const ss::ui::DrawCmd& Cmd = L.Cmds[I];
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+		{
+			const uint32_t Rgb = RgbOf(Cmd.Text.Col);
+			if (Cmd.Text.Col.A > 0.02f && Inside(Area, Cmd.Text.X, Cmd.Text.BaselineY) && Home.count(Rgb) && !Own.count(Rgb))
+			{
+				++Count;
+				std::printf("  %s: \"%s\" in RiverLine's %06x\n", What, Cmd.Text.Text.c_str(), Rgb);
+			}
+			continue;
+		}
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Triangles)
+		{
+			continue;
+		}
+		bool Stray = false;
+		uint32_t Which = 0;
+		float X0 = 1.0e9f, Y0 = 1.0e9f, X1 = -1.0e9f, Y1 = -1.0e9f;
+		for (uint32_t K = 0; K < Cmd.VertexCount; ++K)
+		{
+			const ss::ui::Vertex& V = L.Vertices[Cmd.VertexStart + K];
+			const uint32_t Rgb = RgbOf(V.Col);
+			if (V.Col.A > 0.02f && Inside(Area, V.X, V.Y) && Home.count(Rgb) && !Own.count(Rgb))
+			{
+				Stray = true;
+				Which = Rgb;
+				X0 = std::min(X0, V.X);
+				Y0 = std::min(Y0, V.Y);
+				X1 = std::max(X1, V.X);
+				Y1 = std::max(Y1, V.Y);
+			}
+		}
+		if (Stray && (X1 - X0 >= 12.0f || Y1 - Y0 >= 12.0f))
+		{
+			++Count;
+			std::printf("  %s: RiverLine's %06x over %.0f x %.0f at (%.0f, %.0f)\n", What, Which, X1 - X0, Y1 - Y0, X0, Y0);
+		}
+	}
+	return Count;
+}
+
+/** The face of the first run that is exactly Text (Regular when there's none). */
+ss::ui::Font FaceOf(const DrawList& L, const std::string& Text)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Text)
+		{
+			return Cmd.Text.Face;
+		}
+	}
+	return ss::ui::Font::Regular;
+}
+
+/** The side panel's PAYOUTS tab (its label's centre, right of x 1188), or {-1, -1}. */
+ss::ui::Vec2 PayoutsTab(const DrawList& L, const TableMeasurer& M)
+{
+	for (const char* Label : {"PAYOUTS", "Payouts"})
+	{
+		const ss::ui::Vec2 At = ButtonIn(L, Label, {1188.0f, 64.0f, 412.0f, 898.0f}, M);
+		if (At.X >= 0.0f)
+		{
+			return At;
+		}
+	}
+	return {-1.0f, -1.0f};
+}
+
+/**
+ * §9.6 "Overlays" at the panel: with it open, a one-frame click on a tile picks the style and the panel holds; a one-frame
+ * click on the scrim over the side panel's PAYOUTS tab closes it and reaches nothing under it (the tab stays as it was);
+ * the same click with the panel shut opens PAYOUTS, so the spot was live. Who prefixes the checks.
+ */
+void PanelOneFrame(AutoDesk& D, const std::string& Who, ss::net::SiteId Site)
+{
+	ss::Session& S = D.S;
+	DrawList L = D.Frame();
+	const ss::ui::Vec2 Tab = PayoutsTab(L, D.M);
+	const ss::ui::Vec2 Auto = ButtonAt(L, "AUTO", D.M);
+	D.Click(Auto.X, Auto.Y);
+	D.Now += 0.5;
+	L = D.Frame();
+	Expect(Tab.X >= 0.0f && PanelUp(L), (Who + "the side panel's PAYOUTS tab, and AUTO opens the panel").c_str());
+	const ss::style::Style Was = S.AutoPanel(S.FocusedTable()).Now.S;
+	const ss::style::Style Pick = Was == ss::style::Style::Lag ? ss::style::Style::Tag : ss::style::Style::Lag;
+	const AutoRun Tile = RunOf(L, Cased(Site, ss::style::InfoOf(Pick).Name), D.M);
+	D.OneFrame(Tile.X + 30.0f, Tile.Base + 30.0f);
+	Expect(Tile.Found && S.AutoPanel(S.FocusedTable()).Now.S == Pick && PanelUp(D.Frame()), (Who + "a one-frame click on a tile picks it, and the panel holds").c_str());
+	const ss::RightTab Before = S.Tab == ss::RightTab::Payouts ? ss::RightTab::Chat : S.Tab;
+	S.Tab = Before;
+	D.OneFrame(Tab.X, Tab.Y);
+	Expect(!PanelUp(D.Frame()) && S.Tab == Before, (Who + "a one-frame click on the scrim closes the panel and reaches nothing under it").c_str());
+	D.OneFrame(Tab.X, Tab.Y);
+	Expect(S.Tab == ss::RightTab::Payouts, (Who + "the same click with the panel shut opens PAYOUTS (the spot was live)").c_str());
+	S.Tab = Before;
+	D.Frame();
+}
+
+/** SS_UI_BENCH=1: how long the desk's frame takes to draw as it stands (40 draws, the pointer away), printed (§10). */
+void AutoBench(AutoDesk& D, const std::string& Name)
+{
+	if (!std::getenv("SS_UI_BENCH"))
+	{
+		return;
+	}
+	const auto T0 = std::chrono::steady_clock::now();
+	size_t Verts = 0;
+	for (int K = 0; K < 40; ++K)
+	{
+		Verts = D.Frame().Vertices.size();
+	}
+	std::printf("UI BENCH %-30s %6.3f ms/draw  %6zu vertices\n", Name.c_str(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count() / 40.0, Verts);
+}
+
+/** Site's open event (late registration, or registering within the hour) for $22 or less, other than Not; false when none. */
+bool RivalEvent(ss::Session& S, ss::net::SiteId Site, const std::string& Not, ss::LobbyEvent& Out)
+{
+	const ss::net::Network& Net = ss::net::Site(Site);
+	const double World = S.WorldMinutes();
+	for (const ss::net::EventInstance& E : Net.Window(World - 180.0, World + 60.0))
+	{
+		const ss::net::LiveState Lv = Net.Live(E, World);
+		const bool Open = Lv.St == ss::net::Status::LateReg || (Lv.St == ss::net::Status::Registering && Lv.StartsIn <= 60.0);
+		const ss::LobbyEvent Ev = Net.Listing(E, nullptr, S.Unlocks());
+		if (Open && Ev.Joinable && Ev.BuyInCents > 0 && Ev.BuyInCents <= 2200 && Ev.Spec.Entrants <= 3000 && Ev.Spec.Id != Not)
+		{
+			Out = Ev;
+			return true;
+		}
+	}
+	return false;
+}
+
+/** D seated at Site's table in the evening (an account with $500 in it, the player fed and rested), a hand being dealt. */
+bool SeatAtRival(AutoDesk& D, ss::net::SiteId Site)
+{
+	ss::Session& S = D.S;
+	if (RivalEvening > S.WorldMinutes())
+	{
+		S.LobbyMinutes += RivalEvening - S.WorldMinutes();
+	}
+	D.Now = Step(S, D.Now, 0.2);
+	S.Life.Hunger = 20.0;
+	S.Life.Thirst = 20.0;
+	S.Life.Energy = 80.0;
+	S.BankrollCents = 200000;
+	ss::site::Join(S.Life.Sites, Site, S.WorldMinutes());
+	if (ss::site::Account* A = ss::site::AccountOf(S.Life.Sites, Site))
+	{
+		A->Cents = 50000;
+	}
+	S.Life.Update2LinesRead |= ss::life::U2Sites;
+	ss::LobbyEvent Ev;
+	if (!RivalEvent(S, Site, std::string(), Ev))
+	{
+		return false;
+	}
+	S.RegisterEvent(Ev);
+	S.CurrentPace = ss::Pace::Full;
+	return D.Until([&]() { return S.CurrentScreen == ss::Screen::Table && S.CurHand && !S.CurHand->bComplete; }, 30.0);
+}
+
+/**
+ * The panel, the strip and the skip card at Site's table (Ignite or RunItTwice) in its own language (§2.5, §3.5, §9.6 "share
+ * no chrome"): the look's display face (BlackItalic; BoldCondensed in caps), none of RiverLine's colours, every line whole in
+ * its card, no plan line cut; the panel's one-frame click; the skip card in a tile too. Key names the pages.
+ */
+void RivalTable(ss::net::SiteId Site, const std::string& Key)
+{
+	const auto Began = std::chrono::steady_clock::now();
+	const bool Rit = Site == ss::net::SiteId::RunItTwice;
+	const std::string Who = "autoplay at " + Key + ": ";
+	const auto Say = [&Who](const char* What) { return Who + What; };
+	AutoDesk D("ui-auto-" + Key);
+	ss::Session& S = D.S;
+	if (!SeatAtRival(D, Site))
+	{
+		Expect(false, Say("seated at an evening event").c_str());
+		return;
+	}
+	const ss::ui::Font Face = Rit ? ss::ui::Font::BoldCondensed : ss::ui::Font::BlackItalic;
+	const ss::ui::Rect Panel = RivalPanel(Site);
+
+	// The pace row's AUTO (the look's own control) opens the panel over the table.
+	DrawList L = D.Frame();
+	const ss::ui::Vec2 Auto = ButtonAt(L, "AUTO", D.M);
+	D.Click(Auto.X, Auto.Y);
+	D.Now += 0.5; // the panel's fade-in done
+	L = D.Frame();
+	const AutoRun Title = RunOf(L, "AI AUTOPLAY", D.M);
+	Expect(Title.Found && L.Cmds[Title.Index].Text.Face == Face, Say("AUTO opens the panel, AI AUTOPLAY in the look's face").c_str());
+	const size_t From = Title.Found ? Title.Index : 0;
+	// Eleven tiles in a 4-3-4 grid, each name whole in the look's display face.
+	std::vector<AutoRun> Names;
+	int InFace = 0;
+	for (const ss::style::Info& I : ss::style::Catalog())
+	{
+		const AutoRun N = RunOf(L, Cased(Site, I.Name), D.M, From);
+		Names.push_back(N);
+		InFace += N.Found && L.Cmds[N.Index].Text.Face == Face ? 1 : 0;
+	}
+	Expect(InFace == 11 && Names.size() == 11, Say("the eleven styles, each name whole in the look's face").c_str());
+	if (InFace == 11)
+	{
+		std::set<int> RowsAt;
+		for (const AutoRun& R : Names)
+		{
+			RowsAt.insert(static_cast<int>(std::lround(R.Base)));
+		}
+		std::vector<int> PerRow;
+		for (const int Y : RowsAt)
+		{
+			PerRow.push_back(static_cast<int>(std::count_if(Names.begin(), Names.end(), [Y](const AutoRun& R) { return static_cast<int>(std::lround(R.Base)) == Y; })));
+		}
+		Expect(PerRow == std::vector<int>({4, 3, 4}), Say("the tiles sit 4-3-4").c_str());
+	}
+	// Its controls in the look's face (RunItTwice's in caps): the speeds, SKIP, a target and the main button.
+	Expect(FaceOf(L, Cased(Site, "2x")) == Face && FaceOf(L, "SKIP") == Face && FaceOf(L, Cased(Site, "Next level")) == Face &&
+			   FaceOf(L, Cased(Site, "Watch it play \xC2\xB7 1x")) == Face,
+		Say("the speeds, SKIP, the targets and the main button in the look's face").c_str());
+	Expect(Overflows(L, Panel, From, D.M, "panel") == 0, Say("every line of the panel fits inside it").c_str());
+	// The panel as drawn, not as this test expects it (review-fix2-auto): its title sits 22 right of its left edge in
+	// RunItTwice's section slab, 50 after Ignite's spark.
+	const float DrawnX = Title.Found ? L.Cmds[Title.Index].Text.X - (Rit ? 22.0f : 50.0f) : -1.0f;
+	Expect(std::fabs(DrawnX - Panel.X) < 0.5f && DrawnX >= (Rit ? 72.0f : 16.0f) && DrawnX + Panel.W <= 1188.0f && Panel.Y + Panel.H <= ss::ui::RiverLine::Height - 38.0f,
+		Say("the panel clears the look's rail, the side panel and the taskbar").c_str());
+	Expect(HomeColours(L, Site, {0.0f, 64.0f, ss::ui::RiverLine::Width, 898.0f}, From, "panel") == 0, Say("none of RiverLine's colours on the panel").c_str());
+	std::printf("  site_auto_panel_%s %6zu vertices %5zu commands\n", Key.c_str(), L.Vertices.size(), L.Cmds.size());
+	WriteList("site_auto_panel_" + Key, L);
+	AutoBench(D, "site_auto_panel_" + Key);
+	D.RL.Key("k");
+
+	// §9.6 Overlays: the panel's one-frame click.
+	PanelOneFrame(D, Who, Site);
+
+	// The main button hands the seat to the plan and the panel closes.
+	L = D.Frame();
+	const ss::ui::Vec2 Again = ButtonAt(L, "AUTO", D.M);
+	D.Click(Again.X, Again.Y);
+	D.Now += 0.5;
+	L = D.Frame();
+	const std::string GoLabel = Cased(Site, "Watch it play \xC2\xB7 " + ss::autoplay::SpeedName(S.AutoPanel(0).Now.Speed));
+	const ss::ui::Vec2 Go = ButtonAt(L, GoLabel, D.M);
+	D.OneFrame(Go.X, Go.Y);
+	Expect(Go.X >= 0.0f && S.Autoplay(0).M == ss::autoplay::Mode::Watch && !PanelUp(D.Frame()), Say("the main button hands the seat to the plan and the panel closes").c_str());
+	if (S.HasPrompt)
+	{
+		D.RL.Key("f"); // the decision in hand stays the player's: fold it, and the plan takes the next
+	}
+
+	// The watch strip: the style chip, the speeds and Take over in the look; the think on its fuse or timer, never a move;
+	// the buttons that take the wheel where the player's own sit.
+	const ss::ui::Rect Strip{640.0f, 778.0f, 530.0f, 154.0f};
+	const ss::ui::Rect Actions{640.0f, 850.0f, 530.0f, 92.0f};
+	L = D.Frame();
+	const ss::ui::Vec2 Four = ButtonIn(L, Cased(Site, "4x"), Strip, D.M);
+	D.Click(Four.X, Four.Y);
+	Expect(Four.X >= 0.0f && S.Autoplay(0).Speed == 4 && S.Autoplay(0).M == ss::autoplay::Mode::Watch, Say("the strip's 4x").c_str());
+	bool Thought = false;
+	ss::ui::Vec2 Ghost{-1.0f, -1.0f};
+	size_t Acted = 0;
+	for (int Guard = 0; Guard < 30 * 120 && !Thought; ++Guard)
+	{
+		D.Now += 1.0 / 30.0;
+		S.Update(D.Now);
+		const DrawList Lt = D.Frame();
+		if (!D.Plan().Thinking)
+		{
+			continue;
+		}
+		Thought = true;
+		const std::string Think = ss::autoplay::ThinkingLine(S.Autoplay(0).S);
+		Expect(DrewRun(Lt, Think) && DrewRun(Lt, "Any action takes the wheel.") && !DrewAMove(Lt), Say("the think line, the hint, and never the move").c_str());
+		Expect(FaceOf(Lt, Cased(Site, "4x")) == Face && FaceOf(Lt, "FOLD") == Face,
+			Say("the strip's speeds and the buttons that take the wheel in the look's face").c_str());
+		Expect(Overflows(Lt, Strip, 0, D.M, "strip") == 0 && CutPlanLines(Lt) == 0, Say("the strip's lines fit it, none cut").c_str());
+		const AutoRun Chip = RunOf(Lt, Cased(Site, ss::style::InfoOf(S.Autoplay(0).S).Name), D.M);
+		const AutoRun ChipCaps = RunOf(Lt, Cased(ss::net::SiteId::RunItTwice, ss::style::InfoOf(S.Autoplay(0).S).Name), D.M);
+		const size_t StripFrom = ChipCaps.Found ? ChipCaps.Index : Chip.Found ? Chip.Index : 0;
+		Expect(HomeColours(Lt, Site, Strip, StripFrom, "strip") == 0, Say("none of RiverLine's colours on the strip").c_str());
+		std::printf("  site_auto_strip_%s %6zu vertices %5zu commands\n", Key.c_str(), Lt.Vertices.size(), Lt.Cmds.size());
+		WriteList("site_auto_strip_" + Key, Lt);
+		AutoBench(D, "site_auto_strip_" + Key);
+		Ghost = ButtonIn(Lt, "FOLD", Actions, D.M);
+		Acted = S.CurHand ? S.CurHand->Events.size() : 0;
+	}
+	Expect(Thought && Ghost.X >= 0.0f, Say("the plan thinks, the buttons that take the wheel up").c_str());
+	if (Thought && Ghost.X >= 0.0f)
+	{
+		D.Click(Ghost.X, Ghost.Y);
+		Expect(S.AutoPanel(0).TakenOver && (S.CurHand ? S.CurHand->Events.size() : 0) == Acted, Say("the first press takes the wheel and acts on nothing").c_str());
+		Expect(D.Until([&]() { return S.HasPrompt; }, 5.0), Say("the player's prompt opens").c_str());
+		L = D.Frame();
+		const ss::ui::Vec2 Real = ButtonIn(L, "FOLD", Actions, D.M);
+		Expect(DrewRun(L, "YOUR HAND") && FaceOf(L, "YOUR HAND") == Face && Overflows(L, {712.0f, 752.0f, 458.0f, 26.0f}, 0, D.M, "your hand") == 0,
+			Say("YOUR HAND over the player's own controls, in the look, whole").c_str());
+		Expect(Real.X >= 0.0f && std::fabs(Real.X - Ghost.X) < 1.0f && std::fabs(Real.Y - Ghost.Y) < 6.0f, Say("the buttons that take the wheel sit where the player's own do").c_str());
+		WriteList("site_auto_strip_yours_" + Key, L);
+		D.Click(Real.X, Real.Y);
+		Expect(!S.HasPrompt, Say("the second press acts").c_str());
+	}
+
+	// The skip card: SKIPPING · PUSH/FOLD in the look's face over the dimmed table, its buttons in the look, nothing cut.
+	ss::autoplay::TableAuto Pf;
+	Pf.S = ss::style::Style::PushFold;
+	Pf.M = ss::autoplay::Mode::Watch;
+	S.SetAutoplay(0, Pf);
+	S.SprintBudgetMs = 0.0; // one tick an update: the card stays up to be looked at
+	Expect(S.SkipAhead(0, ss::autoplay::Target::Bubble).empty() && D.Until([&]() { return S.Sprinting; }, 120.0), Say("a skip to the bubble").c_str());
+	D.Run(0.5);
+	L = D.Frame();
+	const AutoRun Head = RunOf(L, "SKIPPING \xC2\xB7 PUSH/FOLD", D.M);
+	Expect(Head.Found && L.Cmds[Head.Index].Text.Face == Face && Drew(L, "to the bubble") && FaceOf(L, Cased(Site, "Take the wheel")) == Face && FaceOf(L, Cased(Site, "Stop")) == Face,
+		Say("the skip card: SKIPPING · PUSH/FOLD and its buttons in the look's face").c_str());
+	Expect(Head.Found && Overflows(L, {0.0f, 64.0f, 1180.0f, 936.0f}, Head.Index, D.M, "skip card") == 0 && CutPlanLines(L) == 0, Say("the card's lines fit, none cut").c_str());
+	Expect(Head.Found && HomeColours(L, Site, {0.0f, 64.0f, 1180.0f, 898.0f}, Head.Index, "skip card") == 0, Say("none of RiverLine's colours on the card").c_str());
+	std::printf("  site_table_skip_%s %6zu vertices %5zu commands\n", Key.c_str(), L.Vertices.size(), L.Cmds.size());
+	WriteList("site_table_skip_" + Key, L);
+	AutoBench(D, "site_table_skip_" + Key);
+
+	// A second table on the same site, tiled: the skipping tile's card in its short form, in the look, whole.
+	ss::LobbyEvent Second;
+	if (S.T && RivalEvent(S, Site, S.T->Spec.Id, Second))
+	{
+		S.RegisterEvent(Second);
+		S.Tiled = true;
+		D.Run(1.0);
+		const DrawList Lt = D.Frame();
+		bool Skipping = false;
+		S.WithTable(0, [&]() { Skipping = S.Sprinting; });
+		const ss::ui::Rect Tile0{0.0f, 64.0f, 800.0f, 898.0f};
+		const AutoRun Short = RunOf(Lt, "SKIPPING \xC2\xB7 PUSH/FOLD", D.M);
+		Expect(S.TableCount() == 2 && Skipping && Short.Found && Lt.Cmds[Short.Index].Text.Face == Face && Inside(Tile0, Short.X, Short.Base),
+			Say("tiled, the skipping table's card in its short form, in the look's face").c_str());
+		Expect(CutPlanLines(Lt) == 0 && Overflows(Lt, Tile0, 0, D.M, "tile") == 0, Say("the tile's plan lines whole, inside it").c_str());
+		Expect(Short.Found && HomeColours(Lt, Site, Tile0, Short.Index, "tile") == 0, Say("none of RiverLine's colours on the tile's card").c_str());
+		WriteList("site_tile_skip_" + Key, Lt);
+		S.StopSkip(0);
+		S.Tiled = false;
+	}
+	else
+	{
+		Expect(false, Say("a second open event to tile").c_str());
+	}
+	S.SprintBudgetMs = 10.0;
+	std::printf("  autoplay at %s: %.2f s\n", Key.c_str(), std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
+}
+
+/**
+ * Ignite after midnight (Afterburner Hours, §2.3): the panel takes the night skin with the rest of the client (its title and
+ * neon in the night's violet accent, b57bff), and still none of RiverLine's colours.
+ */
+void IgniteAfterburner()
+{
+	AutoDesk D("ui-auto-ignite-night");
+	ss::Session& S = D.S;
+	S.LobbyMinutes += RivalEvening + 6.0 * 60.0 - S.WorldMinutes(); // Thu Nov 5, 1:30 AM
+	if (!SeatAtRival(D, ss::net::SiteId::Ignite))
+	{
+		Expect(false, "autoplay at ignite, 1:30 AM: seated");
+		return;
+	}
+	DrawList L = D.Frame();
+	const ss::ui::Vec2 Auto = ButtonAt(L, "AUTO", D.M);
+	D.Click(Auto.X, Auto.Y);
+	D.Now += 0.5;
+	L = D.Frame();
+	const AutoRun Title = RunOf(L, "AI AUTOPLAY", D.M);
+	Expect(Title.Found && RgbOf(L.Cmds[Title.Index].Text.Col) == 0xb57bff, "autoplay at ignite, 1:30 AM: the panel in Afterburner Hours' violet");
+	Expect(Title.Found && HomeColours(L, ss::net::SiteId::Ignite, {0.0f, 64.0f, ss::ui::RiverLine::Width, 898.0f}, Title.Index, "panel at night") == 0,
+		"autoplay at ignite, 1:30 AM: none of RiverLine's colours on the panel");
+	WriteList("site_auto_panel_ignite_night", L);
+}
+
+/** RiverLine's panel's one-frame click (§9.6 Overlays), as at the rivals' tables. */
+void HomeOneFrame()
+{
+	const auto Began = std::chrono::steady_clock::now();
+	AutoDesk D("ui-auto-oneframe");
+	Expect(D.Seat(), "autoplay at riverline: seated");
+	PanelOneFrame(D, "autoplay at riverline: ", ss::net::SiteId::RiverLine);
+	if (std::getenv("SS_UI_BENCH"))
+	{
+		// RiverLine's own panel, to set the rivals' beside (SS_UI_BENCH only: the pages above never see it).
+		const ss::ui::Vec2 Auto = ButtonAt(D.Frame(), "AUTO", D.M);
+		D.Click(Auto.X, Auto.Y);
+		D.Now += 0.5;
+		AutoBench(D, "auto_panel (riverline)");
+		D.RL.Key("k");
+	}
+	std::printf("  autoplay at riverline (one-frame clicks): %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - Began).count());
+}
+
 // ------------------------------------------------------------------ the copy
 
 void Copy()
@@ -1123,6 +1596,10 @@ void SegAuto()
 	auto_seg::FourTiles();
 	auto_seg::StreamShowsNone();
 	auto_seg::ResultsAndCareer();
+	auto_seg::HomeOneFrame();
+	auto_seg::RivalTable(ss::net::SiteId::Ignite, "ignite");
+	auto_seg::IgniteAfterburner();
+	auto_seg::RivalTable(ss::net::SiteId::RunItTwice, "runittwice");
 	auto_seg::Copy();
 }
 } // namespace ui_test

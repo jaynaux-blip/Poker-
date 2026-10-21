@@ -2121,19 +2121,21 @@ const Family Families[] = {
 	{"brunch-stack", Glyph::Cup, 0xf5a20b, 0x8a3d07, 0x7c3a12},
 	{"slingshot", Glyph::Slingshot, 0x0a8ad6, 0x0b3550, 0xf87171},
 	// The rivals' freezeouts (by their stems; no RiverLine id starts so). Left to FormatGlyph they wore the padlock,
-	// which reads as "locked" in a lobby that marks locked events with one. Ignite in coral and plum, RunItTwice in slate.
+	// which reads as "locked" in a lobby that marks locked events with one. Ignite in coral and plum. RunItTwice's six
+	// (Update 3 G1, the 2026-10-21 red-and-black restyle, SPEC §13.2 #13; core-sites-look's rows): carbon, gloss and Signal
+	// Red lit tiles on Onyx and Carbon grounds, with Signal Red, Chrome or Hot White accents (no RiverLine hex).
 	{"two-am-afterburner", Glyph::Rocket, 0xff6b57, 0x4a2142, 0xffc94a},
 	{"wake-up-call", Glyph::Bell, 0xff9e3d, 0x4a2142, 0xfff4ec},
 	{"afternoon-fizz", Glyph::Glass, 0x4fc3f7, 0x2e2038, 0xff6b57},
 	{"plum-turbo", Glyph::Cherries, 0x8e3b8a, 0x2e2038, 0x5be08a},
 	{"spark-jackpot", Glyph::Sevens, 0xff4d6d, 0x4a2142, 0xffc94a},
 	{"night-glow", Glyph::Aurora, 0x46325a, 0x1a1220, 0xff6b57},
-	{"hourly", Glyph::Clock, 0x334155, 0x141a24, 0xd4a843},
-	{"the-closer", Glyph::Hourglass, 0x243044, 0x0b0f17, 0xe5505e},
-	{"first-light", Glyph::Sunrise, 0xe88b45, 0x334155, 0xe8c25a},
-	{"lunch-hour", Glyph::Cup, 0x5e6a7d, 0x1c2433, 0xd4a843},
-	{"the-rush", Glyph::Rocket, 0x8fa3bf, 0x243044, 0xe5505e},
-	{"supper-stack", Glyph::Chips, 0x1d4a3e, 0x141a24, 0xd4a843},
+	{"hourly", Glyph::Clock, 0x2c2c33, 0x0c0c0f, 0xd2141a},
+	{"the-closer", Glyph::Hourglass, 0xd2141a, 0x0c0c0f, 0xffffff},
+	{"first-light", Glyph::Sunrise, 0x7a0a12, 0x16161a, 0xb6bbc5},
+	{"lunch-hour", Glyph::Cup, 0x202026, 0x0c0c0f, 0xb6bbc5},
+	{"the-rush", Glyph::Rocket, 0xd2141a, 0x16161a, 0xb6bbc5},
+	{"supper-stack", Glyph::Chips, 0x1e1e23, 0x0c0c0f, 0xd2141a},
 };
 
 /** A template id without its site's key ("ignite.flip-go-110" is "flip-go-110", update 2 §5.8); RiverLine's as it is. */
@@ -2583,8 +2585,13 @@ void Emblem(Canvas& C, const net::EventTemplate& T, float Cx, float Cy, float Si
 	}
 	// Anything else: its format, in the colours of its stakes.
 	static const uint32_t ByTier[5][2] = {{0x0f9488, 0x0b2f4a}, {0x2f6fef, 0x152a6b}, {0x7c3aed, 0x1b1340}, {0xd97706, 0x3d1704}, {0x1f2937, 0x0b0f17}};
+	// RunItTwice (Update 3 G1, the 2026-10-21 red-and-black restyle): its stakes climb the status ramp instead, carbon and
+	// gloss to deep red and Signal Red, on Onyx and Carbon, with chrome stones (none a RiverLine hex). RiverLine and Ignite as before.
+	static const uint32_t RitByTier[5][2] = {{0x2c2c33, 0x0c0c0f}, {0x202026, 0x0c0c0f}, {0x5c5f68, 0x16161a}, {0x7a0a12, 0x0c0c0f}, {0xd2141a, 0x0c0c0f}};
 	const int Tr = static_cast<int>(net::TierOf(T.BuyInCents));
-	Tile(C, FormatGlyph(T), ByTier[Tr][0], ByTier[Tr][1], 0xf2c14e, T.Featured, 0, Cx, Cy, Size, Time);
+	const bool Rit = net::SiteOf(T.Id) == net::SiteId::RunItTwice;
+	Tile(C, FormatGlyph(T), Rit ? RitByTier[Tr][0] : ByTier[Tr][0], Rit ? RitByTier[Tr][1] : ByTier[Tr][1], Rit ? 0xb6bbc5u : 0xf2c14eu, T.Featured, 0, Cx, Cy, Size,
+		Time);
 }
 
 void SeriesCrest(Canvas& C, const net::SeriesInfo& S, float Cx, float Cy, float Size, double Time)

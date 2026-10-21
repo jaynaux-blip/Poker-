@@ -9,6 +9,7 @@
 #include "ShortStack/UI/Avatars.h"
 #include "ShortStack/UI/EventArt.h"
 #include "ShortStack/UI/RiverLine.h"
+#include "ShortStack/UI/SiteMotion.h"
 
 #include <algorithm>
 #include <array>
@@ -30,6 +31,8 @@ Color SitesOnAccent();
 Color SitesAccentDeep();
 Color SitesOnGold();
 Color SitesGoldDeep();
+// Update 3 (G1, §3.4 "Ink on a filled accent"; declared again further down): a label's ink on a filled accent.
+Color SitesLabelInk(const Color& Dark, const Color& Fill, const Color& Hover);
 } // namespace rlsites_detail
 
 namespace rlnet_detail
@@ -160,7 +163,10 @@ inline float NetPill(Canvas& Cv, const std::string& Label, float X, float Y, con
 	{
 		Cv.StrokeRoundRect({X, Y, W, H}, H / 2.0f, NetA(Col, 0.45f), 1.0f);
 	}
-	Cv.Text(Label, X + W / 2.0f, Y + H / 2.0f + 0.5f, Ts(Size, 700, Solid ? rlsites_detail::SitesTone(0x07121c) : Col, Align::Center, Baseline::Middle));
+	// Update 3 (G1, §3.4): a solid pill's label takes the dark ink or Ink, whichever reads higher on its fill, inside a rival's
+	// skin only (SitesLabelInk); at home the dark ink exactly as before.
+	const Color Dark = rlsites_detail::SitesTone(0x07121c);
+	Cv.Text(Label, X + W / 2.0f, Y + H / 2.0f + 0.5f, Ts(Size, 700, Solid ? rlsites_detail::SitesLabelInk(Dark, Col, Col) : Col, Align::Center, Baseline::Middle));
 	return W;
 }
 
@@ -1034,6 +1040,36 @@ bool SitesButton(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const
 /** The poker button's list of sites is open (the taskbar's caret). */
 bool SitesMenuOpen(const RiverLine* RL);
 void SitesMenuToggle(const RiverLine* RL, bool Open);
+/**
+ * G1 fix2 (g1-audit N2, N7; §3.5 INFO, §10): one player's share of Structure's Icm(), walked in steps. The same finishing orders
+ * in the same order with the same arithmetic as Icm()'s recursion, but only the orders that can still place this player (once
+ * they are placed, the orders under them add nothing to them; the last place's other players add nothing at all), so the sum
+ * is Icm()[Mine] to the bit (tests: SitesIcmExact). Beyond Icm()'s exact range (more than two million finishing orders) it is
+ * Icm()'s own fallback, the chip share of the prizes left, and ChipShare says so. Resumable: SitesIcmRun takes a budget of
+ * steps and carries on where it stopped, so a page spreads a long walk over frames; the slicing never changes a bit.
+ * Players are marked one by one (Used), so the 33rd and later are never mixed up (Icm()'s 32-bit mask does: N7).
+ */
+struct SitesIcmWalk
+{
+	std::vector<double> Stacks; // Icm()'s arguments, copied: the walk never reads the tournament again
+	std::vector<double> Prizes;
+	size_t Mine = 0;
+	int Places = 0;
+	bool ChipShare = false; // Icm()'s fallback: (stack / chips in play) x the prizes left
+	bool Done = true;
+	double Sum = 0.0;  // the equity so far, in cents
+	int Depth = 0;     // the order's length so far
+	std::vector<int> Next;     // by depth: the next player to try
+	std::vector<int> Chosen;   // by depth: the player placed there
+	std::vector<double> Prob;  // by depth: the chance of the order so far
+	std::vector<double> Rem;   // by depth: the chips not placed yet
+	std::vector<uint8_t> Used; // by player: placed in the order so far
+};
+/**
+ * The steps (a player looked at, or a division) SitesIcmCached walks a frame: about 0.5 ms on the G1 PC, so a nine-handed final
+ * table paying nine (912k steps, the most at 9 left) takes 3 frames and ten left paying eight (1.39M, the most anywhere) 4.
+ */
+constexpr int64_t SitesIcmFrameSteps = 400000;
 /** The rival lobby's pages after its first four (§5.11: PROMOTIONS, CASHIER), and the Cashier's small choices. */
 struct SitesUi
 {
@@ -1045,6 +1081,27 @@ struct SitesUi
 	bool NoteBad = false;
 	double NoteAt = -100.0;
 	double PageAt = -100.0;
+	// Update 3 (G1, §3.5): the table's bets toggled away from the look's default (RunItTwice's big blinds to chips); UI state.
+	bool BetsFlipped = false;
+	// G1 fix (g1-audit L10; §3.5, §3.6 R9): the HUD switched off at the tables of a look whose default is on (RunItTwice's pro
+	// default); UI state, never saved. Every other look keeps the session's own switch (Session::Hud).
+	bool HudFlipped = false;
+	// G1 fix (g1-audit M2): a rival look's raise slider held by the pointer (Ui::Slider keeps its own drag private).
+	bool RaiseDrag = false;
+	// G1 fix (g1-audit M1; §3.5 INFO, §10): the hero's ICM value by event, computed when the stacks change, never per frame.
+	// fix2 (N2): walked in steps (Walk, Busy) once a hand has ended; the last value stands until the walk is done.
+	struct IcmMemo
+	{
+		uint64_t Key = 0;
+		double Cents = 0.0;
+		bool ChipShare = false;
+		double At = -100.0;
+		bool Valid = false;
+		bool Busy = false;
+		uint64_t WalkKey = 0;
+		SitesIcmWalk Walk;
+	};
+	std::map<std::string, IcmMemo> Icm;
 };
 SitesUi& SitesOf(const RiverLine* RL);
 /** Drops a laptop's sites state when it goes (~RiverLine). */
@@ -1159,10 +1216,13 @@ struct SiteLook
 	float EaseSeconds = 0.4f;
 	bool RestoreAlpha = false;
 	uint64_t Key = 0;
+	// G1 append (ui-tablestyle; v1.2, §13.2 #5): the 45-degree top-right corner cut of panels (Cut), slabs (Cut x 0.8) and pills
+	// (Cut x 0.6, at most half their height) that Panel, SitesButton and NetPill draw; 0 = none (RiverLine, Ignite).
+	float Cut = 0;
 };
 /**
- * A site's look (RiverLine: today's literals exactly, the no-op proof). Phase A: every site's is RiverLine's (Ignite and
- * RunItTwice draw as today until ui-tablestyle lands their looks); the address is stable for the program's life.
+ * A site's look (RiverLine: today's literals exactly, the no-op proof; G1: Ignite's arcade and RunItTwice's exchange, §2.5,
+ * §3.5, §13); the address is stable for the program's life.
  */
 const SiteLook& SitesLook(net::SiteId S);
 /** The look with what the player wears there (Ignite's equipped back, felt and chips: G2). */
@@ -1241,6 +1301,89 @@ std::vector<StripRow> SitesTableStrip(const RiverLine& RL, const Session& S);
  * Desk, RunItTwice's) on RiverLine or on another rival.
  */
 RiverLine::Page SitesPageHome(net::SiteId Site, RiverLine::Page P);
+
+// ---- Update 3, G1 (ui-tablestyle; §1.11, §2.5, §3.4, §3.5, §13): what the shared table and the gatekeepers draw by look
+/** WCAG 2.x contrast between two colours (1: the same, 21: black on white), sites_main.cpp's SitesContrast formula. */
+double SitesInkContrast(const Color& A, const Color& B);
+/**
+ * The label on a filled accent (§3.4 "Ink on a filled accent", §13.2 #15): inside a rival's skin, whichever of Dark (the
+ * fill's dark mix) and pal::Ink reads higher on the lower of Fill and Hover; at home Dark exactly, whatever the fill.
+ */
+Color SitesLabelInk(const Color& Dark, const Color& Fill, const Color& Hover);
+/** R with its top-right corner cut at 45 degrees by Cut units (SiteLook::Cut), clockwise from the top-left (5 points). */
+std::vector<Vec2> SitesCutPath(const Rect& R, float Cut);
+/**
+ * A seat's box at P in its look (RiverLine's plate, Ignite's bubble with its name pill and stack, RunItTwice's data card; the
+ * hero's is bigger): what the seat lists keep clear of SidePanel (x 1188), the lower third and each other (§2.5, §3.5).
+ */
+Rect SitesSeatBox(const SiteLook& L, Vec2 P, bool Hero);
+/**
+ * The broadcast lower third is up (RunItTwice, §3.5): an all-in with cards to come, a seat showing its equity during the run-out,
+ * before the showdown prints a hand (the engine's hand is already complete then: the run-out is a replay). While it is, the
+ * shared table keeps every hole card out of SiteLook::LowerThird (the band shows them).
+ */
+bool SitesLowerThirdUp(const Session& S);
+/** Bets and stacks in big blinds at a table of look L (RunItTwice's default, §3.5), unless the player toggled them to chips. */
+bool SitesBetsInBb(const RiverLine& RL, const SiteLook& L);
+/** The toggle between big blinds and chips (a look whose default is big blinds; UI state, never saved). */
+void SitesToggleBets(const RiverLine& RL);
+/**
+ * The HUD at a table of look L (g1-audit L10): a look whose HudDefault is set (RunItTwice, §3.5, §3.6 R9's pro defaults) shows
+ * it whenever the client opens, unless the player switched it off at its tables (UI state, never saved); every other look
+ * (RiverLine, Ignite) follows the session's switch, Session::Hud, exactly as before.
+ */
+bool SitesHudOn(const RiverLine& RL, const Session& S, const SiteLook& L);
+/** The table's HUD switch: a HudDefault look flips its own UI state; any other flips Session::Hud. */
+void SitesToggleHud(const RiverLine& RL, Session& S, const SiteLook& L);
+/** Starts W on player Mine of Icm(Stacks, Prizes); the fallback (chip share) and the empty cases are done at once. */
+void SitesIcmStart(SitesIcmWalk& W, const std::vector<double>& Stacks, const std::vector<double>& Prizes, size_t Mine);
+/** Walks W on for about Budget steps (Steps: those taken; a place is finished past it by at most 3 a player); true once done. */
+bool SitesIcmRun(SitesIcmWalk& W, int64_t Budget, int64_t* Steps = nullptr);
+/** The whole walk at once: Icm(Stacks, Prizes)[Mine] to the bit (ChipShare: set when it is Icm()'s fallback). */
+double SitesIcmOne(const std::vector<double>& Stacks, const std::vector<double>& Prizes, size_t Mine, bool* ChipShare = nullptr);
+/**
+ * The hero's ICM value in cents (RunItTwice's INFO tab, §3.5): Structure's Icm() over the stacks still in and the prizes they
+ * still play for (the top places, as many as there are players left), the hero's share only (SitesIcmOne); 0 once the hero is
+ * out. Uncached and unsliced, so a page reads it through SitesIcmCached.
+ */
+double SitesIcmCents(const Tournament& T, bool* ChipShare = nullptr);
+/** INFO's ICM row (§3.5; fix2 N2, N7): the value, whether it is Icm()'s chip-share fallback, and whether one is known yet. */
+struct SitesIcmRead
+{
+	double Cents = 0.0;
+	bool ChipShare = false;
+	bool Known = false; // false only while an event's first walk is under way (or a tick is mid-finish)
+};
+/**
+ * SitesIcmCents for a laptop, cached by event (SitesUi::Icm). A walk starts only once a hand has ended (never while a tick's
+ * tables are still being played: Tournament::FinishPending) and only when the stacks or the prizes left changed, at most twice a
+ * second (a skip moves the stacks every frame); it then walks SitesIcmFrameSteps a frame until done (g1-audit N2: no frame pays
+ * more, about half a millisecond). In between, the last value stands.
+ */
+SitesIcmRead SitesIcmCached(const RiverLine& RL, const Tournament& T, double Now);
+/** How many walks SitesIcmCached has started (tests: the INFO tab never computes per frame). */
+int SitesIcmComputes();
+/**
+ * One of a rival table's small controls (Pace, HUD, Lean back; the tiles' pace row; g1-audit M2, §9.6 "share no chrome").
+ * Ignite: a candy pill (Panel2, a Line rim, a Muted BlackItalic label in caps; lit, a pill in Lite with a gloss and plum
+ * ink). RunItTwice: a slab cut 6 (Carbon, a hairline, a Muted BoldCondensed caps label; lit, Signal Red with Hot White type
+ * and a 1-unit LED Red top edge). The label shrinks to fit. The press is Ui::Clickable's under Id. Returns it.
+ */
+bool SitesControl(Ui& UI, Canvas& C, const SiteLook& L, const std::string& Id, const Rect& R, const std::string& Label, bool Lit, const Color& Lite, bool Enabled = true);
+/** "38.5 BB" / "120 BB": an amount in big blinds as the rivals' tables print it (one decimal under 100). */
+std::string SitesBbText(Chips Amount, Chips BigBlind);
+/** The dealer button of a look (0 RiverLine's white disc, 1 Ignite's sunflower disc with a spark, 2 RunItTwice's chrome puck). */
+void SitesDealerButton(Canvas& C, float X, float Y, float R, int Dealer);
+/** A four-point spark (Ignite's mark), R from its centre to a tip; Thin is its waist. */
+void SitesSpark(Canvas& C, float Cx, float Cy, float R, const Color& Col, float Thin = 0.28f);
+/** The turnstone's two cards (the second run dealt over the first), S tall, its top-left at (X, Y). */
+void SitesTurnstone(Canvas& C, float X, float Y, float S, const Color& First, const Color& Second, const Color& Edge);
+// The table looks' own colours (§2.3, §3.3: constants, never pal::, none a RiverLine hex). Ui.cpp keeps its own for the
+// chips and the backs it draws.
+inline constexpr uint32_t SitesIgNight = 0x120a18, SitesIgCoral = 0xff6b57, SitesIgPink = 0xff3d8b, SitesIgViolet = 0x8b5cff, SitesIgSky = 0x4fc3f7, SitesIgLime = 0xc8ff4a,
+						  SitesIgSun = 0xffc94a, SitesIgTang = 0xff9e3d, SitesIgCream = 0xfff4ec, SitesIgRed = 0xff4d6d, SitesIgPlumInk = 0x2a1640, SitesIgRope = 0xe0b070, SitesIgTrack = 0x3a2240;
+inline constexpr uint32_t SitesRitCarbon = 0x16161a, SitesRitRed = 0xd2141a, SitesRitChrome = 0xb6bbc5, SitesRitWhite = 0xffffff, SitesRitTape = 0x060607, SitesRitGloss = 0x202026,
+						  SitesRitLed = 0xff2633, SitesRitOnyx = 0x0c0c0f, SitesRitMuted = 0xa0a0aa, SitesRitInk = 0xececef, SitesRitHair = 0x2c2c33, SitesRitPool = 0x26262d;
 } // namespace rlsites_detail
 
 namespace rlnet_detail
@@ -1251,7 +1394,7 @@ namespace rlnet_detail
  */
 inline float NetPill(Canvas& Cv, const rlsites_detail::SiteLook& L, const std::string& Label, float X, float Y, const Color& Col, bool Solid = false, float Size = 10.5f)
 {
-	if (!L.LabelCaps && L.Button != rlsites_detail::ButtonShape::Slab)
+	if (!L.LabelCaps && L.Button != rlsites_detail::ButtonShape::Slab && L.Cut <= 0.0f)
 	{
 		return NetPill(Cv, Label, X, Y, Col, Solid, Size);
 	}
@@ -1259,12 +1402,27 @@ inline float NetPill(Canvas& Cv, const rlsites_detail::SiteLook& L, const std::s
 	const float W = Cv.Measure(Text, Size, 700) + Size * 1.3f;
 	const float H = Size + 8.0f;
 	const float Corner = L.Button == rlsites_detail::ButtonShape::Slab ? std::min(H / 2.0f, L.Radius) : H / 2.0f;
-	Cv.FillRoundRect({X, Y, W, H}, Corner, Solid ? Col : NetA(Col, 0.16f));
-	if (!Solid)
+	// G1 (v1.2, §13.2 #5): a look with a cut draws its pills square with the top-right corner cut (RunItTwice's 6).
+	const float Cut = L.Cut > 0.0f ? std::min(H / 2.0f, L.Cut * 0.6f) : 0.0f;
+	if (Cut > 0.0f)
 	{
-		Cv.StrokeRoundRect({X, Y, W, H}, Corner, NetA(Col, 0.45f), 1.0f);
+		const std::vector<Vec2> Path = rlsites_detail::SitesCutPath({X, Y, W, H}, Cut);
+		Cv.FillPolygon(Path, Solid ? Col : NetA(Col, 0.16f));
+		if (!Solid)
+		{
+			Cv.StrokePolyline(Path, true, NetA(Col, 0.45f), 1.0f);
+		}
 	}
-	Cv.Text(Text, X + W / 2.0f, Y + H / 2.0f + 0.5f, Ts(Size, 700, Solid ? rlsites_detail::SitesTone(0x07121c) : Col, Align::Center, Baseline::Middle));
+	else
+	{
+		Cv.FillRoundRect({X, Y, W, H}, Corner, Solid ? Col : NetA(Col, 0.16f));
+		if (!Solid)
+		{
+			Cv.StrokeRoundRect({X, Y, W, H}, Corner, NetA(Col, 0.45f), 1.0f);
+		}
+	}
+	const Color Dark = rlsites_detail::SitesTone(0x07121c);
+	Cv.Text(Text, X + W / 2.0f, Y + H / 2.0f + 0.5f, Ts(Size, 700, Solid ? rlsites_detail::SitesLabelInk(Dark, Col, Col) : Col, Align::Center, Baseline::Middle));
 	return W;
 }
 } // namespace rlnet_detail

@@ -79,6 +79,12 @@ CashMethod SitesBank(Chips WithdrawFee, double HoursMin, double HoursMax)
  * paid online events; its welcome is 100% of the first deposit up to $100, released by rake. Coral and sky on plum: every one
  * of its 16 colours differs from RiverLine's, so the laptop's palette-leak check reads any RiverLine colour inside its skin as
  * a leak.
+ *
+ * Update 3 (SPEC §2.3, §1.11; core-sites-look, G1): from midnight to 6 AM world time the whole skin turns to Afterburner Hours,
+ * a second 16-token palette (NightPalette, chosen by SitesSkin from the world minute inside NightFromMin..NightToMin): violet
+ * on midnight plum, aqua for information, the same sunflower money, loss red, tangerine and lime as the day's, and a violet
+ * velvet cloth. Its anchors are the design's (Bg 120c1f, Panel 1a1230, Accent b57bff, Accent2 3ee6d0, Ink f3eaff); the rest
+ * are derived on the same steps as the day palette's. Every one differs from RiverLine's, so the same leak check holds at night.
  */
 SiteDef SitesIgnite()
 {
@@ -91,6 +97,12 @@ SiteDef SitesIgnite()
 	D.RepTitle = "Ignite Partnerships";
 	D.Palette = {0x1a1220, 0x20162a, 0x24182c, 0x2e2038, 0x46325a, 0xfff4ec, 0xc4afc9, 0x8a7493, 0xff6b57, 0x4fc3f7, 0xffc94a, 0xff4d6d, 0xff9e3d, 0x5be08a, 0x4a2142,
 		0x2c1228};
+	// Afterburner Hours, in pal:: order: Bg, Bg2, Panel, Panel2, Line, Ink, Muted, Dim, Accent (violet), Accent2 (aqua), Gold, Red,
+	// Orange, Green, Felt (violet velvet), FeltDark.
+	D.NightPalette = {0x120c1f, 0x160f28, 0x1a1230, 0x221a3c, 0x382a5e, 0xf3eaff, 0xb4a6d6, 0x7a6c9a, 0xb57bff, 0x3ee6d0, 0xffc94a, 0xff4d6d, 0xff9e3d, 0x5be08a,
+		0x3b2160, 0x22123a};
+	D.NightFromMin = 0;   // 00:00
+	D.NightToMin = 360;   // 06:00, the Night Shift's close
 	D.Rake.Kind = 1;
 	D.Rake.Flat = 0.11;
 	D.Traffic.Scale = 0.30;
@@ -120,7 +132,13 @@ SiteDef SitesIgnite()
  * rake that falls at the top (8% to $55, 7% from $109, 5.5% from $530), 55% of RiverLine's traffic (busiest at 9 PM, Sundays
  * x1.5), its own team of six. Its new lobby and points season opened on Night One. It invites at 300 tracked online events
  * with an $11 average over the last hundred, or an online series title, or Kast Partner; its welcome is $33 in tickets.
- * The brand's slate and gold (the patch's), with every one of its 16 colours apart from RiverLine's.
+ *
+ * Its colours are the Exchange after the bell (Update 3, SPEC §3.3 and §13, the user's 2026-10-21 restyle; core-sites-look,
+ * G1): red and black, all 16 tokens replaced. Onyx ground, carbon panels, frost ink; Signal Red as the one accent ("red is
+ * light, never ink": fills, strokes and glows, never text on the dark), chrome as the second, Hot White for money, Signal Down
+ * for losses, Caution Amber for projected overlays, Signal Up for gains, and black speed cloth. Ink on Panel 15.30:1, Muted on
+ * Bg 7.54:1; every one of the 16 apart from RiverLine's and from Ignite's. The sponsor brand "turnstone" (the team's patch,
+ * badges and book) keeps the heritage slate and gold: Sponsor.cpp and the patch atlas are frozen this update.
  */
 SiteDef SitesRunItTwice()
 {
@@ -132,8 +150,10 @@ SiteDef SitesRunItTwice()
 	D.Rep = "Ingrid Vale";
 	D.RepTitle = "RunItTwice Player Development";
 	D.TeamName = "Team RunItTwice";
-	D.Palette = {0x141a24, 0x18202c, 0x1c2433, 0x243044, 0x334155, 0xeef1f5, 0x9aa6b8, 0x5e6a7d, 0xd4a843, 0x8fa3bf, 0xe8c25a, 0xe5505e, 0xe88b45, 0x48c77a, 0x1d4a3e,
-		0x0f2b24};
+	// Onyx, Bg2, Carbon, Panel2, Hairline, Frost, Muted, Dim, Signal Red, Chrome, Hot White, Signal Down, Caution Amber, Signal Up,
+	// black cloth, its dark edge.
+	D.Palette = {0x0c0c0f, 0x111114, 0x16161a, 0x1e1e23, 0x2c2c33, 0xececef, 0xa0a0aa, 0x62626c, 0xd2141a, 0xb6bbc5, 0xffffff, 0xff3d3d, 0xf5a524, 0x48c77a, 0x1a1a1f,
+		0x09090b};
 	D.Rake.Kind = 2;
 	D.Rake.Steps = {{0, 0.08}, {10900, 0.07}, {53000, 0.055}};
 	D.Traffic.Scale = 0.55;

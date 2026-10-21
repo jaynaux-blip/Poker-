@@ -374,10 +374,41 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 	const float Cy = (Top + Bottom) / 2.0f + 6.0f;
 	const float Ex = R.W * 0.31f;
 	const float Ey = (Bottom - Top) * 0.29f;
-	C->FillEllipse(Cx, Cy + 6.0f, Ex + 20.0f, Ey + 20.0f, Rgba(0, 0, 0, 0.45f));
-	C->FillEllipse(Cx, Cy, Ex + 16.0f, Ey + 16.0f, Paint::Linear({0.0f, Cy - Ey}, {0.0f, Cy + Ey}, rlsites_detail::SitesTone(0x2a3342), rlsites_detail::SitesTone(0x10151d)));
-	C->FillEllipse(Cx, Cy, Ex, Ey, Paint::Radial({Cx, Cy - Ey * 0.3f}, 10.0f, {Cx, Cy}, Ex, rlsites_detail::SitesFeltLight(), 0.7f, pal::Felt, pal::FeltDark));
-	C->StrokeEllipse(Cx, Cy, Ex - 20.0f, Ey - 16.0f, Rgba(255, 255, 255, 0.07f), 1.5f);
+	if (Look.Shape == rlsites_detail::TableShape::Capsule)
+	{
+		// G1 (§2.5 Tiles): a mini capsule with a neon rim.
+		const Rect F{Cx - Ex, Cy - Ey, 2.0f * Ex, 2.0f * Ey};
+		C->FillRoundRect({F.X - 14.0f, F.Y - 8.0f, F.W + 28.0f, F.H + 28.0f}, Ey + 14.0f, Rgba(0, 0, 0, 0.45f));
+		C->FillRoundRect({F.X - 14.0f, F.Y - 14.0f, F.W + 28.0f, F.H + 28.0f}, Ey + 14.0f, Hex(rlsites_detail::SitesIgNight));
+		C->GlowRoundRect({F.X - 8.0f, F.Y - 8.0f, F.W + 16.0f, F.H + 16.0f}, Ey + 8.0f, Rgba(255, 61, 139, 0.3f), 8.0f);
+		C->FillRoundRect({F.X - 8.0f, F.Y - 8.0f, F.W + 16.0f, F.H + 16.0f}, Ey + 8.0f, Paint::Linear({F.X, 0.0f}, {F.X + F.W, 0.0f}, Hex(rlsites_detail::SitesIgCoral), Hex(rlsites_detail::SitesIgPink)));
+		C->FillRoundRect({F.X - 3.0f, F.Y - 3.0f, F.W + 6.0f, F.H + 6.0f}, Ey + 3.0f, Hex(rlsites_detail::SitesIgNight));
+		C->FillRoundRect(F, Ey, Paint::Radial({Cx, Cy - Ey * 0.3f}, 10.0f, {Cx, Cy}, Ex, Hex(Look.FeltLight), 0.7f, Hex(Look.Felt), Hex(Look.FeltDark)));
+	}
+	else if (Look.Shape == rlsites_detail::TableShape::Octagon)
+	{
+		// G1 (§3.5 Tiles): a mini octagon whose rail light is one 1-unit Signal Red line.
+		const auto Oct = [&](float D) {
+			const float X0 = Cx - Ex - D;
+			const float Y0 = Cy - Ey - D;
+			const float W0 = 2.0f * (Ex + D);
+			const float H0 = 2.0f * (Ey + D);
+			const float K = std::max(0.0f, Ey * 0.44f + D * 0.6f);
+			return std::vector<Vec2>{{X0 + K, Y0}, {X0 + W0 - K, Y0}, {X0 + W0, Y0 + K}, {X0 + W0, Y0 + H0 - K}, {X0 + W0 - K, Y0 + H0}, {X0 + K, Y0 + H0}, {X0, Y0 + H0 - K}, {X0, Y0 + K}};
+		};
+		C->FillPolygon(Oct(12.0f), Paint::Linear({0.0f, Cy - Ey - 12.0f}, {0.0f, Cy + Ey + 12.0f}, Hex(rlsites_detail::SitesRitGloss), Hex(0x0c0c0f)));
+		C->StrokePolyline(Oct(12.0f), true, Rgba(182, 187, 197, 0.45f), 1.0f);
+		C->FillPolygon(Oct(0.0f), Hex(Look.FeltDark));
+		C->FillEllipse(Cx, Cy, Ex * 0.92f, Ey * 0.92f, Paint::Radial({Cx, Cy - Ey * 0.2f}, 0.0f, {Cx, Cy}, Ex * 0.92f, Hex(Look.FeltLight), 0.55f, Hex(Look.Felt), Hex(Look.FeltDark)));
+		C->StrokePolyline(Oct(-1.0f), true, Hex(rlsites_detail::SitesRitRed), 1.0f);
+	}
+	else
+	{
+		C->FillEllipse(Cx, Cy + 6.0f, Ex + 20.0f, Ey + 20.0f, Rgba(0, 0, 0, 0.45f));
+		C->FillEllipse(Cx, Cy, Ex + 16.0f, Ey + 16.0f, Paint::Linear({0.0f, Cy - Ey}, {0.0f, Cy + Ey}, rlsites_detail::SitesTone(0x2a3342), rlsites_detail::SitesTone(0x10151d)));
+		C->FillEllipse(Cx, Cy, Ex, Ey, Paint::Radial({Cx, Cy - Ey * 0.3f}, 10.0f, {Cx, Cy}, Ex, rlsites_detail::SitesFeltLight(), 0.7f, pal::Felt, pal::FeltDark));
+		C->StrokeEllipse(Cx, Cy, Ex - 20.0f, Ey - 16.0f, Rgba(255, 255, 255, 0.07f), 1.5f);
+	}
 	// Its site's mark at the corner, once the open tables aren't all RiverLine's (a RiverLine-only sitting looks as it did).
 	bool Mixed = false;
 	for (int K = 0; K < S.TableCount(); ++K)
@@ -425,14 +456,22 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		DrawCard(*C, S.Board[I], Bx0 + Nf(I) * (Bw + 5.0f), Cy - 34.0f, Bw, Bh, O);
 	}
 
-	// Dealer button (Look.Dealer > 0: a site's own, ui-tablestyle's; RiverLine's is the white disc) and bets.
+	// Dealer button (Look.Dealer > 0: a site's own; RiverLine's is the white disc) and bets.
 	{
 		const Vec2 Bp = SeatAt(S.ButtonSeat);
 		const float Dx = Cx + (Bp.X - Cx) * 0.8f + 24.0f;
 		const float Dy = Cy + (Bp.Y - Cy) * 0.78f;
-		C->FillCircle(Dx, Dy, 8.0f, Hex(0xf4f4f4));
-		UI.Text("D", Dx, Dy + 0.5f, Ts(10.0f, 800, Hex(0x111111), Align::Center, Baseline::Middle));
+		if (Look.Dealer > 0)
+		{
+			rlsites_detail::SitesDealerButton(*C, Dx, Dy, 9.0f, Look.Dealer);
+		}
+		else
+		{
+			C->FillCircle(Dx, Dy, 8.0f, Hex(0xf4f4f4));
+			UI.Text("D", Dx, Dy + 0.5f, Ts(10.0f, 800, Hex(0x111111), Align::Center, Baseline::Middle));
+		}
 	}
+	const bool TileInBb = rlsites_detail::SitesBetsInBb(*this, Look);
 	for (const SeatVis& Sv : S.Seats)
 	{
 		if (!Sv.Present || Sv.Bet <= 0)
@@ -440,10 +479,12 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 			continue;
 		}
 		const Vec2 B = BetAt(Sv.Seat);
-		const std::string Amt = ChipsText(static_cast<double>(Sv.Bet));
+		const std::string Amt = TileInBb ? rlsites_detail::SitesBbText(Sv.Bet, S.CurHand ? S.CurHand->BigBlind : Lv.Bb) : ChipsText(static_cast<double>(Sv.Bet));
 		const float Aw = UI.Measure(Amt, 11.5f, 700, true);
 		const float X0 = B.X - (Aw + 14.0f) / 2.0f;
-		C->FillCircle(X0 + 5.0f, B.Y - 4.0f, 5.5f, Hex(0xc8323c));
+		// The chip's colour is the look's (G1: Ignite's coral candy, RunItTwice's Signal Red lacquer; RiverLine's red as always).
+		const Color ChipCol = Look.ChipSet == 1 ? Hex(rlsites_detail::SitesIgCoral) : Look.ChipSet == 2 ? Hex(rlsites_detail::SitesRitRed) : Hex(0xc8323c);
+		C->FillCircle(X0 + 5.0f, B.Y - 4.0f, 5.5f, ChipCol);
 		C->StrokeEllipse(X0 + 5.0f, B.Y - 4.0f, 3.5f, 3.5f, Rgba(255, 255, 255, 0.85f), 1.2f, 2.0f);
 		UI.Text(Amt, X0 + 14.0f, B.Y, Ts(11.5f, 700, Hex(0xffffff), Align::Left, Baseline::Alphabetic, true));
 	}
@@ -680,7 +721,13 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 		{
 			Status = "Shuffling up";
 		}
-		UI.Text(Status, R.X + 16.0f, Fy + 25.0f, Ts(13.0f, 600, Plan.On || S.Sprinting ? pal::Accent2 : pal::Dim, Align::Left, Baseline::Alphabetic, false, R.W - 270.0f));
+		// g1-audit M2 (§9.6 "share no chrome"): a rival tile's status line and pace row in its own language (RunItTwice's Mono and
+		// cut slabs, Ignite's Bold and candy pills); RiverLine's as they were.
+		const bool Own = Look.SeatList;
+		const TextStyle StatusSt = Own ? (Look.Cut > 0.0f ? Ts(12.0f, 500, Plan.On || S.Sprinting ? pal::Accent2 : pal::Muted, Align::Left, Baseline::Alphabetic, true, R.W - 270.0f)
+											  : Ts(13.0f, 700, Plan.On || S.Sprinting ? pal::Accent2 : pal::Muted, Align::Left, Baseline::Alphabetic, false, R.W - 270.0f))
+								   : Ts(13.0f, 600, Plan.On || S.Sprinting ? pal::Accent2 : pal::Dim, Align::Left, Baseline::Alphabetic, false, R.W - 270.0f);
+		UI.Text(Status, R.X + 16.0f, Fy + 25.0f, StatusSt);
 		// Pace for this table: FULL · SMART · AUTO (update 2 §2.6.1). AUTO brings the table forward with the autoplay panel
 		// over it; FULL or SMART hands the seat back.
 		const std::pair<Pace, const char*> Paces[2] = {{Pace::Full, "Full"}, {Pace::Smart, "Smart"}};
@@ -689,11 +736,20 @@ void RiverLine::Tile(int Index, const Rect& R, bool Front, double Now)
 			const bool IsAuto = K == 2;
 			const std::string Label = IsAuto ? std::string("AUTO") : std::string(Paces[K].second);
 			const Rect Pr{R.X + R.W - 12.0f - Nf(3 - K) * 76.0f, Fy + 6.0f, 72.0f, 28.0f};
-			const Ui::ClickState St = UI.Clickable(Id + "pace" + Label, Pr, !S.Finishing());
 			const bool Lit = IsAuto ? Plan.On : !Plan.On && S.CurrentPace == Paces[K].first;
-			UI.RRect(Pr, 8.0f, Lit ? rlsites_detail::SitesTone(0x1f4d63) : St.Hover ? rlsites_detail::SitesTone(0x172a42) : pal::Panel, Lit ? pal::Accent : pal::Line);
-			UI.Text(Label, Pr.X + Pr.W / 2.0f, Pr.Y + 19.0f, Ts(12.5f, IsAuto ? 800 : 700, Lit ? pal::Ink : pal::Muted, Align::Center));
-			if (!St.Clicked)
+			bool Pressed = false;
+			if (Own)
+			{
+				Pressed = rlsites_detail::SitesControl(UI, *C, Look, Id + "pace" + Label, Pr, Label, Lit, pal::Accent, !S.Finishing());
+			}
+			else
+			{
+				const Ui::ClickState St = UI.Clickable(Id + "pace" + Label, Pr, !S.Finishing());
+				UI.RRect(Pr, 8.0f, Lit ? rlsites_detail::SitesTone(0x1f4d63) : St.Hover ? rlsites_detail::SitesTone(0x172a42) : pal::Panel, Lit ? pal::Accent : pal::Line);
+				UI.Text(Label, Pr.X + Pr.W / 2.0f, Pr.Y + 19.0f, Ts(12.5f, IsAuto ? 800 : 700, Lit ? pal::Ink : pal::Muted, Align::Center));
+				Pressed = St.Clicked;
+			}
+			if (!Pressed)
 			{
 				continue;
 			}

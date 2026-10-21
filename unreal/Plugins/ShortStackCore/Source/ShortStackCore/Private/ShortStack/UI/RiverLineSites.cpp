@@ -15,6 +15,7 @@
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Structure.h"
 #include "ShortStack/UI/SiteArt.h"
 
 #include <algorithm>
@@ -223,10 +224,11 @@ net::SiteId SitesClient(const RiverLine& RL, const Session& S)
 	case Screen::Lobby: return SitesShown(RL, S);
 	case Screen::Table: return SitesOfTable(S);
 	case Screen::Results:
-		if (S.HasResults && !S.History.empty() && S.History.front().Name == S.LastResults.EventName)
+		// Update 3 (§1.11): the result's own site, Session::LastSiteResult (ShowResults sets it with HasResults), since a FUSE
+		// result never enters History and History's front would draw it in RiverLine's frame.
+		if (S.HasResults)
 		{
-			const net::SiteId X = net::SiteOf(S.History.front().EventId);
-			return SitesRegistered(X) ? X : net::SiteId::RiverLine;
+			return SitesRegistered(S.LastSiteResult) ? S.LastSiteResult : net::SiteId::RiverLine;
 		}
 		return net::SiteId::RiverLine;
 	case Screen::Boot: break;
@@ -375,7 +377,7 @@ bool SitesButton(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const
 {
 	// The look's corners (update 3, §1.11): a pill's ends are round; RiverLine's look is Ui::Button's 10.
 	const float Corner = L.Button == ButtonShape::Pill ? R.H / 2.0f : L.Radius;
-	if (SitesHome() && Corner == 10.0f)
+	if (SitesHome() && Corner == 10.0f && L.Cut <= 0.0f && !L.LabelCaps && L.TitleFace < 0)
 	{
 		return UI.Button(Id, R, Label, Opts);
 	}
@@ -389,12 +391,13 @@ bool SitesButton(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const
 	case ButtonKind::Primary:
 		Base = Mix(pal::Accent, Hex(0x000000), 0.16f);
 		Hi = pal::Accent;
-		Ink = Mix(pal::Accent, Hex(0x000000), 0.86f);
+		// G1 (§3.4 "Ink on a filled accent"): the dark mix or Ink, whichever reads higher on the fill, inside a rival's skin.
+		Ink = SitesLabelInk(Mix(pal::Accent, Hex(0x000000), 0.86f), Base, Hi);
 		break;
 	case ButtonKind::Gold:
 		Base = Mix(pal::Gold, Hex(0x000000), 0.17f);
 		Hi = pal::Gold;
-		Ink = Mix(pal::Gold, Hex(0x000000), 0.86f);
+		Ink = SitesLabelInk(Mix(pal::Gold, Hex(0x000000), 0.86f), Base, Hi);
 		break;
 	case ButtonKind::Danger:
 		Base = Hex(0x7a2230);
@@ -411,21 +414,48 @@ bool SitesButton(Ui& UI, Canvas& Cv, const std::string& Id, const Rect& R, const
 	const float Prev = Cv.GetAlpha();
 	Cv.SetAlpha(Opts.Enabled ? Prev : Prev * 0.35f);
 	const Rect Body{R.X, R.Y + Shift, R.W, R.H};
-	Cv.FillRoundRect(Body, Corner, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, St.Hover ? Hi : Base, Base));
-	if (Opts.Kind == ButtonKind::Ghost)
+	const Paint Fill = Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, St.Hover ? Hi : Base, Base);
+	// G1 (v1.2, §13.2 #5): a look with a cut draws a slab, square but for its top-right corner (RunItTwice's 8).
+	const float Cut = L.Cut > 0.0f ? std::min(R.H / 2.0f, L.Cut * 0.8f) : 0.0f;
+	if (Cut > 0.0f)
 	{
-		Cv.StrokeRoundRect(Body, Corner, Rgba(255, 255, 255, 0.12f), 1.0f);
+		const std::vector<Vec2> Path = SitesCutPath(Body, Cut);
+		Cv.FillPolygon(Path, Fill);
+		if (Opts.Kind == ButtonKind::Ghost || Opts.Kind == ButtonKind::Secondary)
+		{
+			Cv.StrokePolyline(Path, true, Opts.Kind == ButtonKind::Ghost ? Rgba(255, 255, 255, 0.12f) : pal::Line, 1.0f);
+		}
+		if (Opts.Kind == ButtonKind::Primary && L.Button == ButtonShape::Slab)
+		{
+			// RunItTwice's red slab (§3.4): a 1-unit LED Red top edge. (No light sweep here: under it the shared label's Ink
+			// would read 4.2:1; RunItTwice's own Hot White slabs carry the sweep.)
+			Cv.FillRect({Body.X, Body.Y, Body.W - Cut, 1.0f}, Hex(SitesRitLed));
+		}
 	}
+	else
+	{
+		Cv.FillRoundRect(Body, Corner, Fill);
+		if (Opts.Kind == ButtonKind::Ghost)
+		{
+			Cv.StrokeRoundRect(Body, Corner, Rgba(255, 255, 255, 0.12f), 1.0f);
+		}
+	}
+	// The look's type (§2.3, §3.3): the label in its title face (Ignite's BlackItalic, RunItTwice's BoldCondensed caps).
+	const std::string Text = L.LabelCaps ? NetUpper(Label) : Label;
+	const auto Faced = [&L](TextStyle T) {
+		T.Face = L.TitleFace;
+		return T;
+	};
 	const float Size = Opts.Size;
 	const float Cy = R.Y + R.H / 2.0f + Shift;
 	if (!Opts.Sub.empty())
 	{
-		Cv.Text(Label, R.X + R.W / 2.0f, Cy - 4.0f, Ts(Size, 700, Ink, Align::Center));
+		Cv.Text(Text, R.X + R.W / 2.0f, Cy - 4.0f, Faced(Ts(Size, 700, Ink, Align::Center)));
 		Cv.Text(Opts.Sub, R.X + R.W / 2.0f, Cy + Size * 0.85f, Ts(Size * 0.72f, 600, Ink, Align::Center, Baseline::Alphabetic, true));
 	}
 	else
 	{
-		Cv.Text(Label, R.X + R.W / 2.0f, Cy + 1.0f, Ts(Size, 700, Ink, Align::Center, Baseline::Middle));
+		Cv.Text(Text, R.X + R.W / 2.0f, Cy + 1.0f, Faced(Ts(Size, 700, Ink, Align::Center, Baseline::Middle)));
 	}
 	if (!Opts.Hotkey.empty())
 	{
@@ -1178,17 +1208,99 @@ std::vector<std::string> SitesUiInventory()
 		SitesBonusSlide, SitesClubSlide, SitesOwnMoney, SitesStrikeConfirm, SitesKastClient, SitesAboutSeasonYear, SitesBonusClosed, SitesInviteDone, SitesTicketsMissed};
 }
 
-// ---- Update 3 (SPEC §1.2, §1.11, §7.2): the shared seams the revamped sites draw through. Phase A: every look is RiverLine's
-// (today's literals), so each helper below draws and behaves exactly as RiverLine does today; ui-tablestyle lands Ignite's and
-// RunItTwice's looks and the Afterburner choice.
-const SiteLook& SitesLook(net::SiteId /*S*/)
+// ---- Update 3 (SPEC §1.2, §1.11, §7.2): the shared seams the revamped sites draw through. RiverLine's look is today's
+// literals (the no-op proof: its draw lists don't move); G1 (ui-tablestyle) lands Ignite's arcade and RunItTwice's exchange.
+
+/** Ignite's look (§2.3, §2.5): pills and round corners, BlackItalic, the capsule in its neon tube, bubbles, candy chips. */
+SiteLook SitesIgniteLook()
+{
+	SiteLook L;
+	L.Radius = 18.0f;
+	L.PanelRadius = 22.0f;
+	L.ButtonH = 72.0f;
+	L.Button = ButtonShape::Pill;
+	L.TitleFace = static_cast<int8_t>(Font::BlackItalic);
+	L.NumberFace = static_cast<int8_t>(Font::BlackItalic);
+	L.Shape = TableShape::Capsule; // felt {150,210,880,440}, radius 220
+	L.Cx = 590.0f;
+	L.Cy = 430.0f;
+	L.Rx = 440.0f;
+	L.Ry = 220.0f;
+	L.Chamfer = 220.0f; // the capsule's end radius
+	L.Felt = 0x4a2142;      // Plum Velvet
+	L.FeltLight = 0x6a2d5e; // its radial highlight
+	L.FeltDark = 0x3a1834;
+	L.Rail = 1;     // the neon tube
+	L.ChipSet = 1;  // candy
+	L.CardBack = 1; // Sunset
+	L.Dealer = 1;   // the sunflower disc
+	L.Seat = SeatStyle::Bubble;
+	L.SeatList = true;
+	L.Seat8 = {{{590.0f, 690.0f}, {300.0f, 660.0f}, {140.0f, 430.0f}, {300.0f, 196.0f}, {590.0f, 160.0f}, {880.0f, 196.0f}, {1040.0f, 430.0f}, {880.0f, 660.0f}}};
+	L.Seat6 = {{{590.0f, 690.0f}, {200.0f, 580.0f}, {200.0f, 280.0f}, {590.0f, 170.0f}, {980.0f, 280.0f}, {980.0f, 580.0f}}};
+	L.Seat3 = {{{590.0f, 720.0f}, {330.0f, 300.0f}, {850.0f, 300.0f}}};
+	L.CardW = 140.0f;
+	L.ChromeH = 72.0f; // the marquee
+	L.EaseSeconds = 0.35f;
+	L.RestoreAlpha = true;
+	L.Key = 0x1f9b3c6a52e04d17ull;
+	return L;
+}
+
+/** RunItTwice's look (§3.3, §3.5, v1.2): square corners with one cut, BoldCondensed caps, the octagon, data cards, lacquer. */
+SiteLook SitesRitLook()
+{
+	SiteLook L;
+	L.Radius = 0.0f;
+	L.PanelRadius = 0.0f;
+	L.ButtonH = 60.0f;
+	L.Button = ButtonShape::Slab;
+	L.TitleFace = static_cast<int8_t>(Font::BoldCondensed);
+	L.NumberFace = static_cast<int8_t>(Font::BoldCondensed);
+	L.LabelCaps = true;
+	L.Shape = TableShape::Octagon; // felt {170,210,840,440}, 96-unit chamfers
+	L.Cx = 590.0f;
+	L.Cy = 430.0f;
+	L.Rx = 420.0f;
+	L.Ry = 220.0f;
+	L.Chamfer = 96.0f;
+	L.Felt = 0x1a1a1f;      // the black speed cloth
+	L.FeltLight = 0x26262d; // its downlight pool
+	L.FeltDark = 0x09090b;
+	L.Rail = 2;     // the red-lit rail
+	L.ChipSet = 2;  // lacquer
+	L.CardBack = 2; // the Twin Stripe
+	L.Dealer = 2;   // the chrome puck
+	L.Seat = SeatStyle::DataCard;
+	L.BetsInBb = true;
+	L.HudDefault = true;
+	L.Clock24 = true;
+	L.SeatList = true;
+	// v1.2 (§13.8 #1): the 8-max bottom seats sit in the hero's row, clear of the lower third.
+	L.Seat8 = {{{590.0f, 690.0f}, {280.0f, 690.0f}, {160.0f, 430.0f}, {300.0f, 200.0f}, {590.0f, 160.0f}, {880.0f, 200.0f}, {1020.0f, 430.0f}, {900.0f, 690.0f}}};
+	L.Seat6 = {{{590.0f, 690.0f}, {190.0f, 560.0f}, {190.0f, 300.0f}, {590.0f, 160.0f}, {990.0f, 300.0f}, {990.0f, 560.0f}}};
+	L.Seat3 = {{{590.0f, 690.0f}, {300.0f, 250.0f}, {880.0f, 250.0f}}};
+	L.LowerThird = {250.0f, 598.0f, 680.0f, 36.0f};
+	L.CardW = 180.0f;
+	L.ChromeH = 84.0f; // the tape and the header
+	L.EaseSeconds = 0.16f;
+	L.RestoreAlpha = true;
+	L.Key = 0x6d0c2b77a4e1f359ull;
+	L.Cut = 10.0f;
+	return L;
+}
+
+const SiteLook& SitesLook(net::SiteId S)
 {
 	static const SiteLook SitesTodayLook;
-	return SitesTodayLook;
+	static const SiteLook SitesIgnite = SitesIgniteLook();
+	static const SiteLook SitesRit = SitesRitLook();
+	return S == net::SiteId::Ignite ? SitesIgnite : S == net::SiteId::RunItTwice ? SitesRit : SitesTodayLook;
 }
 
 SiteLook SitesLookFor(const Session& /*S*/, net::SiteId Site)
 {
+	// G2 (ui-tablestyle's small part): Ignite's equipped back, felt and chips over its look.
 	return SitesLook(Site);
 }
 
@@ -1202,10 +1314,24 @@ const SiteLook& SitesClientLook(const RiverLine& RL, const Session& S)
 	return SitesLook(SitesClient(RL, S));
 }
 
-Skin SitesSkin(net::SiteId Site, double /*WorldMin*/)
+Skin SitesSkin(net::SiteId Site, double WorldMin)
 {
-	// Phase A: the day palette at every hour (ui-tablestyle chooses Afterburner here from NightPalette, G1).
-	return Skin::FromHex(net::Def(SitesRegistered(Site) ? Site : net::SiteId::RiverLine).Palette);
+	// G1 (§1.11, §2.3): a site with a night palette (Ignite's Afterburner Hours) wears it inside its window of the day (world
+	// minutes, NightFromMin to NightToMin; a window may cross midnight), so Draw, the stream preview and the tiles choose it
+	// in this one place. Every other site, and every other hour, wears its day palette.
+	const net::SiteDef& D = net::Def(SitesRegistered(Site) ? Site : net::SiteId::RiverLine);
+	const bool Night = std::any_of(D.NightPalette.begin(), D.NightPalette.end(), [](uint32_t V) { return V != 0; });
+	if (Night && D.NightFromMin != D.NightToMin)
+	{
+		const long long Day = static_cast<long long>(net::MinutesPerDay);
+		const long long Minute = ((static_cast<long long>(std::floor(WorldMin)) % Day) + Day) % Day;
+		const bool In = D.NightFromMin < D.NightToMin ? Minute >= D.NightFromMin && Minute < D.NightToMin : Minute >= D.NightFromMin || Minute < D.NightToMin;
+		if (In)
+		{
+			return Skin::FromHex(D.NightPalette);
+		}
+	}
+	return Skin::FromHex(D.Palette);
 }
 
 SitesBlocked SitesBlockUnder(Ui& U, Rect R, bool Modal)
@@ -1324,11 +1450,549 @@ RiverLine::Page SitesPageHome(net::SiteId Site, RiverLine::Page P)
 	using Pg = RiverLine::Page;
 	const bool Rival = Site != net::SiteId::RiverLine;
 	const bool HomeOnly = P == Pg::Career || P == Pg::Embercrest || P == Pg::Backing;
-	const bool RivalsOnly = P == Pg::Promotions || P == Pg::Cashier;
-	const bool IgniteOnly = P == Pg::Fuse || P == Pg::Profile;
+	// G1: Profile is both rivals' (Ignite's Player Card, §2.4 L; RunItTwice's Member File, §3.4 J).
+	const bool RivalsOnly = P == Pg::Promotions || P == Pg::Cashier || P == Pg::Profile;
+	const bool IgniteOnly = P == Pg::Fuse;
 	const bool RitOnly = P == Pg::Live || P == Pg::League || P == Pg::Desk;
 	const bool Missing = Rival ? HomeOnly || (IgniteOnly && Site != net::SiteId::Ignite) || (RitOnly && Site != net::SiteId::RunItTwice) : RivalsOnly || IgniteOnly || RitOnly;
 	return Missing ? Pg::Lobby : P;
+}
+
+// ---- Update 3, G1 (ui-tablestyle): what the shared table and the gatekeepers draw by look
+
+double SitesInkContrast(const Color& A, const Color& B)
+{
+	const auto Lin = [](float V) { return V <= 0.04045f ? V / 12.92 : std::pow((V + 0.055) / 1.055, 2.4); };
+	const auto Lum = [&Lin](const Color& C) { return 0.2126 * Lin(C.R) + 0.7152 * Lin(C.G) + 0.0722 * Lin(C.B); };
+	const double La = Lum(A);
+	const double Lb = Lum(B);
+	return (std::max(La, Lb) + 0.05) / (std::min(La, Lb) + 0.05);
+}
+
+Color SitesLabelInk(const Color& Dark, const Color& Fill, const Color& Hover)
+{
+	if (SitesHome())
+	{
+		return Dark; // at home whatever the fill: RiverLine's, Kast's, Mail's, the Store's and Rerun's pills never move
+	}
+	const double DarkReads = std::min(SitesInkContrast(Dark, Fill), SitesInkContrast(Dark, Hover));
+	const double InkReads = std::min(SitesInkContrast(pal::Ink, Fill), SitesInkContrast(pal::Ink, Hover));
+	return InkReads > DarkReads ? pal::Ink : Dark;
+}
+
+std::vector<Vec2> SitesCutPath(const Rect& R, float Cut)
+{
+	const float K = std::max(0.0f, std::min(Cut, std::min(R.W, R.H)));
+	return {{R.X, R.Y}, {R.X + R.W - K, R.Y}, {R.X + R.W, R.Y + K}, {R.X + R.W, R.Y + R.H}, {R.X, R.Y + R.H}};
+}
+
+Rect SitesSeatBox(const SiteLook& L, Vec2 P, bool Hero)
+{
+	switch (L.Seat)
+	{
+	case SeatStyle::Bubble:
+	{
+		// The avatar (64, the hero's 76) in its ring and the fuse's track, then the name pill and the stack under it (the
+		// hero's stack rides in its wider pill).
+		const float R = Hero ? 38.0f : 32.0f;
+		const float W = Hero ? 184.0f : L.CardW;
+		const float Bottom = Hero ? P.Y + R + 8.0f + 26.0f : P.Y + R + 8.0f + 22.0f + 28.0f;
+		return {P.X - W / 2.0f, P.Y - R - 9.0f, W, Bottom - (P.Y - R - 9.0f)};
+	}
+	case SeatStyle::DataCard:
+	{
+		const float W = Hero ? 236.0f : L.CardW;
+		const float H = Hero ? 72.0f : 64.0f;
+		return {P.X - W / 2.0f, P.Y - H / 2.0f, W, H};
+	}
+	case SeatStyle::Plate: break;
+	}
+	const float W = Hero ? 230.0f : 190.0f;
+	return {P.X - W / 2.0f, P.Y - 32.0f, W, 64.0f};
+}
+
+bool SitesLowerThirdUp(const Session& S)
+{
+	// The band is up from the reveal (equities known) until the showdown prints a hand. Not CurHand->bComplete: an all-in
+	// has finished the engine's hand before its run-out is replayed, so that test kept the band down for every real all-in.
+	if (!S.CurHand)
+	{
+		return false;
+	}
+	bool Equity = false;
+	for (const SeatVis& V : S.Seats)
+	{
+		if (!V.Present || V.Folded)
+		{
+			continue;
+		}
+		if (!V.HandLabel.empty() || V.Winner)
+		{
+			return false;
+		}
+		Equity = Equity || V.HasEquity;
+	}
+	return Equity;
+}
+
+bool SitesBetsInBb(const RiverLine& RL, const SiteLook& L)
+{
+	if (!L.BetsInBb)
+	{
+		return false;
+	}
+	const auto It = SitesStates().find(&RL);
+	return It == SitesStates().end() || !It->second.BetsFlipped;
+}
+
+void SitesToggleBets(const RiverLine& RL)
+{
+	SitesUi& U = SitesOf(&RL);
+	U.BetsFlipped = !U.BetsFlipped;
+}
+
+bool SitesHudOn(const RiverLine& RL, const Session& S, const SiteLook& L)
+{
+	// g1-audit L10: HudDefault is read here, where the table decides whether the HUD shows. RunItTwice's pro default holds
+	// whatever the player chose at RiverLine; RiverLine's and Ignite's looks keep Session::Hud (on until switched, not saved).
+	if (!L.HudDefault)
+	{
+		return S.Hud;
+	}
+	const auto It = SitesStates().find(&RL);
+	return It == SitesStates().end() || !It->second.HudFlipped;
+}
+
+void SitesToggleHud(const RiverLine& RL, Session& S, const SiteLook& L)
+{
+	if (!L.HudDefault)
+	{
+		S.Hud = !S.Hud;
+		return;
+	}
+	SitesUi& U = SitesOf(&RL);
+	U.HudFlipped = !U.HudFlipped;
+}
+
+void SitesIcmStart(SitesIcmWalk& W, const std::vector<double>& Stacks, const std::vector<double>& Prizes, size_t Mine)
+{
+	W.Stacks = Stacks;
+	W.Prizes = Prizes;
+	W.Mine = Mine;
+	W.Places = 0;
+	W.ChipShare = false;
+	W.Done = true;
+	W.Sum = 0.0;
+	W.Depth = 0;
+	// Icm()'s set-up, line for line (Structure.cpp): the chips in play, the places left to pay, the finishing orders.
+	const int N = static_cast<int>(Stacks.size());
+	double Total = 0.0;
+	for (double S : Stacks)
+	{
+		Total += S;
+	}
+	if (N == 0 || Total == 0.0 || Mine >= Stacks.size())
+	{
+		return;
+	}
+	const int Places = static_cast<int>(Prizes.size()) < N ? static_cast<int>(Prizes.size()) : N;
+	double Orders = 1.0;
+	for (int K = 0; K < Places; ++K)
+	{
+		Orders *= N - K;
+	}
+	if (Orders > 2000000.0)
+	{
+		// Beyond Icm()'s exact range, its own fallback: the chip share of every prize left.
+		double PrizeSum = 0.0;
+		for (double P : Prizes)
+		{
+			PrizeSum += P;
+		}
+		W.Sum = (Stacks[Mine] / Total) * PrizeSum;
+		W.ChipShare = true;
+		return;
+	}
+	W.Places = Places;
+	W.Next.assign(static_cast<size_t>(Places), 0);
+	W.Chosen.assign(static_cast<size_t>(Places), -1);
+	W.Prob.assign(static_cast<size_t>(Places), 0.0);
+	W.Rem.assign(static_cast<size_t>(Places), 0.0);
+	W.Used.assign(Stacks.size(), 0);
+	if (Places > 0)
+	{
+		W.Prob[0] = 1.0;
+		W.Rem[0] = Total;
+		W.Done = false;
+	}
+}
+
+bool SitesIcmRun(SitesIcmWalk& W, int64_t Budget, int64_t* Steps)
+{
+	// Icm()'s recursion (structure_detail::IcmRecurse) as a loop over an explicit stack, in its order: at each place, every
+	// player not placed yet in index order, P = (stack / chips left) x the order's chance, skipped at 0. Only this player's
+	// terms are summed, so the orders under them, and the other players at the last place, are never walked. A step is a
+	// player looked at or a division; a place next to the last is finished in one go (at most three steps a player).
+	if (W.Done)
+	{
+		if (Steps)
+		{
+			*Steps = 0;
+		}
+		return true;
+	}
+	int64_t Taken = 0;
+	const int N = static_cast<int>(W.Stacks.size());
+	const int Me = static_cast<int>(W.Mine);
+	const int Places = W.Places;
+	const double* Stk = W.Stacks.data();
+	const double* Prz = W.Prizes.data();
+	const double MyStack = Stk[W.Mine];
+	int* Next = W.Next.data();
+	int* Chosen = W.Chosen.data();
+	double* Prob = W.Prob.data();
+	double* Rem = W.Rem.data();
+	uint8_t* Used = W.Used.data();
+	int Depth = W.Depth;
+	double Sum = W.Sum;
+	bool Done = false;
+	while (Taken < Budget)
+	{
+		const size_t D = static_cast<size_t>(Depth);
+		if (Next[D] >= N)
+		{
+			// Every player tried at this place: back to the place above.
+			++Taken;
+			if (Depth == 0)
+			{
+				Done = true;
+				break;
+			}
+			--Depth;
+			Used[Chosen[D - 1]] = 0;
+			continue;
+		}
+		if (Depth + 2 >= Places)
+		{
+			// The last place (only with one place paid) or the one above it: the rest of this place's players at once.
+			const double Rm = Rem[D];
+			const double Pr = Prob[D];
+			for (int I = Next[D]; I < N; ++I)
+			{
+				++Taken;
+				if (Used[I] != 0)
+				{
+					continue;
+				}
+				const double Stack = Stk[I];
+				const double P = (Stack / Rm) * Pr;
+				++Taken;
+				if (I == Me)
+				{
+					// This player finishes here: Icm()'s term for them; nothing under it is theirs.
+					if (P != 0.0)
+					{
+						Sum += P * Prz[D];
+					}
+					continue;
+				}
+				if (Depth + 1 >= Places || P == 0.0)
+				{
+					continue; // at the last place another player adds nothing to this one; Icm() skips a chance of 0
+				}
+				// Under it the last place: only this player's own term (Icm()'s, at that node).
+				const double Q = (MyStack / (Rm - Stack)) * P;
+				++Taken;
+				if (Q != 0.0)
+				{
+					Sum += Q * Prz[D + 1];
+				}
+			}
+			Next[D] = N;
+			continue;
+		}
+		const int I = Next[D]++;
+		++Taken;
+		if (Used[I] != 0)
+		{
+			continue;
+		}
+		const double Stack = Stk[I];
+		const double P = (Stack / Rem[D]) * Prob[D];
+		++Taken;
+		if (I == Me)
+		{
+			if (P != 0.0)
+			{
+				Sum += P * Prz[D];
+			}
+			continue;
+		}
+		if (P == 0.0)
+		{
+			continue;
+		}
+		Chosen[D] = I;
+		Used[I] = 1;
+		++Depth;
+		Next[D + 1] = 0;
+		Prob[D + 1] = P;
+		Rem[D + 1] = Rem[D] - Stack;
+	}
+	W.Depth = Depth;
+	W.Sum = Sum;
+	W.Done = Done;
+	if (Steps)
+	{
+		*Steps = Taken;
+	}
+	return Done;
+}
+
+double SitesIcmOne(const std::vector<double>& Stacks, const std::vector<double>& Prizes, size_t Mine, bool* ChipShare)
+{
+	SitesIcmWalk W;
+	SitesIcmStart(W, Stacks, Prizes, Mine);
+	SitesIcmRun(W, static_cast<int64_t>(1) << 62); // no budget: the whole walk
+	if (ChipShare)
+	{
+		*ChipShare = W.ChipShare;
+	}
+	return W.Sum;
+}
+
+/** Icm()'s arguments for the hero: the stacks still in, the prizes they play for (one place a player left); false once out. */
+bool SitesIcmInputs(const Tournament& T, std::vector<double>& Stacks, std::vector<double>& Prizes, size_t& Mine)
+{
+	Stacks.clear();
+	Prizes.clear();
+	Mine = 0;
+	if (T.Players.empty() || T.Hero().Busted)
+	{
+		return false;
+	}
+	for (const TPlayer* P : T.AlivePlayers())
+	{
+		Mine = P->IsHero ? Stacks.size() : Mine;
+		Stacks.push_back(static_cast<double>(P->Stack));
+	}
+	// The prizes still to be won: one place for each player left (the rest are paid already).
+	for (size_t I = 0; I < T.Payouts.size() && I < Stacks.size(); ++I)
+	{
+		Prizes.push_back(static_cast<double>(T.Payouts[I]));
+	}
+	return true;
+}
+
+double SitesIcmCents(const Tournament& T, bool* ChipShare)
+{
+	std::vector<double> Stacks;
+	std::vector<double> Prizes;
+	size_t Mine = 0;
+	if (ChipShare)
+	{
+		*ChipShare = false;
+	}
+	return SitesIcmInputs(T, Stacks, Prizes, Mine) ? SitesIcmOne(Stacks, Prizes, Mine, ChipShare) : 0.0;
+}
+
+int& SitesIcmCount()
+{
+	static int IcmRuns = 0;
+	return IcmRuns;
+}
+
+int SitesIcmComputes()
+{
+	return SitesIcmCount();
+}
+
+SitesIcmRead SitesIcmCached(const RiverLine& RL, const Tournament& T, double Now)
+{
+	SitesUi& U = SitesOf(&RL);
+	if (U.Icm.size() > 8 && !U.Icm.count(T.Spec.Id))
+	{
+		U.Icm.clear(); // old events: a laptop only ever needs the tables it has open
+	}
+	SitesUi::IcmMemo& Memo = U.Icm[T.Spec.Id];
+	// A new walk only once a hand has ended everywhere (mid-tick, a big field's tables are still being played over frames and
+	// the stacks are half old, half new), and only for new stacks or prizes, at most twice a second.
+	if (!Memo.Busy && !T.FinishPending())
+	{
+		// The key: every stack still in (and whose it is), and the prizes they play for.
+		uint64_t Key = 1469598103934665603ull;
+		const auto KeyIn = [&Key](uint64_t V) {
+			Key ^= V;
+			Key *= 1099511628211ull;
+		};
+		for (const TPlayer* P : T.AlivePlayers())
+		{
+			KeyIn(static_cast<uint64_t>(P->Stack));
+			KeyIn(P->IsHero ? 1u : 2u);
+		}
+		for (const Chips Prize : T.Payouts)
+		{
+			KeyIn(static_cast<uint64_t>(Prize));
+		}
+		KeyIn(T.Players.empty() || T.Hero().Busted ? 3u : 4u);
+		if (!Memo.Valid || (Memo.Key != Key && !(Now >= Memo.At && Now - Memo.At < 0.5)))
+		{
+			std::vector<double> Stacks;
+			std::vector<double> Prizes;
+			size_t Mine = 0;
+			SitesIcmInputs(T, Stacks, Prizes, Mine); // the hero out: no stacks, 0 at once
+			SitesIcmStart(Memo.Walk, Stacks, Prizes, Mine);
+			Memo.Busy = true;
+			Memo.WalkKey = Key;
+			// The twice-a-second clock runs from a walk's start (review-fix2-icm): a walk left mid-way (INFO hidden) and
+			// finished on its return holds no old value for half a second; the current stacks' walk starts the frame after.
+			Memo.At = Now;
+			++SitesIcmCount();
+		}
+	}
+	// The walk goes on a frame's budget at a time (g1-audit N2: about 0.5 ms; a nine-handed final table paying nine in three
+	// frames, ten left paying eight in four); the last value stands until it is done.
+	if (Memo.Busy && SitesIcmRun(Memo.Walk, SitesIcmFrameSteps))
+	{
+		Memo.Cents = Memo.Walk.Sum;
+		Memo.ChipShare = Memo.Walk.ChipShare;
+		Memo.Key = Memo.WalkKey;
+		Memo.Valid = true;
+		Memo.Busy = false;
+	}
+	SitesIcmRead Out;
+	Out.Cents = Memo.Cents;
+	Out.ChipShare = Memo.ChipShare;
+	Out.Known = Memo.Valid;
+	return Out;
+}
+
+std::string SitesBbText(Chips Amount, Chips BigBlind)
+{
+	const double Bb = static_cast<double>(Amount) / static_cast<double>(std::max<Chips>(1, BigBlind));
+	return Fixed(Bb, Bb < 100.0 ? 1 : 0) + " BB";
+}
+
+void SitesSpark(Canvas& C, float Cx, float Cy, float R, const Color& Col, float Thin)
+{
+	std::vector<Vec2> P;
+	for (int I = 0; I < 8; ++I)
+	{
+		const float A = -Pi / 2.0f + static_cast<float>(I) * Pi / 4.0f;
+		const float Rr = I % 2 == 0 ? R : R * Thin;
+		P.push_back({Cx + Rr * std::cos(A), Cy + Rr * std::sin(A)});
+	}
+	C.FillPolygon(P, Col);
+}
+
+void SitesDealerButton(Canvas& C, float X, float Y, float R, int Dealer)
+{
+	if (Dealer == 1)
+	{
+		// Ignite (§2.5): a sunflower disc with a black D and a spark.
+		C.FillCircle(X + R * 0.12f, Y + R * 0.25f, R, Rgba(0, 0, 0, 0.35f));
+		C.FillCircle(X, Y, R, Hex(SitesIgSun));
+		TextStyle D = Ts(R, 900, Hex(0x1a0f2a), Align::Center, Baseline::Middle);
+		D.Face = static_cast<int8_t>(Font::BlackItalic);
+		C.Text("D", X, Y + R * 0.06f, D);
+		SitesSpark(C, X + R * 0.72f, Y - R * 0.72f, R * 0.36f, Hex(SitesIgCream));
+		return;
+	}
+	if (Dealer == 2)
+	{
+		// RunItTwice (§3.5): a chrome puck with a 2-unit Signal Red ring; DEALER in BoldCondensed caps, Onyx.
+		C.FillCircle(X, Y + R * 0.14f, R, Rgba(0, 0, 0, 0.45f));
+		C.FillCircle(X, Y, R, Paint::Radial({X - R * 0.25f, Y - R * 0.35f}, 0.0f, {X, Y}, R, Hex(0xf3f4f6), 0.55f, Hex(0xaab0ba), Hex(0x8d929c)));
+		C.StrokeArc(X, Y, R - 1.0f, 0.0f, 2.0f * Pi, Hex(SitesRitRed), 2.0f);
+		// The word sits inside the ring (g1-audit L4: at 0.6 R it ran past the puck), measured in its own face: 0.6 R if it fits
+		// the ring's chord at the caps' half-height (the ring's inside edge, R - 2, less a unit), else shrunk to it; a puck too
+		// small for the word at 6 units (a tile's) reads "D". (fix-rit's patch fix-rit_to_fix-tablestyle_1, applied.)
+		std::string Word = "DEALER";
+		float Size = R * 0.6f;
+		const float Inner = R - 3.0f;
+		for (int K = 0; K < 4; ++K)
+		{
+			const float Half = C.Measure(Word, Size, Font::BoldCondensed) * 0.5f;
+			const float Rise = Size * 0.36f;
+			const float Chord = std::sqrt(std::max(0.0f, Inner * Inner - Rise * Rise));
+			if (Half <= Chord)
+			{
+				break;
+			}
+			Size *= Chord / Half;
+		}
+		if (Size < 6.0f)
+		{
+			Word = "D";
+			Size = R * 0.9f;
+		}
+		TextStyle D = Ts(Size, 700, Hex(SitesRitOnyx), Align::Center, Baseline::Middle);
+		D.Face = static_cast<int8_t>(Font::BoldCondensed);
+		C.Text(Word, X, Y, D);
+		return;
+	}
+	C.FillCircle(X, Y, R, Hex(0xf4f4f4));
+	C.Text("D", X, Y + 1.0f, Ts(R * 16.0f / 15.0f, 800, Hex(0x111111), Align::Center, Baseline::Middle));
+}
+
+bool SitesControl(Ui& UI, Canvas& C, const SiteLook& L, const std::string& Id, const Rect& R, const std::string& Label, bool Lit, const Color& Lite, bool Enabled)
+{
+	const Ui::ClickState St = UI.Clickable(Id, R, Enabled);
+	const bool Slab = L.Cut > 0.0f;
+	TextStyle Lb = Ts(Slab ? 15.0f : 14.0f, 800, St.Hover ? pal::Ink : pal::Muted, Align::Center, Baseline::Middle);
+	Lb.Face = L.TitleFace;
+	if (Slab)
+	{
+		const float Cut = std::min(R.H / 2.0f, 6.0f);
+		const std::vector<Vec2> Path = SitesCutPath(R, Cut);
+		if (Lit)
+		{
+			C.FillPolygon(Path, St.Hover ? Hex(0xd62c31) : pal::Accent);
+			C.FillRect({R.X, R.Y, R.W - Cut, 1.0f}, Hex(SitesRitLed));
+			Lb.Col = pal::Gold;
+		}
+		else
+		{
+			C.FillPolygon(Path, St.Hover ? pal::Panel2 : pal::Panel);
+			Color Edge = Hex(SitesRitChrome);
+			Edge.A = 0.35f;
+			C.StrokePolyline(Path, true, St.Hover ? Edge : pal::Line, 1.0f);
+		}
+	}
+	else
+	{
+		const float Rr = R.H / 2.0f;
+		if (Lit)
+		{
+			C.FillRoundRect(R, Rr, Lite);
+			C.FillRoundRect({R.X + Rr * 0.6f, R.Y + 3.0f, R.W - Rr * 1.2f, R.H * 0.28f}, R.H * 0.14f, Rgba(255, 255, 255, 0.22f));
+			Lb.Col = Hex(SitesIgPlumInk);
+		}
+		else
+		{
+			C.FillRoundRect(R, Rr, St.Hover ? pal::Line : pal::Panel2);
+			C.StrokeRoundRect(R, Rr, St.Hover ? Lite : pal::Line, 1.2f);
+		}
+	}
+	// The label in the look's face, brought down to fit (never truncated: these are short).
+	const std::string Text = NetUpper(Label);
+	const float Room = R.W - 16.0f;
+	const float W = C.Measure(Text, Lb.Size, static_cast<Font>(Lb.Face));
+	if (W > Room && W > 0.0f)
+	{
+		Lb.Size *= Room / W;
+	}
+	C.Text(Text, R.X + R.W / 2.0f, R.Y + R.H / 2.0f + 1.0f, Lb);
+	return St.Clicked;
+}
+
+void SitesTurnstone(Canvas& C, float X, float Y, float S, const Color& First, const Color& Second, const Color& Edge)
+{
+	const float Cw = S * 0.40f;
+	const float Ch = S * 0.56f;
+	C.FillRoundRect({X, Y + S * 0.16f, Cw, Ch}, S * 0.04f, First);
+	C.FillRoundRect({X + S * 0.30f, Y, Cw, Ch}, S * 0.04f, Second);
+	C.StrokeRoundRect({X + S * 0.30f, Y, Cw, Ch}, S * 0.04f, Edge, std::max(1.0f, S * 0.035f));
 }
 } // namespace rlsites_detail
 } // namespace ui

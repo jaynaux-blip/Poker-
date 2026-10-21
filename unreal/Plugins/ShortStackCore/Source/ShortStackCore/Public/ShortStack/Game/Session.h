@@ -9,6 +9,7 @@
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/SiteShow.h"
 #include "ShortStack/Game/Store.h"
 #include "ShortStack/Game/VideoContent.h"
 #include "ShortStack/Game/VideoStats.h"
@@ -71,16 +72,18 @@ enum class SoundId : int
 	Cash,
 	Mail, // a letter in the Mail app (next_segment_spec §3.9; audio-synth renders it)
 	// Update 3 (SPEC §1.11, §7.2): the revamped sites' cues, played through Session::UiSound (audio's bodies in Synth.cpp).
-	IgSpark, // Ignite: a rising tick
-	IgPop,
-	IgTick,
-	IgFuse, // a crackling loop segment, 2 s at most
-	IgBoom,
-	RitBlip, // RunItTwice
-	RitFlap,
-	RitBell,
-	RitStamp,
-	RitRank, // a tick and a two-note rise or fall
+	// Volumes 0.25-0.6; IgBoom and RitRank pick their variant by the volume asked for (UiSound's default 0.4 is the
+	// everyday one of each).
+	IgSpark, // Ignite: a rising tick, 75 ms (one per count step)
+	IgPop, // a cracker, a sticker slam, a level-up
+	IgTick, // a wheel's wedge, a reel's symbol, 40 ms
+	IgFuse, // a crackling loop segment, 0.52 s: fire it again every 0.5 s while the fuse burns (the ends cross-fade)
+	IgBoom, // 0.25-0.45 the multiplier lands (0.8 s); 0.5-0.6 the long tail for x25 and up (2.3 s)
+	RitBlip, // RunItTwice: a terminal tick (selection, a feed line), 40 ms
+	RitFlap, // a split-flap settling, 0.15 s (one a row in a wave)
+	RitBell, // the desk bell, 1.6 s
+	RitStamp, // a stamp, a scalp, a credential, a printout
+	RitRank, // 0.25-0.4 one tick per place gained; 0.45 two notes falling (relegation); 0.5-0.6 rising (promotion)
 };
 
 /**
@@ -801,6 +804,12 @@ public:
 	SHORTSTACKCORE_API void UiSound(SoundId Id, float Vol = 0.4f);
 	/** The site of the result on the Results screen (ShowResults sets it): FUSE never enters History (§1.11). */
 	net::SiteId LastSiteResult = net::SiteId::RiverLine;
+	/**
+	 * RunItTwice's Second Boards this sitting (§3.4 I, §3.6 R8; fix secondboard): HeroHandDone notes every hand the player was
+	 * all in with cards to come, on both paths, from the hand itself (site::show::NoteSecond), newest last, at most 12. The
+	 * Settlement's SECOND BOARDS column reads it; the table's 4 s ghost keeps its own read. UI state: never saved.
+	 */
+	std::vector<site::show::SecondRecord> SecondBoards;
 	// ---- Site play (§2.6, §3.6: SessionSitePlay.cpp, core-siteplay)
 	/** Everything the G2 pages draw (const: computed defaults while the book is empty, so a draw never writes, S10). */
 	SHORTSTACKCORE_API site::play::View SitePlayView(net::SiteId S) const;

@@ -18,6 +18,10 @@
 //          [length] [ads] [duel] through its own forward: core only). ss.Video.Sheet's contact sheet is drawn on the
 //          laptop: after the session's answer it opens "video sheet <group> <n>" there (DebugOpen), for ui-rerun to draw
 //          the thumbnails the session dealt
+//   ss.Sound.Cue <name> [volume]   one of the revamped sites' ten cues by name (igspark, igpop, igtick, igfuse, igboom,
+//          ritblip, ritflap, ritbell, ritstamp, ritrank), at the volume given (0.4 if none), through Session::UiSound as
+//          the pages play them: the lead hears each in the game's own mix (§9.2), the two with no G1 page (igpop, igfuse)
+//          included. "igboom 0.6" is the long tail; "ritrank 0.45" falls, "ritrank 0.55" rises
 //
 // Every body behind them is a feature track's (core-siteplay's DebugSitePlay in SessionSitePlay.cpp; core-videoalgo's and
 // core-videocontent's verbs in SessionVideo.cpp and SessionVideo3.cpp; the laptop pages DebugOpen knows): until a track
@@ -141,4 +145,35 @@ FUpdate3Command VideoAds(EUpdate3Feature::Video, TEXT("ss.Video.Ads"), TEXT("Ads
 FUpdate3Command VideoLaunch(EUpdate3Feature::Video, TEXT("ss.Video.Launch"), TEXT("Launch"),
 	TEXT("ss.Video.Launch <id> <cut|kast|teaser|reply>: a launch action for a new video; the time still passes (testing)."));
 FUpdate3Command VideoDuel(EUpdate3Feature::Video, TEXT("ss.Video.Duel"), TEXT("Duel"), TEXT("ss.Video.Duel <id>: the Thumbnail Duel without the laptop, as Studio's Duel picker sets it; the time still passes (testing)."));
+
+/** ss.Sound.Cue <name> [volume]: one of the sites' ten cues through Session::UiSound (its 50 ms per id included). */
+void Update3Cue(const TArray<FString>& Args, UWorld* World)
+{
+	// In SoundId's order from IgSpark (Session.h).
+	static const TCHAR* const Names[10] = {TEXT("igspark"), TEXT("igpop"), TEXT("igtick"), TEXT("igfuse"), TEXT("igboom"), TEXT("ritblip"), TEXT("ritflap"), TEXT("ritbell"),
+		TEXT("ritstamp"), TEXT("ritrank")};
+	FNightOneGame* Game = Update3GameIn(World);
+	if (!Game || Args.Num() < 1)
+	{
+		UE_LOG(LogUpdate3, Warning, TEXT("ss.Sound.Cue <name> [volume]: at home (Night One) only; igspark, igpop, igtick, igfuse, igboom, ritblip, ritflap, ritbell, ritstamp, ritrank"));
+		return;
+	}
+	const float Vol = Args.Num() > 1 ? FCString::Atof(*Args[1]) : 0.4f;
+	static_assert(static_cast<int32>(ss::SoundId::RitRank) - static_cast<int32>(ss::SoundId::IgSpark) == 9, "the ten cues follow IgSpark in order");
+	for (int32 I = 0; I < 10; ++I)
+	{
+		if (Args[0].Equals(Names[I], ESearchCase::IgnoreCase))
+		{
+			Game->Session.UiSound(static_cast<ss::SoundId>(static_cast<int32>(ss::SoundId::IgSpark) + I), Vol);
+			UE_LOG(LogUpdate3, Display, TEXT("ss.Sound.Cue %s %.2f"), Names[I], Vol);
+			return;
+		}
+	}
+	UE_LOG(LogUpdate3, Warning, TEXT("ss.Sound.Cue %s: no cue by that name (igspark, igpop, igtick, igfuse, igboom, ritblip, ritflap, ritbell, ritstamp, ritrank)"), *Args[0]);
+}
+
+// The sites' cues (§1.11), for the lead's ears in PIE.
+FAutoConsoleCommandWithWorldAndArgs SoundCue(TEXT("ss.Sound.Cue"),
+	TEXT("ss.Sound.Cue <name> [volume]: plays one of the revamped sites' ten cues as the pages do (\"igboom 0.6\" is the long tail, \"ritrank 0.55\" the promotion) (testing)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&Update3Cue));
 } // namespace Update3Detail

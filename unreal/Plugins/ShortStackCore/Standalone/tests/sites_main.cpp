@@ -19,6 +19,12 @@
 // C3 (the gate audit's fixes): RiverLine's row never below its last hundred (HeroBySite), letters that carry money always go
 // (PaidLetters), a rival's Flip & Run runs a hyper's full time (RealSchedules), overlay headlines in whole dollars (RivalNews),
 // and no real site's format name in any string a player reads (SitesFormatNames).
+//
+// Update 3 G1 (core-sites-look, SPEC v1.2 §7.7): RealSites pins RunItTwice's 16 red-and-black tokens and Ignite's Afterburner
+// palette; U3Moods, U3Overlay, U3Club, U3SecondBoard, U3Desk, U3SundayLive, U3Welcome and U3ShowCopy prove site::show's pure
+// functions (the projected overlay against a hand-computed case, the Club's accrual at every tier edge, spike S-D's crafted
+// second boards and a fuzz, the Desk from a fixture History); U3Marks the new siteart marks and RunItTwice's six recoloured
+// emblem families.
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
 #include "CopyLint.h"
 #include "Trademarks.h"
@@ -38,6 +44,13 @@
 #include "ShortStack/UI/Ui.h"
 #include "ShortStack/AI/Bot.h"
 #include "ShortStack/AI/View.h"
+#include "ShortStack/Cards.h"
+#include "ShortStack/Game/Autoplay.h"
+#include "ShortStack/Game/SiteShow.h"
+#include "ShortStack/Hand.h"
+#include "ShortStack/Rng.h"
+#include "ShortStack/UI/EventArt.h"
+#include "ShortStack/UI/SiteArt.h"
 
 #include <algorithm>
 #include <array>
@@ -1048,6 +1061,40 @@ void RealSites()
 	}
 	const net::SiteDef& Ig = net::Def(net::SiteId::Ignite);
 	const net::SiteDef& Rt = net::Def(net::SiteId::RunItTwice);
+	// Update 3 G1 (core-sites-look; SPEC §1.11, §3.3, §13.2 #1, §13.3): RunItTwice's 16 red-and-black tokens, pinned, and
+	// Ignite's Afterburner palette for 00:00-06:00. Nobody else has a night palette.
+	const std::array<uint32_t, 16> RedBlack = {0x0c0c0f, 0x111114, 0x16161a, 0x1e1e23, 0x2c2c33, 0xececef, 0xa0a0aa, 0x62626c, 0xd2141a, 0xb6bbc5, 0xffffff, 0xff3d3d, 0xf5a524,
+		0x48c77a, 0x1a1a1f, 0x09090b};
+	const double RtInk = SitesContrast(Rt.Palette[5], Rt.Palette[2]);
+	const double RtMuted = SitesContrast(Rt.Palette[6], Rt.Palette[0]);
+	std::printf("RunItTwice (red and black): Ink on Panel %.2f:1, Muted on Bg %.2f:1, Hot White on Signal Red %.2f:1, Signal Red on Bg %.2f:1\n", RtInk, RtMuted,
+		SitesContrast(Rt.Palette[10], Rt.Palette[8]), SitesContrast(Rt.Palette[8], Rt.Palette[0]));
+	Expect(Rt.Palette == RedBlack && std::fabs(RtInk - 15.30) < 0.005 && std::fabs(RtMuted - 7.54) < 0.005,
+		"RunItTwice wears the 16 red-and-black tokens (Signal Red d2141a on Onyx 0c0c0f): Ink on Panel 15.30, Muted on Bg 7.54");
+	Expect(std::fabs(SitesContrast(Rt.Palette[10], Rt.Palette[8]) - 5.45) < 0.005 && std::fabs(SitesContrast(Rt.Palette[8], Rt.Palette[0]) - 3.59) < 0.005,
+		"Hot White on Signal Red reads 5.45:1 (slabs, tags); Signal Red on Onyx 3.59:1, so red is light, never ink");
+	bool ApartFromIgnite = true;
+	for (const uint32_t C : Rt.Palette)
+	{
+		ApartFromIgnite = ApartFromIgnite && std::find(Ig.Palette.begin(), Ig.Palette.end(), C) == Ig.Palette.end() &&
+			std::find(Ig.NightPalette.begin(), Ig.NightPalette.end(), C) == Ig.NightPalette.end();
+	}
+	Expect(ApartFromIgnite, "none of RunItTwice's 16 is one of Ignite's tokens, day or night");
+	const std::set<uint32_t> Night(Ig.NightPalette.begin(), Ig.NightPalette.end());
+	bool NightApart = true;
+	for (const uint32_t C : Ig.NightPalette)
+	{
+		NightApart = NightApart && std::find(Rl.Palette.begin(), Rl.Palette.end(), C) == Rl.Palette.end();
+	}
+	const double NightInk = SitesContrast(Ig.NightPalette[5], Ig.NightPalette[2]);
+	const double NightMuted = SitesContrast(Ig.NightPalette[6], Ig.NightPalette[0]);
+	std::printf("Ignite's Afterburner Hours: Ink on Panel %.2f:1, Muted on Bg %.2f:1\n", NightInk, NightMuted);
+	Expect(Night.size() == 16 && NightApart && NightInk >= 4.5 && NightMuted >= 4.5 && Ig.NightPalette[0] == 0x120c1f && Ig.NightPalette[2] == 0x1a1230 &&
+			Ig.NightPalette[5] == 0xf3eaff && Ig.NightPalette[8] == 0xb57bff && Ig.NightPalette[9] == 0x3ee6d0,
+		"Ignite's Afterburner palette: 16 of its own (Bg 120c1f, Panel 1a1230, Accent b57bff, Accent2 3ee6d0, Ink f3eaff), none RiverLine's, 4.5:1 or more");
+	const std::array<uint32_t, 16> None{};
+	Expect(Ig.NightFromMin == 0 && Ig.NightToMin == 360 && Rl.NightPalette == None && Rt.NightPalette == None,
+		"Afterburner Hours run 00:00-06:00 world time; RiverLine and RunItTwice have no night palette");
 	Expect(Ig.Rake.Fee(550) == 61 && Ig.Rake.Fee(110) == 12 && Ig.Rake.Fee(2200) == 242 && Ig.Rake.Fee(0) == 0, "Ignite: 11% flat ($5.50 pays 61 cents)");
 	Expect(Rt.Rake.Fee(330) == 26 && Rt.Rake.Fee(5500) == 440 && Rt.Rake.Fee(8250) == 660 && Rt.Rake.Fee(10900) == 763 && Rt.Rake.Fee(21500) == 1505 && Rt.Rake.Fee(53000) == 2915,
 		"RunItTwice: 8% to $55, 7% from $109 to $215, 5.5% from $530");
@@ -2519,6 +2566,1299 @@ void SitesFormatNames()
 	Expect(Files >= 200 && Lock == "Flip & Run unlocks later in your career." && Hit.empty(),
 		"no real site's format name anywhere a player reads (Flip & Run, never GGPoker's)" + (Hit.empty() ? std::string() : ": " + Hit));
 }
+
+// ================================================================== Update 3 G1 (core-sites-look): site::show and the marks
+//
+// SPEC v1.2 §2.3, §3.3-§3.6, §7.3, §7.7: Ignite's hour, Overlay Watch, the Club's live accrual, the Second Board (spike S-D,
+// durable/update3/S-D.md), the Desk, Sunday Live, the welcome bonus's view, their copy, and siteart's new marks with
+// RunItTwice's six emblem families in red and black.
+
+namespace show = ss::site::show;
+
+/** The world minute of a calendar date at a clock hour. */
+double U3At(int Year, int Month, int Day, double Hour)
+{
+	return static_cast<double>(ss::world::DayOn(Year, Month, Day)) * SitesDay + Hour * 60.0;
+}
+
+/** A drawn colour as 0xRRGGBB (rounded): exact palette checks on vertices and text. */
+uint32_t U3Rgb(const ui::Color& C)
+{
+	auto Byte = [](float V) { return static_cast<uint32_t>(std::lround(std::min(1.0f, std::max(0.0f, V)) * 255.0f)); };
+	return Byte(C.R) << 16 | Byte(C.G) << 8 | Byte(C.B);
+}
+
+/** Ignite's hour (§2.3): Afterburner Hours 00:00-06:00, then Wake-Up, Daytime, Prime Time, on any day. */
+void U3Moods()
+{
+	struct U3MoodCase
+	{
+		double Hour;
+		show::Mood Want;
+	};
+	const U3MoodCase Cases[] = {{0.0, show::Mood::Afterburner}, {2.0 + 7.0 / 60.0, show::Mood::Afterburner}, {5.99, show::Mood::Afterburner},
+		{6.0, show::Mood::WakeUp}, {11.99, show::Mood::WakeUp}, {12.0, show::Mood::Daytime}, {17.99, show::Mood::Daytime}, {18.0, show::Mood::PrimeTime},
+		{21.0, show::Mood::PrimeTime}, {23.99, show::Mood::PrimeTime}};
+	int Wrong = 0;
+	for (const double Day : {1.0, static_cast<double>(ss::world::DayOn(2026, 11, 14)), static_cast<double>(ss::world::DayOn(2027, 2, 3))})
+	{
+		for (const U3MoodCase& K : Cases)
+		{
+			Wrong += show::IgniteMood(Day * SitesDay + K.Hour * 60.0) == K.Want ? 0 : 1;
+		}
+	}
+	Expect(Wrong == 0, "Ignite's mood: Afterburner 00:00-06:00, Wake-Up to noon, Daytime to 6 PM, Prime Time to midnight, every day");
+	Expect(show::IgniteMood(SitesDay + 127.0) == show::Mood::Afterburner && show::IgniteMood(U3At(2026, 11, 14, 21.0)) == show::Mood::PrimeTime,
+		"Night One's 2:07 AM is Afterburner Hours (the first visit, IG1); 9 PM is Prime Time (IG2)");
+}
+
+/** Overlay Watch (§3.6 R1): the projection by hand, the actual overlay once closed, and every guaranteed event of a week. */
+void U3Overlay()
+{
+	const net::Network& N = net::Site(net::SiteId::RunItTwice);
+	const net::SiteDef& D = net::Def(net::SiteId::RunItTwice);
+	const double From = U3At(2026, 11, 16, 0.0); // a Monday
+	const std::vector<net::EventInstance> Week = N.Window(From, From + 7.0 * SitesDay);
+	const net::EventInstance* Cap = nullptr;
+	for (const net::EventInstance& E : Week)
+	{
+		Cap = !Cap && E.Id.rfind("runittwice.the-nightcap@", 0) == 0 ? &E : Cap;
+	}
+	Expect(Cap != nullptr, "the Nightcap is on the Board every night");
+	if (!Cap)
+	{
+		return;
+	}
+	const net::EventTemplate& T = N.TemplateOf(*Cap);
+	// By hand: $109 at 7% is $7.63 of fee, so each entry puts $101.37 in the pool. At the start the median registration curve
+	// stands at one half (the field doubles in late registration): 12 registered project 24.
+	const Chips Each = 10137;
+	Expect(T.BuyInCents == 10900 && D.Rake.Fee(10900) == 763 && T.GtdCents > 24 * Each, "the Nightcap: $109, $7.63 of it fee, guaranteed past 24 entries' worth");
+	bool Actual = true;
+	const Chips AtStart = show::ProjectedOverlay(N, *Cap, 12, Cap->Start, Actual);
+	std::printf("overlay watch: the Nightcap guarantees %s; 12 in at the start project 24 and %s short\n", ss::Money(T.GtdCents).c_str(), ss::Money(AtStart).c_str());
+	Expect(!Actual && AtStart == T.GtdCents - 24 * Each && show::LateRegMultiplier(N, *Cap, Cap->Start) == 2.0,
+		"projected overlay at the start: the guarantee less 12 x 2 x $101.37 (PROJ.)");
+	// Halfway through late registration the curve stands at 0.5 + 0.5 x 0.5^0.7 = 0.807786 (x 1.2379515): 20 in project 24.76.
+	const double Half = Cap->Start + 0.5 * Cap->LateReg;
+	const double Mult = 1.0 / (0.5 + 0.5 * std::pow(0.5, 0.7));
+	const Chips AtHalf = show::ProjectedOverlay(N, *Cap, 20, Half, Actual);
+	std::printf("overlay watch: halfway through late registration x%.7f (the curve's %.7f), 20 in leave %s short (by hand %s)\n", Mult,
+		show::LateRegMultiplier(N, *Cap, Half), ss::Money(AtHalf).c_str(),
+		ss::Money(std::max<Chips>(0, T.GtdCents - static_cast<Chips>(std::llround(20.0 * Mult * 10137.0)))).c_str());
+	Expect(!Actual && std::fabs(Mult - 1.2379515) < 1e-7 && std::fabs(show::LateRegMultiplier(N, *Cap, Half) - Mult) < 1e-9 &&
+			AtHalf == std::max<Chips>(0, T.GtdCents - static_cast<Chips>(std::llround(20.0 * Mult * 10137.0))),
+		"projected overlay halfway through late registration: the guarantee less 20 x 1.2379515 x $101.37");
+	// Before registration opens, or with nobody in: nothing to project from. The projection never reads the final field.
+	const double Opens = Cap->Start - static_cast<double>(T.OpensHours) * 60.0;
+	const Chips Early = show::ProjectedOverlay(N, *Cap, 12, Opens - 1.0, Actual);
+	Expect(Early == 0 && !Actual && show::ProjectedOverlay(N, *Cap, 0, Cap->Start - 30.0, Actual) == 0 && show::LateRegMultiplier(N, *Cap, Opens - 1.0) == 0.0,
+		"no projection before registration opens or while nobody is registered");
+	net::EventInstance Other = *Cap;
+	Other.Entries = Cap->Entries * 3 + 7;
+	Other.Pool = Cap->Pool * 3;
+	Expect(show::ProjectedOverlay(N, Other, 12, Cap->Start, Actual) == AtStart && show::ProjectedOverlay(N, Other, 20, Half, Actual) == AtHalf,
+		"the projection reads the registrations so far, never the event's final field");
+	// Closed: the actual overlay, the guarantee less what the final field put in (the network's own pool).
+	const Chips Done = show::ProjectedOverlay(N, *Cap, 0, Cap->Start + Cap->LateReg + 1.0, Actual);
+	Expect(Actual && Done == std::max<Chips>(0, T.GtdCents - Each * static_cast<Chips>(Cap->Entries)), "after registration closes: the actual overlay");
+	// Every guaranteed event of the week on both rivals: the actual overlay is the network's; the amber rule; the projection is
+	// the curve's median (within the instance's wobble at the start and halfway through late registration; centred over all).
+	int Checked = 0;
+	int Off = 0;
+	int Short = 0;
+	int Amber = 0;
+	std::vector<double> Ratios;
+	for (const net::SiteId S : SitesRivals)
+	{
+		const net::Network& Nw = net::Site(S);
+		for (const net::EventInstance& E : Nw.Window(From, From + 7.0 * SitesDay))
+		{
+			const net::EventTemplate& Te = Nw.TemplateOf(E);
+			if (Te.GtdCents <= 0 || Te.BuyInCents <= 0)
+			{
+				continue;
+			}
+			++Checked;
+			const Chips Put = static_cast<Chips>(std::llround(static_cast<double>(Te.BuyInCents) * net::Def(S).Rake.PrizeShare(Te)));
+			const show::OverlayView Close = show::OverlayOf(Nw, E, E.Start + E.LateReg + 1.0);
+			Off += Close.Actual && Close.Shown && Close.Cents == std::max<Chips>(0, Te.GtdCents - Put * static_cast<Chips>(E.Entries)) &&
+					(Te.JoinIndex >= 0 || Close.Cents == E.Pool - Put * static_cast<Chips>(E.Entries)) && Close.Entries == static_cast<double>(E.Entries)
+				? 0
+				: 1;
+			Off += Close.Amber == (Close.Cents >= 10000 && Close.Cents * 20 >= Te.GtdCents) ? 0 : 1;
+			Short += Close.Cents > 0 ? 1 : 0;
+			Amber += Close.Amber ? 1 : 0;
+			for (const double At : {E.Start, E.Start + 0.5 * E.LateReg})
+			{
+				const show::OverlayView V = show::OverlayOf(Nw, E, At);
+				if (!V.Shown || V.Actual)
+				{
+					++Off;
+					continue;
+				}
+				Off += std::fabs(V.Entries - static_cast<double>(E.Entries)) <= 0.1 * static_cast<double>(E.Entries) + 2.0 ? 0 : 1;
+				Off += V.Registered == Nw.Live(E, At).Entries ? 0 : 1;
+				Ratios.push_back(V.Entries / static_cast<double>(std::max(1, E.Entries)));
+			}
+			Off += show::OverlayOf(Nw, E, E.Start - static_cast<double>(Te.OpensHours) * 60.0 - 1.0).Shown ? 1 : 0;
+		}
+	}
+	std::sort(Ratios.begin(), Ratios.end());
+	const double Median = Ratios.empty() ? 0.0 : Ratios[Ratios.size() / 2];
+	std::printf("overlay watch: %d guaranteed rival events in a week, %d closed short (%d amber); projected over final field, median %.3f\n", Checked, Short, Amber, Median);
+	Expect(Checked > 50 && Off == 0 && Short > 0 && Median > 0.97 && Median < 1.03,
+		"every guaranteed rival event: the actual overlay once closed, amber at $100 and 5%, the projection unbiased within the curve's wobble");
+}
+
+/** The Club's live accrual (§3.6 R5): every tier edge, the spec's worked card, and the same cents the 1st pays. */
+void U3Club()
+{
+	const Chips Rakes[] = {0, 4999, 5000, 21240, 24999, 25000, 99999, 100000, 399999, 400000, 612345};
+	const int Tiers[] = {0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 4};
+	const int Nexts[] = {1, 1, 2, 2, 2, 3, 3, 4, 4, 4, 4};
+	const Chips Accrued[] = {0, 0, 750, 3186, 3750, 5000, 20000, 25000, 100000, 120000, 183704};
+	const Chips ToNext[] = {5000, 1, 20000, 3760, 1, 75000, 1, 300000, 1, 0, 0};
+	int Wrong = 0;
+	for (size_t K = 0; K < 11; ++K)
+	{
+		site::Account A;
+		A.Site = net::SiteId::RunItTwice;
+		A.RakeMonth = Rakes[K];
+		const show::Accrual X = show::ClubAccrual(A);
+		const bool Ok = X.Tier == Tiers[K] && X.Next == Nexts[K] && X.Rake == Rakes[K] && X.Accrued == Accrued[K] && X.ToNext == ToNext[K];
+		Wrong += Ok ? 0 : 1;
+		if (!Ok)
+		{
+			std::printf("  club accrual at %s: tier %d next %d accrued %s to next %s\n", ss::Money(Rakes[K]).c_str(), X.Tier, X.Next, ss::Money(X.Accrued).c_str(),
+				ss::Money(X.ToNext).c_str());
+		}
+	}
+	Expect(Wrong == 0, "the Club's accrual at every tier edge ($49.99, $50, $249.99, $250, $999.99, $1,000, $3,999.99, $4,000; Inner Circle at the top)");
+	site::Account Card;
+	Card.Site = net::SiteId::RunItTwice;
+	Card.RakeMonth = 21240;
+	const show::Accrual W = show::ClubAccrual(Card);
+	Expect(W.Tier == 1 && ss::Money(W.Accrued) == "$31.86" && ss::Money(W.ToNext) == "$37.60" && W.Next == 2,
+		"the spec's card: $212.40 of rake is ACCRUED AT MEMBER (15%) $31.86, $37.60 MORE RAKE TO REGULAR (20%)");
+	// The same cents the 1st pays (SiteCloseMonth, pinned by Promotions): the accrual is the payout to come.
+	const double T0 = U3At(2026, 11, 10, 10.0);
+	const ss::rep::Public P;
+	std::vector<std::pair<std::string, std::string>> Texts;
+	int Unequal = 0;
+	for (const Chips Rake : {Chips(4999), Chips(5000), Chips(21240), Chips(25000), Chips(100000), Chips(400000)})
+	{
+		State R;
+		Chips RBank = 0;
+		site::Join(R.Sites, net::SiteId::RunItTwice, T0);
+		site::Account* Ra = site::AccountOf(R.Sites, net::SiteId::RunItTwice);
+		site::OnBuyIn(R.Sites, net::SiteId::RunItTwice, 0, Rake, "Buy-in", T0);
+		const Chips Due = show::ClubAccrual(*Ra).Accrued;
+		const Chips Before = Ra->Cents;
+		const double First = site::NextMonthStart(T0);
+		site::Step(R.Sites, R, RBank, P, 0, T0, First + 60.0, Texts);
+		Unequal += Ra->Cents - Before == Due ? 0 : 1;
+	}
+	Expect(Unequal == 0, "what the card accrues is exactly what the Second Run Club pays on the 1st");
+}
+
+/** A finished hand's whole state as text: a read must leave every bit of it as it was. */
+std::string U3HandText(const ss::Hand& H)
+{
+	std::string Out = std::to_string(H.DeckPosForShow()) + "|" + std::to_string(H.Events.size()) + "|" + std::to_string(static_cast<int>(H.CurrentStreet)) + "|";
+	for (const ss::Card C : H.Board)
+	{
+		Out += ss::CardToString(C);
+	}
+	for (const ss::HandSeat& S : H.Seats)
+	{
+		Out += "|" + S.Id + ":" + std::to_string(S.Stack) + ":" + std::to_string(S.Committed) + (S.Folded ? "f" : "") + (S.AllIn ? "a" : "");
+		for (const ss::Card C : S.Hole)
+		{
+			Out += ss::CardToString(C);
+		}
+	}
+	for (const ss::PotResult& Pr : H.PotResults)
+	{
+		Out += "|" + std::to_string(Pr.Amount);
+		for (size_t K = 0; K < Pr.Winners.size() && K < Pr.Shares.size(); ++K)
+		{
+			Out += "w" + std::to_string(Pr.Winners[K]) + ":" + std::to_string(Pr.Shares[K]);
+		}
+	}
+	Out += "|";
+	for (const ss::Card C : H.DeckForShow())
+	{
+		Out += ss::CardToString(C);
+	}
+	return Out;
+}
+
+std::string U3Board(const show::SecondBoard& B)
+{
+	std::string Out;
+	for (const int C : B.Cards)
+	{
+		Out += ss::CardToString(C);
+	}
+	return Out;
+}
+
+/** A 52-card deck with Top on top, the rest after it in order. */
+std::vector<ss::Card> U3Deck(const std::string& Top)
+{
+	std::vector<ss::Card> Deck = ss::ParseCards(Top);
+	for (const ss::Card C : ss::FullDeck())
+	{
+		if (std::find(Deck.begin(), Deck.end(), C) == Deck.end())
+		{
+			Deck.push_back(C);
+		}
+	}
+	return Deck;
+}
+
+int U3SeatOf(const ss::Hand& H, const std::string& Id)
+{
+	for (size_t I = 0; I < H.Seats.size(); ++I)
+	{
+		if (H.Seats[I].Id == Id)
+		{
+			return static_cast<int>(I);
+		}
+	}
+	return -1;
+}
+
+/** One of spike S-D's crafted hands: a fixed deck, scripted actions, and the second board and verdict worked by hand. */
+struct U3SdCase
+{
+	std::string Name;
+	ss::HandConfig Cfg;
+	std::vector<ss::PlayerAction> Acts;
+	bool Shown = true;
+	int Shared = 0;
+	std::string Cards; // the second board, all five
+	int Second = 0, Verdict = 0;
+	bool FromStub = true;
+	bool HeroIn = true;
+};
+
+ss::HandConfig U3HeadsUp(Chips Hero, Chips Villain, const std::string& Top)
+{
+	ss::HandConfig Cfg;
+	Cfg.Players = {{0, "hero", Hero}, {1, "v", Villain}};
+	Cfg.ButtonSeat = 0; // heads-up: the button (hero) posts the small blind and acts first preflop
+	Cfg.SmallBlind = 50;
+	Cfg.BigBlind = 100;
+	Cfg.Deck = U3Deck(Top);
+	return Cfg;
+}
+
+/** Plays a case, reads it: the read changes nothing, repeats, reads the same from a copy, and matches the hand-worked answer. */
+int U3RunSdCase(const U3SdCase& K)
+{
+	int Bad = 0;
+	ss::Rng R("u3-sd:" + K.Name);
+	ss::Hand H(K.Cfg, R);
+	for (const ss::PlayerAction& A : K.Acts)
+	{
+		Bad += H.Act(A) ? 0 : 1;
+	}
+	Bad += H.bComplete ? 0 : 1;
+	uint32_t Before[4];
+	uint32_t After[4];
+	R.GetState(Before);
+	const std::string Text = U3HandText(H);
+	const int Me = U3SeatOf(H, "hero");
+	show::SecondBoard B;
+	show::SecondBoard Again;
+	show::SecondBoard Copied;
+	const bool Shown = show::SecondRun(H, Me, "u3#" + K.Name, B);
+	const bool Shown2 = show::SecondRun(H, Me, "u3#" + K.Name, Again);
+	const ss::Hand Copy(H);
+	const bool Shown3 = show::SecondRun(Copy, Me, "u3#" + K.Name, Copied);
+	R.GetState(After);
+	Bad += std::equal(Before, Before + 4, After) && U3HandText(H) == Text ? 0 : 1;
+	Bad += Shown == Shown2 && Shown == Shown3 && U3Board(B) == U3Board(Again) && U3Board(B) == U3Board(Copied) && B.Verdict == Copied.Verdict && B.Second == Copied.Second ? 0 : 1;
+	Bad += Shown == K.Shown ? 0 : 1;
+	if (Shown && K.Shown)
+	{
+		Bad += B.Shared == K.Shared && B.FromStub == K.FromStub && B.HeroIn == K.HeroIn ? 0 : 1;
+		Bad += K.Cards.empty() || U3Board(B) == K.Cards ? 0 : 1;
+		Bad += !K.HeroIn || K.Cards.empty() || (B.Second == K.Second && B.Verdict == K.Verdict) ? 0 : 1;
+		// The verdict is the pair's: the real run as the engine paid it (First) with the second (fix secondboard).
+		Bad += !B.HeroIn || B.Verdict == show::VerdictOf(B.First, B.Second) ? 0 : 1;
+		// The Luck Ledger's equity and the Second Board see the same all-in (the hand's first Reveal).
+		Bad += (ss::autoplay::AllInEquity(H, Me) >= 0.0) == B.HeroIn ? 0 : 1;
+	}
+	if (Bad > 0)
+	{
+		std::printf("  second board \"%s\": shown %d, board %s, shared %d, second %d, verdict %d, %s, %s\n", K.Name.c_str(), Shown ? 1 : 0, U3Board(B).c_str(), B.Shared,
+			B.Second, B.Verdict, B.FromStub ? "stub" : "keyed", B.HeroIn ? "in" : "out");
+	}
+	return Bad;
+}
+
+/** The Second Board (§3.6 R8, spike S-D): its crafted hands, the dealer's positions, the keyed fallback, and a fuzz. */
+void U3SecondBoard()
+{
+	using ss::PlayerAction;
+	std::vector<U3SdCase> Cases;
+	// Heads-up deal order: v, hero, v, hero; then burn, flop x3, burn, turn, burn, river (DeckPos 12); the second run burns
+	// Deck[12], flops Deck[13..15], burns 16, turns 17, burns 18, rivers 19.
+	{
+		U3SdCase K;
+		K.Name = "HU all in preflop, lose then win";
+		K.Cfg = U3HeadsUp(1000, 1000, "KsAsKdAd 2c Kh7c2d 3c 9h 4c Jd 5c 8s6d3h 5d Tc 5h 4d");
+		K.Acts = {PlayerAction::RaiseTo(1000), PlayerAction::Call()};
+		K.Cards = "8s6d3hTc4d";
+		K.Second = 2;
+		K.Verdict = 1;
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "HU all in preflop, lost both";
+		K.Cfg = U3HeadsUp(1000, 1000, "AsKsAdKd 2c 8h7c2d 3c 9h 4c Jd 5c 8s6d3h 5d Tc 5h 4d");
+		K.Acts = {PlayerAction::RaiseTo(1000), PlayerAction::Call()};
+		K.Cards = "8s6d3hTc4d";
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "HU all in on the flop";
+		K.Cfg = U3HeadsUp(1000, 1000, "KsAsKdAd 2c 8s6d3h 3c 9h 4c Jd 5c Kh 5d 2s");
+		K.Acts = {PlayerAction::Call(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::RaiseTo(900), PlayerAction::Call()};
+		K.Shared = 3;
+		K.Cards = "8s6d3hKh2s";
+		K.Verdict = 1;
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "HU all in on the turn";
+		K.Cfg = U3HeadsUp(1000, 1000, "KsAsKdAd 2c 8s6d3h 3c 9h 4c Jd 5c 2s");
+		K.Acts = {PlayerAction::Call(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::RaiseTo(900),
+			PlayerAction::Call()};
+		K.Shared = 4;
+		K.Cards = "8s6d3h9h2s";
+		K.Second = 2;
+		K.Verdict = 2;
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "HU all in on the river (no board)";
+		K.Cfg = U3HeadsUp(1000, 1000, "KsAsKdAd 2c 8s6d3h 3c 9h 4c Jd 5c 2s");
+		K.Acts = {PlayerAction::Call(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::Check(),
+			PlayerAction::Check(), PlayerAction::RaiseTo(900), PlayerAction::Call()};
+		K.Shown = false;
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "HU folded on the flop (no board)";
+		K.Cfg = U3HeadsUp(1000, 1000, "KsAsKdAd 2c 8s6d3h 3c 9h 4c Jd");
+		K.Acts = {PlayerAction::Call(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::RaiseTo(400), PlayerAction::Fold()};
+		K.Shown = false;
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "HU the blinds put both in";
+		K.Cfg = U3HeadsUp(50, 100, "KsAsKdAd 2c 8s6d3h 3c 9h 4c Jd 5c Kh7c2d 5d 2s 5h 2h");
+		K.Cards = "Kh7c2d2s2h";
+		K.Verdict = 1; // the aces held on the real board; the kings fill up on Kh 2d 2s 2h
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "HU the small blind all in, v checks";
+		K.Cfg = U3HeadsUp(50, 1000, "KsAsKdAd 2c 8s6d3h 3c 9h 4c Jd 5c Kh7c2d 5d 2s 5h 2h");
+		K.Acts = {PlayerAction::Check()};
+		K.Cards = "Kh7c2d2s2h";
+		K.Verdict = 1;
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "HU chop both runs";
+		K.Cfg = U3HeadsUp(1000, 1000, "AcAsKhKd 2c 7d8c9s 2d 2h 6s 3s Tc 4h5cJs 6h 2s 6c 3c");
+		K.Acts = {PlayerAction::RaiseTo(1000), PlayerAction::Call()};
+		K.Cards = "4h5cJs2s3c";
+		K.Second = 1;
+		K.Verdict = 1;
+		Cases.push_back(K);
+	}
+	{
+		// Three ways, all in preflop: s 500 (AA), hero 1000 (KK), b 3000 (QQ). Main 1,500, side 1,000 (hero, b). DeckPos 14.
+		U3SdCase K;
+		K.Name = "3-way side pots, hero gets the side";
+		K.Cfg.Players = {{0, "hero", 1000}, {1, "s", 500}, {2, "b", 3000}};
+		K.Cfg.ButtonSeat = 2;
+		K.Cfg.SmallBlind = 50;
+		K.Cfg.BigBlind = 100;
+		K.Cfg.Deck = U3Deck("KsAsQsKdAdQd 2c 7h8c3d 2d 9c 2h 4s 3c Qh5dJc 3h 6s 4h 2s");
+		K.Acts = {PlayerAction::RaiseTo(3000), PlayerAction::Call(), PlayerAction::Call()};
+		K.Cards = "Qh5dJc6s2s";
+		K.Verdict = 1; // the first run paid hero the side pot: part of what hero could win; b's set takes both on the second
+		Cases.push_back(K);
+	}
+	{
+		// Hero 500 shoves, b1 and b2 call; on the flop b1 bets and b2 folds: only the turn and river run twice.
+		U3SdCase K;
+		K.Name = "3-way, a fold after the all-in";
+		K.Cfg.Players = {{0, "hero", 500}, {1, "b1", 3000}, {2, "b2", 3000}};
+		K.Cfg.ButtonSeat = 0;
+		K.Cfg.SmallBlind = 50;
+		K.Cfg.BigBlind = 100;
+		K.Cfg.Deck = U3Deck("KsQsAsKdQdAd 2c 7h8c3d 2d 9c 2h 4s 3c Kh 3h 2s");
+		K.Acts = {PlayerAction::RaiseTo(500), PlayerAction::Call(), PlayerAction::Call(), PlayerAction::RaiseTo(1000), PlayerAction::Fold()};
+		K.Shared = 3;
+		K.Cards = "7h8c3dKh2s";
+		K.Verdict = 1;
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "3-way, hero folded";
+		K.Cfg.Players = {{0, "hero", 1000}, {1, "b1", 1000}, {2, "b2", 1000}};
+		K.Cfg.ButtonSeat = 0;
+		K.Cfg.SmallBlind = 50;
+		K.Cfg.BigBlind = 100;
+		K.Cfg.Deck = U3Deck("KsQsAsKdQdAd");
+		K.Acts = {PlayerAction::Fold(), PlayerAction::RaiseTo(1000), PlayerAction::Call()};
+		K.HeroIn = false;
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "9-max, nine all in preflop";
+		for (int I = 0; I < 9; ++I)
+		{
+			K.Cfg.Players.push_back({I, I == 4 ? "hero" : "p" + std::to_string(I), 1000});
+		}
+		K.Cfg.ButtonSeat = 0;
+		K.Cfg.SmallBlind = 50;
+		K.Cfg.BigBlind = 100;
+		K.Acts = {PlayerAction::RaiseTo(1000)};
+		for (int I = 0; I < 8; ++I)
+		{
+			K.Acts.push_back(PlayerAction::Call());
+		}
+		Cases.push_back(K);
+	}
+	{
+		U3SdCase K;
+		K.Name = "HU short test deck (fallback)";
+		K.Cfg = U3HeadsUp(1000, 1000, "KsAsKdAd2cKh7c2d3c9h4cJd");
+		K.Cfg.Deck.resize(12);
+		K.Acts = {PlayerAction::RaiseTo(1000), PlayerAction::Call()};
+		K.FromStub = false;
+		Cases.push_back(K);
+	}
+	int Bad = 0;
+	for (const U3SdCase& K : Cases)
+	{
+		Bad += U3RunSdCase(K);
+	}
+	Expect(Bad == 0, "the Second Board on spike S-D's " + std::to_string(Cases.size()) +
+						 " crafted hands: preflop, flop and turn all-ins, none after a river all-in or a fold, chops, side pots, a fold after the all-in, nine in, the fallback");
+	// The nine-way all-in: the second board is exactly where a dealer deals it, Deck[27..29], [31], [33].
+	{
+		const U3SdCase& K = Cases[12];
+		ss::Rng R("u3-sd:" + K.Name);
+		ss::Hand H(K.Cfg, R);
+		for (const ss::PlayerAction& A : K.Acts)
+		{
+			H.Act(A);
+		}
+		show::SecondBoard B;
+		show::SecondRun(H, U3SeatOf(H, "hero"), "x", B);
+		const std::vector<ss::Card>& Dk = H.DeckForShow();
+		Expect(H.DeckPosForShow() == 26 && B.FromStub && B.Shared == 0 && B.Cards[0] == Dk[27] && B.Cards[1] == Dk[28] && B.Cards[2] == Dk[29] && B.Cards[3] == Dk[31] &&
+				B.Cards[4] == Dk[33],
+			"nine all in: the second run is Deck[27..29], [31], [33] (a burn before each street)");
+	}
+	// The fallback is keyed by the hand's id and deals none of the cards anyone held or saw.
+	{
+		const U3SdCase& K = Cases.back();
+		ss::Rng R1("a");
+		ss::Rng R2("b");
+		ss::Hand H1(K.Cfg, R1);
+		ss::Hand H2(K.Cfg, R2);
+		for (const ss::PlayerAction& A : K.Acts)
+		{
+			H1.Act(A);
+			H2.Act(A);
+		}
+		show::SecondBoard B1;
+		show::SecondBoard B2;
+		show::SecondBoard B3;
+		show::SecondRun(H1, 0, "rit-9#41", B1);
+		show::SecondRun(H2, 0, "rit-9#41", B2);
+		show::SecondRun(H1, 0, "rit-9#42", B3);
+		bool Fresh = true;
+		for (const int Cd : B1.Cards)
+		{
+			bool Seen = std::find(H1.Board.begin(), H1.Board.end(), Cd) != H1.Board.end();
+			for (const ss::HandSeat& S : H1.Seats)
+			{
+				Seen = Seen || std::find(S.Hole.begin(), S.Hole.end(), Cd) != S.Hole.end();
+			}
+			Fresh = Fresh && !Seen;
+		}
+		std::vector<int> Five(B1.Cards.begin(), B1.Cards.end());
+		std::sort(Five.begin(), Five.end());
+		Expect(!B1.FromStub && U3Board(B1) == U3Board(B2) && U3Board(B1) != U3Board(B3) && Fresh && std::adjacent_find(Five.begin(), Five.end()) == Five.end(),
+			"the fallback (a short test deck only) is keyed by the hand id and deals no card anyone was dealt");
+		// A short deck with a folded hand: the fallback deals none of the folded cards either, over many keys.
+		ss::HandConfig Cfg;
+		Cfg.Players = {{0, "f", 1000}, {1, "hero", 1000}, {2, "v", 1000}};
+		Cfg.ButtonSeat = 0;
+		Cfg.SmallBlind = 50;
+		Cfg.BigBlind = 100;
+		Cfg.Deck = U3Deck("2c2d2h2s3c3d4c5c6c7c8c9cTcJc");
+		Cfg.Deck.resize(14);
+		ss::Rng R3("c");
+		ss::Hand H3(Cfg, R3);
+		for (const ss::PlayerAction& A : {ss::PlayerAction::Fold(), ss::PlayerAction::RaiseTo(1000), ss::PlayerAction::Call()})
+		{
+			H3.Act(A);
+		}
+		const int Folder = U3SeatOf(H3, "f");
+		bool NoneFolded = H3.bComplete && Folder >= 0 && H3.Seats[static_cast<size_t>(Folder)].Folded;
+		for (int Key = 0; NoneFolded && Key < 64; ++Key)
+		{
+			show::SecondBoard Bf;
+			NoneFolded = show::SecondRun(H3, U3SeatOf(H3, "hero"), "fold#" + std::to_string(Key), Bf) && !Bf.FromStub;
+			for (const int Cd : Bf.Cards)
+			{
+				const std::vector<ss::Card>& Hole = H3.Seats[static_cast<size_t>(Folder)].Hole;
+				NoneFolded = NoneFolded && std::find(Hole.begin(), Hole.end(), Cd) == Hole.end();
+			}
+		}
+		Expect(NoneFolded, "the fallback never deals a folded hand's cards (64 keys)");
+	}
+	// A fuzz of 2,000 random hands: the stub past DeckPos with a burn before each street, never a dealt card, five distinct
+	// cards, drawing nothing; the Luck Ledger's all-in equity exists exactly when the player is in.
+	ss::Rng R("u3-sd-fuzz");
+	int Hands = 0;
+	int Shown = 0;
+	int Wrong = 0;
+	int ByShared[5] = {};
+	for (int Trial = 0; Trial < 2000; ++Trial)
+	{
+		const int Count = 2 + R.Int(8);
+		ss::HandConfig Cfg;
+		for (int I = 0; I < Count; ++I)
+		{
+			const Chips Stack = R.Chance(0.1) ? 1 + R.Int(150) : 1 + R.Int(20000);
+			Cfg.Players.push_back({I, "p" + std::to_string(I), Stack});
+		}
+		Cfg.ButtonSeat = R.Int(Count);
+		Cfg.SmallBlind = 50;
+		Cfg.BigBlind = 100;
+		Cfg.Ante = R.Chance(0.3) ? 100 : 0;
+		ss::Hand H(Cfg, R);
+		for (int Guard = 0; !H.bComplete && Guard < 500; ++Guard)
+		{
+			const ss::LegalActions L = H.GetLegalActions();
+			const double Roll = R.Next();
+			ss::PlayerAction A = ss::PlayerAction::Call();
+			if (Roll < 0.18)
+			{
+				A = L.CanCheck ? ss::PlayerAction::Check() : ss::PlayerAction::Fold();
+			}
+			else if (Roll >= 0.6 && Roll < 0.8 && L.CanRaise)
+			{
+				A = ss::PlayerAction::RaiseTo(static_cast<double>(L.MinRaiseTo));
+			}
+			else if (Roll >= 0.8 && L.CanRaise)
+			{
+				A = ss::PlayerAction::RaiseTo(static_cast<double>(L.MaxRaiseTo));
+			}
+			if (!H.Act(A))
+			{
+				break;
+			}
+		}
+		if (!H.bComplete)
+		{
+			continue;
+		}
+		++Hands;
+		const int Me = R.Int(Count); // drawn before the read: the read must leave R where it was
+		uint32_t Before[4];
+		uint32_t After[4];
+		R.GetState(Before);
+		const std::string Text = U3HandText(H);
+		const int Pos = H.DeckPosForShow();
+		const std::vector<ss::Card>& Dk = H.DeckForShow();
+		int RevealBoard = -1;
+		size_t SeenBoard = 0;
+		for (const ss::HandEvent& Ev : H.Events)
+		{
+			RevealBoard = Ev.Type == ss::EventType::Reveal && RevealBoard < 0 ? static_cast<int>(SeenBoard) : RevealBoard;
+			SeenBoard = Ev.Type == ss::EventType::Street ? Ev.Board.size() : SeenBoard;
+		}
+		show::SecondBoard B;
+		const bool Is = show::SecondRun(H, Me, "fuzz#" + std::to_string(Trial), B);
+		bool Ok = Is == (RevealBoard >= 0 && RevealBoard < 5 && H.Board.size() == 5);
+		if (Is)
+		{
+			++Shown;
+			++ByShared[B.Shared];
+			Ok = Ok && B.FromStub && B.Shared == RevealBoard;
+			for (int K = 0; Ok && K < B.Shared; ++K)
+			{
+				Ok = B.Cards[static_cast<size_t>(K)] == H.Board[static_cast<size_t>(K)];
+			}
+			const size_t P0 = static_cast<size_t>(Pos);
+			const std::vector<size_t> Want = B.Shared == 0 ? std::vector<size_t>{P0 + 1, P0 + 2, P0 + 3, P0 + 5, P0 + 7}
+								   : B.Shared == 3 ? std::vector<size_t>{P0 + 1, P0 + 3}
+												   : std::vector<size_t>{P0 + 1};
+			for (size_t K = 0; Ok && K < Want.size(); ++K)
+			{
+				Ok = Want[K] < Dk.size() && B.Cards[static_cast<size_t>(B.Shared) + K] == Dk[Want[K]];
+			}
+			for (int K = B.Shared; Ok && K < 5; ++K)
+			{
+				Ok = std::find(Dk.begin(), Dk.begin() + Pos, B.Cards[static_cast<size_t>(K)]) == Dk.begin() + Pos;
+			}
+			std::vector<int> Five(B.Cards.begin(), B.Cards.end());
+			std::sort(Five.begin(), Five.end());
+			Ok = Ok && std::adjacent_find(Five.begin(), Five.end()) == Five.end();
+			Ok = Ok && (ss::autoplay::AllInEquity(H, Me) >= 0.0) == B.HeroIn;
+			Ok = Ok && (!B.HeroIn || B.Verdict == show::VerdictOf(B.First, B.Second));
+		}
+		// The Settlement's record (fix secondboard): exactly when the player was in, and every fact the hand's own.
+		show::SecondRecord Rec;
+		const bool Recorded = show::SecondRecordOf(H, Me, "fuzz#" + std::to_string(Trial), Rec);
+		Ok = Ok && Recorded == (Is && B.HeroIn);
+		if (Recorded)
+		{
+			const ss::HandSeat& Mine = H.Seats[static_cast<size_t>(Me)];
+			Ok = Ok && Rec.Hero[0] == Mine.Hole[0] && Rec.Hero[1] == Mine.Hole[1] && std::equal(H.Board.begin(), H.Board.end(), Rec.Ran.begin()) && Rec.Board.Cards == B.Cards &&
+				Rec.Board.First == B.First && Rec.Board.Verdict == B.Verdict && Rec.Equity == ss::autoplay::AllInEquity(H, Me) && Rec.Villain[0] >= 0;
+		}
+		R.GetState(After);
+		Ok = Ok && std::equal(Before, Before + 4, After) && U3HandText(H) == Text;
+		Wrong += Ok ? 0 : 1;
+	}
+	std::printf("second board fuzz: %d hands, %d all-ins with cards to come (preflop %d, flop %d, turn %d), %d wrong\n", Hands, Shown, ByShared[0], ByShared[3], ByShared[4],
+		Wrong);
+	Expect(Hands > 1500 && Wrong == 0 && ByShared[0] > 0 && ByShared[3] > 0 && ByShared[4] > 0,
+		"the Second Board over 2,000 random hands: the stub past DeckPos, a burn before each street, never a dealt card, drawing nothing");
+}
+
+/**
+ * A heads-up preflop all-in's deck, the villain dealt first ("KsAsKdAd": the villain Ks Kd, the player As Ad): the real board
+ * Run1, then past the hand's DeckPos the second run Run2, a burn before each street (S-D's walk); the burns are the first
+ * cards nobody else uses.
+ */
+std::vector<ss::Card> U3TwoRuns(const std::string& Holes, const std::string& Run1, const std::string& Run2)
+{
+	const std::vector<ss::Card> Hole = ss::ParseCards(Holes);
+	const std::vector<ss::Card> A = ss::ParseCards(Run1);
+	const std::vector<ss::Card> B = ss::ParseCards(Run2);
+	std::vector<ss::Card> Used = Hole;
+	Used.insert(Used.end(), A.begin(), A.end());
+	Used.insert(Used.end(), B.begin(), B.end());
+	std::vector<ss::Card> Spare;
+	for (const ss::Card C : ss::FullDeck())
+	{
+		if (std::find(Used.begin(), Used.end(), C) == Used.end())
+		{
+			Spare.push_back(C);
+		}
+	}
+	size_t Next = 0;
+	std::vector<ss::Card> Deck = Hole;
+	const auto BurnAndDeal = [&](const std::vector<ss::Card>& Run, size_t From, size_t Count) {
+		Deck.push_back(Spare[Next++]);
+		Deck.insert(Deck.end(), Run.begin() + static_cast<std::ptrdiff_t>(From), Run.begin() + static_cast<std::ptrdiff_t>(From + Count));
+	};
+	BurnAndDeal(A, 0, 3);
+	BurnAndDeal(A, 3, 1);
+	BurnAndDeal(A, 4, 1);
+	BurnAndDeal(B, 0, 3);
+	BurnAndDeal(B, 3, 1);
+	BurnAndDeal(B, 4, 1);
+	Deck.insert(Deck.end(), Spare.begin() + static_cast<std::ptrdiff_t>(Next), Spare.end());
+	return Deck;
+}
+
+/**
+ * The Second Board's record (fix secondboard; the lead's PIE 2026-10-21: the Settlement printed AA v K5 "100% | 0%", RAN
+ * "LOST", "you'd have WON BOTH"). VerdictOf for every pair of runs; SecondRecordOf on crafted all-ins for a win, a loss, a
+ * split and the mixed pairs: both hands, the real board, the second run, what the first run paid, the all-in's equity
+ * (AllInEquity, never the river's 1 / 0), the same from a copy (the skip path hands HeroHandDone a copy, LastHeroHand), and
+ * nothing drawn; no record after a fold, a river all-in or with the player folded; NoteSecond's bounded log.
+ */
+void U3SecondRecord()
+{
+	using ss::PlayerAction;
+	const int Pairs[][3] = {{2, 2, 2}, {2, 0, 1}, {0, 2, 1}, {0, 0, 0}, {1, 1, 1}, {1, 2, 1}, {2, 1, 1}, {1, 0, 1}, {0, 1, 1}};
+	int PairsOk = 0;
+	for (const auto& P : Pairs)
+	{
+		PairsOk += show::VerdictOf(P[0], P[1]) == P[2] ? 1 : 0;
+	}
+	Expect(PairsOk == 9, "VerdictOf: won both and lost both only when both runs went that way whole; every other pair (chops too) splits it");
+	struct Case
+	{
+		const char* Name;
+		const char* Run1;
+		const char* Run2;
+		int First, Second, Verdict;
+	};
+	// Win boards (the aces hold), loss boards (a third king), chop boards (a straight flush on board plays for both).
+	const Case Cases[] = {
+		{"win", "2c7h9d3s4c", "2h8cTd3d5s", 2, 2, 2},
+		{"loss", "Kh7c2d3c9h", "Kc8d4d6cJs", 0, 0, 0},
+		{"split", "5h6h7h8h9h", "TcJcQcKcAc", 1, 1, 1},
+		{"won, then lost", "2c7h9d3s4c", "Kc8d4d6cJs", 2, 0, 1},
+		{"lost, then won", "Kh7c2d3c9h", "2h8cTd3d5s", 0, 2, 1},
+		{"split, then won", "5h6h7h8h9h", "2h8cTd3d5s", 1, 2, 1},
+	};
+	const auto Card = [](const char* Text) { return ss::ParseCards(Text)[0]; };
+	const auto Cards = [](const std::vector<int>& V) {
+		std::string Out;
+		for (const int C : V)
+		{
+			Out += C >= 0 ? ss::CardToString(C) : std::string("--");
+		}
+		return Out;
+	};
+	int Good = 0;
+	for (const Case& K : Cases)
+	{
+		ss::HandConfig Cfg = U3HeadsUp(4000, 4000, "");
+		Cfg.Deck = U3TwoRuns("KsAsKdAd", K.Run1, K.Run2);
+		ss::Rng R(std::string("u3-record:") + K.Name);
+		ss::Hand H(Cfg, R);
+		H.Act(PlayerAction::RaiseTo(4000));
+		H.Act(PlayerAction::Call());
+		const int Me = U3SeatOf(H, "hero");
+		uint32_t Before[4];
+		uint32_t After[4];
+		R.GetState(Before);
+		show::SecondRecord Rec;
+		show::SecondRecord Copied;
+		const bool Is = H.bComplete && show::SecondRecordOf(H, Me, std::string("rec#") + K.Name, Rec);
+		const ss::Hand Copy(H);
+		const bool Again = show::SecondRecordOf(Copy, Me, std::string("rec#") + K.Name, Copied);
+		R.GetState(After);
+		const double Eq = ss::autoplay::AllInEquity(H, Me);
+		const std::vector<int> Ran(Rec.Ran.begin(), Rec.Ran.end());
+		const std::vector<int> Twice(Rec.Board.Cards.begin(), Rec.Board.Cards.end());
+		const bool Ok = Is && Again && Rec.Hero == std::array<int, 2>{{Card("As"), Card("Ad")}} && Rec.Villain == std::array<int, 2>{{Card("Ks"), Card("Kd")}} &&
+			Cards(Ran) == K.Run1 && Cards(Twice) == K.Run2 && Rec.Board.First == K.First && Rec.Board.Second == K.Second && Rec.Board.Verdict == K.Verdict &&
+			Rec.Equity == Eq && Eq > 0.75 && Eq < 0.9 && Copied.Equity == Rec.Equity && Copied.Board.Cards == Rec.Board.Cards && Copied.Board.Verdict == Rec.Board.Verdict &&
+			Copied.Board.First == Rec.Board.First && Copied.Ran == Rec.Ran && Copied.Hero == Rec.Hero && Copied.Villain == Rec.Villain && std::equal(Before, Before + 4, After);
+		std::printf("second board record %-16s %s v %s, %.3f at the all-in, ran %s (first %d), twice %s (second %d), verdict %d%s\n", K.Name, Cards({Rec.Hero[0], Rec.Hero[1]}).c_str(),
+			Cards({Rec.Villain[0], Rec.Villain[1]}).c_str(), Rec.Equity, Cards(Ran).c_str(), Rec.Board.First, Cards(Twice).c_str(), Rec.Board.Second, Rec.Board.Verdict, Ok ? "" : "   WRONG");
+		Good += Ok ? 1 : 0;
+	}
+	Expect(Good == static_cast<int>(sizeof(Cases) / sizeof(Cases[0])),
+		"SecondRecordOf: a win, a loss, a split and the mixed pairs keep the hand's cards, the first run's pay, the second run, the verdict and the all-in's equity, the same from a copy, drawing nothing");
+	// No record: a fold ends it, the all-in came on the river, or the player folded before the others went all in.
+	{
+		int None = 0;
+		ss::Rng R("u3-record:none");
+		ss::Hand Fold(U3HeadsUp(4000, 4000, "KsAsKdAd 2c 7d8c9s 2d 2h 6s 3s"), R);
+		Fold.Act(PlayerAction::RaiseTo(400));
+		Fold.Act(PlayerAction::Fold());
+		show::SecondRecord Rec;
+		None += Fold.bComplete && !show::SecondRecordOf(Fold, U3SeatOf(Fold, "hero"), "none#fold", Rec) ? 1 : 0;
+		ss::Hand River(U3HeadsUp(1000, 1000, "KsAsKdAd 2c 8s6d3h 3c 9h 4c Jd 5c 2s"), R);
+		for (const PlayerAction& A : {PlayerAction::Call(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::Check(), PlayerAction::Check(),
+				 PlayerAction::Check(), PlayerAction::RaiseTo(900), PlayerAction::Call()})
+		{
+			River.Act(A);
+		}
+		None += River.bComplete && !show::SecondRecordOf(River, U3SeatOf(River, "hero"), "none#river", Rec) ? 1 : 0;
+		ss::HandConfig Three;
+		Three.Players = {{0, "hero", 1000}, {1, "b1", 3000}, {2, "b2", 3000}};
+		Three.ButtonSeat = 0;
+		Three.SmallBlind = 50;
+		Three.BigBlind = 100;
+		Three.Deck = U3Deck("KsAsQsKdAdQd");
+		ss::Hand Out(Three, R);
+		Out.Act(PlayerAction::Fold());
+		Out.Act(PlayerAction::RaiseTo(3000));
+		Out.Act(PlayerAction::Call());
+		show::SecondBoard B;
+		None += Out.bComplete && show::SecondRun(Out, U3SeatOf(Out, "hero"), "none#out", B) && !B.HeroIn && !show::SecondRecordOf(Out, U3SeatOf(Out, "hero"), "none#out", Rec) ? 1 : 0;
+		Expect(None == 3, "SecondRecordOf: no record after a fold, a river all-in, or with the player out of the pot");
+	}
+	// NoteSecond: the player found by HeroId, the record kept with its event and minute, a hand with no all-in skipped, the
+	// oldest dropped past Keep; the log's record equals SecondRecordOf's for the same hand.
+	{
+		std::vector<show::SecondRecord> Log;
+		int Added = 0;
+		for (int I = 0; I < 14; ++I)
+		{
+			ss::HandConfig Cfg = U3HeadsUp(4000, 4000, "");
+			Cfg.Deck = U3TwoRuns("KsAsKdAd", I % 2 ? "2c7h9d3s4c" : "Kh7c2d3c9h", "2h8cTd3d5s");
+			ss::Rng R("u3-note:" + std::to_string(I));
+			ss::Hand H(Cfg, R);
+			H.Act(PlayerAction::RaiseTo(4000));
+			H.Act(PlayerAction::Call());
+			Added += show::NoteSecond(Log, H, "runittwice.hourly@47295", "runittwice.hourly@47295#7#" + std::to_string(I), 47300.0 + I) ? 1 : 0;
+		}
+		ss::Rng R("u3-note:fold");
+		ss::Hand Fold(U3HeadsUp(4000, 4000, "KsAsKdAd 2c 7d8c9s 2d 2h 6s 3s"), R);
+		Fold.Act(PlayerAction::RaiseTo(400));
+		Fold.Act(PlayerAction::Fold());
+		const bool Skipped = !show::NoteSecond(Log, Fold, "runittwice.hourly@47295", "runittwice.hourly@47295#7#99", 47400.0);
+		const bool Kept = Log.size() == 12 && Log.front().HandId == "runittwice.hourly@47295#7#2" && Log.back().HandId == "runittwice.hourly@47295#7#13" &&
+			Log.back().EventId == "runittwice.hourly@47295" && Log.back().At == 47313.0 && Log.back().Board.First == 2 && Log.front().Board.First == 0;
+		Expect(Added == 14 && Skipped && Kept, "NoteSecond: every all-in the player was in, with its event and minute, at most 12, a fold skipped");
+	}
+}
+
+/** The Desk (§3.4 E, §3.6 R7): KPIs and the net line from a fixture History, only the site's own rows, by range. */
+void U3Desk()
+{
+	const double Now = U3At(2026, 12, 20, 22.0);
+	auto Row = [Now](const char* Name, int Place, int Entrants, Chips Prize, Chips BuyIn, const std::string& Template, double DaysAgo) {
+		ss::HistoryEntry E;
+		E.Name = Name;
+		E.Place = Place;
+		E.Entrants = Entrants;
+		E.Prize = Prize;
+		E.BuyInCents = BuyIn;
+		E.EventId = Template + "@" + std::to_string(static_cast<long long>(std::llround(Now - DaysAgo * SitesDay)));
+		return E;
+	};
+	// Newest first, as the session keeps it.
+	const std::vector<ss::HistoryEntry> H = {
+		Row("The Hourly", 2, 40, 900, 330, "runittwice.hourly", -0.5), // starts after now: not on the Desk yet
+		Row("The Sweat", 3, 120, 15000, 1100, "runittwice.the-sweat", 1.0),
+		Row("Flip & Run", 2, 8, 300, 110, "ignite.flip-go-110", 1.2), // Ignite's: not RunItTwice's Desk
+		Row("The Nightcap", 45, 80, 0, 10900, "runittwice.the-nightcap", 2.0),
+		Row("Night Owl", 7, 300, 2200, 550, "night-owl", 2.5), // RiverLine's
+		Row("The Hourly", 31, 60, 0, 0, "runittwice.hourly", 3.0), // a free entry: an event, not a paid one
+		Row("Supper Stack", 12, 60, 900, 550, "runittwice.supper-stack", 40.0),
+		Row("The Hourly", 1, 30, 4000, 330, "runittwice.hourly", 70.0),
+	};
+	site::Account A;
+	A.Site = net::SiteId::RunItTwice;
+	A.RakeMonth = 21240;
+	// G1's fix pass (G1_AUDIT L5): the rake is what the account actually paid. The Nightcap came in on a ticket, so its $7.63 fee
+	// was never paid: the account's tally is the Sweat's 88, Supper Stack's 44 and the old Hourly's 26 cents.
+	A.RakeLife = 88 + 44 + 26;
+	const show::DeskKpis K60 = show::Desk(H, A, 60, Now);
+	// By hand, the last 60 days: 4 events (the Sweat, the Nightcap, the free Hourly, Supper Stack); $125.50 in, $159.00 back.
+	Expect(K60.Events == 4 && K60.Net == 3350 && std::fabs(K60.Roi - 3350.0 / 12550.0) < 1e-12 && K60.Itm == 0.5 && K60.Ft == 0.25 && K60.Abi == 4183 &&
+			K60.Rake == 158 && K60.Club == 3186,
+		"the Desk, last 60 days: 4 events, net +$33.50, ROI 26.7%, ITM 50%, FT 25%, ABI $41.83 over the paid ones, rake paid $1.58, Club $31.86 accrued");
+	const show::DeskKpis All = show::Desk(H, A, 0, Now);
+	Expect(All.Events == 5 && All.Net == 7020 && All.Ft == 0.4 && All.Itm == 0.6 && All.Abi == 3220 && All.Rake == 158 && All.Rake == show::RakePaid(A),
+		"the Desk over all of History: 5 events, net +$70.20, ABI $32.20 (nothing from Ignite, RiverLine or the future); rake paid $1.58, the account's");
+	const std::vector<show::NetPoint> Line = show::DeskNet(H, net::SiteId::RunItTwice, 60, Now);
+	Expect(Line.size() == 4 && Line[0].Net == 350 && Line[1].Net == 350 && Line[2].Net == -10550 && Line[3].Net == 3350 && Line[3].Net == K60.Net &&
+			Line[0].At < Line[1].At && Line[2].At < Line[3].At,
+		"the Desk's net line: oldest first, cumulative, ending at the KPIs' net");
+	site::Account Ig;
+	Ig.Site = net::SiteId::Ignite;
+	Ig.RakeMonth = 21240;
+	Ig.RakeLife = 12;
+	const show::DeskKpis KI = show::Desk(H, Ig, 60, Now);
+	Expect(KI.Events == 1 && KI.Net == 190 && KI.Rake == 12 && KI.Club == 0, "Ignite's numbers are Ignite's rows (and Ignite has no Club)");
+	Expect(show::Desk({}, A, 30, Now).Events == 0 && show::Desk({}, A, 30, Now).Roi == 0.0 && show::DeskNet({}, net::SiteId::RunItTwice, 30, Now).empty(),
+		"an empty History: zeros, no line");
+}
+
+/**
+ * G1's fix pass (fix-rit, G1_AUDIT L5): one final table and one rake. A final table is the event's last table (8 seats at
+ * the rivals' default, 6 at six-max, 9 when the event isn't known), and the rake is what the account actually paid: a
+ * ticket's entry pays none, so its face value never shows as rake, and the Desk's figure is the Ledger's whatever the range.
+ */
+void U3DeskFix()
+{
+	const double Now = U3At(2026, 12, 20, 22.0);
+	const auto Id = [Now](const std::string& Template, double DaysAgo) {
+		return Template + "@" + std::to_string(static_cast<long long>(std::llround(Now - DaysAgo * SitesDay)));
+	};
+	Expect(show::FinalTableSeats(Id("runittwice.the-sweat", 1.0)) == 8 && show::FinalTableSeats(Id("runittwice.six-max-classic", 1.0)) == 6 &&
+			show::FinalTableSeats(Id("night-owl", 1.0)) == 9 && show::FinalTableSeats("") == 9 && show::FinalTableSeats("runittwice.no-such-event@100") == 9,
+		"final tables: an 8-max event's is 8 seats, a six-max's 6; RiverLine's Night Owl 9, and an unknown event 9");
+	auto Row = [&](const char* Name, int Place, Chips Prize, Chips BuyIn, const std::string& Template, double DaysAgo) {
+		ss::HistoryEntry E;
+		E.Name = Name;
+		E.Place = Place;
+		E.Entrants = 120;
+		E.Prize = Prize;
+		E.BuyInCents = BuyIn;
+		E.EventId = Id(Template, DaysAgo);
+		return E;
+	};
+	const ss::HistoryEntry Eighth = Row("The Sweat", 8, 2200, 1100, "runittwice.the-sweat", 1.0);
+	const ss::HistoryEntry Ninth = Row("The Sweat", 9, 1700, 1100, "runittwice.the-sweat", 2.0);
+	const ss::HistoryEntry Sixth = Row("Six-Max Classic", 6, 4400, 2200, "runittwice.six-max-classic", 3.0);
+	const ss::HistoryEntry Seventh = Row("Six-Max Classic", 7, 3300, 2200, "runittwice.six-max-classic", 4.0);
+	Expect(show::MadeFinalTable(Eighth) && !show::MadeFinalTable(Ninth) && show::MadeFinalTable(Sixth) && !show::MadeFinalTable(Seventh),
+		"final tables: 8th of an 8-max is one, 9th isn't; 6th of a six-max is one, 7th isn't");
+	site::Account Empty;
+	Empty.Site = net::SiteId::RunItTwice;
+	Expect(show::Desk({Eighth, Ninth, Sixth, Seventh}, Empty, 0, Now).Ft == 0.5, "the Desk's FT: 2 of those 4 made the final table (was 3: 9th counted on an 8-max)");
+	// The money path: the Sweat paid from the wallet (its $0.88 fee is rake), the Nightcap on a ticket (the session's ticket
+	// branch writes a zero line and never calls OnBuyIn).
+	site::Book B;
+	site::Join(B, net::SiteId::RunItTwice, Now - 10.0 * SitesDay);
+	site::Account* Acct = site::AccountOf(B, net::SiteId::RunItTwice);
+	const net::SiteDef& Rit = net::Def(net::SiteId::RunItTwice);
+	site::OnBuyIn(B, net::SiteId::RunItTwice, 1100, Rit.Rake.Fee(1100), "Buy-in: The Sweat", Now - 2.0 * SitesDay);
+	site::AddLine(B, net::SiteId::RunItTwice, Now - 1.0 * SitesDay, 0, 0, "Ticket: The Nightcap");
+	const std::vector<ss::HistoryEntry> H = {Row("The Nightcap", 30, 0, 10900, "runittwice.the-nightcap", 1.0), Row("The Sweat", 40, 0, 1100, "runittwice.the-sweat", 2.0)};
+	const show::DeskKpis All = Acct ? show::Desk(H, *Acct, 0, Now) : show::DeskKpis();
+	const show::DeskKpis Week = Acct ? show::Desk(H, *Acct, 7, Now) : show::DeskKpis();
+	std::printf("  desk: rake paid %lld cents (the account's %lld; History's fees would say %lld)\n", static_cast<long long>(All.Rake), static_cast<long long>(Acct ? Acct->RakeLife : -1),
+		static_cast<long long>(Rit.Rake.Fee(1100) + Rit.Rake.Fee(10900)));
+	Expect(Acct && Acct->RakeLife == Rit.Rake.Fee(1100) && All.Rake == Acct->RakeLife && Week.Rake == All.Rake && All.Rake == show::RakePaid(*Acct) && All.Rake < Rit.Rake.Fee(1100) + Rit.Rake.Fee(10900),
+		"the Desk's rake is the rake actually paid (the account's, the Ledger's RAKE PAID): a ticket's face value is never rake, whatever the range");
+}
+
+/** Sunday Live (§3.4 B, §3.6 R6): the story's rows from the network's own numbers and the world's, only what has happened. */
+void U3SundayLive()
+{
+	const net::Network& N = net::Site(net::SiteId::RunItTwice);
+	const double Sunday = U3At(2026, 11, 22, 0.0);
+	net::EventInstance Major;
+	bool Found = false;
+	for (const net::EventInstance& E : N.Window(Sunday, Sunday + SitesDay))
+	{
+		if (!Found && E.Id.rfind("runittwice.sunday-100k@", 0) == 0)
+		{
+			Major = E;
+			Found = true;
+		}
+	}
+	Expect(Found, "the Sunday 100K runs on Sunday");
+	if (!Found)
+	{
+		return;
+	}
+	const net::EventTemplate& T = N.TemplateOf(Major);
+	const double Opens = Major.Start - static_cast<double>(T.OpensHours) * 60.0;
+	const double Ends = Major.Start + Major.Duration;
+	Expect(show::SundayLive(N, nullptr, Major, Opens - 1.0).empty(), "Sunday Live: nothing before registration opens");
+	const std::vector<show::LiveRow> Before = show::SundayLive(N, nullptr, Major, Major.Start - 90.0);
+	const std::string Gtd = T.GtdCents % 100 == 0 ? "$" + ss::Grouped(T.GtdCents / 100) : ss::Money(T.GtdCents);
+	bool Counts = Before.size() == 4 && Before[0].At == Opens && Before[0].Kind == show::LiveFact &&
+		Before[0].Text == "Registration opens for " + T.Name + ": $109 buy-in, " + Gtd + " guaranteed.";
+	const double Marks[] = {360.0, 180.0, 120.0};
+	for (size_t K = 1; Counts && K < Before.size(); ++K)
+	{
+		const double At = Major.Start - Marks[K - 1];
+		Counts = Before[K].At == At && Before[K].Text == ss::Grouped(N.Live(Major, At).Entries) + " registered for " + T.Name + ".";
+	}
+	Expect(Counts, "before the start: registration's opening and the network's own count at 6, 3 and 2 hours out (" + std::to_string(Before.size()) + " rows)");
+	// After the end: in time order, nothing past World, registration's close with the final field, the overlay iff there was
+	// one, the winner and the podium from the result, and no chip count anywhere.
+	auto Ending = [&](const std::vector<show::LiveRow>& Rows, const char* What) {
+		bool Ordered = !Rows.empty() && Rows.size() <= 40;
+		bool NoChips = true;
+		int Closed = 0;
+		int Overlay = 0;
+		int Winner = 0;
+		int Podium = 0;
+		bool Actual = false;
+		const Chips Short = show::ProjectedOverlay(N, Major, Major.Entries, Ends + 1.0, Actual);
+		const net::EventResult& Res = N.Result(Major);
+		std::string First;
+		int Places = 0;
+		for (const net::Placing& P : Res.FinalTable)
+		{
+			First = P.Place == 1 ? (P.Player >= 0 ? N.Players()[static_cast<size_t>(P.Player)].Name : P.Player == -1 ? N.HeroName() : P.Name) : First;
+			Places += P.Place >= 1 && P.Place <= 3 ? 1 : 0;
+		}
+		for (size_t K = 0; K < Rows.size(); ++K)
+		{
+			const std::string& Tx = Rows[K].Text;
+			Ordered = Ordered && Rows[K].At <= Ends + 1.0 && Rows[K].At >= Opens && (K == 0 || Rows[K - 1].At <= Rows[K].At);
+			NoChips = NoChips && Tx.find("chips") == std::string::npos && Tx.find("stack") == std::string::npos;
+			Closed += Tx.rfind("Registration closed at ", 0) == 0 && Tx.find(": " + ss::Grouped(Major.Entries) + " entries, ") != std::string::npos ? 1 : 0;
+			Overlay += Tx.rfind("Overlay paid: ", 0) == 0 ? 1 : 0;
+			Winner += !First.empty() && Tx.rfind(First + " wins " + T.Name + " for $", 0) == 0 ? 1 : 0;
+			Podium += Rows[K].Kind == show::LivePodium ? 1 : 0;
+		}
+		std::printf("sunday live (%s): %zu rows by the end of %s (%d entries, overlay %s, %d places on the podium)\n", What, Rows.size(), T.Name.c_str(), Major.Entries,
+			ss::Money(Short).c_str(), Places);
+		Expect(Ordered && NoChips && Closed == 1 && Overlay == (Short > 0 ? 1 : 0) && Winner == (First.empty() ? 0 : 1) && Podium == Places,
+			std::string("Sunday Live after the end (") + What + "): in time order, the close with the final field, the overlay iff there was one, the winner and the podium, no chip counts");
+	};
+	Ending(show::SundayLive(N, nullptr, Major, Ends + 1.0), "no world");
+	// With a living world: the site's own team pros and the most-followed players in the field, from the world's plan.
+	ss::world::World W;
+	W.Create(95u, 1440.0 + 127.0);
+	net::AttachAll(&W);
+	W.AdvanceTo(Major.Start - 60.0);
+	const std::vector<int> Planned = W.Registered(Major.Id);
+	const std::vector<show::LiveRow> Field = show::SundayLive(N, &W, Major, Major.Start - 60.0);
+	int TeamIn = 0;
+	for (const int Id : Planned)
+	{
+		TeamIn += W.Get(Id) && W.Get(Id)->Sponsor == "Team RunItTwice" ? 1 : 0;
+	}
+	int TeamRows = 0;
+	int NotableRows = 0;
+	bool Honest = true;
+	for (const show::LiveRow& Rw : Field)
+	{
+		const bool Listed = std::find(Planned.begin(), Planned.end(), Rw.Npc) != Planned.end();
+		if (Rw.Kind == show::LiveTeam)
+		{
+			++TeamRows;
+			Honest = Honest && Listed && W.Get(Rw.Npc)->Sponsor == "Team RunItTwice" && Rw.Text == W.Get(Rw.Npc)->Name + " of Team RunItTwice is registered.";
+		}
+		if (Rw.Kind == show::LiveNotable)
+		{
+			++NotableRows;
+			Honest = Honest && Listed && W.Get(Rw.Npc)->Followers >= 2500;
+		}
+		Honest = Honest && Rw.At <= Major.Start - 60.0;
+	}
+	std::printf("sunday live with a world: %zu planned, %d of Team RunItTwice, %d notable rows\n", Planned.size(), TeamIn, NotableRows);
+	Expect(Honest && TeamRows == std::min(6, TeamIn) && NotableRows <= 4, "the field's notable entries: the team's pros and the most-followed, all on the world's own list");
+	W.AdvanceTo(Ends + 1.0);
+	Ending(show::SundayLive(N, &W, Major, Ends + 1.0), "a living world");
+	net::AttachAll(nullptr);
+}
+
+/** Ignite's welcome bonus as the page draws it (§2.6 F11): the meter's next $5 is exactly the rake SiteMoney releases it at. */
+void U3Welcome()
+{
+	const double T0 = U3At(2026, 11, 10, 10.0);
+	State L;
+	Chips Bank = 100000;
+	site::Join(L.Sites, net::SiteId::Ignite, T0);
+	site::Deposit(L.Sites, L, Bank, net::SiteId::Ignite, 5000, "", T0);
+	site::Account* A = site::AccountOf(L.Sites, net::SiteId::Ignite);
+	site::OnBuyIn(L.Sites, net::SiteId::Ignite, 0, 6660, "Buy-in", T0 + 10.0);
+	const show::WelcomeView V = show::Welcome(*A, T0 + 20.0);
+	Expect(V.Pending == 3500 && V.Released == 1500 && V.NextIn == 1340 && std::fabs(V.NeedleT - 0.3) < 1e-12 && V.Ends == A->BonusExpires,
+		"the welcome view: $35.00 pending, $15.00 released, next $5 in $13.40 of rake, the needle at 30%");
+	site::OnBuyIn(L.Sites, net::SiteId::Ignite, 0, V.NextIn - 1, "Buy-in", T0 + 30.0);
+	const Chips Held = A->BonusReleased;
+	site::OnBuyIn(L.Sites, net::SiteId::Ignite, 0, 1, "Buy-in", T0 + 40.0);
+	Expect(Held == 1500 && A->BonusReleased == 2000 && show::Welcome(*A, T0 + 50.0).NextIn == 2000, "a cent short of the meter releases nothing; the meter's cent releases $5");
+	const show::WelcomeView Late = show::Welcome(*A, A->BonusExpires + 1.0);
+	site::Account None;
+	const show::WelcomeView Nil = show::Welcome(None, T0);
+	Expect(Late.NextIn == 0 && Late.Released == 2000 && Nil.Pending == 0 && Nil.Released == 0 && Nil.NextIn == 0 && Nil.NeedleT == 0.0 && Nil.Ends == 0.0,
+		"after the 60 days the meter stops; no bonus, no view");
+}
+
+/** site::show's copy (§1.10): linted, no real names, never AI, bot or autoplay. */
+void U3ShowCopy()
+{
+	std::map<std::string, std::string> Vars = copylint::Samples();
+	Vars.insert({{"Event", "RunItTwice Sunday 100K"}, {"Buyin", "$109"}, {"Gtd", "$100,000"}, {"Count", "1,204"}, {"Clock", "21:30"}, {"Pool", "$122,047"}, {"Paid", "152"},
+		{"Amount", "$4,100"}, {"Left", "8"}, {"Who", "Ana Ribeiro"}, {"Place", "2nd"}, {"Team", "Team RunItTwice"}});
+	std::vector<std::pair<std::string, std::string>> Lines;
+	bool Clean = true;
+	for (const std::string& S : show::Inventory())
+	{
+		Lines.emplace_back("site::show", S);
+		Clean = Clean && !trademarks::Find(S, trademarks::kSourceScan) && !trademarks::Find(S, trademarks::kCopyScan);
+		std::string Word;
+		for (const char Ch : copylint::Lower(S) + " ")
+		{
+			if (Ch >= 'a' && Ch <= 'z')
+			{
+				Word.push_back(Ch);
+				continue;
+			}
+			Clean = Clean && Word != "ai" && Word != "bot" && Word != "bots" && Word != "autoplay" && Word != "autopilot";
+			Word.clear();
+		}
+	}
+	const int Problems = copylint::Run("site::show", Lines, copylint::Pa, Vars);
+	Expect(Problems == 0 && Clean && show::Inventory().size() >= 12, "Sunday Live's lines pass the copy lint and the trademark screen, and never say AI, bot or autoplay");
+}
+
+/** The marks (§3.4, §13.2 #13, §2.5): RunItTwice's logo and strip in red and black, the new siteart, the six emblem families. */
+void U3Marks()
+{
+	const SitesNoText Measure;
+	const std::set<uint32_t> RiverLine(net::Def(net::SiteId::RiverLine).Palette.begin(), net::Def(net::SiteId::RiverLine).Palette.end());
+	const std::set<uint32_t> SlateGold = {0x334155, 0x1c2433, 0xd4a843, 0xeef1f5, 0x141a24, 0x243044, 0x0b0f17, 0xe5505e, 0xe88b45, 0xe8c25a, 0x5e6a7d, 0x8fa3bf, 0x1d4a3e};
+	auto Colours = [](const ui::DrawList& L) {
+		std::set<uint32_t> Out;
+		for (const ui::Vertex& V : L.Vertices)
+		{
+			if (V.Col.A > 0.02f)
+			{
+				Out.insert(U3Rgb(V.Col));
+			}
+		}
+		return Out;
+	};
+	auto Leaks = [&](const std::set<uint32_t>& Seen) {
+		int Hits = 0;
+		for (const uint32_t C : Seen)
+		{
+			Hits += RiverLine.count(C) + SlateGold.count(C) > 0 ? 1 : 0;
+		}
+		return Hits;
+	};
+	// The wide logo (the rail's {16,14,184,44}) and the square one (the poker button's 24).
+	ui::DrawList Wide;
+	{
+		ui::Canvas C(Wide, Measure, 400.0f, 100.0f, 1.0f);
+		ui::siteart::Logo(C, {16.0f, 14.0f, 184.0f, 44.0f}, net::SiteId::RunItTwice);
+	}
+	bool TwiceLed = false;
+	bool RunItInk = false;
+	bool RedInk = false;
+	for (const ui::DrawCmd& Cmd : Wide.Cmds)
+	{
+		if (Cmd.Type != ui::DrawCmd::Kind::Text)
+		{
+			continue;
+		}
+		TwiceLed = TwiceLed || (Cmd.Text.Text == "Twice" && U3Rgb(Cmd.Text.Col) == 0xff2633);
+		RunItInk = RunItInk || (Cmd.Text.Text == "RunIt" && U3Rgb(Cmd.Text.Col) == 0xececef);
+		RedInk = RedInk || (Cmd.Text.Text != "Twice" && (U3Rgb(Cmd.Text.Col) == 0xd2141a || U3Rgb(Cmd.Text.Col) == 0xff2633));
+	}
+	const bool Words = TwiceLed && RunItInk;
+	const std::set<uint32_t> WideCols = Colours(Wide);
+	ui::DrawList Square;
+	{
+		ui::Canvas C(Square, Measure, 100.0f, 100.0f, 1.0f);
+		ui::siteart::Logo(C, {6.0f, 3.0f, 24.0f, 24.0f}, net::SiteId::RunItTwice);
+	}
+	const std::set<uint32_t> SquareCols = Colours(Square);
+	Expect(Words && !RedInk && WideCols.count(0xd2141a) && WideCols.count(0xffffff) && SquareCols.count(0xd2141a) && Leaks(WideCols) == 0 && Leaks(SquareCols) == 0,
+		"RunItTwice's logo: the two cards in chrome and Signal Red on a gloss tile, \"RunIt\" in Ink, \"Twice\" in LED Red, no slate or gold, no RiverLine colour");
+	ui::DrawList Band;
+	{
+		ui::Canvas C(Band, Measure, 200.0f, 40.0f, 1.0f);
+		ui::siteart::Strip(C, {12.0f, 4.0f, 100.0f, 16.0f}, net::SiteId::RunItTwice);
+	}
+	bool Name = false;
+	for (const ui::DrawCmd& Cmd : Band.Cmds)
+	{
+		Name = Name || (Cmd.Type == ui::DrawCmd::Kind::Text && Cmd.Text.Text == "RUNITTWICE" && U3Rgb(Cmd.Text.Col) == 0xffffff && Cmd.Text.Face == ui::Font::BoldCondensed);
+	}
+	const std::set<uint32_t> BandCols = Colours(Band);
+	Expect(Name && BandCols.count(0xd2141a) && BandCols.count(0xff2633) && Leaks(BandCols) == 0,
+		"RunItTwice's strip: a red band (Signal Red to Deep Red, an LED Red edge), the name in Hot White in its display face");
+	// The Twin Stripe back's mark: Hot White cards with an Onyx edge, nothing else.
+	ui::DrawList Back;
+	{
+		ui::Canvas C(Back, Measure, 100.0f, 100.0f, 1.0f);
+		ui::siteart::TwinStripeMark(C, {30.0f, 30.0f, 40.0f, 40.0f});
+	}
+	const std::set<uint32_t> BackCols = Colours(Back);
+	Expect(!Back.Vertices.empty() && BackCols.size() <= 2 && BackCols.count(0xffffff) && (BackCols.size() == 1 || BackCols.count(0x0c0c0f)),
+		"the Twin Stripe back's mark: the two cards in Hot White, edged in Onyx");
+	// Ignite's neon sign: BlackItalic, only colours' own alpha (the parent's carries through, untouched).
+	ui::DrawList Neon;
+	float NeonW = 0.0f;
+	float AlphaAfter = 0.0f;
+	{
+		ui::Canvas C(Neon, Measure, 600.0f, 200.0f, 1.0f);
+		C.SetAlpha(0.5f);
+		NeonW = ui::siteart::NeonSign(C, 40.0f, 140.0f, 60.0f, 1.0f);
+		AlphaAfter = C.GetAlpha();
+	}
+	int Runs = 0;
+	bool Faint = true;
+	for (const ui::DrawCmd& Cmd : Neon.Cmds)
+	{
+		if (Cmd.Type == ui::DrawCmd::Kind::Text)
+		{
+			++Runs;
+			Faint = Faint && Cmd.Text.Text == "Ignite" && Cmd.Text.Face == ui::Font::BlackItalic && Cmd.Text.Col.A <= 0.5f * 0.22f + 1e-4f;
+		}
+	}
+	for (const ui::Vertex& V : Neon.Vertices)
+	{
+		Faint = Faint && V.Col.A <= 0.5f * 0.22f + 1e-4f;
+	}
+	Expect(Runs == 4 && Faint && AlphaAfter == 0.5f && NeonW > 60.0f, "Ignite's neon sign: three soft copies under a crisp one, BlackItalic, at most 0.22 of the parent alpha, which it leaves alone");
+	// The division crests in the status ramp, and the chrome plate.
+	int Crests = 0;
+	const uint32_t Metal[5] = {0xb6bbc5, 0x1e1e23, 0xf3f4f6, 0xe6c66a, 0xd2141a};
+	for (int Div = 0; Div < 5; ++Div)
+	{
+		ui::DrawList L;
+		{
+			ui::Canvas C(L, Measure, 100.0f, 100.0f, 1.0f);
+			ui::siteart::DivisionShield(C, 50.0f, 55.0f, 40.0f, Div, Div == 2 ? 3 : 0);
+		}
+		const std::set<uint32_t> Cols = Colours(L);
+		Crests += Cols.count(Metal[Div]) && Leaks(Cols) == 0 ? 1 : 0;
+	}
+	ui::DrawList Plate;
+	{
+		ui::Canvas C(Plate, Measure, 300.0f, 100.0f, 1.0f);
+		ui::siteart::ChromePlate(C, {20.0f, 20.0f, 200.0f, 36.0f}, 6.0f);
+	}
+	const std::set<uint32_t> PlateCols = Colours(Plate);
+	Expect(Crests == 5 && PlateCols.count(0xf3f4f6) && PlateCols.count(0x8d929c) && Leaks(PlateCols) == 0,
+		"the division crests wear their status metals (Open chrome, Iron carbon, Steel chrome, Gold, High Bridge red), the chrome plate its ramp");
+	// RunItTwice's six emblem families (EventArt): carbon, gloss and Signal Red tiles, no slate or gold, no RiverLine colour.
+	const net::Network& N = net::Site(net::SiteId::RunItTwice);
+	int Families = 0;
+	int Dirty = 0;
+	int Accented = 0;
+	const std::pair<const char*, uint32_t> Six[] = {{"hourly", 0xd2141a}, {"the-closer", 0xffffff}, {"first-light", 0xb6bbc5}, {"lunch-hour", 0xb6bbc5},
+		{"the-rush", 0xb6bbc5}, {"supper-stack", 0xd2141a}};
+	for (const std::pair<const char*, uint32_t>& Fam : Six)
+	{
+		const char* Stem = Fam.first;
+		const net::EventTemplate* T = N.FindTemplate(std::string("runittwice.") + Stem);
+		if (!T)
+		{
+			continue;
+		}
+		++Families;
+		ui::DrawList L;
+		{
+			ui::Canvas C(L, Measure, 200.0f, 200.0f, 1.0f);
+			ui::eventart::Emblem(C, *T, 100.0f, 100.0f, 96.0f, 0.0);
+		}
+		const std::set<uint32_t> Cols = Colours(L);
+		const bool Clean = Leaks(Cols) == 0;
+		Dirty += Clean ? 0 : 1;
+		// Its accent is drawn (a glyph's stones, or a gradient that runs into it: within 16 of it on every channel).
+		bool Near = false;
+		for (const uint32_t C : Cols)
+		{
+			bool Close = true;
+			for (const int Shift : {16, 8, 0})
+			{
+				Close = Close && std::abs(static_cast<int>((C >> Shift) & 255) - static_cast<int>((Fam.second >> Shift) & 255)) <= 16;
+			}
+			Near = Near || Close;
+		}
+		Accented += Near ? 1 : 0;
+		if (!Near)
+		{
+			std::printf("  emblem %s: its accent %06x isn't drawn (%zu colours)\n", Stem, Fam.second, Cols.size());
+		}
+		if (!Clean)
+		{
+			std::string Hits;
+			for (const uint32_t C : Cols)
+			{
+				char Hex[16];
+				std::snprintf(Hex, sizeof(Hex), " %06x", C);
+				Hits += RiverLine.count(C) + SlateGold.count(C) > 0 ? Hex : "";
+			}
+			std::printf("  emblem %s draws%s\n", Stem, Hits.c_str());
+		}
+	}
+	std::printf("rit emblems: %d families, %d with their red, chrome or white accent drawn\n", Families, Accented);
+	Expect(Families == 6 && Dirty == 0 && Accented == 6, "RunItTwice's six emblem families on Onyx and Carbon in red, chrome and white (no slate, no gold, no RiverLine colour)");
+}
 } // namespace sites_test
 
 int main(int Argc, char** Argv)
@@ -2559,6 +3899,18 @@ int main(int Argc, char** Argv)
 	StepBudget();
 	SitesCopy();
 	SitesFormatNames();
+	// Update 3 G1 (core-sites-look): site::show and the marks.
+	U3Moods();
+	U3Overlay();
+	U3Club();
+	U3SecondBoard();
+	U3SecondRecord();
+	U3Desk();
+	U3DeskFix();
+	U3SundayLive();
+	U3Welcome();
+	U3ShowCopy();
+	U3Marks();
 	SoftBound(300);
 	std::printf("sites tests: %d passed, %d failed in %.1fs\n", Passed, Failures, SitesSeconds(T0));
 	return Failures == 0 ? 0 : 1;

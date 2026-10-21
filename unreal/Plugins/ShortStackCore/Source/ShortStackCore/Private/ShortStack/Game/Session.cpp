@@ -3162,6 +3162,13 @@ void Session::HeroHandDone(const Hand& H, const HandFacts& F)
 	// Update 3 (§7.2; core-siteplay's body at G2): the site play book's look at the hand (Beef, the Luck Ledger, the Ouch
 	// Bonus), after Rerun's, on both paths. Draws nothing.
 	SitePlayHand(H, F);
+	// Fix secondboard (the lead's PIE, 2026-10-21): RunItTwice's Second Board for the Settlement, on both paths, from the hand
+	// itself (site::show::NoteSecond). The table's own read sees only the hands it draws, so a night skipped to its result
+	// left the column without the skipped all-ins. The deal is keyed as the table keys its read. Draws nothing.
+	if (T && net::SiteOf(T->Spec.Id) == net::SiteId::RunItTwice)
+	{
+		site::show::NoteSecond(SecondBoards, H, T->Spec.Id, T->Spec.Id + "#" + std::to_string(T->Hero().TableId) + "#" + std::to_string(HandsPlayed), WorldMinutes());
+	}
 }
 
 void Session::BustBanner(const TPlayer& Hero, const char* NoCashSub)

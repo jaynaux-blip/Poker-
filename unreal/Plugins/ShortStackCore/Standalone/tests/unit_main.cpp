@@ -4,6 +4,7 @@
 #include "ShortStack/Cards.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
+#include "ShortStack/Structure.h"
 #include "ShortStack/Tournament.h"
 #include "ShortStack/Game/ChipSet.h"
 #include "ShortStack/Game/Live.h"
@@ -12,7 +13,10 @@
 #include <algorithm>
 #include <chrono>
 #include <climits>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -593,6 +597,112 @@ void Update2Engine()
 	}
 }
 
+namespace
+{
+/** Structure's Icm() as it was before g1-audit N7 (placed players in a 32-bit mask): the reference the fix must match below 33. */
+void IcmMask32Recurse(const std::vector<double>& Stacks, const std::vector<double>& Prizes, std::vector<double>& Out, int N, int Places, uint32_t Mask, int Depth, double Prob,
+	double Remaining)
+{
+	if (Depth >= Places)
+	{
+		return;
+	}
+	for (int I = 0; I < N; ++I)
+	{
+		if (Mask & (1u << I))
+		{
+			continue;
+		}
+		const double Stack = Stacks[static_cast<size_t>(I)];
+		const double P = (Stack / Remaining) * Prob;
+		if (P == 0.0)
+		{
+			continue;
+		}
+		Out[static_cast<size_t>(I)] += P * Prizes[static_cast<size_t>(Depth)];
+		IcmMask32Recurse(Stacks, Prizes, Out, N, Places, Mask | (1u << I), Depth + 1, P, Remaining - Stack);
+	}
+}
+
+std::vector<double> IcmMask32(const std::vector<double>& Stacks, const std::vector<double>& Prizes)
+{
+	const int N = static_cast<int>(Stacks.size());
+	double Total = 0.0;
+	for (double S : Stacks)
+	{
+		Total += S;
+	}
+	std::vector<double> Out(static_cast<size_t>(N), 0.0);
+	const int Places = static_cast<int>(Prizes.size()) < N ? static_cast<int>(Prizes.size()) : N;
+	if (N == 0 || Total == 0.0 || N > 32)
+	{
+		return Out;
+	}
+	IcmMask32Recurse(Stacks, Prizes, Out, N, Places, 0u, 0, 1.0, Total);
+	return Out;
+}
+
+/**
+ * g1-audit N7: Icm()'s exact path past the 32nd player. Up to 32 players the per-player flags change no bit (every places count
+ * to 9 left and the hardest exact cases beyond, against the old 32-bit mask); at 40 left paying 3 and 70 paying 2 (inside the
+ * two-million-order range) the shares add up to the prizes and equal stacks get equal shares wherever they sit.
+ */
+void IcmPastThirtyTwo()
+{
+	uint64_t Seed = 0x2545f4914f6cdd1dull;
+	const auto Next = [&Seed]() {
+		Seed ^= Seed << 13;
+		Seed ^= Seed >> 7;
+		Seed ^= Seed << 17;
+		return Seed;
+	};
+	int Compared = 0;
+	int Moved = 0;
+	const int Shapes[][2] = {{2, 1}, {3, 2}, {4, 4}, {5, 3}, {6, 6}, {7, 5}, {8, 8}, {9, 9}, {9, 4}, {10, 8}, {12, 6}, {20, 4}, {32, 3}, {32, 2}};
+	for (const auto& Shape : Shapes)
+	{
+		for (int Set = 0; Set < 3; ++Set)
+		{
+			std::vector<double> Stacks;
+			for (int I = 0; I < Shape[0]; ++I)
+			{
+				Stacks.push_back(Set == 1 ? 1000.0 * static_cast<double>(1 + Next() % 3) : static_cast<double>(1 + Next() % 100000));
+			}
+			std::vector<double> Prizes;
+			for (int I = 0; I < Shape[1]; ++I)
+			{
+				Prizes.push_back(std::floor(500000.0 / (1.0 + 0.7 * static_cast<double>(I))));
+			}
+			const std::vector<double> New = ss::Icm(Stacks, Prizes);
+			const std::vector<double> Old = IcmMask32(Stacks, Prizes);
+			Compared += static_cast<int>(New.size());
+			Moved += New.size() == Old.size() && std::memcmp(New.data(), Old.data(), New.size() * sizeof(double)) == 0 ? 0 : 1;
+		}
+	}
+	Expect(Compared > 300 && Moved == 0, "icm: per-player flags give the old 32-bit mask's equities to the bit, up to 32 players");
+	for (const int Left : {40, 70})
+	{
+		std::vector<double> Stacks;
+		for (int I = 0; I < Left; ++I)
+		{
+			Stacks.push_back(1000.0 + 500.0 * static_cast<double>(I % 8)); // seat I and seat I + 32 hold the same stack
+		}
+		const std::vector<double> Prizes = Left == 40 ? std::vector<double>{300000.0, 180000.0, 120000.0} : std::vector<double>{300000.0, 180000.0};
+		const std::vector<double> Eq = ss::Icm(Stacks, Prizes);
+		double Sum = 0.0;
+		bool Equal = Eq.size() == Stacks.size();
+		for (size_t I = 0; I < Eq.size(); ++I)
+		{
+			Sum += Eq[I];
+			Equal = Equal && (I < 32 || std::fabs(Eq[I] - Eq[I - 32]) <= 1e-6 * Eq[I]);
+		}
+		const double Want = Left == 40 ? 600000.0 : 480000.0;
+		std::printf("  icm: %d left paying %zu shares out %.4f of %.4f cents\n", Left, Prizes.size(), Sum, Want);
+		Expect(std::fabs(Sum - Want) < 1e-4 && Equal, "icm: past the 32nd player every player is kept apart (the shares add up; equal stacks, equal shares)");
+	}
+}
+} // namespace
+
 int main()
 {
 	ChipConservationFuzz();
@@ -601,6 +711,7 @@ int main()
 	TournamentRunsToCompletion();
 	ChipSetLayout();
 	Update2Engine();
+	IcmPastThirtyTwo();
 	std::printf("unit tests: %s\n", Failures == 0 ? "all passed" : "FAILED");
 	return Failures == 0 ? 0 : 1;
 }
