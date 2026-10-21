@@ -337,6 +337,48 @@ private:
 	void Bust(const Tournament& T, const TEvent& E);
 };
 /**
+ * Who says a cue, as one voice (Turns): the same key for every line one person says, wherever it's heard from. A seat, a
+ * backer at the rail or someone out tonight by Who (their tournament id, a backer's name), else by the name the caption
+ * gives them ("Cashier"); a dealer by their table ("dealer:3"); Dee as herself, dealing or on the PA. Empty for what no
+ * one voice says: the floor's PA (one announcement at a time already, the host's PaFreeAt), the crowd's vocals, a text
+ * to the player, narration.
+ */
+SHORTSTACKCORE_API std::string VoiceKey(const Cue& C);
+/** How long a cue's words take to say by the director's own reckoning (15 characters a second, the PA's 14, and a
+ *  breath), after the chime when it has one. */
+SHORTSTACKCORE_API double LineSeconds(const Cue& C);
+/**
+ * One voice, one line at a time, across Takes. Within a Take the director spaces what one voice says (a line, then its
+ * length and 0.3 s and more), but each Take's Delay counts from its own Take: a hand's start and its end, a lean
+ * mid-hand, and RoomFeed::Simulated's start and finish (taken at one moment) can put one person's two lines on top of
+ * each other at any pace, a backer's double-up line under her read of the stack. The host places every cue it takes, in
+ * the order it takes them, on its cue clock (Place: a pure function of the cues and the clock they were taken at, so a
+ * night taken at the same moments is placed the same), and keeps a second Turns on real time for what it heard (Hold and
+ * FreeAt: a line lasts as long as its speech, or its clip). Only when a line starts changes, never what's said.
+ */
+class Turns
+{
+public:
+	/** After a voice's line, the least before its next (the director's own within a Take). */
+	static constexpr double Gap = 0.3;
+	/** How long past its time a line waits for its own voice before the moment's gone (the host's overdue cue's). */
+	static constexpr double Late = 8.0;
+	/**
+	 * When C, due at At, starts (Start): At, or once its voice has finished the line placed before it; C's line then holds
+	 * the voice (LineSeconds, then Gap). False when its voice is busy until Late seconds and more past At and C isn't the
+	 * PA or a milestone (Priority under 2): the moment's gone by then, the voice isn't held, and the host leaves the line
+	 * to the night log. A cue with no voice starts at At.
+	 */
+	SHORTSTACKCORE_API bool Place(const Cue& C, double At, double& Start);
+	/** The voice is speaking until At at least (the host's real length of a line it played). */
+	SHORTSTACKCORE_API void Hold(const std::string& Voice, double At);
+	/** When the voice is next free (0 when it has said nothing). */
+	SHORTSTACKCORE_API double FreeAt(const std::string& Voice) const;
+
+private:
+	std::map<std::string, double> Until;
+};
+/**
  * An announcement in caption-sized parts: whole sentences, as many as fit in 96 characters (a caption box's two rows at
  * 150%, at 16:9 and at 2550x1220). The director's Pa cues come this way already; the host uses it for a floor line it
  * says itself (talk::Floor("cancelled", ...)), one caption a part.

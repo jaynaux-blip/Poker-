@@ -1,12 +1,23 @@
 // card_room (next_segment_spec §7.6, suite 13): core-room's tests.
 //   RoomNightly      seeded 96-entrant Nightlies taken in turn from NightlySalts until the floors are met (twelve at
 //                    most), the first's full cue log matching Tests/room_nightly.txt (room_test --write regenerates it);
-//                    on each, the PA's order and numbers (the bubble named at one away, and only there); honesty (every
-//                    "all in and a call, table N" has a TableRound{N, Called} that tick; every "seat open, N" has a bust
-//                    at N; every named card was tabled; every claimed result is in the speaker's Story; no talk from
-//                    folded players; no needle at a bust); with floors under every count those checks run over, the
-//                    comparisons counted as pairs, on the nights together (a regenerated night can't empty one
-//                    silently, and no one night has to have it all); the director's cost over the nights' hands.
+//                    on each, the PA's order and numbers (each milestone the field passed said once, none it skipped; the
+//                    bubble named at one away, and only there); honesty (every "all in and a call, table N" has a
+//                    TableRound{N, Called} that tick; every "seat open, N" has a bust at N; every hand a bad beat names was
+//                    tabled; every claimed result is in the speaker's Story as the line says it; no talk from folded
+//                    players; no needle at a bust); with floors under the counts most nights give, the comparisons counted
+//                    as pairs, on the nights together (a regenerated night can't empty one silently, and no one night has
+//                    to have it all); the director's cost over the nights' hands.
+//   RoomStoryClaims  a cash, a win, online, the bubble (and nothing paid but the bubble never called one) through
+//                    talk::Line: StoryClaimProblem passes every line said and catches each kind of false claim.
+//   RoomSkippedMilestones  MilestoneProblems on paper (heads-up, hand for hand, the away call, two tables skipped, and
+//                    each kind of slip caught); the last three, two out in one hand: no heads-up, one champion.
+//   RoomMovedTable   moved at a hand's start: the table they left is called, their new one never.
+//   RoomChampionAfterBreak  the last hand ends a level: no break or level after the champion, the mood Champion then
+//                    After for good, the same at every pace.
+//   RoomRareChecks   the checks few nights give anything to (the dealer's numbers, asked twice, the bubble's reactions,
+//                    the champion's ooh, a bad beat, a pool's line twice, small talk at hand for hand), each over a hand
+//                    set up for it and shown to catch what it's for.
 //   RoomHushAtHandForHand    the hand that takes the room to hand for hand is reactions only, chatter due or not.
 //   RoomHushAtLoneFinalTable at a lone final table hand for hand (the mood FinalTable): no small talk, reactions still.
 //   RoomAwayThenHandForHand  the floor says how far from the money, then hand for hand: one announcement when the
@@ -14,7 +25,11 @@
 //                    an empty-state resume after it doesn't say it again; the routine PA waits after the joined call;
 //                    the bubble's applause after its call; at a lone table hand for hand without the dealers' decks,
 //                    and without "All tables complete"; one place paid is "1 place is paid".
-//   RoomRailOneVoice a backer's two lines in one hand's end a second and more apart; RoomShape's check by Take.
+//   RoomRailOneVoice a backer's two lines in one hand's end a second and more apart; RoomShape's check by Take; the same
+//                    two in a hand's start and its end, placed by the host's guard (room::Turns) at any spacing.
+//   RoomVoiceTurns   room::VoiceKey and room::Turns: one voice one person; a run of lines one after another till the
+//                    moment's gone. Over RoomFinalTable's Sunday and Nightly at Live, Brisk, Fast, a hurried hand and
+//                    the rail's Simulated rounds: nobody starts a line under their own, nobody free waits, deterministic.
 //   RoomRates        lines an hour per Sociability band at 0.5x, 1x and 1.5x.
 //   RoomAsk          ss.Live.Cue Ask: the dealer answers the question after it (the average, the break).
 //   RoomNeedleUp     no needle at a player up from their seat; a seated one gets them.
@@ -45,11 +60,13 @@
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
+#include "ShortStack/Structure.h"
 #include "ShortStack/Tournament.h"
 #include "ShortStack/UI/Canvas.h"
 #include "ShortStack/UI/Captions.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -247,7 +264,8 @@ Setup MakeNight(const std::string& OccurrenceId, int Entrants, const std::string
 		}
 		if (K % 5 == 2)
 		{
-			V.Story += std::string(V.Story.empty() ? "" : "|") + StoryRecord(Day - 3, "Saturday Big Stack $200", 16, 106, 0);
+			// The bubble: 106 runners pay 16 (PayoutTable's places), so seventeenth with nothing.
+			V.Story += std::string(V.Story.empty() ? "" : "|") + StoryRecord(Day - 3, "Saturday Big Stack $200", 17, 106, 0);
 		}
 		V.Mood = K % 6 == 1 ? static_cast<int>(world::Momentum::Downswing) : K % 6 == 4 ? static_cast<int>(world::Momentum::Heater) : 0;
 		V.Staked = K % 8 == 5;
@@ -380,7 +398,8 @@ struct TickFacts
 	std::vector<ss::TEvent> Events;
 	bool HadNote = false;
 	room::HandNote Note;
-	int HeroTable = -1;
+	int HeroTable = -1;  // the table the player's dealt at this hand (after StartTick's balance and the final table), -1 out
+	int Tables = 0;      // the tables in play this hand (StartTick breaks them; the director's two-tables call reads this)
 	bool HandForHandAtHand = false;
 	double Average = 0.0;
 	int Remaining = 0;
@@ -406,6 +425,10 @@ struct Night
 	// balance, the final table) is one, its end another, so two cues' delays only compare within one Take, never by tick.
 	std::vector<int> TakeOf;
 	int Takes = 0;
+	// When each Take came (by Take): its tick, and its moment in it (0 before cards, 1 the hand's start, 2 mid-hand at
+	// AllInCalled, 3 the hand's end, 4 after the cheer), for a host's clock at any pace (PlaceNight).
+	std::vector<int> TakeTick;
+	std::vector<int> TakePhase;
 	std::map<int, TickFacts> Facts;
 	std::map<int, Saved> Saves;
 	int Ticks = 0;
@@ -499,8 +522,10 @@ Night Play(const Setup& S, int ClockCalls, float TalkScale, int StartAt = -1, co
 			Turned.push_back(Last);
 		}
 	};
-	auto Drain = [&](int Tick) {
+	auto Drain = [&](int Tick, int Phase) {
 		const int Take = N.Takes++;
+		N.TakeTick.push_back(Tick);
+		N.TakePhase.push_back(Phase);
 		for (const room::Cue& C : D.Take())
 		{
 			N.Log.push_back(CueLine(Tick, C));
@@ -527,21 +552,24 @@ Night Play(const Setup& S, int ClockCalls, float TalkScale, int StartAt = -1, co
 			D.Clock(*T, At, 0.0);
 			Watch();
 		}
-		Drain(0);
+		Drain(0, 0);
 		N.Saves[0] = {T->Checkpoint(), D.Write(), S.O.Start};
 	}
 	(void)StartAt;
 	for (int Guard = 0; Guard < 4000 && !T->bFinished; ++Guard)
 	{
 		TickFacts F;
-		F.HeroTable = T->Hero().Busted ? -1 : T->Hero().TableId;
 		std::vector<ss::TEvent> Start;
 		std::unique_ptr<ss::Hand> H = T->StartTick(Start);
+		// The player's table is the one this hand's dealt at: StartTick's balance can move them, and the final table seats
+		// them anew, before the first card (taken before StartTick, a call from the table they just left was "their own").
+		F.HeroTable = T->Hero().Busted ? -1 : T->Hero().TableId;
+		F.Tables = static_cast<int>(T->Tables.size());
 		const size_t EquityBefore = D.EquityTables().size();
 		double TickMs = Timed([&] { D.Events(*T, Start, WorldAt(S, *T)); });
 		Watch();
 		// The host plays what the start of the hand says as the hand starts (the final table's call before its first hand).
-		Drain(T->Tick + 1);
+		Drain(T->Tick + 1, 1);
 		const bool FinalNow = std::any_of(Start.begin(), Start.end(), [](const ss::TEvent& E) { return E.Type == ss::TEventType::FinalTable; });
 		if (FinalNow && !T->Tables.empty())
 		{
@@ -583,7 +611,7 @@ Night Play(const Setup& S, int ClockCalls, float TalkScale, int StartAt = -1, co
 				const bool HeroIn = std::any_of(Nt.Shown.begin(), Nt.Shown.end(), [](const auto& Sh) { return Sh.first == ss::HeroId; });
 				TickMs += Timed([&] { D.AllInCalled(*T, 0, HeroIn); });
 				Watch();
-				Drain(T->Tick);
+				Drain(T->Tick, 2);
 				++N.Leans;
 			}
 			TickMs += Timed([&] { D.Hand(*T, F.Note); });
@@ -623,7 +651,7 @@ Night Play(const Setup& S, int ClockCalls, float TalkScale, int StartAt = -1, co
 				}
 			}
 		}
-		Drain(T->Tick);
+		Drain(T->Tick, 3);
 		N.DirectorMs += TickMs;
 		N.WorstMs = std::max(N.WorstMs, TickMs);
 		if (D.EquityTables().size() == EquityBefore)
@@ -643,7 +671,7 @@ Night Play(const Setup& S, int ClockCalls, float TalkScale, int StartAt = -1, co
 		D.Clock(*T, WorldAt(S, *T) + 2.5 + 1.0 * K, 0.0);
 		Watch();
 	}
-	Drain(T->Tick);
+	Drain(T->Tick, 4);
 	N.EquityTables = D.EquityTables();
 	return N;
 }
@@ -726,6 +754,21 @@ std::string Field(const std::string& Line, int Which)
 	}
 	const size_t B = Line.find('\t', A);
 	return Line.substr(A, B == std::string::npos ? std::string::npos : B - A);
+}
+
+/** One Take of a night set up by hand: its cues under the hand's number (and in the cue log, as Play's), taken at the
+ *  hand's end. */
+void AddTake(Night& N, int Tick, const std::vector<room::Cue>& Cues)
+{
+	const int Take = N.Takes++;
+	N.TakeTick.push_back(Tick);
+	N.TakePhase.push_back(3);
+	for (const room::Cue& C : Cues)
+	{
+		N.Log.push_back(CueLine(Tick, C));
+		N.Cues.push_back({Tick, C});
+		N.TakeOf.push_back(Take);
+	}
 }
 
 // ------------------------------------------------------------------ RailListen: a backer at the rail
@@ -871,11 +914,171 @@ RailVoices RailVoicesOf(const Night& N)
 }
 
 /**
+ * What one of a night's checks ran over and what it found: the things it looked at (Count), the pairs it compared for a
+ * check that compares one thing with another (Pairs), and its first slip ("" when there's none). RoomShape and
+ * RoomNightly run them over whole nights; the deterministic tests (RoomRareChecks and the rest) over the cues of a hand
+ * they set up, so a check a night only rarely gives anything to is still run, and shown to catch what it's for.
+ */
+struct RanOver
+{
+	int Count = 0;
+	int Pairs = 0;
+	std::string Problem;
+};
+
+std::string Secs(double D)
+{
+	char Buf[32];
+	std::snprintf(Buf, sizeof(Buf), "%.2f s", D);
+	return Buf;
+}
+
+/** The table reacts to the bubble after the floor names it: each field.bubble line after every part of the floor's
+ *  pa.bubble in its Take (Count: the reactions). */
+RanOver BubbleReactions(const Night& N)
+{
+	RanOver Out;
+	for (size_t I = 0; I < N.Cues.size(); ++I)
+	{
+		const room::Cue& C = N.Cues[I].second;
+		if (!Starts(C.Key, "field.bubble"))
+		{
+			continue;
+		}
+		++Out.Count;
+		double PaEnds = -1.0;
+		for (size_t J = 0; J < N.Cues.size(); ++J)
+		{
+			if (N.TakeOf[J] == N.TakeOf[I] && Starts(N.Cues[J].second.Key, "pa.bubble"))
+			{
+				PaEnds = std::max(PaEnds, N.Cues[J].second.Delay);
+			}
+		}
+		if ((PaEnds < 0.0 || C.Delay <= PaEnds) && Out.Problem.empty())
+		{
+			Out.Problem = ": hand " + std::to_string(N.Cues[I].first) + ", " + C.Key + " at " + Secs(C.Delay) +
+				(PaEnds < 0.0 ? std::string(", no floor's call in its Take") : ", the floor's call till " + Secs(PaEnds));
+		}
+	}
+	return Out;
+}
+
+/** The floor calls the champion once the rail's ooh has landed: in the Take of the champion's call, the call half a second
+ *  and more after each ooh (Count: the oohs it was checked against). */
+RanOver ChampionAfterOoh(const Night& N)
+{
+	RanOver Out;
+	for (size_t I = 0; I < N.Cues.size(); ++I)
+	{
+		const room::Cue& C = N.Cues[I].second;
+		if (!Starts(C.Key, "pa.champion") || C.Part != 0)
+		{
+			continue;
+		}
+		for (size_t J = 0; J < N.Cues.size(); ++J)
+		{
+			const room::Cue& V = N.Cues[J].second;
+			if (N.TakeOf[J] == N.TakeOf[I] && V.What == room::Kind::Vocal && V.Noise == ss::audio::Vocal::Ooh)
+			{
+				++Out.Count;
+				if (C.Delay <= V.Delay + 0.5 && Out.Problem.empty())
+				{
+					Out.Problem = ": hand " + std::to_string(N.Cues[I].first) + ", the ooh at " + Secs(V.Delay) + ", the champion at " + Secs(C.Delay);
+				}
+			}
+		}
+	}
+	return Out;
+}
+
+/** One question to the dealer in six hands: the dealer's answers (the average, the count, the break) each six hands and
+ *  more after the one before that night (Count: the answers; Pairs: the answers after another, what it compared). */
+RanOver AsksApart(const Night& N)
+{
+	RanOver Out;
+	int LastAsk = -1;
+	for (const auto& TC : N.Cues)
+	{
+		const std::string& Key = TC.second.Key;
+		if (!Starts(Key, "dealer.average") && !Starts(Key, "dealer.left") && !Starts(Key, "dealer.break.next") && !Starts(Key, "dealer.break.levels"))
+		{
+			continue;
+		}
+		++Out.Count;
+		if (LastAsk >= 0)
+		{
+			++Out.Pairs;
+			if (TC.first - LastAsk < 6 && Out.Problem.empty())
+			{
+				Out.Problem = ": answers at hands " + std::to_string(LastAsk) + " and " + std::to_string(TC.first);
+			}
+		}
+		LastAsk = TC.first;
+	}
+	return Out;
+}
+
+/** One pool's lines never twice running (the field's lines; a line's pool is its key's stem): Count the lines, Pairs the
+ *  lines that followed another from their pool that night, each compared with the one before it. */
+RanOver PoolRepeats(const Night& N)
+{
+	RanOver Out;
+	int Repeats = 0;
+	std::string First;
+	std::map<std::string, std::string> LastOfPool;
+	for (const auto& TC : N.Cues)
+	{
+		const room::Cue& C = TC.second;
+		if (C.What != room::Kind::Line || !Starts(C.Key, "field."))
+		{
+			continue;
+		}
+		++Out.Count;
+		const std::string Pool = C.Key.substr(0, C.Key.rfind('.'));
+		const auto Last = LastOfPool.find(Pool);
+		if (Last != LastOfPool.end())
+		{
+			++Out.Pairs;
+			if (Last->second == C.Key)
+			{
+				++Repeats;
+				First = First.empty() ? "hand " + std::to_string(TC.first) + ", " + C.Key + " \"" + C.Text + "\"" : First;
+			}
+		}
+		LastOfPool[Pool] = C.Key;
+	}
+	Out.Problem = Repeats > 0 ? ": " + std::to_string(Repeats) + " said twice running, the first at " + First : std::string();
+	return Out;
+}
+
+/** No table call shouts the player's own table: the dealers' calls from the other tables (Count), none from the table the
+ *  player's dealt at that hand (TickFacts::HeroTable, after the hand's balance). */
+RanOver OwnTableCalls(const Night& N)
+{
+	RanOver Out;
+	for (const auto& TC : N.Cues)
+	{
+		const room::Cue& C = TC.second;
+		const auto F = N.Facts.find(TC.first);
+		if (!Starts(C.Key, "dealer.table.") || F == N.Facts.end())
+		{
+			continue;
+		}
+		++Out.Count;
+		if (C.TableId == F->second.HeroTable && Out.Problem.empty())
+		{
+			Out.Problem = ": hand " + std::to_string(TC.first) + ", table " + std::to_string(C.TableId) + ", " + C.Key + " \"" + C.Text + "\"";
+		}
+	}
+	return Out;
+}
+
+/**
  * The order and spacing a listener hears: the break's five minutes; a seated player told of a move by their dealer;
  * one question to the dealer in six hands; the table reacting to the bubble after the floor names it; nobody at the
- * rail saying two things at once; no table shouting its own number the hand the player busts there; no line twice
- * running from one pool; "Hold!" never after the river; the champion called once the rail's ooh has landed; a backer
- * at the rail never repeating a line (RailListen). What each check ran over comes back, for the night's floors.
+ * rail saying two things at once; no table shouting the player's own number (the table they're dealt at that hand); no
+ * line twice running from one pool; "Hold!" never after the river; the champion called once the rail's ooh has landed;
+ * a backer at the rail never repeating a line (RailListen). What each check ran over comes back, for the night's floors.
  */
 struct ShapeHeard
 {
@@ -886,6 +1089,7 @@ struct ShapeHeard
 	int RailTogether = 0; // a rail voice's lines heard in one Take with another of theirs (RailVoicesOf)
 	int TableCalls = 0;   // the dealers' calls from other tables
 	int ChampionOohs = 0; // the rail's oohs in the hand the champion is called
+	int PoolPairs = 0;    // the field's lines after another from their pool: what "never twice running" compares
 	RailHeard Rail;
 };
 
@@ -897,101 +1101,61 @@ ShapeHeard RoomShape(const Setup& S, const Night& N)
 	int HeroMoves = 0;
 	int DealerMoves = 0;
 	int FloorMoves = 0;
+	std::string MovedWrong;
 	for (const auto& F : N.Facts)
 	{
 		const bool Final = std::any_of(F.second.Events.begin(), F.second.Events.end(), [](const ss::TEvent& E) { return E.Type == ss::TEventType::FinalTable; });
+		// The engine's Break in the last hand's news (it ended a level too) is no break: the night's over, the room says none.
+		const bool Over = std::any_of(F.second.Events.begin(), F.second.Events.end(), [](const ss::TEvent& E) { return E.Type == ss::TEventType::Finished; });
 		for (const ss::TEvent& E : F.second.Events)
 		{
-			Breaks += E.Type == ss::TEventType::Break ? 1 : 0;
+			Breaks += E.Type == ss::TEventType::Break && !Over ? 1 : 0;
 			HeroMoves += E.Type == ss::TEventType::Moved && E.IsHero && !Final ? 1 : 0;
+			// The harness's own bookkeeping: the hand the player's moved at, they're dealt at the table they moved to.
+			if (E.Type == ss::TEventType::Moved && E.IsHero && F.second.HeroTable != E.To && MovedWrong.empty())
+			{
+				MovedWrong = " (hand " + std::to_string(F.first) + ": moved to table " + std::to_string(E.To) + ", the facts say " + std::to_string(F.second.HeroTable) + ")";
+			}
 		}
 	}
-	int LastAsk = -100;
-	bool AsksApart = true;
-	bool BubbleAfter = true;
-	bool OwnNumber = true;
+	Expect(MovedWrong.empty(), "room shape: the player's table each hand is the one they're dealt at, after a move" + MovedWrong);
 	bool NoHoldLate = true;
-	bool ChampionAfter = true;
-	std::map<std::string, std::string> LastOfPool;
-	std::vector<std::string> Repeats;
-	for (size_t I = 0; I < N.Cues.size(); ++I)
+	for (const auto& TC : N.Cues)
 	{
-		const int Tick = N.Cues[I].first;
-		const room::Cue& C = N.Cues[I].second;
-		const auto F = N.Facts.find(Tick);
+		const room::Cue& C = TC.second;
 		Fives += Starts(C.Key, "pa.five.minutes") ? 1 : 0;
 		DealerMoves += Starts(C.Key, "dealer.move") && C.Where == room::From::HeroTable ? 1 : 0;
 		FloorMoves += Starts(C.Key, "pa.moved") ? 1 : 0;
-		if (Starts(C.Key, "dealer.average") || Starts(C.Key, "dealer.left") || Starts(C.Key, "dealer.break.next") || Starts(C.Key, "dealer.break.levels"))
-		{
-			++Heard.Asks;
-			Heard.AskPairs += LastAsk > -100 ? 1 : 0;
-			AsksApart = AsksApart && Tick - LastAsk >= 6;
-			LastAsk = Tick;
-		}
-		if (Starts(C.Key, "field.bubble"))
-		{
-			++Heard.Bubbles;
-			double PaEnds = -1.0;
-			for (size_t J = 0; J < N.Cues.size(); ++J)
-			{
-				if (N.TakeOf[J] == N.TakeOf[I] && Starts(N.Cues[J].second.Key, "pa.bubble"))
-				{
-					PaEnds = std::max(PaEnds, N.Cues[J].second.Delay);
-				}
-			}
-			BubbleAfter = BubbleAfter && PaEnds >= 0.0 && C.Delay > PaEnds;
-		}
-		if (Starts(C.Key, "dealer.table.") && F != N.Facts.end())
-		{
-			++Heard.TableCalls;
-			OwnNumber = OwnNumber && C.TableId != F->second.HeroTable;
-		}
 		NoHoldLate = NoHoldLate && !Starts(C.Key, "field.rail.allin");
-		if (Starts(C.Key, "pa.champion"))
-		{
-			for (size_t J = 0; J < N.Cues.size(); ++J)
-			{
-				const room::Cue& V = N.Cues[J].second;
-				if (N.TakeOf[J] == N.TakeOf[I] && V.What == room::Kind::Vocal && V.Noise == ss::audio::Vocal::Ooh)
-				{
-					++Heard.ChampionOohs;
-					ChampionAfter = ChampionAfter && C.Delay > V.Delay + 0.5;
-				}
-			}
-		}
-		// One pool's lines at the player's table: never the same one twice running.
-		if (C.What == room::Kind::Line && Starts(C.Key, "field."))
-		{
-			const std::string Pool = C.Key.substr(0, C.Key.rfind('.'));
-			if (LastOfPool[Pool] == C.Key)
-			{
-				Repeats.push_back(std::to_string(Tick) + " " + C.Key);
-			}
-			LastOfPool[Pool] = C.Key;
-		}
 	}
 	Expect(Breaks > 0 && Fives == Breaks, "room shape: five minutes left is called on every break (" + std::to_string(Fives) + " of " + std::to_string(Breaks) + ")");
 	Expect(DealerMoves == HeroMoves && FloorMoves == 0,
 		"room shape: a seated player's move is their dealer's to tell, not the PA's (" + std::to_string(DealerMoves) + " of " + std::to_string(HeroMoves) + ")");
-	Expect(AsksApart, "room shape: the table asks the dealer at most once in six hands");
-	Expect(BubbleAfter, "room shape: the table reacts to the bubble after the floor names it");
+	const RanOver Asks = AsksApart(N);
+	Expect(Asks.Problem.empty(), "room shape: the table asks the dealer at most once in six hands" + Asks.Problem);
+	const RanOver Bubble = BubbleReactions(N);
+	Expect(Bubble.Problem.empty(), "room shape: the table reacts to the bubble after the floor names it" + Bubble.Problem);
 	const RailVoices Voices = RailVoicesOf(N);
-	Heard.RailTogether = Voices.Together;
 	Expect(Voices.OneVoice, "room shape: nobody at the rail says two things at once" + Voices.Problem);
-	Expect(OwnNumber, "room shape: no table call shouts the player's own table");
+	const RanOver Own = OwnTableCalls(N);
+	Expect(Own.Problem.empty(), "room shape: no table call shouts the player's own table" + Own.Problem);
 	Expect(NoHoldLate, "room shape: \"Hold!\" only while the cards turn (AllInCalled), never at the hand's end");
-	Expect(ChampionAfter, "room shape: the floor calls the champion once the rail's ooh has landed");
-	for (const std::string& R : Repeats)
-	{
-		std::printf("room shape: said twice running: %s\n", R.c_str());
-	}
-	Expect(Repeats.empty(), "room shape: no line twice running from one pool");
+	const RanOver Champion = ChampionAfterOoh(N);
+	Expect(Champion.Problem.empty(), "room shape: the floor calls the champion once the rail's ooh has landed" + Champion.Problem);
+	const RanOver Repeats = PoolRepeats(N);
+	Expect(Repeats.Problem.empty(), "room shape: no line twice running from one pool" + Repeats.Problem);
 	// A backer's lines (stake::RailLine's pools, three a moment for what comes up more than once a night): nothing twice
 	// running, and the double-ups and bad beats all different. (As many as this night's run gave the rail to say: the
 	// player's luck decides it; RoomNightly's floor wants six and more, and RoomFinalTable's Sunday, the player winning
 	// it, a whole night of them.)
 	Heard.HeroMoves = HeroMoves;
+	Heard.Asks = Asks.Count;
+	Heard.AskPairs = Asks.Pairs;
+	Heard.Bubbles = Bubble.Count;
+	Heard.RailTogether = Voices.Together;
+	Heard.TableCalls = Own.Count;
+	Heard.ChampionOohs = Champion.Count;
+	Heard.PoolPairs = Repeats.Pairs;
 	Heard.Rail = RailListen(S, N);
 	Expect(Heard.Rail.Problem.empty(), "room shape: a backer at the rail never says a line twice running, nor a rail line twice in a night till its pool's said through (" +
 		std::to_string(Heard.Rail.Lines) + " lines)" + Heard.Rail.Problem);
@@ -1096,14 +1260,16 @@ void RoomCaptionFit(const std::vector<const Night*>& Nights)
 
 /**
  * What one night's checks ran over. RoomNightly's floors are on its nights' sum, so no one night has to have it all. A
- * check that compares one thing with another (the dealer's answers six hands apart, a needler's needles four apart) is
- * counted by the pairs it compared, not the things: two answers on two nights compare nothing.
+ * check that compares one thing with another (the dealer's answers six hands apart, a needler's needles four apart, a
+ * pool's lines one after another) is counted by the pairs it compared, not the things: two answers on two nights compare
+ * nothing.
  */
 struct NightlyHeard
 {
 	int Averages = 0, Counts = 0, Busts = 0;
 	int Calls = 0, SeatOpens = 0, Stories = 0, Beats = 0, Reactions = 0, Needles = 0, NeedlePairs = 0, HandForHandHands = 0, HandForHandLines = 0;
 	int HeroMoves = 0, Asks = 0, AskPairs = 0, Bubbles = 0, TableCalls = 0, ChampionOohs = 0, RailLines = 0, RailTogether = 0, EquityHands = 0;
+	int PoolPairs = 0; // the field's lines after another from their pool that night: what "never twice running" compares
 	int OneAway = 0; // nights the field was one from the money at a hand's end: the floor's bubble call checked
 	double PlainMs = 0.0; // the director's time on hands with no equity to run, and how many (its cost, over the nights)
 	int PlainTicks = 0;
@@ -1131,6 +1297,7 @@ struct NightlyHeard
 		RailLines += O.RailLines;
 		RailTogether += O.RailTogether;
 		EquityHands += O.EquityHands;
+		PoolPairs += O.PoolPairs;
 		OneAway += O.OneAway;
 		PlainMs += O.PlainMs;
 		PlainTicks += O.PlainTicks;
@@ -1138,7 +1305,36 @@ struct NightlyHeard
 	}
 };
 
-/** A floor under one of NightlyHeard's counts, on the nights together: the check it counts runs over something. */
+/** One of NightlyHeard's counts, by its name in the report (and a sweep's COUNTS line). */
+struct NightlyCount
+{
+	const char* Name;
+	int NightlyHeard::*Count;
+};
+
+/** Every count a night's checks ran over, floored or not: the report says them all, so a sweep sees how often each comes up. */
+const std::vector<NightlyCount>& NightlyCountList()
+{
+	static const std::vector<NightlyCount> All = {{"asks", &NightlyHeard::Asks}, {"averages", &NightlyHeard::Averages}, {"counts", &NightlyHeard::Counts},
+		{"busts", &NightlyHeard::Busts}, {"calls", &NightlyHeard::Calls}, {"seats", &NightlyHeard::SeatOpens}, {"beats", &NightlyHeard::Beats},
+		{"stories", &NightlyHeard::Stories}, {"reactions", &NightlyHeard::Reactions}, {"needles", &NightlyHeard::Needles},
+		{"needlepairs", &NightlyHeard::NeedlePairs}, {"h4hhands", &NightlyHeard::HandForHandHands}, {"h4hlines", &NightlyHeard::HandForHandLines},
+		{"moves", &NightlyHeard::HeroMoves}, {"askpairs", &NightlyHeard::AskPairs}, {"bubbles", &NightlyHeard::Bubbles}, {"tablecalls", &NightlyHeard::TableCalls},
+		{"oohs", &NightlyHeard::ChampionOohs}, {"together", &NightlyHeard::RailTogether}, {"raillines", &NightlyHeard::RailLines},
+		{"equity", &NightlyHeard::EquityHands}, {"oneaway", &NightlyHeard::OneAway}, {"poolpairs", &NightlyHeard::PoolPairs}};
+	return All;
+}
+
+/**
+ * A floor under one of NightlyHeard's counts, on the nights together: the check it counts runs over something. A floor is
+ * only on what two nights in five and more give (round 5's sweep, below NightlySalts: the stories, the rarest, on 45%),
+ * so twelve nights a change has reshuffled meet them all 999 times in 1,000. What a night gives only now and then has a
+ * deterministic test instead:
+ * the check run over a hand set up to give it, and shown to catch what it's for (RoomRareChecks: the average and the
+ * count the dealer's asked, the table asking twice, the bubble's reactions, the rail's ooh in the champion's hand, the bad
+ * beats; RoomRailOneVoice: a rail voice's two lines in one go; RoomHushAtHandForHand and RoomHushAtLoneFinalTable: the
+ * hands at hand for hand). Those counts are still reported a night (NightlyCounts), floorless.
+ */
 struct NightlyFloor
 {
 	const char* Name; // the count's name in the report (and a sweep's COUNTS line)
@@ -1150,43 +1346,35 @@ struct NightlyFloor
 const std::vector<NightlyFloor>& NightlyFloors()
 {
 	static const std::vector<NightlyFloor> All = {
-		{"averages", &NightlyHeard::Averages, 1, "the table asks the dealer the average, so the answer is checked against the engine"},
-		{"counts", &NightlyHeard::Counts, 1, "the table asks the dealer the count, so the answer is checked against the engine"},
 		{"busts", &NightlyHeard::Busts, 1, "busts are called on the PA, so they're checked against the engine's"},
 		{"calls", &NightlyHeard::Calls, 1, "all-in calls are called from other tables, so each is checked against the engine"},
 		{"seats", &NightlyHeard::SeatOpens, 1, "open seats are called from other tables, so each is checked against the engine"},
-		{"beats", &NightlyHeard::Beats, 1, "a bad beat is told, so the hands it names are checked against what was tabled"},
 		{"stories", &NightlyHeard::Stories, 1, "someone claims a result, so it's checked against their Story"},
 		{"reactions", &NightlyHeard::Reactions, 1, "the player's table reacts, so each reaction is checked against the hand"},
 		{"needles", &NightlyHeard::Needles, 1, "the player is needled, so each needle is checked against the hand"},
 		{"needlepairs", &NightlyHeard::NeedlePairs, 1, "a needler needles the player again in a night, so \"one needle per needler per 4 hands\" compares something"},
-		{"h4hhands", &NightlyHeard::HandForHandHands, 1, "the player is seated at hand for hand"},
-		{"h4hlines", &NightlyHeard::HandForHandLines, 1, "the player's table talks at hand for hand, so it's checked for reactions only"},
 		{"moves", &NightlyHeard::HeroMoves, 1, "the player moves, so who tells them is checked"},
-		{"askpairs", &NightlyHeard::AskPairs, 1, "the table asks the dealer again in a night, so \"at most once in six hands\" compares something"},
-		{"bubbles", &NightlyHeard::Bubbles, 1, "the table reacts to the bubble, so it's checked against the floor's call"},
 		{"tablecalls", &NightlyHeard::TableCalls, 1, "other tables call, so no call shouts the player's own table"},
-		{"oohs", &NightlyHeard::ChampionOohs, 1, "the rail oohs in the champion's hand, so the floor's call is checked after it"},
-		{"together", &NightlyHeard::RailTogether, 1, "a rail voice says two things in one go, so \"nobody at the rail says two things at once\" compares something"},
 		{"raillines", &NightlyHeard::RailLines, 6, "the backer at the rail has six lines and more to say, all checked"},
 		{"equity", &NightlyHeard::EquityHands, 1, "an all-in is called and tabled at the player's table, so the equity runs are checked"},
 		{"oneaway", &NightlyHeard::OneAway, 1, "the field is one from the money, so the floor's bubble call is checked"},
+		{"poolpairs", &NightlyHeard::PoolPairs, 1, "the field says another line from a pool it's said one from tonight, so \"no line twice running from one pool\" compares something"},
 	};
 	return All;
 }
 
-/** Every count a night's checks ran over, by its floor's name ("averages=1 counts=0 ..."; the asks too, unfloored). */
+/** Every count a night's checks ran over, by its name ("asks=2 averages=1 ..."), floored or not. */
 std::string NightlyCounts(const NightlyHeard& H)
 {
-	std::string Out = "asks=" + std::to_string(H.Asks);
-	for (const NightlyFloor& F : NightlyFloors())
+	std::string Out;
+	for (const NightlyCount& C : NightlyCountList())
 	{
-		Out += std::string(" ") + F.Name + "=" + std::to_string(H.*F.Count);
+		Out += std::string(Out.empty() ? "" : " ") + C.Name + "=" + std::to_string(H.*C.Count);
 	}
 	return Out;
 }
 
-/** The floors H's counts don't meet yet, as "name have/need" ("askpairs 0/1"); empty when every one is met. */
+/** The floors H's counts don't meet yet, as "name have/need" ("stories 0/1"); empty when every one is met. */
 std::vector<std::string> NightlyShort(const NightlyHeard& H)
 {
 	std::vector<std::string> Out;
@@ -1200,33 +1388,28 @@ std::vector<std::string> NightlyShort(const NightlyHeard& H)
 	return Out;
 }
 
-/**
- * Every check RoomNightly runs on a night but its golden and its floors: the PA's order and numbers, honesty, the shape
- * (RoomShape), equity scope, pace (the same night at Brisk and Fast) and checkpoints. What each check ran over comes
- * back for the floors.
- */
-NightlyHeard NightlyChecks(const Setup& S, const Night& N)
-{
-	NightlyHeard Heard;
-	std::printf("room nightly: %d hands, %d cues, the player %s, champion %s, liveroom at most %d bytes\n", N.Ticks, static_cast<int>(N.Cues.size()),
-		N.HeroPlace == 1 ? "won it" : ("finished " + talk::Ordinal(N.HeroPlace)).c_str(), N.Winner.c_str(), static_cast<int>(N.MaxRoomText));
-	Expect(N.Ticks > 60 && N.Cues.size() > 150, "room nightly: a whole night with plenty said");
-	Expect(N.MaxRoomText <= 16 * 1024, "room nightly: the director's liveroom state stays under 16 KB (§10)");
-	// The director's cost: printed a night, checked by RoomNightly over the nights' hands together (one night's hands
-	// under a load spike aren't the director's cost).
-	const double Plain = N.PlainMs / std::max(1, N.PlainTicks);
-	std::printf("room nightly: the director takes %.4f ms a hand end (budget 0.05), %.4f with the night's %d equity runs averaged in, %.3f ms at most\n", Plain,
-		N.DirectorMs / std::max(1, N.Ticks), static_cast<int>(N.EquityTables.size()), N.WorstMs);
-	Heard.PlainMs = N.PlainMs;
-	Heard.PlainTicks = N.PlainTicks;
+// ------------------------------------------------------------------ the nightly's checks, one at a time
 
-	// The PA's order: each milestone once, in the night's order. One announcement of several calls (Director::PaTogether)
-	// says each in turn, so each counts, in its place in the announcement.
-	const std::vector<std::string> Order = {"pa.desk.open", "pa.ten.minutes", "pa.start", "pa.last.call", "pa.reg.closed", "pa.away", "pa.h4h", "pa.bubble",
+/** The floor's milestones, in the night's order. */
+const std::vector<std::string>& MilestoneOrder()
+{
+	static const std::vector<std::string> Order = {"pa.desk.open", "pa.ten.minutes", "pa.start", "pa.last.call", "pa.reg.closed", "pa.away", "pa.h4h", "pa.bubble",
 		"pa.two.tables", "pa.final", "pa.headsup", "pa.champion"};
+	return Order;
+}
+
+/** What the floor said of its milestones in a night: how many times each, where each was first (its announcement's cue,
+ *  then its place in it), and the hands it called the bubble (one away) on. */
+struct FloorHeard
+{
 	std::map<std::string, int> FirstAt;
 	std::map<std::string, int> Times;
-	std::vector<int> OnBubbleTicks; // the hands the floor called the bubble (one away) on
+	std::vector<int> OnBubbleTicks;
+};
+
+FloorHeard FloorOf(const Night& N)
+{
+	FloorHeard H;
 	for (size_t I = 0; I < N.Cues.size(); ++I)
 	{
 		const room::Cue& C = N.Cues[I].second;
@@ -1254,28 +1437,348 @@ NightlyHeard NightlyChecks(const Setup& S, const Night& N)
 			}
 			if (Pool == "pa.onbubble" || Pool == "pa.away.bubble")
 			{
-				OnBubbleTicks.push_back(N.Cues[I].first);
-				if (!FirstAt.count("pa.onbubble"))
+				H.OnBubbleTicks.push_back(N.Cues[I].first);
+				if (!H.FirstAt.count("pa.onbubble"))
 				{
-					FirstAt["pa.onbubble"] = static_cast<int>(I * 8 + K);
+					H.FirstAt["pa.onbubble"] = static_cast<int>(I * 8 + K);
 				}
 			}
 			Pool = Pool == "pa.away.bubble" ? std::string("pa.away") : Pool;
-			for (const std::string& M : Order)
+			for (const std::string& M : MilestoneOrder())
 			{
 				if (Pool == M)
 				{
-					if (!FirstAt.count(M))
+					if (!H.FirstAt.count(M))
 					{
-						FirstAt[M] = static_cast<int>(I * 8 + K); // the announcement, then the call's place in it
+						H.FirstAt[M] = static_cast<int>(I * 8 + K); // the announcement, then the call's place in it
 					}
-					++Times[M];
+					++H.Times[M];
 				}
 			}
 		}
 	}
+	return H;
+}
+
+/**
+ * Which milestones the field passed, from the engine's facts and never the room's: three or fewer from the money at a
+ * hand's end (the away call), its HandForHand and Bubble, two tables dealt, its FinalTable, two left at a hand's end
+ * (heads-up), its Finished; the room's own (the desk to registration's close) every night. A field can skip some: three
+ * can go to one in a hand (no heads-up), the field can jump into the money from three away (no hand for hand) or from
+ * further (no away call either), three tables can go to one.
+ */
+std::map<std::string, bool> FieldPassed(const Night& N)
+{
+	std::map<std::string, bool> Passed;
+	for (const std::string& M : {"pa.desk.open", "pa.ten.minutes", "pa.start", "pa.last.call", "pa.reg.closed"})
+	{
+		Passed[M] = true;
+	}
+	for (const auto& F : N.Facts)
+	{
+		const int Left = F.second.Remaining - F.second.Paid;
+		Passed["pa.away"] = Passed["pa.away"] || (Left >= 1 && Left <= 3);
+		Passed["pa.two.tables"] = Passed["pa.two.tables"] || F.second.Tables == 2;
+		Passed["pa.headsup"] = Passed["pa.headsup"] || F.second.Remaining == 2;
+		for (const ss::TEvent& E : F.second.Events)
+		{
+			Passed["pa.h4h"] = Passed["pa.h4h"] || E.Type == ss::TEventType::HandForHand;
+			Passed["pa.bubble"] = Passed["pa.bubble"] || E.Type == ss::TEventType::Bubble;
+			Passed["pa.final"] = Passed["pa.final"] || E.Type == ss::TEventType::FinalTable;
+			Passed["pa.champion"] = Passed["pa.champion"] || E.Type == ss::TEventType::Finished;
+		}
+	}
+	return Passed;
+}
+
+/** The floor says each milestone the field passed exactly once, and none it skipped, in the night's order (FieldPassed);
+ *  what's wrong, if anything. */
+std::vector<std::string> MilestoneProblems(const Night& N)
+{
+	std::vector<std::string> Out;
+	const FloorHeard H = FloorOf(N);
+	std::map<std::string, bool> Passed = FieldPassed(N);
+	int Prev = -1;
+	std::string PrevName;
+	for (const std::string& M : MilestoneOrder())
+	{
+		const int Want = Passed[M] ? 1 : 0;
+		const auto Said = H.Times.find(M);
+		const int Times = Said == H.Times.end() ? 0 : Said->second;
+		if (Times != Want)
+		{
+			Out.push_back("the floor says " + M + (Want ? std::string(" exactly once") : " never: the field skipped it") + " (" + std::to_string(Times) + ")");
+		}
+		const auto At = H.FirstAt.find(M);
+		if (At != H.FirstAt.end())
+		{
+			if (At->second <= Prev)
+			{
+				Out.push_back(M + " comes after " + PrevName);
+			}
+			Prev = At->second;
+			PrevName = M;
+		}
+	}
+	return Out;
+}
+
+/** The dealer's numbers are the engine's that hand: the average (the clock card's, to the thousand), the count and the
+ *  places paid. "" when it is, or when C isn't one of them. */
+std::string DealerNumberProblem(const room::Cue& C, const TickFacts& F)
+{
+	if (Starts(C.Key, "dealer.average"))
+	{
+		const long long Rounded = static_cast<long long>(std::llround(F.Average / 1000.0)) * 1000;
+		return C.Text == "Average is about " + talk::Count(Rounded) + "." ? std::string() : "the dealer's average is the clock card's, rounded: " + C.Text;
+	}
+	if (Starts(C.Key, "dealer.left."))
+	{
+		const bool Itm = Starts(C.Key, "dealer.left.itm");
+		const bool Count = Starts(C.Text, std::to_string(F.Remaining) + " left. ");
+		const bool Paid = Itm ? F.Remaining <= F.Paid : Contains(C.Text, " " + std::to_string(F.Paid) + " paid.");
+		return Count && Paid ? std::string() : "the dealer's count is the engine's: " + C.Text;
+	}
+	return std::string();
+}
+
+/**
+ * A claimed result is in the speaker's Story, as the line says it (the line spends "story:Who:Day:Event"): a cash names
+ * its place and was paid, online when it says online; a win ("Won the...", "Shipped the...") was first; a bubble names no
+ * place, and was the first place out of the money (nothing paid, one past the places PayoutTable pays a field that size).
+ * A field's size or a prize the line says is the record's. "" when it is, else what's wrong.
+ */
+std::string StoryClaimProblem(const std::string& Topic, const std::string& Key, const std::string& Text, const std::string& Story)
+{
+	const std::string Rest = Topic.substr(Topic.find(':') + 1);
+	const std::string Tail = Rest.substr(Rest.find(':') + 1);
+	const int Day = std::atoi(Tail.c_str());
+	const std::string Event = Tail.substr(Tail.find(':') + 1);
+	const std::string Said = Lower(Text);
+	// The numbers it says: a field ("106 runners", "of 106", "out of 106") and a prize ("$1,300").
+	std::vector<std::string> Fields;
+	std::vector<std::string> Prizes;
+	for (size_t I = 0; I < Said.size();)
+	{
+		if (Said[I] == '$')
+		{
+			size_t J = I + 1;
+			while (J < Said.size() && (std::isdigit(static_cast<unsigned char>(Said[J])) || (Said[J] == ',' && J + 1 < Said.size() && std::isdigit(static_cast<unsigned char>(Said[J + 1])))))
+			{
+				++J;
+			}
+			Prizes.push_back(Text.substr(I, J - I));
+			I = J;
+		}
+		else if (std::isdigit(static_cast<unsigned char>(Said[I])))
+		{
+			size_t J = I;
+			while (J < Said.size() && std::isdigit(static_cast<unsigned char>(Said[J])))
+			{
+				++J;
+			}
+			if (Said.compare(J, 8, " runners") == 0 || (I >= 3 && Said.compare(I - 3, 3, "of ") == 0))
+			{
+				Fields.push_back(Said.substr(I, J - I));
+			}
+			I = J;
+		}
+		else
+		{
+			++I;
+		}
+	}
+	std::string Why = "no " + Event + " on day " + std::to_string(Day) + " in their Story";
+	for (const talk::Result& R : talk::StoryOf(Story))
+	{
+		if (R.Day != Day || R.Event != Event)
+		{
+			continue;
+		}
+		const int Paid = R.Entries > 0 ? static_cast<int>(ss::PayoutTable(static_cast<ss::Chips>(R.Entries) * 100, R.Entries, 1).size()) : 0;
+		const std::string What = talk::Ordinal(R.Place) + " of " + std::to_string(R.Entries) + (R.Prize > 0 ? ", paid " + talk::Dollars(R.Prize) : ", nothing paid") +
+			(R.Online ? ", online" : "");
+		if (Starts(Key, "field.small.bubble"))
+		{
+			if (R.Prize > 0 || R.Place != Paid + 1)
+			{
+				Why = "a bubble claimed for " + What + " (" + std::to_string(Paid) + " paid)";
+				continue;
+			}
+		}
+		else if (Starts(Key, "field.small.week.win"))
+		{
+			if (R.Place != 1 || R.Prize <= 0)
+			{
+				Why = "a win claimed for " + What;
+				continue;
+			}
+		}
+		else if (R.Prize <= 0 || !Contains(Said, talk::OrdinalWord(R.Place)) || Starts(Key, "field.small.week.online") != R.Online)
+		{
+			Why = "a cash claimed for " + What + " (" + Key + ")";
+			continue;
+		}
+		bool Numbers = true;
+		for (const std::string& F : Fields)
+		{
+			Numbers = Numbers && F == std::to_string(R.Entries);
+		}
+		for (const std::string& P : Prizes)
+		{
+			Numbers = Numbers && P == talk::Dollars((R.Prize + 50) / 100 * 100);
+		}
+		if (!Numbers)
+		{
+			Why = "the field or the prize it says isn't the record's, " + What;
+			continue;
+		}
+		return std::string();
+	}
+	return Why;
+}
+
+/**
+ * The fills a line took from its template (the cue's Key is the template's, talk::Inventory's): "{Mine}. {Theirs}. On the
+ * {Street}." said as "Aces. Kings. On the river." gives Mine "Aces", Theirs "Kings", Street "river". False when the
+ * template can't say the line.
+ */
+bool FillsOf(const std::string& Key, const std::string& Text, std::map<std::string, std::string>& Out)
+{
+	// Template parts: literal, {Var}, literal, ... matched left to right, each fill as short as lets the rest match.
+	struct Match
+	{
+		static bool Run(const std::string& Tpl, size_t A, const std::string& Line, size_t B, std::map<std::string, std::string>& Fills)
+		{
+			if (A == Tpl.size())
+			{
+				return B == Line.size();
+			}
+			if (Tpl[A] != '{')
+			{
+				return B < Line.size() && Tpl[A] == Line[B] && Run(Tpl, A + 1, Line, B + 1, Fills);
+			}
+			const size_t Close = Tpl.find('}', A);
+			const std::string Var = Tpl.substr(A + 1, Close - A - 1);
+			for (size_t End = B + 1; End <= Line.size(); ++End)
+			{
+				Fills[Var] = Line.substr(B, End - B);
+				if (Run(Tpl, Close + 1, Line, End, Fills))
+				{
+					return true;
+				}
+			}
+			Fills.erase(Var);
+			return false;
+		}
+	};
+	Out.clear();
+	for (const auto& KT : talk::Inventory())
+	{
+		if (KT.first == Key)
+		{
+			return Match::Run(KT.second, 0, Text, 0, Out);
+		}
+	}
+	return false;
+}
+
+/**
+ * A bad beat names hands that were tabled tonight (field.badbeat at the hand's end, field.break.beat at the break): each
+ * hand it names (its Mine and Theirs, by its template) shown down that hand or before, on the street it says (Count: the
+ * beats told).
+ */
+RanOver BeatsTabled(const Night& N)
+{
+	RanOver Out;
+	std::set<std::string> TabledTonight;
+	int LastTick = -1;
+	for (const auto& TC : N.Cues)
+	{
+		const int Tick = TC.first;
+		const room::Cue& C = TC.second;
+		const auto F = N.Facts.find(Tick);
+		if (Tick != LastTick && F != N.Facts.end() && F->second.HadNote)
+		{
+			for (const auto& Sh : F->second.Note.Shown)
+			{
+				TabledTonight.insert(talk::SpokenHand(Sh.second));
+			}
+		}
+		LastTick = Tick;
+		if (!Starts(C.Key, "field.badbeat") && !Starts(C.Key, "field.break.beat"))
+		{
+			continue;
+		}
+		++Out.Count;
+		std::map<std::string, std::string> Fills;
+		bool Named = FillsOf(C.Key, C.Text, Fills);
+		for (const char* Var : {"Mine", "MineLower", "Theirs", "TheirsLower"})
+		{
+			const auto It = Fills.find(Var);
+			Named = Named && (It == Fills.end() || TabledTonight.count(Lower(It->second)) > 0);
+		}
+		const auto Street = Fills.find("Street");
+		Named = Named && (Street == Fills.end() || Street->second == "flop" || Street->second == "turn" || Street->second == "river");
+		if (!Named && Out.Problem.empty())
+		{
+			Out.Problem = ": hand " + std::to_string(Tick) + ", " + C.Key + " \"" + C.Text + "\"";
+		}
+	}
+	return Out;
+}
+
+/** Hand for hand is reactions only: no small talk and no question to the dealer in a hand the engine had at hand for hand
+ *  (Count: the lines from the player's table in those hands, every one checked). */
+RanOver HandForHandTalk(const Night& N)
+{
+	RanOver Out;
+	for (const auto& TC : N.Cues)
+	{
+		const room::Cue& C = TC.second;
+		const auto F = N.Facts.find(TC.first);
+		if (F == N.Facts.end() || !F->second.HandForHandAtHand)
+		{
+			continue;
+		}
+		Out.Count += C.What == room::Kind::Line && C.Where == room::From::HeroTable ? 1 : 0;
+		if ((Starts(C.Key, "field.small.") || Starts(C.Key, "field.ask.")) && Out.Problem.empty())
+		{
+			Out.Problem = ": hand " + std::to_string(TC.first) + ", " + C.Key + " \"" + C.Text + "\"";
+		}
+	}
+	return Out;
+}
+
+/**
+ * Every check RoomNightly runs on a night but its golden and its floors: the PA's order and numbers, honesty, the shape
+ * (RoomShape), equity scope, pace (the same night at Brisk and Fast) and checkpoints. What each check ran over comes
+ * back for the floors.
+ */
+NightlyHeard NightlyChecks(const Setup& S, const Night& N)
+{
+	NightlyHeard Heard;
+	std::printf("room nightly: %d hands, %d cues, the player %s, champion %s, liveroom at most %d bytes\n", N.Ticks, static_cast<int>(N.Cues.size()),
+		N.HeroPlace == 1 ? "won it" : ("finished " + talk::Ordinal(N.HeroPlace)).c_str(), N.Winner.c_str(), static_cast<int>(N.MaxRoomText));
+	Expect(N.Ticks > 60 && N.Cues.size() > 150, "room nightly: a whole night with plenty said");
+	Expect(N.MaxRoomText <= 16 * 1024, "room nightly: the director's liveroom state stays under 16 KB (§10)");
+	// The director's cost: printed a night, checked by RoomNightly over the nights' hands together (one night's hands
+	// under a load spike aren't the director's cost).
+	const double Plain = N.PlainMs / std::max(1, N.PlainTicks);
+	std::printf("room nightly: the director takes %.4f ms a hand end (budget 0.05), %.4f with the night's %d equity runs averaged in, %.3f ms at most\n", Plain,
+		N.DirectorMs / std::max(1, N.Ticks), static_cast<int>(N.EquityTables.size()), N.WorstMs);
+	Heard.PlainMs = N.PlainMs;
+	Heard.PlainTicks = N.PlainTicks;
+
+	// The PA's order: each milestone the field passed once, in the night's order, and none it skipped. One announcement of
+	// several calls (Director::PaTogether) says each in turn, so each counts, in its place in the announcement.
+	for (const std::string& Problem : MilestoneProblems(N))
+	{
+		Expect(false, "room nightly: " + Problem);
+	}
 	// On the bubble: named once, at the first hand the field ends one from the money (walked down to it, or jumped there
 	// and called with hand for hand), before the burst; and "on the bubble" never anywhere else (not at two away).
+	const FloorHeard Floor = FloorOf(N);
 	int OneAwayAt = -1;
 	for (const auto& F : N.Facts)
 	{
@@ -1286,11 +1789,13 @@ NightlyHeard NightlyChecks(const Setup& S, const Night& N)
 		}
 	}
 	Heard.OneAway = OneAwayAt >= 0 ? 1 : 0;
-	const bool BubbleNamed = OneAwayAt < 0 ? OnBubbleTicks.empty()
-										   : OnBubbleTicks == std::vector<int>{OneAwayAt} && (!FirstAt.count("pa.bubble") || FirstAt["pa.onbubble"] < FirstAt["pa.bubble"]);
+	const bool BubbleNamed = OneAwayAt < 0 ? Floor.OnBubbleTicks.empty()
+										   : Floor.OnBubbleTicks == std::vector<int>{OneAwayAt} &&
+				(!Floor.FirstAt.count("pa.bubble") || Floor.FirstAt.at("pa.onbubble") < Floor.FirstAt.at("pa.bubble"));
 	Expect(BubbleNamed, "room nightly: the floor names the bubble once, the hand the field is one from the money (" +
 							(OneAwayAt < 0 ? std::string("never one away") : "one away at hand " + std::to_string(OneAwayAt)) + ", called " +
-							std::to_string(OnBubbleTicks.size()) + (OnBubbleTicks.empty() ? std::string(" times") : " times, first at hand " + std::to_string(OnBubbleTicks[0])) + ")");
+							std::to_string(Floor.OnBubbleTicks.size()) +
+							(Floor.OnBubbleTicks.empty() ? std::string(" times") : " times, first at hand " + std::to_string(Floor.OnBubbleTicks[0])) + ")");
 	for (size_t I = 0; I < N.Cues.size(); ++I)
 	{
 		const room::Cue& C = N.Cues[I].second;
@@ -1300,18 +1805,6 @@ NightlyHeard NightlyChecks(const Setup& S, const Night& N)
 		}
 		const auto F = N.Facts.find(N.Cues[I].first);
 		Expect(F != N.Facts.end() && F->second.Remaining - F->second.Paid == 1, "room nightly: \"on the bubble\" only one from the money: " + Whole(N, I));
-	}
-	int Prev = -1;
-	std::string PrevName;
-	for (const std::string& M : Order)
-	{
-		Expect(Times[M] == 1, "room nightly: the floor says " + M + " exactly once (" + std::to_string(Times[M]) + ")");
-		if (FirstAt.count(M))
-		{
-			Expect(FirstAt[M] > Prev, "room nightly: " + M + " comes after " + PrevName);
-			Prev = FirstAt[M];
-			PrevName = M;
-		}
 	}
 	// Numbers from the engine.
 	int Levels = 0;
@@ -1345,17 +1838,10 @@ NightlyHeard NightlyChecks(const Setup& S, const Night& N)
 		{
 			Expect(Contains(Said, "top " + std::to_string(F->second.Paid) + " are paid"), "room nightly: registration closes with the engine's paid places");
 		}
-		if (Starts(C.Key, "dealer.average"))
-		{
-			++Averages;
-			const long long Rounded = static_cast<long long>(std::llround(F->second.Average / 1000.0)) * 1000;
-			Expect(C.Text == "Average is about " + talk::Count(Rounded) + ".", "room nightly: the dealer's average is the clock card's, rounded: " + C.Text);
-		}
-		if (Starts(C.Key, "dealer.left."))
-		{
-			++Counts;
-			Expect(Starts(C.Text, std::to_string(F->second.Remaining) + " left. "), "room nightly: the dealer's count is the engine's: " + C.Text);
-		}
+		Averages += Starts(C.Key, "dealer.average") ? 1 : 0;
+		Counts += Starts(C.Key, "dealer.left.") ? 1 : 0;
+		const std::string Number = DealerNumberProblem(C, F->second);
+		Expect(Number.empty(), "room nightly: " + Number);
 		if (Starts(C.Key, "pa.bust"))
 		{
 			++Busts;
@@ -1383,16 +1869,13 @@ NightlyHeard NightlyChecks(const Setup& S, const Night& N)
 	Heard.Busts = Busts;
 
 	// Honesty.
-	std::set<std::string> TabledTonight;
 	std::map<std::string, int> LastNeedle;
 	int Needles = 0;
 	int Stories = 0;
-	int Beats = 0;
 	int Calls = 0;
 	int SeatOpens = 0;
 	int Reactions = 0;
 	int Noticed = 0;
-	int HandForHandLines = 0; // lines from the player's table in the hands at hand for hand
 	int HandForHandHands = 0; // hands at hand for hand with the player seated
 	for (const auto& F : N.Facts)
 	{
@@ -1403,20 +1886,11 @@ NightlyHeard NightlyChecks(const Setup& S, const Night& N)
 	{
 		VoiceByName[V.Name] = &V;
 	}
-	int LastTick = -1;
 	for (const auto& TC : N.Cues)
 	{
 		const int Tick = TC.first;
 		const room::Cue& C = TC.second;
 		const auto F = N.Facts.find(Tick);
-		if (Tick != LastTick && F != N.Facts.end() && F->second.HadNote)
-		{
-			for (const auto& Sh : F->second.Note.Shown)
-			{
-				TabledTonight.insert(talk::SpokenHand(Sh.second));
-			}
-		}
-		LastTick = Tick;
 		if (Starts(C.Key, "dealer.table.called"))
 		{
 			++Calls;
@@ -1438,34 +1912,13 @@ NightlyHeard NightlyChecks(const Setup& S, const Night& N)
 			}
 			Expect(Found, "room honesty: \"" + C.Text + "\" has a bust at table " + std::to_string(C.TableId) + " that tick");
 		}
-		if (Starts(C.Key, "field.badbeat") || Starts(C.Key, "field.break.beat"))
-		{
-			++Beats;
-			int Named = 0;
-			for (const std::string& Hand : TabledTonight)
-			{
-				Named += Contains(Lower(C.Text), Hand) ? 1 : 0;
-			}
-			Expect(Named >= 1, "room honesty: every named hand was tabled tonight: " + C.Text);
-		}
 		if (Starts(C.Topic, "story:"))
 		{
 			++Stories;
 			const std::string Rest = C.Topic.substr(6);
-			const std::string Who = Rest.substr(0, Rest.find(':'));
-			const std::string Tail = Rest.substr(Rest.find(':') + 1);
-			const int Day = std::atoi(Tail.c_str());
-			const std::string Event = Tail.substr(Tail.find(':') + 1);
-			bool Found = false;
-			const auto V = VoiceByName.find(Who);
-			if (V != VoiceByName.end())
-			{
-				for (const talk::Result& R : talk::StoryOf(V->second->Story))
-				{
-					Found = Found || (R.Day == Day && R.Event == Event && Contains(Lower(C.Text), talk::OrdinalWord(R.Place)));
-				}
-			}
-			Expect(Found, "room honesty: a claimed result is in the speaker's Story: " + C.Topic + " / " + C.Text);
+			const auto V = VoiceByName.find(Rest.substr(0, Rest.find(':')));
+			const std::string Problem = StoryClaimProblem(C.Topic, C.Key, C.Text, V != VoiceByName.end() ? V->second->Story : std::string());
+			Expect(Problem.empty(), "room honesty: a claimed result is in the speaker's Story: " + C.Topic + " / " + C.Text + " (" + Problem + ")");
 		}
 		// Reactions come only from people who were in the hand.
 		const bool Reaction = Starts(C.Key, "field.nicehand") || Starts(C.Key, "field.suckout") || Starts(C.Key, "field.badbeat") || Starts(C.Key, "field.cooler") ||
@@ -1493,32 +1946,31 @@ NightlyHeard NightlyChecks(const Setup& S, const Night& N)
 			Expect(Prev2 == LastNeedle.end() || Tick - Prev2->second >= 4, "room honesty: one needle per needler per 4 hands (" + C.Speaker + ")");
 			LastNeedle[C.Who] = Tick;
 		}
-		if (Starts(C.Key, "field.small.") || Starts(C.Key, "field.ask."))
-		{
-			Expect(F == N.Facts.end() || !F->second.HandForHandAtHand, "room honesty: hand for hand, reactions only (" + C.Key + ")");
-		}
-		HandForHandLines += C.What == room::Kind::Line && C.Where == room::From::HeroTable && F != N.Facts.end() && F->second.HandForHandAtHand ? 1 : 0;
 		if (Starts(C.Topic, "noticed:"))
 		{
 			++Noticed;
 		}
 	}
+	const RanOver Beats = BeatsTabled(N);
+	Expect(Beats.Problem.empty(), "room honesty: every hand a bad beat names was tabled tonight" + Beats.Problem);
+	const RanOver HandForHand = HandForHandTalk(N);
+	Expect(HandForHand.Problem.empty(), "room honesty: hand for hand, reactions only" + HandForHand.Problem);
 	Expect(Noticed <= 1, "room noticed: the patch is noticed at most once a night");
 	std::printf("room honesty: %d all-in calls elsewhere, %d seats open elsewhere, %d stories, %d bad beats, %d reactions, %d needles, %d noticed: all checked\n", Calls,
-		SeatOpens, Stories, Beats, Reactions, Needles, Noticed);
-	std::printf("room honesty: %d hands at hand for hand with the player seated, %d lines from their table in them: reactions only\n", HandForHandHands, HandForHandLines);
+		SeatOpens, Stories, Beats.Count, Reactions, Needles, Noticed);
+	std::printf("room honesty: %d hands at hand for hand with the player seated, %d lines from their table in them: reactions only\n", HandForHandHands, HandForHand.Count);
 	Heard.Calls = Calls;
 	Heard.SeatOpens = SeatOpens;
 	Heard.Stories = Stories;
-	Heard.Beats = Beats;
+	Heard.Beats = Beats.Count;
 	Heard.Reactions = Reactions;
 	Heard.Needles = Needles;
 	Heard.HandForHandHands = HandForHandHands;
-	Heard.HandForHandLines = HandForHandLines;
+	Heard.HandForHandLines = HandForHand.Count;
 	const ShapeHeard Shape = RoomShape(S, N);
 	std::printf("room shape: %d moves told by the dealer, %d answers to the table, %d reactions to the bubble, %d calls from other tables, %d oohs as the champion's "
-				"called; %d rail lines (%d pools said through), %d heard together\n",
-		Shape.HeroMoves, Shape.Asks, Shape.Bubbles, Shape.TableCalls, Shape.ChampionOohs, Shape.Rail.Lines, Shape.Rail.Fresh, Shape.RailTogether);
+				"called; %d rail lines (%d pools said through), %d heard together; %d lines after another from their pool\n",
+		Shape.HeroMoves, Shape.Asks, Shape.Bubbles, Shape.TableCalls, Shape.ChampionOohs, Shape.Rail.Lines, Shape.Rail.Fresh, Shape.RailTogether, Shape.PoolPairs);
 	Heard.HeroMoves = Shape.HeroMoves;
 	Heard.Asks = Shape.Asks;
 	Heard.AskPairs = Shape.AskPairs;
@@ -1527,6 +1979,7 @@ NightlyHeard NightlyChecks(const Setup& S, const Night& N)
 	Heard.ChampionOohs = Shape.ChampionOohs;
 	Heard.RailLines = Shape.Rail.Lines;
 	Heard.RailTogether = Shape.RailTogether;
+	Heard.PoolPairs = Shape.PoolPairs;
 
 	// RoomEquityScope: equity only at the player's table, and only once an all-in was called and tabled.
 	bool Scoped = true;
@@ -1644,14 +2097,13 @@ NightlyHeard NightlyChecks(const Setup& S, const Night& N)
 
 /**
  * The Nightly's salts (each a night's draw and cards), in the order RoomNightly takes them: the golden night first, then
- * nights that pass every per-night check, as many as it takes to meet the floors (NightlyCap at most). From round 4's
- * sweep of 1,847 salts (":20" to ":40", ":20a" to ":20z", ":41" to ":1840"; 1,399 pass every check NightlyChecks makes):
- * ":1782" (the golden: the player second, heads-up for the title), ":379" and ":1278" as before, then nine taken one at a
- * time for the floor the list had the fewest nights behind, so each floor has nine nights or more of the twelve (the
- * rail's ooh in the champion's hand is on 35 of the 1,399, a rail voice's two lines in one go on 64). Today ":1782" and
- * ":379" meet every floor. A change that moves every night (a bot's) meets them within twelve fresh nights about one
- * time in eleven when every night still passes; when the twelve fall short the failure names the floors short, and a
- * sweep's passing nights go here.
+ * as many more as it takes to meet the floors (NightlyCap at most). Any nights will do: round 5's sweep of 1,847 salts
+ * (":20" to ":40", ":20a" to ":20z", ":41" to ":1840") has every one pass every check NightlyChecks makes (round 4's had
+ * 1,399: what the rest failed on are fixes and deterministic tests now, RoomStoryClaims, RoomSkippedMilestones,
+ * RoomMovedTable and RoomChampionAfterBreak, never a choice of nights), and twelve drawn at random from it meet the
+ * floors 999 times in 1,000, in three or four nights. So a change that moves every night (a bot's) needs no edit here;
+ * should twelve ever fall short, the failure names the floors short. Today ":1782" (the golden: the player second,
+ * heads-up for the title) meets them alone; the rest are round 4's picks.
  */
 const char* const NightlySalts[] = {":1782", ":379", ":1278", ":953", ":361", ":406", ":1641", ":57", ":758", ":824", ":1255", ":1521"};
 constexpr size_t NightlyCap = 12;
@@ -2327,6 +2779,12 @@ void RoomHushAtHandForHand()
 	Expect(Turning && FloorParts > 0 && Chatter.empty() && Second->Now() == room::Mood::HandForHand,
 		"room hush: the hand that takes the room to hand for hand gets the floor's call and reactions only, though the table had something to say (hand " +
 			std::to_string(Due) + (Chatter.empty() ? std::string(": nothing said") : ": " + Chatter[0]) + ")");
+	// RoomNightly's own check (HandForHandTalk) over the hand, the engine at hand for hand: a few nights give it one.
+	Night One;
+	AddTake(One, Due, Heard);
+	One.Facts[Due].HandForHandAtHand = T.HandForHand();
+	const RanOver Hushed = HandForHandTalk(One);
+	Expect(One.Facts[Due].HandForHandAtHand && Hushed.Problem.empty(), "room hush: RoomNightly's hand-for-hand check passes the hand" + Hushed.Problem);
 }
 
 /**
@@ -2499,6 +2957,9 @@ void RoomAwayThenHandForHand()
 		{"four away to one in one hand", {4, 1, 0}, {{}, {"pa.away.bubble+pa.h4h"}, {"pa.bubble"}}},
 		{"three away, then one in one hand", {4, 3, 1, 0}, {{}, {"pa.away"}, {"pa.onbubble+pa.h4h"}, {"pa.bubble"}}},
 		{"two away into the money in one hand", {4, 3, 2, 0}, {{}, {"pa.away"}, {"pa.h4h"}, {"pa.bubble"}}},
+		// The engine never went hand for hand (round 5's sweep: 27 nights), or never three away either (one): nothing for them.
+		{"three away into the money in one hand", {4, 3, 0}, {{}, {"pa.away"}, {"pa.bubble"}}},
+		{"four away into the money in one hand", {4, 0}, {{}, {"pa.bubble"}}},
 	};
 	const std::set<std::string> Near = {"pa.away", "pa.away.bubble", "pa.onbubble", "pa.h4h", "pa.h4h.lone", "pa.bubble"};
 	static const std::string Hold = "Dealers, please hold your decks until every table has finished the hand.";
@@ -2958,6 +3419,269 @@ void RoomAwayThenHandForHand()
 	}
 }
 
+// ------------------------------------------------------------------ RoomVoiceTurns
+
+/**
+ * A night's cues as the host places them (room::Turns, in Take order), on a host's clock at a pace: a hand's start Take
+ * at its deal, a lean mid-hand, its end a breath before the next deal, Hand seconds a hand; Simulated, the start's and the
+ * end's Takes at one moment, as RoomFeed::Simulated takes them (on the rail, a round every 4.5 s). Unguarded: a voice's
+ * line that, as taken (its Take's time plus its Delay), runs into the same voice's line before it; Overlaps: the same as
+ * placed (none). Problem: a line placed under its voice's line before, before it was taken, or late with its voice free;
+ * a cue with no voice moved.
+ */
+struct TurnsHeard
+{
+	int Voiced = 0; // cues with a voice
+	int Rail = 0;   // of them, at the rail
+	int Unguarded = 0;
+	int Overlaps = 0;
+	int Waited = 0; // placed later than taken
+	double MaxWait = 0.0;
+	std::map<std::string, int> WaitedBy; // who waited: "rail", "Dee", "dealers", "seats"
+	int Late = 0;                        // left to the night log (their voice busy past their moment)
+	std::vector<double> Starts; // each cue's start as placed (-1: left to the night log)
+	std::string Problem;
+};
+
+TurnsHeard PlaceNight(const Night& N, double Hand, bool Simulated)
+{
+	TurnsHeard R;
+	auto TakeAt = [&N, Hand, Simulated](int Take) {
+		const size_t K = static_cast<size_t>(Take);
+		const double Deal = 10.0 + Hand * N.TakeTick[K];
+		switch (N.TakePhase[K])
+		{
+		case 0: return 0.0;
+		case 1: return Deal;
+		case 2: return Simulated ? Deal : Deal + 0.55 * Hand;
+		case 3: return Simulated ? Deal : Deal + std::max(0.5, Hand - 2.0);
+		default: return Deal + Hand;
+		}
+	};
+	struct Said
+	{
+		double At = 0.0;
+		double Start = 0.0;
+		size_t I = 0;
+	};
+	std::map<std::string, Said> Last; // each voice's line before, as taken and as placed
+	room::Turns Host;
+	for (size_t I = 0; I < N.Cues.size(); ++I)
+	{
+		const room::Cue& C = N.Cues[I].second;
+		const double At = TakeAt(N.TakeOf[I]) + C.Delay;
+		double Start = At;
+		const bool Placed = Host.Place(C, At, Start);
+		R.Starts.push_back(Placed ? Start : -1.0);
+		const std::string Voice = room::VoiceKey(C);
+		auto Fail = [&](const char* What, const Said* P) {
+			if (!R.Problem.empty())
+			{
+				return;
+			}
+			char Buf[160];
+			std::snprintf(Buf, sizeof(Buf), " (taken at %.2f s, placed at %.2f s", At, Start);
+			R.Problem = std::string(": hand ") + std::to_string(N.Cues[I].first) + ", " + What + ": " + (Voice.empty() ? C.Key : Voice) + " " + C.Key + " \"" + C.Text + "\"" + Buf;
+			if (P)
+			{
+				const room::Cue& B = N.Cues[P->I].second;
+				std::snprintf(Buf, sizeof(Buf), "; the line before, %s, at %.2f s for %.2f s", B.Key.c_str(), P->Start, room::LineSeconds(B));
+				R.Problem += Buf;
+			}
+			R.Problem += ")";
+		};
+		if (Voice.empty())
+		{
+			if (Start != At)
+			{
+				Fail("a cue with no voice moved", nullptr);
+			}
+			continue;
+		}
+		++R.Voiced;
+		R.Rail += C.Where == room::From::Rail ? 1 : 0;
+		if (!Placed)
+		{
+			++R.Late;
+			continue;
+		}
+		if (Start < At)
+		{
+			Fail("placed before it was taken", nullptr);
+		}
+		const auto Before = Last.find(Voice);
+		if (Before != Last.end())
+		{
+			const Said& P = Before->second;
+			const double Len = room::LineSeconds(N.Cues[P.I].second);
+			R.Unguarded += At < P.At + Len && P.At < At + room::LineSeconds(C) ? 1 : 0;
+			if (Start < P.Start + Len + room::Turns::Gap - 1e-9)
+			{
+				++R.Overlaps;
+				Fail("under the same voice's line before it", &P);
+			}
+			if (At >= P.Start + Len + room::Turns::Gap && Start != At)
+			{
+				Fail("kept waiting with its voice free", &P);
+			}
+		}
+		else if (Start != At)
+		{
+			Fail("a voice's first line kept waiting", nullptr);
+		}
+		if (Start > At)
+		{
+			++R.Waited;
+			R.MaxWait = std::max(R.MaxWait, Start - At);
+			++R.WaitedBy[C.Where == room::From::Rail ? "rail" : Voice == "Dee" ? "Dee" : C.What == room::Kind::Call ? "dealers" : "seats"];
+		}
+		Last[Voice] = {At, Start, I};
+	}
+	return R;
+}
+
+/**
+ * room::Turns over a whole night (RoomFinalTable's Sunday and Nightly), at Live, Brisk and Fast, a hurried hand (8 s, the
+ * host's quickest) and the rail's Simulated rounds: nobody starts a line under their own line before it; nobody waits
+ * who's free; the same night placed twice is placed the same; at Live, Brisk and Fast nobody has more to say than their
+ * moment has room for (at the two quickest, where the director's Delays, reckoned on a 45 s hand, run past the next
+ * hands, at most one line in a hundred is left to the night log). The night's placings come back in that order.
+ */
+std::vector<TurnsHeard> VoiceTurnsOver(const Night& N, const std::string& Name)
+{
+	struct Pace
+	{
+		const char* Name;
+		double Hand;
+		bool Simulated;
+		bool Quickest;
+	};
+	const Pace Paces[] = {{"Live", 45.0, false, false}, {"Brisk", 27.0, false, false}, {"Fast", 12.0, false, false}, {"a hurried hand", 8.0, false, true},
+		{"the rail (Simulated)", 4.5, true, true}};
+	std::vector<TurnsHeard> Out;
+	for (const Pace& P : Paces)
+	{
+		const TurnsHeard H = PlaceNight(N, P.Hand, P.Simulated);
+		const TurnsHeard Again = PlaceNight(N, P.Hand, P.Simulated);
+		std::string Who;
+		for (const auto& W : H.WaitedBy)
+		{
+			Who += (Who.empty() ? "" : ", ") + std::to_string(W.second) + " " + W.first;
+		}
+		std::printf("room voice turns: %s at %s: %d cues with a voice (%d at the rail); %d would have started under their own line before, "
+					"%d as placed; %d waited (%s; at most %.2f s), %d left to the night log\n",
+			Name.c_str(), P.Name, H.Voiced, H.Rail, H.Unguarded, H.Overlaps, H.Waited, Who.empty() ? "nobody" : Who.c_str(), H.MaxWait, H.Late);
+		const std::string At = "room voice turns: " + Name + " at " + P.Name + ": ";
+		Expect(H.Voiced > 0 && H.Overlaps == 0 && H.Problem.empty(), At + "one voice, one line at a time, and nobody kept waiting who's free" + H.Problem);
+		Expect(H.Starts == Again.Starts, At + "the same night placed twice is placed the same");
+		Expect(P.Quickest ? H.Late * 100 <= H.Voiced : H.Late == 0,
+			At + "nobody has more to say than their moment has room for (" + std::to_string(H.Late) + " of " + std::to_string(H.Voiced) + " left to the night log)");
+		Out.push_back(H);
+	}
+	return Out;
+}
+
+/**
+ * room::VoiceKey and room::Turns: one voice is one person wherever they speak from (a backer's rail line and her shout;
+ * a seat at the player's table and in the room after a move; Dee dealing and on the PA; a dealer by their table); the
+ * floor's PA, the crowd, a text and narration have none. A voice with a run of lines due at once says them one after
+ * another until the moment's gone, then leaves the rest to the night log, never the PA or a milestone; the host's real
+ * time Hold only ever lengthens a turn.
+ */
+void RoomVoiceTurns()
+{
+	auto Make = [](room::Kind K, room::From F, const std::string& Who, const std::string& Speaker, int Table, const std::string& Text) {
+		room::Cue C;
+		C.What = K;
+		C.Where = F;
+		C.Who = Who;
+		C.Speaker = Speaker;
+		C.TableId = Table;
+		C.Text = Text;
+		return C;
+	};
+	using K = room::Kind;
+	using F = room::From;
+	const room::Cue Rail = Make(K::Line, F::Rail, "Mrs. Park", "Mrs. Park", 0, "Well played. Now breathe.");
+	const room::Cue Shout = Make(K::Line, F::Rail, "Mrs. Park", "Mrs. Park", 2, "Hold, Jesse! Hold!");
+	const room::Cue Text = Make(K::Phone, F::Rail, "Mrs. Park", "Mrs. Park", 0, "Eat something.");
+	const room::Cue Seat = Make(K::Line, F::HeroTable, "p12", "Seat 3", 2, "Nice hand.");
+	const room::Cue Moved = Make(K::Line, F::Table, "p12", "Seat 3", 2, "Good luck over there.");
+	const room::Cue Cashier = Make(K::Line, F::Desk, "", "Cashier", 0, "There you go.");
+	const room::Cue Three = Make(K::Call, F::Table, "", "Dealer", 3, "Blinds are up.");
+	const room::Cue Four = Make(K::Call, F::Table, "", "Dealer", 4, "Blinds are up.");
+	const room::Cue DeeDeals = Make(K::Call, F::HeroTable, "", "Dee", 2, "Ship it.");
+	room::Cue DeeMic = Make(K::Pa, F::Pa, "", "Dee", 0, "Your champion, ladies and gentlemen.");
+	DeeMic.Chime = true;
+	DeeMic.Priority = 3;
+	const room::Cue Floor = Make(K::Pa, F::Pa, "", "Floor", 0, "Players, the blinds are going up.");
+	room::Cue Ooh = Make(K::Vocal, F::Rail, "", "", 2, "");
+	Ooh.Sound = "[The rail leans in: ooh.]";
+	const room::Cue Narration = Make(K::Line, F::HeroTable, "", "", 0, "Your hands are shaking.");
+	Expect(!room::VoiceKey(Rail).empty() && room::VoiceKey(Rail) == room::VoiceKey(Shout), "room voice turns: a backer's rail line and her shout are one voice");
+	Expect(room::VoiceKey(Seat) == room::VoiceKey(Moved) && room::VoiceKey(Seat) != room::VoiceKey(Rail), "room voice turns: a seat is one voice at the player's table and after a move");
+	Expect(room::VoiceKey(Three) == "dealer:3" && room::VoiceKey(Four) == "dealer:4", "room voice turns: a dealer is their table's");
+	Expect(room::VoiceKey(DeeDeals) == "Dee" && room::VoiceKey(DeeMic) == "Dee", "room voice turns: Dee dealing and Dee on the PA are one woman");
+	Expect(room::VoiceKey(Cashier) == "name:Cashier", "room voice turns: the staff go by the caption's name");
+	Expect(room::VoiceKey(Floor).empty() && room::VoiceKey(Ooh).empty() && room::VoiceKey(Text).empty() && room::VoiceKey(Narration).empty(),
+		"room voice turns: no voice of its own for the floor's PA, the crowd, a text or narration");
+	room::Cue Bare = DeeMic;
+	Bare.Chime = false;
+	Expect(std::fabs(room::LineSeconds(DeeMic) - room::LineSeconds(Bare) - 1.1) < 1e-9 && room::LineSeconds(Rail) > 1.0, "room voice turns: a line's length, after the chime when it has one");
+
+	// Her lines due all at once (a run of Takes at one moment): one after another, each after the last is said, until the
+	// moment's gone (Late); the rest to the night log, and they don't hold her. The champion on Dee's mic and a milestone
+	// are said whatever the wait.
+	room::Turns Host;
+	int Said = 0;
+	int Left = 0;
+	double Next = 50.0;
+	bool InTurn = true;
+	for (int I = 0; I < 8; ++I)
+	{
+		double Start = 0.0;
+		if (Host.Place(Rail, 50.0, Start))
+		{
+			++Said;
+			InTurn = InTurn && std::fabs(Start - Next) < 1e-9 && Start - 50.0 <= room::Turns::Late;
+			Next = Start + room::LineSeconds(Rail) + room::Turns::Gap;
+		}
+		else
+		{
+			++Left;
+		}
+	}
+	const double Free = Host.FreeAt(room::VoiceKey(Rail));
+	Expect(Said >= 2 && Left >= 1 && Said + Left == 8 && InTurn && std::fabs(Free - Next) < 1e-9,
+		"room voice turns: a run of her lines, one after another till the moment's gone, the rest left (" + std::to_string(Said) + " said, " + std::to_string(Left) + " left)");
+	room::Cue Milestone = Rail;
+	Milestone.Priority = 2;
+	double MStart = 0.0;
+	Expect(Host.Place(Milestone, 50.0, MStart) && std::fabs(MStart - Free) < 1e-9, "room voice turns: a milestone waits its turn however long, never left");
+	bool Announced = true;
+	for (int I = 0; I < 6; ++I)
+	{
+		double DStart = 0.0;
+		Announced = Host.Place(DeeMic, 80.0, DStart) && Announced;
+	}
+	Expect(Announced, "room voice turns: Dee's announcements wait their turn however long, never left");
+	const double DFree = Host.FreeAt("Dee");
+	double CallStart = 0.0;
+	Expect(!Host.Place(DeeDeals, 80.0, CallStart) && Host.FreeAt("Dee") == DFree, "room voice turns: Dee's call past its moment behind her announcements is left, and doesn't hold her");
+	double Other = 0.0;
+	Expect(Host.Place(Three, 50.0, Other) && Other == 50.0, "room voice turns: another voice due then isn't kept waiting");
+
+	// The host's real time: a turn as heard only lengthens.
+	room::Turns Heard;
+	Heard.Hold("Mrs. Park", 10.0);
+	Heard.Hold("Mrs. Park", 7.0);
+	Heard.Hold("", 99.0);
+	double After = 0.0;
+	Expect(Heard.FreeAt("Mrs. Park") == 10.0 && Heard.FreeAt("") == 0.0 && Heard.FreeAt("nobody") == 0.0 && Heard.Place(Rail, 8.0, After) && After == 10.0,
+		"room voice turns: Hold only lengthens a turn, and the next line waits for it");
+	std::printf("room voice turns: a run of eight of her lines at once: %d said, one after another, %d left to the night log\n", Said, Left);
+}
+
 /**
  * Nobody at the rail says two things at once (round 3: salt ":1777" hand 152, Mrs. Park's final-table line at 15.5 s and
  * her read of the player's stack at 16.5 s by the log). In one hand's end, one Take: the player doubles up (her double-up
@@ -3050,9 +3774,870 @@ void RoomRailOneVoice()
 				Expect(Split ? W.Together == 0 && W.OneVoice : W.Together == 1 && !W.OneVoice,
 					std::string("room rail one voice: ") + (Split ? "a hand's start and its end are two Takes, not compared" : "one Take, one voice twice inside a second: caught"));
 			}
+			// The host's guard across Takes (room::Turns): the line in a hand's start Take, the read in its end Take, taken
+			// from one moment apart (RoomFeed::Simulated) to a Live hand's 45 s. The read never starts while her line's
+			// being said, waits only as long as it has to, and a dealer's call due with it isn't kept waiting.
+			int Waited = 0;
+			int Spacings = 0;
+			for (const double Apart : {0.0, 0.5, 1.0, 2.0, 4.5, 8.0, 12.0, 27.0, 45.0})
+			{
+				room::Turns Host;
+				room::Cue A = *Line;
+				room::Cue B = *Read;
+				A.Delay = 15.5;
+				B.Delay = 16.4;
+				room::Cue Call;
+				Call.What = room::Kind::Call;
+				Call.Where = room::From::Table;
+				Call.TableId = 4;
+				Call.Speaker = "Dealer";
+				Call.Text = "Blinds are up.";
+				Call.Delay = B.Delay;
+				const double Taken = 100.0; // the start's Take; the end's comes Apart later
+				double SA = 0.0;
+				double SB = 0.0;
+				double SC = 0.0;
+				const bool Placed = Host.Place(A, Taken + A.Delay, SA) && Host.Place(B, Taken + Apart + B.Delay, SB) && Host.Place(Call, Taken + Apart + Call.Delay, SC);
+				const double Done = SA + room::LineSeconds(A);
+				Waited += SB > Taken + Apart + B.Delay ? 1 : 0;
+				++Spacings;
+				char Placing[200];
+				std::snprintf(Placing, sizeof(Placing), " (Takes %.1f s apart: her line %.2f s to %.2f s, her read at %.2f s, the call at %.2f s)", Apart, SA - Taken, Done - Taken, SB - Taken,
+					SC - Taken);
+				if (Apart == 0.0)
+				{
+					std::printf("room rail one voice: placed by the host%s\n", Placing);
+				}
+				Expect(Placed && SA == Taken + A.Delay && SB == std::max(Taken + Apart + B.Delay, Done + room::Turns::Gap) && SC == Taken + Apart + Call.Delay,
+					std::string("room rail one voice: across two Takes her read waits for her line, and only for it") + Placing);
+			}
+			Expect(Waited >= 1 && Waited < Spacings,
+				"room rail one voice: the read waits only while her line's still being said (" + std::to_string(Waited) + " of " + std::to_string(Spacings) + " spacings)");
 		}
 	}
 	Expect(Tight >= 1, "room rail one voice: a level with nothing from the dealer between her two lines (" + std::to_string(Tight) + " of 8)");
+}
+
+// ------------------------------------------------------------------ the nightly's checks, each on a hand set up for it
+
+/** The engine's news of a player out (the director reads who, where, and the place). */
+ss::TEvent BustOf(const ss::TPlayer& P)
+{
+	ss::TEvent E;
+	E.Type = ss::TEventType::Bust;
+	E.Id = P.Id;
+	E.Name = P.Name;
+	E.Place = P.Place;
+	E.TableId = P.TableId;
+	E.IsHero = P.IsHero;
+	return E;
+}
+
+/** Puts a player out as the engine does: busted, placed, their seat empty, one fewer left. */
+void PutOut(ss::Tournament& T, size_t Idx, int Place)
+{
+	ss::TPlayer& P = T.Players[Idx];
+	const auto Table = T.Tables.find(P.TableId);
+	if (Table != T.Tables.end())
+	{
+		for (int& S : Table->second.Seats)
+		{
+			S = S == static_cast<int>(Idx) ? -1 : S;
+		}
+	}
+	P.Busted = true;
+	P.Place = Place;
+	--T.Remaining;
+}
+
+/**
+ * A claimed result is the speaker's own, as their Story has it (round 5's sweep: 314 of 1,847 nights failed RoomNightly's
+ * check, every one on a bubble: "Bubbled the Big Stack Saturday..." names no place, and the check wanted one). Each kind
+ * of result, through talk::Line till its pool's templates are all said: a cash names its place, a win says it won, online
+ * is online, the bubble (seventeenth of 106: PayoutTable pays 16) names none. Nothing paid anywhere but the bubble
+ * (ninth of twenty, sixteenth of 106: a bust, not a bubble) is never called one. StoryClaimProblem passes every line, and
+ * catches each kind of false claim.
+ */
+void RoomStoryClaims()
+{
+	struct Case
+	{
+		const char* Name;
+		talk::Result R;
+		const char* Pool; // where its lines come from; "" for a result nobody claims
+	};
+	const int Day = 100;
+	const auto Record = [Day](const char* Event, int Place, int Entries, ss::Chips Prize, bool Online) {
+		talk::Result R;
+		R.Day = Day - 2;
+		R.Event = Event;
+		R.Place = Place;
+		R.Entries = Entries;
+		R.Prize = Prize;
+		R.Online = Online;
+		return R;
+	};
+	const std::vector<Case> Cases = {
+		{"a cash", Record("Noon Deepstack $80", 7, 60, 41000, false), "field.small.week"},
+		{"a win", Record("Noon Deepstack $80", 1, 60, 310000, false), "field.small.week.win"},
+		{"a cash online", Record("RiverLine Daily $22", 7, 410, 61000, true), "field.small.week.online"},
+		{"the bubble", Record("Saturday Big Stack $200", 17, 106, 0, false), "field.small.bubble"},
+		{"nothing paid, ninth of twenty", Record("Embercrest Nightly $120", 9, 20, 0, false), ""},
+		{"nothing paid, sixteenth of 106", Record("Saturday Big Stack $200", 16, 106, 0, false), ""},
+	};
+	std::string Bubbled;
+	for (const Case& K : Cases)
+	{
+		life::LiveVoice V = MakeVoice("Walt", ss::Archetype::Reg, 0.6f, 0.3f, world::Identity::LiveRegular, 50);
+		V.Story = talk::StoryText({K.R});
+		int Templates = 0;
+		for (const auto& KT : talk::Inventory())
+		{
+			Templates += KT.first.substr(0, KT.first.rfind('.')) == K.Pool ? 1 : 0;
+		}
+		std::set<std::string> Told; // the templates said, never the story: it's told again and again here
+		std::set<std::string> Keys;
+		std::string Problem;
+		std::string First;
+		for (uint32_t Salt = 0; Salt < 64; ++Salt)
+		{
+			talk::Context C;
+			C.Self = &V;
+			C.Vars["Topic"] = K.R.Prize > 0 ? "week" : "bubble";
+			C.Vars["Record"] = "0";
+			C.Vars["Day"] = std::to_string(Day);
+			C.Salt = Salt * 2654435761u;
+			C.Told = &Told;
+			const talk::Said S = talk::Line(talk::Moment::Small, C);
+			if (S.Text.empty())
+			{
+				continue;
+			}
+			Told.insert(S.Told);
+			Keys.insert(S.Key);
+			First = First.empty() ? S.Text : First;
+			Bubbled = Bubbled.empty() && Starts(S.Key, "field.small.bubble") ? S.Text : Bubbled;
+			const std::string Why = S.Key.substr(0, S.Key.rfind('.')) != K.Pool ? "from " + S.Key : StoryClaimProblem(S.Topic, S.Key, S.Text, V.Story);
+			Problem = Problem.empty() && !Why.empty() ? "\"" + S.Text + "\": " + Why : Problem;
+		}
+		const bool Said = K.Pool[0] != '\0';
+		std::printf("room story claims: %s (%s): %d of %d templates said%s\n", K.Name, talk::StoryText({K.R}).c_str(), static_cast<int>(Keys.size()), Said ? Templates : 0,
+			First.empty() ? ", nothing claimed" : (", \"" + First + "\"").c_str());
+		Expect((Said ? static_cast<int>(Keys.size()) == Templates && Templates > 0 : Keys.empty()) && Problem.empty(),
+			std::string("room story claims: ") + K.Name + (Said ? ", every one of its lines honest (" : ", never claimed (") + std::to_string(Keys.size()) + " of " +
+				std::to_string(Said ? Templates : 0) + " templates said" + (Problem.empty() ? std::string(")") : "; " + Problem + ")"));
+	}
+	// The class the sweep found: a bubble line names no place, so the ordinal the old check looked for is never in it.
+	Expect(!Bubbled.empty() && !Contains(Lower(Bubbled), talk::OrdinalWord(17)), "room story claims: a bubble line names no place (\"" + Bubbled + "\")");
+	// False claims, each caught: the record, the template's key, the line.
+	struct Lie
+	{
+		const char* Name;
+		talk::Result R;
+		const char* Key;
+		const char* Text;
+	};
+	const std::vector<Lie> Lies = {
+		{"a bubble claimed on a cash", Record("Noon Deepstack $80", 7, 60, 41000, false), "field.small.bubble.0", "Bubbled the Noon Deepstack Saturday. 60 runners and I'm the one."},
+		{"a bubble claimed on a bust far from the money", Record("Embercrest Nightly $120", 9, 20, 0, false), "field.small.bubble.1", "Saturday I bubbled the Nightly. Still not over it."},
+		{"a bubble claimed on a place that's paid", Record("Saturday Big Stack $200", 16, 106, 0, false), "field.small.bubble.2", "Bubble boy in the Big Stack Saturday. Don't bring it up."},
+		{"a win claimed on seventh", Record("Noon Deepstack $80", 7, 60, 41000, false), "field.small.week.win.0", "Won the Noon Deepstack Saturday. Still buying my own coffee, though."},
+		{"the wrong place", Record("Noon Deepstack $80", 7, 60, 41000, false), "field.small.week.5", "I got sixth in the Noon Deepstack Saturday. $410. Good enough."},
+		{"the wrong field", Record("Noon Deepstack $80", 7, 60, 41000, false), "field.small.week.1", "Cashed the Noon Deepstack Saturday. Seventh of 61. I'll take it."},
+		{"the wrong prize", Record("Noon Deepstack $80", 7, 60, 41000, false), "field.small.week.2", "Made the money in the Noon Deepstack Saturday. Seventh, $510."},
+		{"online claimed live", Record("RiverLine Daily $22", 7, 410, 61000, true), "field.small.week.5", "I got seventh in the Daily Saturday. $610. Good enough."},
+		{"someone else's record", Record("Noon Deepstack $80", 7, 60, 41000, false), "field.small.week.5", "I got seventh in the Nightly Saturday. $410. Good enough."},
+	};
+	for (const Lie& L : Lies)
+	{
+		const std::string Story = talk::StoryText({L.R});
+		const std::string Topic = "story:Walt:" + std::to_string(L.R.Day) + ":" + (std::string(L.Name) == "someone else's record" ? "Embercrest Nightly $120" : L.R.Event);
+		const std::string Why = StoryClaimProblem(Topic, L.Key, L.Text, Story);
+		Expect(!Why.empty(), std::string("room story claims: caught, ") + L.Name + " (\"" + L.Text + "\"" + (Why.empty() ? std::string(")") : ": " + Why + ")"));
+	}
+	// And the true ones the lies were made from pass.
+	Expect(StoryClaimProblem("story:Walt:98:Noon Deepstack $80", "field.small.week.5", "I got seventh in the Noon Deepstack Saturday. $410. Good enough.",
+			   talk::StoryText({Record("Noon Deepstack $80", 7, 60, 41000, false)}))
+			.empty(),
+		"room story claims: the true cash passes");
+}
+
+/** A night's milestones on paper (RoomSkippedMilestones): a hand a step, the field as the engine had it, the floor's calls. */
+struct PaperHand
+{
+	int Remaining;
+	int Tables;
+	std::vector<ss::TEventType> Events;
+	std::vector<std::string> Calls; // the floor's announcements that hand ("pa.away+pa.h4h": one of several)
+};
+
+Night PaperNight(const std::vector<PaperHand>& Hands)
+{
+	Night N;
+	for (size_t I = 0; I < Hands.size(); ++I)
+	{
+		const int Tick = static_cast<int>(I);
+		if (Tick > 0)
+		{
+			TickFacts F;
+			F.Remaining = Hands[I].Remaining;
+			F.Paid = 14;
+			F.Tables = Hands[I].Tables;
+			for (const ss::TEventType E : Hands[I].Events)
+			{
+				ss::TEvent Ev;
+				Ev.Type = E;
+				F.Events.push_back(Ev);
+			}
+			N.Facts[Tick] = F;
+		}
+		std::vector<room::Cue> Cues;
+		for (const std::string& Call : Hands[I].Calls)
+		{
+			room::Cue C;
+			C.What = room::Kind::Pa;
+			C.Where = room::From::Pa;
+			// Each call's first template: "pa.away+pa.h4h" is the key "pa.away.0+pa.h4h.0".
+			std::string Key;
+			for (size_t A = 0; A <= Call.size();)
+			{
+				const size_t B = Call.find('+', A) == std::string::npos ? Call.size() : Call.find('+', A);
+				Key += (Key.empty() ? "" : "+") + Call.substr(A, B - A) + ".0";
+				A = B + 1;
+			}
+			C.Key = Key;
+			C.Text = Call;
+			Cues.push_back(C);
+		}
+		AddTake(N, Tick, Cues);
+	}
+	return N;
+}
+
+/**
+ * The floor says each milestone the field passes, once, and none it skips (round 5's sweep: 27 nights never went hand for
+ * hand, 23 never had two left, one jumped into the money from four away, and RoomNightly wanted each said once all the
+ * same). On paper (MilestoneProblems over a night set up by hand): the whole night passes; three to one in a hand, into
+ * the money from three away or from five, three tables to one, each passes with the skipped call unsaid; and a call the
+ * field passed but the floor didn't say, one it said though the field skipped it, and one out of order are each caught.
+ * At the table (the director over a field set up by hand): the last three, two out in one hand, get no heads-up and one
+ * champion; one at a time, heads-up once. (RoomAwayThenHandForHand has the director's side near the money.)
+ */
+void RoomSkippedMilestones()
+{
+	using E = ss::TEventType;
+	const std::vector<PaperHand> Whole = {
+		{96, 16, {}, {"pa.desk.open", "pa.ten.minutes", "pa.start"}},
+		{40, 7, {}, {"pa.last.call", "pa.reg.closed"}},
+		{17, 3, {}, {"pa.away"}},
+		{16, 3, {E::HandForHand}, {"pa.h4h"}},
+		{14, 3, {E::Bubble}, {"pa.bubble"}},
+		{12, 2, {}, {"pa.two.tables"}},
+		{9, 1, {E::FinalTable}, {"pa.final"}},
+		{2, 1, {}, {"pa.headsup"}},
+		{1, 1, {E::Finished}, {"pa.champion"}},
+	};
+	struct Case
+	{
+		const char* Name;
+		std::vector<PaperHand> Hands;
+		const char* Caught; // what MilestoneProblems should say ("" nothing)
+	};
+	std::vector<Case> Cases;
+	Cases.push_back({"the whole night", Whole, ""});
+	{
+		std::vector<PaperHand> H = Whole;
+		H[7] = {3, 1, {}, {}};
+		Cases.push_back({"three to one in a hand", H, ""});
+		H[7] = {3, 1, {}, {"pa.headsup"}};
+		Cases.push_back({"heads-up said though three went to one", H, "pa.headsup never"});
+		H = Whole;
+		H[7].Calls.clear();
+		Cases.push_back({"heads-up unsaid with two left", H, "pa.headsup exactly once (0)"});
+	}
+	{
+		std::vector<PaperHand> H = Whole;
+		H[3] = {14, 3, {E::Bubble}, {"pa.bubble"}};
+		H[4] = {13, 3, {}, {}};
+		Cases.push_back({"into the money from three away", H, ""});
+		H[2] = {19, 3, {}, {}};
+		Cases.push_back({"into the money from five away", H, ""});
+		H = Whole;
+		H[3].Calls.clear();
+		Cases.push_back({"hand for hand unsaid", H, "pa.h4h exactly once (0)"});
+		H = Whole;
+		H[3] = {16, 3, {}, {"pa.h4h"}};
+		Cases.push_back({"hand for hand said with no hand for hand", H, "pa.h4h never"});
+	}
+	{
+		std::vector<PaperHand> H = Whole;
+		H[5] = {12, 3, {}, {}};
+		Cases.push_back({"three tables to one", H, ""});
+		H = Whole;
+		H[2].Calls = {"pa.away+pa.h4h"};
+		H[3].Calls.clear();
+		Cases.push_back({"away and hand for hand in one announcement", H, ""});
+		H = Whole;
+		std::swap(H[5].Calls, H[6].Calls);
+		Cases.push_back({"the final table before two tables", H, "comes after"});
+	}
+	for (const Case& K : Cases)
+	{
+		const std::vector<std::string> Problems = MilestoneProblems(PaperNight(K.Hands));
+		std::string Said;
+		for (const std::string& P : Problems)
+		{
+			Said += (Said.empty() ? "" : "; ") + P;
+		}
+		const bool Right = K.Caught[0] == '\0' ? Problems.empty() : Problems.size() == 1 && Contains(Problems[0], K.Caught);
+		std::printf("room skipped milestones: on paper, %s: %s\n", K.Name, Said.empty() ? "nothing wrong" : Said.c_str());
+		Expect(Right, std::string("room skipped milestones: ") + K.Name + (K.Caught[0] == '\0' ? ", nothing wrong" : ", caught") + " (" +
+						  (Said.empty() ? std::string("no problems") : Said) + ")");
+	}
+	// At the table: the last three, then two out in one hand (and one at a time).
+	for (const bool Together : {true, false})
+	{
+		const NearMoney S = MakeNearMoney();
+		ss::Tournament T(S.Spec, "Jesse", "skip", S.Known);
+		room::Director D(S.E, S.O, "skip:room", "Jesse");
+		D.Clock(T, S.O.Start, 0.0);
+		D.Take();
+		// Three left: the player and two others.
+		std::vector<size_t> Others;
+		int Place = static_cast<int>(T.Players.size());
+		for (size_t I = 0; I < T.Players.size(); ++I)
+		{
+			if (T.Players[I].IsHero)
+			{
+				continue;
+			}
+			if (Others.size() < 2)
+			{
+				Others.push_back(I);
+				continue;
+			}
+			PutOut(T, I, Place--);
+		}
+		const size_t Hero = static_cast<size_t>(T.PlayerIndex(ss::HeroId));
+		T.Tick = 80;
+		T.LevelIndex = 9;
+		D.Events(T, {}, S.O.Start + 240.0);
+		std::vector<room::Cue> Heard = D.Take();
+		std::vector<ss::TEvent> Out;
+		T.Tick = 81;
+		PutOut(T, Others[0], 3);
+		Out.push_back(BustOf(T.Players[Others[0]]));
+		if (!Together)
+		{
+			D.Events(T, Out, S.O.Start + 242.0);
+			for (const room::Cue& C : D.Take())
+			{
+				Heard.push_back(C);
+			}
+			Out.clear();
+			T.Tick = 82;
+		}
+		PutOut(T, Others[1], 2);
+		Out.push_back(BustOf(T.Players[Others[1]]));
+		T.Players[Hero].Place = 1;
+		T.bFinished = true;
+		ss::TEvent Won;
+		Won.Type = ss::TEventType::Finished;
+		Won.Id = T.Players[Hero].Id;
+		Won.Name = T.Players[Hero].Name;
+		Out.push_back(Won);
+		D.Events(T, Out, S.O.Start + 244.0);
+		for (const room::Cue& C : D.Take())
+		{
+			Heard.push_back(C);
+		}
+		int HeadsUp = 0;
+		int Champion = 0;
+		for (const room::Cue& C : Heard)
+		{
+			HeadsUp += C.Part == 0 && Carries(C, "pa.headsup") ? 1 : 0;
+			Champion += C.Part == 0 && (Carries(C, "pa.champion") || Carries(C, "pa.champion.seat") || Carries(C, "pa.champion.dee.hero")) ? 1 : 0;
+		}
+		std::printf("room skipped milestones: at the table, the last three %s: %d heads-up, %d champion\n", Together ? "two out in one hand" : "one out at a time", HeadsUp,
+			Champion);
+		Expect(HeadsUp == (Together ? 0 : 1) && Champion == 1, std::string("room skipped milestones: the last three, ") +
+																 (Together ? "two out in one hand: no heads-up" : "one out at a time: heads-up once") + ", one champion (" +
+																 std::to_string(HeadsUp) + " heads-up, " + std::to_string(Champion) + " champion)");
+	}
+}
+
+/**
+ * The player moved at a hand's start (round 5's sweep: 70 nights shouted "the player's own table", 20 ran equity "for
+ * another table", the harness taking the player's table before StartTick's balance): the hand's dealt at the table they
+ * moved to. The table they left goes on without them, and an all-in there is called like any other table's; their new
+ * table's never is. OwnTableCalls, with the player's table as the hand has it, passes; with the table they left, it
+ * would call that "their own" (what the nights were caught on).
+ */
+void RoomMovedTable()
+{
+	const NearMoney S = MakeNearMoney();
+	ss::Tournament T(S.Spec, "Jesse", "moved", S.Known);
+	room::Director D(S.E, S.O, "moved:room", "Jesse");
+	D.Clock(T, S.O.Start, 0.0);
+	D.Take();
+	const int Was = T.Hero().TableId;
+	int To = -1;
+	for (const auto& Tb : T.Tables)
+	{
+		To = To < 0 && Tb.first != Was ? Tb.first : To;
+	}
+	T.Tick = 30;
+	const std::vector<ss::TEvent> Start = T.MoveToTable(ss::HeroId, To);
+	D.Events(T, Start, S.O.Start + 90.0);
+	std::vector<room::Cue> Heard = D.Take();
+	ss::TableRound Left;
+	Left.TableId = Was;
+	Left.AllIn = true;
+	ss::TableRound Here;
+	Here.TableId = To;
+	Here.AllIn = true;
+	D.Rounds(T, {Left, Here});
+	for (const room::Cue& C : D.Take())
+	{
+		Heard.push_back(C);
+	}
+	Night One;
+	AddTake(One, 30, Heard);
+	TickFacts F;
+	F.HeroTable = T.Hero().TableId;
+	One.Facts[30] = F;
+	const RanOver Own = OwnTableCalls(One);
+	const bool Told = !Keyed(Heard, "dealer.move").empty();
+	const std::vector<room::Cue> Calls = Keyed(Heard, "dealer.table.");
+	std::printf("room moved table: moved from table %d to %d (%s); all in at both: %s\n", Was, To, Told ? Keyed(Heard, "dealer.move")[0].Text.c_str() : "not told",
+		Calls.empty() ? "no calls" : ("table " + std::to_string(Calls[0].TableId) + " \"" + Calls[0].Text + "\"" + (Calls.size() > 1 ? " and more" : "")).c_str());
+	Expect(T.Hero().TableId == To && Told && Own.Count == 1 && Own.Problem.empty(),
+		"room moved table: moved at the hand's start, the table they left is called and their new one isn't (" + std::to_string(Own.Count) + " calls" + Own.Problem + ")");
+	One.Facts[30].HeroTable = Was;
+	Expect(!OwnTableCalls(One).Problem.empty(), "room moved table: with the table they left as theirs, the call from it is caught");
+}
+
+/**
+ * The last hand ends a level too (round 5's sweep: 42 nights' Fast pace "ended before '192 MOOD Champion'", ":1014"
+ * among them): the engine's Finished, then its Break and Level, in the hand's news. The champion, then nothing about a
+ * break or the blinds (they were the 15-minute break, the next level, the colour-up, five minutes left and "the cards
+ * are in the air", all after the champion); and the room's mood goes Champion, then After, for good, whatever the
+ * host's clock does (Live pace's clock calls run on 2.2 minutes, then the break's clock steps back to the hand's minute:
+ * the mood went back to Champion and on to After again). The same at Live, Brisk and Fast pace.
+ */
+void RoomChampionAfterBreak()
+{
+	std::vector<std::vector<std::string>> Logs;
+	for (const int Calls : {9, 4, 1})
+	{
+		const NearMoney S = MakeNearMoney();
+		ss::Tournament T(S.Spec, "Jesse", "lastbreak", S.Known);
+		room::Director D(S.E, S.O, "lastbreak:room", "Jesse");
+		D.Clock(T, S.O.Start, 0.0);
+		D.Take();
+		// Two left: the player and one other.
+		size_t Other = T.Players.size();
+		int Place = static_cast<int>(T.Players.size());
+		for (size_t I = 0; I < T.Players.size(); ++I)
+		{
+			if (T.Players[I].IsHero)
+			{
+				continue;
+			}
+			if (Other == T.Players.size())
+			{
+				Other = I;
+				continue;
+			}
+			PutOut(T, I, Place--);
+		}
+		T.Tick = 90;
+		T.LevelIndex = 7;
+		const double W = S.O.Start + 270.0;
+		D.Events(T, {}, W - 1.0);
+		D.Take();
+		// The last hand: the other one out, the player champion, and the level's up with a break before it.
+		T.Tick = 91;
+		PutOut(T, Other, 2);
+		const size_t Hero = static_cast<size_t>(T.PlayerIndex(ss::HeroId));
+		T.Players[Hero].Place = 1;
+		T.bFinished = true;
+		ss::TEvent Won;
+		Won.Type = ss::TEventType::Finished;
+		Won.Id = ss::HeroId;
+		Won.Name = T.Players[Hero].Name;
+		ss::TEvent Break;
+		Break.Type = ss::TEventType::Break;
+		Break.LevelNumber = 9;
+		ss::TEvent Up;
+		Up.Type = ss::TEventType::Level;
+		Up.LevelNumber = 9;
+		Up.Blinds = T.Levels[8];
+		T.LevelIndex = 8;
+		std::vector<std::string> Log;
+		room::Mood Last = D.Now();
+		const auto Watch = [&D, &Last, &Log]() {
+			if (D.Now() != Last)
+			{
+				Last = D.Now();
+				Log.push_back(std::string("MOOD ") + room::MoodName(Last));
+			}
+		};
+		D.Events(T, {BustOf(T.Players[Other]), Won, Break, Up}, W);
+		Watch();
+		for (int K = 0; K < Calls; ++K)
+		{
+			D.Clock(T, W + 2.5 * K / Calls, 0.0);
+			Watch();
+		}
+		for (int Left = 24; Left >= 0; Left -= 2)
+		{
+			D.Clock(T, W, static_cast<double>(Left)); // a break's clock, at the hand's own minute
+			Watch();
+		}
+		for (int K = 0; K < 4; ++K)
+		{
+			D.Clock(T, W + 2.5 + 1.0 * K, 0.0);
+			Watch();
+		}
+		std::vector<std::string> Said;
+		for (const room::Cue& C : D.Take())
+		{
+			Said.push_back(C.Key);
+		}
+		Said.insert(Said.end(), Log.begin(), Log.end());
+		Logs.push_back(Said);
+	}
+	std::string Wrong;
+	int Champions = 0;
+	std::vector<std::string> Moods;
+	for (const std::string& K : Logs[0])
+	{
+		Champions += Starts(K, "pa.champion") ? 1 : 0;
+		if (Starts(K, "MOOD "))
+		{
+			Moods.push_back(K.substr(5));
+		}
+		for (const char* After : {"pa.break", "pa.level", "pa.colorup", "pa.five.minutes", "dealer.break", "dealer.blinds", "field.break", "stake.break"})
+		{
+			Wrong = Wrong.empty() && Starts(K, After) ? K : Wrong;
+		}
+	}
+	std::string Turned;
+	for (const std::string& M : Moods)
+	{
+		Turned += (Turned.empty() ? "" : ", ") + M;
+	}
+	std::printf("room champion after a break: the last hand with a break and a level after it: %d cues at Live pace, %s; the mood %s\n",
+		static_cast<int>(Logs[0].size() - Moods.size()), Wrong.empty() ? "no break or level after the champion" : ("a break after it, " + Wrong).c_str(), Turned.c_str());
+	Expect(Champions >= 1 && Wrong.empty(), "room champion after a break: the champion, and no break or level after (" + (Wrong.empty() ? std::string("none") : Wrong) + ")");
+	Expect(Moods == std::vector<std::string>{"Champion", "After"}, "room champion after a break: the mood goes Champion, then After, for good (" + Turned + ")");
+	Expect(Logs[1] == Logs[0] && Logs[2] == Logs[0], "room champion after a break: the same at Live, Brisk and Fast pace");
+}
+
+/**
+ * The checks only some nights give RoomNightly anything to run over (round 5's sweep of 1,847 nights: the rail's ooh in
+ * the champion's hand on 3.3%, the average asked 8.1%, the count 9.9%, the bubble's reactions 10.8%, the table asking
+ * twice 14.9%, small talk to check at hand for hand 16.6%, a bad beat 20.8%), each run here over a hand set up to give
+ * it, and shown to catch what it's for: RoomNightly's floors are only on what most nights give. (A rail voice's two lines
+ * in one go, 5.3%: RoomRailOneVoice. Hand for hand at the table: RoomHushAtHandForHand, RoomHushAtLoneFinalTable.)
+ */
+void RoomRareChecks()
+{
+	// The dealer's numbers: near the money, the table's question till the dealer's been asked the average and the count.
+	{
+		const NearMoney S = MakeNearMoney();
+		ss::Tournament T(S.Spec, "Jesse", "numbers", S.Known);
+		room::Director D(S.E, S.O, "numbers:room", "Jesse");
+		D.Clock(T, S.O.Start, 0.0);
+		D.Take();
+		T.Remaining = T.PaidPlaces() + 6;
+		std::map<std::string, int> Asked;
+		std::string Problem;
+		std::string Caught;
+		for (int H = 10; H < 200 && (Asked["average"] == 0 || Asked["count"] == 0); ++H)
+		{
+			T.Tick = H;
+			D.Clock(T, S.O.Start + 60.0 + H, 0.0);
+			D.Take();
+			if (!D.Prompt(T, talk::Moment::Ask, -1))
+			{
+				continue;
+			}
+			TickFacts F;
+			F.Remaining = T.Remaining;
+			F.Paid = T.PaidPlaces();
+			F.Average = T.AverageStack();
+			for (const room::Cue& C : D.Take())
+			{
+				if (!Starts(C.Key, "dealer.average") && !Starts(C.Key, "dealer.left."))
+				{
+					continue;
+				}
+				++Asked[Starts(C.Key, "dealer.average") ? "average" : "count"];
+				const std::string Why = DealerNumberProblem(C, F);
+				Problem = Problem.empty() && !Why.empty() ? Why : Problem;
+				// The same answer a hand later, one more out (or the average a thousand off): caught.
+				TickFacts Later = F;
+				Later.Remaining -= 1;
+				Later.Average += 1000.0;
+				Caught += DealerNumberProblem(C, Later).empty() ? "missed " + C.Text + " " : "";
+			}
+		}
+		std::printf("room rare checks: near the money the dealer's asked the average %d and the count %d times, every answer the engine's\n", Asked["average"], Asked["count"]);
+		Expect(Asked["average"] > 0 && Asked["count"] > 0 && Problem.empty() && Caught.empty(),
+			"room rare checks: the dealer's average and count are the engine's, and a wrong one's caught (" + std::to_string(Asked["average"]) + " averages, " +
+				std::to_string(Asked["count"]) + " counts" + (Problem.empty() ? std::string("") : "; " + Problem) + (Caught.empty() ? std::string("") : "; " + Caught) + ")");
+		room::Cue Itm;
+		Itm.Key = "dealer.left.itm.0";
+		Itm.Text = "12 left. Everybody's in the money.";
+		TickFacts In;
+		In.Remaining = 12;
+		In.Paid = 14;
+		TickFacts Out = In;
+		Out.Remaining = 16;
+		Expect(DealerNumberProblem(Itm, In).empty() && !DealerNumberProblem(Itm, Out).empty(), "room rare checks: \"everybody's in the money\" only in the money");
+	}
+	// The table asks the dealer twice in a night, six hands and more apart: near the money, hands folded till it has.
+	{
+		const NearMoney S = MakeNearMoney();
+		ss::Tournament T(S.Spec, "Jesse", "asks", S.Known);
+		const int Paid = T.PaidPlaces();
+		room::Director D(S.E, S.O, "asks:room", "Jesse");
+		D.TalkScale = 2.0f;
+		D.Clock(T, S.O.Start, 0.0);
+		D.Take();
+		Night Asks;
+		int H = 1;
+		for (; H <= 400 && AsksApart(Asks).Pairs < 2; ++H)
+		{
+			T.Tick = H;
+			T.Remaining = Paid + 6;
+			D.Hand(T, FoldedHand(T, H));
+			D.Rounds(T, {});
+			D.Events(T, {}, S.O.Start + 0.75 * H);
+			AddTake(Asks, H, D.Take());
+		}
+		const RanOver Apart = AsksApart(Asks);
+		std::printf("room rare checks: the table asked the dealer %d times in %d hands, %d pairs compared\n", Apart.Count, H - 1, Apart.Pairs);
+		Expect(Apart.Pairs >= 2 && Apart.Problem.empty(), "room rare checks: the table asks the dealer again in a night, six hands and more apart (" +
+															  std::to_string(Apart.Count) + " answers in " + std::to_string(H - 1) + " hands" + Apart.Problem + ")");
+		Night Close;
+		room::Cue A;
+		A.What = room::Kind::Call;
+		A.Key = "dealer.average.0";
+		AddTake(Close, 10, {A});
+		A.Key = "dealer.left.0";
+		AddTake(Close, 13, {A});
+		const RanOver Too = AsksApart(Close);
+		Expect(Too.Pairs == 1 && !Too.Problem.empty(), "room rare checks: asked again three hands on, caught");
+	}
+	// The bubble at another table: the floor names them, then the player's table answers (RoomOrder's hand).
+	{
+		const NearMoney S = MakeNearMoney();
+		ss::Tournament T(S.Spec, "Jesse", "order", S.Known);
+		room::Director D(S.E, S.O, "order:room", "Jesse");
+		D.Clock(T, S.O.Start, 0.0);
+		D.Take();
+		T.Tick = 50;
+		std::string Bubble;
+		for (const ss::TPlayer& P : T.Players)
+		{
+			Bubble = Bubble.empty() && !P.IsHero && P.TableId != T.Hero().TableId ? P.Name : Bubble;
+		}
+		ss::TEvent B;
+		B.Type = ss::TEventType::Bubble;
+		B.Name = Bubble;
+		D.Events(T, {B}, S.O.Start + 150.0);
+		Night One;
+		AddTake(One, 50, D.Take());
+		const RanOver Heard = BubbleReactions(One);
+		std::printf("room rare checks: the bubble at another table, %d reactions at the player's table after the floor's call\n", Heard.Count);
+		Expect(Heard.Count >= 1 && Heard.Problem.empty(), "room rare checks: the table reacts to the bubble after the floor names it (" + std::to_string(Heard.Count) +
+															   " reactions" + Heard.Problem + ")");
+		Night Early = One;
+		for (auto& TC : Early.Cues)
+		{
+			TC.second.Delay = Starts(TC.second.Key, "field.bubble") ? 0.0 : TC.second.Delay;
+		}
+		Night Alone = One;
+		Alone.TakeOf.assign(Alone.Cues.size(), 0);
+		for (size_t I = 0; I < Alone.Cues.size(); ++I)
+		{
+			Alone.TakeOf[I] = Starts(Alone.Cues[I].second.Key, "pa.bubble") ? 1 : 0;
+		}
+		Expect(!BubbleReactions(Early).Problem.empty() && !BubbleReactions(Alone).Problem.empty(),
+			"room rare checks: a reaction before the floor's call, or with no call in its Take, caught");
+	}
+	// The champion's hand: heads-up at the last table, all in on the flop and called, the player's aces hold. The rail
+	// leans in as the cards turn, and the floor calls the champion once it's landed.
+	{
+		const SmallTable S = MakeSmallTable(0, 0.3f);
+		ss::Tournament T(S.Spec, "Jesse", "ooh", S.Known);
+		room::Director D(S.E, S.O, "ooh:room", "Jesse");
+		D.Clock(T, S.O.Start, 0.0);
+		D.Take();
+		size_t Other = T.Players.size();
+		int Place = static_cast<int>(T.Players.size());
+		for (size_t I = 0; I < T.Players.size(); ++I)
+		{
+			if (T.Players[I].IsHero)
+			{
+				continue;
+			}
+			if (Other == T.Players.size())
+			{
+				Other = I;
+				continue;
+			}
+			PutOut(T, I, Place--);
+		}
+		T.Tick = 60;
+		D.Events(T, {}, S.O.Start + 200.0);
+		D.Take();
+		T.Tick = 61;
+		const std::string Name = T.Players[Other].Name;
+		room::HandNote N;
+		N.Hand = 61;
+		N.InHand = {ss::HeroId, Name};
+		N.AllIn = true;
+		N.Called = true;
+		N.Shown = {{ss::HeroId, ss::ParseCards("AsAh")}, {Name, ss::ParseCards("KdKc")}};
+		N.Board = ss::ParseCards("2c7d9hJs3s");
+		N.BoardAtAllIn = ss::ParseCards("2c7d9h");
+		N.Winners = {ss::HeroId};
+		N.Busted = {Name};
+		N.Pot = T.Players[Other].Stack * 2;
+		PutOut(T, Other, 2);
+		const size_t Hero = static_cast<size_t>(T.PlayerIndex(ss::HeroId));
+		T.Players[Hero].Place = 1;
+		T.bFinished = true;
+		ss::TEvent Won;
+		Won.Type = ss::TEventType::Finished;
+		Won.Id = ss::HeroId;
+		Won.Name = T.Players[Hero].Name;
+		D.Hand(T, N);
+		D.Rounds(T, {});
+		D.Events(T, {BustOf(T.Players[Other]), Won}, S.O.Start + 201.0);
+		Night One;
+		AddTake(One, 61, D.Take());
+		const RanOver Ooh = ChampionAfterOoh(One);
+		std::printf("room rare checks: the champion's hand, %d ooh(s) from the rail before the floor's call\n", Ooh.Count);
+		Expect(Ooh.Count >= 1 && Ooh.Problem.empty(), "room rare checks: the floor calls the champion once the rail's ooh has landed (" + std::to_string(Ooh.Count) +
+														   " oohs" + Ooh.Problem + ")");
+		Night Over = One;
+		double OohAt = 0.0;
+		for (const auto& TC : Over.Cues)
+		{
+			OohAt = TC.second.What == room::Kind::Vocal && TC.second.Noise == ss::audio::Vocal::Ooh ? TC.second.Delay : OohAt;
+		}
+		for (auto& TC : Over.Cues)
+		{
+			TC.second.Delay = Starts(TC.second.Key, "pa.champion") ? OohAt + 0.2 : TC.second.Delay;
+		}
+		Expect(!ChampionAfterOoh(Over).Problem.empty(), "room rare checks: the champion called over the ooh, caught");
+	}
+	// A bad beat at the player's table: aces all in on the flop against kings, a king on the river. The loser says it,
+	// naming both hands; the check reads them from the line's template.
+	{
+		const SmallTable S = MakeSmallTable(0, 0.3f);
+		ss::Tournament T(S.Spec, "Jesse", "beat", S.Known);
+		room::Director D(S.E, S.O, "beat:room", "Jesse");
+		D.Clock(T, S.O.Start, 0.0);
+		D.Take();
+		std::vector<std::string> Two;
+		for (const ss::TPlayer& P : T.Players)
+		{
+			if (!P.IsHero && Two.size() < 2)
+			{
+				Two.push_back(P.Name);
+			}
+		}
+		Night Beats;
+		for (int H = 20; H < 60 && BeatsTabled(Beats).Count == 0; ++H)
+		{
+			T.Tick = H;
+			room::HandNote N;
+			N.Hand = H;
+			N.InHand = Two;
+			N.Folded = {ss::HeroId};
+			N.AllIn = true;
+			N.Called = true;
+			N.Shown = {{Two[0], ss::ParseCards("AsAh")}, {Two[1], ss::ParseCards("KdKc")}};
+			N.Board = ss::ParseCards("2c7d9hJsKh");
+			N.BoardAtAllIn = ss::ParseCards("2c7d9h");
+			N.Winners = {Two[1]};
+			N.Pot = 4000;
+			D.Hand(T, N);
+			TickFacts F;
+			F.HadNote = true;
+			F.Note = N;
+			Beats.Facts[H] = F;
+			AddTake(Beats, H, D.Take());
+		}
+		const RanOver Told = BeatsTabled(Beats);
+		std::string Line;
+		for (const auto& TC : Beats.Cues)
+		{
+			Line = Line.empty() && Starts(TC.second.Key, "field.badbeat") ? TC.second.Text : Line;
+		}
+		std::printf("room rare checks: a bad beat told, \"%s\"\n", Line.c_str());
+		Expect(Told.Count >= 1 && Told.Problem.empty(), "room rare checks: a bad beat names the hands that were tabled (\"" + Line + "\"" + Told.Problem + ")");
+		// The same line with queens for the hands it names, or a line its template can't say: caught.
+		for (const bool Queens : {true, false})
+		{
+			Night Wrong = Beats;
+			for (auto& TC : Wrong.Cues)
+			{
+				std::string& Text = TC.second.Text;
+				if (!Starts(TC.second.Key, "field.badbeat"))
+				{
+					continue;
+				}
+				for (const std::string From : {"Aces", "aces", "Kings", "kings"})
+				{
+					for (size_t At = Text.find(From); Queens && At != std::string::npos; At = Text.find(From))
+					{
+						Text.replace(At, From.size(), From[0] == 'A' || From[0] == 'K' ? "Queens" : "queens");
+					}
+				}
+				Text = Queens ? Text : Text + " Again.";
+			}
+			Expect(!BeatsTabled(Wrong).Problem.empty(), std::string("room rare checks: a bad beat ") + (Queens ? "naming a hand nobody tabled" : "its template can't say") + ", caught");
+		}
+	}
+	// One pool's lines never twice running: the pairs compared, and the same line twice caught.
+	{
+		Night Pool;
+		room::Cue L;
+		L.What = room::Kind::Line;
+		L.Where = room::From::HeroTable;
+		L.Key = "field.win.3";
+		AddTake(Pool, 5, {L});
+		L.Key = "field.win.4";
+		AddTake(Pool, 6, {L});
+		const RanOver Fine = PoolRepeats(Pool);
+		AddTake(Pool, 7, {L});
+		const RanOver Twice = PoolRepeats(Pool);
+		Expect(Fine.Pairs == 1 && Fine.Problem.empty() && Twice.Pairs == 2 && !Twice.Problem.empty(), "room rare checks: a pool's line twice running, caught (" +
+																										   std::to_string(Fine.Pairs) + " and " + std::to_string(Twice.Pairs) + " pairs)");
+	}
+	// Hand for hand, reactions only: small talk at a hand the engine had at hand for hand, caught; a reaction, not.
+	{
+		Night H4H;
+		room::Cue L;
+		L.What = room::Kind::Line;
+		L.Where = room::From::HeroTable;
+		L.Key = "field.nicehand.0";
+		AddTake(H4H, 40, {L});
+		TickFacts F;
+		F.HandForHandAtHand = true;
+		H4H.Facts[40] = F;
+		const RanOver Fine = HandForHandTalk(H4H);
+		L.Key = "field.small.trip.1";
+		AddTake(H4H, 40, {L});
+		Expect(Fine.Count == 1 && Fine.Problem.empty() && !HandForHandTalk(H4H).Problem.empty(), "room rare checks: small talk at hand for hand, caught");
+	}
 }
 
 // ------------------------------------------------------------------ RoomTalkCopy
@@ -3408,6 +4993,15 @@ void RoomFinalTable()
 	std::printf("room rail: the Sunday the player wins: %d lines from the backer at the rail\n", Rail.Lines);
 	Expect(Rail.Lines >= 6 && Rail.Problem.empty(), "room rail: through a whole night a backer at the rail never says a line twice running, nor a rail line twice in a night till its pool's said through (" +
 		std::to_string(Rail.Lines) + " lines)" + Rail.Problem);
+	// The host's guard across Takes (room::Turns) over the whole Sunday: Mrs. Park at the rail, Dee dealing and on the mic,
+	// the dealers, the seats, at every pace. Without it, on the rail's rounds her "Hold!" mid-hand and her line at the hand's
+	// end (two Takes at one moment) came out together; Dee's champion call on the mic and her word to the runner-up; one
+	// table's dealer calling "All in." and "Seat open" at the same hashed moment.
+	const std::vector<TurnsHeard> Sunday = VoiceTurnsOver(N, "the Sunday");
+	const TurnsHeard& OnRail = Sunday.back();
+	const auto RailWaited = OnRail.WaitedBy.find("rail");
+	Expect(OnRail.Unguarded > 0 && RailWaited != OnRail.WaitedBy.end() && RailWaited->second > 0 && OnRail.Overlaps == 0,
+		"room voice turns: on the rail's Simulated rounds the Sunday's backer had lines over her own, and the host's guard spaced them");
 
 	// The Nightly isn't a flagship: the final-table call, and at most one honorific sentence.
 	const Setup Nightly = MakeNight("embercrest-nightly@16", 40, "luckypenny", ":ft");
@@ -3420,6 +5014,7 @@ void RoomFinalTable()
 		Honors += Starts(TC.second.Key, "pa.final.honor") ? 1 : 0;
 	}
 	Expect(Intros == 0 && Honors <= 1, "room final table: a Nightly gets no introductions and at most one honorific sentence");
+	VoiceTurnsOver(M, "a Nightly");
 }
 
 // ------------------------------------------------------------------ RoomRailRounds
@@ -4065,6 +5660,12 @@ int main(int argc, char** argv)
 	room_test::RoomHushAtLoneFinalTable();
 	room_test::RoomAwayThenHandForHand();
 	room_test::RoomRailOneVoice();
+	room_test::RoomVoiceTurns();
+	room_test::RoomStoryClaims();
+	room_test::RoomSkippedMilestones();
+	room_test::RoomMovedTable();
+	room_test::RoomChampionAfterBreak();
+	room_test::RoomRareChecks();
 	room_test::RoomNightly(Write);
 	room_test::RoomFinalTable();
 	room_test::RoomRailRounds();

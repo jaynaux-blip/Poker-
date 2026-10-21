@@ -430,6 +430,61 @@ std::vector<std::string> Announcement(const std::string& Text)
 	return SplitAnnouncement(Text);
 }
 
+// ------------------------------------------------------------------ one voice at a time (the host's Turns)
+
+std::string VoiceKey(const Cue& C)
+{
+	if (C.Speaker == "Dee" && C.What != Kind::Vocal && C.What != Kind::Phone)
+	{
+		return "Dee"; // dealing the player's table or on the PA for the champion: one woman, one line at a time
+	}
+	switch (C.What)
+	{
+	case Kind::Line: return C.Speaker.empty() ? std::string() : !C.Who.empty() ? C.Who : "name:" + C.Speaker;
+	case Kind::Call: return "dealer:" + std::to_string(C.TableId);
+	default: return std::string();
+	}
+}
+
+double LineSeconds(const Cue& C)
+{
+	return (C.Chime ? 1.1 : 0.0) + SpeechSeconds(C.Text, C.What == Kind::Pa ? 14.0 : 15.0);
+}
+
+bool Turns::Place(const Cue& C, double At, double& Start)
+{
+	Start = At;
+	const std::string Voice = VoiceKey(C);
+	if (Voice.empty())
+	{
+		return true;
+	}
+	const auto It = Until.find(Voice);
+	Start = It != Until.end() ? std::max(At, It->second) : At;
+	if (Start - At > Late && C.Priority < 2 && C.What != Kind::Pa)
+	{
+		return false;
+	}
+	Until[Voice] = Start + LineSeconds(C) + Gap;
+	return true;
+}
+
+void Turns::Hold(const std::string& Voice, double At)
+{
+	if (Voice.empty())
+	{
+		return;
+	}
+	double& Busy = Until[Voice];
+	Busy = std::max(Busy, At);
+}
+
+double Turns::FreeAt(const std::string& Voice) const
+{
+	const auto It = Until.find(Voice);
+	return It != Until.end() ? It->second : 0.0;
+}
+
 // ------------------------------------------------------------------ moods and the mix
 
 const char* MoodName(Mood M)
@@ -1256,7 +1311,10 @@ void Director::UpdateMood(const Tournament& T, double World)
 	Mood M = room_detail::MoodWith(T, OnBreak, HandsSeen > 0 || T.Tick > 0, Occ.Valid() ? Occ.T->LateRegLevels : 3);
 	if (T.bFinished)
 	{
-		M = ChampionUntil < 0.0 || World < ChampionUntil ? Mood::Champion : Mood::After;
+		// The champion's moment, then the room winds down for good: a host's clock can step back inside the last hand's
+		// minute (a break's clock at the hand's own time), and that never brings the moment back.
+		const bool WoundDown = Current == Mood::After && Has(SaidChampion);
+		M = !WoundDown && (ChampionUntil < 0.0 || World < ChampionUntil) ? Mood::Champion : Mood::After;
 	}
 	else if (BurstTick >= 0 && T.Tick <= BurstTick && !OnBreak && M != Mood::FinalTable && M != Mood::HeadsUp)
 	{
@@ -1854,6 +1912,9 @@ void Director::Events(const Tournament& T, const std::vector<TEvent>& E, double 
 			BreakOver(T);
 		}
 	}
+	// The night's over: the last hand can end a level too (the engine's Level and Break come after its Finished), and
+	// nobody calls a level or a break after the champion.
+	const bool Over = T.bFinished || std::any_of(E.begin(), E.end(), [](const TEvent& Ev) { return Ev.Type == TEventType::Finished; });
 	bool BreakNow = false;
 	std::string BubbleName;
 	for (const TEvent& Ev : E)
@@ -1896,7 +1957,7 @@ void Director::Events(const Tournament& T, const std::vector<TEvent>& E, double 
 			break;
 		}
 		case TEventType::Level:
-			if (Ev.LevelNumber > LevelSaid)
+			if (Ev.LevelNumber > LevelSaid && !Over)
 			{
 				LevelSaid = Ev.LevelNumber;
 				if (!BreakNow)
@@ -2109,6 +2170,10 @@ void Director::Events(const Tournament& T, const std::vector<TEvent>& E, double 
 			break;
 		case TEventType::Break:
 		{
+			if (Over)
+			{
+				break;
+			}
 			OnBreak = true;
 			BreakCounting = false;
 			BreakLevel = Ev.LevelNumber;

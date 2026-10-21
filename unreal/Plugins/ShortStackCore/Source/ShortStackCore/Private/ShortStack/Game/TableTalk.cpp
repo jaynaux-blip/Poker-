@@ -6,6 +6,7 @@
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/Structure.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -1396,8 +1397,10 @@ Said Line(Moment M, const Context& C)
 				Vars["Prize"] = R.Prize > 0 ? Dollars((R.Prize + 50) / 100 * 100) : std::string(); // said to the dollar
 				if (T == "bubble")
 				{
-					// A bubble is a result with nothing paid (the record says it, or it isn't one).
-					if (R.Prize > 0)
+					// A bubble is the first place out of the money: nothing paid, and one place past what a field that size
+					// pays (PayoutTable's places, the world's and the rooms'). Ninth of twenty with nothing is a bust, not a bubble.
+					const int Paid = R.Entries > 0 ? static_cast<int>(PayoutTable(static_cast<Chips>(R.Entries) * 100, R.Entries, 1).size()) : 0;
+					if (R.Prize > 0 || R.Entries <= 0 || R.Place != Paid + 1)
 					{
 						return Said();
 					}

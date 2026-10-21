@@ -1580,6 +1580,25 @@ void ABackRoomGameMode::TickRoom(float RealDt)
 	for (FRoomQueued& Q : H.Incoming)
 	{
 		const ss::room::Cue& C = Q.Cue;
+		// One voice, one line at a time (ss::room::Turns): each cue is due once its speaker has finished the line before it,
+		// in the order they came. Each Take's Delay counts from its own Take, so without this a hand's start and its end, a
+		// lean, or RoomFeed::Simulated's start and finish (taken at one moment) put one person's lines on top of each other.
+		Q.Voice = ss::room::VoiceKey(C);
+		double Start = Q.DueAt;
+		if (!H.VoicesDue.Place(C, Q.DueAt, Start))
+		{
+			// Their speaker has more to say than the moment has room for (a quick pace's run of hands): the night log keeps
+			// the line; the room doesn't say it over their last.
+			ss::ui::Caption Cap;
+			Cap.Speaker = C.Speaker;
+			Cap.Line = C.Text;
+			Cap.Clock = ss::net::TimeLabel(Minutes);
+			Cap.At = FPlatformTime::Seconds() - 30.0;
+			NightLog.push_back(Cap);
+			++H.Skipped;
+			continue;
+		}
+		Q.DueAt = Start;
 		const bool bTalk = C.What == ss::room::Kind::Line || C.What == ss::room::Kind::Call;
 		const bool bSpeech = (bTalk || C.What == ss::room::Kind::Pa) && !C.Text.empty() &&
 			!(C.What == ss::room::Kind::Line && C.Speaker.empty()); // (narration: words on screen, no voice)
@@ -1781,6 +1800,7 @@ void ABackRoomGameMode::TickRoom(float RealDt)
 				}
 			}});
 			H.PaFreeAt = SpeakAt + Heard + 0.25;
+			H.VoicesSpeaking.Hold(Q.Voice, SpeakAt + Heard + ss::room::Turns::Gap); // (Dee on the mic: the floor's PA has no voice of its own)
 			break;
 		}
 		case Kind::Call:
@@ -1795,6 +1815,8 @@ void ABackRoomGameMode::TickRoom(float RealDt)
 				CaptionAt(Now, Said, 0.0, false, 0);
 				break;
 			}
+			// The speaker is saying it until it's heard through (heard or not from here: a far table's quiet call too).
+			H.VoicesSpeaking.Hold(Q.Voice, Now + Heard + ss::room::Turns::Gap);
 			ABackRoomPlayer* A = Q.Actor.Get();
 			if (A && Q.bNear)
 			{
@@ -1941,6 +1963,9 @@ void ABackRoomGameMode::TickRoom(float RealDt)
 	};
 	bool bPaBlocked = false;
 	bool bTableBlocked = false;
+	// The voices with a line held back this frame: their later lines wait behind it (one voice keeps its order). (Held cues
+	// stay ahead of the one being looked at, so an erase past them never moves them.)
+	TArray<const std::string*, TInlineAllocator<8>> VoicesHeld;
 	for (size_t I = 0; I < H.Queue.size();)
 	{
 		FRoomQueued& Q = H.Queue[I];
@@ -1957,18 +1982,26 @@ void ABackRoomGameMode::TickRoom(float RealDt)
 			H.Queue.erase(H.Queue.begin() + static_cast<std::ptrdiff_t>(I));
 			continue;
 		}
-		if ((bPa && bPaBlocked) || (bNear && bTableBlocked) || (Q.Speech.IsValid() && !Q.Speech->bDone))
-		{
-			// Its channel is busy, or its speech isn't made yet (the line starts when it is; its caption waits for it).
+		const bool bVoiceHeld = !Q.Voice.empty() && VoicesHeld.ContainsByPredicate([&Q](const std::string* V) { return *V == Q.Voice; });
+		auto Wait = [&]() {
 			bPaBlocked = bPaBlocked || bPa;
 			bTableBlocked = bTableBlocked || bNear;
+			if (!Q.Voice.empty() && !bVoiceHeld)
+			{
+				VoicesHeld.Add(&Q.Voice);
+			}
 			++I;
+		};
+		if ((bPa && bPaBlocked) || (bNear && bTableBlocked) || bVoiceHeld || (Q.Speech.IsValid() && !Q.Speech->bDone))
+		{
+			// Its channel or its speaker is busy, or its speech isn't made yet (the line starts when it is; its caption waits
+			// for it).
+			Wait();
 			continue;
 		}
 		if (bPa && Now < H.PaFreeAt)
 		{
-			bPaBlocked = true;
-			++I;
+			Wait();
 			continue;
 		}
 		if (bNear && Now < H.TableFreeAt - 0.15)
@@ -1987,8 +2020,14 @@ void ABackRoomGameMode::TickRoom(float RealDt)
 				H.Queue.erase(H.Queue.begin() + static_cast<std::ptrdiff_t>(I));
 				continue;
 			}
-			bTableBlocked = true;
-			++I;
+			Wait();
+			continue;
+		}
+		if (!Q.Voice.empty() && Now < H.VoicesSpeaking.FreeAt(Q.Voice))
+		{
+			// Its speaker is still saying their last line as heard (a backer at the rail between two Takes, a speech that ran
+			// longer than the director reckoned): it starts once they're done.
+			Wait();
 			continue;
 		}
 		Fire(Q);

@@ -173,6 +173,8 @@ struct FRoomQueued
 	bool bHost = false;
 	/** Said at the player's table by someone there (the dealer, a seat): a one-shot at their head, one line at a time. */
 	bool bNear = false;
+	/** Who says it, as one voice (ss::room::VoiceKey): their lines one at a time. Empty: nobody's own voice. */
+	std::string Voice;
 };
 
 /** Something to do at a real time (FPlatformTime::Seconds): a one-shot held by the stream's latency, a caption with its sound. */
@@ -211,6 +213,15 @@ struct FRoomHost
 	 *  long is left to the night log). */
 	double PaFreeAt = 0.0;
 	double TableFreeAt = 0.0;
+	/**
+	 * Each voice, one line at a time (ss::room::Turns), across Takes: a backer at the rail, a dealer, a seat never starts a
+	 * line before their last one is done, at any pace. VoicesDue places every cue as it comes in, on the cue clock, after
+	 * its speaker's line before it by the lines' own lengths (a hand's start and its end, a lean, RoomFeed::Simulated's
+	 * start and finish taken at one moment). VoicesSpeaking is real time, each voice speaking until its line as heard is
+	 * done (its speech or its clip): a line waits for it like the PA's and the table's.
+	 */
+	ss::room::Turns VoicesDue;
+	ss::room::Turns VoicesSpeaking;
 	/** Near speech one-shots playing (their end times): at most 2 engine voices (spec 10). */
 	TArray<double> NearEnds;
 	/** A table's hand in real seconds (the engine's hands elsewhere play over the next one), eased. */
@@ -250,7 +261,7 @@ struct FRoomHost
 	double SpeechMsSum = 0.0;
 	double SpeechMsPeak = 0.0;
 	int32 SpeechJobs = 0;
-	int32 Skipped = 0; // small talk left to the night log (it would have talked over a line)
+	int32 Skipped = 0; // lines left to the night log (small talk that would have talked over a line; a line whose speaker is busy past its moment)
 	double LastLatency = 0.3;
 };
 

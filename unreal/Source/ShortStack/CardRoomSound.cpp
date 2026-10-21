@@ -540,6 +540,9 @@ void Simulated(FRoomHost& H, ss::room::Director& D, FCardRoomSound* Sound, const
 	{
 		(IsStart(E) ? Start : Finish).push_back(E);
 	}
+	// The start's Take and the finish's come at one moment, each one's Delays from it: whoever speaks in both (a backer at
+	// the rail, Dee) says the finish's line after the start's, not over it. TickRoom places every cue that comes in, in
+	// this order, one voice at a time (FRoomHost::VoicesDue), so the catch-up's last tick (EndCatchUp) is spaced the same.
 	D.Events(T, Start, World);
 	Take(H, D);
 	D.Rounds(T, T.Rounds());
