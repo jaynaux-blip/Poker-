@@ -339,6 +339,68 @@ int TrackedFollowers(const Channel& Ch)
 	return N;
 }
 
+/**
+ * A chatter is a viewer (the 2026-10-21 report: "When playing MTTs while live streaming, kast shows 0 Viewers even when
+ * there is chatters"). The count Kast shows everywhere is Stream::Viewers rounded; somebody is watching when it shows at
+ * least one, or when a community member is in the room. Nobody watching, nobody talks: no reaction to a hand, no small
+ * talk, no question, no troll. (Spam bots aren't viewers, no count includes them, and they still find the empty streams.)
+ */
+bool KastWatched(int Present, double Viewers)
+{
+	return Present > 0 || Viewers >= 0.5;
+}
+
+/** The strangers the count shows: Viewers rounded, less the members in the room (drop-ins, lurking followers, raiders). */
+int KastStrangersShown(int Present, double Viewers)
+{
+	return std::max(0, static_cast<int>(std::lround(Viewers)) - Present);
+}
+
+/** Whether a name is timed out right now (Stream::TimedOut: name -> until, real seconds). */
+bool KastTimedOut(const std::map<std::string, double>& TimedOutUntil, const std::string& Name, double RealNow)
+{
+	const auto It = TimedOutUntil.find(Name);
+	return It != TimedOutUntil.end() && It->second > RealNow;
+}
+
+/**
+ * One of those strangers, by name: the latest to drop in, a window of the stream's name pool as wide as the count's
+ * strangers, sliding one name with each arrival (Summary::NewFaces) and starting somewhere new each stream. A stranger who
+ * talks is one of the people counted, so chat never holds more strangers than the count does. One draw, as before.
+ * A timed-out stranger is still watching but can't type (review of the fix: with a window this narrow, the troll the mods
+ * just timed out was the stranger who spoke next): the next one along the window speaks instead, with no further draw. When
+ * every stranger shown is timed out it returns the drawn one (KastStrangersMuted, below, lets the callers see that coming).
+ */
+const std::string& KastStrangerName(const std::vector<std::string>& Pool, int StrangersShown, int Arrivals, int StreamNo, Rng& R, const std::map<std::string, double>& TimedOutUntil, double RealNow)
+{
+	const size_t Width = static_cast<size_t>(std::max(1, StrangersShown));
+	const size_t From = static_cast<size_t>(std::max(0, StreamNo)) * 131u + static_cast<size_t>(std::max(0, Arrivals));
+	const size_t Drawn = static_cast<size_t>(R.Int(static_cast<int>(Width)));
+	for (size_t K = 0; K < Width; ++K)
+	{
+		const std::string& Name = Pool[(From + (Drawn + K) % Width) % Pool.size()];
+		if (!KastTimedOut(TimedOutUntil, Name, RealNow))
+		{
+			return Name;
+		}
+	}
+	return Pool[(From + Drawn) % Pool.size()];
+}
+
+/** Every stranger the count shows is timed out (or none is shown): no stranger can type. No draw. */
+bool KastStrangersMuted(const std::vector<std::string>& Pool, int StrangersShown, int Arrivals, int StreamNo, const std::map<std::string, double>& TimedOutUntil, double RealNow)
+{
+	const size_t From = static_cast<size_t>(std::max(0, StreamNo)) * 131u + static_cast<size_t>(std::max(0, Arrivals));
+	for (size_t K = 0; K < static_cast<size_t>(std::max(0, StrangersShown)); ++K)
+	{
+		if (!KastTimedOut(TimedOutUntil, Pool[(From + K) % Pool.size()], RealNow))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 const char* const MomentNames[] = {"Register", "AllIn", "WonAllIn", "LostAllIn", "BadBeat", "BigPot", "Knockout", "Bubble", "InTheMoney", "FinalTable", "Win", "Bust", "Cashed", "BestPlay", "Blunder", "Rival", "LevelUp"};
 
 /** How hard a moment hits: hype added, chat lines it sets off. */
@@ -1219,8 +1281,11 @@ std::string Stream::Chatter(Channel& Ch, const Inputs& In, int& Badges, uint32_t
 		MemberWeight += 0.2 + Ch.Members[static_cast<size_t>(Visits[static_cast<size_t>(I)].Member)].Loyalty;
 	}
 	const double StrangerWeight = Strangers * 0.1 + Lurkers * 0.03 + RaidViewers * 0.15 + 0.02;
+	// A stranger who talks is one the count shows (kast_detail::KastStrangerName); with none shown, or every one of them timed
+	// out, a member in the room speaks.
+	const int StrangersShown = kast_detail::KastStrangersShown(Present, Viewers);
 	std::string Name;
-	if (!Here.empty() && R.Next() * (MemberWeight + StrangerWeight) < MemberWeight)
+	if (!Here.empty() && (R.Next() * (MemberWeight + StrangerWeight) < MemberWeight || kast_detail::KastStrangersMuted(Pool, StrangersShown, Tonight.NewFaces, Ch.Streams, TimedOut, In.Real)))
 	{
 		double Pick = R.Next() * MemberWeight;
 		int Chosen = Here.front();
@@ -1241,8 +1306,7 @@ std::string Stream::Chatter(Channel& Ch, const Inputs& In, int& Badges, uint32_t
 	}
 	else
 	{
-		const int Reach = std::min(static_cast<int>(Pool.size()), 30 + static_cast<int>(Viewers * 1.5));
-		Name = Pool[static_cast<size_t>(R.Int(std::max(1, Reach)))];
+		Name = kast_detail::KastStrangerName(Pool, StrangersShown, Tonight.NewFaces, Ch.Streams, R, TimedOut, In.Real);
 	}
 	Badges = 0;
 	if (Ch.IsSub(Name, In.World))
@@ -1840,8 +1904,9 @@ void Stream::OnMoment(Channel& Ch, const Inputs& In, Moment M, const std::string
 		Face = H.Face;
 		FaceAt = In.Real;
 	}
-	// A wave in chat, as big as the room.
-	const int Lines = std::min(14, std::max(Present > 0 || Viewers >= 1.0 ? 1 : 0, std::min(H.Lines, 1 + static_cast<int>(Viewers)) + static_cast<int>(std::sqrt(Viewers) / 3.0)));
+	// A wave in chat, as big as the room; an empty room says nothing (before 2026-10-21 every moment drew at least one line
+	// from a stranger nobody counted: the "0 viewers, chat talking" of a tournament on stream).
+	const int Lines = kast_detail::KastWatched(Present, Viewers) ? std::min(14, std::min(H.Lines, 1 + static_cast<int>(Viewers)) + static_cast<int>(std::sqrt(Viewers) / 3.0)) : 0;
 	React(Ch, In, M, Lines);
 	if (M == Moment::Knockout && !Detail.empty() && Lines > 0)
 	{
@@ -1976,7 +2041,8 @@ void Stream::Resolve(Channel& Ch, const Inputs& In, bool Yes)
 		LineKind::System, 0, Violet);
 	static const std::vector<std::string> Believers = {"I BELIEVED kastHype", "never doubted", "points secured", "believers win kastClap"};
 	static const std::vector<std::string> Doubters = {"doubters win kastLUL", "free points", "sorry {hero}", "I knew it kastLUL"};
-	for (int K = 0; K < std::min(3, 1 + static_cast<int>(Viewers)); ++K)
+	// The ones who bet say so, if anybody's watching (kast_detail::KastWatched).
+	for (int K = 0; K < (kast_detail::KastWatched(Present, Viewers) ? std::min(3, 1 + static_cast<int>(Viewers)) : 0); ++K)
 	{
 		int Badges = 0;
 		uint32_t Color = 0;
@@ -2026,7 +2092,8 @@ Chips Stream::SponsorRead(Channel& Ch, const Inputs& In, const std::string& Id)
 			Earn(Ch, D.ReadCents, 4);
 			Say(In, In.Hero, S->ReadLine, LineKind::Streamer, BadgeStreamer | (Ch.Partner ? BadgeVerified : 0), 0xc6f432);
 			static const std::vector<std::string> Reacts = {"ad read kastLUL", "sellout kastLUL", "get that bag", "rent money", "{brand}!!", "the read was smooth"};
-			for (int K = 0; K < std::min(3, 1 + static_cast<int>(Viewers / 3.0)); ++K)
+			// Chat reacts if anybody's watching (kast_detail::KastWatched).
+			for (int K = 0; K < (kast_detail::KastWatched(Present, Viewers) ? std::min(3, 1 + static_cast<int>(Viewers / 3.0)) : 0); ++K)
 			{
 				int Badges = 0;
 				uint32_t Color = 0;
@@ -2198,8 +2265,12 @@ bool Stream::Promote(Channel& Ch, const Inputs& In, const std::string& Name)
 			Say(In, Fan, kast_detail::Fill(R.Pick(Lines2), "{who}", Name), LineKind::Chat, Badges, Color);
 			Chat.back().At = In.Real + 0.7;
 		}
-		Say(In, Name, "thank you!! I'll keep it clean", LineKind::Chat, BadgeMod | (Ch.IsSub(Name, In.World) ? BadgeSub : 0), kast_detail::NameColor(Name));
-		Chat.back().At = In.Real + 1.5;
+		// The new mod thanks chat if they're in the room to see it (a chatter is a viewer).
+		if (HereVisit(Ch, Name) >= 0)
+		{
+			Say(In, Name, "thank you!! I'll keep it clean", LineKind::Chat, BadgeMod | (Ch.IsSub(Name, In.World) ? BadgeSub : 0), kast_detail::NameColor(Name));
+			Chat.back().At = In.Real + 1.5;
+		}
 	}
 	return true;
 }
@@ -2245,7 +2316,14 @@ void Stream::TrollStep(Channel& Ch, const Inputs& In, double DReal)
 	{
 		TrollDebt -= 1.0;
 		const bool IsSpam = R.Chance(0.3);
-		std::string Who = Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
+		// A troll is one of the strangers the count shows (none shown, or all of them timed out: no troll); spam bots aren't
+		// viewers and come anyway.
+		const int StrangersShown = kast_detail::KastStrangersShown(Present, Viewers);
+		if (!IsSpam && kast_detail::KastStrangersMuted(Pool, StrangersShown, Tonight.NewFaces, Ch.Streams, TimedOut, In.Real))
+		{
+			continue;
+		}
+		std::string Who = kast_detail::KastStrangerName(Pool, StrangersShown, Tonight.NewFaces, Ch.Streams, R, TimedOut, In.Real);
 		if (IsSpam)
 		{
 			static const std::vector<std::string> Bots = {"v1ewz_b0t", "free_chips_4u", "promo_kingz", "k4st_boost", "followerz_cheap"};
@@ -2420,7 +2498,7 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 		SumL15 += std::pow(L, 1.5);
 	}
 	auto GiverIn = [&](double Power) -> std::string {
-		// A member weighted by loyalty (or a passer-by when nobody's here).
+		// A member weighted by loyalty (or, with no member here, one of the strangers the count shows).
 		double Total = 0.0;
 		for (const int I : Here)
 		{
@@ -2436,7 +2514,7 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 				return M.Name;
 			}
 		}
-		return Pool[static_cast<size_t>(R.Int(static_cast<int>(Pool.size())))];
+		return kast_detail::KastStrangerName(Pool, kast_detail::KastStrangersShown(Present, Viewers), Tonight.NewFaces, Ch.Streams, R, TimedOut, In.Real);
 	};
 	if (Ch.Affiliate)
 	{
@@ -2510,6 +2588,34 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 	// The very first stream: Dee is watching.
 	if (Ch.Streams == 1 && Ch.EarnedTips == 0 && In.World - StartWorld > 8.0)
 	{
+		// She's watching when she tips (a chatter is a viewer): if she isn't in the room yet, she's here now, counted from
+		// this tick, and stays a while. No draw, so the stream's own dice don't move.
+		const Member* DeeMember = Ch.FindMember("dee_spincycle");
+		if (DeeMember && HereVisit(Ch, DeeMember->Name) < 0)
+		{
+			const int DeeAt = static_cast<int>(DeeMember - Ch.Members.data());
+			int DeeVisit = -1;
+			for (size_t I = 0; I < Visits.size() && DeeVisit < 0; ++I)
+			{
+				if (Visits[I].Member == DeeAt && Visits[I].Leave > In.World)
+				{
+					Visits[I].Arrive = std::min(Visits[I].Arrive, In.World);
+					DeeVisit = static_cast<int>(I);
+				}
+			}
+			if (DeeVisit < 0)
+			{
+				Visit V;
+				V.Member = DeeAt;
+				V.Arrive = In.World;
+				V.Leave = In.World + 90.0;
+				Visits.push_back(V);
+				DeeVisit = static_cast<int>(Visits.size()) - 1;
+			}
+			Here.push_back(DeeVisit);
+			Present = static_cast<int>(Here.size());
+			Viewers += 1.0;
+		}
 		const Chips First = 500;
 		Earn(Ch, First, 2);
 		Alert A;
@@ -2589,7 +2695,9 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 	Talk += Strangers * 0.1 + Lurkers * 0.03 + RaidViewers * 0.15;
 	const double ChatRate = std::min(10.0, Talk / 60.0 * (1.0 + Hype / 40.0) * (0.8 + 0.4 * Engage)) * (AdRunning(In.Real) ? 0.6 : 1.0);
 	ChatDebt = std::min(6.0, ChatDebt + ChatRate * DReal);
-	while (ChatDebt >= 1.0)
+	// Somebody counted says it (kast_detail::KastWatched): a fraction of a stranger keeps the line until there's a whole one.
+	const bool SomeoneWatching = kast_detail::KastWatched(Present, Viewers);
+	while (SomeoneWatching && ChatDebt >= 1.0)
 	{
 		ChatDebt -= 1.0;
 		int Badges = 0;
@@ -2620,7 +2728,7 @@ void Stream::Tick(Channel& Ch, const Inputs& In, double DWorld, double DReal)
 	}
 	// Questions, mostly from people still deciding whether to stay.
 	QuestionDebt = std::min(2.0, QuestionDebt + std::min(0.03, 0.0015 * (Strangers + static_cast<double>(Present) * 0.4 + RaidViewers * 0.5)) * DReal * (Ch.Title == 2 || Ch.Title == 3 ? 1.6 : 1.0));
-	if (QuestionDebt >= 1.0)
+	if (SomeoneWatching && QuestionDebt >= 1.0)
 	{
 		QuestionDebt -= 1.0;
 		int Badges = 0;

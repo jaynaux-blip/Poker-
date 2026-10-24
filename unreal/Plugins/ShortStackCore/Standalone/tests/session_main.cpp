@@ -32,6 +32,7 @@
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <set>
 #include <vector>
@@ -2843,7 +2844,10 @@ void Streaming()
 	Expect(St.Pred.Resolved, "the prediction resolves when the tournament ends");
 	Expect(S.Channel.FindMember("dee_spincycle") && S.Channel.FindMember("dee_spincycle")->Friend && S.Channel.FindMember("mei_ng"), "Dee and Mei are there on night one");
 	Expect(St.Peak <= 12, "a first stream draws a handful of people, not a crowd");
-	Expect(St.Chat.size() > 20 && St.Chatters() > 5, "chat talks through the tournament");
+	// Who talks is who came (StreamCountsChatters, below): Dee, Mei and the few strangers a first stream draws. Before the
+	// 2026-10-21 fix this asked for more than five names, which a first stream peaking at three viewers only reached by the
+	// bug (lines from strangers nobody counted).
+	Expect(St.Chat.size() > 20 && St.Chatters() >= 2, "chat talks through the tournament");
 	Expect(S.Channel.Followers > 0 && St.Peak > 0 && !St.Graph.empty(), "viewers come, some follow");
 	std::printf("  stream: %.0f min on stream, %d followers, peak %d, %zu chat lines, %d chatters, %s earned, hype %.0f\n", St.Uptime(S.WorldMinutes()), S.Channel.Followers, St.Peak, St.Chat.size(),
 		St.Chatters(), ss::Money(St.Tonight.Total()).c_str(), St.Hype);
@@ -2896,6 +2900,298 @@ void Streaming()
 	Wait(Broke, 0.0, 90.0);
 	Expect(!Broke.Owns("gym") && Broke.BankrollCents == 100 && Broke.GearFx().Calm == Loaded.GearFx().Calm, "a subscription the bank can't cover lapses");
 	Expect(S.Cancel("fiber") && !S.Owns("fiber") && S.GearFx().Resolution == 720, "cancelling fiber drops the stream back to 720p");
+}
+
+/**
+ * A chatter is a viewer (the 2026-10-21 report: "When playing MTTs while live streaming, kast shows 0 Viewers even when there
+ * is chatters"). A new channel streams online tournaments the way the frame loop plays them (one table, two tables, a sprint):
+ * whenever a viewer's line lands in chat, the count Kast shows (the pill, the studio, the VIEWERS tile: Stream::Viewers,
+ * rounded) is at least one, and it is never below the number of different people who spoke in the last ten seconds. Spam
+ * bots aren't viewers (no count includes them); trolls are.
+ */
+namespace kast_count
+{
+struct Watch
+{
+	int Frames = 0;
+	int Lines = 0;   // viewers' lines that landed in chat
+	int Silent = 0;  // ... while the count showed nobody
+	int Crowded = 0; // frames where more people had spoken in the last 10 s than the count showed
+	size_t Worst = 0; // the most speakers over the count
+	int Counted = 0; // frames with somebody counted
+	int MaxShown = 0;
+	std::string FirstSilent; // the first line that landed while the count showed nobody ("who: text")
+};
+
+bool ViewerLine(const ss::kast::ChatMsg& M)
+{
+	using ss::kast::LineKind;
+	return !M.Who.empty() && !M.Spam && (M.Kind == LineKind::Chat || M.Kind == LineKind::Question || M.Kind == LineKind::Tip || M.Kind == LineKind::Sub || M.Kind == LineKind::Cheer);
+}
+
+/** One frame: the lines that landed since Prev against the count shown now. */
+void Observe(const ss::Session& S, double Prev, double Now, Watch& W)
+{
+	const ss::kast::Stream& St = S.Stream;
+	if (!St.Live)
+	{
+		return;
+	}
+	const long long Shown = static_cast<long long>(std::round(St.Viewers)); // KastCount's rounding
+	std::set<std::string> Spoke;
+	for (const ss::kast::ChatMsg& M : St.Chat)
+	{
+		if (!ViewerLine(M) || M.At > Now)
+		{
+			continue;
+		}
+		if (M.At > Prev)
+		{
+			++W.Lines;
+			W.Silent += Shown < 1 ? 1 : 0;
+			if (Shown < 1 && W.FirstSilent.empty())
+			{
+				W.FirstSilent = M.Who + ": " + M.Text;
+			}
+		}
+		if (M.At > Now - 10.0)
+		{
+			Spoke.insert(M.Who);
+		}
+	}
+	++W.Frames;
+	W.Counted += Shown >= 1 ? 1 : 0;
+	W.MaxShown = std::max(W.MaxShown, static_cast<int>(Shown));
+	if (static_cast<long long>(Spoke.size()) > Shown)
+	{
+		++W.Crowded;
+		W.Worst = std::max(W.Worst, Spoke.size() - static_cast<size_t>(std::max(0LL, Shown)));
+	}
+}
+
+/** The first joinable listing around now that passes Ok and isn't already open. */
+bool PickListing(const ss::Session& S, ss::LobbyEvent& Out, const std::function<bool(const ss::LobbyEvent&)>& Ok)
+{
+	const ss::net::Network& Net = ss::net::Shared();
+	for (const ss::net::EventInstance& E : Net.Window(S.WorldMinutes() - 120.0, S.WorldMinutes() + 60.0))
+	{
+		const ss::LobbyEvent L = Net.Listing(E, nullptr, S.Unlocks());
+		if (L.Joinable && L.BuyInCents <= 1100 && !S.IsPlaying(L.Spec.Id) && Ok(L))
+		{
+			Out = L;
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Tables 1 or 2: a channel on the first PC upgrade (nothing else) goes live in the lobby, registers and plays for up to
+ * Seconds of real time at 30 frames a second, the hero taking Think seconds over each decision; Sprint sprints the table.
+ * Community 0 is a new channel's first stream (Dee and Mei); otherwise a channel thirty streams in, with that many members
+ * (casual to superfan) and Followers in all (the rest lurk).
+ */
+Watch OnStream(const char* Seed, int Tables, bool Sprint, double Think, double Seconds, int Community = 0, int Followers = 0)
+{
+	Hooks H;
+	ss::Session S(H, Seed);
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 300000;
+	Watch W;
+	for (int K = 0; K < Community; ++K)
+	{
+		ss::kast::Member M;
+		M.Name = "kastfan_" + std::to_string(K);
+		M.Loyalty = 0.1 + 0.8 * static_cast<double>(K % 10) / 9.0;
+		M.Affinity = 0.9;
+		M.Follower = true;
+		M.Streams = 10;
+		M.LastSeen = S.WorldMinutes() - 1440.0;
+		S.Channel.Members.push_back(M);
+	}
+	if (Community > 0)
+	{
+		S.Channel.Followers = std::max(Community, Followers);
+		S.Channel.Streams = 30;
+		S.Channel.Milestone = 10000000; // no milestone alerts for a channel that got here off screen
+	}
+	Expect(S.Buy(ss::gear::FirstPcUpgrade().Id).empty() && S.GoLive().empty() && S.Streaming(), "kast count: the channel goes live");
+	ss::LobbyEvent First;
+	// The listing's speed reads "Hyper · 3 min", "Turbo · 5 min": one table plays a full-speed MTT, two put a hyper beside it.
+	auto Hyper = [](const ss::LobbyEvent& L) { return L.Speed.rfind("Hyper", 0) == 0; };
+	const bool Found = PickListing(S, First, [&](const ss::LobbyEvent& L) { return Tables == 2 ? Hyper(L) : !Hyper(L); });
+	const std::string Why = Found ? S.RegisterEvent(First) : std::string("no listing");
+	std::printf("  kast count (%s): %s, %d entrants, %s%s\n", Seed, First.Spec.Name.c_str(), First.Spec.Entrants, First.Speed.c_str(), Why.empty() ? "" : (": " + Why).c_str());
+	Expect(Why.empty() && S.T, "kast count: an online tournament on stream");
+	if (Tables == 2)
+	{
+		ss::LobbyEvent Second;
+		const std::string Why2 = PickListing(S, Second, [&](const ss::LobbyEvent& L) { return !Hyper(L); }) ? S.RegisterEvent(Second) : std::string("no listing");
+		std::printf("  kast count (%s): and %s, %d entrants, %s%s\n", Seed, Second.Spec.Name.c_str(), Second.Spec.Entrants, Second.Speed.c_str(), Why2.empty() ? "" : (": " + Why2).c_str());
+		Expect(Why2.empty() && S.TableCount() == 2, "kast count: and a second table");
+	}
+	if (Sprint)
+	{
+		S.CurrentPace = ss::Pace::Sprint;
+		S.SprintBudgetMs = 0.0; // one simulated hand a frame (the skip loop's do-while), so the run doesn't hang on the CPU's speed
+	}
+	ss::Rng Choice(std::string(Seed) + "-hero");
+	double Now = 0.0;
+	const double Dt = 1.0 / 30.0;
+	double ResultsAt = -1.0; // the stream goes on over the results screen (the prediction resolves there): 15 s of it
+	for (int Frame = 0; S.Streaming() && S.TableCount() > 0 && Frame < static_cast<int>(Seconds * 30.0) && (ResultsAt < 0.0 || Now - ResultsAt < 15.0); ++Frame)
+	{
+		const double Prev = Now;
+		Now += Dt;
+		S.Update(Now);
+		if (S.CurrentScreen == ss::Screen::Results && ResultsAt < 0.0)
+		{
+			ResultsAt = Now;
+		}
+		for (int K = 0; K < S.TableCount(); ++K)
+		{
+			const ss::TableGlance G = S.Glance(K);
+			if (G.YourTurn && Now - G.TurnOpenedAt > Think)
+			{
+				const double Roll = Choice.Next();
+				S.HeroActAt(K, Roll < 0.6 ? ss::PlayerAction::Call() : ss::PlayerAction::Fold());
+			}
+		}
+		Observe(S, Prev, Now, W);
+	}
+	std::printf("  kast count (%s, %d table%s%s): %d frames, %d viewer lines (%d while the count showed 0), %d frames with more speakers in 10 s than counted (worst +%zu), "
+				"counted somebody in %d, peak shown %d, world %.1f min%s%s\n",
+		Seed, Tables, Tables == 1 ? "" : "s", Sprint ? ", sprint" : "", W.Frames, W.Lines, W.Silent, W.Crowded, W.Worst, W.Counted, W.MaxShown, S.Stream.Uptime(S.WorldMinutes()),
+		W.FirstSilent.empty() ? "" : "; first line at 0: ", W.FirstSilent.c_str());
+	return W;
+}
+
+/**
+ * A timed-out stranger is still watching but can't type (BUG_REVIEW.md: with the strangers who talk as few as the count
+ * shows, the troll the mods had just timed out was the stranger who reacted to the next hand). A channel whose 400
+ * followers lurk, with two mods online, streams three nights at a table with a moment every half minute or so; Kast is
+ * driven directly (no session). Nobody speaks in the ten minutes after their timeout notice.
+ */
+void TimedOutStayQuiet()
+{
+	Hooks H;
+	ss::Session Rig(H, "kast-count-mods");
+	Rig.BankrollCents = 300000;
+	Expect(Rig.Buy(ss::gear::FirstPcUpgrade().Id).empty() && Rig.GearFx().CanStream(), "kast count: the first PC upgrade streams");
+	ss::kast::Channel Ch;
+	Ch.Followers = 400; // no tracked community: the followers lurk, strangers drop in
+	Ch.Streams = 30;
+	Ch.Milestone = 10000000;
+	for (int K = 0; K < 2; ++K)
+	{
+		ss::kast::Moderator M;
+		M.Name = "kastmod_" + std::to_string(K);
+		M.Online = 0.95;
+		Ch.Mods.push_back(M);
+	}
+	ss::kast::Stream St("kast-count-mods");
+	ss::Rng Pick("kast-count-mods-moments");
+	const ss::kast::Moment Kinds[] = {ss::kast::Moment::AllIn, ss::kast::Moment::BigPot, ss::kast::Moment::LevelUp, ss::kast::Moment::Knockout, ss::kast::Moment::Blunder, ss::kast::Moment::BestPlay};
+	int Timeouts = 0;
+	int Lines = 0;
+	int Spoke = 0;
+	std::string FirstSpoke;
+	for (int Night = 0; Night < 3; ++Night)
+	{
+		ss::kast::Inputs In;
+		In.World = 1440.0 * (10.0 + Night) + 20.0 * 60.0;
+		In.Real = 100000.0 * (Night + 1);
+		In.AtTable = true;
+		In.Tables = 1;
+		In.Hero = "kast_count_hero";
+		In.EventName = "Night Owl Turbo";
+		In.Gear = Rig.GearFx();
+		St.Start(Ch, In);
+		std::map<std::string, double> OutAt; // name -> the real second of their timeout notice
+		std::set<int> Landed;
+		double NextMoment = In.Real + 30.0;
+		for (const double End = In.World + 150.0; In.World < End;)
+		{
+			In.World += 0.01; // three world minutes a real one, as at a table
+			In.Real += 0.2;
+			St.Tick(Ch, In, 0.01, 0.2);
+			if (In.Real >= NextMoment)
+			{
+				St.OnMoment(Ch, In, Kinds[Pick.Int(6)], "somebody");
+				NextMoment = In.Real + 20.0 + 40.0 * Pick.Next();
+			}
+			for (const ss::kast::ChatMsg& M : St.Chat)
+			{
+				if (M.At > In.Real || !Landed.insert(M.Id).second)
+				{
+					continue;
+				}
+				const size_t Cut = M.Kind == ss::kast::LineKind::System ? std::min(M.Text.find(" has been timed out"), M.Text.find(" was timed out by ")) : std::string::npos;
+				if (Cut != std::string::npos)
+				{
+					OutAt[M.Text.substr(0, Cut)] = M.At;
+					++Timeouts;
+				}
+				else if (ViewerLine(M))
+				{
+					++Lines;
+					const auto It = OutAt.find(M.Who);
+					if (It != OutAt.end() && M.At > It->second && M.At - It->second < 600.0)
+					{
+						++Spoke;
+						FirstSpoke = FirstSpoke.empty() ? M.Who + ": " + M.Text : FirstSpoke;
+					}
+				}
+			}
+		}
+		St.Stop(Ch, In);
+	}
+	std::printf("  kast count (timeouts): %d timeouts, %d viewer lines, %d from someone timed out%s%s\n", Timeouts, Lines, Spoke, FirstSpoke.empty() ? "" : "; first: ", FirstSpoke.c_str());
+	Expect(Timeouts >= 3 && Lines > 300 && Spoke == 0, "kast count: a timed-out stranger doesn't talk until the timeout runs out");
+}
+} // namespace kast_count
+
+void StreamCountsChatters()
+{
+	const kast_count::Watch One = kast_count::OnStream("kast-count-one", 1, false, 1.0, 300.0);
+	const kast_count::Watch Slow = kast_count::OnStream("kast-count-slow", 1, false, 4.0, 300.0);
+	const kast_count::Watch Two = kast_count::OnStream("kast-count-two", 2, false, 1.5, 300.0);
+	const kast_count::Watch Fast = kast_count::OnStream("kast-count-sprint", 1, true, 0.5, 120.0);
+	// A small channel (a few casual members, the count around a handful) and a bigger one (lurkers, a busy chat).
+	const kast_count::Watch Small = kast_count::OnStream("kast-count-small", 1, false, 1.0, 300.0, 8, 40);
+	const kast_count::Watch Big = kast_count::OnStream("kast-count-big", 2, false, 1.0, 300.0, 120, 3000);
+	Expect(One.Lines > 0 && Two.Lines > 0 && One.Counted > 0 && Two.Counted > 0 && Small.Lines > 20 && Big.Lines > 100 && Big.MaxShown >= 10,
+		"kast count: chat talks and somebody is counted (the check isn't empty)");
+	Expect(One.Silent == 0 && Slow.Silent == 0 && Two.Silent == 0 && Fast.Silent == 0 && Small.Silent == 0 && Big.Silent == 0,
+		"kast count: no viewer's line lands in chat while the count shows nobody (a chatter is a viewer)");
+	Expect(One.Crowded == 0 && Slow.Crowded == 0 && Two.Crowded == 0 && Fast.Crowded == 0 && Small.Crowded == 0 && Big.Crowded == 0, "kast count: never more people talking (last 10 s) than the count shows");
+
+	// An empty room, the moment the stream starts: every kind of moment, the prediction resolving. Nobody is there to say
+	// anything (a raid that turns up is counted before its chat lands).
+	Hooks H;
+	ss::Session S(H, "kast-count-empty");
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 300000;
+	Expect(S.Buy(ss::gear::FirstPcUpgrade().Id).empty() && S.GoLive().empty() && S.Stream.Viewers < 0.5 && S.Stream.Present == 0, "kast count: live to an empty room");
+	const ss::kast::Inputs In = S.StreamInputs();
+	for (int M = 0; M < static_cast<int>(ss::kast::Moment::Count); ++M)
+	{
+		S.Stream.OnMoment(S.Channel, In, static_cast<ss::kast::Moment>(M), "somebody");
+	}
+	S.Stream.Resolve(S.Channel, In, true);
+	kast_count::Watch Empty;
+	double Now = S.Now;
+	for (int Frame = 0; Frame < 30 * 5; ++Frame)
+	{
+		const double Prev = Frame == 0 ? -1e9 : Now; // the first frame takes in every line already landed
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		kast_count::Observe(S, Prev, Now, Empty);
+	}
+	std::printf("  kast count (empty room): %d viewer lines (%d while the count showed 0), %d crowded frames, peak shown %d, %d chatters%s%s\n", Empty.Lines, Empty.Silent, Empty.Crowded, Empty.MaxShown,
+		S.Stream.Chatters(), Empty.FirstSilent.empty() ? "" : "; first line at 0: ", Empty.FirstSilent.c_str());
+	Expect(Empty.Silent == 0 && Empty.Crowded == 0 && (Empty.Lines == 0 || Empty.MaxShown >= 1), "kast count: an empty room reacts to nothing (no moment, no prediction line)");
+	kast_count::TimedOutStayQuiet();
 }
 /** The LED room kit: bought, each colour's perk, the power switch, the save, and the room flashing with the stream. */
 void LedChecks()
@@ -7447,6 +7743,13 @@ int main(int Argc, char** Argv)
 	bool U3 = false;
 	for (int K = 1; K < Argc; ++K)
 	{
+		if (std::string(Argv[K]) == "kastcount")
+		{
+			// "kastcount": only StreamCountsChatters (also in the default run, after Streaming).
+			session_test::StreamCountsChatters();
+			std::printf("%s\n", session_test::Failures == 0 ? "session tests (kastcount): all passed" : "session tests (kastcount): FAILED");
+			return session_test::Failures == 0 ? 0 : 1;
+		}
 		Long = Long || std::string(Argv[K]) == "long";
 		C1 = C1 || std::string(Argv[K]) == "c1";
 		C2 = C2 || std::string(Argv[K]) == "c2";
@@ -7584,6 +7887,7 @@ int main(int Argc, char** Argv)
 	session_test::SprintTournament();
 	session_test::DeepRuns();
 	session_test::Streaming();
+	session_test::StreamCountsChatters();
 	session_test::StreamGrind();
 	session_test::LedChecks();
 	session_test::LivingWorld();
