@@ -968,6 +968,18 @@ std::vector<std::string> VideoUiInventory();
 } // namespace rlvideo_detail
 
 /**
+ * The creator update (SPEC_CREATORS §5.1, §5.3): Kast's new widgets (RiverLineKastGrowth.cpp, ui-kast's), called from
+ * RiverLineKast.cpp: the count-up, the Heat meter, Event Mode, the action slot, Hold or Crack, the Nod menu, the peak-first
+ * end card. They read only the stream's const kast::View; their per-laptop state lives in that file, by laptop (RiverLine.h
+ * is frozen), and ~RiverLine drops it.
+ */
+namespace rlkast_detail
+{
+/** Drops a laptop's Kast widget state when it goes (~RiverLine). */
+void Forget(const RiverLine* RL);
+} // namespace rlkast_detail
+
+/**
  * Update 2, G3 (§1.8, §5.5, §5.11): the rival sites on the laptop (RiverLineSites.cpp). Which site the client wears and
  * in whose colours (a SkinScope for its SiteDef's palette), the player's money and record there, the poker button's
  * list, the Cashier and Promotions pages, Career's Rewards card, and a site's own shades of RiverLine's literal colours.

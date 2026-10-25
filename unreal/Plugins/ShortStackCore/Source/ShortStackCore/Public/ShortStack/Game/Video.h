@@ -172,6 +172,9 @@ enum class CompKind : uint8_t
 	FromCut,
 	Kast,
 	FromNextUp,
+	// The creator update (SPEC_CREATORS §3.3, §8.1): the Binge wave and Late Bloomer, bonus-only (core-videoalgo, C3).
+	Binge,
+	LateBloom,
 	Count,
 };
 /** A thumbnail recipe (§6.1): the archetype, layout and the rest, drawn by ui-thumbs' compositor; captions only from facts. */
@@ -211,6 +214,11 @@ struct VideoX
 	std::array<ThumbSpec, 3> Spec{}; // [0] shown; [1], [2] the Duel's contenders
 	std::vector<Comp> Comps;         // <= 9; the first wave is P0
 	std::string NextUp;              // the Next-up card's target
+	// The creator update (SPEC_CREATORS §3.3, §8.1), appended: the upload's own luck, set at PUBLISH from its existing draws
+	// (ln(Luck x Viral)) so Momentum reads realized performance and a reload can't change it; vid's Update 3 block carries
+	// them once core-videoalgo lands them (U3VideoFields 63 -> 64). Phase A-K: never set, never written.
+	float LuckLn = 0;
+	bool Viral = false; // the upload's Update 2 viral roll hit (narrated at the verdict as a breakout)
 };
 /** A day's (or a month's) row of the channel's rings. */
 struct DayRow
@@ -293,6 +301,15 @@ struct ChannelX
 	std::vector<StubDay> StubDays;   // <= 366
 	int TrendWeek = -1;
 	int Since = -1;
+	// The creator update (SPEC_CREATORS §3.3, §8.1), appended: Momentum from performance (Momentum above becomes MomC), the
+	// meter's display average, the upload streak and Fresh on Rerun's monotonic count. vmom carries them once core-videoalgo
+	// redefines it (C3). Phase A-K: never set, never written.
+	double MomH = 0;     // H: 0.6 H + 0.4 (perf + the compressed score part) at each verdict
+	double MomShown = 1; // the meter's display average: 0.5 D + 0.5 MomC at each verdict
+	int StreakW = 0;     // weeks in a row with an upload (at most 8)
+	int StreakWeek = -1; // the streak's last counted week (Monday 00:00)
+	int RainChecks = 0;  // at most 2 held
+	int UploadsEver = 0; // Fresh on Rerun's n: never falls (DeleteVideo can't re-open the lane)
 };
 /** What the stream had going when a candidate came from it (Kast's moment log). */
 struct StreamBit

@@ -128,4 +128,6 @@ void SegThumbs(); // rerun_ui, ui-thumbs: tests/ui_seg_thumbs.cpp
 // SitesPageHome, DebugOpen (rivals_ui); the cache pools and DrawPortrait's default (rerun_ui).
 void SegSeams();  // rivals_ui: tests/ui_seg_seams.cpp
 void SegCanvas(); // rerun_ui: tests/ui_seg_canvas.cpp
+// The creator update's (SPEC_CREATORS §9.1): a suite of its own, kast_ui (its main is kast_ui_main.cpp).
+void SegKast(); // kast_ui, ui-kast: tests/ui_seg_kast.cpp
 } // namespace ui_test

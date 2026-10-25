@@ -1145,6 +1145,7 @@ RiverLine::~RiverLine()
 	rlsites_detail::ForgetSites(this);
 	rlrit_detail::ForgetRit(this);
 	rlignite_detail::IgniteForget(this);
+	rlkast_detail::Forget(this); // RiverLineKastGrowth.cpp (ui-kast): the creator update's Kast widgets, by laptop
 	BadgeCheers().erase(this);
 }
 

@@ -6,6 +6,7 @@
 
 #include "ShortStack/Game/Life.h"
 
+#include <utility>
 #include <vector>
 
 namespace ss
@@ -59,7 +60,7 @@ double ScoreBase(const Video& /*V*/, const Channel& /*C*/)
 	return 0.0;
 }
 
-int8_t VerdictLabel(double /*Kick*/, double /*P0*/, Class /*K*/)
+int8_t VerdictLabel(double /*Perf*/, double /*S*/, double /*S0Base*/)
 {
 	return -1;
 }
@@ -88,8 +89,14 @@ double ExtraHours7(const Channel& /*C*/, double /*World*/)
 	return 0.0;
 }
 
-void NoteStream(Channel& /*C*/, double /*Start*/, double /*End*/, int /*PeakViewers*/)
+void NoteStream(Channel& /*C*/, double /*Start*/, double /*End*/, int /*PeakViewers*/, double /*AvgOwn*/, double /*Norm*/)
 {
+}
+
+// The creator update (SPEC_CREATORS §3.3): core-videoalgo's at C3. Phase A-K: Rerun has earned Kast no Heat.
+std::vector<std::pair<double, double>> KastHeatSince(const Channel& /*C*/, double /*Since*/)
+{
+	return {};
 }
 } // namespace algo
 } // namespace video

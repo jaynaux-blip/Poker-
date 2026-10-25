@@ -186,6 +186,34 @@ std::string Rebranded(const std::string& Text)
 	}
 	return Out;
 }
+
+/** The creator update (SPEC_CREATORS §5.1): Kast's cue queue plays the best waiting cue: KastCall > KastAlert > KastShine >
+ *  the raid sound and the stage stings (Win, Cash, Bubble) > KastRise; -1 for none. */
+int KastCueRank(int Cue)
+{
+	switch (Cue)
+	{
+	case static_cast<int>(SoundId::KastCall): return 5;
+	case static_cast<int>(SoundId::KastAlert): return 4;
+	case static_cast<int>(SoundId::KastShine): return 3;
+	case static_cast<int>(SoundId::KastRise): return 1;
+	default: return Cue >= 0 ? 2 : -1;
+	}
+}
+
+/** How loud the queue plays a cue: Kast's four in the alerts' range, a reused sting at its alert volume. */
+double KastCueVolume(int Cue)
+{
+	switch (Cue)
+	{
+	case static_cast<int>(SoundId::KastCall): return 0.75;
+	case static_cast<int>(SoundId::KastAlert): return 0.7;
+	case static_cast<int>(SoundId::KastShine): return 0.7;
+	case static_cast<int>(SoundId::KastRise): return 0.5;
+	case static_cast<int>(SoundId::Cash): return 0.55;
+	default: return 0.7;
+	}
+}
 } // namespace session_detail
 
 // ------------------------------------------------------------------ save data
@@ -312,6 +340,10 @@ std::string SaveData::Serialize() const
 	}
 	Out << "leds\t" << Leds.Preset << "\t" << (Leds.On ? 1 : 0) << "\t" << (Leds.Sync ? 1 : 0) << "\n";
 	const kast::Channel& K = Channel;
+	// The creator update (SPEC_CREATORS §8.1, C11): kast\tmo and the member, log and goodwill tails (kast::growth's writers),
+	// only once U3Kast is set, so a save from before it writes back byte for byte (S10).
+	const bool KastU3 = (L.Update3LinesRead & life::U3Kast) != 0;
+	const int KastToday = net::DayOf(net::MinutesPerDay * static_cast<double>(net::NightOneDay) + ClockMinutes);
 	Out << "kast\tch\t" << K.Title << "\t" << K.Followers << "\t" << Fixed(K.FollowFrac, 4) << "\t" << Fixed(K.MinutesLive, 2) << "\t" << Fixed(K.ViewerMinutes, 1) << "\t" << K.Peak << "\t" << K.Streams << "\t"
 		<< (K.Affiliate ? 1 : 0) << "\t" << (K.Partner ? 1 : 0) << "\t" << K.Milestone << "\t" << Fixed(K.LastOffline, 2) << "\t" << K.GiftedSubs << "\t" << K.RaidsIn << "\n";
 	Out << "kast\tearn\t" << K.EarnedSubs << "\t" << K.EarnedBits << "\t" << K.EarnedTips << "\t" << K.EarnedAds << "\t" << K.EarnedSponsors << "\t" << K.UnpaidCents << "\t" << K.PaidCents << "\n";
@@ -332,22 +364,34 @@ std::string SaveData::Serialize() const
 	for (auto It = K.Log.rbegin(); It != K.Log.rend(); ++It)
 	{
 		Out << "kast\tlog\t" << Fixed(It->Start, 2) << "\t" << Fixed(It->Minutes, 2) << "\t" << It->Avg << "\t" << It->Peak << "\t" << It->Follows << "\t" << It->Subs << "\t" << It->Cents << "\t"
-			<< session_detail::Escape(It->Title) << "\t" << It->Returning << "\t" << (It->OnSchedule ? 1 : 0) << "\n";
+			<< session_detail::Escape(It->Title) << "\t" << It->Returning << "\t" << (It->OnSchedule ? 1 : 0) << (KastU3 ? kast::growth::LogTail(*It) : std::string()) << "\n";
 	}
 	for (const kast::Member& M : K.Members)
 	{
+		// The flags field gains Bonded (4) and Noticed (8): 0 for every member until the Room sets them, so its text is unchanged.
 		Out << "kast\tmem\t" << session_detail::Escape(M.Name) << "\t" << Fixed(M.Loyalty, 4) << "\t" << Fixed(M.Affinity, 4) << "\t" << Fixed(M.FirstSeen, 2) << "\t" << Fixed(M.LastSeen, 2) << "\t" << M.Streams << "\t"
-			<< Fixed(M.WatchMinutes, 1) << "\t" << M.Messages << "\t" << ((M.Follower ? 1 : 0) | (M.Friend ? 2 : 0)) << "\t" << M.Given << "\n";
+			<< Fixed(M.WatchMinutes, 1) << "\t" << M.Messages << "\t" << ((M.Follower ? 1 : 0) | (M.Friend ? 2 : 0) | (M.Bonded ? 4 : 0) | (M.Noticed ? 8 : 0)) << "\t" << M.Given
+			<< (KastU3 ? kast::growth::MemberTail(M, KastToday) : std::string()) << "\n";
 	}
 	Out << "kast\tgrowth\t" << K.ScheduleDays << "\t" << K.ScheduleStart << "\t" << Fixed(K.Xp, 1) << "\t" << K.Streak << "\t" << K.Stage << "\t" << K.Week << "\t" << K.WeekStreams << "\t"
 		<< Fixed(K.WeekMinutes, 1) << "\t" << K.WeekAnswers << "\t" << K.WeekRegulars << "\t" << K.WeekRewarded << "\t" << K.ProcessedDay << "\t" << K.RaidsOut << "\n";
+	if (KastU3)
+	{
+		kast::growth::WriteLines(Out, kast::SaveViewOf(K));
+	}
 	for (const int D : K.DaysLive)
 	{
 		Out << "kast\tday\t" << D << "\n";
 	}
 	for (const auto& G : K.Goodwill)
 	{
-		Out << "kast\tgoodwill\t" << session_detail::Escape(G.first) << "\t" << G.second << "\n";
+		Out << "kast\tgoodwill\t" << session_detail::Escape(G.first) << "\t" << G.second;
+		if (KastU3)
+		{
+			const auto Raided = K.RaidedDay.find(G.first);
+			Out << kast::growth::GoodwillTail(Raided == K.RaidedDay.end() ? -1 : Raided->second);
+		}
+		Out << "\n";
 	}
 	for (const kast::Deal& Dl : K.Deals)
 	{
@@ -855,6 +899,9 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 				Lg.Title = Str(9);
 				Lg.Returning = Int(10);
 				Lg.OnSchedule = Int(11) != 0;
+				// The creator update (SPEC_CREATORS §8.1): AvgOwn, PeakAt, PeakMoment and HeatAfter after P[11], on a row
+				// written under U3Kast (which a tail read back sets again, so the save keeps writing it).
+				D.Life.Update3LinesRead |= kast::growth::ReadLogTail(P, Lg) ? static_cast<uint32_t>(life::U3Kast) : 0u;
 				K.Log.insert(K.Log.begin(), Lg);
 			}
 			else if (Key == "mem" && P.size() >= 12)
@@ -870,7 +917,11 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 				M.Messages = Int(9);
 				M.Follower = (Int(10) & 1) != 0;
 				M.Friend = (Int(10) & 2) != 0;
+				M.Bonded = (Int(10) & 4) != 0;
+				M.Noticed = (Int(10) & 8) != 0;
 				M.Given = Cents(11);
+				// The creator update: GaveDay, Hw and HwDay after P[11] (written only under U3Kast).
+				D.Life.Update3LinesRead |= kast::growth::ReadMemberTail(P, M) ? static_cast<uint32_t>(life::U3Kast) : 0u;
 				K.Members.push_back(M);
 			}
 			else if (Key == "growth" && P.size() >= 15)
@@ -889,6 +940,17 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 				K.ProcessedDay = Int(13);
 				K.RaidsOut = Int(14);
 			}
+			else if (Key == "mo")
+			{
+				// The creator update (SPEC_CREATORS §8.1, C11): Heat, the forecast's terms, the week's rings, the grants, the
+				// pending money and the carries (kast::growth::ReadLine). A save that has one keeps writing it (U3Kast).
+				kast::growth::SaveView V;
+				if (kast::growth::ReadLine(P, V))
+				{
+					kast::ApplySaveView(K, V);
+					D.Life.Update3LinesRead |= life::U3Kast;
+				}
+			}
 			else if (Key == "day" && P.size() >= 3)
 			{
 				K.DaysLive.push_back(Int(2));
@@ -896,6 +958,13 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 			else if (Key == "goodwill" && P.size() >= 4)
 			{
 				K.Goodwill[Str(2)] = Int(3);
+				// The creator update: the world day of the last raid out (the 7-day rule), after P[3] once U3Kast wrote it.
+				const int RaidedOn = kast::growth::ReadGoodwillTail(P);
+				if (RaidedOn >= 0)
+				{
+					K.RaidedDay[Str(2)] = RaidedOn;
+					D.Life.Update3LinesRead |= life::U3Kast;
+				}
 			}
 			else if (Key == "deal" && P.size() >= 7)
 			{
@@ -1476,6 +1545,8 @@ void Session::NewCareer(const hero::Character& Who, world::Start S)
 	// Update 3 (§1.8 S2): and every one of Update 3's. Each writer still writes only what holds something, so a new career's
 	// save has no new line until a feature has state.
 	Life.Update3LinesRead = life::U3SitePlay | life::U3Video;
+	// The creator update (SPEC_CREATORS §8.1): a new career's Kast is the new model's from the start (SessionKast.cpp).
+	KastNewCareer();
 	Person = Who;
 	Person.Created = true;
 	session_detail::TellBirthYear(LivingWorld, Person);
@@ -3287,6 +3358,12 @@ void Session::HandleTourneyEvents(const std::vector<TEvent>& Events)
 		{
 		case TEventType::Bust:
 			HandleKnockout(E);
+			// The creator update (SPEC_CREATORS §2.2, §2.3.5): the fourth-place bust leaves the hero three-handed for the title,
+			// the stage after the final table (Kast's Moment::Top3; today's stream ignores it).
+			if (E.Place == 4 && !E.IsHero && T && !T->Hero().Busted)
+			{
+				StreamMoment(kast::Moment::Top3, T->Spec.Name, 1.0 + static_cast<double>(T->PrizeFor(1)) / 100000.0);
+			}
 			break;
 		case TEventType::Level:
 			StreamMoment(kast::Moment::LevelUp);
@@ -5197,6 +5274,9 @@ kast::Inputs Session::StreamInputs() const
 	In.WatchSpeed = Auto.M == autoplay::Mode::Watch ? std::max(1, Auto.Speed) : 1;
 	In.Sprinting = In.Sprinting || In.WatchSpeed >= 8;
 	In.VideoBuzz = video::Buzz(Life.Video, In.World);
+	// The creator update (SPEC_CREATORS §2.2): the deepest run over every table, the front table, the cached all-in equity,
+	// Attended, the series window, the live night, Rerun's Heat bumps, the seed and the rents paid (SessionKast.cpp).
+	KastInputsExtra(In);
 	return In;
 }
 
@@ -5221,7 +5301,12 @@ std::string Session::GoLive()
 	StreamCard = false;
 	StreamWorldAt = WorldMinutes();
 	StreamRealAt = Now;
+	// The creator update (SPEC_CREATORS §8.3, §10.2): an old channel's first stream under the new model is where it migrates,
+	// before Start so the go-live reads the seeded channel; after it, U3Kast is set (so the seeded state is written) and the
+	// one-time letter posts (SessionKast.cpp).
+	KastBeforeStart();
 	Stream.Start(Channel, StreamInputs());
+	KastAfterStart();
 	// Update 2 (§5.7, §7.4; core-deals' body at G3): streaming a site's table is a strike under a running deal that plays
 	// only on another one.
 	if (TableCount() > 0 && T)
@@ -5242,7 +5327,17 @@ std::string Session::GoLive()
 
 void Session::PayOut(const std::string& Label)
 {
-	const Chips Pay = Channel.UnpaidCents;
+	Chips Pay = Channel.UnpaidCents;
+	Chips Pending = Channel.PendingCents;
+	if ((Life.Update3LinesRead & life::U3Kast) != 0)
+	{
+		// The creator update (SPEC_CREATORS C13, C14): sponsor pay never reaches UnpaidCents (KastAfterStop books it as
+		// LedgerSponsors lines), and the Affiliate revenue earned before the second rent waits in PendingCents until it is
+		// paid: then it comes with this payout (kast::growth::PayoutOf).
+		const kast::growth::Payout Split = kast::growth::PayoutOf(Channel.UnpaidCents, Channel.PendingCents, Life.RentsPaid);
+		Pay = Split.Pay;
+		Pending = Split.Pending;
+	}
 	if (Pay <= 0)
 	{
 		return;
@@ -5250,6 +5345,7 @@ void Session::PayOut(const std::string& Label)
 	BankrollCents += Pay;
 	Channel.PaidCents += Pay;
 	Channel.UnpaidCents = 0;
+	Channel.PendingCents = Pending;
 	Life.Record(WorldMinutes(), Label, Pay, 6);
 }
 
@@ -5261,9 +5357,13 @@ void Session::EndStream(const std::string& Raid)
 	}
 	Stream.Stop(Channel, StreamInputs(), Raid);
 	// Update 3 (§1.6, §4.6.9; core-videoalgo's body at G3): Rerun hears of the stream that just ended (going live soon after
-	// a publish is a launch action). Kast itself is untouched.
-	video::algo::NoteStream(Life.Video, Stream.StartWorld, WorldMinutes(), Stream.Last.Peak);
+	// a publish is a launch action), with the creator update's AvgOwn and the usual average before tonight (SPEC_CREATORS §3.4:
+	// Live Drop's push, capped at 1.5x that). Kast itself is untouched.
+	video::algo::NoteStream(Life.Video, Stream.StartWorld, WorldMinutes(), Stream.Last.Peak, Stream.Last.AvgOwn, Stream.Last.NormBefore);
 	SponsorStreamDone();
+	// The creator update (SPEC_CREATORS §10.2): sponsor pay as LedgerSponsors lines, the pending release, the milestone stings'
+	// notices (played just below), before the payout (SessionKast.cpp).
+	KastAfterStop();
 	PlayStreamNotices();
 	PayOut("Kast payout");
 	StreamCard = true;
@@ -5274,8 +5374,10 @@ void Session::EndStream(const std::string& Raid)
 
 Chips Session::CashOut()
 {
-	const Chips Pay = Channel.UnpaidCents;
+	// What the payout paid (the creator update's pending release can make it more than the balance shown).
+	const Chips Before = Channel.PaidCents;
 	PayOut("Kast payout");
+	const Chips Pay = Channel.PaidCents - Before;
 	if (Pay > 0)
 	{
 		Sound(SoundId::Cash, 0.8);
@@ -5290,7 +5392,11 @@ void Session::StreamMoment(kast::Moment M, const std::string& Detail, double Siz
 	{
 		return;
 	}
-	Stream.OnMoment(Channel, StreamInputs(), M, Detail, Size);
+	const kast::Inputs In = StreamInputs();
+	// The creator update (SPEC_CREATORS §1.5 F5c): the room is brought up to this world minute first, so a moment never fires
+	// against the last tick's room (Recount's body is core-kastroom's).
+	Stream.Recount(Channel, In);
+	Stream.OnMoment(Channel, In, M, Detail, Size);
 }
 
 void Session::PlayStreamNotices()
@@ -5300,6 +5406,16 @@ void Session::PlayStreamNotices()
 		if (N.Type == kast::Notice::Kind::Text)
 		{
 			Hooks.Text(N.From, N.Body);
+			continue;
+		}
+		if (N.Sound >= 0)
+		{
+			// The creator update (SPEC_CREATORS §5.1): a notice with Kast's own cue joins the queue below in place of its kind's
+			// sound; a cue of an id already waiting folds into it (a final table's Run Alert and its sting are one KastAlert).
+			if (std::find(StreamCues.begin(), StreamCues.end(), N.Sound) == StreamCues.end())
+			{
+				StreamCues.push_back(N.Sound);
+			}
 			continue;
 		}
 		// One alert sound at a time; a burst of follows doesn't machine-gun the speakers.
@@ -5319,6 +5435,21 @@ void Session::PlayStreamNotices()
 		}
 	}
 	Stream.Notices.clear();
+	// Kast's cue queue: once the throttle frees (1.2 real s after the last alert sound) the best waiting cue by priority plays,
+	// one a call, so cues that land together play one after another; it drains after the stream ends too (StreamStep), so the
+	// end card's stings aren't lost.
+	if (!StreamCues.empty() && Now - StreamSoundAt >= 1.2)
+	{
+		auto BestCue = StreamCues.begin();
+		for (auto CueAt = StreamCues.begin(); CueAt != StreamCues.end(); ++CueAt)
+		{
+			BestCue = session_detail::KastCueRank(*CueAt) > session_detail::KastCueRank(*BestCue) ? CueAt : BestCue;
+		}
+		const int CueNow = *BestCue;
+		StreamCues.erase(BestCue);
+		StreamSoundAt = Now;
+		Hooks.Sound(static_cast<SoundId>(CueNow), session_detail::KastCueVolume(CueNow));
+	}
 }
 
 void Session::StreamStep()
@@ -5326,11 +5457,21 @@ void Session::StreamStep()
 	const double World = WorldMinutes();
 	if (!Stream.Live)
 	{
+		// The creator update (SPEC_CREATORS §5.1): Kast's cue queue drains after the stream has ended.
+		if (!StreamCues.empty())
+		{
+			PlayStreamNotices();
+		}
 		// Offline, the channel still turns over: renewals, clip views, deals running out (once a game minute is plenty).
 		if (OfflineAt < 0.0 || World - OfflineAt >= 1.0)
 		{
+			// The creator update (SPEC_CREATORS §8.4, C14, §10.2): Offline gets the world seed (its renewals and clip followers
+			// are keyed draws) and the rents paid (the pending hold); KastDaily sees the world minutes since the channel last
+			// turned over (Offline moves LastOffline on), a load's days away included (SessionKast.cpp).
+			const double From = std::min(Channel.LastOffline, World);
 			OfflineAt = World;
-			kast::Offline(Channel, World, KastRng);
+			kast::Offline(Channel, World, KastRng, WorldSeed(), Life.RentsPaid);
+			KastDaily(From, World);
 			SponsorStreamDone();
 		}
 		return;

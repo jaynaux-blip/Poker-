@@ -84,6 +84,12 @@ enum class SoundId : int
 	RitBell, // the desk bell, 1.6 s
 	RitStamp, // a stamp, a scalp, a credential, a printout
 	RitRank, // 0.25-0.4 one tick per place gained; 0.45 two notes falling (relegation); 0.5-0.6 rising (promotion)
+	// The creator update (SPEC_CREATORS §5.4): Kast's four cues, played through the Kast cue queue (Notice::Sound). Audio's
+	// bodies in Synth.cpp; until they land each renders silence, so playing one plays nothing.
+	KastAlert, // a two-note bell, 0.4: a Run Alert, a final table
+	KastRise,  // a rising airy shimmer, 0.35: Heat's tier-up at the commit
+	KastCall,  // a drum roll and a hit, 0.45: Hold or Crack's reveal
+	KastShine, // a bright milestone sting, 0.5: First Follower, the milestones
 };
 
 /**
@@ -626,6 +632,20 @@ public:
 	SHORTSTACKCORE_API bool StreamDemote(const std::string& Name);
 	SHORTSTACKCORE_API Chips StreamRead(const std::string& SponsorId);
 	SHORTSTACKCORE_API void StreamTitle(int Title);
+	// The creator update (SPEC_CREATORS §2.9, §5.3, §10.2): the new studio verbs and what Studio shows before going live.
+	// Declared in Phase A-K; the bodies are core-kastglue's (SessionKast.cpp): until they land the verbs refuse and the two
+	// readouts are empty.
+	SHORTSTACKCORE_API bool StreamNod(const std::string& Name);
+	SHORTSTACKCORE_API bool StreamRailCall();
+	SHORTSTACKCORE_API bool StreamWelcomeRaid();
+	SHORTSTACKCORE_API bool StreamSetScene();
+	SHORTSTACKCORE_API bool StreamCallIt(bool Holds);
+	/** The end card's "Clip it" (Clip of the Night, kast::Stream::ClipIt): after the stream, while Stream.Last.ClipItOpen. */
+	SHORTSTACKCORE_API bool StreamClipIt();
+	/** "Tonight: likely 8-14": the forecast for a stream started now (kast::Stream::Forecast). */
+	SHORTSTACKCORE_API kast::growth::Band KastForecast() const;
+	/** "#23 of 49 in Poker": the directory rank now (live, at the stream's count). */
+	SHORTSTACKCORE_API kast::growth::Standing KastRank() const;
 	/** Sponsor offers. Accepting takes one of the overlay's slots (kast::MaxDeals). */
 	SHORTSTACKCORE_API std::string AcceptDeal(const std::string& Id);
 	SHORTSTACKCORE_API void DeclineDeal(const std::string& Id);
@@ -795,6 +815,7 @@ public:
 	SHORTSTACKCORE_API std::string DebugVideo(const std::string& Args);
 	SHORTSTACKCORE_API std::string DebugSite(const std::string& Args);
 	SHORTSTACKCORE_API std::string DebugWorld(const std::string& Args); // SessionWorld.cpp (core-world)
+	SHORTSTACKCORE_API std::string DebugKast(const std::string& Args);  // SessionKast.cpp (core-kastglue): ss.Kast.* (SPEC_CREATORS §10.5)
 
 	// ------------------------------------------------------------ update 3 (update 3 SPEC §7.2)
 	// The revamped rival sites' loops, FUSE and Rerun 2.0. Declared in Phase A; the bodies are the feature tracks' (in
@@ -1051,6 +1072,24 @@ private:
 	void SponsorStream(kast::Inputs& In) const;
 	/** After Kast's step, a read, the offline turnover and the stream's end: what it did with the deals (sponsor::AbsorbStream) (SessionSponsor.cpp). */
 	void SponsorStreamDone();
+	// The creator update's hooks in Session.cpp (SPEC_CREATORS §10.2, the lead's), bodies in SessionKast.cpp (core-kastglue):
+	// stubs that change nothing until they land.
+	/** StreamInputs' hook: the deepest run over every table with its event's facts, the front table, the cached all-in equity
+	 *  (never computed here), Attended, the series window, the live night, Rerun's Heat bumps, the world seed, the rents paid. */
+	void KastInputsExtra(kast::Inputs& In) const;
+	/** GoLive's, before Stream.Start: an old channel's migration at its first stream under the new model (U3Kast unset), so
+	 *  Start's Ping, Pa and forecast read the seeded Heat, Norm and Bias (SPEC_CREATORS §8.3). */
+	void KastBeforeStart();
+	/** GoLive's, after Stream.Start: U3Kast (so the seeded state is written) and the one-time letter. */
+	void KastAfterStart();
+	/** NewCareer's, after Update 3's bits: a new career's channel under the new model from the start (U3Kast, Heat as of now,
+	 *  SPEC_CREATORS §8.1), so its first stream is no migration and gets no letter. */
+	void KastNewCareer();
+	/** EndStream's, before PayOut: sponsor pay as LedgerSponsors lines, the pending release, the milestone stings' notices. */
+	void KastAfterStop();
+	/** StreamStep's offline branch, after kast::Offline: the world minutes From (Channel::LastOffline before that step, so a
+	 *  load's days away are in it) to To, while the player isn't live. */
+	void KastDaily(double From, double To);
 	/** RenewGear's hook: a subscription the sponsor pays for this period (its renewal is skipped) (SessionSponsor.cpp). */
 	bool SponsorCovers(const std::string& GearId) const;
 	/** A pickup (++Life.Busts) or a restriction (++Life.Bans): sponsor::Conduct, then the stake record (Session.cpp). */
@@ -1105,6 +1144,9 @@ private:
 	double StreamWorldAt = -1.0;
 	double StreamRealAt = -1.0;
 	double StreamSoundAt = -100.0;
+	/** The creator update (SPEC_CREATORS §5.1): Kast's cue queue, the cues (SoundIds) waiting for the 1.2 s throttle. They play
+	 *  one at a time by priority, the stream's end included; a cue already waiting folds a second one of its id (not saved). */
+	std::vector<int> StreamCues;
 	double OfflineAt = -1.0;
 	Rng KastRng;
 	/** Update 3: when UiSound last played each id (Now; not saved). */

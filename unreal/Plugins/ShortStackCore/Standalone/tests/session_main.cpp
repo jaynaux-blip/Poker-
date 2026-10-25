@@ -18,6 +18,8 @@
 #include "ShortStack/Game/Stake.h"
 #include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/World.h"
+#include "ShortStack/UI/Canvas.h"
+#include "ShortStack/UI/RiverLine.h"
 #include "SessionSeg.h"
 
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/SitesDetail.h"
@@ -5921,6 +5923,67 @@ size_t LineBytesU2(const std::string& Text)
 	return Bytes;
 }
 
+// The creator update (SPEC_CREATORS §8.1, §8.2, C11): Kast's lines are kast\t, and Kast's first save budget (LineBytesKast,
+// <= 180 KB worst case, <= 165 KB on the heavy fixture at C-K) counts every one of them. Its new parts (kast\tmo, and the
+// fields appended to mem, log, goodwill and deal) are written only once U3Kast is set; LineBytesKastU3 counts just those, for
+// MigrationAll3 (outside LineBytesU3, so Update 3's own Rerun and site budgets never absorb Kast's member tails).
+
+/** The bytes every kast\t line takes (Kast's first save budget). */
+size_t LineBytesKast(const std::string& Text)
+{
+	return LineBytes(Text, {"kast\t"});
+}
+
+/** Of a kast\t line at [Start, End): the bytes of the fields the creator update appends (mem's and log's past P[11], goodwill's
+ *  past P[3], deal's past P[6]), counted as LineBytesU3 counts vid's; 0 for any other line or one without them. */
+size_t KastU3PartOf(const std::string& Text, size_t Start, size_t End)
+{
+	int Keep = 0;
+	if (Text.compare(Start, 9, "kast\tmem\t") == 0 || Text.compare(Start, 9, "kast\tlog\t") == 0)
+	{
+		Keep = 12;
+	}
+	else if (Text.compare(Start, 14, "kast\tgoodwill\t") == 0)
+	{
+		Keep = 4;
+	}
+	else if (Text.compare(Start, 10, "kast\tdeal\t") == 0)
+	{
+		Keep = 7;
+	}
+	int Fields = 1;
+	for (size_t I = Start; Keep > 0 && I < End; ++I)
+	{
+		if (Text[I] == '\t' && ++Fields > Keep)
+		{
+			return End - I - 1; // past the old fields' last one, to the line's end
+		}
+	}
+	return 0;
+}
+
+/** The bytes of the creator update's Kast lines: kast\tmo whole, and the fields appended to the old kast\t lines. */
+size_t LineBytesKastU3(const std::string& Text)
+{
+	size_t Bytes = 0;
+	size_t Start = 0;
+	while (Start < Text.size())
+	{
+		size_t End = Text.find('\n', Start);
+		End = End == std::string::npos ? Text.size() : End + 1;
+		if (Text.compare(Start, 8, "kast\tmo\t") == 0)
+		{
+			Bytes += End - Start;
+		}
+		else if (Text.compare(Start, 5, "kast\t") == 0)
+		{
+			Bytes += KastU3PartOf(Text, Start, End);
+		}
+		Start = End;
+	}
+	return Bytes;
+}
+
 /** The bytes Update 3's lines take (its sub-tags, and the fields appended to vid and cand): its own budget, world lines aside. */
 size_t LineBytesU3(const std::string& Text)
 {
@@ -7583,10 +7646,56 @@ std::vector<std::string> Committed()
 }
 
 /** The bytes of Update 3's lines in a save's text: its site\t and video\t sub-tags and the fields appended to vid and cand
- *  (journeys::LineBytesU3), and the League's world line. Zero in any save Update 3 never touched (S10). */
+ *  (journeys::LineBytesU3), the League's world line, and the creator update's Kast lines (kast\tmo and the fields appended to
+ *  mem, log, goodwill and deal: journeys::LineBytesKastU3, SPEC_CREATORS §9.1). Zero in any save Update 3 never touched (S10). */
 size_t U3Bytes(const std::string& Text)
 {
-	return journeys::LineBytesU3(Text) + journeys::LineBytes(Text, {"world\tleague\t"});
+	return journeys::LineBytesU3(Text) + journeys::LineBytes(Text, {"world\tleague\t"}) + journeys::LineBytesKastU3(Text);
+}
+
+/** Every kast\tmem line in a save's text has its 12 fields and no more (no member gains a field before U3Kast). */
+bool MembersUnchanged(const std::string& Text, int& Members)
+{
+	Members = 0;
+	bool Same = true;
+	size_t Start = 0;
+	while (Start < Text.size())
+	{
+		size_t End = Text.find('\n', Start);
+		End = End == std::string::npos ? Text.size() : End;
+		if (Text.compare(Start, 9, "kast\tmem\t") == 0)
+		{
+			++Members;
+			Same = Same && std::count(Text.begin() + static_cast<std::ptrdiff_t>(Start), Text.begin() + static_cast<std::ptrdiff_t>(End), '\t') == 11;
+		}
+		Start = End + 1;
+	}
+	return Same;
+}
+
+/** Text widths for drawing a page whose looks nobody checks here (the Kast pages opened in the no-write case). */
+struct FlatMeasurer : ss::ui::TextMeasurer
+{
+	float Width(const std::string& Text, ss::ui::Font /*Face*/, float SizePx) const override { return 0.55f * SizePx * static_cast<float>(Text.size()); }
+	float Ascent(ss::ui::Font /*Face*/, float SizePx) const override { return 0.8f * SizePx; }
+};
+
+/** Opens every Kast page on the laptop (ss.Laptop.Open's way) and draws it, the Studio's stream preview with it: what a player
+ *  who only looks at Kast does to a save. True when each page opened and drew. */
+bool OpenKastPages(ss::Session& S, double Now)
+{
+	ss::ui::RiverLine RL(S);
+	FlatMeasurer M;
+	bool Drew = true;
+	for (const char* Page : {"kast studio", "kast community", "kast channel", "kast browse"})
+	{
+		ss::ui::DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		const bool Open = RL.DebugOpen(Page);
+		RL.Draw(C, Now);
+		Drew = Drew && Open && !L.Cmds.empty();
+	}
+	return Drew;
 }
 
 /** A world's own text read a line at a time (World::Read takes a line's fields), then finished. */
@@ -7627,6 +7736,10 @@ void ReadWorldText(const std::string& Text, ss::world::World& W)
  * Then the no-write case's core half: update2_multisite (the clause's save) stepped 40 days through the calendar, so across
  * a 1st, writes no Update 3 line and sets no Update3LinesRead bit. Opening every rival page through ss.Laptop.Open and the
  * Kast preview of each join it at C2, with the rivals' frames; update3_siteplay's facts at C2 and update3_creator's at C3.
+ * The creator update (SPEC_CREATORS §9.1, Phase A-K): Update 3's bytes count Kast's new ones too (kast\tmo and the fields
+ * appended to mem, log, goodwill and deal), update3_* fixtures get the round trip only, and the no-write case also runs on
+ * update2_creator with every Kast page opened (no Kast line or field of the update, followers and subs kept, no member with a
+ * field more); update3_streamer's facts and its 165 KB at C-K.
  */
 void MigrationAll3()
 {
@@ -7703,7 +7816,9 @@ void MigrationAll3()
 			Again == Expected ? "byte for byte" : "with the last segment's own lines (as SaveFixtures allows)", First.size(),
 			Second == First ? "the same from a second load" : ("a second load differs at " + migration2::FirstDifference(First, Second)).c_str(), U3, migration2::Since(F0));
 		Expect(Reads && Second == First, (Tag + ": its session's save reads and writes back byte for byte, and loads a second time identically").c_str());
-		Expect(U3 == 0, (Tag + ": no Update 3 line written back or by its session (S10)").c_str());
+		// Update 3's own fixtures (update3_streamer at C-K, update3_siteplay at C2, update3_creator at C3) carry its lines: the
+		// round trip above is their check (SPEC_CREATORS §9.1).
+		Expect(U3 == 0 || Name.rfind("update3_", 0) == 0, (Tag + ": no Update 3 line written back or by its session (S10)").c_str());
 	}
 	// The no-write case's core half: the clause's save, 40 days of the calendar (ss.Stake.Advance's path: every step
 	// CheckCalendar runs, SiteStep and SitePlayStep, VideoStep and the world's), so across a 1st.
@@ -7722,6 +7837,55 @@ void MigrationAll3()
 		Expect(Parsed && Clause && Stepped.rfind("Advanced", 0) == 0 && S.WorldMinutes() - From >= 40.0 * ss::net::MinutesPerDay - 1.0 && U3 == 0 &&
 				   S.Life.Update3LinesRead == 0,
 			"migration (update 3): the no-write case: update2_multisite's 40 days across a 1st write no Update 3 line and set no Update 3 bit");
+	}
+	// The creator update's no-write case (SPEC_CREATORS §9.1): update2_creator (304 members, 60 log rows, 3 subs, 10 clips),
+	// every Kast page opened and the Studio's stream preview drawn, then 40 days of the calendar a day at a time with the
+	// offline channel turning over between them (StreamStep's Offline and KastDaily), the pages opened again every ten days.
+	// No Kast line or field of the creator update is written and no Update 3 bit set; followers and subs are kept, and no
+	// member gains a field.
+	{
+		ss::SaveData D;
+		const bool Parsed = ss::SaveData::Parse(seams::Fixture("update2_creator.ssave"), D);
+		Hooks H;
+		ss::Session S(H, "migration3-no-write-kast", &D);
+		S.CurrentScreen = ss::Screen::Lobby;
+		const int Followers0 = S.Channel.Followers;
+		const size_t Subs0 = S.Channel.Subs.size();
+		const size_t Members0 = S.Channel.Members.size();
+		const size_t Log0 = S.Channel.Log.size();
+		const size_t Clips0 = S.Channel.Clips.size();
+		int FollowersLeast = Followers0;
+		size_t SubsLeast = Subs0;
+		double Now = 0.0;
+		bool Opened = migration3::OpenKastPages(S, Now);
+		const double From = S.WorldMinutes();
+		bool Stepped = true;
+		for (int Day = 0; Day < 40; ++Day)
+		{
+			Stepped = S.DebugStake("advance 24").rfind("Advanced", 0) == 0 && Stepped;
+			for (int K = 0; K < 3; ++K)
+			{
+				Now += 1.0 / 30.0;
+				S.Update(Now);
+			}
+			FollowersLeast = std::min(FollowersLeast, S.Channel.Followers);
+			SubsLeast = std::min(SubsLeast, S.Channel.Subs.size());
+			Opened = (Day % 10 == 9 ? migration3::OpenKastPages(S, Now) : true) && Opened;
+		}
+		const std::string After = migration2::SavedNow(S, H);
+		int MemberLines = 0;
+		const bool SameMembers = migration3::MembersUnchanged(After, MemberLines);
+		const size_t U3 = migration3::U3Bytes(After);
+		std::printf("  migration (update 3): update2_creator (%zu members, %zu log rows, %zu subs, %zu clips, %d followers), every Kast page opened, stepped %.0f days: "
+					"Update 3 bytes %zu (Kast's %zu), Update3LinesRead %u; followers at least %d, subs at least %zu; %d member lines, %s; Kast lines %zu bytes\n",
+			Members0, Log0, Subs0, Clips0, Followers0, (S.WorldMinutes() - From) / ss::net::MinutesPerDay, U3, journeys::LineBytesKastU3(After),
+			static_cast<unsigned>(S.Life.Update3LinesRead), FollowersLeast, SubsLeast, MemberLines, SameMembers ? "none with a field more" : "SOME WITH A FIELD MORE",
+			journeys::LineBytesKast(After));
+		Expect(Parsed && Opened && Stepped && S.WorldMinutes() - From >= 40.0 * ss::net::MinutesPerDay - 1.0 && U3 == 0 && S.Life.Update3LinesRead == 0,
+			"migration (update 3): the creator update's no-write case: update2_creator with every Kast page opened, 40 days on, writes no Update 3 line and sets no "
+			"Update 3 bit");
+		Expect(FollowersLeast >= Followers0 && SubsLeast >= Subs0 && SameMembers && MemberLines == static_cast<int>(S.Channel.Members.size()),
+			"migration (update 3): the creator update's no-write case: followers and subs never fall, and no member gains a field");
 	}
 	std::printf("  migration (update 3): %d of %zu fixtures written back byte for byte (a world after its one migration; the rest but for the last segment's "
 				"own lines), none with an Update 3 line, %.1f s\n",

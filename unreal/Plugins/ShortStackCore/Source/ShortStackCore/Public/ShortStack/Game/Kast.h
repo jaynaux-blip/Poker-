@@ -2,11 +2,15 @@
 
 #include "ShortStack/Common.h"
 #include "ShortStack/Game/Gear.h"
+#include "ShortStack/Game/KastGrowth.h"
 #include "ShortStack/Rng.h"
 
+#include <array>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ss
@@ -121,6 +125,13 @@ struct Member
 	bool Follower = false;
 	bool Friend = false; // Dee and Mei: there from the first night
 	Chips Given = 0;     // tips, cheers and subs
+	// The creator update (SPEC_CREATORS §2.2, §2.8.2, §8.1), appended: kast\tmem's flags gain bit 4 Bonded and bit 8 Noticed,
+	// and the rest rides its tail (growth::MemberTail), written only when set. Read nowhere until core-kastroom's Room.
+	bool Bonded = false;  // present at a final table or a win on stream (100+ entrants): Affinity +5% of its gap, once
+	bool Noticed = false; // answered or Nodded: Affinity +3% of its gap, once
+	int GaveDay = -1;     // the world day of the last tip or cheer (per-visit giving's 21-day refractory)
+	double Hw = 0.0;      // hours watched lately as of HwDay (the attention budget; decays e^(-days / 7))
+	int HwDay = -1;
 };
 constexpr double RegularLoyalty = 0.35;
 constexpr double SuperfanLoyalty = 0.7;
@@ -159,6 +170,12 @@ struct StreamLog
 	std::string Title;
 	int Returning = 0; // members who came back
 	bool OnSchedule = false;
+	// The creator update (SPEC_CREATORS §2.10.3, §8.1), appended: kast\tlog's tail (growth::LogTail), written only under the new
+	// model; an old row reads -1 everywhere.
+	int AvgOwn = -1;         // the average without raiders and the Broadcast (Partner's rule); -1: read Avg
+	double PeakAt = -1.0;    // the stream minute of the peak
+	int PeakMoment = -1;     // the Moment at the peak, or -1
+	double HeatAfter = -1.0; // Heat after the night's commit
 };
 
 struct Deal
@@ -173,6 +190,12 @@ struct Deal
 	Chips PerHourCents = 0;
 	Chips ReadCents = 0;
 	bool Overlay = true; // holds one of the overlay's two slots (its mark in the corner)
+	// The creator update (SPEC_CREATORS C13, §8.1's ReadsPaid): this contract period's paid reads and the deal's reads ask, for
+	// the 1.5x cap (growth::SponsorReadPays). The book keeps both (sponsor::Contract's Now.Reads and Terms::Asks[Ask::Reads])
+	// and Sponsor.cpp is frozen, so Session::KastInputsExtra (core-kastglue) fills them on Inputs::Deals; read nowhere until the
+	// Room. ReadsAsk 0: the deal asks for no reads.
+	int ReadsPaid = 0;
+	int ReadsAsk = 0;
 };
 
 /** Kast's rules, over the last 30 days (Affiliate also needs 50 followers). */
@@ -180,6 +203,11 @@ constexpr int AffiliateFollowers = 50;
 constexpr double AffiliateMinutes = 500.0;
 constexpr int AffiliateDays = 7;
 constexpr double AffiliateAvg = 3.0;
+/** The creator update's Affiliate bar (SPEC_CREATORS C8, the real platform's current one; the average stays AffiliateAvg):
+ *  read nowhere until core-kastroom's Room and ui-kast's checklist take it in place of the three above, which are today's. */
+constexpr int AffiliateFollowersC8 = 25;
+constexpr double AffiliateMinutesC8 = 240.0;
+constexpr int AffiliateDaysC8 = 4;
 constexpr double PartnerMinutes = 25.0 * 60.0;
 constexpr int PartnerDays = 12;
 constexpr double PartnerAvg = 75.0;
@@ -238,6 +266,43 @@ struct Channel
 	int WeekRewarded = 0; // goals already paid out this week (bits)
 	std::map<std::string, int> Goodwill; // small channels raided -> times (they raid back)
 	int RaidsOut = 0;
+	// ---- The creator update (SPEC_CREATORS §2.2, §8.1), appended. Saved as kast\tmo (growth::WriteLines over a SaveView)
+	// and kast\tgoodwill's tail once life::U3Kast is set; read nowhere until core-kastroom's Room lands. The defaults are a
+	// new channel's (an old one is seeded at its first stream under the new model, §8.3).
+	double Heat = 26.0;     // the Heat meter, raw (8..100), as of HeatAt: growth::HeatAt decays it in closed form
+	double HeatAt = 0.0;    // world minutes
+	double Norm = 0.0;      // the channel's usual average (0.8 Norm + 0.2 Avg a stream of 60+ world minutes)
+	double Bias = 0.0;      // how the forecast usually lands here (log)
+	double RunNorm = 0.0;   // the usual night at the tables (Heat's news reads against it)
+	int BestAvg = 0;        // the record average
+	double PingAt = -1.0e9; // the last go-live ping (one per 4 world hours)
+	int LastStreamDay = -1; // the world day of the last stream (Welcome back, Heat's floor, Rerun's Heat rule)
+	int ShowWeek = -1;      // the show-up term's world week...
+	int ShowDays = 0;       // ...and the days it counted (bits, at most 4)
+	int GainWeek = -1;      // the world week of the positive night gains...
+	double GainUsed = 0.0;  // ...and their sum (at most 35)
+	int FtDays = 0;         // the world days with a final table (100+ entrants) on stream in the last 7: bits from FtBase
+	int FtBase = -1;
+	std::array<int, 7> LiveMin{}; // world minutes live on each of the last 7 world days, short streams included (H7's ring)
+	int LiveDay = -1;             // the ring's newest world day
+	int GrantDay = -1;            // the once-a-world-day grants used on GrantDay (growth::Grant bits)
+	uint32_t GrantMask = 0;
+	std::vector<std::pair<double, double>> RerunHeat; // Rerun's Heat bumps not yet applied: (world minute, amount), at most 4
+	bool WelcomeRaidDone = false; // the welcome raid came (or the channel was past stream 3 when the new model reached it)
+	int CotnDay = -1;             // Clip of the Night's world day
+	Chips PendingCents = 0;       // Affiliate revenue held while RentsPaid < 2 (C14)
+	double LiveSince = -1.0;      // an unfinished stream's start (-1: none)...
+	double GainSoFar = 0.0;       // ...and its ghost gain at the last save (a stream lost to a reload closes at min(this, 0))
+	// The per-stream accumulators (Stream's debts today), carried from stream to stream instead of reset at Start.
+	double CarryFollow = 0.0;
+	double CarryWord = 0.0;
+	double CarrySub = 0.0;
+	double CarryTip = 0.0;
+	double CarryCheer = 0.0;
+	double CarryRaid = 0.0;
+	double CarryGift = 0.0;
+	uint32_t Firsts = 0; // the one-time stings no other field remembers (growth::FirstBit: the first stranger's tip)
+	std::map<std::string, int> RaidedDay; // small channels raided -> the world day of the last raid out (the 7-day rule)
 
 	SHORTSTACKCORE_API int ActiveSubs(double World) const;
 	SHORTSTACKCORE_API double AvgViewers() const; // over the last ten streams
@@ -260,8 +325,20 @@ struct Channel
 	SHORTSTACKCORE_API const Deal* ActiveDeal(const std::string& Id, double World) const;
 };
 
-/** What the channel earns and loses while the player isn't live (sub renewals, clip views, deals running out). */
-SHORTSTACKCORE_API void Offline(Channel& Ch, double World, Rng& R);
+/**
+ * What the channel earns and loses while the player isn't live (sub renewals, clip views, deals running out). The creator
+ * update (SPEC_CREATORS §8.4, C14): Seed (Session::WorldSeed) keys the renewals and the clip followers, so a skip of N days
+ * is N one-day steps and R is never drawn; RentsPaid (life::State) holds the Affiliate money earned offline in PendingCents
+ * before the second rent. The session's offline branch passes both, Start passes its Inputs'; Phase A-K: neither is read.
+ */
+SHORTSTACKCORE_API void Offline(Channel& Ch, double World, Rng& R, uint64_t Seed = 0, int RentsPaid = 2);
+/**
+ * The creator update (SPEC_CREATORS §8.1): the Channel's appended state as kast\tmo's SaveView, field for field, and back.
+ * The Session's save block hands them to growth::WriteLines and growth::ReadLine, and only once life::U3Kast is set, so an
+ * untouched save never reaches them. core-kastroom's (Kast.cpp); Phase A-K's bodies copy every field.
+ */
+SHORTSTACKCORE_API growth::SaveView SaveViewOf(const Channel& Ch);
+SHORTSTACKCORE_API void ApplySaveView(Channel& Ch, const growth::SaveView& V);
 /** The level the channel is at, for the checklist: 0 none, 1 affiliate, 2 partner. */
 SHORTSTACKCORE_API int Tier(const Channel& Ch);
 
@@ -323,6 +400,9 @@ enum class Moment : int
 	Blunder,
 	Rival,
 	LevelUp,
+	// The creator update (SPEC_CREATORS §2.2, §2.3.5): the hero's table reaches three left (the Session fires it where it fires
+	// FinalTable). Inert until core-kastroom's Room: OnMoment ignores it.
+	Top3,
 	Count,
 };
 SHORTSTACKCORE_API const char* MomentName(Moment M);
@@ -432,6 +512,9 @@ struct Notice
 	Kind Type = Kind::Chime;
 	std::string From;
 	std::string Body;
+	/** The creator update (SPEC_CREATORS §5.1, §5.4): a SoundId (Session.h) the session plays through the Kast cue queue in
+	 *  place of the kind's own; -1 plays the kind's own (every notice until the Room sets one). */
+	int Sound = -1;
 };
 
 /** The facecam's face. */
@@ -471,6 +554,31 @@ struct Inputs
 	 *  thins the strangers; 8x and a skip count as Sprinting). */
 	double VideoBuzz = 0;
 	int WatchSpeed = 1;
+	// ---- The creator update (SPEC_CREATORS §2.2), appended: filled by Session::KastInputsExtra (core-kastglue), read by the
+	// Room (core-kastroom). Until both land nothing fills them and nothing reads them.
+	uint64_t Seed = 0; // Session::WorldSeed(): every keyed draw's seed (§2.12)
+	// The deepest live run over every table (the largest P x depth among armed runs), with its event's facts.
+	int DeepTable = -1;          // its table's id (-1: no run)
+	std::string DeepTournament;  // an id for the run (one tournament's stages are granted once)
+	std::string DeepEvent;       // its event's name ("$11 Big Stack")
+	int DeepSite = 0;            // its site (net::SiteId)
+	int DeepEntrants = 0;
+	int DeepRemaining = 0;
+	int DeepTableSize = 0;
+	int DeepPaid = 0;            // places paid
+	double Depth = 0;            // growth::Depth of the run
+	double Prestige = 0;         // growth::Prestige: P
+	double Series = 0;           // 1 a series main or a weekly major, 0.5 any other series event
+	Chips BuyInCents = 0;
+	int FrontTable = -1;         // the table in front (Hold or Crack: background tables fire AllIn too)
+	int ThisTable = -1;          // the table this call is about: a moment's own (a table behind takes its turn), else the front
+	                             // one; moments key on (world minute, kind, this table) (§2.12)
+	double AllInEquity = -1;     // the hero's equity at the all-in, from the cached SeatVis (never computed here); -1 unknown
+	bool Attended = true;        // the pace leaves real seconds (Smart, Full, watch 2x, the lobby, the results, an autoplay stop)
+	std::string SeriesWindow;    // the series running now (Network::CurrentSeries), "" none
+	bool LiveNightRecent = false; // a live Embercrest night that cashed in the last 48 world hours (Dee's line)
+	std::vector<std::pair<double, double>> RerunHeat; // Rerun's Heat bumps with their times (video::algo::KastHeatSince)
+	int RentsPaid = 0; // life::State::RentsPaid (C14: Affiliate revenue earned before the second rent waits as PendingCents)
 };
 
 /**
@@ -516,6 +624,57 @@ struct Summary
 	bool OnSchedule = false;
 	std::string RaidedOut; // the channel the stream ended by raiding
 	int RaidSize = 0;
+	// ---- The creator update (SPEC_CREATORS §2.2, §5.3 K17), appended: the night's facts the peak-first end card reads. Filled
+	// by core-kastroom's Room; empty until then.
+	double PeakAt = -1.0;    // the stream minute of the peak
+	int PeakMoment = -1;     // the Moment at the peak, or -1
+	double AvgOwn = 0.0;     // the average without raiders and the Broadcast (Partner's rule; Live Drop's push, NoteStream)
+	double HeatBefore = 0.0; // HeatShown at the go-live...
+	double GainSoFar = 0.0;  // ...and the night's gain (the ghost fill while live, committed at Stop)
+	std::array<int, 11> Sources{};       // tonight's people by where they came from (View::Source's order)
+	std::array<int, 11> FollowSources{}; // tonight's new followers by where they came from
+	std::vector<std::string> Regulars;   // the roll call: members present for the whole run
+	int Chatted = 0;         // the night's distinct chatters ("38 people chatted tonight")
+	int RunAlerts = 0;       // followers a Run Alert reached tonight...
+	int RunAlertsBack = 0;   // ...and the ones who came
+	bool RailCalled = false;
+	int RailReach = 0;
+	int RailArrived = 0;
+	int BroadcastSize = 0;   // the site's Broadcast tonight (0: none)
+	int RankStart = 0;       // the directory rank at the go-live and the night's best ("from #31 to #6")
+	int RankBest = 0;
+	growth::Band Fc;         // Start's forecast ("above your forecast")
+	Chips RenewCents = 0;    // renewals that came in while the streamer was away (apart from tonight's tips)
+	Chips PendingCents = 0;  // held until the second rent (C14)
+	std::string BestCaller;  // Hold or Crack's best caller tonight...
+	int BestCalls = 0;       // ...right this many times...
+	int BestCallsOf = 0;     // ...of this many
+	/** A raid in and how it held: "kat_v raided with 14 · still here at 15 min: 6 · followed: 2". */
+	struct RaidHeld
+	{
+		std::string From;
+		int Size = 0;
+		int At15 = 0;
+		int Followed = 0;
+		bool Broadcast = false;
+	};
+	std::vector<RaidHeld> RaidsHeld;
+	int PingReached = 0;            // the go-live ping: "Your ping reached 412 of 640 followers"...
+	int PingOf = 0;
+	std::array<int, 3> PingParts{}; // ...those it reached by when they last watched: this week, this month, lapsed (the Community page)
+	double NormBefore = 0.0;        // Channel::Norm at the go-live (Stop moves it): Live Drop's cap is 1.5x it (video::algo::NoteStream)
+	/** C13: a deal's pay tonight, which KastAfterStop books as its own LedgerSponsors lines ("TunnelRat: stream read · $10"),
+	 *  never inside the Kast payout. */
+	struct SponsorPay
+	{
+		std::string Id; // the brand
+		int Reads = 0;
+		Chips ReadCents = 0;
+		Chips HourCents = 0;
+	};
+	std::vector<SponsorPay> SponsorPaid;
+	bool ClipItOpen = false;   // Clip of the Night: the end card offers "Clip it" (Stream::ClipIt would take it)
+	bool BestClipLane = false; // tonight's best clip is in the Clip Lane ("in the Kast feed"), not unlisted
 };
 
 struct Prediction
@@ -530,10 +689,91 @@ struct Prediction
 	double ResolvedAt = 0.0; // real seconds
 };
 
+/**
+ * The creator update (SPEC_CREATORS §1.4, §5.1, §10.7): everything the UI reads of a live stream, filled once a Tick by the
+ * Room (core-kastroom) so every surface (the pill, StreamSide, the VIEWERS tile, the directory card, the 24-inch Studio, the
+ * tile strip) draws the same integer and no surface scans the community per chat line. Empty until the Room lands.
+ */
+struct View
+{
+	/** Where the people in the room came from (Sources, Summary::Sources). */
+	enum class Source : int
+	{
+		Members, // the community (the Ping, latecomers, Run Alerts, Rail Call)
+		Directory,
+		Fresh,   // Fresh on Kast
+		Rising,  // Rising in Poker
+		Rail,    // railbirds
+		Raid,
+		Broadcast,
+		Word,    // word of mouth
+		Video,   // Rerun
+		Clip,
+		Lurkers,
+		Count,
+	};
+	int Count = 0;      // whole people watching now
+	int ShownCount = 0; // the count the surfaces draw (one count-up clock for all of them)
+	int Chatting = 0;   // distinct speakers in the last 2 real minutes who are still present (<= Count)
+	std::array<int, static_cast<size_t>(Source::Count)> Sources{};
+	double Heat = 0, GhostGain = 0; // HeatShown and tonight's gain so far
+	int Tier = 0;                   // growth::Tier
+	std::array<std::string, 2> Why; // Heat's top two reasons, each a fact
+	bool EventMode = false;         // the last two tables of the deepest run
+	int DeepRemaining = 0, DeepEntrants = 0;
+	double Prestige = 0;
+	std::string DeepEvent;
+	/** StreamSide's one action slot (Hold or Crack > Welcome the raid > Rail Call; the others wait as chips). */
+	enum class Slot : int
+	{
+		None,
+		HoldCrack,
+		WelcomeRaid,
+		RailCall,
+	};
+	Slot Action = Slot::None;
+	int Waiting = 0; // the actions waiting as small chips under the strip: bits 1 << Slot (the one in Action excluded)
+	int RailReach = 0, RailArrived = 0;
+	bool WholeRail = false; // every follower is here already: no RAIL CALL, and StreamSide says "Your whole rail is here"
+	int RunAlertSent = 0, RunAlertBack = 0;
+	/** Hold or Crack while it's open: the present chatters' calls, the hero's equity and the streamer's own call. */
+	struct HoldCrack
+	{
+		bool Open = false;
+		int Holds = 0, Cracks = 0;
+		double Equity = 0;
+		int Called = 0; // the streamer's call: 0 none yet, 1 HOLDS, 2 CRACKS
+	};
+	HoldCrack HoC;
+	int Rank = 0, RankOf = 0, RankStart = 0; // "#23 of 49 in Poker", cached once a world minute
+	growth::Band Fc;
+	double Stamina = 1;
+	int NodsLeft = 3;
+	std::vector<std::string> Lit; // the names a Nod lights on the overlay (a world minute each), guests' included
+	int Thanks10 = 0;             // Thank chat's presses in the last 10 world minutes ("(chat heard you)" from two)
+	bool SceneOpen = false;       // Set the scene can be pressed now (a true 0 on streams 1-20, attended, once a stream)
+	bool HeadsDown = false;       // the pace leaves no real seconds and Engage is under 0.15: "heads-down tonight: chat is quieter"
+	int PingReached = 0, PingOf = 0; // the go-live ping's reach: "Your ping reached 412 of 640 followers (64%)"
+	std::vector<uint8_t> MemberFlags; // per member, cached each Tick: 1 regular, 2 mod, 4 Nodded, 8 present
+};
+static_assert(static_cast<size_t>(View::Source::Count) == 11, "Summary::Sources and FollowSources hold View::Source's 11 kinds");
+
+/** The Room's and the chat games' private state (Private/ShortStack/Game/KastRoom.h, core-kastroom's; KastPlay.h,
+ *  core-kastplay's): held by pointer so either can change without a Kast.h patch. */
+struct RoomState;
+struct PlayState;
+
 class Stream
 {
 public:
 	SHORTSTACKCORE_API explicit Stream(const std::string& Seed);
+	// The creator update (Phase A-K): the private state behind Room and Play keeps the special members out of line (Kast.cpp),
+	// where KastRoom.h and KastPlay.h are complete. A stream moves (the session starts a fresh one); it doesn't copy.
+	SHORTSTACKCORE_API ~Stream();
+	SHORTSTACKCORE_API Stream(Stream&& Other);
+	SHORTSTACKCORE_API Stream& operator=(Stream&& Other);
+	Stream(const Stream&) = delete;
+	Stream& operator=(const Stream&) = delete;
 
 	bool Live = false;
 	double StartWorld = 0.0;
@@ -622,7 +862,47 @@ public:
 
 	static constexpr int MaxMods = 6;
 
+	// ---- The creator update (SPEC_CREATORS §1.2, §2.9, §10.7). Declared in Phase A-K: the Room's bodies are core-kastroom's
+	// (Kast.cpp), the verbs' core-kastplay's (KastPlay.cpp, through a RoomView Kast.cpp implements). Until they land every one
+	// is inert: nothing calls them, they change nothing and the verbs refuse. Start, Stop, Tick, OnMoment and SponsorRead keep
+	// their signatures.
+	/** Runs the room on whole world minutes from StartWorld up to In.World, and nothing else changes channel state (R3). */
+	SHORTSTACKCORE_API void AdvanceTo(Channel& Ch, const Inputs& In);
+	/** Display chat over DReal real seconds: speakers sampled from the people present through the stream's own generator.
+	 *  Changes no channel state. */
+	SHORTSTACKCORE_API void ChatStep(Channel& Ch, const Inputs& In, double DReal);
+	/** AdvanceTo(In.World): the session's call before OnMoment, so a moment never fires against the last tick's room (F5c). */
+	SHORTSTACKCORE_API void Recount(Channel& Ch, const Inputs& In);
+	/** What the UI reads (an empty view until the Room fills it). */
+	SHORTSTACKCORE_API const View& GetView() const;
+	/** Whole people watching now: View::Count. */
+	SHORTSTACKCORE_API int Count() const;
+	/** Nod at a chatter: their name lights for a world minute (3 a stream, one a member). */
+	SHORTSTACKCORE_API bool Nod(Channel& Ch, const std::string& Name);
+	/** RAIL CALL: every follower not here gets a second roll (once a world day, from depth 0.4, attended). */
+	SHORTSTACKCORE_API bool RailCall(Channel& Ch, const Inputs& In);
+	/** Welcome the raid: within 2 world minutes of it, attended. */
+	SHORTSTACKCORE_API bool WelcomeRaid(Channel& Ch);
+	/** Set the scene: at a true 0 on streams 1-20, once a stream. */
+	SHORTSTACKCORE_API bool SetTheScene(Channel& Ch);
+	/** Hold or Crack: the streamer calls it. */
+	SHORTSTACKCORE_API bool CallIt(Channel& Ch, bool Holds);
+	/** Clip of the Night (§2.7.2): the end card's "Clip it" clips the ended stream's best moment, even at 0 viewers, while
+	 *  Summary::ClipItOpen (fewer than 2 in today's Clip Lane, 30+ world minutes, once a world day: CotnDay). */
+	SHORTSTACKCORE_API bool ClipIt(Channel& Ch, const Inputs& In);
+	/** The forecast for a stream started now (§2.11): "Tonight: likely 8-14", shown x e^Bias (Session::KastForecast). */
+	SHORTSTACKCORE_API static growth::Band Forecast(const Channel& Ch, const Inputs& In);
+	/** ss.Kast.*'s verbs that need the Room (Session::DebugKast forwards them): "room" (who is here by source, the guests'
+	 *  leave times, the next slot), "raid <size> [broadcast]", "moment <stage> [prestige] [entrants]" (a deepest run held at
+	 *  that stage until the stream ends), "forecast" (its terms). The answer to print; "" for a verb it doesn't take. */
+	SHORTSTACKCORE_API std::string DebugRoom(Channel& Ch, const Inputs& In, const std::string& Args);
+	/** Puts V up as the stream's view until the Room's next fill: kast_ui's pages draw states the Room hasn't reached. */
+	SHORTSTACKCORE_API void DebugView(const View& V);
+
 private:
+	// The creator update (Phase A-K): core-kastroom's helpers (RoomState's members in KastRoom.h, and the RoomView it implements
+	// for the chat games) reach the stream's private parts below (Say, Queue, Earn, R, the debts) without a Kast.h patch.
+	friend struct RoomState;
 	/** A community member watching tonight: when they turn up, when they leave, what happened. */
 	struct Visit
 	{
@@ -679,6 +959,10 @@ private:
 	double GiftDebt = 0.0;
 	int NextId = 1;
 	std::map<std::string, double> TimedOut; // name -> until (real)
+	// The creator update (Phase A-K): the Room's state (KastRoom.h, core-kastroom) and the chat games' (KastPlay.h,
+	// core-kastplay). Never null on a stream that wasn't moved from.
+	std::unique_ptr<RoomState> Room;
+	std::unique_ptr<PlayState> Play;
 };
 } // namespace kast
 } // namespace ss

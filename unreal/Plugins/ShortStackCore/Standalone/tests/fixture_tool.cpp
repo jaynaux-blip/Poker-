@@ -61,6 +61,18 @@
 //     date in Mail), and the next morning $40 out of Ignite: saved that afternoon with the withdrawal in transit. Without
 //     its world lines, like pre_update2_*.
 //
+// The creator update's Kast fixture (SPEC_CREATORS §8.2, §9.1; for PIE §9.4 and C-K's 165 KB check), built with the creator
+// update's code (compiled when the tree has Game/KastGrowth.h) and written only by a build whose Kast runs the new model (a
+// new career's first stream sets life::U3Kast; until core-kastglue's KastAfterStart does, write-g3k writes nothing):
+//   - update3_streamer: an Established career that streams five evenings a week on its posted schedule (Monday to Friday,
+//     7 PM), three world hours a night around an evening hyper it sprints, from Night One until its community reaches the
+//     member cap (1,500) or two years have passed, the Wash & Fold when the roll needs it. Without its world lines, like
+//     pre_update2_*.
+// And kast-worst, the synthetic worst save Kast's first budget (LineBytesKast <= 180 KB) is measured on: a save two years
+// in with every Kast list at its bound (1,500 members, 60 log rows, 300 subs, 36 goodwill names, 16 clips, 60 days, 6 mods)
+// and every field at its widest; it prints today's Kast lines, what this build writes once U3Kast is set, and the new lines
+// projected in §8.1's formats while their writers are stubs. Nothing is written.
+//
 //   fixture_tool write <dir>   writes the fixtures (the saves without their world lines, which go in world_v1.txt;
 //                              <name>.expected.ssave is what loading and saving the v1 save gives)
 //   fixture_tool write2 <dir>  writes update 2's day-0 fixtures (the saves without their world lines; world_v2.txt)
@@ -69,6 +81,12 @@
 //                              grows, every ten days, and the save's video lines)
 //   fixture_tool write-g3 <dir> [show]  writes update 2's gate 3 fixture (deterministic too; "show" prints the career's days
 //                              and the site book as it goes)
+//   fixture_tool write-g3k <dir> [show]  writes the creator update's Kast fixture, on a build with the new model only
+//                              ("show" prints the channel every ten days)
+//   fixture_tool g3k-dry <days>  builds update3_streamer's career for that many days on whatever Kast this build has and
+//                              prints the channel every ten days and its Kast lines' bytes; writes nothing (the lead's check
+//                              of the career before the model lands)
+//   fixture_tool kast-worst    measures the synthetic worst save's Kast lines (above); writes nothing
 //   fixture_tool transcript    prints every save as the careers are built and as each fixture is loaded and played on
 //                              (texts, ledgers, the whole save but the world, whose size and hash are printed), the
 //                              c09bc31 careers first, then update 2's; a build whose transcript matches the code the
@@ -117,10 +135,20 @@
 #define SS_FIXTURE_GATE3 0
 #endif
 
+// The creator update's Kast (SPEC_CREATORS §8.2, §9.1; its declarations date from Phase A-K's KastGrowth.h).
+#if SS_FIXTURE_GATE3 && __has_include("ShortStack/Game/KastGrowth.h")
+#define SS_FIXTURE_G3K 1
+#include "ShortStack/Game/Kast.h"
+#include "ShortStack/Game/KastGrowth.h"
+#else
+#define SS_FIXTURE_G3K 0
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -1899,6 +1927,392 @@ ss::SaveData Multisite()
 }
 #endif
 
+#if SS_FIXTURE_G3K
+namespace kast = ss::kast;
+
+/** The bytes a save's kast\t lines take, all of them (session_test's journeys::LineBytesKast), or those of one sub-tag. */
+size_t KastBytes(const std::string& Text, const char* Tag = "kast\t")
+{
+	size_t Bytes = 0;
+	size_t Start = 0;
+	const size_t Len = std::strlen(Tag);
+	while (Start < Text.size())
+	{
+		size_t End = Text.find('\n', Start);
+		End = End == std::string::npos ? Text.size() : End + 1;
+		Bytes += Text.compare(Start, Len, Tag) == 0 ? End - Start : 0;
+		Start = End;
+	}
+	return Bytes;
+}
+
+/** The stream kit and a little saved up (the creator's Night One): 32 GB of RAM to stream, a webcam, a USB mic, a ring light. */
+void StreamKit(ss::Session& S)
+{
+	S.BankrollCents += 160000;
+	for (const char* Id : {"ram-32", "webcam-720", "mic-usb", "ring-light"})
+	{
+		const std::string Why = S.Buy(Id);
+		if (!Why.empty())
+		{
+			std::printf("fixture: the streamer's %s: %s\n", Id, Why.c_str());
+		}
+	}
+}
+
+/** Whether this build's Kast runs the creator update's model: a new career's first stream sets life::U3Kast (Session::
+ *  KastAfterStart, core-kastglue's). Phase A-K's stubs leave it unset, so write-g3k writes nothing yet. */
+bool KastModelBuilt()
+{
+	Hooks H;
+	ss::Session S(H, "fixture-g3k-probe");
+	S.NewCareer(Someone());
+	S.CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(S, 0.0, 0.2);
+	StreamKit(S);
+	const bool OnAir = S.GoLive().empty();
+	Now = Wait(S, Now, 0.2);
+	const bool Model = (S.Life.Update3LinesRead & life::U3Kast) != 0;
+	if (OnAir)
+	{
+		S.EndStream();
+	}
+	(void)Now;
+	return OnAir && Model;
+}
+
+/** One line on the streamer's channel (the "show" mode's progress), its Kast lines measured on a save taken now. */
+void StreamerLine(ss::Session& S, const Hooks& H, int K)
+{
+	const kast::Channel& C = S.Channel;
+	S.Save();
+	const std::string Text = H.Last.Serialize();
+	std::printf("  [streamer] day %3d %s: %5d followers, %4zu members (%d regulars), %3d subs, %4d streams, average %.1f, %s paid; Kast lines %zu bytes; bank %s\n", K,
+		ss::net::DateLabel(ss::net::DayOf(S.WorldMinutes())).c_str(), C.Followers, C.Members.size(), C.Regulars(), C.ActiveSubs(S.WorldMinutes()), C.Streams,
+		C.AvgViewers(), ss::Money(C.PaidCents).c_str(), KastBytes(Text), ss::Money(S.BankrollCents).c_str());
+}
+
+/**
+ * update3_streamer (see the top): five evenings a week on the posted schedule, three world hours a night around the evening's
+ * hyper (sprinted), until the community reaches the member cap or MaxDays have passed; then saved the next afternoon.
+ */
+ss::SaveData Streamer3K(int MaxDays)
+{
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "fixture-g3k-streamer"));
+	S->NewCareer(Someone());
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.2);
+	StreamKit(*S);
+	S->StreamSchedule(0x1f, 19 * 60);
+	S->SprintBudgetMs = 1.0e9;
+	const ss::net::Network& Net = ss::net::Shared();
+	const int FirstDay = ss::net::DayOf(S->WorldMinutes());
+	int K = 0;
+	for (; K < MaxDays && static_cast<int>(S->Channel.Members.size()) < kast::MaxMembers; ++K)
+	{
+		const int DayNo = FirstDay + K;
+		// 7 AM: a shift when the roll's under the rent and a cushion.
+		Now = CreatorUntil(*S, Now, static_cast<double>(DayNo) * Day + 7.0 * 60.0);
+		Fed(*S);
+		if (S->BankrollCents < life::MonthlyRentCents + 40000 && S->StartActivity("washfold").empty())
+		{
+			for (int Guard = 0; S->TimeSkip.Active && Guard < 200; ++Guard)
+			{
+				Now = Wait(*S, Now, 0.5);
+			}
+		}
+		// Monday to Friday, 7 PM: live for three world hours, the evening's hyper sprinted when there's one in the first two.
+		if (ss::net::Weekday(DayNo) < 5)
+		{
+			const double Air = static_cast<double>(DayNo) * Day + 19.0 * 60.0;
+			Now = CreatorUntil(*S, Now, Air);
+			Fed(*S);
+			if (S->GoLive().empty())
+			{
+				ss::net::EventInstance I;
+				if (S->BankrollCents >= 500 && Net.Next("hyper-sprint", S->WorldMinutes() + 1.0, I) && I.Start < Air + 120.0)
+				{
+					CreatorSprint(*S, Now, I);
+				}
+				Now = CreatorUntil(*S, Now, Air + 180.0);
+				Now = Wait(*S, Now, 0.5);
+				S->EndStream();
+			}
+		}
+		if (Transcript && K % 10 == 9)
+		{
+			StreamerLine(*S, H, K + 1);
+		}
+	}
+	// Saved the next afternoon.
+	Now = CreatorUntil(*S, Now, static_cast<double>(FirstDay + K) * Day + 15.0 * 60.0);
+	Fed(*S);
+	Now = Wait(*S, Now, 0.2);
+	if (Transcript)
+	{
+		StreamerLine(*S, H, K);
+	}
+	S->Save();
+	return H.Last;
+}
+
+/** A handle of exactly Len characters, unique by N (the community's names run 5-17). */
+std::string WorstName(const char* Stem, int N, size_t Len)
+{
+	std::string Name = std::string(Stem) + "_" + std::to_string(N);
+	Name.insert(std::strlen(Stem), Len > Name.size() ? Len - Name.size() : 0, 'x');
+	return Name.substr(0, Len);
+}
+
+/** kast\tmo in §8.1's field order, at the view's values: the projection's line while growth::WriteLines is a stub (the real
+ *  format is core-kastmath's; this one spends the digits a full line would). */
+std::string ProjectedMo(const kast::growth::SaveView& V)
+{
+	std::string Out = "kast\tmo\t" + std::to_string(V.Version);
+	for (const double X : {V.Heat, V.HeatAt, V.Norm})
+	{
+		Out += "\t" + ss::Fixed(X, 2);
+	}
+	Out += "\t" + ss::Fixed(V.Bias, 4) + "\t" + ss::Fixed(V.RunNorm, 4) + "\t" + std::to_string(V.BestAvg) + "\t" + ss::Fixed(V.PingAt, 2);
+	for (const int X : {V.LastStreamDay, V.ShowWeek, V.ShowDays, V.GainWeek})
+	{
+		Out += "\t" + std::to_string(X);
+	}
+	Out += "\t" + ss::Fixed(V.GainUsed, 2) + "\t" + std::to_string(V.FtBase) + "\t" + std::to_string(V.FtDays) + "\t" + std::to_string(V.LiveDay);
+	for (const int M : V.LiveMin)
+	{
+		Out += "\t" + std::to_string(M);
+	}
+	Out += "\t" + std::to_string(V.GrantDay) + "\t" + std::to_string(V.GrantMask) + "\t" + (V.WelcomeRaidDone ? "1" : "0") + "\t" + std::to_string(V.CotnDay) + "\t" +
+		std::to_string(V.PendingCents) + "\t" + ss::Fixed(V.LiveSince, 2) + "\t" + ss::Fixed(V.GainSoFar, 2);
+	for (const double X : {V.CarryFollow, V.CarryWord, V.CarrySub, V.CarryTip, V.CarryCheer, V.CarryRaid, V.CarryGift})
+	{
+		Out += "\t" + ss::Fixed(X, 4);
+	}
+	std::string Heat;
+	for (const std::pair<double, double>& B : V.RerunHeat)
+	{
+		Heat += (Heat.empty() ? "" : ";") + ss::Fixed(B.first, 2) + "," + ss::Fixed(B.second, 1);
+	}
+	// Firsts last (the contract review's addition to §8.1: the one-time stings' bits).
+	return Out + "\t" + Heat + "\t" + std::to_string(V.Firsts) + "\n";
+}
+
+/**
+ * kast-worst (see the top): the synthetic worst save. A new career's save moved two years on (7-digit world minutes), its
+ * channel filled to every bound: 1,500 members with 17-character handles, 60 log rows under the longest title, 300 subs
+ * (lapsed ones' renewals negative), 16 clips with their candidates, 60 days live, 36 goodwill names, 6 mods. SPEC_CREATORS
+ * §8.2's worst case gives the numbers the widths REVIEW_ENGINEERING's kast_bytes.py gave them (a member's streams and
+ * messages three digits, what they gave four, a log row's average three); Widest gives every number the widest it can
+ * plausibly reach two years in (every member a superfan of 9,999 streams). Prints the Kast lines as today writes them, what
+ * this build adds once U3Kast is set (only the flags' second digit while the writers are Phase A-K's stubs), and the creator
+ * update's new lines projected in §8.1's formats; true when the whole is within §8.2's 180 KB.
+ */
+bool KastWorst(bool Widest)
+{
+	Hooks H;
+	ss::Session S(H, "fixture-kast-worst");
+	S.NewCareer(Someone());
+	S.CurrentScreen = ss::Screen::Lobby;
+	Wait(S, 0.0, 0.2);
+	S.Save();
+	ss::SaveData D = H.Last;
+	const int Today = 760;
+	const double World = static_cast<double>(Today) * Day + 23.0 * 60.0 + 59.75;
+	D.ClockMinutes = World - ss::net::MinutesPerDay * static_cast<double>(ss::net::NightOneDay);
+	const double Long = World - 0.25; // a world minute with all seven digits and both decimals
+	kast::Channel& K = D.Channel;
+	K = kast::Channel();
+	K.Title = 0;
+	std::string LongestTitle;
+	for (const kast::TitleSpec& T : kast::Titles())
+	{
+		LongestTitle = T.Text.size() > LongestTitle.size() ? T.Text : LongestTitle;
+	}
+	K.Followers = 999999;
+	K.FollowFrac = 0.9999;
+	K.MinutesLive = 999999.99;
+	K.ViewerMinutes = 99999999.9;
+	K.Peak = 99999;
+	K.Streams = 9999;
+	K.Affiliate = true;
+	K.Partner = true;
+	K.Milestone = 99;
+	K.LastOffline = Long;
+	K.GiftedSubs = 9999;
+	K.RaidsIn = 9999;
+	K.EarnedSubs = K.EarnedBits = K.EarnedTips = K.EarnedAds = K.EarnedSponsors = 99999999;
+	K.UnpaidCents = 9999999;
+	K.PaidCents = 99999999;
+	for (int N = 0; N < 300; ++N)
+	{
+		kast::Subscriber Sb;
+		Sb.Name = WorstName("subscriber", N, 17);
+		Sb.Since = Long;
+		Sb.Renews = -Long;
+		Sb.Months = 24;
+		Sb.Gift = true;
+		K.Subs.push_back(Sb);
+	}
+	for (int N = 0; N < kast::Stream::MaxMods; ++N)
+	{
+		kast::Moderator M;
+		M.Name = WorstName("moderator", N, 17);
+		M.Since = Long;
+		M.Actions = 9999;
+		M.Online = 0.999;
+		K.Mods.push_back(M);
+	}
+	for (int N = 0; N < 16; ++N)
+	{
+		kast::Clip Cl;
+		Cl.At = Long;
+		Cl.Views = 9999999.9;
+		Cl.Reach = 9999999.9;
+		Cl.Kind = static_cast<int>(kast::Moment::Count) - 1;
+		Cl.By = WorstName("clipper", N, 17);
+		Cl.Title = LongestTitle;
+		Cl.Candidate = "kast:" + std::to_string(static_cast<long long>(Long)) + ":" + std::to_string(N) + ":finaltable";
+		K.Clips.push_back(Cl);
+	}
+	for (int N = 0; N < 60; ++N)
+	{
+		kast::StreamLog Lg;
+		Lg.Start = Long;
+		Lg.Minutes = 1439.99;
+		Lg.Avg = Widest ? 9999 : 999;
+		Lg.Peak = Widest ? 99999 : 9999;
+		Lg.Follows = Widest ? 9999 : 999;
+		Lg.Subs = Widest ? 999 : 99;
+		Lg.Cents = Widest ? 9999999 : 999999;
+		Lg.Title = LongestTitle;
+		Lg.Returning = Widest ? 1500 : 999;
+		Lg.OnSchedule = true;
+		K.Log.push_back(Lg);
+	}
+	for (int N = 0; N < kast::MaxMembers; ++N)
+	{
+		kast::Member M;
+		M.Name = WorstName("member", N, 17);
+		M.Loyalty = 0.9999;
+		M.Affinity = 0.9999;
+		M.FirstSeen = Long;
+		M.LastSeen = Long;
+		M.Streams = Widest ? 9999 : 999;
+		M.WatchMinutes = 99999.9;
+		M.Messages = Widest ? 99999 : 999;
+		M.Follower = true;
+		M.Friend = N < 2;
+		M.Given = Widest ? 999999 : 9999;
+		K.Members.push_back(M);
+	}
+	K.ScheduleDays = 0x7f;
+	K.ScheduleStart = 1439;
+	K.Xp = 9999999.9;
+	K.Streak = 999;
+	K.Stage = 9;
+	K.Week = Today / 7;
+	K.WeekStreams = 99;
+	K.WeekMinutes = 9999.9;
+	K.WeekAnswers = 999;
+	K.WeekRegulars = 999;
+	K.WeekRewarded = 255;
+	K.ProcessedDay = Today;
+	K.RaidsOut = 9999;
+	for (int N = 0; N < 60; ++N)
+	{
+		K.DaysLive.push_back(Today - N);
+	}
+	for (int N = 0; N < 36; ++N)
+	{
+		K.Goodwill[WorstName("smallchannel", N, 17)] = 99;
+	}
+	// Today's Kast lines at the cap (U3Kast unset: what every save writes now).
+	D.Life.Update3LinesRead &= ~static_cast<uint32_t>(life::U3Kast);
+	const std::string Before = D.Serialize();
+	// The creator update's state at its widest, and U3Kast set: what this build writes then.
+	K.Heat = 100.0;
+	K.HeatAt = Long;
+	K.Norm = 9999.99;
+	K.Bias = -1.2345;
+	K.RunNorm = 99.9999;
+	K.BestAvg = 99999;
+	K.PingAt = Long;
+	K.LastStreamDay = Today;
+	K.ShowWeek = Today / 7;
+	K.ShowDays = 127;
+	K.GainWeek = Today / 7;
+	K.GainUsed = 35.0;
+	K.FtBase = Today;
+	K.FtDays = 127;
+	K.LiveDay = Today;
+	K.LiveMin.fill(1440);
+	K.GrantDay = Today;
+	K.GrantMask = 511;
+	K.WelcomeRaidDone = true;
+	K.CotnDay = Today;
+	K.PendingCents = 9999999;
+	K.LiveSince = Long;
+	K.GainSoFar = -99.99;
+	K.CarryFollow = K.CarryWord = K.CarrySub = K.CarryTip = K.CarryCheer = K.CarryRaid = K.CarryGift = 0.9999;
+	for (int N = 0; N < 4; ++N)
+	{
+		K.RerunHeat.push_back({Long, 12.0});
+	}
+	for (kast::Member& M : K.Members)
+	{
+		M.Bonded = true;
+		M.Noticed = true;
+		M.GaveDay = Today;
+		M.Hw = 99.9;
+		M.HwDay = Today;
+	}
+	for (kast::StreamLog& Lg : K.Log)
+	{
+		Lg.AvgOwn = 9999;
+		Lg.PeakAt = 1439.5;
+		Lg.PeakMoment = static_cast<int>(kast::Moment::Count) - 1;
+		Lg.HeatAfter = 100.0;
+	}
+	for (const auto& G : K.Goodwill)
+	{
+		K.RaidedDay[G.first] = Today;
+	}
+	D.Life.Update3LinesRead |= life::U3Kast;
+	const std::string After = D.Serialize();
+	// §8.1's new lines at these values, while their writers are stubs: kast\tmo whole; per member the flags' second digit
+	// (Bonded 4, Noticed 8: "13" for "1") and "\t<GaveDay>\t<Hw tenths>\t<HwDay>"; per log row "\t<AvgOwn>\t<PeakAt>\t
+	// <PeakMoment>\t<HeatAfter>"; per goodwill name "\t<LastRaidDay>".
+	const std::string DayText = std::to_string(Today);
+	const size_t MoBytes = ProjectedMo(kast::SaveViewOf(K)).size();
+	const size_t MemBytes = 1 + (1 + DayText.size()) + (1 + std::to_string(static_cast<int>(std::lround(99.9 * 10.0))).size()) + (1 + DayText.size());
+	const size_t LogBytes = (1 + std::string("9999").size()) + (1 + ss::Fixed(1439.5, 1).size()) + (1 + std::to_string(static_cast<int>(kast::Moment::Count) - 1).size()) +
+		(1 + ss::Fixed(100.0, 1).size());
+	const size_t GoodBytes = 1 + DayText.size();
+	const size_t Projected = MoBytes + K.Members.size() * MemBytes + K.Log.size() * LogBytes + K.Goodwill.size() * GoodBytes;
+	const size_t Today0 = KastBytes(Before);
+	const size_t Built = KastBytes(After);
+	const size_t Budget = 180 * 1024;
+	std::printf("kast-worst (%s): the synthetic worst save, day %d (world minute %s): %zu members, %zu log rows, %zu subs, %zu clips, %zu days, %zu goodwill, %zu mods\n",
+		Widest ? "every number at its widest" : "SPEC_CREATORS 8.2's worst case, kast_bytes.py's widths", Today, ss::Fixed(World, 2).c_str(), K.Members.size(), K.Log.size(),
+		K.Subs.size(), K.Clips.size(), K.DaysLive.size(), K.Goodwill.size(), K.Mods.size());
+	std::printf("  today's Kast lines: %zu bytes (%.1f KB): mem %zu, log %zu, sub %zu, clip %zu, goodwill %zu, day %zu, mod %zu, ch+earn+growth %zu\n", Today0, Today0 / 1024.0,
+		KastBytes(Before, "kast\tmem\t"), KastBytes(Before, "kast\tlog\t"), KastBytes(Before, "kast\tsub\t"), KastBytes(Before, "kast\tclip\t"), KastBytes(Before, "kast\tgoodwill\t"),
+		KastBytes(Before, "kast\tday\t"), KastBytes(Before, "kast\tmod\t"),
+		KastBytes(Before, "kast\tch\t") + KastBytes(Before, "kast\tearn\t") + KastBytes(Before, "kast\tgrowth\t"));
+	std::printf("  this build with U3Kast set: %zu bytes (+%zu: the flags' second digit%s)\n", Built, Built - Today0,
+		Built - Today0 > K.Members.size() ? " and the writers' lines" : "; the writers are stubs");
+	std::printf("  projected new lines (SPEC_CREATORS §8.1): kast\\tmo %zu, member tails %zu x %zu = %zu, log tails %zu x %zu = %zu, goodwill tails %zu x %zu = %zu: %zu bytes\n",
+		MoBytes, K.Members.size(), MemBytes, K.Members.size() * MemBytes, K.Log.size(), LogBytes, K.Log.size() * LogBytes, K.Goodwill.size(), GoodBytes,
+		K.Goodwill.size() * GoodBytes, Projected);
+	const size_t Total = std::max(Built, Today0 + Projected);
+	std::printf("  LineBytesKast at the worst case: %zu bytes (%.1f KB) against the 180 KB budget (%zu): %s; the members alone %.1f KB with their tails\n", Total, Total / 1024.0,
+		Budget, Total <= Budget ? "within it" : "OVER IT", (KastBytes(Before, "kast\tmem\t") + K.Members.size() * MemBytes) / 1024.0);
+	return Total <= Budget;
+}
+#endif
+
 bool WriteFile(const std::string& Path, const std::string& Text)
 {
 	FILE* F = std::fopen(Path.c_str(), "wb");
@@ -1939,13 +2353,51 @@ int main(int Argc, char** Argv)
 {
 	using namespace fixture_tool;
 	const std::string Mode = Argc > 1 ? Argv[1] : "";
-	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "write-g2" && Mode != "write-g3" && Mode != "transcript")
+	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "write-g2" && Mode != "write-g3" && Mode != "write-g3k" && Mode != "g3k-dry" && Mode != "kast-worst" &&
+		Mode != "transcript")
 	{
 		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool write-g1 <dir> [show] | fixture_tool write-g2 <dir> [show] | fixture_tool write-g3 <dir> "
-					"[show] | fixture_tool transcript\n");
+					"[show] | fixture_tool write-g3k <dir> [show] | fixture_tool g3k-dry <days> | fixture_tool kast-worst | fixture_tool transcript\n");
 		return 2;
 	}
 	Transcript = Mode == "transcript";
+	if (Mode == "write-g3k" || Mode == "g3k-dry" || Mode == "kast-worst")
+	{
+#if SS_FIXTURE_G3K
+		if (Mode == "kast-worst")
+		{
+			// §8.2's worst case decides; the widest case is printed beside it.
+			const bool Within = KastWorst(false);
+			KastWorst(true);
+			return Within ? 0 : 1;
+		}
+		if (Mode == "g3k-dry")
+		{
+			// The career on whatever Kast this build has, printed every ten days; nothing written.
+			Transcript = true;
+			const ss::SaveData D = Streamer3K(Argc > 2 ? std::max(1, std::atoi(Argv[2])) : 30);
+			std::printf("g3k-dry: %zu bytes of Kast lines in the save (%zu members); nothing written\n", KastBytes(D.Serialize()), D.Channel.Members.size());
+			return 0;
+		}
+		if (Argc < 3)
+		{
+			std::printf("usage: fixture_tool write-g3k <dir> [show]\n");
+			return 2;
+		}
+		if (!KastModelBuilt())
+		{
+			std::printf("fixture_tool write-g3k: this build's Kast doesn't run the creator update's model yet (a first stream sets no U3Kast): nothing written\n");
+			return 2;
+		}
+		// "show" prints the channel every ten days as the career is built.
+		Transcript = Argc > 3 && std::string(Argv[3]) == "show";
+		const std::string Dir = std::string(Argv[2]) + "/";
+		return WriteFile(Dir + "update3_streamer.ssave", WithoutWorld(Streamer3K(730).Serialize())) ? 0 : 1;
+#else
+		std::printf("fixture_tool %s: this tree has no creator update (Game/KastGrowth.h)\n", Mode.c_str());
+		return 2;
+#endif
+	}
 	if (Mode == "write-g3")
 	{
 #if SS_FIXTURE_GATE3

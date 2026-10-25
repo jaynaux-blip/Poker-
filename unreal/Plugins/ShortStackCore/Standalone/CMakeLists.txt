@@ -179,6 +179,22 @@ target_link_libraries(rerun_ui_test PRIVATE ShortStackCore)
 target_compile_definitions(rerun_ui_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
 add_test(NAME rerun_ui COMMAND rerun_ui_test)
 
+# The creator update (SPEC_CREATORS §9.1, Update 3's G3 expanded): two suites of its own. kast_growth (the 23rd; <= 60 s, "long"
+# the gates' run) links the core like video_channel: Kast's pure growth model (core-kastmath, kastgrowth_main.cpp), the Room and
+# the careers on AdvanceTo's minute grid (core-kastroom, kastgrowth_session.cpp), the chat games (core-kastplay,
+# kastgrowth_play.cpp); the kit is KastGrowthSeg.h. kast_ui (the 24th; <= 60 s) is Kast's screens (ui-kast, ui_seg_kast.cpp)
+# apart from riverline_ui, with the UI kit's definitions in ui_seg_kit.cpp. The core's new files (KastGrowth.cpp, KastCopy.cpp,
+# KastPlay.cpp, SessionKast.cpp, UI/RiverLineKastGrowth.cpp) come in through CORE_SOURCES' glob, as Unreal's module globs them.
+add_executable(kastgrowth_test tests/kastgrowth_main.cpp tests/kastgrowth_session.cpp tests/kastgrowth_play.cpp)
+target_link_libraries(kastgrowth_test PRIVATE ShortStackCore)
+target_compile_definitions(kastgrowth_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME kast_growth COMMAND kastgrowth_test)
+
+add_executable(kast_ui_test tests/kast_ui_main.cpp tests/ui_seg_kit.cpp tests/ui_seg_kast.cpp)
+target_link_libraries(kast_ui_test PRIVATE ShortStackCore)
+target_compile_definitions(kast_ui_test PRIVATE SS_TESTS_DIR="${SS_TESTS_DIR}")
+add_test(NAME kast_ui COMMAND kast_ui_test)
+
 # Not a suite: core-styles' chart compiler (update 2 SPEC §2.4.2, §2.4.4), Tests/charts/*.txt into AI/ChartTables.cpp.
 add_executable(chartgen tools/chartgen/chartgen_main.cpp)
 target_link_libraries(chartgen PRIVATE ShortStackCore)

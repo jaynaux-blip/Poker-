@@ -22,10 +22,14 @@
 //          ritblip, ritflap, ritbell, ritstamp, ritrank), at the volume given (0.4 if none), through Session::UiSound as
 //          the pages play them: the lead hears each in the game's own mix (§9.2), the two with no G1 page (igpop, igfuse)
 //          included. "igboom 0.6" is the long tail; "ritrank 0.45" falls, "ritrank 0.55" rises
+//   ss.Kast.Describe | .Grant <followers> [regulars] [subs] | .Heat <h> | .Moment <bubble|itm|ft|top3|win|allin> [prestige]
+//          [entrants] | .Raid <size> [broadcast] | .Room | .Advance <days> | .Rent | .Forecast
+//          the creator update's (SPEC_CREATORS §10.5): to the session's DebugKast, as ss.Video.* go to DebugVideo
+//          ("ss.Kast.Moment ft 1.40 980" is "moment ft 1.40 980"), so every PIE check of §9.4 is a minute away
 //
 // Every body behind them is a feature track's (core-siteplay's DebugSitePlay in SessionSitePlay.cpp; core-videoalgo's and
-// core-videocontent's verbs in SessionVideo.cpp and SessionVideo3.cpp; the laptop pages DebugOpen knows): until a track
-// lands, its commands answer with the stub's line.
+// core-videocontent's verbs in SessionVideo.cpp and SessionVideo3.cpp; core-kastglue's DebugKast in SessionKast.cpp; the
+// laptop pages DebugOpen knows): until a track lands, its commands answer with the stub's line.
 
 #include "CoreMinimal.h"
 #include "Engine/World.h"
@@ -53,6 +57,7 @@ enum class EUpdate3Feature : uint8
 	Laptop,
 	SitePlay,
 	Video,
+	Kast,
 };
 
 void Update3Log(const TCHAR* Name, const FString& Line, const FString& Answer)
@@ -81,14 +86,15 @@ void Update3Open(FNightOneGame& Game, const FString& Line)
 
 void Update3Forward(EUpdate3Feature Feature, const TCHAR* Verb, const TArray<FString>& Args, UWorld* World)
 {
-	// ss.Laptop.Open and ss.Site.Play name their verb in the first argument; ss.Video.* in the command.
+	// ss.Laptop.Open and ss.Site.Play name their verb in the first argument; ss.Video.* and ss.Kast.* in the command.
 	FString Line = Verb ? FString(Verb).ToLower() : FString();
 	for (int32 I = 0; I < Args.Num(); ++I)
 	{
 		const bool bVerb = !Verb && I == 0 && Feature == EUpdate3Feature::SitePlay;
 		Line += (Line.IsEmpty() ? FString() : FString(TEXT(" "))) + (bVerb ? Args[I].ToLower() : Args[I]);
 	}
-	const TCHAR* Name = Feature == EUpdate3Feature::Laptop ? TEXT("ss.Laptop.Open") : Feature == EUpdate3Feature::SitePlay ? TEXT("ss.Site.Play") : TEXT("ss.Video");
+	const TCHAR* Name = Feature == EUpdate3Feature::Laptop ? TEXT("ss.Laptop.Open") : Feature == EUpdate3Feature::SitePlay ? TEXT("ss.Site.Play")
+		: Feature == EUpdate3Feature::Kast ? TEXT("ss.Kast") : TEXT("ss.Video");
 	FNightOneGame* Game = Update3GameIn(World);
 	if (!Game)
 	{
@@ -105,7 +111,7 @@ void Update3Forward(EUpdate3Feature Feature, const TCHAR* Verb, const TArray<FSt
 		Line = TEXT("describe");
 	}
 	const std::string In(TCHAR_TO_UTF8(*Line));
-	const std::string Out = Feature == EUpdate3Feature::SitePlay ? Game->Session.DebugSitePlay(In) : Game->Session.DebugVideo(In);
+	const std::string Out = Feature == EUpdate3Feature::SitePlay ? Game->Session.DebugSitePlay(In) : Feature == EUpdate3Feature::Kast ? Game->Session.DebugKast(In) : Game->Session.DebugVideo(In);
 	Update3Log(Name, Line, FString(UTF8_TO_TCHAR(Out.c_str())));
 	if (Feature == EUpdate3Feature::Video && Line.StartsWith(TEXT("sheet")))
 	{
@@ -145,6 +151,19 @@ FUpdate3Command VideoAds(EUpdate3Feature::Video, TEXT("ss.Video.Ads"), TEXT("Ads
 FUpdate3Command VideoLaunch(EUpdate3Feature::Video, TEXT("ss.Video.Launch"), TEXT("Launch"),
 	TEXT("ss.Video.Launch <id> <cut|kast|teaser|reply>: a launch action for a new video; the time still passes (testing)."));
 FUpdate3Command VideoDuel(EUpdate3Feature::Video, TEXT("ss.Video.Duel"), TEXT("Duel"), TEXT("ss.Video.Duel <id>: the Thumbnail Duel without the laptop, as Studio's Duel picker sets it; the time still passes (testing)."));
+// The creator update's Kast (SPEC_CREATORS §10.5; core-kastglue's DebugKast).
+FUpdate3Command KastDescribe(EUpdate3Feature::Kast, TEXT("ss.Kast.Describe"), TEXT("Describe"),
+	TEXT("The Kast channel: followers, the community by loyalty, Heat and its why lines, Norm, Bias, the forecast band, pending money; live, the room by source."));
+FUpdate3Command KastGrant(EUpdate3Feature::Kast, TEXT("ss.Kast.Grant"), TEXT("Grant"),
+	TEXT("ss.Kast.Grant <followers> [regulars] [subs]: grows the channel (members at a loyalty spread, followers past the cap as lurkers) (testing)."));
+FUpdate3Command KastHeat(EUpdate3Feature::Kast, TEXT("ss.Kast.Heat"), TEXT("Heat"), TEXT("ss.Kast.Heat <h>: sets Heat, as of now (testing)."));
+FUpdate3Command KastMoment(EUpdate3Feature::Kast, TEXT("ss.Kast.Moment"), TEXT("Moment"),
+	TEXT("ss.Kast.Moment <bubble|itm|ft|top3|win|allin> [prestige] [entrants]: a moment on the live stream with a deep run at that stage (testing)."));
+FUpdate3Command KastRaid(EUpdate3Feature::Kast, TEXT("ss.Kast.Raid"), TEXT("Raid"), TEXT("ss.Kast.Raid <size> [broadcast]: an incoming raid, or the site's Broadcast (testing)."));
+FUpdate3Command KastRoom(EUpdate3Feature::Kast, TEXT("ss.Kast.Room"), TEXT("Room"), TEXT("Who is in the live room by source, the guests with their leave times, the next slot's comings and goings."));
+FUpdate3Command KastAdvance(EUpdate3Feature::Kast, TEXT("ss.Kast.Advance"), TEXT("Advance"), TEXT("ss.Kast.Advance <days>: steps the channel offline that many days (testing)."));
+FUpdate3Command KastRent(EUpdate3Feature::Kast, TEXT("ss.Kast.Rent"), TEXT("Rent"), TEXT("Marks the second rent paid, to see the first Kast payout (testing)."));
+FUpdate3Command KastForecast(EUpdate3Feature::Kast, TEXT("ss.Kast.Forecast"), TEXT("Forecast"), TEXT("The forecast for a stream started now, term by term."));
 
 /** ss.Sound.Cue <name> [volume]: one of the sites' ten cues through Session::UiSound (its 50 ms per id included). */
 void Update3Cue(const TArray<FString>& Args, UWorld* World)

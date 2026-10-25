@@ -468,6 +468,10 @@ enum Update3Line : uint32_t
 {
 	U3SitePlay = 1, // site\t play sub-tags (site::play::WriteLines)
 	U3Video = 2,    // video\t Update 3 sub-tags and vid's appended fields (video::WriteLinesU3)
+	// The creator update (SPEC_CREATORS C11, §8.1): kast\tmo and the kast\tmem, log and goodwill tails (kast::growth). Set when
+	// a kast\tmo line was read, by NewCareer, or at the first Stream::Start under the new model (Session::KastAfterStart);
+	// never in AfterParse, by the stream preview, by opening a Kast page or by Offline. Phase A-K: nothing sets it yet.
+	U3Kast = 4,
 };
 
 /**

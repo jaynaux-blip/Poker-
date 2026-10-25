@@ -805,6 +805,13 @@ std::vector<float> Render(SoundId Id, float Volume, uint32_t Seed)
 	case SoundId::RitStamp:
 	case SoundId::RitRank:
 		return CueRender(Id, V, R);
+	// The creator update (SPEC_CREATORS §5.4): Kast's four cues. Their bodies are audio's (wave 1); until then each renders
+	// silence (an empty buffer, which the host doesn't play).
+	case SoundId::KastAlert:
+	case SoundId::KastRise:
+	case SoundId::KastCall:
+	case SoundId::KastShine:
+		break;
 	case SoundId::Win:
 		for (int I = 0; I < 8; ++I)
 		{

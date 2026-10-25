@@ -37,9 +37,13 @@ inline constexpr const char* kSourceScan[] = {
 	"brad owen", "andrew neeme", "doug polk", "jonathan little", "lex veldhuis", "spraggy", "hungry horse", "jaman burton", "johnnie vibes", "kevin martin",
 	"joey ingram", "alexandra botez", "hustler casino live", "lodge live"};
 
-/** Real names that are also ordinary words or fragments: screened over the copy inventories only. */
+/** Real names that are also ordinary words or fragments: screened over the copy inventories only. The creator update
+ *  (SPEC_CREATORS §5.5, Phase A-K) adds the real platforms' feature names its Kast and Rerun copy avoids ("drops" stays out:
+ *  it is ordinary copy, and "Live Drop" is screened by hand). Its "spotlight" waits: Ignite's BUZZ says "The spotlight on
+ *  {Headliner}'s seat is so dramatic." (RiverLineIgnite.cpp), the word's ordinary sense, which this tier would flag. */
 inline constexpr const char* kCopyScan[] = {"kick", "rumble", "twitch", "888", "wsop", "world series", "wpt", "upswing", "bodog", "ignition", "shorts", "premieres",
-	"backstage", "run good", "rungood", "streak freeze", "battle pass", "bumper", "ept", "acr", "supernova", "rampage", "wolfgang", "mariano"};
+	"backstage", "run good", "rungood", "streak freeze", "battle pass", "bumper", "ept", "acr", "supernova", "rampage", "wolfgang", "mariano",
+	"reels", "shout-out", "shoutout", "hype train", "discovery feed", "play button", "subathon", "channel points", "watch streak", "premiere"};
 
 /** Literals a gate's review keeps on purpose despite a kSourceScan word (each with its reason); empty at Phase A. */
 inline constexpr const char* kGrandfathered[] = {""};

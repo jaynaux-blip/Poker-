@@ -5,6 +5,7 @@
 #include "ShortStack/Game/VideoStats.h"
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace ss
@@ -50,8 +51,12 @@ struct Score
 SHORTSTACKCORE_API Score ScoreAt(const Video& V, const Channel& C, double World, int Stage);
 /** S0_base: the same upload with every Update 3 lever neutral. */
 SHORTSTACKCORE_API double ScoreBase(const Video& V, const Channel& C);
-/** R = kick / (kappa(0) x s_v x P0) into the five verdicts (Not pushed .. Pushed hard). */
-SHORTSTACKCORE_API int8_t VerdictLabel(double Kick, double P0, Class K);
+/**
+ * The creator update (SPEC_CREATORS §3.2): the five verdicts (Not pushed .. Pushed hard) read how the video did, from
+ * rp = Perf + 0.5 (S - S0Base): < -0.8 Not pushed, < -0.1 Held, < 0.6 Pushed, < 1.2 Pushed more, else Pushed hard. Replaces
+ * v1.2's VerdictLabel(Kick, P0, Class), which nothing called.
+ */
+SHORTSTACKCORE_API int8_t VerdictLabel(double Perf, double S, double S0Base);
 /** A world midnight's decisions, two-phase (§4.6.3): every eligible video scored, then the components appended. */
 SHORTSTACKCORE_API void DecideDay(Channel& C, life::State& L, int Day, const std::vector<Trend>* Week);
 SHORTSTACKCORE_API double PeakHour(const Channel& C, int Weekday);
@@ -60,8 +65,14 @@ SHORTSTACKCORE_API Comp RepackComp(const Video& V, double T0, double NewCtr);
 SHORTSTACKCORE_API double Momentum(const Channel& C, double World);
 /** Update 3's extra editing over the last 7 days (§4.6.6): never an upload's Update 2 edit. */
 SHORTSTACKCORE_API double ExtraHours7(const Channel& C, double World);
-/** A finished Kast stream (Session::EndStream): a launch action when it was within 6 hours of a publish. */
-SHORTSTACKCORE_API void NoteStream(Channel& C, double Start, double End, int PeakViewers);
+/** A finished Kast stream (Session::EndStream): a launch action when it was within 6 hours of a publish. The creator update
+ *  (SPEC_CREATORS §3.4, Live Drop): AvgOwn, the stream's average without raiders and the Broadcast, sizes the push, capped
+ *  at 1.5 x Norm, the channel's usual average before tonight (kast::Summary::NormBefore: Stop has already moved
+ *  kast::Channel::Norm); both 0 until the Room fills them. */
+SHORTSTACKCORE_API void NoteStream(Channel& C, double Start, double End, int PeakViewers, double AvgOwn = 0.0, double Norm = 0.0);
+/** The creator update (SPEC_CREATORS §3.3): the Kast Heat Rerun earned since Since ("Pushed hard" +6, a breakout or a narrated
+ *  viral +10), each bump with its world minute, oldest first; Kast caps and decays them when it applies them at Start. */
+SHORTSTACKCORE_API std::vector<std::pair<double, double>> KastHeatSince(const Channel& C, double Since);
 } // namespace algo
 } // namespace video
 } // namespace ss

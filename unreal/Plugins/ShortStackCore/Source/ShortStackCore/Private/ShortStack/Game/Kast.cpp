@@ -3,10 +3,13 @@
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Handles.h"
 #include "ShortStack/Game/Sponsor.h"
+#include "KastPlay.h"
+#include "KastRoom.h"
 #include "SponsorCopy.h"
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace ss
 {
@@ -401,7 +404,9 @@ bool KastStrangersMuted(const std::vector<std::string>& Pool, int StrangersShown
 	return true;
 }
 
-const char* const MomentNames[] = {"Register", "AllIn", "WonAllIn", "LostAllIn", "BadBeat", "BigPot", "Knockout", "Bubble", "InTheMoney", "FinalTable", "Win", "Bust", "Cashed", "BestPlay", "Blunder", "Rival", "LevelUp"};
+const char* const MomentNames[] = {"Register", "AllIn", "WonAllIn", "LostAllIn", "BadBeat", "BigPot", "Knockout", "Bubble", "InTheMoney", "FinalTable", "Win", "Bust", "Cashed", "BestPlay", "Blunder", "Rival", "LevelUp",
+	"Top3"};
+static_assert(sizeof(MomentNames) / sizeof(MomentNames[0]) == static_cast<size_t>(Moment::Count), "a name for every Moment");
 
 /** How hard a moment hits: hype added, chat lines it sets off. */
 struct Hit
@@ -999,8 +1004,9 @@ std::vector<SmallChannel> Network(double World)
 	return Live;
 }
 
-void Offline(Channel& Ch, double World, Rng& R)
+void Offline(Channel& Ch, double World, Rng& R, uint64_t /*Seed*/, int /*RentsPaid*/)
 {
+	// The creator update (Phase A-K): Seed and RentsPaid wait for core-kastroom's keyed renewals and the offline pending hold.
 	if (World <= Ch.LastOffline)
 	{
 		return;
@@ -1100,10 +1106,174 @@ void Offline(Channel& Ch, double World, Rng& R)
 	// (Deals run out in the sponsor book now: Kast works on its view, next_segment_spec §3.8.)
 }
 
+// The creator update (SPEC_CREATORS §8.1): kast\tmo's view of the Channel, in the line's field order. core-kastroom's; the
+// Session reaches these only once life::U3Kast is set (Phase A-K: never).
+
+growth::SaveView SaveViewOf(const Channel& Ch)
+{
+	growth::SaveView V;
+	V.Heat = Ch.Heat;
+	V.HeatAt = Ch.HeatAt;
+	V.Norm = Ch.Norm;
+	V.Bias = Ch.Bias;
+	V.RunNorm = Ch.RunNorm;
+	V.BestAvg = Ch.BestAvg;
+	V.PingAt = Ch.PingAt;
+	V.LastStreamDay = Ch.LastStreamDay;
+	V.ShowWeek = Ch.ShowWeek;
+	V.ShowDays = Ch.ShowDays;
+	V.GainWeek = Ch.GainWeek;
+	V.GainUsed = Ch.GainUsed;
+	V.FtBase = Ch.FtBase;
+	V.FtDays = Ch.FtDays;
+	V.LiveDay = Ch.LiveDay;
+	V.LiveMin = Ch.LiveMin;
+	V.GrantDay = Ch.GrantDay;
+	V.GrantMask = Ch.GrantMask;
+	V.WelcomeRaidDone = Ch.WelcomeRaidDone;
+	V.CotnDay = Ch.CotnDay;
+	V.PendingCents = Ch.PendingCents;
+	V.LiveSince = Ch.LiveSince;
+	V.GainSoFar = Ch.GainSoFar;
+	V.CarryFollow = Ch.CarryFollow;
+	V.CarryWord = Ch.CarryWord;
+	V.CarrySub = Ch.CarrySub;
+	V.CarryTip = Ch.CarryTip;
+	V.CarryCheer = Ch.CarryCheer;
+	V.CarryRaid = Ch.CarryRaid;
+	V.CarryGift = Ch.CarryGift;
+	V.RerunHeat = Ch.RerunHeat;
+	V.Firsts = Ch.Firsts;
+	return V;
+}
+
+void ApplySaveView(Channel& Ch, const growth::SaveView& V)
+{
+	Ch.Heat = V.Heat;
+	Ch.HeatAt = V.HeatAt;
+	Ch.Norm = V.Norm;
+	Ch.Bias = V.Bias;
+	Ch.RunNorm = V.RunNorm;
+	Ch.BestAvg = V.BestAvg;
+	Ch.PingAt = V.PingAt;
+	Ch.LastStreamDay = V.LastStreamDay;
+	Ch.ShowWeek = V.ShowWeek;
+	Ch.ShowDays = V.ShowDays;
+	Ch.GainWeek = V.GainWeek;
+	Ch.GainUsed = V.GainUsed;
+	Ch.FtBase = V.FtBase;
+	Ch.FtDays = V.FtDays;
+	Ch.LiveDay = V.LiveDay;
+	Ch.LiveMin = V.LiveMin;
+	Ch.GrantDay = V.GrantDay;
+	Ch.GrantMask = V.GrantMask;
+	Ch.WelcomeRaidDone = V.WelcomeRaidDone;
+	Ch.CotnDay = V.CotnDay;
+	Ch.PendingCents = V.PendingCents;
+	Ch.LiveSince = V.LiveSince;
+	Ch.GainSoFar = V.GainSoFar;
+	Ch.CarryFollow = V.CarryFollow;
+	Ch.CarryWord = V.CarryWord;
+	Ch.CarrySub = V.CarrySub;
+	Ch.CarryTip = V.CarryTip;
+	Ch.CarryCheer = V.CarryCheer;
+	Ch.CarryRaid = V.CarryRaid;
+	Ch.CarryGift = V.CarryGift;
+	Ch.RerunHeat = V.RerunHeat;
+	Ch.Firsts = V.Firsts;
+}
+
 // ------------------------------------------------------------------ stream
 
-Stream::Stream(const std::string& Seed) : R(Seed)
+Stream::Stream(const std::string& Seed) : R(Seed), Room(std::make_unique<RoomState>()), Play(std::make_unique<PlayState>())
 {
+}
+
+// The creator update (Phase A-K): out of line, where RoomState and PlayState are complete.
+Stream::~Stream() = default;
+Stream::Stream(Stream&& Other) = default;
+Stream& Stream::operator=(Stream&& Other) = default;
+
+// ---- The creator update's Room (SPEC_CREATORS §1.2, §10.7): core-kastroom's bodies. Phase A-K: inert (nothing calls them
+// yet, and none of them changes the stream or the channel).
+
+void Stream::AdvanceTo(Channel& /*Ch*/, const Inputs& /*In*/)
+{
+}
+
+void Stream::ChatStep(Channel& /*Ch*/, const Inputs& /*In*/, double /*DReal*/)
+{
+}
+
+void Stream::Recount(Channel& Ch, const Inputs& In)
+{
+	AdvanceTo(Ch, In);
+}
+
+const View& Stream::GetView() const
+{
+	// A stream that was moved from has no Room: it reads the empty view.
+	static const View KastNoRoomView;
+	return Room ? Room->Shown : KastNoRoomView;
+}
+
+int Stream::Count() const
+{
+	return GetView().Count;
+}
+
+// The verbs: core-kastroom wires each to its kast::play function (KastPlay.cpp, core-kastplay) through the RoomView it
+// implements over the stream. Phase A-K: they refuse.
+
+bool Stream::Nod(Channel& /*Ch*/, const std::string& /*Name*/)
+{
+	return false;
+}
+
+bool Stream::RailCall(Channel& /*Ch*/, const Inputs& /*In*/)
+{
+	return false;
+}
+
+bool Stream::WelcomeRaid(Channel& /*Ch*/)
+{
+	return false;
+}
+
+bool Stream::SetTheScene(Channel& /*Ch*/)
+{
+	return false;
+}
+
+bool Stream::CallIt(Channel& /*Ch*/, bool /*Holds*/)
+{
+	return false;
+}
+
+// Clip of the Night, the forecast and the debug entries (Phase A-K): core-kastroom's bodies; until then Clip it refuses, the
+// forecast is empty, ss.Kast's Room verbs get no answer here and a view put up is the one GetView hands out.
+
+bool Stream::ClipIt(Channel& /*Ch*/, const Inputs& /*In*/)
+{
+	return false;
+}
+
+growth::Band Stream::Forecast(const Channel& /*Ch*/, const Inputs& /*In*/)
+{
+	return growth::Band();
+}
+
+std::string Stream::DebugRoom(Channel& /*Ch*/, const Inputs& /*In*/, const std::string& /*Args*/)
+{
+	return std::string();
+}
+
+void Stream::DebugView(const View& V)
+{
+	if (Room)
+	{
+		Room->Shown = V;
+	}
 }
 
 double Stream::AdCooldown(double World) const
@@ -1888,7 +2058,8 @@ Summary Stream::Stop(Channel& Ch, const Inputs& In, const std::string& Raid)
 
 void Stream::OnMoment(Channel& Ch, const Inputs& In, Moment M, const std::string& Detail, double Size)
 {
-	if (!Live)
+	// The creator update's Top3 (Phase A-K) is inert until core-kastroom's Room reacts to it: today's stream ignores it.
+	if (!Live || M == Moment::Top3)
 	{
 		return;
 	}
