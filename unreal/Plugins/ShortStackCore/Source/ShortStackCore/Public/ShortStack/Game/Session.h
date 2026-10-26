@@ -85,7 +85,7 @@ enum class SoundId : int
 	RitStamp, // a stamp, a scalp, a credential, a printout
 	RitRank, // 0.25-0.4 one tick per place gained; 0.45 two notes falling (relegation); 0.5-0.6 rising (promotion)
 	// The creator update (SPEC_CREATORS §5.4): Kast's four cues, played through the Kast cue queue (Notice::Sound). Audio's
-	// bodies in Synth.cpp; until they land each renders silence, so playing one plays nothing.
+	// bodies in Synth.cpp, each shaped for the queue's volume for it (Session.cpp's KastCueVolume; change the two together).
 	KastAlert, // a two-note bell, 0.4: a Run Alert, a final table
 	KastRise,  // a rising airy shimmer, 0.35: Heat's tier-up at the commit
 	KastCall,  // a drum roll and a hit, 0.45: Hold or Crack's reveal

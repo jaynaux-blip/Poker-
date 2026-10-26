@@ -2,10 +2,15 @@
 // Catalog integrity; tiers per road and the conduct limits; offer cadence; exclusivity and slots; an idempotent Step;
 // measurement; strikes and cures; conduct; the counter table; renewals; live money; the round trip and the Kast
 // migration fixtures; Kast's view (Channel::Deals never written); the exploits.
+// The creator update (SPEC_CREATORS §9.3's sponsor_deals row, core-kastglue's re-band): once the Room is in the build, Kast's
+// view follows C13 (a read once a deal a world day, after 30 live minutes with someone watching, within 1.5x the reads ask;
+// sponsor pay apart from the channel's balance). Offer timing needs no re-band: its gates read the public record the tests
+// set, and the thresholds don't change (the faster early game only brings the same offers sooner).
 //
 // Goldens and fixtures are read from SS_TESTS_DIR (unreal/Plugins/ShortStackCore/Tests, set by CMakeLists.txt).
 #include "CopyLint.h"
 #include "Trademarks.h"
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Live.h"
@@ -1068,7 +1073,182 @@ void Migration()
 
 // ------------------------------------------------------------------ 13. Kast works on the view; Channel::Deals is never written
 
+/**
+ * Whether the creator update's Room (core-kastroom's Kast.cpp) is in this build: a fresh channel's first stream counts Dee in
+ * its View within two world minutes (First Faces). Until it is, Kast reads and pays as it always has (KastViewToday); once it
+ * is, C13's rule holds (KastViewRoom: SPEC_CREATORS §9.3's sponsor_deals row, core-kastglue's re-band).
+ */
+bool KastRoomIn()
+{
+	ss::kast::Channel Ch;
+	ss::kast::Stream St("kast-room-probe");
+	ss::kast::Inputs In;
+	In.World = 3.0 * Day + 21.0 * 60.0;
+	In.Hero = "grinder_3c";
+	In.Gear = ss::gear::Sum({{"ram-32", 0.0}});
+	In.Seed = 20261024;
+	St.Start(Ch, In);
+	bool Counted = false;
+	for (int K = 0; K < 8 && !Counted; ++K)
+	{
+		In.World += 0.25;
+		In.Real += 1.0;
+		St.Tick(Ch, In, 0.25, 1.0);
+		Counted = St.GetView().Count > 0;
+	}
+	St.Stop(Ch, In);
+	return Counted;
+}
+
+/** The book's deals as the session hands them to the stream (Session::KastInputsExtra, core-kastglue): the view, each deal with
+ *  its paid reads this period and its reads ask (C13's cap). */
+std::vector<ss::kast::Deal> KastDealsOn(const World& W, double At)
+{
+	std::vector<ss::kast::Deal> Out = sponsor::StreamView(W.L.Sponsors, At);
+	for (ss::kast::Deal& D : Out)
+	{
+		for (const sponsor::Contract& C : W.L.Sponsors.Contracts)
+		{
+			if (C.Brand == D.Id && C.Since == D.Since)
+			{
+				D.ReadsPaid = C.Now.Reads;
+				D.ReadsAsk = static_cast<int>(std::lround(C.T.Asks[static_cast<size_t>(sponsor::Ask::Reads)]));
+				break;
+			}
+		}
+	}
+	return Out;
+}
+
+/** One stream of Kast's on the book's deals from At, a whole world minute a tick: Read reads Id at each minute in ReadAt
+ *  (the cents each paid, in order); the summary at Minutes. */
+ss::kast::Summary KastStreamOn(World& W, ss::kast::Stream& St, double At, double Minutes, const std::string& Id, const std::vector<int>& ReadAt, std::vector<Chips>& Paid,
+	int* WatchingAtRead = nullptr)
+{
+	ss::kast::Inputs In;
+	In.World = At;
+	In.Real = 0.0;
+	In.Hero = "grinder_3c";
+	In.Gear = ss::gear::Sum({{"ram-32", 0.0}});
+	In.Seed = 20261024;
+	In.RentsPaid = 2;
+	In.Deals = KastDealsOn(W, At);
+	St.Start(W.Ch, In);
+	sponsor::AbsorbStream(W.L.Sponsors, St.Deals);
+	St.Deals.clear();
+	for (int K = 1; K <= static_cast<int>(Minutes); ++K)
+	{
+		In.World = At + static_cast<double>(K);
+		In.Real = static_cast<double>(K);
+		In.Deals = KastDealsOn(W, In.World);
+		St.Tick(W.Ch, In, 1.0, 1.0);
+		sponsor::AbsorbStream(W.L.Sponsors, St.Deals);
+		St.Deals.clear();
+		if (std::find(ReadAt.begin(), ReadAt.end(), K) != ReadAt.end())
+		{
+			In.Deals = KastDealsOn(W, In.World);
+			if (WatchingAtRead)
+			{
+				*WatchingAtRead = St.Count();
+			}
+			Paid.push_back(St.SponsorRead(W.Ch, In, Id));
+			sponsor::AbsorbStream(W.L.Sponsors, St.Deals);
+			St.Deals.clear();
+		}
+	}
+	const ss::kast::Summary S = St.Stop(W.Ch, In);
+	sponsor::AbsorbStream(W.L.Sponsors, St.Deals);
+	St.Deals.clear();
+	return S;
+}
+
+/**
+ * Kast's view under the creator update's C13 (SPEC_CREATORS §9.3): a read pays only after 30 world minutes live with someone
+ * watching, once a deal a world day, and within 1.5x the deal's reads ask a contract period; tonight's reads and live hours
+ * are the summary's (Summary::SponsorPaid, booked by the session as LedgerSponsors lines), never the channel's balance. The
+ * book still counts the read and the pay on the contract, and Channel::Deals is still never written nor paid from.
+ */
+void KastViewRoom()
+{
+	World W;
+	const double T0 = 110.0 * Day + 20.0 * 60.0;
+	W.Signed("overclock", T0 - Day);
+	W.Signed("halo", T0 - Day);
+	ss::kast::Deal Sentinel;
+	Sentinel.Id = "tunnelrat";
+	Sentinel.Since = T0 - 2.0 * Day;
+	Sentinel.Until = T0 + 20.0 * Day;
+	Sentinel.PerHourCents = 600;
+	Sentinel.ReadCents = 2500;
+	W.Ch.Deals = {Sentinel};
+	ss::kast::Stream St("kast-view");
+	std::vector<Chips> Paid;
+	int Watching = 0;
+	// Ten minutes in (too soon), then at minute 60, then again at once (the same world day).
+	const ss::kast::Summary S = KastStreamOn(W, St, T0, 70.0, "overclock", {10, 60, 61}, Paid, &Watching);
+	std::vector<Chips> Other;
+	ss::kast::Stream Halo("kast-view-halo");
+	const ss::kast::Summary Sh = KastStreamOn(W, Halo, T0 + 80.0, 40.0, "halo", {35}, Other);
+	const ss::kast::Summary::SponsorPay* Oc = nullptr;
+	const ss::kast::Summary::SponsorPay* Hl = nullptr;
+	for (const ss::kast::Summary::SponsorPay& P : S.SponsorPaid)
+	{
+		Oc = P.Id == "overclock" ? &P : Oc;
+		Hl = P.Id == "halo" ? &P : Hl;
+	}
+	const sponsor::Contract* O = W.Of("overclock");
+	const sponsor::Contract* H = W.Of("halo");
+	std::printf("  kast (C13): reads at 10, 60, 61 minutes: %s / %s / %s (%d watching); Halo's read %s; tonight's pay: Overclock %d read(s) %s + hours %s, Halo hours %s; "
+				"balance %s; the book: %d read(s), paid %s\n",
+		ss::Money(Paid[0]).c_str(), ss::Money(Paid[1]).c_str(), ss::Money(Paid[2]).c_str(), Watching, ss::Money(Other[0]).c_str(), Oc ? Oc->Reads : -1,
+		ss::Money(Oc ? Oc->ReadCents : 0).c_str(), ss::Money(Oc ? Oc->HourCents : 0).c_str(), ss::Money(Hl ? Hl->HourCents : 0).c_str(), ss::Money(W.Ch.UnpaidCents).c_str(),
+		O ? O->Now.Reads : -1, ss::Money(O ? O->PaidCents : 0).c_str());
+	Expect(Paid[0] == 0 && Paid[1] == 1000 && Paid[2] == 0 && Watching >= 1, "kast: a read pays after 30 minutes live with someone watching, once a deal a world day");
+	Expect(Other[0] == 0, "kast: Halo doesn't read");
+	Expect(Oc && Oc->Reads == 1 && Oc->ReadCents == 1000 && Oc->HourCents > 0 && Hl && Hl->HourCents > 0 && Sh.Valid,
+		"kast: tonight's read and live hours are the summary's sponsor pay, deal by deal");
+	Expect(W.Ch.UnpaidCents < 1000, "kast: sponsor pay never reaches the channel's balance (the Kast payout pays Kast money only)");
+	Expect(O && O->Now.Reads == 1 && O->PaidCents >= 1000 && H && H->PaidCents > 0, "kast: the book keeps the read and the pay on the contracts");
+	Expect(W.Ch.Deals.size() == 1 && W.Ch.Deals[0].EarnedCents == 0 && W.Ch.Deals[0].ReadAt == Sentinel.ReadAt && W.Ch.Deals[0].Until == Sentinel.Until && W.Ch.Offers.empty(),
+		"kast: Channel::Deals is never written, nor paid from");
+	// A second stream the same world day reads for nothing; the next world day's pays again.
+	std::vector<Chips> Later;
+	ss::kast::Stream Same("kast-view-same");
+	int SameWatching = 0;
+	KastStreamOn(W, Same, T0 + 130.0, 40.0, "overclock", {35}, Later, &SameWatching);
+	ss::kast::Stream Next("kast-view-next");
+	int NextWatching = 0;
+	KastStreamOn(W, Next, T0 + Day, 40.0, "overclock", {35}, Later, &NextWatching);
+	// The cap: 1.5x the eight reads Overclock asks this period (12) paid already, and the next day's read pays nothing.
+	if (sponsor::Contract* Oc2 = W.Of("overclock"))
+	{
+		Oc2->Now.Reads = 12;
+	}
+	ss::kast::Stream Capped("kast-view-capped");
+	int CappedWatching = 0;
+	KastStreamOn(W, Capped, T0 + 2.0 * Day, 40.0, "overclock", {35}, Later, &CappedWatching);
+	std::printf("  kast (C13): the same day's second stream %s (%d watching); the next day's %s (%d watching); past 1.5x the ask %s (%d watching)\n", ss::Money(Later[0]).c_str(),
+		SameWatching, ss::Money(Later[1]).c_str(), NextWatching, ss::Money(Later[2]).c_str(), CappedWatching);
+	// (Each read with someone watching, so only the rule under test can refuse it.)
+	Expect(Later[0] == 0 && SameWatching >= 1, "kast: a second stream the same world day reads for nothing (a restart can't buy a read)");
+	Expect(Later[1] == 1000 && NextWatching >= 1, "kast: the next world day's read pays again");
+	Expect(Later[2] == 0 && CappedWatching >= 1, "kast: past 1.5x the deal's reads ask in the period, a read pays nothing");
+}
+
+void KastViewToday();
+
 void KastView()
+{
+	if (KastRoomIn())
+	{
+		KastViewRoom();
+		return;
+	}
+	KastViewToday();
+}
+
+/** Kast's view as the next segment wrote it (the stream before the Room): a read once a stream, paid through the balance. */
+void KastViewToday()
 {
 	World W;
 	const double T0 = 110.0 * Day + 20.0 * 60.0;

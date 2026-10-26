@@ -2859,7 +2859,9 @@ void Streaming()
 	S.LeaveResults();
 	Expect(S.StartActivity("nap").empty() && !S.Streaming() && S.StreamCard && H.OnAirs == 1, "a nap ends the stream (the summary card comes up)");
 	Expect(S.BankrollCents == Bank + Owed && S.Channel.UnpaidCents == 0 && (Owed == 0 || S.Life.Ledger.front().Kind == 6), "the stream's balance goes to the bank, in the ledger");
-	Expect(S.Channel.Log.size() == 1 && S.Channel.MinutesLive > 0.0, "the stream is logged");
+	// A stream under 60 world minutes counts, but writes no log row and moves no statistic (SPEC_CREATORS §7 M2: no restart
+	// farming); this one is a hyper's 16 minutes.
+	Expect(S.Channel.Streams == 1 && S.Stream.Last.Minutes < 60.0 && S.Channel.Log.empty() && S.Channel.MinutesLive == 0.0, "a short stream counts, but writes no log row (the 60-minute rule)");
 	Now = Wait(S, Now, 8.0);
 
 	// The save keeps the gear and the channel.
@@ -2884,8 +2886,10 @@ void Streaming()
 	const std::vector<ss::kast::SmallChannel> Small = ss::kast::Network(S.WorldMinutes());
 	const std::string Target = Small.empty() ? std::string("chipleader_carla") : Small.front().Name;
 	S.EndStream(Target);
-	Expect(!S.Streaming() && S.Stream.Last.RaidedOut == Target && S.Channel.Goodwill[Target] == 1 && S.Channel.RaidsOut == 1, "ending with a raid sends the viewers on (and the channel remembers)");
-	Expect(S.Channel.Log.size() == 2 && S.Channel.Log.front().OnSchedule && S.Channel.Streams == 2, "both streams logged");
+	// A raid out from a stream under 60 world minutes earns the target no token (§2.7.1: no restart farming); kast_growth checks
+	// the token, the 7-day rule and the long stream that earns one.
+	Expect(!S.Streaming() && S.Stream.Last.RaidedOut == Target && S.Channel.RaidsOut == 1 && S.Channel.Goodwill.count(Target) == 0, "ending with a raid sends the viewers on (a 3-minute stream earns no token)");
+	Expect(S.Channel.Streams == 2 && S.Channel.Log.empty(), "both streams count; neither short one is logged");
 
 	// Subscriptions: one renews (in the ledger), one lapses when the bank can't cover it.
 	ss::SaveData Monthly = Back;
@@ -3166,7 +3170,10 @@ void StreamCountsChatters()
 		"kast count: chat talks and somebody is counted (the check isn't empty)");
 	Expect(One.Silent == 0 && Slow.Silent == 0 && Two.Silent == 0 && Fast.Silent == 0 && Small.Silent == 0 && Big.Silent == 0,
 		"kast count: no viewer's line lands in chat while the count shows nobody (a chatter is a viewer)");
-	Expect(One.Crowded == 0 && Slow.Crowded == 0 && Two.Crowded == 0 && Fast.Crowded == 0 && Small.Crowded == 0 && Big.Crowded == 0, "kast count: never more people talking (last 10 s) than the count shows");
+	// The sprint is out of this one: its ten real seconds are minutes of world time, and a caught troll or a raider who spoke
+	// then has left since (the Room counts whole people at the world minute). kast_growth's HonestCount checks every line's
+	// speaker at its own world minute at every pace, the sprint included.
+	Expect(One.Crowded == 0 && Slow.Crowded == 0 && Two.Crowded == 0 && Small.Crowded == 0 && Big.Crowded == 0, "kast count: never more people talking (last 10 s) than the count shows");
 
 	// An empty room, the moment the stream starts: every kind of moment, the prediction resolving. Nobody is there to say
 	// anything (a raid that turns up is counted before its chat lands).
@@ -3373,7 +3380,7 @@ Grind RunGrind(bool Engaged, int Total)
 			double Avg = 0.0;
 			Ch.Window30(In.World, Minutes, Days, Avg);
 			G.AffiliateAt = G.Streams;
-			G.RulesKept = Ch.Followers >= ss::kast::AffiliateFollowers && Minutes >= ss::kast::AffiliateMinutes && Days >= ss::kast::AffiliateDays && Avg >= ss::kast::AffiliateAvg;
+			G.RulesKept = Ch.Followers >= ss::kast::AffiliateFollowersC8 && Minutes >= ss::kast::AffiliateMinutesC8 && Days >= ss::kast::AffiliateDaysC8 && Avg >= ss::kast::AffiliateAvg;
 		}
 		G.FirstPeak = G.Streams == 1 ? Sm.Peak : G.FirstPeak;
 		G.ReturningEarly += G.Streams <= 10 ? static_cast<double>(Sm.Returning) / 10.0 : 0.0;
@@ -3409,12 +3416,16 @@ void StreamGrind()
 	const Grind G = RunGrind(true, 50);
 	std::printf("  grind (a mid rig, 4 nights a week, 3 hours, on schedule, talks to chat): first peak %d, followers %d -> %d, regulars %d -> %d, returning %.1f -> %.1f, affiliate at stream %d\n", G.FirstPeak, G.Followers10,
 		G.Followers, G.Regulars10, G.Regulars, G.ReturningEarly, G.ReturningLate, G.AffiliateAt);
-	Expect(G.FirstPeak >= 1 && G.FirstPeak <= 6, "the first stream: a handful of viewers");
-	Expect(G.Followers10 < 40, "ten streams in, followers are still in the tens");
-	Expect(G.Followers > G.Followers10 * 4 && G.Followers < 600, "fifty streams in: real growth, not a flood");
+	// Re-banded by S-K (SPEC_CREATORS §9.3): each a 35% margin around the median of this run over 24 seeds of the Room's C++
+	// (first peak 8, followers 37 at stream 10 and 199.5 at stream 50; this seed: 6, 31, 213). E:/ShortStack/durable/creator/S-K.md.
+	Expect(G.FirstPeak >= 5 && G.FirstPeak <= 11, "the first stream: a handful of viewers");
+	Expect(G.Followers10 >= 24 && G.Followers10 <= 50, "ten streams in, followers are still in the tens");
+	Expect(G.Followers > G.Followers10 * 3 && G.Followers >= 130 && G.Followers <= 270, "fifty streams in: real growth, not a flood");
 	Expect(G.Regulars > G.Regulars10 && G.Regulars >= 8, "regulars build up stream by stream");
 	Expect(G.ReturningLate > G.ReturningEarly * 1.5, "more people come back as the community grows");
-	Expect(G.AffiliateAt > 10 && G.RulesKept, "Affiliate takes weeks, and comes only with the 30-day rules met");
+	// C8: the real platform's bar (25 followers, 240 minutes, 4 days, average 3): a four-nights-a-week streamer reaches it in the
+	// second week, never before its fourth day live.
+	Expect(G.AffiliateAt >= ss::kast::AffiliateDaysC8 && G.RulesKept, "Affiliate comes only with the 30-day rules met (C8's bar)");
 	Expect(G.LoyaltyAfter < G.LoyaltyBefore * 0.9 && G.RegularsAfter < G.Regulars, "three weeks away and the community drifts");
 	const Grind Lazy = RunGrind(false, 50);
 	std::printf("  grind (no schedule, rarely talks to chat, never raids): followers %d, regulars %d, returning %.1f\n", Lazy.Followers, Lazy.Regulars, Lazy.ReturningLate);
@@ -3609,8 +3620,8 @@ struct Career
 	int RentChecks = 0;
 	std::vector<int> TierByDay;    // SponsorTier() each day
 	std::array<ss::Chips, 4> Bank{}; // the bankroll on days 30, 60, 90 and the last
-	std::array<ss::Chips, 3> DealsTo{};  // check 6: what the deals put in by days 30, 60 and 90 (DealValue)
-	std::array<ss::Chips, 3> IncomeTo{}; // check 6: the income by then (Income: check 1's kinds)
+	std::array<ss::Chips, 4> DealsTo{};  // check 6: what the deals put in by days 30, 60, 90 and 180 (DealValue)
+	std::array<ss::Chips, 4> IncomeTo{}; // check 6: the income by then (Income: check 1's kinds)
 	int Online = 0, Live = 0, Streams = 0, Signed = 0;
 	// G2's creator career (update 2 SPEC §1.11): the streaming career's schedule with the stream kit once it's back in (not
 	// §1.11's mid rig: CreatorPacing), and a Rerun upload three times a week from day 7 (Tuesday, Thursday and Saturday: the
@@ -4476,7 +4487,7 @@ void Run(Career& C)
 			C.Subs[At] = ss::video::SubsAt(S->Life.Video, S->WorldMinutes());
 			C.Views[At] = ss::video::TotalViews(S->Life.Video, S->WorldMinutes());
 		}
-		if (Done == 30 || Done == 60 || Done == 90)
+		if (Done == 30 || Done == 60 || Done == 90 || Done == 180)
 		{
 			C.Ledger.Take(S->Life);
 			ss::Chips Earned = 0;
@@ -4484,8 +4495,9 @@ void Run(Career& C)
 			{
 				Earned += Income(E) ? E.Amount : 0;
 			}
-			C.DealsTo[static_cast<size_t>(Done / 30 - 1)] = DealValue(C.Ledger);
-			C.IncomeTo[static_cast<size_t>(Done / 30 - 1)] = Earned;
+			const size_t At = Done == 180 ? 3 : static_cast<size_t>(Done / 30 - 1);
+			C.DealsTo[At] = DealValue(C.Ledger);
+			C.IncomeTo[At] = Earned;
 		}
 	}
 	if (C.Creator)
@@ -4581,6 +4593,15 @@ void Checks(const Career& On)
 		Expect(On.DealsTo[K] * 100 <= std::max<ss::Chips>(On.IncomeTo[K], 0) * 15,
 			(Tag + "the deals' value (cash, and in-kind at face) stays at most 15% of the career's income to date (day " + std::to_string(30 * (K + 1)) + ")").c_str());
 	}
+	// The creator update (SPEC_CREATORS §6.4, §9.3, C13): on a streaming career check 6 is re-measured to day 180 too, sponsor
+	// reads and hours counted with the deals (they are LedgerSponsors lines now, never inside the Kast payout).
+	if (On.Kind == 1 && On.Days >= 180)
+	{
+		std::printf("  pacing %s: the deals' value $%.2f of $%.2f income by day 180 (%.1f%%)\n", Name, static_cast<double>(On.DealsTo[3]) / 100.0,
+			static_cast<double>(On.IncomeTo[3]) / 100.0, Share(3));
+		Expect(On.DealsTo[3] * 100 <= std::max<ss::Chips>(On.IncomeTo[3], 0) * 15,
+			(Tag + "the deals' value (cash, and in-kind at face; sponsor reads and hours counted) stays at most 15% of the career's income to day 180").c_str());
+	}
 	// U11 (update 2, from G3): RiverLine Rewards stays under 3% of the rent in Act I (until the second rent is paid).
 	const double Act1 = ActIEndOf(On.Ledger);
 	ss::Chips Rewards1 = 0;
@@ -4595,6 +4616,54 @@ void Checks(const Career& On)
 		Act1 < 1.0e17 ? ("over on day " + std::to_string(static_cast<int>((Act1 - Start) / Day))).c_str() : "not over", ss::Money(RewardsAll).c_str(), ss::Money(Rewards1).c_str(),
 		ss::Money(life::MonthlyRentCents * 3 / 100).c_str());
 	Expect(Rewards1 * 100 < life::MonthlyRentCents * 3, (Tag + "RiverLine Rewards stays under 3% of the rent in Act I (U11)").c_str());
+}
+
+/**
+ * The creator update's Kast money through the real Session (SPEC_CREATORS C4, C13, C14, §6.4, §9.3) on a streaming career:
+ * Kast payouts are the ledger's streaming lines (kind 6, "Kast payout"); sponsor reads and hours are their own LedgerSponsors
+ * lines (C13), so they never count here.
+ *   - Act I: no 30-day window of Kast payouts at 30% of a rent or more before the second rent is paid (C4; C14 holds
+ *     Affiliate revenue as pending until then);
+ *   - every archetype's ceilings: a 30-day month of Kast payouts at most 1.5 rents to day 90 and 3.0 rents to day 180.
+ * The regular's 1.0-2.0 rents at d365 is kast_growth long's (the Room's careers on the minute grid): this career streams a
+ * sprinted hyper every other afternoon, not the regular's evenings, and its days end at 180.
+ */
+void KastChecks(const Career& C)
+{
+	const char* Name = C.Creator ? "creator" : "streaming";
+	const double Act1 = ActIEndOf(C.Ledger);
+	auto Window = [&C](double To) {
+		ss::Chips Sum = 0;
+		for (const life::LedgerEntry& E : C.Ledger.All)
+		{
+			Sum += E.Kind == 6 && E.Amount > 0 && E.At > To - 30.0 * Day && E.At <= To ? E.Amount : 0;
+		}
+		return Sum;
+	};
+	ss::Chips Paid = 0;
+	ss::Chips WorstActI = 0;
+	int Payouts = 0;
+	ss::Chips Sponsors = 0;
+	for (const life::LedgerEntry& E : C.Ledger.All)
+	{
+		if (E.Kind == 6 && E.Amount > 0)
+		{
+			Paid += E.Amount;
+			++Payouts;
+			WorstActI = E.At < Act1 ? std::max(WorstActI, Window(E.At)) : WorstActI;
+		}
+		Sponsors += E.Kind == life::LedgerSponsors && E.Amount > 0 ? E.Amount : 0;
+	}
+	const ss::Chips To90 = Window(C.Start + 90.0 * Day);
+	const ss::Chips To180 = C.Days >= 180 ? Window(C.Start + 180.0 * Day) : 0;
+	std::printf("  pacing %s (Kast money, C4): %d streams, %d Kast payouts, %s in all; the worst 30 days of Kast payouts before the second rent %s (the guard %s); "
+				"the 30 days to day 90 %s, to day 180 %s (ceilings %s / %s); sponsor lines %s; %d Kast followers\n",
+		Name, C.Streams, Payouts, ss::Money(Paid).c_str(), ss::Money(WorstActI).c_str(), ss::Money(life::MonthlyRentCents * 30 / 100).c_str(), ss::Money(To90).c_str(),
+		ss::Money(To180).c_str(), ss::Money(life::MonthlyRentCents * 3 / 2).c_str(), ss::Money(life::MonthlyRentCents * 3).c_str(), ss::Money(Sponsors).c_str(), C.Kast);
+	const std::string Tag = std::string("pacing (") + Name + "): ";
+	Expect(WorstActI * 100 < life::MonthlyRentCents * 30, (Tag + "Act I: no 30-day window of Kast payouts at 30% of a rent before the second rent (C4)").c_str());
+	Expect(To90 * 2 <= life::MonthlyRentCents * 3 && To180 <= life::MonthlyRentCents * 3,
+		(Tag + "a 30-day month of Kast payouts at most 1.5 rents to day 90 and 3.0 to day 180 (C4)").c_str());
 }
 
 /** A finish as a percentile of the field (100 the winner, 0 last; GAME_DESIGN's "average finish", 50 the middle). */
@@ -4864,6 +4933,7 @@ void CreatorPacing(bool Long)
 	pacing::Run(C);
 	pacing::Checks(C);
 	pacing::CreatorChecks(C);
+	pacing::KastChecks(C); // the creator update (SPEC_CREATORS §9.3): it streams too
 	std::printf("  pacing creator: %.1f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 }
 
@@ -4915,6 +4985,10 @@ void EconomyPacing(bool Long)
 		On.Days = Long ? 180 : 90;
 		pacing::Run(On);
 		pacing::Checks(On);
+		if (On.Kind == 1)
+		{
+			pacing::KastChecks(On); // the creator update (SPEC_CREATORS §9.3): the streaming career's Kast money
+		}
 		Ons.push_back(On);
 		if (Long)
 		{
@@ -7886,6 +7960,127 @@ void MigrationAll3()
 			"Update 3 bit");
 		Expect(FollowersLeast >= Followers0 && SubsLeast >= Subs0 && SameMembers && MemberLines == static_cast<int>(S.Channel.Members.size()),
 			"migration (update 3): the creator update's no-write case: followers and subs never fall, and no member gains a field");
+	}
+	// The creator update's heavy fixture (SPEC_CREATORS §8.2, §9.1, the C-K gate): update3_streamer (fixture_tool write-g3k: a
+	// five-evenings-a-week streamer grown to the member cap), its round trip in the loop above; here its facts and Kast's budget
+	// on it: LineBytesKast at most 165 KB (read as KiB, as kast-worst reads the 180), U3Kast set by its own lines.
+	{
+		namespace life = ss::life;
+		const bool There = std::find(All.begin(), All.end(), std::string("update3_streamer.ssave")) != All.end();
+		const std::string Saved = There ? seams::Fixture("update3_streamer.ssave") : std::string();
+		ss::SaveData D;
+		const bool Parsed = There && ss::SaveData::Parse(Saved, D);
+		const size_t Kast = journeys::LineBytesKast(Saved);
+		Hooks H;
+		ss::Session S(H, "migration3-update3-streamer", &D);
+		std::printf("  migration (update 3): update3_streamer: %zu bytes, Kast's lines %zu bytes (%.1f KB of 165), Update 3's Kast bytes %zu; %d followers, %zu members, "
+					"%zu log rows, %d active subs; U3Kast %s\n",
+			Saved.size(), Kast, static_cast<double>(Kast) / 1024.0, journeys::LineBytesKastU3(Saved), S.Channel.Followers, S.Channel.Members.size(), S.Channel.Log.size(),
+			S.Channel.ActiveSubs(S.WorldMinutes()), (S.Life.Update3LinesRead & life::U3Kast) != 0 ? "set" : "NOT SET");
+		Expect(Parsed && Saved.find("\nkast\tmo\t") != std::string::npos && (S.Life.Update3LinesRead & life::U3Kast) != 0 &&
+				   static_cast<int>(S.Channel.Members.size()) == ss::kast::MaxMembers,
+			"migration (update 3): update3_streamer is committed: a channel at the member cap, written with the creator update's lines (U3Kast)");
+		Expect(Kast <= 165u * 1024u, "migration (update 3): update3_streamer's Kast lines within 165 KB (SPEC_CREATORS §8.2)");
+	}
+	// The creator update's migration (SPEC_CREATORS §8.3, §9.1's Saves, the C-K gate): pre_update2_sponsored_streamer (2,402
+	// followers, all of them beyond the tracked community, its last stream 19 on average over 152 minutes) goes live under this
+	// build for its usual 152 minutes from the lobby: Heat seeded (26 if it streamed in the last 7 days, else 15), one Kast
+	// letter, the first stream's average within 40% of its last ten's, and the income before and after printed.
+	{
+		namespace life = ss::life;
+		ss::SaveData D;
+		const bool Parsed = ss::SaveData::Parse(seams::Fixture("pre_update2_sponsored_streamer.ssave"), D);
+		Hooks H;
+		ss::Session S(H, "migration3-kast-first-stream", &D);
+		S.CurrentScreen = ss::Screen::Lobby;
+		const double Last10 = S.Channel.AvgViewers();
+		const ss::kast::StreamLog Before = S.Channel.Log.empty() ? ss::kast::StreamLog() : S.Channel.Log.front();
+		const int Followers0 = S.Channel.Followers;
+		auto Letters = [&S]() {
+			int N = 0;
+			for (const life::Letter& M : S.Life.Inbox)
+			{
+				N += M.Source == "kast" ? 1 : 0;
+			}
+			return N;
+		};
+		const int Letters0 = Letters();
+		const bool Fresh = (S.Life.Update3LinesRead & life::U3Kast) == 0;
+		double Now = Wait(S, 0.0, 0.2);
+		// Live at its last stream's hour (the save is a late morning; the room reads the time of day, §2.3, §2.8.6).
+		{
+			const double Day = ss::net::MinutesPerDay;
+			const double Want = std::fmod(Before.Start, Day);
+			double At = std::floor(S.WorldMinutes() / Day) * Day + Want;
+			At += At <= S.WorldMinutes() ? Day : 0.0;
+			while (S.WorldMinutes() < At - 0.01)
+			{
+				S.LobbyMinutes += std::min(60.0, At - S.WorldMinutes());
+				Now = Wait(S, Now, 0.05);
+			}
+		}
+		const bool Live = S.GoLive().empty() && S.Streaming();
+		const double Heat0 = S.Channel.Heat;
+		const bool Migrated = (S.Life.Update3LinesRead & life::U3Kast) != 0;
+		const double From = S.WorldMinutes();
+		// As its last stream was (its career's hypers, played on stream): RiverLine's Hyper Sprints back to back, sprinted, the
+		// lobby between them, for 152 world minutes. (The room doesn't read pace, R3; from the lobby alone its directory is halved.)
+		ss::Rng Choice("migration3-kast-first-stream");
+		int Decisions = 0;
+		int Hypers = 0;
+		bool Shown = false;
+		S.SprintBudgetMs = 1.0e9;
+		while (Live && S.WorldMinutes() - From < 152.0)
+		{
+			ss::net::EventInstance I;
+			if (S.BankrollCents >= 500 && ss::net::Shared().Next("hyper-sprint", S.WorldMinutes() + 1.0, I) && I.Start < From + 140.0)
+			{
+				while (S.WorldMinutes() < I.Start - 0.01)
+				{
+					S.LobbyMinutes += std::min(2.0, I.Start - S.WorldMinutes());
+					Now = Wait(S, Now, 0.05);
+				}
+				S.RegisterEvent(ss::net::Shared().Listing(I));
+				if (S.CurrentScreen == ss::Screen::Table)
+				{
+					++Hypers;
+					S.CurrentPace = ss::Pace::Sprint;
+					Now = PlayOut(S, Choice, Now, Decisions);
+					S.LeaveResults();
+					continue;
+				}
+			}
+			S.LobbyMinutes += 2.0;
+			Now = Wait(S, Now, 0.05);
+			if (!Shown && S.WorldMinutes() - From >= 76.0)
+			{
+				Shown = true;
+				std::printf("  migration (kast): the room at %.0f minutes: %s\n", S.WorldMinutes() - From, S.DebugKast("room").substr(0, 400).c_str());
+			}
+		}
+		S.EndStream();
+		Now = Wait(S, Now, 0.5);
+		const ss::kast::Summary& After = S.Stream.Last;
+		const double Hours0 = Before.Minutes / 60.0;
+		const double Hours1 = After.Minutes / 60.0;
+		const ss::Chips Kast1 = After.Total() - After.SponsorCents;
+		const int Letters1 = Letters();
+		std::printf("  migration (kast): pre_update2_sponsored_streamer (%d followers, %zu members, the last ten streams' average %.1f; its last stream %d on average over "
+					"%.0f minutes, %s): live %.0f minutes under this build: Heat seeded %.1f, %d Kast letter(s), average %d, peak %d, %d new followers; its income before "
+					"%s an hour (%s over %.0f minutes), after %s an hour (%s; sponsor pay %s apart); %d hypers on stream\n",
+			Followers0, S.Channel.Members.size(), Last10, Before.Avg, Before.Minutes, ss::Money(Before.Cents).c_str(), S.WorldMinutes() - From, Heat0, Letters1 - Letters0, After.Avg,
+			After.Peak, After.Follows, ss::Money(Hours0 > 0.0 ? static_cast<ss::Chips>(std::llround(static_cast<double>(Before.Cents) / Hours0)) : 0).c_str(),
+			ss::Money(Before.Cents).c_str(), Before.Minutes, ss::Money(Hours1 > 0.0 ? static_cast<ss::Chips>(std::llround(static_cast<double>(Kast1) / Hours1)) : 0).c_str(),
+			ss::Money(Kast1).c_str(), ss::Money(After.SponsorCents).c_str(), Hypers);
+		Expect(Parsed && Fresh && Live && Migrated && (Heat0 == 26.0 || Heat0 == 15.0) && Letters1 == Letters0 + 1,
+			"migration (kast): an old channel's first stream under this build migrates it: Heat seeded (26 or 15) and one Kast letter");
+		Expect(Last10 > 0.0 && After.Avg >= 0.6 * Last10 && After.Avg <= 1.4 * Last10 && S.Channel.Followers >= Followers0,
+			"migration (kast): the migrated first stream is sane: its average within 40% of its last ten's, and nobody's lost");
+		const bool Again = S.GoLive().empty();
+		Now = Wait(S, Now, 0.2);
+		S.EndStream();
+		Now = Wait(S, Now, 0.2);
+		Expect(Again && Letters() == Letters1, "migration (kast): the next stream sends no second letter");
 	}
 	std::printf("  migration (update 3): %d of %zu fixtures written back byte for byte (a world after its one migration; the rest but for the last segment's "
 				"own lines), none with an Update 3 line, %.1f s\n",

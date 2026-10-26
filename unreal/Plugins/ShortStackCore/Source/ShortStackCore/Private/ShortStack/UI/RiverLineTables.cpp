@@ -2,6 +2,7 @@
 // buttons) and the toasts for tournaments that end while others play on.
 #include "ShortStack/UI/RiverLine.h"
 #include "../StrictFloat.h"
+#include "RiverLineKastGrowth.h"
 #include "RiverLineShared.h"
 
 #include "ShortStack/Evaluator.h"
@@ -93,7 +94,7 @@ void RiverLine::TableStrip(float X, double Now)
 	}
 	const std::string Bal = "Balance " + Money(rlsites_detail::SitesBalance(S, rlsites_detail::SitesClient(*this, S))); // as the top bar shows it
 	// Room for the balance (and Kast's LIVE pill beside it while streaming).
-	const float Pill = S.Streaming() ? UI.Measure(std::to_string(static_cast<long long>(std::round(S.Stream.Viewers))), 13.0f, 900, true) + 80.0f + 24.0f : 0.0f;
+	const float Pill = S.Streaming() ? rlkast_detail::KastPillWidth(*C, S) + 24.0f : 0.0f; // the pill's own measure (KastCount of the target count)
 	const float Right = Width - 140.0f - (UI.Measure(Bal, 17.0f, 700) + 28.0f) - 14.0f - Pill;
 	const bool CanAdd = AtTables && Count < S.MaxTables();
 	const bool CanTile = AtTables && Count >= 2;

@@ -86,7 +86,7 @@ SHORTSTACKCORE_API double PingWHot(double W, double H);
 SHORTSTACKCORE_API double Honey(double DaysSinceFollow);
 /** 1 - 0.5 e^(-days since they last watched / 2): nobody watches every night. */
 SHORTSTACKCORE_API double Appetite(double DaysSince);
-/** The attention budget: e^(-max(0, Hw - 10) / 10). */
+/** The attention budget: e^(-max(0, Hw - 8) / 10). */
 SHORTSTACKCORE_API double Budget(double Hw);
 /** Hours watched lately today: Hw e^(-(Today - HwDay) / 7), closed form. */
 SHORTSTACKCORE_API double HwToday(double Hw, int HwDay, int Today);
@@ -196,7 +196,7 @@ SHORTSTACKCORE_API double Lane(int Streams);
 SHORTSTACKCORE_API double Rising(int Streams, double Norm);
 /** The poker category's browsers are finite: (1 + V / 600)^-0.5. */
 SHORTSTACKCORE_API double Pond(double V);
-/** (1 + max(0, H7 - 20) / 20)^-0.5, H7 the world hours live in the last 7 days. */
+/** (1 + max(0, H7 - 20) / 16)^-0.5, H7 the world hours live in the last 7 days. */
 SHORTSTACKCORE_API double Novelty(double Hours7);
 /** max(0.25, e^(-(Uptime - 240) / 300)) after 4 world hours, only while depth <= 0.3. */
 SHORTSTACKCORE_API double Taper(double Uptime, double RunDepth);
@@ -208,7 +208,7 @@ SHORTSTACKCORE_API double Buzz(double Views48, double Norm);
 SHORTSTACKCORE_API double HD(double E);
 /** Follow saturation: (1 + Followers / 3,000)^-0.65. */
 SHORTSTACKCORE_API double Sat(int Followers);
-/** clamp(1 - 0.025 max(0, H7 - 25), 0.6, 1): stays, follows and Engage. */
+/** clamp(1 - 0.03 max(0, H7 - 25), 0.6, 1): stays, follows and Engage. */
 SHORTSTACKCORE_API double Stamina(double Hours7);
 
 // ------------------------------------------------------------------ raids, clips, the community (§2.7, §2.8)
@@ -271,7 +271,7 @@ struct Payout
 };
 SHORTSTACKCORE_API Payout PayoutOf(Chips Unpaid, Chips Pending, int RentsPaid);
 /** C13: a read pays once a deal a world day, after 30 world minutes live with someone watching, within 1.5x the deal's reads
- *  ask a contract period. */
+ *  ask a contract period; a deal that asks for no reads (ReadsAsk 0, Kast's old terms) keeps one a world day, uncapped (M1). */
 SHORTSTACKCORE_API bool SponsorReadPays(int TodayDay, double ReadAt, double LiveMinutes, int Count, int ReadsPaid, int ReadsAsk);
 
 // ------------------------------------------------------------------ the week's rings (§2.2)

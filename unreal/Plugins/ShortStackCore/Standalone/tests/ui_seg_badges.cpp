@@ -475,7 +475,11 @@ void Celebrations()
 	double Now = Step(S, 0.0, 0.2);
 	S.BankrollCents = 100000;
 	Check(S.Buy("ram-32").empty() && S.Buy("monitor-24").empty() && S.GoLive().empty() && S.Streaming(), "cheer: on air");
-	S.Stream.Viewers = std::max(S.Stream.Viewers, 25.0); // somebody watching to react
+	// Somebody watching to react: the Room counts whole people (SPEC_CREATORS §1, R1), so 25 come in by a raid (ss.Kast.Raid's
+	// party is in at once) and one frame with no time passing fills the count, so the page's clock is day 0's (the C-K gate).
+	S.DebugKast("raid 25");
+	S.Update(Now);
+	Check(S.Stream.Count() >= 1, "cheer: somebody is watching to react");
 	Now += 1.0;
 	Laptop(RL, Now);
 	const size_t ChatBefore = S.Stream.Chat.size();

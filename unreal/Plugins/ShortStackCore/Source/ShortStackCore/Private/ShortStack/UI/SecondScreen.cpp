@@ -2,7 +2,9 @@
 // Embercrest's wall calendar by the window, drawn from the same career.
 #include "ShortStack/UI/SecondScreen.h"
 #include "../StrictFloat.h"
+#include "../Game/KastCopy.h"
 #include "../Game/SitesDetail.h"
+#include "RiverLineKastGrowth.h"
 #include "RiverLineShared.h"
 
 #include "ShortStack/Game/Format.h"
@@ -307,9 +309,17 @@ void Studio(Canvas& C, const Session& S, double Now)
 	C.FillRoundRect({40.0f, 28.0f, 96.0f, 40.0f}, 8.0f, Paint::Solid(Alpha(LiveRed, Pulse)));
 	C.Text("LIVE", 88.0f, 56.0f, Ts(20.0f, 900, Hex(0xffffff), Align::Center));
 	C.Text(HoursMinutes(St.Uptime(World)), 156.0f, 57.0f, Ts(22.0f, 700, pal::Ink, Align::Left, Baseline::Alphabetic, true));
-	const std::string Viewers = std::to_string(static_cast<int>(std::round(St.Viewers)));
-	C.Text(Viewers + " watching", 330.0f, 57.0f, Ts(22.0f, 800, Lime));
-	C.Text(std::to_string(S.Channel.Followers) + " followers", 560.0f, 57.0f, Ts(20.0f, 600, pal::Muted));
+	// The creator update (§1.4, §5.3 K1 K4): the count every surface shares, and Heat's tier beside it ("12 watching · Running
+	// hot"), on the laptop's clock (rlkast_detail::KastShown keeps one a session).
+	const rlkast_detail::KastHeat Heat = rlkast_detail::KastHeatNow(S, World);
+	const std::string Line = kast::copy::WatchingTier(rlkast_detail::KastShown(S, Now, false), Heat.Tier);
+	const size_t Dot = Line.find(" \xC2\xB7 ");
+	float Vx = 330.0f + C.Text(Dot == std::string::npos ? Line : Line.substr(0, Dot), 330.0f, 57.0f, Ts(22.0f, 800, Lime));
+	if (Dot != std::string::npos)
+	{
+		Vx += C.Text(Line.substr(Dot), Vx, 57.0f, Ts(22.0f, 800, rlkast_detail::KastTierTint(Heat.Tier, Now)));
+	}
+	C.Text(kast::copy::Number(S.Channel.Followers) + " followers", std::max(560.0f, Vx + 30.0f), 57.0f, Ts(20.0f, 600, pal::Muted));
 	C.Text("KAST STUDIO", W - 40.0f, 57.0f, Ts(18.0f, 900, Hex(0x9b8cff), Align::Right));
 
 	// The program: the facecam as it goes out, with the overlay's name strip.

@@ -48,6 +48,16 @@ struct VideoStats
 	std::vector<std::string> Insights;
 	std::array<float, 3> DuelCtr{}, DuelShare{};
 	bool Estimated = false;
+	// core-videoalgo, appended (SPEC_CREATORS §3, §5.3 R1-R4; announced in STATUS_core-videoalgo.txt):
+	Chips WouldEarnCents = 0; // before Partner: what the views so far would have earned at the day's season (not paid, W9)
+	int Tag = 0;              // against the channel's typical upload: 1 Above typical (2x), 2 Breakout (5x), 3 Outlier (10x)
+	double MomCAtUpload = 1;  // the reach Momentum gave it at upload (the launch card: "Riding your breakout" while > 1.1)
+	int LiveDropAvg = 0;      // Live Drop: the stream's own average its push was sized by ("212 watching"); 0 none
+	bool LiveDrop = false;    // a stream within 6 hours of the publish (V +0.10 at the verdict), with or without a push
+	bool Viral = false;       // a narrated viral roll ("is breaking out")
+	bool LateBloom = false;   // Late Bloomer woke it up
+	int Binged = 0;           // Binge waves it took part in
+	int DuelWin = -1;         // the Duel's winner (0 A, 1 B, 2 C), -1 none yet
 };
 /** The channel over a window, a value a day (the rings, and the closed form for today). */
 struct Range
@@ -73,6 +83,9 @@ struct RealtimeView
 	double SubsNow = 0;
 	std::vector<std::pair<std::string, double>> Top;
 	std::vector<std::string> OnHomeNow;
+	// core-videoalgo, appended (SPEC_CREATORS §3.2, R1): a breakout's note for two days from it (a narrated viral roll from
+	// its verdict midnight: "... is breaking out"), the newest first.
+	std::vector<std::string> Notes;
 };
 /** Channel health, 0-5 bars each. */
 struct Health
@@ -93,5 +106,18 @@ SHORTSTACKCORE_API AudienceView AudienceOf(const Channel& C, double World);
 SHORTSTACKCORE_API RealtimeView Realtime(const Channel& C, double World);
 SHORTSTACKCORE_API Health HealthOf(const Channel& C, double World);
 SHORTSTACKCORE_API std::vector<Trend> Trends(const life::State& L, const world::World& W, double World);
+/** core-videoalgo, appended: every line Rerun 2.0's core says (the bell, "What Rerun did with it", Insights, the health
+ *  meters' words, the trends), "<kind>\t<text>" as video::Inventory()'s, for the copy lint and the trademark screen. */
+SHORTSTACKCORE_API std::vector<std::string> InventoryAlgo();
+/** core-videoalgo, appended: Channel health's words for a meter's bars (§5.9: "on a roll · steady · cooling off"). */
+SHORTSTACKCORE_API std::string HealthWords(int Meter, int Bars);
+/** core-videoalgo, appended (§4.5.8, the Ad market card): this world day's CPM by advertiser category (BaseCPM x the
+ *  category's fit x the season), and the channel's category mix over its last 10 uploads (shares that sum to 1). */
+struct AdMarketRow
+{
+	std::string Category;
+	double Cpm = 0, Fit = 1, Mix = 0;
+};
+SHORTSTACKCORE_API std::vector<AdMarketRow> AdMarket(const Channel& C, double World);
 } // namespace video
 } // namespace ss

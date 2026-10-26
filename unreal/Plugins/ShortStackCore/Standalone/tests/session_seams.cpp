@@ -1541,10 +1541,12 @@ void StreamLinks()
 	const std::string Villain = S.T->Players[1].Id; // somebody in the field (a name the stream can say)
 	const ss::TPlayer* Who = S.PlayerById(Villain);
 	const std::string Prefix = "rl:" + S.T->Spec.Id + ":";
+	// A room to see it: the Room counts whole people (SPEC_CREATORS §1), so 40 come in by a raid (ss.Kast.Raid's party is in
+	// at once); a skipped hand's minutes send a few of them on.
+	S.DebugKast("raid 40");
 	// 1. The skip path: the aces hold and send the villain home. The won all-in and the knockout go on stream first.
 	{
 		S.T->Tick += 1;
-		S.Stream.Viewers = 40.0;
 		const auto Hd = LinkAces("5d", Villain);
 		ss::Session::HandFacts F;
 		F.ByPlan = true;
@@ -1577,7 +1579,7 @@ void StreamLinks()
 		std::printf("  stream links: a skipped hand fired %zu moments (won all-in %d, knockout %d), its candidate %s, face %d, %zu chat lines\n", Notes.size(), Won ? 1 : 0, Out ? 1 : 0,
 			C ? C->Id.c_str() : "none", C ? C->Stream.Face : -1, C ? C->Stream.Chat.size() : 0);
 		Expect(Won && Out && Linked && C && C->Source == 3 && C->Auto, "stream links: a skipped hand's won all-in and knockout go to its own candidate (SkipMoments before the candidate)");
-		Expect(C && C->Stream.Face == static_cast<int>(Notes.back().Face) && C->Stream.Chat == Chat && C->Stream.Viewers >= 40,
+		Expect(C && C->Stream.Face == static_cast<int>(Notes.back().Face) && C->Stream.Chat == Chat && C->Stream.Viewers >= 20 && C->Stream.Viewers >= Notes.back().Viewers,
 			"stream links: the skipped hand's candidate carries the moments' face, chat and viewers");
 	}
 	// 1b. The clip's time (the audit's double count): the same skipped hand, a hand at a time, until somebody in chat clips
@@ -1591,7 +1593,6 @@ void StreamLinks()
 		for (; Hands < 30 && Clip < 0.0; ++Hands)
 		{
 			S.T->Tick += 1;
-			S.Stream.Viewers = 40.0;
 			const auto Hd = LinkAces("5d", Villain);
 			ss::Session::HandFacts F;
 			F.ByPlan = true;

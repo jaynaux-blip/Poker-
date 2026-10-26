@@ -2174,6 +2174,7 @@ bool KastWorst(bool Widest)
 		Cl.By = WorstName("clipper", N, 17);
 		Cl.Title = LongestTitle;
 		Cl.Candidate = "kast:" + std::to_string(static_cast<long long>(Long)) + ":" + std::to_string(N) + ":finaltable";
+		Cl.Lane = true; // C-K's L11: the Clip Lane flag, kast\tclip's 10th field (+2 B a clip)
 		K.Clips.push_back(Cl);
 	}
 	for (int N = 0; N < 60; ++N)
@@ -2306,9 +2307,13 @@ bool KastWorst(bool Widest)
 	std::printf("  projected new lines (SPEC_CREATORS §8.1): kast\\tmo %zu, member tails %zu x %zu = %zu, log tails %zu x %zu = %zu, goodwill tails %zu x %zu = %zu: %zu bytes\n",
 		MoBytes, K.Members.size(), MemBytes, K.Members.size() * MemBytes, K.Log.size(), LogBytes, K.Log.size() * LogBytes, K.Goodwill.size(), GoodBytes,
 		K.Goodwill.size() * GoodBytes, Projected);
-	const size_t Total = std::max(Built, Today0 + Projected);
-	std::printf("  LineBytesKast at the worst case: %zu bytes (%.1f KB) against the 180 KB budget (%zu): %s; the members alone %.1f KB with their tails\n", Total, Total / 1024.0,
-		Budget, Total <= Budget ? "within it" : "OVER IT", (KastBytes(Before, "kast\tmem\t") + K.Members.size() * MemBytes) / 1024.0);
+	// Once the writers are real (core-kastmath's growth::WriteLines and the tails write more than the flags' digit), the build's
+	// own bytes decide; the projection stays printed beside them.
+	const bool Real = Built - Today0 > K.Members.size();
+	const size_t Total = Real ? Built : std::max(Built, Today0 + Projected);
+	const size_t MemberBytes = Real ? KastBytes(After, "kast\tmem\t") : KastBytes(Before, "kast\tmem\t") + K.Members.size() * MemBytes;
+	std::printf("  LineBytesKast at the worst case (%s): %zu bytes (%.1f KB) against the 180 KB budget (%zu): %s; the members alone %.1f KB with their tails\n",
+		Real ? "the writers' own bytes" : "projected", Total, Total / 1024.0, Budget, Total <= Budget ? "within it" : "OVER IT", MemberBytes / 1024.0);
 	return Total <= Budget;
 }
 #endif

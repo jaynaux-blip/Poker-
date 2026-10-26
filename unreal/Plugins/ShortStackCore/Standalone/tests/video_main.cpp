@@ -1358,13 +1358,21 @@ void SavesU3()
 				   Back.Video.Open.back().Idea == 42 && Back.Video.Open.back().IdeaFacts == Ic.IdeaFacts && Back.Video.X.Lists.size() == 1 &&
 				   Back.Video.X.Lists[0].Videos.size() == 2 && Back.Video.X.TrendWeek == 5 && Back.Video.X.Since == 10,
 			"update 3 save: the video's block, its components, the idea candidate and the channel's X come back as they were, the legacy video legacy");
-		// The bit unset: the channel's X and the components stay unwritten (the block rides on its video, which only an Update 3
-		// upload makes, and that upload sets the bit).
+		// core-videoalgo: a Rerun 2.0 channel (its X on) writes its lines with the bit unset too (its first Update 3 upload is its
+		// own, before the Session sets the bit), and reading them sets the bit, so the next save is the same text.
 		life::State Unset = L;
 		Unset.Update3LinesRead = 0;
-		const std::string Plain = SaveText(Unset);
+		const std::string Same = SaveText(Unset);
+		const life::State Again = Reload(Same);
+		Expect(Same == Text && (Again.Update3LinesRead & life::U3Video) != 0 && SaveText(Again) == Text,
+			"update 3 save: a Rerun 2.0 channel writes its X and components without U3Video, and the bit comes back with them");
+		// The channel's X off (an Update 2 channel with one Update 3 video someone made by hand): the X and the components wait
+		// for the bit, as Phase A wrote them.
+		life::State Off = Unset;
+		Off.Video.X.On = false;
+		const std::string Plain = SaveText(Off);
 		Expect(Plain.find("\tvcomp\t") == std::string::npos && Plain.find("\tvlife\t") == std::string::npos && Plain.find("\tvday\t") == std::string::npos,
-			"update 3 save: nothing of the channel's X or the components without U3Video");
+			"update 3 save: nothing of the channel's X or the components without U3Video on a channel whose X is off");
 		std::printf("  update 3 save: %zu bytes of Rerun 2.0 lines for one Update 3 video and a channel's X\n", Text.size() - Plain.size());
 	}
 }

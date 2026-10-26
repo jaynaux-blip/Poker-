@@ -1,5 +1,7 @@
 #include "ShortStack/Game/Video.h"
 
+#include "VideoAlgoPriv.h"
+
 #include "ShortStack/Cards.h"
 #include "ShortStack/Equity.h"
 #include "ShortStack/Evaluator.h"
@@ -9,6 +11,8 @@
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Session.h"
+#include "ShortStack/Game/VideoAlgo.h"
+#include "ShortStack/Game/VideoContent.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 
@@ -25,6 +29,12 @@
 // The model steps by whole world days (midnight to midnight): a step that ends mid-day leaves the rest of the day for the
 // next one, so any split of a span (a frame at a time, a night away, a 30-day skip) steps the same days and pays the same
 // cents. Between steps the channel's numbers are read in closed form (SubsAt, View).
+//
+// Update 3 (core-videoalgo, with the creator update's §3): Rerun 2.0 on a channel whose ChannelX is on. Its uploads are
+// Update 3 videos (VideoX): Update 2's P for the same choices (UploadPlanU2, with Fresh on Rerun's addend), then Update 3's
+// compressed levers, MomC, the upload streak and the CTR noise; a curve of components (the first wave P0, then each
+// decision's kick from VideoAlgo.cpp); per-day money at that day's ad load times the season; the rings, the engagement tails
+// and the day-bucketed evergreen stubs. A legacy video (no VideoX) and a channel whose X is off step exactly as Update 2.
 
 namespace ss
 {
@@ -128,20 +138,31 @@ int GroupOf(Kind K)
 	{
 	case Kind::BadBeat:
 	case Kind::Suckout:
-	case Kind::Cooler: return 0;
+	case Kind::Cooler:
+	case Kind::SetOverSet:   // Update 3's kinds by what they are: a cooler,
+	case Kind::RunnerRunner: return 0; // a suckout,
 	case Kind::Bluff:
 	case Kind::BluffCaught:
 	case Kind::HeroCall:
-	case Kind::HeroFold: return 1;
+	case Kind::HeroFold:
+	case Kind::LadderFold: return 1; // a hero fold,
 	case Kind::BigPot:
 	case Kind::Knockout:
-	case Kind::Bubble: return 2;
+	case Kind::Bubble:
+	case Kind::Monster:
+	case Kind::DoubleKo:
+	case Kind::MinCash:
+	case Kind::Envelope:
+	case Kind::BiggestPot: return 2; // pots, knockouts and the bubble,
 	case Kind::DeepRun:
 	case Kind::FinalTable:
-	case Kind::Win: return 3;
+	case Kind::Win:
+	case Kind::HeadsUp: return 3; // a run for the title
 	case Kind::Rival: return 4;
 	case Kind::Story:
 	case Kind::StreamMoment:
+	case Kind::LastHand:
+	case Kind::Idea:
 	case Kind::Count: break;
 	}
 	return 5;
@@ -458,12 +479,65 @@ void TailGain(const Channel& C, double T0, double T1, double Out[3])
 	}
 }
 
+/** Update 3: likes, dislikes, comments and impressions the folded engagement tails gain between T0 and T1 (TailGain's rule). */
+void TailXGain(const Channel& C, double T0, double T1, double Out[4])
+{
+	double Exact = C.SteppedTo;
+	for (const Video& V : C.Videos)
+	{
+		Exact = std::min(Exact, V.At);
+	}
+	T0 = std::max(T0, Exact);
+	if (T1 <= T0)
+	{
+		return;
+	}
+	for (int K = 0; K < 3; ++K)
+	{
+		const Shape S = ShapeOf(static_cast<Class>(K));
+		const TailX& T = C.X.TailsX[static_cast<size_t>(K)];
+		for (int J = 0; J < 2; ++J)
+		{
+			const double Tau = J == 0 ? S.Tau1 : S.Tau2;
+			const double F0 = std::exp(-(T0 - C.SteppedTo) / Day / Tau);
+			const double F1 = std::exp(-(T1 - C.SteppedTo) / Day / Tau);
+			for (int W = 0; W < 4; ++W)
+			{
+				Out[W] += T.Decay[J][W] * (F0 - F1);
+			}
+		}
+	}
+}
+
 /** Views an evergreen stub gains between T0 and T1. */
 double StubGain(const Stub& S, double T0, double T1)
 {
 	const double From = std::max(T0, S.At);
 	const double To = std::min(T1, S.At + EvergreenDays * Day);
 	return To > From ? S.E * (To - From) / Day : 0.0;
+}
+
+/** The part of [T0, T1] (in days) that falls on world days From .. To - 1. */
+double DaysCovered(double T0, double T1, int From, int To)
+{
+	const double A = std::max(T0, static_cast<double>(From) * Day), B = std::min(T1, static_cast<double>(To) * Day);
+	return B > A ? (B - A) / Day : 0.0;
+}
+
+/**
+ * Update 3 (§4.8's legacy plan, vstubd): the evergreen videos that folded on one upload day, summed. Each runs for 365 days
+ * from its own minute, so over whole days the bucket is exact: its upload day gains E - EF, every day after it E, and the
+ * 365th day after it EF (the F sums weight each video by its minute offset / 1,440). Inside a first or last day it reads
+ * linearly. Out += views, subscribers, the RPM weight.
+ */
+void StubDayGain(const StubDay& S, double T0, double T1, double Out[3])
+{
+	const double Whole = DaysCovered(T0, T1, S.Day, S.Day + 365);
+	const double First = DaysCovered(T0, T1, S.Day, S.Day + 1);
+	const double Last = DaysCovered(T0, T1, S.Day + 365, S.Day + 366);
+	Out[0] += S.E * Whole - S.EF * First + S.EF * Last;
+	Out[1] += S.EConv * Whole - S.EConvF * First + S.EConvF * Last;
+	Out[2] += S.ERpm * Whole - S.ERpmF * First + S.ERpmF * Last;
 }
 
 /** Views, subscribers, ad dollars (when Paying) and watch hours gained between T0 and T1, over everything on the channel. */
@@ -478,13 +552,15 @@ Gains GainsBetween(const Channel& C, double T0, double T1, bool Paying)
 	{
 		return G;
 	}
+	// (An Update 3 video's rates are its load's on T0's day: exact for a day's step, the reads' closed form across a switch.)
+	const int Day0 = DayIndex(T0);
 	for (const Video& V : C.Videos)
 	{
 		const double Gain = std::max(0.0, Views(V, T1) - Views(V, T0));
 		G.Views += Gain;
-		G.Subs += V.Conv * Gain;
-		G.Ad += Paying ? V.Rpm / 1000.0 * Gain : 0.0;
-		G.Hours += RowOf(V.F).Hours ? Gain * V.LengthMin / 60.0 * V.Retention : 0.0;
+		G.Subs += valgo::ConvOn(V, Day0) * Gain;
+		G.Ad += Paying ? valgo::RpmOn(V, Day0) / 1000.0 * Gain : 0.0;
+		G.Hours += RowOf(V.F).Hours ? Gain * V.LengthMin / 60.0 * valgo::RetentionOn(V, Day0) : 0.0;
 	}
 	double Tail[3] = {0.0, 0.0, 0.0};
 	TailGain(C, T0, T1, Tail);
@@ -498,6 +574,14 @@ Gains GainsBetween(const Channel& C, double T0, double T1, bool Paying)
 		G.Subs += S.Conv * Gain;
 		G.Ad += Paying ? S.Rpm / 1000.0 * Gain : 0.0;
 	}
+	double Bucket[3] = {0.0, 0.0, 0.0};
+	for (const StubDay& S : C.X.StubDays)
+	{
+		StubDayGain(S, T0, T1, Bucket);
+	}
+	G.Views += Bucket[0];
+	G.Subs += Bucket[1];
+	G.Ad += Paying ? Bucket[2] / 1000.0 : 0.0;
 	return G;
 }
 
@@ -546,11 +630,125 @@ void Anchor(Channel& C, double World)
 	}
 }
 
+/** Every component of an Update 3 video has started by C.SteppedTo (a fold takes a curve's ages from then). */
+bool StartedBy(const Video& V, double T)
+{
+	return V.At <= T && std::all_of(V.X.Comps.begin(), V.X.Comps.end(), [T](const Comp& K) { return K.T <= T; });
+}
+
+/**
+ * Update 3 (§4.4 "The fold"): an Update 3 video folds every part of its curve (the first wave and each component) with its
+ * own age into its class's tails: Update 2's (views, subscribers, the RPM weight, at the video's rates on the fold's day)
+ * and the engagement tails (likes, dislikes, comments, impressions). An evergreen one joins its upload day's stub bucket;
+ * the lifetime top 20 keeps it by name.
+ */
+void FoldU3(Channel& C, const Video& V)
+{
+	const double At = C.SteppedTo;
+	const int Today = DayIndex(At);
+	const Shape S = ShapeOf(V.C);
+	Tail& T = C.Tails[static_cast<size_t>(V.C)];
+	TailX& Tx = C.X.TailsX[static_cast<size_t>(V.C)];
+	const double Conv = valgo::ConvOn(V, Today), Rpm = valgo::RpmOn(V, Today), Ret = valgo::RetentionOn(V, Today);
+	const int Over = valgo::OverOf(V);
+	const valgo::Rates R = valgo::RatesOf(V, valgo::LoadOn(V.X, Today), Ret, Over);
+	const double W[3] = {1.0, Conv, Rpm};
+	double Total = 0.0;
+	auto Part = [&](double Start, double P, double A, uint8_t Mix, float CtrF) {
+		const double Age = (At - Start) / Day;
+		const double Fast = A * std::exp(-Age / S.Tau1), Slow = (1.0 - A) * std::exp(-Age / S.Tau2);
+		for (int K = 0; K < 3; ++K)
+		{
+			T.Total[K] += P * W[K];
+			T.Decay[0][K] += P * W[K] * Fast;
+			T.Decay[1][K] += P * W[K] * Slow;
+		}
+		const double X4[4] = {R.Like, R.Dislike(), R.Comment, valgo::ImprPerView(V, Mix, CtrF)};
+		for (int K = 0; K < 4; ++K)
+		{
+			Tx.Total[K] += P * X4[K];
+			Tx.Decay[0][K] += P * X4[K] * Fast;
+			Tx.Decay[1][K] += P * X4[K] * Slow;
+		}
+		Total += P;
+	};
+	Part(V.At, V.X.P0, S.A, 0, 1.0f);
+	for (const Comp& K : V.X.Comps)
+	{
+		Part(K.T, K.P, K.A, K.SrcMix, K.CtrF);
+	}
+	if (V.E > 0.0)
+	{
+		const double Age = (At - V.At) / Day;
+		if (Age >= EvergreenDays)
+		{
+			for (int K = 0; K < 3; ++K)
+			{
+				T.Total[K] += V.E * EvergreenDays * W[K];
+			}
+		}
+		else
+		{
+			const int UpDay = DayIndex(V.At);
+			auto It = std::find_if(C.X.StubDays.begin(), C.X.StubDays.end(), [UpDay](const StubDay& Sd) { return Sd.Day == UpDay; });
+			if (It == C.X.StubDays.end())
+			{
+				StubDay Sd;
+				Sd.Day = UpDay;
+				It = C.X.StubDays.insert(std::upper_bound(C.X.StubDays.begin(), C.X.StubDays.end(), Sd, [](const StubDay& A, const StubDay& B) { return A.Day < B.Day; }), Sd);
+			}
+			const double Off = (V.At - static_cast<double>(UpDay) * Day) / Day;
+			// (Each sum kept to 10 significant digits, so the line stays short and a reload reads the very numbers it wrote.)
+			auto Sig = [](double X) {
+				if (X == 0.0)
+				{
+					return 0.0;
+				}
+				const double Scale = std::pow(10.0, 9.0 - std::floor(std::log10(std::fabs(X))));
+				return std::round(X * Scale) / Scale;
+			};
+			It->E = Sig(It->E + V.E);
+			It->EConv = Sig(It->EConv + V.E * Conv);
+			It->ERpm = Sig(It->ERpm + V.E * Rpm);
+			It->EF = Sig(It->EF + V.E * Off);
+			It->EConvF = Sig(It->EConvF + V.E * Conv * Off);
+			It->ERpmF = Sig(It->ERpmF + V.E * Rpm * Off);
+		}
+		Total += V.E * EvergreenDays;
+	}
+	if (!valgo::IsGrant(V))
+	{
+		TopRow Row;
+		Row.Id = V.Id;
+		Row.Title = V.Title;
+		Row.Views = Quantize(Total, 100.0);
+		Row.Cents = static_cast<Chips>(std::llround(V.X.Earned));
+		Row.At = V.At;
+		C.X.Top.push_back(Row);
+		std::stable_sort(C.X.Top.begin(), C.X.Top.end(), [](const TopRow& A, const TopRow& B) { return A.Views > B.Views; });
+		if (C.X.Top.size() > 20)
+		{
+			C.X.Top.resize(20);
+		}
+	}
+}
+
 /** A video leaves the newest Keep: its curve folds into its class's tail as of C.SteppedTo; an evergreen video keeps a stub. */
 void Fold(Channel& C, size_t Keep)
 {
 	while (C.Videos.size() > Keep && C.Videos.front().At <= C.SteppedTo)
 	{
+		if (C.Videos.front().X.On)
+		{
+			if (!StartedBy(C.Videos.front(), C.SteppedTo))
+			{
+				break; // (a component still to start: it folds at the next day's step)
+			}
+			const Video V = C.Videos.front();
+			C.Videos.erase(C.Videos.begin());
+			FoldU3(C, V);
+			continue;
+		}
 		const Video V = C.Videos.front();
 		C.Videos.erase(C.Videos.begin());
 		const double Age = (C.SteppedTo - V.At) / Day;
@@ -634,23 +832,222 @@ void CountUploads(Channel& C, double World)
 	}
 }
 
+/** Update 3: the day's engagement for the rings (likes, dislikes, comments, impressions, subscribers lost). */
+struct DayX
+{
+	double Likes = 0, Dislikes = 0, Comments = 0, Impr = 0, Lost = 0, Watch = 0;
+};
+
+/** A ring row's fields from a day's sums (U3RowText's order), kept to a tenth (display numbers; the save stays short). */
+void AddToRow(DayRow& R, const Gains& G, const DayX& Dx, Chips Cents)
+{
+	auto Add = [](float& Field, double X) {
+		const double Sum = static_cast<double>(Field) + X;
+		Field = static_cast<float>(Quantize(Sum, std::fabs(Sum) >= 100.0 ? 1.0 : 10.0)); // whole numbers from 100 up, tenths below
+	};
+	Add(R.Views, G.Views);
+	Add(R.WatchH, Dx.Watch);
+	Add(R.Gained, G.Subs + Dx.Lost);
+	Add(R.Lost, Dx.Lost);
+	Add(R.Likes, Dx.Likes);
+	Add(R.Dislikes, Dx.Dislikes);
+	Add(R.Impr, Dx.Impr);
+	Add(R.Comments, Dx.Comments);
+	R.Cents += Cents;
+}
+
+/**
+ * TrendCool's bound (12, Video.h): past it, the entry whose window closes first goes (a trend over already, a count or a bell
+ * mark, before one still open), never simply the oldest: a week's bells must not push out a long trend's count, or its third
+ * matching upload would ride it again (§4.6.10).
+ */
+void TrimTrendCool(ChannelX& X)
+{
+	while (X.TrendCool.size() > 12)
+	{
+		X.TrendCool.erase(std::min_element(X.TrendCool.begin(), X.TrendCool.end(), [](const Cool& A, const Cool& B) { return A.LastDay < B.LastDay; }));
+	}
+}
+
+/**
+ * Update 3's midnight (§4.7's steps 2 and 5-7, with SPEC_CREATORS §3.3): the rings (a row a day for 90 days, a row a month
+ * for 24, the lifetime row), the verdicts and check-ins (two-phase, VideoAlgo.cpp), the upload streak on a Monday (a
+ * missed week halves it unless a Rain Check covers it), and Momentum's drift after 21 idle days.
+ */
+void MidnightU3(Channel& C, life::State& L, double D0, const Gains& G, const DayX& Dx, Chips DayCents, const world::World* W)
+{
+	ChannelX& X = C.X;
+	const int DayNo = DayIndex(D0);
+	const int Next = DayNo + 1;
+	DayRow Row;
+	Row.Key = DayNo;
+	AddToRow(Row, G, Dx, DayCents);
+	X.Days.push_back(Row);
+	if (X.Days.size() > 90)
+	{
+		X.Days.erase(X.Days.begin(), X.Days.begin() + static_cast<std::ptrdiff_t>(X.Days.size() - 90));
+	}
+	int Y = 0, Mo = 0, Dm = 0;
+	world::CivilDate(DayNo, Y, Mo, Dm);
+	const int MonthKey = Y * 12 + (Mo - 1);
+	if (X.Months.empty() || X.Months.back().Key != MonthKey)
+	{
+		DayRow M;
+		M.Key = MonthKey;
+		X.Months.push_back(M);
+		if (X.Months.size() > 24)
+		{
+			X.Months.erase(X.Months.begin());
+		}
+	}
+	AddToRow(X.Months.back(), G, Dx, DayCents);
+	AddToRow(X.Life, G, Dx, DayCents);
+	// The decisions of the midnight that ends this day.
+	algo::DecideDay(C, L, Next, nullptr);
+	const double D1 = static_cast<double>(Next) * Day;
+	for (size_t I = 0; I < C.Videos.size(); ++I)
+	{
+		const Video& V = C.Videos[I];
+		if (!V.X.On || valgo::IsGrant(V) || V.At + Day > D1 || V.At + Day <= D1 - Day)
+		{
+			continue;
+		}
+		// Its first day just ended (§6.6.5): better at 24 hours than 8 of the last 10 uploads were at theirs is bell-worthy.
+		const double Mine = Views(V, V.At + Day);
+		int Seen = 0, Beat = 0;
+		for (size_t J = I; J-- > 0 && Seen < 10;)
+		{
+			if (valgo::IsGrant(C.Videos[J]))
+			{
+				continue;
+			}
+			++Seen;
+			Beat += Mine > Views(C.Videos[J], C.Videos[J].At + Day) ? 1 : 0;
+		}
+		if (Seen >= 5 && Beat * 10 >= Seen * 8)
+		{
+			Bell(C, D1, valgo::BellEarly(V.Title));
+		}
+	}
+	// The first Limited ads coin brings one Mail notice, ever (§4.5.4; its key in video\tpaid).
+	for (const Video& V : C.Videos)
+	{
+		if (V.X.On && V.X.C == Coin::Limited && V.At <= D1 && C.Paid.insert("notice:limited").second)
+		{
+			Mail(L, D1, "rerun:limited", valgo::VaLetterLimited, valgo::LimitedSubject(), valgo::LimitedBody(V.Title));
+		}
+	}
+	// A new trend rings the bell, one a day (§6.6.5), the hottest first: one whose window opened in the last week (the
+	// calendar's and the network's) or that this week's list took in from the world's log, once (TrendCool keeps a "bell:"
+	// mark for it until its window has closed).
+	for (const Trend& T : valgo::TrendsNow(L, W, D1))
+	{
+		valgo::VaTrend Tv;
+		const bool FromLog = T.Key.rfind("champ:", 0) == 0 || T.Key.rfind("final:", 0) == 0 || T.Key.rfind("site:", 0) == 0 || T.Key.rfind("overlay:", 0) == 0;
+		if (!valgo::TrendOfKey(T.Key, Tv) || (!FromLog && Tv.Start < D1 - 7.0 * Day))
+		{
+			continue;
+		}
+		const int Mark = valgo::TrendCoolKey("bell:" + T.Key);
+		if (std::any_of(X.TrendCool.begin(), X.TrendCool.end(), [Mark](const Cool& Cl) { return Cl.Key == Mark; }))
+		{
+			continue;
+		}
+		Bell(C, D1, valgo::BellTrend(T.Label));
+		Cool Rung;
+		Rung.Key = Mark;
+		Rung.LastDay = DayIndex(Tv.End - 1.0);
+		X.TrendCool.push_back(Rung);
+		TrimTrendCool(X);
+		break;
+	}
+	// The upload streak (SPEC_CREATORS §3.3): Monday 00:00 counts the week that just ended.
+	if (Next % 7 == 0)
+	{
+		const int Week = Next / 7 - 1;
+		if (X.StreakWeek < Week)
+		{
+			const bool Uploaded = X.LastUploadDay >= 0 && X.LastUploadDay / 7 == Week;
+			if (Uploaded)
+			{
+				const int Held = X.RainChecks;
+				X.StreakW = std::min(valgo::VaStreakMax, X.StreakW + 1);
+				X.RainChecks = X.StreakW % valgo::VaRainEvery == 0 ? std::min(valgo::VaRainMax, X.RainChecks + 1) : X.RainChecks;
+				if (X.RainChecks > Held)
+				{
+					Bell(C, D1, valgo::BellRainCheck(X.StreakW));
+				}
+			}
+			else if (X.RainChecks > 0)
+			{
+				--X.RainChecks;
+			}
+			else
+			{
+				X.StreakW /= 2;
+			}
+			X.StreakWeek = Week;
+		}
+		// The week's trends start over (the cooldowns count a trend's matching uploads inside its window).
+		X.TrendCool.erase(std::remove_if(X.TrendCool.begin(), X.TrendCool.end(), [Next](const Cool& Cl) { return Cl.LastDay < Next - 14; }), X.TrendCool.end());
+		X.TrendWeek = Next / 7;
+	}
+	// Dormancy: after 21 idle days, H drifts 5% a day toward 0 ("Rerun hasn't seen anything from you lately").
+	if (X.LastUploadDay >= 0 && Next - X.LastUploadDay > valgo::VaDormantDays)
+	{
+		X.MomH = valgo::VaRound(X.MomH * valgo::VaMomDormant, 1e6);
+		X.Momentum = valgo::MomCOf(X.MomH);
+	}
+}
+
 /** One world day, D0 (a midnight) to D0 + a day. */
-void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, double D0, size_t Keep)
+void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, double D0, size_t Keep, const world::World* TheWorld)
 {
 	const double D1 = D0 + Day;
+	const int DayNo = DayIndex(D0);
+	const bool U3 = C.X.On;
+	if (U3)
+	{
+		// Update 3 (§4.5.5): an ad-load switch takes effect at the start of its day, before that day's gains.
+		for (Video& V : C.Videos)
+		{
+			valgo::ApplyLoad(V, DayNo);
+		}
+	}
 	Fold(C, Keep);
 	const bool Paying = C.PartnerAt >= 0.0 && D0 >= C.PartnerAt - 1e-6;
+	// Update 3 (§4.5.3): Rerun 2.0's ads pay the day's season (one factor for the day, so the folded tails stay exact).
+	const double Sea = U3 ? algo::Season(DayNo) : 1.0;
+	DayX Dx;
 	// The videos kept whole: their milestones too.
 	Gains G;
-	for (const Video& V : C.Videos)
+	for (Video& V : C.Videos)
 	{
 		const double Was = Views(V, D0);
 		const double Now = Views(V, D1);
 		const double Gain = std::max(0.0, Now - Was);
 		G.Views += Gain;
-		G.Subs += V.Conv * Gain;
-		G.Ad += Paying ? V.Rpm / 1000.0 * Gain : 0.0;
-		G.Hours += RowOf(V.F).Hours ? Gain * V.LengthMin / 60.0 * V.Retention : 0.0;
+		G.Subs += valgo::ConvOn(V, DayNo) * Gain;
+		G.Ad += Paying ? valgo::RpmOn(V, DayNo) / 1000.0 * Gain : 0.0;
+		G.Hours += RowOf(V.F).Hours ? Gain * V.LengthMin / 60.0 * valgo::RetentionOn(V, DayNo) : 0.0;
+		if (U3 && Gain > 0.0)
+		{
+			// The video's own double cents (§4.5.2) and the rings' engagement: counts arrive with the views.
+			if (Paying && V.X.On)
+			{
+				V.X.Earned = Quantize(V.X.Earned + valgo::RpmOn(V, DayNo) / 1000.0 * Gain * 100.0 * Sea, 1e4); // (to 1/10,000 of a cent)
+			}
+			const int Over = valgo::OverOf(V);
+			const double Ret = valgo::RetentionOn(V, DayNo);
+			const AdLoad Load = V.X.On ? valgo::LoadOn(V.X, DayNo) : AdLoad::Standard;
+			const valgo::Rates R = valgo::RatesOf(V, Load, Ret, Over);
+			Dx.Likes += R.Like * Gain;
+			Dx.Dislikes += R.Dislike() * Gain;
+			Dx.Comments += R.Comment * Gain;
+			Dx.Impr += valgo::ImprGain(V, D0, D1);
+			Dx.Lost += valgo::LostShare(valgo::QOf(V, R, Ret, Over), Over, Load == AdLoad::Heavy) * valgo::ConvOn(V, DayNo) * Gain;
+			Dx.Watch += Gain * V.LengthMin / 60.0 * Ret;
+		}
 		for (const double M : {100.0, 1000.0, 10000.0, 100000.0})
 		{
 			if (Was < M && Now >= M && V.Title != video_copy::GrantTitle())
@@ -664,6 +1061,7 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 	{
 		const Shape S = ShapeOf(static_cast<Class>(Cl));
 		Tail& T = C.Tails[static_cast<size_t>(Cl)];
+		TailX& Tx = C.X.TailsX[static_cast<size_t>(Cl)];
 		for (int J = 0; J < 2; ++J)
 		{
 			const double F = std::exp(-1.0 / (J == 0 ? S.Tau1 : S.Tau2));
@@ -676,7 +1074,45 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 			G.Views += Gain[0];
 			G.Subs += Gain[1];
 			G.Ad += Paying ? Gain[2] / 1000.0 : 0.0;
+			if (U3)
+			{
+				double* const Into[4] = {&Dx.Likes, &Dx.Dislikes, &Dx.Comments, &Dx.Impr};
+				for (int W = 0; W < 4; ++W)
+				{
+					*Into[W] += Tx.Decay[J][W] * (1.0 - F);
+					Tx.Decay[J][W] *= F;
+				}
+				// (A part that has decayed below a billionth of a view is gone: the line keeps no 1e-37s.)
+				for (int W = 0; W < 3; ++W)
+				{
+					T.Decay[J][W] = std::fabs(T.Decay[J][W]) < 1e-9 ? 0.0 : T.Decay[J][W];
+				}
+				for (int W = 0; W < 4; ++W)
+				{
+					Tx.Decay[J][W] = std::fabs(Tx.Decay[J][W]) < 1e-9 ? 0.0 : Tx.Decay[J][W];
+				}
+			}
 		}
+	}
+	// The day-bucketed evergreen stubs (Update 3): a year past their upload day, they fold as constants.
+	for (size_t I = 0; I < C.X.StubDays.size();)
+	{
+		const StubDay& S = C.X.StubDays[I];
+		double Gain[3] = {0.0, 0.0, 0.0};
+		StubDayGain(S, D0, D1, Gain);
+		G.Views += Gain[0];
+		G.Subs += Gain[1];
+		G.Ad += Paying ? Gain[2] / 1000.0 : 0.0;
+		if (DayIndex(D1) > S.Day + 365)
+		{
+			Tail& T = C.Tails[static_cast<size_t>(Class::Strategy)];
+			T.Total[0] += S.E * EvergreenDays;
+			T.Total[1] += S.EConv * EvergreenDays;
+			T.Total[2] += S.ERpm * EvergreenDays;
+			C.X.StubDays.erase(C.X.StubDays.begin() + static_cast<std::ptrdiff_t>(I));
+			continue;
+		}
+		++I;
 	}
 	// The evergreen stubs; a year old, they fold as a constant.
 	for (size_t I = 0; I < C.Stubs.size();)
@@ -703,11 +1139,12 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 	C.Subs += G.Subs;
 	// Subscribers follow the player to Kast (§4.7): Kast's offline turnover makes whole follows of it.
 	K.FollowFrac += 0.08 * G.Subs + 0.0005 * G.Views;
+	Chips DayCents = 0;
 	if (Paying)
 	{
-		C.BalanceCents += static_cast<Chips>(std::llround(G.Ad * 100.0));
+		DayCents = static_cast<Chips>(std::llround(G.Ad * 100.0 * Sea));
+		C.BalanceCents += DayCents;
 	}
-	const int DayNo = DayIndex(D0);
 	if (C.PartnerAt < 0.0)
 	{
 		RingAdd(C, DayNo, G.Hours);
@@ -719,11 +1156,12 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 			Bell(C, D1, video_copy::BellSubs(static_cast<long long>(M)));
 		}
 	}
-	// The partner gate (§4.6): the trailing 365 days, both bars; a week's review; then the ads count.
+	// The partner gate (§4.6): the trailing 365 days, both bars; a week's review; then the ads count. Rerun 2.0's review also
+	// waits for the second rent (update 3 W11: Act I stays quiet).
 	if (C.ReviewAt < 0.0 && C.PartnerAt < 0.0)
 	{
 		const double Hours = RingSum(C, DayNo - 364, DayNo) + C.GrantedHours;
-		if (C.Subs >= GateSubs && Hours >= GateHours)
+		if (C.Subs >= GateSubs && Hours >= GateHours && (!U3 || L.RentsPaid >= 2))
 		{
 			C.ReviewAt = D1;
 			Mail(L, D1, "rerun:partner", LetterReview, video_copy::ReviewSubject(), video_copy::ReviewBody(C.Subs, Hours));
@@ -779,12 +1217,16 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 	}
 	// Candidates go stale after three weeks.
 	C.Open.erase(std::remove_if(C.Open.begin(), C.Open.end(), [D1](const Candidate& X) { return X.Expires <= D1; }), C.Open.end());
+	if (U3)
+	{
+		MidnightU3(C, L, D0, G, Dx, DayCents, TheWorld);
+	}
 	C.SteppedTo = D1;
 	CountUploads(C, D1);
 }
 
 /** Step with Keep videos kept whole (Step's 60; the fold test runs the same channel unfolded). */
-void StepKeep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, double From, double To, size_t Keep)
+void StepKeep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, double From, double To, size_t Keep, const world::World* W = nullptr)
 {
 	(void)From;
 	const double End = static_cast<double>(DayIndex(To)) * Day;
@@ -799,7 +1241,7 @@ void StepKeep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, dou
 	{
 		return;
 	}
-	const bool Empty = C.Videos.empty() && C.Stubs.empty() && C.Open.empty() && C.ReviewAt < 0.0 && C.PartnerAt < 0.0 && C.BalanceCents == 0 &&
+	const bool Empty = !C.X.On && C.Videos.empty() && C.Stubs.empty() && C.Open.empty() && C.ReviewAt < 0.0 && C.PartnerAt < 0.0 && C.BalanceCents == 0 &&
 		std::all_of(C.Tails.begin(), C.Tails.end(), [](const Tail& T) { return T.Decay[0][0] == 0.0 && T.Decay[1][0] == 0.0 && T.Decay[0][1] == 0.0 && T.Decay[1][1] == 0.0; });
 	if (Empty && C.Subs < GateSubs)
 	{
@@ -811,7 +1253,7 @@ void StepKeep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, dou
 	}
 	for (double D0 = C.SteppedTo; D0 < End - 1e-6; D0 += Day)
 	{
-		DayStep(C, L, Bankroll, K, D0, Keep);
+		DayStep(C, L, Bankroll, K, D0, Keep, W);
 	}
 }
 
@@ -1004,10 +1446,23 @@ ThumbSpec U3UnpackSpec(const std::string& Field)
 	return S;
 }
 
-/** A float field as the shortest text that reads back as exactly it. */
+/** A float field as the shortest text that reads back as exactly it (as a float: at most 9 significant digits). */
 std::string U3Flt(float X)
 {
-	return Num(static_cast<double>(X));
+	if (X == 0.0f)
+	{
+		return "0";
+	}
+	char Buf[32];
+	for (int Precision = 6; Precision <= 9; ++Precision)
+	{
+		std::snprintf(Buf, sizeof(Buf), "%.*g", Precision, static_cast<double>(X));
+		if (static_cast<float>(std::strtod(Buf, nullptr)) == X)
+		{
+			break;
+		}
+	}
+	return Buf;
 }
 
 /** An enum saved as an int, read back clamped to its Count. */
@@ -1017,11 +1472,62 @@ E U3Enum(const std::string& Field)
 	return static_cast<E>(std::clamp(static_cast<int>(ToInt(Field)), 0, static_cast<int>(E::Count) - 1));
 }
 
-/** vid's Update 3 block, after the title (P[28]): "3", then the fields in VideoX's saved order (§7.4); the Comps are vcomp lines. */
-void U3WriteVideoX(const VideoX& X, std::string& Out)
+/**
+ * A video's components in one field (the creator update's compaction of §7.4's vcomp lines, to keep the heavy creator inside
+ * 22 KB): "<T>:<P>:<A>:<kind>:<ctrF>" joined by ';', each number the shortest text that reads back as exactly it. A is empty
+ * when it is its kind's own (KindA) and the source mix is the kind's (MixFor), so neither is written.
+ */
+std::string U3PackComps(const Video& V)
 {
-	Out += "\t3\t" + std::to_string(X.Fate) + "\t" + Num(X.Ctr) + "\t" + Num(X.CtrNoise) + "\t" + Num(X.Sigma) + "\t" + Num(X.KastShare) + "\t" + Num(X.S0) + "\t" + Num(X.S0Base) +
-		"\t" + Num(X.P0) + "\t" + std::to_string(X.Idea) + "\t" + std::to_string(X.Series) + "\t" + Esc(X.TitleTpl) + "\t" + std::to_string(X.Repacks) + "\t" +
+	std::string Out;
+	for (size_t K = 0; K < V.X.Comps.size(); ++K)
+	{
+		const Comp& Cp = V.X.Comps[K];
+		double Own = 0.0;
+		const bool Fixed = valgo::KindA(V, Cp.Kind, Own) && Own == Cp.A;
+		Out += (K > 0 ? ";" : "") + Num(Cp.T) + ":" + Num(Cp.P) + ":" + (Fixed ? std::string() : Num(Cp.A)) + ":" + std::to_string(static_cast<int>(Cp.Kind)) + ":" + U3Flt(Cp.CtrF);
+	}
+	return Out;
+}
+
+void U3UnpackComps(const std::string& Field, Video& V)
+{
+	size_t At = 0;
+	while (At < Field.size())
+	{
+		const size_t End = std::min(Field.find(';', At), Field.size());
+		std::vector<std::string> F;
+		size_t From = At;
+		while (From <= End)
+		{
+			const size_t Colon = std::min(Field.find(':', From), End);
+			F.push_back(Field.substr(From, Colon - From));
+			From = Colon + 1;
+		}
+		if (F.size() >= 5)
+		{
+			Comp Cp;
+			Cp.T = ToNum(F[0]);
+			Cp.P = ToNum(F[1]);
+			Cp.Kind = U3Enum<CompKind>(F[3]);
+			double Own = 0.0;
+			Cp.A = F[2].empty() && valgo::KindA(V, Cp.Kind, Own) ? Own : ToNum(F[2]);
+			Cp.SrcMix = valgo::MixFor(Cp.Kind);
+			Cp.CtrF = static_cast<float>(ToNum(F[4]));
+			V.X.Comps.push_back(Cp);
+		}
+		At = End + 1;
+	}
+}
+
+/** vid's Update 3 block, after the title (P[28]): "3", then the fields in VideoX's saved order (§7.4), LuckLn and the components. */
+void U3WriteVideoX(const Video& V, std::string& Out)
+{
+	const VideoX& X = V.X;
+	// (s0Base is written empty when it equals s0: every Update 2 choice set's.)
+	Out += "\t3\t" + std::to_string(X.Fate) + "\t" + Num(X.Ctr) + "\t" + Num(X.CtrNoise) + "\t" + Num(X.Sigma) + "\t" + Num(X.KastShare) + "\t" + Num(X.S0) + "\t" +
+		(X.S0Base == X.S0 ? std::string() : Num(X.S0Base)) + "\t" + Num(X.P0) + "\t" + std::to_string(X.Idea) + "\t" + std::to_string(X.Series) + "\t" + Esc(X.TitleTpl) + "\t" +
+		std::to_string(X.Repacks) + "\t" +
 		std::to_string(X.LastRepackDay) + "\t" + std::to_string(static_cast<int>(X.Promise)) + "\t" + std::to_string(static_cast<int>(X.Payoff)) + "\t" +
 		std::to_string(static_cast<int>(X.C)) + "\t" + std::to_string(static_cast<int>(X.Ads)) + "\t" + std::to_string(static_cast<int>(X.AdsAtUpload)) + "\t" +
 		std::to_string(static_cast<int>(X.Len)) + "\t" + std::to_string(X.AdsChangedDay) + "\t" + std::to_string(static_cast<int>(X.Launch)) + "\t" +
@@ -1032,13 +1538,18 @@ void U3WriteVideoX(const VideoX& X, std::string& Out)
 	{
 		Out += "\t" + Esc(U3PackSpec(S));
 	}
+	// The creator update (SPEC_CREATORS §8.1): the upload's own luck, ln(Luck x Viral), and ":1" when its viral roll hit; then
+	// the components (U3PackComps; an empty field when there are none).
+	Out += "\t" + U3Flt(X.LuckLn) + (X.Viral ? ":1" : "") + "\t" + U3PackComps(V);
 }
 
-/** The fields of vid's Update 3 block (P[29] .. P[62]). */
-constexpr size_t U3VideoFields = 63;
+/** The fields of vid's Update 3 block (P[29] .. P[64]); a block of 63 (before LuckLn) or 64 (before the packed components,
+ *  which then come as vcomp lines) still reads. */
+constexpr size_t U3VideoFields = 65;
 
-void U3ReadVideoX(const std::vector<std::string>& P, VideoX& X)
+void U3ReadVideoX(const std::vector<std::string>& P, Video& V)
 {
+	VideoX& X = V.X;
 	X = VideoX();
 	X.On = true;
 	X.Fate = static_cast<uint32_t>(ToInt(P[30]));
@@ -1047,7 +1558,7 @@ void U3ReadVideoX(const std::vector<std::string>& P, VideoX& X)
 	X.Sigma = ToNum(P[33]);
 	X.KastShare = ToNum(P[34]);
 	X.S0 = ToNum(P[35]);
-	X.S0Base = ToNum(P[36]);
+	X.S0Base = P[36].empty() ? X.S0 : ToNum(P[36]);
 	X.P0 = ToNum(P[37]);
 	X.Idea = static_cast<int>(ToInt(P[38]));
 	X.Series = static_cast<int>(ToInt(P[39]));
@@ -1075,6 +1586,17 @@ void U3ReadVideoX(const std::vector<std::string>& P, VideoX& X)
 	for (size_t K = 0; K < 3; ++K)
 	{
 		X.Spec[K] = U3UnpackSpec(Unesc(P[60 + K]));
+	}
+	if (P.size() >= U3VideoFields - 1)
+	{
+		const std::string& Luck = P[63];
+		const size_t Colon = Luck.find(':');
+		X.LuckLn = static_cast<float>(ToNum(Luck.substr(0, Colon)));
+		X.Viral = Colon != std::string::npos && Luck.substr(Colon + 1) == "1";
+	}
+	if (P.size() >= U3VideoFields)
+	{
+		U3UnpackComps(P[64], V);
 	}
 }
 
@@ -1165,7 +1687,7 @@ void WriteVideo(const Video& V, std::string& Out)
 	// Update 3 (§7.4, S4): an Update 3 video's block after the title (an older build reads the line to the title and drops it).
 	if (V.X.On)
 	{
-		U3WriteVideoX(V.X, Out);
+		U3WriteVideoX(V, Out);
 	}
 	Out += "\n";
 }
@@ -1204,9 +1726,9 @@ bool ReadVideo(const std::vector<std::string>& P, Video& V)
 	V.Th.Opponent = Unesc(P[26]);
 	V.Th.Site = static_cast<int>(ToInt(P[27]));
 	V.Title = Unesc(P[28]);
-	if (P.size() >= U3VideoFields && P[29] == "3")
+	if (P.size() >= U3VideoFields - 2 && P[29] == "3")
 	{
-		U3ReadVideoX(P, V.X);
+		U3ReadVideoX(P, V);
 	}
 	return V.Tau1 > 0.0 && V.Tau2 > 0.0;
 }
@@ -1249,6 +1771,109 @@ void Anonymize(recall::Record& Rec, std::string& Opponent)
 }
 } // namespace video_detail
 
+// ================================================================== Rerun 2.0's shared helpers (VideoAlgoPriv.h)
+
+namespace valgo
+{
+VaShape ShapeU3(Class C)
+{
+	const video_detail::Shape S = video_detail::ShapeOf(C);
+	return {S.A, S.Tau1, S.Tau2};
+}
+
+double CurveFrac(double A, double Tau1, double Tau2, double Days)
+{
+	return Days > 0.0 ? A * (1.0 - std::exp(-Days / Tau1)) + (1.0 - A) * (1.0 - std::exp(-Days / Tau2)) : 0.0;
+}
+
+double ViewsU3(const Video& V, double World)
+{
+	const double Days = (World - V.At) / VaDay;
+	if (Days <= 0.0)
+	{
+		return 0.0;
+	}
+	const VaShape S = ShapeU3(V.C);
+	double Sum = V.X.P0 * CurveFrac(S.A, S.Tau1, S.Tau2, Days);
+	for (const Comp& K : V.X.Comps)
+	{
+		Sum += K.P * CurveFrac(K.A, S.Tau1, S.Tau2, (World - K.T) / VaDay);
+	}
+	return Sum + V.E * std::min(Days, video_detail::EvergreenDays);
+}
+
+double RemainingU3(const Video& V, double World)
+{
+	const VaShape S = ShapeU3(V.C);
+	auto Left = [&S, World](double T, double P, double A) {
+		const double Age = std::max(0.0, (World - T) / VaDay);
+		return P * (A * std::exp(-Age / S.Tau1) + (1.0 - A) * std::exp(-Age / S.Tau2));
+	};
+	double Sum = Left(V.At, V.X.P0, S.A);
+	for (const Comp& K : V.X.Comps)
+	{
+		Sum += Left(K.T, K.P, K.A);
+	}
+	return std::max(0.0, Sum);
+}
+
+int DayOf(double World)
+{
+	return video_detail::DayIndex(World);
+}
+
+int KindGroup(Kind K)
+{
+	return video_detail::GroupOf(K);
+}
+
+bool Travels(Kind K)
+{
+	return K == Kind::BadBeat || K == Kind::Win || K == Kind::Bluff;
+}
+
+double FormatRetention(Format F)
+{
+	return video_detail::RowOf(F).Retention;
+}
+
+double FormatRpmRow(Format F)
+{
+	return video_detail::RowOf(F).Rpm;
+}
+
+double StyleCtr(TitleStyle T)
+{
+	return video_detail::TitleOf(T).Ctr;
+}
+
+double StyleRet(TitleStyle T)
+{
+	return video_detail::TitleOf(T).Ret;
+}
+
+double StyleAdFit(TitleStyle T)
+{
+	return video_detail::TitleOf(T).AdFit;
+}
+
+double FrameFit(Frame F, int Group)
+{
+	return video_detail::ThumbFit(F, Group);
+}
+
+bool IsGrant(const Video& V)
+{
+	// (Grant's video is "g<minute>", every upload "v<minute>": the id rules out the title's compare almost always.)
+	return !V.Id.empty() && V.Id[0] == 'g' && V.Title == video_copy::GrantTitle();
+}
+
+void PushBell(Channel& C, double At, const std::string& Line)
+{
+	video_detail::Bell(C, At, Line);
+}
+} // namespace valgo
+
 // ================================================================== candidates
 
 double KindWeight(Kind K)
@@ -1271,6 +1896,19 @@ double KindWeight(Kind K)
 	case Kind::Rival: return 1.8;
 	case Kind::Story: return 1.5;
 	case Kind::StreamMoment: return 1.3;
+	// Update 3's hand kinds (§6.3's Topic column, DESIGN §4.9.3 A15-A24; their Classify rules are core-videocontent's): an idea
+	// video's weight comes from its facts (Upload), so Idea reads 1.0 here.
+	case Kind::Monster: return 1.7;
+	case Kind::SetOverSet: return 1.9;
+	case Kind::RunnerRunner: return 1.6;
+	case Kind::DoubleKo: return 1.4;
+	case Kind::LadderFold: return 1.6;
+	case Kind::MinCash: return 1.3;
+	case Kind::Envelope: return 1.6;
+	case Kind::HeadsUp: return 1.8;
+	case Kind::BiggestPot: return 1.6;
+	case Kind::LastHand: return 1.0;
+	case Kind::Idea:
 	case Kind::Count: break;
 	}
 	return 1.0;
@@ -1650,12 +2288,28 @@ double EditEnergy(Format F)
 namespace video_detail
 {
 /**
+ * Update 3 (the creator update, SPEC_CREATORS §3.2-§3.3): what Upload's Update 3 path reads of Update 2's computation, and
+ * nothing Update 2 itself uses. The upload's own draws (Luck x Viral, saved as VideoX::LuckLn so Momentum reads how the
+ * upload really did) and Update 2's terms for the same choices.
+ */
+struct U2Plan
+{
+	Candidate Lead;
+	double Luck = 1, Viral = 1;
+	double CtrU2 = 0, Quality = 1, Face = 1;
+	double RetU2 = 0, TitleSubs = 1, Niche = 1, Consistency = 1, RowSubs = 1, Tier = 1;
+	double BaseCore = 1, BaseSubs = 0, BaseKast = 0; // Base's constant + Fresh + the subscriber and Kast terms
+	bool OnNiche = true; // the lead's kind group is the channel's niche (Niche's group, when it has one): trend tourists' test
+};
+
+/**
  * Update 2's upload of a choice set (update 3 §4.4: extracted verbatim from Upload at Phase A): the new video with its id,
  * its four draws, its reach and click-through (P), retention, conversion, class and money, everything but its title and
  * thumbnail. Upload makes the video from it, UploadU2 reads its P; nothing here changes the channel, which the caller has
- * anchored (Anchor) and checked (CanUpload).
+ * anchored (Anchor) and checked (CanUpload). The creator update: Fresh is Fresh on Rerun's addend to Base's constant (0 for
+ * Update 2's choice sets and UploadU2, so the five vectors stay pinned); Out, when given, gets the terms Update 3 reads.
  */
-Video UploadPlanU2(const Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F)
+Video UploadPlanU2(const Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F, double Fresh = 0.0, U2Plan* Out = nullptr)
 {
 	const std::vector<Candidate> P = Picked(Ch, C.Open);
 	// The lead: a Recap's event, else the most dramatic moment.
@@ -1692,7 +2346,7 @@ Video UploadPlanU2(const Channel& C, const Choice& Ch, double World, const std::
 		std::min(static_cast<double>(KeepVideos), static_cast<double>(std::count_if(C.Videos.begin(), C.Videos.end(), [](const Video& X) { return X.Title != video_copy::GrantTitle(); })));
 	const double Cadence = 1.0 + 0.05 * static_cast<double>(std::min(6, N14));
 	const double Fatigue = std::sqrt(std::min(1.0, 3.0 / static_cast<double>(N7 + 1)));
-	const double Base = (1200.0 + 180.0 * std::sqrt(Sat) + 3.5 * Sat + 0.25 * std::min(static_cast<double>(F.KastFollowers), 20000.0)) * (1.0 + 0.1 * std::log2(1.0 + Library)) *
+	const double Base = (1200.0 + Fresh + 180.0 * std::sqrt(Sat) + 3.5 * Sat + 0.25 * std::min(static_cast<double>(F.KastFollowers), 20000.0)) * (1.0 + 0.1 * std::log2(1.0 + Library)) *
 		Cadence * Fatigue;
 	// Topic: the kind, the stakes, a series, a name people know, the stream that night.
 	bool Series = false, Named = false;
@@ -1728,7 +2382,7 @@ Video UploadPlanU2(const Channel& C, const Choice& Ch, double World, const std::
 	const bool SmallHand = PotBb < 40.0 && !(Lead->K == Kind::FinalTable || Lead->K == Kind::Win || Lead->Final);
 	const double TitleRet = Ch.T == TitleStyle::Hype && SmallHand ? 0.6 : T.Ret;
 	const double Retention = Row.Retention * TitleRet * (0.85 + 0.3 * std::clamp(F.GearQuality, 0.0, 1.0));
-	int Same = 1, Last = 1;
+	int Same = 1, Last = 1, LeadSame = 1;
 	{
 		std::map<int, int> Groups;
 		++Groups[GroupOf(Lead->K)];
@@ -1745,6 +2399,7 @@ Video UploadPlanU2(const Channel& C, const Choice& Ch, double World, const std::
 		{
 			Same = std::max(Same, Gx.second);
 		}
+		LeadSame = Groups[GroupOf(Lead->K)];
 	}
 	const double Niche = static_cast<double>(Same) >= 0.6 * static_cast<double>(Last) ? 1.15 : 1.0;
 	const double Consistency = N14 >= 2 ? 1.1 : 1.0;
@@ -1770,6 +2425,25 @@ Video UploadPlanU2(const Channel& C, const Choice& Ch, double World, const std::
 	V.Rpm = Quantize(2.5 * Row.Rpm * T.AdFit * Tier, 1e4);
 	V.Auto = std::any_of(P.begin(), P.end(), [](const Candidate& X) { return X.Auto; });
 	V.Site = Lead->Site;
+	if (Out)
+	{
+		Out->Lead = *Lead;
+		Out->Luck = Luck;
+		Out->Viral = Viral;
+		Out->CtrU2 = Ctr;
+		Out->Quality = Quality;
+		Out->Face = Face;
+		Out->RetU2 = Retention;
+		Out->TitleSubs = T.Subs;
+		Out->Niche = Niche;
+		Out->OnNiche = Niche > 1.0 && LeadSame == Same;
+		Out->Consistency = Consistency;
+		Out->RowSubs = Row.Subs;
+		Out->Tier = Tier;
+		Out->BaseSubs = 180.0 * std::sqrt(Sat) + 3.5 * Sat;
+		Out->BaseKast = 0.25 * std::min(static_cast<double>(F.KastFollowers), 20000.0);
+		Out->BaseCore = 1200.0 + Fresh + Out->BaseSubs + Out->BaseKast;
+	}
 	return V;
 }
 } // namespace video_detail
@@ -1792,6 +2466,378 @@ double UploadU2(const Channel& C, const Choice& Ch, double World, const std::str
 	return UploadPlanU2(C, Ch, World, Seed, F).P;
 }
 
+namespace video_detail
+{
+/**
+ * Update 3 (§7.5's migration, SPEC_CREATORS §8.3): a channel's first Update 3 upload turns its X on. The old videos keep
+ * their numbers (V6); Fresh on Rerun's count starts at the videos kept; the streak counts from the kept uploads' last 8
+ * weeks (no new draw); Momentum starts at H 0.
+ */
+void TurnOnU3(Channel& C, double World)
+{
+	ChannelX& X = C.X;
+	X.On = true;
+	const int Today = DayIndex(World);
+	X.Since = Today;
+	X.UploadsEver = 0;
+	X.LastUploadDay = -1;
+	std::set<int> Weeks;
+	for (const Video& V : C.Videos)
+	{
+		if (valgo::IsGrant(V))
+		{
+			continue;
+		}
+		++X.UploadsEver;
+		X.LastUploadDay = std::max(X.LastUploadDay, DayIndex(V.At));
+		Weeks.insert(DayIndex(V.At) / 7);
+	}
+	const int Last = Today / 7 - 1; // the last whole week
+	X.StreakW = 0;
+	for (int W = Last; W > Last - valgo::VaStreakMax && Weeks.count(W) > 0; --W)
+	{
+		++X.StreakW;
+	}
+	X.StreakWeek = Last;
+	X.RainChecks = 0;
+	X.MomH = 0.0;
+	X.Momentum = valgo::MomCOf(0.0);
+	X.MomShown = 1.0;
+}
+
+/**
+ * Payoff (§4.6.5): what the content can back up, 0-3: the drama, +1 for a prize of 20x the buy-in, 2 for a story, and a pot
+ * in the top 10% of the player's own pots pays off at 3 (the history the channel keeps: the open moments, at least 10).
+ */
+uint8_t PayoffOf(const Candidate& Lead, const std::vector<Candidate>& Open)
+{
+	int P = Lead.Drama < 0.45 ? 0 : Lead.Drama < 0.6 ? 1 : Lead.Drama < 0.75 ? 2 : 3;
+	if (EventKind(Lead.K) && Lead.BuyIn > 0 && Lead.Rec.Pot >= 20 * Lead.BuyIn)
+	{
+		++P;
+	}
+	const double Mine = PotBbOf(Lead);
+	if (Mine > 0.0)
+	{
+		int Pots = 0, Bigger = 0;
+		for (const Candidate& X : Open)
+		{
+			const double Bb = PotBbOf(X);
+			Pots += Bb > 0.0 ? 1 : 0;
+			Bigger += Bb > Mine ? 1 : 0;
+		}
+		P = Pots >= valgo::VaPotHistoryMin && Bigger * 10 < Pots ? 3 : P;
+	}
+	if (Lead.K == Kind::Story)
+	{
+		P = 2;
+	}
+	return static_cast<uint8_t>(std::clamp(P, 0, 3));
+}
+
+/** A style's promise without a template (§4.6.5): Plain 0; Story, Question and Teaching 1; Loud 2. */
+uint8_t StylePromise(TitleStyle T)
+{
+	return static_cast<uint8_t>(T == TitleStyle::Plain ? 0 : T == TitleStyle::Hype ? 2 : 1);
+}
+
+/** Sameness (§4.6.2): an archetype in 3 of the last 5 uploads x0.90, in 4 or 5 of them x0.82. */
+double NoveltyOf(const Channel& C, int Arch)
+{
+	int Seen = 0, Count = 0;
+	for (auto It = C.Videos.rbegin(); It != C.Videos.rend() && Count < 5; ++It)
+	{
+		if (!It->X.On || It->Fr != Frame::Recipe)
+		{
+			continue;
+		}
+		++Count;
+		Seen += It->X.Spec[static_cast<size_t>(std::clamp<int>(It->X.DuelWin, 0, 2))].Arch == Arch ? 1 : 0;
+	}
+	return Seen >= 4 ? 0.82 : Seen >= 3 ? 0.90 : 1.0;
+}
+
+/**
+ * The trend an upload rides (§4.6.10): the hottest one its lead matches (TrendsFor: a Sunday major, a series week, the
+ * trends an idea's facts name), TrendFit = 1 + (strength - 1) x heat, x1.10 for a topic few of the world's creators have
+ * covered ("few=1"). Every match counts toward its trend's cooldown (TrendCool, the window's last day kept so a long
+ * window's count lasts it out); a trend's third and later matching upload gets no factor. Heat: the trend's heat (0: none).
+ */
+double TrendFitOf(Channel& C, const Candidate& Lead, double At, double& Heat)
+{
+	Heat = 0.0;
+	double Fit = 1.0;
+	const bool Few = !valgo::FactValues(Lead.IdeaFacts, "few").empty() && valgo::FactValues(Lead.IdeaFacts, "few").front() == "1";
+	for (const valgo::VaTrend& T : valgo::TrendsFor(Lead, At))
+	{
+		const int Key = valgo::TrendCoolKey(T.Key);
+		auto It = std::find_if(C.X.TrendCool.begin(), C.X.TrendCool.end(), [Key](const Cool& Cl) { return Cl.Key == Key; });
+		if (It == C.X.TrendCool.end())
+		{
+			Cool Cl;
+			Cl.Key = Key;
+			C.X.TrendCool.push_back(Cl);
+			It = C.X.TrendCool.end() - 1;
+		}
+		It->LastDay = std::max(It->LastDay, DayIndex(T.End - 1.0));
+		++It->Count;
+		const double H = valgo::TrendHeat(T, At);
+		const double F = It->Count >= 3 ? 1.0 : (1.0 + (T.Strength - 1.0) * H) * (Few ? valgo::VaTrendFew : 1.0);
+		if (F > Fit)
+		{
+			Fit = F;
+			Heat = H;
+		}
+		TrimTrendCool(C.X);
+	}
+	return Fit;
+}
+
+/**
+ * An Update 3 upload (§4.4 with SPEC_CREATORS §3.2-§3.3):
+ *   P  = P_U2(Base + Fresh) x Mc3 x MomC x Streak x CtrNoise,  P0 = P / (1 + kappa(S0))
+ * Update 2's computation is UploadPlanU2's, its four draws untouched; Update 3's rolls come from a fork of their own
+ * (":u3": Fate, the CTR noise, the Duel's contenders). Any Update 2 choice set has Ctr = Ctr_U2, S0 = S0_base (the timing
+ * window aside) and so M3 = 1: its reach moves only by MomC, the streak, Fresh and the noise (C2: nobody gets slower).
+ */
+Video UploadU3(Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F)
+{
+	ChannelX& X = C.X;
+	if (!X.On)
+	{
+		TurnOnU3(C, World);
+	}
+	const int Today = DayIndex(World);
+	// Welcome back: the first upload after 21 or more dark days, once.
+	X.WelcomeBack = X.LastUploadDay >= 0 && Today - X.LastUploadDay >= valgo::VaDormantDays;
+	if (X.WelcomeBack)
+	{
+		X.MomH = valgo::VaRound(X.MomH + valgo::VaMomWelcome, 1e6);
+	}
+	X.Momentum = valgo::MomCOf(X.MomH);
+	const bool Recipe = !Ch.Thumbs.empty();
+	// Update 2's half: a recipe's own Update 2 frame (FrameOf) sets the Update 2 CTR.
+	Choice AsU2 = Ch;
+	if (Recipe)
+	{
+		AsU2.Fr = FrameOf(Ch.Thumbs.front().Arch);
+	}
+	const double Fresh = valgo::VaFresh * std::max(0.0, 1.0 - static_cast<double>(X.UploadsEver) / static_cast<double>(valgo::VaFreshUploads));
+	U2Plan Plan;
+	Video V = UploadPlanU2(C, AsU2, World, Seed, F, Fresh, &Plan);
+	const Candidate& Lead = Plan.Lead;
+	const int Group = GroupOf(Lead.K);
+	VideoX& Vx = V.X;
+	Vx = VideoX();
+	Vx.On = true;
+	Rng U(Seed + ":video:" + V.Id + ":u3");
+	Vx.Fate = U.NextUint32();
+	auto Normal = [&U]() {
+		const double U1 = std::max(1e-12, U.Next());
+		const double U2v = U.Next();
+		return std::sqrt(-2.0 * std::log(U1)) * std::cos(2.0 * 3.14159265358979323846 * U2v);
+	};
+	Vx.CtrNoise = Quantize(std::exp(0.15 * Normal() - 0.01125), 1e6);
+	double DuelNoise[3] = {0.0, 0.0, 0.0};
+	for (double& N : DuelNoise)
+	{
+		N = Normal();
+	}
+	// The packaging: the title template's promise and traits, the recipes (1-3: a Duel), the levers.
+	TitleOption Option;
+	bool Matched = false;
+	if (!Ch.TitleTpl.empty())
+	{
+		for (const TitleOption& O : TitleOptions(Ch, video::Picked(Ch, C.Open), C, Ch.Shuffle, 3))
+		{
+			if (O.Key == Ch.TitleTpl)
+			{
+				Option = O;
+				Matched = true;
+			}
+		}
+	}
+	V.Title = Matched ? Option.Text : Title(Ch, C.Open, 0);
+	Vx.TitleTpl = Ch.TitleTpl;
+	Vx.Promise = Matched ? Option.Promise : StylePromise(Ch.T);
+	Vx.Payoff = PayoffOf(Lead, C.Open);
+	Vx.Idea = Lead.Idea;
+	Vx.Series = Ch.Series;
+	Vx.NextUp = Ch.NextUp;
+	Vx.Len = Ch.F == Format::Short ? LengthOpt::Standard : Ch.Len;
+	Vx.Ads = Ch.F == Format::Short ? AdLoad::Standard : Ch.Ads;
+	Vx.AdsAtUpload = Vx.Ads;
+	const size_t Contenders = Recipe ? std::min<size_t>(3, Ch.Thumbs.size()) : 0;
+	for (size_t K = 0; K < Contenders; ++K)
+	{
+		Vx.Spec[K] = Ch.Thumbs[K];
+	}
+	Vx.Duels = static_cast<int8_t>(Contenders >= 2 ? Contenders : 1);
+	if (Recipe)
+	{
+		V.Fr = Frame::Recipe;
+		V.Th = Thumb();
+		V.Th.Fr = Frame::Recipe;
+	}
+	else
+	{
+		V.Th = ThumbFor(Ch, C.Open);
+	}
+	// Suitability (§4.5.4): an idea that promotes a real-money site is Limited and 18+ (core-videocontent marks it in its
+	// facts: "ltd=1"); strong language (a tilted face with a Loud title) is Limited unless the edit is clean (+15 minutes).
+	const std::vector<std::string> Ltd = valgo::FactValues(Lead.IdeaFacts, "ltd");
+	const bool Promo = !Ltd.empty() && Ltd.front() == "1";
+	const bool Strong = valgo::StrongLanguage(V);
+	Vx.C = Promo || (Strong && !Ch.CleanEdit) ? Coin::Limited : Coin::Full;
+	// The idea's advertiser category ("ad="), in place of the title style's fit (§4.5.4); 0: the style's.
+	const std::vector<std::string> Ad = valgo::FactValues(Lead.IdeaFacts, "ad");
+	const double IdeaFit = Ad.empty() ? 0.0 : valgo::AdCategoryFit(Ad.front());
+	// An idea video's Topic (§4.4, §6.3): the idea's own weight ("w=", inside Update 2's 0.9-2.4) in place of the kind's 1.0,
+	// x0.5 inside its cooldown ("cool=" days since the same idea's last upload; 7 when unsaid). The upload records the use.
+	double IdeaTopic = 1.0;
+	if (Lead.K == Kind::Idea && Lead.Idea >= 0)
+	{
+		const std::vector<std::string> Wf = valgo::FactValues(Lead.IdeaFacts, "w"), Cf = valgo::FactValues(Lead.IdeaFacts, "cool");
+		IdeaTopic = Wf.empty() ? 1.0 : std::clamp(std::strtod(Wf.front().c_str(), nullptr), 0.9, 2.4);
+		const int CoolDays = Cf.empty() ? valgo::VaIdeaCoolDays : std::max(0, static_cast<int>(std::strtol(Cf.front().c_str(), nullptr, 10)));
+		auto It = std::find_if(X.IdeaCool.begin(), X.IdeaCool.end(), [&Lead](const Cool& Cl) { return Cl.Key == Lead.Idea; });
+		if (It != X.IdeaCool.end() && It->LastDay >= 0 && Today - It->LastDay < CoolDays)
+		{
+			IdeaTopic *= 0.5;
+		}
+		if (It == X.IdeaCool.end())
+		{
+			Cool Cl;
+			Cl.Key = Lead.Idea;
+			X.IdeaCool.push_back(Cl);
+			It = X.IdeaCool.end() - 1;
+		}
+		It->LastDay = Today;
+		++It->Count;
+		if (X.IdeaCool.size() > 40)
+		{
+			X.IdeaCool.erase(std::min_element(X.IdeaCool.begin(), X.IdeaCool.end(), [](const Cool& A, const Cool& B) { return A.LastDay < B.LastDay; }));
+		}
+	}
+	// The packaging CTR: Update 2's for an Update 2 choice set (exactly); a recipe's own fit otherwise, compressed later.
+	const int Over0 = valgo::OverOf(V);
+	const int Under0 = valgo::UnderOf(V);
+	// (The saved doubles are kept short: the CTRs to 1e-7, the scores to 1e-6, the shares to 1e-4, P0 to the cent. Reach reads
+	// the unrounded ratio, so an Update 2 choice set's M3 stays exactly 1.)
+	double CtrPack = Plan.CtrU2;
+	if (!Recipe)
+	{
+		Vx.Ctr = Quantize(Plan.CtrU2, 1e7);
+	}
+	else
+	{
+		const double TraitCtr = Matched ? valgo::TitleTraitCtr(Option.Traits) : 1.0;
+		double Sum = 0.0;
+		for (size_t K = 0; K < Contenders; ++K)
+		{
+			const ThumbSpec& S = Vx.Spec[K];
+			const int Promise = std::max(static_cast<int>(Vx.Promise), static_cast<int>(ThumbPromise(S)));
+			const int Over = std::max(0, Promise - static_cast<int>(Vx.Payoff)), Under = std::max(0, static_cast<int>(Vx.Payoff) - Promise);
+			const double Pack = std::clamp(ArchetypeFit(S.Arch, Group, Lead) * ThumbTraits(S, Lead, C) * valgo::StyleCtr(Ch.T) * TraitCtr * NoveltyOf(C, S.Arch) *
+					(1.0 + 0.12 * static_cast<double>(Over)) * (1.0 - 0.04 * static_cast<double>(Under)),
+				0.70, 1.45);
+			double Ctr = std::clamp(0.05 * Pack * Plan.Quality * Plan.Face, 0.02, 0.14);
+			if (Contenders >= 2)
+			{
+				Ctr *= std::exp(0.12 * DuelNoise[K]);
+				Vx.DuelCtr[K] = static_cast<float>(Ctr);
+			}
+			Sum += Ctr;
+		}
+		CtrPack = Sum / static_cast<double>(Contenders);
+		Vx.Ctr = Quantize(CtrPack, 1e7);
+	}
+	// Retention (§4.4): Update 2's three terms, then length, the ad load, honesty, burnout (Update 3's extra editing only).
+	const double RetU2 = Recipe ? valgo::FormatRetention(Ch.F) * valgo::StyleRet(Ch.T) * (0.85 + 0.3 * std::clamp(F.GearQuality, 0.0, 1.0)) : Plan.RetU2;
+	const double Extra = (15.0 * static_cast<double>(std::max(0, Vx.Duels - 1)) +
+							 (Vx.Len == LengthOpt::Extended ? valgo::EditMinutesFor(Ch.F, LengthOpt::Extended) - valgo::EditMinutesFor(Ch.F, LengthOpt::Standard) : 0.0) +
+							 (Strong && Ch.CleanEdit ? valgo::VaCleanEditMinutes : 0.0)) /
+		60.0;
+	const double Hours7 = algo::ExtraHours7(C, World) + Extra;
+	const double Burn = std::clamp(1.0 - valgo::VaBurnSlope * std::max(0.0, Hours7 - valgo::VaBurnFree), valgo::VaBurnFloor, 1.0);
+	// Burnout's warning (§4.6.6, §6.6.5): past 4 extra hours this week, at most once a week.
+	if (Hours7 > valgo::VaBurnFree)
+	{
+		const std::string Prefix = valgo::BellBurnout(0.0).substr(0, 11); // "You've put "
+		const bool Warned = std::any_of(C.Bell.begin(), C.Bell.end(), [&](const std::pair<double, std::string>& B) { return B.first > V.At - 7.0 * Day && B.second.rfind(Prefix, 0) == 0; });
+		if (!Warned)
+		{
+			valgo::PushBell(C, V.At, valgo::BellBurnout(Hours7));
+		}
+	}
+	const double Ret = RetU2 * valgo::LengthRet(Ch.F, Vx.Len) * valgo::AdRet(Ch.F, Vx.Len, Vx.Ads) * (1.0 - 0.10 * static_cast<double>(Over0)) *
+		(1.0 + 0.02 * static_cast<double>(Under0)) * Burn * (Matched ? valgo::TitleTraitRet(Option.Traits) : 1.0);
+	V.Retention = Quantize(Ret, 1e4);
+	V.LengthMin = valgo::LengthMinFor(Ch.F, Vx.Len);
+	// The trend it rides (§4.6.10): bonus-only reach and score; an off-niche trend video's trend viewers subscribe at x0.70
+	// (off-niche: its kind group isn't the channel's niche, a reaction on a channel of bad beats included, or there's none).
+	double TrendHeat = 0.0;
+	const double TrendFit = TrendFitOf(C, Lead, V.At, TrendHeat);
+	const double Tourists = TrendFit > 1.0 && !Plan.OnNiche ? 1.0 - (1.0 - valgo::VaTrendTourists) * (TrendFit - 1.0) / TrendFit : 1.0;
+	// Conversion: Update 2's formula with the Update 3 retention, then the ad load's term for the views it serves.
+	const double Conv = std::clamp(0.0065 * Plan.TitleSubs * (Ret / 0.45) * Plan.Niche * Plan.Consistency * Plan.RowSubs, 0.002, 0.012) * valgo::AdConv(Ch.F, Vx.Len, Vx.Ads) *
+		Tourists;
+	V.Conv = Quantize(Conv, 1e7);
+	// Money (§4.5.2): RPM = CPM x monetized x ads per playback x 55%; an Update 2 choice set keeps Update 2's RPM exactly.
+	const double Pays = 1.0 + 0.6 * (Ret / RetU2 - 1.0);
+	const bool Plain = Vx.Ads == AdLoad::Standard && Vx.Len == LengthOpt::Standard && Vx.C == Coin::Full && Ret == RetU2 && IdeaFit <= 0.0;
+	if (Ch.F != Format::Short && !Plain)
+	{
+		const double Limited = Vx.C == Coin::Limited ? valgo::VaLimitedCpm * valgo::VaMonetizedLimited / valgo::VaMonetized : 1.0;
+		const double Fit = IdeaFit > 0.0 ? IdeaFit : valgo::StyleAdFit(Ch.T);
+		V.Rpm = Quantize(2.5 * algo::AdsPerPlayback(Ch.F, Vx.Len, Vx.Ads) / 1.2 * Fit * Plan.Tier * Limited * Pays, 1e4);
+	}
+	// The score at the upload and the same upload with Update 3's levers neutral (§4.4: S0, S0_base).
+	Vx.Sigma = Plan.BaseCore > 0.0 ? Quantize(Plan.BaseSubs / Plan.BaseCore, 1e4) : 0.0;
+	Vx.KastShare = Plan.BaseCore > 0.0 ? Quantize(0.93 * Plan.BaseKast / Plan.BaseCore, 1e4) : 0.0;
+	const double TimeFit = valgo::TimeFitAt(C, V.At);
+	const double Tr = TrendFit > 1.0 ? valgo::VaTrendTr * TrendHeat : 0.0;
+	const algo::Score S0 = algo::ScoreAt(V, C, World, 0);
+	Vx.S0 = Quantize(std::clamp(S0.S + Tr, -2.0, 2.0), 1e5);
+	// (r_U2 read as the save keeps a retention, and Ctr_U2 as the block keeps a CTR, so an Update 2 choice set's score is the
+	// same number on both sides.)
+	const double RetU2Kept = Quantize(RetU2, 1e4);
+	const valgo::Rates Neutral = valgo::RatesOf(V, AdLoad::Standard, RetU2Kept, 0);
+	Vx.S0Base = Quantize(std::clamp(0.9 * std::log(Quantize(Plan.CtrU2, 1e7) / 0.0475) + valgo::QOf(V, Neutral, RetU2Kept, 0), -2.0, 2.0), 1e5);
+	// Reach: Update 3's per-video levers compressed (LMAX 0.30), then MomC, the streak and the CTR noise.
+	const double M3 = CtrPack / Plan.CtrU2 * TimeFit * TrendFit * (1.0 + algo::Kappa(Vx.S0)) / (1.0 + algo::Kappa(Vx.S0Base));
+	const double Streak = 1.0 + valgo::VaStreakStep * static_cast<double>(X.StreakW);
+	// Site promotion is 18+ (§4.5.4): Home shows it to adults only (x0.6) and the Cuts feed not at all (a real platform's rule,
+	// not a packaging lever: outside the compression).
+	const double Feed = std::max(0.0, 0.93 - Vx.KastShare) * (1.0 - Vx.Sigma);
+	const double Adult = !Promo ? 1.0 : Ch.F == Format::Short ? 1.0 - Feed : 1.0 - (1.0 - valgo::VaAdultHome) * Feed;
+	V.P = Quantize(V.P * IdeaTopic * algo::Compress(M3, valgo::VaLmaxVideo) * X.Momentum * Streak * Vx.CtrNoise * Adult, 100.0);
+	Vx.P0 = Quantize(V.P / (1.0 + algo::Kappa(Vx.S0)), 100.0);
+	V.E = V.C == Class::Strategy ? Quantize(V.P * 0.0015, 10000.0) : 0.0;
+	// The trend's search viewers (§4.4's Trend component, at most one): from the first midnight after the drop, a decision
+	// made at upload from the trend it rides, so nothing later needs to remember the match.
+	if (TrendFit > 1.0)
+	{
+		Comp K;
+		K.T = static_cast<double>(Today + 1) * Day;
+		K.P = Quantize(valgo::VaTrendComp * (TrendFit - 1.0) / valgo::VaTrendCompAt * Vx.P0, 100.0);
+		K.A = valgo::VaTrendA;
+		K.Kind = CompKind::Trend;
+		K.SrcMix = valgo::MixFor(CompKind::Trend);
+		K.CtrF = 1.0f;
+		Vx.Comps.push_back(K);
+	}
+	// The upload's own luck (SPEC_CREATORS §3.3): Momentum reads it at the verdict; a reload can't change it. SettledS keeps
+	// the MomC this upload got (the launch card's "Riding your breakout: +38% reach", true at upload; VideoAlgoPriv.h).
+	Vx.LuckLn = static_cast<float>(Quantize(std::log(Plan.Luck * Plan.Viral), 1e4));
+	Vx.Viral = Plan.Viral > 1.0;
+	Vx.SettledS = static_cast<float>(Quantize(X.Momentum, 1e4));
+	++X.UploadsEver;
+	X.LastUploadDay = Today;
+	return V;
+}
+} // namespace video_detail
+
 std::string Upload(Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F)
 {
 	using namespace video_detail;
@@ -1800,6 +2846,17 @@ std::string Upload(Channel& C, const Choice& Ch, double World, const std::string
 		return std::string();
 	}
 	Anchor(C, World);
+	// Update 3: a Rerun 2.0 channel's upload, or any upload with a recipe or a title template, is an Update 3 video.
+	if (C.X.On || !Ch.TitleTpl.empty() || !Ch.Thumbs.empty())
+	{
+		Video V = UploadU3(C, Ch, World, Seed, F);
+		C.Open.erase(std::remove_if(C.Open.begin(), C.Open.end(),
+						 [&Ch](const Candidate& X) { return std::find(Ch.Candidates.begin(), Ch.Candidates.end(), X.Id) != Ch.Candidates.end(); }),
+			C.Open.end());
+		C.Videos.push_back(V);
+		CountUploads(C, World);
+		return V.Id;
+	}
 	// Update 2's numbers for these choices (UploadU2's), then the title and the thumbnail.
 	Video V = UploadPlanU2(C, Ch, World, Seed, F);
 	V.Title = Title(Ch, C.Open, 0);
@@ -1816,6 +2873,10 @@ std::string Upload(Channel& C, const Choice& Ch, double World, const std::string
 
 double Views(const Video& V, double World)
 {
+	if (V.X.On)
+	{
+		return valgo::ViewsU3(V, World); // Update 3: the first wave and its components (V1)
+	}
 	const double Days = (World - V.At) / video_detail::Day;
 	if (Days <= 0.0)
 	{
@@ -1824,9 +2885,9 @@ double Views(const Video& V, double World)
 	return V.P * (V.A * (1.0 - std::exp(-Days / V.Tau1)) + (1.0 - V.A) * (1.0 - std::exp(-Days / V.Tau2))) + V.E * std::min(Days, video_detail::EvergreenDays);
 }
 
-void Step(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, double From, double To, const world::World* /*W*/)
+void Step(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, double From, double To, const world::World* W)
 {
-	video_detail::StepKeep(C, L, Bankroll, K, From, To, video_detail::KeepVideos);
+	video_detail::StepKeep(C, L, Bankroll, K, From, To, video_detail::KeepVideos, W);
 }
 
 // The fold test's seam (video_test declares it): the same step with every video kept whole.
@@ -1872,6 +2933,12 @@ double TotalViews(const Channel& C, double World)
 	{
 		Sum += StubGain(S, S.At, World);
 	}
+	for (const StubDay& S : C.X.StubDays)
+	{
+		double Gain[3] = {0.0, 0.0, 0.0};
+		StubDayGain(S, static_cast<double>(S.Day) * Day, World, Gain);
+		Sum += Gain[0];
+	}
 	return std::max(0.0, Sum);
 }
 
@@ -1910,7 +2977,7 @@ ChannelView View(const Channel& C, double World)
 		const Gains G = GainsBetween(C, D0, D1, Paying);
 		V.ViewsByDay[static_cast<size_t>(I)] = G.Views;
 		V.SubsByDay[static_cast<size_t>(I)] = G.Subs;
-		V.CentsByDay[static_cast<size_t>(I)] = G.Ad * 100.0;
+		V.CentsByDay[static_cast<size_t>(I)] = G.Ad * 100.0 * (C.X.On ? algo::Season(Today - 27 + I) : 1.0);
 		V.Views28 += G.Views;
 	}
 	return V;
@@ -2066,22 +3133,15 @@ void WriteLines(const life::State& L, std::string& Out)
 void WriteLinesU3(const life::State& L, std::string& Out)
 {
 	// Update 3 (§7.4): Rerun 2.0's lines, after Update 2's, only once U3Video is set and only what holds something: the
-	// components of each Update 3 video (its block rides on its vid line), then the channel's X when it's on.
+	// channel's X when it's on (each Update 3 video's block and its components ride on its vid line).
 	using namespace video_detail;
-	if ((L.Update3LinesRead & life::U3Video) == 0)
+	// (A Rerun 2.0 channel writes its state even before the Session sets the bit: its first Update 3 upload is its own; the
+	// reader sets U3Video from these lines, so the next save is the same.)
+	if ((L.Update3LinesRead & life::U3Video) == 0 && !L.Video.X.On)
 	{
 		return;
 	}
 	const Channel& C = L.Video;
-	for (const Video& V : C.Videos)
-	{
-		for (size_t K = 0; V.X.On && K < V.X.Comps.size(); ++K)
-		{
-			const Comp& Cp = V.X.Comps[K];
-			Out += "video\tvcomp\t" + Esc(V.Id) + "\t" + Num(Cp.T) + "\t" + Num(Cp.P) + "\t" + Num(Cp.A) + "\t" + std::to_string(static_cast<int>(Cp.Kind)) + "\t" +
-				std::to_string(static_cast<int>(Cp.SrcMix)) + "\t" + U3Flt(Cp.CtrF) + "\n";
-		}
-	}
 	const ChannelX& X = C.X;
 	if (!X.On)
 	{
@@ -2089,20 +3149,27 @@ void WriteLinesU3(const life::State& L, std::string& Out)
 	}
 	// The lifetime row and the recommender's standing always (they say the channel's X is on), the rest when they hold any.
 	Out += "video\tvlife" + U3RowText(X.Life) + "\t" + std::to_string(X.Since) + "\n";
-	Out += "video\tvmom\t" + Num(X.Momentum) + "\t" + std::to_string(X.SettledN);
+	// vmom, redefined by the creator update (SPEC_CREATORS §8.1; G3 never shipped): MomH, MomC, MomShown, n, the last six
+	// perf values, lastUploadDay, welcomeBack, the streak (weeks, its last counted week, Rain Checks), UploadsEver, TrendWeek.
+	Out += "video\tvmom\t" + Num(X.MomH) + "\t" + Num(X.Momentum) + "\t" + Num(X.MomShown) + "\t" + std::to_string(X.SettledN);
 	for (const float S : X.Settled)
 	{
 		Out += "\t" + U3Flt(S);
 	}
-	Out += "\t" + std::to_string(X.LastUploadDay) + "\t" + (X.WelcomeBack ? "1" : "0") + "\t" + std::to_string(X.TrendWeek) + "\n";
-	for (const DayRow& R : X.Days)
-	{
-		Out += "video\tvday\t" + std::to_string(R.Key) + U3RowText(R) + "\n";
-	}
-	for (const DayRow& R : X.Months)
-	{
-		Out += "video\tvmonth\t" + std::to_string(R.Key) + U3RowText(R) + "\n";
-	}
+	Out += "\t" + std::to_string(X.LastUploadDay) + "\t" + (X.WelcomeBack ? "1" : "0") + "\t" + std::to_string(X.StreakW) + "\t" + std::to_string(X.StreakWeek) + "\t" +
+		std::to_string(X.RainChecks) + "\t" + std::to_string(X.UploadsEver) + "\t" + std::to_string(X.TrendWeek) + "\n";
+	// The rings: a run of consecutive keys on one line (the first key, then nine fields a row), a new line at any gap.
+	auto Rings = [&Out](const char* Tag, const std::vector<DayRow>& Rows) {
+		for (size_t I = 0; I < Rows.size(); ++I)
+		{
+			const bool Starts = I == 0 || Rows[I].Key != Rows[I - 1].Key + 1;
+			Out += Starts ? (I > 0 ? "\n" : "") + std::string("video\t") + Tag + "\t" + std::to_string(Rows[I].Key) : std::string();
+			Out += U3RowText(Rows[I]);
+		}
+		Out += Rows.empty() ? "" : "\n";
+	};
+	Rings("vday", X.Days);
+	Rings("vmonth", X.Months);
 	for (const TopRow& R : X.Top)
 	{
 		Out += "video\tvtop\t" + Esc(R.Id) + "\t" + Num(R.Views) + "\t" + std::to_string(R.Cents) + "\t" + Num(R.At) + "\t" + Esc(R.Title) + "\n";
@@ -2287,10 +3354,15 @@ bool ReadLine(const std::vector<std::string>& P, life::State& L)
 		}
 		else if ((Tag == "vday" || Tag == "vmonth") && P.size() >= 12)
 		{
-			DayRow R;
-			R.Key = static_cast<int>(ToInt(P[2]));
-			U3ReadRow(P, 3, R);
-			(Tag == "vday" ? X.Days : X.Months).push_back(R);
+			// The first key, then nine fields a row, the keys consecutive.
+			const int First = static_cast<int>(ToInt(P[2]));
+			for (size_t At = 3; At + 9 <= P.size(); At += 9)
+			{
+				DayRow R;
+				R.Key = First + static_cast<int>((At - 3) / 9);
+				U3ReadRow(P, At, R);
+				(Tag == "vday" ? X.Days : X.Months).push_back(R);
+			}
 			U3 = true;
 		}
 		else if (Tag == "vlife" && P.size() >= 12)
@@ -2299,17 +3371,23 @@ bool ReadLine(const std::vector<std::string>& P, life::State& L)
 			X.Since = static_cast<int>(ToInt(P[11]));
 			U3 = true;
 		}
-		else if (Tag == "vmom" && P.size() >= 12)
+		else if (Tag == "vmom" && P.size() >= 18)
 		{
-			X.Momentum = ToNum(P[2]);
-			X.SettledN = static_cast<int>(ToInt(P[3]));
+			X.MomH = ToNum(P[2]);
+			X.Momentum = ToNum(P[3]);
+			X.MomShown = ToNum(P[4]);
+			X.SettledN = static_cast<int>(ToInt(P[5]));
 			for (size_t K = 0; K < X.Settled.size(); ++K)
 			{
-				X.Settled[K] = static_cast<float>(ToNum(P[4 + K]));
+				X.Settled[K] = static_cast<float>(ToNum(P[6 + K]));
 			}
-			X.LastUploadDay = static_cast<int>(ToInt(P[10]));
-			X.WelcomeBack = P[11] == "1";
-			X.TrendWeek = P.size() >= 13 ? static_cast<int>(ToInt(P[12])) : -1;
+			X.LastUploadDay = static_cast<int>(ToInt(P[12]));
+			X.WelcomeBack = P[13] == "1";
+			X.StreakW = static_cast<int>(ToInt(P[14]));
+			X.StreakWeek = static_cast<int>(ToInt(P[15]));
+			X.RainChecks = static_cast<int>(ToInt(P[16]));
+			X.UploadsEver = static_cast<int>(ToInt(P[17]));
+			X.TrendWeek = P.size() >= 19 ? static_cast<int>(ToInt(P[18])) : -1;
 			U3 = true;
 		}
 		else if (Tag == "vtop" && P.size() >= 7)

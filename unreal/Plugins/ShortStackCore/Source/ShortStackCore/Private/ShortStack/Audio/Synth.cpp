@@ -683,6 +683,182 @@ void CueRitRank(Buffer& B, Noise& R, double V)
 	CueFm(B, 0.14, Rise ? 698.46 : 440.0, 1.4, Rise ? 2.2 : 1.4, 0.1, 0.1 * V, 0.002, Rise ? 0.28 : 0.24, 0.6);
 }
 
+// ------------------------------------------------------------------ the creator update: Kast's four cues (SPEC_CREATORS §5.4)
+//
+// Kast is the violet and the lime of the room's lights (a follow flashes violet, a sub lime), so its cues are a vibraphone's
+// bars in E major, round and slowly shimmering under the motor's tremolo (the violet), each strike carrying a glint, a high
+// pure ping flicking into its pitch (the lime). Ignite's cues are the arcade and the fire, RunItTwice's chrome and the
+// exchange's machines; Kast's are the only bars and the only tremolo in the game.
+//   KastAlert  a Run Alert, the final table's sting (Event Mode): two bars rising a fifth, E5 then B5, the second ringing.
+//   KastRise   Heat's tier-up at the commit: air rising through a band, and a soft run up E major's pentatonic from E6 to E7
+//              swelling with it. Warm light, never a crackle (the fire is Ignite's).
+//   KastCall   Hold or Crack's reveal: a snare roll quickening and swelling, then the hit, a low drum, a wash of cymbal and
+//              an open fifth on the bars (no third: the cue is the same whether the all-in held or cracked).
+//   KastShine  a milestone, the first follower: up the E major chord, landing on a high chord that shimmers while glints fall
+//              round it like confetti.
+//
+// They play through the Kast cue queue (Session.cpp, PlayStreamNotices): one at a time, 1.2 s apart at least, at fixed
+// volumes (session_detail::KastCueVolume: KastAlert 0.7, KastRise 0.5, KastCall 0.75, KastShine 0.7). §5.4 hears them at
+// 0.4, 0.35, 0.45 and 0.5, volumes as UiSound passes them, so each body's level is the volume asked for times its ratio
+// below: at the queue's volume each sounds as loud as the game's notes and stings do at §5.4's volume (audio_main.cpp
+// measures it), and any other volume follows linearly. Each says what it has to inside the queue's 1.2 s; only a ring
+// carries on under the next cue.
+
+/** Each cue's level for the volume it's asked for: §5.4's volume over the queue's (KastCueVolume). */
+const double CueKastAlertScale = 0.4 / 0.7;
+const double CueKastRiseScale = 0.35 / 0.5;
+const double CueKastCallScale = 0.45 / 0.75;
+const double CueKastShineScale = 0.5 / 0.7;
+/** The vibraphone motor's tremolo: its rate (Hz) and how far it dips (from full at the cue's start). */
+const double CueKastTremHz = 5.6;
+const double CueKastTremDepth = 0.35;
+
+/**
+ * Kast's bars struck together at At, into a cue's Bars (CueKastShimmer mixes them in): each a vibraphone bar (the
+ * fundamental ringing with time constant Tau, the bar's second mode two octaves up dying ten times sooner, its third mode at
+ * 10x gone in a few milliseconds), with the mallet's soft tick. Peak is each bar's fundamental at the top; Len cuts them.
+ */
+void CueKastBars(Buffer& Bars, Noise& R, double At, const double* Hz, int Count, double Peak, double Tau, double Len)
+{
+	if (!(Peak > 0.0) || !(Len > 0.0) || Count <= 0)
+	{
+		return;
+	}
+	for (int K = 0; K < Count; ++K)
+	{
+		CueOsc(Bars, At, Hz[K], 0.0, 0.0, Peak, 0.0015, Tau, Len);
+		CueOsc(Bars, At, Hz[K] * 4.0, 0.0, 0.0, 0.3 * Peak, 0.0008, 0.1 * Tau, std::min(Len, 0.4 * Tau + 0.03));
+		if (Hz[K] * 10.0 < 0.45 * SynthRate)
+		{
+			CueOsc(Bars, At, Hz[K] * 10.0, 0.0, 0.0, 0.06 * Peak, 0.0005, 0.006, 0.04);
+		}
+	}
+	CueHiss(Bars, R, At, FilterType::BandPass, 3000.0, 0.0, 0.0, 1.2, 0.12 * Peak * std::sqrt(static_cast<double>(Count)), 0.0002, 0.0015, 0.01);
+}
+
+/** One bar (CueKastBars). */
+void CueKastBar(Buffer& Bars, Noise& R, double At, double Hz, double Peak, double Tau, double Len)
+{
+	CueKastBars(Bars, R, At, &Hz, 1, Peak, Tau, Len);
+}
+
+/**
+ * The motor's tremolo over a cue's bars, mixed into Out: 1 - Depth (1 - cos) / 2, full at the cue's start. One motor turns
+ * under every bar of a cue, so bars struck at different times swing together (a phasor turning at CueKastTremHz, its length
+ * held every 256 samples).
+ */
+void CueKastShimmer(Buffer& Out, const Buffer& Bars)
+{
+	Out.Ensure(static_cast<double>(Bars.Data.size()) / SynthRate);
+	const size_t N = std::min(Bars.Data.size(), Out.Data.size());
+	const double W0 = 2.0 * SynthPi * CueKastTremHz / SynthRate;
+	const double StepRe = std::cos(W0), StepIm = std::sin(W0);
+	double Re = 1.0, Im = 0.0;
+	for (size_t I = 0; I < N; ++I)
+	{
+		if (I % 256 == 0)
+		{
+			const double Mag = std::sqrt(Re * Re + Im * Im);
+			Re /= Mag;
+			Im /= Mag;
+		}
+		Out.Data[I] += static_cast<float>(static_cast<double>(Bars.Data[I]) * (1.0 - CueKastTremDepth * 0.5 * (1.0 - Re)));
+		const double NextRe = Re * StepRe - Im * StepIm;
+		Im = Im * StepRe + Re * StepIm;
+		Re = NextRe;
+	}
+}
+
+/** Kast's glint: a pure high ping flicking up into its pitch in 6 ms, gone in 85 ms. */
+void CueKastGlint(Buffer& Out, double At, double Hz, double Peak)
+{
+	CueOsc(Out, At, Hz * 0.94, Hz, 0.006, Peak, 0.0006, 0.022, 0.085);
+}
+
+/** KastAlert: two bars rising a fifth, E5 then B5 0.16 s on, the second ringing to about 1.2 s; each strike's glint (G#7,
+ *  E8) is E major's. */
+void CueKastAlert(Buffer& B, Noise& R, double V)
+{
+	const double L = V * CueKastAlertScale;
+	Buffer Bars;
+	CueKastBar(Bars, R, 0.0, 659.26, 0.055 * L, 0.3, 0.7);
+	CueKastBar(Bars, R, 0.16, 987.77, 0.061 * L, 0.42, 1.04);
+	CueKastShimmer(B, Bars);
+	CueKastGlint(B, 0.002, 3322.4, 0.017 * L);
+	CueKastGlint(B, 0.162, 5274.0, 0.017 * L);
+}
+
+/** KastRise: air through a band rising from 700 Hz to 5 kHz over a second, swelling in for 0.45 s; with it a soft run of
+ *  bars up E major's pentatonic, E6 to E7 90 ms apart from 0.1 s, each a little louder, and a glint (E8) on the top. About
+ *  1.3 s. */
+void CueKastRise(Buffer& B, Noise& R, double V)
+{
+	const double L = V * CueKastRiseScale;
+	CueHiss(B, R, 0.0, FilterType::BandPass, 700.0, 5000.0, 1.0, 2.5, 0.011 * L, 0.45, 0.35, 1.3);
+	const double Run[6] = {1318.5, 1480.0, 1661.2, 1975.5, 2217.5, 2637.0};
+	Buffer Bars;
+	for (int K = 0; K < 6; ++K)
+	{
+		CueKastBar(Bars, R, 0.1 + 0.09 * K, Run[K], (0.016 + 0.005 * K) * L, 0.22, 0.6);
+	}
+	CueKastShimmer(B, Bars);
+	CueKastGlint(B, 0.56, 5274.0, 0.014 * L);
+}
+
+/** KastCall: a snare roll for 0.55 s, its strokes quickening from 16 to 34 a second and swelling (the head's crack, the
+ *  wires, the shell), then the hit at 0.58 s: a low drum falling 120 to 50 Hz, the crack and a cymbal's wash, and an open
+ *  fifth on the bars (E4, B4, E5) with a glint (B7). About 1.5 s. */
+void CueKastCall(Buffer& B, Noise& R, double V)
+{
+	const double L = V * CueKastCallScale;
+	const double RollEnd = 0.55;
+	double At = 0.0;
+	while (At < RollEnd)
+	{
+		const double U = At / RollEnd;
+		const double Stroke = (0.3 + 0.7 * U * U) * (0.85 + 0.3 * Rand(R));
+		CueHiss(B, R, At, FilterType::BandPass, 2600.0 + 900.0 * Rand(R), 0.0, 0.0, 0.9, 0.018 * L * Stroke, 0.0005, 0.01, 0.05);
+		CueHiss(B, R, At, FilterType::HighPass, 5500.0, 0.0, 0.0, 0.0, 0.009 * L * Stroke, 0.0005, 0.03, 0.09);
+		CueOsc(B, At, 215.0, 180.0, 0.01, 0.015 * L * Stroke, 0.0005, 0.012, 0.05);
+		At += (0.92 + 0.16 * Rand(R)) / (16.0 + 18.0 * U);
+	}
+	const double Hit = 0.58;
+	CueOsc(B, Hit, 120.0, 50.0, 0.12, 0.09 * L, 0.002, 0.16, 0.6);
+	CueHiss(B, R, Hit, FilterType::BandPass, 1200.0, 0.0, 0.0, 0.8, 0.024 * L, 0.0005, 0.02, 0.08);
+	CueHiss(B, R, Hit, FilterType::HighPass, 4000.0, 0.0, 0.0, 0.0, 0.016 * L, 0.001, 0.3, 0.95);
+	const double Fifth[3] = {329.63, 493.88, 659.26};
+	Buffer Bars;
+	CueKastBars(Bars, R, Hit + 0.005, Fifth, 3, 0.02 * L, 0.4, 0.85);
+	CueKastShimmer(B, Bars);
+	CueKastGlint(B, Hit + 0.006, 3951.1, 0.012 * L);
+}
+
+/** KastShine: up the E major chord (B5, E6, G#6, B6, 45 ms apart), landing at 0.18 s on E6, G#6, B6 and E7 ringing under
+ *  the tremolo, with glints of the chord two and three octaves up falling round it, thinning out by about 1 s. About
+ *  1.3 s. */
+void CueKastShine(Buffer& B, Noise& R, double V)
+{
+	const double L = V * CueKastShineScale;
+	const double Up[4] = {987.77, 1318.5, 1661.2, 1975.5};
+	Buffer Bars;
+	for (int K = 0; K < 4; ++K)
+	{
+		CueKastBar(Bars, R, 0.045 * K, Up[K], 0.026 * L, 0.18, 0.4);
+	}
+	const double Land[4] = {1318.5, 1661.2, 1975.5, 2637.0};
+	CueKastBars(Bars, R, 0.18, Land, 4, 0.021 * L, 0.5, 1.15);
+	CueKastShimmer(B, Bars);
+	const double Glints[5] = {3322.4, 3951.1, 5274.0, 6644.9, 7902.1};
+	double At = 0.19;
+	while (At < 1.0)
+	{
+		const double Thin = 1.0 - (At - 0.19) / 0.85;
+		const int Pick = std::min(4, static_cast<int>(Rand(R) * 5.0));
+		CueKastGlint(B, At, Glints[Pick], 0.042 * L * Thin * (0.5 + 0.5 * Rand(R)));
+		At += 0.03 + 0.05 * Rand(R);
+	}
+}
+
 /** Finish's bus and limiter, tanh(1.728 x) / 1.2, with the quiet samples (most of a cue's tail) on a series that agrees with
  *  tanh to 1e-6 under 0.3, so a 2.3 s cue doesn't spend its render on tanh. */
 float CueLimit(float S)
@@ -696,8 +872,8 @@ float CueLimit(float S)
 	return static_cast<float>(std::tanh(Y) / 1.2);
 }
 
-/** The ten cues: the volume clamped to 0..1 (a non-number is silence), then the bus and the limiter as every one-shot, held
- *  under CueCeiling, with the trailing silence trimmed. */
+/** The ten cues and Kast's four: the volume clamped to 0..1 (a non-number is silence), then the bus and the limiter as every
+ *  one-shot, held under CueCeiling, with the trailing silence trimmed. */
 std::vector<float> CueRender(SoundId Id, double Volume, Noise& R)
 {
 	const double V = std::isfinite(Volume) ? (Volume < 0.0 ? 0.0 : Volume > 1.0 ? 1.0 : Volume) : 0.0;
@@ -714,6 +890,10 @@ std::vector<float> CueRender(SoundId Id, double Volume, Noise& R)
 	case SoundId::RitBell: CueRitBell(B, R, V); break;
 	case SoundId::RitStamp: CueRitStamp(B, R, V); break;
 	case SoundId::RitRank: CueRitRank(B, R, V); break;
+	case SoundId::KastAlert: CueKastAlert(B, R, V); break;
+	case SoundId::KastRise: CueKastRise(B, R, V); break;
+	case SoundId::KastCall: CueKastCall(B, R, V); break;
+	case SoundId::KastShine: CueKastShine(B, R, V); break;
 	default: break;
 	}
 	B.Ensure(0.002);
@@ -804,14 +984,12 @@ std::vector<float> Render(SoundId Id, float Volume, uint32_t Seed)
 	case SoundId::RitBell:
 	case SoundId::RitStamp:
 	case SoundId::RitRank:
-		return CueRender(Id, V, R);
-	// The creator update (SPEC_CREATORS §5.4): Kast's four cues. Their bodies are audio's (wave 1); until then each renders
-	// silence (an empty buffer, which the host doesn't play).
+	// The creator update (SPEC_CREATORS §5.4): Kast's four cues, through the same render (the bodies above CueLimit).
 	case SoundId::KastAlert:
 	case SoundId::KastRise:
 	case SoundId::KastCall:
 	case SoundId::KastShine:
-		break;
+		return CueRender(Id, V, R);
 	case SoundId::Win:
 		for (int I = 0; I < 8; ++I)
 		{

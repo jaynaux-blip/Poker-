@@ -18,6 +18,10 @@
 
 namespace session_test
 {
+namespace econ_seg
+{
+bool EconRoomIn(); // session_seg_econ.cpp (core-kastglue): whether the creator update's Room is in the build
+} // namespace econ_seg
 namespace sponsor_seg
 {
 namespace life = ss::life;
@@ -328,11 +332,71 @@ void KastTrap()
 	double Now = 0.0;
 	const std::string Live = S.GoLive();
 	Now = Wait(S, Now, 30.0);
-	const Chips Read = S.StreamRead("riverline");
-	Now = Wait(S, Now, 5.0);
-	S.EndStream();
-	const sponsor::Contract* C = sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
-	Expect(Live.empty() && Read == 6000 && C && C->Now.Reads == 1 && C->PaidCents >= 6000, "kast trap: a read pays as it did, on the contract");
+	if (!econ_seg::EconRoomIn())
+	{
+		const Chips Read = S.StreamRead("riverline");
+		Now = Wait(S, Now, 5.0);
+		S.EndStream();
+		const sponsor::Contract* C = sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
+		Expect(Live.empty() && Read == 6000 && C && C->Now.Reads == 1 && C->PaidCents >= 6000, "kast trap: a read pays as it did, on the contract");
+	}
+	else
+	{
+		// The creator update's C13 (SPEC_CREATORS §0.4): a read pays once a deal a world day, only after 30 world minutes live
+		// with someone watching, and within 1.5x the reads the deal asks a period; the live hours pay on the contract, booked as
+		// their own sponsor ledger line at the stream's end (Session::KastAfterStop), never inside the Kast payout. The old Team
+		// RiverLine deal asks for no reads (Kast's old terms, "hourly and reads, nothing asked"): it keeps one paid read a world
+		// day, with no 1.5x cap (the C-K gate's M1, the lead's decision; kast::growth::SponsorReadPays).
+		const Chips Early = S.StreamRead("riverline");
+		S.LobbyMinutes += 35.0;
+		Now = Wait(S, Now, 1.0);
+		const int Watching = S.Stream.Count();
+		const Chips Read = S.StreamRead("riverline");
+		const Chips Twice = S.StreamRead("riverline");
+		const size_t Ledger0 = S.Life.Ledger.size();
+		S.EndStream();
+		const sponsor::Contract* C = sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
+		const int Ask = C ? static_cast<int>(std::lround(C->T.Asks[static_cast<size_t>(sponsor::Ask::Reads)])) : -1;
+		Chips Sponsors = 0;
+		Chips ReadLines = 0;
+		for (size_t I = 0; I + Ledger0 < S.Life.Ledger.size(); ++I)
+		{
+			const life::LedgerEntry& Le = S.Life.Ledger[I];
+			Sponsors += Le.Kind == life::LedgerSponsors ? Le.Amount : 0;
+			ReadLines += Le.Kind == life::LedgerSponsors && Le.Amount == Read && Le.Label.find("read") != std::string::npos ? Le.Amount : 0;
+		}
+		std::printf("  kast trap (C13, M1): a read at once %lld, 35 minutes in with %d watching %lld, again the same day %lld (the deal asks %d reads); the night's sponsor "
+					"lines %lld (reads %lld)\n",
+			static_cast<long long>(Early), Watching, static_cast<long long>(Read), static_cast<long long>(Twice), Ask, static_cast<long long>(Sponsors),
+			static_cast<long long>(ReadLines));
+		Expect(Live.empty() && C && Ask == 0 && Watching >= 1 && Early == 0 && Read == 6000 && Twice == 0 && C->Now.Reads == 1 && C->PaidCents > 0,
+			"kast trap: the old Team RiverLine deal (it asks for no reads) pays one read after 30 live minutes with someone watching, once that world day; the live "
+			"hours pay on the contract");
+		Expect(Sponsors > 0 && ReadLines == 6000, "kast trap: tonight's sponsor pay is its own ledger lines (LedgerSponsors, the read's among them), not the Kast payout");
+		// The next world day it reads again, with no 1.5x cap: twelve reads already paid this period make no difference to a deal
+		// that asks for none.
+		for (sponsor::Contract& K : S.Life.Sponsors.Contracts)
+		{
+			if (C && K.Id == C->Id)
+			{
+				K.Now.Reads = 12;
+			}
+		}
+		S.LobbyMinutes += Day;
+		Now = Wait(S, Now, 1.0);
+		S.Life.RentStage = life::Rent::Paid;
+		const std::string LiveNext = S.GoLive();
+		S.LobbyMinutes += 35.0;
+		Now = Wait(S, Now, 1.0);
+		const int WatchingNext = S.Stream.Count();
+		const Chips ReadNext = S.StreamRead("riverline");
+		S.EndStream();
+		const sponsor::Contract* Cn = sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
+		std::printf("  kast trap (M1): the next world day (\"%s\", %d watching, 12 reads paid before): a read %lld; the period's reads %d\n", LiveNext.c_str(), WatchingNext,
+			static_cast<long long>(ReadNext), Cn ? Cn->Now.Reads : -1);
+		Expect(LiveNext.empty() && Cn && WatchingNext >= 1 && ReadNext == 6000 && Cn->Now.Reads == 13,
+			"kast trap: the next world day the old deal reads again, past 1.5x of nothing (no cap for a deal that asks for no reads)");
+	}
 	Expect(S.Channel.Deals.empty() && S.Channel.Offers.empty(), "kast trap: Channel::Deals is never written");
 	S.Save();
 	Expect(H.Last.Serialize().find("kast\tdeal") == std::string::npos && H.Last.Serialize().find("sponsor\tdeal") != std::string::npos, "kast trap: the save keeps the deal in the book");

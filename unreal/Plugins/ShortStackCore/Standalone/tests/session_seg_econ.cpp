@@ -41,6 +41,19 @@
 // C3 (c3-fixes, the gate audit's should-fix 5):
 //   EconSeasonPastHundred  the Season leader the block names is the board's, the player's row read as its YOU row is
 //                     (site::HeroOn): past a hundred results the last hundred aren't the season. EconBoardTop reads it too.
+//
+// The creator update (SPEC_CREATORS §9.3's re-bands and core-kastglue's glue; core-kastglue's file from wave 1):
+//   EconPace, EconBuzz  re-banded for the Room (core-kastroom's): the same inputs at every watch speed are the same room, tick
+//                     for tick (R3, C6: the 4x x0.9 and 8x/skip x0.8 pins retire); heads-down (Inputs::Attended false) the same
+//                     strangers come and follow at HD(E) (about half, against today's x0.6); Rerun's buzz reads against the
+//                     channel's size, 1 + 0.35 min(1, views / (2,000 + 40 Norm)). Until the Room is in the build (EconRoomIn: a
+//                     first stream's View counts Dee within two world minutes), today's checks run as they were.
+//   EconPaceSession, EconBuzzSession  the session's half: Attended from the pace (Smart, watch 1x and 2x, a stopped skip: yes;
+//                     watch 4x and 8x, a skip waiting or running: no) and the buzz handed on; today's factors only without the Room.
+//   EconEstablished, EconRecord  measured against the new curve: nothing in them reads Kast's growth, so they stand as they were.
+//   (core-kastglue's Session glue checks, EconKastInputs, EconKastMigration, EconKastStop, EconKastConsole, EconKastBehind,
+//   EconKastRail and EconKastDaily, run in kast_growth since the C-K gate's L14: tests/kastgrowth_main.cpp's SegGlue, the same
+//   checks on the same kit; §9.3 keeps new checks out of this suite.)
 #include "CopyLint.h"
 #include "SessionSeg.h"
 
@@ -49,18 +62,23 @@
 #include "ShortStack/AI/Style.h"
 #include "ShortStack/Cards.h"
 #include "ShortStack/Game/Autoplay.h"
+#include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Gear.h"
 #include "ShortStack/Game/Kast.h"
+#include "ShortStack/Game/KastGrowth.h"
 #include "ShortStack/Game/Live.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Rep.h"
+#include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/TableTalk.h"
 #include "ShortStack/Game/Talk.h"
 #include "ShortStack/Game/Town.h"
 #include "ShortStack/Game/Video.h"
+#include "ShortStack/Game/VideoAlgo.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
+#include "ShortStack/Tournament.h"
 
 #include <algorithm>
 #include <chrono>
@@ -136,20 +154,28 @@ struct EconStreamRun
 	int Members = 0;
 	std::vector<float> Graph;
 	std::string Chat;       // the last chat lines, as written
+	std::vector<int> Counts; // the creator update's room: View::Count after every tick (all 0 until the Room fills the View)
 };
 
 /**
  * One stream of Minutes world minutes from In (its speed and Sprinting as given), ticked every Step world minutes (a real
  * second each), with the same all-in moments at the same ticks whatever the speed. Grown: a channel a few months in
- * (level 20, an eight-week streak), so a night brings enough strangers to count follows by.
+ * (level 20, an eight-week streak), so a night brings enough strangers to count follows by. The creator update: the stream's
+ * keyed draws take their seed from Seed (In.Seed, unless the inputs carry one), and Norm is the channel's usual night (Rerun's
+ * buzz reads against it).
  */
-EconStreamRun EconStream(const std::string& Seed, kast::Inputs In, double Minutes, double Step = 0.25 / 6.0, bool Grown = false)
+EconStreamRun EconStream(const std::string& Seed, kast::Inputs In, double Minutes, double Step = 0.25 / 6.0, bool Grown = false, double Norm = 0.0)
 {
 	EconStreamRun Out;
 	kast::Channel Ch;
 	if (Grown)
 	{
 		Ch.Xp = kast::Channel::LevelXp(20);
+	}
+	Ch.Norm = Norm;
+	if (In.Seed == 0)
+	{
+		In.Seed = kast::growth::NameKey(Seed);
 	}
 	kast::Stream St(Seed);
 	ss::Rng Ev(Seed + ":moments");
@@ -167,6 +193,7 @@ EconStreamRun EconStream(const std::string& Seed, kast::Inputs In, double Minute
 		In.World += Step;
 		In.Real += 1.0;
 		St.Tick(Ch, In, Step, 1.0);
+		Out.Counts.push_back(St.GetView().Count);
 		if (++Tick == 1)
 		{
 			Out.First = St.Strangers;
@@ -210,7 +237,126 @@ bool EconNear(double A, double B, double Tolerance = 1e-9)
 	return std::fabs(A - B) <= Tolerance * std::max(1.0, std::fabs(B));
 }
 
+/**
+ * Whether the creator update's Room (core-kastroom's Kast.cpp) is in this build: a fresh channel's first stream counts Dee in
+ * its View within two world minutes (First Faces: she arrives at 0.25). Until it is, the stream is today's, the View stays
+ * empty, and the checks that read the room keep today's bands (SPEC_CREATORS §9.3's re-bands assert the Room's once it lands).
+ */
+bool EconRoomIn()
+{
+	static const bool In = [] {
+		kast::Inputs I = EconBaseInputs();
+		I.Seed = 20261024;
+		kast::Channel Ch;
+		kast::Stream St("econ-room-probe");
+		St.Start(Ch, I);
+		bool Counted = false;
+		for (int K = 0; K < 8 && !Counted; ++K)
+		{
+			I.World += 0.25;
+			I.Real += 1.0;
+			St.Tick(Ch, I, 0.25, 1.0);
+			Counted = St.GetView().Count > 0;
+		}
+		St.Stop(Ch, I);
+		std::printf("  econ: the creator update's Room is %s this build\n", Counted ? "in" : "not yet in");
+		// From the C-K gate on the Room is in: the "not yet in" branches below are wave 1's, kept only until the merge, and must
+		// never quietly assert today's bands again.
+		Expect(Counted, "econ: the creator update's Room is in this build (C-K: every econ check reads the Room's bands)");
+		return Counted;
+	}();
+	return In;
+}
+
+/** Two runs of one stream are the same room: the count after every tick, the graph, tonight's numbers and the channel after. */
+bool EconSameRoom(const EconStreamRun& A, const EconStreamRun& B)
+{
+	return A.Counts == B.Counts && A.Graph == B.Graph && A.Sum.NewFaces == B.Sum.NewFaces && A.Sum.Follows == B.Sum.Follows && A.Sum.Avg == B.Sum.Avg &&
+		A.Sum.Peak == B.Sum.Peak && A.Sum.Subs == B.Sum.Subs && A.Sum.Total() == B.Sum.Total() && A.Sum.Returning == B.Sum.Returning && A.Followers == B.Followers &&
+		A.Members == B.Members && A.Sum.Xp == B.Sum.Xp;
+}
+
+/** The same inputs with no real seconds left to the streamer (watch 4x, 8x, a skip): heads-down. */
+kast::Inputs EconHeadsDown(kast::Inputs In)
+{
+	In.Attended = false;
+	return In;
+}
+
+void EconPaceToday();
+
+/**
+ * SPEC_CREATORS §9.3's EconPace, for the Room: R3 and C6, the room never reads the pace. The same inputs at 1x, 2x, 4x, 8x, 8x
+ * with Sprinting and a skip are the same room tick for tick; the pace reaches it only as the streamer's real seconds
+ * (Inputs::Attended): heads-down, the same strangers come, and follow at HD(E) (0.54 at Engage 0.05 against 1 attended, with
+ * the passive floor; today's skip was x0.6); a skip and 8x, both heads-down, are one room.
+ */
+void EconPaceRoom()
+{
+	const kast::Inputs Base = EconBaseInputs();
+	bool Same = true;
+	bool SameChat = true;
+	int Faces = 0;
+	for (int Seed = 0; Seed < 2; ++Seed)
+	{
+		const std::string Sd = "econ-same-" + std::to_string(Seed);
+		const EconStreamRun One = EconStream(Sd, EconAt(Base, 1, false), 150.0);
+		const EconStreamRun Two = EconStream(Sd, EconAt(Base, 2, false), 150.0);
+		Faces += One.Sum.NewFaces;
+		Same = Same && EconSameRoom(One, Two);
+		SameChat = SameChat && One.Chat == Two.Chat;
+		if (Seed > 0)
+		{
+			continue; // the second seed is 1x against 2x, chat and all; the rest of the speeds on the first
+		}
+		for (const std::pair<int, bool> P : {std::make_pair(4, false), std::make_pair(8, false), std::make_pair(8, true), std::make_pair(1, true)})
+		{
+			Same = Same && EconSameRoom(One, EconStream(Sd, EconAt(Base, P.first, P.second), 150.0));
+		}
+	}
+	Expect(Same && Faces > 0, "econ pace: the same inputs at 1x, 2x, 4x, 8x and on a skip are the same room, tick for tick (counts, graph, faces, follows, money, the channel)");
+	Expect(SameChat, "econ pace: and at 2x the same chat, line for line");
+
+	double NightFaces[2] = {0, 0};
+	double NightFollows[2] = {0, 0};
+	bool SkipIsEight = true;
+	for (int Seed = 0; Seed < 16; ++Seed)
+	{
+		const std::string Sd = "econ-pace-" + std::to_string(Seed);
+		const EconStreamRun Attended = EconStream(Sd, EconAt(Base, 1, false), 480.0, 0.5, true);
+		const EconStreamRun Down = EconStream(Sd, EconHeadsDown(EconAt(Base, 8, true)), 480.0, 0.5, true);
+		if (Seed < 2)
+		{
+			SkipIsEight = SkipIsEight && EconSameRoom(Down, EconStream(Sd, EconHeadsDown(EconAt(Base, 1, true)), 480.0, 0.5, true));
+		}
+		NightFaces[0] += Attended.Sum.NewFaces;
+		NightFaces[1] += Down.Sum.NewFaces;
+		NightFollows[0] += Attended.Sum.Follows;
+		NightFollows[1] += Down.Sum.Follows;
+	}
+	const double FaceRatio = NightFaces[1] / std::max(1.0, NightFaces[0]);
+	const double PerAttended = NightFollows[0] / std::max(1.0, NightFaces[0]);
+	const double PerDown = NightFollows[1] / std::max(1.0, NightFaces[1]);
+	std::printf("  econ pace (the Room): sixteen 8-hour streams: new faces attended %.0f, heads-down %.0f (x%.3f); follows %.0f / %.0f, per new face %.4f / %.4f (x%.3f)\n",
+		NightFaces[0], NightFaces[1], FaceRatio, NightFollows[0], NightFollows[1], PerAttended, PerDown, PerDown / std::max(1e-9, PerAttended));
+	// The directory never reads the pace; it reads the room (1 + 0.45 log2(1 + V/4)), which heads-down stays thin a little.
+	Expect(NightFaces[0] > 0.0 && FaceRatio > 0.75 && FaceRatio <= 1.0, "econ pace: heads-down, about as many strangers drop in (a shorter-staying room draws a few fewer)");
+	Expect(NightFollows[0] >= 40.0 && PerDown > 0.35 * PerAttended && PerDown < 0.8 * PerAttended, "econ pace: heads-down they follow about half as often (HD(E))");
+	Expect(SkipIsEight, "econ pace: a skip and 8x, both heads-down, are the same room");
+}
+
 void EconPace()
+{
+	if (EconRoomIn())
+	{
+		EconPaceRoom();
+		return;
+	}
+	EconPaceToday();
+}
+
+/** EconPace as update 2 wrote it (the stream before the Room): today's pace factors. */
+void EconPaceToday()
 {
 	const kast::Inputs Base = EconBaseInputs();
 	// The first tick: the same stream up to the strangers, so their ratio is the factor itself.
@@ -291,15 +437,19 @@ void EconPaceSession()
 	const bool Rig = S.Buy(ss::gear::FirstPcUpgrade().Id).empty();
 	S.Register(1);
 	Expect(Rig && S.StreamInputs().Gear.CanStream() && S.T, "econ pace: a rig that streams, at a table");
+	const bool OffAttended = S.StreamInputs().Attended;
 	const double Off = EconFirstStrangers(S.StreamInputs());
 	std::map<int, double> Watched;
+	std::map<int, bool> Attended;
 	for (const int Speed : {1, 2, 4, 8})
 	{
 		S.SetAutoplay(0, EconPlan(ss::autoplay::Mode::Watch, Speed));
 		Watched[Speed] = EconFirstStrangers(S.StreamInputs()) / Off;
+		Attended[Speed] = S.StreamInputs().Attended;
 	}
 	S.SprintBudgetMs = 0.0;
 	S.SetAutoplay(0, EconPlan(ss::autoplay::Mode::Skip, 1));
+	const bool Waiting = S.StreamInputs().Attended;
 	S.SkipAhead(0, ss::autoplay::Target::Result);
 	double Now = 0.0;
 	for (int F = 0; F < 20000 && !S.Sprinting && !S.Finishing(); ++F)
@@ -308,11 +458,24 @@ void EconPaceSession()
 		S.Update(Now);
 	}
 	const double Skipped = S.Sprinting ? EconFirstStrangers(S.StreamInputs()) / Off : -1.0;
-	std::printf("  econ: the session's inputs, strangers against autoplay off: 1x %.3f, 2x %.3f, 4x %.3f, 8x %.3f, skipping %.3f\n", Watched[1], Watched[2], Watched[4], Watched[8],
-		Skipped);
-	Expect(Off > 0.0 && EconNear(Watched[1], 1.0) && EconNear(Watched[2], 1.0), "econ pace: watching at 1x and 2x, the stream's strangers are as with autoplay off");
-	Expect(EconNear(Watched[4], 0.9) && EconNear(Watched[8], 0.8), "econ pace: watching at 4x x0.9, at 8x x0.8 (the session's inputs)");
-	Expect(EconNear(Skipped, 0.8), "econ pace: a skip x0.8, as Sprint's");
+	const bool Skipping = S.Sprinting && S.StreamInputs().Attended;
+	if (!EconRoomIn())
+	{
+		std::printf("  econ: the session's inputs, strangers against autoplay off: 1x %.3f, 2x %.3f, 4x %.3f, 8x %.3f, skipping %.3f\n", Watched[1], Watched[2], Watched[4],
+			Watched[8], Skipped);
+		Expect(Off > 0.0 && EconNear(Watched[1], 1.0) && EconNear(Watched[2], 1.0), "econ pace: watching at 1x and 2x, the stream's strangers are as with autoplay off");
+		Expect(EconNear(Watched[4], 0.9) && EconNear(Watched[8], 0.8), "econ pace: watching at 4x x0.9, at 8x x0.8 (the session's inputs)");
+		Expect(EconNear(Skipped, 0.8), "econ pace: a skip x0.8, as Sprint's");
+	}
+	// The creator update (SPEC_CREATORS §2.9, R4): the pace reaches Kast only as Attended. A skip stops (the player takes the
+	// seat back, or a stop rule): the plan watches at 1x, attended again.
+	const bool WasSkipping = S.Sprinting;
+	S.StopSkip(0);
+	const bool Stopped = S.StreamInputs().Attended;
+	std::printf("  kast glue: Attended: autoplay off %d, watching 1x %d, 2x %d, 4x %d, 8x %d, a skip waiting %d, skipping %d, the skip stopped %d\n", OffAttended ? 1 : 0,
+		Attended[1] ? 1 : 0, Attended[2] ? 1 : 0, Attended[4] ? 1 : 0, Attended[8] ? 1 : 0, Waiting ? 1 : 0, Skipping ? 1 : 0, Stopped ? 1 : 0);
+	Expect(OffAttended && Attended[1] && Attended[2] && Stopped, "kast glue: attended at Smart, watching at 1x and 2x, and once a skip has stopped");
+	Expect(!Attended[4] && !Attended[8] && !Waiting && WasSkipping && !Skipping, "kast glue: heads-down watching at 4x and 8x, with a skip waiting for its hand and while it runs");
 }
 
 // ------------------------------------------------------------------ a fresh world's first month on the block (§3.3 F9)
@@ -934,7 +1097,61 @@ double EconBuzzFactor(double Buzz)
 	return 1.0 + 0.3 * std::min(1.0, std::max(0.0, Buzz) / 5000.0);
 }
 
+/** SPEC_CREATORS §2.5.1's Buzz, for the Room: 1 + 0.35 min(1, views in 48 hours / (2,000 + 40 Norm)). */
+double EconBuzzFactorRoom(double Buzz, double Norm)
+{
+	return 1.0 + 0.35 * std::min(1.0, std::max(0.0, Buzz) / (2000.0 + 40.0 * Norm));
+}
+
+/**
+ * SPEC_CREATORS §9.3's EconBuzz, for the Room: the buzz reads against the channel's size. Whole nights on a grown channel: a
+ * small one's directory (Norm 0) brings about a third more strangers at 5,000 views (x1.35, full at 2,000), one whose usual
+ * night is 100 gets x1.175 from 3,000 (2,000 + 4,000 is the full mark), and more of them follow; the watch speed's factor is
+ * gone (C6), so buzz at 4x is the 1x room.
+ */
+void EconBuzzRoom()
+{
+	const kast::Inputs Base = EconBaseInputs();
+	double Faces[4] = {0, 0, 0, 0};
+	double Follows[4] = {0, 0, 0, 0};
+	const double Views[4] = {0.0, 5000.0, 0.0, 3000.0};
+	const double Norms[4] = {0.0, 0.0, 100.0, 100.0};
+	for (int Seed = 0; Seed < 6; ++Seed)
+	{
+		for (int K = 0; K < 4; ++K)
+		{
+			const EconStreamRun R = EconStream("econ-buzz-" + std::to_string(Seed), EconBuzzAt(Base, Views[K]), 480.0, 0.5, true, Norms[K]);
+			Faces[K] += R.Sum.NewFaces;
+			Follows[K] += R.Sum.Follows;
+		}
+	}
+	const double Small = Faces[1] / std::max(1.0, Faces[0]);
+	const double Big = Faces[3] / std::max(1.0, Faces[2]);
+	std::printf("  econ buzz (the Room): six 8-hour streams: a small channel %.0f -> %.0f new faces at 5,000 views (x%.3f, the factor x%.3f); a usual night of 100 %.0f -> %.0f at "
+				"3,000 (x%.3f, the factor x%.3f); follows %.0f -> %.0f\n",
+		Faces[0], Faces[1], Small, EconBuzzFactorRoom(5000.0, 0.0), Faces[2], Faces[3], Big, EconBuzzFactorRoom(3000.0, 100.0), Follows[0], Follows[1]);
+	Expect(Faces[0] > 0.0 && Small > 1.2 && Small < 1.5, "econ buzz: a small channel's directory brings about a third more strangers at 5,000 views in 48 hours");
+	Expect(Faces[2] > 0.0 && Big > 1.05 && Big < 1.3 && Big < Small, "econ buzz: the same buzz is less news for a bigger channel (3,000 views on a usual night of 100)");
+	Expect(Follows[1] > Follows[0], "econ buzz: and more of them follow");
+	const EconStreamRun One = EconStream("econ-buzz", EconBuzzAt(Base, 5000.0), 60.0);
+	const EconStreamRun Four = EconStream("econ-buzz", EconAt(EconBuzzAt(Base, 5000.0), 4, false), 60.0);
+	Expect(EconSameRoom(One, Four), "econ buzz: at 4x the buzz brings the same room as at 1x (no pace factor on top)");
+}
+
+void EconBuzzToday();
+
 void EconBuzz()
+{
+	if (EconRoomIn())
+	{
+		EconBuzzRoom();
+		return;
+	}
+	EconBuzzToday();
+}
+
+/** EconBuzz as update 2 wrote it (the stream before the Room): §4.7's factor on top of the watch speed's. */
+void EconBuzzToday()
 {
 	const kast::Inputs Base = EconBaseInputs();
 	const double Tick = 0.25 / 6.0;
@@ -1033,21 +1250,65 @@ void EconBuzzSession()
 	video::Grant(S.Life.Video, 0.0, 0.0, 600000.0, World - 1.0 * EconDay);
 	const double Viral = video::Buzz(S.Life.Video, World);
 	const double Capped = EconFirstStrangers(S.StreamInputs()) / Off;
-	std::printf("  econ buzz session: no channel x1 (buzz %.0f); a day-old Breakdown: %.1f views in 48 hours, strangers x%.4f; viral: %.0f views, x%.4f\n",
-		Quiet ? 0.0 : -1.0, Buzz, Up, Viral, Capped);
-	Expect(Ready && Quiet && Off > 0.0, "econ buzz session: no channel, no buzz");
-	Expect(!Id.empty() && Buzz > 0.0 && Buzz < 5000.0 && Handed == Buzz && EconNear(Up, EconBuzzFactor(Buzz)),
-		"econ buzz session: the session hands the stream Rerun's last 48 hours (video::Buzz), and the strangers rise by its factor");
-	Expect(Viral >= 5000.0 && S.StreamInputs().VideoBuzz == Viral && EconNear(Capped, 1.3), "econ buzz session: a viral week tops out at x1.3");
+	if (!EconRoomIn())
+	{
+		std::printf("  econ buzz session: no channel x1 (buzz %.0f); a day-old Breakdown: %.1f views in 48 hours, strangers x%.4f; viral: %.0f views, x%.4f\n",
+			Quiet ? 0.0 : -1.0, Buzz, Up, Viral, Capped);
+	}
+	else
+	{
+		std::printf("  econ buzz session: no channel, buzz %.0f; a day-old Breakdown: %.1f views in 48 hours; viral: %.0f views (the factor: EconBuzz)\n", Quiet ? 0.0 : -1.0, Buzz,
+			Viral);
+	}
+	Expect(Ready && Quiet && (Off > 0.0 || EconRoomIn()), "econ buzz session: no channel, no buzz");
+	if (!EconRoomIn())
+	{
+		Expect(!Id.empty() && Buzz > 0.0 && Buzz < 5000.0 && Handed == Buzz && EconNear(Up, EconBuzzFactor(Buzz)),
+			"econ buzz session: the session hands the stream Rerun's last 48 hours (video::Buzz), and the strangers rise by its factor");
+		Expect(Viral >= 5000.0 && S.StreamInputs().VideoBuzz == Viral && EconNear(Capped, 1.3), "econ buzz session: a viral week tops out at x1.3");
+		return;
+	}
+	// The Room: the factor is EconBuzz's (against the channel's size); the session's part is handing the views on.
+	Expect(!Id.empty() && Buzz > 0.0 && Handed == Buzz && Viral >= 5000.0 && S.StreamInputs().VideoBuzz == Viral,
+		"econ buzz session: the session hands the stream Rerun's last 48 hours (video::Buzz), a day-old upload's and a viral week's");
 }
 
 // ------------------------------------------------------------------ G2: tonight's moment log (§4.4)
 
+/**
+ * The creator update: a community that fills a room. The Room counts whole people (R2), so a test can't set Stream::Viewers
+ * for a room big enough to clip things as today's could: N members who watch (loyal, seen yesterday) bring one through the
+ * Ping instead. Only under the Room (today's checks keep their own room).
+ */
+void EconCommunity(kast::Channel& Ch, int N, double World)
+{
+	for (int K = 0; K < N; ++K)
+	{
+		kast::Member M;
+		M.Name = "econ_regular_" + std::to_string(K);
+		M.Loyalty = 0.8;
+		M.Affinity = 0.9;
+		M.FirstSeen = World - 60.0 * 1440.0;
+		M.LastSeen = World - 1440.0;
+		M.Streams = 30;
+		M.WatchMinutes = 30.0 * 90.0;
+		M.Follower = true;
+		Ch.Members.push_back(M);
+		++Ch.Followers;
+	}
+}
+
 void EconMomentLog()
 {
+	const bool Room = EconRoomIn();
 	kast::Inputs In = EconBaseInputs();
 	kast::Channel Ch;
 	Ch.Xp = kast::Channel::LevelXp(20);
+	if (Room)
+	{
+		In.Seed = 20261024;
+		EconCommunity(Ch, 120, In.World);
+	}
 	kast::Stream St("econ-moments");
 	St.Start(Ch, In);
 	const kast::Moment Kinds[] = {kast::Moment::AllIn, kast::Moment::BadBeat, kast::Moment::WonAllIn, kast::Moment::Knockout, kast::Moment::FinalTable, kast::Moment::Win,
@@ -1062,8 +1323,17 @@ void EconMomentLog()
 	{
 		In.World += 1.5;
 		In.Real += 9.0;
-		St.Viewers = 40.0; // a room big enough to clip things (the stream's own ticks would take a while to get there)
+		if (!Room)
+		{
+			St.Viewers = 40.0; // a room big enough to clip things (the stream's own ticks would take a while to get there)
+		}
 		const kast::Moment M = Kinds[K % 7];
+		if (Room)
+		{
+			// As Session::StreamMoment does: the room up to the moment's minute first (its hype steps a grid minute at a time), so
+			// the moment's own hype is what's left.
+			St.Recount(Ch, In);
+		}
 		const double HypeBefore = St.Hype;
 		const int ClipsBefore = St.Tonight.Clips;
 		const size_t LogBefore = St.Moments.size();
@@ -1071,8 +1341,17 @@ void EconMomentLog()
 		Times.push_back(In.World);
 		const bool Logged = !St.Moments.empty() && (St.Moments.size() == LogBefore + 1 || (LogBefore == 60 && St.Moments.size() == 60));
 		const kast::MomentNote N = Logged ? St.Moments.back() : kast::MomentNote();
-		Each = Each && Logged && N.Kind == M && N.World == In.World && N.Real == In.Real && N.Viewers == 40 && N.HypeAfter >= HypeBefore - 1e-9 && N.HypeAfter <= St.Hype + 1e-9 &&
-			N.Face == St.Face && N.Candidate.empty();
+		// (The Room: the note's viewers are the whole people in the room at the moment, the count every surface draws.)
+		const int Viewers = Room ? St.Count() : 40;
+		const bool Note = Logged && N.Kind == M && N.World == In.World && N.Real == In.Real && N.Viewers == Viewers && N.HypeAfter >= HypeBefore - 1e-9 &&
+			N.HypeAfter <= St.Hype + 1e-9 && N.Face == St.Face && N.Candidate.empty();
+		if (Each && !Note)
+		{
+			std::printf("  econ moments: the note of moment %d (%s): logged %d, world %.2f/%.2f, viewers %d/%d, hype %.2f in [%.2f, %.2f], face %d/%d, candidate \"%s\"\n", K,
+				kast::MomentName(M), Logged ? 1 : 0, N.World, In.World, N.Viewers, Viewers, N.HypeAfter, HypeBefore, St.Hype, static_cast<int>(N.Face), static_cast<int>(St.Face),
+				N.Candidate.c_str());
+		}
+		Each = Each && Note;
 		const bool Made = St.Tonight.Clips > ClipsBefore;
 		Clips += Made ? 1 : 0;
 		Clipped = Clipped &&
@@ -1121,6 +1400,11 @@ void EconMomentLog()
 		kast::Inputs Same = EconBaseInputs();
 		kast::Channel Ch2;
 		Ch2.Xp = kast::Channel::LevelXp(20);
+		if (Room)
+		{
+			Same.Seed = 20261025;
+			EconCommunity(Ch2, 120, Same.World);
+		}
 		kast::Stream St2("econ-moments-same");
 		St2.Start(Ch2, Same);
 		Same.World += 30.0;
@@ -1129,7 +1413,16 @@ void EconMomentLog()
 		for (int K = 0; K < 400 && Pairs < 3; ++K)
 		{
 			Same.Real += 9.0;
-			St2.Viewers = 40.0;
+			if (Room)
+			{
+				// The Room's clips are keyed draws on (minute, kind, table): a hand that went unclipped in its minute stays so, so
+				// each try is the next hand's minute.
+				Same.World += 1.0;
+			}
+			else
+			{
+				St2.Viewers = 40.0;
+			}
 			const int Before = St2.Tonight.Clips;
 			St2.OnMoment(Ch2, Same, kast::Moment::WonAllIn);
 			if (St2.Tonight.Clips == Before)
@@ -1162,7 +1455,10 @@ void EconMomentLog()
 		{
 			Small.World += 1.5;
 			Small.Real += 9.0;
-			St3.Viewers = 1.6;
+			if (!Room)
+			{
+				St3.Viewers = 1.6;
+			}
 			const int Before = St3.Tonight.Clips;
 			St3.OnMoment(Ch3, Small, kast::Moment::BadBeat);
 			if (St3.Tonight.Clips == Before)
@@ -1171,7 +1467,8 @@ void EconMomentLog()
 			}
 			++SmallClips;
 			const kast::MomentNote& N = St3.Moments.back();
-			ChatOnly = ChatOnly && N.ClipAt == Small.World && !N.Chat.empty() && N.Chat.size() <= 2;
+			// (The Room: the first night's room is Dee, Mei and a stranger or two, whose reaction is up to three lines.)
+			ChatOnly = ChatOnly && N.ClipAt == Small.World && !N.Chat.empty() && N.Chat.size() <= (Room ? 3u : 2u);
 			for (const std::string& Line : N.Chat)
 			{
 				ChatOnly = ChatOnly && !EconHas(Line, "clipped it");
@@ -1224,9 +1521,15 @@ double EconClipGain(const kast::Channel& Ch, double World)
 
 void EconMomentLink()
 {
+	const bool Room = EconRoomIn();
 	Hooks H;
 	ss::Session S(H, "econ-moment-link");
 	const bool Ready = EconAtTable(S);
+	if (Room)
+	{
+		// The Room counts whole people (R2): a community to fill the room, where today's check set Stream::Viewers.
+		S.DebugKast("grant 120 100");
+	}
 	const std::string Live = Ready ? S.GoLive() : std::string("no table");
 	Expect(Ready && Live.empty() && S.Stream.Live, "econ link: live on Kast at a table");
 	if (!Ready || !S.Stream.Live || !S.T)
@@ -1243,7 +1546,10 @@ void EconMomentLink()
 		// A new hand (the tick clock moves a hand on), its award's moment (what Session::StreamMoment does), then its
 		// capture at the same tick (HeroHandDone's VideoNoteHand, at the end of AfterAward).
 		S.T->Tick += 1;
-		S.Stream.Viewers = 40.0;
+		if (!Room)
+		{
+			S.Stream.Viewers = 40.0;
+		}
 		S.Stream.OnMoment(S.Channel, S.StreamInputs(), kast::Moment::BadBeat);
 		ss::Session::HandFacts F;
 		S.VideoNoteHand(*Beat, F);
@@ -1253,7 +1559,7 @@ void EconMomentLink()
 		{
 			C = !N.Candidate.empty() && X.Id == N.Candidate ? &X : C;
 		}
-		Each = Each && C && C->K == video::Kind::BadBeat && C->Stream.Chat == N.Chat && C->Stream.ClipAt == N.ClipAt && C->Stream.Viewers == 40;
+		Each = Each && C && C->K == video::Kind::BadBeat && C->Stream.Chat == N.Chat && C->Stream.ClipAt == N.ClipAt && C->Stream.Viewers == (Room ? N.Viewers : 40);
 		if (C && N.ClipAt >= 0.0)
 		{
 			Got = *C;
@@ -1288,12 +1594,22 @@ void EconMomentLink()
 	const double Views = Clip ? Clip->Views : -1.0;
 	Expect(Up.empty() && Clip && Clip->Candidate == Got.Id && Views > 0.0, "econ link: publishing it marks the Kast clip (watched a while) as the video's");
 	// Kast's days off: the clip's views stand where they were and it brings no follows; any other clip goes on as before.
+	// (The Room: clip follows are 0.15% x Sat of each whole day's views; the check is a twin channel without the uploaded clip,
+	// which must gain exactly the follows the channel does.)
 	double Expected = 0.0;
 	const double Before = static_cast<double>(S.Channel.Followers) + S.Channel.FollowFrac;
+	kast::Channel Twin = S.Channel;
+	Twin.Clips.erase(std::remove_if(Twin.Clips.begin(), Twin.Clips.end(), [&Got](const kast::Clip& K) { return K.Candidate == Got.Id; }), Twin.Clips.end());
+	ss::Rng TwinR("econ-link-offline-twin");
 	for (const double Days : {1.0, 2.0, 3.5})
 	{
 		Expected += 0.002 * EconClipGain(S.Channel, T0 + Days * EconDay);
 		kast::Offline(S.Channel, T0 + Days * EconDay, R);
+		kast::Offline(Twin, T0 + Days * EconDay, TwinR);
+	}
+	if (Room)
+	{
+		Expected = static_cast<double>(Twin.Followers) + Twin.FollowFrac - Before;
 	}
 	Clip = ClipOf(Note.ClipAt);
 	const double After = static_cast<double>(S.Channel.Followers) + S.Channel.FollowFrac;
@@ -1624,5 +1940,6 @@ void SegEcon()
 	econ_seg::EconClipFollows();
 	econ_seg::EconRecord();
 	std::printf("  econ: core-econ's checks %.1f s\n", econ_seg::EconSecondsSince(T0));
+	// (The creator update's Session glue checks, core-kastglue's, run in kast_growth now: tests/kastgrowth_main.cpp's SegGlue.)
 }
 } // namespace session_test

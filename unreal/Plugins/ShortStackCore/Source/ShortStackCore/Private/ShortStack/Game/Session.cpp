@@ -1,5 +1,6 @@
 #include "ShortStack/Game/Session.h"
 #include "../StrictFloat.h"
+#include "KastCopy.h"
 #include "SitesDetail.h"
 
 #include "ShortStack/AI/Bot.h"
@@ -357,9 +358,10 @@ std::string SaveData::Serialize() const
 	}
 	for (const kast::Clip& Cl : K.Clips)
 	{
-		// Update 2: the Rerun candidate cut from it, as a 9th field, only when there is one (§6.4).
+		// Update 2: the Rerun candidate cut from it, as a 9th field, only when there is one (§6.4). C-K's L11: a 10th, "1", when the
+		// clip went into the Clip Lane (Top clips' flag), the 9th then written even when empty.
 		Out << "kast\tclip\t" << Fixed(Cl.At, 2) << "\t" << Fixed(Cl.Views, 1) << "\t" << Fixed(Cl.Reach, 1) << "\t" << Cl.Kind << "\t" << session_detail::Escape(Cl.By) << "\t" << session_detail::Escape(Cl.Title)
-			<< (Cl.Candidate.empty() ? std::string() : "\t" + session_detail::Escape(Cl.Candidate)) << "\n";
+			<< (Cl.Candidate.empty() && !Cl.Lane ? std::string() : "\t" + session_detail::Escape(Cl.Candidate)) << (Cl.Lane ? "\t1" : "") << "\n";
 	}
 	for (auto It = K.Log.rbegin(); It != K.Log.rend(); ++It)
 	{
@@ -884,6 +886,7 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 				Cl.By = Str(6);
 				Cl.Title = Str(7);
 				Cl.Candidate = P.size() >= 9 ? Str(8) : std::string();
+				Cl.Lane = P.size() >= 10 && Int(9) == 1;
 				K.Clips.push_back(Cl);
 			}
 			else if (Key == "log" && P.size() >= 10)
@@ -1064,7 +1067,10 @@ bool SaveData::Parse(const std::string& Saved, SaveData& Out)
 const char* SoundName(SoundId Id)
 {
 	static const char* const Names[] = {"chip", "chips", "card", "flip", "check", "fold", "turn", "win", "level", "bust", "click", "alert", "move", "allin", "bubble", "cash", "mail",
-		"igspark", "igpop", "igtick", "igfuse", "igboom", "ritblip", "ritflap", "ritbell", "ritstamp", "ritrank"};
+		"igspark", "igpop", "igtick", "igfuse", "igboom", "ritblip", "ritflap", "ritbell", "ritstamp", "ritrank", "kastalert", "kastrise", "kastcall", "kastshine"};
+	// A name for every id: the creator update's four (SPEC_CREATORS §5.4) came after RitRank without one, so SoundName read past
+	// the table for them.
+	static_assert(sizeof(Names) / sizeof(Names[0]) == static_cast<size_t>(SoundId::KastShine) + 1, "SoundName needs a name for every SoundId");
 	return Names[static_cast<int>(Id)];
 }
 
@@ -5376,10 +5382,17 @@ Chips Session::CashOut()
 {
 	// What the payout paid (the creator update's pending release can make it more than the balance shown).
 	const Chips Before = Channel.PaidCents;
+	const Chips PendingBefore = Channel.PendingCents;
 	PayOut("Kast payout");
 	const Chips Pay = Channel.PaidCents - Before;
 	if (Pay > 0)
 	{
+		// The creator update (SPEC_CREATORS C14, K20): cashed out off air, the payout that releases what waited for the second rent
+		// says so, as the end card's does (Session::KastAfterStop).
+		if ((Life.Update3LinesRead & life::U3Kast) != 0 && PendingBefore > 0 && Channel.PendingCents < PendingBefore)
+		{
+			Hooks.Text(kast::copy::LetterFrom(), kast::copy::FirstPayout(Pay));
+		}
 		Sound(SoundId::Cash, 0.8);
 		Save();
 	}
@@ -5401,6 +5414,13 @@ void Session::StreamMoment(kast::Moment M, const std::string& Detail, double Siz
 
 void Session::PlayStreamNotices()
 {
+	// One alert sound at a time, Kast's cue queue first (SPEC_CREATORS §5.1; the C-K audit's L4). A raid's or a milestone's Win
+	// is "the raid sound" of §5.1's order, so it waits in the queue under Kast's own three cues instead of taking the slot from
+	// them. A follow's chime, a sub's and a tip's Cash keep the old throttle (a burst of follows doesn't machine-gun the
+	// speakers) but play only when no cue is waiting: they never take the slot ahead of a waiting KastCall, KastAlert or
+	// KastShine.
+	int Plain = -1; // the first follow, sub or tip sound this call (the old throttle's), and its volume
+	double PlainVolume = 0.0;
 	for (const kast::Notice& N : Stream.Notices)
 	{
 		if (N.Type == kast::Notice::Kind::Text)
@@ -5408,37 +5428,45 @@ void Session::PlayStreamNotices()
 			Hooks.Text(N.From, N.Body);
 			continue;
 		}
-		if (N.Sound >= 0)
+		const int Cue = N.Sound >= 0 ? N.Sound
+						: N.Type == kast::Notice::Kind::Raid || N.Type == kast::Notice::Kind::Milestone ? static_cast<int>(SoundId::Win)
+																										: -1;
+		if (Cue >= 0)
 		{
-			// The creator update (SPEC_CREATORS §5.1): a notice with Kast's own cue joins the queue below in place of its kind's
-			// sound; a cue of an id already waiting folds into it (a final table's Run Alert and its sting are one KastAlert).
-			if (std::find(StreamCues.begin(), StreamCues.end(), N.Sound) == StreamCues.end())
+			// A notice with Kast's own cue joins the queue below in place of its kind's sound; a cue of an id already waiting folds
+			// into it (a final table's Run Alert and its sting are one KastAlert; two raids at once are one Win).
+			if (std::find(StreamCues.begin(), StreamCues.end(), Cue) == StreamCues.end())
 			{
-				StreamCues.push_back(N.Sound);
+				StreamCues.push_back(Cue);
 			}
 			continue;
 		}
-		// One alert sound at a time; a burst of follows doesn't machine-gun the speakers.
-		if (Now - StreamSoundAt < 1.2)
+		if (Plain < 0)
 		{
-			continue;
-		}
-		StreamSoundAt = Now;
-		switch (N.Type)
-		{
-		case kast::Notice::Kind::Chime: Hooks.Sound(SoundId::Alert, 0.35); break;
-		case kast::Notice::Kind::Sub:
-		case kast::Notice::Kind::Tip: Hooks.Sound(SoundId::Cash, 0.55); break;
-		case kast::Notice::Kind::Raid:
-		case kast::Notice::Kind::Milestone: Hooks.Sound(SoundId::Win, 0.7); break;
-		default: break;
+			switch (N.Type)
+			{
+			case kast::Notice::Kind::Chime:
+				Plain = static_cast<int>(SoundId::Alert);
+				PlainVolume = 0.35;
+				break;
+			case kast::Notice::Kind::Sub:
+			case kast::Notice::Kind::Tip:
+				Plain = static_cast<int>(SoundId::Cash);
+				PlainVolume = 0.55;
+				break;
+			default: break;
+			}
 		}
 	}
 	Stream.Notices.clear();
+	if (Now - StreamSoundAt < 1.2)
+	{
+		return; // the throttle: a follow's, sub's or tip's sound is dropped, a cue waits
+	}
 	// Kast's cue queue: once the throttle frees (1.2 real s after the last alert sound) the best waiting cue by priority plays,
 	// one a call, so cues that land together play one after another; it drains after the stream ends too (StreamStep), so the
 	// end card's stings aren't lost.
-	if (!StreamCues.empty() && Now - StreamSoundAt >= 1.2)
+	if (!StreamCues.empty())
 	{
 		auto BestCue = StreamCues.begin();
 		for (auto CueAt = StreamCues.begin(); CueAt != StreamCues.end(); ++CueAt)
@@ -5449,6 +5477,12 @@ void Session::PlayStreamNotices()
 		StreamCues.erase(BestCue);
 		StreamSoundAt = Now;
 		Hooks.Sound(static_cast<SoundId>(CueNow), session_detail::KastCueVolume(CueNow));
+		return;
+	}
+	if (Plain >= 0)
+	{
+		StreamSoundAt = Now;
+		Hooks.Sound(static_cast<SoundId>(Plain), PlainVolume);
 	}
 }
 

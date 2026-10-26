@@ -156,6 +156,9 @@ struct Clip
 	int Kind = 0;       // the Moment it caught
 	/** Update 2: the Rerun candidate cut from this clip's moment (kast\tclip's 9th field, written only when set). */
 	std::string Candidate;
+	/** The creator update (C-K's L11, appended): the clip went into the Clip Lane, Kast's feed, when it was made (MakeClip,
+	 *  ClipIt): the Channel page's Top clips flag. Saved as kast\tclip's 10th field, "1", only when set (an old line reads false). */
+	bool Lane = false;
 };
 
 struct StreamLog
@@ -579,6 +582,9 @@ struct Inputs
 	bool LiveNightRecent = false; // a live Embercrest night that cashed in the last 48 world hours (Dee's line)
 	std::vector<std::pair<double, double>> RerunHeat; // Rerun's Heat bumps with their times (video::algo::KastHeatSince)
 	int RentsPaid = 0; // life::State::RentsPaid (C14: Affiliate revenue earned before the second rent waits as PendingCents)
+	// ---- C-K's L5 (appended; filled by Session::KastInputsExtra, empty until it does): the Rerun videos the Room's lines name.
+	std::string VideoTitle;     // the video behind VideoBuzz (the most views in the last 48 world hours): a guest from Rerun says it
+	std::string RerunHeatTitle; // the video behind RerunHeat's newest bump: Heat's why line ("Your video ... got pushed hard")
 };
 
 /**
@@ -675,6 +681,9 @@ struct Summary
 	std::vector<SponsorPay> SponsorPaid;
 	bool ClipItOpen = false;   // Clip of the Night: the end card offers "Clip it" (Stream::ClipIt would take it)
 	bool BestClipLane = false; // tonight's best clip is in the Clip Lane ("in the Kast feed"), not unlisted
+	// ---- C-K's fixes (M3, L5), appended: filled by the Room at Stop.
+	std::vector<std::string> Firsts; // tonight's one-time firsts as they were posted live (the first stranger's tip, the first raid in)
+	std::array<std::string, 2> Why;  // Heat's top two why lines after tonight's commit (each a fact; "" none)
 };
 
 struct Prediction
@@ -755,6 +764,12 @@ struct View
 	bool HeadsDown = false;       // the pace leaves no real seconds and Engage is under 0.15: "heads-down tonight: chat is quieter"
 	int PingReached = 0, PingOf = 0; // the go-live ping's reach: "Your ping reached 412 of 640 followers (64%)"
 	std::vector<uint8_t> MemberFlags; // per member, cached each Tick: 1 regular, 2 mod, 4 Nodded, 8 present
+	// ---- C-K's fixes (L11), appended: filled each Tick by the Room.
+	int WelcomeRaidSecs = 0;          // WELCOME THE RAID's window left in world seconds (120..1; 0 when it isn't open): "1:52"
+	int Impressions = 0;              // the directory's impressions over the last 30 world minutes...
+	int ImpressionsCame = 0;          // ...and the arrivals they brought (the VIEWERS tile's line)
+	int LiveChannels = 0;             // Poker channels live now: the directory's, the network's and yours (RankOf)
+	std::vector<std::string> Nodded;  // tonight's Nodded names, guests included (no second Nod for anyone here)
 };
 static_assert(static_cast<size_t>(View::Source::Count) == 11, "Summary::Sources and FollowSources hold View::Source's 11 kinds");
 
@@ -964,5 +979,9 @@ private:
 	std::unique_ptr<RoomState> Room;
 	std::unique_ptr<PlayState> Play;
 };
+
+/** C-K's L11 (appended): the Poker channels live at World, the directory's and the network's (Browse's "N channels live" off
+ *  air; while live, View::LiveChannels adds yours). */
+SHORTSTACKCORE_API int ChannelsLive(double World);
 } // namespace kast
 } // namespace ss

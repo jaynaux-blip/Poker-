@@ -3,6 +3,8 @@
 // Stream tab with chat at the table.
 #include "ShortStack/UI/RiverLine.h"
 #include "../StrictFloat.h"
+#include "../Game/KastCopy.h"
+#include "RiverLineKastGrowth.h"
 #include "RiverLineShared.h"
 
 #include "ShortStack/Game/Format.h"
@@ -32,18 +34,7 @@ void VideoOpenTonight(RiverLine& RL, double From, double To, double Now);
 
 namespace rlkast_detail
 {
-const float KastH = 962.0f;
-const Color KBg = Hex(0x0e0a16);
-const Color KPanel = Hex(0x17121f);
-const Color KPanel2 = Hex(0x201832);
-const Color KLine = Hex(0x2d2442);
-const Color KInk = Hex(0xf1ecff);
-const Color KMuted = Hex(0x9d93b8);
-const Color KDim = Hex(0x625a7c);
-const Color KViolet = Hex(kast::Violet);
-const Color KLime = Hex(kast::Lime);
-const Color KRed = Hex(0xff3b5c);
-const Color KGold = Hex(0xf5c542);
+// Kast's look (KBg, KPanel, ... KGold, and the creator update's additions) is RiverLineKastGrowth.h's, shared with the new widgets.
 
 std::string KastCount(double V)
 {
@@ -124,7 +115,8 @@ std::string AlertTitle(const kast::Alert& A)
 	case kast::AlertKind::Gift: return std::to_string(A.Count) + " GIFTED SUB" + (A.Count == 1 ? "" : "S");
 	case kast::AlertKind::Tip: return Money(A.Cents) + " TIP";
 	case kast::AlertKind::Cheer: return "CHEER " + Grouped(A.Count);
-	case kast::AlertKind::Raid: return "RAID!";
+	// The creator update (§5.3 K6): the site's Broadcast sends viewers, it isn't a raid; its headline says so (the mockup's).
+	case kast::AlertKind::Raid: return KastIsBroadcast(A) ? KastBroadcastHeadline() : "RAID!";
 	case kast::AlertKind::Milestone: return "MILESTONE";
 	case kast::AlertKind::Sponsor: return "SPONSOR";
 	case kast::AlertKind::Clip: return "YOUR CLIP IS TAKING OFF";
@@ -144,7 +136,9 @@ std::string AlertLine(const kast::Alert& A)
 	case kast::AlertKind::Gift: return A.Who + " gifted to the community";
 	case kast::AlertKind::Tip:
 	case kast::AlertKind::Cheer: return A.Who + ": " + A.Text;
-	case kast::AlertKind::Raid: return A.Who + " is raiding with " + Grouped(A.Count) + " viewers";
+	// The creator update (§5.3 K6, K10): a raid that carries its own line (the Broadcast in its site's voice, the welcome raid)
+	// says it; the rest read as today.
+	case kast::AlertKind::Raid: return A.Text.empty() ? A.Who + " is raiding with " + Grouped(A.Count) + " viewers" : A.Text;
 	case kast::AlertKind::Clip: return A.Text;
 	default: return A.Text;
 	}
@@ -330,9 +324,11 @@ void RiverLine::StreamChatLine(const kast::ChatMsg& M, float X, float Y, float W
 			{
 				C->FillRoundRect({X, Y, W, LineHeight}, 6.0f, NetA(KRed, 0.12f));
 			}
+			// The creator update (C-K's L13): each row stays inside the panel; a word too long for a row of its own (a long event
+			// name in "Prediction started: ...") ends in an ellipsis instead of running to the edge.
 			for (size_t I = 0; I < Lines.size(); ++I)
 			{
-				UI.Text(Lines[I], X + 8.0f, Y + LineH * (Nf(I) + 0.75f), Ts(Size - 1.0f, 600, M.Kind == kast::LineKind::Raid ? Col : KMuted));
+				UI.Text(Lines[I], X + 8.0f, Y + LineH * (Nf(I) + 0.75f), Ts(Size - 1.0f, 600, M.Kind == kast::LineKind::Raid ? Col : KMuted, Align::Left, Baseline::Alphabetic, false, W - 16.0f));
 			}
 		}
 		return;
@@ -398,7 +394,14 @@ void RiverLine::StreamChatLine(const kast::ChatMsg& M, float X, float Y, float W
 	default: break;
 	}
 	const bool Hover = Interactive && UI.Hover(Box);
-	if (BoxCol.A > 0.0f)
+	// The creator update (§5.3 K11): a chatter a Nod lit glows while their name is up on the overlay.
+	const bool Lit = M.Kind != kast::LineKind::Streamer && !M.Who.empty() && rlkast_detail::KastLit(S, M.Who);
+	if (Lit)
+	{
+		C->FillRoundRect(Box, 6.0f, NetA(KViolet, 0.22f));
+		C->StrokeRoundRect(Box, 6.0f, KViolet, 1.2f);
+	}
+	else if (BoxCol.A > 0.0f)
 	{
 		C->FillRoundRect(Box, 6.0f, BoxCol);
 		if (M.Kind != kast::LineKind::Streamer)
@@ -417,7 +420,23 @@ void RiverLine::StreamChatLine(const kast::ChatMsg& M, float X, float Y, float W
 		Bx += KastBadges(*C, M.Badges, Bx, Base - Size * 0.36f, Size);
 	}
 	const Color NameCol = M.Kind == kast::LineKind::Streamer ? KLime : Hex(M.NameColor);
-	UI.Text(Name, Bx, Base, Ts(Size, 800, M.Deleted ? KDim : NameCol));
+	const float NameDrawn = UI.Text(Name, Bx, Base, Ts(Size, 800, M.Deleted ? KDim : NameCol));
+	// The creator update (§5.3 K11): a chatter's name opens the menu (Nod, Timeout, Promote to mod).
+	const bool MenuOpen = rlkast_detail::KastNameMenuOpen(this);
+	if (Interactive && S.Streaming() && !M.Deleted && !M.Who.empty() && M.Who != S.HeroName && (M.Kind == kast::LineKind::Chat || M.Kind == kast::LineKind::Question))
+	{
+		const Rect NameR{Bx - 2.0f, Base - Size, NameDrawn + 4.0f, Size * 1.35f};
+		const Ui::ClickState Ns = UI.Clickable("kastname" + std::to_string(M.Id), NameR, !Previewing && !MenuOpen);
+		if (Ns.Hover && !MenuOpen)
+		{
+			C->FillRect({Bx, Base + 2.0f, NameDrawn, 1.0f}, NetA(NameCol, 0.8f));
+		}
+		if (Ns.Clicked)
+		{
+			rlkast_detail::KastFrame F{*this, *C, UI, S, World, Now, Previewing};
+			rlkast_detail::KastOpenNameMenu(F, M, NameR.X, NameR.Y + NameR.H + 2.0f);
+		}
+	}
 	const float BodyX = X + Pad;
 	const Color TextCol = M.Deleted ? KDim : M.Kind == kast::LineKind::Tip ? Hex(0xfde68a) : KInk;
 	for (const Piece& P : Pieces)
@@ -434,33 +453,18 @@ void RiverLine::StreamChatLine(const kast::ChatMsg& M, float X, float Y, float W
 		}
 	}
 	(void)BadgeW;
-	// Moderation and answers, on hover.
-	if (Interactive && S.Streaming() && !M.Deleted)
+	// Answers (Timeout and the rest moved into the name's menu: the creator update, §5.3 K11).
+	if (Interactive && S.Streaming() && !M.Deleted && M.Kind == kast::LineKind::Question && !M.Answered)
 	{
-		if (M.Kind == kast::LineKind::Question && !M.Answered)
+		const Rect Btn{Box.X + Box.W - 74.0f, Box.Y + Box.H - 28.0f, 66.0f, 22.0f};
+		const Ui::ClickState St = UI.Clickable("kastans" + std::to_string(M.Id), Btn, !Previewing && !MenuOpen);
+		C->FillRoundRect(Btn, 11.0f, St.Hover ? KLime : KViolet);
+		UI.Text("Answer", Btn.X + Btn.W / 2.0f, Btn.Y + 15.5f, Ts(12.0f, 800, St.Hover ? Hex(0x1b1036) : Hex(0xffffff), Align::Center));
+		if (St.Clicked)
 		{
-			const Rect Btn{Box.X + Box.W - 74.0f, Box.Y + Box.H - 28.0f, 66.0f, 22.0f};
-			const Ui::ClickState St = UI.Clickable("kastans" + std::to_string(M.Id), Btn);
-			C->FillRoundRect(Btn, 11.0f, St.Hover ? KLime : KViolet);
-			UI.Text("Answer", Btn.X + Btn.W / 2.0f, Btn.Y + 15.5f, Ts(12.0f, 800, St.Hover ? Hex(0x1b1036) : Hex(0xffffff), Align::Center));
-			if (St.Clicked)
-			{
-				S.StreamAnswer(M.Id);
-			}
-		}
-		else if (Hover && M.Kind == kast::LineKind::Chat && !M.Who.empty())
-		{
-			const Rect Btn{Box.X + Box.W - 76.0f, Box.Y + 3.0f, 70.0f, 22.0f};
-			const Ui::ClickState St = UI.Clickable("kastto" + std::to_string(M.Id), Btn);
-			C->FillRoundRect(Btn, 11.0f, St.Hover ? KRed : Hex(0x3a2f55));
-			UI.Text("Timeout", Btn.X + Btn.W / 2.0f, Btn.Y + 15.5f, Ts(12.0f, 800, Hex(0xffffff), Align::Center));
-			if (St.Clicked)
-			{
-				S.StreamTimeout(M.Id);
-			}
+			S.StreamAnswer(M.Id);
 		}
 	}
-	(void)Now;
 }
 
 void RiverLine::StreamChat(const Rect& R, double Now, bool Interactive)
@@ -468,9 +472,10 @@ void RiverLine::StreamChat(const Rect& R, double Now, bool Interactive)
 	const kast::Stream& St = S.Stream;
 	C->FillRoundRect(R, 14.0f, KPanel);
 	C->StrokeRoundRect(R, 14.0f, KLine, 1.0f);
-	// Tabs.
+	rlkast_detail::KastFrame F{*this, *C, UI, S, World, Now, Previewing};
+	// Tabs. The creator update (C12): the Chat tab carries no number; the Mods tab says who's here ("2 of 3 here").
 	const char* Names[3] = {"Chat", "Mods", "Activity"};
-	const std::string Counts[3] = {St.Live ? KastCount(St.Chatters()) : std::string(), std::to_string(St.ModsOnline()) + "/" + std::to_string(S.Channel.Mods.size()), St.Live ? std::to_string(St.Feed.size()) : std::string()};
+	const std::string Counts[3] = {std::string(), rlkast_detail::KastModsHere(S), St.Live ? std::to_string(St.Feed.size()) : std::string()};
 	float Tx = R.X + 16.0f;
 	for (int K = 0; K < 3; ++K)
 	{
@@ -492,6 +497,11 @@ void RiverLine::StreamChat(const Rect& R, double Now, bool Interactive)
 			UI.Text(Counts[K], T.X + T.W - 10.0f, T.Y + 21.0f, Ts(11.0f, 700, On ? KLime : KDim, Align::Right));
 		}
 		Tx += W + 4.0f;
+	}
+	// Studio's chat header (§5.3 K1): "12 watching · 5 chatting" (StreamSide's strip says it there).
+	if (St.Live && R.W >= 500.0f)
+	{
+		rlkast_detail::KastWatchingChatting(F, R.X + R.W - 14.0f, R.Y + 31.0f);
 	}
 	const Rect Body{R.X + 8.0f, R.Y + 52.0f, R.W - 16.0f, R.H - 52.0f - (ChatTab == 0 ? 56.0f : 8.0f)};
 	C->FillRect({R.X, R.Y + 48.0f, R.W, 1.0f}, KLine);
@@ -522,20 +532,27 @@ void RiverLine::StreamChat(const Rect& R, double Now, bool Interactive)
 			C->SetAlpha(A0);
 		}
 		C->PopClip();
-		// The message bar.
+		// The message bar. Thank chat tapers: its label adds "(chat heard you)" after two in ten world minutes (§5.3 K11).
 		const Rect Bar{R.X + 12.0f, R.Y + R.H - 48.0f, R.W - 24.0f, 38.0f};
 		C->FillRoundRect(Bar, 10.0f, KPanel2);
 		C->StrokeRoundRect(Bar, 10.0f, KLine, 1.0f);
-		UI.Text(St.Live ? "Chatting as " + S.HeroName : "Offline", Bar.X + 14.0f, Bar.Y + 24.0f, Ts(13.0f, 600, KDim, Align::Left, Baseline::Alphabetic, false, Bar.W - 140.0f));
-		const Rect Thx{Bar.X + Bar.W - 112.0f, Bar.Y + 5.0f, 106.0f, 28.0f};
+		const std::string ThankLabel = rlkast_detail::KastThankLabel(S);
+		const float ThankW = std::max(106.0f, UI.Measure(ThankLabel, 12.0f, 800) + 44.0f);
+		UI.Text(St.Live ? "Chatting as " + S.HeroName : "Offline", Bar.X + 14.0f, Bar.Y + 24.0f, Ts(13.0f, 600, KDim, Align::Left, Baseline::Alphabetic, false, Bar.W - ThankW - 34.0f));
+		const Rect Thx{Bar.X + Bar.W - ThankW - 6.0f, Bar.Y + 5.0f, ThankW, 28.0f};
 		const bool Can = St.Live && Now - St.ThankAt >= 20.0;
-		const Ui::ClickState Cs = UI.Clickable("kastthank", Thx, Interactive && Can);
+		const Ui::ClickState Cs = UI.Clickable("kastthank", Thx, Interactive && Can && !rlkast_detail::KastNameMenuOpen(this));
 		C->FillRoundRect(Thx, 8.0f, Can ? (Cs.Hover ? KLime : KViolet) : NetA(KViolet, 0.25f));
 		streamart::Emote(*C, static_cast<int>(kast::Emote::Love), Thx.X + 8.0f, Thx.Y + 5.0f, 18.0f);
-		UI.Text("Talk to chat", Thx.X + 30.0f, Thx.Y + 19.0f, Ts(12.0f, 800, Can && Cs.Hover ? Hex(0x1b1036) : Hex(0xffffff)));
+		UI.Text(ThankLabel, Thx.X + 30.0f, Thx.Y + 19.0f, Ts(12.0f, 800, Can && Cs.Hover ? Hex(0x1b1036) : Hex(0xffffff)));
 		if (Cs.Clicked)
 		{
 			S.StreamThank();
+		}
+		// The name menu over everything (§5.3 K11).
+		if (Interactive)
+		{
+			rlkast_detail::KastNameMenu(F, R);
 		}
 		return;
 	}
@@ -653,8 +670,29 @@ void RiverLine::StreamAlert(float Cx, float Y, float Scale, double Now)
 	const Color Col = AlertColor(A.Kind);
 	const std::string Title = AlertTitle(A);
 	const std::string Body = AlertLine(A);
-	const float W = std::max(UI.Measure(Title, 22.0f, 900), UI.Measure(Body, 16.0f, 700)) + 120.0f;
-	const float H = 84.0f;
+	// The creator update (§5.3 K2, K6): the first follower's alert says who and why on two lines; a long line (the Broadcast in
+	// its site's voice) wraps to two.
+	std::vector<std::string> Lines;
+	if (A.Kind == kast::AlertKind::Follow && A.Count == 1 && !A.Text.empty() && !A.Who.empty())
+	{
+		Lines = {A.Who, A.Text};
+	}
+	else if (UI.Measure(Body, 16.0f, 700) > 640.0f)
+	{
+		Lines = NetWrap(*C, Body, 640.0f, 16.0f, 700);
+		Lines.resize(std::min<size_t>(2, Lines.size()));
+	}
+	else
+	{
+		Lines = {Body};
+	}
+	float LinesW = 0.0f;
+	for (const std::string& Ln : Lines)
+	{
+		LinesW = std::max(LinesW, UI.Measure(Ln, 16.0f, 700));
+	}
+	const float W = std::max(UI.Measure(Title, 22.0f, 900), LinesW) + 120.0f;
+	const float H = Lines.size() > 1 ? 62.0f + 22.0f * Nf(Lines.size()) : 84.0f;
 	C->Save();
 	C->Translate(Cx, Y + (1.0f - In) * -30.0f * Scale);
 	C->Scale(Scale * Pop, Scale * Pop);
@@ -681,9 +719,22 @@ void RiverLine::StreamAlert(float Cx, float Y, float Scale, double Now)
 	const float Bob = Nf(std::sin(Age * 6.0)) * 3.0f;
 	streamart::Emote(*C, E, Rr.X + 16.0f, 12.0f + Bob, 60.0f);
 	UI.Text(Title, Rr.X + 90.0f, 36.0f, Ts(22.0f, 900, Col, Align::Left, Baseline::Alphabetic, false, Rr.W - 104.0f));
-	EmoteText(Body, Rr.X + 90.0f, 62.0f, 16.0f, 700, KInk, Rr.W - 104.0f, true);
-	// Confetti for the big ones.
-	if (A.Kind == kast::AlertKind::Raid || A.Kind == kast::AlertKind::Milestone || A.Kind == kast::AlertKind::Gift || A.Kind == kast::AlertKind::Partner || A.Kind == kast::AlertKind::Affiliate)
+	for (size_t I = 0; I < Lines.size(); ++I)
+	{
+		EmoteText(Lines[I], Rr.X + 90.0f, 62.0f + 22.0f * Nf(I), 16.0f, 700, I == 0 ? KInk : KLav, Rr.W - 104.0f, true);
+	}
+	// Confetti for the big ones. The creator update (§5.3 K17): a milestone's tier by its size (none under 25 followers, then
+	// 60, 120 and 200 pieces from 1,000), Affiliate and Partner the biggest; the motion kit's, at most 200 quads.
+	if (A.Kind == kast::AlertKind::Milestone || A.Kind == kast::AlertKind::Partner || A.Kind == kast::AlertKind::Affiliate)
+	{
+		const int Size = A.Kind == kast::AlertKind::Milestone ? A.Count : 1000;
+		const int Pieces = Size >= 1000 ? 200 : Size >= 100 ? 120 : Size >= 25 ? 60 : 0;
+		if (Pieces > 0)
+		{
+			motion::Confetti(*C, static_cast<uint32_t>(A.Count * 31 + static_cast<int>(A.Kind)), A.At, Now, Pieces, {Rr.X - 40.0f, -40.0f, Rr.W + 80.0f, H + 140.0f});
+		}
+	}
+	else if (A.Kind == kast::AlertKind::Raid || A.Kind == kast::AlertKind::Gift)
 	{
 		for (int K = 0; K < 24; ++K)
 		{
@@ -704,7 +755,7 @@ void RiverLine::StreamOverlay(const Rect& R, float Scale, double Now)
 	streamart::Cam Look;
 	Look.Gear = Fx;
 	Look.Headphones = S.Owns("headphones");
-	Look.Face = St.Face;
+	Look.Face = rlkast_detail::KastCamMood(S); // Event Mode: the facecam leans Hyped (§5.3 K5)
 	Look.FaceAge = Now - St.FaceAt;
 	Look.Talking = Now - St.ThankAt < 3.0;
 	Look.Time = Now;
@@ -759,8 +810,10 @@ void RiverLine::StreamOverlay(const Rect& R, float Scale, double Now)
 			UI.Text(Latest, Goal.X + Goal.W + 20.0f * Scale, Goal.Y + 21.0f * Scale, Ts(13.0f * Scale, 700, KInk));
 		}
 	}
-	// Sponsors in the corner: each overlay slot's brand, its mark and its name (the sponsor book's deals, §3.9).
+	// Sponsors in the corner: each overlay slot's brand, its mark and its name (the sponsor book's deals, §3.9). The creator
+	// update: they step down under Hold or Crack's bar while it's open.
 	float Sx = R.X + R.W - 14.0f * Scale;
+	const float Sy = R.Y + (S.Streaming() && St.GetView().HoC.Open ? 92.0f : 46.0f) * Scale;
 	for (const kast::Deal& D : sponsor::StreamView(S.Life.Sponsors, World))
 	{
 		const kast::Sponsor* Sp = D.Overlay ? kast::FindSponsor(D.Id) : nullptr;
@@ -770,10 +823,15 @@ void RiverLine::StreamOverlay(const Rect& R, float Scale, double Now)
 		}
 		const float W = UI.Measure(Sp->Brand, 13.0f * Scale, 900) + 50.0f * Scale;
 		Sx -= W;
-		C->FillRoundRect({Sx, R.Y + 46.0f * Scale, W, 26.0f * Scale}, 8.0f * Scale, NetA(Hex(Sp->Color), 0.9f));
-		sponsorart::Mark(*C, D.Id, {Sx + 4.0f * Scale, R.Y + 48.0f * Scale, 22.0f * Scale, 22.0f * Scale});
-		UI.Text(Sp->Brand, Sx + 30.0f * Scale, R.Y + 64.0f * Scale, Ts(13.0f * Scale, 900, Hex(0x0b0716)));
+		C->FillRoundRect({Sx, Sy, W, 26.0f * Scale}, 8.0f * Scale, NetA(Hex(Sp->Color), 0.9f));
+		sponsorart::Mark(*C, D.Id, {Sx + 4.0f * Scale, Sy + 2.0f * Scale, 22.0f * Scale, 22.0f * Scale});
+		UI.Text(Sp->Brand, Sx + 30.0f * Scale, Sy + 18.0f * Scale, Ts(13.0f * Scale, 900, Hex(0x0b0716)));
 		Sx -= 8.0f * Scale;
+	}
+	// The creator update (§5.3 K5, K11, K12): Event Mode's bar, Hold or Crack's bar and the names a Nod lit.
+	{
+		rlkast_detail::KastFrame F{*this, *C, UI, S, World, Now, Previewing};
+		rlkast_detail::KastOverlay(F, R, Scale, Cam);
 	}
 	// Ad break.
 	if (St.AdRunning(Now))
@@ -783,7 +841,7 @@ void RiverLine::StreamOverlay(const Rect& R, float Scale, double Now)
 		UI.Text("back in " + std::to_string(static_cast<int>(std::ceil(St.AdUntil - Now))) + "s \xC2\xB7 thanks for supporting the channel", R.X + R.W / 2.0f, R.Y + R.H / 2.0f + 30.0f * Scale,
 			Ts(16.0f * Scale, 600, KMuted, Align::Center));
 	}
-	StreamAlert(R.X + R.W / 2.0f, R.Y + 20.0f * Scale, Scale, Now);
+	StreamAlert(R.X + R.W / 2.0f, rlkast_detail::KastAlertY(S, R, Scale), Scale, Now);
 }
 
 void RiverLine::StreamPreview(const Rect& R, double Now)
@@ -804,16 +862,27 @@ void RiverLine::StreamPreview(const Rect& R, double Now)
 	Previewing = true;
 	// Update 3 (§1.11): the client's own frame, cropped by its own chrome's height (RiverLine's top bar is 64).
 	const net::SiteId Client = rlsites_detail::SitesClient(*this, S);
-	C->Save();
-	C->Translate(R.X, R.Y - std::min(Crop, rlsites_detail::SitesLook(Client).ChromeH) * Scale);
-	C->Scale(Scale, Scale);
-	{
-		// Update 2 (§1.8, §5.11): the stream shows whatever the poker client wears, a rival's skin included.
-		const SkinScope Skin(rlsites_detail::SitesSkin(Client, World));
-		C->FillRect({0.0f, 0.0f, NetW, 1000.0f}, Paint::Linear({0.0f, 0.0f}, {0.0f, 1000.0f}, pal::Bg2, pal::Bg));
-		ClientFrame(Now, true);
-	}
-	C->Restore();
+	// The creator update (§9.3's frame budget): the client is captured at the stream's 15 a second, the laptop redrawing at 30;
+	// in between, the last capture is copied in (rlkast_detail::KastPreviewCapture).
+	rlkast_detail::KastCaptureKey Key;
+	Key.Frame = R;
+	Key.Client = static_cast<int>(Client);
+	Key.Screen = static_cast<int>(S.CurrentScreen);
+	Key.Tables = S.TableCount();
+	Key.PxScale = C->PixelScale();
+	Key.Xf = C->Transform();
+	rlkast_detail::KastPreviewCapture(*C, this, Key, Now, [&] {
+		C->Save();
+		C->Translate(R.X, R.Y - std::min(Crop, rlsites_detail::SitesLook(Client).ChromeH) * Scale);
+		C->Scale(Scale, Scale);
+		{
+			// Update 2 (§1.8, §5.11): the stream shows whatever the poker client wears, a rival's skin included.
+			const SkinScope Skin(rlsites_detail::SitesSkin(Client, World));
+			C->FillRect({0.0f, 0.0f, NetW, 1000.0f}, Paint::Linear({0.0f, 0.0f}, {0.0f, 1000.0f}, pal::Bg2, pal::Bg));
+			ClientFrame(Now, true);
+		}
+		C->Restore();
+	});
 	Previewing = false;
 	UI.Ptr = Real;
 	UI.CursorIsPointer = Cursor;
@@ -833,15 +902,28 @@ void RiverLine::StreamPreview(const Rect& R, double Now)
 	}
 	StreamOverlay(R, R.W / NetW * 1.6f, Now);
 	C->PopClip();
-	// Frame and status.
-	C->StrokeRoundRect(R, 4.0f, S.Streaming() ? NetA(KRed, 0.7f) : KLine, 2.0f);
+	// Frame and status. The creator update (§5.3 K5): in Event Mode the frame and the LIVE tag turn gold, the tag inside the
+	// EVENT bar.
+	const bool Event = S.Streaming() && S.Stream.GetView().EventMode;
+	C->StrokeRoundRect(R, 4.0f, Event ? NetA(KGold, 0.7f) : S.Streaming() ? NetA(KRed, 0.7f) : KLine, 2.0f);
 	const std::string Tag = S.Streaming() ? "LIVE" : "PREVIEW";
-	C->FillRoundRect({R.X + 12.0f, R.Y + 12.0f, UI.Measure(Tag, 12.0f, 900) + 30.0f, 24.0f}, 6.0f, S.Streaming() ? KRed : Hex(0x3a2f55));
-	if (S.Streaming())
+	const float TagY = Event ? R.Y + 5.0f : R.Y + 12.0f;
+	const float TagW = UI.Measure(Tag, 12.0f, 900) + 30.0f;
+	if (Event)
 	{
-		C->FillCircle(R.X + 24.0f, R.Y + 24.0f, 4.0f, NetA(Hex(0xffffff), 0.6f + 0.4f * Nf(std::sin(Now * 4.0))));
+		C->FillRoundRect({R.X + 12.0f, TagY, TagW, 24.0f}, 6.0f, Paint::Linear({R.X + 12.0f, 0.0f}, {R.X + 12.0f + TagW, 0.0f}, KGold, KGold2));
+		C->FillCircle(R.X + 24.0f, TagY + 12.0f, 4.0f, KRed);
+		UI.Text(Tag, R.X + 32.0f, TagY + 16.5f, Ts(12.0f, 900, KDeep));
 	}
-	UI.Text(Tag, R.X + (S.Streaming() ? 32.0f : 24.0f), R.Y + 28.5f, Ts(12.0f, 900, Hex(0xffffff)));
+	else
+	{
+		C->FillRoundRect({R.X + 12.0f, TagY, TagW, 24.0f}, 6.0f, S.Streaming() ? KRed : Hex(0x3a2f55));
+		if (S.Streaming())
+		{
+			C->FillCircle(R.X + 24.0f, TagY + 12.0f, 4.0f, NetA(Hex(0xffffff), 0.6f + 0.4f * Nf(std::sin(Now * 4.0))));
+		}
+		UI.Text(Tag, R.X + (S.Streaming() ? 32.0f : 24.0f), TagY + 16.5f, Ts(12.0f, 900, Hex(0xffffff)));
+	}
 	UI.Text(gear::ResolutionLabel(Fx.Resolution) + (S.TableCount() > Fx.StreamTables ? "  \xC2\xB7  DROPPING FRAMES" : ""), R.X + R.W - 12.0f, R.Y + R.H - 12.0f,
 		Ts(11.5f, 800, S.TableCount() > Fx.StreamTables ? KRed : NetA(KInk, 0.6f), Align::Right, Baseline::Alphabetic, true));
 }
@@ -893,15 +975,36 @@ void RiverLine::KastHeader(double Now)
 	{
 		const std::string L = "LIVE  " + KastClock(S.Stream.Uptime(World));
 		const float W = UI.Measure(L, 14.0f, 900, true) + 34.0f;
-		C->FillRoundRect({Rx - W, 16.0f, W, 28.0f}, 8.0f, KRed);
-		C->FillCircle(Rx - W + 14.0f, 30.0f, 4.0f, NetA(Hex(0xffffff), 0.6f + 0.4f * Nf(std::sin(Now * 4.0))));
-		UI.Text(L, Rx - W + 24.0f, 35.0f, Ts(14.0f, 900, Hex(0xffffff), Align::Left, Baseline::Alphabetic, true));
+		if (S.Stream.GetView().EventMode)
+		{
+			// Event Mode (§5.3 K5): the LIVE pill turns gold, its words dark.
+			C->FillRoundRect({Rx - W, 16.0f, W, 28.0f}, 8.0f, Paint::Linear({Rx - W, 0.0f}, {Rx, 0.0f}, KGold, KGold2));
+			C->FillCircle(Rx - W + 14.0f, 30.0f, 4.0f, KRed);
+			UI.Text(L, Rx - W + 24.0f, 35.0f, Ts(14.0f, 900, KDeep, Align::Left, Baseline::Alphabetic, true));
+		}
+		else
+		{
+			C->FillRoundRect({Rx - W, 16.0f, W, 28.0f}, 8.0f, KRed);
+			C->FillCircle(Rx - W + 14.0f, 30.0f, 4.0f, NetA(Hex(0xffffff), 0.6f + 0.4f * Nf(std::sin(Now * 4.0))));
+			UI.Text(L, Rx - W + 24.0f, 35.0f, Ts(14.0f, 900, Hex(0xffffff), Align::Left, Baseline::Alphabetic, true));
+		}
+		Rx -= W + 12.0f;
 	}
 	else
 	{
 		const float W = UI.Measure("OFFLINE", 13.0f, 900) + 24.0f;
 		C->FillRoundRect({Rx - W, 17.0f, W, 26.0f}, 8.0f, Hex(0x2b2340));
 		UI.Text("OFFLINE", Rx - W / 2.0f, 34.5f, Ts(13.0f, 900, KMuted, Align::Center));
+		Rx -= W + 12.0f;
+	}
+	// The creator update (§5.3 K4, K7): the Heat chip left of LIVE, and the Poker rank while live ("#23 of 49 in Poker").
+	const rlkast_detail::KastHeat Heat = rlkast_detail::KastHeatNow(S, World);
+	rlkast_detail::KastHeatChip(*C, Rx - 200.0f, 14.0f, Heat, Previewing ? 0.0 : Now);
+	Rx -= 212.0f;
+	if (S.Streaming())
+	{
+		const kast::View& V = S.Stream.GetView();
+		rlkast_detail::KastRankChip(*C, Rx, 16.0f, V.Rank, V.RankOf);
 	}
 }
 
@@ -1016,10 +1119,13 @@ void RiverLine::KastStudio(double Now)
 	}
 
 	// Controls.
+	rlkast_detail::KastFrame F{*this, *C, UI, S, World, Now, Previewing};
 	const float Cy = 654.0f;
 	const Rect Go{20.0f, Cy, 220.0f, Live ? 44.0f : 64.0f};
 	if (Live)
 	{
+		// The one action beside Go (§5.1, §5.3 K2 K3 K10 K12): Hold or Crack, Welcome the raid, Rail Call, Set the scene.
+		rlkast_detail::KastStudioSlot(F, {20.0f, Cy + 78.0f, 220.0f, 32.0f});
 		if (AppButton("kastend", Go, "End stream", KRed, Hex(0xffffff), true))
 		{
 			S.EndStream();
@@ -1045,11 +1151,10 @@ void RiverLine::KastStudio(double Now)
 	}
 	else
 	{
-		const kast::Inputs In = S.StreamInputs();
-		const int Est = static_cast<int>(std::round(kast::Stream::Expected(Ch, In)));
+		// Go live with tonight's forecast under it (§5.3 K9).
 		const bool Open = CanStream && !S.Evicted();
 		const std::string Locked = !S.Evicted() ? "needs a PC upgrade" : S.Life.StorageDue > 0.0 ? "the rig is in storage" : "no rig at Dee's";
-		if (AppButton("kastlive", Go, "Go live", KLime, Hex(0x1b1036), Open && !S.TimeSkip.Active, Open ? "~" + std::to_string(Est) + " viewers to start" : Locked))
+		if (rlkast_detail::KastGoBlock(F, Go, Open, Open && !S.TimeSkip.Active, Locked))
 		{
 			S.GoLive();
 		}
@@ -1112,8 +1217,27 @@ void RiverLine::KastStudio(double Now)
 				continue;
 			}
 			Any = true;
-			const bool Can = Live && D.ReadAt < St.StartWorld;
-			const std::string Label = Can ? "Read for " + Sp->Brand + "  +" + Money(D.ReadCents) : Sp->Brand + (Live ? ": read done" : ": read when live");
+			// The creator update (C13): a read pays once a deal a world day, after 30 world minutes live with someone watching, and
+			// within 1.5x the deal's reads ask a contract period (the book's count, as the Room reads it): the core's own rule, so the
+			// button never offers money the read can't pay.
+			int ReadsPaid = 0;
+			int ReadsAsk = 0;
+			for (const sponsor::Contract& Ct : S.Life.Sponsors.Contracts)
+			{
+				if (Ct.Brand == D.Id && Ct.Since == D.Since)
+				{
+					ReadsPaid = Ct.Now.Reads;
+					ReadsAsk = static_cast<int>(std::lround(Ct.T.Asks[static_cast<size_t>(sponsor::Ask::Reads)]));
+					break;
+				}
+			}
+			const int ReadDay = net::DayOf(World);
+			const bool ReadToday = D.ReadAt > -1.0e8 && net::DayOf(D.ReadAt) == ReadDay;
+			const bool ReadsLeft = kast::growth::SponsorReadPays(ReadDay, -1.0e9, 1.0e9, 1, ReadsPaid, ReadsAsk);
+			const bool ReadOpen = Live && !ReadToday && D.ReadAt < St.StartWorld && ReadsLeft;
+			const bool Can = ReadOpen && kast::growth::SponsorReadPays(ReadDay, D.ReadAt, St.Uptime(World), St.GetView().Count, ReadsPaid, ReadsAsk);
+			const std::string Label = ReadOpen ? "Read for " + Sp->Brand + "  +" + Money(D.ReadCents)
+				: Live && ReadToday ? kast::copy::SponsorReadDone(Sp->Brand) : Sp->Brand + (Live ? ": read done" : ": read when live");
 			const float W = UI.Measure(Label, 13.0f, 800) + 30.0f;
 			const Rect B{X, Y, W, 32.0f};
 			const Ui::ClickState Cs = UI.Clickable("kastread" + D.Id, B, Can);
@@ -1158,6 +1282,21 @@ void RiverLine::KastStudio(double Now)
 			}
 			Right -= W + 14.0f;
 		}
+		// The creator update (§2.8.5, §5.3 K16): Stamina's chip, from 24 world hours live in 7 days, when it fits.
+		const double H7 = kast::growth::H7(Ch.LiveMin, Ch.LiveDay, net::DayOf(World));
+		if (H7 >= 24.0)
+		{
+			const std::string L = kast::copy::StaminaLine(static_cast<int>(std::floor(H7)));
+			const float W = UI.Measure(L, 12.0f, 800) + 24.0f;
+			if (Right - W > X + 8.0f)
+			{
+				const Color Amber = Hex(0xf59e0b);
+				C->FillRoundRect({Right - W, Y, W, 32.0f}, 9.0f, NetA(Amber, 0.12f));
+				C->StrokeRoundRect({Right - W, Y, W, 32.0f}, 9.0f, NetA(Amber, 0.5f), 1.0f);
+				UI.Text(L, Right - W + 12.0f, Y + 21.0f, Ts(12.0f, 800, Amber));
+				Right -= W + 14.0f;
+			}
+		}
 		if (St.Pred.Active)
 		{
 			const int Total = std::max(1, St.Pred.Yes + St.Pred.No);
@@ -1174,17 +1313,20 @@ void RiverLine::KastStudio(double Now)
 		C->FillRoundRect(R, 14.0f, KPanel);
 		C->StrokeRoundRect(R, 14.0f, KLine, 1.0f);
 		NetSpaced(*C, Label, R.X + 16.0f, R.Y + 26.0f, 10.0f, 900, KDim, 1.4f);
-		UI.Text(Big, R.X + 16.0f, R.Y + 68.0f, Ts(30.0f, 900, Col, Align::Left, Baseline::Alphabetic, true, R.W - 24.0f));
-		UI.Text(Sub, R.X + 16.0f, R.Y + 92.0f, Ts(12.0f, 600, KMuted, Align::Left, Baseline::Alphabetic, false, R.W - 24.0f));
+		if (!Big.empty())
+		{
+			UI.Text(Big, R.X + 16.0f, R.Y + 68.0f, Ts(30.0f, 900, Col, Align::Left, Baseline::Alphabetic, true, R.W - 24.0f));
+			UI.Text(Sub, R.X + 16.0f, R.Y + 92.0f, Ts(12.0f, 600, KMuted, Align::Left, Baseline::Alphabetic, false, R.W - 24.0f));
+		}
 		return R;
 	};
+	// The creator update (§5.3 K1, K8): VIEWERS is the count every surface shares, where they came from, who's chatting, the
+	// night's graph against tonight's forecast.
+	rlkast_detail::KastViewersTile(F, Tile(0, "VIEWERS", std::string(), std::string(), KRed));
 	{
-		const Rect R = Tile(0, "VIEWERS", Live ? KastCount(St.Viewers) : std::string("\xE2\x80\x94"),
-			Live ? std::to_string(St.RegularsHere) + (St.RegularsHere == 1 ? " regular" : " regulars") + " \xC2\xB7 " + std::to_string(static_cast<int>(std::round(St.Strangers))) + " new" : "offline",
-			Live ? KRed : KDim);
-		KastSpark(*C, {R.X + 12.0f, R.Y + 106.0f, R.W - 24.0f, 54.0f}, St.Graph, KRed);
-	}
-	{
+		// Before Affiliate the bar fills toward the real bar's 25 (C8).
+		int Goal = 0;
+		const std::string Foot = rlkast_detail::KastFollowerFoot(Ch, Goal);
 		const Rect R = Tile(1, "FOLLOWERS", KastCount(Ch.Followers), Live ? "+" + Grouped(St.Tonight.Follows) + " tonight" : "next: " + Grouped(Ch.Milestone > 0 ? Ch.Milestone : 10), KInk);
 		static const int Steps[] = {10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000};
 		int Next = 250000;
@@ -1196,19 +1338,51 @@ void RiverLine::KastStudio(double Now)
 				break;
 			}
 		}
+		Next = Ch.Affiliate ? Next : Goal;
 		const float P = Nf(std::min(1.0, static_cast<double>(Ch.Followers) / static_cast<double>(Next)));
 		C->FillRoundRect({R.X + 16.0f, R.Y + 128.0f, R.W - 32.0f, 8.0f}, 4.0f, KPanel2);
 		C->FillRoundRect({R.X + 16.0f, R.Y + 128.0f, std::max(8.0f, (R.W - 32.0f) * P), 8.0f}, 4.0f, KViolet);
-		UI.Text(Grouped(Ch.Regulars()) + " regulars \xC2\xB7 " + Grouped(Ch.Superfans()) + " superfans", R.X + 16.0f, R.Y + 156.0f, Ts(11.5f, 600, KDim, Align::Left, Baseline::Alphabetic, false, R.W - 24.0f));
+		UI.Text(Ch.Affiliate ? Grouped(Ch.Regulars()) + " regulars \xC2\xB7 " + Grouped(Ch.Superfans()) + " superfans" : Foot, R.X + 16.0f, R.Y + 156.0f,
+			Ts(11.5f, 600, KDim, Align::Left, Baseline::Alphabetic, false, R.W - 24.0f));
 	}
 	{
 		const Rect R = Tile(2, "SUBSCRIBERS", Ch.Affiliate ? Grouped(Ch.ActiveSubs(World)) : std::string("\xE2\x80\x94"), Ch.Affiliate ? (Live ? "+" + std::to_string(St.Tonight.Subs + St.Tonight.Gifted) + " tonight" : (Ch.Partner ? "70% share" : "50% share")) : "affiliate unlocks subs", Ch.Affiliate ? KLime : KDim);
-		UI.Text(Ch.GiftedSubs > 0 ? Grouped(Ch.GiftedSubs) + " gifted, all time" : "", R.X + 16.0f, R.Y + 156.0f, Ts(11.5f, 600, KDim));
+		if (Ch.Affiliate)
+		{
+			UI.Text(Ch.GiftedSubs > 0 ? Grouped(Ch.GiftedSubs) + " gifted, all time" : "", R.X + 16.0f, R.Y + 156.0f, Ts(11.5f, 600, KDim));
+		}
+		else
+		{
+			// The real platform's Affiliate bar (C8), on two lines.
+			const std::string Bar = kast::copy::AffiliateBar(kast::AffiliateFollowersC8, static_cast<int>(kast::AffiliateMinutesC8), kast::AffiliateDaysC8, static_cast<int>(kast::AffiliateAvg));
+			NetParagraph(*C, Bar, R.X + 16.0f, R.Y + 128.0f, R.W - 28.0f, 11.0f, 600, KDim, 15.0f, 3);
+		}
 	}
 	{
+		// Kast money tonight (C4, C13): tips, subs, cheers and ads; sponsor pay is its own ledger line.
 		const kast::Summary& T = St.Tonight;
-		const Rect R = Tile(3, "TONIGHT", Money(Live ? T.Total() : 0), "balance " + Money(Ch.UnpaidCents), KGold);
-		const std::pair<const char*, Chips> Parts[4] = {{"tips", T.TipCents}, {"subs", T.SubCents}, {"bits", T.BitCents}, {"sponsor", T.SponsorCents + T.AdCents}};
+		const Chips KastMoney = Live ? T.TipCents + T.SubCents + T.BitCents + T.AdCents : 0;
+		std::string Sub = Ch.PendingCents > 0 ? "pending: " + kast::copy::Dollars(Ch.PendingCents) : "balance " + Money(Ch.UnpaidCents);
+		if (Live && !Ch.Affiliate && T.TipCents > 0)
+		{
+			// "dee tipped $5" names the tipper only while one person tipped tonight: the dollars are the night's tips.
+			const kast::Alert* Tipper = nullptr;
+			bool ManyTippers = false;
+			for (const kast::Alert& A : St.Feed)
+			{
+				if (A.Kind == kast::AlertKind::Tip && !A.Who.empty())
+				{
+					ManyTippers = ManyTippers || (Tipper && A.Who != Tipper->Who);
+					Tipper = Tipper ? Tipper : &A;
+				}
+			}
+			if (Tipper && !ManyTippers)
+			{
+				Sub = kast::copy::Tipped(Tipper->Who, T.TipCents);
+			}
+		}
+		const Rect R = Tile(3, "TONIGHT", Money(KastMoney), Sub, KGold);
+		const std::pair<const char*, Chips> Parts[4] = {{"tips", T.TipCents}, {"subs", T.SubCents}, {"cheers", T.BitCents}, {"ads", T.AdCents}};
 		for (int K = 0; K < 4; ++K)
 		{
 			const float Py = R.Y + 118.0f + Nf(K) * 13.5f;
@@ -1216,145 +1390,32 @@ void RiverLine::KastStudio(double Now)
 			UI.Text(NetMoney(Live ? Parts[K].second : 0), R.X + R.W - 16.0f, Py, Ts(11.0f, 800, KInk, Align::Right, Baseline::Alphabetic, true));
 		}
 	}
-	{
-		const Rect R = Tile(4, "HYPE", Live ? std::to_string(static_cast<int>(St.Hype)) : std::string("\xE2\x80\x94"), Live ? (St.Hype > 60 ? "chat is losing it" : St.Hype > 30 ? "chat is awake" : "quiet grind") : "big hands make hype", Hex(0xf97316));
-		const float H = Nf(St.Hype / 100.0);
-		C->FillRoundRect({R.X + 16.0f, R.Y + 128.0f, R.W - 32.0f, 10.0f}, 5.0f, KPanel2);
-		C->FillRoundRect({R.X + 16.0f, R.Y + 128.0f, std::max(10.0f, (R.W - 32.0f) * H), 10.0f}, 5.0f, Paint::Linear({R.X, 0.0f}, {R.X + R.W, 0.0f}, Hex(0xfacc15), Hex(0xef4444)));
-		streamart::Emote(*C, static_cast<int>(kast::Emote::Hype), R.X + R.W - 46.0f, R.Y + 40.0f, 30.0f + (Live ? 8.0f * H * Nf(0.5 + 0.5 * std::sin(Now * 8.0)) : 0.0f));
-	}
+	// Tile 4 becomes HEAT (§5.3 K4): the tier word, tonight's ghost or the top why line, the five segments, the hype.
+	rlkast_detail::KastHeatTile(F, Tile(4, "HEAT", std::string(), std::string(), KInk));
 	{
 		const Rect R = Tile(5, "CHAT HEALTH", Live ? std::to_string(static_cast<int>(St.Health * 100.0)) + "%" : std::string("\xE2\x80\x94"), std::to_string(St.ModsOnline()) + (St.ModsOnline() == 1 ? " mod" : " mods") + " watching", St.Health > 0.7 ? Hex(0x22c55e) : St.Health > 0.4 ? KGold : KRed);
 		UI.Text(Live ? std::to_string(St.Caught) + " caught \xC2\xB7 " + std::to_string(St.Missed) + " missed" : std::string("trolls show up as you grow"), R.X + 16.0f, R.Y + 132.0f, Ts(11.5f, 600, KDim));
 	}
 
-	// Chat.
+	// Chat, and the toast line over its top (the go-live's ping, Front Row, Welcome back: one a real minute).
 	StreamChat({1044.0f, 74.0f, 536.0f, 872.0f}, Now, true);
+	rlkast_detail::KastStudioToast(F, {1044.0f, 74.0f, 536.0f, 872.0f});
 }
 
 void RiverLine::KastCommunity(double Now)
 {
 	const kast::Channel& Ch = S.Channel;
-	const float In = NetEase((Now - KastAt) / 0.5);
-	const std::vector<kast::StageSpec>& Stg = kast::Stages();
-	const int Last = static_cast<int>(Stg.size()) - 1;
-	const int Reached = Ch.Streams > 0 ? std::min(Ch.Stage, Last) : -1;
-	const int Next = std::min(Reached + 1, Last);
-	const bool Done = Reached >= Last;
 	const float Lx = 20.0f;
 	const float Lw = 760.0f;
+	rlkast_detail::KastFrame F{*this, *C, UI, S, World, Now, Previewing};
 
-	// The ladder: where the community is, and what the next stage takes.
-	{
-		const Rect R{Lx, 74.0f, Lw, 340.0f};
-		C->FillRoundRect(R, 16.0f, KPanel);
-		NetSpaced(*C, "BUILDING A COMMUNITY", R.X + 20.0f, R.Y + 30.0f, 10.0f, 900, KViolet, 1.6f);
-		UI.Text(Reached < 0 ? "Nobody yet" : Stg[static_cast<size_t>(Reached)].Name, R.X + 20.0f, R.Y + 62.0f, Ts(24.0f, 900, KInk));
-		UI.Text("Stage " + std::to_string(Reached + 1) + " of " + std::to_string(Last + 1), R.X + R.W - 20.0f, R.Y + 62.0f, Ts(13.0f, 700, KMuted, Align::Right));
-		const float Ly = R.Y + 100.0f;
-		const float Step = (R.W - 100.0f) / Nf(Last);
-		const float L0 = R.X + 50.0f;
-		C->FillRoundRect({L0, Ly - 2.0f, Step * Nf(Last), 4.0f}, 2.0f, KPanel2);
-		if (Reached > 0)
-		{
-			C->FillRoundRect({L0, Ly - 2.0f, Step * Nf(Reached) * In, 4.0f}, 2.0f, KLime);
-		}
-		for (int K = 0; K <= Last; ++K)
-		{
-			const float Nx = L0 + Step * Nf(K);
-			const bool Got = K <= Reached;
-			const bool Is = K == Next && !Done;
-			if (Is)
-			{
-				C->FillCircle(Nx, Ly, 16.0f, NetA(KViolet, 0.18f + 0.1f * Nf(std::sin(Now * 3.0))));
-			}
-			C->FillCircle(Nx, Ly, Is ? 11.0f : 9.0f, Got ? KLime : Is ? KViolet : KPanel2);
-			if (Got)
-			{
-				NetCheck(*C, Nx, Ly, 9.0f, Hex(0x1b1036));
-			}
-			else
-			{
-				UI.Text(std::to_string(K + 1), Nx, Ly + 4.0f, Ts(10.5f, 900, Is ? Hex(0xffffff) : KDim, Align::Center));
-			}
-			// Two words a line.
-			const std::string& Name = Stg[static_cast<size_t>(K)].Name;
-			const size_t Sp = Name.find(' ');
-			const Color Col = Got ? KInk : Is ? Hex(0xd8ccff) : KDim;
-			UI.Text(Name.substr(0, Sp), Nx, Ly + 32.0f, Ts(11.0f, 700, Col, Align::Center));
-			if (Sp != std::string::npos)
-			{
-				UI.Text(Name.substr(Sp + 1), Nx, Ly + 46.0f, Ts(11.0f, 700, Col, Align::Center));
-			}
-		}
-		C->FillRect({R.X + 20.0f, R.Y + 164.0f, R.W - 40.0f, 1.0f}, KLine);
-		const kast::StageSpec& N = Stg[static_cast<size_t>(Done ? Last : Next)];
-		if (Done)
-		{
-			UI.Text("Every stage reached", R.X + 20.0f, R.Y + 194.0f, Ts(16.0f, 900, KLime));
-			NetParagraph(*C, N.Blurb + " Keep the schedule: a community this size still drifts if you vanish.", R.X + 20.0f, R.Y + 218.0f, R.W - 40.0f, 13.0f, 500, KMuted, 19.0f, 3);
-		}
-		else
-		{
-			const float Tw = UI.Text("Next: " + N.Name, R.X + 20.0f, R.Y + 194.0f, Ts(16.0f, 900, KInk));
-			NetPill(*C, "OPENS: " + NetUpper(N.Unlock), R.X + 32.0f + Tw, R.Y + 180.0f, KLime, false, 9.5f);
-			UI.Text(N.Blurb, R.X + 20.0f, R.Y + 216.0f, Ts(12.5f, 500, KMuted, Align::Left, Baseline::Alphabetic, false, R.W - 40.0f));
-			const std::vector<kast::Goal> G = kast::StageGoals(Ch, World, Next);
-			for (size_t I = 0; I < G.size(); ++I)
-			{
-				const float Gy = R.Y + 238.0f + Nf(I) * 24.0f;
-				const float P = Nf(std::min(1.0, G[I].Have / G[I].Need)) * In;
-				UI.Text(G[I].Label, R.X + 20.0f, Gy + 12.0f, Ts(12.5f, 600, KMuted));
-				C->FillRoundRect({R.X + 230.0f, Gy + 4.0f, R.W - 380.0f, 7.0f}, 3.5f, KPanel2);
-				C->FillRoundRect({R.X + 230.0f, Gy + 4.0f, std::max(7.0f, (R.W - 380.0f) * P), 7.0f}, 3.5f, P >= 1.0f ? KLime : KViolet);
-				UI.Text(GoalText(G[I]), R.X + R.W - 20.0f, Gy + 12.0f, Ts(12.5f, 800, P >= 1.0f ? KLime : KInk, Align::Right, Baseline::Alphabetic, true));
-			}
-		}
-	}
-
-	// This week: goals, the streak, the level.
-	{
-		const Rect R{Lx, 428.0f, Lw, 250.0f};
-		C->FillRoundRect(R, 16.0f, KPanel);
-		UI.Text("This week", R.X + 20.0f, R.Y + 34.0f, Ts(18.0f, 900, KInk));
-		const std::string Streak = Ch.Streak > 0 ? std::to_string(Ch.Streak) + (Ch.Streak == 1 ? " week" : " weeks") + " in a row" : "no streak yet";
-		UI.Text("Streak: " + Streak + " \xC2\xB7 resets Monday", R.X + R.W - 20.0f, R.Y + 34.0f, Ts(13.0f, 700, Ch.Streak > 0 ? KGold : KMuted, Align::Right));
-		const std::vector<kast::Goal> G = kast::WeekGoals(Ch, World);
-		const float Cw = (R.W - 52.0f) / 2.0f;
-		for (size_t I = 0; I < G.size() && I < 4; ++I)
-		{
-			const Rect Cell{R.X + 20.0f + Nf(I % 2) * (Cw + 12.0f), R.Y + 52.0f + Nf(I / 2) * 62.0f, Cw, 54.0f};
-			const bool Met = G[I].Have >= G[I].Need;
-			C->FillRoundRect(Cell, 10.0f, Met ? NetA(KLime, 0.1f) : KPanel2);
-			if (Met)
-			{
-				C->FillCircle(Cell.X + 22.0f, Cell.Y + 20.0f, 9.0f, KLime);
-				NetCheck(*C, Cell.X + 22.0f, Cell.Y + 20.0f, 9.0f, Hex(0x1b1036));
-			}
-			else
-			{
-				C->StrokeEllipse(Cell.X + 22.0f, Cell.Y + 20.0f, 8.0f, 8.0f, KDim, 1.5f);
-			}
-			UI.Text(G[I].Label, Cell.X + 40.0f, Cell.Y + 25.0f, Ts(13.5f, 800, Met ? KLime : KInk));
-			UI.Text("+" + std::to_string(G[I].Xp) + " XP", Cell.X + Cell.W - 12.0f, Cell.Y + 25.0f, Ts(12.0f, 800, KGold, Align::Right));
-			const float P = Nf(std::min(1.0, G[I].Have / G[I].Need)) * In;
-			C->FillRoundRect({Cell.X + 40.0f, Cell.Y + 36.0f, Cell.W - 140.0f, 5.0f}, 2.5f, Hex(0x1a1426));
-			C->FillRoundRect({Cell.X + 40.0f, Cell.Y + 36.0f, std::max(5.0f, (Cell.W - 140.0f) * P), 5.0f}, 2.5f, Met ? KLime : KViolet);
-			UI.Text(GoalText(G[I]), Cell.X + Cell.W - 12.0f, Cell.Y + 43.0f, Ts(11.5f, 700, KMuted, Align::Right, Baseline::Alphabetic, true));
-		}
-		const int Lv = Ch.Level();
-		const double Lo = kast::Channel::LevelXp(Lv);
-		const double Hi = kast::Channel::LevelXp(std::min(kast::MaxLevel, Lv + 1));
-		const float P = Lv >= kast::MaxLevel ? 1.0f : Nf(std::min(1.0, (Ch.Xp - Lo) / std::max(1.0, Hi - Lo))) * In;
-		const float Ly = R.Y + 200.0f;
-		UI.Text("Level " + std::to_string(Lv), R.X + 20.0f, Ly + 6.0f, Ts(20.0f, 900, KGold));
-		C->FillRoundRect({R.X + 120.0f, Ly - 4.0f, 300.0f, 9.0f}, 4.5f, KPanel2);
-		C->FillRoundRect({R.X + 120.0f, Ly - 4.0f, std::max(9.0f, 300.0f * P), 9.0f}, 4.5f, KGold);
-		UI.Text(Lv >= kast::MaxLevel ? std::string("max level") : Grouped(static_cast<int64_t>(Ch.Xp - Lo)) + " / " + Grouped(static_cast<int64_t>(Hi - Lo)) + " XP", R.X + 432.0f, Ly + 5.0f, Ts(12.0f, 700, KMuted, Align::Left, Baseline::Alphabetic, true));
-		const int More = static_cast<int>(std::round((Ch.Discoverability() - 1.0) * 100.0));
-		UI.Text(More > 0 ? "Kast shows you to " + std::to_string(More) + "% more people browsing Poker" : std::string("Levels and streaks get you shown to more people browsing Poker"),
-			R.X + 20.0f, Ly + 34.0f, Ts(12.5f, 600, More > 0 ? Hex(0xd8ccff) : KDim, Align::Left, Baseline::Alphabetic, false, R.W - 40.0f));
-	}
+	// The creator update (§5.3 K3 K4 K10 K16 K20, C8 C13 C14; the kast_community mockup): momentum between streams. Left:
+	// Heat over the last 30 streams with its why lines, the Ping's reach, the road (the stage ladder, the real Affiliate bar,
+	// Partner's own-viewers average), then the schedule (where it always was). Right: raids owed and the 7-day rule, this
+	// week (the streak, the goals, Stamina), Kast payouts with sponsor pay apart.
+	rlkast_detail::KastCommunityHeat(F, {Lx, 74.0f, Lw, 250.0f});
+	rlkast_detail::KastCommunityPing(F, {Lx, 336.0f, Lw, 110.0f});
+	rlkast_detail::KastCommunityPath(F, {Lx, 458.0f, Lw, 222.0f});
 
 	// The schedule: post it, keep it.
 	{
@@ -1443,92 +1504,12 @@ void RiverLine::KastCommunity(double Now)
 			R.X + 20.0f, Sy + 92.0f, R.W - 40.0f, 12.5f, 500, KDim, 18.0f, 2);
 	}
 
-	// Right: the audience, then the people in it.
+	// Right: raids, this week, Kast payouts.
 	const float Rx = 800.0f;
 	const float Rw = NetW - 20.0f - Rx;
-	std::vector<const kast::Member*> People;
-	int Watched = 0;
-	int Following = 0;
-	for (const kast::Member& M : Ch.Members)
-	{
-		People.push_back(&M);
-		Watched += M.Streams > 0 ? 1 : 0;
-		Following += M.Follower ? 1 : 0;
-	}
-	std::stable_sort(People.begin(), People.end(), [](const kast::Member* A, const kast::Member* B) { return A->Loyalty > B->Loyalty; });
-	{
-		const Rect R{Rx, 74.0f, Rw, 250.0f};
-		C->FillRoundRect(R, 16.0f, KPanel);
-		UI.Text("Your audience", R.X + 20.0f, R.Y + 34.0f, Ts(18.0f, 900, KInk));
-		UI.Text("most followers never come back; a few never miss one", R.X + R.W - 20.0f, R.Y + 34.0f, Ts(12.0f, 600, KDim, Align::Right));
-		const int Lurk = std::max(0, Ch.Followers - Following);
-		const std::pair<const char*, std::pair<int, Color>> Rows[5] = {{"Followers", {Ch.Followers, Hex(0x6b6385)}}, {"Have watched", {Watched, Hex(0x8b7fb0)}}, {"Regulars", {Ch.Regulars(), KViolet}}, {"Superfans", {Ch.Superfans(), KLime}},
-			{"Followers who just lurk", {Lurk, Hex(0x3a3352)}}};
-		const double Top = std::sqrt(static_cast<double>(std::max(1, std::max(Ch.Followers, Watched))));
-		for (int K = 0; K < 5; ++K)
-		{
-			const float Ry = R.Y + 58.0f + Nf(K) * 36.0f;
-			const float Full = R.W - 300.0f;
-			const float W = Full * Nf(std::sqrt(static_cast<double>(Rows[K].second.first)) / Top) * In;
-			UI.Text(Rows[K].first, R.X + 20.0f, Ry + 17.0f, Ts(13.5f, 700, K == 4 ? KDim : KMuted));
-			C->FillRoundRect({R.X + 200.0f, Ry + 5.0f, Full, 16.0f}, 8.0f, Hex(0x1a1426));
-			if (Rows[K].second.first > 0)
-			{
-				C->FillRoundRect({R.X + 200.0f, Ry + 5.0f, std::max(16.0f, W), 16.0f}, 8.0f, Rows[K].second.second);
-			}
-			UI.Text(Grouped(Rows[K].second.first), R.X + R.W - 20.0f, Ry + 18.0f, Ts(15.0f, 900, K == 4 ? KMuted : KInk, Align::Right, Baseline::Alphabetic, true));
-		}
-	}
-	{
-		const Rect R{Rx, 338.0f, Rw, KastH - 338.0f - 16.0f};
-		C->FillRoundRect(R, 16.0f, KPanel);
-		UI.Text("The community", R.X + 20.0f, R.Y + 34.0f, Ts(18.0f, 900, KInk));
-		UI.Text("most loyal first", R.X + R.W - 20.0f, R.Y + 34.0f, Ts(13.0f, 600, KMuted, Align::Right));
-		const char* Heads[4] = {"NAME", "LOYALTY", "STREAMS", "LAST SEEN"};
-		const float Cols[4] = {20.0f, 380.0f, 580.0f, 760.0f};
-		for (int K = 0; K < 4; ++K)
-		{
-			NetSpaced(*C, Heads[K], R.X + Cols[K] - (K == 3 ? UI.Measure(Heads[K], 10.0f, 900) + 9.0f : 0.0f), R.Y + 62.0f, 10.0f, 900, KDim, 1.2f);
-		}
-		if (People.empty())
-		{
-			NetParagraph(*C, "Nobody yet. Go live: Dee and Mei will be there on night one, and everyone after them starts as a stranger.", R.X + 20.0f, R.Y + 96.0f, R.W - 40.0f, 14.0f, 500, KMuted, 20.0f, 3);
-		}
-		const int Rows = static_cast<int>((R.H - 120.0f) / 34.0f);
-		for (int I = 0; I < static_cast<int>(People.size()) && I < Rows; ++I)
-		{
-			const kast::Member& M = *People[static_cast<size_t>(I)];
-			const float Ry = R.Y + 78.0f + Nf(I) * 34.0f;
-			if (I % 2 == 0)
-			{
-				C->FillRoundRect({R.X + 10.0f, Ry, R.W - 20.0f, 32.0f}, 8.0f, Hex(0x1a1426));
-			}
-			DrawAvatar(*C, R.X + 34.0f, Ry + 16.0f, 11.0f, AvatarFor(M.Name));
-			const float Nw = UI.Text(M.Name, R.X + 54.0f, Ry + 21.0f, Ts(13.5f, 800, Ch.IsMod(M.Name) ? Hex(0x34d399) : KInk, Align::Left, Baseline::Alphabetic, false, 170.0f));
-			float Bx = R.X + 62.0f + Nw;
-			const char* Tag = M.Friend ? "FRIEND" : M.Loyalty >= kast::SuperfanLoyalty ? "SUPERFAN" : M.Loyalty >= kast::RegularLoyalty ? "REGULAR" : nullptr;
-			if (Tag)
-			{
-				Bx += NetPill(*C, Tag, Bx, Ry + 7.0f, M.Friend ? KGold : LoyaltyColor(M.Loyalty), false, 9.0f) + 4.0f;
-			}
-			if (Ch.IsSub(M.Name, World) && Bx < R.X + Cols[1] - 40.0f)
-			{
-				NetPill(*C, "SUB", Bx, Ry + 7.0f, KLime, true, 9.0f);
-			}
-			const float Bw = 150.0f;
-			C->FillRoundRect({R.X + Cols[1], Ry + 12.0f, Bw, 7.0f}, 3.5f, KPanel2);
-			C->FillRoundRect({R.X + Cols[1], Ry + 12.0f, std::max(7.0f, Bw * Nf(M.Loyalty) * In), 7.0f}, 3.5f, LoyaltyColor(M.Loyalty));
-			UI.Text(std::to_string(static_cast<int>(std::round(M.Loyalty * 100.0))), R.X + Cols[1] + Bw + 10.0f, Ry + 21.0f, Ts(12.0f, 700, KMuted, Align::Left, Baseline::Alphabetic, true));
-			UI.Text(std::to_string(M.Streams), R.X + Cols[2], Ry + 21.0f, Ts(13.0f, 700, KInk, Align::Left, Baseline::Alphabetic, true));
-			const int Ago = static_cast<int>(std::floor((World - M.LastSeen) / net::MinutesPerDay));
-			const std::string Seen = M.Streams == 0 ? std::string("only followed") : Ago <= 0 ? std::string("today") : Ago == 1 ? std::string("yesterday") : std::to_string(Ago) + " days ago";
-			UI.Text(Seen, R.X + Cols[3], Ry + 21.0f, Ts(12.5f, 600, Ago > 14 ? KDim : KMuted, Align::Right));
-		}
-		if (static_cast<int>(People.size()) > Rows)
-		{
-			UI.Text("and " + Grouped(static_cast<int64_t>(People.size()) - Rows) + " more who've stopped by", R.X + 20.0f, R.Y + R.H - 16.0f, Ts(12.5f, 600, KDim));
-		}
-	}
+	rlkast_detail::KastCommunityRaids(F, {Rx, 74.0f, Rw, 200.0f});
+	rlkast_detail::KastCommunityWeek(F, {Rx, 286.0f, Rw, 250.0f});
+	rlkast_detail::KastCommunityPayouts(F, {Rx, 548.0f, Rw, KastH - 548.0f - 16.0f});
 }
 
 void RiverLine::KastChannel(double Now)
@@ -1594,7 +1575,19 @@ void RiverLine::KastChannel(double Now)
 			const bool Done = Col == 0 ? Ch.Affiliate : Ch.Partner;
 			UI.Text(Col == 0 ? "Affiliate" : "Partner", Cx, R.Y + 64.0f, Ts(15.0f, 800, Done ? KLime : KInk));
 			UI.Text(Done ? "unlocked" : Col == 0 ? "subs, cheers, ads" : "70% subs, verified", Cx + (Col == 0 ? 80.0f : 70.0f), R.Y + 64.0f, Ts(12.0f, 600, Done ? KLime : KMuted));
-			const std::vector<kast::Goal> G = kast::StageGoals(Ch, World, Col == 0 ? 2 : 5);
+			std::vector<kast::Goal> G = kast::StageGoals(Ch, World, Col == 0 ? 2 : 5);
+			if (Col == 0)
+			{
+				// The creator update (C8): Affiliate is the real platform's bar, 25 followers, 240 minutes, 4 days, an average of 3.
+				double Minutes = 0.0;
+				int Days = 0;
+				double Avg = 0.0;
+				Ch.Window30(World, Minutes, Days, Avg);
+				G = {{"Followers", static_cast<double>(Ch.Followers), static_cast<double>(kast::AffiliateFollowersC8), 0},
+					{"Minutes live", Minutes, kast::AffiliateMinutesC8, 0},
+					{"Days live", static_cast<double>(Days), static_cast<double>(kast::AffiliateDaysC8), 0},
+					{"Average viewers", Avg, kast::AffiliateAvg, 0}};
+			}
 			for (size_t I = 0; I < G.size(); ++I)
 			{
 				const float Gy = R.Y + 82.0f + Nf(I) * 28.0f;
@@ -1766,7 +1759,13 @@ void RiverLine::KastChannel(double Now)
 			C->FillEllipse(Th.X + Th.W / 2.0f, Th.Y + Th.H * 0.55f, Th.W * 0.36f, Th.H * 0.28f, Hex(0x0f6a4e));
 			C->FillPolygon({{Th.X + 40.0f, Th.Y + 17.0f}, {Th.X + 58.0f, Th.Y + 27.0f}, {Th.X + 40.0f, Th.Y + 37.0f}}, Hex(0xffffff));
 			UI.Text(Cl.Title, Th.X + Th.W + 14.0f, Cy + 22.0f, Ts(14.0f, 800, KInk, Align::Left, Baseline::Alphabetic, false, R.W - Th.W - 60.0f));
-			UI.Text(KastCount(Cl.Views) + " views \xC2\xB7 clipped by " + Cl.By, Th.X + Th.W + 14.0f, Cy + 42.0f, Ts(12.0f, 600, Cl.Views > 10000 ? KLime : KMuted, Align::Left, Baseline::Alphabetic, false, R.W - Th.W - 60.0f));
+			// The creator update (C-K's L11): a clip that went into the Clip Lane says so ("· in the Kast feed").
+			const float Vw = UI.Text(KastCount(Cl.Views) + " views \xC2\xB7 clipped by " + Cl.By, Th.X + Th.W + 14.0f, Cy + 42.0f,
+				Ts(12.0f, 600, Cl.Views > 10000 ? KLime : KMuted, Align::Left, Baseline::Alphabetic, false, R.W - Th.W - 60.0f));
+			if (Cl.Lane && Vw + 20.0f < R.W - Th.W - 60.0f)
+			{
+				UI.Text("\xC2\xB7 " + rlkast_detail::KastClipLaneTag(), Th.X + Th.W + 18.0f + Vw, Cy + 42.0f, Ts(12.0f, 700, KViolet, Align::Left, Baseline::Alphabetic, false, R.W - Th.W - 64.0f - Vw));
+			}
 		}
 	}
 	(void)ChannelScroll;
@@ -1786,7 +1785,6 @@ void RiverLine::KastBrowse(double Now)
 		bool Partner = false; // the violet check by the name (next_segment_spec §5: KastPartner)
 	};
 	std::vector<Card> Live;
-	std::vector<const kast::Streamer*> Off;
 	for (const kast::Streamer& St : kast::Directory())
 	{
 		const int V = kast::ViewersNow(St, World);
@@ -1794,15 +1792,13 @@ void RiverLine::KastBrowse(double Now)
 		{
 			Live.push_back({St.Name, St.Title, St.Tag, V, St.Color, false, St.Rival, St.Followers >= badge::KastPartnerFollowers});
 		}
-		else
-		{
-			Off.push_back(&St);
-		}
 	}
+	// The creator update (§1.4, §5.3 K7): your card draws the count every surface shares; the rank is the Room's while live.
+	rlkast_detail::KastFrame F{*this, *C, UI, S, World, Now, Previewing};
 	if (S.Streaming())
 	{
 		const kast::TitleSpec& T = kast::Titles()[static_cast<size_t>(std::max(0, std::min(static_cast<int>(kast::Titles().size()) - 1, S.Channel.Title)))];
-		Live.push_back({S.HeroName, T.Text, "That's you.", static_cast<int>(std::round(S.Stream.Viewers)), kast::Lime, true, false, S.Channel.Partner});
+		Live.push_back({S.HeroName, T.Text, "That's you.", rlkast_detail::KastShown(S, Now, Previewing), kast::Lime, true, false, S.Channel.Partner});
 	}
 	std::stable_sort(Live.begin(), Live.end(), [](const Card& A, const Card& B) { return A.Viewers > B.Viewers; });
 	long long Total = 0;
@@ -1812,11 +1808,26 @@ void RiverLine::KastBrowse(double Now)
 		Total += Live[I].Viewers;
 		Rank = Live[I].You ? static_cast<int>(I) + 1 : Rank;
 	}
+	if (S.Streaming() && S.Stream.GetView().Rank > 0)
+	{
+		Rank = S.Stream.GetView().Rank;
+	}
 	UI.Text("Poker", 24.0f, 112.0f, Ts(34.0f, 900, KInk));
-	UI.Text(std::to_string(Live.size()) + " channels live \xC2\xB7 " + Grouped(Total) + " viewers \xC2\xB7 sorted by viewers", 24.0f, 140.0f, Ts(14.0f, 600, KMuted));
+	// The creator update (C-K's L11): every Poker channel live counts, the network's small channels with the directory's (the field
+	// the rank is out of: View::LiveChannels while live, kast::ChannelsLive off air), and their viewers with them.
+	int Channels = kast::ChannelsLive(World) + (S.Streaming() ? 1 : 0);
+	if (S.Streaming() && S.Stream.GetView().LiveChannels > 0)
+	{
+		Channels = S.Stream.GetView().LiveChannels;
+	}
+	for (const kast::SmallChannel& Sc : kast::Network(World))
+	{
+		Total += Sc.Viewers;
+	}
+	UI.Text(kast::copy::Number(Channels) + " channels live \xC2\xB7 " + Grouped(Total) + " viewers \xC2\xB7 sorted by viewers", 24.0f, 140.0f, Ts(14.0f, 600, KMuted));
 	if (Rank > 0)
 	{
-		const std::string R = "You're #" + std::to_string(Rank) + " in Poker right now";
+		const std::string R = kast::copy::RankNow(Rank);
 		const float W = UI.Measure(R, 15.0f, 900) + 32.0f;
 		C->FillRoundRect({NetW - 24.0f - W, 92.0f, W, 36.0f}, 10.0f, KLime);
 		UI.Text(R, NetW - 24.0f - W / 2.0f, 116.0f, Ts(15.0f, 900, Hex(0x1b1036), Align::Center));
@@ -1825,14 +1836,15 @@ void RiverLine::KastBrowse(double Now)
 	{
 		UI.Text(S.Streaming() ? "" : "Go live and your channel shows up here, ranked by viewers.", NetW - 24.0f, 116.0f, Ts(14.0f, 600, KMuted, Align::Right));
 	}
+	// Two rows of cards (the thumbnails 150 tall), then the shelves (Sweating now, Fresh on Kast, Rising in Poker).
 	const float CardW = 362.0f;
-	const float CardH = 268.0f;
+	const float CardH = 214.0f;
 	for (size_t I = 0; I < Live.size() && I < 8; ++I)
 	{
 		const Card& Cd = Live[I];
 		const float Rise = (1.0f - NetEase((Now - KastAt - 0.04 * static_cast<double>(I)) / 0.4)) * 20.0f;
-		const Rect R{24.0f + Nf(I % 4) * (CardW + 16.0f), 160.0f + Nf(I / 4) * (CardH + 18.0f) + Rise, CardW, CardH};
-		const Rect Th{R.X, R.Y, R.W, 204.0f};
+		const Rect R{24.0f + Nf(I % 4) * (CardW + 16.0f), 160.0f + Nf(I / 4) * (CardH + 14.0f) + Rise, CardW, CardH};
+		const Rect Th{R.X, R.Y, R.W, 150.0f};
 		C->FillRoundRect(Th, 10.0f, Paint::Linear({Th.X, Th.Y}, {Th.X, Th.Y + Th.H}, Hex(0x0e1726), Hex(0x0a111c)));
 		C->FillEllipse(Th.X + Th.W * 0.42f, Th.Y + Th.H * 0.54f, Th.W * 0.3f, Th.H * 0.26f, Paint::Radial({Th.X + Th.W * 0.42f, Th.Y + Th.H * 0.5f}, 0.0f, {Th.X + Th.W * 0.42f, Th.Y + Th.H * 0.5f}, Th.W * 0.32f, Hex(0x15885f), 0.6f, Hex(0x0f6a4e), Hex(0x083a2b)));
 		for (int K = 0; K < 3; ++K)
@@ -1844,16 +1856,16 @@ void RiverLine::KastBrowse(double Now)
 			streamart::Cam Look;
 			Look.Gear = S.GearFx();
 			Look.Headphones = S.Owns("headphones");
-			Look.Face = S.Stream.Face;
+			Look.Face = rlkast_detail::KastCamMood(S);
 			Look.FaceAge = Now - S.Stream.FaceAt;
 			Look.Time = Now;
 			Look.Leds = S.RoomGlow(Now);
 			rlkast_detail::DressCam(S, Look, World);
-			streamart::Facecam(*C, {Th.X + Th.W - 140.0f, Th.Y + Th.H - 84.0f, 132.0f, 76.0f}, Look);
+			streamart::Facecam(*C, {Th.X + Th.W - 132.0f, Th.Y + Th.H - 80.0f, 124.0f, 72.0f}, Look);
 		}
 		else
 		{
-			const Rect Cam{Th.X + Th.W - 140.0f, Th.Y + Th.H - 84.0f, 132.0f, 76.0f};
+			const Rect Cam{Th.X + Th.W - 132.0f, Th.Y + Th.H - 80.0f, 124.0f, 72.0f};
 			C->FillRoundRect(Cam, 4.0f, Mix(Hex(Cd.Color), Hex(0x000000), 0.6f));
 			C->PushClip(Cam);
 			C->FillEllipse(Cam.X + Cam.W / 2.0f, Cam.Y + Cam.H + 8.0f, 36.0f, 30.0f, Mix(Hex(Cd.Color), Hex(0x000000), 0.15f));
@@ -1868,6 +1880,8 @@ void RiverLine::KastBrowse(double Now)
 		UI.Text(V, Th.X + 18.0f, Th.Y + Th.H - 16.5f, Ts(12.0f, 800, Hex(0xffffff)));
 		if (Cd.You)
 		{
+			// The lanes' chips (NEW ON KAST, RISING IN POKER) after the viewers, Event Mode's FINAL TABLE beside LIVE (K5, K7).
+			rlkast_detail::KastOwnCardChips(F, Th, Th.X + 18.0f + Vw);
 			C->StrokeRoundRect(Th, 10.0f, KLime, 3.0f);
 		}
 		AvatarSpec Av = AvatarFor(Cd.Name);
@@ -1875,63 +1889,19 @@ void RiverLine::KastBrowse(double Now)
 		{
 			Av.Icon = AvatarIcon::Ghost;
 		}
-		DrawAvatar(*C, R.X + 20.0f, R.Y + 230.0f, 18.0f, Av);
-		UI.Text(Cd.Title, R.X + 48.0f, R.Y + 226.0f, Ts(14.5f, 800, KInk, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
-		const float Nw = UI.Text(Cd.Name, R.X + 48.0f, R.Y + 246.0f, Ts(13.0f, 700, Cd.You ? KLime : KMuted));
+		DrawAvatar(*C, R.X + 20.0f, Th.Y + Th.H + 30.0f, 17.0f, Av);
+		UI.Text(Cd.Title, R.X + 46.0f, Th.Y + Th.H + 26.0f, Ts(14.5f, 800, KInk, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
+		const float Nw = UI.Text(Cd.Name, R.X + 46.0f, Th.Y + Th.H + 45.0f, Ts(13.0f, 700, Cd.You ? KLime : KMuted));
 		if (Cd.Partner)
 		{
-			C->FillCircle(R.X + 56.0f + Nw, R.Y + 241.5f, 7.0f, KViolet);
-			NetCheck(*C, R.X + 56.0f + Nw, R.Y + 241.5f, 7.5f, Hex(0xffffff));
+			C->FillCircle(R.X + 54.0f + Nw, Th.Y + Th.H + 40.5f, 7.0f, KViolet);
+			NetCheck(*C, R.X + 54.0f + Nw, Th.Y + Th.H + 40.5f, 7.5f, Hex(0xffffff));
 		}
-		UI.Text(Cd.Tag, R.X + 48.0f, R.Y + 264.0f, Ts(11.5f, 500, KDim, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
+		UI.Text(Cd.Tag, R.X + 46.0f, Th.Y + Th.H + 63.0f, Ts(11.5f, 500, KDim, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
 	}
-	// The small channels: where a new streamer actually lives (and who raids whom).
-	const float Base = Live.size() > 4 ? 744.0f : 474.0f;
-	{
-		const std::vector<kast::SmallChannel> Net = kast::Network(World);
-		UI.Text("Smaller channels", 24.0f, Base, Ts(18.0f, 900, KInk));
-		UI.Text("raid them at the end of a stream and they'll remember", 190.0f, Base, Ts(12.5f, 600, KDim));
-		float Sx = 24.0f;
-		for (const kast::SmallChannel& Sc : Net)
-		{
-			if (Sx > NetW - 200.0f)
-			{
-				break;
-			}
-			const Rect R{Sx, Base + 14.0f, 182.0f, 58.0f};
-			C->FillRoundRect(R, 12.0f, KPanel);
-			C->FillCircle(R.X + 24.0f, R.Y + 29.0f, 14.0f, Mix(Hex(Sc.Color), Hex(0x000000), 0.2f));
-			C->FillCircle(R.X + 24.0f, R.Y + 24.0f, 5.0f, Hex(0xd9a37c));
-			UI.Text(Sc.Name, R.X + 46.0f, R.Y + 25.0f, Ts(13.0f, 800, KInk, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
-			const auto It = S.Channel.Goodwill.find(Sc.Name);
-			const std::string Sub = std::to_string(Sc.Viewers) + " watching" + (It != S.Channel.Goodwill.end() ? " \xC2\xB7 raided " + std::to_string(It->second) + "x" : "");
-			UI.Text(Sub, R.X + 46.0f, R.Y + 44.0f, Ts(11.5f, 600, It != S.Channel.Goodwill.end() ? KViolet : KMuted, Align::Left, Baseline::Alphabetic, false, R.W - 52.0f));
-			Sx += 192.0f;
-		}
-		if (Net.empty())
-		{
-			UI.Text("Nobody small is live right now.", 24.0f, Base + 44.0f, Ts(13.0f, 500, KMuted));
-		}
-	}
-	// Offline, at the bottom.
-	float Ox = 24.0f;
-	UI.Text("Offline", 24.0f, Base + 106.0f, Ts(18.0f, 900, KInk));
-	const float Oy = Base + 120.0f;
-	for (const kast::Streamer* St : Off)
-	{
-		if (Ox > NetW - 260.0f)
-		{
-			break;
-		}
-		const Rect R{Ox, Oy, 240.0f, 64.0f};
-		C->FillRoundRect(R, 12.0f, KPanel);
-		AvatarSpec Av = AvatarFor(St->Name);
-		DrawAvatar(*C, R.X + 30.0f, R.Y + 32.0f, 18.0f, Av);
-		UI.Text(St->Name, R.X + 58.0f, R.Y + 28.0f, Ts(14.0f, 800, KInk, Align::Left, Baseline::Alphabetic, false, R.W - 66.0f));
-		const int Opens = St->Opens;
-		UI.Text("live at " + net::TimeLabel(static_cast<double>(Opens)) + " \xC2\xB7 " + KastCount(St->Followers), R.X + 58.0f, R.Y + 47.0f, Ts(12.0f, 600, KMuted));
-		Ox += 252.0f;
-	}
+	// The shelves (§5.3 K6, K7): Sweating now with the Broadcast's tease, Fresh on Kast, Rising in Poker with the network's small
+	// channels (raid them at the end of a stream and they remember).
+	rlkast_detail::KastShelves(F, {24.0f, 616.0f, NetW - 48.0f, 334.0f});
 }
 
 void RiverLine::StreamSummary(double Now)
@@ -1939,80 +1909,51 @@ void RiverLine::StreamSummary(double Now)
 	const kast::Summary& L = S.Stream.Last;
 	const kast::Channel& Ch = S.Channel;
 	C->FillRect({0.0f, 0.0f, NetW, KastH}, Rgba(5, 2, 10, 0.7f));
-	const float Extra = (L.BestClip.empty() ? 0.0f : 24.0f) + (L.Trolls > 0 ? 24.0f : 0.0f);
-	const float H = 650.0f + Extra;
+	// The creator update (§5.3 K17, K8 K9 K10 K12 K15 K20; the kast_end_card mockup): the card opens on the peak, then the
+	// night's numbers, where they came from, the regulars' roll call, Heat's move and the best caller, raids with their
+	// 15-minute retention and the rank climb, tonight's money apart from renewals (pending before the second rent, sponsor
+	// pay on its own lines), the next goal, the clip, Make it a Cut, Cut highlights and Done. Empty blocks collapse.
+	rlkast_detail::KastFrame F{*this, *C, UI, S, World, Now, Previewing};
+	const float Inner = 640.0f;
+	const float BodyH = rlkast_detail::KastEndCardBody(F, 0.0f, 0.0f, Inner, false);
+	const float ClipH = rlkast_detail::KastEndCardClip(F, 0.0f, 0.0f, Inner, false);
+	const float H = std::min(KastH - 12.0f, 70.0f + BodyH + ClipH + 84.0f);
 	const Rect R{NetW / 2.0f - 360.0f, std::round((KastH - H) / 2.0f), 720.0f, H};
-	const float In = NetEase((Now - S.Stream.FaceAt) / 0.6);
 	C->GlowRoundRect(R, 22.0f, NetA(KViolet, 0.4f), 30.0f);
 	C->FillRoundRect(R, 22.0f, Paint::Linear({R.X, R.Y}, {R.X, R.Y + R.H}, Hex(0x221640), KPanel));
 	C->StrokeRoundRect(R, 22.0f, KLine, 1.0f);
-	const float Sw = NetSpaced(*C, "STREAM ENDED", R.X + 40.0f, R.Y + 56.0f, 12.0f, 900, KViolet, 2.0f);
+	const float Sw = NetSpaced(*C, "STREAM ENDED", R.X + 40.0f, R.Y + 46.0f, 12.0f, 900, KViolet, 2.0f);
 	if (L.OnSchedule)
 	{
-		NetPill(*C, "ON SCHEDULE", R.X + 52.0f + Sw, R.Y + 42.0f, KLime, false, 10.0f);
+		NetPill(*C, "ON SCHEDULE", R.X + 52.0f + Sw, R.Y + 32.0f, KLime, false, 10.0f);
 	}
-	UI.Text(KastClock(L.Minutes) + " live", R.X + 40.0f, R.Y + 104.0f, Ts(40.0f, 900, KInk, Align::Left, Baseline::Alphabetic, true));
+	UI.Text(KastClock(L.Minutes) + " live", R.X + R.W - 40.0f, R.Y + 46.0f, Ts(15.0f, 800, KMuted, Align::Right, Baseline::Alphabetic, true));
 	if (!L.RaidedOut.empty())
 	{
-		UI.Text("Raided " + L.RaidedOut + " with " + Grouped(L.RaidSize), R.X + R.W - 40.0f, R.Y + 100.0f, Ts(13.5f, 800, KViolet, Align::Right));
+		UI.Text("Raided " + L.RaidedOut + " with " + Grouped(L.RaidSize), R.X + R.W - 40.0f, R.Y + 64.0f, Ts(12.5f, 800, KViolet, Align::Right));
 	}
-	struct Num
+	C->PushClip({R.X, R.Y, R.W, R.H - 80.0f});
+	rlkast_detail::KastEndCardBody(F, R.X + 40.0f, R.Y + 70.0f, Inner, true);
+	rlkast_detail::KastEndCardClip(F, R.X + 40.0f, R.Y + 70.0f + BodyH, Inner, true);
+	C->PopClip();
+	const float By = R.Y + R.H - 70.0f;
+	// Clip of the Night -> Cut (K15): one click opens Rerun Studio on the clip's moment.
+	double ClipAt = -1.0;
+	for (const kast::Clip& Cl : Ch.Clips)
 	{
-		const char* Label;
-		std::string Value;
-		Color Col;
-	};
-	const Num Nums[8] = {{"AVERAGE VIEWERS", KastCount(L.Avg), KInk}, {"PEAK", KastCount(L.Peak), KRed}, {"NEW FOLLOWERS", "+" + Grouped(L.Follows), KViolet}, {"NEW SUBS", "+" + Grouped(L.Subs + L.Gifted), KLime},
-		{"CAME BACK", Grouped(L.Returning), KInk}, {"NEW FACES", Grouped(L.NewFaces), KInk}, {"NEW REGULARS", (L.NewRegulars > 0 ? "+" : "") + Grouped(L.NewRegulars), L.NewRegulars > 0 ? KLime : KMuted},
-		{"CHANNEL XP", "+" + Grouped(static_cast<int64_t>(std::round(L.Xp * static_cast<double>(In)))), KGold}};
-	for (int K = 0; K < 8; ++K)
-	{
-		const float X = R.X + 40.0f + Nf(K % 4) * 162.0f;
-		const float Y = R.Y + 150.0f + Nf(K / 4) * 76.0f;
-		NetSpaced(*C, Nums[K].Label, X, Y, 9.5f, 900, KDim, 1.2f);
-		UI.Text(Nums[K].Value, X, Y + 38.0f, Ts(28.0f, 900, Nums[K].Col, Align::Left, Baseline::Alphabetic, true));
+		ClipAt = ClipAt < 0.0 && !L.BestClip.empty() && Cl.Title == L.BestClip ? Cl.At : ClipAt;
 	}
-	C->FillRect({R.X + 40.0f, R.Y + 290.0f, R.W - 80.0f, 1.0f}, KLine);
-	const std::pair<const char*, std::pair<Chips, Color>> Bars[5] = {{"Tips", {L.TipCents, KGold}}, {"Subscriptions", {L.SubCents, KLime}}, {"Cheers", {L.BitCents, Hex(0xf472b6)}}, {"Ads", {L.AdCents, Hex(0x38bdf8)}}, {"Sponsors", {L.SponsorCents, KViolet}}};
-	Chips Top = 1;
-	for (const auto& B : Bars)
+	if (ClipAt >= 0.0 && rlvideo_detail::VideoCutCount(S, ClipAt - 2.0, ClipAt + 2.0) > 0)
 	{
-		Top = std::max(Top, B.second.first);
-	}
-	for (int K = 0; K < 5; ++K)
-	{
-		const float By = R.Y + 312.0f + Nf(K) * 32.0f;
-		UI.Text(Bars[K].first, R.X + 40.0f, By + 13.0f, Ts(14.0f, 600, KMuted));
-		const float W = (R.W - 340.0f) * Nf(static_cast<double>(Bars[K].second.first) / static_cast<double>(Top)) * In;
-		C->FillRoundRect({R.X + 170.0f, By + 2.0f, R.W - 340.0f, 14.0f}, 7.0f, KPanel2);
-		if (W > 1.0f)
+		const bool Pressed = AppButton("kastclipcut", {R.X + 40.0f, By, 168.0f, 46.0f}, kast::copy::MakeItACutButton(), KPanel2, KInk, !Previewing);
+		C->StrokeRoundRect({R.X + 40.0f, By, 168.0f, 46.0f}, 12.0f, Hex(ui::videoart::Marigold), 1.2f);
+		if (Pressed)
 		{
-			C->FillRoundRect({R.X + 170.0f, By + 2.0f, std::max(14.0f, W), 14.0f}, 7.0f, Bars[K].second.second);
+			S.StreamCard = false;
+			rlvideo_detail::VideoOpenTonight(*this, ClipAt - 2.0, ClipAt + 2.0, Now);
+			return;
 		}
-		UI.Text(Money(Bars[K].second.first), R.X + R.W - 40.0f, By + 14.0f, Ts(15.0f, 800, KInk, Align::Right, Baseline::Alphabetic, true));
 	}
-	UI.Text("Sent to your bank", R.X + 40.0f, R.Y + 506.0f, Ts(15.0f, 700, KMuted));
-	UI.Text(Money(L.Total()), R.X + R.W - 40.0f, R.Y + 508.0f, Ts(30.0f, 900, KLime, Align::Right, Baseline::Alphabetic, true));
-	float Ny = R.Y + 550.0f;
-	if (!L.BestClip.empty())
-	{
-		UI.Text("Clip of the night: \"" + L.BestClip + "\"", R.X + 40.0f, Ny, Ts(13.5f, 600, KViolet, Align::Left, Baseline::Alphabetic, false, R.W - 80.0f));
-		Ny += 24.0f;
-	}
-	if (L.Trolls > 0)
-	{
-		UI.Text(std::to_string(L.Trolls) + " trolls showed up" + (Ch.Mods.empty() ? ": a couple of mods would help." : "."), R.X + 40.0f, Ny, Ts(12.5f, 600, KDim));
-		Ny += 24.0f;
-	}
-	// Where the channel stands: the level, and the next stage.
-	const int Lv = Ch.Level();
-	const double Lo = kast::Channel::LevelXp(Lv);
-	const double Hi = kast::Channel::LevelXp(std::min(kast::MaxLevel, Lv + 1));
-	const float P = Lv >= kast::MaxLevel ? 1.0f : Nf(std::min(1.0, (Ch.Xp - Lo) / std::max(1.0, Hi - Lo)));
-	const float Ly = R.Y + R.H - 78.0f;
-	UI.Text("Level " + std::to_string(Lv), R.X + 40.0f, Ly + 4.0f, Ts(15.0f, 900, KGold));
-	C->FillRoundRect({R.X + 120.0f, Ly - 6.0f, 240.0f, 8.0f}, 4.0f, KPanel2);
-	C->FillRoundRect({R.X + 120.0f, Ly - 6.0f, std::max(8.0f, 240.0f * P), 8.0f}, 4.0f, KGold);
 	// Rerun (update 2 §4.8): the moments this stream made, cut in Studio with the list filtered to tonight.
 	const double CutFrom = S.Stream.StartWorld - 1.0;
 	const double CutTo = S.Stream.StartWorld + L.Minutes + 1.0;
@@ -2020,20 +1961,13 @@ void RiverLine::StreamSummary(double Now)
 	const std::string CutLabel = "Cut highlights (" + std::to_string(Cut) + ")";
 	const float CutW = UI.Measure(CutLabel, 17.0f, 800) + 44.0f;
 	const float CutX = R.X + R.W - 200.0f - 16.0f - CutW;
-	const std::vector<kast::StageSpec>& Stg = kast::Stages();
-	const int Next = Ch.Streams > 0 ? Ch.Stage + 1 : 0;
-	if (Next < static_cast<int>(Stg.size()))
-	{
-		const float NextW = Cut > 0 ? CutX - 16.0f - (R.X + 40.0f) : R.W - 300.0f;
-		UI.Text("Next stage: " + Stg[static_cast<size_t>(Next)].Name, R.X + 40.0f, Ly + 30.0f, Ts(13.0f, 700, KMuted, Align::Left, Baseline::Alphabetic, false, NextW));
-	}
-	if (Cut > 0 && AppButton("kastcut", {CutX, R.Y + R.H - 70.0f, CutW, 46.0f}, CutLabel, Hex(ui::videoart::Marigold), Hex(ui::videoart::Ink), !Previewing))
+	if (Cut > 0 && AppButton("kastcut", {CutX, By, CutW, 46.0f}, CutLabel, Hex(ui::videoart::Marigold), Hex(ui::videoart::Ink), !Previewing))
 	{
 		S.StreamCard = false;
 		rlvideo_detail::VideoOpenTonight(*this, CutFrom, CutTo, Now);
 		return;
 	}
-	if (AppButton("kastdone", {R.X + R.W - 200.0f, R.Y + R.H - 70.0f, 160.0f, 46.0f}, "Done", KViolet, Hex(0xffffff), true))
+	if (AppButton("kastdone", {R.X + R.W - 200.0f, By, 160.0f, 46.0f}, kast::copy::DoneButton(), KViolet, Hex(0xffffff), true))
 	{
 		S.StreamCard = false;
 	}
@@ -2043,36 +1977,18 @@ void RiverLine::StreamSummary(double Now)
 
 void RiverLine::LivePill(float X, float Y, double Now)
 {
-	const std::string L = KastCount(S.Stream.Viewers);
-	const float W = UI.Measure(L, 13.0f, 900, true) + 80.0f;
-	const Rect R{X - W, Y, W, 30.0f};
-	const Ui::ClickState St = UI.Clickable("kastpill", R, !Previewing);
-	C->FillRoundRect(R, 15.0f, St.Hover ? Hex(0x6d28d9) : Hex(0x2a1652));
-	C->StrokeRoundRect(R, 15.0f, KViolet, 1.5f);
-	C->FillCircle(R.X + 15.0f, R.Y + 15.0f, 4.5f, NetA(KRed, 0.6f + 0.4f * Nf(std::sin(Now * 4.0))));
-	UI.Text("KAST", R.X + 24.0f, R.Y + 19.5f, Ts(11.0f, 900, Hex(0xd8ccff)));
-	UI.Text(L, R.X + W - 12.0f, R.Y + 20.0f, Ts(13.0f, 900, Hex(0xffffff), Align::Right, Baseline::Alphabetic, true));
-	if (St.Clicked)
-	{
-		OpenApp(App::Kast, Now);
-	}
+	// The creator update (§1.4, §5.3 K5): the count every surface shares, gold in Event Mode.
+	rlkast_detail::KastFrame F{*this, *C, UI, S, World, Now, Previewing};
+	rlkast_detail::KastPill(F, X, Y);
 }
 
 void RiverLine::StreamSide(const Rect& R, double Now)
 {
-	const kast::Stream& St = S.Stream;
-	// A strip of numbers, then chat.
-	const Rect Top{R.X, R.Y, R.W, 58.0f};
-	C->FillRoundRect(Top, 12.0f, KPanel);
-	C->FillCircle(Top.X + 16.0f, Top.Y + 20.0f, 4.5f, NetA(KRed, 0.6f + 0.4f * Nf(std::sin(Now * 4.0))));
-	UI.Text(KastCount(St.Viewers), Top.X + 28.0f, Top.Y + 26.0f, Ts(18.0f, 900, KInk, Align::Left, Baseline::Alphabetic, true));
-	UI.Text("viewers", Top.X + 34.0f + UI.Measure(KastCount(St.Viewers), 18.0f, 900, true), Top.Y + 26.0f, Ts(12.0f, 600, KMuted));
-	UI.Text(KastClock(St.Uptime(World)), Top.X + Top.W - 14.0f, Top.Y + 26.0f, Ts(13.0f, 700, KMuted, Align::Right, Baseline::Alphabetic, true));
-	UI.Text("+" + Grouped(St.Tonight.Follows) + " follows \xC2\xB7 " + Money(St.Tonight.Total()) + " tonight", Top.X + 16.0f, Top.Y + 46.0f, Ts(12.0f, 700, KLime));
-	const float H = Nf(St.Hype / 100.0);
-	C->FillRoundRect({Top.X + Top.W - 110.0f, Top.Y + 38.0f, 96.0f, 6.0f}, 3.0f, KPanel2);
-	C->FillRoundRect({Top.X + Top.W - 110.0f, Top.Y + 38.0f, std::max(6.0f, 96.0f * H), 6.0f}, 3.0f, Paint::Linear({Top.X + Top.W - 110.0f, 0.0f}, {Top.X + Top.W - 14.0f, 0.0f}, Hex(0xfacc15), Hex(0xef4444)));
-	StreamChat({R.X, R.Y + 66.0f, R.W, R.H - 66.0f}, Now, true);
+	// The creator update (§5.1, §5.3 K1 K3 K4 K12): the strip ("12 watching · 5 chatting", the tier, tonight, the Run Alert's
+	// counter, Hold or Crack's bar), the one action slot with the others waiting as chips, the toast line, then chat.
+	rlkast_detail::KastFrame F{*this, *C, UI, S, World, Now, Previewing};
+	const float ChatY = std::min(R.Y + R.H - 120.0f, rlkast_detail::KastSideTop(F, R));
+	StreamChat({R.X, ChatY, R.W, R.Y + R.H - ChatY}, Now, true);
 }
 } // namespace ui
 } // namespace ss

@@ -1054,6 +1054,12 @@ int main(int Argc, char** Argv)
 		ss::Chips PrevBank = S.BankrollCents;
 		std::vector<ss::life::LedgerEntry> PrevLedger = S.Life.Ledger;
 		double PrevWorld = S.WorldMinutes();
+		// The creator update (SPEC_CREATORS §9.3): Kast's pending money and the honest count, frame by frame.
+		ss::Chips KastPending = S.Channel.PendingCents;
+		int KastRents = S.Life.RentsPaid;
+		int KastCount = 0;
+		int KastChatId = -1;
+		double KastWorld = S.WorldMinutes();
 		bool Releasing = false;
 		Spot Down{0, 0};
 		std::map<const ss::Tournament*, std::pair<long long, double>> Progress; // signature, since
@@ -1273,9 +1279,18 @@ int main(int Argc, char** Argv)
 					const std::vector<ss::kast::SmallChannel> Net = ss::kast::Network(S.WorldMinutes());
 					const bool Raid = !Net.empty() && R.Chance(0.5);
 					const std::string Target = Raid ? Net[static_cast<size_t>(R.Int(static_cast<int>(Net.size())))].Name : std::string();
+					const int RaidsBefore = S.Channel.RaidsOut;
+					const auto Tokens = [&S](const std::string& Name) {
+						const auto It = S.Channel.Goodwill.find(Name);
+						return It == S.Channel.Goodwill.end() ? 0 : It->second;
+					};
+					const int TokensBefore = Tokens(Target);
 					S.EndStream(Target);
 					++Reached[Raid ? "raided" : "ended"];
-					if (Raid && (S.Stream.Last.RaidedOut != Target || S.Channel.Goodwill.count(Target) == 0))
+					// A raid out always lands; it gives the target a token only from a stream of 60+ world minutes, one a raid
+					// (SPEC_CREATORS §2.7.1: no restart farming; a raid back during the stream's last minute may spend one).
+					const int TokensAfter = Tokens(Target);
+					if (Raid && (S.Stream.Last.RaidedOut != Target || S.Channel.RaidsOut != RaidsBefore + 1 || TokensAfter > TokensBefore + (S.Stream.Last.Minutes < 60.0 ? 0 : 1)))
 					{
 						Fail("a raid out didn't land", Seed, F);
 					}
@@ -1452,9 +1467,58 @@ int main(int Argc, char** Argv)
 				{
 					Fail("a single frame wrote more than 20 ledger lines (" + std::to_string(Fresh) + ")", Seed, F);
 				}
+				// The creator update (SPEC_CREATORS §9.3, C13, C14): Kast payouts conserve (the check above: every cent the bankroll
+				// moves is a ledger line, the Kast payout kind 6 and the sponsors' LedgerSponsors lines apart), and the money held for
+				// the second rent is paid exactly once: never below zero, released only with a Kast payout line that carries it, and
+				// never building again off air once the second rent is paid (Offline holds renewals only before it).
+				{
+					ss::Chips Payouts = 0;
+					for (size_t I = 0; I < Fresh; ++I)
+					{
+						Payouts += Cur[I].Kind == 6 && Cur[I].Amount > 0 ? Cur[I].Amount : 0;
+					}
+					const ss::Chips Pending = S.Channel.PendingCents;
+					const ss::Chips Released = KastPending - Pending;
+					if (Pending < 0 || (Released > 0 && Payouts < Released) || (KastRents >= 2 && !S.Streaming() && Pending > KastPending))
+					{
+						Fail("kast: the money held for the second rent was lost, paid without a payout line, or held again after the rent (" + ss::Money(KastPending) + " -> " +
+								 ss::Money(Pending) + ", payouts " + ss::Money(Payouts) + ", rents " + std::to_string(S.Life.RentsPaid) + ")",
+							Seed, F);
+					}
+					KastPending = Pending;
+					KastRents = S.Life.RentsPaid;
+				}
 				PrevBank = S.BankrollCents;
 				PrevLedger = S.Life.Ledger;
 			}
+			// The creator update (SPEC_CREATORS R1, §9.3): no named line lands while the count shows nobody. A viewer's line this
+			// frame (not Kast's own system lines, not the streamer's) with the count at 0 when the frame began and when it ended is
+			// a line from nobody; frames that ran a world minute or more (a skip, a sprint) are kast_growth's HonestCount's, where
+			// someone can come, talk and go inside one frame.
+			if (S.Streaming())
+			{
+				const ss::kast::Stream& Ks = S.Stream;
+				const int CountNow = Ks.Count();
+				const bool Short = S.WorldMinutes() - KastWorld < 1.0;
+				int Newest = KastChatId;
+				for (const ss::kast::ChatMsg& Line : Ks.Chat)
+				{
+					Newest = std::max(Newest, Line.Id);
+					if (Line.Id > KastChatId && KastChatId >= 0 && Short && KastCount == 0 && CountNow == 0 && !Line.Who.empty() && Line.Kind != ss::kast::LineKind::System &&
+						Line.Kind != ss::kast::LineKind::Streamer)
+					{
+						Fail("kast: a named line while the count showed nobody (" + Line.Who + ": " + Line.Text.substr(0, 40) + ")", Seed, F);
+					}
+				}
+				KastChatId = Newest;
+				KastCount = CountNow;
+			}
+			else
+			{
+				KastChatId = -1;
+				KastCount = 0;
+			}
+			KastWorld = S.WorldMinutes();
 			// The living world keeps up with the clock, and the network shows it.
 			if (S.Living().Clock() + 1e-6 < S.WorldMinutes() - 60.0 || ss::net::Shared().Attached() != &S.Living())
 			{

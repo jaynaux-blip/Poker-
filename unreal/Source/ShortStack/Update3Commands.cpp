@@ -21,7 +21,8 @@
 //   ss.Sound.Cue <name> [volume]   one of the revamped sites' ten cues by name (igspark, igpop, igtick, igfuse, igboom,
 //          ritblip, ritflap, ritbell, ritstamp, ritrank), at the volume given (0.4 if none), through Session::UiSound as
 //          the pages play them: the lead hears each in the game's own mix (§9.2), the two with no G1 page (igpop, igfuse)
-//          included. "igboom 0.6" is the long tail; "ritrank 0.45" falls, "ritrank 0.55" rises
+//          included. "igboom 0.6" is the long tail; "ritrank 0.45" falls, "ritrank 0.55" rises. The creator update's four
+//          too (kastalert, kastrise, kastcall, kastshine; SPEC_CREATORS §5.4), at the Kast cue queue's volume if none
 //   ss.Kast.Describe | .Grant <followers> [regulars] [subs] | .Heat <h> | .Moment <bubble|itm|ft|top3|win|allin> [prestige]
 //          [entrants] | .Raid <size> [broadcast] | .Room | .Advance <days> | .Rent | .Forecast
 //          the creator update's (SPEC_CREATORS §10.5): to the session's DebugKast, as ss.Video.* go to DebugVideo
@@ -165,34 +166,37 @@ FUpdate3Command KastAdvance(EUpdate3Feature::Kast, TEXT("ss.Kast.Advance"), TEXT
 FUpdate3Command KastRent(EUpdate3Feature::Kast, TEXT("ss.Kast.Rent"), TEXT("Rent"), TEXT("Marks the second rent paid, to see the first Kast payout (testing)."));
 FUpdate3Command KastForecast(EUpdate3Feature::Kast, TEXT("ss.Kast.Forecast"), TEXT("Forecast"), TEXT("The forecast for a stream started now, term by term."));
 
-/** ss.Sound.Cue <name> [volume]: one of the sites' ten cues through Session::UiSound (its 50 ms per id included). */
+/** ss.Sound.Cue <name> [volume]: one of the sites' ten cues, or Kast's four (the creator update, SPEC_CREATORS §5.4), through
+ *  Session::UiSound (its 50 ms per id included). With no volume a site's cue plays at the pages' everyday 0.4 and Kast's at
+ *  the cue queue's volume for it (Session.cpp's session_detail::KastCueVolume), as a stream plays them. */
 void Update3Cue(const TArray<FString>& Args, UWorld* World)
 {
 	// In SoundId's order from IgSpark (Session.h).
-	static const TCHAR* const Names[10] = {TEXT("igspark"), TEXT("igpop"), TEXT("igtick"), TEXT("igfuse"), TEXT("igboom"), TEXT("ritblip"), TEXT("ritflap"), TEXT("ritbell"),
-		TEXT("ritstamp"), TEXT("ritrank")};
+	static const TCHAR* const Names[14] = {TEXT("igspark"), TEXT("igpop"), TEXT("igtick"), TEXT("igfuse"), TEXT("igboom"), TEXT("ritblip"), TEXT("ritflap"), TEXT("ritbell"),
+		TEXT("ritstamp"), TEXT("ritrank"), TEXT("kastalert"), TEXT("kastrise"), TEXT("kastcall"), TEXT("kastshine")};
+	static const float Default[14] = {0.4f, 0.4f, 0.4f, 0.4f, 0.4f, 0.4f, 0.4f, 0.4f, 0.4f, 0.4f, 0.7f, 0.5f, 0.75f, 0.7f};
 	FNightOneGame* Game = Update3GameIn(World);
 	if (!Game || Args.Num() < 1)
 	{
-		UE_LOG(LogUpdate3, Warning, TEXT("ss.Sound.Cue <name> [volume]: at home (Night One) only; igspark, igpop, igtick, igfuse, igboom, ritblip, ritflap, ritbell, ritstamp, ritrank"));
+		UE_LOG(LogUpdate3, Warning, TEXT("ss.Sound.Cue <name> [volume]: at home (Night One) only; igspark, igpop, igtick, igfuse, igboom, ritblip, ritflap, ritbell, ritstamp, ritrank, kastalert, kastrise, kastcall, kastshine"));
 		return;
 	}
-	const float Vol = Args.Num() > 1 ? FCString::Atof(*Args[1]) : 0.4f;
-	static_assert(static_cast<int32>(ss::SoundId::RitRank) - static_cast<int32>(ss::SoundId::IgSpark) == 9, "the ten cues follow IgSpark in order");
-	for (int32 I = 0; I < 10; ++I)
+	static_assert(static_cast<int32>(ss::SoundId::KastShine) - static_cast<int32>(ss::SoundId::IgSpark) == 13, "the sites' ten cues and Kast's four follow IgSpark in order");
+	for (int32 I = 0; I < 14; ++I)
 	{
 		if (Args[0].Equals(Names[I], ESearchCase::IgnoreCase))
 		{
+			const float Vol = Args.Num() > 1 ? FCString::Atof(*Args[1]) : Default[I];
 			Game->Session.UiSound(static_cast<ss::SoundId>(static_cast<int32>(ss::SoundId::IgSpark) + I), Vol);
 			UE_LOG(LogUpdate3, Display, TEXT("ss.Sound.Cue %s %.2f"), Names[I], Vol);
 			return;
 		}
 	}
-	UE_LOG(LogUpdate3, Warning, TEXT("ss.Sound.Cue %s: no cue by that name (igspark, igpop, igtick, igfuse, igboom, ritblip, ritflap, ritbell, ritstamp, ritrank)"), *Args[0]);
+	UE_LOG(LogUpdate3, Warning, TEXT("ss.Sound.Cue %s: no cue by that name (igspark, igpop, igtick, igfuse, igboom, ritblip, ritflap, ritbell, ritstamp, ritrank, kastalert, kastrise, kastcall, kastshine)"), *Args[0]);
 }
 
-// The sites' cues (§1.11), for the lead's ears in PIE.
+// The sites' cues (§1.11) and Kast's (SPEC_CREATORS §5.4), for the lead's ears in PIE.
 FAutoConsoleCommandWithWorldAndArgs SoundCue(TEXT("ss.Sound.Cue"),
-	TEXT("ss.Sound.Cue <name> [volume]: plays one of the revamped sites' ten cues as the pages do (\"igboom 0.6\" is the long tail, \"ritrank 0.55\" the promotion) (testing)."),
+	TEXT("ss.Sound.Cue <name> [volume]: plays one of the revamped sites' ten cues as the pages do (\"igboom 0.6\" is the long tail, \"ritrank 0.55\" the promotion), or one of Kast's four at the cue queue's volume (\"kastalert\", \"kastrise\", \"kastcall\", \"kastshine\") (testing)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&Update3Cue));
 } // namespace Update3Detail
