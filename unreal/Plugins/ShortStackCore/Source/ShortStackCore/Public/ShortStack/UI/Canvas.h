@@ -272,8 +272,8 @@ public:
 	/** Cached through a pool (Shared: exactly the four-argument Cached). */
 	SHORTSTACKCORE_API void Cached(uint64_t Key, float X, float Y, const std::function<void(Canvas&)>& Paint, CachePool Pool);
 	/**
-	 * A pool's budget in vertices (every canvas on this thread; 0 puts the default back: Shared 1.5M, Rerun 750k until spike
-	 * S-T sizes it, Boardwalk 120k). A least-recently-used pool evicts down to a smaller budget at once.
+	 * A pool's budget in vertices (every canvas on this thread; 0 puts the default back: Shared 1.5M, Rerun 480k as spike
+	 * S-T sized it (thumbart::PoolVertices), Boardwalk 120k). A least-recently-used pool evicts down to a smaller budget at once.
 	 */
 	SHORTSTACKCORE_API static void SetPoolBudget(CachePool Pool, size_t Vertices);
 	/**

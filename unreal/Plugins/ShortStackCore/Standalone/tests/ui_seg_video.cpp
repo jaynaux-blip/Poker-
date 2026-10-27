@@ -23,6 +23,8 @@
 //   greyed words from Video.h's PublishWhy (N6).
 #include "UiSeg.h"
 
+#include "../../Source/ShortStackCore/Private/ShortStack/UI/RiverLineVideoShared.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/VideoAlgoPriv.h"
 #include "CopyLint.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Kast.h"
@@ -63,13 +65,11 @@ namespace video_seg
 using ss::ui::DrawList;
 namespace video = ss::video;
 
-/** Where Studio draws the thumbnail (RiverLineVideo.cpp: the editor's column, centred). */
-const ss::ui::Rect ThumbBox{490.0f, 400.0f, 640.0f, 360.0f};
-/** The Channel's chart card and its plots (views, subscribers, revenue). */
-const float ChartPx = 830.0f;
-const float ChartPw = 730.0f;
-const float PlotTop[3] = {278.0f, 370.0f, 426.0f};
-const float PlotH[3] = {78.0f, 42.0f, 42.0f};
+/** Where Studio draws the thumbnail's preview (C3: the editor's column, beside the six options; 16:9 at 504 wide). */
+const ss::ui::Rect ThumbBox{396.0f, 476.0f, 504.0f, 283.5f};
+/** C3: the six options' grid (the frame names under each Update 2 frame), the band their labels sit in. */
+const float OptTop = 476.0f;
+const float OptBottom = 760.0f;
 
 int Checks = 0;
 void Check(bool Condition, const char* What)
@@ -135,6 +135,16 @@ struct Desk
 		return Done();
 	}
 	void Open(int Page) { ss::ui::rlvideo_detail::VideoOpen(RL, Page, Now); }
+	/** C3 fix round (L9, update 3 §4.1): Studio opens on IDEAS while a new or trending idea waits; the player's click on
+	 *  MOMENTS (the list's first tab) brings the moments back. The frame after it. */
+	DrawList Moments()
+	{
+		if (ss::ui::rlvideo_detail::VideoUiOf(&RL).ListTab != 0)
+		{
+			Click(ss::ui::rlvideo_detail::RrListX + 40.0f, 90.0f);
+		}
+		return Frame();
+	}
 	bool Dot() const { return ss::ui::rlvideo_detail::VideoDot(&RL, S); }
 	std::string Fake(const std::string& What) { return S.DebugVideo("fake " + What); }
 	/** Publishes through the session and lets the edit's time skip run out (the result card put away). */
@@ -307,6 +317,31 @@ std::string ThumbText(const DrawList& L)
 	return Out;
 }
 
+/** C3 (the gate's rewrite of the frame checks): every word of a recipe's caption is drawn inside the preview (any case: a
+ *  caption style may set it in capitals). */
+bool CaptionIn(const DrawList& L, const video::ThumbSpec& S)
+{
+	auto Upper = [](std::string T) {
+		std::transform(T.begin(), T.end(), T.begin(), [](char C) { return static_cast<char>(C >= 'a' && C <= 'z' ? C - 'a' + 'A' : C); });
+		return T;
+	};
+	const std::string In = Upper(ThumbText(L));
+	std::string Word;
+	bool All = ThumbSpan(L).First >= 0;
+	const size_t Facts = S.Caption2.find(video::thumb::FactSep); // line 2, then the compositor's facts block (VideoContent.h)
+	for (const char C : Upper(S.Caption) + " " + Upper(S.Caption2.substr(0, Facts)) + " ")
+	{
+		if ((C >= 'A' && C <= 'Z') || (C >= '0' && C <= '9'))
+		{
+			Word += C;
+			continue;
+		}
+		All = All && (Word.empty() || In.find(Word) != std::string::npos);
+		Word.clear();
+	}
+	return All;
+}
+
 /** The runs whose start lies in Region, joined (the advice column, a card). */
 std::string TextIn(const DrawList& L, const ss::ui::Rect& Region)
 {
@@ -349,28 +384,19 @@ bool SameColour(const ss::ui::Color& A, const ss::ui::Color& B)
 	return std::fabs(A.R - B.R) < 0.01f && std::fabs(A.G - B.G) < 0.01f && std::fabs(A.B - B.B) < 0.01f;
 }
 
-/** The chart's days with a bar in plot Row (by the bar's colour inside the plot): one flag per day, oldest first. */
-std::vector<bool> BarsIn(const DrawList& L, int Row, const ss::ui::Color& Col)
+/** Draws frames until every thumbnail on the page is painted (two a frame, C3), then the page at rest. */
+DrawList Settled(Desk& D, float Scale = 1.0f)
 {
-	std::vector<bool> Out(28, false);
-	const float Slot = ChartPw / 28.0f;
-	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	for (int K = 0; K < 60; ++K)
 	{
-		if (Cmd.Type != ss::ui::DrawCmd::Kind::Triangles)
+		D.Frame(-1.0f, -1.0f, false, false, false, 0.0f, Scale);
+		const ss::ui::rlvideo_detail::VideoUi& U = ss::ui::rlvideo_detail::VideoUiOf(&D.RL);
+		if (U.Paint.Painted == 0 && U.Paint.Waiting == 0)
 		{
-			continue;
-		}
-		for (uint32_t K = 0; K < Cmd.VertexCount; ++K)
-		{
-			const ss::ui::Vertex& V = L.Vertices[Cmd.VertexStart + K];
-			if (V.Col.A < 0.4f || !SameColour(V.Col, Col) || V.X < ChartPx || V.X >= ChartPx + ChartPw || V.Y < PlotTop[Row] - 0.5f || V.Y > PlotTop[Row] + PlotH[Row] + 0.5f)
-			{
-				continue;
-			}
-			Out[static_cast<size_t>(std::clamp(static_cast<int>((V.X - ChartPx) / Slot), 0, 27))] = true;
+			break;
 		}
 	}
-	return Out;
+	return D.Frame(-1.0f, -1.0f, false, false, false, 0.0f, Scale);
 }
 
 std::string Floored(double V)
@@ -408,15 +434,24 @@ void Empty()
 	Check(!D.Dot(), "video_empty: no taskbar dot on a channel with nothing new");
 	D.Open(0);
 	DrawList L = D.Frame();
-	Check(DrewRun(L, "Rerun") && DrewRun(L, "Studio") && DrewRun(L, "Channel"), "video_empty: Rerun's header with its two pages");
+	Check(DrewRun(L, "Rerun") && DrewRun(L, "HOME") && DrewRun(L, "STUDIO") && DrewRun(L, "CHANNEL") && DrewRun(L, "ANALYTICS"), "video_empty: Rerun's header with its four pages (C3)");
 	Check(DrewRun(L, "Play some hands. The good ones show up here."), "video_empty: Studio's empty state (§4.8)");
-	Check(!Drew(L, "PUBLISH") && !Spelled(L, "FORMAT"), "video_empty: no editor with nothing to cut");
+	// C3 (the gate's rewrite): the editor stays for IDEAS, so with nothing picked PUBLISH is greyed with its reason, and a
+	// press posts nothing.
+	Check(Drew(L, "Pick something to post first."), "video_empty: nothing picked: PUBLISH greyed with its reason (C3: the editor stays for IDEAS)");
 	WriteList("video_empty", L);
-	Check(ClickRun(D, L, "Channel", 0.0f, 60.0f), "video_empty: the Channel tab");
+	{
+		D.Frame();
+		const DrawList Lp = D.Frame();
+		ClickRun(D, Lp, "PUBLISH");
+		D.Frame();
+		Check(!D.S.TimeSkip.Active && D.S.Life.Video.Videos.empty(), "video_empty: a press on the greyed PUBLISH posts nothing");
+	}
+	Check(ClickRun(D, L, "CHANNEL", 0.0f, 60.0f), "video_empty: the Channel tab");
 	L = D.Frame();
 	Check(DrewRun(L, "No videos yet."), "video_empty: the Channel's empty state (§4.8, §8.2's old save)");
 	Check(DrewRun(L, "Subscribers") && DrewRun(L, "0 / 1,000") && DrewRun(L, "Watch hours") && DrewRun(L, "0 / 4,000"), "video_empty: the gate's two bars at zero");
-	Check(DrewRun(L, "Last 28 days") && DrewRun(L, "Not yet") && DrewRun(L, "Ads start at the gate."), "video_empty: the chart and the program, honest at zero");
+	Check(DrewRun(L, "Not yet") && DrewRun(L, "Ads start at the gate."), "video_empty: the program, honest at zero (the numbers are Analytics' at C3)");
 	Check(!DrewRun(L, "PARTNER") && !Drew(L, "earned") && !Drew(L, "Open Studio"), "video_empty: no Partner mark, no earnings, no Studio button with nothing to cut");
 	WriteList("video_empty_channel", L);
 	std::printf("  video_empty         %5zu vertices %5zu commands\n", L.Vertices.size(), L.Cmds.size());
@@ -452,28 +487,45 @@ void StudioFlow()
 	Check(Auto.Found && Big.Found && std::fabs(Auto.Base - Big.Base) < 14.0f, "video_studio: AUTO sits on the skipped hand's row only");
 	Check(DrewRun(L, "21 days left") || DrewRun(L, "20 days left"), "video_studio: each row's days left (kept 21 days)");
 	Check(Drew(L, "Night Owl Turbo \xC2\xB7 ") && Drew(L, " BB"), "video_studio: what happened, with the pot in big blinds");
-	// The editor: the best candidate picked, a Breakdown with the Story title and the Reaction frame (the defaults).
-	const video::Choice Ch = ChoiceOf({List.front().Id}, video::Format::Breakdown);
-	const std::string Title = video::Title(Ch, Open, 0);
+	// The editor: the best candidate picked, a Breakdown with the Story title (the defaults). C3 (the gate's rewrite): the library
+	// deals, so Studio shows its three title options and six recipes (Session::TitleOptions / ThumbOptions), and the choice
+	// carries the first of each (an Update 2 channel's first such upload migrates it, §7.5).
+	const ss::ui::rlvideo_detail::VideoUi& Su = ss::ui::rlvideo_detail::VideoUiOf(&D.RL);
+	const video::Choice Ch = ss::ui::rlvideo_detail::RrChoice(Su);
+	const std::string Title = Su.Titles.empty() ? std::string() : Su.Titles.front().Text;
 	const std::string Quoted = "\xE2\x80\x9C" + Title + "\xE2\x80\x9D";
-	Check(!Title.empty() && (DrewRun(L, Quoted) || Drew(L, Quoted.substr(0, 14))), "video_studio: the real title, made from the hand (§4.5: no free text)");
-	Check(DrewRun(L, "Edit: 1 h 30 m \xC2\xB7 8 energy"), "video_studio: \"Edit: 1 h 30 m · 8 energy\" (§4.8)");
+	Check(Su.Titles.size() == 3 && Ch.TitleTpl == Su.Titles.front().Key && !Title.empty() && (DrewRun(L, Quoted) || Drew(L, Quoted.substr(0, 14))),
+		"video_studio: the real title, the library's first of three, made from the hand (§4.5: no free text)");
+	Check(DrewRun(L, "Edit 1 h 30 m \xC2\xB7 8 energy"), "video_studio: \"Edit 1 h 30 m · 8 energy\" (§4.8, C3's side column)");
 	const ClipSpan Sp = ThumbSpan(L);
-	Check(Sp.First >= 0 && Sp.Vertices > 200, "video_studio: the thumbnail drawn at 640 x 360 (videoart::Thumbnail)");
-	const video::Thumb Th = video::ThumbFor(Ch, Open);
-	Check(!Th.BigText.empty() && InThumb(L, Th.BigText), "video_studio: the frame's big words are the hand's own");
-	// The right-hand column: a line on each choice, never a promised number (§4.8).
-	const std::vector<std::string> Advice = video::Advice(Ch, Open);
-	bool AllAdvice = !Advice.empty();
-	for (const std::string& A : Advice)
+	Check(Sp.First >= 0 && Sp.Vertices > 200, "video_studio: the thumbnail drawn at 504 x 283.5 (videoart::Thumbnail, C3's preview)");
+	Check(Su.Thumbs.size() == 6 && Ch.Thumbs.size() == 1 && CaptionIn(L, Su.Thumbs.front()), "video_studio: the preview's caption is the dealt recipe's own (C3)");
+	// The right-hand column: core-videocontent's packaging read for that choice (the audience's hour sits under "Goes up"),
+	// never a promised number (§4.8, W9).
+	std::vector<std::string> Read;
+	for (const std::string& A : video::PackagingRead(Ch, Open, D.S.Life.Video, D.S.WorldMinutes(), false))
 	{
-		AllAdvice = AllAdvice && Drew(L, A.substr(0, std::min<size_t>(A.size(), 22)));
+		if (A.rfind("Your viewers are on at ", 0) != 0)
+		{
+			Read.push_back(A);
+		}
 	}
-	Check(AllAdvice, "video_studio: video::Advice's lines in the right-hand column");
+	bool AllAdvice = Read.size() >= 2;
+	for (size_t K = 0; K < Read.size() && K < 3; ++K)
+	{
+		AllAdvice = AllAdvice && Drew(L, Read[K].substr(0, std::min<size_t>(Read[K].size(), 22)));
+	}
+	Check(AllAdvice, "video_studio: the packaging read's lines in the right-hand column (C3: video::PackagingRead)");
 	const float TileLabel = SpelledAt(L, "ON YOUR CHANNEL");
 	const std::string Side = TextIn(L, {1180.0f, 110.0f, 400.0f, (TileLabel > 0.0f ? TileLabel : 470.0f) - 120.0f});
 	Check(!Side.empty() && Side.find_first_of("0123456789%") == std::string::npos, "video_studio: the advice never promises a number");
-	Check(Spelled(L, "ON YOUR CHANNEL") && Drew(L, "0 views \xC2\xB7 just now"), "video_studio: the tile as the Channel will show it");
+	std::set<int> Archs;
+	for (const video::ThumbSpec& S : Su.Thumbs)
+	{
+		Archs.insert(S.Arch);
+	}
+	Check(Archs.size() >= 4 && Drew(L, video::ArchName(Su.Thumbs.front().Arch)) && !DrewRun(L, "Versus") && !DrewRun(L, "Trophy"),
+		"video_studio: six recipes beside the preview, at least four archetypes, the picked one named (C3: no Update 2 frames)");
 	Check(!Drew(L, "Close your tables") && !Drew(L, "Too tired") && !Drew(L, "End the stream"), "video_studio: no reason under PUBLISH when it can go");
 	WriteList("video_studio", L);
 	std::printf("  video_studio        %5zu vertices %5zu commands  \"%s\"\n", L.Vertices.size(), L.Cmds.size(), Title.c_str());
@@ -498,12 +550,17 @@ void StudioFlow()
 	Check(ClickRun(D, L, "PUBLISH"), "video_studio: PUBLISH drawn");
 	Check(D.S.TimeSkip.Active && std::fabs(D.S.TimeSkip.To - D.S.TimeSkip.From - 90.0) < 0.01, "video_studio: PUBLISH starts the edit, an hour and a half of the clock (a TimeSkip)");
 	D.Until([&D]() { return !D.S.TimeSkip.Active; }, 15.0);
-	Check(D.S.Life.Video.Videos.size() == 1 && D.S.Life.Video.Videos[0].Title == Title, "video_studio: the video goes up under the title Studio showed");
+	Check(D.S.Life.Video.Videos.size() == 1 && D.S.Life.Video.Videos[0].Title == Title && D.S.Life.Video.Videos[0].X.On && D.S.Life.Video.X.On,
+		"video_studio: the video goes up under the title Studio showed (C3: a Rerun 2.0 video; the channel migrated)");
 	Check(std::fabs(D.S.WorldMinutes() - W0 - 90.0) < 2.0 && std::fabs(D.S.Life.Energy - (E0 - 8.0)) < 1.0, "video_studio: the edit took 1 h 30 m and 8 energy");
 	Check(D.S.Life.Video.Open.size() == 2, "video_studio: its moment is used up");
 	D.S.HasOutcome = false;
 	L = D.Frame();
-	Check(Spelled(L, "YOUR VIDEOS") && Drew(L, Title.substr(0, std::min<size_t>(Title.size(), 10))), "video_studio: after publishing, the Channel shows the new video at once");
+	// C3 (the gate's rewrite, §6.6.4): PUBLISH lands on Studio's launch card for the 48 hours; the Channel has the video at once.
+	Check(Drew(L, Title.substr(0, std::min<size_t>(Title.size(), 10))), "video_studio: after publishing, Studio's launch card shows the new video");
+	D.Open(1);
+	L = D.Frame();
+	Check(DrewRun(L, "VIDEOS") && Drew(L, Title.substr(0, std::min<size_t>(Title.size(), 10))), "video_studio: after publishing, the Channel shows the new video at once");
 }
 
 // ------------------------------------------------------------------ PUBLISH greyed, with the reason
@@ -557,7 +614,8 @@ void Formats()
 	D.S.LobbyMinutes = D.S.WorldMinutes() + 1440.0;
 	D.Fake("cooler online");
 	D.Open(0);
-	DrawList L = D.Frame();
+	D.Frame();
+	DrawList L = D.Moments(); // a trending idea may open the visit on IDEAS (L9): the moments are a click away
 	const std::vector<video::Candidate>& Open = D.S.Life.Video.Open;
 	const video::Candidate* Beat = FindKind(D.S, video::Kind::BadBeat);
 	const video::Candidate* Bluff = FindKind(D.S, video::Kind::Bluff);
@@ -583,7 +641,7 @@ void Formats()
 	Check(video::CanUpload(Vlog, Open).empty() && !Drew(L, "A Vlog takes"), "formats: three moments from one night make a Vlog");
 	const std::string VlogTitle = video::Title(Vlog, Open, 0);
 	Check(Drew(L, ("\xE2\x80\x9C" + VlogTitle).substr(0, 14)), "formats: the Vlog's real title");
-	Check(DrewRun(L, "Edit: 3 h \xC2\xB7 15 energy"), "formats: a Vlog's edit, 3 h and 15 energy");
+	Check(DrewRun(L, "Edit 3 h \xC2\xB7 15 energy"), "formats: a Vlog's edit, 3 h and 15 energy");
 	Check(DrewRun(L, "1") && DrewRun(L, "2") && DrewRun(L, "3"), "formats: the picks numbered in order");
 	WriteList("video_studio_vlog", L);
 	// A hand from the next night starts over from itself.
@@ -595,17 +653,17 @@ void Formats()
 	L = D.Frame();
 	Check(ClickRun(D, L, "Recap", 112.0f, 168.0f), "formats: the Recap format");
 	L = D.Frame();
-	Check(DrewRun(L, "A Recap needs a deep run, a final table or a win, plus two to six hands from that event."), "formats: a Recap needs two hands to go with its result");
+	Check(Drew(L, "A Recap needs a deep run, a final table or a win,"), "formats: a Recap needs two hands to go with its result (the line wrapped in the side column)");
 	Check(Row(L, "BLUFF"), "formats: add a second hand");
 	L = D.Frame();
 	const video::Choice Recap = ChoiceOf({WinId, BeatId, BluffId}, video::Format::Recap);
 	Check(video::CanUpload(Recap, Open).empty() && !Drew(L, "A Recap needs"), "formats: the win and two of its hands make a Recap (the result brought in with the format)");
 	Check(Drew(L, ("\xE2\x80\x9C" + video::Title(Recap, Open, 0)).substr(0, 14)), "formats: the Recap's real title");
-	Check(DrewRun(L, "Edit: 2 h 30 m \xC2\xB7 12 energy"), "formats: a Recap's edit, 2 h 30 m and 12 energy");
+	Check(DrewRun(L, "Edit 2 h 30 m \xC2\xB7 12 energy"), "formats: a Recap's edit, 2 h 30 m and 12 energy");
 	WriteList("video_studio_recap", L);
-	Check(ClickRun(D, L, "Short", 112.0f, 168.0f), "formats: a Short");
+	Check(ClickRun(D, L, "Cut", 112.0f, 168.0f), "formats: a Cut (the Short, renamed at C3)");
 	L = D.Frame();
-	Check(DrewRun(L, "Edit: 20 m \xC2\xB7 2 energy") && !Drew(L, "A Short is one moment"), "formats: a Short keeps one moment: 20 m and 2 energy");
+	Check(DrewRun(L, "Edit 20 m \xC2\xB7 2 energy") && !Drew(L, "A Short is one moment"), "formats: a Cut keeps one moment: 20 m and 2 energy");
 	// The picked moment posted from elsewhere (ss.Video.Upload): Studio moves on to the best one left.
 	Check(D.Publish(ChoiceOf({WinId}, video::Format::Short)), "formats: the win posted from the console");
 	L = D.Frame();
@@ -626,27 +684,27 @@ void Storytime()
 	Check(DrewRun(L, "STORYTIME"), "storytime: the STORYTIME chip on Dee's hands (§4.8)");
 	Check(Drew(L, "A back-room game"), "storytime: the game is \"a back-room game\", never Dee's");
 	Check(Drew(L, "Storytime: nobody from the game is named"), "storytime: the advice says how it's told");
-	// Nobody from the game, in any frame: no cast name, no "Dee's" (the fake's villain is Big Lou).
-	const char* Frames[5] = {"Reaction", "Cards", "Number", "Versus", "Trophy"};
-	bool Nameless = true, Drawn = true;
-	for (const char* Fr : Frames)
+	// Nobody from the game, in any of the six dealt recipes: no cast name, no "Dee's" (the fake's villain is Big Lou). C3 (the
+	// gate's rewrite): the library deals storytime no VS Split (§6.1: "Never: storytime") and draws nobody but the player.
+	ss::ui::rlvideo_detail::VideoUi& U = ss::ui::rlvideo_detail::VideoUiOf(&D.RL);
+	bool Nameless = true, Drawn = true, NoVersus = !U.Thumbs.empty();
+	for (int K = 0; K < static_cast<int>(U.Thumbs.size()); ++K)
 	{
-		ClickRun(D, L, Fr, 354.0f, 388.0f);
+		U.ThumbPick = K;
 		L = D.Frame();
 		const std::string All = Joined(L);
 		Nameless = Nameless && All.find("Big Lou") == std::string::npos && All.find("Dee's") == std::string::npos;
 		Drawn = Drawn && ThumbSpan(L).Vertices > 100;
-		if (std::string(Fr) == "Versus")
-		{
-			Check(InThumb(L, "?"), "storytime: the Versus frame's opponent is a silhouette with a question mark");
-		}
-		if (std::string(Fr) == "Reaction")
+		NoVersus = NoVersus && U.Thumbs[static_cast<size_t>(K)].Arch != video::thumb::ArVsSplit;
+		if (K == 0)
 		{
 			WriteList("video_studio_storytime", L);
 		}
 	}
-	Check(Nameless, "storytime: no frame, title or line names anyone from the game");
-	Check(Drawn, "storytime: every frame draws");
+	Check(NoVersus && U.Thumbs.size() == 6, "storytime: six recipes, none of them a VS Split (no opponent to put a face to)");
+	Check(Nameless, "storytime: no recipe, title or line names anyone from the game");
+	Check(Drawn, "storytime: every recipe draws");
+	U.ThumbPick = 0;
 }
 
 // ------------------------------------------------------------------ video_channel_gate
@@ -669,42 +727,36 @@ void ChannelGate()
 	Check(!V.Partner && V.Subs >= 612.0 && V.Subs < 1000.0 && V.WatchHours365 >= 1840.0 && V.WatchHours365 < 4000.0, "gate: under the gate on both bars");
 	Check(DrewRun(L, "Subscribers") && DrewRun(L, Subs) && DrewRun(L, "Watch hours") && DrewRun(L, Hours), "gate: \"Subscribers N / 1,000 · Watch hours N / 4,000\" (§4.1)");
 	Check(DrewRun(L, "Fill both bars and Rerun takes a look.") && DrewRun(L, "Not yet"), "gate: what the bars are for, and no promise past them");
-	// The 28-day chart: the totals, and a bar for every day with views (none for a day without).
-	double S28 = 0.0;
-	for (const double X : V.SubsByDay)
-	{
-		S28 += X;
-	}
-	Check(Spelled(L, "VIEWS") && DrewRun(L, Floored(V.Views28)) && Spelled(L, "SUBSCRIBERS") && DrewRun(L, "+" + Floored(S28)), "gate: the chart's 28-day totals");
-	const std::vector<bool> Bars = BarsIn(L, 0, ss::ui::Hex(ss::ui::videoart::Marigold));
-	int Match = 0, Days = 0;
-	for (size_t I = 0; I < 28; ++I)
-	{
-		Days += V.ViewsByDay[I] > 0.0 ? 1 : 0;
-		Match += (V.ViewsByDay[I] > 0.0) == Bars[I] || I == 27 ? 1 : 0; // today's bar is drawn fainter
-	}
-	Check(Days >= 14 && Match == 28, "gate: a views bar for each day that had views, none for a day without");
 	Check(DrewRun(L, "Ads start at the gate.") && !Drew(L, "earned") && !DrewRun(L, "PARTNER"), "gate: no revenue, no earnings and no Partner mark before the gate");
 	Check(Drew(L, " views \xC2\xB7 ") && Drew(L, "days ago"), "gate: each video's views and age");
-	// A day of the chart under the pointer: its date, views and subscribers.
-	int Hot = 0;
-	for (int I = 0; I < 27; ++I)
-	{
-		Hot = V.ViewsByDay[static_cast<size_t>(I)] > 0.0 ? I : Hot;
-	}
-	const DrawList Lh = D.Frame(ChartPx + (static_cast<float>(Hot) + 0.5f) * ChartPw / 28.0f, 320.0f);
-	const int Today = ss::net::DayOf(D.S.WorldMinutes());
-	Check(Drew(Lh, ss::net::DateLabel(Today - 27 + Hot) + " \xC2\xB7 ") && Drew(Lh, " subscribers"), "gate: the day under the pointer, with its views and subscribers");
+	Check(!Spelled(L, "BALANCE") && !Drew(L, "dislike"), "gate: the public page shows no balance and no dislike (C3, §1.12)");
 	WriteList("video_channel_gate", L);
 	std::printf("  video_channel_gate  %5zu vertices %5zu commands\n", L.Vertices.size(), L.Cmds.size());
-	// Taking a video down: the first press asks, the second does it (its subscribers stay, §4.5).
+	// C3: the 28 days are Analytics' now (the Overview's tiles over video::StatsRange; the public page keeps the bars).
+	{
+		ss::ui::rlvideo_detail::VideoUi& U = ss::ui::rlvideo_detail::VideoUiOf(&D.RL);
+		D.Open(2);
+		U.Sub = 0;
+		U.RangeIx = 1;
+		const DrawList La = Settled(D);
+		const video::Range R28 = video::StatsRange(D.S.Life.Video, D.S.WorldMinutes(), 28);
+		double Views = 0.0;
+		for (const double X : R28.Views)
+		{
+			Views += X;
+		}
+		Check(DrewRun(La, "VIEWS") && DrewRun(La, Floored(Views)) && DrewRun(La, "SUBSCRIBERS"), "gate: Analytics' Overview carries the 28 days (StatsRange's own sum)");
+		D.Open(1);
+		L = D.Frame();
+	}
+	// Taking a video down: the first press asks, the second does it (its subscribers stay, §4.5). Five columns from y 492.
 	const double SubsBefore = D.S.Life.Video.Subs;
 	const size_t Count = D.S.Life.Video.Videos.size();
-	const float TileW = (1560.0f - 6.0f * 14.0f) / 7.0f;
-	D.Frame(20.0f + TileW / 2.0f, 600.0f);
-	L = D.Frame(20.0f + TileW / 2.0f, 600.0f);
+	const float TileW = (1560.0f - 4.0f * 15.0f) / 5.0f;
+	D.Frame(20.0f + TileW / 2.0f, 560.0f);
+	L = D.Frame(20.0f + TileW / 2.0f, 560.0f);
 	Check(ClickRun(D, L, "Delete"), "delete: a tile under the pointer offers Delete");
-	L = D.Frame(20.0f + TileW / 2.0f, 600.0f);
+	L = D.Frame(20.0f + TileW / 2.0f, 560.0f);
 	Check(DrewRun(L, "Press again to take it down.") && DrewRun(L, "Sure?") && D.S.Life.Video.Videos.size() == Count, "delete: the first press only asks");
 	Check(ClickRun(D, L, "Sure?"), "delete: the second press");
 	L = D.Frame();
@@ -729,24 +781,19 @@ void ChannelPartner()
 	DrawList L = D.Frame();
 	const video::ChannelView V = D.S.VideoView();
 	const video::Channel& Ch = D.S.Life.Video;
-	Check(V.Partner && DrewRun(L, "PARTNER") && DrewRun(L, "You're a Rerun Partner."), "partner: the banner's Partner mark, once in (§4.8)");
-	Check(Ch.PaidCents > 0 && DrewRun(L, "paid out " + ss::Money(Ch.PaidCents) + " so far"), "partner: what's been paid out (the 21st's payout)");
-	Check(Spelled(L, "BALANCE") && DrewRun(L, ss::Money(V.Balance)), "partner: the balance waiting for the next 21st");
-	double Cents = 0.0;
-	for (const double X : V.CentsByDay)
-	{
-		Cents += X;
-	}
-	Check(Spelled(L, "REVENUE") && DrewRun(L, ss::Money(static_cast<ss::Chips>(std::floor(Cents)))), "partner: the chart's revenue row, its 28-day total");
-	const std::vector<bool> Bars = BarsIn(L, 2, ss::ui::Hex(0xffd479));
-	int Match = 0, Days = 0;
-	for (size_t I = 0; I < 28; ++I)
-	{
-		Days += V.CentsByDay[I] > 0.0 ? 1 : 0;
-		Match += (V.CentsByDay[I] > 0.0) == Bars[I] || I == 27 ? 1 : 0;
-	}
-	Check(Days >= 20 && Match == 28, "partner: a revenue bar for each day that earned");
-	// Each video's earnings, once in: the one posted after the gate has earned, from its own RPM.
+	Check(V.Partner && DrewRun(L, "PARTNER") && DrewRun(L, "since " + ss::net::DateLabel(ss::net::DayOf(Ch.PartnerAt))), "partner: the banner's Partner mark, once in (§4.8)");
+	// C3 (§6.6.6): the public page shows no money: the payouts, the balance and the earnings are Analytics › Revenue's.
+	Check(!Spelled(L, "BALANCE") && !Drew(L, " earned") && !Drew(L, ss::Money(V.Balance)), "partner: no balance and no earnings on the public page");
+	WriteList("video_channel_partner", L);
+	ss::ui::rlvideo_detail::VideoUi& U = ss::ui::rlvideo_detail::VideoUiOf(&D.RL);
+	D.Open(2);
+	U.Sub = 3;
+	DrawList Lr = Settled(D);
+	Check(Ch.PaidCents > 0 && DrewRun(Lr, "Paid out " + ss::Money(Ch.PaidCents) + " so far"), "partner: what's been paid out (the 21st's payout), on Revenue");
+	Check(DrewRun(Lr, "Balance " + ss::Money(Ch.BalanceCents)), "partner: the balance waiting for the next 21st, on Revenue");
+	Check(DrewRun(Lr, "EST. REVENUE") && DrewRun(Lr, "PAYOUTS"), "partner: Revenue's tiles and payouts once in");
+	WriteList("video_revenue_partner", Lr);
+	// Each video's earnings, once in: the one posted after the gate has earned, from its own RPM (the Content table's column).
 	const video::Video* After = nullptr;
 	for (const video::Video& X : Ch.Videos)
 	{
@@ -755,10 +802,11 @@ void ChannelPartner()
 	Check(After != nullptr, "partner: the video posted after the gate");
 	if (After)
 	{
-		const double Earned = std::max(0.0, video::Views(*After, D.S.WorldMinutes()) - video::Views(*After, After->At)) * After->Rpm / 1000.0 * 100.0;
-		Check(Earned >= 1.0 && DrewRun(L, ss::Money(static_cast<ss::Chips>(std::floor(Earned))) + " earned"), "partner: each tile's earnings since the gate");
+		U.Sub = 1;
+		const DrawList Lc = Settled(D);
+		const video::VideoStats St = video::StatsOf(Ch, *After, D.S.WorldMinutes());
+		Check(St.EarnedCents >= 1 && DrewRun(Lc, ss::Money(St.EarnedCents)), "partner: each video's earnings since the gate, in the Content table");
 	}
-	WriteList("video_channel_partner", L);
 	std::printf("  video_channel_partner %5zu vertices %5zu commands  paid %s, balance %s\n", L.Vertices.size(), L.Cmds.size(), ss::Money(Ch.PaidCents).c_str(), ss::Money(V.Balance).c_str());
 }
 
@@ -777,32 +825,26 @@ void Frames()
 	D.Open(0);
 	DrawList L = D.Frame();
 	const char* Groups[6] = {"BAD BEAT", "BLUFF", "BIG POT", "WIN", "RIVAL", "STORY"};
-	const char* Frames[5] = {"Reaction", "Cards", "Number", "Versus", "Trophy"};
-	int Drawn = 0, Words = 0, Inside = 0;
+	// C3 (the gate's rewrite): the library deals each moment six recipes (Session::ThumbOptions); every one draws in the preview
+	// with its own caption and keeps inside its box. Update 2's five frames are the legacy path (VC2's sheet below, and
+	// rerun_ui's legacy pins).
+	ss::ui::rlvideo_detail::VideoUi& U = ss::ui::rlvideo_detail::VideoUiOf(&D.RL);
+	int Drawn = 0, Words = 0, Inside = 0, Dealt = 0;
 	for (const char* G : Groups)
 	{
 		ClickRun(D, L, G, 100.0f, 960.0f);
-		for (const char* Fr : Frames)
+		L = D.Frame();
+		for (int K = 0; K < static_cast<int>(U.Thumbs.size()); ++K)
 		{
+			U.ThumbPick = K;
 			L = D.Frame();
-			ClickRun(D, L, Fr, 354.0f, 388.0f);
-			L = D.Frame();
+			++Dealt;
 			const ClipSpan Sp = ThumbSpan(L);
 			Drawn += Sp.First >= 0 && Sp.Vertices > 100 ? 1 : 0;
-			// The frame's big words, from the same choice Studio built (the pick is this group's row, the frame this one).
-			const video::Candidate* C = nullptr;
-			for (const video::Candidate& X : D.S.Life.Video.Open)
-			{
-				C = std::string(video::KindLabel(X.K)) == G ? &X : C;
-			}
-			int Fi = 0;
-			while (Fi < 5 && std::string(Frames[Fi]) != Fr)
-			{
-				++Fi;
-			}
-			const video::Thumb Th = C ? video::ThumbFor(ChoiceOf({C->Id}, video::Format::Breakdown, video::TitleStyle::Story, static_cast<video::Frame>(Fi)), D.S.Life.Video.Open) : video::Thumb();
-			Words += C && (Th.BigText.empty() || InThumb(L, Th.BigText)) ? 1 : 0;
-			// Everything the frame draws stays in its box.
+			// The recipe's caption, from the deal Studio holds for this pick.
+			Words += CaptionIn(L, U.Thumbs[static_cast<size_t>(K)]) ? 1 : 0;
+			const std::string Fr = std::to_string(K);
+			// Everything the recipe draws stays in its box.
 			bool In = Sp.First >= 0;
 			for (long I = Sp.First; In && I <= Sp.Last; ++I)
 			{
@@ -812,27 +854,29 @@ void Frames()
 			Inside += In ? 1 : 0;
 			if (std::string(G) == "BAD BEAT")
 			{
-				WriteList(std::string("video_frame_badbeat_") + Fr, L);
+				WriteList(std::string("video_recipe_badbeat_") + Fr, L);
 				// How far the frame's own drawing runs past its right edge (the clip hides it; information, not a check:
 				// videoart's Reaction frame puts the opponent's shown cards past it, patches/ui-video_to_lead_1.diff).
 				float Right = 0.0f;
 				for (long I = Sp.First; Sp.First >= 0 && I <= Sp.Last; ++I)
 				{
 					const ss::ui::DrawCmd& Cmd = L.Cmds[static_cast<size_t>(I)];
-					for (uint32_t K = 0; Cmd.Type == ss::ui::DrawCmd::Kind::Triangles && K < Cmd.VertexCount; ++K)
+					for (uint32_t Vi = 0; Cmd.Type == ss::ui::DrawCmd::Kind::Triangles && Vi < Cmd.VertexCount; ++Vi)
 					{
-						const ss::ui::Vertex& V = L.Vertices[Cmd.VertexStart + K];
+						const ss::ui::Vertex& V = L.Vertices[Cmd.VertexStart + Vi];
 						Right = V.Col.A > 0.5f ? std::max(Right, V.X) : Right;
 					}
 				}
-				std::printf("  video frame %-8s draws to x %.0f (the box ends at %.0f)\n", Fr, Right, ThumbBox.X + ThumbBox.W);
+				std::printf("  video recipe %s (%s) draws to x %.0f (the box ends at %.0f)\n", Fr.c_str(), video::ArchName(U.Thumbs[static_cast<size_t>(K)].Arch), Right,
+					ThumbBox.X + ThumbBox.W);
 			}
 		}
+		U.ThumbPick = 0;
 	}
-	std::printf("  video frames        %d of 30 drawn, %d with the hand's own big words, %d inside the box\n", Drawn, Words, Inside);
-	Check(Drawn == 30, "frames: every frame for every kind group draws at 640 x 360");
-	Check(Words == 30, "frames: each frame's big words are the moment's own (videoart's Thumb from video::ThumbFor)");
-	Check(Inside == 30, "frames: every frame keeps inside its box");
+	std::printf("  video recipes       %d of %d drawn, %d with their own captions, %d inside the box\n", Drawn, Dealt, Words, Inside);
+	Check(Dealt == 36 && Drawn == 36, "frames: six recipes for every kind group, each drawn at 504 x 283.5 (C3)");
+	Check(Words == 36, "frames: each recipe's caption drawn whole in the preview (C3: the dealt recipe's own words)");
+	Check(Inside == 36, "frames: every recipe keeps inside its box");
 	// VC2: every frame for one bad beat, side by side (5 x 640 x 360 on one sheet).
 	const video::Candidate* Beat = FindKind(D.S, video::Kind::BadBeat);
 	if (Beat)
@@ -884,7 +928,8 @@ void KastCut()
 	D.Frame();
 	D.Now += 1.0;
 	D.RL.OpenApp(ss::ui::RiverLine::App::Video, D.Now);
-	L = D.Frame();
+	D.Frame();
+	L = D.Moments(); // a plain visit follows L9's rule (IDEAS while a new or trending idea waits)
 	Check(DrewRun(L, "BAD BEAT") && !DrewRun(L, "TONIGHT'S STREAM"), "kast_summary_cut: the filter doesn't outlive the visit");
 	// Show all, from the filtered list (the summary's own window: the stream's start less a minute, its end plus one).
 	D.Now += 1.0;
@@ -934,14 +979,14 @@ void Bell()
 	Check(D.Dot(), "bell: a visit alone leaves a milestone unseen until the bell is opened");
 	D.Click(1600.0f - 44.0f, 30.0f);
 	L = D.Frame();
-	Check(DrewRun(L, "Milestones") && Drew(L, "100 subscribers. People are sticking around."), "bell: its list holds the milestone");
+	Check(DrewRun(L, "Notifications") && Drew(L, "100 subscribers. People are sticking around."), "bell: its list holds the milestone");
 	Check(!D.Dot(), "bell: opened, the dot goes out");
 	WriteList("video_bell", L);
 	// A click anywhere else closes it, and does nothing under it.
 	const size_t Picked = D.S.Life.Video.Videos.size();
 	D.Click(800.0f, 700.0f);
 	L = D.Frame();
-	Check(!DrewRun(L, "Milestones") && D.S.Life.Video.Videos.size() == Picked && !D.S.TimeSkip.Active, "bell: a click off it closes it");
+	Check(!DrewRun(L, "Notifications") && D.S.Life.Video.Videos.size() == Picked && !D.S.TimeSkip.Active, "bell: a click off it closes it");
 	Desk E("rerun-bell-empty");
 	E.Open(0);
 	E.Frame();
@@ -964,9 +1009,10 @@ void Fits()
 	D.Open(0);
 	DrawList L = D.Frame();
 	int Bad = 0;
-	Bad += Overflows(L, {20.0f, 80.0f, 420.0f, 870.0f}, D.M, "studio list");
-	Bad += Overflows(L, {460.0f, 80.0f, 700.0f, 870.0f}, D.M, "studio editor", ThumbBox);
-	Bad += Overflows(L, {1180.0f, 80.0f, 400.0f, 470.0f}, D.M, "studio advice");
+	// C3's three columns: the list (20, 66, 360), the editor (396, 66, 764) and the side (1176, 66, 404).
+	Bad += Overflows(L, {20.0f, 66.0f, 360.0f, 884.0f}, D.M, "studio list");
+	Bad += Overflows(L, {396.0f, 66.0f, 764.0f, 884.0f}, D.M, "studio editor", {ThumbBox.X, ThumbBox.Y, 764.0f, ThumbBox.H});
+	Bad += Overflows(L, {1176.0f, 66.0f, 404.0f, 884.0f}, D.M, "studio side");
 	Bad += Overflows(L, {0.0f, 0.0f, 1600.0f, 962.0f}, D.M, "studio");
 	Check(Bad == 0, "fits: Studio's words keep inside their columns at the laptop's 1600 units");
 	// The same layout at both screen sizes the acceptance shoots (§8.6: 1920 and 2552 wide): only the pixel scale changes.
@@ -983,9 +1029,10 @@ void Fits()
 		}
 		return Out;
 	};
-	const std::vector<std::string> At1 = Runs(L);
-	const std::vector<std::string> At1920 = Runs(D.Frame(-1.0f, -1.0f, false, false, false, 0.0f, 1920.0f / 1600.0f));
-	const std::vector<std::string> At2552 = Runs(D.Frame(-1.0f, -1.0f, false, false, false, 0.0f, 2552.0f / 1600.0f));
+	// (Each scale's thumbnails cache apart: the page at rest at each, two painted a frame until then, C3.)
+	const std::vector<std::string> At1 = Runs(Settled(D));
+	const std::vector<std::string> At1920 = Runs(Settled(D, 1920.0f / 1600.0f));
+	const std::vector<std::string> At2552 = Runs(Settled(D, 2552.0f / 1600.0f));
 	Check(At1 == At1920 && At1 == At2552, "fits: Studio lays out the same at 1920 and 2552 pixels wide");
 	// The list scrolls when it's longer than the screen.
 	D.S.DebugVideo("fake suckout online");
@@ -1015,14 +1062,15 @@ void Fits()
 	C.Open(1);
 	L = C.Frame();
 	Bad = 0;
+	// C3's public page: the banner, the gate's card and the Outlier shelf, then five columns of 300-wide tiles from y 492.
 	Bad += Overflows(L, {20.0f, 74.0f, 1560.0f, 136.0f}, C.M, "channel banner");
-	Bad += Overflows(L, {20.0f, 226.0f, 600.0f, 256.0f}, C.M, "channel gate");
-	Bad += Overflows(L, {640.0f, 226.0f, 940.0f, 256.0f}, C.M, "channel chart");
+	Bad += Overflows(L, {20.0f, 226.0f, 600.0f, 204.0f}, C.M, "channel gate");
+	Bad += Overflows(L, {636.0f, 226.0f, 944.0f, 204.0f}, C.M, "channel shelf");
 	Bad += Overflows(L, {0.0f, 0.0f, 1600.0f, 962.0f}, C.M, "channel");
-	const float TileW = (1560.0f - 6.0f * 14.0f) / 7.0f;
-	for (int Col = 0; Col < 7; ++Col)
+	const float TileW = (1560.0f - 4.0f * 15.0f) / 5.0f;
+	for (int Col = 0; Col < 5; ++Col)
 	{
-		Bad += Overflows(L, {20.0f + static_cast<float>(Col) * (TileW + 14.0f), 536.0f, TileW, 412.0f}, C.M, "channel tile");
+		Bad += Overflows(L, {20.0f + static_cast<float>(Col) * (TileW + 15.0f), 492.0f, TileW, 456.0f}, C.M, "channel tile");
 	}
 	Check(C.S.Life.Video.Videos.size() == 9 && Bad == 0, "fits: the Channel's words keep inside the banner, the cards and each tile");
 	WriteList("video_channel_grid", L);
@@ -1225,12 +1273,16 @@ void EarnedSinceGate()
 	const double World = D.S.WorldMinutes();
 	const double Since = std::max(0.0, video::Views(*Before, World) - video::Views(*Before, Ch.PartnerAt)) * Before->Rpm / 1000.0 * 100.0;
 	const double All = video::Views(*Before, World) * Before->Rpm / 1000.0 * 100.0;
-	const std::string SinceLine = ss::Money(static_cast<ss::Chips>(std::floor(Since))) + " earned";
-	const std::string AllLine = ss::Money(static_cast<ss::Chips>(std::floor(All))) + " earned";
-	D.Open(1);
-	const DrawList L = D.Frame();
-	std::printf("  video earned: a pre-gate video's tile reads \"%s\" (all its views would be \"%s\")\n", SinceLine.c_str(), AllLine.c_str());
-	Check(SinceLine != AllLine && DrewRun(L, SinceLine) && !DrewRun(L, AllLine), "earned: the pre-gate video's tile counts only the views since the gate");
+	// C3: a video's earnings are Analytics' (the Content table's REVENUE, the core's StatsOf: the views since the gate).
+	const video::VideoStats St = video::StatsOf(Ch, *Before, World);
+	const std::string SinceLine = ss::Money(St.EarnedCents);
+	const std::string AllLine = ss::Money(static_cast<ss::Chips>(std::floor(All)));
+	D.Open(2);
+	ss::ui::rlvideo_detail::VideoUiOf(&D.RL).Sub = 1;
+	const DrawList L = Settled(D);
+	std::printf("  video earned: a pre-gate video's row reads \"%s\" (all its views would be \"%s\")\n", SinceLine.c_str(), AllLine.c_str());
+	Check(std::fabs(static_cast<double>(St.EarnedCents) - Since) < 1.0 && SinceLine != AllLine && DrewRun(L, SinceLine) && !DrewRun(L, AllLine),
+		"earned: the pre-gate video's row counts only the views since the gate");
 }
 
 /** PUBLISH greyed is drawn greyed: its label in the disabled grey with a reason, in Rerun's ink when it can go. */
@@ -1274,7 +1326,17 @@ void VlogFull()
 		ClickRun(D, L, video::KindLabel(List[I].K), 100.0f, 960.0f);
 	}
 	L = D.Frame();
-	Check(List.size() == 9 && DrewRun(L, "A Vlog holds eight moments at most.") && DrewRun(L, "8") && !DrewRun(L, "9"), "vlog full: eight picked, the ninth refused with a line");
+	// The order badges on the list's rows (C3: the five frames beside the preview carry their own numbers, so the list's).
+	bool Eight = false, Nine = false;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.X < 380.0f)
+		{
+			Eight = Eight || Cmd.Text.Text == "8";
+			Nine = Nine || Cmd.Text.Text == "9";
+		}
+	}
+	Check(List.size() == 9 && DrewRun(L, "A Vlog holds eight moments at most.") && Eight && !Nine, "vlog full: eight picked, the ninth refused with a line");
 }
 
 /** A click off the open bell closes it and does nothing on the page under it. */
@@ -1284,14 +1346,14 @@ void BellSwallows()
 	D.Fake("badbeat online");
 	D.Open(0);
 	DrawList L = D.Frame();
-	Check(DrewRun(L, "Edit: 1 h 30 m \xC2\xB7 8 energy"), "bell click: a Breakdown to start");
+	Check(DrewRun(L, "Edit 1 h 30 m \xC2\xB7 8 energy"), "bell click: a Breakdown to start");
 	D.Click(1600.0f - 44.0f, 30.0f);
 	L = D.Frame();
-	Check(DrewRun(L, "Milestones"), "bell click: the bell is open");
+	Check(DrewRun(L, "Notifications"), "bell click: the bell is open");
 	const VRun Vlog = RunOf(L, "Vlog", D.M, 112.0f, 168.0f);
 	D.Click(Vlog.X + Vlog.W / 2.0f, Vlog.Base - 5.0f);
 	L = D.Frame();
-	Check(Vlog.Found && !DrewRun(L, "Milestones") && DrewRun(L, "Edit: 1 h 30 m \xC2\xB7 8 energy"), "bell click: the click closes the bell and doesn't pick the Vlog under it");
+	Check(Vlog.Found && !DrewRun(L, "Notifications") && DrewRun(L, "Edit 1 h 30 m \xC2\xB7 8 energy"), "bell click: the click closes the bell and doesn't pick the Vlog under it");
 }
 
 /**
@@ -1348,7 +1410,7 @@ void LongEventName()
 		}
 	}
 	Check(!Tail.empty() && Beat && Win, "long event name: the row shortens the event's name and keeps the pot, who, and a run's prize");
-	Check(Overflows(L, {20.0f, 80.0f, 420.0f, 870.0f}, D.M, "studio list") == 0, "long event name: the row's words keep inside the list");
+	Check(Overflows(L, {20.0f, 66.0f, 360.0f, 884.0f}, D.M, "studio list") == 0, "long event name: the row's words keep inside the list");
 }
 
 /** The widest rows keep every chip: AUTO is the player's only sign the plan played (§1.10), so it never drops off. */
@@ -1370,7 +1432,7 @@ void ChipsFit()
 	int Auto = 0, Site = 0, Story = 0;
 	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
 	{
-		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.X < 440.0f)
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.X < 380.0f)
 		{
 			Auto += Cmd.Text.Text == "AUTO" ? 1 : 0;
 			Site += Cmd.Text.Text == "RIVERLINE" ? 1 : 0;
@@ -1411,7 +1473,10 @@ void SkipRecap()
 	const video::Choice Recap = ChoiceOf({Run, Skipped, Watched}, video::Format::Recap);
 	Check(video::CanUpload(Recap, D.S.Life.Video.Open).empty() && !Drew(L, "A Recap needs") && !Drew(L, "aren't all from the same event"),
 		"skip recap: the run, its skipped hand and its watched hand make a Recap");
-	Check(Drew(L, ("\xE2\x80\x9C" + video::Title(Recap, D.S.Life.Video.Open, 0)).substr(0, 14)), "skip recap: Studio previews that Recap's real title");
+	// C3 (the gate's rewrite): the title Studio previews is the library's first option for that Recap.
+	const ss::ui::rlvideo_detail::VideoUi& U = ss::ui::rlvideo_detail::VideoUiOf(&D.RL);
+	Check(U.F == video::Format::Recap && U.Pick.size() == 3 && !U.Titles.empty() && Drew(L, ("\xE2\x80\x9C" + U.Titles.front().Text).substr(0, 14)),
+		"skip recap: Studio previews that Recap's real title");
 }
 
 /** N3: Studio says nothing about ads until they run; a Partner's Vlog says longer videos carry more. */
@@ -1490,6 +1555,24 @@ void PublishClause()
 	Check(!DrewRun(L, "Strike under your Team RiverLine deal") && !DrewRun(L, "PUBLISH ANYWAY"), "publish clause: a RiverLine hand under a RiverLine deal goes up without a warning");
 }
 
+// ------------------------------------------------------------------ the C3 fix round (c3f-ui, H1): the statement in Mail
+
+void StatementTopRate()
+{
+	// A month paid past the top-earner rate: the itemized statement carries the core's line (c3f-algo appends it to the letter),
+	// and Mail shows the letter whole, the line in its own words.
+	Desk D("rerun-mail-toprate");
+	const std::string Line = video::valgo::TopRateLine();
+	const std::string Body = "November: watch-page ads $7,412.30 (RPM $3.10, CPM $10.40) \xC2\xB7 Cuts feed $96.20. Paid today: $7,508.50. Your balance is $0.00. " + Line;
+	D.S.Life.Inbox.push_back(ss::life::Letter{D.S.WorldMinutes(), "rerun:pay", "video", "Rerun", "Your Rerun statement for November.", Body, video::LetterStatement, false});
+	D.RL.OpenApp(ss::ui::RiverLine::App::Mail, D.Now);
+	D.Frame();
+	const DrawList L = D.Frame();
+	Check(Drew(L, Line.substr(0, 24)) && Drew(L, "reduced share"), "statement: Mail shows the top-earner rate's line (the core's words)");
+	Check(Overflows(L, {0.0f, 0.0f, 1600.0f, 962.0f}, D.M, "statement top rate") == 0, "statement: the itemized letter and its line fit Mail's page");
+	WriteList("mail_rerun_toprate", L);
+}
+
 void Copy()
 {
 	std::vector<std::pair<std::string, std::string>> Lines;
@@ -1553,6 +1636,7 @@ void SegVideo()
 	video_seg::SkipRecap();
 	video_seg::AdsAfterTheGate();
 	video_seg::PublishClause();
+	video_seg::StatementTopRate();
 	video_seg::Copy();
 	std::printf("  ui-video: %d checks\n", video_seg::Checks);
 }

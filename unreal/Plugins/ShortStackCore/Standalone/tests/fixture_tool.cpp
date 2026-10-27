@@ -87,6 +87,9 @@
 //                              prints the channel every ten days and its Kast lines' bytes; writes nothing (the lead's check
 //                              of the career before the model lands)
 //   fixture_tool kast-worst    measures the synthetic worst save's Kast lines (above); writes nothing
+//   fixture_tool write-u3g3 <dir> [show] [days]  writes C3's creator fixture, update3_creator (update 3 SPEC §7.4-§7.5; Creator3:
+//                              a NewCareer on Rerun 2.0 for 420 days, every upload packaged in Studio from the library; "show"
+//                              prints the channel every thirty days and the tally; days builds a shorter one, for a dry run)
 //   fixture_tool transcript    prints every save as the careers are built and as each fixture is loaded and played on
 //                              (texts, ledgers, the whole save but the world, whose size and hash are printed), the
 //                              c09bc31 careers first, then update 2's; a build whose transcript matches the code the
@@ -142,6 +145,14 @@
 #include "ShortStack/Game/KastGrowth.h"
 #else
 #define SS_FIXTURE_G3K 0
+#endif
+
+// C3's creator fixture (update 3 SPEC §7.5, update3_creator: Rerun 2.0's Studio packaging, VideoContent.h's options).
+#if SS_FIXTURE_G3K && __has_include("ShortStack/Game/VideoContent.h")
+#define SS_FIXTURE_U3G3 1
+#include "ShortStack/Game/VideoContent.h"
+#else
+#define SS_FIXTURE_U3G3 0
 #endif
 
 #include <algorithm>
@@ -2318,6 +2329,282 @@ bool KastWorst(bool Widest)
 }
 #endif
 
+#if SS_FIXTURE_U3G3
+// ---------------------------------------------------------------- C3's creator fixture (write-u3g3)
+
+/** What the C3 creator did (printed with "show"; MigrationAll3 reads the facts back from the save itself). */
+struct Creator3Tally
+{
+	int Uploads = 0, Ideas = 0, Series = 0, Cuts = 0, Teaching = 0, Duels = 0, Repacks = 0, Teasers = 0, Replies = 0, MadeCuts = 0, Heavy = 0, Refused = 0;
+	std::string LastDuel;
+};
+
+/** Waits out the session's edit or launch action (its TimeSkip). */
+double Creator3Skip(ss::Session& S, double Now)
+{
+	for (int Guard = 0; S.TimeSkip.Active && Guard < 600; ++Guard)
+	{
+		Now = Wait(S, Now, 0.5);
+	}
+	return Now;
+}
+
+/** The newest kept video's id ("" for none). */
+std::string Creator3Newest(const ss::Session& S)
+{
+	const video::Video* N = nullptr;
+	for (const video::Video& V : S.Life.Video.Videos)
+	{
+		N = !N || V.At > N->At ? &V : N;
+	}
+	return N ? N->Id : std::string();
+}
+
+/**
+ * One upload packaged the way Studio's PUBLISH packages it (RrChoice): the best moment, or every seventh upload an idea from
+ * IDEAS (a ready one outside group A, in its card's first format; a series idea while fewer than two are running); the
+ * library's first title option and its first recipe (a Cut has none), or a Duel of the first three; then, now and then, a
+ * launch action inside the 48 hours (a teaser, a reply round, Make a Cut).
+ */
+bool Creator3Upload(ss::Session& S, double& Now, int Turn, bool Duel, bool Launch, Creator3Tally& T)
+{
+	video::Choice Ch;
+	bool Idea = false;
+	// (Series ideas first, while fewer than two are running; then any other ready one.)
+	for (int Pass = 0; Turn % 7 == 6 && Pass < 2 && !Idea; ++Pass)
+	{
+		for (const video::IdeaCard& I : S.VideoIdeas())
+		{
+			const bool SeriesIdea = I.Id / 100 == 16;
+			if (Idea || !I.Ready || I.Formats.empty() || I.Id / 100 == 1 || SeriesIdea != (Pass == 0) || (SeriesIdea && T.Series >= 2) || I.Strike)
+			{
+				continue;
+			}
+			if (!S.ChooseIdea(I.Id).empty() || S.Life.Video.Open.empty() || S.Life.Video.Open.back().Idea != I.Id)
+			{
+				continue;
+			}
+			Ch.Candidates = {S.Life.Video.Open.back().Id};
+			Ch.F = I.Formats.front();
+			Ch.T = Ch.F == video::Format::Short ? video::TitleStyle::Story : video::TitleStyle::Question;
+			Idea = video::CanUpload(Ch, S.Life.Video.Open).empty();
+			T.Series += Idea && SeriesIdea ? 1 : 0;
+		}
+	}
+	if (!Idea)
+	{
+		const std::vector<video::Candidate> List = S.VideoCandidates();
+		if (List.empty())
+		{
+			return false;
+		}
+		const int Slot = Turn % 3;
+		Ch.Candidates = {List.front().Id};
+		Ch.F = Slot == 1 && !Duel ? video::Format::Short : video::Format::Breakdown; // a Duel needs thumbnails: never a Cut
+		Ch.T = Slot == 0 ? video::TitleStyle::Teaching : Slot == 1 ? video::TitleStyle::Story : (Turn % 2 == 0 ? video::TitleStyle::Question : video::TitleStyle::Story);
+	}
+	const std::vector<video::TitleOption> Titles = S.TitleOptions(Ch, 0);
+	if (!Titles.empty())
+	{
+		Ch.TitleTpl = Titles.front().Key;
+	}
+	if (Ch.F != video::Format::Short)
+	{
+		const std::vector<video::ThumbSpec> Thumbs = S.ThumbOptions(Ch, 0);
+		for (size_t K = 0; K < Thumbs.size() && K < (Duel ? 3u : 1u); ++K)
+		{
+			Ch.Thumbs.push_back(Thumbs[K]);
+		}
+	}
+	Fed(S);
+	if (!video::CanUpload(Ch, S.Life.Video.Open).empty() || !S.Publish(Ch).empty())
+	{
+		++T.Refused;
+		return false;
+	}
+	Now = Creator3Skip(S, Now);
+	const std::string Id = Creator3Newest(S);
+	++T.Uploads;
+	T.Ideas += Idea ? 1 : 0;
+	T.Cuts += Ch.F == video::Format::Short ? 1 : 0;
+	T.Teaching += Ch.T == video::TitleStyle::Teaching ? 1 : 0;
+	T.Duels += Ch.Thumbs.size() > 1 ? 1 : 0;
+	T.LastDuel = Ch.Thumbs.size() > 1 ? Id : T.LastDuel;
+	if (Launch && !Id.empty())
+	{
+		// The launched uploads take a teaser, a reply round and Make a Cut in turn (a Cut can't be cut: it takes the teaser).
+		const int Pick = (T.Teasers + T.Replies + T.MadeCuts) % 3;
+		const video::Launch A = Pick == 2 && Ch.F != video::Format::Short ? video::Launch::Cut : Pick == 1 ? video::Launch::Reply : video::Launch::Teaser;
+		Fed(S);
+		if (S.LaunchAction(Id, A).empty())
+		{
+			Now = Creator3Skip(S, Now);
+			T.MadeCuts += A == video::Launch::Cut ? 1 : 0;
+			T.Teasers += A == video::Launch::Teaser ? 1 : 0;
+			T.Replies += A == video::Launch::Reply ? 1 : 0;
+		}
+	}
+	return true;
+}
+
+/**
+ * update3_creator (update 3 SPEC §7.4, §7.5: "the heavy creator, with a Duel mid-test and a Heavy switch after a last
+ * check-in"): a new career (NewCareer: Rerun 2.0 from its first upload) on update2_creator's days (the Wash & Fold when the
+ * roll needs it, an afternoon hyper on Kast, sprinted one day and played by the plan the next), uploading three times a week
+ * from day 3, every third a Teaching Breakdown, every third a Cut, every seventh an idea from IDEAS, all packaged in Studio
+ * from the library (the first title and recipe); Tuesdays' upload goes up before the afternoon's stream (a Live Drop when the
+ * stream runs 30 minutes); launch actions on about half; three Duels (the last one uploaded the evening before the save, so
+ * its test is running); five repackages at five days old (title, thumbnail, alternately); two series; and, twelve days before
+ * the end, Heavy ads on a News video past its day-14 check-in. Saved the afternoon after the last upload. Without its world
+ * lines, like pre_update2_*.
+ */
+ss::SaveData Creator3(int Days, Creator3Tally& T)
+{
+	const char* Seed = "fixture-u3g3-creator";
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, Seed));
+	S->NewCareer(Someone());
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.2);
+	S->BankrollCents += 160000;
+	for (const char* Gear : {"ram-32", "webcam-720", "mic-usb", "ring-light"})
+	{
+		const std::string Why = S->Buy(Gear);
+		if (!Why.empty())
+		{
+			std::printf("fixture: the C3 creator's %s: %s\n", Gear, Why.c_str());
+		}
+	}
+	S->SprintBudgetMs = 1.0e9;
+	const ss::net::Network& Net = ss::net::Shared();
+	const int FirstDay = ss::net::DayOf(S->WorldMinutes());
+	int Turn = 0;
+	std::vector<std::string> ToRepack; // uploads 30, 60, 90, 120 and 150: repackaged at five days old
+	bool Switched = false;
+	for (int K = 0; K <= Days; ++K)
+	{
+		const int DayNo = FirstDay + K;
+		const bool Last = K == Days;
+		const int Wd = K % 7;
+		const bool UploadDay = K >= 3 && (Wd == 1 || Wd == 3 || Wd == 5);
+		// 7 AM: a shift when the roll's under the rent and a cushion; a repackage that's due.
+		Now = CreatorUntil(*S, Now, static_cast<double>(DayNo) * Day + 7.0 * 60.0);
+		Fed(*S);
+		if (S->BankrollCents < ss::life::MonthlyRentCents + 40000 && S->StartActivity("washfold").empty())
+		{
+			Now = Creator3Skip(*S, Now);
+		}
+		for (const std::string& Id : ToRepack)
+		{
+			for (const video::Video& V : S->Life.Video.Videos)
+			{
+				if (V.Id != Id || !V.X.On || V.X.Repacks > 0 || S->WorldMinutes() < V.At + 5.0 * Day || T.Repacks >= 5)
+				{
+					continue;
+				}
+				video::Repack Rp;
+				if (T.Repacks % 2 == 0 || V.F == video::Format::Short) // a Cut has no thumbnail: its repackage is its title
+				{
+					const std::vector<video::TitleOption> Os = video::RepackTitles(V, S->Life.Video, 0, 3);
+					Rp.TitleKey = Os.size() > 1 ? Os[1].Key : std::string();
+				}
+				else
+				{
+					const std::vector<video::ThumbSpec> Os = video::RepackThumbs(V, S->Life.Video, 0, 6);
+					Rp.Spec = Os.size() > 1 ? Os[1] : video::ThumbSpec();
+				}
+				const std::string Why = Rp.TitleKey.empty() && Rp.Spec.Arch < 0 ? std::string("no options") : S->Repackage(Id, Rp);
+				T.Repacks += Why.empty() ? 1 : 0;
+				if (!Why.empty() && Transcript)
+				{
+					std::printf("  [creator3] day %d: the repackage of %s: %s\n", K, Id.c_str(), Why.c_str());
+				}
+				break;
+			}
+		}
+		// Twelve days before the end: Heavy ads on the newest News video past its last check-in (day 14).
+		if (!Switched && K == Days - 12)
+		{
+			for (auto It = S->Life.Video.Videos.rbegin(); It != S->Life.Video.Videos.rend() && !Switched; ++It)
+			{
+				if (It->X.On && It->C == video::Class::News && It->F != video::Format::Short && S->WorldMinutes() >= It->At + 16.0 * Day)
+				{
+					const std::string Why = S->SetAdLoad(It->Id, video::AdLoad::Heavy);
+					Switched = Why.empty();
+					T.Heavy += Switched ? 1 : 0;
+				}
+			}
+		}
+		// Tuesdays: the upload before the afternoon's stream (a Live Drop if the stream runs half an hour).
+		if (UploadDay && Wd == 1 && !Last)
+		{
+			Now = CreatorUntil(*S, Now, static_cast<double>(DayNo) * Day + 11.0 * 60.0);
+			if (Creator3Upload(*S, Now, Turn, Turn == 50 || Turn == 100, false, T))
+			{
+				if (Turn == 30 || Turn == 60 || Turn == 90 || Turn == 120 || Turn == 150)
+				{
+					ToRepack.push_back(Creator3Newest(*S));
+				}
+				++Turn;
+			}
+		}
+		// 2 PM: a hyper on stream; the plan (TAG) skips it whole one day, Sprint plays it the next.
+		Now = CreatorUntil(*S, Now, static_cast<double>(DayNo) * Day + 14.0 * 60.0);
+		Fed(*S);
+		ss::net::EventInstance I;
+		if (!Last && S->BankrollCents >= 500 && Net.Next("hyper-sprint", S->WorldMinutes() + 1.0, I))
+		{
+			const bool OnAir = S->GoLive().empty();
+			if (K % 2 == 0)
+			{
+				PlanHyper(*S, Now, I, style::Style::Tag, 0, 0);
+			}
+			else
+			{
+				CreatorSprint(*S, Now, I);
+			}
+			if (OnAir)
+			{
+				// Half an hour on air at least (Live Drop's minimum), then off.
+				Now = CreatorUntil(*S, Now, std::max(S->WorldMinutes(), S->Stream.StartWorld + 35.0));
+				Now = Wait(*S, Now, 0.5);
+				S->EndStream();
+			}
+		}
+		// 9 PM: the evening's upload (Thursday and Saturday; the last evening's is a Duel, mid-test at the save).
+		if ((UploadDay && Wd != 1) || Last)
+		{
+			Now = CreatorUntil(*S, Now, static_cast<double>(DayNo) * Day + 21.0 * 60.0);
+			if (Creator3Upload(*S, Now, Turn, Last || Turn == 50 || Turn == 100, !Last && Turn % 2 == 0, T))
+			{
+				if (Turn == 30 || Turn == 60 || Turn == 90 || Turn == 120 || Turn == 150)
+				{
+					ToRepack.push_back(Creator3Newest(*S));
+				}
+				++Turn;
+			}
+		}
+		if (Transcript && K % 30 == 29)
+		{
+			CreatorLine(*S, K + 1);
+		}
+	}
+	// The next afternoon, fed: saved (the last Duel's 48-hour test still running).
+	Now = CreatorUntil(*S, Now, static_cast<double>(ss::net::DayOf(S->WorldMinutes()) + 1) * Day + 15.0 * 60.0);
+	Fed(*S);
+	Now = Wait(*S, Now, 0.2);
+	S->Save();
+	if (Transcript)
+	{
+		CreatorLine(*S, Days + 1);
+		std::printf("  [creator3] %d uploads (%d ideas, %d series, %d Cuts, %d Teaching), %d Duels (the last %s), %d repackages, %d teasers, %d reply rounds, "
+					"%d Cuts made from a video, %d Heavy switch, %d refused\n",
+			T.Uploads, T.Ideas, T.Series, T.Cuts, T.Teaching, T.Duels, T.LastDuel.c_str(), T.Repacks, T.Teasers, T.Replies, T.MadeCuts, T.Heavy, T.Refused);
+	}
+	return H.Last;
+}
+#endif
+
 bool WriteFile(const std::string& Path, const std::string& Text)
 {
 	FILE* F = std::fopen(Path.c_str(), "wb");
@@ -2359,10 +2646,11 @@ int main(int Argc, char** Argv)
 	using namespace fixture_tool;
 	const std::string Mode = Argc > 1 ? Argv[1] : "";
 	if (Mode != "write" && Mode != "write2" && Mode != "write-g1" && Mode != "write-g2" && Mode != "write-g3" && Mode != "write-g3k" && Mode != "g3k-dry" && Mode != "kast-worst" &&
-		Mode != "transcript")
+		Mode != "write-u3g3" && Mode != "transcript")
 	{
 		std::printf("usage: fixture_tool write <dir> | fixture_tool write2 <dir> | fixture_tool write-g1 <dir> [show] | fixture_tool write-g2 <dir> [show] | fixture_tool write-g3 <dir> "
-					"[show] | fixture_tool write-g3k <dir> [show] | fixture_tool g3k-dry <days> | fixture_tool kast-worst | fixture_tool transcript\n");
+					"[show] | fixture_tool write-g3k <dir> [show] | fixture_tool g3k-dry <days> | fixture_tool kast-worst | fixture_tool write-u3g3 <dir> [show] [days] | "
+					"fixture_tool transcript\n");
 		return 2;
 	}
 	Transcript = Mode == "transcript";
@@ -2400,6 +2688,27 @@ int main(int Argc, char** Argv)
 		return WriteFile(Dir + "update3_streamer.ssave", WithoutWorld(Streamer3K(730).Serialize())) ? 0 : 1;
 #else
 		std::printf("fixture_tool %s: this tree has no creator update (Game/KastGrowth.h)\n", Mode.c_str());
+		return 2;
+#endif
+	}
+	if (Mode == "write-u3g3")
+	{
+#if SS_FIXTURE_U3G3
+		// C3's creator fixture (update 3 SPEC §7.5): "show" prints the channel every thirty days and the tally; a number after it
+		// builds that many days instead of 420 (a dry run's length: the file is written either way, so write it to scratch).
+		if (Argc < 3)
+		{
+			std::printf("usage: fixture_tool write-u3g3 <dir> [show] [days]\n");
+			return 2;
+		}
+		Transcript = Argc > 3 && std::string(Argv[3]) == "show";
+		const int Days = Argc > 4 ? std::max(7, std::atoi(Argv[4])) : 420;
+		const std::string Dir = std::string(Argv[2]) + "/";
+		Creator3Tally T;
+		const ss::SaveData D = Creator3(Days, T);
+		return WriteFile(Dir + "update3_creator.ssave", WithoutWorld(D.Serialize())) ? 0 : 1;
+#else
+		std::printf("fixture_tool write-u3g3: this tree has no Rerun 2.0 library (Game/VideoContent.h)\n");
 		return 2;
 #endif
 	}

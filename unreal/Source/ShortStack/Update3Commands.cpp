@@ -143,6 +143,8 @@ FUpdate3Command VideoCheckin(EUpdate3Feature::Video, TEXT("ss.Video.Checkin"), T
 	TEXT("ss.Video.Checkin [id]: each eligible video's next decision midnight and its score now."));
 FUpdate3Command VideoTrends(EUpdate3Feature::Video, TEXT("ss.Video.Trends"), TEXT("Trends"), TEXT("This week's trends on Rerun, with their heat."));
 FUpdate3Command VideoIdeas(EUpdate3Feature::Video, TEXT("ss.Video.Ideas"), TEXT("Ideas"), TEXT("Every video idea, with its lock and what it still needs."));
+FUpdate3Command VideoIdea(EUpdate3Feature::Video, TEXT("ss.Video.Idea"), TEXT("Idea"),
+	TEXT("ss.Video.Idea <id>: chooses a ready idea from IDEAS as Studio's card does (a series idea declares its series) (testing)."));
 FUpdate3Command VideoSheet(EUpdate3Feature::Video, TEXT("ss.Video.Sheet"), TEXT("Sheet"),
 	TEXT("ss.Video.Sheet <beats|reads|pots|runs|rival|stories|ideas> <n>: n generated thumbnails for that kind group as a contact sheet on the laptop (testing)."));
 FUpdate3Command VideoRepack(EUpdate3Feature::Video, TEXT("ss.Video.Repack"), TEXT("Repack"),

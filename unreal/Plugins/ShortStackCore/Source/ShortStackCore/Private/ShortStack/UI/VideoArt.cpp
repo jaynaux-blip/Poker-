@@ -9,6 +9,7 @@
 #include "ShortStack/UI/Portrait.h"
 #include "ShortStack/UI/SiteArt.h"
 #include "ShortStack/UI/StreamArt.h"
+#include "ShortStack/UI/ThumbArt.h"
 #include "ShortStack/UI/Ui.h"
 
 #include <algorithm>
@@ -420,7 +421,18 @@ void Tile(Canvas& C, Rect R, const video::Video& V, double World)
 	C.PushClip(R);
 	C.FillRoundRect(Th, 8.0f, Hex(Ink));
 	C.PushClip(Th);
-	Thumbnail(C, Th, V.Th);
+	if (V.X.On && V.X.Spec[static_cast<size_t>(std::clamp(static_cast<int>(V.X.DuelWin), 0, 2))].Arch >= 0)
+	{
+		// Update 3 (C3, ui-thumbs): a Rerun 2.0 video's shown recipe through the compositor (Tile has no Look: the default
+		// person; the pages draw with the player's, thumbart::VideoThumb). Update 2's videos draw their frame below, unchanged.
+		thumbart::Budget All;
+		All.Max = 1 << 20;
+		thumbart::Draw(C, Th, V.X.Spec[static_cast<size_t>(std::clamp(static_cast<int>(V.X.DuelWin), 0, 2))], hero::Character(), V.Th, All);
+	}
+	else
+	{
+		Thumbnail(C, Th, V.Th);
+	}
 	C.PopClip();
 	const int Seconds = static_cast<int>(std::lround(V.LengthMin * 60.0));
 	const std::string Length = std::to_string(Seconds / 60) + ":" + (Seconds % 60 < 10 ? "0" : "") + std::to_string(Seconds % 60);

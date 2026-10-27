@@ -226,6 +226,14 @@ struct DayRow
 	int Key = 0;
 	float Views = 0, WatchH = 0, Gained = 0, Lost = 0, Likes = 0, Dislikes = 0, Impr = 0, Comments = 0;
 	Chips Cents = 0;
+	// core-videoalgo (C3: §4.5.7's itemized statement, §5.6's Revenue), appended: the Cuts feed's share of Cents and of Views,
+	// and the watch page's ad impressions and monetized playbacks behind the rest (filled on the days ads pay; vday/vmonth/vlife
+	// carry them).
+	Chips CutCents = 0;
+	float CutViews = 0, AdImpr = 0, Monetized = 0;
+	// c3f-algo (C3 fix H1, the top-earner rate: the user's soft ceiling), appended: what the rate held back on the row's days (the
+	// ads' earnings less Cents) and the Cuts feed's part of it; 0 under the rate (a "*" run in vday/vmonth, two after vlife's split).
+	Chips HeldCents = 0, HeldCutCents = 0;
 };
 /** The folded tails' engagement: likes, dislikes, comments, impressions, per time constant. */
 struct TailX
@@ -495,6 +503,7 @@ enum LetterKind : int
 	LetterReview = 1,    // "Your channel's under review."
 	LetterWelcome = 2,   // the Partner Program welcome
 	LetterStatement = 3, // the monthly statement (paid, or rolled over under $100)
+	LetterLimited = 4,   // the first Limited ads coin's notice, ever (core-videoalgo, C3: valgo::VaLetterLimited)
 };
 /** Marks (life::Mark::Kind) Rerun adds to the wall calendar and the second screen. */
 enum MarkKind : int

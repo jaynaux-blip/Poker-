@@ -1,14 +1,22 @@
 #include "ShortStack/Game/Video.h"
 
+#include "VideoContentPriv.h"
+#include "VideoAlgoPriv.h"
+
 #include "ShortStack/Cards.h"
 #include "ShortStack/Evaluator.h"
 #include "ShortStack/Game/Format.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/VideoAlgo.h"
+#include "ShortStack/Game/VideoContent.h"
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <set>
 
 // Rerun's words (update 2 §4.5, §4.9): the five title styles' templates for every kind and for the Vlog and Recap
 // formats, the thumbnails' big text, Studio's lines, Rerun's letters and the bell. core-video.
@@ -30,6 +38,7 @@ int GroupOf(Kind K); // Video.cpp
 bool EventKind(Kind K);
 double PotBbOf(const Candidate& C);
 int MadeLevel(const std::vector<Card>& Mine, const std::vector<Card>& Board);
+int OwnCategory(const std::vector<Card>& Hole, const std::vector<Card>& Board);
 } // namespace video_detail
 
 namespace video_copy
@@ -705,6 +714,18 @@ const char* KindPhrase(Kind K)
 	case Kind::Win: return "a win";
 	case Kind::Rival: return "a rivalry";
 	case Kind::Story: return "a story";
+	// Update 3's kinds (G3: their copy is in, so Classify may make them).
+	case Kind::Monster: return "a monster hand";
+	case Kind::SetOverSet: return "set over set";
+	case Kind::RunnerRunner: return "runner-runner";
+	case Kind::DoubleKo: return "a double knockout";
+	case Kind::LadderFold: return "an ICM fold";
+	case Kind::MinCash: return "a min-cash scramble";
+	case Kind::Envelope: return "a mystery bounty";
+	case Kind::HeadsUp: return "heads-up for the title";
+	case Kind::BiggestPot: return "my biggest pot";
+	case Kind::LastHand: return "my last hand";
+	case Kind::Idea: return "a video idea";
 	case Kind::StreamMoment:
 	case Kind::Count: break;
 	}
@@ -808,13 +829,14 @@ std::string WhyNot(int Reason)
 	{
 	case 1: return "That moment's gone stale. Pick another.";
 	case 2: return "You picked the same moment twice.";
-	case 3: return "A Short is one moment.";
+	case 3: return "A Cut is one moment."; // (G3: Short is shown as "Cut")
 	case 4: return "A Breakdown is one hand.";
 	case 5: return "A Vlog takes three to eight moments from one night.";
 	case 6: return "Those moments aren't all from the same night.";
 	case 7: return "A Recap needs a deep run, a final table or a win, plus two to six hands from that event.";
 	case 8: return "Those hands aren't all from the same event.";
-	case 9: return "A story stands on its own. Post it as a Short or a Breakdown.";
+	case 9: return "A story stands on its own. Post it as a Cut or a Breakdown.";
+	case 10: return "This idea doesn't go up as that. Studio shows the formats it fits.";
 	default: break;
 	}
 	return "Pick something to post first.";
@@ -825,7 +847,7 @@ std::string EditLabel(Format F)
 {
 	switch (F)
 	{
-	case Format::Short: return "Cutting a Short";
+	case Format::Short: return "Making a Cut";
 	case Format::Vlog: return "Editing the night into a Vlog";
 	case Format::Recap: return "Putting the Recap together";
 	case Format::Breakdown: break;
@@ -910,6 +932,16 @@ std::string Title(const Choice& Ch, const std::vector<Candidate>& Cands, uint32_
 			{
 				Options.push_back(Filled);
 			}
+		}
+	}
+	if (Options.empty() && (static_cast<int>(Lead->K) >= KindCountU2 || Lead->Idea >= 0))
+	{
+		// Update 3's kinds and the idea videos have no Update 2 template (they never existed there): an Update 2 choice set of
+		// one takes Rerun 2.0's first option for the same style instead of the bare phrase (nothing Update 2 made changes).
+		video::Channel None;
+		for (const TitleOption& O : TitleOptions(Ch, Cands, None, 0, 1))
+		{
+			return O.Text;
 		}
 	}
 	if (Options.empty())
@@ -1034,6 +1066,17 @@ const char* KindLabel(Kind K)
 	case Kind::Rival: return "RIVAL";
 	case Kind::Story: return "STORY";
 	case Kind::StreamMoment: return "STREAM";
+	case Kind::Monster: return "MONSTER HAND";
+	case Kind::SetOverSet: return "SET OVER SET";
+	case Kind::RunnerRunner: return "RUNNER-RUNNER";
+	case Kind::DoubleKo: return "DOUBLE KNOCKOUT";
+	case Kind::LadderFold: return "ICM FOLD";
+	case Kind::MinCash: return "MIN-CASH";
+	case Kind::Envelope: return "MYSTERY BOUNTY";
+	case Kind::HeadsUp: return "HEADS-UP";
+	case Kind::BiggestPot: return "BIGGEST POT";
+	case Kind::LastHand: return "LAST HAND";
+	case Kind::Idea: return "IDEA";
 	case Kind::Count: break;
 	}
 	return "MOMENT";
@@ -1043,7 +1086,7 @@ const char* FormatName(Format F)
 {
 	switch (F)
 	{
-	case Format::Short: return "Short";
+	case Format::Short: return "Cut"; // G3 (SPEC §6.2): the format's name everywhere; the enum is unchanged
 	case Format::Vlog: return "Vlog";
 	case Format::Recap: return "Recap";
 	case Format::Breakdown: break;
@@ -1055,7 +1098,7 @@ const char* TitleStyleName(TitleStyle T)
 {
 	switch (T)
 	{
-	case TitleStyle::Hype: return "Hype";
+	case TitleStyle::Hype: return "Loud"; // G3: Hype is shown as "Loud"
 	case TitleStyle::Teaching: return "Teaching";
 	case TitleStyle::Question: return "Question";
 	case TitleStyle::Plain: return "Plain";
@@ -1106,7 +1149,7 @@ std::vector<std::string> Advice(const Choice& Ch, const std::vector<Candidate>& 
 	const std::vector<Candidate> P = Picked(Ch, Open);
 	switch (Ch.F)
 	{
-	case Format::Short: Out.push_back("Shorts get seen fast and forgotten fast, and they don't count toward watch hours."); break;
+	case Format::Short: Out.push_back("Cuts get seen fast and forgotten fast, and they don't count toward watch hours."); break;
 	case Format::Breakdown: Out.push_back("A Breakdown walks through one hand, and it counts toward watch hours."); break;
 	case Format::Vlog:
 		// Ads are no reason to pick a format until there are any (the gate, then the review).
@@ -1117,7 +1160,7 @@ std::vector<std::string> Advice(const Choice& Ch, const std::vector<Candidate>& 
 	switch (Ch.T)
 	{
 	case TitleStyle::Story: Out.push_back("Story titles make people care, and the ones who care stay."); break;
-	case TitleStyle::Hype: Out.push_back("Hype titles get the click. On a small pot, people leave early."); break;
+	case TitleStyle::Hype: Out.push_back("Loud titles get the click. On a small pot, people leave early."); break;
 	case TitleStyle::Teaching: Out.push_back("Teaching titles keep people watching. On a decision, people keep finding it for months."); break;
 	case TitleStyle::Question: Out.push_back("A question pulls people in to argue about it."); break;
 	case TitleStyle::Plain: Out.push_back("Plain titles tell people exactly what they're getting."); break;
@@ -1267,5 +1310,1344 @@ std::vector<std::string> Inventory()
 	}
 	return Out;
 }
+
+// ================================================================== Rerun 2.0's title engine (update 3 SPEC §6.2; core-videocontent)
+// The facts (Update 2's FactsFor and Update 3's: the new kinds', an idea's, a series' episode), the templates (Update 2's 296
+// strings verbatim, then VideoTitles.cpp's rows), the stable rendezvous picker that skips the last 20 titles' templates, the
+// traits and the promise. Update 2's Title() above is untouched for Update 2's kinds: an empty Choice::TitleTpl keeps it.
+
+namespace vcontent
+{
+std::string UpperU3(std::string S)
+{
+	return video_copy::Upper(std::move(S));
+}
+
+std::string LowerU3(std::string S)
+{
+	return video_copy::Lower(std::move(S));
+}
+
+std::string Cash(Chips Cents)
+{
+	if (Cents >= 100000000 || Cents <= -100000000)
+	{
+		// "$1.2M": a million and more, to a tenth.
+		const double M = static_cast<double>(Cents) / 100000000.0;
+		const double R = std::round(M * 10.0) / 10.0;
+		const bool Whole = std::fabs(R - std::round(R)) < 1e-9;
+		return std::string(Cents < 0 ? "-" : "") + "$" + (Whole ? std::to_string(static_cast<long long>(std::llround(std::fabs(R)))) : Fixed(std::fabs(R), 1)) + "M";
+	}
+	return Cents < 0 ? "-" + video_copy::Dollars(-Cents) : video_copy::Dollars(Cents);
+}
+
+std::string FactEsc(const std::string& Value)
+{
+	static const char* const Hex = "0123456789ABCDEF";
+	std::string Out;
+	for (const char Ch : Value)
+	{
+		const unsigned char U = static_cast<unsigned char>(Ch);
+		if (Ch == ' ')
+		{
+			Out.push_back('+');
+		}
+		else if (Ch == '+' || Ch == '%' || Ch == ';' || Ch == '=' || U <= 0x20 || U == 0x7f)
+		{
+			Out.push_back('%');
+			Out.push_back(Hex[U >> 4]);
+			Out.push_back(Hex[U & 15]);
+		}
+		else
+		{
+			Out.push_back(Ch);
+		}
+	}
+	return Out;
+}
+
+std::string FactUnesc(const std::string& Value)
+{
+	auto Nibble = [](char C) { return C >= '0' && C <= '9' ? C - '0' : C >= 'A' && C <= 'F' ? C - 'A' + 10 : C >= 'a' && C <= 'f' ? C - 'a' + 10 : 0; };
+	std::string Out;
+	for (size_t I = 0; I < Value.size(); ++I)
+	{
+		if (Value[I] == '+')
+		{
+			Out.push_back(' ');
+		}
+		else if (Value[I] == '%' && I + 2 < Value.size())
+		{
+			Out.push_back(static_cast<char>(Nibble(Value[I + 1]) * 16 + Nibble(Value[I + 2])));
+			I += 2;
+		}
+		else
+		{
+			Out.push_back(Value[I]);
+		}
+	}
+	return Out;
+}
+
+std::map<std::string, std::string> DisplayFacts(const std::string& IdeaFacts)
+{
+	std::map<std::string, std::string> Out;
+	size_t At = 0;
+	while (At < IdeaFacts.size())
+	{
+		size_t End = IdeaFacts.find(';', At);
+		End = End == std::string::npos ? IdeaFacts.size() : End;
+		const std::string Token = IdeaFacts.substr(At, End - At);
+		const size_t Eq = Token.find('=');
+		if (Eq != std::string::npos && Eq > 0 && Token[0] >= 'A' && Token[0] <= 'Z')
+		{
+			const std::string Key = Token.substr(0, Eq);
+			std::string Value = FactUnesc(Token.substr(Eq + 1));
+			// An event's name as a title says it after "the": "The Spark" is "the Spark", "$215 The Big Session" "the $215 Big Session".
+			if (Key == "Event" || Key == "Event2" || Key == "Major" || Key == "Seat" || Key == "Series")
+			{
+				const size_t Price = !Value.empty() && Value[0] == '$' ? Value.find(' ') : std::string::npos;
+				const size_t The = Value.compare(0, 4, "The ") == 0 ? 0 : Price != std::string::npos && Value.compare(Price + 1, 4, "The ") == 0 ? Price + 1 : std::string::npos;
+				if (The != std::string::npos && Value.size() > The + 4)
+				{
+					Value.erase(The, 4);
+				}
+			}
+			Out[Key] = Value;
+		}
+		At = End + 1;
+	}
+	return Out;
+}
+
+const char* KindPhraseU3(Kind K)
+{
+	return video_copy::KindPhrase(K);
+}
+
+const Candidate& LeadOf(const Choice& Ch, const std::vector<Candidate>& Picks)
+{
+	const Candidate* Lead = &Picks.front();
+	for (const Candidate& X : Picks)
+	{
+		if (Ch.F != Format::Recap && (video_detail::EventKind(X.K) ? 10.0 : 0.0) + X.Drama > (video_detail::EventKind(Lead->K) ? 10.0 : 0.0) + Lead->Drama)
+		{
+			Lead = &X;
+		}
+	}
+	return *Lead;
+}
+
+namespace
+{
+/** The player's chance to win after the flop against a hand turned up (every turn and river), 0-1; -1 when it can't be known. */
+double VcFlopEquity(const std::vector<Card>& Mine, const std::vector<Card>& Theirs, const std::vector<Card>& Board)
+{
+	if (Mine.size() < 2 || Theirs.size() < 2 || Board.size() < 3)
+	{
+		return -1.0;
+	}
+	bool Used[52] = {};
+	for (const Card C : Mine)
+	{
+		Used[C] = true;
+	}
+	for (const Card C : Theirs)
+	{
+		Used[C] = true;
+	}
+	for (size_t I = 0; I < 3; ++I)
+	{
+		Used[Board[I]] = true;
+	}
+	double Win = 0.0, N = 0.0;
+	std::vector<Card> Full(Board.begin(), Board.begin() + 3);
+	Full.resize(5);
+	for (int A = 0; A < 52; ++A)
+	{
+		if (Used[A])
+		{
+			continue;
+		}
+		for (int B = A + 1; B < 52; ++B)
+		{
+			if (Used[B])
+			{
+				continue;
+			}
+			Full[3] = static_cast<Card>(A);
+			Full[4] = static_cast<Card>(B);
+			const int Me = EvaluateHand(Mine, Full), Them = EvaluateHand(Theirs, Full);
+			Win += Me > Them ? 1.0 : Me == Them ? 0.5 : 0.0;
+			N += 1.0;
+		}
+	}
+	return N > 0.0 ? Win / N : -1.0;
+}
+
+/** "quad kings", "a straight flush", "a royal flush" (the player's own made hand), or "". */
+std::string VcMadeHand(const std::vector<Card>& Mine, const std::vector<Card>& Board)
+{
+	if (Mine.size() < 2 || Board.size() < 3)
+	{
+		return std::string();
+	}
+	const int Cat = video_detail::OwnCategory(Mine, Board);
+	if (Cat == static_cast<int>(Category::StraightFlush))
+	{
+		const int Score = EvaluateHand(Mine, Board);
+		return ((Score >> 16) & 15) == 12 ? std::string("a royal flush") : std::string("a straight flush");
+	}
+	if (Cat == static_cast<int>(Category::Quads))
+	{
+		return std::string("quads");
+	}
+	return std::string();
+}
+
+/** "the nine of hearts" (a card by its name). */
+std::string VcCardName(Card C)
+{
+	static const char* const Suits[4] = {"clubs", "diamonds", "hearts", "spades"};
+	const std::string S = CardToString(C);
+	const char Suit = S.size() >= 2 ? S[1] : 'c';
+	const int I = Suit == 'd' ? 1 : Suit == 'h' ? 2 : Suit == 's' ? 3 : 0;
+	return "the " + video_copy::RankWord(RankOf(C)) + " of " + Suits[I];
+}
+
+/** The player's pair on the final board: "an overpair", "top pair", "second pair", "bottom pair", "" for none or more. */
+std::string VcPairWord(const std::vector<Card>& Mine, const std::vector<Card>& Board)
+{
+	if (Mine.size() < 2 || Board.size() < 3 || video_detail::OwnCategory(Mine, Board) != static_cast<int>(Category::Pair))
+	{
+		return std::string();
+	}
+	std::vector<int> Ranks;
+	for (const Card C : Board)
+	{
+		if (std::find(Ranks.begin(), Ranks.end(), RankOf(C)) == Ranks.end())
+		{
+			Ranks.push_back(RankOf(C));
+		}
+	}
+	std::sort(Ranks.rbegin(), Ranks.rend());
+	const int A = RankOf(Mine[0]), B = RankOf(Mine[1]);
+	if (A == B)
+	{
+		return A > Ranks.front() ? std::string("an overpair") : std::string();
+	}
+	for (size_t I = 0; I < Ranks.size(); ++I)
+	{
+		if (Ranks[I] == A || Ranks[I] == B)
+		{
+			return I == 0 ? std::string("top pair") : I + 1 == Ranks.size() ? std::string("bottom pair") : I == 1 ? std::string("second pair") : std::string("a middle pair");
+		}
+	}
+	return std::string();
+}
+
+/** "KsKh": the cards as written. */
+std::string VcCards2(const std::vector<Card>& C)
+{
+	std::string S;
+	for (const Card X : C)
+	{
+		S += CardToString(X);
+	}
+	return S;
+}
+
+/** The hand that was turned up against the player (the opponent's, else the first). */
+const std::vector<Card>* VcTheirs(const Candidate& L)
+{
+	const std::vector<Card>* Theirs = nullptr;
+	for (const auto& S : L.Rec.Shown)
+	{
+		if (S.second.size() >= 2 && (L.Opponent.empty() || S.first == L.Opponent || !Theirs))
+		{
+			Theirs = &S.second;
+		}
+	}
+	return Theirs;
+}
+} // namespace
+
+Facts FactsOf(const Choice& Ch, const std::vector<Candidate>& Picks, const Candidate& Lead, const Channel* C)
+{
+	Facts F;
+	{
+		const video_copy::Facts U2 = video_copy::FactsFor(Ch, Picks, Lead);
+		F.V = U2.V;
+		F.Won = U2.Won;
+		F.Lost = U2.Lost;
+		F.Bubble = U2.Bubble;
+		F.EventWon = U2.EventWon;
+		F.Nothing = U2.Nothing;
+	}
+	F.Storytime = Lead.Storytime;
+	F.Live = Lead.Source == 1;
+	F.AllIn = !video_detail::EventKind(Lead.K) && Lead.Rec.Mine.size() >= 2 && Lead.EquityAtAllIn >= 0.0;
+	auto Set = [&F](const char* Key, const std::string& Value) {
+		if (!Value.empty())
+		{
+			F.V[Key] = Value;
+		}
+	};
+	// Update 3's hand facts: the made hand, seven-deuce as written, the chance after the flop, the stream's room.
+	if (!video_detail::EventKind(Lead.K) && Lead.Rec.Mine.size() >= 2)
+	{
+		Set("MadeHand", VcMadeHand(Lead.Rec.Mine, Lead.Rec.Board));
+		Set("MineCards", VcCards2(Lead.Rec.Mine));
+		Set("PairWord", VcPairWord(Lead.Rec.Mine, Lead.Rec.Board));
+		if (const std::vector<Card>* Theirs = VcTheirs(Lead))
+		{
+			Set("TheirsCards", VcCards2(*Theirs));
+			// The card that turned it, by its name ("the nine of hearts"): the same card as {Killer}.
+			if (Lead.Rec.Board.size() >= 4)
+			{
+				const bool HeroWon = Lead.Rec.HeroNet > 0;
+				for (int N = 5; N >= 3; --N)
+				{
+					if (static_cast<size_t>(N) > Lead.Rec.Board.size())
+					{
+						continue;
+					}
+					const std::vector<Card> Part(Lead.Rec.Board.begin(), Lead.Rec.Board.begin() + N);
+					const int Me = EvaluateHand(Lead.Rec.Mine, Part), Them = EvaluateHand(*Theirs, Part);
+					if (!(HeroWon ? Me > Them : Them > Me))
+					{
+						if (N < static_cast<int>(Lead.Rec.Board.size()))
+						{
+							Set("KillerCard", VcCardName(Lead.Rec.Board[static_cast<size_t>(N)]));
+						}
+						break;
+					}
+				}
+			}
+		}
+		const int A = std::max(RankOf(Lead.Rec.Mine[0]), RankOf(Lead.Rec.Mine[1])), B = std::min(RankOf(Lead.Rec.Mine[0]), RankOf(Lead.Rec.Mine[1]));
+		if (A != B)
+		{
+			Set("MineDash", std::string(1, RankChars[A]) + "-" + RankChars[B]);
+		}
+		if (Lead.K == Kind::RunnerRunner)
+		{
+			if (const std::vector<Card>* Theirs = VcTheirs(Lead))
+			{
+				const double Eq = VcFlopEquity(Lead.Rec.Mine, *Theirs, Lead.Rec.Board);
+				if (Eq >= 0.0)
+				{
+					Set("FlopEq", std::to_string(static_cast<int>(std::lround(Eq * 100.0))));
+				}
+			}
+		}
+	}
+	if (Lead.Stream.Viewers > 0)
+	{
+		Set("Watching", Grouped(Lead.Stream.Viewers));
+	}
+	// The kinds that are about where the player stood in the event (a min-cash, the last two, the bust, a pay jump): the place
+	// and the field are the hand's own facts there (a hand of any other kind says nothing of a place).
+	if ((Lead.K == Kind::MinCash || Lead.K == Kind::HeadsUp || Lead.K == Kind::LastHand || Lead.K == Kind::LadderFold) && Lead.PlaceSoFar > 0 && !F.V.count("Place"))
+	{
+		Set("Place", Ordinal(Lead.PlaceSoFar));
+		Set("PlaceWord", video_copy::PlaceWords(Lead.PlaceSoFar));
+		if (Lead.Field > 1)
+		{
+			Set("Field", Grouped(Lead.Field));
+		}
+	}
+	Set("KindPhrase", KindPhraseU3(Lead.K));
+	// An idea's (or an Idea-tagged moment's) display facts, its conditions and its name.
+	for (const auto& Kv : DisplayFacts(Lead.IdeaFacts))
+	{
+		Set(Kv.first.c_str(), Kv.second);
+	}
+	const std::string& Flags = F.V.count("If") ? F.V.at("If") : std::string();
+	F.First = Flags.find('F') != std::string::npos || Lead.K == Kind::BiggestPot;
+	F.RentShort = Flags.find('R') != std::string::npos;
+	F.Trend = Flags.find('T') != std::string::npos;
+	if (Flags.find('X') != std::string::npos)
+	{
+		F.EventWon = true;
+	}
+	if (Flags.find('U') != std::string::npos)
+	{
+		F.Won = true;
+	}
+	if (Flags.find('M') != std::string::npos)
+	{
+		F.Lost = true;
+	}
+	F.V.erase("If");
+	if (Lead.Idea >= 0)
+	{
+		Set("IdeaName", IdeaName(Lead.Idea));
+	}
+	if (!F.V.count("Stakes") && F.V.count("BuyIn") && F.V.count("Event"))
+	{
+		Set("Stakes", F.V.at("BuyIn") + " " + F.V.at("Event"));
+	}
+	if (F.V.count("Event") && !Lead.Storytime)
+	{
+		// "the Night Owl Turbo", but "The Spark" as it's named.
+		const std::string& E = F.V.at("Event");
+		Set("TheEvent", E.rfind("The ", 0) == 0 ? E : "the " + E);
+	}
+	F.Series = Lead.Series || Ch.Series >= 0;
+	if (C)
+	{
+		F.Partner = C->PartnerAt >= 0.0;
+		// A series' episode (Choice::Series names the channel's challenge): its name, the episode, where the roll stands.
+		for (const Challenge& S : C->X.Challenges)
+		{
+			if (S.Id == Ch.Series)
+			{
+				Set("Ep", std::to_string(S.Episodes + 1));
+				Set("Day", std::to_string(std::max(1, static_cast<int>(std::floor((Lead.At - S.StartedAt) / 1440.0)) + 1)));
+				if (S.Start > 0)
+				{
+					Set("Start", Cash(S.Start));
+				}
+				if (S.Goal > 0)
+				{
+					Set("Goal", Cash(S.Goal));
+				}
+			}
+		}
+		for (const Playlist& Pl : C->X.Lists)
+		{
+			if (!Pl.Name.empty() && Pl.Id == "s" + std::to_string(Ch.Series))
+			{
+				Set("Series", Pl.Name);
+			}
+		}
+	}
+	return F;
+}
+
+std::string FillU3(const std::string& Text, const Facts& F)
+{
+	std::string T = Text;
+	while (T.size() > 3 && T[0] == '#' && T[2] == ' ')
+	{
+		const char C = T[1];
+		const bool Pass = C == 'W' ? F.Won : C == 'L' ? F.Lost : C == 'B' ? F.Bubble : C == 'X' ? F.EventWon : C == 'N' ? !F.EventWon : C == '0' ? F.Nothing : C == 'F' ? F.First :
+			C == 'R' ? F.RentShort : C == 'S' ? F.Series : C == 'P' ? F.Partner : C == 'T' ? F.Trend : C == 'D' ? !F.Storytime : C == 'V' ? F.Live : C == 'U' ? F.Won :
+			C == 'M' ? F.Lost : C == 'Y' ? F.Storytime : C == 'A' ? F.AllIn : false;
+		if (!Pass)
+		{
+			return std::string();
+		}
+		T = T.substr(3);
+	}
+	// (A template written in capitals keeps an article it fits in capitals: "AN $11 SHOT".)
+	bool Letters = false, Lower = false;
+	for (size_t K = 0, Depth = 0; K < T.size(); ++K)
+	{
+		Depth = T[K] == '{' ? 1 : T[K] == '}' ? 0 : Depth;
+		Letters = Letters || (Depth == 0 && T[K] >= 'A' && T[K] <= 'Z');
+		Lower = Lower || (Depth == 0 && T[K] >= 'a' && T[K] <= 'z');
+	}
+	std::string Out;
+	size_t I = 0;
+	while (I < T.size())
+	{
+		const size_t Open = T.find('{', I);
+		if (Open == std::string::npos)
+		{
+			Out.append(T, I, std::string::npos);
+			break;
+		}
+		const size_t Close = T.find('}', Open);
+		const auto It = Close == std::string::npos ? F.V.end() : F.V.find(T.substr(Open + 1, Close - Open - 1));
+		if (It == F.V.end())
+		{
+			return std::string();
+		}
+		Out.append(T, I, Open - I);
+		FitArticle(Out, It->second, Letters && !Lower); // "an $11 buy-in", "a Midnight Turbo vlog"
+		Out += It->second;
+		I = Close + 1;
+	}
+	return Out;
+}
+
+bool TakesAn(const std::string& Next)
+{
+	const auto Starts = [&Next](const char* W) {
+		const size_t N = std::strlen(W);
+		if (Next.size() < N)
+		{
+			return false;
+		}
+		for (size_t K = 0; K < N; ++K)
+		{
+			if (std::tolower(static_cast<unsigned char>(Next[K])) != W[K])
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	const size_t At = !Next.empty() && Next[0] == '$' ? 1 : 0;
+	if (At < Next.size() && Next[At] >= '0' && Next[At] <= '9')
+	{
+		// A number is read by its first group ("$18,000" eighteen thousand, "$1,190" one thousand): eight, eleven, eighteen,
+		// eighty-something and eight hundred-something start with a vowel; "8th" and "11x" too.
+		int N = 0;
+		for (size_t K = At; K < Next.size() && K < At + 3 && Next[K] >= '0' && Next[K] <= '9'; ++K)
+		{
+			N = N * 10 + (Next[K] - '0');
+		}
+		return N == 8 || N == 11 || N == 18 || (N >= 80 && N <= 89) || (N >= 800 && N <= 899);
+	}
+	if (At > 0 || Next.empty())
+	{
+		return false;
+	}
+	switch (std::tolower(static_cast<unsigned char>(Next[0])))
+	{
+	case 'a':
+	case 'i': return true;
+	case 'e': return !Starts("eu") && !Starts("ewe");
+	case 'o': return !Starts("one") && !Starts("once");
+	case 'u': return (Starts("un") && !Starts("uni")) || Starts("up") || Starts("ug") || Starts("ul") || Starts("um");
+	case 'h': return Starts("hour") || Starts("honest") || Starts("honour") || Starts("honor") || Starts("heir");
+	default: break;
+	}
+	return false;
+}
+
+void FitArticle(std::string& Out, const std::string& Next, bool Caps)
+{
+	if (Next.empty() || Out.size() < 2 || Out.back() != ' ')
+	{
+		return;
+	}
+	const unsigned char First = static_cast<unsigned char>(Next[0]);
+	if (!(std::isalnum(First) || First == '$'))
+	{
+		return;
+	}
+	const size_t End = Out.size() - 1;
+	size_t Start = End;
+	while (Start > 0 && std::isalpha(static_cast<unsigned char>(Out[Start - 1])))
+	{
+		--Start;
+	}
+	if (Start > 0 && (Out[Start - 1] == '\'' || Out[Start - 1] == '-' || std::isalnum(static_cast<unsigned char>(Out[Start - 1]))))
+	{
+		return; // part of a longer word
+	}
+	const std::string W = Out.substr(Start, End - Start);
+	const std::string L = LowerU3(W);
+	if (L != "a" && L != "an")
+	{
+		return;
+	}
+	const bool An = TakesAn(Next);
+	if ((L == "an") == An)
+	{
+		return;
+	}
+	const bool Upper = W[0] >= 'A' && W[0] <= 'Z';
+	const bool AllUpper = W.size() > 1 ? W[1] >= 'A' && W[1] <= 'Z' : Caps;
+	Out.replace(Start, W.size(), An ? (AllUpper ? "AN" : Upper ? "An" : "an") : (Upper ? "A" : "a"));
+}
+
+std::string ThumbNotALook()
+{
+	return "That thumbnail isn't one of this moment's looks: pick it again from the options.";
+}
+
+std::string StyledU3(const std::string& Title, TitleStyle T)
+{
+	return video_copy::Styled(Title, T);
+}
+
+const char* StyleSlug(TitleStyle T)
+{
+	switch (T)
+	{
+	case TitleStyle::Hype: return "loud";
+	case TitleStyle::Teaching: return "teaching";
+	case TitleStyle::Question: return "question";
+	case TitleStyle::Plain: return "plain";
+	case TitleStyle::Story:
+	case TitleStyle::Count: break;
+	}
+	return "story";
+}
+
+std::string ForSlug(int For)
+{
+	static const char* const Kinds[] = {"badbeat", "suckout", "cooler", "bluff", "bluffcaught", "herocall", "herofold", "bigpot", "knockout", "bubble", "deeprun", "finaltable", "win",
+		"rival", "story", "stream", "monster", "setoverset", "runnerrunner", "doubleko", "ladderfold", "mincash", "envelope", "headsup", "biggestpot", "lasthand", "idea"};
+	if (For >= 0 && For < static_cast<int>(Kind::Count))
+	{
+		return Kinds[For];
+	}
+	switch (For)
+	{
+	case ForVlog: return "vlog";
+	case ForRecap: return "recap";
+	case ForCut: return "cut";
+	case ForSeries: return "series";
+	case ForFallback: return "fallback";
+	default: break;
+	}
+	if (For >= ForIdea)
+	{
+		const IdeaDef* D = IdeaById(For - ForIdea);
+		return std::string("idea.") + (D ? LowerU3(D->Code) : std::to_string(For - ForIdea));
+	}
+	if (For >= ForStory)
+	{
+		const std::vector<std::string>& Keys = StoryKeys();
+		const size_t I = static_cast<size_t>(For - ForStory);
+		return "story." + (I < Keys.size() ? Keys[I] : std::to_string(I));
+	}
+	return "for" + std::to_string(For);
+}
+
+int StoryKeyOf(const std::string& Event)
+{
+	const std::vector<std::string>& Keys = StoryKeys();
+	for (size_t I = 0; I < Keys.size(); ++I)
+	{
+		if (Event == Keys[I] || Event.rfind(Keys[I] + ":", 0) == 0)
+		{
+			return static_cast<int>(I);
+		}
+	}
+	return -1;
+}
+
+namespace
+{
+/** The promise a template makes (§4.6.5): Plain 0; Story, Question and Teaching 1; Loud 2; an intensity word one more. */
+uint8_t VcPromise(TitleStyle T, const std::string& Text, const std::string& Flags)
+{
+	int P = T == TitleStyle::Plain ? 0 : T == TitleStyle::Hype ? 2 : 1;
+	const std::string Up = UpperU3(Text);
+	for (const char* W : {"BIGGEST", "INSANE", "NEVER", "CRAZIEST", "CRAZY", "WORST", "SICKEST", "CRUELEST", "LUCKIEST", "HARDEST", "MOST ", "OF MY LIFE", "!!", "EVER"})
+	{
+		if (Up.find(W) != std::string::npos)
+		{
+			++P;
+			break;
+		}
+	}
+	P += Flags.find('p') != std::string::npos ? 1 : 0;
+	P -= Flags.find('q') != std::string::npos ? 1 : 0;
+	return static_cast<uint8_t>(std::clamp(P, 0, 3));
+}
+
+uint16_t VcTagBits(const std::string& Flags)
+{
+	return static_cast<uint16_t>((Flags.find('c') != std::string::npos ? 1u : 0u) | (Flags.find('s') != std::string::npos ? 128u : 0u));
+}
+} // namespace
+
+const std::vector<Tpl>& Templates3()
+{
+	static const std::vector<Tpl> All = [] {
+		std::vector<Tpl> Out;
+		std::map<std::pair<int, int>, int> N;
+		auto Add = [&](int For, TitleStyle T, const std::string& Text, const std::string& Flags, bool U2) {
+			Tpl X;
+			X.For = For;
+			X.T = T;
+			X.Text = Text;
+			X.Promise = VcPromise(T, Text, Flags);
+			X.Flags = VcTagBits(Flags);
+			X.U2 = U2;
+			const int K = ++N[{For, static_cast<int>(T)}];
+			X.Key = ForSlug(For) + "." + StyleSlug(T) + "." + std::to_string(K);
+			Out.push_back(X);
+		};
+		// Update 2's own strings first, verbatim, in their buckets' order (their keys never move).
+		for (const video_copy::Template& T : video_copy::Templates())
+		{
+			const int For = T.For == video_copy::VlogKey ? ForVlog : T.For == video_copy::RecapKey ? ForRecap : T.For;
+			Add(For, T.T, T.Text, "", true);
+		}
+		for (const video_copy::StoryLine& S : video_copy::StoryLines())
+		{
+			const int Key = StoryKeyOf(S.Key);
+			for (int T = 0; T < 5; ++T)
+			{
+				Add(ForStory + std::max(0, Key), static_cast<TitleStyle>(T), S.Lines[T], "", true);
+			}
+		}
+		for (const Row& R : TitleRows())
+		{
+			Add(R.For, R.T, R.Text, R.Flags ? R.Flags : "", false);
+		}
+		return Out;
+	}();
+	return All;
+}
+
+namespace
+{
+/** Templates3's rows by (for, style). */
+const std::map<std::pair<int, int>, std::vector<int>>& VcIndex()
+{
+	static const std::map<std::pair<int, int>, std::vector<int>> Index = [] {
+		std::map<std::pair<int, int>, std::vector<int>> Out;
+		const std::vector<Tpl>& All = Templates3();
+		for (size_t I = 0; I < All.size(); ++I)
+		{
+			Out[{All[I].For, static_cast<int>(All[I].T)}].push_back(static_cast<int>(I));
+		}
+		return Out;
+	}();
+	return Index;
+}
+
+/** The picker's rank: FNV-1a mixes its last bytes weakly (the shuffle digit barely moved the order), so a finaliser spreads it. */
+uint32_t VcMix(uint32_t H)
+{
+	H ^= H >> 16;
+	H *= 0x85ebca6bu;
+	H ^= H >> 13;
+	H *= 0xc2b2ae35u;
+	H ^= H >> 16;
+	return H;
+}
+
+bool VcFirstPerson(const std::string& Filled)
+{
+	const std::string Low = " " + LowerU3(Filled) + " ";
+	for (const char* W : {" i ", " i'm ", " i've ", " i'd ", " i'll ", " my ", " me ", " me.", " me?", " me,", " we ", " our ", " us ", " mine "})
+	{
+		if (Low.find(W) != std::string::npos)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+/** A style's renormalizer n (TitleOption::Traits bits 9-15) from its pinned mean trait factor: the step is read from
+ *  core-videoalgo's own decoding (TitleTraitCtr: 1.000 + (n - 64) x step), so the pin survives a change of scale; a mean
+ *  past the scale's reach clamps to 1 or 127. */
+int VcStyleNorm(int Style)
+{
+	static const double Step = valgo::TitleTraitCtr(static_cast<uint16_t>(65u << 9)) - 1.0;
+	const double Mean = TitleStyleMean[std::clamp(Style, 0, 4)];
+	if (Step <= 0.0 || Mean <= 0.0)
+	{
+		return 64;
+	}
+	return std::clamp(static_cast<int>(std::lround(64.0 + (1.0 / Mean - 1.0) / Step)), 1, 127);
+}
+} // namespace
+
+uint16_t TraitsOf(const Tpl& T, const std::string& Filled)
+{
+	uint16_t Bits = T.Flags;
+	const bool Digit = std::any_of(Filled.begin(), Filled.end(), [](char C) { return C >= '0' && C <= '9'; });
+	const size_t Len = Filled.size();
+	Bits = static_cast<uint16_t>(Bits | (Digit ? 2u : 0u) | (VcFirstPerson(Filled) ? 4u : 0u) | (Filled.find('?') != std::string::npos ? 8u : 0u) |
+		(Len >= 40 && Len <= 70 ? 16u : 0u) | (Len > 85 ? 32u : 0u));
+	for (const char* Slot : {"{Opp}", "{Creator}", "{Npc}", "{Winner}", "{Beef}", "{Headliner}", "{Callout}", "{Leader}", "{Other}"})
+	{
+		if (T.Text.find(Slot) != std::string::npos)
+		{
+			Bits = static_cast<uint16_t>(Bits | 64u);
+			break;
+		}
+	}
+	if (T.Text.find("{Ep}") != std::string::npos)
+	{
+		Bits = static_cast<uint16_t>(Bits | 256u);
+	}
+	const int Norm = VcStyleNorm(static_cast<int>(T.T));
+	return static_cast<uint16_t>(Bits | (static_cast<uint16_t>(Norm) << 9));
+}
+
+std::vector<int> CellsFor(const Choice& Ch, const Candidate& Lead)
+{
+	std::vector<int> Cells;
+	if (Ch.Series >= 0 || Lead.Idea / 100 == 16)
+	{
+		Cells.push_back(ForSeries); // an episode (group P's ideas are a series' episodes)
+	}
+	if (Lead.Idea >= 0)
+	{
+		Cells.push_back(ForIdea + Lead.Idea);
+	}
+	if (Lead.K == Kind::Idea)
+	{
+		// An idea's own rows (its facts say nothing a hand's rows need); a Cut of a hand an idea video showed, with no idea
+		// of its own (CutKindOf), is one hand told by a Cut's own titles.
+		if (Cells.empty() && Ch.F == Format::Short)
+		{
+			Cells.push_back(ForCut);
+		}
+		return Cells;
+	}
+	if (Ch.F == Format::Short)
+	{
+		Cells.push_back(ForCut);
+	}
+	if (Ch.F == Format::Vlog)
+	{
+		Cells.push_back(ForVlog);
+	}
+	else if (Ch.F == Format::Recap)
+	{
+		Cells.push_back(ForRecap);
+	}
+	else if (Lead.K == Kind::Story)
+	{
+		const int Key = StoryKeyOf(Lead.Event);
+		if (Key >= 0)
+		{
+			Cells.push_back(ForStory + Key);
+		}
+	}
+	else
+	{
+		Cells.push_back(static_cast<int>(Lead.K));
+	}
+	return Cells;
+}
+} // namespace vcontent
+
+std::vector<TitleOption> TitleOptions(const Choice& Ch, const std::vector<Candidate>& Cands, const Channel& C, int Shuffle, int Count)
+{
+	using namespace vcontent;
+	std::vector<TitleOption> Out;
+	const std::vector<Candidate> P = Picked(Ch, Cands);
+	if (P.empty() || Count <= 0)
+	{
+		return Out;
+	}
+	const Candidate& Lead = LeadOf(Ch, P);
+	const Facts F = FactsOf(Ch, P, Lead, &C);
+	// The last 20 titles' templates (the kept videos' saved TitleTpl, newest first): never offered while they're that fresh.
+	std::vector<const Video*> Kept;
+	for (const Video& V : C.Videos)
+	{
+		Kept.push_back(&V);
+	}
+	std::stable_sort(Kept.begin(), Kept.end(), [](const Video* A, const Video* B) { return A->At > B->At; });
+	std::set<std::string> Recent;
+	for (size_t I = 0; I < Kept.size() && I < 20; ++I)
+	{
+		if (!Kept[I]->X.TitleTpl.empty())
+		{
+			Recent.insert(Kept[I]->X.TitleTpl);
+		}
+	}
+	std::string Key = std::to_string(static_cast<int>(Ch.F));
+	for (const std::string& Id : Ch.Candidates)
+	{
+		Key += "|" + Id;
+	}
+	const bool Cut = Ch.F == Format::Short;
+	const size_t MaxLen = Cut ? 50 : 100;
+	const std::vector<Tpl>& All = Templates3();
+	const auto& Index = VcIndex();
+	struct Ranked
+	{
+		uint32_t H;
+		int I;
+		std::string Text;
+	};
+	auto Gather = [&](const std::vector<int>& Cells, TitleStyle T) {
+		std::vector<Ranked> R;
+		std::set<std::string> Seen;
+		for (const int Cell : Cells)
+		{
+			const auto It = Index.find({Cell, static_cast<int>(T)});
+			if (It == Index.end())
+			{
+				continue;
+			}
+			for (const int I : It->second)
+			{
+				const Tpl& X = All[static_cast<size_t>(I)];
+				if (Recent.count(X.Key) > 0)
+				{
+					continue;
+				}
+				const std::string Filled = FillU3(X.Text, F);
+				if (Filled.empty())
+				{
+					continue;
+				}
+				// A Cut asks its question the way people type one ("would you call this?"); every other title is styled.
+				const std::string Text = Cut && X.T == TitleStyle::Question ? Filled : StyledU3(Filled, X.T);
+				if (Text.size() > MaxLen || !Seen.insert(Text).second)
+				{
+					continue;
+				}
+				R.push_back({VcMix(Fnv1a(Key + "|" + X.Key + "|" + std::to_string(Shuffle))), I, Text});
+			}
+		}
+		std::sort(R.begin(), R.end(), [](const Ranked& A, const Ranked& B) { return A.H != B.H ? A.H > B.H : A.I < B.I; });
+		return R;
+	};
+	auto Take = [&](const Ranked& R) {
+		const Tpl& X = All[static_cast<size_t>(R.I)];
+		for (const TitleOption& O : Out)
+		{
+			if (O.Key == X.Key || O.Text == R.Text)
+			{
+				return;
+			}
+		}
+		TitleOption O;
+		O.Key = X.Key;
+		O.Text = R.Text;
+		O.Promise = X.Promise;
+		O.Traits = TraitsOf(X, R.Text);
+		Out.push_back(O);
+	};
+	const std::vector<int> Cells = CellsFor(Ch, Lead);
+	for (const Ranked& R : Gather(Cells, Ch.T))
+	{
+		if (static_cast<int>(Out.size()) >= Count)
+		{
+			break;
+		}
+		Take(R);
+	}
+	// A cell short of Count spans the other styles (the chosen one first), then the last word's rows.
+	const std::vector<int> Fallback = {ForFallback};
+	for (int Pass = 0; Pass < 2; ++Pass)
+	{
+		if (static_cast<int>(Out.size()) >= Count)
+		{
+			break;
+		}
+		const std::vector<int>& Pool = Pass == 0 ? Cells : Fallback;
+		std::vector<std::vector<Ranked>> ByStyle;
+		for (int T = 0; T < 5; ++T)
+		{
+			ByStyle.push_back(Pass == 0 && T == static_cast<int>(Ch.T) ? std::vector<Ranked>() : Gather(Pool, static_cast<TitleStyle>(T)));
+		}
+		if (Pass == 1)
+		{
+			// The last word: the chosen style first.
+			std::swap(ByStyle[0], ByStyle[static_cast<size_t>(std::clamp(static_cast<int>(Ch.T), 0, 4))]);
+		}
+		for (size_t Round = 0; static_cast<int>(Out.size()) < Count && Round < 64; ++Round)
+		{
+			bool Any = false;
+			for (std::vector<Ranked>& S : ByStyle)
+			{
+				if (Round < S.size() && static_cast<int>(Out.size()) < Count)
+				{
+					Take(S[Round]);
+					Any = true;
+				}
+			}
+			if (!Any)
+			{
+				break;
+			}
+		}
+	}
+	return Out;
+}
+
+// ================================================================== Studio's side panel, the coin, the statement (core-videocontent)
+
+namespace vcontent
+{
+namespace
+{
+/** A display Payoff (§4.6.5, the packaging read's "Payoff: big"): the drama, a big prize, a story; core-videoalgo's PayoffOf
+ *  adds the pot against the open moments at upload (the read names that only as "big" when the drama does). */
+int VcPayoff(const Candidate& Lead)
+{
+	int P = Lead.Drama < 0.45 ? 0 : Lead.Drama < 0.6 ? 1 : Lead.Drama < 0.75 ? 2 : 3;
+	if (video_detail::EventKind(Lead.K) && Lead.BuyIn > 0 && Lead.Rec.Pot >= 20 * Lead.BuyIn)
+	{
+		++P;
+	}
+	if (Lead.K == Kind::Story)
+	{
+		P = 2;
+	}
+	return std::clamp(P, 0, 3);
+}
+
+const char* VcLevel(int P)
+{
+	static const char* const Words[4] = {"low", "medium", "high", "huge"};
+	return Words[std::clamp(P, 0, 3)];
+}
+
+const char* VcPayoffWord(int P)
+{
+	static const char* const Words[4] = {"small", "medium", "big", "huge"};
+	return Words[std::clamp(P, 0, 3)];
+}
+
+/** The kind's line in the read (a fact about the moment, never a number). */
+const char* VcKindLine(Kind K)
+{
+	switch (K)
+	{
+	case Kind::BadBeat: return "Bad beats travel.";
+	case Kind::Bluff: return "Everybody wants to see the cards nobody saw.";
+	case Kind::Win: return "A win is the one people share.";
+	case Kind::Rival: return "People love a grudge.";
+	case Kind::Monster: return "A monster hand is easy to click on.";
+	case Kind::SetOverSet: return "Set over set is the cooler everyone has a story about.";
+	case Kind::HeroFold:
+	case Kind::LadderFold: return "A big fold starts an argument in the comments.";
+	case Kind::HeroCall: return "A hero call makes people want to see if they'd have called.";
+	case Kind::FinalTable:
+	case Kind::DeepRun: return "A deep run gives people a reason to watch to the end.";
+	case Kind::Envelope: return "Mystery bounties make people guess the multiple.";
+	default: break;
+	}
+	return nullptr;
+}
+
+std::string VcHour(double Hour)
+{
+	const int H = static_cast<int>(std::floor(Hour + 1e-9)) % 24;
+	return std::to_string(H % 12 == 0 ? 12 : H % 12) + (H < 12 ? " AM" : " PM");
+}
+} // namespace
+} // namespace vcontent
+
+Coin CoinOf(const Choice& Ch, const std::vector<Candidate>& Open)
+{
+	const std::vector<Candidate> P = Picked(Ch, Open);
+	if (P.empty())
+	{
+		return Coin::Full;
+	}
+	const Candidate& Lead = vcontent::LeadOf(Ch, P);
+	if (Lead.IdeaFacts.find("ltd=1") != std::string::npos)
+	{
+		return Coin::Limited; // a real-money site's promotion (and 18+)
+	}
+	const bool Tilted = std::any_of(Ch.Thumbs.begin(), Ch.Thumbs.end(), [](const ThumbSpec& S) { return S.Expr == thumb::ExTilted; });
+	return Tilted && Ch.T == TitleStyle::Hype && !Ch.CleanEdit ? Coin::Limited : Coin::Full;
+}
+
+std::string CoinReason(const Choice& Ch, const std::vector<Candidate>& Open)
+{
+	const std::vector<Candidate> P = Picked(Ch, Open);
+	if (P.empty())
+	{
+		return std::string();
+	}
+	const Candidate& Lead = vcontent::LeadOf(Ch, P);
+	if (Lead.IdeaFacts.find("ltd=1") != std::string::npos)
+	{
+		return "Limited ads: the video shows a real-money site's promotions, so it's for adults only and stays off the Cuts feed.";
+	}
+	const bool Tilted = std::any_of(Ch.Thumbs.begin(), Ch.Thumbs.end(), [](const ThumbSpec& S) { return S.Expr == thumb::ExTilted; });
+	if (Tilted && Ch.T == TitleStyle::Hype)
+	{
+		return Ch.CleanEdit ? "Clean edit: full ads, and 15 more minutes in the edit." : "Limited ads: a tilted face with a Loud title reads as strong language. A clean edit keeps full ads.";
+	}
+	return std::string();
+}
+
+std::vector<std::string> PackagingRead(const Choice& Ch, const std::vector<Candidate>& Open, const Channel& C, double World, bool AdsOn)
+{
+	using namespace vcontent;
+	std::vector<std::string> Out;
+	const std::vector<Candidate> P = Picked(Ch, Open);
+	// The format and the length.
+	switch (Ch.F)
+	{
+	case Format::Short: Out.push_back("Cuts get seen fast and forgotten fast, and they don't count toward watch hours."); break;
+	case Format::Breakdown: Out.push_back(Ch.Len == LengthOpt::Tight ? "Under 8 minutes: no mid-roll ads." : "A Breakdown walks through one hand, and it counts toward watch hours."); break;
+	// (A Partner's Vlog keeps Update 2's N3 line: ads run once you're in, and a long video carries more of them.)
+	case Format::Vlog: Out.push_back(AdsOn ? "A Vlog tells the whole night. Longer videos carry more ads." : "A Vlog tells the whole night, and it counts toward watch hours."); break;
+	case Format::Recap: Out.push_back("A Recap follows one run from the first hand to the last."); break;
+	case Format::Count: break;
+	}
+	if (Ch.F != Format::Short && Ch.Len == LengthOpt::Extended)
+	{
+		Out.push_back("Extended: more watch time from every view, and a longer edit.");
+	}
+	if (P.empty())
+	{
+		return Out;
+	}
+	const Candidate& Lead = LeadOf(Ch, P);
+	if (const char* Line = VcKindLine(Lead.K))
+	{
+		Out.push_back(Line);
+	}
+	// The title: what its picked template does (its traits, measured on the text Studio shows).
+	TitleOption Picked3;
+	bool HavePick = false;
+	for (const TitleOption& O : TitleOptions(Ch, Open, C, Ch.Shuffle, 3))
+	{
+		if (O.Key == Ch.TitleTpl)
+		{
+			Picked3 = O;
+			HavePick = true;
+		}
+	}
+	if (HavePick)
+	{
+		if (Picked3.Traits & 2u)
+		{
+			Out.push_back("A specific number gets clicks.");
+		}
+		if (Picked3.Traits & 8u)
+		{
+			Out.push_back("A question pulls people into the comments.");
+		}
+		if (Picked3.Traits & 32u)
+		{
+			Out.push_back("A long title gets cut off on a phone.");
+		}
+		if (Picked3.Traits & 128u)
+		{
+			Out.push_back("A search phrase keeps a lesson turning up for months.");
+		}
+	}
+	else
+	{
+		switch (Ch.T)
+		{
+		case TitleStyle::Story: Out.push_back("Story titles make people care, and the ones who care stay."); break;
+		case TitleStyle::Hype: Out.push_back("Loud titles get the click. On a small pot, people leave early."); break;
+		case TitleStyle::Teaching: Out.push_back("Teaching titles keep people watching. On a decision, people keep finding it for months."); break;
+		case TitleStyle::Question: Out.push_back("A question pulls people in to argue about it."); break;
+		case TitleStyle::Plain: Out.push_back("Plain titles tell people exactly what they're getting."); break;
+		case TitleStyle::Count: break;
+		}
+	}
+	// The thumbnail: the archetype against this moment, sameness, the Duel.
+	const int Group = video_detail::GroupOf(Lead.K);
+	if (!Ch.Thumbs.empty())
+	{
+		const ThumbSpec& S = Ch.Thumbs.front();
+		const double Fit = ArchetypeFit(S.Arch, Group, Lead);
+		const std::string Name = ArchName(S.Arch);
+		Out.push_back(Fit >= 1.25 ? Name + " suits this moment." : Fit <= 0.85 ? Name + " undersells this moment." : Name + " works here.");
+		int Seen = 0, Count = 0;
+		for (auto It = C.Videos.rbegin(); It != C.Videos.rend() && Count < 5; ++It)
+		{
+			if (It->X.On && It->Fr == Frame::Recipe)
+			{
+				++Count;
+				Seen += It->X.Spec[static_cast<size_t>(std::clamp<int>(It->X.DuelWin, 0, 2))].Arch == S.Arch ? 1 : 0;
+			}
+		}
+		if (Seen >= 3)
+		{
+			Out.push_back("Your last 5 thumbnails look alike.");
+		}
+		if (Ch.Thumbs.size() >= 2)
+		{
+			Out.push_back("A Duel tests your thumbnails for 48 hours and keeps the one people watch longest.");
+		}
+	}
+	else
+	{
+		static const double Fit[5][6] = {
+			{1.3, 1.1, 1.1, 1.1, 1.0, 1.2}, {1.2, 1.3, 1.0, 0.8, 0.9, 0.7}, {0.9, 0.8, 1.3, 1.2, 0.9, 1.0}, {1.0, 1.0, 1.1, 0.9, 1.4, 0.8}, {0.7, 0.7, 0.8, 1.4, 0.9, 1.0},
+		};
+		const double Here = Fit[std::clamp(static_cast<int>(Ch.Fr), 0, 4)][std::clamp(Group, 0, 5)];
+		const std::string Frame = FrameName(Ch.Fr);
+		Out.push_back(Here >= 1.2 ? "The " + Frame + " frame suits " + video_copy::KindPhrase(Lead.K) + "." :
+			Here <= 0.8 ? "The " + Frame + " frame undersells " + video_copy::KindPhrase(Lead.K) + "." : "The " + Frame + " frame works here.");
+	}
+	// Promise against payoff (the honesty check).
+	int Promise = HavePick ? Picked3.Promise : (Ch.T == TitleStyle::Plain ? 0 : Ch.T == TitleStyle::Hype ? 2 : 1);
+	for (const ThumbSpec& S : Ch.Thumbs)
+	{
+		Promise = std::max(Promise, static_cast<int>(ThumbPromise(S)));
+	}
+	const int Payoff = VcPayoff(Lead);
+	Out.push_back(std::string("Promise: ") + VcLevel(Promise) + " \xC2\xB7 Payoff: " + VcPayoffWord(Payoff) + (Promise > Payoff ? " (it promises more than it shows)" : Promise < Payoff ? " (it undersells the hand)" : " (match)"));
+	// The audience's hour (the model's own curve).
+	const int Weekday = net::Weekday(net::DayOf(World));
+	Out.push_back("Your viewers are on at " + VcHour(algo::PeakHour(C, Weekday)) + ".");
+	// Ads: the load's trade, and nothing about money before it runs.
+	if (Ch.F != Format::Short)
+	{
+		if (Ch.Ads == AdLoad::Heavy)
+		{
+			Out.push_back(AdsOn ? "Heavy ads: more mid-rolls, and some viewers leave at each one." : "Heavy ads cost viewers before Partner and pay nothing yet.");
+		}
+		else if (Ch.Ads == AdLoad::Light)
+		{
+			Out.push_back("Light ads: no mid-rolls, and people stay a little longer.");
+		}
+	}
+	const std::string Coin = CoinReason(Ch, Open);
+	if (!Coin.empty())
+	{
+		Out.push_back(Coin);
+	}
+	if (Lead.Storytime)
+	{
+		Out.push_back("Storytime: nobody from the game is named, and no face but yours.");
+	}
+	// Burnout (§4.6.6): this week's extra editing past 4 hours.
+	const double Extra = algo::ExtraHours7(C, World);
+	if (Extra > 4.0)
+	{
+		Out.push_back("You've put " + std::to_string(static_cast<int>(std::floor(Extra))) + " extra hours into this week's videos. It shows.");
+	}
+	return Out;
+}
+
+namespace video_copy
+{
+std::string StatementBodyU3(const std::string& Month, Chips WatchCents, double Rpm, double Cpm, Chips CutsCents, Chips PaidCents, Chips BalanceCents, bool Paid)
+{
+	// §4.5.7's itemized statement: "October: watch-page ads $141.20 (RPM $2.88, CPM $9.10) · Cuts feed $3.10. Paid today: $144.30.
+	// Your balance is $0.00." (under LetterBodyMax, 600 characters).
+	std::string Out = Month + ": watch-page ads " + Money(WatchCents) + " (RPM " + Money(static_cast<Chips>(std::llround(Rpm * 100.0))) + ", CPM " +
+		Money(static_cast<Chips>(std::llround(Cpm * 100.0))) + ") \xC2\xB7 Cuts feed " + Money(CutsCents) + ".";
+	if (Paid)
+	{
+		Out += " Paid today: " + Money(PaidCents) + ". Your balance is " + Money(BalanceCents) + ".";
+	}
+	else
+	{
+		Out += " Your balance is " + Money(BalanceCents) + ", under the $100 minimum, so it rolls into next month's. Nothing's lost; it just waits.";
+	}
+	return Out;
+}
+} // namespace video_copy
+
+std::vector<std::string> InventoryU3()
+{
+	using namespace vcontent;
+	std::vector<std::string> Out;
+	// Every template, as written ("title"), and its key's family for the lint's report.
+	for (const Tpl& T : Templates3())
+	{
+		std::string Text = T.Text;
+		while (Text.size() > 3 && Text[0] == '#' && Text[2] == ' ')
+		{
+			Text = Text.substr(3);
+		}
+		Out.push_back("title\t" + Text);
+	}
+	for (const std::string& L : CopyInventoryU3())
+	{
+		Out.push_back(L);
+	}
+	return Out;
+}
+
+namespace vcontent
+{
+std::string StatementU3(const std::string& Month, Chips WatchCents, double Rpm, double Cpm, Chips CutsCents, Chips PaidCents, Chips BalanceCents, bool Paid)
+{
+	return video_copy::StatementBodyU3(Month, WatchCents, Rpm, Cpm, CutsCents, PaidCents, BalanceCents, Paid);
+}
+
+std::vector<std::string> CopyInventoryU3()
+{
+	std::vector<std::string> Out;
+	auto Line = [&Out](const std::string& K, const std::string& T) {
+		if (std::find(Out.begin(), Out.end(), K + "\t" + T) == Out.end())
+		{
+			Out.push_back(K + "\t" + T);
+		}
+	};
+	// The kinds' labels and phrases (Update 3's ten and the idea).
+	for (int K = KindCountU2; K < static_cast<int>(Kind::Count); ++K)
+	{
+		Line("label", KindLabel(static_cast<Kind>(K)));
+		Line("title", std::string(video_copy::KindPhrase(static_cast<Kind>(K))) + " from {Stakes}");
+	}
+	// The archetypes' names and reads, and their caption rows as written.
+	for (int A = 0; A < thumb::ArCount; ++A)
+	{
+		Line("label", ArchName(A));
+		Line("frag", ArchRead(A));
+	}
+	// The ideas' names (the board's cards).
+	for (const IdeaDef& D : IdeaTable())
+	{
+		Line("label", D.Name);
+	}
+	// The statement, the coin's reasons, the packaging read's lines.
+	Line("body", video_copy::StatementBodyU3("October", 14120, 2.88, 9.10, 310, 14430, 0, true));
+	Line("body", video_copy::StatementBodyU3("October", 4120, 2.10, 7.80, 110, 0, 4230, false));
+	Choice Promo;
+	Candidate Site;
+	Site.Id = "idea:h5:w1";
+	Site.K = Kind::Idea;
+	Site.Source = 5;
+	Site.IdeaFacts = "ltd=1";
+	Promo.Candidates = {Site.Id};
+	Line("line", CoinReason(Promo, {Site}));
+	Candidate Hand;
+	Hand.Id = "rl:x@1:1";
+	Hand.K = Kind::Rival;
+	Choice Strong;
+	Strong.Candidates = {Hand.Id};
+	Strong.T = TitleStyle::Hype;
+	ThumbSpec Tilt;
+	Tilt.Arch = thumb::ArTheGhost;
+	Tilt.Expr = thumb::ExTilted;
+	Strong.Thumbs = {Tilt};
+	Line("line", CoinReason(Strong, {Hand}));
+	Strong.CleanEdit = true;
+	Line("line", CoinReason(Strong, {Hand}));
+	for (const char* L : {"Cuts get seen fast and forgotten fast, and they don't count toward watch hours.", "Under 8 minutes: no mid-roll ads.",
+			 "A Breakdown walks through one hand, and it counts toward watch hours.", "A Vlog tells the whole night, and it counts toward watch hours.",
+			 "A Recap follows one run from the first hand to the last.", "Extended: more watch time from every view, and a longer edit.", "A specific number gets clicks.",
+			 "A question pulls people into the comments.", "A long title gets cut off on a phone.", "A search phrase keeps a lesson turning up for months.",
+			 "Your last 5 thumbnails look alike.", "A Duel tests your thumbnails for 48 hours and keeps the one people watch longest.",
+			 "Heavy ads: more mid-rolls, and some viewers leave at each one.", "Heavy ads cost viewers before Partner and pay nothing yet.",
+			 "Light ads: no mid-rolls, and people stay a little longer.", "Your viewers are on at 9 PM.", "You've put 6 extra hours into this week's videos. It shows.",
+			 "Promise: medium \xC2\xB7 Payoff: big (it undersells the hand).", "Promise: high \xC2\xB7 Payoff: small (it promises more than it shows).",
+			 "Promise: medium \xC2\xB7 Payoff: medium (match)."})
+	{
+		Line("line", L);
+	}
+	for (int K = 0; K < static_cast<int>(Kind::Count); ++K)
+	{
+		if (const char* L = VcKindLine(static_cast<Kind>(K)))
+		{
+			Line("line", L);
+		}
+	}
+	for (int A = 0; A < thumb::ArCount; ++A)
+	{
+		const std::string N = ArchName(A);
+		Line("line", N + " suits this moment.");
+		Line("line", N + " undersells this moment.");
+		Line("line", N + " works here.");
+	}
+	// The comments (every template, unfilled) and the world creators' own shows.
+	for (const std::string& L : CommentInventory())
+	{
+		Line("comment", L);
+	}
+	for (const std::string& L : WorldShowInventory())
+	{
+		Line("show", L);
+	}
+	for (int I = 1; I <= 10; ++I)
+	{
+		Line("line", video_copy::WhyNot(I));
+	}
+	// The C3 fix round's: Publish's refusal of a recipe edited outside its archetype, Research's search phrases.
+	Line("line", ThumbNotALook());
+	for (const std::string& L : SearchInventory())
+	{
+		Line("label", L);
+	}
+	return Out;
+}
+} // namespace vcontent
 } // namespace video
 } // namespace ss

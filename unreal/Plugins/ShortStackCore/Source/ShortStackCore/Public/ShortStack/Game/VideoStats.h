@@ -65,6 +65,10 @@ struct Range
 	int Days = 0;
 	std::vector<double> Views, WatchH, SubsGained, SubsLost, Likes, Dislikes, Impressions, Cents;
 	std::vector<bool> Estimated;
+	// core-videoalgo, appended (C3, §5.6 Revenue): the Cuts feed's share of Cents and of Views, and the watch page's ad
+	// impressions and monetized playbacks, a value a day (CPM = (Cents - CutCents) / 100 / 0.55 / AdImpressions x 1,000; playback
+	// CPM the same over Monetized), so "How you earned" and the KPI tiles are the identity's own numbers.
+	std::vector<double> CutCents, CutViews, AdImpressions, Monetized;
 };
 /** Audience (display only: none of it enters money, W5). */
 struct AudienceView

@@ -14,6 +14,7 @@
 #include "ShortStack/Game/Recall.h"
 #include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Video.h"
+#include "ShortStack/Game/VideoContent.h"
 
 #include <algorithm>
 #include <cctype>
@@ -51,12 +52,12 @@ bool SaysAutoplay(const std::string& Text)
 
 /**
  * The trademark screen (tests/Trademarks.h, both tiers, whole words): no real video platform, feature, payment wallet, poker
- * site or creator. "shorts" joins Rerun's screen at C3, once the Cut rename has reworded Studio's Short line (VideoCopy.cpp).
+ * site or creator. "shorts" is on Rerun's screen since C3's Cut rename reworded Studio's Short line (VideoCopy.cpp).
  */
 bool RealBrand(const std::string& Text, std::string& Which)
 {
 	const char* Hit = trademarks::Find(Text, trademarks::kSourceScan);
-	Hit = Hit ? Hit : trademarks::Find(Text, trademarks::kCopyScan, "shorts");
+	Hit = Hit ? Hit : trademarks::Find(Text, trademarks::kCopyScan);
 	if (Hit)
 	{
 		Which = Hit;
@@ -107,6 +108,21 @@ void Copy()
 			std::printf("  trademark '%s': \"%s\"\n", Which.c_str(), Filled.c_str());
 		}
 	}
+	// Rerun 2.0's library (C3): every title template, the comments, the shows, the lines and the letters, unfilled.
+	int SaidU3 = 0, BrandsU3 = 0;
+	for (const std::string& E : video::InventoryU3())
+	{
+		const std::string Text = E.substr(E.find('\t') + 1);
+		std::string Hit;
+		SaidU3 += SaysAutoplay(Text) ? 1 : 0;
+		if (RealBrand(Text, Hit))
+		{
+			++BrandsU3;
+			std::printf("  trademark '%s' (Update 3): \"%s\"\n", Hit.c_str(), Text.c_str());
+		}
+	}
+	Expect(video::InventoryU3().size() >= 2000 && SaidU3 == 0 && BrandsU3 == 0, "copy: Rerun 2.0's library says no AI, bot or autoplay and no real brand (" +
+		std::to_string(SaidU3) + ", " + std::to_string(BrandsU3) + ")");
 	std::string Which;
 	Expect(Said == 0, "copy: no line says AI, bot or autoplay");
 	Expect(Brands == 0 && !RealBrand("Rerun", Which), "copy: the trademark screen passes over Rerun and every line");

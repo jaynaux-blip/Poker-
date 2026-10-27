@@ -1,47 +1,78 @@
-upload3	1	v18520	P=220.39	P0=136.56	ctr=0.080275	noise=0.933269	S0=0.56184	base=0.48184	luck=-0.763700008	r=0.3825	c=0.0057184	rpm=2.25	len=8	title=THE CRUELEST RIVER I'VE EVER SEEN
-decided3	1	verdict=1	H=-0.001745	shown=0.91433	earned=43.9318	ads=1
-comp3	1	T=21600	P=20.55	A=0.75	kind=0
-comp3	1	T=27360	P=12.32	A=0.75	kind=1
-comp3	1	T=37440	P=3.56	A=0.75	kind=2
-views3	1	1	52.5655024
-views3	1	7	137.31519
-views3	1	30	169.043547
-views3	1	119	172.987628
-upload3	2	v18520	P=204.1	P0=135.63	ctr=0.0524875	noise=1.062807	S0=0.36639	base=0.35421	luck=-0.530700028	r=0.4838	c=0.0104463	rpm=3.1144	len=12	title=How to handle a 64 big blind bad beat without tilting
-decided3	2	verdict=1	H=-0.001293	shown=0.92965	earned=53.839	ads=1
-comp3	2	T=21600	P=11.07	A=0.75	kind=0
-comp3	2	T=27360	P=6.92	A=0.75	kind=1
-views3	2	1	52.2075211
-views3	2	7	127.037915
-views3	2	30	150.328352
-views3	2	119	153.618021
-upload3	3	v18520	P=423.03	P0=241.76	ctr=0.067925	noise=1.1469	S0=0.76184	base=0.63084	luck=-0.163299993	r=0.504	c=0.0092092	rpm=2.2333	len=6	title=Is this the worst river in poker?
-decided3	3	verdict=2	H=-0.000181	shown=0.969819	earned=95.1943	ads=1
+upload3	1	v18520	P=220.19	P0=136	ctr=0.080275	noise=0.9333	S0=0.56184	base=0.48184	luck=-0.763700008	r=0.3825	c=0.0057184	rpm=2.25	len=8	title=THE CRUELEST RIVER I'VE EVER SEEN
+decided3	1	verdict=1	H=-0.001745	shown=0.913935	earned=43.7509	ads=1
+comp3	1	T=21600	P=20.47	A=0.75	kind=0
+comp3	1	T=27360	P=12.27	A=0.75	kind=1
+comp3	1	T=37440	P=3.54	A=0.75	kind=2
+views3	1	1	52.3499438
+views3	1	7	136.755706
+views3	1	30	168.349939
+views3	1	119	172.277637
+upload3	2	v18520	P=203.91	P0=135	ctr=0.0524875	noise=1.0628	S0=0.36639	base=0.35421	luck=-0.530700028	r=0.4838	c=0.0104463	rpm=3.1144	len=12	title=How to handle a 64 big blind bad beat without tilting
+decided3	2	verdict=1	H=-0.001293	shown=0.929241	earned=53.5906	ads=1
+comp3	2	T=21600	P=11.02	A=0.75	kind=0
+comp3	2	T=27360	P=6.89	A=0.75	kind=1
+views3	2	1	51.9650177
+views3	2	7	126.449706
+views3	2	30	149.633534
+views3	2	119	152.90803
+upload3	3	v18520	P=422.63	P0=242	ctr=0.067925	noise=1.1469	S0=0.76184	base=0.63084	luck=-0.163299993	r=0.504	c=0.0092092	rpm=2.2333	len=6	title=Is this the worst river in poker?
+decided3	3	verdict=2	H=-0.000181	shown=0.969372	earned=95.2717	ads=1
 comp3	3	T=18700	P=67.2	A=0.9	kind=10
-comp3	3	T=21600	P=70.59	A=0.75	kind=0
-views3	3	1	120.26232
-views3	3	7	325.868604
-views3	3	30	372.30016
-views3	3	119	379.545642
-upload3	4	v18520	P=387.27	P0=274.65	ctr=0.055575	noise=1.099787	S0=0.15835	base=0.07835	luck=0.00749999983	r=0.7	c=0.0058139	rpm=0.075	len=0.75	title=$5.50 Night Owl Turbo: AA vs 77, 64 big blind pot
-decided3	4	verdict=2	H=0.000177	shown=0.983428	earned=2.6183	ads=2
-comp3	4	T=21600	P=19.08	A=0.9	kind=0
-comp3	4	T=37440	P=19.85	A=0.9	kind=2
-views3	4	1	160.4671
-views3	4	7	283.970331
-views3	4	30	313.257094
-views3	4	119	313.58
-upload3	5	v18520	P=847.46	P0=544.36	ctr=0.06175	noise=1.063249	S0=0.46427	base=0.45214	luck=0.729799986	r=0.4257	c=0.0081321	rpm=2.5953	len=12	title=81% to win, and then a seven on the river
-decided3	5	verdict=3	H=0.00185	shown=1.052837	earned=234.1319	ads=1
-comp3	5	T=21600	P=86.28	A=0.75	kind=0
-comp3	5	T=27360	P=96.23	A=0.75	kind=1
-comp3	5	T=37440	P=65.95	A=0.75	kind=2
-views3	5	1	209.538348
-views3	5	7	567.128953
-views3	5	30	772.193512
-views3	5	119	792.807601
-creator3	30	subs=56.5704709	views=6344.65044	partner=-1	balance=0	paid=0	H=0.460845	streak=4
-creator3	90	subs=340.793402	views=36526.5617	partner=-1	balance=0	paid=0	H=0.01806	streak=8
-creator3	180	subs=983.257771	views=106962.422	partner=-1	balance=0	paid=0	H=-0.010863	streak=8
-creator3	365	subs=7331.46687	views=831064.2	partner=276480	balance=20979	paid=78565	H=0.571085	streak=8
-creator3	400	subs=8044.71389	views=908399.685	partner=276480	balance=9602	paid=109511	H=-0.379617	streak=8
+comp3	3	T=21600	P=70.66	A=0.75	kind=0
+views3	3	1	120.354702
+views3	3	7	326.129704
+views3	3	30	372.603518
+views3	3	119	379.855638
+upload3	4	v18520	P=386.91	P0=274	ctr=0.055575	noise=1.0998	S0=0.15835	base=0.07835	luck=0.00749999983	r=0.7	c=0.0058139	rpm=0.075	len=0.75	title=$5.50 Night Owl Turbo: AA vs 77, 64 big blind pot
+decided3	4	verdict=2	H=0.000177	shown=0.982968	earned=2.6122	ads=2
+comp3	4	T=21600	P=19.03	A=0.9	kind=0
+comp3	4	T=37440	P=19.8	A=0.9	kind=2
+views3	4	1	160.087331
+views3	4	7	283.293678
+views3	4	30	312.507882
+views3	4	119	312.83
+upload3	5	v18520	P=846.61	P0=544	ctr=0.06175	noise=1.0632	S0=0.46427	base=0.45214	luck=0.729799986	r=0.4257	c=0.0081321	rpm=2.5953	len=12	title=81% to win, and then a seven on the river
+decided3	5	verdict=3	H=0.00185	shown=1.05231	earned=233.9747	ads=1
+comp3	5	T=21600	P=86.22	A=0.75	kind=0
+comp3	5	T=27360	P=96.17	A=0.75	kind=1
+comp3	5	T=37440	P=65.9	A=0.75	kind=2
+views3	5	1	209.399775
+views3	5	7	566.752786
+views3	5	30	771.677492
+views3	5	119	792.277609
+recipe3	0	v29970	tpl=badbeat.story.9	archs=1,0	promise=1	payoff=3	P=3029	P0=1838	ctr=0.069715	duel=0.064662002/0.0747679994	S0=0.6163	base=0.45737	r=0.5428	rpm=2.53	title=I was 81% to win this 64 big blind pot. I did not win it
+recipe3	1	v32850	tpl=cooler.story.4	archs=10,0	promise=1	payoff=3	P=2605.61	P0=1544	ctr=0.077128	duel=0.0778049976/0.0764510036	S0=0.67454	base=0.26057	r=0.5428	rpm=2.53	title=a 64 big blind pot I was always going to lose
+recipe3	2	v35730	tpl=bluff.story.5	archs=3,2	promise=1	payoff=2	P=427.85	P0=283	ctr=0.0631165	duel=0.067904003/0.0583290011	S0=0.38373	base=0.23598	r=0.5428	rpm=2.5301	title=the bluff that kept me in the Night Owl Turbo
+recipe3	3	v38610	tpl=herocall.story.6	archs=2,21	promise=1	payoff=3	P=724.11	P0=466	ctr=0.0699935	duel=0.0611190014/0.0788680017	S0=0.46027	base=0.36108	r=0.5534	rpm=2.5602	title=they had ten-nine. I had a feeling about this one
+recipe3	4	v41490	tpl=bigpot.story.6	archs=7,6	promise=1	payoff=2	P=729.35	P0=398	ctr=0.091545	duel=0.0935759991/0.0895140022	S0=0.86856	base=0.48649	r=0.5428	rpm=2.5302	title=the pot that changed my Night Owl Turbo in one hand
+decidedr	v29970	verdict=4	duelwin=1	ctr=0.074768	views60=3617.92873	earned=1083.5051
+compr	v29970	T=33120	P=1127	A=0.75	kind=0
+compr	v29970	T=33120	P=133	A=0.6369	kind=6
+compr	v29970	T=36000	P=20.56	A=0.75	kind=11
+compr	v29970	T=48960	P=548	A=0.75	kind=2
+decidedr	v32850	verdict=4	duelwin=0	ctr=0.077805	views60=2447.86165	earned=748.453
+compr	v32850	T=36000	P=428	A=0.75	kind=0
+compr	v32850	T=36000	P=8.94	A=0.5793	kind=6
+compr	v32850	T=38880	P=2.75	A=0.75	kind=11
+compr	v32850	T=41760	P=497	A=0.75	kind=1
+decidedr	v35730	verdict=1	duelwin=0	ctr=0.067904	views60=325.262044	earned=100.6847
+compr	v35730	T=38880	P=19.69	A=0.75	kind=0
+compr	v35730	T=38880	P=9.71	A=0.501	kind=6
+compr	v35730	T=41760	P=5.52	A=0.75	kind=11
+compr	v35730	T=44640	P=12.11	A=0.75	kind=1
+decidedr	v38610	verdict=1	duelwin=1	ctr=0.078868	views60=605.306987	earned=207.864
+compr	v38610	T=41760	P=66.61	A=0.75	kind=0
+compr	v38610	T=41760	P=31.06	A=0.5358	kind=6
+compr	v38610	T=44640	P=6.14	A=0.75	kind=11
+compr	v38610	T=47520	P=26.4	A=0.75	kind=1
+compr	v38610	T=57600	P=20.58	A=0.75	kind=2
+decidedr	v41490	verdict=2	duelwin=0	ctr=0.093576	views60=585.894006	earned=201.6032
+compr	v41490	T=44640	P=148	A=0.75	kind=0
+compr	v41490	T=44640	P=6.66	A=0.6007	kind=6
+compr	v41490	T=60480	P=46.78	A=0.75	kind=2
+momentumr	H=0.070441	shown=1.069128
+creator3	30	subs=56.5980691	views=6346.05729	partner=-1	balance=0	paid=0	H=0.460845	streak=4
+creator3	90	subs=329.980795	views=35377.7994	partner=-1	balance=0	paid=0	H=0.01806	streak=8
+creator3	180	subs=938.109589	views=102038.15	partner=-1	balance=0	paid=0	H=-0.010863	streak=8
+creator3	365	subs=7000.83314	views=794654.021	partner=282240	balance=19737	paid=72718	H=0.571085	streak=8
+creator3	400	subs=7674.81933	views=867779.945	partner=282240	balance=9071	paid=101828	H=-0.379617	streak=8

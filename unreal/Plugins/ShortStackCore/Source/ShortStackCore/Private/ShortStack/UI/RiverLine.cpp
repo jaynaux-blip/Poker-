@@ -3725,6 +3725,17 @@ bool RiverLine::DebugOpen(const std::string& Args)
 	}
 	if (Name == "video" || Name == "rerun")
 	{
+		if (More >= 1 && Words[1] == "sheet")
+		{
+			// ss.Video.Sheet <group> <n> (Update3Commands.cpp opens "video sheet <group> <n>" after the session's answer):
+			// ui-rerun's contact sheet of n generated thumbnails for a kind group, 24 when n is left out.
+			int N = More >= 3 ? 0 : 24;
+			for (const char Ch : More >= 3 ? Words[3] : std::string())
+			{
+				N = Ch >= '0' && Ch <= '9' ? std::min(N * 10 + (Ch - '0'), 999) : N;
+			}
+			return More <= 3 && rlvideo_detail::VideoOpenSheet(*this, More >= 2 ? Words[2] : std::string("beats"), N, Now);
+		}
 		const int P = More == 1 ? rlvideo_detail::VideoPageNamed(Words[1]) : 0;
 		if (More > 1 || P < 0)
 		{

@@ -398,8 +398,10 @@ void OpenAndStrip()
 	Expect(RL.DebugOpen("kast channel") && RL.CurrentApp() == App::Kast && RL.CurrentKastPage() == ss::ui::RiverLine::KastPage::Channel, "ss.Laptop.Open kast channel");
 	Expect(RL.DebugOpen("video studio") && RL.CurrentApp() == App::Video, "ss.Laptop.Open video studio");
 	Expect(RL.DebugOpen("bank") && RL.CurrentApp() == App::Bank && RL.DebugOpen("burner sam") && RL.CurrentApp() == App::Burner, "the other apps");
-	Expect(!RL.DebugOpen("") && !RL.DebugOpen("riverline nowhere") && !RL.DebugOpen("bank vault") && !RL.DebugOpen("video analytics") && RL.CurrentApp() == App::Burner,
+	Expect(!RL.DebugOpen("") && !RL.DebugOpen("riverline nowhere") && !RL.DebugOpen("bank vault") && !RL.DebugOpen("video nowhere") && RL.CurrentApp() == App::Burner,
 		"a name that names nothing opens nothing");
+	// C3 (Rerun 2.0): Analytics and Home are pages now, so ss.Laptop.Open names them.
+	Expect(RL.DebugOpen("video analytics") && RL.CurrentApp() == App::Video && RL.DebugOpen("video home") && RL.CurrentApp() == App::Video, "ss.Laptop.Open video analytics, video home");
 	// SitesTableStrip: the open tables in order (none here).
 	Expect(ss::ui::rlsites_detail::SitesTableStrip(RL, S).empty(), "no tables, no strip");
 }

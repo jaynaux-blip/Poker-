@@ -7,10 +7,16 @@
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Sponsor.h"
 #include "ShortStack/Game/Video.h"
+#include "ShortStack/Game/VideoAlgo.h"
+#include "ShortStack/Game/VideoContent.h"
+#include "VideoContentPriv.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cctype>
 #include <cstdlib>
+#include <set>
 
 // Rerun's side of the session (update 2 §4, §6.2): the candidates the hands make on both online paths (watched and
 // skipped) and the event's recap, life stories, publishing (the edit's TimeSkip and its settle), deleting, the channel's
@@ -38,6 +44,14 @@ std::string NoSuchVideo();
 std::string WhyNot(int Reason);
 } // namespace video_copy
 } // namespace video
+
+namespace session_video3_detail
+{
+/** After an upload lands (SessionVideo3.cpp): a series' episode counted, its playlist and its challenge's state. */
+void AfterUpload(life::State& L, const std::vector<HistoryEntry>& History, const world::World& W, const kast::Channel& K, const gear::Owned& G,
+	const std::set<std::string>& Told, Chips Bankroll, const std::string& Hero, bool Evicted, double World, const video::Choice& C,
+	const std::vector<video::Candidate>& Picked, const std::string& VideoId);
+} // namespace session_video3_detail
 
 namespace session_video_detail
 {
@@ -219,6 +233,46 @@ std::vector<std::string> Words(const std::string& Args)
 }
 
 /** The edit's activity id: "video:<format>:<title style>:<frame>:<id>|<id>|..." (candidate ids carry no '|'). */
+/** A field of the edit's id, percent-escaped (nothing but letters, digits, '-', '_' and '.' stays as it is). */
+std::string EditEsc(const std::string& S)
+{
+	static const char* const Hex = "0123456789ABCDEF";
+	std::string Out;
+	for (const char Ch : S)
+	{
+		const unsigned char U = static_cast<unsigned char>(Ch);
+		if (std::isalnum(U) || Ch == '-' || Ch == '_' || Ch == '.')
+		{
+			Out.push_back(Ch);
+		}
+		else
+		{
+			Out.push_back('%');
+			Out.push_back(Hex[U >> 4]);
+			Out.push_back(Hex[U & 15]);
+		}
+	}
+	return Out;
+}
+
+std::string EditUnesc(const std::string& S)
+{
+	std::string Out;
+	for (size_t I = 0; I < S.size(); ++I)
+	{
+		if (S[I] == '%' && I + 2 < S.size())
+		{
+			Out.push_back(static_cast<char>(std::strtol(S.substr(I + 1, 2).c_str(), nullptr, 16)));
+			I += 2;
+		}
+		else
+		{
+			Out.push_back(S[I]);
+		}
+	}
+	return Out;
+}
+
 std::string EditId(const video::Choice& C)
 {
 	std::string Id = "video:" + std::to_string(static_cast<int>(C.F)) + ":" + std::to_string(static_cast<int>(C.T)) + ":" + std::to_string(static_cast<int>(C.Fr)) + ":";
@@ -226,14 +280,108 @@ std::string EditId(const video::Choice& C)
 	{
 		Id += (I > 0 ? "|" : "") + C.Candidates[I];
 	}
+	// Update 3 (core-videocontent): Studio's template, recipes and levers ride after a tab; an Update 2 choice has none.
+	if (!C.TitleTpl.empty() || !C.Thumbs.empty())
+	{
+		Id += "\tu3|tpl=" + EditEsc(C.TitleTpl) + "|sh=" + std::to_string(C.Shuffle) + "|ads=" + std::to_string(static_cast<int>(C.Ads)) +
+			"|len=" + std::to_string(static_cast<int>(C.Len)) + "|clean=" + (C.CleanEdit ? "1" : "0") + "|next=" + EditEsc(C.NextUp) + "|ser=" + std::to_string(C.Series);
+		for (const video::ThumbSpec& T : C.Thumbs)
+		{
+			const int Fields[14] = {T.Arch, T.Layout, T.Mirror, T.Bg, T.Pal, T.Subj, T.Expr, T.Pose, T.PropA, T.PropB, T.CapStyle, T.Sticker, T.Corner, T.LookRef};
+			Id += "|th=";
+			for (const int F : Fields)
+			{
+				Id += std::to_string(F) + ",";
+			}
+			Id += std::to_string(T.Variant) + "," + EditEsc(T.Caption) + "," + EditEsc(T.Caption2);
+		}
+	}
 	return Id;
 }
 
-bool ReadEditId(const std::string& Id, video::Choice& C)
+/** Reads the Update 3 tail of an edit's id into C (EditId's "u3|..."). */
+void ReadEditTail(const std::string& Tail, video::Choice& C)
 {
-	if (Id.rfind("video:", 0) != 0)
+	size_t At = 0;
+	while (At <= Tail.size())
+	{
+		size_t End = Tail.find('|', At);
+		End = End == std::string::npos ? Tail.size() : End;
+		const std::string Tok = Tail.substr(At, End - At);
+		const size_t Eq = Tok.find('=');
+		const std::string K = Eq == std::string::npos ? Tok : Tok.substr(0, Eq), V = Eq == std::string::npos ? std::string() : Tok.substr(Eq + 1);
+		if (K == "tpl")
+		{
+			C.TitleTpl = EditUnesc(V);
+		}
+		else if (K == "sh")
+		{
+			C.Shuffle = std::atoi(V.c_str());
+		}
+		else if (K == "ads")
+		{
+			C.Ads = static_cast<video::AdLoad>(std::clamp(std::atoi(V.c_str()), 0, static_cast<int>(video::AdLoad::Count) - 1));
+		}
+		else if (K == "len")
+		{
+			C.Len = static_cast<video::LengthOpt>(std::clamp(std::atoi(V.c_str()), 0, 2));
+		}
+		else if (K == "clean")
+		{
+			C.CleanEdit = V == "1";
+		}
+		else if (K == "next")
+		{
+			C.NextUp = EditUnesc(V);
+		}
+		else if (K == "ser")
+		{
+			C.Series = std::atoi(V.c_str());
+		}
+		else if (K == "th")
+		{
+			std::vector<std::string> P;
+			size_t B = 0;
+			for (size_t I = 0; I <= V.size(); ++I)
+			{
+				if (I == V.size() || V[I] == ',')
+				{
+					P.push_back(V.substr(B, I - B));
+					B = I + 1;
+				}
+			}
+			if (P.size() >= 17)
+			{
+				video::ThumbSpec T;
+				int16_t* Fields[14] = {&T.Arch, &T.Layout, &T.Mirror, &T.Bg, &T.Pal, &T.Subj, &T.Expr, &T.Pose, &T.PropA, &T.PropB, &T.CapStyle, &T.Sticker, &T.Corner, &T.LookRef};
+				for (int I = 0; I < 14; ++I)
+				{
+					*Fields[I] = static_cast<int16_t>(std::atoi(P[static_cast<size_t>(I)].c_str()));
+				}
+				T.Variant = static_cast<uint32_t>(std::strtoul(P[14].c_str(), nullptr, 10));
+				T.Caption = EditUnesc(P[15]);
+				T.Caption2 = EditUnesc(P[16]);
+				if (C.Thumbs.size() < 3)
+				{
+					C.Thumbs.push_back(T);
+				}
+			}
+		}
+		At = End + 1;
+	}
+}
+
+bool ReadEditId(const std::string& Full, video::Choice& C)
+{
+	if (Full.rfind("video:", 0) != 0)
 	{
 		return false;
+	}
+	const size_t Tab = Full.find('\t');
+	const std::string Id = Full.substr(0, Tab);
+	if (Tab != std::string::npos && Full.compare(Tab + 1, 3, "u3|") == 0)
+	{
+		ReadEditTail(Full.substr(Tab + 4), C);
 	}
 	size_t At = 6;
 	int Fields[3] = {0, 0, 0};
@@ -569,6 +717,68 @@ void Session::VideoNoteHand(const Hand& H, const HandFacts& F)
 		K = video::Kind::Knockout;
 		Is = true;
 	}
+	// Rerun 2.0's kinds that need the event's context (§6.3 A13, A20, A21, A22, A24; core-videocontent), on a channel that
+	// runs it: two players out in one pot of the player's, a strong hand folded near a pay jump, the money made from a short
+	// stack, the heads-up for the title, the hand the player went out on. Their facts ride in IdeaFacts (the title's slots).
+	std::string ContextFacts;
+	if (Life.Video.X.On)
+	{
+		auto Take = [&](video::Kind Nk) {
+			if (!Is || video::KindWeight(Nk) > video::KindWeight(K))
+			{
+				K = Nk;
+				Is = true;
+				return true;
+			}
+			return false;
+		};
+		int Busted = 0;
+		for (const HandSeat& S : H.Seats)
+		{
+			if (S.Id == HeroId || S.Stack > 0 || S.Folded)
+			{
+				continue;
+			}
+			bool ByHero = false;
+			for (const PotResult& P : H.PotResults)
+			{
+				ByHero = ByHero || (std::find(P.Eligible.begin(), P.Eligible.end(), S.Seat) != P.Eligible.end() &&
+									   std::find(P.Winners.begin(), P.Winners.end(), HeroSeat->Seat) != P.Winners.end());
+			}
+			Busted += ByHero ? 1 : 0;
+		}
+		const int Hi = std::max(RankOf(HeroSeat->Hole[0]), RankOf(HeroSeat->Hole[1])), Lo = std::min(RankOf(HeroSeat->Hole[0]), RankOf(HeroSeat->Hole[1]));
+		const bool Strong = (Hi == Lo && Hi >= 8) || (Hi == 12 && Lo >= 11); // tens or better, ace-king or ace-queen
+		const bool NearJump = T->HandForHand() || (T->InTheMoney() && T->Remaining <= T->TableSize);
+		const bool HeroOut = HeroSeat->Stack <= 0 && !HeroSeat->Folded;
+		const double StackBb = static_cast<double>(HeroSeat->Stack) / Bb;
+		if (Busted >= 2 && Take(video::Kind::DoubleKo))
+		{
+			ContextFacts.clear();
+		}
+		if (HeroSeat->Folded && Strong && NearJump && HeroSeat->Committed < 4 * H.BigBlind && Take(video::Kind::LadderFold))
+		{
+			ContextFacts = "Left=" + std::to_string(T->Remaining);
+		}
+		if (BurstHere && !HeroOut && StackBb > 0.0 && StackBb <= 5.0 && Take(video::Kind::MinCash))
+		{
+			ContextFacts = "StackBb=" + std::to_string(static_cast<int>(std::max(1.0, std::round(StackBb))));
+		}
+		if (T->Remaining == 2 && HeroAllIn && Take(video::Kind::HeadsUp))
+		{
+			ContextFacts.clear();
+		}
+		if (HeroOut && HeroAllIn && T->Spec.Entrants > 1 && Take(video::Kind::LastHand))
+		{
+			ContextFacts.clear();
+		}
+		// A mystery bounty's envelope (A16): a knockout in the money. Its multiple is known once the envelope opens (the
+		// elimination's, which on the watch path comes after this hook): VideoStep fills Mult and Bounty from it.
+		if (KnockedOut && T->Spec.MysteryBounty && T->InTheMoney() && T->Spec.BountyCents > 0 && Take(video::Kind::Envelope))
+		{
+			ContextFacts = "envbase=" + std::to_string(static_cast<long long>(T->Spec.BountyCents));
+		}
+	}
 	if (!Is)
 	{
 		return;
@@ -581,6 +791,7 @@ void Session::VideoNoteHand(const Hand& H, const HandFacts& F)
 	C.K = K;
 	C.Rec = Rec;
 	C.EquityAtAllIn = Eq;
+	C.IdeaFacts = ContextFacts;
 	if (Villain)
 	{
 		const TPlayer* P = PlayerById(Villain->Id);
@@ -710,8 +921,22 @@ std::string Session::Publish(const video::Choice& C)
 	{
 		return Why;
 	}
+	// Studio's CAPTION, FACE and PALETTE pickers (§6.6.2) change a recipe only inside its archetype's values on this moment: a
+	// contender outside them isn't one of the moment's looks (and its caption could say what didn't happen).
+	if (C.F != video::Format::Short)
+	{
+		for (const video::ThumbSpec& Th : C.Thumbs)
+		{
+			if (!video::ThumbWithin(Th, C, Life.Video.Open, Life.Video))
+			{
+				return video::vcontent::ThumbNotALook();
+			}
+		}
+	}
 	const double World = WorldMinutes();
-	const double Minutes = video::EditMinutes(C.F);
+	// Update 3 (core-videocontent): a Studio choice's edit is its length option's, plus a Duel's contenders and Clean edit.
+	const bool U3 = !C.TitleTpl.empty() || !C.Thumbs.empty();
+	const double Minutes = video::EditMinutesOf(C);
 	// The moments can't go stale under the editor's hands.
 	for (video::Candidate& X : Life.Video.Open)
 	{
@@ -733,9 +958,29 @@ std::string Session::Publish(const video::Choice& C)
 	TimeSkip.Result.ActivityId = EditId(C);
 	TimeSkip.Result.Start = World;
 	TimeSkip.Result.End = TimeSkip.To;
-	TimeSkip.Result.Energy = -video::EditEnergy(C.F);
+	TimeSkip.Result.Energy = -video::EditEnergyOf(C);
 	TimeSkip.Result.Title = video::video_copy::UploadedTitle();
 	TimeSkip.Result.Body = video::Title(C, Life.Video.Open, 0);
+	if (U3)
+	{
+		// The title Studio picked: its template's text over these moments (the Shuffle-th deal and the next ones).
+		for (int S = 0; S < 8; ++S)
+		{
+			bool Found = false;
+			for (const video::TitleOption& O : video::TitleOptions(C, Life.Video.Open, Life.Video, C.Shuffle + S, 3))
+			{
+				if (O.Key == C.TitleTpl)
+				{
+					TimeSkip.Result.Body = O.Text;
+					Found = true;
+				}
+			}
+			if (Found)
+			{
+				break;
+			}
+		}
+	}
 	HasOutcome = false;
 	ConfirmRegister = false;
 	Touch(Life, TextsSeen, Evicted());
@@ -775,6 +1020,15 @@ std::string Session::SettleEdit(const std::string& ActivityId)
 	F.KastFollowers = Channel.Followers;
 	F.Energy = Life.Energy;
 	const double World = WorldMinutes();
+	// Rerun 2.0 (core-videoalgo's patch): the review waits for the second rent (W11); burnout reads Update 3's extra editing. A
+	// career whose save has Update 3's video lines on from its start (NewCareer's) uploads Rerun 2.0 videos from its first; an
+	// older channel's first upload with a recipe or a title template turns it on itself (video::Upload).
+	F.RentsPaid = Life.RentsPaid;
+	F.ExtraHours7 = video::algo::ExtraHours7(Life.Video, World);
+	if ((Life.Update3LinesRead & life::U3Video) != 0 && !Life.Video.X.On && Life.Video.Videos.empty())
+	{
+		Life.Video.X.On = true;
+	}
 	const std::string Id = video::Upload(Life.Video, C, World, SeedBase, F);
 	if (Id.empty())
 	{
@@ -782,7 +1036,45 @@ std::string Session::SettleEdit(const std::string& ActivityId)
 		LastOutcome.Body = video::video_copy::WhyNot(1);
 		return LastOutcome.Body;
 	}
+	// Update 3 (core-videocontent): an episode of a series is counted (its playlist, the challenge's state) once it's up.
+	session_video3_detail::AfterUpload(Life, History, LivingWorld, Channel, Gear, TextsSeen, BankrollCents, HeroName, Evicted(), World, C, Picked, Id);
+	// The face its thumbnails were made with stays theirs (§6.1, ChannelX::Looks): the look now, frozen once per look.
+	for (video::Video& V : Life.Video.Videos)
+	{
+		if (V.Id != Id || !V.X.On || V.X.Spec[0].Arch < 0)
+		{
+			continue;
+		}
+		std::array<int16_t, 14> Look{};
+		for (int K = 0; K < hero::SlotCount && K < 14; ++K)
+		{
+			Look[static_cast<size_t>(K)] = static_cast<int16_t>(Person.Appearance.Get(static_cast<hero::Slot>(K)));
+		}
+		int Ref = -1, Next = 0;
+		for (const video::FrozenLook& Fz : Life.Video.X.Looks)
+		{
+			Ref = Fz.Look == Look ? Fz.Ref : Ref;
+			Next = std::max(Next, Fz.Ref + 1);
+		}
+		if (Ref < 0)
+		{
+			if (Life.Video.X.Looks.size() >= 8)
+			{
+				Life.Video.X.Looks.erase(Life.Video.X.Looks.begin()); // the oldest look goes: its videos draw today's face
+			}
+			video::FrozenLook Fz;
+			Fz.Ref = Next;
+			Fz.Look = Look;
+			Life.Video.X.Looks.push_back(Fz);
+			Ref = Next;
+		}
+		for (video::ThumbSpec& S : V.X.Spec)
+		{
+			S.LookRef = S.Arch >= 0 ? static_cast<int16_t>(Ref) : S.LookRef;
+		}
+	}
 	Life.Update2LinesRead |= life::U2Video;
+	Life.Update3LinesRead |= Life.Video.X.On ? static_cast<uint32_t>(life::U3Video) : 0u;
 	std::string Title;
 	for (const video::Video& V : Life.Video.Videos)
 	{
@@ -841,6 +1133,24 @@ void Session::VideoStep(double From, double To)
 	// CheckCalendar's step after the sponsors' (§1.6): views, subscribers, the review and the monthly payout. Update 3
 	// (§4.6.10): with the session's world, whose log the week's trends read.
 	video::Step(Life.Video, Life, BankrollCents, Channel, From, To, &LivingWorld);
+	// An envelope's multiple (core-videocontent): the knockout's envelope opened after the hand was captured.
+	if (LastBountyCents > 0 && !LastBountyName.empty())
+	{
+		for (video::Candidate& X : Life.Video.Open)
+		{
+			const size_t At = X.IdeaFacts.find("envbase=");
+			if (X.K != video::Kind::Envelope || At == std::string::npos || X.IdeaFacts.find("Mult=") != std::string::npos || X.Opponent != LastBountyName)
+			{
+				continue;
+			}
+			const double Base = std::atof(X.IdeaFacts.c_str() + At + 8);
+			if (Base > 0.0)
+			{
+				const long long Mult = std::llround(static_cast<double>(LastBountyCents) / Base);
+				X.IdeaFacts += ";Mult=" + std::to_string(std::max(1LL, Mult)) + ";Bounty=" + video::vcontent::FactEsc(Money(LastBountyCents));
+			}
+		}
+	}
 	if ((Life.Update2LinesRead & life::U2Video) == 0)
 	{
 		return; // the channel has nothing yet: the stories start once it does (Touch)
@@ -1034,12 +1344,148 @@ std::string Session::DebugVideo(const std::string& Args)
 		}
 		return Out;
 	}
-	// §7.6's verbs whose bodies are still to land (core-videocontent's SessionVideo3.cpp, core-videoalgo's numbers): the
-	// stub's line, as DebugSitePlay's, until they do (Update3Commands.cpp registers their ss.Video.* names).
-	if (Verb == "checkin" || Verb == "trends" || Verb == "sheet" || Verb == "repack" || Verb == "duel")
+	// §7.6's Update 3 verbs (core-videocontent): the ideas, a check-in's score, the week's trends, the contact sheet, a
+	// repackage and a Duel without the laptop.
+	if (Verb == "idea" && W.size() > 1)
 	{
-		return "video " + Verb + ": not in this build yet";
+		const std::string Why = ChooseIdea(std::atoi(W[1].c_str()));
+		return Why.empty() ? "Idea " + W[1] + " is in MOMENTS (" + video::IdeaName(std::atoi(W[1].c_str())) + ")." : Why;
 	}
-	return "ss.Video.<Describe|Candidates|Fake|Upload|Advance|Grant|Ads|Launch|Stats|Ideas|Checkin|Trends|Sheet|Repack|Duel>";
+	if (Verb == "checkin")
+	{
+		std::string Out;
+		for (const video::Video& V : Ch.Videos)
+		{
+			if (!V.X.On || (W.size() > 1 && V.Id != W[1]))
+			{
+				continue;
+			}
+			// The decision midnights (§4.6.8): the verdict's (the first after 48 hours), day 7's and day 14's.
+			const int Up = net::DayOf(V.At);
+			const int Verdict = net::DayOf(V.At + 48.0 * 60.0) + 1;
+			const int Today = net::DayOf(World);
+			const int Next = Today < Verdict ? Verdict : Today < Up + 7 ? Up + 7 : Today < Up + 14 ? Up + 14 : -1;
+			const int Stage = Today < Verdict ? 1 : Today < Up + 7 ? 2 : 3;
+			const video::algo::Score S = video::algo::ScoreAt(V, Ch, World, Stage);
+			Out += (Out.empty() ? "" : "\n") + V.Id + ": " + (Next < 0 ? std::string("no decision left") : "next decision " + net::DateLabel(Next)) + ", score " +
+				Fixed(S.S, 2) + " (CTR " + Fixed(S.Ctr, 2) + ", quality " + Fixed(S.Q, 2) + ", viewers " + Fixed(S.V, 2) + ", trend " + Fixed(S.Tr, 2) + ", season " +
+				Fixed(S.Se, 2) + ").";
+		}
+		return Out.empty() ? std::string("No Rerun 2.0 video to check.") : Out;
+	}
+	if (Verb == "trends")
+	{
+		std::string Out;
+		for (const video::Trend& Tr : video::Trends(Life, LivingWorld, World))
+		{
+			Out += (Out.empty() ? "" : "\n") + Tr.Label + "  heat " + Fixed(Tr.Heat, 2) + "  x" + Fixed(Tr.Strength, 2) + "  (yours " + std::to_string(Tr.Mine) + ", others " +
+				std::to_string(Tr.Others) + ")" + (Tr.Limited ? "  limited ads" : "") + (Tr.Strike ? "  a strike" : "");
+		}
+		return Out.empty() ? std::string("Nothing is trending on Rerun this week.") : Out;
+	}
+	if (Verb == "sheet")
+	{
+		static const char* const Groups[] = {"beats", "reads", "pots", "runs", "rival", "stories", "ideas"};
+		int G = -1;
+		for (int I = 0; I < 7; ++I)
+		{
+			G = W.size() > 1 && W[1] == Groups[I] ? I : G;
+		}
+		const int N = W.size() > 2 ? std::clamp(std::atoi(W[2].c_str()), 1, 48) : 24;
+		if (G < 0)
+		{
+			return "ss.Video.Sheet <beats|reads|pots|runs|rival|stories|ideas> <n>";
+		}
+		std::string Out = W[1] + ": ";
+		std::set<int> Archs;
+		const std::vector<video::ThumbSpec> Sheet = video::ContactSheet(G, N);
+		for (const video::ThumbSpec& S : Sheet)
+		{
+			Archs.insert(S.Arch);
+		}
+		Out += std::to_string(Sheet.size()) + " thumbnails, " + std::to_string(Archs.size()) + " archetypes (the laptop draws the sheet).";
+		return Out;
+	}
+	if (Verb == "repack")
+	{
+		if (W.size() < 4 || (W[2] != "title" && W[2] != "thumb"))
+		{
+			return "ss.Video.Repack <id> <title|thumb> <n>";
+		}
+		const video::Video* V = nullptr;
+		for (const video::Video& X : Ch.Videos)
+		{
+			V = X.Id == W[1] ? &X : V;
+		}
+		if (!V)
+		{
+			return video::video_copy::NoSuchVideo();
+		}
+		const int N = std::max(1, std::atoi(W[3].c_str()));
+		video::Repack Rp;
+		if (W[2] == "title")
+		{
+			const std::vector<video::TitleOption> Os = video::RepackTitles(*V, Ch, 0, 3);
+			if (N > static_cast<int>(Os.size()))
+			{
+				return "There are " + std::to_string(Os.size()) + " title options.";
+			}
+			Rp.TitleKey = Os[static_cast<size_t>(N - 1)].Key;
+		}
+		else
+		{
+			const std::vector<video::ThumbSpec> Os = video::RepackThumbs(*V, Ch, 0, 6);
+			if (N > static_cast<int>(Os.size()))
+			{
+				return "There are " + std::to_string(Os.size()) + " thumbnail options.";
+			}
+			Rp.Spec = Os[static_cast<size_t>(N - 1)];
+		}
+		const std::string Id = V->Id;
+		const std::string Why = Repackage(Id, Rp);
+		if (!Why.empty())
+		{
+			return Why;
+		}
+		for (const video::Video& X : Ch.Videos)
+		{
+			if (X.Id == Id)
+			{
+				return "Repackaged " + Id + ": \xE2\x80\x9C" + X.Title + "\xE2\x80\x9D, " + video::ArchName(X.X.Spec[0].Arch) + ".";
+			}
+		}
+		return "Repackaged.";
+	}
+	if (Verb == "duel")
+	{
+		// The Thumbnail Duel without the laptop: a candidate's Breakdown with Studio's first title and three recipes.
+		if (W.size() < 2)
+		{
+			return "ss.Video.Duel <candidate id or number>";
+		}
+		const std::vector<video::Candidate> List = VideoCandidates();
+		const int Index = std::atoi(W[1].c_str());
+		video::Choice C;
+		C.Candidates = {Index >= 1 && Index <= static_cast<int>(List.size()) && std::to_string(Index) == W[1] ? List[static_cast<size_t>(Index - 1)].Id : W[1]};
+		C.F = video::Format::Breakdown;
+		for (const video::TitleOption& O : TitleOptions(C, 0))
+		{
+			C.TitleTpl = C.TitleTpl.empty() ? O.Key : C.TitleTpl;
+		}
+		for (const video::ThumbSpec& S : ThumbOptions(C, 0))
+		{
+			if (C.Thumbs.size() < 3)
+			{
+				C.Thumbs.push_back(S);
+			}
+		}
+		if (C.TitleTpl.empty() || C.Thumbs.empty())
+		{
+			return "Nothing to package for " + C.Candidates.front() + ".";
+		}
+		const std::string Why = Publish(C);
+		return Why.empty() ? "Editing a Duel of " + std::to_string(C.Thumbs.size()) + " thumbnails (" + Fixed(video::EditMinutesOf(C), 0) + " minutes)." : Why;
+	}
+	return "ss.Video.<Describe|Candidates|Fake|Upload|Advance|Grant|Ads|Launch|Stats|Ideas|Idea|Checkin|Trends|Sheet|Repack|Duel>";
 }
 } // namespace ss

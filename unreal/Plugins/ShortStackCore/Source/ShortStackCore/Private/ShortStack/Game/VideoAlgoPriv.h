@@ -24,10 +24,12 @@
 #include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/VideoStats.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -52,14 +54,19 @@ constexpr double VaKappaNeutral = 0.35;
 constexpr double VaKappaLo = 0.07, VaKappaHi = 0.875;
 constexpr double VaBreakoutMeanSize = 5.5; // U(3, 8)'s mean
 constexpr double VaCheckChance = 0.6;
-constexpr double VaMomWeight = 0.4, VaMomLo = 0.75, VaMomHi = 1.8, VaMomNorm = 1.049;
+// (C3, SPEC_CREATORS §3.6's knob order on the library's archetypes, 24 seeds (STATUS_core-videoalgo.txt, ssb/c3r-core-videoalgo/
+// knobs): at the spec's values the expert reads 1.91x / 1.91x its twin's subscribers and money, just past 1.9. The Momentum
+// weight's 0.3 breaks the meter's band (MomC p10 0.80, p90 1.21) and stays 0.4; the streak step 2.0% -> 1.5% (VaStreakStep) and
+// MomC's clamp 0.75-1.8 -> 0.8-1.6 (the normaliser re-pinned to 1.05, a neutral channel's mean as before) bring it to about
+// 1.85x / 1.89x; the Fresh lane's 1,200 moved nothing and stays 1,800.)
+constexpr double VaMomWeight = 0.4, VaMomLo = 0.8, VaMomHi = 1.6, VaMomNorm = 1.05;
 constexpr double VaMomBreakout = 0.5, VaMomWelcome = 0.2, VaMomDormant = 0.95;
 constexpr int VaDormantDays = 21;
 constexpr double VaPerfLo = -1.2, VaPerfHi = 2.0;
 constexpr double VaKickLo = 0.4, VaKickHi = 3.0;
 constexpr double VaKickNormStay = 1.764;   // kinds that don't travel (the viral roll at 0.5%)
 constexpr double VaKickNormTravel = 1.890; // bad beats, wins and bluffs (1%)
-constexpr double VaStreakStep = 0.02;
+constexpr double VaStreakStep = 0.015; // (C3's knob: 2.0% -> 1.5%, to +12% at 8 weeks)
 constexpr int VaStreakMax = 8, VaRainEvery = 4, VaRainMax = 2;
 constexpr double VaFresh = 1800.0;
 constexpr int VaFreshUploads = 12;
@@ -92,6 +99,12 @@ inline double VaRound(double X, double Scale)
 	return std::round(X * Scale) / Scale;
 }
 
+/** A curve's views as the save keeps them (P0, a component's P): whole views from 100 up, to the cent below (C3's compaction). */
+inline double VaViews(double P)
+{
+	return std::fabs(P) >= 100.0 ? std::round(P) : VaRound(P, 100.0);
+}
+
 // ---------------------------------------------------------------- shared helpers (bodies in Video.cpp unless said)
 struct VaShape
 {
@@ -104,6 +117,8 @@ double CurveFrac(double A, double Tau1, double Tau2, double Days);
 double ViewsU3(const Video& V, double World);
 /** The views a video has still to come after World from its first wave and components (the Next-up card's base). */
 double RemainingU3(const Video& V, double World);
+/** An Update 3 video over [T0, T1]: ViewsU3 at both ends and ImprGain between them, bit for bit, each part's curve read once. */
+void SpanU3(const Video& V, double T0, double T1, double& Was, double& Now, double& Impr);
 int DayOf(double World);
 /** A video's Update 2 kind group (beats, reads, pots, runs, the rival, stories), its Topic weight's "travels" flag. */
 int KindGroup(Kind K);
@@ -119,6 +134,10 @@ double StyleAdFit(TitleStyle T);
 double FrameFit(Frame F, int Group);
 /** ss.Video.Grant's synthetic video (no upload of the player's: never ranked, never typical). */
 bool IsGrant(const Video& V);
+/** What a moment can back up, 0-3 (§4.6.5; Upload's VideoX::Payoff): Studio's honest title or recipe promises no more. */
+uint8_t PayoffFor(const Candidate& Lead, const std::vector<Candidate>& Open);
+/** Sameness (§4.6.2): x0.90 for an archetype in 3 of the last 5 recipe uploads, x0.82 in 4 or 5 (Upload's own factor). */
+double NoveltyFor(const Channel& C, int Arch);
 /** The in-app bell, the last 20 (Video.cpp's Bell). */
 void PushBell(Channel& C, double At, const std::string& Line);
 /** The audience's hour curve (§5.5, VideoAlgo.cpp): Kast's poker hours over the viewers' time zones; PeakHour is its maximum. */
@@ -217,8 +236,12 @@ std::string BellVerdict(const std::string& Title, int Label);
 std::string BellKick(const std::string& Title);
 std::string BellBreakout(const std::string& Title);
 std::string BellViral(const std::string& Title);
-std::string BellBinge(int Videos);
-std::string BellBloom(const std::string& Title);
+/** C3 fix L4: rung at the midnight after the wave began, with what its parts really added that day ("New viewers are bingeing
+ *  your channel: 3 older videos picked up 1,240 views."). */
+std::string BellBinge(int Videos, double Views);
+/** C3 fix L4: rung at the midnight after the check-in that woke it, with its day against its usual day (the 7 days before):
+ *  "... woke up: 3x its usual daily views." (U+00D7); under 2x, the old words without a number. */
+std::string BellBloom(const std::string& Title, double Ratio);
 std::string BellDuel(int Winner);
 std::string BellStreak(int Weeks);
 std::string BellEarly(const std::string& Title);
@@ -243,8 +266,9 @@ std::string StreakLine(int Weeks, int RainChecks);
 std::string WouldEarnLine(Chips Cents);
 /** VideoStats::Tag's name: 1 Above typical, 2 Breakout, 3 Outlier ("" for 0). */
 const char* TagName(int Tag);
-/** The first Limited ads coin's letter (life::Letter::Kind 4: Video.h's LetterKind lists 1-3; 4 is this one's, to append). */
-constexpr int VaLetterLimited = 4;
+/** The first Limited ads coin's letter (life::Letter::Kind: Video.h's LetterLimited, appended at the C3 gate). */
+constexpr int VaLetterLimited = LetterLimited;
+static_assert(VaLetterLimited == 4, "the Limited ads letter's kind is saved: it stays 4");
 std::string LimitedSubject();
 std::string LimitedBody(const std::string& Title);
 const char* VerdictName(int Label);
@@ -262,6 +286,9 @@ std::vector<std::string> AlgoInventory();
  *   w=<weight>     its Topic weight (§6.3's column, 0.9-2.4; the kind Idea's own is 1.0)
  *   cool=<days>    its cooldown: a repeat inside it reaches x0.5 (7 days when unsaid). Upload records each idea video's use in
  *                  ChannelX::IdeaCool (key the idea, the day, a count), which the IDEAS board reads
+ *   cls=S          a Strategy lesson (§6.3's S): the video is the evergreen class in any long format (C3)
+ *   fmt=<digits>   the formats the idea may go up as (Studio's; CanUpload lets a lone idea up as a Vlog or a Recap it lists)
+ * An idea video's advertiser category on the Ad market card is IdeaAdCategory(VideoX::Idea) (core-videocontent's table).
  */
 constexpr int VaIdeaCoolDays = 7;
 std::vector<std::string> FactValues(const std::string& Facts, const std::string& Key);
@@ -295,13 +322,239 @@ int TrendCoolKey(const std::string& Key);
 std::vector<Trend> TrendsNow(const life::State& L, const world::World* W, double World);
 constexpr double VaTrendTr = 0.4, VaTrendComp = 0.08, VaTrendCompAt = 0.25, VaTrendFew = 1.10, VaTrendTourists = 0.70;
 
+// ---------------------------------------------------------------- the money's split (§4.5.7's itemized statement, §5.6's Revenue)
+/**
+ * DayRow's split, appended by the lead's Video.h patch (core-videoalgo_to_lead_2.diff): CutCents and CutViews, the Cuts feed's
+ * share of a row's Cents and Views; AdImpr and Monetized, the watch page's ad impressions and monetized playbacks behind the
+ * rest. DayStep fills them on the days ads pay (Partner); until the patch lands DayRow has no such fields, these read 0 and
+ * write nothing, and the statement stays Update 2's. (VaRowSplit<DayRow> is true from the patch on; the trait can go once it has.)
+ */
+template <class R, class = void>
+struct VaRowSplit : std::false_type
+{
+};
+template <class R>
+struct VaRowSplit<R, std::void_t<decltype(std::declval<R&>().CutCents), decltype(std::declval<R&>().CutViews), decltype(std::declval<R&>().AdImpr),
+						 decltype(std::declval<R&>().Monetized)>> : std::true_type
+{
+};
+constexpr bool VaHasSplit = VaRowSplit<DayRow>::value;
+template <class R>
+Chips VaRowCut(const R& Row)
+{
+	if constexpr (VaRowSplit<R>::value)
+	{
+		return Row.CutCents;
+	}
+	else
+	{
+		(void)Row;
+		return 0;
+	}
+}
+template <class R>
+double VaRowCutViews(const R& Row)
+{
+	if constexpr (VaRowSplit<R>::value)
+	{
+		return static_cast<double>(Row.CutViews);
+	}
+	else
+	{
+		(void)Row;
+		return 0.0;
+	}
+}
+template <class R>
+double VaRowImpr(const R& Row)
+{
+	if constexpr (VaRowSplit<R>::value)
+	{
+		return static_cast<double>(Row.AdImpr);
+	}
+	else
+	{
+		(void)Row;
+		return 0.0;
+	}
+}
+template <class R>
+double VaRowMonetized(const R& Row)
+{
+	if constexpr (VaRowSplit<R>::value)
+	{
+		return static_cast<double>(Row.Monetized);
+	}
+	else
+	{
+		(void)Row;
+		return 0.0;
+	}
+}
+/** Sets a row's split (nothing before the patch): AddToRow's tenths-below-100 rounding for the counts. */
+template <class R>
+void VaSetRowSplit(R& Row, Chips Cut, float CutViews, float Impr, float Monetized)
+{
+	if constexpr (VaRowSplit<R>::value)
+	{
+		Row.CutCents = Cut;
+		Row.CutViews = CutViews;
+		Row.AdImpr = Impr;
+		Row.Monetized = Monetized;
+	}
+	else
+	{
+		(void)Row;
+		(void)Cut;
+		(void)CutViews;
+		(void)Impr;
+		(void)Monetized;
+	}
+}
+/**
+ * The top-earner rate's held-back cents on a row (c3f-algo_to_lead_1.diff appends DayRow::HeldCents and HeldCutCents: what the
+ * rate held back from the row's days, the ads' earnings less Cents, and the Cuts feed's part of it). The money never needs them
+ * (TopRatePay works from the paid cents alone); the statement's CPM (the advertisers' price, before any share) and
+ * TopRateView::Held do. Until the patch lands they read 0 and write nothing, like VaRowSplit before its patch.
+ */
+template <class R, class = void>
+struct VaRowHeldT : std::false_type
+{
+};
+template <class R>
+struct VaRowHeldT<R, std::void_t<decltype(std::declval<R&>().HeldCents), decltype(std::declval<R&>().HeldCutCents)>> : std::true_type
+{
+};
+constexpr bool VaHasHeld = VaRowHeldT<DayRow>::value;
+template <class R>
+Chips VaRowHeld(const R& Row)
+{
+	if constexpr (VaRowHeldT<R>::value)
+	{
+		return Row.HeldCents;
+	}
+	else
+	{
+		(void)Row;
+		return 0;
+	}
+}
+template <class R>
+Chips VaRowHeldCut(const R& Row)
+{
+	if constexpr (VaRowHeldT<R>::value)
+	{
+		return Row.HeldCutCents;
+	}
+	else
+	{
+		(void)Row;
+		return 0;
+	}
+}
+template <class R>
+void VaSetRowHeld(R& Row, Chips Held, Chips HeldCut)
+{
+	if constexpr (VaRowHeldT<R>::value)
+	{
+		Row.HeldCents = Held;
+		Row.HeldCutCents = HeldCut;
+	}
+	else
+	{
+		(void)Row;
+		(void)Held;
+		(void)HeldCut;
+	}
+}
+/**
+ * A span's ad money, split: the Cuts feed's cents and views and the watch page's, with the watch page's ad impressions and
+ * monetized playbacks, so the span's CPM (gross / impressions) and playback CPM (gross / monetized playbacks) are the
+ * identity's own: impressions x CPM / 1,000 x 55% + the Cuts feed = the cents paid (§5.6). Views: every view of the span.
+ * Has: the rings carried the split for the span (the Video.h patch). Held, HeldCut: what the top-earner rate held back on
+ * the span's days (the watch page's part is in the CPMs: advertisers paid it; Rerun kept it).
+ */
+struct VaSplit
+{
+	Chips Cents = 0, CutCents = 0;
+	double Views = 0, CutViews = 0, AdImpr = 0, Monetized = 0;
+	int FromDay = -1, ToDay = -1;
+	bool Has = false;
+	Chips Held = 0, HeldCut = 0;
+	Chips WatchCents() const { return Cents - CutCents; }
+	/** The watch page's ads before the top-earner rate (what the CPMs are of). */
+	Chips WatchGross() const { return WatchCents() + std::max<Chips>(0, Held - HeldCut); }
+	double WatchViews() const { return std::max(0.0, Views - CutViews); }
+	/** Dollars per 1,000 views: every view (Rerun's RPM), the watch page's, the Cuts feed's; per 1,000 ad impressions before
+	 *  Rerun's share; per 1,000 monetized playbacks. */
+	double Rpm() const { return Views > 0.0 ? static_cast<double>(Cents) / 100.0 / Views * 1000.0 : 0.0; }
+	double WatchRpm() const { return WatchViews() > 0.0 ? static_cast<double>(WatchCents()) / 100.0 / WatchViews() * 1000.0 : 0.0; }
+	double CutRpm() const { return CutViews > 0.0 ? static_cast<double>(CutCents) / 100.0 / CutViews * 1000.0 : 0.0; }
+	double Cpm() const { return AdImpr > 0.0 ? static_cast<double>(WatchGross()) / 100.0 / VaCreatorShare / AdImpr * 1000.0 : 0.0; }
+	double PlaybackCpm() const { return Monetized > 0.0 ? static_cast<double>(WatchGross()) / 100.0 / VaCreatorShare / Monetized * 1000.0 : 0.0; }
+};
+/** The newest days of the rings whose cents reach Target (past the 90-day ring, the month rows; the oldest part in proportion). */
+VaSplit SplitCovering(const Channel& C, Chips Target);
+/** The balance's split between steps: the days since it was last paid out (SplitCovering(C, C.BalanceCents)). */
+VaSplit BalanceSplit(const Channel& C);
+/** (The statement's words are core-videocontent's: vcontent::StatementU3 with WatchCents, WatchRpm, Cpm and CutCents.) */
+
+// ---------------------------------------------------------------- the top-earner rate (the user's soft ceiling, 2026-10-27; C3_AUDIT H1)
+/**
+ * Rerun's pay for a pay month (the days one payout covers: the 21st to the 20th, the month named by the 21st that pays it) is
+ * what the ads earned, E, up to T = 6 rents (life::MonthlyRentCents), then T + C (1 - e^(-(E - T) / C)) with C = 4 rents: past
+ * T it grows more and more slowly toward T + C. Views, subscribers, bells, impressions and the audience keep every view; only
+ * the money flattens, and only a Rerun 2.0 channel's (an Update 2 channel's ads stay Update 2's, as the season does).
+ * DayStep applies it as each day accrues, from the month's paid cents so far P (the day rings): above T the gap to T + C
+ * shrinks by e^(-r / C) for r cents more, the curve's own step, so N one-day steps are the month's curve (to the day's cent
+ * rounding), a skip of N days is N steps, and a reload changes nothing (no new saved state: the rings hold P).
+ */
+constexpr int VaPayDay = 21; // Video.cpp's PayDay (static_assert there): the payout's day of the month
+Chips TopRateFrom(); // T: 6 rents
+Chips TopRateTop();  // T + C: 10 rents, what no month pays past
+/** The pay month a world day's ads belong to: Y * 12 + (Mo - 1) of the 21st whose payout covers it (the 21st on: the next). */
+int PayMonthOf(int Day);
+/** The first world day of Day's pay month (the 21st on or before it). */
+int PayMonthFirst(int Day);
+/** The cents Earned more cents of ads pay in a month that has paid PaidSoFar: Earned itself while the month stays at or under
+ *  T (byte for byte today's), the curve's step past it; never more than Earned, never past T + C. */
+Chips TopRatePay(Chips PaidSoFar, Chips Earned);
+/** The share of full pay the next cent of ads pays at: 1 at or under T, (T + C - P) / C past it. */
+double TopRateShare(Chips PaidSoFar);
+/** What Day's pay month has paid on the days before Day (the day rings; 0 for a channel off Rerun 2.0). */
+Chips PaidThisMonth(const Channel& C, int Day);
+/** What Day's ads paid against what they earned, the same for every video that day (DayStep's share): 1 at or under T; a
+ *  stepped day's from its row (its held cents once DayRow keeps them, else the curve read back from its paid cents); a day not
+ *  stepped yet, the share its first view pays at (StatsOf's "today"). For a video's RPM a day (review-c3f-algo). */
+double DayPaidShare(const Channel& C, int Day);
+/** The curve closed: what a month whose ads earned EarnedCents pays, in one go (where the stepped days land, to their cents). */
+double TopRateCurve(double EarnedCents);
+/** One pay month so far (through the last midnight: the rings, what its statement will itemize), for the Revenue page. */
+struct TopRateView
+{
+	int Month = -1;       // PayMonthOf the day
+	Chips Paid = 0;       // the month's cents through the last midnight
+	Chips Held = -1;      // what the rate held back of them; -1 unknown (DayRow has no HeldCents yet: c3f-algo_to_lead_1.diff)
+	double Share = 1.0;   // TopRateShare(Paid): what today's views pay against the full rate (StatsOf's Rpm uses the same)
+	bool Applies = false; // Paid passed T
+};
+/** (VideoStats.cpp.) */
+TopRateView TopRateOf(const Channel& C, double World);
+/** "Top-earner rate: above $6,450 this month pays at a reduced share." (the statement's line and the Revenue page's) */
+std::string TopRateLine();
+/** The "?" card's words, every amount from the game's rent. */
+std::string TopRateHelp();
+/** The statement's CPM for a span that may hold top-earner days: the advertisers' price, never the rate's share (the held cents
+ *  when DayRow keeps them; before that, the month's days the rate didn't touch). */
+double StatementCpm(const Channel& C, const VaSplit& S, int PayMonth);
+
 // ---------------------------------------------------------------- the title template's hidden traits (§4.6.2)
 /**
  * TitleOption::Traits, as core-videocontent sets them (bit -> CTR factor): 1 a curiosity gap (+6%), 2 a specific number
  * (+4%), 4 first person (+3%), 8 a question (+3%), 16 40-70 characters (+3%), 32 over 85 characters (-5%), 64 a named
  * creator or rival (+5%), 128 a search phrase (-3% CTR, +4% retention), 256 "episode N" (+6%). Bits 9-15 are
- * core-videocontent's style renormalizer, an unsigned fixed-point factor (1.000 + (n - 64) / 1000 for n in 0..127; 0 is
- * 1.000): each style's templates average 1.000 with it (§4.6.2).
+ * core-videocontent's style renormalizer, an unsigned fixed-point factor (1.000 + (n - 64) / 500 for n in 0..127, 0.874 to
+ * 1.126; 0 is 1.000): each style's templates average 1.000 with it (§4.6.2).
  */
 double TitleTraitCtr(uint16_t Traits);
 double TitleTraitRet(uint16_t Traits);

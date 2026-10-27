@@ -3633,6 +3633,8 @@ struct Career
 	std::array<double, 4> Subs{};       // Rerun's subscribers on days 30, 60, 90 and the last
 	std::array<double, 4> Views{};      // and its views to date
 	double PartnerAt = -1.0;            // world minutes
+	double ReviewAt = -1.0;             // C3: when Rerun's review started (world minutes; -1 never)
+	bool Rerun2 = false;                // C3: the channel runs Rerun 2.0 (NewCareer's: its X on from the first upload)
 	int Kast = 0;                       // Kast followers at the end
 	double Rig = 0.0;                   // the rig's quality at the end (gear::Effects::Quality)
 	// G3's multi-site career (update 2 SPEC §1.11): Ignite and RunItTwice joined from their own invitations, money moving
@@ -4505,6 +4507,8 @@ void Run(Career& C)
 		C.Ledger.Take(S->Life);
 	}
 	C.PartnerAt = S->Life.Video.PartnerAt;
+	C.ReviewAt = S->Life.Video.ReviewAt >= 0.0 ? S->Life.Video.ReviewAt : C.PartnerAt;
+	C.Rerun2 = S->Life.Video.X.On;
 	C.Kast = S->Channel.Followers;
 	C.Rig = S->GearFx().Quality;
 	if (C.Sites)
@@ -4833,6 +4837,14 @@ void CreatorChecks(const Career& C)
 	Expect(C.Uploads >= C.Days / 4, "pacing (creator): the creator uploads about three times a week from day 7, cut from the career's own hands");
 	Expect(!Covered && Paid60 < ss::life::MonthlyRentCents, "pacing (creator): no month's rent before day 60 is covered by Rerun");
 	Expect(FirstPay < 0.0 || FirstPay >= 90.0, "pacing (creator): Rerun's first payout lands no earlier than day 90");
+	// C3 (update 3 SPEC §4.4, W11; §8.3's "the creator career's review rule"): a new career's channel is Rerun 2.0's, and its
+	// Partner review waits for the second rent (Act I's end), however the gate's numbers came.
+	const double Act1 = ActIEndOf(C.Ledger);
+	std::printf("  pacing creator (C3): Rerun 2.0 %s; review %s; Act I over %s\n", C.Rerun2 ? "on" : "OFF",
+		C.ReviewAt >= 0.0 ? ("on day " + std::to_string(static_cast<int>((C.ReviewAt - C.Start) / Day))).c_str() : "not in these days",
+		Act1 < 1.0e17 ? ("on day " + std::to_string(static_cast<int>((Act1 - C.Start) / Day))).c_str() : "not in these days");
+	Expect(C.Rerun2, "pacing (creator, C3): a new career's Rerun channel runs Rerun 2.0 from its first upload (NewCareer)");
+	Expect(C.ReviewAt < 0.0 || C.ReviewAt >= Act1, "pacing (creator, C3): Rerun's Partner review never starts before the second rent (W11)");
 }
 
 /**
@@ -7982,6 +7994,131 @@ void MigrationAll3()
 			"migration (update 3): update3_streamer is committed: a channel at the member cap, written with the creator update's lines (U3Kast)");
 		Expect(Kast <= 165u * 1024u, "migration (update 3): update3_streamer's Kast lines within 165 KB (SPEC_CREATORS §8.2)");
 	}
+	// C3's heavy fixture (update 3 SPEC §7.4, §7.5, I9): update3_creator (fixture_tool write-u3g3: a NewCareer on Rerun 2.0, three
+	// uploads a week for 420 days packaged in Studio from the library), its round trip in the loop above; here its facts (every
+	// video Rerun 2.0's, components and rings, the Duel mid-test, the Heavy switch after a last check-in, the repackages) and
+	// Rerun's budget on it: its Update 3 lines (LineBytesU3) within 22 KB.
+	{
+		namespace life = ss::life;
+		namespace video = ss::video;
+		const bool There = std::find(All.begin(), All.end(), std::string("update3_creator.ssave")) != All.end();
+		const std::string Saved = There ? seams::Fixture("update3_creator.ssave") : std::string();
+		ss::SaveData D;
+		const bool Parsed = There && ss::SaveData::Parse(Saved, D);
+		Hooks H;
+		ss::Session S(H, "migration3-update3-creator", &D);
+		const video::Channel& C = S.Life.Video;
+		const double World = S.WorldMinutes();
+		int On = 0, Comps = 0, DuelMid = 0, HeavyAfter = 0, Repacked = 0, Ideas = 0, Verdicts = 0, Packaged = 0;
+		for (const video::Video& V : C.Videos)
+		{
+			On += V.X.On ? 1 : 0;
+			Comps += static_cast<int>(V.X.Comps.size());
+			DuelMid += V.X.Duels >= 2 && V.X.DuelWin < 0 && World < V.At + 48.0 * 60.0 ? 1 : 0;
+			HeavyAfter += V.X.Ads == video::AdLoad::Heavy && V.X.AdsChangedDay >= ss::net::DayOf(V.At) + 15 ? 1 : 0;
+			Repacked += V.X.Repacks > 0 ? 1 : 0;
+			Ideas += V.X.Idea >= 0 ? 1 : 0;
+			Verdicts += V.X.Verdict >= 0 ? 1 : 0;
+			Packaged += !V.X.TitleTpl.empty() ? 1 : 0;
+		}
+		const size_t U3 = journeys::LineBytesU3(Saved);
+		std::printf("  migration (update 3): update3_creator: %zu bytes, Update 3's lines %zu bytes (%.1f KB of 22); %zu videos kept (%d Rerun 2.0, %d with a library "
+					"title, %d ideas, %d judged), %d components, %zu day rows, %zu month rows, %zu challenges; a Duel mid-test %d, Heavy after a last check-in %d, "
+					"repackaged %d; %.0f subscribers, partner %s; U3Video %s\n",
+			Saved.size(), U3, static_cast<double>(U3) / 1024.0, C.Videos.size(), On, Packaged, Ideas, Verdicts, Comps, C.X.Days.size(), C.X.Months.size(),
+			C.X.Challenges.size(), DuelMid, HeavyAfter, Repacked, video::SubsAt(C, World), C.PartnerAt >= 0.0 ? "yes" : "no",
+			(S.Life.Update3LinesRead & life::U3Video) != 0 ? "set" : "NOT SET");
+		Expect(Parsed && (S.Life.Update3LinesRead & life::U3Video) != 0 && C.X.On && !C.Videos.empty() && On == static_cast<int>(C.Videos.size()) && Comps > On &&
+				   !C.X.Days.empty() && Verdicts > 0 && Packaged > 0,
+			"migration (update 3): update3_creator is committed: a Rerun 2.0 channel, every kept video Rerun 2.0's, with components, verdicts and the rings");
+		Expect(DuelMid >= 1 && HeavyAfter >= 1 && Repacked >= 1, "migration (update 3): update3_creator carries a Duel mid-test, a Heavy switch after a last check-in and repackages");
+		Expect(U3 <= 22u * 1024u, "migration (update 3): update3_creator's Update 3 lines within 22 KB (update 3 SPEC §7.4, I9)");
+	}
+	// C3: Rerun's migration (update 3 SPEC §7.5 item 3, V6, I7; SPEC_CREATORS §8.3): update2_creator's channel (Update 2's, X off)
+	// stays Update 2 until its first upload packaged in Studio (the library's first title and recipe for its best open moment),
+	// which turns Rerun 2.0 on (TurnOnU3): the new video is Rerun 2.0's, every old one keeps its numbers and gains nothing a week
+	// on, and the save writes Rerun 2.0's lines from then on (U3Video), reading back byte for byte.
+	{
+		namespace life = ss::life;
+		namespace video = ss::video;
+		ss::SaveData D;
+		const bool Parsed = ss::SaveData::Parse(seams::Fixture("update2_creator.ssave"), D);
+		Hooks H;
+		ss::Session S(H, "migration3-rerun-first-upload", &D);
+		S.CurrentScreen = ss::Screen::Lobby;
+		const bool WasOff = !S.Life.Video.X.On && (S.Life.Update3LinesRead & life::U3Video) == 0;
+		struct Was
+		{
+			std::string Id, Title;
+			double P, Retention, Rpm, Conv, At;
+		};
+		std::vector<Was> Old;
+		for (const video::Video& V : S.Life.Video.Videos)
+		{
+			Old.push_back({V.Id, V.Title, V.P, V.Retention, V.Rpm, V.Conv, V.At});
+		}
+		const std::vector<video::Candidate> List = S.VideoCandidates();
+		video::Choice Ch;
+		for (const video::Candidate& C : List)
+		{
+			if (Ch.Candidates.empty() && !C.Storytime)
+			{
+				Ch.Candidates = {C.Id};
+			}
+		}
+		Ch.F = video::Format::Breakdown;
+		const std::vector<video::TitleOption> Titles = S.TitleOptions(Ch, 0);
+		const std::vector<video::ThumbSpec> Thumbs = S.ThumbOptions(Ch, 0);
+		Ch.TitleTpl = Titles.empty() ? std::string() : Titles.front().Key;
+		if (!Thumbs.empty())
+		{
+			Ch.Thumbs = {Thumbs.front()};
+		}
+		S.Life.Energy = 90.0;
+		S.Life.Hunger = 10.0;
+		S.Life.Thirst = 10.0;
+		const std::string Why = Ch.Candidates.empty() ? std::string("no candidate") : S.Publish(Ch);
+		double Now = 0.0;
+		for (int Guard = 0; S.TimeSkip.Active && Guard < 400; ++Guard)
+		{
+			Now = Wait(S, Now, 0.25);
+		}
+		S.DebugVideo("advance 7");
+		int Kept = 0, New = 0;
+		bool NewOn = false;
+		for (const video::Video& V : S.Life.Video.Videos)
+		{
+			const auto W = std::find_if(Old.begin(), Old.end(), [&V](const Was& X) { return X.Id == V.Id; });
+			if (W == Old.end())
+			{
+				++New;
+				NewOn = V.X.On && V.X.TitleTpl == Ch.TitleTpl && V.Title == (Titles.empty() ? std::string() : Titles.front().Text);
+				continue;
+			}
+			Kept += !V.X.On && V.X.Comps.empty() && V.Title == W->Title && V.P == W->P && V.Retention == W->Retention && V.Rpm == W->Rpm && V.Conv == W->Conv &&
+					V.At == W->At ?
+				1 :
+				0;
+		}
+		// (A kept old video may have folded into the tails in the week: count those that are still kept.)
+		int StillKept = 0;
+		for (const Was& W : Old)
+		{
+			StillKept += std::any_of(S.Life.Video.Videos.begin(), S.Life.Video.Videos.end(), [&W](const video::Video& V) { return V.Id == W.Id; }) ? 1 : 0;
+		}
+		const std::string After = migration2::SavedNow(S, H);
+		ss::SaveData Back;
+		const bool Round = ss::SaveData::Parse(After, Back) && Back.Serialize() == After;
+		std::printf("  migration (update 3): update2_creator's first Rerun 2.0 upload (\"%s\"): %s; channel %s, U3Video %s; %d of %d old videos kept with their numbers, "
+					"%d new; Update 3 lines %zu bytes; %s\n",
+			Titles.empty() ? "" : Titles.front().Text.c_str(), Why.empty() ? "published" : Why.c_str(), S.Life.Video.X.On ? "on" : "OFF",
+			(S.Life.Update3LinesRead & life::U3Video) != 0 ? "set" : "NOT SET", Kept, StillKept, New, journeys::LineBytesU3(After),
+			Round ? "the save reads back byte for byte" : "THE SAVE DOESN'T READ BACK");
+		Expect(Parsed && WasOff && Why.empty() && !Titles.empty() && !Thumbs.empty() && S.Life.Video.X.On && New == 1 && NewOn &&
+				   (S.Life.Update3LinesRead & life::U3Video) != 0,
+			"migration (update 3): an Update 2 channel's first upload packaged in Studio turns Rerun 2.0 on (TurnOnU3), its video Rerun 2.0's");
+		Expect(StillKept > 0 && Kept == StillKept && Round, "migration (update 3): every old video keeps its numbers, stays Update 2 and gains no component; the save reads back");
+	}
 	// The creator update's migration (SPEC_CREATORS §8.3, §9.1's Saves, the C-K gate): pre_update2_sponsored_streamer (2,402
 	// followers, all of them beyond the tracked community, its last stream 19 on average over 152 minutes) goes live under this
 	// build for its usual 152 minutes from the lobby: Heat seeded (26 if it streamed in the last 7 days, else 15), one Kast
@@ -8086,6 +8223,276 @@ void MigrationAll3()
 				"own lines), none with an Update 3 line, %.1f s\n",
 		Exact, All.size(), migration2::Since(T0));
 }
+
+/**
+ * U3CreatorJourney (update 3 SPEC §8.3, the lead's C3 journey; in "session_test u3"): a new career (NewCareer: Rerun 2.0 from
+ * its first upload) uploading for 150 days with the levers, through the Session's own methods (the console's ss.Video.Fake
+ * for the moments, ss.Stake.Advance's calendar for the days, the rent covered by the journey):
+ *   - three uploads a week packaged the way Studio's PUBLISH packages them: the library's first title (TitleOptions) and first
+ *     recipe (ThumbOptions, six a deal, four archetypes or more); every video Rerun 2.0's, its title the template's;
+ *   - a Live Drop (the rig bought; live within 6 hours of a publish, 40 minutes): the video's Kast part and LiveDrop;
+ *   - a Duel of three, decided at its verdict (the winner on watch time, the stats' DuelWin);
+ *   - a teaser, a reply round and Make a Cut inside the 48 hours (the Cut linked back to its long video); each once a video;
+ *   - a repackage at five days (the title's words change; a second one inside three days refused);
+ *   - Heavy ads on a News video past its day-14 check-in (effective the next midnight; a second switch inside the week and a
+ *     Cut's switch refused);
+ *   - Partner by grant (ss.Video.Grant), the review never before the second rent (W11);
+ *   - a December and a January payout: one "Rerun payout" bank line a month, each with its itemized statement;
+ *   - every 30 days the save reads and writes back byte for byte; at the end Update 3's lines within 22 KB.
+ */
+void U3CreatorJourney()
+{
+	namespace life = ss::life;
+	namespace net = ss::net;
+	namespace video = ss::video;
+	using pacing::Fed;
+	const auto T0 = std::chrono::steady_clock::now();
+	const double Day = 1440.0;
+	Hooks H;
+	std::unique_ptr<ss::Session> S(new ss::Session(H, "u3-creator-journey"));
+	S->NewCareer(journeys::Jesse());
+	S->CurrentScreen = ss::Screen::Lobby;
+	double Now = Wait(*S, 0.0, 0.1);
+	const int FirstDay = net::DayOf(S->WorldMinutes());
+	auto To = [&](double World) {
+		if (World > S->WorldMinutes() + 0.01)
+		{
+			S->DebugStake("advance " + ss::Fixed((World - S->WorldMinutes()) / 60.0, 4));
+		}
+		Now = Wait(*S, Now, 0.05);
+	};
+	auto Skip = [&]() {
+		for (int Guard = 0; S->TimeSkip.Active && Guard < 2000; ++Guard)
+		{
+			Now = Wait(*S, Now, 0.25);
+		}
+	};
+	auto Newest = [&]() {
+		const video::Video* N = nullptr;
+		for (const video::Video& V : S->Life.Video.Videos)
+		{
+			N = !N || V.At > N->At ? &V : N;
+		}
+		return N ? N->Id : std::string();
+	};
+	auto Find = [&](const std::string& Id) -> const video::Video* {
+		for (const video::Video& V : S->Life.Video.Videos)
+		{
+			if (V.Id == Id)
+			{
+				return &V;
+			}
+		}
+		return nullptr;
+	};
+	// The rig for Kast (the Live Drop), from Night One's savings.
+	S->BankrollCents += 160000;
+	for (const char* Gear : {"ram-32", "webcam-720", "mic-usb"})
+	{
+		S->Buy(Gear);
+	}
+	static const char* const Kinds[] = {"badbeat", "bluff", "herocall", "cooler", "bigpot", "suckout", "herofold", "win"};
+	int Turn = 0, Uploads = 0, Packaged = 0, Dealt6 = 0, Archs4 = 0, Rerun2 = 0, RoundTrips = 0, RoundTripsSame = 0;
+	std::string DuelId, RepackId, CutFrom, LiveId, HeavyId;
+	bool DuelDecided = false, LaunchOnce = true, CutLinked = false, RepackDone = false, RepackWords = false, RepackTwiceRefused = false;
+	bool HeavyOk = false, HeavyLocked = false, CutAdsRefused = false, LiveDrop = false, Teaser = false, Reply = false, ReviewAfterRent = true;
+	double RentTwoAt = -1.0;
+	for (int K = 0; K < 150; ++K)
+	{
+		const int DayNo = FirstDay + K;
+		To(static_cast<double>(DayNo) * Day + 8.0 * 60.0);
+		Fed(*S);
+		if (S->BankrollCents < life::MonthlyRentCents + 40000)
+		{
+			S->BankrollCents += life::MonthlyRentCents + 80000 - S->BankrollCents; // the journey's cushion (Rerun is what it watches)
+		}
+		RentTwoAt = RentTwoAt < 0.0 && S->Life.RentsPaid >= 2 ? S->WorldMinutes() : RentTwoAt;
+		// The repackage at five days old: a new title; a second change inside three days is refused.
+		if (const video::Video* V = RepackId.empty() || RepackDone ? nullptr : Find(RepackId))
+		{
+			if (S->WorldMinutes() >= V->At + 5.0 * Day)
+			{
+				const std::string Was = V->Title;
+				const std::vector<video::TitleOption> Os = video::RepackTitles(*V, S->Life.Video, 0, 3);
+				video::Repack Rp;
+				Rp.TitleKey = Os.size() > 1 ? Os[1].Key : std::string();
+				RepackDone = !Rp.TitleKey.empty() && S->Repackage(RepackId, Rp).empty();
+				const video::Video* After = Find(RepackId);
+				RepackWords = RepackDone && After && After->Title != Was && After->X.Repacks == 1 && After->X.TitleTpl == Rp.TitleKey;
+				RepackTwiceRefused = RepackDone && !S->Repackage(RepackId, Rp).empty();
+			}
+		}
+		// Day 40: Heavy ads on a News video past its day-14 check-in; a second switch inside the week, and a Cut's, refused.
+		if (K == 40)
+		{
+			for (const video::Video& V : S->Life.Video.Videos)
+			{
+				if (HeavyId.empty() && V.X.On && V.C == video::Class::News && V.F != video::Format::Short && S->WorldMinutes() >= V.At + 16.0 * Day)
+				{
+					HeavyId = V.Id;
+				}
+			}
+			HeavyOk = !HeavyId.empty() && S->SetAdLoad(HeavyId, video::AdLoad::Heavy).empty() && Find(HeavyId)->X.Ads == video::AdLoad::Heavy &&
+				Find(HeavyId)->X.AdsChangedDay == net::DayOf(S->WorldMinutes()) + 1;
+			HeavyLocked = HeavyOk && !S->SetAdLoad(HeavyId, video::AdLoad::Light).empty();
+			for (const video::Video& V : S->Life.Video.Videos)
+			{
+				CutAdsRefused = CutAdsRefused || (V.F == video::Format::Short && !S->SetAdLoad(V.Id, video::AdLoad::Heavy).empty());
+			}
+		}
+		// Day 45: Partner by grant (the review waits for the second rent, W11).
+		if (K == 45)
+		{
+			S->DebugVideo("grant 20000 4000 0");
+		}
+		ReviewAfterRent = ReviewAfterRent && (S->Life.Video.ReviewAt < 0.0 || (RentTwoAt >= 0.0 && S->Life.Video.ReviewAt >= RentTwoAt - 1.0));
+		// The Duel's verdict: the winner on watch time, the stats say so.
+		if (const video::Video* V = DuelId.empty() || DuelDecided ? nullptr : Find(DuelId))
+		{
+			if (V->X.DuelWin >= 0)
+			{
+				DuelDecided = S->VideoStatsOf(DuelId).DuelWin == V->X.DuelWin && S->WorldMinutes() >= V->At + 48.0 * 60.0;
+			}
+		}
+		const int Wd = K % 7;
+		if (K >= 1 && (Wd == 1 || Wd == 3 || Wd == 5))
+		{
+			// Turn 8 goes up at noon, before a 2 PM stream (the Live Drop); the rest at 7 PM.
+			const bool Drop = Turn == 8;
+			To(static_cast<double>(DayNo) * Day + (Drop ? 12.0 : 19.0) * 60.0);
+			Fed(*S);
+			const std::string Faked = S->DebugVideo(std::string("fake ") + Kinds[Turn % 8] + " online");
+			const size_t A = Faked.find("Faked "), B = Faked.find(" (");
+			video::Choice Ch;
+			Ch.Candidates = {A == 0 && B != std::string::npos ? Faked.substr(6, B - 6) : std::string()};
+			Ch.F = Turn % 3 == 1 && Turn != 6 ? video::Format::Short : video::Format::Breakdown;
+			Ch.T = Turn % 3 == 0 ? video::TitleStyle::Teaching : video::TitleStyle::Story;
+			const std::vector<video::TitleOption> Titles = S->TitleOptions(Ch, 0);
+			Ch.TitleTpl = Titles.empty() ? std::string() : Titles.front().Key;
+			if (Ch.F != video::Format::Short)
+			{
+				const std::vector<video::ThumbSpec> Thumbs = S->ThumbOptions(Ch, 0);
+				std::set<int> Archs;
+				for (const video::ThumbSpec& Sp : Thumbs)
+				{
+					Archs.insert(Sp.Arch);
+				}
+				Dealt6 += Thumbs.size() == 6 ? 1 : 0;
+				Archs4 += Archs.size() >= 4 ? 1 : 0;
+				for (size_t I = 0; I < Thumbs.size() && I < (Turn == 6 ? 3u : 1u); ++I)
+				{
+					Ch.Thumbs.push_back(Thumbs[I]);
+				}
+			}
+			Packaged += !Ch.TitleTpl.empty() && (Ch.F == video::Format::Short || !Ch.Thumbs.empty()) ? 1 : 0;
+			if (!S->Publish(Ch).empty())
+			{
+				continue;
+			}
+			Skip();
+			const std::string Id = Newest();
+			const video::Video* V = Find(Id);
+			++Uploads;
+			Rerun2 += V && V->X.On && V->X.TitleTpl == Ch.TitleTpl && (Titles.empty() || V->Title == Titles.front().Text) ? 1 : 0;
+			DuelId = Turn == 6 ? Id : DuelId;
+			RepackId = Turn == 9 ? Id : RepackId;
+			// The launch actions inside the 48 hours: a teaser (turn 3), a reply round (turn 4), Make a Cut (turn 5); each once.
+			const video::Launch Act = Turn == 3 ? video::Launch::Teaser : Turn == 4 ? video::Launch::Reply : video::Launch::Cut;
+			if (Turn >= 3 && Turn <= 5 && V && (Act != video::Launch::Cut || V->F != video::Format::Short))
+			{
+				Fed(*S);
+				const size_t Before = S->Life.Video.Videos.size();
+				const bool Did = S->LaunchAction(Id, Act).empty();
+				Skip();
+				LaunchOnce = LaunchOnce && Did && !S->LaunchAction(Id, Act).empty();
+				Teaser = Teaser || (Did && Act == video::Launch::Teaser);
+				Reply = Reply || (Did && Act == video::Launch::Reply);
+				if (Did && Act == video::Launch::Cut)
+				{
+					CutFrom = Id;
+					for (const video::Video& X : S->Life.Video.Videos)
+					{
+						CutLinked = CutLinked || (X.F == video::Format::Short && X.X.On && X.X.NextUp == Id && S->Life.Video.Videos.size() > Before);
+					}
+				}
+			}
+			if (Drop)
+			{
+				LiveId = Id;
+				To(static_cast<double>(DayNo) * Day + 14.0 * 60.0);
+				if (S->GoLive().empty())
+				{
+					To(S->WorldMinutes() + 40.0);
+					Now = Wait(*S, Now, 0.5);
+					S->EndStream();
+					Now = Wait(*S, Now, 0.2);
+				}
+				const video::VideoStats St = S->VideoStatsOf(LiveId);
+				bool Part = false;
+				for (const video::Comp& C : Find(LiveId) ? Find(LiveId)->X.Comps : std::vector<video::Comp>())
+				{
+					Part = Part || C.Kind == video::CompKind::Kast;
+				}
+				LiveDrop = St.LiveDrop && Part;
+			}
+			++Turn;
+		}
+		if (K % 30 == 29)
+		{
+			const std::string Saved = migration2::SavedNow(*S, H);
+			ss::SaveData Back;
+			++RoundTrips;
+			RoundTripsSame += ss::SaveData::Parse(Saved, Back) && Back.Serialize() == Saved ? 1 : 0;
+		}
+	}
+	// The payouts: one "Rerun payout" bank line in December and one in January (and at most one in any month), each month's
+	// statement itemized.
+	std::map<std::string, int> ByMonth;
+	for (const life::LedgerEntry& E : S->Life.Ledger)
+	{
+		ByMonth[net::DateLabel(net::DayOf(E.At)).substr(0, 3)] += E.Kind == life::LedgerVideo && E.Amount > 0 ? 1 : 0;
+	}
+	const int Dec = ByMonth["Dec"], Jan = ByMonth["Jan"];
+	int Other = 0;
+	for (const auto& Kv : ByMonth)
+	{
+		Other = std::max(Other, Kv.second);
+	}
+	int Statements = 0, Itemized = 0;
+	for (const life::Letter& L : S->Life.Inbox)
+	{
+		if (L.Source == "video" && L.Kind == video::LetterStatement)
+		{
+			++Statements;
+			Itemized += L.Body.find("watch-page ads") != std::string::npos ? 1 : 0;
+		}
+	}
+	const std::string Saved = migration2::SavedNow(*S, H);
+	const size_t U3 = journeys::LineBytesU3(Saved);
+	const video::Channel& C = S->Life.Video;
+	std::printf("  u3 creator journey: %d uploads (%d packaged from the library, %d Rerun 2.0 under the template's title; %d long deals of six, %d with 4+ archetypes); "
+				"partner %s (review %s the second rent); payouts Dec %d, Jan %d, at most %d in a month; %d statements, %d itemized; Update 3 lines %zu bytes; %.0f subscribers; "
+				"%.1f s\n",
+		Uploads, Packaged, Rerun2, Dealt6, Archs4, C.PartnerAt >= 0.0 ? net::DateLabel(net::DayOf(C.PartnerAt)).c_str() : "never", ReviewAfterRent ? "after" : "BEFORE", Dec, Jan,
+		Other, Statements, Itemized, U3, video::SubsAt(C, S->WorldMinutes()), std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
+	std::printf("  u3 creator journey: duel %s %s; repackage %s (words %s, a second inside 3 days %s); teaser %s, reply %s, once a video %s, Make a Cut %s; "
+				"Live Drop %s; Heavy %s (%s, locked %s), a Cut's switch %s\n",
+		DuelId.c_str(), DuelDecided ? "decided on watch time" : "NOT DECIDED", RepackDone ? "done" : "NOT DONE", RepackWords ? "changed" : "SAME",
+		RepackTwiceRefused ? "refused" : "ALLOWED", Teaser ? "yes" : "no", Reply ? "yes" : "no", LaunchOnce ? "yes" : "NO", CutLinked ? "linked back" : "NOT LINKED",
+		LiveDrop ? "yes" : "NO", HeavyId.c_str(), HeavyOk ? "from the next midnight" : "NOT SET", HeavyLocked ? "yes" : "NO", CutAdsRefused ? "refused" : "ALLOWED");
+	Expect(Uploads >= 60 && Packaged == Uploads && Rerun2 == Uploads && Dealt6 > 0 && Archs4 == Dealt6,
+		"u3 creator journey: three uploads a week, every one packaged from the library (six recipes, four archetypes or more), a Rerun 2.0 video under the template's title");
+	Expect(DuelDecided, "u3 creator journey: the Duel is decided at its verdict, on watch time (the stats agree)");
+	Expect(Teaser && Reply && LaunchOnce && CutLinked, "u3 creator journey: a teaser, a reply round and Make a Cut inside the 48 hours, each once; the Cut links back");
+	Expect(RepackDone && RepackWords && RepackTwiceRefused, "u3 creator journey: a repackage changes the title's words; a second one inside three days is refused");
+	Expect(HeavyOk && HeavyLocked && CutAdsRefused, "u3 creator journey: Heavy ads past the last check-in from the next midnight, locked for the week; a Cut has no ad load");
+	Expect(LiveDrop, "u3 creator journey: a stream within 6 hours of a publish is a Live Drop (the video's Kast part)");
+	Expect(C.PartnerAt >= 0.0 && ReviewAfterRent, "u3 creator journey: Partner by grant, its review never before the second rent (W11)");
+	Expect(Dec == 1 && Jan == 1 && Other == 1 && Statements >= 2 && Itemized == Statements,
+		"u3 creator journey: a December and a January payout, one bank line a month at most, every statement itemized");
+	Expect(RoundTrips == 5 && RoundTripsSame == RoundTrips, "u3 creator journey: every 30 days the save reads and writes back byte for byte");
+	Expect(U3 <= 22u * 1024u, "u3 creator journey: Update 3's lines within 22 KB");
+}
 } // namespace session_test
 
 int main(int Argc, char** Argv)
@@ -8120,8 +8527,9 @@ int main(int Argc, char** Argv)
 	{
 		// "u3": update 3's lead checks (update 3 SPEC §7.5, §7.7), run by every C pass and kept out of the default run (no new
 		// check there): MigrationAll3, Phase A's stub over every committed fixture; U3SitesJourney joins it at C2 and
-		// U3CreatorJourney at C3.
+		// U3CreatorJourney at C3 (here since the C3 gate).
 		session_test::MigrationAll3();
+		session_test::U3CreatorJourney();
 		std::printf("%s\n", session_test::Failures == 0 ? "session tests (u3): all passed" : "session tests (u3): FAILED");
 		return session_test::Failures == 0 ? 0 : 1;
 	}

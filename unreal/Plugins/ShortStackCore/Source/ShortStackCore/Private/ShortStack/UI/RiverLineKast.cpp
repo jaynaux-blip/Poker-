@@ -30,6 +30,8 @@ namespace rlvideo_detail
 // Rerun's (RiverLineVideo.cpp, ui-video's): the stream summary's Cut highlights (update 2 §4.8).
 int VideoCutCount(const Session& S, double From, double To);
 void VideoOpenTonight(RiverLine& RL, double From, double To, double Now);
+// C3 (ui-rerun): Kast's "Make it a Cut" makes a Cut of the clip's moment linked to the newest long video (G3, "Make a Cut and link it").
+void VideoOpenCut(RiverLine& RL, double From, double To, double Now);
 } // namespace rlvideo_detail
 
 namespace rlkast_detail
@@ -1955,7 +1957,7 @@ void RiverLine::StreamSummary(double Now)
 		if (Pressed)
 		{
 			S.StreamCard = false;
-			rlvideo_detail::VideoOpenTonight(*this, ClipAt - 2.0, ClipAt + 2.0, Now);
+			rlvideo_detail::VideoOpenCut(*this, ClipAt - 2.0, ClipAt + 2.0, Now);
 			return;
 		}
 	}

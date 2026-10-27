@@ -1,5 +1,6 @@
 #include "ShortStack/UI/Portrait.h"
 #include "../StrictFloat.h"
+#include "ThumbPortrait.h"
 
 #include <algorithm>
 #include <cmath>
@@ -14,6 +15,11 @@ namespace portrait_detail
 using Pts = std::vector<Vec2>;
 constexpr float Deg = 3.14159265358979f / 180.0f;
 
+// Update 3 (SPEC §6.1, spike S-T): the small thumbnail's coarse drawing, switched on only while DrawPortraitX draws at the
+// LOD (a guard puts it back). 0 for every other caller, so the default overload draws exactly as it always has: Spline
+// keeps its density and Soft its radial falloff.
+thread_local int PortraitCoarse = 0;
+
 float Fl(int V)
 {
 	return static_cast<float>(V);
@@ -27,6 +33,11 @@ Vec2 Lerp2(Vec2 A, Vec2 B, float T)
 /** Catmull-Rom through the points (closed loop, or open with the ends kept). */
 Pts Spline(const Pts& P, int Per, bool Closed)
 {
+	if (PortraitCoarse > 0)
+	{
+		// The small tile: a third of the points (an outline 60 pixels tall needs no more).
+		Per = std::max(2, (Per + 1) / 3);
+	}
 	const int N = static_cast<int>(P.size());
 	if (N < 3)
 	{
@@ -96,6 +107,10 @@ Pts Moved(const Pts& P, float Dx, float Dy)
 
 Pts Ellipse(float Cx, float Cy, float Rx, float Ry, int Segs)
 {
+	if (PortraitCoarse > 0)
+	{
+		Segs = std::max(8, Segs / 2);
+	}
 	Pts Out;
 	for (int I = 0; I < Segs; ++I)
 	{
@@ -191,6 +206,15 @@ void Soft(Canvas& C, float X, float Y, float Rx, float Ry, const Color& Col, flo
 {
 	if (A <= 0.003f)
 	{
+		return;
+	}
+	if (PortraitCoarse > 0)
+	{
+		// The small tile: the light or shade as one flat, faint ellipse (a radial fill is six rings of vertices).
+		if (A >= 0.2f)
+		{
+			C.FillEllipse(X, Y, Rx * 0.7f, Ry * 0.7f, WithA(Col, A * 0.45f));
+		}
 		return;
 	}
 	const float R = std::max(Rx, Ry);
@@ -360,6 +384,10 @@ struct Head
 	/** Outer edge from A0 to A1 degrees (A0 < A1), pushed out by Thick(angle). */
 	Pts Arc(float A0, float A1, const std::function<float(float)>& Thick, float Step = 3.0f) const
 	{
+		if (PortraitCoarse > 0)
+		{
+			Step *= 3.0f; // the small tile's hair and hats: a point every 9 degrees or so
+		}
 		Pts Out;
 		for (float A = A0; A < A1; A += Step)
 		{
@@ -369,6 +397,38 @@ struct Head
 		return Out;
 	}
 };
+
+/**
+ * Update 3 (S-T): the thumbnails' heads, built once per face shape (Build casts 360 rays at the outline: a fifth of a
+ * small thumbnail's paint). Keyed by what GeoOf reads and the coarse switch; the default overload never asks for it.
+ */
+const Head& HeadFor(const hero::Look& L, int Age)
+{
+	struct Entry
+	{
+		uint64_t Key;
+		Head H;
+	};
+	thread_local std::vector<Entry> Heads;
+	const uint64_t Key = (static_cast<uint64_t>(std::clamp(L.Face, 0, 63)) << 0) | (static_cast<uint64_t>(std::clamp(L.Body, 0, 63)) << 6) | (static_cast<uint64_t>(std::clamp(L.Build, 0, 63)) << 12) |
+		(static_cast<uint64_t>(std::clamp(Age, 0, 255)) << 18) | (static_cast<uint64_t>(PortraitCoarse > 0 ? 1 : 0) << 26);
+	for (size_t I = 0; I < Heads.size(); ++I)
+	{
+		if (Heads[I].Key == Key)
+		{
+			return Heads[I].H;
+		}
+	}
+	if (Heads.size() >= 12)
+	{
+		Heads.erase(Heads.begin());
+	}
+	Heads.push_back(Entry{Key, Head()});
+	Head& H = Heads.back().H;
+	H.G = GeoOf(L, Age);
+	H.Build();
+	return H;
+}
 
 /** Everything the parts of the drawing share. */
 struct Ctx
@@ -386,6 +446,10 @@ struct Ctx
 	float Age = 24.0f;
 	float Lines = 0.0f;
 	float HatTop = 0.0f; // the hat's lowest edge on the forehead (0: no hat)
+	// Update 3 (SPEC §6.1): the thumbnails' face and detail. Null and false for every screen that draws the default
+	// overload, so its draw lists stay byte-identical (rerun_ui pins the ID card, the creator and the barber).
+	const PortraitExpression* E = nullptr;
+	bool Lod = false; // no hair strands, stipple, wrinkles or fine strokes (a small tile)
 };
 
 // ------------------------------------------------------------------ hair
@@ -435,6 +499,10 @@ void HairFill(Ctx& X, const Pts& P, float Alpha = 1.0f)
 /** Strands: soft strokes from the hairline toward the crown. */
 void Strands(Ctx& X, float Thick, int Count, float Alpha, float Spread = 1.0f)
 {
+	if (X.Lod)
+	{
+		return;
+	}
 	const Geo& G = X.H.G;
 	for (int I = 0; I < Count; ++I)
 	{
@@ -451,6 +519,17 @@ void Strands(Ctx& X, float Thick, int Count, float Alpha, float Spread = 1.0f)
 /** Stippled texture inside a shape (buzz cuts, stubble). */
 void Stipple(Ctx& X, const Pts& Shape, const Color& Col, float Alpha, int Count, int Seed)
 {
+	if (X.Lod)
+	{
+		// The small tile: the shape's tone without the dots (its fill is already under it).
+		return;
+	}
+	if (X.E)
+	{
+		// A thumbnail's face (a head 130 pixels tall at most): half the dots, a little darker (S-T's vertex budget).
+		Count /= 2;
+		Alpha = std::min(1.0f, Alpha * 1.25f);
+	}
 	float MinX = 1e9f, MinY = 1e9f, MaxX = -1e9f, MaxY = -1e9f;
 	for (const Vec2& P : Shape)
 	{
@@ -494,7 +573,7 @@ void BackHair(Ctx& X)
 		}
 		HairFill(X, Cloud);
 		Soft(*X.C, -30.0f, -120.0f, 70.0f, 46.0f, X.HairLight, 0.22f);
-		for (int I = 0; I < 90; ++I)
+		for (int I = 0; I < (X.Lod ? 0 : X.E ? 45 : 90); ++I)
 		{
 			const float A = Hash(I * 3) * 2.0f * 3.1415926f;
 			const float R = (40.0f + 90.0f * Hash(I * 3 + 1)) * K;
@@ -525,7 +604,7 @@ void BackHair(Ctx& X)
 		const Pts Back = Spline(Mirror(R), 3, true);
 		HairFill(X, Back);
 		X.C->FillPolygon(Back, Paint::Linear({0.0f, 40.0f}, {0.0f, Bottom}, WithA(X.HairDark, 0.0f), WithA(X.HairDark, 0.45f)));
-		if (Style == 10)
+		if (Style == 10 && !X.Lod)
 		{
 			for (int I = -7; I <= 7; ++I)
 			{
@@ -672,7 +751,7 @@ void FrontHair(Ctx& X)
 		Top.push_back(X.H.Rim(-62.0f, 1.0f));
 		const Pts Smooth = Spline(Top, 3, true);
 		HairFill(X, Smooth);
-		for (int I = 0; I < 15; ++I)
+		for (int I = 0; I < (X.Lod ? 0 : 15); ++I)
 		{
 			const float K = Fl(I - 7) / 7.0f;
 			C.StrokePolyline(Spline({{K * G.TempleW * 0.58f, G.HairlineY - 5.0f}, X.H.Rim(K * 36.0f, 12.0f), X.H.Rim(K * 44.0f + (K > 0 ? 10.0f : -10.0f), 6.0f)}, 5, false), false,
@@ -691,7 +770,7 @@ void FrontHair(Ctx& X)
 		Pts Hr = HairlineRight(X, Afro ? -2.0f : 4.0f);
 		const Pts P = Cap(X, [T](float A) { return T + 4.0f * std::sin(A * Deg * 14.0f); }, 0.0f, &Hr);
 		HairFill(X, P);
-		for (int I = 0; I < (Afro ? 30 : 70); ++I)
+		for (int I = 0; I < (X.Lod ? 0 : Afro ? 30 : 70); ++I)
 		{
 			const float A = -90.0f + 180.0f * Hash(I * 5 + 3);
 			const Vec2 Q = X.H.Rim(A, T * (0.2f + 0.7f * Hash(I * 5 + 4)) - (Afro ? 4.0f : 0.0f));
@@ -724,7 +803,7 @@ void FrontHair(Ctx& X)
 		Pts Hr = HairlineRight(X, -2.0f);
 		const Pts P = Cap(X, [](float) { return 8.0f; }, 0.0f, &Hr);
 		HairFill(X, P);
-		for (int I = 0; I < 12; ++I)
+		for (int I = 0; I < (X.Lod ? 0 : 12); ++I)
 		{
 			const float K = Fl(I) / 11.0f * 2.0f - 1.0f;
 			C.StrokePolyline(Spline({{K * G.TempleW * 0.85f, G.HairlineY + 4.0f + std::fabs(K) * 16.0f}, X.H.Rim(K * 50.0f, 6.0f), X.H.Rim(26.0f, 8.0f)}, 5, false), false, WithA(I % 2 ? X.HairLight : X.HairDark, 0.22f),
@@ -746,7 +825,7 @@ void FrontHair(Ctx& X)
 		Pts Hr = HairlineRight(X, -2.0f);
 		const Pts P = Cap(X, [](float) { return 9.0f; }, 0.0f, &Hr);
 		HairFill(X, P);
-		for (int I = 0; I < 10; ++I)
+		for (int I = 0; I < (X.Lod ? 0 : 10); ++I)
 		{
 			const float K = (Fl(I) + 0.5f) / 10.0f * 2.0f - 1.0f;
 			const Vec2 From{K * G.TempleW * 0.86f, G.HairlineY + 4.0f + std::fabs(K) * 18.0f};
@@ -769,7 +848,7 @@ void FrontHair(Ctx& X)
 		Pts Hr = {X.H.Rim(97.0f, -0.5f), {G.CheekW - 8.0f, -24.0f}, {G.TempleW * 0.8f, -34.0f}, {G.TempleW * 0.4f, -33.0f}, {0.0f, -32.0f}};
 		const Pts P = Cap(X, [](float) { return 14.0f; }, 0.0f, &Hr);
 		HairFill(X, P);
-		for (int I = 0; I < 14; ++I)
+		for (int I = 0; I < (X.Lod ? 0 : 14); ++I)
 		{
 			const float Bx = (Fl(I) / 13.0f * 2.0f - 1.0f) * G.TempleW * 0.85f;
 			C.StrokePolyline(Spline({{Bx, -34.0f}, {Bx * 0.92f, G.HairlineY}, X.H.Rim(Bx * 0.8f, 10.0f)}, 4, false), false, WithA(I % 2 ? X.HairLight : X.HairDark, 0.22f), 1.4f, true);
@@ -796,7 +875,7 @@ void FrontLocks(Ctx& X)
 										{S * (G.CheekW + 34.0f), 110.0f}, {S * (G.CheekW + 22.0f), 30.0f}, {S * (G.CheekW + 10.0f), -30.0f}},
 				4, true);
 			HairFill(X, Lock);
-			for (int I = 0; I < 4; ++I)
+			for (int I = 0; I < (X.Lod ? 0 : 4); ++I)
 			{
 				const float O = Fl(I) * 7.0f + 4.0f;
 				C.StrokePolyline(Spline({{S * (G.CheekW - 2.0f + O * 0.4f), -10.0f}, {S * (G.CheekW + 6.0f + O * 0.6f), 60.0f}, {S * (G.CheekW + 18.0f + O), 150.0f}}, 5, false), false,
@@ -818,7 +897,7 @@ void FrontLocks(Ctx& X)
 					Braid.push_back({Bx + S * (Y + 30.0f) * 0.08f + (static_cast<int>(Y / 6.0f) % 2 == 0 ? -2.0f : 2.0f), Y});
 				}
 				C.StrokePolyline(Braid, false, X.HairDark, 8.0f, true);
-				for (size_t K = 0; K + 1 < Braid.size(); ++K)
+				for (size_t K = 0; K + 1 < (X.Lod ? size_t{1} : Braid.size()); K += (X.E ? 2 : 1))
 				{
 					const Vec2 Q = Lerp2(Braid[K], Braid[K + 1], 0.5f);
 					C.FillEllipse(Q.X, Q.Y, 3.4f, 2.4f, K % 2 ? X.Hair : Lum(X.Hair, 0.06f));
@@ -850,6 +929,10 @@ void Ear(Ctx& X, float Side)
 	const Pts Shape = Spline({{Ex, -14.0f}, {Ex + Side * 9.0f, -16.0f}, {Ex + Side * 13.0f, -2.0f}, {Ex + Side * 10.0f, 20.0f}, {Ex + Side * 3.0f, 34.0f}, {Ex - Side * 4.0f, 30.0f}}, 5, true);
 	const Color Base = Side < 0.0f ? Mix(X.Skin, X.SkinLight, 0.3f) : Mix(X.Skin, X.SkinShade, 0.55f);
 	X.C->FillPolygon(Shape, Base);
+	if (X.Lod)
+	{
+		return;
+	}
 	X.C->StrokePolyline(Spline({{Ex + Side * 5.0f, -8.0f}, {Ex + Side * 9.0f, 2.0f}, {Ex + Side * 6.0f, 18.0f}, {Ex + Side * 1.0f, 24.0f}}, 4, false), false, WithA(X.SkinDeep, 0.55f), 2.0f, true);
 	if (Side > 0.0f)
 	{
@@ -871,6 +954,10 @@ void Neck(Ctx& X)
 	if (!G.SoftFace)
 	{
 		Soft(*X.C, -2.0f, 118.0f, 7.0f, 10.0f, X.SkinLight, 0.25f);
+	}
+	if (X.Lod)
+	{
+		return;
 	}
 	for (int Side = -1; Side <= 1; Side += 2)
 	{
@@ -904,7 +991,7 @@ void HeadFill(Ctx& X)
 void HeadRim(Ctx& X)
 {
 	Pts Edge;
-	for (float A = 40.0f; A <= 150.0f; A += 3.0f)
+	for (float A = 40.0f; A <= 150.0f; A += (X.Lod ? 10.0f : 3.0f))
 	{
 		Edge.push_back(X.H.Rim(A, -0.6f));
 	}
@@ -917,7 +1004,12 @@ void Eye(Ctx& X, float Side)
 	Canvas& C = *X.C;
 	const float Cx = Side * G.EyeX;
 	const float W = G.EyeW;
-	const float H = G.EyeH * X.EyeOpen;
+	float H = G.EyeH * X.EyeOpen;
+	if (X.E)
+	{
+		// The expression's lids: wide with shock, a squint, half-closed when exhausted.
+		H *= std::clamp(X.E->EyeOpen, 0.0f, 1.7f);
+	}
 	const float S = Side; // inner corner toward the nose
 	const Vec2 Inner{Cx - S * W, 1.0f};
 	const Vec2 Outer{Cx + S * W, -0.5f + (G.SoftFace ? -1.0f : 0.0f)};
@@ -931,6 +1023,13 @@ void Eye(Ctx& X, float Side)
 		C.StrokePolyline(Spline({Inner, {Cx, 2.5f}, Outer}, 4, false), false, Lum(X.SkinDeep, -0.3f), 2.2f, true);
 		return;
 	}
+	if (X.E && H < G.EyeH * 0.25f)
+	{
+		// Shut by the expression: a laugh's lids curve up, anything else is a pressed line.
+		const float Up = X.E->Smile > 0.4f ? -4.5f : 2.5f;
+		C.StrokePolyline(Spline({Inner, {Cx, Up}, Outer}, 4, false), false, Lum(X.SkinDeep, -0.3f), 2.6f, true);
+		return;
+	}
 	Pts Shape = Upper;
 	for (size_t I = 1; I + 1 < Lower.size(); ++I)
 	{
@@ -940,28 +1039,45 @@ void Eye(Ctx& X, float Side)
 	// Iris and pupil, cut by the lids.
 	const Color Iris = Hex(hero::EyeTone(X.Who->Appearance.Eyes));
 	const float Ir = G.EyeH * 0.9f;
-	const float Ix = Cx + X.LookX;
-	const Pts IrisPoly = ClipConvex(Ellipse(Ix, 1.4f, Ir, Ir, 24), Shape);
+	float Ix = Cx + X.LookX;
+	float Iy = 1.4f;
+	float Pr = Ir * 0.42f;
+	if (X.E)
+	{
+		// Where the expression looks, and a shocked stare's small pupils.
+		Ix += std::clamp(X.E->LookX, -6.0f, 6.0f);
+		Iy += std::clamp(X.E->LookY, -5.0f, 5.0f);
+		Pr = X.E->EyeOpen > 1.2f ? Ir * 0.3f : Pr;
+	}
+	const Pts IrisPoly = ClipConvex(Ellipse(Ix, Iy, Ir, Ir, 24), Shape);
 	if (!IrisPoly.empty())
 	{
-		C.FillPolygon(IrisPoly, Paint::Linear({0.0f, 1.4f - Ir}, {0.0f, 1.4f + Ir}, Lum(Iris, -0.45f), Lum(Iris, 0.12f)));
-		const Pts Ring = ClipConvex(Ellipse(Ix, 1.4f, Ir - 0.3f, Ir - 0.3f, 24), Shape);
+		C.FillPolygon(IrisPoly, Paint::Linear({0.0f, Iy - Ir}, {0.0f, Iy + Ir}, Lum(Iris, -0.45f), Lum(Iris, 0.12f)));
+		const Pts Ring = X.Lod ? Pts() : ClipConvex(Ellipse(Ix, Iy, Ir - 0.3f, Ir - 0.3f, 24), Shape);
 		if (!Ring.empty())
 		{
 			C.StrokePolyline(Ring, true, WithA(Lum(Iris, -0.6f), 0.6f), 1.0f);
 		}
-		const Pts Pupil = ClipConvex(Ellipse(Ix, 1.4f, Ir * 0.42f, Ir * 0.42f, 16), Shape);
+		const Pts Pupil = ClipConvex(Ellipse(Ix, Iy, Pr, Pr, 16), Shape);
 		if (!Pupil.empty())
 		{
 			C.FillPolygon(Pupil, Hex(0x0b0907));
 		}
-		C.FillCircle(Ix - 2.0f, -1.2f, 1.5f, WithA(Hex(0xffffff), 0.9f));
-		C.FillCircle(Ix + 2.2f, 3.2f, 0.8f, WithA(Hex(0xffffff), 0.45f));
+		// The catchlights ride with the iris (the default face's literals exactly: its offset is +0).
+		const float Dy = X.E ? Iy - 1.4f : 0.0f;
+		C.FillCircle(Ix - 2.0f, -1.2f + Dy, 1.5f, WithA(Hex(0xffffff), 0.9f));
+		if (!X.Lod)
+		{
+			C.FillCircle(Ix + 2.2f, 3.2f + Dy, 0.8f, WithA(Hex(0xffffff), 0.45f));
+		}
 	}
 	// Lid shadow over the top of the eye, then the lash line and the crease.
-	C.StrokePolyline(Upper, false, WithA(Lum(X.SkinDeep, -0.2f), 0.35f), 4.0f, true);
+	if (!X.Lod)
+	{
+		C.StrokePolyline(Upper, false, WithA(Lum(X.SkinDeep, -0.2f), 0.35f), 4.0f, true);
+	}
 	C.StrokePolyline(Upper, false, Lum(X.SkinDeep, -0.55f), G.SoftFace ? 2.6f : 2.0f, true);
-	if (G.SoftFace)
+	if (G.SoftFace && !X.Lod)
 	{
 		// A flick of liner and lashes at the outer corner.
 		C.StrokePolyline({Outer, {Outer.X + S * 4.5f, Outer.Y - 3.0f}}, false, Lum(X.SkinDeep, -0.6f), 2.0f, true);
@@ -971,8 +1087,33 @@ void Eye(Ctx& X, float Side)
 			C.StrokePolyline({B, {B.X + S * 2.5f, B.Y - 3.0f}}, false, Lum(X.SkinDeep, -0.6f), 1.1f, true);
 		}
 	}
-	C.StrokePolyline(Moved(Spline({{Cx - S * W * 0.7f, 1.0f - H * 0.7f}, {Cx, -H - 4.0f}, {Cx + S * W * 0.8f, -H * 0.6f}}, 4, false), 0.0f, -2.5f), false, WithA(X.SkinDeep, 0.35f), 1.3f, true);
-	C.StrokePolyline(Lower, false, WithA(X.SkinDeep, 0.28f), 1.1f, true);
+	if (!X.Lod)
+	{
+		C.StrokePolyline(Moved(Spline({{Cx - S * W * 0.7f, 1.0f - H * 0.7f}, {Cx, -H - 4.0f}, {Cx + S * W * 0.8f, -H * 0.6f}}, 4, false), 0.0f, -2.5f), false, WithA(X.SkinDeep, 0.35f), 1.3f, true);
+		C.StrokePolyline(Lower, false, WithA(X.SkinDeep, 0.28f), 1.1f, true);
+	}
+	if (X.E)
+	{
+		// The expression's extras under the eye: a night's bags when the lids sag and the mouth falls, and the tear (the
+		// character's right eye, on the left of the frame).
+		if (X.E->EyeOpen < 0.75f && X.E->Smile < 0.0f)
+		{
+			C.StrokePolyline(Moved(Lower, 0.0f, 4.5f), false, WithA(Lum(X.SkinDeep, -0.1f), 0.45f), 2.2f, true);
+			C.StrokePolyline(Moved(Lower, 0.0f, 8.0f), false, WithA(X.SkinDeep, 0.22f), 1.6f, true);
+		}
+		if (X.E->Tear && Side < 0.0f)
+		{
+			const float Tx = Cx + S * W * 0.35f;
+			const Pts Drop = Spline({{Tx, 6.0f}, {Tx - 2.6f, 16.0f}, {Tx, 20.5f}, {Tx + 2.6f, 16.0f}}, 4, true);
+			C.StrokePolyline({{Tx, 4.0f}, {Tx - 0.6f, 12.0f}}, false, WithA(Hex(0xbfe8ff), 0.55f), 2.0f, true);
+			C.FillPolygon(Drop, Paint::Linear({Tx, 6.0f}, {Tx, 20.5f}, WithA(Hex(0xd8f3ff), 0.95f), WithA(Hex(0x6cc6f0), 0.95f)));
+			C.FillCircle(Tx - 0.8f, 14.0f, 0.9f, WithA(Hex(0xffffff), 0.9f));
+		}
+	}
+	if (X.Lod)
+	{
+		return;
+	}
 	// Age: crow's feet and bags.
 	const float Crow = std::clamp((X.Age - 34.0f) / 26.0f, 0.0f, 1.0f) * 0.42f;
 	if (Crow > 0.01f)
@@ -999,9 +1140,28 @@ void Brow(Ctx& X, float Side)
 	const float Thick = Kind == 0 ? 2.6f : Kind == 2 ? 6.4f : 4.4f;
 	const float Arch = Kind == 3 ? 6.0f : 2.5f;
 	const float Y0 = G.SoftFace ? -23.0f : -20.0f;
-	const Vec2 In{Cx - S * G.EyeW * 1.05f, Y0 - 1.0f};
-	const Vec2 Peak{Cx + S * G.EyeW * 0.35f, Y0 - 3.0f - Arch * 0.7f};
-	const Vec2 Out{Cx + S * G.EyeW * 1.2f, Y0 - 0.5f};
+	Vec2 In{Cx - S * G.EyeW * 1.05f, Y0 - 1.0f};
+	Vec2 Peak{Cx + S * G.EyeW * 0.35f, Y0 - 3.0f - Arch * 0.7f};
+	Vec2 Out{Cx + S * G.EyeW * 1.2f, Y0 - 0.5f};
+	if (X.E)
+	{
+		// The expression's brows: lifted, knit (inner ends down: anger; up: worry), one raised against the other.
+		const float Knit = std::clamp(X.E->BrowKnit, -1.0f, 1.0f);
+		const float Lift = -std::clamp(X.E->BrowLift, -1.0f, 1.5f) * 7.0f - S * std::clamp(X.E->BrowAsym, -1.0f, 1.0f) * 4.5f;
+		In.Y += Lift + Knit * 6.5f;
+		In.X -= S * Knit * 1.5f;
+		Peak.Y += Lift + Knit * 1.2f;
+		Out.Y += Lift - Knit * 1.8f;
+		if (Knit > 0.35f && Side > 0.0f)
+		{
+			// The crease between knitted brows.
+			for (int K = -1; K <= 1; K += 2)
+			{
+				const float Kx = Fl(K) * 4.5f;
+				X.C->StrokePolyline({{Kx, Y0 + 1.0f}, {Kx * 0.8f, Y0 + 9.0f}}, false, WithA(X.SkinDeep, 0.45f * Knit), 1.4f, true);
+			}
+		}
+	}
 	const Pts Top = Spline({In, Lerp2(In, Peak, 0.5f), Peak, Out}, 4, false);
 	Pts Shape = Moved(Top, 0.0f, -Thick * 0.5f);
 	const Pts Bottom = Spline({Out, {Peak.X, Peak.Y + Thick * 0.85f}, {Lerp2(In, Peak, 0.5f).X, Lerp2(In, Peak, 0.5f).Y + Thick}, {In.X, In.Y + Thick * 0.9f}}, 4, false);
@@ -1010,7 +1170,7 @@ void Brow(Ctx& X, float Side)
 		Shape.push_back({P.X, P.Y - Thick * 0.5f});
 	}
 	X.C->FillPolygon(Shape, X.Brow);
-	for (int I = 0; I < 6; ++I)
+	for (int I = 0; I < (X.Lod ? 0 : 6); ++I)
 	{
 		const Vec2 B = Lerp2(In, Out, Fl(I) / 6.0f + 0.04f);
 		X.C->StrokePolyline({{B.X, B.Y - Thick * 0.1f}, {B.X + S * 3.5f, B.Y - Thick * 0.7f - (I < 3 ? Arch * 0.5f : 0.0f)}}, false, WithA(Lum(X.Brow, 0.2f), 0.4f), 0.9f, true);
@@ -1033,6 +1193,10 @@ void Nose(Ctx& X)
 	C.FillEllipse(-5.5f * Wd, 39.5f, 3.2f, 1.7f, WithA(Lum(X.SkinDeep, -0.3f), 0.6f));
 	C.FillEllipse(5.5f * Wd, 39.5f, 3.2f, 1.7f, WithA(Lum(X.SkinDeep, -0.3f), 0.7f));
 	Soft(C, 0.0f, 44.0f, 10.0f, 3.0f, X.SkinShade, 0.35f);
+	if (X.Lod)
+	{
+		return;
+	}
 	// Nasolabial folds, deeper with age.
 	const float Fold = 0.12f + std::clamp((X.Age - 26.0f) / 30.0f, 0.0f, 1.0f) * 0.3f;
 	for (int Side = -1; Side <= 1; Side += 2)
@@ -1042,8 +1206,130 @@ void Nose(Ctx& X)
 	}
 }
 
+/**
+ * Update 3 (SPEC §6.1): the expression's mouth. The corners lift with a smile and fall with a frown, a smirk pulls one up,
+ * the jaw drops it open (a dark mouth, the upper teeth, a tongue when it's wide); an O when it opens without a smile.
+ */
+void MouthX(Ctx& X)
+{
+	Canvas& C = *X.C;
+	const Geo& G = X.H.G;
+	const PortraitExpression& E = *X.E;
+	const float Smile = std::clamp(E.Smile, -1.0f, 1.0f);
+	const float Open = std::clamp(E.MouthOpen, 0.0f, 1.0f);
+	const float Smirk = std::clamp(E.Smirk, -1.0f, 1.0f);
+	const float My = 61.0f;
+	const float Full = G.SoftFace ? 2.5f : 0.0f;
+	const float Round = Smile < 0.25f ? Open : 0.0f; // an O: it opens without a smile and narrows
+	const float Mw = (G.SoftFace ? 20.0f : 22.0f) * (1.0f + 0.2f * std::max(0.0f, Smile) - 0.38f * Round);
+	const Color Lip = Mix(X.Skin, Hex(0xb04552), G.SoftFace ? 0.42f : 0.24f);
+	const Color Line = WithA(Lum(X.SkinDeep, -0.4f), 0.8f);
+	// The corners (the smirk lifts the frame's right one) and the middle of the lip line.
+	const Vec2 L{-Mw, My - 7.0f * Smile + 1.5f * Smirk};
+	const Vec2 R{Mw, My - 7.0f * Smile - 6.5f * Smirk};
+	const float Mid = (L.Y + R.Y) * 0.5f + 5.0f * Smile + (Smile < 0.0f ? 2.0f * Smile : 0.0f);
+	if (Open < 0.06f)
+	{
+		// Closed: the two lips along the curve, the line between them.
+		const Pts Curve = Spline({L, {-Mw * 0.5f, (L.Y + Mid) * 0.5f + 1.0f}, {0.0f, Mid + 1.2f}, {Mw * 0.5f, (R.Y + Mid) * 0.5f + 1.0f}, R}, 4, false);
+		Pts Upper = Spline({L, {-Mw * 0.5f, (L.Y + Mid) * 0.5f - 4.5f - Full * 0.4f}, {-3.0f, Mid - 4.6f - Full * 0.5f}, {0.0f, Mid - 3.4f}, {3.0f, Mid - 4.6f - Full * 0.5f},
+								{Mw * 0.5f, (R.Y + Mid) * 0.5f - 4.5f - Full * 0.4f}, R},
+			4, false);
+		for (size_t I = Curve.size() - 1; I-- > 1;)
+		{
+			Upper.push_back(Curve[I]);
+		}
+		C.FillPolygon(Upper, Lum(Lip, -0.18f));
+		Pts Lower = Curve;
+		const Pts Under = Spline({R, {Mw * 0.55f, (R.Y + Mid) * 0.5f + 5.5f + Full}, {0.0f, Mid + 7.5f + Full}, {-Mw * 0.55f, (L.Y + Mid) * 0.5f + 5.5f + Full}, L}, 4, false);
+		for (size_t I = 1; I + 1 < Under.size(); ++I)
+		{
+			Lower.push_back(Under[I]);
+		}
+		C.FillPolygon(Lower, Paint::Linear({-Mw, 0.0f}, {Mw, 0.0f}, Lum(Lip, 0.04f), Lum(Lip, -0.14f)));
+		C.StrokePolyline(Curve, false, Line, 1.6f, true);
+		if (std::fabs(Smirk) > 0.2f || Smile > 0.3f)
+		{
+			// The dimple at a lifted corner.
+			const Vec2 D = Smirk > 0.2f || Smile > 0.3f ? R : L;
+			C.StrokeArc(D.X + (D.X > 0.0f ? 2.0f : -2.0f), D.Y - 1.0f, 4.0f, D.X > 0.0f ? -1.2f : 1.9f, D.X > 0.0f ? 0.9f : 4.3f, WithA(X.SkinDeep, 0.45f), 1.3f, true);
+		}
+	}
+	else
+	{
+		// Open: the top edge along the lip line, the bottom where the jaw dropped it.
+		const float Drop = 4.0f + Open * 24.0f + std::max(0.0f, Smile) * 5.0f;
+		const float TopMid = Mid - (Smile > 0.3f ? 1.0f : 3.0f + 3.0f * Round);
+		const Pts Top = Spline({L, {-Mw * 0.55f, (L.Y + TopMid) * 0.5f - 1.5f}, {0.0f, TopMid}, {Mw * 0.55f, (R.Y + TopMid) * 0.5f - 1.5f}, R}, 5, false);
+		const float BotMid = TopMid + Drop;
+		const Pts Bot = Spline({R, {Mw * (0.62f - 0.12f * Round), (R.Y + BotMid) * 0.5f + Drop * 0.32f}, {0.0f, BotMid}, {-Mw * (0.62f - 0.12f * Round), (L.Y + BotMid) * 0.5f + Drop * 0.32f}, L}, 5, false);
+		Pts Hole = Top;
+		for (size_t I = 1; I + 1 < Bot.size(); ++I)
+		{
+			Hole.push_back(Bot[I]);
+		}
+		// The upper lip above the opening, the lower lip below it.
+		Pts UpperLip = Top;
+		for (size_t I = Top.size(); I-- > 0;)
+		{
+			UpperLip.push_back({Top[I].X, Top[I].Y - (3.6f + Full * 0.5f) * (1.0f - std::fabs(Top[I].X) / (Mw * 1.05f))});
+		}
+		C.FillPolygon(UpperLip, Lum(Lip, -0.16f));
+		Pts LowerLip = Bot;
+		for (size_t I = Bot.size(); I-- > 0;)
+		{
+			LowerLip.push_back({Bot[I].X, Bot[I].Y + (5.0f + Full) * (1.0f - std::fabs(Bot[I].X) / (Mw * 1.05f))});
+		}
+		C.FillPolygon(LowerLip, Paint::Linear({-Mw, 0.0f}, {Mw, 0.0f}, Lum(Lip, 0.06f), Lum(Lip, -0.12f)));
+		C.FillPolygon(Hole, Paint::Linear({0.0f, TopMid}, {0.0f, BotMid}, Hex(0x2a0c10), Hex(0x4a1418)));
+		if (Open > 0.45f)
+		{
+			// The tongue, low in a wide mouth.
+			const Pts Tongue = ClipConvex(Ellipse(0.0f, BotMid - Drop * 0.12f, Mw * 0.55f, Drop * 0.32f, 18), Hole);
+			if (!Tongue.empty())
+			{
+				C.FillPolygon(Tongue, Paint::Linear({0.0f, BotMid - Drop * 0.4f}, {0.0f, BotMid}, Hex(0xc85a64), Hex(0x8e3540)));
+			}
+		}
+		if (E.Teeth)
+		{
+			// The upper teeth along the top edge (a grin shows them across, a scream at the middle).
+			Pts Band = Top;
+			const float Tooth = std::min(7.5f, Drop * 0.42f);
+			for (size_t I = Top.size(); I-- > 0;)
+			{
+				const float K = 1.0f - std::pow(std::fabs(Top[I].X) / Mw, 3.0f);
+				Band.push_back({Top[I].X * 0.97f, Top[I].Y + Tooth * K});
+			}
+			const Pts Teeth = Band;
+			C.FillPolygon(Teeth, Paint::Linear({0.0f, TopMid}, {0.0f, TopMid + Tooth}, Hex(0xfbf7f0), Hex(0xd9d2c6)));
+			if (!X.Lod)
+			{
+				for (int K = -2; K <= 2; ++K)
+				{
+					const float Tx = Fl(K) * Mw * 0.22f;
+					C.StrokePolyline({{Tx, TopMid + 0.5f}, {Tx, TopMid + Tooth * 0.85f}}, false, WithA(Hex(0xb8ad9e), 0.6f), 0.8f, false);
+				}
+			}
+		}
+		C.StrokePolyline(Hole, true, Line, 1.4f, true);
+	}
+	// A smile lifts the cheeks; a hard frown pulls the chin.
+	if (Smile > 0.35f)
+	{
+		Soft(C, -34.0f, 30.0f, 16.0f, 10.0f, X.SkinLight, 0.35f * Smile);
+		Soft(C, 34.0f, 30.0f, 16.0f, 10.0f, X.SkinLight, 0.22f * Smile);
+	}
+	Soft(C, 0.0f, My + 15.0f + Open * 22.0f, 13.0f, 4.0f, X.SkinShade, 0.32f);
+}
+
 void Mouth(Ctx& X)
 {
+	if (X.E)
+	{
+		MouthX(X);
+		return;
+	}
 	Canvas& C = *X.C;
 	const Geo& G = X.H.G;
 	const float Mw = G.SoftFace ? 20.0f : 22.0f;
@@ -1065,7 +1351,7 @@ void Mouth(Ctx& X)
 void Wrinkles(Ctx& X)
 {
 	const float A = std::clamp((X.Age - 38.0f) / 25.0f, 0.0f, 1.0f) * 0.3f;
-	if (A < 0.01f)
+	if (A < 0.01f || X.Lod)
 	{
 		return;
 	}
@@ -1144,7 +1430,7 @@ void FacialHair(Ctx& X)
 		const Pts Area = BeardArea(X, Full ? 16.0f : 4.0f, Full ? 0.0f : 10.0f);
 		C.FillPolygon(Area, Fill);
 		C.FillPolygon(Mustache(X), Fill);
-		for (int I = 0; I < (Full ? 70 : 40); ++I)
+		for (int I = 0; I < (X.Lod ? 0 : Full ? 70 : 40); ++I)
 		{
 			const float A = 100.0f + 160.0f * Hash(I * 3 + 500);
 			const Vec2 Q = X.H.Rim(A, -6.0f - 10.0f * Hash(I * 3 + 501));
@@ -1271,7 +1557,7 @@ void Outfit(Ctx& X)
 					C.FillPolygon(Band, WithA(Lum(X.Cloth, -0.55f), 0.38f));
 				}
 				const Pts Thin = ClipConvex({{Gx + 18.0f, 100.0f}, {Gx + 20.0f, 100.0f}, {Gx + 20.0f, 380.0f}, {Gx + 18.0f, 380.0f}}, Clip);
-				if (!Thin.empty())
+				if (!Thin.empty() && !X.E)
 				{
 					C.FillPolygon(Thin, WithA(Hex(0xf3ead8), 0.22f));
 				}
@@ -1284,7 +1570,7 @@ void Outfit(Ctx& X)
 					C.FillPolygon(Band, WithA(Lum(X.Cloth, -0.55f), 0.32f));
 				}
 				const Pts Thin = ClipConvex({{-260.0f, Gy + 18.0f}, {260.0f, Gy + 18.0f}, {260.0f, Gy + 20.0f}, {-260.0f, Gy + 20.0f}}, Clip);
-				if (!Thin.empty())
+				if (!Thin.empty() && !X.E)
 				{
 					C.FillPolygon(Thin, WithA(Hex(0xf3ead8), 0.18f));
 				}
@@ -1518,7 +1804,7 @@ void Hat(Ctx& X)
 			}
 			for (const Pts& Piece : Pieces)
 			{
-				if (Piece.empty())
+				if (Piece.empty() || X.Lod)
 				{
 					continue;
 				}
@@ -1724,18 +2010,627 @@ void DrawFigure(Canvas& C, const hero::Look& L, float X, float FeetY, float PxPe
 	C.StrokeEllipse(X, Top + HeadR + 0.5f * K, HeadR * 0.88f * (L.Build == 3 ? 1.08f : 1.0f), HeadR, Edge, 1.0f);
 }
 
-// Update 3 (SPEC §6.1, §7.2). Phase A, day 1: the expression overload draws the default portrait and every named
-// expression is the neutral face, until ui-thumbs lands the 12 expressions, the poses and the LOD.
-void DrawPortrait(Canvas& C, const hero::Character& Who, float X, float Y, float Scale, double Time, const PortraitLight& Light, const PortraitExpression& /*E*/,
-	PortraitPose /*P*/, bool /*Lod*/)
+// ------------------------------------------------------------------ Update 3: the thumbnails' faces (ui-thumbs)
+// SPEC §6.1, §7.2: 12 expressions, the hands layer with the 4 P0 poses, the LOD. The default overload above is untouched:
+// the expression overload calls it whenever the face is the neutral one with no pose and no LOD (rerun_ui pins the ID
+// card, the creator and the barber, and the overload's neutral face against them); otherwise DrawPortraitX below draws
+// the same parts in the same order, with the expression's hooks (Ctx::E) and the LOD (Ctx::Lod) switched on.
+namespace portrait_detail
 {
-	DrawPortrait(C, Who, X, Y, Scale, Time, Light);
+/** One arm of a pose, in head units (eyes on y = 0): the sleeve from the shoulder through the elbow to the wrist, the hand. */
+struct ArmPlan
+{
+	Vec2 Shoulder, Elbow, Wrist, Hand;
+	Vec2 Dir;            // where the fingers (or the fist's knuckles) point
+	float Width = 50.0f; // the sleeve at the shoulder
+	float HandR = 25.0f;
+	int Grip = 0;        // 0 an open hand, 1 a fist, 2 a pointing finger
+	bool Behind = false; // the sleeve goes before the head (the hands always after it)
+};
+
+Vec2 UnitOf(Vec2 V)
+{
+	const float L = std::sqrt(V.X * V.X + V.Y * V.Y);
+	return L > 1e-6f ? Vec2{V.X / L, V.Y / L} : Vec2{0.0f, -1.0f};
 }
 
-const PortraitExpression& ExpressionOf(int /*Expr*/)
+std::vector<ArmPlan> ArmsFor(const Geo& G, PortraitPose P, float Side)
 {
-	static const PortraitExpression PortraitNeutral;
-	return PortraitNeutral;
+	std::vector<ArmPlan> Out;
+	ArmPlan A;
+	const float S = Side < 0.0f ? -1.0f : 1.0f;
+	switch (P)
+	{
+	case PortraitPose::HandsOnHead:
+		for (int K = -1; K <= 1; K += 2)
+		{
+			const float Sk = Fl(K);
+			A.Shoulder = {Sk * G.ShoulderW * 0.86f, 206.0f};
+			A.Elbow = {Sk * (G.CheekW + 112.0f), -26.0f};
+			A.Wrist = {Sk * (G.TempleW + 16.0f), -102.0f};
+			A.Hand = {Sk * G.TempleW * 0.5f, -120.0f};
+			A.Dir = UnitOf({-Sk, -0.18f});
+			A.Width = 52.0f;
+			A.HandR = 29.0f;
+			A.Grip = 0;
+			A.Behind = true;
+			Out.push_back(A);
+		}
+		break;
+	case PortraitPose::Facepalm:
+		A.Shoulder = {S * G.ShoulderW * 0.72f, 222.0f};
+		A.Elbow = {S * 64.0f, 300.0f};
+		A.Wrist = {S * 22.0f, 82.0f};
+		A.Hand = {S * 6.0f, 4.0f};
+		A.Dir = UnitOf({-S * 0.2f, -1.0f});
+		A.Width = 52.0f;
+		A.HandR = 33.0f;
+		A.Grip = 0;
+		Out.push_back(A);
+		break;
+	case PortraitPose::Point:
+		A.Shoulder = {S * G.ShoulderW * 0.9f, 206.0f};
+		A.Elbow = {S * (G.ShoulderW + 66.0f), 178.0f};
+		A.Wrist = {S * (G.ShoulderW + 144.0f), 124.0f};
+		A.Hand = {S * (G.ShoulderW + 164.0f), 112.0f};
+		A.Dir = UnitOf({S, -0.42f});
+		A.Width = 50.0f;
+		A.HandR = 24.0f;
+		A.Grip = 2;
+		Out.push_back(A);
+		break;
+	case PortraitPose::FistPump:
+		A.Shoulder = {S * G.ShoulderW * 0.9f, 206.0f};
+		A.Elbow = {S * (G.ShoulderW + 38.0f), 66.0f};
+		A.Wrist = {S * (G.CheekW + 98.0f), -62.0f};
+		A.Hand = {S * (G.CheekW + 94.0f), -94.0f};
+		A.Dir = UnitOf({S * 0.12f, -1.0f});
+		A.Width = 50.0f;
+		A.HandR = 27.0f;
+		A.Grip = 1;
+		Out.push_back(A);
+		break;
+	default: break;
+	}
+	return Out;
 }
+
+/** A segment of a limb as a convex quad, W0 wide at P0 and W1 at P1. */
+Pts Limb(Vec2 P0, Vec2 P1, float W0, float W1)
+{
+	const Vec2 D = UnitOf({P1.X - P0.X, P1.Y - P0.Y});
+	const Vec2 N{-D.Y, D.X};
+	return {{P0.X + N.X * W0 * 0.5f, P0.Y + N.Y * W0 * 0.5f}, {P1.X + N.X * W1 * 0.5f, P1.Y + N.Y * W1 * 0.5f}, {P1.X - N.X * W1 * 0.5f, P1.Y - N.Y * W1 * 0.5f}, {P0.X - N.X * W0 * 0.5f, P0.Y - N.Y * W0 * 0.5f}};
+}
+
+/** The sleeve: the jacket's (or the tee's, with no jacket), lit from the left, a crease at the elbow and a cuff. */
+void Sleeve(Ctx& X, const ArmPlan& A)
+{
+	Canvas& C = *X.C;
+	const Color Cloth = X.Who->Appearance.Outfit == hero::OutfitNone ? X.Tee : X.Cloth;
+	const Color Hi = Mix(Mix(Cloth, X.Light.Key, 0.14f), Hex(0xffffff), 0.08f);
+	const Color Lo = Mix(Cloth, Hex(0x000000), 0.48f);
+	const Color Edge = WithA(Mix(Cloth, Hex(0x000000), 0.7f), 0.85f);
+	const float W0 = A.Width, W1 = A.Width * 0.86f, W2 = A.Width * 0.68f;
+	const Pts Upper = Limb(A.Shoulder, A.Elbow, W0, W1);
+	const Pts Fore = Limb(A.Elbow, A.Wrist, W1, W2);
+	C.StrokePolyline({A.Shoulder, A.Elbow, A.Wrist}, false, Edge, W1 + 3.0f, true);
+	auto Across = [&](Vec2 P0, Vec2 P1, float Wd) {
+		const Vec2 D = UnitOf({P1.X - P0.X, P1.Y - P0.Y});
+		const Vec2 N{-D.Y, D.X};
+		const Vec2 M{(P0.X + P1.X) * 0.5f, (P0.Y + P1.Y) * 0.5f};
+		const float Sg = N.X <= 0.0f ? 1.0f : -1.0f; // light from the frame's left
+		return Paint::Linear({M.X + N.X * Wd * 0.5f * Sg, M.Y + N.Y * Wd * 0.5f * Sg}, {M.X - N.X * Wd * 0.5f * Sg, M.Y - N.Y * Wd * 0.5f * Sg}, Hi, Lo);
+	};
+	C.FillPolygon(Upper, Across(A.Shoulder, A.Elbow, W0));
+	C.FillCircle(A.Elbow.X, A.Elbow.Y, W1 * 0.5f, Mix(Hi, Lo, 0.5f));
+	C.FillPolygon(Fore, Across(A.Elbow, A.Wrist, W1));
+	// The crease where the elbow bends, the cuff at the wrist.
+	const Vec2 Df = UnitOf({A.Wrist.X - A.Elbow.X, A.Wrist.Y - A.Elbow.Y});
+	const Vec2 Nf{-Df.Y, Df.X};
+	const Vec2 Ce{A.Elbow.X + Df.X * W1 * 0.4f, A.Elbow.Y + Df.Y * W1 * 0.4f};
+	C.StrokePolyline({{Ce.X + Nf.X * W1 * 0.3f, Ce.Y + Nf.Y * W1 * 0.3f}, {Ce.X - Nf.X * W1 * 0.05f + Df.X * 6.0f, Ce.Y - Nf.Y * W1 * 0.05f + Df.Y * 6.0f}}, false, WithA(Lo, 0.8f), 2.0f, true);
+	const Vec2 Cu{A.Wrist.X - Df.X * 7.0f, A.Wrist.Y - Df.Y * 7.0f};
+	C.FillPolygon(Limb(Cu, A.Wrist, W2 + 2.0f, W2 + 2.0f), Mix(Lo, Cloth, 0.35f));
+}
+
+/** A finger (or the thumb): a rounded stroke with its edge. */
+void Finger(Canvas& C, Vec2 From, Vec2 To, float W, const Color& Fill, const Color& Edge)
+{
+	C.StrokePolyline({From, To}, false, Edge, W + 2.4f, true);
+	C.StrokePolyline({From, To}, false, Fill, W, true);
+}
+
+/** The hand at the end of an arm: an open hand, a fist, or a fist with the index finger out. */
+void HandOf(Ctx& X, const ArmPlan& A)
+{
+	Canvas& C = *X.C;
+	const float R = A.HandR;
+	const Color Fill = Mix(X.Skin, X.SkinLight, 0.35f);
+	const Color Shade = Mix(X.Skin, X.SkinShade, 0.55f);
+	const Color Edge = WithA(Lum(X.SkinDeep, -0.25f), 0.75f);
+	C.Save();
+	C.Translate(A.Hand.X, A.Hand.Y);
+	// Local up (0, -1) turns to Dir.
+	C.Rotate(std::atan2(A.Dir.X, -A.Dir.Y));
+	const Paint Palm = Paint::Linear({-R, 0.0f}, {R, 0.0f}, Fill, Shade);
+	// The thumb sits on the side toward the body's middle; a hand on the frame's right has it on its local left.
+	const float Th = A.Hand.X >= 0.0f ? -1.0f : 1.0f;
+	if (A.Grip == 0)
+	{
+		static const float Len[4] = {0.9f, 1.06f, 1.0f, 0.8f};
+		for (int K = 0; K < 4; ++K)
+		{
+			const float Fx = (-0.5f + 0.33f * Fl(K)) * R;
+			const float Lean = (Fl(K) - 1.5f) * 0.09f;
+			const float L = Len[K] * R * 1.05f;
+			Finger(C, {Fx, -R * 0.45f}, {Fx + std::sin(Lean) * L, -R * 0.45f - std::cos(Lean) * L}, R * 0.3f, Fill, Edge);
+		}
+		C.FillEllipse(0.0f, 0.0f, R * 0.74f, R * 0.8f, Palm);
+		C.StrokeEllipse(0.0f, 0.0f, R * 0.74f, R * 0.8f, Edge, 1.4f);
+		Finger(C, {Th * R * 0.55f, R * 0.2f}, {Th * R * 1.02f, -R * 0.28f}, R * 0.32f, Fill, Edge);
+		if (!X.Lod)
+		{
+			C.StrokeArc(0.0f, R * 0.15f, R * 0.4f, 3.6f, 5.2f, WithA(X.SkinDeep, 0.35f), 1.2f, true);
+		}
+	}
+	else
+	{
+		if (A.Grip == 2)
+		{
+			// The index finger out along Dir.
+			Finger(C, {-Th * R * 0.32f, -R * 0.55f}, {-Th * R * 0.36f, -R * 1.95f}, R * 0.3f, Fill, Edge);
+		}
+		C.FillRoundRect({-R * 0.8f, -R * 0.72f, R * 1.6f, R * 1.38f}, R * 0.38f, Palm);
+		C.StrokeRoundRect({-R * 0.8f, -R * 0.72f, R * 1.6f, R * 1.38f}, R * 0.38f, Edge, 1.4f);
+		const int First = A.Grip == 2 ? 1 : 0;
+		for (int K = First; K < 4; ++K)
+		{
+			// Knuckles across the top, the fingers' creases under them.
+			const float Kx = (-0.56f + 0.37f * Fl(K)) * R * -Th;
+			C.FillEllipse(Kx, -R * 0.62f, R * 0.19f, R * 0.13f, Mix(Fill, Hex(0xffffff), 0.12f));
+			if (!X.Lod)
+			{
+				C.StrokePolyline({{Kx - R * 0.15f, -R * 0.2f}, {Kx + R * 0.15f, -R * 0.18f}}, false, WithA(X.SkinDeep, 0.45f), 1.1f, true);
+			}
+		}
+		Finger(C, {Th * R * 0.72f, R * 0.32f}, {-Th * R * 0.05f, -R * 0.05f}, R * 0.34f, Fill, Edge);
+	}
+	C.Restore();
+}
+
+/** Points rotated by A radians about Pivot. */
+Pts Turned(const Pts& P, Vec2 Pivot, float A)
+{
+	const float Cs = std::cos(A), Sn = std::sin(A);
+	Pts Out;
+	for (const Vec2& Q : P)
+	{
+		const float Dx = Q.X - Pivot.X, Dy = Q.Y - Pivot.Y;
+		Out.push_back({Pivot.X + Dx * Cs - Dy * Sn, Pivot.Y + Dx * Sn + Dy * Cs});
+	}
+	return Out;
+}
+
+/** The convex hull (Andrew's monotone chain), clockwise on screen. */
+Pts Hull(Pts P)
+{
+	std::sort(P.begin(), P.end(), [](const Vec2& A, const Vec2& B) { return A.X < B.X || (A.X == B.X && A.Y < B.Y); });
+	if (P.size() < 3)
+	{
+		return P;
+	}
+	Pts H(P.size() * 2);
+	size_t K = 0;
+	for (size_t I = 0; I < P.size(); ++I)
+	{
+		while (K >= 2 && Cross(H[K - 2], H[K - 1], P[I]) <= 0.0f)
+		{
+			--K;
+		}
+		H[K++] = P[I];
+	}
+	for (size_t I = P.size() - 1, T = K + 1; I-- > 0;)
+	{
+		while (K >= T && Cross(H[K - 2], H[K - 1], P[I]) <= 0.0f)
+		{
+			--K;
+		}
+		H[K++] = P[I];
+	}
+	H.resize(K - 1);
+	return H;
+}
+
+/** The head with its hair and any hat, the outline a cut-out follows (head units, untilted). */
+Pts HeadHull(const Ctx& X)
+{
+	const Geo& G = X.H.G;
+	const hero::Look& L = X.Who->Appearance;
+	const int Style = std::clamp(L.Hair, 0, 11);
+	const float Hair = HairOuter(Style) + 2.0f;
+	Pts P;
+	for (int D = 0; D < 360; D += 6)
+	{
+		const float A = Fl(D);
+		const bool Top = D <= 104 || D >= 256;
+		P.push_back(X.H.Rim(A, Top ? Hair : 0.5f));
+	}
+	for (int Side = -1; Side <= 1; Side += 2)
+	{
+		const float S = Fl(Side);
+		P.push_back({S * (G.CheekW + 13.0f), -4.0f});
+		P.push_back({S * (G.CheekW + 10.0f), 22.0f});
+		if (Style == 8 || Style == 10)
+		{
+			P.push_back({S * (G.CheekW + 40.0f), 20.0f});
+			P.push_back({S * (G.CheekW + 46.0f), 190.0f});
+		}
+		if (L.Hat != 0)
+		{
+			P.push_back({S * (G.TempleW + 34.0f), -32.0f});
+			P.push_back({S * (G.TempleW + 14.0f), G.CrownY - 18.0f});
+		}
+	}
+	if (Style == 7)
+	{
+		for (int D = 0; D < 360; D += 20)
+		{
+			const float A = Fl(D) * Deg;
+			P.push_back({(G.CheekW + 62.0f) * std::sin(A), -58.0f - 126.0f * std::cos(A)});
+		}
+	}
+	if (L.Hat != 0)
+	{
+		P.push_back({0.0f, G.CrownY - 26.0f});
+	}
+	return Hull(P);
+}
+
+void DrawPortraitX(Canvas& C, const hero::Character& Who, float X, float Y, float Scale, double Time, const PortraitLight& Light, const PortraitExpression& E, PortraitPose P, bool Lod)
+{
+	// The LOD draws coarse (Spline, Ellipse and Soft read it), put back when this portrait is done.
+	struct CoarseScope
+	{
+		int Old;
+		explicit CoarseScope(int V) : Old(PortraitCoarse) { PortraitCoarse = V; }
+		~CoarseScope() { PortraitCoarse = Old; }
+		CoarseScope(const CoarseScope&) = delete;
+		CoarseScope& operator=(const CoarseScope&) = delete;
+	} Coarse(Lod ? 1 : 0);
+	const hero::Look& L = Who.Appearance;
+	Ctx Cx;
+	Cx.C = &C;
+	Cx.Who = &Who;
+	Cx.Light = Light;
+	Cx.Age = Fl(Who.Age);
+	Cx.H = HeadFor(L, Who.Age);
+	Cx.E = &E;
+	Cx.Lod = Lod;
+	// The palette, exactly as the default overload builds it.
+	Cx.Skin = Hex(hero::SkinTone(L.Skin));
+	Cx.SkinLight = Mix(Mix(Cx.Skin, Light.Key, 0.35f), Hex(0xffffff), 0.12f);
+	Cx.SkinShade = Mix(Cx.Skin, Hex(0x3a1d22), 0.36f);
+	Cx.SkinDeep = Mix(Cx.Skin, Hex(0x2a1214), 0.62f);
+	Cx.Blush = Mix(Cx.Skin, Hex(0xd8545c), 0.45f);
+	const Color HairBase = Hex(hero::HairToneAt(L, Who.Age));
+	const float Grey = L.HairColor >= 6 ? 0.0f : std::clamp((Cx.Age - 44.0f) / 30.0f, 0.0f, 0.65f);
+	Cx.Hair = HairBase;
+	Cx.HairLight = Mix(HairBase, Mix(Hex(0xfff4e6), Hex(0xf2f5fa), Grey / 0.65f), Luma(HairBase) > 0.5f ? 0.25f : 0.2f);
+	Cx.HairDark = Mix(HairBase, Hex(0x050404), 0.45f);
+	Cx.Brow = L.HairColor >= 5 ? Mix(HairBase, Hex(0x6a5848), 0.45f) : Mix(HairBase, Hex(0x000000), 0.25f);
+	Cx.Beard = Mix(HairBase, Hex(0x000000), 0.1f);
+	Cx.Cloth = Hex(hero::OutfitTone(L.OutfitColor));
+	Cx.ClothLight = Mix(Mix(Cx.Cloth, Light.Key, 0.12f), Hex(0xffffff), 0.06f);
+	Cx.ClothDark = Mix(Cx.Cloth, Hex(0x000000), 0.5f);
+	Cx.Tee = L.Outfit == hero::OutfitNone ? Cx.Cloth : Luma(Cx.Cloth) < 0.33f ? Hex(0xe7e3dc) : Hex(0x26282d);
+	const float T = static_cast<float>(Time);
+	Cx.Breath = Time > 0.0 ? std::sin(T * 1.6f) : 0.0f;
+	const float Phase = std::fmod(T + 0.9f, 4.3f);
+	Cx.EyeOpen = Time > 0.0 && Phase < 0.16f ? 1.0f - std::sin(Phase / 0.16f * 3.1415926f) : 1.0f;
+	Cx.LookX = Time > 0.0 ? 0.9f * std::sin(T * 0.37f) : 0.0f;
+
+	const float Tilt = std::clamp(E.HeadTilt, -20.0f, 20.0f) * Deg;
+	const std::vector<ArmPlan> Arms = ArmsFor(Cx.H.G, P, thumbportrait::PoseSide(E));
+	const bool OpenMouth = E.MouthOpen >= 0.06f;
+	// The head turns about the top of the neck.
+	auto HeadSpace = [&](float Dy) {
+		C.Save();
+		C.Translate(0.0f, Dy);
+		if (Tilt != 0.0f)
+		{
+			C.Translate(0.0f, 70.0f);
+			C.Rotate(Tilt);
+			C.Translate(0.0f, -70.0f);
+		}
+	};
+	C.Save();
+	C.Translate(X, Y);
+	C.Scale(Scale, Scale);
+	C.Save();
+	C.Translate(0.0f, Cx.Breath * 1.4f);
+	if (L.Outfit == 0)
+	{
+		HoodBack(Cx);
+	}
+	C.Restore();
+	HeadSpace(Cx.Breath * 0.6f);
+	BackHair(Cx);
+	C.Restore();
+	C.Save();
+	C.Translate(0.0f, Cx.Breath * 0.6f);
+	Neck(Cx);
+	C.Restore();
+	C.Save();
+	C.Translate(0.0f, Cx.Breath * 1.4f);
+	Outfit(Cx);
+	for (const ArmPlan& A : Arms)
+	{
+		if (A.Behind)
+		{
+			Sleeve(Cx, A);
+		}
+	}
+	C.Restore();
+	HeadSpace(Cx.Breath * 0.6f);
+	Ear(Cx, -1.0f);
+	Ear(Cx, 1.0f);
+	HeadFill(Cx);
+	if (E.BrowKnit > 0.6f && E.Smile < -0.2f)
+	{
+		// Tilted: the flush of it.
+		Soft(C, 0.0f, -10.0f, Cx.H.G.CheekW * 0.95f, 80.0f, Hex(0xff3a2a), 0.22f);
+	}
+	if (E.Smile > 0.5f)
+	{
+		Soft(C, -36.0f, 30.0f, 17.0f, 11.0f, Cx.Blush, 0.3f);
+		Soft(C, 36.0f, 30.0f, 17.0f, 11.0f, Cx.Blush, 0.24f);
+	}
+	Wrinkles(Cx);
+	Nose(Cx);
+	if (OpenMouth)
+	{
+		// An open mouth goes over the beard, which would otherwise close it.
+		FacialHair(Cx);
+		Mouth(Cx);
+	}
+	else
+	{
+		Mouth(Cx);
+	}
+	Eye(Cx, -1.0f);
+	Eye(Cx, 1.0f);
+	Brow(Cx, -1.0f);
+	Brow(Cx, 1.0f);
+	HeadRim(Cx);
+	if (!OpenMouth)
+	{
+		FacialHair(Cx);
+	}
+	FrontHair(Cx);
+	if (E.MouthOpen > 0.85f && E.BrowLift > 0.5f)
+	{
+		// A scream's sweat on the temple.
+		const float Sx = Cx.H.G.TempleW * 0.72f;
+		C.FillPolygon(Spline({{Sx, -44.0f}, {Sx - 4.5f, -30.0f}, {Sx, -24.0f}, {Sx + 4.5f, -30.0f}}, 4, true), Paint::Linear({Sx, -44.0f}, {Sx, -24.0f}, Hex(0xe4f6ff), Hex(0x76c8f0)));
+	}
+	C.Restore();
+	HeadSpace(Cx.Breath * 1.0f);
+	FrontLocks(Cx);
+	C.Restore();
+	HeadSpace(Cx.Breath * 0.6f);
+	Glasses(Cx);
+	Hat(Cx);
+	C.Restore();
+	C.Save();
+	C.Translate(0.0f, Cx.Breath * 1.4f);
+	for (const ArmPlan& A : Arms)
+	{
+		if (!A.Behind)
+		{
+			Sleeve(Cx, A);
+		}
+		HandOf(Cx, A);
+	}
+	C.Restore();
+	C.Restore();
+}
+
+/** Whether E is the default face (every field at rest). */
+bool AtRest(const PortraitExpression& E)
+{
+	return E.BrowLift == 0.0f && E.BrowKnit == 0.0f && E.BrowAsym == 0.0f && E.EyeOpen == 1.0f && E.LookX == 0.0f && E.LookY == 0.0f && E.Smile == 0.0f && E.MouthOpen == 0.0f && E.Smirk == 0.0f &&
+		E.HeadTilt == 0.0f && !E.Teeth && !E.Tear;
+}
+} // namespace portrait_detail
+
+void DrawPortrait(Canvas& C, const hero::Character& Who, float X, float Y, float Scale, double Time, const PortraitLight& Light, const PortraitExpression& E, PortraitPose P,
+	bool Lod)
+{
+	using namespace portrait_detail;
+	if (AtRest(E) && P == PortraitPose::None && !Lod)
+	{
+		// The default face: the default overload itself, byte for byte.
+		DrawPortrait(C, Who, X, Y, Scale, Time, Light);
+		return;
+	}
+	// The P1 poses (cards up, holding, shrug, thumbs down) draw no hands until they land.
+	const PortraitPose Pose = P >= PortraitPose::CardsUp ? PortraitPose::None : P;
+	DrawPortraitX(C, Who, X, Y, Scale, Time, Light, E, Pose, Lod);
+}
+
+const PortraitExpression& ExpressionOf(int Expr)
+{
+	// SPEC §6.1's 12, in its order (rerun's recipes store the index): Neutral, Smile, Grin, Laugh, Shocked, Scream,
+	// Devastated, Tilted, Smug, Skeptical, Thinking, Exhausted.
+	static const PortraitExpression Faces[12] = {
+		[] { return PortraitExpression(); }(),
+		[] {
+			PortraitExpression F;
+			F.Smile = 0.62f;
+			F.BrowLift = 0.15f;
+			F.EyeOpen = 0.92f;
+			return F;
+		}(),
+		[] {
+			PortraitExpression F;
+			F.Smile = 1.0f;
+			F.MouthOpen = 0.3f;
+			F.Teeth = true;
+			F.EyeOpen = 0.8f;
+			F.BrowLift = 0.25f;
+			return F;
+		}(),
+		[] {
+			PortraitExpression F;
+			F.Smile = 1.0f;
+			F.MouthOpen = 0.78f;
+			F.Teeth = true;
+			F.EyeOpen = 0.18f;
+			F.BrowLift = 0.55f;
+			F.HeadTilt = -7.0f;
+			return F;
+		}(),
+		[] {
+			PortraitExpression F;
+			F.BrowLift = 1.2f;
+			F.EyeOpen = 1.45f;
+			F.MouthOpen = 0.62f;
+			F.Smile = -0.1f;
+			return F;
+		}(),
+		[] {
+			PortraitExpression F;
+			F.BrowLift = 1.0f;
+			F.BrowKnit = -0.5f;
+			F.EyeOpen = 1.38f;
+			F.MouthOpen = 1.0f;
+			F.Teeth = true;
+			F.Smile = -0.35f;
+			F.HeadTilt = 5.0f;
+			return F;
+		}(),
+		[] {
+			PortraitExpression F;
+			F.BrowKnit = -0.95f;
+			F.BrowLift = 0.2f;
+			F.EyeOpen = 0.72f;
+			F.LookY = 2.5f;
+			F.Smile = -0.85f;
+			F.MouthOpen = 0.22f;
+			F.Tear = true;
+			F.HeadTilt = 6.0f;
+			return F;
+		}(),
+		[] {
+			PortraitExpression F;
+			F.BrowKnit = 1.0f;
+			F.BrowLift = -0.35f;
+			F.EyeOpen = 0.66f;
+			F.Smile = -0.55f;
+			F.MouthOpen = 0.18f;
+			F.Teeth = true;
+			F.HeadTilt = -3.0f;
+			return F;
+		}(),
+		[] {
+			PortraitExpression F;
+			F.BrowAsym = 0.65f;
+			F.EyeOpen = 0.68f;
+			F.Smirk = 0.95f;
+			F.Smile = 0.2f;
+			F.LookX = 2.5f;
+			F.HeadTilt = 5.0f;
+			return F;
+		}(),
+		[] {
+			PortraitExpression F;
+			F.BrowAsym = 1.0f;
+			F.BrowKnit = 0.3f;
+			F.EyeOpen = 0.74f;
+			F.Smirk = -0.5f;
+			F.Smile = -0.2f;
+			F.LookX = -2.5f;
+			return F;
+		}(),
+		[] {
+			PortraitExpression F;
+			F.BrowKnit = 0.3f;
+			F.BrowAsym = 0.45f;
+			F.LookX = 3.5f;
+			F.LookY = -3.5f;
+			F.EyeOpen = 0.9f;
+			F.Smirk = 0.35f;
+			F.Smile = -0.1f;
+			F.HeadTilt = -4.0f;
+			return F;
+		}(),
+		[] {
+			PortraitExpression F;
+			F.EyeOpen = 0.55f;
+			F.BrowKnit = -0.4f;
+			F.BrowLift = -0.2f;
+			F.Smile = -0.4f;
+			F.MouthOpen = 0.1f;
+			F.LookY = 2.0f;
+			F.HeadTilt = 7.0f;
+			return F;
+		}(),
+	};
+	return Faces[Expr >= 0 && Expr < 12 ? Expr : 0];
+}
+
+namespace thumbportrait
+{
+float PoseSide(const PortraitExpression& E)
+{
+	return E.LookX < 0.0f ? -1.0f : 1.0f;
+}
+
+std::vector<std::vector<Vec2>> Silhouette(const hero::Character& Who, float X, float Y, float Scale, const PortraitExpression& E, PortraitPose P)
+{
+	using namespace portrait_detail;
+	Ctx Cx;
+	Cx.Who = &Who;
+	Cx.H = HeadFor(Who.Appearance, Who.Age);
+	const Geo& G = Cx.H.G;
+	const float Tilt = std::clamp(E.HeadTilt, -20.0f, 20.0f) * Deg;
+	std::vector<Pts> Pieces;
+	Pieces.push_back(Turned(HeadHull(Cx), {0.0f, 70.0f}, Tilt));
+	Pieces.push_back({{-G.NeckW * 1.06f, 40.0f}, {G.NeckW * 1.06f, 40.0f}, {G.NeckW * 1.1f, 170.0f}, {-G.NeckW * 1.1f, 170.0f}});
+	Pts Torso = TorsoOutline(Cx);
+	if (Who.Appearance.Outfit == 0)
+	{
+		Torso.push_back({G.NeckW + 46.0f, 140.0f});
+		Torso.push_back({-G.NeckW - 46.0f, 140.0f});
+	}
+	Pieces.push_back(Hull(Torso));
+	const PortraitPose Pose = P >= PortraitPose::CardsUp ? PortraitPose::None : P;
+	for (const ArmPlan& A : ArmsFor(G, Pose, PoseSide(E)))
+	{
+		Pieces.push_back(Hull(Pts{Limb(A.Shoulder, A.Elbow, A.Width + 2.0f, A.Width * 0.86f + 2.0f)}));
+		Pieces.push_back(Hull(Pts{Limb(A.Elbow, A.Wrist, A.Width * 0.86f + 2.0f, A.Width * 0.68f + 2.0f)}));
+		Pts Hand = Ellipse(A.Hand.X, A.Hand.Y, A.HandR * 0.95f, A.HandR * 0.95f, 14);
+		const float Reach = A.Grip == 0 ? 1.45f : A.Grip == 2 ? 1.95f : 0.75f;
+		for (const Vec2& Q : Ellipse(A.Hand.X + A.Dir.X * A.HandR * Reach * 0.6f, A.Hand.Y + A.Dir.Y * A.HandR * Reach * 0.6f, A.HandR * 0.7f, A.HandR * 0.7f, 12))
+		{
+			Hand.push_back(Q);
+		}
+		Hand.push_back({A.Hand.X + A.Dir.X * A.HandR * Reach, A.Hand.Y + A.Dir.Y * A.HandR * Reach});
+		Pieces.push_back(Hull(Hand));
+	}
+	std::vector<std::vector<Vec2>> Out;
+	for (const Pts& Piece : Pieces)
+	{
+		std::vector<Vec2> Q;
+		for (const Vec2& V : Piece)
+		{
+			Q.push_back({X + V.X * Scale, Y + V.Y * Scale});
+		}
+		Out.push_back(Q);
+	}
+	return Out;
+}
+} // namespace thumbportrait
 } // namespace ui
 } // namespace ss

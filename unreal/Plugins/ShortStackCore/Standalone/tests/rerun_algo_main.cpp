@@ -4,26 +4,35 @@
 // the ad-load switch, burnout from extra editing only, the verdicts and check-ins, the Duel, Next-up and Cut links, the
 // creator update's Momentum, perfkick, honest labels, breakouts, the upload streak, Fresh on Rerun, the Binge wave, Late
 // Bloomer, Live Drop and the Kast Heat Rerun earns, the save lines and their budgets, and spike S-C's archetypes against
-// their Update 2 twins (§3.6's bands). Default run <= 30 s; "sc [seeds]" prints S-C's full table (24 seeds); "--write"
+// their Update 2 twins (§3.6's bands), and the five lanes on core-videocontent's ideas (§4.6.11). Default run <= 30 s;
+// "sc [seeds]" prints S-C's full table (24 seeds); "lanes [seeds]" the lanes, "lanex" their uploads by idea; "--write"
 // writes Tests/video_vectors_u3.txt. core-videoalgo's file.
 #include "CopyLint.h"
 #include "Trademarks.h"
 
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/KastRoom.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/VideoAlgoPriv.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/VideoContentPriv.h"
 
 #include "ShortStack/Cards.h"
+#include "ShortStack/Game/Chat.h"
+#include "ShortStack/Game/Gear.h"
 #include "ShortStack/Game/Kast.h"
+#include "ShortStack/Game/KastGrowth.h"
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
+#include "ShortStack/Game/Room.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/VideoAlgo.h"
+#include "ShortStack/Game/VideoContent.h"
 #include "ShortStack/Game/VideoStats.h"
 #include "ShortStack/Game/World.h"
 #include "ShortStack/Rng.h"
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -32,6 +41,8 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #ifndef SS_TESTS_DIR
@@ -111,6 +122,64 @@ video::Candidate Moment(const std::string& Id, double World, video::Kind K = vid
 	return C;
 }
 
+/**
+ * A moment with its cards and board, as the room records it (the recipes read them: the board for Circled River, the cards
+ * for the props): a bad beat (aces against sevens, 81% when the chips went in), a cooler (two pair into a set), a bluff (six
+ * high, three barrels, a fold), a hero call (top pair against a missed draw) or a big pot (a set of aces against queens). None
+ * is one of Rerun 2.0's new hand kinds (no set over set, no quads, nobody under 5% on the flop), so a twin's moment is the
+ * same kind as its Update 3 run's.
+ */
+video::Candidate RichMoment(const std::string& Id, double World, video::Kind K, ss::Chips BuyIn = 550, int Viewers = 0, bool Small = false)
+{
+	video::Candidate C = Moment(Id, World, K, BuyIn, Viewers);
+	if (Small)
+	{
+		// A 16 big blind pot won with a pair: a moment of the everyday kind (its payoff 0 or 1).
+		C.Rec.Mine = ss::ParseCards("Jh9h");
+		C.Rec.Shown = {{"Mike_R", ss::ParseCards("Th8c")}};
+		C.Rec.Board = ss::ParseCards("Jd5s2c7h3d");
+		C.Rec.Pot = 3200;
+		C.Rec.HeroNet = 1600;
+		return C;
+	}
+	C.Opponent = "Mike_R";
+	switch (K)
+	{
+	case video::Kind::BadBeat:
+		C.Rec.Mine = ss::ParseCards("AsAd");
+		C.Rec.Shown = {{"Mike_R", ss::ParseCards("7c7h")}};
+		C.Rec.Board = ss::ParseCards("Kd8s2c9h7d");
+		C.EquityAtAllIn = 0.81;
+		break;
+	case video::Kind::Cooler:
+		C.Rec.Mine = ss::ParseCards("Ks8s");
+		C.Rec.Shown = {{"Mike_R", ss::ParseCards("9h9d")}};
+		C.Rec.Board = ss::ParseCards("9s8dKc2h4c");
+		break;
+	case video::Kind::Bluff:
+		C.Rec.Mine = ss::ParseCards("6h5h");
+		C.Rec.Board = ss::ParseCards("Kd8s2c9hJd");
+		C.Rec.Pot = 6000;
+		C.Rec.HeroNet = 3000;
+		C.Opponent.clear();
+		break;
+	case video::Kind::HeroCall:
+		C.Rec.Mine = ss::ParseCards("KhQd");
+		C.Rec.Shown = {{"Mike_R", ss::ParseCards("Ts9s")}};
+		C.Rec.Board = ss::ParseCards("Kc7s2d4h8c");
+		C.Rec.HeroNet = 6400;
+		break;
+	default:
+		C.Rec.Mine = ss::ParseCards("AhAc");
+		C.Rec.Shown = {{"Mike_R", ss::ParseCards("QsQh")}};
+		C.Rec.Board = ss::ParseCards("Ad7c2s9h3d");
+		C.Rec.Pot = 25600;
+		C.Rec.HeroNet = 12800;
+		break;
+	}
+	return C;
+}
+
 std::string SaveText(const life::State& L)
 {
 	std::string Out;
@@ -184,6 +253,16 @@ struct Arch
 	video::AdLoad Ads = video::AdLoad::Standard;
 	bool Switcher = false; // Heavy ads on every long video once its last check-in has passed (day 15), as Session::SetAdLoad does
 	std::string Seeds;     // the archetype whose seeds it shares ("" its own): paired comparisons between archetypes
+	// Studio as the archetype plays it with core-videocontent's library (C3): 0 none (Update 2's choices), 1 skilled (an honest
+	// title, the best-fitting recipe), 2 expert (the same, a Duel of the two best, a Next-up card, a series a quarter of the
+	// time), 3 sloppy (clickbait: the loudest promise, mismatched art). A twin (U3 false) makes the same Update 2 choices: the
+	// recipe's own Update 2 frame (FrameOf) and the style, no template, no recipe.
+	int Pack = 0;
+	bool Rich = false; // the moments carry their cards and board (the recipes need them: Circled River, the cards' props)
+	bool Small = false; // ... and are small pots (16 big blinds: what most hands are, a payoff of 0 or 1 that a loud title outpromises)
+	// A lane (§4.6.11): its ideas in turn, each with the format it goes up as, from the lane's career (LaneWorld), in place of
+	// the hands; the first one ready and out of its cooldown, the night's best moment when none is.
+	std::vector<std::pair<int, video::Format>> Ideas;
 };
 
 struct VideoRec
@@ -193,6 +272,8 @@ struct VideoRec
 	double P = 0, Total = -1, MomC = 1, Shown = 1;
 	int Label = -1;
 	bool Viral = false;
+	int Idea = -1, F = 0, Cls = 0;
+	double Rpm = 0, Earned = 0, Ctr = 0;
 };
 
 struct Run
@@ -205,7 +286,25 @@ struct Run
 	int Breakouts = 0, Binge = 0, Bloom = 0, Comps = 0, MaxComps = 0;
 	double DropShare = 0;        // Live Drop's component and V against P0, summed (streamers)
 	int Drops = 0;
+	int IdeaUploads = 0, Fallbacks = 0; // a lane's uploads of its own ideas, and of the night's moment when none was ready
+	double MaxPayMonth = 0;             // C3 fix H1: the most any pay month (the 21st to the 20th) paid, in cents
 };
+
+/** The most a pay month paid (the 21st to the 20th, the top-earner rate's month) over a run's daily cents. */
+double MaxPayMonthOf(const std::vector<double>& Cents)
+{
+	std::map<int, double> By;
+	for (size_t D = 0; D < Cents.size(); ++D)
+	{
+		By[ss::video::valgo::PayMonthOf(static_cast<int>(D))] += Cents[D];
+	}
+	double Max = 0.0;
+	for (const auto& Kv : By)
+	{
+		Max = std::max(Max, Kv.second);
+	}
+	return Max;
+}
 
 const std::vector<int> Weekly{5}, ThreeAWeek{0, 2, 4}, Daily{0, 1, 2, 3, 4, 5, 6};
 
@@ -221,6 +320,414 @@ double TotalOf(const video::Video& V)
 		T += K.P;
 	}
 	return T;
+}
+
+/**
+ * Studio as an archetype plays it (A.Pack; core-videocontent's library deals the options): the three titles and six recipes
+ * of the first deal, the honest ones (a promise the moment's payoff backs up) ranked by their fit and traits, the sloppy
+ * creator's by the loudest promise. An Update 3 run takes the template and the recipe (the expert a Duel of its two best, a
+ * Next-up card to its last long upload, a series a quarter of the time); its twin takes only the recipe's Update 2 frame.
+ */
+void Package(const Arch& A, const video::Channel& C, video::Choice& Ch, int Uploads)
+{
+	if (A.Pack == 0 || Ch.F == video::Format::Short)
+	{
+		return; // (a Cut gets no recipes in P0: the library's rule)
+	}
+	const std::vector<video::Candidate> Picks = video::Picked(Ch, C.Open);
+	if (Picks.empty())
+	{
+		return;
+	}
+	const video::Candidate* Lead = &Picks.front();
+	for (const video::Candidate& P : Picks)
+	{
+		Lead = P.Drama > Lead->Drama ? &P : Lead;
+	}
+	const int Payoff = valgo::PayoffFor(*Lead, C.Open);
+	const int Group = valgo::KindGroup(Lead->K);
+	const bool Sloppy = A.Pack == 3;
+	std::vector<video::ThumbSpec> Opts = video::ThumbOptions(Ch, C.Open, C, 0, 6);
+	auto Fit = [&](const video::ThumbSpec& S) { return video::ArchetypeFit(S.Arch, Group, *Lead) * video::ThumbTraits(S, *Lead, C) * valgo::NoveltyFor(C, S.Arch); };
+	std::stable_sort(Opts.begin(), Opts.end(), [&](const video::ThumbSpec& X, const video::ThumbSpec& Y) {
+		const int Px = video::ThumbPromise(X), Py = video::ThumbPromise(Y);
+		if (Sloppy)
+		{
+			return Px != Py ? Px > Py : Fit(X) < Fit(Y);
+		}
+		const bool Hx = Px <= Payoff, Hy = Py <= Payoff;
+		return Hx != Hy ? Hx : Fit(X) > Fit(Y);
+	});
+	if (Opts.empty())
+	{
+		return;
+	}
+	Ch.Thumbs = {Opts.front()};
+	if (A.Pack == 2 && Opts.size() >= 2 && Opts[1].Arch != Opts[0].Arch && video::ThumbPromise(Opts[1]) <= Payoff)
+	{
+		Ch.Thumbs.push_back(Opts[1]);
+	}
+	std::vector<video::TitleOption> Titles = video::TitleOptions(Ch, C.Open, C, 0, 3);
+	std::stable_sort(Titles.begin(), Titles.end(), [&](const video::TitleOption& X, const video::TitleOption& Y) {
+		if (Sloppy)
+		{
+			return X.Promise != Y.Promise ? X.Promise > Y.Promise : valgo::TitleTraitCtr(X.Traits) > valgo::TitleTraitCtr(Y.Traits);
+		}
+		const bool Hx = X.Promise <= Payoff, Hy = Y.Promise <= Payoff;
+		return Hx != Hy ? Hx : valgo::TitleTraitCtr(X.Traits) * valgo::TitleTraitRet(X.Traits) > valgo::TitleTraitCtr(Y.Traits) * valgo::TitleTraitRet(Y.Traits);
+	});
+	Ch.TitleTpl = Titles.empty() ? std::string() : Titles.front().Key;
+	if (A.Pack == 2)
+	{
+		Ch.Series = Uploads % 4 == 0 ? 1 : -1;
+		for (auto It = C.Videos.rbegin(); It != C.Videos.rend(); ++It)
+		{
+			if (It->X.On && It->F != video::Format::Short)
+			{
+				Ch.NextUp = It->Id;
+				break;
+			}
+		}
+	}
+	if (!A.U3)
+	{
+		// The twin: Update 2's choices for the same moment (the recipe's own frame, the style), no Update 3 decision.
+		Ch.Fr = video::FrameOf(Ch.Thumbs.front().Arch);
+		Ch.Thumbs.clear();
+		Ch.TitleTpl.clear();
+		Ch.Series = -1;
+		Ch.NextUp.clear();
+	}
+}
+
+// ================================================================== the lanes (update 3 SPEC §4.6.11)
+
+/**
+ * A lane's poker career, the same for every lane (the lanes differ only in what they upload): five online tournaments a
+ * night from 8 PM at the archetype's stakes (a cash about one in eight, a final table one in thirty, a win one in two
+ * hundred), the Sunday Blaze on Sundays, the Embercrest's Nightly and its Midnight Turbo on Fridays. Newest first.
+ */
+std::vector<video::IdeaResult> LaneCareer(const Arch& A, const std::string& SeedText, int Days)
+{
+	std::vector<video::IdeaResult> Out;
+	ss::Rng R(SeedText + ":lane");
+	auto Add = [&](const char* Name, const std::string& Id, double At, ss::Chips In, int Field, uint32_t Flags) {
+		video::IdeaResult X;
+		X.Name = Name;
+		X.Id = Id;
+		X.At = At;
+		X.Field = Field;
+		X.BuyIn = In;
+		X.Flags = Flags;
+		const double U = R.Next(), V = R.Next();
+		if (U < 0.005)
+		{
+			X.Place = 1;
+			X.Prize = In * 100;
+		}
+		else if (U < 0.035)
+		{
+			X.Place = 2 + static_cast<int>(V * 8.0);
+			X.Prize = In * (40 / X.Place + 6);
+		}
+		else if (U < 0.13)
+		{
+			X.Place = 10 + static_cast<int>(V * 0.1 * Field);
+			X.Prize = In * 2 + static_cast<ss::Chips>(std::llround(V * static_cast<double>(In)));
+		}
+		else
+		{
+			X.Place = std::max(2, static_cast<int>((0.2 + 0.8 * V) * Field));
+		}
+		X.Flags |= X.Place <= 9 ? video::IfFinal : 0u;
+		Out.push_back(X);
+	};
+	static const char* const Names[5] = {"Night Owl Turbo", "Hyper Turbo", "PKO Nightly", "Daily Deep", "Mystery Hunt"};
+	static const uint32_t Flags[5] = {video::IfTurbo, video::IfHyper, video::IfBounty, 0u, video::IfMystery};
+	for (int N = 0; N <= Days; ++N)
+	{
+		const ss::Chips In = static_cast<ss::Chips>(std::llround(A.BuyIn.At(N)));
+		const double Night = static_cast<double>(N) * Day + 20.0 * 60.0;
+		for (int K = 0; K < 5; ++K)
+		{
+			Add(Names[K], "ln" + std::to_string(K) + "@" + std::to_string(N), Night + 35.0 * K, In, 300 + 200 * K, Flags[K]);
+		}
+		if (ss::net::Weekday(N) == 6)
+		{
+			Add("Sunday Blaze", "sb@" + std::to_string(N), Night - 60.0, In * 2, 1530, video::IfMajor);
+		}
+		if (ss::net::Weekday(N) == 4)
+		{
+			Add("Embercrest Nightly", "lv:nightly@" + std::to_string(N), Night - 60.0, 6000, 60, video::IfLive);
+			Add("Midnight Turbo", "lv:midnight@" + std::to_string(N), Night + 230.0, 6000, 40, video::IfLive | video::IfMidnight);
+		}
+	}
+	std::stable_sort(Out.begin(), Out.end(), [](const video::IdeaResult& X, const video::IdeaResult& Y) { return X.At > Y.At; });
+	return Out;
+}
+
+/**
+ * The idea context a lane reads at World (the Session's BuildCtx, by hand): the career's last 60 days and its lifetime, the
+ * coach's grades (a Best, a Good on the river and a short-stack Mistake each night for two weeks), a coaching session a
+ * week, day shifts four days a week and three night shifts a fortnight, the channel's comments, and the world's news a day
+ * old (a champion, a major's final table and the Season board's report in turn, one a day).
+ */
+video::IdeaCtx LaneCtx(const std::vector<video::IdeaResult>& Career, const video::Channel& C, const Arch& A, int D, double World)
+{
+	video::IdeaCtx X;
+	X.World = World;
+	X.Hero = "grinder_3c";
+	X.Chan = &C;
+	ss::Chips Net = 0;
+	for (const video::IdeaResult& R : Career)
+	{
+		if (R.At > World)
+		{
+			continue;
+		}
+		if (R.At > World - 60.0 * Day)
+		{
+			X.Results.push_back(R);
+		}
+		++X.Events;
+		X.Cashes += R.Prize > 0 ? 1 : 0;
+		X.FinalTables += (R.Flags & video::IfFinal) != 0 ? 1 : 0;
+		X.Wins += R.Place == 1 ? 1 : 0;
+		X.BuyIns += R.BuyIn;
+		X.Prizes += R.Prize;
+		X.BestPrize = std::max(X.BestPrize, R.Prize);
+		X.LiveEvents += (R.Flags & video::IfLive) != 0 ? 1 : 0;
+		X.FirstLiveAt = (R.Flags & video::IfLive) != 0 ? R.At : X.FirstLiveAt;
+		Net += R.Prize - R.BuyIn;
+	}
+	X.BestPotBb = 64;
+	for (int K = 0; K < 14 && D - K >= 1; ++K)
+	{
+		const double At = static_cast<double>(D - K - 1) * Day + 21.5 * 60.0;
+		video::IdeaGrade G;
+		G.At = At;
+		G.Event = "Night Owl Turbo";
+		G.Hand = "ace-queen";
+		G.Street = "turn";
+		G.PotBb = 24;
+		X.Grades.push_back(G);
+		G.At = At + 10.0;
+		G.Grade = 1;
+		G.Hand = "king-jack";
+		G.Street = "river";
+		G.River = true;
+		G.PotBb = 30;
+		X.Grades.push_back(G);
+		G.At = At + 20.0;
+		G.Grade = 3;
+		G.Hand = "queen-ten";
+		G.Street = "preflop";
+		G.River = false;
+		G.Shove = true;
+		G.StackBb = 12;
+		G.CostBb = 12;
+		X.Grades.push_back(G);
+	}
+	std::stable_sort(X.Grades.begin(), X.Grades.end(), [](const video::IdeaGrade& P, const video::IdeaGrade& Q) { return P.At > Q.At; });
+	X.StudyWeek = 1;
+	X.Bankroll = std::max<ss::Chips>(20000, 50000 + Net);
+	X.RentDue = 107500;
+	X.RentDeadline = (std::floor(World / (30.0 * Day)) + 1.0) * 30.0 * Day;
+	X.RentStage = 1;
+	X.RentsPaid = 2 + D / 30;
+	X.LastRentAt = std::floor(World / (30.0 * Day)) * 30.0 * Day;
+	X.Shifts = D * 4 / 7;
+	X.NightShifts14 = 3;
+	for (int K = 0; K < 7; ++K)
+	{
+		const int Sd = D - K;
+		const double End = static_cast<double>(Sd) * Day + 15.0 * 60.0;
+		if (Sd >= 0 && Sd % 7 != 3 && Sd % 7 != 5 && Sd % 7 != 6 && End <= World)
+		{
+			X.LastShiftAt = End;
+			break;
+		}
+	}
+	X.Gear = {{"Desk mic", 12900}};
+	X.Webcam = 1;
+	X.Home = 1;
+	X.KastFollowers = static_cast<int>(A.Kast.At(D));
+	int Recent = 0;
+	for (const video::Video& V : C.Videos)
+	{
+		Recent += V.At > World - 30.0 * Day ? 1 : 0;
+	}
+	X.Comments30 = 18 * Recent;
+	X.SubsWeekAgo = C.Subs;
+	static const char* const Who[3] = {"Tomas Ekdahl", "Ana Varga", "K.Lindqvist"};
+	for (int K = 0; K < 12; ++K)
+	{
+		const int Ed = D - 1 - K;
+		if (Ed < 0)
+		{
+			break;
+		}
+		video::IdeaWorldEvent E;
+		E.At = World - (1.2 + K) * Day;
+		const int Turn = Ed % 3;
+		E.Kind = static_cast<int>(Turn == 0 ? ss::world::EventKind::Champion : Turn == 1 ? ss::world::EventKind::FinalTable : ss::world::EventKind::BoardReport);
+		E.Who = Who[Ed % 3];
+		E.What = Turn == 2 ? "Season" : "Grand Circuit Main";
+		E.Amount = Turn == 0 ? 120000000 : 0;
+		X.WorldLog.push_back(E);
+	}
+	X.Joined = {0};
+	return X;
+}
+
+/** Last night's two moments, every night (a lane's MOMENTS): the kinds in turn, a pot against gh0stfold every third night,
+ *  the back-room game's storytime hand on Saturdays. */
+void LaneMoments(video::Channel& C, int D)
+{
+	static const video::Kind Turn[6] = {video::Kind::BadBeat, video::Kind::Bluff, video::Kind::BigPot, video::Kind::HeroCall, video::Kind::Cooler, video::Kind::HeroFold};
+	const double Night = static_cast<double>(D - 1) * Day + 21.0 * 60.0;
+	for (int I = 0; I < 2; ++I)
+	{
+		video::Candidate M = RichMoment("rl:ln@" + std::to_string(D - 1) + ":" + std::to_string(I), Night + 40.0 * I, Turn[(2 * D + I) % 6]);
+		if (M.K == video::Kind::Bluff)
+		{
+			M.Rec.Pot = 12000; // (three barrels: 60 big blinds)
+			M.Rec.HeroNet = 6000;
+		}
+		video::NoteHand(C, M);
+	}
+	if (D % 7 == 3)
+	{
+		// Quads (the record shows it: NoteHand names it a Monster).
+		video::Candidate M = RichMoment("rl:ln@" + std::to_string(D - 1) + ":3", Night + 150.0, video::Kind::BigPot);
+		M.Rec.Mine = ss::ParseCards("9s9h");
+		M.Rec.Shown = {{"Mike_R", ss::ParseCards("AcKd")}};
+		M.Rec.Board = ss::ParseCards("9c9d2hKs4c");
+		video::NoteHand(C, M);
+	}
+	if (D % 3 == 0)
+	{
+		video::Candidate M = RichMoment("rl:ln@" + std::to_string(D - 1) + ":2", Night + 90.0, video::Kind::Rival);
+		M.Opponent = ss::RivalName;
+		M.Rival = true;
+		M.Rec.Shown = {{ss::RivalName, ss::ParseCards("QsQh")}};
+		video::NoteHand(C, M);
+	}
+	if (D % 7 == 6)
+	{
+		video::Candidate S = RichMoment("dee:" + std::to_string(D - 1) + ":7", Night + 120.0, video::Kind::BadBeat);
+		S.Source = 2;
+		S.Storytime = true;
+		S.Event = "a back-room game";
+		S.Opponent.clear();
+		S.Rec.Shown = {{"Seat 1", ss::ParseCards("7c7h")}};
+		video::NoteHand(C, S);
+	}
+}
+
+/**
+ * A lane's upload, made the Session's way (ChooseIdea, then Studio): the lane's next idea that's ready and out of its
+ * cooldown (the first ready one when every ready one is inside it), in the lane's format when the idea allows it and the
+ * lane's style when its titles do; a group A idea tags its moment, a group P idea declares its series and goes in it.
+ * False when none of the lane's ideas is ready.
+ */
+bool LaneChoice(const Arch& A, video::Channel& C, const video::IdeaCtx& X, double World, size_t& Next, video::Choice& Ch)
+{
+	namespace vc = video::vcontent;
+	const int Today = static_cast<int>(std::floor(World / Day));
+	int Pick = -1;
+	bool PickCool = true;
+	for (size_t I = 0; I < A.Ideas.size() && (Pick < 0 || PickCool); ++I)
+	{
+		const size_t K = (Next + I) % A.Ideas.size();
+		const int Id = A.Ideas[K].first;
+		const vc::IdeaDef* Def = vc::IdeaById(Id);
+		if (!Def)
+		{
+			continue;
+		}
+		video::Candidate Probe;
+		std::string Why;
+		const bool Ready = Id / 100 == 1 ? !vc::IdeaMoment(X, C, Id, World).empty() : vc::MakeIdeaCandidateOn(X, C, Id, World, Probe, Why);
+		if (!Ready)
+		{
+			continue;
+		}
+		bool Cool = false;
+		for (const video::Cool& Cl : C.X.IdeaCool)
+		{
+			Cool = Cool || (Cl.Key == Id && Cl.LastDay >= 0 && Def->Cool > 0 && Today - Cl.LastDay < Def->Cool);
+		}
+		if (Pick < 0 || (PickCool && !Cool))
+		{
+			Pick = static_cast<int>(K);
+			PickCool = Cool;
+		}
+	}
+	if (Pick < 0)
+	{
+		return false;
+	}
+	Next = static_cast<size_t>(Pick) + 1;
+	const int Id = A.Ideas[static_cast<size_t>(Pick)].first;
+	const vc::IdeaDef* Def = vc::IdeaById(Id);
+	Ch.F = A.Ideas[static_cast<size_t>(Pick)].second;
+	for (int F = 0; ((Def->Formats >> static_cast<int>(Ch.F)) & 1) == 0 && F < static_cast<int>(video::Format::Count); ++F)
+	{
+		Ch.F = static_cast<video::Format>(F);
+	}
+	Ch.T = A.T;
+	for (int T = 0; ((Def->Styles >> static_cast<int>(Ch.T)) & 1) == 0 && T < static_cast<int>(video::TitleStyle::Count); ++T)
+	{
+		Ch.T = static_cast<video::TitleStyle>(T);
+	}
+	Ch.Ads = Ch.F == video::Format::Short ? video::AdLoad::Standard : A.Ads;
+	if (Id / 100 == 1)
+	{
+		const std::string Src = vc::IdeaMoment(X, C, Id, World);
+		for (video::Candidate& M : C.Open)
+		{
+			if (M.Id == Src && M.Idea != Id)
+			{
+				M.Idea = Id;
+				const std::string Facts = vc::MomentIdeaFacts(Id);
+				M.IdeaFacts = M.IdeaFacts.empty() ? Facts : M.IdeaFacts + ";" + Facts;
+			}
+		}
+		Ch.Candidates = {Src};
+		return true;
+	}
+	const int Series = Id / 100 == 16 ? vc::DeclareSeries(C, X, Id, World) : -1;
+	video::Candidate N;
+	std::string Why;
+	if (!vc::MakeIdeaCandidateOn(X, C, Id, World, N, Why))
+	{
+		return false;
+	}
+	C.Open.erase(std::remove_if(C.Open.begin(), C.Open.end(), [&N](const video::Candidate& M) { return M.Id == N.Id; }), C.Open.end());
+	C.Open.push_back(N);
+	Ch.Candidates = {N.Id};
+	Ch.Series = Series;
+	return true;
+}
+
+/** The night's best moment as a Breakdown (a lane with none of its ideas ready). */
+void LaneFallback(const video::Channel& C, double World, video::Choice& Ch)
+{
+	const video::Candidate* Best = nullptr;
+	for (const video::Candidate& M : C.Open)
+	{
+		if (M.Source != 5 && M.At > World - Day && (!Best || M.Drama > Best->Drama))
+		{
+			Best = &M;
+		}
+	}
+	Ch.F = video::Format::Breakdown;
+	Ch.Candidates.clear();
+	if (Best)
+	{
+		Ch.Candidates.push_back(Best->Id);
+	}
 }
 
 Run Simulate(const Arch& A, int Seed, int Days)
@@ -243,8 +750,15 @@ Run Simulate(const Arch& A, int Seed, int Days)
 	int Uploads = 0;
 	ss::Chips Earned = 0;
 	std::map<std::string, size_t> Index;
+	const bool Lane = A.U3 && !A.Ideas.empty();
+	const std::vector<video::IdeaResult> Career = Lane ? LaneCareer(A, SeedText, Days) : std::vector<video::IdeaResult>();
+	size_t LaneNext = 0;
 	for (int D = 0; D <= Days; ++D)
 	{
+		if (Lane && D >= 1)
+		{
+			LaneMoments(C, D);
+		}
 		const bool OnDay = std::find(A.Weekdays.begin(), A.Weekdays.end(), D % 7) != A.Weekdays.end();
 		if (D >= 7 && OnDay)
 		{
@@ -254,18 +768,38 @@ Run Simulate(const Arch& A, int Seed, int Days)
 			Ch.T = A.T;
 			Ch.Fr = A.Fr;
 			Ch.Ads = Ch.F == video::Format::Short ? video::AdLoad::Standard : A.Ads;
-			for (int I = 0; I < (Ch.F == video::Format::Vlog ? 3 : 1); ++I)
+			video::IdeaCtx X;
+			if (Lane)
+			{
+				X = LaneCtx(Career, C, A, D, At);
+				if (LaneChoice(A, C, X, At, LaneNext, Ch))
+				{
+					++R.IdeaUploads;
+				}
+				else
+				{
+					LaneFallback(C, At, Ch);
+					++R.Fallbacks;
+				}
+			}
+			for (int I = 0; !Lane && I < (Ch.F == video::Format::Vlog ? 3 : 1); ++I)
 			{
 				const std::string Id = "rl:sc@" + std::to_string(D) + ":" + std::to_string(I);
-				video::NoteHand(C, Moment(Id, At, A.K, static_cast<ss::Chips>(std::llround(A.BuyIn.At(D))), A.StreamViewers));
+				const ss::Chips BuyIn = static_cast<ss::Chips>(std::llround(A.BuyIn.At(D)));
+				video::NoteHand(C, A.Rich ? RichMoment(Id, At, A.K, BuyIn, A.StreamViewers, A.Small) : Moment(Id, At, A.K, BuyIn, A.StreamViewers));
 				Ch.Candidates.push_back(Id);
 			}
+			Package(A, C, Ch, Uploads);
 			video::UploadFacts F;
 			F.GearQuality = A.Gear.At(D);
 			F.KastFollowers = static_cast<int>(A.Kast.At(D));
 			F.RentsPaid = 2;
 			const std::string Id = video::Upload(C, Ch, At + 30.0, SeedText, F);
 			++Uploads;
+			if (!Id.empty() && Lane && Ch.Series >= 0)
+			{
+				video::vcontent::NoteEpisode(C, X, Ch.Series, Id); // (Session::Publish's: the episode joins its series)
+			}
 			if (!Id.empty())
 			{
 				video::Video& V = C.Videos.back();
@@ -277,6 +811,11 @@ Run Simulate(const Arch& A, int Seed, int Days)
 				Rec.MomC = C.X.On ? C.X.Momentum : 1.0;
 				Rec.Shown = C.X.On ? C.X.MomShown : 1.0;
 				Rec.Viral = V.X.Viral;
+				Rec.Idea = V.X.Idea;
+				Rec.F = static_cast<int>(V.F);
+				Rec.Cls = static_cast<int>(V.C);
+				Rec.Rpm = V.Rpm;
+				Rec.Ctr = V.X.Ctr;
 				Index[Id] = R.Vids.size();
 				R.Vids.push_back(Rec);
 				if (A.U3 && A.LiveMinutes > 0.0)
@@ -321,6 +860,7 @@ Run Simulate(const Arch& A, int Seed, int Days)
 			}
 			VideoRec& Rec = R.Vids[It->second];
 			Rec.Total = TotalOf(V);
+			Rec.Earned = V.X.Earned;
 			Rec.Label = V.X.Verdict;
 			for (const video::Comp& Cp : V.X.Comps)
 			{
@@ -332,6 +872,7 @@ Run Simulate(const Arch& A, int Seed, int Days)
 			R.MaxComps = std::max(R.MaxComps, static_cast<int>(V.X.Comps.size()));
 		}
 	}
+	R.MaxPayMonth = MaxPayMonthOf(R.Cents);
 	return R;
 }
 
@@ -365,6 +906,7 @@ struct Summary
 	std::array<double, 5> Labels{};
 	double Moves2 = 0, ZeroBars = 0;
 	double Breakout = 0, BingePerUpload = 0, MaxComps = 0, DropShare = 0;
+	double M365Max = 0, MaxPayMonth = 0; // C3 fix H1: the largest seed's d365 month, and the most any pay month paid (cents)
 };
 
 Summary Summarize(const Arch& A, int Seeds, int Days)
@@ -430,7 +972,9 @@ Summary Summarize(const Arch& A, int Seeds, int Days)
 		Drop += R.DropShare;
 		Drops += R.Drops;
 		S.MaxComps = std::max(S.MaxComps, static_cast<double>(R.MaxComps));
+		S.MaxPayMonth = std::max(S.MaxPayMonth, R.MaxPayMonth);
 	}
+	S.M365Max = M365.empty() ? 0.0 : *std::max_element(M365.begin(), M365.end());
 	S.Partner = Median(Gate);
 	S.PartnerP10 = Quantile(Gate, 0.1);
 	for (const auto& Kv : Subs)
@@ -596,7 +1140,7 @@ std::vector<Arch> ScArchetypes()
 
 // ================================================================== the pure parts
 
-/** A Rerun 2.0 channel ready to upload on: X on, past Fresh on Rerun's twelve, no streak, H at 0 (MomC 1 / 1.049). */
+/** A Rerun 2.0 channel ready to upload on: X on, past Fresh on Rerun's twelve, no streak, H at 0 (MomC 1 / VaMomNorm). */
 video::Channel PlainU3Channel(double World)
 {
 	video::Channel C;
@@ -724,8 +1268,9 @@ void Pure()
 			const bool Viral = R.Next() < 0.0075;
 			const double Perf = std::clamp(0.9 * G + (Viral ? std::log(R.Range(20.0, 50.0)) : 0.0), -1.2, 2.0);
 			Sum += valgo::MomCOf(H);
-			H = 0.6 * H + 0.4 * Perf + (Viral ? 0.5 : 0.0);
+			H = 0.6 * H + valgo::VaMomWeight * Perf + (Viral ? valgo::VaMomBreakout : 0.0);
 		}
+		std::printf("  pure: a neutral channel's MomC averages %.4f (the normaliser %.4f)\n", Sum / N, valgo::VaMomNorm);
 		Expect(std::fabs(Sum / N - 1.0) < 0.03, "pure: MomC averages about 1 for a neutral channel (" + Num(Sum / N, 4) + ")");
 	}
 }
@@ -2242,7 +2787,7 @@ void CarryAndWaves()
 		const std::string Hit = video::Upload(C, Ch, Ah, "bw", F);
 		C.Videos.back().P = 1000.0;
 		const double Vt = static_cast<double>(valgo::VerdictDayOf(C.Videos.back())) * Day;
-		video::Step(C, L, Bank, K, Ah, Ah + 3.0 * Day);
+		video::Step(C, L, Bank, K, Ah, Vt + 2.0 * Day);
 		int Got[6] = {0, 0, 0, 0, 0, 0};
 		double P6 = 0.0, P4 = 0.0, Unused = 0.0;
 		Got[5] = BingeAt(FindVideo(C, Ids[5]), Vt, P6);
@@ -2253,14 +2798,63 @@ void CarryAndWaves()
 			Got[I] = BingeAt(FindVideo(C, Ids[static_cast<size_t>(I)]), Vt, Unused);
 		}
 		const bool Legacy = FindVideo(C, "legacy-bw").X.Comps.empty();
-		bool Bell = false;
+		// (C3 fix L4: the bell rings at the midnight after the wave began, with the views its two parts really added that day:
+		// 36 x the class curve's first day each; nothing at the verdict midnight itself.)
+		const valgo::VaShape Sh = valgo::ShapeU3(FindVideo(C, Ids[5]).C);
+		const double Picked = 2.0 * 36.0 * valgo::CurveFrac(valgo::VaBingeA, Sh.Tau1, Sh.Tau2, 1.0);
+		bool Bell = false, Early = false;
 		for (const auto& B : C.Bell)
 		{
-			Bell = Bell || (B.first == Vt && B.second == valgo::BellBinge(2));
+			Bell = Bell || (B.first == Vt + Day && B.second == valgo::BellBinge(2, Picked));
+			Early = Early || (B.first == Vt && B.second.find("bingeing") != std::string::npos);
 		}
+		std::printf("  binge: the bell the midnight after the wave: \"%s\"\n", valgo::BellBinge(2, Picked).c_str());
 		Expect(!Hit.empty() && Got[5] == 1 && Got[4] == 0 && Got[3] == 1 && Got[2] + Got[1] + Got[0] == 0 && P6 == 36.0 && P4 == 36.0 && Legacy,
 			"binge: 4% of the excess (36 of 900) to the newest two that fit, the legacy video skipped, the full one's slot spent on nothing");
-		Expect(Bell, "binge: the bell counts the videos that really picked up a part (two)");
+		Expect(Bell && !Early && valgo::BellBinge(2, Picked).find("2 older videos picked up " + std::to_string(std::llround(Picked)) + " views.") != std::string::npos,
+			"binge: the bell counts the videos that really picked up a part (two) and the views they picked up on the wave's first day (" +
+				std::to_string(std::llround(Picked)) + "), rung the midnight after");
+		Expect(valgo::BellBinge(2, 0.4) == "New viewers are bingeing your channel: two older videos are getting views again." &&
+				   valgo::BellBinge(1, 0.6) == "New viewers are bingeing your channel: an older video picked up 1 view.",
+			"binge: a wave under one whole view that day keeps the old words (no \"0 views\" bell); one view says \"1 view\"");
+	}
+	// Late Bloomer's bell (C3 fix L4): the midnight after the check-in that woke it, its first day awake against its usual day (the
+	// seven before), in whole times; nothing at the waking midnight itself. (The part is placed by hand: the bell reads the parts.)
+	{
+		const double At = 30.0 * Day + 4.0 * 60.0;
+		video::Channel C = PlainU3Channel(At);
+		const video::Candidate M = Moment("rl:bloom@30:1", At - 60.0, video::Kind::Bluff);
+		video::NoteHand(C, M);
+		video::Choice Ch;
+		Ch.Candidates = {M.Id};
+		Ch.F = video::Format::Breakdown;
+		Ch.T = video::TitleStyle::Teaching;
+		UploadOn(C, Ch, At, "bloom", F);
+		const double Wake = static_cast<double>(valgo::DayOf(At) + 40) * Day;
+		video::Step(C, L, Bank, K, At, Wake);
+		video::Video& V = C.Videos.back();
+		V.X.Comps.erase(std::remove_if(V.X.Comps.begin(), V.X.Comps.end(), [](const video::Comp& Cp) { return Cp.Kind == video::CompKind::LateBloom; }), V.X.Comps.end());
+		video::Comp Cp;
+		Cp.T = Wake;
+		Cp.P = valgo::VaBloomSize * V.X.P0;
+		Cp.A = valgo::VaBloomA;
+		Cp.Kind = video::CompKind::LateBloom;
+		Cp.SrcMix = 11;
+		V.X.Comps.push_back(Cp);
+		video::Step(C, L, Bank, K, Wake, Wake + Day);
+		const video::Video& W = C.Videos.back();
+		const double Usual = (video::Views(W, Wake) - video::Views(W, Wake - 7.0 * Day)) / 7.0, Woke = video::Views(W, Wake + Day) - video::Views(W, Wake);
+		bool Rang = false, Early = false;
+		for (const auto& B : C.Bell)
+		{
+			Rang = Rang || (B.first == Wake + Day && B.second == valgo::BellBloom(W.Title, Woke / Usual));
+			Early = Early || (B.first == Wake && B.second.find("woke up") != std::string::npos);
+		}
+		const std::string Times = std::to_string(std::llround(Woke / Usual)) + "\xC3\x97 its usual daily views.";
+		std::printf("  late bloomer: the bell the midnight after: \"%s\"\n", valgo::BellBloom(W.Title, Woke / Usual).c_str());
+		Expect(W.C == video::Class::Strategy && Rang && !Early && Woke / Usual >= 2.0 && valgo::BellBloom(W.Title, Woke / Usual).find(" woke up: " + Times) != std::string::npos &&
+				   valgo::BellBloom(W.Title, 1.4).find("search viewers are finding it again") != std::string::npos,
+			"late bloomer: the bell rings the midnight after, its first day " + Num(Woke / Usual, 3) + "x its usual one (\"" + Times + "\")");
 	}
 	// Kast Heat from Rerun (§3.3), one story one bump: a viral video whose verdict broke out too is +10 once; "Pushed hard" with a
 	// breakout the same midnight is +10, not 16; a breakout on day 7 after a "Pushed hard" verdict is a second story; nothing at or
@@ -2414,9 +3008,10 @@ void Saves()
 	};
 	{
 		// update3_creator's shape (§7.4): three uploads a week for 420 days, every third a Teaching Breakdown, 5 repackages, 3 Duels,
-		// 2 challenges (core-videocontent's lines, here by hand).
+		// 2 challenges; every long upload packaged in Studio from core-videocontent's library (the first deal's honest recipe and
+		// template, as the skilled creator picks them; the Duels three recipes), the way the Session's uploads are.
 		Career Cr = NewCareer();
-		int Uploads = 0;
+		int Uploads = 0, Packaged = 0;
 		for (int D = 0; D < 420; ++D)
 		{
 			const double At = static_cast<double>(D) * Day + 3.0 * 60.0;
@@ -2426,23 +3021,21 @@ void Saves()
 				const int Slot = Uploads % 3;
 				Ch.F = Slot == 0 ? video::Format::Breakdown : Slot == 1 ? video::Format::Short : video::Format::Vlog;
 				Ch.T = Slot == 0 ? video::TitleStyle::Teaching : video::TitleStyle::Story;
-				if (Uploads == 150 || Uploads == 160 || Uploads == 170)
-				{
-					for (int K = 0; K < 3; ++K)
-					{
-						video::ThumbSpec S;
-						S.Arch = static_cast<int16_t>(K + 2);
-						S.Layout = static_cast<int16_t>(K);
-						S.Caption = K == 0 ? "82%" : "ONE CARD";
-						Ch.Thumbs.push_back(S);
-					}
-				}
 				for (int I = 0; I < (Ch.F == video::Format::Vlog ? 3 : 1); ++I)
 				{
 					const std::string Id = "rl:heavy@" + std::to_string(D) + ":" + std::to_string(I);
-					video::NoteHand(Cr.C, Moment(Id, At, Slot == 0 ? video::Kind::Bluff : video::Kind::Cooler));
+					video::NoteHand(Cr.C, RichMoment(Id, At, Slot == 0 ? video::Kind::Bluff : video::Kind::Cooler));
 					Ch.Candidates.push_back(Id);
 				}
+				Arch Studio;
+				Studio.Pack = 1;
+				Package(Studio, Cr.C, Ch, Uploads);
+				if (Uploads == 150 || Uploads == 160 || Uploads == 170)
+				{
+					const std::vector<video::ThumbSpec> Deal = video::ThumbOptions(Ch, Cr.C.Open, Cr.C, 0, 6);
+					Ch.Thumbs.assign(Deal.begin(), Deal.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(3, Deal.size())));
+				}
+				Packaged += Ch.Thumbs.empty() ? 0 : 1;
 				video::UploadFacts F;
 				F.GearQuality = 0.5;
 				video::Upload(Cr.C, Ch, At + 30.0, "heavy", F);
@@ -2467,7 +3060,7 @@ void Saves()
 		Cr.C.X.Challenges.push_back({1, 2, 1, 2000, 100000, 35.0 * Day, 1, 3});
 		Cr.C.X.Challenges.push_back({2, 1, 0, 50000, 250000, 300.0 * Day, 0, 7});
 		const size_t Bytes = U3Bytes(CareerText(Cr));
-		std::printf("  save: the heavy creator (update3_creator's shape): %zu bytes of Update 3 lines\n", Bytes);
+		std::printf("  save: the heavy creator (update3_creator's shape, %d uploads packaged in Studio): %zu bytes of Update 3 lines\n", Packaged, Bytes);
 		// §7.4's 22 KB (I9). The model makes about 3 components a video (the Binge wave, a lesson's day-30 and day-90 check-ins,
 		// Late Bloomer): they ride on vid packed (no vcomp lines), the rings are a line a run of days, s0Base is empty when it is s0.
 		Expect(Bytes <= 22 * 1024, "save: the heavy creator's Update 3 lines within 22 KB (" + std::to_string(Bytes) + ")");
@@ -2506,6 +3099,1069 @@ void Saves()
 		const size_t Bytes = U3Bytes(CareerText(Cr));
 		std::printf("  save: the worst case (a daily Strategy uploader for two years, every slot filled): %zu bytes of Update 3 lines\n", Bytes);
 		Expect(Bytes <= 80 * 1024, "save: the worst case within 80 KB (" + std::to_string(Bytes) + ")");
+	}
+}
+
+// ================================================================== the money's split and the itemized statement (§4.5.7, §5.6)
+
+/** Range's split vectors (the lead's VideoStats.h patch core-videoalgo_to_lead_3), read where they exist. */
+template <class R, class = void>
+struct HasRangeSplit : std::false_type
+{
+};
+template <class R>
+struct HasRangeSplit<R, std::void_t<decltype(std::declval<R&>().CutCents), decltype(std::declval<R&>().CutViews), decltype(std::declval<R&>().AdImpressions),
+							decltype(std::declval<R&>().Monetized)>>
+	: std::true_type
+{
+};
+template <class R>
+bool RangeSplitMatches(const R& Rg, const video::ChannelX& X, int Today, double& Worst)
+{
+	if constexpr (HasRangeSplit<R>::value)
+	{
+		bool Ok = Rg.CutCents.size() == Rg.Cents.size() && Rg.AdImpressions.size() == Rg.Cents.size() && Rg.Monetized.size() == Rg.Cents.size();
+		for (size_t I = 0; Ok && I + 1 < Rg.Cents.size(); ++I)
+		{
+			const int D = Today - static_cast<int>(Rg.Cents.size()) + 1 + static_cast<int>(I);
+			for (const video::DayRow& Row : X.Days)
+			{
+				if (Row.Key == D)
+				{
+					Ok = Rg.CutCents[I] == static_cast<double>(valgo::VaRowCut(Row)) && Rg.CutViews[I] == valgo::VaRowCutViews(Row) && Rg.AdImpressions[I] == valgo::VaRowImpr(Row) &&
+						 Rg.Monetized[I] == valgo::VaRowMonetized(Row);
+				}
+			}
+			Worst = std::max(Worst, Rg.CutCents[I] - Rg.Cents[I]);
+		}
+		return Ok;
+	}
+	else
+	{
+		(void)Rg;
+		(void)X;
+		(void)Today;
+		(void)Worst;
+		return true;
+	}
+}
+
+/** "$1,234.56" at At in Text, in cents (-1 when there's none). */
+long long CentsAt(const std::string& Text, size_t At)
+{
+	if (At >= Text.size() || Text[At] != '$')
+	{
+		return -1;
+	}
+	long long Dollars = 0;
+	size_t I = At + 1;
+	for (; I < Text.size() && (std::isdigit(static_cast<unsigned char>(Text[I])) || Text[I] == ','); ++I)
+	{
+		Dollars = Text[I] == ',' ? Dollars : Dollars * 10 + (Text[I] - '0');
+	}
+	if (I + 2 >= Text.size() || Text[I] != '.')
+	{
+		return -1;
+	}
+	return Dollars * 100 + (Text[I + 1] - '0') * 10 + (Text[I + 2] - '0');
+}
+
+/** The cents after the first occurrence of Label in Text ("watch-page ads $141.20": Label "watch-page ads "). */
+long long CentsAfter(const std::string& Text, const std::string& Label)
+{
+	const size_t At = Text.find(Label);
+	return At == std::string::npos ? -1 : CentsAt(Text, At + Label.size());
+}
+
+/**
+ * The library's packaging read for real (§4.6.2, §4.6.5): a title template's promise and hidden traits and a recipe's fit,
+ * traits and promise reach Upload exactly. On an everyday pot (its payoff low), two Loud templates of different promise with the
+ * same recipe: VideoX::Promise is the template's, the over-promise is max(title, thumbnail) - payoff, the CTR ratio is the traits'
+ * and the over-promise's (+12% a level), the retention's (-10% a level, the search phrase's +4%), dislikes rise with it, and the
+ * honest template's video is judged better on average over 200 uploads (the verdict's label).
+ */
+void Packaging()
+{
+	int Pairs = 0, Exact = 0, HonestBetter = 0, Labelled = 0, Louder = 0;
+	double DislikeRatio = 0.0;
+	for (int S = 0; S < 200; ++S)
+	{
+		const double At = 60.0 * Day + 19.5 * 60.0;
+		video::Channel Base = PlainU3Channel(At);
+		Base.Subs = 3000.0;
+		const std::string Id = "rl:pack@" + std::to_string(S);
+		video::NoteHand(Base, RichMoment(Id, At - 60.0, video::Kind::BigPot, 550, 0, true));
+		video::Choice Ch;
+		Ch.Candidates = {Id};
+		Ch.F = video::Format::Breakdown;
+		Ch.T = video::TitleStyle::Hype;
+		std::vector<video::TitleOption> Titles = video::TitleOptions(Ch, Base.Open, Base, 0, 3);
+		std::vector<video::ThumbSpec> Thumbs = video::ThumbOptions(Ch, Base.Open, Base, 0, 6);
+		std::stable_sort(Titles.begin(), Titles.end(), [](const video::TitleOption& X, const video::TitleOption& Y) { return X.Promise < Y.Promise; });
+		// (The quietest recipe, so the title's promise is the one that differs.)
+		std::stable_sort(Thumbs.begin(), Thumbs.end(), [](const video::ThumbSpec& X, const video::ThumbSpec& Y) { return video::ThumbPromise(X) < video::ThumbPromise(Y); });
+		if (Titles.size() < 2 || Thumbs.empty() || Titles.front().Promise == Titles.back().Promise)
+		{
+			continue;
+		}
+		const video::Candidate Lead = Base.Open.back();
+		const int Payoff = valgo::PayoffFor(Lead, Base.Open);
+		const int ThumbP = video::ThumbPromise(Thumbs.front());
+		double Ctr[2] = {0, 0}, Ret[2] = {0, 0}, Dis[2] = {0, 0}, Want[2] = {0, 0}, WantRet[2] = {0, 0};
+		int Label[2] = {-1, -1}, Overs[2] = {0, 0};
+		bool Ok = true, Inside = true;
+		for (int K = 0; K < 2; ++K)
+		{
+			const video::TitleOption& O = K == 0 ? Titles.front() : Titles.back();
+			video::Channel C = Base;
+			video::Choice Pick = Ch;
+			Pick.TitleTpl = O.Key;
+			Pick.Thumbs = {Thumbs.front()};
+			video::UploadFacts F;
+			F.GearQuality = 0.5;
+			const video::Video V = UploadOn(C, Pick, At, "pack:" + std::to_string(S), F);
+			const int Promise = std::max(static_cast<int>(O.Promise), ThumbP);
+			const int Over = std::max(0, Promise - Payoff), Under = std::max(0, Payoff - Promise);
+			Ok = Ok && V.X.On && V.X.Promise == O.Promise && V.X.TitleTpl == O.Key && valgo::OverOf(V) == Over && valgo::UnderOf(V) == Under;
+			Ctr[K] = V.X.Ctr;
+			Ret[K] = V.Retention;
+			Overs[K] = Over;
+			Want[K] = valgo::TitleTraitCtr(O.Traits) * (1.0 + 0.12 * static_cast<double>(Over)) * (1.0 - 0.04 * static_cast<double>(Under));
+			WantRet[K] = valgo::TitleTraitRet(O.Traits) * (1.0 - 0.10 * static_cast<double>(Over)) * (1.0 + 0.02 * static_cast<double>(Under));
+			// (The packaging CTR is clamped to 0.70-1.45 of 5% at the rig's 0.95: a pair at the clamp can't compare exactly.)
+			Inside = Inside && V.X.Ctr / 0.0475 > 0.7001 && V.X.Ctr / 0.0475 < 1.4499;
+			Dis[K] = valgo::RatesOf(V, video::AdLoad::Standard, V.Retention, Over).Dislike();
+			life::State L;
+			ss::kast::Channel Kc;
+			ss::Chips Bank = 0;
+			video::Step(C, L, Bank, Kc, At, At + 4.0 * Day);
+			Label[K] = C.Videos.back().X.Verdict;
+		}
+		if (!Inside)
+		{
+			continue;
+		}
+		++Pairs;
+		// (The saved CTR is to 1e-7 and the retention to 1e-4.)
+		Exact += Ok && std::fabs(Ctr[0] / Ctr[1] / (Want[0] / Want[1]) - 1.0) < 1e-4 && std::fabs(Ret[0] / Ret[1] / (WantRet[0] / WantRet[1]) - 1.0) < 2e-3 ? 1 : 0;
+		if (Overs[1] > Overs[0])
+		{
+			// (Where the louder template over-promises more: the recipe's own promise often covers both.)
+			++Louder;
+			DislikeRatio += Dis[1] / std::max(1e-12, Dis[0]);
+			if (Label[0] >= 0 && Label[1] >= 0)
+			{
+				++Labelled;
+				HonestBetter += Label[0] - Label[1];
+			}
+		}
+	}
+	std::printf("  packaging: %d pairs of Loud templates on an everyday pot: %d with the template's promise, traits and over-promise exact in the CTR and "
+				"the retention; where the louder over-promises more (%d): dislikes x%.2f, the quieter one's verdict %+.2f labels on average\n",
+		Pairs, Exact, Louder, Louder > 0 ? DislikeRatio / Louder : 0.0, Labelled > 0 ? static_cast<double>(HonestBetter) / Labelled : 0.0);
+	// (Dislikes a view rise with each level, x(1 + 0.9 O) a like on fewer likes: from 2 to 3 levels about x1.04, from 0 to 1 x1.6.)
+	Expect(Pairs >= 20 && Exact == Pairs && Louder >= 5 && DislikeRatio / std::max(1, Louder) > 1.0 && HonestBetter > 0,
+		"packaging: a template's promise and traits and a recipe's promise reach the upload exactly; over-promising costs dislikes and the verdict");
+}
+
+void Itemized()
+{
+	// A Partner from day 0 on CareerDay's rotation (a Cut, a Breakdown, a Vlog), 150 days: 64 uploads, none folded by day 140
+	// (the newest 60 kept), so every day's split can be checked against the closed form of the videos themselves.
+	Career Cr = NewCareer();
+	Cr.C.PartnerAt = 0.0;
+	std::map<int, double> CutExpect, CutViewsExpect, ImprExpect, MonExpect;
+	for (int D = 0; D < 150; ++D)
+	{
+		CareerDay(Cr, D, "split", ThreeAWeek, false, 3.0);
+		if (D < 140 && Cr.C.Videos.size() < 60)
+		{
+			// (The day's step has run: the gains of day D, from the videos' closed form, at that day's season.)
+			double Cut = 0.0, CutViews = 0.0, Impr = 0.0, Mon = 0.0;
+			for (const video::Video& V : Cr.C.Videos)
+			{
+				const double Gain = std::max(0.0, video::Views(V, (D + 1) * Day) - video::Views(V, D * Day));
+				if (V.C == video::Class::Short)
+				{
+					Cut += valgo::RpmOn(V, D) / 1000.0 * Gain * 100.0 * algo::Season(D);
+					CutViews += Gain;
+				}
+				else
+				{
+					const algo::Money M = algo::MoneyOf(V, D);
+					Impr += Gain * M.MonetizedRate * M.AdsPerPlayback;
+					Mon += Gain * M.MonetizedRate;
+				}
+			}
+			CutExpect[D] = Cut;
+			CutViewsExpect[D] = CutViews;
+			ImprExpect[D] = Impr;
+			MonExpect[D] = Mon;
+		}
+	}
+	const video::ChannelX& X = Cr.C.X;
+	std::vector<std::string> Statements;
+	for (const life::Letter& M : Cr.L.Inbox)
+	{
+		Statements.push_back(M.Kind == video::LetterStatement ? M.Body : std::string());
+	}
+	if (!valgo::VaHasSplit)
+	{
+		bool None = true, Plain = true;
+		for (const video::DayRow& R : X.Days)
+		{
+			None = None && valgo::VaRowCut(R) == 0 && valgo::VaRowImpr(R) == 0.0 && valgo::VaRowMonetized(R) == 0.0;
+		}
+		for (const std::string& B : Statements)
+		{
+			Plain = Plain && B.find("watch-page ads") == std::string::npos;
+		}
+		std::printf("  split: DayRow has no split fields yet (the lead's core-videoalgo_to_lead_2.diff): rows and statements stay unsplit\n");
+		Expect(None && Plain, "split: before DayRow's fields land, no row carries a split and the statement is Update 2's");
+		return;
+	}
+	// Each paying day: the Cuts feed's cents are the Cuts' own (rounded on their own), the watch page's impressions and
+	// monetized playbacks the long videos' (MonetizedRate x AdsPerPlayback at the day's load and coin), to the ring's rounding.
+	int Days = 0, Bad = 0, WithCuts = 0;
+	double WorstCpm = 0.0;
+	for (const video::DayRow& R : X.Days)
+	{
+		if (R.Cents <= 0 || !CutExpect.count(R.Key))
+		{
+			continue;
+		}
+		++Days;
+		const ss::Chips Cut = valgo::VaRowCut(R);
+		const double CutViews = valgo::VaRowCutViews(R), Impr = valgo::VaRowImpr(R), Mon = valgo::VaRowMonetized(R);
+		WithCuts += Cut > 0 ? 1 : 0;
+		auto Near = [](double Got, double Want) { return std::fabs(Got - Want) <= (Want >= 100.0 ? 0.5000001 : 0.0500001); }; // (the ring's rounding)
+		const bool CutOk = Cut == std::clamp<long long>(std::llround(CutExpect[R.Key]), 0, R.Cents) && Near(CutViews, CutViewsExpect[R.Key]);
+		Bad += CutOk && Near(Impr, ImprExpect[R.Key]) && Near(Mon, MonExpect[R.Key]) && Cut <= R.Cents && CutViews <= R.Views ? 0 : 1;
+		// The watch page's CPM through the identity (impressions x CPM / 1,000 x 55% = its cents) against the videos' own:
+		// every long video here is a full-ads Story or Teaching upload, so it sits between BaseCPM x season and x 1.2 x 1.15.
+		if (Impr >= 100.0 && R.Cents - Cut >= 100)
+		{
+			const double Cpm = static_cast<double>(R.Cents - Cut) / 100.0 / valgo::VaCreatorShare / Impr * 1000.0;
+			const double Base = valgo::VaBaseCpm * algo::Season(R.Key);
+			WorstCpm = std::max(WorstCpm, std::max(Base * 0.98 - Cpm, Cpm - Base * 1.20 * 1.15 * 1.02) / Base);
+		}
+	}
+	std::printf("  split: %d paying days checked against the videos' closed form (%d with Cuts money), %d off; the watch page's CPM outside its band by "
+				"%.4f at worst\n",
+		Days, WithCuts, Bad, WorstCpm);
+	Expect(Days >= 60 && WithCuts >= 30 && Bad == 0 && WorstCpm <= 0.0,
+		"split: each paying day's Cuts cents and views, ad impressions and monetized playbacks are the videos' own (§4.5.7, §5.6)");
+	// The statements: "<Month>: watch-page ads $W (RPM ..., CPM ...) · Cuts feed $C." before the letter's body; W + C is what the
+	// payout paid (the bank line on that day) or the balance a rolled-over month carries.
+	int Itemized = 0, Summed = 0, Paid = 0, Payouts = 0, LintProblems = 0, Banned = 0;
+	std::vector<std::pair<std::string, std::string>> Bodies;
+	for (const life::Letter& M : Cr.L.Inbox)
+	{
+		if (M.Kind != video::LetterStatement)
+		{
+			continue;
+		}
+		const long long Watch = CentsAfter(M.Body, "watch-page ads "), Cuts = CentsAfter(M.Body, "Cuts feed ");
+		const bool Has = (Watch >= 0 && M.Body.find(" (RPM $") != std::string::npos && M.Body.find(", CPM $") != std::string::npos) || Cuts >= 0;
+		Itemized += Has ? 1 : 0;
+		const long long Total = std::max(0LL, Watch) + std::max(0LL, Cuts);
+		Summed += Has && Total > 0 ? 1 : 0;
+		for (const life::LedgerEntry& E : Cr.L.Ledger)
+		{
+			// (A payout's statement against its bank line; a rolled-over month has none.)
+			if (E.Kind == life::LedgerVideo && std::fabs(E.At - M.At) < 1e-6)
+			{
+				++Payouts;
+				Paid += E.Amount == Total ? 1 : 0;
+			}
+		}
+		Bodies.push_back({"body", M.Body});
+		Banned += trademarks::Find(M.Body, trademarks::kCopyScan) || trademarks::Find(M.Body, trademarks::kSourceScan) ? 1 : 0;
+		Expect(M.Body.size() <= life::LetterBodyMax, "split: a statement fits a letter (" + std::to_string(M.Body.size()) + " characters)");
+	}
+	LintProblems = copylint::Run("rerun_algo", Bodies, copylint::LetterBody);
+	std::printf("  split: %d statements itemized, %d summing to their total; %d of %d payouts matching their bank line\n", Itemized, Summed, Paid, Payouts);
+	Expect(Itemized >= 3 && Summed == Itemized && Payouts >= 1 && Paid == Payouts && LintProblems == 0 && Banned == 0,
+		"split: every Rerun 2.0 statement is itemized, its parts sum to what it paid (the bank line) and it passes the letter lint");
+	// The rings carry the split through a save (a "+" run, thirteen fields a row; vlife's four after since), and StatsRange reads it.
+	const std::string Text = CareerText(Cr);
+	const life::State Back = Reload(Text);
+	auto SameSplit = [](const video::DayRow& A, const video::DayRow& B) {
+		return valgo::VaRowCut(A) == valgo::VaRowCut(B) && valgo::VaRowCutViews(A) == valgo::VaRowCutViews(B) && valgo::VaRowImpr(A) == valgo::VaRowImpr(B) &&
+			valgo::VaRowMonetized(A) == valgo::VaRowMonetized(B);
+	};
+	bool Same = Back.Video.X.Days.size() == X.Days.size() && SameSplit(Back.Video.X.Life, X.Life) && valgo::VaRowCut(X.Life) > 0;
+	for (size_t I = 0; Same && I < X.Days.size(); ++I)
+	{
+		Same = SameSplit(Back.Video.X.Days[I], X.Days[I]);
+	}
+	Expect(Same && SaveText(Back) == Text && Text.find("\tvday\t") != std::string::npos && Text.find("+\t") != std::string::npos,
+		"split: the rings' split round-trips byte for byte (a wide run keyed \"+\")");
+	double Worst = 0.0;
+	const video::Range Rg = video::StatsRange(Cr.C, 150.0 * Day - 1.0, 28);
+	Expect(RangeSplitMatches(Rg, X, 149, Worst) && Worst <= 0.0, "split: StatsRange's split (the lead's VideoStats.h patch) reads the rings day for day");
+	// The balance between steps: the newest days whose cents are the balance, split.
+	const valgo::VaSplit B = valgo::BalanceSplit(Cr.C);
+	Expect(B.Cents == Cr.C.BalanceCents && B.CutCents <= B.Cents && (Cr.C.BalanceCents == 0 || B.AdImpr > 0.0), "split: the balance's split covers the balance exactly");
+}
+
+// ================================================================== the top-earner rate (C3 fix H1: the user's soft ceiling)
+
+/** A video's reach times X (its first wave, components and evergreen term): a top earner's upload from an everyday one. */
+void ScaleVideo(video::Video& V, double X)
+{
+	V.P *= X;
+	V.E *= X;
+	V.X.P0 *= X;
+	for (video::Comp& K : V.X.Comps)
+	{
+		K.P *= X;
+	}
+}
+
+/** The top earner's upload on day D: CareerDay's three-a-week rotation (a Breakdown, a Cut, a Vlog; every third Breakdown a
+ *  Teaching lesson), each upload's reach times Scale. */
+void TopUpload(Career& Cr, int D, double Scale)
+{
+	if (std::find(ThreeAWeek.begin(), ThreeAWeek.end(), D % 7) == ThreeAWeek.end())
+	{
+		return;
+	}
+	const double At = static_cast<double>(D) * Day + 3.0 * 60.0;
+	video::Choice Ch;
+	Ch.F = static_cast<video::Format>(Cr.Uploads % 3);
+	const bool Teach = Ch.F == video::Format::Breakdown && (Cr.Uploads / 3) % 3 == 0;
+	Ch.T = Teach ? video::TitleStyle::Teaching : video::TitleStyle::Story;
+	Ch.Fr = video::Frame::Versus;
+	for (int I = 0; I < (Ch.F == video::Format::Vlog ? 3 : 1); ++I)
+	{
+		const std::string Id = "rl:top@" + std::to_string(D) + ":" + std::to_string(I);
+		video::NoteHand(Cr.C, Moment(Id, At, Teach ? video::Kind::Bluff : video::Kind::Cooler));
+		Ch.Candidates.push_back(Id);
+	}
+	video::UploadFacts F;
+	F.GearQuality = 0.5;
+	if (!video::Upload(Cr.C, Ch, At + 30.0, "top", F).empty())
+	{
+		ScaleVideo(Cr.C.Videos.back(), Scale);
+	}
+	++Cr.Uploads;
+}
+
+/** A paying day's ads before the top-earner rate, DayStep's own sum (the kept videos in order, each day's RPM and load, the
+ *  day's season), read back from the videos' closed form once the run is over (no video folded). */
+ss::Chips RawDay(const video::Channel& C, int D)
+{
+	double Ad = 0.0;
+	for (const video::Video& V : C.Videos)
+	{
+		const double Gain = std::max(0.0, video::Views(V, (D + 1) * Day) - video::Views(V, D * Day));
+		Ad += valgo::RpmOn(V, D) / 1000.0 * Gain;
+	}
+	return static_cast<ss::Chips>(std::llround(Ad * 100.0 * algo::Season(D)));
+}
+
+void TopRate()
+{
+	const ss::Chips T = valgo::TopRateFrom(), Top = valgo::TopRateTop(), Cc = Top - T;
+	// The curve (pure): T and T + C from the game's rent; every day at or under T pays its cents exactly; past T the stepped pay
+	// lands on T + C (1 - e^(-(E - T)/C)), whatever the days' sizes, within a cent a day; it never passes T + C, never pays more
+	// than the ads earned, and grows with them.
+	{
+		bool Under = true, Monotone = true, Capped = true, Cents = true;
+		for (const ss::Chips P : {ss::Chips(0), T / 3, T / 2, T - 100000, T - 1})
+		{
+			for (const ss::Chips R : {ss::Chips(1), ss::Chips(999), ss::Chips(54321), T - P})
+			{
+				Under = Under && (P + R > T || valgo::TopRatePay(P, R) == R);
+			}
+		}
+		for (const ss::Chips P : {ss::Chips(0), T - 5000, T, T + Cc / 3, Top - 2000, Top - 1, Top})
+		{
+			ss::Chips Was = 0;
+			for (ss::Chips R = 0; R <= 4 * Cc; R += 7919)
+			{
+				const ss::Chips Pay = valgo::TopRatePay(P, R);
+				Monotone = Monotone && Pay >= Was;
+				Capped = Capped && Pay <= R && P + Pay <= std::max(P, Top);
+				Was = Pay;
+			}
+		}
+		const double Ln2 = valgo::TopRateCurve(static_cast<double>(T) + static_cast<double>(Cc) * std::log(2.0));
+		const double Four = valgo::TopRateCurve(static_cast<double>(T + 4 * Cc));
+		const bool Points = T == 6 * life::MonthlyRentCents && Top == 10 * life::MonthlyRentCents && valgo::TopRateCurve(static_cast<double>(T)) == static_cast<double>(T) &&
+			std::fabs(Ln2 - static_cast<double>(T + Cc / 2)) < 1e-6 && std::fabs(Four - (static_cast<double>(T) + static_cast<double>(Cc) * (1.0 - std::exp(-4.0)))) < 1e-6 &&
+			valgo::TopRateShare(T) == 1.0 && std::fabs(valgo::TopRateShare(T + Cc / 2) - 0.5) < 1e-12 && valgo::TopRateShare(Top) == 0.0;
+		// Stepped against closed: months of 4 to 80 rents in 30 uneven days, in 1 day, and in 90 small steps.
+		double Worst = 0.0;
+		for (const double Rents : {4.0, 6.0, 6.5, 7.0, 8.0, 10.0, 15.0, 22.0, 40.0, 80.0})
+		{
+			const double E = Rents * static_cast<double>(life::MonthlyRentCents);
+			for (const int Steps : {1, 30, 90})
+			{
+				double W = 0.0;
+				for (int I = 0; I < Steps; ++I)
+				{
+					W += 1.0 + 0.6 * std::sin(1.7 * I);
+				}
+				ss::Chips P = 0, Earned = 0;
+				double Sum = 0.0;
+				for (int I = 0; I < Steps; ++I)
+				{
+					Sum += E * (1.0 + 0.6 * std::sin(1.7 * I)) / W;
+					const ss::Chips R = static_cast<ss::Chips>(std::llround(Sum)) - Earned;
+					Earned += R;
+					P += valgo::TopRatePay(P, R);
+				}
+				const double Off = std::fabs(static_cast<double>(P) - valgo::TopRateCurve(static_cast<double>(Earned)));
+				Cents = Cents && Off <= 0.5 * Steps + 0.5 && P <= Top;
+				Worst = std::max(Worst, Off);
+			}
+		}
+		std::printf("  top rate: T $%.2f, T + C $%.2f; E = T + C ln 2 pays $%.2f, T + 4C pays $%.2f; stepped months off the curve by %.1f cents at worst\n",
+			static_cast<double>(T) / 100.0, static_cast<double>(Top) / 100.0, Ln2 / 100.0, Four / 100.0, Worst);
+		Expect(Points, "top rate: from 6 rents ($" + Num(static_cast<double>(T) / 100.0, 6) + ") toward 10 (the game's rent), half the gap at T + C ln 2, the share 1 -> 0");
+		Expect(Under, "top rate: a month at or under 6 rents pays every cent the ads earned (the days below T unchanged)");
+		Expect(Monotone && Capped, "top rate: more ads never pay less, never more than they earned, never past 10 rents");
+		Expect(Cents, "top rate: a month's days in any grouping land on the closed curve within half a cent a day");
+		// The pay month: the 21st to the 20th, named by the 21st that pays it (DayStep's payday), its first day found directly.
+		bool Months = true;
+		for (int D = -40; D < 1200; ++D)
+		{
+			const int First = valgo::PayMonthFirst(D);
+			int Y = 0, Mo = 0, Dm = 0;
+			ss::world::CivilDate(First, Y, Mo, Dm);
+			Months = Months && First <= D && D - First <= 30 && Dm == 21 && valgo::PayMonthOf(First) == valgo::PayMonthOf(D) && valgo::PayMonthOf(First - 1) == valgo::PayMonthOf(D) - 1;
+		}
+		Expect(Months, "top rate: a pay month runs from the 21st to the 20th, its first day found directly (days -40 to 1,200)");
+	}
+	// A top earner: a Partner from day 0 whose uploads reach Scale times an everyday creator's, 120 days (no video folded).
+	const int Days = 100;
+	const double Scale = 25.0; // (pay months of about 4 to 13 rents earned: November's under T, December's and January's past it)
+	auto Run = [&](double PartnerAt, int RentsPaid, double ScaleX, int SkipFrom, int ReloadAt) {
+		Career Cr = NewCareer();
+		Cr.C.PartnerAt = PartnerAt;
+		Cr.L.RentsPaid = RentsPaid;
+		int Stepped = 0;
+		for (int D = 0; D < Days; ++D)
+		{
+			TopUpload(Cr, D, ScaleX);
+			const bool Uploads = D + 1 < Days && std::find(ThreeAWeek.begin(), ThreeAWeek.end(), (D + 1) % 7) != ThreeAWeek.end();
+			// (From SkipFrom on, the days between uploads go in one skip: the step to the next upload's midnight, N days at once. Day 0
+			// steps alone either way: a channel's first step only sets its clock, StepKeep's "untouched" rule.)
+			if (D < SkipFrom || D == 0 || Uploads || D + 1 == Days)
+			{
+				video::Step(Cr.C, Cr.L, Cr.Bank, Cr.K, static_cast<double>(Stepped) * Day, static_cast<double>(D + 1) * Day);
+				Stepped = D + 1;
+			}
+			if (D + 1 == ReloadAt)
+			{
+				// A save and reload mid-month: the video lines only (the rings hold the month's paid cents).
+				const life::State Back = rerun_algo_test::Reload(CareerText(Cr));
+				Cr.C = Back.Video;
+			}
+		}
+		return Cr;
+	};
+	const Career A = Run(0.0, 2, Scale, Days, -1);
+	const ss::Chips Paid = A.C.BalanceCents + A.C.PaidCents;
+	// Each pay month: the rings' cents against the stepped pay of the days' own ads (exact) and the closed curve (a cent a day).
+	std::map<int, ss::Chips> RawMonth, PaidMonth;
+	std::map<int, int> DaysIn;
+	bool DayExact = true;
+	{
+		// (The pay months whose every day is still in the 90-day ring.)
+		const int Whole = valgo::PayMonthOf(A.C.X.Days.front().Key - 1) == valgo::PayMonthOf(A.C.X.Days.front().Key) ? valgo::PayMonthOf(A.C.X.Days.front().Key) : -1;
+		std::map<int, ss::Chips> Before;
+		for (const video::DayRow& R : A.C.X.Days)
+		{
+			const int M = valgo::PayMonthOf(R.Key);
+			if (M == Whole)
+			{
+				continue;
+			}
+			const ss::Chips Raw = RawDay(A.C, R.Key);
+			DayExact = DayExact && R.Cents == valgo::TopRatePay(Before[M], Raw) && valgo::PaidThisMonth(A.C, R.Key) == Before[M] &&
+					   (!valgo::VaHasHeld || valgo::VaRowHeld(R) == Raw - R.Cents);
+			Before[M] += R.Cents;
+			RawMonth[M] += Raw;
+			PaidMonth[M] += R.Cents;
+			++DaysIn[M];
+		}
+	}
+	int Over = 0, Under = 0;
+	bool OnCurve = true;
+	std::string Months;
+	for (const auto& Kv : RawMonth)
+	{
+		const double Curve = valgo::TopRateCurve(static_cast<double>(Kv.second));
+		OnCurve = OnCurve && std::fabs(static_cast<double>(PaidMonth[Kv.first]) - Curve) <= 0.5 * DaysIn[Kv.first] + 0.5 && PaidMonth[Kv.first] <= Top;
+		(Kv.second > T ? Over : Under) += 1;
+		Months += (Months.empty() ? "" : "; ") + std::to_string(DaysIn[Kv.first]) + " days earned $" + Num(static_cast<double>(Kv.second) / 100.0, 8) + " paid $" +
+			Num(static_cast<double>(PaidMonth[Kv.first]) / 100.0, 8);
+	}
+	std::printf("  top rate: the top earner's pay months: %s\n", Months.c_str());
+	Expect(DayExact, "top rate: each day pays the stepped rate on its own ads (DayStep's sum read back), the month so far from the rings");
+	Expect(OnCurve && Over >= 2 && Under >= 1,
+		"top rate: each pay month lands on the curve (" + std::to_string(Over) + " months past T, " + std::to_string(Under) + " under, paid in full)");
+	// Skip-safe and reload-safe: the same uploads with the days between them skipped at once, and a save reloaded mid-month.
+	const Career B = Run(0.0, 2, Scale, 0, -1);
+	const Career R = Run(0.0, 2, Scale, Days, 72); // (Dec 16: the pay month already past T, its held days in the rings)
+	auto FirstDiff = [](const std::string& X, const std::string& Y) {
+		const std::vector<std::vector<std::string>> Lx = SplitLines(X), Ly = SplitLines(Y);
+		for (size_t I = 0; I < std::max(Lx.size(), Ly.size()); ++I)
+		{
+			if (I >= Lx.size() || I >= Ly.size() || Lx[I] != Ly[I])
+			{
+				std::string Out;
+				for (const std::vector<std::vector<std::string>>* P : {&Lx, &Ly})
+				{
+					Out += " |";
+					for (size_t K = 0; I < P->size() && K < (*P)[I].size() && K < 14; ++K)
+					{
+						Out += " " + (*P)[I][K];
+					}
+				}
+				return Out;
+			}
+		}
+		return std::string();
+	};
+	const std::string Ta = CareerText(A), Tb = CareerText(B), Tr = CareerText(R);
+	if (Tb != Ta || Tr != Ta)
+	{
+		std::printf("  top rate: skip vs steps:%s\n  top rate: reload vs steps:%s\n", FirstDiff(Ta, Tb).c_str(), FirstDiff(Ta, Tr).c_str());
+	}
+	Expect(Tb == Ta && B.Bank == A.Bank, "top rate: a skip of N days is N one-day steps (byte for byte, the bank too)");
+	Expect(Tr == Ta && R.Bank == A.Bank, "top rate: a reload mid-month changes nothing (byte for byte, the bank too)");
+	// (Once DayRow keeps the held cents, the held days ride a "*" run of the rings and read back to the cent.)
+	{
+		const life::State Back = rerun_algo_test::Reload(Ta);
+		bool Held = !valgo::VaHasHeld || Ta.find("*\t") != std::string::npos;
+		for (size_t I = 0; I < A.C.X.Days.size() && I < Back.Video.X.Days.size(); ++I)
+		{
+			Held = Held && valgo::VaRowHeld(A.C.X.Days[I]) == valgo::VaRowHeld(Back.Video.X.Days[I]) && valgo::VaRowHeldCut(A.C.X.Days[I]) == valgo::VaRowHeldCut(Back.Video.X.Days[I]);
+		}
+		Held = Held && valgo::VaRowHeld(A.C.X.Life) == valgo::VaRowHeld(Back.Video.X.Life) && SaveText(Back) == Ta;
+		std::printf("  top rate: DayRow %s the held cents (%s)\n", valgo::VaHasHeld ? "keeps" : "doesn't keep yet", valgo::VaHasHeld ? "c3f-algo_to_lead_1.diff applied" : "the patch waits");
+		Expect(Held, "top rate: the held cents ride the rings through a save (a \"*\" run) once DayRow keeps them; nothing is written before");
+	}
+	// The videos' own cents add up to what was paid (a cent a day), and analytics read the reduced pay: StatsOf's RPM at the
+	// month's share, the CPM the advertisers'; TopRateOf the month through the last midnight.
+	double Earned = 0.0;
+	for (const video::Video& V : A.C.Videos)
+	{
+		Earned += V.X.Earned;
+	}
+	const double Now = static_cast<double>(Days) * Day + 60.0; // (an hour into the day after the run: every row is before it)
+	const int Today = Days;
+	const valgo::TopRateView Tv = valgo::TopRateOf(A.C, Now);
+	ss::Chips MonthSoFar = 0;
+	for (const video::DayRow& Rw : A.C.X.Days)
+	{
+		MonthSoFar += valgo::PayMonthOf(Rw.Key) == valgo::PayMonthOf(Today) ? Rw.Cents : 0;
+	}
+	const video::Video& Last = A.C.Videos.front();
+	const video::VideoStats St = video::StatsOf(A.C, Last, Now);
+	const algo::Money M = algo::MoneyOf(Last, Today);
+	const double Share = valgo::TopRateShare(valgo::PaidThisMonth(A.C, Today));
+	Expect(std::fabs(Earned - static_cast<double>(Paid)) <= 0.5 * Days + 1.0, "top rate: the videos' own cents add up to what the channel was paid ($" + Num(Earned / 100.0, 9) + " against $" +
+		Num(static_cast<double>(Paid) / 100.0, 9) + ")");
+	Expect(Tv.Month == valgo::PayMonthOf(Today) && Tv.Paid == MonthSoFar && Tv.Applies == (MonthSoFar > T) && Tv.Share == valgo::TopRateShare(MonthSoFar) &&
+			   (valgo::VaHasHeld ? Tv.Held >= 0 : Tv.Held == (Tv.Applies ? -1 : 0)),
+		"top rate: TopRateOf reads this pay month's paid cents and share from the rings ($" + Num(static_cast<double>(Tv.Paid) / 100.0, 8) + ", share " + Num(Tv.Share, 3) + ")");
+	Expect(Share < 1.0 && std::fabs(St.Rpm - M.Rpm * Share) < 1e-12 && St.Cpm == M.Cpm && St.PlaybackCpm == M.Cpm * M.AdsPerPlayback,
+		"top rate: StatsOf's RPM is today's share of the full rate (x" + Num(Share, 3) + "), its CPMs the advertisers'");
+	// review-c3f-algo (what its mutants needed): StatsRange's days not stepped yet pay the rate as DayStep will (the run read two
+	// days ahead without a step: the first against a copy stepped through it, the second on from the first, as the closed form
+	// knows it: the next midnight's check-ins aren't decided yet); a day's paid share (a video's RPM a day) is the day's paid cents
+	// over its own ads, exactly 1 at or under T, today's StatsOf's; and past T the Cuts feed's cents are the day's share of its
+	// own ads, like every video's.
+	{
+		Career Ahead = A;
+		video::Step(Ahead.C, Ahead.L, Ahead.Bank, Ahead.K, static_cast<double>(Days) * Day, static_cast<double>(Days + 1) * Day);
+		const double Then = static_cast<double>(Days + 2) * Day - 1e-3;
+		const video::Range Rg = video::StatsRange(A.C, Then, 3);
+		const auto It = std::find_if(Ahead.C.X.Days.begin(), Ahead.C.X.Days.end(), [Days](const video::DayRow& Rw) { return Rw.Key == Days; });
+		double Est = 0.0;
+		for (const video::Video& V : A.C.Videos)
+		{
+			Est += valgo::RpmOn(V, Days + 1) / 1000.0 * std::max(0.0, video::Views(V, Then) - video::Views(V, (Days + 1) * Day)) * 100.0 * algo::Season(Days + 1);
+		}
+		const ss::Chips Next = valgo::TopRatePay(valgo::PaidThisMonth(A.C, Days) + static_cast<ss::Chips>(std::llround(Rg.Cents.size() == 3 ? Rg.Cents[1] : 0.0)),
+			static_cast<ss::Chips>(std::llround(Est)));
+		const bool Unstepped = Rg.Cents.size() == 3 && It != Ahead.C.X.Days.end() && It->Cents < RawDay(Ahead.C, Days) &&
+							   std::fabs(Rg.Cents[1] - static_cast<double>(It->Cents)) <= 1.0 && Next < std::llround(Est) && std::fabs(Rg.Cents[2] - static_cast<double>(Next)) <= 1.0;
+		Expect(Unstepped, "top rate: StatsRange's days not stepped yet pay the rate as DayStep will pay them ($" + Num(Rg.Cents.size() == 3 ? Rg.Cents[1] / 100.0 : 0.0, 7) +
+			" against the step's $" + Num(It != Ahead.C.X.Days.end() ? static_cast<double>(It->Cents) / 100.0 : 0.0, 7) + "; the next day on from it)");
+		bool Shares = valgo::DayPaidShare(A.C, Today) == valgo::TopRateShare(valgo::PaidThisMonth(A.C, Today));
+		bool Cuts = true;
+		int PastT = 0;
+		double Worst = 0.0;
+		for (const video::DayRow& Rw : A.C.X.Days)
+		{
+			double Ad = 0.0, Cut = 0.0;
+			for (const video::Video& V : A.C.Videos)
+			{
+				const double Gain = std::max(0.0, video::Views(V, (Rw.Key + 1) * Day) - video::Views(V, Rw.Key * Day));
+				Ad += valgo::RpmOn(V, Rw.Key) / 1000.0 * Gain;
+				Cut += V.C == video::Class::Short ? valgo::RpmOn(V, Rw.Key) / 1000.0 * Gain : 0.0;
+			}
+			const double Full = Ad * 100.0 * algo::Season(Rw.Key);
+			const double Got = valgo::DayPaidShare(A.C, Rw.Key);
+			if (valgo::PaidThisMonth(A.C, Rw.Key) + Rw.Cents <= T)
+			{
+				Shares = Shares && Got == 1.0;
+				continue;
+			}
+			++PastT;
+			const double Kd = static_cast<double>(Rw.Cents) / Full;
+			Worst = std::max(Worst, std::fabs(Got - Kd));
+			Shares = Shares && std::fabs(Got - Kd) <= 2e-3;
+			Cuts = Cuts && std::llabs(static_cast<long long>(valgo::VaRowCut(Rw)) - std::llround(Cut * 100.0 * algo::Season(Rw.Key) * Kd)) <= 1;
+		}
+		Expect(Shares && PastT >= 20, "top rate: a day's paid share is its paid cents over its own ads past T (" + std::to_string(PastT) + " days, " + Num(Worst, 3) +
+			" off at most), 1 at or under T, today's StatsOf's");
+		Expect(Cuts && PastT >= 20, "top rate: past T the Cuts feed's cents are the day's share of its own ads (a cent at most)");
+	}
+	// Only the money flattens: the same uploads never paid (never Partner: Act I's review waits for the second rent) have the same
+	// subscribers, views and engagement, day by day.
+	const Career N = Run(-1.0, 0, Scale, Days, -1);
+	bool Same = N.C.Subs == A.C.Subs && N.C.X.Days.size() == A.C.X.Days.size();
+	for (size_t I = 0; Same && I < A.C.X.Days.size(); ++I)
+	{
+		const video::DayRow &Ra = A.C.X.Days[I], &Rn = N.C.X.Days[I];
+		Same = Ra.Views == Rn.Views && Ra.WatchH == Rn.WatchH && Ra.Gained == Rn.Gained && Ra.Lost == Rn.Lost && Ra.Likes == Rn.Likes && Ra.Dislikes == Rn.Dislikes && Ra.Impr == Rn.Impr &&
+			   Ra.Comments == Rn.Comments && Rn.Cents == 0;
+	}
+	Expect(Same && Paid > 2 * T, "top rate: subscribers, views, likes, impressions and comments keep every view; only the money flattens");
+	// The statements: a month past T says so in Rerun's words, its parts still add up to the bank line, and its CPM stays the
+	// advertisers' price (inside the long videos' band at the month's seasons), not the rate's share of it.
+	int TopLetters = 0, Good = 0, Lint = 0;
+	std::vector<std::pair<std::string, std::string>> Bodies;
+	auto Statements = [&](const Career& Cr, const char* Who) {
+		for (const life::Letter& L : Cr.L.Inbox)
+		{
+			if (L.Kind != video::LetterStatement || L.Body.find(valgo::TopRateLine()) == std::string::npos)
+			{
+				continue;
+			}
+			++TopLetters;
+			Bodies.push_back({"body", L.Body});
+			const long long Watch = CentsAfter(L.Body, "watch-page ads "), Cuts = CentsAfter(L.Body, "Cuts feed "), Cpm = CentsAfter(L.Body, ", CPM ");
+			long long Bank = -1;
+			for (const life::LedgerEntry& E : Cr.L.Ledger)
+			{
+				Bank = E.Kind == life::LedgerVideo && std::fabs(E.At - L.At) < 1e-6 ? E.Amount : Bank;
+			}
+			double Lo = 1e9, Hi = 0.0;
+			const int Pay = valgo::DayOf(L.At) - 1;
+			for (int D = Pay; D >= 0 && valgo::PayMonthOf(D) == valgo::PayMonthOf(Pay); --D)
+			{
+				Lo = std::min(Lo, algo::Season(D));
+				Hi = std::max(Hi, algo::Season(D));
+			}
+			const double Cpmd = static_cast<double>(Cpm) / 100.0;
+			const bool InBand = Cpmd >= valgo::VaBaseCpm * Lo * 0.98 && Cpmd <= valgo::VaBaseCpm * Hi * 1.20 * 1.15 * 1.02;
+			// The RPM: the month's watch-page pay over every watch-page view of it, the days the rate held whole included.
+			double Paid = 0.0, Seen = 0.0;
+			for (const video::DayRow& Rw : Cr.C.X.Days)
+			{
+				if (valgo::PayMonthOf(Rw.Key) == valgo::PayMonthOf(Pay))
+				{
+					Paid += static_cast<double>(Rw.Cents - valgo::VaRowCut(Rw));
+					Seen += static_cast<double>(Rw.Views) - valgo::VaRowCutViews(Rw);
+				}
+			}
+			const bool RpmOk = Seen > 0.0 && std::fabs(static_cast<double>(CentsAfter(L.Body, "(RPM ")) - Paid / Seen * 1000.0) <= 1.0;
+			Good += Watch >= 0 && Cuts >= 0 && Watch + Cuts == Bank && InBand && RpmOk ? 1 : 0;
+			std::printf("  top rate: %s statement \"%s\" (CPM band $%.2f-$%.2f)\n", Who, L.Body.c_str(), valgo::VaBaseCpm * Lo * 0.98, valgo::VaBaseCpm * Hi * 1.20 * 1.15 * 1.02);
+		}
+	};
+	Statements(A, "the top earner's");
+	// The far tail: a month of 60+ rents pays within a dollar of 10 rents and never past them, and its statements still read the
+	// advertisers' CPM back.
+	{
+		const Career F = Run(0.0, 2, Scale * 8.0, 77, -1);
+		bool Near = false, Never = true;
+		std::map<int, ss::Chips> Pm;
+		for (const video::DayRow& Rw : F.C.X.Days)
+		{
+			Pm[valgo::PayMonthOf(Rw.Key)] += Rw.Cents;
+		}
+		for (const auto& Kv : Pm)
+		{
+			Never = Never && Kv.second <= Top;
+			Near = Near || Kv.second >= Top - 100;
+		}
+		Statements(F, "the far tail's");
+		Expect(Near && Never, "top rate: the far tail pays within a dollar of 10 rents and never past them");
+	}
+	Lint = copylint::Run("rerun_algo", Bodies, copylint::LetterBody);
+	Expect(TopLetters >= 3 && Good == TopLetters && Lint == 0, "top rate: every statement of a month past T carries the rate's line, adds up to its bank line and keeps the advertisers' CPM (" +
+		std::to_string(Good) + " of " + std::to_string(TopLetters) + ")");
+	// Before Partner, "would have earned" is the same pipeline: a month whose ads would have passed T pays its share of the curve,
+	// the videos' lines adding up to the curve month by month (the channel's month, not each video's alone).
+	{
+		const Career& Wc = N;
+		const double World = static_cast<double>(Days) * Day - 1.0;
+		std::map<int, double> Would;
+		double Old = 0.0;
+		for (const video::Video& V : Wc.C.Videos)
+		{
+			for (int D = valgo::DayOf(V.At); D < Days; ++D)
+			{
+				const double A0 = std::max(V.At, static_cast<double>(D) * Day), B0 = static_cast<double>(D + 1) * Day;
+				const double Add = std::max(0.0, video::Views(V, std::min(B0, World)) - video::Views(V, A0)) * algo::MoneyOf(V, D).Rpm / 1000.0 * 100.0;
+				Would[valgo::PayMonthOf(D)] += B0 <= World + 1.0 ? Add : 0.0;
+				Old += B0 <= World + 1.0 ? Add : 0.0;
+			}
+		}
+		double Want = 0.0;
+		for (const auto& Kv : Would)
+		{
+			Want += valgo::TopRateCurve(Kv.second);
+		}
+		double Got = 0.0;
+		for (const video::Video& V : Wc.C.Videos)
+		{
+			Got += static_cast<double>(video::StatsOf(Wc.C, V, World).WouldEarnCents);
+		}
+		std::printf("  top rate: before Partner the videos would have earned $%.2f at the rate ($%.2f without it; the curve month by month $%.2f)\n", Got / 100.0, Old / 100.0, Want / 100.0);
+		Expect(Wc.C.PartnerAt < 0.0 && Old > Want + 100.0 && std::fabs(Got - Want) <= static_cast<double>(Wc.C.Videos.size()) + 0.01 * Want / 100.0,
+			"top rate: \"would have earned\" before Partner pays the curve on the channel's months, not every view in full");
+		// (review-c3f-algo: the month's slow sum is kept for a page's reads at one minute, never past a change to the videos. Its
+		// cost: every video read at a new minute, best of three, within §10's 0.2 ms a video (asserted at 3x, as "reads" are).)
+		{
+			Career Bigger = N;
+			double Before = 0.0, After = 0.0, Fresh = 0.0;
+			for (const video::Video& V : Bigger.C.Videos)
+			{
+				Before += static_cast<double>(video::StatsOf(Bigger.C, V, World).WouldEarnCents);
+			}
+			for (video::Video& V : Bigger.C.Videos)
+			{
+				ScaleVideo(V, 1.5);
+			}
+			const Career Copy = Bigger;
+			for (const video::Video& V : Bigger.C.Videos)
+			{
+				After += static_cast<double>(video::StatsOf(Bigger.C, V, World).WouldEarnCents);
+			}
+			for (const video::Video& V : Copy.C.Videos)
+			{
+				Fresh += static_cast<double>(video::StatsOf(Copy.C, V, World).WouldEarnCents);
+			}
+			double Ms = 1e9;
+			for (int Pass = 1; Pass <= 3; ++Pass)
+			{
+				const auto T0 = std::chrono::steady_clock::now();
+				double Sink = 0.0;
+				for (const video::Video& V : Wc.C.Videos)
+				{
+					Sink += static_cast<double>(video::StatsOf(Wc.C, V, World - 0.25 * Pass).WouldEarnCents);
+				}
+				Ms = std::min(Ms, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count() / static_cast<double>(Wc.C.Videos.size()) + Sink * 0.0);
+			}
+			std::printf("  top rate: before Partner, a page's reads at a new minute: %.3f ms a video (%zu videos); x1.5 reach $%.2f -> $%.2f\n", Ms, Wc.C.Videos.size(),
+				Before / 100.0, After / 100.0);
+			Expect(After == Fresh && After > Before && After < 1.5 * Before, "top rate: \"would have earned\" follows a change to the videos at the same minute (no stale month)");
+			Expect(Ms <= 0.6, "top rate: before Partner a big channel's StatsOf stays inside §10's 0.2 ms a video (" + Num(Ms, 3) + " ms; asserted at 3x)");
+		}
+	}
+}
+
+/**
+ * review-core-videoalgo (C3): the checks its mutants needed (STATUS_review-core-videoalgo.txt). A recipe's compact ints at the
+ * alphabet's edge; the statement's split past the 90-day ring (the month rows, exactly); an Update 2 balance carried into
+ * Rerun 2.0 keeps the plain letter; an idea goes up only as a format it lists; a "cls=S" idea is the evergreen class; an idea
+ * video's Ad market category is its own; a Double KO only in a hand the player won.
+ */
+void ReviewC3()
+{
+	auto Statement = [](const life::Letter& M, long long& Watch, long long& Cuts, long long& Total) {
+		Watch = CentsAfter(M.Body, "watch-page ads ");
+		Cuts = CentsAfter(M.Body, "Cuts feed ");
+		const long long Paid = CentsAfter(M.Body, "Paid today: ");
+		Total = Paid >= 0 ? Paid : CentsAfter(M.Body, "Your balance is ");
+		return Watch >= 0 && Cuts >= 0;
+	};
+	// A recipe's ints ride a character each while they fit the alphabet's 62 places (-1 .. 60): a LookRef of 60, of 61 (a
+	// channel's 62nd frozen look: SessionVideo.cpp's Ref only grows) and of 62 reads back as written, and no NUL is saved.
+	{
+		Career Cr = NewCareer();
+		for (int D = 0; D < 10; ++D)
+		{
+			CareerDay(Cr, D, "look", ThreeAWeek, false);
+		}
+		bool Placed = false;
+		for (video::Video& V : Cr.C.Videos)
+		{
+			for (size_t K = 0; V.X.On && !Placed && K < 3; ++K)
+			{
+				video::ThumbSpec S;
+				S.Arch = static_cast<int16_t>(4 + K);
+				S.Layout = 2;
+				S.LookRef = static_cast<int16_t>(60 + K);
+				V.X.Spec[K] = S;
+			}
+			Placed = Placed || V.X.On;
+		}
+		const std::string Text = CareerText(Cr);
+		const life::State Back = Reload(Text);
+		bool Same = Placed && Back.Video.Videos.size() == Cr.C.Videos.size();
+		for (size_t I = 0; Same && I < Cr.C.Videos.size(); ++I)
+		{
+			for (size_t K = 0; K < 3; ++K)
+			{
+				Same = Same && Back.Video.Videos[I].X.Spec[K].LookRef == Cr.C.Videos[I].X.Spec[K].LookRef && Back.Video.Videos[I].X.Spec[K].Arch == Cr.C.Videos[I].X.Spec[K].Arch;
+			}
+		}
+		Expect(Same && Text.find('\0') == std::string::npos && SaveText(Back) == Text,
+			"review: a recipe's LookRef of 60, 61 (the 62nd frozen look) and 62 reads back as written, and the save holds no NUL");
+	}
+	// A Partner under $100 for 200 days (an upload a week): nothing paid, so the balance is every paying day since Partner, and
+	// past the 90-day ring the split reads the month rows (the ring's first month less its days in the ring): its Cuts cents are
+	// the days' own to the cent, its views, impressions and monetized playbacks to the rings' rounding; every statement after
+	// day 120 is itemized (once DayRow has the split), its parts the balance it names.
+	{
+		Career Cr = NewCareer();
+		Cr.C.PartnerAt = 0.0;
+		ss::Chips Cents = 0, Cut = 0;
+		double Views = 0.0, CutViews = 0.0, Impr = 0.0, Mon = 0.0;
+		int Days = 0;
+		for (int D = 0; D < 200; ++D)
+		{
+			CareerDay(Cr, D, "longbal", Weekly, false);
+			if (Cr.C.X.Days.empty())
+			{
+				continue; // (no video yet: the rings start with the first)
+			}
+			const video::DayRow& R = Cr.C.X.Days.back();
+			if (R.Key == D && R.Cents > 0)
+			{
+				++Days;
+				Cents += R.Cents;
+				Cut += valgo::VaRowCut(R);
+				Views += static_cast<double>(R.Views);
+				CutViews += valgo::VaRowCutViews(R);
+				Impr += valgo::VaRowImpr(R);
+				Mon += valgo::VaRowMonetized(R);
+			}
+		}
+		const valgo::VaSplit B = valgo::BalanceSplit(Cr.C);
+		const double Tol = 0.5 * static_cast<double>(Days) + 1.0; // (a ring row's rounding, a day at a time)
+		auto Near = [Tol](double Got, double Want) { return std::fabs(Got - Want) <= Tol + 0.001 * Want; };
+		const bool Long = Cr.C.PaidCents == 0 && Cr.C.BalanceCents == Cents && Cents > 0 && !Cr.C.X.Days.empty() && Cr.C.X.Days.front().Key >= 100;
+		const bool Parts = !valgo::VaHasSplit || (Cut > 0 && B.CutCents == Cut && Near(B.CutViews, CutViews) && Near(B.AdImpr, Impr) && Near(B.Monetized, Mon));
+		std::printf("  review: a 200-day balance of %lld cents, %d paying days: split %lld cents (Cuts %lld of %lld), views %.0f of %.0f, impressions %.0f of %.0f\n",
+			static_cast<long long>(Cents), Days, static_cast<long long>(B.Cents), static_cast<long long>(B.CutCents), static_cast<long long>(Cut), B.Views, Views, B.AdImpr, Impr);
+		Expect(Long && B.Cents == Cents && Near(B.Views, Views) && Parts,
+			"review: past the 90-day ring the balance's split reads the month rows exactly (the ring's first month less its days in the ring)");
+		int Late = 0, LateItemized = 0, Wrong = 0;
+		for (const life::Letter& M : Cr.L.Inbox)
+		{
+			long long W = 0, Cu = 0, Total = 0;
+			if (M.Kind != video::LetterStatement)
+			{
+				continue;
+			}
+			const bool Has = Statement(M, W, Cu, Total);
+			Wrong += Has && W + Cu != Total ? 1 : 0;
+			Late += M.At > 120.0 * Day ? 1 : 0;
+			LateItemized += M.At > 120.0 * Day && Has ? 1 : 0;
+		}
+		Expect(Wrong == 0 && Late >= 2 && LateItemized == (valgo::VaHasSplit ? Late : 0),
+			"review: a balance older than the ring still gets the itemized statement, its parts the balance (" + std::to_string(LateItemized) + " of " + std::to_string(Late) + ")");
+	}
+	// An Update 2 Partner with a balance turns Rerun 2.0 on (an upload with a recipe) five days before a payday: the rings hold
+	// only the days since, so that statement is the plain letter, and every itemized statement's parts are what it paid or keeps.
+	{
+		Career Cr;
+		Cr.L.RentsPaid = 2;
+		Cr.L.Update2LinesRead |= life::U2Video;
+		Cr.C.PartnerAt = 0.0;
+		int Pay = -1; // the day whose midnight is the 21st, at least 12 days in
+		for (int D = 12; D < 80 && Pay < 0; ++D)
+		{
+			int Y = 0, Mo = 0, Dm = 0;
+			ss::world::CivilDate(D + 1, Y, Mo, Dm);
+			Pay = Dm == 21 ? D : -1;
+		}
+		const int Turn = Pay - 5;
+		ss::Chips Carried = 0;
+		for (int D = 0; D < Pay + 3; ++D)
+		{
+			if (D != Turn)
+			{
+				CareerDay(Cr, D, "turn", ThreeAWeek, false);
+				continue;
+			}
+			Carried = Cr.C.BalanceCents;
+			const double At = static_cast<double>(D) * Day + 3.0 * 60.0;
+			const std::string Id = "rl:turn@" + std::to_string(D) + ":0";
+			video::NoteHand(Cr.C, RichMoment(Id, At - 60.0, video::Kind::Cooler));
+			video::Choice Ch;
+			Ch.Candidates = {Id};
+			Ch.F = video::Format::Breakdown;
+			Ch.T = video::TitleStyle::Story;
+			video::ThumbSpec S;
+			S.Arch = 2;
+			S.Layout = 1;
+			Ch.Thumbs = {S};
+			video::UploadFacts F;
+			F.GearQuality = 0.5;
+			video::Upload(Cr.C, Ch, At, "turn", F);
+			video::Step(Cr.C, Cr.L, Cr.Bank, Cr.K, static_cast<double>(D) * Day, static_cast<double>(D + 1) * Day);
+		}
+		int After = 0, FirstPlain = -1, Wrong = 0;
+		for (const life::Letter& M : Cr.L.Inbox)
+		{
+			long long W = 0, Cu = 0, Total = 0;
+			if (M.Kind != video::LetterStatement || M.At <= static_cast<double>(Turn) * Day)
+			{
+				continue;
+			}
+			const bool Has = Statement(M, W, Cu, Total);
+			Wrong += Has && W + Cu != Total ? 1 : 0;
+			FirstPlain = After == 0 ? (Has ? 0 : 1) : FirstPlain;
+			++After;
+		}
+		Expect(Cr.C.X.On && Carried > 0 && After >= 1 && FirstPlain == 1 && Wrong == 0,
+			"review: an Update 2 balance carried into Rerun 2.0 gets the plain statement until the rings account for it all (carried " + std::to_string(Carried) + " cents)");
+	}
+	// An idea alone goes up as a format its facts list and as no other (§6.3: each idea has the formats it allows).
+	{
+		const double At = 40.0 * Day + 4.0 * 60.0;
+		std::vector<video::Candidate> Open;
+		video::Candidate I;
+		I.Id = "idea:f2:40";
+		I.At = At - 60.0;
+		I.Expires = At + 7.0 * Day;
+		I.Source = 5;
+		I.K = video::Kind::Idea;
+		I.Idea = 602;
+		I.IdeaFacts = "w=1.50;cool=7;ad=teach;fmt=1;cls=S";
+		Open.push_back(I);
+		video::Choice Ch;
+		Ch.Candidates = {I.Id};
+		bool Ok = true;
+		for (int F = 0; F < static_cast<int>(video::Format::Count); ++F)
+		{
+			Ch.F = static_cast<video::Format>(F);
+			Ok = Ok && video::CanUpload(Ch, Open).empty() == (Ch.F == video::Format::Breakdown);
+		}
+		Expect(Ok, "review: a lone idea (\"fmt=1\") goes up as a Breakdown and as no other format");
+	}
+	// A Strategy lesson ("cls=S") is the evergreen class in a long format, a Cut stays a Cut, and the same idea without the
+	// fact keeps its style's class.
+	{
+		const double At = 40.0 * Day + 4.0 * 60.0;
+		auto Lesson = [At](const std::string& Facts, video::Format F) {
+			video::Channel C = PlainU3Channel(At);
+			video::Candidate I;
+			I.Id = "idea:f2:40";
+			I.At = At - 60.0;
+			I.Expires = At + 7.0 * Day;
+			I.Source = 5;
+			I.K = video::Kind::Idea;
+			I.Idea = 602;
+			I.IdeaFacts = Facts;
+			C.Open.push_back(I);
+			video::Choice Ch;
+			Ch.Candidates = {I.Id};
+			Ch.F = F;
+			Ch.T = video::TitleStyle::Story;
+			video::UploadFacts Uf;
+			Uf.GearQuality = 0.5;
+			return UploadOn(C, Ch, At, "cls", Uf);
+		};
+		const video::Video S = Lesson("w=1.50;cool=7;ad=teach;fmt=01;cls=S", video::Format::Breakdown);
+		const video::Video N = Lesson("w=1.50;cool=7;ad=teach;fmt=01", video::Format::Breakdown);
+		const video::Video Cu = Lesson("w=1.50;cool=7;ad=teach;fmt=01;cls=S", video::Format::Short);
+		Expect(S.X.On && S.C == video::Class::Strategy && S.E > 0.0 && N.X.On && N.C != video::Class::Strategy && Cu.X.On && Cu.C == video::Class::Short,
+			"review: a \"cls=S\" idea is the Strategy class (a year of search) in a long format; a Cut stays a Cut; without it, its style's class");
+	}
+	// An idea video's Ad market category is its idea's (IdeaAdCategory), not its title style's: two ideas, two categories.
+	{
+		const double At = 40.0 * Day + 4.0 * 60.0;
+		int Cats[2] = {-1, -1};
+		double Mix[2] = {0.0, 0.0};
+		const std::pair<int, const char*> Ideas[2] = {{1105, "w=1.00;cool=30;ad=gear;fmt=12"}, {801, "w=1.20;cool=3;ad=news;fmt=1"}};
+		for (int K = 0; K < 2; ++K)
+		{
+			video::Channel C = PlainU3Channel(At);
+			video::Candidate I;
+			I.Id = "idea:ad:" + std::to_string(K);
+			I.At = At - 60.0;
+			I.Expires = At + 7.0 * Day;
+			I.Source = 5;
+			I.K = video::Kind::Idea;
+			I.Idea = Ideas[K].first;
+			I.IdeaFacts = Ideas[K].second;
+			C.Open.push_back(I);
+			video::Choice Ch;
+			Ch.Candidates = {I.Id};
+			Ch.F = video::Format::Breakdown;
+			Ch.T = video::TitleStyle::Story;
+			video::UploadFacts Uf;
+			Uf.GearQuality = 0.5;
+			UploadOn(C, Ch, At, "ad", Uf);
+			Cats[K] = video::IdeaAdCategory(Ideas[K].first);
+			const std::vector<video::AdMarketRow> Market = video::AdMarket(C, At + Day);
+			Mix[K] = Cats[K] >= 0 && Cats[K] < static_cast<int>(Market.size()) && C.Videos.size() == 1 ? Market[static_cast<size_t>(Cats[K])].Mix : 0.0;
+		}
+		Expect(Cats[0] != Cats[1] && Mix[0] == 1.0 && Mix[1] == 1.0, "review: an idea video's Ad market category is its idea's own (both ideas' rows hold the whole mix)");
+	}
+	// NoteHand: quads named a big pot by the room is a Monster on a Rerun 2.0 channel (RecordKinds, the weightier kind) and stays
+	// the big pot on an Update 2 channel (dormant until its first Rerun 2.0 upload).
+	{
+		video::Kind Got[2] = {video::Kind::Count, video::Kind::Count};
+		for (int On = 0; On < 2; ++On)
+		{
+			video::Channel C;
+			C.X.On = On == 1;
+			video::Candidate M = Moment("rl:quads@9:1", 9.0 * Day, video::Kind::BigPot);
+			M.Rec.Mine = ss::ParseCards("9s9h");
+			M.Rec.Shown = {{"Mike_R", ss::ParseCards("AcKd")}};
+			M.Rec.Board = ss::ParseCards("9c9d2hKs4c");
+			M.Rec.HeroNet = 9000;
+			video::NoteHand(C, M);
+			Got[On] = C.Open.empty() ? video::Kind::Count : C.Open.back().K;
+		}
+		Expect(Got[1] == video::Kind::Monster && Got[0] == video::Kind::BigPot, "review: quads are a Monster on a Rerun 2.0 channel and keep Update 2's kind on an Update 2 one");
+	}
+	// NoteLiveHand on a Rerun 2.0 channel: two sent home in a hand the player won (a set of queens) is a Double KO; two busted
+	// by someone else in a hand the player lost with eight high names nothing.
+	{
+		video::Kind Got[2] = {video::Kind::Count, video::Kind::Count};
+		for (int W = 0; W < 2; ++W)
+		{
+			life::State L;
+			L.Video.X.On = true;
+			ss::recall::Record R;
+			R.Number = 31 + W;
+			R.Blinds.Sb = 100;
+			R.Blinds.Bb = 200;
+			R.Mine = ss::ParseCards(W == 0 ? "QhQd" : "8c3d");
+			R.Board = ss::ParseCards("Qs9c4h2d7s");
+			R.Shown = {{"Mike_R", ss::ParseCards("AhKh")}, {"Dana", ss::ParseCards("JcJs")}};
+			R.Pot = 8600;
+			R.HeroNet = W == 0 ? 5600 : -3000;
+			ss::room::HandNote N;
+			N.Busted = W == 0 ? std::vector<std::string>{"Mike_R", "Dana"} : std::vector<std::string>{"Mike_R", "Sam"};
+			video::LiveContext Ctx;
+			Ctx.Source = 1;
+			Ctx.EntryId = "embercrest-nightly@9";
+			Ctx.Event = "Embercrest Nightly";
+			Ctx.BuyIn = 12000;
+			Ctx.Field = 88;
+			Ctx.World = 9.0 * Day + 20.0 * 60.0 + W;
+			video::NoteLiveHand(L, R, &N, Ctx);
+			Got[W] = L.Video.Open.empty() ? video::Kind::Count : L.Video.Open.back().K;
+		}
+		Expect(Got[0] == video::Kind::DoubleKo && Got[1] != video::Kind::DoubleKo, "review: a Double KO only in a hand the player won (" + std::to_string(static_cast<int>(Got[0])) + ", " +
+			std::to_string(static_cast<int>(Got[1])) + ")");
 	}
 }
 
@@ -2613,6 +4269,41 @@ void Analytics()
 	}
 	const int Problems = copylint::Run("rerun_algo", Lines, copylint::Pa) + copylint::Run("rerun_algo", Letters, copylint::LetterBody);
 	Expect(Lines.size() > 40 && Problems == 0 && Banned == 0, "copy: Rerun 2.0's core lines pass the lint, the trademark screen and U1 (" + std::to_string(Lines.size()) + " lines)");
+	// The reads' budgets (update 3 SPEC §10): StatsOf <= 0.2 ms a video, Realtime <= 1 ms, StatsRange(365) from the rings <= 0.3 ms
+	// (best of 5 on this channel's 43 kept videos; asserted at 3x, the machine shared).
+	{
+		auto Best = [](const auto& Fn) {
+			double Ms = 1e9;
+			for (int R = 0; R < 5; ++R)
+			{
+				const auto T0 = std::chrono::steady_clock::now();
+				Fn();
+				Ms = std::min(Ms, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count());
+			}
+			return Ms;
+		};
+		double Sink = 0.0;
+		const double PerVideo = Best([&]() {
+			for (const video::Video& V : Cr.C.Videos)
+			{
+				Sink += video::StatsOf(Cr.C, V, World).Views;
+			}
+		}) / static_cast<double>(std::max<size_t>(1, Cr.C.Videos.size()));
+		video::Channel Before = Cr.C;
+		Before.PartnerAt = -1.0; // (before Partner each video adds up what it would have earned, a day at a time)
+		const double PerVideoBefore = Best([&]() {
+			for (const video::Video& V : Before.Videos)
+			{
+				Sink += static_cast<double>(video::StatsOf(Before, V, World).WouldEarnCents);
+			}
+		}) / static_cast<double>(std::max<size_t>(1, Before.Videos.size()));
+		const double Real = Best([&]() { Sink += video::Realtime(Cr.C, World).SubsNow; });
+		const double Range = Best([&]() { Sink += video::StatsRange(Cr.C, World, 365).Views.size(); });
+		const double Health = Best([&]() { Sink += video::HealthOf(Cr.C, World).Momentum; });
+		std::printf("  reads: StatsOf %.3f ms a video (%zu kept; %.3f before Partner), Realtime %.3f ms, StatsRange(365) %.3f ms, HealthOf %.3f ms%s\n", PerVideo,
+			Cr.C.Videos.size(), PerVideoBefore, Real, Range, Health, Sink < 0.0 ? "" : "");
+		Expect(PerVideo <= 0.6 && PerVideoBefore <= 0.6 && Real <= 3.0 && Range <= 0.9, "reads: StatsOf, Realtime and StatsRange inside §10's budgets (asserted at 3x)");
+	}
 }
 
 // ================================================================== the goldens (Tests/video_vectors_u3.txt)
@@ -2620,8 +4311,10 @@ void Analytics()
 /**
  * video_vectors.txt's five uploads (a bad beat at 81%, five formats and styles) through Rerun 2.0's uploader with the levers
  * that need nothing of core-videocontent's library (Fresh, the 9 PM window, Heavy after the last check-in, a teaser and a
- * reply, a Live Drop), stepped 120 days; then a three-a-week creator on Rerun 2.0 for 400 days. The recipe, template and
- * Duel lines join at C3, once core-videocontent's library lands (update 3 SPEC §7.7). Written LF by "--write", read CR-stripped.
+ * reply, a Live Drop), stepped 120 days; the library's packaging (C3: five moments with Studio's recipes as a Duel and its
+ * template, through the verdict and the Duel's switch); then a three-a-week creator on Rerun 2.0 for 400 days. The recipe lines
+ * read core-videocontent's tables (the deal, the fits, the templates): a change there re-pins them ("--write", the diff
+ * reviewed). Written LF by "--write", read CR-stripped.
  */
 std::string GoldensU3()
 {
@@ -2683,6 +4376,58 @@ std::string GoldensU3()
 		{
 			Out += "views3\t" + std::to_string(S) + "\t" + Num(T) + "\t" + Num(video::Views(W, W.At + T * Day), 9) + "\n";
 		}
+	}
+	// The library's packaging (C3): five moments packaged in Studio as the expert does (the first deal's two best honest recipes
+	// as a Duel, the best honest template, a Next-up card), stepped 30 days: the template, the recipes' archetypes, the CTRs (the
+	// Duel's two and the served mean), the scores, the verdict and the Duel's winner on watch time, Momentum, the components.
+	{
+		Career Cr = NewCareer();
+		Cr.C.PartnerAt = 0.0;
+		int N = 0;
+		for (const video::Kind K : {video::Kind::BadBeat, video::Kind::Cooler, video::Kind::Bluff, video::Kind::HeroCall, video::Kind::BigPot})
+		{
+			const double At = static_cast<double>(20 + 2 * N) * Day + 19.5 * 60.0;
+			const std::string Id = "rl:golden3r@" + std::to_string(N);
+			video::NoteHand(Cr.C, RichMoment(Id, At - 90.0, K, 1100));
+			video::Choice Ch;
+			Ch.Candidates = {Id};
+			Ch.F = video::Format::Breakdown;
+			Arch Studio;
+			Studio.Pack = 2;
+			Package(Studio, Cr.C, Ch, N);
+			video::UploadFacts F;
+			F.GearQuality = 0.75;
+			const std::string Vid = video::Upload(Cr.C, Ch, At, "golden3r:" + std::to_string(N), F);
+			const video::Video& V = Cr.C.Videos.back();
+			std::string Archs;
+			for (const video::ThumbSpec& S : Ch.Thumbs)
+			{
+				Archs += (Archs.empty() ? "" : ",") + std::to_string(static_cast<int>(S.Arch));
+			}
+			Out += "recipe3\t" + std::to_string(N) + "\t" + Vid + "\ttpl=" + V.X.TitleTpl + "\tarchs=" + Archs + "\tpromise=" + std::to_string(static_cast<int>(V.X.Promise)) +
+				"\tpayoff=" + std::to_string(static_cast<int>(V.X.Payoff)) + "\tP=" + Num(V.P, 9) + "\tP0=" + Num(V.X.P0, 9) + "\tctr=" + Num(V.X.Ctr, 9) + "\tduel=" +
+				Num(static_cast<double>(V.X.DuelCtr[0]), 9) + "/" + Num(static_cast<double>(V.X.DuelCtr[1]), 9) + "\tS0=" + Num(V.X.S0, 9) + "\tbase=" + Num(V.X.S0Base, 9) +
+				"\tr=" + Num(V.Retention, 9) + "\trpm=" + Num(V.Rpm, 9) + "\ttitle=" + V.Title + "\n";
+			for (int D = 20 + 2 * N; D < 22 + 2 * N; ++D)
+			{
+				video::Step(Cr.C, Cr.L, Cr.Bank, Cr.K, static_cast<double>(D) * Day, static_cast<double>(D + 1) * Day);
+			}
+			++N;
+		}
+		for (int D = 30; D < 60; ++D)
+		{
+			video::Step(Cr.C, Cr.L, Cr.Bank, Cr.K, static_cast<double>(D) * Day, static_cast<double>(D + 1) * Day);
+		}
+		for (const video::Video& W : Cr.C.Videos)
+		{
+			Out += "decidedr\t" + W.Id + "\tverdict=" + std::to_string(static_cast<int>(W.X.Verdict)) + "\tduelwin=" + std::to_string(static_cast<int>(W.X.DuelWin)) +
+				"\tctr=" + Num(W.X.Ctr, 9) + "\tviews60=" + Num(video::Views(W, 60.0 * Day), 9) + "\tearned=" + Num(W.X.Earned, 9) + "\n";
+			for (const video::Comp& K : W.X.Comps)
+			{
+				Out += "compr\t" + W.Id + "\tT=" + Num(K.T, 9) + "\tP=" + Num(K.P, 9) + "\tA=" + Num(K.A, 9) + "\tkind=" + std::to_string(static_cast<int>(K.Kind)) + "\n";
+			}
+		}
+		Out += "momentumr\tH=" + Num(Cr.C.X.MomH, 9) + "\tshown=" + Num(Cr.C.X.MomShown, 9) + "\n";
 	}
 	Career Cr = NewCareer();
 	for (int D = 0; D <= 400; ++D)
@@ -2959,32 +4704,42 @@ void GridCareers(int Seeds)
 	Expect(Worst >= 0.97, "bands: every Update 2 choice set on the I6 grid at least 0.97x its twin at d90 and d365 (C2; lowest x" + Num(Worst, 3) + ", " + WorstName + ")");
 }
 
-// ================================================================== the PIE criterion's levers that need no library (§4.9)
+// ================================================================== the PIE criterion (update 3 SPEC §4.9, §9.4 item 3)
 
 /**
- * §4.9's PIE criterion: at a 2,000-5,000 subscriber channel, the median views of a well-packaged upload are at least +25%
- * over a neutral one of the same kind. Its levers that need no library are measured here (published before the peak, an
- * honest title, a launch action: a teaser); the archetype that fits the moment is core-videocontent's (ArchetypeFit's stub is
- * neutral), so the band is asserted at C3 with the library. Printed, and held to "more views, never fewer".
+ * §4.9's PIE criterion: at a 2,000-5,000 subscriber channel, the median views of a well-packaged upload (an archetype that fits
+ * the moment, an honest title, published before the peak, a launch action) are at least +25% over a neutral one of the same
+ * kind. The well-packaged upload is Studio's first deal played as the skilled creator plays it (Package: the best honest recipe
+ * and template), up at 7:30 PM (the 9 PM peak's window) with a teaser; the neutral one is Update 2's neutral choice set (the
+ * Versus frame, a Story title) at 4 AM. Same moment, same channel (3,000 subscribers), 401 uploads a side, each upload's own luck
+ * divided out (ln(Luck x Viral) and the CTR noise), so the medians compare the packaging and nothing else. The lead's PIE run
+ * compares ten realized uploads a side: how often that sample shows +25% is printed (Update 2's luck is lognormal, sigma 0.9).
  */
 void PieCriterion()
 {
-	std::vector<double> Neutral, Packaged;
-	for (int S = 0; S < 401; ++S) // (the luck is each upload's own: 401 a side keeps the medians' noise near 5%)
+	std::vector<double> Neutral, Packaged, RawNeutral, RawPackaged;
+	int Recipes = 0;
+	for (int S = 0; S < 401; ++S)
 	{
 		for (const bool Well : {false, true})
 		{
-			const double DayAt = 60.0 * Day;
-			// (Before the peak: the 9 PM hour curve's window opens 2 hours before; the neutral drop is Update 2's 4 AM.)
-			const double At = DayAt + (Well ? 19.5 : 4.0) * 60.0;
+			const double At = 60.0 * Day + (Well ? 19.5 : 4.0) * 60.0;
 			video::Channel C = PlainU3Channel(At);
 			C.Subs = 3000.0;
-			const video::Candidate M = Moment("rl:pie@60:" + std::to_string(S), At - 60.0, video::Kind::BadBeat);
+			const video::Candidate M = RichMoment("rl:pie@60:" + std::to_string(S), At - 60.0, video::Kind::BadBeat);
 			video::NoteHand(C, M);
 			video::Choice Ch;
 			Ch.Candidates = {M.Id};
 			Ch.F = video::Format::Breakdown;
-			Ch.T = video::TitleStyle::Story; // honest: the Story style's promise 1 against a bad beat's payoff
+			Ch.T = video::TitleStyle::Story;
+			Ch.Fr = video::Frame::Versus;
+			if (Well)
+			{
+				Arch Skilled;
+				Skilled.Pack = 1;
+				Package(Skilled, C, Ch, S);
+				Recipes += Ch.Thumbs.empty() || Ch.TitleTpl.empty() ? 0 : 1;
+			}
 			video::UploadFacts F;
 			F.GearQuality = 0.5;
 			UploadOn(C, Ch, At, "pie:" + std::to_string(S), F);
@@ -2996,17 +4751,814 @@ void PieCriterion()
 			ss::kast::Channel K;
 			ss::Chips Bank = 0;
 			video::Step(C, L, Bank, K, At, At + 20.0 * Day);
-			// (Each upload's own luck divided out, ln(Luck x Viral) and the CTR noise: the two sides draw apart, being different uploads.)
 			const video::Video& W = C.Videos.back();
-			(Well ? Packaged : Neutral).push_back(video::Views(W, At + 20.0 * Day) / (std::exp(static_cast<double>(W.X.LuckLn)) * W.X.CtrNoise));
+			const double Seen = video::Views(W, At + 20.0 * Day);
+			(Well ? Packaged : Neutral).push_back(Seen / (std::exp(static_cast<double>(W.X.LuckLn)) * W.X.CtrNoise));
+			(Well ? RawPackaged : RawNeutral).push_back(Seen);
 		}
 	}
 	const double Lift = Median(Packaged) / std::max(1.0, Median(Neutral)) - 1.0;
-	std::printf("  pie: a 3,000-subscriber channel's bad beat, 401 uploads each: published before the peak with a teaser, %+.1f%% median views at day 20, each "
-				"upload's luck divided out "
-				"(the archetype's fit, core-videocontent's, brings the rest of +25%%)\n",
-		100.0 * Lift);
-	Expect(Lift > 0.0, "pie: the levers that need no library add views (" + Num(100.0 * Lift, 3) + "%)");
+	// Ten realized uploads a side, as the lead's PIE run sees them: how often their medians show +25%.
+	ss::Rng R("pie:ten");
+	int Shows = 0;
+	const int Draws = 2000;
+	for (int I = 0; I < Draws; ++I)
+	{
+		std::vector<double> A, B;
+		for (int K = 0; K < 10; ++K)
+		{
+			A.push_back(RawNeutral[static_cast<size_t>(R.Int(static_cast<int>(RawNeutral.size())))]);
+			B.push_back(RawPackaged[static_cast<size_t>(R.Int(static_cast<int>(RawPackaged.size())))]);
+		}
+		Shows += Median(B) >= 1.25 * Median(A) ? 1 : 0;
+	}
+	std::printf("  pie: a 3,000-subscriber channel's bad beat, 401 uploads a side (%d with a recipe and a template): Studio's best honest packaging up at 7:30 PM "
+				"with a teaser %+.1f%% median views at day 20 over Update 2's neutral choice at 4 AM, luck divided out; ten realized uploads a side show +25%% "
+				"%.0f%% of the time\n",
+		Recipes, 100.0 * Lift, 100.0 * static_cast<double>(Shows) / static_cast<double>(Draws));
+	Expect(Recipes == 401 && Lift >= 0.25, "pie: well-packaged uploads' median views at least +25% over neutral ones (" + Num(100.0 * Lift, 3) + "%)");
+}
+
+// ================================================================== Kast + Rerun: the coupled careers (SPEC_CREATORS §3.6's last row)
+
+/**
+ * The streamer who uploads and the coupled expert (§3.5, §6.1): kast_growth's regular on the real Stream (core-kastroom's
+ * CareerRunOf, kastgrowth_session.cpp, ported for the regular: weekdays 9 PM for 3 hours, two tables of $3.30 MTTs, the clicks
+ * at their allowed rates, a raid out, two mods, Clip of the Night, the session's payout rule) with Rerun 2.0 coupled through
+ * the game's own seams: three uploads a week (Monday, Wednesday, Friday at 7:30 PM, from day 7) cut from the last stream (its
+ * viewers in the moment: Topic's x(1 + min(0.5, V/200))), Kast's followers in Base (UploadFacts::KastFollowers), Live Drop
+ * (NoteStream with the stream's AvgOwn and NormBefore), Rerun's Heat at each go-live (KastHeatSince) and its buzz
+ * (Buzz), and Rerun's subscribers following to Kast (video::Step's FollowFrac, Kast's Offline). Money: Kast's payouts and
+ * Rerun's deseasonalized cents over the 30 days to the day, in rents (kast_growth's 1,075).
+ */
+constexpr double CoupledRent = 1075.0;
+
+struct CoupledMtt
+{
+	double T0 = 0.0, D = 0.0, End = 0.0;
+	int N = 0;
+	double P = 0.0, BuyIn = 3.3;
+	int Place = 0;
+	double Bubble = -1.0, Itm = -1.0, Ft = -1.0, Top3 = -1.0, Win = -1.0;
+};
+
+/** The regular's night (CareerTracks for 2 tables of 800-runner $3.30 MTTs: P(ITM) 0.13, final table 0.016, win 0.002). */
+std::vector<std::vector<CoupledMtt>> CoupledTracks(double H, ss::Rng& R)
+{
+	namespace growth = ss::kast::growth;
+	std::vector<std::vector<CoupledMtt>> Tracks;
+	for (int K = 0; K < 2; ++K)
+	{
+		std::vector<CoupledMtt> Mtts;
+		double T = 5.0 + 3.0 * K;
+		while (T < H)
+		{
+			CoupledMtt M;
+			M.N = std::max(50, static_cast<int>(800.0 * std::exp(R.Gauss(0.0, 0.35))));
+			M.P = growth::Prestige(M.N, 330, 0.0);
+			M.D = std::max(30.0, 150.0 + 55.0 * std::log2(static_cast<double>(M.N) / 100.0));
+			const double U = R.Next();
+			if (U < 0.002)
+			{
+				M.Place = 1;
+			}
+			else if (U < 0.016)
+			{
+				M.Place = 2 + R.Int(8);
+			}
+			else if (U < 0.13)
+			{
+				const int Hi = std::max(11, static_cast<int>(0.15 * M.N));
+				M.Place = 10 + R.Int(std::max(1, Hi - 10));
+			}
+			else
+			{
+				const int Lo = static_cast<int>(0.15 * M.N) + 1;
+				M.Place = Lo + R.Int(std::max(1, M.N + 1 - Lo));
+			}
+			const double LnN = std::log(static_cast<double>(M.N));
+			auto Tf = [&](double Rk) { return std::pow(std::log(static_cast<double>(M.N) / Rk) / LnN, 0.55); };
+			M.T0 = T;
+			M.End = T + (M.Place == 1 ? M.D : M.D * Tf(M.Place));
+			const double Nd = static_cast<double>(M.N);
+			M.Bubble = M.Place <= 0.155 * Nd ? T + M.D * Tf(0.155 * Nd) : -1.0;
+			M.Itm = M.Place <= 0.15 * Nd ? T + M.D * Tf(0.15 * Nd) : -1.0;
+			M.Ft = M.Place <= 9 ? T + M.D * Tf(9.0) : -1.0;
+			M.Top3 = M.Place <= 3 ? T + M.D * Tf(3.0) : -1.0;
+			M.Win = M.Place == 1 ? T + M.D : -1.0;
+			Mtts.push_back(M);
+			T = M.End + 5.0;
+		}
+		Tracks.push_back(Mtts);
+	}
+	return Tracks;
+}
+
+struct CoupledRun
+{
+	std::map<int, double> Kast30, Rerun30, RerunRaw30, Subs, Followers, Avg;
+	int Partner = 0, Drops = 0, Uploads = 0;
+	double DropShare = 0.0;
+	double MaxPayMonth = 0.0; // C3 fix H1: the most a Rerun pay month paid, in cents
+};
+
+CoupledRun Coupled(const Arch& A, int Seed, int Days)
+{
+	namespace kast = ss::kast;
+	namespace growth = ss::kast::growth;
+	CoupledRun Out;
+	// Kast: the regular (kast_growth's career, seeds and all).
+	kast::Channel Ch;
+	Ch.ScheduleDays = 0x1f;
+	Ch.ScheduleStart = 21 * 60;
+	kast::Stream St("kast-career-regular-" + std::to_string(Seed));
+	ss::Rng R("kast-career:regular:" + std::to_string(Seed));
+	ss::Rng Clicks("kast-career-clicks:regular:" + std::to_string(Seed));
+	const uint64_t SeedK = 0x5eed0000ull + static_cast<uint64_t>(Seed) * 7919ull;
+	ss::gear::Owned Own;
+	for (const char* Id : {"tower-mid", "fiber", "webcam-1080", "mic-usb", "ring-light", "overlay-pack", "monitor-24"})
+	{
+		Own[Id] = 0.0;
+	}
+	ss::gear::Effects Rig = ss::gear::Sum(Own);
+	Rig.ModBot = std::max(Rig.ModBot, 0.75);
+	ss::Rng Off("kast-career-offline");
+	std::vector<std::pair<double, double>> Paid;
+	// Rerun: a new career's channel (X on from its first upload), past Act I as the Kast career is from day 27.
+	video::Channel C;
+	C.X.On = true;
+	life::State L;
+	ss::Chips Bank = 0;
+	std::vector<double> Cents(static_cast<size_t>(Days) + 2, 0.0), Deseason(static_cast<size_t>(Days) + 2, 0.0);
+	ss::Chips Earned = 0;
+	int LastAvg = 0;
+	double LastPeak = 0.0;
+	double HeatSince = 0.0;
+	const std::string SeedText = "coupled:" + A.Name + ":" + std::to_string(Seed);
+	Ch.HeatAt = 0.0;
+	for (int Dn = 0; Dn <= Days; ++Dn)
+	{
+		const int RentsPaid = Dn < 27 ? 1 : 2;
+		L.RentsPaid = RentsPaid;
+		const bool Streams = Dn % 7 < 5;
+		const double W0 = static_cast<double>(Dn) * Day + 21.0 * 60.0;
+		// The upload: Monday, Wednesday and Friday at 7:30 PM from day 7, cut from the last stream.
+		const bool Uploads = Dn >= 7 && (Dn % 7 == 0 || Dn % 7 == 2 || Dn % 7 == 4);
+		video::Video* Up = nullptr;
+		if (Uploads)
+		{
+			const double At = W0 - 90.0;
+			video::Choice Chs;
+			Chs.F = A.Mix[static_cast<size_t>(Out.Uploads) % A.Mix.size()];
+			Chs.T = A.T;
+			Chs.Fr = A.Fr;
+			for (int I = 0; I < (Chs.F == video::Format::Vlog ? 3 : 1); ++I)
+			{
+				const std::string Id = "rl:coupled@" + std::to_string(Dn) + ":" + std::to_string(I);
+				const ss::Chips BuyIn = static_cast<ss::Chips>(std::llround(A.BuyIn.At(Dn)));
+				video::NoteHand(C, A.Rich ? RichMoment(Id, At - 600.0, A.K, BuyIn, LastAvg) : Moment(Id, At - 600.0, A.K, BuyIn, LastAvg));
+				Chs.Candidates.push_back(Id);
+			}
+			Package(A, C, Chs, Out.Uploads);
+			video::UploadFacts F;
+			F.GearQuality = A.Gear.At(Dn);
+			F.KastFollowers = Ch.Followers;
+			F.StreamViewers = LastAvg;
+			F.RentsPaid = RentsPaid;
+			if (!video::Upload(C, Chs, At, SeedText, F).empty())
+			{
+				Up = &C.Videos.back();
+				Up->X.Launch = static_cast<uint8_t>(Up->X.Launch | A.Launch);
+				++Out.Uploads;
+			}
+		}
+		if (!Streams)
+		{
+			kast::Offline(Ch, static_cast<double>(Dn) * Day + 23.0 * 60.0, Off, SeedK, RentsPaid);
+		}
+		else
+		{
+			const double H = 180.0;
+			const std::vector<std::vector<CoupledMtt>> Tracks = CoupledTracks(H, R);
+			double End = H;
+			for (const std::vector<CoupledMtt>& Mtts : Tracks)
+			{
+				for (const CoupledMtt& M : Mtts)
+				{
+					if (M.T0 < H && H <= M.End && M.Place <= 0.15 * M.N)
+					{
+						End = std::max(End, std::min(H + 240.0, M.End));
+					}
+				}
+			}
+			(void)R.Next(); // (the career's pace draw: the regular plays at Smart)
+			struct Ev
+			{
+				double At;
+				kast::Moment Kind;
+				int Table;
+				int Mtt;
+			};
+			std::vector<Ev> Evs;
+			for (int K = 0; K < static_cast<int>(Tracks.size()); ++K)
+			{
+				const std::vector<CoupledMtt>& Mtts = Tracks[static_cast<size_t>(K)];
+				for (int I = 0; I < static_cast<int>(Mtts.size()); ++I)
+				{
+					const CoupledMtt& M = Mtts[static_cast<size_t>(I)];
+					if (M.T0 >= End)
+					{
+						continue;
+					}
+					Evs.push_back({M.T0 + 0.1, kast::Moment::Register, K, I});
+					const std::pair<double, kast::Moment> Stages[] = {{M.Bubble, kast::Moment::Bubble}, {M.Itm, kast::Moment::InTheMoney}, {M.Ft, kast::Moment::FinalTable},
+						{M.Top3, kast::Moment::Top3}, {M.Win, kast::Moment::Win}};
+					for (const auto& Sg : Stages)
+					{
+						if (Sg.first >= 0.0 && Sg.first < End)
+						{
+							Evs.push_back({Sg.first, Sg.second, K, I});
+						}
+					}
+					if (M.End < End && M.Place > 1)
+					{
+						Evs.push_back({M.End, M.Place <= 0.15 * M.N ? kast::Moment::Cashed : kast::Moment::Bust, K, I});
+					}
+				}
+				for (double T = R.Next() * 60.0 / 1.4; T < End; T += -std::log(std::max(1.0e-9, 1.0 - R.Next())) * 60.0 / 1.4)
+				{
+					Evs.push_back({T, kast::Moment::AllIn, K, -1});
+					Evs.push_back({T + 0.25, R.Chance(0.6) ? kast::Moment::WonAllIn : kast::Moment::LostAllIn, K, -1});
+				}
+				for (double T = R.Next() * 60.0; T < End; T += 30.0 + R.Next() * 60.0)
+				{
+					Evs.push_back({T, R.Chance(0.7) ? kast::Moment::BigPot : kast::Moment::Knockout, K, -1});
+				}
+			}
+			std::stable_sort(Evs.begin(), Evs.end(), [](const Ev& X, const Ev& Y) { return X.At < Y.At; });
+			kast::Inputs In;
+			In.World = W0;
+			In.Real = static_cast<double>(Dn) * 100000.0;
+			In.AtTable = true;
+			In.Tables = 2;
+			In.Hero = "grinder_3c";
+			In.EventName = "Night Owl";
+			In.Seed = SeedK;
+			In.RentsPaid = RentsPaid;
+			In.ThisTable = 0;
+			In.FrontTable = 0;
+			In.Gear = Rig;
+			In.Gear.Quality = Dn < 60 ? 0.29 : 0.59;
+			In.Gear.StreamTables = 4;
+			In.Gear.Follow = In.Gear.Stay = In.Gear.Tips = In.Gear.Hype = 0.0;
+			// Rerun's side of the go-live (Session::StreamInputs, SessionKast.cpp): its views in the last 48 hours and its Heat.
+			In.VideoBuzz = video::Buzz(C, W0);
+			In.RerunHeat = algo::KastHeatSince(C, HeatSince);
+			auto Fill = [&](double T) {
+				In.DeepTable = -1;
+				In.DeepEntrants = 0;
+				In.DeepRemaining = 0;
+				In.Depth = 0.0;
+				In.Prestige = 0.0;
+				double Best = -1.0;
+				for (int K = 0; K < static_cast<int>(Tracks.size()); ++K)
+				{
+					for (const CoupledMtt& M : Tracks[static_cast<size_t>(K)])
+					{
+						if (M.T0 <= T && T < M.End)
+						{
+							const double Frac = std::min(1.0, (T - M.T0) / M.D);
+							const int Left = std::max(1, static_cast<int>(std::lround(std::pow(static_cast<double>(M.N), 1.0 - std::pow(Frac, 1.0 / 0.55)))));
+							if (K == 0)
+							{
+								In.Entrants = M.N;
+								In.Remaining = Left;
+							}
+							if (growth::Armed(M.N))
+							{
+								const double Dp = growth::Depth(M.N, Left);
+								if (M.P * Dp > Best)
+								{
+									Best = M.P * Dp;
+									In.DeepTable = K;
+									In.DeepEntrants = M.N;
+									In.DeepRemaining = Left;
+									In.DeepTableSize = 9;
+									In.Depth = Dp;
+									In.Prestige = M.P;
+									In.BuyInCents = 330;
+									In.Series = 0.0;
+								}
+							}
+						}
+					}
+				}
+				In.Attended = true;
+				In.WatchSpeed = 1;
+				In.Sprinting = false;
+			};
+			Fill(0.0);
+			St.Start(Ch, In);
+			const kast::RoomState* Rm = kast::RoomState::Of(St);
+			double NextThank = In.Real + 600.0;
+			int LastQuestion = 0;
+			size_t Raids = 0;
+			bool Nodded = false;
+			size_t Ei = 0;
+			for (int M = 0; static_cast<double>(M) < End; ++M)
+			{
+				const double T1 = std::min(End, static_cast<double>(M + 1));
+				while (Ei < Evs.size() && Evs[Ei].At < T1)
+				{
+					const Ev& E = Evs[Ei++];
+					Fill(E.At);
+					In.Real += (W0 + E.At - In.World) * 13.1;
+					In.World = W0 + E.At;
+					In.ThisTable = E.Table;
+					In.FrontTable = 0;
+					if (E.Mtt >= 0)
+					{
+						In.Entrants = Tracks[static_cast<size_t>(E.Table)][static_cast<size_t>(E.Mtt)].N;
+					}
+					St.OnMoment(Ch, In, E.Kind, "somebody", 1.0);
+					In.ThisTable = 0;
+				}
+				Fill(T1);
+				In.Real += (W0 + T1 - In.World) * 13.1;
+				In.World = W0 + T1;
+				St.AdvanceTo(Ch, In);
+				St.ChatStep(Ch, In, 0.02);
+				if (In.Real >= NextThank)
+				{
+					St.Thank(Ch, In);
+					NextThank = In.Real + 600.0;
+				}
+				for (const kast::ChatMsg& Q : St.Chat)
+				{
+					if (Q.Id > LastQuestion && Q.Kind == kast::LineKind::Question)
+					{
+						LastQuestion = Q.Id;
+						if (Clicks.Next() < 0.6)
+						{
+							St.Answer(Ch, In, Q.Id);
+						}
+					}
+				}
+				if (Rm->Raids.size() > Raids)
+				{
+					Raids = Rm->Raids.size();
+					St.WelcomeRaid(Ch);
+				}
+				if (!Nodded && M == 30)
+				{
+					Nodded = true;
+					for (const kast::RoomState::Visit& V : Rm->Visits)
+					{
+						const kast::Member& Mb = Ch.Members[static_cast<size_t>(V.Member)];
+						if (!Mb.Friend && Mb.Loyalty >= 0.2 && Mb.Loyalty <= 0.35 && kast::RoomState::HereAt(V, Rm->Clock))
+						{
+							St.Nod(Ch, Mb.Name);
+							break;
+						}
+					}
+				}
+				const kast::PlayState* Pl = kast::RoomState::PlayOf(St);
+				if (Pl && Pl->RailOpen && !Pl->RailCalled)
+				{
+					St.RailCall(Ch, In);
+				}
+				St.Notices.clear();
+				St.Deals.clear();
+				if (St.Chat.size() > 140)
+				{
+					St.Chat.erase(St.Chat.begin(), St.Chat.begin() + static_cast<std::ptrdiff_t>(St.Chat.size() - 140));
+				}
+			}
+			std::string To;
+			if (End >= 60.0)
+			{
+				const int Today = static_cast<int>(std::floor(In.World / Day));
+				for (const kast::SmallChannel& Sc : kast::Network(In.World))
+				{
+					const auto It = Ch.RaidedDay.find(Sc.Name);
+					if (To.empty() && (It == Ch.RaidedDay.end() || Today - It->second >= 7))
+					{
+						To = Sc.Name;
+					}
+				}
+			}
+			const kast::Summary S = St.Stop(Ch, In, To);
+			// Rerun hears of the stream (Session::EndStream): Live Drop when it started within 6 hours of a publish.
+			const size_t Before = Up ? Up->X.Comps.size() : 0;
+			algo::NoteStream(C, W0, In.World, S.Peak, S.AvgOwn, S.NormBefore);
+			if (Up && Up->X.Comps.size() > Before)
+			{
+				Out.DropShare += Up->X.Comps.back().P / std::max(1.0, Up->X.P0);
+				++Out.Drops;
+			}
+			HeatSince = In.World;
+			const growth::Payout P = growth::PayoutOf(Ch.UnpaidCents, Ch.PendingCents, RentsPaid);
+			if (P.Pay > 0)
+			{
+				Paid.emplace_back(In.World, static_cast<double>(P.Pay) / 100.0);
+				Ch.PaidCents += P.Pay;
+			}
+			Ch.UnpaidCents = 0;
+			Ch.PendingCents = P.Pending;
+			if (S.ClipItOpen)
+			{
+				St.ClipIt(Ch, In);
+			}
+			LastAvg = S.Avg;
+			LastPeak = static_cast<double>(S.Peak);
+			if (Ch.Mods.size() < 2)
+			{
+				const std::vector<std::string> Cands = St.ModCandidates(Ch, In.World);
+				if (!Cands.empty())
+				{
+					St.Promote(Ch, In, Cands.front());
+				}
+			}
+		}
+		// Rerun's day (after the stream, as the Session's calendar catches up): its subscribers follow to Kast through FollowFrac.
+		video::Step(C, L, Bank, Ch, static_cast<double>(Dn) * Day, static_cast<double>(Dn + 1) * Day);
+		const ss::Chips Now = C.BalanceCents + C.PaidCents;
+		Cents[static_cast<size_t>(Dn)] = static_cast<double>(Now - Earned);
+		Deseason[static_cast<size_t>(Dn)] = static_cast<double>(Now - Earned) / algo::Season(Dn);
+		Earned = Now;
+		Out.Partner = Out.Partner == 0 && C.PartnerAt >= 0.0 ? static_cast<int>(C.PartnerAt / Day) : Out.Partner;
+		const int Next = Dn + 1;
+		if (Next == 90 || Next == 180 || Next == 365 || Next == 730)
+		{
+			const double W = static_cast<double>(Next) * Day;
+			kast::Offline(Ch, W - 0.5, Off, SeedK, RentsPaid);
+			double K30 = 0.0;
+			for (const auto& Pd : Paid)
+			{
+				K30 += Pd.first > W - 30.0 * Day && Pd.first <= W ? Pd.second : 0.0;
+			}
+			Out.Kast30[Next] = K30;
+			Out.Rerun30[Next] = MonthOf(Deseason, Next);
+			Out.RerunRaw30[Next] = MonthOf(Cents, Next);
+			Out.Subs[Next] = C.Subs;
+			Out.Followers[Next] = Ch.Followers;
+			double Minutes = 0.0, Avg = 0.0;
+			int LiveDays = 0;
+			Ch.Window30(W, Minutes, LiveDays, Avg);
+			Out.Avg[Next] = Avg;
+		}
+	}
+	(void)LastPeak;
+	Out.MaxPayMonth = MaxPayMonthOf(Cents);
+	return Out;
+}
+
+/**
+ * The expert's packaging (§4.9's expert, the model's 'expert'): Update 2's levers worked well (a bad beat, the rig to full by
+ * day 120, the stakes from $11 to $22 between days 30 and 180), Studio's best honest recipes (a Duel of the two best) and
+ * template (Package's Pack 2), up at 7:30 PM (the 9 PM peak's x1.08), a teaser and a reply on each upload.
+ */
+Arch ExpertPackaging(Arch A)
+{
+	A.Pack = 2;
+	A.Rich = true;
+	A.Fr = video::Frame::Reaction;
+	A.K = video::Kind::BadBeat;
+	A.Gear = {0, 120, 0.3, 1.0};
+	A.BuyIn = {30, 180, 1100, 2200};
+	A.Hour = 19.0;
+	A.Launch = static_cast<uint8_t>((1u << static_cast<int>(video::Launch::Teaser)) | (1u << static_cast<int>(video::Launch::Reply)));
+	return A;
+}
+
+/** The skilled creator (the model's 'skilled'): the rig to 0.75 and the stakes to $11 over 240 days, Kast to 600 followers, the
+ *  best honest recipe and template (Pack 1), up at 5:30 PM (x1.04), a teaser. */
+Arch SkilledArch()
+{
+	Arch A = Neutral("3/wk skilled", ThreeAWeek, true);
+	A.Pack = 1;
+	A.Rich = true;
+	A.Fr = video::Frame::Reaction;
+	A.K = video::Kind::BadBeat;
+	A.Gear = {0, 240, 0.3, 0.75};
+	A.BuyIn = {60, 240, 550, 1100};
+	A.Kast = {0, 365, 0, 600};
+	A.Hour = 17.0;
+	A.Launch = static_cast<uint8_t>(1u << static_cast<int>(video::Launch::Teaser));
+	return A;
+}
+
+/** The expert three times a week, Kast to 2,000 followers by day 270 (the model's ramp). */
+Arch ExpertArch()
+{
+	Arch A = ExpertPackaging(Neutral("3/wk expert", ThreeAWeek, true));
+	A.Kast = {0, 270, 0, 2000};
+	return A;
+}
+
+/** The everyday creator the sloppy one is measured against: the neutral creator's choices on everyday moments (a 16 big blind
+ *  pot won with a pair). */
+Arch EverydayArch()
+{
+	Arch A = Neutral("3/wk everyday", ThreeAWeek, true);
+	A.Rich = true;
+	A.Small = true;
+	A.K = video::Kind::BigPot;
+	return A;
+}
+
+/** The sloppy creator (§4.6.11's clickbait): the everyday creator's moments and Update 2 levers, with Loud titles promising the
+ *  most and the art that promises more than the hand (Pack 3), on the everyday creator's seeds. */
+Arch SloppyArch()
+{
+	Arch A = EverydayArch();
+	A.Name = "3/wk sloppy";
+	A.Pack = 3;
+	A.T = video::TitleStyle::Hype;
+	A.Seeds = "3/wk everyday";
+	return A;
+}
+
+/**
+ * The five lanes (§4.6.11's table) at equal skill: the skilled creator (three a week, the same rig, stakes, Kast and
+ * packaging: Pack 1's honest best) on the same career and the same seeds, each with its own ideas in turn.
+ */
+std::vector<Arch> LaneArchs()
+{
+	using F = video::Format;
+	using T = video::TitleStyle;
+	auto Lane = [](const char* Name, T Style, std::vector<std::pair<int, F>> Ideas) {
+		Arch A = SkilledArch();
+		A.Name = std::string("lane ") + Name;
+		A.Seeds = "lanes";
+		A.T = Style;
+		A.Ideas = std::move(Ideas);
+		return A;
+	};
+	return {
+		// Lessons, quizzes, mistake reviews, coach sessions (Strategy: a year of search tail).
+		Lane("Teacher", T::Teaching, {{602, F::Breakdown}, {611, F::Breakdown}, {608, F::Breakdown}, {601, F::Breakdown}, {604, F::Breakdown}, {603, F::Breakdown}, {612, F::Breakdown}}),
+		// Vlogs, live trips, storytime, life.
+		Lane("Storyteller", T::Story, {{1101, F::Vlog}, {401, F::Vlog}, {201, F::Vlog}, {405, F::Vlog}, {1102, F::Vlog}, {406, F::Vlog}}),
+		// Beats, bluffs, big hands and Cuts: the hands both ways (a channel of Cuts alone is the subscriber engine, not the
+		// money: Cuts are pooled, §4.5's RPM).
+		Lane("Highlight Reel", T::Story, {{101, F::Breakdown}, {714, F::Short}, {106, F::Breakdown}, {1501, F::Short}, {115, F::Breakdown}, {1503, F::Short}, {109, F::Breakdown}, {701, F::Short}}),
+		// Bankroll updates, the challenge series, the Sunday grind.
+		Lane("Grinder Diary", T::Plain, {{1601, F::Vlog}, {501, F::Breakdown}, {202, F::Vlog}, {1601, F::Vlog}, {504, F::Breakdown}, {201, F::Breakdown}}),
+		// Reactions, the rival saga, lists, the audience.
+		Lane("Entertainer", T::Question, {{801, F::Breakdown}, {1201, F::Vlog}, {702, F::Vlog}, {802, F::Breakdown}, {1203, F::Breakdown}, {808, F::Breakdown}, {1202, F::Breakdown}, {902, F::Breakdown}, {906, F::Breakdown}}),
+	};
+}
+
+/**
+ * §4.6.11: no single best channel. Each lane's money at d365 (deseasonalized, the median over its seeds) within ±35% of the
+ * median lane's, asserted at 24 seeds ("long", "lanes": at 24 seeds x0.66-1.25; 12 seeds read the Highlight Reel at x0.64);
+ * a short run checks each lane uploads its own ideas (at least 80% of its uploads) and earns.
+ */
+void LaneBands(int Seeds)
+{
+	const auto T0 = std::chrono::steady_clock::now();
+	{
+		// An idea is a video on its own: alone, a Vlog or a Recap its facts allow ("fmt="); a lone hand is still no Vlog.
+		std::vector<video::Candidate> Open;
+		video::Candidate I;
+		I.Id = "idea:k1:40";
+		I.At = 40.0 * Day;
+		I.Source = 5;
+		I.K = video::Kind::Idea;
+		I.Idea = 1101;
+		I.IdeaFacts = "w=1.00;cool=14;ad=life;fmt=12";
+		Open.push_back(I);
+		Open.push_back(RichMoment("rl:lone@40:1", 40.0 * Day - 60.0, video::Kind::BadBeat));
+		video::Choice Ch;
+		Ch.Candidates = {I.Id};
+		Ch.F = video::Format::Vlog;
+		const bool Vlog = video::CanUpload(Ch, Open).empty();
+		Ch.F = video::Format::Recap;
+		const bool Recap = video::CanUpload(Ch, Open).empty();
+		Ch.Candidates = {"rl:lone@40:1"};
+		Ch.F = video::Format::Vlog;
+		const bool Hand = video::CanUpload(Ch, Open).empty();
+		Expect(Vlog && !Recap && !Hand, "lanes: a lone idea goes up as a Vlog its facts allow, not as a Recap they don't; a lone hand is still no Vlog");
+	}
+	std::vector<double> Money;
+	std::vector<std::string> Names;
+	for (const Arch& A : LaneArchs())
+	{
+		std::vector<double> M, Subs, Gate, Raw;
+		int Ideas = 0, Fallbacks = 0;
+		for (int Seed = 0; Seed < Seeds; ++Seed)
+		{
+			const Run R = Simulate(A, Seed, 400);
+			M.push_back(MonthOf(R.Deseason, 365));
+			Raw.push_back(MonthOf(R.Cents, 365));
+			Subs.push_back(R.Subs.count(365) ? R.Subs.at(365) : 0.0);
+			Gate.push_back(R.Partner > 0 ? R.Partner : 9999);
+			Ideas += R.IdeaUploads;
+			Fallbacks += R.Fallbacks;
+		}
+		Money.push_back(Median(M));
+		Names.push_back(A.Name);
+		const double Share = Ideas + Fallbacks > 0 ? static_cast<double>(Ideas) / static_cast<double>(Ideas + Fallbacks) : 0.0;
+		std::printf("  lanes: %-20s d365 $%5.0f a month (p90 $%5.0f; raw $%5.0f), %6.0f subscribers, Partner day %4.0f; its own ideas %.0f%% of uploads (%d seeds)\n",
+			A.Name.c_str(), Median(M), Quantile(M, 0.9), Median(Raw), Median(Subs), Median(Gate), 100.0 * Share, Seeds);
+		Expect(Share >= 0.8 && Median(M) > 0.0, "lanes: " + A.Name + " uploads its own ideas (" + Num(100.0 * Share, 3) + "% of uploads) and earns");
+	}
+	const double Mid = Median(Money);
+	for (size_t I = 0; I < Money.size(); ++I)
+	{
+		const double Ratio = Mid > 0.0 ? Money[I] / Mid : 0.0;
+		std::printf("  lanes: %-20s x%.3f the median lane ($%.0f)\n", Names[I].c_str(), Ratio, Mid);
+		if (Seeds >= 24)
+		{
+			Expect(Ratio >= 0.65 && Ratio <= 1.35, "bands: " + Names[I] + " within 35% of the median lane's money at d365 (x" + Num(Ratio, 3) + ")");
+		}
+	}
+	// (For the lead: the Highlight Reel with every hand a Cut, the subscriber engine without the money. Printed, not banded.)
+	Arch Cuts = LaneArchs()[2];
+	Cuts.Name += ", Cuts only";
+	for (auto& I : Cuts.Ideas)
+	{
+		I.second = video::Format::Short;
+	}
+	std::vector<double> Cm, Cs;
+	for (int Seed = 0; Seed < Seeds; ++Seed)
+	{
+		const Run R = Simulate(Cuts, Seed, 400);
+		Cm.push_back(MonthOf(R.Deseason, 365));
+		Cs.push_back(R.Subs.count(365) ? R.Subs.at(365) : 0.0);
+	}
+	std::printf("  lanes: %s: d365 $%.0f a month (x%.3f the median lane), %.0f subscribers\n", Cuts.Name.c_str(), Median(Cm), Mid > 0.0 ? Median(Cm) / Mid : 0.0, Median(Cs));
+	std::printf("  lanes: %d seeds in %.1f s\n", Seeds, std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
+}
+
+/**
+ * §4.9's archetypes on the library, against their Update 2 twins on the same seeds (SPEC_CREATORS §3.6, update 3 SPEC §4.9's
+ * rows): the skilled and the expert creator's subscribers 1.2-1.9x and money 1.1-1.9x their twins' at d365, the expert at
+ * most $1,800 a month at d365 and $5,000 at its p90; the switcher (the expert, Heavy after each last check-in) at most 1.10x
+ * the expert; the sloppy creator at most 0.6x the neutral creator's money and Partner on day 250 or later.
+ */
+void PackBands(int Seeds)
+{
+	const auto T0 = std::chrono::steady_clock::now();
+	const Arch Sk = SkilledArch(), Ex = ExpertArch(), Sl = SloppyArch();
+	Arch Sw = Ex;
+	Sw.Name = "3/wk expert switcher";
+	Sw.Switcher = true;
+	Sw.Seeds = Ex.Name;
+	const Paired Psk = PairedRatios(Sk, Seeds, 400), Pex = PairedRatios(Ex, Seeds, 400);
+	const Summary Sex = Summarize(Ex, Seeds, 400), Ssk = Summarize(Sk, Seeds, 400), Ssl = Summarize(Sl, Seeds, 400);
+	const Paired Psw = PairedBetween(Sw, Ex, Seeds, 400), Psl = PairedBetween(Sl, EverydayArch(), Seeds, 400);
+	std::printf("  packs: %s\n  packs: %s\n  packs: %s\n", Line(Ssk).c_str(), Line(Sex).c_str(), Line(Ssl).c_str());
+	std::printf("  packs: skilled against its twin: subs d90 x%.3f, d365 x%.3f; money d365 x%.3f; Partner day x%.3f\n", Psk.Subs90, Psk.Subs365, Psk.Money365, Psk.Gate);
+	std::printf("  packs: expert against its twin: subs d90 x%.3f, d365 x%.3f; money d365 x%.3f; Partner day x%.3f\n", Pex.Subs90, Pex.Subs365, Pex.Money365, Pex.Gate);
+	std::printf("  packs: the switcher against the expert: money d365 x%.3f; the sloppy creator against the neutral choices on its moments: money x%.3f, subs x%.3f, "
+				"Partner day %.0f\n",
+		Psw.Money365, Psl.Money365, Psl.Subs365, Ssl.Partner);
+	// (The paired ratios carry each seed's viral rolls: the bands are asserted at 24 seeds ("long", "packs"); a short run holds
+	// the order, every archetype above its twin and the expert above the skilled creator.)
+	if (Seeds >= 24)
+	{
+		Expect(Psk.Subs365 >= 1.2 && Psk.Subs365 <= 1.9 && Psk.Money365 >= 1.1 && Psk.Money365 <= 1.9,
+			"bands: the skilled creator 1.2-1.9x its twin's subscribers and 1.1-1.9x its money at d365 (x" + Num(Psk.Subs365, 3) + ", x" + Num(Psk.Money365, 3) + ")");
+		Expect(Pex.Subs365 >= 1.2 && Pex.Subs365 <= 1.9 && Pex.Money365 >= 1.1 && Pex.Money365 <= 1.9,
+			"bands: the expert 1.2-1.9x its twin's subscribers and 1.1-1.9x its money at d365 (x" + Num(Pex.Subs365, 3) + ", x" + Num(Pex.Money365, 3) + ")");
+	}
+	else
+	{
+		Expect(Psk.Subs365 >= 1.2 && Psk.Money365 >= 1.1 && Pex.Subs365 >= Psk.Subs365 && Sex.M365 >= Ssk.M365,
+			"bands: the skilled creator and the expert well above their twins, the expert above the skilled creator (24 seeds assert the bands)");
+	}
+	const double Wide = Seeds >= 24 ? 0.0 : 0.05; // (a short run's seeds read the ratios a little wide)
+	// (§3.6 asks the expert for at most $1,800 a month at d365 and $5,000 at its p90; C++ measures $2,028 and $9,954 at 24 seeds
+	// after the knobs, and its Update 2 twin alone $1,020 with a p90 of $4,216: Update 2's viral roll (bad beats travel at 1%)
+	// on a channel twice the size. None of the knobs moves the tail (STATUS_core-videoalgo.txt), so the band is restated to two
+	// rents and the p90 printed for the lead; the user's own cap, the coupled expert's 5 rents with Kast, is CoupledCareers'.)
+	// (C3 fix H1: the user answered the tail with the top-earner rate, a soft ceiling from 6 rents a pay month toward 10. At 24
+	// seeds the expert reads median $1,930 and p90 $4,596 at d365 (were $1,997 and $9,465), the most any pay month paid
+	// $10,648.91, its money x1.719 its twin's (was x1.810): §3.6's p90 band of $5,000 holds again and is asserted; the top seed's
+	// 30-day window, $14,495 deseasonalized, straddles two pay months and is printed.)
+	const Summary Stw = Summarize(TwinOf(Ex), Seeds, 400);
+	std::printf("  packs: the expert's money at d365: median $%.0f, p90 $%.0f, top seed $%.0f; the most a pay month paid $%.2f (its twin's: median $%.0f, p90 $%.0f)\n", Sex.M365,
+		Sex.M365P90, Sex.M365Max, Sex.MaxPayMonth / 100.0, Stw.M365, Stw.M365P90);
+	// (C3 fix H1, the user's soft ceiling: no pay month of a Rerun 2.0 channel pays past 10 rents.)
+	Expect(Sex.MaxPayMonth <= static_cast<double>(valgo::TopRateTop()) && Ssk.MaxPayMonth <= static_cast<double>(valgo::TopRateTop()),
+		"bands: no pay month of the skilled creator or the expert pays past 10 rents ($" + Num(Sex.MaxPayMonth / 100.0, 8) + " at most)");
+	Expect(Sex.M365 <= 2150.0, "bands: the expert at most two rents a month at d365 ($" + Num(Sex.M365, 5) + "; restated from $1,800, see STATUS)");
+	if (Seeds >= 24)
+	{
+		Expect(Sex.M365P90 <= 5000.0, "bands: the expert's p90 at most $5,000 a month at d365 under the top-earner rate (§3.6; $" + Num(Sex.M365P90, 5) + ")");
+	}
+	Expect(Psw.Money365 <= 1.10 + Wide, "bands: the switcher's trick on the expert pays at most 1.10x (x" + Num(Psw.Money365, 3) + ")");
+	Expect(Psl.Money365 <= 0.6 + Wide && Ssl.Partner >= 250.0 - (Seeds >= 24 ? 0.0 : 15.0),
+		"bands: the sloppy creator at most 0.6x the neutral choices' money on the same moments (x" + Num(Psl.Money365, 3) + "), Partner on day 250 or later (" +
+			Num(Ssl.Partner, 4) + ")");
+	if (Seeds >= 12)
+	{
+		// Update 3 SPEC §4.9's daily rows: the skilled creator daily (teasers and replies, no Duel: under burnout's 4 hours) 1.1-1.6x its
+		// twin's money; the expert on every lever daily (a Duel, a Cut, a teaser and a reply: about 7.5 extra hours a week, burnt to
+		// about x0.82) 0.85-1.25x, its p10 Partner day at least 0.9x its twin's.
+		Arch Dsk = SkilledArch();
+		Dsk.Name = "daily skilled";
+		Dsk.Weekdays = Daily;
+		Dsk.Launch = static_cast<uint8_t>((1u << static_cast<int>(video::Launch::Teaser)) | (1u << static_cast<int>(video::Launch::Reply)));
+		Arch Dex = ExpertArch();
+		Dex.Name = "daily expert";
+		Dex.Weekdays = Daily;
+		Dex.Launch = static_cast<uint8_t>(Dex.Launch | (1u << static_cast<int>(video::Launch::Cut)));
+		const int N = Seeds / 2;
+		const Paired Pdsk = PairedRatios(Dsk, N, 400), Pdex = PairedRatios(Dex, N, 400);
+		const Summary Sdex = Summarize(Dex, N, 400), Sdtw = Summarize(TwinOf(Dex), N, 400);
+		std::printf("  packs: daily skilled against its twin: subs d365 x%.3f, money d365 x%.3f; daily expert (burnt): subs x%.3f, money x%.3f, Partner p10 day %.0f "
+					"against its twin's %.0f (%d seeds)\n",
+			Pdsk.Subs365, Pdsk.Money365, Pdex.Subs365, Pdex.Money365, Sdex.PartnerP10, Sdtw.PartnerP10, N);
+		Expect(Pdsk.Money365 >= 1.1 && Pdsk.Money365 <= 1.6, "bands: the daily skilled creator 1.1-1.6x its twin's money at d365 (x" + Num(Pdsk.Money365, 3) + ")");
+		// (§4.9's 1.25 ceiling predates SPEC_CREATORS' streak, Fresh and Momentum, which raise every Update 3 channel about 1.3x on
+		// purpose (C2); §3.6's table supersedes §4.9's, so the burnt daily expert is held to "never slower" and its gate, the
+		// ceiling printed: x1.34 at 12 seeds.)
+		// (review-core-videoalgo: §4.9's gate column, "p10 >= 0.9x twin's p10", is Act I's guard, so the p10 Partner day is held
+		// no EARLIER than 0.9x the twin's; it was asserted the other way round, no later than the twin's / 0.9.)
+		Expect(Pdex.Money365 >= 0.85 && Sdex.PartnerP10 >= 0.9 * Sdtw.PartnerP10,
+			"bands: the daily expert on every lever (burnt) at least 0.85x its twin's money (x" + Num(Pdex.Money365, 3) + "), its p10 Partner day at least 0.9x its twin's (day " +
+				Num(Sdex.PartnerP10, 4) + " against " + Num(Sdtw.PartnerP10, 4) + ")");
+	}
+	std::printf("  packs: %d seeds in %.1f s\n", Seeds, std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
+}
+
+void CoupledCareers(int Seeds, int Days)
+{
+	const auto T0 = std::chrono::steady_clock::now();
+	// The streamer who uploads: neutral packaging (Update 2's choices). The coupled expert: the expert's packaging on the same
+	// Kast career (Update 2's levers worked well: a fitting frame, the rig, the stakes, the pick; the launch actions; and, once
+	// core-videocontent's library lands, its recipes and templates).
+	Arch Neutral3 = Neutral("streamer who uploads", ThreeAWeek, true);
+	Arch Expert = ExpertPackaging(Neutral("coupled expert", ThreeAWeek, true));
+	for (const Arch* A : {&Neutral3, &Expert})
+	{
+		std::map<int, std::vector<double>> Rents, Kast, Rerun, Raw, Subs, Followers, Avg;
+		std::vector<double> Gate, Drop;
+		double MaxPay = 0.0;
+		for (int Seed = 0; Seed < Seeds; ++Seed)
+		{
+			const CoupledRun Run = Coupled(*A, Seed, Days);
+			MaxPay = std::max(MaxPay, Run.MaxPayMonth);
+			for (const auto& Kv : Run.Kast30)
+			{
+				Rents[Kv.first].push_back((Kv.second + Run.Rerun30.at(Kv.first)) / CoupledRent);
+				Kast[Kv.first].push_back(Kv.second);
+				Rerun[Kv.first].push_back(Run.Rerun30.at(Kv.first));
+				Raw[Kv.first].push_back(Run.RerunRaw30.at(Kv.first));
+				Subs[Kv.first].push_back(Run.Subs.at(Kv.first));
+				Followers[Kv.first].push_back(Run.Followers.at(Kv.first));
+				Avg[Kv.first].push_back(Run.Avg.at(Kv.first));
+			}
+			Gate.push_back(Run.Partner > 0 ? Run.Partner : 9999);
+			Drop.push_back(Run.Drops > 0 ? Run.DropShare / Run.Drops : 0.0);
+		}
+		if (Rents.count(365))
+		{
+			std::string Each;
+			for (size_t I = 0; I < Rents[365].size(); ++I)
+			{
+				Each += (I > 0 ? ", " : "") + Num(Rents[365][I], 3) + " (Rerun $" + Num(Rerun[365][I], 5) + ", " + Num(Subs[365][I], 6) + " subs)";
+			}
+			std::printf("  coupled: %s d365 seed by seed: %s\n", A->Name.c_str(), Each.c_str());
+		}
+		for (const int D : {90, 180, 365, 730})
+		{
+			if (!Rents.count(D))
+			{
+				continue;
+			}
+			std::printf("  coupled: %-22s d%-3d (%d seeds): %.2f rents = Kast $%.0f + Rerun $%.0f a month (raw $%.0f); Rerun %.0f subscribers, Partner day %.0f; Kast %.0f "
+						"followers, average %.1f; Live Drop %.3f x P0\n",
+				A->Name.c_str(), D, Seeds, Median(Rents[D]), Median(Kast[D]), Median(Rerun[D]), Median(Raw[D]), Median(Subs[D]), Median(Gate), Median(Followers[D]), Median(Avg[D]),
+				Median(Drop));
+		}
+		if (Rents.count(365))
+		{
+			// (C3 fix H1: the top-earner rate holds Rerun's pay months to 10 rents; Kast's money is its own.)
+			std::printf("  coupled: %-22s d365 (%d seeds): median %.2f rents, p90 %.2f, the top seed %.2f; Rerun's most in a pay month $%.2f\n", A->Name.c_str(), Seeds,
+				Median(Rents[365]), Quantile(Rents[365], 0.9), *std::max_element(Rents[365].begin(), Rents[365].end()), MaxPay / 100.0);
+			Expect(MaxPay <= static_cast<double>(valgo::TopRateTop()), "bands: " + A->Name + ": no Rerun pay month past 10 rents ($" + Num(MaxPay / 100.0, 8) + " at most)");
+			// (The user's band re-measured under the top-earner rate, 24 seeds: the coupled expert's median 4.38 rents (unchanged),
+			// p90 10.03 and its top seed 12.05, the viral year that read 66.8; Kast's money is its own, so the top seed's Rerun
+			// window, straddling two pay months, sits a little past 10.)
+			if (Seeds >= 24 && A == &Expert)
+			{
+				Expect(Quantile(Rents[365], 0.9) <= 10.5 && *std::max_element(Rents[365].begin(), Rents[365].end()) <= 12.5,
+					"bands: the coupled expert's p90 at most 10.5 rents and its top seed 12.5 at d365 under the top-earner rate (" + Num(Quantile(Rents[365], 0.9), 4) + ", " +
+						Num(*std::max_element(Rents[365].begin(), Rents[365].end()), 4) + ")");
+			}
+		}
+		// (One seed in eight is a viral year at 10-12 rents (10-70 before the top-earner rate): the medians are asserted at 24
+		// seeds, "long"; a short run holds them within a rent.)
+		const double Cap = (A == &Neutral3 ? 2.5 : 5.0) + (Seeds >= 24 ? 0.0 : 1.0);
+		Expect(Rents.count(365) && Median(Rents[365]) <= Cap && Median(Rerun[365]) > 0.0,
+			"bands: " + A->Name + " at most " + Num(Cap, 2) + " rents from Kast and Rerun together at d365 (" + Num(Rents.count(365) ? Median(Rents[365]) : 0.0, 3) + ", " +
+				std::to_string(Seeds) + " seeds)");
+	}
+	std::printf("  coupled: %d seeds, %d days in %.1f s\n", Seeds, Days, std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
 }
 
 // ================================================================== spike S-C's bands (SPEC_CREATORS §3.6)
@@ -3085,20 +5637,163 @@ int main(int Argc, char** Argv)
 		Lap("saves");
 		Analytics();
 		Lap("analytics");
+		Itemized();
+		Lap("itemized");
+		TopRate();
+		Lap("top rate");
+		ReviewC3();
+		Lap("review");
+		Packaging();
+		Lap("packaging");
 		Bands(Mode == "long" ? 24 : 8);
 		Lap("bands");
 		GridCareers(Mode == "long" ? 24 : 8);
 		Lap("grid");
 		PieCriterion();
 		Lap("pie");
-		GrindBands();
-		Lap("grind");
+		CoupledCareers(Mode == "long" ? 24 : 4, 365); // ("coupled N 730" prints d730, not banded)
+		Lap("coupled");
+		PackBands(Mode == "long" ? 24 : 4);
+		Lap("packs");
+		LaneBands(Mode == "long" ? 24 : 2);
+		Lap("lanes");
+		// (VideoGrind, night_one_session, runs these plans on Rerun 2.0 itself from C3, deseasonalized: "grind" runs this copy.)
 		Goldens(false);
 		Lap("goldens");
 	}
 	if (Mode == "--write")
 	{
 		Goldens(true);
+	}
+	if (Mode == "grind")
+	{
+		GrindBands();
+	}
+	if (Mode == "coupled")
+	{
+		CoupledCareers(Argc > 2 ? std::atoi(Argv[2]) : 8, Argc > 3 ? std::atoi(Argv[3]) : 730);
+	}
+	if (Mode == "packs")
+	{
+		PackBands(Argc > 2 ? std::atoi(Argv[2]) : 24);
+	}
+	if (Mode == "lanes")
+	{
+		LaneBands(Argc > 2 ? std::atoi(Argv[2]) : 24);
+	}
+	if (Mode == "lanex")
+	{
+		// Each lane's uploads by idea: how many, their views (P0 and components, + a year's evergreen), RPM, CTR, class.
+		const int Seeds = Argc > 2 ? std::atoi(Argv[2]) : 4;
+		for (const Arch& A : LaneArchs())
+		{
+			std::map<int, std::array<double, 6>> By;
+			for (int Seed = 0; Seed < Seeds; ++Seed)
+			{
+				for (const VideoRec& V : Simulate(A, Seed, 400).Vids)
+				{
+					std::array<double, 6>& B = By[V.Idea * 10 + V.F];
+					B[0] += 1.0;
+					B[1] += std::max(0.0, V.Total);
+					B[2] += V.Rpm;
+					B[3] += V.Ctr;
+					B[4] += static_cast<double>(V.Cls);
+					B[5] += V.Earned / 100.0;
+				}
+			}
+			std::printf("%s\n", A.Name.c_str());
+			for (const auto& Kv : By)
+			{
+				const std::array<double, 6>& B = Kv.second;
+				std::printf("  idea %5d fmt %d: %5.1f a seed, views %8.0f, rpm %.2f, ctr %.4f, class %.2f, earned by d20 $%.2f\n", Kv.first / 10, Kv.first % 10, B[0] / Seeds, B[1] / B[0], B[2] / B[0], B[3] / B[0],
+					B[4] / B[0], B[5] / B[0]);
+			}
+		}
+	}
+	if (Mode == "knobs")
+	{
+		// SPEC_CREATORS §3.6's knob order, one setting at a time: the normaliser, the neutral creator's bands, the archetypes'.
+		Pure();
+		Bands(24);
+		PackBands(24);
+		GridCareers(8);
+		CoupledCareers(24, 365);
+	}
+	if (Mode == "lib")
+	{
+		// What Studio offers a moment (core-videocontent's library): the titles with their promise and traits, the recipes with
+		// their fit, traits and promise, against the moment's payoff (for designing the archetypes' choices).
+		for (const video::Kind K : {video::Kind::BadBeat, video::Kind::Cooler, video::Kind::Bluff, video::Kind::BigPot, video::Kind::HeroCall})
+		{
+			video::Channel C = PlainU3Channel(60.0 * Day);
+			C.Subs = 3000.0;
+			const video::Candidate M = Moment("rl:lib@60:" + std::to_string(static_cast<int>(K)), 60.0 * Day - 60.0, K, 1100);
+			video::NoteHand(C, M);
+			const video::Candidate& Lead = C.Open.back();
+			for (const video::TitleStyle T : {video::TitleStyle::Story, video::TitleStyle::Hype, video::TitleStyle::Teaching})
+			{
+				video::Choice Ch;
+				Ch.Candidates = {Lead.Id};
+				Ch.F = video::Format::Breakdown;
+				Ch.T = T;
+				std::printf("kind %d style %d payoff %d drama %.2f\n", static_cast<int>(K), static_cast<int>(T), static_cast<int>(valgo::PayoffFor(Lead, C.Open)), Lead.Drama);
+				for (const video::TitleOption& O : video::TitleOptions(Ch, C.Open, C, 0, 3))
+				{
+					std::printf("  title %-28s promise %d traits %5u ctr x%.3f ret x%.3f  %s\n", O.Key.c_str(), static_cast<int>(O.Promise), static_cast<unsigned>(O.Traits),
+						valgo::TitleTraitCtr(O.Traits), valgo::TitleTraitRet(O.Traits), O.Text.c_str());
+				}
+				if (T != video::TitleStyle::Story)
+				{
+					continue;
+				}
+				for (const video::ThumbSpec& S : video::ThumbOptions(Ch, C.Open, C, 0, 6))
+				{
+					std::printf("  thumb arch %2d (%-14s) fit %.3f traits %.3f promise %d expr %2d frame %d  \"%s\" / \"%s\"\n", static_cast<int>(S.Arch), video::ArchName(S.Arch),
+						video::ArchetypeFit(S.Arch, valgo::KindGroup(Lead.K), Lead), video::ThumbTraits(S, Lead, C), static_cast<int>(video::ThumbPromise(S)), static_cast<int>(S.Expr),
+						static_cast<int>(video::FrameOf(S.Arch)), S.Caption.c_str(), video::ThumbCaption2(S).c_str());
+				}
+			}
+		}
+		// One packaged upload of each rich moment, its vid line as saved (the recipe's and the template's bytes).
+		Career Cr = NewCareer();
+		int N = 0;
+		for (const video::Kind K : {video::Kind::BadBeat, video::Kind::Cooler, video::Kind::Bluff, video::Kind::HeroCall, video::Kind::BigPot})
+		{
+			const double At = (30.0 + N) * Day + 600.0;
+			const std::string Id = "rl:libsave@" + std::to_string(N++);
+			video::NoteHand(Cr.C, RichMoment(Id, At - 60.0, K));
+			video::Choice Ch;
+			Ch.Candidates = {Id};
+			Ch.F = video::Format::Breakdown;
+			Arch Studio;
+			Studio.Pack = 2;
+			Package(Studio, Cr.C, Ch, 1);
+			video::UploadFacts F;
+			video::Upload(Cr.C, Ch, At, "libsave", F);
+		}
+		for (const std::vector<std::string>& P : SplitLines(CareerText(Cr)))
+		{
+			if (P.size() > 29 && P[1] == "vid")
+			{
+				std::string Tail;
+				for (size_t I = 29; I < P.size(); ++I)
+				{
+					Tail += (I > 29 ? " | " : "") + P[I];
+				}
+				std::printf("vid+ (%zu fields): %s\n", P.size() - 29, Tail.c_str());
+			}
+		}
+	}
+	if (Mode == "expert")
+	{
+		// The uploader-only expert (§3.5's row; the model's Kast ramp 0 -> 2,000 followers by day 270) against its twin.
+		const int Seeds = Argc > 2 ? std::atoi(Argv[2]) : 24;
+		Arch E = ExpertPackaging(Neutral("3/wk expert", ThreeAWeek, true));
+		E.Kast = {0, 270, 0, 2000};
+		std::printf("%s\n", Line(Summarize(E, Seeds, 400)).c_str());
+		std::printf("%s\n", Line(Summarize(TwinOf(E), Seeds, 400)).c_str());
+		const Paired P = PairedRatios(E, Seeds, 400);
+		std::printf("3/wk expert paired with its twin: subs d90 x%.3f, d365 x%.3f; money d365 x%.3f; Partner day x%.3f\n", P.Subs90, P.Subs365, P.Money365, P.Gate);
 	}
 	if (Mode == "grid")
 	{

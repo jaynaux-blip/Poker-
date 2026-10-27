@@ -1131,7 +1131,7 @@ size_t CanvasPoolDefault(Canvas::CachePool Pool)
 	switch (Pool)
 	{
 	case Canvas::CachePool::Shared: return 1500000; // a page's worth of art is a few hundred thousand vertices
-	case Canvas::CachePool::Rerun: return 750000;   // about 18 MB of thumbnails until spike S-T sizes it (§10)
+	case Canvas::CachePool::Rerun: return 480000;   // S-T (durable/creator/S-T.md): every Rerun page's thumbnails twice over, about 20 MB (thumbart::PoolVertices)
 	case Canvas::CachePool::Boardwalk: return 120000;
 	case Canvas::CachePool::Count: break;
 	}

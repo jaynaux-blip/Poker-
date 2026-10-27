@@ -167,34 +167,48 @@ std::array<float, 61> CurveOf(const Video& V, double R, int Over, double Q, AdLo
 		}
 	}
 	const double Dip = Load == AdLoad::Heavy ? 0.06 : 0.03;
+	// (What doesn't depend on the decay K is worked out once: the hook's line, each point's bumps at the moments, its mid-roll
+	// dips and the end's taper; the decay is a running product. The solve below calls Build 60 times: StatsOf <= 0.2 ms, §10.)
+	std::array<double, 61> Fixed{}, Bump{}, Mult{};
+	std::array<bool, 61> Linear{};
+	int FirstDecay = 61;
+	for (int I = 0; I <= 60; ++I)
+	{
+		const double X = static_cast<double>(I) / 60.0;
+		const size_t Ix = static_cast<size_t>(I);
+		Linear[Ix] = X <= Xh;
+		if (Linear[Ix])
+		{
+			Fixed[Ix] = 1.0 + (Hook - 1.0) * X / Xh;
+			continue;
+		}
+		FirstDecay = std::min(FirstDecay, I);
+		for (size_t B = 0; B < Marks.size(); ++B)
+		{
+			const double D = (X - Marks[B].first) / 0.035;
+			Bump[Ix] += Heights[B] * Hook * std::exp(-0.5 * D * D);
+		}
+		Mult[Ix] = 1.0;
+		for (const double Roll : Rolls)
+		{
+			Mult[Ix] *= X >= Roll ? 1.0 - Dip : 1.0;
+		}
+		Mult[Ix] *= X > 0.97 ? 1.0 - 0.4 * (X - 0.97) / 0.03 : 1.0;
+	}
 	auto Build = [&](double K) {
 		std::array<float, 61> C{};
+		const double Step = std::exp(-K / 60.0);
+		double Decay = FirstDecay <= 60 ? std::exp(-K * (static_cast<double>(FirstDecay) / 60.0 - Xh)) : 0.0;
 		for (int I = 0; I <= 60; ++I)
 		{
-			const double X = static_cast<double>(I) / 60.0;
-			double Y = 0.0;
-			if (X <= Xh)
+			const size_t Ix = static_cast<size_t>(I);
+			double Y = Fixed[Ix];
+			if (!Linear[Ix])
 			{
-				Y = 1.0 + (Hook - 1.0) * X / Xh;
+				Y = (Hook * Decay + Bump[Ix]) * Mult[Ix];
+				Decay *= Step;
 			}
-			else
-			{
-				Y = Hook * std::exp(-K * (X - Xh));
-				for (size_t B = 0; B < Marks.size(); ++B)
-				{
-					const double D = (X - Marks[B].first) / 0.035;
-					Y += Heights[B] * Hook * std::exp(-0.5 * D * D);
-				}
-				for (const double Roll : Rolls)
-				{
-					Y *= X >= Roll ? 1.0 - Dip : 1.0;
-				}
-				if (X > 0.97)
-				{
-					Y *= 1.0 - 0.4 * (X - 0.97) / 0.03;
-				}
-			}
-			C[static_cast<size_t>(I)] = static_cast<float>(std::clamp(Y, 0.0, 1.0));
+			C[Ix] = static_cast<float>(std::clamp(Y, 0.0, 1.0));
 		}
 		return C;
 	};
@@ -396,6 +410,123 @@ std::string LegacyNote()
 {
 	return "Published before Rerun's new analytics.";
 }
+
+// ---------------------------------------------------------------- the top-earner rate's reads (C3 fix H1)
+
+/** The world days of Day's pay month (the 21st to the 20th), First to Last. */
+void PayMonthDays(int Day, int& First, int& Last)
+{
+	First = valgo::PayMonthFirst(Day);
+	Last = valgo::PayMonthFirst(First + 31) - 1; // (the next pay month's first day, 28 to 31 days on)
+}
+
+/** Dollars per 1,000 views above any video's RPM, the season in (§4.5's largest factors: $7.58 x 1.25 x 1.15 x 0.50 x 2.85 x
+ *  0.55 x RetentionPays x the season's top, about $15): the rings' views at it bound a month's ads from above. */
+constexpr double StRpmBound = 25.0;
+
+/**
+ * WouldShare's slow sums, kept per thread (review-c3f-algo): it is the channel's month, the same for every video's StatsOf at
+ * one minute, and a page reads every video at once (on its first draw and after each midnight), so a big channel before
+ * Partner summed the month once a video (1.7 ms a video at 43). Keyed on the channel, the minute, its last step, the month and
+ * a fingerprint of what Views and MoneyOf read off the videos; a hit is the same number, nothing else changes.
+ */
+struct WouldMemo
+{
+	const Channel* C = nullptr;
+	double World = -1.0, Stepped = -1.0, Print = 0.0, Share = 1.0;
+	size_t Videos = 0;
+	int First = 0;
+	uint64_t Used = 0;
+};
+
+double WouldPrint(const Channel& C)
+{
+	double P = 0.0;
+	for (const Video& V : C.Videos)
+	{
+		P += V.At + V.P + V.E + V.X.P0 + static_cast<double>(static_cast<int>(V.X.C)) + 3.0 * static_cast<double>(static_cast<int>(V.X.Ads)) +
+			7.0 * static_cast<double>(static_cast<int>(V.T)) + static_cast<double>(V.X.AdsChangedDay);
+		for (const Comp& K : V.X.Comps)
+		{
+			P += K.T + K.P;
+		}
+	}
+	return P;
+}
+
+/**
+ * Before Partner, the share a pay month's ads would have paid under the top-earner rate (the would-have-earned line, W9: views
+ * that happened): 1 for a month at or under T. The rings' views at StRpmBound prove almost every month far under T (a month's
+ * stepped days within half of T, so today's unstepped hours can't carry it past); only a month that could have passed T is
+ * summed from the kept videos themselves, a day at a time at each day's prices, and paid on the curve as one month.
+ */
+double WouldShare(const Channel& C, int Day, double World)
+{
+	if (!C.X.On)
+	{
+		return 1.0;
+	}
+	const double T = static_cast<double>(valgo::TopRateFrom());
+	int First = 0, Last = 0;
+	PayMonthDays(Day, First, Last);
+	double Seen = 0.0;
+	for (const DayRow& R : C.X.Days)
+	{
+		Seen += R.Key >= First && R.Key <= Last ? static_cast<double>(R.Views) : 0.0;
+	}
+	if (C.X.Days.empty() || First < C.X.Days.front().Key)
+	{
+		// (Older than the day ring: the calendar months it touches, whole.)
+		int Y = 0, Mo = 0, Dm = 0;
+		world::CivilDate(First, Y, Mo, Dm);
+		const int K0 = Y * 12 + (Mo - 1);
+		world::CivilDate(Last, Y, Mo, Dm);
+		const int K1 = Y * 12 + (Mo - 1);
+		for (const DayRow& R : C.X.Months)
+		{
+			Seen += R.Key >= K0 && R.Key <= K1 ? static_cast<double>(R.Views) : 0.0;
+		}
+	}
+	if (Seen * StRpmBound / 1000.0 * 100.0 <= 0.5 * T)
+	{
+		return 1.0;
+	}
+	thread_local std::array<WouldMemo, 4> Memo;
+	thread_local uint64_t Clock = 0;
+	const double Print = WouldPrint(C);
+	++Clock;
+	for (WouldMemo& M : Memo)
+	{
+		if (M.C == &C && M.World == World && M.Stepped == C.SteppedTo && M.Videos == C.Videos.size() && M.First == First && M.Print == Print)
+		{
+			M.Used = Clock;
+			return M.Share;
+		}
+	}
+	double Raw = 0.0;
+	for (int D = First; D <= Last && static_cast<double>(D) * StDay < World; ++D)
+	{
+		for (const Video& V : C.Videos)
+		{
+			const double A = std::max(V.At, static_cast<double>(D) * StDay), B = std::min(World, static_cast<double>(D + 1) * StDay);
+			if (B > A)
+			{
+				Raw += std::max(0.0, Views(V, B) - Views(V, A)) * algo::MoneyOf(V, D).Rpm / 1000.0 * 100.0;
+			}
+		}
+	}
+	const double Share = Raw > T ? valgo::TopRateCurve(Raw) / Raw : 1.0;
+	WouldMemo& Slot = *std::min_element(Memo.begin(), Memo.end(), [](const WouldMemo& A, const WouldMemo& B) { return A.Used < B.Used; });
+	Slot.C = &C;
+	Slot.World = World;
+	Slot.Stepped = C.SteppedTo;
+	Slot.Print = Print;
+	Slot.Share = Share;
+	Slot.Videos = C.Videos.size();
+	Slot.First = First;
+	Slot.Used = Clock;
+	return Share;
+}
 } // namespace video_stats_detail
 
 // ================================================================== one video (§5.4)
@@ -462,6 +593,13 @@ VideoStats StatsOf(const Channel& C, const Video& V, double World)
 	S.Monetized = S.Views * M.MonetizedRate;
 	S.AdImpressions = S.Monetized * M.AdsPerPlayback;
 	const bool Partner = C.PartnerAt >= 0.0 && C.PartnerAt <= World;
+	if (Partner && C.X.On)
+	{
+		// The top-earner rate (C3 fix H1): past T, today's views start at the month's reduced share (the RPM tile's "per 1,000
+		// views today"); the CPMs stay what advertisers pay.
+		const double Share = valgo::TopRateShare(valgo::PaidThisMonth(C, Today));
+		S.Rpm = Share < 1.0 ? M.Rpm * Share : M.Rpm;
+	}
 	if (V.X.On)
 	{
 		S.EarnedCents = static_cast<Chips>(std::llround(V.X.Earned));
@@ -476,14 +614,38 @@ VideoStats StatsOf(const Channel& C, const Video& V, double World)
 		// "As a Partner, this video would have earned about $4.10 so far (not paid)": the pipeline over the views so far, a day
 		// at a time at each day's season (V9: views that already happened).
 		double Cents = 0.0;
+		double Was = Views(V, V.At); // (each day's end is the next day's start: one read a day)
+		// (C3 fix H1: the top-earner rate too, a pay month at a time: a month whose ads would have passed T pays its share.)
+		double Month = 0.0;
+		int Pm = -1, PmDay = 0;
+		auto Close = [&]() {
+			if (Pm >= 0 && Month > 0.0)
+			{
+				const double Share = WouldShare(C, PmDay, World);
+				Cents -= Share < 1.0 ? Month * (1.0 - Share) : 0.0;
+			}
+			Month = 0.0;
+		};
 		for (int D = valgo::DayOf(V.At); static_cast<double>(D) * StDay < World; ++D)
 		{
 			const double A = std::max(V.At, static_cast<double>(D) * StDay), B = std::min(World, static_cast<double>(D + 1) * StDay);
 			if (B > A)
 			{
-				Cents += std::max(0.0, Views(V, B) - Views(V, A)) * algo::MoneyOf(V, D).Rpm / 1000.0 * 100.0;
+				const double Now = Views(V, B);
+				const double Add = std::max(0.0, Now - Was) * algo::MoneyOf(V, D).Rpm / 1000.0 * 100.0;
+				Cents += Add;
+				Was = Now;
+				const int Here = C.X.On ? valgo::PayMonthOf(D) : -1;
+				if (Here != Pm)
+				{
+					Close();
+					Pm = Here;
+				}
+				PmDay = D;
+				Month += Add;
 			}
 		}
+		Close();
 		S.WouldEarnCents = static_cast<Chips>(std::llround(Cents));
 	}
 	S.Coin = V.X.On ? static_cast<int>(V.X.C) : 0;
@@ -696,6 +858,46 @@ VideoStats StatsOf(const Channel& C, const Video& V, double World)
 
 // ================================================================== the channel over a window (§5.3)
 
+namespace video_stats_detail
+{
+/** Range's money split, appended by the lead's VideoStats.h patch (core-videoalgo_to_lead_3.diff): the Cuts feed's cents and
+ *  views, the watch page's ad impressions and monetized playbacks a day (Revenue's "How you earned" and its KPI tiles, §5.6). */
+template <class R, class = void>
+struct RangeSplit : std::false_type
+{
+};
+template <class R>
+struct RangeSplit<R, std::void_t<decltype(std::declval<R&>().CutCents), decltype(std::declval<R&>().CutViews), decltype(std::declval<R&>().AdImpressions),
+						 decltype(std::declval<R&>().Monetized)>> : std::true_type
+{
+};
+/** A day's split: the Cuts feed's cents and views, the watch page's ad impressions and monetized playbacks. */
+struct DaySplit
+{
+	double Cut = 0, CutViews = 0, Impr = 0, Mon = 0;
+};
+DaySplit RowSplit(const DayRow& R, double F)
+{
+	return {static_cast<double>(valgo::VaRowCut(R)) * F, valgo::VaRowCutViews(R) * F, valgo::VaRowImpr(R) * F, valgo::VaRowMonetized(R) * F};
+}
+template <class R>
+void PushSplit(R& Out, const DaySplit& S)
+{
+	if constexpr (RangeSplit<R>::value)
+	{
+		Out.CutCents.push_back(S.Cut);
+		Out.CutViews.push_back(S.CutViews);
+		Out.AdImpressions.push_back(S.Impr);
+		Out.Monetized.push_back(S.Mon);
+	}
+	else
+	{
+		(void)Out;
+		(void)S;
+	}
+}
+} // namespace video_stats_detail
+
 Range StatsRange(const Channel& C, double World, int Days)
 {
 	using namespace video_stats_detail;
@@ -713,6 +915,9 @@ Range StatsRange(const Channel& C, double World, int Days)
 		Out.Cents.push_back(Cents);
 		Out.Estimated.push_back(Est);
 	};
+	// (The top-earner rate on the days not stepped yet: what each pay month has paid before them, the rings' and these days'.)
+	int OpenMonth = -1;
+	Chips OpenPaid = 0;
 	for (int D = Today - Out.Days + 1; D <= Today; ++D)
 	{
 		if (D == Today || static_cast<double>(D + 1) * StDay > C.SteppedTo)
@@ -720,6 +925,7 @@ Range StatsRange(const Channel& C, double World, int Days)
 			// The day not stepped yet: the closed form over the kept videos (the tails omitted: a little under, never over).
 			const double From = static_cast<double>(D) * StDay, To = std::min(World, static_cast<double>(D + 1) * StDay);
 			double Seen = 0, Watch = 0, Subs = 0, Lost = 0, Likes = 0, Dis = 0, Impr = 0, Cents = 0;
+			DaySplit Sp;
 			const bool Paying = C.PartnerAt >= 0.0 && From >= C.PartnerAt - 1e-6;
 			for (const Video& V : C.Videos)
 			{
@@ -737,15 +943,52 @@ Range StatsRange(const Channel& C, double World, int Days)
 				Likes += Rt.Like * Gain;
 				Dis += Rt.Dislike() * Gain;
 				Impr += valgo::ImprGain(V, From, To);
-				Cents += Paying ? valgo::RpmOn(V, D) / 1000.0 * Gain * 100.0 * (C.X.On ? algo::Season(D) : 1.0) : 0.0;
+				const double Paid = Paying ? valgo::RpmOn(V, D) / 1000.0 * Gain * 100.0 * (C.X.On ? algo::Season(D) : 1.0) : 0.0;
+				Cents += Paid;
+				if (Paying && C.X.On)
+				{
+					// (DayStep's split: a Cut's money the Cuts feed's; a long video's with its ad impressions and monetized playbacks.)
+					if (V.C == Class::Short)
+					{
+						Sp.Cut += Paid;
+						Sp.CutViews += Gain;
+					}
+					else
+					{
+						const algo::Money M = algo::MoneyOf(V, D);
+						Sp.Impr += Gain * M.MonetizedRate * M.AdsPerPlayback;
+						Sp.Mon += Gain * M.MonetizedRate;
+					}
+				}
+			}
+			if (Paying && C.X.On)
+			{
+				// The top-earner rate (C3 fix H1), as DayStep will pay the day: at or under T the closed form stands as it is.
+				const int Pm = valgo::PayMonthOf(D);
+				if (Pm != OpenMonth)
+				{
+					OpenMonth = Pm;
+					OpenPaid = valgo::PaidThisMonth(C, D);
+				}
+				const Chips Earned = static_cast<Chips>(std::llround(Cents));
+				const Chips Pay = valgo::TopRatePay(OpenPaid, Earned);
+				OpenPaid += Pay;
+				if (Pay < Earned)
+				{
+					const double K = static_cast<double>(Pay) / std::max(1e-9, Cents);
+					Cents = static_cast<double>(Pay);
+					Sp.Cut *= K;
+				}
 			}
 			Push(Seen, Watch, Subs, Lost, Likes, Dis, Impr, Cents, !C.X.On);
+			PushSplit(Out, Sp);
 			continue;
 		}
 		const auto It = std::find_if(C.X.Days.begin(), C.X.Days.end(), [D](const DayRow& R) { return R.Key == D; });
 		if (It != C.X.Days.end())
 		{
 			Push(It->Views, It->WatchH, It->Gained, It->Lost, It->Likes, It->Dislikes, It->Impr, static_cast<double>(It->Cents), false);
+			PushSplit(Out, RowSplit(*It, 1.0));
 			continue;
 		}
 		// Older than the day ring: the month's row spread over its days; before the rings began, nothing ("est.").
@@ -758,10 +1001,12 @@ Range StatsRange(const Channel& C, double World, int Days)
 			const int Len = Mo == 2 ? ((Y % 4 == 0 && Y % 100 != 0) || Y % 400 == 0 ? 29 : 28) : (Mo == 4 || Mo == 6 || Mo == 9 || Mo == 11) ? 30 : 31;
 			const double F = 1.0 / static_cast<double>(Len);
 			Push(Mt->Views * F, Mt->WatchH * F, Mt->Gained * F, Mt->Lost * F, Mt->Likes * F, Mt->Dislikes * F, Mt->Impr * F, static_cast<double>(Mt->Cents) * F, true);
+			PushSplit(Out, RowSplit(*Mt, F));
 		}
 		else
 		{
 			Push(0, 0, 0, 0, 0, 0, 0, 0, true);
+			PushSplit(Out, DaySplit());
 		}
 	}
 	return Out;
@@ -952,7 +1197,7 @@ std::string HealthWords(int Meter, int Bars)
 	case 2: return High ? "Holding: they stay." : Low ? "Holding: they leave early." : "Holding: about average.";
 	case 3: return High ? "Satisfaction: liked." : Low ? "Satisfaction: disliked." : "Satisfaction: mixed.";
 	case 4: return High ? "Consistency: regular." : Low ? "Consistency: quiet." : "Consistency: patchy.";
-	default: return High ? "Energy: fresh." : Low ? "Energy: burnt out." : "Energy: busy.";
+	default: return High ? "Energy: fresh." : Low ? "Energy: running on empty." : "Energy: busy."; // (C9: no fire or burn words)
 	}
 }
 
@@ -1078,9 +1323,18 @@ const AdCategory* AdCategories(size_t& N)
 	return List;
 }
 
-/** A video's category: its title style, a rival's hand as rival drama (an idea's group is core-videocontent's to tell). */
+/** A video's category: an idea video's own (core-videocontent's IdeaAdCategory, the same eight rows), else its title style, a
+ *  rival's hand as rival drama. */
 int CategoryOf(const Video& V)
 {
+	if (V.X.On && V.X.Idea >= 0)
+	{
+		const int Cat = IdeaAdCategory(V.X.Idea);
+		if (Cat >= 0 && Cat < 8)
+		{
+			return Cat;
+		}
+	}
 	if (V.K == Kind::Rival)
 	{
 		return 7;
@@ -1110,6 +1364,36 @@ std::vector<AdMarketRow> AdMarket(const Channel& C, double World)
 		Out.push_back(R);
 	}
 	return Out;
+}
+
+// ================================================================== the top-earner rate's month (C3 fix H1)
+
+valgo::TopRateView valgo::TopRateOf(const Channel& C, double World)
+{
+	// This pay month through the last midnight (the rings: what the statement will itemize), the share the next view pays at.
+	TopRateView V;
+	const int Today = DayOf(World);
+	V.Month = PayMonthOf(Today);
+	if (!C.X.On)
+	{
+		V.Held = 0;
+		return V;
+	}
+	int First = 0, Last = 0;
+	video_stats_detail::PayMonthDays(Today, First, Last);
+	Chips Held = 0;
+	for (const DayRow& R : C.X.Days)
+	{
+		if (R.Key >= First && R.Key <= Last)
+		{
+			V.Paid += R.Cents;
+			Held += VaRowHeld(R);
+		}
+	}
+	V.Applies = V.Paid > TopRateFrom();
+	V.Share = TopRateShare(V.Paid);
+	V.Held = VaHasHeld ? Held : V.Applies ? -1 : 0;
+	return V;
 }
 
 // ================================================================== the copy

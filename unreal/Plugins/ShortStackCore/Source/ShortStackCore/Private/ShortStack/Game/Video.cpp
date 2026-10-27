@@ -61,6 +61,11 @@ std::string GrantTitle();
 std::string StorytimeEvent();
 std::string WhyNot(int Reason);
 } // namespace video_copy
+// core-videocontent's itemized statement (VideoContentPriv.h's declaration, VideoCopy.cpp's body; §4.5.7).
+namespace vcontent
+{
+std::string StatementU3(const std::string& Month, Chips WatchCents, double Rpm, double Cpm, Chips CutsCents, Chips PaidCents, Chips BalanceCents, bool Paid);
+} // namespace vcontent
 
 namespace video_detail
 {
@@ -75,6 +80,7 @@ constexpr double GateHours = 4000.0;
 constexpr double ReviewDays = 7.0;
 constexpr Chips PayoutMinCents = 10000;
 constexpr int PayDay = 21;
+static_assert(PayDay == valgo::VaPayDay, "the top-earner rate's pay month ends where the payout is (VideoAlgoPriv.h)");
 constexpr double EvergreenDays = 365.0;
 
 struct Shape
@@ -189,6 +195,18 @@ bool EventKind(Kind K)
 
 double Quantize(double X, double Scale)
 {
+	return std::round(X * Scale) / Scale;
+}
+
+/** X to 10 significant digits: what a saved running sum keeps (the stub buckets, the engagement tails), so a reload reads the
+ *  very numbers it wrote and the line stays short. */
+double Sig10(double X)
+{
+	if (X == 0.0 || !std::isfinite(X))
+	{
+		return X;
+	}
+	const double Scale = std::pow(10.0, 9.0 - std::floor(std::log10(std::fabs(X))));
 	return std::round(X * Scale) / Scale;
 }
 
@@ -677,6 +695,13 @@ void FoldU3(Channel& C, const Video& V)
 	{
 		Part(K.T, K.P, K.A, K.SrcMix, K.CtrF);
 	}
+	// (The engagement tails kept to 10 significant digits, as vtailx writes them: C3's compaction.)
+	for (int K = 0; K < 4; ++K)
+	{
+		Tx.Total[K] = Sig10(Tx.Total[K]);
+		Tx.Decay[0][K] = Sig10(Tx.Decay[0][K]);
+		Tx.Decay[1][K] = Sig10(Tx.Decay[1][K]);
+	}
 	if (V.E > 0.0)
 	{
 		const double Age = (At - V.At) / Day;
@@ -698,13 +723,14 @@ void FoldU3(Channel& C, const Video& V)
 				It = C.X.StubDays.insert(std::upper_bound(C.X.StubDays.begin(), C.X.StubDays.end(), Sd, [](const StubDay& A, const StubDay& B) { return A.Day < B.Day; }), Sd);
 			}
 			const double Off = (V.At - static_cast<double>(UpDay) * Day) / Day;
-			// (Each sum kept to 10 significant digits, so the line stays short and a reload reads the very numbers it wrote.)
+			// (Each sum kept to 8 significant digits, so the line stays short and a reload reads the very numbers it wrote: C3's
+			// compaction from 10; a stub's year of views moves by under 1e-7 of itself.)
 			auto Sig = [](double X) {
 				if (X == 0.0)
 				{
 					return 0.0;
 				}
-				const double Scale = std::pow(10.0, 9.0 - std::floor(std::log10(std::fabs(X))));
+				const double Scale = std::pow(10.0, 7.0 - std::floor(std::log10(std::fabs(X))));
 				return std::round(X * Scale) / Scale;
 			};
 			It->E = Sig(It->E + V.E);
@@ -832,19 +858,32 @@ void CountUploads(Channel& C, double World)
 	}
 }
 
-/** Update 3: the day's engagement for the rings (likes, dislikes, comments, impressions, subscribers lost). */
+/**
+ * Update 3: the day's engagement for the rings (likes, dislikes, comments, impressions, subscribers lost), and its ad money's
+ * split (§4.5.7, §5.6): the Cuts feed's dollars (Class::Short, kept and folded: the tails are per class, so the split is exact),
+ * the watch page's from the kept long videos with their ad impressions and monetized playbacks, and the folded long tails' and
+ * stubs' dollars, whose impressions the day's kept long videos' ratio stands for (a folded video keeps no ads of its own).
+ */
 struct DayX
 {
 	double Likes = 0, Dislikes = 0, Comments = 0, Impr = 0, Lost = 0, Watch = 0;
+	double CutAd = 0, LongAd = 0, LongImpr = 0, LongMon = 0, FoldedAd = 0; // dollars at season 1 (Paying days only)
+	double CutViews = 0;                                                   // the Cuts' views (kept and folded)
+	Chips CutCents = 0;
+	double AdImpr = 0, Monetized = 0; // the day's, once DayStep has its cents
+	Chips Held = 0, HeldCut = 0;      // what the top-earner rate held back of the day's cents, and of the Cuts feed's (C3 fix H1)
 };
+
+/** X rounded as a ring keeps it: whole numbers from 100 up, tenths below (display numbers; the save stays short). */
+double RowRound(double X)
+{
+	return Quantize(X, std::fabs(X) >= 100.0 ? 1.0 : 10.0);
+}
 
 /** A ring row's fields from a day's sums (U3RowText's order), kept to a tenth (display numbers; the save stays short). */
 void AddToRow(DayRow& R, const Gains& G, const DayX& Dx, Chips Cents)
 {
-	auto Add = [](float& Field, double X) {
-		const double Sum = static_cast<double>(Field) + X;
-		Field = static_cast<float>(Quantize(Sum, std::fabs(Sum) >= 100.0 ? 1.0 : 10.0)); // whole numbers from 100 up, tenths below
-	};
+	auto Add = [](float& Field, double X) { Field = static_cast<float>(RowRound(static_cast<double>(Field) + X)); };
 	Add(R.Views, G.Views);
 	Add(R.WatchH, Dx.Watch);
 	Add(R.Gained, G.Subs + Dx.Lost);
@@ -854,6 +893,15 @@ void AddToRow(DayRow& R, const Gains& G, const DayX& Dx, Chips Cents)
 	Add(R.Impr, Dx.Impr);
 	Add(R.Comments, Dx.Comments);
 	R.Cents += Cents;
+	if (Cents > 0 || Dx.CutCents > 0 || Dx.Held > 0)
+	{
+		valgo::VaSetRowSplit(R, valgo::VaRowCut(R) + Dx.CutCents, static_cast<float>(RowRound(valgo::VaRowCutViews(R) + Dx.CutViews)),
+			static_cast<float>(RowRound(valgo::VaRowImpr(R) + Dx.AdImpr)), static_cast<float>(RowRound(valgo::VaRowMonetized(R) + Dx.Monetized)));
+	}
+	if (Dx.Held > 0)
+	{
+		valgo::VaSetRowHeld(R, valgo::VaRowHeld(R) + Dx.Held, valgo::VaRowHeldCut(R) + Dx.HeldCut);
+	}
 }
 
 /**
@@ -902,9 +950,48 @@ void MidnightU3(Channel& C, life::State& L, double D0, const Gains& G, const Day
 	}
 	AddToRow(X.Months.back(), G, Dx, DayCents);
 	AddToRow(X.Life, G, Dx, DayCents);
+	const double D1 = static_cast<double>(Next) * Day;
+	{
+		// The Binge wave's and Late Bloomer's bells (C3 fix L4) ring at the midnight that ends their first day, with what it
+		// really did: the views the wave's parts added on the older videos, and the woken video's day against its usual one (the
+		// 7 days before). Both come from the parts that started at this day's first midnight: nothing saved, a skip the same.
+		int Binged = 0;
+		double BingeViews = 0.0;
+		for (const Video& V : C.Videos)
+		{
+			if (!V.X.On)
+			{
+				continue;
+			}
+			const valgo::VaShape S = valgo::ShapeU3(V.C);
+			bool Took = false, Woke = false;
+			for (const Comp& K : V.X.Comps)
+			{
+				if (K.T != D0)
+				{
+					continue;
+				}
+				if (K.Kind == CompKind::Binge)
+				{
+					BingeViews += K.P * valgo::CurveFrac(K.A, S.Tau1, S.Tau2, 1.0);
+					Took = true;
+				}
+				Woke = Woke || K.Kind == CompKind::LateBloom;
+			}
+			Binged += Took ? 1 : 0;
+			if (Woke)
+			{
+				const double Usual = (Views(V, D0) - Views(V, D0 - 7.0 * Day)) / 7.0;
+				Bell(C, D1, valgo::BellBloom(V.Title, Usual > 0.0 ? (Views(V, D1) - Views(V, D0)) / Usual : 0.0));
+			}
+		}
+		if (Binged > 0)
+		{
+			Bell(C, D1, valgo::BellBinge(Binged, BingeViews));
+		}
+	}
 	// The decisions of the midnight that ends this day.
 	algo::DecideDay(C, L, Next, nullptr);
-	const double D1 = static_cast<double>(Next) * Day;
 	for (size_t I = 0; I < C.Videos.size(); ++I)
 	{
 		const Video& V = C.Videos[I];
@@ -1021,10 +1108,26 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 	DayX Dx;
 	// The videos kept whole: their milestones too.
 	Gains G;
+	// (Each kept Update 3 video's double cents for the day, added once the day's total is known: the top-earner rate scales a
+	// day past T for every video alike. Under T the add is today's, to the bit.)
+	std::vector<std::pair<Video*, double>> Earn;
+	if (Paying && U3)
+	{
+		Earn.reserve(C.Videos.size());
+	}
 	for (Video& V : C.Videos)
 	{
-		const double Was = Views(V, D0);
-		const double Now = Views(V, D1);
+		// (An Update 3 video's curve is read once for its views at both ends and its impressions: SpanU3, ViewsU3's own numbers.)
+		double Was = 0.0, Now = 0.0, SpanImpr = -1.0;
+		if (V.X.On)
+		{
+			valgo::SpanU3(V, D0, D1, Was, Now, SpanImpr);
+		}
+		else
+		{
+			Was = Views(V, D0);
+			Now = Views(V, D1);
+		}
 		const double Gain = std::max(0.0, Now - Was);
 		G.Views += Gain;
 		G.Subs += valgo::ConvOn(V, DayNo) * Gain;
@@ -1035,7 +1138,26 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 			// The video's own double cents (§4.5.2) and the rings' engagement: counts arrive with the views.
 			if (Paying && V.X.On)
 			{
-				V.X.Earned = Quantize(V.X.Earned + valgo::RpmOn(V, DayNo) / 1000.0 * Gain * 100.0 * Sea, 1e4); // (to 1/10,000 of a cent)
+				Earn.push_back({&V, valgo::RpmOn(V, DayNo) / 1000.0 * Gain * 100.0 * Sea});
+			}
+			if (Paying)
+			{
+				// The split (§4.5.7): a Cut's money is the Cuts feed's; a long video's carries its ad impressions and monetized
+				// playbacks at the day's load and coin (MoneyOf's MonetizedRate and AdsPerPlayback).
+				const double Ad = valgo::RpmOn(V, DayNo) / 1000.0 * Gain;
+				if (V.C == Class::Short)
+				{
+					Dx.CutAd += Ad;
+					Dx.CutViews += Gain;
+				}
+				else
+				{
+					const double Mon = V.X.On && V.X.C == Coin::Limited ? valgo::VaMonetizedLimited : valgo::VaMonetized;
+					const double Per = algo::AdsPerPlayback(V.F, V.X.On ? V.X.Len : LengthOpt::Standard, V.X.On ? valgo::LoadOn(V.X, DayNo) : AdLoad::Standard);
+					Dx.LongAd += Ad;
+					Dx.LongImpr += Gain * Mon * Per;
+					Dx.LongMon += Gain * Mon;
+				}
 			}
 			const int Over = valgo::OverOf(V);
 			const double Ret = valgo::RetentionOn(V, DayNo);
@@ -1044,7 +1166,7 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 			Dx.Likes += R.Like * Gain;
 			Dx.Dislikes += R.Dislike() * Gain;
 			Dx.Comments += R.Comment * Gain;
-			Dx.Impr += valgo::ImprGain(V, D0, D1);
+			Dx.Impr += SpanImpr >= 0.0 ? SpanImpr : valgo::ImprGain(V, D0, D1);
 			Dx.Lost += valgo::LostShare(valgo::QOf(V, R, Ret, Over), Over, Load == AdLoad::Heavy) * valgo::ConvOn(V, DayNo) * Gain;
 			Dx.Watch += Gain * V.LengthMin / 60.0 * Ret;
 		}
@@ -1076,6 +1198,8 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 			G.Ad += Paying ? Gain[2] / 1000.0 : 0.0;
 			if (U3)
 			{
+				(Cl == static_cast<int>(Class::Short) ? Dx.CutAd : Dx.FoldedAd) += Paying ? Gain[2] / 1000.0 : 0.0;
+				Dx.CutViews += Paying && Cl == static_cast<int>(Class::Short) ? Gain[0] : 0.0;
 				double* const Into[4] = {&Dx.Likes, &Dx.Dislikes, &Dx.Comments, &Dx.Impr};
 				for (int W = 0; W < 4; ++W)
 				{
@@ -1089,7 +1213,7 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 				}
 				for (int W = 0; W < 4; ++W)
 				{
-					Tx.Decay[J][W] = std::fabs(Tx.Decay[J][W]) < 1e-9 ? 0.0 : Tx.Decay[J][W];
+					Tx.Decay[J][W] = std::fabs(Tx.Decay[J][W]) < 1e-9 ? 0.0 : Sig10(Tx.Decay[J][W]); // (10 digits: vtailx's)
 				}
 			}
 		}
@@ -1103,6 +1227,7 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 		G.Views += Gain[0];
 		G.Subs += Gain[1];
 		G.Ad += Paying ? Gain[2] / 1000.0 : 0.0;
+		Dx.FoldedAd += Paying ? Gain[2] / 1000.0 : 0.0;
 		if (DayIndex(D1) > S.Day + 365)
 		{
 			Tail& T = C.Tails[static_cast<size_t>(Class::Strategy)];
@@ -1122,6 +1247,7 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 		G.Views += Gain;
 		G.Subs += S.Conv * Gain;
 		G.Ad += Paying ? S.Rpm / 1000.0 * Gain : 0.0;
+		Dx.FoldedAd += Paying ? S.Rpm / 1000.0 * Gain : 0.0;
 		if (D1 >= S.At + EvergreenDays * Day)
 		{
 			Tail& T = C.Tails[static_cast<size_t>(Class::Strategy)];
@@ -1143,7 +1269,34 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 	if (Paying)
 	{
 		DayCents = static_cast<Chips>(std::llround(G.Ad * 100.0 * Sea));
+		// The top-earner rate (the user's soft ceiling, C3 fix H1): a Rerun 2.0 channel's pay month pays in full up to T, then
+		// closes on T + C; the day's share Kd scales every part of the day alike (the videos' cents, the Cuts feed's) and the
+		// rings keep what it held back. At or under T, Kd is exactly 1 and nothing below changes.
+		const Chips Earned = DayCents;
+		double Kd = 1.0;
+		if (U3)
+		{
+			DayCents = valgo::TopRatePay(valgo::PaidThisMonth(C, DayNo), Earned);
+			Kd = DayCents < Earned ? static_cast<double>(DayCents) / std::max(1e-9, G.Ad * 100.0 * Sea) : 1.0;
+			Dx.Held = Earned - DayCents;
+		}
+		for (const std::pair<Video*, double>& E : Earn)
+		{
+			E.first->X.Earned = Kd == 1.0 ? Quantize(E.first->X.Earned + E.second, 1e4) : Quantize(E.first->X.Earned + E.second * Kd, 1e4); // (to 1/10,000 of a cent)
+		}
 		C.BalanceCents += DayCents;
+		if (U3)
+		{
+			// The day's split (§4.5.7): the Cuts feed's cents rounded on their own, the watch page the rest (they sum to the day's);
+			// the folded long tails' impressions at the kept long videos' ratio that day (a neutral Breakdown's when none earned).
+			// (Past T the Cuts feed's part is Kd of its own, and what the rate held back of it is the held cents' Cuts part.)
+			Dx.CutCents = std::clamp<Chips>(static_cast<Chips>(std::llround(Kd == 1.0 ? Dx.CutAd * 100.0 * Sea : Dx.CutAd * 100.0 * Sea * Kd)), 0, DayCents);
+			Dx.HeldCut = Dx.Held > 0 ? std::clamp<Chips>(static_cast<Chips>(std::llround(Dx.CutAd * 100.0 * Sea)) - Dx.CutCents, 0, Dx.Held) : 0;
+			const double ImprPerDollar = Dx.LongAd > 0.0 ? Dx.LongImpr / Dx.LongAd : 1000.0 / (valgo::VaBaseCpm * valgo::VaCreatorShare);
+			const double MonPerDollar = Dx.LongAd > 0.0 ? Dx.LongMon / Dx.LongAd : 1000.0 / (valgo::VaBaseCpm * valgo::VaCreatorShare * 1.20);
+			Dx.AdImpr = Dx.LongImpr + Dx.FoldedAd * ImprPerDollar;
+			Dx.Monetized = Dx.LongMon + Dx.FoldedAd * MonPerDollar;
+		}
 	}
 	if (C.PartnerAt < 0.0)
 	{
@@ -1187,6 +1340,29 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 			const std::string Month = video_copy::MonthName(Mo);
 			const bool Pays = C.BalanceCents >= PayoutMinCents;
 			const Chips Cents = Pays ? C.BalanceCents : 0;
+			// Rerun 2.0's statement is itemized (§4.5.7): the balance's days split into the watch page (its RPM and CPM) and the
+			// Cuts feed (today's row joins the rings at the midnight, so it's added here); VideoCopy.cpp words it.
+			valgo::VaSplit Split;
+			const Chips BalanceNow = C.BalanceCents;
+			if (U3)
+			{
+				Split = valgo::SplitCovering(C, std::max<Chips>(0, C.BalanceCents - DayCents));
+				if (DayCents > 0 || Dx.Held > 0)
+				{
+					Split.Cents += DayCents;
+					Split.CutCents += Dx.CutCents;
+					Split.Views += G.Views;
+					Split.CutViews += Dx.CutViews;
+					Split.AdImpr += Dx.AdImpr;
+					Split.Monetized += Dx.Monetized;
+					Split.ToDay = DayNo;
+					// (Today's held cents join the rings' only where the rings keep theirs: DayRow's HeldCents, the lead's patch.)
+					Split.Held += valgo::VaHasHeld ? Dx.Held : 0;
+					Split.HeldCut += valgo::VaHasHeld ? Dx.HeldCut : 0;
+				}
+			}
+			// The top-earner rate's line (C3 fix H1): the month this payout covers passed T (its paid cents, today's included).
+			const bool TopRate = U3 && valgo::PaidThisMonth(C, DayNo) + DayCents > valgo::TopRateFrom();
 			if (Pays)
 			{
 				Bankroll += Cents;
@@ -1198,7 +1374,15 @@ void DayStep(Channel& C, life::State& L, Chips& Bankroll, kast::Channel& K, doub
 			// keeps to the one routine letter a week (§1.7).
 			if (Pays || !WroteThisWeek(L, D1))
 			{
-				Mail(L, D1, "rerun:pay", LetterStatement, video_copy::StatementSubject(Month, Pays), video_copy::StatementBody(Month, Cents, C.BalanceCents, Pays));
+				// (Itemized when the rings account for the whole balance: a channel that turned Rerun 2.0 on with an Update 2 balance
+				// keeps the plain letter until its balance is all Rerun 2.0's, so the parts always add up to what's paid.)
+				// (The statement's CPM is the advertisers' price, the top-earner rate's share never in it: StatementCpm.)
+				const std::string Body = (U3 && Split.Has && Split.Cents > 0 && Split.Cents == BalanceNow
+						? vcontent::StatementU3(Month, Split.WatchCents(), Split.WatchRpm(), valgo::StatementCpm(C, Split, valgo::PayMonthOf(DayNo)), Split.CutCents, Cents,
+							  C.BalanceCents, Pays)
+						: video_copy::StatementBody(Month, Cents, C.BalanceCents, Pays)) +
+					(TopRate ? " " + valgo::TopRateLine() : std::string());
+				Mail(L, D1, "rerun:pay", LetterStatement, video_copy::StatementSubject(Month, Pays), Body);
 			}
 			// Old payout keys go (the day's step never comes round again); the story keys stay.
 			std::vector<std::string> PayKeys;
@@ -1389,27 +1573,79 @@ std::string U3SemiEsc(const std::string& In)
 	return Out;
 }
 
+/** The compact ints' alphabet: a value from -1 to 60 as one character (62 places; review-core-videoalgo: 61 read the NUL). */
+constexpr const char* U3IntChars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
 /**
- * A thumbnail recipe in one field: "<14 ints, comma-joined>;<variant>;<caption>;<caption2>". A default recipe (a Duel's
- * contender that isn't there) is the empty field.
+ * The compositor's facts that repeat the video's own Thumb (VideoContent.h: Caption2's facts after thumb::FactSep; c the cards,
+ * o the other face, s the site, as Video::Th keeps them): written "key=" + U3SameAsThumb, read back from the video's Thumb.
  */
-std::string U3PackSpec(const ThumbSpec& S)
+constexpr char U3SameAsThumb = '\x1e';
+std::string U3FactOfThumb(char Key, const Thumb& Th)
+{
+	return Key == 'c' ? Th.Cards : Key == 'o' ? Th.Opponent : Key == 's' ? std::to_string(Th.Site) : std::string();
+}
+
+/** Caption2 with each repeated fact elided (Pack) or restored (!Pack): the facts' order and every other byte kept. */
+std::string U3ThumbFacts(const std::string& Caption2, const Thumb& Th, bool Pack)
+{
+	std::string Out;
+	size_t At = 0;
+	const size_t First = Caption2.find(thumb::FactSep);
+	if (First == std::string::npos)
+	{
+		return Caption2;
+	}
+	Out = Caption2.substr(0, First);
+	At = First;
+	while (At < Caption2.size())
+	{
+		const size_t Next = std::min(Caption2.find(thumb::FactSep, At + 1), Caption2.size());
+		std::string Fact = Caption2.substr(At + 1, Next - At - 1);
+		if (Fact.size() >= 2 && Fact[1] == '=' && (Fact[0] == 'c' || Fact[0] == 'o' || Fact[0] == 's'))
+		{
+			const std::string Own = U3FactOfThumb(Fact[0], Th);
+			if (Pack && Fact.substr(2) == Own && !Own.empty())
+			{
+				Fact = Fact.substr(0, 2) + U3SameAsThumb;
+			}
+			else if (!Pack && Fact.size() == 3 && Fact[2] == U3SameAsThumb)
+			{
+				Fact = Fact.substr(0, 2) + Own;
+			}
+		}
+		Out += thumb::FactSep + Fact;
+		At = Next;
+	}
+	return Out;
+}
+
+/**
+ * A thumbnail recipe in one field: "<14 ints>;<variant>;<caption>;<caption2>". The ints are "~" and a character each while they
+ * fit -1 .. 60 (C3's compaction), else comma-joined (the older form, still read); Caption2's facts that repeat the video's Thumb
+ * are elided. A default recipe (a Duel's contender that isn't there) is the empty field.
+ */
+std::string U3PackSpec(const ThumbSpec& S, const Thumb& Th)
 {
 	ThumbSpec Copy = S;
 	ThumbSpec Blank;
 	const std::array<int16_t*, 14> Given = U3SpecInts(Copy);
 	const std::array<int16_t*, 14> Unset = U3SpecInts(Blank);
 	bool Same = S.Variant == Blank.Variant && S.Caption.empty() && S.Caption2.empty();
-	std::string Ints;
+	bool Compact = true;
+	std::string Ints, Chars = "~";
 	for (size_t I = 0; I < Given.size(); ++I)
 	{
+		const int V = static_cast<int>(*Given[I]);
 		Same = Same && *Given[I] == *Unset[I];
-		Ints += (I > 0 ? "," : "") + std::to_string(static_cast<int>(*Given[I]));
+		Ints += (I > 0 ? "," : "") + std::to_string(V);
+		Compact = Compact && V >= -1 && V <= 60;
+		Chars += Compact ? U3IntChars[V + 1] : '0';
 	}
-	return Same ? std::string() : Ints + ";" + std::to_string(S.Variant) + ";" + U3SemiEsc(S.Caption) + ";" + U3SemiEsc(S.Caption2);
+	return Same ? std::string() : (Compact ? Chars : Ints) + ";" + std::to_string(S.Variant) + ";" + U3SemiEsc(S.Caption) + ";" + U3SemiEsc(U3ThumbFacts(S.Caption2, Th, true));
 }
 
-ThumbSpec U3UnpackSpec(const std::string& Field)
+ThumbSpec U3UnpackSpec(const std::string& Field, const Thumb& Th)
 {
 	ThumbSpec S;
 	if (Field.empty())
@@ -1433,16 +1669,29 @@ ThumbSpec U3UnpackSpec(const std::string& Field)
 		}
 	}
 	const std::array<int16_t*, 14> Ints = U3SpecInts(S);
-	size_t At = 0;
-	for (size_t I = 0; I < Ints.size() && At <= Parts[0].size(); ++I)
+	if (!Parts[0].empty() && Parts[0][0] == '~')
 	{
-		const size_t Comma = std::min(Parts[0].find(',', At), Parts[0].size());
-		*Ints[I] = static_cast<int16_t>(ToInt(Parts[0].substr(At, Comma - At)));
-		At = Comma + 1;
+		// The compact form: a character a value (U3IntChars' place less one).
+		const std::string Alphabet = U3IntChars;
+		for (size_t I = 0; I < Ints.size() && I + 1 < Parts[0].size(); ++I)
+		{
+			const size_t Place = Alphabet.find(Parts[0][I + 1]);
+			*Ints[I] = static_cast<int16_t>(Place == std::string::npos ? 0 : static_cast<int>(Place) - 1);
+		}
+	}
+	else
+	{
+		size_t At = 0;
+		for (size_t I = 0; I < Ints.size() && At <= Parts[0].size(); ++I)
+		{
+			const size_t Comma = std::min(Parts[0].find(',', At), Parts[0].size());
+			*Ints[I] = static_cast<int16_t>(ToInt(Parts[0].substr(At, Comma - At)));
+			At = Comma + 1;
+		}
 	}
 	S.Variant = Parts.size() > 1 ? static_cast<uint32_t>(ToInt(Parts[1])) : 0u;
 	S.Caption = Parts.size() > 2 ? Parts[2] : std::string();
-	S.Caption2 = Parts.size() > 3 ? Parts[3] : std::string();
+	S.Caption2 = Parts.size() > 3 ? U3ThumbFacts(Parts[3], Th, false) : std::string();
 	return S;
 }
 
@@ -1477,15 +1726,29 @@ E U3Enum(const std::string& Field)
  * 22 KB): "<T>:<P>:<A>:<kind>:<ctrF>" joined by ';', each number the shortest text that reads back as exactly it. A is empty
  * when it is its kind's own (KindA) and the source mix is the kind's (MixFor), so neither is written.
  */
+/** A component's start: "d<day>" at a world midnight (every decision's), the minute otherwise (a repackage's, a Live Drop's). */
+std::string U3CompTime(double T)
+{
+	const double Days = T / Day;
+	return Days == std::floor(Days) && Days >= 0.0 && Days < 1e7 ? "d" + std::to_string(static_cast<long long>(Days)) : Num(T);
+}
+
+double U3ReadCompTime(const std::string& F)
+{
+	return !F.empty() && F[0] == 'd' ? static_cast<double>(ToInt(F.substr(1))) * Day : ToNum(F);
+}
+
 std::string U3PackComps(const Video& V)
 {
+	// (C3's compaction: the start as a day at a midnight, CtrF empty when 1.)
 	std::string Out;
 	for (size_t K = 0; K < V.X.Comps.size(); ++K)
 	{
 		const Comp& Cp = V.X.Comps[K];
 		double Own = 0.0;
 		const bool Fixed = valgo::KindA(V, Cp.Kind, Own) && Own == Cp.A;
-		Out += (K > 0 ? ";" : "") + Num(Cp.T) + ":" + Num(Cp.P) + ":" + (Fixed ? std::string() : Num(Cp.A)) + ":" + std::to_string(static_cast<int>(Cp.Kind)) + ":" + U3Flt(Cp.CtrF);
+		Out += (K > 0 ? ";" : "") + U3CompTime(Cp.T) + ":" + Num(Cp.P) + ":" + (Fixed ? std::string() : Num(Cp.A)) + ":" + std::to_string(static_cast<int>(Cp.Kind)) + ":" +
+			(Cp.CtrF == 1.0f ? std::string() : U3Flt(Cp.CtrF));
 	}
 	return Out;
 }
@@ -1507,13 +1770,13 @@ void U3UnpackComps(const std::string& Field, Video& V)
 		if (F.size() >= 5)
 		{
 			Comp Cp;
-			Cp.T = ToNum(F[0]);
+			Cp.T = U3ReadCompTime(F[0]);
 			Cp.P = ToNum(F[1]);
 			Cp.Kind = U3Enum<CompKind>(F[3]);
 			double Own = 0.0;
 			Cp.A = F[2].empty() && valgo::KindA(V, Cp.Kind, Own) ? Own : ToNum(F[2]);
 			Cp.SrcMix = valgo::MixFor(Cp.Kind);
-			Cp.CtrF = static_cast<float>(ToNum(F[4]));
+			Cp.CtrF = F[4].empty() ? 1.0f : static_cast<float>(ToNum(F[4]));
 			V.X.Comps.push_back(Cp);
 		}
 		At = End + 1;
@@ -1521,22 +1784,34 @@ void U3UnpackComps(const std::string& Field, Video& V)
 }
 
 /** vid's Update 3 block, after the title (P[28]): "3", then the fields in VideoX's saved order (§7.4), LuckLn and the components. */
+/** An int field, empty at its default (C3's compaction of vid's block: most videos keep most defaults). */
+std::string U3IntOr(long long V, long long Default)
+{
+	return V == Default ? std::string() : std::to_string(V);
+}
+
+long long U3ReadIntOr(const std::string& F, long long Default)
+{
+	return F.empty() ? Default : ToInt(F);
+}
+
 void U3WriteVideoX(const Video& V, std::string& Out)
 {
 	const VideoX& X = V.X;
-	// (s0Base is written empty when it equals s0: every Update 2 choice set's.)
-	Out += "\t3\t" + std::to_string(X.Fate) + "\t" + Num(X.Ctr) + "\t" + Num(X.CtrNoise) + "\t" + Num(X.Sigma) + "\t" + Num(X.KastShare) + "\t" + Num(X.S0) + "\t" +
-		(X.S0Base == X.S0 ? std::string() : Num(X.S0Base)) + "\t" + Num(X.P0) + "\t" + std::to_string(X.Idea) + "\t" + std::to_string(X.Series) + "\t" + Esc(X.TitleTpl) + "\t" +
-		std::to_string(X.Repacks) + "\t" +
-		std::to_string(X.LastRepackDay) + "\t" + std::to_string(static_cast<int>(X.Promise)) + "\t" + std::to_string(static_cast<int>(X.Payoff)) + "\t" +
-		std::to_string(static_cast<int>(X.C)) + "\t" + std::to_string(static_cast<int>(X.Ads)) + "\t" + std::to_string(static_cast<int>(X.AdsAtUpload)) + "\t" +
-		std::to_string(static_cast<int>(X.Len)) + "\t" + std::to_string(X.AdsChangedDay) + "\t" + std::to_string(static_cast<int>(X.Launch)) + "\t" +
-		std::to_string(static_cast<int>(X.Duels)) + "\t" + U3Flt(X.DuelCtr[0]) + "\t" + U3Flt(X.DuelCtr[1]) + "\t" + U3Flt(X.DuelCtr[2]) + "\t" +
-		std::to_string(static_cast<int>(X.DuelWin)) + "\t" + std::to_string(static_cast<int>(X.Verdict)) + "\t" + U3Flt(X.SettledS) + "\t" + Num(X.Earned) + "\t" +
-		Esc(X.NextUp);
+	// (s0Base is written empty when it equals s0: every Update 2 choice set's. C3: every field at VideoX's default is empty.)
+	auto Flt0 = [](float F) { return F == 0.0f ? std::string() : U3Flt(F); };
+	auto Num0 = [](double D) { return D == 0.0 ? std::string() : Num(D); };
+	constexpr long long Std = static_cast<long long>(AdLoad::Standard);
+	Out += "\t3\t" + std::to_string(X.Fate) + "\t" + Num(X.Ctr) + "\t" + Num(X.CtrNoise) + "\t" + Num(X.Sigma) + "\t" + Num0(X.KastShare) + "\t" + Num(X.S0) + "\t" +
+		(X.S0Base == X.S0 ? std::string() : Num(X.S0Base)) + "\t" + Num(X.P0) + "\t" + U3IntOr(X.Idea, -1) + "\t" + U3IntOr(X.Series, -1) + "\t" + Esc(X.TitleTpl) + "\t" +
+		U3IntOr(X.Repacks, 0) + "\t" + U3IntOr(X.LastRepackDay, -1) + "\t" + U3IntOr(X.Promise, 0) + "\t" + U3IntOr(X.Payoff, 0) + "\t" + U3IntOr(static_cast<long long>(X.C), 0) +
+		"\t" + U3IntOr(static_cast<long long>(X.Ads), Std) + "\t" + U3IntOr(static_cast<long long>(X.AdsAtUpload), Std) + "\t" +
+		U3IntOr(static_cast<long long>(X.Len), static_cast<long long>(LengthOpt::Standard)) + "\t" + U3IntOr(X.AdsChangedDay, -1) + "\t" + U3IntOr(X.Launch, 0) + "\t" +
+		U3IntOr(X.Duels, 1) + "\t" + Flt0(X.DuelCtr[0]) + "\t" + Flt0(X.DuelCtr[1]) + "\t" + Flt0(X.DuelCtr[2]) + "\t" + U3IntOr(X.DuelWin, -1) + "\t" + U3IntOr(X.Verdict, -1) +
+		"\t" + Flt0(X.SettledS) + "\t" + Num0(X.Earned) + "\t" + Esc(X.NextUp);
 	for (const ThumbSpec& S : X.Spec)
 	{
-		Out += "\t" + Esc(U3PackSpec(S));
+		Out += "\t" + Esc(U3PackSpec(S, V.Th));
 	}
 	// The creator update (SPEC_CREATORS §8.1): the upload's own luck, ln(Luck x Viral), and ":1" when its viral roll hit; then
 	// the components (U3PackComps; an empty field when there are none).
@@ -1560,32 +1835,34 @@ void U3ReadVideoX(const std::vector<std::string>& P, Video& V)
 	X.S0 = ToNum(P[35]);
 	X.S0Base = P[36].empty() ? X.S0 : ToNum(P[36]);
 	X.P0 = ToNum(P[37]);
-	X.Idea = static_cast<int>(ToInt(P[38]));
-	X.Series = static_cast<int>(ToInt(P[39]));
+	// (Each field empty at VideoX's default reads as it: C3's compaction.)
+	auto EnumOr = [](const std::string& F, auto Default) { return F.empty() ? Default : U3Enum<decltype(Default)>(F); };
+	X.Idea = static_cast<int>(U3ReadIntOr(P[38], -1));
+	X.Series = static_cast<int>(U3ReadIntOr(P[39], -1));
 	X.TitleTpl = Unesc(P[40]);
-	X.Repacks = static_cast<int>(ToInt(P[41]));
-	X.LastRepackDay = static_cast<int>(ToInt(P[42]));
-	X.Promise = static_cast<uint8_t>(ToInt(P[43]));
-	X.Payoff = static_cast<uint8_t>(ToInt(P[44]));
-	X.C = U3Enum<Coin>(P[45]);
-	X.Ads = U3Enum<AdLoad>(P[46]);
-	X.AdsAtUpload = U3Enum<AdLoad>(P[47]);
-	X.Len = U3Enum<LengthOpt>(P[48]);
-	X.AdsChangedDay = static_cast<int>(ToInt(P[49]));
-	X.Launch = static_cast<uint8_t>(ToInt(P[50]));
-	X.Duels = static_cast<int8_t>(ToInt(P[51]));
+	X.Repacks = static_cast<int>(U3ReadIntOr(P[41], 0));
+	X.LastRepackDay = static_cast<int>(U3ReadIntOr(P[42], -1));
+	X.Promise = static_cast<uint8_t>(U3ReadIntOr(P[43], 0));
+	X.Payoff = static_cast<uint8_t>(U3ReadIntOr(P[44], 0));
+	X.C = EnumOr(P[45], Coin::Full);
+	X.Ads = EnumOr(P[46], AdLoad::Standard);
+	X.AdsAtUpload = EnumOr(P[47], AdLoad::Standard);
+	X.Len = EnumOr(P[48], LengthOpt::Standard);
+	X.AdsChangedDay = static_cast<int>(U3ReadIntOr(P[49], -1));
+	X.Launch = static_cast<uint8_t>(U3ReadIntOr(P[50], 0));
+	X.Duels = static_cast<int8_t>(U3ReadIntOr(P[51], 1));
 	for (size_t K = 0; K < 3; ++K)
 	{
 		X.DuelCtr[K] = static_cast<float>(ToNum(P[52 + K]));
 	}
-	X.DuelWin = static_cast<int8_t>(ToInt(P[55]));
-	X.Verdict = static_cast<int8_t>(ToInt(P[56]));
+	X.DuelWin = static_cast<int8_t>(U3ReadIntOr(P[55], -1));
+	X.Verdict = static_cast<int8_t>(U3ReadIntOr(P[56], -1));
 	X.SettledS = static_cast<float>(ToNum(P[57]));
 	X.Earned = ToNum(P[58]);
 	X.NextUp = Unesc(P[59]);
 	for (size_t K = 0; K < 3; ++K)
 	{
-		X.Spec[K] = U3UnpackSpec(Unesc(P[60 + K]));
+		X.Spec[K] = U3UnpackSpec(Unesc(P[60 + K]), V.Th);
 	}
 	if (P.size() >= U3VideoFields - 1)
 	{
@@ -1616,6 +1893,43 @@ void U3ReadRow(const std::vector<std::string>& P, size_t At, DayRow& R)
 		*Fields[K] = static_cast<float>(ToNum(P[At + K]));
 	}
 	R.Cents = ToInt(P[At + 8]);
+}
+
+/** A row carries the money's split (a day ads paid, once DayRow has the fields: VideoAlgoPriv.h's VaRowSplit). */
+bool U3RowSplits(const DayRow& R)
+{
+	return valgo::VaHasSplit && (valgo::VaRowCut(R) != 0 || valgo::VaRowCutViews(R) != 0.0 || valgo::VaRowImpr(R) != 0.0 || valgo::VaRowMonetized(R) != 0.0);
+}
+
+/** The split's four fields (cutCents, cutViews, adImpr, monetized), after a row's nine. */
+constexpr size_t U3SplitFields = 4;
+std::string U3SplitText(const DayRow& R)
+{
+	return "\t" + std::to_string(valgo::VaRowCut(R)) + "\t" + U3Flt(static_cast<float>(valgo::VaRowCutViews(R))) + "\t" + U3Flt(static_cast<float>(valgo::VaRowImpr(R))) + "\t" +
+		U3Flt(static_cast<float>(valgo::VaRowMonetized(R)));
+}
+
+void U3ReadSplit(const std::vector<std::string>& P, size_t At, DayRow& R)
+{
+	valgo::VaSetRowSplit(R, static_cast<Chips>(ToInt(P[At])), static_cast<float>(ToNum(P[At + 1])), static_cast<float>(ToNum(P[At + 2])), static_cast<float>(ToNum(P[At + 3])));
+}
+
+/** A row carries what the top-earner rate held back (a day past T, once DayRow keeps it: c3f-algo_to_lead_1.diff). Such a row
+ *  writes its split too: a run of its own keyed "*", fifteen fields a row (vlife: two after its split). Nothing else moves. */
+bool U3RowHolds(const DayRow& R)
+{
+	return valgo::VaHasHeld && (valgo::VaRowHeld(R) != 0 || valgo::VaRowHeldCut(R) != 0);
+}
+
+constexpr size_t U3HeldFields = 2;
+std::string U3HeldText(const DayRow& R)
+{
+	return "\t" + std::to_string(valgo::VaRowHeld(R)) + "\t" + std::to_string(valgo::VaRowHeldCut(R));
+}
+
+void U3ReadHeld(const std::vector<std::string>& P, size_t At, DayRow& R)
+{
+	valgo::VaSetRowHeld(R, static_cast<Chips>(ToInt(P[At])), static_cast<Chips>(ToInt(P[At + 1])));
 }
 
 void WriteCandidate(const Candidate& C, std::string& Out)
@@ -1800,6 +2114,28 @@ double ViewsU3(const Video& V, double World)
 		Sum += K.P * CurveFrac(K.A, S.Tau1, S.Tau2, (World - K.T) / VaDay);
 	}
 	return Sum + V.E * std::min(Days, video_detail::EvergreenDays);
+}
+
+void SpanU3(const Video& V, double T0, double T1, double& Was, double& Now, double& Impr)
+{
+	// ViewsU3 at both ends and ImprGain over the span, each part's curve read once (the same expressions in the same order, so
+	// the numbers are theirs to the bit): DayStep's hot loop.
+	const VaShape S = ShapeU3(V.C);
+	const double Days0 = (T0 - V.At) / VaDay, Days1 = (T1 - V.At) / VaDay;
+	const double F0 = CurveFrac(S.A, S.Tau1, S.Tau2, Days0), F1 = CurveFrac(S.A, S.Tau1, S.Tau2, Days1);
+	double Sum0 = V.X.P0 * F0, Sum1 = V.X.P0 * F1;
+	double Out = (F1 - F0) * V.X.P0 * ImprPerView(V, 0, 1.0f);
+	for (const Comp& K : V.X.Comps)
+	{
+		const double K0 = CurveFrac(K.A, S.Tau1, S.Tau2, (T0 - K.T) / VaDay), K1 = CurveFrac(K.A, S.Tau1, S.Tau2, (T1 - K.T) / VaDay);
+		Sum0 += K.P * K0;
+		Sum1 += K.P * K1;
+		const double Part = (K1 - K0) * K.P;
+		Out += Part * ImprPerView(V, K.SrcMix, K.CtrF);
+	}
+	Was = Days0 <= 0.0 ? 0.0 : Sum0 + V.E * std::min(Days0, video_detail::EvergreenDays);
+	Now = Days1 <= 0.0 ? 0.0 : Sum1 + V.E * std::min(Days1, video_detail::EvergreenDays);
+	Impr = std::max(0.0, Out);
 }
 
 double RemainingU3(const Video& V, double World)
@@ -2014,6 +2350,16 @@ void NoteHand(Channel& C, const Candidate& Cand)
 		}
 	}
 	N.Rec.Shown = Shown;
+	// Rerun 2.0's hand kinds a record shows by itself (RecordKinds: a monster, set over set, runner-runner) on a channel that
+	// runs it: the weightiest kind names the moment (an Update 2 channel's candidates keep Update 2's kinds: dormant until its
+	// first Rerun 2.0 upload). The kinds that need the event's context are the Session's and NoteLiveHand's.
+	if (C.X.On && (N.Source == 0 || N.Source == 1 || N.Source == 3) && N.Rec.Mine.size() >= 2 && !EventKind(N.K) && N.K != Kind::Idea)
+	{
+		for (const Kind Nk : RecordKinds(N.Rec, !N.Rec.Shown.empty()))
+		{
+			N.K = KindWeight(Nk) > KindWeight(N.K) ? Nk : N.K;
+		}
+	}
 	N.At = Quantize(N.At, 100.0);
 	N.Expires = N.Expires > N.At ? Quantize(N.Expires, 100.0) : N.At + OpenDays * Day;
 	N.Drama = DramaOf(N);
@@ -2092,6 +2438,31 @@ void NoteLiveHand(life::State& L, const recall::Record& Rec, const room::HandNot
 	{
 		K = Kind::Knockout;
 		Is = true;
+	}
+	// Rerun 2.0's hand kinds (§6.3's unlock column; their copy is core-videocontent's), on a channel that runs it: what the record
+	// shows by itself (RecordKinds: a monster, set over set, runner-runner) and what the room saw (two sent home at once; the
+	// heads-up all-in that decided the title). The weightiest kind wins, as Classify's own do.
+	if (L.Video.X.On)
+	{
+		auto Take = [&K, &Is](Kind Nk) {
+			if (!Is || KindWeight(Nk) > KindWeight(K))
+			{
+				K = Nk;
+				Is = true;
+			}
+		};
+		for (const Kind Nk : RecordKinds(Rec, Showdown))
+		{
+			Take(Nk);
+		}
+		if (Note && Note->Busted.size() >= 2 && Rec.HeroNet > 0)
+		{
+			Take(Kind::DoubleKo);
+		}
+		if (Ctx.Final && Ctx.Remaining == 2 && AllInCalled && Note && !Note->Busted.empty())
+		{
+			Take(Kind::HeadsUp);
+		}
 	}
 	if (!Is)
 	{
@@ -2215,6 +2586,18 @@ std::string CanUpload(const Choice& Ch, const std::vector<Candidate>& Open)
 			{
 				return video_copy::WhyNot(2);
 			}
+		}
+	}
+	// An idea is a video on its own (§6.3): alone, it goes up as any format its facts allow ("fmt=", the formats a single idea
+	// may go up as: IDEAS sets the format to the card's first), without a night's or an event's hands, and as no other
+	// (WhyNot(10); core-videocontent_to_core-videoalgo_2.diff's rule, review-core-videoalgo). An idea without "fmt=" keeps
+	// Update 2's rules below.
+	if (P.size() == 1 && P.front().K == Kind::Idea)
+	{
+		const std::vector<std::string> Fmt = valgo::FactValues(P.front().IdeaFacts, "fmt");
+		if (!Fmt.empty())
+		{
+			return Fmt.front().find(static_cast<char>('0' + static_cast<int>(Ch.F))) != std::string::npos ? std::string() : video_copy::WhyNot(10);
 		}
 	}
 	if (Ch.F == Format::Vlog || Ch.F == Format::Recap)
@@ -2627,6 +3010,20 @@ Video UploadU3(Channel& C, const Choice& Ch, double World, const std::string& Se
 	Video V = UploadPlanU2(C, AsU2, World, Seed, F, Fresh, &Plan);
 	const Candidate& Lead = Plan.Lead;
 	const int Group = GroupOf(Lead.K);
+	// An idea that is a Strategy lesson ("cls=S", §6.3's S: core-videocontent's facts) is the evergreen class, a year of search
+	// tail, in any long format (a Cut stays a Cut).
+	if (Lead.K == Kind::Idea && Ch.F != Format::Short)
+	{
+		const std::vector<std::string> Cls = valgo::FactValues(Lead.IdeaFacts, "cls");
+		if (!Cls.empty() && Cls.front() == "S")
+		{
+			V.C = Class::Strategy;
+			const Shape Sh = ShapeOf(V.C);
+			V.A = Sh.A;
+			V.Tau1 = Sh.Tau1;
+			V.Tau2 = Sh.Tau2;
+		}
+	}
 	VideoX& Vx = V.X;
 	Vx = VideoX();
 	Vx.On = true;
@@ -2637,7 +3034,7 @@ Video UploadU3(Channel& C, const Choice& Ch, double World, const std::string& Se
 		const double U2v = U.Next();
 		return std::sqrt(-2.0 * std::log(U1)) * std::cos(2.0 * 3.14159265358979323846 * U2v);
 	};
-	Vx.CtrNoise = Quantize(std::exp(0.15 * Normal() - 0.01125), 1e6);
+	Vx.CtrNoise = Quantize(std::exp(0.15 * Normal() - 0.01125), 1e4); // (to 1e-4, as the block keeps it: C3's compaction)
 	double DuelNoise[3] = {0.0, 0.0, 0.0};
 	for (double& N : DuelNoise)
 	{
@@ -2673,15 +3070,13 @@ Video UploadU3(Channel& C, const Choice& Ch, double World, const std::string& Se
 		Vx.Spec[K] = Ch.Thumbs[K];
 	}
 	Vx.Duels = static_cast<int8_t>(Contenders >= 2 ? Contenders : 1);
+	// The thumbnail's facts (the cards, the opponent, the site: ui-thumbs' compositor reads them from Video::Th for a recipe
+	// too, ThumbArt.h's contract), with the frame marked Recipe (the video's ThumbSpec draws it).
+	V.Th = ThumbFor(Ch, C.Open);
 	if (Recipe)
 	{
 		V.Fr = Frame::Recipe;
-		V.Th = Thumb();
 		V.Th.Fr = Frame::Recipe;
-	}
-	else
-	{
-		V.Th = ThumbFor(Ch, C.Open);
 	}
 	// Suitability (§4.5.4): an idea that promotes a real-money site is Limited and 18+ (core-videocontent marks it in its
 	// facts: "ltd=1"); strong language (a tilted face with a Loud title) is Limited unless the edit is clean (+15 minutes).
@@ -2744,7 +3139,8 @@ Video UploadU3(Channel& C, const Choice& Ch, double World, const std::string& Se
 			double Ctr = std::clamp(0.05 * Pack * Plan.Quality * Plan.Face, 0.02, 0.14);
 			if (Contenders >= 2)
 			{
-				Ctr *= std::exp(0.12 * DuelNoise[K]);
+				// (Each contender's CTR to 1e-6, as the block keeps it: the served mean is the saved contenders' own.)
+				Ctr = Quantize(Ctr * std::exp(0.12 * DuelNoise[K]), 1e6);
 				Vx.DuelCtr[K] = static_cast<float>(Ctr);
 			}
 			Sum += Ctr;
@@ -2812,7 +3208,7 @@ Video UploadU3(Channel& C, const Choice& Ch, double World, const std::string& Se
 	const double Feed = std::max(0.0, 0.93 - Vx.KastShare) * (1.0 - Vx.Sigma);
 	const double Adult = !Promo ? 1.0 : Ch.F == Format::Short ? 1.0 - Feed : 1.0 - (1.0 - valgo::VaAdultHome) * Feed;
 	V.P = Quantize(V.P * IdeaTopic * algo::Compress(M3, valgo::VaLmaxVideo) * X.Momentum * Streak * Vx.CtrNoise * Adult, 100.0);
-	Vx.P0 = Quantize(V.P / (1.0 + algo::Kappa(Vx.S0)), 100.0);
+	Vx.P0 = valgo::VaViews(V.P / (1.0 + algo::Kappa(Vx.S0)));
 	V.E = V.C == Class::Strategy ? Quantize(V.P * 0.0015, 10000.0) : 0.0;
 	// The trend's search viewers (§4.4's Trend component, at most one): from the first midnight after the drop, a decision
 	// made at upload from the trend it rides, so nothing later needs to remember the match.
@@ -2820,7 +3216,7 @@ Video UploadU3(Channel& C, const Choice& Ch, double World, const std::string& Se
 	{
 		Comp K;
 		K.T = static_cast<double>(Today + 1) * Day;
-		K.P = Quantize(valgo::VaTrendComp * (TrendFit - 1.0) / valgo::VaTrendCompAt * Vx.P0, 100.0);
+		K.P = valgo::VaViews(valgo::VaTrendComp * (TrendFit - 1.0) / valgo::VaTrendCompAt * Vx.P0);
 		K.A = valgo::VaTrendA;
 		K.Kind = CompKind::Trend;
 		K.SrcMix = valgo::MixFor(CompKind::Trend);
@@ -2837,6 +3233,19 @@ Video UploadU3(Channel& C, const Choice& Ch, double World, const std::string& Se
 	return V;
 }
 } // namespace video_detail
+
+namespace valgo
+{
+uint8_t PayoffFor(const Candidate& Lead, const std::vector<Candidate>& Open)
+{
+	return video_detail::PayoffOf(Lead, Open);
+}
+
+double NoveltyFor(const Channel& C, int Arch)
+{
+	return video_detail::NoveltyOf(C, Arch);
+}
+} // namespace valgo
 
 std::string Upload(Channel& C, const Choice& Ch, double World, const std::string& Seed, const UploadFacts& F)
 {
@@ -3148,7 +3557,9 @@ void WriteLinesU3(const life::State& L, std::string& Out)
 		return;
 	}
 	// The lifetime row and the recommender's standing always (they say the channel's X is on), the rest when they hold any.
-	Out += "video\tvlife" + U3RowText(X.Life) + "\t" + std::to_string(X.Since) + "\n";
+	// (A row's money split, §4.5.7, follows its nine fields once ads have paid: vlife's after since.)
+	Out += "video\tvlife" + U3RowText(X.Life) + "\t" + std::to_string(X.Since) + (U3RowSplits(X.Life) || U3RowHolds(X.Life) ? U3SplitText(X.Life) : std::string()) +
+		(U3RowHolds(X.Life) ? U3HeldText(X.Life) : std::string()) + "\n";
 	// vmom, redefined by the creator update (SPEC_CREATORS §8.1; G3 never shipped): MomH, MomC, MomShown, n, the last six
 	// perf values, lastUploadDay, welcomeBack, the streak (weeks, its last counted week, Rain Checks), UploadsEver, TrendWeek.
 	Out += "video\tvmom\t" + Num(X.MomH) + "\t" + Num(X.Momentum) + "\t" + Num(X.MomShown) + "\t" + std::to_string(X.SettledN);
@@ -3158,13 +3569,17 @@ void WriteLinesU3(const life::State& L, std::string& Out)
 	}
 	Out += "\t" + std::to_string(X.LastUploadDay) + "\t" + (X.WelcomeBack ? "1" : "0") + "\t" + std::to_string(X.StreakW) + "\t" + std::to_string(X.StreakWeek) + "\t" +
 		std::to_string(X.RainChecks) + "\t" + std::to_string(X.UploadsEver) + "\t" + std::to_string(X.TrendWeek) + "\n";
-	// The rings: a run of consecutive keys on one line (the first key, then nine fields a row), a new line at any gap.
+	// The rings: a run of consecutive keys on one line (the first key, then nine fields a row), a new line at any gap. Rows that
+	// carry the money's split (the days ads paid) run on a line of their own, its key marked "+", thirteen fields a row; rows the
+	// top-earner rate held back on (C3 fix H1, once DayRow keeps it) the same with the held cents, keyed "*", fifteen a row.
 	auto Rings = [&Out](const char* Tag, const std::vector<DayRow>& Rows) {
+		auto KindOf = [](const DayRow& R) { return U3RowHolds(R) ? 2 : U3RowSplits(R) ? 1 : 0; };
 		for (size_t I = 0; I < Rows.size(); ++I)
 		{
-			const bool Starts = I == 0 || Rows[I].Key != Rows[I - 1].Key + 1;
-			Out += Starts ? (I > 0 ? "\n" : "") + std::string("video\t") + Tag + "\t" + std::to_string(Rows[I].Key) : std::string();
-			Out += U3RowText(Rows[I]);
+			const int Kind = KindOf(Rows[I]);
+			const bool Starts = I == 0 || Rows[I].Key != Rows[I - 1].Key + 1 || Kind != KindOf(Rows[I - 1]);
+			Out += Starts ? (I > 0 ? "\n" : "") + std::string("video\t") + Tag + "\t" + std::to_string(Rows[I].Key) + (Kind == 2 ? "*" : Kind == 1 ? "+" : "") : std::string();
+			Out += U3RowText(Rows[I]) + (Kind >= 1 ? U3SplitText(Rows[I]) : std::string()) + (Kind == 2 ? U3HeldText(Rows[I]) : std::string());
 		}
 		Out += Rows.empty() ? "" : "\n";
 	};
@@ -3172,7 +3587,9 @@ void WriteLinesU3(const life::State& L, std::string& Out)
 	Rings("vmonth", X.Months);
 	for (const TopRow& R : X.Top)
 	{
-		Out += "video\tvtop\t" + Esc(R.Id) + "\t" + Num(R.Views) + "\t" + std::to_string(R.Cents) + "\t" + Num(R.At) + "\t" + Esc(R.Title) + "\n";
+		// (At is empty when the id says it: an upload's id is "v<its minute>", C3's compaction.)
+		const bool AtInId = R.Id == "v" + Num(R.At);
+		Out += "video\tvtop\t" + Esc(R.Id) + "\t" + Num(R.Views) + "\t" + std::to_string(R.Cents) + "\t" + (AtInId ? std::string() : Num(R.At)) + "\t" + Esc(R.Title) + "\n";
 	}
 	for (size_t K = 0; K < X.TailsX.size(); ++K)
 	{
@@ -3354,13 +3771,25 @@ bool ReadLine(const std::vector<std::string>& P, life::State& L)
 		}
 		else if ((Tag == "vday" || Tag == "vmonth") && P.size() >= 12)
 		{
-			// The first key, then nine fields a row, the keys consecutive.
+			// The first key, then nine fields a row (thirteen with the money's split: the key ends in "+"; fifteen with the top-earner
+			// rate's held cents too: "*"), the keys consecutive.
 			const int First = static_cast<int>(ToInt(P[2]));
-			for (size_t At = 3; At + 9 <= P.size(); At += 9)
+			const bool Held = !P[2].empty() && P[2].back() == '*';
+			const bool Wide = Held || (!P[2].empty() && P[2].back() == '+');
+			const size_t Width = Held ? 9 + U3SplitFields + U3HeldFields : Wide ? 9 + U3SplitFields : 9;
+			for (size_t At = 3; At + Width <= P.size(); At += Width)
 			{
 				DayRow R;
-				R.Key = First + static_cast<int>((At - 3) / 9);
+				R.Key = First + static_cast<int>((At - 3) / Width);
 				U3ReadRow(P, At, R);
+				if (Wide)
+				{
+					U3ReadSplit(P, At + 9, R);
+				}
+				if (Held)
+				{
+					U3ReadHeld(P, At + 9 + U3SplitFields, R);
+				}
 				(Tag == "vday" ? X.Days : X.Months).push_back(R);
 			}
 			U3 = true;
@@ -3369,6 +3798,14 @@ bool ReadLine(const std::vector<std::string>& P, life::State& L)
 		{
 			U3ReadRow(P, 2, X.Life);
 			X.Since = static_cast<int>(ToInt(P[11]));
+			if (P.size() >= 12 + U3SplitFields)
+			{
+				U3ReadSplit(P, 12, X.Life);
+			}
+			if (P.size() >= 12 + U3SplitFields + U3HeldFields)
+			{
+				U3ReadHeld(P, 12 + U3SplitFields, X.Life);
+			}
 			U3 = true;
 		}
 		else if (Tag == "vmom" && P.size() >= 18)
@@ -3396,7 +3833,7 @@ bool ReadLine(const std::vector<std::string>& P, life::State& L)
 			R.Id = Unesc(P[2]);
 			R.Views = ToNum(P[3]);
 			R.Cents = ToInt(P[4]);
-			R.At = ToNum(P[5]);
+			R.At = P[5].empty() && R.Id.size() > 1 && R.Id[0] == 'v' ? ToNum(R.Id.substr(1)) : ToNum(P[5]);
 			R.Title = Unesc(P[6]);
 			X.Top.push_back(R);
 			U3 = true;

@@ -13,6 +13,7 @@
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Video.h"
+#include "ShortStack/Game/VideoAlgo.h"
 #include "ShortStack/Hand.h"
 #include "ShortStack/Rng.h"
 
@@ -264,7 +265,7 @@ struct Grind
 	int FirstPay = 0;   // the day of the first payout (0: never)
 	int Tier4 = 0;      // the first day at 50,000 subscribers (the creator road's tier 4; 0: never)
 	double Subs30 = 0, Subs90 = 0, Subs180 = 0, Subs365 = 0, Subs730 = 0, Subs5y = 0;
-	double Ads365 = 0, Ads540 = 0, Ads5y = 0; // dollars earned in the 30 days to that day
+	double Ads365 = 0, Ads540 = 0, Ads5y = 0; // dollars earned in the 30 days to that day, deseasonalized (each day's ÷ Season(day))
 };
 
 /**
@@ -280,15 +281,23 @@ enum class GrindPlan
 	ShortAndBreakdowns, // every day a Short at 3:30 AM; on the weekdays given a Breakdown at 3:30 PM too
 };
 
-/** A creator in closed form (a channel and a calendar, no tables): uploads from day 7, by the plan. */
+/**
+ * A creator in closed form (a channel and a calendar, no tables): uploads from day 7, by the plan. Update 3 (SPEC §4.9, C3):
+ * the channel runs Rerun 2.0 from its first upload (a new career's, ChannelX on) past Act I (RentsPaid 2, so W11 holds no
+ * review), with Update 2's choices; its money is deseasonalized (each day's cents divided by that day's Season), so the
+ * floors and ceilings read the channel and not the advertisers' calendar (the daily creator's day 540 falls in late March).
+ */
 Grind Creator(const std::string& Seed, GrindPlan Plan, const std::vector<int>& Weekdays, int Days)
 {
 	video::Channel C;
+	C.X.On = true;
 	life::State L;
+	L.RentsPaid = 2;
 	ss::kast::Channel K;
 	ss::Chips Bank = 0;
 	Grind G;
-	std::vector<ss::Chips> Earned(static_cast<size_t>(Days) + 2, 0);
+	std::vector<double> Earned(static_cast<size_t>(Days) + 2, 0.0);
+	ss::Chips EarnedWas = 0;
 	int Uploads = 0;
 	for (int D = 0; D <= Days; ++D)
 	{
@@ -343,7 +352,9 @@ Grind Creator(const std::string& Seed, GrindPlan Plan, const std::vector<int>& W
 		G.FirstPay = G.FirstPay == 0 && Bank > Was ? D + 1 : G.FirstPay;
 		G.Gate = G.Gate == 0 && C.PartnerAt >= 0.0 ? static_cast<int>(C.PartnerAt / Day) : G.Gate;
 		G.Tier4 = G.Tier4 == 0 && C.Subs >= 50000.0 ? D + 1 : G.Tier4;
-		Earned[static_cast<size_t>(D + 1)] = C.BalanceCents + C.PaidCents;
+		const ss::Chips EarnedNow = C.BalanceCents + C.PaidCents;
+		Earned[static_cast<size_t>(D + 1)] = Earned[static_cast<size_t>(D)] + static_cast<double>(EarnedNow - EarnedWas) / ss::video::algo::Season(D);
+		EarnedWas = EarnedNow;
 		G.Subs30 = D + 1 == 30 ? C.Subs : G.Subs30;
 		G.Subs90 = D + 1 == 90 ? C.Subs : G.Subs90;
 		G.Subs180 = D + 1 == 180 ? C.Subs : G.Subs180;
@@ -351,7 +362,7 @@ Grind Creator(const std::string& Seed, GrindPlan Plan, const std::vector<int>& W
 		G.Subs730 = D + 1 == 730 ? C.Subs : G.Subs730;
 		G.Subs5y = C.Subs;
 	}
-	auto Month = [&Earned](int To) { return To < 30 || To >= static_cast<int>(Earned.size()) ? 0.0 : static_cast<double>(Earned[static_cast<size_t>(To)] - Earned[static_cast<size_t>(To - 30)]) / 100.0; };
+	auto Month = [&Earned](int To) { return To < 30 || To >= static_cast<int>(Earned.size()) ? 0.0 : (Earned[static_cast<size_t>(To)] - Earned[static_cast<size_t>(To - 30)]) / 100.0; };
 	G.Ads365 = Month(365);
 	G.Ads540 = Month(540);
 	G.Ads5y = Month(Days + 1);
@@ -385,8 +396,8 @@ void VideoGrind()
 		SD5y.push_back(Daily.Subs5y);
 	}
 	const double Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count();
-	std::printf("  VideoGrind (medians of 5, %.1f s): three a week: subscribers %.0f on day 30, %.0f on day 90; Partner on day %.0f; first payout day %.0f; "
-				"$%.0f a month at day 365, $%.0f in year 5\n",
+	std::printf("  VideoGrind (Rerun 2.0, medians of 5, %.1f s): three a week: subscribers %.0f on day 30, %.0f on day 90; Partner on day %.0f; first payout day %.0f; "
+				"$%.0f a month at day 365, $%.0f in year 5 (deseasonalized)\n",
 		Seconds, Median(S30), Median(S90), Median(Gate3), Median(Pay3), Median(A365), Median(A5y));
 	std::printf("  VideoGrind: daily: Partner on day %.0f; $%.0f a month at day 365, $%.0f at day 540, $%.0f in year 5; %.0f subscribers in year 5\n", Median(GateD), Median(AD365),
 		Median(AD540), Median(AD5y), Median(SD5y));
@@ -445,7 +456,10 @@ void VideoGrind()
 	// long-form creator at day 365 (3.7x measured; 7.7x before the factor), and no Shorts-heavy creator at tier 4 before day
 	// 400 (days 464 and 619 measured; 2.5 and 730 asked, which no factor reaches with the floors held).
 	Expect(Median(ShortsS365) <= 4.5 * LongMedian, "VideoGrind: three Shorts a day, at most 4.5x the long-form creator's subscribers at day 365");
-	Expect(Median(ShortsTier4) >= 400.0 && Median(MixedTier4) >= 400.0, "VideoGrind: no Shorts-heavy creator reaches 50,000 subscribers (tier 4) before day 400");
+	// Update 3 (C3, SPEC_CREATORS §3.6's one re-pin): on Rerun 2.0 every plan grows about 1.4x (the streak, Fresh, Momentum),
+	// Cuts no faster than the rest (3.0x the long-form creator against 3.7x), and the three-Cuts-a-day creator's tier 4 moves
+	// from day 464 to about day 397: the ceiling is restated from day 400 to "not inside the first year".
+	Expect(Median(ShortsTier4) >= 365.0 && Median(MixedTier4) >= 365.0, "VideoGrind: no Shorts-heavy creator reaches 50,000 subscribers (tier 4) inside its first year");
 }
 
 // ------------------------------------------------------------------ the session's calendar, the edit, the save

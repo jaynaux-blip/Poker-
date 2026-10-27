@@ -280,9 +280,29 @@ double RetentionRef(Format F)
 	return FormatRetention(F) * StyleRet(TitleStyle::Story);
 }
 
+/** FateNormal(Fate, 0 .. 4), each Box-Muller pair drawn once (the same numbers, a third of the hashing: DayStep's hot loop). */
+std::array<double, 5> FateNormals5(uint32_t Fate)
+{
+	std::array<double, 5> N{};
+	for (int Pair = 0; Pair < 3; ++Pair)
+	{
+		const double U1 = (static_cast<double>(RatesHash(Fate, 2 * Pair)) + 0.5) / 4294967296.0;
+		const double U2 = (static_cast<double>(RatesHash(Fate, 2 * Pair + 1)) + 0.5) / 4294967296.0;
+		const double R = std::sqrt(-2.0 * std::log(U1));
+		const double Angle = 2.0 * 3.14159265358979323846 * U2;
+		N[static_cast<size_t>(2 * Pair)] = std::clamp(R * std::cos(Angle), -3.0, 3.0);
+		if (2 * Pair + 1 < 5)
+		{
+			N[static_cast<size_t>(2 * Pair + 1)] = std::clamp(R * std::sin(Angle), -3.0, 3.0);
+		}
+	}
+	return N;
+}
+
 Rates RatesOf(const Video& V, AdLoad Load, double Retention, int Over)
 {
 	const uint32_t Fate = FateOf(V);
+	const std::array<double, 5> Fn = FateNormals5(Fate);
 	const bool Cut = V.F == Format::Short;
 	const double O = static_cast<double>(Over);
 	const double Sigma = V.X.On ? V.X.Sigma : 0.3;
@@ -290,14 +310,14 @@ Rates RatesOf(const Video& V, AdLoad Load, double Retention, int Over)
 	Rates R;
 	const double StyleL = V.T == TitleStyle::Teaching ? 1.25 : V.T == TitleStyle::Hype ? 0.90 : 1.0;
 	R.Like = 0.035 * KindLike(V.K) * StyleL * std::sqrt(std::max(0.0, Retention) / RetentionRef(V.F)) * (1.0 + 0.3 * Sigma) * std::max(0.0, 1.0 - 0.12 * O) *
-		(Cut ? 0.8 : 1.0) * (1.0 + 0.15 * FateNormal(Fate, 0));
+		(Cut ? 0.8 : 1.0) * (1.0 + 0.15 * Fn[0]);
 	const double StyleD = V.T == TitleStyle::Hype ? 1.3 : V.T == TitleStyle::Teaching ? 0.7 : 1.0;
-	R.DislikePerLike = 0.03 * KindDislike(V.K) * StyleD * (1.0 + 0.9 * O) * AdDislikes(V.F, Len, Load) * (1.0 + 0.3 * FateNormal(Fate, 1));
+	R.DislikePerLike = 0.03 * KindDislike(V.K) * StyleD * (1.0 + 0.9 * O) * AdDislikes(V.F, Len, Load) * (1.0 + 0.3 * Fn[1]);
 	const double StyleC = V.T == TitleStyle::Question ? 2.5 : V.T == TitleStyle::Plain ? 0.8 : 1.0;
 	const bool Reply = V.X.On && (V.X.Launch & (1u << static_cast<int>(Launch::Reply))) != 0;
-	R.Comment = 0.004 * KindComment(V.K) * StyleC * (1.0 + 0.1 * O) * (Cut ? 0.25 : 1.0) * (1.0 + 0.25 * FateNormal(Fate, 2)) * (Reply ? 1.25 : 1.0);
-	R.Share = 0.0025 * KindShare(V.K) * (V.T == TitleStyle::Teaching ? 0.8 : 1.0) * (Cut ? 1.5 : 1.0) * (1.0 + 0.3 * FateNormal(Fate, 3));
-	R.Save = 0.002 * (V.T == TitleStyle::Teaching ? 4.0 : 1.0) * (1.0 + 0.3 * FateNormal(Fate, 4));
+	R.Comment = 0.004 * KindComment(V.K) * StyleC * (1.0 + 0.1 * O) * (Cut ? 0.25 : 1.0) * (1.0 + 0.25 * Fn[2]) * (Reply ? 1.25 : 1.0);
+	R.Share = 0.0025 * KindShare(V.K) * (V.T == TitleStyle::Teaching ? 0.8 : 1.0) * (Cut ? 1.5 : 1.0) * (1.0 + 0.3 * Fn[3]);
+	R.Save = 0.002 * (V.T == TitleStyle::Teaching ? 4.0 : 1.0) * (1.0 + 0.3 * Fn[4]);
 	return R;
 }
 
@@ -658,10 +678,11 @@ bool CompFits(const Video& V, int Day)
 	return V.X.On && V.X.Comps.size() + ReservedAfter(V, Day) < VaMaxComps;
 }
 
-/** A component as the save keeps it (its views to the cent, A to 1e-4, the CTR factor to 1e-3; a Kast part's average whole). */
+/** A component as the save keeps it (its views whole from 100 up, else to the cent; A to 1e-4, the CTR factor to 1e-3; a Kast
+ *  part's average whole). */
 void AddComp(VideoX& X, Comp K)
 {
-	K.P = VaRound(K.P, 100.0);
+	K.P = VaViews(K.P);
 	K.A = VaRound(K.A, 1e4);
 	K.CtrF = static_cast<float>(K.Kind == CompKind::Kast ? std::round(static_cast<double>(K.CtrF)) : VaRound(static_cast<double>(K.CtrF), 1e3));
 	X.Comps.push_back(K);
@@ -680,7 +701,7 @@ double TitleTraitCtr(uint16_t Traits)
 	F *= (Traits & 128u) ? 0.97 : 1.0;
 	F *= (Traits & 256u) ? 1.06 : 1.0;
 	const int Norm = static_cast<int>((Traits >> 9) & 127u);
-	return F * (Norm == 0 ? 1.0 : 1.0 + static_cast<double>(Norm - 64) / 1000.0);
+	return F * (Norm == 0 ? 1.0 : 1.0 + static_cast<double>(Norm - 64) / 500.0); // (core-videocontent_to_core-videoalgo_1: the 1/500 step)
 }
 
 double TitleTraitRet(uint16_t Traits)
@@ -913,15 +934,27 @@ std::string BellViral(const std::string& Title)
 	return Quoted(Title) + " is breaking out: it's showing up next to other videos.";
 }
 
-std::string BellBinge(int Videos)
+std::string BellBinge(int Videos, double Views)
 {
-	return Videos == 1 ? "New viewers are bingeing your channel: an older video is getting views again."
-					   : "New viewers are bingeing your channel: " + std::string(Videos == 2 ? "two" : "three") + " older videos are getting views again.";
+	// (C3 fix L4: the views its parts really added on the wave's first day, rung at the midnight that ends it. A tiny channel's
+	// wave that added under one whole view that day keeps the old words: no "0 views" bell.)
+	const long long Whole = std::isfinite(Views) ? std::llround(std::max(0.0, Views)) : 0;
+	if (Whole < 1)
+	{
+		return Videos == 1 ? "New viewers are bingeing your channel: an older video is getting views again."
+						   : "New viewers are bingeing your channel: " + std::string(Videos == 2 ? "two" : "three") + " older videos are getting views again.";
+	}
+	const std::string Picked = " picked up " + Grouped(static_cast<int64_t>(Whole)) + (Whole == 1 ? " view." : " views.");
+	return Videos == 1 ? "New viewers are bingeing your channel: an older video" + Picked
+					   : "New viewers are bingeing your channel: " + std::to_string(Videos) + " older videos" + Picked;
 }
 
-std::string BellBloom(const std::string& Title)
+std::string BellBloom(const std::string& Title, double Ratio)
 {
-	return Quoted(Title) + " woke up: search viewers are finding it again.";
+	// (C3 fix L4: its first day awake against its usual day, the 7 before the check-in that woke it; whole times, 2 and up.)
+	const long long Times = std::isfinite(Ratio) && Ratio < 1e6 ? std::llround(Ratio) : 0;
+	return Times >= 2 ? Quoted(Title) + " woke up: " + std::to_string(Times) + "\xC3\x97 its usual daily views."
+					  : Quoted(Title) + " woke up: search viewers are finding it again.";
 }
 
 std::string BellDuel(int Winner)
@@ -1007,6 +1040,279 @@ std::string LimitedBody(const std::string& Title)
 		"only, off the Cuts feed. Videos about the poker itself keep full ads.";
 }
 
+
+VaSplit SplitCovering(const Channel& C, Chips Target)
+{
+	// The newest days of the ring until their cents reach Target; past the ring's first day, the month rows (the ring's first
+	// month less its days in the ring, then whole older months), the last one's part scaled to what is left (a balance older
+	// than the 90-day ring is a channel under $100 for three months: its oldest month is attributed in proportion).
+	VaSplit S;
+	S.Has = VaHasSplit;
+	auto Take = [&S](const DayRow& R, double Share) {
+		S.Cents += static_cast<Chips>(std::llround(static_cast<double>(R.Cents) * Share));
+		S.CutCents += static_cast<Chips>(std::llround(static_cast<double>(VaRowCut(R)) * Share));
+		S.Views += static_cast<double>(R.Views) * Share;
+		S.CutViews += VaRowCutViews(R) * Share;
+		S.AdImpr += VaRowImpr(R) * Share;
+		S.Monetized += VaRowMonetized(R) * Share;
+		S.Held += static_cast<Chips>(std::llround(static_cast<double>(VaRowHeld(R)) * Share));
+		S.HeldCut += static_cast<Chips>(std::llround(static_cast<double>(VaRowHeldCut(R)) * Share));
+	};
+	const ChannelX& X = C.X;
+	for (size_t I = X.Days.size(); I-- > 0 && S.Cents < Target;)
+	{
+		if (X.Days[I].Cents <= 0 && VaRowHeld(X.Days[I]) <= 0 && VaRowImpr(X.Days[I]) <= 0.0 && VaRowCutViews(X.Days[I]) <= 0.0)
+		{
+			continue; // (a day no ad paid: before Partner; its views aren't the statement's. A day the top-earner rate held
+					  // whole carries its split, so it stays the month's: its views in the RPM, its impressions in the CPM.)
+		}
+		Take(X.Days[I], 1.0);
+		S.FromDay = X.Days[I].Key;
+		S.ToDay = S.ToDay < 0 ? X.Days[I].Key : S.ToDay;
+	}
+	if (S.Cents < Target && !X.Days.empty())
+	{
+		int Y = 0, Mo = 0, Dm = 0;
+		world::CivilDate(X.Days.front().Key, Y, Mo, Dm);
+		const int First = Y * 12 + (Mo - 1);
+		for (size_t I = X.Months.size(); I-- > 0 && S.Cents < Target;)
+		{
+			const DayRow& M = X.Months[I];
+			if (M.Key > First)
+			{
+				continue;
+			}
+			DayRow Part = M;
+			if (M.Key == First)
+			{
+				// The month's days before the ring: the month's row less its days in the ring.
+				for (const DayRow& D : X.Days)
+				{
+					world::CivilDate(D.Key, Y, Mo, Dm);
+					if (Y * 12 + (Mo - 1) == First)
+					{
+						Part.Cents -= D.Cents;
+						Part.Views -= D.Views;
+						VaSetRowSplit(Part, VaRowCut(Part) - VaRowCut(D), static_cast<float>(VaRowCutViews(Part) - VaRowCutViews(D)), static_cast<float>(VaRowImpr(Part) - VaRowImpr(D)),
+							static_cast<float>(VaRowMonetized(Part) - VaRowMonetized(D)));
+						VaSetRowHeld(Part, VaRowHeld(Part) - VaRowHeld(D), VaRowHeldCut(Part) - VaRowHeldCut(D));
+					}
+				}
+			}
+			if (Part.Cents <= 0)
+			{
+				continue;
+			}
+			const Chips Left = Target - S.Cents;
+			Take(Part, Part.Cents > Left ? static_cast<double>(Left) / static_cast<double>(Part.Cents) : 1.0);
+		}
+	}
+	S.Cents = std::min(S.Cents, std::max<Chips>(Target, 0));
+	S.CutCents = std::clamp<Chips>(S.CutCents, 0, S.Cents);
+	return S;
+}
+
+VaSplit BalanceSplit(const Channel& C)
+{
+	return SplitCovering(C, C.BalanceCents);
+}
+
+// ================================================================== the top-earner rate (the user's soft ceiling, 2026-10-27)
+
+Chips TopRateFrom()
+{
+	return 6 * life::MonthlyRentCents;
+}
+
+Chips TopRateTop()
+{
+	return 10 * life::MonthlyRentCents;
+}
+
+int PayMonthOf(int Day)
+{
+	int Y = 0, Mo = 0, Dm = 0;
+	world::CivilDate(Day, Y, Mo, Dm);
+	return Y * 12 + (Mo - 1) + (Dm >= VaPayDay ? 1 : 0);
+}
+
+int PayMonthFirst(int Day)
+{
+	// The 21st on or before Day: this month's, or the month before's (its length from its last day's date).
+	int Y = 0, Mo = 0, Dm = 0;
+	world::CivilDate(Day, Y, Mo, Dm);
+	if (Dm >= VaPayDay)
+	{
+		return Day - (Dm - VaPayDay);
+	}
+	const int LastOfBefore = Day - Dm;
+	world::CivilDate(LastOfBefore, Y, Mo, Dm);
+	return LastOfBefore - (Dm - VaPayDay);
+}
+
+double TopRateCurve(double EarnedCents)
+{
+	const double T = static_cast<double>(TopRateFrom()), C = static_cast<double>(TopRateTop() - TopRateFrom());
+	return EarnedCents <= T ? EarnedCents : T + C * (1.0 - std::exp(-(EarnedCents - T) / C));
+}
+
+Chips TopRatePay(Chips PaidSoFar, Chips Earned)
+{
+	const Chips T = TopRateFrom(), Top = TopRateTop();
+	if (Earned <= 0 || PaidSoFar + Earned <= T)
+	{
+		return Earned; // (every day at or under T: today's cents exactly)
+	}
+	// The part that still fits under T pays in full; the rest closes the gap to T + C by 1 - e^(-rest / C), the closed form's
+	// own step from wherever the month stands (so the month's days in any grouping land on the same curve).
+	const Chips Straight = std::max<Chips>(0, T - PaidSoFar);
+	const Chips From = PaidSoFar + Straight;
+	const double Gap = static_cast<double>(Top - From);
+	if (Gap <= 0.0)
+	{
+		return Straight;
+	}
+	const double After = static_cast<double>(Top) - Gap * std::exp(-static_cast<double>(Earned - Straight) / static_cast<double>(Top - T));
+	return std::clamp<Chips>(Straight + (static_cast<Chips>(std::llround(After)) - From), Straight, Earned);
+}
+
+double TopRateShare(Chips PaidSoFar)
+{
+	const Chips T = TopRateFrom(), Top = TopRateTop();
+	return PaidSoFar <= T ? 1.0 : std::max(0.0, static_cast<double>(Top - PaidSoFar) / static_cast<double>(Top - T));
+}
+
+Chips PaidThisMonth(const Channel& C, int Day)
+{
+	if (!C.X.On)
+	{
+		return 0;
+	}
+	const int First = PayMonthFirst(Day);
+	Chips Sum = 0;
+	for (size_t I = C.X.Days.size(); I-- > 0;)
+	{
+		const DayRow& R = C.X.Days[I];
+		if (R.Key >= Day)
+		{
+			continue;
+		}
+		if (R.Key < First)
+		{
+			break; // (the ring runs in day order: the month's first day is behind us)
+		}
+		Sum += R.Cents;
+	}
+	return Sum;
+}
+
+double DayPaidShare(const Channel& C, int Day)
+{
+	if (!C.X.On)
+	{
+		return 1.0;
+	}
+	const Chips Before = PaidThisMonth(C, Day);
+	const auto It = std::find_if(C.X.Days.begin(), C.X.Days.end(), [Day](const DayRow& R) { return R.Key == Day; });
+	if (It == C.X.Days.end())
+	{
+		return TopRateShare(Before); // (not stepped yet: the share its first view pays at, StatsOf's "today")
+	}
+	const Chips T = TopRateFrom(), Paid = It->Cents;
+	if (Before + Paid <= T)
+	{
+		return 1.0; // (a month at or under T so far: every cent the day's ads earned)
+	}
+	if constexpr (VaHasHeld)
+	{
+		const Chips Earned = Paid + VaRowHeld(*It);
+		return Earned > 0 ? static_cast<double>(Paid) / static_cast<double>(Earned) : TopRateShare(Before);
+	}
+	else
+	{
+		// (CpmReadBack's reading: the part under T paid in full, the rest closed the gap G0 to After, so its ads were C ln(G0 /
+		// After); a day that closed the gap to under half a cent reads as if it stopped at half a cent.)
+		const Chips Straight = std::max<Chips>(0, T - Before);
+		const double G0 = static_cast<double>(TopRateTop() - (Before + Straight));
+		if (G0 <= 0.0)
+		{
+			return 0.0;
+		}
+		const double After = std::max(0.5, G0 - static_cast<double>(Paid - Straight));
+		const double Earned = static_cast<double>(Straight) + static_cast<double>(TopRateTop() - T) * std::log(G0 / After);
+		return Earned > 0.0 ? std::min(1.0, static_cast<double>(Paid) / Earned) : 1.0;
+	}
+}
+
+std::string TopRateDollars(Chips Cents)
+{
+	return Cents % 100 == 0 ? "$" + Grouped(Cents / 100) : Money(Cents);
+}
+
+std::string TopRateLine()
+{
+	return "Top-earner rate: above " + TopRateDollars(TopRateFrom()) + " this month pays at a reduced share.";
+}
+
+std::string TopRateHelp()
+{
+	return "Rerun pays its biggest channels at a reduced share. A payout month (the 21st to the 20th) pays in full up to " + TopRateDollars(TopRateFrom()) +
+		"; past that, each dollar your ads earn pays a little less than the one before, and no month pays more than " + TopRateDollars(TopRateTop()) +
+		". Views, subscribers and analytics still count every view.";
+}
+
+/**
+ * Before DayRow keeps the held cents, the rings keep only what was paid, so each of the month's days is read back through the
+ * curve: a day the month stayed under T paid all its ads; a day past T paid Straight (what still fit under T) plus the gap's
+ * closing, G0 (1 - e^(-rest / C)), so its ads were Straight + C ln(G0 / gap after). A day whose gap after is under $10 can't
+ * be read back to the cent (the curve is flat there) and sits out; the rest give the advertisers' price on their impressions.
+ */
+double CpmReadBack(const Channel& C, const VaSplit& S, int PayMonth)
+{
+	const double Top = static_cast<double>(TopRateTop()), Room = static_cast<double>(TopRateTop() - TopRateFrom());
+	Chips Paid = 0;
+	double Gross = 0.0, Impr = 0.0;
+	for (const DayRow& R : C.X.Days)
+	{
+		if (PayMonthOf(R.Key) != PayMonth || R.Cents <= 0)
+		{
+			continue;
+		}
+		const Chips Before = Paid;
+		Paid += R.Cents;
+		double Ads = static_cast<double>(R.Cents);
+		if (Paid > TopRateFrom())
+		{
+			const Chips Straight = std::max<Chips>(0, TopRateFrom() - Before);
+			const double From = static_cast<double>(Before + Straight), Above = static_cast<double>(R.Cents - Straight);
+			const double G0 = Top - From, After = G0 - Above;
+			if (G0 <= 0.0 || After < 1000.0)
+			{
+				continue;
+			}
+			Ads = static_cast<double>(Straight) + Room * std::log(G0 / After);
+		}
+		Gross += static_cast<double>(R.Cents - VaRowCut(R)) * Ads / static_cast<double>(R.Cents);
+		Impr += VaRowImpr(R);
+	}
+	return Impr >= 100.0 && Gross > 0.0 ? Gross / 100.0 / VaCreatorShare / Impr * 1000.0 : S.Cpm();
+}
+
+double StatementCpm(const Channel& C, const VaSplit& S, int PayMonth)
+{
+	// With DayRow's held cents the split's CPM is the advertisers' already; a span at or under T held nothing.
+	if constexpr (VaHasHeld)
+	{
+		(void)C;
+		(void)PayMonth;
+		return S.Cpm();
+	}
+	else
+	{
+		return S.Cents <= TopRateFrom() ? S.Cpm() : CpmReadBack(C, S, PayMonth);
+	}
+}
+
 std::vector<std::string> AlgoInventory()
 {
 	std::vector<std::string> Out;
@@ -1018,11 +1324,18 @@ std::vector<std::string> AlgoInventory()
 	Out.push_back("line\t" + BellKick(T));
 	Out.push_back("line\t" + BellBreakout(T));
 	Out.push_back("line\t" + BellViral(T));
+	Out.push_back("line\t" + BellBinge(1, 412.0));
+	Out.push_back("line\t" + BellBinge(1, 1.0));
+	Out.push_back("line\t" + BellBinge(2, 860.0));
+	Out.push_back("line\t" + BellBinge(3, 1240.0));
 	for (int N = 1; N <= 3; ++N)
 	{
-		Out.push_back("line\t" + BellBinge(N));
+		Out.push_back("line\t" + BellBinge(N, 0.3)); // (a wave under one whole view that day: the old words)
 	}
-	Out.push_back("line\t" + BellBloom("ICM at the bubble"));
+	Out.push_back("line\t" + BellBloom("ICM at the bubble", 3.0));
+	Out.push_back("line\t" + BellBloom("ICM at the bubble", 1.2));
+	Out.push_back("line\t" + TopRateLine());
+	Out.push_back("body\t" + TopRateHelp());
 	for (int W = 0; W < 3; ++W)
 	{
 		Out.push_back("line\t" + BellDuel(W));
@@ -1226,7 +1539,7 @@ void Decide(Channel& C, life::State& L, const Decision& D, int Day)
 			K.SrcMix = 11;
 			K.CtrF = 1.0f;
 			AddComp(X, K);
-			Say(BellBloom(V.Title), 2);
+			// (Its bell rings at the next midnight, with its first day against its usual one: MidnightU3, C3 fix L4.)
 		}
 	}
 	if (D.Stage == 1)
@@ -1314,11 +1627,8 @@ void Decide(Channel& C, life::State& L, const Decision& D, int Day)
 		}
 		if (Excess > 0.0)
 		{
-			const int Fitted = BingeWave(C, D.Index, Excess, Day);
-			if (Fitted > 0)
-			{
-				PushBell(C, D1, BellBinge(Fitted));
-			}
+			// (The wave's bell rings at the next midnight with the views its parts really added that day: MidnightU3, C3 fix L4.)
+			BingeWave(C, D.Index, Excess, Day);
 		}
 	}
 	// Momentum (SPEC_CREATORS §3.3): H reads how the video really did (its own luck) plus the compressed score part; a

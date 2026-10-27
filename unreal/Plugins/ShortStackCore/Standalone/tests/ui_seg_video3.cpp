@@ -11,11 +11,28 @@
 // with its rect, and new data or a new look never replays the old); RunItTwice's "red is light" (a red run is only a twice
 // print's under-copy) and no RiverLine colour in either look; the budgets (vertices, runs, warm milliseconds, printed);
 // and two pages, chart_kit_rerun and chart_kit_rit, written with an out-dir for the rasterizer.
+//
+// C3 (ui-rerun, Rerun 2.0's pages; update 3 SPEC §7.7, SPEC_CREATORS §9.1's R1-R4 surfaces), on a channel the test builds
+// through the core (uploads with recipes, a Duel, a Cut, a Live Drop, a breakout and its Binge wave, the world stepped
+// between them): the header's four pages; Studio (the Cut and Loud renames, the lengths, three titles, six options and the
+// Duel picker with its real cost, the settings, PUBLISH); the launch card (likes and dislikes, the ranking, "would have
+// earned ... (not paid)" before Partner, the carry and Live Drop's lines, the four launch actions); every Analytics page
+// and one video's four tabs (a Cut's "Shown in feed" and "Stayed to watch", the legacy "est."); the Ad market before
+// Partner; Channel and Home (RECOMMENDED; no dislike on either); the Outlier shelf and the tags; the bell's lines; at most
+// two uncached thumbnails painted a frame (Canvas::IsCached); every page inside the laptop at both scales and inside the
+// page budget (printed); the copy lint and the trademark screen over the pages' inventories.
 #include "UiSeg.h"
 
 #include "../../Source/ShortStackCore/Private/ShortStack/UI/RiverLineVideoShared.h"
+#include "../../Source/ShortStackCore/Private/ShortStack/Game/VideoAlgoPriv.h"
+#include "CopyLint.h"
+#include "Trademarks.h"
 #include "ShortStack/Game/Format.h"
+#include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Sites.h"
+#include "ShortStack/Game/Video.h"
+#include "ShortStack/Game/VideoAlgo.h"
+#include "ShortStack/Game/VideoStats.h"
 #include "ShortStack/UI/ChartArt.h"
 #include "ShortStack/UI/Ui.h"
 
@@ -1402,6 +1419,1890 @@ void Budgets()
 }
 } // namespace video3_seg
 
+// ================================================================== C3: Rerun 2.0's pages (ui-rerun)
+
+namespace video3_c3
+{
+using ss::ui::DrawList;
+namespace rr = ss::ui::rlvideo_detail;
+namespace video = ss::video;
+
+int Checks = 0;
+void Check(bool Condition, const char* What)
+{
+	++Checks;
+	Expect(Condition, What);
+}
+void Check(bool Condition, const std::string& What)
+{
+	Check(Condition, What.c_str());
+}
+
+/** A laptop on the desk with Rerun's session, the pointer driven by hand, a frame drawn for every step. */
+struct Lap
+{
+	QuietHooks H;
+	ss::Session S;
+	ss::ui::RiverLine RL;
+	TableMeasurer M;
+	double Now = 1.0;
+	explicit Lap(const std::string& Seed) : S(H, Seed), RL(S)
+	{
+		S.CurrentScreen = ss::Screen::Lobby;
+		Now = Step(S, Now, 0.2);
+		Rest();
+	}
+	void Rest()
+	{
+		S.Life.Energy = 90.0;
+		S.Life.Hunger = 5.0;
+		S.Life.Thirst = 5.0;
+	}
+	DrawList Frame(float X = -1.0f, float Y = -1.0f, bool Down = false, bool Pressed = false, bool Released = false, float Wheel = 0.0f, float Scale = 1.0f)
+	{
+		RL.UI.Ptr.Active = X >= 0.0f;
+		RL.UI.Ptr.X = X;
+		RL.UI.Ptr.Y = Y;
+		RL.UI.Ptr.Down = Down;
+		RL.UI.Ptr.Pressed = Pressed;
+		RL.UI.Ptr.Released = Released;
+		RL.UI.Ptr.Wheel = Wheel;
+		DrawList L;
+		ss::ui::Canvas C(L, M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, Scale);
+		RL.Draw(C, Now);
+		RL.UI.Ptr.EndFrame();
+		Now += 1.0 / 30.0;
+		return L;
+	}
+	/** Frames until every thumbnail on the page is cached (two paint a frame), then one more: the page at rest. */
+	DrawList Settled(float Scale = 1.0f)
+	{
+		for (int K = 0; K < 80; ++K)
+		{
+			Frame(-1.0f, -1.0f, false, false, false, 0.0f, Scale);
+			if (U().Paint.Painted == 0 && U().Paint.Waiting == 0)
+			{
+				break;
+			}
+		}
+		return Frame(-1.0f, -1.0f, false, false, false, 0.0f, Scale);
+	}
+	void Click(float X, float Y)
+	{
+		Frame(X, Y);
+		Frame(X, Y, true, true, false);
+		Frame(X, Y, false, false, true);
+	}
+	void Open(int Page) { rr::VideoOpen(RL, Page, Now); }
+	rr::VideoUi& U() { return rr::VideoUiOf(&RL); }
+	video::Channel& Ch() { return S.Life.Video; }
+};
+
+/** The run that is exactly Text (or holds it), with its place and width. */
+struct Run
+{
+	bool Found = false;
+	float X = 0.0f, Base = 0.0f, W = 0.0f, Size = 0.0f;
+};
+Run RunOf(const DrawList& L, const std::string& Text, bool Has = false, float MinY = -1.0e9f)
+{
+	TableMeasurer M;
+	Run Out;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.BaselineY >= MinY && (Has ? Cmd.Text.Text.find(Text) != std::string::npos : Cmd.Text.Text == Text))
+		{
+			Out.Found = true;
+			Out.X = Cmd.Text.X;
+			Out.Base = Cmd.Text.BaselineY;
+			Out.Size = Cmd.Text.SizePx;
+			Out.W = M.Width(Cmd.Text.Text, Cmd.Text.Face, Cmd.Text.SizePx); // X is the box's left (the alignment applied)
+			return Out;
+		}
+	}
+	return Out;
+}
+
+/** Clicks the middle of a run (a tab, a chip, a button's label): false when it isn't drawn. */
+bool ClickRun(Lap& L, const DrawList& D, const std::string& Text, float MinY = -1.0e9f)
+{
+	const Run R = RunOf(D, Text, false, MinY);
+	if (R.Found)
+	{
+		L.Click(R.X + R.W / 2.0f, R.Base - R.Size * 0.35f);
+	}
+	return R.Found;
+}
+
+std::string Joined(const DrawList& L)
+{
+	std::string Out;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text)
+		{
+			Out += Cmd.Text.Text + "\n";
+		}
+	}
+	return Out;
+}
+
+/** Whether NetSpaced's tracked capitals (one run a glyph on one baseline) spell Word. */
+bool Spelled(const DrawList& L, const std::string& Word)
+{
+	std::string Cur;
+	float Base = -1.0e9f;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text)
+		{
+			continue;
+		}
+		const std::string& T = Cmd.Text.Text;
+		if (T.size() == 1 && Cmd.Text.BaselineY == Base)
+		{
+			Cur += T;
+		}
+		else
+		{
+			Cur = T.size() == 1 ? T : std::string();
+			Base = Cmd.Text.BaselineY;
+		}
+		if (Cur.find(Word) != std::string::npos)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** Text runs whose ink leaves the laptop's page (x outside 0..1600, y outside 0..962): their count, each printed. */
+int Outside(const DrawList& L, const char* What)
+{
+	TableMeasurer M;
+	int Bad = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || Cmd.Text.BaselineY > 962.0f)
+		{
+			continue;
+		}
+		// The run as drawn (Canvas::Text resolves the alignment and the ellipsis): its box's left and its width.
+		const float W = M.Width(Cmd.Text.Text, Cmd.Text.Face, Cmd.Text.SizePx);
+		const float X0 = Cmd.Text.X;
+		if (X0 < -0.5f || X0 + W > 1600.5f || Cmd.Text.BaselineY < 0.0f)
+		{
+			++Bad;
+			std::printf("  %s: \"%s\" at %.1f..%.1f, %.1f\n", What, Cmd.Text.Text.c_str(), X0, X0 + W, Cmd.Text.BaselineY);
+		}
+	}
+	return Bad;
+}
+
+/** Pairs of different text runs inside R whose boxes share a line and come within Gap of each other across it (review-c3f-ui: a top
+ *  earner's revenue ran into LIKES), each printed. */
+int Crowded(const DrawList& L, const ss::ui::Rect& R, const char* What, float Gap)
+{
+	TableMeasurer M;
+	struct Box
+	{
+		std::string T;
+		float X0, X1, Y0, Y1;
+	};
+	std::vector<Box> B;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		const ss::ui::TextItem& Tx = Cmd.Text;
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Tx.Text.size() > 1 && Tx.X >= R.X && Tx.X <= R.X + R.W && Tx.BaselineY >= R.Y && Tx.BaselineY <= R.Y + R.H)
+		{
+			B.push_back({Tx.Text, Tx.X, Tx.X + M.Width(Tx.Text, Tx.Face, Tx.SizePx), Tx.BaselineY - 0.72f * Tx.SizePx, Tx.BaselineY + 0.18f * Tx.SizePx});
+		}
+	}
+	int N = 0;
+	for (size_t I = 0; I < B.size(); ++I)
+	{
+		for (size_t J = I + 1; J < B.size(); ++J)
+		{
+			if (B[I].T != B[J].T && B[I].X0 < B[J].X1 + Gap && B[J].X0 < B[I].X1 + Gap && B[I].Y0 < B[J].Y1 && B[J].Y0 < B[I].Y1)
+			{
+				++N;
+				std::printf("  %s: \"%s\" %.1f..%.1f runs into \"%s\" %.1f..%.1f\n", What, B[I].T.c_str(), B[I].X0, B[I].X1, B[J].T.c_str(), B[J].X0, B[J].X1);
+			}
+		}
+	}
+	return N;
+}
+
+/** A recipe as the library would deal one (the archetype, a palette, a face): the compositor draws it (ui-thumbs). */
+video::ThumbSpec Spec(int I, int K)
+{
+	video::ThumbSpec S;
+	S.Arch = static_cast<int16_t>((I * 3 + K * 7) % 35);
+	S.Layout = static_cast<int16_t>((I + K) % 18);
+	S.Bg = static_cast<int16_t>(K % 8);
+	S.Pal = static_cast<int16_t>((I + 2 * K) % 11);
+	S.Expr = static_cast<int16_t>((I + K) % 12 == 7 ? 4 : (I + K) % 12);
+	S.CapStyle = static_cast<int16_t>(K % 8);
+	S.Variant = static_cast<uint32_t>(1000 * I + K);
+	S.Caption = "82%";
+	return S;
+}
+
+/** The newest open candidate. */
+std::string Newest(const ss::Session& S)
+{
+	const video::Candidate* Best = nullptr;
+	for (const video::Candidate& C : S.Life.Video.Open)
+	{
+		Best = !Best || C.At >= Best->At ? &C : Best;
+	}
+	return Best ? Best->Id : std::string();
+}
+
+/**
+ * A Rerun 2.0 channel's history through the core: N uploads three days apart, every format and style in turn, recipes on
+ * most (a Duel every fourth, a Cut every fifth), the world stepped between them so each video has its verdict, its check-ins,
+ * its parts and the rings their days; then a Live Drop on the newest, a breakout on the third newest (its Binge wave), the
+ * Momentum and the streak a hit leaves.
+ */
+void Build(Lap& L, int N, bool Partner)
+{
+	video::Channel& Ch = L.Ch();
+	Ch.X.On = true;
+	L.S.Life.Update3LinesRead |= static_cast<uint32_t>(ss::life::U3Video);
+	if (Partner)
+	{
+		Ch.PartnerAt = L.S.WorldMinutes() - 1.0;
+	}
+	const char* Kinds[8] = {"badbeat", "bluff", "cooler", "herocall", "bigpot", "deeprun", "suckout", "win"};
+	for (int I = 0; I < N; ++I)
+	{
+		L.S.DebugVideo(std::string("fake ") + Kinds[I % 8] + " online");
+		video::Choice C;
+		C.Candidates = {Newest(L.S)};
+		C.F = I % 5 == 3 ? video::Format::Short : I % 7 == 6 ? video::Format::Recap : video::Format::Breakdown;
+		if (C.F == video::Format::Recap && Kinds[I % 8] != std::string("deeprun"))
+		{
+			C.F = video::Format::Breakdown;
+		}
+		C.T = static_cast<video::TitleStyle>(I % 5);
+		C.Len = static_cast<video::LengthOpt>(I % 3);
+		C.Ads = I % 6 == 5 ? video::AdLoad::Heavy : video::AdLoad::Standard;
+		if (C.F != video::Format::Short && I % 3 != 2)
+		{
+			C.Thumbs = {Spec(I, 0)};
+			if (I % 4 == 1)
+			{
+				C.Thumbs.push_back(Spec(I, 1));
+				C.Thumbs.push_back(Spec(I, 2));
+			}
+		}
+		video::UploadFacts Fa;
+		Fa.Energy = 90.0;
+		Fa.RentsPaid = 2;
+		Fa.GearQuality = 0.5;
+		video::Upload(Ch, C, L.S.WorldMinutes(), "rerun3-build", Fa);
+		L.S.DebugVideo("advance 3");
+		L.Rest();
+	}
+	// A breakout on the third newest (a surge into Next up: Breakout, Outlier tags), a hit's Momentum and the streak.
+	std::vector<video::Video*> Up;
+	for (video::Video& V : Ch.Videos)
+	{
+		Up.push_back(&V);
+	}
+	std::stable_sort(Up.begin(), Up.end(), [](const video::Video* A, const video::Video* B) { return A->At > B->At; });
+	if (Up.size() >= 3)
+	{
+		video::Video& B = *Up[2];
+		video::Comp K;
+		K.T = B.At + 2.0 * 1440.0;
+		K.P = 60.0 * std::max(50.0, B.X.P0);
+		K.A = 0.3;
+		K.Kind = video::CompKind::Breakout;
+		K.SrcMix = 4;
+		B.X.Comps.push_back(K);
+		// Its Binge wave on the three Update 3 uploads before it (SPEC_CREATORS §3.3: 0.04 x the hit's excess, A 0.5).
+		for (size_t I = 3; I < Up.size() && I < 6; ++I)
+		{
+			video::Comp W;
+			W.T = K.T;
+			W.P = 0.04 * K.P;
+			W.A = 0.5;
+			W.Kind = video::CompKind::Binge;
+			W.SrcMix = 10;
+			Up[I]->X.Comps.push_back(W);
+		}
+	}
+	Ch.X.MomH = 0.7;
+	Ch.X.Momentum = 1.38;
+	Ch.X.MomShown = 1.2;
+	Ch.X.StreakW = 6;
+	Ch.X.RainChecks = 1;
+}
+
+/** Uploads the newest candidate now as a long video with a recipe (and a Duel of two), through the core's Upload (the launch
+ *  card's subject; Session::Publish's glue carrying the Update 3 choice is core-videocontent's, checked in its suite). */
+std::string PublishOne(Lap& L, bool Duel)
+{
+	L.S.DebugVideo("fake badbeat online");
+	video::Choice C;
+	C.Candidates = {Newest(L.S)};
+	C.F = video::Format::Breakdown;
+	C.T = video::TitleStyle::Story;
+	C.Thumbs = {Spec(40, 0)};
+	if (Duel)
+	{
+		C.Thumbs.push_back(Spec(40, 1));
+	}
+	video::UploadFacts Fa;
+	Fa.Energy = 90.0;
+	Fa.RentsPaid = 2;
+	Fa.GearQuality = 0.5;
+	return video::Upload(L.Ch(), C, L.S.WorldMinutes(), "rerun3-publish", Fa);
+}
+
+int CountRuns(const DrawList& L)
+{
+	int N = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		N += Cmd.Type == ss::ui::DrawCmd::Kind::Text ? 1 : 0;
+	}
+	return N;
+}
+
+/** A page's warm draw (the median of 9 frames once its thumbnails and charts are cached), printed with its size. */
+void Measure(Lap& L, const std::string& Name, double MaxMs = 6.0)
+{
+	const DrawList D = L.Settled();
+	std::vector<double> Ms;
+	for (int K = 0; K < 9; ++K)
+	{
+		const auto T0 = std::chrono::steady_clock::now();
+		L.Frame();
+		Ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count());
+	}
+	std::sort(Ms.begin(), Ms.end());
+	const int Runs = CountRuns(D);
+	std::printf("  rerun page     %-28s %6zu vertices, %3d runs, %.3f ms warm\n", Name.c_str(), D.Vertices.size(), Runs, Ms[4]);
+	Check(D.Vertices.size() <= 35000 && Runs <= 600, Name + ": inside a laptop page's budget (35k vertices, 600 runs)");
+	Check(Ms[4] < MaxMs, Name + ": draws warm in a few milliseconds (printed; the editor's 1.5 ms is checked in PIE)");
+}
+
+/** No dislike on a public page: no run mentions dislikes and none is a video's dislike count. */
+bool NoDislikes(Lap& L, const DrawList& D)
+{
+	const std::string All = trademarks::Lower(Joined(D));
+	if (All.find("dislike") != std::string::npos)
+	{
+		return false;
+	}
+	for (const video::Video& V : L.Ch().Videos)
+	{
+		const video::VideoStats St = video::StatsOf(L.Ch(), V, L.S.WorldMinutes());
+		if (St.Dislikes >= 10.0 && DrewRun(D, ss::Grouped(static_cast<int64_t>(std::floor(St.Dislikes)))))
+		{
+			return false;
+		}
+	}
+	// review-ui-rerun: a tile's or the banner's line ("629 views · 6 days ago") puts a word beside every number; a bare count
+	// beside the views is a count the page doesn't name (a dislike count slipped in passes the checks above).
+	for (const ss::ui::DrawCmd& Cmd : D.Cmds)
+	{
+		const std::string& T = Cmd.Text.Text;
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || T.find(" view") == std::string::npos)
+		{
+			continue;
+		}
+		size_t From = 0;
+		while (From <= T.size())
+		{
+			const size_t Dot = T.find(" \xC2\xB7 ", From);
+			const std::string Seg = T.substr(From, Dot == std::string::npos ? std::string::npos : Dot - From);
+			bool Bare = !Seg.empty();
+			for (const char C : Seg)
+			{
+				Bare = Bare && ((C >= '0' && C <= '9') || C == ',');
+			}
+			if (Bare)
+			{
+				std::printf("  public line with a bare count: \"%s\"\n", T.c_str());
+				return false;
+			}
+			if (Dot == std::string::npos)
+			{
+				break;
+			}
+			From = Dot + 4;
+		}
+	}
+	return true;
+}
+
+// ------------------------------------------------------------------ the shell
+
+void Shell()
+{
+	Lap L("rerun3-shell");
+	Build(L, 6, false);
+	L.Open(0);
+	DrawList D = L.Settled();
+	Check(DrewRun(D, "HOME") && DrewRun(D, "STUDIO") && DrewRun(D, "CHANNEL") && DrewRun(D, "ANALYTICS"), "shell: HOME · STUDIO · CHANNEL · ANALYTICS");
+	Check(RunOf(D, "HOME").X < RunOf(D, "STUDIO").X && RunOf(D, "STUDIO").X < RunOf(D, "CHANNEL").X && RunOf(D, "CHANNEL").X < RunOf(D, "ANALYTICS").X, "shell: the tabs in the spec's order");
+	// The indices callers use (Mail opens 1): 0 Studio, 1 Channel, 2 Analytics, 3 Home; names for ss.Laptop.Open.
+	Check(rr::VideoPageNamed("studio") == 0 && rr::VideoPageNamed("channel") == 1 && rr::VideoPageNamed("analytics") == 2 && rr::VideoPageNamed("home") == 3 &&
+			rr::VideoPageNamed("nope") == -1,
+		"shell: VideoPageNamed knows the four pages");
+	for (int P = 0; P < 4; ++P)
+	{
+		L.Open(P);
+		L.Frame();
+		Check(L.U().Page == P, "shell: VideoOpen opens page " + std::to_string(P));
+	}
+	L.Open(9);
+	Check(L.U().Page == 3, "shell: VideoOpen clamps to the last page");
+	// The glance is public (rounded); the second line names the channel.
+	L.Ch().Subs = 4210.0;
+	L.Open(1);
+	D = L.Frame();
+	Check(DrewRun(D, "4.2K subscribers") && Drew(D, L.S.HeroName), "shell: the glance rounds subscribers in public (4.2K)");
+	// Clicking the tabs moves the pages.
+	Check(ClickRun(L, L.Frame(), "ANALYTICS") && L.U().Page == 2, "shell: the ANALYTICS tab");
+	Check(ClickRun(L, L.Frame(), "HOME") && L.U().Page == 3, "shell: the HOME tab");
+	Check(ClickRun(L, L.Frame(), "STUDIO") && L.U().Page == 0, "shell: the STUDIO tab");
+	// The bell: the core's Rerun 2.0 lines, newest first, their accents (a breakout marigold).
+	video::Channel& Ch = L.Ch();
+	Ch.Bell.push_back({L.S.WorldMinutes(), "\xE2\x80\x9Ckings, 82% to win\xE2\x80\x9D is breaking out: it's showing up next to other videos."});
+	Ch.Bell.push_back({L.S.WorldMinutes(), "New viewers are bingeing your channel: three older videos are getting views again."});
+	L.Frame();
+	const Run Bell = RunOf(L.Frame(), "4.2K subscribers");
+	L.Click(1556.0f, 30.0f);
+	D = L.Frame();
+	Check(L.U().BellOpen && DrewRun(D, "Notifications") && Drew(D, "bingeing your channel") && Drew(D, "is breaking out"), "bell: Rerun 2.0's lines in the bell");
+	Check(Bell.Found, "bell: the glance beside it");
+	WriteList("rerun3_bell", D);
+	L.Click(800.0f, 500.0f);
+	Check(!L.U().BellOpen, "bell: a click off it closes it");
+}
+
+// ------------------------------------------------------------------ Studio
+
+void Studio()
+{
+	Lap L("rerun3-studio");
+	Build(L, 5, false);
+	L.U().LaunchHidden = true;
+	L.S.DebugVideo("fake badbeat online");
+	L.S.DebugVideo("fake bluff online");
+	L.Open(0);
+	DrawList D = L.Settled();
+	// The renames (§1.10, §6.2): a Cut, Loud; the lengths with their real minutes; three columns.
+	Check(DrewRun(D, "Cut") && !DrewRun(D, "Short"), "studio: the Short format shows as Cut");
+	Check(DrewRun(D, "Loud") && !DrewRun(D, "Hype"), "studio: the Hype style shows as Loud");
+	Check(Drew(D, "Tight  6:00") && Drew(D, "Standard  8:00") && Drew(D, "Extended  12:00"), "studio: Breakdown's three lengths, 6:00, 8:00, 12:00");
+	Check(Drew(D, "MOMENTS") && Drew(D, "IDEAS") && Drew(D, "SERIES"), "studio: MOMENTS · IDEAS · SERIES");
+	Check(DrewRun(D, "PUBLISH") && Spelled(D, "PACKAGING READ") && Spelled(D, "SETTINGS"), "studio: PUBLISH, the packaging read and the settings");
+	Check(Drew(D, "Goes up ") && Drew(D, "when the edit ends") && Drew(D, "Your viewers peak around"), "studio: when it goes up against the audience's peak (§6.6.3)");
+	Check(Drew(D, "Edit 1 h 30 m") && Drew(D, "8 energy"), "studio: a Standard Breakdown's edit, 1 h 30 m and 8 energy");
+	Check(Drew(D, "Riding your breakout: this upload starts with +38% reach"), "studio: the carry while Momentum is over 1.1 (R1, the core's line)");
+	Check(Drew(D, "Upload streak: 6 weeks \xC2\xB7 1 Rain Check"), "studio: the upload streak with its Rain Check (R2)");
+	Check(Drew(D, "Promise: ") && !Drew(D, "Your viewers are on at"), "studio: core-videocontent's packaging read (promise against payoff), the hour once");
+	Check(Outside(D, "studio") == 0, "studio: every run inside the laptop");
+	WriteList("rerun3_studio", D);
+	// Extended: the edit's minutes follow the length (§4.5.5).
+	Check(ClickRun(L, D, "Extended  12:00"), "studio: Extended picked");
+	D = L.Frame();
+	Check(Drew(D, "Edit 2 h") && Drew(D, "10 energy"), "studio: Extended's edit, 2 h and 10 energy");
+	// A Cut: no thumbnail, fixed length, the feed's ads (§4.5.6, §5.4).
+	Check(ClickRun(L, D, "Cut"), "studio: Cut picked");
+	D = L.Frame();
+	Check(DrewRun(D, "45 s, fixed") && Drew(D, "A Cut plays in the feed") && DrewRun(D, "Cuts share the feed's ads"), "studio: a Cut has no thumbnail and no ad load of its own");
+	Check(ClickRun(L, D, "Breakdown"), "studio: back to a Breakdown");
+	// The library's options as it deals them (three titles, six recipes): the Duel picker and its cost.
+	rr::VideoUi& U = L.U();
+	U.Titles = {{"badbeat.story.1", "kings, 82% to win, and then the nine of hearts", 1, 0}, {"badbeat.question.1", "Would you get kings in here? 58 big blinds", 0, 0},
+		{"badbeat.plain.1", "Night Owl, hand 214: kings against ace-nine all in", 0, 0}};
+	U.Thumbs.clear();
+	for (int K = 0; K < 6; ++K)
+	{
+		U.Thumbs.push_back(Spec(50, K));
+	}
+	U.OptKey = rr::RrOptionKey(U);
+	D = L.Settled();
+	Check(Drew(D, "kings, 82% to win, and then the nine of hearts") && Drew(D, "Would you get kings in here?") && Drew(D, "Night Owl, hand 214"), "studio: the three title options");
+	const video::Choice One = rr::RrChoice(U);
+	Check(One.TitleTpl == "badbeat.story.1" && One.Thumbs.size() == 1 && One.Len == video::LengthOpt::Extended, "studio: the choice carries the template, the recipe and the length");
+	const int PickedArch = U.Thumbs[static_cast<size_t>(std::clamp(U.ThumbPick, 0, 5))].Arch;
+	const char* PickedName = video::ArchName(PickedArch);
+	const std::string PickedRead = video::ArchRead(PickedArch);
+	Check(PickedName && DrewRun(D, PickedName) && !PickedRead.empty() && Drew(D, PickedRead.substr(0, std::min<size_t>(12, PickedRead.size()))),
+		"studio: the picked recipe's archetype and its read under the options (ArchName, ArchRead)");
+	Check(ClickRun(L, D, "DUEL"), "studio: DUEL");
+	D = L.Frame();
+	// The options at x 912 / 1040 from the grid's top (below the day's verdict line when it shows): the second and the fifth.
+	const float Oy = U.OptTop;
+	Check(U.DuelOn && Oy >= 452.0f, "studio: the Duel picker is on");
+	L.Click(rr::RrEdX + rr::RrThumbW + 12.0f + rr::RrOptW + 8.0f + 60.0f, Oy + 30.0f);
+	L.Click(rr::RrEdX + rr::RrThumbW + 12.0f + 60.0f, Oy + 2.0f * (rr::RrOptH + 8.0f) + 30.0f);
+	D = L.Settled();
+	const video::Choice Duel = rr::RrChoice(U);
+	Check(U.DuelOn && Duel.Thumbs.size() == 3, "studio: a Duel of three (the selected and two more)");
+	Check(Drew(D, "DUEL: A + B + C (+30 min)") && Drew(D, "(+Duel)") && Drew(D, "Edit 2 h 30 m") && Drew(D, "12 energy"), "studio: the Duel's cost, +15 minutes and +1 energy a contender (§4.6.8)");
+	WriteList("rerun3_studio_duel", D);
+	// Shuffle advances the deal (the library's: here the stub deals none, so the injected options give way).
+	const int Before = U.ThumbShuffle;
+	Check(ClickRun(L, D, "SHUFFLE", 420.0f) && U.ThumbShuffle == Before + 1, "studio: the thumbnails' SHUFFLE advances the deal");
+	// Ads: a segmented setting; Heavy rides in the choice.
+	D = L.Frame();
+	Check(ClickRun(L, D, "Heavy") && rr::RrChoice(U).Ads == video::AdLoad::Heavy, "studio: Heavy ads ride in the choice");
+	Measure(L, "studio");
+}
+
+// ------------------------------------------------------------------ the launch card
+
+void Launch()
+{
+	Lap L("rerun3-launch");
+	Build(L, 7, false);
+	const std::string Id = PublishOne(L, true);
+	Check(!Id.empty(), "launch: a Duel published through the session");
+	// Live Drop (R3): a stream of an hour starting 20 minutes after the drop, 30 of its own viewers.
+	const video::Video* V = rr::RrVideo(L.S, Id);
+	Check(V && V->X.On && V->X.Duels == 2, "launch: the video is Rerun 2.0's, with its Duel");
+	if (V)
+	{
+		video::algo::NoteStream(L.Ch(), V->At + 20.0, V->At + 80.0, 40, 30.0, 25.0);
+	}
+	L.S.DebugVideo("advance 1");
+	L.Rest();
+	L.Open(0);
+	DrawList D = L.Settled();
+	Check(Drew(D, "LAUNCH") || Drew(D, "L"), "launch: the card");
+	Check(DrewRun(D, "VIEWS") && DrewRun(D, "CTR SO FAR") && DrewRun(D, "LIKES \xC2\xB7 DISLIKES") && DrewRun(D, "RANKING") && DrewRun(D, "IMPRESSIONS"), "launch: views, CTR so far, likes and dislikes, the ranking, impressions");
+	Check(Drew(D, " OF ") && Drew(D, "typical "), "launch: the numbers against the typical upload at the same age");
+	Check(Drew(D, "As a Partner, this video would have earned about") && Drew(D, "(not paid)"), "launch: before Partner, \"would have earned ... (not paid)\" (§4.5.8)");
+	Check(Drew(D, "Live Drop: your stream gave it a push (30 watching)"), "launch: Live Drop's line with the stream's own viewers (R3)");
+	Check(Drew(D, "Riding your breakout"), "launch: the carry it got at upload (R1)");
+	Check(Drew(D, "Make a Cut") && DrewRun(D, "Go live on Kast") && Drew(D, "Post a teaser") && Drew(D, "Reply round") && Drew(D, "Viewers who arrive early count."), "launch: the four launch actions and the hint");
+	Check(DrewRun(D, "THUMBNAIL DUEL") && Drew(D, "of watch time") && Drew(D, " CTR"), "launch: the Duel's running CTRs and watch-time shares");
+	Check(Drew(D, "VIEWS AN HOUR SINCE THE DROP") && Drew(D, "The verdict comes at midnight"), "launch: views an hour and when the verdict comes");
+	Check(Drew(D, "dislikes are only visible to you"), "launch: the dislikes' privacy note");
+	Check(Outside(D, "launch") == 0, "launch: every run inside the laptop");
+	WriteList("rerun3_launch", D);
+	Measure(L, "launch card");
+	// NEW VIDEO: the editor while the launch runs, and back.
+	L.S.DebugVideo("fake bluff online");
+	Check(ClickRun(L, D, "NEW VIDEO \xE2\x80\xBA"), "launch: NEW VIDEO");
+	D = L.Frame();
+	Check(DrewRun(D, "PUBLISH") && Drew(D, "BACK TO THE LAUNCH"), "launch: the editor, with the way back");
+	const Run Back = RunOf(D, "BACK TO THE LAUNCH", true);
+	if (Back.Found)
+	{
+		L.Click(Back.X + Back.W / 2.0f, Back.Base - Back.Size * 0.35f);
+	}
+	Check(Back.Found && !L.U().LaunchHidden && Drew(L.Frame(), "LAUNCH ACTIONS"), "launch: back to the card");
+	// After the verdict: the day's one-line result at the top of Studio (the bell's sentence and the label).
+	L.S.DebugVideo("advance 2");
+	L.Rest();
+	L.U().LaunchHidden = true;
+	D = L.Frame();
+	const video::Video* After = rr::RrVideo(L.S, Id);
+	Check(After && After->X.Verdict >= 0, "launch: the verdict came");
+	if (After && After->X.Verdict >= 0)
+	{
+		const std::string Label = ss::ui::rlnet_detail::NetUpper(rr::RrVerdictName(After->X.Verdict));
+		Check(DrewRun(D, Label), "launch: the verdict's label at the top of Studio for a day (" + Label + ")");
+	}
+	WriteList("rerun3_studio_verdict", D);
+}
+
+// ------------------------------------------------------------------ Analytics
+
+void Analytics(bool Partner)
+{
+	const std::string Tag = Partner ? "partner" : "before";
+	Lap L("rerun3-analytics-" + Tag);
+	Build(L, 14, Partner);
+	L.Open(2);
+	DrawList D = L.Settled();
+	// Overview (§5.3).
+	Check(DrewRun(D, "OVERVIEW") && DrewRun(D, "Content") && DrewRun(D, "Audience") && DrewRun(D, "Revenue") && DrewRun(D, "Realtime") && DrewRun(D, "Research"), "overview " + Tag + ": the six sub-tabs");
+	Check(DrewRun(D, "7 d") && DrewRun(D, "28 d") && DrewRun(D, "90 d") && DrewRun(D, "365 d") && DrewRun(D, "Lifetime"), "overview " + Tag + ": the range picker");
+	Check(Drew(D, "VIEWS") && Drew(D, "WATCH TIME (HOURS)") && Drew(D, "SUBSCRIBERS") && Drew(D, "ESTIMATED REVENUE"), "overview " + Tag + ": the four tiles");
+	Check(Drew(D, " lost)") && Drew(D, " gained \xC2\xB7 "), "overview " + Tag + ": subscribers gained and lost (§5.1)");
+	Check(Drew(D, "REALTIME") && Drew(D, "views \xC2\xB7 last 48 hours"), "overview " + Tag + ": the Realtime card");
+	Check(Drew(D, "TOP CONTENT") && Drew(D, "LATEST") && Drew(D, "CHANNEL HEALTH") && Drew(D, "Momentum"), "overview " + Tag + ": top content, the latest and Channel health");
+	Check(Drew(D, "Upload streak: 6 weeks \xC2\xB7 1 Rain Check"), "overview " + Tag + ": the upload streak with its Rain Check (R2)");
+	Check(Partner ? Drew(D, "HOW THE MONEY ADDS UP") : Drew(D, "Ads start when you join the Partner Program."), "overview " + Tag + ": the money card");
+	Check(Outside(D, ("overview " + Tag).c_str()) == 0, "overview " + Tag + ": every run inside the laptop");
+	WriteList("rerun3_overview_" + Tag, D);
+	Measure(L, "overview " + Tag);
+	// The range picker moves the window.
+	Check(ClickRun(L, D, "90 d") && L.U().RangeIx == 2, "overview " + Tag + ": 90 d");
+	D = L.Settled();
+	Check(Drew(D, "LAST 90 DAYS"), "overview " + Tag + ": the chart follows the window");
+	Check(ClickRun(L, D, "Lifetime") && L.U().RangeIx == 4, "overview " + Tag + ": Lifetime");
+	D = L.Settled();
+	Check(Drew(D, "LIFETIME"), "overview " + Tag + ": lifetime");
+	L.U().RangeIx = 1;
+	// Content: the table.
+	Check(ClickRun(L, L.Frame(), "Content"), "content " + Tag + ": the tab");
+	D = L.Settled();
+	Check(DrewRun(D, "LIKES \xC2\xB7 DISLIKES") && DrewRun(D, "CTR 48H") && DrewRun(D, "IMPRESSIONS") && DrewRun(D, "COIN"), "content " + Tag + ": the table's columns");
+	Check(DrewRun(D, "shown in feed") && DrewRun(D, "stayed to watch"), "content " + Tag + ": a Cut's impressions and CTR relabelled (§5.4)");
+	Check(DrewRun(D, "BREAKOUT") || DrewRun(D, "OUTLIER"), "content " + Tag + ": the breakout's tag (R1)");
+	Check(DrewRun(D, "BINGE WAVE"), "content " + Tag + ": the Binge wave's videos marked (R2)");
+	Check(Outside(D, ("content " + Tag).c_str()) == 0, "content " + Tag + ": every run inside the laptop");
+	WriteList("rerun3_content_" + Tag, D);
+	Measure(L, "content " + Tag);
+	// Sorting by views.
+	Check(ClickRun(L, D, "VIEWS", 150.0f) && L.U().SortCol == 0, "content " + Tag + ": sort by views");
+	// One video: the breakout's.
+	std::vector<const video::Video*> Up;
+	for (const video::Video& V : L.Ch().Videos)
+	{
+		Up.push_back(&V);
+	}
+	std::stable_sort(Up.begin(), Up.end(), [](const video::Video* A, const video::Video* B) { return A->At > B->At; });
+	const video::Video& Hit = *Up[2];
+	L.U().One = Hit.Id;
+	L.U().OneTab = 0;
+	D = L.Settled();
+	Check(DrewRun(D, "Not pushed") && DrewRun(D, "Held") && DrewRun(D, "Pushed") && DrewRun(D, "Pushed more") && DrewRun(D, "Pushed hard"), "video " + Tag + ": the five-step scale (R1)");
+	Check(Drew(D, "WHAT RERUN DID WITH IT") && Drew(D, "INSIGHTS") && Drew(D, "your subscribers got it"), "video " + Tag + ": the log and the Insights");
+	Check(Drew(D, "is showing up next to other videos"), "video " + Tag + ": the breakout's line");
+	Check(Drew(D, "YOUR NEXT UPLOAD") && Drew(D, "Riding your breakout"), "video " + Tag + ": the next upload's carry (R1)");
+	// C3 gate (update 3 §4.6.7): a video inside its 28 days shows CHANGE THE PACKAGING: its first 48 hours against the typical,
+	// the library's three titles and six thumbnails for it.
+	Check(Drew(D, "CHANGE THE PACKAGING") && Drew(D, "This video's first 48 hours: CTR ") && L.U().RepackT.size() == 3 && L.U().RepackS.size() == 6,
+		"video " + Tag + ": the repackage card (the read, three titles, six thumbnails)");
+	Check(Partner ? DrewRun(D, "REVENUE") && Drew(D, "RPM ") : DrewRun(D, "WOULD HAVE EARNED") && DrewRun(D, "not paid"), "video " + Tag + ": revenue, or what it would have earned (not paid)");
+	Check(Outside(D, ("video overview " + Tag).c_str()) == 0, "video " + Tag + ": every run inside the laptop");
+	WriteList("rerun3_video_overview_" + Tag, D);
+	Measure(L, "video overview " + Tag);
+	const char* Tabs[3] = {"Reach", "Engagement", "Revenue"};
+	for (int K = 0; K < 3; ++K)
+	{
+		Check(ClickRun(L, L.Frame(), Tabs[K], 240.0f) && L.U().OneTab == K + 1, std::string("video ") + Tag + ": the " + Tabs[K] + " tab");
+		D = L.Settled();
+		if (K == 0)
+		{
+			Check(Drew(D, "HOW VIEWERS GOT THERE") && DrewRun(D, "Past half") && DrewRun(D, "Subscribed") && Drew(D, "TRAFFIC SOURCES"), "reach " + Tag + ": the funnel and the sources");
+		}
+		else if (K == 1)
+		{
+			Check(Drew(D, "AUDIENCE RETENTION") && Drew(D, "Moments that held them") && Drew(D, "Dip: "), "engagement " + Tag + ": retention with its moments and the dip");
+			Check(Drew(D, "LIKES AND DISLIKES") && Drew(D, "dislikes are only visible to you"), "engagement " + Tag + ": likes against dislikes, private");
+		}
+		else
+		{
+			Check(Drew(D, "AD TYPES") && Drew(D, "pre-roll") && Drew(D, "RPM A DAY") && Drew(D, "SUITABILITY AND ADS"), "revenue " + Tag + ": the ad types, the coin and RPM a day");
+		}
+		Check(Outside(D, (std::string("video ") + Tabs[K] + " " + Tag).c_str()) == 0, std::string("video ") + Tabs[K] + " " + Tag + ": every run inside the laptop");
+		WriteList(std::string("rerun3_video_") + Tabs[K] + "_" + Tag, D);
+		Measure(L, std::string("video ") + Tabs[K] + " " + Tag);
+	}
+	// A Cut's Reach: "Shown in feed" and "Stayed to watch" (§5.4).
+	for (const video::Video* V : Up)
+	{
+		if (V->F == video::Format::Short)
+		{
+			L.U().One = V->Id;
+			L.U().OneTab = 1;
+			D = L.Settled();
+			Check(DrewRun(D, "SHOWN IN FEED") && DrewRun(D, "STAYED TO WATCH") && !DrewRun(D, "IMPRESSIONS"), "reach " + Tag + ": a Cut's Shown in feed and Stayed to watch");
+			WriteList("rerun3_video_cut_" + Tag, D);
+			break;
+		}
+	}
+	// C3 gate (§4.6.7): a press on the card's second title repackages the breakout through Session::Repackage (its words change,
+	// one change spent); a second press inside three days is refused in the core's words.
+	{
+		L.U().One = Hit.Id;
+		L.U().OneTab = 0;
+		L.Settled();
+		const std::string Was = Hit.Title;
+		const int Before = Hit.X.Repacks;
+		const std::string Second = L.U().RepackT.size() > 1 ? L.U().RepackT[1].Text : std::string();
+		L.Click(1300.0f, 510.0f); // the second title row (the card at 1176, 372; the read, the label, row 0 at 464, row 1 at 496)
+		D = L.Settled();
+		std::printf("  rerun repack   \"%s\" -> \"%s\" (the card's second title \"%s\"), %d change(s)\n", Was.c_str(), Hit.Title.c_str(), Second.c_str(), Hit.X.Repacks);
+		Check(!Second.empty() && Hit.X.Repacks == Before + 1 && Hit.Title != Was && Hit.Title == Second && Drew(D, "Changed. Rerun skips its next check-in"),
+			"video " + Tag + ": a title press repackages the video (its words change, one change spent)");
+		WriteList("rerun3_video_repack_" + Tag, D);
+		L.Click(1300.0f, 510.0f);
+		D = L.Settled();
+		Check(Hit.X.Repacks == Before + 1 && Drew(D, "Give the last change three days."), "video " + Tag + ": a second change inside three days is refused");
+	}
+	L.U().One.clear();
+	// Audience, Revenue, Realtime, Research.
+	const char* Pages[4] = {"Audience", "Revenue", "Realtime", "Research"};
+	for (int K = 0; K < 4; ++K)
+	{
+		Check(ClickRun(L, L.Frame(), Pages[K], 0.0f) && L.U().Sub == K + 2, std::string("analytics ") + Tag + ": " + Pages[K]);
+		D = L.Settled();
+		switch (K)
+		{
+		case 0:
+			Check(Drew(D, "WHEN YOUR VIEWERS ARE ON") && Drew(D, "Best: ") && Drew(D, "You post at") && Drew(D, "AGE") && Drew(D, "TOP GEOGRAPHIES"), "audience " + Tag + ": the heat map and its caption, ages, geography");
+			break;
+		case 1:
+			if (Partner)
+			{
+				Check(Drew(D, "EST. REVENUE") && Drew(D, "PLAYBACK CPM") && Drew(D, "MONETIZED PLAYS") && Drew(D, "PAYOUTS") && Drew(D, "AD SETTINGS ON YOUR VIDEOS"), "revenue " + Tag + ": the tiles, payouts, the ad settings");
+				// C3 gate: a payday that rolled over (nothing paid yet) never reads PAID.
+				const bool Paydays = std::any_of(L.Ch().Paid.begin(), L.Ch().Paid.end(), [](const std::string& K) { return K.rfind("pay:", 0) == 0; });
+				Check(L.Ch().PaidCents > 0 || (!Drew(D, " PAID") && (!Paydays || Drew(D, " ROLLED OVER"))), "revenue " + Tag + ": a rolled-over month reads ROLLED OVER, never PAID");
+				WriteList(std::string("rerun3_") + Pages[K] + "_" + Tag, D);
+				Check(ClickRun(L, D, "MANAGE") && L.U().Manage, "revenue " + Tag + ": MANAGE opens the list");
+				const DrawList Mg = L.Frame();
+				Check(Drew(Mg, "MANAGE ADS") && (Drew(Mg, "judged") || Drew(Mg, "check-in on day")), "revenue " + Tag + ": each video's load and whether it's judged");
+				WriteList("rerun3_Revenue_manage", Mg);
+				// A click outside the list closes it and clicks nothing under it (here: the Realtime tab's spot).
+				L.Click(431.0f, 90.0f);
+				Check(!L.U().Manage && L.U().Sub == 3, "revenue " + Tag + ": a click off MANAGE's list closes it, nothing under it");
+				D = L.Settled();
+			}
+			else
+			{
+				Check(Drew(D, "THE AD MARKET THIS WEEK") && Drew(D, "Setup and gear") && Drew(D, "WHAT YOUR VIDEOS WOULD HAVE EARNED"), "revenue " + Tag + ": the Ad market card and \"would have earned\" (§4.5.8)");
+			}
+			break;
+		case 2: Check(Drew(D, "VIEWS \xC2\xB7 LAST 48 HOURS") && Drew(D, "LAST 60 MINUTES") && Drew(D, "subscribers now"), "realtime " + Tag + ": the hours, the minutes, subscribers now"); break;
+		default:
+			// C3 fix round (M2): the search table beside the trends; before Partner the Ad market takes the help card's place
+			// (its words behind the trends' "?").
+			Check(Drew(D, "TRENDING IN POKER THIS WEEK") && Drew(D, "WHAT POKER VIEWERS SEARCH") && Drew(D, "YOUR NICHE") &&
+					(Partner ? Drew(D, "HOW RERUN DECIDES") : Drew(D, "THE AD MARKET THIS WEEK")),
+				"research " + Tag + ": the trends, the searches, the niche, the help card (the Ad market before Partner)");
+			break;
+		}
+		Check(Outside(D, (std::string(Pages[K]) + " " + Tag).c_str()) == 0, std::string(Pages[K]) + " " + Tag + ": every run inside the laptop");
+		if (!(K == 1 && Partner))
+		{
+			WriteList(std::string("rerun3_") + Pages[K] + "_" + Tag, D);
+		}
+		Measure(L, std::string(Pages[K]) + " " + Tag);
+	}
+}
+
+// ------------------------------------------------------------------ Channel and Home (public)
+
+void Public()
+{
+	Lap L("rerun3-public");
+	Build(L, 9, false);
+	L.Open(1);
+	DrawList D = L.Settled();
+	Check(DrewRun(D, "VIDEOS") && DrewRun(D, "CUTS") && DrewRun(D, "SERIES") && DrewRun(D, "ABOUT"), "channel: VIDEOS · CUTS · SERIES · ABOUT");
+	Check(DrewRun(D, "Latest") && DrewRun(D, "Popular") && DrewRun(D, "Oldest"), "channel: the sorts");
+	Check(Drew(D, "THE OUTLIER SHELF") && (DrewRun(D, "BREAKOUT") || DrewRun(D, "OUTLIER")), "channel: the Outlier shelf with the breakout (R1)");
+	Check(Drew(D, "Upload streak: 6 weeks"), "channel: the upload streak in the banner (R2)");
+	Check(Drew(D, "Partner Program") && Drew(D, " / 1,000"), "channel: before Partner, the gate's two bars");
+	Check(NoDislikes(L, D), "channel: no dislike on the public page");
+	Check(!Drew(D, "BALANCE") && !Drew(D, " earned"), "channel: no money on the public page");
+	Check(Outside(D, "channel") == 0, "channel: every run inside the laptop");
+	WriteList("rerun3_channel", D);
+	Measure(L, "channel");
+	Check(ClickRun(L, D, "CUTS") && L.U().ChanTab == 1, "channel: the CUTS tab");
+	D = L.Settled();
+	Check(Drew(D, "CUT"), "channel: Cuts marked");
+	Check(ClickRun(L, D, "ABOUT") && L.U().ChanTab == 3, "channel: ABOUT");
+	// Home: a video Rerun is testing on Home right now is RECOMMENDED; the world's creators' videos are the library's.
+	const std::string Id = PublishOne(L, false);
+	L.Open(3);
+	D = L.Settled();
+	Check(!Id.empty() && DrewRun(D, "RECOMMENDED"), "home: the new upload, RECOMMENDED while Rerun tests it on Home (§6.6.6)");
+	Check(DrewRun(D, "All") && DrewRun(D, "Bad beats") && DrewRun(D, "Strategy"), "home: the chips");
+	Check(NoDislikes(L, D), "home: no dislike on the public feed");
+	Check(Outside(D, "home") == 0, "home: every run inside the laptop");
+	WriteList("rerun3_home", D);
+	Measure(L, "home");
+	Check(ClickRun(L, D, "Strategy") && L.U().HomeChip == 2, "home: a chip");
+	// The world's creators beside yours (core-videocontent's WorldVideos is a stub today, so these are fake: the library's
+	// recipes under made-up channels, set for the day the way RrDaily keeps them).
+	L.U().HomeChip = 0;
+	const std::vector<video::ThumbSpec> Specs = video::ContactSheet(1, 9);
+	static const char* const Who[] = {"Overlay Weekly", "deepstack dana", "Ray at the rail"};
+	for (size_t K = 0; K < Specs.size(); ++K)
+	{
+		video::WorldVideo W;
+		W.Creator = Who[K % 3];
+		W.Title = "Fake world video " + std::to_string(K + 1) + ": a read from the cheap seats";
+		W.Spec = Specs[K];
+		W.At = L.S.WorldMinutes() - 90.0 * static_cast<double>(K + 1);
+		W.Views = 1200.0 + 3100.0 * static_cast<double>(K);
+		L.U().WorldVids.push_back(W);
+	}
+	D = L.Settled();
+	Check(!Specs.empty() && Drew(D, "Fake world video 1:") && Drew(D, "Overlay Weekly") && RunOf(D, "RECOMMENDED").Found, "home: the world's videos after yours, newest first");
+	Check(RunOf(D, "Fake world video 1:", true).Base < RunOf(D, "Fake world video 5:", true).Base || !Drew(D, "Fake world video 5:"), "home: newest first, four a row");
+	Check(NoDislikes(L, D) && Outside(D, "home world") == 0, "home: the world's tiles stay inside the laptop, no dislikes");
+	WriteList("rerun3_home_world", D);
+	Measure(L, "home with the world");
+}
+
+// ------------------------------------------------------------------ ss.Video.Sheet's contact sheet (VT1)
+
+void Sheet()
+{
+	Lap L("rerun3-sheet");
+	Build(L, 2, false);
+	Check(!rr::VideoOpenSheet(L.RL, "nothing", 24, L.Now), "sheet: an unknown group opens nothing");
+	static const char* const Groups[] = {"beats", "reads", "pots", "runs", "rival", "stories", "ideas"};
+	for (const char* G : Groups)
+	{
+		const bool Opened = rr::VideoOpenSheet(L.RL, G, 24, L.Now);
+		const DrawList D = L.Settled();
+		const std::vector<video::ThumbSpec>& Sh = L.U().Sheet;
+		std::set<std::pair<int, int>> Pairs;
+		int Named = 0;
+		for (const video::ThumbSpec& T : Sh)
+		{
+			Pairs.insert({T.Arch, T.Pal});
+			Named += video::ArchName(T.Arch) && DrewRun(D, video::ArchName(T.Arch)) ? 1 : 0;
+		}
+		const std::string Tag = std::string("sheet ") + G;
+		Check(Opened && L.U().Page == rr::RrPageSheet && L.U().SheetGroup == G, Tag + ": opens on the sheet page");
+		// As many as the library has for the group, up to 24 (core-videocontent's ContactSheet).
+		std::printf("  sheet          %-8s %2zu recipes, %2zu (archetype, palette) pairs, %2d named\n", G, Sh.size(), Pairs.size(), Named);
+		Check(!Sh.empty() && Sh.size() <= 24 && Pairs.size() == Sh.size() && Named == static_cast<int>(Sh.size()),
+			Tag + ": up to 24 recipes, no (archetype, palette) twice, each named");
+		Check(DrewRun(D, std::to_string(Sh.size()) + " for " + G + ", no two alike"), Tag + ": the count it drew is the sheet's");
+		Check(L.U().Paint.Waiting == 0, Tag + ": every thumbnail painted once the sheet settles");
+		Check(Outside(D, Tag.c_str()) == 0, Tag + ": every run inside the laptop");
+		if (G == Groups[0])
+		{
+			WriteList("rerun3_sheet", D);
+			// A testing page: 24 thumbnails replay their cached vertices, so its size is printed, not held to a page's 35k.
+			std::vector<double> Ms;
+			for (int K = 0; K < 9; ++K)
+			{
+				const auto T0 = std::chrono::steady_clock::now();
+				L.Frame();
+				Ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count());
+			}
+			std::sort(Ms.begin(), Ms.end());
+			std::printf("  rerun page     %-28s %6zu vertices, %3d runs, %.3f ms warm\n", "sheet beats", D.Vertices.size(), CountRuns(D), Ms[4]);
+			Check(Ms[4] < 12.0, "sheet: draws warm (printed)");
+		}
+	}
+	Check(rr::VideoOpenSheet(L.RL, "pots", 3, L.Now) && L.U().Sheet.size() == 3, "sheet: n of them");
+	L.Open(0);
+	Check(L.U().Page == rr::RrPageStudio, "sheet: the tabs leave it");
+}
+
+// ------------------------------------------------------------------ thumbnails: two uncached a frame
+
+void Progressive()
+{
+	Lap L("rerun3-progressive");
+	Build(L, 12, true);
+	// A fresh look: nothing of this channel is cached at this size yet.
+	L.S.Person.Appearance.Hair = (L.S.Person.Appearance.Hair + 5) % 12;
+	L.Open(1);
+	L.Frame();
+	Check(L.U().Paint.Painted == 2 && L.U().Paint.Waiting > 0, "thumbnails: the first frame paints two uncached ones, the rest skeletons (V12)");
+	int Frames = 1, Most = 2;
+	while ((L.U().Paint.Painted > 0 || L.U().Paint.Waiting > 0) && Frames < 60)
+	{
+		L.Frame();
+		Most = std::max(Most, L.U().Paint.Painted);
+		++Frames;
+	}
+	Check(Most <= 2 && L.U().Paint.Painted == 0 && L.U().Paint.Waiting == 0, "thumbnails: never more than two uncached a frame, and the page settles");
+	std::printf("  rerun thumbs   the Channel's grid and shelf cached over %d frames (2 a frame)\n", Frames);
+	// A skeleton until a tile's turn: a new look repaints, two a frame.
+	L.S.Person.Appearance.Hair = (L.S.Person.Appearance.Hair + 1) % 12;
+	const DrawList D = L.Frame();
+	Check(L.U().Paint.Painted == 2, "thumbnails: a new look repaints, two a frame");
+	WriteList("rerun3_channel_skeletons", D);
+}
+
+// ------------------------------------------------------------------ an old save (V6): Update 2's channel
+
+void Legacy()
+{
+	Lap L("rerun3-legacy");
+	// Update 2 videos: the channel's X off, uploads through Update 2's choice sets.
+	for (int I = 0; I < 4; ++I)
+	{
+		L.S.DebugVideo("fake badbeat online");
+		video::Choice C;
+		C.Candidates = {Newest(L.S)};
+		C.F = video::Format::Breakdown;
+		C.T = video::TitleStyle::Story;
+		video::UploadFacts Fa;
+		Fa.Energy = 90.0;
+		video::Upload(L.Ch(), C, L.S.WorldMinutes(), "rerun3-legacy", Fa);
+		L.S.DebugVideo("advance 2");
+		L.Rest();
+	}
+	Check(!L.Ch().X.On && !L.Ch().Videos.empty() && !L.Ch().Videos.front().X.On, "legacy: an Update 2 channel and videos");
+	L.Open(2);
+	L.U().Sub = 1;
+	DrawList D = L.Settled();
+	Check(Drew(D, " est."), "legacy: the table marks Update 2's impressions and CTR \"est.\" (V6)");
+	L.U().One = L.Ch().Videos.front().Id;
+	D = L.Settled();
+	Check(Drew(D, "Published before Rerun's new analytics"), "legacy: one video says it predates the log");
+	WriteList("rerun3_legacy_video", D);
+	L.Open(1);
+	D = L.Settled();
+	Check(DrewRun(D, "VIDEOS") && !L.Ch().X.On, "legacy: Channel renders and nothing turns Rerun 2.0 on");
+	L.U().One.clear();
+	L.S.DebugVideo("fake cooler online");
+	L.Open(0);
+	D = L.Settled();
+	Check(DrewRun(D, "PUBLISH") && !L.Ch().X.On, "legacy: Studio renders; looking changes nothing");
+	// C3 (the gate's rewrite): the library deals for an Update 2 channel too, so Studio's choice carries Rerun 2.0's packaging (a
+	// template and a recipe), and looking turns nothing on: the first PUBLISH of it is the channel's migration (§7.5 item 3).
+	const video::Choice C = rr::RrChoice(L.U());
+	Check(!C.TitleTpl.empty() && C.Thumbs.size() == 1 && !L.Ch().X.On, "legacy: Studio deals Rerun 2.0's packaging on an Update 2 channel; looking turns nothing on");
+	WriteList("rerun3_legacy_studio", D);
+	// The migration (§7.5, V6, I7): that PUBLISH turns the channel on and makes a Rerun 2.0 video; every Update 2 video keeps its
+	// numbers, stays Update 2 and gains no component as the days go by.
+	struct Was
+	{
+		std::string Id, Title;
+		double P, Retention, Rpm, Conv, At;
+	};
+	std::vector<Was> Old;
+	for (const video::Video& V : L.Ch().Videos)
+	{
+		Old.push_back({V.Id, V.Title, V.P, V.Retention, V.Rpm, V.Conv, V.At});
+	}
+	L.Rest();
+	const std::string Why = L.S.Publish(C);
+	for (int K = 0; K < 1800 && L.S.TimeSkip.Active; ++K)
+	{
+		L.Now += 1.0 / 30.0;
+		L.S.Update(L.Now);
+	}
+	L.S.DebugVideo("advance 7");
+	int Kept = 0, New = 0;
+	bool NewOn = false;
+	for (const video::Video& V : L.Ch().Videos)
+	{
+		const auto W = std::find_if(Old.begin(), Old.end(), [&V](const Was& X) { return X.Id == V.Id; });
+		if (W == Old.end())
+		{
+			++New;
+			NewOn = V.X.On && V.X.TitleTpl == C.TitleTpl && V.X.Spec[0].Arch == C.Thumbs.front().Arch;
+			continue;
+		}
+		Kept += !V.X.On && V.X.Comps.empty() && V.Title == W->Title && V.P == W->P && V.Retention == W->Retention && V.Rpm == W->Rpm && V.Conv == W->Conv && V.At == W->At ? 1 : 0;
+	}
+	Check(Why.empty() && L.Ch().X.On && New == 1 && NewOn && (L.S.Life.Update3LinesRead & ss::life::U3Video) != 0,
+		"legacy: its first Rerun 2.0 upload migrates the channel (TurnOnU3): the channel on, the new video Rerun 2.0's, the save's bit set");
+	Check(Kept == static_cast<int>(Old.size()) && !Old.empty(), "legacy: every Update 2 video keeps its numbers, stays Update 2 and gains no component a week on (V6, I7)");
+}
+
+// ------------------------------------------------------------------ copy
+
+void Copy()
+{
+	std::vector<std::pair<std::string, std::string>> Lines;
+	for (const std::string& S : rr::VideoUiInventory())
+	{
+		Lines.push_back({"rerun", S});
+	}
+	Failures += copylint::Run("ui-rerun", Lines, copylint::LetterBody);
+	++Checks;
+	int Bad = 0;
+	std::vector<std::string> All = rr::VideoUiInventory();
+	const std::vector<std::string> Frags = rr::VideoUiFragments();
+	All.insert(All.end(), Frags.begin(), Frags.end());
+	for (const std::string& S : All)
+	{
+		const char* Hit = trademarks::Find(S, trademarks::kSourceScan);
+		const char* Hit2 = trademarks::Find(S, trademarks::kCopyScan);
+		if (Hit || Hit2)
+		{
+			++Bad;
+			std::printf("  copy: \"%s\" names \"%s\"\n", S.c_str(), Hit ? Hit : Hit2);
+		}
+		// U1: nothing in the world says AI, bot or autoplay.
+		for (const char* Banned : {"ai", "bot", "bots", "autoplay", "autopilot"})
+		{
+			if (trademarks::HasWord(trademarks::Lower(S), Banned))
+			{
+				++Bad;
+				std::printf("  copy: \"%s\" says \"%s\"\n", S.c_str(), Banned);
+			}
+		}
+		// C9: no fire or burn words on Rerun's pages (Ignite owns the Flame).
+		for (const char* Burn : {"fire", "flame", "blaze", "burn", "burnt", "burning", "spark", "heat"})
+		{
+			if (trademarks::HasWord(trademarks::Lower(S), Burn))
+			{
+				++Bad;
+				std::printf("  copy: \"%s\" says \"%s\" (C9)\n", S.c_str(), Burn);
+			}
+		}
+	}
+	Check(Bad == 0, "copy: Rerun's pages name no real brand, never say AI, bot or autoplay, and no fire or burn word (U1, C9)");
+	Check(Frags.size() > 200 && rr::VideoUiInventory().size() > 40, "copy: the pages' inventories are whole");
+}
+
+// ------------------------------------------------------------------ review-ui-rerun (C3): the gaps its mutants went through
+
+/** The runs exactly Text. */
+int RunsOf(const DrawList& L, const std::string& Text)
+{
+	int N = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		N += Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Text ? 1 : 0;
+	}
+	return N;
+}
+
+video::Video* VideoById(Lap& L, const std::string& Id)
+{
+	for (video::Video& V : L.Ch().Videos)
+	{
+		if (V.Id == Id)
+		{
+			return &V;
+		}
+	}
+	return nullptr;
+}
+
+void Review()
+{
+	// R1's carry in Studio only while Momentum is over 1.1, its number the channel's MomC - 1 (m3).
+	{
+		Lap L("rerun3-review-carry");
+		Build(L, 5, false);
+		L.U().LaunchHidden = true;
+		L.S.DebugVideo("fake badbeat online");
+		L.Open(0);
+		L.Ch().X.Momentum = 1.05;
+		DrawList D = L.Settled();
+		Check(DrewRun(D, "PUBLISH") && !Drew(D, "Riding your breakout"), "review: no carry in Studio at Momentum 1.05 (R1: only over 1.1)");
+		L.Ch().X.Momentum = 1.12;
+		D = L.Frame();
+		Check(Drew(D, "Riding your breakout: this upload starts with +12% reach"), "review: the carry at Momentum 1.12 reads +12%");
+	}
+	// The launch card: the carry the upload got (SettledS), not the channel's Momentum now (m4); before Partner its money tile
+	// is what it would have earned, never revenue (m5).
+	{
+		Lap L("rerun3-review-launch");
+		Build(L, 6, false);
+		const std::string Id = PublishOne(L, false);
+		video::Video* V = VideoById(L, Id);
+		Check(V && V->X.On && V->X.SettledS > 1.1f, "review: the launch's upload got a carry over 1.1");
+		L.S.DebugVideo("advance 1");
+		L.Rest();
+		L.Open(0);
+		V = VideoById(L, Id);
+		const std::string Got = V ? "Riding your breakout: this upload starts with +" + std::to_string(std::llround(100.0 * (static_cast<double>(V->X.SettledS) - 1.0))) + "% reach" : std::string("?");
+		L.Ch().X.Momentum = 0.9; // a flop since: the meter falls, the card keeps what the upload got
+		L.U().Stats.clear();
+		DrawList D = L.Settled();
+		Check(DrewRun(D, "LAUNCH ACTIONS") || Drew(D, "LAUNCH ACTIONS"), "review: the launch card is up");
+		Check(Drew(D, Got), "review: the launch card's carry is the upload's own (" + Got + "), whatever Momentum does after");
+		Check(Drew(D, "WOULD HAVE EARNED") && DrewRun(D, "not paid") && !Drew(D, "EST. REVENUE"), "review: before Partner the money tile reads WOULD HAVE EARNED, not paid");
+		if (V)
+		{
+			V->X.SettledS = 1.05f;
+		}
+		L.Ch().X.Momentum = 1.5;
+		L.U().Stats.clear();
+		D = L.Frame();
+		Check(!Drew(D, "Riding your breakout"), "review: an upload that got no carry shows none, however high Momentum is now");
+		L.Ch().PartnerAt = L.S.WorldMinutes() - 1.0;
+		D = L.Frame();
+		Check(Drew(D, "EST. REVENUE") && !Drew(D, "WOULD HAVE EARNED"), "review: after Partner the tile is revenue");
+	}
+	// An Update 2 channel's thumbnails wait their turn too: two painted a frame, the rest skeletons (V12; m2).
+	{
+		Lap L("rerun3-review-legacy-paint");
+		const char* Kinds[6] = {"badbeat", "bluff", "cooler", "herocall", "bigpot", "suckout"};
+		for (int I = 0; I < 6; ++I)
+		{
+			L.S.DebugVideo(std::string("fake ") + Kinds[I] + " online");
+			video::Choice C;
+			C.Candidates = {Newest(L.S)};
+			C.F = video::Format::Breakdown;
+			C.T = static_cast<video::TitleStyle>(I % 5);
+			C.Fr = static_cast<video::Frame>(I % 5); // six different frames: none replays another's cache
+			video::UploadFacts Fa;
+			Fa.Energy = 90.0;
+			video::Upload(L.Ch(), C, L.S.WorldMinutes(), "rerun3-review-legacy", Fa);
+			L.S.DebugVideo("advance 1");
+			L.Rest();
+		}
+		Check(!L.Ch().X.On, "review: an Update 2 channel");
+		L.S.Person.Appearance.Hair = (L.S.Person.Appearance.Hair + 7) % 12; // a look nothing is cached at
+		L.Open(1);
+		L.Frame();
+		Check(L.U().Paint.Painted == 2 && L.U().Paint.Waiting > 0, "review: Update 2 frames paint two a frame, the rest wait as skeletons");
+		int Frames = 1;
+		while ((L.U().Paint.Painted > 0 || L.U().Paint.Waiting > 0) && Frames < 40)
+		{
+			L.Frame();
+			++Frames;
+		}
+		Check(Frames >= 3 && L.U().Paint.Waiting == 0, "review: the Update 2 grid settles over several frames");
+	}
+	// RECOMMENDED is the video Rerun is testing on Home, not every upload sharing its title (Realtime's OnHomeNow lists titles).
+	{
+		Lap L("rerun3-review-home");
+		Build(L, 6, false);
+		const std::string NewId = PublishOne(L, false);
+		const double W = L.S.WorldMinutes();
+		video::Video* New = VideoById(L, NewId);
+		video::Video* Old = nullptr;
+		for (video::Video& V : L.Ch().Videos)
+		{
+			Old = V.Id != NewId && V.X.On && !rr::RrHomeTested(V, W) && (!Old || V.At < Old->At) ? &V : Old;
+		}
+		Check(New && Old && rr::RrHomeTested(*New, W), "review: a new upload is tested on Home, an old one isn't");
+		// The UI's reading agrees with the core's (by title, where titles are unique).
+		const video::RealtimeView Rt = video::Realtime(L.Ch(), W);
+		int Agree = 0, Differ = 0;
+		for (const video::Video& V : L.Ch().Videos)
+		{
+			int Same = 0;
+			for (const video::Video& O : L.Ch().Videos)
+			{
+				Same += O.Title == V.Title ? 1 : 0;
+			}
+			if (Same == 1 && V.X.On)
+			{
+				const bool Core = std::find(Rt.OnHomeNow.begin(), Rt.OnHomeNow.end(), V.Title) != Rt.OnHomeNow.end();
+				(Core == rr::RrHomeTested(V, W) ? Agree : Differ) += 1;
+			}
+		}
+		Check(Differ == 0 && Agree >= 3,"review: RrHomeTested reads Home as the core's Realtime does (" + std::to_string(Agree) + " agree)");
+		L.Open(3);
+		DrawList D = L.Settled();
+		const int Before = RunsOf(D, "RECOMMENDED");
+		if (New && Old)
+		{
+			Old->Title = New->Title;
+		}
+		D = L.Settled();
+		Check(Before >= 1 && RunsOf(D, "RECOMMENDED") == Before, "review: an old upload with the new one's title isn't RECOMMENDED with it");
+		if (Old && New)
+		{
+			L.U().One = Old->Id;
+			L.Open(2);
+			L.U().Sub = 1;
+			L.U().One = Old->Id;
+			L.U().OneTab = 0;
+			D = L.Settled();
+			Check(Drew(D, "THE VERDICT") && !DrewRun(D, "RECOMMENDED ON HOME"), "review: the old one's page isn't RECOMMENDED ON HOME");
+			L.U().One = New->Id;
+			D = L.Settled();
+			Check(DrewRun(D, "RECOMMENDED ON HOME"), "review: the new one's page is");
+		}
+	}
+	// What the pages print adds up: a like ratio from the counts beside it, subscribers gained - lost = net; the Overview's
+	// balance clear of Channel health's card.
+	{
+		Lap L("rerun3-review-sums");
+		Build(L, 14, true);
+		L.Open(2);
+		DrawList D = L.Settled();
+		const video::Range& Rg = L.U().Range;
+		double G = 0.0, Lo = 0.0;
+		for (const double X : Rg.SubsGained)
+		{
+			G += X;
+		}
+		for (const double X : Rg.SubsLost)
+		{
+			Lo += X;
+		}
+		const double NetS = std::floor(G - Lo), LostS = std::floor(Lo);
+		Check(G >= Lo && Drew(D, "+" + ss::Grouped(static_cast<int64_t>(NetS))) && Drew(D,ss::Grouped(static_cast<int64_t>(NetS + LostS)) + " gained \xC2\xB7 " + ss::Grouped(static_cast<int64_t>(LostS)) + " lost"),
+			"review: Overview's subscribers: gained - lost = the net it shows");
+		const Run Bal = RunOf(D, "Balance ", true);
+		Check(Bal.Found && Bal.Base + 3.0f < 582.0f + 230.0f, "review: the balance sits above Channel health's card");
+		L.U().Sub = 1;
+		D = L.Settled();
+		int Rows = 0, Off = 0;
+		for (const video::Video& V : L.Ch().Videos)
+		{
+			const video::VideoStats St = video::StatsOf(L.Ch(), V, L.S.WorldMinutes());
+			const double Lf = std::floor(St.Likes), Df = std::floor(St.Dislikes);
+			const std::string Counts = ss::Grouped(static_cast<int64_t>(Lf)) + " \xC2\xB7 " + ss::Grouped(static_cast<int64_t>(Df)) + "  ";
+			if (!Drew(D, Counts))
+			{
+				continue;
+			}
+			++Rows;
+			const double Ratio = Lf + Df > 0.0 ? Lf / (Lf + Df) : 1.0;
+			Off += Drew(D, Counts + ss::Fixed(100.0 * Ratio, 1) + "%") ? 0 : 1;
+		}
+		Check(Rows >= 5 && Off == 0, "review: the Content table's like ratio is the counts' own (" + std::to_string(Rows) + " rows)");
+		// Reach's CTR LIFETIME says "colder viewers later" only when it fell below the first 48 hours'.
+		int Rose = 0, Fell = 0, Wrong = 0;
+		for (const video::Video& V : L.Ch().Videos)
+		{
+			const video::VideoStats St = video::StatsOf(L.Ch(), V, L.S.WorldMinutes());
+			if (V.F == video::Format::Short || St.Estimated || (St.CtrLife >= St.Ctr48 ? Rose : Fell) >= 2)
+			{
+				continue;
+			}
+			(St.CtrLife >= St.Ctr48 ? Rose : Fell) += 1;
+			L.U().One = V.Id;
+			L.U().OneTab = 1;
+			D = L.Settled();
+			Wrong += Drew(D, "colder viewers later") == (St.CtrLife < St.Ctr48) ? 0 : 1;
+		}
+		L.U().One.clear();
+		Check(Rose + Fell >= 2 && Wrong == 0, "review: Reach's lifetime CTR note follows the numbers (" + std::to_string(Rose) + " rose, " + std::to_string(Fell) + " fell)");
+	}
+	// After 21+ dark days Studio's carry is the one the upload gets: Upload adds welcome back's +0.2 to H first (R1, §3.3).
+	{
+		Lap L("rerun3-review-welcome");
+		Build(L, 4, false);
+		L.U().LaunchHidden = true;
+		video::Channel& Ch = L.Ch();
+		L.S.DebugVideo("advance 25"); // 25 dark days
+		L.Rest();
+		Ch.X.MomH = 0.2;
+		Ch.X.Momentum = std::clamp(std::exp(0.5 * 0.2), 0.75, 1.8) / 1.049; // MomCOf(0.2): about 1.05, no carry by itself
+		L.S.DebugVideo("fake badbeat online");
+		L.Open(0);
+		const DrawList D = L.Settled();
+		const int Dark = static_cast<int>(std::floor(L.S.WorldMinutes() / 1440.0)) - Ch.X.LastUploadDay;
+		const std::string Id = PublishOne(L, false);
+		const video::Video* V = VideoById(L, Id);
+		Check(Dark >= 21 && Ch.X.WelcomeBack, "review: the upload after " + std::to_string(Dark) + " dark days got welcome back");
+		const std::string Got = V ? "Riding your breakout: this upload starts with +" + std::to_string(std::llround(100.0 * (static_cast<double>(V->X.SettledS) - 1.0))) + "% reach" : std::string("?");
+		Check(V && V->X.SettledS > 1.1f && Drew(D, Got), "review: Studio's carry after a break is the upload's own (" + Got + ")");
+	}
+	// Live Drop's hint under Studio's preview only for an upload it can push (a Rerun 2.0 one).
+	{
+		Lap L("rerun3-review-legacy-drop");
+		L.S.DebugVideo("fake cooler online");
+		L.Open(0);
+		const DrawList D = L.Settled();
+		const video::Choice C = rr::RrChoice(L.U());
+		const bool U3 = L.Ch().X.On || !C.TitleTpl.empty() || !C.Thumbs.empty();
+		Check(DrewRun(D, "PUBLISH") && Drew(D, "Go live within 6 hours") == U3, std::string("review: Studio's Live Drop hint only for a Rerun 2.0 upload (this one ") + (U3 ? "is" : "isn't") + ")");
+	}
+	// Kast's "Make it a Cut" lands in the editor as a Cut even when Studio hasn't shown the running launch yet.
+	{
+		Lap L("rerun3-review-cut");
+		Build(L, 5, false);
+		const std::string Id = PublishOne(L, false);
+		L.S.DebugVideo("fake bluff online");
+		const double W = L.S.WorldMinutes();
+		rr::VideoOpenCut(L.RL, W - 5.0, W + 5.0, L.Now);
+		const DrawList D = L.Settled();
+		Check(!Id.empty() && L.U().F == video::Format::Short && DrewRun(D, "PUBLISH") && !Drew(D, "LAUNCH ACTIONS") && Drew(D, "BACK TO THE LAUNCH"),
+			"review: Make it a Cut opens the Cut editor, the running launch one link away");
+		Check(!L.U().NextUp.empty() && rr::RrChoice(L.U()).NextUp == L.U().NextUp, "review: the Cut links the newest long video as its Next-up card");
+	}
+}
+
+// ------------------------------------------------------------------ the C3 fix round (c3f-ui): L9, M1, M2, H1
+
+/** The app away for a while and back on Studio: a new visit. */
+DrawList Revisit(Lap& L, int Page = 0)
+{
+	L.RL.OpenApp(ss::ui::RiverLine::App::Bank, L.Now);
+	L.Frame();
+	L.Now += 2.0;
+	L.Open(Page);
+	return L.Frame();
+}
+
+/** The ideas Studio reads this frame, replaced (RrIdeas' cache: its ten-minute bucket and the moments' count). */
+void SetIdeas(Lap& L, const std::vector<video::IdeaCard>& Ideas)
+{
+	L.U().Ideas = Ideas;
+	L.U().IdeasMinute = std::floor(L.S.WorldMinutes() / 10.0);
+	L.U().IdeasOpen = L.Ch().Open.size();
+}
+
+video::IdeaCard FakeIdea(int Id, bool Ready, bool Trending)
+{
+	video::IdeaCard I;
+	I.Id = Id;
+	I.Name = Trending ? "Sunday grind" : "Bankroll update";
+	I.Fact = "214 events, up $412";
+	I.Hint = Ready ? std::string() : "Play 20 events this month first.";
+	I.Formats = {video::Format::Breakdown};
+	I.EditMin = 90;
+	I.Energy = 8;
+	I.Ready = Ready;
+	I.Trending = Trending;
+	return I;
+}
+
+void FixVisit()
+{
+	// L9 (update 3 §4.1): Studio opens on IDEAS when a new or trending idea waits, else on MOMENTS.
+	Lap L("rerun3-fix-visit");
+	Build(L, 3, false);
+	L.U().LaunchHidden = true;
+	L.S.DebugVideo("fake badbeat online");
+	L.S.DebugVideo("fake bluff online");
+	// The first look: the ready ideas then aren't new (a load's), a trending one waits until IDEAS shows it.
+	std::vector<video::IdeaCard> Base = L.S.VideoIdeas();
+	bool Trend = false;
+	for (const video::IdeaCard& I : Base)
+	{
+		Trend = Trend || (I.Ready && I.Trending);
+	}
+	L.Open(0);
+	L.Frame();
+	Check(L.U().ListTab == (Trend ? 1 : 0), std::string("visit: the first visit opens on ") + (Trend ? "IDEAS (a trending idea waits)" : "MOMENTS (nothing new or trending)"));
+	// Every idea seen (the list shown): the next visit opens on MOMENTS.
+	L.U().ListTab = 1;
+	L.Frame();
+	DrawList D = Revisit(L);
+	Check(L.U().ListTab == 0 && Drew(D, "BAD BEAT"), "visit: nothing new or trending: Studio opens on MOMENTS");
+	// A new ready idea since the last visit: IDEAS, its card marked NEW. (The board from here is a short one of its own, so
+	// every card shows: the real ideas were all seen above, and an idea that leaves the board is never new again.)
+	std::vector<video::IdeaCard> More = {FakeIdea(9001, true, false)};
+	L.RL.OpenApp(ss::ui::RiverLine::App::Bank, L.Now);
+	L.Frame();
+	L.Now += 2.0;
+	SetIdeas(L, More);
+	L.Open(0);
+	D = L.Frame();
+	Check(L.U().ListTab == 1 && L.U().NewIdeas.count(9001) == 1 && DrewRun(D, "NEW") && DrewRun(D, "Bankroll update"), "visit: a new ready idea opens Studio on IDEAS, marked NEW");
+	WriteList("rerun3_fix_studio_ideas", D);
+	// Seen on the list: the visit after opens on MOMENTS again, and the NEW chip is gone.
+	SetIdeas(L, More);
+	D = Revisit(L);
+	SetIdeas(L, More);
+	D = L.Frame();
+	Check(L.U().ListTab == 0 && L.U().NewIdeas.empty(), "visit: once seen, the idea isn't new: MOMENTS");
+	// A trending idea not seen yet: IDEAS.
+	More.push_back(FakeIdea(9002, true, true));
+	L.RL.OpenApp(ss::ui::RiverLine::App::Bank, L.Now);
+	L.Frame();
+	L.Now += 2.0;
+	SetIdeas(L, More);
+	L.Open(0);
+	D = L.Frame();
+	Check(L.U().ListTab == 1 && DrewRun(D, "TRENDING"), "visit: an unseen trending idea opens Studio on IDEAS");
+	// A locked idea never opens IDEAS by itself.
+	More.push_back(FakeIdea(9003, false, true));
+	SetIdeas(L, More);
+	L.Frame();
+	D = Revisit(L);
+	SetIdeas(L, More);
+	L.Frame();
+	Check(L.U().ListTab == 0, "visit: a locked idea, even trending, leaves Studio on MOMENTS");
+	// The header's STUDIO tab from another page is a visit too; inside one visit the player's tab stays.
+	More.push_back(FakeIdea(9004, true, false));
+	SetIdeas(L, More);
+	L.U().Page = rr::RrPageChannel;
+	L.Frame();
+	SetIdeas(L, More);
+	Check(ClickRun(L, L.Frame(), "STUDIO") && L.U().Page == 0 && L.U().ListTab == 1, "visit: the STUDIO tab from the Channel follows the rule (a new idea: IDEAS)");
+	L.Click(rr::RrListX + 40.0f, 90.0f);
+	SetIdeas(L, More);
+	L.Frame();
+	L.Frame();
+	Check(L.U().ListTab == 0, "visit: the player's MOMENTS click holds for the visit");
+	// Callers that mean a tab: Kast's Cut highlights open MOMENTS, Research's links open IDEAS, whatever waits.
+	More.push_back(FakeIdea(9005, true, true));
+	SetIdeas(L, More);
+	rr::VideoOpenCut(L.RL, L.S.WorldMinutes() - 90.0, L.S.WorldMinutes(), L.Now + 2.0);
+	L.Now += 2.0;
+	L.Frame();
+	Check(L.U().ListTab == 0, "visit: Kast's Make it a Cut opens MOMENTS");
+}
+
+/** A dealt recipe for the newest moment (Studio's own deal), with the pickers' allowed values: false when the library deals
+ *  none for it. */
+bool StudioWithRecipes(Lap& L)
+{
+	L.U().LaunchHidden = true;
+	L.Open(0);
+	L.Frame();
+	L.Click(rr::RrListX + 40.0f, 90.0f); // MOMENTS (L9 may open IDEAS)
+	L.Settled();
+	return L.U().Thumbs.size() == 6 && !L.U().Pick.empty();
+}
+
+void FixPickers()
+{
+	// M1 (update 3 §6.6.2): CAPTION, FACE and PALETTE on the selected recipe, inside its archetype's values; live; saved.
+	Lap L("rerun3-fix-pickers");
+	Build(L, 4, false);
+	L.S.DebugVideo("fake badbeat online");
+	Check(StudioWithRecipes(L), "pickers: the library deals six recipes for a bad beat");
+	if (L.U().Thumbs.size() != 6)
+	{
+		return;
+	}
+	rr::VideoUi& U = L.U();
+	DrawList D = L.Settled();
+	const video::Choice Ch0 = rr::RrChoice(U);
+	const video::ThumbChoices P = video::ThumbChoicesOf(U.Thumbs[static_cast<size_t>(U.ThumbPick)], Ch0, L.Ch().Open, L.Ch());
+	std::printf("  rerun pickers  %s: %zu captions, %zu faces, %zu palettes, %zu caption styles\n", video::ArchName(U.Thumbs[static_cast<size_t>(U.ThumbPick)].Arch), P.Captions.size(),
+		P.Exprs.size(), P.Pals.size(), P.CapStyles.size());
+	Check(Spelled(D, "CAPTION") && Spelled(D, "PALETTE") && (P.Exprs.empty() || Spelled(D, "FACE")), "pickers: CAPTION, FACE and PALETTE under the preview");
+	bool Chips = !P.Captions.empty();
+	for (const auto& C : P.Captions)
+	{
+		Chips = Chips && (Drew(D, C.first) || Drew(D, C.first.substr(0, std::min<size_t>(6, C.first.size()))));
+	}
+	Check(Chips, "pickers: the archetype's caption rows on this moment, each a chip");
+	Check(Outside(D, "pickers") == 0, "pickers: every run inside the laptop");
+	WriteList("rerun3_fix_studio_pickers", D);
+	// PALETTE: a press on another swatch recolours the selected recipe (the preview and its option at once).
+	const video::ThumbSpec Was = U.Thumbs[static_cast<size_t>(U.ThumbPick)];
+	int Other = -1;
+	for (const int16_t Pl : P.Pals)
+	{
+		Other = Other < 0 && Pl != Was.Pal ? Pl : Other;
+	}
+	if (Other >= 0)
+	{
+		// The swatches sit on the second row (FACE's chips, then PALETTE's): find this one's by its clickable's spot (a press
+		// that moved anything else is put back).
+		const auto Same = [](const video::ThumbSpec& A, const video::ThumbSpec& B) {
+			return A.Arch == B.Arch && A.Pal == B.Pal && A.Expr == B.Expr && A.CapStyle == B.CapStyle && A.Caption == B.Caption && A.Caption2 == B.Caption2;
+		};
+		bool Hit = false;
+		for (float X = rr::RrEdX + 80.0f; X < rr::RrEdX + rr::RrEdW && !Hit; X += 22.0f)
+		{
+			for (float Y = U.OptTop + rr::RrThumbH + 50.0f; Y < U.OptTop + rr::RrThumbH + 90.0f && !Hit; Y += 10.0f)
+			{
+				L.Click(X, Y);
+				const video::ThumbSpec& Now = U.Thumbs[static_cast<size_t>(U.ThumbPick)];
+				Hit = Now.Pal == Other;
+				if (!Hit && !Same(Now, Was))
+				{
+					U.Thumbs[static_cast<size_t>(U.ThumbPick)] = Was;
+				}
+			}
+		}
+		Check(Hit, "pickers: a swatch press recolours the selected recipe to that palette");
+	}
+	const video::ThumbSpec Pal = U.Thumbs[static_cast<size_t>(U.ThumbPick)];
+	Check(Pal.Arch == Was.Arch && Pal.Expr == Was.Expr && Pal.Caption == Was.Caption && video::ThumbWithin(Pal, rr::RrChoice(U), L.Ch().Open, L.Ch()),
+		"pickers: the palette moved alone, inside the archetype's values (ThumbWithin)");
+	// FACE and CAPTION: their chips by their words.
+	int Face = -1;
+	for (const int16_t E : P.Exprs)
+	{
+		Face = Face < 0 && E != Pal.Expr ? E : Face;
+	}
+	const char* const Faces[12] = {"Neutral", "Smile", "Grin", "Laugh", "Shocked", "Scream", "Devastated", "Tilted", "Smug", "Skeptical", "Thinking", "Exhausted"};
+	if (Face >= 0)
+	{
+		Check(ClickRun(L, L.Frame(), Faces[Face], U.OptTop + rr::RrThumbH) && U.Thumbs[static_cast<size_t>(U.ThumbPick)].Expr == Face, std::string("pickers: FACE ") + Faces[Face]);
+	}
+	int Cap = -1;
+	for (size_t K = 0; K < P.Captions.size(); ++K)
+	{
+		Cap = Cap < 0 && P.Captions[K].first != Pal.Caption ? static_cast<int>(K) : Cap;
+	}
+	if (Cap >= 0)
+	{
+		const std::string Label = P.Captions[static_cast<size_t>(Cap)].second.empty() ? P.Captions[static_cast<size_t>(Cap)].first
+																					: P.Captions[static_cast<size_t>(Cap)].first + " " + P.Captions[static_cast<size_t>(Cap)].second;
+		Check(ClickRun(L, L.Frame(), Label, U.OptTop + rr::RrThumbH) && U.Thumbs[static_cast<size_t>(U.ThumbPick)].Caption == P.Captions[static_cast<size_t>(Cap)].first,
+			"pickers: CAPTION \"" + Label + "\"");
+		D = L.Settled();
+		Check(Drew(D, P.Captions[static_cast<size_t>(Cap)].first), "pickers: the preview draws the picked caption (live)");
+	}
+	// The titles' SHUFFLE keeps the edits too: only the thumbnails' own SHUFFLE deals the six again (review-c3f-ui).
+	{
+		const video::ThumbSpec Was2 = U.Thumbs[static_cast<size_t>(U.ThumbPick)];
+		const int Shuffles = U.TitleShuffle;
+		bool Hit = false;
+		const DrawList Dt = L.Frame();
+		for (const ss::ui::DrawCmd& Cmd : Dt.Cmds)
+		{
+			if (!Hit && Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "SHUFFLE" && Cmd.Text.BaselineY < U.OptTop - 40.0f)
+			{
+				L.Click(Cmd.Text.X + 10.0f, Cmd.Text.BaselineY - 5.0f);
+				Hit = true;
+			}
+		}
+		L.Settled();
+		const video::ThumbSpec& Now = U.Thumbs[static_cast<size_t>(U.ThumbPick)];
+		Check(Hit && U.TitleShuffle == Shuffles + 1 && Now.Arch == Was2.Arch && Now.Pal == Was2.Pal && Now.Expr == Was2.Expr && Now.Caption == Was2.Caption &&
+				Now.Caption2 == Was2.Caption2,
+			"pickers: the titles' SHUFFLE keeps the edited recipe");
+	}
+	// A title's style keeps the edits (the six aren't dealt again); the choice carries the edited recipe.
+	const video::ThumbSpec Edited = U.Thumbs[static_cast<size_t>(U.ThumbPick)];
+	Check(ClickRun(L, L.Frame(), "Question", 200.0f), "pickers: another title style");
+	L.Settled();
+	const video::Choice Ch = rr::RrChoice(U);
+	Check(Ch.Thumbs.size() == 1 && Ch.Thumbs[0].Pal == Edited.Pal && Ch.Thumbs[0].Expr == Edited.Expr && Ch.Thumbs[0].Caption == Edited.Caption,
+		"pickers: a title's style keeps the edited recipe, and the choice carries it");
+	// A value the archetype doesn't allow leaves the recipe as it was (the core's guard).
+	int Banned = -1;
+	for (int Pl = 0; Pl < video::thumb::PlCount && Banned < 0; ++Pl)
+	{
+		Banned = std::find(P.Pals.begin(), P.Pals.end(), static_cast<int16_t>(Pl)) == P.Pals.end() ? Pl : -1;
+	}
+	if (Banned >= 0)
+	{
+		const video::ThumbSpec Same = video::ThumbEdit(Edited, Ch, L.Ch().Open, L.Ch(), video::TfPalette, Banned);
+		Check(Same.Pal == Edited.Pal, "pickers: a palette outside the archetype's values changes nothing");
+	}
+	// PUBLISH: the edited recipe goes up as it was shown.
+	const size_t Before = L.Ch().Videos.size();
+	const std::string Why = L.S.Publish(Ch);
+	for (int K = 0; K < 2000 && L.S.TimeSkip.Active; ++K)
+	{
+		L.Now += 1.0 / 30.0;
+		L.S.Update(L.Now);
+	}
+	const video::Video* V = nullptr;
+	for (const video::Video& X : L.Ch().Videos)
+	{
+		V = !V || X.At > V->At ? &X : V;
+	}
+	Check(Why.empty() && L.Ch().Videos.size() == Before + 1 && V && V->X.On && V->X.Spec[0].Arch == Edited.Arch && V->X.Spec[0].Pal == Edited.Pal && V->X.Spec[0].Expr == Edited.Expr &&
+			V->X.Spec[0].Caption == Edited.Caption && V->X.Spec[0].Caption2 == Edited.Caption2,
+		"pickers: PUBLISH saves the edited recipe with the upload (" + (Why.empty() ? std::string("published") : Why) + ")");
+}
+
+void FixDuelPickers()
+{
+	// The Duel's contenders are edited one at a time: the selected one only.
+	Lap L("rerun3-fix-duel");
+	Build(L, 4, false);
+	L.S.DebugVideo("fake bluff online");
+	if (!StudioWithRecipes(L))
+	{
+		Check(false, "duel pickers: the library deals six recipes for a bluff");
+		return;
+	}
+	rr::VideoUi& U = L.U();
+	Check(ClickRun(L, L.Frame(), "DUEL"), "duel pickers: DUEL on");
+	L.Click(rr::RrEdX + rr::RrThumbW + 12.0f + rr::RrOptW + 8.0f + 60.0f, U.OptTop + 30.0f); // the second option joins as B
+	L.Settled();
+	const std::vector<video::ThumbSpec> Was = U.Thumbs;
+	const int Sel = U.ThumbPick;
+	const video::ThumbChoices P = video::ThumbChoicesOf(U.Thumbs[static_cast<size_t>(Sel)], rr::RrChoice(U), L.Ch().Open, L.Ch());
+	int Other = -1;
+	for (const int16_t Pl : P.Pals)
+	{
+		Other = Other < 0 && Pl != Was[static_cast<size_t>(Sel)].Pal ? Pl : Other;
+	}
+	if (Other >= 0)
+	{
+		const video::ThumbSpec E = video::ThumbEdit(U.Thumbs[static_cast<size_t>(Sel)], rr::RrChoice(U), L.Ch().Open, L.Ch(), video::TfPalette, Other);
+		U.Thumbs[static_cast<size_t>(Sel)] = E;
+	}
+	bool OthersSame = true;
+	for (size_t K = 0; K < Was.size(); ++K)
+	{
+		OthersSame = OthersSame && (static_cast<int>(K) == Sel || (U.Thumbs[K].Pal == Was[K].Pal && U.Thumbs[K].Caption == Was[K].Caption));
+	}
+	const video::Choice Ch = rr::RrChoice(U);
+	bool Carried = false;
+	for (const video::ThumbSpec& S : Ch.Thumbs)
+	{
+		Carried = Carried || (S.Arch == U.Thumbs[static_cast<size_t>(Sel)].Arch && S.Pal == U.Thumbs[static_cast<size_t>(Sel)].Pal);
+	}
+	Check(U.DuelOn && Ch.Thumbs.size() == 2 && OthersSame && Carried, "duel pickers: an edit moves the selected contender only, and the Duel carries it");
+	WriteList("rerun3_fix_studio_duel", L.Settled());
+	// Through the pickers themselves (review-c3f-ui): a press edits the contender shown (B) alone; a press on A, a contender that
+	// isn't shown, selects it and keeps it in the Duel, and the next press edits A alone; a press on the one shown takes it out.
+	const auto Press = [&L, &U]() {
+		// Another caption row, else another face (by their chips' words, under the preview): true when one was pressed.
+		const size_t S = static_cast<size_t>(U.ThumbPick);
+		const video::ThumbChoices C = video::ThumbChoicesOf(U.Thumbs[S], rr::RrChoice(U), L.Ch().Open, L.Ch());
+		const float Below = U.OptTop + rr::RrThumbH;
+		for (const auto& Cp : C.Captions)
+		{
+			if (Cp.first != U.Thumbs[S].Caption && ClickRun(L, L.Frame(), Cp.second.empty() ? Cp.first : Cp.first + " " + Cp.second, Below))
+			{
+				return true;
+			}
+		}
+		const char* const Faces[12] = {"Neutral", "Smile", "Grin", "Laugh", "Shocked", "Scream", "Devastated", "Tilted", "Smug", "Skeptical", "Thinking", "Exhausted"};
+		for (const int16_t E : C.Exprs)
+		{
+			if (E != U.Thumbs[S].Expr && E >= 0 && E < 12 && ClickRun(L, L.Frame(), Faces[E], Below))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	const auto Moved = [](const video::ThumbSpec& X, const video::ThumbSpec& Y) {
+		return X.Pal != Y.Pal || X.Expr != Y.Expr || X.CapStyle != Y.CapStyle || X.Caption != Y.Caption || X.Caption2 != Y.Caption2;
+	};
+	const int A = U.Duel.size() == 2 ? U.Duel.front() : -1, B = U.ThumbPick;
+	const auto TileOf = [&U](int K) {
+		return ss::ui::Vec2{rr::RrEdX + rr::RrThumbW + 12.0f + static_cast<float>(K % 2) * (rr::RrOptW + 8.0f) + 60.0f, U.OptTop + static_cast<float>(K / 2) * (rr::RrOptH + 8.0f) + 30.0f};
+	};
+	if (A >= 0 && A != B)
+	{
+		std::vector<video::ThumbSpec> Was2 = U.Thumbs;
+		const bool PressB = Press();
+		L.Settled();
+		Check(PressB && Moved(U.Thumbs[static_cast<size_t>(B)], Was2[static_cast<size_t>(B)]) && !Moved(U.Thumbs[static_cast<size_t>(A)], Was2[static_cast<size_t>(A)]),
+			"duel pickers: a picker press edits the contender shown (B) alone");
+		L.Click(TileOf(A).X, TileOf(A).Y);
+		L.Settled();
+		Check(U.ThumbPick == A && U.Duel.size() == 2 && U.DuelOn, "duel pickers: a press on A, not the one shown, selects it and keeps it in the Duel");
+		Was2 = U.Thumbs;
+		const bool PressA = Press();
+		L.Settled();
+		Check(PressA && Moved(U.Thumbs[static_cast<size_t>(A)], Was2[static_cast<size_t>(A)]) && !Moved(U.Thumbs[static_cast<size_t>(B)], Was2[static_cast<size_t>(B)]),
+			"duel pickers: then a picker press edits A alone");
+		L.Click(TileOf(A).X, TileOf(A).Y);
+		L.Settled();
+		Check(U.Duel.size() == 1 && U.Duel.front() == B, "duel pickers: a press on the contender shown takes it out of the Duel");
+	}
+	else
+	{
+		Check(false, "duel pickers: a Duel of two, B shown");
+	}
+}
+
+void FixResearch()
+{
+	// M2 (§5.8): "What poker viewers search": the phrases, their interest, the week's arrow, yours, MAKE IT.
+	for (const bool Partner : {false, true})
+	{
+		const std::string Tag = Partner ? "partner" : "before";
+		Lap L("rerun3-fix-research-" + Tag);
+		Build(L, 8, Partner);
+		L.Open(2);
+		L.U().Sub = 5;
+		DrawList D = L.Settled();
+		const std::vector<video::SearchRow> Rows = video::SearchesOf(L.S, L.S.VideoIdeas(), 10);
+		std::string Interest;
+		for (const video::SearchRow& R : Rows)
+		{
+			Interest += (Interest.empty() ? "" : " ") + std::to_string(R.Interest) + (R.Arrow > 0 ? "+" : R.Arrow < 0 ? "-" : "=");
+		}
+		std::printf("  rerun search   %zu rows%s, interest %s\n", Rows.size(), Rows.empty() ? "" : (", top \"" + Rows.front().Phrase + "\"").c_str(), Interest.c_str());
+		Check(Drew(D, "WHAT POKER VIEWERS SEARCH") && DrewRun(D, "INTEREST") && DrewRun(D, "YOURS"), "research " + Tag + ": the search table and its columns");
+		bool All = !Rows.empty();
+		int Shown = 0, Make = 0;
+		for (const video::SearchRow& R : Rows)
+		{
+			const bool In = Drew(D, R.Phrase.substr(0, std::min<size_t>(R.Phrase.size(), 18)));
+			Shown += In ? 1 : 0;
+			Make += R.Idea > 0 ? 1 : 0;
+		}
+		All = All && Shown >= std::min<int>(8, static_cast<int>(Rows.size()));
+		Check(All, "research " + Tag + ": the phrases, the most searched first (" + std::to_string(Shown) + " of " + std::to_string(Rows.size()) + " drawn)");
+		Check(Make == 0 || RunsOf(D, "MAKE IT \xE2\x80\xBA") >= std::min(Make, 8), "research " + Tag + ": MAKE IT on each row with an idea");
+		Check(Drew(D, "TRENDING IN POKER THIS WEEK") && Drew(D, "YOUR NICHE") && (Partner ? Drew(D, "HOW RERUN DECIDES") : Drew(D, "THE AD MARKET THIS WEEK")),
+			"research " + Tag + ": the trends, the niche, and the help card (Partner) or the Ad market");
+		Check(Outside(D, ("research fix " + Tag).c_str()) == 0, "research " + Tag + ": every run inside the laptop");
+		WriteList("rerun3_fix_research_" + Tag, D);
+		Measure(L, "research (search) " + Tag);
+		if (!Partner)
+		{
+			// The help behind its "?": opens over the page, a click off it closes it.
+			L.Click(20.0f + 760.0f - 28.0f, 142.0f);
+			D = L.Frame();
+			Check(L.U().HelpOpen == "research" && Drew(D, "HOW RERUN DECIDES") && Drew(D, "Nobody can promise a number"), "research before: the \"?\" opens how Rerun decides");
+			WriteList("rerun3_fix_research_help", D);
+			L.Click(400.0f, 900.0f);
+			Check(L.U().HelpOpen.empty(), "research before: a click off the card closes it");
+		}
+		// MAKE IT on a ready idea: Studio, the idea's candidate picked; on a locked one: IDEAS and what to do.
+		const video::SearchRow* Ready = nullptr;
+		const video::SearchRow* Locked = nullptr;
+		for (const video::SearchRow& R : Rows)
+		{
+			Ready = !Ready && R.Idea > 0 && R.IdeaReady ? &R : Ready;
+			Locked = !Locked && R.Idea > 0 && !R.IdeaReady ? &R : Locked;
+		}
+		for (const video::SearchRow* R : {Locked, Ready})
+		{
+			if (!R)
+			{
+				continue;
+			}
+			L.U().Page = 2;
+			L.U().Sub = 5;
+			D = L.Settled();
+			const Run Phrase = RunOf(D, R->Phrase.substr(0, std::min<size_t>(R->Phrase.size(), 18)), true, 150.0f);
+			bool Clicked = false;
+			for (const ss::ui::DrawCmd& Cmd : D.Cmds)
+			{
+				if (!Clicked && Phrase.Found && Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "MAKE IT \xE2\x80\xBA" && std::fabs(Cmd.Text.BaselineY - Phrase.Base) < 2.0f)
+				{
+					L.Click(Cmd.Text.X + 20.0f, Cmd.Text.BaselineY - 4.0f);
+					Clicked = true;
+				}
+			}
+			L.Frame();
+			if (R == Ready)
+			{
+				const video::Candidate* C = rr::RrFind(L.Ch().Open, L.U().Pick.empty() ? std::string() : L.U().Pick.front());
+				Check(Clicked && L.U().Page == 0 && L.U().ListTab == 1 && C && C->Source == 5 && C->Idea == R->Idea, "research " + Tag + ": MAKE IT on a ready idea: Studio with it picked (" + R->IdeaName + ")");
+			}
+			else
+			{
+				Check(Clicked && L.U().Page == 0 && L.U().ListTab == 1 && L.U().Note == (R->IdeaHint.empty() ? R->IdeaName : R->IdeaHint), "research " + Tag + ": MAKE IT on a locked idea: IDEAS, and what to do first");
+			}
+		}
+	}
+}
+
+/**
+ * The pay month's days before today, paid past the top-earner rate's start (the rings PaidThisMonth reads): one big day, the
+ * 28 days' own mix of views, watch time, ads and the Cuts feed k times over, paid as the core pays it (the day's row, the
+ * videos' earnings in their own shares, the balance), so the page's other numbers (RPM, CPM, HOW YOU EARNED, the balance)
+ * agree with the rate's line. The page's caches are read again (a day's step moves their keys in play).
+ */
+bool PastTopRate(Lap& L)
+{
+	video::Channel& Ch = L.Ch();
+	const int Today = ss::net::DayOf(L.S.WorldMinutes());
+	const int Month = video::valgo::PayMonthOf(Today);
+	video::DayRow Mix;
+	for (const video::DayRow& D : Ch.X.Days)
+	{
+		if (D.Key >= Today - 28 && D.Key < Today)
+		{
+			Mix.Views += D.Views;
+			Mix.WatchH += D.WatchH;
+			Mix.Impr += D.Impr;
+			Mix.Cents += D.Cents;
+			Mix.CutCents += D.CutCents;
+			Mix.CutViews += D.CutViews;
+			Mix.AdImpr += D.AdImpr;
+			Mix.Monetized += D.Monetized;
+		}
+	}
+	double Earned = 0.0;
+	for (const video::Video& V : Ch.Videos)
+	{
+		Earned += V.X.On ? V.X.Earned : 0.0;
+	}
+	if (Mix.Cents <= 0 || Earned <= 0.0)
+	{
+		return false;
+	}
+	for (auto It = Ch.X.Days.rbegin(); It != Ch.X.Days.rend(); ++It)
+	{
+		if (It->Key < Today && video::valgo::PayMonthOf(It->Key) == Month)
+		{
+			const ss::Chips Big = video::valgo::TopRateFrom() + 120000;
+			const double K = static_cast<double>(Big) / static_cast<double>(Mix.Cents);
+			const auto Times = [K](float X) { return static_cast<float>(static_cast<double>(X) * K); };
+			It->Cents += Big;
+			It->CutCents += static_cast<ss::Chips>(std::llround(static_cast<double>(Mix.CutCents) * K));
+			It->Views += Times(Mix.Views);
+			It->WatchH += Times(Mix.WatchH);
+			It->Impr += Times(Mix.Impr);
+			It->CutViews += Times(Mix.CutViews);
+			It->AdImpr += Times(Mix.AdImpr);
+			It->Monetized += Times(Mix.Monetized);
+			const double Scale = 1.0 + static_cast<double>(Big) / Earned;
+			for (video::Video& V : Ch.Videos)
+			{
+				V.X.Earned *= V.X.On ? Scale : 1.0;
+			}
+			Ch.BalanceCents += Big;
+			L.U().RangeMinute = -1.0;
+			L.U().Stats.clear();
+			return true;
+		}
+	}
+	return false;
+}
+
+void FixTopRate()
+{
+	// H1 (the user's soft ceiling, 2026-10-27): the Revenue page and the Overview say so when the month passed it.
+	Lap L("rerun3-fix-toprate");
+	Build(L, 14, true);
+	L.Open(2);
+	L.U().Sub = 3;
+	DrawList D = L.Settled();
+	Check(!Drew(D, "Top-earner rate") && !Drew(D, "top-earner") && !Drew(D, "full rate"), "top rate: a month under it says nothing of it");
+	// A video's RPM A DAY (review-c3f-ui, review-c3f-algo's F2): under the rate, every day at the full rate.
+	const video::Video* Long = nullptr;
+	for (const video::Video& V : L.Ch().Videos)
+	{
+		Long = !Long && V.F != video::Format::Short && V.X.On ? &V : Long;
+	}
+	const int Today = ss::net::DayOf(L.S.WorldMinutes());
+	if (Long)
+	{
+		const std::vector<double> Under = rr::RrRpmADay(L.Ch(), *Long, Today, 28, L.S.WorldMinutes());
+		bool Full = Under.size() == 28;
+		for (size_t K = 0; K < Under.size(); ++K)
+		{
+			Full = Full && Under[K] == video::algo::MoneyOf(*Long, Today - 27 + static_cast<int>(K)).Rpm * 100.0;
+		}
+		Check(Full, "top rate: under it, a video's RPM A DAY is the full rate every day");
+	}
+	Check(PastTopRate(L), "top rate: the month's paid cents past 6 rents");
+	D = L.Settled();
+	const video::valgo::TopRateView Top = video::valgo::TopRateOf(L.Ch(), L.S.WorldMinutes());
+	const double Share = Top.Share;
+	if (Long)
+	{
+		// Past it, today's point is what the RPM tile above it reads ("per 1,000 views today"), not the full rate.
+		const std::vector<double> Past = rr::RrRpmADay(L.Ch(), *Long, Today, 28, L.S.WorldMinutes());
+		const video::VideoStats St = video::StatsOf(L.Ch(), *Long, L.S.WorldMinutes());
+		const double FullToday = video::algo::MoneyOf(*Long, Today).Rpm * 100.0;
+		Check(!Past.empty() && std::fabs(Past.back() - St.Rpm * 100.0) < 1e-6 && Past.back() < 0.9 * FullToday,
+			"top rate: a video's RPM A DAY ends on the reduced share its RPM tile reads (" + ss::Money(static_cast<ss::Chips>(std::llround(Past.empty() ? 0.0 : Past.back()))) + " of " +
+				ss::Money(static_cast<ss::Chips>(std::llround(FullToday))) + ")");
+	}
+	Check(Top.Applies && Drew(D, video::valgo::TopRateLine().substr(0, 30)), "top rate: Revenue's HOW YOU EARNED carries the rate's line (the core's words)");
+	Check(Top.Held > 0 ? Drew(D, "Held back so far this month: " + ss::Money(Top.Held)) : Drew(D, "The next views pay " + rr::RrPct(Share, 0) + " of the full rate."),
+		"top rate: what it held back (or what the next views pay), the core's numbers");
+	Check(Outside(D, "revenue top rate") == 0, "top rate: every run inside the laptop");
+	WriteList("rerun3_fix_revenue_toprate", D);
+	// The "?" card: the rule in words, every amount the game's rent's.
+	L.Click(1156.0f + 12.0f + 400.0f - 20.0f, 246.0f + 146.0f + 20.0f); // the block's "?" (HOW YOU EARNED at 1156, 246)
+	D = L.Frame();
+	Check(L.U().HelpOpen == "toprate" && Drew(D, video::valgo::TopRateHelp().substr(0, 40)), "top rate: the \"?\" opens its card with the core's words");
+	{
+		// Under the block it explains: the rate's line and what it means stay readable (review-c3f-ui).
+		const Run Means = RunOf(D, Top.Held > 0 ? "Held back so far this month" : "The next views pay", true);
+		Check(Means.Found && L.U().HelpBox.Y > Means.Base + 2.0f, "top rate: the \"?\" card opens below the rate's lines");
+	}
+	WriteList("rerun3_fix_revenue_toprate_help", D);
+	// A click inside the card clicks nothing under it; a click off it closes it.
+	const int Sub = L.U().Sub;
+	L.Click(L.U().HelpBox.X + 40.0f, L.U().HelpBox.Y + 40.0f);
+	Check(L.U().HelpOpen == "toprate" && L.U().Sub == Sub, "top rate: a click inside the card stays in it");
+	L.Click(300.0f, 400.0f);
+	Check(L.U().HelpOpen.empty(), "top rate: a click off the card closes it");
+	// Overview's HOW THE MONEY ADDS UP: the share the next view pays, named.
+	L.U().Sub = 0;
+	D = L.Settled();
+	Check(Drew(D, "top-earner share") && Drew(D, "\xC3\x97 " + rr::RrPct(0.55 * Share, 0)), "top rate: the Overview's money card shows the reduced share");
+	// A top earner's TOP CONTENT: revenues in the thousands stay in their column, clear of LIKES (review-c3f-ui; the titles and
+	// the values, right of the thumbnails).
+	Check(Crowded(D, {20.0f + 136.0f, 600.0f, 700.0f - 136.0f, 330.0f}, "overview top content", 4.0f) == 0, "top rate: TOP CONTENT's values keep apart (4 units or more)");
+	WriteList("rerun3_fix_overview_toprate", D);
+	// Videos that run to millions of views: the titles give way to the counts (the closed form scaled; the caches read again).
+	for (video::Video& V : L.Ch().Videos)
+	{
+		V.P *= 2000.0;
+		V.E *= 2000.0;
+		V.X.P0 *= 2000.0;
+		for (video::Comp& K : V.X.Comps)
+		{
+			K.P *= 2000.0;
+		}
+	}
+	L.U().RangeMinute = -1.0;
+	L.U().Stats.clear();
+	D = L.Settled();
+	Check(Crowded(D, {20.0f + 136.0f, 600.0f, 700.0f - 136.0f, 330.0f}, "overview top content, millions", 4.0f) == 0, "top rate: TOP CONTENT's titles give way to view counts in the millions");
+}
+} // namespace video3_c3
+
 void SegVideo3()
 {
 	// G1: the chart kit (ChartArt), for RunItTwice's Desk and Rankings now and Rerun's Analytics at G3.
@@ -1412,5 +3313,26 @@ void SegVideo3()
 	video3_seg::Cache();
 	video3_seg::Budgets();
 	video3_seg::Pages();
+	// C3: Rerun 2.0's pages.
+	video3_c3::Shell();
+	video3_c3::Studio();
+	video3_c3::Launch();
+	video3_c3::Analytics(false);
+	video3_c3::Analytics(true);
+	video3_c3::Public();
+	video3_c3::Sheet();
+	video3_c3::Progressive();
+	video3_c3::Legacy();
+	video3_c3::Copy();
+	video3_c3::Review();
+	// The C3 fix round (c3f-ui): Studio's visit rule (L9), the pickers (M1), Research's search table (M2), the top-earner
+	// rate (H1).
+	video3_c3::FixVisit();
+	video3_c3::FixPickers();
+	video3_c3::FixDuelPickers();
+	video3_c3::FixResearch();
+	video3_c3::FixTopRate();
+	std::printf("  ui-rerun (C3): %d checks\n", video3_c3::Checks);
+	std::fflush(stdout); // ui-rerun's lines reach the log even when a later segment stops the run
 }
 } // namespace ui_test

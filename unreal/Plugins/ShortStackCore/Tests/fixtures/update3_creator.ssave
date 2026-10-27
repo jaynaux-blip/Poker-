@@ -1,0 +1,2501 @@
+shortstack.nightone.v2
+bankroll	83282
+name	grinder_3c
+hero	name	Jesse	Cole
+hero	age	24
+hero	country	US
+hero	background	dealerskid
+hero	look	body	0	face	0	skin	3	eyes	1	brows	1	hair	3	haircolor	1	facialhair	1	build	1	height	178	outfit	0	outfitcolor	0	glasses	0	hat	0
+hero	created	1
+clock	607140.01
+life	energy	90.00
+life	heat	0.00
+life	needs	10.00	10.00
+pantry	oodle-cup	2
+life	drop	0	-1000000000.00
+life	rent	1	107500	643680.00	15
+life	evicted	0	0.00	0	0.00	0
+life	debt	0
+life	ban	0.00
+life	count	298	0	0	0	0
+life	shift	607020.00
+life	earned	1489108	0
+life	backroom	0	0
+life	live	0	0	0	0
+unlock	bounty
+unlock	satellite
+night	1
+night	2
+night	3
+night	4
+night	5
+night	6
+night	7
+night	8
+night	9
+night	10
+night	11
+night	12
+night	13
+night	14
+night	15
+night	16
+night	17
+night	18
+night	19
+night	20
+night	21
+night	22
+night	23
+night	24
+night	25
+night	26
+night	27
+night	28
+night	29
+night	30
+night	31
+night	32
+night	33
+night	34
+night	35
+night	36
+night	37
+night	38
+night	39
+night	40
+night	41
+night	42
+night	43
+night	44
+night	45
+night	46
+night	47
+night	48
+night	49
+night	50
+night	51
+night	52
+night	53
+night	54
+night	55
+night	56
+night	57
+night	58
+night	59
+night	60
+night	61
+night	62
+night	63
+night	64
+night	65
+night	66
+night	67
+night	68
+night	69
+night	70
+night	71
+night	72
+night	73
+night	74
+night	75
+night	76
+night	77
+night	78
+night	79
+night	80
+night	81
+night	82
+night	83
+night	84
+night	85
+night	86
+night	87
+night	88
+night	89
+night	90
+night	91
+night	92
+night	93
+night	94
+night	95
+night	96
+night	97
+night	98
+night	99
+night	100
+night	101
+night	102
+night	103
+night	104
+night	105
+night	106
+night	107
+night	108
+night	109
+night	110
+night	111
+night	112
+night	113
+night	114
+night	115
+night	116
+night	117
+night	118
+night	119
+night	120
+night	121
+night	122
+night	123
+night	124
+night	125
+night	126
+night	127
+night	128
+night	129
+night	130
+night	131
+night	132
+night	133
+night	134
+night	135
+night	136
+night	137
+night	138
+night	139
+night	140
+night	141
+night	142
+night	143
+night	144
+night	145
+night	146
+night	147
+night	148
+night	149
+night	150
+night	151
+night	152
+night	153
+night	154
+night	155
+night	156
+night	157
+night	158
+night	159
+night	160
+night	161
+night	162
+night	163
+night	164
+night	165
+night	166
+night	167
+night	168
+night	169
+night	170
+night	171
+night	172
+night	173
+night	174
+night	175
+night	176
+night	177
+night	178
+night	179
+night	180
+night	181
+night	182
+night	183
+night	184
+night	185
+night	186
+night	187
+night	188
+night	189
+night	190
+night	191
+night	192
+night	193
+night	194
+night	195
+night	196
+night	197
+night	198
+night	199
+night	200
+night	201
+night	202
+night	203
+night	204
+night	205
+night	206
+night	207
+night	208
+night	209
+night	210
+night	211
+night	212
+night	213
+night	214
+night	215
+night	216
+night	217
+night	218
+night	219
+night	220
+night	221
+night	222
+night	223
+night	224
+night	225
+night	226
+night	227
+night	228
+night	229
+night	230
+night	231
+night	232
+night	233
+night	234
+night	235
+night	236
+night	237
+night	238
+night	239
+night	240
+night	241
+night	242
+night	243
+night	244
+night	245
+night	246
+night	247
+night	248
+night	249
+night	250
+night	251
+night	252
+night	253
+night	254
+night	255
+night	256
+night	257
+night	258
+night	259
+night	260
+night	261
+night	262
+night	263
+night	264
+night	265
+night	266
+night	267
+night	268
+night	269
+night	270
+night	271
+night	272
+night	273
+night	274
+night	275
+night	276
+night	277
+night	278
+night	279
+night	280
+night	281
+night	282
+night	283
+night	284
+night	285
+night	286
+night	287
+night	288
+night	289
+night	290
+night	291
+night	292
+night	293
+night	294
+night	295
+night	296
+night	297
+night	298
+night	299
+night	300
+night	301
+night	302
+night	303
+night	304
+night	305
+night	306
+night	307
+night	308
+night	309
+night	310
+night	311
+night	312
+night	313
+night	314
+night	315
+night	316
+night	317
+night	318
+night	319
+night	320
+night	321
+night	322
+night	323
+night	324
+night	325
+night	326
+night	327
+night	328
+night	329
+night	330
+night	331
+night	332
+night	333
+night	334
+night	335
+night	336
+night	337
+night	338
+night	339
+night	340
+night	341
+night	342
+night	343
+night	344
+night	345
+night	346
+night	347
+night	348
+night	349
+night	350
+night	351
+night	352
+night	353
+night	354
+night	355
+night	356
+night	357
+night	358
+night	359
+night	360
+night	361
+night	362
+night	363
+night	364
+night	365
+night	366
+night	367
+night	368
+night	369
+night	370
+night	371
+night	372
+night	373
+night	374
+night	375
+night	376
+night	377
+night	378
+night	379
+night	380
+night	381
+night	382
+night	383
+night	384
+night	385
+night	386
+night	387
+night	388
+night	389
+night	390
+night	391
+night	392
+night	393
+night	394
+night	395
+night	396
+night	397
+night	398
+night	399
+night	400
+night	401
+night	402
+night	403
+night	404
+night	405
+night	406
+night	407
+night	408
+night	409
+night	410
+night	411
+night	412
+night	413
+night	414
+night	415
+night	416
+night	417
+night	418
+night	419
+night	420
+night	421
+night	422
+ledger	573900.00	1	5028	Wash & Fold shift
+ledger	573990.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	574044.60	0	50	Prize: $0.25 Hyper Sprint
+ledger	574044.61	6	12	Kast payout
+ledger	575340.00	1	5001	Wash & Fold shift
+ledger	575430.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	575490.90	0	82	Prize: $0.25 Hyper Sprint
+ledger	575490.91	6	262	Kast payout
+ledger	576780.00	1	5166	Wash & Fold shift
+ledger	576870.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	576915.51	6	8	Kast payout
+ledger	578220.00	1	4960	Wash & Fold shift
+ledger	578340.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	579660.00	1	4952	Wash & Fold shift
+ledger	579750.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	579777.31	6	250	Kast payout
+ledger	581100.00	1	4933	Wash & Fold shift
+ledger	581190.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	581236.91	6	8	Kast payout
+ledger	582540.00	1	5096	Wash & Fold shift
+ledger	582630.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	582667.81	6	11	Kast payout
+ledger	583980.00	1	5075	Wash & Fold shift
+ledger	584070.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	584144.90	0	157	Prize: $0.25 Hyper Sprint
+ledger	584144.91	6	9	Kast payout
+ledger	585420.00	1	4981	Wash & Fold shift
+ledger	585510.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	586860.00	1	5041	Wash & Fold shift
+ledger	586950.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	588390.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	589830.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	591270.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	591314.81	6	10	Kast payout
+ledger	592710.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	592759.01	6	7	Kast payout
+ledger	593280.00	13	16626	Rerun payout: November
+ledger	594150.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	595590.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	595620.11	6	6	Kast payout
+ledger	597030.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	597073.41	6	3	Kast payout
+ledger	598470.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	598512.71	6	9	Kast payout
+ledger	599910.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	599945.71	6	6	Kast payout
+ledger	600480.00	3	-107500	Rent (collected)
+ledger	601260.00	1	4940	Wash & Fold shift
+ledger	601350.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	601385.01	6	262	Kast payout
+ledger	602700.00	1	4835	Wash & Fold shift
+ledger	602790.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	602839.01	6	10	Kast payout
+ledger	604140.00	1	4975	Wash & Fold shift
+ledger	604230.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	604280.41	6	11	Kast payout
+ledger	605580.00	1	5158	Wash & Fold shift
+ledger	605670.00	0	-25	Buy-in: $0.25 Hyper Sprint
+ledger	605683.31	6	250	Kast payout
+ledger	607020.00	1	5036	Wash & Fold shift
+text	dee-bubble
+text	dee-embercrest-139
+text	dee-embercrest-76
+text	dee-ft
+text	dee-itm
+text	first-shift
+text	gear-can-stream
+text	gear-first-stream
+text	kast-first
+text	marcus-intro
+text	needs:thirsty:10
+text	needs:thirsty:100
+text	needs:thirsty:101
+text	needs:thirsty:102
+text	needs:thirsty:104
+text	needs:thirsty:106
+text	needs:thirsty:107
+text	needs:thirsty:108
+text	needs:thirsty:109
+text	needs:thirsty:11
+text	needs:thirsty:111
+text	needs:thirsty:113
+text	needs:thirsty:114
+text	needs:thirsty:115
+text	needs:thirsty:116
+text	needs:thirsty:118
+text	needs:thirsty:120
+text	needs:thirsty:121
+text	needs:thirsty:122
+text	needs:thirsty:123
+text	needs:thirsty:125
+text	needs:thirsty:127
+text	needs:thirsty:128
+text	needs:thirsty:129
+text	needs:thirsty:13
+text	needs:thirsty:130
+text	needs:thirsty:132
+text	needs:thirsty:134
+text	needs:thirsty:135
+text	needs:thirsty:136
+text	needs:thirsty:137
+text	needs:thirsty:139
+text	needs:thirsty:141
+text	needs:thirsty:142
+text	needs:thirsty:143
+text	needs:thirsty:144
+text	needs:thirsty:146
+text	needs:thirsty:148
+text	needs:thirsty:149
+text	needs:thirsty:15
+text	needs:thirsty:150
+text	needs:thirsty:151
+text	needs:thirsty:153
+text	needs:thirsty:155
+text	needs:thirsty:156
+text	needs:thirsty:157
+text	needs:thirsty:158
+text	needs:thirsty:16
+text	needs:thirsty:160
+text	needs:thirsty:162
+text	needs:thirsty:163
+text	needs:thirsty:164
+text	needs:thirsty:165
+text	needs:thirsty:167
+text	needs:thirsty:169
+text	needs:thirsty:17
+text	needs:thirsty:170
+text	needs:thirsty:171
+text	needs:thirsty:172
+text	needs:thirsty:174
+text	needs:thirsty:176
+text	needs:thirsty:177
+text	needs:thirsty:178
+text	needs:thirsty:179
+text	needs:thirsty:18
+text	needs:thirsty:181
+text	needs:thirsty:183
+text	needs:thirsty:184
+text	needs:thirsty:185
+text	needs:thirsty:186
+text	needs:thirsty:188
+text	needs:thirsty:190
+text	needs:thirsty:191
+text	needs:thirsty:192
+text	needs:thirsty:193
+text	needs:thirsty:195
+text	needs:thirsty:197
+text	needs:thirsty:198
+text	needs:thirsty:199
+text	needs:thirsty:2
+text	needs:thirsty:20
+text	needs:thirsty:200
+text	needs:thirsty:202
+text	needs:thirsty:204
+text	needs:thirsty:205
+text	needs:thirsty:206
+text	needs:thirsty:207
+text	needs:thirsty:209
+text	needs:thirsty:211
+text	needs:thirsty:212
+text	needs:thirsty:213
+text	needs:thirsty:214
+text	needs:thirsty:216
+text	needs:thirsty:218
+text	needs:thirsty:219
+text	needs:thirsty:22
+text	needs:thirsty:220
+text	needs:thirsty:221
+text	needs:thirsty:223
+text	needs:thirsty:225
+text	needs:thirsty:226
+text	needs:thirsty:227
+text	needs:thirsty:228
+text	needs:thirsty:23
+text	needs:thirsty:230
+text	needs:thirsty:232
+text	needs:thirsty:233
+text	needs:thirsty:234
+text	needs:thirsty:235
+text	needs:thirsty:237
+text	needs:thirsty:239
+text	needs:thirsty:24
+text	needs:thirsty:240
+text	needs:thirsty:241
+text	needs:thirsty:242
+text	needs:thirsty:244
+text	needs:thirsty:246
+text	needs:thirsty:247
+text	needs:thirsty:248
+text	needs:thirsty:249
+text	needs:thirsty:25
+text	needs:thirsty:251
+text	needs:thirsty:253
+text	needs:thirsty:254
+text	needs:thirsty:255
+text	needs:thirsty:256
+text	needs:thirsty:258
+text	needs:thirsty:260
+text	needs:thirsty:261
+text	needs:thirsty:262
+text	needs:thirsty:263
+text	needs:thirsty:265
+text	needs:thirsty:267
+text	needs:thirsty:268
+text	needs:thirsty:269
+text	needs:thirsty:27
+text	needs:thirsty:270
+text	needs:thirsty:272
+text	needs:thirsty:274
+text	needs:thirsty:275
+text	needs:thirsty:276
+text	needs:thirsty:277
+text	needs:thirsty:279
+text	needs:thirsty:281
+text	needs:thirsty:282
+text	needs:thirsty:283
+text	needs:thirsty:284
+text	needs:thirsty:286
+text	needs:thirsty:288
+text	needs:thirsty:289
+text	needs:thirsty:29
+text	needs:thirsty:290
+text	needs:thirsty:291
+text	needs:thirsty:293
+text	needs:thirsty:295
+text	needs:thirsty:296
+text	needs:thirsty:297
+text	needs:thirsty:298
+text	needs:thirsty:3
+text	needs:thirsty:30
+text	needs:thirsty:300
+text	needs:thirsty:302
+text	needs:thirsty:303
+text	needs:thirsty:304
+text	needs:thirsty:305
+text	needs:thirsty:307
+text	needs:thirsty:309
+text	needs:thirsty:31
+text	needs:thirsty:310
+text	needs:thirsty:311
+text	needs:thirsty:312
+text	needs:thirsty:314
+text	needs:thirsty:316
+text	needs:thirsty:317
+text	needs:thirsty:318
+text	needs:thirsty:319
+text	needs:thirsty:32
+text	needs:thirsty:321
+text	needs:thirsty:323
+text	needs:thirsty:324
+text	needs:thirsty:325
+text	needs:thirsty:326
+text	needs:thirsty:328
+text	needs:thirsty:330
+text	needs:thirsty:331
+text	needs:thirsty:332
+text	needs:thirsty:333
+text	needs:thirsty:335
+text	needs:thirsty:337
+text	needs:thirsty:338
+text	needs:thirsty:339
+text	needs:thirsty:34
+text	needs:thirsty:340
+text	needs:thirsty:342
+text	needs:thirsty:344
+text	needs:thirsty:345
+text	needs:thirsty:346
+text	needs:thirsty:347
+text	needs:thirsty:349
+text	needs:thirsty:351
+text	needs:thirsty:352
+text	needs:thirsty:353
+text	needs:thirsty:354
+text	needs:thirsty:356
+text	needs:thirsty:358
+text	needs:thirsty:359
+text	needs:thirsty:36
+text	needs:thirsty:360
+text	needs:thirsty:361
+text	needs:thirsty:363
+text	needs:thirsty:365
+text	needs:thirsty:366
+text	needs:thirsty:367
+text	needs:thirsty:368
+text	needs:thirsty:37
+text	needs:thirsty:370
+text	needs:thirsty:372
+text	needs:thirsty:373
+text	needs:thirsty:374
+text	needs:thirsty:375
+text	needs:thirsty:377
+text	needs:thirsty:379
+text	needs:thirsty:38
+text	needs:thirsty:380
+text	needs:thirsty:381
+text	needs:thirsty:382
+text	needs:thirsty:384
+text	needs:thirsty:386
+text	needs:thirsty:387
+text	needs:thirsty:388
+text	needs:thirsty:389
+text	needs:thirsty:39
+text	needs:thirsty:391
+text	needs:thirsty:393
+text	needs:thirsty:394
+text	needs:thirsty:395
+text	needs:thirsty:396
+text	needs:thirsty:398
+text	needs:thirsty:4
+text	needs:thirsty:400
+text	needs:thirsty:401
+text	needs:thirsty:402
+text	needs:thirsty:403
+text	needs:thirsty:405
+text	needs:thirsty:407
+text	needs:thirsty:408
+text	needs:thirsty:409
+text	needs:thirsty:41
+text	needs:thirsty:410
+text	needs:thirsty:412
+text	needs:thirsty:414
+text	needs:thirsty:415
+text	needs:thirsty:416
+text	needs:thirsty:417
+text	needs:thirsty:419
+text	needs:thirsty:421
+text	needs:thirsty:422
+text	needs:thirsty:43
+text	needs:thirsty:44
+text	needs:thirsty:45
+text	needs:thirsty:46
+text	needs:thirsty:48
+text	needs:thirsty:50
+text	needs:thirsty:51
+text	needs:thirsty:52
+text	needs:thirsty:53
+text	needs:thirsty:55
+text	needs:thirsty:57
+text	needs:thirsty:58
+text	needs:thirsty:59
+text	needs:thirsty:6
+text	needs:thirsty:60
+text	needs:thirsty:62
+text	needs:thirsty:64
+text	needs:thirsty:65
+text	needs:thirsty:66
+text	needs:thirsty:67
+text	needs:thirsty:69
+text	needs:thirsty:71
+text	needs:thirsty:72
+text	needs:thirsty:73
+text	needs:thirsty:74
+text	needs:thirsty:76
+text	needs:thirsty:78
+text	needs:thirsty:79
+text	needs:thirsty:8
+text	needs:thirsty:80
+text	needs:thirsty:81
+text	needs:thirsty:83
+text	needs:thirsty:85
+text	needs:thirsty:86
+text	needs:thirsty:87
+text	needs:thirsty:88
+text	needs:thirsty:9
+text	needs:thirsty:90
+text	needs:thirsty:92
+text	needs:thirsty:93
+text	needs:thirsty:94
+text	needs:thirsty:95
+text	needs:thirsty:97
+text	needs:thirsty:99
+text	rent-friday
+text	rent-notice:116
+text	rent-notice:146
+text	rent-notice:176
+text	rent-notice:206
+text	rent-notice:236
+text	rent-notice:26
+text	rent-notice:266
+text	rent-notice:296
+text	rent-notice:326
+text	rent-notice:356
+text	rent-notice:386
+text	rent-notice:416
+text	rent-notice:56
+text	rent-notice:86
+text	rent-soon:116
+text	rent-soon:146
+text	rent-soon:176
+text	rent-soon:206
+text	rent-soon:236
+text	rent-soon:26
+text	rent-soon:266
+text	rent-soon:296
+text	rent-soon:326
+text	rent-soon:356
+text	rent-soon:386
+text	rent-soon:416
+text	rent-soon:56
+text	rent-soon:86
+text	rent-thursday
+text	rent-tonight:116
+text	rent-tonight:146
+text	rent-tonight:326
+text	rent-tonight:356
+text	sam-intro
+text	world:10080:1605:3
+text	world:126719:1599:18
+text	world:20160:1606:3
+text	world:282240:1603:3
+text	world:40320:1601:3
+text	world:443520:1602:3
+text	world:453600:1600:3
+text	world:50400:1605:3
+text	world:50400:1606:3
+text	world:524160:1602:3
+text	world:574560:1602:3
+text	world:60480:1604:3
+text	world:70560:1602:3
+gear	mic-usb	0.00
+gear	ram-32	0.00
+gear	ring-light	0.00
+gear	webcam-720	0.00
+leds	0	1	1
+kast	ch	0	793	0.6001	19296.03	107697.6	90	420	1	0	500	608580.00	5	2
+kast	earn	11250	3700	1600	1146	0	0	17696
+kast	sub	dee_spincycle	167943.00	643143.00	11	0
+kast	sub	RogueRail	346525.01	-605725.01	6	0
+kast	sub	florianw	388264.00	647464.00	6	0
+kast	sub	RoyalTubarao	526479.00	-569679.00	1	0
+kast	sub	LateRegLarry	575454.00	618654.00	1	0
+kast	sub	DustyGutshot	579771.00	622971.00	1	0
+kast	clip	597062.20	26.2	26.3	6	LyckaCooler	grinder_3c sends QuietFlush home		1
+kast	clip	201111.20	4809.2	4809.2	2	camila_costa	grinder_3c holds the all-in for 783,484		1
+kast	clip	584138.60	1585.0	1585.0	9	Erik_Kortspel	grinder_3c makes the final table of the $0.25 Hyper Sprint		1
+kast	clip	444443.20	1576.4	1576.4	8	sofiag	grinder_3c on Kast		1
+kast	clip	84457.10	979.7	979.7	6	Lucas_ReiDoRio	grinder_3c sends LenaKoch home		1
+kast	clip	513520.50	875.0	875.0	2	xXRaiseXx	grinder_3c holds the all-in for 15,672		1
+kast	clip	396964.40	549.0	549.0	9	OCampbell	grinder_3c makes the final table of the $0.25 Hyper Sprint		1
+kast	clip	110352.70	455.9	455.9	6	R0y4lFelt	grinder_3c sends chughes home		1
+kast	clip	110352.70	455.9	455.9	6	R0y4lFelt	grinder_3c sends IslaBrown home		1
+kast	clip	36940.70	341.1	341.1	9	GauchoCooler	grinder_3c makes the final table of the $0.25 Hyper Sprint		1
+kast	clip	284579.40	261.7	261.7	4	n00braise	grinder_3c gets rivered at 29,888		1
+kast	clip	284563.30	245.8	245.8	2	JustOneMoreHand	grinder_3c holds the all-in for 20,665		1
+kast	clip	64321.60	235.7	235.7	9	NeonWheel6	grinder_3c makes the final table of the $0.25 Hyper Sprint		1
+kast	clip	525097.20	231.1	231.1	9	logan84	grinder_3c makes the final table of the $0.25 Hyper Sprint		1
+kast	clip	119006.70	175.0	175.0	6	ruthless_cooler1	grinder_3c sends hollow_shove81 home		1
+kast	clip	447341.30	175.0	175.0	4	ShadyBlinds	the cruelest river (grinder_3c)		1
+kast	log	455880.00	61.51	5	8	0	0	7	Grinding the micros to make rent · !rent	7	0	5	61.0	2	20.2
+kast	log	457350.01	91.60	6	9	2	0	106	Grinding the micros to make rent · !rent	8	0	6	11.0	-1	22.3
+kast	log	458760.00	79.71	7	10	0	0	5	Grinding the micros to make rent · !rent	8	0	7	16.0	-1	26.5
+kast	log	461640.00	63.61	9	15	1	0	11	Grinding the micros to make rent · !rent	12	0	9	21.0	-1	27.6
+kast	log	464520.00	89.51	10	15	1	0	6	Grinding the micros to make rent · !rent	17	0	10	20.0	-1	32.3
+kast	log	467400.00	81.11	6	10	1	0	5	Grinding the micros to make rent · !rent	12	0	6	13.0	-1	21.0
+kast	log	470280.00	65.01	9	13	1	0	7	Grinding the micros to make rent · !rent	13	0	9	17.0	-1	25.4
+kast	log	473160.00	81.81	11	16	2	0	10	Grinding the micros to make rent · !rent	17	0	11	16.0	-1	30.1
+kast	log	474600.00	114.71	10	28	0	0	5	Grinding the micros to make rent · !rent	15	0	10	106.0	9	44.0
+kast	log	478920.00	68.51	12	21	1	0	9	Grinding the micros to make rent · !rent	19	0	12	16.0	-1	43.4
+kast	log	481800.00	62.21	10	15	0	0	9	Grinding the micros to make rent · !rent	11	0	10	22.0	-1	35.5
+kast	log	484680.00	77.61	8	14	0	0	4	Grinding the micros to make rent · !rent	14	0	8	12.0	-1	28.5
+kast	log	489000.00	83.91	6	13	0	0	2	Grinding the micros to make rent · !rent	11	0	6	7.0	-1	17.4
+kast	log	490440.00	86.71	9	14	0	0	9	Grinding the micros to make rent · !rent	14	0	9	14.0	-1	26.2
+kast	log	496200.00	90.21	7	15	0	0	5	Grinding the micros to make rent · !rent	14	0	7	88.0	8	22.0
+kast	log	500520.00	69.91	12	16	0	0	12	Grinding the micros to make rent · !rent	12	0	12	40.0	15	31.1
+kast	log	504840.00	66.41	8	13	0	0	5	Grinding the micros to make rent · !rent	12	0	8	17.0	-1	25.2
+kast	log	506280.00	71.31	5	11	1	0	3	Grinding the micros to make rent · !rent	9	0	5	70.0	16	17.0
+kast	log	509160.00	76.21	9	13	0	0	8	Grinding the micros to make rent · !rent	16	0	9	76.0	16	26.3
+kast	log	510600.00	75.51	8	13	0	0	4	Grinding the micros to make rent · !rent	12	0	8	14.0	-1	24.6
+kast	log	512040.00	60.81	9	14	0	0	7	Grinding the micros to make rent · !rent	15	0	9	15.0	-1	24.2
+kast	log	513480.00	72.71	8	11	0	0	7	Grinding the micros to make rent · !rent	13	0	8	13.0	-1	20.7
+kast	log	517830.01	64.30	10	12	1	0	10	Grinding the micros to make rent · !rent	11	0	10	10.0	-1	28.9
+kast	log	519240.00	79.71	10	15	1	0	9	Grinding the micros to make rent · !rent	14	0	10	9.0	-1	33.0
+kast	log	520680.00	71.31	8	14	0	0	3	Grinding the micros to make rent · !rent	9	0	8	29.0	-1	27.3
+kast	log	522120.00	65.71	7	11	0	0	4	Grinding the micros to make rent · !rent	12	0	7	10.0	-1	21.3
+kast	log	523560.00	72.01	10	16	0	0	9	Grinding the micros to make rent · !rent	18	0	10	14.0	-1	24.3
+kast	log	525000.00	101.41	15	27	3	0	12	Grinding the micros to make rent · !rent	16	0	15	92.0	8	47.6
+kast	log	526440.00	61.51	14	25	0	1	260	Grinding the micros to make rent · !rent	23	0	14	10.0	-1	49.9
+kast	log	530760.00	81.81	12	16	2	0	9	Grinding the micros to make rent · !rent	19	0	12	22.0	-1	39.5
+kast	log	533640.00	95.81	9	13	0	0	6	Grinding the micros to make rent · !rent	15	0	9	13.0	-1	31.3
+kast	log	536520.00	76.91	7	11	0	0	4	Grinding the micros to make rent · !rent	11	0	7	38.0	16	22.3
+kast	log	537990.01	76.90	5	11	0	0	2	Grinding the micros to make rent · !rent	11	0	5	10.0	-1	14.4
+kast	log	543720.00	60.11	10	13	0	0	8	Grinding the micros to make rent · !rent	13	0	10	12.0	-1	27.6
+kast	log	546600.00	82.51	5	12	1	0	5	Grinding the micros to make rent · !rent	9	0	5	77.0	16	18.6
+kast	log	549480.00	60.11	17	20	1	0	15	Grinding the micros to make rent · !rent	18	0	17	14.0	-1	40.9
+kast	log	550920.00	88.11	13	19	3	0	14	Grinding the micros to make rent · !rent	16	0	13	88.0	8	44.7
+kast	log	552360.00	79.01	12	20	2	0	7	Grinding the micros to make rent · !rent	23	0	12	14.0	-1	41.9
+kast	log	553800.00	75.51	11	17	1	0	8	Grinding the micros to make rent · !rent	18	0	11	37.0	16	35.6
+kast	log	556680.00	77.61	9	12	0	0	9	Grinding the micros to make rent · !rent	11	0	9	11.0	-1	27.8
+kast	log	559560.00	65.01	12	17	1	0	15	Grinding the micros to make rent · !rent	11	0	12	56.0	16	31.3
+kast	log	562440.00	83.91	8	12	2	0	5	Grinding the micros to make rent · !rent	15	0	8	12.0	-1	23.8
+kast	log	565320.00	67.11	8	10	2	0	8	Grinding the micros to make rent · !rent	9	0	8	10.0	-1	20.7
+kast	log	568230.01	62.90	7	11	1	0	5	Grinding the micros to make rent · !rent	7	0	7	13.0	-1	20.3
+kast	log	569640.00	75.51	6	12	0	0	5	Grinding the micros to make rent · !rent	12	0	6	12.0	-1	14.7
+kast	log	573960.00	84.61	14	20	1	0	12	Grinding the micros to make rent · !rent	21	0	14	50.0	16	34.9
+kast	log	575400.00	90.91	14	22	0	1	262	Grinding the micros to make rent · !rent	18	0	14	84.0	8	42.9
+kast	log	576840.00	75.51	10	17	1	0	8	Grinding the micros to make rent · !rent	18	0	10	11.0	-1	37.9
+kast	log	581160.00	76.91	9	13	0	0	8	Grinding the micros to make rent · !rent	11	0	9	50.0	16	25.8
+kast	log	582600.00	67.81	14	19	0	0	11	Grinding the micros to make rent · !rent	20	0	14	10.0	-1	34.7
+kast	log	584040.00	104.91	13	23	0	0	9	Grinding the micros to make rent · !rent	16	0	13	103.0	9	42.1
+kast	log	591240.00	74.81	12	16	1	0	10	Grinding the micros to make rent · !rent	17	0	12	16.0	-1	31.4
+kast	log	592680.00	79.01	7	15	0	0	7	Grinding the micros to make rent · !rent	13	0	7	10.0	-1	22.3
+kast	log	595560.00	60.11	7	11	0	0	6	Grinding the micros to make rent · !rent	8	0	7	13.0	-1	18.6
+kast	log	597000.00	73.41	5	8	0	0	3	Grinding the micros to make rent · !rent	10	0	5	19.0	-1	14.0
+kast	log	598440.00	72.71	8	11	0	0	9	Grinding the micros to make rent · !rent	12	0	8	69.0	16	23.3
+kast	log	599880.00	65.71	9	15	0	0	6	Grinding the micros to make rent · !rent	8	0	9	19.0	-1	25.3
+kast	log	601320.00	65.01	13	18	0	0	12	Grinding the micros to make rent · !rent	17	0	13	41.0	15	31.7
+kast	log	602760.00	79.01	12	16	0	0	10	Grinding the micros to make rent · !rent	19	0	12	16.0	-1	32.5
+kast	log	604200.00	80.41	10	16	0	0	11	Grinding the micros to make rent · !rent	15	0	10	16.0	-1	27.9
+kast	mem	dee_spincycle	0.8822	0.9525	2280.00	605683.31	165	8112.5	542	7	5994		25	0
+kast	mem	mei_ng	0.7988	0.8575	2280.00	605683.31	151	7072.1	465	7	1499		29	0
+kast	mem	PabloNavarro	0.0191	0.1213	5202.00	483298.71	3	96.2	2	1	0
+kast	mem	theod	0.0146	0.1058	9491.00	453035.01	5	114.7	2	5	0
+kast	mem	lucky_kicker7	0.0373	0.4339	9559.00	548090.31	4	44.7	1	1	0
+kast	mem	lunar_nuts	0.2481	0.5454	32539.00	470345.01	32	1139.5	41	5	0
+kast	mem	Ferreira4	0.0274	0.2962	39736.00	339285.41	4	94.3	2	1	0
+kast	mem	Tomek_Szczescie	0.0683	0.2273	43200.00	601385.01	7	197.0	6	1	0		10	0
+kast	mem	noah13	0.0173	0.0593	51840.00	555290.31	7	324.8	7	1	0
+kast	mem	piotrwisniewski	0.0306	0.1014	54196.01	525101.41	7	244.5	6	5	0
+kast	mem	koch98	0.0358	0.2441	61401.00	417050.31	7	173.7	9	1	0
+kast	mem	tanaka83	0.0168	0.0878	61920.00	443000.41	10	226.0	6	1	0
+kast	mem	NekoJoker	0.4356	0.6687	62771.00	581236.91	20	752.7	29	5	0		10	0
+kast	mem	TimeBankTina	0.0198	0.1790	66240.00	353703.61	3	82.3	0	1	0
+kast	mem	Yan_XiongMao	0.0304	0.2389	68560.00	353703.61	5	88.2	3	1	0
+kast	mem	li_zhang	0.0146	0.0997	68565.00	526501.51	4	95.3	2	1	0
+kast	mem	CopperBlinds	0.0379	0.2552	79200.00	339285.41	5	133.8	6	1	0
+kast	mem	RestlessRail	0.0229	0.1324	82080.00	535124.01	6	153.5	6	1	0
+kast	mem	RogueRail	0.4956	0.5592	82948.00	601385.01	71	3022.1	140	5	499		15	0
+kast	mem	SneakyBlinds7	0.0239	0.1113	84960.00	402658.01	9	259.8	7	1	0
+kast	mem	CrispyMuck	0.0167	0.0526	86400.00	576915.51	8	181.8	4	1	0
+kast	mem	VelvetJoker9	0.0138	0.0500	87252.00	549540.11	3	67.9	2	1	0
+kast	mem	NightCrawler	0.1603	0.4802	87840.00	561056.61	12	332.2	13	1	0
+kast	mem	FrostyBlinds21	0.0360	0.4776	88728.00	224119.01	4	82.6	3	1	0
+kast	mem	Isbre	0.0145	0.0902	90163.00	169368.21	6	146.2	7	1	0
+kast	mem	javisanchez	0.1083	0.2209	90169.00	602839.01	14	495.4	12	1	0		10	0
+kast	mem	santialvarez	0.0132	0.0509	92160.00	504906.41	7	100.7	3	1	0
+kast	mem	FrostyFlop	0.0162	0.0970	94528.01	347935.21	5	130.7	3	1	0
+kast	mem	QuietJoker	0.0254	0.0996	96480.00	493378.01	10	256.4	7	5	0
+kast	mem	DustyRocket13	0.0174	0.1998	100268.00	288879.11	3	53.7	0	1	0
+kast	mem	Mica_Pampa	0.1524	0.4808	101671.00	595620.11	7	231.2	6	1	0		10	0
+kast	mem	hannah95	0.4560	0.5463	102240.00	591314.81	50	1751.1	75	5	0		31	0
+kast	mem	R0y4lFelt	0.5958	0.6933	103111.00	604280.41	82	3474.3	172	5	599		10	0
+kast	mem	Silva5	0.0323	0.1649	104582.01	559625.01	5	136.9	4	5	999
+kast	mem	rusty_grinder	0.0395	0.1365	105120.00	402658.01	14	456.6	15	5	0
+kast	mem	sofiag	0.4448	0.5190	106020.00	605683.31	45	1886.2	88	5	599		14	0
+kast	mem	irynak	0.0178	0.1008	106046.00	343609.61	4	141.6	4	5	0
+kast	mem	rusty_stack3	0.0258	0.1312	106057.00	411292.41	9	158.5	4	5	0
+kast	mem	KoalaStack	0.0216	0.2924	106057.00	538066.91	3	49.5	2	5	0
+kast	mem	H0llowWh33l	0.0217	0.1104	107417.00	522185.71	6	211.7	6	5	0
+kast	mem	IronVolk	0.0500	0.1337	107458.00	486175.21	11	333.7	5	1	0
+kast	mem	camila_costa	0.0156	0.0612	110309.00	558201.01	5	161.6	7	1	0
+kast	mem	reckless_rounder	0.0195	0.0851	110367.00	549540.11	6	152.0	5	1	0
+kast	mem	midnight_kicker91	0.0889	0.5546	110393.00	552439.01	4	138.5	6	1	0
+kast	mem	PolarWhale13	0.0392	0.1446	110880.00	484757.61	8	245.0	4	5	0
+kast	mem	tkachenko101	0.0198	0.0900	115200.00	582667.81	4	134.5	3	1	0
+kast	mem	lukasb	0.0139	0.0506	118923.00	443000.41	5	164.4	6	1	0
+kast	mem	n00braise	0.3187	0.4512	119520.00	602839.01	31	1135.5	33	5	0		4	0
+kast	mem	LunarFish	0.1455	0.4188	120960.00	392588.51	15	539.1	17	1	0
+kast	mem	RogueLucha	0.0245	0.9454	124718.00	444470.51	1	7.0	0	1	0
+kast	mem	GlueckspilzNuts	0.0153	0.0905	126159.00	248620.01	6	126.4	3	1	0
+kast	mem	hugo.b	0.0212	0.2154	129600.00	404099.41	2	78.5	1	1	0
+kast	mem	BoatBuilder	0.0185	0.5169	132480.00	205364.71	2	18.0	0	1	0
+kast	mem	daan94	0.0909	0.2135	137677.00	601385.01	15	431.6	7	1	0		2	0
+kast	mem	NoteTaker	0.0202	0.1196	142560.00	487628.41	7	173.6	5	1	0
+kast	mem	MuckYourHand	0.0810	0.2094	146329.00	604280.41	14	322.2	10	1	0		7	0
+kast	mem	SneakyTex	0.0134	0.0784	148320.00	255812.91	5	133.3	4	1	0
+kast	mem	roy44	0.0413	0.2752	149173.00	443000.41	8	141.9	4	5	0
+kast	mem	HumbleDeuce99	0.0162	0.1457	149760.00	365195.01	3	61.3	0	1	0
+kast	mem	martim33	0.0125	0.0500	153507.00	349385.01	3	102.2	1	1	500
+kast	mem	LazySnowman	0.0256	0.1107	153540.00	527958.21	7	189.6	3	5	0
+kast	mem	sotasato	0.0140	0.0856	159840.00	398355.51	4	111.8	2	1	0
+kast	mem	AssoRaise	0.0177	0.0507	163603.00	598512.71	9	218.2	4	1	0
+kast	mem	FrostyShove	0.0145	0.0500	165005.00	337860.11	7	151.0	4	1	0
+kast	mem	BubbleTTV	0.0173	0.1132	165600.00	251452.41	3	155.0	4	5	0
+kast	mem	santi_fernandez	0.0146	0.4051	174240.00	180894.51	1	18.1	0	1	0
+kast	mem	VelvetButt0n	0.0303	0.1439	175177.02	438647.51	8	176.2	5	1	0
+kast	mem	n00bcowboy	0.0144	0.0810	185760.00	339285.41	3	108.8	1	1	0
+kast	mem	diaz03	0.0277	0.3398	188640.00	476082.61	2	33.5	0	1	0
+kast	mem	AlpenMonster	0.0150	0.0846	189489.00	203956.91	2	63.8	2	1	0
+kast	mem	bia98	0.2104	0.5851	189513.00	598512.71	8	270.0	8	1	0		12	0
+kast	mem	GG_whale	0.1074	0.3226	190080.00	486175.21	12	398.9	8	1	0
+kast	mem	GG_turn	0.0149	0.0500	192960.00	552439.01	4	92.7	1	1	0
+kast	mem	RogueKicker	0.0278	0.3471	193860.00	294674.11	4	45.5	1	1	0
+kast	mem	CGonzalez	0.0302	0.2044	195330.01	327810.91	5	112.7	2	1	0
+kast	mem	paul.h	0.0224	0.1217	195840.00	382522.51	6	150.2	4	1	0
+kast	mem	amelia.c	0.1615	0.4015	201096.00	551008.11	11	346.4	11	1	0
+kast	mem	BadBeatBarry	0.0141	0.1328	201600.00	211120.51	2	43.7	1	1	0
+kast	mem	Hetman	0.0740	0.2168	202473.00	535124.01	11	278.0	8	1	0
+kast	mem	Diogo_Galo	0.0138	0.0500	203040.00	559625.01	3	51.8	2	1	0
+kast	mem	MidnightMuck	0.3872	0.5809	203040.00	602839.01	21	717.0	28	5	0		13	0
+kast	mem	JustOneMoreHand	0.4381	0.5677	203040.00	582667.81	41	1667.9	64	5	0		17	0
+kast	mem	CopperRail	0.0170	0.0726	203948.00	522185.71	4	65.7	1	1	0
+kast	mem	Tim_Glueckspilz	0.0271	0.2902	204480.00	352276.91	3	59.4	1	1	0
+kast	mem	CrimsonBubble	0.0235	0.0711	205920.00	529379.41	5	221.1	3	1	0
+kast	mem	nico96	0.0271	0.1431	205920.00	605683.31	4	75.1	3	1	0		2	0
+kast	mem	oscar.l	0.0172	0.0998	207360.00	324898.71	5	164.0	3	5	0
+kast	mem	golden_fish7	0.0243	0.0880	208800.00	542322.61	8	203.0	4	1	0
+kast	mem	KatyaIvanov	0.0209	0.1108	210240.00	530841.81	3	98.0	3	1	0
+kast	mem	nora.o	0.0133	0.0503	211085.00	211120.51	1	1.4	0	1	0
+kast	mem	MinCashMike	0.0132	0.0595	211680.00	438647.51	1	42.2	1	1	0
+kast	mem	MrRiver	0.0234	0.0937	213120.00	562523.91	6	109.3	4	1	0
+kast	mem	FullHouseFred	0.0391	0.3322	217440.00	422813.81	2	61.6	1	1	0
+kast	mem	Bruno_ReiDoRio	0.0328	0.0816	219743.00	409859.41	10	294.9	6	1	499
+kast	mem	rocha77	0.0188	0.0509	221235.00	579777.31	6	161.6	4	1	0		9	0
+kast	mem	CanuckJack	0.0181	0.0500	223200.00	532249.61	10	254.7	10	1	0
+kast	mem	TRocha	0.0134	0.0598	224640.00	238495.21	3	116.9	4	1	0
+kast	mem	florianw	0.4162	0.4961	225534.01	589840.51	56	2339.9	103	5	499		13	0
+kast	mem	neon_dealer6	0.0126	0.0975	226080.00	525101.41	2	34.2	3	5	0
+kast	mem	MaximSmirnov	0.0194	0.0514	226950.00	526501.51	7	146.2	4	1	0
+kast	mem	PlusEV	0.0182	0.1167	227520.00	298975.91	2	87.1	1	1	0
+kast	mem	bartekz	0.0149	0.0630	230400.00	409859.41	3	99.9	4	1	0
+kast	mem	RooHammer	0.0151	0.0500	231275.00	270178.01	3	114.7	5	1	0
+kast	mem	QuietLaChance	0.0269	0.1038	231840.00	566810.31	6	184.1	3	1	0
+kast	mem	thirsty_ace2	0.0143	0.0857	233280.00	453035.01	2	26.2	0	1	0
+kast	mem	JacareTurn	0.0139	0.0500	237600.00	483298.71	4	73.5	1	1	0
+kast	mem	OKuznetsov	0.2896	0.5718	239040.00	491939.41	20	671.7	28	1	0
+kast	mem	RogueBjorn	0.0147	0.0505	240480.00	465999.11	4	100.3	4	1	0
+kast	mem	TurnAndBurn	0.4215	0.5584	243360.00	586963.31	33	1119.0	37	1	0		14	0
+kast	mem	El3ctr1cGutshot	0.3610	0.6160	246240.00	592759.01	15	469.9	17	1	0		14	0
+kast	mem	leihuang	0.0475	0.2229	248616.00	576915.51	6	133.0	4	1	0
+kast	mem	vikrams	0.0199	0.0687	248616.00	552439.01	3	50.2	2	1	0
+kast	mem	DavidSteiner	0.0213	0.1685	248616.00	355138.71	2	43.1	1	1	0
+kast	mem	ElectricChe	0.0125	0.0502	249120.00	345036.31	2	81.0	1	1	0
+kast	mem	RogueFlush	0.0160	0.0587	250002.00	424269.91	2	25.0	1	1	0
+kast	mem	NeonButton	0.0947	0.3807	250560.00	502005.41	9	257.0	4	5	0
+kast	mem	osullivan86	0.2072	0.5023	250560.00	597073.41	9	336.8	11	5	0		8	0
+kast	mem	boyko91	0.0154	0.0503	251420.00	255812.91	2	68.6	2	1	0
+kast	mem	pavelk	0.1069	0.5335	252000.00	512100.81	5	150.8	5	1	0
+kast	mem	StestiBluff	0.0147	0.0738	252000.00	448734.51	3	44.0	0	1	0
+kast	mem	DustyGutshot	0.1705	0.3274	253440.00	579777.31	11	338.2	4	1	499		9	0
+kast	mem	SilentBlinds	0.0142	0.0514	254880.00	291808.11	4	167.1	2	1	0
+kast	mem	NoSleepTil6	0.0338	0.4699	256320.00	323469.91	3	44.2	1	1	0
+kast	mem	SteadyQueen	0.0384	0.2225	257760.00	568292.91	5	122.8	3	1	0
+kast	mem	brb_tilt	0.0183	0.1847	259200.00	503435.01	2	21.9	0	1	0
+kast	mem	HijackHank	0.0712	0.5654	260640.00	463125.41	3	93.5	0	1	0
+kast	mem	Ivan_Medved	0.0166	0.0658	262080.00	353703.61	4	102.6	2	1	0
+kast	mem	ShadyRaise	0.0327	0.3241	262952.00	343609.61	2	61.6	1	1	0
+kast	mem	volkov85	0.0486	0.2946	265835.01	553875.51	6	103.2	5	1	0
+kast	mem	ThirstyJoker	0.0229	0.0738	265864.01	440091.01	8	155.1	7	1	0
+kast	mem	Alpen	0.1223	0.3364	266400.00	535124.01	9	275.0	6	5	0
+kast	mem	RuthlessFish	0.0136	0.0504	269280.00	519319.71	3	55.0	2	1	0
+kast	mem	bazzawilson	0.0190	0.0524	270133.00	525101.41	4	80.4	1	1	0
+kast	mem	silent_chip4	0.0270	0.2154	270173.00	421392.01	3	34.3	1	1	0
+kast	mem	BackdoorBetty	0.0155	0.0557	270720.00	574044.61	1	32.2	1	1	0
+kast	mem	Asado	0.0131	0.0501	273600.00	303305.71	2	61.5	1	1	0
+kast	mem	NiceHandSir	0.0171	0.0655	273600.00	500589.91	4	91.2	1	1	0
+kast	mem	BaronBluff	0.0154	0.0507	273600.00	535124.01	2	56.4	0	1	0
+kast	mem	rsantos	0.0150	0.0556	275040.00	460252.41	4	69.7	1	1	0
+kast	mem	CrispyBubble3	0.0193	0.0915	280206.00	317702.21	2	46.8	1	1	0
+kast	mem	majaa	0.0176	0.0502	280254.00	526501.51	3	40.6	0	1	0
+kast	mem	CardDeadCarl	0.0257	0.1073	280800.00	476082.61	4	113.7	5	1	0
+kast	mem	PatientMonster	0.0181	0.1880	281685.00	283148.51	2	8.9	1	1	0
+kast	mem	AssoOwl	0.0361	0.0681	281695.00	565387.11	14	392.5	14	1	0
+kast	mem	joao_sousa	0.0206	0.1234	281698.00	359467.11	3	39.3	0	1	0
+kast	mem	Loonie	0.0214	0.5122	283680.00	290326.11	2	14.6	0	1	0
+kast	mem	BluffkoenigPot	0.0182	0.0600	283680.00	602839.01	4	110.6	3	1	0		3	0
+kast	mem	mike23	0.2554	0.4641	284568.00	592759.01	14	424.1	17	1	0		6	0
+kast	mem	WhyAlwaysRiver	0.0139	0.0509	286560.00	388283.91	3	52.8	1	1	0
+kast	mem	xXKickerXx	0.0320	0.1168	286560.00	525101.41	9	204.4	3	5	0
+kast	mem	yuiwatanabe	0.0123	0.5216	286560.00	286560.00	0	0.0	0	1	0
+kast	mem	JuliDiaz	0.0145	0.0500	286560.00	408398.41	4	60.1	0	1	0
+kast	mem	Clover	0.0168	0.0562	287464.00	288879.11	2	27.2	1	1	0
+kast	mem	chenchen	0.0123	0.0500	288000.00	288000.00	0	0.0	0	1	0
+kast	mem	StoneFlush	0.0140	0.0556	288000.00	313366.11	2	55.7	1	1	0
+kast	mem	ElPescado	0.0333	0.1173	288000.00	586963.31	3	106.6	4	1	0		5	0
+kast	mem	mateus.o	0.0685	0.2133	289440.00	489083.91	7	277.3	8	1	0
+kast	mem	karlsson33	0.0148	0.0552	290880.00	391161.81	3	63.7	2	1	0
+kast	mem	amelia01	0.0155	0.1129	290880.00	291808.11	1	40.1	1	1	0
+kast	mem	Sorte91	0.0723	0.5682	290880.00	329209.61	3	108.1	1	1	0
+kast	mem	ThreeBetBob	0.0124	0.6004	290880.00	290880.00	0	0.0	0	1	0
+kast	mem	DongYoon	0.0180	0.0500	291758.00	359467.11	5	87.2	2	1	0
+kast	mem	thirsty_boat	0.0187	0.0606	291780.00	319145.01	3	75.2	3	1	0
+kast	mem	CosmicHammer	0.0239	0.1280	292320.00	359467.11	3	101.3	2	1	0
+kast	mem	isla_smith	0.0259	0.0963	293195.00	507771.71	3	81.5	2	1	0
+kast	mem	xXButtonXx	0.0183	0.2279	293760.00	298975.91	1	28.9	1	1	0
+kast	mem	RounderTTV	0.0305	0.3562	293760.00	394015.91	1	32.4	0	1	0
+kast	mem	lazy_turn	0.0151	0.0500	295200.00	444470.51	4	94.5	3	1	0
+kast	mem	SilentMuck	0.0160	0.0581	296640.00	425694.51	3	71.6	3	1	0
+kast	mem	silent_monster	0.0136	0.0500	296640.00	457441.61	1	12.0	0	1	0
+kast	mem	Jones6	0.0209	0.0507	296640.00	555290.31	7	142.9	4	1	0
+kast	mem	StoicRounder4	0.0152	0.0518	296640.00	460252.41	3	91.9	3	1	0
+kast	mem	jackson101	0.0145	0.0506	296640.00	444470.51	1	45.9	1	1	0
+kast	mem	clarke101	0.0174	0.0955	298080.00	546682.51	1	20.4	1	1	0
+kast	mem	LuckyMuck8	0.0133	0.0507	298080.00	373844.71	2	18.0	0	1	0
+kast	mem	HeroCallHarry	0.0183	0.0505	298080.00	553875.51	5	112.3	2	1	0
+kast	mem	Logan_Loonie	0.0231	0.1433	298080.00	499128.91	2	61.7	3	1	0
+kast	mem	CopperShark	0.0443	0.1256	298080.00	578361.01	7	217.0	6	1	0
+kast	mem	FoldEquity	0.0143	0.0551	298080.00	379645.31	1	44.8	0	1	0
+kast	mem	adam_prochazka	0.0211	0.0515	298080.00	601385.01	5	147.4	6	1	0		4	0
+kast	mem	Kartenhai	0.0233	0.0891	298080.00	581236.91	3	90.1	2	1	0		8	0
+kast	mem	electric_button	0.0143	0.0505	299520.00	316304.11	2	61.0	1	1	0
+kast	mem	brunoferreira	0.0127	0.1443	299520.00	299520.00	0	0.0	0	1	0
+kast	mem	SleepyBlinds	0.0221	0.0786	299520.00	417050.31	6	144.0	3	1	0
+kast	mem	DukeOfDeuces	0.0171	0.0502	300960.00	553875.51	3	65.8	0	1	0
+kast	mem	GoodGameGreg	0.0137	0.0500	300960.00	303305.71	1	50.4	1	1	0
+kast	mem	amelia7	0.0128	0.4534	300960.00	300960.00	0	0.0	0	1	0
+kast	mem	Gagnon5	0.0671	0.2396	300960.00	589840.51	5	154.8	4	1	0		7	0
+kast	mem	Tomek_Blef	0.0255	0.1146	300960.00	470345.01	3	106.1	3	1	0
+kast	mem	TheQuietOne	0.0209	0.0982	300960.00	512100.81	2	89.5	2	1	0
+kast	mem	NoahMorin	0.0282	0.1636	300960.00	586963.31	1	37.4	1	1	0		6	0
+kast	mem	StoicRiver	0.0180	0.0500	301822.00	497695.21	2	29.9	1	1	0
+kast	mem	n00bquads	0.0173	0.0653	302400.00	392588.51	5	104.8	1	1	0
+kast	mem	ChipAndAChair	0.0893	0.2405	302400.00	533735.81	13	293.2	8	1	0
+kast	mem	Jacks4Life	0.0143	0.0500	302400.00	330641.21	2	52.2	1	1	0
+kast	mem	ColdCall4bet	0.1897	0.3227	302400.00	602839.01	19	533.9	14	1	0		6	0
+kast	mem	sdiaz	0.0170	0.1655	302400.00	388283.91	1	14.6	0	1	0
+kast	mem	BibimbapCowboy	0.0241	0.0960	303262.00	552439.01	4	62.4	1	1	0
+kast	mem	irynat	0.0143	0.0516	303840.00	342196.21	2	49.3	0	1	0
+kast	mem	Sota_Samurai	0.0307	0.0576	303840.00	478988.51	6	146.3	3	1	499
+kast	mem	ShipItSteve	0.0274	0.1825	303840.00	363790.61	3	89.3	4	1	0
+kast	mem	SetMiner	0.0190	0.0501	303840.00	535124.01	4	145.9	5	1	0
+kast	mem	OJohansson	0.0753	0.4724	303840.00	453035.01	5	104.8	3	1	0
+kast	mem	rogue_kicker	0.0129	0.5069	303840.00	303840.00	0	0.0	0	1	0
+kast	mem	ChipsAndSalsa	0.0589	0.2915	303840.00	487628.41	5	112.3	3	1	0
+kast	mem	CosmicJeton	0.0413	0.1379	303840.00	504906.41	7	162.8	2	1	0
+kast	mem	Piotr_Sokol	0.0145	0.0536	303840.00	339285.41	2	58.1	0	1	0
+kast	mem	FloatTheFlop	0.0175	0.0506	305280.00	561056.61	3	112.0	1	1	0
+kast	mem	femke99	0.0153	0.0500	305280.00	478988.51	2	90.0	1	1	0
+kast	mem	EnergyDrinkEd	0.0176	0.0500	305280.00	604280.41	3	101.7	4	1	0		7	0
+kast	mem	TripsTracy	0.0158	0.0500	305280.00	483298.71	3	74.6	0	1	0
+kast	mem	xXBlindsXx	0.0300	0.0728	305280.00	566810.31	8	263.7	6	1	0
+kast	mem	ICMhero	0.0130	0.0620	306720.00	306720.00	0	0.0	0	1	0
+kast	mem	MarianaPereira	0.0130	0.3078	306720.00	306720.00	0	0.0	0	1	0
+kast	mem	olga_sokolov	0.3825	0.5885	306720.00	605683.31	23	652.7	29	1	0		4	0
+kast	mem	TexRocket	0.0130	0.0974	306720.00	306720.00	0	0.0	0	1	0
+kast	mem	AllInAnnie	0.0273	0.1058	306720.00	454503.61	4	153.4	4	1	0
+kast	mem	Lukas_Donau	0.0138	0.0500	308160.00	310498.71	1	42.4	1	1	0
+kast	mem	bohdan_shevchenko	0.0165	0.0502	308160.00	558201.01	3	52.6	0	1	0
+kast	mem	Mr_Fold	0.0130	0.0665	308160.00	308160.00	0	0.0	0	1	0
+kast	mem	luis_cruz	0.0154	0.0500	309600.00	405534.51	2	84.2	1	1	0
+kast	mem	anna_wagner	0.0131	0.0545	309600.00	309600.00	0	0.0	0	1	0
+kast	mem	Klompen8	0.0144	0.0502	309600.00	458839.71	2	27.9	1	1	0
+kast	mem	haru_ito	0.0249	0.3216	311040.00	352276.91	1	35.8	0	1	0
+kast	mem	annafischer	0.0135	0.0599	311040.00	311934.51	1	7.5	0	1	0
+kast	mem	AceKingNever	0.0228	0.2051	311040.00	468875.01	1	32.9	0	1	0
+kast	mem	GutshotGary	0.0158	0.0503	312480.00	585528.91	2	46.2	0	1	0
+kast	mem	LuckyDealer	0.0181	0.0995	312480.00	340759.71	3	55.5	1	1	0
+kast	mem	FrostyRaise5	0.0152	0.0640	312480.00	327810.91	1	44.6	1	1	0
+kast	mem	iryna05	0.0201	0.0502	313920.00	522185.71	6	185.4	4	1	0
+kast	mem	MinRaiseMaria	0.0153	0.0557	315360.00	417050.31	2	36.6	0	1	0
+kast	mem	ChenWu	0.0265	0.1478	315360.00	604280.41	1	32.9	1	1	0		5	0
+kast	mem	PolarChip84	0.0476	0.0975	316800.00	579777.31	11	308.5	9	5	0		12	0
+kast	mem	SultanOfSuited	0.1466	0.5953	316800.00	581236.91	3	118.2	2	1	0		12	0
+kast	mem	R0y4lTurn	0.0179	0.0500	317697.00	317702.21	1	5.2	0	1	0
+kast	mem	LateRegLarry	0.0583	0.0756	318240.00	578361.01	6	169.0	5	1	499		13	0
+kast	mem	tom.c	0.0178	0.0502	318240.00	527958.21	4	96.3	1	1	0
+kast	mem	HannahMoser	0.0208	0.1863	319680.00	346527.31	2	38.2	1	1	0
+kast	mem	SteadyQueen4	0.0717	0.5498	320555.00	359467.11	4	101.2	2	1	0
+kast	mem	giuliaromano	0.0138	0.0500	321120.00	343609.61	1	10.0	0	1	0
+kast	mem	StoneRocket	0.0147	0.0883	322560.00	363790.61	1	12.6	0	1	0
+kast	mem	AFerrari	0.0136	0.0573	324000.00	324000.00	0	0.0	0	1	0
+kast	mem	ShadyJack	0.0156	0.0507	324000.00	381050.31	3	51.3	0	1	0
+kast	mem	AFK_at_BB	0.0145	0.0500	324000.00	329209.61	1	40.1	1	1	0
+kast	mem	Moose	0.2841	0.4997	325440.00	604280.41	13	466.3	15	1	0		11	0
+kast	mem	andriyk	0.0622	0.2439	326880.00	538066.91	5	118.1	1	1	0
+kast	mem	QuietRounder	0.0138	0.2149	328320.00	328320.00	0	0.0	0	1	0
+kast	mem	ThirstyHygge	0.0155	0.0944	331200.00	350802.61	2	15.5	1	1	0
+kast	mem	SmoothButton7	0.0151	0.0504	332640.00	385382.91	2	35.2	0	1	0
+kast	mem	Rocha1	0.0181	0.0516	332640.00	602839.01	3	97.7	2	1	0		3	0
+kast	mem	ChatBanned	0.1474	0.4058	333486.00	574044.61	8	281.6	7	1	0
+kast	mem	CosmicRaise94	0.0240	0.0529	334080.00	604280.41	5	183.2	3	1	0		7	0
+kast	mem	walker78	0.0245	0.0720	335520.00	597073.41	8	157.9	5	1	0
+kast	mem	MAndersson	0.0757	0.2272	336960.00	545215.91	14	276.5	10	5	0
+kast	mem	LunarDeuce	0.0146	0.0630	338400.00	340759.71	1	7.3	0	1	0
+kast	mem	FrostyKicker	0.0142	0.0942	339840.00	339840.00	0	0.0	0	1	0
+kast	mem	thiago_ferreira	0.0153	0.0673	341280.00	350802.61	1	14.7	0	1	0
+kast	mem	GG_wheel	0.0207	0.0753	341280.00	591314.81	4	84.3	1	1	0
+kast	mem	Zver7	0.1044	0.3132	342142.00	555290.31	7	183.8	3	1	0
+kast	mem	oleksiitkachenko	0.1484	0.4032	342173.00	602839.01	12	247.5	10	1	0		1	0
+kast	mem	HammerTime72	0.0960	0.5801	342720.00	503435.01	4	73.7	2	1	0
+kast	mem	RestlessBluff1	0.0155	0.2035	342720.00	474714.71	1	2.0	0	1	0
+kast	mem	Kartenhai85	0.0633	0.1794	344160.00	585528.91	7	212.4	4	1	0		10	0
+kast	mem	HumbleShove	0.0426	0.1975	344160.00	558201.01	4	81.3	2	1	0
+kast	mem	george_jones	0.0148	0.0510	347040.00	362325.41	1	7.5	0	1	0
+kast	mem	Blefe8	0.0146	0.0502	348480.00	348480.00	0	0.0	0	1	0
+kast	mem	owen97	0.0211	0.0638	349920.00	552439.01	5	140.9	0	1	0
+kast	mem	thiago13	0.0231	0.4078	351360.00	379645.31	1	10.4	0	1	0
+kast	mem	MidnightOwl	0.0292	0.2332	352227.00	365195.01	2	39.8	3	1	0
+kast	mem	Magnus_Fjord	0.0383	0.2073	352800.00	562523.91	3	69.5	3	1	0
+kast	mem	ThinValueTim	0.0512	0.2198	354240.00	427168.11	7	144.8	0	1	0
+kast	mem	ElectricShark	0.0308	0.4146	354240.00	447361.61	1	18.3	0	1	0
+kast	mem	Krtek	0.0211	0.0500	355680.00	509236.21	5	135.8	2	1	0
+kast	mem	Antoine_LeRenard	0.0248	0.0566	356586.01	561056.61	4	148.4	5	1	0
+kast	mem	emilianor	0.0201	0.0745	357120.00	385382.91	3	105.1	5	1	0
+kast	mem	RestlessBubble	0.0209	0.0536	357983.00	382522.51	3	49.6	2	1	0
+kast	mem	GnocchiBlinds	0.0157	0.0542	358560.00	379645.31	1	21.2	2	1	0
+kast	mem	kayla98	0.2908	0.5083	359462.00	588418.01	16	489.0	12	1	0		15	0
+kast	mem	FrostyOwl9	0.1006	0.3595	360000.00	592759.01	6	150.8	1	1	0		6	0
+kast	mem	Borshch88	0.0265	0.0540	360852.00	575490.91	6	138.8	1	1	0
+kast	mem	chiara.f	0.1188	0.3897	360867.00	507771.71	9	209.8	4	1	0
+kast	mem	wisniewski96	0.2308	0.4496	361440.00	589840.51	13	375.7	12	1	0		6	0
+kast	mem	QuietCooler	0.0214	0.0526	361440.00	574044.61	3	120.0	1	1	0
+kast	mem	George_Cheeky	0.0202	0.1227	361440.00	398355.51	2	37.2	1	1	0
+kast	mem	mykolas	0.0190	0.0815	361440.00	435795.51	3	47.6	1	1	0
+kast	mem	lucia.f	0.0175	0.0595	361440.00	476082.61	2	44.9	1	1	0
+kast	mem	salty_hammer	0.0196	0.0516	361440.00	536596.91	3	96.5	2	1	0
+kast	mem	frosty_stack	0.0151	0.0500	361440.00	361440.00	0	0.0	0	1	0
+kast	mem	PatientPot	0.0200	0.1053	362880.00	391161.81	2	41.3	1	1	0
+kast	mem	hyun.c	0.0602	0.3081	362880.00	523632.01	5	95.8	4	1	0
+kast	mem	StoneCooler	0.0152	0.0540	362880.00	362880.00	0	0.0	0	1	0
+kast	mem	LunarMonster	0.0152	0.1627	362880.00	362880.00	0	0.0	0	1	0
+kast	mem	facu.r	0.0341	0.1572	362880.00	430048.11	5	98.6	2	1	0
+kast	mem	Toro13	0.0375	0.1074	363733.00	576915.51	8	160.6	2	5	0
+kast	mem	jack.w	0.0805	0.5544	364320.00	535124.01	2	68.8	2	1	0
+kast	mem	Sorte	0.0257	0.0934	364320.00	461703.61	5	117.3	1	1	0
+kast	mem	MidnightPizzaiolo	0.1155	0.2648	364320.00	604280.41	9	274.8	8	1	0		10	0
+kast	mem	SteelWheel	0.0571	0.2521	364320.00	579777.31	4	101.2	4	1	0		9	0
+kast	mem	PuntMaster	0.0320	0.1545	364320.00	388283.91	5	102.8	4	1	0
+kast	mem	Giulia_Bluffatore	0.0254	0.0501	365178.00	509236.21	7	218.2	8	1	0
+kast	mem	SilentToque	0.0484	0.4559	365192.00	474714.71	3	34.9	1	1	0
+kast	mem	max93	0.3954	0.5188	365760.00	604280.41	20	807.2	30	5	0		15	0
+kast	mem	WildKicker	0.0211	0.0584	365760.00	491939.41	4	115.2	2	1	0
+kast	mem	Baptiste_Tapis	0.0173	0.0543	365760.00	461703.61	2	40.8	0	1	0
+kast	mem	YaroslavKovalenko	0.0227	0.0502	366670.01	417050.31	6	121.0	6	1	100
+kast	mem	dejong23	0.0557	0.5398	367200.00	411292.41	3	47.1	4	1	0
+kast	mem	CopperJack	0.4956	0.6031	367200.00	602839.01	20	1032.0	42	1	0		19	0
+kast	mem	FrostyRounder	0.0154	0.0819	367200.00	367200.00	0	0.0	0	1	0
+kast	mem	SqueezePlay	0.4431	0.6479	368640.00	586963.31	16	635.6	24	1	0		9	0
+kast	mem	ryan99	0.0154	0.5582	368640.00	368640.00	0	0.0	0	1	0
+kast	mem	WWang	0.0186	0.0512	370080.00	510675.51	5	67.4	2	1	0
+kast	mem	TigrTurn	0.0295	0.0607	370931.00	474714.71	7	265.5	5	1	0
+kast	mem	wei_zhang	0.0190	0.0500	371520.00	388283.91	3	159.5	3	1	0
+kast	mem	Nachtfalke94	0.0639	0.3373	371520.00	457441.61	5	98.2	3	1	0
+kast	mem	Rossi1	0.0289	0.1394	371520.00	503435.01	3	53.7	1	1	0
+kast	mem	rennakamura	0.0166	0.0503	371520.00	503435.01	1	11.6	0	1	0
+kast	mem	OLewandowski	0.0280	0.2439	372960.00	572566.11	2	29.9	0	5	0
+kast	mem	Canuck96	0.0222	0.0600	372960.00	558201.01	4	89.6	2	1	0
+kast	mem	CutoffCurt	0.0186	0.0536	374400.00	516410.31	2	62.2	1	1	0
+kast	mem	Fernandez7	0.0194	0.0837	374400.00	392588.51	2	52.8	1	1	0
+kast	mem	tomas.g	0.0211	0.0886	375276.00	375315.51	1	2.0	0	1	0
+kast	mem	LuciaGarcia	0.0157	0.1331	375840.00	375840.00	0	0.0	0	1	0
+kast	mem	lena_koch	0.0226	0.0508	377280.00	538066.91	6	168.7	5	1	0
+kast	mem	Pierogi84	0.0183	0.0553	377280.00	405534.51	2	71.0	0	1	0
+kast	mem	RuthlessFelt4	0.0263	0.1453	378720.00	519319.71	2	45.0	0	1	0
+kast	mem	Emma_Frietkot	0.0209	0.1401	380160.00	389700.11	1	25.8	0	1	0
+kast	mem	Brown8	0.0273	0.0698	381600.00	599945.71	6	192.5	4	1	0		7	0
+kast	mem	Freddie_Skint	0.0185	0.0593	381600.00	418535.11	1	69.9	3	1	0
+kast	mem	RoyalAce77	0.0204	0.0512	381600.00	538066.91	4	67.7	1	1	0
+kast	mem	ColdMuck	0.2731	0.4973	383040.00	586963.31	14	500.7	13	1	0		8	0
+kast	mem	MidnightShove	0.0242	0.0900	383040.00	574044.61	2	82.2	2	1	0
+kast	mem	AndriyShevchenko	0.0467	0.1954	383922.00	574044.61	4	96.7	5	1	0
+kast	mem	GhostTown	0.0288	0.0975	384480.00	481862.21	6	195.5	5	5	0
+kast	mem	Pokerface	0.0168	0.0500	384480.00	388283.91	1	23.5	0	1	0
+kast	mem	CosmicRaise	0.0220	0.0751	384480.00	431474.81	3	104.4	2	1	0
+kast	mem	Vikram_Masala	0.0162	0.0913	385920.00	385920.00	0	0.0	0	1	0
+kast	mem	AkselAndersen	0.0162	0.0500	387360.00	387360.00	0	0.0	0	1	0
+kast	mem	ivan_morozov	0.0448	0.2563	387360.00	549540.11	2	73.3	1	1	0
+kast	mem	aarav_gupta	0.0232	0.0501	388211.00	458839.71	1	50.9	2	1	0
+kast	mem	bruno_silva	0.0227	0.4113	388213.00	388283.91	1	0.9	0	1	0
+kast	mem	koch80	0.1155	0.6787	388253.00	487628.41	4	77.0	1	1	0
+kast	mem	Jaguar	0.0503	0.1004	388258.00	602839.01	8	334.7	8	1	0		13	0
+kast	mem	SpewQueen	0.0163	0.2186	388800.00	388800.00	0	0.0	0	1	0
+kast	mem	annaw	0.0183	0.0502	388800.00	510675.51	2	41.5	2	1	0
+kast	mem	Tengu88	0.0375	0.1298	388800.00	503435.01	6	166.9	2	1	0
+kast	mem	morin101	0.0325	0.1000	390240.00	519319.71	6	147.6	2	1	0
+kast	mem	QuietFlush	0.0266	0.1732	391680.00	478988.51	2	42.6	0	1	0
+kast	mem	RustyBlinds	0.0196	0.0500	391680.00	421392.01	3	108.4	2	1	0
+kast	mem	francescacolombo	0.0233	0.0503	392579.00	415636.21	3	77.4	2	1	0
+kast	mem	ZockerQuads	0.0165	0.3259	393120.00	393120.00	0	0.0	0	1	0
+kast	mem	sharma80	0.0273	0.0786	394560.00	602839.01	2	104.0	1	1	0		12	0
+kast	mem	SlyMonster	0.0225	0.0502	394560.00	601385.01	5	108.6	2	1	0		3	0
+kast	mem	RoyalTubarao	0.0568	0.0622	395420.00	526501.51	6	106.8	2	1	499
+kast	mem	NeonQueen88	0.0459	0.2623	396000.00	448734.51	4	79.7	2	1	0
+kast	mem	MFernandez	0.0227	0.3064	397440.00	514955.01	1	8.4	1	1	0
+kast	mem	PizzaAndPoker	0.0469	0.2234	398880.00	591314.81	4	72.0	3	1	0
+kast	mem	pavel_morozov	0.0168	0.0504	400320.00	400320.00	0	0.0	0	1	0
+kast	mem	JetonCowboy	0.0558	0.1840	401222.00	527958.21	5	136.0	6	1	0
+kast	mem	Jersey	0.0278	0.0635	401760.00	535124.01	5	177.9	11	1	0
+kast	mem	yang7	0.0333	0.5235	401760.00	402658.01	1	23.3	1	1	0
+kast	mem	CrimsonRocket	0.0600	0.1655	403200.00	592759.01	6	225.9	3	1	0
+kast	mem	Fortune8888	0.1772	0.5348	406080.00	601385.01	6	160.3	7	1	0		7	0
+kast	mem	TheProfessor	0.0293	0.0852	406080.00	563918.41	4	104.7	3	1	0
+kast	mem	Jjang81	0.0258	0.2867	407520.00	411292.41	1	16.1	0	1	0
+kast	mem	SaltyBlinds	0.0184	0.2145	407520.00	553875.51	1	1.0	1	1	0
+kast	mem	Vargen88	0.0309	0.1634	408960.00	514955.01	3	57.5	2	1	0
+kast	mem	apetrov	0.0173	0.0506	408960.00	408960.00	0	0.0	0	1	0
+kast	mem	rafaeloliveira	0.0770	0.5265	408960.00	428604.61	2	102.5	6	1	0
+kast	mem	laurent83	0.0232	0.0513	409834.00	409859.41	1	10.5	0	1	0
+kast	mem	bohdan21	0.0705	0.6243	410400.00	539455.91	3	46.2	3	1	0
+kast	mem	PatientPraline	0.0538	0.1748	410400.00	581236.91	4	151.9	1	1	0
+kast	mem	dusty_gutshot	0.1743	0.5075	411840.00	591314.81	8	183.1	6	1	0		6	0
+kast	mem	leon.b	0.0234	0.0816	411840.00	474714.71	3	55.6	1	1	0
+kast	mem	CopperChip9	0.1657	0.3985	411840.00	589840.51	8	260.8	5	5	0		4	0
+kast	mem	luca05	0.0198	0.0716	411840.00	558201.01	2	17.3	1	1	0
+kast	mem	PatientAce	0.0200	0.0500	411840.00	605683.31	2	47.3	0	1	0		4	0
+kast	mem	PolarBluff	0.1044	0.3075	413280.00	556757.61	7	201.6	3	1	0
+kast	mem	RogueWhale7	0.0225	0.0761	413280.00	490526.71	2	64.9	4	1	0
+kast	mem	ShadyJoker	0.0235	0.0501	414150.00	417050.31	1	9.7	0	1	0
+kast	mem	RoyalBubble5	0.1557	0.5852	414720.00	578361.01	6	142.2	4	1	0
+kast	mem	xcruz	0.0354	0.1180	414720.00	543780.11	4	97.6	3	1	0
+kast	mem	StoneSnowman7	0.0176	0.1359	416160.00	416160.00	0	0.0	0	1	0
+kast	mem	SneakyLucky8	0.0230	0.0550	416160.00	591314.81	4	156.2	1	1	0
+kast	mem	felipe83	0.0235	0.0506	417010.00	417050.31	1	0.7	0	1	0
+kast	mem	ana01	0.0261	0.0502	418485.00	548090.31	4	84.8	4	1	0
+kast	mem	julia81	0.0181	0.0519	419040.00	506351.31	1	3.9	0	1	0
+kast	mem	StoicTurn	0.0351	0.0710	420480.00	582667.81	6	192.5	3	1	0		14	0
+kast	mem	bruno02	0.0261	0.0508	421377.00	594175.91	5	77.6	2	1	0
+kast	mem	MellowCooler4	0.0187	0.0516	421920.00	431474.81	1	22.0	0	1	0
+kast	mem	sromero	0.0179	0.0896	421920.00	421920.00	0	0.0	0	1	0
+kast	mem	SlyRail95	0.0316	0.0921	423360.00	553875.51	4	148.3	2	1	0
+kast	mem	SickHeater	0.0243	0.1028	424800.00	444470.51	4	153.9	2	5	0
+kast	mem	MadsChristensen	0.0209	0.2040	424800.00	461703.61	1	7.2	0	1	0
+kast	mem	Davis5	0.0224	0.0685	426240.00	474714.71	2	70.1	2	1	0
+kast	mem	YTanaka	0.0198	0.0610	427680.00	448734.51	2	22.6	2	1	0
+kast	mem	logan8	0.0377	0.2727	429120.00	533735.81	2	45.9	1	1	0
+kast	mem	Hajen23	0.0183	0.0502	430560.00	430560.00	0	0.0	0	1	0
+kast	mem	NittyGritty	0.0210	0.0619	432000.00	476082.61	2	49.4	2	1	0
+kast	mem	ShadyBlinds	0.0656	0.3895	432000.00	447361.61	3	99.5	4	1	0
+kast	mem	TMartin	0.0545	0.1695	433440.00	486175.21	5	190.6	9	1	0
+kast	mem	Tubarao	0.0213	0.0501	434880.00	458839.71	2	105.3	1	1	0
+kast	mem	mateus95	0.0462	0.2557	434880.00	448734.51	3	72.5	3	1	0
+kast	mem	ollie_smith	0.4482	0.6391	435752.00	601385.01	20	614.9	13	1	0		16	0
+kast	mem	JackTTV	0.0198	0.0511	436320.00	487628.41	2	22.7	0	1	0
+kast	mem	ColdRiver44	0.0187	0.0988	437760.00	437760.00	0	0.0	0	1	0
+kast	mem	taeyangcho	0.0504	0.2818	437760.00	470345.01	3	77.9	2	1	0
+kast	mem	SitAndGoGo	0.0223	0.2105	439200.00	444470.51	1	9.8	0	1	0
+kast	mem	LazyFlop	0.0242	0.0513	439200.00	523632.01	4	140.7	6	1	0
+kast	mem	lucia_navarro	0.0767	0.5902	440061.00	586963.31	3	41.3	0	1	0
+kast	mem	ChuyCruz	0.0206	0.0501	440640.00	601385.01	1	21.9	0	1	0		4	0
+kast	mem	tarasb	0.0558	0.1585	442080.00	604280.41	5	161.5	5	1	0		9	0
+kast	mem	matejn	0.0227	0.1251	442080.00	453035.01	1	24.5	0	1	0
+kast	mem	Gonzalez3	0.0214	0.0539	442080.00	450172.41	2	78.1	0	1	0
+kast	mem	RogueCowboy	0.0694	0.4614	442942.00	464609.51	3	66.5	0	1	0
+kast	mem	Oliver_Gaffer	0.3505	0.5689	442954.00	571138.01	17	533.7	24	1	0
+kast	mem	Yamamoto5	0.2918	0.4688	442959.00	601385.01	14	543.7	18	1	0		11	0
+kast	mem	WildShark	0.0448	0.3164	443520.00	464609.51	2	43.5	1	1	0
+kast	mem	IrinaIvanov	0.0190	0.0676	443520.00	443520.00	0	0.0	0	1	0
+kast	mem	BlefDealer	0.0650	0.2135	444396.00	586963.31	6	128.8	3	1	0		6	0
+kast	mem	smith33	0.0296	0.1170	444404.00	451638.31	2	24.7	0	1	0
+kast	mem	lkoch	0.0219	0.0520	444960.00	478988.51	2	60.1	0	1	0
+kast	mem	UlvMuck	0.0191	0.0500	444960.00	444960.00	0	0.0	0	1	0
+kast	mem	felixw	0.0231	0.0542	444960.00	497695.21	4	75.1	3	1	0
+kast	mem	LuckyBhai	0.0353	0.3402	446400.00	584144.91	1	20.8	1	1	0
+kast	mem	StoicMuck	0.0241	0.0500	446400.00	558201.01	6	107.2	3	1	0
+kast	mem	LunarBubble7	0.0202	0.0524	446400.00	529379.41	1	17.4	0	1	0
+kast	mem	oscarl	0.0192	0.1760	447840.00	447840.00	0	0.0	0	1	0
+kast	mem	tomasn	0.0721	0.2498	450160.00	585528.91	5	103.5	2	1	0
+kast	mem	mateuso	0.0220	0.0509	450720.00	576915.51	2	40.4	0	1	0
+kast	mem	Aoi_Kitsune	0.0247	0.0683	452160.00	486175.21	4	79.2	4	1	0
+kast	mem	VictorHansen	0.0209	0.0554	453600.00	454503.61	1	34.6	2	1	0
+kast	mem	RecklessRaise	0.0906	0.2197	455040.00	602839.01	7	225.5	6	1	0		3	0
+kast	mem	Smirnov1	0.0273	0.0512	457365.01	595620.11	1	11.6	0	1	0		2	0
+kast	mem	KaasHaaiDeuce	0.1064	0.3204	457417.01	480401.21	6	174.8	5	1	0
+kast	mem	leogirard	0.0289	0.0926	457920.00	578361.01	3	79.7	2	1	0
+kast	mem	Joao_Coringa	0.0198	0.4427	457920.00	457920.00	0	0.0	0	1	0
+kast	mem	sanne.d	0.0198	0.0950	457920.00	457920.00	0	0.0	0	1	0
+kast	mem	noah.h	0.0271	0.1164	457920.00	470345.01	2	42.1	1	1	0
+kast	mem	ethanm	0.0940	0.3188	457920.00	576915.51	5	148.0	3	1	0
+kast	mem	GG_hammer	0.0199	0.4983	459360.00	459360.00	0	0.0	0	1	0
+kast	mem	eliasg	0.0246	0.0500	459360.00	585528.91	4	92.3	3	1	0		8	0
+kast	mem	GatorStack	0.0229	0.0703	459360.00	465999.11	1	38.1	0	1	0
+kast	mem	linaj	0.0208	0.0500	459360.00	467481.11	1	29.0	1	1	0
+kast	mem	KickerTTV	0.1215	0.4343	459360.00	582667.81	4	130.5	5	1	0		14	0
+kast	mem	Johnson8	0.0479	0.6438	459360.00	460252.41	1	28.7	0	1	0
+kast	mem	BSantos	0.0393	0.2511	459360.00	538066.91	2	45.2	1	1	0
+kast	mem	SmoothCooler1	0.1022	0.3972	460223.00	536596.91	4	125.1	4	1	0
+kast	mem	MidnightChip4	0.0234	0.0798	460800.00	463125.41	1	34.4	2	1	0
+kast	mem	oliverw	0.0215	0.2363	460800.00	464609.51	1	2.7	0	1	0
+kast	mem	noaht	0.0270	0.0504	460800.00	592759.01	4	180.8	7	1	0		3	0
+kast	mem	Mertens8	0.0376	0.1558	460800.00	486175.21	3	75.3	3	1	0
+kast	mem	SteadyRiver	0.0199	0.0500	460800.00	460800.00	0	0.0	0	1	0
+kast	mem	Martin6	0.0319	0.4215	461664.00	461703.61	1	5.8	0	1	0
+kast	mem	LuckyRaise	0.0310	0.0738	462240.00	592759.01	5	120.2	2	1	0		8	0
+kast	mem	humble_ace4	0.0233	0.0676	462240.00	487628.41	2	57.5	0	1	0
+kast	mem	DustyAce	0.0374	0.1608	462240.00	525101.41	3	83.9	4	5	0
+kast	mem	n00bboat	0.0203	0.0500	462240.00	467481.11	1	6.6	1	1	0
+kast	mem	gupta98	0.0225	0.0500	462240.00	474714.71	3	79.1	0	1	0
+kast	mem	silent_monster1	0.0200	0.0813	462240.00	462240.00	0	0.0	0	1	0
+kast	mem	RestlessRail00	0.0416	0.2195	462240.00	543780.11	2	46.6	2	1	0
+kast	mem	Cody_Brooklyn	0.0373	0.1290	463680.00	586963.31	2	61.9	0	1	0		7	0
+kast	mem	rafael.a	0.0281	0.0770	463680.00	563918.41	3	95.6	1	1	0
+kast	mem	HumbleFortune88	0.0201	0.1175	463680.00	463680.00	0	0.0	0	1	0
+kast	mem	electric_ace7	0.0201	0.0505	463680.00	463680.00	0	0.0	0	1	0
+kast	mem	DonkBetDonna	0.0371	0.2738	463680.00	496290.21	2	29.3	3	1	0
+kast	mem	AnaSilva	0.0414	0.1458	464530.00	551008.11	2	58.4	2	1	0
+kast	mem	VelvetRaise00	0.0202	0.1410	465120.00	465120.00	0	0.0	0	1	0
+kast	mem	xXFlopXx	0.0220	0.0500	465120.00	559625.01	2	29.0	2	1	0
+kast	mem	xXRailXx	0.0534	0.5274	465120.00	575490.91	1	30.4	0	1	0
+kast	mem	n00brail	0.0673	0.4698	465120.00	535124.01	3	54.5	3	1	0
+kast	mem	DadAtWork	0.0223	0.0500	466560.00	473241.81	1	56.0	3	1	0
+kast	mem	SlowRollSam	0.0242	0.0549	466560.00	598512.71	2	61.1	2	1	0		6	0
+kast	mem	rusty_pot	0.0339	0.1332	467479.00	471770.31	2	48.7	5	1	0
+kast	mem	lorenzo_ferrari	0.0227	0.0502	468000.00	601385.01	2	47.2	2	1	0		2	0
+kast	mem	Yuto_Sakura	0.0207	0.0501	468000.00	499128.91	1	7.2	0	1	0
+kast	mem	victorc	0.0569	0.4084	468000.00	486175.21	2	59.0	2	1	0
+kast	mem	CoffeeAndCards	0.0489	0.1851	468000.00	517894.31	4	108.2	2	1	0
+kast	mem	RoyalGutshot01	0.0866	0.4393	468000.00	569715.51	4	79.9	1	1	0
+kast	mem	cwalsh	0.1879	0.5407	469440.00	591314.81	7	161.4	4	1	0		12	0
+kast	mem	MagnusLarsen	0.0207	0.0500	469440.00	473241.81	1	5.2	0	1	0
+kast	mem	nicor	0.0204	0.1243	469440.00	469440.00	0	0.0	0	1	0
+kast	mem	ruthless_muck	0.0318	0.0531	470319.00	562523.91	6	176.3	5	1	0
+kast	mem	hyunp	0.0269	0.1041	470880.00	569715.51	1	39.5	0	1	0
+kast	mem	SmallSample	0.0210	0.0500	470880.00	471770.31	1	12.7	0	1	0
+kast	mem	lazy_blinds	0.0221	0.0501	472320.00	523632.01	2	27.5	1	1	0
+kast	mem	kuznetsov23	0.0260	0.0643	472320.00	491939.41	3	88.7	3	1	0
+kast	mem	paulwagner	0.0327	0.0843	473203.00	512100.81	3	60.5	0	1	0
+kast	mem	SophieMueller	0.0829	0.2216	473238.00	555290.31	8	201.8	2	5	0
+kast	mem	Sne4kyRounder	0.0218	0.0687	473760.00	477545.02	1	9.8	0	1	0
+kast	mem	gupta13	0.0224	0.0555	473760.00	483298.71	1	43.4	0	1	0
+kast	mem	noah.n	0.0399	0.1351	473760.00	597073.41	3	80.9	2	1	0		5	0
+kast	mem	Tereza_Vlk	0.0218	0.0608	475200.00	592759.01	1	8.7	0	1	0
+kast	mem	IronJoker	0.0242	0.0597	475200.00	513552.71	3	66.7	1	1	0
+kast	mem	SlyKartenhexe	0.0273	0.3809	475200.00	477545.02	1	8.2	1	1	0
+kast	mem	xXDealerXx	0.0468	0.1703	475200.00	506351.31	5	97.4	1	1	0
+kast	mem	stone_ace	0.0351	0.1015	476072.00	574044.61	2	58.1	2	1	0
+kast	mem	noahb	0.0264	0.0850	476640.00	503435.01	2	45.3	0	1	0
+kast	mem	NutFlushDraw	0.0208	0.0500	476640.00	476640.00	0	0.0	0	1	0
+kast	mem	Manon_Jeton	0.0236	0.0503	476640.00	546682.51	2	44.3	0	1	0
+kast	mem	reckless_raise	0.0271	0.0518	478080.00	605683.31	5	127.0	3	1	0		3	0
+kast	mem	Klompen23	0.0238	0.0620	478080.00	527958.21	2	48.7	1	1	0
+kast	mem	diaz21	0.0209	0.4770	478080.00	478080.00	0	0.0	0	1	0
+kast	mem	gabriel_silva	0.0302	0.0700	478080.00	588418.01	3	97.5	3	1	0		11	0
+kast	mem	NTremblay	0.0290	0.0507	478954.00	512100.81	2	50.0	1	1	0
+kast	mem	n00bmonster	0.0220	0.0653	479520.00	480401.21	1	13.3	0	1	0
+kast	mem	GG_flop	0.0233	0.0638	479520.00	486175.21	2	32.4	2	1	0
+kast	mem	hugo00	0.0245	0.0512	480960.00	551008.11	3	59.6	3	1	0
+kast	mem	GoldenAce	0.0264	0.0501	480960.00	561056.61	6	145.9	5	1	0
+kast	mem	rodriguez23	0.0300	0.1489	480960.00	576915.51	2	27.7	0	1	0
+kast	mem	akoch	0.0225	0.1155	482400.00	490526.71	1	4.4	0	1	0
+kast	mem	BazzaWilson	0.0212	0.1686	482400.00	482400.00	0	0.0	0	1	0
+kast	mem	Blef13	0.0293	0.0526	483259.00	499128.91	2	34.9	1	1	0
+kast	mem	Viktor_Isbjorn	0.0222	0.0538	483840.00	490526.71	2	18.0	0	1	0
+kast	mem	SergeiMorozov	0.2641	0.5022	483840.00	601385.01	10	341.4	7	1	0		11	0
+kast	mem	jprochazka	0.1713	0.4922	485280.00	576915.51	5	197.9	6	1	0		16	0
+kast	mem	SaltyJack8	0.0247	0.0616	485280.00	497695.21	2	64.6	1	1	0
+kast	mem	ElectricStack	0.0213	0.0501	485280.00	485280.00	0	0.0	0	1	0
+kast	mem	SilentRiver	0.0780	0.4160	485280.00	555290.31	2	65.5	1	1	0
+kast	mem	lucas.l	0.0235	0.0513	486720.00	507771.71	2	50.7	0	1	0
+kast	mem	SilentRaiser	0.0214	0.1807	486720.00	486720.00	0	0.0	0	1	0
+kast	mem	BigSlickRick	0.0215	0.0500	488160.00	488160.00	0	0.0	0	1	0
+kast	mem	jack_tremblay	0.0500	0.4989	489600.00	496290.21	2	30.1	0	1	0
+kast	mem	xin.l	0.0394	0.1119	491040.00	604280.41	3	117.9	3	1	0		3	0
+kast	mem	GoldenCooler	0.0268	0.0600	492480.00	563918.41	3	81.4	0	1	0
+kast	mem	electric_turn	0.0247	0.0826	493920.00	516410.31	1	27.8	1	1	0
+kast	mem	ana99	0.0225	0.0524	493920.00	539455.91	1	9.2	1	1	0
+kast	mem	StoicShove	0.0250	0.0557	495360.00	526501.51	2	67.8	2	1	0
+kast	mem	felipe13	0.0358	0.0968	495360.00	530841.81	4	108.6	0	1	0
+kast	mem	lucas_dubois	0.0284	0.0554	495360.00	553875.51	3	143.5	1	1	0
+kast	mem	RiverRat	0.0219	0.4010	495360.00	495360.00	0	0.0	0	1	0
+kast	mem	ivan03	0.1017	0.4255	495360.00	598512.71	3	94.6	4	1	0		8	0
+kast	mem	lucas_ferreira	0.0220	0.1658	496800.00	496800.00	0	0.0	0	1	0
+kast	mem	sergeiv	0.0412	0.2411	496800.00	509236.21	2	52.9	2	1	0
+kast	mem	LuckyButton	0.0714	0.5914	497649.00	579777.31	3	36.7	0	1	0
+kast	mem	TheRailbird	0.0221	0.1917	498240.00	498240.00	0	0.0	0	1	0
+kast	mem	UdachaStack	0.0377	0.6069	498240.00	503435.01	1	12.2	0	1	0
+kast	mem	n00bturn	0.0313	0.0562	499085.00	510675.51	3	59.6	2	1	0
+kast	mem	Brandon_Jersey	0.0222	0.2175	499680.00	499680.00	0	0.0	0	1	0
+kast	mem	sneaky_shove	0.0400	0.2094	499680.00	579777.31	2	32.9	1	1	0
+kast	mem	crispy_bubble	0.0228	0.0500	501120.00	502005.41	1	11.8	0	1	0
+kast	mem	Lei_XiongMao	0.0232	0.0660	501120.00	503435.01	1	11.3	0	1	0
+kast	mem	FoldPreRepeat	0.0224	0.0570	502560.00	502560.00	0	0.0	0	1	0
+kast	mem	FelipeSouza	0.0538	0.6300	502560.00	517894.31	1	19.6	1	1	0
+kast	mem	Campbell3	0.0249	0.0576	504000.00	506351.31	1	57.7	2	1	0
+kast	mem	GrinderTTV	0.0256	0.0513	504000.00	595620.11	2	38.7	1	1	0		5	0
+kast	mem	StoneBlinds4	0.0878	0.6113	505440.00	553875.51	2	58.0	1	1	0
+kast	mem	lromero	0.0226	0.0502	505440.00	505440.00	0	0.0	0	1	0
+kast	mem	KMiller	0.0260	0.0506	505440.00	592759.01	3	54.8	1	1	0		4	0
+kast	mem	MoonlightShover	0.0267	0.0515	505440.00	589840.51	4	86.2	3	1	0		4	0
+kast	mem	Zosia_Szczescie	0.0617	0.1462	506323.00	584144.91	5	152.0	7	1	0		14	0
+kast	mem	MellowAce	0.0317	0.0750	506880.00	523632.01	3	110.3	6	1	0
+kast	mem	rocha99	0.0227	0.0900	506880.00	506880.00	0	0.0	0	1	0
+kast	mem	ColdJoker	0.0271	0.0524	508320.00	551008.11	4	81.8	3	1	0
+kast	mem	BrooklynCooler	0.0261	0.0501	508320.00	553875.51	4	78.2	0	1	0
+kast	mem	ruthless_quads	0.0332	0.2001	509760.00	523632.01	1	33.0	0	1	0
+kast	mem	BubbleBoy	0.0967	0.2242	511200.00	602839.01	7	242.3	5	1	0		4	0
+kast	mem	ola95	0.0488	0.3627	512640.00	538066.91	1	43.1	0	1	0
+kast	mem	MidnightGrinder	0.0242	0.0500	512640.00	520751.31	1	29.2	2	1	0
+kast	mem	CosmicJack	0.0285	0.0500	514080.00	533735.81	4	173.5	4	1	0
+kast	mem	VelvetJoker	0.0231	0.0687	514080.00	514080.00	0	0.0	0	1	0
+kast	mem	patient_deuce	0.0281	0.0845	515520.00	527958.21	1	37.5	0	1	0
+kast	mem	milanmeijer	0.0542	0.6490	515520.00	516410.31	1	26.3	1	1	0
+kast	mem	RoyalSnowman	0.0233	0.0682	516960.00	516960.00	0	0.0	0	1	0
+kast	mem	ethan_roy	0.0364	0.5073	516960.00	546682.51	1	7.4	0	1	0
+kast	mem	almeida80	0.0311	0.0639	517885.01	517894.31	1	0.5	0	1	0
+kast	mem	Tiago_Galo	0.0256	0.0500	518400.00	563918.41	2	48.1	1	1	0
+kast	mem	chen91	0.0388	0.1047	519257.00	605683.31	5	44.4	2	1	0		2	0
+kast	mem	harryh	0.1125	0.4800	519840.00	559625.01	4	100.4	1	1	0
+kast	mem	Ren_Shogun	0.0241	0.0500	519840.00	545215.91	1	9.8	0	1	0
+kast	mem	kacper_zielinski	0.1993	0.6198	522720.00	602839.01	3	176.7	1	1	0		16	0
+kast	mem	LaoHu	0.0257	0.0523	522720.00	551008.11	2	41.8	2	1	0
+kast	mem	sleepy_flop	0.0355	0.1855	524160.00	525101.41	1	44.1	1	1	0
+kast	mem	bwojcik	0.0336	0.0500	525024.00	555290.31	4	79.9	3	1	0
+kast	mem	rahul03	0.0317	0.0830	525056.00	525056.00	0	0.0	0	1	0
+kast	mem	elsa_johansson	0.1072	0.4680	525100.00	569715.51	4	86.9	0	1	0
+kast	mem	Ficha	0.0250	0.0518	525600.00	552439.01	1	14.4	1	1	0
+kast	mem	PicanteOwl	0.0239	0.4645	525600.00	525600.00	0	0.0	0	1	0
+kast	mem	BluffCatcher	0.0253	0.0504	527040.00	574044.61	1	25.2	0	1	0
+kast	mem	neon_flush	0.0256	0.0542	527040.00	529379.41	1	26.0	1	1	0
+kast	mem	Jersey77	0.0241	0.5656	528480.00	528480.00	0	0.0	0	1	0
+kast	mem	royal_pot9	0.0251	0.0500	529920.00	532249.61	1	21.9	2	1	0
+kast	mem	silva87	0.1342	0.8051	530792.00	597073.41	3	50.7	1	1	0		2	0
+kast	mem	RustyDeuce	0.0625	0.3454	530807.00	586963.31	2	34.6	1	1	0
+kast	mem	SleepyFlussratte	0.0243	0.1014	531360.00	531360.00	0	0.0	0	1	0
+kast	mem	LenaWagner	0.0244	0.0523	532800.00	532800.00	0	0.0	0	1	0
+kast	mem	GG_flush	0.0262	0.0504	532800.00	574044.61	1	37.4	1	1	0
+kast	mem	morales81	0.0300	0.0705	534240.00	549540.11	1	59.9	1	1	0
+kast	mem	SleepyBrolly	0.0339	0.1189	535680.00	589840.51	2	35.8	0	5	0		5	0
+kast	mem	MellowQuads	0.0277	0.0544	537120.00	553875.51	2	63.3	1	1	0
+kast	mem	xXBoatXx	0.1055	0.4967	538560.00	576915.51	4	68.7	1	1	0
+kast	mem	lars.m	0.1559	0.5266	539443.00	589840.51	5	126.6	2	1	0
+kast	mem	Coringa89	0.0295	0.0637	540000.00	548090.31	2	62.9	0	1	0
+kast	mem	PolarBoat	0.0300	0.0757	542880.00	552439.01	2	54.4	0	1	0
+kast	mem	QuietZocker	0.0251	0.3269	544320.00	544320.00	0	0.0	0	1	0
+kast	mem	alejandror	0.3288	0.5732	545760.00	602839.01	7	344.8	12	1	0		19	0
+kast	mem	SteadyShaYu	0.0724	0.2944	546681.00	584144.91	3	63.9	2	5	0		7	0
+kast	mem	GG_felt	0.0286	0.0520	547200.00	598512.71	2	59.4	0	1	0		7	0
+kast	mem	SilentDesi	0.0268	0.0502	548640.00	552439.01	1	32.4	0	1	0
+kast	mem	ButtonMasher	0.0317	0.0682	548640.00	576915.51	2	57.5	1	1	0
+kast	mem	cold_stack	0.1555	0.6542	549512.00	602839.01	4	81.7	2	1	0		5	0
+kast	mem	PolarKicker88	0.0256	0.1976	550080.00	550080.00	0	0.0	0	1	0
+kast	mem	Picante	0.0509	0.0960	550943.00	597073.41	5	142.7	5	1	0		11	0
+kast	mem	RogueBystro	0.0377	0.0582	550981.00	601385.01	4	92.2	1	1	0		2	0
+kast	mem	St3adyBluff	0.1488	0.6430	550987.00	594175.91	3	90.2	3	1	0		7	0
+kast	mem	n00briver	0.0257	0.5459	551520.00	551520.00	0	0.0	0	1	0
+kast	mem	hinayamamoto	0.0363	0.0523	552376.00	582667.81	2	65.5	1	1	0
+kast	mem	julienb	0.0351	0.0502	552389.00	552439.01	1	48.4	2	1	0
+kast	mem	jackt	0.0258	0.0693	552960.00	552960.00	0	0.0	0	1	0
+kast	mem	emiliano.r	0.0344	0.0506	553858.00	553875.51	1	1.9	0	1	0
+kast	mem	oscaro	0.0350	0.2395	554400.00	582667.81	1	16.8	1	1	0
+kast	mem	PotTTV	0.0424	0.4641	554400.00	574044.61	1	14.7	1	1	0
+kast	mem	Peixe78	0.0780	0.2962	555285.00	579777.31	4	77.9	3	1	0
+kast	mem	BorshchChip	0.0288	0.0958	555840.00	558201.01	1	13.0	0	1	0
+kast	mem	tim.h	0.0260	0.0834	555840.00	555840.00	0	0.0	0	1	0
+kast	mem	SnowmenSam	0.0262	0.5814	558720.00	558720.00	0	0.0	0	1	0
+kast	mem	DustyQueen	0.0262	0.6019	558720.00	558720.00	0	0.0	0	1	0
+kast	mem	charlottemartin	0.1844	0.7037	559579.00	585528.91	4	102.4	4	1	0		8	0
+kast	mem	Eetu_Sauna	0.0362	0.0783	560160.00	597073.41	3	82.0	2	1	0		4	0
+kast	mem	WildTurn	0.0296	0.0621	560160.00	574044.61	1	37.5	0	1	0
+kast	mem	javi.g	0.0263	0.2413	560160.00	560160.00	0	0.0	0	1	0
+kast	mem	PatientButton	0.1879	0.7914	561034.00	602839.01	4	86.9	5	1	0		4	0
+kast	mem	Peixe	0.0264	0.0526	561600.00	561600.00	0	0.0	0	1	0
+kast	mem	LenaBecker	0.0414	0.1782	561600.00	575490.91	1	37.9	0	1	0
+kast	mem	electric_queen	0.0394	0.0617	562482.00	591314.81	4	81.2	4	1	0		7	0
+kast	mem	Logan_Poutine	0.0362	0.1291	562521.00	562523.91	1	2.9	0	1	0
+kast	mem	EmmaLarsen	0.0265	0.1255	563040.00	563040.00	0	0.0	0	1	0
+kast	mem	yuto.n	0.0342	0.1384	564480.00	572566.11	1	33.1	2	1	0
+kast	mem	Gabriel_Ficha	0.0304	0.0585	564480.00	598512.71	2	58.5	0	1	0		4	0
+kast	mem	bouchard94	0.0266	0.0502	564480.00	564480.00	0	0.0	0	1	0
+kast	mem	LyckaCooler	0.2086	0.6664	565333.00	597073.41	3	139.2	4	1	0		10	0
+kast	mem	PolarBubble	0.0518	0.1143	565357.00	591314.81	3	91.2	3	1	0		11	0
+kast	mem	ElectricBlinds87	0.0267	0.4813	565920.00	565920.00	0	0.0	0	1	0
+kast	mem	yuto.t	0.0267	0.0907	565920.00	565920.00	0	0.0	0	1	0
+kast	mem	StoneChip	0.0330	0.0728	565920.00	591314.81	4	60.0	1	1	0		3	0
+kast	mem	mellow_cooler1	0.0728	0.5826	565920.00	568292.91	1	30.2	1	1	0
+kast	mem	PocketRockets	0.0479	0.5751	565920.00	575490.91	1	15.1	0	1	0
+kast	mem	BlindStealBen	0.0267	0.0518	565920.00	565920.00	0	0.0	0	1	0
+kast	mem	Adam_Medvidek	0.0267	0.1423	565920.00	565920.00	0	0.0	0	1	0
+kast	mem	PatientRail88	0.0281	0.0557	565920.00	582667.81	1	22.0	0	1	0
+kast	mem	nakamura85	0.0283	0.0500	565920.00	602839.01	1	30.5	1	1	0		5	0
+kast	mem	cosmic_turn	0.0335	0.0685	567360.00	594175.91	2	83.9	2	1	0		11	0
+kast	mem	3amShove	0.0268	0.0500	567360.00	567360.00	0	0.0	0	1	0
+kast	mem	VarianceVictim	0.0268	0.0504	567360.00	567360.00	0	0.0	0	1	0
+kast	mem	RustyBrolly	0.0492	0.1552	568240.01	595620.11	3	46.3	0	1	0		5	0
+kast	mem	seo.k	0.0567	0.1222	568800.00	605683.31	5	161.9	2	1	0		5	0
+kast	mem	GG_rocket	0.0404	0.2873	568800.00	605683.31	1	19.8	0	1	0		3	0
+kast	mem	DSmit	0.0456	0.1715	568800.00	578361.01	2	54.2	3	1	0
+kast	mem	LunarRoo	0.0806	0.3321	568800.00	578361.01	2	72.0	1	1	0
+kast	mem	golden_cooler	0.0269	0.0500	568800.00	568800.00	0	0.0	0	1	0
+kast	mem	ElectricHajen	0.0290	0.0500	568800.00	574044.61	1	37.8	2	1	0
+kast	mem	BankrollRIP	0.0270	0.4419	570240.00	570240.00	0	0.0	0	1	0
+kast	mem	ashleyj	0.0283	0.0500	570240.00	576915.51	1	27.5	0	1	0
+kast	mem	StoicShogun	0.0376	0.0768	570240.00	602839.01	3	112.2	3	1	0		8	0
+kast	mem	kevinm	0.0271	0.0662	571680.00	571680.00	0	0.0	0	1	0
+kast	mem	FietserTurn	0.0367	0.0500	572542.00	572566.11	1	22.1	1	1	0
+kast	mem	HollowRounder3	0.0272	0.1008	573120.00	573120.00	0	0.0	0	1	0
+kast	mem	HUDwatcher	0.0272	0.0535	573120.00	573120.00	0	0.0	0	1	0
+kast	mem	fernandez77	0.0366	0.0500	574024.00	574044.61	1	6.3	0	1	0
+kast	mem	Blefe101	0.0274	0.1567	574560.00	574560.00	0	0.0	0	1	0
+kast	mem	ElectricKrtek	0.1373	0.5672	574560.00	604280.41	5	88.9	3	1	0		6	0
+kast	mem	camilarocha	0.0497	0.4226	576000.00	604280.41	1	15.7	0	1	0		3	0
+kast	mem	HollowWheel	0.1391	0.5028	576000.00	602839.01	4	113.5	5	1	0		9	0
+kast	mem	valeng	0.0346	0.0779	576000.00	589840.51	3	65.9	3	1	0		5	0
+kast	mem	SteadyQuads	0.0755	0.4131	576877.00	579777.31	2	46.7	2	1	0
+kast	mem	joao.o	0.0494	0.5275	577440.00	597073.41	1	11.5	0	1	0		2	0
+kast	mem	alfieclarke	0.0386	0.0680	578347.01	604280.41	3	20.5	0	1	0		1	0
+kast	mem	VelvetZver	0.0314	0.0692	578880.00	599945.71	2	35.0	0	1	0		6	0
+kast	mem	ElectricQuads	0.0317	0.0578	578880.00	605683.31	2	63.0	0	1	0		8	0
+kast	mem	Erik_Vargen	0.1972	0.7537	579735.00	601385.01	3	112.4	2	1	0		7	0
+kast	mem	aoifem	0.0906	0.2802	579755.00	605683.31	5	89.6	2	1	0		9	0
+kast	mem	HwarangMonster	0.0303	0.0500	580320.00	601385.01	2	39.2	1	1	0		6	0
+kast	mem	Emma_Troll	0.0280	0.0538	583200.00	583200.00	0	0.0	0	1	0
+kast	mem	ColdShark9	0.0499	0.2511	586080.00	598512.71	1	47.2	2	1	0		8	0
+kast	mem	ArtemKuznetsov	0.0282	0.0754	586080.00	586080.00	0	0.0	0	1	0
+kast	mem	lucasl	0.0744	0.6117	586932.00	595620.11	2	23.9	0	1	0		4	0
+kast	mem	MellowWhale	0.0544	0.2060	587520.00	604280.41	2	68.6	3	1	0		7	0
+kast	mem	xXJokerXx	0.0285	0.0500	588960.00	588960.00	0	0.0	0	1	0
+kast	mem	Fortune88Joker	0.0321	0.0500	588960.00	598512.71	3	78.9	1	1	0		10	0
+kast	mem	LunarPokerface	0.0299	0.1034	590400.00	597073.41	1	5.0	0	1	0
+kast	mem	almeida93	0.0286	0.0521	590400.00	590400.00	0	0.0	0	1	0
+kast	mem	manon_laurent	0.0431	0.1111	591284.00	591314.81	1	30.8	1	1	0		5	0
+kast	mem	sofiiamelnyk	0.0288	0.4399	593280.00	593280.00	0	0.0	0	1	0
+kast	mem	copper_flop1	0.0288	0.0501	593280.00	593280.00	0	0.0	0	1	0
+kast	mem	IronNuts77	0.0291	0.5917	596160.00	596160.00	0	0.0	0	1	0
+kast	mem	bram.v	0.0293	0.3858	599040.00	599040.00	0	0.0	0	1	0
+kast	mem	adam_kucera	0.0486	0.5852	600480.00	605683.31	1	11.5	1	1	0		2	0
+kast	mem	lucasjacobs	0.0455	0.2151	601920.00	605683.31	2	32.0	3	1	0		5	0
+kast	mem	Wojtek_Sokol	0.0296	0.0500	603360.00	603360.00	0	0.0	0	1	0
+kast	mem	RuthlessRiver	0.0296	0.0501	603360.00	603360.00	0	0.0	0	1	0
+kast	mem	PatientSkint	0.0298	0.0502	604800.00	604800.00	0	0.0	0	1	0
+kast	mem	lenabecker	0.0298	0.0885	604800.00	604800.00	0	0.0	0	1	0
+kast	mem	Sergio_ElTiburon	0.0404	0.0570	605669.00	605683.31	1	14.3	0	1	0		2	0
+kast	mem	Oscar_Norrsken	0.0299	0.0780	606240.00	606240.00	0	0.0	0	1	0
+kast	mem	LuckyMonster	0.0299	0.0503	606240.00	606240.00	0	0.0	0	1	0
+kast	mem	gabriel.r	0.0299	0.3827	606240.00	606240.00	0	0.0	0	1	0
+kast	mem	PatientQueen	0.0299	0.0571	606240.00	606240.00	0	0.0	0	1	0
+kast	mem	JMeijer	0.0299	0.0807	606240.00	606240.00	0	0.0	0	1	0
+kast	mem	BluffeurJoker	0.0300	0.4729	607680.00	607680.00	0	0.0	0	1	0
+kast	mem	CosmicBlinds	0.0300	0.0500	607680.00	607680.00	0	0.0	0	1	0
+kast	growth	0	1260	40455.8	9	3	60	0	0.0	0	0	0	422	0
+kast	mo	1	25.35	605683.31	10.07	0.2225	0.0172	17	605640.00	420	59	15	59	13.82	405	1	420	43	73	73	66	65	79	80	414	384	1	-1	0	-1.00	0.00	0.0000	0.4051	0.6802	0.3145	0.6053	0.0000	0.0000		0
+kast	day	361
+kast	day	362
+kast	day	363
+kast	day	364
+kast	day	365
+kast	day	366
+kast	day	367
+kast	day	368
+kast	day	369
+kast	day	370
+kast	day	371
+kast	day	372
+kast	day	373
+kast	day	374
+kast	day	375
+kast	day	376
+kast	day	377
+kast	day	378
+kast	day	379
+kast	day	380
+kast	day	381
+kast	day	382
+kast	day	383
+kast	day	384
+kast	day	385
+kast	day	386
+kast	day	387
+kast	day	388
+kast	day	389
+kast	day	390
+kast	day	391
+kast	day	392
+kast	day	393
+kast	day	394
+kast	day	395
+kast	day	396
+kast	day	397
+kast	day	398
+kast	day	399
+kast	day	400
+kast	day	401
+kast	day	402
+kast	day	403
+kast	day	404
+kast	day	405
+kast	day	406
+kast	day	407
+kast	day	408
+kast	day	409
+kast	day	410
+kast	day	411
+kast	day	412
+kast	day	413
+kast	day	414
+kast	day	415
+kast	day	416
+kast	day	417
+kast	day	418
+kast	day	419
+kast	day	420
+result	$0.25 Hyper Sprint	170	180	0	100.000	25	hyper-sprint@605670
+result	$0.25 Hyper Sprint	36	180	0	0.000	25	hyper-sprint@604230
+result	$0.25 Hyper Sprint	34	180	0	100.000	25	hyper-sprint@602790
+result	$0.25 Hyper Sprint	89	180	0	0.000	25	hyper-sprint@601350
+result	$0.25 Hyper Sprint	83	180	0	100.000	25	hyper-sprint@599910
+result	$0.25 Hyper Sprint	59	180	0	0.000	25	hyper-sprint@598470
+result	$0.25 Hyper Sprint	52	180	0	0.000	25	hyper-sprint@597030
+result	$0.25 Hyper Sprint	113	180	0	0.000	25	hyper-sprint@595590
+result	$0.25 Hyper Sprint	134	180	0	0.000	25	hyper-sprint@594150
+result	$0.25 Hyper Sprint	35	180	0	0.000	25	hyper-sprint@592710
+result	$0.25 Hyper Sprint	47	180	0	100.000	25	hyper-sprint@591270
+result	$0.25 Hyper Sprint	161	180	0	0.000	25	hyper-sprint@589830
+result	$0.25 Hyper Sprint	122	180	0	0.000	25	hyper-sprint@588390
+result	$0.25 Hyper Sprint	155	180	0	0.000	25	hyper-sprint@586950
+result	$0.25 Hyper Sprint	151	180	0	100.000	25	hyper-sprint@585510
+result	$0.25 Hyper Sprint	7	180	157	0.000	25	hyper-sprint@584070
+result	$0.25 Hyper Sprint	71	180	0	0.000	25	hyper-sprint@582630
+result	$0.25 Hyper Sprint	44	180	0	0.000	25	hyper-sprint@581190
+result	$0.25 Hyper Sprint	114	180	0	0.000	25	hyper-sprint@579750
+result	$0.25 Hyper Sprint	141	180	0	0.000	25	hyper-sprint@578340
+result	$0.25 Hyper Sprint	48	180	0	0.000	25	hyper-sprint@576870
+result	$0.25 Hyper Sprint	14	180	82	0.000	25	hyper-sprint@575430
+result	$0.25 Hyper Sprint	23	180	50	100.000	25	hyper-sprint@573990
+result	$0.25 Hyper Sprint	150	180	0	0.000	25	hyper-sprint@572550
+result	$0.25 Hyper Sprint	131	180	0	0.000	25	hyper-sprint@571110
+result	$0.25 Hyper Sprint	45	180	0	0.000	25	hyper-sprint@569670
+result	$0.25 Hyper Sprint	97	180	0	0.000	25	hyper-sprint@568260
+result	$0.25 Hyper Sprint	142	180	0	0.000	25	hyper-sprint@566790
+result	$0.25 Hyper Sprint	73	180	0	100.000	25	hyper-sprint@565350
+result	$0.25 Hyper Sprint	168	180	0	0.000	25	hyper-sprint@563910
+result	$0.25 Hyper Sprint	24	180	50	0.000	25	hyper-sprint@562470
+result	$0.25 Hyper Sprint	119	180	0	0.000	25	hyper-sprint@561030
+result	$0.25 Hyper Sprint	73	180	0	0.000	25	hyper-sprint@559590
+result	$0.25 Hyper Sprint	151	180	0	0.000	25	hyper-sprint@558180
+result	$0.25 Hyper Sprint	49	180	0	0.000	25	hyper-sprint@556710
+result	$0.25 Hyper Sprint	144	180	0	0.000	25	hyper-sprint@555270
+result	$0.25 Hyper Sprint	45	180	0	0.000	25	hyper-sprint@553830
+result	$0.25 Hyper Sprint	36	180	0	0.000	25	hyper-sprint@552390
+result	$0.25 Hyper Sprint	16	180	68	100.000	25	hyper-sprint@550950
+result	$0.25 Hyper Sprint	109	180	0	0.000	25	hyper-sprint@549510
+result	$0.25 Hyper Sprint	144	180	0	0.000	25	hyper-sprint@548070
+result	$0.25 Hyper Sprint	25	180	50	0.000	25	hyper-sprint@546630
+result	$0.25 Hyper Sprint	126	180	0	0.000	25	hyper-sprint@545190
+result	$0.25 Hyper Sprint	99	180	0	0.000	25	hyper-sprint@543750
+result	$0.25 Hyper Sprint	158	180	0	0.000	25	hyper-sprint@542310
+result	$0.25 Hyper Sprint	176	180	0	0.000	25	hyper-sprint@540870
+result	$0.25 Hyper Sprint	132	180	0	100.000	25	hyper-sprint@539430
+result	$0.25 Hyper Sprint	36	180	0	0.000	25	hyper-sprint@538020
+result	$0.25 Hyper Sprint	36	180	0	0.000	25	hyper-sprint@536550
+result	$0.25 Hyper Sprint	152	180	0	0.000	25	hyper-sprint@535110
+result	$0.25 Hyper Sprint	11	180	103	100.000	25	hyper-sprint@533670
+result	$0.25 Hyper Sprint	146	180	0	0.000	25	hyper-sprint@532230
+result	$0.25 Hyper Sprint	35	180	0	100.000	25	hyper-sprint@530790
+result	$0.25 Hyper Sprint	115	180	0	0.000	25	hyper-sprint@529350
+result	$0.25 Hyper Sprint	159	180	0	0.000	25	hyper-sprint@527940
+result	$0.25 Hyper Sprint	100	180	0	0.000	25	hyper-sprint@526470
+result	$0.25 Hyper Sprint	7	180	157	100.000	25	hyper-sprint@525030
+result	$0.25 Hyper Sprint	59	180	0	0.000	25	hyper-sprint@523590
+result	$0.25 Hyper Sprint	80	180	0	100.000	25	hyper-sprint@522150
+result	$0.25 Hyper Sprint	57	180	0	0.000	25	hyper-sprint@520710
+result	$0.25 Hyper Sprint	37	180	0	100.000	25	hyper-sprint@519270
+result	$0.25 Hyper Sprint	78	180	0	0.000	25	hyper-sprint@517860
+result	$0.25 Hyper Sprint	144	180	0	0.000	25	hyper-sprint@516390
+result	$0.25 Hyper Sprint	178	180	0	0.000	25	hyper-sprint@514950
+result	$0.25 Hyper Sprint	52	180	0	0.000	25	hyper-sprint@513510
+result	$0.25 Hyper Sprint	100	180	0	0.000	25	hyper-sprint@512070
+result	$0.25 Hyper Sprint	41	180	0	100.000	25	hyper-sprint@510630
+result	$0.25 Hyper Sprint	46	180	0	0.000	25	hyper-sprint@509190
+result	$0.25 Hyper Sprint	142	180	0	100.000	25	hyper-sprint@507750
+result	$0.25 Hyper Sprint	58	180	0	0.000	25	hyper-sprint@506310
+result	$0.25 Hyper Sprint	82	180	0	100.000	25	hyper-sprint@504870
+result	$0.25 Hyper Sprint	180	180	0	0.000	25	hyper-sprint@503430
+result	$0.25 Hyper Sprint	153	180	0	0.000	25	hyper-sprint@501990
+result	$0.25 Hyper Sprint	64	180	0	0.000	25	hyper-sprint@500550
+result	$0.25 Hyper Sprint	147	180	0	100.000	25	hyper-sprint@499110
+result	$0.25 Hyper Sprint	122	180	0	0.000	25	hyper-sprint@497670
+result	$0.25 Hyper Sprint	15	180	82	100.000	25	hyper-sprint@496230
+result	$0.25 Hyper Sprint	160	180	0	0.000	25	hyper-sprint@494790
+result	$0.25 Hyper Sprint	118	180	0	0.000	25	hyper-sprint@493350
+result	$0.25 Hyper Sprint	114	180	0	0.000	25	hyper-sprint@491910
+result	$0.25 Hyper Sprint	20	180	50	100.000	25	hyper-sprint@490470
+result	$0.25 Hyper Sprint	31	180	0	0.000	25	hyper-sprint@489030
+result	$0.25 Hyper Sprint	169	180	0	0.000	25	hyper-sprint@487620
+result	$0.25 Hyper Sprint	122	180	0	0.000	25	hyper-sprint@486150
+result	$0.25 Hyper Sprint	37	180	0	100.000	25	hyper-sprint@484710
+result	$0.25 Hyper Sprint	106	180	0	0.000	25	hyper-sprint@483270
+result	$0.25 Hyper Sprint	89	180	0	0.000	25	hyper-sprint@481830
+result	$0.25 Hyper Sprint	167	180	0	0.000	25	hyper-sprint@480390
+result	$0.25 Hyper Sprint	74	180	0	100.000	25	hyper-sprint@478950
+result	$0.25 Hyper Sprint	176	180	0	0.000	25	hyper-sprint@477540
+result	$0.25 Hyper Sprint	164	180	0	0.000	25	hyper-sprint@476070
+result	$0.25 Hyper Sprint	2	180	513	0.000	25	hyper-sprint@474630
+result	$0.25 Hyper Sprint	31	180	0	100.000	25	hyper-sprint@473190
+result	$0.25 Hyper Sprint	144	180	0	0.000	25	hyper-sprint@471750
+result	$0.25 Hyper Sprint	93	180	0	0.000	25	hyper-sprint@470310
+result	$0.25 Hyper Sprint	179	180	0	0.000	25	hyper-sprint@468870
+result	$0.25 Hyper Sprint	31	180	0	100.000	25	hyper-sprint@467430
+result	$0.25 Hyper Sprint	172	180	0	0.000	25	hyper-sprint@465990
+result	$0.25 Hyper Sprint	21	180	50	0.000	25	hyper-sprint@464550
+result	$0.25 Hyper Sprint	156	180	0	0.000	25	hyper-sprint@463110
+closet	seeded
+closet	own	bottom.jeans.mid
+closet	own	bottom.shorts.khaki
+closet	own	outer.hoodie.charcoal
+closet	own	shoes.sneakers.white
+closet	own	top.tee.white
+closet	wear	1	outer.hoodie.charcoal
+closet	wear	2	bottom.jeans.mid
+closet	wear	3	shoes.sneakers.white
+fit	0.0000	-1000000000.00	0	0	0.00	608580.01
+groom	-8513.00	-8513.00	0
+pawn	next	412
+meal	0.00	-1000000000.00
+coach	tally	0	59	0	0	59	0	0
+coach	tally	1	29	0	0	29	0	0
+coach	tally	2	5	0	0	5	0	0
+coach	tally	3	13	0	0	13	0	0
+coach	tally	4	12	0	0	12	0	0
+coach	tally	5	31	0	0	31	0	0
+coach	tally	6	7	0	0	7	0	0
+coach	tally	7	24	0	0	24	0	0
+coach	tally	8	12	0	0	12	0	0
+coach	tally	9	1	0	0	1	0	0
+sponsor	book	608580.00	0	0
+sponsor	deal	halo@319	halo	4	3	459959.00	470039.00	0.00	0.00	0	0	0	0.00	0	0	1	-1000000000.00	0	0	0.00	0	0	0.00	-1	0		0	0	
+sponsor	terms	halo@319	days=60	sign=0	mo=0	hr=200	rd=0	ft=0	ti=0	ce=0	cc=0	fa=0	cut=0	ex=0	cond=1	cure=14	pt=0	tc=0	ask=15,0,0,0,0,0,0,0	wants=3	ev=	perk=3.camera.1.0.0
+sponsor	deal	halo@347	halo	4	3	500656.00	510736.00	0.00	0.00	0	0	0	0.00	0	0	1	-1000000000.00	0	0	0.00	0	0	0.00	-1	0		0	0	
+sponsor	terms	halo@347	days=60	sign=0	mo=0	hr=200	rd=0	ft=0	ti=0	ce=0	cc=0	fa=0	cut=0	ex=0	cond=1	cure=14	pt=0	tc=0	ask=15,0,0,0,0,0,0,0	wants=3	ev=	perk=3.camera.1.0.0
+sponsor	deal	halo@403	halo	4	3	580969.00	591049.00	0.00	0.00	0	0	0	0.00	0	0	1	-1000000000.00	0	0	0.00	0	0	0.00	-1	0		0	0	
+sponsor	terms	halo@403	days=60	sign=0	mo=0	hr=200	rd=0	ft=0	ti=0	ce=0	cc=0	fa=0	cut=0	ex=0	cond=1	cure=14	pt=0	tc=0	ask=15,0,0,0,0,0,0,0	wants=3	ev=	perk=3.camera.1.0.0
+sponsor	cool	halo	681769.00
+badge	review	24335	0
+mail	217860.00	ignite	site	1	0	Bree Okafor, Ignite Partnerships	Poker that's actually fun	Hi, it's Bree from Ignite Poker. We hear you play a lot of tournaments, so here's ours: Flip & Run every hour, the Spark Jackpot every night at 8 PM, and tables a lot friendlier than the ones you're used to. Open an account and we'll match your first deposit 100%, up to $100. The match comes off as you play, $5 for every $20 of rake inside 60 days. Accept below and your Cashier's ready.
+mail	300960.00	rerun:partner	video	1	0	Rerun	Your channel's under review.	Your channel just cleared both bars for the Rerun Partner Program: 1,029 subscribers and 5,635 watch hours in the last twelve months. Someone here is looking it over now, which usually takes about a week. Nothing to do but keep posting.
+mail	311040.00	rerun:partner	video	2	0	Rerun	Welcome to the Rerun Partner Program.	You're in. From today ads run on your videos, and you keep your share of what they earn. It adds up through the month and pays out on the 21st once your balance reaches $100; anything less rolls over. Views from before today don't count, so keep the uploads coming.
+mail	328320.00	rerun:pay	video	3	0	Rerun	Your Rerun statement for May.	May: watch-page ads $27.21 (RPM $2.40, CPM $7.25) · Cuts feed $0.54. Your balance is $27.75, under the $100 minimum, so it rolls into next month's. Nothing's lost; it just waits.
+mail	372960.00	rerun:pay	video	3	0	Rerun	Your Rerun payout for June.	June: watch-page ads $130.34 (RPM $2.68, CPM $8.12) · Cuts feed $1.22. Paid today: $131.56. Your balance is $0.00.
+mail	416160.00	rerun:pay	video	3	0	Rerun	Your Rerun statement for July.	July: watch-page ads $96.04 (RPM $2.45, CPM $7.43) · Cuts feed $0.81. Your balance is $96.85, under the $100 minimum, so it rolls into next month's. Nothing's lost; it just waits.
+mail	459959.00	halo@319	sponsor	1	0	Halo Creators	A camera, on us.	Your channel's up to 511 followers, and they stay. Your facecam deserves better, and we make better. Join the Halo creator program: a new camera on us, our mark on your overlay, and a small rate for every live hour. The terms are on the card below.
+mail	460800.00	rerun:pay	video	3	0	Rerun	Your Rerun payout for August.	August: watch-page ads $190.11 (RPM $2.53, CPM $7.67) · Cuts feed $1.66. Paid today: $191.77. Your balance is $0.00.
+mail	500656.00	halo@347	sponsor	1	0	Halo Creators	A camera, on us.	Your channel's up to 615 followers, and they stay. Halo builds cameras for people who stream from a desk at two in the morning. We'd like to send you the next one up, put our mark on your overlay, and pay a little for every hour you're live with it. Sixty days. Details below.
+mail	505440.00	rerun:pay	video	3	0	Rerun	Your Rerun payout for September.	September: watch-page ads $188.92 (RPM $3.08, CPM $8.49) · Cuts feed $1.71. Paid today: $190.63. Your balance is $0.00.
+mail	548640.00	rerun:pay	video	3	0	Rerun	Your Rerun statement for October.	October: watch-page ads $70.46 (RPM $3.20, CPM $9.29) · Cuts feed $1.32. Your balance is $71.78, under the $100 minimum, so it rolls into next month's. Nothing's lost; it just waits.
+mail	580969.00	halo@403	sponsor	1	0	Halo Creators	A camera, on us.	Your channel's up to 762 followers, and they stay. Your facecam deserves better, and we make better. Join the Halo creator program: a new camera on us, our mark on your overlay, and a small rate for every live hour. The terms are on the card below.
+mail	593280.00	rerun:pay	video	3	0	Rerun	Your Rerun payout for November.	November: watch-page ads $161.84 (RPM $3.30, CPM $9.79) · Cuts feed $4.42. Paid today: $166.26. Your balance is $0.00.
+autoplay	pref	autopilot	1	1	3	70075	60	1
+autoplay	played	hyper-sprint@605670	0	0	autopilot	36	1	18	1
+autoplay	played	hyper-sprint@604230	0	0	tag	87	0	72	0
+autoplay	played	hyper-sprint@602790	0	0	autopilot	82	1	68	2
+autoplay	played	hyper-sprint@601350	0	0	tag	61	0	50	0
+autoplay	played	hyper-sprint@599910	0	0	autopilot	69	1	50	1
+autoplay	played	hyper-sprint@598470	0	0	tag	96	0	61	0
+autoplay	played	hyper-sprint@597030	0	0	autopilot	81	0	61	1
+autoplay	played	hyper-sprint@595590	0	0	tag	57	0	43	0
+autoplay	played	hyper-sprint@594150	0	0	autopilot	47	0	36	1
+autoplay	played	hyper-sprint@592710	0	0	tag	101	0	70	0
+autoplay	played	hyper-sprint@591270	0	0	autopilot	71	1	63	1
+autoplay	played	hyper-sprint@589830	0	0	tag	24	0	15	0
+autoplay	played	hyper-sprint@588390	0	0	autopilot	51	0	39	1
+autoplay	played	hyper-sprint@586950	0	0	tag	27	0	19	0
+autoplay	played	hyper-sprint@585510	0	0	autopilot	43	1	26	1
+autoplay	played	hyper-sprint@584070	0	0	tag	137	0	107	0
+autoplay	played	hyper-sprint@582630	0	0	autopilot	78	0	53	1
+autoplay	played	hyper-sprint@581190	0	0	tag	93	0	67	0
+autoplay	played	hyper-sprint@579750	0	0	autopilot	49	0	38	1
+autoplay	played	hyper-sprint@578340	0	0	tag	45	0	30	0
+autoplay	played	hyper-sprint@576870	0	0	autopilot	78	0	64	1
+autoplay	played	hyper-sprint@575430	0	0	tag	136	0	87	0
+autoplay	played	hyper-sprint@573990	0	0	autopilot	92	4	76	2
+autoplay	played	hyper-sprint@572550	0	0	tag	40	0	23	0
+autoplay	played	hyper-sprint@571110	0	0	autopilot	46	0	39	1
+autoplay	played	hyper-sprint@569670	0	0	tag	93	0	65	0
+autoplay	played	hyper-sprint@568260	0	0	autopilot	64	0	46	1
+autoplay	played	hyper-sprint@566790	0	0	tag	48	0	29	0
+autoplay	played	hyper-sprint@565350	0	0	autopilot	73	1	52	1
+autoplay	played	hyper-sprint@563910	0	0	tag	22	0	12	0
+autoplay	played	hyper-sprint@562470	0	0	autopilot	105	0	75	2
+autoplay	played	hyper-sprint@561030	0	0	tag	58	0	38	0
+autoplay	played	hyper-sprint@559590	0	0	autopilot	59	0	49	1
+autoplay	played	hyper-sprint@558180	0	0	tag	49	0	30	0
+autoplay	played	hyper-sprint@556710	0	0	autopilot	85	0	67	1
+autoplay	played	hyper-sprint@555270	0	0	tag	39	0	29	0
+autoplay	played	hyper-sprint@553830	0	0	autopilot	87	0	64	1
+autoplay	played	hyper-sprint@552390	0	0	tag	93	0	70	0
+autoplay	played	hyper-sprint@550950	0	0	autopilot	90	1	81	2
+autoplay	played	hyper-sprint@549510	0	0	tag	51	0	43	0
+autoplay	played	hyper-sprint@548070	0	0	autopilot	36	0	28	1
+autoplay	played	hyper-sprint@546630	0	0	tag	107	0	75	0
+autoplay	played	hyper-sprint@545190	0	0	autopilot	58	0	36	1
+autoplay	played	hyper-sprint@543750	0	0	tag	52	0	43	0
+autoplay	played	hyper-sprint@542310	0	0	autopilot	24	0	17	1
+autoplay	played	hyper-sprint@540870	0	0	tag	17	0	8	0
+autoplay	played	hyper-sprint@539430	0	0	autopilot	50	3	36	1
+autoplay	played	hyper-sprint@538020	0	0	tag	111	0	67	0
+autoplay	played	hyper-sprint@536550	0	0	autopilot	82	0	65	2
+autoplay	played	hyper-sprint@535110	0	0	tag	32	0	20	0
+autoplay	played	hyper-sprint@533670	0	0	autopilot	121	1	92	2
+autoplay	played	hyper-sprint@532230	0	0	tag	46	0	28	0
+autoplay	played	hyper-sprint@530790	0	0	autopilot	89	1	72	2
+autoplay	played	hyper-sprint@529350	0	0	tag	56	0	42	0
+autoplay	played	hyper-sprint@527940	0	0	autopilot	47	0	25	1
+autoplay	played	hyper-sprint@526470	0	0	tag	58	0	45	0
+autoplay	played	hyper-sprint@525030	0	0	autopilot	119	1	99	3
+autoplay	played	hyper-sprint@523590	0	0	tag	74	0	60	0
+autoplay	played	hyper-sprint@522150	0	0	autopilot	62	1	50	1
+autoplay	played	hyper-sprint@520710	0	0	tag	74	0	59	0
+autoplay	played	hyper-sprint@519270	0	0	autopilot	78	1	69	2
+autoplay	played	hyper-sprint@517860	0	0	tag	64	0	49	0
+autoplay	played	hyper-sprint@516390	0	0	autopilot	49	0	28	1
+autoplay	played	hyper-sprint@514950	0	0	tag	5	0	2	0
+autoplay	played	hyper-sprint@513510	0	0	autopilot	81	0	60	1
+autoplay	played	hyper-sprint@512070	0	0	tag	69	0	44	0
+autoplay	played	hyper-sprint@510630	0	0	autopilot	78	5	63	2
+autoplay	played	hyper-sprint@509190	0	0	tag	81	0	66	0
+autoplay	played	hyper-sprint@507750	0	0	autopilot	38	1	30	1
+autoplay	played	hyper-sprint@506310	0	0	tag	63	0	59	0
+autoplay	played	hyper-sprint@504870	0	0	autopilot	72	4	51	1
+autoplay	played	hyper-sprint@503430	0	0	tag	4	0	2	0
+autoplay	played	hyper-sprint@501990	0	0	autopilot	34	0	21	1
+autoplay	played	hyper-sprint@500550	0	0	tag	79	0	57	0
+autoplay	played	hyper-sprint@499110	0	0	autopilot	36	4	26	1
+autoplay	played	hyper-sprint@497670	0	0	tag	57	0	36	0
+autoplay	played	hyper-sprint@496230	0	0	autopilot	94	1	84	2
+autoplay	played	hyper-sprint@494790	0	0	tag	35	0	22	0
+autoplay	played	hyper-sprint@493350	0	0	autopilot	50	0	39	1
+autoplay	played	hyper-sprint@491910	0	0	tag	58	0	42	0
+autoplay	played	hyper-sprint@490470	0	0	autopilot	99	1	79	2
+autoplay	played	hyper-sprint@489030	0	0	tag	87	0	77	0
+autoplay	played	hyper-sprint@487620	0	0	autopilot	20	0	11	1
+autoplay	played	hyper-sprint@486150	0	0	tag	56	0	36	0
+autoplay	played	hyper-sprint@484710	0	0	autopilot	87	1	66	2
+autoplay	played	hyper-sprint@483270	0	0	tag	63	0	41	0
+autoplay	played	hyper-sprint@481830	0	0	autopilot	67	0	45	1
+autoplay	played	hyper-sprint@480390	0	0	tag	30	0	16	0
+autoplay	played	hyper-sprint@478950	0	0	autopilot	79	1	54	1
+autoplay	played	hyper-sprint@477540	0	0	tag	5	0	3	0
+autoplay	played	hyper-sprint@476070	0	0	autopilot	23	0	17	1
+autoplay	played	hyper-sprint@474630	0	0	tag	171	0	121	0
+autoplay	played	hyper-sprint@473190	0	0	autopilot	97	1	72	2
+autoplay	played	hyper-sprint@471750	0	0	tag	40	0	29	0
+autoplay	played	hyper-sprint@470310	0	0	autopilot	59	0	49	1
+autoplay	played	hyper-sprint@468870	0	0	tag	9	0	2	0
+autoplay	played	hyper-sprint@467430	0	0	autopilot	83	5	71	2
+autoplay	played	hyper-sprint@465990	0	0	tag	20	0	13	0
+autoplay	played	hyper-sprint@464550	0	0	autopilot	119	0	83	2
+autoplay	played	hyper-sprint@463110	0	0	tag	39	0	22	0
+autoplay	played	hyper-sprint@461670	0	0	autopilot	77	0	47	1
+autoplay	played	hyper-sprint@460230	0	0	tag	43	0	32	0
+autoplay	played	hyper-sprint@458790	0	0	autopilot	85	4	69	2
+autoplay	played	hyper-sprint@457380	0	0	tag	120	0	88	0
+autoplay	played	hyper-sprint@455910	0	0	autopilot	73	0	44	1
+autoplay	played	hyper-sprint@454470	0	0	tag	67	0	48	0
+autoplay	played	hyper-sprint@453030	0	0	autopilot	7	0	6	1
+autoplay	played	hyper-sprint@451590	0	0	tag	90	0	69	0
+autoplay	played	hyper-sprint@450150	0	0	autopilot	44	0	31	1
+autoplay	played	hyper-sprint@448710	0	0	tag	54	0	35	0
+autoplay	played	hyper-sprint@447300	0	0	autopilot	102	0	86	2
+autoplay	played	hyper-sprint@445830	0	0	tag	76	0	45	0
+autoplay	played	hyper-sprint@444390	0	0	autopilot	147	2	112	3
+autoplay	played	hyper-sprint@442950	0	0	tag	93	0	72	0
+autoplay	played	hyper-sprint@441510	0	0	autopilot	68	4	48	1
+autoplay	played	hyper-sprint@440070	0	0	tag	47	0	30	0
+autoplay	played	hyper-sprint@438630	0	0	autopilot	46	0	24	1
+autoplay	played	hyper-sprint@437220	0	0	tag	87	0	53	0
+autoplay	played	hyper-sprint@435750	0	0	autopilot	95	0	64	1
+autoplay	played	hyper-sprint@434310	0	0	tag	48	0	25	0
+autoplay	played	hyper-sprint@432870	0	0	autopilot	77	1	70	2
+autoplay	played	hyper-sprint@431430	0	0	tag	97	0	64	0
+autoplay	played	hyper-sprint@429990	0	0	autopilot	100	5	81	2
+autoplay	played	hyper-sprint@428550	0	0	tag	118	0	78	0
+autoplay	played	hyper-sprint@427110	0	0	autopilot	100	4	81	2
+autoplay	played	hyper-sprint@425670	0	0	tag	56	0	35	0
+autoplay	played	hyper-sprint@424230	0	0	autopilot	79	0	56	1
+autoplay	played	hyper-sprint@422790	0	0	tag	47	0	34	0
+autoplay	played	hyper-sprint@421350	0	0	autopilot	82	0	59	1
+autoplay	played	hyper-sprint@419910	0	0	tag	125	0	85	0
+autoplay	played	hyper-sprint@418470	0	0	autopilot	112	0	91	2
+autoplay	played	hyper-sprint@417030	0	0	tag	42	0	29	0
+autoplay	played	hyper-sprint@415590	0	0	autopilot	89	0	65	1
+autoplay	played	hyper-sprint@414150	0	0	tag	27	0	20	0
+autoplay	played	hyper-sprint@412710	0	0	autopilot	75	3	64	1
+autoplay	played	hyper-sprint@411270	0	0	tag	50	0	32	0
+autoplay	played	hyper-sprint@409830	0	0	autopilot	50	0	41	1
+autoplay	played	hyper-sprint@408390	0	0	tag	28	0	12	0
+autoplay	played	hyper-sprint@406980	0	0	autopilot	58	2	45	1
+autoplay	played	hyper-sprint@405510	0	0	tag	52	0	35	0
+autoplay	played	hyper-sprint@404070	0	0	autopilot	60	0	41	1
+autoplay	played	hyper-sprint@402630	0	0	tag	63	0	40	0
+autoplay	played	hyper-sprint@401190	0	0	autopilot	90	1	78	2
+autoplay	played	hyper-sprint@399750	0	0	tag	67	0	45	0
+autoplay	played	hyper-sprint@398310	0	0	autopilot	82	3	63	2
+autoplay	played	hyper-sprint@396900	0	0	tag	134	0	96	0
+autoplay	played	hyper-sprint@395430	0	0	autopilot	46	0	36	1
+autoplay	played	hyper-sprint@393990	0	0	tag	65	0	37	0
+autoplay	played	hyper-sprint@392550	0	0	autopilot	69	1	54	1
+autoplay	played	hyper-sprint@391110	0	0	tag	115	0	74	0
+autoplay	played	hyper-sprint@389670	0	0	autopilot	58	1	42	1
+autoplay	played	hyper-sprint@388230	0	0	tag	88	0	77	0
+autoplay	played	hyper-sprint@386820	0	0	autopilot	94	0	81	2
+autoplay	played	hyper-sprint@385350	0	0	tag	68	0	47	0
+autoplay	played	hyper-sprint@383910	0	0	autopilot	43	4	34	1
+autoplay	played	hyper-sprint@382470	0	0	tag	99	0	75	0
+autoplay	played	hyper-sprint@381030	0	0	autopilot	44	1	28	1
+autoplay	played	hyper-sprint@379590	0	0	tag	120	0	79	0
+autoplay	played	hyper-sprint@378150	0	0	autopilot	95	1	77	2
+autoplay	played	hyper-sprint@376710	0	0	tag	71	0	53	0
+autoplay	played	hyper-sprint@375270	0	0	autopilot	89	0	64	1
+autoplay	played	hyper-sprint@373830	0	0	tag	48	0	21	0
+autoplay	played	hyper-sprint@372390	0	0	autopilot	125	0	86	2
+autoplay	played	hyper-sprint@370950	0	0	tag	61	0	47	0
+autoplay	played	hyper-sprint@369510	0	0	autopilot	8	0	5	1
+autoplay	played	hyper-sprint@368070	0	0	tag	64	0	44	0
+autoplay	played	hyper-sprint@366660	0	0	autopilot	37	0	30	1
+autoplay	played	hyper-sprint@365190	0	0	tag	24	0	6	0
+autoplay	played	hyper-sprint@363750	0	0	autopilot	84	0	57	1
+autoplay	played	hyper-sprint@362310	0	0	tag	36	0	22	0
+autoplay	played	hyper-sprint@360870	0	0	autopilot	50	0	39	1
+autoplay	played	hyper-sprint@359430	0	0	tag	75	0	53	0
+autoplay	played	hyper-sprint@357990	0	0	autopilot	95	1	81	2
+autoplay	played	hyper-sprint@356580	0	0	tag	46	0	27	0
+autoplay	played	hyper-sprint@355110	0	0	autopilot	63	0	40	1
+autoplay	played	hyper-sprint@353670	0	0	tag	73	0	48	0
+autoplay	played	hyper-sprint@352230	0	0	autopilot	96	0	65	2
+autoplay	played	hyper-sprint@350790	0	0	tag	32	0	18	0
+autoplay	played	hyper-sprint@349350	0	0	autopilot	68	0	49	1
+autoplay	played	hyper-sprint@347910	0	0	tag	62	0	36	0
+autoplay	played	hyper-sprint@346500	0	0	autopilot	48	0	38	1
+autoplay	played	hyper-sprint@345030	0	0	tag	17	0	9	0
+autoplay	played	hyper-sprint@343590	0	0	autopilot	50	0	27	1
+autoplay	played	hyper-sprint@342150	0	0	tag	87	0	66	0
+autoplay	played	hyper-sprint@340710	0	0	autopilot	94	0	69	2
+autoplay	played	hyper-sprint@339270	0	0	tag	33	0	22	0
+autoplay	played	hyper-sprint@337830	0	0	autopilot	55	0	42	1
+autoplay	played	hyper-sprint@336390	0	0	tag	83	0	57	0
+autoplay	played	hyper-sprint@334950	0	0	autopilot	25	0	15	1
+autoplay	played	hyper-sprint@333510	0	0	tag	75	0	55	0
+autoplay	played	hyper-sprint@332070	0	0	autopilot	6	1	5	1
+autoplay	played	hyper-sprint@330630	0	0	tag	23	0	16	0
+autoplay	played	hyper-sprint@329190	0	0	autopilot	36	1	27	1
+autoplay	played	hyper-sprint@327750	0	0	tag	129	0	87	0
+autoplay	played	hyper-sprint@326340	0	0	autopilot	51	0	49	1
+autoplay	played	hyper-sprint@324870	0	0	tag	51	0	41	0
+autoplay	played	hyper-sprint@323430	0	0	autopilot	71	1	56	1
+autoplay	played	hyper-sprint@321990	0	0	tag	28	0	15	0
+autoplay	played	hyper-sprint@320550	0	0	autopilot	29	1	18	1
+autoplay	played	hyper-sprint@319110	0	0	tag	84	0	50	0
+autoplay	note	npc:Agus_Gaucho	464609	12	3	2	6	0	0	0	1	1	0	0	3	2	1	1
+autoplay	note	npc:Anna_Flussratte	602839	55	17	4	29	0	1	1	2	1	3	1	14	11	5	7
+autoplay	note	npc:Aoi_Neko	543780	18	7	2	10	1	2	0	1	0	3	1	6	6	1	6
+autoplay	note	npc:AshleyGarcia	461703	42	13	5	19	2	0	0	2	1	2	1	13	9	5	3
+autoplay	note	npc:Ashley_Brooklyn	51282	4	2	1	2	0	1	0	1	1	1	0	2	2	1	3
+autoplay	note	npc:BrandonJackson	19650	8	1	1	5	0	0	0	1	0	0	0	1	0	0	0
+autoplay	note	npc:C0ldC0wb0y	221239	20	8	4	11	1	2	1	1	1	3	2	8	5	2	3
+autoplay	note	npc:CheekySnowman	581236	31	10	6	15	0	1	0	3	2	2	1	9	6	3	3
+autoplay	note	npc:ChenZhang	222672	56	9	4	33	0	1	1	2	2	1	0	8	5	5	2
+autoplay	note	npc:Choi6	546682	59	9	6	27	3	2	1	4	2	0	0	7	7	7	2
+autoplay	note	npc:ColdPot21	54226	10	3	0	7	0	0	0	0	0	1	1	1	1	0	1
+autoplay	note	npc:ColdQueen	9576	6	1	0	4	0	0	0	0	0	0	0	1	1	1	0
+autoplay	note	npc:CopperDealer	568292	135	54	35	63	6	6	4	14	11	10	3	35	20	24	15
+autoplay	note	npc:CopperDeuce	405534	18	2	2	9	1	1	1	1	0	0	0	1	1	1	0
+autoplay	note	npc:CopperFish	572566	150	24	14	70	4	3	2	8	5	6	4	19	13	11	6
+autoplay	note	npc:CopperGlueckspilz	238495	18	8	2	8	0	0	0	0	0	2	0	6	4	2	3
+autoplay	note	npc:CopperStack	549540	250	77	26	122	4	6	1	11	7	15	4	63	44	17	35
+autoplay	note	npc:CosmicCroissant	487628	6	1	0	4	0	0	0	0	0	1	0	1	1	0	1
+autoplay	note	npc:CosmicPot7	54226	17	8	3	8	0	1	0	2	1	1	0	8	6	3	4
+autoplay	note	npc:CrimsonBluff	604280	18	4	2	7	0	1	0	2	1	0	0	4	3	1	2
+autoplay	note	npc:CrimsonDeuce	595620	38	13	5	16	1	1	0	2	1	3	1	13	8	7	5
+autoplay	note	npc:CrimsonMonster	129045	9	2	0	5	0	0	0	0	0	0	0	2	2	0	1
+autoplay	note	npc:CrimsonRocket	147766	12	4	1	7	0	1	0	1	1	1	1	4	2	2	1
+autoplay	note	npc:CrimsonXiongMao	147766	12	7	2	5	0	0	0	2	1	1	0	6	5	5	2
+autoplay	note	npc:CrispyGutshot	491939	36	6	4	17	1	0	0	1	1	1	0	4	2	1	1
+autoplay	note	npc:CrispyJoker	372451	37	11	3	18	0	1	0	1	0	2	2	9	7	3	3
+autoplay	note	npc:Daebak	382522	45	11	10	15	2	1	0	5	4	1	1	10	8	8	3
+autoplay	note	npc:DaniGarcia	463125	11	0	0	6	0	0	0	0	0	0	0	0	0	0	0
+autoplay	note	npc:DerekGarcia	418535	84	23	5	46	1	0	0	1	0	8	4	18	13	7	8
+autoplay	note	npc:Diego_Jaguar	553875	24	6	2	12	1	0	0	1	1	1	1	5	4	2	2
+autoplay	note	npc:DustyAce88	8084	11	3	3	3	0	1	1	1	0	0	0	2	2	0	2
+autoplay	note	npc:DustyNachtfalke	530841	141	22	12	62	2	4	2	6	1	2	0	19	16	6	11
+autoplay	note	npc:DustyShove	489083	18	7	3	8	1	0	0	1	0	1	0	4	4	2	3
+autoplay	note	npc:ElectricBoat	434327	2	1	1	1	1	0	0	1	0	0	0	1	1	0	0
+autoplay	note	npc:FabianPichler	483298	202	33	13	95	3	3	2	5	3	5	3	30	20	14	8
+autoplay	note	npc:Farol80	224119	15	3	1	9	1	0	0	1	1	1	0	3	2	1	1
+autoplay	note	npc:Felipe_ReiDoRio	588418	29	6	2	13	1	0	0	1	1	1	0	6	4	3	1
+autoplay	note	npc:Ferrari6	262983	259	48	35	124	5	6	3	19	13	8	2	40	31	28	14
+autoplay	note	npc:FrostyFlop9	597073	169	48	17	83	6	1	1	8	5	12	2	40	32	11	26
+autoplay	note	npc:FrostyMonster85	392588	19	4	1	8	1	0	0	1	0	1	0	4	3	3	1
+autoplay	note	npc:GG_chip	176596	12	2	1	3	0	0	0	1	0	1	1	2	1	2	1
+autoplay	note	npc:Gabriel_Coringa	310498	8	4	3	3	0	1	0	1	0	1	0	3	2	1	2
+autoplay	note	npc:Gator99	463125	108	29	12	52	2	2	1	5	4	7	3	26	18	13	10
+autoplay	note	npc:GoldenJinLong	543780	3	1	1	0	0	1	0	0	0	1	0	1	1	0	1
+autoplay	note	npc:GoldenLongWei	556757	294	89	33	137	1	4	0	15	6	20	8	82	57	28	40
+autoplay	note	npc:HTaylor	497695	18	2	2	8	1	0	0	1	1	0	0	1	1	2	0
+autoplay	note	npc:HUDwatcher	520751	10	2	2	5	0	1	1	1	1	0	0	1	0	2	0
+autoplay	note	npc:HYoon	180894	30	11	6	16	2	1	1	2	1	1	1	9	6	4	3
+autoplay	note	npc:HoserDeuce	428604	90	14	6	43	3	0	0	3	2	3	1	11	7	5	4
+autoplay	note	npc:HoserPot	49888	2	1	0	1	0	0	0	0	0	0	0	0	0	0	0
+autoplay	note	npc:HumbleBjorn	208246	144	44	18	64	1	4	4	9	5	12	6	39	26	11	18
+autoplay	note	npc:IronFish	477542	16	4	3	6	0	0	0	2	1	1	0	4	2	1	2
+autoplay	note	npc:IronPot97	561056	19	5	2	12	0	1	1	1	0	0	0	3	2	0	1
+autoplay	note	npc:Isla_Gaffer	561056	30	5	5	16	0	2	1	2	1	0	0	5	5	1	0
+autoplay	note	npc:JSilva	493378	172	50	16	90	6	0	0	10	5	11	5	43	29	16	16
+autoplay	note	npc:JinLongFlop	527958	31	10	3	15	1	0	0	2	1	3	2	9	8	3	6
+autoplay	note	npc:JoaoRocha	582667	5	2	0	3	0	0	0	0	0	1	1	2	1	0	0
+autoplay	note	npc:JugaadGrinder	383934	39	16	5	18	1	1	0	1	1	4	3	12	7	5	5
+autoplay	note	npc:JulienLaurent	602839	334	105	30	152	1	6	2	13	8	33	10	89	69	30	46
+autoplay	note	npc:Kartenhexe03	16756	20	5	2	9	0	0	0	1	0	1	0	4	3	1	3
+autoplay	note	npc:Klompen44	337860	46	8	2	27	0	0	0	2	2	3	2	7	4	4	3
+autoplay	note	npc:Kortspel13	262983	21	8	2	10	0	1	1	1	1	3	1	6	4	4	2
+autoplay	note	npc:KortspelHammer	430048	73	24	6	39	1	2	1	1	0	3	2	19	14	6	5
+autoplay	note	npc:Kozak	598512	7	2	0	3	0	0	0	0	0	1	0	2	2	0	1
+autoplay	note	npc:L4zyR0under	445861	11	2	1	5	1	0	0	0	0	1	1	3	2	1	1
+autoplay	note	npc:LLindberg	585528	103	30	12	50	2	2	1	5	3	4	1	24	16	10	9
+autoplay	note	npc:LazyWheel	15307	13	5	2	6	0	0	0	1	1	1	0	4	4	1	4
+autoplay	note	npc:LeoGirard	572566	141	50	16	71	3	6	2	7	3	14	5	42	30	13	23
+autoplay	note	npc:LiLiu	598512	110	35	15	55	4	4	1	8	3	9	4	30	24	14	15
+autoplay	note	npc:Linnea_Kortspel	153577	27	7	6	11	2	1	1	4	3	0	0	6	3	5	1
+autoplay	note	npc:Lotte_Klompen	542322	29	4	3	12	0	1	1	1	1	2	0	4	3	2	3
+autoplay	note	npc:Lucas_Jacare	539455	166	58	28	80	4	5	3	12	10	9	1	44	33	17	18
+autoplay	note	npc:Lucky8	592759	118	33	18	55	4	3	1	9	5	8	4	30	19	12	11
+autoplay	note	npc:LuckyLupo	382522	10	3	2	4	0	1	0	1	1	1	0	3	3	2	1
+autoplay	note	npc:LuisRodriguez	604280	34	3	2	15	0	1	1	0	0	1	0	3	2	1	2
+autoplay	note	npc:LunarFish	526501	43	10	6	20	2	3	0	1	1	2	0	8	6	1	5
+autoplay	note	npc:MFerreira	594175	19	4	2	13	0	1	0	1	1	1	1	3	2	1	1
+autoplay	note	npc:MSchmidt	574044	216	66	26	99	6	3	0	14	8	15	6	55	40	21	23
+autoplay	note	npc:ManonBernard	363790	42	14	9	18	3	1	1	3	2	1	0	8	6	4	4
+autoplay	note	npc:MasalaKicker	337860	150	33	21	65	2	7	4	12	8	3	0	26	21	17	10
+autoplay	note	npc:Max_Bluffkoenig	427168	287	45	21	135	5	4	2	12	8	10	4	37	27	17	14
+autoplay	note	npc:MidnightChip	589840	53	11	6	23	1	2	1	1	1	2	0	8	6	4	3
+autoplay	note	npc:MidnightWhale	399781	19	7	1	9	0	0	0	0	0	1	1	5	3	1	4
+autoplay	note	npc:MilandeVries	179465	21	6	0	10	0	0	0	0	0	2	1	5	4	3	2
+autoplay	note	npc:MinCashMike	382522	95	39	26	45	8	8	5	9	8	5	1	31	24	16	12
+autoplay	note	npc:MinjiKang	2348	6	1	1	2	0	0	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:Moose	553875	394	123	43	187	4	8	3	17	11	21	9	97	73	40	41
+autoplay	note	npc:NightCrawler	563918	6	3	0	4	0	0	0	0	0	2	1	3	1	1	2
+autoplay	note	npc:Nordlys	604280	676	203	79	335	8	15	8	35	18	40	11	172	129	63	74
+autoplay	note	npc:NutFlushDraw	525101	11	3	2	5	0	0	0	1	0	1	0	2	1	0	1
+autoplay	note	npc:OverbetOllie	447361	35	11	4	17	0	1	0	1	0	1	0	9	8	2	1
+autoplay	note	npc:PlusEV	566810	43	18	5	19	1	2	2	2	0	4	2	15	10	5	7
+autoplay	note	npc:Pokerface	15307	22	6	3	8	0	1	0	1	0	2	1	5	2	1	2
+autoplay	note	npc:PokerfaceMuck	8084	11	2	2	5	1	0	0	1	1	0	0	1	0	1	0
+autoplay	note	npc:PolarFlop	575490	164	49	17	80	3	4	1	8	3	14	6	43	25	12	16
+autoplay	note	npc:PolarMonster2	170876	6	1	1	3	0	0	0	1	0	0	0	2	1	1	1
+autoplay	note	npc:Proper	552439	314	95	36	156	2	5	2	15	10	16	8	77	57	28	36
+autoplay	note	npc:QuadsOrBust	278801	29	6	5	11	0	2	1	2	2	2	2	5	3	3	3
+autoplay	note	npc:QuietWheel	368100	84	28	12	41	1	2	2	4	3	4	3	22	16	8	6
+autoplay	note	npc:RecklessAce	523632	314	100	38	147	5	11	2	19	12	22	7	84	56	31	37
+autoplay	note	npc:RecklessElPibe	275987	37	7	5	14	3	1	0	2	1	2	2	7	6	2	2
+autoplay	note	npc:RecklessFelt	597073	255	60	23	123	3	4	0	8	4	17	5	53	39	19	40
+autoplay	note	npc:ReiDoRioDealer	309060	1	1	0	1	0	0	0	0	0	1	0	1	1	0	1
+autoplay	note	npc:Ren_Ronin	412755	5	1	1	3	0	0	0	1	0	0	0	1	0	1	0
+autoplay	note	npc:RestlessDeuce	247116	195	37	24	85	7	3	2	10	7	8	6	32	23	18	11
+autoplay	note	npc:RestlessMonster	221239	16	7	6	6	1	0	0	4	4	1	1	5	2	5	1
+autoplay	note	npc:RestlessTex	271608	12	5	2	4	1	0	0	1	1	1	1	4	3	3	1
+autoplay	note	npc:RogueQuads	599945	380	102	40	199	7	8	3	14	9	22	7	82	60	25	32
+autoplay	note	npc:RogueRail	108909	23	2	1	12	1	0	0	0	0	1	1	2	1	1	0
+autoplay	note	npc:RogueRiver	574044	99	38	24	52	5	6	2	11	7	3	1	28	20	18	10
+autoplay	note	npc:Roo01	595620	186	65	22	90	3	5	2	8	6	14	4	55	41	18	33
+autoplay	note	npc:RustyButton	525101	217	69	29	103	6	7	2	12	6	17	8	57	40	17	20
+autoplay	note	npc:RuthlessMonster	412755	70	15	10	33	2	3	2	4	3	0	0	13	10	7	1
+autoplay	note	npc:SNakamura	250027	27	5	4	9	0	0	0	2	2	1	0	4	2	4	2
+autoplay	note	npc:SaltyCowboy	493378	105	25	10	49	2	1	0	6	2	3	0	23	20	9	12
+autoplay	note	npc:SaltyJoker	512100	156	52	20	80	4	3	1	9	5	14	5	39	30	15	19
+autoplay	note	npc:Sh4dyNuts	584144	7	3	2	4	1	0	0	1	0	1	1	2	1	0	2
+autoplay	note	npc:ShadyButton	519319	74	20	7	36	2	1	1	3	3	4	2	15	10	7	8
+autoplay	note	npc:ShadyPot	322000	8	3	0	4	0	0	0	0	0	0	0	3	3	0	1
+autoplay	note	npc:ShadyRocket	555290	32	7	2	12	1	1	0	1	0	2	0	7	6	2	3
+autoplay	note	npc:ShadyShove1	552439	174	46	14	86	3	6	4	6	2	12	6	40	28	13	26
+autoplay	note	npc:ShadyZver	480401	14	5	1	10	0	0	0	0	0	1	0	4	4	2	4
+autoplay	note	npc:Shamrock99	602839	58	17	9	28	1	1	0	5	3	3	2	14	11	6	6
+autoplay	note	npc:SilentBoat	586963	18	8	6	8	2	1	1	3	2	1	1	5	3	3	1
+autoplay	note	npc:SilentFelt6	529379	160	62	25	79	2	6	2	9	2	13	7	49	32	14	19
+autoplay	note	npc:SilentHammer	601385	9	3	2	4	0	0	0	1	1	0	0	2	2	2	1
+autoplay	note	npc:SleepySnowman	412755	5	2	1	3	0	0	0	1	1	1	0	2	2	2	2
+autoplay	note	npc:SlyFlop3	565387	151	43	19	70	1	2	2	6	1	7	3	34	24	9	14
+autoplay	note	npc:SmallSample	595620	85	27	12	39	1	3	0	7	3	7	3	21	15	5	15
+autoplay	note	npc:SmoothCalavera	565387	332	102	44	163	5	6	3	18	8	22	7	78	58	41	39
+autoplay	note	npc:SmoothFelt	522185	118	18	9	59	3	3	3	2	2	3	1	16	10	8	5
+autoplay	note	npc:SneakyBlinds	468871	38	6	3	17	1	1	1	1	1	0	0	4	4	3	0
+autoplay	note	npc:SneakyRoo	290326	6	1	0	3	0	0	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:SneakyShove	605683	35	7	2	22	0	0	0	1	1	1	0	5	5	5	2
+autoplay	note	npc:Sokil96	576915	199	54	21	95	2	4	1	11	4	7	3	45	34	16	18
+autoplay	note	npc:Sophie_Kartenhexe	476082	5	1	0	3	0	0	0	0	0	1	1	1	0	0	1
+autoplay	note	npc:Sorte99	382522	19	5	2	8	0	1	0	1	0	2	1	5	4	1	3
+autoplay	note	npc:SpewQueen	362325	268	53	35	126	6	9	3	13	9	5	2	48	34	32	15
+autoplay	note	npc:SteadyBoat	571138	140	36	13	67	4	1	0	6	4	10	2	34	24	13	17
+autoplay	note	npc:SteadyJack	137711	35	14	3	16	1	2	0	3	1	4	1	13	10	5	6
+autoplay	note	npc:SteadyWheel8	503431	37	8	5	18	1	0	0	3	3	0	0	5	4	4	1
+autoplay	note	npc:StoicHammer	477542	16	6	1	8	0	0	0	1	0	3	2	6	4	0	3
+autoplay	note	npc:StoneGutshot	513552	17	5	3	5	1	1	1	2	1	1	0	4	4	2	1
+autoplay	note	npc:StoneJoker	509236	3	2	2	1	1	0	0	1	1	0	0	2	2	1	1
+autoplay	note	npc:TKravchenko	264399	64	11	9	32	1	2	2	3	3	0	0	7	5	10	2
+autoplay	note	npc:TableCaptain	584144	13	2	2	7	0	1	0	1	1	0	0	2	1	1	1
+autoplay	note	npc:TankTillDawn	150686	4	1	1	1	0	0	0	1	1	0	0	1	1	1	1
+autoplay	note	npc:Tapas86	206814	34	12	5	15	1	0	0	4	2	2	1	9	6	4	3
+autoplay	note	npc:Tapis	591314	27	3	2	14	1	0	0	0	0	1	0	3	2	0	1
+autoplay	note	npc:ThiagoSilva	286025	16	3	1	5	0	0	0	0	0	1	0	2	2	0	1
+autoplay	note	npc:ThirstyMonster	444470	19	7	2	9	0	0	0	1	1	1	1	7	5	1	4
+autoplay	note	npc:TigrBoat	487628	172	58	17	83	0	3	2	6	4	13	3	45	33	21	20
+autoplay	note	npc:Ulv02	411292	108	13	11	49	4	3	0	9	6	2	1	15	11	12	4
+autoplay	note	npc:VarianceVictim	592759	71	16	7	40	2	1	0	2	1	3	0	11	9	3	3
+autoplay	note	npc:VolkFlush	90185	21	6	2	10	0	2	1	1	0	1	0	4	3	1	2
+autoplay	note	npc:W1ldFlush	322000	8	3	1	5	0	0	0	1	0	0	0	2	2	1	0
+autoplay	note	npc:WildFish	119031	68	14	8	37	1	1	0	3	1	1	0	12	8	9	3
+autoplay	note	npc:Wilk23	389700	29	5	4	13	0	0	0	2	1	1	0	3	3	3	1
+autoplay	note	npc:William_Dingo	535124	121	42	19	54	2	3	2	9	4	10	5	37	24	13	17
+autoplay	note	npc:WoutGoossens	601385	202	51	19	92	1	0	0	11	7	13	7	44	31	18	16
+autoplay	note	npc:aarav23	461703	20	3	2	9	1	0	0	1	1	0	0	3	3	3	1
+autoplay	note	npc:aleksi23	2348	6	1	1	1	0	0	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:alfie.b	594175	164	53	18	75	5	3	0	11	3	11	4	48	35	14	21
+autoplay	note	npc:almeida23	298975	51	17	7	29	1	1	0	4	2	4	1	15	12	5	10
+autoplay	note	npc:aoi.t	478988	50	14	6	23	1	1	0	2	1	3	2	10	6	5	2
+autoplay	note	npc:bakker81	594175	15	4	1	9	0	0	0	1	0	2	1	4	2	1	3
+autoplay	note	npc:bohdan_lysenko	193867	31	5	2	16	0	0	0	1	1	1	1	4	2	2	1
+autoplay	note	npc:boyko22	140570	8	2	1	4	1	0	0	0	0	1	0	2	2	0	3
+autoplay	note	npc:byrne91	463125	18	7	2	9	0	0	0	1	0	1	1	6	3	3	2
+autoplay	note	npc:camilarocha	186702	40	5	4	19	1	1	0	3	1	1	0	4	4	2	1
+autoplay	note	npc:clarke01	29712	47	19	6	25	0	1	0	1	1	5	3	15	9	6	7
+autoplay	note	npc:cmorales	71471	13	4	2	5	0	1	1	1	1	1	0	3	2	2	2
+autoplay	note	npc:conorbyrne	54226	21	6	1	12	1	0	0	0	0	1	0	6	5	2	3
+autoplay	note	npc:copper_joker05	422813	17	5	3	9	2	0	0	1	1	1	1	4	2	2	2
+autoplay	note	npc:cosmic_button	345036	5	1	0	4	0	0	0	0	0	0	0	1	1	1	1
+autoplay	note	npc:cosmic_jack	551008	109	33	11	57	3	3	0	6	4	8	4	28	20	13	15
+autoplay	note	npc:daand	562523	90	21	8	49	1	2	0	4	3	7	3	19	12	3	12
+autoplay	note	npc:dusty_blinds	229866	25	3	2	18	1	0	0	2	2	1	0	3	2	3	2
+autoplay	note	npc:elsa_nilsson	527958	5	4	1	2	0	0	0	1	1	0	0	4	3	1	3
+autoplay	note	npc:emmat	309060	43	10	9	19	2	1	1	4	4	1	1	7	5	5	2
+autoplay	note	npc:ethan_leblanc	360898	159	26	17	66	5	2	1	10	8	4	4	26	16	16	6
+autoplay	note	npc:frosty_blinds	418535	11	2	2	4	0	0	0	0	0	0	0	1	1	0	3
+autoplay	note	npc:frosty_rocket5	586963	418	133	48	199	6	10	2	26	13	26	10	111	79	51	44
+autoplay	note	npc:gabriela	594175	59	14	6	30	2	2	0	3	2	4	1	12	7	3	5
+autoplay	note	npc:gh0stfold	605683	4244	840	607	1967	125	120	68	237	168	107	50	685	508	390	189
+autoplay	note	npc:gonzalez03	90185	14	5	3	7	1	1	0	1	0	1	0	4	3	0	2
+autoplay	note	npc:haru.i	483298	23	1	1	11	0	0	0	1	1	0	0	1	1	1	0
+autoplay	note	npc:humble_chip	591314	205	52	20	94	4	4	1	10	6	11	3	48	34	14	20
+autoplay	note	npc:ines.s	301869	10	4	1	5	0	0	0	0	0	1	1	3	2	1	2
+autoplay	note	npc:ivani	85877	13	2	1	8	0	0	0	0	0	0	0	2	1	1	0
+autoplay	note	npc:jakub.n	25392	25	6	3	12	0	0	0	3	1	2	1	5	4	3	1
+autoplay	note	npc:jonas88	552439	27	7	4	14	1	0	0	1	0	2	2	6	4	1	4
+autoplay	note	npc:jonass	460252	16	2	1	7	0	0	0	1	1	0	0	2	1	1	0
+autoplay	note	npc:jule101	553875	13	2	2	6	1	1	1	1	0	0	0	2	1	1	0
+autoplay	note	npc:jule_fischer	32590	38	11	5	23	1	0	0	2	2	3	0	9	7	4	4
+autoplay	note	npc:juliaa	271608	14	5	2	6	0	0	0	1	0	2	0	5	3	2	4
+autoplay	note	npc:julien.d	369514	54	18	9	24	0	1	0	3	2	4	1	16	12	4	9
+autoplay	note	npc:katyao	352276	76	17	10	40	1	3	1	2	1	3	1	11	9	6	7
+autoplay	note	npc:kevin85	239970	49	13	7	25	1	2	1	1	1	1	0	10	8	5	3
+autoplay	note	npc:koch8	224119	60	14	6	34	1	1	0	3	2	3	1	11	9	2	5
+autoplay	note	npc:lena.s	457441	84	19	8	39	2	1	1	4	3	4	2	16	12	7	5
+autoplay	note	npc:lena99	545215	18	5	2	6	0	0	0	1	1	1	0	6	5	1	2
+autoplay	note	npc:leonie_mayer	460252	12	4	2	4	0	0	0	1	0	1	0	3	3	2	2
+autoplay	note	npc:leonie_steiner	291808	8	2	1	4	0	0	0	1	0	0	0	1	1	0	0
+autoplay	note	npc:lewandowski02	252891	2	1	1	1	0	1	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:liam_gagnon	311934	18	6	1	10	0	0	0	0	0	3	1	5	5	1	6
+autoplay	note	npc:linam	535124	10	4	2	5	0	0	0	2	2	1	0	4	3	5	1
+autoplay	note	npc:loganm	579777	45	16	4	21	1	1	1	3	2	5	2	12	9	5	7
+autoplay	note	npc:louism	536596	10	1	1	5	0	0	0	0	0	0	0	1	1	1	1
+autoplay	note	npc:lpichler	22480	6	2	0	3	0	0	0	0	0	1	0	2	2	1	2
+autoplay	note	npc:lucas.s	425694	31	15	2	15	0	0	0	1	1	3	2	12	9	5	6
+autoplay	note	npc:lucia.s	247116	5	2	1	2	0	0	0	1	1	0	0	2	2	1	0
+autoplay	note	npc:lucky_gutshot02	267312	19	4	2	8	1	0	0	1	0	1	1	4	3	1	1
+autoplay	note	npc:lukaswagner	376747	12	5	1	7	0	0	0	0	0	1	1	2	2	1	1
+autoplay	note	npc:mateo_morales	566810	259	47	24	120	4	5	1	11	10	9	3	41	31	25	14
+autoplay	note	npc:mateus93	391161	23	4	3	13	0	0	0	0	0	0	0	4	4	0	2
+autoplay	note	npc:mateusc	444470	7	0	0	3	0	0	0	0	0	0	0	1	0	1	0
+autoplay	note	npc:mayacampbell	463125	11	3	1	7	0	0	0	1	0	2	1	3	2	1	3
+autoplay	note	npc:megan_garcia	548090	136	44	13	75	2	5	0	6	2	9	2	32	23	8	13
+autoplay	note	npc:midnight_rocket	525101	47	14	7	22	1	2	1	3	3	4	2	12	7	6	5
+autoplay	note	npc:mingzhao	572566	81	23	10	34	2	5	2	4	1	8	2	18	12	7	10
+autoplay	note	npc:n00bblinds	582667	32	6	4	11	0	1	1	3	2	1	0	5	4	4	2
+autoplay	note	npc:n00bkicker	473241	4	1	1	2	0	0	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:n00bmuck	523632	74	23	11	32	1	1	0	6	4	3	0	15	10	11	5
+autoplay	note	npc:n00brail	599945	119	32	14	49	2	2	2	6	3	5	4	25	19	7	5
+autoplay	note	npc:neon_blinds	605683	167	58	36	76	5	6	4	14	9	7	3	46	31	26	17
+autoplay	note	npc:neon_raise	232745	33	12	4	21	0	0	0	3	0	2	0	9	7	4	7
+autoplay	note	npc:nikitas	605683	107	39	12	52	2	1	1	5	4	10	5	33	20	16	12
+autoplay	note	npc:noaha	503431	8	4	1	4	0	0	0	1	1	2	0	5	3	3	2
+autoplay	note	npc:nora_johansen	251452	16	5	3	7	0	1	1	2	0	1	1	5	4	2	0
+autoplay	note	npc:oksana21	291808	17	5	4	6	0	2	1	1	0	1	0	4	2	2	1
+autoplay	note	npc:olgao	481862	41	11	3	18	1	1	0	1	1	3	2	8	4	2	3
+autoplay	note	npc:oliver.s	494805	127	27	22	49	3	2	0	8	6	4	4	24	13	13	6
+autoplay	note	npc:oscar.e	584144	54	20	15	23	3	0	0	5	3	1	0	15	11	8	4
+autoplay	note	npc:oscar.l	26797	5	1	0	3	0	0	0	0	0	1	0	1	1	0	1
+autoplay	note	npc:owen.r	473241	162	30	19	67	2	5	4	8	6	6	1	28	23	16	14
+autoplay	note	npc:owen_martin	405534	6	2	0	3	0	0	0	0	0	1	0	2	1	1	1
+autoplay	note	npc:paula.t	549540	17	3	2	11	1	0	0	1	1	1	1	3	2	1	0
+autoplay	note	npc:pepe_reyes	563918	6	3	2	4	1	1	0	1	0	1	0	3	2	1	3
+autoplay	note	npc:quiet_flop92	553875	18	7	3	9	1	1	1	0	0	3	1	5	3	0	2
+autoplay	note	npc:rafael.r	74331	25	3	1	11	1	0	0	0	0	2	1	3	2	0	2
+autoplay	note	npc:reckless_bluff	571138	55	21	9	28	2	0	0	5	3	5	4	18	14	9	9
+autoplay	note	npc:reckless_bubble	290326	6	3	2	2	0	0	0	2	1	0	0	3	3	3	0
+autoplay	note	npc:reckless_flop	569715	65	4	3	29	1	0	0	2	0	1	1	5	4	3	1
+autoplay	note	npc:reckless_rail	419969	5	1	0	3	0	0	0	0	0	0	0	1	0	0	1
+autoplay	note	npc:ren_suzuki	402658	89	29	10	43	2	2	1	5	3	6	3	27	19	10	10
+autoplay	note	npc:rusty_cooler95	143494	36	13	5	17	1	2	1	2	2	3	2	10	8	5	8
+autoplay	note	npc:salty_ace	597073	339	105	35	170	5	9	2	16	8	22	9	87	65	22	32
+autoplay	note	npc:salty_owl2	585528	96	28	11	46	4	5	2	5	3	7	1	25	18	6	13
+autoplay	note	npc:shady_cowboy78	545215	318	62	46	129	11	9	5	20	14	5	2	48	34	35	15
+autoplay	note	npc:shady_joker5	489083	103	17	7	48	0	0	0	4	2	4	1	14	12	6	8
+autoplay	note	npc:silent_kicker3	232745	7	4	2	4	0	0	0	2	0	0	0	3	1	2	0
+autoplay	note	npc:sleepy_flush	602839	367	66	38	166	7	11	3	18	12	12	6	57	41	25	23
+autoplay	note	npc:sleepy_whale89	16756	30	9	2	15	0	0	0	2	1	0	0	7	5	6	1
+autoplay	note	npc:sly_button	356598	24	2	0	11	0	0	0	0	0	2	1	3	2	1	3
+autoplay	note	npc:sly_wheel98	412755	7	1	1	4	0	0	0	0	0	0	0	1	1	0	0
+autoplay	note	npc:steady_hammer	581236	246	82	32	119	8	9	3	13	9	22	9	70	49	21	29
+autoplay	note	npc:tobiasm	540875	42	16	6	18	0	3	1	3	2	2	0	12	8	5	7
+autoplay	note	npc:tom.j	574044	118	38	12	58	1	4	2	4	2	9	4	30	23	10	15
+autoplay	note	npc:tomasnovak	578361	15	6	2	9	1	0	0	1	0	2	1	5	3	1	3
+autoplay	note	npc:valeria.r	470345	192	66	17	100	5	3	0	7	3	15	6	56	34	19	29
+autoplay	note	npc:vikram.i	330641	6	1	1	2	0	1	0	0	0	1	0	1	1	0	1
+autoplay	note	npc:viktor.k	549540	9	3	2	4	0	1	0	1	0	1	0	3	3	0	2
+autoplay	note	npc:wagner23	572566	36	10	4	17	2	2	1	1	0	3	0	7	6	2	3
+autoplay	note	npc:wagner78	542322	102	15	6	49	1	1	1	0	0	5	2	9	5	2	4
+autoplay	note	npc:wtaylor	283148	28	3	3	13	0	0	0	0	0	0	0	2	1	0	1
+video	ch	4329.651473628738	311040	300960	3347	68022	607680	7	4
+video	vid	v416910	416910	0	1	3	5	0	1812.81	0.75	1.5	12	0	0.0086417	0.4299	8	2.5387		0	0	5	4	TsKs/JhTd/JcAd5h9d8s	73%	16743001	gh0stfold	0	How do you bounce back from this?	3	1524769344	0.0484344	1.1314	0.9215	0.0062	0.22331	0.41286	1261			badbeat.question.4			1	3						2						0	1.0957	331.5283		~SA281155O05C11;537;3;WATCHINGh=ALL IN kastPogh=kastPog kastPog kastPog			-0.777	417050.3105555558:7.26::10:7;d292:62.27::0:0.463;d296:72.17::1:0.463
+video	vid	v420390	420390	2	1	2	5	0	2868.73	0.75	1.5	12	0	0.012	0.5374	8	3.0466		1	0	5	1	AdKh/QcQs/As3d7cTd3h	COOLER	16743001	SneakyNuts8	0	When to stop worrying about coolers (ace-king vs queens)	3	1515913190	0.0409369	0.877	0.9219	0.0062	0.0251	0.13397	2111			cooler.teaching.2			1	3												2	1.0957	718.2849		~SA388142O01C21;872;6;WATCHINGh=chip leader soon?h=chip leader soon?			0.3508	d294:152::0:0.588;d298:261::1:0.588
+video	vid	v423200	423200	0	0	0	0	2	1709.03	0.9	1	6	0	0.0075779	0.7213	0.75	0.0753		1	0	0	4	8h8s/AhKc/2c4d4h4sAd	61%	16743001	bazza_wilson	0	the $0.25 Hyper Sprint, in under a minute	3	1260368463	0.0548925	0.921	0.9223	0.0062	0.13141	0.05141	1221			cut.story.12			1	3						4						1	0.8665	10.4946					-0.5688	d296:146::0:0.519;d300:81.48::1:0.519;d307:48.13::2:0.519
+video	vid	v426990	426990	26	1	3	5	0	1212.07	0.75	1.5	12	0	0.007625	0.3794	8	2.1225		0	0	5	0		IDEA	16774368		0	Who's missing from the Hall of Fame?	3	3449158512	0.0478851	1.2867	0.9227	0.0062	-0.39067	0.31442	980	804		idea.h4.question.4			1							2						0	0.8595	216.3616		~UC2181A1007011;578;HALL OF FAME;CLASS			-0.6334	427168.1105555558:9.96::10:6;d299:56.23::0:0.6;d310:35::2:0.6
+video	vid	v430470	430470	2	1	2	5	0	4461.02	0.75	1.5	12	0	0.012	0.5374	8	3.0468		1	0	5	2	9dKc/JcAd/9hAs9s6s5h	COOLER	16743001	gh0stfold	0	How to stop replaying coolers: a 74 big blind hand, reviewed	3	3619615516	0.0409369	0.9969	0.9229	0.0062	0.05601	0.16488	3256			cooler.teaching.7			1	3						8						2	0.8595	1349.1882		~SA188152O05C21;9;LIVE;h=holds!!h=holds!!			0.5442	d301:723::0:0.556;d305:392::1:0.556;d312:204::2:0.556
+video	vid	v433280	433280	2	0	0	0	2	1619.06	0.9	1	6	0	0.0075779	0.7213	0.75	0.0753		1	0	0	1	KsKd/JhJd/3h5s2s5dQs	COOLER	16743001	niklaswagner	0	somebody had to lose this one. not me	3	2372740763	0.0548925	0.9223	0.9235	0.0062	0.14737	0.06737	1152			cooler.story.5			1	3												1	0.7619	10.7874					-0.3633	d303:159::0:0.533;d307:79.05::1:0.533;d314:65.81::2:0.533
+video	vid	v437190	437190.01	5	1	3	5	0	5348.29	0.75	1.5	12	0	0.0088111	0.4384	8	2.5694		1	0	5	1	QcAs/2d2s/Ah7d3d4sJs	HERO CALL	8177406	StoicCowboy	0	137 big blinds on the river with top pair. Do you call?	3	2555425155	0.0495099	1.0267	0.9239	0.0062	0.27709	0.43806	3659			herocall.question.9			1	3						2						2	0.8728	1101.1253		~MI3671A4X03421;200;FOLD?;c=			0.6497	437257.1105555558:12.64::10:9;d306:677::0:0.444
+video	vid	v440550	440550	13	1	2	5	0	3731.23	0.75	1.5	12	0	0.012	0.5589	8	3.1209		1	0	5	1	3c6h/KsKh/AhQh7s7d9d	RIVAL	16752412	gh0stfold	0	A 51 big blind pot against gh0stfold, street by street	3	3497487968	0.0555536	1.045	0.9244	0.0063	0.00657	-0.1103	2759			rival.teaching.8			1	3												2	0.8728	1000.0564		~B5121251023831;411;63 VS;KKc=o=			0.0359	d308:411::0:0.597;d319:80.28::2:0.597
+video	vid	v443360	443360	13	0	0	0	2	6378.7	0.9	1	6	0	0.0075779	0.7213	0.75	0.0753		1	0	0	0	6h7c/QsQh/5d4d5c9hAd	RIVAL	16752412	gh0stfold	0	another night, another big pot against gh0stfold	3	193592101	0.042225	0.8748	0.925	0.0063	-0.29699	-0.37699	5062			rival.story.10			1	3						4						3	1.0079	47.0727					0.7961	d310:668::0:0.6;d314:277::1:0.6;d321:345::2:0.6
+video	vid	v447270	447270.01	6	1	0	5	0	712.09	0.75	1.5	12	0	0.0088111	0.4822	8	2.5698		1	0	5	0	9h9s/QcKc/Ad5sQhJsJh	HERO FOLD	8177406	ThirstyQuads	0	folding nines was the easy part. not knowing is the hard part	3	2678867140	0.0466655	1.0028	0.9258	0.0064	0.073	0.20153	517			herofold.story.8			1	3						2						0	1.171	435.871		~MI3141B1X12431;361;QUIZ;c=			-1.3074	447361.6105555558:16.42::10:9;d313:50.73::0:0.522;d320:1125::12:
+video	vid	v450630	450630	26	1	3	5	0	264.16	0.75	1.5	12	0	0.0066304	0.3794	8	2.1232		0	0	5	0		IDEA	16774368		0	Who should be in the Hall of Fame next?	3	1060243917	0.0498005	1.0396	0.926	0.0064	-0.34556	0.29123	212	804		idea.h4.question.2			1							4						0	1.171	285.1586		~UC2181A1007011;578;HALL OF FAME;CLASS			-1.5855	d315:7.31::0:0.6;d319:6.83::1:0.6;d320:1125::12:
+video	vid	v453440	453440	0	0	0	0	2	2015.98	0.9	1	6	0	0.0065895	0.7213	0.75	0.0753		1	0	0	4	KdKs/JcJd/9hJh2s8sQd	81%	16743001	Choi6	0	this one still stings	3	4173109451	0.0548925	0.7443	0.9262	0.0064	0.20451	0.12451	1410			badbeat.story.7			1	3												1	0.8329	20.6078					-0.1765	d317:126::0:0.509;d320:1125::12:;d321:115::1:0.509
+video	vid	v457350	457350.01	13	1	3	5	0	30143.63	0.75	1.5	12	0	0.0075145	0.4299	8	2.5398		1	0	5	0	JsKs//9d3cJhKcAd	RIVAL	16752412	gh0stfold	0	How would you play against gh0stfold?	3	1526111630	0.0525834	1.2689	0.9264	0.0064	-0.11662	-0.23717	22985			rival.question.1			1	3						2						4	0.7619	9387.1114		~SA118161O01031;366;CHAT LOST IT;			2.1895	457441.6105555558:10.44::10:6;d320:5825::0:0.6;d324:6000::1:0.6;d331:2420::2:0.6
+video	vid	v460710	460710	2	1	2	5	0	2857.42	0.75	1.5	12	0	0.0117714	0.5699	8	3.1597		1	0	5	0	KsJc/QhQd/Jh9s2s4s2d	COOLER	16743001	Yaroslav_Kozak	0	Coolers vs mistakes: how to tell which one you just played	3	241953732	0.0449733	0.8117	0.9281	0.0064	0.15243	-0.08589	2030			cooler.teaching.4			1	3												3	0.7619	747.4857		~B5135254125031;683;110 BB;COOLERc=o=			0.5645	d322:201::0:0.531;d333:152::2:0.531
+video	vid	v463520	463520	2	0	0	0	2	4473.2	0.9	1	6	0	0.0065895	0.7213	0.75	0.0753		1	0	0	1	QhKh/7hJd/9hJs7sTcQc	COOLER	16743001	CopperDealer9	0	one hand from the $0.25 Hyper Sprint	3	2417408572	0.0548925	1.0668	0.9292	0.0065	0.14233	0.06233	3187			cut.story.7			1	3						8						2	1.252	29.8323					-0.1181	d324:491::0:0.519;d328:342::1:0.519
+video	vid	v467310	467310	2	1	0	5	0	3676.43	0.75	1.5	12	0	0.0088111	0.4822	8	2.571		1	0	5	0	AsQh/7dQd/2dQcJdJh5c	COOLER	16743001	ShadyShove1	0	the cooler that sent my $0.25 Hyper Sprint sideways	3	314378953	0.0371559	1.0427	0.9301	0.0065	-0.22234	0.11129	2872			cooler.story.3			1	3						2						2	1.1302	949.0345		~L1118124P02021;13;LESSON;c=			0.1451	467481.1105555558:9.32::10:6;d327:183::0:0.6;d331:459::12:;d338:166::2:0.6
+video	vid	v470790	470790	0	1	2	5	0	2359.47	0.75	1.5	12	0	0.0113186	0.548	8	3.0854		1	0	5	4	KsKd/QhQd/7h9s8h9hAh	82%	16743001	CopperSaudade	0	Why I'd get kings in again (154 big blinds, 82% to win)	3	1593988359	0.0326531	1.0228	0.9308	0.0066	-0.09253	0.13899	1789			badbeat.teaching.2			1	3						1						1	1.1302	813.4343		~MI3181A1X02041;12;CALL?;c=			-0.2594	d329:178::0:0.6;d329:106::9:;d331:459::12:;d340:88.69::2:0.6
+video	vid	v470810	470810.01	0	0	0	0	2	3576.54	0.9	1	6	0	0.0075779	0.7213	0.75	0.0753		0	0	0	3	KsKd/QhQd/7h9s8h9hAh	BAD BEAT	16743001	CopperSaudade	0	this is why I love poker	3	1468682783	0.0548925	0.9835	0.9308	0.0066	0.12213		2563			cut.story.8			1	1												1	1.1302	25.7096	v470790				-0.2803	d329:161::0:0.544;d331:459::12:;d333:152::1:0.544;d340:88.67::2:0.544
+video	vid	v473730	473730	26	3	3	5	0	15056.86	0.75	1.5	12	0	0.0078321	0.3897	14	4.1399		0	0	5	0		IDEA	16774368		0	my $0.25 Hyper Sprint run on stream: 6 moments to second	3	3744940821	0.042124	1.0273	0.9313	0.0066	0.07044	0.14071	10946	312		idea.c12.story.1			1	3												4	1.0527	6748.4565		~97327145b05011;156;2ND OF;180f=$0.25t=$5.13			1.4753	d331:2191::0:0.567;d335:1564::1:0.567;d342:1349::2:0.567
+video	vid	v477510	477510.01	2	1	3	5	0	3593.97	0.75	1.5	12	0	0.0086417	0.4299	8	2.5416		1	0	5	1	TsJs/Qd8c/7sQc6sKs8d	COOLER	16743001	jackt	0	Jack-ten against queen-eight. Could anyone get away from this?	3	1573065359	0.0612262	0.8569	0.9325	0.0067	0.32955	0.07205	2418			cooler.question.4			1	3						2						2	1.2151	750.3562		~B5224251125811;948;COOLER;c=o=			0.0458	477545.02388888947:9.14::10:13;d334:250::0:0.426;d345:172::2:0.426
+video	vid	v480870	480870	2	1	2	5	0	4588.92	0.75	1.5	12	0	0.012	0.5374	8	3.0502		1	0	5	1	JhKc/QdQh/8cKs4h5c8s	COOLER	16743001	girard77	0	Coolers: why this 80 big blind pot was never a mistake	3	2320831383	0.0309632	0.7782	0.9331	0.0067	-0.17448	-0.14526	3546			cooler.teaching.1			2	3												3	1.2151	1230.6319		~78443121Q51931;397;SHIP IT;			0.9334	d336:347::0:0.6
+video	vid	v483680	483680	13	0	0	0	2	2734.11	0.9	1	6	0	0.0075779	0.7213	0.75	0.0754		1	0	0	1	JcAd/AcAh/3d4d7h7s5s	RIVAL	16752412	gh0stfold	0	me against gh0stfold for 30 big blinds	3	3622640154	0.042225	1.2152	0.9336	0.0067	-0.36221	-0.44221	2198			rival.story.2			1	3						4						1	1.1437	18.3733					-0.5781	d338:158::0:0.6
+video	vid	v487590	487590.01	2	1	0	5	0	968.93	0.75	1.5	12	0	0.0101328	0.4822	8	2.5723		1	0	5	1	Ks7d/Kh8h/3c6hKd7cJh	COOLER	16743001	Nordlys	0	two big hands, 110 big blinds, and no way out for either of us	3	3746739692	0.0334403	0.8776	0.9341	0.0068	-0.36387	-0.26637	779			cooler.story.9			1	3						2						1	1.0232	228.5145		~78443125Q52221;120;SHIP IT;			-0.6851	487628.41055555583:4.66::10:6;d341:26.81::0:0.6;d345:45.8::1:0.6
+video	vid	v490950	490950	2	1	2	5	0	723.3	0.75	1.5	12	0	0.012	0.5374	8	3.0507		1	0	5	4	ThAc/AhAs/3h4cAdJd4h	COOLER	16743001	QuietCooler	0	Two strong hands, one pot: playing ace-ten for stacks	3	2910558030	0.0416813	1.0538	0.9344	0.0068	0.09306	0.18571	523			cooler.teaching.3			1	3						8						0	1.0232	183.4375		~12278172103311;572;WHY.;c=			-1.5029	d343:42.44::0:0.539;d354:13.69::2:0.539
+video	vid	v493760	493760	13	0	0	0	2	7938	0.9	1	6	0	0.0075779	0.7213	0.75	0.0754		1	0	0	4	AhQh/KhKs/3h5cJh7cJd	RIVAL	16752412	gh0stfold	0	gh0stfold gets the better of me this time	3	2136051895	0.042225	0.9609	0.9345	0.0068	-0.57258	-0.65258	6629			rival.story.5			1	3												3	0.8543	64.1702					0.8843	d345:832::0:0.6;d349:391::1:0.6;d356:373::2:0.6
+video	vid	v497550	497550	26	1	3	5	0	4418.9	0.75	1.5	12	0	0.0084722	0.4215	8	2.8893		0	0	5	0		IDEA	16774368		0	deep in the $0.25 Hyper Sprint: the run, the hands, the cash	3	3324714778	0.0519922	0.9026	0.9352	0.0068	0.24548	0.14398	3053	301		idea.c1.story.3			1	1						2						3	0.9503	1394.8287		~OE216134Z01021;560;THE RUN;			0.8371	497695.2105555558:7.81::10:7;d348:641::0:0.455;d352:719::1:0.455;d359:213::2:0.455
+video	vid	v501030	501030	2	1	2	5	0	3277.73	0.75	1.5	12	0	0.012	0.5589	8	3.125		1	0	5	0	6h6s/KhKd/5d2h3hAc5s	COOLER	16743001	ameliab	0	Can you ever fold sixes against kings? The hand, street by street	3	1259348848	0.0388415	1.1505	0.9355	0.0068	-0.02723	0.11127	2445			cooler.teaching.5			2	3												2	0.9503	919.2362		~SA418142O01C41;840;CHAT LOST IT;			0.0067	d350:380::0:0.6
+video	vid	v503840	503840	0	0	0	0	2	7699.72	0.9	1	6	0	0.0075779	0.7213	0.75	0.0754		1	0	0	4	AhKs/AcJd/6s2d5hAdJs	93%	16743001	VesuvioRaise	0	the hand that wrecked my $0.25 Hyper Sprint	3	775881011	0.0548925	1.0688	0.9358	0.0068	0.22828	0.14828	5348			badbeat.story.6			1	3						4						2	1.1417	55.9218					0.3127	d352:564::0:0.48;d356:811::1:0.48;d363:411::2:0.48
+video	vid	v507630	507630	2	1	0	5	0	2107.52	0.75	1.5	12	0	0.0101328	0.4822	8	2.5732		1	0	5	1	9s9d/AcKh/Ad6d5d3s6s	COOLER	16743001	gh0stfold	0	I knew it was a cooler the second the chips went in	3	731507798	0.0603783	0.8077	0.9364	0.0069	0.17181	-0.16765	1489			cooler.story.10			1	3						2						1	1.0845	475.4569		~B5335251001031;677;45 BB;COOLERc=o=			-0.6699	507771.7105555558:6.05::10:6;d355:178::0:0.483;d366:89.99::2:0.483
+video	vid	v511110	511110	0	1	2	5	0	3474	0.75	1.5	12	0	0.012	0.548	8	3.0879		1	0	5	4	KhKc/QcAc/8d3c5cAd4s	68%	16743001	minho21	0	Getting it in good: 68% is all you can ask for	3	4085605966	0.030444225000000002	0.8776	0.9366	0.0069	-0.15289707798261	0.14166	2688			badbeat.teaching.3	1	360	1	3						4						2	1.0845	1019.4813		~MI2671B1X02421;612;FOLD?;c=			0.2259	d357:299::0:0.6;519180.00833333354:16.38384504856476:0.12675563240003768:7:1.03;d368:138::2:0.6
+video	vid	v513920	513920	2	0	0	0	2	3133.7	0.9	1	6	0	0.0075779	0.7213	0.75	0.0754		1	0	0	1	KsQs/JdQc/5s8cQdKdQh	COOLER	16743001	GoldenShark44	0	king-queen and a very long think	3	969275619	0.0548925	1.1108	0.937	0.0068	0.14514	0.06514	2231			cut.story.6			1	3												1	0.9296	22.0677					-0.3671	d359:336::0:0.534;d363:168::1:0.534;d370:64.68::2:0.534
+video	vid	v517830	517830.01	17	1	3	5	0	2681.36	0.75	1.5	12	0	0.0086417	0.4299	8	2.5434		1	0	5	4	6d6s/JdJs/2s6c8sTdJc	SET OVER SET	16743001	Gaufre85	0	How many times have you been set over set? Here's mine	3	436965453	0.0456747	1.0406	0.9373	0.0069	0.02714	0.26949	1972			setoverset.question.4			1	3						2						1	0.896	622.0808		~SA315141O01C31;14;CHAT LOST IT;h=kastRIPh=it happens			-0.317	517894.3105555558:12.27::10:10;d362:231::0:0.542;d373:54.51::2:0.542
+video	vid	v521250	521250	26	3	3	5	0	2044.7	0.75	1.5	12	0	0.0078321	0.3897	14	4.1435		0	0	5	0		IDEA	16774368		0	the road to the money: the $0.25 Hyper Sprint, live	3	1665295351	0.053812	0.8486	0.9374	0.0069	0.14673	0.1607	1455	312		idea.c12.story.3			1	3												1	0.896	786.5065		~SA211151ON1031;277;CHAT LOST IT;			-0.4836	d364:175::0:0.534;d375:83.25::2:0.534
+video	vid	v524000	524000	13	0	0	0	2	4859.21	0.9	1	6	0	0.0075779	0.7213	0.75	0.0754		1	0	0	2	QdKh/QsJs/Ac7cTh6h6d	RIVAL	16752412	gh0stfold	0	every table I sit at, gh0stfold sits at too	3	2758019797	0.042225	0.8574	0.9376	0.0069	-0.34202	-0.42202	3892			rival.story.9			2	3						8						2	0.8389	38.0845					0.487	d366:431::0:0.6;d370:144::1:0.6;d377:105::2:0.6
+video	vid	v527910	527910.01	0	1	0	5	0	1737.01	0.75	1.5	12	0	0.0101328	0.4822	8	2.5738		1	0	5	4	JdJc/6d5s/5c4hTc7s8h	70%	16743001	CopperStack	0	70% to win, and then an eight on the river	3	1197941137	0.0375166	0.9827	0.9379	0.007	-0.05536	0.19753	1305			badbeat.story.1			1	3						2						1	0.9569	415.6779		~MI3181A4X02031;335;FOLD?;c=			-0.496	527958.2105555558:12.15::10:13;d369:139::0:0.579
+video	vid	v531270	531270	13	1	2	5	0	2351.16	0.75	1.5	12	0	0.012	0.5699	8	3.164		1	0	5	0	6hAh//Kh4dJsThJc	RIVAL	16752412	gh0stfold	0	When to avoid a tough regular, and when not to	3	1257390355	0.0482288	1.0568	0.9381	0.007	0.09844	0.10004	1696			rival.teaching.7			1	3						1						1	0.9569	696.1369		~V5275591001041;442;HIM AGAIN;			-0.5219	d371:209::0:0.555;d371:10.44::9:;d382:65.84::2:0.555
+video	vid	v531290	531290.01	13	0	0	0	2	670.51	0.9	1	6	0	0.0075779	0.7213	0.75	0.0754		0	0	0	4	6hAh//Kh4dJsThJc	RIVAL	16752412	gh0stfold	0	I still think about this hand	3	708737216	0.042225	1.0822	0.9381	0.007	-0.58682		561			cut.story.11			1	1												0	0.9569	4.8586	v531270				-1.5369	d371:10.13::0:0.6;d375:12.02::1:0.6
+video	vid	v534080	534080	5	0	0	0	2	4340.75	0.9	1	6	0	0.0065895	0.7213	0.75	0.0754		1	0	0	1	Ac9d/7h4d/Ad6cJcTd3s	HERO CALL	8177406	CopperDealer	0	I called 67 big blinds on the river with ace-nine	3	1476049783	0.0464475	1.1662	0.9383	0.007	0.0021	-0.0779	3214			herocall.story.5			1	3												2	0.8415	31.1353					0.2893	d373:367::0:0.599;d377:155::1:0.599
+video	vid	v537990	537990.01	2	1	3	5	0	2363.41	0.75	1.5	12	0	0.0075145	0.4299	8	2.5439		0	0	5	0	TsAh/AsKc/7s6s9sAd7h	COOLER	16743001	RecklessAce	0	What's the worst cooler you've ever played? This one's mine	3	3264304411	0.0415225	0.8744	0.9385	0.007	0.06519	0.39332	1721			cooler.question.7			2	3						2						2	0.8297	585.2854		~LD3781B4P12041;468;LESSON;c=			0.0701	538066.9105555558:8.08::10:5;d376:223::0:0.526;d387:113::2:0.526
+video	vid	v541350	541350	2	1	2	5	0	1737.55	0.75	1.5	12	0	0.0113186	0.548	8	3.089		1	0	5	0	KdQd/Ah5h/Qh2hAd9c2c	COOLER	16743001	noahg	0	How to stop replaying coolers: a 69 big blind hand, reviewed	3	3577717724	0.0392312	1.1611	0.9387	0.007	-0.01865	0.11973	1293			cooler.teaching.7			1	3												1	0.8297	507.0542		~SA115155ON5031;822;LIVE;			-0.4233	d378:121::0:0.6;d382:58.4::1:0.6
+video	vid	v544230	544230	26	1	3	5	0	4031.5	0.75	1.5	12	0	0.0073671	0.4215	8	2.891		0	0	5	0		IDEA	16774368		0	a $0.25 buy-in and a $1.03 cash	3	3986193235	0.0485365	0.8906	0.9388	0.007	0.20002	0.16043	2824	301		idea.c1.story.2			1	1						4						3	0.8617	1113.724		~OD425134Z06031;645;THE RUN;			0.6929	d380:626::0:0.491
+video	vid	v547950	547950	2	1	0	5	0	2113.36	0.75	1.5	12	0	0.0086417	0.4729	8	2.5442		1	0	5	4	TcTd/AhKh/Kc4c7s4h3h	COOLER	16743001	ruthless_quads	0	the kind of hand you can't play any other way: tens into ace-king	3	2472921244	0.0447904	0.9748	0.939	0.007	-0.02064	0.15356	1574			cooler.story.7			1	3						2						1	0.9986	562.4496		~SA288152ON5C11;397;CHAT LOST IT;h=kastGGh=kastRIP			-0.3893	548090.3105555559:8.16::10:8;d383:88.3::0:0.563;d390:246::12:;d394:34.24::2:0.563
+video	vid	v551430	551430	0	1	2	5	0	3177.46	0.75	1.5	12	0	0.0117714	0.5699	8	3.1646		1	0	5	3	KdKh/QdQh/8s7c4hQsAc	84%	16743001	yaroslav.t	0	Why 84% all in is still the play, even after a beat like this	3	3932970483	0.0449733	0.8155	0.9391	0.0071	0.22422	0.22202	2210			badbeat.teaching.5			1	3						8						2	0.9986	1131.7179		~11378152123021;895;84%;AND LOSTc=			0.0028	d385:275::0:0.486;d389:258::1:0.486;d390:246::12:;d396:144::2:0.486
+video	vid	v554240	554240	2	0	0	0	2	3491.86	0.9	1	6	0	0.0075779	0.7213	0.75	0.0754		1	0	0	0	KcJd/QhQc/6d7cJsKhJh	COOLER	16743001	n00brail	0	there was no folding this one	3	4221245008	0.0548925	1.1293	0.9393	0.0071	0.13922	0.05922	2490			cooler.story.2			1	3												2	0.8867	35.4768					-0.0793	d387:388::0:0.537;d390:246::12:;d394:892::12:
+video	vid	v558150	558150.01	13	1	3	5	0	8514.06	0.75	1.5	12	0	0.0073671	0.4215	8	2.5142		1	0	5	4	QcKs/TdTs/3sTc2h7d3c	RIVAL	16752412	gh0stfold	0	Would you have called gh0stfold down here?	3	2686107425	0.0507758	0.9862	0.9395	0.0072	-0.289	-0.36919	6746			rival.question.6			1	3						2						3	0.9258	2808.3801		~SA188162ON5C41;52;LIVE;h=kastGGh=kastRIP			0.6327	558201.0105555558:11.72::10:11;d390:738::0:0.6;d394:725::1:0.6;d394:892::12:;d401:359::2:0.6
+video	vid	v561510	561510	0	1	2	5	0	521.74	0.75	1.5	12	0	0.0108	0.5357059999999999	8	3.9386529296875006		1	0	5	3	KsJd/Ac6s/6dTsKd3hAh	89%	16743001	LeoGirard	0	What an 89% all in is worth in chips (and why I'd do it again)	3	4014181848	0.0407638	1.1399	0.9398	0.0072	0.06497999999999998	0.25123	369			badbeat.teaching.7			1	3		2	2		410							0	0.9258	541.7077		~SA181151O01011;243;CHAT LOST IT;h=you were 60%h=kastRIP kastRIP			-1.9758	d392:30.43::0:0.526;d394:892::12:;d396:24.59::1:0.526;d403:10.75::2:0.526
+video	vid	v564320	564320	2	0	0	0	2	25488.19	0.9	1	6	0	0.0075779	0.7213	0.75	0.0754		1	0	0	4	QdQh/AdAh/4h8s4cTh8d	COOLER	16743001	MidnightChip	0	my whole stack on one card	3	3776596162	0.0548925	1.213	0.9399	0.0072	0.14903	0.06903	18125			cut.story.10			1	3						4						4	1.0761	245.1146					1.4117	d394:2782::0:0.512;d398:3414::1:0.512
+video	vid	v568230	568230.01	26	1	3	5	0	2359.99	0.75	1.5	12	0	0.0084722	0.4215	8	2.2635		0	0	5	0		IDEA	16774368		0	Who did you want to win the RCOP '27 #81: $2,100 Southern Stallion?	3	2949005410	0.0526444	1.2452	0.9411	0.0073	0.26367	0.15095	1621	802		idea.h2.question.3			1	1						2						1	1.1481	563.7805		~NE415194Y02021;69;RANKED;			-0.6096	568292.9105555558:8.41::10:7;d397:170::0:0.449;d408:85.74::2:0.449
+video	vid	v571590	571590	2	1	2	5	0	3036.55	0.75	1.5	12	0	0.012	0.5374	8	3.0545		1	0	5	1	AsQd/KdQs/9dQcQh7sJc	COOLER	16743001	oleksiitkachenko	0	Coolers: why this 115 big blind pot was never a mistake	3	1095826414	0.032821	1.1305	0.9414	0.0073	-0.12844	-0.15166	2322			cooler.teaching.1			2	3						4						2	1.1481	1069.2966		~78313121Q56211;138;115 BB;			-0.1059	d399:336::0:0.6
+video	vid	v574400	574400	13	0	0	0	2	1091.62	0.9	1	6	0	0.0075779	0.7213	0.75	0.0755		1	0	0	1	JhTs/3sKs/7h2s5sTd6s	RIVAL	16752412	gh0stfold	0	another night, another big pot against gh0stfold	3	1703709462	0.042225	0.9444	0.9417	0.0073	-0.31994	-0.39994	870			rival.story.10			1	3												0	0.9587	9.5503					-1.3219	d401:46.68::0:0.6;d405:17.99::1:0.6
+video	vid	v578310	578310.01	2	1	3	5	0	2513.65	0.75	1.5	12	0	0.0086417	0.4299	8	2.5457		1	0	5	1	AcAs/Ad5h/Ah4s4cJc8h	COOLER	16743001	Nordlys	0	Would you have stacked off with aces here?	3	900096431	0.0612262	1.0936	0.9419	0.0074	0.26373	0.00622	1727			cooler.question.6			1	3						2						1	0.7619	631.2236		~B5464254005841;890;AA VS;A5c=o=			-0.2824	578361.0105555558:14.38::10:14;d404:167::0:0.449
+video	vid	v581670	581670	5	1	2	5	1	1509.16	0.45	2	30	2.2637	0.012	0.5699	8	3.1665		1	0	5	0	Ah8c/8hAs/Qh3dQcAc2s	HERO CALL	8177406	Cosm1cBlinds	0	Hero call or crying call? How I decided on the river	3	1906099113	0.0295575	1.0213	0.942	0.0074	-0.24862	-0.31001	1186			herocall.teaching.8			1	3												1	0.7619	399.7286		~78213131Q56211;8;SHIP IT;			-0.2212	d406:68.49::0:0.6
+video	vid	v584480	584480	13	0	0	0	2	2317.27	0.9	1	6	0	0.0065895	0.7213	0.75	0.0755		1	0	0	1	2h4s/AcQs/7sTs5c5s4c	RIVAL	16752412	gh0stfold	0	me against gh0stfold for 35 big blinds	3	110590459	0.042225	0.9588	0.9421	0.0074	-0.31681	-0.39681	1846			rival.story.2			1	3						8						1	0.8036	21.0768					-0.4321	d408:170::0:0.6;d412:53.18::1:0.6
+video	vid	v588270	588270	0	1	0	5	0	4062.11	0.75	1.5	12	0	0.0088111	0.4822	8	2.5761		1	0	5	4	AhAd/9s9c/4cQdJc6s9d	86%	16743001	FrancescaRusso	0	the hand that wrecked my $0.25 Hyper Sprint	3	4105269584	0.0521668	0.8357	0.9422	0.0074	0.22882	0.18502	2821			badbeat.story.6			1	3						2						2	0.8153	1138.6373		~24272141322211;253;ONE CARD.;c=k=4			0.3278	588418.0105555558:7.7::10:7;d411:275::0:0.461;d415:399::1:0.461
+video	vid	v591750	591750	26	1	3	5	0	1091.55	0.75	1.5	12	0	0.0065895	0.3794	8	2.1283		0	0	5	0		IDEA	16774368		0	Who wins Player of the Year in 2027, and who's close?	3	4229977716	0.0589617	1.031	0.9423	0.0074	-0.41709	0.0175	887	803		idea.h3.question.1			1													0	0.8153	254.7907		~NE468194Y02041;622;RANKED;			-0.9443	d411:5.96::8:;d413:25.34::0:0.6;d417:41.57::1:0.6
+video	vid	v594560	594560	13	0	0	0	2	335.94	0.9	1	6	0	0.0065895	0.7213	0.75	0.0755		1	0	0	0	5s5h/9cKc/As6h8d4dJc	RIVAL	16752412	gh0stfold	0	gh0stfold gets the better of me this time	3	1522248674	0.042225	0.6855	0.9424	0.0075	-0.64305	-0.72305	284			rival.story.5			1	3												0	0.9335	3.0959					-2.1547	d415:6.52::0:0.6;d419:6.53::1:0.6;d422:294::12:
+video	vid	v598350	598350	0	1	3	5	0	5999.28	0.75	1.5	12	0	0.0075145	0.4299	8	2.546		1	0	5	3	AhAs/JdJh/9cTd7s8sKs	82%	16743001	lotte_vdberg	0	Aces against jacks for 106 big blinds. Worst beat of the night?	3	314026374	0.0612262	1.0595	0.9425	0.0075	0.42889	0.40752	3902			badbeat.question.7			2	3						2						2	0.7619	1407.2537		~11171151125A21;296;106 BB;GONEc=			0.2445	598512.7105555558:11.02::10:8;d418:475::0:0.393;d422:294::12:
+video	vid	v601830	601830	2	1	2	5	0	3092.15	0.75	1.5	12	0	0.0113186	0.548	8	3.0916		1	0	5	2	Ad3h/7c7s/7h4h3s4dQd	COOLER	16743001	gh0stfold	0	Two strong hands, one pot: playing ace-three for stacks	3	3444338836	0.051369	1.1103	0.9427	0.0075	0.2246	-0.11575	2150			cooler.teaching.3			1	3												2	0.7619	834.2696		~V1175591005011;721;HIM AGAIN;			-0.168	d420:224::0:0.501;d422:294::12:
+video	vid	v604640	604640	2	0	0	0	2	9859.68	0.9	1	6	0	0.0065895	0.7213	0.75	0.0755		1	0	0	0	9sAh/3sAs/8s9h7sAc3c	COOLER	16743001	lucky_shark3	0	ace-nine into ace-three. nothing I could do	3	327169642	0.0548925	1.1154	0.9428	0.0075	0.01656	-0.06344	7272			cooler.story.1			1	3						4						3	0.8046	67.8617					0.8101	d422:707::0:0.569
+video	vid	v607620	607620	2	1	0	5	0	13643.43	0.75	1.5	12	0	0.0101328	0.4822	8	2.5766		1	0	5	4	8cAc/KsKc/Jh8d2d6hJd	COOLER	16743001	WildGnocchi	0	the cooler that sent my $0.25 Hyper Sprint sideways	3	2187459071	0.043099	1.0341	0.9431	0.0075	0.01642	0.2165	10063			cooler.story.3			1	3							3	0.041296	0.049832	0.038169			0.8593	83.6203		~SA385142ON5021;658;CHAT LOST IT;h=kastGGh=kastRIP	~1131A162125A41;879;32%;AND LOSTc=	~LD2781B4P02041;336;LESSON;c=	1.4703	
+video	tail	0	196256.10940959	1766.6682541135165	523549.3870115892	0	0	0	0.05636803743161018	0.0005315810948088417	0.15256721718475602
+video	tail	1	3697.5849999999996	42.77439220399999	11508.685872550002	0	0	0	0.6454833777100146	0.0076532251000511805	2.03273779255362
+video	tail	2	75735.04999999999	530.1204878230001	5688.603208999999	0	0	0	1.1756467309448352e-07	0	8.469518498079531e-09
+video	cand	rl:hyper-sprint@578340:30	578361	3	0	2	0.8845	608601	1	1	0	-1	paulm	-1	0	$0.25 Hyper Sprint	25	180	141	0	13	10.109011855855321	4	-1	kastRIP|re-reg?|re-reg?	1;30;8;200;400;400;20952;-10576;5,51;45,32,48,17,44;0,892,paulm,raises to/0,0,gh0stfold,folds/0,0,ShadyFelt,folds/0,0,ShadyCoringa,folds/0,0,tomasnovak,folds/0,0,CrimsonCooler,folds/0,0,pepeh,folds/0,0,DustyBluff,folds/0,892,You,calls/1,0,You,checks/1,1695,paulm,bets/1,1695,You,calls/2,0,You,checks/2,3599,paulm,bets/2,3599,You,calls/3,0,You,checks/3,9758,paulm,bets/3,3990,You,all in;paulm,47,46
+video	cand	rl:hyper-sprint@579750:19	579763.3	3	0	6	0.8335	610003.3	1	0	0	-1	Vlk81	-1	0	$0.25 Hyper Sprint	25	180	46	0	14	10.579427085485571	1	-1		1;19;5;125;250;250;15595;-600;48,44;26,40,34,30,0;0,0,pkoch,folds/0,600,You,raises to/0,0,gh0stfold,folds/0,0,MahjongAce,folds/0,600,FrostyRail,calls/0,0,DustyDeuce,folds/0,0,loganm,folds/0,0,silva78,folds/0,600,Vlk81,calls/1,0,Vlk81,checks/1,0,You,checks/1,0,FrostyRail,checks/2,0,Vlk81,checks/2,0,You,checks/2,1576,FrostyRail,bets/2,1576,Vlk81,calls/2,0,You,folds/3,0,Vlk81,checks/3,5134,FrostyRail,bets/3,5134,Vlk81,calls;FrostyRail,39,38/Vlk81,43,14
+video	cand	rl:hyper-sprint@582630:3	582632.1	3	0	7	0.8203	612872.1	1	0	0	1	CrimsonBluff	644	0	$0.25 Hyper Sprint	25	180	3	0	15	45.927243136681085	1	-1	HOLDS kastHype|kastClap kastClap|kastClap kastClap	1;3;1;50;100;100;20050;10150;45,49;5,9,13,22,36;0,212,CrimsonBluff,raises to/0,0,CrimsonChip,folds/0,0,TubaraoButton,folds/0,0,CrispyShove85,folds/0,0,Samurai,folds/0,763,You,raises to/0,0,ColdDealer,folds/0,0,JoaoRocha,folds/0,0,n00bblinds,folds/0,1755,CrimsonBluff,raises to/0,1755,You,calls/1,1279,CrimsonBluff,bets/1,4265,You,raises to/1,4265,CrimsonBluff,calls/2,0,CrimsonBluff,checks/2,3930,You,all in/2,3880,CrimsonBluff,all in;CrimsonBluff,42,43
+video	cand	rl:hyper-sprint@584070:62	584113.4	3	0	1	0.6872	614353.4	1	1	0	0.17054263565891473	FrostyRail	-1	0	$0.25 Hyper Sprint	25	180	18	0	12	24.058356355747048	2	-1	kastClap kastClap|SHIP IT kastHype|EZ	1;62;15;1250;2500;2500;77221;30132;41,35;34,28,9,40,16;0,13191,You,all in/0,0,BMiller,folds/0,0,SleepyRaise,folds/0,13191,IronButton,calls/0,0,Krtek96,folds/0,0,morozov7,folds/0,0,Taquero,folds/0,0,DustyRiver,folds/0,13191,FrostyRail,calls/1,0,FrostyRail,checks/1,29061,IronButton,bets/1,16949,FrostyRail,all in;IronButton,50,48/FrostyRail,51,42
+video	cand	rl:hyper-sprint@584070:recap	584144.9	3	0	11	0.845	614384.9	1	1	0	-1		-1	0	$0.25 Hyper Sprint	25	180	7	2	20	49.10431298945522	1	-1		1;0;25;0;0;0;157;132;;;;
+video	cand	rl:hyper-sprint@586950:6	586954.2	3	0	6	0.6641	617194.2	1	1	0	-1	Mateus_Coringa	-1	0	$0.25 Hyper Sprint	25	180	135	0	15	5.033282527424102	0	-1		1;6;2;60;120;120;1572;-444;47,35;22,50,26;0,0,Taylor7,folds/0,0,oliver89,folds/0,0,WeiWu,folds/0,0,frosty_rocket5,folds/0,0,WoutGoossens,folds/0,444,Mateus_Coringa,raises to/0,444,You,calls/0,444,SilentBoat,calls/0,0,NeonGutshot4,folds/1,0,SilentBoat,checks/1,1833,Mateus_Coringa,bets/1,0,You,folds/1,0,SilentBoat,folds;
+video	cand	rl:hyper-sprint@586950:19	586963.3	3	0	25	0.7041	617203.3	1	1	0	0.45400000000000007	oliver89	-1	0	$0.25 Hyper Sprint	25	180	155	0	14	13.73354279997918	4	-1	it happens|gg|kastGG	1;19;5;125;250;250;32774;-8905;39,38;23,2,8,50,16;0,0,WoutGoossens,folds/0,1009,Mateus_Coringa,raises to/0,2906,You,raises to/0,0,SilentBoat,folds/0,0,NeonGutshot4,folds/0,0,gh0stfold,folds/0,2906,oliver89,calls/0,0,WeiWu,folds/0,0,frosty_rocket5,folds/0,11974,Mateus_Coringa,all in/0,8905,You,all in/0,11622,oliver89,all in;oliver89,48,43/Mateus_Coringa,30,28
+video	cand	rl:hyper-sprint@588390:20	588404	3	0	2	0.867	618644	1	0	0	0.828	Felipe_ReiDoRio	564	0	$0.25 Hyper Sprint	25	180	31	0	8	41.73555835434298	1	-1	never in doubt|kastHype kastHype|doubled up kastChip	1;20;5;125;250;250;11147;5886;49,51;18,43,17,39,6;0,0,S4ltyCowb0y,folds/0,600,You,raises to/0,0,golden_cooler,folds/0,5261,Felipe_ReiDoRio,all in/0,0,Nordlys,folds/0,0,santos95,folds/0,0,gh0stfold,folds/0,0,Roo01,folds/0,0,cold_boat,folds/0,5261,You,calls;Felipe_ReiDoRio,44,45
+video	cand	rl:hyper-sprint@589830:15	589840.5	3	0	0	0.8719	620080.5	1	1	0	0.908080808080808	MMeijer	-1	0	$0.25 Hyper Sprint	25	180	161	0	8	63.37613413268128	4	-1	unreal|kastRIP kastRIP|sick beat	1;15;4;100;200;200;4895;-1565;37,32;43,1,34,27,39;0,0,salty_cooler,folds/0,0,MidnightChip,folds/0,0,patient_chip,folds/0,0,CanuckBlinds,folds/0,0,gh0stfold,folds/0,1565,You,all in/0,0,LiLiu,folds/0,1565,MMeijer,calls/0,1565,lotte_vdberg,calls/1,2813,MMeijer,bets/1,0,lotte_vdberg,folds;MMeijer,26,24
+video	cand	rl:hyper-sprint@591270:29	591290.3	3	0	6	0.8455	621530.3	1	0	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	73	0	12	7.306147281076972	0	-1		1;29;7;200;400;400;11092;0;42,43;1,18,51,37,20;0,5246,rusty_felt,all in/0,0,humble_chip,folds/0,0,iron_wheel,folds/0,0,vdBerg9,folds/0,0,You,folds/0,0,BluffeurDeuce,folds/0,0,Tapis,folds/0,0,Ana_Sorte,folds/0,5246,gh0stfold,calls;gh0stfold,45,44/rusty_felt,14,50
+video	cand	rl:hyper-sprint@592710:13	592719.1	3	0	6	0.7358	622959.1	1	1	0	-1	gabriela	1792	0	$0.25 Hyper Sprint	25	180	21	0	8	4.419924373777511	0	-1		1;13;4;80;160;160;4060;-500;48,38;45,21,43,7;0,0,LuckyStrudel,folds/0,0,VarianceVictim,folds/0,0,priya.p,folds/0,0,jensen101,folds/0,500,Lucky8,raises to/0,0,GoldenFish,folds/0,500,You,calls/0,500,gabriela,calls/1,0,You,checks/1,0,gabriela,checks/1,1200,Lucky8,bets/1,0,You,folds/1,1200,gabriela,calls/2,2303,gabriela,bets/2,0,Lucky8,folds;
+video	cand	rl:hyper-sprint@592710:26	592728.2	3	0	7	0.735	622968.2	1	1	0	0.6744999999999998	Lucky8	1568	0	$0.25 Hyper Sprint	25	180	8	0	5	47.806147281076974	1	-1	EZ|chat we're so back|kastClap kastClap	1;26;7;150;300;300;27431;16843;45,46;7,28,14,23,0;0,626,jensen101,raises to/0,3198,Lucky8,raises to/0,0,GoldenFish,folds/0,10588,You,all in/0,0,gabriela,folds/0,0,LuckyStrudel,folds/0,0,VarianceVictim,folds/0,0,priya.p,folds/0,0,StoneVolk,folds/0,5505,jensen101,all in/0,10588,Lucky8,calls;jensen101,37,36/Lucky8,41,40
+video	cand	rl:hyper-sprint@592710:30	592731	3	0	3	0.7857	622971	1	1	0	-1	Lucky8	1568	0	$0.25 Hyper Sprint	25	180	8	0	5	48.306147281076974	1	-1		1;30;8;200;400;400;6110;3155;42,34;46,5,38;0,0,gabriela,folds/0,0,LuckyStrudel,folds/0,0,VarianceVictim,folds/0,0,priya.p,folds/0,400,StoneVolk,calls/0,0,oscar.k,folds/0,2555,Lucky8,raises to/0,0,GoldenFish,folds/0,2555,You,calls/0,0,StoneVolk,folds/1,3866,You,bets/1,0,Lucky8,folds;
+video	cand	rl:hyper-sprint@592710:64	592754.8	3	0	1	0.6358	622994.8	1	1	0	0.37650000000000006	jones80	-1	0	$0.25 Hyper Sprint	25	180	13	0	6	26.452019138885344	1	-1	never in doubt|kastClap kastClap|grindShip grindShip	1;64;15;1250;2500;2500;48111;29993;44,40;21,42,6,8,11;0,0,NoahTremblay,folds/0,0,IronGezellig,folds/0,24379,jones80,all in/0,0,oscar.k,folds/0,5625,GoldenFish,all in/0,18118,You,all in/0,0,ZubrTurn,folds/0,0,LuckyStrudel,folds;jones80,28,36/GoldenFish,25,51
+video	cand	rl:hyper-sprint@597030:42	597059.4	3	0	1	0.6663	627299.4	1	0	0	0.3965	QuietFlush	-1	0	$0.25 Hyper Sprint	25	180	28	0	2	29.698629148414092	2	597059.4016666667	holds!!|kastClap kastClap|EZ	1;42;10;400;800;800;20380;10190;43,46;18,4,24,45,38;0,0,MellowDealer3,folds/0,0,salty_ace,folds/0,0,becker77,folds/0,0,SaltyGrinder23,folds/0,800,NeonFish5,calls/0,0,SteadyTengu,folds/0,0,camilled,folds/0,3417,QuietFlush,raises to/0,9390,You,all in/0,0,NeonFish5,folds/0,9390,QuietFlush,calls;QuietFlush,1,49
+video	cand	rl:hyper-sprint@598470:29	598490.3	3	0	2	0.9251	628730.3	1	1	0	0.13636363636363635	SneakyChip	-1	0	$0.25 Hyper Sprint	25	180	6	0	6	38.1845201527909	2	-1	chat we're so back|grinder_3c is cooking|kastHype kastHype	1;29;7;200;400;400;30432;15516;35,50;16,33,1,20,51;0,0,HarrySmith,folds/0,0,shady_felt,folds/0,0,LunarAsso,folds/0,820,You,raises to/0,0,gh0stfold,folds/0,0,dusty_whale44,folds/0,0,ShaYu,folds/0,0,alfiew,folds/0,820,SneakyChip,calls/1,0,SneakyChip,checks/1,0,You,checks/2,1221,SneakyChip,bets/2,3735,You,raises to/2,17316,SneakyChip,all in/2,14096,You,all in;SneakyChip,32,19
+video	cand	rl:hyper-sprint@599910:38	599936.6	3	0	6	0.6208	630176.6	1	0	0	-1	gh0stfold	1599	1	$0.25 Hyper Sprint	25	180	119	0	9	5.3208027218849825	0	-1		1;38;9;300;600;600;2100;0;48,41;;0,0,AxelAndersson,folds/0,6392,RogueQuads,all in/0,0,n00brail,folds/0,0,Mateo_Jaguar,folds/0,0,You,folds/0,0,Nordlys,folds/0,0,LuckyTigr,folds/0,0,Pierogi89,folds/0,0,gh0stfold,folds;
+video	cand	rl:hyper-sprint@601350:49	601384.3	3	0	21	0.6071	631624.3	1	1	0	-1	SilentHammer	583	0	$0.25 Hyper Sprint	25	180	83	0	12	11.303695581081255	2	-1		1;49;12;600;1200;1200;24468;0;5,27;15,9,33,35,49;0,0,You,folds/0,0,MellowToro,folds/0,5780,sly_joker,all in/0,0,crimson_river2,folds/0,0,ZKowalski,folds/0,0,derekjackson,folds/0,5780,Ollie_Cheeky,calls/0,0,Louis_Gaufre,folds/0,5780,SilentHammer,calls/1,0,SilentHammer,checks/1,2664,Ollie_Cheeky,all in/1,2664,SilentHammer,calls;Ollie_Cheeky,46,47/SilentHammer,18,19/sly_joker,43,28
+video	cand	rl:hyper-sprint@602790:16	602801.2	3	0	6	0.8665	633041.2	1	0	0	-1	GoldenFish	-1	0	$0.25 Hyper Sprint	25	180	132	0	10	12.942240563414316	0	-1		1;16;4;100;200;200;16899;-1275;40,36;18,51,14,23,9;0,0,WildTurn,folds/0,200,shady_bubble86,calls/0,0,gh0stfold,folds/0,200,Anna_Flussratte,calls/0,0,sleepy_flush,folds/0,1075,GoldenFish,raises to/0,1075,JulienLaurent,calls/0,0,arthur.c,folds/0,1075,You,calls/0,0,shady_bubble86,folds/0,0,Anna_Flussratte,folds/1,0,You,checks/1,0,GoldenFish,checks/1,0,JulienLaurent,checks/2,0,You,checks/2,2196,GoldenFish,bets/2,2196,JulienLaurent,calls/2,0,You,folds/3,4291,GoldenFish,bets/3,4291,JulienLaurent,calls;GoldenFish,48,12/JulienLaurent,37,50
+video	cand	rl:hyper-sprint@602790:35	602814.5	3	0	6	0.685	633054.5	1	0	0	-1	sleepy_flush	1323	0	$0.25 Hyper Sprint	25	180	68	0	13	6.190033223737761	0	-1		1;35;9;250;500;500;7944;-250;36,48;37,29,49,27,1;0,0,shady_bubble86,folds/0,0,gh0stfold,folds/0,0,Anna_Flussratte,folds/0,6437,sleepy_flush,all in/0,0,GoldenFish,folds/0,0,BluffkoenigButton,folds/0,3347,arthur.c,all in/0,0,You,folds/0,0,WildTurn,folds;sleepy_flush,30,28/arthur.c,40,47
+video	cand	rl:hyper-sprint@602790:58	602830.6	3	0	6	0.7364	633070.6	1	0	0	-1	Loonie7	-1	0	$0.25 Hyper Sprint	25	180	46	0	12	9.909078020439965	2	-1		1;58;14;1000;2000;2000;51028;0;46,51;10,6,9,4,19;0,0,bzhao,folds/0,24014,paul.k,all in/0,0,You,folds/0,0,morin82,folds/0,0,WildOwl,folds/0,0,charlie_jones,folds/0,0,RecklessChip,folds/0,0,nathan_lefevre,folds/0,24014,Loonie7,calls;Loonie7,21,48/paul.k,34,32
+video	cand	rl:hyper-sprint@602790:65	602835.5	3	0	0	0.8198	633075.5	1	0	0	0.6285	ITkachenko	-1	0	$0.25 Hyper Sprint	25	180	42	0	14	22.725432951655016	3	-1	sick beat|kastSalt kastSalt|the poker gods hate you	1;65;16;1250;2500;2500;37858;-16429;29,47;15,6,51,44,11;0,0,cold_shove,folds/0,0,nathan_lefevre,folds/0,0,Anna_Flussratte,folds/0,0,CosmicJack,folds/0,0,ElPibe,folds/0,27776,You,all in/0,0,LMoreau,folds/0,16429,ITkachenko,all in/0,0,IronButton,folds;ITkachenko,21,16
+video	cand	rl:hyper-sprint@602790:66	602835.5	0	0	6	0.6813	633075.5	0	0	0	-1	cold_shove	-1	0	$0.25 Hyper Sprint	25	180	42	0	14	23.225432951655016	0	-1		1;66;16;1500;3000;3000;46084;0;43,39;15,32,22,0,19;0,20792,nathan_lefevre,all in/0,0,Anna_Flussratte,folds/0,0,CosmicJack,folds/0,0,ElPibe,folds/0,0,You,folds/0,0,LMoreau,folds/0,0,ITkachenko,folds/0,0,IronButton,folds/0,20792,cold_shove,calls;nathan_lefevre,48,36/cold_shove,33,29
+video	cand	rl:hyper-sprint@604230:11	604237.7	3	0	6	0.7218	634477.7	1	1	0	-1	lkoch	-1	0	$0.25 Hyper Sprint	25	180	147	0	11	4.419924373777511	0	-1		1;11;3;80;160;160;3568;-1584;29,31;49,43,0,7,24;0,440,lkoch,raises to/0,1584,You,raises to/0,0,aarav_iyer,folds/0,0,PavelSmirnov,folds/0,0,CrimsonBluff,folds/0,0,DFlores,folds/0,0,XiongMao,folds/0,0,Maxim_Akula,folds/0,0,LuisRodriguez,folds/0,1584,lkoch,calls/1,0,lkoch,checks/1,0,You,checks/2,0,lkoch,checks/2,0,You,checks/3,3941,lkoch,bets/3,0,You,folds;
+video	cand	rl:hyper-sprint@604230:71	604279.7	3	0	21	0.6414	634519.7	1	1	0	-1	GG_joker	-1	0	$0.25 Hyper Sprint	25	180	35	0	6	22.57788593956862	2	-1		1;71;17;2000;4000;4000;111870;0;39,16;12,26,25,5,34;0,0,MidnightCooler84,folds/0,0,max.m,folds/0,27628,hollow_owl,all in/0,0,You,folds/0,0,tomasr,folds/0,27628,Blefe7,calls/0,0,FrostyTango,folds/0,27628,GG_joker,calls/1,0,GG_joker,checks/1,0,Blefe7,checks/2,0,GG_joker,checks/2,45184,Blefe7,bets/2,11493,GG_joker,all in;Blefe7,32,35/GG_joker,4,51/hollow_owl,23,20
+video	cand	rl:hyper-sprint@604230:72	604280.4	3	0	0	0.7794	634520.4	1	1	0	0.62525	MidnightCooler84	-1	0	$0.25 Hyper Sprint	25	180	36	0	6	33.11176783450959	4	-1	kastSalt kastSalt|RIGGED kastSalt|kastRIP kastRIP	1;72;17;2000;4000;4000;41740;-17870;18,40;20,33,4,15,34;0,0,max.m,folds/0,17870,You,all in/0,0,tomasr,folds/0,0,Blefe7,folds/0,0,FrostyTango,folds/0,0,Garcia3,folds/0,17870,MidnightCooler84,calls;MidnightCooler84,2,6
+video	paid	pay:2027-05
+video	paid	pay:2027-06
+video	paid	pay:2027-07
+video	paid	pay:2027-08
+video	paid	pay:2027-09
+video	paid	pay:2027-10
+video	paid	pay:2027-11
+video	paid	story:*
+video	bell	596160	Searches for “The $215 Sunday Showdown final table” are up.
+video	bell	597600	“gh0stfold gets the better of me this time” didn't hold viewers. Rerun stopped testing it.
+video	bell	597600	Searches for “$215 The Big Session overlay” are up.
+video	bell	599040	100 views on “Aces against jacks for 106 big blinds. Worst beat of the night?”.
+video	bell	599040	Searches for “$215 The Big Session overlay” are up.
+video	bell	600480	1,000 views on “Aces against jacks for 106 big blinds. Worst beat of the night?”.
+video	bell	600480	“Aces against jacks for 106 big blinds. Worst beat of the night?” is doing better than most of your recent uploads.
+video	bell	600480	Searches for “$55 The Fifty-Five overlay” are up.
+video	bell	601920	Rerun is pushing “Aces against jacks for 106 big blinds. Worst beat of the night?” to more viewers.
+video	bell	603360	100 views on “Two strong hands, one pot: playing ace-three for stacks”.
+video	bell	604800	1,000 views on “Two strong hands, one pot: playing ace-three for stacks”.
+video	bell	604800	100 views on “ace-nine into ace-three. nothing I could do”.
+video	bell	604800	Rerun is pushing “Two strong hands, one pot: playing ace-three for stacks” to more viewers.
+video	bell	604800	Searches for “Sunday majors” are up.
+video	bell	606240	1,000 views on “ace-nine into ace-three. nothing I could do”.
+video	bell	606240	“ace-nine into ace-three. nothing I could do” is doing better than most of your recent uploads.
+video	bell	606240	Searches for “korlov wins the Grand Circuit São Paulo 2027: $1,700 Main Event” are up.
+video	bell	607680	100 views on “the cooler that sent my $0.25 Hyper Sprint sideways”.
+video	bell	607680	Rerun is pushing “ace-nine into ace-three. nothing I could do” further: it's beating most of your recent uploads.
+video	bell	607680	Searches for “Fitz wins the $215 Sunday Showdown” are up.
+video	vlife	512850	23854	4622	295	21484	910	11765065	3838	71369	-1	974	117006	149681	121153
+video	vmom	0.225844	1.066233	0.947397	6	0.3278	-0.9443	-1.2	0.2445	-0.168	0.8101	421	0	8	59	2	188	60
+video	vday	332+	3133	215	27.2	1.6	123	4.6	68801	29.3	986	1	149	2067	1492	2182	144	19.6	1.2	89.2	3.2	50487	19	656	1	181	1364	1000	2752	188	29.4	1.8	133	3.5	85247	18.6	845	1	99.6	1694	1326	2525	173	24.6	1.5	115	3.5	71728	19.2	783	2	277	1564	1124	2762	127	25.4	1.5	117	4.6	71357	15.1	540	9	1199	1067	781	1535	81.9	14.3	0.9	65.8	2.5	40009	9.9	358	4	477	719	529	1283	72.3	12.1	0.7	54	2.1	34645	8.2	315	2	298	650	492	1022	62.6	9.8	0.6	42.1	1.6	27635	6.7	274	1	136	577	443	837	50.7	8	0.5	34.9	1.3	21889	5.7	223	1	125	464	356	818	53.3	8.4	0.5	37.2	1.2	20292	5.7	237	1	65.7	483	376	1767	92.9	15.5	0.9	77	3.9	44812	11.8	407	5	681	804	543	4255	89.9	35.3	2.1	180	13.8	101952	15.6	296	27	3504	542	375	1898	53.7	16	1	80.7	5.7	45645	8.4	202	11	1349	389	274	2207	83.2	19.1	1.1	93.6	5.3	58351	14.2	374	8	1033	746	587	1706	81.6	15.1	0.9	73	3.2	40756	14.1	396	3	429	798	638	1086	58	10	0.6	46.8	1.9	25338	8.9	278	2	199	558	444	1816	118	19.8	1.2	81.6	2.3	45565	11.1	541	1	108	1047	854	1846	77.9	17.8	1.1	82.4	3.2	42409	8.7	333	6	814	639	516	3760	83.4	32.7	2	171	6.4	70966	11.6	284	23	2941	509	410	1699	48.7	15.2	0.9	76.8	2.8	33701	6.3	186	9	1144	349	278	1810	71.7	16.7	1	78.1	2.8	44842	8.7	305	6	803	619	504	1242	61.1	12	0.7	51.3	1.9	29249	6.1	264	3	344	552	449	843	46.2	8.5	0.5	35.6	1.2	20934	4.5	203	1	168	417	337	1575	105	18.4	1.1	72	2	51242	7.2	462	1	96.7	898	739	1858	71	18.2	1.1	80.9	3	51569	6.4	284	8	972	542	443	2169	61.7	20	1.2	82.5	2.4	50885	5.4	227	12	1482	422	344	1053	37.6	10	0.6	41.5	1.3	26156	3.4	150	5	590	287	232	1234	52.9	11.5	0.7	46.5	1.4	30920	6	230	4	451	478	392	1109	56.9	10.4	0.6	41.2	1.3	25737	6.6	256	2	200	553	455	690	37.6	6.6	0.4	26.3	0.9	16185	4.3	182	1	103	363	294	1094	80.3	9.8	0.6	41.9	1.6	25536	8.1	399	1	62.6	758	515	1389	54.8	11.9	0.7	51.7	2	33982	6.2	246	6	758	456	316	2688	57	22.2	1.3	87.2	4.1	70167	7.6	204	18	2203	352	243	1195	32.9	10.1	0.6	40	1.8	31023	4.1	133	7	857	239	169	1136	41.6	10.3	0.6	43.6	1.9	33702	5	176	5	607	341	265	879	43.6	8.6	0.5	39.2	1.6	24212	5.3	193	2	260	388	310	657	35.9	6.7	0.4	30.1	1.2	17920	3.9	163	1	151	316	253	1373	75.3	14.9	0.9	68.6	2.9	31041	8.1	336	3	385	602	494	1191	48.1	11.5	0.7	55.4	2.1	26432	5.3	204	5	600	363	296	2287	50.1	18.4	1.1	103	3	44694	5.5	173	15	1821	287	233	1026	28.8	8.7	0.5	46.6	1.4	20847	3.2	112	6	713	194	156	1078	39.9	8.9	0.5	46.2	1.3	26205	5.4	176	4	514	345	282	932	44.9	7.8	0.5	38.5	1	23332	6.6	211	2	223	431	355	627	33.7	5.5	0.3	26.1	0.7	15614	4.4	161	1	118	318	255	938	60.1	9.8	0.6	41.4	1	23569	4.9	284	1	67.5	531	436	808	42.3	7.7	0.5	34.6	0.9	20120	4.2	200	2	197	373	306	1519	85.7	13	0.8	65.8	1.7	35318	13.6	460	1	91.9	861	714	869	49.5	7.5	0.4	37.7	1	20251	7.7	264	0	50.2	496	410	1114	65.5	9.7	0.6	51.6	1.6	30427	9.2	334	0	32.3	653	541	933	56.1	8.3	0.5	44.9	1.5	23740	7	275	0	23.6	550	455	689	43.1	6.6	0.4	33.3	1.1	17477	4.9	210	0	18.6	405	335	1254	88.7	14.3	0.9	61.1	1.6	32645	7.1	416	0	15.2	746	619	981	53.7	10.2	0.6	44.2	1.2	22852	4.6	245	2	253	439	364	1880	51.8	17	1	73.1	1.9	37642	4.8	200	11	1316	341	282	877	30.3	8.2	0.5	35.3	0.9	18817	2.8	128	4	507	224	185	1971	93.6	16.3	1	86.9	6	42077	29.1	445	4	433	925	769	2431	130	19.7	1.2	112	9	48805	45.5	638	1	179	1354	1127	1467	82.4	12.5	0.7	68.1	5	31626	25.5	402	1	82.1	833	693	1515	85.5	13.6	0.8	73	4.7	33626	22.5	409	1	141	827	688	2645	66.9	22.2	1.3	102	4.1	45015	14.9	261	15	1821	496	412	10088	120	82	4.9	349	9.4	149253	18	298	98	9545	328	272	4037	56.4	33	2	142	4.1	61137	9.3	178	37	3657	229	190	4826	115	40.6	2.4	185	6.7	94158	23.7	527	35	3444	831	691	2591	82.5	22.3	1.3	103	3.8	48014	16.6	416	15	1425	702	584	1519	59.6	13.8	0.8	64	2.4	29486	10.7	317	7	657	519	431	1799	100	19.4	1.2	89.7	2.5	40558	11.2	566	4	355	868	722	3173	78.6	28.3	1.7	124	3.4	67494	9.5	360	24	2305	522	434	2071	58.7	18.9	1.1	82.4	2.6	47575	7.2	284	14	1379	416	346	1069	36.2	10	0.6	44.4	1.5	24176	4.8	186	6	603	280	233	1127	51.1	10.3	0.6	46.2	2	22972	9.2	291	3	330	479	398	1056	53.1	9.7	0.6	41.8	1.8	19104	8.8	310	2	191	520	433	698	35.5	6.5	0.4	28.8	1.2	13051	5.8	207	1	129	342	285	766	44.6	7.9	0.5	36	1.2	17947	5.3	258	1	96.9	402	335	728	32.6	6.9	0.4	31.2	1.2	16914	4.2	180	3	266	278	231	1390	32.5	11.1	0.7	49.9	2.1	32697	4.8	147	11	1036	213	177	700	21.8	6	0.4	27	1.1	16267	3.1	111	4	424	166	138	1160	58.2	10.5	0.6	44.1	1.5	27402	5.3	312	3	292	521	434	1156	66.4	10.8	0.6	44.4	1.4	25988	5.5	362	1	140	610	508	722	41.5	6.7	0.4	28.4	1	15853	3.9	230	1	78.9	389	322	890	49.6	7.7	0.6	34.6	1.8	20056	7.1	279	1	52.2	505	419	616	31.6	5.3	0.4	24.1	1.2	14274	4.5	177	1	97.3	314	260	550	23.1	4.6	0.3	21.6	1.3	13902	3.4	125	2	192	217	179	347	16.5	3.1	0.2	14.1	0.7	8305	2.4	103	1	86.9	158	130	1248	70.9	10.5	0.6	57.5	2.5	23670	17.9	464	1	49.7	721	600	1396	79.8	11.5	0.7	66.2	2.9	23716	22.3	528	0	30.1	821	683	901	52.5	7.8	0.5	42.3	1.8	15614	12.9	346	0	21.1	530	440	1499	98.3	15.5	0.9	70.6	2.2	29259	13.2	637	0	16.2	891	741	1582	63.3	13.9	0.8	60.3	2	28240	8.3	378	8	719	519	432	4448	75.9	33.3	2	133	4.5	72970	7.9	313	43	3824	376	312	2090	53.9	16.8	1	68	2.2	36135	5.5	276	17	1464	377	313
+video	vmonth	24321	2856	119	24.5	1.6	94.3	4.4	66887	23.2	0	9103	307	76.5	5.1	311	18.6	191856	49.6	0	10689	489	97.9	6	443	18.6	243542	54	0	10229	527	106	6.4	494	13.7	241909	51	0	14360	772	138	8.6	634	26.8	300051	93.1	0	22716	1032	224	13.3	923	33.3	567420	99.7	0	45918	2304	378	26.4	1992	106	1059973	594	0
+video	vmonth	24328+	67718	2906	562	35.3	2914	123	1975774	715	5614	58	8070	13155	10961	52709	2712	520	34.7	2185	84.2	1165252	268	10513	96	13595	23476	19561	45115	2312	436	28.5	2052	89.7	985852	323	8859	67	10083	21028	17524	76748	3981	672	40.4	3096	141	1548403	674	16607	127	17144	37329	29806	58313	2842	538	32.4	2487	101	1.43706e+06	346	12370	162	20603	24842	18856	40133	1792	359	21.4	1709	70.7	924899	291	8240	120	14605	15807	12772	56243	1762	485	29.2	2152	74	1056187	270	9166	344	32906	14044	11673
+video	vtop	v295950	40095.42	1886		Would you get ace-jack in here? $0.25 Hyper Sprint, 51 big blinds
+video	vtop	v359910	17313	5140		Coolers vs mistakes: how to tell which one you just played
+video	vtop	v302240	17074	28		me against gh0stfold for 63 big blinds
+video	vtop	v285870	15954.58	252		NGoossens wins the Grand Circuit Atlantic City 2027: $1,700 Main Event. Who's next?
+video	vtop	v386790	7912.09	1866	386790.01	gh0stfold gets the better of me this time
+video	vtop	v406950	7076.19	1666	406950.01	jack-six into ace-king. nothing I could do
+video	vtop	v380070	5781	1088		MidnightRocket wins the Championship 2027: $10,000 Heads-Up Championship. Who's next?
+video	vtop	v249030	5004.92	10		Coolers: why this 170 big blind pot was never a mistake
+video	vtop	v349850	4858	35	349850.01	letting go of ace-jack preflop
+video	vtop	v369990	4550	1366		Expected value, explained with a 207 big blind bad beat
+video	vtop	v339750	4425	1299		When to stop worrying about coolers (queen-four vs sevens)
+video	vtop	v403110	4322	1086		my deep run in the $0.25 Hyper Sprint: seventh of 180
+video	vtop	v205230	4171.13	1		ace-king against ace-ten for 153 big blinds. somebody had to lose
+video	vtop	v221600	3943	0		19% and still lost
+video	vtop	v80480	3866.07	0		one hand from the $0.25 Hyper Sprint
+video	vtop	v309510	3862.51	549		ONE HAND FROM TONIGHT YOU NEED TO SEE
+video	vtop	v382880	3802	27		this is why I love poker
+video	vtop	v410330	3609	25	410330.01	queen-ten and a very long think
+video	vtop	v413120	3575	25		the river I needed, live
+video	vtop	v390150	3536.09	1020		How to play against a regular like gh0stfold
+video	vtailx	0	9113.476731	390.4667145	2122.066888	4851464.724	0	0	0	0	0.002723749064	0.0001181762848	0.000480164473	1.237955654
+video	vtailx	1	237.7121954	7.105297862	18.05352709	98758.4612	0	0	0	0	0.03329007566	0.001150301362	0.00311278195	18.85220028
+video	vtailx	2	2426.335471	119.5866926	110.8780847	1729751.701	0	0	0	0	3.551222635e-09	0	0	2.086093575e-06
+video	vlook	0	0	0	3	1	1	3	1	1	1	178	0	0	0	0
+video	vlist	s1	$240 to $2,400 on RiverLine	v27270|v50310
+video	vchal	1	1601	0	24000	240000	27180.001666666663	0	2
+video	videa	1601	34	2
+video	videa	803	410	4
+video	videa	301	377	10
+video	videa	801	263	3
+video	videa	802	394	2
+video	videa	804	312	2
+video	videa	312	361	2
+video	vtrend	1302838898	0	412
+video	vtrend	269342301	0	412
+video	vtrend	792467474	1	452
+video	vtrend	1255963877	0	452
+video	vtrend	1082733295	0	413
+video	vtrend	600842142	0	415
+video	vtrend	587340713	0	419
+video	vtrend	2035600679	0	419
+video	vtrend	1702879311	0	419
+video	vtrend	1233731866	0	420
+video	vtrend	107471236	0	422
+video	vtrend	1955253899	0	422
+video	vstubd	81	2.4505	0.027736229	7.5298964	2.2973438	0.026002715	7.0592779
+video	vstubd	193	1.0385	0.012224599	3.2715866	0.97359375	0.011460561	3.0671124
+video	vstubd	242	0.3317	0.0039804	1.046215	0.31096875	0.003731625	0.98082653
+site	invite	1	217860.00055555557	0

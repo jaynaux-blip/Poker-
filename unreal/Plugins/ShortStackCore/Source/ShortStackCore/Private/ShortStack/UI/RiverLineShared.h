@@ -957,6 +957,9 @@ namespace rlvideo_detail
 {
 /** Switches the laptop to Rerun at a page: 0 Studio, 1 Channel (Mail's Rerun letters open 1). */
 void VideoOpen(RiverLine& RL, int Page, double Now);
+/** Update 3 (ss.Video.Sheet, VT1): Rerun's contact sheet of N of the library's recipes for a kind group ("beats", "reads",
+ *  "pots", "runs", "rival", "stories", "ideas"); false, and nothing opens, for any other name. */
+bool VideoOpenSheet(RiverLine& RL, const std::string& Group, int N, double Now);
 /** Update 3 (§7.6, ss.Laptop.Open): the page VideoOpen takes for a page's name ("studio", "channel"); -1 for none. */
 int VideoPageNamed(const std::string& Name);
 /** The taskbar's marigold dot: three or more candidates new since the last visit, or a bell milestone not yet seen. */
