@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
@@ -151,6 +152,14 @@ const std::vector<KcRow>& KcRows()
 		{"k4.why.milestone", Kind::Label, "{N} followers"},
 		{"k4.why.steady", Kind::Label, "Steady: nights near your forecast"},
 		{"k4.why.new", Kind::Label, "New channel: Kast is getting to know you"},
+		// The C-K PIE fix (F4): a final table off air, from the channel's own days (no field size kept), and a night under 60 world
+		// minutes that moved no Heat says why.
+		{"k4.why.run.plain", Kind::Label, "{When} {Stage}"},
+		{"k4.why.short", Kind::Label, "Under an hour: only a deep run counts"},
+		{"k4.why.short.counted", Kind::Label, "This run's Heat already counted"},
+		{"k4.why.short.usual", Kind::Label, "Runs this deep are your usual now"},
+		{"k4.why.short.before", Kind::Label, "Stages before going live don't count"}, // review-pie-room: live at a formed final table
+		{"k4.why.ceiling", Kind::Label, "Heat is at its ceiling"},
 		{"pool.k4.tierup", Kind::Chat, "chat is cooking"},
 		{"pool.k4.tierup", Kind::Chat, "the room is up tonight"},
 		{"pool.k4.tierup", Kind::Chat, "look at this chat go"},
@@ -350,6 +359,7 @@ const std::vector<KcRow>& KcRows()
 		{"k17.at.15", Kind::Label, "with the rival at the table"},
 		{"k17.at.16", Kind::Label, "at a level change"},
 		{"k17.at.17", Kind::Label, "at three left"},
+		{"k17.at.raid", Kind::Label, "on a raid"}, // the C-K PIE fix (F1): a peak a network raid brought (PeakRaid)
 		{"k17.followers", Kind::Label, "+{N}"},
 		{"k17.followers.best", Kind::Label, "+{N} \xC2\xB7 best night ever"},
 		{"k17.rollcall.one", Kind::Label, "{A} sweated the whole run"},
@@ -963,6 +973,50 @@ std::string WhyNew()
 	return T;
 }
 
+std::string WhyRunPlain(growth::RunStage S, int DaysAgo, const std::string& DayName)
+{
+	using namespace kastcopy_detail;
+	static const std::string T = KcText("k4.why.run.plain");
+	static const std::string Tonight = KcText("k4.why.when.tonight");
+	static const std::string Last = KcText("k4.why.when.last");
+	static const std::string OnDay = KcText("k4.why.when.day");
+	static const std::string Stages[6] = {KcText("k4.why.stage.0"), KcText("k4.why.stage.1"), KcText("k4.why.stage.2"), KcText("k4.why.stage.3"),
+		KcText("k4.why.stage.4"), KcText("k4.why.stage.5")};
+	const std::string When = DaysAgo <= 0 ? Tonight : DaysAgo == 1 ? Last : KcFill(OnDay, {{"Day", DayName}});
+	const size_t Stage = static_cast<size_t>(std::max(0, std::min(5, static_cast<int>(S))));
+	return KcFill(T, {{"When", When}, {"Stage", Stages[Stage]}});
+}
+
+std::string WhyShort()
+{
+	static const std::string T = kastcopy_detail::KcText("k4.why.short");
+	return T;
+}
+
+std::string WhyShortCounted()
+{
+	static const std::string T = kastcopy_detail::KcText("k4.why.short.counted");
+	return T;
+}
+
+std::string WhyShortUsual()
+{
+	static const std::string T = kastcopy_detail::KcText("k4.why.short.usual");
+	return T;
+}
+
+std::string WhyShortBefore()
+{
+	static const std::string T = kastcopy_detail::KcText("k4.why.short.before");
+	return T;
+}
+
+std::string WhyCeiling()
+{
+	static const std::string T = kastcopy_detail::KcText("k4.why.ceiling");
+	return T;
+}
+
 std::array<std::string, 2> WhyOffline(const Channel& Ch, int LastStreamDay, double World)
 {
 	// A world week is net::DayOf / 7 (day 0 a Monday), as GainWeek and ShowWeek count them; ShowDays holds the week's weekday bits.
@@ -974,6 +1028,23 @@ std::array<std::string, 2> WhyOffline(const Channel& Ch, int LastStreamDay, doub
 		++Nights;
 	}
 	std::vector<std::string> Lines;
+	// A final table on stream in the last 6 world days first, as the live lines put a deep run first (C-K PIE F4: a final table
+	// night never reads "New channel"). FtDays holds the days (bit k is FtBase - k), not the field's size: no runners here.
+	if (Ch.FtBase >= 0 && Ch.FtDays != 0)
+	{
+		const uint32_t Bits = static_cast<uint32_t>(Ch.FtDays);
+		int K = 0;
+		while (K < 31 && ((Bits >> K) & 1u) == 0u)
+		{
+			++K;
+		}
+		const int FtDay = Ch.FtBase - K;
+		const int Ago = Today - FtDay;
+		if (Ago >= 0 && Ago <= 6)
+		{
+			Lines.push_back(WhyRunPlain(growth::RunStage::FinalTable, Ago, net::WeekdayName(FtDay, true)));
+		}
+	}
 	if (LastStreamDay >= 0 && Today - LastStreamDay >= 2)
 	{
 		Lines.push_back(WhyCooling(Today - LastStreamDay));
@@ -1543,6 +1614,11 @@ std::string PeakLine(int Peak, int MomentAtPeak, const std::string& Clock)
 	using namespace kastcopy_detail;
 	static const std::string AtMoment = KcText("k17.peak");
 	static const std::string Plain = KcText("k17.peak.plain");
+	static const std::string OnRaid = KcText("k17.at.raid");
+	if (MomentAtPeak == PeakRaid)
+	{
+		return KcFill(AtMoment, {{"Peak", Grouped(Peak)}, {"At", OnRaid}, {"Time", Clock}});
+	}
 	if (MomentAtPeak < 0 || MomentAtPeak >= static_cast<int>(Moment::Count))
 	{
 		return KcFill(Plain, {{"Peak", Grouped(Peak)}, {"Time", Clock}});

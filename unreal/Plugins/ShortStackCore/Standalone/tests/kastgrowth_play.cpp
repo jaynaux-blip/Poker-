@@ -1,6 +1,8 @@
 // kast_growth: the chat games (SPEC_CREATORS §2.9, §5.1, §5.3 K2, K3, K10-K12, §9.1; core-kastplay's file). Hold or Crack opens
 // only with an all-in on the front table, cards to come, 2+ watching and an attended minute, counts its callers (each a person
-// present, each once), reveals from the same table with Hype +8 whatever chat called, and moves no money; Nod (three a stream,
+// present, each once), reveals from the same table with Hype +8 whatever chat called (and the streamer's booked call's Engage),
+// closes quietly when no reveal comes by the next hand or 3 world minutes (the PIE's F2, ss.Kast.Moment allin through the Stream
+// and a real Session), and moves no money; Nod (three a stream,
 // one a person, a member Noticed once ever, a guest's follow on its keyed draw), Welcome the raid (2 world minutes, attended,
 // once a raid), Set the scene (a true 0, streams 1-20, attended, once), Rail Call (offered at an attended minute at depth 0.4,
 // its reach and its keyed second roll, once a world day, "Your whole rail is here"), First Follower's line, the one action
@@ -11,9 +13,12 @@
 
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/KastCopy.h"
 #include "../../Source/ShortStackCore/Private/ShortStack/Game/KastPlay.h"
+#include "ShortStack/AI/Style.h"
+#include "ShortStack/Game/Autoplay.h"
 #include "ShortStack/Game/Gear.h"
 #include "ShortStack/Game/Kast.h"
 #include "ShortStack/Game/KastGrowth.h"
+#include "ShortStack/Game/Lobby.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Session.h"
 #include "ShortStack/Rng.h"
@@ -27,6 +32,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace kastgrowth_test
@@ -377,7 +383,8 @@ void HocCallsAndReveal()
 		Expect(CallLines == V.HoC.Holds + V.HoC.Cracks, "hold or crack: every call counted is a line in chat from its caller");
 		// The streamer calls it once.
 		Expect(play::CallIt(P, Room, Ch, true), "hold or crack: the streamer can call it while it's open");
-		Expect(std::abs(Room.EngageV - 0.3) < 1e-12, "hold or crack: the streamer's call is Engage +0.3");
+		Expect(Room.EngageV == 0.0 && P.HoC.Called == 1 && Room.Lines.back().Kind == LineKind::Streamer,
+			"hold or crack: the streamer's call is said and booked (its Engage comes with the reveal, F2)");
 		Expect(!play::CallIt(P, Room, Ch, false), "hold or crack: the streamer calls it once");
 		play::Fill(P, V);
 		Expect(V.HoC.Called == 1, "hold or crack: the view carries the streamer's call");
@@ -391,6 +398,7 @@ void HocCallsAndReveal()
 		play::OnMoment(P, Room, Ch, PlayIn(W0 + 0.5), Moment::WonAllIn);
 		Expect(!P.HoC.Open, "hold or crack: the front table's result reveals it");
 		Expect(Room.HypeV == 8.0, "hold or crack: the reveal is Hype +8");
+		Expect(std::abs(Room.EngageV - 0.3) < 1e-12, "hold or crack: the reveal gives the streamer's call its Engage +0.3");
 		Expect(Room.Notices.size() == NoticesBefore + 1 && Room.Notices.back().Sound == static_cast<int>(ss::SoundId::KastCall),
 			"hold or crack: the reveal plays KastCall through the cue queue");
 		const FakeRoom::Said* Result = Room.LastSystem();
@@ -520,18 +528,20 @@ void HocCallsAndReveal()
 		PlayChat(P, Room, W0 + 3.0, 3.0, 1.0 / 60.0, R);
 		play::OnMoment(P, Room, Ch, PlayIn(W0 + 3.3), Moment::WonAllIn);
 		Expect(Room.HypeV == 8.0 && Room.Lines.empty() && Room.Notices.empty(), "hold or crack: with nobody named the reveal is Hype +8, silent");
+		Expect(Room.EngageV == 0.0, "hold or crack: a reveal the streamer didn't call gives no Engage (only a booked call does)");
 	}
-	// A reveal that never comes: closed after 5 world minutes, no result, no Hype.
+	// A reveal that never comes, off a table (the lobby's clock, Inputs::Tables 0): closed on the grid at 3 world minutes (F2), no
+	// result, no Hype. HocSafetyClose has the rest of the safety close.
 	{
 		FakeRoom Room;
 		Room.Here = {"fan_1", "fan_2"};
 		PlayState P;
 		play::Begin(P, Ch, PlayIn(W0));
 		play::OnMoment(P, Room, Ch, PlayIn(W0 + 4.0), Moment::AllIn);
-		play::OnMinute(P, Room, Ch, PlayIn(W0 + 8.0), 8); // the grid's index: stream minutes since Begin's world minute
-		Expect(P.HoC.Open, "hold or crack: still open 4 world minutes in");
-		play::OnMinute(P, Room, Ch, PlayIn(W0 + 9.0), 9);
-		Expect(!P.HoC.Open && Room.HypeV == 0.0, "hold or crack: a reveal that never came closes at 5 world minutes, no Hype");
+		play::OnMinute(P, Room, Ch, PlayIn(W0 + 6.0), 6); // the grid's index: stream minutes since Begin's world minute
+		Expect(P.HoC.Open, "hold or crack: still open 2 world minutes in");
+		play::OnMinute(P, Room, Ch, PlayIn(W0 + 7.0), 7);
+		Expect(!P.HoC.Open && Room.HypeV == 0.0 && P.HocDropped == 1, "hold or crack: a reveal that never came closes at 3 world minutes, no Hype");
 		Expect(!play::CallIt(P, Room, Ch, true), "hold or crack: nothing to call once it's closed");
 	}
 	// A second all-in before any reveal (review: the first one's result never came): a fresh Hold or Crack, its bar empty, the
@@ -640,7 +650,9 @@ void HocHeadsDown()
 		play::Fill(P, V);
 		Expect(V.HoC.Open && V.Action == View::Slot::HoldCrack && V.HoC.Holds + V.HoC.Cracks == static_cast<int>(P.HoC.Calls.size()),
 			"hold or crack heads-down: back at an attended pace before the reveal, it shows again with chat's calls");
-		Expect(play::CallIt(P, Room, Ch, false) && std::abs(Room.EngageV - 0.3) < 1e-12, "hold or crack heads-down: and the call works again (Engage +0.3)");
+		Expect(play::CallIt(P, Room, Ch, false) && P.HoC.Called == 2 && Room.EngageV == 0.0, "hold or crack heads-down: and the call works again (booked)");
+		play::OnMoment(P, Room, Ch, PlayIn(W0 + 5.2), Moment::BadBeat);
+		Expect(!P.HoC.Open && std::abs(Room.EngageV - 0.3) < 1e-12 && Room.HypeV == 8.0, "hold or crack heads-down: and its reveal gives the call its Engage +0.3");
 		PlayRefusedTotal += Room.Refused;
 	}
 	// The reveal comes at a heads-down moment: chat's game reveals as at any pace.
@@ -676,7 +688,7 @@ void HocHeadsDown()
 		Expect(!CallsAtReveal.empty() && !P.HoC.Open && Room.HypeV == 8.0 && Room.Notices.size() == 1 && Room.Notices[0].Sound == static_cast<int>(ss::SoundId::KastCall) &&
 				   Result && Result->Text == kcopy::RevealLine(true, Right, static_cast<int>(CallsAtReveal.size()), Points) && P.Callers.size() == CallsAtReveal.size(),
 			"hold or crack heads-down: a reveal at a heads-down moment is chat's as at any pace (Hype +8, KastCall, the result, the tally)");
-		Expect(std::abs(Room.EngageV - 0.3) < 1e-12, "hold or crack heads-down: the streamer's call at Smart is the only Engage it gave");
+		Expect(std::abs(Room.EngageV - 0.3) < 1e-12, "hold or crack heads-down: the streamer's call at Smart is the only Engage it gave (with the heads-down reveal)");
 		PlayChat(P, Room, W0 + 4.3, 3.0, 1.0 / 60.0, R, false);
 		Room.AttendedV = true;
 		PlayChat(P, Room, W0 + 4.5, 0.5, 1.0 / 60.0, R);
@@ -704,6 +716,383 @@ void HocHeadsDown()
 		}
 	}
 	Expect(PlayMoney(Ch) == MoneyBefore, "hold or crack heads-down: moves no money and no member");
+}
+
+// ------------------------------------------------------------------ Hold or Crack's safety close (the lead's PIE, F2)
+
+/** The inputs at world minute World with Tables open (0: off a table, the lobby's clock). A table's clock stands while its hand
+ *  plays and moves a whole hand when it ends (Tournament::ClockMinutes), so a hand's runout is display steps at one World. */
+Inputs PlayAt(double World, int Tables, bool Attended = true)
+{
+	Inputs In = PlayIn(World, Attended);
+	In.AtTable = Tables > 0;
+	In.Tables = Tables;
+	return In;
+}
+
+/** Display time: Seconds of DReal steps through In. */
+void PlayChatAt(PlayState& P, FakeRoom& Room, const Inputs& In, double Seconds, double DReal, ss::Rng& R)
+{
+	for (double T = 0.0; T < Seconds - 1e-9; T += DReal)
+	{
+		play::OnChat(P, Room, In, DReal, R);
+	}
+}
+
+/** A hand's world minutes at the default 42 seconds a hand (TournamentSpec::SecondsPerHand). */
+constexpr double PlayHand = 0.7;
+
+/** The safety close (F2): a Hold or Crack whose reveal hasn't come by the next hand on its table (one table: the room's clock half
+ *  a world minute past the open) or within 3 world minutes (two or more tables, or none) closes quietly: no reveal line, no
+ *  KastCall, no Hype, no Engage, no tally; the streamer's call is dropped; a later hand's result reveals nothing. A runout that
+ *  ends inside its hand reveals as before, however many real seconds it plays. */
+void HocSafetyClose()
+{
+	const double W0 = 22.0 * PlayDay + 21.0 * 60.0;
+	Channel Ch = PlayChannel(10, W0);
+	const std::string MoneyBefore = PlayMoney(Ch);
+	const auto Room6 = [&]() {
+		FakeRoom Room;
+		Room.MinuteV = W0 + 4.0;
+		Room.Here = {PlayDee, PlayMei, "fan_1", "fan_2", "fan_3", "fan_4"};
+		return Room;
+	};
+	const double Fps = 1.0 / 60.0;
+	// ss.Kast.Moment allin's case at one table: an all-in with no hand behind it. Chat calls, the streamer calls, 22 real seconds
+	// go by at the hand's world minute; then the hand ends and the clock moves a hand.
+	{
+		FakeRoom Room = Room6();
+		PlayState P;
+		ss::Rng R("kastplay:f2:onetable");
+		play::Begin(P, Ch, PlayAt(W0, 1));
+		const double At = W0 + 4.0;
+		play::OnMoment(P, Room, Ch, PlayAt(At, 1), Moment::AllIn);
+		PlayChatAt(P, Room, PlayAt(At, 1), 2.0, Fps, R);
+		const bool Called = play::CallIt(P, Room, Ch, true);
+		PlayChatAt(P, Room, PlayAt(At, 1), 20.0, Fps, R);
+		View V;
+		play::Fill(P, V);
+		Expect(Called && P.HoC.Open && V.HoC.Open && V.Action == View::Slot::HoldCrack && !P.HoC.Calls.empty() && V.HoC.Called == 1 && Room.EngageV == 0.0,
+			"hold or crack's safety close: open at one table with chat's calls and the streamer's, 22 real seconds at the hand's world minute (the check's start)");
+		const size_t Lines = Room.Lines.size();
+		const size_t Notices = Room.Notices.size();
+		PlayChatAt(P, Room, PlayAt(At + PlayHand, 1), Fps, Fps, R);
+		play::Fill(P, V);
+		Expect(!P.HoC.Open && P.HocDropped == 1 && !V.HoC.Open && V.Action != View::Slot::HoldCrack && V.HoC.Called == 0,
+			"hold or crack's safety close: one table: the bar and its buttons go on the frame the next hand moves the clock");
+		Expect(Room.Lines.size() == Lines && Room.Notices.size() == Notices && Room.HypeV == 0.0 && Room.EngageV == 0.0 && P.Callers.empty() && P.Pending.empty(),
+			"hold or crack's safety close: quietly (no reveal line, no KastCall, no Hype, no tally), and the streamer's call is dropped (no Engage)");
+		// The next hand's result on that table (a skipped hand's WonAllIn, say) reveals nothing, and there's nothing to call.
+		play::OnMoment(P, Room, Ch, PlayAt(At + PlayHand, 1), Moment::WonAllIn);
+		PlayChatAt(P, Room, PlayAt(At + PlayHand, 1), 3.0, Fps, R);
+		Expect(!play::CallIt(P, Room, Ch, false) && Room.Lines.size() == Lines && Room.Notices.size() == Notices && Room.HypeV == 0.0 && Room.EngageV == 0.0,
+			"hold or crack's safety close: a later hand's result reveals nothing, and a press is refused");
+		PlayRefusedTotal += Room.Refused;
+	}
+	// No display step between: a result moment a hand on (the skip path's SkipMoments fires after its hand's tick) and the grid's
+	// first minute past the hand each close it first, quietly.
+	{
+		FakeRoom Room = Room6();
+		PlayState P;
+		play::Begin(P, Ch, PlayAt(W0, 1));
+		play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0, 1), Moment::AllIn);
+		play::CallIt(P, Room, Ch, true);
+		const size_t Lines = Room.Lines.size();
+		play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0 + PlayHand, 1), Moment::WonAllIn);
+		Expect(!P.HoC.Open && P.HocDropped == 1 && Room.Lines.size() == Lines && Room.Notices.empty() && Room.HypeV == 0.0 && Room.EngageV == 0.0,
+			"hold or crack's safety close: a result moment a hand on closes it quietly instead of revealing it");
+		FakeRoom Grid = Room6();
+		PlayState Q;
+		play::Begin(Q, Ch, PlayAt(W0, 1));
+		play::OnMoment(Q, Grid, Ch, PlayAt(W0 + 4.3, 1), Moment::AllIn);
+		play::OnMinute(Q, Grid, Ch, PlayAt(W0 + 5.0, 1), 5);
+		Expect(!Q.HoC.Open && Q.HocDropped == 1 && Grid.HypeV == 0.0 && Grid.Lines.empty(), "hold or crack's safety close: on the grid too (the first grid minute a hand on)");
+		PlayRefusedTotal += Room.Refused + Grid.Refused;
+	}
+	// A runout that ends inside its hand reveals as ever: at one table at the all-in's world minute after 25 real seconds, and a
+	// quarter and nearly half a world minute on (S-K's careers put the result 0.25 world minutes after the all-in): Hype +8, KastCall,
+	// the result line, the tally, and the streamer's call's Engage +0.3.
+	{
+		bool Revealed = true;
+		std::string Seen;
+		for (const double Gap : {0.0, 0.25, 0.49})
+		{
+			FakeRoom Room = Room6();
+			PlayState P;
+			ss::Rng R("kastplay:f2:inside");
+			play::Begin(P, Ch, PlayAt(W0, 1));
+			play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0, 1), Moment::AllIn);
+			PlayChatAt(P, Room, PlayAt(W0 + 4.0, 1), 25.0, 1.0 / 30.0, R);
+			play::CallIt(P, Room, Ch, false);
+			PlayChatAt(P, Room, PlayAt(W0 + 4.0 + Gap, 1), 0.5, 1.0 / 30.0, R);
+			const size_t Calls = P.HoC.Calls.size();
+			play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0 + Gap, 1), Moment::LostAllIn);
+			int Of = 0;
+			for (const PlayState::Caller& C : P.Callers)
+			{
+				Of += C.Of;
+			}
+			const bool Ok = P.HocDropped == 0 && !P.HoC.Open && Room.HypeV == 8.0 && std::abs(Room.EngageV - 0.3) < 1e-12 && Room.Notices.size() == 1 &&
+							Room.Notices[0].Sound == static_cast<int>(ss::SoundId::KastCall) && Calls > 0 && Of == static_cast<int>(Calls) && Room.LastSystem() != nullptr;
+			Revealed = Revealed && Ok;
+			Seen += std::string(Seen.empty() ? "" : ", ") + std::to_string(Gap).substr(0, 4) + (Ok ? " revealed" : " NOT revealed");
+			PlayRefusedTotal += Room.Refused;
+		}
+		Expect(Revealed, "hold or crack's safety close: a result inside its hand reveals as ever, the call's Engage +0.3 with it (" + Seen + ")");
+	}
+	// Two tables: the other table's hands move the room's clock while this runout plays, so the next-hand rule doesn't apply. The
+	// result 2.8 world minutes on still reveals; a game whose result never comes closes at 3, quietly.
+	{
+		FakeRoom Room = Room6();
+		PlayState P;
+		ss::Rng R("kastplay:f2:two");
+		play::Begin(P, Ch, PlayAt(W0, 2));
+		play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0, 2), Moment::AllIn);
+		play::CallIt(P, Room, Ch, true);
+		for (int K = 1; K <= 4; ++K)
+		{
+			const double World = W0 + 4.0 + 0.7 * static_cast<double>(K);
+			PlayChatAt(P, Room, PlayAt(World, 2), 0.5, Fps, R);
+			const int Minute = static_cast<int>(std::floor(World - W0));
+			Room.MinuteV = W0 + static_cast<double>(Minute);
+			play::OnMinute(P, Room, Ch, PlayAt(World, 2), Minute);
+		}
+		const bool Held = P.HoC.Open;
+		play::OnMoment(P, Room, Ch, PlayAt(W0 + 6.8, 2), Moment::WonAllIn);
+		Expect(Held && !P.HoC.Open && P.HocDropped == 0 && Room.HypeV == 8.0 && std::abs(Room.EngageV - 0.3) < 1e-12,
+			"hold or crack's safety close: two tables: open 2.8 world minutes on (the other table's hands), and the result reveals it with the call's Engage");
+		play::OnMoment(P, Room, Ch, PlayAt(W0 + 10.0, 2), Moment::AllIn);
+		play::CallIt(P, Room, Ch, true);
+		PlayChatAt(P, Room, PlayAt(W0 + 12.95, 2), 0.2, Fps, R);
+		const bool Before3 = P.HoC.Open;
+		const size_t Notices = Room.Notices.size();
+		PlayChatAt(P, Room, PlayAt(W0 + 13.0, 2), Fps, Fps, R);
+		Expect(Before3 && !P.HoC.Open && P.HocDropped == 1 && Room.Notices.size() == Notices && Room.HypeV == 8.0 && std::abs(Room.EngageV - 0.3) < 1e-12,
+			"hold or crack's safety close: two tables: no result, closed at 3 world minutes, quietly (the second call gave nothing)");
+		PlayRefusedTotal += Room.Refused;
+	}
+	// The table count when it opened counts too: opened at one table, then a second one opens (its hands move the clock), or opened
+	// at two and one goes (the clock already moved by the other's hands): the 3-minute rule, and the result a hand's time on reveals.
+	{
+		bool Both = true;
+		for (const std::pair<int, int>& T : {std::make_pair(1, 2), std::make_pair(2, 1)})
+		{
+			FakeRoom Room = Room6();
+			PlayState P;
+			ss::Rng R("kastplay:f2:count");
+			play::Begin(P, Ch, PlayAt(W0, T.first));
+			play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0, T.first), Moment::AllIn);
+			PlayChatAt(P, Room, PlayAt(W0 + 4.7, T.second), 0.5, Fps, R);
+			play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.8, T.second), Moment::WonAllIn);
+			Both = Both && P.HocDropped == 0 && Room.HypeV == 8.0;
+			PlayRefusedTotal += Room.Refused;
+		}
+		Expect(Both, "hold or crack's safety close: a table opening or closing mid-runout leaves the 3-minute rule, and the result reveals it");
+	}
+	// Off a table (ss.Kast.Moment allin from the lobby; the clock runs in real time): 3 world minutes.
+	{
+		FakeRoom Room = Room6();
+		PlayState P;
+		ss::Rng R("kastplay:f2:lobby");
+		play::Begin(P, Ch, PlayAt(W0, 0));
+		play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0, 0), Moment::AllIn);
+		for (double World = W0 + 4.0; World < W0 + 6.99; World += 0.25)
+		{
+			PlayChatAt(P, Room, PlayAt(World, 0), 15.0, 0.25, R);
+		}
+		const bool Held = P.HoC.Open;
+		const size_t Lines = Room.Lines.size();
+		PlayChatAt(P, Room, PlayAt(W0 + 7.0, 0), 0.25, 0.25, R);
+		Expect(Held && !P.HoC.Open && P.HocDropped == 1 && Room.Lines.size() == Lines && Room.Notices.empty() && Room.HypeV == 0.0,
+			"hold or crack's safety close: off a table it holds for 3 world minutes, then closes quietly");
+		PlayRefusedTotal += Room.Refused;
+	}
+	// Heads-down: opened at Smart, the pace drops to 8x and the hand ends heads-down: closed quietly; back at Smart, no bar.
+	{
+		FakeRoom Room = Room6();
+		PlayState P;
+		ss::Rng R("kastplay:f2:headsdown");
+		play::Begin(P, Ch, PlayAt(W0, 1));
+		play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0, 1), Moment::AllIn);
+		PlayChatAt(P, Room, PlayAt(W0 + 4.0, 1), 1.0, Fps, R);
+		play::CallIt(P, Room, Ch, true);
+		Room.AttendedV = false;
+		PlayChatAt(P, Room, PlayAt(W0 + 4.0, 1, false), 0.5, Fps, R);
+		const bool Hidden = P.HoC.Open;
+		PlayChatAt(P, Room, PlayAt(W0 + 4.0 + PlayHand, 1, false), 0.5, Fps, R);
+		Room.AttendedV = true;
+		PlayChatAt(P, Room, PlayAt(W0 + 4.0 + PlayHand, 1), 0.5, Fps, R);
+		View V;
+		play::Fill(P, V);
+		Expect(Hidden && !P.HoC.Open && P.HocDropped == 1 && !V.HoC.Open && V.Action == View::Slot::None && Room.HypeV == 0.0 && Room.EngageV == 0.0 && Room.Notices.empty(),
+			"hold or crack's safety close: a hand that ends heads-down closes it quietly; back at Smart there's no bar");
+		PlayRefusedTotal += Room.Refused;
+	}
+	// The toast line: a toast that waited while the bar was open goes up once the safety close frees the line.
+	{
+		FakeRoom Room = Room6();
+		Room.StreamV = 1;
+		Room.Here.push_back("first_a");
+		Room.Here.push_back("first_b");
+		PlayState P;
+		ss::Rng R("kastplay:f2:toast");
+		play::Begin(P, Ch, PlayAt(W0, 1));
+		play::OnFollow(P, Room, Ch, "first_a", true); // up at once
+		play::OnFollow(P, Room, Ch, "first_b", true); // waits for the line
+		play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0, 1), Moment::AllIn);
+		PlayChatAt(P, Room, PlayAt(W0 + 4.0, 1), 70.0, 0.25, R);
+		const bool Waited = Room.Alerts.size() == 1 && P.Toasts.size() == 1;
+		PlayChatAt(P, Room, PlayAt(W0 + 4.0 + PlayHand, 1), 0.25, 0.25, R);
+		Expect(Waited && !P.HoC.Open && Room.Alerts.size() == 2 && Room.Alerts[1].Who == "first_b" && P.Toasts.empty(),
+			"hold or crack's safety close: frees the toast line (the toast that waited goes up)");
+		PlayRefusedTotal += Room.Refused;
+	}
+	Expect(PlayMoney(Ch) == MoneyBefore, "hold or crack's safety close: moves no money and no member");
+}
+
+/** One night with the safety close (F2), display time sliced by Step: hand 1 (ss.Kast.Moment allin's) is called and never
+ *  revealed; a skipped hand's result comes after; hand 3 is called and revealed. ByGrid leaves out the display step that sees
+ *  hand 1 end, so the grid's next minute closes it instead. What it did to the room. */
+std::string HocSafetyNight(double Step, const char* RSeed, bool ByGrid)
+{
+	const double W0 = 22.5 * PlayDay + 21.0 * 60.0;
+	Channel Ch = PlayChannel(10, W0);
+	FakeRoom Room;
+	Room.Here = {PlayDee, PlayMei, "fan_1", "fan_2", "fan_3", "fan_4"};
+	PlayState P;
+	ss::Rng R(RSeed);
+	play::Begin(P, Ch, PlayAt(W0, 1));
+	Room.MinuteV = W0 + 3.0;
+	play::OnMoment(P, Room, Ch, PlayAt(W0 + 3.0, 1), Moment::AllIn);
+	PlayChatAt(P, Room, PlayAt(W0 + 3.0, 1), 4.0, Step, R);
+	play::CallIt(P, Room, Ch, true);
+	PlayChatAt(P, Room, PlayAt(W0 + 3.0, 1), 3.0, Step, R);
+	if (!ByGrid)
+	{
+		PlayChatAt(P, Room, PlayAt(W0 + 3.0 + PlayHand, 1), 5.0, Step, R);
+	}
+	Room.MinuteV = W0 + 4.0;
+	play::OnMinute(P, Room, Ch, PlayAt(W0 + 4.4, 1), 4);
+	play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.4, 1), Moment::WonAllIn);
+	play::OnMoment(P, Room, Ch, PlayAt(W0 + 5.1, 1), Moment::AllIn);
+	PlayChatAt(P, Room, PlayAt(W0 + 5.1, 1), 4.0, Step, R);
+	play::CallIt(P, Room, Ch, false);
+	PlayChatAt(P, Room, PlayAt(W0 + 5.1, 1), 2.0, Step, R);
+	play::OnMoment(P, Room, Ch, PlayAt(W0 + 5.1, 1), Moment::BadBeat);
+	PlayChatAt(P, Room, PlayAt(W0 + 5.8, 1), 3.0, Step, R);
+	PlayRefusedTotal += Room.Refused;
+	std::ostringstream O;
+	O << Room.Effects() << " |K " << Room.Notices.size() << " |D " << P.HocDropped << " |O " << P.HoC.Open;
+	return O.str();
+}
+
+void HocSafetyFrames()
+{
+	const std::string A = HocSafetyNight(1.0 / 60.0, "kastplay:f2:a", false);
+	const std::string B = HocSafetyNight(1.0 / 30.0, "kastplay:f2:b", false);
+	const std::string C = HocSafetyNight(0.5, "kastplay:f2:c", false);
+	const std::string D = HocSafetyNight(1.0 / 60.0, "kastplay:f2:a", true);
+	Expect(A == B && A == C && A == D && A.find("H 8 ") != std::string::npos && A.find("|K 1 |D 1 |O 0") != std::string::npos,
+		"hold or crack's safety close: the room's effects are the same at 60, 30 and 2 fps and when the grid closes it instead of a frame: one reveal's Hype and "
+		"Engage, one KastCall, one game closed (" + A + ")");
+	if (A != B || A != C || A != D)
+	{
+		std::printf("  60 fps: %s\n  30 fps: %s\n  2 fps: %s\n  by the grid: %s\n", A.c_str(), B.c_str(), C.c_str(), D.c_str());
+	}
+}
+
+int PlayHyperSteps = 0; // the measured note: the clock's hyper steps tried across powers of two, those that rounded short, and
+int PlayHyperShort = 0; // the games those steps left open
+int PlayHyperMissed = 0;
+
+/** The safety close at the rival sites' hyper (30 world seconds a hand, Sites.cpp's SecondsPerHand[0]: the shortest hand any table
+ *  deals), where the next-hand rule's half minute is exactly one hand (the F2 review):
+ *  - the clock exactly half a world minute past the open (a hyper hand on) closes it;
+ *  - the clock as the Session builds it (Session::WorldMinutes: Night One's day plus Tournament::ClockMinutes, the start plus the
+ *    hands' seconds over 60) from a late registration's start (the lobby clock's fraction): a step across a power of two of world
+ *    minutes rounds, and can come out a hair under 0.5; that hand closes it all the same;
+ *  - the frame that closes it says nothing: a slow frame (half a real second) that would have drawn chat's first call. */
+void HocSafetyHyper()
+{
+	const double W0 = 22.0 * PlayDay + 21.0 * 60.0;
+	Channel Ch = PlayChannel(10, W0);
+	const auto Room6 = [&]() {
+		FakeRoom Room;
+		Room.MinuteV = W0 + 4.0;
+		Room.Here = {PlayDee, PlayMei, "fan_1", "fan_2", "fan_3", "fan_4"};
+		return Room;
+	};
+	const double Fps = 1.0 / 60.0;
+	{
+		FakeRoom Room = Room6();
+		PlayState P;
+		ss::Rng R("kastplay:f2:hyper");
+		play::Begin(P, Ch, PlayAt(W0, 1));
+		play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0, 1), Moment::AllIn);
+		PlayChatAt(P, Room, PlayAt(W0 + 4.0, 1), 3.0, Fps, R);
+		const bool Held = P.HoC.Open;
+		PlayChatAt(P, Room, PlayAt(W0 + 4.5, 1), Fps, Fps, R);
+		Expect(Held && !P.HoC.Open && P.HocDropped == 1 && Room.HypeV == 0.0 && Room.Notices.empty(),
+			"hold or crack's safety close: a hyper hand on (the clock exactly half a world minute past the open) closes it quietly");
+		PlayRefusedTotal += Room.Refused;
+	}
+	{
+		const double Day = ss::net::MinutesPerDay * static_cast<double>(ss::net::NightOneDay);
+		int& Missed = PlayHyperMissed;
+		std::string First;
+		for (const double Edge : {2048.0, 4096.0, 8192.0, 16384.0, 32768.0, 65536.0})
+		{
+			for (int J = 0; J < 64; ++J)
+			{
+				const double Start = Edge - Day - 2.0 + 1.0 / 3.0 + 0.0123 * static_cast<double>(J);
+				for (int Tick = 0; Tick < 8; ++Tick)
+				{
+					const double At = Day + (Start + static_cast<double>(Tick) * 30.0 / 60.0);
+					const double Next = Day + (Start + static_cast<double>(Tick + 1) * 30.0 / 60.0);
+					FakeRoom Room = Room6();
+					PlayState P;
+					ss::Rng R("kastplay:f2:edge");
+					play::Begin(P, Ch, PlayAt(At - 1.0, 1));
+					play::OnMoment(P, Room, Ch, PlayAt(At, 1), Moment::AllIn);
+					PlayChatAt(P, Room, PlayAt(Next, 1), Fps, Fps, R);
+					++PlayHyperSteps;
+					PlayHyperShort += Next - At < 0.5 ? 1 : 0;
+					if (P.HoC.Open)
+					{
+						++Missed;
+						if (First.empty())
+						{
+							char Buf[120];
+							std::snprintf(Buf, sizeof(Buf), " (first: %.17g -> %.17g, a step of 0.5%+.3g)", At, Next, Next - At - 0.5);
+							First = Buf;
+						}
+					}
+					PlayRefusedTotal += Room.Refused;
+				}
+			}
+		}
+		Expect(Missed == 0 && PlayHyperShort > 0,
+			"hold or crack's safety close: the Session's clock at hyper, across powers of two of world minutes: every next hand closes it (" + std::to_string(PlayHyperSteps) +
+				" steps, " + std::to_string(PlayHyperShort) + " a hair short of 0.5, " + std::to_string(Missed) + " left open" + First + ")");
+	}
+	{
+		FakeRoom Room = Room6();
+		FakeRoom Twin = Room6();
+		PlayState P;
+		PlayState Q;
+		ss::Rng R("kastplay:f2:lastframe");
+		ss::Rng RTwin("kastplay:f2:lastframe");
+		play::Begin(P, Ch, PlayAt(W0, 1));
+		play::Begin(Q, Ch, PlayAt(W0, 1));
+		play::OnMoment(P, Room, Ch, PlayAt(W0 + 4.0, 1), Moment::AllIn);
+		play::OnMoment(Q, Twin, Ch, PlayAt(W0 + 4.0, 1), Moment::AllIn);
+		const size_t Lines = Room.Lines.size();
+		play::OnChat(P, Room, PlayAt(W0 + 4.0 + PlayHand, 1), 0.5, R);
+		play::OnChat(Q, Twin, PlayAt(W0 + 4.0, 1), 0.5, RTwin);
+		Expect(!P.HoC.Open && P.HocDropped == 1 && Room.Lines.size() == Lines && Room.Notices.empty() && Q.HoC.Open && Twin.Lines.size() == Lines + 1,
+			"hold or crack's safety close: the frame that closes it says nothing (the same slow frame inside the hand draws chat's first call)");
+		PlayRefusedTotal += Room.Refused + Twin.Refused;
+	}
 }
 
 // ------------------------------------------------------------------ Nod
@@ -1427,9 +1816,8 @@ void VerbsByPace()
 		play::Fill(P, V);
 		Case C;
 		C.Drawn = V.HoC.Open && V.Action == View::Slot::HoldCrack;
-		const double Before = Room.EngageV;
 		C.Works = play::CallIt(P, Room, Ch, true);
-		C.Works = C.Works && Room.EngageV > Before;
+		C.Works = C.Works && P.HoC.Called == 1; // booked (its Engage comes with the reveal)
 		PlayRefusedTotal += Room.Refused;
 		return C;
 	};
@@ -1611,8 +1999,9 @@ void ThroughTheStream()
 	Expect(Open.HoC.Open && Open.Action == View::Slot::HoldCrack, "through the stream: the all-in opens Hold or Crack in the action slot");
 	Expect(Open.HoC.Holds + Open.HoC.Cracks >= 1 && Open.HoC.Holds + Open.HoC.Cracks <= St.Count(), "through the stream: chat calls it, never more callers than watching");
 	const double EngageBefore = St.Engage;
-	Expect(St.CallIt(Ch, true) && St.Engage > EngageBefore, "through the stream: the streamer's call (Engage up)");
+	Expect(St.CallIt(Ch, true) && St.Engage == EngageBefore, "through the stream: the streamer's call (booked: Engage waits for the reveal)");
 	St.OnMoment(Ch, In, Moment::WonAllIn, "1,200", 1.0);
+	Expect(std::abs(St.Engage - std::min(1.0, EngageBefore + 0.3)) < 1e-12, "through the stream: the reveal gives the call its Engage +0.3");
 	Run(W0 + 4.6);
 	Expect(!St.GetView().HoC.Open, "through the stream: the won all-in reveals it");
 	bool RevealLine = false;
@@ -1668,7 +2057,8 @@ void ThroughTheStream()
 /** The audit's L2 through the real Stream (PIE §9.4 #5's "refused at 8x"): Hold or Crack opens at Smart and the player goes to
  *  watch 8x mid-runout. The next frame's View has no bar and no slot, Stream::CallIt is refused with Engage untouched, a grid
  *  minute at 8x leaves the game open (back at Smart the bar shows and the call works), and a reveal at 8x is chat's as at any
- *  pace (the result line, KastCall). */
+ *  pace (the result line, KastCall). Two tables: a runout spans a grid minute only when another table's hands move the room's
+ *  clock (at one table the clock moving is the next hand, and the safety close takes the game: HocSafetyClose, F2). */
 void HeadsDownThroughTheStream()
 {
 	const double W0 = 11.0 * PlayDay + 21.0 * 60.0;
@@ -1677,7 +2067,7 @@ void HeadsDownThroughTheStream()
 	Inputs In = PlayIn(W0);
 	In.Hero = "grinder_3c";
 	In.AtTable = true;
-	In.Tables = 1;
+	In.Tables = 2;
 	In.RentsPaid = 2;
 	{
 		ss::gear::Owned Own;
@@ -1735,17 +2125,154 @@ void HeadsDownThroughTheStream()
 	Pace(true);
 	Run(W0 + 5.2, 13.1);
 	const double EngageAtSmart = St.Engage;
-	Expect(St.GetView().HoC.Open && St.CallIt(Ch, true) && St.Engage > EngageAtSmart, "through the stream heads-down: back at Smart before the reveal, the bar shows and the call works");
-	// The reveal at 8x: chat's game resolves as at any pace (the result line and KastCall).
+	Expect(St.GetView().HoC.Open && St.CallIt(Ch, true) && St.Engage == EngageAtSmart, "through the stream heads-down: back at Smart before the reveal, the bar shows and the call works (booked)");
+	// The reveal at 8x: chat's game resolves as at any pace (the result line and KastCall), and gives the call its Engage.
 	Pace(false);
 	Run(W0 + 5.3, 0.8);
 	const int CallsBefore = Count(static_cast<int>(ss::SoundId::KastCall));
 	const int RevealsBefore = RevealLines();
+	const double EngageAtReveal = St.Engage;
 	St.OnMoment(Ch, In, Moment::WonAllIn, "1,200", 1.0);
+	const bool CallPaid = std::abs(St.Engage - std::min(1.0, EngageAtReveal + 0.3)) < 1e-12 && EngageAtReveal == EngageAtSmart;
 	Run(W0 + 5.6, 0.8);
-	Expect(Count(static_cast<int>(ss::SoundId::KastCall)) == CallsBefore + 1 && RevealLines() == RevealsBefore + 1 && !St.GetView().HoC.Open,
-		"through the stream heads-down: the reveal at 8x is chat's as at any pace (the result line, KastCall)");
+	Expect(Count(static_cast<int>(ss::SoundId::KastCall)) == CallsBefore + 1 && RevealLines() == RevealsBefore + 1 && !St.GetView().HoC.Open && CallPaid,
+		"through the stream heads-down: the reveal at 8x is chat's as at any pace (the result line, KastCall, the call's Engage +0.3)");
 	St.Stop(Ch, In);
+}
+
+/** What ss.Kast.Moment allin did on one stream (DebugAllinThroughTheStream). */
+struct PlayDebugAllin
+{
+	bool Opened = false;       // the next frame's View shows the bar in the slot
+	bool Called = false;       // Stream::CallIt took the streamer's call
+	bool HeldTheHand = false;  // still open at the end of the hand in progress (the clock still)
+	bool Closed = false;       // gone on the frame the clock moved
+	double OpenWorld = 0.0;    // world minutes it stayed open
+	double OpenReal = 0.0;     // real seconds it stayed open
+	int RevealLines = 0;
+	int KastCalls = 0;
+	std::string Room;          // Engage, Hype, the count, the channel's money and members after it
+};
+
+/** ss.Kast.Moment allin (Stream::DebugRoom's "moment allin") on a stream at one table (Tables 1, the clock moving a hand at a
+ *  time: 9 real seconds of display at one world minute, then 0.7 world minutes) or off a table (Tables 0: the lobby's clock, a
+ *  real second a world second). The game opens mid-hand; Call presses Stream::CallIt on it. */
+PlayDebugAllin PlayDebugAllinNight(int Tables, bool Call)
+{
+	PlayDebugAllin Out;
+	const double W0 = 12.0 * PlayDay + 21.0 * 60.0;
+	Channel Ch;
+	ss::kast::Stream St("kastplay:seam:debugallin");
+	Inputs In = PlayIn(W0);
+	In.Hero = "grinder_3c";
+	In.AtTable = Tables > 0;
+	In.Tables = Tables;
+	In.RentsPaid = 2;
+	{
+		ss::gear::Owned Own;
+		for (const char* Id : {"tower-mid", "fiber", "webcam-1080", "mic-usb", "ring-light", "overlay-pack", "monitor-24"})
+		{
+			Own[Id] = 0.0;
+		}
+		In.Gear = ss::gear::Sum(Own);
+	}
+	St.Start(Ch, In);
+	const double DReal = 1.0 / 30.0;
+	const auto Frame = [&](double DWorld) {
+		In.World += DWorld;
+		In.Real += DReal;
+		St.Tick(Ch, In, DWorld, DReal);
+	};
+	// The clock: at a table it stands through a hand's 9 real seconds and moves 0.7 world minutes as it ends; off a table it runs.
+	const auto Seconds = [&](double S) {
+		for (double T = 0.0; T < S - 1e-9; T += DReal)
+		{
+			Frame(Tables > 0 ? 0.0 : DReal / 60.0);
+		}
+	};
+	const auto HandEnds = [&]() { Frame(PlayHand); };
+	for (int H = 0; H < 6; ++H)
+	{
+		Seconds(9.0);
+		HandEnds();
+	}
+	Seconds(3.0); // the next hand is under way
+	St.DebugRoom(Ch, In, "moment allin");
+	const double OpenedWorld = In.World;
+	const double OpenedReal = In.Real;
+	Frame(0.0);
+	Out.Opened = St.GetView().HoC.Open && St.GetView().Action == View::Slot::HoldCrack;
+	const double EngageBefore = St.Engage;
+	if (Call)
+	{
+		Out.Called = St.CallIt(Ch, true) && St.Engage == EngageBefore;
+	}
+	if (Tables > 0)
+	{
+		Seconds(6.0);
+		Out.HeldTheHand = St.GetView().HoC.Open;
+		HandEnds();
+		Out.Closed = !St.GetView().HoC.Open;
+	}
+	else
+	{
+		while (St.GetView().HoC.Open && In.World < OpenedWorld + 10.0)
+		{
+			Frame(DReal / 60.0);
+		}
+		Out.HeldTheHand = In.World - OpenedWorld > 2.9;
+		Out.Closed = !St.GetView().HoC.Open;
+	}
+	Out.OpenWorld = In.World - OpenedWorld;
+	Out.OpenReal = In.Real - OpenedReal;
+	for (int H = 0; H < 3; ++H)
+	{
+		Seconds(9.0);
+		HandEnds();
+	}
+	for (const ss::kast::ChatMsg& M : St.Chat)
+	{
+		Out.RevealLines += M.Kind == LineKind::System && M.Who.empty() && M.Text.rfind(kcopy::RevealLine(true, 0, 1, 0).substr(0, 5), 0) == 0 ? 1 : 0;
+	}
+	for (const Notice& N : St.Notices)
+	{
+		Out.KastCalls += N.Sound == static_cast<int>(ss::SoundId::KastCall) ? 1 : 0;
+	}
+	std::ostringstream O;
+	O.precision(17);
+	O << "E " << St.Engage << " H " << St.Hype << " N " << St.Count() << " | " << PlayMoney(Ch);
+	Out.Room = O.str();
+	St.Stop(Ch, In);
+	return Out;
+}
+
+/** F2 end to end through the real Stream: ss.Kast.Moment allin opens Hold or Crack with no hand behind it and relies on the safety
+ *  close. At one table the bar holds through the hand in progress and goes on the frame that hand ends; off a table it holds 3
+ *  world minutes. Either way: no reveal line, no KastCall, and the streamer's call leaves no trace in the room (Engage, Hype, the
+ *  count and the channel equal a twin stream's that never called). */
+double PlayDebugAllinReal = 0.0;
+double PlayDebugAllinWorld = 0.0;
+
+void DebugAllinThroughTheStream()
+{
+	const PlayDebugAllin A = PlayDebugAllinNight(1, true);
+	const PlayDebugAllin B = PlayDebugAllinNight(1, false);
+	PlayDebugAllinReal = A.OpenReal;
+	PlayDebugAllinWorld = A.OpenWorld;
+	Expect(A.Opened && A.Called && A.HeldTheHand && A.Closed && B.Opened && B.Closed,
+		"ss.Kast.Moment allin at one table: the bar opens, takes the streamer's call (booked), holds through the hand in progress and goes on the frame it ends (" +
+			std::to_string(A.OpenReal).substr(0, 4) + " real s, " + std::to_string(A.OpenWorld).substr(0, 4) + " world min)");
+	Expect(A.RevealLines == 0 && A.KastCalls == 0 && B.RevealLines == 0 && B.KastCalls == 0, "ss.Kast.Moment allin at one table: closed quietly (no reveal line, no KastCall)");
+	Expect(A.Room == B.Room, "ss.Kast.Moment allin at one table: the streamer's call is dropped with no effect (the room and the channel equal the twin's that never called: " +
+								  A.Room.substr(0, 60) + ")");
+	if (A.Room != B.Room)
+	{
+		std::printf("  called: %s\n  never:  %s\n", A.Room.c_str(), B.Room.c_str());
+	}
+	const PlayDebugAllin L = PlayDebugAllinNight(0, true);
+	const PlayDebugAllin M = PlayDebugAllinNight(0, false);
+	Expect(L.Opened && L.Called && L.HeldTheHand && L.Closed && L.OpenWorld >= 3.0 && L.OpenWorld < 3.01 && L.RevealLines == 0 && L.KastCalls == 0 && L.Room == M.Room,
+		"ss.Kast.Moment allin off a table: holds 3 world minutes, then closes quietly, the call dropped with no effect (" + std::to_string(L.OpenWorld).substr(0, 5) + " world min)");
 }
 
 // ------------------------------------------------------------------ the games' share of the Room's frame (review)
@@ -1944,6 +2471,331 @@ void CueQueueFirst()
 						   "the queue; with nothing waiting a follow still chimes (" + Order + ")");
 	std::printf("kast play: the cue queue with a raid, a follow and a tip landing as the throttle frees: %s\n", Order.c_str());
 }
+
+// ------------------------------------------------------------------ Hold or Crack in the real game (F2's measured note)
+
+/** A SessionHooks that counts KastCall's plays. */
+struct PlayHocHooks : ss::SessionHooks
+{
+	int KastCalls = 0;
+	void Sound(ss::SoundId Id, double /*Volume*/) override { KastCalls += Id == ss::SoundId::KastCall ? 1 : 0; }
+};
+
+/** A listing to register for (session_seams' shape), at Night One's first listing's start, its id unique by N. */
+ss::LobbyEvent PlayListing(int N, ss::Chips BuyIn, int Entrants)
+{
+	ss::LobbyEvent L = ss::Lobby()[1];
+	const long long Start = static_cast<long long>(std::llround(ss::net::MinutesPerDay * static_cast<double>(ss::net::NightOneDay) + L.Spec.StartClock));
+	const std::string Name = "Kast Play Sit " + std::to_string(N);
+	L.Spec.Id = "kastplay-sit-" + std::to_string(N) + "@" + std::to_string(Start);
+	L.Spec.Name = Name;
+	L.Name = Name;
+	L.Spec.BuyInCents = BuyIn;
+	L.BuyInCents = BuyIn;
+	L.Spec.FeeCents = BuyIn / 10;
+	L.Spec.GuaranteeCents = 0;
+	L.Spec.BountyCents = 0;
+	L.Spec.MysteryBounty = false;
+	L.Spec.SeatValueCents = 0;
+	L.Spec.SeatTicket.clear();
+	L.Spec.Entrants = Entrants;
+	L.Joinable = true;
+	return L;
+}
+
+/** What a real night of all-ins showed (PlayRealNight). */
+struct PlayRealSeen
+{
+	std::string Why;            // a setup that failed, or ""
+	int Frames = 0;
+	int AllIns = 0;             // the hero's AllIn moments (Session::StreamMoment at the cards' reveal)
+	int Opens = 0;              // ...that opened Hold or Crack (the bar showed)
+	int Reveals = 0;            // games closed by their own hand's result moment
+	int Quiet = 0;              // games closed with no result (the safety close)
+	int QuietShifted = 0;       // ...of them, with another table closed mid-runout (Session::CloseFinishedTables shifts the
+	                            // indices: the game's own result came under a new ThisTable, so it couldn't match)
+	std::string QuietWhy;       // each one's context
+	int Registered = 0;
+	double MaxGap = 0.0;        // world minutes from a game's AllIn to the result that revealed it
+	double MaxRunout = 0.0;     // real seconds from a game's open to its reveal
+	int KastCalls = 0;
+	// ss.Kast.Moment allin mid-hand, after the measured part (one table only):
+	bool DebugOpened = false;
+	bool DebugQuiet = false;    // closed with no result moment, no KastCall, no new reveal line
+	double DebugReal = 0.0;     // real seconds it stayed
+	double DebugWorld = 0.0;    // the clock's move on the frame it went
+	int DebugTries = 0;         // hands tried (one where the hero went all in for real is tried again)
+	double Wall = 0.0;          // seconds this took
+};
+
+/** The real game: a Session live at Tables tables, autoplay's push-fold plan watched at 1x on each (attended: Hold or Crack opens
+ *  on the hero's all-ins), run at 30 frames a second for RealSeconds. Each frame reads the View's bar and the moments the frame
+ *  fired (MomentNote::Real is the Session's clock); a busted table is replaced. Then, at one table, ss.Kast.Moment allin a second
+ *  into a hand (a tight plan by then, so no real all-in is behind it). SecondsPerHand, when set, deals every table at that pace
+ *  (30: the rival sites' hyper, the shortest hand). */
+PlayRealSeen PlayRealNight(int Tables, double RealSeconds, const char* Seed, double SecondsPerHand = 0.0)
+{
+	using Clock = std::chrono::steady_clock;
+	const auto T0 = Clock::now();
+	PlayRealSeen Out;
+	PlayHocHooks H;
+	ss::Session S(H, Seed);
+	S.CurrentScreen = ss::Screen::Lobby;
+	S.BankrollCents = 5000000;
+	double Now = 50.0;
+	S.Update(Now);
+	if (!S.Buy(ss::gear::FirstPcUpgrade().Id).empty())
+	{
+		Out.Why = "the rig";
+		return Out;
+	}
+	S.DebugKast("grant 60 40");
+	if (!S.GoLive().empty())
+	{
+		Out.Why = "go live";
+		return Out;
+	}
+	const auto Plan = [](ss::style::Style St) {
+		ss::autoplay::TableAuto A;
+		A.S = St;
+		A.M = ss::autoplay::Mode::Watch;
+		A.Speed = 1;
+		A.To = ss::autoplay::Target::Result;
+		A.Stops = 0;
+		return A;
+	};
+	ss::style::Style Style = ss::style::Style::PushFold;
+	const auto Fill = [&]() {
+		// Leave a results screen; register until Tables tables are open, each on the plan.
+		if (S.CurrentScreen == ss::Screen::Results)
+		{
+			S.LeaveResults();
+		}
+		for (int Guard = 0; S.TableCount() < Tables && Guard < 4; ++Guard)
+		{
+			ss::LobbyEvent L = PlayListing(++Out.Registered, 110, 18);
+			L.Spec.SecondsPerHand = SecondsPerHand > 0.0 ? SecondsPerHand : L.Spec.SecondsPerHand;
+			if (!S.RegisterEvent(L).empty())
+			{
+				break;
+			}
+		}
+		for (int K = 0; K < S.TableCount(); ++K)
+		{
+			if (S.Autoplay(K).M != ss::autoplay::Mode::Watch || S.Autoplay(K).S != Style)
+			{
+				S.SetAutoplay(K, Plan(Style));
+			}
+		}
+	};
+	Fill();
+	if (S.TableCount() != Tables)
+	{
+		Out.Why = "the tables (" + std::to_string(S.TableCount()) + ")";
+		return Out;
+	}
+	// One frame: what the bar and the moments did.
+	double OpenWorld = 0.0;
+	double OpenReal = 0.0;
+	double LastAllIn = 0.0;
+	bool ResultNow = false;
+	double ResultWorld = 0.0;
+	bool Counting = true; // the measured part (not the ss.Kast.Moment allin check after it)
+	int AllInsSeen = 0;   // every frame's AllIn moments, the check's too
+	int OpenTables = 0;   // at the open: the tables, the clock, the registrations (a quiet close's context)
+	double OpenClock = 0.0;
+	int OpenRegistered = 0;
+	int FewestTables = 0;         // while open: the fewest tables...
+	bool ResultWhileOpen = false; // ...and a result moment that didn't close it (another table's, or this one's under a new index)
+	const auto Step = [&]() {
+		const bool Was = S.Stream.GetView().HoC.Open;
+		Now += 1.0 / 30.0;
+		S.Update(Now);
+		++Out.Frames;
+		ResultNow = false;
+		for (auto It = S.Stream.Moments.rbegin(); It != S.Stream.Moments.rend() && It->Real == S.Now; ++It)
+		{
+			if (It->Kind == Moment::AllIn)
+			{
+				Out.AllIns += Counting ? 1 : 0;
+				++AllInsSeen;
+				LastAllIn = It->World;
+			}
+			if (It->Kind == Moment::WonAllIn || It->Kind == Moment::LostAllIn || It->Kind == Moment::BadBeat)
+			{
+				ResultNow = true;
+				ResultWorld = It->World;
+			}
+		}
+		const bool Is = S.Stream.GetView().HoC.Open;
+		if (Counting && !Was && Is)
+		{
+			++Out.Opens;
+			OpenWorld = LastAllIn;
+			OpenReal = Now;
+		}
+		if (Counting && Was && !Is)
+		{
+			if (ResultNow)
+			{
+				++Out.Reveals;
+				Out.MaxGap = std::max(Out.MaxGap, ResultWorld - OpenWorld);
+				Out.MaxRunout = std::max(Out.MaxRunout, Now - OpenReal);
+			}
+			else
+			{
+				++Out.Quiet;
+				Out.QuietShifted += FewestTables < OpenTables ? 1 : 0;
+				char Buf[200];
+				std::snprintf(Buf, sizeof(Buf), "%s[%d tables, %d at the open, %d at the fewest, a result while open %d, +%.2f world min, +%.1f real s, %d registered since]",
+					Out.QuietWhy.empty() ? "" : " ", S.TableCount(), OpenTables, FewestTables, ResultWhileOpen ? 1 : 0, S.WorldMinutes() - OpenClock, Now - OpenReal,
+					Out.Registered - OpenRegistered);
+				Out.QuietWhy += Buf;
+			}
+		}
+		if (!Was && Is)
+		{
+			OpenTables = S.TableCount();
+			FewestTables = OpenTables;
+			ResultWhileOpen = false;
+			OpenClock = S.WorldMinutes();
+			OpenRegistered = Out.Registered;
+		}
+		if (Is)
+		{
+			FewestTables = std::min(FewestTables, S.TableCount());
+			ResultWhileOpen = ResultWhileOpen || (Was && ResultNow);
+		}
+		return Is;
+	};
+	while (Now - 50.0 < RealSeconds)
+	{
+		Step();
+		if (Out.Frames % 30 == 0 && (S.CurrentScreen == ss::Screen::Results || S.TableCount() < Tables))
+		{
+			Fill();
+		}
+	}
+	// Let a game still open finish (its hand's result, or the safety close).
+	for (int F = 0; F < 30 * 60 && S.Stream.GetView().HoC.Open; ++F)
+	{
+		Step();
+	}
+	Out.KastCalls = H.KastCalls;
+	Counting = false;
+	if (Tables == 1 && Out.Why.empty())
+	{
+		Style = ss::style::Style::Nit;
+		Fill();
+		// A hand where the hero goes all in for real reopens the game on its own all-in and reveals it (that's no safety close):
+		// such a hand is tried again, up to five.
+		for (int Try = 0; Try < 5; ++Try)
+		{
+			++Out.DebugTries;
+			// A second into a fresh hand: the clock just moved (the last hand ended).
+			double World = S.WorldMinutes();
+			int Guard = 0;
+			while (S.WorldMinutes() == World && ++Guard < 30 * 120)
+			{
+				Step();
+			}
+			for (int F = 0; F < 30; ++F)
+			{
+				Step();
+			}
+			// Chat keeps 140 lines: the lines since are the ones with a later id.
+			const int LastId = S.Stream.Chat.empty() ? 0 : S.Stream.Chat.back().Id;
+			const int CallsBefore = H.KastCalls;
+			const int AllInsBefore = AllInsSeen; // (the debug's own AllIn carries the last frame's clock: Step doesn't see it)
+			const std::string Said = S.DebugKast("moment allin");
+			World = S.WorldMinutes();
+			const double Opened = Now;
+			Out.DebugOpened = Step() && Said.find("All-in") != std::string::npos;
+			bool Result = false;
+			Guard = 0;
+			while (S.Stream.GetView().HoC.Open && ++Guard < 30 * 600)
+			{
+				Step();
+				Result = Result || ResultNow;
+			}
+			Out.DebugReal = Now - Opened;
+			Out.DebugWorld = S.WorldMinutes() - World;
+			// (Two more seconds, past the cue queue's throttle: a KastCall would have played by now.)
+			for (int F = 0; F < 60; ++F)
+			{
+				Step();
+			}
+			int RevealLines = 0;
+			for (const ss::kast::ChatMsg& M : S.Stream.Chat)
+			{
+				RevealLines += M.Id > LastId && M.Kind == LineKind::System && M.Who.empty() && M.Text.rfind(kcopy::RevealLine(true, 0, 1, 0).substr(0, 5), 0) == 0 ? 1 : 0;
+			}
+			// The hero's own all-in in that hand (an AllIn moment a frame fired).
+			const int AllInsAfter = AllInsSeen;
+			if (Result && AllInsAfter > AllInsBefore && Try < 4)
+			{
+				continue;
+			}
+			Out.DebugQuiet = !S.Stream.GetView().HoC.Open && !Result && RevealLines == 0 && H.KastCalls == CallsBefore;
+			if (!Out.DebugOpened || !Out.DebugQuiet)
+			{
+				std::printf("  ss.Kast.Moment allin: \"%s\", opened %d, open now %d, a result %d, reveal lines since %d, KastCalls %d -> %d, all-ins %d -> %d\n", Said.c_str(),
+					Out.DebugOpened ? 1 : 0, S.Stream.GetView().HoC.Open ? 1 : 0, Result ? 1 : 0, RevealLines, CallsBefore, H.KastCalls, AllInsBefore, AllInsAfter);
+			}
+			break;
+		}
+	}
+	S.EndStream();
+	Out.Wall = std::chrono::duration<double>(Clock::now() - T0).count();
+	return Out;
+}
+
+PlayRealSeen PlayRealOne;
+PlayRealSeen PlayRealTwo;
+PlayRealSeen PlayRealHyper;
+
+/** F2 in the real game: no game an all-in opened is ever taken by the safety close (each is revealed by its own hand's result),
+ *  at one table the result comes at the all-in's own world minute (the next-hand rule's premise: a table's clock stands while
+ *  its hand plays), and ss.Kast.Moment allin mid-hand closes quietly on the frame that hand ends. Two tables (long only): every
+ *  game revealed unless another table closed mid-runout (the table indices shift then, so the game's own result comes under a
+ *  new ThisTable and can't match: a seam limit older than F2, which the safety close now ends at 3 world minutes, not 5), and
+ *  the largest all-in-to-result move of the room's clock against the 3-minute rule. */
+void HocRealGame()
+{
+	PlayRealOne = PlayRealNight(1, Long ? 10800.0 : 3600.0, "kastplay-real-one");
+	const PlayRealSeen& A = PlayRealOne;
+	Expect(A.Why.empty(), "hold or crack in the real game: a session live at one table (" + A.Why + ")");
+	Expect(A.Opens >= 3 && A.Quiet == 0 && A.Reveals == A.Opens,
+		"hold or crack in the real game: every game an all-in opened was revealed by its own hand's result, none taken by the safety close (" + std::to_string(A.Opens) +
+			" opened, " + std::to_string(A.Reveals) + " revealed, " + std::to_string(A.Quiet) + " closed quietly, " + std::to_string(A.AllIns) + " all-ins)");
+	Expect(A.MaxGap == 0.0, "hold or crack in the real game: at one table each result came at its all-in's world minute (the clock stands while the hand plays; largest move " +
+								std::to_string(A.MaxGap) + ")");
+	Expect(A.DebugOpened && A.DebugQuiet && A.DebugWorld >= 0.5 && A.DebugReal < 60.0,
+		"hold or crack in the real game: ss.Kast.Moment allin a second into a hand closes quietly on the frame the hand ends (" + std::to_string(A.DebugReal).substr(0, 4) +
+			" real s, the clock +" + std::to_string(A.DebugWorld).substr(0, 4) + ")");
+	// The F2 review: at the rival sites' hyper (30 world seconds a hand, the shortest) the half minute is exactly one hand, so the
+	// next-hand rule is at its edge: every all-in's game is still revealed, and ss.Kast.Moment allin goes at the next hand, not two on.
+	PlayRealHyper = PlayRealNight(1, Long ? 7200.0 : 2400.0, "kastplay-real-hyper", 30.0);
+	const PlayRealSeen& Y = PlayRealHyper;
+	Expect(Y.Why.empty() && Y.Opens >= 3 && Y.Quiet == 0 && Y.Reveals == Y.Opens && Y.MaxGap == 0.0 && Y.DebugOpened && Y.DebugQuiet && Y.DebugWorld > 0.499 && Y.DebugWorld < 0.75,
+		"hold or crack in the real game at a hyper table (30 world seconds a hand): every game revealed by its own result (" + std::to_string(Y.Opens) + " opened, " +
+			std::to_string(Y.Quiet) + " closed quietly), and ss.Kast.Moment allin closes quietly at the next hand (the clock +" + std::to_string(Y.DebugWorld).substr(0, 4) +
+			(Y.Why.empty() ? "" : ", " + Y.Why) + ")");
+	if (Long)
+	{
+		PlayRealTwo = PlayRealNight(2, 10800.0, "kastplay-real-two");
+		const PlayRealSeen& B = PlayRealTwo;
+		Expect(B.Why.empty() && B.Opens >= 3 && B.Quiet == B.QuietShifted && B.Reveals + B.Quiet == B.Opens && B.MaxGap < 3.0,
+			"hold or crack in the real game, two tables: every game revealed by its own result unless another table closed mid-runout, the clock's largest move "
+			"from an all-in to its result " +
+				std::to_string(B.MaxGap).substr(0, 4) + " world minutes (the safety close waits 3) (" + std::to_string(B.Opens) + " opened, " + std::to_string(B.Quiet) +
+				" closed quietly, " + std::to_string(B.QuietShifted) + " of them after a table closed" + (B.Why.empty() ? "" : ", " + B.Why) + ")");
+		if (B.Quiet > 0)
+		{
+			std::printf("  two tables, closed quietly: %s\n", B.QuietWhy.c_str());
+		}
+	}
+}
 } // namespace play_seg
 
 void SegPlay()
@@ -1953,6 +2805,9 @@ void SegPlay()
 	play_seg::HocGates();
 	play_seg::HocCallsAndReveal();
 	play_seg::HocHeadsDown();
+	play_seg::HocSafetyClose();
+	play_seg::HocSafetyFrames();
+	play_seg::HocSafetyHyper();
 	play_seg::NodChecks();
 	play_seg::WelcomeAndScene();
 	play_seg::RailCallChecks();
@@ -1962,7 +2817,9 @@ void SegPlay()
 	play_seg::DisplayChangesNothing();
 	play_seg::ThroughTheStream();
 	play_seg::HeadsDownThroughTheStream();
+	play_seg::DebugAllinThroughTheStream();
 	play_seg::CueQueueFirst();
+	play_seg::HocRealGame();
 	play_seg::GamesBudget();
 	Expect(play_seg::PlayRefusedTotal == 0, "the games: no line was ever offered for someone not in the room (R1)");
 	std::printf("kast play: a Nodded guest followed at %.4f (4,000 guests, Sat 1; 0.10 asked); hold or crack in a 60-name room: %d callers, "
@@ -1972,6 +2829,28 @@ void SegPlay()
 				"Fill) %.1f us; an attended minute's whole-rail scan %.1f us; a Rail Call press %.1f us\n",
 		play_seg::PlaySprintUs, play_seg::PlayScanUs, play_seg::PlayPressUs);
 	std::printf("kast play: a Hold or Crack reveal of 300 calls against %zu callers tonight: %.1f us\n", play_seg::PlayRevealCallers, play_seg::PlayRevealUs);
+	{
+		const play_seg::PlayRealSeen& A = play_seg::PlayRealOne;
+		std::printf("kast play: hold or crack's safety close (F2): ss.Kast.Moment allin through the Stream at one table stayed %.2f real s (%.2f world min: the hand in "
+					"progress); in a real session at one table (%d frames, %.1f s): %d all-ins, %d games opened, %d revealed, %d closed quietly, the clock's largest move "
+					"from an all-in to its result %.2f world min, the longest runout %.1f real s, %d KastCalls; ss.Kast.Moment allin a second into a hand closed quietly "
+					"after %.1f real s (the clock +%.2f; %d hand(s) tried)\n",
+			play_seg::PlayDebugAllinReal, play_seg::PlayDebugAllinWorld, A.Frames, A.Wall, A.AllIns, A.Opens, A.Reveals, A.Quiet, A.MaxGap, A.MaxRunout, A.KastCalls,
+			A.DebugReal, A.DebugWorld, A.DebugTries);
+		const play_seg::PlayRealSeen& Y = play_seg::PlayRealHyper;
+		std::printf("kast play: hold or crack at hyper (30 world s a hand): a real session at one table (%d frames, %.1f s): %d all-ins, %d games opened, %d revealed, %d "
+					"closed quietly, the clock's largest move from an all-in to its result %.2f world min; ss.Kast.Moment allin closed quietly after %.1f real s (the "
+					"clock +%.2f); the Session's clock across powers of two: %d hyper steps, %d a hair short of 0.5, %d left the game open\n",
+			Y.Frames, Y.Wall, Y.AllIns, Y.Opens, Y.Reveals, Y.Quiet, Y.MaxGap, Y.DebugReal, Y.DebugWorld, play_seg::PlayHyperSteps, play_seg::PlayHyperShort,
+			play_seg::PlayHyperMissed);
+		if (Long)
+		{
+			const play_seg::PlayRealSeen& B = play_seg::PlayRealTwo;
+			std::printf("kast play: hold or crack in a real session at two tables (%d frames, %.1f s): %d all-ins, %d games opened, %d revealed, %d closed quietly (%d "
+						"after another table closed mid-runout), the clock's largest move from an all-in to its result %.2f world min, the longest runout %.1f real s\n",
+				B.Frames, B.Wall, B.AllIns, B.Opens, B.Reveals, B.Quiet, B.QuietShifted, B.MaxGap, B.MaxRunout);
+		}
+	}
 	std::printf("kast play: %d checks in %.2fs\n", Checks - PlayChecks0, std::chrono::duration<double>(std::chrono::steady_clock::now() - PlayT0).count());
 }
 } // namespace kastgrowth_test

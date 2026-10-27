@@ -184,7 +184,23 @@ std::string WhyMilestone(int Followers);
 std::string WhySteady();
 /** A new channel's first streams: "New channel: Kast is getting to know you". */
 std::string WhyNew();
-/** Heat's why lines off air, the top two ("" where there's none), each a fact the channel holds, in this order: "Cooling: N days
+/** A deep run without its field's size (off air: the channel keeps the final-table days, FtDays): "Last night's final table",
+ *  "Tonight's final table", "Tuesday's final table" (DaysAgo and DayName as WhyRun's). The C-K PIE fix (F4). */
+std::string WhyRunPlain(growth::RunStage S, int DaysAgo, const std::string& DayName);
+/** A night under 60 world minutes that moved no Heat says why (the end card, C-K PIE F4): no deep run's news on it, "Under an
+ *  hour: only a deep run counts" (beside the card's Heat move); ... */
+std::string WhyShort();
+/** ...its run's news already counted on an earlier stream of the same tournament: "This run's Heat already counted"; ... */
+std::string WhyShortCounted();
+/** ...its run no deeper than the channel's usual night (RunNorm): "Runs this deep are your usual now"; ... */
+std::string WhyShortUsual();
+/** ...no armed stage on stream while the deepest run at the stop is in the money (its stages came before the go-live, as at a
+ *  final table that had formed): "Stages before going live don't count" (review-pie-room); ... */
+std::string WhyShortBefore();
+/** ...and Heat at the soft ceiling (§2.4: a night adds nothing at 90): "Heat is at its ceiling" (the week's cap: WhyHotWeek). */
+std::string WhyCeiling();
+/** Heat's why lines off air, the top two ("" where there's none), each a fact the channel holds, in this order: a final table on
+ *  stream in the last 6 world days (WhyRunPlain, from FtDays: the C-K PIE fix, F4), "Cooling: N days
  *  dark" from 2 world days dark, "Hot week: ..." once this world week's gains reach §2.4's cap (35), "Showing up: N nights this
  *  week", and "New channel: ..." for a channel in its first 3 streams with nothing else to say. Studio's Heat tile off air and
  *  ss.Kast.Describe read the same lines. LastStreamDay is the channel's own (Ch.LastStreamDay), or for an old save before its
@@ -364,8 +380,8 @@ std::string StreakRow(int Weeks);
 
 // ------------------------------------------------------------------ K17 the end card, stings, the letter
 
-/** Peak first: "Peak 41 at the final table, 9:48 PM" (Moment the one at the peak, or -1: "Peak 12 at 9:48 PM"). Clock is
- *  ClockString's "9:48 PM". */
+/** Peak first: "Peak 41 at the final table, 9:48 PM" (Moment the one that brought the peak, PeakRaid: "Peak 30 on a raid, 9:48
+ *  PM", or -1: "Peak 12 at 9:48 PM"). Clock is ClockString's "9:48 PM". */
 std::string PeakLine(int Peak, int MomentAtPeak, const std::string& Clock);
 /** "+46 · best night ever" (Best) or "+46". */
 std::string NewFollowersLine(int N, bool Best);

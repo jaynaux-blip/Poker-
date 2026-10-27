@@ -57,7 +57,8 @@ struct PlayState
 		int Table = -1;         // the front table it opened on (its reveal must come from the same table)
 		double Equity = -1.0;   // Inputs::AllInEquity at the open (-1 unknown)
 		double OpenedAt = 0.0;  // world minute
-		int Called = 0;         // the streamer's call: 0 none yet, 1 HOLDS, 2 CRACKS
+		bool OneTable = false;  // Inputs::Tables was 1 at the open (the safety close's next-hand rule; KastPlay.cpp, F2)
+		int Called = 0;         // the streamer's call: 0 none yet, 1 HOLDS, 2 CRACKS (booked: its Engage comes with the reveal)
 		int Target = 0;         // how many of the named people present will call (OnChat brings them in)
 		bool Queued = false;    // OnChat drew its callers (Queue, shuffled by the stream's R) at its first step after the open
 		std::vector<std::string> Queue;
@@ -65,6 +66,7 @@ struct PlayState
 		std::vector<Call> Calls;
 	};
 	HoldCrack HoC;
+	int HocDropped = 0; // tonight's Hold or Cracks the safety close took (no reveal came: KastPlay.cpp, F2)
 	/** Tonight's tally of chat's callers: the end card's best caller ("kat_v called 4 of 5"). */
 	struct Caller
 	{
@@ -181,8 +183,9 @@ namespace play
  *    In.World + ExpAt(6, Unit(..., RailCall, NameKey, 1)); "Your rail call reached N followers" (N the followers rolled).
  *  - WelcomeRaid: within 2 world minutes of the newest raid, attended, once a raid: WelcomeRaiders(1.3, 1.5).
  *  - SetTheScene: a true 0 on streams 1-20, attended, once a stream: BankArrivals(3, 1.2).
- *  - CallIt: while Hold or Crack is open, attended, once a reveal: Engage +0.3 (heads-down the buttons aren't drawn and a
- *    press is refused).
+ *  - CallIt: while Hold or Crack is open, attended, once a reveal: the streamer's line, and the call booked; its Engage +0.3
+ *    comes with the reveal, and a game the safety close takes drops it with no effect (heads-down the buttons aren't drawn and
+ *    a press is refused).
  *  §2.9's table: Nod draws at every pace; Welcome the raid, Rail Call, Set the scene and Hold or Crack only while attended. */
 bool Nod(PlayState& P, RoomView& Room, Channel& Ch, const std::string& Name);
 bool RailCall(PlayState& P, RoomView& Room, Channel& Ch, const Inputs& In);
@@ -195,17 +198,23 @@ bool CallIt(PlayState& P, RoomView& Room, Channel& Ch, bool Holds);
 void Begin(PlayState& P, const Channel& Ch, const Inputs& In);
 /** OnMoment, after Recount: Hold or Crack opens on an all-in on the front table (In.ThisTable == In.FrontTable, cards to come:
  *  In.AllInEquity unknown or strictly between 0 and 1, 2+ watching, an attended minute) and reveals at WonAllIn, LostAllIn and
- *  BadBeat from the same table (Hype +8, KastCall, chat's result; the reveal's Hype never reads chat's calls, nor the pace: one
- *  that opened attended reveals at any pace, the streamer's say in it is CallIt's). A moment whose inputs carry no armed run at
- *  depth 0.4 (a bust) withdraws RAIL CALL at once. */
+ *  BadBeat from the same table (Hype +8, the streamer's booked call's Engage +0.3, KastCall, chat's result; the reveal's Hype
+ *  never reads chat's calls, nor the pace: one that opened attended reveals at any pace, the streamer's say in it is CallIt's).
+ *  A moment whose inputs carry no armed run at depth 0.4 (a bust) withdraws RAIL CALL at once.
+ *  The safety close (the lead's PIE, F2), on every hook's clock (OnMoment's and OnChat's In.World, OnMinute's grid minute): a
+ *  reveal that hasn't come by the next hand on its table (at one table, when it opened and now: the room's clock half a world
+ *  minute past the open, since a table's clock moves a whole hand at a time, after the hand's result) or within 3 world minutes
+ *  (two or more tables, or none) never will. The bar closes quietly: no reveal line, no KastCall, no Hype, and the streamer's
+ *  call is dropped (no Engage). ss.Kast.Moment allin (Stream::DebugRoom) opens one with no hand behind it and relies on this. */
 void OnMoment(PlayState& P, RoomView& Room, Channel& Ch, const Inputs& In, Moment M);
 /** Each whole world minute AdvanceTo runs (Minute is the grid's index, the stream minute: its world minute is the stream's
  *  StartWorld + Minute, Begin's In.World + Minute): a Nod's glow ends, Rail Call is offered (the first attended minute an
  *  armed run is at depth 0.4: growth::RailCallOpen, while today's grant is unused) or withdrawn (the run ended), and a Hold or
- *  Crack whose reveal never came closes after 5 world minutes. */
+ *  Crack whose reveal can't come any more closes quietly (OnMoment's safety close). */
 void OnMinute(PlayState& P, RoomView& Room, Channel& Ch, const Inputs& In, int Minute);
 /** ChatStep's display time: chat calls HOLDS or CRACKS while Hold or Crack is open, from the people present, words from the
- *  stream's own R; the games' waiting lines and toasts go up. Changes no channel state and no room state. */
+ *  stream's own R; the games' waiting lines and toasts go up; the safety close on the frame's clock (the bar goes on the frame
+ *  the table's next hand moves the clock). Changes no channel state and no room state. */
 void OnChat(PlayState& P, RoomView& Room, const Inputs& In, double DReal, Rng& R);
 /** Someone the games sent for arrived (Rail Call's named arrivals say so). */
 void OnArrive(PlayState& P, RoomView& Room, Channel& Ch, const std::string& Name, View::Source From);
@@ -219,8 +228,9 @@ void OnFollow(PlayState& P, RoomView& Room, Channel& Ch, const std::string& Name
  *  three, Hold or Crack's bar and "Your whole rail is here" show only while attended (PlayState::Attended, the last hook's):
  *  heads-down mid-runout the bar goes and chat's game runs on to its reveal. */
 void Fill(const PlayState& P, View& V);
-/** Stop: an open Hold or Crack closes without a reveal; the end card's best caller (Summary::BestCaller, BestCalls,
- *  BestCallsOf) and Rail Call's facts (RailCalled, RailReach, RailArrived). The games are over until the next Begin. */
+/** Stop: an open Hold or Crack closes without a reveal (a booked call gives nothing); the end card's best caller
+ *  (Summary::BestCaller, BestCalls, BestCallsOf) and Rail Call's facts (RailCalled, RailReach, RailArrived). The games are over
+ *  until the next Begin. */
 void Close(PlayState& P, Summary& S);
 
 /** Whether Name was Nodded tonight (View::MemberFlags' bit 4, the Room's per-member cache). */

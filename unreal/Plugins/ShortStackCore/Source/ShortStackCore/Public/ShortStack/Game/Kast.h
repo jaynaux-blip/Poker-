@@ -983,5 +983,10 @@ private:
 /** C-K's L11 (appended): the Poker channels live at World, the directory's and the network's (Browse's "N channels live" off
  *  air; while live, View::LiveChannels adds yours). */
 SHORTSTACKCORE_API int ChannelsLive(double World);
+
+/** The C-K PIE fix (F1, appended): StreamLog::PeakMoment and Summary::PeakMoment for a peak a raid from the network brought (the
+ *  network's raids, the welcome raid): "Peak 41 on a raid, 9:48 PM". A Moment names the moment that brought the peak (a moment
+ *  raid's, a big name's, the Broadcast's final table, a deep run's stage), -1 none. */
+constexpr int PeakRaid = -2;
 } // namespace kast
 } // namespace ss

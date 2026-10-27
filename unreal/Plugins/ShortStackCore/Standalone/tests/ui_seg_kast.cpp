@@ -354,6 +354,46 @@ void Chat(KDesk& D, const std::vector<std::pair<std::string, std::string>>& Line
 	}
 }
 
+/** A chat line landing at the desk's clock, its id past every line in chat (as the stream's own ids run: the C-K PIE round's F3). */
+void Land(KDesk& D, const std::string& Who, const std::string& Text, kast::LineKind Kind = kast::LineKind::Chat)
+{
+	kast::ChatMsg M;
+	M.Id = 800000;
+	for (const kast::ChatMsg& Old : D.S.Stream.Chat)
+	{
+		M.Id = std::max(M.Id, Old.Id);
+	}
+	++M.Id;
+	M.Who = Who;
+	M.Text = Text;
+	M.Kind = Kind;
+	M.NameColor = 0x51cf66;
+	M.At = D.Now;
+	D.S.Stream.Chat.push_back(M);
+}
+
+/** One frame with the pointer at X, Y (held down, pressed or released as given). */
+DrawList PtrAt(KDesk& D, float X, float Y, bool Down = false, bool Pressed = false, bool Released = false)
+{
+	D.RL.UI.Ptr.Active = true;
+	D.RL.UI.Ptr.X = X;
+	D.RL.UI.Ptr.Y = Y;
+	D.RL.UI.Ptr.Down = Down;
+	D.RL.UI.Ptr.Pressed = Pressed;
+	D.RL.UI.Ptr.Released = Released;
+	return D.Frame();
+}
+
+/** Chat's 140 (Stream::Say's cap): the oldest lines leave as new ones come. */
+void Cap140(KDesk& D)
+{
+	std::vector<kast::ChatMsg>& Ch = D.S.Stream.Chat;
+	if (Ch.size() > 140)
+	{
+		Ch.erase(Ch.begin(), Ch.begin() + static_cast<std::ptrdiff_t>(Ch.size() - 140));
+	}
+}
+
 /** The night of the mockups' first screen: 12 watching, 5 chatting, three hours into a long MTT, Running hot. */
 kast::View MidMtt()
 {
@@ -450,7 +490,8 @@ void OneCount()
 	Check(RunIn(L, copy::SourceCount(kast::View::Source::Members, 5), D.M, StudioTile0, true).Found && RunIn(L, copy::SourceCount(kast::View::Source::Video, 1), D.M, StudioTile0, true).Found,
 		"count: where they came from, the top four sources");
 	Check(RunIn(L, copy::Chatting(5), D.M, StudioTile0).Found, "count: 5 chatting on the tile");
-	Check(RunIn(L, copy::ForecastShort(8.0, 14.0), D.M, StudioTile0).Found, "count: the forecast band on the night's graph");
+	// The band's label reads as the go-live forecast (the C-K PIE round's F5): "forecast was 8-14", ForecastShort's digits.
+	Check(RunIn(L, "forecast was 8-14", D.M, StudioTile0).Found && !RunIn(L, copy::ForecastShort(8.0, 14.0), D.M, StudioTile0).Found, "count: the forecast band on the night's graph (forecast was 8-14)");
 	Check(RunIn(L, copy::Watching(12), D.M, StudioChat).Found && RunIn(L, copy::Chatting(5), D.M, StudioChat, true).Found, "count: Studio's chat header reads 12 watching · 5 chatting");
 	// The Chat tab carries no number (C12): only its word in the tab row's left run.
 	bool TabNumber = false;
@@ -979,6 +1020,68 @@ void TableSide()
 		}
 		D.S.Stream.Chat = Was;
 	}
+	// The C-K PIE round's F3 on StreamSide (every site's Stream tab draws Studio's chat): under the pointer the list holds still while
+	// a line lands underneath; moving off resumes and jumps to the newest.
+	{
+		Chat(D, {{"side_sweat", "this is it"}});
+		D.Now += 0.5;
+		L = D.Frame();
+		const KRun Nm = RunIn(L, "side_sweat:", D.M, Side);
+		Check(Nm.Found, "side pause: a chatter's name in StreamSide's chat");
+		D.RL.UI.Ptr.Active = true;
+		D.RL.UI.Ptr.X = Nm.X + Nm.W / 2.0f;
+		D.RL.UI.Ptr.Y = Nm.Base - Nm.Size * 0.35f;
+		D.Now += 1.0 / 30.0;
+		D.Frame();
+		kast::ChatMsg M;
+		for (const kast::ChatMsg& Old : D.S.Stream.Chat)
+		{
+			M.Id = std::max(M.Id, Old.Id + 1); // past every line in chat, as the stream's own ids run
+		}
+		M.Who = "late_rail";
+		M.Text = "made it for the final table";
+		M.NameColor = 0x51cf66;
+		M.At = D.Now;
+		D.S.Stream.Chat.push_back(M);
+		D.Now += 1.0 / 30.0;
+		L = D.Shot("table_chat_paused");
+		Keep(L);
+		const KRun Still = RunIn(L, "side_sweat:", D.M, Side);
+		Check(Still.Found && std::fabs(Still.Base - Nm.Base) < 0.01f && !RunIn(L, "late_rail:", D.M, Side).Found && RunIn(L, kw::KastChatPausedLabel(1), D.M, Side).Found,
+			"side pause: StreamSide's chat holds still under the pointer (Chat paused · 1 new)");
+		D.Away();
+		D.Now += 0.5;
+		L = D.Frame();
+		Check(RunIn(L, "late_rail:", D.M, Side).Found && !RunIn(L, "Chat paused", D.M, Side, true).Found, "side pause: moving off resumes and jumps to the newest");
+	}
+	// The pause's own cost (§9.3's budget), on StreamSide where no stream preview shares the frame: a busy chat (140 lines) live with
+	// the pointer away, then paused under the pointer with 20 lines underneath.
+	{
+		const std::vector<kast::ChatMsg> Was = D.S.Stream.Chat;
+		for (int K = 0; K < 140; ++K)
+		{
+			Land(D, "rail_" + std::to_string(K), "gl gl final table " + std::to_string(K));
+		}
+		Cap140(D);
+		D.Now += 0.5;
+		L = D.Frame();
+		Time(D, "table_chat_busy");
+		const KRun Nm = RunIn(L, "rail_136:", D.M, Side); // StreamSide's list under the strip, the slot and the chips shows a few lines
+		Check(Nm.Found, "side pause: a name in the busy StreamSide chat");
+		D.Now += 1.0 / 30.0;
+		PtrAt(D, Nm.X + Nm.W / 2.0f, Nm.Base - Nm.Size * 0.35f);
+		for (int K = 0; K < 20; ++K)
+		{
+			Land(D, "late_" + std::to_string(K), "made it");
+		}
+		Cap140(D);
+		D.Now += 1.0 / 30.0;
+		L = PtrAt(D, Nm.X + Nm.W / 2.0f, Nm.Base - Nm.Size * 0.35f);
+		Check(RunIn(L, kw::KastChatPausedLabel(20), D.M, Side).Found, "side pause: 20 new under the pointer before the bench");
+		Time(D, "table_chat_paused");
+		D.Away();
+		D.S.Stream.Chat = Was;
+	}
 	// The stream preview draws stills: Studio's tile counts up from 118 while StreamSide inside the preview is already at 130.
 	D.Studio();
 	D.Frame();
@@ -1004,6 +1107,55 @@ void TableSide()
 	// The Studio at a table (C-K's M5: the bench the gate lacked), the final table's view with Hold or Crack open.
 	D.Shot("studio_table");
 	Time(D, "studio_table");
+	// The C-K PIE round's F3, Previewing never pauses: with the pointer on Studio's chat its list holds still, while the stream's own
+	// chat (StreamSide inside the preview: the viewers don't see the streamer's pointer) shows the line that just landed.
+	{
+		D.RL.UI.Ptr.Active = true;
+		D.RL.UI.Ptr.X = 1300.0f;
+		D.RL.UI.Ptr.Y = 600.0f;
+		D.Now += 1.0 / 30.0;
+		D.Frame();
+		kast::ChatMsg M;
+		for (const kast::ChatMsg& Old : D.S.Stream.Chat)
+		{
+			M.Id = std::max(M.Id, Old.Id + 1); // past every line in chat, as the stream's own ids run
+		}
+		M.Who = "fresh_face";
+		M.Text = "just got here";
+		M.NameColor = 0x51cf66;
+		M.At = D.Now;
+		D.S.Stream.Chat.push_back(M);
+		D.Now += 0.1; // past the capture's frame time: the preview's client is drawn again
+		L = D.Shot("studio_table_paused");
+		Keep(L);
+		Check(!RunIn(L, "fresh_face:", D.M, StudioChat).Found && RunIn(L, kw::KastChatPausedLabel(1), D.M, StudioChat).Found && RunIn(L, "fresh_face:", D.M, StudioPrev).Found,
+			"pause: Studio's chat holds still under the pointer while the preview's StreamSide runs live (Previewing never pauses)");
+		D.Away();
+	}
+	// review-pie-ui (F3 as the game delivers a click): back at the table, a quick click on a name in StreamSide's chat (its press and
+	// release reach the laptop in one draw) opens the name menu there too; a quick click off the menu closes it.
+	{
+		D.RL.OpenApp(ss::ui::RiverLine::App::RiverLine, D.Now);
+		D.S.Tab = ss::RightTab::Stream;
+		Chat(D, {{"side_quick", "gl on the final table"}});
+		D.Now += 0.5;
+		L = D.Frame();
+		const KRun Nm = RunIn(L, "side_quick:", D.M, Side);
+		const float Qx = Nm.X + Nm.W / 2.0f;
+		const float Qy = Nm.Base - Nm.Size * 0.35f;
+		D.Now += 1.0 / 30.0;
+		PtrAt(D, Qx, Qy);
+		D.Now += 1.0 / 30.0;
+		PtrAt(D, Qx, Qy, false, true, true);
+		D.Now += 1.0 / 30.0;
+		L = PtrAt(D, Qx, Qy);
+		Check(Nm.Found && kw::KastNameMenuOpen(&D.RL) && RunIn(L, copy::NodButton(), D.M, Side).Found && RunIn(L, "side_quick", D.M, Side).Found,
+			"side pause: a quick click on a name opens its menu in StreamSide too");
+		D.Now += 1.0 / 30.0;
+		PtrAt(D, Qx, Qy, false, true, true);
+		Check(!kw::KastNameMenuOpen(&D.RL), "side pause: a quick click off the menu closes it");
+		D.Away();
+	}
 }
 
 // ------------------------------------------------------------------ K11: the name menu, Nod, Thank's taper
@@ -1882,19 +2034,26 @@ void FixCopy()
 	const std::string Fl = copy::NewFollowersLine(S.Follows, false);
 	Check(RunIn(L, Fl, D.M).Found, "copy: NEW FOLLOWERS is KastCopy's line (+N)");
 	Check(Overflows(L, {440.0f, 62.0f, 720.0f, 900.0f}, D.M, "end card (firsts)") == 0, "copy: the card with its firsts fits");
-	// A night under 60 world minutes commits no Heat and reads no forecast (§7): the Room's fallback "Steady: nights near your
-	// forecast" never sits beside the card's UNDER YOUR FORECAST (riverline_ui's kast_summary, a 9-minute night); from 60 on the
-	// Room's line is the card's.
+	// A night under 60 world minutes commits only a deep run's news (the C-K PIE fix, F4): the Room's line for it is the night's own
+	// (the run that counted, or why Heat didn't move), drawn beside the card's UNDER YOUR FORECAST, never "Steady" (riverline_ui's
+	// kast_summary, a 9-minute night); from 60 on the Room's line is the card's as before.
 	kast::Summary Sh = S;
 	Sh.Minutes = 9.42;
 	Sh.Avg = 11;
 	Sh.Fc = {13.0, 17.5, 22.0};
-	Sh.Why = {copy::WhySteady(), std::string()};
+	Sh.Why = {copy::WhyShort(), std::string()};
 	D.S.Stream.Last = Sh;
 	D.Studio();
 	DrawList Ls = D.Frame();
-	Check(RunIn(Ls, "UNDER YOUR FORECAST", D.M).Found && !RunIn(Ls, copy::WhySteady(), D.M, {0.0f, 0.0f, 0.0f, 0.0f}, true).Found,
-		"copy: a night under 60 minutes keeps the channel's own why (no Steady beside UNDER YOUR FORECAST)");
+	Check(RunIn(Ls, "UNDER YOUR FORECAST", D.M).Found && RunIn(Ls, copy::WhyShort(), D.M, {0.0f, 0.0f, 0.0f, 0.0f}, true).Found &&
+			  !RunIn(Ls, copy::WhySteady(), D.M, {0.0f, 0.0f, 0.0f, 0.0f}, true).Found,
+		"copy: a night under 60 minutes draws the Room's own short-night line (why Heat didn't move; no Steady beside UNDER YOUR FORECAST)");
+	Sh.Why = {copy::WhyRun(kast::growth::RunStage::FinalTable, 980, 0, std::string()), std::string()};
+	Sh.GainSoFar = 25.0;
+	D.S.Stream.Last = Sh;
+	DrawList Lf = D.Frame();
+	Check(RunIn(Lf, Sh.Why[0], D.M, {0.0f, 0.0f, 0.0f, 0.0f}, true).Found && !RunIn(Lf, copy::WhyNew(), D.M, {0.0f, 0.0f, 0.0f, 0.0f}, true).Found,
+		"copy: a short night at a final table names its run on the card (never \"New channel\")");
 	Sh.Minutes = 60.0;
 	Sh.Why = {copy::WhyUnderForecast(37), std::string()};
 	D.S.Stream.Last = Sh;
@@ -2130,6 +2289,325 @@ void EdgeCapture()
 	}
 }
 
+// ------------------------------------------------------------------ the C-K PIE round (pie-ui): F3 chat's pause, F5 the forecast label
+
+/** Studio's chat list (RiverLine::StreamChat's Body: the panel less its tabs and message bar). */
+const Rect StudioLines{1052.0f, 126.0f, 520.0f, 764.0f};
+
+/** F3 (PIE_CK_NOTES): in a busy chat a name moved between press and release, so Nod, Timeout and Promote couldn't be opened. Chat
+ *  now pauses under the pointer, as real platforms' does: lines keep landing underneath, the list holds still, "Chat paused · N new"
+ *  at its foot; moving off (or a press on the pill) resumes and jumps to the newest. */
+void PieChatPause()
+{
+	KDesk D("kast-ui-pie-pause");
+	Check(D.Live(), "pause: live");
+	D.Studio();
+	kast::View V = MidMtt();
+	V.Count = V.ShownCount = 25;
+	V.Chatting = 25;
+	D.S.Stream.DebugView(V);
+	D.S.Stream.Chat.clear();
+	// A busy room (the PIE's 25 chatters): 40 lines down, then one a frame at the laptop's 30. A name a line, so the menu's name
+	// says which line took the press.
+	int Line = 0;
+	auto Busy = [&](int N) {
+		for (int K = 0; K < N; ++K, ++Line)
+		{
+			Land(D, "railbird_" + std::to_string(Line), "gl on the bubble " + std::to_string(Line));
+		}
+	};
+	auto Name = [&](int K) { return "railbird_" + std::to_string(K) + ":"; };
+	const double Fr = 1.0 / 30.0;
+	Busy(40);
+	D.Now += 0.5;
+	DrawList L = D.Frame();
+	Check(RunIn(L, Name(39), D.M, StudioLines).Found && !RunIn(L, kw::KastChatPausedLabel(0), D.M, StudioChat, true).Found, "pause: with the pointer away chat runs live (the newest at the foot, no pill)");
+	const KRun Pick = RunIn(L, Name(30), D.M, StudioLines);
+	Check(Pick.Found, "pause: a chatter's name up the busy list");
+	const float Px = Pick.X + Pick.W / 2.0f;
+	const float Py = Pick.Base - Pick.Size * 0.35f;
+	// The pointer comes onto chat; three lines land, one a frame: the list holds still.
+	D.Now += Fr;
+	PtrAt(D, Px, Py);
+	for (int K = 0; K < 3; ++K)
+	{
+		Busy(1);
+		D.Now += Fr;
+		L = PtrAt(D, Px, Py);
+	}
+	const KRun Held = RunIn(L, Name(30), D.M, StudioLines);
+	Check(Held.Found && std::fabs(Held.Base - Pick.Base) < 0.01f && std::fabs(Held.X - Pick.X) < 0.01f && RunIn(L, Name(39), D.M, StudioLines).Found && !RunIn(L, Name(40), D.M, StudioChat).Found,
+		"pause: under the pointer the list stops moving while lines land underneath");
+	Check(kw::KastChatPausedLabel(3) == "Chat paused \xC2\xB7 3 new" && RunIn(L, kw::KastChatPausedLabel(3), D.M, StudioLines).Found, "pause: the pill reads Chat paused · 3 new");
+	L = D.Shot("pie_chat_paused");
+	Keep(L);
+	// Press and release on that name with a line landing every frame between them: the menu opens for that name.
+	Busy(1);
+	D.Now += Fr;
+	PtrAt(D, Px, Py, true, true, false);
+	Busy(1);
+	D.Now += Fr;
+	PtrAt(D, Px, Py, true, false, false);
+	Busy(1);
+	D.Now += Fr;
+	PtrAt(D, Px, Py, false, false, true);
+	D.Now += Fr;
+	L = D.Shot("pie_chat_paused_menu");
+	Keep(L);
+	Check(kw::KastNameMenuOpen(&D.RL) && RunIn(L, "railbird_30", D.M, StudioChat).Found && !RunIn(L, "railbird_29", D.M, StudioChat).Found && !RunIn(L, "railbird_31", D.M, StudioChat).Found &&
+			  RunIn(L, copy::NodButton(), D.M, StudioChat).Found && RunIn(L, "Timeout", D.M, StudioChat).Found && RunIn(L, "Promote to mod", D.M, StudioChat).Found,
+		"pause: hover, press a name in a busy chat: the menu opens for that name");
+	Check(RunIn(L, kw::KastChatPausedLabel(6), D.M, StudioLines).Found, "pause: 6 new under the pill");
+	// The open menu holds the pause with the pointer off chat; a press elsewhere closes it, and chat jumps to the newest.
+	Busy(1);
+	D.Now += Fr;
+	L = PtrAt(D, 600.0f, 300.0f);
+	const KRun Menu = RunIn(L, Name(30), D.M, StudioLines);
+	Check(Menu.Found && std::fabs(Menu.Base - Pick.Base) < 0.01f && RunIn(L, kw::KastChatPausedLabel(7), D.M, StudioLines).Found, "pause: the open name menu holds it");
+	PtrAt(D, 600.0f, 300.0f, true, true, false);
+	D.Now += Fr;
+	PtrAt(D, 600.0f, 300.0f, false, false, true);
+	D.Now += Fr;
+	L = PtrAt(D, 600.0f, 300.0f);
+	const KRun Moved = RunIn(L, Name(30), D.M, StudioLines);
+	Check(!kw::KastNameMenuOpen(&D.RL) && RunIn(L, Name(Line - 1), D.M, StudioLines).Found && !RunIn(L, "Chat paused", D.M, StudioChat, true).Found && Moved.Found && Moved.Base < Pick.Base - 100.0f,
+		"pause: moving off resumes and jumps to the newest (the list moved on 7 lines)");
+	// The Answer button stays where it was pressed too.
+	Land(D, "asker_ann", "what would you do with AQ under the gun?", kast::LineKind::Question);
+	const int Asked = D.S.Stream.Chat.back().Id;
+	Busy(2);
+	D.Now += 0.5;
+	L = PtrAt(D, 600.0f, 300.0f);
+	const KRun Ans = RunIn(L, "Answer", D.M, StudioLines);
+	Check(Ans.Found, "pause: the question's Answer button");
+	const float Ax = Ans.X + 2.0f;
+	const float Ay = Ans.Base - 4.0f;
+	D.Now += Fr;
+	PtrAt(D, Ax, Ay);
+	Busy(1);
+	D.Now += Fr;
+	PtrAt(D, Ax, Ay, true, true, false);
+	Busy(1);
+	D.Now += Fr;
+	PtrAt(D, Ax, Ay, false, false, true);
+	bool Answered = false;
+	for (const kast::ChatMsg& M : D.S.Stream.Chat)
+	{
+		Answered = Answered || (M.Id == Asked && M.Answered);
+	}
+	Check(Answered && !kw::KastNameMenuOpen(&D.RL), "pause: Answer takes its press in a busy chat");
+	// A press on the pill resumes and jumps to the newest; chat then runs live under the still pointer, and pauses again when the
+	// pointer moves over the lines. The line under the pill takes no press.
+	D.Away();
+	D.Now += 0.5;
+	D.Frame();
+	D.Now += Fr;
+	PtrAt(D, Px, Py);
+	Busy(2);
+	D.Now += Fr;
+	L = PtrAt(D, Px, Py);
+	const KRun PillRun = RunIn(L, kw::KastChatPausedLabel(2), D.M, StudioLines);
+	Check(PillRun.Found, "pause: the pill (2 new)");
+	const float Qx = PillRun.X + PillRun.W / 2.0f;
+	const float Qy = PillRun.Base - 4.0f;
+	D.Now += Fr;
+	PtrAt(D, Qx, Qy);
+	D.Now += Fr;
+	PtrAt(D, Qx, Qy, true, true, false);
+	Busy(1);
+	D.Now += Fr;
+	PtrAt(D, Qx, Qy, false, false, true);
+	D.Now += Fr;
+	L = PtrAt(D, Qx, Qy);
+	Check(RunIn(L, Name(Line - 1), D.M, StudioLines).Found && !RunIn(L, "Chat paused", D.M, StudioChat, true).Found && !kw::KastNameMenuOpen(&D.RL),
+		"pause: a press on the pill resumes and jumps to the newest (and opens no menu under it)");
+	Busy(1);
+	D.Now += Fr;
+	L = PtrAt(D, Qx, Qy);
+	Check(RunIn(L, Name(Line - 1), D.M, StudioLines).Found && !RunIn(L, "Chat paused", D.M, StudioChat, true).Found, "pause: live under the still pointer after the pill");
+	D.Now += Fr;
+	PtrAt(D, Px, Py);
+	Busy(1);
+	D.Now += Fr;
+	L = PtrAt(D, Px, Py);
+	Check(!RunIn(L, Name(Line - 1), D.M, StudioLines).Found && RunIn(L, kw::KastChatPausedLabel(1), D.M, StudioLines).Found, "pause: the pointer moving over the lines pauses it again");
+	// The stream preview never pauses, and its draws leave the laptop's pause as it was.
+	{
+		DrawList Lp;
+		ss::ui::Canvas Cv(Lp, D.M, ss::ui::RiverLine::Width, ss::ui::RiverLine::Height, 1.0f);
+		kw::KastFrame Fp{D.RL, Cv, D.RL.UI, D.S, D.S.WorldMinutes(), D.Now, true};
+		const kw::KastChatHold Hp = kw::KastChatPause(Fp, StudioLines, true);
+		D.Now += Fr;
+		L = PtrAt(D, Px, Py);
+		Check(!Hp.Paused && RunIn(L, kw::KastChatPausedLabel(1), D.M, StudioLines).Found, "pause: a Previewing draw never pauses and leaves the laptop's pause as it was");
+	}
+	// A long hover in a busy room: the pause holds while any of its lines is still in chat's 140, then takes the newest again.
+	auto Cap = [&]() { Cap140(D); };
+	D.Away();
+	D.Now += 0.5;
+	D.Frame();
+	D.Now += Fr;
+	L = PtrAt(D, Px, Py);
+	const KRun Top = RunIn(L, Name(Line - 1), D.M, StudioLines);
+	const int Was = Line - 1;
+	Busy(100);
+	Cap();
+	D.Now += Fr;
+	L = PtrAt(D, Px, Py);
+	const KRun Still = RunIn(L, Name(Was), D.M, StudioLines);
+	Check(Top.Found && Still.Found && std::fabs(Still.Base - Top.Base) < 0.01f && RunIn(L, kw::KastChatPausedLabel(100), D.M, StudioLines).Found, "pause: 100 lines later it holds (Chat paused · 100 new)");
+	Busy(60);
+	Cap();
+	D.Now += Fr;
+	L = PtrAt(D, Px, Py);
+	Check(RunIn(L, Name(Line - 1), D.M, StudioLines).Found && RunIn(L, kw::KastChatPausedLabel(0), D.M, StudioLines).Found, "pause: once its lines have left chat's 140 it takes the newest");
+	// No pause carries across a gap in chat's draws (the laptop put away, another page): it takes the newest when chat is back.
+	Busy(1);
+	D.Now += 2.0;
+	L = PtrAt(D, Px, Py);
+	Check(RunIn(L, Name(Line - 1), D.M, StudioLines).Found && RunIn(L, kw::KastChatPausedLabel(0), D.M, StudioLines).Found, "pause: a gap in chat's draws starts a fresh pause at the newest");
+	// The frame budget (§9.3): Studio with a busy chat paused under the pointer (140 lines, 40 of them underneath), beside the same
+	// chat live with the pointer away (the A/B).
+	D.Away();
+	D.Now += 0.5;
+	D.Frame();
+	Time(D, "studio_chat_busy");
+	D.Now += Fr;
+	PtrAt(D, Px, Py);
+	Busy(40);
+	Cap();
+	D.Now += Fr;
+	L = PtrAt(D, Px, Py);
+	Check(RunIn(L, kw::KastChatPausedLabel(40), D.M, StudioLines).Found, "pause: 40 new before the bench");
+	D.RL.UI.Ptr.Active = true;
+	Time(D, "studio_chat_paused");
+	D.Away();
+}
+
+/** F5 (PIE_CK_NOTES): "forecast 1-2" beside "36 watching" mid-surge read oddly. The band's label reads as the go-live forecast,
+ *  and steps aside for "above your forecast" (KastCopy's verdict) once the room has beaten it by 2x; the band stays. */
+void PieForecastLabel()
+{
+	const kast::growth::Band One{1.2, 1.6, 2.4};
+	Check(kw::KastForecastLabel(One, 0, 0) == "forecast was 1-2" && kw::KastForecastLabel(One, 1, 1) == "forecast was 1-2" && kw::KastForecastLabel(One, 3, 3) == "forecast was 1-2",
+		"forecast: under 2x the band's top the label is the go-live forecast (forecast was 1-2)");
+	Check(kw::KastForecastLabel(One, 4, 4) == copy::ForecastVerdict(4.0, One) && kw::KastForecastLabel(One, 36, 36) == "above your forecast", "forecast: at 2x (4 against 1-2) it steps aside: above your forecast");
+	Check(kw::KastForecastLabel(One, 3, 36) == "above your forecast" && kw::KastForecastLabel(One, 2, 36) == "forecast was 1-2",
+		"forecast: beaten tonight (peak 36), it stays aside while the room is above the band and comes back inside it");
+	const kast::growth::Band Mid{8.0, 11.0, 14.0};
+	Check(kw::KastForecastLabel(Mid, 12, 13) == "forecast was 8-14" && copy::ForecastShort(8.0, 14.0) == "forecast 8-14", "forecast: ForecastShort's digits (forecast was 8-14)");
+	Check(kw::KastForecastLabel({1.6, 1.8, 2.2}, 1, 1) == "forecast was 2" && kw::KastForecastLabel({1180.0, 1500.0, 1900.4}, 1400, 1400) == "forecast was 1,180-1,900",
+		"forecast: one number when the band's ends round together; grouped digits");
+	Check(kw::KastForecastLabel({0.1, 0.2, 0.4}, 1, 1) == "forecast was 0" && kw::KastForecastLabel({0.1, 0.2, 0.4}, 2, 2) == "above your forecast", "forecast: a band of 0 steps aside at 2");
+	// On the tile: the PIE's mid-surge, 36 watching against a go-live forecast of 1-2.
+	KDesk D("kast-ui-pie-forecast");
+	Check(D.Live(), "forecast: live");
+	D.Studio();
+	kast::View V = MidMtt();
+	V.Count = V.ShownCount = 36;
+	V.Fc = One;
+	D.S.Stream.DebugView(V);
+	Graph(D, {0, 1, 1, 2, 2, 5, 36});
+	D.S.Stream.Peak = 36;
+	D.Now += 1.0;
+	DrawList L = D.Shot("pie_viewers_above");
+	Keep(L);
+	const KRun Above = RunIn(L, "above your forecast", D.M, StudioTile0);
+	Check(Above.Found && !RunIn(L, "forecast 1-2", D.M, StudioTile0).Found && !RunIn(L, "forecast was 1-2", D.M, StudioTile0).Found, "forecast: mid-surge the tile reads above your forecast");
+	Check(Overflows(L, StudioTile0, D.M, "VIEWERS tile") == 0, "forecast: the label fits the tile");
+	V.Count = V.ShownCount = 2;
+	D.S.Stream.DebugView(V);
+	D.S.Stream.Peak = 2;
+	Graph(D, {0, 1, 1, 2, 2});
+	D.Now += 1.0;
+	D.Frame(); // the count steps down from 36 over 0.3 real s
+	D.Now += 0.5;
+	L = D.Shot("pie_viewers_forecast");
+	Keep(L);
+	const KRun Was = RunIn(L, "forecast was 1-2", D.M, StudioTile0);
+	Check(Was.Found && Was.Base > StudioTile0.Y + 122.0f && Was.Base < StudioTile0.Y + 164.0f, "forecast: inside the band the tile reads forecast was 1-2, on the graph");
+}
+
+/** review-pie-ui (the C-K PIE round's adversarial review of F3): the pause as the game feeds it. The stream sets many lines to land
+ *  a moment later (Msg.At = In.Real + Delay: Dee's hello, a raider's thanks, a moment's reactions), so their ids are already in chat
+ *  when a pause begins: they land underneath. The laptop draws at 30 and latches the pointer between draws, so a press and its
+ *  release that fall between two draws (a quick click, a touchpad tap, a scripted click) reach it in one draw: that opens the name
+ *  menu and keeps it open. The pill over a long name takes the press. */
+void PieReview()
+{
+	KDesk D("kast-ui-pie-review");
+	Check(D.Live(), "review: live");
+	D.Studio();
+	kast::View V = MidMtt();
+	V.Count = V.ShownCount = 25;
+	V.Chatting = 25;
+	D.S.Stream.DebugView(V);
+	D.S.Stream.Chat.clear();
+	const double Fr = 1.0 / 30.0;
+	for (int K = 0; K < 30; ++K)
+	{
+		Land(D, "railbird_" + std::to_string(K), "gl on the bubble " + std::to_string(K));
+	}
+	Land(D, "late_typer", "ship it");
+	D.S.Stream.Chat.back().At = D.Now + 0.4; // set to land 0.4 s from now
+	D.Now += Fr;
+	DrawList L = D.Frame();
+	const KRun Pick = RunIn(L, "railbird_25:", D.M, StudioLines);
+	Check(Pick.Found && !RunIn(L, "late_typer:", D.M, StudioLines).Found, "review: a line set to land later isn't in the list yet");
+	const float Px = Pick.X + Pick.W / 2.0f;
+	const float Py = Pick.Base - Pick.Size * 0.35f;
+	D.Now += Fr;
+	PtrAt(D, Px, Py);
+	for (int K = 0; K < 18; ++K) // 0.6 s at the laptop's 30
+	{
+		D.Now += Fr;
+		L = PtrAt(D, Px, Py);
+	}
+	const KRun Held = RunIn(L, "railbird_25:", D.M, StudioLines);
+	Check(Held.Found && std::fabs(Held.Base - Pick.Base) < 0.01f && !RunIn(L, "late_typer:", D.M, StudioLines).Found && RunIn(L, kw::KastChatPausedLabel(1), D.M, StudioLines).Found,
+		"review: a line already in chat that lands during the pause lands underneath (Chat paused · 1 new); the list holds");
+	// A quick click: its press and release reach the laptop in one draw.
+	D.Now += Fr;
+	PtrAt(D, Px, Py, false, true, true);
+	D.Now += Fr;
+	L = PtrAt(D, Px, Py);
+	Check(kw::KastNameMenuOpen(&D.RL) && RunIn(L, "railbird_25", D.M, StudioChat).Found && RunIn(L, copy::NodButton(), D.M, StudioChat).Found,
+		"review: a quick click on a name (press and release in one draw) opens its menu, and it stays open");
+	D.Now += Fr;
+	PtrAt(D, 600.0f, 300.0f, false, true, true);
+	Check(!kw::KastNameMenuOpen(&D.RL), "review: a quick click elsewhere closes it");
+	// A long name under the pill: the press there is the pill's (resume, jump to the newest), never the name's.
+	D.Away();
+	D.Now += 0.6;
+	D.Frame();
+	Land(D, "railbird_with_the_longest_name", "gl gl");
+	D.Now += 0.5;
+	D.Frame();
+	D.Now += Fr;
+	PtrAt(D, Px, Py);
+	Land(D, "railbird_newest", "gl");
+	D.Now += Fr;
+	L = PtrAt(D, Px, Py);
+	const KRun Long = RunIn(L, "railbird_with_the_longest_name:", D.M, StudioLines);
+	const KRun PillLabel = RunIn(L, kw::KastChatPausedLabel(1), D.M, StudioLines);
+	const Rect PillR{PillLabel.X - 30.0f, PillLabel.Base - 17.5f, PillLabel.W + 40.0f, 26.0f};
+	const Rect NameR{Long.X - 2.0f, Long.Base - Long.Size, Long.W + 4.0f, Long.Size * 1.35f};
+	const float Ox0 = std::max(PillR.X, NameR.X) + 2.0f, Ox1 = std::min(PillR.X + PillR.W, NameR.X + NameR.W) - 2.0f;
+	const float Oy0 = std::max(PillR.Y, NameR.Y) + 2.0f, Oy1 = std::min(PillR.Y + PillR.H, NameR.Y + NameR.H) - 2.0f;
+	Check(Long.Found && PillLabel.Found && !RunIn(L, "railbird_newest:", D.M, StudioLines).Found && Ox1 > Ox0 && Oy1 > Oy0, "review: the pill lies over the long name of the newest line it holds");
+	const float Qx = (Ox0 + Ox1) / 2.0f;
+	const float Qy = (Oy0 + Oy1) / 2.0f;
+	D.Now += Fr;
+	PtrAt(D, Qx, Qy);
+	D.Now += Fr;
+	PtrAt(D, Qx, Qy, false, true, true);
+	D.Now += Fr;
+	L = PtrAt(D, Qx, Qy);
+	Check(!kw::KastNameMenuOpen(&D.RL) && RunIn(L, "railbird_newest:", D.M, StudioLines).Found && !RunIn(L, "Chat paused", D.M, StudioChat, true).Found,
+		"review: a quick click on the pill over a name resumes chat and opens no menu");
+	D.Away();
+}
+
 void Budgets()
 {
 	// SPEC_CREATORS §9.3: each Kast page <= 1.5 ms warm, <= 2.0 ms at a final table with the Broadcast and Hold or Crack open.
@@ -2179,6 +2657,9 @@ void SegKast()
 	kast_seg::FixHeadlines();
 	kast_seg::FixL11();
 	kast_seg::FixCopy();
+	kast_seg::PieChatPause();
+	kast_seg::PieForecastLabel();
+	kast_seg::PieReview();
 	kast_seg::Copy();
 	kast_seg::Budgets();
 	std::printf("  kast-ui: %d checks\n", kast_seg::Checks);

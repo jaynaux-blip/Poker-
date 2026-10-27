@@ -2,7 +2,7 @@
 // so the widgets are free functions here rather than members). RiverLineKast.cpp's members hand each one a KastFrame (the
 // laptop's canvas, pointer, session and clock) and the widget draws from the stream's const kast::View, the stream's last
 // Summary or the Channel offline, and acts only through the Session's verbs. The per-laptop state (the Nod menu, the toast
-// line, the forecast cache) lives in RiverLineKastGrowth.cpp by laptop, and ~RiverLine drops it (rlkast_detail::Forget,
+// line, the forecast cache, chat's pause) lives in RiverLineKastGrowth.cpp by laptop, and ~RiverLine drops it (rlkast_detail::Forget,
 // declared in RiverLineShared.h). While the laptop is Previewing every widget draws a still and changes nothing.
 #pragma once
 
@@ -124,6 +124,12 @@ float KastRankChip(Canvas& Cv, float Right, float Y, int Rank, int Of);
 
 /** Tile 0, VIEWERS: "12 watching", the top four sources, "5 chatting", the night's graph with the forecast band. */
 void KastViewersTile(KastFrame& F, const Rect& R);
+/**
+ * The band's label on the VIEWERS tile's graph (the C-K PIE round's F5): the go-live forecast as it was ("forecast was 8-14",
+ * the digits ForecastShort's), until the room has beaten it by 2x tonight (Count, the count shown, or Peak, the night's peak,
+ * at least twice the band's top as shown); from then, while Count is above the band, KastCopy's verdict "above your forecast".
+ */
+std::string KastForecastLabel(const kast::growth::Band& Fc, int Count, int Peak);
 /** Tile 4, HEAT: the tier word, tonight's ghost (live) or the top why line, the five-segment bar, the hype line. */
 void KastHeatTile(KastFrame& F, const Rect& R);
 /** The FOLLOWERS tile's foot before Affiliate ("Affiliate at 25", the real bar) and its bar's goal; Have the followers. */
@@ -204,6 +210,33 @@ void KastOpenNameMenu(KastFrame& F, const kast::ChatMsg& M, float X, float Y);
 bool KastNameMenu(KastFrame& F, const Rect& Bounds);
 /** Whether the name menu is open (chat lines don't take presses under it). */
 bool KastNameMenuOpen(const RiverLine* RL);
+/**
+ * Chat pauses under the pointer, as real platforms' chat does (the C-K PIE round's F3). While the pointer is over chat's lines
+ * (or the name menu is open on one of them), lines keep arriving underneath but the list stops moving: it shows only the lines
+ * that had landed when the pause began, so a name or an Answer stays where it was pressed. "Chat paused · 3 new" sits at the
+ * list's foot. Moving off resumes and jumps to the newest; so does a press on the pill, and then chat runs live until the pointer
+ * moves again over the lines. If every line the pause holds has scrolled out of chat's 140 (a long hover in a busy room), the
+ * pause takes the newest again. UI-only, per laptop (KwLaptop); while the laptop is Previewing chat never pauses and nothing
+ * here changes. Studio's chat and StreamSide's (every site's Stream tab) are RiverLine::StreamChat's, so both pause.
+ */
+struct KastChatHold
+{
+	bool Paused = false;
+	double At = 0.0; // the clock when the pause began: lines that had landed by then show...
+	int UpTo = 0;    // ...if they were in chat then (by id)
+	int New = 0;     // lines that have landed since, underneath (the pill's N)
+	Rect Pill;       // the pill at the list's foot (W 0 when not paused)
+};
+/** The pause for this draw of chat's list (Lines: the list's rect); once a draw, before the lines are laid out. */
+KastChatHold KastChatPause(KastFrame& F, const Rect& Lines, bool Interactive);
+/** Whether a line draws in the list: it has landed and, while paused, it is one the pause holds. */
+bool KastChatShows(const KastChatHold& H, const kast::ChatMsg& M, double Now);
+/** The pill ("Chat paused", "Chat paused · 3 new") over the list's foot; a press on it resumes and jumps to the newest. */
+void KastChatPausePill(KastFrame& F, const KastChatHold& H);
+/** The pill's words for N lines underneath. */
+std::string KastChatPausedLabel(int New);
+/** Whether the pointer is on the pill now (the line under it takes no press: the pill does). */
+bool KastChatPillHeld(const RiverLine* RL);
 
 // ------------------------------------------------------------------ the end card (K15 K17 K20, K8 K9 K10 K12)
 

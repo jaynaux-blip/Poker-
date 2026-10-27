@@ -421,8 +421,9 @@ void RiverLine::StreamChatLine(const kast::ChatMsg& M, float X, float Y, float W
 	}
 	const Color NameCol = M.Kind == kast::LineKind::Streamer ? KLime : Hex(M.NameColor);
 	const float NameDrawn = UI.Text(Name, Bx, Base, Ts(Size, 800, M.Deleted ? KDim : NameCol));
-	// The creator update (§5.3 K11): a chatter's name opens the menu (Nod, Timeout, Promote to mod).
-	const bool MenuOpen = rlkast_detail::KastNameMenuOpen(this);
+	// The creator update (§5.3 K11): a chatter's name opens the menu (Nod, Timeout, Promote to mod). A line under the paused chat's
+	// pill takes no press while the pointer is on the pill (the C-K PIE round's F3).
+	const bool MenuOpen = rlkast_detail::KastNameMenuOpen(this) || rlkast_detail::KastChatPillHeld(this);
 	if (Interactive && S.Streaming() && !M.Deleted && !M.Who.empty() && M.Who != S.HeroName && (M.Kind == kast::LineKind::Chat || M.Kind == kast::LineKind::Question))
 	{
 		const Rect NameR{Bx - 2.0f, Base - Size, NameDrawn + 4.0f, Size * 1.35f};
@@ -507,6 +508,9 @@ void RiverLine::StreamChat(const Rect& R, double Now, bool Interactive)
 	C->FillRect({R.X, R.Y + 48.0f, R.W, 1.0f}, KLine);
 	if (ChatTab == 0)
 	{
+		// The C-K PIE round's F3: under the pointer the list holds still ("Chat paused · 3 new") so a name or an Answer stays put
+		// between press and release; lines keep arriving underneath. Never in the stream preview.
+		const rlkast_detail::KastChatHold Hold = rlkast_detail::KastChatPause(F, Body, Interactive);
 		C->PushClip(Body);
 		if (St.Chat.empty())
 		{
@@ -518,7 +522,7 @@ void RiverLine::StreamChat(const Rect& R, double Now, bool Interactive)
 		for (size_t I = St.Chat.size(); I-- > 0 && Y > Body.Y;)
 		{
 			const kast::ChatMsg& M = St.Chat[I];
-			if (M.At > Now)
+			if (!rlkast_detail::KastChatShows(Hold, M, Now))
 			{
 				continue;
 			}
@@ -531,6 +535,7 @@ void RiverLine::StreamChat(const Rect& R, double Now, bool Interactive)
 			StreamChatLine(M, Body.X, Y, Body.W, Size, Interactive, Now, H, false);
 			C->SetAlpha(A0);
 		}
+		rlkast_detail::KastChatPausePill(F, Hold);
 		C->PopClip();
 		// The message bar. Thank chat tapers: its label adds "(chat heard you)" after two in ten world minutes (§5.3 K11).
 		const Rect Bar{R.X + 12.0f, R.Y + R.H - 48.0f, R.W - 24.0f, 38.0f};

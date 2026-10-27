@@ -276,6 +276,8 @@ struct RoomState : public RoomView
 		bool Decided = false;  // the party's follows (2 world minutes on, when the welcome window closes)
 		int At15 = -1;         // raiders still here at 15 minutes
 		int Followed = 0;
+		int Cause = PeakRaid;  // what brought it (the peak's label, C-K PIE F1): the moment of a moment raid, a big name's or the
+		                       // Broadcast; PeakRaid for the network's raids, the welcome raid and ss.Kast.Raid
 	};
 	std::vector<Raid> Raids;
 	struct Raider
@@ -337,6 +339,33 @@ struct RoomState : public RoomView
 	double GhostNow = 0.0;       // tonight's gain so far (the ghost fill)
 	int BestStageKind = -1;      // tonight's best armed stage (a growth::RunStage) and its field
 	int BestStageEntrants = 0;
+	// The C-K PIE fix (F4): a deep run's Heat news commits on a stream of any length, once a tournament. Tonight's armed runs by
+	// tournament (Key: Inputs::DeepTournament for the deepest run's own stages; "" for a stage with no id, which keeps the 60-minute
+	// rule), each its best RunValue x P, stage and field...
+	struct NightRun
+	{
+		std::string Key;
+		double Run = 0.0;
+		int Stage = -1;
+		int Entrants = 0;
+	};
+	std::vector<NightRun> NightRuns;
+	// ...and the runs whose news this session's streams already committed (their best RunValue x P counted; kept between streams,
+	// at most 16): a later stream of the same tournament adds only a deeper stage's news, so restarts farm nothing.
+	std::vector<std::pair<std::string, double>> NewsRuns;
+	/** Heat's Run for the commit (and the ghost): the best over tonight's runs, each tournament's against what its news already
+	 *  counted; a short stream (Short) counts only keyed runs. */
+	struct NewsPick
+	{
+		double Run = 0.0;      // what growth::Gain reads as Run (its news is max(0, Run - RunNorm))
+		int Stage = -1;        // the counted run's stage and field (the end card's why line)
+		int Entrants = 0;
+		bool Counted = false;  // a keyed run tonight that an earlier stream's news already covered
+		bool Usual = false;    // a keyed run tonight at or under the channel's RunNorm (no news for this channel)
+	};
+	NewsPick NewsRunOf(const Channel& Ch, bool Short) const;
+	/** Tonight's keyed runs into NewsRuns (Close, after the commit). */
+	void NoteNewsRuns();
 	// ss.Kast.Moment's held run: a deepest run at that stage until the stream ends
 	bool Held = false;
 	int HeldStage = 0;
@@ -351,6 +380,16 @@ struct RoomState : public RoomView
 	int PeakMoment = -1;
 	int LastMomentKind = -1;
 	double LastMomentAt = -1.0e9;
+	// The C-K PIE fix (F1): the peak's label names what brought the count up, not whatever moment came next. The latest armed stage
+	// of a deep run (its Sweat, railbirds and Run Alert bring people in over the next minutes) and its uptime...
+	int StageCauseKind = -1;
+	double StageCauseAt = -1.0e9;
+	std::vector<int> PeakParty; // ...and PeakCause's count of each raid's people here (kept between peaks: no allocation a minute)
+	/** What brought the room to a new peak at T (the label's Moment, PeakRaid, or -1): the raid party holding a fifth of the room or
+	 *  more that came in the last 10 world minutes (its Cause), else the latest armed stage in the last 10 or while the deep run is
+	 *  still live (RunDepth > 0: its Sweat; review-pie-room), else the moment the peak came at (the last one in the last 10), as
+	 *  before. */
+	int PeakCause(double T);
 	double StageHype = 0.0;             // the run's stage hits on the room clock (the room's hype: RoomHypeBase 14 + this)
 	double BigAtRoom = -1.0e9;          // the stream's last big moment (the giving hazard's bunching weight)...
 	int GiveMinutes = 0, NearMinutes = 0; // ...and its grid minutes so far, those inside 6 world minutes after one

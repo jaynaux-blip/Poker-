@@ -2751,6 +2751,531 @@ void ForecastLurkers()
 	Expect(First.Hi < 10.0, "forecast lurkers: a first stream's forecast has no lurkers in it");
 }
 
+// ------------------------------------------------------------------ the C-K PIE fixes (pie-room: F1, F4)
+
+/** A deepest run at the $11 Big Stack's final table (980 runners, P 1.40), its tournament's id Id ("" none). */
+void PieDeep(kast::Inputs& In, const std::string& Id)
+{
+	In.DeepTable = 0;
+	In.DeepTournament = Id;
+	In.DeepEvent = "$11 Big Stack";
+	In.DeepEntrants = 980;
+	In.Entrants = 980;
+	In.DeepRemaining = 9;
+	In.Remaining = 9;
+	In.DeepTableSize = 9;
+	In.BuyInCents = 1100;
+	In.Prestige = growth::Prestige(980, 1100, 0.0);
+	In.Depth = growth::Depth(980, 9);
+}
+
+/**
+ * F1 (PIE_CK_NOTES): a raid's alert and the count change together. A night at a table whose world clock moves a hand at a time
+ * (the session's: a tournament's clock steps when a hand ends, so the frames between see no world time pass), at 1x, Full and
+ * watch 4x, with the Broadcast at a final table (ss.Kast.Moment ft, mid-hand, as the PIE typed it), a moment raid mid-hand and the
+ * welcome raid on the grid. The first call that holds a raid has its alert in the feed and every one of its party here and in the
+ * count, the View draws that count, and no named line goes up from anyone not here (HonestCount's observer).
+ */
+void PieAlertCount()
+{
+	const double W0 = RoomDay * 61.0 + 21.0 * 60.0;
+	struct Pace
+	{
+		const char* Name;
+		double RealPerWorld;
+		bool Attended;
+		int Watch;
+	};
+	const Pace Paces[] = {{"1x", 13.1, true, 1}, {"full", 33.6, true, 1}, {"watch 4x", 3.37, false, 4}};
+	static const double Hands[] = {1.25, 0.75, 1.5, 1.0, 2.0, 0.5, 1.75};
+	for (const Pace& P : Paces)
+	{
+		kast::Channel Ch = RoomCommunity(6, 12, 30, W0); // a small room: the Broadcast is most of it
+		kast::Stream St("kast-pie-alert");
+		kast::Inputs In = RoomInputs(W0, 6101);
+		In.Attended = P.Attended;
+		In.WatchSpeed = P.Watch;
+		St.Start(Ch, In);
+		const kast::RoomState* R = kast::RoomState::Of(St);
+		size_t Seen = 0;
+		int Raids = 0, AlertOff = 0, PartyOff = 0, ViewOff = 0, Broadcasts = 0, MomentRaids = 0, Welcomes = 0;
+		std::string First, Sizes;
+		RoomWatch W;
+		auto Look = [&](const char* Where) {
+			RoomObserve(St, W, In.Real);
+			ViewOff += St.GetView().Count == R->Watchers ? 0 : 1;
+			for (; Seen < R->Raids.size(); ++Seen)
+			{
+				const kast::RoomState::Raid& Rd = R->Raids[Seen];
+				++Raids;
+				bool Posted = false;
+				for (const kast::Alert& A : St.Feed)
+				{
+					Posted = Posted || (A.Kind == kast::AlertKind::Raid && A.Who == Rd.From && A.Count == Rd.Size);
+				}
+				// The party: every one in by now (none still to come), and everyone whose stay hasn't ended is in the count. (A frame that
+				// spans minutes, a hand's step past the welcome raid's minute, can see a short stayer come and go inside it.)
+				int Party = 0, Here = 0, Due = 0, Stayed = 0;
+				for (const kast::RoomState::Raider& X : R->Raiders)
+				{
+					if (X.RaidIx == static_cast<int>(Seen))
+					{
+						++Party;
+						Here += R->RaiderHere(X, R->Clock) ? 1 : 0;
+						Due += X.Arrive > R->Clock ? 1 : 0;
+						Stayed += X.Leave > R->Clock ? 1 : 0;
+					}
+				}
+				const bool Whole = Party == Rd.Size && Due == 0 && Here == Stayed && R->RaidersHere >= Here && (Rd.At < R->Clock || Here == Rd.Size);
+				AlertOff += Posted ? 0 : 1;
+				PartyOff += Whole ? 0 : 1;
+				Broadcasts += Rd.Broadcast ? 1 : 0;
+				MomentRaids += Rd.From == "kat_v" ? 1 : 0;
+				Welcomes += Rd.Size == 8 && Rd.Cause == kast::PeakRaid && Rd.AtMinute == 40 ? 1 : 0;
+				Sizes += (Sizes.empty() ? "" : ", ") + Rd.From + " " + std::to_string(Rd.Size);
+				if ((!Posted || !Whole) && First.empty())
+				{
+					First = std::string(Where) + ": " + Rd.From + "'s alert " + (Posted ? "posted" : "not posted") + " with " + std::to_string(Here) + " of " + std::to_string(Rd.Size) +
+						" here (" + std::to_string(Due) + " still to come) at uptime " + std::to_string(R->Clock);
+				}
+			}
+		};
+		double T = 0.0;
+		int H = 0;
+		bool Ft = false, MomentRaid = false;
+		while (T < 50.0)
+		{
+			const double Hand = Hands[static_cast<size_t>(H++) % 7];
+			const double RealHand = Hand * P.RealPerWorld;
+			for (double Rs = 0.25; Rs <= RealHand + 1.0e-9; Rs += 0.25)
+			{
+				In.Real += 0.25;
+				St.Tick(Ch, In, 0.0, 0.25);
+				Look("a frame");
+				if (!Ft && T >= 36.0 && Rs >= 0.5 * RealHand)
+				{
+					Ft = true;
+					St.DebugRoom(Ch, In, "moment ft 1.40 980");
+					Look("the final table");
+				}
+				if (!MomentRaid && T >= 44.0 && Rs >= 0.5 * RealHand)
+				{
+					// A moment raid as MomentStep adds one (Kind 1), then the session's next call into the room.
+					MomentRaid = true;
+					kast::RoomState::AddRaid(St, Ch, In, "kat_v", 0x8b5cf6, 12, false, R->Clock, 1);
+					St.AdvanceTo(Ch, In);
+					Look("a moment raid");
+				}
+				St.Notices.clear();
+			}
+			T += Hand;
+			In.World = W0 + T; // the hand ends: the table's clock steps
+		}
+		St.Stop(Ch, In);
+		std::printf("  pie (F1) alert and count, %s: %d raids (%s); alert not posted %d, party not all here and counted %d, View off the count %d; named lines from "
+					"nobody here %d%s%s\n",
+			P.Name, Raids, Sizes.c_str(), AlertOff, PartyOff, ViewOff, W.Absent + W.AtZero, First.empty() ? "" : "; first: ", First.c_str());
+		Expect(Broadcasts == 1 && MomentRaids == 1 && Welcomes == 1, std::string("pie (F1): the night holds the Broadcast, a moment raid and the welcome raid (") + P.Name + ")");
+		Expect(AlertOff == 0 && PartyOff == 0, std::string("pie (F1): each raid's alert and its whole party land on the same call, in the count (") + P.Name + ")");
+		Expect(ViewOff == 0 && W.Absent == 0 && W.AtZero == 0, std::string("pie (F1): the View draws the room's count, and no named raider line comes before the raider (") + P.Name + ")");
+	}
+}
+
+/**
+ * F1: the end card's peak names what brought the room up. A small room's final table whose Broadcast fills it, then a big pot and
+ * an all-in before the clock moves on (the PIE night ended "57 on a big pot"): "at the final table". A raid that makes the peak,
+ * with a big pot after it: "on a raid". A night with neither keeps the moment the peak came at.
+ */
+void PiePeakLabel()
+{
+	const double W0 = RoomDay * 62.0 + 21.0 * 60.0;
+	auto Night = [&](const char* Seed, bool Ft, bool Raid) {
+		kast::Channel Ch = RoomCommunity(6, 12, 30, W0);
+		Ch.WelcomeRaidDone = true;
+		kast::Stream St(Seed);
+		kast::Inputs In = RoomInputs(W0, 6111);
+		St.Start(Ch, In);
+		RoomRun(St, Ch, In, 36.0);
+		In.World += 0.25; // mid-hand
+		if (Ft)
+		{
+			St.DebugRoom(Ch, In, "moment ft 1.40 980");
+		}
+		if (Raid)
+		{
+			St.DebugRoom(Ch, In, "raid 30");
+		}
+		St.OnMoment(Ch, In, kast::Moment::BigPot, "somebody", 1.0);
+		St.OnMoment(Ch, In, kast::Moment::AllIn, "somebody", 1.0);
+		In.World -= 0.25;
+		RoomRun(St, Ch, In, 9.0);
+		return St.Stop(Ch, In);
+	};
+	const kast::Summary A = Night("kast-pie-peak-ft", true, false);
+	const kast::Summary B = Night("kast-pie-peak-raid", false, true);
+	const std::string La = kast::copy::PeakLine(A.Peak, A.PeakMoment, "9:37 PM");
+	const std::string Lb = kast::copy::PeakLine(B.Peak, B.PeakMoment, "9:37 PM");
+	std::printf("  pie (F1) the peak's label: the Broadcast's final table then a big pot and an all-in: \"%s\" (minute %.0f); a raid of 30 then a big pot: \"%s\"\n", La.c_str(),
+		A.PeakAt, Lb.c_str());
+	Expect(A.PeakMoment == static_cast<int>(kast::Moment::FinalTable) && A.PeakAt >= 36.0 && La.find("at the final table") != std::string::npos,
+		"pie (F1): a final table's Broadcast peak reads \"at the final table\", not the big pot or all-in after it");
+	Expect(B.PeakMoment == kast::PeakRaid && B.PeakAt >= 36.0 && Lb.find("on a raid") != std::string::npos, "pie (F1): a raid's peak reads \"on a raid\"");
+	// The cause, unit by unit: a deep run's stage in the last 10 minutes, else the moment the peak came at, else none.
+	{
+		kast::RoomState Rs;
+		Rs.LastMomentKind = static_cast<int>(kast::Moment::BigPot);
+		Rs.LastMomentAt = 40.0;
+		Expect(Rs.PeakCause(41.0) == static_cast<int>(kast::Moment::BigPot) && Rs.PeakCause(51.0) == -1, "pie (F1): no raid and no stage: the moment the peak came at (in 10 minutes), as before");
+		Rs.StageCauseKind = static_cast<int>(kast::Moment::InTheMoney);
+		Rs.StageCauseAt = 35.0;
+		Expect(Rs.PeakCause(41.0) == static_cast<int>(kast::Moment::InTheMoney) && Rs.PeakCause(46.0) == static_cast<int>(kast::Moment::BigPot),
+			"pie (F1): a deep run's stage in the last 10 minutes names the peak over a moment after it (past 10, the moment again)");
+	}
+}
+
+/**
+ * F4 (PIE_CK_NOTES): a short stream with a real final table moves Heat by its news, once a tournament. A young channel (stream 3)
+ * goes live at the $11 Big Stack's final table for 36 world minutes: its news commits (+25: Running hot), the 60-minute rule still
+ * holds back the rest (no log row, no statistics, no showing up), the end card's line is the run ("Tonight's final table (980
+ * runners)") and off air the channel never reads "New channel" after it. Restarts farm nothing: five 3-minute restarts, the same
+ * final table again, then a deeper stage adds only its own part; a long stream after it adds no second news; another tournament's
+ * final table is its own news; a run with no tournament id keeps the rule; ss.Kast.Moment's held run is keyed for its day.
+ */
+void PieShortRun()
+{
+	const double W0 = RoomDay * 70.0 + 20.0 * 60.0; // a Monday, 8 PM: every stream below is in one world week
+	kast::Channel Ch = RoomCommunity(8, 20, 2, W0);
+	kast::Stream St("kast-pie-short");
+	kast::Inputs In = RoomInputs(W0, 6201);
+	const std::string IdA = "bigstack@100800", IdB = "bigstack@100860";
+	auto Shown = [&](double World) { return growth::HeatShown(Ch.Heat, Ch.HeatAt, World, Ch.LastStreamDay); };
+	// 1. Live at the final table for 36 world minutes.
+	PieDeep(In, IdA);
+	const size_t Logged = Ch.Log.size();
+	const double Norm = Ch.Norm, Bias = Ch.Bias, RunNorm = Ch.RunNorm;
+	const int ShowDays = Ch.ShowDays, Streak = Ch.Streak, WeekStreams = Ch.WeekStreams;
+	const double Minutes = Ch.MinutesLive;
+	St.Start(Ch, In);
+	const double Before = kast::RoomState::Of(St)->HeatStart;
+	RoomRun(St, Ch, In, 4.0);
+	St.OnMoment(Ch, In, kast::Moment::FinalTable, "$11 Big Stack", 1.0);
+	RoomRun(St, Ch, In, 32.0);
+	const kast::Summary S1 = St.Stop(Ch, In);
+	const double After1 = Shown(In.World);
+	const std::array<std::string, 2> Off1 = kast::copy::WhyOffline(Ch, Ch.LastStreamDay, In.World);
+	std::printf("  pie (F4) live at a final table for %.0f world minutes: Heat %.1f -> %.1f (%s, +%.1f committed), the card's line \"%s\", off air \"%s\"\n", S1.Minutes, Before,
+		After1, kast::copy::TierName(growth::Tier(After1)).c_str(), S1.GainSoFar, S1.Why[0].c_str(), Off1[0].c_str());
+	Expect(S1.Minutes < 60.0 && S1.GainSoFar >= 24.5 && growth::Tier(After1) >= 2 && Ch.GainUsed >= 24.5,
+		"pie (F4): a final table on a stream under 60 world minutes commits its Heat news (Running hot)");
+	Expect(Ch.Log.size() == Logged && Ch.Norm == Norm && Ch.Bias == Bias && Ch.RunNorm == RunNorm && Ch.MinutesLive == Minutes && Ch.ShowDays == ShowDays && Ch.Streak == Streak &&
+			   Ch.WeekStreams == WeekStreams,
+		"pie (F4): the 60-minute rule still holds back the performance part, the statistics, the log row, showing up and the streak");
+	Expect(S1.Why[0] == kast::copy::WhyRun(growth::RunStage::FinalTable, 980, 0, std::string()) && S1.Why[1].empty(),
+		"pie (F4): the short night's card names its run (\"Tonight's final table (980 runners)\")");
+	Expect(Off1[0] == kast::copy::WhyRunPlain(growth::RunStage::FinalTable, 0, std::string()) && Off1[0] != kast::copy::WhyNew() && Off1[1] != kast::copy::WhyNew(),
+		"pie (F4): off air after a final table the channel never reads \"New channel\" (\"Tonight's final table\")");
+	// 2. Restart farming: five 3-minute restarts in the same tournament (its final table already fired): nothing, and the card says why.
+	const double Used1 = Ch.GainUsed;
+	double Farmed = 0.0;
+	bool WhyShort = true;
+	std::string Live2;
+	for (int K = 0; K < 5; ++K)
+	{
+		RoomNext(In, In.World + 2.0);
+		St.Start(Ch, In);
+		RoomRun(St, Ch, In, 3.0);
+		if (K == 0)
+		{
+			St.Tick(Ch, In, 0.0, 0.1);
+			Live2 = St.GetView().Why[0];
+		}
+		const kast::Summary S = St.Stop(Ch, In);
+		Farmed += S.GainSoFar;
+		WhyShort = WhyShort && S.Why[0] == kast::copy::WhyShort();
+	}
+	std::printf("  pie (F4) five 3-minute restarts: Heat committed %+.1f, the week's gains %.1f -> %.1f; the next live why line \"%s\"\n", Farmed, Used1, Ch.GainUsed, Live2.c_str());
+	Expect(Farmed == 0.0 && Ch.GainUsed == Used1 && WhyShort, "pie (F4): restart farming gains nothing (and each card says why: \"Under an hour: ...\")");
+	Expect(Live2 == kast::copy::WhyRun(growth::RunStage::FinalTable, 980, 0, std::string()), "pie (F4): the next stream's live why line names the run that counted");
+	// 3. The same final table again (its key): nothing.
+	RoomNext(In, In.World + 2.0);
+	St.Start(Ch, In);
+	RoomRun(St, Ch, In, 2.0);
+	St.OnMoment(Ch, In, kast::Moment::FinalTable, "$11 Big Stack", 1.0);
+	RoomRun(St, Ch, In, 3.0);
+	const kast::Summary S3 = St.Stop(Ch, In);
+	Expect(S3.GainSoFar == 0.0 && Ch.GainUsed == Used1 && S3.Why[0] == kast::copy::WhyShortCounted(), "pie (F4): a tournament's news counts once (\"This run's Heat already counted\")");
+	// 4. Another tournament's final table is its own news (the week's cap leaves 10).
+	PieDeep(In, IdB);
+	RoomNext(In, In.World + 2.0);
+	St.Start(Ch, In);
+	RoomRun(St, Ch, In, 2.0);
+	St.OnMoment(Ch, In, kast::Moment::FinalTable, "$11 Big Stack", 1.0);
+	RoomRun(St, Ch, In, 3.0);
+	const kast::Summary S4 = St.Stop(Ch, In);
+	Expect(S4.GainSoFar > 0.5 && Ch.GainUsed <= 35.0 + 1.0e-9 && S4.Why[0] == kast::copy::WhyRun(growth::RunStage::FinalTable, 980, 0, std::string()),
+		"pie (F4): another tournament's final table is its own news, within the week's cap");
+	// 5. A deeper stage of the first run adds only its own part: Top 3 (1.3 P) past the final table (1.0 P) that counted.
+	Ch.GainWeek = -1; // the week's cap aside, to see the part itself
+	Ch.GainUsed = 0.0;
+	PieDeep(In, IdA);
+	RoomNext(In, In.World + 2.0);
+	St.Start(Ch, In);
+	RoomRun(St, Ch, In, 2.0);
+	St.OnMoment(Ch, In, kast::Moment::Top3, "$11 Big Stack", 1.0);
+	RoomRun(St, Ch, In, 3.0);
+	const double P = growth::Prestige(980, 1100, 0.0);
+	const double Ft = growth::RunValue(growth::RunStage::FinalTable) * P, Top3 = growth::RunValue(growth::RunStage::Top3) * P;
+	const double Heat5 = Shown(In.World);
+	const double Part = growth::Gain(Ch.Bias, Ch.Bias, Ch.RunNorm + (Top3 - std::max(Ch.RunNorm, Ft)), Ch.RunNorm, 0.0, Heat5).Gain;
+	const double Whole = growth::Gain(Ch.Bias, Ch.Bias, Top3, Ch.RunNorm, 0.0, Heat5).Gain;
+	const kast::Summary S5 = St.Stop(Ch, In);
+	std::printf("  pie (F4) the same run's top 3 on a later short stream: +%.2f (its own part %.2f; the whole run's news would be %.2f)\n", S5.GainSoFar, Part, Whole);
+	Expect(std::fabs(S5.GainSoFar - Part) < 1.0e-9 && Part + 1.0 < Whole, "pie (F4): a deeper stage of a run that counted adds only its own part");
+	// 6. A long stream of the same run (its final table again, 65 world minutes): no second news, only the night itself.
+	Ch.GainWeek = -1;
+	Ch.GainUsed = 0.0;
+	RoomNext(In, In.World + 2.0);
+	St.Start(Ch, In);
+	RoomRun(St, Ch, In, 2.0);
+	St.OnMoment(Ch, In, kast::Moment::FinalTable, "$11 Big Stack", 1.0);
+	RoomRun(St, Ch, In, 63.0);
+	const kast::RoomState* R6 = kast::RoomState::Of(St);
+	const double FcRaw = R6->FcRaw;
+	const double Bias6 = Ch.Bias, RunNorm6 = Ch.RunNorm;
+	const double Used6 = Ch.GainWeek == static_cast<int>(std::floor(In.World / (7.0 * RoomDay))) ? Ch.GainUsed : 0.0;
+	const double Heat6 = Shown(In.World);
+	const double Show6 = growth::ShowUp(Ch.ShowWeek, Ch.ShowDays, static_cast<int>(std::floor(In.World / RoomDay)));
+	const kast::Summary S6 = St.Stop(Ch, In);
+	const double Lr = std::log((static_cast<double>(S6.Avg) + 1.0) / (FcRaw + 1.0));
+	const double NoNews = growth::Gain(Lr, Bias6, 0.0, RunNorm6, Used6, Heat6).Gain + Show6;
+	const double WithNews = growth::Gain(Lr, Bias6, Ft, RunNorm6, Used6, Heat6).Gain + Show6;
+	std::printf("  pie (F4) a long stream of the same run: +%.2f committed (the night alone %.2f; with the run's news again %.2f)\n", S6.GainSoFar, NoNews, WithNews);
+	Expect(std::fabs(S6.GainSoFar - NoNews) < 1.0e-9 && WithNews > NoNews + 1.0, "pie (F4): a long stream of a run whose news counted adds no second news");
+	// 7. A run with no tournament id keeps the 60-minute rule.
+	Ch.GainWeek = -1;
+	Ch.GainUsed = 0.0;
+	PieDeep(In, std::string());
+	RoomNext(In, In.World + 2.0);
+	St.Start(Ch, In);
+	RoomRun(St, Ch, In, 2.0);
+	St.OnMoment(Ch, In, kast::Moment::Win, "$11 Big Stack", 1.0);
+	RoomRun(St, Ch, In, 3.0);
+	const kast::Summary S7 = St.Stop(Ch, In);
+	Expect(S7.GainSoFar == 0.0 && Ch.GainUsed == 0.0, "pie (F4): a run with no tournament id commits nothing under 60 minutes (the rule as it was)");
+	// 8. ss.Kast.Moment's held run (no real one): keyed for its world day, so a restart's second press adds nothing.
+	In.DeepTable = -1;
+	In.DeepEntrants = 0;
+	In.Entrants = 120;
+	RoomNext(In, In.World + 2.0);
+	St.Start(Ch, In);
+	RoomRun(St, Ch, In, 2.0);
+	St.DebugRoom(Ch, In, "moment ft 1.40 980");
+	RoomRun(St, Ch, In, 3.0);
+	const kast::Summary S8 = St.Stop(Ch, In);
+	RoomNext(In, In.World + 2.0);
+	St.Start(Ch, In);
+	RoomRun(St, Ch, In, 2.0);
+	St.DebugRoom(Ch, In, "moment ft 1.40 980");
+	RoomRun(St, Ch, In, 3.0);
+	const kast::Summary S9 = St.Stop(Ch, In);
+	std::printf("  pie (F4) ss.Kast.Moment ft on short streams: +%.1f, then again after a restart +%.1f (\"%s\")\n", S8.GainSoFar, S9.GainSoFar, S9.Why[0].c_str());
+	Expect(S8.GainSoFar > 0.5 && S9.GainSoFar == 0.0 && S9.Why[0] == kast::copy::WhyShortCounted(), "pie (F4): ss.Kast.Moment's held run counts once a world day");
+}
+
+/** F4's copy: the short night's lines and the off-air final table, each a fact, against their examples. */
+void PieCopy()
+{
+	Expect(kast::copy::WhyShort() == "Under an hour: only a deep run counts" && kast::copy::WhyShortCounted() == "This run's Heat already counted" &&
+			   kast::copy::WhyShortUsual() == "Runs this deep are your usual now" && kast::copy::WhyCeiling() == "Heat is at its ceiling" &&
+			   kast::copy::WhyRunPlain(growth::RunStage::FinalTable, 1, "Sunday") == "Last night's final table" &&
+			   kast::copy::WhyRunPlain(growth::RunStage::FinalTable, 3, "Sunday") == "Sunday's final table",
+		"pie (F4): the short night's why lines and the off-air final table read as written");
+	// Off air: a final table 6 world days ago still reads, 7 days ago it doesn't; the most recent day wins.
+	const double World = 300.0 * RoomDay + 900.0;
+	const int Today = static_cast<int>(std::floor(World / RoomDay));
+	kast::Channel Ch;
+	Ch.Streams = 2;
+	Ch.LastStreamDay = Today;
+	Ch.FtBase = Today - 1;
+	Ch.FtDays = 1 | 8;
+	std::array<std::string, 2> W = kast::copy::WhyOffline(Ch, Ch.LastStreamDay, World);
+	Expect(W[0] == kast::copy::WhyRunPlain(growth::RunStage::FinalTable, 1, std::string()) && W[1].empty(), "pie (F4): off air, last night's final table first (no \"New channel\")");
+	Ch.FtBase = Today - 6;
+	Ch.FtDays = 1;
+	W = kast::copy::WhyOffline(Ch, Ch.LastStreamDay, World);
+	Expect(W[0] == kast::copy::WhyRunPlain(growth::RunStage::FinalTable, 6, ss::net::WeekdayName(Today - 6, true)), "pie (F4): off air, a final table 6 days ago by its weekday");
+	Ch.FtBase = Today - 7;
+	W = kast::copy::WhyOffline(Ch, Ch.LastStreamDay, World);
+	Expect(W[0] == kast::copy::WhyNew(), "pie (F4): a final table 7 days ago is no longer a reason (a new channel reads new)");
+}
+
+/**
+ * review-pie-room (C-K PIE F1, F4): what the checks above leave open. The network's raids on a world clock that moves a little a
+ * frame (a hand-stepped night always jumps past half a minute, so it can't see a party that comes half a minute after its alert):
+ * the welcome raid's alert and its whole party land in the same call on the frame that stops on its minute. PeakCause at its
+ * limits, unit by unit: a raid party under a fifth of the room isn't the cause (a fifth is), nor one older than 10 world minutes;
+ * a live deep run's latest stage names a later peak. The ghost of a later stream of a run whose news counted. A short stream at a
+ * final table that formed before the go-live says so.
+ */
+void PieReviewRoom()
+{
+	{
+		const double W0 = RoomDay * 63.0 + 21.0 * 60.0;
+		kast::Channel Ch = RoomCommunity(6, 12, 30, W0);
+		kast::Stream St("kast-pie-review-welcome");
+		kast::Inputs In = RoomInputs(W0, 6131);
+		St.Start(Ch, In);
+		const kast::RoomState* R = kast::RoomState::Of(St);
+		RoomWatch W;
+		size_t Seen = 0;
+		int Raids = 0, Welcomes = 0, Off = 0;
+		std::string First;
+		for (int F = 1; F <= 41 * 50 && St.Live; ++F)
+		{
+			In.World = W0 + static_cast<double>(F) / 50.0; // a fiftieth of a world minute a frame: one frame stops on uptime 40.0
+			In.Real += 0.672;                              // Full's 33.6 real s a world minute
+			St.Tick(Ch, In, 0.0, 0.672);
+			RoomObserve(St, W, In.Real);
+			for (; Seen < R->Raids.size(); ++Seen)
+			{
+				const kast::RoomState::Raid& Rd = R->Raids[Seen];
+				bool Posted = false;
+				for (const kast::Alert& A : St.Feed)
+				{
+					Posted = Posted || (A.Kind == kast::AlertKind::Raid && A.Who == Rd.From && A.Count == Rd.Size);
+				}
+				int Party = 0, Here = 0;
+				for (const kast::RoomState::Raider& X : R->Raiders)
+				{
+					if (X.RaidIx == static_cast<int>(Seen))
+					{
+						++Party;
+						Here += R->RaiderHere(X, R->Clock) ? 1 : 0;
+					}
+				}
+				++Raids;
+				Welcomes += Rd.Size == 8 && Rd.Cause == kast::PeakRaid && Rd.AtMinute == 40 ? 1 : 0;
+				const bool Ok = Posted && Party == Rd.Size && Here == Rd.Size && St.GetView().Count == R->Watchers;
+				Off += Ok ? 0 : 1;
+				if (!Ok && First.empty())
+				{
+					First = Rd.From + "'s alert " + (Posted ? "posted" : "not posted") + " at uptime " + std::to_string(R->Clock) + " with " + std::to_string(Here) + " of " +
+						std::to_string(Rd.Size) + " here";
+				}
+			}
+			St.Notices.clear();
+		}
+		St.Stop(Ch, In);
+		std::printf("  pie review (F1) the welcome raid on a clock a fiftieth of a world minute a frame: %d raid(s), %d not in with the alert%s%s; named lines from nobody "
+					"here %d\n",
+			Raids, Off, First.empty() ? "" : "; first: ", First.c_str(), W.Absent + W.AtZero);
+		Expect(Welcomes == 1 && Off == 0 && W.Absent == 0 && W.AtZero == 0,
+			"pie review (F1): the network's raid is in the count with its alert on the frame that stops on its minute (no line before it)");
+	}
+	{
+		kast::RoomState Rs;
+		Rs.Watchers = 30;
+		Rs.StageCauseKind = static_cast<int>(kast::Moment::InTheMoney);
+		Rs.StageCauseAt = 35.0;
+		Rs.LastMomentKind = static_cast<int>(kast::Moment::BigPot);
+		Rs.LastMomentAt = 38.0;
+		kast::RoomState::Raid Rd;
+		Rd.At = 36.0;
+		Rd.AtMinute = 36;
+		Rd.Size = 6;
+		Rd.Cause = kast::PeakRaid;
+		Rs.Raids.push_back(Rd);
+		for (int I = 0; I < 6; ++I)
+		{
+			kast::RoomState::Raider X;
+			X.RaidIx = 0;
+			X.Arrive = 36.0;
+			X.Leave = 90.0;
+			X.Gone = I == 0; // one followed: a member now, not a raider
+			Rs.Raiders.push_back(X);
+		}
+		const int Under = Rs.PeakCause(40.0); // 5 of 30 here
+		Rs.Raiders[0].Gone = false;
+		const int Fifth = Rs.PeakCause(40.0); // 6 of 30
+		const int Edge = Rs.PeakCause(46.0);  // the party 10 world minutes in
+		const int Late = Rs.PeakCause(46.5);  // past 10 (the stage too, at 35): the moment at 38 names it
+		Expect(Under == static_cast<int>(kast::Moment::InTheMoney) && Fifth == kast::PeakRaid && Edge == kast::PeakRaid && Late == static_cast<int>(kast::Moment::BigPot),
+			"pie review (F1): a raid party is the peak's cause from a fifth of the room and for 10 world minutes (else the stage, else the moment)");
+		// While the deep run is still live (its Sweat brings the room up with its depth), its latest stage names a peak past those 10
+		// minutes; a raid party of a fifth still comes first.
+		Rs.RunDepth = 0.6;
+		const int Live = Rs.PeakCause(46.5);
+		const int LiveRaid = Rs.PeakCause(40.0);
+		Rs.RunDepth = 0.0;
+		const int Over = Rs.PeakCause(46.5);
+		Expect(Live == static_cast<int>(kast::Moment::InTheMoney) && LiveRaid == kast::PeakRaid && Over == static_cast<int>(kast::Moment::BigPot),
+			"pie review (F1): a live deep run's latest stage names a later peak (a raid party of a fifth first; the run over, the moment again)");
+	}
+	{
+		// F4: the ghost of a later stream of a run whose news counted shows that stage's own part, as Stop commits it, not the whole
+		// run's news again. The channel's Bias is held high so the night's own part sits at its floor (-9) and the week's cap stays
+		// out of the way (at the cap the two ghosts read the same).
+		const double W0 = RoomDay * 77.0 + 20.0 * 60.0;
+		kast::Channel Ch = RoomCommunity(8, 20, 4, W0);
+		Ch.Bias = 3.0;
+		kast::Stream St("kast-pie-review-ghost");
+		kast::Inputs In = RoomInputs(W0, 6141);
+		PieDeep(In, "bigstack@110880");
+		St.Start(Ch, In);
+		RoomRun(St, Ch, In, 2.0);
+		St.OnMoment(Ch, In, kast::Moment::FinalTable, "$11 Big Stack", 1.0);
+		RoomRun(St, Ch, In, 3.0);
+		const kast::Summary S1 = St.Stop(Ch, In);
+		Ch.GainWeek = -1; // the week's cap aside
+		Ch.GainUsed = 0.0;
+		RoomNext(In, In.World + 2.0);
+		St.Start(Ch, In);
+		RoomRun(St, Ch, In, 2.0);
+		St.OnMoment(Ch, In, kast::Moment::Top3, "$11 Big Stack", 1.0);
+		RoomRun(St, Ch, In, 3.0);
+		const kast::RoomState* R = kast::RoomState::Of(St);
+		const double P = growth::Prestige(980, 1100, 0.0);
+		const double Ft = growth::RunValue(growth::RunStage::FinalTable) * P, Top3 = growth::RunValue(growth::RunStage::Top3) * P;
+		// The last grid minute's ghost: the running average against Start's forecast, the Heat shown at that minute.
+		const double Lr = std::log((R->VM / static_cast<double>(R->Done) + 1.0) / (R->FcRaw + 1.0));
+		const double Heat = growth::HeatShown(Ch.Heat, Ch.HeatAt, St.StartWorld + static_cast<double>(R->Done - 1), Ch.LastStreamDay);
+		const double Part = growth::Gain(Lr, Ch.Bias, Ch.RunNorm + (Top3 - std::max(Ch.RunNorm, Ft)), Ch.RunNorm, 0.0, Heat).Gain;
+		const double Whole = growth::Gain(Lr, Ch.Bias, Top3, Ch.RunNorm, 0.0, Heat).Gain;
+		const double Ghost = R->GhostNow;
+		const kast::Summary S2 = St.Stop(Ch, In);
+		std::printf("  pie review (F4) a run's final table (+%.1f), then its top 3 on a later short stream: the ghost %+.2f (the stage's part %+.2f; the whole run's %+.2f), "
+					"committed %+.2f\n",
+			S1.GainSoFar, Ghost, Part, Whole, S2.GainSoFar);
+		Expect(S1.GainSoFar > 0.5 && std::fabs(Ghost - Part) < 1.0e-9 && Whole > Part + 1.0, "pie review (F4): the ghost of a run whose news counted shows only the deeper stage's part");
+	}
+	{
+		// F4: live at a final table that had formed before the go-live: no stage fires on stream, so no news (the stages are the
+		// stream's moments), and the card says so rather than "only a deep run counts"; the same short stream at a run not yet in
+		// the money keeps that line.
+		const double W0 = RoomDay * 84.0 + 20.0 * 60.0;
+		kast::Channel Ch = RoomCommunity(8, 20, 4, W0);
+		kast::Stream St("kast-pie-review-formed");
+		kast::Inputs In = RoomInputs(W0, 6151);
+		PieDeep(In, "bigstack@120960");
+		In.DeepPaid = 135;
+		St.Start(Ch, In);
+		RoomRun(St, Ch, In, 30.0);
+		const kast::Summary Formed = St.Stop(Ch, In);
+		In.DeepRemaining = 400;
+		In.Remaining = 400;
+		In.Depth = growth::Depth(980, 400);
+		RoomNext(In, In.World + 2.0);
+		St.Start(Ch, In);
+		RoomRun(St, Ch, In, 30.0);
+		const kast::Summary Early = St.Stop(Ch, In);
+		std::printf("  pie review (F4) live at a final table that had formed, 30 world minutes: Heat %+.1f, \"%s\"; at 400 left of 980 (not yet paid): %+.1f, \"%s\"\n",
+			Formed.GainSoFar, Formed.Why[0].c_str(), Early.GainSoFar, Early.Why[0].c_str());
+		Expect(kast::copy::WhyShortBefore() == "Stages before going live don't count" && Formed.GainSoFar == 0.0 && Formed.Why[0] == kast::copy::WhyShortBefore() &&
+				   Early.GainSoFar == 0.0 && Early.Why[0] == kast::copy::WhyShort(),
+			"pie review (F4): a short stream at a final table that formed before it says its stages came before the go-live");
+	}
+}
+
 /** Tick's wall time on a 1,500-member channel with three mods (§9.4 #13: <= 0.1 ms during a sprint frame): 1x at 60 fps, hand-
  *  sized sprint frames (0.5-2.25 world minutes, the sprint pace's), then a 10-minute and a 100-minute skip frame. Information only
  *  (the machine's load moves it): the default run times one night, KAST_BENCH=1 three and prints the best (KAST_BENCH=only runs
@@ -4314,6 +4839,11 @@ void SegSession()
 	room_seg::ViewFacts();
 	room_seg::RoomLines();
 	room_seg::ForecastLurkers();
+	room_seg::PieAlertCount();
+	room_seg::PiePeakLabel();
+	room_seg::PieShortRun();
+	room_seg::PieCopy();
+	room_seg::PieReviewRoom();
 	room_seg::RoomBench();
 	room_career::LongMtt();
 	room_career::Careers();

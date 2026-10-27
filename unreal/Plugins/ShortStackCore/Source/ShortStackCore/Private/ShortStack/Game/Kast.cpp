@@ -2187,6 +2187,113 @@ void RoomState::LeaveNow(Visit& V, double T)
 	V.Gone = true;
 }
 
+int RoomState::PeakCause(double T)
+{
+	// The peak's label names what brought the room up (C-K PIE F1): a raid party is people the room can point at, so the one holding
+	// a fifth of the room or more, in the last 10 world minutes, is the cause (its moment, or a raid); else a deep run's latest stage
+	// (its Run Alert and railbirds fill the room over the next minutes, and its Sweat for as long as the run is live: a final
+	// table's room peaks 10-30 world minutes on as often as not, review-pie-room); else, as before, the moment the peak came at.
+	if (!Raids.empty() && Watchers > 0)
+	{
+		PeakParty.assign(Raids.size(), 0);
+		for (const Raider& X : Raiders)
+		{
+			if (RaiderHere(X, T))
+			{
+				++PeakParty[static_cast<size_t>(X.RaidIx)];
+			}
+		}
+		int Best = -1;
+		for (size_t I = 0; I < Raids.size(); ++I)
+		{
+			if (Raids[I].At <= T && T - Raids[I].At <= 10.0 && PeakParty[I] > 0 && (Best < 0 || PeakParty[I] >= PeakParty[static_cast<size_t>(Best)]))
+			{
+				Best = static_cast<int>(I);
+			}
+		}
+		if (Best >= 0 && 5 * PeakParty[static_cast<size_t>(Best)] >= Watchers)
+		{
+			return Raids[static_cast<size_t>(Best)].Cause;
+		}
+	}
+	if (StageCauseKind >= 0 && StageCauseAt <= T && (T - StageCauseAt <= 10.0 || RunDepth > 0.0))
+	{
+		return StageCauseKind;
+	}
+	return LastMomentKind >= 0 && T - LastMomentAt <= 10.0 ? LastMomentKind : -1;
+}
+
+RoomState::NewsPick RoomState::NewsRunOf(const Channel& Ch, bool Short) const
+{
+	// Heat's Run (§2.4, C-K PIE F4): tonight's best RunValue x P, each tournament's against the news an earlier stream of it already
+	// committed (only a deeper stage adds: RunNorm + the part past max(RunNorm, what counted), so growth::Gain's news is that part).
+	// A run with no tournament id keeps the 60-minute rule: a long stream reads it as before, a short one doesn't. With no earlier
+	// stream of tonight's runs, a long stream's Run is RunValue to the bit (the same values, the same max).
+	NewsPick P;
+	for (const NightRun& N : NightRuns)
+	{
+		double Eff = 0.0;
+		if (N.Key.empty())
+		{
+			Eff = Short ? 0.0 : N.Run;
+		}
+		else
+		{
+			double Got = -1.0;
+			for (const std::pair<std::string, double>& K : NewsRuns)
+			{
+				Got = K.first == N.Key ? K.second : Got;
+			}
+			if (Got < 0.0)
+			{
+				Eff = N.Run;
+			}
+			else
+			{
+				const double Base = std::max(Ch.RunNorm, Got);
+				Eff = N.Run > Base ? Ch.RunNorm + (N.Run - Base) : 0.0;
+				P.Counted = P.Counted || N.Run <= Got;
+			}
+			P.Usual = P.Usual || N.Run <= Ch.RunNorm;
+		}
+		if (Eff > P.Run)
+		{
+			P.Run = Eff;
+			P.Stage = N.Stage;
+			P.Entrants = N.Entrants;
+		}
+	}
+	return P;
+}
+
+void RoomState::NoteNewsRuns()
+{
+	for (const NightRun& N : NightRuns)
+	{
+		if (N.Key.empty())
+		{
+			continue;
+		}
+		bool Found = false;
+		for (std::pair<std::string, double>& K : NewsRuns)
+		{
+			if (K.first == N.Key)
+			{
+				K.second = std::max(K.second, N.Run);
+				Found = true;
+			}
+		}
+		if (!Found)
+		{
+			NewsRuns.emplace_back(N.Key, N.Run);
+			if (NewsRuns.size() > 16)
+			{
+				NewsRuns.erase(NewsRuns.begin());
+			}
+		}
+	}
+}
+
 void RoomState::Recount(const Channel& C, double T)
 {
 	MembersHere = 0;
@@ -2764,13 +2871,18 @@ void RoomState::AddRaid(Stream& S, Channel& Ch, const Inputs& In, const std::str
 	Rd.At = At;
 	Rd.AtMinute = M;
 	Rd.Broadcast = Broadcast;
+	// What brought it, for the peak's label (C-K PIE F1): a moment raid, a big name and the Broadcast came with the moment that
+	// MomentStep is running (its kind is LastMomentKind); the network's raids, the welcome raid and ss.Kast.Raid came on their own.
+	Rd.Cause = (Kind == 1 || Kind == 3 || Kind == 4) && R.LastMomentKind >= 0 ? R.LastMomentKind : PeakRaid;
 	R.Raids.push_back(Rd);
 	for (int I = 0; I < Size; ++I)
 	{
 		const uint64_t B = static_cast<uint64_t>(I) * 4u;
 		Raider X;
 		X.RaidIx = Ri;
-		X.Arrive = Kind == 5 ? At : At + 0.01 * static_cast<double>(std::min(I, 60)); // ss.Kast.Raid's party is in at once
+		// The whole party is in at the alert's own time (C-K PIE F1): the alert, its lines and the count change in the same call at
+		// every pace (a party that trickled in over 0.6 world minutes left the count behind its alert until the clock moved on).
+		X.Arrive = At;
 		const double U1 = growth::Unit(R.SeedK, R.StreamK, growth::Tag::Raider, A, B);
 		const double U2 = growth::Unit(R.SeedK, R.StreamK, growth::Tag::Raider, A, B + 1);
 		const double Stay = Broadcast ? growth::ExpAt(I % 2 == 0 ? 20.0 : 3.0, U2) : growth::RaiderStay(U1, U2, false);
@@ -2933,6 +3045,7 @@ void RoomState::Begin(Stream& S, Channel& Ch, const Inputs& In)
 		Fresh.WhyVideoBreakout = S.Room->WhyVideoBreakout;
 		Fresh.WhyVideoDay = S.Room->WhyVideoDay;
 		Fresh.WhyEpoch = S.Room->WhyEpoch + 1;
+		Fresh.NewsRuns = std::move(S.Room->NewsRuns); // the runs whose Heat news counted (C-K PIE F4: once a tournament)
 		*S.Room = Fresh;
 	}
 	RoomState& R = *S.Room;
@@ -3457,7 +3570,7 @@ void RoomState::RaidsAt(Stream& S, Channel& Ch, const Inputs& In, int M)
 			From = C.Name;
 			Color = C.Color;
 		}
-		AddRaid(S, Ch, In, From, Color, kast_room_detail::RoomWelcomeRaidSize, false, T + 0.5, 2);
+		AddRaid(S, Ch, In, From, Color, kast_room_detail::RoomWelcomeRaidSize, false, T, 2); // in at the alert's minute (C-K PIE F1)
 		return;
 	}
 	int Tokens = 0;
@@ -3511,7 +3624,8 @@ void RoomState::RaidsAt(Stream& S, Channel& Ch, const Inputs& In, int M)
 		Color = C.Name == From ? C.Color : Color;
 	}
 	const int Size = std::max(1, static_cast<int>(std::lround(growth::RaidSize(growth::Unit(R.SeedK, R.StreamK, growth::Tag::Raid, Mk, 1), growth::Unit(R.SeedK, R.StreamK, growth::Tag::Raid, Mk, 2)))));
-	AddRaid(S, Ch, In, From, Color, Size, false, T + 0.5, 0);
+	// The party is in at the minute its alert goes up (C-K PIE F1: half a minute later, the alert came before anyone it named).
+	AddRaid(S, Ch, In, From, Color, Size, false, T, 0);
 }
 
 void RoomState::TrollStepAt(Stream& S, Channel& Ch, const Inputs& In, int M)
@@ -4366,7 +4480,7 @@ void RoomState::RunMinute(Stream& S, Channel& Ch, const Inputs& InRaw, int M)
 	if (R.Watchers > S.Peak || R.PeakAt < 0)
 	{
 		R.PeakAt = M;
-		R.PeakMoment = R.LastMomentKind >= 0 && T - R.LastMomentAt <= 10.0 ? R.LastMomentKind : -1;
+		R.PeakMoment = R.PeakCause(T); // what brought the room up (C-K PIE F1), not whatever moment came after it
 	}
 	S.Peak = std::max(S.Peak, R.Watchers);
 	S.Tonight.Xp += 1.0 + 0.05 * std::sqrt(static_cast<double>(R.Watchers));
@@ -4405,7 +4519,9 @@ void RoomState::RunMinute(Stream& S, Channel& Ch, const Inputs& InRaw, int M)
 		const double Avg = R.VM / static_cast<double>(M + 1);
 		const int Week = kast_detail::KastWeekOf(World);
 		const double Used = Ch.GainWeek == Week ? Ch.GainUsed : 0.0;
-		const growth::NightGain G = growth::Gain(std::log((Avg + 1.0) / (R.FcRaw + 1.0)), Ch.Bias, R.RunValue, Ch.RunNorm, Used, kast_room_detail::RoomShownHeat(Ch, World));
+		// The news part reads each tournament's run against what its news already counted (C-K PIE F4): a restart's ghost shows none.
+		const double Run = R.NightRuns.empty() ? R.RunValue : R.NewsRunOf(Ch, false).Run;
+		const growth::NightGain G = growth::Gain(std::log((Avg + 1.0) / (R.FcRaw + 1.0)), Ch.Bias, Run, Ch.RunNorm, Used, kast_room_detail::RoomShownHeat(Ch, World));
 		R.GhostNow = G.Gain;
 		Ch.GainSoFar = G.Gain;
 	}
@@ -4519,6 +4635,32 @@ void RoomState::MomentStep(Stream& S, Channel& Ch, const Inputs& In, ss::kast::M
 	}
 	const double Pm = IsDeep && In.Prestige > 0.0 ? In.Prestige : growth::Prestige(Entrants, In.BuyInCents > 0 ? In.BuyInCents : 330, In.Series);
 	R.RunValue = std::max(R.RunValue, growth::RunValue(Stage) * Pm);
+	// The peak's label (C-K PIE F1): a deep run's stage brings the room up over the minutes after it.
+	R.StageCauseKind = static_cast<int>(M);
+	R.StageCauseAt = T;
+	// Heat's news by tournament (C-K PIE F4): the deepest run's own stages carry its tournament's id (ss.Kast.Moment's held run with
+	// no real one: a key of its own for the world day); a table behind's stage has none and keeps the 60-minute rule.
+	{
+		const std::string Key = !IsDeep ? std::string() : !In.DeepTournament.empty() ? In.DeepTournament : R.Held ? "ss.Kast.Moment@" + std::to_string(Day) : std::string();
+		const double Run = growth::RunValue(Stage) * Pm;
+		RoomState::NightRun* Nr = nullptr;
+		for (RoomState::NightRun& N : R.NightRuns)
+		{
+			Nr = N.Key == Key ? &N : Nr;
+		}
+		if (!Nr)
+		{
+			R.NightRuns.emplace_back();
+			Nr = &R.NightRuns.back();
+			Nr->Key = Key;
+		}
+		if (Run > Nr->Run || Nr->Stage < 0)
+		{
+			Nr->Run = std::max(Nr->Run, Run);
+			Nr->Stage = static_cast<int>(Stage);
+			Nr->Entrants = Entrants;
+		}
+	}
 	if (static_cast<int>(Stage) > R.BestStageKind)
 	{
 		R.BestStageKind = static_cast<int>(Stage);
@@ -5398,13 +5540,54 @@ void RoomState::Close(Stream& S, Channel& Ch, const Inputs& In, Summary& Out, co
 	}
 	Ch.Xp += S.Tonight.Xp;
 	// Heat's commit (§2.4): the night against Start's forecast and how forecasts usually land here, a rare deep run's news on
-	// top, within the week's cap and the soft ceiling; showing up outside the cap; a record peak after stream 3.
+	// top, within the week's cap and the soft ceiling; showing up outside the cap; a record peak after stream 3. A deep run's news
+	// counts on a stream of any length, once a tournament (C-K PIE F4: whoever goes live at a final table gets its Heat); under 60
+	// world minutes it is all that counts: the 60-minute rule still holds back the performance part, the statistics, the log row,
+	// showing up, a record peak, tokens and streaks.
 	double Commit = 0.0;
-	if (!Short)
+	const NewsPick Pick = R.NewsRunOf(Ch, Short); // with no earlier stream of tonight's runs, a long night's Run is RunValue
+	const double RunK = Pick.Run;
+	std::string ShortWhy; // a short night's line for the end card: the run that counted, or why Heat didn't move
+	if (Short)
+	{
+		const double Used = Ch.GainWeek == Week ? Ch.GainUsed : 0.0;
+		// The news alone: Lr = Bias reads a performance of exactly 0.
+		const growth::NightGain G = RunK > 0.0 ? growth::Gain(Ch.Bias, Ch.Bias, RunK, Ch.RunNorm, Used, kast_room_detail::RoomShownHeat(Ch, World)) : growth::NightGain();
+		Commit = G.Gain;
+		if (G.Raw > 0.0)
+		{
+			Ch.GainWeek = Week;
+			Ch.GainUsed = Used + std::min(G.Raw, std::max(0.0, 35.0 - Used));
+		}
+		if (G.News > 0.0 && Pick.Stage >= static_cast<int>(growth::RunStage::FinalTable))
+		{
+			R.WhyStage = Pick.Stage; // the next night's "Last night's final table (980 runners)"
+			R.WhyStageRunners = Pick.Entrants;
+			R.WhyStageDay = Day;
+			++R.WhyEpoch;
+		}
+		if (std::lround(Commit) != 0)
+		{
+			ShortWhy = copy::WhyRun(static_cast<growth::RunStage>(std::max(0, Pick.Stage)), Pick.Entrants, 0, std::string());
+		}
+		else if (G.Raw >= 0.5)
+		{
+			ShortWhy = Used >= 35.0 - 1.0e-9 || std::min(G.Raw, std::max(0.0, 35.0 - Used)) < 0.5 ? copy::WhyHotWeek() : copy::WhyCeiling();
+		}
+		else
+		{
+			// A deep run in the money at the stop with no armed stage on stream tonight: its stages came before the go-live, and "only a
+			// deep run counts" would be wrong for a player sitting at one (review-pie-room: live at a final table that had formed).
+			const bool Before = R.NightRuns.empty() && In.DeepTable >= 0 && growth::Armed(In.DeepEntrants) && In.DeepPaid > 0 && In.DeepRemaining > 0 &&
+				In.DeepRemaining <= In.DeepPaid;
+			ShortWhy = Pick.Counted ? copy::WhyShortCounted() : Pick.Usual || RunK > 0.0 ? copy::WhyShortUsual() : Before ? copy::WhyShortBefore() : copy::WhyShort();
+		}
+	}
+	else
 	{
 		const double Lr = std::log((static_cast<double>(Out.Avg) + 1.0) / (R.FcRaw + 1.0));
 		const double Used = Ch.GainWeek == Week ? Ch.GainUsed : 0.0;
-		const growth::NightGain G = growth::Gain(Lr, Ch.Bias, R.RunValue, Ch.RunNorm, Used, kast_room_detail::RoomShownHeat(Ch, World));
+		const growth::NightGain G = growth::Gain(Lr, Ch.Bias, RunK, Ch.RunNorm, Used, kast_room_detail::RoomShownHeat(Ch, World));
 		Commit = G.Gain;
 		if (G.Raw > 0.0)
 		{
@@ -5442,6 +5625,7 @@ void RoomState::Close(Stream& S, Channel& Ch, const Inputs& In, Summary& Out, co
 		++R.WhyEpoch;
 	}
 	kast_room_detail::RoomAddHeat(Ch, World, Commit);
+	R.NoteNewsRuns(); // tonight's tournaments: a later stream of one adds only a deeper stage's news (C-K PIE F4)
 	if (!Short && S.Peak > Ch.Peak && Ch.Streams > 3)
 	{
 		kast_room_detail::RoomAddHeat(Ch, World, kast_room_detail::RoomHeatRecord);
@@ -5450,7 +5634,9 @@ void RoomState::Close(Stream& S, Channel& Ch, const Inputs& In, Summary& Out, co
 		++R.WhyEpoch;
 	}
 	Out.GainSoFar = Commit;
-	Out.Why = R.WhyNow(Ch, World); // Heat's top two reasons after tonight's commit (the end card's, C-K's L5)
+	// Heat's top two reasons after tonight's commit (the end card's, C-K's L5); a night under 60 world minutes says what its own
+	// commit was: the deep run that counted, or why Heat didn't move (C-K PIE F4), never another night's line.
+	Out.Why = Short ? std::array<std::string, 2>{{ShortWhy, std::string()}} : R.WhyNow(Ch, World);
 	const double HeatAfter = kast_room_detail::RoomShownHeat(Ch, World);
 	if (growth::Tier(HeatAfter) > R.TierStart && growth::Tier(HeatAfter) >= 2)
 	{

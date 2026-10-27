@@ -86,6 +86,11 @@ const char* const KwRailLabel = "present from the first hand to the last: your r
 const char* const KwShownSoon = "Levels and streaks get you shown to more people browsing Poker";
 // The alert's headline for the site's Broadcast (K6; the mockup's): the site sends viewers, it isn't a raid.
 const char* const KwBroadcastTitle = "THE BROADCAST";
+// Chat's pause under the pointer (the C-K PIE round's F3): the pill at the list's foot, and its count of lines underneath.
+const char* const KwChatPaused = "Chat paused";
+const char* const KwChatPausedNew = " new";
+// The VIEWERS tile's band label while live (F5): the go-live forecast, as it was ("forecast was 8-14").
+const char* const KwForecastWas = "forecast was ";
 
 /** The end card's troll line: "1 troll showed up." / "3 trolls showed up: a couple of mods would help." */
 std::string KwTrollsLine(int Trolls, bool HasMods)
@@ -105,6 +110,7 @@ std::string KwShownMore(int More)
 struct KwLaptop
 {
 	int MenuMsg = -1;          // the chat line the name menu is open on (-1: closed)
+	bool MenuOpening = false;  // opened in this draw: the press that opened it doesn't close it
 	std::string MenuWho;
 	float MenuX = 0.0f;
 	float MenuY = 0.0f;
@@ -125,6 +131,15 @@ struct KwLaptop
 	bool CapHeld = false;
 	long long CapCaptures = 0;
 	long long CapCopies = 0;
+	bool ChatPaused = false;         // chat's pause under the pointer (KastChatPause, the C-K PIE round's F3)
+	double ChatPausedAt = 0.0;       // the clock when it began...
+	int ChatUpTo = 0;                // ...and the newest line id chat held then
+	double ChatStream = -1.0;        // the stream (its StartWorld) the pause belongs to
+	double ChatDrawn = -1.0e9;       // the clock at chat's last draw (not the preview's)
+	bool ChatLive = false;           // the pill was pressed: live until the pointer moves over the lines
+	float ChatLiveX = 0.0f;
+	float ChatLiveY = 0.0f;
+	bool ChatPillHover = false;      // the pointer is on the pill this draw
 };
 
 std::map<const RiverLine*, KwLaptop>& KwLaptops()
@@ -771,6 +786,20 @@ float rlkast_detail::KastRankChip(Canvas& Cv, float Right, float Y, int Rank, in
 
 // ------------------------------------------------------------------ Studio
 
+std::string rlkast_detail::KastForecastLabel(const kast::growth::Band& Fc, int Count, int Peak)
+{
+	// The band's ends as ForecastShort rounds them (the digits the player saw under Go live).
+	const long long Lo = std::max(0ll, std::llround(Fc.Lo));
+	const long long Hi = std::max(Lo, std::llround(Fc.Hi));
+	const bool Beaten = static_cast<long long>(std::max(Count, Peak)) >= 2 * std::max(1ll, Hi);
+	if (Beaten && Count > Fc.Hi)
+	{
+		return kast::copy::ForecastVerdict(Count, Fc); // "above your forecast"
+	}
+	const std::string Range = Lo == Hi ? kast::copy::Number(static_cast<int>(Lo)) : kast::copy::Number(static_cast<int>(Lo)) + "-" + kast::copy::Number(static_cast<int>(Hi));
+	return KwForecastWas + Range;
+}
+
 void rlkast_detail::KastViewersTile(KastFrame& F, const Rect& R)
 {
 	using namespace rlnet_detail;
@@ -847,7 +876,9 @@ void rlkast_detail::KastViewersTile(KastFrame& F, const Rect& R)
 		F.C.FillRect({G.X, Y0, G.W, std::max(1.0f, Y1 - Y0)}, Rgba(255, 255, 255, 0.07f));
 		F.C.StrokeDashed({{G.X, Y0}, {G.X + G.W, Y0}}, NetA(KMuted, 0.45f), 1.0f, 3.0f, 3.0f);
 		F.C.StrokeDashed({{G.X, Y1}, {G.X + G.W, Y1}}, NetA(KMuted, 0.45f), 1.0f, 3.0f, 3.0f);
-		F.UI.Text(kast::copy::ForecastShort(V.Fc.Lo, V.Fc.Hi), G.X + G.W - 2.0f, Y0 - 3.0f, Ts(9.5f, 700, KMuted, Align::Right));
+		// The go-live forecast says so ("forecast was 8-14"), and steps aside for "above your forecast" once the room has beaten it
+		// by 2x (the C-K PIE round's F5); the band stays.
+		F.UI.Text(KastForecastLabel(V.Fc, N, St.Peak), G.X + G.W - 2.0f, Y0 - 3.0f, Ts(9.5f, 700, KMuted, Align::Right));
 	}
 	if (Nn >= 2)
 	{
@@ -1447,6 +1478,7 @@ void rlkast_detail::KastOpenNameMenu(KastFrame& F, const kast::ChatMsg& M, float
 	}
 	KwLaptop& K = KwOf(&F.RL);
 	K.MenuMsg = M.Id;
+	K.MenuOpening = true;
 	K.MenuWho = M.Who;
 	K.MenuX = X;
 	K.MenuY = Y;
@@ -1466,6 +1498,10 @@ bool rlkast_detail::KastNameMenu(KastFrame& F, const Rect& Bounds)
 		return false;
 	}
 	KwLaptop& K = KwOf(&F.RL);
+	// A quick click (a tap, or any click shorter than the laptop's frame: the review of the C-K PIE round's F3) brings its press
+	// and its release to one draw: the name took the click and opened the menu, so that press isn't a press outside it.
+	const bool Opening = K.MenuOpening;
+	K.MenuOpening = false;
 	if (K.MenuMsg < 0)
 	{
 		return false;
@@ -1550,11 +1586,134 @@ bool rlkast_detail::KastNameMenu(KastFrame& F, const Rect& Bounds)
 		Done = true;
 	}
 	const bool Inside = F.UI.Hover(Box);
-	if (Done || (F.UI.Ptr.Pressed && !Inside))
+	if (Done || (F.UI.Ptr.Pressed && !Inside && !Opening))
 	{
 		K.MenuMsg = -1;
 	}
 	return Inside;
+}
+
+// ------------------------------------------------------------------ chat's pause under the pointer (the C-K PIE round's F3)
+
+rlkast_detail::KastChatHold rlkast_detail::KastChatPause(KastFrame& F, const Rect& Lines, bool Interactive)
+{
+	KastChatHold H;
+	if (F.Previewing)
+	{
+		// The stream's own picture of chat (StreamSide inside the preview) runs live, and the laptop's pause stays as it was.
+		return H;
+	}
+	KwLaptop& K = KwOf(&F.RL);
+	const kast::Stream& St = F.S.Stream;
+	// No pause carries across a gap in chat's draws (another page or tab, the laptop put away), a new stream, or a clock that ran
+	// backwards: the laptop redraws chat 30 times a second while it's up.
+	if (!St.Live || K.ChatStream != St.StartWorld || F.Now < K.ChatDrawn || F.Now - K.ChatDrawn > 0.5)
+	{
+		K.ChatPaused = false;
+		K.ChatLive = false;
+	}
+	K.ChatStream = St.StartWorld;
+	K.ChatDrawn = F.Now;
+	K.ChatPillHover = false;
+	const bool Menu = Interactive && St.Live && K.MenuMsg >= 0;
+	if (!Menu && !(Interactive && St.Live && F.UI.Hover(Lines)))
+	{
+		K.ChatPaused = false;
+		K.ChatLive = false;
+		return H;
+	}
+	if (K.ChatLive)
+	{
+		// After a press on the pill chat runs live under a still pointer; the pointer moving over the lines (or the name menu
+		// opening) pauses it again.
+		if (!Menu && std::fabs(F.UI.Ptr.X - K.ChatLiveX) <= 3.0f && std::fabs(F.UI.Ptr.Y - K.ChatLiveY) <= 3.0f)
+		{
+			return H;
+		}
+		K.ChatLive = false;
+	}
+	auto Newest = [&St]() {
+		int Id = 0;
+		for (const kast::ChatMsg& M : St.Chat)
+		{
+			Id = std::max(Id, M.Id);
+		}
+		return Id;
+	};
+	if (!K.ChatPaused)
+	{
+		K.ChatPaused = true;
+		K.ChatPausedAt = F.Now;
+		K.ChatUpTo = Newest();
+	}
+	H.Paused = true;
+	H.At = K.ChatPausedAt;
+	H.UpTo = K.ChatUpTo;
+	int Held = 0;
+	for (const kast::ChatMsg& M : St.Chat)
+	{
+		if (M.At <= F.Now)
+		{
+			++(KastChatShows(H, M, F.Now) ? Held : H.New);
+		}
+	}
+	if (Held == 0 && H.New > 0)
+	{
+		// Every line the pause held has left chat's 140 (or it began on an empty chat): it takes the newest again.
+		K.ChatPausedAt = H.At = F.Now;
+		K.ChatUpTo = H.UpTo = Newest();
+		H.New = 0;
+	}
+	const float W = F.UI.Measure(KastChatPausedLabel(H.New), 12.0f, 800) + 40.0f;
+	H.Pill = {Lines.X + (Lines.W - W) / 2.0f, Lines.Y + Lines.H - 34.0f, W, 26.0f};
+	K.ChatPillHover = !Menu && F.UI.Hover(H.Pill);
+	return H;
+}
+
+bool rlkast_detail::KastChatShows(const KastChatHold& H, const kast::ChatMsg& M, double Now)
+{
+	return M.At <= Now && (!H.Paused || (M.Id <= H.UpTo && M.At <= H.At));
+}
+
+std::string rlkast_detail::KastChatPausedLabel(int New)
+{
+	return New > 0 ? std::string(KwChatPaused) + " \xC2\xB7 " + kast::copy::Number(New) + KwChatPausedNew : std::string(KwChatPaused);
+}
+
+void rlkast_detail::KastChatPausePill(KastFrame& F, const KastChatHold& H)
+{
+	using namespace rlnet_detail;
+	if (!H.Paused || F.Previewing || H.Pill.W <= 0.0f)
+	{
+		return;
+	}
+	KwLaptop& K = KwOf(&F.RL);
+	const Rect& R = H.Pill;
+	// While the name menu is open a press anywhere but the menu closes it; the pill takes presses again after.
+	const Ui::ClickState Cs = F.UI.Clickable("kastchatpaused", R, K.MenuMsg < 0);
+	const Color Ink = Cs.Hover ? KDeep : KInk;
+	F.C.GlowRoundRect({R.X + 1.0f, R.Y + 3.0f, R.W, R.H}, R.H / 2.0f, Rgba(0, 0, 0, 0.5f), 8.0f);
+	F.C.FillRoundRect(R, R.H / 2.0f, Cs.Hover ? KLime : Hex(0x2a2042));
+	F.C.StrokeRoundRect(R, R.H / 2.0f, Cs.Hover ? KLime : KViolet, 1.2f);
+	// The pause glyph, then the words.
+	F.C.FillRoundRect({R.X + 14.0f, R.Y + 8.0f, 3.0f, 10.0f}, 1.0f, Ink);
+	F.C.FillRoundRect({R.X + 20.0f, R.Y + 8.0f, 3.0f, 10.0f}, 1.0f, Ink);
+	F.UI.Text(KastChatPausedLabel(H.New), R.X + 30.0f, R.Y + 17.5f, Ts(12.0f, 800, Ink));
+	if (Cs.Clicked)
+	{
+		// Resume and jump to the newest; live until the pointer moves again over the lines.
+		K.ChatPaused = false;
+		K.ChatLive = true;
+		K.ChatLiveX = F.UI.Ptr.X;
+		K.ChatLiveY = F.UI.Ptr.Y;
+		K.ChatPillHover = false;
+	}
+}
+
+bool rlkast_detail::KastChatPillHeld(const RiverLine* RL)
+{
+	const auto It = KwLaptops().find(RL);
+	return It != KwLaptops().end() && It->second.ChatPaused && It->second.ChatPillHover;
 }
 
 // ------------------------------------------------------------------ the end card
@@ -1833,9 +1992,10 @@ float rlkast_detail::KastEndCardBody(KastFrame& F, float X, float Y0, float W, b
 				KastThermo(F.C, X, Y - 2.0f, 46.0f, (After - 8.0) / 92.0, 0.0, Col);
 				NetSpaced(F.C, kast::copy::HeatTitle(), X + 30.0f, Y + 8.0f, 9.5f, 900, KDim, 1.2f);
 				// The night's own why line once the Room commits it (Summary::Why, C-K's L5), else what the channel's facts say. A night
-				// under 60 world minutes commits nothing and reads no forecast (§7), so the Room's lines speak of another night or fall
-				// back to "Steady: nights near your forecast" beside this card's UNDER YOUR FORECAST: the channel's facts then.
-				const std::array<std::string, 2> Why = L.Minutes >= 60.0 && !L.Why[0].empty() ? L.Why : KwWhyOffline(Ch, F.World);
+				// under 60 world minutes commits only a deep run's news (the C-K PIE fix, F4), and the Room's line for it is that night's
+				// own: the run that counted ("Tonight's final table (980 runners)") or why Heat didn't move ("Under an hour: ..."), never
+				// another night's line or "Steady" beside this card's UNDER YOUR FORECAST.
+				const std::array<std::string, 2> Why = !L.Why[0].empty() ? L.Why : KwWhyOffline(Ch, F.World);
 				if (!Why[0].empty())
 				{
 					F.UI.Text(Why[0], X + 74.0f, Y + 8.0f, Ts(11.0f, 600, KMuted, Align::Left, Baseline::Alphabetic, false, W / 2.0f - 80.0f));
@@ -2575,7 +2735,8 @@ std::string rlkast_detail::KastClipLaneTag()
 std::vector<std::string> rlkast_detail::KastUiInventory()
 {
 	return {KwPingNone, KwHeatNoHistory, KwNobodyOwes, KwNoPayouts, KwPartnerPerks, KwPartnerDone, KwSweatingNobody, KwFreshNotYou, KwRisingNotYou, KwRaidThem, KwGoLiveHere,
-		std::string(KwRailLabel) + ".", KwTrollsLine(1, true), KwTrollsLine(3, false), KwShownMore(12) + ".", std::string(KwShownSoon) + ".", std::string(KwBroadcastTitle) + "."};
+		std::string(KwRailLabel) + ".", KwTrollsLine(1, true), KwTrollsLine(3, false), KwShownMore(12) + ".", std::string(KwShownSoon) + ".", std::string(KwBroadcastTitle) + ".",
+		KastChatPausedLabel(0) + ".", KastChatPausedLabel(12) + ".", KastChatPausedLabel(1250) + ".", KastForecastLabel({8.0, 11.0, 14.0}, 12, 12) + "."};
 }
 } // namespace ui
 } // namespace ss

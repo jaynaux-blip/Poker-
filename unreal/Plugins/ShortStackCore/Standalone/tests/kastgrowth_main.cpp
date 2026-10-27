@@ -913,6 +913,10 @@ void Saves()
 	Expect(g::ReadLogTail(Split("kast\tlog\t1440.00\t60.00\t3\t5\t1\t0\t0\tgrind\t2\t1" + g::LogTail(Lg)), Read) && Read.AvgOwn == 41 && Read.PeakAt == 128.5 && Read.PeakMoment == 9 &&
 			Read.HeatAfter == 47.5,
 		"kast growth: the log tail round-trips");
+	Lg.PeakMoment = ss::kast::PeakRaid; // a peak a network raid brought (the C-K PIE fix, F1; review-pie-room)
+	Expect(g::LogTail(Lg) == "\t41\t128.5\t-2\t47.5" && g::ReadLogTail(Split("kast\tlog\t1440.00\t60.00\t3\t5\t1\t0\t0\tgrind\t2\t1" + g::LogTail(Lg)), Read) &&
+			Read.PeakMoment == ss::kast::PeakRaid,
+		"kast growth: the log tail round-trips a raid's peak (PeakRaid, -2)");
 	ss::kast::StreamLog WideLog;
 	WideLog.AvgOwn = 9999;
 	WideLog.PeakAt = 1439.5;
@@ -1330,6 +1334,7 @@ void Copy()
 	Is(c::StreakRow(1), "Streak 1 week");
 	Is(c::PeakLine(41, static_cast<int>(ss::kast::Moment::FinalTable), "9:48 PM"), "Peak 41 at the final table, 9:48 PM");
 	Is(c::PeakLine(12, -1, "9:48 PM"), "Peak 12 at 9:48 PM");
+	Is(c::PeakLine(30, ss::kast::PeakRaid, "9:48 PM"), "Peak 30 on a raid, 9:48 PM"); // the C-K PIE fix (F1)
 	for (int M = 0; M < static_cast<int>(ss::kast::Moment::Count); ++M)
 	{
 		const std::string Line = c::PeakLine(5, M, "1:00 AM");
@@ -1384,7 +1389,8 @@ void Copy()
 		c::RisingShelfSub(), c::CameBecauseOf(), c::FollowedFrom(), c::CameFromClip(), c::WelcomeRaidStreamer(), c::TokenRule(), c::NodButton(), c::DoneButton(),
 		c::PartnerAverage(), c::RaidsOwed(0), c::RaidsOwedShort(0), c::RaidsOwedShort(1), c::RaidedAgo("x", 0, "Friday"), c::RaidedAgo("x", 1, "Friday"),
 		c::WhyShowingUp(1), c::WhyCooling(1), c::RunAlertSent(1), c::PingToast(1, 1), c::EmptySeen(1, 0), c::BroadcastTease(1), c::BroadcastTease(2), c::BroadcastTease(3),
-		c::ClipOfTheNight("x", false)};
+		c::ClipOfTheNight("x", false), c::WhyShort(), c::WhyShortCounted(), c::WhyShortUsual(), c::WhyShortBefore(), c::WhyCeiling(),
+		c::WhyRunPlain(ss::kast::growth::RunStage::FinalTable, 0, ""), c::WhyRunPlain(ss::kast::growth::RunStage::Win, 4, "Friday"), c::PeakLine(5, ss::kast::PeakRaid, "1:00 AM")};
 	bool AllFilled = true;
 	for (const std::string& S : Filled)
 	{

@@ -3,10 +3,13 @@
 // toast line's one-a-minute rule, all through the RoomView Kast.cpp implements (KastPlay.h). Every word is KastCopy.h's.
 //
 // The two clocks (R3, R4): what moves the room (a Nodded guest's follow, Rail Call's arrivals, the raid's welcome, the scene's
-// bank, the reveal's Hype, a call's Engage) happens in the verbs (the player's clicks: inputs) and in OnMoment / OnMinute (the
-// world-minute grid) from the inputs and keyed draws, growth::Unit(Room.Seed(), Room.StreamNo(), Tag, ...). OnChat is display:
-// chat's calls, the replies, the reveal's words and the toasts, from the stream's own R; it is handed no Channel, and nothing
-// the room reads depends on it (the reveal's Hype doesn't read how chat called), so a frame rate never moves the room.
+// bank, the reveal's Hype and the streamer's call's Engage, which the press books and the reveal gives) happens in the verbs (the
+// player's clicks: inputs) and in OnMoment / OnMinute (the world-minute grid) from the inputs and keyed draws,
+// growth::Unit(Room.Seed(), Room.StreamNo(), Tag, ...). OnChat is display: chat's calls, the replies, the reveal's words and the
+// toasts, from the stream's own R; it is handed no Channel, and nothing the room reads depends on it (the reveal's Hype doesn't
+// read how chat called), so a frame rate never moves the room. Hold or Crack's safety close (the PIE's F2, KastPlayHocStale)
+// may run in any hook, OnChat too: it reads only the world clock the hook carries, and once one clock says the reveal can't
+// come, every later one says so, so whichever hook closes it, a later reveal gets the same answer.
 #include "KastPlay.h"
 
 #include "KastCopy.h"
@@ -36,12 +39,22 @@ constexpr int KastPlayNods = 3;
 constexpr double KastPlayNodFollow = 0.10;
 /** A member's one-time Affinity bump when the streamer Nods or answers them (§2.8.2: +3% of the gap). */
 constexpr double KastPlayNoticedShare = 0.03;
-/** Hold or Crack: 2+ watching (§5.3 K12, REVIEW_PLAYER M9), Hype +8 at the reveal, Engage +0.3 for the streamer's call, and a
- *  reveal that never came closes after this many world minutes (a runout takes seconds). */
+/** Hold or Crack: 2+ watching (§5.3 K12, REVIEW_PLAYER M9), Hype +8 at the reveal, and Engage +0.3 for the streamer's call
+ *  (booked at the press, given with the reveal: a call on a game that never reveals gives nothing). */
 constexpr int KastPlayHocWatching = 2;
 constexpr double KastPlayHocHype = 8.0;
 constexpr double KastPlayHocEngage = 0.3;
-constexpr double KastPlayHocStaleMinutes = 5.0;
+/** Its safety close (the lead's PIE, 2026-10-26, F2): a reveal that hasn't come by the next hand on its table, or within 3 world
+ *  minutes of the open, never will (ss.Kast.Moment allin opens one with no hand behind it). A table's clock moves a whole hand at
+ *  a time, after the hand's result (Session::AfterAward fires WonAllIn, LostAllIn or BadBeat; then EndHand ticks the tournament,
+ *  whose clock is its hands: Tournament::ClockMinutes), and the shortest hand any table deals is 30 world seconds (the rival
+ *  sites' hyper; 42 by default, 150 live). So at one table the room's clock half a world minute past the open is the next hand.
+ *  A hyper hand is exactly that half minute, and the room's clock is a sum (Night One's day, the start, the hands' seconds over 60)
+ *  whose step across a power of two of world minutes can round a hair under it, so the rule allows a millionth of a minute (the
+ *  F2 review; a hand's own reveal comes at the open's very clock, so nothing inside a hand comes near it). */
+constexpr double KastPlayHocStaleMinutes = 3.0;
+constexpr double KastPlayHocHandMinutes = 0.5;
+constexpr double KastPlayHocClockSlack = 1e-6;
 /** Welcome the raid: within 2 world minutes of the raid, stays x1.3 and follows x1.5 (§2.7.1). */
 constexpr double KastPlayWelcomeMinutes = 2.0;
 constexpr double KastPlayWelcomeStay = 1.3;
@@ -137,6 +150,29 @@ double KastPlayHoldsChance(double Equity)
 	return std::min(0.95, std::max(0.05, 0.15 + 0.85 * E));
 }
 
+/** Hold or Crack's safety close (F2): whether the open game's reveal can no longer come, with the room's clock at World and
+ *  Tables open now. At one table (when it opened and now) the clock half a world minute on is that table's next hand: its clock
+ *  moves only when a hand ends, after the hand's result. With two or more another table's hands move the room's clock while this
+ *  runout plays, and with none (the lobby, ss.Kast.Moment allin off a table) the clock runs in real time: 3 world minutes then.
+ *  Once true for a clock it is true for every later one (the clock never goes back). */
+bool KastPlayHocStale(const PlayState& P, double World, int Tables)
+{
+	if (!P.HoC.Open)
+	{
+		return false;
+	}
+	const double Since = World - P.HoC.OpenedAt;
+	return Since >= KastPlayHocStaleMinutes || (P.HoC.OneTable && Tables == 1 && Since >= KastPlayHocHandMinutes - KastPlayHocClockSlack);
+}
+
+/** The safety close: the bar goes quietly (no reveal line, no KastCall, no Hype), and chat's calls and the streamer's call are
+ *  dropped with it (the call's Engage was only booked; no caller joins the night's tally). */
+void KastPlayHocDrop(PlayState& P)
+{
+	P.HoC = PlayState::HoldCrack();
+	++P.HocDropped;
+}
+
 void KastPlayPostToast(PlayState& P, RoomView& Room, const PlayState::Toast& T)
 {
 	if (play::ToastFree(P) && P.Toasts.empty())
@@ -158,10 +194,18 @@ void KastPlayQueue(PlayState& P, int Kind, std::vector<std::string> Speakers, do
 	P.Pending.push_back(std::move(L));
 }
 
-/** Hold or Crack's reveal: Hype +8 whatever chat called, then chat's result, the night's tally and KastCall. */
+/** Hold or Crack's reveal: Hype +8 whatever chat called, the streamer's booked call's Engage +0.3, then chat's result, the night's
+ *  tally and KastCall. */
 void KastPlayReveal(PlayState& P, RoomView& Room, bool Holds)
 {
 	Room.AddHype(KastPlayHocHype);
+	if (P.HoC.Called != 0)
+	{
+		// The streamer's call lands with the reveal (F2: a call on a game the safety close drops gives nothing). At one table the
+		// clock doesn't move between the press and the reveal (it moves when the hand ends), so no grid minute runs between them
+		// and the Engage the room reads is the press's to the byte.
+		Room.AddEngage(KastPlayHocEngage);
+	}
 	int Right = 0;
 	int Points = 0;
 	std::vector<std::string> RightNames;
@@ -394,8 +438,8 @@ bool CallIt(PlayState& P, RoomView& Room, Channel& /*Ch*/, bool Holds)
 	{
 		return false;
 	}
+	// The call is booked: its Engage +0.3 comes with the reveal (KastPlayReveal), and the safety close drops it with the bar (F2).
 	P.HoC.Called = Holds ? 1 : 2;
-	Room.AddEngage(kastplay_detail::KastPlayHocEngage);
 	Room.Speak(std::string(), copy::StreamerCall(Holds), LineKind::Streamer);
 	return true;
 }
@@ -420,6 +464,12 @@ void OnMoment(PlayState& P, RoomView& Room, Channel& /*Ch*/, const Inputs& In, M
 	}
 	P.World = std::max(P.World, In.World);
 	P.Attended = In.Attended;
+	// F2: a Hold or Crack whose reveal can't come any more closes quietly first, so a later hand's result (a skipped hand's, which
+	// fires WonAllIn or BadBeat with no AllIn) never reveals it.
+	if (kastplay_detail::KastPlayHocStale(P, In.World, In.Tables))
+	{
+		kastplay_detail::KastPlayHocDrop(P);
+	}
 	// RAIL CALL goes with the run (§2.3.6: "until it is pressed or the run ends"): a bust's own inputs show no armed run at depth
 	// 0.4, so the button goes at once, not at the next grid minute (13 real seconds at Smart). Another table's deep run, or
 	// ss.Kast.Moment's held run (the moment's inputs carry it), keeps it.
@@ -440,6 +490,7 @@ void OnMoment(PlayState& P, RoomView& Room, Channel& /*Ch*/, const Inputs& In, M
 			P.HoC.Table = In.ThisTable;
 			P.HoC.Equity = In.AllInEquity;
 			P.HoC.OpenedAt = In.World;
+			P.HoC.OneTable = In.Tables == 1;
 		}
 		return;
 	}
@@ -461,9 +512,9 @@ void OnMinute(PlayState& P, RoomView& Room, Channel& Ch, const Inputs& In, int M
 	P.Attended = In.Attended;
 	P.RaidAt = Room.RaidAt();
 	P.Lit.erase(std::remove_if(P.Lit.begin(), P.Lit.end(), [Now](const PlayState::Glow& G) { return G.Until <= Now; }), P.Lit.end());
-	if (P.HoC.Open && Now - P.HoC.OpenedAt >= kastplay_detail::KastPlayHocStaleMinutes)
+	if (kastplay_detail::KastPlayHocStale(P, Now, In.Tables))
 	{
-		P.HoC = PlayState::HoldCrack(); // the reveal never came (the hand went elsewhere): no result, no Hype
+		kastplay_detail::KastPlayHocDrop(P); // the reveal never came (F2): no result, no Hype, no Engage
 	}
 	// RAIL CALL (§2.3.6): offered at the first attended minute an armed run is at depth 0.4 while today's grant is unused; it
 	// stays (heads-down it just isn't drawn) until pressed or until the deepest run is no longer at depth 0.4 (it ended).
@@ -495,6 +546,12 @@ void OnChat(PlayState& P, RoomView& Room, const Inputs& In, double DReal, Rng& R
 	P.Attended = In.Attended;
 	P.RaidAt = Room.RaidAt();
 	P.SceneOpen = !P.SceneUsed && P.Attended && Room.Watching() == 0 && Room.StreamNo() <= kastplay_detail::KastPlaySceneStreams;
+	// F2 on the display step's clock: the bar goes on the frame the table's next hand moves the clock, not at the next grid
+	// minute (13 real seconds at Smart). It changes nothing the room reads (the clock only goes on; see the file's head).
+	if (kastplay_detail::KastPlayHocStale(P, In.World, In.Tables))
+	{
+		kastplay_detail::KastPlayHocDrop(P);
+	}
 	if (P.HoC.Open)
 	{
 		kastplay_detail::KastPlayCalls(P, Room, DReal, R);
@@ -629,7 +686,7 @@ void Fill(const PlayState& P, View& V)
 
 void Close(PlayState& P, Summary& S)
 {
-	P.HoC = PlayState::HoldCrack(); // no reveal after the stream
+	P.HoC = PlayState::HoldCrack(); // no reveal after the stream (a booked call gives nothing)
 	const PlayState::Caller* Best = nullptr;
 	for (const PlayState::Caller& C : P.Callers)
 	{
