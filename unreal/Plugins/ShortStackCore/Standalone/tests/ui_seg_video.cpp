@@ -134,7 +134,24 @@ struct Desk
 		}
 		return Done();
 	}
-	void Open(int Page) { ss::ui::rlvideo_detail::VideoOpen(RL, Page, Now); }
+	/** Studio (Page 0) as a player who has been through IDEAS before opens it: the ready ideas carry the save's "seen" mark
+	 *  (C3 PIE fix F2: a save that never showed the list has every ready idea new once, and the visit opens on IDEAS). */
+	void Open(int Page)
+	{
+		if (Page == 0)
+		{
+			std::vector<int> Ready;
+			for (const video::IdeaCard& I : S.VideoIdeas())
+			{
+				if (I.Ready)
+				{
+					Ready.push_back(I.Id);
+				}
+			}
+			S.SeeIdeas(Ready);
+		}
+		ss::ui::rlvideo_detail::VideoOpen(RL, Page, Now);
+	}
 	/** C3 fix round (L9, update 3 §4.1): Studio opens on IDEAS while a new or trending idea waits; the player's click on
 	 *  MOMENTS (the list's first tab) brings the moments back. The frame after it. */
 	DrawList Moments()
@@ -1205,9 +1222,23 @@ void OldSave()
 		return Frame(X, Y, false, true);
 	};
 	const bool Dot = ss::ui::rlvideo_detail::VideoDot(&RL, S);
+	size_t Ready = 0;
+	for (const video::IdeaCard& I : S.VideoIdeas())
+	{
+		Ready += I.Ready ? 1 : 0;
+	}
 	ss::ui::rlvideo_detail::VideoOpen(RL, 0, Now);
 	DrawList L = Frame(-1.0f, -1.0f, false, false);
+	// C3 PIE fix F2: the old save never showed the IDEAS list, so its career's ready ideas are new once and Studio opens on them;
+	// the moments' empty state is the MOMENTS tab's.
+	const bool IdeasFirst = ss::ui::rlvideo_detail::VideoUiOf(&RL).ListTab == (Ready > 0 ? 1 : 0);
+	if (Ready > 0)
+	{
+		Click(ss::ui::rlvideo_detail::RrListX + 40.0f, 90.0f);
+		L = Frame(-1.0f, -1.0f, false, false);
+	}
 	const bool StudioEmpty = DrewRun(L, "Play some hands. The good ones show up here.");
+	Check(IdeasFirst, "old save: Studio's first look opens on IDEAS when the career has ready ideas (never shown: new once)");
 	Click(1600.0f - 44.0f, 30.0f); // the bell
 	L = Frame(-1.0f, -1.0f, false, false);
 	const bool BellEmpty = DrewRun(L, "Nothing yet. Milestones land here as your videos grow.");

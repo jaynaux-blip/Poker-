@@ -878,6 +878,86 @@ video::VideoStats Session::VideoStatsOf(const std::string& VideoId) const
 	return video::VideoStats();
 }
 
+namespace session_video3_detail
+{
+/** C3 PIE fix F2: the TextsSeen key that holds Studio's seen ideas, "rerun-ideas-seen:1101,1601" (ids ascending; at most the
+ *  library's 148, about 5 bytes each). Absent until the IDEAS list first shows a ready idea: an old save writes back as read. */
+const std::string& IdeasSeenPrefix()
+{
+	static const std::string Prefix = "rerun-ideas-seen:";
+	return Prefix;
+}
+
+std::set<std::string>::const_iterator IdeasSeenKeyIn(const std::set<std::string>& Told)
+{
+	const std::string& Pre = IdeasSeenPrefix();
+	const auto It = Told.lower_bound(Pre);
+	return It != Told.end() && It->compare(0, Pre.size(), Pre) == 0 ? It : Told.end();
+}
+} // namespace session_video3_detail
+
+std::vector<int> Session::IdeasSeen() const
+{
+	using namespace session_video3_detail;
+	std::vector<int> Out;
+	const auto It = IdeasSeenKeyIn(TextsSeen);
+	if (It == TextsSeen.end())
+	{
+		return Out;
+	}
+	const char* P = It->c_str() + IdeasSeenPrefix().size();
+	while (*P != '\0')
+	{
+		char* End = nullptr;
+		const long Id = std::strtol(P, &End, 10);
+		if (End == P)
+		{
+			++P; // a stray character: skip it
+			continue;
+		}
+		if (Id > 0 && Id < 100000)
+		{
+			Out.push_back(static_cast<int>(Id));
+		}
+		P = End;
+	}
+	std::sort(Out.begin(), Out.end());
+	Out.erase(std::unique(Out.begin(), Out.end()), Out.end());
+	return Out;
+}
+
+void Session::SeeIdeas(const std::vector<int>& IdeaIds)
+{
+	using namespace session_video3_detail;
+	std::vector<int> All = IdeasSeen();
+	const size_t Had = All.size();
+	for (const int Id : IdeaIds)
+	{
+		if (Id > 0 && Id < 100000 && !std::binary_search(All.begin(), All.begin() + static_cast<std::ptrdiff_t>(Had), Id))
+		{
+			All.push_back(Id);
+		}
+	}
+	if (All.size() == Had)
+	{
+		return; // nothing new seen: the save stays as it is
+	}
+	std::sort(All.begin(), All.end());
+	All.erase(std::unique(All.begin(), All.end()), All.end());
+	std::string Key = IdeasSeenPrefix();
+	for (size_t K = 0; K < All.size(); ++K)
+	{
+		Key += (K > 0 ? "," : "") + std::to_string(All[K]);
+	}
+	const auto It = IdeasSeenKeyIn(TextsSeen);
+	if (It != TextsSeen.end())
+	{
+		TextsSeen.erase(It);
+	}
+	TextsSeen.insert(Key);
+	Save();
+}
+
 namespace video
 {
 std::vector<Trend> WeekTrends(const Session& S, double World)

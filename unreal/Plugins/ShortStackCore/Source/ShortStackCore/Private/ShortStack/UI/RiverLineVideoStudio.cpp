@@ -324,9 +324,9 @@ void RrIdeaCard(RrFrame& F, const video::IdeaCard& I, const Rect& R, bool Clicka
 	{
 		Chip("TRENDING", RrGold, true);
 	}
-	if (I.Ready && U.NewIdeas.count(I.Id) != 0)
+	if (I.Ready && !I.Trending && U.NewIdeas.count(I.Id) != 0)
 	{
-		Chip("NEW", RrGood, false); // ready since the last visit (L9)
+		Chip("NEW", RrGood, false); // ready since the last visit (L9); a trending card's TRENDING says it already (C3 PIE: room for its name)
 	}
 	F.UI.Text(I.Name, X0, R.Y + 28.0f, Ts(14.0f, 800, RrCream, Align::Left, Baseline::Alphabetic, false, std::max(60.0f, Cx - X0 - 4.0f)));
 	F.UI.Text(I.Fact, X0, R.Y + 48.0f, Ts(12.5f, 800, I.Ready ? RrGold : RrMuted, Align::Left, Baseline::Alphabetic, false, Right - X0));
@@ -399,21 +399,28 @@ void RrIdeasList(RrFrame& F)
 	using namespace rlnet_detail;
 	VideoUi& U = F.U;
 	std::vector<video::IdeaCard> Cards = RrIdeas(F);
-	// Ready first, trend matches on top, locked last (§6.6.2); the library's order inside each.
-	std::stable_sort(Cards.begin(), Cards.end(), [](const video::IdeaCard& A, const video::IdeaCard& B) {
-		const int Ra = A.Ready ? (A.Trending ? 0 : 1) : 2, Rb = B.Ready ? (B.Trending ? 0 : 1) : 2;
+	// Ready first, trend matches on top, locked last (§6.6.2); this visit's NEW ideas next under the trends (C3 PIE fix F2: what
+	// opened the list is in view); the library's order inside each.
+	const std::set<int>& New = U.NewIdeas;
+	std::stable_sort(Cards.begin(), Cards.end(), [&New](const video::IdeaCard& A, const video::IdeaCard& B) {
+		const int Ra = A.Ready ? (A.Trending ? 0 : New.count(A.Id) != 0 ? 1 : 2) : 3, Rb = B.Ready ? (B.Trending ? 0 : New.count(B.Id) != 0 ? 1 : 2) : 3;
 		return Ra < Rb;
 	});
+	std::vector<int> Shown;
 	for (const video::IdeaCard& I : Cards)
 	{
 		if (I.Trending && I.Ready)
 		{
 			U.SeenIdeas.insert(I.Id); // seen: the taskbar's dot stops counting it
 		}
-		if (I.Ready)
+		if (I.Ready && F.Live && U.ReadySeen.insert(I.Id).second)
 		{
-			U.ReadySeen.insert(I.Id); // seen on the list: no longer new (its NEW chip stays for this visit)
+			Shown.push_back(I.Id); // seen on the list: no longer new (its NEW chip stays for this visit)
 		}
+	}
+	if (!Shown.empty())
+	{
+		F.S.SeeIdeas(Shown); // the saved mark (C3 PIE fix F2): still seen after a load
 	}
 	float Top = RrListTop;
 	RrDaily(F);
@@ -1681,24 +1688,17 @@ float RrVerdictLine(RrFrame& F)
 /**
  * A visit's first frame (L9, update 3 §4.1): Studio opens on IDEAS when a new or trending idea waits (a ready idea the IDEAS
  * list hasn't shown since it got ready, or a trending one not yet seen), else on MOMENTS. A caller that means a tab says so
- * (OpenTab: Research's links open IDEAS, Kast's Cut highlights MOMENTS). The ideas that were ready at the first look aren't
- * new (a load's, as VideoPrime's twelve hours for moments); the new ones wear a NEW chip for the visit.
+ * (OpenTab: Research's links open IDEAS, Kast's Cut highlights MOMENTS). Seen is the session's saved mark (C3 PIE fix F2,
+ * Session::IdeasSeen): the first look after a load knows what the list showed before it, so an idea that got ready since
+ * (in the session before this visit too) is new; a save that never showed the list has every ready idea new once. The new
+ * ones wear a NEW chip for the visit.
  */
 void RrStudioVisit(RrFrame& F)
 {
 	VideoUi& U = F.U;
 	const std::vector<video::IdeaCard>& Ideas = RrIdeas(F);
-	if (!U.ReadyPrimed)
-	{
-		U.ReadyPrimed = true;
-		for (const video::IdeaCard& I : Ideas)
-		{
-			if (I.Ready)
-			{
-				U.ReadySeen.insert(I.Id);
-			}
-		}
-	}
+	const std::vector<int> Seen = F.S.IdeasSeen();
+	U.ReadySeen = std::set<int>(Seen.begin(), Seen.end());
 	U.NewIdeas.clear();
 	bool Waiting = false;
 	for (const video::IdeaCard& I : Ideas)

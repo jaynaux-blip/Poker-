@@ -22,6 +22,7 @@
 #include "ShortStack/Game/Life.h"
 #include "ShortStack/Game/Network.h"
 #include "ShortStack/Game/Room.h"
+#include "ShortStack/Game/Session.h"
 #include "ShortStack/Game/Sites.h"
 #include "ShortStack/Game/Video.h"
 #include "ShortStack/Game/VideoAlgo.h"
@@ -4306,6 +4307,447 @@ void Analytics()
 	}
 }
 
+// ================================================================== C3-F1: the days before Rerun 2.0's analytics (c3p-stats)
+
+/** A committed fixture's text, line endings as written (night_one_session's seams::Fixture). */
+std::string FixtureText(const char* Name)
+{
+	std::ifstream In(std::string(SS_TESTS_DIR) + "/fixtures/" + Name, std::ios::binary);
+	std::string Out((std::istreambuf_iterator<char>(In)), std::istreambuf_iterator<char>());
+	Out.erase(std::remove(Out.begin(), Out.end(), '\r'), Out.end());
+	return Out;
+}
+
+double SumOf(const std::vector<double>& X, size_t From = 0, size_t To = static_cast<size_t>(-1))
+{
+	double S = 0.0;
+	for (size_t K = From; K < X.size() && K < To; ++K)
+	{
+		S += X[K];
+	}
+	return S;
+}
+
+/** Every number a Range holds (its estimated marks aside), FNV-1a over their bits: what a fresh channel's must keep. */
+uint64_t RangePrint(const video::Range& R)
+{
+	uint64_t H = 1469598103934665603ull;
+	for (const std::vector<double>* V : {&R.Views, &R.WatchH, &R.SubsGained, &R.SubsLost, &R.Likes, &R.Dislikes, &R.Impressions, &R.Cents, &R.CutCents, &R.CutViews,
+			 &R.AdImpressions, &R.Monetized})
+	{
+		for (const double X : *V)
+		{
+			uint64_t B = 0;
+			std::memcpy(&B, &X, sizeof(B));
+			for (int K = 0; K < 8; ++K)
+			{
+				H ^= (B >> (8 * K)) & 0xffu;
+				H *= 1099511628211ull;
+			}
+		}
+		H ^= V->size();
+		H *= 1099511628211ull;
+	}
+	return H;
+}
+
+/** The days a Range marks estimated (V6: from before Rerun 2.0's own analytics); Prefix: all of them come first. */
+int EstDays(const video::Range& R, bool& Prefix)
+{
+	int N = 0;
+	bool Seen = false;
+	Prefix = true;
+	for (size_t K = 0; K < R.Estimated.size(); ++K)
+	{
+		if (R.Estimated[K])
+		{
+			++N;
+			Prefix = Prefix && !Seen;
+		}
+		else
+		{
+			Seen = true;
+		}
+	}
+	return N;
+}
+
+/** The Lifetime window's days as Analytics picks them (RiverLineVideoStats.cpp RrWindowDays: the oldest kept, top or stub video). */
+int LifeDays(const video::Channel& C, double World)
+{
+	double First = World;
+	for (const video::Video& V : C.Videos)
+	{
+		First = std::min(First, V.At);
+	}
+	for (const video::TopRow& T : C.X.Top)
+	{
+		First = std::min(First, T.At);
+	}
+	for (const video::Stub& S : C.Stubs)
+	{
+		First = std::min(First, S.At);
+	}
+	return std::clamp(valgo::DayOf(World) - valgo::DayOf(First) + 1, 7, 730);
+}
+
+/** A Studio-packaged upload of the channel's first open moment that isn't a story (a recipe: Rerun 2.0's, TurnOnU3 on an old channel). */
+std::string PackagedUpload(video::Channel& C, double World, const std::string& Seed)
+{
+	video::Choice Ch;
+	for (const video::Candidate& M : C.Open)
+	{
+		if (Ch.Candidates.empty() && !M.Storytime)
+		{
+			Ch.Candidates = {M.Id};
+		}
+	}
+	Ch.F = video::Format::Breakdown;
+	Ch.T = video::TitleStyle::Story;
+	Ch.Fr = video::Frame::Versus;
+	video::ThumbSpec S;
+	S.Arch = 0;
+	S.Layout = 1;
+	Ch.Thumbs = {S};
+	video::UploadFacts F;
+	F.GearQuality = 0.5;
+	F.RentsPaid = 2;
+	return video::Upload(C, Ch, World, Seed, F);
+}
+
+/**
+ * C3-F1 (PIE_C3_NOTES.md; update 3 SPEC §7.5 item 3, V6): a channel's days before Rerun 2.0's own rings (an Update 2 channel
+ * looked at, a migrated one's days before its first Rerun 2.0 upload) read Update 2's closed form, the numbers Describe's "Last 28
+ * days" and the per-video views use, marked estimated, never zeros: the KPIs, the charts, the comparison with the window before
+ * and the lifetime. A fresh Rerun 2.0 channel's numbers don't move and none of its days is estimated.
+ */
+void MigratedHistory()
+{
+	// The est. rule: a window's views within 0.5% of Describe's closed form over the same days (the rings keep floats; today's
+	// hours read the kept videos alone, the folded tails' few views omitted).
+	auto Near = [](double A, double B) { return std::fabs(A - B) <= 0.005 * std::max(std::fabs(A), std::fabs(B)) + 1.0; };
+	// (1) update2_creator: an Update 2 channel (60 kept videos, folded tails, evergreen stubs, a Partner), looked at, then migrated.
+	ss::SaveData D;
+	const bool Parsed = ss::SaveData::Parse(FixtureText("update2_creator.ssave"), D);
+	video::Channel& C = D.Life.Video;
+	const double Start = C.SteppedTo;
+	{
+		const double World = Start + 16.0 * 60.0;
+		const video::ChannelView V = video::View(C, World);
+		const video::Range R = video::StatsRange(C, World, 28);
+		bool Prefix = false;
+		const int Est = EstDays(R, Prefix);
+		int Lit = 0;
+		for (const double X : R.Views)
+		{
+			Lit += X > 0.0 ? 1 : 0;
+		}
+		double Cents = 0.0, Subs = 0.0;
+		for (size_t K = 0; K < 28; ++K)
+		{
+			Cents += V.CentsByDay[K];
+			Subs += V.SubsByDay[K];
+		}
+		std::printf("  history: update2_creator (Update 2, looked at): 28 days %.1f views (Describe %.1f), %d of 28 days with views, %d estimated; revenue $%.2f "
+					"(Describe's days $%.2f); subscribers %+.1f (%+.1f)\n",
+			SumOf(R.Views), V.Views28, Lit, Est, SumOf(R.Cents) / 100.0, Cents / 100.0, SumOf(R.SubsGained) - SumOf(R.SubsLost), Subs);
+		Expect(Parsed && !C.X.On && Est == 28 && Lit == 28 && Near(SumOf(R.Views), V.Views28) && Near(SumOf(R.Cents), Cents) &&
+				   Near(SumOf(R.SubsGained) - SumOf(R.SubsLost), Subs),
+			"history: an Update 2 channel's 28 days read its closed form (Describe's), every day estimated, none zero");
+		// (review-c3p-stats) The folded and spread views carry their engagement: on the days before the oldest kept upload (the
+		// folded videos', the stubs' and the spread's views only), watch time, likes and impressions a view sit inside the kept
+		// Update 2 videos' own range, never zero.
+		double Lo[3] = {1e30, 1e30, 1e30}, Hi[3] = {0.0, 0.0, 0.0}, Oldest = C.SteppedTo;
+		for (const video::Video& Vv : C.Videos)
+		{
+			const video::VideoStats S = video::StatsOf(C, Vv, World);
+			Oldest = std::min(Oldest, Vv.At);
+			if (S.Views > 1.0)
+			{
+				const double Per[3] = {S.WatchHours / S.Views, S.Likes / S.Views, S.Impressions / S.Views};
+				for (int K = 0; K < 3; ++K)
+				{
+					Lo[K] = std::min(Lo[K], Per[K]);
+					Hi[K] = std::max(Hi[K], Per[K]);
+				}
+			}
+		}
+		const int LifeN = LifeDays(C, World);
+		const video::Range L0 = video::StatsRange(C, World, LifeN);
+		int Folded = 0, Outside = 0;
+		for (int K = 0; K < LifeN; ++K)
+		{
+			const int Dk = valgo::DayOf(World) - LifeN + 1 + K;
+			const double Vw = L0.Views[static_cast<size_t>(K)];
+			if (Dk >= valgo::DayOf(Oldest) || Vw <= 0.0)
+			{
+				continue;
+			}
+			++Folded;
+			const double Per[3] = {L0.WatchH[static_cast<size_t>(K)] / Vw, L0.Likes[static_cast<size_t>(K)] / Vw, L0.Impressions[static_cast<size_t>(K)] / Vw};
+			for (int J = 0; J < 3; ++J)
+			{
+				Outside += Per[J] < 0.9 * Lo[J] || Per[J] > 1.1 * Hi[J] ? 1 : 0;
+			}
+		}
+		std::printf("  history: update2_creator's %d days before its oldest kept upload: %d per-view numbers outside the kept videos' range (watch %.3f-%.3f h, "
+					"likes %.4f-%.4f, impressions %.1f-%.1f a view)\n",
+			Folded, Outside, Lo[0], Hi[0], Lo[1], Hi[1], Lo[2], Hi[2]);
+		Expect(Folded > 100 && Outside == 0, "history: the folded and spread views carry watch time, likes and impressions at the kept videos' rates");
+	}
+	// The migration: a Studio-packaged upload at 4 PM turns Rerun 2.0 on (X.Since today); three midnights stepped.
+	const std::string Id = PackagedUpload(C, Start + 16.0 * 60.0, "c3p:migrate");
+	video::Step(C, D.Life, D.BankrollCents, D.Channel, Start, Start + 3.0 * Day);
+	const double World = Start + 3.0 * Day + 16.0 * 60.0;
+	const int Today = valgo::DayOf(World), Since = C.X.Since;
+	const video::ChannelView V = video::View(C, World), Was = video::View(C, World - 28.0 * Day);
+	const video::Range R = video::StatsRange(C, World, 28), B = video::StatsRange(C, World - 28.0 * Day, 28);
+	bool Prefix = false, PrefixB = false;
+	const int Est = EstDays(R, Prefix), EstB = EstDays(B, PrefixB);
+	const size_t Cut = static_cast<size_t>(Since - (Today - 27));
+	int Lit = 0;
+	double Paid = 0.0;
+	for (size_t K = 0; K < Cut; ++K)
+	{
+		Lit += R.Views[K] > 0.0 ? 1 : 0;
+		Paid += V.CentsByDay[K]; // (Update 2 paid no season: View's chart says so for these days too)
+	}
+	const double Now = SumOf(R.Views), Then = SumOf(B.Views);
+	std::printf("  history: update2_creator migrated (\"%s\", since day %d, today %d): 28 days %.1f views (Describe %.1f), the 28 before %.1f (Describe %.1f): "
+				"%+.1f%% (Describe %+.1f%%); %d estimated days (%d with views), the window before %d of 28; the days before the migration $%.2f "
+				"(their closed form $%.2f)\n",
+		Id.c_str(), Since, Today, Now, V.Views28, Then, Was.Views28, 100.0 * (Now - Then) / std::max(1.0, Then), 100.0 * (V.Views28 - Was.Views28) / std::max(1.0, Was.Views28), Est, Lit,
+		EstB, SumOf(R.Cents, 0, Cut) / 100.0, Paid / 100.0);
+	Expect(!Id.empty() && C.X.On && Since == valgo::DayOf(Start) && Near(Now, V.Views28) && Near(Then, Was.Views28),
+		"history: a migrated channel's 28 days and the 28 before them match Describe's (the est. rule)");
+	Expect(Est == static_cast<int>(Cut) && Prefix && Lit == Est && EstB == 28 && PrefixB,
+		"history: the days before the migration are estimated and carry views; the days since are Rerun 2.0's own");
+	Expect(std::fabs((Now - Then) / std::max(1.0, Then) - (V.Views28 - Was.Views28) / std::max(1.0, Was.Views28)) < 0.01,
+		"history: the comparison with the 28 days before is the closed form's, not against zeros");
+	Expect(Paid > 0.0 && Near(SumOf(R.Cents, 0, Cut), Paid), "history: the days before the migration earn what Update 2 paid them (no season), not zero");
+	// The lifetime: the views against the channel's total, the subscribers against its count, the money against what Rerun paid
+	// and holds (and today's hours). The folded videos' views before the oldest kept upload, which the tails can't place, are
+	// spread over the days before it, so the totals are the channel's.
+	{
+		const int Days = LifeDays(C, World);
+		const video::Range L = video::StatsRange(C, World, Days);
+		const double Total = video::TotalViews(C, World), Subs = video::SubsAt(C, World);
+		const double Money = static_cast<double>(C.PaidCents + C.BalanceCents) + L.Cents.back();
+		double Oldest = C.SteppedTo;
+		for (const video::Video& Vv : C.Videos)
+		{
+			Oldest = std::min(Oldest, Vv.At);
+		}
+		bool P = false;
+		const int E = EstDays(L, P);
+		int Zero = 0;
+		for (size_t K = 0; K < L.Views.size(); ++K)
+		{
+			Zero += L.Estimated[K] && L.Views[K] <= 0.0 ? 1 : 0;
+		}
+		std::printf("  history: update2_creator's lifetime (%d days, %d estimated, %d of them without a view; the oldest kept upload day %d): %.0f views of %.0f; "
+					"%+.1f subscribers of %.1f; $%.2f of the $%.2f paid, held and today's\n",
+			Days, E, Zero, valgo::DayOf(Oldest), SumOf(L.Views), Total, SumOf(L.SubsGained) - SumOf(L.SubsLost), Subs, SumOf(L.Cents) / 100.0, Money / 100.0);
+		Expect(P && E == Days - 4 && Zero == 0 && Near(SumOf(L.Views), Total) && Near(SumOf(L.SubsGained) - SumOf(L.SubsLost), Subs) && Near(SumOf(L.Cents), Money),
+			"history: the lifetime adds up to the channel's views, subscribers and money, every old day with its views");
+	}
+	// The reads stay inside their budgets on the migrated channel (update 3 SPEC §10: StatsRange(365) <= 0.3 ms; asserted at 3x).
+	{
+		auto Best = [](const auto& Fn) {
+			double Ms = 1e9;
+			for (int K = 0; K < 5; ++K)
+			{
+				const auto T0 = std::chrono::steady_clock::now();
+				Fn();
+				Ms = std::min(Ms, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count());
+			}
+			return Ms;
+		};
+		double Sink = 0.0;
+		video::Channel Cold = C;
+		const auto T0 = std::chrono::steady_clock::now();
+		Sink += video::StatsRange(Cold, World + 7.0, 365).Views.size();
+		const double First = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();
+		double Minute = World;
+		const double Year = Best([&]() {
+			Minute += 1.0;
+			Sink += video::StatsRange(C, Minute, 365).Views.size() + video::StatsRange(C, Minute - 365.0 * Day, 365).Views.size();
+		});
+		const double Life = Best([&]() {
+			Minute += 1.0;
+			Sink += video::StatsRange(C, Minute, 730).Views.size();
+		});
+		std::printf("  history: reads on the migrated channel: StatsRange(365) the first %.3f ms, then a minute later with the year before it %.3f ms; "
+					"StatsRange(730) %.3f ms%s\n",
+			First, Year, Life, Sink < 0.0 ? "" : "");
+		Expect(Year <= 2.0 * 0.9 && Life <= 0.9 && First <= 6.0, "history: StatsRange on a migrated channel inside §10's budget (asserted at 3x)");
+	}
+	// Nothing is saved for it: a reload reads the same days to the bit, and a day reads the same whichever window asks first.
+	{
+		ss::SaveData Back;
+		const bool Reread = ss::SaveData::Parse(D.Serialize(), Back);
+		const video::Range Y0 = video::StatsRange(C, World, 365), Y1 = video::StatsRange(Back.Life.Video, World, 365);
+		video::Channel Other = C;
+		const video::Range M28 = video::StatsRange(Other, World - 40.0 * Day, 28), Y2 = video::StatsRange(Other, World, 365);
+		bool Same28 = M28.Views.size() == 28;
+		for (size_t K = 0; Same28 && K < 27; ++K)
+		{
+			const size_t At = Y2.Views.size() - 68 + K; // (that window's 27 whole days: 67 to 41 days before today; its last is partial)
+			Same28 = M28.Views[K] == Y2.Views[At] && M28.Cents[K] == Y2.Cents[At] && M28.Likes[K] == Y2.Likes[At] && M28.Estimated[K] == Y2.Estimated[At];
+		}
+		Expect(Reread && RangePrint(Y0) == RangePrint(Y1) && Y0.Estimated == Y1.Estimated && RangePrint(Y2) == RangePrint(Y0) && Same28,
+			"history: a reload reads the same days to the bit, and a day reads the same whichever window asks first");
+	}
+	// (2) The user's save's shape: five Update 2 uploads over two weeks, a handful of subscribers; Rerun 2.0 turns on five days
+	// after the last. Every view the videos had shows in the 28 days and the lifetime.
+	{
+		Career Cr;
+		Cr.L.RentsPaid = 2;
+		Cr.L.Update2LinesRead |= life::U2Video;
+		const std::vector<int> Ups{6, 8, 11, 15, 19};
+		for (int Dd = 0; Dd < 24; ++Dd)
+		{
+			if (std::find(Ups.begin(), Ups.end(), Dd) != Ups.end())
+			{
+				const double At = static_cast<double>(Dd) * Day + 21.0 * 60.0;
+				const std::string Mid = "rl:user@" + std::to_string(Dd);
+				video::NoteHand(Cr.C, Moment(Mid, At, video::Kind::Cooler));
+				video::Choice Ch;
+				Ch.Candidates = {Mid};
+				Ch.F = video::Format::Breakdown;
+				Ch.T = video::TitleStyle::Story;
+				Ch.Fr = video::Frame::Versus;
+				video::UploadFacts F;
+				F.GearQuality = 0.3;
+				video::Upload(Cr.C, Ch, At + 30.0, "c3p:user", F);
+			}
+			video::Step(Cr.C, Cr.L, Cr.Bank, Cr.K, static_cast<double>(Dd) * Day, static_cast<double>(Dd + 1) * Day);
+		}
+		const size_t Old = Cr.C.Videos.size();
+		video::NoteHand(Cr.C, Moment("rl:user@24", 24.0 * Day + 14.0 * 60.0, video::Kind::BadBeat));
+		const std::string Mig = PackagedUpload(Cr.C, 24.0 * Day + 15.0 * 60.0, "c3p:user");
+		for (int Dd = 24; Dd < 26; ++Dd)
+		{
+			video::Step(Cr.C, Cr.L, Cr.Bank, Cr.K, static_cast<double>(Dd) * Day, static_cast<double>(Dd + 1) * Day);
+		}
+		const double W = 26.0 * Day + 20.0 * 60.0;
+		const video::ChannelView Vu = video::View(Cr.C, W);
+		const video::Range Ru = video::StatsRange(Cr.C, W, 28), Lu = video::StatsRange(Cr.C, W, LifeDays(Cr.C, W));
+		double Kept = 0.0;
+		for (const video::Video& Vv : Cr.C.Videos)
+		{
+			Kept += video::StatsOf(Cr.C, Vv, W).Views;
+		}
+		bool Pu = false;
+		const int Eu = EstDays(Ru, Pu);
+		int Lu0 = 0;
+		for (size_t K = 0; K < Ru.Views.size(); ++K)
+		{
+			Lu0 += Ru.Estimated[K] && Ru.Views[K] > 0.0 ? 1 : 0;
+		}
+		std::printf("  history: the user's save's shape (%zu Update 2 videos, Rerun 2.0 on day %d): 28 days %.1f views (Describe %.1f; its videos' own %.1f), "
+					"%d estimated days (%d with views), lifetime %.1f of %.1f; %.1f subscribers\n",
+			Old, Cr.C.X.Since, SumOf(Ru.Views), Vu.Views28, Kept, Eu, Lu0, SumOf(Lu.Views), video::TotalViews(Cr.C, W), video::SubsAt(Cr.C, W));
+		Expect(Old == Ups.size() && !Mig.empty() && Cr.C.X.On && Cr.C.X.Since == 24 && Near(SumOf(Ru.Views), Vu.Views28) && Near(SumOf(Ru.Views), Kept) &&
+				   Eu == 28 - 3 && Pu && Lu0 == 24 - 6 && Near(SumOf(Lu.Views), video::TotalViews(Cr.C, W)),
+			"history: the user's save's shape shows every view its five old videos had, estimated, in the 28 days and the lifetime");
+		// (review-c3p-stats) Months on, once the day ring (90 days) has left the migration's month: its days from X.Since share that
+		// month's row (it holds nothing older), a month the ring still half holds shares its row less the ring's days, so every
+		// month the window holds whole adds up to its row, and the lifetime to the channel.
+		for (int Dd = 26; Dd < 150; ++Dd)
+		{
+			if (Dd < 68 && Dd % 7 == 3)
+			{
+				const std::string Mid = "rl:user@" + std::to_string(Dd);
+				video::NoteHand(Cr.C, Moment(Mid, static_cast<double>(Dd) * Day + 13.0 * 60.0, video::Kind::BadBeat));
+				PackagedUpload(Cr.C, static_cast<double>(Dd) * Day + 14.0 * 60.0, "c3p:later");
+			}
+			video::Step(Cr.C, Cr.L, Cr.Bank, Cr.K, static_cast<double>(Dd) * Day, static_cast<double>(Dd + 1) * Day);
+		}
+		const double W2 = 150.0 * Day + 20.0 * 60.0;
+		const int Today2 = valgo::DayOf(W2);
+		const video::Range Y = video::StatsRange(Cr.C, W2, 365), L2 = video::StatsRange(Cr.C, W2, LifeDays(Cr.C, W2));
+		auto KeyOf = [](int Dk) {
+			int Yy = 0, Mm = 0, Dm = 0;
+			ss::world::CivilDate(Dk, Yy, Mm, Dm);
+			return Yy * 12 + (Mm - 1);
+		};
+		std::map<int, std::array<double, 3>> Month; // views, likes, days (from X.Since, stepped)
+		for (int K = 0; K < 365; ++K)
+		{
+			const int Dk = Today2 - 364 + K;
+			if (Dk >= Cr.C.X.Since && Dk < Today2)
+			{
+				std::array<double, 3>& M = Month[KeyOf(Dk)];
+				M[0] += Y.Views[static_cast<size_t>(K)];
+				M[1] += Y.Likes[static_cast<size_t>(K)];
+				M[2] += 1.0;
+			}
+		}
+		int Whole = 0, Off = 0;
+		double Worst = 0.0;
+		for (const video::DayRow& M : Cr.C.X.Months)
+		{
+			int Need = 0;
+			for (int Dk = Cr.C.X.Since; Dk < Today2; ++Dk)
+			{
+				Need += KeyOf(Dk) == M.Key ? 1 : 0;
+			}
+			const auto It = Month.find(M.Key);
+			if (It == Month.end() || KeyOf(Today2) == M.Key || static_cast<int>(It->second[2]) != Need)
+			{
+				continue;
+			}
+			++Whole;
+			const double E = std::max(std::fabs(It->second[0] - M.Views) / std::max(1.0, static_cast<double>(M.Views)),
+				std::fabs(It->second[1] - M.Likes) / std::max(1.0, static_cast<double>(M.Likes)));
+			Worst = std::max(Worst, E);
+			Off += E > 1e-4 ? 1 : 0;
+		}
+		std::printf("  history: the user's save's shape on day %d (the ring from day %d): %d whole months, %d off their rows (worst %.4f%%); lifetime %.1f of %.1f\n", Today2,
+			Cr.C.X.Days.empty() ? -1 : Cr.C.X.Days.front().Key, Whole, Off, 100.0 * Worst, SumOf(L2.Views), video::TotalViews(Cr.C, W2));
+		Expect(Whole >= 4 && Off == 0 && Near(SumOf(L2.Views), video::TotalViews(Cr.C, W2)),
+			"history: months after the migration, every month the window holds adds up to its row (the migration's from X.Since, the ring's edge less its days)");
+	}
+	// (3) A fresh Rerun 2.0 channel (NewCareer's): no day is estimated, and its numbers are the rings' (the print is pinned in
+	// STATUS_c3p-stats.txt against the C3 commit's; review-c3p-stats' month rule moved it, STATUS_review-c3p-stats.txt).
+	{
+		Career Cr = NewCareer();
+		Cr.C.PartnerAt = 0.0;
+		for (int Dd = 0; Dd < 160; ++Dd)
+		{
+			CareerDay(Cr, Dd, "c3p:fresh", ThreeAWeek, false, 19.0, true);
+		}
+		const double W = 160.0 * Day + 13.0 * 60.0;
+		uint64_t H = 1469598103934665603ull;
+		int FreshEst = 0;
+		for (const int Days : {7, 28, 90, 365, 730})
+		{
+			for (const double At : {W, W - static_cast<double>(Days) * Day})
+			{
+				const video::Range Rf = video::StatsRange(Cr.C, At, Days);
+				bool P = false;
+				FreshEst += EstDays(Rf, P);
+				H = (H ^ RangePrint(Rf)) * 1099511628211ull;
+				if (std::getenv("SS_HISTORY_DUMP"))
+				{
+					std::printf("    fresh %d at %.0f: %016llx views %.6f cents %.6f likes %.6f impr %.6f\n", Days, At, static_cast<unsigned long long>(RangePrint(Rf)), SumOf(Rf.Views),
+						SumOf(Rf.Cents), SumOf(Rf.Likes), SumOf(Rf.Impressions));
+				}
+			}
+		}
+		std::printf("  history: a fresh Rerun 2.0 channel (%zu kept, since %d): its ranges' print %016llx, %d estimated days\n", Cr.C.Videos.size(), Cr.C.X.Since,
+			static_cast<unsigned long long>(H), FreshEst);
+		Expect(Cr.C.X.Since < 0 && FreshEst == 0, "history: a fresh Rerun 2.0 channel has no estimated day");
+		// (review-c3p-stats) Its lifetime adds up too: the months the ring has left read their rows, the one at the ring's edge its
+		// row less the ring's days, the first from the first upload (no views before the channel had a video).
+		const video::Range Lf = video::StatsRange(Cr.C, W, LifeDays(Cr.C, W));
+		std::printf("  history: the fresh channel's lifetime (%zu days, the ring from day %d): %.1f views of %.1f\n", Lf.Views.size(),
+			Cr.C.X.Days.empty() ? -1 : Cr.C.X.Days.front().Key, SumOf(Lf.Views), video::TotalViews(Cr.C, W));
+		Expect(Near(SumOf(Lf.Views), video::TotalViews(Cr.C, W)), "history: a fresh Rerun 2.0 channel's lifetime adds up to its views");
+	}
+}
+
 // ================================================================== the goldens (Tests/video_vectors_u3.txt)
 
 /**
@@ -5637,6 +6079,8 @@ int main(int Argc, char** Argv)
 		Lap("saves");
 		Analytics();
 		Lap("analytics");
+		MigratedHistory();
+		Lap("history");
 		Itemized();
 		Lap("itemized");
 		TopRate();
@@ -5668,6 +6112,10 @@ int main(int Argc, char** Argv)
 	if (Mode == "grind")
 	{
 		GrindBands();
+	}
+	if (Mode == "history")
+	{
+		MigratedHistory(); // C3-F1's checks alone (c3p-stats)
 	}
 	if (Mode == "coupled")
 	{

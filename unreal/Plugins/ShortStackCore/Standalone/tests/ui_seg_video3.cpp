@@ -1446,7 +1446,8 @@ struct Lap
 	ss::ui::RiverLine RL;
 	TableMeasurer M;
 	double Now = 1.0;
-	explicit Lap(const std::string& Seed) : S(H, Seed), RL(S)
+	/** Hooks of the caller's (they outlive the laptop: a save kept, C3 PIE fix F2) and a save to start from, or none. */
+	explicit Lap(const std::string& Seed, QuietHooks* Own = nullptr, const ss::SaveData* Loaded = nullptr) : S(Own ? *Own : H, Seed, Loaded), RL(S)
 	{
 		S.CurrentScreen = ss::Screen::Lobby;
 		Now = Step(S, Now, 0.2);
@@ -2747,16 +2748,20 @@ void FixVisit()
 	L.U().LaunchHidden = true;
 	L.S.DebugVideo("fake badbeat online");
 	L.S.DebugVideo("fake bluff online");
-	// The first look: the ready ideas then aren't new (a load's), a trending one waits until IDEAS shows it.
+	// The first look (C3 PIE fix F2: seen is the save's mark, and this career's save has none): every ready idea is new once,
+	// so Studio opens on IDEAS with each marked NEW; a trending one waits until IDEAS shows it.
 	std::vector<video::IdeaCard> Base = L.S.VideoIdeas();
 	bool Trend = false;
+	size_t Ready = 0;
 	for (const video::IdeaCard& I : Base)
 	{
 		Trend = Trend || (I.Ready && I.Trending);
+		Ready += I.Ready ? 1 : 0;
 	}
 	L.Open(0);
 	L.Frame();
-	Check(L.U().ListTab == (Trend ? 1 : 0), std::string("visit: the first visit opens on ") + (Trend ? "IDEAS (a trending idea waits)" : "MOMENTS (nothing new or trending)"));
+	Check(L.U().ListTab == (Trend || Ready > 0 ? 1 : 0) && L.U().NewIdeas.size() == Ready,
+		std::string("visit: the first visit opens on ") + (Trend || Ready > 0 ? "IDEAS (never shown: every ready idea new once)" : "MOMENTS (nothing new or trending)"));
 	// Every idea seen (the list shown): the next visit opens on MOMENTS.
 	L.U().ListTab = 1;
 	L.Frame();
@@ -3301,6 +3306,462 @@ void FixTopRate()
 	D = L.Settled();
 	Check(Crowded(D, {20.0f + 136.0f, 600.0f, 700.0f - 136.0f, 330.0f}, "overview top content, millions", 4.0f) == 0, "top rate: TOP CONTENT's titles give way to view counts in the millions");
 }
+
+// ------------------------------------------------------------------ the C3 PIE fix round (c3p-ui): F2, F1
+
+/** Hooks that keep the session's last save as text (the load after it reads that text). */
+struct KeepHooks : QuietHooks
+{
+	std::string Last;
+	int Saves = 0;
+	void Save(const ss::SaveData& Data) override
+	{
+		Last = Data.Serialize();
+		++Saves;
+	}
+};
+
+size_t CountRun(const DrawList& L, const std::string& Text)
+{
+	size_t N = 0;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		N += Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Text ? 1 : 0;
+	}
+	return N;
+}
+
+void FixSeenMark()
+{
+	// C3 PIE fix F2 (c3f round's F4): Studio's "seen" mark is saved, so the first Studio look after a load doesn't count every
+	// ready idea as seen: an idea that got ready in the session before that visit still opens IDEAS, marked NEW.
+	KeepHooks Ka;
+	std::string Saved;
+	std::vector<int> SeenA;
+	std::vector<video::IdeaCard> Board;
+	{
+		Lap L("rerun3-c3p-seen", &Ka);
+		Build(L, 3, false);
+		L.U().LaunchHidden = true;
+		// A board of its own, every card ready and none trending (the trending rule is FixVisit's): what the save marks is all.
+		for (int K = 0; K < 4; ++K)
+		{
+			Board.push_back(FakeIdea(9101 + K, true, false));
+		}
+		L.S.Save();
+		Check(Ka.Last.find("rerun-ideas-seen") == std::string::npos && L.S.IdeasSeen().empty(), "seen mark: none in the save before the IDEAS list shows an idea");
+		const int SavesBefore = Ka.Saves;
+		SetIdeas(L, Board);
+		L.Open(0);
+		DrawList D = L.Frame();
+		Check(L.U().ListTab == 1 && L.U().NewIdeas.size() == Board.size() && CountRun(D, "NEW") == Board.size(),
+			"seen mark: a save that never showed the list has every ready idea new once (IDEAS, each marked NEW)");
+		SeenA = L.S.IdeasSeen();
+		Check(SeenA == std::vector<int>({9101, 9102, 9103, 9104}) && Ka.Saves == SavesBefore + 1 &&
+				Ka.Last.find("\ntext\trerun-ideas-seen:9101,9102,9103,9104\n") != std::string::npos,
+			"seen mark: the list shown, the save carries the ideas it showed (one text line) and saved once");
+		// Looking again changes nothing: no save, the same line.
+		SetIdeas(L, Board);
+		L.Frame();
+		D = Revisit(L);
+		SetIdeas(L, Board);
+		L.U().ListTab = 1;
+		L.Frame();
+		L.S.SeeIdeas({9102, 9104});
+		Check(L.U().ListTab == 1 && Ka.Saves == SavesBefore + 1 && L.S.IdeasSeen() == SeenA, "seen mark: ideas seen again add nothing and save nothing");
+		L.S.Save();
+		Saved = Ka.Last;
+	}
+	// The load: a new session from that save, a new laptop.
+	ss::SaveData Data;
+	const bool Parsed = ss::SaveData::Parse(Saved, Data);
+	Check(Parsed, "seen mark: the save reads back");
+	if (!Parsed)
+	{
+		return;
+	}
+	KeepHooks Kb;
+	Lap B("rerun3-c3p-seen", &Kb, &Data);
+	B.U().LaunchHidden = true;
+	Check(B.S.IdeasSeen() == SeenA, "seen mark: the load brings the mark back");
+	// An idea that got ready in the session before the first Studio look of this launch.
+	std::vector<video::IdeaCard> After = Board;
+	After.push_back(FakeIdea(9201, true, false));
+	SetIdeas(B, After);
+	B.Open(0);
+	DrawList D = B.Frame();
+	Check(B.U().ListTab == 1 && B.U().NewIdeas == std::set<int>({9201}) && CountRun(D, "NEW") == 1,
+		"seen mark: the first Studio look after a load opens IDEAS, only the idea that got ready since marked NEW");
+	{
+		// The NEW card leads the ready ones (no trend here): what opened the list is in view.
+		std::vector<float> Names;
+		for (const ss::ui::DrawCmd& Cmd : D.Cmds)
+		{
+			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == "Bankroll update")
+			{
+				Names.push_back(Cmd.Text.BaselineY);
+			}
+		}
+		std::sort(Names.begin(), Names.end());
+		const Run NewChip = RunOf(D, "NEW");
+		Check(NewChip.Found && Names.size() == After.size() && NewChip.Base < Names[1] - 20.0f, "seen mark: the NEW card leads the list");
+	}
+	WriteList("rerun3_c3p_studio_seen_after_load", D);
+	B.S.Save();
+	Check(B.S.IdeasSeen() == std::vector<int>({9101, 9102, 9103, 9104, 9201}) && Kb.Last.find("\ntext\trerun-ideas-seen:9101,9102,9103,9104,9201\n") != std::string::npos,
+		"seen mark: that look marks it in the save");
+	SetIdeas(B, After);
+	B.Frame();
+	D = Revisit(B);
+	Check(B.U().ListTab == 0 && B.U().NewIdeas.empty(), "seen mark: the visit after: nothing new, MOMENTS");
+	// A real save with no mark (the gate's update3_creator, as the user's own save will be): its first Studio look opens IDEAS
+	// with every ready idea NEW once, and the next load knows them.
+	std::string Text;
+	if (std::FILE* Fp = std::fopen((std::string(SS_TESTS_DIR) + "/fixtures/update3_creator.ssave").c_str(), "rb"))
+	{
+		char Buf[4096];
+		size_t N = 0;
+		while ((N = std::fread(Buf, 1, sizeof(Buf), Fp)) > 0)
+		{
+			Text.append(Buf, N);
+		}
+		std::fclose(Fp);
+	}
+	ss::SaveData Fx;
+	const bool FxOk = !Text.empty() && ss::SaveData::Parse(Text, Fx) && Text.find("rerun-ideas-seen") == std::string::npos;
+	Check(FxOk, "seen mark: update3_creator reads, with no mark");
+	if (!FxOk)
+	{
+		return;
+	}
+	KeepHooks Kc;
+	Lap C("rerun3-c3p-fixture", &Kc, &Fx);
+	C.U().LaunchHidden = true;
+	std::vector<int> Ready;
+	for (const video::IdeaCard& I : C.S.VideoIdeas())
+	{
+		if (I.Ready)
+		{
+			Ready.push_back(I.Id);
+		}
+	}
+	std::sort(Ready.begin(), Ready.end());
+	C.Open(0);
+	C.Frame(); // its running launch's card first (the visit's tab is chosen); the editor under it, the same visit
+	C.U().LaunchHidden = true;
+	D = C.Frame();
+	Check(!Ready.empty() && C.U().ListTab == 1 && C.U().NewIdeas == std::set<int>(Ready.begin(), Ready.end()) && C.S.IdeasSeen() == Ready,
+		"seen mark: update3_creator's first Studio look: IDEAS, every ready idea NEW once, then marked in the save");
+	const size_t At = Kc.Last.find("\ntext\trerun-ideas-seen:");
+	const size_t Bytes = At == std::string::npos ? 0 : Kc.Last.find('\n', At + 1) - At;
+	std::printf("  seen mark: update3_creator's first Studio look: %zu ready ideas, NEW once; the save's line %zu bytes\n", Ready.size(), Bytes);
+	WriteList("rerun3_c3p_studio_fixture_first", D);
+}
+
+void FixOutcomeHeat()
+{
+	// C3 PIE fix F3 (c3p-stats' finding): the "Up on Rerun" card's "Heat 33" was the police-attention meter (Life.Heat), drawn on
+	// every outcome card while it's up, its change under it ("+0" on an edit: nothing Rerun does moves it); beside Rerun's
+	// numbers it read as Kast's Heat. Rerun's cards (an edit, a launch action) carry no Heat column; every other card keeps it.
+	Lap L("rerun3-c3p-heat");
+	Build(L, 2, false);
+	L.S.Life.Heat = 33.0;
+	L.S.DebugVideo("fake cooler online");
+	L.U().LaunchHidden = true;
+	L.Open(0);
+	L.Settled();
+	L.Rest();
+	const std::string Why = L.S.Publish(rr::RrChoice(L.U()));
+	for (int K = 0; K < 1800 && L.S.TimeSkip.Active; ++K)
+	{
+		L.Now += 1.0 / 30.0;
+		L.S.Update(L.Now);
+	}
+	DrawList D = L.Frame();
+	const std::string Heat = "Heat " + std::to_string(static_cast<int>(L.S.Life.Heat));
+	Check(Why.empty() && L.S.HasOutcome && DrewRun(D, "Up on Rerun") && L.S.LastOutcome.Heat == 0.0 && L.S.Life.Heat > 0.0 && !DrewRun(D, Heat) && !Drew(D, "Heat "),
+		"outcome heat: the \"Up on Rerun\" card shows no Heat (the police meter it showed never moves on an edit)");
+	WriteList("rerun3_c3p_outcome_upload", D);
+	L.S.LastOutcome.ActivityId = "video-act:teaser:" + L.Ch().Videos.back().Id;
+	D = L.Frame();
+	Check(!Drew(D, "Heat "), "outcome heat: a launch action's card shows none either");
+	L.S.LastOutcome.ActivityId.clear();
+	L.S.LastOutcome.Title = "Back home";
+	D = L.Frame();
+	Check(DrewRun(D, Heat), "outcome heat: any other card keeps the police meter while it's up");
+	L.S.HasOutcome = false;
+}
+
+/** A Days-day window whose first Est days are the core's estimates (Zero: before the channel had a video, plain zeros). */
+video::Range FakeRange(int Days, int Est, double Base, bool Zero = false)
+{
+	video::Range R;
+	R.Days = Days;
+	for (int K = 0; K < Days; ++K)
+	{
+		const bool E = K < Est;
+		const double V = Zero && E ? 0.0 : Base * (1.0 + 0.03 * static_cast<double>(K));
+		R.Views.push_back(V);
+		R.WatchH.push_back(V * 0.06);
+		R.SubsGained.push_back(V * 0.012);
+		R.SubsLost.push_back(V * 0.001);
+		R.Likes.push_back(V * 0.04);
+		R.Dislikes.push_back(V * 0.001);
+		R.Impressions.push_back(V * 12.0);
+		R.Cents.push_back(V * 0.25);
+		R.Estimated.push_back(E);
+		R.CutCents.push_back(0.0);
+		R.CutViews.push_back(0.0);
+		R.AdImpressions.push_back(V * 0.45);
+		R.Monetized.push_back(V * 0.35);
+	}
+	return R;
+}
+
+/** The page's window (and the one before it) as given, held in RrRange's cache while the world stands still. */
+void SetRange(Lap& L, int Days, const video::Range& Now, const video::Range& Was)
+{
+	rr::VideoUi& U = L.U();
+	U.Range = Now;
+	U.Before = Was;
+	U.RangeDays = Days;
+	U.RangeMinute = std::floor(L.S.WorldMinutes());
+	U.RangeStepped = L.Ch().SteppedTo;
+	U.RangeVideos = L.Ch().Videos.size();
+}
+
+void FixEstHistory()
+{
+	// C3 PIE fix F1 (V6; update 3 §8.6 step 3): the days before Rerun 2.0's rings are the closed form's estimates; Analytics
+	// draws them as such: an "est." chip, a dashed line over a lighter fill, and honest words against an estimated window.
+	{
+		const video::Range R = FakeRange(28, 10, 100.0);
+		const std::vector<bool> E = rr::RrEstDays(R);
+		Check(std::count(E.begin(), E.end(), true) == 10 && E[9] && !E[10], "est: the estimated days are the core's flagged days");
+		const std::vector<bool> Z = rr::RrEstDays(FakeRange(28, 10, 100.0, true));
+		Check(std::count(Z.begin(), Z.end(), true) == 0, "est: a flagged day before the channel had a video is a plain zero, not an estimate");
+		ss::ui::chart::Series S;
+		S.Y = R.Views;
+		S.Area = 0.35f;
+		const std::vector<ss::ui::chart::Series> Split = rr::RrEstSplit(S, E);
+		Check(Split.size() == 2 && std::isnan(Split[0].Y[0]) && Split[0].Y[10] == R.Views[10] && Split[1].Y[0] == R.Views[0] && Split[1].Y[10] == R.Views[10] &&
+				std::isnan(Split[1].Y[11]) && Split[1].Dash > 0.0f && Split[1].Area < S.Area && Split[0].Dash == 0.0f,
+			"est: the line splits: the measured days solid and first, the estimated ones dashed over a lighter fill, joined at the edge");
+		Check(rr::RrEstSplit(S, std::vector<bool>(28, false)).size() == 1, "est: without an estimate, one line");
+		// (review-c3p-ui) A quiet day inside the estimated span (nothing at all that day) is estimated too: the span is one.
+		video::Range Q = FakeRange(28, 10, 100.0);
+		for (std::vector<double>* V : {&Q.Views, &Q.WatchH, &Q.SubsGained, &Q.SubsLost, &Q.Cents})
+		{
+			(*V)[4] = 0.0;
+		}
+		const std::vector<bool> Eq = rr::RrEstDays(Q);
+		Check(std::count(Eq.begin(), Eq.end(), true) == 10 && Eq[4] && !Eq[10], "est: a quiet day inside the estimated span is part of it");
+	}
+	Lap L("rerun3-c3p-est");
+	Build(L, 6, true);
+	L.Open(2);
+	L.U().Sub = 0;
+	L.U().RangeIx = 0; // seven days, all inside the rings (Build's 18 days of steps)
+	DrawList D = L.Settled();
+	Check(CountRun(D, "est.") == 0 && !Drew(D, "dashed: estimated") && !Drew(D, "(est.)"), "est: a window measured all the way says nothing of estimates");
+	L.U().RangeIx = 1;
+	// A window that reaches 10 days before the rings, against one estimated whole.
+	SetRange(L, 28, FakeRange(28, 10, 400.0), FakeRange(28, 28, 300.0));
+	D = L.Settled();
+	Check(CountRun(D, "est.") == 5, "est: each of the four tiles wears the chip, and the chart's estimated span its own");
+	Check(Drew(D, "More than the 28 days before (est.)") && Drew(D, "% est."), "est: the comparisons say the window before was estimated");
+	Check(DrewRun(D, "shaded: your typical range \xC2\xB7 dashed: estimated"), "est: the chart's key names the dashed days");
+	Check(Outside(D, "overview est") == 0, "est: every run inside the laptop");
+	WriteList("rerun3_c3p_overview_est", D);
+	D = L.Frame(30.0f + 1100.0f * 0.12f, 420.0f);
+	Check(DrewRun(D, "VIEWS (est.)"), "est: an estimated day's tooltip says so");
+	D = L.Frame(30.0f + 1100.0f * 0.92f, 420.0f);
+	Check(!DrewRun(D, "VIEWS (est.)") && DrewRun(D, "Typical"), "est: a measured day's doesn't");
+	// Against a measured window, the words say nothing of estimates (the tiles still count estimated days: the chip stays).
+	SetRange(L, 28, FakeRange(28, 10, 400.0), FakeRange(28, 0, 300.0));
+	D = L.Settled();
+	Check(Drew(D, "More than the 28 days before") && !Drew(D, "(est.)") && !Drew(D, "% est.") && CountRun(D, "est.") == 5, "est: against a measured window, no \"(est.)\"");
+	// Days before the channel's first video, flagged: plain zeros, no chip.
+	SetRange(L, 28, FakeRange(28, 10, 400.0, true), FakeRange(28, 28, 300.0, true));
+	D = L.Settled();
+	Check(CountRun(D, "est.") == 0 && !Drew(D, "dashed: estimated"), "est: the days before the channel's first video are zeros, not estimates");
+	{
+		// (review-c3p-ui) A figure wears "est." only where it counts an estimate: estimated days that paid nothing (before
+		// Partner; the user's own save) leave the revenue tile, its chart and the Revenue page bare.
+		video::Range NoPay = FakeRange(28, 10, 400.0), WasNoPay = FakeRange(28, 28, 300.0);
+		std::fill(NoPay.Cents.begin(), NoPay.Cents.begin() + 10, 0.0);
+		std::fill(WasNoPay.Cents.begin(), WasNoPay.Cents.end(), 0.0);
+		SetRange(L, 28, NoPay, WasNoPay);
+		D = L.Settled();
+		Check(CountRun(D, "est.") == 4 && Drew(D, "% est.") && DrewRun(D, "shaded: your typical range \xC2\xB7 dashed: estimated"),
+			"est: estimated days that paid nothing: no chip on the revenue tile (views, watch time and subscribers keep theirs)");
+		L.U().KpiSel = 3;
+		D = L.Settled();
+		Check(CountRun(D, "est.") == 3 && !Drew(D, "dashed: estimated"), "est: the revenue chart over estimated days that paid nothing: no dashed span, no chip");
+		L.U().KpiSel = 0;
+		L.U().Sub = 3;
+		SetRange(L, 28, NoPay, WasNoPay);
+		D = L.Settled();
+		Check(CountRun(D, "est.") == 0 && !Drew(D, "% est."), "est: Revenue over estimated days that paid nothing: no chip");
+		L.U().Sub = 0;
+	}
+	// Revenue: its window's revenue and RPM wear the chip, the estimated days' bars draw lighter under the chart's chip.
+	L.U().Sub = 3;
+	SetRange(L, 28, FakeRange(28, 10, 400.0), FakeRange(28, 28, 300.0));
+	D = L.Settled();
+	Check(CountRun(D, "est.") == 3 && Drew(D, "% est."), "est: Revenue's EST. REVENUE and RPM wear the chip, the chart's span its own; the change says it was against an estimate");
+	Check(Outside(D, "revenue est") == 0, "est: Revenue's runs inside the laptop");
+	{
+		// (review-c3p-ui) The estimated days' bars in the lighter cash (38%); a window with no estimate draws none.
+		const auto Light = [](const DrawList& Dl) {
+			size_t N = 0;
+			for (const ss::ui::Vertex& Vx : Dl.Vertices)
+			{
+				N += Vx.Col.R == rr::RrCash.R && Vx.Col.G == rr::RrCash.G && Vx.Col.B == rr::RrCash.B && std::fabs(Vx.Col.A - 0.38f * rr::RrCash.A) < 0.004f ? 1 : 0;
+			}
+			return N;
+		};
+		const size_t LightEst = Light(D);
+		SetRange(L, 28, FakeRange(28, 0, 400.0), FakeRange(28, 0, 300.0));
+		const size_t LightNone = Light(L.Settled());
+		Check(LightEst >= 40 && LightNone == 0, "est: the estimated days' bars draw in the lighter cash, a measured window's none (" + std::to_string(LightEst) + " vertices)");
+		SetRange(L, 28, FakeRange(28, 10, 400.0), FakeRange(28, 28, 300.0));
+		D = L.Settled();
+	}
+	WriteList("rerun3_c3p_revenue_est", D);
+	D = L.Frame(30.0f + 1100.0f * 0.12f, 420.0f);
+	Check(DrewRun(D, "Revenue (est.)"), "est: an estimated day's bar says so");
+	// Audience: the subscribers card and the unique viewers.
+	L.U().Sub = 2;
+	SetRange(L, 28, FakeRange(28, 10, 400.0), FakeRange(28, 28, 300.0));
+	D = L.Settled();
+	Check(DrewRun(D, "28 days \xC2\xB7 est.") && Drew(D, " est. \xC2\xB7 views per viewer"), "est: Audience's window says it counts estimated days");
+	WriteList("rerun3_c3p_audience_est", D);
+	{
+		// (review-c3p-ui) Lifetime starts at the channel's first known day, a folded day-stub (vstubd) older than every kept video
+		// included (the core's first day too).
+		L.U().Sub = 0;
+		L.U().RangeIx = 4;
+		L.Settled();
+		const size_t Kept = L.U().Range.Views.size();
+		video::StubDay Sd;
+		Sd.Day = ss::net::DayOf(L.S.WorldMinutes()) - 120;
+		Sd.E = 3.0;
+		L.Ch().X.StubDays.insert(L.Ch().X.StubDays.begin(), Sd);
+		L.Settled();
+		const size_t WithStub = L.U().Range.Views.size();
+		L.Ch().X.StubDays.erase(L.Ch().X.StubDays.begin());
+		Check(Kept < 121 && WithStub == 121, "est: Lifetime reaches a folded day-stub older than every kept video (" + std::to_string(Kept) + " -> " + std::to_string(WithStub) + " days)");
+		L.U().RangeIx = 1;
+	}
+	// The real thing: an Update 2 channel migrated by its first Rerun 2.0 upload. Its 28 days read the closed form over its kept
+	// videos before the rings (c3p-stats' StatsRange): the views tile is the videos' own views, and the days before wear "est.".
+	Lap M("rerun3-c3p-migrate");
+	for (int I = 0; I < 4; ++I)
+	{
+		M.S.DebugVideo("fake badbeat online");
+		video::Choice C;
+		C.Candidates = {Newest(M.S)};
+		C.F = video::Format::Breakdown;
+		C.T = video::TitleStyle::Story;
+		video::UploadFacts Fa;
+		Fa.Energy = 90.0;
+		video::Upload(M.Ch(), C, M.S.WorldMinutes(), "rerun3-c3p-migrate", Fa);
+		M.S.DebugVideo("advance 3");
+		M.Rest();
+	}
+	M.S.DebugVideo("fake cooler online");
+	M.U().LaunchHidden = true;
+	M.Open(0);
+	M.Settled();
+	M.Rest();
+	const std::string Why = M.S.Publish(rr::RrChoice(M.U()));
+	for (int K = 0; K < 1800 && M.S.TimeSkip.Active; ++K)
+	{
+		M.Now += 1.0 / 30.0;
+		M.S.Update(M.Now);
+	}
+	M.S.HasOutcome = false;
+	M.S.DebugVideo("advance 3");
+	M.Open(2);
+	M.U().Sub = 0;
+	M.U().RangeIx = 1;
+	D = M.Settled();
+	const double World = M.S.WorldMinutes();
+	const double From = static_cast<double>(ss::net::DayOf(World) - 27) * ss::net::MinutesPerDay;
+	double Real = 0.0;
+	for (const video::Video& V : M.Ch().Videos)
+	{
+		Real += video::Views(V, World) - video::Views(V, std::max(From, V.At));
+	}
+	double Shown = 0.0;
+	for (const double X : M.U().Range.Views)
+	{
+		Shown += X;
+	}
+	Check(Why.empty() && M.Ch().X.On && Real > 0.0 && std::fabs(Shown - Real) <= 0.03 * Real,
+		"est: a migrated channel's 28-day views are its videos' own (" + std::to_string(std::llround(Shown)) + " of " + std::to_string(std::llround(Real)) + ")");
+	// (Before Partner its revenue is $0.00, no estimate: views, watch time, subscribers and the chart wear the chip; review-c3p-ui.)
+	const bool Paid = M.Ch().PartnerAt >= 0.0 && M.Ch().PartnerAt <= World;
+	Check(CountRun(D, "est.") == (Paid ? 5u : 4u) && Drew(D, "dashed: estimated"), "est: and the days before its rings wear \"est.\"");
+	WriteList("rerun3_c3p_overview_migrated", D);
+	// The PIE's channel (update2_creator, looked at: every day before the rings): the Overview at each window, its views tile
+	// the core's window, and what a refresh costs (RrRange reads again each world minute) against a warm frame.
+	std::string Text;
+	if (std::FILE* Fp = std::fopen((std::string(SS_TESTS_DIR) + "/fixtures/update2_creator.ssave").c_str(), "rb"))
+	{
+		char Buf[4096];
+		size_t N = 0;
+		while ((N = std::fread(Buf, 1, sizeof(Buf), Fp)) > 0)
+		{
+			Text.append(Buf, N);
+		}
+		std::fclose(Fp);
+	}
+	ss::SaveData Fx;
+	if (Text.empty() || !ss::SaveData::Parse(Text, Fx))
+	{
+		Check(false, "est: update2_creator reads");
+		return;
+	}
+	Lap O("rerun3-c3p-u2", nullptr, &Fx);
+	O.Open(2);
+	O.U().Sub = 0;
+	const char* Windows[5] = {"7 d", "28 d", "90 d", "365 d", "Lifetime"};
+	for (int K = 0; K < 5; ++K)
+	{
+		O.U().RangeIx = K;
+		D = O.Settled();
+		double Sum = 0.0;
+		for (const double X : O.U().Range.Views)
+		{
+			Sum += X;
+		}
+		const std::vector<bool> E = rr::RrEstDays(O.U().Range);
+		const long Est = static_cast<long>(std::count(E.begin(), E.end(), true));
+		std::vector<double> Warm, Cold;
+		for (int R = 0; R < 5; ++R)
+		{
+			auto T0 = std::chrono::steady_clock::now();
+			O.Frame();
+			Warm.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count());
+			O.U().RangeMinute = -1.0; // the next world minute
+			T0 = std::chrono::steady_clock::now();
+			O.Frame();
+			Cold.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count());
+		}
+		std::sort(Warm.begin(), Warm.end());
+		std::sort(Cold.begin(), Cold.end());
+		std::printf("  est: update2_creator Overview %-8s %8.0f views, %3ld of %3zu days est., warm %.3f ms, a minute's refresh %.3f ms\n", Windows[K], Sum, Est,
+			O.U().Range.Views.size(), Warm[2], Cold[2]);
+		Check(DrewRun(D, ss::Grouped(static_cast<int64_t>(std::floor(std::max(0.0, Sum))))) && (Sum <= 0.0 || CountRun(D, "est.") >= 4),
+			std::string("est: update2_creator's ") + Windows[K] + " Overview: the views tile is the core's window, every tile \"est.\"");
+		if (K == 1)
+		{
+			WriteList("rerun3_c3p_overview_update2", D);
+		}
+	}
+}
 } // namespace video3_c3
 
 void SegVideo3()
@@ -3332,6 +3793,11 @@ void SegVideo3()
 	video3_c3::FixDuelPickers();
 	video3_c3::FixResearch();
 	video3_c3::FixTopRate();
+	// The C3 PIE fix round (c3p-ui): Studio's saved "seen" mark (F2), the estimated days before the rings (F1), no Heat on
+	// Rerun's outcome cards (F3).
+	video3_c3::FixSeenMark();
+	video3_c3::FixEstHistory();
+	video3_c3::FixOutcomeHeat();
 	std::printf("  ui-rerun (C3): %d checks\n", video3_c3::Checks);
 	std::fflush(stdout); // ui-rerun's lines reach the log even when a later segment stops the run
 }

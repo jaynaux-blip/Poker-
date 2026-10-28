@@ -140,6 +140,13 @@ uint8_t PayoffFor(const Candidate& Lead, const std::vector<Candidate>& Open);
 double NoveltyFor(const Channel& C, int Arch);
 /** The in-app bell, the last 20 (Video.cpp's Bell). */
 void PushBell(Channel& C, double At, const std::string& Line);
+/**
+ * c3p-stats (C3-F1, update 3 SPEC §7.5 item 3): what the folded part of the channel gained between T0 and T1, Video.cpp's
+ * GainsBetween less the kept videos: the tails (read back only from the oldest kept upload: a little under before it, never
+ * over), Update 2's evergreen stubs and the day-bucketed ones. Out += views, net subscribers, ad dollars (Paying), and the
+ * Short class's tail's ad dollars (Paying) and views (the Cuts feed's part).
+ */
+void FoldedGains(const Channel& C, double T0, double T1, bool Paying, double Out[5]);
 /** The audience's hour curve (§5.5, VideoAlgo.cpp): Kast's poker hours over the viewers' time zones; PeakHour is its maximum. */
 double HourHeat(int Weekday, int Hour);
 

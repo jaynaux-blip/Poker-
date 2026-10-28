@@ -541,6 +541,9 @@ void EditThroughFinishSkip()
 	S.Life.Energy = 6.0;
 	Expect(!S.Publish(C).empty() && !S.TimeSkip.Active, "video edit: too tired to edit below 10 energy");
 	S.Life.Energy = 80.0;
+	// (C3 PIE F3, c3p-stats: the user's copy's "Up on Rerun" card read "Heat 33": the card's Heat is the police-attention meter,
+	// Life.Heat, which an edit never raises; Kast's Heat hears of Rerun only at a verdict, through KastHeatSince.)
+	S.Life.Heat = 33.0;
 	const double W0 = S.WorldMinutes();
 	const double E0 = S.Life.Energy;
 	Expect(S.Publish(C).empty() && S.TimeSkip.Active && S.TimeSkip.Result.ActivityId.rfind("video:", 0) == 0, "video edit: PUBLISH starts the edit's time skip");
@@ -551,6 +554,8 @@ void EditThroughFinishSkip()
 	Expect(std::fabs(S.Life.Energy - (E0 - 8.0)) < 1.0, "video edit: and 8 energy");
 	Expect(S.HasOutcome && S.LastOutcome.Title == "Up on Rerun" && S.LastOutcome.Body.find(Preview) != std::string::npos && S.Life.Video.Videos[0].Title == Preview,
 		"video edit: the result card names the video, and its title is Studio's preview");
+	Expect(S.LastOutcome.Heat == 0.0 && S.Life.Heat <= 33.0 && S.Life.Heat > 30.0 && ss::video::algo::KastHeatSince(S.Life.Video, W0 - 1.0).empty(),
+		"video edit: the card's Heat is the police meter (an edit adds 0; the hour and a half only cools it), and no Kast Heat waits before the verdict");
 	Expect(H.Last.Serialize().find("video\tvid\t") != std::string::npos, "video edit: the save keeps the video");
 	// Dee's game as storytime: Dee texts once.
 	const size_t Since = H.Inbox.size();

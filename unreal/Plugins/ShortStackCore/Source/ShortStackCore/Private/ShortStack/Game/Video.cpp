@@ -462,8 +462,8 @@ double EquityAt(const std::vector<Card>& Mine, const std::vector<std::vector<Car
 
 // ---------------------------------------------------------------- the channel's sums
 
-/** Views gained between T0 and T1 by the folded tails (their sums are as of C.SteppedTo). */
-void TailGain(const Channel& C, double T0, double T1, double Out[3])
+/** Views gained between T0 and T1 by the folded tails (their sums are as of C.SteppedTo); Only: one class's tail (c3p-stats). */
+void TailGain(const Channel& C, double T0, double T1, double Out[3], int Only = -1)
 {
 	// Read back before the last step, the tails' closed form holds only once every folded video was up: from the oldest
 	// kept upload on (every folded video went up before it). A channel posting more than two a day folds videos younger
@@ -482,6 +482,10 @@ void TailGain(const Channel& C, double T0, double T1, double Out[3])
 	}
 	for (int K = 0; K < 3; ++K)
 	{
+		if (Only >= 0 && K != Only)
+		{
+			continue;
+		}
 		const Shape S = ShapeOf(static_cast<Class>(K));
 		const Tail& T = C.Tails[static_cast<size_t>(K)];
 		for (int J = 0; J < 2; ++J)
@@ -2208,6 +2212,35 @@ void PushBell(Channel& C, double At, const std::string& Line)
 {
 	video_detail::Bell(C, At, Line);
 }
+
+void FoldedGains(const Channel& C, double T0, double T1, bool Paying, double Out[5])
+{
+	using namespace video_detail;
+	// (GainsBetween's own sums less the kept videos, in its order, so a day's views read the very numbers Describe's do.)
+	double Tail[3] = {0.0, 0.0, 0.0}, Cuts[3] = {0.0, 0.0, 0.0};
+	TailGain(C, T0, T1, Tail);
+	TailGain(C, T0, T1, Cuts, static_cast<int>(Class::Short));
+	Out[0] += Tail[0];
+	Out[1] += Tail[1];
+	Out[2] += Paying ? Tail[2] / 1000.0 : 0.0;
+	Out[3] += Paying ? Cuts[2] / 1000.0 : 0.0;
+	Out[4] += Cuts[0];
+	for (const Stub& S : C.Stubs)
+	{
+		const double Gain = StubGain(S, T0, T1);
+		Out[0] += Gain;
+		Out[1] += S.Conv * Gain;
+		Out[2] += Paying ? S.Rpm / 1000.0 * Gain : 0.0;
+	}
+	double Bucket[3] = {0.0, 0.0, 0.0};
+	for (const StubDay& S : C.X.StubDays)
+	{
+		StubDayGain(S, T0, T1, Bucket);
+	}
+	Out[0] += Bucket[0];
+	Out[1] += Bucket[1];
+	Out[2] += Paying ? Bucket[2] / 1000.0 : 0.0;
+}
 } // namespace valgo
 
 // ================================================================== candidates
@@ -3386,7 +3419,8 @@ ChannelView View(const Channel& C, double World)
 		const Gains G = GainsBetween(C, D0, D1, Paying);
 		V.ViewsByDay[static_cast<size_t>(I)] = G.Views;
 		V.SubsByDay[static_cast<size_t>(I)] = G.Subs;
-		V.CentsByDay[static_cast<size_t>(I)] = G.Ad * 100.0 * (C.X.On ? algo::Season(Today - 27 + I) : 1.0);
+		// (A migrated channel's days before its first Rerun 2.0 upload paid Update 2's ads: no season, c3p-stats.)
+		V.CentsByDay[static_cast<size_t>(I)] = G.Ad * 100.0 * (C.X.On && (C.X.Since < 0 || Today - 27 + I >= C.X.Since) ? algo::Season(Today - 27 + I) : 1.0);
 		V.Views28 += G.Views;
 	}
 	return V;

@@ -75,6 +75,9 @@ std::vector<std::string> RrStatsInventory(bool Sentences)
 			"The next views pay 74% of the full rate."};
 	}
 	return {RrVerdictHow, RrGapsNote, "More than the 28 days before", "Less than the 28 days before", "About the same as the 28 days before", "Since your first video",
+		// C3 PIE fix F1: the estimated days before Rerun 2.0's rings (V6's "est." on the windows that reach them).
+		"More than the 28 days before (est.)", "Less than the 28 days before (est.)", "About the same as before (est.)", "143% est.", "dashed: estimated",
+		"shaded: your typical range \xC2\xB7 dashed: estimated", "VIEWS (est.)", "Revenue (est.)", "28 days \xC2\xB7 est.", "Unique viewers 44,900 est.",
 		"October ads pay more", "January is quiet for ads", "About an average month for ads", "shaded: your typical range", "dashed: your typical",
 		"dashed: your typical video at the same age", "14% of subscribers get every alert", "Changes at the next midnight", "Next change from Oct 13", "SEE ALL CONTENT \xE2\x80\xBA",
 		"\xE2\x80\xB9 All content", "matching videos get about 14% more viewers", "2 of yours", "judged", "check-in on day 14", "Kept videos, since each went up",
@@ -135,6 +138,10 @@ int RrWindowDays(RrFrame& F)
 	for (const video::Stub& S : Ch.Stubs)
 	{
 		First = std::min(First, S.At);
+	}
+	for (const video::StubDay& S : Ch.X.StubDays)
+	{
+		First = std::min(First, static_cast<double>(S.Day) * net::MinutesPerDay); // (C3 PIE fix F1: the core's first known day, too)
 	}
 	return std::clamp(net::DayOf(F.World) - net::DayOf(First) + 1, 7, 730);
 }
@@ -226,7 +233,14 @@ struct RrTileSpec
 	std::vector<double> Spark;
 	Color SparkCol{0, 0, 0, 0};
 	bool Selected = false;
+	bool Est = false; // C3 PIE fix F1: the figure counts estimated days (before Rerun 2.0's rings): an "est." chip beside it
 };
+
+/** The "est." chip (V6's badge as a pill): its width. */
+float RrEstChip(Canvas& Cv, float X, float Y)
+{
+	return RrTag(Cv, "est.", X, Y, RrMuted, false, 9.0f);
+}
 
 void RrTiles(RrFrame& F, const Rect& R, const std::vector<RrTileSpec>& Tiles, float ValueSize, const std::string& IdPrefix = std::string(), int* Clicked = nullptr,
 	const std::vector<float>& Weights = std::vector<float>())
@@ -262,6 +276,31 @@ void RrTiles(RrFrame& F, const Rect& R, const std::vector<RrTileSpec>& Tiles, fl
 		Ko.ValueSize = ValueSize;
 		Ko.NoteSize = ValueSize >= 30.0f ? 12.5f : 11.0f;
 		chart::Kpi(F.C, Tr, Kc, RrTheme(), Ko);
+		if (T.Est)
+		{
+			// Beside the figure (and its sub), on chart::Kpi's own lines; on the label's line when the figure's row is full.
+			const chart::Theme& Th = RrTheme();
+			const float PadX = W >= 300.0f ? 18.0f : 12.0f;
+			const float LabelBase = Tr.Y + std::max(Th.LabelSize + 4.0f, Tr.H * 0.235f);
+			const float NoteBase = Tr.Y + Tr.H - std::max(4.0f, std::min(16.0f, (Tr.H - 72.0f) * 0.32f + 4.0f));
+			const float ValueBase = !T.Note.empty() ? (LabelBase + NoteBase) * 0.5f + ValueSize * 0.36f : (LabelBase + Tr.Y + Tr.H) * 0.5f + ValueSize * 0.36f - 2.0f;
+			const bool Spark = T.Spark.size() >= 2 && W >= 260.0f && Tr.H >= 90.0f;
+			const float TextRight = Spark ? Tr.X + Tr.W - PadX - Tr.W * 0.35f - 10.0f : Tr.X + Tr.W - PadX;
+			float Cx = Tr.X + PadX + F.C.Measure(T.Value, ValueSize, Th.FigureWeight) + 8.0f;
+			if (!T.Sub.empty())
+			{
+				Cx += F.C.Measure(T.Sub, Th.LabelSize + 1.5f, Th.LabelWeight) + 8.0f;
+			}
+			const float ChipW = F.C.Measure("est.", 9.0f, 900) + 16.0f;
+			if (Cx + ChipW <= TextRight)
+			{
+				RrEstChip(F.C, Cx, ValueBase - 19.0f);
+			}
+			else
+			{
+				RrEstChip(F.C, Tr.X + PadX + F.C.Measure(T.Label, Th.LabelSize, Th.LabelWeight) + 8.0f, LabelBase - 13.0f);
+			}
+		}
 		if (!IdPrefix.empty() && Clicked && F.UI.Clickable(IdPrefix + std::to_string(K), Tr, F.Live).Clicked)
 		{
 			*Clicked = static_cast<int>(K);
@@ -281,7 +320,7 @@ void RrDelta(double Now, double Was, RrTileSpec& T)
 	T.Sign = D > 0.005 ? 1 : D < -0.005 ? -1 : 0;
 }
 
-std::string RrVersus(double Now, double Was, int Days, bool Lifetime)
+std::string RrVersus(double Now, double Was, int Days, bool Lifetime, bool WasEst = false)
 {
 	if (Lifetime)
 	{
@@ -292,7 +331,132 @@ std::string RrVersus(double Now, double Was, int Days, bool Lifetime)
 	{
 		return Now > 0.0 ? "More than the " + Window : std::string(RrNoSubs);
 	}
-	return Now > 1.1 * Was ? "More than the " + Window : Now < Was / 1.1 ? "Less than the " + Window : std::string("About the same as before");
+	// C3 PIE fix F1: against a window Rerun 2.0's rings don't reach, the comparison says its days were estimated.
+	const std::string Est = WasEst ? std::string(" (est.)") : std::string();
+	return Now > 1.1 * Was ? "More than the " + Window + Est : Now < Was / 1.1 ? "Less than the " + Window + Est : "About the same as before" + Est;
+}
+
+/**
+ * C3 PIE fix F1 (V6, update 3 §8.6 step 3): the window's estimated days, StatsRange's Estimated (the days before Rerun 2.0's
+ * rings: the closed form over the kept videos) where the estimate carries anything. A day before the channel had a video
+ * is a plain zero, not an estimate.
+ */
+std::vector<bool> RrEstDays(const video::Range& R)
+{
+	std::vector<bool> Out(R.Views.size(), false);
+	for (size_t K = 0; K < Out.size() && K < R.Estimated.size(); ++K)
+	{
+		const auto At = [K](const std::vector<double>& V) { return K < V.size() ? std::fabs(V[K]) : 0.0; };
+		Out[K] = R.Estimated[K] && (At(R.Views) > 0.0 || At(R.WatchH) > 0.0 || At(R.SubsGained) > 0.0 || At(R.SubsLost) > 0.0 || At(R.Cents) > 0.0);
+	}
+	// The span between the first and the last estimate is all estimated (its quiet days too).
+	size_t First = Out.size(), Last = 0;
+	for (size_t K = 0; K < Out.size(); ++K)
+	{
+		if (Out[K])
+		{
+			First = std::min(First, K);
+			Last = K;
+		}
+	}
+	for (size_t K = First; K < Last && K < Out.size(); ++K)
+	{
+		Out[K] = Out[K] || (K < R.Estimated.size() && R.Estimated[K]);
+	}
+	return Out;
+}
+
+bool RrAnyEst(const std::vector<bool>& Est)
+{
+	return std::find(Est.begin(), Est.end(), true) != Est.end();
+}
+
+/** Whether V's estimated days carry anything (review-c3p-ui: a figure wears "est." only where it counts an estimate; a
+ *  window's $0.00 before Partner is no estimate). */
+bool RrEstIn(const std::vector<bool>& Est, const std::vector<double>& V)
+{
+	for (size_t K = 0; K < Est.size() && K < V.size(); ++K)
+	{
+		if (Est[K] && std::fabs(V[K]) > 0.0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * A line chart's series with its estimated days apart (C3 PIE fix F1): the measured days solid as given, first (the hover's
+ * anchor and the bubbles' stems read it); the estimated ones dashed over a lighter fill, joined to the measured line at
+ * each edge. Without estimates, the series alone.
+ */
+std::vector<chart::Series> RrEstSplit(const chart::Series& S, const std::vector<bool>& Est)
+{
+	if (!RrAnyEst(Est))
+	{
+		return {S};
+	}
+	const double Gap = std::numeric_limits<double>::quiet_NaN();
+	chart::Series Real = S, Guess = S;
+	Guess.Name = S.Name + " (est.)";
+	Guess.Width = std::max(1.5f, S.Width * 0.75f);
+	Guess.Area = S.Area * 0.45f;
+	Guess.Dash = 7.0f;
+	Guess.Gap = 5.0f;
+	Guess.Col = rlnet_detail::NetA(S.Col.A > 0.0f ? S.Col : RrGold, 0.75f);
+	for (size_t K = 0; K < S.Y.size(); ++K)
+	{
+		const bool E = K < Est.size() && Est[K];
+		const bool Edge = !E && ((K > 0 && K - 1 < Est.size() && Est[K - 1]) || (K + 1 < Est.size() && Est[K + 1]));
+		Real.Y[K] = E ? Gap : S.Y[K];
+		Guess.Y[K] = E || Edge ? S.Y[K] : Gap;
+	}
+	return {Real, Guess};
+}
+
+/** Where the estimated days sit on a plot (Slots: a bar chart's), as an x range: false when none. */
+bool RrEstSpan(const std::vector<bool>& Est, const Rect& Plot, bool Slots, float& X0, float& X1)
+{
+	const int N = static_cast<int>(Est.size());
+	int First = -1, Last = -1;
+	for (int K = 0; K < N; ++K)
+	{
+		if (Est[static_cast<size_t>(K)])
+		{
+			First = First < 0 ? K : First;
+			Last = K;
+		}
+	}
+	if (First < 0 || N <= 0)
+	{
+		return false;
+	}
+	const auto At = [&](double K) {
+		return Slots ? Plot.X + static_cast<float>((K + 0.5) / static_cast<double>(N)) * Plot.W
+					 : N == 1 ? Plot.X + Plot.W * 0.5f : Plot.X + static_cast<float>(K / static_cast<double>(N - 1)) * Plot.W;
+	};
+	// The span's edges halfway to the measured days beside it (a slot's own edges on a bar chart).
+	X0 = First == 0 ? Plot.X : At(static_cast<double>(First) - 0.5);
+	X1 = Last == N - 1 ? Plot.X + Plot.W : At(static_cast<double>(Last) + 0.5);
+	return X1 > X0;
+}
+
+/** The estimated span marked on a chart: a faint veil, a dashed edge where the measured days begin, the "est." chip on top. */
+void RrEstMark(RrFrame& F, const std::vector<bool>& Est, const Rect& Plot, bool Slots)
+{
+	float X0 = 0.0f, X1 = 0.0f;
+	if (!RrEstSpan(Est, Plot, Slots, X0, X1))
+	{
+		return;
+	}
+	F.C.FillRect({X0, Plot.Y, X1 - X0, Plot.H}, rlnet_detail::NetA(RrCream, 0.035f));
+	if (X1 < Plot.X + Plot.W - 1.0f)
+	{
+		F.C.StrokeDashed({{X1, Plot.Y}, {X1, Plot.Y + Plot.H}}, rlnet_detail::NetA(RrMuted, 0.55f), 1.0f, 4.0f, 4.0f);
+	}
+	const float ChipW = F.C.Measure("est.", 9.0f, 900) + 16.0f;
+	const float Cx = std::clamp((X0 + X1) / 2.0f - ChipW / 2.0f, Plot.X + 4.0f, std::max(Plot.X + 4.0f, X1 - ChipW - 6.0f));
+	RrEstChip(F.C, Cx, Plot.Y + 6.0f);
 }
 
 /** The season in words for the tile (§4.5.3): this month's ads against the year's average. */
@@ -466,18 +630,22 @@ void RrOverview(RrFrame& F)
 	const video::Range& Rg = RrRange(F, Days);
 	const video::Range& Was = U.Before;
 	const bool Partner = Ch.PartnerAt >= 0.0 && Ch.PartnerAt <= F.World;
+	// C3 PIE fix F1: the days before Rerun 2.0's rings are estimated (V6): the tiles that count them wear "est.", a
+	// comparison against an estimated window says so, and the chart draws them dashed.
+	const std::vector<bool> Est = RrEstDays(Rg), EstWas = RrEstDays(Was);
+	const bool WasEst = RrAnyEst(EstWas);
 	// The four tiles: the window's totals against the window before (words at +-10%), each with its days as a sparkline.
 	const std::vector<double> Net = RrNet(Rg);
 	std::vector<RrTileSpec> Tiles(4);
 	Tiles[0].Label = "VIEWS";
 	Tiles[0].Value = RrCount(RrSum(Rg.Views));
 	Tiles[0].Spark = Rg.Views;
-	Tiles[0].Note = RrVersus(RrSum(Rg.Views), RrSum(Was.Views), Days, Life);
+	Tiles[0].Note = RrVersus(RrSum(Rg.Views), RrSum(Was.Views), Days, Life, WasEst);
 	Tiles[1].Label = "WATCH TIME (HOURS)";
 	Tiles[1].Value = RrCount(RrSum(Rg.WatchH));
 	Tiles[1].Spark = Rg.WatchH;
 	Tiles[1].SparkCol = RrSky;
-	Tiles[1].Note = RrVersus(RrSum(Rg.WatchH), RrSum(Was.WatchH), Days, Life);
+	Tiles[1].Note = RrVersus(RrSum(Rg.WatchH), RrSum(Was.WatchH), Days, Life, WasEst);
 	const double Gained = RrSum(Rg.SubsGained), Lost = RrSum(Rg.SubsLost);
 	double NetShown = 0.0, LostShown = 0.0, GainedShown = 0.0;
 	RrSubsShown(Gained - Lost, Lost, NetShown, LostShown, GainedShown);
@@ -499,6 +667,16 @@ void RrOverview(RrFrame& F)
 		RrDelta(Gained - Lost, RrSum(RrNet(Was)), Tiles[2]);
 		RrDelta(RrSum(Rg.Cents), RrSum(Was.Cents), Tiles[3]);
 	}
+	// Each tile wears "est." where its own figure counts estimated days (review-c3p-ui: not a pre-Partner window's $0.00).
+	const std::vector<double> NetWas = RrNet(Was);
+	const std::vector<double>* NowOf[4] = {&Rg.Views, &Rg.WatchH, &Net, &Rg.Cents};
+	const std::vector<double>* WasOf[4] = {&Was.Views, &Was.WatchH, &NetWas, &Was.Cents};
+	for (size_t K = 0; K < Tiles.size(); ++K)
+	{
+		Tiles[K].Est = RrEstIn(Est, *NowOf[K]);
+		// Subscribers and revenue say no comparison in words: their change says it was against an estimate.
+		Tiles[K].Delta += K >= 2 && RrEstIn(EstWas, *WasOf[K]) && !Tiles[K].Delta.empty() ? std::string(" est.") : std::string();
+	}
 	Tiles[static_cast<size_t>(std::clamp(U.KpiSel, 0, 3))].Selected = true;
 	int Clicked = -1;
 	RrTiles(F, {20.0f, 120.0f, NetW - 40.0f, 110.0f}, Tiles, 34.0f, "rrkpi", &Clicked);
@@ -512,8 +690,11 @@ void RrOverview(RrFrame& F)
 	const char* Names[4] = {"VIEWS", "WATCH TIME", "SUBSCRIBERS", "REVENUE"};
 	const std::vector<double>& Ys = Sel == 0 ? Rg.Views : Sel == 1 ? Rg.WatchH : Sel == 2 ? Net : Rg.Cents;
 	const std::vector<double> Prev = Sel == 0 ? Was.Views : Sel == 1 ? Was.WatchH : Sel == 2 ? RrNet(Was) : Was.Cents;
+	const bool NowEst = RrEstIn(Est, Ys); // the chart's estimated days, where its figure has any
 	const Rect Mc{20.0f, 246.0f, 1120.0f, 320.0f};
-	RrCard(F, Mc, std::string(Names[Sel]) + " \xC2\xB7 " + (Life ? std::string("LIFETIME") : "LAST " + std::to_string(Days) + " DAYS"), Life ? std::string() : std::string("shaded: your typical range"));
+	const std::string Shaded = Life ? std::string() : std::string("shaded: your typical range");
+	RrCard(F, Mc, std::string(Names[Sel]) + " \xC2\xB7 " + (Life ? std::string("LIFETIME") : "LAST " + std::to_string(Days) + " DAYS"),
+		NowEst ? Shaded + (Shaded.empty() ? "" : " \xC2\xB7 ") + "dashed: estimated" : Shaded);
 	const int First = net::DayOf(F.World) - Days + 1;
 	chart::Series Sv;
 	Sv.Y = Ys;
@@ -554,7 +735,11 @@ void RrOverview(RrFrame& F)
 	O.Mouse = F.Live && F.UI.Ptr.Active ? Vec2{F.UI.Ptr.X, F.UI.Ptr.Y} : Vec2{-1.0f, -1.0f};
 	O.Empty = RrNoSubs;
 	const Rect Plot{Mc.X + 10.0f, Mc.Y + 40.0f, Mc.W - 20.0f, Mc.H - 70.0f};
-	const chart::LineOut Lo = chart::LineChart(F.C, Plot, {Sv}, O, T, Typ.Lo.empty() ? nullptr : &Typ, &Marks);
+	const chart::LineOut Lo = chart::LineChart(F.C, Plot, RrEstSplit(Sv, NowEst ? Est : std::vector<bool>()), O, T, Typ.Lo.empty() ? nullptr : &Typ, &Marks);
+	if (NowEst && Lo.Points > 0)
+	{
+		RrEstMark(F, Est, Lo.Plot, false);
+	}
 	std::string LegendLine;
 	for (const std::string& L : Legend)
 	{
@@ -563,7 +748,9 @@ void RrOverview(RrFrame& F)
 	F.UI.Text(LegendLine, Mc.X + 18.0f, Mc.Y + Mc.H - 12.0f, Ts(11.5f, 600, RrMuted, Align::Left, Baseline::Alphabetic, false, Mc.W - 36.0f));
 	if (Lo.Hover >= 0 && Lo.Hover < static_cast<int>(Ys.size()))
 	{
-		std::vector<chart::TipRow> Rows = {{Names[Sel], Sel == 3 ? RrCents(Ys[static_cast<size_t>(Lo.Hover)]) : RrCount(Ys[static_cast<size_t>(Lo.Hover)]), RrGold, Color{0, 0, 0, 0}}};
+		const bool HoverEst = NowEst && static_cast<size_t>(Lo.Hover) < Est.size() && Est[static_cast<size_t>(Lo.Hover)];
+		std::vector<chart::TipRow> Rows = {{std::string(Names[Sel]) + (HoverEst ? " (est.)" : ""), Sel == 3 ? RrCents(Ys[static_cast<size_t>(Lo.Hover)]) : RrCount(Ys[static_cast<size_t>(Lo.Hover)]), RrGold,
+			Color{0, 0, 0, 0}}};
 		if (!Typ.Lo.empty())
 		{
 			Rows.push_back({"Typical", (Sel == 3 ? RrCents(Typ.Lo.front()) : RrCount(Typ.Lo.front())) + " to " + (Sel == 3 ? RrCents(Typ.Hi.front()) : RrCount(Typ.Hi.front())), NetA(RrCream, 0.3f), Color{0, 0, 0, 0}});
@@ -1948,13 +2135,15 @@ void RrAudiencePage(RrFrame& F)
 	const int Days = RrWindowDays(F);
 	const video::Range& Rg = RrRange(F, Days);
 	const double Views = RrSum(Rg.Views);
+	const bool Est = RrAnyEst(RrEstDays(Rg)); // C3 PIE fix F1: the window reaches days before Rerun 2.0's rings
 	// Returning and new viewers.
 	const Rect Rn{20.0f, 120.0f, 760.0f, 110.0f};
 	RrCard(F, Rn, "RETURNING AND NEW VIEWERS");
 	F.UI.Text("Returning " + RrPct(A.Returning, 0), Rn.X + 18.0f, Rn.Y + 62.0f, Ts(22.0f, 800, RrCream));
 	F.UI.Text("New " + RrPct(1.0 - A.Returning, 0), Rn.X + 230.0f, Rn.Y + 62.0f, Ts(22.0f, 800, RrSky));
 	const double Unique = Views / (1.0 + 0.6 * A.Returning);
-	F.UI.Text("Unique viewers " + RrCount(Unique) + " \xC2\xB7 views per viewer " + Fixed(1.0 + 0.6 * A.Returning, 2) + " \xC2\xB7 " + RrPct(A.SubsWatchShare, 0) + " of watch time from subscribers",
+	F.UI.Text("Unique viewers " + RrCount(Unique) + (Est ? " est." : "") + " \xC2\xB7 views per viewer " + Fixed(1.0 + 0.6 * A.Returning, 2) + " \xC2\xB7 " + RrPct(A.SubsWatchShare, 0) +
+			" of watch time from subscribers",
 		Rn.X + 18.0f, Rn.Y + 92.0f, Ts(12.0f, 600, RrMuted, Align::Left, Baseline::Alphabetic, false, Rn.W - 36.0f));
 	// When your viewers are on: the heat map, the best window, the hours your last uploads went up ringed.
 	const Rect Hm{796.0f, 120.0f, 784.0f, 330.0f};
@@ -2067,7 +2256,7 @@ void RrAudiencePage(RrFrame& F)
 		F.UI.Text(RrShort(Names[K]->Followers) + " followers", X + 28.0f, Cw.Y + 84.0f, Ts(11.0f, 600, RrMuted));
 	}
 	const Rect Sb{20.0f, 524.0f, 760.0f, 142.0f};
-	RrCard(F, Sb, "SUBSCRIBERS", std::to_string(Days) + " days");
+	RrCard(F, Sb, "SUBSCRIBERS", std::to_string(Days) + " days" + (Est ? " \xC2\xB7 est." : ""));
 	const double Gained = RrSum(Rg.SubsGained), Lost = RrSum(Rg.SubsLost);
 	double NetShown = 0.0, LostShown = 0.0, GainedShown = 0.0;
 	RrSubsShown(Gained - Lost, Lost, NetShown, LostShown, GainedShown);
@@ -2291,10 +2480,17 @@ void RrRevenuePage(RrFrame& F)
 		}
 	}
 	const double Views = RrSum(Rg.Views), Cents = RrSum(Rg.Cents);
+	// C3 PIE fix F1: the days before Rerun 2.0's rings are estimated (V6): the window's revenue and RPM wear "est.", their
+	// change against an estimated window says so, and the bars of those days draw lighter under the chip.
+	const std::vector<bool> Est = RrEstDays(Rg);
+	// (Only where the money counts an estimate: days before Partner paid nothing, review-c3p-ui.)
+	const bool NowEst = RrEstIn(Est, Rg.Cents), WasEst = RrEstIn(RrEstDays(U.Before), U.Before.Cents);
 	std::vector<RrTileSpec> Tiles(4);
-	Tiles[0] = {"EST. REVENUE", RrCents(Cents), "", RrSeasonWords(F.World), "", 0, RrCash, Rg.Cents, RrCash, false};
+	Tiles[0] = {"EST. REVENUE", RrCents(Cents), "", RrSeasonWords(F.World), "", 0, RrCash, Rg.Cents, RrCash, false, NowEst};
 	RrDelta(Cents, RrSum(U.Before.Cents), Tiles[0]);
-	Tiles[1] = {"RPM", Views > 0.0 ? Money(static_cast<Chips>(std::llround(Cents / Views * 1000.0))) : std::string("$0.00"), "", "per 1,000 views, every view", "", 0, Color{0, 0, 0, 0}, {}, Color{0, 0, 0, 0}, false};
+	Tiles[0].Delta += WasEst && !Tiles[0].Delta.empty() ? std::string(" est.") : std::string();
+	Tiles[1] = {"RPM", Views > 0.0 ? Money(static_cast<Chips>(std::llround(Cents / Views * 1000.0))) : std::string("$0.00"), "", "per 1,000 views, every view", "", 0, Color{0, 0, 0, 0}, {}, Color{0, 0, 0, 0}, false,
+		NowEst};
 	Tiles[2] = {"PLAYBACK CPM", W > 0.0 ? Money(static_cast<Chips>(std::llround(Cpm / W * App / W * 100.0))) : std::string("$0.00"), "", W > 0.0 ? "CPM " + Money(static_cast<Chips>(std::llround(Cpm / W * 100.0))) + " \xC2\xB7 " + Fixed(App / W, 2) + " ads per playback" : std::string(),
 		"", 0, Color{0, 0, 0, 0}, {}, Color{0, 0, 0, 0}, false};
 	Tiles[3] = {"MONETIZED PLAYS", RrCount(Mon), "", W > 0.0 ? RrPct(Mon / W, 0) + " of long views" : std::string(), "", 0, Color{0, 0, 0, 0}, {}, Color{0, 0, 0, 0}, false};
@@ -2316,16 +2512,29 @@ void RrRevenuePage(RrFrame& F)
 	chart::BarSet Cb;
 	Cb.V = Rg.Cents;
 	Cb.Col = RrCash;
+	if (NowEst)
+	{
+		Cb.Each.assign(Rg.Cents.size(), Color{0, 0, 0, 0});
+		for (size_t K = 0; K < Est.size() && K < Cb.Each.size(); ++K)
+		{
+			Cb.Each[K] = Est[K] ? NetA(RrCash, 0.38f) : Color{0, 0, 0, 0};
+		}
+	}
 	chart::BarOpts Bo;
 	Bo.Y = chart::Units::Money;
 	Bo.X.FirstDay = Today - static_cast<int>(Rg.Cents.size()) + 1;
 	Bo.X.Count = 8;
 	Bo.Mouse = F.Live && F.UI.Ptr.Active ? Vec2{F.UI.Ptr.X, F.UI.Ptr.Y} : Vec2{-1.0f, -1.0f};
 	const chart::BarOut Out = chart::Bars(F.C, Plot, {Cb}, Bo, T);
+	if (NowEst && Out.Slots > 0)
+	{
+		RrEstMark(F, Est, Out.Plot, true);
+	}
 	if (Out.Hover >= 0 && Out.Hover < static_cast<int>(Rg.Cents.size()))
 	{
+		const bool HoverEst = static_cast<size_t>(Out.Hover) < Est.size() && Est[static_cast<size_t>(Out.Hover)];
 		chart::Tooltip(F.C, {Out.HoverSlot.X + Out.HoverSlot.W / 2.0f, Out.HoverSlot.Y}, chart::AxisDate(Bo.X.FirstDay + Out.Hover),
-			{{"Revenue", RrCents(Rg.Cents[static_cast<size_t>(Out.Hover)]), RrCash, Color{0, 0, 0, 0}}}, T, Rc);
+			{{HoverEst ? "Revenue (est.)" : "Revenue", RrCents(Rg.Cents[static_cast<size_t>(Out.Hover)]), RrCash, Color{0, 0, 0, 0}}}, T, Rc);
 	}
 	// How you earned: watch-page ads and the Cuts feed (kept videos, each since it went up).
 	const Rect Hw{1156.0f, 246.0f, 424.0f, 320.0f};

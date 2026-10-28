@@ -869,6 +869,10 @@ public:
 	/** FinishSkip's "video-act:" branch. */
 	SHORTSTACKCORE_API std::string SettleVideoAct(const std::string& ActivityId);
 	SHORTSTACKCORE_API video::VideoStats VideoStatsOf(const std::string& VideoId) const;
+	/** C3 PIE fix F2 (c3p-ui, SessionVideo3.cpp): Studio's saved "seen" mark, the ready ideas the IDEAS list has shown (ids
+	 *  ascending), kept as one TextsSeen key so a save carries nothing until an idea is seen. SeeIdeas adds and saves on a change. */
+	SHORTSTACKCORE_API std::vector<int> IdeasSeen() const;
+	SHORTSTACKCORE_API void SeeIdeas(const std::vector<int>& IdeaIds);
 
 	// Who is who in the tournament being played (player id -> country; regulars from the network).
 	std::map<std::string, std::string> FieldCountry;

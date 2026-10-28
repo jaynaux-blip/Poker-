@@ -177,8 +177,7 @@ struct VideoUi
 	// starts when Studio draws after another page or after the app was away; a caller that means a tab says so (OpenTab).
 	bool StudioShown = false;  // Studio drew last frame (the same visit)
 	int OpenTab = -1;          // the tab the next visit opens on (Research's links, Kast's Cut highlights); -1: §4.1's rule
-	bool ReadyPrimed = false;  // ReadySeen holds the ideas that were ready at the first look (a load's aren't "new")
-	std::set<int> ReadySeen;   // ready ideas the IDEAS list has shown
+	std::set<int> ReadySeen;   // ready ideas the IDEAS list has shown: the session's saved mark (C3 PIE fix F2), read each visit
 	std::set<int> NewIdeas;    // this visit's new ready ideas (their NEW chip)
 
 	// ---- Rerun 2.0 (C3)
@@ -446,6 +445,11 @@ void RrHealthCard(RrFrame& F, const Rect& R);
 /** One video's RPM a day in cents, the Days days to Today (its Revenue tab's chart): what each day's views paid per 1,000, past
  *  the top-earner rate at the day's share of the full rate (RiverLineVideoStats.cpp). */
 std::vector<double> RrRpmADay(const video::Channel& Ch, const video::Video& V, int Today, int Days, double World);
+/** C3 PIE fix F1 (RiverLineVideoStats.cpp; V6): a window's estimated days, the core's Range::Estimated where the estimate carries
+ *  anything (a day before the channel's first video is a plain zero), the quiet days between the first and the last of them
+ *  included; and a line split on them (the measured days solid, first; the estimated ones dashed over a lighter fill). */
+std::vector<bool> RrEstDays(const video::Range& R);
+std::vector<chart::Series> RrEstSplit(const chart::Series& S, const std::vector<bool>& Est);
 /** Home (RiverLineVideoHome.cpp): the world's videos and yours while Rerun tests them there, RECOMMENDED. */
 void RrHome(RrFrame& F);
 /** ss.Video.Sheet's contact sheet (RiverLineVideoHome.cpp). */

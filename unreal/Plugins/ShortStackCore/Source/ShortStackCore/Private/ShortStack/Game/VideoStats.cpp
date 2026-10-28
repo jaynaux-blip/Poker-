@@ -896,6 +896,379 @@ void PushSplit(R& Out, const DaySplit& S)
 		(void)S;
 	}
 }
+
+// ---------------------------------------------------------------- the days before Rerun 2.0's analytics (C3 PIE fix F1, c3p-stats)
+
+/**
+ * A day before the channel's Rerun 2.0 rings began (V6, update 3 SPEC §7.5 item 3): an Update 2 channel's every day, a
+ * migrated channel's days before its first Rerun 2.0 upload (X.Since). Read from Update 2's closed form, the sums Describe's
+ * "Last 28 days" and each video's views use, and marked estimated: never zeros for days that had views.
+ */
+bool OldDay(const Channel& C, int D)
+{
+	return !C.X.On || (C.X.Since >= 0 && D < C.X.Since);
+}
+
+/** The channel's first known upload day (a kept, top or evergreen video's), -2^30 when none (review-c3p-stats). */
+int FirstKnownDay(const Channel& C)
+{
+	double First = -1.0;
+	auto Earliest = [&First](double At) { First = First < 0.0 ? At : std::min(First, At); };
+	for (const Video& V : C.Videos)
+	{
+		Earliest(V.At);
+	}
+	for (const TopRow& T : C.X.Top)
+	{
+		Earliest(T.At);
+	}
+	for (const Stub& S : C.Stubs)
+	{
+		Earliest(S.At);
+	}
+	for (const StubDay& S : C.X.StubDays)
+	{
+		Earliest(static_cast<double>(S.Day) * StDay);
+	}
+	return First < 0.0 ? -(1 << 30) : valgo::DayOf(std::max(0.0, First));
+}
+
+/** An old day's numbers: StatsRange's row and its money split. */
+struct OldRow
+{
+	double Views = 0, Watch = 0, Gained = 0, Lost = 0, Likes = 0, Dis = 0, Impr = 0, Cents = 0;
+	DaySplit Sp;
+};
+
+/** A kept video's numbers per view on the old days (an Update 2 video's never change: it has no ad-load switch). */
+struct OldRates
+{
+	double Watch = 0, Conv = 0, LostPer = 0, Like = 0, Dis = 0, Impr = 0, Rpm = 0, Mon = 0, AdsPer = 0;
+	bool Cut = false;
+};
+
+OldRates OldRatesOf(const Video& V, int Day)
+{
+	OldRates O;
+	const double R = valgo::RetentionOn(V, Day);
+	const int Over = valgo::OverOf(V);
+	const AdLoad L = V.X.On ? valgo::LoadOn(V.X, Day) : AdLoad::Standard;
+	const valgo::Rates Rt = valgo::RatesOf(V, L, R, Over);
+	O.Watch = V.LengthMin * R / 60.0;
+	O.Conv = valgo::ConvOn(V, Day);
+	O.LostPer = O.Conv * valgo::LostShare(valgo::QOf(V, Rt, R, Over), Over, L == AdLoad::Heavy);
+	O.Like = Rt.Like;
+	O.Dis = Rt.Dislike();
+	O.Impr = valgo::ImprPerView(V, 0, 1.0f); // (ImprGain's for an Update 2 video)
+	O.Rpm = valgo::RpmOn(V, Day);
+	const algo::Money M = algo::MoneyOf(V, Day);
+	O.Mon = M.MonetizedRate;
+	O.AdsPer = M.AdsPerPlayback;
+	O.Cut = V.C == Class::Short;
+	return O;
+}
+
+/** Update 2's money: a day from Partner on pays (no season, no top-earner rate). */
+bool OldPaying(const Channel& C, int D)
+{
+	return C.PartnerAt >= 0.0 && static_cast<double>(D) * StDay >= C.PartnerAt - 1e-6;
+}
+
+/**
+ * What the folded views read as (the tails keep no engagement for Update 2's videos): the kept Update 2 videos' blend (every
+ * kept video's when none is Update 2's), each weighted by its whole curve (P and a year of its evergreen term), so a day reads
+ * the same whatever span is asked: watch time, likes, dislikes and impressions a view, subscribers lost a net one; and the
+ * folded long videos' ad impressions and monetized plays a dollar (DayStep's rule; a neutral Breakdown's when none earns).
+ */
+struct OldBlend
+{
+	double Watch = 0, Like = 0, Dis = 0, Impr = 0, LostPerNet = 0, ImprPerDollar = 0, MonPerDollar = 0;
+};
+
+OldBlend BlendOf(const Channel& C)
+{
+	const int Ref = valgo::DayOf(C.SteppedTo); // (an Update 2 video's rates are the same any day)
+	const bool AnyOld = std::any_of(C.Videos.begin(), C.Videos.end(), [](const Video& V) { return !V.X.On; });
+	double W = 0, Watch = 0, Conv = 0, Lost = 0, Like = 0, Dis = 0, Impr = 0, LongAd = 0, LongImpr = 0, LongMon = 0;
+	for (const Video& V : C.Videos)
+	{
+		if (V.X.On && AnyOld)
+		{
+			continue;
+		}
+		const OldRates O = OldRatesOf(V, Ref);
+		const double Wt = std::max(0.0, V.X.On ? V.X.P0 : V.P + V.E * 365.0);
+		W += Wt;
+		Watch += Wt * O.Watch;
+		Conv += Wt * O.Conv;
+		Lost += Wt * O.LostPer;
+		Like += Wt * O.Like;
+		Dis += Wt * O.Dis;
+		Impr += Wt * O.Impr;
+		if (!O.Cut)
+		{
+			LongAd += Wt * O.Rpm / 1000.0;
+			LongImpr += Wt * O.Mon * O.AdsPer;
+			LongMon += Wt * O.Mon;
+		}
+	}
+	OldBlend B;
+	const double Wn = W > 0.0 ? 1.0 / W : 0.0;
+	B.Watch = Watch * Wn;
+	B.Like = Like * Wn;
+	B.Dis = Dis * Wn;
+	B.Impr = Impr * Wn;
+	B.LostPerNet = Conv > 0.0 ? Lost / Conv : 0.0;
+	B.ImprPerDollar = LongAd > 0.0 ? LongImpr / LongAd : 1000.0 / (valgo::VaBaseCpm * valgo::VaCreatorShare);
+	B.MonPerDollar = LongAd > 0.0 ? LongMon / LongAd : 1000.0 / (valgo::VaBaseCpm * valgo::VaCreatorShare * 1.20);
+	return B;
+}
+
+/** Folded views (or the ones spread before the oldest kept upload) into a row, at the blend; Cents and CutCents in cents. */
+void AddFolded(OldRow& R, const OldBlend& B, double Views, double Net, double Cents, double CutCents, double CutViews)
+{
+	const double Ls = Net * B.LostPerNet;
+	R.Views += Views;
+	R.Watch += Views * B.Watch;
+	R.Gained += Net + Ls;
+	R.Lost += Ls;
+	R.Likes += Views * B.Like;
+	R.Dis += Views * B.Dis;
+	R.Impr += Views * B.Impr;
+	R.Cents += Cents;
+	R.Sp.Cut += CutCents;
+	R.Sp.CutViews += CutViews;
+	const double Long = std::max(0.0, Cents - CutCents) / 100.0;
+	R.Sp.Impr += Long * B.ImprPerDollar;
+	R.Sp.Mon += Long * B.MonPerDollar;
+}
+
+/**
+ * The old days A..B, a row each (B's end capped at Until; every other day whole). Each kept video is read once a midnight
+ * (Views at both ends of a day, as GainsBetween reads them, so a day's views are Describe's); the folded part is
+ * valgo::FoldedGains, a day at a time, at the blend. Money is Update 2's: the RPM, no season, from Partner on.
+ */
+std::vector<OldRow> OldRows(const Channel& C, int A, int B, double Until, const OldBlend& Bl)
+{
+	std::vector<OldRow> Out(static_cast<size_t>(std::max(0, B - A + 1)));
+	if (Out.empty())
+	{
+		return Out;
+	}
+	const int Ref = valgo::DayOf(C.SteppedTo);
+	for (const Video& V : C.Videos)
+	{
+		const int Up = std::max(A, valgo::DayOf(V.At));
+		if (Up > B)
+		{
+			continue;
+		}
+		const OldRates O = OldRatesOf(V, Ref);
+		double Was = Views(V, static_cast<double>(Up) * StDay);
+		for (int D = Up; D <= B; ++D)
+		{
+			const double Now = Views(V, std::min(Until, static_cast<double>(D + 1) * StDay));
+			const double Gain = std::max(0.0, Now - Was);
+			Was = Now;
+			if (Gain <= 0.0)
+			{
+				continue;
+			}
+			OldRow& R = Out[static_cast<size_t>(D - A)];
+			const double Ls = Gain * O.LostPer;
+			R.Views += Gain;
+			R.Watch += Gain * O.Watch;
+			R.Gained += Gain * O.Conv + Ls;
+			R.Lost += Ls;
+			R.Likes += Gain * O.Like;
+			R.Dis += Gain * O.Dis;
+			R.Impr += Gain * O.Impr;
+			if (OldPaying(C, D))
+			{
+				const double Ad = O.Rpm / 1000.0 * Gain;
+				R.Cents += Ad * 100.0;
+				if (O.Cut)
+				{
+					R.Sp.Cut += Ad * 100.0;
+					R.Sp.CutViews += Gain;
+				}
+				else
+				{
+					R.Sp.Impr += Gain * O.Mon * O.AdsPer;
+					R.Sp.Mon += Gain * O.Mon;
+				}
+			}
+		}
+	}
+	for (int D = A; D <= B; ++D)
+	{
+		double F[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+		valgo::FoldedGains(C, static_cast<double>(D) * StDay, std::min(Until, static_cast<double>(D + 1) * StDay), OldPaying(C, D), F);
+		AddFolded(Out[static_cast<size_t>(D - A)], Bl, F[0], F[1], F[2] * 100.0, F[3] * 100.0, F[4]);
+	}
+	return Out;
+}
+
+/** What OldRows reads off a channel, folded into one number (WouldPrint's videos, the tails, the stubs): a memo's key. */
+double OldPrint(const Channel& C)
+{
+	// (The totals the spread reads too: a grant moves the subscribers without a step, review-c3p-stats.)
+	double P = WouldPrint(C) + C.PartnerAt + 3.0 * static_cast<double>(C.X.Since) + 11.0 * C.Subs + 13.0 * static_cast<double>(C.PaidCents + C.BalanceCents);
+	for (const Tail& T : C.Tails)
+	{
+		for (int K = 0; K < 3; ++K)
+		{
+			P += T.Total[K] + 5.0 * T.Decay[0][K] + 7.0 * T.Decay[1][K];
+		}
+	}
+	for (const Stub& S : C.Stubs)
+	{
+		P += S.At + S.E + S.Conv + S.Rpm;
+	}
+	for (const StubDay& S : C.X.StubDays)
+	{
+		P += static_cast<double>(S.Day) + S.E + S.EF + S.ERpm;
+	}
+	return P;
+}
+
+/**
+ * The channel's old days, whole, from its first known one (the oldest kept, top or evergreen video) to the last that can't move
+ * (the day before X.Since; an Update 2 channel's last stepped day). The tails read nothing before the oldest kept upload, so the
+ * folded videos' views there come from the channel's own totals: its views before Rerun 2.0 (TotalViews at the last step less
+ * the lifetime row's), its subscribers and the money Rerun paid and holds the same way, less what the days read, spread evenly
+ * over the days before that upload (the money over the Partner days among them). The lifetime then adds up to the channel.
+ * Kept per thread: a page reads its window and the window before it each world minute, and an old day doesn't move until the
+ * channel does (a step, an upload, a fold). Keyed on the channel, its last step, its videos and OldPrint; a hit is the same
+ * rows, to the bit.
+ */
+struct OldMemo
+{
+	const Channel* C = nullptr;
+	double Stepped = -1.0, Print = 0.0;
+	size_t Videos = 0;
+	int A = 0, B = -1, SpreadTo = -1; // the rows A..B; the spread on A..SpreadTo
+	double SpreadViews = 0, SpreadNet = 0, SpreadCents = 0; // a day's share (the cents a Partner day's)
+	OldBlend Blend;
+	std::vector<OldRow> Rows;
+	uint64_t Used = 0;
+};
+
+void BuildOld(const Channel& C, OldMemo& M)
+{
+	M.Blend = BlendOf(C);
+	M.Rows.clear();
+	M.A = 0;
+	M.B = -1;
+	M.SpreadTo = -1;
+	M.SpreadViews = M.SpreadNet = M.SpreadCents = 0.0;
+	double First = -1.0, Exact = C.SteppedTo;
+	auto Earliest = [&First](double At) { First = First < 0.0 ? At : std::min(First, At); };
+	for (const Video& V : C.Videos)
+	{
+		Earliest(V.At);
+		Exact = std::min(Exact, V.At);
+	}
+	for (const TopRow& T : C.X.Top)
+	{
+		Earliest(T.At);
+	}
+	for (const Stub& S : C.Stubs)
+	{
+		Earliest(S.At);
+	}
+	for (const StubDay& S : C.X.StubDays)
+	{
+		Earliest(static_cast<double>(S.Day) * StDay);
+	}
+	const int A = valgo::DayOf(std::max(0.0, First)), B = C.X.On ? C.X.Since - 1 : valgo::DayOf(C.SteppedTo) - 1;
+	if (First < 0.0 || C.SteppedTo <= 0.0 || B < A)
+	{
+		return;
+	}
+	M.A = A;
+	M.B = B;
+	M.Rows = OldRows(C, A, B, static_cast<double>(B + 1) * StDay, M.Blend);
+	// The channel's own totals before Rerun 2.0 against what the days read.
+	double Views = TotalViews(C, C.SteppedTo), Net = C.Subs, Cents = static_cast<double>(C.PaidCents + C.BalanceCents);
+	if (C.X.On)
+	{
+		Views -= static_cast<double>(C.X.Life.Views);
+		Net -= static_cast<double>(C.X.Life.Gained) - static_cast<double>(C.X.Life.Lost);
+		Cents -= static_cast<double>(C.X.Life.Cents);
+	}
+	for (const OldRow& R : M.Rows)
+	{
+		Views -= R.Views;
+		Net -= R.Gained - R.Lost;
+		Cents -= R.Cents;
+	}
+	M.SpreadTo = std::min(B, valgo::DayOf(Exact) - 1);
+	const int Days = M.SpreadTo - A + 1;
+	if (Days <= 0 || Views <= 0.5)
+	{
+		M.SpreadTo = -1;
+		return;
+	}
+	int Paid = 0;
+	for (int D = A; D <= M.SpreadTo; ++D)
+	{
+		Paid += OldPaying(C, D) ? 1 : 0;
+	}
+	M.SpreadViews = Views / static_cast<double>(Days);
+	M.SpreadNet = std::max(0.0, Net) / static_cast<double>(Days);
+	M.SpreadCents = Paid > 0 ? std::max(0.0, Cents) / static_cast<double>(Paid) : 0.0;
+	for (int D = A; D <= M.SpreadTo; ++D)
+	{
+		AddFolded(M.Rows[static_cast<size_t>(D - A)], M.Blend, M.SpreadViews, M.SpreadNet, OldPaying(C, D) ? M.SpreadCents : 0.0, 0.0, 0.0);
+	}
+}
+
+/** The channel's old days, from the memo or read and kept. */
+const OldMemo& OldKept(const Channel& C)
+{
+	thread_local std::array<OldMemo, 2> Memo;
+	thread_local uint64_t Clock = 0;
+	const double Print = OldPrint(C);
+	++Clock;
+	for (OldMemo& M : Memo)
+	{
+		if (M.C == &C && M.Stepped == C.SteppedTo && M.Videos == C.Videos.size() && M.Print == Print)
+		{
+			M.Used = Clock;
+			return M;
+		}
+	}
+	OldMemo& Slot = *std::min_element(Memo.begin(), Memo.end(), [](const OldMemo& X, const OldMemo& Y) { return X.Used < Y.Used; });
+	BuildOld(C, Slot);
+	Slot.C = &C;
+	Slot.Stepped = C.SteppedTo;
+	Slot.Print = Print;
+	Slot.Videos = C.Videos.size();
+	Slot.Used = Clock;
+	return Slot;
+}
+
+/** One old day of a window: the kept row, or (today's hours, a day past the last step) read now, with its share of the spread. */
+OldRow OldDayRow(const Channel& C, const OldMemo& M, int D, double World)
+{
+	const double End = std::min(World, static_cast<double>(D + 1) * StDay);
+	if (End >= static_cast<double>(D + 1) * StDay && D >= M.A && D <= M.B)
+	{
+		return M.Rows[static_cast<size_t>(D - M.A)];
+	}
+	if (D < M.A && M.B >= M.A)
+	{
+		return OldRow(); // (before the channel's first known video: nothing to read)
+	}
+	OldRow R = OldRows(C, D, D, End, M.Blend).front();
+	if (D >= M.A && D <= M.SpreadTo)
+	{
+		const double Part = (End - static_cast<double>(D) * StDay) / StDay;
+		AddFolded(R, M.Blend, M.SpreadViews * Part, M.SpreadNet * Part, OldPaying(C, D) ? M.SpreadCents * Part : 0.0, 0.0, 0.0);
+	}
+	return R;
+}
 } // namespace video_stats_detail
 
 Range StatsRange(const Channel& C, double World, int Days)
@@ -918,8 +1291,26 @@ Range StatsRange(const Channel& C, double World, int Days)
 	// (The top-earner rate on the days not stepped yet: what each pay month has paid before them, the rings' and these days'.)
 	int OpenMonth = -1;
 	Chips OpenPaid = 0;
-	for (int D = Today - Out.Days + 1; D <= Today; ++D)
+	// C3 PIE fix F1 (V6, update 3 SPEC §7.5 item 3; c3p-stats): the window's days before Rerun 2.0's rings, always its first ones,
+	// read Update 2's closed form, marked estimated: the whole ones kept (OldKept), today's hours read now.
+	const int First = Today - Out.Days + 1;
+	int OldLast = First - 1;
+	while (OldLast < Today && OldDay(C, OldLast + 1))
 	{
+		++OldLast;
+	}
+	const OldMemo* const Old = OldLast >= First ? &OldKept(C) : nullptr;
+	int Known = -(1 << 30); // (the first known upload's day, read at the first month row: review-c3p-stats)
+	bool KnownRead = false;
+	for (int D = First; D <= Today; ++D)
+	{
+		if (D <= OldLast)
+		{
+			const OldRow R = OldDayRow(C, *Old, D, World);
+			Push(R.Views, R.Watch, R.Gained, R.Lost, R.Likes, R.Dis, R.Impr, R.Cents, true);
+			PushSplit(Out, R.Sp);
+			continue;
+		}
 		if (D == Today || static_cast<double>(D + 1) * StDay > C.SteppedTo)
 		{
 			// The day not stepped yet: the closed form over the kept videos (the tails omitted: a little under, never over).
@@ -991,7 +1382,8 @@ Range StatsRange(const Channel& C, double World, int Days)
 			PushSplit(Out, RowSplit(*It, 1.0));
 			continue;
 		}
-		// Older than the day ring: the month's row spread over its days; before the rings began, nothing ("est.").
+		// Older than the day ring: the month's row spread over its days (a migrated channel's first month over its days from
+		// X.Since: the row holds nothing older); before the rings began, nothing. Both are Rerun 2.0's own (not "est.", V6: c3p-stats).
 		int Y = 0, Mo = 0, Dm = 0;
 		world::CivilDate(D, Y, Mo, Dm);
 		const int Key = Y * 12 + (Mo - 1);
@@ -999,13 +1391,54 @@ Range StatsRange(const Channel& C, double World, int Days)
 		if (Mt != C.X.Months.end())
 		{
 			const int Len = Mo == 2 ? ((Y % 4 == 0 && Y % 100 != 0) || Y % 400 == 0 ? 29 : 28) : (Mo == 4 || Mo == 6 || Mo == 9 || Mo == 11) ? 30 : 31;
-			const double F = 1.0 / static_cast<double>(Len);
-			Push(Mt->Views * F, Mt->WatchH * F, Mt->Gained * F, Mt->Lost * F, Mt->Likes * F, Mt->Dislikes * F, Mt->Impr * F, static_cast<double>(Mt->Cents) * F, true);
-			PushSplit(Out, RowSplit(*Mt, F));
+			const int MonthFirst = D - (Dm - 1);
+			int Start = C.X.Since >= 0 && C.X.Since > MonthFirst && C.X.Since < MonthFirst + Len ? C.X.Since : MonthFirst;
+			// (review-c3p-stats: the row holds nothing before the channel's first known upload either, in that upload's month; and
+			// the month's days still in the day ring read there, so its other days share the row less them: the month adds up to
+			// its row. A month the ring has left whole, with no first upload or X.Since in it, reads as before, to the bit.)
+			if (!KnownRead)
+			{
+				Known = FirstKnownDay(C);
+				KnownRead = true;
+			}
+			Start = Known > Start && Known < MonthFirst + Len ? Known : Start;
+			if (D < Start)
+			{
+				Push(0, 0, 0, 0, 0, 0, 0, 0, false);
+				PushSplit(Out, DaySplit());
+				continue;
+			}
+			const int Over = Start - MonthFirst;
+			int Ring = 0;
+			double In[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+			DaySplit InSp;
+			for (const DayRow& R : C.X.Days)
+			{
+				if (R.Key >= MonthFirst + Over && R.Key < MonthFirst + Len)
+				{
+					++Ring;
+					const double Row[8] = {R.Views, R.WatchH, R.Gained, R.Lost, R.Likes, R.Dislikes, R.Impr, static_cast<double>(R.Cents)};
+					for (int K = 0; K < 8; ++K)
+					{
+						In[K] += Row[K];
+					}
+					const DaySplit S = RowSplit(R, 1.0);
+					InSp.Cut += S.Cut;
+					InSp.CutViews += S.CutViews;
+					InSp.Impr += S.Impr;
+					InSp.Mon += S.Mon;
+				}
+			}
+			const double F = 1.0 / static_cast<double>(std::max(1, Len - Over - Ring));
+			const auto Less = [F](double All, double Read) { return std::max(0.0, All - Read) * F; };
+			Push(Less(Mt->Views, In[0]), Less(Mt->WatchH, In[1]), Less(Mt->Gained, In[2]), Less(Mt->Lost, In[3]), Less(Mt->Likes, In[4]), Less(Mt->Dislikes, In[5]),
+				Less(Mt->Impr, In[6]), Less(static_cast<double>(Mt->Cents), In[7]), false);
+			const DaySplit All = RowSplit(*Mt, 1.0);
+			PushSplit(Out, DaySplit{Less(All.Cut, InSp.Cut), Less(All.CutViews, InSp.CutViews), Less(All.Impr, InSp.Impr), Less(All.Mon, InSp.Mon)});
 		}
 		else
 		{
-			Push(0, 0, 0, 0, 0, 0, 0, 0, true);
+			Push(0, 0, 0, 0, 0, 0, 0, 0, false);
 			PushSplit(Out, DaySplit());
 		}
 	}

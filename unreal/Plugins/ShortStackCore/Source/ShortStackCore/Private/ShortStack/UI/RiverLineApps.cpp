@@ -2254,7 +2254,10 @@ void RiverLine::OutcomeCard(double Now)
 	UI.Text("Balance " + Money(S.BankrollCents), R.X + 36.0f, Sy + 52.0f, Ts(13.0f, 600, pal::Muted));
 	UI.Text("Energy " + std::to_string(static_cast<int>(std::round(S.Life.Energy))) + "%", R.X + 330.0f, Sy + 22.0f, Ts(16.0f, 800, O.Energy >= 0.0 ? pal::Green : pal::Gold));
 	UI.Text((O.Energy >= 0.0 ? "+" : "\xE2\x88\x92") + std::to_string(static_cast<int>(std::round(std::fabs(O.Energy)))), R.X + 330.0f, Sy + 44.0f, Ts(13.0f, 600, pal::Muted));
-	if (O.Heat != 0.0 || S.Life.Heat > 0.0)
+	// The police-attention meter (Marcus's runs) shows where an activity moved it or it's up. A Rerun card (an edit, a launch
+	// action) never moves it, and on Rerun's card "Heat" reads as Kast's Heat (C3 PIE F3; ruling C9 keeps heat words off Rerun).
+	const bool RerunCard = Edit || O.ActivityId.rfind("video-act:", 0) == 0;
+	if (!RerunCard && (O.Heat != 0.0 || S.Life.Heat > 0.0))
 	{
 		UI.Text("Heat " + std::to_string(static_cast<int>(S.Life.Heat)), R.X + 480.0f, Sy + 22.0f, Ts(16.0f, 800, S.Life.Heat > 50.0 ? pal::Red : pal::Orange));
 		UI.Text((O.Heat >= 0.0 ? "+" : "\xE2\x88\x92") + std::to_string(static_cast<int>(std::round(std::fabs(O.Heat)))), R.X + 480.0f, Sy + 44.0f, Ts(13.0f, 600, pal::Muted));
