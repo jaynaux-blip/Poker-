@@ -702,8 +702,11 @@ SHORTSTACKCORE_API int LevelOf(int64_t BaseLife);
 SHORTSTACKCORE_API int IgniteLevel(const Book& B);
 /** A themed event's base Sparks multiplier on its night (F10): 1.5, else 1 (the cabinets' x1.5 sticker). */
 SHORTSTACKCORE_API double ThemeMult(const std::string& TemplateId, double Start);
-/** Whether an entry in this template at Start can move Dare DareId (the sheet's "counts for"). */
-SHORTSTACKCORE_API bool DareMayCount(int DareId, const std::string& TemplateId, double Start);
+/**
+ * Whether an entry in this template at Start can move Dare DareId (the sheet's "counts for"). World is when the entry would be
+ * made (the Early bird reads it, as IgniteEntryMoves does: the play day's 6 AM to noon); negative, unknown: the Early bird may.
+ */
+SHORTSTACKCORE_API bool DareMayCount(int DareId, const std::string& TemplateId, double Start, double World = -1.0);
 /** A Box's contents, drawn from its key (§1.9: the same before and after a reload; Open pays exactly this). */
 SHORTSTACKCORE_API OpenView CrackerContents(uint64_t WorldSeed, const Box& B);
 /** A Cracker's Odds (Paper 0, Neon 1, Gold 2): the tables CrackerContents draws from, as rows (G2 fix M2, W5). Pure. */
@@ -784,6 +787,12 @@ SHORTSTACKCORE_API std::string Buy(Book& B, life::State& L, int Item, double Wor
 SHORTSTACKCORE_API std::string Equip(Book& B, int Slot, int Look);
 SHORTSTACKCORE_API std::string Star(Book& B, const std::string& TemplateId, bool On);
 SHORTSTACKCORE_API std::string CallOut(Book& B, int Npc, double World);
+/**
+ * A Callout's standing (R3), one rule for the card, the table's ticker and the week's end: +1 ahead, 0 all square, -1 behind,
+ * the week's points compared at the League's tenth (LeagueScore's unit), so float noise never decides it. A week that ends all
+ * square (0-0 included) goes on neither side of the record (G2 PIE P6).
+ */
+SHORTSTACKCORE_API int CalloutEdge(double Hero, double Them);
 /**
  * G2 fix L6: the seen marks (RitView::NightSeen, IncomingSeen). League Night for the closed Month, or the incoming Callout of
  * Matchweek Week, has played on this save: one dated site\tdone key each ("play:seen:night:<Month>", "play:seen:call:<Week>"),

@@ -1954,12 +1954,13 @@ void IgniteSheet(IgniteCtx& X)
 			{
 				Also += (Also.empty() ? "" : " \xC2\xB7 ") + std::string("lights ") + IgniteRingName(Lp.RingsLit + 1);
 			}
-			// The Dares today an entry here can move (core's DareMayCount).
+			// The Dares today an entry here can move (core's DareMayCount, told the minute: the Early bird is the play day's 6 AM
+			// to noon).
 			std::string Dares;
 			const char* const Tiers[3] = {"Easy", "Medium", "Hard"};
 			for (const IgniteDare& D : Lp.Dares)
 			{
-				if (D.Id >= 0 && !D.Done && !D.Claimed && site::play::DareMayCount(D.Id, T.Id, E.Start))
+				if (D.Id >= 0 && !D.Done && !D.Claimed && site::play::DareMayCount(D.Id, T.Id, E.Start, X.World))
 				{
 					Dares += (Dares.empty() ? "" : ", ") + std::string(Tiers[std::min(2, std::max(0, D.Tier))]);
 				}

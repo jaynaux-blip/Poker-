@@ -564,7 +564,20 @@ std::string Session::DebugSitePlay(const std::string& Args)
 			Save();
 			return "booked " + Money(Cents) + " of paid rake on " + std::string(net::Def(Site).Name) + " (dev)";
 		}
-		const bool Paid = Grant(B, Life, Site, Kind::WalletPromo, "Grant " + Money(Cents), Cents, "dev:" + std::to_string(static_cast<long long>(World)), Day, World);
+		// A counter key, the first "dev:<n>" no grant on this site has used (G2 PIE, dev: the world minute made a second grant in
+		// the same minute a duplicate that paid nothing and read "held"). Grant's keyed contract is unchanged: a key that has
+		// paid or queued pays nothing again, and the verb says so rather than calling it held.
+		int DevSeq = 1;
+		while (DevSeq < 1000000 && siteplay_detail::SitePlayDone(Life.Sites, siteplay_detail::SitePlayGrantDoneKey(Site, "dev:" + std::to_string(DevSeq))))
+		{
+			++DevSeq;
+		}
+		const std::string DevKey = "dev:" + std::to_string(DevSeq);
+		if (siteplay_detail::SitePlayDone(Life.Sites, siteplay_detail::SitePlayGrantDoneKey(Site, DevKey)))
+		{
+			return "already granted (same key): Grant " + Money(Cents);
+		}
+		const bool Paid = Grant(B, Life, Site, Kind::WalletPromo, "Grant " + Money(Cents), Cents, DevKey, Day, World);
 		Save();
 		return Paid ? "paid " + Money(Cents) + " into the " + std::string(net::Def(Site).Name) + " wallet" : "held on the Guest List: Grant " + Money(Cents);
 	}

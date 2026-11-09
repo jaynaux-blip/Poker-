@@ -1899,14 +1899,86 @@ void IgniteStartReveal(IgniteUi& U, const Session& S, int Table, double Now)
 	U.RevealEvent = Table >= 0 && Table < S.TableCount() ? S.Glance(Table).EventId : std::string();
 	U.RevealAt = Now;
 	U.RevealSkip = -1.0;
+	U.RevealAway = false;
 	U.Drawer = 0;
 }
 
-int IgniteOverlay(const RiverLine& RL, const IgniteUi& U, double Now)
+namespace
 {
-	(void)RL;
-	(void)Now;
-	if (!U.RevealEvent.empty())
+/** The reveal is over (its seat taken, its hand dealt while it was away, or the player's own clock open at its table): it never
+ *  plays again. One that was up takes its Odds drawer with it (Drawer 2 is its own then; while it was away, whatever drawer is
+ *  open is the page's and stays). */
+void IgpRevealDone(IgniteUi& U)
+{
+	if (!U.RevealAway && U.Drawer == 2)
+	{
+		U.Drawer = 0;
+	}
+	U.RevealsDone.insert(U.RevealEvent);
+	U.RevealEvent.clear();
+	U.RevealTable = -1;
+	U.RevealAway = false;
+}
+
+/**
+ * Where the FUSE reveal stands this frame (PIE G2 P7); true while it's up. It's up only while its own table is the one in front
+ * (Session::FocusedTable, as AutoFocusStep, a tab or a tile leaves it). With another table in front nothing of it draws or holds
+ * the pointer, its Odds drawer closes with it, and the laptop stops telling core it's drawn (fuse::RevealShown), so core goes by
+ * its clock alone: the reveal counts as seen its run and a second after the light, and the table deals by itself (never one
+ * stuck with no prompt). Back in front before that first deal, it plays on from its clock, or from the boom if its reel landed
+ * while it was away, and the first deal waits for it again (the laptop draws it: RevealShown). Back after the first deal went,
+ * or the deal going while it's away, ends it (nothing covers a dealt hand; the marquee carries the multiplier). And whatever
+ * brought its table forward, it never covers the player's own clock there, its Odds drawer included.
+ */
+bool IgpRevealSettle(RiverLine& RL, IgniteUi& U, double Now)
+{
+	Session& S = Access::S(RL);
+	const bool AtTable = U.RevealTable >= 0 && U.RevealTable < S.TableCount() && S.Glance(U.RevealTable).EventId == U.RevealEvent;
+	const bool Front = AtTable && S.FocusedTable() == U.RevealTable;
+	const bool Dealt = fuse::FirstDealAt(S, U.RevealEvent) >= 0.0;
+	if (!Front)
+	{
+		if (Dealt)
+		{
+			IgpRevealDone(U);
+		}
+		else if (!U.RevealAway)
+		{
+			U.RevealAway = true;
+			U.Drawer = 0; // its Odds drawer goes with it (the only drawer the reveal lets up)
+		}
+		return false;
+	}
+	if (U.RevealAway)
+	{
+		if (Dealt)
+		{
+			IgpRevealDone(U);
+			return false;
+		}
+		U.RevealAway = false;
+		const IgniteRevealTimes Tm = IgniteRevealTimesFor(std::max(2, S.FuseReveal(U.RevealTable).M));
+		if (Now - U.RevealAt >= Tm.ReelEnd)
+		{
+			U.RevealAt = Now - Tm.ReelEnd; // the boom again, then the table opens itself a second after it
+		}
+		U.RevealSkip = -1.0;
+		U.Drawer = 0;
+	}
+	// The player's own clock open at its table (a plan dealt under it, M3's exception, and handed the seat back: K): it's over,
+	// its Odds drawer with it.
+	if (S.HasPrompt)
+	{
+		IgpRevealDone(U);
+		return false;
+	}
+	return true;
+}
+} // namespace
+
+int IgniteOverlay(RiverLine& RL, IgniteUi& U, double Now)
+{
+	if (!U.RevealEvent.empty() && IgpRevealSettle(RL, U, Now))
 	{
 		return 1;
 	}
@@ -2020,7 +2092,11 @@ void IgpReveal(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K, doub
 		C.FillRoundRect(R, 22.0f, Paint::Linear({0.0f, R.Y}, {0.0f, R.Y + R.H}, Hex(0x3a1f5c), Hex(0x1d1030)));
 		IgniteNeonRoundRect(C, R, 22.0f, Hex(IgSun, 0.8f), 1.5f, 5.0f);
 		C.Text(Money(BuyIn), R.X + 26.0f, R.Y + 56.0f, IgniteBi(36.0f, Hex(IgCream)));
-		C.Text("FUSE \xC2\xB7 #" + Grouped(std::max(1, IgniteLoopsOf(RL, Now).Fuse.N[static_cast<size_t>(Tier)])) + " at this tier", R.X + 26.0f, R.Y + 88.0f, IgniteTx(13.0f, 700, Hex(K.Cream)));
+		// This FUSE's own number at its tier (its id's ordinal): the newest one's is the tier's count, an older one's (a reveal
+		// back in front after another was lit) its own.
+		const int Ordinal = fuse::OrdinalOf(U.RevealEvent);
+		C.Text("FUSE \xC2\xB7 #" + Grouped(std::max(1, Ordinal > 0 ? Ordinal : IgniteLoopsOf(RL, Now).Fuse.N[static_cast<size_t>(Tier)])) + " at this tier", R.X + 26.0f, R.Y + 88.0f,
+			IgniteTx(13.0f, 700, Hex(K.Cream)));
 		rlnet_detail::NetParagraph(C, IgniteFuseKeyed, R.X + 26.0f, R.Y + 116.0f, R.W - 52.0f, 12.0f, 700, Hex(IgLime), 16.0f, 2);
 	}
 	// The fuse: a wavy rope from (180,520) to (700,520), burning to the reel.
@@ -2122,17 +2198,20 @@ void IgpReveal(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K, doub
 			}
 		}
 		C.Text("THREE PLAYERS \xC2\xB7 ONE FUSE", 800.0f, 660.0f, IgniteTx(13.0f, 900, Hex(K.Cream, 0.8f), Align::Center));
-		const bool Front = S.T && S.T->Spec.Id == U.RevealEvent;
+		// The FUSE's own three, read at its own table (WithTable: the front table's seats are someone else's whenever its table
+		// isn't the one in front; P7).
 		std::vector<std::string> Names;
-		if (Front)
+		if (U.RevealTable >= 0 && U.RevealTable < S.TableCount() && S.Glance(U.RevealTable).EventId == U.RevealEvent)
 		{
-			for (const SeatVis& Sv : S.Seats)
-			{
-				if (Sv.Present)
+			S.WithTable(U.RevealTable, [&S, &Names]() {
+				for (const SeatVis& Sv : S.Seats)
 				{
-					Names.push_back(Sv.Name);
+					if (Sv.Present)
+					{
+						Names.push_back(Sv.Name);
+					}
 				}
-			}
+			});
 		}
 		for (size_t I = 0; I < Names.size() && I < 3; ++I)
 		{
@@ -2158,10 +2237,8 @@ void IgpReveal(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K, doub
 		{
 			// The seat taken (or the table opening itself): its first hand deals on the usual beat (core's HoldFirstDeal).
 			fuse::TakeSeat(S, U.RevealEvent);
-			U.RevealsDone.insert(U.RevealEvent);
 			const int Table = U.RevealTable;
-			U.RevealEvent.clear();
-			U.RevealTable = -1;
+			IgpRevealDone(U);
 			if (Table >= 0 && Table < S.TableCount())
 			{
 				S.ShowTables();

@@ -635,9 +635,14 @@ std::vector<RitTapeItem> RitTapeBuild(RitCtx& X)
 		}
 		if (Here)
 		{
-			const bool Lead = X.P.Callout.Mine >= X.P.Callout.Theirs;
-			Out.push_back({"callout:here", "CALLOUT \xC2\xB7 " + RitUpper(X.P.Callout.Name) + " AT YOUR TABLE \xC2\xB7 YOU " + (Lead ? "LEAD " : "TRAIL ") +
-												Grouped(static_cast<int64_t>(std::llround(X.P.Callout.Mine))) + "-" + Grouped(static_cast<int64_t>(std::llround(X.P.Callout.Theirs))),
+			// Ahead, behind or all square by core's CalloutEdge (the card's and the week's end's rule, G2 PIE P6); whole points
+			// as before, tenths when either side has one, so the words never contradict the figures.
+			const int TapeEdge = site::play::CalloutEdge(X.P.Callout.Mine, X.P.Callout.Theirs);
+			const bool TapeWhole = std::llround(X.P.Callout.Mine * 10.0f) % 10 == 0 && std::llround(X.P.Callout.Theirs * 10.0f) % 10 == 0;
+			const auto TapeScore = [TapeWhole](float V) { return TapeWhole ? Grouped(static_cast<int64_t>(std::llround(V))) : RitPts(V); };
+			Out.push_back({"callout:here", "CALLOUT \xC2\xB7 " + RitUpper(X.P.Callout.Name) + " AT YOUR TABLE \xC2\xB7 " +
+												(TapeEdge > 0 ? "YOU LEAD " : TapeEdge < 0 ? "YOU TRAIL " : "ALL SQUARE ") + TapeScore(X.P.Callout.Mine) + "-" +
+												TapeScore(X.P.Callout.Theirs),
 				RitInk, 0});
 		}
 	}

@@ -2231,6 +2231,246 @@ void G2Fixes()
 			"welcome (L11): the Governor's 75% ceiling is site::WelcomeWindow's window, to the minute (one definition)");
 	}
 }
+
+// ------------------------------------------------------------------ the G2 PIE fixes (g2p-core: P6, P3, P5)
+
+/** Minute M of play day Day (0: its 6 AM; 1439: 5:59 AM the next morning) as a world minute. */
+double PieAt(int Day, double M)
+{
+	return play::PlayDayStart(Day) + M;
+}
+
+/** The first play day from From whose Easy Dare (slot 0) is Id for this life's account (-1: none in 400 days). */
+int PieEasyDay(const ss::life::State& L, int Id, int From)
+{
+	for (int D = From; D < From + 400; ++D)
+	{
+		if (play::ViewOf(L.SitePlay, L, L.Sites, nullptr, net::SiteId::Ignite, PieAt(D, 60.0)).Ig.Dares[0].Id == Id)
+		{
+			return D;
+		}
+	}
+	return -1;
+}
+
+/** Team RiverLine's "plays only on" deal, running from Since for a year. */
+ss::sponsor::Contract PieDeal(double Since)
+{
+	ss::sponsor::Contract C;
+	C.Id = "riverline@1";
+	C.Brand = "riverline";
+	C.St = ss::sponsor::State::Active;
+	C.T.Only = "riverline";
+	C.Since = Since;
+	C.Until = Since + 365.0 * DayMin;
+	return C;
+}
+
+void G2Pie()
+{
+	const uint64_t Seed = 4242;
+	const double Base = (Dec1 + 6) * DayMin + 360.0; // Monday, December 7, 6 AM; every life here joins the day before (one Dare key)
+	const Chips Fee = FeeOn(net::SiteId::Ignite, 110);
+	// P3: "Play an event that starts after 6 PM" counts a start from 6 PM through the 6 AM rollover of its play day (an
+	// Afterburner entry at 4 AM didn't count); 6:00 AM is the next play day's first minute, whose 6 PM is still ahead. The
+	// event sheet's DareMayCount reads the same minutes.
+	{
+		const ss::life::State Probe = Fresh(Base);
+		const int Da = PieEasyDay(Probe, 103, play::PlayDay(Base));
+		Expect(Da >= 0, "dares (P3): a day whose Easy Dare is \"Play an event that starts after 6 PM\"");
+		struct PieCase
+		{
+			const char* When;
+			double Start, Entered;
+			bool Counts;
+		};
+		const PieCase Cases[] = {{"5:59 PM", 719.0, 719.0, false}, {"6:00 PM", 720.0, 720.0, true}, {"6:00 PM, registered at 5:50 PM", 720.0, 710.0, true},
+			{"11:59 PM", 1079.0, 1079.0, true}, {"12:30 AM", 1110.0, 1110.0, true}, {"4:00 AM, Afterburner Hours", 1320.0, 1320.0, true},
+			{"5:59 AM", 1439.0, 1439.0, true}, {"6:00 AM, the next play day's first minute", 0.0, 0.0, false}};
+		for (const PieCase& C : Cases)
+		{
+			if (Da < 0)
+			{
+				break;
+			}
+			ss::life::State L = Fresh(Base);
+			Pay(L, net::SiteId::Ignite, IdAt("ignite.flip-go", PieAt(Da, C.Start)), 110, Fee, PieAt(Da, C.Entered));
+			const play::View V = play::ViewOf(L.SitePlay, L, L.Sites, nullptr, net::SiteId::Ignite, PieAt(Da, C.Entered) + 0.5);
+			Expect(V.Ig.Dares[0].Id == 103 && V.Ig.Dares[0].Done == C.Counts && V.Ig.EntriesToday == 1 && play::PlayDay(PieAt(Da, C.Entered)) == Da,
+				std::string("dares (P3): an event that starts at ") + C.When + (C.Counts ? " counts" : " doesn't count") + " for \"after 6 PM\"");
+			Expect(play::DareMayCount(103, "ignite.flip-go", PieAt(Da, C.Start)) == C.Counts,
+				std::string("dares (P3): the event sheet's DareMayCount agrees at ") + C.When);
+		}
+		// The Early bird reads the same play day: its 6 AM to noon (5:59 AM is the night before's last minute).
+		const int Db = PieEasyDay(Probe, 106, play::PlayDay(Base));
+		Expect(Db >= 0, "dares (P3): a day whose Easy Dare is the Early bird");
+		const std::pair<double, bool> Early[] = {{0.0, true}, {359.0, true}, {360.0, false}, {1439.0, false}};
+		bool EarlyOk = Db >= 0;
+		for (const std::pair<double, bool>& E : Early)
+		{
+			if (Db < 0)
+			{
+				break;
+			}
+			ss::life::State L = Fresh(Base);
+			Pay(L, net::SiteId::Ignite, IdAt("ignite.flip-go", PieAt(Db, E.first)), 110, Fee, PieAt(Db, E.first));
+			const play::View V = play::ViewOf(L.SitePlay, L, L.Sites, nullptr, net::SiteId::Ignite, PieAt(Db, E.first) + 0.5);
+			EarlyOk = EarlyOk && V.Ig.Dares[0].Id == 106 && V.Ig.Dares[0].Done == E.second;
+		}
+		Expect(EarlyOk, "dares (P3): the Early bird counts its play day's 6:00 AM to 11:59 AM, not noon, not 5:59 AM");
+		// Review: the event sheet's DareMayCount reads the Early bird the same way at the minute the sheet is shown (it offered
+		// the Early bird on every event all afternoon and night); told no minute, it still may.
+		{
+			const int Dd = play::PlayDay(Base);
+			const char* const Flip = "ignite.flip-go";
+			Expect(play::DareMayCount(106, Flip, PieAt(Dd, 120.0), PieAt(Dd, 0.0)) && play::DareMayCount(106, Flip, PieAt(Dd, 420.0), PieAt(Dd, 359.0)) &&
+					   !play::DareMayCount(106, Flip, PieAt(Dd, 420.0), PieAt(Dd, 360.0)) && !play::DareMayCount(106, Flip, PieAt(Dd + 1, 0.0), PieAt(Dd, 1439.0)) &&
+					   play::DareMayCount(106, Flip, PieAt(Dd, 420.0)) && play::DareMayCount(103, Flip, PieAt(Dd, 720.0), PieAt(Dd, 300.0)),
+				"dares (P3, review): the event sheet's Early bird reads the play day's 6:00 AM to 11:59 AM at the minute it's shown (no minute: it may)");
+		}
+		// The Flame's nudge: from the play day's 6 PM through 5:59 AM, gone at 6:00 AM (a new day); core's and the view's agree.
+		ss::life::State N = Fresh(Base);
+		const int Dn = play::PlayDay(Base);
+		Pay(N, net::SiteId::Ignite, IdAt("ignite.flip-go", PieAt(Dn, 300.0)), 110, Fee, PieAt(Dn, 300.0)); // Monday 11 AM: lit
+		const std::pair<double, bool> Nudges[] = {{PieAt(Dn + 1, 719.0), false}, {PieAt(Dn + 1, 720.0), true}, {PieAt(Dn + 1, 1079.0), true},
+			{PieAt(Dn + 1, 1439.0), true}, {PieAt(Dn + 2, 0.0), false}};
+		bool NudgeOk = true;
+		for (const std::pair<double, bool>& At : Nudges)
+		{
+			const bool Core = play::FlameNudge(N.SitePlay, N.Sponsors, At.first);
+			const bool Page = play::ViewOf(N.SitePlay, N, N.Sites, nullptr, net::SiteId::Ignite, At.first).Ig.Nudge;
+			NudgeOk = NudgeOk && Core == At.second && Page == At.second;
+		}
+		Expect(NudgeOk, "flame (P3): the nudge runs from 6:00 PM to 5:59 AM of an unlit play day and stops at 6:00 AM (core and view agree)");
+	}
+	// P6: a Callout that ends all square is neither a win nor a loss (0-0 when neither played was an L), and the card's word is
+	// the settlement's: CalloutEdge at the League's tenth, float noise and all.
+	{
+		Expect(play::CalloutEdge(20.0, 5.0) == 1 && play::CalloutEdge(5.0, 12.0) == -1 && play::CalloutEdge(0.0, 0.0) == 0 &&
+				   play::CalloutEdge(7.5, 19.8 - static_cast<double>(12.3f)) == 0 && play::CalloutEdge(7.6, 7.5) == 1 && play::CalloutEdge(7.4, 7.5) == -1,
+			"callout (P6): CalloutEdge compares whole tenths (ahead, behind, all square through float noise)");
+		const double T0 = (Dec1 + 2) * DayMin + 19.0 * 60.0; // Thursday, December 3, 7 PM: Matchweek 1 (days 1-7)
+		ss::world::World W;
+		W.Create(4242u, T0 - 40.0 * DayMin);
+		W.AdvanceTo(T0);
+		ss::life::State L = Fresh(T0);
+		Pay(L, net::SiteId::RunItTwice, IdAt("runittwice.the-sweat", T0 + 30.0), 1100, FeeOn(net::SiteId::RunItTwice, 1100), T0);
+		L.SitePlay.Rt.L.Div = 2;
+		const play::StepOut Out = play::Step(L.SitePlay, L, L.Sites, &W, L.Sponsors, 99, T0, T0 + 5.0);
+		W.SetLeagueRoster(net::SiteId::RunItTwice, Out.MonthKey, Out.Div, Out.Npcs);
+		const int Day = play::PlayDay(T0);
+		int Y = 0, M = 0, Dm = 1;
+		ss::world::CivilDate(Day, Y, M, Dm);
+		const int Week = play::PlayMonth(Day) * 8 + (Dm - 1) / 7;
+		const int Next = ss::world::MonthStart(Day) + 7 * ((Dm - 1) / 7 + 1); // the next Matchweek's first day
+		const int Npc = Out.Npcs.empty() ? -1 : Out.Npcs[0];
+		const std::string Name = W.Get(Npc) ? W.Get(Npc)->Name : std::string();
+		Expect(!Name.empty() && L.SitePlay.Rt.L.Month == play::PlayMonth(Day), "callout (P6): a drawn group to call out in");
+		struct PieDuel
+		{
+			const char* What;
+			float Mine;
+			int16_t From, To; // the member's points x 10 at the call and at the week's end
+			int Edge, Won, Lost;
+		};
+		const PieDuel Duels[] = {{"a win, 20.0-5.0", 20.0f, 100, 150, 1, 1, 0}, {"a loss, 5.0-12.0", 5.0f, 100, 220, -1, 0, 1},
+			{"0-0, neither played", 0.0f, 100, 100, 0, 0, 0}, {"all square at 7.5 each", 7.5f, 123, 198, 0, 0, 0}};
+		for (const PieDuel& D : Duels)
+		{
+			if (Name.empty())
+			{
+				break;
+			}
+			ss::life::State Lc = L;
+			play::Book& B = Lc.SitePlay;
+			B.Rt.L.Days.clear();
+			if (D.Mine > 0.0f)
+			{
+				B.Rt.L.Days.emplace_back(Day, D.Mine);
+			}
+			B.Rt.C = play::Callout();
+			B.Rt.C.Week = Week;
+			B.Rt.C.Npc = Npc;
+			B.Rt.C.NpcPts0 = static_cast<float>(static_cast<double>(D.From) / 10.0);
+			B.Rt.C.HeroPts0 = 0.0f;
+			LeagueMembersAt(W, D.To);
+			const play::View V = play::ViewOf(B, Lc, Lc.Sites, &W, net::SiteId::RunItTwice, T0 + 60.0);
+			// The card reads the view's figures as floats (RitArt's RitPlay): its word is the same.
+			const int Card = play::CalloutEdge(static_cast<float>(V.Rt.CalloutHero), static_cast<float>(V.Rt.CalloutThem));
+			detail::RitCallouts(B, &W, 99, Next, false);
+			const play::H2H* Row = nullptr;
+			for (const play::H2H& H : B.Rt.H)
+			{
+				Row = H.Name == Name ? &H : Row;
+			}
+			const bool Booked = D.Edge == 0 ? Row == nullptr && Lines(Lc).find("site\th2h\t") == std::string::npos : Row && Row->W == D.Won && Row->L == D.Lost;
+			Expect(V.Rt.CalloutOn && Card == D.Edge && play::CalloutEdge(V.Rt.CalloutHero, V.Rt.CalloutThem) == D.Edge && Booked && B.Rt.C.Week > Week,
+				std::string("callout (P6): ") + D.What + (D.Edge > 0 ? ": LEADING, then a win" : D.Edge < 0 ? ": TRAILING, then a loss" : ": ALL SQUARE, then neither on the record"));
+		}
+		// Review: the baselines are floats, so a week with no points on either side came out a hair under zero (12.3 against
+		// 12.3f; the player's 20.1 + 12.3 against their float sum) and the card printed "-0.0" beside ALL SQUARE. The view
+		// gives the week at the League's tenth: "0.0" each, and the week still ends all square.
+		if (!Name.empty())
+		{
+			ss::life::State Lc = L;
+			play::Book& B = Lc.SitePlay;
+			B.Rt.L.Days.clear();
+			B.Rt.L.Days.emplace_back(Day - 1, 20.1f);
+			B.Rt.L.Days.emplace_back(Day, 12.3f);
+			B.Rt.C = play::Callout();
+			B.Rt.C.Week = Week;
+			B.Rt.C.Npc = Npc;
+			B.Rt.C.NpcPts0 = 12.3f;
+			B.Rt.C.HeroPts0 = static_cast<float>(detail::RitHeroPoints(B.Rt.L));
+			LeagueMembersAt(W, 123);
+			const play::View V = play::ViewOf(B, Lc, Lc.Sites, &W, net::SiteId::RunItTwice, T0 + 60.0);
+			// The card prints the view's figures as floats (RitArt's RitPlay, RitPts).
+			const std::string Mine = ss::Fixed(static_cast<float>(V.Rt.CalloutHero), 1);
+			const std::string Theirs = ss::Fixed(static_cast<float>(V.Rt.CalloutThem), 1);
+			const size_t Rows = B.Rt.H.size();
+			detail::RitCallouts(B, &W, 99, Next, false);
+			Expect(V.Rt.CalloutOn && Mine == "0.0" && Theirs == "0.0" && play::CalloutEdge(V.Rt.CalloutHero, V.Rt.CalloutThem) == 0 && B.Rt.H.size() == Rows &&
+					   B.Rt.C.Week > Week,
+				"callout (P6, review): a week with no points from float baselines reads 0.0 and 0.0 on the card (never -0.0), and ends all square: " + Mine + " / " + Theirs);
+		}
+	}
+	// P5: the entry that starts the book can be the strike that ends the deal (RegisterEvent takes the strike after the loops'
+	// hook). The book's first day writes no ice (the next roll reads the clause after the strike), and the view reads the
+	// clause now, so the Flame is never left ON ICE after the deal is gone.
+	{
+		const double At = Base + 650.0; // Monday 4:50 PM
+		const double Friday = Base + 4.0 * DayMin + 1.0;
+		// The deal ends with the entry's own strike (its second): no ice written, none shown, and the week's misses count.
+		ss::life::State Ends = Fresh(Base);
+		Ends.Sponsors.Contracts.push_back(PieDeal(Base - DayMin));
+		Pay(Ends, net::SiteId::Ignite, IdAt("ignite.flip-go", At + 50.0), 110, Fee, At);
+		const bool Iced = play::ViewOf(Ends.SitePlay, Ends, Ends.Sites, nullptr, net::SiteId::Ignite, At).Ig.OnIce;
+		const int IceAtEntry = Ends.SitePlay.Ig.F.IceSince;
+		Ends.Sponsors.Contracts.clear(); // NoteSitePlay's second strike ended it
+		const play::View After = play::ViewOf(Ends.SitePlay, Ends, Ends.Sites, nullptr, net::SiteId::Ignite, At + 1.0);
+		Expect(Iced && IceAtEntry < 0 && !After.Ig.OnIce && After.Ig.Streak == 1 && After.Ig.LitToday,
+			"flame (P5): the book's first entry under the deal writes no ice; once its strike ends the deal the Flame isn't ON ICE, at once");
+		play::Step(Ends.SitePlay, Ends, Ends.Sites, nullptr, Ends.Sponsors, Seed, At + 1.0, Friday);
+		Expect(Ends.SitePlay.Ig.F.IceSince < 0 && Ends.SitePlay.Ig.F.Streak == 0,
+			"flame (P5): with the deal over, Tuesday and Wednesday are the week's rest days and Thursday's miss puts the flame out");
+		// The deal runs on (a first strike): the next roll, after the strike, ices from the book's first day; misses wait.
+		ss::life::State Runs = Fresh(Base);
+		Runs.Sponsors.Contracts.push_back(PieDeal(Base - DayMin));
+		Pay(Runs, net::SiteId::Ignite, IdAt("ignite.flip-go", At + 50.0), 110, Fee, At);
+		const bool RunsIced = play::ViewOf(Runs.SitePlay, Runs, Runs.Sites, nullptr, net::SiteId::Ignite, At).Ig.OnIce;
+		play::Step(Runs.SitePlay, Runs, Runs.Sites, nullptr, Runs.Sponsors, Seed, At, At + 5.0);
+		const int IceNext = Runs.SitePlay.Ig.F.IceSince;
+		play::Step(Runs.SitePlay, Runs, Runs.Sites, nullptr, Runs.Sponsors, Seed, At + 5.0, Friday);
+		Expect(RunsIced && IceNext == play::PlayDay(At) && Runs.SitePlay.Ig.F.Streak == 1,
+			"flame (P5): under a deal that runs on, the next step ices from the book's first day and the week's misses wait");
+		// A book already on ice: the deal ends; the view thaws at once and the next step clears IceSince.
+		Runs.Sponsors.Contracts.clear();
+		const bool Thawed = !play::ViewOf(Runs.SitePlay, Runs, Runs.Sites, nullptr, net::SiteId::Ignite, Friday + 1.0).Ig.OnIce;
+		const bool Stored = Runs.SitePlay.Ig.F.IceSince >= 0;
+		play::Step(Runs.SitePlay, Runs, Runs.Sites, nullptr, Runs.Sponsors, Seed, Friday, Friday + 2.0);
+		Expect(Thawed && Stored && Runs.SitePlay.Ig.F.IceSince < 0, "flame (P5): when a deal ends the view thaws at once and the next step clears the stored ice");
+	}
+}
 } // namespace core_seg
 
 void SegCore()
@@ -2243,6 +2483,7 @@ void SegCore()
 	core_seg::LeagueWorld();
 	core_seg::Hardening();
 	core_seg::G2Fixes();
+	core_seg::G2Pie();
 	core_seg::Copy();
 	core_seg::IgnitePatterns();
 	core_seg::League();

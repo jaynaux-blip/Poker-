@@ -514,7 +514,11 @@ void RitClose(Book& B, life::State& L, const world::World* W, const sponsor::Boo
 	R.C = Callout();
 }
 
-/** A Callout's end (R3): the week's League points each, a win or a loss on the head-to-head record. */
+/**
+ * A Callout's end (R3): the week's League points each, a win or a loss on the head-to-head record by CalloutEdge, the card's own
+ * rule. A week that ends all square (0-0 when neither played) is neither: no row is touched (G2 PIE P6: a tie was booked as a
+ * loss while the card said LEADING). The save keeps W and L only, so a tie simply isn't counted.
+ */
 void RitSettleCallout(Rit& R, const world::World* W)
 {
 	Callout& C = R.C;
@@ -526,11 +530,12 @@ void RitSettleCallout(Rit& R, const world::World* W)
 	const world::LeagueMember* M = RitMember(RitBookOf(W, C.Week / 8), C.Npc);
 	const double Them = (M ? RitMemberPoints(*M) : 0.0) - std::max(0.0f, C.NpcPts0);
 	const double Me = RitHeroPoints(R.L) - static_cast<double>(C.HeroPts0);
-	if (N)
+	const int CallEdge = CalloutEdge(Me, Them);
+	if (N && CallEdge != 0)
 	{
 		H2H& H = RitHeadFor(R, N->Name);
-		H.W += Me > Them ? 1 : 0;
-		H.L += Me > Them ? 0 : 1;
+		H.W += CallEdge > 0 ? 1 : 0;
+		H.L += CallEdge < 0 ? 1 : 0;
 	}
 	C = Callout();
 }
@@ -1162,8 +1167,10 @@ void RitFillView(const Book& B, const life::State& L, const sponsor::Book* Deals
 	{
 		Out.CalloutName = N->Name;
 		const world::LeagueMember* Mb = RitMember(RitBookOf(W, Lg.Month), R.C.Npc);
-		Out.CalloutThem = (Mb ? RitMemberPoints(*Mb) : 0.0) - std::max(0.0f, R.C.NpcPts0);
-		Out.CalloutHero = RitHeroPoints(Lg) - static_cast<double>(R.C.HeroPts0);
+		// At the League's tenth (CalloutEdge's unit): the baselines are floats, so a week with no points came out a hair under
+		// zero and the card printed "-0.0" beside ALL SQUARE (review of G2 PIE P6).
+		Out.CalloutThem = static_cast<double>(std::llround(((Mb ? RitMemberPoints(*Mb) : 0.0) - std::max(0.0f, R.C.NpcPts0)) * 10.0)) / 10.0;
+		Out.CalloutHero = static_cast<double>(std::llround((RitHeroPoints(Lg) - static_cast<double>(R.C.HeroPts0)) * 10.0)) / 10.0;
 	}
 	Out.CanCallOut = Out.League && !NoCall && R.C.Npc < 0;
 	Out.Heads = R.H;
@@ -1705,6 +1712,14 @@ double LeagueScore(int Div, const std::string& TemplateId, Chips BuyIn, int Worl
 	const net::EventTemplate* T = RitTemplateOf(SitePlayTemplate(TemplateId));
 	Mult *= Deadline && T && T->Featured ? 1.25 : 1.0;
 	return std::round(RawPoints * Mult * 10.0) / 10.0;
+}
+
+int CalloutEdge(double Hero, double Them)
+{
+	// Both sides' points are tenths (LeagueScore's unit, the world's points x 10) carried in floats: compared as whole tenths.
+	const long long HeroTenths = std::llround(Hero * 10.0);
+	const long long ThemTenths = std::llround(Them * 10.0);
+	return HeroTenths > ThemTenths ? 1 : HeroTenths < ThemTenths ? -1 : 0;
 }
 
 std::vector<int> TeamPros(const world::World* W)

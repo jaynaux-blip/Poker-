@@ -2542,6 +2542,37 @@ void RitLeagueChecks()
 	RitExpect(RitDrewSub(L, "MATCHWEEK 2 OF 4 \xC2\xB7 DEADLINE "), "rit: the matchweek and the deadline's countdown");
 	RitExpect(DrewRun(L, "THE SWEAT x1.5") || RitDrewSub(L, "THE SWEAT x1.5"), "rit: the footer lists this week's Matchdays");
 	RitExpect(DrewRun(L, "VS") && RitDrewSub(L, "Record 2-1"), "rit: the Callout panel: VS and the record");
+	// G2 PIE P6: the card's word is core's CalloutEdge, the rule the week's end settles by: ALL SQUARE at 0-0 and on equal points
+	// (float noise and all), TRAILING behind, LEADING ahead. Drawn at the same page clock, so the pages after don't move.
+	{
+		RitPlay Tie = F;
+		const float Noisy = static_cast<float>(19.8 - static_cast<double>(12.3f)); // 7.4999998: a member's week from a float baseline
+		const std::pair<float, float> Weeks[] = {{0.0f, 0.0f}, {7.5f, Noisy}, {10.0f, 12.5f}, {214.0f, 190.0f}};
+		const char* const Words[] = {"ALL SQUARE", "ALL SQUARE", "TRAILING", "LEADING"};
+		bool Agree = true;
+		for (size_t K = 0; K < 4; ++K)
+		{
+			Tie.Callout.Mine = Weeks[K].first;
+			Tie.Callout.Theirs = Weeks[K].second;
+			R::RitPlayOverride(&P.RL, &Tie);
+			const DrawList Lt = P.Frame();
+			for (const char* Word : {"ALL SQUARE", "TRAILING", "LEADING"})
+			{
+				Agree = Agree && DrewRun(Lt, Word) == (std::string(Word) == Words[K]);
+			}
+			Agree = Agree && ss::site::play::CalloutEdge(Tie.Callout.Mine, Tie.Callout.Theirs) == (K < 2 ? 0 : K == 2 ? -1 : 1);
+			// Review: and in its own colour: ALL SQUARE in Chrome, never LEADING's green (TRAILING in Ink).
+			uint32_t Hue = 0;
+			for (const DrawCmd& Cmd : Lt.Cmds)
+			{
+				Hue = Cmd.Type == DrawCmd::Kind::Text && Cmd.Text.Text == Words[K] ? RitRgb(Cmd.Text.Col) : Hue;
+			}
+			Agree = Agree && Hue == (K < 2 ? R::RitChrome : K == 2 ? R::RitInk : R::RitUp);
+		}
+		R::RitPlayOverride(&P.RL, &F);
+		P.Frame();
+		RitExpect(Agree, "rit: the Callout card says ALL SQUARE (Chrome) at 0-0 and on equal points, TRAILING behind, LEADING (green) ahead (core's CalloutEdge, P6)");
+	}
 	RitExpect(RitDrewSub(L, "BRIEFING") || DrewRun(L, "BRIEFING"), "rit: the Briefing is pinned on the League page");
 	// Division tabs: another division shows what it is (floor, fixtures, reward), never invented standings.
 	P.Click(232.0f + 3.0f * 196.0f + 90.0f, 112.0f);
@@ -3145,6 +3176,43 @@ void RitTableG2()
 	RitExpect(DrewRun(L, "VS"), "rit: your Callout opponent's seat wears the amber VS tab");
 	std::printf("  rit table G2: %zu vertices, %d text runs\n", L.Vertices.size(), RitRuns(L));
 	RitExpect(L.Vertices.size() <= 19000, "rit: the octagon within its budget with G2's marks (19k vertices)");
+	// Review of G2 PIE P6: the tape's line for the Callout opponent at your table had its own Mine >= Theirs; it reads core's
+	// CalloutEdge like the card (ALL SQUARE at 0-0 and on equal points, YOU TRAIL, YOU LEAD), whole points as before and
+	// tenths when either side has one, so the word never contradicts the figures. Read from the tape's items; the laptop's
+	// own state is put back after, so the pages after this don't move.
+	if (Seated.size() >= 2)
+	{
+		const R::RitUi Kept = R::RitOf(&P.RL);
+		const float Noisy = static_cast<float>(19.8 - static_cast<double>(12.3f)); // 7.4999998: a member's week from a float baseline
+		const std::pair<float, float> Weeks[] = {{0.0f, 0.0f}, {7.5f, Noisy}, {10.0f, 12.5f}, {214.0f, 190.0f}, {1214.0f, 1190.0f}};
+		const char* const Says[] = {"ALL SQUARE 0-0", "ALL SQUARE 7.5-7.5", "YOU TRAIL 10.0-12.5", "YOU LEAD 214-190", "YOU LEAD 1,214-1,190"};
+		bool TapeOk = true;
+		std::string Seen;
+		for (size_t K = 0; K < 5; ++K)
+		{
+			RitPlay Tw = F;
+			Tw.Callout.Mine = Weeks[K].first;
+			Tw.Callout.Theirs = Weeks[K].second;
+			R::RitPlayOverride(&P.RL, &Tw);
+			R::RitOf(&P.RL).TapeKey = -1;
+			P.Frame();
+			std::string Line;
+			for (const R::RitTapeItem& It : R::RitOf(&P.RL).Tape)
+			{
+				Line = It.Key == "callout:here" ? It.Text : Line;
+			}
+			const std::string Want = "CALLOUT \xC2\xB7 " + R::RitUpper(Tw.Callout.Name) + " AT YOUR TABLE \xC2\xB7 " + Says[K];
+			TapeOk = TapeOk && Line == Want;
+			Seen += (K ? " | " : "") + Line;
+		}
+		R::RitPlayOverride(&P.RL, &F);
+		R::RitOf(&P.RL) = Kept;
+		if (!TapeOk)
+		{
+			std::printf("  rit: the tape's Callout lines: %s\n", Seen.c_str());
+		}
+		RitExpect(TapeOk, "rit: the tape's Callout line at your table says ALL SQUARE, YOU TRAIL or YOU LEAD by core's CalloutEdge, figures to match");
+	}
 	// INCOMING CALLOUT mid-session (§3.8 #5): the alert slides in over the table too, and holds the pointer under it.
 	{
 		RitPlay In = F;

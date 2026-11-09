@@ -50,6 +50,14 @@ struct SitePlayScratch
 };
 SitePlayScratch& SitePlayScratchOf(const Book& B);
 
+/**
+ * Minutes since the play day's 6 AM start, [0, 1440): the one reading of "when in the day" the loops share (G2 PIE P3). Under
+ * 360 is the morning (the Early bird's 6 AM to noon); 720 and up is the evening and the night through the 6 AM rollover (the
+ * "after 6 PM" Dare, the Flame's nudge).
+ */
+double SitePlayIntoDay(double World);
+constexpr double SitePlayNoonIn = 360.0;    // noon, in SitePlayIntoDay's minutes
+constexpr double SitePlayEveningIn = 720.0; // 6 PM, in SitePlayIntoDay's minutes
 /** The Governor's ring for a site (RiverLine's is never used). */
 int SitePlayGovIndex(net::SiteId S);
 /** Rolls a site's ring forward to Day (clearing the slots it passes) and its week to Day's week. */
@@ -74,6 +82,8 @@ void SitePlayBook(Book& B, net::SiteId S, int Day, int64_t Value, bool CountsInW
  */
 bool SitePlayGrant(Book& B, life::State& L, net::SiteId S, Kind K, const std::string& What, int64_t Value, const SitePlayPayload& Pay,
 	const std::string& Key, int Day, double World, bool Reset);
+/** Grant()'s done key for a key's idempotent part ("play:g:<site>:<key>"): set once that key has paid or queued. */
+std::string SitePlayGrantDoneKey(net::SiteId S, const std::string& Idem);
 /** Whether a claimed ticket could still queue (the claim lines aren't all taken). */
 bool SitePlayHasItemRoom(const Book& B);
 /** The day's spare Room into the oldest hold's Covered; clears what's covered, then any later hold that fits whole. */

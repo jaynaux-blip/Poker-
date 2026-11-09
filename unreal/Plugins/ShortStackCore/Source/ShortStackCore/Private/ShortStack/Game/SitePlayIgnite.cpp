@@ -791,20 +791,27 @@ int64_t IgniteLevelNeedsOf(int Level)
 	return static_cast<int64_t>(std::floor(100.0 * M2 * X + 1e-7));
 }
 
+/**
+ * An event that starts after 6 PM (F3): from 6 PM through the 6 AM rollover of its play day, on the play day's own reading
+ * (G2 PIE P3: an Afterburner entry at 4 AM, after 6 PM of its play day, didn't count). DareMayCount's rule too.
+ */
+bool IgniteEveningStart(double Start)
+{
+	return SitePlayIntoDay(Start) >= SitePlayEveningIn;
+}
+
 /** Does this entry move this Dare (an entry-time Dare)? */
 bool IgniteEntryMoves(int Kind, bool Fuse, const net::EventTemplate* T, double Start, double World)
 {
-	const double StartOfDay = std::fmod(std::fmod(Start, 1440.0) + 1440.0, 1440.0);
-	const double NowOfDay = std::fmod(std::fmod(World, 1440.0) + 1440.0, 1440.0);
 	switch (Kind)
 	{
 	case IgDkFuseEntry:
 	case IgDkFuse3: return Fuse;
 	case IgDkFlipEntry: return !Fuse && T && T->Fmt == net::Format::Flip;
-	case IgDkEveningEntry: return StartOfDay >= 18.0 * 60.0;
+	case IgDkEveningEntry: return IgniteEveningStart(Start);
 	case IgDkBountyEntry: return !Fuse && T && (T->Fmt == net::Format::Bounty || T->Fmt == net::Format::Mystery);
 	case IgDkGtdEntry: return !Fuse && T && T->GtdCents > 0;
-	case IgDkEarlyEntry: return NowOfDay >= 6.0 * 60.0 && NowOfDay < 12.0 * 60.0;
+	case IgDkEarlyEntry: return SitePlayIntoDay(World) < SitePlayNoonIn; // the play day's 6 AM to noon
 	default: return false;
 	}
 }
@@ -1109,7 +1116,11 @@ void IgniteRoll(Book& B, life::State& L, const sponsor::Book* Deals, uint64_t Wo
 		I.D.Claimed = 0;
 		I.S.MonthKey = PlayMonth(Day);
 		I.BandMonth = I.S.MonthKey;
-		I.F.IceSince = Ice ? Day : -1;
+		// No ice written yet: the entry that starts the book rolls before its own strike is taken (Session::RegisterEvent's
+		// NoteSitePlay comes after the hook), and that strike may end the deal (G2 PIE P5: the Flame sat ON ICE after it). The
+		// next roll reads the clause after the strike and ices from this first day if the deal still runs (below), before any
+		// miss is counted; until then the view reads the clause itself.
+		I.F.IceSince = -1;
 		return;
 	}
 	// The clause (§1.5): on ice from the first day it finds running (a skip over the signing ices the whole gap: nothing nags).
@@ -1793,7 +1804,11 @@ std::string IgniteDebug(Book& B, life::State& L, const std::string& Verb, int64_
 	IgniteRoll(B, L, &L.Sponsors, 0, Day, World);
 	if (Verb == "sparks")
 	{
-		const bool Paid = IgniteGrantSparks(B, L, Kind::DareSparks, "Sparks (dev)", std::max<int64_t>(1, N), "dev:" + std::to_string(I.S.SpentLife + I.S.Balance), Day, World, false);
+		// A counter key (G2 PIE, dev: keyed by the balance, two presses at one balance shared a key). Sparks grants share the
+		// one "Sparks owed" line and aren't held by key, so false here is always the Guest List.
+		static int64_t IgniteDevSparksSeq = 0;
+		++IgniteDevSparksSeq;
+		const bool Paid = IgniteGrantSparks(B, L, Kind::DareSparks, "Sparks (dev)", std::max<int64_t>(1, N), "dev:sparks:" + std::to_string(IgniteDevSparksSeq), Day, World, false);
 		return Paid ? "granted " + SitePlayCount(N) + " Sparks" : "held on the Guest List: " + SitePlayCount(N) + " Sparks";
 	}
 	if (Verb == "flame")
@@ -1822,7 +1837,9 @@ void IgniteFillView(const Book& B, const life::State& L, const sponsor::Book* De
 	Out.On = true;
 	Out.Started = Started;
 	Out.FuseOn = true;
-	Out.OnIce = IgniteOnIce(Deals) || (Started && I.F.IceSince >= 0 && Day >= I.F.IceSince);
+	// On ice is the clause now (§1.5): IceSince only excuses the past days' misses at the next roll, which also thaws it, so a
+	// strike that ended the deal never leaves the Flame showing ON ICE until a later step (G2 PIE P5).
+	Out.OnIce = IgniteOnIce(Deals);
 	// The book as of today: a day that hasn't rolled yet reads as a fresh one (no write: the view is const, S10).
 	const bool Today = Started && I.S.DayKey == Day;
 	const int Entries = Today ? I.S.DayEntries : 0;
@@ -1836,8 +1853,7 @@ void IgniteFillView(const Book& B, const life::State& L, const sponsor::Book* De
 	Out.LitToday = I.F.LastDay == Day;
 	Out.Mult = IgniteFlameMult(Out.LitToday ? I.F.Streak : I.F.Streak + 1);
 	Out.Look = IgniteFlameLook(I.F.Streak);
-	const double NowOfDay = std::fmod(std::fmod(World, 1440.0) + 1440.0, 1440.0);
-	Out.Nudge = Started && !Out.LitToday && !Out.OnIce && (NowOfDay >= 18.0 * 60.0 || NowOfDay < 6.0 * 60.0);
+	Out.Nudge = Started && !Out.LitToday && !Out.OnIce && SitePlayIntoDay(World) >= SitePlayEveningIn; // FlameNudge's reading
 	Out.RestLeft = I.F.RestWeek == PlayWeek(Day) ? std::max(0, 2 - static_cast<int>(I.F.RestUsed)) : 2;
 	const int Wd = net::Weekday(Day);
 	const bool RowWeek = I.D.WeekKey == PlayWeek(Day);
@@ -2357,9 +2373,8 @@ int IgniteLevel(const Book& B)
 bool FlameNudge(const Book& B, const sponsor::Book& Deals, double World)
 {
 	using namespace siteplay_detail;
-	const double OfDay = std::fmod(std::fmod(World, 1440.0) + 1440.0, 1440.0);
-	// From 6 PM to the 6 AM close (the play day's evening and night).
-	return (OfDay >= 18.0 * 60.0 || OfDay < 6.0 * 60.0) && SitePlayIgniteStarted(B) && B.Ig.F.LastDay != PlayDay(World) && !IgniteOnIce(&Deals);
+	// From 6 PM to the 6 AM close (the play day's evening and night, the "after 6 PM" Dare's reading).
+	return SitePlayIntoDay(World) >= SitePlayEveningIn && SitePlayIgniteStarted(B) && B.Ig.F.LastDay != PlayDay(World) && !IgniteOnIce(&Deals);
 }
 
 int8_t BandOf(const Book& B, const std::vector<HistoryEntry>& History)
@@ -2408,7 +2423,7 @@ double ThemeMult(const std::string& TemplateId, double Start)
 	return Themed ? 1.5 : 1.0;
 }
 
-bool DareMayCount(int DareId, const std::string& TemplateId, double Start)
+bool DareMayCount(int DareId, const std::string& TemplateId, double Start, double World)
 {
 	using namespace siteplay_detail;
 	for (const DareDef& D : IgniteDares())
@@ -2426,7 +2441,7 @@ bool DareMayCount(int DareId, const std::string& TemplateId, double Start)
 		case IgDkFuseWin:
 		case IgDkFuseWin3x: return Fuse;
 		case IgDkFlipEntry: return T && T->Fmt == net::Format::Flip;
-		case IgDkEveningEntry: return std::fmod(std::fmod(Start, 1440.0) + 1440.0, 1440.0) >= 18.0 * 60.0;
+		case IgDkEveningEntry: return IgniteEveningStart(Start);
 		case IgDkBountyEntry: return T && (T->Fmt == net::Format::Bounty || T->Fmt == net::Format::Mystery);
 		case IgDkGtdEntry: return T && T->GtdCents > 0;
 		case IgDkTopHalf50:
@@ -2435,7 +2450,10 @@ bool DareMayCount(int DareId, const std::string& TemplateId, double Start)
 		case IgDkSecondBreak: return !Fuse;
 		case IgDkTop10_100: return !Fuse && T && T->Field >= 100;
 		case IgDkSparkCash: return T && IgniteDailyOf(T->Id) == "spark-jackpot";
-		default: return true; // the hand Dares, a cash, a knockout, the early bird: any paid entry
+		// The Early bird counts an entry made in the play day's 6 AM to noon (IgniteEntryMoves' reading; review of G2 PIE P3:
+		// the sheet offered it on every event all afternoon and night).
+		case IgDkEarlyEntry: return World < 0.0 || SitePlayIntoDay(World) < SitePlayNoonIn;
+		default: return true; // the hand Dares, a cash, a knockout: any paid entry
 		}
 	}
 	return false;

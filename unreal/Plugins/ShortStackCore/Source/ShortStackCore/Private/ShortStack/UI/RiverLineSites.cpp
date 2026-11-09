@@ -1515,6 +1515,68 @@ std::map<std::pair<const Ui*, std::string>, bool>& SitesArmedStates()
 	return ByButton;
 }
 
+/** Text cut to Room with an ellipsis, measured by Width (S itself when it fits). */
+template <typename WidthFn>
+std::string SitesEllipsized(std::string S, float Room, const WidthFn& Width)
+{
+	if (Width(S) <= Room)
+	{
+		return S;
+	}
+	const std::string Dots = "\xE2\x80\xA6";
+	while (S.size() > 1 && Width(S + Dots) > Room)
+	{
+		while (!S.empty() && (static_cast<unsigned char>(S.back()) & 0xC0) == 0x80)
+		{
+			S.pop_back();
+		}
+		S.pop_back();
+	}
+	while (!S.empty() && S.back() == ' ')
+	{
+		S.pop_back();
+	}
+	return S + Dots;
+}
+
+/**
+ * PIE G2 P4: a two-press button's label and the line under it inside its rect, clear of a pill's round ends (SitesButton draws
+ * the label in the look's title face, in caps where the look says, and the line under it in mono at 0.72 of the size). What
+ * fits is left exactly as it was; else the label takes Shorter (if given), then both shrink together to a floor, then each
+ * line that still doesn't fit ends in an ellipsis.
+ */
+void SitesFitButton(const Canvas& C, const SiteLook& L, const Rect& R, std::string& Label, ButtonOpts& O, const char* Shorter)
+{
+	// A pill's ends round in by about a fifth of its height at the lines' band; a square or rounded button keeps 5 units.
+	const float Pad = L.Button == ButtonShape::Pill ? R.H * 0.2f : std::max(5.0f, L.Radius * 0.5f);
+	const float Room = std::max(1.0f, R.W - 2.0f * Pad);
+	const auto LabelW = [&C, &L](const std::string& T, float Size) {
+		const std::string Shown = L.LabelCaps ? NetUpper(T) : T;
+		return L.TitleFace >= 0 ? C.Measure(Shown, Size, static_cast<Font>(L.TitleFace)) : C.Measure(Shown, Size, 700, false);
+	};
+	const auto SubW = [&C](const std::string& T, float Size) { return C.Measure(T, Size * 0.72f, 600, true); };
+	const auto Fits = [&](float Size) { return LabelW(Label, Size) <= Room && (O.Sub.empty() || SubW(O.Sub, Size) <= Room); };
+	if (Fits(O.Size))
+	{
+		return;
+	}
+	if (Shorter && LabelW(Label, O.Size) > Room)
+	{
+		Label = Shorter;
+	}
+	const float Floor = std::max(12.0f, O.Size * 0.75f);
+	while (!Fits(O.Size) && O.Size > Floor)
+	{
+		O.Size = std::max(Floor, O.Size - 0.5f);
+	}
+	const float Size = O.Size;
+	Label = SitesEllipsized(Label, Room, [&LabelW, Size](const std::string& T) { return LabelW(T, Size); });
+	if (!O.Sub.empty())
+	{
+		O.Sub = SitesEllipsized(O.Sub, Room, [&SubW, Size](const std::string& T) { return SubW(T, Size); });
+	}
+}
+
 TwoPress SitesTwoPress(Canvas& C, Ui& U, const SiteLook& L, const std::string& Id, Rect R, const std::string& Label, bool UnderClause, const TwoPressOpts& O)
 {
 	bool& Armed = O.Armed ? *O.Armed : SitesArmedStates()[{&U, Id}];
@@ -1529,6 +1591,8 @@ TwoPress SitesTwoPress(Canvas& C, Ui& U, const SiteLook& L, const std::string& I
 			First.Sub = Label + " anyway";
 			Text = O.Strike.empty() ? std::string("Strike under your sponsor's deal") : O.Strike;
 		}
+		// Every line inside the button (P4): a deal's name too long for a narrow button (FUSE's pills) gives way first.
+		SitesFitButton(C, L, R, Text, First, UnderClause ? SitesStrikeShort : nullptr);
 		if (!SitesButton(U, C, Id, R, Text, First, L))
 		{
 			return TwoPress::Idle;
@@ -1545,14 +1609,23 @@ TwoPress SitesTwoPress(Canvas& C, Ui& U, const SiteLook& L, const std::string& I
 	const std::string Note = UnderClause ? std::string(SitesStrikeConfirm) : O.Note;
 	if (!Note.empty())
 	{
-		U.Text(Note, R.X, R.Y - 10.0f, Ts(14.0f, 600, UnderClause ? pal::Red : pal::Muted));
+		// Over the button and no wider (P4): smaller to a floor, then an ellipsis.
+		float Ns = 14.0f;
+		while (Ns > 11.0f && C.Measure(Note, Ns, 600, false) > R.W)
+		{
+			Ns -= 0.5f;
+		}
+		U.Text(Note, R.X, R.Y - 10.0f, Ts(Ns, 600, UnderClause ? pal::Red : pal::Muted, Align::Left, Baseline::Alphabetic, false, R.W));
 	}
 	TwoPress Out = TwoPress::Armed;
 	ButtonOpts Ok;
 	Ok.Kind = UnderClause ? ButtonKind::Danger : ButtonKind::Gold;
 	Ok.Size = O.First.Size;
 	const float Hw = (R.W - 12.0f) / 2.0f;
-	if (SitesButton(U, C, Id + "ok", {R.X, R.Y, Hw, R.H}, UnderClause ? std::string("Take the strike") : O.Ok, Ok, L))
+	const Rect OkR{R.X, R.Y, Hw, R.H};
+	std::string OkText = UnderClause ? std::string("Take the strike") : O.Ok;
+	SitesFitButton(C, L, OkR, OkText, Ok, nullptr);
+	if (SitesButton(U, C, Id + "ok", OkR, OkText, Ok, L))
 	{
 		Armed = false;
 		Out = TwoPress::Confirmed;
@@ -1560,7 +1633,10 @@ TwoPress SitesTwoPress(Canvas& C, Ui& U, const SiteLook& L, const std::string& I
 	ButtonOpts No;
 	No.Kind = ButtonKind::Ghost;
 	No.Size = O.First.Size;
-	if (SitesButton(U, C, Id + "no", {R.X + Hw + 12.0f, R.Y, Hw, R.H}, "Cancel", No, L))
+	const Rect NoR{R.X + Hw + 12.0f, R.Y, Hw, R.H};
+	std::string NoText = "Cancel";
+	SitesFitButton(C, L, NoR, NoText, No, nullptr);
+	if (SitesButton(U, C, Id + "no", NoR, NoText, No, L))
 	{
 		Armed = false;
 		Out = TwoPress::Cancelled;

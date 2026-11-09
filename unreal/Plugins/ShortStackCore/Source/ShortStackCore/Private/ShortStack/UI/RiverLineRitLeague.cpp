@@ -491,13 +491,15 @@ void RitLeagueSide(RitCtx& X)
 		RitLabel(X.C, (P.Callout.ByThem ? std::string("Called you out") : std::string("You called them out")) + (P.Callout.Country.empty() ? std::string() : " \xC2\xB7 " + P.Callout.Country), Co.X + 72.0f,
 			Co.Y + 80.0f, 11.0f, RitC(P.Callout.ByThem ? RitAmber : RitMuted));
 		RitTag(X.C, Co.X + Co.W - 52.0f, Co.Y + 48.0f, "VS", RitAmber, RitOnyx, 12.0f, 9.0f, 18.0f);
-		// The week so far: yours against theirs, by the League's own scoring.
-		const bool Lead = P.Callout.Mine >= P.Callout.Theirs;
+		// The week so far: yours against theirs, by the League's own scoring. Ahead, behind or all square by core's CalloutEdge,
+		// the rule the week's end settles by (G2 PIE P6: the card said LEADING on a tie that settled as a loss).
+		const int CoEdge = site::play::CalloutEdge(P.Callout.Mine, P.Callout.Theirs);
 		RitTwice(X.C, RitPts(P.Callout.Mine), Co.X + 20.0f, Co.Y + 140.0f, 32.0f, RitC(RitWhite));
 		RitLabel(X.C, "you", Co.X + 20.0f, Co.Y + 158.0f, 11.0f, RitC(RitMuted));
 		RitText(X.C, RitPts(P.Callout.Theirs), Co.X + Co.W - 20.0f, Co.Y + 140.0f, 32.0f, RitC(RitInk), RitFace::Cond, Align::Right);
 		RitLabel(X.C, "them", Co.X + Co.W - 20.0f, Co.Y + 158.0f, 11.0f, RitC(RitMuted), Align::Right);
-		RitText(X.C, Lead ? "LEADING" : "TRAILING", Co.X + Co.W / 2.0f, Co.Y + 132.0f, 13.0f, RitC(Lead ? RitUp : RitInk), RitFace::Cond, Align::Center);
+		RitText(X.C, CoEdge > 0 ? "LEADING" : CoEdge < 0 ? "TRAILING" : "ALL SQUARE", Co.X + Co.W / 2.0f, Co.Y + 132.0f, 13.0f,
+			RitC(CoEdge > 0 ? RitUp : CoEdge < 0 ? RitInk : RitChrome), RitFace::Cond, Align::Center);
 		RitText(X.C, "Ends in " + RitCountdown(P.Callout.Ends - X.World), Co.X + 20.0f, Co.Y + 184.0f, 11.0f, RitC(RitMuted), RitFace::Mono);
 		if (P.Callout.Tonight)
 		{

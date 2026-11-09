@@ -558,6 +558,9 @@ struct IgniteUi
 	double RevealAt = -100.0;
 	double RevealSkip = -1.0;
 	std::set<std::string> RevealsDone;
+	/** The reveal is waiting off the front (PIE G2 P7): another table came forward while it played, so it draws nothing until
+	 * its own table is back in front (IgniteOverlay settles it each frame). */
+	bool RevealAway = false;
 	/** The FUSE table's blind clock: the level it last slammed "BLINDS UP!" for, and when. */
 	std::string BlindsTable;
 	int BlindsLevel = 0;
@@ -617,8 +620,10 @@ void IgniteFusePage(RiverLine& RL, IgniteUi& U, const igniteart::IgniteTones& K,
 /** The Fuse Wall (your FUSEs of x10 and up) with your FUSE numbers: the FUSE page's right card, BOARDS' Fuse Wall tab. */
 void IgniteFuseWallCard(RiverLine& RL, const IgniteLoops& L, const igniteart::IgniteTones& K, const Rect& R);
 /** Which overlay is up (one at a time): 0 none, 1 the FUSE reveal, 2 the wheel's spin, 3 a cracker, 4 the Prize Counter's
- * confirm, 5 a drawer (odds, the Fine print). */
-int IgniteOverlay(const RiverLine& RL, const IgniteUi& U, double Now);
+ * confirm, 5 a drawer (odds, the Fine print). It settles the reveal's place first (PIE G2 P7): the reveal, its Odds drawer
+ * and TAKE YOUR SEAT are up only while the reveal's own table is the one in front (RiverLineIgnitePlay.cpp's
+ * IgpRevealSettle says what happens while it's away and when it comes back). */
+int IgniteOverlay(RiverLine& RL, IgniteUi& U, double Now);
 /** The overlay's rect (its SitesBlockUnder: modal ones hold the whole client). */
 Rect IgniteOverlayRect(int Overlay, const IgniteUi& U);
 /** Draws the overlay that's up, after the page; a scrim click (B.Scrim) closes or skips it. */

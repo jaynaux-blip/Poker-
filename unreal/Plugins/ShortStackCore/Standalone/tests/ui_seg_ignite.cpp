@@ -3610,6 +3610,318 @@ void FixRound()
 		}
 	}
 }
+
+// ------------------------------------------------------------------ the PIE G2 fixes (g2p-sheet: P1 the sheet's close, P4 the clause's fit)
+
+/**
+ * Whether every text run centred inside R (its baseline within R's height) lies inside R; Found counts them. A line wider than
+ * its button (PIE G2 P4's "Strike under your Team RiverLine deal" on a FUSE pill) is centred on it, so it's caught.
+ */
+bool RunsInside(const DrawList& L, const TableMeasurer& M, const ss::ui::Rect& R, int& Found)
+{
+	bool Inside = true;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text || Cmd.Text.BaselineY < R.Y || Cmd.Text.BaselineY > R.Y + R.H)
+		{
+			continue;
+		}
+		const float W = M.Width(Cmd.Text.Text, Cmd.Text.Face, Cmd.Text.SizePx);
+		const float Mid = Cmd.Text.X + W / 2.0f;
+		if (Mid < R.X || Mid > R.X + R.W)
+		{
+			continue;
+		}
+		++Found;
+		Inside = Inside && Cmd.Text.X >= R.X - 0.01f && Cmd.Text.X + W <= R.X + R.W + 0.01f;
+	}
+	return Inside;
+}
+
+/** The size a run that is exactly Text was drawn at (0 if it wasn't). */
+float RunSize(const DrawList& L, const std::string& Text)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text == Text)
+		{
+			return Cmd.Text.SizePx;
+		}
+	}
+	return 0.0f;
+}
+
+/** Whether some run ends in an ellipsis. */
+bool Ellipsized(const DrawList& L)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		const std::string& T = Cmd.Text.Text;
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && T.size() >= 3 && T.compare(T.size() - 3, 3, "\xE2\x80\xA6") == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * PIE G2 P4: SitesTwoPress under the clause keeps every line inside its button, in each look: what fits draws exactly as
+ * before (the long warning at its size), a deal's name too long for the button gives way to the short warning, then both
+ * lines shrink to a floor, then end in an ellipsis; the confirm step's "Take the strike" and "Cancel" fit their halves and
+ * its line stays over the button's width.
+ */
+void TwoPressFit()
+{
+	namespace sd = ss::ui::rlsites_detail;
+	TableMeasurer M;
+	const std::string Long = "Strike under your Team RiverLine deal";
+	const auto Draw = [&M, &Long](SiteId Site, const ss::ui::Rect& R, float Size, bool Armed) {
+		DrawList L;
+		ss::ui::Ui U;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		U.Begin(C, 1.0);
+		bool Flag = Armed;
+		sd::TwoPressOpts O;
+		O.First.Kind = ss::ui::ButtonKind::Primary;
+		O.First.Size = Size;
+		O.Strike = Long;
+		O.Armed = &Flag;
+		sd::SitesTwoPress(C, U, sd::SitesLook(Site), "fitcheck", R, "Light it \xC2\xB7 $1.10", true, O);
+		U.End();
+		return L;
+	};
+	int N = 0;
+	// RiverLine's 400-wide button (ui_seg_seams' rig): it fits, so it's exactly as it was.
+	const ss::ui::Rect Wide{400.0f, 500.0f, 400.0f, 70.0f};
+	const DrawList A = Draw(SiteId::RiverLine, Wide, 22.0f, false);
+	IgExpect(RunSize(A, Long) == 22.0f && RunSize(A, "Light it \xC2\xB7 $1.10 anyway") > 0.0f && RunsInside(A, M, Wide, N), "g2p: a strike line that fits keeps the deal's name at its size");
+	// A FUSE pill (Ignite's look, 308 wide at 22): the short warning, at its size, inside the pill.
+	const ss::ui::Rect Pill{48.0f, 500.0f, 308.0f, 72.0f};
+	const DrawList B = Draw(SiteId::Ignite, Pill, 22.0f, false);
+	N = 0;
+	IgExpect(RunSize(B, ss::ui::rlsites_detail::SitesStrikeShort) == 22.0f && RunSize(B, Long) == 0.0f && RunsInside(B, M, Pill, N) && N == 2,
+		"g2p: on a FUSE pill the strike line gives way to \"Strike under your deal\", inside the pill");
+	// RunItTwice's slab in caps, 240 wide.
+	const ss::ui::Rect Slab{100.0f, 300.0f, 240.0f, 56.0f};
+	const DrawList Cs = Draw(SiteId::RunItTwice, Slab, 20.0f, false);
+	N = 0;
+	IgExpect(RunSize(Cs, ss::ui::rlnet_detail::NetUpper(ss::ui::rlsites_detail::SitesStrikeShort)) == 20.0f && RunsInside(Cs, M, Slab, N) && N == 2,
+		"g2p: RunItTwice's narrow slab: the short warning in caps, inside");
+	// Narrower: the short warning shrinks (to no less than 12), then both lines end in an ellipsis; nothing leaves.
+	const ss::ui::Rect Small{100.0f, 300.0f, 150.0f, 44.0f};
+	const DrawList D = Draw(SiteId::Ignite, Small, 15.0f, false);
+	N = 0;
+	const float Ds = RunSize(D, ss::ui::rlsites_detail::SitesStrikeShort);
+	IgExpect(Ds >= 12.0f && Ds < 15.0f && RunsInside(D, M, Small, N) && N == 2 && !Ellipsized(D), "g2p: a small pill shrinks the short warning to fit (no ellipsis needed)");
+	const ss::ui::Rect Tiny{100.0f, 300.0f, 100.0f, 44.0f};
+	const DrawList E = Draw(SiteId::Ignite, Tiny, 15.0f, false);
+	N = 0;
+	IgExpect(Ellipsized(E) && RunsInside(E, M, Tiny, N) && N == 2, "g2p: past the floor both lines end in an ellipsis, inside");
+	// The confirm step on a FUSE pill: "Take the strike" fits its half (smaller), "Cancel" its own; the line over the pill.
+	const DrawList F = Draw(SiteId::Ignite, Pill, 22.0f, true);
+	const float Hw = (Pill.W - 12.0f) / 2.0f;
+	int Nl = 0;
+	int Nr = 0;
+	const IgBox Note = IgRun(F, ss::ui::rlsites_detail::SitesStrikeConfirm, M);
+	const float Take = RunSize(F, "Take the strike");
+	IgExpect(Take >= 16.5f && Take < 22.0f && RunSize(F, "Cancel") == 22.0f && RunsInside(F, M, {Pill.X, Pill.Y, Hw, Pill.H}, Nl) && Nl == 1 &&
+			RunsInside(F, M, {Pill.X + Hw + 12.0f, Pill.Y, Hw, Pill.H}, Nr) && Nr == 1 && Note.Found && Note.X >= Pill.X && Note.X + Note.W <= Pill.X + Pill.W + 0.01f,
+		"g2p: the confirm step fits: \"Take the strike\" smaller in its half, \"Cancel\" as it was, the line no wider than the pill");
+	std::printf("  g2p two-press fit: FUSE pill %.1f (short), small pill %.1f, Take the strike %.1f\n", RunSize(B, ss::ui::rlsites_detail::SitesStrikeShort), Ds, Take);
+}
+
+/**
+ * PIE G2 P4 on the page: FUSE under Team RiverLine with a ticket held (the PIE shot g2_13 had none): the three LIGHT IT pills
+ * and the ticket pill under the first keep every line inside; the first pill armed, its halves too; Cancel disarms it.
+ */
+void ClauseFuse()
+{
+	IgLaptop P("ignite-clause-fuse");
+	ss::Session& S = P.S;
+	P.At(IgPrime - 60.0);
+	S.BankrollCents = 200000;
+	P.Join(50000);
+	if (!IgSignClause(S))
+	{
+		std::printf("  g2p: no clause strike to warn of here; the FUSE fit checks are skipped\n");
+		return;
+	}
+	const ig::IgniteLoops F = Fake(true);
+	ig::IgniteFakeLoops(&P.RL, &F);
+	S.Life.Tickets[F.FuseTicketIds[0]] = 2;
+	P.Open(Page::Fuse);
+	P.Settled();
+	P.Now += 7.0; // the deal's badge toast (RiverLine's, over every app) has gone
+	DrawList L = P.Settled();
+	IgPage(L, "ignite_g2p_fuse_clause");
+	bool Inside = true;
+	int Lines = 0;
+	for (int I = 0; I < 3; ++I)
+	{
+		Inside = RunsInside(L, P.M, {48.0f + static_cast<float>(I) * 372.0f, 500.0f, 308.0f, 72.0f}, Lines) && Inside;
+	}
+	Inside = RunsInside(L, P.M, {48.0f, 582.0f, 308.0f, 44.0f}, Lines) && Inside;
+	IgExpect(Inside && Lines == 8 && CountRuns(L, ss::ui::rlsites_detail::SitesStrikeShort) == 3 && DrewRun(L, "Light it \xC2\xB7 $1.10 anyway") &&
+			DrewRun(L, "Use a ticket \xC2\xB7 2 held anyway"),
+		"g2p: under the clause FUSE's pills read the short warning and every line stays inside its pill (P4)");
+	P.Click(202.0f, 530.0f); // the $1.10 pill: the first press arms
+	L = P.Settled();
+	int Nl = 0;
+	int Nr = 0;
+	const bool Halves = RunsInside(L, P.M, {48.0f, 500.0f, 148.0f, 72.0f}, Nl) && RunsInside(L, P.M, {208.0f, 500.0f, 148.0f, 72.0f}, Nr);
+	IgExpect(Halves && Nl == 1 && Nr == 1 && DrewRun(L, "Take the strike") && S.TableCount() == 0, "g2p: armed, \"Take the strike\" and \"Cancel\" fit their halves (no table yet)");
+	P.Click(282.0f, 536.0f); // Cancel
+	L = P.Settled();
+	IgExpect(CountRuns(L, ss::ui::rlsites_detail::SitesStrikeShort) == 3 && S.TableCount() == 0, "g2p: Cancel disarms the pill");
+	ig::IgniteFakeLoops(&P.RL, nullptr);
+}
+
+/**
+ * The fit's other halves (review-g2p-sheet: three mutants of SitesFitButton no check caught): off the clause, a label that
+ * fits over a line that doesn't shrinks together with it before anything is cut; the confirm step's line over a narrower
+ * button shrinks first (to 11), then ends in an ellipsis, never wider than the button; on a button too narrow for "Cancel",
+ * both halves keep their words inside.
+ */
+void TwoPressFitEdges()
+{
+	namespace sd = ss::ui::rlsites_detail;
+	TableMeasurer M;
+	DrawList Scratch;
+	const ss::ui::Canvas Cm(Scratch, M, 1600.0f, 1000.0f, 1.0f);
+	const std::string Reg = "Register \xC2\xB7 $5.50";
+	const auto Draw = [&M, &Reg](SiteId Site, const ss::ui::Rect& R, float Size, bool Clause, bool Armed, const std::string& Sub) {
+		DrawList L;
+		ss::ui::Ui U;
+		ss::ui::Canvas C(L, M, 1600.0f, 1000.0f, 1.0f);
+		U.Begin(C, 1.0);
+		bool Flag = Armed;
+		sd::TwoPressOpts O;
+		O.First.Kind = ss::ui::ButtonKind::Primary;
+		O.First.Size = Size;
+		O.First.Sub = Sub;
+		O.Strike = "Strike under your Team RiverLine deal";
+		O.Always = true;
+		O.Armed = &Flag;
+		sd::SitesTwoPress(C, U, sd::SitesLook(Site), "fitedge", R, Reg, Clause, O);
+		U.End();
+		return L;
+	};
+	// The confirm step's line (its baseline 10 over the button): inside the button's width, its size, whether it was cut.
+	const auto Over = [&M](const DrawList& L, const ss::ui::Rect& R, float& Size, bool& Cuts) {
+		for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+		{
+			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && std::fabs(Cmd.Text.BaselineY - (R.Y - 10.0f)) < 0.01f)
+			{
+				const std::string& T = Cmd.Text.Text;
+				Size = Cmd.Text.SizePx;
+				Cuts = T.size() >= 3 && T.compare(T.size() - 3, 3, "\xE2\x80\xA6") == 0;
+				return Cmd.Text.X >= R.X - 0.01f && Cmd.Text.X + M.Width(T, Cmd.Text.Face, Cmd.Text.SizePx) <= R.X + R.W + 0.01f;
+			}
+		}
+		Size = 0.0f;
+		Cuts = false;
+		return false;
+	};
+	// Off the clause on RunItTwice's slab (caps): "REGISTER · $5.50" fits; RegisterBlock's "Late registration · 12:34 left" doesn't.
+	const sd::SiteLook& RitLook = sd::SitesLook(SiteId::RunItTwice);
+	const std::string Late = "Late registration \xC2\xB7 12:34 left";
+	const std::string RegCaps = ss::ui::rlnet_detail::NetUpper(Reg);
+	const float RegAt20 =
+		RitLook.TitleFace >= 0 ? Cm.Measure(RegCaps, 20.0f, static_cast<ss::ui::Font>(RitLook.TitleFace)) : Cm.Measure(RegCaps, 20.0f, 700, false);
+	const float LateAt20 = Cm.Measure(Late, 20.0f * 0.72f, 600, true);
+	const float Inner = std::max(RegAt20 + 1.0f, LateAt20 * 0.85f);
+	const float Ends = RitLook.Button == sd::ButtonShape::Pill ? 56.0f * 0.2f : std::max(5.0f, RitLook.Radius * 0.5f);
+	const ss::ui::Rect Slab{100.0f, 300.0f, Inner + 2.0f * Ends, 56.0f};
+	const DrawList A = Draw(SiteId::RunItTwice, Slab, 20.0f, false, false, Late);
+	int N = 0;
+	const float LateSize = RunSize(A, Late);
+	IgExpect(Inner < LateAt20 && LateSize > 0.0f && LateSize < 20.0f * 0.72f - 0.01f && std::fabs(RunSize(A, RegCaps) * 0.72f - LateSize) < 0.01f && RunsInside(A, M, Slab, N) && N == 2 &&
+			!Ellipsized(A),
+		"review: a label that fits over a line that doesn't: the two shrink together, nothing cut, both inside");
+	// Under the clause, armed, over a button narrower than the line at 14: smaller first (to 12.5 here), whole, no wider.
+	const std::string Confirm = sd::SitesStrikeConfirm;
+	const ss::ui::Rect Mid{100.0f, 300.0f, Cm.Measure(Confirm, 12.5f, 600, false) + 1.0f, 72.0f};
+	float MidSize = 0.0f;
+	bool MidCut = true;
+	const bool MidIn = Over(Draw(SiteId::Ignite, Mid, 22.0f, true, true, std::string()), Mid, MidSize, MidCut);
+	IgExpect(Cm.Measure(Confirm, 13.0f, 600, false) > Mid.W && MidIn && MidSize == 12.5f && !MidCut, "review: the confirm step's line shrinks to sit over a narrower button (12.5 here), whole");
+	// Narrower than the line at its floor and than "Cancel" at 15: the line at 11 ends in an ellipsis over the button, and
+	// "Take the strike" and "Cancel" stay inside their halves.
+	const ss::ui::Rect Thin{100.0f, 300.0f, 100.0f, 44.0f};
+	const float Hw = (Thin.W - 12.0f) / 2.0f;
+	const sd::SiteLook& IgLook = sd::SitesLook(SiteId::Ignite);
+	const float CancelAt15 =
+		IgLook.TitleFace >= 0 ? Cm.Measure("Cancel", 15.0f, static_cast<ss::ui::Font>(IgLook.TitleFace)) : Cm.Measure("Cancel", 15.0f, 700, false);
+	const DrawList Dt = Draw(SiteId::Ignite, Thin, 15.0f, true, true, std::string());
+	float ThinSize = 0.0f;
+	bool ThinCut = false;
+	const bool ThinIn = Over(Dt, Thin, ThinSize, ThinCut);
+	int Nl = 0;
+	int Nr = 0;
+	IgExpect(CancelAt15 > Hw && ThinIn && ThinSize == 11.0f && ThinCut && RunsInside(Dt, M, {Thin.X, Thin.Y, Hw, Thin.H}, Nl) && Nl == 1 &&
+			RunsInside(Dt, M, {Thin.X + Hw + 12.0f, Thin.Y, Hw, Thin.H}, Nr) && Nr == 1,
+		"review: on a thin button the confirm line ends in an ellipsis at 11 over it, and both halves keep their words inside");
+	std::printf("  review two-press edges: the line under at %.2f with its label, the confirm line %.1f then %.1f (cut), \"Cancel\" at 15 is %.1f in a %.1f half\n", LateSize, MidSize,
+		ThinSize, CancelAt15, Hw);
+}
+
+/**
+ * PIE G2 P1: the sheet opened as PIE opened it (a cabinet clicked through the pointer, which stays on the screen), then its
+ * close button clicked as a mouse does, after hovering it: a click inside one frame, a press and a release a frame apart, and
+ * a press held for ten frames. Each closes the sheet, and nothing opens it again (no confirm step is left armed).
+ */
+void SheetClose()
+{
+	IgLaptop P("ignite-sheet-close");
+	P.At(IgPrime);
+	P.S.BankrollCents = 150000;
+	P.Join(21240);
+	P.Open(Page::Lobby);
+	P.Settled(800.0f, 600.0f);
+	const double Tick = 1.0 / 30.0;
+	const auto At = [&P, Tick](float X, float Y, bool Down, bool Pressed, bool Released) {
+		P.Frame(X, Y, Down, Pressed, Released);
+		P.Now += Tick;
+	};
+	int Opened = 0;
+	int Closed = 0;
+	for (int Kind = 0; Kind < 3; ++Kind)
+	{
+		At(110.0f, 590.0f, true, true, false); // the first shelf's first cabinet {24, 508, 180, 120}
+		At(110.0f, 590.0f, false, false, true);
+		for (int I = 0; I < 3; ++I)
+		{
+			At(110.0f, 590.0f, false, false, false);
+		}
+		Opened += ig::IgniteSheetOpen(&P.RL) ? 1 : 0;
+		for (int I = 0; I < 3; ++I)
+		{
+			At(1540.0f, 332.0f, false, false, false); // hovering the close button
+		}
+		if (Kind == 0)
+		{
+			At(1540.0f, 332.0f, false, true, true);
+		}
+		else
+		{
+			At(1540.0f, 332.0f, true, true, false);
+			for (int I = 0; I < (Kind == 2 ? 10 : 0); ++I) // held a third of a second (PIE's 0.35 s press)
+			{
+				At(1540.0f, 332.0f, true, false, false);
+			}
+			At(1540.0f, 332.0f, false, false, true);
+		}
+		for (int I = 0; I < 3; ++I)
+		{
+			At(1540.0f, 332.0f, false, false, false);
+		}
+		Closed += !ig::IgniteSheetOpen(&P.RL) && !P.S.ConfirmRegister ? 1 : 0;
+		P.Settled(800.0f, 200.0f);
+	}
+	std::printf("  g2p sheet close: opened by a cabinet %d of 3, closed by the x %d of 3\n", Opened, Closed);
+	IgExpect(Opened == 3 && Closed == 3, "g2p: a sheet opened from a cabinet closes on its x however the click comes (one frame, two, held) and stays closed (P1)");
+}
 } // namespace ig2
 
 void SegIgnite()
@@ -3653,6 +3965,13 @@ void SegIgnite()
 	const auto Fix0 = std::chrono::steady_clock::now();
 	ig2::FixRound();
 	const auto Fix1 = std::chrono::steady_clock::now();
-	std::printf("  ui-ignite: %d checks in %.1f s (the G2 fix round's %.1f s)\n", IgChecks, std::chrono::duration<double>(Fix1 - Seg0).count(), std::chrono::duration<double>(Fix1 - Fix0).count());
+	// The PIE G2 fixes (g2p-sheet): P1 the sheet's close button as PIE clicked it, P4 the clause's lines inside their buttons.
+	ig2::SheetClose();
+	ig2::TwoPressFit();
+	ig2::ClauseFuse();
+	ig2::TwoPressFitEdges(); // review-g2p-sheet: the fit's mutants no check caught
+	const auto Fix2 = std::chrono::steady_clock::now();
+	std::printf("  ui-ignite: %d checks in %.1f s (the G2 fix round's %.1f s, the PIE fixes' %.1f s)\n", IgChecks, std::chrono::duration<double>(Fix2 - Seg0).count(),
+		std::chrono::duration<double>(Fix1 - Fix0).count(), std::chrono::duration<double>(Fix2 - Fix1).count());
 }
 } // namespace ui_test

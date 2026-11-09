@@ -1176,6 +1176,8 @@ inline constexpr const char* SitesBonusSlide = "On your first deposit, released 
 inline constexpr const char* SitesClubSlide = "Rakeback on the 1st by the month's rake, from 15% at $50.";
 inline constexpr const char* SitesOwnMoney = "{Backer} funds RiverLine events only. This one's your own money.";
 inline constexpr const char* SitesStrikeConfirm = "Confirm and it's a strike under the deal.";
+/** The clause's warning where the deal's name won't fit the button (SitesTwoPress: FUSE's LIGHT IT pills, PIE G2 P4). */
+inline constexpr const char* SitesStrikeShort = "Strike under your deal";
 inline constexpr const char* SitesKastClient = "A poker client and a stream encoder at once is too much for it: the fans scream and the stream drops out.";
 /** Fills a template's {Key}s. */
 std::string SitesFill(std::string Text, const std::vector<std::pair<std::string, std::string>>& Vars);

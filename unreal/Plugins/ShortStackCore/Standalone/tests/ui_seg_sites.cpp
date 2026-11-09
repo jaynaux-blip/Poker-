@@ -34,6 +34,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
@@ -3323,6 +3324,523 @@ void SitesFuseTable()
 	S.Tab = ss::RightTab::Chat;
 }
 
+// ------------------------------------------------------------------ PIE G2 P7: a FUSE's reveal and the table in front
+
+/** Frames at 30 Hz with the session stepped before each, as the host runs them (the laptop's clock is the session's), for
+ *  Seconds or until Stop (shown each frame's list) says so; the last frame's list. */
+int SitesRunFrames = 0; // the frames SitesRunFor drew (SitesFuseTwo prints its cost)
+DrawList SitesRunFor(SitesLaptop& P, double Seconds, const std::function<bool(const DrawList&)>& Stop = std::function<bool(const DrawList&)>())
+{
+	DrawList L;
+	const int Frames = std::max(1, static_cast<int>(std::lround(Seconds * 30.0)));
+	for (int F = 0; F < Frames; ++F)
+	{
+		++SitesRunFrames;
+		P.Now += 1.0 / 30.0;
+		P.S.Update(P.Now);
+		L = P.Frame();
+		if (Stop && Stop(L))
+		{
+			break;
+		}
+	}
+	return L;
+}
+
+/** Anything of a FUSE reveal on the page: its skip line and its card (drawn at every stage), its players row, its Odds drawer. */
+bool SitesRevealDrawn(const DrawList& L)
+{
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type != ss::ui::DrawCmd::Kind::Text)
+		{
+			continue;
+		}
+		const std::string& T = Cmd.Text.Text;
+		if (T == ss::ui::rlignite_detail::IgniteFuseSkip || T.rfind("FUSE \xC2\xB7 #", 0) == 0 || T == "THREE PLAYERS \xC2\xB7 ONE FUSE" || T == "FUSE ODDS")
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/** The reveal's players row: the names drawn on its line (y 764, centred on 640, 800 and 960). */
+std::vector<std::string> SitesRevealRow(const DrawList& L)
+{
+	std::vector<std::string> Out;
+	for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+	{
+		if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && std::fabs(Cmd.Text.BaselineY - 764.0f) < 0.5f && Cmd.Text.X >= 540.0f && Cmd.Text.X <= 1060.0f)
+		{
+			Out.push_back(Cmd.Text.Text);
+		}
+	}
+	std::sort(Out.begin(), Out.end());
+	return Out;
+}
+
+/** The present seats' names at the table in front, sorted. */
+std::vector<std::string> SitesSeatNames(const ss::Session& S)
+{
+	std::vector<std::string> Out;
+	for (const ss::SeatVis& Sv : S.Seats)
+	{
+		if (Sv.Present)
+		{
+			Out.push_back(Sv.Name);
+		}
+	}
+	std::sort(Out.begin(), Out.end());
+	return Out;
+}
+
+/** The open table holding an event, or -1. */
+int SitesTableOf(const ss::Session& S, const std::string& EventId)
+{
+	for (int K = 0; K < S.TableCount(); ++K)
+	{
+		if (S.Glance(K).EventId == EventId)
+		{
+			return K;
+		}
+	}
+	return -1;
+}
+
+/**
+ * A laptop on Ignite's tables with a first FUSE seated and dealing (its reveal seen), the client on Ignite. False (and a note)
+ * when FUSE isn't lit in this build.
+ */
+bool SitesFuseOne(SitesLaptop& P, std::string& First)
+{
+	ss::Session& S = P.S;
+	P.At(SitesEvening);
+	S.BankrollCents = 200000;
+	P.Join(SiteId::Ignite, 50000);
+	S.CurrentPace = ss::Pace::Full; // every hand comes to the player
+	const std::string Why = ss::ui::rlignite_detail::IgniteLoopsFrom(S, S.WorldMinutes()).FuseOn ? S.LightFuse(0, false) : std::string("FUSE isn't lit");
+	if (!Why.empty() || !S.T)
+	{
+		std::printf("  sites: no FUSE to light here (%s); the two-FUSE checks are skipped\n", Why.c_str());
+		return false;
+	}
+	First = S.T->Spec.Id;
+	ss::fuse::TakeSeat(S, First);
+	P.RL.SiteShown = SiteId::Ignite;
+	P.RL.OpenApp(App::RiverLine, P.Now);
+	return true;
+}
+
+/** From Ignite's tables to its FUSE page, which settles; then the $1.10 cabinet's button that reads Label is pressed. */
+bool SitesLightFromPage(SitesLaptop& P, const std::string& Label)
+{
+	P.S.ShowLobby();
+	P.RL.OpenPage(Page::Fuse, P.Now);
+	const DrawList L = SitesRunFor(P, 1.2);
+	const SitesBox B = SitesRun(L, Label, P.M);
+	if (B.Found)
+	{
+		P.Click(B.X + B.W / 2.0f, B.Base - 6.0f);
+	}
+	return B.Found;
+}
+
+/**
+ * PIE G2 P7: a second FUSE's reveal never covers another table. The reveal (its Odds drawer, TAKE YOUR SEAT) is up only while
+ * its own table is in front: with FUSE #1 waiting on the player and FUSE #2 lit (USE A TICKET), AutoFocusStep brings #1 forward
+ * and #1 draws no reveal, the pointer reaches its buttons and the decision is the player's (no "You ran out of time."); left
+ * there, #2 deals by core's clock (its run and a second; never stuck) and its reveal is over. Brought back before its first deal,
+ * the reveal plays on, its row is FUSE #2's own three, its Odds drawer holds the deal past the clock, hides with it, and back at
+ * the boom the table opens itself a second after (the first deal waited). A lone FUSE's reveal is as before (M3): nothing dealt
+ * under it, the table opening itself a second after the boom. The review's cases (review-g2p-reveal): back in front in the frame
+ * its deal goes, it's over; an older FUSE's reveal picked up again after a newer one reads its own number; and when the player's
+ * own clock opens at its table (a plan dealt under it, K), the reveal and its Odds drawer are gone.
+ */
+void SitesFuseTwoCases()
+{
+	namespace ig = ss::ui::rlignite_detail;
+	const double Frame = 1.0 / 30.0;
+	const double Run25 = ss::fuse::RevealSeconds(25) + 1.0; // a x25's run and its second: core's clock alone (7.3 s)
+	const ig::IgniteRevealTimes Tm = ig::IgniteRevealTimesFor(25);
+	// 1. The PIE case: #1's turn, #2 lit on a ticket, auto-focus brings #1 forward; then #1 stays in front past #2's clock.
+	{
+		SitesLaptop P("sites-fuse-two");
+		ss::Session& S = P.S;
+		std::string First;
+		if (!SitesFuseOne(P, First))
+		{
+			return;
+		}
+		ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+		SitesRunFor(P, 60.0, [&S](const DrawList&) { return S.HasPrompt; });
+		const bool Waiting = S.HasPrompt && S.FocusedTable() == 0 && S.AutoFocus;
+		SitesExpect(Waiting, "two fuses: the first FUSE waits on the player (its turn, in front; auto-focus on)");
+		if (!Waiting)
+		{
+			return;
+		}
+		const double TurnAt = S.Prompt.OpenedAt;
+		const double TurnLeft = S.Prompt.Deadline - S.Now;
+		ss::fuse::DebugForce(S, 0, 25);
+		S.Life.Tickets[ss::fuse::TicketId(0)] = 1;
+		const bool Pressed = SitesLightFromPage(P, "Use a ticket \xC2\xB7 1 held");
+		const std::string Second = S.TableCount() == 2 ? S.Glance(1).EventId : std::string();
+		const bool Lit = Pressed && ss::fuse::IsFuse(Second) && Second != First && U.RevealEvent == Second && S.FocusedTable() == 1 && S.FuseReveal(1).M == 25;
+		SitesExpect(Lit, "two fuses: USE A TICKET lights a second FUSE (x25), in front with its reveal");
+		if (!Lit)
+		{
+			return;
+		}
+		const double PaidAt = S.FuseReveal(1).PaidAt;
+		DrawList L = SitesRunFor(P, 0.5);
+		SitesExpect(S.FocusedTable() == 1 && SitesRevealDrawn(L), "two fuses: the reveal draws over its own table");
+		L = SitesRunFor(P, 3.0, [&S](const DrawList&) { return S.FocusedTable() == 0; });
+		const double SwapAt = S.Now - PaidAt;
+		WriteList("sites_fuse_two_front", L);
+		const SitesBox Fold = SitesRun(L, "Fold", P.M).Found ? SitesRun(L, "Fold", P.M) : SitesRun(L, "FOLD", P.M);
+		std::printf("  two fuses: #1's turn opened %.2f s before the light (%.1f s on its clock then); auto-focus brought it forward %.2f s after the light\n",
+			PaidAt - TurnAt, TurnLeft, SwapAt);
+		SitesExpect(S.FocusedTable() == 0 && S.HasPrompt && !SitesRevealDrawn(L) && Fold.Found,
+			"two fuses: #1 in front with the player's turn draws its cards and buttons and nothing of #2's reveal");
+		SitesExpect(U.RevealEvent == Second && U.RevealAway && U.Drawer == 0 && ss::fuse::FirstDealAt(S, Second) < 0.0,
+			"two fuses: #2's reveal waits off the front (nothing dealt there yet)");
+		// The player's decision at #1: the pointer reaches its buttons (no reveal holds it).
+		size_t TimedOut = 0;
+		for (const ss::ChatLine& C : S.Chat)
+		{
+			TimedOut += C.Text == "You ran out of time." ? 1 : 0;
+		}
+		const size_t Graded = S.Grades.size();
+		if (Fold.Found)
+		{
+			P.Click(Fold.X + Fold.W / 2.0f, Fold.Base - 6.0f);
+		}
+		size_t TimedOutAfter = 0;
+		for (const ss::ChatLine& C : S.Chat)
+		{
+			TimedOutAfter += C.Text == "You ran out of time." ? 1 : 0;
+		}
+		SitesExpect(!S.HasPrompt && S.Grades.size() == Graded + 1 && TimedOutAfter == TimedOut && S.FocusedTable() == 0,
+			"two fuses: the player folds at #1 by its own button, on the clock (no \"You ran out of time.\")");
+		// Left at #1: core's clock sees #2's reveal (its run and a second after the light) and deals it; the reveal is over.
+		bool CoveredOne = false;
+		L = SitesRunFor(P, Run25 + 2.0, [&](const DrawList& Each) {
+			CoveredOne = CoveredOne || (S.FocusedTable() != SitesTableOf(S, Second) && SitesRevealDrawn(Each));
+			return ss::fuse::FirstDealAt(S, Second) >= 0.0;
+		});
+		const double DealtAt = ss::fuse::FirstDealAt(S, Second);
+		std::printf("  two fuses: #2 left behind deals by core's clock %.2f s after the light (its run and a second, %.1f s)\n", DealtAt - PaidAt, Run25);
+		SitesExpect(DealtAt >= PaidAt + Run25 - 1e-6 && DealtAt <= PaidAt + Run25 + Frame + 1e-6 && !CoveredOne,
+			"two fuses: #2 behind deals by itself on core's clock (never stuck), nothing of it over #1 meanwhile");
+		SitesExpect(U.RevealEvent.empty() && U.RevealsDone.count(Second) == 1, "two fuses: the reveal of a FUSE dealt while away is over");
+		const int Back = SitesTableOf(S, Second);
+		if (Back >= 0)
+		{
+			S.FocusTable(Back);
+		}
+		L = SitesRunFor(P, 0.2);
+		SitesExpect(Back >= 0 && S.FocusedTable() == Back && !SitesRevealDrawn(L) && DrewRun(L, "PRIZE") && DrewRun(L, "$27.50"),
+			"two fuses: #2 back in front after its deal shows its table (the marquee's x25 prize), no reveal over the hand");
+	}
+	// 2. Back before its first deal (focus moved by hand: a tab or a tile, auto-focus off): it plays on, the row is #2's own,
+	//    its Odds drawer holds the deal and hides with it, and it resumes at the boom; the table opens itself a second after.
+	{
+		SitesLaptop P("sites-fuse-back");
+		ss::Session& S = P.S;
+		std::string First;
+		if (!SitesFuseOne(P, First))
+		{
+			return;
+		}
+		ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+		S.AutoFocus = false;
+		SitesRunFor(P, 0.5);
+		ss::fuse::DebugForce(S, 0, 25);
+		const bool Pressed = SitesLightFromPage(P, "Light it \xC2\xB7 $1.10");
+		const std::string Second = S.TableCount() == 2 ? S.Glance(1).EventId : std::string();
+		const bool Lit = Pressed && ss::fuse::IsFuse(Second) && U.RevealEvent == Second && S.FocusedTable() == 1;
+		SitesExpect(Lit, "two fuses (back): a second FUSE lights in front with its reveal");
+		if (!Lit)
+		{
+			return;
+		}
+		const double PaidAt = S.FuseReveal(1).PaidAt;
+		std::vector<std::string> Theirs;
+		S.WithTable(0, [&]() { Theirs = SitesSeatNames(S); });
+		const std::vector<std::string> Own = SitesSeatNames(S);
+		SitesRunFor(P, 1.0);
+		S.FocusTable(0);
+		DrawList L = SitesRunFor(P, 0.9);
+		SitesExpect(!SitesRevealDrawn(L) && U.RevealAway && ss::fuse::FirstDealAt(S, Second) < 0.0, "two fuses (back): #1 in front draws none of #2's reveal");
+		S.FocusTable(1);
+		L = SitesRunFor(P, Frame);
+		const double Since = P.Now - U.RevealAt;
+		SitesExpect(SitesRevealDrawn(L) && !U.RevealAway && Since > 1.5 && Since < Tm.ReelEnd && ss::fuse::FirstDealAt(S, Second) < 0.0,
+			"two fuses (back): back in front before its deal, the reveal plays on from its clock");
+		L = SitesRunFor(P, Tm.ReelEnd + 0.4 - Since);
+		WriteList("sites_fuse_two_row", L);
+		const std::vector<std::string> Row = SitesRevealRow(L);
+		std::string RowText;
+		for (const std::string& N : Row)
+		{
+			RowText += (RowText.empty() ? "" : ", ") + N;
+		}
+		std::printf("  two fuses (back): #2's row reads %s (#2's own seats; #1's %s)\n", RowText.c_str(), Row == Theirs ? "the same" : "differ");
+		SitesExpect(DrewRun(L, "THREE PLAYERS \xC2\xB7 ONE FUSE") && Row.size() == 3 && Row == Own && std::find(Row.begin(), Row.end(), S.HeroName) != Row.end(),
+			"two fuses (back): the players row is the FUSE's own three (you and its two)");
+		const SitesBox Pill = SitesRun(L, "ODDS", P.M, 520.0f, 545.0f);
+		if (Pill.Found)
+		{
+			P.Click(Pill.X + Pill.W / 2.0f, Pill.Base - 6.0f);
+		}
+		L = SitesRunFor(P, PaidAt + Run25 + 1.0 - S.Now);
+		const bool Held = ss::fuse::HoldFirstDeal(S);
+		SitesExpect(U.Drawer == 2 && DrewRun(L, "FUSE ODDS") && S.Now > PaidAt + Run25 && ss::fuse::FirstDealAt(S, Second) < 0.0 && Held && !S.FuseReveal(1).Seen,
+			"two fuses (back): its Odds drawer up past the clock, the first deal waits for the reveal");
+		S.FocusTable(0);
+		L = SitesRunFor(P, 0.5);
+		SitesExpect(!SitesRevealDrawn(L) && U.Drawer == 0 && U.RevealAway && ss::fuse::FirstDealAt(S, Second) < 0.0,
+			"two fuses (back): another table in front, the reveal and its Odds drawer draw nothing");
+		S.FocusTable(1);
+		L = SitesRunFor(P, Frame);
+		const double ResumeAt = S.Now;
+		const double AtBoom = P.Now - U.RevealAt;
+		SitesExpect(SitesRevealDrawn(L) && !DrewRun(L, "FUSE ODDS") && AtBoom >= Tm.ReelEnd - 1e-6 && AtBoom <= Tm.ReelEnd + 1e-6 && ss::fuse::FirstDealAt(S, Second) < 0.0,
+			"two fuses (back): back in front, the reveal resumes at the boom (its odds closed) and the deal still waits");
+		SitesRunFor(P, 6.0, [&](const DrawList&) { return ss::fuse::FirstDealAt(S, Second) >= 0.0; });
+		const double DealtAt = ss::fuse::FirstDealAt(S, Second);
+		const double Open = Tm.BoomEnd - Tm.ReelEnd + 1.0;
+		std::printf("  two fuses (back): from the boom resumed, the table opened itself and dealt %.2f s later (the boom and a second, %.1f s)\n", DealtAt - ResumeAt, Open);
+		SitesExpect(DealtAt >= ResumeAt + Open - 1e-6 && DealtAt <= ResumeAt + Open + 3.0 * Frame + 1e-6 && U.RevealEvent.empty() && S.FocusedTable() == 1,
+			"two fuses (back): the table opens itself a second after the resumed boom, and only then deals");
+	}
+	// 4. Back in front in the frame its first deal goes (dealt by core's clock while it was away): its table is the hand, and the
+	//    reveal is over there too, never resumed at the boom over it (the return's dealt rule; review-g2p-reveal).
+	[&]() {
+		SitesLaptop P("sites-fuse-late");
+		ss::Session& S = P.S;
+		std::string First;
+		if (!SitesFuseOne(P, First))
+		{
+			return;
+		}
+		ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+		S.AutoFocus = false;
+		SitesRunFor(P, 0.5);
+		ss::fuse::DebugForce(S, 0, 25);
+		const bool Pressed = SitesLightFromPage(P, "Light it \xC2\xB7 $1.10");
+		const std::string Second = S.TableCount() == 2 ? S.Glance(1).EventId : std::string();
+		const bool Lit = Pressed && ss::fuse::IsFuse(Second) && U.RevealEvent == Second && S.FocusedTable() == 1;
+		SitesExpect(Lit, "two fuses (late): a second FUSE lights in front with its reveal");
+		if (!Lit)
+		{
+			return;
+		}
+		SitesRunFor(P, 1.0);
+		S.FocusTable(0);
+		SitesRunFor(P, Frame);
+		// Away (the session stepped; nothing of the reveal draws meanwhile) until the step that deals it; its tab picked as that
+		// step lands, before the laptop's next frame (a click on the beat).
+		bool Caught = false;
+		for (int F = 0; F < 300 && !Caught; ++F)
+		{
+			P.Now += Frame;
+			S.Update(P.Now);
+			Caught = ss::fuse::FirstDealAt(S, Second) >= 0.0;
+		}
+		S.FocusTable(SitesTableOf(S, Second));
+		++SitesRunFrames;
+		const DrawList L = P.Frame();
+		const bool Prompted = S.HasPrompt;
+		bool Again = false;
+		const DrawList After = SitesRunFor(P, 1.0, [&](const DrawList& Each) {
+			Again = Again || SitesRevealDrawn(Each);
+			return false;
+		});
+		std::printf("  two fuses (late): brought back as its first deal went (the player's turn there: %s); the reveal drew again: %s\n", Prompted ? "yes" : "no",
+			Again ? "yes" : "no");
+		SitesExpect(Caught && S.FocusedTable() == SitesTableOf(S, Second) && !SitesRevealDrawn(L) && !Again && U.RevealEvent.empty() && U.RevealsDone.count(Second) == 1 &&
+						DrewRun(After, "$27.50"),
+			"two fuses (late): back in front as its first deal goes, the reveal is over (its table's hand, no boom over it)");
+	}();
+	// 5. An older FUSE's reveal back after a newer one at its stake was lit and seated (a second screen: three tables): it plays
+	//    on with its own number on its card (#1), not the stake's count (#2), and its own three; then it seats you.
+	[&]() {
+		SitesLaptop P("sites-fuse-older");
+		ss::Session& S = P.S;
+		P.At(SitesEvening);
+		S.BankrollCents = 200000;
+		P.Join(SiteId::Ignite, 50000);
+		S.CurrentPace = ss::Pace::Full;
+		S.AutoFocus = false;
+		ss::net::EventInstance E;
+		S.Life.RentStage = ss::life::Rent::Paid; // housed: the apartment holds the second screen
+		const std::string Bought = S.Buy("monitor-24");
+		const bool On = ig::IgniteLoopsFrom(S, S.WorldMinutes()).FuseOn;
+		const bool Open = SitesOpenEvent(S, SiteId::Ignite, E, 2200);
+		if (!On || !Bought.empty() || S.MaxTables() < 3 || !Open)
+		{
+			std::printf("  two fuses (older): skipped (FUSE %s, the screen: %s, %d tables, an open event: %s)\n", On ? "on" : "off", Bought.empty() ? "bought" : Bought.c_str(),
+				S.MaxTables(), Open ? "yes" : "no");
+			return;
+		}
+		S.RegisterEvent(ss::net::Site(SiteId::Ignite).Listing(E, nullptr, S.Unlocks()));
+		ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+		P.RL.SiteShown = SiteId::Ignite;
+		P.RL.OpenApp(App::RiverLine, P.Now);
+		SitesRunFor(P, 0.5);
+		ss::fuse::DebugForce(S, 0, 25);
+		const bool PressedA = SitesLightFromPage(P, "Light it \xC2\xB7 $1.10");
+		const int TableA = S.TableCount() - 1;
+		const std::string A = S.TableCount() == 2 ? S.Glance(TableA).EventId : std::string();
+		SitesRunFor(P, 1.0);
+		S.FocusTable(0); // the event's table forward (as auto-focus does on its turn): A's reveal waits off the front
+		SitesRunFor(P, Frame);
+		ss::fuse::DebugForce(S, 0, 2);
+		const bool PressedB = SitesLightFromPage(P, "Light it \xC2\xB7 $1.10");
+		const std::string B = S.TableCount() == 3 ? S.Glance(2).EventId : std::string();
+		const bool Lit = PressedA && PressedB && ss::fuse::OrdinalOf(A) == 1 && ss::fuse::OrdinalOf(B) == 2 && U.RevealEvent == B && S.FocusedTable() == 2;
+		SitesExpect(Lit, "two fuses (older): a second FUSE at the stake lights in front while the first's reveal waits");
+		if (!Lit)
+		{
+			return;
+		}
+		// B's x2 reveal plays out and seats you; then A's (unseen) is picked up again, waiting off the front.
+		SitesRunFor(P, 4.0, [&](const DrawList&) { return U.RevealEvent == A; });
+		const bool Picked = U.RevealEvent == A && ss::fuse::FirstDealAt(S, A) < 0.0;
+		SitesExpect(Picked && ss::fuse::FirstDealAt(S, B) >= 0.0, "two fuses (older): the newer one seated, the older reveal is picked up again (not dealt yet)");
+		if (!Picked)
+		{
+			return;
+		}
+		std::vector<std::string> Own;
+		S.WithTable(TableA, [&]() { Own = SitesSeatNames(S); });
+		S.FocusTable(TableA);
+		const DrawList L = SitesRunFor(P, 0.3);
+		std::string Card;
+		for (const ss::ui::DrawCmd& Cmd : L.Cmds)
+		{
+			if (Cmd.Type == ss::ui::DrawCmd::Kind::Text && Cmd.Text.Text.rfind("FUSE \xC2\xB7 #", 0) == 0)
+			{
+				Card = Cmd.Text.Text;
+			}
+		}
+		const std::vector<std::string> Row = SitesRevealRow(L);
+		std::printf("  two fuses (older): back in front, the first FUSE's card reads \"%s\" (the stake's count is %d)\n", Card.c_str(), S.Life.SitePlay.Ig.Fuse.N[0]);
+		SitesExpect(Card == "FUSE \xC2\xB7 #1 at this tier" && S.Life.SitePlay.Ig.Fuse.N[0] == 2 && Row == Own && Row.size() == 3,
+			"two fuses (older): the older FUSE's card reads its own number and its row its own three");
+		SitesRunFor(P, 4.0, [&](const DrawList&) { return ss::fuse::FirstDealAt(S, A) >= 0.0; });
+		SitesExpect(U.RevealEvent.empty() && ss::fuse::FirstDealAt(S, A) >= 0.0 && S.FocusedTable() == SitesTableOf(S, A),
+			"two fuses (older): it opens its table itself after the boom and deals");
+	}();
+	// 6. A lone FUSE's reveal with the plan's key (K: the plan takes the seat, so core deals under the reveal, M3's exception), its
+	//    Odds opened, then the seat taken back (K, K): the player's own clock opening there ends the reveal and its Odds drawer
+	//    with it, and FOLD is the player's (review-g2p-reveal).
+	[&]() {
+		SitesLaptop P("sites-fuse-plan");
+		ss::Session& S = P.S;
+		P.At(SitesEvening);
+		S.BankrollCents = 200000;
+		P.Join(SiteId::Ignite, 50000);
+		S.CurrentPace = ss::Pace::Full;
+		if (!ig::IgniteLoopsFrom(S, S.WorldMinutes()).FuseOn)
+		{
+			return;
+		}
+		ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+		P.RL.SiteShown = SiteId::Ignite;
+		P.RL.OpenApp(App::RiverLine, P.Now);
+		ss::fuse::DebugForce(S, 0, 25);
+		const bool Pressed = SitesLightFromPage(P, "Light it \xC2\xB7 $1.10");
+		const std::string Id = S.T ? S.T->Spec.Id : std::string();
+		if (!Pressed || !ss::fuse::IsFuse(Id) || U.RevealEvent != Id)
+		{
+			SitesExpect(false, "the plan's key: LIGHT IT starts the reveal");
+			return;
+		}
+		P.RL.Key("k");
+		const bool Planned = S.Autoplay(S.FocusedTable()).M == ss::autoplay::Mode::Watch;
+		DrawList L = SitesRunFor(P, Tm.ReelEnd + 0.3);
+		const SitesBox Pill = SitesRun(L, "ODDS", P.M, 520.0f, 545.0f);
+		if (Pill.Found)
+		{
+			P.Click(Pill.X + Pill.W / 2.0f, Pill.Base - 6.0f);
+		}
+		SitesExpect(Planned && ss::fuse::FirstDealAt(S, Id) >= 0.0 && U.Drawer == 2 && U.RevealEvent == Id,
+			"the plan's key: the plan dealt under the reveal (M3's exception), its Odds drawer open over it");
+		P.RL.Key("k");
+		P.RL.Key("k");
+		// The hand plays on under the reveal (its Odds holding it) until the player's own turn; the frame that turn opens on.
+		const double HandedAt = S.Now;
+		for (int F = 0; F < 900 && !S.HasPrompt; ++F)
+		{
+			P.Now += Frame;
+			S.Update(P.Now);
+		}
+		std::printf("  the plan's key: the seat back, the player's turn there %.2f s later\n", S.Now - HandedAt);
+		++SitesRunFrames;
+		L = P.Frame();
+		WriteList("sites_fuse_plan_turn", L);
+		SitesBox Fold = SitesRun(L, "Fold", P.M);
+		Fold = Fold.Found ? Fold : SitesRun(L, "FOLD", P.M);
+		const bool Clear = S.HasPrompt && !SitesRevealDrawn(L) && U.RevealEvent.empty() && U.Drawer == 0 && Fold.Found;
+		const size_t Graded = S.Grades.size();
+		if (Clear)
+		{
+			P.Click(Fold.X + Fold.W / 2.0f, Fold.Base - 6.0f);
+		}
+		SitesExpect(Clear && S.Grades.size() == Graded + 1 && !S.HasPrompt,
+			"the plan's key: the player's own clock there ends the reveal and its Odds drawer; FOLD is the player's");
+	}();
+	// 3. One FUSE alone (M3, unchanged): the laptop drawing the reveal, nothing of the hand shows under it; the table opens itself
+	//    a second after the boom and deals then.
+	{
+		SitesLaptop P("sites-fuse-alone");
+		ss::Session& S = P.S;
+		P.At(SitesEvening);
+		S.BankrollCents = 200000;
+		P.Join(SiteId::Ignite, 50000);
+		S.CurrentPace = ss::Pace::Full;
+		if (!ss::ui::rlignite_detail::IgniteLoopsFrom(S, S.WorldMinutes()).FuseOn)
+		{
+			return;
+		}
+		ig::IgniteUi& U = ig::IgniteOf(&P.RL);
+		P.RL.SiteShown = SiteId::Ignite;
+		P.RL.OpenApp(App::RiverLine, P.Now);
+		ss::fuse::DebugForce(S, 0, 25);
+		const bool Pressed = SitesLightFromPage(P, "Light it \xC2\xB7 $1.10");
+		const std::string Id = S.T ? S.T->Spec.Id : std::string();
+		if (!Pressed || !ss::fuse::IsFuse(Id) || U.RevealEvent != Id)
+		{
+			SitesExpect(false, "one fuse: LIGHT IT starts the reveal");
+			return;
+		}
+		const double PaidAt = S.FuseReveal(-1).PaidAt;
+		const double RevealAt = U.RevealAt;
+		bool Under = false;
+		SitesRunFor(P, Run25 + 2.0, [&](const DrawList&) {
+			const bool Up = !U.RevealEvent.empty();
+			Under = Under || (Up && (S.HasPrompt || !S.Board.empty() || ss::fuse::FirstDealAt(S, Id) >= 0.0));
+			return !Up && ss::fuse::FirstDealAt(S, Id) >= 0.0;
+		});
+		const double DealtAt = ss::fuse::FirstDealAt(S, Id);
+		std::printf("  one fuse: x25 dealt %.2f s after the light (the reveal %.2f s after the light, its run and a second after it)\n", DealtAt - PaidAt, RevealAt - PaidAt);
+		SitesExpect(!Under && DealtAt >= RevealAt + Tm.BoomEnd + 1.0 - 1e-6 && DealtAt <= RevealAt + Tm.BoomEnd + 1.0 + 2.0 * Frame + 1e-6 && U.RevealEvent.empty(),
+			"one fuse: nothing dealt under the reveal; the table opens itself a second after the boom (M3, unchanged)");
+	}
+}
+
+/** SitesFuseTwoCases, with what it costs the suite (frames drawn, wall time). */
+void SitesFuseTwo()
+{
+	const auto T0 = std::chrono::steady_clock::now();
+	const int Frames0 = SitesRunFrames;
+	SitesFuseTwoCases();
+	std::printf("  two fuses: %d laptop frames in %.2f s\n", SitesRunFrames - Frames0, std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count());
+}
+
 // ------------------------------------------------------------------ the copy
 
 void SitesCopy()
@@ -3387,6 +3905,7 @@ void SegSites()
 	SitesMail();
 	SitesTables();
 	SitesFuseTable();
+	SitesFuseTwo();
 	SitesRitTable();
 	SitesBetStacks();
 	SitesWorn();

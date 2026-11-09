@@ -200,6 +200,78 @@ void StrikeGate()
 	const play::View After = S.SitePlayView(net::SiteId::Ignite);
 	Expect(After.Ig.OnIce && S.Life.SitePlay.Ig.F.Streak == 1, "session: ten days on, the flame waits on ice");
 }
+void StrikeEndsDeal()
+{
+	// G2 PIE P5: the entry that starts the play book is also the strike that ends Team RiverLine's deal (its second strike;
+	// RegisterEvent takes it after the loops' hook). The Flame is off the ice at once, not at the next site step, and the
+	// week's misses count from there.
+	Hooks H;
+	ss::Session S(H, "siteplay-strike-ends");
+	S.BankrollCents = 600000;
+	double Now = Jump(S, 0.0, 63.0 * 1440.0 + 19.0 * 60.0); // Monday, December 7, 7 PM
+	const std::string Signed = S.DebugSponsor("sign riverline");
+	const ss::sponsor::Contract* Deal = ss::sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes());
+	if (!Deal || Deal->T.Only != "riverline")
+	{
+		std::printf("  session: Team RiverLine's clause isn't on offer in this career (%s): the strike-ends-the-deal check is skipped\n", Signed.c_str());
+		return;
+	}
+	for (ss::sponsor::Contract& C : S.Life.Sponsors.Contracts)
+	{
+		if (C.Id == Deal->Id)
+		{
+			C.Strikes = 1; // a strike already taken this term: the next one ends the deal
+		}
+	}
+	OpenIgnite(S);
+	ss::LobbyEvent Ev;
+	if (!IgniteEvent(S, Ev))
+	{
+		Expect(false, "session: an Ignite event to register for under the clause");
+		return;
+	}
+	const std::string Why = S.RegisterEvent(Ev, ss::StrikeConfirm{true});
+	const play::View V = S.SitePlayView(net::SiteId::Ignite);
+	Expect(Why.empty() && !ss::sponsor::Running(S.Life.Sponsors, "riverline", S.WorldMinutes()) && V.Ig.Started && V.Ig.Streak == 1 && !V.Ig.OnIce &&
+			   S.Life.SitePlay.Ig.F.IceSince < 0,
+		"session: the book's first entry is the strike that ends the deal, and the Flame is lit and off the ice at once (P5)");
+	Now = Jump(S, Now, S.WorldMinutes() + 4.0 * 1440.0); // Friday: Tuesday and Wednesday rest, Thursday's miss puts it out
+	Expect(!S.SitePlayView(net::SiteId::Ignite).Ig.OnIce && S.Life.SitePlay.Ig.F.IceSince < 0 && S.Life.SitePlay.Ig.F.Streak == 0,
+		"session: with the deal over the week's misses count (no ice was written)");
+}
+
+void DevGrantKeys()
+{
+	// Dev (G2 PIE): ss.Site.Play grant keys each press with a counter ("dev:<n>"), so two grants in one world minute are two
+	// grants (the minute's key made the second a duplicate that paid nothing and read "held on the Guest List").
+	Hooks H;
+	ss::Session S(H, "siteplay-devgrant");
+	double Now = Jump(S, 0.0, 63.0 * 1440.0 + 19.0 * 60.0);
+	OpenIgnite(S);
+	const double Minute = S.WorldMinutes();
+	const std::string First = S.DebugSitePlay("grant ignite 100");
+	const std::string Second = S.DebugSitePlay("grant ignite 100");
+	int Waiting = 0;
+	for (const play::Hold& Hd : S.Life.SitePlay.Holds)
+	{
+		Waiting += Hd.What == "Grant $1.00" ? 1 : 0;
+	}
+	Expect(S.WorldMinutes() == Minute && First.find("held on the Guest List") != std::string::npos && Second.find("held on the Guest List") != std::string::npos &&
+			   Waiting == 2,
+		"session: two dev grants in one minute with no Room are two holds: " + First + " / " + Second);
+	S.DebugSitePlay("rake ignite 1000");
+	const Chips Wallet = *ss::site::WalletOf(S.Life.Sites, net::SiteId::Ignite);
+	Now = Jump(S, Now, S.WorldMinutes() + 30.0);
+	Expect(S.Life.SitePlay.Holds.empty() && *ss::site::WalletOf(S.Life.Sites, net::SiteId::Ignite) == Wallet + 200,
+		"session: the dev rake's Room clears both at the next step ($2.00 into the wallet)");
+	const Chips Before = *ss::site::WalletOf(S.Life.Sites, net::SiteId::Ignite);
+	const std::string Third = S.DebugSitePlay("grant ignite 50");
+	const std::string Fourth = S.DebugSitePlay("grant ignite 50");
+	Expect(Third.find("paid $0.50") != std::string::npos && Fourth.find("paid $0.50") != std::string::npos &&
+			   *ss::site::WalletOf(S.Life.Sites, net::SiteId::Ignite) == Before + 100 && Third.find("already granted") == std::string::npos,
+		"session: with Room, two grants in one minute both pay: " + Third + " / " + Fourth);
+}
+
 void CalloutOnLeave()
 {
 	// W7 (§1.5, R3): on leave under a clause that strikes RunItTwice there are no Callouts in or out, and core refuses the
@@ -539,6 +611,8 @@ void SegSession()
 	session_seg::Untouched();
 	session_seg::PaidAndClaimed();
 	session_seg::StrikeGate();
+	session_seg::StrikeEndsDeal();
+	session_seg::DevGrantKeys();
 	session_seg::CalloutOnLeave();
 }
 

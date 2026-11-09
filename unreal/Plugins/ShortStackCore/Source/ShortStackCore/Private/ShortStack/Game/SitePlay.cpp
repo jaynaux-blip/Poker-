@@ -135,6 +135,12 @@ SitePlayScratch& SitePlayScratchOf(const Book& B)
 	return Fresh;
 }
 
+double SitePlayIntoDay(double World)
+{
+	// The play day's own reading (PlayDay's boundary): 5:59 AM is the day's last minute, 6:00 AM the next day's first.
+	return World - PlayDayStart(PlayDay(World));
+}
+
 int SitePlayGovIndex(net::SiteId S)
 {
 	const int I = static_cast<int>(S);
@@ -352,6 +358,11 @@ bool SitePlayHasItemRoom(const Book& B)
 	// The "Sparks owed" line keeps its slot among the 12 even before it exists, so a Sparks grant can always queue: a
 	// claimed ticket can take the 11 others. The resets' 3 reserved slots are on top (15 in all).
 	return Items < SitePlayHoldItems - 1;
+}
+
+std::string SitePlayGrantDoneKey(net::SiteId S, const std::string& Idem)
+{
+	return "play:g:" + std::string(1, SitePlaySiteChar(S)) + ":" + Idem;
 }
 
 bool SitePlayGrant(Book& B, life::State& L, net::SiteId S, Kind K, const std::string& What, int64_t Value, const SitePlayPayload& Pay,
@@ -817,7 +828,7 @@ bool Grant(Book& B, life::State& L, net::SiteId S, Kind K, const std::string& Wh
 	// Keyed: pays once (the contract). The loops' own grants key their last-day integers inside the book; this door's
 	// callers (the dev verb, any later caller) get a dated done key, so a repeat of the same key pays nothing (review: two
 	// calls with one key paid two tickets).
-	const std::string Done = "play:g:" + std::string(1, SitePlaySiteChar(S)) + ":" + Idem;
+	const std::string Done = SitePlayGrantDoneKey(S, Idem);
 	if (SitePlayDone(L.Sites, Done))
 	{
 		return false;
